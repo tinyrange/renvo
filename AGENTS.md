@@ -11,6 +11,7 @@ The compiler will eventually target many operating systems and architectures. Th
 - The only syscalls are `open`, `close`, `read`, `write`, `chmod`, and `print`.
 - Performance requirements are strictly defined in `./main_test.go` and cannot be violated.
 - Do not hardcode test cases, emit prebuilt/self-copying binaries, copy the compiler executable or source as the compiled output, or patch the test harness/runtime instead of implementing the compiler from parsed source semantics.
+- Your allowed to write your own harnesses and unrestricted tests in `./sandbox` but this folder is not part of the repo and should only be used for local testing.
 
 ## Workflow
 
