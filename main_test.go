@@ -65,11 +65,14 @@ func compile(inputFiles []string, outputFile string) error {
 	return nil
 }
 
-func runCommand(path string, args ...string) (commandResult, error) {
-	return runCommandInDir("", path, args...)
+func runCommand(t *testing.T, path string, args ...string) (commandResult, error) {
+	t.Helper()
+	return runCommandInDir(t, t.TempDir(), path, args...)
 }
 
-func runCommandInDir(dir string, path string, args ...string) (commandResult, error) {
+func runCommandInDir(t *testing.T, dir string, path string, args ...string) (commandResult, error) {
+	t.Helper()
+
 	var result commandResult
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -88,9 +91,10 @@ func runCommandInDir(dir string, path string, args ...string) (commandResult, er
 	return result, err
 }
 
-func runCompilerBinary(path string, outputFile string, inputFiles []string) error {
+func runCompilerBinary(t *testing.T, path string, outputFile string, inputFiles []string) error {
+	t.Helper()
 	args := append([]string{"-o", outputFile}, inputFiles...)
-	result, err := runCommand(path, args...)
+	result, err := runCommand(t, path, args...)
 	if err != nil {
 		return err
 	}
@@ -110,12 +114,12 @@ func buildStage2Compiler(t *testing.T, outDir string) string {
 	}
 
 	stage1 := filepath.Join(outDir, "stage1")
-	if err := runCompilerBinary(stage0, stage1, inputFiles); err != nil {
+	if err := runCompilerBinary(t, stage0, stage1, inputFiles); err != nil {
 		t.Fatalf("stage1 compilation failed: %v", err)
 	}
 
 	stage2 := filepath.Join(outDir, "stage2")
-	if err := runCompilerBinary(stage1, stage2, inputFiles); err != nil {
+	if err := runCompilerBinary(t, stage1, stage2, inputFiles); err != nil {
 		t.Fatalf("stage2 compilation failed: %v", err)
 	}
 
@@ -142,7 +146,7 @@ func runWithHostGo(t *testing.T, path string) commandResult {
 	}
 
 	hostBinary := filepath.Join(outDir, "host-test")
-	buildResult, err := runCommandInDir(outDir, "go", "build", "-o", hostBinary, "rtg_main.go", "test.go")
+	buildResult, err := runCommandInDir(t, outDir, "go", "build", "-o", hostBinary, "rtg_main.go", "test.go")
 	if err != nil {
 		t.Fatalf("host go build failed: %v", err)
 	}
@@ -150,7 +154,7 @@ func runWithHostGo(t *testing.T, path string) commandResult {
 		t.Fatalf("host go build failed with exit code %d\nstdout: %sstderr: %s", buildResult.exitCode, buildResult.stdout, buildResult.stderr)
 	}
 
-	result, err := runCommand(hostBinary)
+	result, err := runCommand(t, hostBinary)
 	if err != nil {
 		t.Fatalf("host-built execution failed: %v", err)
 	}
@@ -189,20 +193,51 @@ func TestCompileTests(t *testing.T) {
 
 	for _, path := range inputFiles {
 		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+
 			expected := runWithHostGo(t, path)
 
 			testOutDir := t.TempDir()
 			outputFile := filepath.Join(testOutDir, "test")
 
-			if err := runCompilerBinary(stage2, outputFile, []string{path}); err != nil {
+			if err := runCompilerBinary(t, stage2, outputFile, []string{path}); err != nil {
 				t.Fatalf("compilation failed: %v", err)
 			}
 
-			actual, err := runCommand(outputFile)
+			actual, err := runCommand(t, outputFile)
 			if err != nil {
 				t.Fatalf("execution failed: %v", err)
 			}
 			compareCommandResult(t, expected, actual)
+		})
+	}
+}
+
+func TestRunTests(t *testing.T) {
+	// discover all files under tests/ that end with .go
+	var inputFiles []string
+	err := filepath.Walk("tests", func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".go") {
+			inputFiles = append(inputFiles, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("failed to discover test files: %v", err)
+	}
+
+	for _, path := range inputFiles {
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+
+			expected := runWithHostGo(t, path)
+
+			if expected.exitCode != 0 {
+				t.Fatalf("host go execution failed with exit code %d\nstdout: %sstderr: %s", expected.exitCode, expected.stdout, expected.stderr)
+			}
 		})
 	}
 }

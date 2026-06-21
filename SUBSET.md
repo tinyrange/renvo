@@ -12,6 +12,8 @@ listed here should be treated as unsupported until this file is updated.
   return value.
 - Source files may contain top-level `const`, `var`, `type`, and `func`
   declarations.
+- Grouped `const (...)` declarations may use `iota` for integer-like enum
+  constants.
 - Imports are not part of the compiled subset. Runtime functions and constants
   are provided by `rtg_main.go`.
 
@@ -39,7 +41,7 @@ Unsupported:
 - arrays as distinct fixed-length values
 - channels
 - function values and closures
-- methods
+- method values and interface-style dynamic dispatch
 - generics
 
 ## Literals
@@ -53,6 +55,8 @@ Required:
 - interpreted string literals with common escapes such as `\n`, `\"`, and `\\`
 - boolean literals `true` and `false`
 - composite literals for structs and supported aggregate values
+- slice literals for supported element types, for example `[]byte{1, 2, 3}`
+  and `[]int{1, 2, 3}`
 
 Unsupported:
 
@@ -79,10 +83,15 @@ Required:
 - slice indexing and assignment, for example `buf[i] = 65`
 - slice length with `len(x)`
 - function calls
+- method calls on concrete receiver values or pointers
 - slice append with `append(slice, value)`
+- variadic calls to supported variadic functions and methods
+- slice expansion in supported variadic calls, for example `append(dst, src...)`
 - conversions between supported integer-like types where needed, especially
   `byte(x)` and `int(x)`
 - conversion from `string` to `[]byte`
+- slice allocation with `make([]T, n)` and `make([]T, n, cap)`
+- slice copying with `copy(dst, src)`
 
 String concatenation with `+` is optional; tests should avoid requiring it
 unless the compiler source needs it.
@@ -91,7 +100,6 @@ Unsupported:
 
 - slicing expressions `x[a:b]`
 - `cap`
-- variadic calls other than `append`
 - type assertions and type switches
 
 ## Statements
@@ -99,46 +107,46 @@ Unsupported:
 Required:
 
 - `var` declarations with explicit type, initializer, or both
-- short variable declarations `:=`
-- assignment `=`
+- short variable declarations `:=`, including multiple variables
+- assignment `=`, including multiple assignment
 - compound assignment for arithmetic operators: `+=`, `-=`, `*=`, `/=`, `%=`
 - expression statements for function calls and append assignments
-- `return` with zero or one value according to function result type
+- `return` with the number of values required by the function result type
 - `if`, `else if`, and `else`
+- `switch` statements over supported integer-like, boolean, and string
+  expressions, without fallthrough
 - `for` loops in Go's three common forms:
   - `for condition { ... }`
   - `for init; condition; post { ... }`
 - `for { ... }`
 - `break` and `continue`
 - labels and `goto`
-- increment and decrement as expressions; `i++` and `i--` as statements are
-  optional unless required by compiler source
+- increment and decrement statements `i++` and `i--`
 
 Unsupported:
 
 - `defer`
 - `go`
 - `select`
-- `switch`
 - `range`
-- multiple assignment
 
 ## Functions
 
 Required:
 
 - named top-level functions
+- methods with concrete value or pointer receivers
 - zero or more parameters
-- zero or one return value
+- zero or more return values
+- variadic parameters on functions and methods, for example `func emit(xs ...byte)`
 - recursion
 - calls before declarations
 
 Unsupported:
 
-- multiple return values
 - named return values
 - anonymous functions
-- methods
+- method values
 
 ## Runtime API
 
