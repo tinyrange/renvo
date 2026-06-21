@@ -13,6 +13,13 @@ import (
 )
 
 func resetRuntime() {
+	for k := range files {
+		if k >= 3 {
+			files[k].Close()
+		}
+		delete(files, k)
+	}
+
 	files = make(map[int]file)
 	files[0] = os.Stdin
 	files[1] = os.Stdout
@@ -49,28 +56,48 @@ func compile(inputFiles []string, outputFile string) error {
 }
 
 // test that the compiler can compile and run a simple "hello, world!" program.
-func TestCompileAndRunHello(t *testing.T) {
-	inputFiles := []string{"tests/hello.go"}
-
-	outDir := t.TempDir()
-	outputFile := filepath.Join(outDir, "hello")
-
-	err := compile(inputFiles, outputFile)
+func TestCompileTests(t *testing.T) {
+	// discover all files under tests/ that end with .go
+	var inputFiles []string
+	err := filepath.Walk("tests", func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".go") {
+			inputFiles = append(inputFiles, path)
+		}
+		return nil
+	})
 	if err != nil {
-		t.Fatalf("compilation failed: %v", err)
+		t.Fatalf("failed to discover test files: %v", err)
 	}
 
-	// Run the compiled binary and check its output
-	cmd := exec.Command(outputFile)
-	cmd.Env = os.Environ()
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("execution failed: %v\nOutput: %s", err, string(output))
-	}
+	for _, path := range inputFiles {
+		t.Run(path, func(t *testing.T) {
+			// compile the test file
+			resetRuntime()
 
-	expectedOutput := "hello, world!\n"
-	if string(output) != expectedOutput {
-		t.Fatalf("unexpected output: got %q, want %q", string(output), expectedOutput)
+			outDir := t.TempDir()
+			outputFile := filepath.Join(outDir, "hello")
+
+			err := compile([]string{path}, outputFile)
+			if err != nil {
+				t.Fatalf("compilation failed: %v", err)
+			}
+
+			// Run the compiled binary and check its output
+			cmd := exec.Command(outputFile)
+			cmd.Env = os.Environ()
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("execution failed: %v\nOutput: %s", err, string(output))
+			}
+
+			expectedOutput := "PASS\n"
+			if string(output) != expectedOutput {
+				t.Fatalf("unexpected output: got %q, want %q", string(output), expectedOutput)
+			}
+		})
 	}
 }
 

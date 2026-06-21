@@ -13,8 +13,7 @@ func appMain(args []string) int {
 
 	for i := 0; i < len(args); i++ {
 		if args[i][0] == '-' {
-			switch args[i][1] {
-			case 'o':
+			if args[i][1] == 'o' {
 				if i+1 >= len(args) {
 					return 1
 				}
@@ -23,7 +22,8 @@ func appMain(args []string) int {
 					return 1
 				}
 				i++
-			default:
+			} else {
+				print("unknown option\n")
 				return 1
 			}
 

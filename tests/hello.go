@@ -1,6 +1,6 @@
 package main
 
 func appMain(args []string) int {
-	print("hello, world!\n")
+	print("PASS\n")
 	return 0
 }
