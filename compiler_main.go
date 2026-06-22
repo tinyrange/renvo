@@ -1,15 +1,9 @@
 package main
 
-func rtgEnv() []string {
-	var empty []string
-	return empty
-}
-
-func rtgOpenInputFallback(path string) int {
+func rtgOpenInputFallback(path string, env []string) int {
 	if len(path) == 0 || path[0] == '/' {
 		return -1
 	}
-	env := rtgEnv()
 	for e := 0; e < len(env); e++ {
 		pwd := env[e]
 		if len(pwd) > 4 {
@@ -30,7 +24,7 @@ func rtgOpenInputFallback(path string) int {
 	return -1
 }
 
-func appMain(args []string) int {
+func appMain(args []string, env []string) int {
 	var input []int
 	if len(args) < 4 {
 		return 1
@@ -42,7 +36,7 @@ func appMain(args []string) int {
 	for i := 3; i < len(args); i++ {
 		fd := open(args[i], O_RDONLY)
 		if fd < 0 {
-			fd = rtgOpenInputFallback(args[i])
+			fd = rtgOpenInputFallback(args[i], env)
 		}
 		if fd < 0 {
 			return 1

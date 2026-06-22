@@ -4,6 +4,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"reflect"
 )
 
 type file interface {
@@ -138,12 +139,40 @@ func print(s string) {
 	write(1, []byte(s), -1)
 }
 
+func runAppMain() int {
+	fn := reflect.ValueOf(appMain)
+	fnType := fn.Type()
+	if fnType.NumOut() != 1 || fnType.Out(0).Kind() != reflect.Int {
+		return 1
+	}
+
+	var result []reflect.Value
+	args := reflect.ValueOf(os.Args)
+	env := reflect.ValueOf(os.Environ())
+	if fnType.NumIn() == 0 {
+		result = fn.Call(nil)
+	} else if fnType.NumIn() == 1 {
+		if fnType.In(0) != args.Type() {
+			return 1
+		}
+		result = fn.Call([]reflect.Value{args})
+	} else if fnType.NumIn() == 2 {
+		if fnType.In(0) != args.Type() || fnType.In(1) != env.Type() {
+			return 1
+		}
+		result = fn.Call([]reflect.Value{args, env})
+	} else {
+		return 1
+	}
+	return int(result[0].Int())
+}
+
 func main() {
 	files[0] = os.Stdin
 	files[1] = os.Stdout
 	files[2] = os.Stderr
 
-	exit := appMain(os.Args)
+	exit := runAppMain()
 
 	for fd, file := range files {
 		if fd >= 3 {

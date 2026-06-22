@@ -285,8 +285,6 @@ type rtgLinearGen struct {
 	continueLabels     []int
 	breakDepth         int
 	continueDepth      int
-	envDataOff         int
-	envLenOff          int
 	streqLabel         int
 	streqEmitted       bool
 	append8Label       int
@@ -308,18 +306,17 @@ type rtgLinearGen struct {
 const rtgIdentAppend = 1
 const rtgIdentByteSlice = 2
 const rtgIdentMake = 3
-const rtgIdentRtgEnv = 4
-const rtgIdentRtgParseProgram = 5
-const rtgIdentInt = 6
-const rtgIdentInt64 = 7
-const rtgIdentByte = 8
-const rtgIdentLen = 9
-const rtgIdentOpen = 10
-const rtgIdentClose = 11
-const rtgIdentRead = 12
-const rtgIdentWrite = 13
-const rtgIdentChmod = 14
-const rtgIdentCopy = 15
+const rtgIdentRtgParseProgram = 4
+const rtgIdentInt = 5
+const rtgIdentInt64 = 6
+const rtgIdentByte = 7
+const rtgIdentLen = 8
+const rtgIdentOpen = 9
+const rtgIdentClose = 10
+const rtgIdentRead = 11
+const rtgIdentWrite = 12
+const rtgIdentChmod = 13
+const rtgIdentCopy = 14
 
 func compileLinuxAmd64(input []int, output int) int {
 	var src []byte
@@ -800,9 +797,6 @@ func rtgExprIdentCode(p *rtgProgram, ep *rtgExprParse, idx int) int {
 	if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "make") {
 		return rtgIdentMake
 	}
-	if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "rtgEnv") {
-		return rtgIdentRtgEnv
-	}
 	if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "rtgParseProgram") {
 		return rtgIdentRtgParseProgram
 	}
@@ -1050,9 +1044,6 @@ func rtgTryCompileScalarProgram(p *rtgProgram, meta *rtgMeta) rtgCompileResult {
 	rtgAsmMovRaxImm(a, 60)
 	rtgAsmSyscall(a)
 	for i := 0; i < len(meta.funcs); i++ {
-		if rtgBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "rtgEnv") {
-			continue
-		}
 		if !rtgEmitScalarFunction(&g, i) {
 			var result rtgCompileResult
 			return result
@@ -1069,16 +1060,26 @@ func rtgEmitProgramEntryArgs(g *rtgLinearGen, appIndex int) bool {
 	app := &g.meta.funcs[appIndex]
 	argsOff := g.asm.bssSize
 	g.asm.bssSize += 32768
-	g.envDataOff = g.asm.bssSize
+	envDataOff := g.asm.bssSize
 	g.asm.bssSize += 32768
-	g.envLenOff = g.asm.bssSize
+	envLenOff := g.asm.bssSize
 	g.asm.bssSize += 8
-	rtgAsmBuildArgvEnvSlices(&g.asm, argsOff, g.envDataOff, g.envLenOff)
+	rtgAsmBuildArgvEnvSlices(&g.asm, argsOff, envDataOff, envLenOff)
 	if app.paramCount == 0 {
 		return true
 	}
+	if app.paramCount > 2 {
+		return false
+	}
 	first := &g.meta.params[app.firstParam]
-	if !rtgTypeIsSlice(g.meta, first.typ) {
+	if !rtgTypeIsStringSlice(g.meta, first.typ) {
+		return false
+	}
+	if app.paramCount == 1 {
+		return true
+	}
+	second := &g.meta.params[app.firstParam+1]
+	if !rtgTypeIsStringSlice(g.meta, second.typ) {
 		return false
 	}
 	return true
@@ -3102,12 +3103,6 @@ func rtgInferParsedExprType(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 				return rtgTypeFromExpr(g, ep, ep.args[e.firstArg])
 			}
 		}
-		if callee == rtgIdentRtgEnv && e.argCount == 0 {
-			fnIndex := rtgFuncInfoFromCall(g, ep, e.left)
-			if fnIndex >= 0 {
-				return meta.funcs[fnIndex].resultType
-			}
-		}
 		if callee == rtgIdentRtgParseProgram {
 			named := rtgFindTypeByText(g, "rtgProgram")
 			if named > 0 {
@@ -3415,17 +3410,6 @@ func rtgEmitSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		}
 		if e.argCount == 1 && callee == rtgIdentByteSlice {
 			return rtgEmitByteSliceConversionRegs(g, ep, idx)
-		}
-		if e.argCount == 0 && callee == rtgIdentRtgEnv {
-			if g.envDataOff == 0 && g.envLenOff == 0 {
-				return false
-			}
-			rtgAsmLoadRaxBss(a, g.envLenOff)
-			rtgAsmMovRdxRax(a)
-			rtgAsmPushRdx(a)
-			rtgAsmPopRcx(a)
-			rtgAsmMovRaxBssAddr(a, g.envDataOff)
-			return true
 		}
 		callType := rtgInferParsedExprType(g, ep, idx)
 		if !rtgTypeIsSlice(meta, callType) {
@@ -7000,6 +6984,11 @@ func rtgAsmBuildArgvEnvSlices(a *rtgAsm, bssOff int, envOff int, envLenOff int) 
 	rtgAsmEmit32(a, 1290242380)
 	rtgAsmEmit32(a, -1991457143)
 	rtgAsmEmit8(a, 0xc2)
+	rtgAsmMovRaxBssAddr(a, envOff)
+	rtgAsmMovRcxRax(a)
+	rtgAsmLoadRaxBss(a, envLenOff)
+	rtgAsmMovR8Rax(a)
+	rtgAsmMovR9Rax(a)
 }
 
 func rtgAsmLoadRaxBss(a *rtgAsm, bssOff int) {
@@ -7034,6 +7023,14 @@ func rtgAsmMovRsiRax(a *rtgAsm) {
 
 func rtgAsmMovRcxRax(a *rtgAsm) {
 	rtgAsmEmit16(a, 22864)
+}
+
+func rtgAsmMovR8Rax(a *rtgAsm) {
+	rtgAsmEmit24(a, 12618057)
+}
+
+func rtgAsmMovR9Rax(a *rtgAsm) {
+	rtgAsmEmit24(a, 12683593)
 }
 
 func rtgAsmMovRcxRdx(a *rtgAsm) {
@@ -8872,6 +8869,14 @@ func rtgResolveType(m *rtgMeta, typ int) rtgTypeInfo {
 func rtgTypeIsSlice(m *rtgMeta, typ int) bool {
 	t := rtgResolveType(m, typ)
 	return t.kind == rtgTypeSlice
+}
+
+func rtgTypeIsStringSlice(m *rtgMeta, typ int) bool {
+	t := rtgResolveType(m, typ)
+	if t.kind != rtgTypeSlice {
+		return false
+	}
+	return rtgTypeIsString(m, t.elem)
 }
 
 func rtgTypeIsString(m *rtgMeta, typ int) bool {
