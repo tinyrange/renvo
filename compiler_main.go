@@ -5,14 +5,11 @@ func rtgEnv() []string {
 	return empty
 }
 
-func rtgOpenInput(path string, flags int, env []string) int {
-	fd := open(path, flags)
-	if fd >= 0 {
-		return fd
-	}
+func rtgOpenInputFallback(path string) int {
 	if len(path) == 0 || path[0] == '/' {
-		return fd
+		return -1
 	}
+	env := rtgEnv()
 	for e := 0; e < len(env); e++ {
 		pwd := env[e]
 		if len(pwd) > 4 {
@@ -26,65 +23,35 @@ func rtgOpenInput(path string, flags int, env []string) int {
 					full = append(full, path[i])
 				}
 				full = append(full, 0)
-				return open(string(full), flags)
+				return open(string(full), O_RDONLY)
 			}
 		}
 	}
-	return fd
+	return -1
 }
 
 func appMain(args []string) int {
 	var input []int
-	var output int = -1
-	env := rtgEnv()
-
-	if len(args) < 2 {
-		print("usage: rtgx6 [options] <input files>\n")
-		print("options:\n")
-		print("  -o <file>  specify output file\n")
+	if len(args) < 4 {
 		return 1
 	}
-
-	for i := 0; i < len(args); i++ {
-		if args[i][0] == '-' {
-			if args[i][1] == 'o' {
-				if i+1 >= len(args) {
-					return 1
-				}
-				output = open(args[i+1], O_RDWR|O_CREATE|O_TRUNC)
-				if output < 0 {
-					return 1
-				}
-				i++
-			} else {
-				print("unknown option\n")
-				return 1
-			}
-
-			continue
+	var output int = open(args[2], O_RDWR|O_CREATE|O_TRUNC)
+	if output < 0 {
+		return 1
+	}
+	for i := 3; i < len(args); i++ {
+		fd := open(args[i], O_RDONLY)
+		if fd < 0 {
+			fd = rtgOpenInputFallback(args[i])
 		}
-
-		fd := rtgOpenInput(args[i], O_RDONLY, env)
 		if fd < 0 {
 			return 1
 		}
 		input = append(input, fd)
 	}
-
-	if output < 0 {
-		print("output file not specified\n")
+	if compileLinuxAmd64(input, output) != 0 {
 		return 1
 	}
-
-	err := compileLinuxAmd64(input, output)
-	if err != 0 {
-		print("compilation failed\n")
-		return 1
-	}
-	if chmod(output, 0755) != 0 {
-		return 1
-	}
-	close(output)
 
 	return 0
 }

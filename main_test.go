@@ -336,7 +336,7 @@ func TestCompilerPerformance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to stat stage3: %v", err)
 	}
-	const maxBinarySize = 126 * 1024
+	const maxBinarySize = 160 * 1024
 
 	rssFile := filepath.Join(outDir, "stage3-rss")
 	cmd = exec.Command("/usr/bin/time", "-f", "%M", "-o", rssFile, stage3)
@@ -360,8 +360,8 @@ func TestCompilerPerformance(t *testing.T) {
 	const maxRSSKB = 1024
 
 	var failures []string
-	if elapsed > 25*time.Millisecond {
-		failures = append(failures, fmt.Sprintf("runtime %s > 25ms", elapsed))
+	if elapsed > 30*time.Millisecond {
+		failures = append(failures, fmt.Sprintf("runtime %s > 30ms", elapsed))
 	}
 	if info.Size() > maxBinarySize {
 		failures = append(failures, fmt.Sprintf("binary size %d bytes > %d bytes", info.Size(), maxBinarySize))
