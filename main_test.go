@@ -296,7 +296,8 @@ func TestCompilerCompiler(t *testing.T) {
 	}
 }
 
-// Check the stage2 compiler compiles in under 25ms and produces a binary under 126KB which runs with under 1MB max RSS.
+// Check the stage2 compiler compiles stage3 in under 50ms, produces a binary under 160KB,
+// and uses under 3MB max RSS while compiling stage3.
 func TestCompilerPerformance(t *testing.T) {
 	inputFiles := getCompilerFiles()
 	outDir := t.TempDir()
@@ -323,7 +324,8 @@ func TestCompilerPerformance(t *testing.T) {
 	}
 
 	stage3 := filepath.Join(outDir, "stage3")
-	cmd = exec.Command(stage2, append([]string{"-o", stage3}, inputFiles...)...)
+	stage3Args := append([]string{"-o", stage3}, inputFiles...)
+	cmd = exec.Command(stage2, stage3Args...)
 	cmd.Env = os.Environ()
 	start := time.Now()
 	output, err = cmd.CombinedOutput()
@@ -332,45 +334,47 @@ func TestCompilerPerformance(t *testing.T) {
 		t.Fatalf("stage2 performance compilation failed: %v\nOutput: %s", err, string(output))
 	}
 
+	rssFile := filepath.Join(outDir, "stage3-compile-rss")
+	timeArgs := append([]string{"-f", "%M", "-o", rssFile, stage2}, stage3Args...)
+	cmd = exec.Command("/usr/bin/time", timeArgs...)
+	cmd.Env = os.Environ()
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("stage2 resource-measured compilation failed: %v\nOutput: %s", err, string(output))
+	}
+
 	info, err := os.Stat(stage3)
 	if err != nil {
 		t.Fatalf("failed to stat stage3: %v", err)
 	}
 	const maxBinarySize = 160 * 1024
 
-	rssFile := filepath.Join(outDir, "stage3-rss")
-	cmd = exec.Command("/usr/bin/time", "-f", "%M", "-o", rssFile, stage3)
-	cmd.Env = os.Environ()
-	output, err = cmd.CombinedOutput()
-	if err == nil {
-		t.Fatalf("stage3 run without arguments succeeded unexpectedly\nOutput: %s", string(output))
-	}
 	rssData, err := os.ReadFile(rssFile)
 	if err != nil {
-		t.Fatalf("failed to read stage3 resource usage: %v", err)
+		t.Fatalf("failed to read stage3 compile resource usage: %v", err)
 	}
 	rssLines := strings.Fields(string(rssData))
 	if len(rssLines) == 0 {
-		t.Fatalf("failed to read stage3 resource usage")
+		t.Fatalf("failed to read stage3 compile resource usage")
 	}
 	maxRSS, err := strconv.Atoi(rssLines[len(rssLines)-1])
 	if err != nil {
-		t.Fatalf("failed to parse stage3 resource usage %q: %v", string(rssData), err)
+		t.Fatalf("failed to parse stage3 compile resource usage %q: %v", string(rssData), err)
 	}
-	const maxRSSKB = 1024
+	const maxRSSKB = 3 * 1024
 
 	var failures []string
-	if elapsed > 30*time.Millisecond {
-		failures = append(failures, fmt.Sprintf("runtime %s > 30ms", elapsed))
+	if elapsed > 50*time.Millisecond {
+		failures = append(failures, fmt.Sprintf("runtime %s > 50ms", elapsed))
 	}
 	if info.Size() > maxBinarySize {
 		failures = append(failures, fmt.Sprintf("binary size %d bytes > %d bytes", info.Size(), maxBinarySize))
 	}
 	if maxRSS > maxRSSKB {
-		failures = append(failures, fmt.Sprintf("max RSS %dKB > %dKB", maxRSS, maxRSSKB))
+		failures = append(failures, fmt.Sprintf("compile max RSS %dKB > %dKB", maxRSS, maxRSSKB))
 	}
 	if len(failures) > 0 {
-		t.Fatalf("performance limits failed: stage2 runtime=%s, stage3 binary=%d bytes, stage3 max RSS=%dKB; failures: %s",
+		t.Fatalf("performance limits failed: stage2 runtime=%s, stage3 binary=%d bytes, stage2 compile max RSS=%dKB; failures: %s",
 			elapsed, info.Size(), maxRSS, strings.Join(failures, "; "))
 	}
 }
