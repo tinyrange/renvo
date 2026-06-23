@@ -1,18 +1,10 @@
 package main
 
-const rtgRel32 = 1
-const rtgAbsDataReloc = 3
-const rtgAbsBssReloc = 4
+const rtgAbsBssReloc = 1
 
 type rtgLabelRef struct {
 	at    int
 	label int
-	kind  int
-}
-
-type rtgDataRef struct {
-	at  int
-	off int
 }
 
 type rtgAbsRef struct {
@@ -26,7 +18,6 @@ type rtgAsm struct {
 	labelPos   []int
 	labelSet   []bool
 	relocs     []rtgLabelRef
-	dataRelocs []rtgDataRef
 	absRelocs  []rtgAbsRef
 	data       []byte
 	bssSize    int
@@ -39,14 +30,12 @@ func rtgAsmInit(a *rtgAsm) {
 	var labelPos []int
 	var labelSet []bool
 	var relocs []rtgLabelRef
-	var dataRelocs []rtgDataRef
 	var absRelocs []rtgAbsRef
 	var data []byte
 	a.code = code
 	a.labelPos = labelPos
 	a.labelSet = labelSet
 	a.relocs = relocs
-	a.dataRelocs = dataRelocs
 	a.absRelocs = absRelocs
 	a.data = data
 	a.bssSize = 0
@@ -95,8 +84,8 @@ func rtgAsmAddAbsReloc(a *rtgAsm, at int, off int, kind int) {
 	a.absRelocs = append(a.absRelocs, rtgAbsRef{at: at, off: off, kind: kind})
 }
 
-func rtgAsmAddReloc(a *rtgAsm, at int, label int, kind int) {
-	a.relocs = append(a.relocs, rtgLabelRef{at: at, label: label, kind: kind})
+func rtgAsmAddReloc(a *rtgAsm, at int, label int) {
+	a.relocs = append(a.relocs, rtgLabelRef{at: at, label: label})
 }
 
 func rtgAsmEmit32(a *rtgAsm, v int) {
@@ -128,13 +117,6 @@ func rtgAsmPatch(a *rtgAsm) {
 		}
 	}
 	a.dataOffset = a.codeOffset + len(a.code)
-	for i := 0; i < len(a.dataRelocs); i++ {
-		r := a.dataRelocs[i]
-		target := a.dataOffset + r.off
-		next := a.codeOffset + r.at + 4
-		disp := target - next
-		rtgPut32At(a.code, r.at, disp)
-	}
 	for i := 0; i < len(a.absRelocs); i++ {
 		r := a.absRelocs[i]
 		target := a.dataOffset + r.off
@@ -328,10 +310,12 @@ const rtgTypeByte = 3
 const rtgTypeBool = 4
 const rtgTypeString = 5
 const rtgTypeFloat64 = 6
-const rtgTypePointer = 7
-const rtgTypeSlice = 8
-const rtgTypeStruct = 9
-const rtgTypeNamed = 10
+const rtgTypeInt16 = 7
+const rtgTypeInt32 = 8
+const rtgTypePointer = 9
+const rtgTypeSlice = 10
+const rtgTypeStruct = 11
+const rtgTypeNamed = 12
 
 type rtgTypeInfo struct {
 	kind      int
@@ -402,7 +386,6 @@ type rtgTypeResult struct {
 const rtgIdentAppend = 1
 const rtgIdentByteSlice = 2
 const rtgIdentMake = 3
-const rtgIdentRtgParseProgram = 4
 const rtgIdentInt = 5
 const rtgIdentInt64 = 6
 const rtgIdentByte = 7
@@ -413,6 +396,8 @@ const rtgIdentRead = 11
 const rtgIdentWrite = 12
 const rtgIdentChmod = 13
 const rtgIdentCopy = 14
+const rtgIdentInt16 = 15
+const rtgIdentInt32 = 16
 
 const rtgDiagParseMissingPackage = 1
 const rtgDiagParseMissingPackageName = 2
@@ -448,27 +433,16 @@ const rtgDiagBreakOutsideLoop = 60
 const rtgDiagContinueOutsideLoop = 61
 const rtgDiagUnsupportedStatement = 62
 
-var rtgCompilerDiag int
-
-func rtgSetCompilerDiag(diag int) {
-	if rtgCompilerDiag == 0 {
-		rtgCompilerDiag = diag
-	}
-}
-
 func rtgProgramError(p *rtgProgram, diag int) {
 	p.ok = false
-	rtgSetCompilerDiag(diag)
 }
 
 func rtgMetaError(m *rtgMeta, diag int) {
 	m.ok = false
-	rtgSetCompilerDiag(diag)
 }
 
 func rtgExprError(ep *rtgExprParse, diag int) {
 	ep.ok = false
-	rtgSetCompilerDiag(diag)
 }
 
 func rtgParseProgram(src []byte) rtgProgram {
@@ -914,11 +888,14 @@ func rtgExprIdentCode(p *rtgProgram, ep *rtgExprParse, idx int) int {
 	if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "make") {
 		return rtgIdentMake
 	}
-	if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "rtgParseProgram") {
-		return rtgIdentRtgParseProgram
-	}
 	if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "int") {
 		return rtgIdentInt
+	}
+	if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "int16") {
+		return rtgIdentInt16
+	}
+	if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "int32") {
+		return rtgIdentInt32
 	}
 	if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "int64") {
 		return rtgIdentInt64
@@ -1164,6 +1141,32 @@ func rtgConstResultOk(value int) rtgConstResult {
 	return r
 }
 
+func rtgConvertConstInt(value int, kind int) int {
+	if kind == rtgTypeByte {
+		return value & 0xff
+	}
+	if kind == rtgTypeInt && rtgNativeIntSize == 4 {
+		kind = rtgTypeInt32
+	}
+	if kind == rtgTypeInt16 {
+		value = value & 0xffff
+		if value >= 0x8000 {
+			value -= 0x10000
+		}
+		return value
+	}
+	if kind == rtgTypeInt32 {
+		limit := 2147483647
+		if value > limit {
+			value -= limit
+			value -= limit
+			value -= 2
+		}
+		return value
+	}
+	return value
+}
+
 func rtgEvalConstExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) rtgConstResult {
 	p := g.prog
 	e := &ep.exprs[idx]
@@ -1189,8 +1192,19 @@ func rtgEvalConstExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) rtgConstResult
 	}
 	if e.kind == rtgExprCall {
 		callee := rtgExprIdentCode(p, ep, e.left)
-		if e.argCount == 1 && (callee == rtgIdentInt || callee == rtgIdentByte || callee == rtgIdentInt64) {
+		if e.argCount == 1 && (callee == rtgIdentInt || callee == rtgIdentByte || callee == rtgIdentInt16 || callee == rtgIdentInt32 || callee == rtgIdentInt64) {
 			result := rtgEvalConstExpr(g, ep, ep.args[e.firstArg])
+			if result.ok {
+				if callee == rtgIdentByte {
+					result.value = rtgConvertConstInt(result.value, rtgTypeByte)
+				}
+				if callee == rtgIdentInt16 {
+					result.value = rtgConvertConstInt(result.value, rtgTypeInt16)
+				}
+				if callee == rtgIdentInt32 {
+					result.value = rtgConvertConstInt(result.value, rtgTypeInt32)
+				}
+			}
 			return result
 		}
 		if e.argCount == 1 {
@@ -1198,13 +1212,17 @@ func rtgEvalConstExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) rtgConstResult
 			if calleeExpr.kind == rtgExprIdent {
 				namedType := rtgFindTypeByRange(g, calleeExpr.nameStart, calleeExpr.nameEnd)
 				resolved := rtgResolveType(g.meta, namedType)
-				if resolved.kind == rtgTypeInt || resolved.kind == rtgTypeInt64 || resolved.kind == rtgTypeBool {
-					return rtgEvalConstExpr(g, ep, ep.args[e.firstArg])
+				if resolved.kind == rtgTypeInt || resolved.kind == rtgTypeInt16 || resolved.kind == rtgTypeInt32 || resolved.kind == rtgTypeInt64 || resolved.kind == rtgTypeBool {
+					result := rtgEvalConstExpr(g, ep, ep.args[e.firstArg])
+					if result.ok {
+						result.value = rtgConvertConstInt(result.value, resolved.kind)
+					}
+					return result
 				}
 				if resolved.kind == rtgTypeByte {
 					result := rtgEvalConstExpr(g, ep, ep.args[e.firstArg])
 					if result.ok {
-						result.value = result.value & 255
+						result.value = rtgConvertConstInt(result.value, rtgTypeByte)
 					}
 					return result
 				}
@@ -1842,12 +1860,10 @@ func rtgParseOneStatement(bp *rtgBodyParse, start int, end int) int {
 	if rtgTokIsKind(p, start, rtgTokIf) {
 		bodyStart := rtgFindStatementBodyOpen(p, start+1, end)
 		if bodyStart <= start {
-			rtgSetCompilerDiag(rtgDiagParseStatement)
 			return start
 		}
 		bodyEnd := rtgFindMatchingBrace(p, bodyStart, end)
 		if bodyEnd <= bodyStart {
-			rtgSetCompilerDiag(rtgDiagParseStatement)
 			return start
 		}
 		stmt := rtgStmt{kind: rtgStmtIf, startTok: start, endTok: bodyEnd + 1, exprStart: start + 1, exprEnd: bodyStart, bodyStart: bodyStart + 1, bodyEnd: bodyEnd}
@@ -1856,7 +1872,6 @@ func rtgParseOneStatement(bp *rtgBodyParse, start int, end int) int {
 			if rtgTokIsKind(p, next+1, rtgTokIf) {
 				foundEnd := rtgFindIfStatementEnd(p, next+1, end)
 				if foundEnd <= next+1 {
-					rtgSetCompilerDiag(rtgDiagParseStatement)
 					return start
 				}
 				stmt.elseStart = next + 1
@@ -1866,7 +1881,6 @@ func rtgParseOneStatement(bp *rtgBodyParse, start int, end int) int {
 			} else if rtgTokCharIs(p, next+1, '{') {
 				elseBodyEnd := rtgFindMatchingBrace(p, next+1, end)
 				if elseBodyEnd <= next+1 {
-					rtgSetCompilerDiag(rtgDiagParseStatement)
 					return start
 				}
 				stmt.elseStart = next + 2
@@ -1881,12 +1895,10 @@ func rtgParseOneStatement(bp *rtgBodyParse, start int, end int) int {
 	if rtgTokIsKind(p, start, rtgTokSwitch) {
 		bodyStart := rtgFindStatementBodyOpen(p, start+1, end)
 		if bodyStart <= start {
-			rtgSetCompilerDiag(rtgDiagParseStatement)
 			return start
 		}
 		bodyEnd := rtgFindMatchingBrace(p, bodyStart, end)
 		if bodyEnd <= bodyStart {
-			rtgSetCompilerDiag(rtgDiagParseStatement)
 			return start
 		}
 		rtgAddStmt(bp, rtgStmtSwitch, start, bodyEnd+1, start+1, bodyStart, bodyStart+1, bodyEnd, 0, 0, 0, 0)
@@ -1895,12 +1907,10 @@ func rtgParseOneStatement(bp *rtgBodyParse, start int, end int) int {
 	if rtgTokIsKind(p, start, rtgTokFor) {
 		bodyStart := rtgFindStatementBodyOpen(p, start+1, end)
 		if bodyStart <= start {
-			rtgSetCompilerDiag(rtgDiagParseStatement)
 			return start
 		}
 		bodyEnd := rtgFindMatchingBrace(p, bodyStart, end)
 		if bodyEnd <= bodyStart {
-			rtgSetCompilerDiag(rtgDiagParseStatement)
 			return start
 		}
 		rtgAddStmt(bp, rtgStmtFor, start, bodyEnd+1, start+1, bodyStart, bodyStart+1, bodyEnd, 0, 0, 0, 0)
@@ -1909,7 +1919,6 @@ func rtgParseOneStatement(bp *rtgBodyParse, start int, end int) int {
 	if rtgTokCharIs(p, start, '{') {
 		bodyEnd := rtgFindMatchingBrace(p, start, end)
 		if bodyEnd <= start {
-			rtgSetCompilerDiag(rtgDiagParseStatement)
 			return start
 		}
 		rtgAddStmt(bp, rtgStmtBlock, start, bodyEnd+1, 0, 0, start+1, bodyEnd, 0, 0, 0, 0)
@@ -2244,12 +2253,14 @@ func rtgBuildMeta(pp *rtgProgram) rtgMeta {
 
 func rtgInitBuiltinTypes(m *rtgMeta) {
 	rtgAddBuiltinType(m, rtgTypeInvalid, 0)
-	rtgAddBuiltinType(m, rtgTypeInt, 8)
+	rtgAddBuiltinType(m, rtgTypeInt, rtgNativeIntSize)
 	rtgAddBuiltinType(m, rtgTypeInt64, 8)
 	rtgAddBuiltinType(m, rtgTypeByte, 1)
 	rtgAddBuiltinType(m, rtgTypeBool, 1)
 	rtgAddBuiltinType(m, rtgTypeString, 16)
 	rtgAddBuiltinType(m, rtgTypeFloat64, 8)
+	rtgAddBuiltinType(m, rtgTypeInt16, 2)
+	rtgAddBuiltinType(m, rtgTypeInt32, 4)
 }
 
 func rtgAddBuiltinType(m *rtgMeta, kind int, size int) {
@@ -2394,7 +2405,13 @@ func rtgEvalMetaParsedConstExpr(m *rtgMeta, p *rtgProgram, ep *rtgExprParse, idx
 			if result.ok {
 				callee := rtgExprIdentCode(p, ep, e.left)
 				if callee == rtgIdentByte {
-					result.value = result.value & 255
+					result.value = rtgConvertConstInt(result.value, rtgTypeByte)
+				}
+				if callee == rtgIdentInt16 {
+					result.value = rtgConvertConstInt(result.value, rtgTypeInt16)
+				}
+				if callee == rtgIdentInt32 {
+					result.value = rtgConvertConstInt(result.value, rtgTypeInt32)
 				}
 			}
 			return result
@@ -2763,6 +2780,12 @@ func rtgBuiltinTypeFromToken(p *rtgProgram, tokIndex int) int {
 	if rtgBytesEqualText(p.src, tok.start, tok.end, "int") {
 		return rtgTypeInt
 	}
+	if rtgBytesEqualText(p.src, tok.start, tok.end, "int16") {
+		return rtgTypeInt16
+	}
+	if rtgBytesEqualText(p.src, tok.start, tok.end, "int32") {
+		return rtgTypeInt32
+	}
 	if rtgBytesEqualText(p.src, tok.start, tok.end, "int64") {
 		return rtgTypeInt64
 	}
@@ -2848,6 +2871,26 @@ func rtgTypeIsString(m *rtgMeta, typ int) bool {
 func rtgTypeIsInt(m *rtgMeta, typ int) bool {
 	t := rtgResolveType(m, typ)
 	return t.kind == rtgTypeInt
+}
+
+func rtgTypeKindIsScalarInt(kind int) bool {
+	if kind > rtgTypeInvalid && kind < rtgTypeString {
+		return true
+	}
+	return kind == rtgTypeInt16 || kind == rtgTypeInt32
+}
+
+func rtgScalarKindSize(kind int) int {
+	if kind == rtgTypeByte || kind == rtgTypeBool {
+		return 1
+	}
+	if kind == rtgTypeInt {
+		return rtgNativeIntSize
+	}
+	if kind >= rtgTypeInt16 {
+		return (kind - 6) * 2
+	}
+	return 8
 }
 
 func rtgTypeIsStruct(m *rtgMeta, typ int) bool {

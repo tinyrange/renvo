@@ -31,7 +31,7 @@ func rtgEmitLinearPrintStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 	rtgAsmEmit2(a, 0x6a, 1)
 	rtgAsmPopRdi(a)
 	rtgAsmMovRsiRax(a)
-	rtgAsmMovRaxImm(a, 1)
+	rtgAsmMovRaxImm(a, rtgLinuxSysWriteSeq)
 	rtgAsmSyscall(a)
 	return true
 }
@@ -74,11 +74,10 @@ func rtgEmitBuiltinReadWrite(g *rtgLinearGen, ep *rtgExprParse, idx int, seqSysc
 	if !rtgEmitSlicePtrLen(g, ep, ep.args[firstArg+1]) {
 		return false
 	}
-	rtgAsmMovRsiRax(a)
-	rtgAsmEmit16(a, 0x5a51)
+	rtgAsmPrepareReadWriteBuf(a)
 	if offsetRead {
 		rtgAsmPopRax(a)
-		rtgAsmEmit24(a, 0xc28949)
+		rtgAsmMoveOffsetArg(a)
 	}
 	rtgAsmPopRdi(a)
 	if offsetRead {

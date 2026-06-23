@@ -1,29 +1,36 @@
+//go:build rtg_target_386
+// +build rtg_target_386
+
 package main
 
-const rtgLinuxAmd64CodeOffset = 0x78
+const rtgLinux386CodeOffset = 0x54
+const rtgLinux386LoadAddress = 0x08048000
 
-const rtgLinuxSysReadSeq = 0
-const rtgLinuxSysWriteSeq = 1
-const rtgLinuxSysOpen = 2
-const rtgLinuxSysClose = 3
-const rtgLinuxSysReadAt = 17
-const rtgLinuxSysWriteAt = 18
-const rtgLinuxSysFchmod = 91
+const rtgLinuxSysReadSeq = 3
+const rtgLinuxSysWriteSeq = 4
+const rtgLinuxSysOpen = 5
+const rtgLinuxSysClose = 6
+const rtgLinuxSysFchmod = 94
+const rtgLinuxSysReadAt = 180
+const rtgLinuxSysWriteAt = 181
 
 func rtgAsmPrepareReadWriteBuf(a *rtgAsm) {
+	rtgAsmPushRcx(a)
 	rtgAsmMovRsiRax(a)
-	rtgAsmEmit16(a, 0x5a51)
+	rtgAsmPopRdx(a)
 }
 
 func rtgAsmMoveOffsetArg(a *rtgAsm) {
-	rtgAsmEmit24(a, 0xc28949)
+	rtgAsmEmit16(a, 0xc689)
+	rtgAsmMovRaxImm(a, 0)
+	rtgAsmEmit16(a, 0xc789)
 }
 
 func compileLinuxTarget(input []int, output int) int {
-	return compileLinuxAmd64(input, output)
+	return compileLinux386(input, output)
 }
 
-func compileLinuxAmd64(input []int, output int) int {
+func compileLinux386(input []int, output int) int {
 	var src []byte
 	for i := 0; i < len(input); i++ {
 		src = rtgReadAll(input[i], src)
@@ -64,7 +71,7 @@ func rtgTryCompileScalarProgram(p *rtgProgram, meta *rtgMeta) rtgCompileResult {
 	g.meta = meta
 	a := &g.asm
 	rtgAsmInit(a)
-	a.codeOffset = rtgLinuxAmd64CodeOffset
+	a.codeOffset = rtgLinux386CodeOffset
 	for i := 0; i < len(meta.funcs); i++ {
 		g.funcLabels = append(g.funcLabels, rtgAsmNewLabel(a))
 	}
@@ -78,7 +85,7 @@ func rtgTryCompileScalarProgram(p *rtgProgram, meta *rtgMeta) rtgCompileResult {
 	}
 	rtgAsmCallLabel(a, g.funcLabels[appIndex])
 	rtgAsmMovRdiRax(a)
-	rtgAsmMovRaxImm(a, 60)
+	rtgAsmMovRaxImm(a, 1)
 	rtgAsmSyscall(a)
 	for i := 0; i < len(meta.funcs); i++ {
 		if !rtgEmitScalarFunction(&g, i) {
@@ -130,83 +137,87 @@ func rtgAsmBuildArgvEnvSlices(a *rtgAsm, bssOff int, envOff int, envLenOff int) 
 	strlenLabel := rtgAsmNewLabel(a)
 	afterLenLabel := rtgAsmNewLabel(a)
 	doneLabel := rtgAsmNewLabel(a)
-	envScanLabel := rtgAsmNewLabel(a)
-	envStartLabel := rtgAsmNewLabel(a)
 	envLoopLabel := rtgAsmNewLabel(a)
 	envStrlenLabel := rtgAsmNewLabel(a)
 	envAfterLenLabel := rtgAsmNewLabel(a)
 	envDoneLabel := rtgAsmNewLabel(a)
-	rtgAsmEmit32(a, 0x24048b48)
-	rtgAsmEmit24(a, 0xc08949)
-	rtgAsmEmit32(a, 0x244c8d4c)
-	rtgAsmEmit8(a, 0x8)
-	rtgAsmMovR10BssAddr(a, bssOff)
-	rtgAsmEmit32(a, 0x4dd4894d)
-	rtgAsmEmit16(a, 0xdb31)
-	rtgAsmMarkLabel(a, loopLabel)
-	rtgAsmEmit24(a, 0xc3394d)
-	rtgAsmEmit16(a, 0x8d0f)
+
+	rtgAsmEmit24(a, 0x24048b)
+	rtgAsmEmit16(a, 0xe689)
+	rtgAsmEmit3(a, 0x83, 0xc6, 0x04)
+	rtgAsmEmit8(a, 0xbf)
 	at := len(a.code)
 	rtgAsmEmit32(a, 0)
+	rtgAsmAddAbsReloc(a, at, bssOff, rtgAbsBssReloc)
+	rtgAsmEmit16(a, 0xc931)
+	rtgAsmMarkLabel(a, loopLabel)
+	rtgAsmEmit16(a, 0xc139)
+	rtgAsmEmit16(a, 0x8d0f)
+	at = len(a.code)
+	rtgAsmEmit32(a, 0)
 	rtgAsmAddReloc(a, at, doneLabel)
-	rtgAsmEmit32(a, 0xd93c8b4b)
-	rtgAsmEmit32(a, 0x483a8949)
-	rtgAsmEmit16(a, 0xc031)
+	rtgAsmEmit24(a, 0x8e148b)
+	rtgAsmEmit16(a, 0x1789)
+	rtgAsmEmit16(a, 0xdb31)
 	rtgAsmMarkLabel(a, strlenLabel)
-	rtgAsmEmit32(a, 0x00073c80)
+	rtgAsmEmit4(a, 0x80, 0x3c, 0x1a, 0x00)
 	rtgAsmJzLabel(a, afterLenLabel)
-	rtgAsmEmit24(a, 0xc0ff48)
+	rtgAsmEmit8(a, 0x43)
 	rtgAsmJmpLabel(a, strlenLabel)
 	rtgAsmMarkLabel(a, afterLenLabel)
-	rtgAsmEmit32(a, 0x08428949)
-	rtgAsmEmit32(a, 0x10c28349)
-	rtgAsmEmit24(a, 0xc3ff49)
+	rtgAsmEmit3(a, 0x89, 0x5f, 0x08)
+	rtgAsmEmit3(a, 0x83, 0xc7, 0x10)
+	rtgAsmEmit8(a, 0x41)
 	rtgAsmJmpLabel(a, loopLabel)
 	rtgAsmMarkLabel(a, doneLabel)
 
-	rtgAsmEmit32(a, 0x244c8d4c)
-	rtgAsmEmit8(a, 0x8)
-	rtgAsmMarkLabel(a, envScanLabel)
-	rtgAsmEmit32(a, 0x00398349)
-	rtgAsmJzLabel(a, envStartLabel)
-	rtgAsmEmit32(a, 0x08c18349)
-	rtgAsmJmpLabel(a, envScanLabel)
-	rtgAsmMarkLabel(a, envStartLabel)
-	rtgAsmEmit32(a, 0x08c18349)
-	rtgAsmMovR10BssAddr(a, envOff)
-	rtgAsmEmit24(a, 0xdb314d)
+	rtgAsmEmit4(a, 0x8d, 0x74, 0x86, 0x08)
+	rtgAsmEmit8(a, 0xbf)
+	at = len(a.code)
+	rtgAsmEmit32(a, 0)
+	rtgAsmAddAbsReloc(a, at, envOff, rtgAbsBssReloc)
+	rtgAsmEmit16(a, 0xc931)
 	rtgAsmMarkLabel(a, envLoopLabel)
-	rtgAsmEmit32(a, 0xd93c8b4b)
-	rtgAsmEmit32(a, 0x00ff8348)
+	rtgAsmEmit24(a, 0x8e148b)
+	rtgAsmEmit16(a, 0xd285)
 	rtgAsmJzLabel(a, envDoneLabel)
-	rtgAsmEmit32(a, 0x483a8949)
-	rtgAsmEmit16(a, 0xc031)
+	rtgAsmEmit16(a, 0x1789)
+	rtgAsmEmit16(a, 0xdb31)
 	rtgAsmMarkLabel(a, envStrlenLabel)
-	rtgAsmEmit32(a, 0x00073c80)
+	rtgAsmEmit4(a, 0x80, 0x3c, 0x1a, 0x00)
 	rtgAsmJzLabel(a, envAfterLenLabel)
-	rtgAsmEmit24(a, 0xc0ff48)
+	rtgAsmEmit8(a, 0x43)
 	rtgAsmJmpLabel(a, envStrlenLabel)
 	rtgAsmMarkLabel(a, envAfterLenLabel)
-	rtgAsmEmit32(a, 0x08428949)
-	rtgAsmEmit32(a, 0x10c28349)
-	rtgAsmEmit24(a, 0xc3ff49)
+	rtgAsmEmit3(a, 0x89, 0x5f, 0x08)
+	rtgAsmEmit3(a, 0x83, 0xc7, 0x10)
+	rtgAsmEmit8(a, 0x41)
 	rtgAsmJmpLabel(a, envLoopLabel)
 	rtgAsmMarkLabel(a, envDoneLabel)
-	rtgAsmEmit24(a, 0xd8894c)
-	rtgAsmStoreRaxBss(a, envLenOff)
+	rtgAsmEmit16(a, 0x0d89)
+	at = len(a.code)
+	rtgAsmEmit32(a, 0)
+	rtgAsmAddAbsReloc(a, at, envLenOff, rtgAbsBssReloc)
 
-	rtgAsmEmit32(a, 0x4ce7894c)
-	rtgAsmEmit32(a, 0x894cc689)
-	rtgAsmEmit8(a, 0xc2)
-	rtgAsmMovRaxBssAddr(a, envOff)
-	rtgAsmMovRcxRax(a)
-	rtgAsmLoadRaxBss(a, envLenOff)
-	rtgAsmMovR8Rax(a)
-	rtgAsmMovR9Rax(a)
+	rtgAsmEmit8(a, 0xbb)
+	at = len(a.code)
+	rtgAsmEmit32(a, 0)
+	rtgAsmAddAbsReloc(a, at, bssOff, rtgAbsBssReloc)
+	rtgAsmEmit16(a, 0xc689)
+	rtgAsmEmit16(a, 0xc289)
+	rtgAsmEmit8(a, 0xb9)
+	at = len(a.code)
+	rtgAsmEmit32(a, 0)
+	rtgAsmAddAbsReloc(a, at, envOff, rtgAbsBssReloc)
+	rtgAsmEmit8(a, 0xa1)
+	at = len(a.code)
+	rtgAsmEmit32(a, 0)
+	rtgAsmAddAbsReloc(a, at, envLenOff, rtgAbsBssReloc)
+	rtgAsmEmit16(a, 0xc789)
 }
 
 func rtgAsmImage(a *rtgAsm) []byte {
-	rtgAsmPatch(a)
+	rtgAsmPatch386(a)
 	fileSize := a.codeOffset + len(a.code) + len(a.data)
 	memSize := fileSize + a.bssSize
 	var out []byte
@@ -220,14 +231,26 @@ func rtgAsmImage(a *rtgAsm) []byte {
 	return out
 }
 
+func rtgAsmPatch386(a *rtgAsm) {
+	rtgAsmPatch(a)
+	for i := 0; i < len(a.absRelocs); i++ {
+		r := a.absRelocs[i]
+		target := a.dataOffset + r.off
+		if r.kind == rtgAbsBssReloc {
+			target = a.dataOffset + len(a.data) + r.off
+		}
+		rtgPut32At(a.code, r.at, rtgLinux386LoadAddress+target)
+	}
+}
+
 func rtgAppendElfHeader(out []byte, entryOff int, fileSize int, memSize int) []byte {
-	base := 0x400000
+	base := rtgLinux386LoadAddress
 
 	out = append(out, 0x7f)
 	out = append(out, 'E')
 	out = append(out, 'L')
 	out = append(out, 'F')
-	out = append(out, 2)
+	out = append(out, 1)
 	out = append(out, 1)
 	out = append(out, 1)
 	out = append(out, 0)
@@ -235,26 +258,26 @@ func rtgAppendElfHeader(out []byte, entryOff int, fileSize int, memSize int) []b
 		out = append(out, 0)
 	}
 	out = rtgAppend16(out, 2)
-	out = rtgAppend16(out, 0x3e)
+	out = rtgAppend16(out, 3)
 	out = rtgAppend32(out, 1)
-	out = rtgAppend64(out, base+entryOff)
-	out = rtgAppend64(out, 64)
-	out = rtgAppend64(out, 0)
+	out = rtgAppend32(out, base+entryOff)
+	out = rtgAppend32(out, 52)
 	out = rtgAppend32(out, 0)
-	out = rtgAppend16(out, 64)
-	out = rtgAppend16(out, 56)
+	out = rtgAppend32(out, 0)
+	out = rtgAppend16(out, 52)
+	out = rtgAppend16(out, 32)
 	out = rtgAppend16(out, 1)
 	out = rtgAppend16(out, 0)
 	out = rtgAppend16(out, 0)
 	out = rtgAppend16(out, 0)
 
 	out = rtgAppend32(out, 1)
+	out = rtgAppend32(out, 0)
+	out = rtgAppend32(out, base)
+	out = rtgAppend32(out, base)
+	out = rtgAppend32(out, fileSize)
+	out = rtgAppend32(out, memSize)
 	out = rtgAppend32(out, 7)
-	out = rtgAppend64(out, 0)
-	out = rtgAppend64(out, base)
-	out = rtgAppend64(out, base)
-	out = rtgAppend64(out, fileSize)
-	out = rtgAppend64(out, memSize)
-	out = rtgAppend64(out, 0x1000)
+	out = rtgAppend32(out, 0x1000)
 	return out
 }

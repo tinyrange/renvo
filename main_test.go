@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -32,8 +33,76 @@ func resetRuntime() {
 	files[2] = os.Stderr
 }
 
-func getCompilerFiles() []string {
-	return []string{"compiler_common_impl.go", "compiler_amd64_impl.go", "compiler_linux_impl.go", "compiler_linux_amd64_impl.go", "compiler_main.go"}
+type targetConfig struct {
+	os   string
+	arch string
+}
+
+func getCompilerFiles(config targetConfig) ([]string, error) {
+	var files []string
+
+	files = append(files, "compiler_common_impl.go", "compiler_main.go")
+
+	switch config.os {
+	case "linux":
+		files = append(files, "compiler_linux_impl.go")
+	default:
+		return nil, fmt.Errorf("unsupported OS: %s", config.os)
+	}
+
+	switch config.arch {
+	case "amd64":
+		files = append(files, "compiler_amd64_impl.go")
+	case "386":
+		files = append(files, "compiler_386_impl.go")
+	default:
+		return nil, fmt.Errorf("unsupported architecture: %s", config.arch)
+	}
+
+	switch config.os + "/" + config.arch {
+	case "linux/amd64":
+		files = append(files, "compiler_linux_amd64_impl.go")
+	case "linux/386":
+		files = append(files, "compiler_linux_386_impl.go")
+	default:
+		return nil, fmt.Errorf("unsupported OS/architecture combination: %s/%s", config.os, config.arch)
+	}
+
+	return files, nil
+}
+
+type compilerTarget struct {
+	name  string
+	files []string
+}
+
+func supportedCompilerTargets(t *testing.T) []compilerTarget {
+	t.Helper()
+
+	var targets []compilerTarget
+
+	switch runtime.GOOS + "/" + runtime.GOARCH {
+	case "linux/amd64":
+		for _, config := range []targetConfig{
+			{os: "linux", arch: "amd64"},
+			{os: "linux", arch: "386"},
+		} {
+			files, err := getCompilerFiles(config)
+			if err != nil {
+				t.Fatalf("failed to get compiler files for target %s/%s: %v", config.os, config.arch, err)
+			}
+			targetName := fmt.Sprintf("%s/%s", config.os, config.arch)
+			targets = append(targets, compilerTarget{name: targetName, files: files})
+		}
+		return targets
+	default:
+		t.Skipf("no RTG compiler targets supported on %s/%s", runtime.GOOS, runtime.GOARCH)
+		return nil
+	}
+}
+
+func (target compilerTarget) safeName() string {
+	return strings.ReplaceAll(target.name, "/", "-")
 }
 
 func compile(inputFiles []string, outputFile string) error {
@@ -104,22 +173,39 @@ func runCompilerBinary(t *testing.T, path string, outputFile string, inputFiles 
 	return nil
 }
 
-func buildStage2Compiler(t *testing.T, outDir string) string {
+func runTargetCommand(t *testing.T, target compilerTarget, path string, args ...string) (commandResult, error) {
+	t.Helper()
+	return runCommand(t, path, args...)
+}
+
+func runTargetCompilerBinary(t *testing.T, target compilerTarget, path string, outputFile string, inputFiles []string) error {
+	t.Helper()
+	args := append([]string{"-o", outputFile}, inputFiles...)
+	result, err := runTargetCommand(t, target, path, args...)
+	if err != nil {
+		return err
+	}
+	if result.exitCode != 0 {
+		return fmt.Errorf("exit code %d\nstdout: %sstderr: %s", result.exitCode, result.stdout, result.stderr)
+	}
+	return nil
+}
+
+func buildStage2Compiler(t *testing.T, target compilerTarget, outDir string) string {
 	t.Helper()
 
-	inputFiles := getCompilerFiles()
-	stage0 := filepath.Join(outDir, "stage0")
-	if err := compile(inputFiles, stage0); err != nil {
+	stage0 := filepath.Join(outDir, "stage0-"+target.safeName())
+	if err := compile(target.files, stage0); err != nil {
 		t.Fatalf("stage0 compilation failed: %v", err)
 	}
 
-	stage1 := filepath.Join(outDir, "stage1")
-	if err := runCompilerBinary(t, stage0, stage1, inputFiles); err != nil {
+	stage1 := filepath.Join(outDir, "stage1-"+target.safeName())
+	if err := runCompilerBinary(t, stage0, stage1, target.files); err != nil {
 		t.Fatalf("stage1 compilation failed: %v", err)
 	}
 
-	stage2 := filepath.Join(outDir, "stage2")
-	if err := runCompilerBinary(t, stage1, stage2, inputFiles); err != nil {
+	stage2 := filepath.Join(outDir, "stage2-"+target.safeName())
+	if err := runTargetCompilerBinary(t, target, stage1, stage2, target.files); err != nil {
 		t.Fatalf("stage2 compilation failed: %v", err)
 	}
 
@@ -173,6 +259,8 @@ func compareCommandResult(t *testing.T, expected commandResult, actual commandRe
 
 // test that the compiler can compile and run a simple "hello, world!" program.
 func TestCompileTests(t *testing.T) {
+	targets := supportedCompilerTargets(t)
+
 	// discover all files under tests/ that end with .go
 	var inputFiles []string
 	err := filepath.Walk("tests", func(path string, info os.FileInfo, err error) error {
@@ -188,27 +276,33 @@ func TestCompileTests(t *testing.T) {
 		t.Fatalf("failed to discover test files: %v", err)
 	}
 
-	outDir := t.TempDir()
-	stage2 := buildStage2Compiler(t, outDir)
+	for _, target := range targets {
+		target := target
+		t.Run(target.name, func(t *testing.T) {
+			outDir := t.TempDir()
+			stage2 := buildStage2Compiler(t, target, outDir)
 
-	for _, path := range inputFiles {
-		t.Run(path, func(t *testing.T) {
-			t.Parallel()
+			for _, path := range inputFiles {
+				path := path
+				t.Run(path, func(t *testing.T) {
+					t.Parallel()
 
-			expected := runWithHostGo(t, path)
+					expected := runWithHostGo(t, path)
 
-			testOutDir := t.TempDir()
-			outputFile := filepath.Join(testOutDir, "test")
+					testOutDir := t.TempDir()
+					outputFile := filepath.Join(testOutDir, "test")
 
-			if err := runCompilerBinary(t, stage2, outputFile, []string{path}); err != nil {
-				t.Fatalf("compilation failed: %v", err)
+					if err := runTargetCompilerBinary(t, target, stage2, outputFile, []string{path}); err != nil {
+						t.Fatalf("compilation failed: %v", err)
+					}
+
+					actual, err := runTargetCommand(t, target, outputFile)
+					if err != nil {
+						t.Fatalf("execution failed: %v", err)
+					}
+					compareCommandResult(t, expected, actual)
+				})
 			}
-
-			actual, err := runCommand(t, outputFile)
-			if err != nil {
-				t.Fatalf("execution failed: %v", err)
-			}
-			compareCommandResult(t, expected, actual)
 		})
 	}
 }
@@ -244,137 +338,130 @@ func TestRunTests(t *testing.T) {
 
 // Test the self-hosting of the compiler.
 func TestCompilerCompiler(t *testing.T) {
-	inputFiles := getCompilerFiles()
+	for _, target := range supportedCompilerTargets(t) {
+		target := target
+		t.Run(target.name, func(t *testing.T) {
+			// compile stage0
+			outDir := t.TempDir()
+			stage0 := filepath.Join(outDir, "stage0")
 
-	// compile stage0
-	outDir := t.TempDir()
-	stage0 := filepath.Join(outDir, "stage0")
+			err := compile(target.files, stage0)
+			if err != nil {
+				t.Fatalf("compilation failed: %v", err)
+			}
 
-	err := compile(inputFiles, stage0)
-	if err != nil {
-		t.Fatalf("compilation failed: %v", err)
-	}
+			// use stage0 to compile stage1
+			stage1 := filepath.Join(outDir, "stage1")
+			if err := runCompilerBinary(t, stage0, stage1, target.files); err != nil {
+				t.Fatalf("stage0 compilation failed: %v", err)
+			}
 
-	// use stage0 to compile stage1
-	stage1 := filepath.Join(outDir, "stage1")
-	cmd := exec.Command(stage0, append([]string{"-o", stage1}, inputFiles...)...)
-	cmd.Env = os.Environ()
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("stage0 compilation failed: %v\nOutput: %s", err, string(output))
-	}
+			// use stage1 to compile stage2
+			stage2 := filepath.Join(outDir, "stage2")
+			if err := runTargetCompilerBinary(t, target, stage1, stage2, target.files); err != nil {
+				t.Fatalf("stage1 compilation failed: %v", err)
+			}
 
-	// use stage1 to compile stage2
-	stage2 := filepath.Join(outDir, "stage2")
-	cmd = exec.Command(stage1, append([]string{"-o", stage2}, inputFiles...)...)
-	cmd.Env = os.Environ()
-	output, err = cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("stage1 compilation failed: %v\nOutput: %s", err, string(output))
-	}
+			// use stage2 to compile stage3
+			stage3 := filepath.Join(outDir, "stage3")
+			if err := runTargetCompilerBinary(t, target, stage2, stage3, target.files); err != nil {
+				t.Fatalf("stage2 compilation failed: %v", err)
+			}
 
-	// use stage2 to compile stage3
-	stage3 := filepath.Join(outDir, "stage3")
-	cmd = exec.Command(stage2, append([]string{"-o", stage3}, inputFiles...)...)
-	cmd.Env = os.Environ()
-	output, err = cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("stage2 compilation failed: %v\nOutput: %s", err, string(output))
-	}
-
-	// make sure stage2 and stage3 are byte identical
-	stage2Data, err := os.ReadFile(stage2)
-	if err != nil {
-		t.Fatalf("failed to read stage2: %v", err)
-	}
-	stage3Data, err := os.ReadFile(stage3)
-	if err != nil {
-		t.Fatalf("failed to read stage3: %v", err)
-	}
-	if !bytes.Equal(stage2Data, stage3Data) {
-		t.Fatal("stage2 and stage3 are not identical")
+			// make sure stage2 and stage3 are byte identical
+			stage2Data, err := os.ReadFile(stage2)
+			if err != nil {
+				t.Fatalf("failed to read stage2: %v", err)
+			}
+			stage3Data, err := os.ReadFile(stage3)
+			if err != nil {
+				t.Fatalf("failed to read stage3: %v", err)
+			}
+			if !bytes.Equal(stage2Data, stage3Data) {
+				t.Fatal("stage2 and stage3 are not identical")
+			}
+		})
 	}
 }
 
 // Check the stage2 compiler compiles stage3 in under 50ms, produces a binary under 160KB,
 // and uses under 3MB max RSS while compiling stage3.
 func TestCompilerPerformance(t *testing.T) {
-	inputFiles := getCompilerFiles()
-	outDir := t.TempDir()
+	for _, target := range supportedCompilerTargets(t) {
+		target := target
+		t.Run(target.name, func(t *testing.T) {
+			outDir := t.TempDir()
 
-	stage0 := filepath.Join(outDir, "stage0")
-	if err := compile(inputFiles, stage0); err != nil {
-		t.Fatalf("stage0 compilation failed: %v", err)
-	}
+			stage0 := filepath.Join(outDir, "stage0")
+			if err := compile(target.files, stage0); err != nil {
+				t.Fatalf("stage0 compilation failed: %v", err)
+			}
 
-	stage1 := filepath.Join(outDir, "stage1")
-	cmd := exec.Command(stage0, append([]string{"-o", stage1}, inputFiles...)...)
-	cmd.Env = os.Environ()
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("stage1 compilation failed: %v\nOutput: %s", err, string(output))
-	}
+			stage1 := filepath.Join(outDir, "stage1")
+			if err := runCompilerBinary(t, stage0, stage1, target.files); err != nil {
+				t.Fatalf("stage1 compilation failed: %v", err)
+			}
 
-	stage2 := filepath.Join(outDir, "stage2")
-	cmd = exec.Command(stage1, append([]string{"-o", stage2}, inputFiles...)...)
-	cmd.Env = os.Environ()
-	output, err = cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("stage2 compilation failed: %v\nOutput: %s", err, string(output))
-	}
+			stage2 := filepath.Join(outDir, "stage2")
+			if err := runTargetCompilerBinary(t, target, stage1, stage2, target.files); err != nil {
+				t.Fatalf("stage2 compilation failed: %v", err)
+			}
 
-	stage3 := filepath.Join(outDir, "stage3")
-	stage3Args := append([]string{"-o", stage3}, inputFiles...)
-	cmd = exec.Command(stage2, stage3Args...)
-	cmd.Env = os.Environ()
-	start := time.Now()
-	output, err = cmd.CombinedOutput()
-	elapsed := time.Since(start)
-	if err != nil {
-		t.Fatalf("stage2 performance compilation failed: %v\nOutput: %s", err, string(output))
-	}
+			stage3 := filepath.Join(outDir, "stage3")
+			stage3Args := append([]string{"-o", stage3}, target.files...)
+			start := time.Now()
+			result, err := runTargetCommand(t, target, stage2, stage3Args...)
+			elapsed := time.Since(start)
+			if err != nil {
+				t.Fatalf("stage2 performance compilation failed: %v", err)
+			}
+			if result.exitCode != 0 {
+				t.Fatalf("stage2 performance compilation failed with exit code %d\nstdout: %sstderr: %s", result.exitCode, result.stdout, result.stderr)
+			}
 
-	rssFile := filepath.Join(outDir, "stage3-compile-rss")
-	timeArgs := append([]string{"-f", "%M", "-o", rssFile, stage2}, stage3Args...)
-	cmd = exec.Command("/usr/bin/time", timeArgs...)
-	cmd.Env = os.Environ()
-	output, err = cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("stage2 resource-measured compilation failed: %v\nOutput: %s", err, string(output))
-	}
+			rssFile := filepath.Join(outDir, "stage3-compile-rss")
+			timeArgs := append([]string{"-f", "%M", "-o", rssFile, stage2}, stage3Args...)
+			cmd := exec.Command("/usr/bin/time", timeArgs...)
+			cmd.Env = os.Environ()
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("stage2 resource-measured compilation failed: %v\nOutput: %s", err, string(output))
+			}
 
-	info, err := os.Stat(stage3)
-	if err != nil {
-		t.Fatalf("failed to stat stage3: %v", err)
-	}
-	const maxBinarySize = 160 * 1024
+			info, err := os.Stat(stage3)
+			if err != nil {
+				t.Fatalf("failed to stat stage3: %v", err)
+			}
+			const maxBinarySize = 160 * 1024
 
-	rssData, err := os.ReadFile(rssFile)
-	if err != nil {
-		t.Fatalf("failed to read stage3 compile resource usage: %v", err)
-	}
-	rssLines := strings.Fields(string(rssData))
-	if len(rssLines) == 0 {
-		t.Fatalf("failed to read stage3 compile resource usage")
-	}
-	maxRSS, err := strconv.Atoi(rssLines[len(rssLines)-1])
-	if err != nil {
-		t.Fatalf("failed to parse stage3 compile resource usage %q: %v", string(rssData), err)
-	}
-	const maxRSSKB = 3 * 1024
+			rssData, err := os.ReadFile(rssFile)
+			if err != nil {
+				t.Fatalf("failed to read stage3 compile resource usage: %v", err)
+			}
+			rssLines := strings.Fields(string(rssData))
+			if len(rssLines) == 0 {
+				t.Fatalf("failed to read stage3 compile resource usage")
+			}
+			maxRSS, err := strconv.Atoi(rssLines[len(rssLines)-1])
+			if err != nil {
+				t.Fatalf("failed to parse stage3 compile resource usage %q: %v", string(rssData), err)
+			}
+			const maxRSSKB = 3 * 1024
 
-	var failures []string
-	if elapsed > 50*time.Millisecond {
-		failures = append(failures, fmt.Sprintf("runtime %s > 50ms", elapsed))
-	}
-	if info.Size() > maxBinarySize {
-		failures = append(failures, fmt.Sprintf("binary size %d bytes > %d bytes", info.Size(), maxBinarySize))
-	}
-	if maxRSS > maxRSSKB {
-		failures = append(failures, fmt.Sprintf("compile max RSS %dKB > %dKB", maxRSS, maxRSSKB))
-	}
-	if len(failures) > 0 {
-		t.Fatalf("performance limits failed: stage2 runtime=%s, stage3 binary=%d bytes, stage2 compile max RSS=%dKB; failures: %s",
-			elapsed, info.Size(), maxRSS, strings.Join(failures, "; "))
+			var failures []string
+			if elapsed > 50*time.Millisecond {
+				failures = append(failures, fmt.Sprintf("runtime %s > 50ms", elapsed))
+			}
+			if info.Size() > maxBinarySize {
+				failures = append(failures, fmt.Sprintf("binary size %d bytes > %d bytes", info.Size(), maxBinarySize))
+			}
+			if maxRSS > maxRSSKB {
+				failures = append(failures, fmt.Sprintf("compile max RSS %dKB > %dKB", maxRSS, maxRSSKB))
+			}
+			if len(failures) > 0 {
+				t.Fatalf("performance limits failed: stage2 runtime=%s, stage3 binary=%d bytes, stage2 compile max RSS=%dKB; failures: %s",
+					elapsed, info.Size(), maxRSS, strings.Join(failures, "; "))
+			}
+		})
 	}
 }
