@@ -64,7 +64,12 @@ func rtgTryCompileScalarProgramAmd64(p *rtgProgram, meta *rtgMeta) rtgCompileRes
 	rtgAsmInit(a)
 	a.codeOffset = rtgLinuxAmd64CodeOffset
 	for i := 0; i < len(meta.funcs); i++ {
-		g.funcLabels = append(g.funcLabels, rtgAsmNewLabel(a))
+		label := rtgAsmNewLabel(a)
+		g.funcLabels = append(g.funcLabels, label)
+		src := meta.prog.src
+		nameStart := meta.funcs[i].nameStart
+		nameEnd := meta.funcs[i].nameEnd
+		rtgAsmAddFuncSymbol(a, src, nameStart, nameEnd, label)
 	}
 	if !rtgLinearInitGlobals(&g) {
 		var result rtgCompileResult
@@ -80,6 +85,9 @@ func rtgTryCompileScalarProgramAmd64(p *rtgProgram, meta *rtgMeta) rtgCompileRes
 	rtgAsmSyscall(a)
 	for i := 0; i < len(meta.funcs); i++ {
 		if !rtgEmitScalarFunction(&g, i) {
+			rtgPrintErr("rtg: amd64 failed in function ")
+			write(2, meta.prog.src[meta.funcs[i].nameStart:meta.funcs[i].nameEnd], -1)
+			rtgPrintErr("\n")
 			var result rtgCompileResult
 			return result
 		}
@@ -205,20 +213,35 @@ func rtgAsmBuildArgvEnvSlicesAmd64(a *rtgAsm, bssOff int, envOff int, envLenOff 
 
 func rtgAsmImageAmd64(a *rtgAsm) []byte {
 	rtgAsmPatch(a)
-	fileSize := a.codeOffset + len(a.code) + len(a.data)
-	memSize := fileSize + a.bssSize
+	loadFileSize := a.codeOffset + len(a.code) + len(a.data)
+	memSize := loadFileSize + a.bssSize
+	sec := rtgBuildElf64SymbolSections(a, 0x400000, a.codeOffset, loadFileSize)
 	var out []byte
-	out = rtgAppendElfHeaderAmd64(out, a.codeOffset, fileSize, memSize)
+	out = rtgAppendElfHeaderAmd64(out, a.codeOffset, loadFileSize, memSize, sec.shoff)
 	for i := 0; i < len(a.code); i++ {
 		out = append(out, a.code[i])
 	}
 	for i := 0; i < len(a.data); i++ {
 		out = append(out, a.data[i])
 	}
+	out = rtgAppendUntil(out, sec.symtabOff)
+	for i := 0; i < len(sec.symtab); i++ {
+		out = append(out, sec.symtab[i])
+	}
+	out = rtgAppendUntil(out, sec.strtabOff)
+	for i := 0; i < len(sec.strtab); i++ {
+		out = append(out, sec.strtab[i])
+	}
+	out = rtgAppendUntil(out, sec.shstrOff)
+	for i := 0; i < len(sec.shstrtab); i++ {
+		out = append(out, sec.shstrtab[i])
+	}
+	out = rtgAppendUntil(out, sec.shoff)
+	out = rtgAppendElf64SectionHeaders(out, &sec, a, 0x400000)
 	return out
 }
 
-func rtgAppendElfHeaderAmd64(out []byte, entryOff int, fileSize int, memSize int) []byte {
+func rtgAppendElfHeaderAmd64(out []byte, entryOff int, fileSize int, memSize int, shoff int) []byte {
 	base := 0x400000
 
 	out = append(out, 0x7f)
@@ -237,14 +260,14 @@ func rtgAppendElfHeaderAmd64(out []byte, entryOff int, fileSize int, memSize int
 	out = rtgAppend32(out, 1)
 	out = rtgAppend64(out, base+entryOff)
 	out = rtgAppend64(out, 64)
-	out = rtgAppend64(out, 0)
+	out = rtgAppend64(out, shoff)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend16(out, 64)
 	out = rtgAppend16(out, 56)
 	out = rtgAppend16(out, 1)
-	out = rtgAppend16(out, 0)
-	out = rtgAppend16(out, 0)
-	out = rtgAppend16(out, 0)
+	out = rtgAppend16(out, 64)
+	out = rtgAppend16(out, 7)
+	out = rtgAppend16(out, 6)
 
 	out = rtgAppend32(out, 1)
 	out = rtgAppend32(out, 7)

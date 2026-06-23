@@ -12,6 +12,10 @@ func rtgOpenArg(path string, env []string) int {
 			for i := 0; i < len(path); i++ {
 				full = append(full, path[i])
 			}
+			fd := open(string(full), O_RDONLY)
+			if fd >= 0 {
+				return fd
+			}
 			full = append(full, 0)
 			return open(string(full), O_RDONLY)
 		}
@@ -26,6 +30,12 @@ func rtgParseTargetArg(target string) int {
 	if target == "linux/386" {
 		return rtgTargetLinux386
 	}
+	if target == "linux/aarch64" {
+		return rtgTargetLinuxAarch64
+	}
+	if target == "linux/arm" {
+		return rtgTargetLinuxArm
+	}
 	return 0
 }
 
@@ -33,15 +43,34 @@ func rtgPrintErr(s string) {
 	write(2, []byte(s), -1)
 }
 
+func rtgPrintIntErr(v int) {
+	if v == 0 {
+		rtgPrintErr("0")
+		return
+	}
+	if v < 0 {
+		rtgPrintErr("-")
+		v = -v
+	}
+	var digits []byte
+	for v > 0 {
+		digits = append(digits, byte('0'+v%10))
+		v = v / 10
+	}
+	for i := len(digits) - 1; i >= 0; i-- {
+		write(2, digits[i:i+1], -1)
+	}
+}
+
 func rtgPrintUsage() {
-	rtgPrintErr("usage: rtg [-t linux/amd64|linux/386] -o <output> <input.go>...\n")
+	rtgPrintErr("usage: rtg [-t linux/amd64|linux/386|linux/aarch64|linux/arm] -o <output> <input.go>...\n")
 }
 
 func rtgPrintUnsupportedTarget(target string) {
 	rtgPrintErr("rtg: unsupported target: ")
 	rtgPrintErr(target)
 	rtgPrintErr("\n")
-	rtgPrintErr("rtg: supported targets: linux/amd64, linux/386\n")
+	rtgPrintErr("rtg: supported targets: linux/amd64, linux/386, linux/aarch64, linux/arm\n")
 }
 
 func appMain(args []string, env []string) int {
@@ -50,45 +79,48 @@ func appMain(args []string, env []string) int {
 	target := rtgTargetLinuxAmd64
 	i := 1
 	for i < len(args) {
-		if args[i] == "-o" {
+		arg := args[i]
+		if arg == "-o" {
 			i++
 			if i >= len(args) {
 				rtgPrintErr("rtg: missing argument for -o\n")
 				rtgPrintUsage()
 				return 1
 			}
-			outputPath = args[i]
+			outputArg := args[i]
+			outputPath = outputArg
 			i++
 			continue
 		}
-		if args[i] == "-t" {
+		if arg == "-t" {
 			i++
 			if i >= len(args) {
 				rtgPrintErr("rtg: missing argument for -t\n")
 				rtgPrintUsage()
 				return 1
 			}
-			target = rtgParseTargetArg(args[i])
+			targetArg := args[i]
+			target = rtgParseTargetArg(targetArg)
 			if target == 0 {
-				rtgPrintUnsupportedTarget(args[i])
+				rtgPrintUnsupportedTarget(targetArg)
 				return 1
 			}
 			i++
 			continue
 		}
-		if len(args[i]) > 0 {
-			if args[i][0] == '-' {
+		if len(arg) > 0 {
+			if arg[0] == '-' {
 				rtgPrintErr("rtg: unknown option: ")
-				rtgPrintErr(args[i])
+				rtgPrintErr(arg)
 				rtgPrintErr("\n")
 				rtgPrintUsage()
 				return 1
 			}
 		}
-		fd := rtgOpenArg(args[i], env)
+		fd := rtgOpenArg(arg, env)
 		if fd < 0 {
 			rtgPrintErr("rtg: failed to open input: ")
-			rtgPrintErr(args[i])
+			rtgPrintErr(arg)
 			rtgPrintErr("\n")
 			return 1
 		}

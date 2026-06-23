@@ -1,30 +1,27 @@
 package main
 
-const rtgLinux386CodeOffset = 0x54
-const rtgLinux386LoadAddress = 0x08048000
+const rtgLinuxArmCodeOffset = 0x54
+const rtgLinuxArmLoadAddress = 0x00010000
 
-const rtgLinux386SysReadSeq = 3
-const rtgLinux386SysWriteSeq = 4
-const rtgLinux386SysOpen = 5
-const rtgLinux386SysClose = 6
-const rtgLinux386SysFchmod = 94
-const rtgLinux386SysReadAt = 180
-const rtgLinux386SysWriteAt = 181
+const rtgLinuxArmSysReadSeq = 3
+const rtgLinuxArmSysWriteSeq = 4
+const rtgLinuxArmSysOpen = 5
+const rtgLinuxArmSysClose = 6
+const rtgLinuxArmSysFchmod = 94
+const rtgLinuxArmSysReadAt = 180
+const rtgLinuxArmSysWriteAt = 181
 
-func rtg386AsmPrepareReadWriteBuf(a *rtgAsm) {
-	rtgAsmPushRcx(a)
-	rtgAsmMovRsiRax(a)
-	rtgAsmPopRdx(a)
+func rtgArmAsmPrepareReadWriteBuf(a *rtgAsm) {
+	rtgArmAsmMovRegReg(a, rtgArmRegRsi, rtgArmRegRax)
+	rtgArmAsmMovRegReg(a, rtgArmRegRdx, rtgArmRegRcx)
 }
 
-func rtg386AsmMoveOffsetArg(a *rtgAsm) {
-	rtgAsmEmit16(a, 0xc689)
-	rtgAsmMovRaxImm(a, 0)
-	rtgAsmEmit16(a, 0xc789)
+func rtgArmAsmMoveOffsetArg(a *rtgAsm) {
+	rtgArmAsmMovRegReg(a, rtgArmRegR10, rtgArmRegRax)
 }
 
-func compileLinux386(input []int, output int) int {
-	rtgSetTarget(rtgTargetLinux386)
+func compileLinuxArm(input []int, output int) int {
+	rtgSetTarget(rtgTargetLinuxArm)
 	var src []byte
 	for i := 0; i < len(input); i++ {
 		src = rtgReadAll(input[i], src)
@@ -41,7 +38,7 @@ func compileLinux386(input []int, output int) int {
 		return 1
 	}
 	var result rtgCompileResult
-	result = rtgTryCompileScalarProgram386(&prog, &meta)
+	result = rtgTryCompileScalarProgramArm(&prog, &meta)
 	if result.ok {
 		write(output, result.data, -1)
 		return 0
@@ -50,7 +47,7 @@ func compileLinux386(input []int, output int) int {
 	return 1
 }
 
-func rtgTryCompileScalarProgram386(p *rtgProgram, meta *rtgMeta) rtgCompileResult {
+func rtgTryCompileScalarProgramArm(p *rtgProgram, meta *rtgMeta) rtgCompileResult {
 	appIndex := -1
 	for i := 0; i < len(meta.funcs); i++ {
 		if rtgBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
@@ -66,7 +63,7 @@ func rtgTryCompileScalarProgram386(p *rtgProgram, meta *rtgMeta) rtgCompileResul
 	g.meta = meta
 	a := &g.asm
 	rtgAsmInit(a)
-	a.codeOffset = rtgLinux386CodeOffset
+	a.codeOffset = rtgLinuxArmCodeOffset
 	for i := 0; i < len(meta.funcs); i++ {
 		label := rtgAsmNewLabel(a)
 		g.funcLabels = append(g.funcLabels, label)
@@ -79,7 +76,7 @@ func rtgTryCompileScalarProgram386(p *rtgProgram, meta *rtgMeta) rtgCompileResul
 		var result rtgCompileResult
 		return result
 	}
-	if !rtgEmitProgramEntryArgs386(&g, appIndex) {
+	if !rtgEmitProgramEntryArgsArm(&g, appIndex) {
 		var result rtgCompileResult
 		return result
 	}
@@ -93,14 +90,14 @@ func rtgTryCompileScalarProgram386(p *rtgProgram, meta *rtgMeta) rtgCompileResul
 			return result
 		}
 	}
-	data := rtgAsmImage386(a)
+	data := rtgAsmImageArm(a)
 	var result rtgCompileResult
 	result.data = data
 	result.ok = true
 	return result
 }
 
-func rtgEmitProgramEntryArgs386(g *rtgLinearGen, appIndex int) bool {
+func rtgEmitProgramEntryArgsArm(g *rtgLinearGen, appIndex int) bool {
 	app := &g.meta.funcs[appIndex]
 	if app.resultType != 0 && !rtgTypeIsInt(g.meta, app.resultType) {
 		return false
@@ -111,7 +108,7 @@ func rtgEmitProgramEntryArgs386(g *rtgLinearGen, appIndex int) bool {
 	g.asm.bssSize += 32768
 	envLenOff := g.asm.bssSize
 	g.asm.bssSize += 8
-	rtgAsmBuildArgvEnvSlices386(&g.asm, argsOff, envDataOff, envLenOff)
+	rtgAsmBuildArgvEnvSlicesArm(&g.asm, argsOff, envDataOff, envLenOff)
 	if app.paramCount == 0 {
 		return true
 	}
@@ -132,7 +129,7 @@ func rtgEmitProgramEntryArgs386(g *rtgLinearGen, appIndex int) bool {
 	return true
 }
 
-func rtgAsmBuildArgvEnvSlices386(a *rtgAsm, bssOff int, envOff int, envLenOff int) {
+func rtgAsmBuildArgvEnvSlicesArm(a *rtgAsm, bssOff int, envOff int, envLenOff int) {
 	loopLabel := rtgAsmNewLabel(a)
 	strlenLabel := rtgAsmNewLabel(a)
 	afterLenLabel := rtgAsmNewLabel(a)
@@ -142,87 +139,77 @@ func rtgAsmBuildArgvEnvSlices386(a *rtgAsm, bssOff int, envOff int, envLenOff in
 	envAfterLenLabel := rtgAsmNewLabel(a)
 	envDoneLabel := rtgAsmNewLabel(a)
 
-	rtgAsmEmit24(a, 0x24048b)
-	rtgAsmEmit16(a, 0xe689)
-	rtgAsmEmit3(a, 0x83, 0xc6, 0x04)
-	rtgAsmEmit8(a, 0xbf)
-	at := len(a.code)
-	rtgAsmEmit32(a, 0)
-	rtgAsmAddAbsReloc(a, at, bssOff, rtgAbsBssReloc)
-	rtgAsmEmit16(a, 0xc931)
+	rtgArmAsmLoadRegMem(a, rtgArmRegR8, rtgArmRegSp, 0, 4)
+	rtgArmAsmAddRegImm(a, rtgArmRegR9, rtgArmRegSp, 4)
+	rtgArmAsmMovRegAbs(a, rtgArmRegR10, bssOff, rtgAbsBssReloc)
+	rtgArmAsmMovRegImm(a, rtgArmRegTmp2, 0)
 	rtgAsmMarkLabel(a, loopLabel)
-	rtgAsmEmit16(a, 0xc139)
-	rtgAsmEmit16(a, 0x8d0f)
-	at = len(a.code)
-	rtgAsmEmit32(a, 0)
-	rtgAsmAddReloc(a, at, doneLabel)
-	rtgAsmEmit24(a, 0x8e148b)
-	rtgAsmEmit16(a, 0x1789)
-	rtgAsmEmit16(a, 0xdb31)
+	rtgArmAsmCmpRegReg(a, rtgArmRegTmp2, rtgArmRegR8)
+	rtgArmAsmBCondLabel(a, doneLabel, 0)
+	rtgArmAsmAddRegRegShift(a, rtgArmRegAddr, rtgArmRegR9, rtgArmRegTmp2, 2)
+	rtgArmAsmLoadRegMem(a, rtgArmRegAddr, rtgArmRegAddr, 0, 4)
+	rtgArmAsmStoreRegMem(a, rtgArmRegAddr, rtgArmRegR10, 0, 4)
+	rtgArmAsmMovRegImm(a, rtgArmRegRax, 0)
 	rtgAsmMarkLabel(a, strlenLabel)
-	rtgAsmEmit4(a, 0x80, 0x3c, 0x1a, 0x00)
-	rtgAsmJzLabel(a, afterLenLabel)
-	rtgAsmEmit8(a, 0x43)
+	rtgArmAsmAddRegReg(a, rtgArmRegTmp, rtgArmRegAddr, rtgArmRegRax)
+	rtgArmAsmLoadRegMem(a, rtgArmRegTmp, rtgArmRegTmp, 0, 1)
+	rtgArmAsmCmpRegImm(a, rtgArmRegTmp, 0)
+	rtgArmAsmBCondLabel(a, afterLenLabel, 0)
+	rtgArmAsmAddRegImm(a, rtgArmRegRax, rtgArmRegRax, 1)
 	rtgAsmJmpLabel(a, strlenLabel)
 	rtgAsmMarkLabel(a, afterLenLabel)
-	rtgAsmEmit3(a, 0x89, 0x5f, 0x08)
-	rtgAsmEmit3(a, 0x83, 0xc7, 0x10)
-	rtgAsmEmit8(a, 0x41)
+	rtgArmAsmStoreRegMem(a, rtgArmRegRax, rtgArmRegR10, 8, 4)
+	rtgArmAsmAddRegImm(a, rtgArmRegR10, rtgArmRegR10, 16)
+	rtgArmAsmAddRegImm(a, rtgArmRegTmp2, rtgArmRegTmp2, 1)
 	rtgAsmJmpLabel(a, loopLabel)
 	rtgAsmMarkLabel(a, doneLabel)
 
-	rtgAsmEmit4(a, 0x8d, 0x74, 0x86, 0x08)
-	rtgAsmEmit8(a, 0xbf)
-	at = len(a.code)
-	rtgAsmEmit32(a, 0)
-	rtgAsmAddAbsReloc(a, at, envOff, rtgAbsBssReloc)
-	rtgAsmEmit16(a, 0xc931)
+	rtgArmAsmAddRegRegShift(a, rtgArmRegR9, rtgArmRegR9, rtgArmRegR8, 2)
+	rtgArmAsmAddRegImm(a, rtgArmRegR9, rtgArmRegR9, 4)
+	rtgArmAsmMovRegAbs(a, rtgArmRegR10, envOff, rtgAbsBssReloc)
+	rtgArmAsmMovRegImm(a, rtgArmRegR9, 0)
+	rtgArmAsmLoadRegMem(a, rtgArmRegTmp2, rtgArmRegSp, 0, 4)
+	rtgArmAsmAddRegImm(a, rtgArmRegTmp2, rtgArmRegTmp2, 2)
+	rtgArmAsmAddRegRegShift(a, rtgArmRegTmp2, rtgArmRegSp, rtgArmRegTmp2, 2)
+	rtgArmAsmMovRegImm(a, rtgArmRegR9, 0)
 	rtgAsmMarkLabel(a, envLoopLabel)
-	rtgAsmEmit24(a, 0x8e148b)
-	rtgAsmEmit16(a, 0xd285)
-	rtgAsmJzLabel(a, envDoneLabel)
-	rtgAsmEmit16(a, 0x1789)
-	rtgAsmEmit16(a, 0xdb31)
+	rtgArmAsmLoadRegMem(a, rtgArmRegAddr, rtgArmRegTmp2, 0, 4)
+	rtgArmAsmCmpRegImm(a, rtgArmRegAddr, 0)
+	rtgArmAsmBCondLabel(a, envDoneLabel, 0)
+	rtgArmAsmStoreRegMem(a, rtgArmRegAddr, rtgArmRegR10, 0, 4)
+	rtgArmAsmMovRegImm(a, rtgArmRegRax, 0)
 	rtgAsmMarkLabel(a, envStrlenLabel)
-	rtgAsmEmit4(a, 0x80, 0x3c, 0x1a, 0x00)
-	rtgAsmJzLabel(a, envAfterLenLabel)
-	rtgAsmEmit8(a, 0x43)
+	rtgArmAsmAddRegReg(a, rtgArmRegTmp, rtgArmRegAddr, rtgArmRegRax)
+	rtgArmAsmLoadRegMem(a, rtgArmRegTmp, rtgArmRegTmp, 0, 1)
+	rtgArmAsmCmpRegImm(a, rtgArmRegTmp, 0)
+	rtgArmAsmBCondLabel(a, envAfterLenLabel, 0)
+	rtgArmAsmAddRegImm(a, rtgArmRegRax, rtgArmRegRax, 1)
 	rtgAsmJmpLabel(a, envStrlenLabel)
 	rtgAsmMarkLabel(a, envAfterLenLabel)
-	rtgAsmEmit3(a, 0x89, 0x5f, 0x08)
-	rtgAsmEmit3(a, 0x83, 0xc7, 0x10)
-	rtgAsmEmit8(a, 0x41)
+	rtgArmAsmStoreRegMem(a, rtgArmRegRax, rtgArmRegR10, 8, 4)
+	rtgArmAsmAddRegImm(a, rtgArmRegR10, rtgArmRegR10, 16)
+	rtgArmAsmAddRegImm(a, rtgArmRegTmp2, rtgArmRegTmp2, 4)
+	rtgArmAsmAddRegImm(a, rtgArmRegR9, rtgArmRegR9, 1)
 	rtgAsmJmpLabel(a, envLoopLabel)
 	rtgAsmMarkLabel(a, envDoneLabel)
-	rtgAsmEmit16(a, 0x0d89)
-	at = len(a.code)
-	rtgAsmEmit32(a, 0)
-	rtgAsmAddAbsReloc(a, at, envLenOff, rtgAbsBssReloc)
+	rtgArmAsmMovRegAbs(a, rtgArmRegAddr, envLenOff, rtgAbsBssReloc)
+	rtgArmAsmStoreRegMem(a, rtgArmRegR9, rtgArmRegAddr, 0, 4)
 
-	rtgAsmEmit8(a, 0xbb)
-	at = len(a.code)
-	rtgAsmEmit32(a, 0)
-	rtgAsmAddAbsReloc(a, at, bssOff, rtgAbsBssReloc)
-	rtgAsmEmit16(a, 0xc689)
-	rtgAsmEmit16(a, 0xc289)
-	rtgAsmEmit8(a, 0xb9)
-	at = len(a.code)
-	rtgAsmEmit32(a, 0)
-	rtgAsmAddAbsReloc(a, at, envOff, rtgAbsBssReloc)
-	rtgAsmEmit8(a, 0xa1)
-	at = len(a.code)
-	rtgAsmEmit32(a, 0)
-	rtgAsmAddAbsReloc(a, at, envLenOff, rtgAbsBssReloc)
-	rtgAsmEmit16(a, 0xc789)
+	rtgArmAsmMovRegAbs(a, rtgArmRegRdi, bssOff, rtgAbsBssReloc)
+	rtgArmAsmMovRegReg(a, rtgArmRegRsi, rtgArmRegR8)
+	rtgArmAsmMovRegReg(a, rtgArmRegRdx, rtgArmRegR8)
+	rtgArmAsmMovRegAbs(a, rtgArmRegRcx, envOff, rtgAbsBssReloc)
+	rtgArmAsmMovRegReg(a, rtgArmRegR8, rtgArmRegR9)
+	rtgArmAsmMovRegReg(a, rtgArmRegR9, rtgArmRegR9)
 }
 
-func rtgAsmImage386(a *rtgAsm) []byte {
-	rtgAsmPatch386(a)
+func rtgAsmImageArm(a *rtgAsm) []byte {
+	rtgAsmPatchArm(a)
 	loadFileSize := a.codeOffset + len(a.code) + len(a.data)
 	memSize := loadFileSize + a.bssSize
-	sec := rtgBuildElf32SymbolSections(a, rtgLinux386LoadAddress, a.codeOffset, loadFileSize)
+	sec := rtgBuildElf32SymbolSections(a, rtgLinuxArmLoadAddress, a.codeOffset, loadFileSize)
 	var out []byte
-	out = rtgAppendElfHeader386(out, a.codeOffset, loadFileSize, memSize, sec.shoff)
+	out = rtgAppendElfHeaderArm(out, a.codeOffset, loadFileSize, memSize, sec.shoff)
 	for i := 0; i < len(a.code); i++ {
 		out = append(out, a.code[i])
 	}
@@ -242,11 +229,11 @@ func rtgAsmImage386(a *rtgAsm) []byte {
 		out = append(out, sec.shstrtab[i])
 	}
 	out = rtgAppendUntil(out, sec.shoff)
-	out = rtgAppendElf32SectionHeaders(out, &sec, a, rtgLinux386LoadAddress)
+	out = rtgAppendElf32SectionHeaders(out, &sec, a, rtgLinuxArmLoadAddress)
 	return out
 }
 
-func rtgAsmPatch386(a *rtgAsm) {
+func rtgAsmPatchArm(a *rtgAsm) {
 	rtgAsmPatch(a)
 	for i := 0; i < len(a.absRelocs); i++ {
 		r := a.absRelocs[i]
@@ -254,12 +241,14 @@ func rtgAsmPatch386(a *rtgAsm) {
 		if r.kind == rtgAbsBssReloc {
 			target = a.dataOffset + len(a.data) + r.off
 		}
-		rtgPut32At(a.code, r.at, rtgLinux386LoadAddress+target)
+		insn := rtgGet32At(a.code, r.at)
+		reg := (insn >> 12) & 15
+		rtgArmAsmPatchMovRegImmAt(a, r.at, reg, rtgLinuxArmLoadAddress+target)
 	}
 }
 
-func rtgAppendElfHeader386(out []byte, entryOff int, fileSize int, memSize int, shoff int) []byte {
-	base := rtgLinux386LoadAddress
+func rtgAppendElfHeaderArm(out []byte, entryOff int, fileSize int, memSize int, shoff int) []byte {
+	base := rtgLinuxArmLoadAddress
 
 	out = append(out, 0x7f)
 	out = append(out, 'E')
@@ -273,12 +262,12 @@ func rtgAppendElfHeader386(out []byte, entryOff int, fileSize int, memSize int, 
 		out = append(out, 0)
 	}
 	out = rtgAppend16(out, 2)
-	out = rtgAppend16(out, 3)
+	out = rtgAppend16(out, 40)
 	out = rtgAppend32(out, 1)
 	out = rtgAppend32(out, base+entryOff)
 	out = rtgAppend32(out, 52)
 	out = rtgAppend32(out, shoff)
-	out = rtgAppend32(out, 0)
+	out = rtgAppend32(out, 0x05000000)
 	out = rtgAppend16(out, 52)
 	out = rtgAppend16(out, 32)
 	out = rtgAppend16(out, 1)

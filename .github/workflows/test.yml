@@ -9,13 +9,29 @@ permissions:
 
 jobs:
   test:
-    name: Go tests
-    runs-on: ubuntu-latest
+    name: Go tests (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-amd64
+            runner: ubuntu-latest
+            install-qemu: true
+          - name: linux-arm64
+            runner: ubuntu-24.04-arm
+            install-qemu: false
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+
+      - name: Install QEMU user emulators
+        if: matrix.install-qemu
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user
 
       - name: Set up Go
         uses: actions/setup-go@v6

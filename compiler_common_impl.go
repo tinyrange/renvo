@@ -4,9 +4,13 @@ const rtgAbsBssReloc = 1
 
 const rtgTargetLinuxAmd64 = 1
 const rtgTargetLinux386 = 2
+const rtgTargetLinuxAarch64 = 3
+const rtgTargetLinuxArm = 4
 
 const rtgArchAmd64 = 1
 const rtgArch386 = 2
+const rtgArchAarch64 = 3
+const rtgArchArm = 4
 
 var rtgTargetArch int = rtgArchAmd64
 var rtgNativeIntSize int = 8
@@ -14,6 +18,16 @@ var rtgNativeIntSize int = 8
 func rtgSetTarget(target int) {
 	if target == rtgTargetLinux386 {
 		rtgTargetArch = rtgArch386
+		rtgNativeIntSize = 4
+		return
+	}
+	if target == rtgTargetLinuxAarch64 {
+		rtgTargetArch = rtgArchAarch64
+		rtgNativeIntSize = 8
+		return
+	}
+	if target == rtgTargetLinuxArm {
+		rtgTargetArch = rtgArchArm
 		rtgNativeIntSize = 4
 		return
 	}
@@ -32,12 +46,18 @@ type rtgAbsRef struct {
 	kind int
 }
 
+type rtgAsmSymbol struct {
+	name  []byte
+	label int
+}
+
 type rtgAsm struct {
 	code       []byte
 	labelPos   []int
 	labelSet   []bool
 	relocs     []rtgLabelRef
 	absRelocs  []rtgAbsRef
+	symbols    []rtgAsmSymbol
 	data       []byte
 	bssSize    int
 	codeOffset int
@@ -50,12 +70,14 @@ func rtgAsmInit(a *rtgAsm) {
 	var labelSet []bool
 	var relocs []rtgLabelRef
 	var absRelocs []rtgAbsRef
+	var symbols []rtgAsmSymbol
 	var data []byte
 	a.code = code
 	a.labelPos = labelPos
 	a.labelSet = labelSet
 	a.relocs = relocs
 	a.absRelocs = absRelocs
+	a.symbols = symbols
 	a.data = data
 	a.bssSize = 0
 	a.codeOffset = 0
@@ -107,6 +129,14 @@ func rtgAsmAddReloc(a *rtgAsm, at int, label int) {
 	a.relocs = append(a.relocs, rtgLabelRef{at: at, label: label})
 }
 
+func rtgAsmAddFuncSymbol(a *rtgAsm, src []byte, nameStart int, nameEnd int, label int) {
+	var name []byte
+	for i := nameStart; i < nameEnd; i++ {
+		name = append(name, src[i])
+	}
+	a.symbols = append(a.symbols, rtgAsmSymbol{name: name, label: label})
+}
+
 func rtgAsmEmit32(a *rtgAsm, v int) {
 	a.code = rtgAppend32(a.code, v)
 }
@@ -127,6 +157,40 @@ func rtgAsmEmit24(a *rtgAsm, v int) {
 }
 
 func rtgAsmPatch(a *rtgAsm) {
+	if rtgTargetArch == rtgArchArm {
+		for i := 0; i < len(a.relocs); i++ {
+			r := a.relocs[i]
+			if r.label >= 0 && r.label < len(a.labelPos) && a.labelSet[r.label] {
+				target := a.labelPos[r.label]
+				disp := target - (r.at + 8)
+				insn := rtgGet32At(a.code, r.at)
+				if (insn & 0x0e000000) == 0x0a000000 {
+					rtgPut32At(a.code, r.at, (insn&0xff000000)|((disp/4)&0x00ffffff))
+				}
+			}
+		}
+		a.dataOffset = a.codeOffset + len(a.code)
+		return
+	}
+	if rtgTargetArch == rtgArchAarch64 {
+		for i := 0; i < len(a.relocs); i++ {
+			r := a.relocs[i]
+			if r.label >= 0 && r.label < len(a.labelPos) && a.labelSet[r.label] {
+				target := a.labelPos[r.label]
+				disp := target - r.at
+				insn := rtgGet32At(a.code, r.at)
+				if (insn & 0xfc000000) == 0x94000000 {
+					rtgPut32At(a.code, r.at, 0x94000000|((disp/4)&0x03ffffff))
+				} else if (insn & 0xfc000000) == 0x14000000 {
+					rtgPut32At(a.code, r.at, 0x14000000|((disp/4)&0x03ffffff))
+				} else if (insn & 0xff000010) == 0x54000000 {
+					rtgPut32At(a.code, r.at, (insn&0xff00001f)|(((disp/4)&0x7ffff)<<5))
+				}
+			}
+		}
+		a.dataOffset = a.codeOffset + len(a.code)
+		return
+	}
 	for i := 0; i < len(a.relocs); i++ {
 		r := a.relocs[i]
 		if r.label >= 0 && r.label < len(a.labelPos) && a.labelSet[r.label] {
@@ -146,6 +210,10 @@ func rtgAsmPatch(a *rtgAsm) {
 		disp := target - next
 		rtgPut32At(a.code, r.at, disp)
 	}
+}
+
+func rtgGet32At(in []byte, at int) int {
+	return int(in[at]) | (int(in[at+1]) << 8) | (int(in[at+2]) << 16) | (int(in[at+3]) << 24)
 }
 
 func rtgPut32At(out []byte, at int, v int) {
@@ -182,6 +250,303 @@ func rtgAppend64(out []byte, v int) []byte {
 	out = append(out, byte(v>>40))
 	out = append(out, byte(v>>48))
 	out = append(out, byte(v>>56))
+	return out
+}
+
+type rtgElf64SymbolSections struct {
+	symtab     []byte
+	strtab     []byte
+	shstrtab   []byte
+	symtabOff  int
+	strtabOff  int
+	shstrOff   int
+	shoff      int
+	textName   int
+	dataName   int
+	bssName    int
+	symtabName int
+	strtabName int
+	shstrName  int
+}
+
+func rtgAlignValue(v int, align int) int {
+	rem := v % align
+	if rem == 0 {
+		return v
+	}
+	return v + align - rem
+}
+
+func rtgAppendUntil(out []byte, size int) []byte {
+	for len(out) < size {
+		out = append(out, 0)
+	}
+	return out
+}
+
+func rtgAppendStringZ(out []byte, s string) []byte {
+	text := s
+	for i := 0; i < len(text); i++ {
+		out = append(out, text[i])
+	}
+	out = append(out, 0)
+	return out
+}
+
+func rtgAppendBytesZ(out []byte, s []byte) []byte {
+	for i := 0; i < len(s); i++ {
+		out = append(out, s[i])
+	}
+	out = append(out, 0)
+	return out
+}
+
+func rtgAppendElf64Sym(out []byte, name int, info int, shndx int, value int, size int) []byte {
+	out = rtgAppend32(out, name)
+	out = append(out, byte(info))
+	out = append(out, 0)
+	out = rtgAppend16(out, shndx)
+	out = rtgAppend64(out, value)
+	out = rtgAppend64(out, size)
+	return out
+}
+
+func rtgAppendElf64Shdr(out []byte, name int, typ int, flags int, addr int, off int, size int, link int, info int, align int, entsize int) []byte {
+	out = rtgAppend32(out, name)
+	out = rtgAppend32(out, typ)
+	out = rtgAppend64(out, flags)
+	out = rtgAppend64(out, addr)
+	out = rtgAppend64(out, off)
+	out = rtgAppend64(out, size)
+	out = rtgAppend32(out, link)
+	out = rtgAppend32(out, info)
+	out = rtgAppend64(out, align)
+	out = rtgAppend64(out, entsize)
+	return out
+}
+
+func rtgBuildElf64SymbolSections(a *rtgAsm, base int, entryOff int, loadFileSize int) rtgElf64SymbolSections {
+	var sec rtgElf64SymbolSections
+	sec.shstrtab = append(sec.shstrtab, 0)
+	sec.textName = len(sec.shstrtab)
+	sec.shstrtab = rtgAppendStringZ(sec.shstrtab, ".text")
+	sec.dataName = len(sec.shstrtab)
+	sec.shstrtab = rtgAppendStringZ(sec.shstrtab, ".data")
+	sec.bssName = len(sec.shstrtab)
+	sec.shstrtab = rtgAppendStringZ(sec.shstrtab, ".bss")
+	sec.symtabName = len(sec.shstrtab)
+	sec.shstrtab = rtgAppendStringZ(sec.shstrtab, ".symtab")
+	sec.strtabName = len(sec.shstrtab)
+	sec.shstrtab = rtgAppendStringZ(sec.shstrtab, ".strtab")
+	sec.shstrName = len(sec.shstrtab)
+	sec.shstrtab = rtgAppendStringZ(sec.shstrtab, ".shstrtab")
+
+	sec.strtab = append(sec.strtab, 0)
+	startName := len(sec.strtab)
+	sec.strtab = rtgAppendStringZ(sec.strtab, "_start")
+	sec.symtab = rtgAppendElf64Sym(sec.symtab, 0, 0, 0, 0, 0)
+	sec.symtab = rtgAppendElf64Sym(sec.symtab, startName, 18, 1, base+entryOff, 0)
+	for i := 0; i < len(a.symbols); i++ {
+		s := a.symbols[i]
+		if s.label >= 0 && s.label < len(a.labelPos) && a.labelSet[s.label] {
+			nameOff := len(sec.strtab)
+			sec.strtab = rtgAppendBytesZ(sec.strtab, s.name)
+			value := base + a.codeOffset + a.labelPos[s.label]
+			sec.symtab = rtgAppendElf64Sym(sec.symtab, nameOff, 18, 1, value, 0)
+		}
+	}
+
+	sec.symtabOff = rtgAlignValue(loadFileSize, 8)
+	sec.strtabOff = sec.symtabOff + len(sec.symtab)
+	sec.shstrOff = sec.strtabOff + len(sec.strtab)
+	sec.shoff = rtgAlignValue(sec.shstrOff+len(sec.shstrtab), 8)
+	return sec
+}
+
+func rtgAppendElf64SectionHeaders(out []byte, sec *rtgElf64SymbolSections, a *rtgAsm, base int) []byte {
+	codeOff := a.codeOffset
+	codeSize := len(a.code)
+	dataOff := a.dataOffset
+	dataSize := len(a.data)
+	bssSize := a.bssSize
+	symtabSize := len(sec.symtab)
+	strtabSize := len(sec.strtab)
+	shstrtabSize := len(sec.shstrtab)
+
+	out = rtgAppend32(out, 0)
+	out = rtgAppend32(out, 0)
+	out = rtgAppend64(out, 0)
+	out = rtgAppend64(out, 0)
+	out = rtgAppend64(out, 0)
+	out = rtgAppend64(out, 0)
+	out = rtgAppend32(out, 0)
+	out = rtgAppend32(out, 0)
+	out = rtgAppend64(out, 0)
+	out = rtgAppend64(out, 0)
+
+	out = rtgAppend32(out, sec.textName)
+	out = rtgAppend32(out, 1)
+	out = rtgAppend64(out, 6)
+	out = rtgAppend64(out, base+codeOff)
+	out = rtgAppend64(out, codeOff)
+	out = rtgAppend64(out, codeSize)
+	out = rtgAppend32(out, 0)
+	out = rtgAppend32(out, 0)
+	out = rtgAppend64(out, 16)
+	out = rtgAppend64(out, 0)
+
+	out = rtgAppend32(out, sec.dataName)
+	out = rtgAppend32(out, 1)
+	out = rtgAppend64(out, 3)
+	out = rtgAppend64(out, base+dataOff)
+	out = rtgAppend64(out, dataOff)
+	out = rtgAppend64(out, dataSize)
+	out = rtgAppend32(out, 0)
+	out = rtgAppend32(out, 0)
+	out = rtgAppend64(out, 8)
+	out = rtgAppend64(out, 0)
+
+	out = rtgAppend32(out, sec.bssName)
+	out = rtgAppend32(out, 8)
+	out = rtgAppend64(out, 3)
+	out = rtgAppend64(out, base+dataOff+dataSize)
+	out = rtgAppend64(out, dataOff+dataSize)
+	out = rtgAppend64(out, bssSize)
+	out = rtgAppend32(out, 0)
+	out = rtgAppend32(out, 0)
+	out = rtgAppend64(out, 8)
+	out = rtgAppend64(out, 0)
+
+	out = rtgAppend32(out, sec.symtabName)
+	out = rtgAppend32(out, 2)
+	out = rtgAppend64(out, 0)
+	out = rtgAppend64(out, 0)
+	out = rtgAppend64(out, sec.symtabOff)
+	out = rtgAppend64(out, symtabSize)
+	out = rtgAppend32(out, 5)
+	out = rtgAppend32(out, 1)
+	out = rtgAppend64(out, 8)
+	out = rtgAppend64(out, 24)
+
+	out = rtgAppend32(out, sec.strtabName)
+	out = rtgAppend32(out, 3)
+	out = rtgAppend64(out, 0)
+	out = rtgAppend64(out, 0)
+	out = rtgAppend64(out, sec.strtabOff)
+	out = rtgAppend64(out, strtabSize)
+	out = rtgAppend32(out, 0)
+	out = rtgAppend32(out, 0)
+	out = rtgAppend64(out, 1)
+	out = rtgAppend64(out, 0)
+
+	out = rtgAppend32(out, sec.shstrName)
+	out = rtgAppend32(out, 3)
+	out = rtgAppend64(out, 0)
+	out = rtgAppend64(out, 0)
+	out = rtgAppend64(out, sec.shstrOff)
+	out = rtgAppend64(out, shstrtabSize)
+	out = rtgAppend32(out, 0)
+	out = rtgAppend32(out, 0)
+	out = rtgAppend64(out, 1)
+	out = rtgAppend64(out, 0)
+	return out
+}
+
+type rtgElf32SymbolSections struct {
+	symtab     []byte
+	strtab     []byte
+	shstrtab   []byte
+	symtabOff  int
+	strtabOff  int
+	shstrOff   int
+	shoff      int
+	textName   int
+	dataName   int
+	bssName    int
+	symtabName int
+	strtabName int
+	shstrName  int
+}
+
+func rtgAppendElf32Sym(out []byte, name int, info int, shndx int, value int, size int) []byte {
+	out = rtgAppend32(out, name)
+	out = rtgAppend32(out, value)
+	out = rtgAppend32(out, size)
+	out = append(out, byte(info))
+	out = append(out, 0)
+	out = rtgAppend16(out, shndx)
+	return out
+}
+
+func rtgAppendElf32Shdr(out []byte, name int, typ int, flags int, addr int, off int, size int, link int, info int, align int, entsize int) []byte {
+	out = rtgAppend32(out, name)
+	out = rtgAppend32(out, typ)
+	out = rtgAppend32(out, flags)
+	out = rtgAppend32(out, addr)
+	out = rtgAppend32(out, off)
+	out = rtgAppend32(out, size)
+	out = rtgAppend32(out, link)
+	out = rtgAppend32(out, info)
+	out = rtgAppend32(out, align)
+	out = rtgAppend32(out, entsize)
+	return out
+}
+
+func rtgBuildElf32SymbolSections(a *rtgAsm, base int, entryOff int, loadFileSize int) rtgElf32SymbolSections {
+	var sec rtgElf32SymbolSections
+	sec.shstrtab = append(sec.shstrtab, 0)
+	sec.textName = len(sec.shstrtab)
+	sec.shstrtab = rtgAppendStringZ(sec.shstrtab, ".text")
+	sec.dataName = len(sec.shstrtab)
+	sec.shstrtab = rtgAppendStringZ(sec.shstrtab, ".data")
+	sec.bssName = len(sec.shstrtab)
+	sec.shstrtab = rtgAppendStringZ(sec.shstrtab, ".bss")
+	sec.symtabName = len(sec.shstrtab)
+	sec.shstrtab = rtgAppendStringZ(sec.shstrtab, ".symtab")
+	sec.strtabName = len(sec.shstrtab)
+	sec.shstrtab = rtgAppendStringZ(sec.shstrtab, ".strtab")
+	sec.shstrName = len(sec.shstrtab)
+	sec.shstrtab = rtgAppendStringZ(sec.shstrtab, ".shstrtab")
+
+	sec.strtab = append(sec.strtab, 0)
+	startName := len(sec.strtab)
+	sec.strtab = rtgAppendStringZ(sec.strtab, "_start")
+	sec.symtab = rtgAppendElf32Sym(sec.symtab, 0, 0, 0, 0, 0)
+	sec.symtab = rtgAppendElf32Sym(sec.symtab, startName, 18, 1, base+entryOff, 0)
+	for i := 0; i < len(a.symbols); i++ {
+		s := a.symbols[i]
+		if s.label >= 0 && s.label < len(a.labelPos) && a.labelSet[s.label] {
+			nameOff := len(sec.strtab)
+			sec.strtab = rtgAppendBytesZ(sec.strtab, s.name)
+			value := base + a.codeOffset + a.labelPos[s.label]
+			sec.symtab = rtgAppendElf32Sym(sec.symtab, nameOff, 18, 1, value, 0)
+		}
+	}
+
+	sec.symtabOff = rtgAlignValue(loadFileSize, 4)
+	sec.strtabOff = sec.symtabOff + len(sec.symtab)
+	sec.shstrOff = sec.strtabOff + len(sec.strtab)
+	sec.shoff = rtgAlignValue(sec.shstrOff+len(sec.shstrtab), 4)
+	return sec
+}
+
+func rtgAppendElf32SectionHeaders(out []byte, sec *rtgElf32SymbolSections, a *rtgAsm, base int) []byte {
+	codeOff := a.codeOffset
+	codeSize := len(a.code)
+	dataOff := a.dataOffset
+	dataSize := len(a.data)
+	bssSize := a.bssSize
+	symtabSize := len(sec.symtab)
+	strtabSize := len(sec.strtab)
+	shstrtabSize := len(sec.shstrtab)
+
+	out = rtgAppendElf32Shdr(out, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+	out = rtgAppendElf32Shdr(out, sec.textName, 1, 6, base+codeOff, codeOff, codeSize, 0, 0, 16, 0)
+	out = rtgAppendElf32Shdr(out, sec.dataName, 1, 3, base+dataOff, dataOff, dataSize, 0, 0, 4, 0)
+	out = rtgAppendElf32Shdr(out, sec.bssName, 8, 3, base+dataOff+dataSize, dataOff+dataSize, bssSize, 0, 0, 4, 0)
+	out = rtgAppendElf32Shdr(out, sec.symtabName, 2, 0, 0, sec.symtabOff, symtabSize, 5, 1, 4, 16)
+	out = rtgAppendElf32Shdr(out, sec.strtabName, 3, 0, 0, sec.strtabOff, strtabSize, 0, 0, 1, 0)
+	out = rtgAppendElf32Shdr(out, sec.shstrName, 3, 0, 0, sec.shstrOff, shstrtabSize, 0, 0, 1, 0)
 	return out
 }
 
@@ -1543,9 +1908,31 @@ func rtgParsePostfixExpr(ep *rtgExprParse) int {
 		}
 		if rtgTokCharIs(ep.prog, ep.pos, '(') {
 			callTok := ep.pos
-			var callArgs []int
 			callExpanded := false
 			ep.pos++
+			argsStart := ep.pos
+			scanPos := ep.pos
+			count := 0
+			for scanPos < ep.end && !rtgTokCharIs(ep.prog, scanPos, ')') {
+				argEnd := rtgFindExprBoundary(ep.prog, scanPos, ep.end)
+				if rtgTokCharIs(ep.prog, argEnd, '{') {
+					closeTok := rtgSkipBalanced(ep.prog, argEnd, '{', '}')
+					if closeTok > argEnd {
+						argEnd = closeTok
+					}
+				}
+				count++
+				scanPos = argEnd
+				if rtgTokCharIs(ep.prog, scanPos, ',') {
+					scanPos++
+				}
+			}
+			first := len(ep.args)
+			for i := 0; i < count; i++ {
+				ep.args = append(ep.args, 0)
+			}
+			argIndex := 0
+			ep.pos = argsStart
 			for ep.ok && ep.pos < ep.end && !rtgTokCharIs(ep.prog, ep.pos, ')') {
 				argEnd := rtgFindExprBoundary(ep.prog, ep.pos, ep.end)
 				if rtgTokCharIs(ep.prog, argEnd, '{') {
@@ -1563,7 +1950,8 @@ func rtgParsePostfixExpr(ep *rtgExprParse) int {
 				ep.end = parseEnd
 				argRoot := rtgParseBinaryExpr(ep, 1)
 				ep.end = oldEnd
-				callArgs = append(callArgs, argRoot)
+				ep.args[first+argIndex] = argRoot
+				argIndex++
 				ep.pos = argEnd
 				if rtgTokCharIs(ep.prog, ep.pos, ',') {
 					ep.pos++
@@ -1574,11 +1962,6 @@ func rtgParsePostfixExpr(ep *rtgExprParse) int {
 				return left
 			}
 			ep.pos++
-			first := len(ep.args)
-			for i := 0; i < len(callArgs); i++ {
-				ep.args = append(ep.args, callArgs[i])
-			}
-			count := len(callArgs)
 			expanded := 0
 			if callExpanded {
 				expanded = 1
@@ -3041,24 +3424,80 @@ func rtgIntTokenNeedsMovabs(p *rtgProgram, tokIndex int) bool {
 	return false
 }
 func rtgAsmMovRdxRax(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmMovRdxRax(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmMovRdxRax(a)
+		return
+	}
 	rtgAsmEmit16(a, 0x5a50)
 }
 func rtgAsmMovRcxRax(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmMovRcxRax(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmMovRcxRax(a)
+		return
+	}
 	rtgAsmEmit16(a, 0x5950)
 }
 func rtgAsmMovRcxRdx(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmMovRcxRdx(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmMovRcxRdx(a)
+		return
+	}
 	rtgAsmEmit16(a, 0x5952)
 }
 func rtgAsmPushRax(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmPushRax(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmPushRax(a)
+		return
+	}
 	rtgAsmEmit8(a, 0x50)
 }
 func rtgAsmPushRcx(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmPushRcx(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmPushRcx(a)
+		return
+	}
 	rtgAsmEmit8(a, 0x51)
 }
 func rtgAsmPushRdx(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmPushRdx(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmPushRdx(a)
+		return
+	}
 	rtgAsmEmit8(a, 0x52)
 }
 func rtgAsmPushImm(a *rtgAsm, imm int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmPushImm(a, imm)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmPushImm(a, imm)
+		return
+	}
 	if rtgAsmImmFits8Signed(imm) {
 		rtgAsmEmit2(a, 0x6a, imm)
 		return
@@ -3081,13 +3520,48 @@ func rtgAsmPushStringRegs(a *rtgAsm) {
 	rtgAsmPushRax(a)
 }
 func rtgAsmPopRax(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmPopRax(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmPopRax(a)
+		return
+	}
 	rtgAsmEmit8(a, 0x58)
 }
 func rtgAsmPopRcx(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmPopRcx(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmPopRcx(a)
+		return
+	}
 	rtgAsmEmit8(a, 0x59)
 }
 func rtgAsmPopRdx(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmPopRdx(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmPopRdx(a)
+		return
+	}
 	rtgAsmEmit8(a, 0x5a)
+}
+func rtgAsmPopRsi(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmPopRsi(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmPopRsi(a)
+		return
+	}
+	rtgAsmEmit8(a, 0x5e)
 }
 func rtgAsmStoreRaxStack(a *rtgAsm, offset int) {
 	rtgAsmStackMem(a, offset, 0x8948, 0x45, 0x85)
@@ -3111,6 +3585,9 @@ func rtgAsmLoadRdxStack(a *rtgAsm, offset int) {
 	rtgAsmStackMem(a, offset, 0x8b48, 0x55, 0x95)
 }
 func rtgAsmRdxDisp(a *rtgAsm, disp int) {
+	if rtgTargetArch == rtgArchAarch64 || rtgTargetArch == rtgArchArm {
+		return
+	}
 	if disp == 0 {
 		rtgAsmEmit8(a, 0x02)
 		return
@@ -3126,6 +3603,14 @@ func rtgAsmLoadRcxStack(a *rtgAsm, offset int) {
 	rtgAsmStackMem(a, offset, 0x8b48, 0x4d, 0x8d)
 }
 func rtgAsmStoreSliceStack(a *rtgAsm, offset int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmStoreSliceStack(a, offset)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmStoreSliceStack(a, offset)
+		return
+	}
 	rtgAsmStoreRaxStack(a, offset)
 	rtgAsmStoreRdxStack(a, offset-8)
 	rtgAsmStackMem(a, offset-16, 0x8948, 0x4d, 0x8d)
@@ -3145,9 +3630,25 @@ func rtgAsmPopStoreSliceMemRdx(a *rtgAsm, disp int) {
 	rtgAsmStoreRaxMemRdxDisp(a, disp+16)
 }
 func rtgAsmStoreAlMemRdxRcx1(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmStoreAlMemRdxRcx1(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmStoreAlMemRdxRcx1(a)
+		return
+	}
 	rtgAsmEmit24(a, 0x0a0488)
 }
 func rtgAsmStoreRaxMemRdxRcxSize(a *rtgAsm, size int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmStoreRaxMemRdxRcxSize(a, size)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmStoreRaxMemRdxRcxSize(a, size)
+		return
+	}
 	if size == 1 {
 		rtgAsmStoreAlMemRdxRcx1(a)
 		return
@@ -3163,12 +3664,36 @@ func rtgAsmStoreRaxMemRdxRcxSize(a *rtgAsm, size int) {
 	rtgAsmStoreRaxMemRdxRcx8(a)
 }
 func rtgAsmIncRcx(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmIncRcx(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmIncRcx(a)
+		return
+	}
 	rtgAsmEmit16(a, 0xc1ff)
 }
 func rtgAsmIncRax(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmIncRax(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmIncRax(a)
+		return
+	}
 	rtgAsmEmit16(a, 0xc0ff)
 }
 func rtgAsmImulRcxImm(a *rtgAsm, imm int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmImulRcxImm(a, imm)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmImulRcxImm(a, imm)
+		return
+	}
 	if rtgAsmImmFits8Signed(imm) {
 		rtgAsmEmit3(a, 0x6b, 0xc9, imm)
 		return
@@ -3177,30 +3702,78 @@ func rtgAsmImulRcxImm(a *rtgAsm, imm int) {
 	rtgAsmEmit32(a, imm)
 }
 func rtgAsmRet(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmRet(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmRet(a)
+		return
+	}
 	rtgAsmEmit8(a, 0xc3)
 }
 func rtgAsmLeave(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmLeave(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmLeave(a)
+		return
+	}
 	rtgAsmEmit8(a, 0xc9)
 }
 func rtgAsmCallLabel(a *rtgAsm, label int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmCallLabel(a, label)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmCallLabel(a, label)
+		return
+	}
 	rtgAsmEmit8(a, 0xe8)
 	at := len(a.code)
 	rtgAsmEmit32(a, 0)
 	rtgAsmAddReloc(a, at, label)
 }
 func rtgAsmJmpLabel(a *rtgAsm, label int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmJmpLabel(a, label)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmJmpLabel(a, label)
+		return
+	}
 	rtgAsmEmit8(a, 0xe9)
 	at := len(a.code)
 	rtgAsmEmit32(a, 0)
 	rtgAsmAddReloc(a, at, label)
 }
 func rtgAsmJzLabel(a *rtgAsm, label int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmJzLabel(a, label)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmJzLabel(a, label)
+		return
+	}
 	rtgAsmEmit16(a, 0x840f)
 	at := len(a.code)
 	rtgAsmEmit32(a, 0)
 	rtgAsmAddReloc(a, at, label)
 }
 func rtgAsmJnzLabel(a *rtgAsm, label int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmJnzLabel(a, label)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmJnzLabel(a, label)
+		return
+	}
 	rtgAsmEmit16(a, 0x850f)
 	at := len(a.code)
 	rtgAsmEmit32(a, 0)
@@ -3305,6 +3878,11 @@ func rtgEmitLinearRange(g *rtgLinearGen, start int, end int) bool {
 		lastKind = stmt.kind
 		i = next
 		if !rtgEmitLinearStmt(g, &stmt) {
+			rtgPrintErr("rtg: statement failed near line ")
+			rtgPrintIntErr(bp.prog.toks[stmt.startTok].line)
+			rtgPrintErr("\n")
+			write(2, bp.prog.src[bp.prog.toks[stmt.startTok].start:bp.prog.toks[stmt.endTok-1].end], -1)
+			rtgPrintErr("\n")
 			return false
 		}
 	}
@@ -3342,9 +3920,15 @@ func rtgEmitLinearStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 		rootIndex := len(ep.exprs) - 1
 		root := &ep.exprs[rootIndex]
 		if root.kind != rtgExprCall {
+			if rtgTargetArch == rtgArchAarch64 {
+				rtgPrintErr("rtg: aarch64 expr stmt root not call\n")
+			}
 			return false
 		}
 		if !rtgEmitIntExpr(g, &ep, rootIndex) {
+			if rtgTargetArch == rtgArchAarch64 {
+				rtgPrintErr("rtg: aarch64 expr stmt call emission failed\n")
+			}
 			return false
 		}
 		return true
@@ -3792,6 +4376,18 @@ func rtgEmitLinearIncDec(g *rtgLinearGen, start int, end int) bool {
 	if root.kind == rtgExprIdent {
 		localOffset := rtgFindLocalOffset(g, root.nameStart, root.nameEnd)
 		if localOffset >= 0 {
+			if rtgTargetArch == rtgArchAarch64 || rtgTargetArch == rtgArchArm {
+				rtgAsmLoadRaxStack(a, localOffset)
+				rtgAsmPushImm(a, 1)
+				rtgAsmPopRcx(a)
+				if inc {
+					rtgAsmAddRaxRcx(a)
+				} else {
+					rtgAsmSubRaxRcx(a)
+				}
+				rtgAsmStoreRaxStack(a, localOffset)
+				return true
+			}
 			rtgAsmEmit16(a, 0xff48)
 			if localOffset >= 0 && localOffset <= 128 {
 				if inc {
@@ -3813,6 +4409,18 @@ func rtgEmitLinearIncDec(g *rtgLinearGen, start int, end int) bool {
 		globalOffset := rtgFindGlobalOffset(g, root.nameStart, root.nameEnd)
 		if globalOffset < 0 {
 			return false
+		}
+		if rtgTargetArch == rtgArchAarch64 || rtgTargetArch == rtgArchArm {
+			rtgAsmLoadRaxBss(a, globalOffset)
+			rtgAsmPushImm(a, 1)
+			rtgAsmPopRcx(a)
+			if inc {
+				rtgAsmAddRaxRcx(a)
+			} else {
+				rtgAsmSubRaxRcx(a)
+			}
+			rtgAsmStoreRaxBss(a, globalOffset)
+			return true
 		}
 		if inc {
 			rtgAsmEmit24(a, 0x05ff48)
@@ -3934,6 +4542,54 @@ func rtgEmitJumpIfTrue(g *rtgLinearGen, ep *rtgExprParse, idx int, trueLabel int
 	return true
 }
 func rtgEmitCompareJumpOp(a *rtgAsm, c0 byte, c1 byte, label int, jumpIfTrue bool) {
+	if rtgTargetArch == rtgArchAarch64 || rtgTargetArch == rtgArchArm {
+		cond := 0
+		if c0 == '=' {
+			if jumpIfTrue {
+				cond = 0
+			} else {
+				cond = 1
+			}
+		} else if c0 == '!' {
+			if jumpIfTrue {
+				cond = 1
+			} else {
+				cond = 0
+			}
+		} else if c0 == '<' {
+			if c1 == '=' {
+				if jumpIfTrue {
+					cond = 13
+				} else {
+					cond = 12
+				}
+			} else {
+				if jumpIfTrue {
+					cond = 11
+				} else {
+					cond = 10
+				}
+			}
+		} else if c1 == '=' {
+			if jumpIfTrue {
+				cond = 10
+			} else {
+				cond = 11
+			}
+		} else {
+			if jumpIfTrue {
+				cond = 12
+			} else {
+				cond = 13
+			}
+		}
+		if rtgTargetArch == rtgArchArm {
+			rtgArmAsmBCondLabel(a, label, cond)
+		} else {
+			rtgAarch64AsmBCondLabel(a, label, cond)
+		}
+		return
+	}
 	op := 0
 	if c0 == '=' {
 		if jumpIfTrue {
@@ -5546,7 +6202,12 @@ func rtgEmitCopyStackToMemRdx(g *rtgLinearGen, srcOffset int, destDisp int, size
 		if destDisp != 0 {
 			rtgAsmAddRdxImm(a, destDisp)
 		}
-		rtgAsmEmit16(a, 0x5f52)
+		rtgAsmPushRdx(a)
+		if rtgTargetArch == rtgArch386 {
+			rtgAsmEmit8(a, 0x5f)
+		} else {
+			rtgAsmPopRdi(a)
+		}
 		rtgAsmLeaRsiStack(a, srcOffset)
 		rtgAsmMovRdxImm(a, size/8)
 		rtgAsmCallLabel(a, label)
@@ -5562,7 +6223,8 @@ func rtgEmitCopyMemRdxToStack(g *rtgLinearGen, destOffset int, size int) {
 	if size > 16 {
 		label := rtgEnsureCopyWordsHelper(g)
 		rtgAsmLeaRdiStack(a, destOffset)
-		rtgAsmEmit16(a, 0x5e52)
+		rtgAsmPushRdx(a)
+		rtgAsmPopRsi(a)
 		rtgAsmMovRdxImm(a, size/8)
 		rtgAsmCallLabel(a, label)
 		return
@@ -5620,15 +6282,25 @@ func rtgEmitStructCallToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, destTy
 	e := &ep.exprs[idx]
 	fnIndex := rtgFuncInfoFromCall(g, ep, e.left)
 	if fnIndex < 0 || !rtgTypeIsStruct(g.meta, g.meta.funcs[fnIndex].resultType) {
+		if rtgTargetArch == rtgArchAarch64 {
+			rtgPrintErr("rtg: aarch64 struct call target rejected\n")
+		}
 		return false
 	}
 	if rtgTypeSize(g.meta, destType) != rtgTypeSize(g.meta, g.meta.funcs[fnIndex].resultType) {
+		if rtgTargetArch == rtgArchAarch64 {
+			rtgPrintErr("rtg: aarch64 struct call size mismatch\n")
+		}
 		return false
 	}
 	wordCount := 1
 	for i := e.argCount - 1; i >= 0; i-- {
-		words := rtgEmitCallArgReverse(g, ep, ep.args[e.firstArg+i])
+		argIndex := ep.args[e.firstArg+i]
+		words := rtgEmitCallArgReverse(g, ep, argIndex)
 		if words < 0 {
+			if rtgTargetArch == rtgArchAarch64 {
+				rtgPrintErr("rtg: aarch64 struct call argument failed\n")
+			}
 			return false
 		}
 		wordCount += words
@@ -5642,9 +6314,15 @@ func rtgEmitUserCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	e := &ep.exprs[idx]
 	fnIndex := rtgFuncInfoFromCall(g, ep, e.left)
 	if fnIndex < 0 {
+		if rtgTargetArch == rtgArchAarch64 {
+			rtgPrintErr("rtg: aarch64 user call target not found\n")
+		}
 		return rtgEmitNamedConversionCall(g, ep, idx)
 	}
 	if fnIndex >= len(g.funcLabels) {
+		if rtgTargetArch == rtgArchAarch64 {
+			rtgPrintErr("rtg: aarch64 user call label missing\n")
+		}
 		return false
 	}
 	firstArg := e.firstArg
@@ -5681,16 +6359,24 @@ func rtgEmitUserCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		}
 		wordCount = 3
 		for i := fixed - 1; i >= 0; i-- {
-			words := rtgEmitCallArgReverse(g, ep, ep.args[firstArg+i])
+			argIndex := ep.args[firstArg+i]
+			words := rtgEmitCallArgReverse(g, ep, argIndex)
 			if words < 0 {
+				if rtgTargetArch == rtgArchAarch64 {
+					rtgPrintErr("rtg: aarch64 user call arg failed\n")
+				}
 				return false
 			}
 			wordCount += words
 		}
 	} else {
 		for i := argCount - 1; i >= 0; i-- {
-			words := rtgEmitCallArgReverse(g, ep, ep.args[firstArg+i])
+			argIndex := ep.args[firstArg+i]
+			words := rtgEmitCallArgReverse(g, ep, argIndex)
 			if words < 0 {
+				if rtgTargetArch == rtgArchAarch64 {
+					rtgPrintErr("rtg: aarch64 user call arg failed\n")
+				}
 				return false
 			}
 			wordCount += words
@@ -6475,6 +7161,26 @@ func rtgEmitEnsureMemSlice(g *rtgLinearGen, elemSize int) {
 	rtgAsmStoreRaxMemRdxDisp(a, 16)
 	rtgAsmMarkLabel(a, okLabel)
 }
+func rtgEmitEnsureLocalSlice(g *rtgLinearGen, offset int, elemSize int) {
+	a := &g.asm
+	if elemSize < 1 {
+		elemSize = 8
+	}
+	okLabel := rtgAsmNewLabel(a)
+	rtgAsmLoadRaxStack(a, offset)
+	rtgAsmCmpRaxImm8(a, 0)
+	rtgAsmJnzLabel(a, okLabel)
+	backingSize := 2097152
+	backingOff := g.asm.bssSize
+	g.asm.bssSize += backingSize
+	rtgAsmMovRaxBssAddr(a, backingOff)
+	rtgAsmStoreRaxStack(a, offset)
+	rtgAsmMovRaxImm(a, 0)
+	rtgAsmStoreRaxStack(a, offset-8)
+	rtgAsmMovRaxImm(a, backingSize/elemSize)
+	rtgAsmStoreRaxStack(a, offset-16)
+	rtgAsmMarkLabel(a, okLabel)
+}
 func rtgEmitAppendStructCompositeTokens(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSliceLocation, elemType int, typeTok int) bool {
 	p := g.prog
 	openTok := typeTok + 1
@@ -6583,7 +7289,7 @@ func rtgEmitStringCompare(g *rtgLinearGen, ep *rtgExprParse, left int, right int
 	rtgAsmMovRcxRdx(a)
 	rtgAsmMovRdxRax(a)
 	rtgAsmPopRdi(a)
-	rtgAsmEmit8(a, 0x5e)
+	rtgAsmPopRsi(a)
 	rtgAsmCallLabel(a, label)
 	if notEqual {
 		rtgAsmBoolNotRax(a)
@@ -7148,18 +7854,38 @@ func rtgFuncInfoFromCall(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 
 // Architecture target dispatch wrappers.
 func rtgEmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
+	if rtgTargetArch == rtgArchAarch64 {
+		return rtgAarch64EmitScalarFunction(g, fnInfoIndex)
+	}
+	if rtgTargetArch == rtgArchArm {
+		return rtgArmEmitScalarFunction(g, fnInfoIndex)
+	}
 	if rtgTargetArch == rtgArch386 {
 		return rtg386EmitScalarFunction(g, fnInfoIndex)
 	}
 	return rtgAmd64EmitScalarFunction(g, fnInfoIndex)
 }
 func rtgStoreParamWord(g *rtgLinearGen, reg int, offset int) bool {
+	if rtgTargetArch == rtgArchAarch64 {
+		return rtgAarch64StoreParamWord(g, reg, offset)
+	}
+	if rtgTargetArch == rtgArchArm {
+		return rtgArmStoreParamWord(g, reg, offset)
+	}
 	if rtgTargetArch == rtgArch386 {
 		return rtg386StoreParamWord(g, reg, offset)
 	}
 	return rtgAmd64StoreParamWord(g, reg, offset)
 }
 func rtgAsmMovRaxImm(a *rtgAsm, imm int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmMovRaxImm(a, imm)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmMovRaxImm(a, imm)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmMovRaxImm(a, imm)
 		return
@@ -7167,6 +7893,14 @@ func rtgAsmMovRaxImm(a *rtgAsm, imm int) {
 	rtgAmd64AsmMovRaxImm(a, imm)
 }
 func rtgAsmMovRaxImm64(a *rtgAsm, imm int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmMovRaxImm64(a, imm)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmMovRaxImm64(a, imm)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmMovRaxImm64(a, imm)
 		return
@@ -7174,6 +7908,14 @@ func rtgAsmMovRaxImm64(a *rtgAsm, imm int) {
 	rtgAmd64AsmMovRaxImm64(a, imm)
 }
 func rtgAsmMovRdxImm(a *rtgAsm, imm int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmMovRdxImm(a, imm)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmMovRdxImm(a, imm)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmMovRdxImm(a, imm)
 		return
@@ -7181,6 +7923,14 @@ func rtgAsmMovRdxImm(a *rtgAsm, imm int) {
 	rtgAmd64AsmMovRdxImm(a, imm)
 }
 func rtgAsmMovRaxDataAddr(a *rtgAsm, dataOff int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmMovRaxDataAddr(a, dataOff)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmMovRaxDataAddr(a, dataOff)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmMovRaxDataAddr(a, dataOff)
 		return
@@ -7188,6 +7938,14 @@ func rtgAsmMovRaxDataAddr(a *rtgAsm, dataOff int) {
 	rtgAmd64AsmMovRaxDataAddr(a, dataOff)
 }
 func rtgAsmMovRaxBssAddr(a *rtgAsm, bssOff int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmMovRaxBssAddr(a, bssOff)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmMovRaxBssAddr(a, bssOff)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmMovRaxBssAddr(a, bssOff)
 		return
@@ -7195,6 +7953,14 @@ func rtgAsmMovRaxBssAddr(a *rtgAsm, bssOff int) {
 	rtgAmd64AsmMovRaxBssAddr(a, bssOff)
 }
 func rtgAsmMovR10BssAddr(a *rtgAsm, bssOff int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmMovR10BssAddr(a, bssOff)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmMovR10BssAddr(a, bssOff)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmMovR10BssAddr(a, bssOff)
 		return
@@ -7202,6 +7968,14 @@ func rtgAsmMovR10BssAddr(a *rtgAsm, bssOff int) {
 	rtgAmd64AsmMovR10BssAddr(a, bssOff)
 }
 func rtgAsmLoadRaxBss(a *rtgAsm, bssOff int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmLoadRaxBss(a, bssOff)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmLoadRaxBss(a, bssOff)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmLoadRaxBss(a, bssOff)
 		return
@@ -7209,6 +7983,14 @@ func rtgAsmLoadRaxBss(a *rtgAsm, bssOff int) {
 	rtgAmd64AsmLoadRaxBss(a, bssOff)
 }
 func rtgAsmStoreRaxBss(a *rtgAsm, bssOff int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmStoreRaxBss(a, bssOff)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmStoreRaxBss(a, bssOff)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmStoreRaxBss(a, bssOff)
 		return
@@ -7216,6 +7998,14 @@ func rtgAsmStoreRaxBss(a *rtgAsm, bssOff int) {
 	rtgAmd64AsmStoreRaxBss(a, bssOff)
 }
 func rtgAsmMovRdiRax(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmMovRdiRax(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmMovRdiRax(a)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmMovRdiRax(a)
 		return
@@ -7223,6 +8013,14 @@ func rtgAsmMovRdiRax(a *rtgAsm) {
 	rtgAmd64AsmMovRdiRax(a)
 }
 func rtgAsmMovRaxRdx(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmMovRaxRdx(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmMovRaxRdx(a)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmMovRaxRdx(a)
 		return
@@ -7230,6 +8028,14 @@ func rtgAsmMovRaxRdx(a *rtgAsm) {
 	rtgAmd64AsmMovRaxRdx(a)
 }
 func rtgAsmMovRsiRax(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmMovRsiRax(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmMovRsiRax(a)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmMovRsiRax(a)
 		return
@@ -7237,6 +8043,14 @@ func rtgAsmMovRsiRax(a *rtgAsm) {
 	rtgAmd64AsmMovRsiRax(a)
 }
 func rtgAsmMovR8Rax(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmMovR8Rax(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmMovR8Rax(a)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmMovR8Rax(a)
 		return
@@ -7244,6 +8058,14 @@ func rtgAsmMovR8Rax(a *rtgAsm) {
 	rtgAmd64AsmMovR8Rax(a)
 }
 func rtgAsmMovR9Rax(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmMovR9Rax(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmMovR9Rax(a)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmMovR9Rax(a)
 		return
@@ -7251,6 +8073,14 @@ func rtgAsmMovR9Rax(a *rtgAsm) {
 	rtgAmd64AsmMovR9Rax(a)
 }
 func rtgAsmAddRdxRcx(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmAddRdxRcx(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmAddRdxRcx(a)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmAddRdxRcx(a)
 		return
@@ -7258,6 +8088,14 @@ func rtgAsmAddRdxRcx(a *rtgAsm) {
 	rtgAmd64AsmAddRdxRcx(a)
 }
 func rtgAsmSyscall(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmSyscall(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmSyscall(a)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmSyscall(a)
 		return
@@ -7265,6 +8103,14 @@ func rtgAsmSyscall(a *rtgAsm) {
 	rtgAmd64AsmSyscall(a)
 }
 func rtgAsmPopRdi(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmPopRdi(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmPopRdi(a)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmPopRdi(a)
 		return
@@ -7272,6 +8118,14 @@ func rtgAsmPopRdi(a *rtgAsm) {
 	rtgAmd64AsmPopRdi(a)
 }
 func rtgAsmStackMem(a *rtgAsm, offset int, base int, disp8 int, disp32 int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmStackMem(a, offset, base, disp8, disp32)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmStackMem(a, offset, base, disp8, disp32)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmStackMem(a, offset, base, disp8, disp32)
 		return
@@ -7279,6 +8133,14 @@ func rtgAsmStackMem(a *rtgAsm, offset int, base int, disp8 int, disp32 int) {
 	rtgAmd64AsmStackMem(a, offset, base, disp8, disp32)
 }
 func rtgAsmAddRdxImm(a *rtgAsm, imm int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmAddRdxImm(a, imm)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmAddRdxImm(a, imm)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmAddRdxImm(a, imm)
 		return
@@ -7286,6 +8148,14 @@ func rtgAsmAddRdxImm(a *rtgAsm, imm int) {
 	rtgAmd64AsmAddRdxImm(a, imm)
 }
 func rtgAsmMemDisp(a *rtgAsm, disp int, op int, disp8 int, disp32 int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmMemDisp(a, disp, op, disp8, disp32)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmMemDisp(a, disp, op, disp8, disp32)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmMemDisp(a, disp, op, disp8, disp32)
 		return
@@ -7293,6 +8163,14 @@ func rtgAsmMemDisp(a *rtgAsm, disp int, op int, disp8 int, disp32 int) {
 	rtgAmd64AsmMemDisp(a, disp, op, disp8, disp32)
 }
 func rtgAsmLoadQwordRaxIndexRcx8(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmLoadQwordRaxIndexRcx8(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmLoadQwordRaxIndexRcx8(a)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmLoadQwordRaxIndexRcx8(a)
 		return
@@ -7300,6 +8178,14 @@ func rtgAsmLoadQwordRaxIndexRcx8(a *rtgAsm) {
 	rtgAmd64AsmLoadQwordRaxIndexRcx8(a)
 }
 func rtgAsmLoadQwordRaxIndexRcxDisp(a *rtgAsm, disp int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmLoadQwordRaxIndexRcxDisp(a, disp)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmLoadQwordRaxIndexRcxDisp(a, disp)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmLoadQwordRaxIndexRcxDisp(a, disp)
 		return
@@ -7307,6 +8193,14 @@ func rtgAsmLoadQwordRaxIndexRcxDisp(a *rtgAsm, disp int) {
 	rtgAmd64AsmLoadQwordRaxIndexRcxDisp(a, disp)
 }
 func rtgAsmLoadRaxMemRdxDisp(a *rtgAsm, disp int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmLoadRaxMemRdxDisp(a, disp)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmLoadRaxMemRdxDisp(a, disp)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmLoadRaxMemRdxDisp(a, disp)
 		return
@@ -7314,6 +8208,14 @@ func rtgAsmLoadRaxMemRdxDisp(a *rtgAsm, disp int) {
 	rtgAmd64AsmLoadRaxMemRdxDisp(a, disp)
 }
 func rtgAsmLoadRaxMemRdxDispSize(a *rtgAsm, disp int, size int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmLoadRaxMemRdxDispSize(a, disp, size)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmLoadRaxMemRdxDispSize(a, disp, size)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmLoadRaxMemRdxDispSize(a, disp, size)
 		return
@@ -7321,6 +8223,14 @@ func rtgAsmLoadRaxMemRdxDispSize(a *rtgAsm, disp int, size int) {
 	rtgAmd64AsmLoadRaxMemRdxDispSize(a, disp, size)
 }
 func rtgAsmLoadByteRaxIndexRcx(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmLoadByteRaxIndexRcx(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmLoadByteRaxIndexRcx(a)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmLoadByteRaxIndexRcx(a)
 		return
@@ -7328,6 +8238,14 @@ func rtgAsmLoadByteRaxIndexRcx(a *rtgAsm) {
 	rtgAmd64AsmLoadByteRaxIndexRcx(a)
 }
 func rtgAsmLoadRaxIndexRcxSize(a *rtgAsm, size int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmLoadRaxIndexRcxSize(a, size)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmLoadRaxIndexRcxSize(a, size)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmLoadRaxIndexRcxSize(a, size)
 		return
@@ -7335,6 +8253,14 @@ func rtgAsmLoadRaxIndexRcxSize(a *rtgAsm, size int) {
 	rtgAmd64AsmLoadRaxIndexRcxSize(a, size)
 }
 func rtgAsmStoreRaxMemRdxRcx8(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmStoreRaxMemRdxRcx8(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmStoreRaxMemRdxRcx8(a)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmStoreRaxMemRdxRcx8(a)
 		return
@@ -7342,6 +8268,14 @@ func rtgAsmStoreRaxMemRdxRcx8(a *rtgAsm) {
 	rtgAmd64AsmStoreRaxMemRdxRcx8(a)
 }
 func rtgAsmStoreRaxMemRdxDisp(a *rtgAsm, disp int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmStoreRaxMemRdxDisp(a, disp)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmStoreRaxMemRdxDisp(a, disp)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmStoreRaxMemRdxDisp(a, disp)
 		return
@@ -7349,6 +8283,14 @@ func rtgAsmStoreRaxMemRdxDisp(a *rtgAsm, disp int) {
 	rtgAmd64AsmStoreRaxMemRdxDisp(a, disp)
 }
 func rtgAsmStoreRaxMemRdxDispSize(a *rtgAsm, disp int, size int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmStoreRaxMemRdxDispSize(a, disp, size)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmStoreRaxMemRdxDispSize(a, disp, size)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmStoreRaxMemRdxDispSize(a, disp, size)
 		return
@@ -7356,6 +8298,14 @@ func rtgAsmStoreRaxMemRdxDispSize(a *rtgAsm, disp int, size int) {
 	rtgAmd64AsmStoreRaxMemRdxDispSize(a, disp, size)
 }
 func rtgAsmNormalizeRaxForKind(a *rtgAsm, kind int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmNormalizeRaxForKind(a, kind)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmNormalizeRaxForKind(a, kind)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmNormalizeRaxForKind(a, kind)
 		return
@@ -7363,6 +8313,14 @@ func rtgAsmNormalizeRaxForKind(a *rtgAsm, kind int) {
 	rtgAmd64AsmNormalizeRaxForKind(a, kind)
 }
 func rtgAsmIncMemRdx(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmIncMemRdx(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmIncMemRdx(a)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmIncMemRdx(a)
 		return
@@ -7370,6 +8328,14 @@ func rtgAsmIncMemRdx(a *rtgAsm) {
 	rtgAmd64AsmIncMemRdx(a)
 }
 func rtgAsmDecMemRdx(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmDecMemRdx(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmDecMemRdx(a)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmDecMemRdx(a)
 		return
@@ -7377,6 +8343,14 @@ func rtgAsmDecMemRdx(a *rtgAsm) {
 	rtgAmd64AsmDecMemRdx(a)
 }
 func rtgAsmBoolNotRax(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmBoolNotRax(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmBoolNotRax(a)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmBoolNotRax(a)
 		return
@@ -7384,6 +8358,14 @@ func rtgAsmBoolNotRax(a *rtgAsm) {
 	rtgAmd64AsmBoolNotRax(a)
 }
 func rtgAsmCmpRaxImm8(a *rtgAsm, imm int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmCmpRaxImm8(a, imm)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmCmpRaxImm8(a, imm)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmCmpRaxImm8(a, imm)
 		return
@@ -7391,6 +8373,14 @@ func rtgAsmCmpRaxImm8(a *rtgAsm, imm int) {
 	rtgAmd64AsmCmpRaxImm8(a, imm)
 }
 func rtgAsmAddRaxRcx(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmAddRaxRcx(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmAddRaxRcx(a)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmAddRaxRcx(a)
 		return
@@ -7398,6 +8388,14 @@ func rtgAsmAddRaxRcx(a *rtgAsm) {
 	rtgAmd64AsmAddRaxRcx(a)
 }
 func rtgAsmSubRaxRcx(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmSubRaxRcx(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmSubRaxRcx(a)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmSubRaxRcx(a)
 		return
@@ -7405,6 +8403,14 @@ func rtgAsmSubRaxRcx(a *rtgAsm) {
 	rtgAmd64AsmSubRaxRcx(a)
 }
 func rtgAsmShlRcxImm(a *rtgAsm, imm int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmShlRcxImm(a, imm)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmShlRcxImm(a, imm)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmShlRcxImm(a, imm)
 		return
@@ -7412,6 +8418,14 @@ func rtgAsmShlRcxImm(a *rtgAsm, imm int) {
 	rtgAmd64AsmShlRcxImm(a, imm)
 }
 func rtgAsmShlRaxImm(a *rtgAsm, imm int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmShlRaxImm(a, imm)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmShlRaxImm(a, imm)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmShlRaxImm(a, imm)
 		return
@@ -7419,6 +8433,14 @@ func rtgAsmShlRaxImm(a *rtgAsm, imm int) {
 	rtgAmd64AsmShlRaxImm(a, imm)
 }
 func rtgAsmSarRaxImm(a *rtgAsm, imm int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmSarRaxImm(a, imm)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmSarRaxImm(a, imm)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmSarRaxImm(a, imm)
 		return
@@ -7426,6 +8448,14 @@ func rtgAsmSarRaxImm(a *rtgAsm, imm int) {
 	rtgAmd64AsmSarRaxImm(a, imm)
 }
 func rtgAsmDivLeftRcxRightRax(a *rtgAsm, mod bool) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmDivLeftRcxRightRax(a, mod)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmDivLeftRcxRightRax(a, mod)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmDivLeftRcxRightRax(a, mod)
 		return
@@ -7433,6 +8463,14 @@ func rtgAsmDivLeftRcxRightRax(a *rtgAsm, mod bool) {
 	rtgAmd64AsmDivLeftRcxRightRax(a, mod)
 }
 func rtgAsmCmpRcxRaxSet(a *rtgAsm, setcc int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmCmpRcxRaxSet(a, setcc)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmCmpRcxRaxSet(a, setcc)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmCmpRcxRaxSet(a, setcc)
 		return
@@ -7446,6 +8484,12 @@ func rtgEmitSwitchStringCaseTest(g *rtgLinearGen, valueOffset int, lenOffset int
 	return rtgAmd64EmitSwitchStringCaseTest(g, valueOffset, lenOffset, ep, idx, matchLabel)
 }
 func rtgEmitRaxRcxOp(g *rtgLinearGen, tok int) bool {
+	if rtgTargetArch == rtgArchAarch64 {
+		return rtgAarch64EmitRaxRcxOp(g, tok)
+	}
+	if rtgTargetArch == rtgArchArm {
+		return rtgArmEmitRaxRcxOp(g, tok)
+	}
 	if rtgTargetArch == rtgArch386 {
 		return rtg386EmitRaxRcxOp(g, tok)
 	}
@@ -7482,6 +8526,14 @@ func rtgEmitNamedConversionCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool
 	return rtgAmd64EmitNamedConversionCall(g, ep, idx)
 }
 func rtgEmitCallWithWordCount(g *rtgLinearGen, fnIndex int, wordCount int) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64EmitCallWithWordCount(g, fnIndex, wordCount)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmEmitCallWithWordCount(g, fnIndex, wordCount)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386EmitCallWithWordCount(g, fnIndex, wordCount)
 		return
@@ -7495,48 +8547,93 @@ func rtgEmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	return rtgAmd64EmitIntExpr(g, ep, idx)
 }
 func rtgEmitFloatBinaryExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	if rtgTargetArch == rtgArchAarch64 {
+		return rtgAarch64EmitFloatBinaryExpr(g, ep, idx)
+	}
+	if rtgTargetArch == rtgArchArm {
+		return rtgArmEmitFloatBinaryExpr(g, ep, idx)
+	}
 	if rtgTargetArch == rtgArch386 {
 		return rtg386EmitFloatBinaryExpr(g, ep, idx)
 	}
 	return rtgAmd64EmitFloatBinaryExpr(g, ep, idx)
 }
 func rtgEmitSliceSlotAddrs(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSliceLocation, elemSize int) bool {
+	if rtgTargetArch == rtgArchArm {
+		return rtgArmEmitSliceSlotAddrs(g, locEp, loc, elemSize)
+	}
 	if rtgTargetArch == rtgArch386 {
 		return rtg386EmitSliceSlotAddrs(g, locEp, loc, elemSize)
 	}
 	return rtgAmd64EmitSliceSlotAddrs(g, locEp, loc, elemSize)
 }
 func rtgEnsureAppendAddrHelper(g *rtgLinearGen) int {
+	if rtgTargetArch == rtgArchAarch64 {
+		return rtgAarch64EnsureAppendAddrHelper(g)
+	}
+	if rtgTargetArch == rtgArchArm {
+		return rtgArmEnsureAppendAddrHelper(g)
+	}
 	if rtgTargetArch == rtgArch386 {
 		return rtg386EnsureAppendAddrHelper(g)
 	}
 	return rtgAmd64EnsureAppendAddrHelper(g)
 }
 func rtgEnsureAppend8Helper(g *rtgLinearGen) int {
+	if rtgTargetArch == rtgArchAarch64 {
+		return rtgAarch64EnsureAppend8Helper(g)
+	}
+	if rtgTargetArch == rtgArchArm {
+		return rtgArmEnsureAppend8Helper(g)
+	}
 	if rtgTargetArch == rtgArch386 {
 		return rtg386EnsureAppend8Helper(g)
 	}
 	return rtgAmd64EnsureAppend8Helper(g)
 }
 func rtgEnsureAppend64Helper(g *rtgLinearGen) int {
+	if rtgTargetArch == rtgArchAarch64 {
+		return rtgAarch64EnsureAppend64Helper(g)
+	}
+	if rtgTargetArch == rtgArchArm {
+		return rtgArmEnsureAppend64Helper(g)
+	}
 	if rtgTargetArch == rtgArch386 {
 		return rtg386EnsureAppend64Helper(g)
 	}
 	return rtgAmd64EnsureAppend64Helper(g)
 }
 func rtgEnsureAppendBytesHelper(g *rtgLinearGen) int {
+	if rtgTargetArch == rtgArchAarch64 {
+		return rtgAarch64EnsureAppendBytesHelper(g)
+	}
+	if rtgTargetArch == rtgArchArm {
+		return rtgArmEnsureAppendBytesHelper(g)
+	}
 	if rtgTargetArch == rtgArch386 {
 		return rtg386EnsureAppendBytesHelper(g)
 	}
 	return rtgAmd64EnsureAppendBytesHelper(g)
 }
 func rtgEnsureCopyWordsHelper(g *rtgLinearGen) int {
+	if rtgTargetArch == rtgArchAarch64 {
+		return rtgAarch64EnsureCopyWordsHelper(g)
+	}
+	if rtgTargetArch == rtgArchArm {
+		return rtgArmEnsureCopyWordsHelper(g)
+	}
 	if rtgTargetArch == rtgArch386 {
 		return rtg386EnsureCopyWordsHelper(g)
 	}
 	return rtgAmd64EnsureCopyWordsHelper(g)
 }
 func rtgEnsureStringEqualHelper(g *rtgLinearGen) int {
+	if rtgTargetArch == rtgArchAarch64 {
+		return rtgAarch64EnsureStringEqualHelper(g)
+	}
+	if rtgTargetArch == rtgArchArm {
+		return rtgArmEnsureStringEqualHelper(g)
+	}
 	if rtgTargetArch == rtgArch386 {
 		return rtg386EnsureStringEqualHelper(g)
 	}

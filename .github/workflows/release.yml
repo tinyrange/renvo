@@ -29,34 +29,42 @@ jobs:
         run: |
           set -eux
           mkdir -p dist
+          compiler_files=(
+            compiler_common_impl.go
+            compiler_main.go
+            compiler_linux_impl.go
+            compiler_amd64_impl.go
+            compiler_386_impl.go
+            compiler_aarch64_impl.go
+            compiler_arm_impl.go
+            compiler_linux_amd64_impl.go
+            compiler_linux_386_impl.go
+            compiler_linux_aarch64_impl.go
+            compiler_linux_arm_impl.go
+          )
           go build -o dist/rtgx-stage0 \
             rtg_main.go \
-            compiler_common.go \
-            compiler_amd64_impl.go \
-            compiler_linux_amd64_impl.go \
-            compiler_main.go
-          ./dist/rtgx-stage0 -o dist/rtgx-stage1 \
-            compiler_common.go \
-            compiler_amd64_impl.go \
-            compiler_linux_amd64_impl.go \
-            compiler_main.go
+            "${compiler_files[@]}"
+          ./dist/rtgx-stage0 -t linux/amd64 -o dist/rtgx-stage1 \
+            "${compiler_files[@]}"
           chmod +x dist/rtgx-stage1
-          ./dist/rtgx-stage1 -o dist/rtgx-linux-amd64 \
-            compiler_common.go \
-            compiler_amd64_impl.go \
-            compiler_linux_amd64_impl.go \
-            compiler_main.go
-          chmod +x dist/rtgx-linux-amd64
+          ./dist/rtgx-stage1 -t linux/amd64 -o dist/rtgx-linux-amd64 \
+            "${compiler_files[@]}"
+          ./dist/rtgx-stage1 -t linux/aarch64 -o dist/rtgx-linux-arm64 \
+            "${compiler_files[@]}"
+          chmod +x dist/rtgx-linux-amd64 dist/rtgx-linux-arm64
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v7
         with:
-          name: rtgx-linux-amd64
-          path: dist/rtgx-linux-amd64
+          name: rtgx-release-binaries
+          path: |
+            dist/rtgx-linux-amd64
+            dist/rtgx-linux-arm64
           if-no-files-found: error
 
       - name: Upload release asset
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" dist/rtgx-linux-amd64 --clobber
+        run: gh release upload "$GITHUB_REF_NAME" dist/rtgx-linux-amd64 dist/rtgx-linux-arm64 --clobber

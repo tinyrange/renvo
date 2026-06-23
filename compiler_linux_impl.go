@@ -15,6 +15,12 @@ func compileLinuxTarget(input []int, output int, target int) int {
 	if target == rtgTargetLinux386 {
 		return compileLinux386(input, output)
 	}
+	if target == rtgTargetLinuxAarch64 {
+		return compileLinuxAarch64(input, output)
+	}
+	if target == rtgTargetLinuxArm {
+		return compileLinuxArm(input, output)
+	}
 	if target != rtgTargetLinuxAmd64 {
 		return 1
 	}
@@ -22,6 +28,12 @@ func compileLinuxTarget(input []int, output int, target int) int {
 }
 
 func rtgLinuxSysWriteSeq() int {
+	if rtgTargetArch == rtgArchAarch64 {
+		return rtgLinuxAarch64SysWriteSeq
+	}
+	if rtgTargetArch == rtgArchArm {
+		return rtgLinuxArmSysWriteSeq
+	}
 	if rtgTargetArch == rtgArch386 {
 		return rtgLinux386SysWriteSeq
 	}
@@ -29,6 +41,12 @@ func rtgLinuxSysWriteSeq() int {
 }
 
 func rtgLinuxSysReadSeq() int {
+	if rtgTargetArch == rtgArchAarch64 {
+		return rtgLinuxAarch64SysReadSeq
+	}
+	if rtgTargetArch == rtgArchArm {
+		return rtgLinuxArmSysReadSeq
+	}
 	if rtgTargetArch == rtgArch386 {
 		return rtgLinux386SysReadSeq
 	}
@@ -36,6 +54,12 @@ func rtgLinuxSysReadSeq() int {
 }
 
 func rtgLinuxSysReadAt() int {
+	if rtgTargetArch == rtgArchAarch64 {
+		return rtgLinuxAarch64SysReadAt
+	}
+	if rtgTargetArch == rtgArchArm {
+		return rtgLinuxArmSysReadAt
+	}
 	if rtgTargetArch == rtgArch386 {
 		return rtgLinux386SysReadAt
 	}
@@ -43,6 +67,12 @@ func rtgLinuxSysReadAt() int {
 }
 
 func rtgLinuxSysWriteAt() int {
+	if rtgTargetArch == rtgArchAarch64 {
+		return rtgLinuxAarch64SysWriteAt
+	}
+	if rtgTargetArch == rtgArchArm {
+		return rtgLinuxArmSysWriteAt
+	}
 	if rtgTargetArch == rtgArch386 {
 		return rtgLinux386SysWriteAt
 	}
@@ -50,6 +80,12 @@ func rtgLinuxSysWriteAt() int {
 }
 
 func rtgLinuxSysOpen() int {
+	if rtgTargetArch == rtgArchAarch64 {
+		return rtgLinuxAarch64SysOpen
+	}
+	if rtgTargetArch == rtgArchArm {
+		return rtgLinuxArmSysOpen
+	}
 	if rtgTargetArch == rtgArch386 {
 		return rtgLinux386SysOpen
 	}
@@ -57,6 +93,12 @@ func rtgLinuxSysOpen() int {
 }
 
 func rtgLinuxSysClose() int {
+	if rtgTargetArch == rtgArchAarch64 {
+		return rtgLinuxAarch64SysClose
+	}
+	if rtgTargetArch == rtgArchArm {
+		return rtgLinuxArmSysClose
+	}
 	if rtgTargetArch == rtgArch386 {
 		return rtgLinux386SysClose
 	}
@@ -64,6 +106,12 @@ func rtgLinuxSysClose() int {
 }
 
 func rtgLinuxSysFchmod() int {
+	if rtgTargetArch == rtgArchAarch64 {
+		return rtgLinuxAarch64SysFchmod
+	}
+	if rtgTargetArch == rtgArchArm {
+		return rtgLinuxArmSysFchmod
+	}
 	if rtgTargetArch == rtgArch386 {
 		return rtgLinux386SysFchmod
 	}
@@ -71,6 +119,14 @@ func rtgLinuxSysFchmod() int {
 }
 
 func rtgAsmPrepareReadWriteBuf(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmPrepareReadWriteBuf(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmPrepareReadWriteBuf(a)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmPrepareReadWriteBuf(a)
 		return
@@ -79,6 +135,14 @@ func rtgAsmPrepareReadWriteBuf(a *rtgAsm) {
 }
 
 func rtgAsmMoveOffsetArg(a *rtgAsm) {
+	if rtgTargetArch == rtgArchAarch64 {
+		rtgAarch64AsmMoveOffsetArg(a)
+		return
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgArmAsmMoveOffsetArg(a)
+		return
+	}
 	if rtgTargetArch == rtgArch386 {
 		rtg386AsmMoveOffsetArg(a)
 		return
@@ -103,7 +167,7 @@ func rtgEmitLinearPrintStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 	if !rtgEmitStringValueRegs(g, &ep, ep.args[root.firstArg]) {
 		return false
 	}
-	rtgAsmEmit2(a, 0x6a, 1)
+	rtgAsmPushImm(a, 1)
 	rtgAsmPopRdi(a)
 	rtgAsmMovRsiRax(a)
 	rtgAsmMovRaxImm(a, rtgLinuxSysWriteSeq())

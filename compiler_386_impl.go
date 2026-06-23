@@ -802,7 +802,8 @@ func rtg386EmitStructReturnExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool
 		}
 		wordCount := 1
 		for i := e.argCount - 1; i >= 0; i-- {
-			words := rtgEmitCallArgReverse(g, ep, ep.args[e.firstArg+i])
+			argIndex := ep.args[e.firstArg+i]
+			words := rtgEmitCallArgReverse(g, ep, argIndex)
 			if words < 0 {
 				return false
 			}
@@ -1251,6 +1252,7 @@ func rtg386EmitSliceSlotAddrs(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSlic
 		rtgAsmAddAbsReloc(a, at, loc.offset+8, rtgAbsBssReloc)
 		return true
 	}
+	rtgEmitEnsureLocalSlice(g, loc.offset, elemSize)
 	rtgAsmLeaRdiStack(a, loc.offset)
 	rtgAsmLeaRsiStack(a, loc.offset-8)
 	return true
