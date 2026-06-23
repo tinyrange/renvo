@@ -2,6 +2,25 @@ package main
 
 const rtgAbsBssReloc = 1
 
+const rtgTargetLinuxAmd64 = 1
+const rtgTargetLinux386 = 2
+
+const rtgArchAmd64 = 1
+const rtgArch386 = 2
+
+var rtgTargetArch int = rtgArchAmd64
+var rtgNativeIntSize int = 8
+
+func rtgSetTarget(target int) {
+	if target == rtgTargetLinux386 {
+		rtgTargetArch = rtgArch386
+		rtgNativeIntSize = 4
+		return
+	}
+	rtgTargetArch = rtgArchAmd64
+	rtgNativeIntSize = 8
+}
+
 type rtgLabelRef struct {
 	at    int
 	label int
@@ -6744,6 +6763,17 @@ func rtgEmitSlicePtrLen(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		rtgAsmMemDisp(a, 8, 0x8b48, 0x4a, 0x8a)
 		return true
 	}
+	if e.kind == rtgExprIndex {
+		valueType := rtgInferParsedExprType(g, ep, idx)
+		if !rtgTypeIsString(meta, valueType) {
+			return false
+		}
+		if !rtgEmitStringValueRegs(g, ep, idx) {
+			return false
+		}
+		rtgAsmMovRcxRdx(a)
+		return true
+	}
 	if e.kind == rtgExprCall {
 		valueType := rtgInferParsedExprType(g, ep, idx)
 		if !rtgTypeIsSlice(meta, valueType) {
@@ -7114,4 +7144,419 @@ func rtgFuncInfoFromCall(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 		}
 	}
 	return -1
+}
+
+// Architecture target dispatch wrappers.
+func rtgEmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
+	if rtgTargetArch == rtgArch386 {
+		return rtg386EmitScalarFunction(g, fnInfoIndex)
+	}
+	return rtgAmd64EmitScalarFunction(g, fnInfoIndex)
+}
+func rtgStoreParamWord(g *rtgLinearGen, reg int, offset int) bool {
+	if rtgTargetArch == rtgArch386 {
+		return rtg386StoreParamWord(g, reg, offset)
+	}
+	return rtgAmd64StoreParamWord(g, reg, offset)
+}
+func rtgAsmMovRaxImm(a *rtgAsm, imm int) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmMovRaxImm(a, imm)
+		return
+	}
+	rtgAmd64AsmMovRaxImm(a, imm)
+}
+func rtgAsmMovRaxImm64(a *rtgAsm, imm int) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmMovRaxImm64(a, imm)
+		return
+	}
+	rtgAmd64AsmMovRaxImm64(a, imm)
+}
+func rtgAsmMovRdxImm(a *rtgAsm, imm int) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmMovRdxImm(a, imm)
+		return
+	}
+	rtgAmd64AsmMovRdxImm(a, imm)
+}
+func rtgAsmMovRaxDataAddr(a *rtgAsm, dataOff int) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmMovRaxDataAddr(a, dataOff)
+		return
+	}
+	rtgAmd64AsmMovRaxDataAddr(a, dataOff)
+}
+func rtgAsmMovRaxBssAddr(a *rtgAsm, bssOff int) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmMovRaxBssAddr(a, bssOff)
+		return
+	}
+	rtgAmd64AsmMovRaxBssAddr(a, bssOff)
+}
+func rtgAsmMovR10BssAddr(a *rtgAsm, bssOff int) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmMovR10BssAddr(a, bssOff)
+		return
+	}
+	rtgAmd64AsmMovR10BssAddr(a, bssOff)
+}
+func rtgAsmLoadRaxBss(a *rtgAsm, bssOff int) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmLoadRaxBss(a, bssOff)
+		return
+	}
+	rtgAmd64AsmLoadRaxBss(a, bssOff)
+}
+func rtgAsmStoreRaxBss(a *rtgAsm, bssOff int) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmStoreRaxBss(a, bssOff)
+		return
+	}
+	rtgAmd64AsmStoreRaxBss(a, bssOff)
+}
+func rtgAsmMovRdiRax(a *rtgAsm) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmMovRdiRax(a)
+		return
+	}
+	rtgAmd64AsmMovRdiRax(a)
+}
+func rtgAsmMovRaxRdx(a *rtgAsm) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmMovRaxRdx(a)
+		return
+	}
+	rtgAmd64AsmMovRaxRdx(a)
+}
+func rtgAsmMovRsiRax(a *rtgAsm) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmMovRsiRax(a)
+		return
+	}
+	rtgAmd64AsmMovRsiRax(a)
+}
+func rtgAsmMovR8Rax(a *rtgAsm) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmMovR8Rax(a)
+		return
+	}
+	rtgAmd64AsmMovR8Rax(a)
+}
+func rtgAsmMovR9Rax(a *rtgAsm) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmMovR9Rax(a)
+		return
+	}
+	rtgAmd64AsmMovR9Rax(a)
+}
+func rtgAsmAddRdxRcx(a *rtgAsm) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmAddRdxRcx(a)
+		return
+	}
+	rtgAmd64AsmAddRdxRcx(a)
+}
+func rtgAsmSyscall(a *rtgAsm) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmSyscall(a)
+		return
+	}
+	rtgAmd64AsmSyscall(a)
+}
+func rtgAsmPopRdi(a *rtgAsm) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmPopRdi(a)
+		return
+	}
+	rtgAmd64AsmPopRdi(a)
+}
+func rtgAsmStackMem(a *rtgAsm, offset int, base int, disp8 int, disp32 int) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmStackMem(a, offset, base, disp8, disp32)
+		return
+	}
+	rtgAmd64AsmStackMem(a, offset, base, disp8, disp32)
+}
+func rtgAsmAddRdxImm(a *rtgAsm, imm int) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmAddRdxImm(a, imm)
+		return
+	}
+	rtgAmd64AsmAddRdxImm(a, imm)
+}
+func rtgAsmMemDisp(a *rtgAsm, disp int, op int, disp8 int, disp32 int) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmMemDisp(a, disp, op, disp8, disp32)
+		return
+	}
+	rtgAmd64AsmMemDisp(a, disp, op, disp8, disp32)
+}
+func rtgAsmLoadQwordRaxIndexRcx8(a *rtgAsm) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmLoadQwordRaxIndexRcx8(a)
+		return
+	}
+	rtgAmd64AsmLoadQwordRaxIndexRcx8(a)
+}
+func rtgAsmLoadQwordRaxIndexRcxDisp(a *rtgAsm, disp int) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmLoadQwordRaxIndexRcxDisp(a, disp)
+		return
+	}
+	rtgAmd64AsmLoadQwordRaxIndexRcxDisp(a, disp)
+}
+func rtgAsmLoadRaxMemRdxDisp(a *rtgAsm, disp int) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmLoadRaxMemRdxDisp(a, disp)
+		return
+	}
+	rtgAmd64AsmLoadRaxMemRdxDisp(a, disp)
+}
+func rtgAsmLoadRaxMemRdxDispSize(a *rtgAsm, disp int, size int) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmLoadRaxMemRdxDispSize(a, disp, size)
+		return
+	}
+	rtgAmd64AsmLoadRaxMemRdxDispSize(a, disp, size)
+}
+func rtgAsmLoadByteRaxIndexRcx(a *rtgAsm) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmLoadByteRaxIndexRcx(a)
+		return
+	}
+	rtgAmd64AsmLoadByteRaxIndexRcx(a)
+}
+func rtgAsmLoadRaxIndexRcxSize(a *rtgAsm, size int) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmLoadRaxIndexRcxSize(a, size)
+		return
+	}
+	rtgAmd64AsmLoadRaxIndexRcxSize(a, size)
+}
+func rtgAsmStoreRaxMemRdxRcx8(a *rtgAsm) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmStoreRaxMemRdxRcx8(a)
+		return
+	}
+	rtgAmd64AsmStoreRaxMemRdxRcx8(a)
+}
+func rtgAsmStoreRaxMemRdxDisp(a *rtgAsm, disp int) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmStoreRaxMemRdxDisp(a, disp)
+		return
+	}
+	rtgAmd64AsmStoreRaxMemRdxDisp(a, disp)
+}
+func rtgAsmStoreRaxMemRdxDispSize(a *rtgAsm, disp int, size int) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmStoreRaxMemRdxDispSize(a, disp, size)
+		return
+	}
+	rtgAmd64AsmStoreRaxMemRdxDispSize(a, disp, size)
+}
+func rtgAsmNormalizeRaxForKind(a *rtgAsm, kind int) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmNormalizeRaxForKind(a, kind)
+		return
+	}
+	rtgAmd64AsmNormalizeRaxForKind(a, kind)
+}
+func rtgAsmIncMemRdx(a *rtgAsm) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmIncMemRdx(a)
+		return
+	}
+	rtgAmd64AsmIncMemRdx(a)
+}
+func rtgAsmDecMemRdx(a *rtgAsm) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmDecMemRdx(a)
+		return
+	}
+	rtgAmd64AsmDecMemRdx(a)
+}
+func rtgAsmBoolNotRax(a *rtgAsm) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmBoolNotRax(a)
+		return
+	}
+	rtgAmd64AsmBoolNotRax(a)
+}
+func rtgAsmCmpRaxImm8(a *rtgAsm, imm int) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmCmpRaxImm8(a, imm)
+		return
+	}
+	rtgAmd64AsmCmpRaxImm8(a, imm)
+}
+func rtgAsmAddRaxRcx(a *rtgAsm) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmAddRaxRcx(a)
+		return
+	}
+	rtgAmd64AsmAddRaxRcx(a)
+}
+func rtgAsmSubRaxRcx(a *rtgAsm) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmSubRaxRcx(a)
+		return
+	}
+	rtgAmd64AsmSubRaxRcx(a)
+}
+func rtgAsmShlRcxImm(a *rtgAsm, imm int) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmShlRcxImm(a, imm)
+		return
+	}
+	rtgAmd64AsmShlRcxImm(a, imm)
+}
+func rtgAsmShlRaxImm(a *rtgAsm, imm int) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmShlRaxImm(a, imm)
+		return
+	}
+	rtgAmd64AsmShlRaxImm(a, imm)
+}
+func rtgAsmSarRaxImm(a *rtgAsm, imm int) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmSarRaxImm(a, imm)
+		return
+	}
+	rtgAmd64AsmSarRaxImm(a, imm)
+}
+func rtgAsmDivLeftRcxRightRax(a *rtgAsm, mod bool) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmDivLeftRcxRightRax(a, mod)
+		return
+	}
+	rtgAmd64AsmDivLeftRcxRightRax(a, mod)
+}
+func rtgAsmCmpRcxRaxSet(a *rtgAsm, setcc int) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmCmpRcxRaxSet(a, setcc)
+		return
+	}
+	rtgAmd64AsmCmpRcxRaxSet(a, setcc)
+}
+func rtgEmitSwitchStringCaseTest(g *rtgLinearGen, valueOffset int, lenOffset int, ep *rtgExprParse, idx int, matchLabel int) bool {
+	if rtgTargetArch == rtgArch386 {
+		return rtg386EmitSwitchStringCaseTest(g, valueOffset, lenOffset, ep, idx, matchLabel)
+	}
+	return rtgAmd64EmitSwitchStringCaseTest(g, valueOffset, lenOffset, ep, idx, matchLabel)
+}
+func rtgEmitRaxRcxOp(g *rtgLinearGen, tok int) bool {
+	if rtgTargetArch == rtgArch386 {
+		return rtg386EmitRaxRcxOp(g, tok)
+	}
+	return rtgAmd64EmitRaxRcxOp(g, tok)
+}
+func rtgEmitCompareJump(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, label int, jumpIfTrue bool) bool {
+	if rtgTargetArch == rtgArch386 {
+		return rtg386EmitCompareJump(g, ep, e, label, jumpIfTrue)
+	}
+	return rtgAmd64EmitCompareJump(g, ep, e, label, jumpIfTrue)
+}
+func rtgEmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	if rtgTargetArch == rtgArch386 {
+		return rtg386EmitStringValueRegs(g, ep, idx)
+	}
+	return rtgAmd64EmitStringValueRegs(g, ep, idx)
+}
+func rtgEmitCompositeFieldToMem(g *rtgLinearGen, ep *rtgExprParse, idx int, fieldType int, addrOffset int, fieldOffset int) bool {
+	if rtgTargetArch == rtgArch386 {
+		return rtg386EmitCompositeFieldToMem(g, ep, idx, fieldType, addrOffset, fieldOffset)
+	}
+	return rtgAmd64EmitCompositeFieldToMem(g, ep, idx, fieldType, addrOffset, fieldOffset)
+}
+func rtgEmitStructReturnExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	if rtgTargetArch == rtgArch386 {
+		return rtg386EmitStructReturnExpr(g, ep, idx)
+	}
+	return rtgAmd64EmitStructReturnExpr(g, ep, idx)
+}
+func rtgEmitNamedConversionCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	if rtgTargetArch == rtgArch386 {
+		return rtg386EmitNamedConversionCall(g, ep, idx)
+	}
+	return rtgAmd64EmitNamedConversionCall(g, ep, idx)
+}
+func rtgEmitCallWithWordCount(g *rtgLinearGen, fnIndex int, wordCount int) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386EmitCallWithWordCount(g, fnIndex, wordCount)
+		return
+	}
+	rtgAmd64EmitCallWithWordCount(g, fnIndex, wordCount)
+}
+func rtgEmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	if rtgTargetArch == rtgArch386 {
+		return rtg386EmitIntExpr(g, ep, idx)
+	}
+	return rtgAmd64EmitIntExpr(g, ep, idx)
+}
+func rtgEmitFloatBinaryExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	if rtgTargetArch == rtgArch386 {
+		return rtg386EmitFloatBinaryExpr(g, ep, idx)
+	}
+	return rtgAmd64EmitFloatBinaryExpr(g, ep, idx)
+}
+func rtgEmitSliceSlotAddrs(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSliceLocation, elemSize int) bool {
+	if rtgTargetArch == rtgArch386 {
+		return rtg386EmitSliceSlotAddrs(g, locEp, loc, elemSize)
+	}
+	return rtgAmd64EmitSliceSlotAddrs(g, locEp, loc, elemSize)
+}
+func rtgEnsureAppendAddrHelper(g *rtgLinearGen) int {
+	if rtgTargetArch == rtgArch386 {
+		return rtg386EnsureAppendAddrHelper(g)
+	}
+	return rtgAmd64EnsureAppendAddrHelper(g)
+}
+func rtgEnsureAppend8Helper(g *rtgLinearGen) int {
+	if rtgTargetArch == rtgArch386 {
+		return rtg386EnsureAppend8Helper(g)
+	}
+	return rtgAmd64EnsureAppend8Helper(g)
+}
+func rtgEnsureAppend64Helper(g *rtgLinearGen) int {
+	if rtgTargetArch == rtgArch386 {
+		return rtg386EnsureAppend64Helper(g)
+	}
+	return rtgAmd64EnsureAppend64Helper(g)
+}
+func rtgEnsureAppendBytesHelper(g *rtgLinearGen) int {
+	if rtgTargetArch == rtgArch386 {
+		return rtg386EnsureAppendBytesHelper(g)
+	}
+	return rtgAmd64EnsureAppendBytesHelper(g)
+}
+func rtgEnsureCopyWordsHelper(g *rtgLinearGen) int {
+	if rtgTargetArch == rtgArch386 {
+		return rtg386EnsureCopyWordsHelper(g)
+	}
+	return rtgAmd64EnsureCopyWordsHelper(g)
+}
+func rtgEnsureStringEqualHelper(g *rtgLinearGen) int {
+	if rtgTargetArch == rtgArch386 {
+		return rtg386EnsureStringEqualHelper(g)
+	}
+	return rtgAmd64EnsureStringEqualHelper(g)
+}
+func rtgEmitIndexedStructField(g *rtgLinearGen, ep *rtgExprParse, indexIdx int, fieldStart int, fieldEnd int) bool {
+	if rtgTargetArch == rtgArch386 {
+		return rtg386EmitIndexedStructField(g, ep, indexIdx, fieldStart, fieldEnd)
+	}
+	return rtgAmd64EmitIndexedStructField(g, ep, indexIdx, fieldStart, fieldEnd)
+}
+func rtgEmitStringPtrExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	if rtgTargetArch == rtgArch386 {
+		return rtg386EmitStringPtrExpr(g, ep, idx)
+	}
+	return rtgAmd64EmitStringPtrExpr(g, ep, idx)
+}
+func rtgEmitSelectorAddressRdx(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	if rtgTargetArch == rtgArch386 {
+		return rtg386EmitSelectorAddressRdx(g, ep, idx)
+	}
+	return rtgAmd64EmitSelectorAddressRdx(g, ep, idx)
 }

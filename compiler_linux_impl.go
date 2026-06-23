@@ -11,6 +11,81 @@ func rtgReadAll(fd int, out []byte) []byte {
 	}
 }
 
+func compileLinuxTarget(input []int, output int, target int) int {
+	if target == rtgTargetLinux386 {
+		return compileLinux386(input, output)
+	}
+	if target != rtgTargetLinuxAmd64 {
+		return 1
+	}
+	return compileLinuxAmd64(input, output)
+}
+
+func rtgLinuxSysWriteSeq() int {
+	if rtgTargetArch == rtgArch386 {
+		return rtgLinux386SysWriteSeq
+	}
+	return rtgLinuxAmd64SysWriteSeq
+}
+
+func rtgLinuxSysReadSeq() int {
+	if rtgTargetArch == rtgArch386 {
+		return rtgLinux386SysReadSeq
+	}
+	return rtgLinuxAmd64SysReadSeq
+}
+
+func rtgLinuxSysReadAt() int {
+	if rtgTargetArch == rtgArch386 {
+		return rtgLinux386SysReadAt
+	}
+	return rtgLinuxAmd64SysReadAt
+}
+
+func rtgLinuxSysWriteAt() int {
+	if rtgTargetArch == rtgArch386 {
+		return rtgLinux386SysWriteAt
+	}
+	return rtgLinuxAmd64SysWriteAt
+}
+
+func rtgLinuxSysOpen() int {
+	if rtgTargetArch == rtgArch386 {
+		return rtgLinux386SysOpen
+	}
+	return rtgLinuxAmd64SysOpen
+}
+
+func rtgLinuxSysClose() int {
+	if rtgTargetArch == rtgArch386 {
+		return rtgLinux386SysClose
+	}
+	return rtgLinuxAmd64SysClose
+}
+
+func rtgLinuxSysFchmod() int {
+	if rtgTargetArch == rtgArch386 {
+		return rtgLinux386SysFchmod
+	}
+	return rtgLinuxAmd64SysFchmod
+}
+
+func rtgAsmPrepareReadWriteBuf(a *rtgAsm) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmPrepareReadWriteBuf(a)
+		return
+	}
+	rtgAmd64AsmPrepareReadWriteBuf(a)
+}
+
+func rtgAsmMoveOffsetArg(a *rtgAsm) {
+	if rtgTargetArch == rtgArch386 {
+		rtg386AsmMoveOffsetArg(a)
+		return
+	}
+	rtgAmd64AsmMoveOffsetArg(a)
+}
+
 func rtgEmitLinearPrintStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 	p := g.prog
 	a := &g.asm
@@ -31,7 +106,7 @@ func rtgEmitLinearPrintStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 	rtgAsmEmit2(a, 0x6a, 1)
 	rtgAsmPopRdi(a)
 	rtgAsmMovRsiRax(a)
-	rtgAsmMovRaxImm(a, rtgLinuxSysWriteSeq)
+	rtgAsmMovRaxImm(a, rtgLinuxSysWriteSeq())
 	rtgAsmSyscall(a)
 	return true
 }

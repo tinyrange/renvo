@@ -2,28 +2,25 @@ package main
 
 const rtgLinuxAmd64CodeOffset = 0x78
 
-const rtgLinuxSysReadSeq = 0
-const rtgLinuxSysWriteSeq = 1
-const rtgLinuxSysOpen = 2
-const rtgLinuxSysClose = 3
-const rtgLinuxSysReadAt = 17
-const rtgLinuxSysWriteAt = 18
-const rtgLinuxSysFchmod = 91
+const rtgLinuxAmd64SysReadSeq = 0
+const rtgLinuxAmd64SysWriteSeq = 1
+const rtgLinuxAmd64SysOpen = 2
+const rtgLinuxAmd64SysClose = 3
+const rtgLinuxAmd64SysReadAt = 17
+const rtgLinuxAmd64SysWriteAt = 18
+const rtgLinuxAmd64SysFchmod = 91
 
-func rtgAsmPrepareReadWriteBuf(a *rtgAsm) {
+func rtgAmd64AsmPrepareReadWriteBuf(a *rtgAsm) {
 	rtgAsmMovRsiRax(a)
 	rtgAsmEmit16(a, 0x5a51)
 }
 
-func rtgAsmMoveOffsetArg(a *rtgAsm) {
+func rtgAmd64AsmMoveOffsetArg(a *rtgAsm) {
 	rtgAsmEmit24(a, 0xc28949)
 }
 
-func compileLinuxTarget(input []int, output int) int {
-	return compileLinuxAmd64(input, output)
-}
-
 func compileLinuxAmd64(input []int, output int) int {
+	rtgSetTarget(rtgTargetLinuxAmd64)
 	var src []byte
 	for i := 0; i < len(input); i++ {
 		src = rtgReadAll(input[i], src)
@@ -40,15 +37,16 @@ func compileLinuxAmd64(input []int, output int) int {
 		return 1
 	}
 	var result rtgCompileResult
-	result = rtgTryCompileScalarProgram(&prog, &meta)
+	result = rtgTryCompileScalarProgramAmd64(&prog, &meta)
 	if result.ok {
 		write(output, result.data, -1)
 		return 0
 	}
+	rtgPrintErr("rtg: compilation failed\n")
 	return 1
 }
 
-func rtgTryCompileScalarProgram(p *rtgProgram, meta *rtgMeta) rtgCompileResult {
+func rtgTryCompileScalarProgramAmd64(p *rtgProgram, meta *rtgMeta) rtgCompileResult {
 	appIndex := -1
 	for i := 0; i < len(meta.funcs); i++ {
 		if rtgBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
@@ -72,7 +70,7 @@ func rtgTryCompileScalarProgram(p *rtgProgram, meta *rtgMeta) rtgCompileResult {
 		var result rtgCompileResult
 		return result
 	}
-	if !rtgEmitProgramEntryArgs(&g, appIndex) {
+	if !rtgEmitProgramEntryArgsAmd64(&g, appIndex) {
 		var result rtgCompileResult
 		return result
 	}
@@ -86,14 +84,14 @@ func rtgTryCompileScalarProgram(p *rtgProgram, meta *rtgMeta) rtgCompileResult {
 			return result
 		}
 	}
-	data := rtgAsmImage(a)
+	data := rtgAsmImageAmd64(a)
 	var result rtgCompileResult
 	result.data = data
 	result.ok = true
 	return result
 }
 
-func rtgEmitProgramEntryArgs(g *rtgLinearGen, appIndex int) bool {
+func rtgEmitProgramEntryArgsAmd64(g *rtgLinearGen, appIndex int) bool {
 	app := &g.meta.funcs[appIndex]
 	if app.resultType != 0 && !rtgTypeIsInt(g.meta, app.resultType) {
 		return false
@@ -104,7 +102,7 @@ func rtgEmitProgramEntryArgs(g *rtgLinearGen, appIndex int) bool {
 	g.asm.bssSize += 32768
 	envLenOff := g.asm.bssSize
 	g.asm.bssSize += 8
-	rtgAsmBuildArgvEnvSlices(&g.asm, argsOff, envDataOff, envLenOff)
+	rtgAsmBuildArgvEnvSlicesAmd64(&g.asm, argsOff, envDataOff, envLenOff)
 	if app.paramCount == 0 {
 		return true
 	}
@@ -125,7 +123,7 @@ func rtgEmitProgramEntryArgs(g *rtgLinearGen, appIndex int) bool {
 	return true
 }
 
-func rtgAsmBuildArgvEnvSlices(a *rtgAsm, bssOff int, envOff int, envLenOff int) {
+func rtgAsmBuildArgvEnvSlicesAmd64(a *rtgAsm, bssOff int, envOff int, envLenOff int) {
 	loopLabel := rtgAsmNewLabel(a)
 	strlenLabel := rtgAsmNewLabel(a)
 	afterLenLabel := rtgAsmNewLabel(a)
@@ -205,12 +203,12 @@ func rtgAsmBuildArgvEnvSlices(a *rtgAsm, bssOff int, envOff int, envLenOff int) 
 	rtgAsmMovR9Rax(a)
 }
 
-func rtgAsmImage(a *rtgAsm) []byte {
+func rtgAsmImageAmd64(a *rtgAsm) []byte {
 	rtgAsmPatch(a)
 	fileSize := a.codeOffset + len(a.code) + len(a.data)
 	memSize := fileSize + a.bssSize
 	var out []byte
-	out = rtgAppendElfHeader(out, a.codeOffset, fileSize, memSize)
+	out = rtgAppendElfHeaderAmd64(out, a.codeOffset, fileSize, memSize)
 	for i := 0; i < len(a.code); i++ {
 		out = append(out, a.code[i])
 	}
@@ -220,7 +218,7 @@ func rtgAsmImage(a *rtgAsm) []byte {
 	return out
 }
 
-func rtgAppendElfHeader(out []byte, entryOff int, fileSize int, memSize int) []byte {
+func rtgAppendElfHeaderAmd64(out []byte, entryOff int, fileSize int, memSize int) []byte {
 	base := 0x400000
 
 	out = append(out, 0x7f)

@@ -1,36 +1,30 @@
-//go:build rtg_target_386
-// +build rtg_target_386
-
 package main
 
 const rtgLinux386CodeOffset = 0x54
 const rtgLinux386LoadAddress = 0x08048000
 
-const rtgLinuxSysReadSeq = 3
-const rtgLinuxSysWriteSeq = 4
-const rtgLinuxSysOpen = 5
-const rtgLinuxSysClose = 6
-const rtgLinuxSysFchmod = 94
-const rtgLinuxSysReadAt = 180
-const rtgLinuxSysWriteAt = 181
+const rtgLinux386SysReadSeq = 3
+const rtgLinux386SysWriteSeq = 4
+const rtgLinux386SysOpen = 5
+const rtgLinux386SysClose = 6
+const rtgLinux386SysFchmod = 94
+const rtgLinux386SysReadAt = 180
+const rtgLinux386SysWriteAt = 181
 
-func rtgAsmPrepareReadWriteBuf(a *rtgAsm) {
+func rtg386AsmPrepareReadWriteBuf(a *rtgAsm) {
 	rtgAsmPushRcx(a)
 	rtgAsmMovRsiRax(a)
 	rtgAsmPopRdx(a)
 }
 
-func rtgAsmMoveOffsetArg(a *rtgAsm) {
+func rtg386AsmMoveOffsetArg(a *rtgAsm) {
 	rtgAsmEmit16(a, 0xc689)
 	rtgAsmMovRaxImm(a, 0)
 	rtgAsmEmit16(a, 0xc789)
 }
 
-func compileLinuxTarget(input []int, output int) int {
-	return compileLinux386(input, output)
-}
-
 func compileLinux386(input []int, output int) int {
+	rtgSetTarget(rtgTargetLinux386)
 	var src []byte
 	for i := 0; i < len(input); i++ {
 		src = rtgReadAll(input[i], src)
@@ -47,15 +41,16 @@ func compileLinux386(input []int, output int) int {
 		return 1
 	}
 	var result rtgCompileResult
-	result = rtgTryCompileScalarProgram(&prog, &meta)
+	result = rtgTryCompileScalarProgram386(&prog, &meta)
 	if result.ok {
 		write(output, result.data, -1)
 		return 0
 	}
+	rtgPrintErr("rtg: compilation failed\n")
 	return 1
 }
 
-func rtgTryCompileScalarProgram(p *rtgProgram, meta *rtgMeta) rtgCompileResult {
+func rtgTryCompileScalarProgram386(p *rtgProgram, meta *rtgMeta) rtgCompileResult {
 	appIndex := -1
 	for i := 0; i < len(meta.funcs); i++ {
 		if rtgBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
@@ -79,7 +74,7 @@ func rtgTryCompileScalarProgram(p *rtgProgram, meta *rtgMeta) rtgCompileResult {
 		var result rtgCompileResult
 		return result
 	}
-	if !rtgEmitProgramEntryArgs(&g, appIndex) {
+	if !rtgEmitProgramEntryArgs386(&g, appIndex) {
 		var result rtgCompileResult
 		return result
 	}
@@ -93,14 +88,14 @@ func rtgTryCompileScalarProgram(p *rtgProgram, meta *rtgMeta) rtgCompileResult {
 			return result
 		}
 	}
-	data := rtgAsmImage(a)
+	data := rtgAsmImage386(a)
 	var result rtgCompileResult
 	result.data = data
 	result.ok = true
 	return result
 }
 
-func rtgEmitProgramEntryArgs(g *rtgLinearGen, appIndex int) bool {
+func rtgEmitProgramEntryArgs386(g *rtgLinearGen, appIndex int) bool {
 	app := &g.meta.funcs[appIndex]
 	if app.resultType != 0 && !rtgTypeIsInt(g.meta, app.resultType) {
 		return false
@@ -111,7 +106,7 @@ func rtgEmitProgramEntryArgs(g *rtgLinearGen, appIndex int) bool {
 	g.asm.bssSize += 32768
 	envLenOff := g.asm.bssSize
 	g.asm.bssSize += 8
-	rtgAsmBuildArgvEnvSlices(&g.asm, argsOff, envDataOff, envLenOff)
+	rtgAsmBuildArgvEnvSlices386(&g.asm, argsOff, envDataOff, envLenOff)
 	if app.paramCount == 0 {
 		return true
 	}
@@ -132,7 +127,7 @@ func rtgEmitProgramEntryArgs(g *rtgLinearGen, appIndex int) bool {
 	return true
 }
 
-func rtgAsmBuildArgvEnvSlices(a *rtgAsm, bssOff int, envOff int, envLenOff int) {
+func rtgAsmBuildArgvEnvSlices386(a *rtgAsm, bssOff int, envOff int, envLenOff int) {
 	loopLabel := rtgAsmNewLabel(a)
 	strlenLabel := rtgAsmNewLabel(a)
 	afterLenLabel := rtgAsmNewLabel(a)
@@ -216,12 +211,12 @@ func rtgAsmBuildArgvEnvSlices(a *rtgAsm, bssOff int, envOff int, envLenOff int) 
 	rtgAsmEmit16(a, 0xc789)
 }
 
-func rtgAsmImage(a *rtgAsm) []byte {
+func rtgAsmImage386(a *rtgAsm) []byte {
 	rtgAsmPatch386(a)
 	fileSize := a.codeOffset + len(a.code) + len(a.data)
 	memSize := fileSize + a.bssSize
 	var out []byte
-	out = rtgAppendElfHeader(out, a.codeOffset, fileSize, memSize)
+	out = rtgAppendElfHeader386(out, a.codeOffset, fileSize, memSize)
 	for i := 0; i < len(a.code); i++ {
 		out = append(out, a.code[i])
 	}
@@ -243,7 +238,7 @@ func rtgAsmPatch386(a *rtgAsm) {
 	}
 }
 
-func rtgAppendElfHeader(out []byte, entryOff int, fileSize int, memSize int) []byte {
+func rtgAppendElfHeader386(out []byte, entryOff int, fileSize int, memSize int) []byte {
 	base := rtgLinux386LoadAddress
 
 	out = append(out, 0x7f)
