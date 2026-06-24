@@ -22,6 +22,9 @@ func compileTarget(input []int, output int, target int) int {
 	if target == rtgTargetWindows386 {
 		return compileWindows386(input, output)
 	}
+	if target == rtgTargetWasiWasm32 {
+		return compileWasiWasm32(input, output)
+	}
 	if target == rtgTargetLinux386 {
 		return compileLinux386(input, output)
 	}
@@ -129,6 +132,11 @@ func rtgLinuxSysFchmod() int {
 }
 
 func rtgAsmPrepareReadWriteBuf(a *rtgAsm) {
+	if rtgTargetArch == rtgArchWasm32 {
+		rtgWasm32AsmMovRsiRax(a)
+		rtgWasm32EmitRegReg(a, rtgWasm32OpMovRegReg, rtgWasm32RegRdx, rtgWasm32RegRcx)
+		return
+	}
 	if rtgTargetArch == rtgArchAarch64 {
 		rtgAarch64AsmPrepareReadWriteBuf(a)
 		return
@@ -145,6 +153,10 @@ func rtgAsmPrepareReadWriteBuf(a *rtgAsm) {
 }
 
 func rtgAsmMoveOffsetArg(a *rtgAsm) {
+	if rtgTargetArch == rtgArchWasm32 {
+		rtgWasm32EmitRegReg(a, rtgWasm32OpMovRegReg, rtgWasm32RegR10, rtgWasm32RegRax)
+		return
+	}
 	if rtgTargetArch == rtgArchAarch64 {
 		rtgAarch64AsmMoveOffsetArg(a)
 		return

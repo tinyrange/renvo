@@ -25,7 +25,7 @@ func rtg386AsmMoveOffsetArg(a *rtgAsm) {
 
 func compileLinux386(input []int, output int) int {
 	rtgSetTarget(rtgTargetLinux386)
-	var src []byte
+	src := make([]byte, 0, 1048576)
 	for i := 0; i < len(input); i++ {
 		src = rtgReadAll(input[i], src)
 		src = append(src, '\n')

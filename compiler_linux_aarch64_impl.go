@@ -22,7 +22,7 @@ func rtgAarch64AsmMoveOffsetArg(a *rtgAsm) {
 
 func compileLinuxAarch64(input []int, output int) int {
 	rtgSetTarget(rtgTargetLinuxAarch64)
-	var src []byte
+	src := make([]byte, 0, 1048576)
 	for i := 0; i < len(input); i++ {
 		src = rtgReadAll(input[i], src)
 		src = append(src, '\n')

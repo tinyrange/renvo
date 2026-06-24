@@ -46,6 +46,9 @@ func rtgParseTargetArg(target string) int {
 	if target == "windows/386" {
 		return rtgTargetWindows386
 	}
+	if target == "wasi/wasm32" {
+		return rtgTargetWasiWasm32
+	}
 	return 0
 }
 
@@ -73,14 +76,14 @@ func rtgPrintIntErr(v int) {
 }
 
 func rtgPrintUsage() {
-	rtgPrintErr("usage: rtg [-t linux/amd64|linux/386|linux/aarch64|linux/arm|windows/amd64|windows/386] -o <output> <input.go>...\n")
+	rtgPrintErr("usage: rtg [-t linux/amd64|linux/386|linux/aarch64|linux/arm|windows/amd64|windows/386|wasi/wasm32] -o <output> <input.go>...\n")
 }
 
 func rtgPrintUnsupportedTarget(target string) {
 	rtgPrintErr("rtg: unsupported target: ")
 	rtgPrintErr(target)
 	rtgPrintErr("\n")
-	rtgPrintErr("rtg: supported targets: linux/amd64, linux/386, linux/aarch64, linux/arm, windows/amd64, windows/386\n")
+	rtgPrintErr("rtg: supported targets: linux/amd64, linux/386, linux/aarch64, linux/arm, windows/amd64, windows/386, wasi/wasm32\n")
 }
 
 func appMain(args []string, env []string) int {

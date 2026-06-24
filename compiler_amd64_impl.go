@@ -539,6 +539,8 @@ func rtgAmd64EmitCompareJump(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, labe
 		rtgAarch64AsmCmpRegReg(&g.asm, rtgAarch64RegRcx, rtgAarch64RegRax)
 	} else if rtgTargetArch == rtgArchArm {
 		rtgArmAsmCmpRegReg(&g.asm, rtgArmRegRcx, rtgArmRegRax)
+	} else if rtgTargetArch == rtgArchWasm32 {
+		rtgWasm32EmitRegReg(&g.asm, rtgWasm32OpCmpRegReg, rtgWasm32RegRcx, rtgWasm32RegRax)
 	} else {
 		rtgAsmEmit24(&g.asm, 0xc13948)
 	}
@@ -620,7 +622,7 @@ func rtgAmd64EmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) boo
 		rtgAsmMovRdxRax(a)
 		rtgAsmLoadQwordRaxIndexRcxDisp(a, 0)
 		rtgAsmAddRdxRcx(a)
-		if rtgTargetArch == rtgArchAarch64 {
+		if rtgTargetArch == rtgArchAarch64 || rtgTargetArch == rtgArchWasm32 {
 			rtgAsmPushRax(a)
 			rtgAsmLoadRaxMemRdxDisp(a, 8)
 			rtgAsmMovRdxRax(a)
@@ -643,6 +645,24 @@ func rtgAmd64EmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) boo
 		rtgAsmLoadRaxMemRdxDisp(a, 8)
 		rtgAsmMovRdxRax(a)
 		rtgAsmPopRax(a)
+		return true
+	}
+	if e.kind == rtgExprCall && e.argCount == 1 && rtgExprIsIdentText(g.prog, ep, e.left, "string") {
+		argIndex := ep.args[e.firstArg]
+		argType := rtgInferParsedExprType(g, ep, argIndex)
+		argResolved := rtgResolveType(meta, argType)
+		if argResolved.kind != rtgTypeSlice {
+			return false
+		}
+		elem := rtgResolveType(meta, argResolved.elem)
+		if elem.kind != rtgTypeByte {
+			return false
+		}
+		if !rtgEmitSlicePtrLen(g, ep, argIndex) {
+			return false
+		}
+		rtgAsmPushRcx(a)
+		rtgAsmPopRdx(a)
 		return true
 	}
 	if e.kind == rtgExprCall {
@@ -739,6 +759,8 @@ func rtgAmd64EmitStructReturnExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bo
 				rtgAarch64AsmStoreRegMem(a, rtgAarch64RegRax, rtgAarch64RegRcx, at, 8)
 			} else if rtgTargetArch == rtgArchArm {
 				rtgArmAsmStoreRegMem(a, rtgArmRegRax, rtgArmRegRcx, at, 4)
+			} else if rtgTargetArch == rtgArchWasm32 {
+				rtgWasm32EmitMem(a, rtgWasm32OpStoreMem, rtgWasm32RegRax, rtgWasm32RegRcx, at, 4)
 			} else if at == 0 {
 				rtgAsmEmit24(a, 0x018948)
 			} else {
@@ -952,7 +974,7 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			if !rtgEmitSlicePtrLen(g, ep, ep.args[e.firstArg]) {
 				return false
 			}
-			if rtgTargetArch == rtgArchAarch64 || rtgTargetArch == rtgArchArm {
+			if rtgTargetArch == rtgArchAarch64 || rtgTargetArch == rtgArchArm || rtgTargetArch == rtgArchWasm32 {
 				rtgAsmPushRcx(a)
 				rtgAsmPopRax(a)
 			} else {
@@ -979,6 +1001,20 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 				rtgAsmPopRdx(a)
 				rtgAarch64AsmMovRegImm(a, rtgAarch64RegRdi, -100)
 				rtgAarch64AsmMovRegImm(a, rtgAarch64RegR10, 493)
+				rtgAsmMovRaxImm(a, rtgLinuxSysOpen())
+				rtgAsmSyscall(a)
+				return true
+			}
+			if rtgTargetArch == rtgArchWasm32 {
+				if !rtgEmitIntExpr(g, ep, ep.args[e.firstArg+1]) {
+					return false
+				}
+				rtgAsmPushRax(a)
+				if !rtgEmitStringValueRegs(g, ep, ep.args[e.firstArg]) {
+					return false
+				}
+				rtgAsmMovRdiRax(a)
+				rtgAsmPopRsi(a)
 				rtgAsmMovRaxImm(a, rtgLinuxSysOpen())
 				rtgAsmSyscall(a)
 				return true
@@ -1098,7 +1134,7 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 				if !rtgEmitSelectorAddressRdx(g, ep, e.left) {
 					return false
 				}
-				if rtgTargetArch == rtgArchAarch64 || rtgTargetArch == rtgArchArm {
+				if rtgTargetArch == rtgArchAarch64 || rtgTargetArch == rtgArchArm || rtgTargetArch == rtgArchWasm32 {
 					rtgAsmMovRaxRdx(a)
 				} else {
 					rtgAsmEmit16(a, 0x5852)
@@ -1128,6 +1164,8 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 				rtgAarch64AsmNegRax(a)
 			} else if rtgTargetArch == rtgArchArm {
 				rtgArmAsmNegRax(a)
+			} else if rtgTargetArch == rtgArchWasm32 {
+				rtgWasm32AsmNegRax(a)
 			} else {
 				rtgAsmEmit24(a, 0xd8f748)
 			}
@@ -1249,6 +1287,11 @@ func rtgAmd64EmitSliceSlotAddrs(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSl
 			rtgAsmPushRdx(a)
 			rtgAsmPopRdi(a)
 			rtgAarch64AsmAddRegImm(a, rtgAarch64RegRsi, rtgAarch64RegRdx, 8)
+		} else if rtgTargetArch == rtgArchWasm32 {
+			rtgAsmPushRdx(a)
+			rtgAsmPopRdi(a)
+			rtgWasm32EmitRegReg(a, rtgWasm32OpMovRegReg, rtgWasm32RegRsi, rtgWasm32RegRdx)
+			rtgWasm32EmitRegImm(a, rtgWasm32OpAddRegImm, rtgWasm32RegRsi, 8)
 		} else {
 			rtgAsmEmit16(a, 0x5f52)
 			rtgAsmEmit24(a, 0x728d48)
@@ -1260,6 +1303,11 @@ func rtgAmd64EmitSliceSlotAddrs(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSl
 		if rtgTargetArch == rtgArchAarch64 {
 			rtgAarch64AsmMovRegAbs(a, rtgAarch64RegRdi, loc.offset, rtgAbsBssReloc)
 			rtgAarch64AsmMovRegAbs(a, rtgAarch64RegRsi, loc.offset+8, rtgAbsBssReloc)
+		} else if rtgTargetArch == rtgArchWasm32 {
+			rtgWasm32EmitRegImm(a, rtgWasm32OpMovRegImm, rtgWasm32RegRdi, 0)
+			rtgAsmAddAbsReloc(a, len(a.code)-4, loc.offset, rtgAbsBssReloc)
+			rtgWasm32EmitRegImm(a, rtgWasm32OpMovRegImm, rtgWasm32RegRsi, 0)
+			rtgAsmAddAbsReloc(a, len(a.code)-4, loc.offset+8, rtgAbsBssReloc)
 		} else {
 			rtgAsmEmit24(a, 0x3d8d48)
 			at := len(a.code)
@@ -1623,6 +1671,8 @@ func rtgAmd64EmitSelectorAddressRdx(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 				rtgAarch64AsmLoadRegMem(a, rtgAarch64RegRdx, rtgAarch64RegRdx, 0, 8)
 			} else if rtgTargetArch == rtgArchArm {
 				rtgArmAsmLoadRegMem(a, rtgArmRegRdx, rtgArmRegRdx, 0, 4)
+			} else if rtgTargetArch == rtgArchWasm32 {
+				rtgWasm32EmitMem(a, rtgWasm32OpLoadMem, rtgWasm32RegRdx, rtgWasm32RegRdx, 0, 4)
 			} else {
 				rtgAsmEmit24(a, 0x128b48)
 			}

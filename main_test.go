@@ -42,7 +42,7 @@ func getCompilerFiles(config targetConfig) ([]string, error) {
 	var files []string
 
 	switch config.os + "/" + config.arch {
-	case "linux/amd64", "linux/386", "linux/aarch64", "linux/arm":
+	case "linux/amd64", "linux/386", "linux/aarch64", "linux/arm", "wasi/wasm32":
 	default:
 		return nil, fmt.Errorf("unsupported OS/architecture combination: %s/%s", config.os, config.arch)
 	}
@@ -55,10 +55,12 @@ func getCompilerFiles(config targetConfig) ([]string, error) {
 		"compiler_386_impl.go",
 		"compiler_aarch64_impl.go",
 		"compiler_arm_impl.go",
+		"compiler_wasm32_impl.go",
 		"compiler_linux_amd64_impl.go",
 		"compiler_linux_386_impl.go",
 		"compiler_linux_aarch64_impl.go",
 		"compiler_linux_arm_impl.go",
+		"compiler_wasi_wasm32_impl.go",
 	)
 
 	return files, nil
@@ -84,6 +86,7 @@ func supportedCompilerTargets(t *testing.T) []compilerTarget {
 			{os: "linux", arch: "386"},
 			{os: "linux", arch: "aarch64"},
 			{os: "linux", arch: "arm"},
+			{os: "wasi", arch: "wasm32"},
 		}
 	case "linux/arm64":
 		configs = []targetConfig{
@@ -107,6 +110,10 @@ func supportedCompilerTargets(t *testing.T) []compilerTarget {
 		if runtime.GOARCH == "amd64" && config.arch == "arm" {
 			target.emulated = true
 			target.runner = []string{"qemu-arm"}
+		}
+		if config.os == "wasi" && config.arch == "wasm32" {
+			target.emulated = true
+			target.runner = []string{"wasmtime", "run", "--dir=.", "--dir=/", "--env", "PWD", "--env", "PATH"}
 		}
 		targets = append(targets, target)
 	}
@@ -263,7 +270,7 @@ func TestCompilerTargetDiagnostics(t *testing.T) {
 	checkFailure(
 		"unsupported target",
 		[]string{"-t", "linux/arm64", "-o", outputFile, "tests/print_pass_smoke.go"},
-		[]string{"rtg: unsupported target: linux/arm64", "linux/amd64", "linux/386", "linux/aarch64", "linux/arm"},
+		[]string{"rtg: unsupported target: linux/arm64", "linux/amd64", "linux/386", "linux/aarch64", "linux/arm", "wasi/wasm32"},
 	)
 	checkFailure(
 		"missing target argument",
