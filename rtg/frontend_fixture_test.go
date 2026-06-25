@@ -63,7 +63,7 @@ func value() int {
 
 func main() {
 	if value() == 12 {
-		print("PASS\n")
+		dep.Emit(dep.First(), dep.Second())
 	}
 }
 `)
@@ -72,6 +72,12 @@ func main() {
 func First() int { return 1 }
 func Second() int { return 2 }
 func Join(a int, b int) int { return a*10 + b }
+func Emit(a int, b int) int {
+	if Join(a, b) == 12 {
+		print("PASS\n")
+	}
+	return 0
+}
 `)
 	runFrontendFixtureMatchesHostGo(t, fixture)
 }

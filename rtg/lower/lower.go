@@ -315,6 +315,13 @@ func normalizationStatement(toks []scan.Token, pos int) (expressionStatement, bo
 		}
 		return expressionStatement{token: pos, exprStart: exprStart, exprEnd: exprEnd}, true
 	}
+	if startsCallStatement(toks, pos) {
+		exprEnd := lineExpressionEnd(toks, pos)
+		if exprEnd <= pos {
+			return expressionStatement{}, false
+		}
+		return expressionStatement{token: pos, exprStart: pos, exprEnd: exprEnd}, true
+	}
 	if !isAssignmentOperator(toks[pos].Text) {
 		return expressionStatement{}, false
 	}
@@ -378,6 +385,13 @@ func statementStartToken(toks []scan.Token, pos int) int {
 
 func isAssignmentOperator(text string) bool {
 	return text == "=" || text == ":="
+}
+
+func startsCallStatement(toks []scan.Token, pos int) bool {
+	if pos+1 >= len(toks) || toks[pos].Kind != scan.Ident || toks[pos+1].Text != "(" {
+		return false
+	}
+	return statementStartToken(toks, pos) == pos
 }
 
 func normalizeCallArgumentExpressions(body string, toks []scan.Token, start int, end int, unitName string, tempIndex *int) ([]expressionTemp, []expressionReplacement) {
