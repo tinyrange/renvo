@@ -88,7 +88,7 @@ func Source(u unit.Unit) []byte {
 			out.WriteString(decl.UnitName)
 		}
 		out.WriteString(" ")
-		out.WriteString(decl.Path)
+		out.WriteString(quoteIfNeeded(decl.Path))
 		out.WriteByte('\n')
 		out.WriteString(decl.Body)
 		if len(decl.Body) == 0 || decl.Body[len(decl.Body)-1] != '\n' {
@@ -103,4 +103,13 @@ func Source(u unit.Unit) []byte {
 
 func quote(s string) string {
 	return strconv.Quote(s)
+}
+
+func quoteIfNeeded(s string) string {
+	for i := 0; i < len(s); i++ {
+		if s[i] == ' ' || s[i] == '\t' || s[i] == '\r' || s[i] == '\n' || s[i] == '"' || s[i] == '\\' {
+			return quote(s)
+		}
+	}
+	return s
 }

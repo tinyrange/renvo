@@ -252,15 +252,25 @@ func parseReference(s string) (Symbol, error) {
 func parseDecl(s string) (Decl, error) {
 	arrow := strings.Index(s, " => ")
 	if arrow < 0 {
-		parts := strings.Fields(s)
+		parts, err := metadataFields(s)
+		if err != nil {
+			return Decl{}, fmt.Errorf("invalid declaration metadata %q", s)
+		}
 		if len(parts) < 2 {
 			return Decl{}, fmt.Errorf("invalid declaration metadata %q", s)
 		}
-		return Decl{Kind: parts[0], Path: parts[len(parts)-1], Name: strings.Join(parts[1:len(parts)-1], " ")}, nil
+		path, err := unquoteMetadataField(parts[len(parts)-1])
+		if err != nil {
+			return Decl{}, fmt.Errorf("invalid declaration metadata %q", s)
+		}
+		return Decl{Kind: parts[0], Path: path, Name: strings.Join(parts[1:len(parts)-1], " ")}, nil
 	}
 	left := strings.TrimSpace(s[:arrow])
 	right := strings.TrimSpace(s[arrow+4:])
-	rightParts := strings.Fields(right)
+	rightParts, err := metadataFields(right)
+	if err != nil {
+		return Decl{}, fmt.Errorf("invalid declaration metadata %q", s)
+	}
 	if len(rightParts) < 2 {
 		return Decl{}, fmt.Errorf("invalid declaration metadata %q", s)
 	}
@@ -268,10 +278,61 @@ func parseDecl(s string) (Decl, error) {
 	if len(leftParts) < 2 {
 		return Decl{}, fmt.Errorf("invalid declaration metadata %q", s)
 	}
+	path, err := unquoteMetadataField(rightParts[len(rightParts)-1])
+	if err != nil {
+		return Decl{}, fmt.Errorf("invalid declaration metadata %q", s)
+	}
+	if len(rightParts) > 2 {
+		path = strings.Join(rightParts[1:], " ")
+	}
 	return Decl{
 		Kind:     leftParts[0],
 		Name:     strings.Join(leftParts[1:], " "),
 		UnitName: rightParts[0],
-		Path:     strings.Join(rightParts[1:], " "),
+		Path:     path,
 	}, nil
+}
+
+func metadataFields(s string) ([]string, error) {
+	var fields []string
+	for i := 0; i < len(s); {
+		for i < len(s) && (s[i] == ' ' || s[i] == '\t' || s[i] == '\r') {
+			i++
+		}
+		if i >= len(s) {
+			break
+		}
+		start := i
+		if s[i] == '"' {
+			i++
+			for i < len(s) {
+				if s[i] == '\\' {
+					i += 2
+					continue
+				}
+				if s[i] == '"' {
+					i++
+					fields = append(fields, s[start:i])
+					break
+				}
+				i++
+			}
+			if i > len(s) || len(fields) == 0 || fields[len(fields)-1] != s[start:i] {
+				return nil, fmt.Errorf("invalid metadata field")
+			}
+			continue
+		}
+		for i < len(s) && s[i] != ' ' && s[i] != '\t' && s[i] != '\r' {
+			i++
+		}
+		fields = append(fields, s[start:i])
+	}
+	return fields, nil
+}
+
+func unquoteMetadataField(field string) (string, error) {
+	if len(field) == 0 || field[0] != '"' {
+		return field, nil
+	}
+	return strconv.Unquote(field)
 }

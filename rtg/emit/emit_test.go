@@ -63,6 +63,30 @@ func TestSourceEscapesImportMetadata(t *testing.T) {
 	}
 }
 
+func TestSourceEscapesDeclarationPathMetadata(t *testing.T) {
+	u := unit.Unit{
+		ImportPath: "example.com/app/pkg/answer",
+		Package:    "answer",
+		Decls: []unit.Decl{
+			{Path: "pkg dir/answer.go", Kind: "const", Body: "const (\n\trtg_example_com_app_pkg_answer_Value = 7\n)\n"},
+		},
+	}
+	src := Source(u)
+	if !strings.Contains(string(src), `// rtg:decl const "pkg dir/answer.go"`+"\n") {
+		t.Fatalf("emitted source did not escape declaration path:\n%s", string(src))
+	}
+	parsed, err := unit.ParseSource("declpath.rtg.go", src)
+	if err != nil {
+		t.Fatalf("ParseSource failed: %v", err)
+	}
+	if len(parsed.Decls) != 1 {
+		t.Fatalf("parsed declarations = %#v", parsed.Decls)
+	}
+	if parsed.Decls[0].Name != "" || parsed.Decls[0].Path != u.Decls[0].Path {
+		t.Fatalf("parsed declaration = %#v, want empty name and path %q", parsed.Decls[0], u.Decls[0].Path)
+	}
+}
+
 func TestSourceBuildTagIsIgnoredByHostGo(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/hostsafe\n"), 0644); err != nil {
