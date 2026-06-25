@@ -107,6 +107,55 @@ require (
 	}
 }
 
+func TestParseFileStripsBlockComments(t *testing.T) {
+	module, err := ParseFile(`/* leading */
+module example.com/app /* tail */
+
+require (
+	/* before */ example.com/one v0.1.0
+	/*
+		middle
+	*/
+	example.com/two v2.0.0 /* after */
+)
+
+replace (
+	example.com/one => ./one /* local one */
+	/* comment */ example.com/two v2.0.0 => ../two
+)
+`)
+	if err != nil {
+		t.Fatalf("ParseFile failed: %v", err)
+	}
+	if module.Path != "example.com/app" {
+		t.Fatalf("module path = %q, want example.com/app", module.Path)
+	}
+	wantRequires := []Require{
+		{Path: "example.com/one", Version: "v0.1.0"},
+		{Path: "example.com/two", Version: "v2.0.0"},
+	}
+	if len(module.Requires) != len(wantRequires) {
+		t.Fatalf("requires = %#v, want %#v", module.Requires, wantRequires)
+	}
+	for i := range wantRequires {
+		if module.Requires[i] != wantRequires[i] {
+			t.Fatalf("require %d = %#v, want %#v", i, module.Requires[i], wantRequires[i])
+		}
+	}
+	wantReplaces := []Replace{
+		{Old: "example.com/one", New: "./one"},
+		{Old: "example.com/two", New: "../two"},
+	}
+	if len(module.Replaces) != len(wantReplaces) {
+		t.Fatalf("replaces = %#v, want %#v", module.Replaces, wantReplaces)
+	}
+	for i := range wantReplaces {
+		if module.Replaces[i] != wantReplaces[i] {
+			t.Fatalf("replace %d = %#v, want %#v", i, module.Replaces[i], wantReplaces[i])
+		}
+	}
+}
+
 func TestParseFileRejectsMalformedRequires(t *testing.T) {
 	tests := []struct {
 		name string

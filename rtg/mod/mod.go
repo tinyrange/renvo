@@ -56,11 +56,10 @@ func Find(start string) (Module, error) {
 
 func ParseFile(data string) (Module, error) {
 	var module Module
-	lines := strings.Split(data, "\n")
+	lines := strings.Split(stripComments(data), "\n")
 	inRequireBlock := false
 	inReplaceBlock := false
 	for _, line := range lines {
-		line = stripLineComment(line)
 		fields := strings.Fields(line)
 		if len(fields) == 0 {
 			continue
@@ -191,11 +190,38 @@ func parseRequireFields(fields []string) (Require, error) {
 	return Require{Path: fields[0], Version: fields[1]}, nil
 }
 
-func stripLineComment(line string) string {
-	for i := 0; i+1 < len(line); i++ {
-		if line[i] == '/' && line[i+1] == '/' {
-			return line[:i]
+func stripComments(data string) string {
+	var out []byte
+	inBlock := false
+	for i := 0; i < len(data); i++ {
+		if inBlock {
+			if i+1 < len(data) && data[i] == '*' && data[i+1] == '/' {
+				inBlock = false
+				i++
+				out = append(out, ' ')
+				continue
+			}
+			if data[i] == '\n' {
+				out = append(out, '\n')
+			}
+			continue
 		}
+		if i+1 < len(data) && data[i] == '/' && data[i+1] == '/' {
+			for i < len(data) && data[i] != '\n' {
+				i++
+			}
+			if i < len(data) {
+				out = append(out, data[i])
+			}
+			continue
+		}
+		if i+1 < len(data) && data[i] == '/' && data[i+1] == '*' {
+			inBlock = true
+			i++
+			out = append(out, ' ')
+			continue
+		}
+		out = append(out, data[i])
 	}
-	return line
+	return string(out)
 }
