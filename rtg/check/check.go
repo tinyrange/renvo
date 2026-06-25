@@ -1,8 +1,8 @@
 package check
 
 import (
-	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"j5.nz/rtg/rtg/load"
@@ -79,16 +79,42 @@ func Graph(g *load.Graph) error {
 }
 
 func parseDiagnostic(path string, err error) Diagnostic {
-	var parseErr parse.Error
-	if errors.As(err, &parseErr) {
+	line, column, message, ok := splitPathPositionMessage(path, err.Error())
+	if ok {
 		return Diagnostic{
-			Path:    parseErr.Path,
-			Line:    parseErr.Line,
-			Column:  parseErr.Column,
-			Message: parseErr.Message,
+			Path:    path,
+			Line:    line,
+			Column:  column,
+			Message: message,
 		}
 	}
 	return Diagnostic{Path: path, Line: 1, Column: 1, Message: err.Error()}
+}
+
+func splitPathPositionMessage(path string, message string) (int, int, string, bool) {
+	prefix := path + ":"
+	if !strings.HasPrefix(message, prefix) {
+		return 0, 0, "", false
+	}
+	rest := message[len(prefix):]
+	first := strings.IndexByte(rest, ':')
+	if first < 0 {
+		return 0, 0, "", false
+	}
+	second := strings.IndexByte(rest[first+1:], ':')
+	if second < 0 {
+		return 0, 0, "", false
+	}
+	second = second + first + 1
+	line, err := strconv.Atoi(rest[:first])
+	if err != nil {
+		return 0, 0, "", false
+	}
+	column, err := strconv.Atoi(rest[first+1 : second])
+	if err != nil {
+		return 0, 0, "", false
+	}
+	return line, column, strings.TrimSpace(rest[second+1:]), true
 }
 
 func declDiagnostics(file parse.File) Diagnostics {
