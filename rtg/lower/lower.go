@@ -117,6 +117,7 @@ func rewriteDecl(file parse.File, decl parse.Decl, topNames map[string]string, i
 		end--
 	}
 	var out []byte
+	localNames := localNamesForDecl(file, decl, topNames)
 	cursor := start
 	prevText := ""
 	for i := 0; i < len(file.Tokens); i++ {
@@ -146,7 +147,7 @@ func rewriteDecl(file parse.File, decl parse.Decl, topNames map[string]string, i
 				}
 			}
 		}
-		if tok.Kind == scan.Ident && prevText != "." {
+		if tok.Kind == scan.Ident && prevText != "." && !localNames[tok.Text] {
 			replacement = topNames[tok.Text]
 		}
 		if replacement != "" {
@@ -161,6 +162,157 @@ func rewriteDecl(file parse.File, decl parse.Decl, topNames map[string]string, i
 		out = append(out, file.Source[cursor:end]...)
 	}
 	return string(out)
+}
+
+func localNamesForDecl(file parse.File, decl parse.Decl, topNames map[string]string) map[string]bool {
+	names := map[string]bool{}
+	if decl.Kind != "func" {
+		return names
+	}
+	toks := file.Tokens
+	start := tokenIndexAt(toks, decl.Start)
+	if start < 0 {
+		return names
+	}
+	body := findTokenText(toks, start, decl.End, "{")
+	if body < 0 {
+		return names
+	}
+	collectFuncSignatureLocals(toks, start, body, topNames, names)
+	for i := body + 1; i < len(toks) && toks[i].Start < decl.End; i++ {
+		if toks[i].Text == ":=" {
+			collectShortDeclLocals(toks, i, topNames, names)
+			continue
+		}
+		if toks[i].Text == "var" {
+			collectVarLocals(toks, i, decl.End, topNames, names)
+		}
+	}
+	return names
+}
+
+func collectFuncSignatureLocals(toks []scan.Token, start int, end int, topNames map[string]string, names map[string]bool) {
+	for i := start; i < end; i++ {
+		if toks[i].Text != "(" {
+			continue
+		}
+		close := findClose(toks, i, "(", ")")
+		if close < 0 || close > end {
+			continue
+		}
+		collectParameterListLocals(toks, i+1, close, topNames, names)
+		i = close
+	}
+}
+
+func collectParameterListLocals(toks []scan.Token, start int, end int, topNames map[string]string, names map[string]bool) {
+	for i := start; i < end; i++ {
+		if toks[i].Kind != scan.Ident || topNames[toks[i].Text] == "" {
+			continue
+		}
+		if i+1 < end && isTypeStart(toks[i+1]) {
+			names[toks[i].Text] = true
+			continue
+		}
+		if i+2 < end && toks[i+1].Text == "," && toks[i+2].Kind == scan.Ident && isTypeStartAfterName(toks, i+2, end) {
+			names[toks[i].Text] = true
+		}
+	}
+}
+
+func collectShortDeclLocals(toks []scan.Token, assign int, topNames map[string]string, names map[string]bool) {
+	for i := assign - 1; i >= 0; i-- {
+		if isStatementBoundary(toks[i].Text) {
+			return
+		}
+		if toks[i].Kind == scan.Ident && topNames[toks[i].Text] != "" && (i == 0 || toks[i-1].Text != ".") {
+			names[toks[i].Text] = true
+		}
+	}
+}
+
+func collectVarLocals(toks []scan.Token, pos int, end int, topNames map[string]string, names map[string]bool) {
+	if pos+1 < len(toks) && toks[pos+1].Text == "(" {
+		for i := pos + 2; i < len(toks) && toks[i].Start < end; i++ {
+			if toks[i].Text == ")" || toks[i].Text == "}" {
+				return
+			}
+			if toks[i].Kind != scan.Ident || topNames[toks[i].Text] == "" {
+				continue
+			}
+			if toks[i-1].Text == "(" || toks[i-1].Text == "," || toks[i-1].Line != toks[i].Line {
+				names[toks[i].Text] = true
+			}
+		}
+		return
+	}
+	line := toks[pos].Line
+	for i := pos + 1; i < len(toks) && toks[i].Start < end && toks[i].Line == line; i++ {
+		if toks[i].Text == ")" || toks[i].Text == "}" || toks[i].Text == ":=" {
+			return
+		}
+		if toks[i].Text == "=" {
+			return
+		}
+		if toks[i].Kind != scan.Ident || topNames[toks[i].Text] == "" {
+			continue
+		}
+		if i == pos+1 || toks[i-1].Text == "," {
+			names[toks[i].Text] = true
+		}
+	}
+}
+
+func tokenIndexAt(toks []scan.Token, start int) int {
+	for i, tok := range toks {
+		if tok.Start == start {
+			return i
+		}
+	}
+	return -1
+}
+
+func findTokenText(toks []scan.Token, start int, end int, text string) int {
+	for i := start; i < len(toks) && toks[i].Start < end; i++ {
+		if toks[i].Text == text {
+			return i
+		}
+	}
+	return -1
+}
+
+func findClose(toks []scan.Token, pos int, open string, close string) int {
+	depth := 0
+	for pos < len(toks) {
+		if toks[pos].Text == open {
+			depth++
+		} else if toks[pos].Text == close {
+			depth--
+			if depth == 0 {
+				return pos
+			}
+		}
+		pos++
+	}
+	return -1
+}
+
+func isTypeStart(tok scan.Token) bool {
+	return tok.Kind == scan.Ident || tok.Text == "*" || tok.Text == "[" || tok.Text == "..."
+}
+
+func isTypeStartAfterName(toks []scan.Token, pos int, end int) bool {
+	if pos+1 >= end {
+		return false
+	}
+	if toks[pos+1].Text == "," {
+		return isTypeStartAfterName(toks, pos+2, end)
+	}
+	return isTypeStart(toks[pos+1])
+}
+
+func isStatementBoundary(text string) bool {
+	return text == "{" || text == "}" || text == ";" || text == "if" || text == "for" || text == "switch"
 }
 
 func importReferenceMap(pkg load.Package, graph *load.Graph) map[string]map[string]unit.Symbol {

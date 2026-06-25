@@ -125,6 +125,64 @@ func hidden() int { return 9 }
 	}
 }
 
+func TestPackagePreservesLocalShadowNames(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+const answer = 7
+const total = 9
+
+func Use(answer int) int {
+	return answer
+}
+
+func appMain() int {
+	answer := 1
+	var total int
+	total = answer
+	return Use(total)
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	if len(u.Decls) != 4 {
+		t.Fatalf("decls = %#v, want 4", u.Decls)
+	}
+	use := u.Decls[2].Body
+	if !strings.Contains(use, "func rtg_example_com_app_Use(answer int) int") {
+		t.Fatalf("Use signature rewrote parameter name: %q", use)
+	}
+	if !strings.Contains(use, "return answer") {
+		t.Fatalf("Use body rewrote parameter reference: %q", use)
+	}
+	appMain := u.Decls[3].Body
+	if !strings.Contains(appMain, "answer := 1") {
+		t.Fatalf("appMain rewrote local short declaration: %q", appMain)
+	}
+	if !strings.Contains(appMain, "var total int") || !strings.Contains(appMain, "total = answer") {
+		t.Fatalf("appMain rewrote local var declaration: %q", appMain)
+	}
+	if !strings.Contains(appMain, "return rtg_example_com_app_Use(total)") {
+		t.Fatalf("appMain did not preserve local argument while rewriting callee: %q", appMain)
+	}
+	if strings.Contains(appMain, "rtg_example_com_app_answer := 1") {
+		t.Fatalf("appMain rewrote local shadow as package symbol: %q", appMain)
+	}
+	if strings.Contains(appMain, "var rtg_example_com_app_total int") {
+		t.Fatalf("appMain rewrote var shadow as package symbol: %q", appMain)
+	}
+}
+
 func TestPackageWithGraphRewritesStdSelector(t *testing.T) {
 	mainPkg := load.Package{
 		ImportPath:  "example.com/app",
