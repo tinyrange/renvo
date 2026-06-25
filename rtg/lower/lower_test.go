@@ -1052,7 +1052,7 @@ func appMain() int {
 	}
 }
 
-func TestPackageDoesNotNormalizeClassicForConditionCallArguments(t *testing.T) {
+func TestPackageNormalizesClassicForConditionCallArguments(t *testing.T) {
 	pkg := load.Package{
 		ImportPath: "example.com/app",
 		Name:       "main",
@@ -1081,11 +1081,20 @@ func appMain() int {
 		t.Fatalf("Package failed: %v", err)
 	}
 	body := u.Decls[3].Body
-	if strings.Contains(body, "_tmp_") {
-		t.Fatalf("classic for condition was normalized unsafely: %q", body)
+	if !strings.Contains(body, "for i := 0; ; i = i + 1 {") {
+		t.Fatalf("classic for condition was not moved into loop body guard: %q", body)
 	}
-	if !strings.Contains(body, "for i := 0; rtg_example_com_app_join(rtg_example_com_app_first(), rtg_example_com_app_second()) == 12; i = i + 1 {") {
-		t.Fatalf("classic for condition shape changed unexpectedly: %q", body)
+	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_0 := rtg_example_com_app_first()") {
+		t.Fatalf("first classic for condition call was not lifted into a temp: %q", body)
+	}
+	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_1 := rtg_example_com_app_second()") {
+		t.Fatalf("second classic for condition call was not lifted into a temp: %q", body)
+	}
+	if !strings.Contains(body, "if !(rtg_example_com_app_join(rtg_example_com_app_appMain_tmp_0, rtg_example_com_app_appMain_tmp_1) == 12) {\n\t\t\tbreak\n\t\t}") {
+		t.Fatalf("classic for condition guard did not use lifted temps: %q", body)
+	}
+	if !strings.Contains(body, "total = total + i") {
+		t.Fatalf("classic for body was not preserved: %q", body)
 	}
 }
 

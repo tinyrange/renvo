@@ -175,6 +175,42 @@ func Next(v int) int { return v + 1 }
 	runFrontendFixtureMatchesHostGo(t, fixture)
 }
 
+func TestClassicForConditionNestedCallArgumentFrontendMatchesHostGo(t *testing.T) {
+	fixture := t.TempDir()
+	writeFixtureFile(t, fixture, "go.mod", "module example.com/forcond\n")
+	writeFixtureFile(t, fixture, "cmd/app/main.go", `package main
+
+import "example.com/forcond/pkg/dep"
+
+func main() {
+	total := 0
+	for i := 0; dep.KeepGoing(dep.Step()); i = i + 1 {
+		total = total + i
+		if i > 4 {
+			print("FAIL\n")
+			return
+		}
+	}
+	if total == 3 && dep.Count() == 4 {
+		print("PASS\n")
+		return
+	}
+	print("FAIL\n")
+}
+`)
+	writeFixtureFile(t, fixture, "pkg/dep/dep.go", `package dep
+
+var count int
+func Step() int {
+	count = count + 1
+	return count
+}
+func KeepGoing(v int) bool { return v < 4 }
+func Count() int { return count }
+`)
+	runFrontendFixtureMatchesHostGo(t, fixture)
+}
+
 func TestIfShortConditionNestedCallArgumentFrontendMatchesHostGo(t *testing.T) {
 	fixture := t.TempDir()
 	writeFixtureFile(t, fixture, "go.mod", "module example.com/ifshortcond\n")

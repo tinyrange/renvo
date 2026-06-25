@@ -290,6 +290,13 @@ type conditionalShortStatement struct {
 	kind      string
 }
 
+type classicForConditionStatement struct {
+	token     int
+	condStart int
+	condEnd   int
+	openBrace int
+}
+
 func normalizeFunctionExpressions(body string, unitName string) string {
 	toks, err := scan.Tokens([]byte(body))
 	if err != nil {
@@ -340,6 +347,36 @@ func normalizeFunctionExpressions(body string, unitName string) string {
 			cursor = toks[short.end].End
 			i = short.end
 			continue
+		}
+		classic, ok := normalizationClassicForConditionStatement(toks, i)
+		if ok {
+			temps, replacements := normalizeCallArgumentExpressions(body, toks, classic.condStart, classic.condEnd, unitName, &tempIndex)
+			if len(temps) > 0 {
+				condition := applyExpressionReplacements(body, toks[classic.condStart].Start, toks[classic.condEnd-1].End, replacements)
+				out = append(out, body[cursor:toks[classic.condStart].Start]...)
+				out = append(out, body[toks[classic.condEnd].Start:toks[classic.openBrace].End]...)
+				indent := statementIndent(body, toks[classic.token].Start)
+				innerIndent := indent + "\t"
+				out = append(out, '\n')
+				for _, temp := range temps {
+					out = append(out, innerIndent...)
+					out = append(out, temp.name...)
+					out = append(out, " := "...)
+					out = append(out, temp.expr...)
+					out = append(out, '\n')
+				}
+				out = append(out, innerIndent...)
+				out = append(out, "if !("...)
+				out = append(out, condition...)
+				out = append(out, ") {\n"...)
+				out = append(out, innerIndent...)
+				out = append(out, "\tbreak\n"...)
+				out = append(out, innerIndent...)
+				out = append(out, "}\n"...)
+				cursor = toks[classic.openBrace].End
+				i = classic.openBrace
+				continue
+			}
 		}
 		stmt, ok := normalizationStatement(toks, i)
 		if !ok {
@@ -424,6 +461,31 @@ func normalizationConditionalShortStatement(toks []scan.Token, pos int) (conditi
 		openBrace: exprEnd,
 		end:       end,
 		kind:      toks[pos].Text,
+	}, true
+}
+
+func normalizationClassicForConditionStatement(toks []scan.Token, pos int) (classicForConditionStatement, bool) {
+	if toks[pos].Text != "for" {
+		return classicForConditionStatement{}, false
+	}
+	exprStart := pos + 1
+	exprEnd := conditionExpressionEnd(toks, pos)
+	if exprEnd <= exprStart || exprEnd >= len(toks) || toks[exprEnd].Text != "{" {
+		return classicForConditionStatement{}, false
+	}
+	firstSemi := topLevelSemicolon(toks, exprStart, exprEnd)
+	if firstSemi < 0 {
+		return classicForConditionStatement{}, false
+	}
+	secondSemi := topLevelSemicolon(toks, firstSemi+1, exprEnd)
+	if secondSemi < 0 || secondSemi <= firstSemi+1 {
+		return classicForConditionStatement{}, false
+	}
+	return classicForConditionStatement{
+		token:     pos,
+		condStart: firstSemi + 1,
+		condEnd:   secondSemi,
+		openBrace: exprEnd,
 	}, true
 }
 
