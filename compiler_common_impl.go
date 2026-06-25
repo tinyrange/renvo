@@ -6549,6 +6549,9 @@ func rtgInferParsedExprType(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 		}
 		leftType := rtgResolveType(meta, rtgInferParsedExprType(g, ep, e.left))
 		rightType := rtgResolveType(meta, rtgInferParsedExprType(g, ep, e.right))
+		if rtgTokCharIs(p, e.tok, '+') && (leftType.kind == rtgTypeString || rightType.kind == rtgTypeString) {
+			return rtgTypeString
+		}
 		if leftType.kind == rtgTypeFloat64 || rightType.kind == rtgTypeFloat64 {
 			return rtgTypeFloat64
 		}
@@ -9661,11 +9664,60 @@ func rtgEmitCompareJump(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, label int
 	return rtgAmd64EmitCompareJump(g, ep, e, label, jumpIfTrue)
 }
 func rtgEmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	e := &ep.exprs[idx]
+	if e.kind == rtgExprBinary && rtgTokCharIs(g.prog, e.tok, '+') && rtgTypeIsString(g.meta, rtgInferParsedExprType(g, ep, idx)) {
+		return rtgEmitStringConcatValueRegs(g, ep, idx)
+	}
 	if rtgTargetArch == rtgArch386 {
 		return rtg386EmitStringValueRegs(g, ep, idx)
 	}
 	return rtgAmd64EmitStringValueRegs(g, ep, idx)
 }
+
+func rtgEmitStringConcatValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	byteSliceType := rtgAddType(g.meta, rtgTypeSlice, rtgTypeByte, 0, 0, 24, 0, 0)
+	offset := rtgAddTypedLocal(g, 0, 0, byteSliceType)
+	rtgZeroLocalAtOffset(g, offset)
+	loc := rtgSliceLocation{offset: offset, typ: byteSliceType, ok: true}
+	if !rtgEmitStringConcatIntoLocation(g, ep, idx, &loc) {
+		return false
+	}
+	rtgAsmLoadRaxStack(&g.asm, offset)
+	rtgAsmPushRax(&g.asm)
+	rtgAsmLoadRaxStack(&g.asm, offset-8)
+	rtgAsmMovRdxRax(&g.asm)
+	rtgAsmPopRax(&g.asm)
+	return true
+}
+
+func rtgEmitStringConcatIntoLocation(g *rtgLinearGen, ep *rtgExprParse, idx int, loc *rtgSliceLocation) bool {
+	e := &ep.exprs[idx]
+	if e.kind == rtgExprBinary && rtgTokCharIs(g.prog, e.tok, '+') && rtgTypeIsString(g.meta, rtgInferParsedExprType(g, ep, idx)) {
+		if !rtgEmitStringConcatIntoLocation(g, ep, e.left, loc) {
+			return false
+		}
+		return rtgEmitStringConcatIntoLocation(g, ep, e.right, loc)
+	}
+	return rtgEmitAppendStringBytesToLocation(g, ep, idx, loc)
+}
+
+func rtgEmitAppendStringBytesToLocation(g *rtgLinearGen, ep *rtgExprParse, idx int, loc *rtgSliceLocation) bool {
+	a := &g.asm
+	if !rtgEmitStringValueRegs(g, ep, idx) {
+		return false
+	}
+	rtgAsmPushRax(a)
+	rtgAsmPushRdx(a)
+	if !rtgEmitSliceSlotAddrs(g, ep, loc, 1) {
+		return false
+	}
+	rtgAsmPopRdx(a)
+	rtgAsmPopRax(a)
+	label := rtgEnsureAppendBytesHelper(g)
+	rtgAsmCallLabel(a, label)
+	return true
+}
+
 func rtgEmitCompositeFieldToMem(g *rtgLinearGen, ep *rtgExprParse, idx int, fieldType int, addrOffset int, fieldOffset int) bool {
 	if rtgTargetArch == rtgArch386 {
 		return rtg386EmitCompositeFieldToMem(g, ep, idx, fieldType, addrOffset, fieldOffset)

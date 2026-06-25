@@ -438,6 +438,35 @@ func main() {
 	runFrontendFixtureMatchesHostGo(t, fixture)
 }
 
+func TestStdPathFilepathFrontendMatchesHostGo(t *testing.T) {
+	fixture := t.TempDir()
+	writeFixtureFile(t, fixture, "go.mod", "module example.com/stdfilepath\n")
+	writeFixtureFile(t, fixture, "cmd/app/main.go", `package main
+
+import "path/filepath"
+
+func main() {
+	ok := filepath.Separator == '/'
+	ok = ok && filepath.ToSlash("a/b") == "a/b"
+	ok = ok && filepath.FromSlash("a/b") == "a/b"
+	ok = ok && filepath.IsAbs("/tmp")
+	ok = ok && !filepath.IsAbs("tmp")
+	ok = ok && filepath.Clean("/a//b/./c/..") == "/a/b"
+	ok = ok && filepath.Clean("a/../b") == "b"
+	ok = ok && filepath.Join("/tmp/", "app") == "/tmp/app"
+	ok = ok && filepath.Base("/tmp/app/main.go") == "main.go"
+	ok = ok && filepath.Dir("/tmp/app/main.go") == "/tmp/app"
+	ok = ok && filepath.Ext("/tmp/app/main.go") == ".go"
+	if ok {
+		print("PASS\n")
+		return
+	}
+	print("FAIL\n")
+}
+`)
+	runFrontendFixtureMatchesHostGo(t, fixture)
+}
+
 func TestTopLevelNameListsFrontendMatchesHostGo(t *testing.T) {
 	fixture := t.TempDir()
 	writeFixtureFile(t, fixture, "go.mod", "module example.com/namelists\n")
