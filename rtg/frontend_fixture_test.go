@@ -120,11 +120,14 @@ import "example.com/forcall/pkg/dep"
 
 func main() {
 	count := 0
-	for dep.Join(dep.First(), dep.Second()) == 12 {
+	for dep.KeepGoing(dep.Step()) {
 		count = count + 1
-		break
+		if count > 3 {
+			print("FAIL\n")
+			return
+		}
 	}
-	if count == 1 {
+	if count == 2 && dep.Count() == 3 {
 		dep.Emit()
 		return
 	}
@@ -133,9 +136,13 @@ func main() {
 `)
 	writeFixtureFile(t, fixture, "pkg/dep/dep.go", `package dep
 
-func First() int { return 1 }
-func Second() int { return 2 }
-func Join(a int, b int) int { return a*10 + b }
+var count int
+func Step() int {
+	count = count + 1
+	return count
+}
+func KeepGoing(v int) bool { return v < 3 }
+func Count() int { return count }
 func Emit() int {
 	print("PASS\n")
 	return 0
