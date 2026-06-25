@@ -18,11 +18,18 @@ type File struct {
 }
 
 type Package struct {
-	ImportPath string
-	Dir        string
-	Name       string
-	Files      []File
-	Imports    []string
+	ImportPath      string
+	Dir             string
+	Name            string
+	Files           []File
+	Imports         []string
+	ImportPositions map[string]ImportPosition
+}
+
+type ImportPosition struct {
+	Path   string
+	Line   int
+	Column int
 }
 
 type Graph struct {
@@ -171,7 +178,7 @@ func loadPackageRecursiveAs(g *Graph, opts Options, seen map[string]bool, dir st
 	for _, imp := range pkg.Imports {
 		next, ok, err := resolveImport(g.Module, opts, imp)
 		if err != nil {
-			return err
+			return importResolutionError(pkg, imp, err)
 		}
 		if ok {
 			if err := loadPackageRecursiveAs(g, opts, seen, next.Dir, next.ImportPath); err != nil {
@@ -196,7 +203,7 @@ func loadPackageFilesRecursiveAs(g *Graph, opts Options, seen map[string]bool, d
 	for _, imp := range pkg.Imports {
 		next, ok, err := resolveImport(g.Module, opts, imp)
 		if err != nil {
-			return err
+			return importResolutionError(pkg, imp, err)
 		}
 		if ok {
 			if err := loadPackageRecursiveAs(g, opts, seen, next.Dir, next.ImportPath); err != nil {
@@ -225,7 +232,7 @@ func readPackageFiles(module mod.Module, dir string, importPath string, files []
 	files = append([]string(nil), files...)
 	sort.Strings(files)
 	files = uniqueStrings(files)
-	pkg := Package{Dir: dir, ImportPath: importPath}
+	pkg := Package{Dir: dir, ImportPath: importPath, ImportPositions: map[string]ImportPosition{}}
 	importSet := map[string]bool{}
 	for _, path := range files {
 		data, err := os.ReadFile(path)
@@ -243,6 +250,9 @@ func readPackageFiles(module mod.Module, dir string, importPath string, files []
 		}
 		for _, imp := range info.Imports {
 			importSet[imp.Path] = true
+			if _, ok := pkg.ImportPositions[imp.Path]; !ok {
+				pkg.ImportPositions[imp.Path] = ImportPosition{Path: path, Line: imp.Line, Column: imp.Column}
+			}
 		}
 		pkg.Files = append(pkg.Files, File{Path: path, UnitPath: unitFilePath(module, importPath, path), Source: data})
 	}
@@ -251,6 +261,14 @@ func readPackageFiles(module mod.Module, dir string, importPath string, files []
 	}
 	sort.Strings(pkg.Imports)
 	return pkg, nil
+}
+
+func importResolutionError(pkg Package, imp string, err error) error {
+	pos, ok := pkg.ImportPositions[imp]
+	if !ok || pos.Path == "" || pos.Line == 0 || pos.Column == 0 {
+		return err
+	}
+	return fmt.Errorf("%s:%d:%d: %v", pos.Path, pos.Line, pos.Column, err)
 }
 
 func uniqueStrings(values []string) []string {

@@ -545,7 +545,7 @@ func appMain() int { return 0 }
 	if err == nil {
 		t.Fatalf("LoadEntries succeeded with missing std package")
 	}
-	if !strings.Contains(err.Error(), `standard package "fmt" is not available in rtg/std`) {
+	if !containsAll(err.Error(), []string{filepath.Join(root, "main.go") + ":3:8", `standard package "fmt" is not available in rtg/std`}) {
 		t.Fatalf("error = %q", err)
 	}
 }
@@ -564,7 +564,7 @@ func appMain() int { return 0 }
 	if err == nil {
 		t.Fatalf("LoadEntries succeeded with unavailable nested std package")
 	}
-	if !strings.Contains(err.Error(), `standard package "net/http" is not available in rtg/std`) {
+	if !containsAll(err.Error(), []string{filepath.Join(root, "main.go") + ":3:8", `standard package "net/http" is not available in rtg/std`}) {
 		t.Fatalf("error = %q", err)
 	}
 }
@@ -583,7 +583,7 @@ func appMain() int { return pkg.Value() }
 	if err == nil {
 		t.Fatalf("LoadEntries succeeded with unrequired external module import")
 	}
-	if !strings.Contains(err.Error(), `import "example.org/lib/pkg" is not in module "example.com/app"`) {
+	if !containsAll(err.Error(), []string{filepath.Join(root, "main.go") + ":3:8", `import "example.org/lib/pkg" is not in module "example.com/app"`}) {
 		t.Fatalf("error = %q", err)
 	}
 }
@@ -636,7 +636,7 @@ func appMain() int { return pkg.Value() }
 	if err == nil {
 		t.Fatalf("LoadEntries succeeded with non-local replace")
 	}
-	if got := err.Error(); got == "" || !containsAll(got, []string{"non-local replace target", "external module fetching is not supported"}) {
+	if got := err.Error(); got == "" || !containsAll(got, []string{filepath.Join(root, "main.go") + ":3:8", "non-local replace target", "external module fetching is not supported"}) {
 		t.Fatalf("error = %q", got)
 	}
 }
@@ -688,7 +688,7 @@ func appMain() int { return pkg.Value() }
 	if err == nil {
 		t.Fatalf("LoadEntries succeeded with required external module")
 	}
-	if got := err.Error(); got == "" || !containsAll(got, []string{"required module", "example.com/lib", "external module fetching is not supported"}) {
+	if got := err.Error(); got == "" || !containsAll(got, []string{filepath.Join(root, "main.go") + ":3:8", "required module", "example.com/lib", "external module fetching is not supported"}) {
 		t.Fatalf("error = %q", got)
 	}
 }
@@ -830,6 +830,12 @@ func appMain() int { return 0 }
 	}
 	if info.Imports[1].Alias != "alias" {
 		t.Fatalf("aliased import = %#v", info.Imports[1])
+	}
+	if info.Imports[0].Line != 4 || info.Imports[0].Column != 4 {
+		t.Fatalf("first import position = %d:%d, want 4:4", info.Imports[0].Line, info.Imports[0].Column)
+	}
+	if info.Imports[1].Line != 5 || info.Imports[1].Column != 8 {
+		t.Fatalf("second import position = %d:%d, want 5:8", info.Imports[1].Line, info.Imports[1].Column)
 	}
 }
 

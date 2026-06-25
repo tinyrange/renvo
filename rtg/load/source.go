@@ -25,8 +25,10 @@ type SourceInfo struct {
 }
 
 type ImportInfo struct {
-	Path  string
-	Alias string
+	Path   string
+	Alias  string
+	Line   int
+	Column int
 }
 
 func ParseSourceInfo(path string, src []byte) (SourceInfo, error) {
@@ -61,7 +63,7 @@ func ParseSourceInfo(path string, src []byte) (SourceInfo, error) {
 				if err != nil {
 					return SourceInfo{}, sourceError{path: path, line: toks[pos].Line, column: toks[pos].Column, message: err.Error()}
 				}
-				info.Imports = append(info.Imports, ImportInfo{Path: value, Alias: alias})
+				info.Imports = append(info.Imports, ImportInfo{Path: value, Alias: alias, Line: toks[pos].Line, Column: toks[pos].Column})
 				pos++
 			}
 			if pos >= len(toks) || toks[pos].Text != ")" {
@@ -82,7 +84,7 @@ func ParseSourceInfo(path string, src []byte) (SourceInfo, error) {
 					return SourceInfo{}, sourceError{path: path, line: toks[pos].Line, column: toks[pos].Column, message: err.Error()}
 				}
 				alias := importAliasBefore(toks, pos)
-				info.Imports = append(info.Imports, ImportInfo{Path: value, Alias: alias})
+				info.Imports = append(info.Imports, ImportInfo{Path: value, Alias: alias, Line: toks[pos].Line, Column: toks[pos].Column})
 				pos++
 				found = true
 				break
