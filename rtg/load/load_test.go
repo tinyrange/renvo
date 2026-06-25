@@ -84,6 +84,61 @@ const C = 3
 	}
 }
 
+func TestLoadEntriesFiltersDirectoryFilesByTarget(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "pkg/common.go", `package pkg
+
+const Common = 1
+`)
+	writeFile(t, root, "pkg/value_linux.go", `package pkg
+
+const Value = Common + 1
+`)
+	writeFile(t, root, "pkg/value_windows.go", `package pkg
+
+const Value = Common + 2
+`)
+	writeFile(t, root, "pkg/arch_amd64.go", `package pkg
+
+const Arch = 64
+`)
+	writeFile(t, root, "pkg/arch_arm64.go", `package pkg
+
+const Arch = 128
+`)
+
+	graph, err := LoadEntries([]string{filepath.Join(root, "pkg")}, Options{Target: "linux/amd64"})
+	if err != nil {
+		t.Fatalf("LoadEntries linux/amd64 failed: %v", err)
+	}
+	got := packageFileNames(graph.Packages[0])
+	want := []string{"arch_amd64.go", "common.go", "value_linux.go"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("linux/amd64 files = %v, want %v", got, want)
+	}
+
+	graph, err = LoadEntries([]string{filepath.Join(root, "pkg")}, Options{Target: "windows/amd64"})
+	if err != nil {
+		t.Fatalf("LoadEntries windows/amd64 failed: %v", err)
+	}
+	got = packageFileNames(graph.Packages[0])
+	want = []string{"arch_amd64.go", "common.go", "value_windows.go"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("windows/amd64 files = %v, want %v", got, want)
+	}
+
+	graph, err = LoadEntries([]string{filepath.Join(root, "pkg")}, Options{Target: "linux/aarch64"})
+	if err != nil {
+		t.Fatalf("LoadEntries linux/aarch64 failed: %v", err)
+	}
+	got = packageFileNames(graph.Packages[0])
+	want = []string{"arch_arm64.go", "common.go", "value_linux.go"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("linux/aarch64 files = %v, want %v", got, want)
+	}
+}
+
 func TestLoadEntriesDeduplicatesExplicitFiles(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/app\n")
@@ -370,6 +425,14 @@ func writeFile(t *testing.T, root string, name string, data string) {
 	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
+}
+
+func packageFileNames(pkg Package) []string {
+	names := make([]string, 0, len(pkg.Files))
+	for _, file := range pkg.Files {
+		names = append(names, filepath.Base(file.Path))
+	}
+	return names
 }
 
 func containsAll(s string, parts []string) bool {

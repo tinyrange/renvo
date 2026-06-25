@@ -44,7 +44,7 @@ func run(cfg config) error {
 	if cfg.link {
 		return runLink(cfg)
 	}
-	graph, err := load.LoadEntries(cfg.inputs, load.Options{})
+	graph, err := load.LoadEntries(cfg.inputs, load.Options{Target: cfg.target})
 	if err != nil {
 		return err
 	}

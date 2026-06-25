@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"j5.nz/rtg/rtg/mod"
+	targetpkg "j5.nz/rtg/rtg/target"
 )
 
 type File struct {
@@ -31,6 +32,7 @@ type Graph struct {
 
 type Options struct {
 	StdRoot string
+	Target  string
 }
 
 func LoadEntries(entries []string, opts Options) (*Graph, error) {
@@ -43,6 +45,9 @@ func LoadEntries(entries []string, opts Options) (*Graph, error) {
 	}
 	if opts.StdRoot == "" {
 		opts.StdRoot = defaultStdRoot(module.Root)
+	}
+	if opts.Target == "" {
+		opts.Target = targetpkg.Default()
 	}
 	g := &Graph{Module: module}
 	seen := map[string]bool{}
@@ -152,7 +157,7 @@ func loadPackageRecursiveAs(g *Graph, opts Options, seen map[string]bool, dir st
 		return nil
 	}
 	seen[dir] = true
-	pkg, err := readPackage(g.Module, dir, importPath)
+	pkg, err := readPackage(g.Module, dir, importPath, opts)
 	if err != nil {
 		return err
 	}
@@ -196,8 +201,8 @@ func loadPackageFilesRecursiveAs(g *Graph, opts Options, seen map[string]bool, d
 	return nil
 }
 
-func readPackage(module mod.Module, dir string, importPath string) (Package, error) {
-	files, err := goFiles(dir)
+func readPackage(module mod.Module, dir string, importPath string, opts Options) (Package, error) {
+	files, err := goFiles(dir, opts.Target)
 	if err != nil {
 		return Package{}, err
 	}
@@ -280,11 +285,12 @@ func PackageNameFromImportPath(path string) string {
 	return path
 }
 
-func goFiles(dir string) ([]string, error) {
+func goFiles(dir string, target string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
+	targetOS, targetArch := targetFileParts(target)
 	var files []string
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -297,10 +303,70 @@ func goFiles(dir string) ([]string, error) {
 		if strings.HasSuffix(name, "_test.go") || strings.HasSuffix(name, ".rtg.go") {
 			continue
 		}
+		if !fileNameMatchesTarget(name, targetOS, targetArch) {
+			continue
+		}
 		files = append(files, filepath.Join(dir, name))
 	}
 	sort.Strings(files)
 	return files, nil
+}
+
+func targetFileParts(target string) (string, string) {
+	slash := strings.IndexByte(target, '/')
+	if slash < 0 {
+		return "", ""
+	}
+	osPart := target[:slash]
+	archPart := target[slash+1:]
+	if archPart == "aarch64" {
+		archPart = "arm64"
+	}
+	if archPart == "wasm32" {
+		archPart = "wasm"
+	}
+	return osPart, archPart
+}
+
+func fileNameMatchesTarget(name string, targetOS string, targetArch string) bool {
+	base := strings.TrimSuffix(name, ".go")
+	parts := strings.Split(base, "_")
+	if len(parts) < 2 {
+		return true
+	}
+	last := parts[len(parts)-1]
+	if isGoArchName(last) {
+		if targetArch != "" && last != targetArch {
+			return false
+		}
+		parts = parts[:len(parts)-1]
+		if len(parts) < 2 {
+			return true
+		}
+		last = parts[len(parts)-1]
+	}
+	if isGoOSName(last) {
+		if targetOS != "" && last != targetOS {
+			return false
+		}
+	}
+	return true
+}
+
+func isGoOSName(name string) bool {
+	switch name {
+	case "aix", "android", "darwin", "dragonfly", "freebsd", "hurd", "illumos", "ios", "js", "linux", "netbsd", "openbsd", "plan9", "solaris", "wasi", "wasip1", "windows":
+		return true
+	}
+	return false
+}
+
+func isGoArchName(name string) bool {
+	switch name {
+	case "386", "amd64", "amd64p32", "arm", "arm64", "loong64", "mips", "mips64", "mips64le", "mipsle", "ppc64", "ppc64le", "riscv64", "s390x", "sparc64", "wasm", "wasm32":
+		return true
+	}
+	return false
 }
 
 type resolvedImport struct {

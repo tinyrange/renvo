@@ -45,6 +45,43 @@ func appMain() int {
 	}
 }
 
+func TestRunEmitUnitUsesTargetFileSuffixes(t *testing.T) {
+	root := t.TempDir()
+	writeCLIFile(t, root, "go.mod", "module example.com/app\n")
+	writeCLIFile(t, root, "cmd/app/main_linux.go", `package main
+
+func appMain() int {
+	return linuxValue()
+}
+
+func linuxValue() int { return 1 }
+`)
+	writeCLIFile(t, root, "cmd/app/main_windows.go", `package main
+
+func appMain() int {
+	return windowsValue()
+}
+
+func windowsValue() int { return 2 }
+`)
+	out := filepath.Join(root, "out.rtg.go")
+	cfg := config{target: "windows/amd64", output: out, emitUnit: true, inputs: []string{filepath.Join(root, "cmd", "app")}}
+	if err := run(cfg); err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	src := string(data)
+	if !strings.Contains(src, "rtg_example_com_app_cmd_app_windowsValue") {
+		t.Fatalf("emitted unit missing windows-selected file:\n%s", src)
+	}
+	if strings.Contains(src, "linuxValue") {
+		t.Fatalf("emitted unit included linux-only file for windows target:\n%s", src)
+	}
+}
+
 func TestRunEmitUnitWithExplicitFiles(t *testing.T) {
 	root := t.TempDir()
 	writeCLIFile(t, root, "go.mod", "module example.com/app\n")
