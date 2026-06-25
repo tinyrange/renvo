@@ -49,6 +49,51 @@ func appMain() int {
 	}
 }
 
+func TestCompileSourceBytesBuildsRunnableExecutable(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skipf("linux/amd64 executable smoke requires linux/amd64 host, got %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	root, ok := findBackendRootUpward(".")
+	if !ok {
+		t.Skip("backend root not found")
+	}
+	src := []byte(`//go:build rtg
+
+package main
+
+func appMain() int {
+	print("PASS\n")
+	return 0
+}
+`)
+	data, err := CompileSourceBytes(src, Options{Target: "linux/amd64", BackendRoot: root})
+	if err != nil {
+		t.Fatalf("CompileSourceBytes failed: %v", err)
+	}
+	out := filepath.Join(t.TempDir(), "app")
+	if err := os.WriteFile(out, data, 0755); err != nil {
+		t.Fatalf("WriteFile output failed: %v", err)
+	}
+	cmd := exec.Command(out)
+	outData, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("compiled app failed: %v\n%s", err, string(outData))
+	}
+	if string(outData) != "PASS\n" {
+		t.Fatalf("compiled app output = %q", string(outData))
+	}
+}
+
+func TestCompileSourceRequiresOutput(t *testing.T) {
+	err := CompileSource([]byte("package main\n"), Options{Target: "linux/amd64"})
+	if err == nil {
+		t.Fatalf("CompileSource accepted missing output path")
+	}
+	if !strings.Contains(err.Error(), "missing output path") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestCompileSourceRejectsUnsupportedTarget(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "app")
 	err := CompileSource([]byte("package main\n"), Options{Target: "linux/arm64", Output: out})

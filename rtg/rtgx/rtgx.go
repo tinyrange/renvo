@@ -19,38 +19,77 @@ type Options struct {
 }
 
 func CompileUnits(units []unit.Unit, opts Options) error {
-	plan, err := link.Build(units)
+	if opts.Output == "" {
+		return fmt.Errorf("rtg: missing output path (-o)")
+	}
+	data, err := CompileUnitsBytes(units, opts)
 	if err != nil {
 		return err
 	}
+	return writeOutput(data, opts.Output)
+}
+
+func CompileUnitsBytes(units []unit.Unit, opts Options) ([]byte, error) {
+	plan, err := link.Build(units)
+	if err != nil {
+		return nil, err
+	}
 	artifact := link.SourceArtifact(plan)
-	return CompileSource(artifact.Source, opts)
+	return CompileSourceBytes(artifact.Source, opts)
 }
 
 func CompileUnitSources(sources []unit.SourceFile, opts Options) error {
-	units, err := unit.ParseSources(sources)
+	if opts.Output == "" {
+		return fmt.Errorf("rtg: missing output path (-o)")
+	}
+	data, err := CompileUnitSourcesBytes(sources, opts)
 	if err != nil {
 		return err
 	}
-	return CompileUnits(units, opts)
+	return writeOutput(data, opts.Output)
+}
+
+func CompileUnitSourcesBytes(sources []unit.SourceFile, opts Options) ([]byte, error) {
+	units, err := unit.ParseSources(sources)
+	if err != nil {
+		return nil, err
+	}
+	return CompileUnitsBytes(units, opts)
 }
 
 func CompileSource(source []byte, opts Options) error {
 	if opts.Output == "" {
 		return fmt.Errorf("rtg: missing output path (-o)")
 	}
+	data, err := CompileSourceBytes(source, opts)
+	if err != nil {
+		return err
+	}
+	return writeOutput(data, opts.Output)
+}
+
+func CompileSourceBytes(source []byte, opts Options) ([]byte, error) {
 	target := opts.Target
 	if target == "" {
 		target = targetpkg.Default()
 	}
 	if !targetpkg.Supported(target) {
-		return fmt.Errorf("rtg: unsupported target: %s\nrtg: supported targets: %s", target, targetpkg.List())
+		return nil, fmt.Errorf("rtg: unsupported target: %s\nrtg: supported targets: %s", target, targetpkg.List())
 	}
-	output, err := filepath.Abs(opts.Output)
+	outDir, err := os.MkdirTemp("", "rtgx-out-")
 	if err != nil {
-		return err
+		return nil, err
 	}
-	root, err := backendRoot(opts.BackendRoot)
+	defer os.RemoveAll(outDir)
+	output := filepath.Join(outDir, "out")
+	if err := compileSourceToPath(source, target, output, opts.BackendRoot); err != nil {
+		return nil, err
+	}
+	return os.ReadFile(output)
+}
+
+func compileSourceToPath(source []byte, target string, output string, backendRootOverride string) error {
+	root, err := backendRoot(backendRootOverride)
 	if err != nil {
 		return err
 	}
@@ -66,6 +105,17 @@ func CompileSource(source []byte, opts Options) error {
 		return fmt.Errorf("rtgx compile failed: %w", err)
 	}
 	return os.Chmod(output, 0755)
+}
+
+func writeOutput(data []byte, outputPath string) error {
+	if outputPath == "" {
+		return fmt.Errorf("rtg: missing output path (-o)")
+	}
+	output, err := filepath.Abs(outputPath)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(output, data, 0755)
 }
 
 func backendRoot(explicit string) (string, error) {
@@ -87,7 +137,10 @@ func backendRoot(explicit string) (string, error) {
 }
 
 func findBackendRootUpward(start string) (string, bool) {
-	dir := filepath.Clean(start)
+	dir, err := filepath.Abs(start)
+	if err != nil {
+		dir = filepath.Clean(start)
+	}
 	for {
 		if hasBackendRootFiles(dir) {
 			return dir, true
