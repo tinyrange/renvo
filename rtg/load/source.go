@@ -14,7 +14,6 @@ type SourceInfo struct {
 type ImportInfo struct {
 	Path  string
 	Alias string
-	Name  string
 }
 
 func ParseSourceInfo(path string, src []byte) (SourceInfo, error) {
@@ -40,7 +39,7 @@ func ParseSourceInfo(path string, src []byte) (SourceInfo, error) {
 					if err != nil {
 						return SourceInfo{}, fmt.Errorf("%s: %w", path, err)
 					}
-					info.Imports = append(info.Imports, ImportInfo{Path: value, Alias: aliasBefore(toks, pos), Name: importLocalName(value, aliasBefore(toks, pos))})
+					info.Imports = append(info.Imports, ImportInfo{Path: value, Alias: aliasBefore(toks, pos)})
 				}
 				pos++
 			}
@@ -58,7 +57,7 @@ func ParseSourceInfo(path string, src []byte) (SourceInfo, error) {
 					return SourceInfo{}, fmt.Errorf("%s: %w", path, err)
 				}
 				alias := importAliasBefore(toks, pos)
-				info.Imports = append(info.Imports, ImportInfo{Path: value, Alias: alias, Name: importLocalName(value, alias)})
+				info.Imports = append(info.Imports, ImportInfo{Path: value, Alias: alias})
 				pos++
 				found = true
 				break
@@ -87,11 +86,4 @@ func aliasBefore(toks []scan.Token, pos int) string {
 
 func importAliasBefore(toks []scan.Token, pos int) string {
 	return aliasBefore(toks, pos)
-}
-
-func importLocalName(path string, alias string) string {
-	if alias != "" && alias != "." && alias != "_" {
-		return alias
-	}
-	return PackageNameFromImportPath(path)
 }

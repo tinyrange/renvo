@@ -202,7 +202,7 @@ func appMain() int { return 0 }
 	if len(info.Imports) != 2 {
 		t.Fatalf("imports = %v, want 2 imports", info.Imports)
 	}
-	if info.Imports[1].Alias != "alias" || info.Imports[1].Name != "alias" {
+	if info.Imports[1].Alias != "alias" {
 		t.Fatalf("aliased import = %#v", info.Imports[1])
 	}
 }
