@@ -70,6 +70,16 @@ func Graph(g *load.Graph) error {
 	return nil
 }
 
+func declDiagnostics(file parse.File) Diagnostics {
+	var diags Diagnostics
+	for _, decl := range file.Decls {
+		if decl.Kind == "func" && decl.Receiver {
+			diags = append(diags, declDiagnostic(file, decl, "methods are not supported"))
+		}
+	}
+	return diags
+}
+
 func exportedDecls(g *load.Graph) map[string]map[string]bool {
 	out := map[string]map[string]bool{}
 	for _, pkg := range g.Packages {
@@ -123,6 +133,7 @@ func importedSelectorDiagnostics(pkg load.Package, file parse.File, exported map
 func File(file parse.File) Diagnostics {
 	var diags Diagnostics
 	diags = append(diags, importDiagnostics(file)...)
+	diags = append(diags, declDiagnostics(file)...)
 	topFuncs := file.TopLevelFuncAt
 	for i, tok := range file.Tokens {
 		if tok.Kind == scan.EOF {

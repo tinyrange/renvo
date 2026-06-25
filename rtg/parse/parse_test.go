@@ -43,3 +43,21 @@ func TestFileSourceRejectsUnexpectedTopLevelToken(t *testing.T) {
 		t.Fatalf("FileSource succeeded for non-declaration top-level statement")
 	}
 }
+
+func TestFileSourceMarksMethodDecls(t *testing.T) {
+	file, err := FileSource("method.go", []byte(`package main
+
+type box struct { value int }
+func (b box) Value() int { return b.value }
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	if len(file.Decls) != 2 {
+		t.Fatalf("decls = %#v, want 2", file.Decls)
+	}
+	method := file.Decls[1]
+	if method.Name != "Value" || !method.Receiver {
+		t.Fatalf("method decl = %#v, want receiver Value", method)
+	}
+}

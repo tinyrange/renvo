@@ -23,12 +23,13 @@ type Import struct {
 }
 
 type Decl struct {
-	Kind    string
-	Name    string
-	Tok     scan.Token
-	NameTok scan.Token
-	Start   int
-	End     int
+	Kind     string
+	Name     string
+	Tok      scan.Token
+	NameTok  scan.Token
+	Receiver bool
+	Start    int
+	End      int
 }
 
 func FileSource(path string, src []byte) (File, error) {
@@ -128,6 +129,7 @@ func parseDecl(file *File, pos int) int {
 		file.TopLevelFuncAt[pos] = true
 		namePos := pos + 1
 		if namePos < len(toks) && toks[namePos].Text == "(" {
+			decl.Receiver = true
 			close := skipBalanced(toks, namePos, "(", ")")
 			if close > namePos {
 				namePos = close + 1

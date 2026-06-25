@@ -70,6 +70,29 @@ func appMain() int {
 	}
 }
 
+func TestFileRejectsMethods(t *testing.T) {
+	file, err := parse.FileSource("method.go", []byte(`package main
+
+type box struct { value int }
+
+func (b box) Value() int {
+	return b.value
+}
+
+func appMain() int { return 0 }
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	err = File(file)
+	if err == nil {
+		t.Fatalf("File accepted method declaration")
+	}
+	if !strings.Contains(err.Error(), "method.go:5:14: methods are not supported") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestFileRejectsUnsupportedImportForms(t *testing.T) {
 	file, err := parse.FileSource("imports.go", []byte(`package main
 
