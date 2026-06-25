@@ -89,7 +89,10 @@ func ParseFile(data string) (Module, error) {
 			module.Replaces = append(module.Replaces, repl)
 			continue
 		}
-		if len(fields) >= 2 && fields[0] == "module" {
+		if fields[0] == "module" {
+			if module.Path != "" || len(fields) != 2 {
+				return Module{}, fmt.Errorf("malformed module directive")
+			}
 			module.Path = fields[1]
 			continue
 		}

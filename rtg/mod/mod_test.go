@@ -18,6 +18,32 @@ func TestParseModulePathMissing(t *testing.T) {
 	}
 }
 
+func TestParseFileRejectsMalformedModuleDirective(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+	}{
+		{name: "missing path", data: `module
+`},
+		{name: "extra field", data: `module example.com/app extra
+`},
+		{name: "duplicate", data: `module example.com/app
+module example.com/other
+`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseFile(tt.data)
+			if err == nil {
+				t.Fatalf("ParseFile accepted malformed module directive %s", tt.name)
+			}
+			if err.Error() != "malformed module directive" {
+				t.Fatalf("error = %q", err)
+			}
+		})
+	}
+}
+
 func TestParseFileReplaces(t *testing.T) {
 	module, err := ParseFile(`module example.com/app
 
