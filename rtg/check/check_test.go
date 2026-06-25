@@ -150,6 +150,40 @@ func appMain() int {
 	}
 }
 
+func TestFileRejectsNestedArrayTypes(t *testing.T) {
+	file, err := parse.FileSource("arrays.go", []byte(`package main
+
+type Pointer *[3]int
+type SliceOfArray [][2]int
+type Box struct { values []*[4]int }
+func use(values []*[5]int) int { return 0 }
+func appMain() int {
+	var values [][6]int
+	_ = values
+	return 0
+}
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	err = File(file)
+	if err == nil {
+		t.Fatalf("File accepted nested array types")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"arrays.go:3:15: arrays are not supported",
+		"arrays.go:4:21: arrays are not supported",
+		"arrays.go:5:29: arrays are not supported",
+		"arrays.go:6:20: arrays are not supported",
+		"arrays.go:8:15: arrays are not supported",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("missing diagnostic %q in:\n%s", want, msg)
+		}
+	}
+}
+
 func TestFileAcceptsSimpleSubsetProgram(t *testing.T) {
 	file, err := parse.FileSource("ok.go", []byte(`package main
 

@@ -270,7 +270,8 @@ func startsGenericDecl(toks []scan.Token, i int, topFuncs map[int]bool) bool {
 		return false
 	}
 	if toks[i].Text == "type" && toks[i+1].Kind == scan.Ident && toks[i+2].Text == "[" {
-		return true
+		close := findClose(toks, i+2, "[", "]")
+		return close > i+4
 	}
 	if toks[i].Text == "func" && topFuncs[i] {
 		namePos := i + 1
@@ -281,7 +282,11 @@ func startsGenericDecl(toks []scan.Token, i int, topFuncs map[int]bool) bool {
 			}
 			namePos = close + 1
 		}
-		return toks[namePos].Kind == scan.Ident && toks[namePos+1].Text == "["
+		if toks[namePos].Kind != scan.Ident || toks[namePos+1].Text != "[" {
+			return false
+		}
+		close := findClose(toks, namePos+1, "[", "]")
+		return close > namePos+3
 	}
 	return false
 }
@@ -305,17 +310,20 @@ func startsArrayType(toks []scan.Token, i int) bool {
 		return false
 	}
 	prev := toks[i-1]
+	if prev.Text == "*" {
+		return precededByTypeContext(toks, i-1)
+	}
+	if prev.Text == "]" {
+		open := findOpen(toks, i-1, "[", "]")
+		return open >= 0 && open+1 == i-1 && precededByTypeContext(toks, open)
+	}
 	if prev.Text == ")" {
 		return true
 	}
 	if prev.Kind != scan.Ident {
 		return false
 	}
-	if i < 2 {
-		return false
-	}
-	beforeName := toks[i-2].Text
-	return beforeName == "var" || beforeName == "type" || beforeName == "(" || beforeName == "{" || beforeName == ","
+	return precededByTypeContext(toks, i-1)
 }
 
 func startsAnyInterfaceType(toks []scan.Token, i int) bool {
@@ -387,6 +395,38 @@ func findClose(toks []scan.Token, pos int, open string, close string) int {
 		pos++
 	}
 	return -1
+}
+
+func findOpen(toks []scan.Token, pos int, open string, close string) int {
+	depth := 0
+	for pos >= 0 {
+		if toks[pos].Text == close {
+			depth++
+		} else if toks[pos].Text == open {
+			depth--
+			if depth == 0 {
+				return pos
+			}
+		}
+		pos--
+	}
+	return -1
+}
+
+func precededByTypeContext(toks []scan.Token, pos int) bool {
+	if pos <= 0 {
+		return false
+	}
+	prev := toks[pos-1]
+	switch prev.Text {
+	case "var", "type", "(", "{", ",", "*", "]", ")":
+		return true
+	}
+	if prev.Kind == scan.Ident && pos >= 2 {
+		beforeName := toks[pos-2].Text
+		return beforeName == "var" || beforeName == "type" || beforeName == "(" || beforeName == "{" || beforeName == ","
+	}
+	return false
 }
 
 func localImportShadows(file parse.File, importNames map[string]bool) map[string][]sourceRange {
