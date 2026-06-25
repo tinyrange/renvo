@@ -300,6 +300,9 @@ func goFiles(dir string, target string) ([]string, error) {
 		if !strings.HasSuffix(name, ".go") {
 			continue
 		}
+		if strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
+			continue
+		}
 		if strings.HasSuffix(name, "_test.go") || strings.HasSuffix(name, ".rtg.go") {
 			continue
 		}

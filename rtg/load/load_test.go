@@ -84,6 +84,33 @@ const C = 3
 	}
 }
 
+func TestLoadEntriesIgnoresDotAndUnderscoreFiles(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "pkg/visible.go", `package pkg
+
+const Visible = 1
+`)
+	writeFile(t, root, "pkg/_scratch.go", `package scratch
+
+const Broken = 1
+`)
+	writeFile(t, root, "pkg/.hidden.go", `package hidden
+
+const Broken = 1
+`)
+
+	graph, err := LoadEntries([]string{filepath.Join(root, "pkg")}, Options{})
+	if err != nil {
+		t.Fatalf("LoadEntries failed: %v", err)
+	}
+	got := packageFileNames(graph.Packages[0])
+	want := []string{"visible.go"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("loaded files = %v, want %v", got, want)
+	}
+}
+
 func TestLoadEntriesFiltersDirectoryFilesByTarget(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/app\n")
