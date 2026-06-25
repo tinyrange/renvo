@@ -155,6 +155,9 @@ func unitInputPaths(input string) ([]string, error) {
 		return nil, err
 	}
 	if !info.IsDir() {
+		if !strings.HasSuffix(filepath.Base(input), ".rtg.go") {
+			return nil, fmt.Errorf("%s: link input must be an emitted .rtg.go unit", input)
+		}
 		return []string{input}, nil
 	}
 	entries, err := os.ReadDir(input)

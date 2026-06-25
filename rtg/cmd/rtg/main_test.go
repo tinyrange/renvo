@@ -562,6 +562,23 @@ func TestRunLinkRejectsDirectoryWithoutUnits(t *testing.T) {
 	}
 }
 
+func TestRunLinkRejectsNonUnitFileInput(t *testing.T) {
+	root := t.TempDir()
+	input := filepath.Join(root, "main.go")
+	writeCLIFile(t, root, "main.go", `package main
+
+func appMain() int { return 0 }
+`)
+	out := filepath.Join(root, "linked")
+	err := run(config{link: true, output: out, inputs: []string{input}})
+	if err == nil {
+		t.Fatalf("link accepted non-unit file input")
+	}
+	if !strings.Contains(err.Error(), "link input must be an emitted .rtg.go unit") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestRunLinkRejectsMissingExport(t *testing.T) {
 	root := t.TempDir()
 	mainUnit := filepath.Join(root, "main.rtg.go")
