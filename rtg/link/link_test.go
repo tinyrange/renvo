@@ -442,7 +442,13 @@ func TestSourceOmitsUnreachableFunctions(t *testing.T) {
 					Kind:     "func",
 					Name:     "used",
 					UnitName: "rtg_example_com_app_main_used",
-					Body:     "func rtg_example_com_app_main_used() int { return 1 }\n",
+					Body:     "func rtg_example_com_app_main_used() int { return rtg_example_com_app_main_helper() }\n",
+				},
+				{
+					Kind:     "func",
+					Name:     "helper",
+					UnitName: "rtg_example_com_app_main_helper",
+					Body:     "func rtg_example_com_app_main_helper() int { return 1 }\n",
 				},
 				{
 					Kind:     "func",
@@ -459,6 +465,9 @@ func TestSourceOmitsUnreachableFunctions(t *testing.T) {
 	src := string(Source(plan))
 	if !strings.Contains(src, "func rtg_example_com_app_main_used() int") {
 		t.Fatalf("linked source missing reachable function:\n%s", src)
+	}
+	if !strings.Contains(src, "func rtg_example_com_app_main_helper() int") {
+		t.Fatalf("linked source missing transitive reachable function:\n%s", src)
 	}
 	if strings.Contains(src, "rtg_example_com_app_main_unused") {
 		t.Fatalf("linked source retained unreachable function:\n%s", src)
