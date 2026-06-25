@@ -196,7 +196,9 @@ func findBackendRootUpward(start string) (string, bool) {
 }
 
 func hasBackendRootFiles(dir string) bool {
-	for _, name := range []string{"go.mod", "compiler_main.go", "compiler_common_impl.go"} {
+	names := []string{"go.mod", "compiler_main.go", "compiler_common_impl.go"}
+	for i := 0; i < len(names); i++ {
+		name := names[i]
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			return false
 		}
