@@ -467,6 +467,54 @@ func main() {
 	runFrontendFixtureMatchesHostGo(t, fixture)
 }
 
+func TestStdRuntimeFrontendMatchesHostGo(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skipf("native runtime fixture expects linux/amd64 host, got %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	fixture := t.TempDir()
+	writeFixtureFile(t, fixture, "go.mod", "module example.com/stdruntime\n")
+	writeFixtureFile(t, fixture, "cmd/app/main.go", `package main
+
+import "runtime"
+
+func main() {
+	if runtime.GOOS == "linux" && runtime.GOARCH == "amd64" {
+		print("PASS\n")
+		return
+	}
+	print("FAIL\n")
+}
+`)
+	runFrontendFixtureMatchesHostGo(t, fixture)
+}
+
+func TestStdRuntimeFrontendTargetConstants(t *testing.T) {
+	fixture := t.TempDir()
+	writeFixtureFile(t, fixture, "go.mod", "module example.com/stdruntimetarget\n")
+	writeFixtureFile(t, fixture, "cmd/app/main.go", `package main
+
+import "runtime"
+
+func main() {
+	if runtime.GOOS == "linux" && runtime.GOARCH == "arm64" {
+		print("PASS\n")
+		return
+	}
+	print("FAIL\n")
+}
+`)
+	units := loadFixtureUnitsForTarget(t, fixture, "linux/aarch64")
+	if !unitsContainBody(units, `const rtg_runtime_GOOS = "linux"`) {
+		t.Fatalf("linux/aarch64 units did not include linux GOOS: %#v", units)
+	}
+	if !unitsContainBody(units, `const rtg_runtime_GOARCH = "arm64"`) {
+		t.Fatalf("linux/aarch64 units did not include arm64 GOARCH: %#v", units)
+	}
+	if unitsContainBody(units, `const rtg_runtime_GOARCH = "amd64"`) {
+		t.Fatalf("linux/aarch64 units included amd64 GOARCH: %#v", units)
+	}
+}
+
 func TestTopLevelNameListsFrontendMatchesHostGo(t *testing.T) {
 	fixture := t.TempDir()
 	writeFixtureFile(t, fixture, "go.mod", "module example.com/namelists\n")
