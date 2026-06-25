@@ -23,11 +23,12 @@ type Import struct {
 }
 
 type Decl struct {
-	Kind  string
-	Name  string
-	Tok   scan.Token
-	Start int
-	End   int
+	Kind    string
+	Name    string
+	Tok     scan.Token
+	NameTok scan.Token
+	Start   int
+	End     int
 }
 
 func FileSource(path string, src []byte) (File, error) {
@@ -134,6 +135,7 @@ func parseDecl(file *File, pos int) int {
 		}
 		if namePos < len(toks) && toks[namePos].Kind == scan.Ident {
 			decl.Name = toks[namePos].Text
+			decl.NameTok = toks[namePos]
 		}
 		next := findNextTopLevel(toks, pos+1)
 		decl.End = declEnd(file, next)
@@ -157,6 +159,7 @@ func parseDecl(file *File, pos int) int {
 		}
 		if namePos < len(toks) && toks[namePos].Kind == scan.Ident {
 			decl.Name = toks[namePos].Text
+			decl.NameTok = toks[namePos]
 		}
 		next := findNextTopLevel(toks, pos+1)
 		decl.End = declEnd(file, next)

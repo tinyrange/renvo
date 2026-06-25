@@ -36,6 +36,7 @@ func (d Diagnostics) Error() string {
 func Graph(g *load.Graph) error {
 	var diags Diagnostics
 	for _, pkg := range g.Packages {
+		names := map[string]Diagnostic{}
 		for _, file := range pkg.Files {
 			parsed, err := parse.FileSource(file.Path, file.Source)
 			if err != nil {
@@ -47,6 +48,18 @@ func Graph(g *load.Graph) error {
 				continue
 			}
 			diags = append(diags, File(parsed)...)
+			for _, decl := range parsed.Decls {
+				if decl.Name == "" || decl.Name == "_" {
+					continue
+				}
+				current := declDiagnostic(parsed, decl, "duplicate package-level declaration: "+decl.Name)
+				if previous, ok := names[decl.Name]; ok {
+					diags = append(diags, previous)
+					diags = append(diags, current)
+					continue
+				}
+				names[decl.Name] = current
+			}
 		}
 	}
 	if len(diags) > 0 {
@@ -75,10 +88,15 @@ func File(file parse.File) Diagnostics {
 			diags = append(diags, diag(file, tok, "maps are not supported"))
 		case "defer":
 			diags = append(diags, diag(file, tok, "defer is not supported"))
+		case "range":
+			diags = append(diags, diag(file, tok, "range is not supported"))
 		case "func":
 			if !topFuncs[i] {
 				diags = append(diags, diag(file, tok, "function values and function types are not supported"))
 			}
+		}
+		if startsArrayType(file.Tokens, i) {
+			diags = append(diags, diag(file, tok, "arrays are not supported"))
 		}
 		if startsGenericDecl(file.Tokens, i, topFuncs) {
 			diags = append(diags, diag(file, file.Tokens[i+2], "generics are not supported"))
@@ -111,6 +129,27 @@ func startsGenericDecl(toks []scan.Token, i int, topFuncs map[int]bool) bool {
 	return false
 }
 
+func startsArrayType(toks []scan.Token, i int) bool {
+	if i+1 >= len(toks) || toks[i].Text != "[" || toks[i+1].Text == "]" {
+		return false
+	}
+	if i == 0 {
+		return false
+	}
+	prev := toks[i-1]
+	if prev.Text == ")" {
+		return true
+	}
+	if prev.Kind != scan.Ident {
+		return false
+	}
+	if i < 2 {
+		return false
+	}
+	beforeName := toks[i-2].Text
+	return beforeName == "var" || beforeName == "type" || beforeName == "(" || beforeName == "{" || beforeName == ","
+}
+
 func startsTypeAssertion(toks []scan.Token, i int) bool {
 	if i+3 >= len(toks) {
 		return false
@@ -136,4 +175,12 @@ func findClose(toks []scan.Token, pos int, open string, close string) int {
 
 func diag(file parse.File, tok scan.Token, message string) Diagnostic {
 	return Diagnostic{Path: file.Path, Line: tok.Line, Column: tok.Column, Message: message}
+}
+
+func declDiagnostic(file parse.File, decl parse.Decl, message string) Diagnostic {
+	tok := decl.NameTok
+	if tok.Text == "" {
+		tok = decl.Tok
+	}
+	return diag(file, tok, message)
 }
