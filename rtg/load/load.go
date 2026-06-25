@@ -57,6 +57,9 @@ func LoadEntries(entries []string, opts Options) (*Graph, error) {
 		if err != nil {
 			return nil, err
 		}
+		if !isWithinModuleRoot(module.Root, dir) {
+			return nil, fmt.Errorf("%s: entry is outside module root %s", dir, module.Root)
+		}
 		if len(files) > 0 {
 			fileEntries[dir] = append(fileEntries[dir], files...)
 			continue
@@ -700,6 +703,14 @@ func requiredModuleForImport(module mod.Module, imp string) (mod.Require, bool) 
 
 func isLocalPath(path string) bool {
 	return filepath.IsAbs(path) || strings.HasPrefix(path, "./") || strings.HasPrefix(path, "../") || path == "." || path == ".."
+}
+
+func isWithinModuleRoot(root string, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel))
 }
 
 func importPathForDir(module mod.Module, dir string) string {

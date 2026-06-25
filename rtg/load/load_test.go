@@ -84,6 +84,51 @@ const C = 3
 	}
 }
 
+func TestLoadEntriesRejectsDirectoryOutsideModuleRoot(t *testing.T) {
+	root := t.TempDir()
+	other := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "main.go", `package main
+
+func appMain() int { return 0 }
+`)
+	writeFile(t, other, "go.mod", "module example.com/other\n")
+	writeFile(t, other, "main.go", `package main
+
+func appMain() int { return 0 }
+`)
+
+	_, err := LoadEntries([]string{root, other}, Options{})
+	if err == nil {
+		t.Fatalf("LoadEntries accepted directory outside module root")
+	}
+	if !containsAll(err.Error(), []string{"outside module root", root}) {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestLoadEntriesRejectsExplicitFileOutsideModuleRoot(t *testing.T) {
+	root := t.TempDir()
+	other := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "main.go", `package main
+
+func appMain() int { return 0 }
+`)
+	writeFile(t, other, "other.go", `package other
+
+const Value = 1
+`)
+
+	_, err := LoadEntries([]string{root, filepath.Join(other, "other.go")}, Options{})
+	if err == nil {
+		t.Fatalf("LoadEntries accepted explicit file outside module root")
+	}
+	if !containsAll(err.Error(), []string{"outside module root", root}) {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestLoadEntriesIgnoresDotAndUnderscoreFiles(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/app\n")
