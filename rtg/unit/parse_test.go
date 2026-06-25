@@ -94,6 +94,47 @@ package main
 	}
 }
 
+func TestParseSourceRejectsEmptyMetadataPaths(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "unit",
+			src:  "// rtg:unit " + "\npackage main\n",
+			want: "empty rtg unit metadata",
+		},
+		{
+			name: "import",
+			src: `// rtg:unit example.com/app
+package main
+// rtg:import ""
+`,
+			want: "empty import metadata",
+		},
+		{
+			name: "reference",
+			src: `// rtg:unit example.com/app
+package main
+// rtg:ref  Value => rtg_value
+`,
+			want: `invalid symbol metadata "=> rtg_value"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseSource(tt.name+".rtg.go", []byte(tt.src))
+			if err == nil {
+				t.Fatalf("ParseSource accepted empty %s metadata", tt.name)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func sourceForTest(u Unit) []byte {
 	var b strings.Builder
 	b.WriteString("//go:build rtg\n\n")

@@ -42,12 +42,18 @@ func ParseSource(path string, src []byte) (Unit, error) {
 			}
 			seenUnit = true
 			u.ImportPath = strings.TrimSpace(strings.TrimPrefix(body, "unit "))
+			if u.ImportPath == "" {
+				return Unit{}, fmt.Errorf("%s: empty rtg unit metadata", path)
+			}
 			continue
 		}
 		if strings.HasPrefix(body, "import ") {
 			imp, err := parseQuoted(strings.TrimSpace(strings.TrimPrefix(body, "import ")))
 			if err != nil {
 				return Unit{}, fmt.Errorf("%s: %w", path, err)
+			}
+			if imp == "" {
+				return Unit{}, fmt.Errorf("%s: empty import metadata", path)
 			}
 			if seenImports[imp] {
 				return Unit{}, fmt.Errorf("%s: duplicate import metadata %q", path, imp)
@@ -129,6 +135,9 @@ func parseReference(s string) (Symbol, error) {
 		return Symbol{}, fmt.Errorf("invalid reference metadata %q", s)
 	}
 	importPath := s[:firstSpace]
+	if importPath == "" {
+		return Symbol{}, fmt.Errorf("invalid reference metadata %q", s)
+	}
 	sym, err := parseNameArrow(strings.TrimSpace(s[firstSpace+1:]))
 	if err != nil {
 		return Symbol{}, err
