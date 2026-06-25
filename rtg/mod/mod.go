@@ -65,7 +65,16 @@ func ParseFile(data string) (Module, error) {
 	inRequireBlock := false
 	inReplaceBlock := false
 	for _, line := range lines {
-		fields := strings.Fields(line)
+		fields, err := lineFields(line)
+		if err != nil {
+			if inRequireBlock {
+				return Module{}, fmt.Errorf("malformed require directive")
+			}
+			if inReplaceBlock {
+				return Module{}, fmt.Errorf("malformed replace directive")
+			}
+			return Module{}, malformedDirectiveForLine(line)
+		}
 		if len(fields) == 0 {
 			continue
 		}
@@ -232,6 +241,75 @@ func unquoteField(field string) (string, error) {
 		return field, nil
 	}
 	return strconv.Unquote(field)
+}
+
+func lineFields(line string) ([]string, error) {
+	var fields []string
+	for i := 0; i < len(line); {
+		for i < len(line) && isFieldSpace(line[i]) {
+			i++
+		}
+		if i >= len(line) {
+			break
+		}
+		start := i
+		if line[i] == '"' {
+			i++
+			for i < len(line) {
+				if line[i] == '\\' {
+					i += 2
+					continue
+				}
+				if line[i] == '"' {
+					i++
+					fields = append(fields, line[start:i])
+					break
+				}
+				i++
+			}
+			if i > len(line) || len(fields) == 0 || fields[len(fields)-1] != line[start:i] {
+				return nil, fmt.Errorf("malformed directive")
+			}
+			continue
+		}
+		if line[i] == '`' {
+			i++
+			for i < len(line) && line[i] != '`' {
+				i++
+			}
+			if i >= len(line) {
+				return nil, fmt.Errorf("malformed directive")
+			}
+			i++
+			fields = append(fields, line[start:i])
+			continue
+		}
+		for i < len(line) && !isFieldSpace(line[i]) {
+			i++
+		}
+		fields = append(fields, line[start:i])
+	}
+	return fields, nil
+}
+
+func isFieldSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\r'
+}
+
+func malformedDirectiveForLine(line string) error {
+	fields := strings.Fields(line)
+	if len(fields) == 0 {
+		return fmt.Errorf("malformed module directive")
+	}
+	switch fields[0] {
+	case "module":
+		return fmt.Errorf("malformed module directive")
+	case "require":
+		return fmt.Errorf("malformed require directive")
+	case "replace":
+		return fmt.Errorf("malformed replace directive")
+	}
+	return fmt.Errorf("malformed module directive")
 }
 
 func stripComments(data string) (string, error) {

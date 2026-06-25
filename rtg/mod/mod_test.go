@@ -113,6 +113,7 @@ func TestParseFileUnquotesDirectiveFields(t *testing.T) {
 require "example.com/lib" "v1.2.3"
 replace "example.com/lib" => "../lib"
 replace "example.com/other" "v1.0.0" => "./other"
+replace "example.com/spaced" => "../my lib"
 `)
 	if err != nil {
 		t.Fatalf("ParseFile failed: %v", err)
@@ -126,6 +127,7 @@ replace "example.com/other" "v1.0.0" => "./other"
 	want := []Replace{
 		{Old: "example.com/lib", New: "../lib"},
 		{Old: "example.com/other", New: "./other"},
+		{Old: "example.com/spaced", New: "../my lib"},
 	}
 	if len(module.Replaces) != len(want) {
 		t.Fatalf("replaces = %#v, want %#v", module.Replaces, want)

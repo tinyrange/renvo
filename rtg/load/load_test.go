@@ -655,6 +655,34 @@ func Value() int { return 7 }
 	}
 }
 
+func TestLoadEntriesResolvesQuotedLocalReplacePathWithSpace(t *testing.T) {
+	root := t.TempDir()
+	libRoot := filepath.Join(t.TempDir(), "lib root")
+	writeFile(t, root, "go.mod", "module example.com/app\n\nreplace example.com/lib => \""+filepath.ToSlash(libRoot)+"\"\n")
+	writeFile(t, root, "main.go", `package main
+
+import "example.com/lib/pkg/answer"
+
+func appMain() int { return answer.Value() }
+`)
+	writeFile(t, libRoot, "pkg/answer/answer.go", `package answer
+
+func Value() int { return 7 }
+`)
+
+	graph, err := LoadEntries([]string{root}, Options{})
+	if err != nil {
+		t.Fatalf("LoadEntries failed: %v", err)
+	}
+	if len(graph.Packages) != 2 {
+		t.Fatalf("loaded %d packages, want 2", len(graph.Packages))
+	}
+	dep := graph.Packages[1]
+	if dep.Dir != filepath.Join(libRoot, "pkg", "answer") {
+		t.Fatalf("dep dir = %q, want replaced dir with space", dep.Dir)
+	}
+}
+
 func TestLoadEntriesRejectsNonLocalReplaceImports(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/app\n\nreplace example.com/lib => example.com/other v1.2.3\n")
