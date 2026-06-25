@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"j5.nz/rtg/rtg/build"
 	"j5.nz/rtg/rtg/check"
@@ -96,23 +97,68 @@ func runLink(cfg config) error {
 	if len(cfg.inputs) == 0 {
 		return fmt.Errorf("rtg: -link requires input units")
 	}
-	var units []unit.Unit
-	for _, input := range cfg.inputs {
-		data, err := os.ReadFile(input)
-		if err != nil {
-			return err
-		}
-		u, err := unit.ParseSource(input, data)
-		if err != nil {
-			return err
-		}
-		units = append(units, u)
+	units, err := readUnitInputs(cfg.inputs)
+	if err != nil {
+		return err
 	}
 	plan, err := link.Build(units)
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(cfg.output, link.Source(plan), 0644)
+}
+
+func readUnitInputs(inputs []string) ([]unit.Unit, error) {
+	var units []unit.Unit
+	for _, input := range inputs {
+		paths, err := unitInputPaths(input)
+		if err != nil {
+			return nil, err
+		}
+		for _, path := range paths {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return nil, err
+			}
+			u, err := unit.ParseSource(path, data)
+			if err != nil {
+				return nil, err
+			}
+			units = append(units, u)
+		}
+	}
+	if len(units) == 0 {
+		return nil, fmt.Errorf("rtg: no input units")
+	}
+	return units, nil
+}
+
+func unitInputPaths(input string) ([]string, error) {
+	info, err := os.Stat(input)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return []string{input}, nil
+	}
+	entries, err := os.ReadDir(input)
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasSuffix(name, ".rtg.go") {
+			paths = append(paths, filepath.Join(input, name))
+		}
+	}
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("rtg: no unit files in %s", input)
+	}
+	return paths, nil
 }
 
 func parseArgs(args []string) (config, error) {
@@ -152,12 +198,12 @@ func parseArgs(args []string) (config, error) {
 		}
 		cfg.inputs = append(cfg.inputs, arg)
 	}
-	if len(cfg.inputs) == 0 {
+	if len(cfg.inputs) == 0 && !cfg.link {
 		cfg.inputs = append(cfg.inputs, ".")
 	}
 	return cfg, nil
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: rtg [-t target] [-check] [-emit-unit -o output.rtg.go] [package-or-files...]")
+	fmt.Fprintln(os.Stderr, "usage: rtg [-t target] [-check] [-emit-unit -o output.rtg.go] [-link -o output.rtg.go] [package-or-files...]")
 }

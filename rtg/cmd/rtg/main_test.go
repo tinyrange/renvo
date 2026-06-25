@@ -242,6 +242,73 @@ func rtg_example_com_app_dep_Value() int { return 7 }
 	}
 }
 
+func TestRunLinkAcceptsUnitDirectory(t *testing.T) {
+	root := t.TempDir()
+	writeCLIFile(t, root, "go.mod", "module example.com/app\n")
+	writeCLIFile(t, root, "cmd/app/main.go", `package main
+
+import "example.com/app/pkg/answer"
+
+func appMain() int {
+	return answer.Value()
+}
+`)
+	writeCLIFile(t, root, "pkg/answer/answer.go", `package answer
+
+func Value() int {
+	return 7
+}
+`)
+	unitDir := filepath.Join(root, "units")
+	if err := run(config{emitUnit: true, output: unitDir, inputs: []string{filepath.Join(root, "cmd", "app")}}); err != nil {
+		t.Fatalf("emit failed: %v", err)
+	}
+	out := filepath.Join(root, "linked.rtg.go")
+	if err := run(config{link: true, output: out, inputs: []string{unitDir}}); err != nil {
+		t.Fatalf("link failed: %v", err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	got := string(data)
+	for _, want := range []string{
+		"// rtg:linked-unit example.com/app/cmd/app\n",
+		"// rtg:linked-unit example.com/app/pkg/answer\n",
+		"func rtg_example_com_app_cmd_app_appMain() int {",
+		"return rtg_example_com_app_pkg_answer_Value()",
+		"func rtg_example_com_app_pkg_answer_Value() int {",
+		"func appMain() int {\n\treturn rtg_example_com_app_cmd_app_appMain()\n}\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("linked source missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRunLinkRequiresInputUnits(t *testing.T) {
+	root := t.TempDir()
+	err := run(config{link: true, output: filepath.Join(root, "linked.rtg.go")})
+	if err == nil {
+		t.Fatalf("link succeeded without input units")
+	}
+	if !strings.Contains(err.Error(), "requires input units") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestRunLinkRejectsDirectoryWithoutUnits(t *testing.T) {
+	root := t.TempDir()
+	out := filepath.Join(root, "linked.rtg.go")
+	err := run(config{link: true, output: out, inputs: []string{root}})
+	if err == nil {
+		t.Fatalf("link succeeded with empty unit directory")
+	}
+	if !strings.Contains(err.Error(), "no unit files") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestRunLinkRejectsMissingExport(t *testing.T) {
 	root := t.TempDir()
 	mainUnit := filepath.Join(root, "main.rtg.go")
