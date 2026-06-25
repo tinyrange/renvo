@@ -61,6 +61,39 @@ func appMain() int { return 0 }
 	}
 }
 
+func TestLoadEntriesResolvesStdImportsWithStdIdentity(t *testing.T) {
+	root := t.TempDir()
+	stdRoot := filepath.Join(root, "rtgstd")
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "main.go", `package main
+
+import "fmt"
+
+func appMain() int { return fmt.PrintInt(7) }
+`)
+	writeFile(t, stdRoot, "fmt/fmt.go", `package fmt
+
+func PrintInt(v int) int { return v }
+`)
+
+	graph, err := LoadEntries([]string{root}, Options{StdRoot: stdRoot})
+	if err != nil {
+		t.Fatalf("LoadEntries failed: %v", err)
+	}
+	if len(graph.Packages) != 2 {
+		t.Fatalf("loaded %d packages, want 2", len(graph.Packages))
+	}
+	if graph.Packages[0].ImportPath != "example.com/app" {
+		t.Fatalf("main import path = %q, want example.com/app", graph.Packages[0].ImportPath)
+	}
+	if graph.Packages[1].ImportPath != "fmt" {
+		t.Fatalf("std import path = %q, want fmt", graph.Packages[1].ImportPath)
+	}
+	if graph.Packages[0].ImportNames["fmt"] != "fmt" {
+		t.Fatalf("std import local name = %q", graph.Packages[0].ImportNames["fmt"])
+	}
+}
+
 func TestParseSourceInfoImportBlockAndBody(t *testing.T) {
 	src := []byte(`package main
 

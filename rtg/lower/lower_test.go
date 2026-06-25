@@ -119,3 +119,51 @@ func hidden() int { return 9 }
 		t.Fatalf("imported selector was not rewritten: %q", u.Decls[0].Body)
 	}
 }
+
+func TestPackageWithGraphRewritesStdSelector(t *testing.T) {
+	mainPkg := load.Package{
+		ImportPath:  "example.com/app",
+		Name:        "main",
+		Imports:     []string{"fmt"},
+		ImportNames: map[string]string{"fmt": "fmt"},
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+import "fmt"
+
+func appMain() int { return fmt.PrintInt(7) }
+`),
+			},
+		},
+	}
+	stdPkg := load.Package{
+		ImportPath: "fmt",
+		Name:       "fmt",
+		Files: []load.File{
+			{
+				Path: "fmt.go",
+				Source: []byte(`package fmt
+
+func PrintInt(v int) int { return v }
+`),
+			},
+		},
+	}
+	graph := &load.Graph{Packages: []load.Package{mainPkg, stdPkg}}
+	u, err := PackageWithGraph(mainPkg, graph)
+	if err != nil {
+		t.Fatalf("PackageWithGraph failed: %v", err)
+	}
+	if len(u.References) != 1 {
+		t.Fatalf("references = %#v, want one", u.References)
+	}
+	ref := u.References[0]
+	if ref.ImportPath != "fmt" || ref.Name != "PrintInt" || ref.UnitName != "rtg_fmt_PrintInt" {
+		t.Fatalf("reference = %#v", ref)
+	}
+	if !strings.Contains(u.Decls[0].Body, "return rtg_fmt_PrintInt(7)") {
+		t.Fatalf("std selector was not rewritten: %q", u.Decls[0].Body)
+	}
+}

@@ -71,23 +71,27 @@ func entryDir(entry string) (string, error) {
 }
 
 func loadPackageRecursive(g *Graph, opts Options, seen map[string]bool, dir string) error {
+	return loadPackageRecursiveAs(g, opts, seen, dir, importPathForDir(g.Module, dir))
+}
+
+func loadPackageRecursiveAs(g *Graph, opts Options, seen map[string]bool, dir string, importPath string) error {
 	dir = filepath.Clean(dir)
 	if seen[dir] {
 		return nil
 	}
 	seen[dir] = true
-	pkg, err := readPackage(g.Module, dir)
+	pkg, err := readPackage(g.Module, dir, importPath)
 	if err != nil {
 		return err
 	}
 	g.Packages = append(g.Packages, pkg)
 	for _, imp := range pkg.Imports {
-		nextDir, ok, err := resolveImport(g.Module, opts, imp)
+		next, ok, err := resolveImport(g.Module, opts, imp)
 		if err != nil {
 			return err
 		}
 		if ok {
-			if err := loadPackageRecursive(g, opts, seen, nextDir); err != nil {
+			if err := loadPackageRecursiveAs(g, opts, seen, next.Dir, next.ImportPath); err != nil {
 				return err
 			}
 		}
@@ -95,7 +99,7 @@ func loadPackageRecursive(g *Graph, opts Options, seen map[string]bool, dir stri
 	return nil
 }
 
-func readPackage(module mod.Module, dir string) (Package, error) {
+func readPackage(module mod.Module, dir string, importPath string) (Package, error) {
 	files, err := goFiles(dir)
 	if err != nil {
 		return Package{}, err
@@ -103,7 +107,7 @@ func readPackage(module mod.Module, dir string) (Package, error) {
 	if len(files) == 0 {
 		return Package{}, fmt.Errorf("%s: no Go source files", dir)
 	}
-	pkg := Package{Dir: dir, ImportPath: importPathForDir(module, dir), ImportNames: map[string]string{}}
+	pkg := Package{Dir: dir, ImportPath: importPath, ImportNames: map[string]string{}}
 	importSet := map[string]bool{}
 	for _, path := range files {
 		data, err := os.ReadFile(path)
@@ -171,19 +175,24 @@ func goFiles(dir string) ([]string, error) {
 	return files, nil
 }
 
-func resolveImport(module mod.Module, opts Options, imp string) (string, bool, error) {
+type resolvedImport struct {
+	Dir        string
+	ImportPath string
+}
+
+func resolveImport(module mod.Module, opts Options, imp string) (resolvedImport, bool, error) {
 	if imp == module.Path {
-		return module.Root, true, nil
+		return resolvedImport{Dir: module.Root, ImportPath: imp}, true, nil
 	}
 	prefix := module.Path + "/"
 	if strings.HasPrefix(imp, prefix) {
-		return filepath.Join(module.Root, filepath.FromSlash(strings.TrimPrefix(imp, prefix))), true, nil
+		return resolvedImport{Dir: filepath.Join(module.Root, filepath.FromSlash(strings.TrimPrefix(imp, prefix))), ImportPath: imp}, true, nil
 	}
 	stdDir := filepath.Join(opts.StdRoot, filepath.FromSlash(imp))
 	if info, err := os.Stat(stdDir); err == nil && info.IsDir() {
-		return stdDir, true, nil
+		return resolvedImport{Dir: stdDir, ImportPath: imp}, true, nil
 	}
-	return "", false, fmt.Errorf("import %q is not in module %q and was not found in rtg/std", imp, module.Path)
+	return resolvedImport{}, false, fmt.Errorf("import %q is not in module %q and was not found in rtg/std", imp, module.Path)
 }
 
 func importPathForDir(module mod.Module, dir string) string {
