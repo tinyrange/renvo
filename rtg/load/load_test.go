@@ -545,6 +545,47 @@ func appMain() int { return 0 }
 	if err == nil {
 		t.Fatalf("LoadEntries succeeded with missing std package")
 	}
+	if !strings.Contains(err.Error(), `standard package "fmt" is not available in rtg/std`) {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestLoadEntriesRejectsUnavailableNestedStdPackage(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "main.go", `package main
+
+import "net/http"
+
+func appMain() int { return 0 }
+`)
+
+	_, err := LoadEntries([]string{root}, Options{StdRoot: filepath.Join(root, "missing-std")})
+	if err == nil {
+		t.Fatalf("LoadEntries succeeded with unavailable nested std package")
+	}
+	if !strings.Contains(err.Error(), `standard package "net/http" is not available in rtg/std`) {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestLoadEntriesRejectsUnrequiredExternalModuleImport(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "main.go", `package main
+
+import "example.org/lib/pkg"
+
+func appMain() int { return pkg.Value() }
+`)
+
+	_, err := LoadEntries([]string{root}, Options{})
+	if err == nil {
+		t.Fatalf("LoadEntries succeeded with unrequired external module import")
+	}
+	if !strings.Contains(err.Error(), `import "example.org/lib/pkg" is not in module "example.com/app"`) {
+		t.Fatalf("error = %q", err)
+	}
 }
 
 func TestLoadEntriesResolvesLocalReplaceImports(t *testing.T) {

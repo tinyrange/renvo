@@ -680,7 +680,18 @@ func resolveImport(module mod.Module, opts Options, imp string) (resolvedImport,
 	if info, err := os.Stat(stdDir); err == nil && info.IsDir() {
 		return resolvedImport{Dir: stdDir, ImportPath: imp}, true, nil
 	}
+	if isStandardImportPath(imp) {
+		return resolvedImport{}, false, fmt.Errorf("standard package %q is not available in rtg/std", imp)
+	}
 	return resolvedImport{}, false, fmt.Errorf("import %q is not in module %q and was not found in rtg/std", imp, module.Path)
+}
+
+func isStandardImportPath(path string) bool {
+	first := path
+	if slash := strings.IndexByte(path, '/'); slash >= 0 {
+		first = path[:slash]
+	}
+	return first != "" && !strings.Contains(first, ".")
 }
 
 func resolveReplacedImport(module mod.Module, imp string) (resolvedImport, bool, error) {
