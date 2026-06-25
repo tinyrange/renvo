@@ -181,6 +181,43 @@ package main
 	}
 }
 
+func TestParseSourceRejectsDeclarationMetadataWithoutBody(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "before metadata",
+			src: `// rtg:unit example.com/app
+package main
+// rtg:decl func appMain => rtg_example_com_app_appMain main.go
+// rtg:import "example.com/app/dep"
+`,
+			want: "declaration metadata for appMain has no body before next rtg metadata",
+		},
+		{
+			name: "at eof",
+			src: `// rtg:unit example.com/app
+package main
+// rtg:decl func appMain => rtg_example_com_app_appMain main.go
+`,
+			want: "declaration metadata for appMain has no body",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseSource(tt.name+".rtg.go", []byte(tt.src))
+			if err == nil {
+				t.Fatalf("ParseSource accepted declaration metadata without body")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseSourceRejectsEmptyMetadataPaths(t *testing.T) {
 	tests := []struct {
 		name string

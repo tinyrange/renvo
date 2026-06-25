@@ -41,6 +41,9 @@ func ParseSource(path string, src []byte) (Unit, error) {
 		if !seenUnit && !strings.HasPrefix(body, "unit ") {
 			return Unit{}, fmt.Errorf("%s: rtg metadata before unit declaration", path)
 		}
+		if currentDecl >= 0 && strings.TrimSpace(u.Decls[currentDecl].Body) == "" {
+			return Unit{}, fmt.Errorf("%s: declaration metadata for %s has no body before next rtg metadata", path, u.Decls[currentDecl].Name)
+		}
 		if strings.HasPrefix(body, "decl ") {
 			decl, err := parseDecl(strings.TrimSpace(strings.TrimPrefix(body, "decl ")))
 			if err != nil {
@@ -111,6 +114,11 @@ func ParseSource(path string, src []byte) (Unit, error) {
 	}
 	if u.Package == "" {
 		return Unit{}, fmt.Errorf("%s: missing package declaration", path)
+	}
+	for _, decl := range u.Decls {
+		if strings.TrimSpace(decl.Body) == "" {
+			return Unit{}, fmt.Errorf("%s: declaration metadata for %s has no body", path, decl.Name)
+		}
 	}
 	return u, nil
 }
