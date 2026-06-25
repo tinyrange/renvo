@@ -45,6 +45,37 @@ func appMain() int {
 	}
 }
 
+func TestRunEmitUnitDefaultsToCacheDirectory(t *testing.T) {
+	root := t.TempDir()
+	writeCLIFile(t, root, "go.mod", "module example.com/app\n")
+	writeCLIFile(t, root, "cmd/app/main.go", `package main
+
+func appMain() int {
+	return 0
+}
+`)
+	cfg := config{emitUnit: true, inputs: []string{filepath.Join(root, "cmd", "app")}}
+	if err := run(cfg); err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	unitPath := filepath.Join(root, ".rtg", "units", "example_com_app_cmd_app.rtg.go")
+	data, err := os.ReadFile(unitPath)
+	if err != nil {
+		t.Fatalf("ReadFile default unit failed: %v", err)
+	}
+	src := string(data)
+	if !strings.Contains(src, "//go:build rtg\n") {
+		t.Fatalf("default emitted unit missing build tag:\n%s", src)
+	}
+	if !strings.Contains(src, "// rtg:unit example.com/app/cmd/app\n") {
+		t.Fatalf("default emitted unit missing import path:\n%s", src)
+	}
+	sourceDirUnit := filepath.Join(root, "cmd", "app", "example_com_app_cmd_app.rtg.go")
+	if _, err := os.Stat(sourceDirUnit); !os.IsNotExist(err) {
+		t.Fatalf("unit was emitted beside source at %s", sourceDirUnit)
+	}
+}
+
 func TestRunEmitUnitRewritesLoadedPackageSelector(t *testing.T) {
 	root := t.TempDir()
 	writeCLIFile(t, root, "go.mod", "module example.com/app\n")

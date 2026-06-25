@@ -70,15 +70,15 @@ func runBuild(cfg config, graph *load.Graph) error {
 }
 
 func runEmitUnit(cfg config, graph *load.Graph) error {
-	if cfg.output == "" {
-		return fmt.Errorf("rtg: -emit-unit requires -o")
-	}
 	if len(graph.Packages) == 0 {
 		return fmt.Errorf("rtg: no packages loaded")
 	}
 	units, err := build.Units(graph)
 	if err != nil {
 		return err
+	}
+	if cfg.output == "" {
+		return writeUnitDirectory(defaultUnitCacheDir(graph), units)
 	}
 	if len(units) == 1 {
 		return os.WriteFile(cfg.output, emit.Source(units[0]), 0644)
@@ -94,11 +94,19 @@ func runEmitUnit(cfg config, graph *load.Graph) error {
 	} else {
 		return err
 	}
-	if err := os.MkdirAll(cfg.output, 0755); err != nil {
+	return writeUnitDirectory(cfg.output, units)
+}
+
+func defaultUnitCacheDir(graph *load.Graph) string {
+	return filepath.Join(graph.Module.Root, ".rtg", "units")
+}
+
+func writeUnitDirectory(dir string, units []unit.Unit) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 	for _, u := range units {
-		path := filepath.Join(cfg.output, emit.FileName(u.ImportPath))
+		path := filepath.Join(dir, emit.FileName(u.ImportPath))
 		if err := os.WriteFile(path, emit.Source(u), 0644); err != nil {
 			return err
 		}
@@ -221,5 +229,5 @@ func parseArgs(args []string) (config, error) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: rtg [-t target] [-check] [-emit-unit -o output.rtg.go] [-link -o output] [package-or-files...]")
+	fmt.Fprintln(os.Stderr, "usage: rtg [-t target] [-check] [-emit-unit [-o output.rtg.go|dir]] [-link -o output] [package-or-files...]")
 }
