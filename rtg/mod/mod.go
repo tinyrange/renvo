@@ -64,7 +64,8 @@ func ParseFile(data string) (Module, error) {
 	lines := strings.Split(stripped, "\n")
 	inRequireBlock := false
 	inReplaceBlock := false
-	for _, line := range lines {
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
 		fields, err := lineFields(line)
 		if err != nil {
 			if inRequireBlock {
@@ -159,7 +160,8 @@ func ParseModulePath(data string) (string, error) {
 
 func parseReplaceFields(fields []string) (Replace, error) {
 	arrow := -1
-	for i, field := range fields {
+	for i := 0; i < len(fields); i++ {
+		field := fields[i]
 		if field == "=>" {
 			arrow = i
 			break
@@ -194,7 +196,8 @@ func invalidReplaceFields(fields []string) bool {
 	if len(fields) == 0 {
 		return true
 	}
-	for _, field := range fields {
+	for i := 0; i < len(fields); i++ {
+		field := fields[i]
 		if field == "(" || field == ")" || field == "=>" {
 			return true
 		}
@@ -223,7 +226,8 @@ func parseRequireFields(fields []string) (Require, error) {
 
 func unquoteFields(fields []string) ([]string, error) {
 	out := make([]string, 0, len(fields))
-	for _, field := range fields {
+	for i := 0; i < len(fields); i++ {
+		field := fields[i]
 		unquoted, err := unquoteField(field)
 		if err != nil {
 			return nil, err
