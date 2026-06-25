@@ -11,6 +11,7 @@ import (
 	"j5.nz/rtg/rtg/emit"
 	"j5.nz/rtg/rtg/link"
 	"j5.nz/rtg/rtg/load"
+	"j5.nz/rtg/rtg/rtgx"
 	"j5.nz/rtg/rtg/unit"
 )
 
@@ -50,7 +51,22 @@ func run(cfg config) error {
 	if cfg.emitUnit {
 		return runEmitUnit(cfg, graph)
 	}
-	return fmt.Errorf("rtg: build pipeline after package loading is not implemented yet")
+	return runBuild(cfg, graph)
+}
+
+func runBuild(cfg config, graph *load.Graph) error {
+	if cfg.output == "" {
+		return fmt.Errorf("rtg: build requires -o")
+	}
+	units, err := build.Units(graph)
+	if err != nil {
+		return err
+	}
+	plan, err := link.Build(units)
+	if err != nil {
+		return err
+	}
+	return rtgx.CompileSource(link.Source(plan), rtgx.Options{Target: cfg.target, Output: cfg.output})
 }
 
 func runEmitUnit(cfg config, graph *load.Graph) error {
