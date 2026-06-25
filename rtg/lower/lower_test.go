@@ -593,6 +593,42 @@ func appMain() int {
 	}
 }
 
+func TestPackageNormalizesNestedVarInitializerCallArguments(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+func first() int { return 1 }
+func second() int { return 2 }
+func join(a int, b int) int { return a*10 + b }
+func appMain() int {
+	var total = join(first(), second())
+	return total
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	body := u.Decls[3].Body
+	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_0 := rtg_example_com_app_first()") {
+		t.Fatalf("first var initializer call was not lifted into a temp: %q", body)
+	}
+	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_1 := rtg_example_com_app_second()") {
+		t.Fatalf("second var initializer call was not lifted into a temp: %q", body)
+	}
+	if !strings.Contains(body, "var total = rtg_example_com_app_join(rtg_example_com_app_appMain_tmp_0, rtg_example_com_app_appMain_tmp_1)") {
+		t.Fatalf("var initializer did not use lifted temps: %q", body)
+	}
+}
+
 func TestPackageNormalizesNestedIfConditionCallArguments(t *testing.T) {
 	pkg := load.Package{
 		ImportPath: "example.com/app",

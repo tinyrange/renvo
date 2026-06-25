@@ -322,6 +322,17 @@ func normalizationStatement(toks []scan.Token, pos int) (expressionStatement, bo
 		}
 		return expressionStatement{token: pos, exprStart: pos, exprEnd: exprEnd}, true
 	}
+	if toks[pos].Text == "var" {
+		exprStart := varInitializerStart(toks, pos)
+		if exprStart < 0 {
+			return expressionStatement{}, false
+		}
+		exprEnd := lineExpressionEnd(toks, exprStart-1)
+		if exprEnd <= exprStart {
+			return expressionStatement{}, false
+		}
+		return expressionStatement{token: pos, exprStart: exprStart, exprEnd: exprEnd}, true
+	}
 	if !isAssignmentOperator(toks[pos].Text) {
 		return expressionStatement{}, false
 	}
@@ -388,6 +399,22 @@ func statementStartToken(toks []scan.Token, pos int) int {
 
 func isAssignmentOperator(text string) bool {
 	return text == "=" || text == ":="
+}
+
+func varInitializerStart(toks []scan.Token, pos int) int {
+	if pos+1 < len(toks) && toks[pos+1].Text == "(" {
+		return -1
+	}
+	paren := 0
+	brack := 0
+	brace := 0
+	for i := pos + 1; i < len(toks) && toks[i].Line == toks[pos].Line; i++ {
+		if paren == 0 && brack == 0 && brace == 0 && toks[i].Text == "=" {
+			return i + 1
+		}
+		updateExpressionDepth(toks[i].Text, &paren, &brack, &brace)
+	}
+	return -1
 }
 
 func isForPostClauseAssignment(toks []scan.Token, pos int) bool {
