@@ -104,8 +104,14 @@ func writeUnitDirectory(dir string, units []unit.Unit) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
+	names := map[string]string{}
 	for _, u := range units {
-		path := filepath.Join(dir, emit.FileName(u.ImportPath))
+		name := emit.FileName(u.ImportPath)
+		if existing, ok := names[name]; ok {
+			return fmt.Errorf("rtg: emitted unit filename collision for %s: %s and %s", name, existing, u.ImportPath)
+		}
+		names[name] = u.ImportPath
+		path := filepath.Join(dir, name)
 		if err := os.WriteFile(path, emit.Source(u), 0644); err != nil {
 			return err
 		}

@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"j5.nz/rtg/rtg/unit"
 )
 
 func TestRunEmitUnit(t *testing.T) {
@@ -121,6 +123,22 @@ func Broken() {}
 	}
 	if strings.Contains(src, "Broken") || strings.Contains(src, "ignored.go") {
 		t.Fatalf("explicit-file emit included unlisted file:\n%s", src)
+	}
+}
+
+func TestWriteUnitDirectoryRejectsFilenameCollisions(t *testing.T) {
+	err := writeUnitDirectory(t.TempDir(), []unit.Unit{
+		{ImportPath: "example.com/a-b", Package: "first"},
+		{ImportPath: "example.com/a_b", Package: "second"},
+	})
+	if err == nil {
+		t.Fatalf("writeUnitDirectory accepted colliding unit filenames")
+	}
+	msg := err.Error()
+	for _, want := range []string{"filename collision", "example_com_a_b.rtg.go", "example.com/a-b", "example.com/a_b"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q missing %q", msg, want)
+		}
 	}
 }
 
