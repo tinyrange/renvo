@@ -196,6 +196,7 @@ func readPackageFiles(module mod.Module, dir string, importPath string, files []
 	}
 	files = append([]string(nil), files...)
 	sort.Strings(files)
+	files = uniqueStrings(files)
 	pkg := Package{Dir: dir, ImportPath: importPath}
 	importSet := map[string]bool{}
 	for _, path := range files {
@@ -222,6 +223,17 @@ func readPackageFiles(module mod.Module, dir string, importPath string, files []
 	}
 	sort.Strings(pkg.Imports)
 	return pkg, nil
+}
+
+func uniqueStrings(values []string) []string {
+	var out []string
+	for _, value := range values {
+		if len(out) > 0 && out[len(out)-1] == value {
+			continue
+		}
+		out = append(out, value)
+	}
+	return out
 }
 
 func unitFilePath(module mod.Module, importPath string, path string) string {

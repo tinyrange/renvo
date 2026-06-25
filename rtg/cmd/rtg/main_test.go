@@ -87,6 +87,29 @@ func Broken() {}
 	}
 }
 
+func TestRunEmitUnitDeduplicatesExplicitFiles(t *testing.T) {
+	root := t.TempDir()
+	writeCLIFile(t, root, "go.mod", "module example.com/app\n")
+	writeCLIFile(t, root, "pkg/a.go", `package pkg
+
+const A = 1
+`)
+	path := filepath.Join(root, "pkg", "a.go")
+	out := filepath.Join(root, "pkg.rtg.go")
+	cfg := config{output: out, emitUnit: true, inputs: []string{path, path}}
+	if err := run(cfg); err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	src := string(data)
+	if strings.Count(src, "// rtg:decl const A => rtg_example_com_app_pkg_A pkg/a.go\n") != 1 {
+		t.Fatalf("duplicate explicit file changed emitted declarations:\n%s", src)
+	}
+}
+
 func TestParseArgsDefaultsToSupportedTarget(t *testing.T) {
 	cfg, err := parseArgs([]string{"-check", "."})
 	if err != nil {

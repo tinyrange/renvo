@@ -84,6 +84,26 @@ const C = 3
 	}
 }
 
+func TestLoadEntriesDeduplicatesExplicitFiles(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "pkg/a.go", `package pkg
+
+const A = 1
+`)
+	path := filepath.Join(root, "pkg", "a.go")
+	graph, err := LoadEntries([]string{path, path}, Options{})
+	if err != nil {
+		t.Fatalf("LoadEntries explicit duplicate files failed: %v", err)
+	}
+	if len(graph.Packages) != 1 {
+		t.Fatalf("loaded %d packages, want one", len(graph.Packages))
+	}
+	if len(graph.Packages[0].Files) != 1 {
+		t.Fatalf("files = %#v, want one selected file", graph.Packages[0].Files)
+	}
+}
+
 func TestLoadEntriesRejectsMissingStdPackage(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/app\n")
