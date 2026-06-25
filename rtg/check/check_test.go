@@ -111,6 +111,31 @@ return 0
 	}
 }
 
+func TestFileRejectsFallthrough(t *testing.T) {
+	file, err := parse.FileSource("switch.go", []byte(`package main
+
+func appMain() int {
+	switch 1 {
+	case 1:
+		fallthrough
+	case 2:
+		return 0
+	}
+	return 1
+}
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	err = File(file)
+	if err == nil {
+		t.Fatalf("File accepted fallthrough")
+	}
+	if !strings.Contains(err.Error(), "switch.go:6:3: fallthrough is not supported") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestFileRejectsAnyInterfaceTypeAlias(t *testing.T) {
 	file, err := parse.FileSource("any.go", []byte(`package main
 

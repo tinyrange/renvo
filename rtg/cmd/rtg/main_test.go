@@ -420,6 +420,30 @@ func appMain() int {
 	}
 }
 
+func TestRunCheckRejectsFallthroughBeforeBackend(t *testing.T) {
+	root := t.TempDir()
+	writeCLIFile(t, root, "go.mod", "module example.com/app\n")
+	writeCLIFile(t, root, "cmd/app/main.go", `package main
+
+func main() {
+	switch 1 {
+	case 1:
+		fallthrough
+	case 2:
+		print("PASS\n")
+	}
+}
+`)
+	cfg := config{check: true, inputs: []string{filepath.Join(root, "cmd", "app")}}
+	err := run(cfg)
+	if err == nil {
+		t.Fatalf("run check succeeded for fallthrough")
+	}
+	if !strings.Contains(err.Error(), filepath.Join(root, "cmd", "app", "main.go")+":6:3: fallthrough is not supported") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestRunCheckAcceptsSimplePackage(t *testing.T) {
 	root := t.TempDir()
 	writeCLIFile(t, root, "go.mod", "module example.com/app\n")

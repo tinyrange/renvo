@@ -197,6 +197,8 @@ func File(file parse.File) Diagnostics {
 			diags = append(diags, diag(file, tok, "defer is not supported"))
 		case "range":
 			diags = append(diags, diag(file, tok, "range is not supported"))
+		case "fallthrough":
+			diags = append(diags, diag(file, tok, "fallthrough is not supported"))
 		case "func":
 			if !topFuncs[i] {
 				diags = append(diags, diag(file, tok, "function values and function types are not supported"))
