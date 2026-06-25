@@ -122,6 +122,7 @@ func importedSelectorDiagnostics(pkg load.Package, file parse.File, exported map
 
 func File(file parse.File) Diagnostics {
 	var diags Diagnostics
+	diags = append(diags, importDiagnostics(file)...)
 	topFuncs := file.TopLevelFuncAt
 	for i, tok := range file.Tokens {
 		if tok.Kind == scan.EOF {
@@ -155,6 +156,19 @@ func File(file parse.File) Diagnostics {
 		}
 		if startsTypeAssertion(file.Tokens, i) {
 			diags = append(diags, diag(file, file.Tokens[i+1], "type assertions and type switches are not supported"))
+		}
+	}
+	return diags
+}
+
+func importDiagnostics(file parse.File) Diagnostics {
+	var diags Diagnostics
+	for _, imp := range file.Imports {
+		if imp.Alias == "." {
+			diags = append(diags, diag(file, imp.Tok, "dot imports are not supported"))
+		}
+		if imp.Alias == "_" {
+			diags = append(diags, diag(file, imp.Tok, "blank imports are not supported"))
 		}
 	}
 	return diags

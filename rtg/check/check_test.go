@@ -70,6 +70,38 @@ func appMain() int {
 	}
 }
 
+func TestFileRejectsUnsupportedImportForms(t *testing.T) {
+	file, err := parse.FileSource("imports.go", []byte(`package main
+
+import (
+	_ "example.com/side"
+	. "example.com/dot"
+	alias "example.com/alias"
+)
+
+func appMain() int { return alias.Value() }
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	err = File(file)
+	if err == nil {
+		t.Fatalf("File accepted unsupported import forms")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"imports.go:4:4: blank imports are not supported",
+		"imports.go:5:4: dot imports are not supported",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("missing diagnostic %q in:\n%s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "alias") {
+		t.Fatalf("ordinary import alias was rejected:\n%s", msg)
+	}
+}
+
 func TestGraphRejectsDuplicatePackageLevelNames(t *testing.T) {
 	graph := &load.Graph{
 		Packages: []load.Package{
