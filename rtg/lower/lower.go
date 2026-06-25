@@ -38,7 +38,7 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 		}
 		parsedFiles = append(parsedFiles, parsed)
 		for _, decl := range parsed.Decls {
-			for _, name := range declNames(decl) {
+			for _, name := range declTopNames(parsed, decl) {
 				if name != "" && name != "_" {
 					topNames[name] = SymbolName(pkg.ImportPath, name)
 				}
@@ -64,7 +64,7 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 			var refs []unit.Symbol
 			body := rewriteDecl(parsed, decl, topNames, importRefs, &refs)
 			if decl.Kind == "func" {
-				body = normalizeFunctionExpressions(body, topNames[decl.Name])
+				body = normalizeFunctionExpressions(body, unitDeclSymbol(decl, parsed, topNames))
 			}
 			for _, ref := range refs {
 				key := ref.ImportPath + "\x00" + ref.Name
@@ -76,8 +76,8 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 			u.Decls = append(u.Decls, unit.Decl{
 				Path:     unitPathForDecl(files, parsed.Path),
 				Kind:     decl.Kind,
-				Name:     unitDeclName(decl),
-				UnitName: unitDeclSymbol(decl, topNames),
+				Name:     unitDeclName(parsed, decl),
+				UnitName: unitDeclSymbol(decl, parsed, topNames),
 				Body:     body,
 			})
 		}
@@ -132,7 +132,10 @@ func symbolAfterByImportPathName(a unit.Symbol, b unit.Symbol) bool {
 	return a.ImportPath > b.ImportPath
 }
 
-func unitDeclName(decl parse.Decl) string {
+func unitDeclName(file parse.File, decl parse.Decl) string {
+	if decl.Kind == "func" && decl.Receiver {
+		return methodDeclName(file, decl)
+	}
 	names := declNames(decl)
 	if len(names) == 1 {
 		return names[0]
@@ -143,12 +146,53 @@ func unitDeclName(decl parse.Decl) string {
 	return strings.Join(names, ", ")
 }
 
-func unitDeclSymbol(decl parse.Decl, topNames map[string]string) string {
+func unitDeclSymbol(decl parse.Decl, file parse.File, topNames map[string]string) string {
+	if decl.Kind == "func" && decl.Receiver {
+		return topNames[methodDeclName(file, decl)]
+	}
 	names := declNames(decl)
 	if len(names) != 1 {
 		return ""
 	}
 	return topNames[names[0]]
+}
+
+func declTopNames(file parse.File, decl parse.Decl) []string {
+	if decl.Kind == "func" && decl.Receiver {
+		name := methodDeclName(file, decl)
+		if name == "" {
+			return nil
+		}
+		return []string{name}
+	}
+	return declNames(decl)
+}
+
+func methodDeclName(file parse.File, decl parse.Decl) string {
+	receiver := methodReceiverTypeName(file, decl)
+	if receiver == "" || decl.Name == "" {
+		return decl.Name
+	}
+	return receiver + "_" + decl.Name
+}
+
+func methodReceiverTypeName(file parse.File, decl parse.Decl) string {
+	toks := file.Tokens
+	start := tokenIndexAt(toks, decl.Start)
+	if start < 0 || start+1 >= len(toks) || toks[start+1].Text != "(" {
+		return ""
+	}
+	close := findClose(toks, start+1, "(", ")")
+	if close < 0 {
+		return ""
+	}
+	name := ""
+	for i := start + 2; i < close; i++ {
+		if toks[i].Kind == scan.Ident {
+			name = toks[i].Text
+		}
+	}
+	return name
 }
 
 func hasOrdinaryMain(files []parse.File) bool {
@@ -245,11 +289,15 @@ func rewriteDecl(file parse.File, decl parse.Decl, topNames map[string]string, i
 	}
 	var out []byte
 	localNames := localNamesForDecl(file, decl, localRewriteNames(topNames, importRefs))
+	localTypes := localTypesForDecl(file, decl)
 	cursor := start
+	if decl.Kind == "func" && decl.Receiver {
+		cursor = appendMethodDeclPrefix(file, decl, topNames, &out)
+	}
 	prevText := ""
 	for i := 0; i < len(file.Tokens); i++ {
 		tok := file.Tokens[i]
-		if tok.End <= start {
+		if tok.End <= cursor {
 			prevText = tok.Text
 			continue
 		}
@@ -261,6 +309,24 @@ func rewriteDecl(file parse.File, decl parse.Decl, topNames map[string]string, i
 		}
 		replacement := ""
 		if tok.Kind == scan.Ident && i+2 < len(file.Tokens) && file.Tokens[i+1].Text == "." && file.Tokens[i+2].Kind == scan.Ident {
+			if i+3 < len(file.Tokens) && file.Tokens[i+3].Text == "(" {
+				if receiverType := localTypes[tok.Text]; receiverType != "" {
+					methodName := receiverType + "_" + file.Tokens[i+2].Text
+					if unitName := topNames[methodName]; unitName != "" {
+						open := file.Tokens[i+3]
+						close := findClose(file.Tokens, i+3, "(", ")")
+						replacement = unitName + "(" + tok.Text
+						if close < 0 || open.End < file.Tokens[close].Start {
+							replacement = replacement + ", "
+						}
+						out = append(out, replacement...)
+						cursor = open.End
+						prevText = "("
+						i += 3
+						continue
+					}
+				}
+			}
 			if symbols, ok := importRefs[tok.Text]; ok && !isLocalNameAt(localNames, tok.Text, tok.Start) {
 				member := file.Tokens[i+2]
 				if sym, ok := symbols[member.Text]; ok {
@@ -291,6 +357,77 @@ func rewriteDecl(file parse.File, decl parse.Decl, topNames map[string]string, i
 		out = append(out, file.Source[cursor:end]...)
 	}
 	return string(out)
+}
+
+func appendMethodDeclPrefix(file parse.File, decl parse.Decl, topNames map[string]string, out *[]byte) int {
+	toks := file.Tokens
+	start := tokenIndexAt(toks, decl.Start)
+	if start < 0 || start+1 >= len(toks) || toks[start+1].Text != "(" {
+		return decl.Start
+	}
+	receiverOpen := start + 1
+	receiverClose := findClose(toks, receiverOpen, "(", ")")
+	if receiverClose < 0 || receiverClose+2 >= len(toks) {
+		return decl.Start
+	}
+	nameTok := receiverClose + 1
+	paramsOpen := nameTok + 1
+	if toks[nameTok].Kind != scan.Ident || toks[paramsOpen].Text != "(" {
+		return decl.Start
+	}
+	paramsClose := findClose(toks, paramsOpen, "(", ")")
+	if paramsClose < 0 {
+		return decl.Start
+	}
+	unitName := topNames[methodDeclName(file, decl)]
+	if unitName == "" {
+		return decl.Start
+	}
+	*out = append(*out, "func "...)
+	*out = append(*out, unitName...)
+	*out = append(*out, '(')
+	*out = append(*out, rewriteReceiverSegment(file, receiverOpen+1, receiverClose, topNames)...)
+	if paramsOpen+1 < paramsClose {
+		*out = append(*out, ", "...)
+		return toks[paramsOpen].End
+	}
+	return toks[paramsClose].Start
+}
+
+func rewriteReceiverSegment(file parse.File, start int, end int, topNames map[string]string) string {
+	toks := file.Tokens
+	var out []byte
+	cursor := toks[start].Start
+	for i := start; i < end; i++ {
+		tok := toks[i]
+		if tok.Start > cursor {
+			out = append(out, file.Source[cursor:tok.Start]...)
+		}
+		replacement := ""
+		if tok.Kind == scan.Ident && (i > start || !receiverSegmentHasName(toks, start, end)) {
+			replacement = topNames[tok.Text]
+		}
+		if replacement != "" {
+			out = append(out, replacement...)
+		} else {
+			out = append(out, file.Source[tok.Start:tok.End]...)
+		}
+		cursor = tok.End
+	}
+	if end > start && cursor < toks[end-1].End {
+		out = append(out, file.Source[cursor:toks[end-1].End]...)
+	}
+	return string(out)
+}
+
+func receiverSegmentHasName(toks []scan.Token, start int, end int) bool {
+	idents := 0
+	for i := start; i < end; i++ {
+		if toks[i].Kind == scan.Ident {
+			idents++
+		}
+	}
+	return idents > 1
 }
 
 type expressionTemp struct {
@@ -1177,6 +1314,118 @@ func localNamesForDecl(file parse.File, decl parse.Decl, namesOfInterest map[str
 		}
 	}
 	return names
+}
+
+func localTypesForDecl(file parse.File, decl parse.Decl) map[string]string {
+	types := map[string]string{}
+	if decl.Kind != "func" {
+		return types
+	}
+	toks := file.Tokens
+	start := tokenIndexAt(toks, decl.Start)
+	if start < 0 {
+		return types
+	}
+	body := findTokenText(toks, start, decl.End, "{")
+	if body < 0 {
+		return types
+	}
+	collectFuncSignatureLocalTypes(toks, start, body, types)
+	for i := body + 1; i < len(toks) && toks[i].Start < decl.End; i++ {
+		if toks[i].Text == ":=" {
+			collectShortDeclLocalTypes(toks, i, types)
+			continue
+		}
+		if toks[i].Text == "var" {
+			collectVarLocalTypes(toks, i, decl.End, types)
+		}
+	}
+	return types
+}
+
+func collectFuncSignatureLocalTypes(toks []scan.Token, start int, end int, types map[string]string) {
+	for i := start; i < end; i++ {
+		if toks[i].Text != "(" {
+			continue
+		}
+		close := findClose(toks, i, "(", ")")
+		if close < 0 || close > end {
+			continue
+		}
+		collectParameterListLocalTypes(toks, i+1, close, types)
+		i = close
+	}
+}
+
+func collectParameterListLocalTypes(toks []scan.Token, start int, end int, types map[string]string) {
+	for i := start; i < end; i++ {
+		if toks[i].Kind != scan.Ident {
+			continue
+		}
+		if i+1 < end && isTypeStart(toks[i+1]) {
+			typ := typeNameInRange(toks, i+1, parameterTypeEnd(toks, i+1, end))
+			if typ != "" {
+				types[toks[i].Text] = typ
+			}
+			continue
+		}
+		if i+2 < end && toks[i+1].Text == "," && toks[i+2].Kind == scan.Ident && isTypeStartAfterName(toks, i+2, end) {
+			typeStart := i + 3
+			for typeStart < end && toks[typeStart].Text == "," {
+				typeStart++
+			}
+			typ := typeNameInRange(toks, typeStart, parameterTypeEnd(toks, typeStart, end))
+			if typ != "" {
+				types[toks[i].Text] = typ
+				types[toks[i+2].Text] = typ
+			}
+		}
+	}
+}
+
+func collectShortDeclLocalTypes(toks []scan.Token, assign int, types map[string]string) {
+	if assign-1 < 0 || assign+2 >= len(toks) {
+		return
+	}
+	if toks[assign-1].Kind != scan.Ident || toks[assign+1].Kind != scan.Ident || toks[assign+2].Text != "{" {
+		return
+	}
+	types[toks[assign-1].Text] = toks[assign+1].Text
+}
+
+func collectVarLocalTypes(toks []scan.Token, pos int, end int, types map[string]string) {
+	if pos+2 >= len(toks) || toks[pos+1].Kind != scan.Ident {
+		return
+	}
+	if toks[pos+2].Text == "=" {
+		if pos+4 < len(toks) && toks[pos+3].Kind == scan.Ident && toks[pos+4].Text == "{" {
+			types[toks[pos+1].Text] = toks[pos+3].Text
+		}
+		return
+	}
+	typ := typeNameInRange(toks, pos+2, parameterTypeEnd(toks, pos+2, end))
+	if typ != "" {
+		types[toks[pos+1].Text] = typ
+	}
+}
+
+func parameterTypeEnd(toks []scan.Token, start int, end int) int {
+	for i := start; i < end; i++ {
+		if toks[i].Text == "," || toks[i].Text == ")" || toks[i].Text == "{" || toks[i].Text == "=" {
+			return i
+		}
+	}
+	return end
+}
+
+func typeNameInRange(toks []scan.Token, start int, end int) string {
+	name := ""
+	for i := start; i < end; i++ {
+		if toks[i].Kind == scan.Ident {
+			name = toks[i].Text
+		}
+	}
+	return name
 }
 
 func isLocalNameAt(names map[string][]localRange, name string, pos int) bool {

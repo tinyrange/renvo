@@ -515,6 +515,32 @@ func main() {
 	}
 }
 
+func TestMethodFrontendMatchesHostGo(t *testing.T) {
+	fixture := t.TempDir()
+	writeFixtureFile(t, fixture, "go.mod", "module example.com/methods\n")
+	writeFixtureFile(t, fixture, "cmd/app/main.go", `package main
+
+type point struct {
+	x int
+	y int
+}
+
+func (p point) Sum() int {
+	return p.x + p.y
+}
+
+func main() {
+	p := point{x: 3, y: 4}
+	if p.Sum() == 7 {
+		print("PASS\n")
+		return
+	}
+	print("FAIL\n")
+}
+`)
+	runFrontendFixtureMatchesHostGo(t, fixture)
+}
+
 func TestTopLevelNameListsFrontendMatchesHostGo(t *testing.T) {
 	fixture := t.TempDir()
 	writeFixtureFile(t, fixture, "go.mod", "module example.com/namelists\n")

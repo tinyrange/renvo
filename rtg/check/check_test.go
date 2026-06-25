@@ -461,7 +461,7 @@ func appMain() int {
 	}
 }
 
-func TestFileRejectsMethods(t *testing.T) {
+func TestFileAllowsMethods(t *testing.T) {
 	file, err := parse.FileSource("method.go", []byte(`package main
 
 type box struct { value int }
@@ -475,12 +475,9 @@ func appMain() int { return 0 }
 	if err != nil {
 		t.Fatalf("FileSource failed: %v", err)
 	}
-	err = File(file)
-	if err == nil {
-		t.Fatalf("File accepted method declaration")
-	}
-	if !strings.Contains(err.Error(), "method.go:5:14: methods are not supported") {
-		t.Fatalf("error = %q", err)
+	diags := File(file)
+	if len(diags) != 0 {
+		t.Fatalf("File rejected method declaration: %v", diags)
 	}
 }
 

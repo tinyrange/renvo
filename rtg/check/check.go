@@ -119,9 +119,6 @@ func splitPathPositionMessage(path string, message string) (int, int, string, bo
 func declDiagnostics(file parse.File) Diagnostics {
 	var diags Diagnostics
 	for _, decl := range file.Decls {
-		if decl.Kind == "func" && decl.Receiver {
-			diags = append(diags, declDiagnostic(file, decl, "methods are not supported"))
-		}
 		if decl.Kind == "func" {
 			if decl.Name == "init" {
 				diags = append(diags, declDiagnostic(file, decl, "init functions are not supported"))

@@ -108,6 +108,50 @@ func Use() int { return A + B + C + D }
 	}
 }
 
+func TestPackageLowersMethodsToFunctions(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app/pkg",
+		Name:       "pkg",
+		Files: []load.File{
+			{
+				Path: "method.go",
+				Source: []byte(`package pkg
+
+type Point struct { x int; y int }
+
+func (p Point) Sum() int {
+	return p.x + p.y
+}
+
+func Use() int {
+	p := Point{x: 3, y: 4}
+	return p.Sum()
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	if len(u.Decls) != 3 {
+		t.Fatalf("decls = %#v, want 3", u.Decls)
+	}
+	if u.Decls[1].Name != "Point_Sum" || u.Decls[1].UnitName != "rtg_example_com_app_pkg_Point_Sum" {
+		t.Fatalf("method metadata = %#v", u.Decls[1])
+	}
+	if !strings.Contains(u.Decls[1].Body, "func rtg_example_com_app_pkg_Point_Sum(p rtg_example_com_app_pkg_Point) int") {
+		t.Fatalf("method declaration was not lowered: %q", u.Decls[1].Body)
+	}
+	if !strings.Contains(u.Decls[2].Body, "p := rtg_example_com_app_pkg_Point{x: 3, y: 4}") {
+		t.Fatalf("method receiver local type was not rewritten: %q", u.Decls[2].Body)
+	}
+	if !strings.Contains(u.Decls[2].Body, "return rtg_example_com_app_pkg_Point_Sum(p)") {
+		t.Fatalf("method call was not lowered: %q", u.Decls[2].Body)
+	}
+}
+
 func TestSymbolNameIsStableIdentifier(t *testing.T) {
 	got := SymbolName("example.com/team/app-pkg", "Value")
 	want := "rtg_example_com_team_app_pkg_Value"
