@@ -194,6 +194,9 @@ func File(file parse.File) Diagnostics {
 		if startsGenericDecl(file.Tokens, i, topFuncs) {
 			diags = append(diags, diag(file, file.Tokens[i+2], "generics are not supported"))
 		}
+		if startsGenericInstantiation(file.Tokens, i) {
+			diags = append(diags, diag(file, file.Tokens[i+1], "generics are not supported"))
+		}
 		if startsTypeAssertion(file.Tokens, i) {
 			diags = append(diags, diag(file, file.Tokens[i+1], "type assertions and type switches are not supported"))
 		}
@@ -278,6 +281,17 @@ func startsGenericDecl(toks []scan.Token, i int, topFuncs map[int]bool) bool {
 		return toks[namePos].Kind == scan.Ident && toks[namePos+1].Text == "["
 	}
 	return false
+}
+
+func startsGenericInstantiation(toks []scan.Token, i int) bool {
+	if i+3 >= len(toks) || toks[i].Kind != scan.Ident || toks[i+1].Text != "[" {
+		return false
+	}
+	close := findClose(toks, i+1, "[", "]")
+	if close < 0 || close+1 >= len(toks) {
+		return false
+	}
+	return toks[close+1].Text == "{" || toks[close+1].Text == "("
 }
 
 func startsArrayType(toks []scan.Token, i int) bool {

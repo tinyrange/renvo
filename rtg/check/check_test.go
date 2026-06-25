@@ -52,6 +52,36 @@ func appMain() int {
 	}
 }
 
+func TestFileRejectsGenericInstantiations(t *testing.T) {
+	file, err := parse.FileSource("generics.go", []byte(`package main
+
+type Box struct { value int }
+func id(value int) int { return value }
+
+func appMain() int {
+	_ = Box[int]{value: 1}
+	_ = id[int](1)
+	return 0
+}
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	err = File(file)
+	if err == nil {
+		t.Fatalf("File accepted generic instantiations")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"generics.go:7:9: generics are not supported",
+		"generics.go:8:8: generics are not supported",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("missing diagnostic %q in:\n%s", want, msg)
+		}
+	}
+}
+
 func TestFileAcceptsSimpleSubsetProgram(t *testing.T) {
 	file, err := parse.FileSource("ok.go", []byte(`package main
 
@@ -59,6 +89,10 @@ type box struct { value int }
 func appMain() int {
 	var b box
 	b.value = 7
+	values := []int{1, 2}
+	if values[0] == 1 {
+		b.value = b.value + values[1]
+	}
 	return b.value
 }
 `))
