@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -240,6 +241,56 @@ func main() {
 	runFrontendFixtureMatchesHostGo(t, fixture)
 }
 
+func TestStdOSFileIntrinsicsFrontendRuns(t *testing.T) {
+	fixture := t.TempDir()
+	dataPath := filepath.ToSlash(filepath.Join(fixture, "rtg_std_os.tmp"))
+	writeFixtureFile(t, fixture, "go.mod", "module example.com/stdos\n")
+	writeFixtureFile(t, fixture, "cmd/app/main.go", `package main
+
+import "os"
+
+func fail(msg string) {
+	os.Write(os.Stdout, []byte(msg), -1)
+}
+
+func main() {
+	fd := os.Open(`+strconv.Quote(dataPath)+`, os.O_RDWR|os.O_CREATE|os.O_TRUNC)
+	if fd < 0 {
+		fail("FAIL open\n")
+		return
+	}
+	var data []byte
+	data = append(data, 'O')
+	data = append(data, 'K')
+	if os.Write(fd, data, int64(0)) != 2 {
+		fail("FAIL write\n")
+		os.Close(fd)
+		return
+	}
+	var readBuf []byte
+	readBuf = append(readBuf, 0)
+	readBuf = append(readBuf, 0)
+	if os.Read(fd, readBuf, int64(0)) != 2 {
+		fail("FAIL read\n")
+		os.Close(fd)
+		return
+	}
+	if os.Chmod(fd, 420) != 0 {
+		fail("FAIL chmod\n")
+		os.Close(fd)
+		return
+	}
+	os.Close(fd)
+	if readBuf[0] == 'O' && readBuf[1] == 'K' {
+		os.Write(os.Stdout, []byte("PASS\n"), -1)
+		return
+	}
+	fail("FAIL data\n")
+}
+`)
+	runFrontendFixtureOutput(t, fixture, []byte("PASS\n"))
+}
+
 func TestTopLevelNameListsFrontendMatchesHostGo(t *testing.T) {
 	fixture := t.TempDir()
 	writeFixtureFile(t, fixture, "go.mod", "module example.com/namelists\n")
@@ -333,6 +384,32 @@ func runFrontendFixtureMatchesHostGo(t *testing.T, fixture string) {
 			}
 			if !bytes.Equal(frontOut, hostOut) {
 				t.Fatalf("frontend output = %q, host output = %q", string(frontOut), string(hostOut))
+			}
+		})
+	}
+}
+
+func runFrontendFixtureOutput(t *testing.T, fixture string, want []byte) {
+	t.Helper()
+	for _, target := range frontendSmokeTargets(t) {
+		target := target
+		t.Run(target.name, func(t *testing.T) {
+			if len(target.runner) > 0 {
+				if _, err := exec.LookPath(target.runner[0]); err != nil {
+					t.Skipf("runner %s is not installed", target.runner[0])
+				}
+			}
+			units := loadFixtureUnitsForTarget(t, fixture, target.name)
+			out := filepath.Join(t.TempDir(), "app")
+			if err := rtgx.CompileUnits(units, rtgx.Options{Target: target.name, Output: out}); err != nil {
+				t.Fatalf("CompileUnits failed: %v", err)
+			}
+			frontOut, err := runFrontendTarget(target, out)
+			if err != nil {
+				t.Fatalf("frontend fixture failed: %v\n%s", err, string(frontOut))
+			}
+			if !bytes.Equal(frontOut, want) {
+				t.Fatalf("frontend output = %q, want %q", string(frontOut), string(want))
 			}
 		})
 	}

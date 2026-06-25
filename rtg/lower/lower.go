@@ -232,7 +232,9 @@ func rewriteDecl(file parse.File, decl parse.Decl, topNames map[string]string, i
 				member := file.Tokens[i+2]
 				if sym, ok := symbols[member.Text]; ok {
 					replacement = sym.UnitName
-					*refs = append(*refs, sym)
+					if sym.ImportPath != "" {
+						*refs = append(*refs, sym)
+					}
 					out = append(out, replacement...)
 					cursor = member.End
 					prevText = member.Text
@@ -1100,9 +1102,33 @@ func importReferenceMap(file parse.File, packages map[string]load.Package) map[s
 				}
 			}
 		}
+		for name, intrinsic := range intrinsicImportSymbols(importPath) {
+			symbols[name] = unit.Symbol{Name: name, UnitName: intrinsic}
+		}
 		refs[localName] = symbols
 	}
 	return refs
+}
+
+func intrinsicImportSymbols(importPath string) map[string]string {
+	if importPath != "os" {
+		return nil
+	}
+	return map[string]string{
+		"Open":     "open",
+		"Close":    "close",
+		"Read":     "read",
+		"Write":    "write",
+		"Chmod":    "chmod",
+		"O_RDONLY": "O_RDONLY",
+		"O_WRONLY": "O_WRONLY",
+		"O_RDWR":   "O_RDWR",
+		"O_CREATE": "O_CREATE",
+		"O_TRUNC":  "O_TRUNC",
+		"Stdin":    "0",
+		"Stdout":   "1",
+		"Stderr":   "2",
+	}
 }
 
 func importLocalName(imp parse.Import) string {
