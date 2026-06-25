@@ -8,8 +8,14 @@ import (
 )
 
 type Module struct {
-	Root string
-	Path string
+	Root     string
+	Path     string
+	Replaces []Replace
+}
+
+type Replace struct {
+	Old string
+	New string
 }
 
 func Find(start string) (Module, error) {
@@ -28,11 +34,11 @@ func Find(start string) (Module, error) {
 		path := filepath.Join(abs, "go.mod")
 		data, err := os.ReadFile(path)
 		if err == nil {
-			modulePath, err := ParseModulePath(string(data))
+			parsed, err := ParseFile(string(data))
 			if err != nil {
 				return Module{}, fmt.Errorf("%s: %w", path, err)
 			}
-			return Module{Root: abs, Path: modulePath}, nil
+			return Module{Root: abs, Path: parsed.Path, Replaces: parsed.Replaces}, nil
 		}
 		parent := filepath.Dir(abs)
 		if parent == abs {
@@ -42,16 +48,66 @@ func Find(start string) (Module, error) {
 	}
 }
 
-func ParseModulePath(data string) (string, error) {
+func ParseFile(data string) (Module, error) {
+	var module Module
 	lines := strings.Split(data, "\n")
+	inReplaceBlock := false
 	for _, line := range lines {
 		line = stripLineComment(line)
 		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if inReplaceBlock {
+			if fields[0] == ")" {
+				inReplaceBlock = false
+				continue
+			}
+			if repl, ok := parseReplaceFields(fields); ok {
+				module.Replaces = append(module.Replaces, repl)
+			}
+			continue
+		}
 		if len(fields) >= 2 && fields[0] == "module" {
-			return fields[1], nil
+			module.Path = fields[1]
+			continue
+		}
+		if fields[0] == "replace" {
+			if len(fields) >= 2 && fields[1] == "(" {
+				inReplaceBlock = true
+				continue
+			}
+			if repl, ok := parseReplaceFields(fields[1:]); ok {
+				module.Replaces = append(module.Replaces, repl)
+			}
 		}
 	}
-	return "", fmt.Errorf("module directive not found")
+	if module.Path == "" {
+		return Module{}, fmt.Errorf("module directive not found")
+	}
+	return module, nil
+}
+
+func ParseModulePath(data string) (string, error) {
+	module, err := ParseFile(data)
+	if err != nil {
+		return "", err
+	}
+	return module.Path, nil
+}
+
+func parseReplaceFields(fields []string) (Replace, bool) {
+	arrow := -1
+	for i, field := range fields {
+		if field == "=>" {
+			arrow = i
+			break
+		}
+	}
+	if arrow <= 0 || arrow+1 >= len(fields) {
+		return Replace{}, false
+	}
+	return Replace{Old: fields[0], New: fields[arrow+1]}, true
 }
 
 func stripLineComment(line string) string {

@@ -234,11 +234,37 @@ func resolveImport(module mod.Module, opts Options, imp string) (resolvedImport,
 	if strings.HasPrefix(imp, prefix) {
 		return resolvedImport{Dir: filepath.Join(module.Root, filepath.FromSlash(strings.TrimPrefix(imp, prefix))), ImportPath: imp}, true, nil
 	}
+	if next, ok, err := resolveReplacedImport(module, imp); ok || err != nil {
+		return next, ok, err
+	}
 	stdDir := filepath.Join(opts.StdRoot, filepath.FromSlash(imp))
 	if info, err := os.Stat(stdDir); err == nil && info.IsDir() {
 		return resolvedImport{Dir: stdDir, ImportPath: imp}, true, nil
 	}
 	return resolvedImport{}, false, fmt.Errorf("import %q is not in module %q and was not found in rtg/std", imp, module.Path)
+}
+
+func resolveReplacedImport(module mod.Module, imp string) (resolvedImport, bool, error) {
+	for _, repl := range module.Replaces {
+		if imp != repl.Old && !strings.HasPrefix(imp, repl.Old+"/") {
+			continue
+		}
+		if !isLocalPath(repl.New) {
+			return resolvedImport{}, false, fmt.Errorf("import %q uses non-local replace target %q; external module fetching is not supported", imp, repl.New)
+		}
+		root := repl.New
+		if !filepath.IsAbs(root) {
+			root = filepath.Join(module.Root, root)
+		}
+		suffix := strings.TrimPrefix(imp, repl.Old)
+		suffix = strings.TrimPrefix(suffix, "/")
+		return resolvedImport{Dir: filepath.Join(root, filepath.FromSlash(suffix)), ImportPath: imp}, true, nil
+	}
+	return resolvedImport{}, false, nil
+}
+
+func isLocalPath(path string) bool {
+	return filepath.IsAbs(path) || strings.HasPrefix(path, "./") || strings.HasPrefix(path, "../") || path == "." || path == ".."
 }
 
 func importPathForDir(module mod.Module, dir string) string {

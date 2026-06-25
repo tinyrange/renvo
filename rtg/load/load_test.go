@@ -3,6 +3,7 @@ package load
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -64,6 +65,59 @@ func appMain() int { return 0 }
 	_, err := LoadEntries([]string{root}, Options{StdRoot: filepath.Join(root, "missing-std")})
 	if err == nil {
 		t.Fatalf("LoadEntries succeeded with missing std package")
+	}
+}
+
+func TestLoadEntriesResolvesLocalReplaceImports(t *testing.T) {
+	root := t.TempDir()
+	libRoot := filepath.Join(t.TempDir(), "lib")
+	writeFile(t, root, "go.mod", "module example.com/app\n\nreplace example.com/lib => "+filepath.ToSlash(libRoot)+"\n")
+	writeFile(t, root, "main.go", `package main
+
+import "example.com/lib/pkg/answer"
+
+func appMain() int { return answer.Value() }
+`)
+	writeFile(t, libRoot, "pkg/answer/answer.go", `package answer
+
+func Value() int { return 7 }
+`)
+
+	graph, err := LoadEntries([]string{root}, Options{})
+	if err != nil {
+		t.Fatalf("LoadEntries failed: %v", err)
+	}
+	if len(graph.Packages) != 2 {
+		t.Fatalf("loaded %d packages, want 2", len(graph.Packages))
+	}
+	dep := graph.Packages[1]
+	if dep.ImportPath != "example.com/lib/pkg/answer" {
+		t.Fatalf("dep import path = %q, want example.com/lib/pkg/answer", dep.ImportPath)
+	}
+	if dep.Dir != filepath.Join(libRoot, "pkg", "answer") {
+		t.Fatalf("dep dir = %q, want replaced dir", dep.Dir)
+	}
+	if dep.Files[0].UnitPath != "example.com/lib/pkg/answer/answer.go" {
+		t.Fatalf("dep unit path = %q, want import-relative path", dep.Files[0].UnitPath)
+	}
+}
+
+func TestLoadEntriesRejectsNonLocalReplaceImports(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n\nreplace example.com/lib => example.com/other v1.2.3\n")
+	writeFile(t, root, "main.go", `package main
+
+import "example.com/lib/pkg"
+
+func appMain() int { return pkg.Value() }
+`)
+
+	_, err := LoadEntries([]string{root}, Options{})
+	if err == nil {
+		t.Fatalf("LoadEntries succeeded with non-local replace")
+	}
+	if got := err.Error(); got == "" || !containsAll(got, []string{"non-local replace target", "external module fetching is not supported"}) {
+		t.Fatalf("error = %q", got)
 	}
 }
 
@@ -172,4 +226,13 @@ func writeFile(t *testing.T, root string, name string, data string) {
 	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
+}
+
+func containsAll(s string, parts []string) bool {
+	for _, part := range parts {
+		if !strings.Contains(s, part) {
+			return false
+		}
+	}
+	return true
 }

@@ -287,6 +287,42 @@ func Print() int {
 	}
 }
 
+func TestRunBuildCompilesLocalReplaceModule(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skipf("linux/amd64 executable smoke requires linux/amd64 host, got %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	root := t.TempDir()
+	libRoot := filepath.Join(t.TempDir(), "lib")
+	writeCLIFile(t, root, "go.mod", "module example.com/app\n\nreplace example.com/lib => "+filepath.ToSlash(libRoot)+"\n")
+	writeCLIFile(t, root, "cmd/app/main.go", `package main
+
+import "example.com/lib/pkg/answer"
+
+func appMain() int {
+	return answer.Print()
+}
+`)
+	writeCLIFile(t, libRoot, "pkg/answer/answer.go", `package answer
+
+func Print() int {
+	print("PASS\n")
+	return 0
+}
+`)
+	out := filepath.Join(root, "app")
+	if err := run(config{output: out, inputs: []string{filepath.Join(root, "cmd", "app")}}); err != nil {
+		t.Fatalf("run build failed: %v", err)
+	}
+	cmd := exec.Command(out)
+	data, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("compiled app failed: %v\n%s", err, string(data))
+	}
+	if string(data) != "PASS\n" {
+		t.Fatalf("compiled app output = %q", string(data))
+	}
+}
+
 func TestRunBuildRequiresOutput(t *testing.T) {
 	root := t.TempDir()
 	writeCLIFile(t, root, "go.mod", "module example.com/app\n")
