@@ -138,6 +138,35 @@ package main
 	}
 }
 
+func TestParseSourcePreservesRTGCommentsInsideDeclarationBody(t *testing.T) {
+	u, err := ParseSource("comment.rtg.go", []byte(`//go:build rtg
+
+// rtg:unit example.com/app
+package main
+
+// rtg:decl func appMain => rtg_example_com_app_appMain main.go
+func rtg_example_com_app_appMain() int {
+// rtg: this is an ordinary source comment
+	return 0
+}
+
+// rtg:decl func helper => rtg_example_com_app_helper main.go
+func rtg_example_com_app_helper() int { return 1 }
+`))
+	if err != nil {
+		t.Fatalf("ParseSource failed: %v", err)
+	}
+	if len(u.Decls) != 2 {
+		t.Fatalf("decls = %#v, want 2", u.Decls)
+	}
+	if !strings.Contains(u.Decls[0].Body, "// rtg: this is an ordinary source comment") {
+		t.Fatalf("first decl body lost rtg-like comment: %q", u.Decls[0].Body)
+	}
+	if u.Decls[1].Name != "helper" {
+		t.Fatalf("second declaration was not parsed as metadata: %#v", u.Decls[1])
+	}
+}
+
 func TestParseSourceRejectsDuplicateMetadata(t *testing.T) {
 	tests := []struct {
 		name string

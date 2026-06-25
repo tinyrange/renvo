@@ -3,6 +3,8 @@ package unit
 import (
 	"fmt"
 	"strings"
+
+	"j5.nz/rtg/rtg/scan"
 )
 
 func ParseSources(sources []SourceFile) ([]Unit, error) {
@@ -38,6 +40,11 @@ func ParseSource(path string, src []byte) (Unit, error) {
 				u.Decls[currentDecl].Body += line
 				u.Decls[currentDecl].Body += "\n"
 			}
+			continue
+		}
+		if currentDecl >= 0 && strings.TrimSpace(u.Decls[currentDecl].Body) != "" && !declBodyComplete(u.Decls[currentDecl]) {
+			u.Decls[currentDecl].Body += line
+			u.Decls[currentDecl].Body += "\n"
 			continue
 		}
 		body := strings.TrimPrefix(line, "// rtg:")
@@ -124,6 +131,72 @@ func ParseSource(path string, src []byte) (Unit, error) {
 		}
 	}
 	return u, nil
+}
+
+func declBodyComplete(decl Decl) bool {
+	toks, err := scan.Tokens([]byte(decl.Body))
+	if err != nil {
+		return true
+	}
+	switch decl.Kind {
+	case "func":
+		return balancedAfterFirst(toks, "{", "}")
+	case "const", "var", "type":
+		return delimitersBalanced(toks)
+	default:
+		return delimitersBalanced(toks)
+	}
+}
+
+func balancedAfterFirst(toks []scan.Token, open string, close string) bool {
+	depth := 0
+	seen := false
+	for _, tok := range toks {
+		if tok.Kind == scan.EOF {
+			break
+		}
+		if tok.Text == open {
+			depth++
+			seen = true
+			continue
+		}
+		if tok.Text == close {
+			depth--
+			if depth < 0 {
+				return false
+			}
+		}
+	}
+	return seen && depth == 0
+}
+
+func delimitersBalanced(toks []scan.Token) bool {
+	paren := 0
+	brack := 0
+	brace := 0
+	for _, tok := range toks {
+		if tok.Kind == scan.EOF {
+			break
+		}
+		switch tok.Text {
+		case "(":
+			paren++
+		case ")":
+			paren--
+		case "[":
+			brack++
+		case "]":
+			brack--
+		case "{":
+			brace++
+		case "}":
+			brace--
+		}
+		if paren < 0 || brack < 0 || brace < 0 {
+			return false
+		}
+	}
+	return paren == 0 && brack == 0 && brace == 0
 }
 
 func hasRTGBuildConstraint(lines []string) bool {
