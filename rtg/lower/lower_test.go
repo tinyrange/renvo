@@ -934,7 +934,7 @@ func appMain() int {
 	}
 }
 
-func TestPackageDoesNotNormalizeForPostClauseCallArguments(t *testing.T) {
+func TestPackageNormalizesForPostClauseCallArgumentsWithoutContinue(t *testing.T) {
 	pkg := load.Package{
 		ImportPath: "example.com/app",
 		Name:       "main",
@@ -960,11 +960,97 @@ func appMain() int {
 		t.Fatalf("Package failed: %v", err)
 	}
 	body := u.Decls[2].Body
+	if !strings.Contains(body, "{\n\t\ti := 0\n\t\tfor {") {
+		t.Fatalf("for post clause was not lowered into scoped loop: %q", body)
+	}
+	if !strings.Contains(body, "if !(i < 3) {\n\t\t\t\tbreak\n\t\t\t}") {
+		t.Fatalf("for post condition guard was not emitted: %q", body)
+	}
+	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_0 := rtg_example_com_app_first()") {
+		t.Fatalf("for post nested call was not lifted into loop body temp: %q", body)
+	}
+	if !strings.Contains(body, "i = rtg_example_com_app_next(rtg_example_com_app_appMain_tmp_0)") {
+		t.Fatalf("for post clause did not use lifted temp: %q", body)
+	}
+}
+
+func TestPackageNormalizesClassicForConditionAndPostCallArguments(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+func first() int { return 1 }
+func second() int { return 2 }
+func join(a int, b int) int { return a + b }
+func appMain() int {
+	total := 0
+	for i := 0; join(first(), second()) < 4; i = join(first(), second()) {
+		total = total + i
+		break
+	}
+	return total
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	body := u.Decls[3].Body
+	condFirst := strings.Index(body, "rtg_example_com_app_appMain_tmp_0 := rtg_example_com_app_first()")
+	condSecond := strings.Index(body, "rtg_example_com_app_appMain_tmp_1 := rtg_example_com_app_second()")
+	guard := strings.Index(body, "if !(rtg_example_com_app_join(rtg_example_com_app_appMain_tmp_0, rtg_example_com_app_appMain_tmp_1) < 4)")
+	postFirst := strings.Index(body, "rtg_example_com_app_appMain_tmp_2 := rtg_example_com_app_first()")
+	postSecond := strings.Index(body, "rtg_example_com_app_appMain_tmp_3 := rtg_example_com_app_second()")
+	postAssign := strings.Index(body, "i = rtg_example_com_app_join(rtg_example_com_app_appMain_tmp_2, rtg_example_com_app_appMain_tmp_3)")
+	if condFirst < 0 || condSecond < 0 || guard < 0 || postFirst < 0 || postSecond < 0 || postAssign < 0 {
+		t.Fatalf("classic for condition/post calls were not all normalized: %q", body)
+	}
+	if !(condFirst < condSecond && condSecond < guard && guard < postFirst && postFirst < postSecond && postSecond < postAssign) {
+		t.Fatalf("classic for condition/post temps emitted in wrong order: %q", body)
+	}
+}
+
+func TestPackageDoesNotNormalizeForPostClauseWithContinue(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+func first() int { return 1 }
+func next(v int) int { return v + 1 }
+func appMain() int {
+	for i := 0; i < 3; i = next(first()) {
+		if i == 1 {
+			continue
+		}
+		_ = i
+	}
+	return 0
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	body := u.Decls[2].Body
 	if strings.Contains(body, "_tmp_") {
-		t.Fatalf("for post clause was normalized unsafely: %q", body)
+		t.Fatalf("for post clause with continue was normalized unsafely: %q", body)
 	}
 	if !strings.Contains(body, "i = rtg_example_com_app_next(rtg_example_com_app_first())") {
-		t.Fatalf("for post clause shape changed unexpectedly: %q", body)
+		t.Fatalf("for post clause with continue shape changed unexpectedly: %q", body)
 	}
 }
 
@@ -1044,11 +1130,17 @@ func appMain() int {
 	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_0 := rtg_example_com_app_first()") {
 		t.Fatalf("classic for init call was not lifted before loop: %q", body)
 	}
-	if !strings.Contains(body, "for i := rtg_example_com_app_next(rtg_example_com_app_appMain_tmp_0); i < 3; i = rtg_example_com_app_next(rtg_example_com_app_first()) {") {
-		t.Fatalf("classic for init did not use lifted temp while preserving post clause: %q", body)
+	if !strings.Contains(body, "i := rtg_example_com_app_next(rtg_example_com_app_appMain_tmp_0)\n\t\tfor {") {
+		t.Fatalf("classic for init did not use lifted temp in scoped loop: %q", body)
 	}
-	if strings.Contains(body, "i = rtg_example_com_app_next(rtg_example_com_app_appMain_tmp_") {
-		t.Fatalf("classic for post clause was normalized unsafely: %q", body)
+	if !strings.Contains(body, "if !(i < 3) {\n\t\t\t\tbreak\n\t\t\t}") {
+		t.Fatalf("classic for condition guard was not emitted: %q", body)
+	}
+	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_1 := rtg_example_com_app_first()") {
+		t.Fatalf("classic for post call was not lifted into loop body: %q", body)
+	}
+	if !strings.Contains(body, "i = rtg_example_com_app_next(rtg_example_com_app_appMain_tmp_1)") {
+		t.Fatalf("classic for post clause did not use lifted temp: %q", body)
 	}
 }
 

@@ -297,6 +297,18 @@ type classicForConditionStatement struct {
 	openBrace int
 }
 
+type classicForPostStatement struct {
+	token     int
+	initStart int
+	initEnd   int
+	condStart int
+	condEnd   int
+	postStart int
+	postEnd   int
+	openBrace int
+	end       int
+}
+
 func normalizeFunctionExpressions(body string, unitName string) string {
 	toks, err := scan.Tokens([]byte(body))
 	if err != nil {
@@ -347,6 +359,76 @@ func normalizeFunctionExpressions(body string, unitName string) string {
 			cursor = toks[short.end].End
 			i = short.end
 			continue
+		}
+		post, ok := normalizationClassicForPostStatement(toks, i)
+		if ok {
+			if expressionContainsCall(toks, post.postStart, post.postEnd) {
+				initTemps, initReplacements := normalizeCallArgumentExpressions(body, toks, post.initStart, post.initEnd, unitName, &tempIndex)
+				condTemps, condReplacements := normalizeCallArgumentExpressions(body, toks, post.condStart, post.condEnd, unitName, &tempIndex)
+				postTemps, postReplacements := normalizeCallArgumentExpressions(body, toks, post.postStart, post.postEnd, unitName, &tempIndex)
+				insertStart := statementInsertStart(body, toks[post.token].Start)
+				out = append(out, body[cursor:insertStart]...)
+				indent := statementIndent(body, toks[post.token].Start)
+				innerIndent := indent + "\t"
+				loopIndent := innerIndent + "\t"
+				out = append(out, indent...)
+				out = append(out, "{\n"...)
+				for _, temp := range initTemps {
+					out = append(out, innerIndent...)
+					out = append(out, temp.name...)
+					out = append(out, " := "...)
+					out = append(out, temp.expr...)
+					out = append(out, '\n')
+				}
+				if post.initStart < post.initEnd {
+					init := strings.TrimSpace(applyExpressionReplacements(body, toks[post.initStart].Start, toks[post.initEnd-1].End, initReplacements))
+					out = append(out, innerIndent...)
+					out = append(out, init...)
+					out = append(out, '\n')
+				}
+				out = append(out, innerIndent...)
+				out = append(out, "for {\n"...)
+				if post.condStart < post.condEnd {
+					condition := strings.TrimSpace(applyExpressionReplacements(body, toks[post.condStart].Start, toks[post.condEnd-1].End, condReplacements))
+					for _, temp := range condTemps {
+						out = append(out, loopIndent...)
+						out = append(out, temp.name...)
+						out = append(out, " := "...)
+						out = append(out, temp.expr...)
+						out = append(out, '\n')
+					}
+					out = append(out, loopIndent...)
+					out = append(out, "if !("...)
+					out = append(out, condition...)
+					out = append(out, ") {\n"...)
+					out = append(out, loopIndent...)
+					out = append(out, "\tbreak\n"...)
+					out = append(out, loopIndent...)
+					out = append(out, "}\n"...)
+				}
+				out = append(out, body[toks[post.openBrace].End:toks[post.end].Start]...)
+				if len(out) == 0 || out[len(out)-1] != '\n' {
+					out = append(out, '\n')
+				}
+				for _, temp := range postTemps {
+					out = append(out, loopIndent...)
+					out = append(out, temp.name...)
+					out = append(out, " := "...)
+					out = append(out, temp.expr...)
+					out = append(out, '\n')
+				}
+				postExpr := strings.TrimSpace(applyExpressionReplacements(body, toks[post.postStart].Start, toks[post.postEnd-1].End, postReplacements))
+				out = append(out, loopIndent...)
+				out = append(out, postExpr...)
+				out = append(out, '\n')
+				out = append(out, innerIndent...)
+				out = append(out, "}\n"...)
+				out = append(out, indent...)
+				out = append(out, '}')
+				cursor = toks[post.end].End
+				i = post.end
+				continue
+			}
 		}
 		classic, ok := normalizationClassicForConditionStatement(toks, i)
 		if ok {
@@ -461,6 +543,40 @@ func normalizationConditionalShortStatement(toks []scan.Token, pos int) (conditi
 		openBrace: exprEnd,
 		end:       end,
 		kind:      toks[pos].Text,
+	}, true
+}
+
+func normalizationClassicForPostStatement(toks []scan.Token, pos int) (classicForPostStatement, bool) {
+	if toks[pos].Text != "for" {
+		return classicForPostStatement{}, false
+	}
+	exprStart := pos + 1
+	exprEnd := conditionExpressionEnd(toks, pos)
+	if exprEnd <= exprStart || exprEnd >= len(toks) || toks[exprEnd].Text != "{" {
+		return classicForPostStatement{}, false
+	}
+	firstSemi := topLevelSemicolon(toks, exprStart, exprEnd)
+	if firstSemi < 0 {
+		return classicForPostStatement{}, false
+	}
+	secondSemi := topLevelSemicolon(toks, firstSemi+1, exprEnd)
+	if secondSemi < 0 || secondSemi+1 >= exprEnd {
+		return classicForPostStatement{}, false
+	}
+	end := findClose(toks, exprEnd, "{", "}")
+	if end <= exprEnd || containsTokenText(toks, exprEnd+1, end, "continue") {
+		return classicForPostStatement{}, false
+	}
+	return classicForPostStatement{
+		token:     pos,
+		initStart: exprStart,
+		initEnd:   firstSemi,
+		condStart: firstSemi + 1,
+		condEnd:   secondSemi,
+		postStart: secondSemi + 1,
+		postEnd:   exprEnd,
+		openBrace: exprEnd,
+		end:       end,
 	}, true
 }
 
@@ -1110,6 +1226,15 @@ func findClose(toks []scan.Token, pos int, open string, close string) int {
 		pos++
 	}
 	return -1
+}
+
+func containsTokenText(toks []scan.Token, start int, end int, text string) bool {
+	for i := start; i < end && i < len(toks); i++ {
+		if toks[i].Text == text {
+			return true
+		}
+	}
+	return false
 }
 
 func isTypeStart(tok scan.Token) bool {

@@ -211,6 +211,38 @@ func Count() int { return count }
 	runFrontendFixtureMatchesHostGo(t, fixture)
 }
 
+func TestClassicForPostNestedCallArgumentFrontendMatchesHostGo(t *testing.T) {
+	fixture := t.TempDir()
+	writeFixtureFile(t, fixture, "go.mod", "module example.com/forpost\n")
+	writeFixtureFile(t, fixture, "cmd/app/main.go", `package main
+
+import "example.com/forpost/pkg/dep"
+
+func main() {
+	total := 0
+	for i := 0; i < 3; i = dep.Next(dep.Step()) {
+		total = total + i
+	}
+	if total == 2 && dep.Count() == 2 {
+		print("PASS\n")
+		return
+	}
+	print("FAIL\n")
+}
+`)
+	writeFixtureFile(t, fixture, "pkg/dep/dep.go", `package dep
+
+var count int
+func Step() int {
+	count = count + 1
+	return count
+}
+func Next(v int) int { return v + 1 }
+func Count() int { return count }
+`)
+	runFrontendFixtureMatchesHostGo(t, fixture)
+}
+
 func TestIfShortConditionNestedCallArgumentFrontendMatchesHostGo(t *testing.T) {
 	fixture := t.TempDir()
 	writeFixtureFile(t, fixture, "go.mod", "module example.com/ifshortcond\n")
