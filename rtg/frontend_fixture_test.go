@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"testing"
 
 	"j5.nz/rtg/rtg/build"
 	"j5.nz/rtg/rtg/emit"
-	"j5.nz/rtg/rtg/link"
 	"j5.nz/rtg/rtg/load"
 	"j5.nz/rtg/rtg/rtgx"
 	"j5.nz/rtg/rtg/unit"
@@ -195,6 +195,43 @@ func main() {
 	runFrontendFixtureMatchesHostGo(t, fixture)
 }
 
+func TestFrontendUnitsUseRequestedTargetFiles(t *testing.T) {
+	fixture := t.TempDir()
+	writeFixtureFile(t, fixture, "go.mod", "module example.com/targetfiles\n")
+	writeFixtureFile(t, fixture, "cmd/app/main.go", `package main
+
+import "example.com/targetfiles/pkg/dep"
+
+func main() {
+	if dep.Value() == 1 {
+		print("PASS\n")
+	}
+}
+`)
+	writeFixtureFile(t, fixture, "pkg/dep/value_amd64.go", `package dep
+
+func Value() int { return 1 }
+`)
+	writeFixtureFile(t, fixture, "pkg/dep/value_arm64.go", `package dep
+
+func Value() int { return 2 }
+`)
+	amd64Units := loadFixtureUnitsForTarget(t, fixture, "linux/amd64")
+	aarch64Units := loadFixtureUnitsForTarget(t, fixture, "linux/aarch64")
+	if !unitsContainBody(amd64Units, "func rtg_example_com_targetfiles_pkg_dep_Value() int { return 1 }") {
+		t.Fatalf("linux/amd64 units did not include amd64 body: %#v", amd64Units)
+	}
+	if unitsContainBody(amd64Units, "func rtg_example_com_targetfiles_pkg_dep_Value() int { return 2 }") {
+		t.Fatalf("linux/amd64 units included arm64 body: %#v", amd64Units)
+	}
+	if !unitsContainBody(aarch64Units, "func rtg_example_com_targetfiles_pkg_dep_Value() int { return 2 }") {
+		t.Fatalf("linux/aarch64 units did not include arm64 body: %#v", aarch64Units)
+	}
+	if unitsContainBody(aarch64Units, "func rtg_example_com_targetfiles_pkg_dep_Value() int { return 1 }") {
+		t.Fatalf("linux/aarch64 units included amd64 body: %#v", aarch64Units)
+	}
+}
+
 func runFrontendFixtureMatchesHostGo(t *testing.T, fixture string) {
 	t.Helper()
 	host := exec.Command("go", "run", "./cmd/app")
@@ -203,12 +240,6 @@ func runFrontendFixtureMatchesHostGo(t *testing.T, fixture string) {
 	if err != nil {
 		t.Fatalf("host fixture failed: %v\n%s", err, string(hostOut))
 	}
-	units := loadFixtureUnits(t, fixture)
-	plan, err := link.Build(units)
-	if err != nil {
-		t.Fatalf("link.Build failed: %v", err)
-	}
-	source := link.Source(plan)
 	for _, target := range frontendSmokeTargets(t) {
 		target := target
 		t.Run(target.name, func(t *testing.T) {
@@ -217,9 +248,10 @@ func runFrontendFixtureMatchesHostGo(t *testing.T, fixture string) {
 					t.Skipf("runner %s is not installed", target.runner[0])
 				}
 			}
+			units := loadFixtureUnitsForTarget(t, fixture, target.name)
 			out := filepath.Join(t.TempDir(), "hello")
-			if err := rtgx.CompileSource(source, rtgx.Options{Target: target.name, Output: out}); err != nil {
-				t.Fatalf("CompileSource failed: %v", err)
+			if err := rtgx.CompileUnits(units, rtgx.Options{Target: target.name, Output: out}); err != nil {
+				t.Fatalf("CompileUnits failed: %v", err)
 			}
 			frontOut, err := runFrontendTarget(target, out)
 			if err != nil {
@@ -230,6 +262,17 @@ func runFrontendFixtureMatchesHostGo(t *testing.T, fixture string) {
 			}
 		})
 	}
+}
+
+func unitsContainBody(units []unit.Unit, body string) bool {
+	for _, u := range units {
+		for _, decl := range u.Decls {
+			if strings.Contains(decl.Body, body) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func writeFixtureFile(t *testing.T, root string, path string, data string) {
@@ -278,7 +321,12 @@ func runFrontendTarget(target frontendSmokeTarget, path string) ([]byte, error) 
 
 func loadFixtureUnits(t *testing.T, fixture string) []unit.Unit {
 	t.Helper()
-	graph, err := load.LoadEntries([]string{filepath.Join(fixture, "cmd", "app")}, load.Options{})
+	return loadFixtureUnitsForTarget(t, fixture, "")
+}
+
+func loadFixtureUnitsForTarget(t *testing.T, fixture string, target string) []unit.Unit {
+	t.Helper()
+	graph, err := load.LoadEntries([]string{filepath.Join(fixture, "cmd", "app")}, load.Options{Target: target})
 	if err != nil {
 		t.Fatalf("LoadEntries failed: %v", err)
 	}
