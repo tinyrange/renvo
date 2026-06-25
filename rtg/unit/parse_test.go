@@ -63,11 +63,23 @@ func TestParseSourcesReadsLoadedUnitFiles(t *testing.T) {
 }
 
 func TestParseSourcesReportsSourcePath(t *testing.T) {
-	_, err := ParseSources([]SourceFile{{Path: "broken.rtg.go", Source: []byte("package main\n")}})
+	_, err := ParseSources([]SourceFile{{Path: "broken.rtg.go", Source: withRTGBuild("package main\n")}})
 	if err == nil {
 		t.Fatalf("ParseSources accepted source without unit metadata")
 	}
 	if !strings.Contains(err.Error(), "broken.rtg.go: missing rtg unit metadata") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestParseSourceRequiresRTGBuildConstraint(t *testing.T) {
+	_, err := ParseSource("unsafe.rtg.go", []byte(`// rtg:unit example.com/app
+package main
+`))
+	if err == nil {
+		t.Fatalf("ParseSource accepted unit without rtg build constraint")
+	}
+	if !strings.Contains(err.Error(), "unsafe.rtg.go: missing rtg build constraint") {
 		t.Fatalf("error = %q", err)
 	}
 }
@@ -170,7 +182,7 @@ package main
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := ParseSource(tt.name+".rtg.go", []byte(tt.src))
+			_, err := ParseSource(tt.name+".rtg.go", withRTGBuild(tt.src))
 			if err == nil {
 				t.Fatalf("ParseSource accepted duplicate %s metadata", tt.name)
 			}
@@ -207,7 +219,7 @@ package main
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := ParseSource(tt.name+".rtg.go", []byte(tt.src))
+			_, err := ParseSource(tt.name+".rtg.go", withRTGBuild(tt.src))
 			if err == nil {
 				t.Fatalf("ParseSource accepted declaration metadata without body")
 			}
@@ -248,7 +260,7 @@ package main
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := ParseSource(tt.name+".rtg.go", []byte(tt.src))
+			_, err := ParseSource(tt.name+".rtg.go", withRTGBuild(tt.src))
 			if err == nil {
 				t.Fatalf("ParseSource accepted empty %s metadata", tt.name)
 			}
@@ -257,6 +269,10 @@ package main
 			}
 		})
 	}
+}
+
+func withRTGBuild(src string) []byte {
+	return []byte("//go:build rtg\n\n" + src)
 }
 
 func sourceForTest(u Unit) []byte {

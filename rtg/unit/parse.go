@@ -19,6 +19,9 @@ func ParseSources(sources []SourceFile) ([]Unit, error) {
 
 func ParseSource(path string, src []byte) (Unit, error) {
 	lines := strings.Split(string(src), "\n")
+	if !hasRTGBuildConstraint(lines) {
+		return Unit{}, fmt.Errorf("%s: missing rtg build constraint", path)
+	}
 	var u Unit
 	currentDecl := -1
 	seenUnit := false
@@ -121,6 +124,17 @@ func ParseSource(path string, src []byte) (Unit, error) {
 		}
 	}
 	return u, nil
+}
+
+func hasRTGBuildConstraint(lines []string) bool {
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		return trimmed == "//go:build rtg"
+	}
+	return false
 }
 
 func parseQuoted(s string) (string, error) {

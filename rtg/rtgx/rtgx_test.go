@@ -169,7 +169,7 @@ func TestCompileUnitsValidatesUnitGraph(t *testing.T) {
 
 func TestCompileUnitSourcesReportsParseErrors(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "app")
-	err := CompileUnitSources([]unit.SourceFile{{Path: "broken.rtg.go", Source: []byte("package main\n")}}, Options{Target: "linux/amd64", Output: out})
+	err := CompileUnitSources([]unit.SourceFile{{Path: "broken.rtg.go", Source: []byte("//go:build rtg\n\npackage main\n")}}, Options{Target: "linux/amd64", Output: out})
 	if err == nil {
 		t.Fatalf("CompileUnitSources accepted malformed unit source")
 	}
