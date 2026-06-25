@@ -156,6 +156,20 @@ replace (
 	}
 }
 
+func TestParseFileRejectsUnterminatedBlockComment(t *testing.T) {
+	_, err := ParseFile(`module example.com/app
+
+/* unterminated
+require example.com/lib v1.2.3
+`)
+	if err == nil {
+		t.Fatalf("ParseFile accepted unterminated block comment")
+	}
+	if err.Error() != "malformed comment" {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestParseFileRejectsMalformedRequires(t *testing.T) {
 	tests := []struct {
 		name string

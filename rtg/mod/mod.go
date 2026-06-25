@@ -56,7 +56,11 @@ func Find(start string) (Module, error) {
 
 func ParseFile(data string) (Module, error) {
 	var module Module
-	lines := strings.Split(stripComments(data), "\n")
+	stripped, err := stripComments(data)
+	if err != nil {
+		return Module{}, err
+	}
+	lines := strings.Split(stripped, "\n")
 	inRequireBlock := false
 	inReplaceBlock := false
 	for _, line := range lines {
@@ -190,7 +194,7 @@ func parseRequireFields(fields []string) (Require, error) {
 	return Require{Path: fields[0], Version: fields[1]}, nil
 }
 
-func stripComments(data string) string {
+func stripComments(data string) (string, error) {
 	var out []byte
 	inBlock := false
 	for i := 0; i < len(data); i++ {
@@ -223,5 +227,8 @@ func stripComments(data string) string {
 		}
 		out = append(out, data[i])
 	}
-	return string(out)
+	if inBlock {
+		return "", fmt.Errorf("malformed comment")
+	}
+	return string(out), nil
 }

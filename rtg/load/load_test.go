@@ -725,6 +725,25 @@ func appMain() int { return 0 }
 	}
 }
 
+func TestLoadEntriesRejectsMalformedModuleComment(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", `module example.com/app
+
+/* unterminated
+`)
+	writeFile(t, root, "main.go", `package main
+
+func appMain() int { return 0 }
+`)
+	_, err := LoadEntries([]string{root}, Options{})
+	if err == nil {
+		t.Fatalf("LoadEntries accepted malformed module comment")
+	}
+	if !containsAll(err.Error(), []string{"go.mod", "malformed comment"}) {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestLoadEntriesResolvesStdImportsWithStdIdentity(t *testing.T) {
 	root := t.TempDir()
 	stdRoot := filepath.Join(root, "rtgstd")
