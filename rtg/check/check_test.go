@@ -102,6 +102,71 @@ func appMain() int { return alias.Value() }
 	}
 }
 
+func TestFileRejectsUnsupportedBuiltins(t *testing.T) {
+	file, err := parse.FileSource("builtins.go", []byte(`package main
+
+func appMain() int {
+	panic("bad")
+	println("bad")
+	close(nil)
+	delete(nil, "key")
+	_ = cap(nil)
+	_ = new(int)
+	_ = real(1)
+	_ = imag(1)
+	_ = complex(1, 2)
+	_ = recover()
+	return 0
+}
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	err = File(file)
+	if err == nil {
+		t.Fatalf("File accepted unsupported builtins")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"builtins.go:4:2: unsupported builtin: panic",
+		"builtins.go:5:2: unsupported builtin: println",
+		"builtins.go:6:2: unsupported builtin: close",
+		"builtins.go:7:2: unsupported builtin: delete",
+		"builtins.go:8:6: unsupported builtin: cap",
+		"builtins.go:9:6: unsupported builtin: new",
+		"builtins.go:10:6: unsupported builtin: real",
+		"builtins.go:11:6: unsupported builtin: imag",
+		"builtins.go:12:6: unsupported builtin: complex",
+		"builtins.go:13:6: unsupported builtin: recover",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("missing diagnostic %q in:\n%s", want, msg)
+		}
+	}
+}
+
+func TestFileAllowsSupportedBuiltins(t *testing.T) {
+	file, err := parse.FileSource("builtins.go", []byte(`package main
+
+func appMain() int {
+	values := []int{1}
+	dst := []int{0}
+	_ = len(values)
+	_ = append(values, 2)
+	_ = copy(dst, values)
+	_ = make([]int, 1)
+	print("ok")
+	return 0
+}
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	if diags := File(file); len(diags) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diags)
+	}
+}
+
 func TestGraphRejectsDuplicatePackageLevelNames(t *testing.T) {
 	graph := &load.Graph{
 		Packages: []load.Package{

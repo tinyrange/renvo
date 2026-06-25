@@ -157,6 +157,9 @@ func File(file parse.File) Diagnostics {
 		if startsTypeAssertion(file.Tokens, i) {
 			diags = append(diags, diag(file, file.Tokens[i+1], "type assertions and type switches are not supported"))
 		}
+		if startsUnsupportedBuiltinCall(file.Tokens, i) {
+			diags = append(diags, diag(file, tok, "unsupported builtin: "+tok.Text))
+		}
 	}
 	return diags
 }
@@ -221,6 +224,20 @@ func startsTypeAssertion(toks []scan.Token, i int) bool {
 		return false
 	}
 	return toks[i].Text == "." && toks[i+1].Text == "(" && toks[i+2].Text == "type" && toks[i+3].Text == ")"
+}
+
+func startsUnsupportedBuiltinCall(toks []scan.Token, i int) bool {
+	if i+1 >= len(toks) || toks[i].Kind != scan.Ident || toks[i+1].Text != "(" {
+		return false
+	}
+	if i > 0 && toks[i-1].Text == "." {
+		return false
+	}
+	switch toks[i].Text {
+	case "cap", "close", "complex", "delete", "imag", "new", "panic", "println", "real", "recover":
+		return true
+	}
+	return false
 }
 
 func findClose(toks []scan.Token, pos int, open string, close string) int {
