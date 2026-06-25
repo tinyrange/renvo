@@ -1,9 +1,6 @@
 package target
 
-import (
-	"runtime"
-	"strings"
-)
+import "runtime"
 
 var supported = []string{
 	"linux/amd64",
@@ -36,5 +33,12 @@ func Supported(name string) bool {
 }
 
 func List() string {
-	return strings.Join(supported, ", ")
+	out := ""
+	for i, name := range supported {
+		if i > 0 {
+			out = out + ", "
+		}
+		out = out + name
+	}
+	return out
 }
