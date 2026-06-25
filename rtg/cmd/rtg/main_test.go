@@ -165,6 +165,22 @@ const A = 1
 	}
 }
 
+func TestRunEmitUnitRejectsNonUnitFileOutput(t *testing.T) {
+	root := t.TempDir()
+	writeCLIFile(t, root, "go.mod", "module example.com/app\n")
+	writeCLIFile(t, root, "pkg/a.go", `package pkg
+
+const A = 1
+`)
+	err := run(config{emitUnit: true, output: filepath.Join(root, "pkg.go"), inputs: []string{filepath.Join(root, "pkg", "a.go")}})
+	if err == nil {
+		t.Fatalf("run accepted non-.rtg.go emitted unit output")
+	}
+	if !strings.Contains(err.Error(), "requires .rtg.go output file") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestRunEmitUnitRejectsExplicitRTGUnitInput(t *testing.T) {
 	root := t.TempDir()
 	writeCLIFile(t, root, "go.mod", "module example.com/app\n")

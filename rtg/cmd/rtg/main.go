@@ -79,19 +79,28 @@ func runEmitUnit(cfg config, graph *load.Graph) error {
 	if cfg.output == "" {
 		return writeUnitDirectory(defaultUnitCacheDir(graph), units)
 	}
-	if len(units) == 1 {
+	if info, err := os.Stat(cfg.output); err == nil {
+		if info.IsDir() {
+			return writeUnitDirectory(cfg.output, units)
+		}
+		if len(units) == 1 && isUnitFileOutput(cfg.output) {
+			return os.WriteFile(cfg.output, emit.Source(units[0]), 0644)
+		}
+		if len(units) == 1 {
+			return fmt.Errorf("rtg: -emit-unit requires .rtg.go output file or output directory")
+		}
+		return fmt.Errorf("rtg: -emit-unit with multiple packages requires output directory")
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if len(units) == 1 && isUnitFileOutput(cfg.output) {
 		return os.WriteFile(cfg.output, emit.Source(units[0]), 0644)
 	}
-	if info, err := os.Stat(cfg.output); err == nil {
-		if !info.IsDir() {
-			return fmt.Errorf("rtg: -emit-unit with multiple packages requires output directory")
+	if filepath.Ext(filepath.Base(cfg.output)) != "" {
+		if len(units) == 1 {
+			return fmt.Errorf("rtg: -emit-unit requires .rtg.go output file or output directory")
 		}
-	} else if os.IsNotExist(err) {
-		if filepath.Ext(cfg.output) == ".go" {
-			return fmt.Errorf("rtg: -emit-unit with multiple packages requires output directory")
-		}
-	} else {
-		return err
+		return fmt.Errorf("rtg: -emit-unit with multiple packages requires output directory")
 	}
 	return writeUnitDirectory(cfg.output, units)
 }
@@ -117,6 +126,10 @@ func writeUnitDirectory(dir string, units []unit.Unit) error {
 		}
 	}
 	return nil
+}
+
+func isUnitFileOutput(path string) bool {
+	return strings.HasSuffix(filepath.Base(path), ".rtg.go")
 }
 
 func runLink(cfg config) error {
