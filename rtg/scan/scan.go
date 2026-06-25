@@ -1,6 +1,6 @@
 package scan
 
-import "fmt"
+import "strconv"
 
 const (
 	Ident  = "ident"
@@ -18,6 +18,16 @@ type Token struct {
 	End    int
 	Line   int
 	Column int
+}
+
+type scanError string
+
+func (e scanError) Error() string {
+	return string(e)
+}
+
+func posError(line int, column int, message string) error {
+	return scanError(strconv.Itoa(line) + ":" + strconv.Itoa(column) + ": " + message)
 }
 
 func Tokens(src []byte) ([]Token, error) {
@@ -70,7 +80,7 @@ func Tokens(src []byte) ([]Token, error) {
 				}
 			}
 			if !closed {
-				return nil, fmt.Errorf("%d:%d: unterminated block comment", startLine, startCol)
+				return nil, posError(startLine, startCol, "unterminated block comment")
 			}
 			continue
 		}
@@ -133,7 +143,7 @@ func Tokens(src []byte) ([]Token, error) {
 				}
 			}
 			if len(toks) == 0 || toks[len(toks)-1].Start != start {
-				return nil, fmt.Errorf("%d:%d: unterminated literal", startLine, startCol)
+				return nil, posError(startLine, startCol, "unterminated literal")
 			}
 			continue
 		}
@@ -151,17 +161,17 @@ func Tokens(src []byte) ([]Token, error) {
 
 func UnquoteString(s string) (string, error) {
 	if len(s) < 2 {
-		return "", fmt.Errorf("invalid string literal")
+		return "", scanError("invalid string literal")
 	}
 	quote := s[0]
 	if quote == '`' {
 		if s[len(s)-1] != '`' {
-			return "", fmt.Errorf("invalid raw string literal")
+			return "", scanError("invalid raw string literal")
 		}
 		return s[1 : len(s)-1], nil
 	}
 	if quote != '"' || s[len(s)-1] != '"' {
-		return "", fmt.Errorf("invalid string literal")
+		return "", scanError("invalid string literal")
 	}
 	var out []byte
 	for i := 1; i < len(s)-1; i++ {
@@ -171,13 +181,13 @@ func UnquoteString(s string) (string, error) {
 		}
 		i++
 		if i >= len(s)-1 {
-			return "", fmt.Errorf("invalid string escape")
+			return "", scanError("invalid string escape")
 		}
 		if s[i] == '"' || s[i] == '\\' {
 			out = append(out, s[i])
 			continue
 		}
-		return "", fmt.Errorf("unsupported string escape")
+		return "", scanError("unsupported string escape")
 	}
 	return string(out), nil
 }

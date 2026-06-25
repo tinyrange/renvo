@@ -1,7 +1,6 @@
 package check
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -18,7 +17,7 @@ type Diagnostic struct {
 }
 
 func (d Diagnostic) Error() string {
-	return fmt.Sprintf("%s:%d:%d: %s", d.Path, d.Line, d.Column, d.Message)
+	return d.Path + ":" + strconv.Itoa(d.Line) + ":" + strconv.Itoa(d.Column) + ": " + d.Message
 }
 
 type Diagnostics []Diagnostic

@@ -1,7 +1,6 @@
 package parse
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -16,7 +15,7 @@ type Error struct {
 }
 
 func (e Error) Error() string {
-	return fmt.Sprintf("%s:%d:%d: %s", e.Path, e.Line, e.Column, e.Message)
+	return e.Path + ":" + strconv.Itoa(e.Line) + ":" + strconv.Itoa(e.Column) + ": " + e.Message
 }
 
 type File struct {

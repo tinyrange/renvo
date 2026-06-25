@@ -1,7 +1,6 @@
 package load
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -16,7 +15,7 @@ type sourceError struct {
 }
 
 func (e sourceError) Error() string {
-	return fmt.Sprintf("%s:%d:%d: %s", e.path, e.line, e.column, e.message)
+	return e.path + ":" + strconv.Itoa(e.line) + ":" + strconv.Itoa(e.column) + ": " + e.message
 }
 
 type SourceInfo struct {
