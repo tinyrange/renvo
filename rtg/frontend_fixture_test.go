@@ -467,6 +467,37 @@ func main() {
 	runFrontendFixtureMatchesHostGo(t, fixture)
 }
 
+func TestStdBytesBufferFrontendMatchesHostGo(t *testing.T) {
+	fixture := t.TempDir()
+	writeFixtureFile(t, fixture, "go.mod", "module example.com/stdbytes\n")
+	writeFixtureFile(t, fixture, "cmd/app/main.go", `package main
+
+import "bytes"
+
+func main() {
+	var b bytes.Buffer
+	b.WriteString("PA")
+	b.WriteByte('S')
+	b.WriteByte('S')
+	if b.Len() != 4 {
+		print("FAIL len\n")
+		return
+	}
+	if string(b.Bytes()) != "PASS" {
+		print("FAIL bytes\n")
+		return
+	}
+	b.WriteString("\n")
+	if b.String() == "PASS\n" {
+		print(b.String())
+		return
+	}
+	print("FAIL string\n")
+}
+`)
+	runFrontendFixtureMatchesHostGo(t, fixture)
+}
+
 func TestStdRuntimeFrontendMatchesHostGo(t *testing.T) {
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
 		t.Skipf("native runtime fixture expects linux/amd64 host, got %s/%s", runtime.GOOS, runtime.GOARCH)

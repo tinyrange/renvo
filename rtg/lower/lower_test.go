@@ -194,6 +194,76 @@ func Use() int {
 	}
 }
 
+func TestPackageLowersImportedMethodCalls(t *testing.T) {
+	mainPkg := load.Package{
+		ImportPath: "example.com/app/main",
+		Name:       "main",
+		Imports:    []string{"example.com/app/dep"},
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+import "example.com/app/dep"
+
+func appMain() int {
+	var b dep.Buffer
+	b.WriteString("PASS")
+	return b.Len()
+}
+`),
+			},
+		},
+	}
+	depPkg := load.Package{
+		ImportPath: "example.com/app/dep",
+		Name:       "dep",
+		Files: []load.File{
+			{
+				Path: "buffer.go",
+				Source: []byte(`package dep
+
+type Buffer struct { buf []byte }
+
+func (b *Buffer) WriteString(s string) int {
+	return len(s)
+}
+
+func (b *Buffer) Len() int {
+	return len(b.buf)
+}
+`),
+			},
+		},
+	}
+	graph := &load.Graph{Packages: []load.Package{mainPkg, depPkg}}
+	u, err := PackageWithGraph(mainPkg, graph)
+	if err != nil {
+		t.Fatalf("PackageWithGraph failed: %v", err)
+	}
+	if len(u.Decls) != 1 {
+		t.Fatalf("decls = %#v, want 1", u.Decls)
+	}
+	body := u.Decls[0].Body
+	if !strings.Contains(body, "var b rtg_example_com_app_dep_Buffer") {
+		t.Fatalf("imported receiver type was not rewritten: %q", body)
+	}
+	if !strings.Contains(body, "rtg_example_com_app_dep_Buffer_WriteString(&b, \"PASS\")") {
+		t.Fatalf("imported pointer method call was not lowered: %q", body)
+	}
+	if !strings.Contains(body, "return rtg_example_com_app_dep_Buffer_Len(&b)") {
+		t.Fatalf("imported method call was not lowered: %q", body)
+	}
+	var gotRefs []string
+	for _, ref := range u.References {
+		gotRefs = append(gotRefs, ref.Name)
+	}
+	wantRefs := []string{"Buffer", "Buffer_Len", "Buffer_WriteString"}
+	if strings.Join(gotRefs, ",") != strings.Join(wantRefs, ",") {
+		t.Fatalf("references = %#v, want %v", u.References, wantRefs)
+	}
+}
+
 func TestSymbolNameIsStableIdentifier(t *testing.T) {
 	got := SymbolName("example.com/team/app-pkg", "Value")
 	want := "rtg_example_com_team_app_pkg_Value"
