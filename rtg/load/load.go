@@ -60,6 +60,9 @@ func LoadEntries(entries []string, opts Options) (*Graph, error) {
 		if !isWithinModuleRoot(module.Root, dir) {
 			return nil, fmt.Errorf("%s: entry is outside module root %s", dir, module.Root)
 		}
+		if nested, ok := nestedModuleRoot(module.Root, dir); ok {
+			return nil, fmt.Errorf("%s: entry is inside nested module root %s", dir, nested)
+		}
 		if len(files) > 0 {
 			fileEntries[dir] = append(fileEntries[dir], files...)
 			continue
@@ -658,7 +661,11 @@ func resolveImport(module mod.Module, opts Options, imp string) (resolvedImport,
 	}
 	prefix := module.Path + "/"
 	if strings.HasPrefix(imp, prefix) {
-		return resolvedImport{Dir: filepath.Join(module.Root, filepath.FromSlash(strings.TrimPrefix(imp, prefix))), ImportPath: imp}, true, nil
+		dir := filepath.Join(module.Root, filepath.FromSlash(strings.TrimPrefix(imp, prefix)))
+		if nested, ok := nestedModuleRoot(module.Root, dir); ok {
+			return resolvedImport{}, false, fmt.Errorf("import %q crosses nested module root %s", imp, nested)
+		}
+		return resolvedImport{Dir: dir, ImportPath: imp}, true, nil
 	}
 	if next, ok, err := resolveReplacedImport(module, imp); ok || err != nil {
 		return next, ok, err
@@ -725,6 +732,24 @@ func isWithinModuleRoot(root string, path string) bool {
 		return false
 	}
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel))
+}
+
+func nestedModuleRoot(root string, dir string) (string, bool) {
+	root = filepath.Clean(root)
+	dir = filepath.Clean(dir)
+	for {
+		if dir == root {
+			return "", false
+		}
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
 }
 
 func importPathForDir(module mod.Module, dir string) string {

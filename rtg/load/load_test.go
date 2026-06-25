@@ -49,6 +49,30 @@ func Value() int {
 	}
 }
 
+func TestLoadEntriesRejectsLocalImportAcrossNestedModuleRoot(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "main.go", `package main
+
+import "example.com/app/nested/pkg"
+
+func appMain() int { return pkg.Value() }
+`)
+	writeFile(t, root, "nested/go.mod", "module example.com/nested\n")
+	writeFile(t, root, "nested/pkg/pkg.go", `package pkg
+
+func Value() int { return 1 }
+`)
+
+	_, err := LoadEntries([]string{root}, Options{})
+	if err == nil {
+		t.Fatalf("LoadEntries accepted local import across nested module root")
+	}
+	if !containsAll(err.Error(), []string{"crosses nested module root", filepath.Join(root, "nested")}) {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestLoadEntriesGroupsExplicitFilesWithoutReadingWholeDirectory(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/app\n")
@@ -125,6 +149,28 @@ const Value = 1
 		t.Fatalf("LoadEntries accepted explicit file outside module root")
 	}
 	if !containsAll(err.Error(), []string{"outside module root", root}) {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestLoadEntriesRejectsEntryInsideNestedModuleRoot(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "main.go", `package main
+
+func appMain() int { return 0 }
+`)
+	writeFile(t, root, "nested/go.mod", "module example.com/nested\n")
+	writeFile(t, root, "nested/pkg/pkg.go", `package pkg
+
+const Value = 1
+`)
+
+	_, err := LoadEntries([]string{root, filepath.Join(root, "nested", "pkg")}, Options{})
+	if err == nil {
+		t.Fatalf("LoadEntries accepted entry inside nested module root")
+	}
+	if !containsAll(err.Error(), []string{"inside nested module root", filepath.Join(root, "nested")}) {
 		t.Fatalf("error = %q", err)
 	}
 }
