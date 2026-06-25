@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"j5.nz/rtg/rtg/scan"
@@ -277,7 +278,7 @@ func SourceArtifact(plan Plan) Artifact {
 	var wrapper string
 	for _, u := range plan.Units {
 		out.WriteString("// rtg:linked-unit ")
-		out.WriteString(u.ImportPath)
+		out.WriteString(quoteIfNeeded(u.ImportPath))
 		out.WriteByte('\n')
 		for _, decl := range u.Decls {
 			if !shouldEmitDecl(decl, reachable) {
@@ -299,6 +300,15 @@ func SourceArtifact(plan Plan) Artifact {
 	}
 	artifact.Source = out.Bytes()
 	return artifact
+}
+
+func quoteIfNeeded(s string) string {
+	for i := 0; i < len(s); i++ {
+		if s[i] == ' ' || s[i] == '\t' || s[i] == '\r' || s[i] == '\n' || s[i] == '"' || s[i] == '\\' {
+			return strconv.Quote(s)
+		}
+	}
+	return s
 }
 
 func linkedUnitNames(plan Plan) []string {

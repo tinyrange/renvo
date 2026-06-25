@@ -486,6 +486,8 @@ func TestSourceCombinesUnitsAndAddsAppMainWrapper(t *testing.T) {
 	}
 	for _, want := range []string{
 		"package main\n",
+		"// rtg:linked-unit example.com/app/dep\n",
+		"// rtg:linked-unit example.com/app/main\n",
 		"func rtg_example_com_app_dep_Value() int { return 7 }\n",
 		"func rtg_example_com_app_main_appMain(args []string) int",
 		"func appMain(args []string) int {\n\treturn rtg_example_com_app_main_appMain(args)\n}\n",
@@ -493,6 +495,32 @@ func TestSourceCombinesUnitsAndAddsAppMainWrapper(t *testing.T) {
 		if !strings.Contains(src, want) {
 			t.Fatalf("linked source missing %q:\n%s", want, src)
 		}
+	}
+}
+
+func TestSourceQuotesLinkedUnitMetadataWhenNeeded(t *testing.T) {
+	importPath := "example.com/app with\\quote\"line\nnext"
+	plan, err := Build([]unit.Unit{{
+		ImportPath: importPath,
+		Package:    "main",
+		Decls: []unit.Decl{{
+			Kind:     "func",
+			Name:     "appMain",
+			UnitName: "rtg_app_appMain",
+			Body:     "func rtg_app_appMain() int { return 0 }\n",
+		}},
+	}})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	artifact := SourceArtifact(plan)
+	if len(artifact.LinkedUnits) != 1 || artifact.LinkedUnits[0] != importPath {
+		t.Fatalf("linked units = %#v", artifact.LinkedUnits)
+	}
+	want := "// rtg:linked-unit \"example.com/app with\\\\quote\\\"line\\nnext\"\n"
+	if !strings.Contains(string(artifact.Source), want) {
+		t.Fatalf("linked source missing quoted metadata %q:\n%s", want, string(artifact.Source))
 	}
 }
 
