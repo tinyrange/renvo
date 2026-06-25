@@ -80,6 +80,24 @@ func Index(s string, substr string) int {
 	return -1
 }
 
+func LastIndex(s string, substr string) int {
+	n := len(substr)
+	if n == 0 {
+		return len(s)
+	}
+	if n > len(s) {
+		return -1
+	}
+	i := len(s) - n
+	for i >= 0 {
+		if s[i:i+n] == substr {
+			return i
+		}
+		i = i - 1
+	}
+	return -1
+}
+
 func IndexByte(s string, c byte) int {
 	i := 0
 	for i < len(s) {
@@ -89,6 +107,49 @@ func IndexByte(s string, c byte) int {
 		i = i + 1
 	}
 	return -1
+}
+
+func LastIndexByte(s string, c byte) int {
+	i := len(s) - 1
+	for i >= 0 {
+		if s[i] == c {
+			return i
+		}
+		i = i - 1
+	}
+	return -1
+}
+
+func Count(s string, substr string) int {
+	n := len(substr)
+	if n == 0 {
+		return len(s) + 1
+	}
+	count := 0
+	i := 0
+	for i <= len(s)-n {
+		if s[i:i+n] == substr {
+			count = count + 1
+			i = i + n
+		} else {
+			i = i + 1
+		}
+	}
+	return count
+}
+
+func Repeat(s string, count int) string {
+	var out []byte
+	i := 0
+	for i < count {
+		j := 0
+		for j < len(s) {
+			out = append(out, s[j])
+			j = j + 1
+		}
+		i = i + 1
+	}
+	return string(out)
 }
 
 func TrimPrefix(s string, prefix string) string {

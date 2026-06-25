@@ -395,8 +395,16 @@ func main() {
 	ok = ok && strings.Contains(value, "")
 	ok = ok && strings.IndexByte(value, '-') == 6
 	ok = ok && strings.IndexByte(value, 'z') == -1
+	ok = ok && strings.LastIndexByte(value, '-') == 11
+	ok = ok && strings.LastIndexByte(value, 'z') == -1
 	ok = ok && strings.Index(value, "body") == 7
 	ok = ok && strings.Index(value, "missing") == -1
+	ok = ok && strings.LastIndex(value, "-") == 11
+	ok = ok && strings.LastIndex(value, "missing") == -1
+	ok = ok && strings.Count(value, "-") == 2
+	ok = ok && strings.Count(value, "") == len(value)+1
+	ok = ok && strings.Repeat("PA", 2) == "PAPA"
+	ok = ok && strings.Repeat("x", 0) == ""
 	ok = ok && strings.TrimPrefix(value, "prefix-") == "body-suffix"
 	ok = ok && strings.TrimSuffix(value, "-suffix") == "prefix-body"
 	ok = ok && strings.TrimSpace(" \tPASS\n") == "PASS"
