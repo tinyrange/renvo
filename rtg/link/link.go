@@ -46,8 +46,10 @@ func Build(units []unit.Unit) (Plan, error) {
 		return Plan{}, err
 	}
 	exports := map[string]unit.Symbol{}
-	for _, u := range units {
-		for _, sym := range u.Exports {
+	for uIndex := 0; uIndex < len(units); uIndex++ {
+		u := units[uIndex]
+		for symIndex := 0; symIndex < len(u.Exports); symIndex++ {
+			sym := u.Exports[symIndex]
 			key := symbolKey(sym.ImportPath, sym.Name)
 			if existing, ok := exports[key]; ok && existing.UnitName != sym.UnitName {
 				return Plan{}, fmt.Errorf("duplicate export %s.%s", sym.ImportPath, sym.Name)
@@ -55,8 +57,10 @@ func Build(units []unit.Unit) (Plan, error) {
 			exports[key] = sym
 		}
 	}
-	for _, u := range units {
-		for _, ref := range u.References {
+	for uIndex := 0; uIndex < len(units); uIndex++ {
+		u := units[uIndex]
+		for refIndex := 0; refIndex < len(u.References); refIndex++ {
+			ref := u.References[refIndex]
 			export, ok := exports[symbolKey(ref.ImportPath, ref.Name)]
 			if !ok {
 				return Plan{}, fmt.Errorf("%s: unresolved reference %s.%s", u.ImportPath, ref.ImportPath, ref.Name)
@@ -75,7 +79,8 @@ func Build(units []unit.Unit) (Plan, error) {
 }
 
 func validateUnitMetadata(units []unit.Unit) error {
-	for _, u := range units {
+	for uIndex := 0; uIndex < len(units); uIndex++ {
+		u := units[uIndex]
 		if u.ImportPath == "" {
 			return fmt.Errorf("empty unit import path")
 		}
@@ -83,7 +88,8 @@ func validateUnitMetadata(units []unit.Unit) error {
 			return fmt.Errorf("%s: empty unit package", u.ImportPath)
 		}
 		imports := map[string]bool{}
-		for _, imp := range u.Imports {
+		for impIndex := 0; impIndex < len(u.Imports); impIndex++ {
+			imp := u.Imports[impIndex]
 			if imp == "" {
 				return fmt.Errorf("%s: empty import metadata", u.ImportPath)
 			}
@@ -93,7 +99,8 @@ func validateUnitMetadata(units []unit.Unit) error {
 			imports[imp] = true
 		}
 		exports := map[string]bool{}
-		for _, sym := range u.Exports {
+		for symIndex := 0; symIndex < len(u.Exports); symIndex++ {
+			sym := u.Exports[symIndex]
 			if sym.Name == "" || sym.UnitName == "" {
 				return fmt.Errorf("%s: invalid export metadata", u.ImportPath)
 			}
@@ -103,7 +110,8 @@ func validateUnitMetadata(units []unit.Unit) error {
 			exports[sym.Name] = true
 		}
 		refs := map[string]bool{}
-		for _, sym := range u.References {
+		for symIndex := 0; symIndex < len(u.References); symIndex++ {
+			sym := u.References[symIndex]
 			if sym.ImportPath == "" || sym.Name == "" || sym.UnitName == "" {
 				return fmt.Errorf("%s: invalid reference metadata", u.ImportPath)
 			}
@@ -119,7 +127,8 @@ func validateUnitMetadata(units []unit.Unit) error {
 
 func validateUniqueUnits(units []unit.Unit) error {
 	seen := map[string]bool{}
-	for _, u := range units {
+	for i := 0; i < len(units); i++ {
+		u := units[i]
 		if seen[u.ImportPath] {
 			return fmt.Errorf("duplicate unit: %s", u.ImportPath)
 		}
@@ -130,11 +139,14 @@ func validateUniqueUnits(units []unit.Unit) error {
 
 func validateImports(units []unit.Unit) error {
 	present := map[string]bool{}
-	for _, u := range units {
+	for i := 0; i < len(units); i++ {
+		u := units[i]
 		present[u.ImportPath] = true
 	}
-	for _, u := range units {
-		for _, imp := range u.Imports {
+	for uIndex := 0; uIndex < len(units); uIndex++ {
+		u := units[uIndex]
+		for impIndex := 0; impIndex < len(u.Imports); impIndex++ {
+			imp := u.Imports[impIndex]
 			if !present[imp] {
 				return fmt.Errorf("%s: missing imported unit %s", u.ImportPath, imp)
 			}
@@ -144,12 +156,15 @@ func validateImports(units []unit.Unit) error {
 }
 
 func validateReferencesDeclared(units []unit.Unit) error {
-	for _, u := range units {
+	for uIndex := 0; uIndex < len(units); uIndex++ {
+		u := units[uIndex]
 		imports := map[string]bool{}
-		for _, imp := range u.Imports {
+		for impIndex := 0; impIndex < len(u.Imports); impIndex++ {
+			imp := u.Imports[impIndex]
 			imports[imp] = true
 		}
-		for _, ref := range u.References {
+		for refIndex := 0; refIndex < len(u.References); refIndex++ {
+			ref := u.References[refIndex]
 			if !imports[ref.ImportPath] {
 				return fmt.Errorf("%s: reference %s.%s missing import metadata", u.ImportPath, ref.ImportPath, ref.Name)
 			}
@@ -159,8 +174,10 @@ func validateReferencesDeclared(units []unit.Unit) error {
 }
 
 func validateExportOwnership(units []unit.Unit) error {
-	for _, u := range units {
-		for _, sym := range u.Exports {
+	for uIndex := 0; uIndex < len(units); uIndex++ {
+		u := units[uIndex]
+		for symIndex := 0; symIndex < len(u.Exports); symIndex++ {
+			sym := u.Exports[symIndex]
 			if sym.ImportPath != u.ImportPath {
 				return fmt.Errorf("%s: export %s belongs to %s", u.ImportPath, sym.Name, sym.ImportPath)
 			}
@@ -170,10 +187,13 @@ func validateExportOwnership(units []unit.Unit) error {
 }
 
 func validateExportsDeclared(units []unit.Unit) error {
-	for _, u := range units {
-		for _, sym := range u.Exports {
+	for uIndex := 0; uIndex < len(units); uIndex++ {
+		u := units[uIndex]
+		for symIndex := 0; symIndex < len(u.Exports); symIndex++ {
+			sym := u.Exports[symIndex]
 			found := false
-			for _, decl := range u.Decls {
+			for declIndex := 0; declIndex < len(u.Decls); declIndex++ {
+				decl := u.Decls[declIndex]
 				if bodyReferencesSymbol(decl.Body, sym.UnitName) {
 					found = true
 					break
@@ -188,8 +208,10 @@ func validateExportsDeclared(units []unit.Unit) error {
 }
 
 func validateDeclSymbols(units []unit.Unit) error {
-	for _, u := range units {
-		for _, decl := range u.Decls {
+	for uIndex := 0; uIndex < len(units); uIndex++ {
+		u := units[uIndex]
+		for declIndex := 0; declIndex < len(u.Decls); declIndex++ {
+			decl := u.Decls[declIndex]
 			if decl.UnitName == "" {
 				continue
 			}
@@ -215,8 +237,10 @@ func validateDeclSymbols(units []unit.Unit) error {
 
 func validateUniqueDeclSymbols(units []unit.Unit) error {
 	owners := map[string]string{}
-	for _, u := range units {
-		for _, decl := range u.Decls {
+	for uIndex := 0; uIndex < len(units); uIndex++ {
+		u := units[uIndex]
+		for declIndex := 0; declIndex < len(u.Decls); declIndex++ {
+			decl := u.Decls[declIndex]
 			if decl.UnitName == "" {
 				continue
 			}
@@ -231,11 +255,13 @@ func validateUniqueDeclSymbols(units []unit.Unit) error {
 
 func validateEntrypoint(units []unit.Unit) error {
 	var found []string
-	for _, u := range units {
+	for uIndex := 0; uIndex < len(units); uIndex++ {
+		u := units[uIndex]
 		if u.Package != "main" {
 			continue
 		}
-		for _, decl := range u.Decls {
+		for declIndex := 0; declIndex < len(u.Decls); declIndex++ {
+			decl := u.Decls[declIndex]
 			if decl.Name == "appMain" && decl.UnitName != "" {
 				if appMainWrapper(decl) == "" {
 					return fmt.Errorf("%s: appMain declaration cannot be linked", u.ImportPath)
@@ -266,17 +292,19 @@ func SourceArtifact(plan Plan) Artifact {
 	reachable := reachableFunctionDecls(plan)
 	artifact := Artifact{
 		LinkedUnits:        linkedUnitNames(plan),
-		ReachableFunctions: sortedReachableFunctions(reachable),
+		ReachableFunctions: sortedReachableFunctions(plan, reachable),
 	}
 	out = appendString(out, "//go:build rtg\n\n")
 	out = appendString(out, "// Code generated by rtg linker; DO NOT EDIT.\n")
 	out = appendString(out, "package main\n\n")
 	var wrapper string
-	for _, u := range plan.Units {
+	for uIndex := 0; uIndex < len(plan.Units); uIndex++ {
+		u := plan.Units[uIndex]
 		out = appendString(out, "// rtg:linked-unit ")
 		out = appendString(out, quoteIfNeeded(u.ImportPath))
 		out = append(out, '\n')
-		for _, decl := range u.Decls {
+		for declIndex := 0; declIndex < len(u.Decls); declIndex++ {
+			decl := u.Decls[declIndex]
 			if !shouldEmitDecl(decl, reachable) {
 				continue
 			}
@@ -313,16 +341,23 @@ func quoteIfNeeded(s string) string {
 
 func linkedUnitNames(plan Plan) []string {
 	names := make([]string, 0, len(plan.Units))
-	for _, u := range plan.Units {
+	for i := 0; i < len(plan.Units); i++ {
+		u := plan.Units[i]
 		names = append(names, u.ImportPath)
 	}
 	return names
 }
 
-func sortedReachableFunctions(reachable map[string]bool) []string {
+func sortedReachableFunctions(plan Plan, reachable map[string]bool) []string {
 	var names []string
-	for name := range reachable {
-		names = append(names, name)
+	for uIndex := 0; uIndex < len(plan.Units); uIndex++ {
+		u := plan.Units[uIndex]
+		for declIndex := 0; declIndex < len(u.Decls); declIndex++ {
+			decl := u.Decls[declIndex]
+			if decl.Kind == "func" && decl.UnitName != "" && reachable[decl.UnitName] {
+				names = append(names, decl.UnitName)
+			}
+		}
 	}
 	sortStrings(names)
 	return names
@@ -362,12 +397,16 @@ func shouldEmitDecl(decl unit.Decl, reachable map[string]bool) bool {
 func reachableFunctionDecls(plan Plan) map[string]bool {
 	bodies := map[string]string{}
 	var queue []string
-	for _, u := range plan.Units {
-		for _, decl := range u.Decls {
+	var candidates []string
+	for uIndex := 0; uIndex < len(plan.Units); uIndex++ {
+		u := plan.Units[uIndex]
+		for declIndex := 0; declIndex < len(u.Decls); declIndex++ {
+			decl := u.Decls[declIndex]
 			if decl.Kind != "func" || decl.UnitName == "" {
 				continue
 			}
 			bodies[decl.UnitName] = decl.Body
+			candidates = append(candidates, decl.UnitName)
 			if u.Package == "main" && decl.Name == "appMain" {
 				queue = append(queue, decl.UnitName)
 			}
@@ -382,7 +421,8 @@ func reachableFunctionDecls(plan Plan) map[string]bool {
 		}
 		reachable[name] = true
 		body := bodies[name]
-		for candidate := range bodies {
+		for i := 0; i < len(candidates); i++ {
+			candidate := candidates[i]
 			if !reachable[candidate] && bodyReferencesSymbol(body, candidate) {
 				queue = append(queue, candidate)
 			}
@@ -396,7 +436,8 @@ func bodyReferencesSymbol(body string, symbol string) bool {
 	if err != nil {
 		return strings.Contains(body, symbol)
 	}
-	for _, tok := range toks {
+	for i := 0; i < len(toks); i++ {
+		tok := toks[i]
 		if tok.Text == symbol {
 			return true
 		}
@@ -469,7 +510,8 @@ func argumentNames(params string) (string, bool) {
 	parts := strings.Split(inner, ",")
 	var names []string
 	var pending []string
-	for _, part := range parts {
+	for i := 0; i < len(parts); i++ {
+		part := parts[i]
 		fields := strings.Fields(strings.TrimSpace(part))
 		if len(fields) == 0 {
 			return "", false
@@ -478,7 +520,8 @@ func argumentNames(params string) (string, bool) {
 			pending = append(pending, fields[0])
 			continue
 		}
-		for _, name := range pending {
+		for j := 0; j < len(pending); j++ {
+			name := pending[j]
 			if !isArgumentIdentifier(name) {
 				return "", false
 			}
