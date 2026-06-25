@@ -39,6 +39,39 @@ func TestParseSourceRoundTripMetadata(t *testing.T) {
 	}
 }
 
+func TestParseSourcesReadsLoadedUnitFiles(t *testing.T) {
+	units, err := ParseSources([]SourceFile{
+		{Path: "main.rtg.go", Source: sourceForTest(Unit{
+			ImportPath: "example.com/app/main",
+			Package:    "main",
+			Decls:      []Decl{{Kind: "func", Name: "appMain", UnitName: "rtg_example_com_app_main_appMain", Path: "main.go", Body: "func rtg_example_com_app_main_appMain() int { return 0 }\n"}},
+		})},
+		{Path: "dep.rtg.go", Source: sourceForTest(Unit{
+			ImportPath: "example.com/app/dep",
+			Package:    "dep",
+		})},
+	})
+	if err != nil {
+		t.Fatalf("ParseSources failed: %v", err)
+	}
+	if len(units) != 2 {
+		t.Fatalf("units = %#v, want 2", units)
+	}
+	if units[0].ImportPath != "example.com/app/main" || units[1].ImportPath != "example.com/app/dep" {
+		t.Fatalf("unit order/identity = %#v", units)
+	}
+}
+
+func TestParseSourcesReportsSourcePath(t *testing.T) {
+	_, err := ParseSources([]SourceFile{{Path: "broken.rtg.go", Source: []byte("package main\n")}})
+	if err == nil {
+		t.Fatalf("ParseSources accepted source without unit metadata")
+	}
+	if !strings.Contains(err.Error(), "broken.rtg.go: missing rtg unit metadata") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestParseSourceRejectsDuplicateMetadata(t *testing.T) {
 	tests := []struct {
 		name string

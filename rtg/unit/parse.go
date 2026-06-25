@@ -5,6 +5,18 @@ import (
 	"strings"
 )
 
+func ParseSources(sources []SourceFile) ([]Unit, error) {
+	units := make([]Unit, 0, len(sources))
+	for _, source := range sources {
+		u, err := ParseSource(source.Path, source.Source)
+		if err != nil {
+			return nil, err
+		}
+		units = append(units, u)
+	}
+	return units, nil
+}
+
 func ParseSource(path string, src []byte) (Unit, error) {
 	lines := strings.Split(string(src), "\n")
 	var u Unit

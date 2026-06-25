@@ -26,6 +26,14 @@ func CompileUnits(units []unit.Unit, opts Options) error {
 	return CompileSource(link.Source(plan), opts)
 }
 
+func CompileUnitSources(sources []unit.SourceFile, opts Options) error {
+	units, err := unit.ParseSources(sources)
+	if err != nil {
+		return err
+	}
+	return CompileUnits(units, opts)
+}
+
 func CompileSource(source []byte, opts Options) error {
 	if opts.Output == "" {
 		return fmt.Errorf("rtg: missing output path (-o)")

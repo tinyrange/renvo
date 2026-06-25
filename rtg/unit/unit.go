@@ -9,6 +9,11 @@ type Unit struct {
 	Decls      []Decl
 }
 
+type SourceFile struct {
+	Path   string
+	Source []byte
+}
+
 type Symbol struct {
 	ImportPath string
 	Name       string

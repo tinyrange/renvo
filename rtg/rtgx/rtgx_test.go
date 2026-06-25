@@ -121,3 +121,36 @@ func TestCompileUnitsValidatesUnitGraph(t *testing.T) {
 		t.Fatalf("error = %q", err)
 	}
 }
+
+func TestCompileUnitSourcesReportsParseErrors(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "app")
+	err := CompileUnitSources([]unit.SourceFile{{Path: "broken.rtg.go", Source: []byte("package main\n")}}, Options{Target: "linux/amd64", Output: out})
+	if err == nil {
+		t.Fatalf("CompileUnitSources accepted malformed unit source")
+	}
+	if !strings.Contains(err.Error(), "broken.rtg.go: missing rtg unit metadata") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestCompileUnitSourcesValidatesUnitGraph(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "app")
+	err := CompileUnitSources([]unit.SourceFile{{
+		Path: "main.rtg.go",
+		Source: []byte(`//go:build rtg
+
+// rtg:unit example.com/app/main
+package main
+
+// rtg:import "example.com/app/missing"
+// rtg:decl func appMain => rtg_example_com_app_main_appMain main.go
+func rtg_example_com_app_main_appMain() int { return 0 }
+`),
+	}}, Options{Target: "linux/amd64", Output: out})
+	if err == nil {
+		t.Fatalf("CompileUnitSources accepted missing imported unit")
+	}
+	if !strings.Contains(err.Error(), "missing imported unit example.com/app/missing") {
+		t.Fatalf("error = %q", err)
+	}
+}

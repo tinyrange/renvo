@@ -117,15 +117,15 @@ func runLink(cfg config) error {
 	if len(cfg.inputs) == 0 {
 		return fmt.Errorf("rtg: -link requires input units")
 	}
-	units, err := readUnitInputs(cfg.inputs)
+	sources, err := readUnitInputs(cfg.inputs)
 	if err != nil {
 		return err
 	}
-	return rtgx.CompileUnits(units, rtgx.Options{Target: cfg.target, Output: cfg.output})
+	return rtgx.CompileUnitSources(sources, rtgx.Options{Target: cfg.target, Output: cfg.output})
 }
 
-func readUnitInputs(inputs []string) ([]unit.Unit, error) {
-	var units []unit.Unit
+func readUnitInputs(inputs []string) ([]unit.SourceFile, error) {
+	var sources []unit.SourceFile
 	for _, input := range inputs {
 		paths, err := unitInputPaths(input)
 		if err != nil {
@@ -136,17 +136,13 @@ func readUnitInputs(inputs []string) ([]unit.Unit, error) {
 			if err != nil {
 				return nil, err
 			}
-			u, err := unit.ParseSource(path, data)
-			if err != nil {
-				return nil, err
-			}
-			units = append(units, u)
+			sources = append(sources, unit.SourceFile{Path: path, Source: data})
 		}
 	}
-	if len(units) == 0 {
+	if len(sources) == 0 {
 		return nil, fmt.Errorf("rtg: no input units")
 	}
-	return units, nil
+	return sources, nil
 }
 
 func unitInputPaths(input string) ([]string, error) {
