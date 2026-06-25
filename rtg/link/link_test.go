@@ -21,6 +21,7 @@ func TestBuildResolvesReferences(t *testing.T) {
 	}
 	depUnit := unit.Unit{
 		ImportPath: "example.com/app/pkg/answer",
+		Package:    "answer",
 		Exports: []unit.Symbol{
 			{ImportPath: "example.com/app/pkg/answer", Name: "Value", UnitName: "rtg_example_com_app_pkg_answer_Value"},
 		},
@@ -102,6 +103,101 @@ func TestBuildRejectsDuplicateUnits(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "duplicate unit: example.com/app/dep") {
 		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestBuildRejectsInvalidUnitMetadata(t *testing.T) {
+	tests := []struct {
+		name  string
+		units []unit.Unit
+		want  string
+	}{
+		{
+			name: "empty import path",
+			units: []unit.Unit{{
+				Package: "main",
+			}},
+			want: "empty unit import path",
+		},
+		{
+			name: "empty package",
+			units: []unit.Unit{{
+				ImportPath: "example.com/app/main",
+			}},
+			want: "example.com/app/main: empty unit package",
+		},
+		{
+			name: "empty import metadata",
+			units: []unit.Unit{{
+				ImportPath: "example.com/app/main",
+				Package:    "main",
+				Imports:    []string{""},
+			}},
+			want: "example.com/app/main: empty import metadata",
+		},
+		{
+			name: "duplicate import metadata",
+			units: []unit.Unit{{
+				ImportPath: "example.com/app/main",
+				Package:    "main",
+				Imports:    []string{"example.com/app/dep", "example.com/app/dep"},
+			}},
+			want: `example.com/app/main: duplicate import metadata "example.com/app/dep"`,
+		},
+		{
+			name: "invalid export metadata",
+			units: []unit.Unit{{
+				ImportPath: "example.com/app/main",
+				Package:    "main",
+				Exports:    []unit.Symbol{{ImportPath: "example.com/app/main", Name: "Value"}},
+			}},
+			want: "example.com/app/main: invalid export metadata",
+		},
+		{
+			name: "duplicate export metadata",
+			units: []unit.Unit{{
+				ImportPath: "example.com/app/main",
+				Package:    "main",
+				Exports: []unit.Symbol{
+					{ImportPath: "example.com/app/main", Name: "Value", UnitName: "rtg_example_com_app_main_Value"},
+					{ImportPath: "example.com/app/main", Name: "Value", UnitName: "rtg_example_com_app_main_Value"},
+				},
+			}},
+			want: "example.com/app/main: duplicate export metadata Value",
+		},
+		{
+			name: "invalid reference metadata",
+			units: []unit.Unit{{
+				ImportPath: "example.com/app/main",
+				Package:    "main",
+				References: []unit.Symbol{{ImportPath: "example.com/app/dep", Name: "Value"}},
+			}},
+			want: "example.com/app/main: invalid reference metadata",
+		},
+		{
+			name: "duplicate reference metadata",
+			units: []unit.Unit{{
+				ImportPath: "example.com/app/main",
+				Package:    "main",
+				References: []unit.Symbol{
+					{ImportPath: "example.com/app/dep", Name: "Value", UnitName: "rtg_example_com_app_dep_Value"},
+					{ImportPath: "example.com/app/dep", Name: "Value", UnitName: "rtg_example_com_app_dep_Value"},
+				},
+			}},
+			want: "example.com/app/main: duplicate reference metadata example.com/app/dep.Value",
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Build(tt.units)
+			if err == nil {
+				t.Fatalf("Build accepted %s metadata", tt.name)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want %q", err, tt.want)
+			}
+		})
 	}
 }
 

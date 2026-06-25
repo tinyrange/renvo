@@ -14,6 +14,9 @@ type Plan struct {
 }
 
 func Build(units []unit.Unit) (Plan, error) {
+	if err := validateUnitMetadata(units); err != nil {
+		return Plan{}, err
+	}
 	if err := validateUniqueUnits(units); err != nil {
 		return Plan{}, err
 	}
@@ -58,6 +61,49 @@ func Build(units []unit.Unit) (Plan, error) {
 		return ordered[i].ImportPath < ordered[j].ImportPath
 	})
 	return Plan{Units: ordered}, nil
+}
+
+func validateUnitMetadata(units []unit.Unit) error {
+	for _, u := range units {
+		if u.ImportPath == "" {
+			return fmt.Errorf("empty unit import path")
+		}
+		if u.Package == "" {
+			return fmt.Errorf("%s: empty unit package", u.ImportPath)
+		}
+		imports := map[string]bool{}
+		for _, imp := range u.Imports {
+			if imp == "" {
+				return fmt.Errorf("%s: empty import metadata", u.ImportPath)
+			}
+			if imports[imp] {
+				return fmt.Errorf("%s: duplicate import metadata %q", u.ImportPath, imp)
+			}
+			imports[imp] = true
+		}
+		exports := map[string]bool{}
+		for _, sym := range u.Exports {
+			if sym.Name == "" || sym.UnitName == "" {
+				return fmt.Errorf("%s: invalid export metadata", u.ImportPath)
+			}
+			if exports[sym.Name] {
+				return fmt.Errorf("%s: duplicate export metadata %s", u.ImportPath, sym.Name)
+			}
+			exports[sym.Name] = true
+		}
+		refs := map[string]bool{}
+		for _, sym := range u.References {
+			if sym.ImportPath == "" || sym.Name == "" || sym.UnitName == "" {
+				return fmt.Errorf("%s: invalid reference metadata", u.ImportPath)
+			}
+			key := symbolKey(sym.ImportPath, sym.Name)
+			if refs[key] {
+				return fmt.Errorf("%s: duplicate reference metadata %s.%s", u.ImportPath, sym.ImportPath, sym.Name)
+			}
+			refs[key] = true
+		}
+	}
+	return nil
 }
 
 func validateUniqueUnits(units []unit.Unit) error {
