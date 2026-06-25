@@ -7,12 +7,13 @@ package main
 // rtg:import "example.com/fixture/pkg/answer"
 // rtg:ref example.com/fixture/pkg/answer Print => rtg_example_com_fixture_pkg_answer_Print
 
-// rtg:decl func appMain => rtg_example_com_fixture_cmd_app_appMain cmd/app/main.go
-func rtg_example_com_fixture_cmd_app_appMain() int {
-	return rtg_example_com_fixture_pkg_answer_Print()
-}
-
 // rtg:decl func main => rtg_example_com_fixture_cmd_app_main cmd/app/main.go
 func rtg_example_com_fixture_cmd_app_main() {
-	rtg_example_com_fixture_cmd_app_appMain()
+	rtg_example_com_fixture_pkg_answer_Print()
+}
+
+// rtg:decl func appMain => rtg_example_com_fixture_cmd_app_appMain rtg-entrypoint
+func rtg_example_com_fixture_cmd_app_appMain() int {
+	rtg_example_com_fixture_cmd_app_main()
+	return 0
 }
