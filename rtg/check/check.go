@@ -102,6 +102,11 @@ func declDiagnostics(file parse.File) Diagnostics {
 				diags = append(diags, diag(file, tok, "named result parameters are not supported"))
 			}
 		}
+		if decl.Kind == "const" {
+			if tok, ok := declToken(file, decl, "iota"); ok {
+				diags = append(diags, diag(file, tok, "iota is not supported"))
+			}
+		}
 		if file.PackageName == "main" && decl.Kind == "func" && decl.Name == "main" && !hasOrdinaryMainSignature(file, decl) {
 			diags = append(diags, declDiagnostic(file, decl, "main function must have no parameters or results"))
 		}
@@ -728,6 +733,21 @@ func tokenIndexAt(toks []scan.Token, start int) int {
 		}
 	}
 	return -1
+}
+
+func declToken(file parse.File, decl parse.Decl, text string) (scan.Token, bool) {
+	for _, tok := range file.Tokens {
+		if tok.Start < decl.Start {
+			continue
+		}
+		if tok.Start >= decl.End {
+			break
+		}
+		if tok.Text == text {
+			return tok, true
+		}
+	}
+	return scan.Token{}, false
 }
 
 func diag(file parse.File, tok scan.Token, message string) Diagnostic {

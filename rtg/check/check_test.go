@@ -163,6 +163,28 @@ func TestFileRejectsUnsupportedLiterals(t *testing.T) {
 	}
 }
 
+func TestFileRejectsIotaConst(t *testing.T) {
+	file, err := parse.FileSource("iota.go", []byte(`package main
+
+const (
+	A = iota
+	B
+)
+
+func appMain() int { return A + B }
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	err = File(file)
+	if err == nil {
+		t.Fatalf("File accepted iota")
+	}
+	if !strings.Contains(err.Error(), "iota.go:4:6: iota is not supported") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestFileRejectsAnyInterfaceTypeAlias(t *testing.T) {
 	file, err := parse.FileSource("any.go", []byte(`package main
 
