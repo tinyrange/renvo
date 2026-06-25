@@ -289,7 +289,14 @@ func appMain() int {
 	if s[0] == 'p' && s[0:6] == "prefix" {
 		return 0
 	}
+	if isByte(s[0]) && s[1:3] == "re" {
+		return 0
+	}
 	return 1
+}
+
+func isByte(c byte) bool {
+	return c > 0
 }
 `))
 	if err != nil {
@@ -297,6 +304,24 @@ func appMain() int {
 	}
 	if diags := File(file); len(diags) != 0 {
 		t.Fatalf("unexpected diagnostics: %v", diags)
+	}
+}
+
+func TestFileRejectsArrayFunctionResult(t *testing.T) {
+	file, err := parse.FileSource("arrays.go", []byte(`package main
+
+func appMain() int { return 0 }
+func Values() [3]int { return [3]int{} }
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	diags := File(file)
+	if len(diags) == 0 {
+		t.Fatalf("File accepted array result type")
+	}
+	if !strings.Contains(diags.Error(), "arrays.go:4:15: arrays are not supported") {
+		t.Fatalf("diagnostics = %v", diags)
 	}
 }
 

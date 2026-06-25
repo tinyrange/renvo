@@ -379,12 +379,26 @@ func startsArrayType(toks []scan.Token, i int) bool {
 		return open >= 0 && open+1 == i-1 && precededByTypeContext(toks, open)
 	}
 	if prev.Text == ")" {
-		return true
+		return closesFunctionSignature(toks, i-1)
 	}
 	if prev.Kind != scan.Ident {
 		return false
 	}
 	return precededByTypeContext(toks, i-1)
+}
+
+func closesFunctionSignature(toks []scan.Token, close int) bool {
+	open := findOpen(toks, close, "(", ")")
+	if open < 0 {
+		return false
+	}
+	if open > 0 && toks[open-1].Text == "func" {
+		return true
+	}
+	if open > 1 && toks[open-2].Text == "func" && toks[open-1].Kind == scan.Ident {
+		return true
+	}
+	return false
 }
 
 func startsAnyInterfaceType(toks []scan.Token, i int) bool {
@@ -522,7 +536,7 @@ func precededByTypeContext(toks []scan.Token, pos int) bool {
 	}
 	prev := toks[pos-1]
 	switch prev.Text {
-	case "var", "type", "(", "{", ",", "*", "]", ")":
+	case "var", "type", "{", "*", "]", ")":
 		return true
 	}
 	if prev.Kind == scan.Ident && pos >= 2 {
@@ -530,9 +544,48 @@ func precededByTypeContext(toks []scan.Token, pos int) bool {
 			return false
 		}
 		beforeName := toks[pos-2].Text
-		return beforeName == "var" || beforeName == "type" || beforeName == "(" || beforeName == "{" || beforeName == ","
+		if beforeName == "var" || beforeName == "type" || beforeName == "{" {
+			return true
+		}
+		if beforeName == "(" || beforeName == "," {
+			namePos := pos - 1
+			return nameInFunctionSignature(toks, namePos) || nameInStructFieldList(toks, namePos)
+		}
 	}
 	return false
+}
+
+func nameInFunctionSignature(toks []scan.Token, namePos int) bool {
+	open := containingOpen(toks, namePos, "(", ")")
+	if open < 0 {
+		return false
+	}
+	if open > 0 && toks[open-1].Text == "func" {
+		return true
+	}
+	return open > 1 && toks[open-2].Text == "func" && toks[open-1].Kind == scan.Ident
+}
+
+func nameInStructFieldList(toks []scan.Token, namePos int) bool {
+	open := containingOpen(toks, namePos, "{", "}")
+	return open > 0 && toks[open-1].Text == "struct"
+}
+
+func containingOpen(toks []scan.Token, pos int, openText string, closeText string) int {
+	depth := 0
+	for i := pos - 1; i >= 0; i-- {
+		if toks[i].Text == closeText {
+			depth++
+			continue
+		}
+		if toks[i].Text == openText {
+			if depth == 0 {
+				return i
+			}
+			depth--
+		}
+	}
+	return -1
 }
 
 func isKeyword(text string) bool {

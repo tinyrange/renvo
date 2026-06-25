@@ -307,6 +307,16 @@ func main() {
 	ok = ok && strings.Contains(value, "")
 	ok = ok && strings.IndexByte(value, '-') == 6
 	ok = ok && strings.IndexByte(value, 'z') == -1
+	ok = ok && strings.Index(value, "body") == 7
+	ok = ok && strings.Index(value, "missing") == -1
+	ok = ok && strings.TrimPrefix(value, "prefix-") == "body-suffix"
+	ok = ok && strings.TrimSuffix(value, "-suffix") == "prefix-body"
+	ok = ok && strings.TrimSpace(" \tPASS\n") == "PASS"
+	parts := strings.Split("red,green,blue", ",")
+	ok = ok && len(parts) == 3 && parts[0] == "red" && parts[2] == "blue"
+	fields := strings.Fields("  alpha\tbeta\n gamma ")
+	ok = ok && len(fields) == 3 && fields[1] == "beta"
+	ok = ok && strings.Join(fields, "-") == "alpha-beta-gamma"
 	if ok {
 		print("PASS\n")
 		return
