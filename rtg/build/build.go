@@ -12,7 +12,8 @@ func Units(graph *load.Graph) ([]unit.Unit, error) {
 		return nil, err
 	}
 	units := make([]unit.Unit, 0, len(graph.Packages))
-	for _, pkg := range graph.Packages {
+	for i := 0; i < len(graph.Packages); i++ {
+		pkg := graph.Packages[i]
 		u, err := lower.PackageWithGraph(pkg, graph)
 		if err != nil {
 			return nil, err

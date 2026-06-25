@@ -36,14 +36,16 @@ func Source(u unit.Unit) []byte {
 	out = appendString(out, "\n\n")
 	imports := append([]string(nil), u.Imports...)
 	sortStrings(imports)
-	for _, imp := range imports {
+	for i := 0; i < len(imports); i++ {
+		imp := imports[i]
 		out = appendString(out, "// rtg:import ")
 		out = appendString(out, quote(imp))
 		out = append(out, '\n')
 	}
 	exports := append([]unit.Symbol(nil), u.Exports...)
 	sortSymbolsByName(exports)
-	for _, sym := range exports {
+	for i := 0; i < len(exports); i++ {
+		sym := exports[i]
 		out = appendString(out, "// rtg:export ")
 		out = appendString(out, sym.Name)
 		out = appendString(out, " => ")
@@ -52,7 +54,8 @@ func Source(u unit.Unit) []byte {
 	}
 	refs := append([]unit.Symbol(nil), u.References...)
 	sortSymbolsByImportPathName(refs)
-	for _, sym := range refs {
+	for i := 0; i < len(refs); i++ {
+		sym := refs[i]
 		out = appendString(out, "// rtg:ref ")
 		out = appendString(out, quoteIfNeeded(sym.ImportPath))
 		out = append(out, ' ')
@@ -64,7 +67,8 @@ func Source(u unit.Unit) []byte {
 	if len(imports) > 0 || len(exports) > 0 || len(refs) > 0 {
 		out = append(out, '\n')
 	}
-	for i, decl := range u.Decls {
+	for i := 0; i < len(u.Decls); i++ {
+		decl := u.Decls[i]
 		out = appendString(out, "// rtg:decl ")
 		out = appendString(out, decl.Kind)
 		if decl.Name != "" {
