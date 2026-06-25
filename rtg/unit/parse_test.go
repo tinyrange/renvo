@@ -72,6 +72,22 @@ func TestParseSourcesReportsSourcePath(t *testing.T) {
 	}
 }
 
+func TestParseSourceRejectsUnknownMetadata(t *testing.T) {
+	_, err := ParseSource("unit.rtg.go", []byte(`//go:build rtg
+
+// rtg:unit example.com/app
+package main
+
+// rtg:unknown value
+`))
+	if err == nil {
+		t.Fatalf("ParseSource accepted unknown rtg metadata")
+	}
+	if !strings.Contains(err.Error(), `unit.rtg.go: unknown rtg metadata "unknown value"`) {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestParseSourceRejectsDuplicateMetadata(t *testing.T) {
 	tests := []struct {
 		name string

@@ -101,6 +101,7 @@ func ParseSource(path string, src []byte) (Unit, error) {
 			u.References = append(u.References, sym)
 			continue
 		}
+		return Unit{}, fmt.Errorf("%s: unknown rtg metadata %q", path, strings.TrimSpace(body))
 	}
 	if u.ImportPath == "" {
 		return Unit{}, fmt.Errorf("%s: missing rtg unit metadata", path)
