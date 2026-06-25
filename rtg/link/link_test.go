@@ -138,6 +138,38 @@ func TestBuildRejectsExportFromDifferentUnit(t *testing.T) {
 	}
 }
 
+func TestBuildRejectsDeclarationSymbolMismatch(t *testing.T) {
+	_, err := Build([]unit.Unit{{
+		ImportPath: "example.com/app/main",
+		Package:    "main",
+		Decls: []unit.Decl{
+			{Kind: "func", Name: "appMain", UnitName: "rtg_example_com_app_main_appMain", Body: "func wrong() int { return 0 }\n"},
+		},
+	}})
+	if err == nil {
+		t.Fatalf("Build succeeded with mismatched declaration symbol")
+	}
+	if !strings.Contains(err.Error(), "example.com/app/main: declaration appMain body does not define rtg_example_com_app_main_appMain") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestBuildRejectsEmptySymbolDeclarationBody(t *testing.T) {
+	_, err := Build([]unit.Unit{{
+		ImportPath: "example.com/app/main",
+		Package:    "main",
+		Decls: []unit.Decl{
+			{Kind: "func", Name: "appMain", UnitName: "rtg_example_com_app_main_appMain"},
+		},
+	}})
+	if err == nil {
+		t.Fatalf("Build succeeded with empty declaration body")
+	}
+	if !strings.Contains(err.Error(), "example.com/app/main: declaration appMain has empty body") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestBuildRejectsMissingEntrypoint(t *testing.T) {
 	_, err := Build([]unit.Unit{{
 		ImportPath: "example.com/app/main",

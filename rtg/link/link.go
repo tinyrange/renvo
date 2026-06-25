@@ -26,6 +26,9 @@ func Build(units []unit.Unit) (Plan, error) {
 	if err := validateExportOwnership(units); err != nil {
 		return Plan{}, err
 	}
+	if err := validateDeclSymbols(units); err != nil {
+		return Plan{}, err
+	}
 	exports := map[string]unit.Symbol{}
 	for _, u := range units {
 		for _, sym := range u.Exports {
@@ -103,6 +106,32 @@ func validateExportOwnership(units []unit.Unit) error {
 		for _, sym := range u.Exports {
 			if sym.ImportPath != u.ImportPath {
 				return fmt.Errorf("%s: export %s belongs to %s", u.ImportPath, sym.Name, sym.ImportPath)
+			}
+		}
+	}
+	return nil
+}
+
+func validateDeclSymbols(units []unit.Unit) error {
+	for _, u := range units {
+		for _, decl := range u.Decls {
+			if decl.UnitName == "" {
+				continue
+			}
+			if decl.Body == "" {
+				return fmt.Errorf("%s: declaration %s has empty body", u.ImportPath, decl.Name)
+			}
+			if decl.Kind == "func" && !strings.HasPrefix(decl.Body, "func "+decl.UnitName) {
+				return fmt.Errorf("%s: declaration %s body does not define %s", u.ImportPath, decl.Name, decl.UnitName)
+			}
+			if decl.Kind == "const" && !strings.Contains(decl.Body, decl.UnitName) {
+				return fmt.Errorf("%s: declaration %s body does not define %s", u.ImportPath, decl.Name, decl.UnitName)
+			}
+			if decl.Kind == "var" && !strings.Contains(decl.Body, decl.UnitName) {
+				return fmt.Errorf("%s: declaration %s body does not define %s", u.ImportPath, decl.Name, decl.UnitName)
+			}
+			if decl.Kind == "type" && !strings.Contains(decl.Body, decl.UnitName) {
+				return fmt.Errorf("%s: declaration %s body does not define %s", u.ImportPath, decl.Name, decl.UnitName)
 			}
 		}
 	}
