@@ -104,6 +104,36 @@ const A = 1
 	}
 }
 
+func TestLoadEntriesRejectsInvalidExplicitFrontendFiles(t *testing.T) {
+	tests := []struct {
+		name string
+		file string
+		want string
+	}{
+		{name: "non-go", file: "pkg/input.txt", want: "must be a .go source file"},
+		{name: "test", file: "pkg/input_test.go", want: "must not be a Go test file"},
+		{name: "unit", file: "pkg/input.rtg.go", want: "use -link for .rtg.go files"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFile(t, root, "go.mod", "module example.com/app\n")
+			writeFile(t, root, tt.file, `package pkg
+
+const A = 1
+`)
+			_, err := LoadEntries([]string{filepath.Join(root, tt.file)}, Options{})
+			if err == nil {
+				t.Fatalf("LoadEntries accepted %s explicit file", tt.name)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoadEntriesRejectsMissingStdPackage(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/app\n")

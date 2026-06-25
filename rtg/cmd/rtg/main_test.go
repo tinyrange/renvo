@@ -110,6 +110,23 @@ const A = 1
 	}
 }
 
+func TestRunEmitUnitRejectsExplicitRTGUnitInput(t *testing.T) {
+	root := t.TempDir()
+	writeCLIFile(t, root, "go.mod", "module example.com/app\n")
+	writeCLIFile(t, root, "pkg/generated.rtg.go", `//go:build rtg
+
+// rtg:unit example.com/app/pkg
+package pkg
+`)
+	err := run(config{emitUnit: true, output: filepath.Join(root, "out.rtg.go"), inputs: []string{filepath.Join(root, "pkg", "generated.rtg.go")}})
+	if err == nil {
+		t.Fatalf("run accepted explicit .rtg.go frontend input")
+	}
+	if !strings.Contains(err.Error(), "use -link for .rtg.go files") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestParseArgsDefaultsToSupportedTarget(t *testing.T) {
 	cfg, err := parseArgs([]string{"-check", "."})
 	if err != nil {

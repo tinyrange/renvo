@@ -118,7 +118,24 @@ func entryInput(entry string) (string, []string, error) {
 	if err != nil {
 		return "", nil, err
 	}
+	if err := validateFrontendFileInput(path); err != nil {
+		return "", nil, err
+	}
 	return filepath.Dir(path), []string{path}, nil
+}
+
+func validateFrontendFileInput(path string) error {
+	name := filepath.Base(path)
+	if !strings.HasSuffix(name, ".go") {
+		return fmt.Errorf("%s: frontend file input must be a .go source file", path)
+	}
+	if strings.HasSuffix(name, "_test.go") {
+		return fmt.Errorf("%s: frontend file input must not be a Go test file", path)
+	}
+	if strings.HasSuffix(name, ".rtg.go") {
+		return fmt.Errorf("%s: frontend file input must not be an emitted RTG unit; use -link for .rtg.go files", path)
+	}
+	return nil
 }
 
 func loadPackageRecursive(g *Graph, opts Options, seen map[string]bool, dir string) error {
