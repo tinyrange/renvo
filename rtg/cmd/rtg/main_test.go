@@ -445,6 +445,29 @@ func main() {
 	}
 }
 
+func TestRunCheckRejectsInitFunctionsBeforeBackend(t *testing.T) {
+	root := t.TempDir()
+	writeCLIFile(t, root, "go.mod", "module example.com/app\n")
+	writeCLIFile(t, root, "cmd/app/main.go", `package main
+
+func init() {
+	print("FAIL\n")
+}
+
+func main() {
+	print("PASS\n")
+}
+`)
+	cfg := config{check: true, inputs: []string{filepath.Join(root, "cmd", "app")}}
+	err := run(cfg)
+	if err == nil {
+		t.Fatalf("run check succeeded for init function")
+	}
+	if !strings.Contains(err.Error(), filepath.Join(root, "cmd", "app", "main.go")+":3:6: init functions are not supported") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestRunCheckAcceptsSimplePackage(t *testing.T) {
 	root := t.TempDir()
 	writeCLIFile(t, root, "go.mod", "module example.com/app\n")

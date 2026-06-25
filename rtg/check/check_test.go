@@ -325,6 +325,27 @@ func main() int { return 0 }
 	}
 }
 
+func TestFileRejectsInitFunctions(t *testing.T) {
+	file, err := parse.FileSource("init.go", []byte(`package main
+
+func init() {
+	print("init")
+}
+
+func appMain() int { return 0 }
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	err = File(file)
+	if err == nil {
+		t.Fatalf("File accepted init function")
+	}
+	if !strings.Contains(err.Error(), "init.go:3:6: init functions are not supported") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestFileRejectsNamedResultParameters(t *testing.T) {
 	file, err := parse.FileSource("results.go", []byte(`package main
 
