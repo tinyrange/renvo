@@ -233,15 +233,18 @@ func parseNameArrow(s string) (Symbol, error) {
 }
 
 func parseReference(s string) (Symbol, error) {
-	firstSpace := strings.IndexByte(s, ' ')
-	if firstSpace < 0 {
+	field, rest, err := splitFirstMetadataField(s)
+	if err != nil {
 		return Symbol{}, fmt.Errorf("invalid reference metadata %q", s)
 	}
-	importPath := s[:firstSpace]
+	importPath, err := unquoteMetadataField(field)
+	if err != nil {
+		return Symbol{}, fmt.Errorf("invalid reference metadata %q", s)
+	}
 	if importPath == "" {
 		return Symbol{}, fmt.Errorf("invalid reference metadata %q", s)
 	}
-	sym, err := parseNameArrow(strings.TrimSpace(s[firstSpace+1:]))
+	sym, err := parseNameArrow(strings.TrimSpace(rest))
 	if err != nil {
 		return Symbol{}, err
 	}
@@ -328,6 +331,36 @@ func metadataFields(s string) ([]string, error) {
 		fields = append(fields, s[start:i])
 	}
 	return fields, nil
+}
+
+func splitFirstMetadataField(s string) (string, string, error) {
+	i := 0
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t' || s[i] == '\r') {
+		i++
+	}
+	if i >= len(s) {
+		return "", "", fmt.Errorf("missing metadata field")
+	}
+	start := i
+	if s[i] == '"' {
+		i++
+		for i < len(s) {
+			if s[i] == '\\' {
+				i += 2
+				continue
+			}
+			if s[i] == '"' {
+				i++
+				return s[start:i], s[i:], nil
+			}
+			i++
+		}
+		return "", "", fmt.Errorf("invalid metadata field")
+	}
+	for i < len(s) && s[i] != ' ' && s[i] != '\t' && s[i] != '\r' {
+		i++
+	}
+	return s[start:i], s[i:], nil
 }
 
 func unquoteMetadataField(field string) (string, error) {

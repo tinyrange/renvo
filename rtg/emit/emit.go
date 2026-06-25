@@ -66,7 +66,7 @@ func Source(u unit.Unit) []byte {
 	})
 	for _, sym := range refs {
 		out.WriteString("// rtg:ref ")
-		out.WriteString(sym.ImportPath)
+		out.WriteString(quoteIfNeeded(sym.ImportPath))
 		out.WriteByte(' ')
 		out.WriteString(sym.Name)
 		out.WriteString(" => ")

@@ -39,6 +39,20 @@ func TestParseSourceRoundTripMetadata(t *testing.T) {
 	}
 }
 
+func TestParseSourceAcceptsQuotedReferenceImportPath(t *testing.T) {
+	u, err := ParseSource("quotedref.rtg.go", withRTGBuild(`// rtg:unit example.com/app
+package main
+// rtg:ref "example.com/app/dep path\\quoted\"line\nnext" Value => rtg_example_com_app_dep_Value
+`))
+	if err != nil {
+		t.Fatalf("ParseSource failed: %v", err)
+	}
+	want := "example.com/app/dep path\\quoted\"line\nnext"
+	if len(u.References) != 1 || u.References[0].ImportPath != want {
+		t.Fatalf("references = %#v, want import path %q", u.References, want)
+	}
+}
+
 func TestParseSourcesReadsLoadedUnitFiles(t *testing.T) {
 	units, err := ParseSources([]SourceFile{
 		{Path: "main.rtg.go", Source: sourceForTest(Unit{
@@ -301,15 +315,38 @@ package main
 }
 
 func TestParseSourceRejectsInvalidQuotedMetadata(t *testing.T) {
-	_, err := ParseSource("badquote.rtg.go", withRTGBuild(`// rtg:unit example.com/app
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "import",
+			src: `// rtg:unit example.com/app
 package main
 // rtg:import "example.com/app/\q"
-`))
-	if err == nil {
-		t.Fatalf("ParseSource accepted invalid quoted import metadata")
+`,
+			want: "invalid quoted import",
+		},
+		{
+			name: "reference",
+			src: `// rtg:unit example.com/app
+package main
+// rtg:ref "example.com/app/\q" Value => rtg_example_com_app_dep_Value
+`,
+			want: "invalid reference metadata",
+		},
 	}
-	if !strings.Contains(err.Error(), `invalid quoted import`) {
-		t.Fatalf("error = %q", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseSource("badquote.rtg.go", withRTGBuild(tt.src))
+			if err == nil {
+				t.Fatalf("ParseSource accepted invalid quoted %s metadata", tt.name)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want %q", err, tt.want)
+			}
+		})
 	}
 }
 
