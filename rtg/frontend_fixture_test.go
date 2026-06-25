@@ -82,6 +82,35 @@ func Emit(a int, b int) int {
 	runFrontendFixtureMatchesHostGo(t, fixture)
 }
 
+func TestSwitchNestedCallArgumentFrontendMatchesHostGo(t *testing.T) {
+	fixture := t.TempDir()
+	writeFixtureFile(t, fixture, "go.mod", "module example.com/switchcall\n")
+	writeFixtureFile(t, fixture, "cmd/app/main.go", `package main
+
+import "example.com/switchcall/pkg/dep"
+
+func main() {
+	switch dep.Join(dep.First(), dep.Second()) {
+	case 12:
+		dep.Emit()
+	default:
+		print("FAIL\n")
+	}
+}
+`)
+	writeFixtureFile(t, fixture, "pkg/dep/dep.go", `package dep
+
+func First() int { return 1 }
+func Second() int { return 2 }
+func Join(a int, b int) int { return a*10 + b }
+func Emit() int {
+	print("PASS\n")
+	return 0
+}
+`)
+	runFrontendFixtureMatchesHostGo(t, fixture)
+}
+
 func runFrontendFixtureMatchesHostGo(t *testing.T, fixture string) {
 	t.Helper()
 	host := exec.Command("go", "run", "./cmd/app")

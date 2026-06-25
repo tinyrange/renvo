@@ -315,6 +315,14 @@ func normalizationStatement(toks []scan.Token, pos int) (expressionStatement, bo
 		}
 		return expressionStatement{token: pos, exprStart: exprStart, exprEnd: exprEnd}, true
 	}
+	if toks[pos].Text == "switch" {
+		exprStart := pos + 1
+		exprEnd := conditionExpressionEnd(toks, pos)
+		if exprEnd <= exprStart {
+			return expressionStatement{}, false
+		}
+		return expressionStatement{token: pos, exprStart: exprStart, exprEnd: exprEnd}, true
+	}
 	if startsCallStatement(toks, pos) {
 		exprEnd := lineExpressionEnd(toks, pos)
 		if exprEnd <= pos {
