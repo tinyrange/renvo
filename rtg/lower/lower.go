@@ -17,6 +17,18 @@ type localRange struct {
 	end   int
 }
 
+type localTypeInfo struct {
+	name    string
+	pointer bool
+}
+
+type methodInfo struct {
+	name            string
+	receiverType    string
+	pointerReceiver bool
+	unitName        string
+}
+
 func Package(pkg load.Package) (unit.Unit, error) {
 	return PackageWithGraph(pkg, nil)
 }
@@ -28,6 +40,7 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 	sortFilesByPath(files)
 	parsedFiles := make([]parse.File, 0, len(files))
 	topNames := map[string]string{}
+	methods := map[string]methodInfo{}
 	for _, file := range files {
 		parsed, err := parse.FileSource(file.Path, file.Source)
 		if err != nil {
@@ -42,6 +55,18 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 				if name != "" && name != "_" {
 					topNames[name] = SymbolName(pkg.ImportPath, name)
 				}
+			}
+		}
+	}
+	for _, parsed := range parsedFiles {
+		for _, decl := range parsed.Decls {
+			if decl.Kind != "func" || !decl.Receiver {
+				continue
+			}
+			info := methodDeclInfo(parsed, decl)
+			if info.name != "" {
+				info.unitName = topNames[info.name]
+				methods[info.name] = info
 			}
 		}
 	}
@@ -62,7 +87,7 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 		importRefs := importReferenceMap(parsed, depPackages)
 		for _, decl := range parsed.Decls {
 			var refs []unit.Symbol
-			body := rewriteDecl(parsed, decl, topNames, importRefs, &refs)
+			body := rewriteDecl(parsed, decl, topNames, importRefs, methods, &refs)
 			if decl.Kind == "func" {
 				body = normalizeFunctionExpressions(body, unitDeclSymbol(decl, parsed, topNames))
 			}
@@ -169,11 +194,24 @@ func declTopNames(file parse.File, decl parse.Decl) []string {
 }
 
 func methodDeclName(file parse.File, decl parse.Decl) string {
-	receiver := methodReceiverTypeName(file, decl)
-	if receiver == "" || decl.Name == "" {
+	info := methodDeclInfo(file, decl)
+	if info.receiverType == "" || decl.Name == "" {
 		return decl.Name
 	}
-	return receiver + "_" + decl.Name
+	return info.name
+}
+
+func methodDeclInfo(file parse.File, decl parse.Decl) methodInfo {
+	receiver := methodReceiverTypeName(file, decl)
+	name := decl.Name
+	if receiver != "" && decl.Name != "" {
+		name = receiver + "_" + decl.Name
+	}
+	return methodInfo{
+		name:            name,
+		receiverType:    receiver,
+		pointerReceiver: methodReceiverIsPointer(file, decl),
+	}
 }
 
 func methodReceiverTypeName(file parse.File, decl parse.Decl) string {
@@ -193,6 +231,19 @@ func methodReceiverTypeName(file parse.File, decl parse.Decl) string {
 		}
 	}
 	return name
+}
+
+func methodReceiverIsPointer(file parse.File, decl parse.Decl) bool {
+	toks := file.Tokens
+	start := tokenIndexAt(toks, decl.Start)
+	if start < 0 || start+1 >= len(toks) || toks[start+1].Text != "(" {
+		return false
+	}
+	close := findClose(toks, start+1, "(", ")")
+	if close < 0 {
+		return false
+	}
+	return containsTokenText(toks, start+2, close, "*")
 }
 
 func hasOrdinaryMain(files []parse.File) bool {
@@ -275,7 +326,7 @@ func SymbolName(importPath string, name string) string {
 	return string(out)
 }
 
-func rewriteDecl(file parse.File, decl parse.Decl, topNames map[string]string, importRefs map[string]map[string]unit.Symbol, refs *[]unit.Symbol) string {
+func rewriteDecl(file parse.File, decl parse.Decl, topNames map[string]string, importRefs map[string]map[string]unit.Symbol, methods map[string]methodInfo, refs *[]unit.Symbol) string {
 	start := decl.Start
 	end := decl.End
 	if start < 0 {
@@ -310,12 +361,16 @@ func rewriteDecl(file parse.File, decl parse.Decl, topNames map[string]string, i
 		replacement := ""
 		if tok.Kind == scan.Ident && i+2 < len(file.Tokens) && file.Tokens[i+1].Text == "." && file.Tokens[i+2].Kind == scan.Ident {
 			if i+3 < len(file.Tokens) && file.Tokens[i+3].Text == "(" {
-				if receiverType := localTypes[tok.Text]; receiverType != "" {
-					methodName := receiverType + "_" + file.Tokens[i+2].Text
-					if unitName := topNames[methodName]; unitName != "" {
+				if receiverType := localTypes[tok.Text]; receiverType.name != "" {
+					methodName := receiverType.name + "_" + file.Tokens[i+2].Text
+					if method := methods[methodName]; method.unitName != "" {
 						open := file.Tokens[i+3]
 						close := findClose(file.Tokens, i+3, "(", ")")
-						replacement = unitName + "(" + tok.Text
+						receiverArg := tok.Text
+						if method.pointerReceiver && !receiverType.pointer {
+							receiverArg = "&" + receiverArg
+						}
+						replacement = method.unitName + "(" + receiverArg
 						if close < 0 || open.End < file.Tokens[close].Start {
 							replacement = replacement + ", "
 						}
@@ -1316,8 +1371,8 @@ func localNamesForDecl(file parse.File, decl parse.Decl, namesOfInterest map[str
 	return names
 }
 
-func localTypesForDecl(file parse.File, decl parse.Decl) map[string]string {
-	types := map[string]string{}
+func localTypesForDecl(file parse.File, decl parse.Decl) map[string]localTypeInfo {
+	types := map[string]localTypeInfo{}
 	if decl.Kind != "func" {
 		return types
 	}
@@ -1343,7 +1398,7 @@ func localTypesForDecl(file parse.File, decl parse.Decl) map[string]string {
 	return types
 }
 
-func collectFuncSignatureLocalTypes(toks []scan.Token, start int, end int, types map[string]string) {
+func collectFuncSignatureLocalTypes(toks []scan.Token, start int, end int, types map[string]localTypeInfo) {
 	for i := start; i < end; i++ {
 		if toks[i].Text != "(" {
 			continue
@@ -1357,15 +1412,17 @@ func collectFuncSignatureLocalTypes(toks []scan.Token, start int, end int, types
 	}
 }
 
-func collectParameterListLocalTypes(toks []scan.Token, start int, end int, types map[string]string) {
+func collectParameterListLocalTypes(toks []scan.Token, start int, end int, types map[string]localTypeInfo) {
 	for i := start; i < end; i++ {
 		if toks[i].Kind != scan.Ident {
 			continue
 		}
 		if i+1 < end && isTypeStart(toks[i+1]) {
-			typ := typeNameInRange(toks, i+1, parameterTypeEnd(toks, i+1, end))
+			typeStart := i + 1
+			typeEnd := parameterTypeEnd(toks, typeStart, end)
+			typ := typeNameInRange(toks, typeStart, typeEnd)
 			if typ != "" {
-				types[toks[i].Text] = typ
+				types[toks[i].Text] = localTypeInfo{name: typ, pointer: typeRangeIsPointer(toks, typeStart, typeEnd)}
 			}
 			continue
 		}
@@ -1374,44 +1431,70 @@ func collectParameterListLocalTypes(toks []scan.Token, start int, end int, types
 			for typeStart < end && toks[typeStart].Text == "," {
 				typeStart++
 			}
-			typ := typeNameInRange(toks, typeStart, parameterTypeEnd(toks, typeStart, end))
+			typeEnd := parameterTypeEnd(toks, typeStart, end)
+			typ := typeNameInRange(toks, typeStart, typeEnd)
 			if typ != "" {
-				types[toks[i].Text] = typ
-				types[toks[i+2].Text] = typ
+				info := localTypeInfo{name: typ, pointer: typeRangeIsPointer(toks, typeStart, typeEnd)}
+				types[toks[i].Text] = info
+				types[toks[i+2].Text] = info
 			}
 		}
 	}
 }
 
-func collectShortDeclLocalTypes(toks []scan.Token, assign int, types map[string]string) {
+func collectShortDeclLocalTypes(toks []scan.Token, assign int, types map[string]localTypeInfo) {
 	if assign-1 < 0 || assign+2 >= len(toks) {
 		return
 	}
-	if toks[assign-1].Kind != scan.Ident || toks[assign+1].Kind != scan.Ident || toks[assign+2].Text != "{" {
+	if toks[assign-1].Kind != scan.Ident {
 		return
 	}
-	types[toks[assign-1].Text] = toks[assign+1].Text
+	if toks[assign+1].Kind == scan.Ident && toks[assign+2].Text == "{" {
+		types[toks[assign-1].Text] = localTypeInfo{name: toks[assign+1].Text}
+		return
+	}
+	if assign+3 < len(toks) && toks[assign+1].Text == "&" && toks[assign+2].Kind == scan.Ident && toks[assign+3].Text == "{" {
+		types[toks[assign-1].Text] = localTypeInfo{name: toks[assign+2].Text, pointer: true}
+	}
 }
 
-func collectVarLocalTypes(toks []scan.Token, pos int, end int, types map[string]string) {
+func collectVarLocalTypes(toks []scan.Token, pos int, end int, types map[string]localTypeInfo) {
 	if pos+2 >= len(toks) || toks[pos+1].Kind != scan.Ident {
 		return
 	}
 	if toks[pos+2].Text == "=" {
 		if pos+4 < len(toks) && toks[pos+3].Kind == scan.Ident && toks[pos+4].Text == "{" {
-			types[toks[pos+1].Text] = toks[pos+3].Text
+			types[toks[pos+1].Text] = localTypeInfo{name: toks[pos+3].Text}
+		}
+		if pos+5 < len(toks) && toks[pos+3].Text == "&" && toks[pos+4].Kind == scan.Ident && toks[pos+5].Text == "{" {
+			types[toks[pos+1].Text] = localTypeInfo{name: toks[pos+4].Text, pointer: true}
 		}
 		return
 	}
-	typ := typeNameInRange(toks, pos+2, parameterTypeEnd(toks, pos+2, end))
+	typeStart := pos + 2
+	typeEnd := varTypeEnd(toks, typeStart, end)
+	typ := typeNameInRange(toks, typeStart, typeEnd)
 	if typ != "" {
-		types[toks[pos+1].Text] = typ
+		types[toks[pos+1].Text] = localTypeInfo{name: typ, pointer: typeRangeIsPointer(toks, typeStart, typeEnd)}
 	}
 }
 
 func parameterTypeEnd(toks []scan.Token, start int, end int) int {
 	for i := start; i < end; i++ {
-		if toks[i].Text == "," || toks[i].Text == ")" || toks[i].Text == "{" || toks[i].Text == "=" {
+		if toks[i].Text == "," || toks[i].Text == ")" || toks[i].Text == "{" || toks[i].Text == "=" || toks[i].Text == ";" {
+			return i
+		}
+	}
+	return end
+}
+
+func varTypeEnd(toks []scan.Token, start int, end int) int {
+	line := toks[start].Line
+	for i := start; i < end; i++ {
+		if toks[i].Line != line {
+			return i
+		}
+		if toks[i].Text == "," || toks[i].Text == ")" || toks[i].Text == "{" || toks[i].Text == "=" || toks[i].Text == ";" {
 			return i
 		}
 	}
@@ -1426,6 +1509,10 @@ func typeNameInRange(toks []scan.Token, start int, end int) string {
 		}
 	}
 	return name
+}
+
+func typeRangeIsPointer(toks []scan.Token, start int, end int) bool {
+	return containsTokenText(toks, start, end, "*")
 }
 
 func isLocalNameAt(names map[string][]localRange, name string, pos int) bool {

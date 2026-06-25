@@ -152,6 +152,48 @@ func Use() int {
 	}
 }
 
+func TestPackageLowersPointerReceiverMethodCalls(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app/pkg",
+		Name:       "pkg",
+		Files: []load.File{
+			{
+				Path: "method.go",
+				Source: []byte(`package pkg
+
+type Counter struct { n int }
+
+func (c *Counter) Add(v int) {
+	c.n = c.n + v
+}
+
+func Use() int {
+	var c Counter
+	c.Add(5)
+	return c.n
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	if len(u.Decls) != 3 {
+		t.Fatalf("decls = %#v, want 3", u.Decls)
+	}
+	if u.Decls[1].Name != "Counter_Add" || u.Decls[1].UnitName != "rtg_example_com_app_pkg_Counter_Add" {
+		t.Fatalf("method metadata = %#v", u.Decls[1])
+	}
+	if !strings.Contains(u.Decls[1].Body, "func rtg_example_com_app_pkg_Counter_Add(c *rtg_example_com_app_pkg_Counter, v int)") {
+		t.Fatalf("pointer receiver declaration was not lowered: %q", u.Decls[1].Body)
+	}
+	if !strings.Contains(u.Decls[2].Body, "rtg_example_com_app_pkg_Counter_Add(&c, 5)") {
+		t.Fatalf("pointer receiver call was not lowered: %q", u.Decls[2].Body)
+	}
+}
+
 func TestSymbolNameIsStableIdentifier(t *testing.T) {
 	got := SymbolName("example.com/team/app-pkg", "Value")
 	want := "rtg_example_com_team_app_pkg_Value"
