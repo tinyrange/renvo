@@ -326,10 +326,14 @@ func fileBuildTagsMatchTarget(path string, targetOS string, targetArch string) (
 		return false, err
 	}
 	expr, ok := leadingGoBuildExpr(string(data))
-	if !ok {
+	if ok {
+		return evalGoBuildExpr(expr, targetOS, targetArch), nil
+	}
+	lines := leadingPlusBuildLines(string(data))
+	if len(lines) == 0 {
 		return true, nil
 	}
-	return evalGoBuildExpr(expr, targetOS, targetArch), nil
+	return evalPlusBuildLines(lines, targetOS, targetArch), nil
 }
 
 func leadingGoBuildExpr(src string) (string, bool) {
@@ -352,6 +356,80 @@ func leadingGoBuildExpr(src string) (string, bool) {
 		return "", false
 	}
 	return "", false
+}
+
+func leadingPlusBuildLines(src string) []string {
+	var lines []string
+	for len(src) > 0 {
+		line := src
+		next := strings.IndexByte(src, '\n')
+		if next >= 0 {
+			line = src[:next]
+			src = src[next+1:]
+		} else {
+			src = ""
+		}
+		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		if strings.HasPrefix(line, "// +build ") {
+			lines = append(lines, strings.TrimSpace(strings.TrimPrefix(line, "// +build ")))
+			continue
+		}
+		if line == "" || strings.HasPrefix(line, "//") || strings.HasPrefix(line, "/*") {
+			continue
+		}
+		break
+	}
+	return lines
+}
+
+func evalPlusBuildLines(lines []string, targetOS string, targetArch string) bool {
+	for _, line := range lines {
+		if !evalPlusBuildLine(line, targetOS, targetArch) {
+			return false
+		}
+	}
+	return true
+}
+
+func evalPlusBuildLine(line string, targetOS string, targetArch string) bool {
+	options := strings.Fields(line)
+	if len(options) == 0 {
+		return false
+	}
+	for _, option := range options {
+		if evalPlusBuildOption(option, targetOS, targetArch) {
+			return true
+		}
+	}
+	return false
+}
+
+func evalPlusBuildOption(option string, targetOS string, targetArch string) bool {
+	terms := strings.Split(option, ",")
+	if len(terms) == 0 {
+		return false
+	}
+	for _, term := range terms {
+		if term == "" {
+			return false
+		}
+		negated := false
+		if strings.HasPrefix(term, "!") {
+			negated = true
+			term = strings.TrimPrefix(term, "!")
+			if term == "" {
+				return false
+			}
+		}
+		matches := goBuildTagMatches(term, targetOS, targetArch)
+		if negated {
+			matches = !matches
+		}
+		if !matches {
+			return false
+		}
+	}
+	return true
 }
 
 func evalGoBuildExpr(expr string, targetOS string, targetArch string) bool {

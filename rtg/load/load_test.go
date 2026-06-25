@@ -192,6 +192,60 @@ const Ignored = 1
 	}
 }
 
+func TestLoadEntriesFiltersDirectoryFilesByLegacyBuildConstraint(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "pkg/common.go", `package pkg
+
+const Common = 1
+`)
+	writeFile(t, root, "pkg/linux.go", `// +build linux,amd64
+
+package pkg
+
+const Linux = Common + 1
+`)
+	writeFile(t, root, "pkg/other.go", `// +build darwin windows
+
+package pkg
+
+const Other = Common + 2
+`)
+	writeFile(t, root, "pkg/notwin.go", `// +build !windows
+// +build amd64
+
+package pkg
+
+const NotWindows = Common + 3
+`)
+	writeFile(t, root, "pkg/ignored.go", `// +build ignore
+
+package pkg
+
+const Ignored = Common + 4
+`)
+
+	graph, err := LoadEntries([]string{filepath.Join(root, "pkg")}, Options{Target: "linux/amd64"})
+	if err != nil {
+		t.Fatalf("LoadEntries linux/amd64 failed: %v", err)
+	}
+	got := packageFileNames(graph.Packages[0])
+	want := []string{"common.go", "linux.go", "notwin.go"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("linux/amd64 files = %v, want %v", got, want)
+	}
+
+	graph, err = LoadEntries([]string{filepath.Join(root, "pkg")}, Options{Target: "windows/amd64"})
+	if err != nil {
+		t.Fatalf("LoadEntries windows/amd64 failed: %v", err)
+	}
+	got = packageFileNames(graph.Packages[0])
+	want = []string{"common.go", "other.go"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("windows/amd64 files = %v, want %v", got, want)
+	}
+}
+
 func TestLoadEntriesExplicitFilesIgnoreGoBuildConstraint(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/app\n")
