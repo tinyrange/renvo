@@ -41,9 +41,6 @@ func Value() int {
 	if graph.Packages[1].ImportPath != "example.com/app/pkg/answer" {
 		t.Fatalf("second import path = %q", graph.Packages[1].ImportPath)
 	}
-	if graph.Packages[0].ImportNames["example.com/app/pkg/answer"] != "answer" {
-		t.Fatalf("import local name = %q", graph.Packages[0].ImportNames["example.com/app/pkg/answer"])
-	}
 	if graph.Packages[0].Files[0].UnitPath != "cmd/app/main.go" {
 		t.Fatalf("main unit path = %q, want cmd/app/main.go", graph.Packages[0].Files[0].UnitPath)
 	}
@@ -148,9 +145,6 @@ func PrintInt(v int) int { return v }
 	}
 	if graph.Packages[1].ImportPath != "fmt" {
 		t.Fatalf("std import path = %q, want fmt", graph.Packages[1].ImportPath)
-	}
-	if graph.Packages[0].ImportNames["fmt"] != "fmt" {
-		t.Fatalf("std import local name = %q", graph.Packages[0].ImportNames["fmt"])
 	}
 }
 

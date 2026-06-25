@@ -416,10 +416,9 @@ func TestGraphRejectsUnresolvedImportedSelectors(t *testing.T) {
 	graph := &load.Graph{
 		Packages: []load.Package{
 			{
-				ImportPath:  "example.com/app",
-				Name:        "main",
-				Imports:     []string{"example.com/app/dep"},
-				ImportNames: map[string]string{"example.com/app/dep": "dep"},
+				ImportPath: "example.com/app",
+				Name:       "main",
+				Imports:    []string{"example.com/app/dep"},
 				Files: []load.File{
 					{
 						Path: "main.go",
@@ -469,10 +468,9 @@ func TestGraphIgnoresLocalShadowedImportSelector(t *testing.T) {
 	graph := &load.Graph{
 		Packages: []load.Package{
 			{
-				ImportPath:  "example.com/app",
-				Name:        "main",
-				Imports:     []string{"example.com/app/dep"},
-				ImportNames: map[string]string{"example.com/app/dep": "dep"},
+				ImportPath: "example.com/app",
+				Name:       "main",
+				Imports:    []string{"example.com/app/dep"},
 				Files: []load.File{
 					{
 						Path: "main.go",
@@ -617,10 +615,9 @@ func TestGraphAcceptsExportedImportedSelectors(t *testing.T) {
 	graph := &load.Graph{
 		Packages: []load.Package{
 			{
-				ImportPath:  "example.com/app",
-				Name:        "main",
-				Imports:     []string{"example.com/app/dep"},
-				ImportNames: map[string]string{"example.com/app/dep": "dep"},
+				ImportPath: "example.com/app",
+				Name:       "main",
+				Imports:    []string{"example.com/app/dep"},
 				Files: []load.File{
 					{
 						Path: "main.go",

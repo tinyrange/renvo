@@ -113,10 +113,9 @@ func main() {
 
 func TestPackageWithGraphRewritesImportedSelector(t *testing.T) {
 	mainPkg := load.Package{
-		ImportPath:  "example.com/app/cmd/app",
-		Name:        "main",
-		Imports:     []string{"example.com/app/pkg/answer"},
-		ImportNames: map[string]string{"example.com/app/pkg/answer": "answer"},
+		ImportPath: "example.com/app/cmd/app",
+		Name:       "main",
+		Imports:    []string{"example.com/app/pkg/answer"},
 		Files: []load.File{
 			{
 				Path: "main.go",
@@ -279,10 +278,9 @@ func Value() int { return 7 }
 
 func TestPackageWithGraphPreservesLocalImportNameShadow(t *testing.T) {
 	mainPkg := load.Package{
-		ImportPath:  "example.com/app/cmd/app",
-		Name:        "main",
-		Imports:     []string{"example.com/app/pkg/answer"},
-		ImportNames: map[string]string{"example.com/app/pkg/answer": "answer"},
+		ImportPath: "example.com/app/cmd/app",
+		Name:       "main",
+		Imports:    []string{"example.com/app/pkg/answer"},
 		Files: []load.File{
 			{
 				Path: "main.go",
@@ -473,10 +471,9 @@ func appMain() int {
 
 func TestPackageWithGraphRewritesStdSelector(t *testing.T) {
 	mainPkg := load.Package{
-		ImportPath:  "example.com/app",
-		Name:        "main",
-		Imports:     []string{"fmt"},
-		ImportNames: map[string]string{"fmt": "fmt"},
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Imports:    []string{"fmt"},
 		Files: []load.File{
 			{
 				Path: "main.go",
@@ -521,10 +518,9 @@ func PrintInt(v int) int { return v }
 
 func TestPackageWithGraphExportsGroupedDeclNames(t *testing.T) {
 	mainPkg := load.Package{
-		ImportPath:  "example.com/app",
-		Name:        "main",
-		Imports:     []string{"example.com/app/dep"},
-		ImportNames: map[string]string{"example.com/app/dep": "dep"},
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Imports:    []string{"example.com/app/dep"},
 		Files: []load.File{
 			{
 				Path: "main.go",

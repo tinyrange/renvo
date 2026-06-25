@@ -18,12 +18,11 @@ type File struct {
 }
 
 type Package struct {
-	ImportPath  string
-	Dir         string
-	Name        string
-	Files       []File
-	Imports     []string
-	ImportNames map[string]string
+	ImportPath string
+	Dir        string
+	Name       string
+	Files      []File
+	Imports    []string
 }
 
 type Graph struct {
@@ -139,7 +138,7 @@ func readPackage(module mod.Module, dir string, importPath string) (Package, err
 	if len(files) == 0 {
 		return Package{}, fmt.Errorf("%s: no Go source files", dir)
 	}
-	pkg := Package{Dir: dir, ImportPath: importPath, ImportNames: map[string]string{}}
+	pkg := Package{Dir: dir, ImportPath: importPath}
 	importSet := map[string]bool{}
 	for _, path := range files {
 		data, err := os.ReadFile(path)
@@ -157,9 +156,6 @@ func readPackage(module mod.Module, dir string, importPath string) (Package, err
 		}
 		for _, imp := range info.Imports {
 			importSet[imp.Path] = true
-			if imp.Alias != "." && imp.Alias != "_" {
-				pkg.ImportNames[imp.Path] = imp.Name
-			}
 		}
 		body := string(data[info.BodyStart:])
 		pkg.Files = append(pkg.Files, File{Path: path, UnitPath: unitFilePath(module, importPath, path), Source: data, Body: strings.TrimLeft(body, " \t\r\n")})

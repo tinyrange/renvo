@@ -8,10 +8,9 @@ import (
 
 func TestUnitsLowersWholePackageGraph(t *testing.T) {
 	mainPkg := load.Package{
-		ImportPath:  "example.com/app",
-		Name:        "main",
-		Imports:     []string{"example.com/app/answer"},
-		ImportNames: map[string]string{"example.com/app/answer": "answer"},
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Imports:    []string{"example.com/app/answer"},
 		Files: []load.File{
 			{
 				Path: "main.go",
