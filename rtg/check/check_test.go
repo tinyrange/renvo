@@ -102,6 +102,54 @@ func appMain() int { return alias.Value() }
 	}
 }
 
+func TestFileRejectsDuplicateImportNames(t *testing.T) {
+	file, err := parse.FileSource("imports.go", []byte(`package main
+
+import (
+	"example.com/one/fmt"
+	"fmt"
+	lib "example.com/lib/a"
+	lib "example.com/lib/b"
+)
+
+func appMain() int { return 0 }
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	err = File(file)
+	if err == nil {
+		t.Fatalf("File accepted duplicate import names")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"imports.go:5:2: duplicate import name: fmt",
+		"imports.go:7:6: duplicate import name: lib",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("missing diagnostic %q in:\n%s", want, msg)
+		}
+	}
+}
+
+func TestFileAcceptsDistinctImportAliases(t *testing.T) {
+	file, err := parse.FileSource("imports.go", []byte(`package main
+
+import (
+	fmt1 "example.com/one/fmt"
+	fmt2 "fmt"
+)
+
+func appMain() int { return 0 }
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	if diags := File(file); len(diags) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diags)
+	}
+}
+
 func TestFileRejectsUnsupportedBuiltins(t *testing.T) {
 	file, err := parse.FileSource("builtins.go", []byte(`package main
 

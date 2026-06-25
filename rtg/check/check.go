@@ -166,6 +166,7 @@ func File(file parse.File) Diagnostics {
 
 func importDiagnostics(file parse.File) Diagnostics {
 	var diags Diagnostics
+	names := map[string]scan.Token{}
 	for _, imp := range file.Imports {
 		if imp.Alias == "." {
 			diags = append(diags, diag(file, imp.Tok, "dot imports are not supported"))
@@ -173,8 +174,24 @@ func importDiagnostics(file parse.File) Diagnostics {
 		if imp.Alias == "_" {
 			diags = append(diags, diag(file, imp.Tok, "blank imports are not supported"))
 		}
+		localName := importLocalName(imp)
+		if localName == "" || localName == "." || localName == "_" {
+			continue
+		}
+		if _, ok := names[localName]; ok {
+			diags = append(diags, diag(file, imp.Tok, "duplicate import name: "+localName))
+			continue
+		}
+		names[localName] = imp.Tok
 	}
 	return diags
+}
+
+func importLocalName(imp parse.Import) string {
+	if imp.Alias != "" {
+		return imp.Alias
+	}
+	return load.PackageNameFromImportPath(imp.Path)
 }
 
 func startsGenericDecl(toks []scan.Token, i int, topFuncs map[int]bool) bool {
