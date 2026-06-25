@@ -1,6 +1,7 @@
 package check
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -46,7 +47,7 @@ func Graph(g *load.Graph) error {
 		for _, file := range pkg.Files {
 			parsed, err := parse.FileSource(file.Path, file.Source)
 			if err != nil {
-				diags = append(diags, Diagnostic{Path: file.Path, Line: 1, Column: 1, Message: err.Error()})
+				diags = append(diags, parseDiagnostic(file.Path, err))
 				continue
 			}
 			if parsed.PackageName != pkg.Name {
@@ -75,6 +76,19 @@ func Graph(g *load.Graph) error {
 		return diags
 	}
 	return nil
+}
+
+func parseDiagnostic(path string, err error) Diagnostic {
+	var parseErr parse.Error
+	if errors.As(err, &parseErr) {
+		return Diagnostic{
+			Path:    parseErr.Path,
+			Line:    parseErr.Line,
+			Column:  parseErr.Column,
+			Message: parseErr.Message,
+		}
+	}
+	return Diagnostic{Path: path, Line: 1, Column: 1, Message: err.Error()}
 }
 
 func declDiagnostics(file parse.File) Diagnostics {

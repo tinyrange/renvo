@@ -789,6 +789,46 @@ func Value() int { return 1 }
 	}
 }
 
+func TestGraphPreservesParseDiagnosticPositions(t *testing.T) {
+	graph := &load.Graph{
+		Packages: []load.Package{
+			{
+				ImportPath: "example.com/app",
+				Name:       "main",
+				Files: []load.File{
+					{
+						Path: "main.go",
+						Source: []byte(`package main
+
+bad := 1
+`),
+					},
+					{
+						Path:   "broken.go",
+						Source: []byte("package main\n\nfunc appMain() int { print(\"unterminated)\n"),
+					},
+				},
+			},
+		},
+	}
+	err := Graph(graph)
+	if err == nil {
+		t.Fatalf("Graph accepted parse errors")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"main.go:3:1: expected top-level declaration",
+		"broken.go:3:28: unterminated literal",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("missing diagnostic %q in:\n%s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "main.go:1:1:") || strings.Contains(msg, "broken.go:1:1:") {
+		t.Fatalf("parse diagnostic was wrapped at 1:1:\n%s", msg)
+	}
+}
+
 func messages(diags Diagnostics) []string {
 	var out []string
 	for _, diag := range diags {

@@ -2,9 +2,22 @@ package parse
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 
 	"j5.nz/rtg/rtg/scan"
 )
+
+type Error struct {
+	Path    string
+	Line    int
+	Column  int
+	Message string
+}
+
+func (e Error) Error() string {
+	return fmt.Sprintf("%s:%d:%d: %s", e.Path, e.Line, e.Column, e.Message)
+}
 
 type File struct {
 	Path           string
@@ -37,10 +50,10 @@ type Decl struct {
 func FileSource(path string, src []byte) (File, error) {
 	toks, err := scan.Tokens(src)
 	if err != nil {
-		return File{}, fmt.Errorf("%s: %w", path, err)
+		return File{}, scannerError(path, err)
 	}
 	if len(toks) < 3 || toks[0].Text != "package" || toks[1].Kind != scan.Ident {
-		return File{}, fmt.Errorf("%s: missing package declaration", path)
+		return File{}, Error{Path: path, Line: 1, Column: 1, Message: "missing package declaration"}
 	}
 	file := File{
 		Path:           path,
@@ -53,7 +66,7 @@ func FileSource(path string, src []byte) (File, error) {
 	for pos < len(toks) && toks[pos].Text == "import" {
 		next, err := parseImportDecl(&file, pos)
 		if err != nil {
-			return File{}, fmt.Errorf("%s: %w", path, err)
+			return File{}, err
 		}
 		pos = next
 	}
@@ -67,7 +80,7 @@ func FileSource(path string, src []byte) (File, error) {
 			}
 			continue
 		}
-		return File{}, fmt.Errorf("%s:%d:%d: expected top-level declaration", path, toks[pos].Line, toks[pos].Column)
+		return File{}, Error{Path: path, Line: toks[pos].Line, Column: toks[pos].Column, Message: "expected top-level declaration"}
 	}
 	return file, nil
 }
@@ -88,16 +101,16 @@ func parseImportDecl(file *File, pos int) (int, error) {
 			if toks[pos].Kind == scan.String {
 				path, err := scan.UnquoteString(toks[pos].Text)
 				if err != nil {
-					return pos, err
+					return pos, Error{Path: file.Path, Line: toks[pos].Line, Column: toks[pos].Column, Message: err.Error()}
 				}
 				file.Imports = append(file.Imports, Import{Path: path, Alias: alias, Tok: toks[pos]})
 				pos++
 				continue
 			}
-			return pos, fmt.Errorf("%d:%d: malformed import declaration", toks[pos].Line, toks[pos].Column)
+			return pos, Error{Path: file.Path, Line: toks[pos].Line, Column: toks[pos].Column, Message: "malformed import declaration"}
 		}
 		if pos >= len(toks) || toks[pos].Text != ")" {
-			return pos, fmt.Errorf("%d:%d: unterminated import block", toks[pos-1].Line, toks[pos-1].Column)
+			return pos, Error{Path: file.Path, Line: toks[pos-1].Line, Column: toks[pos-1].Column, Message: "unterminated import block"}
 		}
 		return pos + 1, nil
 	}
@@ -112,7 +125,7 @@ func parseImportDecl(file *File, pos int) (int, error) {
 		if toks[pos].Kind == scan.String {
 			path, err := scan.UnquoteString(toks[pos].Text)
 			if err != nil {
-				return pos, err
+				return pos, Error{Path: file.Path, Line: toks[pos].Line, Column: toks[pos].Column, Message: err.Error()}
 			}
 			file.Imports = append(file.Imports, Import{Path: path, Alias: alias, Tok: toks[pos]})
 			return pos + 1, nil
@@ -122,7 +135,36 @@ func parseImportDecl(file *File, pos int) (int, error) {
 		}
 		pos++
 	}
-	return pos, fmt.Errorf("%d:%d: malformed import declaration", toks[pos].Line, toks[pos].Column)
+	return pos, Error{Path: file.Path, Line: toks[pos].Line, Column: toks[pos].Column, Message: "malformed import declaration"}
+}
+
+func scannerError(path string, err error) Error {
+	line, column, message, ok := splitPositionMessage(err.Error())
+	if !ok {
+		return Error{Path: path, Line: 1, Column: 1, Message: err.Error()}
+	}
+	return Error{Path: path, Line: line, Column: column, Message: message}
+}
+
+func splitPositionMessage(message string) (int, int, string, bool) {
+	first := strings.IndexByte(message, ':')
+	if first < 0 {
+		return 0, 0, "", false
+	}
+	second := strings.IndexByte(message[first+1:], ':')
+	if second < 0 {
+		return 0, 0, "", false
+	}
+	second += first + 1
+	line, err := strconv.Atoi(message[:first])
+	if err != nil {
+		return 0, 0, "", false
+	}
+	column, err := strconv.Atoi(message[first+1 : second])
+	if err != nil {
+		return 0, 0, "", false
+	}
+	return line, column, strings.TrimSpace(message[second+1:]), true
 }
 
 func parseDecl(file *File, pos int) int {
