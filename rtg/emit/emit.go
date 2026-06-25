@@ -3,6 +3,7 @@ package emit
 import (
 	"bytes"
 	"sort"
+	"strconv"
 
 	"j5.nz/rtg/rtg/unit"
 )
@@ -101,14 +102,5 @@ func Source(u unit.Unit) []byte {
 }
 
 func quote(s string) string {
-	var out bytes.Buffer
-	out.WriteByte('"')
-	for i := 0; i < len(s); i++ {
-		if s[i] == '"' || s[i] == '\\' {
-			out.WriteByte('\\')
-		}
-		out.WriteByte(s[i])
-	}
-	out.WriteByte('"')
-	return out.String()
+	return strconv.Quote(s)
 }

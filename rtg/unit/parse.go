@@ -2,6 +2,7 @@ package unit
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"j5.nz/rtg/rtg/scan"
@@ -211,20 +212,11 @@ func hasRTGBuildConstraint(lines []string) bool {
 }
 
 func parseQuoted(s string) (string, error) {
-	if len(s) < 2 || s[0] != '"' || s[len(s)-1] != '"' {
+	value, err := strconv.Unquote(s)
+	if err != nil {
 		return "", fmt.Errorf("invalid quoted import %q", s)
 	}
-	var out []byte
-	for i := 1; i < len(s)-1; i++ {
-		if s[i] == '\\' {
-			i++
-			if i >= len(s)-1 {
-				return "", fmt.Errorf("invalid quoted escape")
-			}
-		}
-		out = append(out, s[i])
-	}
-	return string(out), nil
+	return value, nil
 }
 
 func parseNameArrow(s string) (Symbol, error) {

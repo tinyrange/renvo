@@ -300,6 +300,19 @@ package main
 	}
 }
 
+func TestParseSourceRejectsInvalidQuotedMetadata(t *testing.T) {
+	_, err := ParseSource("badquote.rtg.go", withRTGBuild(`// rtg:unit example.com/app
+package main
+// rtg:import "example.com/app/\q"
+`))
+	if err == nil {
+		t.Fatalf("ParseSource accepted invalid quoted import metadata")
+	}
+	if !strings.Contains(err.Error(), `invalid quoted import`) {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func withRTGBuild(src string) []byte {
 	return []byte("//go:build rtg\n\n" + src)
 }

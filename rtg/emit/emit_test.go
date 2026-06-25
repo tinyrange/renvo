@@ -44,6 +44,25 @@ func TestSourceEmitsHostGoSafeUnit(t *testing.T) {
 	}
 }
 
+func TestSourceEscapesImportMetadata(t *testing.T) {
+	u := unit.Unit{
+		ImportPath: "example.com/app/pkg/answer",
+		Package:    "answer",
+		Imports:    []string{"example.com/app/pkg/dep\\quoted\"line\nnext"},
+	}
+	src := Source(u)
+	if !strings.Contains(string(src), `// rtg:import "example.com/app/pkg/dep\\quoted\"line\nnext"`+"\n") {
+		t.Fatalf("emitted source did not escape import metadata:\n%s", string(src))
+	}
+	parsed, err := unit.ParseSource("escaped.rtg.go", src)
+	if err != nil {
+		t.Fatalf("ParseSource failed: %v", err)
+	}
+	if len(parsed.Imports) != 1 || parsed.Imports[0] != u.Imports[0] {
+		t.Fatalf("parsed imports = %#v, want %#v", parsed.Imports, u.Imports)
+	}
+}
+
 func TestSourceBuildTagIsIgnoredByHostGo(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/hostsafe\n"), 0644); err != nil {
