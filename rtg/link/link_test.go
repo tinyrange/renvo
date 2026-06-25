@@ -10,8 +10,12 @@ import (
 func TestBuildResolvesReferences(t *testing.T) {
 	mainUnit := unit.Unit{
 		ImportPath: "example.com/app/main",
+		Package:    "main",
 		References: []unit.Symbol{
 			{ImportPath: "example.com/app/pkg/answer", Name: "Value", UnitName: "rtg_example_com_app_pkg_answer_Value"},
+		},
+		Decls: []unit.Decl{
+			{Kind: "func", Name: "appMain", UnitName: "rtg_example_com_app_main_appMain", Body: "func rtg_example_com_app_main_appMain() int { return rtg_example_com_app_pkg_answer_Value() }\n"},
 		},
 	}
 	depUnit := unit.Unit{
@@ -32,14 +36,59 @@ func TestBuildResolvesReferences(t *testing.T) {
 func TestBuildRejectsUnresolvedReference(t *testing.T) {
 	_, err := Build([]unit.Unit{{
 		ImportPath: "example.com/app/main",
+		Package:    "main",
 		References: []unit.Symbol{
 			{ImportPath: "example.com/app/pkg/missing", Name: "Value", UnitName: "rtg_example_com_app_pkg_missing_Value"},
+		},
+		Decls: []unit.Decl{
+			{Kind: "func", Name: "appMain", UnitName: "rtg_example_com_app_main_appMain", Body: "func rtg_example_com_app_main_appMain() int { return rtg_example_com_app_pkg_missing_Value() }\n"},
 		},
 	}})
 	if err == nil {
 		t.Fatalf("Build succeeded with unresolved reference")
 	}
 	if !strings.Contains(err.Error(), "unresolved reference") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestBuildRejectsMissingEntrypoint(t *testing.T) {
+	_, err := Build([]unit.Unit{{
+		ImportPath: "example.com/app/main",
+		Package:    "main",
+		Decls: []unit.Decl{
+			{Kind: "func", Name: "main", UnitName: "rtg_example_com_app_main_main", Body: "func rtg_example_com_app_main_main() {}\n"},
+		},
+	}})
+	if err == nil {
+		t.Fatalf("Build succeeded without appMain")
+	}
+	if !strings.Contains(err.Error(), "missing entrypoint") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestBuildRejectsMultipleEntrypoints(t *testing.T) {
+	_, err := Build([]unit.Unit{
+		{
+			ImportPath: "example.com/app/cmd/one",
+			Package:    "main",
+			Decls: []unit.Decl{
+				{Kind: "func", Name: "appMain", UnitName: "rtg_example_com_app_cmd_one_appMain", Body: "func rtg_example_com_app_cmd_one_appMain() int { return 0 }\n"},
+			},
+		},
+		{
+			ImportPath: "example.com/app/cmd/two",
+			Package:    "main",
+			Decls: []unit.Decl{
+				{Kind: "func", Name: "appMain", UnitName: "rtg_example_com_app_cmd_two_appMain", Body: "func rtg_example_com_app_cmd_two_appMain() int { return 0 }\n"},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatalf("Build succeeded with multiple appMain entrypoints")
+	}
+	if !strings.Contains(err.Error(), "multiple entrypoints") {
 		t.Fatalf("error = %q", err)
 	}
 }

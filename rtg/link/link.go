@@ -35,11 +35,35 @@ func Build(units []unit.Unit) (Plan, error) {
 			}
 		}
 	}
+	if err := validateEntrypoint(units); err != nil {
+		return Plan{}, err
+	}
 	ordered := append([]unit.Unit(nil), units...)
 	sort.Slice(ordered, func(i int, j int) bool {
 		return ordered[i].ImportPath < ordered[j].ImportPath
 	})
 	return Plan{Units: ordered}, nil
+}
+
+func validateEntrypoint(units []unit.Unit) error {
+	var found []string
+	for _, u := range units {
+		if u.Package != "main" {
+			continue
+		}
+		for _, decl := range u.Decls {
+			if decl.Name == "appMain" && decl.UnitName != "" {
+				found = append(found, u.ImportPath)
+			}
+		}
+	}
+	if len(found) == 0 {
+		return fmt.Errorf("missing entrypoint: package main must declare appMain")
+	}
+	if len(found) > 1 {
+		return fmt.Errorf("multiple entrypoints: %s", strings.Join(found, ", "))
+	}
+	return nil
 }
 
 func symbolKey(importPath string, name string) string {

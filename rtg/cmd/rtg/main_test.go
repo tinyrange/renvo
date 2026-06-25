@@ -249,6 +249,22 @@ func appMain() int { return 0 }
 	}
 }
 
+func TestRunBuildRequiresAppMainEntrypoint(t *testing.T) {
+	root := t.TempDir()
+	writeCLIFile(t, root, "go.mod", "module example.com/app\n")
+	writeCLIFile(t, root, "cmd/app/main.go", `package main
+
+func main() {}
+`)
+	err := run(config{output: filepath.Join(root, "app"), inputs: []string{filepath.Join(root, "cmd", "app")}})
+	if err == nil {
+		t.Fatalf("run build succeeded without appMain")
+	}
+	if !strings.Contains(err.Error(), "missing entrypoint") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestRunLinkValidatesUnitReferences(t *testing.T) {
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
 		t.Skipf("linux/amd64 executable smoke requires linux/amd64 host, got %s/%s", runtime.GOOS, runtime.GOARCH)
