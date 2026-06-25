@@ -291,6 +291,32 @@ func main() {
 	runFrontendFixtureOutput(t, fixture, []byte("PASS\n"))
 }
 
+func TestStdStringsFrontendMatchesHostGo(t *testing.T) {
+	fixture := t.TempDir()
+	writeFixtureFile(t, fixture, "go.mod", "module example.com/stdstrings\n")
+	writeFixtureFile(t, fixture, "cmd/app/main.go", `package main
+
+import "strings"
+
+func main() {
+	value := "prefix-body-suffix"
+	ok := strings.HasPrefix(value, "prefix")
+	ok = ok && strings.HasSuffix(value, "suffix")
+	ok = ok && strings.Contains(value, "body")
+	ok = ok && !strings.Contains(value, "missing")
+	ok = ok && strings.Contains(value, "")
+	ok = ok && strings.IndexByte(value, '-') == 6
+	ok = ok && strings.IndexByte(value, 'z') == -1
+	if ok {
+		print("PASS\n")
+		return
+	}
+	print("FAIL\n")
+}
+`)
+	runFrontendFixtureMatchesHostGo(t, fixture)
+}
+
 func TestTopLevelNameListsFrontendMatchesHostGo(t *testing.T) {
 	fixture := t.TempDir()
 	writeFixtureFile(t, fixture, "go.mod", "module example.com/namelists\n")

@@ -281,6 +281,25 @@ func appMain() int {
 	}
 }
 
+func TestFileAcceptsStringIndexAndSliceExpressions(t *testing.T) {
+	file, err := parse.FileSource("strings.go", []byte(`package main
+
+func appMain() int {
+	s := "prefix-body"
+	if s[0] == 'p' && s[0:6] == "prefix" {
+		return 0
+	}
+	return 1
+}
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	if diags := File(file); len(diags) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diags)
+	}
+}
+
 func TestFileAcceptsOrdinaryMainEntrypoint(t *testing.T) {
 	file, err := parse.FileSource("main.go", []byte(`package main
 

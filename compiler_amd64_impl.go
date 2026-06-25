@@ -564,6 +564,9 @@ func rtgAmd64EmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) boo
 		rtgAsmMovRdxImm(a, msgLen)
 		return true
 	}
+	if e.kind == rtgExprSlice {
+		return rtgEmitStringSliceValueRegs(g, ep, idx)
+	}
 	if e.kind == rtgExprIdent {
 		localIndex := rtgFindLocalIndex(g, e.nameStart, e.nameEnd)
 		if localIndex >= 0 {

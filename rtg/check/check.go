@@ -526,8 +526,19 @@ func precededByTypeContext(toks []scan.Token, pos int) bool {
 		return true
 	}
 	if prev.Kind == scan.Ident && pos >= 2 {
+		if isKeyword(prev.Text) {
+			return false
+		}
 		beforeName := toks[pos-2].Text
 		return beforeName == "var" || beforeName == "type" || beforeName == "(" || beforeName == "{" || beforeName == ","
+	}
+	return false
+}
+
+func isKeyword(text string) bool {
+	switch text {
+	case "break", "case", "chan", "const", "continue", "default", "defer", "else", "fallthrough", "for", "func", "go", "goto", "if", "import", "interface", "map", "package", "range", "return", "select", "struct", "switch", "type", "var":
+		return true
 	}
 	return false
 }

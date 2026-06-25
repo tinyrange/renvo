@@ -6856,6 +6856,60 @@ func rtgEmitSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	}
 	return false
 }
+func rtgEmitStringSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	meta := g.meta
+	a := &g.asm
+	e := &ep.exprs[idx]
+	if e.kind != rtgExprSlice {
+		return false
+	}
+	baseType := rtgInferParsedExprType(g, ep, e.left)
+	if !rtgTypeIsString(meta, baseType) {
+		return false
+	}
+	if !rtgEmitStringValueRegs(g, ep, e.left) {
+		return false
+	}
+	if e.firstArg >= 0 {
+		baseOff := rtgAddTypedLocal(g, 0, 0, rtgTypeString)
+		lowOff := rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
+		highOff := rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
+		rtgAsmStoreRaxStack(a, baseOff)
+		rtgAsmMovRaxRdx(a)
+		rtgAsmStoreRaxStack(a, baseOff-8)
+		if !rtgEmitIntExpr(g, ep, e.firstArg) {
+			return false
+		}
+		rtgAsmStoreRaxStack(a, lowOff)
+		if e.right >= 0 {
+			if !rtgEmitIntExpr(g, ep, e.right) {
+				return false
+			}
+			rtgAsmStoreRaxStack(a, highOff)
+		} else {
+			rtgAsmLoadRaxStack(a, baseOff-8)
+			rtgAsmStoreRaxStack(a, highOff)
+		}
+		rtgAsmLoadRaxStack(a, highOff)
+		rtgAsmLoadRcxStack(a, lowOff)
+		rtgAsmSubRaxRcx(a)
+		rtgAsmPushRax(a)
+		rtgAsmLoadRaxStack(a, baseOff)
+		rtgAsmLoadRcxStack(a, lowOff)
+		rtgAsmAddRaxRcx(a)
+		rtgAsmPopRdx(a)
+		return true
+	}
+	if e.right >= 0 {
+		rtgAsmPushRax(a)
+		if !rtgEmitIntExpr(g, ep, e.right) {
+			return false
+		}
+		rtgAsmMovRdxRax(a)
+		rtgAsmPopRax(a)
+	}
+	return true
+}
 func rtgEmitSliceLiteralRegs(g *rtgLinearGen, ep *rtgExprParse, idx int, sliceType int) bool {
 	a := &g.asm
 	e := &ep.exprs[idx]
