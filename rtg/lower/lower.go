@@ -2,7 +2,6 @@ package lower
 
 import (
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 
@@ -1633,11 +1632,11 @@ func collectParameterListLocals(toks []scan.Token, start int, end int, topNames 
 			continue
 		}
 		if i+1 < end && isTypeStart(toks[i+1]) {
-			addLocalName(names, toks[i].Text, 0, math.MaxInt)
+			addLocalName(names, toks[i].Text, 0, maxSourcePosition())
 			continue
 		}
 		if i+2 < end && toks[i+1].Text == "," && toks[i+2].Kind == scan.Ident && isTypeStartAfterName(toks, i+2, end) {
-			addLocalName(names, toks[i].Text, 0, math.MaxInt)
+			addLocalName(names, toks[i].Text, 0, maxSourcePosition())
 		}
 	}
 }
@@ -1712,6 +1711,10 @@ func localScopeEnd(toks []scan.Token, body int, pos int, fallback int) int {
 
 func addLocalName(names map[string][]localRange, name string, start int, end int) {
 	names[name] = append(names[name], localRange{start: start, end: end})
+}
+
+func maxSourcePosition() int {
+	return int(^uint(0) >> 1)
 }
 
 func tokenIndexAt(toks []scan.Token, start int) int {
