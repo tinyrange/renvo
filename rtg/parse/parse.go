@@ -208,18 +208,45 @@ func parseDecl(file *File, pos int) int {
 			file.Decls = append(file.Decls, decl)
 			return next
 		}
-		if namePos < len(toks) && toks[namePos].Kind == scan.Ident {
+		next := findNextTopLevel(toks, pos+1)
+		if kind == "var" || kind == "const" {
+			decl.Names, decl.NameToks = singleValueDeclNames(toks, namePos, next)
+			if len(decl.Names) > 0 {
+				decl.Name = decl.Names[0]
+				decl.NameTok = decl.NameToks[0]
+			}
+		} else if namePos < len(toks) && toks[namePos].Kind == scan.Ident {
 			decl.Name = toks[namePos].Text
 			decl.Names = []string{decl.Name}
 			decl.NameTok = toks[namePos]
 			decl.NameToks = []scan.Token{decl.NameTok}
 		}
-		next := findNextTopLevel(toks, pos+1)
 		decl.End = declEnd(file, next)
 		file.Decls = append(file.Decls, decl)
 		return next
 	}
 	return pos + 1
+}
+
+func singleValueDeclNames(toks []scan.Token, start int, end int) ([]string, []scan.Token) {
+	var names []string
+	var nameToks []scan.Token
+	expectName := true
+	for i := start; i < end && i < len(toks); i++ {
+		tok := toks[i]
+		if tok.Kind == scan.Ident && expectName {
+			names = append(names, tok.Text)
+			nameToks = append(nameToks, tok)
+			expectName = false
+			continue
+		}
+		if tok.Text == "," && len(names) > 0 {
+			expectName = true
+			continue
+		}
+		break
+	}
+	return names, nameToks
 }
 
 func groupedDeclNames(toks []scan.Token, open int, close int) ([]string, []scan.Token) {

@@ -68,6 +68,46 @@ func A() int { return answer }
 	}
 }
 
+func TestPackageLowersTopLevelNameLists(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app/pkg",
+		Name:       "pkg",
+		Files: []load.File{
+			{
+				Path: "names.go",
+				Source: []byte(`package pkg
+
+const A, B = 1, 2
+var C, D int
+func Use() int { return A + B + C + D }
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	if len(u.Exports) != 5 {
+		t.Fatalf("exports = %#v, want A, B, C, D, Use", u.Exports)
+	}
+	if !strings.Contains(u.Decls[0].Body, "const rtg_example_com_app_pkg_A, rtg_example_com_app_pkg_B = 1, 2") {
+		t.Fatalf("const list was not rewritten: %q", u.Decls[0].Body)
+	}
+	if u.Decls[0].Name != "A, B" || u.Decls[0].UnitName != "" {
+		t.Fatalf("const list metadata = %#v", u.Decls[0])
+	}
+	if !strings.Contains(u.Decls[1].Body, "var rtg_example_com_app_pkg_C, rtg_example_com_app_pkg_D int") {
+		t.Fatalf("var list was not rewritten: %q", u.Decls[1].Body)
+	}
+	if u.Decls[1].Name != "C, D" || u.Decls[1].UnitName != "" {
+		t.Fatalf("var list metadata = %#v", u.Decls[1])
+	}
+	if !strings.Contains(u.Decls[2].Body, "return rtg_example_com_app_pkg_A + rtg_example_com_app_pkg_B + rtg_example_com_app_pkg_C + rtg_example_com_app_pkg_D") {
+		t.Fatalf("function body did not rewrite all names: %q", u.Decls[2].Body)
+	}
+}
+
 func TestSymbolNameIsStableIdentifier(t *testing.T) {
 	got := SymbolName("example.com/team/app-pkg", "Value")
 	want := "rtg_example_com_team_app_pkg_Value"

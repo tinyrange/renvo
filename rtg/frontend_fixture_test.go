@@ -195,6 +195,35 @@ func main() {
 	runFrontendFixtureMatchesHostGo(t, fixture)
 }
 
+func TestTopLevelNameListsFrontendMatchesHostGo(t *testing.T) {
+	fixture := t.TempDir()
+	writeFixtureFile(t, fixture, "go.mod", "module example.com/namelists\n")
+	writeFixtureFile(t, fixture, "cmd/app/main.go", `package main
+
+import "example.com/namelists/pkg/dep"
+
+func main() {
+	dep.C = 3
+	dep.D = 4
+	if dep.Sum() == 10 {
+		print("PASS\n")
+		return
+	}
+	print("FAIL\n")
+}
+`)
+	writeFixtureFile(t, fixture, "pkg/dep/dep.go", `package dep
+
+const A, B = 1, 2
+var C, D int
+
+func Sum() int {
+	return A + B + C + D
+}
+`)
+	runFrontendFixtureMatchesHostGo(t, fixture)
+}
+
 func TestFrontendUnitsUseRequestedTargetFiles(t *testing.T) {
 	fixture := t.TempDir()
 	writeFixtureFile(t, fixture, "go.mod", "module example.com/targetfiles\n")

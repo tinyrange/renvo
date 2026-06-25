@@ -3427,6 +3427,10 @@ func rtgParseTopDeclEntry(m *rtgMeta, p *rtgProgram, kind int, start int, end in
 		return
 	}
 	name := &p.toks[start]
+	if kind == rtgTokVar {
+		rtgParseVarDeclEntry(m, p, start, end)
+		return
+	}
 	if kind == rtgTokType {
 		typeStart := start + 1
 		if rtgTokCharIs(p, typeStart, '=') {
@@ -3476,6 +3480,64 @@ func rtgParseTopDeclEntry(m *rtgMeta, p *rtgProgram, kind int, start int, end in
 		typ = rtgInferTopLiteralType(m, p, initStart, initEnd)
 	}
 	rtgMetaAppendGlobal(m, rtgSymbolInfo{nameStart: name.start, nameEnd: name.end, kind: kind, typ: typ, initStart: initStart, initEnd: initEnd})
+}
+
+func rtgParseVarDeclEntry(m *rtgMeta, p *rtgProgram, start int, end int) {
+	eq := rtgFindConstSpecEqual(p, start, end)
+	headEnd := end
+	if eq > start {
+		headEnd = eq
+	}
+	var names []int
+	k := start
+	for k < headEnd {
+		if !rtgTokIsKind(p, k, rtgTokIdent) {
+			break
+		}
+		names = append(names, k)
+		k++
+		if rtgTokCharIs(p, k, ',') {
+			k++
+			continue
+		}
+		break
+	}
+	if len(names) == 0 {
+		rtgMetaError(m, rtgDiagMetaTopDecl)
+		return
+	}
+	typ := 0
+	if k < headEnd {
+		typeResult := rtgParseType(m, p, k, headEnd)
+		typ = typeResult.typ
+	}
+	var values []int
+	if eq > start {
+		values = rtgSplitTopLevelComma(p, eq+1, end, values)
+	}
+	valueCount := len(values) / 2
+	if valueCount != 0 && valueCount != len(names) {
+		rtgMetaError(m, rtgDiagMetaTopDecl)
+		return
+	}
+	for i := 0; i < len(names); i++ {
+		nameTok := names[i]
+		name := &p.toks[nameTok]
+		if rtgBytesEqualText(p.src, name.start, name.end, "_") {
+			continue
+		}
+		initStart := end
+		initEnd := end
+		symType := typ
+		if valueCount != 0 {
+			initStart = values[i*2]
+			initEnd = values[i*2+1]
+			if symType == 0 {
+				symType = rtgInferTopLiteralType(m, p, initStart, initEnd)
+			}
+		}
+		rtgMetaAppendGlobal(m, rtgSymbolInfo{nameStart: name.start, nameEnd: name.end, kind: rtgTokVar, typ: symType, initStart: initStart, initEnd: initEnd})
+	}
 }
 
 func rtgInferTopLiteralType(m *rtgMeta, p *rtgProgram, start int, end int) int {

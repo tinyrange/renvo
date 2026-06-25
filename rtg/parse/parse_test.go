@@ -116,6 +116,34 @@ type (
 	}
 }
 
+func TestFileSourceRecordsSingleDeclNameLists(t *testing.T) {
+	file, err := FileSource("names.go", []byte(`package pkg
+
+const A, B = 1, 2
+var C, D int
+var E = A
+type Box struct { value int }
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	if len(file.Decls) != 4 {
+		t.Fatalf("decls = %#v, want 4", file.Decls)
+	}
+	if !sameStrings(file.Decls[0].Names, []string{"A", "B"}) {
+		t.Fatalf("const names = %#v", file.Decls[0].Names)
+	}
+	if !sameStrings(file.Decls[1].Names, []string{"C", "D"}) {
+		t.Fatalf("var names = %#v", file.Decls[1].Names)
+	}
+	if !sameStrings(file.Decls[2].Names, []string{"E"}) {
+		t.Fatalf("single var names = %#v", file.Decls[2].Names)
+	}
+	if !sameStrings(file.Decls[3].Names, []string{"Box"}) {
+		t.Fatalf("type names = %#v", file.Decls[3].Names)
+	}
+}
+
 func sameStrings(got []string, want []string) bool {
 	if len(got) != len(want) {
 		return false

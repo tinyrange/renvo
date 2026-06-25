@@ -81,8 +81,8 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 			u.Decls = append(u.Decls, unit.Decl{
 				Path:     unitPathForDecl(files, parsed.Path),
 				Kind:     decl.Kind,
-				Name:     decl.Name,
-				UnitName: topNames[decl.Name],
+				Name:     unitDeclName(decl),
+				UnitName: unitDeclSymbol(decl, topNames),
 				Body:     body,
 			})
 		}
@@ -97,6 +97,25 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 		return u.References[i].ImportPath < u.References[j].ImportPath
 	})
 	return u, nil
+}
+
+func unitDeclName(decl parse.Decl) string {
+	names := declNames(decl)
+	if len(names) == 1 {
+		return names[0]
+	}
+	if decl.Kind == "func" {
+		return decl.Name
+	}
+	return strings.Join(names, ", ")
+}
+
+func unitDeclSymbol(decl parse.Decl, topNames map[string]string) string {
+	names := declNames(decl)
+	if len(names) != 1 {
+		return ""
+	}
+	return topNames[names[0]]
 }
 
 func hasOrdinaryMain(files []parse.File) bool {
