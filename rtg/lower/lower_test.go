@@ -899,7 +899,7 @@ func appMain() int {
 	}
 }
 
-func TestPackageDoesNotNormalizeClassicForClauseCallArguments(t *testing.T) {
+func TestPackageNormalizesClassicForInitCallArguments(t *testing.T) {
 	pkg := load.Package{
 		ImportPath: "example.com/app",
 		Name:       "main",
@@ -926,11 +926,51 @@ func appMain() int {
 		t.Fatalf("Package failed: %v", err)
 	}
 	body := u.Decls[2].Body
-	if strings.Contains(body, "_tmp_") {
-		t.Fatalf("classic for clause was normalized unsafely: %q", body)
+	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_0 := rtg_example_com_app_first()") {
+		t.Fatalf("classic for init call was not lifted before loop: %q", body)
 	}
-	if !strings.Contains(body, "for i := rtg_example_com_app_next(rtg_example_com_app_first()); i < 3; i = rtg_example_com_app_next(rtg_example_com_app_first()) {") {
-		t.Fatalf("classic for clause shape changed unexpectedly: %q", body)
+	if !strings.Contains(body, "for i := rtg_example_com_app_next(rtg_example_com_app_appMain_tmp_0); i < 3; i = rtg_example_com_app_next(rtg_example_com_app_first()) {") {
+		t.Fatalf("classic for init did not use lifted temp while preserving post clause: %q", body)
+	}
+	if strings.Contains(body, "i = rtg_example_com_app_next(rtg_example_com_app_appMain_tmp_") {
+		t.Fatalf("classic for post clause was normalized unsafely: %q", body)
+	}
+}
+
+func TestPackageDoesNotNormalizeClassicForConditionCallArguments(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+func first() int { return 1 }
+func second() int { return 2 }
+func join(a int, b int) int { return a*10 + b }
+func appMain() int {
+	total := 0
+	for i := 0; join(first(), second()) == 12; i = i + 1 {
+		total = total + i
+		break
+	}
+	return total
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	body := u.Decls[3].Body
+	if strings.Contains(body, "_tmp_") {
+		t.Fatalf("classic for condition was normalized unsafely: %q", body)
+	}
+	if !strings.Contains(body, "for i := 0; rtg_example_com_app_join(rtg_example_com_app_first(), rtg_example_com_app_second()) == 12; i = i + 1 {") {
+		t.Fatalf("classic for condition shape changed unexpectedly: %q", body)
 	}
 }
 

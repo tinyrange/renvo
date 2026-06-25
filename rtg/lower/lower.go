@@ -356,9 +356,16 @@ func normalizationStatement(toks []scan.Token, pos int) (expressionStatement, bo
 			return expressionStatement{}, false
 		}
 		if expressionContainsTopLevelSemicolon(toks, exprStart, exprEnd) {
-			return expressionStatement{}, false
+			assign, semi := classicForInitAssignment(toks, exprStart, exprEnd)
+			if assign < 0 || semi <= assign+1 {
+				return expressionStatement{}, false
+			}
+			return expressionStatement{token: pos, exprStart: assign + 1, exprEnd: semi}, true
 		}
 		return expressionStatement{token: pos, exprStart: exprStart, exprEnd: exprEnd, kind: "for-condition", openBrace: exprEnd}, true
+	}
+	if isInsideClassicForHeader(toks, pos) {
+		return expressionStatement{}, false
 	}
 	if startsCallStatement(toks, pos) {
 		exprEnd := lineExpressionEnd(toks, pos)
@@ -494,6 +501,39 @@ func isForPostClauseAssignment(toks []scan.Token, pos int) bool {
 		}
 	}
 	return false
+}
+
+func isInsideClassicForHeader(toks []scan.Token, pos int) bool {
+	for i := pos - 1; i >= 0 && toks[i].Line == toks[pos].Line; i-- {
+		if toks[i].Text == "{" || toks[i].Text == "}" {
+			return false
+		}
+		if toks[i].Text != "for" {
+			continue
+		}
+		exprEnd := conditionExpressionEnd(toks, i)
+		return pos < exprEnd && expressionContainsTopLevelSemicolon(toks, i+1, exprEnd)
+	}
+	return false
+}
+
+func classicForInitAssignment(toks []scan.Token, start int, end int) (int, int) {
+	paren := 0
+	brack := 0
+	brace := 0
+	assign := -1
+	for i := start; i < end; i++ {
+		if paren == 0 && brack == 0 && brace == 0 {
+			if toks[i].Text == ";" {
+				return assign, i
+			}
+			if assign < 0 && isAssignmentOperator(toks[i].Text) {
+				assign = i
+			}
+		}
+		updateExpressionDepth(toks[i].Text, &paren, &brack, &brace)
+	}
+	return -1, -1
 }
 
 func startsCallStatement(toks []scan.Token, pos int) bool {

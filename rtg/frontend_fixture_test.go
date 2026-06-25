@@ -151,6 +151,33 @@ func Emit() int {
 	runFrontendFixtureMatchesHostGo(t, fixture)
 }
 
+func TestClassicForInitNestedCallArgumentFrontendMatchesHostGo(t *testing.T) {
+	fixture := t.TempDir()
+	writeFixtureFile(t, fixture, "go.mod", "module example.com/forinit\n")
+	writeFixtureFile(t, fixture, "cmd/app/main.go", `package main
+
+import "example.com/forinit/pkg/dep"
+
+func main() {
+	total := 0
+	for i := dep.Next(dep.First()); i < 4; i = i + 1 {
+		total = total + i
+	}
+	if total == 5 {
+		print("PASS\n")
+		return
+	}
+	print("FAIL\n")
+}
+`)
+	writeFixtureFile(t, fixture, "pkg/dep/dep.go", `package dep
+
+func First() int { return 1 }
+func Next(v int) int { return v + 1 }
+`)
+	runFrontendFixtureMatchesHostGo(t, fixture)
+}
+
 func TestStdFmtPrintlnFrontendMatchesHostGo(t *testing.T) {
 	fixture := t.TempDir()
 	writeFixtureFile(t, fixture, "go.mod", "module example.com/stdprint\n")
