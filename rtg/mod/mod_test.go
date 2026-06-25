@@ -51,6 +51,76 @@ replace (
 	}
 }
 
+func TestParseFileRequires(t *testing.T) {
+	module, err := ParseFile(`module example.com/app
+
+require example.com/lib v1.2.3
+
+require (
+	example.com/one v0.1.0
+	example.com/two v2.0.0
+)
+`)
+	if err != nil {
+		t.Fatalf("ParseFile failed: %v", err)
+	}
+	want := []Require{
+		{Path: "example.com/lib", Version: "v1.2.3"},
+		{Path: "example.com/one", Version: "v0.1.0"},
+		{Path: "example.com/two", Version: "v2.0.0"},
+	}
+	if len(module.Requires) != len(want) {
+		t.Fatalf("requires = %#v, want %#v", module.Requires, want)
+	}
+	for i := range want {
+		if module.Requires[i] != want[i] {
+			t.Fatalf("require %d = %#v, want %#v", i, module.Requires[i], want[i])
+		}
+	}
+}
+
+func TestParseFileRejectsMalformedRequires(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+	}{
+		{name: "line", data: `module example.com/app
+
+require example.com/lib
+`},
+		{name: "block", data: `module example.com/app
+
+require (
+	example.com/lib
+)
+`},
+		{name: "too many fields", data: `module example.com/app
+
+require example.com/lib v1.0.0 extra
+`},
+		{name: "bad block opener", data: `module example.com/app
+
+require ( extra
+`},
+		{name: "unterminated block", data: `module example.com/app
+
+require (
+	example.com/lib v1.0.0
+`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseFile(tt.data)
+			if err == nil {
+				t.Fatalf("ParseFile accepted malformed require %s", tt.name)
+			}
+			if err.Error() != "malformed require directive" {
+				t.Fatalf("error = %q", err)
+			}
+		})
+	}
+}
+
 func TestParseFileRejectsMalformedReplaces(t *testing.T) {
 	tests := []struct {
 		name string
@@ -69,6 +139,15 @@ replace (
 		{name: "missing target", data: `module example.com/app
 
 replace example.com/lib =>
+`},
+		{name: "bad block opener", data: `module example.com/app
+
+replace ( extra
+`},
+		{name: "unterminated block", data: `module example.com/app
+
+replace (
+	example.com/lib => ../lib
 `},
 	}
 	for _, tt := range tests {

@@ -203,6 +203,25 @@ func appMain() int { return pkg.Value() }
 	}
 }
 
+func TestLoadEntriesRejectsRequiredExternalModuleImports(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n\nrequire example.com/lib v1.2.3\n")
+	writeFile(t, root, "main.go", `package main
+
+import "example.com/lib/pkg"
+
+func appMain() int { return pkg.Value() }
+`)
+
+	_, err := LoadEntries([]string{root}, Options{})
+	if err == nil {
+		t.Fatalf("LoadEntries succeeded with required external module")
+	}
+	if got := err.Error(); got == "" || !containsAll(got, []string{"required module", "example.com/lib", "external module fetching is not supported"}) {
+		t.Fatalf("error = %q", got)
+	}
+}
+
 func TestLoadEntriesRejectsMalformedReplaceDirective(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/app\n\nreplace example.com/lib ../lib\n")

@@ -319,6 +319,9 @@ func resolveImport(module mod.Module, opts Options, imp string) (resolvedImport,
 	if next, ok, err := resolveReplacedImport(module, imp); ok || err != nil {
 		return next, ok, err
 	}
+	if req, ok := requiredModuleForImport(module, imp); ok {
+		return resolvedImport{}, false, fmt.Errorf("import %q uses required module %q; external module fetching is not supported", imp, req.Path)
+	}
 	stdDir := filepath.Join(opts.StdRoot, filepath.FromSlash(imp))
 	if info, err := os.Stat(stdDir); err == nil && info.IsDir() {
 		return resolvedImport{Dir: stdDir, ImportPath: imp}, true, nil
@@ -343,6 +346,15 @@ func resolveReplacedImport(module mod.Module, imp string) (resolvedImport, bool,
 		return resolvedImport{Dir: filepath.Join(root, filepath.FromSlash(suffix)), ImportPath: imp}, true, nil
 	}
 	return resolvedImport{}, false, nil
+}
+
+func requiredModuleForImport(module mod.Module, imp string) (mod.Require, bool) {
+	for _, req := range module.Requires {
+		if imp == req.Path || strings.HasPrefix(imp, req.Path+"/") {
+			return req, true
+		}
+	}
+	return mod.Require{}, false
 }
 
 func isLocalPath(path string) bool {
