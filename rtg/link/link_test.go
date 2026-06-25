@@ -25,6 +25,9 @@ func TestBuildResolvesReferences(t *testing.T) {
 		Exports: []unit.Symbol{
 			{ImportPath: "example.com/app/pkg/answer", Name: "Value", UnitName: "rtg_example_com_app_pkg_answer_Value"},
 		},
+		Decls: []unit.Decl{
+			{Kind: "func", Name: "Value", UnitName: "rtg_example_com_app_pkg_answer_Value", Body: "func rtg_example_com_app_pkg_answer_Value() int { return 7 }\n"},
+		},
 	}
 	plan, err := Build([]unit.Unit{mainUnit, depUnit})
 	if err != nil {
@@ -231,6 +234,45 @@ func TestBuildRejectsExportFromDifferentUnit(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "example.com/app/dep: export Value belongs to example.com/app/other") {
 		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestBuildRejectsExportWithoutDeclaration(t *testing.T) {
+	_, err := Build([]unit.Unit{{
+		ImportPath: "example.com/app/dep",
+		Package:    "dep",
+		Exports: []unit.Symbol{
+			{ImportPath: "example.com/app/dep", Name: "Value", UnitName: "rtg_example_com_app_dep_Value"},
+		},
+	}})
+	if err == nil {
+		t.Fatalf("Build succeeded with export metadata but no declaration")
+	}
+	if !strings.Contains(err.Error(), "example.com/app/dep: export Value has no declaration for rtg_example_com_app_dep_Value") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestBuildAcceptsGroupedExportDeclarations(t *testing.T) {
+	_, err := Build([]unit.Unit{{
+		ImportPath: "example.com/app/main",
+		Package:    "main",
+		Decls: []unit.Decl{
+			{Kind: "func", Name: "appMain", UnitName: "rtg_example_com_app_main_appMain", Body: "func rtg_example_com_app_main_appMain() int { return 0 }\n"},
+		},
+	}, {
+		ImportPath: "example.com/app/dep",
+		Package:    "dep",
+		Exports: []unit.Symbol{
+			{ImportPath: "example.com/app/dep", Name: "Answer", UnitName: "rtg_example_com_app_dep_Answer"},
+			{ImportPath: "example.com/app/dep", Name: "Next", UnitName: "rtg_example_com_app_dep_Next"},
+		},
+		Decls: []unit.Decl{
+			{Kind: "const", Name: "", Body: "const (\n\trtg_example_com_app_dep_Answer = 41\n\trtg_example_com_app_dep_Next = rtg_example_com_app_dep_Answer + 1\n)\n"},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("Build rejected grouped export declarations: %v", err)
 	}
 }
 

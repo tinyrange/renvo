@@ -30,6 +30,9 @@ func Build(units []unit.Unit) (Plan, error) {
 	if err := validateExportOwnership(units); err != nil {
 		return Plan{}, err
 	}
+	if err := validateExportsDeclared(units); err != nil {
+		return Plan{}, err
+	}
 	if err := validateDeclSymbols(units); err != nil {
 		return Plan{}, err
 	}
@@ -153,6 +156,24 @@ func validateExportOwnership(units []unit.Unit) error {
 		for _, sym := range u.Exports {
 			if sym.ImportPath != u.ImportPath {
 				return fmt.Errorf("%s: export %s belongs to %s", u.ImportPath, sym.Name, sym.ImportPath)
+			}
+		}
+	}
+	return nil
+}
+
+func validateExportsDeclared(units []unit.Unit) error {
+	for _, u := range units {
+		for _, sym := range u.Exports {
+			found := false
+			for _, decl := range u.Decls {
+				if bodyReferencesSymbol(decl.Body, sym.UnitName) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("%s: export %s has no declaration for %s", u.ImportPath, sym.Name, sym.UnitName)
 			}
 		}
 	}
