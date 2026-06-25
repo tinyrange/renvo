@@ -32,7 +32,8 @@ func (d Diagnostics) Error() string {
 		return ""
 	}
 	var parts []string
-	for _, diag := range d {
+	for i := 0; i < len(d); i++ {
+		diag := d[i]
 		parts = append(parts, diag.Error())
 	}
 	return strings.Join(parts, "\n")
@@ -41,9 +42,11 @@ func (d Diagnostics) Error() string {
 func Graph(g *load.Graph) error {
 	var diags Diagnostics
 	exported := exportedDecls(g)
-	for _, pkg := range g.Packages {
+	for pkgIndex := 0; pkgIndex < len(g.Packages); pkgIndex++ {
+		pkg := g.Packages[pkgIndex]
 		names := map[string]Diagnostic{}
-		for _, file := range pkg.Files {
+		for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
+			file := pkg.Files[fileIndex]
 			parsed, err := parse.FileSource(file.Path, file.Source)
 			if err != nil {
 				diags = append(diags, parseDiagnostic(file.Path, err))
@@ -55,8 +58,11 @@ func Graph(g *load.Graph) error {
 			}
 			diags = append(diags, File(parsed)...)
 			diags = append(diags, importedSelectorDiagnostics(parsed, exported)...)
-			for _, decl := range parsed.Decls {
-				for i, name := range declNames(decl) {
+			for declIndex := 0; declIndex < len(parsed.Decls); declIndex++ {
+				decl := parsed.Decls[declIndex]
+				namesForDecl := declNames(decl)
+				for i := 0; i < len(namesForDecl); i++ {
+					name := namesForDecl[i]
 					if name == "" || name == "_" {
 						continue
 					}
@@ -118,7 +124,8 @@ func splitPathPositionMessage(path string, message string) (int, int, string, bo
 
 func declDiagnostics(file parse.File) Diagnostics {
 	var diags Diagnostics
-	for _, decl := range file.Decls {
+	for i := 0; i < len(file.Decls); i++ {
+		decl := file.Decls[i]
 		if decl.Kind == "func" {
 			if decl.Name == "init" {
 				diags = append(diags, declDiagnostic(file, decl, "init functions are not supported"))
@@ -141,15 +148,20 @@ func declDiagnostics(file parse.File) Diagnostics {
 
 func exportedDecls(g *load.Graph) map[string]map[string]bool {
 	out := map[string]map[string]bool{}
-	for _, pkg := range g.Packages {
+	for pkgIndex := 0; pkgIndex < len(g.Packages); pkgIndex++ {
+		pkg := g.Packages[pkgIndex]
 		names := map[string]bool{}
-		for _, file := range pkg.Files {
+		for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
+			file := pkg.Files[fileIndex]
 			parsed, err := parse.FileSource(file.Path, file.Source)
 			if err != nil {
 				continue
 			}
-			for _, decl := range parsed.Decls {
-				for _, name := range declNames(decl) {
+			for declIndex := 0; declIndex < len(parsed.Decls); declIndex++ {
+				decl := parsed.Decls[declIndex]
+				namesForDecl := declNames(decl)
+				for nameIndex := 0; nameIndex < len(namesForDecl); nameIndex++ {
+					name := namesForDecl[nameIndex]
 					if isExported(name) {
 						names[name] = true
 					}
@@ -174,7 +186,8 @@ func declNames(decl parse.Decl) []string {
 func importedSelectorDiagnostics(file parse.File, exported map[string]map[string]bool) Diagnostics {
 	localImports := map[string]string{}
 	importNames := map[string]bool{}
-	for _, imp := range file.Imports {
+	for i := 0; i < len(file.Imports); i++ {
+		imp := file.Imports[i]
 		localName := importLocalName(imp)
 		if localName != "" {
 			localImports[localName] = imp.Path
@@ -213,7 +226,8 @@ func File(file parse.File) Diagnostics {
 	diags = append(diags, importDiagnostics(file)...)
 	diags = append(diags, declDiagnostics(file)...)
 	topFuncs := file.TopLevelFuncAt
-	for i, tok := range file.Tokens {
+	for i := 0; i < len(file.Tokens); i++ {
+		tok := file.Tokens[i]
 		if tok.Kind == scan.EOF {
 			break
 		}
@@ -279,14 +293,16 @@ func importDiagnostics(file parse.File) Diagnostics {
 	var diags Diagnostics
 	names := map[string]scan.Token{}
 	importNames := map[string]bool{}
-	for _, imp := range file.Imports {
+	for i := 0; i < len(file.Imports); i++ {
+		imp := file.Imports[i]
 		localName := importLocalName(imp)
 		if localName != "" && localName != "." && localName != "_" {
 			importNames[localName] = true
 		}
 	}
 	used := usedImportNames(file, importNames)
-	for _, imp := range file.Imports {
+	for i := 0; i < len(file.Imports); i++ {
+		imp := file.Imports[i]
 		if imp.Alias == "." {
 			diags = append(diags, diag(file, imp.Tok, "dot imports are not supported"))
 		}
@@ -660,7 +676,8 @@ func localImportShadows(file parse.File, importNames map[string]bool) map[string
 	if len(importNames) == 0 {
 		return shadows
 	}
-	for _, decl := range file.Decls {
+	for i := 0; i < len(file.Decls); i++ {
+		decl := file.Decls[i]
 		if decl.Kind != "func" {
 			continue
 		}
@@ -775,7 +792,9 @@ func addLocalShadow(shadows map[string][]sourceRange, name string, start int, en
 }
 
 func isLocalShadowAt(shadows map[string][]sourceRange, name string, pos int) bool {
-	for _, r := range shadows[name] {
+	ranges := shadows[name]
+	for i := 0; i < len(ranges); i++ {
+		r := ranges[i]
 		if pos >= r.start && pos < r.end {
 			return true
 		}
@@ -853,7 +872,8 @@ func hasOrdinaryMainSignature(file parse.File, decl parse.Decl) bool {
 }
 
 func tokenIndexAt(toks []scan.Token, start int) int {
-	for i, tok := range toks {
+	for i := 0; i < len(toks); i++ {
+		tok := toks[i]
 		if tok.Start == start {
 			return i
 		}
@@ -862,7 +882,8 @@ func tokenIndexAt(toks []scan.Token, start int) int {
 }
 
 func declToken(file parse.File, decl parse.Decl, text string) (scan.Token, bool) {
-	for _, tok := range file.Tokens {
+	for i := 0; i < len(file.Tokens); i++ {
+		tok := file.Tokens[i]
 		if tok.Start < decl.Start {
 			continue
 		}
