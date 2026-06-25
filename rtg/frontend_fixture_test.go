@@ -174,6 +174,55 @@ func Next(v int) int { return v + 1 }
 	runFrontendFixtureMatchesHostGo(t, fixture)
 }
 
+func TestIfShortConditionNestedCallArgumentFrontendMatchesHostGo(t *testing.T) {
+	fixture := t.TempDir()
+	writeFixtureFile(t, fixture, "go.mod", "module example.com/ifshortcond\n")
+	writeFixtureFile(t, fixture, "cmd/app/main.go", `package main
+
+import "example.com/ifshortcond/pkg/dep"
+
+func main() {
+	if total := dep.First(); dep.Check(dep.Next(total)) {
+		print("PASS\n")
+		return
+	}
+	print("FAIL\n")
+}
+`)
+	writeFixtureFile(t, fixture, "pkg/dep/dep.go", `package dep
+
+func First() int { return 1 }
+func Next(v int) int { return v + 1 }
+func Check(v int) bool { return v == 2 }
+`)
+	runFrontendFixtureMatchesHostGo(t, fixture)
+}
+
+func TestSwitchShortTagNestedCallArgumentFrontendMatchesHostGo(t *testing.T) {
+	fixture := t.TempDir()
+	writeFixtureFile(t, fixture, "go.mod", "module example.com/switchshorttag\n")
+	writeFixtureFile(t, fixture, "cmd/app/main.go", `package main
+
+import "example.com/switchshorttag/pkg/dep"
+
+func main() {
+	switch total := dep.First(); dep.Next(total) {
+	case 2:
+		print("PASS\n")
+		return
+	default:
+		print("FAIL\n")
+	}
+}
+`)
+	writeFixtureFile(t, fixture, "pkg/dep/dep.go", `package dep
+
+func First() int { return 1 }
+func Next(v int) int { return v + 1 }
+`)
+	runFrontendFixtureMatchesHostGo(t, fixture)
+}
+
 func TestStdFmtPrintlnFrontendMatchesHostGo(t *testing.T) {
 	fixture := t.TempDir()
 	writeFixtureFile(t, fixture, "go.mod", "module example.com/stdprint\n")

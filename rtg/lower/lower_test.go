@@ -740,8 +740,46 @@ func appMain() int {
 	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_1 := rtg_example_com_app_second()") {
 		t.Fatalf("second short-statement call was not lifted into a temp: %q", body)
 	}
-	if !strings.Contains(body, "if total := rtg_example_com_app_join(rtg_example_com_app_appMain_tmp_0, rtg_example_com_app_appMain_tmp_1); total == 12 {") {
+	if !strings.Contains(body, "total := rtg_example_com_app_join(rtg_example_com_app_appMain_tmp_0, rtg_example_com_app_appMain_tmp_1)\n\t\tif total == 12 {") {
 		t.Fatalf("if short statement did not use lifted temps: %q", body)
+	}
+}
+
+func TestPackageDoesNotHoistIfShortConditionCallsBeforeInit(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+func first() int { return 1 }
+func next(v int) int { return v + 1 }
+func check(v int) bool { return v == 2 }
+func appMain() int {
+	if total := first(); check(next(total)) {
+		return total
+	}
+	return 0
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	body := u.Decls[3].Body
+	init := strings.Index(body, "total := rtg_example_com_app_first()")
+	temp := strings.Index(body, "rtg_example_com_app_appMain_tmp_0 := rtg_example_com_app_next(total)")
+	condition := strings.Index(body, "if rtg_example_com_app_check(rtg_example_com_app_appMain_tmp_0) {")
+	if init < 0 || temp < 0 || condition < 0 {
+		t.Fatalf("if short condition was not lowered into scoped temporaries: %q", body)
+	}
+	if !(init < temp && temp < condition) {
+		t.Fatalf("if short condition temp was not after init and before condition: %q", body)
 	}
 }
 
@@ -818,8 +856,45 @@ func appMain() int {
 	if !strings.Contains(body, "rtg_example_com_app_appMain_tmp_1 := rtg_example_com_app_second()") {
 		t.Fatalf("second switch short statement call was not lifted into a temp: %q", body)
 	}
-	if !strings.Contains(body, "switch total := rtg_example_com_app_join(rtg_example_com_app_appMain_tmp_0, rtg_example_com_app_appMain_tmp_1); total {") {
+	if !strings.Contains(body, "total := rtg_example_com_app_join(rtg_example_com_app_appMain_tmp_0, rtg_example_com_app_appMain_tmp_1)\n\t\tswitch total {") {
 		t.Fatalf("switch short statement did not use lifted temps: %q", body)
+	}
+}
+
+func TestPackageDoesNotHoistSwitchShortTagCallsBeforeInit(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+func first() int { return 1 }
+func next(v int) int { return v + 1 }
+func appMain() int {
+	switch total := first(); next(total) {
+	case 2:
+		return total
+	}
+	return 0
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	body := u.Decls[2].Body
+	init := strings.Index(body, "total := rtg_example_com_app_first()")
+	tag := strings.Index(body, "switch rtg_example_com_app_next(total) {")
+	if init < 0 || tag < 0 {
+		t.Fatalf("switch short tag was not lowered into scoped form: %q", body)
+	}
+	if !(init < tag) {
+		t.Fatalf("switch short tag was emitted before init: %q", body)
 	}
 }
 

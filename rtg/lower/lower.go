@@ -277,6 +277,17 @@ type expressionStatement struct {
 	openBrace int
 }
 
+type conditionalShortStatement struct {
+	token     int
+	initStart int
+	semi      int
+	condStart int
+	condEnd   int
+	openBrace int
+	end       int
+	kind      string
+}
+
 func normalizeFunctionExpressions(body string, unitName string) string {
 	toks, err := scan.Tokens([]byte(body))
 	if err != nil {
@@ -286,6 +297,48 @@ func normalizeFunctionExpressions(body string, unitName string) string {
 	cursor := 0
 	tempIndex := 0
 	for i := 0; i < len(toks); i++ {
+		short, ok := normalizationConditionalShortStatement(toks, i)
+		if ok {
+			initTemps, initReplacements := normalizeCallArgumentExpressions(body, toks, short.initStart, short.semi, unitName, &tempIndex)
+			condTemps, condReplacements := normalizeCallArgumentExpressions(body, toks, short.condStart, short.condEnd, unitName, &tempIndex)
+			insertStart := statementInsertStart(body, toks[short.token].Start)
+			out = append(out, body[cursor:insertStart]...)
+			indent := statementIndent(body, toks[short.token].Start)
+			innerIndent := indent + "\t"
+			init := strings.TrimSpace(applyExpressionReplacements(body, toks[short.initStart].Start, toks[short.semi-1].End, initReplacements))
+			condition := strings.TrimSpace(applyExpressionReplacements(body, toks[short.condStart].Start, toks[short.condEnd-1].End, condReplacements))
+			out = append(out, indent...)
+			out = append(out, "{\n"...)
+			for _, temp := range initTemps {
+				out = append(out, innerIndent...)
+				out = append(out, temp.name...)
+				out = append(out, " := "...)
+				out = append(out, temp.expr...)
+				out = append(out, '\n')
+			}
+			out = append(out, innerIndent...)
+			out = append(out, init...)
+			out = append(out, '\n')
+			for _, temp := range condTemps {
+				out = append(out, innerIndent...)
+				out = append(out, temp.name...)
+				out = append(out, " := "...)
+				out = append(out, temp.expr...)
+				out = append(out, '\n')
+			}
+			out = append(out, innerIndent...)
+			out = append(out, short.kind...)
+			out = append(out, ' ')
+			out = append(out, condition...)
+			out = append(out, ' ')
+			out = append(out, body[toks[short.openBrace].Start:toks[short.end].End]...)
+			out = append(out, '\n')
+			out = append(out, indent...)
+			out = append(out, '}')
+			cursor = toks[short.end].End
+			i = short.end
+			continue
+		}
 		stmt, ok := normalizationStatement(toks, i)
 		if !ok {
 			continue
@@ -343,6 +396,35 @@ func normalizeFunctionExpressions(body string, unitName string) string {
 	return string(out)
 }
 
+func normalizationConditionalShortStatement(toks []scan.Token, pos int) (conditionalShortStatement, bool) {
+	if toks[pos].Text != "if" && toks[pos].Text != "switch" {
+		return conditionalShortStatement{}, false
+	}
+	exprStart := pos + 1
+	exprEnd := conditionExpressionEnd(toks, pos)
+	if exprEnd <= exprStart || exprEnd >= len(toks) || toks[exprEnd].Text != "{" {
+		return conditionalShortStatement{}, false
+	}
+	semi := topLevelSemicolon(toks, exprStart, exprEnd)
+	if semi < 0 || semi <= exprStart || semi+1 >= exprEnd {
+		return conditionalShortStatement{}, false
+	}
+	end := conditionalStatementEnd(toks, pos, exprEnd)
+	if end <= exprEnd {
+		return conditionalShortStatement{}, false
+	}
+	return conditionalShortStatement{
+		token:     pos,
+		initStart: exprStart,
+		semi:      semi,
+		condStart: semi + 1,
+		condEnd:   exprEnd,
+		openBrace: exprEnd,
+		end:       end,
+		kind:      toks[pos].Text,
+	}, true
+}
+
 func normalizationStatement(toks []scan.Token, pos int) (expressionStatement, bool) {
 	if toks[pos].Text == "return" {
 		exprStart := pos + 1
@@ -358,6 +440,13 @@ func normalizationStatement(toks []scan.Token, pos int) (expressionStatement, bo
 		if exprEnd <= exprStart {
 			return expressionStatement{}, false
 		}
+		if expressionContainsTopLevelSemicolon(toks, exprStart, exprEnd) {
+			assign, semi := shortHeaderInitAssignment(toks, exprStart, exprEnd)
+			if assign < 0 || semi <= assign+1 {
+				return expressionStatement{}, false
+			}
+			return expressionStatement{token: pos, exprStart: assign + 1, exprEnd: semi}, true
+		}
 		return expressionStatement{token: pos, exprStart: exprStart, exprEnd: exprEnd}, true
 	}
 	if toks[pos].Text == "switch" {
@@ -365,6 +454,13 @@ func normalizationStatement(toks []scan.Token, pos int) (expressionStatement, bo
 		exprEnd := conditionExpressionEnd(toks, pos)
 		if exprEnd <= exprStart {
 			return expressionStatement{}, false
+		}
+		if expressionContainsTopLevelSemicolon(toks, exprStart, exprEnd) {
+			assign, semi := shortHeaderInitAssignment(toks, exprStart, exprEnd)
+			if assign < 0 || semi <= assign+1 {
+				return expressionStatement{}, false
+			}
+			return expressionStatement{token: pos, exprStart: assign + 1, exprEnd: semi}, true
 		}
 		return expressionStatement{token: pos, exprStart: exprStart, exprEnd: exprEnd}, true
 	}
@@ -384,6 +480,9 @@ func normalizationStatement(toks []scan.Token, pos int) (expressionStatement, bo
 		return expressionStatement{token: pos, exprStart: exprStart, exprEnd: exprEnd, kind: "for-condition", openBrace: exprEnd}, true
 	}
 	if isInsideClassicForHeader(toks, pos) {
+		return expressionStatement{}, false
+	}
+	if isInsideConditionalShortHeader(toks, pos) {
 		return expressionStatement{}, false
 	}
 	if startsCallStatement(toks, pos) {
@@ -537,6 +636,10 @@ func isInsideClassicForHeader(toks []scan.Token, pos int) bool {
 }
 
 func classicForInitAssignment(toks []scan.Token, start int, end int) (int, int) {
+	return shortHeaderInitAssignment(toks, start, end)
+}
+
+func shortHeaderInitAssignment(toks []scan.Token, start int, end int) (int, int) {
 	paren := 0
 	brack := 0
 	brace := 0
@@ -553,6 +656,20 @@ func classicForInitAssignment(toks []scan.Token, start int, end int) (int, int) 
 		updateExpressionDepth(toks[i].Text, &paren, &brack, &brace)
 	}
 	return -1, -1
+}
+
+func isInsideConditionalShortHeader(toks []scan.Token, pos int) bool {
+	for i := pos - 1; i >= 0; i-- {
+		if toks[i].Text == "{" || toks[i].Text == "}" {
+			return false
+		}
+		if toks[i].Text != "if" && toks[i].Text != "switch" {
+			continue
+		}
+		exprEnd := conditionExpressionEnd(toks, i)
+		return pos < exprEnd && expressionContainsTopLevelSemicolon(toks, i+1, exprEnd)
+	}
+	return false
 }
 
 func startsCallStatement(toks []scan.Token, pos int) bool {
@@ -653,16 +770,55 @@ func expressionContainsCall(toks []scan.Token, start int, end int) bool {
 }
 
 func expressionContainsTopLevelSemicolon(toks []scan.Token, start int, end int) bool {
+	return topLevelSemicolon(toks, start, end) >= 0
+}
+
+func topLevelSemicolon(toks []scan.Token, start int, end int) int {
 	paren := 0
 	brack := 0
 	brace := 0
 	for i := start; i < end; i++ {
 		if paren == 0 && brack == 0 && brace == 0 && toks[i].Text == ";" {
-			return true
+			return i
 		}
 		updateExpressionDepth(toks[i].Text, &paren, &brack, &brace)
 	}
-	return false
+	return -1
+}
+
+func conditionalStatementEnd(toks []scan.Token, pos int, openBrace int) int {
+	closeBrace := findClose(toks, openBrace, "{", "}")
+	if closeBrace < 0 {
+		return -1
+	}
+	if toks[pos].Text != "if" {
+		return closeBrace
+	}
+	if closeBrace+1 >= len(toks) || toks[closeBrace+1].Text != "else" {
+		return closeBrace
+	}
+	next := closeBrace + 2
+	if next >= len(toks) {
+		return closeBrace
+	}
+	if toks[next].Text == "if" {
+		nextOpen := conditionExpressionEnd(toks, next)
+		if nextOpen >= len(toks) || toks[nextOpen].Text != "{" {
+			return closeBrace
+		}
+		end := conditionalStatementEnd(toks, next, nextOpen)
+		if end >= 0 {
+			return end
+		}
+		return closeBrace
+	}
+	if toks[next].Text == "{" {
+		end := findClose(toks, next, "{", "}")
+		if end >= 0 {
+			return end
+		}
+	}
+	return closeBrace
 }
 
 func applyExpressionReplacements(body string, start int, end int, replacements []expressionReplacement) string {
