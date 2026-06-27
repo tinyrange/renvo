@@ -613,6 +613,9 @@ func goBuildTagMatches(tag string, targetOS string, targetArch string) bool {
 	if tag == targetOS || tag == targetArch {
 		return true
 	}
+	if tag == "rtg" {
+		return true
+	}
 	if tag == "unix" && isUnixTargetOS(targetOS) {
 		return true
 	}

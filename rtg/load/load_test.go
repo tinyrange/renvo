@@ -397,6 +397,37 @@ const Ignored = Common + 4
 	}
 }
 
+func TestLoadEntriesEnablesRTGBuildTag(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "pkg/common.go", `package pkg
+
+const Common = 1
+`)
+	writeFile(t, root, "pkg/rtg.go", `//go:build rtg
+
+package pkg
+
+const Frontend = Common + 1
+`)
+	writeFile(t, root, "pkg/host.go", `//go:build !rtg
+
+package pkg
+
+const Host = Common + 2
+`)
+
+	graph, err := LoadEntries([]string{filepath.Join(root, "pkg")}, Options{Target: "linux/amd64"})
+	if err != nil {
+		t.Fatalf("LoadEntries linux/amd64 failed: %v", err)
+	}
+	got := packageFileNames(graph.Packages[0])
+	want := []string{"common.go", "rtg.go"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("linux/amd64 files = %v, want %v", got, want)
+	}
+}
+
 func TestLoadEntriesSupportsUnixBuildTag(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/app\n")
