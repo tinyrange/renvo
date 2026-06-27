@@ -75,7 +75,7 @@ func LoadEntries(entries []string, opts Options) (*Graph, error) {
 			if _, ok := fileEntries[dir]; !ok {
 				fileDirs = append(fileDirs, dir)
 			}
-			fileEntries[dir] = append(fileEntries[dir], files...)
+			fileEntries[dir] = appendStrings(fileEntries[dir], files)
 			continue
 		}
 		if err := loadPackageRecursive(g, opts, seen, dir); err != nil {
@@ -232,7 +232,7 @@ func readPackageFiles(module mod.Module, dir string, importPath string, files []
 	if len(files) == 0 {
 		return Package{}, fmt.Errorf("%s: no Go source files", dir)
 	}
-	files = append([]string(nil), files...)
+	files = copyStrings(files)
 	sortStrings(files)
 	files = uniqueStrings(files)
 	pkg := Package{Dir: dir, ImportPath: importPath, ImportPositions: map[string]ImportPosition{}}
@@ -284,6 +284,21 @@ func uniqueStrings(values []string) []string {
 			continue
 		}
 		out = append(out, value)
+	}
+	return out
+}
+
+func appendStrings(out []string, values []string) []string {
+	for i := 0; i < len(values); i++ {
+		out = append(out, values[i])
+	}
+	return out
+}
+
+func copyStrings(values []string) []string {
+	out := make([]string, len(values))
+	for i := 0; i < len(values); i++ {
+		out[i] = values[i]
 	}
 	return out
 }

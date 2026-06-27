@@ -73,7 +73,7 @@ func Build(units []unit.Unit) (Plan, error) {
 	if err := validateEntrypoint(units); err != nil {
 		return Plan{}, err
 	}
-	ordered := append([]unit.Unit(nil), units...)
+	ordered := copyUnits(units)
 	sortUnitsByImportPath(ordered)
 	return Plan{Units: ordered}, nil
 }
@@ -327,7 +327,18 @@ func SourceArtifact(plan Plan) Artifact {
 }
 
 func appendString(out []byte, s string) []byte {
-	return append(out, s...)
+	for i := 0; i < len(s); i++ {
+		out = append(out, s[i])
+	}
+	return out
+}
+
+func copyUnits(values []unit.Unit) []unit.Unit {
+	out := make([]unit.Unit, len(values))
+	for i := 0; i < len(values); i++ {
+		out[i] = values[i]
+	}
+	return out
 }
 
 func quoteIfNeeded(s string) string {

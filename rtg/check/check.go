@@ -56,8 +56,8 @@ func Graph(g *load.Graph) error {
 				diags = append(diags, Diagnostic{Path: file.Path, Line: 1, Column: 1, Message: "package name changed during parsing"})
 				continue
 			}
-			diags = append(diags, File(parsed)...)
-			diags = append(diags, importedSelectorDiagnostics(parsed, exported)...)
+			diags = appendDiagnostics(diags, File(parsed))
+			diags = appendDiagnostics(diags, importedSelectorDiagnostics(parsed, exported))
 			for declIndex := 0; declIndex < len(parsed.Decls); declIndex++ {
 				decl := parsed.Decls[declIndex]
 				namesForDecl := packageLevelDeclNames(decl)
@@ -230,8 +230,8 @@ func importedSelectorDiagnostics(file parse.File, exported map[string]map[string
 
 func File(file parse.File) Diagnostics {
 	var diags Diagnostics
-	diags = append(diags, importDiagnostics(file)...)
-	diags = append(diags, declDiagnostics(file)...)
+	diags = appendDiagnostics(diags, importDiagnostics(file))
+	diags = appendDiagnostics(diags, declDiagnostics(file))
 	topFuncs := file.TopLevelFuncAt
 	for i := 0; i < len(file.Tokens); i++ {
 		tok := file.Tokens[i]
@@ -294,6 +294,13 @@ func File(file parse.File) Diagnostics {
 		}
 	}
 	return diags
+}
+
+func appendDiagnostics(out Diagnostics, values Diagnostics) Diagnostics {
+	for i := 0; i < len(values); i++ {
+		out = append(out, values[i])
+	}
+	return out
 }
 
 func importDiagnostics(file parse.File) Diagnostics {
