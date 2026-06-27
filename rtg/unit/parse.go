@@ -29,9 +29,9 @@ func ParseSource(path string, src []byte) (Unit, error) {
 	var u Unit
 	currentDecl := -1
 	seenUnit := false
-	seenImports := map[string]bool{}
-	seenExports := map[string]bool{}
-	seenRefs := map[string]bool{}
+	var seenImports []string
+	var seenExports []string
+	var seenRefs []string
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
 		if strings.HasPrefix(line, "package ") && u.Package == "" {
@@ -90,10 +90,10 @@ func ParseSource(path string, src []byte) (Unit, error) {
 			if imp == "" {
 				return Unit{}, fmt.Errorf("%s: empty import metadata", path)
 			}
-			if seenImports[imp] {
+			if containsString(seenImports, imp) {
 				return Unit{}, fmt.Errorf("%s: duplicate import metadata %q", path, imp)
 			}
-			seenImports[imp] = true
+			seenImports = append(seenImports, imp)
 			u.Imports = append(u.Imports, imp)
 			continue
 		}
@@ -104,10 +104,10 @@ func ParseSource(path string, src []byte) (Unit, error) {
 			}
 			sym.ImportPath = u.ImportPath
 			key := sym.Name
-			if seenExports[key] {
+			if containsString(seenExports, key) {
 				return Unit{}, fmt.Errorf("%s: duplicate export metadata %s", path, sym.Name)
 			}
-			seenExports[key] = true
+			seenExports = append(seenExports, key)
 			u.Exports = append(u.Exports, sym)
 			continue
 		}
@@ -117,10 +117,10 @@ func ParseSource(path string, src []byte) (Unit, error) {
 				return Unit{}, fmt.Errorf("%s: %w", path, err)
 			}
 			key := sym.ImportPath + "\x00" + sym.Name
-			if seenRefs[key] {
+			if containsString(seenRefs, key) {
 				return Unit{}, fmt.Errorf("%s: duplicate reference metadata %s.%s", path, sym.ImportPath, sym.Name)
 			}
-			seenRefs[key] = true
+			seenRefs = append(seenRefs, key)
 			u.References = append(u.References, sym)
 			continue
 		}
@@ -139,6 +139,15 @@ func ParseSource(path string, src []byte) (Unit, error) {
 		}
 	}
 	return u, nil
+}
+
+func containsString(values []string, value string) bool {
+	for i := 0; i < len(values); i++ {
+		if values[i] == value {
+			return true
+		}
+	}
+	return false
 }
 
 func declBodyComplete(decl Decl) bool {
