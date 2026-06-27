@@ -25,7 +25,7 @@ type File struct {
 	Imports        []Import
 	Decls          []Decl
 	Tokens         []scan.Token
-	TopLevelFuncAt map[int]bool
+	TopLevelFuncs  []int
 }
 
 type Import struct {
@@ -55,11 +55,10 @@ func FileSource(path string, src []byte) (File, error) {
 		return File{}, Error{Path: path, Line: 1, Column: 1, Message: "missing package declaration"}
 	}
 	file := File{
-		Path:           path,
-		Source:         src,
-		PackageName:    toks[1].Text,
-		Tokens:         toks,
-		TopLevelFuncAt: map[int]bool{},
+		Path:          path,
+		Source:        src,
+		PackageName:   toks[1].Text,
+		Tokens:        toks,
 	}
 	pos := 2
 	for pos < len(toks) && toks[pos].Text == "import" {
@@ -82,6 +81,15 @@ func FileSource(path string, src []byte) (File, error) {
 		return File{}, Error{Path: path, Line: toks[pos].Line, Column: toks[pos].Column, Message: "expected top-level declaration"}
 	}
 	return file, nil
+}
+
+func (file File) IsTopLevelFuncAt(pos int) bool {
+	for i := 0; i < len(file.TopLevelFuncs); i++ {
+		if file.TopLevelFuncs[i] == pos {
+			return true
+		}
+	}
+	return false
 }
 
 func parseImportDecl(file *File, pos int) (int, error) {
@@ -171,7 +179,7 @@ func parseDecl(file *File, pos int) int {
 	kind := toks[pos].Text
 	decl := Decl{Kind: kind, Tok: toks[pos], Start: toks[pos].Start}
 	if kind == "func" {
-		file.TopLevelFuncAt[pos] = true
+		file.TopLevelFuncs = append(file.TopLevelFuncs, pos)
 		namePos := pos + 1
 		if namePos < len(toks) && toks[namePos].Text == "(" {
 			decl.Receiver = true

@@ -232,7 +232,6 @@ func File(file parse.File) Diagnostics {
 	var diags Diagnostics
 	diags = appendDiagnostics(diags, importDiagnostics(file))
 	diags = appendDiagnostics(diags, declDiagnostics(file))
-	topFuncs := file.TopLevelFuncAt
 	for i := 0; i < len(file.Tokens); i++ {
 		tok := file.Tokens[i]
 		if tok.Kind == scan.EOF {
@@ -267,7 +266,7 @@ func File(file parse.File) Diagnostics {
 		case "fallthrough":
 			diags = append(diags, diag(file, tok, "fallthrough is not supported"))
 		case "func":
-			if !topFuncs[i] {
+			if !file.IsTopLevelFuncAt(i) {
 				diags = append(diags, diag(file, tok, "function values and function types are not supported"))
 			}
 		}
@@ -277,7 +276,7 @@ func File(file parse.File) Diagnostics {
 		if startsAnyInterfaceType(file.Tokens, i) {
 			diags = append(diags, diag(file, tok, "interfaces are not supported"))
 		}
-		if startsGenericDecl(file.Tokens, i, topFuncs) {
+		if startsGenericDecl(file, i) {
 			diags = append(diags, diag(file, file.Tokens[i+2], "generics are not supported"))
 		}
 		if startsGenericInstantiation(file.Tokens, i) {
@@ -360,7 +359,8 @@ func importLocalName(imp parse.Import) string {
 	return load.PackageNameFromImportPath(imp.Path)
 }
 
-func startsGenericDecl(toks []scan.Token, i int, topFuncs map[int]bool) bool {
+func startsGenericDecl(file parse.File, i int) bool {
+	toks := file.Tokens
 	if i+2 >= len(toks) {
 		return false
 	}
@@ -368,7 +368,7 @@ func startsGenericDecl(toks []scan.Token, i int, topFuncs map[int]bool) bool {
 		close := findClose(toks, i+2, "[", "]")
 		return close > i+4
 	}
-	if toks[i].Text == "func" && topFuncs[i] {
+	if toks[i].Text == "func" && file.IsTopLevelFuncAt(i) {
 		namePos := i + 1
 		if toks[namePos].Text == "(" {
 			close := findClose(toks, namePos, "(", ")")
