@@ -20,6 +20,21 @@ type Artifact struct {
 	Entrypoint         unit.Symbol
 }
 
+type symbolEntry struct {
+	key    string
+	symbol unit.Symbol
+}
+
+type ownerEntry struct {
+	name  string
+	owner string
+}
+
+type declBodyEntry struct {
+	name string
+	body string
+}
+
 func Build(units []unit.Unit) (Plan, error) {
 	if err := validateUnitMetadata(units); err != nil {
 		return Plan{}, err
@@ -45,23 +60,25 @@ func Build(units []unit.Unit) (Plan, error) {
 	if err := validateUniqueDeclSymbols(units); err != nil {
 		return Plan{}, err
 	}
-	exports := map[string]unit.Symbol{}
+	var exports []symbolEntry
 	for uIndex := 0; uIndex < len(units); uIndex++ {
 		u := units[uIndex]
 		for symIndex := 0; symIndex < len(u.Exports); symIndex++ {
 			sym := u.Exports[symIndex]
 			key := symbolKey(sym.ImportPath, sym.Name)
-			if existing, ok := exports[key]; ok && existing.UnitName != sym.UnitName {
+			if existing, ok := symbolEntryValue(exports, key); ok && existing.UnitName != sym.UnitName {
 				return Plan{}, fmt.Errorf("duplicate export %s.%s", sym.ImportPath, sym.Name)
 			}
-			exports[key] = sym
+			if !hasSymbolEntry(exports, key) {
+				exports = append(exports, symbolEntry{key: key, symbol: sym})
+			}
 		}
 	}
 	for uIndex := 0; uIndex < len(units); uIndex++ {
 		u := units[uIndex]
 		for refIndex := 0; refIndex < len(u.References); refIndex++ {
 			ref := u.References[refIndex]
-			export, ok := exports[symbolKey(ref.ImportPath, ref.Name)]
+			export, ok := symbolEntryValue(exports, symbolKey(ref.ImportPath, ref.Name))
 			if !ok {
 				return Plan{}, fmt.Errorf("%s: unresolved reference %s.%s", u.ImportPath, ref.ImportPath, ref.Name)
 			}
@@ -87,67 +104,67 @@ func validateUnitMetadata(units []unit.Unit) error {
 		if u.Package == "" {
 			return fmt.Errorf("%s: empty unit package", u.ImportPath)
 		}
-		imports := map[string]bool{}
+		var imports []string
 		for impIndex := 0; impIndex < len(u.Imports); impIndex++ {
 			imp := u.Imports[impIndex]
 			if imp == "" {
 				return fmt.Errorf("%s: empty import metadata", u.ImportPath)
 			}
-			if imports[imp] {
+			if containsString(imports, imp) {
 				return fmt.Errorf("%s: duplicate import metadata %q", u.ImportPath, imp)
 			}
-			imports[imp] = true
+			imports = append(imports, imp)
 		}
-		exports := map[string]bool{}
+		var exports []string
 		for symIndex := 0; symIndex < len(u.Exports); symIndex++ {
 			sym := u.Exports[symIndex]
 			if sym.Name == "" || sym.UnitName == "" {
 				return fmt.Errorf("%s: invalid export metadata", u.ImportPath)
 			}
-			if exports[sym.Name] {
+			if containsString(exports, sym.Name) {
 				return fmt.Errorf("%s: duplicate export metadata %s", u.ImportPath, sym.Name)
 			}
-			exports[sym.Name] = true
+			exports = append(exports, sym.Name)
 		}
-		refs := map[string]bool{}
+		var refs []string
 		for symIndex := 0; symIndex < len(u.References); symIndex++ {
 			sym := u.References[symIndex]
 			if sym.ImportPath == "" || sym.Name == "" || sym.UnitName == "" {
 				return fmt.Errorf("%s: invalid reference metadata", u.ImportPath)
 			}
 			key := symbolKey(sym.ImportPath, sym.Name)
-			if refs[key] {
+			if containsString(refs, key) {
 				return fmt.Errorf("%s: duplicate reference metadata %s.%s", u.ImportPath, sym.ImportPath, sym.Name)
 			}
-			refs[key] = true
+			refs = append(refs, key)
 		}
 	}
 	return nil
 }
 
 func validateUniqueUnits(units []unit.Unit) error {
-	seen := map[string]bool{}
+	var seen []string
 	for i := 0; i < len(units); i++ {
 		u := units[i]
-		if seen[u.ImportPath] {
+		if containsString(seen, u.ImportPath) {
 			return fmt.Errorf("duplicate unit: %s", u.ImportPath)
 		}
-		seen[u.ImportPath] = true
+		seen = append(seen, u.ImportPath)
 	}
 	return nil
 }
 
 func validateImports(units []unit.Unit) error {
-	present := map[string]bool{}
+	var present []string
 	for i := 0; i < len(units); i++ {
 		u := units[i]
-		present[u.ImportPath] = true
+		present = append(present, u.ImportPath)
 	}
 	for uIndex := 0; uIndex < len(units); uIndex++ {
 		u := units[uIndex]
 		for impIndex := 0; impIndex < len(u.Imports); impIndex++ {
 			imp := u.Imports[impIndex]
-			if !present[imp] {
+			if !containsString(present, imp) {
 				return fmt.Errorf("%s: missing imported unit %s", u.ImportPath, imp)
 			}
 		}
@@ -158,14 +175,14 @@ func validateImports(units []unit.Unit) error {
 func validateReferencesDeclared(units []unit.Unit) error {
 	for uIndex := 0; uIndex < len(units); uIndex++ {
 		u := units[uIndex]
-		imports := map[string]bool{}
+		var imports []string
 		for impIndex := 0; impIndex < len(u.Imports); impIndex++ {
 			imp := u.Imports[impIndex]
-			imports[imp] = true
+			imports = append(imports, imp)
 		}
 		for refIndex := 0; refIndex < len(u.References); refIndex++ {
 			ref := u.References[refIndex]
-			if !imports[ref.ImportPath] {
+			if !containsString(imports, ref.ImportPath) {
 				return fmt.Errorf("%s: reference %s.%s missing import metadata", u.ImportPath, ref.ImportPath, ref.Name)
 			}
 		}
@@ -236,7 +253,7 @@ func validateDeclSymbols(units []unit.Unit) error {
 }
 
 func validateUniqueDeclSymbols(units []unit.Unit) error {
-	owners := map[string]string{}
+	var owners []ownerEntry
 	for uIndex := 0; uIndex < len(units); uIndex++ {
 		u := units[uIndex]
 		for declIndex := 0; declIndex < len(u.Decls); declIndex++ {
@@ -244,10 +261,10 @@ func validateUniqueDeclSymbols(units []unit.Unit) error {
 			if decl.UnitName == "" {
 				continue
 			}
-			if owner, ok := owners[decl.UnitName]; ok {
+			if owner, ok := ownerEntryValue(owners, decl.UnitName); ok {
 				return fmt.Errorf("%s: duplicate declaration symbol %s already declared in %s", u.ImportPath, decl.UnitName, owner)
 			}
-			owners[decl.UnitName] = u.ImportPath
+			owners = append(owners, ownerEntry{name: decl.UnitName, owner: u.ImportPath})
 		}
 	}
 	return nil
@@ -359,13 +376,13 @@ func linkedUnitNames(plan Plan) []string {
 	return names
 }
 
-func sortedReachableFunctions(plan Plan, reachable map[string]bool) []string {
+func sortedReachableFunctions(plan Plan, reachable []string) []string {
 	var names []string
 	for uIndex := 0; uIndex < len(plan.Units); uIndex++ {
 		u := plan.Units[uIndex]
 		for declIndex := 0; declIndex < len(u.Decls); declIndex++ {
 			decl := u.Decls[declIndex]
-			if decl.Kind == "func" && decl.UnitName != "" && reachable[decl.UnitName] {
+			if decl.Kind == "func" && decl.UnitName != "" && containsString(reachable, decl.UnitName) {
 				names = append(names, decl.UnitName)
 			}
 		}
@@ -398,15 +415,60 @@ func sortStrings(values []string) {
 	}
 }
 
-func shouldEmitDecl(decl unit.Decl, reachable map[string]bool) bool {
+func containsString(values []string, value string) bool {
+	for i := 0; i < len(values); i++ {
+		if values[i] == value {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSymbolEntry(values []symbolEntry, key string) bool {
+	for i := 0; i < len(values); i++ {
+		if values[i].key == key {
+			return true
+		}
+	}
+	return false
+}
+
+func symbolEntryValue(values []symbolEntry, key string) (unit.Symbol, bool) {
+	for i := 0; i < len(values); i++ {
+		if values[i].key == key {
+			return values[i].symbol, true
+		}
+	}
+	return unit.Symbol{}, false
+}
+
+func ownerEntryValue(values []ownerEntry, name string) (string, bool) {
+	for i := 0; i < len(values); i++ {
+		if values[i].name == name {
+			return values[i].owner, true
+		}
+	}
+	return "", false
+}
+
+func declBody(values []declBodyEntry, name string) string {
+	for i := 0; i < len(values); i++ {
+		if values[i].name == name {
+			return values[i].body
+		}
+	}
+	return ""
+}
+
+func shouldEmitDecl(decl unit.Decl, reachable []string) bool {
 	if decl.Kind != "func" || decl.UnitName == "" {
 		return true
 	}
-	return reachable[decl.UnitName]
+	return containsString(reachable, decl.UnitName)
 }
 
-func reachableFunctionDecls(plan Plan) map[string]bool {
-	bodies := map[string]string{}
+func reachableFunctionDecls(plan Plan) []string {
+	var bodies []declBodyEntry
 	var queue []string
 	var candidates []string
 	for uIndex := 0; uIndex < len(plan.Units); uIndex++ {
@@ -416,25 +478,25 @@ func reachableFunctionDecls(plan Plan) map[string]bool {
 			if decl.Kind != "func" || decl.UnitName == "" {
 				continue
 			}
-			bodies[decl.UnitName] = decl.Body
+			bodies = append(bodies, declBodyEntry{name: decl.UnitName, body: decl.Body})
 			candidates = append(candidates, decl.UnitName)
 			if u.Package == "main" && decl.Name == "appMain" {
 				queue = append(queue, decl.UnitName)
 			}
 		}
 	}
-	reachable := map[string]bool{}
+	var reachable []string
 	for len(queue) > 0 {
 		name := queue[0]
 		queue = queue[1:]
-		if reachable[name] {
+		if containsString(reachable, name) {
 			continue
 		}
-		reachable[name] = true
-		body := bodies[name]
+		reachable = append(reachable, name)
+		body := declBody(bodies, name)
 		for i := 0; i < len(candidates); i++ {
 			candidate := candidates[i]
-			if !reachable[candidate] && bodyReferencesSymbol(body, candidate) {
+			if !containsString(reachable, candidate) && bodyReferencesSymbol(body, candidate) {
 				queue = append(queue, candidate)
 			}
 		}
