@@ -19,7 +19,7 @@ func FileName(importPath string) string {
 			out = append(out, '_')
 		}
 	}
-	out = append(out, ".rtg.go"...)
+	out = appendString(out, ".rtg.go")
 	return string(out)
 }
 
@@ -34,7 +34,7 @@ func Source(u unit.Unit) []byte {
 	out = appendString(out, "package ")
 	out = appendString(out, u.Package)
 	out = appendString(out, "\n\n")
-	imports := append([]string(nil), u.Imports...)
+	imports := copyStrings(u.Imports)
 	sortStrings(imports)
 	for i := 0; i < len(imports); i++ {
 		imp := imports[i]
@@ -42,7 +42,7 @@ func Source(u unit.Unit) []byte {
 		out = appendString(out, quote(imp))
 		out = append(out, '\n')
 	}
-	exports := append([]unit.Symbol(nil), u.Exports...)
+	exports := copySymbols(u.Exports)
 	sortSymbolsByName(exports)
 	for i := 0; i < len(exports); i++ {
 		sym := exports[i]
@@ -52,7 +52,7 @@ func Source(u unit.Unit) []byte {
 		out = appendString(out, sym.UnitName)
 		out = append(out, '\n')
 	}
-	refs := append([]unit.Symbol(nil), u.References...)
+	refs := copySymbols(u.References)
 	sortSymbolsByImportPathName(refs)
 	for i := 0; i < len(refs); i++ {
 		sym := refs[i]
@@ -94,7 +94,26 @@ func Source(u unit.Unit) []byte {
 }
 
 func appendString(out []byte, s string) []byte {
-	return append(out, s...)
+	for i := 0; i < len(s); i++ {
+		out = append(out, s[i])
+	}
+	return out
+}
+
+func copyStrings(values []string) []string {
+	out := make([]string, len(values))
+	for i := 0; i < len(values); i++ {
+		out[i] = values[i]
+	}
+	return out
+}
+
+func copySymbols(values []unit.Symbol) []unit.Symbol {
+	out := make([]unit.Symbol, len(values))
+	for i := 0; i < len(values); i++ {
+		out[i] = values[i]
+	}
+	return out
 }
 
 func quote(s string) string {
