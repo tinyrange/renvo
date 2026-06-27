@@ -134,5 +134,5 @@ func writeOutput(data []byte, outputPath string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(output, data, 0755)
+	return os.WriteFile(output, data, 493)
 }

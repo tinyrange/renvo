@@ -84,7 +84,7 @@ func runEmitUnit(cfg config, graph *load.Graph) error {
 			return writeUnitDirectory(cfg.output, units)
 		}
 		if len(units) == 1 && isUnitFileOutput(cfg.output) {
-			return os.WriteFile(cfg.output, emit.Source(units[0]), 0644)
+			return os.WriteFile(cfg.output, emit.Source(units[0]), 420)
 		}
 		if len(units) == 1 {
 			return fmt.Errorf("rtg: -emit-unit requires .rtg.go output file or output directory")
@@ -94,7 +94,7 @@ func runEmitUnit(cfg config, graph *load.Graph) error {
 		return err
 	}
 	if len(units) == 1 && isUnitFileOutput(cfg.output) {
-		return os.WriteFile(cfg.output, emit.Source(units[0]), 0644)
+		return os.WriteFile(cfg.output, emit.Source(units[0]), 420)
 	}
 	if filepath.Ext(filepath.Base(cfg.output)) != "" {
 		if len(units) == 1 {
@@ -110,7 +110,7 @@ func defaultUnitCacheDir(graph *load.Graph) string {
 }
 
 func writeUnitDirectory(dir string, units []unit.Unit) error {
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 493); err != nil {
 		return err
 	}
 	names := map[string]string{}
@@ -122,7 +122,7 @@ func writeUnitDirectory(dir string, units []unit.Unit) error {
 		}
 		names[name] = u.ImportPath
 		path := filepath.Join(dir, name)
-		if err := os.WriteFile(path, emit.Source(u), 0644); err != nil {
+		if err := os.WriteFile(path, emit.Source(u), 420); err != nil {
 			return err
 		}
 	}
