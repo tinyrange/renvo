@@ -60,7 +60,7 @@ func Graph(g *load.Graph) error {
 			diags = append(diags, importedSelectorDiagnostics(parsed, exported)...)
 			for declIndex := 0; declIndex < len(parsed.Decls); declIndex++ {
 				decl := parsed.Decls[declIndex]
-				namesForDecl := declNames(decl)
+				namesForDecl := packageLevelDeclNames(decl)
 				for i := 0; i < len(namesForDecl); i++ {
 					name := namesForDecl[i]
 					if name == "" || name == "_" {
@@ -159,7 +159,7 @@ func exportedDecls(g *load.Graph) map[string]map[string]bool {
 			}
 			for declIndex := 0; declIndex < len(parsed.Decls); declIndex++ {
 				decl := parsed.Decls[declIndex]
-				namesForDecl := declNames(decl)
+				namesForDecl := packageLevelDeclNames(decl)
 				for nameIndex := 0; nameIndex < len(namesForDecl); nameIndex++ {
 					name := namesForDecl[nameIndex]
 					if isExported(name) {
@@ -171,6 +171,13 @@ func exportedDecls(g *load.Graph) map[string]map[string]bool {
 		out[pkg.ImportPath] = names
 	}
 	return out
+}
+
+func packageLevelDeclNames(decl parse.Decl) []string {
+	if decl.Receiver {
+		return nil
+	}
+	return declNames(decl)
 }
 
 func declNames(decl parse.Decl) []string {

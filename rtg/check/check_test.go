@@ -779,6 +779,33 @@ var (
 	}
 }
 
+func TestGraphAllowsMethodNameMatchingTypeName(t *testing.T) {
+	graph := &load.Graph{
+		Packages: []load.Package{
+			{
+				ImportPath: "example.com/app/pkg",
+				Name:       "pkg",
+				Files: []load.File{
+					{
+						Path: "error.go",
+						Source: []byte(`package pkg
+
+type Error string
+
+func (e Error) Error() string {
+	return string(e)
+}
+`),
+					},
+				},
+			},
+		},
+	}
+	if err := Graph(graph); err != nil {
+		t.Fatalf("Graph rejected method with same name as type: %v", err)
+	}
+}
+
 func TestGraphRejectsUnresolvedImportedSelectors(t *testing.T) {
 	graph := &load.Graph{
 		Packages: []load.Package{
