@@ -252,6 +252,22 @@ func TestRunRejectsConflictingModes(t *testing.T) {
 	}
 }
 
+func TestAppMainReturnsFailureForDiagnostics(t *testing.T) {
+	root := t.TempDir()
+	writeCLIFile(t, root, "go.mod", "module example.com/app\n")
+	writeCLIFile(t, root, "main.go", `package main
+
+func appMain(args []string, env []string) int {
+	go appMain(args, env)
+	return 0
+}
+`)
+	code := appMain([]string{"rtg", "-check", root}, nil)
+	if code == 0 {
+		t.Fatalf("appMain returned success for checker diagnostics")
+	}
+}
+
 func TestRunEmitUnitDefaultsToCacheDirectory(t *testing.T) {
 	root := t.TempDir()
 	writeCLIFile(t, root, "go.mod", "module example.com/app\n")
@@ -754,6 +770,11 @@ func Print() int {
 	unitDir := filepath.Join(root, "units")
 	if err := run(config{emitUnit: true, output: unitDir, inputs: []string{filepath.Join(root, "cmd", "app")}}); err != nil {
 		t.Fatalf("emit failed: %v", err)
+	}
+	for _, name := range []string{"example_com_app_cmd_app.rtg.go", "example_com_app_pkg_answer.rtg.go"} {
+		if _, err := os.Stat(filepath.Join(unitDir, name)); err != nil {
+			t.Fatalf("missing emitted unit %s: %v", name, err)
+		}
 	}
 	out := filepath.Join(root, "linked")
 	if err := run(config{link: true, output: out, inputs: []string{unitDir}}); err != nil {

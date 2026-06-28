@@ -194,6 +194,187 @@ func Use() int {
 	}
 }
 
+func TestPackageLowersValueReceiverMethodCallsOnPointers(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app/pkg",
+		Name:       "pkg",
+		Files: []load.File{
+			{
+				Path: "method.go",
+				Source: []byte(`package pkg
+
+type Items []int
+
+func (items Items) Add(v int) Items {
+	return append(items, v)
+}
+
+func Fill(items *Items) {
+	*items = items.Add(5)
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	if len(u.Decls) != 3 {
+		t.Fatalf("decls = %#v, want 3", u.Decls)
+	}
+	if !strings.Contains(u.Decls[2].Body, "*items = rtg_example_com_app_pkg_Items_Add(*items, 5)") {
+		t.Fatalf("value receiver pointer call was not lowered with dereference: %q", u.Decls[2].Body)
+	}
+}
+
+func TestPackageLowersSamePackageTypesInFunctionSignatures(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app/pkg",
+		Name:       "pkg",
+		Files: []load.File{
+			{
+				Path: "types.go",
+				Source: []byte(`package pkg
+
+type Item struct { Name string }
+type Items []Item
+
+func Copy(out Items, values Items) Items {
+	for i := 0; i < len(values); i++ {
+		value := values[i]
+		out = append(out, value)
+	}
+	return out
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	if len(u.Decls) != 3 {
+		t.Fatalf("decls = %#v, want 3", u.Decls)
+	}
+	body := u.Decls[2].Body
+	if strings.Contains(body, "out Items") || strings.Contains(body, "values Items") || strings.Contains(body, ") Items") {
+		t.Fatalf("function signature retained source type names: %q", body)
+	}
+	if !strings.Contains(body, "out rtg_example_com_app_pkg_Items, values rtg_example_com_app_pkg_Items") {
+		t.Fatalf("parameter types were not lowered: %q", body)
+	}
+	if !strings.Contains(body, ") rtg_example_com_app_pkg_Items") {
+		t.Fatalf("result type was not lowered: %q", body)
+	}
+}
+
+func TestPackageDoesNotRewriteCompositeFieldKeys(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app/pkg",
+		Name:       "pkg",
+		Files: []load.File{
+			{
+				Path: "keys.go",
+				Source: []byte(`package pkg
+
+type Unit struct { Package string }
+type Input struct { Name string }
+
+func Package(input Input) Unit {
+	return Unit{Package: input.Name}
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	body := u.Decls[2].Body
+	if !strings.Contains(body, "rtg_example_com_app_pkg_Unit{Package: input.Name}") {
+		t.Fatalf("composite field key was rewritten: %q", body)
+	}
+	if strings.Contains(body, "rtg_example_com_app_pkg_Package:") {
+		t.Fatalf("composite field key contains unit name: %q", body)
+	}
+}
+
+func TestPackageDoesNotRewriteStructFieldNames(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app/pkg",
+		Name:       "pkg",
+		Files: []load.File{
+			{
+				Path: "fields.go",
+				Source: []byte(`package pkg
+
+type Artifact struct {
+	Source []byte
+}
+
+func Source() []byte {
+	return nil
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	body := u.Decls[0].Body
+	if !strings.Contains(body, "Source []byte") {
+		t.Fatalf("struct field name was rewritten: %q", body)
+	}
+	if strings.Contains(body, "rtg_example_com_app_pkg_Source []byte") {
+		t.Fatalf("struct field contains unit name: %q", body)
+	}
+}
+
+func TestPackageLowersStructFieldTypeNames(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app/pkg",
+		Name:       "pkg",
+		Files: []load.File{
+			{
+				Path: "fields.go",
+				Source: []byte(`package pkg
+
+type Symbol struct {
+	Name string
+}
+
+type Unit struct {
+	Exports []Symbol
+	Primary Symbol
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	body := u.Decls[1].Body
+	if strings.Contains(body, "[]Symbol") || strings.Contains(body, "Primary Symbol") {
+		t.Fatalf("struct field type retained source name: %q", body)
+	}
+	if !strings.Contains(body, "Exports []rtg_example_com_app_pkg_Symbol") {
+		t.Fatalf("slice field type was not lowered: %q", body)
+	}
+	if !strings.Contains(body, "Primary rtg_example_com_app_pkg_Symbol") {
+		t.Fatalf("plain field type was not lowered: %q", body)
+	}
+	if strings.Contains(body, "rtg_example_com_app_pkg_Exports") || strings.Contains(body, "rtg_example_com_app_pkg_Primary") {
+		t.Fatalf("struct field name was rewritten: %q", body)
+	}
+}
+
 func TestPackageLowersImportedMethodCalls(t *testing.T) {
 	mainPkg := load.Package{
 		ImportPath: "example.com/app/main",
@@ -305,7 +486,7 @@ func main() {
 	if u.Decls[1].Name != "appMain" || u.Decls[1].Path != "rtg-entrypoint" {
 		t.Fatalf("synthetic entrypoint decl = %#v", u.Decls[1])
 	}
-	want := "func rtg_example_com_app_cmd_app_appMain() int {\n\trtg_example_com_app_cmd_app_main()\n\treturn 0\n}\n"
+	want := "func rtg_example_com_app_cmd_app_appMain(args []string, env []string) int {\n\trtg_example_com_app_cmd_app_main()\n\treturn 0\n}\n"
 	if u.Decls[1].Body != want {
 		t.Fatalf("synthetic entrypoint body = %q, want %q", u.Decls[1].Body, want)
 	}
@@ -1001,6 +1182,54 @@ func appMain() int {
 	}
 	if !strings.Contains(body, "if rtg_example_com_app_join(rtg_example_com_app_appMain_tmp_0, rtg_example_com_app_appMain_tmp_1) == 12 {") {
 		t.Fatalf("condition did not use lifted temps: %q", body)
+	}
+}
+
+func TestPackagePreservesShortCircuitConditionCallArguments(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+type Decl struct { Body string }
+type Unit struct { Decls []Decl }
+func declAt(u Unit, index int) Decl { return u.Decls[index] }
+func bodyAt(u Unit, index int) string {
+	decl := declAt(u, index)
+	return decl.Body
+}
+func check(value string) bool { return value != "" }
+func done(decl Decl) bool { return decl.Body == "" }
+func appMain(args []string, env []string) int {
+	var u Unit
+	currentDecl := -1
+	if currentDecl >= 0 && check(bodyAt(u, currentDecl)) && !done(declAt(u, currentDecl)) {
+		return 1
+	}
+	return 0
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	body := u.Decls[len(u.Decls)-1].Body
+	firstGuard := strings.Index(body, "if currentDecl >= 0 {")
+	bodyTemp := strings.Index(body, "rtg_example_com_app_appMain_tmp_0 := rtg_example_com_app_bodyAt(u, currentDecl)")
+	bodyGuard := strings.Index(body, "if rtg_example_com_app_check(rtg_example_com_app_appMain_tmp_0) {")
+	declTemp := strings.Index(body, "rtg_example_com_app_appMain_tmp_1 := rtg_example_com_app_declAt(u, currentDecl)")
+	declGuard := strings.Index(body, "if !rtg_example_com_app_done(rtg_example_com_app_appMain_tmp_1) {")
+	if firstGuard < 0 || bodyTemp < 0 || bodyGuard < 0 || declTemp < 0 || declGuard < 0 {
+		t.Fatalf("short-circuit condition was not lowered into nested guarded temps: %q", body)
+	}
+	if !(firstGuard < bodyTemp && bodyTemp < bodyGuard && bodyGuard < declTemp && declTemp < declGuard) {
+		t.Fatalf("short-circuit condition temps were emitted before their guards: %q", body)
 	}
 }
 

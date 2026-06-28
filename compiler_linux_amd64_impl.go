@@ -32,7 +32,7 @@ func compileLinuxAmd64(input []int, output int) int {
 		return 1
 	}
 	var meta rtgMeta
-	meta = rtgBuildMeta(&prog)
+	rtgBuildMetaInto(&prog, &meta)
 	if !meta.ok {
 		return 1
 	}
@@ -59,7 +59,7 @@ func compileWindowsAmd64(input []int, output int) int {
 		return 1
 	}
 	var meta rtgMeta
-	meta = rtgBuildMeta(&prog)
+	rtgBuildMetaInto(&prog, &meta)
 	if !meta.ok {
 		return 1
 	}
@@ -364,7 +364,8 @@ func rtgAsmImageAmd64(a *rtgAsm) []byte {
 	loadFileSize := a.codeOffset + len(a.code) + len(a.data)
 	memSize := loadFileSize + a.bssSize
 	sec := rtgBuildElf64SymbolSections(a, 0x400000, a.codeOffset, loadFileSize)
-	var out []byte
+	finalSize := sec.shoff + 448
+	out := make([]byte, 0, finalSize)
 	out = rtgAppendElfHeaderAmd64(out, a.codeOffset, loadFileSize, memSize, sec.shoff)
 	for i := 0; i < len(a.code); i++ {
 		out = append(out, a.code[i])

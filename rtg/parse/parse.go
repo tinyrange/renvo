@@ -7,25 +7,24 @@ import (
 	"j5.nz/rtg/rtg/scan"
 )
 
-type Error struct {
-	Path    string
-	Line    int
-	Column  int
-	Message string
-}
+type Error string
 
 func (e Error) Error() string {
-	return e.Path + ":" + strconv.Itoa(e.Line) + ":" + strconv.Itoa(e.Column) + ": " + e.Message
+	return string(e)
+}
+
+func newError(path string, line int, column int, message string) Error {
+	return Error(path + ":" + strconv.Itoa(line) + ":" + strconv.Itoa(column) + ": " + message)
 }
 
 type File struct {
-	Path           string
-	Source         []byte
-	PackageName    string
-	Imports        []Import
-	Decls          []Decl
-	Tokens         []scan.Token
-	TopLevelFuncs  []int
+	Path          string
+	Source        []byte
+	PackageName   string
+	Imports       []Import
+	Decls         []Decl
+	Tokens        []scan.Token
+	TopLevelFuncs []int
 }
 
 type Import struct {
@@ -52,13 +51,13 @@ func FileSource(path string, src []byte) (File, error) {
 		return File{}, scannerError(path, err)
 	}
 	if len(toks) < 3 || toks[0].Text != "package" || toks[1].Kind != scan.Ident {
-		return File{}, Error{Path: path, Line: 1, Column: 1, Message: "missing package declaration"}
+		return File{}, newError(path, 1, 1, "missing package declaration")
 	}
 	file := File{
-		Path:          path,
-		Source:        src,
-		PackageName:   toks[1].Text,
-		Tokens:        toks,
+		Path:        path,
+		Source:      src,
+		PackageName: toks[1].Text,
+		Tokens:      toks,
 	}
 	pos := 2
 	for pos < len(toks) && toks[pos].Text == "import" {
@@ -78,14 +77,29 @@ func FileSource(path string, src []byte) (File, error) {
 			}
 			continue
 		}
-		return File{}, Error{Path: path, Line: toks[pos].Line, Column: toks[pos].Column, Message: "expected top-level declaration"}
+		return File{}, newError(path, toks[pos].Line, toks[pos].Column, "expected top-level declaration")
 	}
 	return file, nil
 }
 
 func (file File) IsTopLevelFuncAt(pos int) bool {
-	for i := 0; i < len(file.TopLevelFuncs); i++ {
-		if file.TopLevelFuncs[i] == pos {
+	tokens := file.Tokens
+	if pos >= 0 && pos < len(tokens) {
+		if tokens[pos].Text == "func" && tokens[pos].Column == 1 {
+			return true
+		}
+		start := tokens[pos].Start
+		decls := file.Decls
+		for i := 0; i < len(decls); i++ {
+			decl := decls[i]
+			if decl.Kind == "func" && decl.Start == start {
+				return true
+			}
+		}
+	}
+	topLevelFuncs := file.TopLevelFuncs
+	for i := 0; i < len(topLevelFuncs); i++ {
+		if topLevelFuncs[i] == pos {
 			return true
 		}
 	}
@@ -108,16 +122,16 @@ func parseImportDecl(file *File, pos int) (int, error) {
 			if toks[pos].Kind == scan.String {
 				path, err := scan.UnquoteString(toks[pos].Text)
 				if err != nil {
-					return pos, Error{Path: file.Path, Line: toks[pos].Line, Column: toks[pos].Column, Message: err.Error()}
+					return pos, newError(file.Path, toks[pos].Line, toks[pos].Column, err.Error())
 				}
 				file.Imports = append(file.Imports, Import{Path: path, Alias: alias, Tok: toks[pos]})
 				pos++
 				continue
 			}
-			return pos, Error{Path: file.Path, Line: toks[pos].Line, Column: toks[pos].Column, Message: "malformed import declaration"}
+			return pos, newError(file.Path, toks[pos].Line, toks[pos].Column, "malformed import declaration")
 		}
 		if pos >= len(toks) || toks[pos].Text != ")" {
-			return pos, Error{Path: file.Path, Line: toks[pos-1].Line, Column: toks[pos-1].Column, Message: "unterminated import block"}
+			return pos, newError(file.Path, toks[pos-1].Line, toks[pos-1].Column, "unterminated import block")
 		}
 		return pos + 1, nil
 	}
@@ -132,7 +146,7 @@ func parseImportDecl(file *File, pos int) (int, error) {
 		if toks[pos].Kind == scan.String {
 			path, err := scan.UnquoteString(toks[pos].Text)
 			if err != nil {
-				return pos, Error{Path: file.Path, Line: toks[pos].Line, Column: toks[pos].Column, Message: err.Error()}
+				return pos, newError(file.Path, toks[pos].Line, toks[pos].Column, err.Error())
 			}
 			file.Imports = append(file.Imports, Import{Path: path, Alias: alias, Tok: toks[pos]})
 			return pos + 1, nil
@@ -142,15 +156,15 @@ func parseImportDecl(file *File, pos int) (int, error) {
 		}
 		pos++
 	}
-	return pos, Error{Path: file.Path, Line: toks[pos].Line, Column: toks[pos].Column, Message: "malformed import declaration"}
+	return pos, newError(file.Path, toks[pos].Line, toks[pos].Column, "malformed import declaration")
 }
 
 func scannerError(path string, err error) Error {
 	line, column, message, ok := splitPositionMessage(err.Error())
 	if !ok {
-		return Error{Path: path, Line: 1, Column: 1, Message: err.Error()}
+		return newError(path, 1, 1, err.Error())
 	}
-	return Error{Path: path, Line: line, Column: column, Message: message}
+	return newError(path, line, column, message)
 }
 
 func splitPositionMessage(message string) (int, int, string, bool) {
@@ -218,9 +232,13 @@ func parseDecl(file *File, pos int) int {
 		next := findNextTopLevel(toks, pos+1)
 		if kind == "var" || kind == "const" {
 			decl.Names, decl.NameToks = singleValueDeclNames(toks, namePos, next)
-			if len(decl.Names) > 0 {
-				decl.Name = decl.Names[0]
-				decl.NameTok = decl.NameToks[0]
+			names := decl.Names
+			nameToks := decl.NameToks
+			if len(names) > 0 {
+				firstName := names[0]
+				firstTok := nameToks[0]
+				decl.Name = firstName
+				decl.NameTok = firstTok
 			}
 		} else if namePos < len(toks) && toks[namePos].Kind == scan.Ident {
 			decl.Name = toks[namePos].Text
@@ -319,21 +337,24 @@ func groupedDeclNames(toks []scan.Token, open int, close int) ([]string, []scan.
 func DeclText(file File, decl Decl) string {
 	start := decl.Start
 	end := decl.End
+	source := file.Source
 	if start < 0 {
 		start = 0
 	}
-	if end > len(file.Source) {
-		end = len(file.Source)
+	if end > len(source) {
+		end = len(source)
 	}
-	for end > start && (file.Source[end-1] == ' ' || file.Source[end-1] == '\t' || file.Source[end-1] == '\r' || file.Source[end-1] == '\n') {
+	for end > start && (source[end-1] == ' ' || source[end-1] == '\t' || source[end-1] == '\r' || source[end-1] == '\n') {
 		end--
 	}
-	return string(file.Source[start:end])
+	return string(source[start:end])
 }
 
 func declEnd(file *File, next int) int {
-	if next >= 0 && next < len(file.Tokens) {
-		return file.Tokens[next].Start
+	tokens := file.Tokens
+	if next >= 0 && next < len(tokens) {
+		tok := tokens[next]
+		return tok.Start
 	}
 	return len(file.Source)
 }

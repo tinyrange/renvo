@@ -45,7 +45,12 @@ func HasPrefix(s string, prefix string) bool {
 	if n > len(s) {
 		return false
 	}
-	return s[0:n] == prefix
+	for i := 0; i < n; i++ {
+		if s[i] != prefix[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func HasSuffix(s string, suffix string) bool {
@@ -54,7 +59,12 @@ func HasSuffix(s string, suffix string) bool {
 		return false
 	}
 	start := len(s) - n
-	return s[start:len(s)] == suffix
+	for i := 0; i < n; i++ {
+		if s[start+i] != suffix[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func Contains(s string, substr string) bool {
@@ -72,7 +82,7 @@ func Index(s string, substr string) int {
 	limit := len(s) - n
 	i := 0
 	for i <= limit {
-		if s[i:i+n] == substr {
+		if equalAt(s, substr, i) {
 			return i
 		}
 		i = i + 1
@@ -90,7 +100,7 @@ func LastIndex(s string, substr string) int {
 	}
 	i := len(s) - n
 	for i >= 0 {
-		if s[i:i+n] == substr {
+		if equalAt(s, substr, i) {
 			return i
 		}
 		i = i - 1
@@ -128,7 +138,7 @@ func Count(s string, substr string) int {
 	count := 0
 	i := 0
 	for i <= len(s)-n {
-		if s[i:i+n] == substr {
+		if equalAt(s, substr, i) {
 			count = count + 1
 			i = i + n
 		} else {
@@ -150,6 +160,15 @@ func Repeat(s string, count int) string {
 		i = i + 1
 	}
 	return string(out)
+}
+
+func equalAt(s string, substr string, start int) bool {
+	for i := 0; i < len(substr); i++ {
+		if s[start+i] != substr[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TrimPrefix(s string, prefix string) string {

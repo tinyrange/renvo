@@ -61,16 +61,17 @@ type localNameTable []localNameRange
 
 type localTypeTable []localTypeEntry
 
-func (table symbolNameTable) unitName(name string) string {
+func symbolNameTableUnitName(table symbolNameTable, name string) string {
 	for i := 0; i < len(table); i++ {
-		if table[i].name == name {
-			return table[i].unitName
+		entry := table[i]
+		if entry.name == name {
+			return entry.unitName
 		}
 	}
 	return ""
 }
 
-func (table symbolNameTable) set(name string, unitName string) symbolNameTable {
+func symbolNameTableSet(table symbolNameTable, name string, unitName string) symbolNameTable {
 	for i := 0; i < len(table); i++ {
 		if table[i].name == name {
 			table[i].unitName = unitName
@@ -80,16 +81,18 @@ func (table symbolNameTable) set(name string, unitName string) symbolNameTable {
 	return append(table, symbolName{name: name, unitName: unitName})
 }
 
-func (table methodTable) lookup(name string) methodInfo {
+func methodTableLookup(table methodTable, name string) methodInfo {
 	for i := 0; i < len(table); i++ {
-		if table[i].lookup == name {
-			return table[i].info
+		entry := table[i]
+		if entry.lookup == name {
+			info := entry.info
+			return info
 		}
 	}
 	return methodInfo{}
 }
 
-func (table methodTable) set(name string, info methodInfo) methodTable {
+func methodTableSet(table methodTable, name string, info methodInfo) methodTable {
 	for i := 0; i < len(table); i++ {
 		if table[i].lookup == name {
 			table[i].info = info
@@ -99,10 +102,11 @@ func (table methodTable) set(name string, info methodInfo) methodTable {
 	return append(table, methodEntry{lookup: name, info: info})
 }
 
-func (table importSymbolTable) symbols(localName string) ([]unit.Symbol, bool) {
+func importSymbolTableSymbols(table importSymbolTable, localName string) ([]unit.Symbol, bool) {
 	for i := 0; i < len(table); i++ {
-		if table[i].localName == localName {
-			return table[i].symbols, true
+		entry := table[i]
+		if entry.localName == localName {
+			return entry.symbols, true
 		}
 	}
 	return nil, false
@@ -110,8 +114,9 @@ func (table importSymbolTable) symbols(localName string) ([]unit.Symbol, bool) {
 
 func symbolByName(symbols []unit.Symbol, name string) (unit.Symbol, bool) {
 	for i := 0; i < len(symbols); i++ {
-		if symbols[i].Name == name {
-			return symbols[i], true
+		sym := symbols[i]
+		if sym.Name == name {
+			return sym, true
 		}
 	}
 	return unit.Symbol{}, false
@@ -127,16 +132,18 @@ func setSymbol(symbols []unit.Symbol, sym unit.Symbol) []unit.Symbol {
 	return append(symbols, sym)
 }
 
-func (table localTypeTable) lookup(name string) localTypeInfo {
+func localTypeTableLookup(table localTypeTable, name string) localTypeInfo {
 	for i := 0; i < len(table); i++ {
-		if table[i].name == name {
-			return table[i].info
+		entry := table[i]
+		if entry.name == name {
+			info := entry.info
+			return info
 		}
 	}
 	return localTypeInfo{}
 }
 
-func (table localTypeTable) set(name string, info localTypeInfo) localTypeTable {
+func localTypeTableSet(table localTypeTable, name string, info localTypeInfo) localTypeTable {
 	for i := 0; i < len(table); i++ {
 		if table[i].name == name {
 			table[i].info = info
@@ -151,7 +158,7 @@ func Package(pkg load.Package) (unit.Unit, error) {
 }
 
 func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
-	u := unit.Unit{ImportPath: pkg.ImportPath, Package: pkg.Name}
+	u := unit.Unit{ImportPath: pkg.ImportPath, Package: pkg.Name, Entry: pkg.Entry}
 	u.Imports = appendStrings(u.Imports, pkg.Imports)
 	files := copyLoadFiles(pkg.Files)
 	sortFilesByPath(files)
@@ -162,7 +169,7 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 	var methodOrder []string
 	for fileIndex := 0; fileIndex < len(files); fileIndex++ {
 		file := files[fileIndex]
-		parsed, err := parse.FileSource(file.Path, file.Source)
+		parsed, err := parsedLoadFile(file)
 		if err != nil {
 			return unit.Unit{}, err
 		}
@@ -170,46 +177,49 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 			return unit.Unit{}, fmt.Errorf("%s: package name %s does not match loaded package %s", file.Path, parsed.PackageName, pkg.Name)
 		}
 		parsedFiles = append(parsedFiles, parsed)
-		for declIndex := 0; declIndex < len(parsed.Decls); declIndex++ {
-			decl := parsed.Decls[declIndex]
-			names := declTopNames(parsed, decl)
+		decls := parsed.Decls
+		for declIndex := 0; declIndex < len(decls); declIndex++ {
+			decl := &decls[declIndex]
+			names := declTopNames(&parsed, decl)
 			for nameIndex := 0; nameIndex < len(names); nameIndex++ {
 				name := names[nameIndex]
 				if name != "" && name != "_" {
-					if topNames.unitName(name) == "" {
+					if symbolNameTableUnitName(topNames, name) == "" {
 						topNameOrder = append(topNameOrder, name)
 					}
-					topNames = topNames.set(name, SymbolName(pkg.ImportPath, name))
+					topNames = symbolNameTableSet(topNames, name, SymbolName(pkg.ImportPath, name))
 				}
 			}
 		}
 	}
 	for fileIndex := 0; fileIndex < len(parsedFiles); fileIndex++ {
 		parsed := parsedFiles[fileIndex]
-		for declIndex := 0; declIndex < len(parsed.Decls); declIndex++ {
-			decl := parsed.Decls[declIndex]
+		decls := parsed.Decls
+		for declIndex := 0; declIndex < len(decls); declIndex++ {
+			decl := &decls[declIndex]
 			if decl.Kind != "func" || !decl.Receiver {
 				continue
 			}
-			info := methodDeclInfo(parsed, decl)
+			info := methodDeclInfo(&parsed, decl)
 			if info.name != "" {
-				info.unitName = topNames.unitName(info.name)
-				if methods.lookup(info.name).unitName == "" {
+				info.unitName = symbolNameTableUnitName(topNames, info.name)
+				existingMethod := methodTableLookup(methods, info.name)
+				if existingMethod.unitName == "" {
 					methodOrder = append(methodOrder, info.name)
 				}
-				methods = methods.set(info.name, info)
+				methods = methodTableSet(methods, info.name, info)
 			}
 		}
 	}
 	syntheticEntrypoint := false
-	if pkg.Name == "main" && topNames.unitName("appMain") == "" && topNames.unitName("main") != "" && hasOrdinaryMain(parsedFiles) {
+	if pkg.Name == "main" && symbolNameTableUnitName(topNames, "appMain") == "" && symbolNameTableUnitName(topNames, "main") != "" && hasOrdinaryMain(parsedFiles) {
 		topNameOrder = append(topNameOrder, "appMain")
-		topNames = topNames.set("appMain", SymbolName(pkg.ImportPath, "appMain"))
+		topNames = symbolNameTableSet(topNames, "appMain", SymbolName(pkg.ImportPath, "appMain"))
 		syntheticEntrypoint = true
 	}
 	for i := 0; i < len(topNameOrder); i++ {
 		name := topNameOrder[i]
-		unitName := topNames.unitName(name)
+		unitName := symbolNameTableUnitName(topNames, name)
 		if isExported(name) {
 			u.Exports = append(u.Exports, unit.Symbol{ImportPath: pkg.ImportPath, Name: name, UnitName: unitName})
 		}
@@ -218,14 +228,15 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 	depPackages := dependencyPackages(graph)
 	var seenRefs []string
 	for fileIndex := 0; fileIndex < len(parsedFiles); fileIndex++ {
-		parsed := parsedFiles[fileIndex]
-		importRefs, importRefNames := importReferenceMap(parsed, depPackages)
+		parsed := &parsedFiles[fileIndex]
+		importRefs, _ := importReferenceMap(parsed, depPackages)
 		importMethods, importMethodOrder := importMethodMap(parsed, depPackages)
 		allMethods := mergedMethodMap(methods, methodOrder, importMethods, importMethodOrder)
-		for declIndex := 0; declIndex < len(parsed.Decls); declIndex++ {
-			decl := parsed.Decls[declIndex]
+		decls := parsed.Decls
+		for declIndex := 0; declIndex < len(decls); declIndex++ {
+			decl := &decls[declIndex]
 			var refs []unit.Symbol
-			body := rewriteDecl(parsed, decl, topNames, topNameOrder, importRefs, importRefNames, allMethods, &refs)
+			body := rewriteDecl(parsed, decl, topNames, importRefs, allMethods, &refs)
 			if decl.Kind == "func" {
 				body = normalizeFunctionExpressions(body, unitDeclSymbol(decl, parsed, topNames))
 			}
@@ -237,27 +248,37 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 					u.References = append(u.References, ref)
 				}
 			}
-			u.Decls = append(u.Decls, unit.Decl{
-				Path:     unitPathForDecl(files, parsed.Path),
-				Kind:     decl.Kind,
-				Name:     unitDeclName(parsed, decl),
-				UnitName: unitDeclSymbol(decl, parsed, topNames),
-				Body:     body,
-			})
+			var outDecl unit.Decl
+			outDecl.Path = unitPathForDecl(files, parsed.Path)
+			outDecl.Kind = decl.Kind
+			outDecl.Name = unitDeclName(parsed, decl)
+			outDecl.UnitName = unitDeclSymbol(decl, parsed, topNames)
+			outDecl.Body = body
+			u.Decls = append(u.Decls, outDecl)
 		}
 	}
 	if syntheticEntrypoint {
-		u.Decls = append(u.Decls, syntheticAppMainDecl(topNames.unitName("appMain"), topNames.unitName("main")))
+		if containsString(pkg.Imports, "os") && !containsString(seenRefs, "os\x00Args") {
+			u.References = append(u.References, unit.Symbol{ImportPath: "os", Name: "Args", UnitName: SymbolName("os", "Args")})
+		}
+		u.Decls = append(u.Decls, syntheticAppMainDecl(symbolNameTableUnitName(topNames, "appMain"), symbolNameTableUnitName(topNames, "main"), containsString(pkg.Imports, "os")))
 	}
 	sortSymbolsByImportPathName(u.References)
 	return u, nil
+}
+
+func parsedLoadFile(file load.File) (parse.File, error) {
+	if file.Parsed.Path != "" {
+		return file.Parsed, nil
+	}
+	return parse.FileSource(file.Path, file.Source)
 }
 
 func sortFilesByPath(files []load.File) {
 	for i := 1; i < len(files); i++ {
 		value := files[i]
 		j := i - 1
-		for j >= 0 && files[j].Path > value.Path {
+		for j >= 0 && stringGreater(files[j].Path, value.Path) {
 			files[j+1] = files[j]
 			j = j - 1
 		}
@@ -269,7 +290,7 @@ func sortSymbolsByName(symbols []unit.Symbol) {
 	for i := 1; i < len(symbols); i++ {
 		value := symbols[i]
 		j := i - 1
-		for j >= 0 && symbols[j].Name > value.Name {
+		for j >= 0 && stringGreater(symbols[j].Name, value.Name) {
 			symbols[j+1] = symbols[j]
 			j = j - 1
 		}
@@ -291,12 +312,26 @@ func sortSymbolsByImportPathName(symbols []unit.Symbol) {
 
 func symbolAfterByImportPathName(a unit.Symbol, b unit.Symbol) bool {
 	if a.ImportPath == b.ImportPath {
-		return a.Name > b.Name
+		return stringGreater(a.Name, b.Name)
 	}
-	return a.ImportPath > b.ImportPath
+	return stringGreater(a.ImportPath, b.ImportPath)
 }
 
-func unitDeclName(file parse.File, decl parse.Decl) string {
+func stringGreater(a string, b string) bool {
+	i := 0
+	for i < len(a) && i < len(b) {
+		if a[i] > b[i] {
+			return true
+		}
+		if a[i] < b[i] {
+			return false
+		}
+		i = i + 1
+	}
+	return len(a) > len(b)
+}
+
+func unitDeclName(file *parse.File, decl *parse.Decl) string {
 	if decl.Kind == "func" && decl.Receiver {
 		return methodDeclName(file, decl)
 	}
@@ -310,18 +345,18 @@ func unitDeclName(file parse.File, decl parse.Decl) string {
 	return strings.Join(names, ", ")
 }
 
-func unitDeclSymbol(decl parse.Decl, file parse.File, topNames symbolNameTable) string {
+func unitDeclSymbol(decl *parse.Decl, file *parse.File, topNames symbolNameTable) string {
 	if decl.Kind == "func" && decl.Receiver {
-		return topNames.unitName(methodDeclName(file, decl))
+		return symbolNameTableUnitName(topNames, methodDeclName(file, decl))
 	}
 	names := declNames(decl)
 	if len(names) != 1 {
 		return ""
 	}
-	return topNames.unitName(names[0])
+	return symbolNameTableUnitName(topNames, names[0])
 }
 
-func declTopNames(file parse.File, decl parse.Decl) []string {
+func declTopNames(file *parse.File, decl *parse.Decl) []string {
 	if decl.Kind == "func" && decl.Receiver {
 		name := methodDeclName(file, decl)
 		if name == "" {
@@ -332,16 +367,28 @@ func declTopNames(file parse.File, decl parse.Decl) []string {
 	return declNames(decl)
 }
 
-func methodDeclName(file parse.File, decl parse.Decl) string {
-	info := methodDeclInfo(file, decl)
+func methodDeclName(file *parse.File, decl *parse.Decl) string {
+	info := methodDeclInfoFromTokens(file.Tokens, decl)
 	if info.receiverType == "" || decl.Name == "" {
 		return decl.Name
 	}
 	return info.name
 }
 
-func methodDeclInfo(file parse.File, decl parse.Decl) methodInfo {
-	receiver := methodReceiverTypeName(file, decl)
+func methodDeclInfo(file *parse.File, decl *parse.Decl) methodInfo {
+	return methodDeclInfoFromTokens(file.Tokens, decl)
+}
+
+func methodDeclNameFromTokens(toks []scan.Token, decl *parse.Decl) string {
+	info := methodDeclInfoFromTokens(toks, decl)
+	if info.receiverType == "" || decl.Name == "" {
+		return decl.Name
+	}
+	return info.name
+}
+
+func methodDeclInfoFromTokens(toks []scan.Token, decl *parse.Decl) methodInfo {
+	receiver := methodReceiverTypeNameFromTokens(toks, decl)
 	name := decl.Name
 	if receiver != "" && decl.Name != "" {
 		name = receiver + "_" + decl.Name
@@ -349,12 +396,15 @@ func methodDeclInfo(file parse.File, decl parse.Decl) methodInfo {
 	return methodInfo{
 		name:            name,
 		receiverType:    receiver,
-		pointerReceiver: methodReceiverIsPointer(file, decl),
+		pointerReceiver: methodReceiverIsPointerFromTokens(toks, decl),
 	}
 }
 
-func methodReceiverTypeName(file parse.File, decl parse.Decl) string {
-	toks := file.Tokens
+func methodReceiverTypeName(file *parse.File, decl *parse.Decl) string {
+	return methodReceiverTypeNameFromTokens(file.Tokens, decl)
+}
+
+func methodReceiverTypeNameFromTokens(toks []scan.Token, decl *parse.Decl) string {
 	start := tokenIndexAt(toks, decl.Start)
 	if start < 0 || start+1 >= len(toks) || toks[start+1].Text != "(" {
 		return ""
@@ -372,8 +422,11 @@ func methodReceiverTypeName(file parse.File, decl parse.Decl) string {
 	return name
 }
 
-func methodReceiverIsPointer(file parse.File, decl parse.Decl) bool {
-	toks := file.Tokens
+func methodReceiverIsPointer(file *parse.File, decl *parse.Decl) bool {
+	return methodReceiverIsPointerFromTokens(file.Tokens, decl)
+}
+
+func methodReceiverIsPointerFromTokens(toks []scan.Token, decl *parse.Decl) bool {
 	start := tokenIndexAt(toks, decl.Start)
 	if start < 0 || start+1 >= len(toks) || toks[start+1].Text != "(" {
 		return false
@@ -420,21 +473,29 @@ func isOrdinaryMainDecl(file parse.File, decl parse.Decl) bool {
 	return false
 }
 
-func syntheticAppMainDecl(appMainUnitName string, mainUnitName string) unit.Decl {
+func syntheticAppMainDecl(appMainUnitName string, mainUnitName string, setOSArgs bool) unit.Decl {
+	body := "func " + appMainUnitName + "(args []string, env []string) int {\n"
+	if setOSArgs {
+		body = body + "\t" + SymbolName("os", "Args") + " = args\n"
+	}
+	body = body + "\t" + mainUnitName + "()\n\treturn 0\n}\n"
 	return unit.Decl{
 		Path:     "rtg-entrypoint",
 		Kind:     "func",
 		Name:     "appMain",
 		UnitName: appMainUnitName,
-		Body:     "func " + appMainUnitName + "() int {\n\t" + mainUnitName + "()\n\treturn 0\n}\n",
+		Body:     body,
 	}
 }
 
-func declNames(decl parse.Decl) []string {
-	if len(decl.Names) > 0 {
+func declNames(decl *parse.Decl) []string {
+	if len(decl.Names) > 1 {
 		return decl.Names
 	}
 	if decl.Name == "" {
+		if len(decl.Names) > 0 {
+			return decl.Names
+		}
 		return nil
 	}
 	return []string{decl.Name}
@@ -499,19 +560,21 @@ func copyLoadFiles(values []load.File) []load.File {
 
 func appendExpressionTemps(out []expressionTemp, values []expressionTemp) []expressionTemp {
 	for i := 0; i < len(values); i++ {
-		out = append(out, values[i])
+		value := values[i]
+		out = append(out, value)
 	}
 	return out
 }
 
 func appendExpressionReplacements(out []expressionReplacement, values []expressionReplacement) []expressionReplacement {
 	for i := 0; i < len(values); i++ {
-		out = append(out, values[i])
+		value := values[i]
+		out = append(out, value)
 	}
 	return out
 }
 
-func rewriteDecl(file parse.File, decl parse.Decl, topNames symbolNameTable, topNameOrder []string, importRefs importSymbolTable, importRefNames []string, methods methodTable, refs *[]unit.Symbol) string {
+func rewriteDecl(file *parse.File, decl *parse.Decl, topNames symbolNameTable, importRefs importSymbolTable, methods methodTable, refs *[]unit.Symbol) string {
 	start := decl.Start
 	end := decl.End
 	if start < 0 {
@@ -524,15 +587,23 @@ func rewriteDecl(file parse.File, decl parse.Decl, topNames symbolNameTable, top
 		end--
 	}
 	var out []byte
-	localNames := localNamesForDecl(file, decl, localRewriteNames(topNames, topNameOrder, importRefs, importRefNames))
-	localTypes := localTypesForDecl(file, decl)
+	localNames := localNamesForDecl(file, decl, topNames)
+	var importNames symbolNameTable
+	for i := 0; i < len(importRefs); i++ {
+		name := importRefs[i].localName
+		importNames = symbolNameTableSet(importNames, name, name)
+	}
+	importLocalNames := localNamesForDecl(file, decl, importNames)
+	var localTypes localTypeTable
+	localTypes = localTypesForDecl(file, decl)
 	cursor := start
 	if decl.Kind == "func" && decl.Receiver {
 		cursor = appendMethodDeclPrefix(file, decl, topNames, &out)
 	}
 	prevText := ""
-	for i := 0; i < len(file.Tokens); i++ {
-		tok := file.Tokens[i]
+	tokens := file.Tokens
+	for i := 0; i < len(tokens); i++ {
+		tok := tokens[i]
 		if tok.End <= cursor {
 			prevText = tok.Text
 			continue
@@ -543,23 +614,27 @@ func rewriteDecl(file parse.File, decl parse.Decl, topNames symbolNameTable, top
 		if tok.Start > cursor {
 			out = appendBytes(out, file.Source[cursor:tok.Start])
 		}
-		replacement := ""
-		if tok.Kind == scan.Ident && i+2 < len(file.Tokens) && file.Tokens[i+1].Text == "." && file.Tokens[i+2].Kind == scan.Ident {
-			if i+3 < len(file.Tokens) && file.Tokens[i+3].Text == "(" {
-				if receiverType := localTypes.lookup(tok.Text); receiverType.name != "" {
-					methodName := methodLookupName(receiverType, file.Tokens[i+2].Text)
-					if method := methods.lookup(methodName); method.unitName != "" {
-						open := file.Tokens[i+3]
-						close := findClose(file.Tokens, i+3, "(", ")")
+		if tok.Kind == scan.Ident && i+2 < len(tokens) && tokens[i+1].Text == "." && tokens[i+2].Kind == scan.Ident {
+			if i+3 < len(tokens) && tokens[i+3].Text == "(" {
+				receiverType := localTypeTableLookup(localTypes, tok.Text)
+				if receiverType.name != "" {
+					memberTok := tokens[i+2]
+					methodName := methodLookupName(receiverType, memberTok.Text)
+					method := methodTableLookup(methods, methodName)
+					if method.unitName != "" {
+						open := tokens[i+3]
+						close := findClose(tokens, i+3, "(", ")")
 						if method.importPath != "" {
-							*refs = append(*refs, unit.Symbol{ImportPath: method.importPath, Name: method.name, UnitName: method.unitName})
+							appendUnitSymbolRef(refs, unit.Symbol{ImportPath: method.importPath, Name: method.name, UnitName: method.unitName})
 						}
 						receiverArg := tok.Text
 						if method.pointerReceiver && !receiverType.pointer {
 							receiverArg = "&" + receiverArg
+						} else if !method.pointerReceiver && receiverType.pointer {
+							receiverArg = "*" + receiverArg
 						}
-						replacement = method.unitName + "(" + receiverArg
-						if close < 0 || open.End < file.Tokens[close].Start {
+						replacement := method.unitName + "(" + receiverArg
+						if close < 0 || open.End < tokens[close].Start {
 							replacement = replacement + ", "
 						}
 						out = appendString(out, replacement)
@@ -570,14 +645,15 @@ func rewriteDecl(file parse.File, decl parse.Decl, topNames symbolNameTable, top
 					}
 				}
 			}
-			if symbols, ok := importRefs.symbols(tok.Text); ok && !isLocalNameAt(localNames, tok.Text, tok.Start) {
-				member := file.Tokens[i+2]
-				if sym, ok := symbolByName(symbols, member.Text); ok {
-					replacement = sym.UnitName
+			symbols, symbolsOK := importSymbolTableSymbols(importRefs, tok.Text)
+			if symbolsOK && !isLocalNameAt(importLocalNames, tok.Text, tok.Start) {
+				member := tokens[i+2]
+				sym, symOK := symbolByName(symbols, member.Text)
+				if symOK {
 					if sym.ImportPath != "" {
-						*refs = append(*refs, sym)
+						appendUnitSymbolRef(refs, sym)
 					}
-					out = appendString(out, replacement)
+					out = appendString(out, sym.UnitName)
 					cursor = member.End
 					prevText = member.Text
 					i += 2
@@ -585,14 +661,16 @@ func rewriteDecl(file parse.File, decl parse.Decl, topNames symbolNameTable, top
 				}
 			}
 		}
-		if tok.Kind == scan.Ident && prevText != "." && !isLocalNameAt(localNames, tok.Text, tok.Start) {
-			replacement = topNames.unitName(tok.Text)
+		if tok.Kind == scan.Ident && prevText != "." && !isCompositeKey(tokens, i) && !isStructFieldName(tokens, i) && !isLocalNameAt(localNames, tok.Text, tok.Start) {
+			unitName := symbolNameTableUnitName(topNames, tok.Text)
+			if unitName != "" {
+				out = appendString(out, unitName)
+				cursor = tok.End
+				prevText = tok.Text
+				continue
+			}
 		}
-		if replacement != "" {
-			out = appendString(out, replacement)
-		} else {
-			out = appendBytes(out, file.Source[tok.Start:tok.End])
-		}
+		out = appendBytes(out, file.Source[tok.Start:tok.End])
 		cursor = tok.End
 		prevText = tok.Text
 	}
@@ -600,6 +678,53 @@ func rewriteDecl(file parse.File, decl parse.Decl, topNames symbolNameTable, top
 		out = appendBytes(out, file.Source[cursor:end])
 	}
 	return string(out)
+}
+
+func appendUnitSymbolRef(refs *[]unit.Symbol, sym unit.Symbol) {
+	values := *refs
+	values = append(values, sym)
+	*refs = values
+}
+
+func isCompositeKey(toks []scan.Token, pos int) bool {
+	return pos+1 < len(toks) && toks[pos+1].Text == ":"
+}
+
+func isStructFieldName(toks []scan.Token, pos int) bool {
+	if pos+1 >= len(toks) || !isTypeStartAfterName(toks, pos, len(toks)) {
+		return false
+	}
+	if pos > 0 && toks[pos-1].Text == "type" {
+		return false
+	}
+	if !startsStructFieldName(toks, pos) {
+		return false
+	}
+	depth := 0
+	for i := pos - 1; i >= 0; i-- {
+		if toks[i].Text == "}" {
+			depth++
+			continue
+		}
+		if toks[i].Text == "{" {
+			if depth == 0 {
+				return i > 0 && toks[i-1].Text == "struct"
+			}
+			depth--
+		}
+	}
+	return false
+}
+
+func startsStructFieldName(toks []scan.Token, pos int) bool {
+	if pos <= 0 {
+		return false
+	}
+	prev := toks[pos-1]
+	if prev.Text == "{" || prev.Text == ";" || prev.Text == "," {
+		return true
+	}
+	return prev.Line != toks[pos].Line
 }
 
 func methodLookupName(receiver localTypeInfo, methodName string) string {
@@ -610,7 +735,7 @@ func methodLookupName(receiver localTypeInfo, methodName string) string {
 	return name
 }
 
-func appendMethodDeclPrefix(file parse.File, decl parse.Decl, topNames symbolNameTable, out *[]byte) int {
+func appendMethodDeclPrefix(file *parse.File, decl *parse.Decl, topNames symbolNameTable, out *[]byte) int {
 	toks := file.Tokens
 	start := tokenIndexAt(toks, decl.Start)
 	if start < 0 || start+1 >= len(toks) || toks[start+1].Text != "(" {
@@ -630,22 +755,34 @@ func appendMethodDeclPrefix(file parse.File, decl parse.Decl, topNames symbolNam
 	if paramsClose < 0 {
 		return decl.Start
 	}
-	unitName := topNames.unitName(methodDeclName(file, decl))
+	unitName := symbolNameTableUnitName(topNames, methodDeclNameFromTokens(toks, decl))
 	if unitName == "" {
 		return decl.Start
 	}
-	*out = appendString(*out, "func ")
-	*out = appendString(*out, unitName)
-	*out = append(*out, '(')
-	*out = appendString(*out, rewriteReceiverSegment(file, receiverOpen+1, receiverClose, topNames))
+	appendStringRef(out, "func ")
+	appendStringRef(out, unitName)
+	appendByteRef(out, '(')
+	appendStringRef(out, rewriteReceiverSegment(file, receiverOpen+1, receiverClose, topNames))
 	if paramsOpen+1 < paramsClose {
-		*out = appendString(*out, ", ")
+		appendStringRef(out, ", ")
 		return toks[paramsOpen].End
 	}
 	return toks[paramsClose].Start
 }
 
-func rewriteReceiverSegment(file parse.File, start int, end int, topNames symbolNameTable) string {
+func appendStringRef(out *[]byte, s string) {
+	values := *out
+	values = appendString(values, s)
+	*out = values
+}
+
+func appendByteRef(out *[]byte, c byte) {
+	values := *out
+	values = append(values, c)
+	*out = values
+}
+
+func rewriteReceiverSegment(file *parse.File, start int, end int, topNames symbolNameTable) string {
 	toks := file.Tokens
 	var out []byte
 	cursor := toks[start].Start
@@ -654,15 +791,15 @@ func rewriteReceiverSegment(file parse.File, start int, end int, topNames symbol
 		if tok.Start > cursor {
 			out = appendBytes(out, file.Source[cursor:tok.Start])
 		}
-		replacement := ""
 		if tok.Kind == scan.Ident && (i > start || !receiverSegmentHasName(toks, start, end)) {
-			replacement = topNames.unitName(tok.Text)
+			unitName := symbolNameTableUnitName(topNames, tok.Text)
+			if unitName != "" {
+				out = appendString(out, unitName)
+				cursor = tok.End
+				continue
+			}
 		}
-		if replacement != "" {
-			out = appendString(out, replacement)
-		} else {
-			out = appendBytes(out, file.Source[tok.Start:tok.End])
-		}
+		out = appendBytes(out, file.Source[tok.Start:tok.End])
 		cursor = tok.End
 	}
 	if end > start && cursor < toks[end-1].End {
@@ -730,19 +867,35 @@ type classicForPostStatement struct {
 	end       int
 }
 
+type shortCircuitIfStatement struct {
+	token     int
+	condStart int
+	condEnd   int
+	openBrace int
+	end       int
+	operands  []expressionRange
+}
+
 func normalizeFunctionExpressions(body string, unitName string) string {
+	tempIndex := 0
+	return normalizeFunctionExpressionsWithTemp(body, unitName, &tempIndex)
+}
+
+func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempIndex *int) string {
 	toks, err := scan.Tokens([]byte(body))
 	if err != nil {
 		return body
 	}
+	if !tokenSpansMatchSource(body, toks) {
+		return body
+	}
 	var out []byte
 	cursor := 0
-	tempIndex := 0
 	for i := 0; i < len(toks); i++ {
 		short, ok := normalizationConditionalShortStatement(toks, i)
 		if ok {
-			initTemps, initReplacements := normalizeExpression(body, toks, short.initStart, short.semi, unitName, &tempIndex)
-			condTemps, condReplacements := normalizeExpression(body, toks, short.condStart, short.condEnd, unitName, &tempIndex)
+			initTemps, initReplacements := normalizeExpression(body, toks, short.initStart, short.semi, unitName, tempIndex)
+			condTemps, condReplacements := normalizeExpression(body, toks, short.condStart, short.condEnd, unitName, tempIndex)
 			insertStart := statementInsertStart(body, toks[short.token].Start)
 			out = appendString(out, body[cursor:insertStart])
 			indent := statementIndent(body, toks[short.token].Start)
@@ -786,9 +939,9 @@ func normalizeFunctionExpressions(body string, unitName string) string {
 		post, ok := normalizationClassicForPostStatement(toks, i)
 		if ok {
 			if expressionContainsCall(toks, post.postStart, post.postEnd) {
-				initTemps, initReplacements := normalizeExpression(body, toks, post.initStart, post.initEnd, unitName, &tempIndex)
-				condTemps, condReplacements := normalizeExpression(body, toks, post.condStart, post.condEnd, unitName, &tempIndex)
-				postTemps, postReplacements := normalizeExpression(body, toks, post.postStart, post.postEnd, unitName, &tempIndex)
+				initTemps, initReplacements := normalizeExpression(body, toks, post.initStart, post.initEnd, unitName, tempIndex)
+				condTemps, condReplacements := normalizeExpression(body, toks, post.condStart, post.condEnd, unitName, tempIndex)
+				postTemps, postReplacements := normalizeExpression(body, toks, post.postStart, post.postEnd, unitName, tempIndex)
 				insertStart := statementInsertStart(body, toks[post.token].Start)
 				out = appendString(out, body[cursor:insertStart])
 				indent := statementIndent(body, toks[post.token].Start)
@@ -858,7 +1011,7 @@ func normalizeFunctionExpressions(body string, unitName string) string {
 		}
 		classic, ok := normalizationClassicForConditionStatement(toks, i)
 		if ok {
-			temps, replacements := normalizeExpression(body, toks, classic.condStart, classic.condEnd, unitName, &tempIndex)
+			temps, replacements := normalizeExpression(body, toks, classic.condStart, classic.condEnd, unitName, tempIndex)
 			if len(temps) > 0 {
 				condition := applyExpressionReplacements(body, toks[classic.condStart].Start, toks[classic.condEnd-1].End, replacements)
 				out = appendString(out, body[cursor:toks[classic.condStart].Start])
@@ -887,11 +1040,21 @@ func normalizeFunctionExpressions(body string, unitName string) string {
 				continue
 			}
 		}
+		shortCircuit, ok := normalizationShortCircuitIfStatement(toks, i)
+		if ok {
+			insertStart := statementInsertStart(body, toks[shortCircuit.token].Start)
+			out = appendString(out, body[cursor:insertStart])
+			indent := statementIndent(body, toks[shortCircuit.token].Start)
+			appendShortCircuitIf(&out, body, toks, shortCircuit, indent, unitName, tempIndex)
+			cursor = toks[shortCircuit.end].End
+			i = shortCircuit.end
+			continue
+		}
 		stmt, ok := normalizationStatement(toks, i)
 		if !ok {
 			continue
 		}
-		temps, replacements := normalizeExpression(body, toks, stmt.exprStart, stmt.exprEnd, unitName, &tempIndex)
+		temps, replacements := normalizeExpression(body, toks, stmt.exprStart, stmt.exprEnd, unitName, tempIndex)
 		if len(temps) == 0 {
 			continue
 		}
@@ -943,7 +1106,74 @@ func normalizeFunctionExpressions(body string, unitName string) string {
 		return body
 	}
 	out = appendString(out, body[cursor:])
+	if strings.HasPrefix(strings.TrimSpace(body), "func ") && !trimmedBytesHavePrefix(out, "func ") {
+		return body
+	}
 	return string(out)
+}
+
+func appendShortCircuitIf(out *[]byte, body string, toks []scan.Token, stmt shortCircuitIfStatement, indent string, unitName string, tempIndex *int) {
+	currentIndent := indent
+	for i := 0; i < len(stmt.operands); i++ {
+		operand := stmt.operands[i]
+		temps, replacements := normalizeExpression(body, toks, operand.start, operand.end, unitName, tempIndex)
+		for j := 0; j < len(temps); j++ {
+			temp := temps[j]
+			appendStringRef(out, currentIndent)
+			appendStringRef(out, temp.name)
+			appendStringRef(out, " := ")
+			appendStringRef(out, temp.expr)
+			appendByteRef(out, '\n')
+		}
+		condition := strings.TrimSpace(applyExpressionReplacements(body, toks[operand.start].Start, toks[operand.end-1].End, replacements))
+		appendStringRef(out, currentIndent)
+		appendStringRef(out, "if ")
+		appendStringRef(out, condition)
+		appendStringRef(out, " {\n")
+		currentIndent = currentIndent + "\t"
+	}
+	innerBody := normalizeFunctionExpressionsWithTemp(body[toks[stmt.openBrace].End:toks[stmt.end].Start], unitName, tempIndex)
+	appendStringRef(out, innerBody)
+	if len(*out) == 0 || (*out)[len(*out)-1] != '\n' {
+		appendByteRef(out, '\n')
+	}
+	for i := len(stmt.operands) - 1; i >= 0; i-- {
+		currentIndent = currentIndent[:len(currentIndent)-1]
+		appendStringRef(out, currentIndent)
+		appendByteRef(out, '}')
+		if i > 0 {
+			appendByteRef(out, '\n')
+		}
+	}
+}
+
+func trimmedBytesHavePrefix(body []byte, prefix string) bool {
+	start := 0
+	for start < len(body) && (body[start] == ' ' || body[start] == '\t' || body[start] == '\r' || body[start] == '\n') {
+		start++
+	}
+	if start+len(prefix) > len(body) {
+		return false
+	}
+	for i := 0; i < len(prefix); i++ {
+		if body[start+i] != prefix[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func tokenSpansMatchSource(body string, toks []scan.Token) bool {
+	for i := 0; i < len(toks); i++ {
+		tok := toks[i]
+		if tok.Start < 0 || tok.End < tok.Start || tok.End > len(body) {
+			return false
+		}
+		if body[tok.Start:tok.End] != tok.Text {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizationConditionalShortStatement(toks []scan.Token, pos int) (conditionalShortStatement, bool) {
@@ -963,16 +1193,50 @@ func normalizationConditionalShortStatement(toks []scan.Token, pos int) (conditi
 	if end <= exprEnd {
 		return conditionalShortStatement{}, false
 	}
-	return conditionalShortStatement{
-		token:     pos,
-		initStart: exprStart,
-		semi:      semi,
-		condStart: semi + 1,
-		condEnd:   exprEnd,
-		openBrace: exprEnd,
-		end:       end,
-		kind:      toks[pos].Text,
-	}, true
+	posTok := toks[pos]
+	var stmt conditionalShortStatement
+	stmt.token = pos
+	stmt.initStart = exprStart
+	stmt.semi = semi
+	stmt.condStart = semi + 1
+	stmt.condEnd = exprEnd
+	stmt.openBrace = exprEnd
+	stmt.end = end
+	stmt.kind = posTok.Text
+	return stmt, true
+}
+
+func normalizationShortCircuitIfStatement(toks []scan.Token, pos int) (shortCircuitIfStatement, bool) {
+	if toks[pos].Text != "if" {
+		return shortCircuitIfStatement{}, false
+	}
+	exprStart := pos + 1
+	exprEnd := conditionExpressionEnd(toks, pos)
+	if exprEnd <= exprStart || exprEnd >= len(toks) || toks[exprEnd].Text != "{" {
+		return shortCircuitIfStatement{}, false
+	}
+	if expressionContainsTopLevelSemicolon(toks, exprStart, exprEnd) {
+		return shortCircuitIfStatement{}, false
+	}
+	closeBrace := findClose(toks, exprEnd, "{", "}")
+	if closeBrace <= exprEnd {
+		return shortCircuitIfStatement{}, false
+	}
+	if closeBrace+1 < len(toks) && toks[closeBrace+1].Text == "else" {
+		return shortCircuitIfStatement{}, false
+	}
+	operands, ok := topLevelAndOperands(toks, exprStart, exprEnd)
+	if !ok || len(operands) < 2 {
+		return shortCircuitIfStatement{}, false
+	}
+	var stmt shortCircuitIfStatement
+	stmt.token = pos
+	stmt.condStart = exprStart
+	stmt.condEnd = exprEnd
+	stmt.openBrace = exprEnd
+	stmt.end = closeBrace
+	stmt.operands = operands
+	return stmt, true
 }
 
 func normalizationClassicForPostStatement(toks []scan.Token, pos int) (classicForPostStatement, bool) {
@@ -996,17 +1260,17 @@ func normalizationClassicForPostStatement(toks []scan.Token, pos int) (classicFo
 	if end <= exprEnd || containsTokenText(toks, exprEnd+1, end, "continue") {
 		return classicForPostStatement{}, false
 	}
-	return classicForPostStatement{
-		token:     pos,
-		initStart: exprStart,
-		initEnd:   firstSemi,
-		condStart: firstSemi + 1,
-		condEnd:   secondSemi,
-		postStart: secondSemi + 1,
-		postEnd:   exprEnd,
-		openBrace: exprEnd,
-		end:       end,
-	}, true
+	var stmt classicForPostStatement
+	stmt.token = pos
+	stmt.initStart = exprStart
+	stmt.initEnd = firstSemi
+	stmt.condStart = firstSemi + 1
+	stmt.condEnd = secondSemi
+	stmt.postStart = secondSemi + 1
+	stmt.postEnd = exprEnd
+	stmt.openBrace = exprEnd
+	stmt.end = end
+	return stmt, true
 }
 
 func normalizationClassicForConditionStatement(toks []scan.Token, pos int) (classicForConditionStatement, bool) {
@@ -1026,12 +1290,12 @@ func normalizationClassicForConditionStatement(toks []scan.Token, pos int) (clas
 	if secondSemi < 0 || secondSemi <= firstSemi+1 {
 		return classicForConditionStatement{}, false
 	}
-	return classicForConditionStatement{
-		token:     pos,
-		condStart: firstSemi + 1,
-		condEnd:   secondSemi,
-		openBrace: exprEnd,
-	}, true
+	var stmt classicForConditionStatement
+	stmt.token = pos
+	stmt.condStart = firstSemi + 1
+	stmt.condEnd = secondSemi
+	stmt.openBrace = exprEnd
+	return stmt, true
 }
 
 func normalizationStatement(toks []scan.Token, pos int) (expressionStatement, bool) {
@@ -1345,6 +1609,38 @@ type expressionRange struct {
 	end   int
 }
 
+func topLevelAndOperands(toks []scan.Token, start int, end int) ([]expressionRange, bool) {
+	var out []expressionRange
+	operandStart := start
+	paren := 0
+	brack := 0
+	brace := 0
+	sawAnd := false
+	for i := start; i < end; i++ {
+		tok := toks[i]
+		if paren == 0 && brack == 0 && brace == 0 {
+			if tok.Text == "||" {
+				return nil, false
+			}
+			if tok.Text == "&&" {
+				if operandStart >= i {
+					return nil, false
+				}
+				out = append(out, expressionRange{start: operandStart, end: i})
+				operandStart = i + 1
+				sawAnd = true
+				continue
+			}
+		}
+		updateExpressionDepth(tok.Text, &paren, &brack, &brace)
+	}
+	if !sawAnd || operandStart >= end {
+		return nil, false
+	}
+	out = append(out, expressionRange{start: operandStart, end: end})
+	return out, true
+}
+
 func indexBoundRanges(toks []scan.Token, start int, end int) []expressionRange {
 	if start >= end {
 		return nil
@@ -1376,6 +1672,10 @@ func normalizeOneCallArguments(body string, toks []scan.Token, start int, end in
 	for i := start; i <= end; i++ {
 		if i == end || (paren == 0 && brack == 0 && brace == 0 && toks[i].Text == ",") {
 			if argStart < i {
+				if expressionStartsCompositeLiteral(toks, argStart, i) {
+					argStart = i + 1
+					continue
+				}
 				argTemps, argReplacements := normalizeExpression(body, toks, argStart, i, unitName, tempIndex)
 				temps = appendExpressionTemps(temps, argTemps)
 				exprStart := toks[argStart].Start
@@ -1397,6 +1697,19 @@ func normalizeOneCallArguments(body string, toks []scan.Token, start int, end in
 		updateExpressionDepth(toks[i].Text, &paren, &brack, &brace)
 	}
 	return temps, replacements
+}
+
+func expressionStartsCompositeLiteral(toks []scan.Token, start int, end int) bool {
+	if start+1 >= end || toks[start].Kind != scan.Ident {
+		return false
+	}
+	if toks[start+1].Text == "{" {
+		return true
+	}
+	if start+3 < end && toks[start+1].Text == "." && toks[start+2].Kind == scan.Ident && toks[start+3].Text == "{" {
+		return true
+	}
+	return false
 }
 
 func nextExpressionTempName(body string, unitName string, tempIndex *int) string {
@@ -1539,21 +1852,7 @@ func statementInsertStart(body string, pos int) int {
 	return lineStart
 }
 
-func localRewriteNames(topNames symbolNameTable, topNameOrder []string, importRefs importSymbolTable, importRefNames []string) symbolNameTable {
-	var names symbolNameTable
-	for i := 0; i < len(topNameOrder); i++ {
-		name := topNameOrder[i]
-		unitName := topNames.unitName(name)
-		names = names.set(name, unitName)
-	}
-	for i := 0; i < len(importRefNames); i++ {
-		name := importRefNames[i]
-		names = names.set(name, name)
-	}
-	return names
-}
-
-func localNamesForDecl(file parse.File, decl parse.Decl, namesOfInterest symbolNameTable) localNameTable {
+func localNamesForDecl(file *parse.File, decl *parse.Decl, namesOfInterest symbolNameTable) localNameTable {
 	var names localNameTable
 	if decl.Kind != "func" {
 		return names
@@ -1580,7 +1879,7 @@ func localNamesForDecl(file parse.File, decl parse.Decl, namesOfInterest symbolN
 	return names
 }
 
-func localTypesForDecl(file parse.File, decl parse.Decl) localTypeTable {
+func localTypesForDecl(file *parse.File, decl *parse.Decl) localTypeTable {
 	var types localTypeTable
 	if decl.Kind != "func" {
 		return types
@@ -1632,7 +1931,7 @@ func collectParameterListLocalTypes(toks []scan.Token, start int, end int, types
 			typ := typeInfoInRange(toks, typeStart, typeEnd)
 			if typ.name != "" {
 				typ.pointer = typeRangeIsPointer(toks, typeStart, typeEnd)
-				*types = types.set(toks[i].Text, typ)
+				*types = localTypeTableSet(*types, toks[i].Text, typ)
 			}
 			continue
 		}
@@ -1646,8 +1945,8 @@ func collectParameterListLocalTypes(toks []scan.Token, start int, end int, types
 			if typ.name != "" {
 				info := typ
 				info.pointer = typeRangeIsPointer(toks, typeStart, typeEnd)
-				*types = types.set(toks[i].Text, info)
-				*types = types.set(toks[i+2].Text, info)
+				*types = localTypeTableSet(*types, toks[i].Text, info)
+				*types = localTypeTableSet(*types, toks[i+2].Text, info)
 			}
 		}
 	}
@@ -1661,25 +1960,25 @@ func collectShortDeclLocalTypes(toks []scan.Token, assign int, types *localTypeT
 		return
 	}
 	if toks[assign+1].Kind == scan.Ident && toks[assign+2].Text == "{" {
-		*types = types.set(toks[assign-1].Text, localTypeInfo{name: toks[assign+1].Text})
+		*types = localTypeTableSet(*types, toks[assign-1].Text, localTypeInfo{name: toks[assign+1].Text})
 		return
 	}
 	if assign+4 < len(toks) && toks[assign+1].Kind == scan.Ident && toks[assign+2].Text == "." && toks[assign+3].Kind == scan.Ident && toks[assign+4].Text == "{" {
-		*types = types.set(toks[assign-1].Text, localTypeInfo{qualifier: toks[assign+1].Text, name: toks[assign+3].Text})
+		*types = localTypeTableSet(*types, toks[assign-1].Text, localTypeInfo{qualifier: toks[assign+1].Text, name: toks[assign+3].Text})
 		return
 	}
 	if assign+3 < len(toks) && toks[assign+1].Text == "&" && toks[assign+2].Kind == scan.Ident && toks[assign+3].Text == "{" {
-		*types = types.set(toks[assign-1].Text, localTypeInfo{name: toks[assign+2].Text, pointer: true})
+		*types = localTypeTableSet(*types, toks[assign-1].Text, localTypeInfo{name: toks[assign+2].Text, pointer: true})
 		return
 	}
 	if assign+5 < len(toks) && toks[assign+1].Text == "&" && toks[assign+2].Kind == scan.Ident && toks[assign+3].Text == "." && toks[assign+4].Kind == scan.Ident && toks[assign+5].Text == "{" {
-		*types = types.set(toks[assign-1].Text, localTypeInfo{qualifier: toks[assign+2].Text, name: toks[assign+4].Text, pointer: true})
+		*types = localTypeTableSet(*types, toks[assign-1].Text, localTypeInfo{qualifier: toks[assign+2].Text, name: toks[assign+4].Text, pointer: true})
 		return
 	}
 	if assign+2 < len(toks) && toks[assign+1].Text == "&" && toks[assign+2].Kind == scan.Ident {
-		if pointed := types.lookup(toks[assign+2].Text); pointed.name != "" {
+		if pointed := localTypeTableLookup(*types, toks[assign+2].Text); pointed.name != "" {
 			pointed.pointer = true
-			*types = types.set(toks[assign-1].Text, pointed)
+			*types = localTypeTableSet(*types, toks[assign-1].Text, pointed)
 		}
 	}
 }
@@ -1690,16 +1989,16 @@ func collectVarLocalTypes(toks []scan.Token, pos int, end int, types *localTypeT
 	}
 	if toks[pos+2].Text == "=" {
 		if pos+4 < len(toks) && toks[pos+3].Kind == scan.Ident && toks[pos+4].Text == "{" {
-			*types = types.set(toks[pos+1].Text, localTypeInfo{name: toks[pos+3].Text})
+			*types = localTypeTableSet(*types, toks[pos+1].Text, localTypeInfo{name: toks[pos+3].Text})
 		}
 		if pos+6 < len(toks) && toks[pos+3].Kind == scan.Ident && toks[pos+4].Text == "." && toks[pos+5].Kind == scan.Ident && toks[pos+6].Text == "{" {
-			*types = types.set(toks[pos+1].Text, localTypeInfo{qualifier: toks[pos+3].Text, name: toks[pos+5].Text})
+			*types = localTypeTableSet(*types, toks[pos+1].Text, localTypeInfo{qualifier: toks[pos+3].Text, name: toks[pos+5].Text})
 		}
 		if pos+5 < len(toks) && toks[pos+3].Text == "&" && toks[pos+4].Kind == scan.Ident && toks[pos+5].Text == "{" {
-			*types = types.set(toks[pos+1].Text, localTypeInfo{name: toks[pos+4].Text, pointer: true})
+			*types = localTypeTableSet(*types, toks[pos+1].Text, localTypeInfo{name: toks[pos+4].Text, pointer: true})
 		}
 		if pos+7 < len(toks) && toks[pos+3].Text == "&" && toks[pos+4].Kind == scan.Ident && toks[pos+5].Text == "." && toks[pos+6].Kind == scan.Ident && toks[pos+7].Text == "{" {
-			*types = types.set(toks[pos+1].Text, localTypeInfo{qualifier: toks[pos+4].Text, name: toks[pos+6].Text, pointer: true})
+			*types = localTypeTableSet(*types, toks[pos+1].Text, localTypeInfo{qualifier: toks[pos+4].Text, name: toks[pos+6].Text, pointer: true})
 		}
 		return
 	}
@@ -1708,7 +2007,7 @@ func collectVarLocalTypes(toks []scan.Token, pos int, end int, types *localTypeT
 	typ := typeInfoInRange(toks, typeStart, typeEnd)
 	if typ.name != "" {
 		typ.pointer = typeRangeIsPointer(toks, typeStart, typeEnd)
-		*types = types.set(toks[pos+1].Text, typ)
+		*types = localTypeTableSet(*types, toks[pos+1].Text, typ)
 	}
 }
 
@@ -1735,7 +2034,8 @@ func varTypeEnd(toks []scan.Token, start int, end int) int {
 }
 
 func typeNameInRange(toks []scan.Token, start int, end int) string {
-	return typeInfoInRange(toks, start, end).name
+	info := typeInfoInRange(toks, start, end)
+	return info.name
 }
 
 func typeInfoInRange(toks []scan.Token, start int, end int) localTypeInfo {
@@ -1786,7 +2086,10 @@ func collectFuncSignatureLocals(toks []scan.Token, start int, end int, topNames 
 
 func collectParameterListLocals(toks []scan.Token, start int, end int, topNames symbolNameTable, names *localNameTable) {
 	for i := start; i < end; i++ {
-		if toks[i].Kind != scan.Ident || topNames.unitName(toks[i].Text) == "" {
+		if toks[i].Kind != scan.Ident || symbolNameTableUnitName(topNames, toks[i].Text) == "" {
+			continue
+		}
+		if i > start && toks[i-1].Text != "," {
 			continue
 		}
 		if i+1 < end && isTypeStart(toks[i+1]) {
@@ -1809,7 +2112,7 @@ func collectShortDeclLocals(toks []scan.Token, body int, assign int, declEnd int
 		if isStatementBoundary(toks[i].Text) {
 			return
 		}
-		if toks[i].Kind == scan.Ident && topNames.unitName(toks[i].Text) != "" && (i == 0 || toks[i-1].Text != ".") {
+		if toks[i].Kind == scan.Ident && symbolNameTableUnitName(topNames, toks[i].Text) != "" && (i == 0 || toks[i-1].Text != ".") {
 			addLocalName(names, toks[i].Text, toks[i].Start, scopeEnd)
 		}
 	}
@@ -1822,7 +2125,7 @@ func collectVarLocals(toks []scan.Token, body int, pos int, end int, topNames sy
 			if toks[i].Text == ")" || toks[i].Text == "}" {
 				return
 			}
-			if toks[i].Kind != scan.Ident || topNames.unitName(toks[i].Text) == "" {
+			if toks[i].Kind != scan.Ident || symbolNameTableUnitName(topNames, toks[i].Text) == "" {
 				continue
 			}
 			if toks[i-1].Text == "(" || toks[i-1].Text == "," || toks[i-1].Line != toks[i].Line {
@@ -1839,7 +2142,7 @@ func collectVarLocals(toks []scan.Token, body int, pos int, end int, topNames sy
 		if toks[i].Text == "=" {
 			return
 		}
-		if toks[i].Kind != scan.Ident || topNames.unitName(toks[i].Text) == "" {
+		if toks[i].Kind != scan.Ident || symbolNameTableUnitName(topNames, toks[i].Text) == "" {
 			continue
 		}
 		if i == pos+1 || toks[i-1].Text == "," {
@@ -1868,11 +2171,13 @@ func localScopeEnd(toks []scan.Token, body int, pos int, fallback int) int {
 }
 
 func addLocalName(names *localNameTable, name string, start int, end int) {
-	*names = append(*names, localNameRange{name: name, start: start, end: end})
+	values := *names
+	values = append(values, localNameRange{name: name, start: start, end: end})
+	*names = values
 }
 
 func maxSourcePosition() int {
-	return int(^uint(0) >> 1)
+	return 2147483647
 }
 
 func tokenIndexAt(toks []scan.Token, start int) int {
@@ -1975,20 +2280,21 @@ func mergedMethodMap(local methodTable, localOrder []string, imported methodTabl
 	var methods methodTable
 	for i := 0; i < len(localOrder); i++ {
 		name := localOrder[i]
-		method := local.lookup(name)
-		methods = methods.set(name, method)
+		method := methodTableLookup(local, name)
+		methods = methodTableSet(methods, name, method)
 	}
 	for i := 0; i < len(importedOrder); i++ {
 		name := importedOrder[i]
-		method := imported.lookup(name)
-		if methods.lookup(name).unitName == "" {
-			methods = methods.set(name, method)
+		method := methodTableLookup(imported, name)
+		existing := methodTableLookup(methods, name)
+		if existing.unitName == "" {
+			methods = methodTableSet(methods, name, method)
 		}
 	}
 	return methods
 }
 
-func importReferenceMap(file parse.File, packages []load.Package) (importSymbolTable, []string) {
+func importReferenceMap(file *parse.File, packages []load.Package) (importSymbolTable, []string) {
 	var refs importSymbolTable
 	var refNames []string
 	for impIndex := 0; impIndex < len(file.Imports); impIndex++ {
@@ -2002,19 +2308,10 @@ func importReferenceMap(file parse.File, packages []load.Package) (importSymbolT
 		var symbols []unit.Symbol
 		for fileIndex := 0; fileIndex < len(dep.Files); fileIndex++ {
 			depFile := dep.Files[fileIndex]
-			parsed, err := parse.FileSource(depFile.Path, depFile.Source)
-			if err != nil {
-				continue
-			}
-			for declIndex := 0; declIndex < len(parsed.Decls); declIndex++ {
-				decl := parsed.Decls[declIndex]
-				names := declNames(decl)
-				for nameIndex := 0; nameIndex < len(names); nameIndex++ {
-					name := names[nameIndex]
-					if isExported(name) {
-						symbols = setSymbol(symbols, unit.Symbol{ImportPath: importPath, Name: name, UnitName: SymbolName(importPath, name)})
-					}
-				}
+			names := dependencyExportedNames(depFile.Source)
+			for nameIndex := 0; nameIndex < len(names); nameIndex++ {
+				name := names[nameIndex]
+				symbols = setSymbol(symbols, unit.Symbol{ImportPath: importPath, Name: name, UnitName: SymbolName(importPath, name)})
 			}
 		}
 		intrinsicNames := intrinsicImportSymbolNames(importPath)
@@ -2029,7 +2326,7 @@ func importReferenceMap(file parse.File, packages []load.Package) (importSymbolT
 	return refs, refNames
 }
 
-func importMethodMap(file parse.File, packages []load.Package) (methodTable, []string) {
+func importMethodMap(file *parse.File, packages []load.Package) (methodTable, []string) {
 	var methods methodTable
 	var methodNames []string
 	for impIndex := 0; impIndex < len(file.Imports); impIndex++ {
@@ -2042,30 +2339,227 @@ func importMethodMap(file parse.File, packages []load.Package) (methodTable, []s
 		}
 		for fileIndex := 0; fileIndex < len(dep.Files); fileIndex++ {
 			depFile := dep.Files[fileIndex]
-			parsed, err := parse.FileSource(depFile.Path, depFile.Source)
-			if err != nil {
-				continue
-			}
-			for declIndex := 0; declIndex < len(parsed.Decls); declIndex++ {
-				decl := parsed.Decls[declIndex]
-				if decl.Kind != "func" || !decl.Receiver || !isExported(decl.Name) {
-					continue
-				}
-				info := methodDeclInfo(parsed, decl)
+			methodsInFile := dependencyExportedMethods(importPath, depFile.Source)
+			for methodIndex := 0; methodIndex < len(methodsInFile); methodIndex++ {
+				info := methodsInFile[methodIndex]
 				if info.name == "" || info.receiverType == "" {
 					continue
 				}
-				info.unitName = SymbolName(importPath, info.name)
-				info.importPath = importPath
 				methodName := localName + "." + info.name
-				if methods.lookup(methodName).unitName == "" {
+				existing := methodTableLookup(methods, methodName)
+				if existing.unitName == "" {
 					methodNames = append(methodNames, methodName)
 				}
-				methods = methods.set(methodName, info)
+				methods = methodTableSet(methods, methodName, info)
 			}
 		}
 	}
 	return methods, methodNames
+}
+
+func dependencyExportedNames(src []byte) []string {
+	toks, err := scan.Tokens(src)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	pos := dependencyTopLevelStart(toks)
+	for pos < len(toks) && toks[pos].Kind != scan.EOF {
+		tok := toks[pos]
+		if tok.Text == "func" {
+			next := pos + 1
+			if next < len(toks) && toks[next].Text == "(" {
+				close := findClose(toks, next, "(", ")")
+				if close > next && close+1 < len(toks) {
+					nameTok := close + 1
+					if toks[nameTok].Kind == scan.Ident && isExported(toks[nameTok].Text) {
+						names = appendStringUnique(names, toks[nameTok].Text)
+					}
+				}
+			} else if next < len(toks) && toks[next].Kind == scan.Ident && isExported(toks[next].Text) {
+				names = appendStringUnique(names, toks[next].Text)
+			}
+			pos = dependencySkipFunc(toks, pos+1)
+			continue
+		}
+		if tok.Text == "type" {
+			next := pos + 1
+			if next < len(toks) && toks[next].Text == "(" {
+				close := findClose(toks, next, "(", ")")
+				names = appendExportedGroupedNames(names, toks, next+1, close)
+				if close > next {
+					pos = close + 1
+					continue
+				}
+			} else if next < len(toks) && toks[next].Kind == scan.Ident && isExported(toks[next].Text) {
+				names = appendStringUnique(names, toks[next].Text)
+			}
+			pos = dependencySkipLine(toks, pos)
+			continue
+		}
+		if tok.Text == "const" || tok.Text == "var" {
+			next := pos + 1
+			if next < len(toks) && toks[next].Text == "(" {
+				close := findClose(toks, next, "(", ")")
+				names = appendExportedGroupedNames(names, toks, next+1, close)
+				if close > next {
+					pos = close + 1
+					continue
+				}
+			} else {
+				lineEnd := dependencyLineEnd(toks, pos)
+				names = appendExportedSingleValueNames(names, toks, next, lineEnd)
+			}
+			pos = dependencySkipLine(toks, pos)
+			continue
+		}
+		pos++
+	}
+	return names
+}
+
+func dependencyExportedMethods(importPath string, src []byte) []methodInfo {
+	toks, err := scan.Tokens(src)
+	if err != nil {
+		return nil
+	}
+	var methods []methodInfo
+	pos := dependencyTopLevelStart(toks)
+	for pos < len(toks) && toks[pos].Kind != scan.EOF {
+		if toks[pos].Text != "func" || pos+1 >= len(toks) || toks[pos+1].Text != "(" {
+			pos++
+			continue
+		}
+		receiverOpen := pos + 1
+		receiverClose := findClose(toks, receiverOpen, "(", ")")
+		if receiverClose > receiverOpen && receiverClose+1 < len(toks) && toks[receiverClose+1].Kind == scan.Ident {
+			nameTok := receiverClose + 1
+			if isExported(toks[nameTok].Text) {
+				var decl parse.Decl
+				decl.Kind = "func"
+				decl.Name = toks[nameTok].Text
+				decl.Receiver = true
+				decl.Start = toks[pos].Start
+				info := methodDeclInfoFromTokens(toks, &decl)
+				if info.name != "" {
+					info.unitName = SymbolName(importPath, info.name)
+					info.importPath = importPath
+					methods = append(methods, info)
+				}
+			}
+		}
+		pos = dependencySkipFunc(toks, pos+1)
+	}
+	return methods
+}
+
+func dependencyTopLevelStart(toks []scan.Token) int {
+	pos := 0
+	if len(toks) >= 2 && toks[0].Text == "package" {
+		pos = 2
+	}
+	for pos < len(toks) && toks[pos].Text == "import" {
+		pos = dependencySkipImport(toks, pos)
+	}
+	return pos
+}
+
+func dependencySkipImport(toks []scan.Token, pos int) int {
+	next := pos + 1
+	if next < len(toks) && toks[next].Text == "(" {
+		close := findClose(toks, next, "(", ")")
+		if close > next {
+			return close + 1
+		}
+	}
+	return dependencySkipLine(toks, pos)
+}
+
+func dependencySkipFunc(toks []scan.Token, pos int) int {
+	for pos < len(toks) && toks[pos].Kind != scan.EOF {
+		if toks[pos].Text == "{" {
+			close := findClose(toks, pos, "{", "}")
+			if close > pos {
+				return close + 1
+			}
+		}
+		pos++
+	}
+	return pos
+}
+
+func dependencySkipLine(toks []scan.Token, pos int) int {
+	line := toks[pos].Line
+	for pos < len(toks) && toks[pos].Line == line && toks[pos].Kind != scan.EOF {
+		pos++
+	}
+	return pos
+}
+
+func dependencyLineEnd(toks []scan.Token, pos int) int {
+	line := toks[pos].Line
+	for pos < len(toks) && toks[pos].Line == line && toks[pos].Kind != scan.EOF {
+		pos++
+	}
+	return pos
+}
+
+func appendExportedGroupedNames(names []string, toks []scan.Token, start int, end int) []string {
+	if end <= start {
+		return names
+	}
+	lineStart := true
+	lastLine := -1
+	for i := start; i < end; i++ {
+		tok := toks[i]
+		if lastLine != tok.Line {
+			lineStart = true
+			lastLine = tok.Line
+		}
+		if lineStart && tok.Kind == scan.Ident {
+			if isExported(tok.Text) {
+				names = appendStringUnique(names, tok.Text)
+			}
+			lineStart = false
+			continue
+		}
+		if tok.Text == ";" {
+			lineStart = true
+		}
+	}
+	return names
+}
+
+func appendExportedSingleValueNames(names []string, toks []scan.Token, start int, end int) []string {
+	expectName := true
+	for i := start; i < end; i++ {
+		tok := toks[i]
+		if tok.Text == "=" {
+			return names
+		}
+		if tok.Kind == scan.Ident && expectName {
+			if isExported(tok.Text) {
+				names = appendStringUnique(names, tok.Text)
+			}
+			expectName = false
+			continue
+		}
+		if tok.Text == "," {
+			expectName = true
+			continue
+		}
+		if len(names) > 0 {
+			return names
+		}
+	}
+	return names
+}
+
+func appendStringUnique(values []string, value string) []string {
+	if containsString(values, value) {
+		return values
+	}
+	return append(values, value)
 }
 
 func intrinsicImportSymbol(importPath string, name string) string {

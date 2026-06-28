@@ -515,6 +515,11 @@ func rtgAmd64EmitCompareJump(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, labe
 		return true
 	}
 	if c0 == '=' || c0 == '!' {
+		leftType := rtgInferParsedExprType(g, ep, leftIndex)
+		rightType := rtgInferParsedExprType(g, ep, rightIndex)
+		if rtgTypeIsString(g.meta, leftType) || rtgTypeIsString(g.meta, rightType) {
+			return false
+		}
 		if right.kind == rtgExprString {
 			return false
 		}
@@ -735,6 +740,9 @@ func rtgAmd64EmitStructReturnExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bo
 			return false
 		}
 		rtgEmitCopyStackToMemRdx(g, g.locals[localIndex].offset, 0, size)
+		if !rtgEmitCopyReturnedStructSliceFields(g, resultType, g.locals[localIndex].offset, 0) {
+			return false
+		}
 		return true
 	}
 	if e.kind == rtgExprIndex {
@@ -922,6 +930,9 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	}
 	if e.kind == rtgExprCall {
 		callee := rtgExprIdentCode(p, ep, e.left)
+		if callee == rtgIdentSyscall {
+			return rtgEmitArbitrarySyscall(g, ep, idx)
+		}
 		if e.argCount == 1 && (callee == rtgIdentInt || callee == rtgIdentInt64) {
 			return rtgEmitIntExpr(g, ep, ep.args[e.firstArg])
 		}
@@ -1323,7 +1334,11 @@ func rtgAmd64EmitSliceSlotAddrs(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSl
 		}
 		return true
 	}
-	rtgEmitEnsureLocalSlice(g, loc.offset, elemSize)
+	if loc.param {
+		rtgEmitEnsureLocalSliceArena(g, loc.offset, elemSize)
+	} else {
+		rtgEmitEnsureLocalSlice(g, loc.offset, elemSize)
+	}
 	rtgAsmLeaRdiStack(a, loc.offset)
 	rtgAsmLeaRsiStack(a, loc.offset-8)
 	return true

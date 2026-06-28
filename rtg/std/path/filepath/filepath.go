@@ -29,15 +29,15 @@ func Abs(path string) (string, error) {
 func Rel(basepath string, targpath string) (string, error) {
 	base := Clean(basepath)
 	target := Clean(targpath)
-	if base == target {
+	if stringEqual(base, target) {
 		return ".", nil
 	}
 	prefix := base
 	if !strings.HasSuffix(prefix, "/") {
 		prefix = prefix + "/"
 	}
-	if strings.HasPrefix(target, prefix) {
-		return target[len(prefix):len(target)], nil
+	if stringHasPrefix(target, prefix) {
+		return stringRange(target, len(prefix), len(target)), nil
 	}
 	return target, nil
 }
@@ -144,4 +144,36 @@ func lastIndexByte(s string, c byte) int {
 		i = i - 1
 	}
 	return -1
+}
+
+func stringEqual(a string, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := 0; i < len(a); i++ {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func stringHasPrefix(s string, prefix string) bool {
+	if len(prefix) > len(s) {
+		return false
+	}
+	for i := 0; i < len(prefix); i++ {
+		if s[i] != prefix[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func stringRange(s string, start int, end int) string {
+	var out []byte
+	for i := start; i < end; i++ {
+		out = append(out, s[i])
+	}
+	return string(out)
 }

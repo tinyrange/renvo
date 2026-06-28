@@ -19,6 +19,7 @@ import (
 )
 
 const crossArchTestsEnv = "RTG_CROSS_ARCH_TESTS"
+const selfHostTestsEnv = "RTG_SELFHOST_TESTS"
 
 type frontendSmokeTarget struct {
 	name   string
@@ -41,6 +42,59 @@ func TestStructFixtureGoldenUnits(t *testing.T) {
 func TestStructFixtureFrontendMatchesHostGo(t *testing.T) {
 	fixture := filepath.Join("testdata", "struct_module")
 	runFrontendFixtureMatchesHostGo(t, fixture)
+}
+
+func TestSelfHostedFrontendBuildsHelloFixture(t *testing.T) {
+	if os.Getenv(selfHostTestsEnv) != "1" {
+		t.Skipf("set %s=1 to run self-hosted frontend test", selfHostTestsEnv)
+	}
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skipf("self-hosted frontend smoke requires linux/amd64 host, got %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	tmp := t.TempDir()
+	self := filepath.Join(tmp, "rtg-self")
+	cmd := exec.Command("go", "run", "./cmd/rtg", "-t", "linux/amd64", "-o", self, "./cmd/rtg")
+	data, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("self frontend build failed: %v\n%s", err, string(data))
+	}
+	out := filepath.Join(tmp, "hello")
+	cmd = exec.Command(self, "-t", "linux/amd64", "-o", out, "./testdata/hello_module/cmd/app")
+	data, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("self-hosted fixture build failed: %v\n%s", err, string(data))
+	}
+	cmd = exec.Command(out)
+	data, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("self-hosted fixture failed: %v\n%s", err, string(data))
+	}
+	if string(data) != "PASS\n" {
+		t.Fatalf("self-hosted fixture output = %q, want PASS", string(data))
+	}
+	unitDir := filepath.Join(tmp, "units")
+	if err := os.MkdirAll(unitDir, 0755); err != nil {
+		t.Fatalf("MkdirAll unit dir failed: %v", err)
+	}
+	cmd = exec.Command(self, "-emit-unit", "-o", unitDir, "./testdata/hello_module/cmd/app")
+	data, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("self-hosted fixture emit-unit failed: %v\n%s", err, string(data))
+	}
+	linked := filepath.Join(tmp, "linked-hello")
+	cmd = exec.Command(self, "-link", "-t", "linux/amd64", "-o", linked, unitDir)
+	data, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("self-hosted unit directory link failed: %v\n%s", err, string(data))
+	}
+	cmd = exec.Command(linked)
+	data, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("self-hosted linked fixture failed: %v\n%s", err, string(data))
+	}
+	if string(data) != "PASS\n" {
+		t.Fatalf("self-hosted linked fixture output = %q, want PASS", string(data))
+	}
 }
 
 func TestNestedCallArgumentFrontendMatchesHostGo(t *testing.T) {
@@ -283,6 +337,35 @@ func main() {
 func First() int { return 1 }
 func Next(v int) int { return v + 1 }
 func Check(v int) bool { return v == 2 }
+`)
+	runFrontendFixtureMatchesHostGo(t, fixture)
+}
+
+func TestShortCircuitNestedCallArgumentFrontendMatchesHostGo(t *testing.T) {
+	fixture := t.TempDir()
+	writeFixtureFile(t, fixture, "go.mod", "module example.com/shortcircuit\n")
+	writeFixtureFile(t, fixture, "cmd/app/main.go", `package main
+
+import "example.com/shortcircuit/pkg/dep"
+
+func main() {
+	if false && dep.Check(dep.Fail()) {
+		print("FAIL\n")
+		return
+	}
+	print("PASS\n")
+}
+`)
+	writeFixtureFile(t, fixture, "pkg/dep/dep.go", `package dep
+
+func Fail() int {
+	print("FAIL\n")
+	return 1
+}
+
+func Check(v int) bool {
+	return v == 1
+}
 `)
 	runFrontendFixtureMatchesHostGo(t, fixture)
 }

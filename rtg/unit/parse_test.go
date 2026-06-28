@@ -39,6 +39,28 @@ func TestParseSourceRoundTripMetadata(t *testing.T) {
 	}
 }
 
+func TestParseSourceSkipsBlankLinesBeforeDeclBody(t *testing.T) {
+	u, err := ParseSource("blank.rtg.go", withRTGBuild(`// rtg:unit example.com/app
+package main
+
+// rtg:decl func appMain => rtg_example_com_app_appMain main.go
+
+func rtg_example_com_app_appMain() int { return 0 }
+`))
+	if err != nil {
+		t.Fatalf("ParseSource failed: %v", err)
+	}
+	if len(u.Decls) != 1 {
+		t.Fatalf("decls = %#v, want one", u.Decls)
+	}
+	if strings.HasPrefix(u.Decls[0].Body, "\n") {
+		t.Fatalf("decl body kept leading blank line: %q", u.Decls[0].Body)
+	}
+	if !strings.Contains(u.Decls[0].Body, "func rtg_example_com_app_appMain() int") {
+		t.Fatalf("decl body = %q", u.Decls[0].Body)
+	}
+}
+
 func TestParseSourceAcceptsQuotedReferenceImportPath(t *testing.T) {
 	u, err := ParseSource("quotedref.rtg.go", withRTGBuild(`// rtg:unit example.com/app
 package main

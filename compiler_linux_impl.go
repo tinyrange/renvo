@@ -7,7 +7,9 @@ func rtgReadAll(fd int, out []byte) []byte {
 		if n <= 0 {
 			return out
 		}
-		out = append(out, buf[:n]...)
+		for i := 0; i < n; i++ {
+			out = append(out, buf[i])
+		}
 	}
 }
 
@@ -38,6 +40,40 @@ func compileTarget(input []int, output int, target int) int {
 		return 1
 	}
 	return compileLinuxAmd64(input, output)
+}
+
+func RtgCompileSourceToBytes(source []byte, targetName string) ([]byte, bool) {
+	target := rtgParseTargetArg(targetName)
+	if target == 0 {
+		return nil, false
+	}
+	rtgSetTarget(target)
+	var prog rtgProgram
+	prog = rtgParseProgram(source)
+	if !prog.ok {
+		return nil, false
+	}
+	var meta rtgMeta
+	rtgBuildMetaInto(&prog, &meta)
+	if !meta.ok {
+		return nil, false
+	}
+	var result rtgCompileResult
+	if target == rtgTargetLinux386 || target == rtgTargetWindows386 {
+		result = rtgTryCompileScalarProgram386(&prog, &meta)
+	} else if target == rtgTargetLinuxAarch64 {
+		result = rtgTryCompileScalarProgramAarch64(&prog, &meta)
+	} else if target == rtgTargetLinuxArm {
+		result = rtgTryCompileScalarProgramArm(&prog, &meta)
+	} else if target == rtgTargetWasiWasm32 {
+		result = rtgTryCompileScalarProgramWasm32(&prog, &meta)
+	} else {
+		result = rtgTryCompileScalarProgramAmd64(&prog, &meta)
+	}
+	if !result.ok {
+		return nil, false
+	}
+	return result.data, true
 }
 
 func rtgLinuxSysWriteSeq() int {

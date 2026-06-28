@@ -8,6 +8,12 @@ import (
 	"j5.nz/rtg/rtg/scan"
 )
 
+type parseError string
+
+func (err parseError) Error() string {
+	return string(err)
+}
+
 func ParseSources(sources []SourceFile) ([]Unit, error) {
 	units := make([]Unit, 0, len(sources))
 	for i := 0; i < len(sources); i++ {
@@ -22,13 +28,15 @@ func ParseSources(sources []SourceFile) ([]Unit, error) {
 }
 
 func ParseSource(path string, src []byte) (Unit, error) {
-	lines := strings.Split(string(src), "\n")
+	text := bytesToString(src)
+	lines := strings.Split(text, "\n")
 	if !hasRTGBuildConstraint(lines) {
 		return Unit{}, fmt.Errorf("%s: missing rtg build constraint", path)
 	}
 	var u Unit
 	currentDecl := -1
 	seenUnit := false
+	seenEntry := false
 	var seenImports []string
 	var seenExports []string
 	var seenRefs []string
@@ -39,28 +47,29 @@ func ParseSource(path string, src []byte) (Unit, error) {
 			continue
 		}
 		if !strings.HasPrefix(line, "// rtg:") {
+			if currentDecl >= 0 && strings.TrimSpace(declBodyAt(u, currentDecl)) == "" && strings.TrimSpace(line) == "" {
+				continue
+			}
 			if currentDecl >= 0 {
-				u.Decls[currentDecl].Body += line
-				u.Decls[currentDecl].Body += "\n"
+				appendDeclBodyLine(&u, currentDecl, line)
 			}
 			continue
 		}
-		if currentDecl >= 0 && strings.TrimSpace(u.Decls[currentDecl].Body) != "" && !declBodyComplete(u.Decls[currentDecl]) {
-			u.Decls[currentDecl].Body += line
-			u.Decls[currentDecl].Body += "\n"
+		if currentDecl >= 0 && strings.TrimSpace(declBodyAt(u, currentDecl)) != "" && !declBodyComplete(declAt(u, currentDecl)) {
+			appendDeclBodyLine(&u, currentDecl, line)
 			continue
 		}
 		body := strings.TrimPrefix(line, "// rtg:")
 		if !seenUnit && !strings.HasPrefix(body, "unit ") {
 			return Unit{}, fmt.Errorf("%s: rtg metadata before unit declaration", path)
 		}
-		if currentDecl >= 0 && strings.TrimSpace(u.Decls[currentDecl].Body) == "" {
-			return Unit{}, fmt.Errorf("%s: declaration metadata for %s has no body before next rtg metadata", path, u.Decls[currentDecl].Name)
+		if currentDecl >= 0 && strings.TrimSpace(declBodyAt(u, currentDecl)) == "" {
+			return Unit{}, fmt.Errorf("%s: declaration metadata for %s has no body before next rtg metadata", path, declNameAt(u, currentDecl))
 		}
 		if strings.HasPrefix(body, "decl ") {
 			decl, err := parseDecl(strings.TrimSpace(strings.TrimPrefix(body, "decl ")))
 			if err != nil {
-				return Unit{}, fmt.Errorf("%s: %w", path, err)
+				return Unit{}, parseError(path + ": " + err.Error())
 			}
 			u.Decls = append(u.Decls, decl)
 			currentDecl = len(u.Decls) - 1
@@ -82,10 +91,18 @@ func ParseSource(path string, src []byte) (Unit, error) {
 			}
 			continue
 		}
+		if strings.TrimSpace(body) == "entrypoint" {
+			if seenEntry {
+				return Unit{}, fmt.Errorf("%s: duplicate entrypoint metadata", path)
+			}
+			seenEntry = true
+			u.Entry = true
+			continue
+		}
 		if strings.HasPrefix(body, "import ") {
 			imp, err := parseQuoted(strings.TrimSpace(strings.TrimPrefix(body, "import ")))
 			if err != nil {
-				return Unit{}, fmt.Errorf("%s: %w", path, err)
+				return Unit{}, parseError(path + ": " + err.Error())
 			}
 			if imp == "" {
 				return Unit{}, fmt.Errorf("%s: empty import metadata", path)
@@ -100,7 +117,7 @@ func ParseSource(path string, src []byte) (Unit, error) {
 		if strings.HasPrefix(body, "export ") {
 			sym, err := parseNameArrow(strings.TrimSpace(strings.TrimPrefix(body, "export ")))
 			if err != nil {
-				return Unit{}, fmt.Errorf("%s: %w", path, err)
+				return Unit{}, parseError(path + ": " + err.Error())
 			}
 			sym.ImportPath = u.ImportPath
 			key := sym.Name
@@ -114,7 +131,7 @@ func ParseSource(path string, src []byte) (Unit, error) {
 		if strings.HasPrefix(body, "ref ") {
 			sym, err := parseReference(strings.TrimSpace(strings.TrimPrefix(body, "ref ")))
 			if err != nil {
-				return Unit{}, fmt.Errorf("%s: %w", path, err)
+				return Unit{}, parseError(path + ": " + err.Error())
 			}
 			key := sym.ImportPath + "\x00" + sym.Name
 			if containsString(seenRefs, key) {
@@ -132,13 +149,48 @@ func ParseSource(path string, src []byte) (Unit, error) {
 	if u.Package == "" {
 		return Unit{}, fmt.Errorf("%s: missing package declaration", path)
 	}
-	for i := 0; i < len(u.Decls); i++ {
-		decl := u.Decls[i]
+	decls := u.Decls
+	for i := 0; i < len(decls); i++ {
+		decl := decls[i]
 		if strings.TrimSpace(decl.Body) == "" {
 			return Unit{}, fmt.Errorf("%s: declaration metadata for %s has no body", path, decl.Name)
 		}
 	}
 	return u, nil
+}
+
+func bytesToString(data []byte) string {
+	var out []byte
+	for i := 0; i < len(data); i++ {
+		out = append(out, data[i])
+	}
+	return string(out)
+}
+
+func declAt(u Unit, index int) Decl {
+	decls := u.Decls
+	return decls[index]
+}
+
+func declBodyAt(u Unit, index int) string {
+	decl := declAt(u, index)
+	return decl.Body
+}
+
+func declNameAt(u Unit, index int) string {
+	decl := declAt(u, index)
+	return decl.Name
+}
+
+func appendDeclBodyLine(u *Unit, index int, line string) {
+	decls := u.Decls
+	decl := decls[index]
+	body := decl.Body
+	body = body + line
+	body = body + "\n"
+	decl.Body = body
+	decls[index] = decl
+	u.Decls = decls
 }
 
 func containsString(values []string, value string) bool {
@@ -285,7 +337,13 @@ func parseDecl(s string) (Decl, error) {
 		if err != nil {
 			return Decl{}, fmt.Errorf("invalid declaration metadata %q", s)
 		}
-		return Decl{Kind: parts[0], Path: path, Name: strings.Join(parts[1:len(parts)-1], " ")}, nil
+		kind := parts[0]
+		name := strings.Join(parts[1:len(parts)-1], " ")
+		var decl Decl
+		decl.Kind = kind
+		decl.Path = path
+		decl.Name = name
+		return decl, nil
 	}
 	left := strings.TrimSpace(s[:arrow])
 	right := strings.TrimSpace(s[arrow+4:])
@@ -307,12 +365,15 @@ func parseDecl(s string) (Decl, error) {
 	if len(rightParts) > 2 {
 		path = strings.Join(rightParts[1:], " ")
 	}
-	return Decl{
-		Kind:     leftParts[0],
-		Name:     strings.Join(leftParts[1:], " "),
-		UnitName: rightParts[0],
-		Path:     path,
-	}, nil
+	kind := leftParts[0]
+	name := strings.Join(leftParts[1:], " ")
+	unitName := rightParts[0]
+	var decl Decl
+	decl.Kind = kind
+	decl.Name = name
+	decl.UnitName = unitName
+	decl.Path = path
+	return decl, nil
 }
 
 func metadataFields(s string) ([]string, error) {

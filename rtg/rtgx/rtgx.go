@@ -49,12 +49,13 @@ func CompileUnitsArtifact(units []unit.Unit, opts Options) (Artifact, error) {
 	if err != nil {
 		return Artifact{}, err
 	}
-	linked := link.SourceArtifact(plan)
-	compiled, err := CompileSourceArtifact(linked.Source, opts)
+	linkedSource := link.Source(plan)
+	compiled, err := CompileSourceArtifact(linkedSource, opts)
 	if err != nil {
 		return Artifact{}, err
 	}
-	compiled.LinkedSource = copyBytes(linked.Source)
+	linked := link.SourceArtifact(plan)
+	compiled.LinkedSource = copyBytes(linkedSource)
 	compiled.LinkedUnits = copyStrings(linked.LinkedUnits)
 	compiled.ReachableFunctions = copyStrings(linked.ReachableFunctions)
 	compiled.Entrypoint = linked.Entrypoint
@@ -143,12 +144,20 @@ func writeOutput(data []byte, outputPath string) error {
 		return fmt.Errorf("rtg: missing output path (-o)")
 	}
 	if outputPath == "-" {
-		_, err := os.Stdout.Write(data)
-		return err
+		fmt.Fprint(os.Stdout, bytesToString(data))
+		return nil
 	}
 	output, err := filepath.Abs(outputPath)
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(output, data, 493)
+}
+
+func bytesToString(data []byte) string {
+	var out []byte
+	for i := 0; i < len(data); i++ {
+		out = append(out, data[i])
+	}
+	return string(out)
 }

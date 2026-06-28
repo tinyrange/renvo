@@ -33,7 +33,7 @@ func TestBuildResolvesReferences(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
-	if len(plan.Units) != 2 || plan.Units[0].ImportPath != "example.com/app/main" {
+	if len(plan.Units) != 2 || plan.Units[0].ImportPath != "example.com/app/pkg/answer" || plan.Units[1].ImportPath != "example.com/app/main" {
 		t.Fatalf("plan ordering = %#v", plan.Units)
 	}
 }
@@ -289,6 +289,19 @@ func TestBuildRejectsDeclarationSymbolMismatch(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "example.com/app/main: declaration appMain body does not define rtg_example_com_app_main_appMain") {
 		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestBuildAcceptsLeadingWhitespaceBeforeDeclarationBody(t *testing.T) {
+	_, err := Build([]unit.Unit{{
+		ImportPath: "example.com/app/main",
+		Package:    "main",
+		Decls: []unit.Decl{
+			{Kind: "func", Name: "appMain", UnitName: "rtg_example_com_app_main_appMain", Body: "\nfunc rtg_example_com_app_main_appMain() int { return 0 }\n"},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("Build rejected declaration body with leading whitespace: %v", err)
 	}
 }
 

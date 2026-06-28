@@ -1,6 +1,10 @@
 package mod
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestParseModulePath(t *testing.T) {
 	got, err := ParseModulePath("\n// comment\nmodule example.com/app // tail\n\ngo 1.25\n")
@@ -9,6 +13,36 @@ func TestParseModulePath(t *testing.T) {
 	}
 	if got != "example.com/app" {
 		t.Fatalf("module path = %q, want example.com/app", got)
+	}
+}
+
+func TestFindRelativeSubdirectoryUsesNearestModule(t *testing.T) {
+	root := t.TempDir()
+	writeModTestFile(t, root, "go.mod", "module example.com/outer\n")
+	writeModTestFile(t, root, "nested/go.mod", "module example.com/nested\n")
+	writeModTestFile(t, root, "nested/cmd/app/main.go", "package main\n")
+	t.Chdir(root)
+
+	got, err := Find("./nested/cmd/app")
+	if err != nil {
+		t.Fatalf("Find failed: %v", err)
+	}
+	if got.Path != "example.com/nested" {
+		t.Fatalf("module path = %q, want example.com/nested", got.Path)
+	}
+	if got.Root != filepath.Join(root, "nested") {
+		t.Fatalf("module root = %q, want nested root", got.Root)
+	}
+}
+
+func writeModTestFile(t *testing.T, root string, name string, data string) {
+	t.Helper()
+	path := filepath.Join(root, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
 	}
 }
 

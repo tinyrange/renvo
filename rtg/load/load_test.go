@@ -141,6 +141,35 @@ const C = 3
 	}
 }
 
+func TestLoadEntriesKeepsMultiFileSourcesDistinct(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n")
+	writeFile(t, root, "pkg/a.go", `package pkg
+
+func A() string { return "AAAA" }
+`)
+	writeFile(t, root, "pkg/b.go", `package pkg
+
+func B() string { return "BBBBBBBBBBBB" }
+`)
+
+	graph, err := LoadEntries([]string{filepath.Join(root, "pkg")}, Options{})
+	if err != nil {
+		t.Fatalf("LoadEntries failed: %v", err)
+	}
+	if len(graph.Packages) != 1 || len(graph.Packages[0].Files) != 2 {
+		t.Fatalf("loaded graph = %#v", graph)
+	}
+	first := string(graph.Packages[0].Files[0].Source)
+	second := string(graph.Packages[0].Files[1].Source)
+	if !strings.Contains(first, `"AAAA"`) || strings.Contains(first, `"BBBBBBBBBBBB"`) {
+		t.Fatalf("first source was not preserved: %q", first)
+	}
+	if !strings.Contains(second, `"BBBBBBBBBBBB"`) || strings.Contains(second, `"AAAA"`) {
+		t.Fatalf("second source was not preserved: %q", second)
+	}
+}
+
 func TestLoadEntriesRejectsDirectoryOutsideModuleRoot(t *testing.T) {
 	root := t.TempDir()
 	other := t.TempDir()

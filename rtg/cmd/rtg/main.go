@@ -25,16 +25,28 @@ type config struct {
 }
 
 func main() {
-	cfg, err := parseArgs(os.Args[1:])
+	os.Exit(appMain(os.Args, nil))
+}
+
+func appMain(args []string, env []string) int {
+	cfg, err := parseArgs(cliArgs(args))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		usage()
-		os.Exit(1)
+		return 1
 	}
 	if err := run(cfg); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return 1
 	}
+	return 0
+}
+
+func cliArgs(args []string) []string {
+	if len(args) == 0 {
+		return nil
+	}
+	return args[1:]
 }
 
 func run(cfg config) error {
@@ -80,7 +92,7 @@ func runEmitUnit(cfg config, graph *load.Graph) error {
 		return writeUnitDirectory(defaultUnitCacheDir(graph), units)
 	}
 	if info, err := os.Stat(cfg.output); err == nil {
-		if info.IsDir() {
+		if fileInfoIsDir(info) {
 			return writeUnitDirectory(cfg.output, units)
 		}
 		if len(units) == 1 && isUnitFileOutput(cfg.output) {
@@ -106,7 +118,7 @@ func runEmitUnit(cfg config, graph *load.Graph) error {
 }
 
 func defaultUnitCacheDir(graph *load.Graph) string {
-	return filepath.Join(graph.Module.Root, ".rtg", "units")
+	return filepath.Join(filepath.Join(graph.Module.Root, ".rtg"), "units")
 }
 
 func writeUnitDirectory(dir string, units []unit.Unit) error {
@@ -145,6 +157,18 @@ func findUnitFileName(names []unitFileName, name string) (string, bool) {
 
 func isUnitFileOutput(path string) bool {
 	return strings.HasSuffix(filepath.Base(path), ".rtg.go")
+}
+
+func fileInfoIsDir(info os.FileInfo) bool {
+	return info.IsDir()
+}
+
+func dirEntryIsDir(entry os.DirEntry) bool {
+	return entry.IsDir()
+}
+
+func dirEntryName(entry os.DirEntry) string {
+	return entry.Name()
 }
 
 func runLink(cfg config) error {
@@ -189,7 +213,7 @@ func unitInputPaths(input string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !info.IsDir() {
+	if !fileInfoIsDir(info) {
 		if !strings.HasSuffix(filepath.Base(input), ".rtg.go") {
 			return nil, fmt.Errorf("%s: link input must be an emitted .rtg.go unit", input)
 		}
@@ -202,18 +226,45 @@ func unitInputPaths(input string) ([]string, error) {
 	var paths []string
 	for i := 0; i < len(entries); i++ {
 		entry := entries[i]
-		if entry.IsDir() {
+		if dirEntryIsDir(entry) {
 			continue
 		}
-		name := entry.Name()
+		name := dirEntryName(entry)
 		if strings.HasSuffix(name, ".rtg.go") {
 			paths = append(paths, filepath.Join(input, name))
 		}
 	}
+	sortStrings(paths)
 	if len(paths) == 0 {
 		return nil, fmt.Errorf("rtg: no unit files in %s", input)
 	}
 	return paths, nil
+}
+
+func sortStrings(values []string) {
+	for i := 1; i < len(values); i++ {
+		value := values[i]
+		j := i - 1
+		for j >= 0 && stringGreater(values[j], value) {
+			values[j+1] = values[j]
+			j = j - 1
+		}
+		values[j+1] = value
+	}
+}
+
+func stringGreater(a string, b string) bool {
+	i := 0
+	for i < len(a) && i < len(b) {
+		if a[i] > b[i] {
+			return true
+		}
+		if a[i] < b[i] {
+			return false
+		}
+		i = i + 1
+	}
+	return len(a) > len(b)
 }
 
 func parseArgs(args []string) (config, error) {
@@ -237,7 +288,8 @@ func parseArgs(args []string) (config, error) {
 			if i >= len(args) {
 				return cfg, fmt.Errorf("rtg: missing argument for -o")
 			}
-			cfg.output = args[i]
+			output := args[i]
+			cfg.output = output
 			continue
 		}
 		if arg == "-emit-unit" {

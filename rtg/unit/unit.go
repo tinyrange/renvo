@@ -3,6 +3,7 @@ package unit
 type Unit struct {
 	ImportPath string
 	Package    string
+	Entry      bool
 	Imports    []string
 	Exports    []Symbol
 	References []Symbol

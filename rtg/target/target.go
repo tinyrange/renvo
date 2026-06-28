@@ -24,8 +24,9 @@ func Default() string {
 }
 
 func Supported(name string) bool {
-	for i := 0; i < len(supported); i++ {
-		supportedName := supported[i]
+	values := supported
+	for i := 0; i < len(values); i++ {
+		supportedName := values[i]
 		if name == supportedName {
 			return true
 		}
@@ -35,8 +36,9 @@ func Supported(name string) bool {
 
 func List() string {
 	out := ""
-	for i := 0; i < len(supported); i++ {
-		name := supported[i]
+	values := supported
+	for i := 0; i < len(values); i++ {
+		name := values[i]
 		if i > 0 {
 			out = out + ", "
 		}

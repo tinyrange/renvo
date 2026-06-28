@@ -25,6 +25,12 @@ type Replace struct {
 	New string
 }
 
+type modError string
+
+func (err modError) Error() string {
+	return string(err)
+}
+
 func Find(start string) (Module, error) {
 	if start == "" {
 		start = "."
@@ -34,18 +40,24 @@ func Find(start string) (Module, error) {
 		return Module{}, err
 	}
 	info, err := os.Stat(abs)
-	if err == nil && !info.IsDir() {
+	if err == nil && !fileInfoIsDir(info) {
 		abs = filepath.Dir(abs)
 	}
 	for {
 		path := filepath.Join(abs, "go.mod")
-		data, err := os.ReadFile(path)
-		if err == nil {
-			parsed, err := ParseFile(string(data))
-			if err != nil {
-				return Module{}, fmt.Errorf("%s: %w", path, err)
-			}
-			return Module{Root: abs, Path: parsed.Path, Requires: parsed.Requires, Replaces: parsed.Replaces}, nil
+		if isGoModPath(path) {
+			path = "go.mod"
+		}
+		stablePath := copyString(path)
+		parsed, ok, readErr := readModuleFile(stablePath)
+		if readErr != nil {
+			return Module{}, readErr
+		}
+		if ok {
+			parsedPath := parsed.Path
+			parsedRequires := parsed.Requires
+			parsedReplaces := parsed.Replaces
+			return newModule(abs, parsedPath, parsedRequires, parsedReplaces), nil
 		}
 		parent := filepath.Dir(abs)
 		if parent == abs {
@@ -55,8 +67,59 @@ func Find(start string) (Module, error) {
 	}
 }
 
-func ParseFile(data string) (Module, error) {
+func isGoModPath(path string) bool {
+	if len(path) != 6 {
+		return false
+	}
+	return path[0] == 'g' && path[1] == 'o' && path[2] == '.' && path[3] == 'm' && path[4] == 'o' && path[5] == 'd'
+}
+
+func copyString(s string) string {
+	var out []byte
+	for i := 0; i < len(s); i++ {
+		out = append(out, s[i])
+	}
+	return string(out)
+}
+
+func newModule(root string, path string, requires []Require, replaces []Replace) Module {
 	var module Module
+	module.Root = root
+	module.Path = path
+	module.Requires = requires
+	module.Replaces = replaces
+	return module
+}
+
+func readModuleFile(path string) (Module, bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Module{}, false, nil
+	}
+	text := bytesToString(data)
+	parsed, err := ParseFile(text)
+	if err != nil {
+		return Module{}, false, modError(path + ": " + err.Error())
+	}
+	return parsed, true, nil
+}
+
+func fileInfoIsDir(info os.FileInfo) bool {
+	return info.IsDir()
+}
+
+func bytesToString(data []byte) string {
+	var out []byte
+	for i := 0; i < len(data); i++ {
+		out = append(out, data[i])
+	}
+	return string(out)
+}
+
+func ParseFile(data string) (Module, error) {
+	modulePath := ""
+	var requires []Require
+	var replaces []Replace
 	stripped, err := stripComments(data)
 	if err != nil {
 		return Module{}, err
@@ -66,7 +129,7 @@ func ParseFile(data string) (Module, error) {
 	inReplaceBlock := false
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
-		fields, err := lineFields(line)
+		fields, err := directiveFields(line)
 		if err != nil {
 			if inRequireBlock {
 				return Module{}, fmt.Errorf("malformed require directive")
@@ -79,8 +142,9 @@ func ParseFile(data string) (Module, error) {
 		if len(fields) == 0 {
 			continue
 		}
+		first := fields[0]
 		if inRequireBlock {
-			if fields[0] == ")" {
+			if first == ")" {
 				inRequireBlock = false
 				continue
 			}
@@ -88,11 +152,11 @@ func ParseFile(data string) (Module, error) {
 			if err != nil {
 				return Module{}, err
 			}
-			module.Requires = append(module.Requires, req)
+			requires = append(requires, req)
 			continue
 		}
 		if inReplaceBlock {
-			if fields[0] == ")" {
+			if first == ")" {
 				inReplaceBlock = false
 				continue
 			}
@@ -100,42 +164,51 @@ func ParseFile(data string) (Module, error) {
 			if err != nil {
 				return Module{}, err
 			}
-			module.Replaces = append(module.Replaces, repl)
+			replaces = append(replaces, repl)
 			continue
 		}
-		if fields[0] == "module" {
-			if module.Path != "" || len(fields) != 2 {
+		if first == "module" {
+			if modulePath != "" || len(fields) != 2 {
 				return Module{}, fmt.Errorf("malformed module directive")
 			}
-			path, err := unquoteField(fields[1])
+			field := fields[1]
+			path, err := unquoteField(field)
 			if err != nil {
 				return Module{}, fmt.Errorf("malformed module directive")
 			}
-			module.Path = path
+			modulePath = path
 			continue
 		}
-		if fields[0] == "require" {
-			if len(fields) == 2 && fields[1] == "(" {
-				inRequireBlock = true
-				continue
+		if first == "require" {
+			if len(fields) == 2 {
+				second := fields[1]
+				if second == "(" {
+					inRequireBlock = true
+					continue
+				}
 			}
-			req, err := parseRequireFields(fields[1:])
+			reqFields := fields[1:]
+			req, err := parseRequireFields(reqFields)
 			if err != nil {
 				return Module{}, err
 			}
-			module.Requires = append(module.Requires, req)
+			requires = append(requires, req)
 			continue
 		}
-		if fields[0] == "replace" {
-			if len(fields) == 2 && fields[1] == "(" {
-				inReplaceBlock = true
-				continue
+		if first == "replace" {
+			if len(fields) == 2 {
+				second := fields[1]
+				if second == "(" {
+					inReplaceBlock = true
+					continue
+				}
 			}
-			repl, err := parseReplaceFields(fields[1:])
+			replFields := fields[1:]
+			repl, err := parseReplaceFields(replFields)
 			if err != nil {
 				return Module{}, err
 			}
-			module.Replaces = append(module.Replaces, repl)
+			replaces = append(replaces, repl)
 		}
 	}
 	if inRequireBlock {
@@ -144,10 +217,18 @@ func ParseFile(data string) (Module, error) {
 	if inReplaceBlock {
 		return Module{}, fmt.Errorf("malformed replace directive")
 	}
-	if module.Path == "" {
+	if modulePath == "" {
 		return Module{}, fmt.Errorf("module directive not found")
 	}
-	return module, nil
+	return newModule("", modulePath, requires, replaces), nil
+}
+
+func directiveFields(line string) ([]string, error) {
+	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmed, "module ") || trimmed == "module" {
+		return strings.Fields(trimmed), nil
+	}
+	return lineFields(line)
 }
 
 func ParseModulePath(data string) (string, error) {

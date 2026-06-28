@@ -551,6 +551,11 @@ func rtg386EmitCompareJump(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, label 
 		return true
 	}
 	if c0 == '=' || c0 == '!' {
+		leftType := rtgInferParsedExprType(g, ep, leftIndex)
+		rightType := rtgInferParsedExprType(g, ep, rightIndex)
+		if rtgTypeIsString(g.meta, leftType) || rtgTypeIsString(g.meta, rightType) {
+			return false
+		}
 		if right.kind == rtgExprString {
 			return false
 		}
@@ -742,6 +747,9 @@ func rtg386EmitStructReturnExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool
 			return false
 		}
 		rtgEmitCopyStackToMemRdx(g, g.locals[localIndex].offset, 0, size)
+		if !rtgEmitCopyReturnedStructSliceFields(g, resultType, g.locals[localIndex].offset, 0) {
+			return false
+		}
 		return true
 	}
 	if e.kind == rtgExprIndex {
@@ -927,6 +935,9 @@ func rtg386EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	}
 	if e.kind == rtgExprCall {
 		callee := rtgExprIdentCode(p, ep, e.left)
+		if callee == rtgIdentSyscall {
+			return rtgEmitArbitrarySyscall(g, ep, idx)
+		}
 		if e.argCount == 1 && (callee == rtgIdentInt || callee == rtgIdentInt64) {
 			return rtgEmitIntExpr(g, ep, ep.args[e.firstArg])
 		}
@@ -1253,7 +1264,7 @@ func rtg386EmitSliceSlotAddrs(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSlic
 		if !rtgEmitSelectorAddressRdx(g, locEp, loc.expr) {
 			return false
 		}
-		rtgEmitEnsureMemSlice(g, elemSize)
+		rtg386EmitEnsureMemSlice(g, elemSize)
 		rtgAsmEmit16(a, 0x5f52)
 		rtgAsmEmit16(a, 0x728d)
 		rtgAsmEmit8(a, 8)
@@ -1274,6 +1285,25 @@ func rtg386EmitSliceSlotAddrs(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSlic
 	rtgAsmLeaRdiStack(a, loc.offset)
 	rtgAsmLeaRsiStack(a, loc.offset-8)
 	return true
+}
+
+func rtg386EmitEnsureMemSlice(g *rtgLinearGen, elemSize int) {
+	a := &g.asm
+	if elemSize < 1 {
+		elemSize = 8
+	}
+	okLabel := rtgAsmNewLabel(a)
+	rtgAsmLoadRaxMemRdxDisp(a, 0)
+	rtgAsmCmpRaxImm8(a, 0)
+	rtgAsmJnzLabel(a, okLabel)
+	backingSize := 2097152
+	backingOff := g.asm.bssSize
+	g.asm.bssSize += backingSize
+	rtgAsmMovRaxBssAddr(a, backingOff)
+	rtgAsmStoreRaxMemRdxDisp(a, 0)
+	rtgAsmMovRaxImm(a, backingSize/elemSize)
+	rtgAsmStoreRaxMemRdxDisp(a, 16)
+	rtgAsmMarkLabel(a, okLabel)
 }
 
 func rtg386EnsureAppendAddrHelper(g *rtgLinearGen) int {

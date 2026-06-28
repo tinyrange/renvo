@@ -33,7 +33,7 @@ func compileLinuxAarch64(input []int, output int) int {
 		return 1
 	}
 	var meta rtgMeta
-	meta = rtgBuildMeta(&prog)
+	rtgBuildMetaInto(&prog, &meta)
 	if !meta.ok {
 		rtgPrintErr("rtg: aarch64 meta failed\n")
 		return 1

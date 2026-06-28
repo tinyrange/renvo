@@ -22,9 +22,10 @@ func (d Diagnostic) Error() string {
 
 type Diagnostics []Diagnostic
 
-type diagnosticEntry struct {
-	name string
-	diag Diagnostic
+type diagnosticError string
+
+func (err diagnosticError) Error() string {
+	return string(err)
 }
 
 type exportedPackage struct {
@@ -55,32 +56,48 @@ func (d Diagnostics) Error() string {
 	var parts []string
 	for i := 0; i < len(d); i++ {
 		diag := d[i]
-		parts = append(parts, diag.Error())
+		parts = append(parts, diagnosticString(diag))
 	}
 	return strings.Join(parts, "\n")
+}
+
+func diagnosticString(diag Diagnostic) string {
+	return diag.Error()
 }
 
 func Graph(g *load.Graph) error {
 	var diags Diagnostics
 	exported := exportedDecls(g)
-	for pkgIndex := 0; pkgIndex < len(g.Packages); pkgIndex++ {
-		pkg := g.Packages[pkgIndex]
-		var names []diagnosticEntry
-		for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
-			file := pkg.Files[fileIndex]
-			parsed, err := parse.FileSource(file.Path, file.Source)
+	var packages []load.Package
+	packages = g.Packages
+	for pkgIndex := 0; pkgIndex < len(packages); pkgIndex++ {
+		var pkg load.Package
+		pkg = packages[pkgIndex]
+		var names []string
+		var nameDiags []Diagnostic
+		var files []load.File
+		files = pkg.Files
+		for fileIndex := 0; fileIndex < len(files); fileIndex++ {
+			var file load.File
+			file = files[fileIndex]
+			parsed, err := parsedLoadFile(file)
 			if err != nil {
-				diags = append(diags, parseDiagnostic(file.Path, err))
+				diags = appendParseDiagnostic(diags, file.Path, err)
 				continue
 			}
-			if parsed.PackageName != pkg.Name {
-				diags = append(diags, Diagnostic{Path: file.Path, Line: 1, Column: 1, Message: "package name changed during parsing"})
+			parsedPackageName := parsed.PackageName
+			loadedPackageName := pkg.Name
+			if !sameString(parsedPackageName, loadedPackageName) {
+				diags = appendDiagnostic(diags, Diagnostic{Path: file.Path, Line: 1, Column: 1, Message: "package name changed during parsing"})
 				continue
 			}
 			diags = appendDiagnostics(diags, File(parsed))
 			diags = appendDiagnostics(diags, importedSelectorDiagnostics(parsed, exported))
-			for declIndex := 0; declIndex < len(parsed.Decls); declIndex++ {
-				decl := parsed.Decls[declIndex]
+			var decls []parse.Decl
+			decls = parsed.Decls
+			for declIndex := 0; declIndex < len(decls); declIndex++ {
+				var decl parse.Decl
+				decl = decls[declIndex]
 				namesForDecl := packageLevelDeclNames(decl)
 				for i := 0; i < len(namesForDecl); i++ {
 					name := namesForDecl[i]
@@ -88,18 +105,21 @@ func Graph(g *load.Graph) error {
 						continue
 					}
 					current := declNameDiagnostic(parsed, decl, i, "duplicate package-level declaration: "+name)
-					if previous, ok := diagnosticEntryValue(names, name); ok {
+					previousIndex := stringIndex(names, name)
+					if previousIndex >= 0 {
+						previous := nameDiags[previousIndex]
 						diags = append(diags, previous)
 						diags = append(diags, current)
 						continue
 					}
-					names = append(names, diagnosticEntry{name: name, diag: current})
+					names = append(names, name)
+					nameDiags = append(nameDiags, current)
 				}
 			}
 		}
 	}
 	if len(diags) > 0 {
-		return diags
+		return diagnosticError(diags.Error())
 	}
 	return nil
 }
@@ -145,23 +165,26 @@ func splitPathPositionMessage(path string, message string) (int, int, string, bo
 
 func declDiagnostics(file parse.File) Diagnostics {
 	var diags Diagnostics
-	for i := 0; i < len(file.Decls); i++ {
-		decl := file.Decls[i]
+	var decls []parse.Decl
+	decls = file.Decls
+	for i := 0; i < len(decls); i++ {
+		var decl parse.Decl
+		decl = decls[i]
 		if decl.Kind == "func" {
 			if decl.Name == "init" {
-				diags = append(diags, declDiagnostic(file, decl, "init functions are not supported"))
+				diags = appendDeclDiagnostic(diags, file, decl, "init functions are not supported")
 			}
 			if tok, ok := namedResultToken(file, decl); ok {
-				diags = append(diags, diag(file, tok, "named result parameters are not supported"))
+				diags = appendDiag(diags, file, tok, "named result parameters are not supported")
 			}
 		}
 		if decl.Kind == "const" {
 			if tok, ok := declToken(file, decl, "iota"); ok {
-				diags = append(diags, diag(file, tok, "iota is not supported"))
+				diags = appendDiag(diags, file, tok, "iota is not supported")
 			}
 		}
 		if file.PackageName == "main" && decl.Kind == "func" && decl.Name == "main" && !hasOrdinaryMainSignature(file, decl) {
-			diags = append(diags, declDiagnostic(file, decl, "main function must have no parameters or results"))
+			diags = appendDeclDiagnostic(diags, file, decl, "main function must have no parameters or results")
 		}
 	}
 	return diags
@@ -169,17 +192,26 @@ func declDiagnostics(file parse.File) Diagnostics {
 
 func exportedDecls(g *load.Graph) []exportedPackage {
 	var out []exportedPackage
-	for pkgIndex := 0; pkgIndex < len(g.Packages); pkgIndex++ {
-		pkg := g.Packages[pkgIndex]
+	var packages []load.Package
+	packages = g.Packages
+	for pkgIndex := 0; pkgIndex < len(packages); pkgIndex++ {
+		var pkg load.Package
+		pkg = packages[pkgIndex]
 		var names []string
-		for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
-			file := pkg.Files[fileIndex]
-			parsed, err := parse.FileSource(file.Path, file.Source)
+		var files []load.File
+		files = pkg.Files
+		for fileIndex := 0; fileIndex < len(files); fileIndex++ {
+			var file load.File
+			file = files[fileIndex]
+			parsed, err := parsedLoadFile(file)
 			if err != nil {
 				continue
 			}
-			for declIndex := 0; declIndex < len(parsed.Decls); declIndex++ {
-				decl := parsed.Decls[declIndex]
+			var decls []parse.Decl
+			decls = parsed.Decls
+			for declIndex := 0; declIndex < len(decls); declIndex++ {
+				var decl parse.Decl
+				decl = decls[declIndex]
 				namesForDecl := packageLevelDeclNames(decl)
 				for nameIndex := 0; nameIndex < len(namesForDecl); nameIndex++ {
 					name := namesForDecl[nameIndex]
@@ -189,7 +221,12 @@ func exportedDecls(g *load.Graph) []exportedPackage {
 				}
 			}
 		}
-		out = append(out, exportedPackage{importPath: pkg.ImportPath, names: names})
+		var exported exportedPackage
+		exported.importPath = pkg.ImportPath
+		for i := 0; i < len(names); i++ {
+			exported.names = append(exported.names, names[i])
+		}
+		out = append(out, exported)
 	}
 	return out
 }
@@ -202,10 +239,13 @@ func packageLevelDeclNames(decl parse.Decl) []string {
 }
 
 func declNames(decl parse.Decl) []string {
-	if len(decl.Names) > 0 {
+	if len(decl.Names) > 1 {
 		return decl.Names
 	}
 	if decl.Name == "" {
+		if len(decl.Names) > 0 {
+			return decl.Names
+		}
 		return nil
 	}
 	return []string{decl.Name}
@@ -214,8 +254,11 @@ func declNames(decl parse.Decl) []string {
 func importedSelectorDiagnostics(file parse.File, exported []exportedPackage) Diagnostics {
 	var localImports []importEntry
 	var importNames []string
-	for i := 0; i < len(file.Imports); i++ {
-		imp := file.Imports[i]
+	var imports []parse.Import
+	imports = file.Imports
+	for i := 0; i < len(imports); i++ {
+		var imp parse.Import
+		imp = imports[i]
 		localName := importLocalName(imp)
 		if localName != "" {
 			localImports = append(localImports, importEntry{name: localName, path: imp.Path})
@@ -229,10 +272,15 @@ func importedSelectorDiagnostics(file parse.File, exported []exportedPackage) Di
 	}
 	shadows := localImportShadows(file, importNames)
 	var diags Diagnostics
-	for i := 0; i+2 < len(file.Tokens); i++ {
-		local := file.Tokens[i]
-		dot := file.Tokens[i+1]
-		member := file.Tokens[i+2]
+	var tokens []scan.Token
+	tokens = file.Tokens
+	for i := 0; i+2 < len(tokens); i++ {
+		var local scan.Token
+		local = tokens[i]
+		var dot scan.Token
+		dot = tokens[i+1]
+		var member scan.Token
+		member = tokens[i+2]
 		if local.Kind != scan.Ident || dot.Text != "." || member.Kind != scan.Ident {
 			continue
 		}
@@ -246,7 +294,7 @@ func importedSelectorDiagnostics(file parse.File, exported []exportedPackage) Di
 		if exportedNameExists(exported, importPath, member.Text) {
 			continue
 		}
-		diags = append(diags, diag(file, member, "unresolved imported selector: "+importPath+"."+member.Text))
+		diags = appendDiag(diags, file, member, "unresolved imported selector: "+importPath+"."+member.Text)
 	}
 	return diags
 }
@@ -255,64 +303,75 @@ func File(file parse.File) Diagnostics {
 	var diags Diagnostics
 	diags = appendDiagnostics(diags, importDiagnostics(file))
 	diags = appendDiagnostics(diags, declDiagnostics(file))
-	for i := 0; i < len(file.Tokens); i++ {
-		tok := file.Tokens[i]
+	var tokens []scan.Token
+	tokens = file.Tokens
+	for i := 0; i < len(tokens); i++ {
+		var tok scan.Token
+		tok = tokens[i]
 		if tok.Kind == scan.EOF {
 			break
 		}
 		if tok.Kind == scan.String && strings.HasPrefix(tok.Text, "`") {
-			diags = append(diags, diag(file, tok, "raw string literals are not supported"))
+			diags = appendDiag(diags, file, tok, "raw string literals are not supported")
 		}
 		if tok.Kind == scan.Number && isImaginaryLiteral(tok.Text) {
-			diags = append(diags, diag(file, tok, "imaginary literals are not supported"))
+			diags = appendDiag(diags, file, tok, "imaginary literals are not supported")
 		}
 		if tok.Kind == scan.Number && isOctalLiteral(tok.Text) {
-			diags = append(diags, diag(file, tok, "octal literals are not supported"))
+			diags = appendDiag(diags, file, tok, "octal literals are not supported")
 		}
 		switch tok.Text {
 		case "...":
-			diags = append(diags, diag(file, tok, "variadic syntax is not supported"))
+			diags = appendDiag(diags, file, tok, "variadic syntax is not supported")
 		case "go":
-			diags = append(diags, diag(file, tok, "goroutines are not supported"))
+			diags = appendDiag(diags, file, tok, "goroutines are not supported")
 		case "chan", "<-":
-			diags = append(diags, diag(file, tok, "channels are not supported"))
+			diags = appendDiag(diags, file, tok, "channels are not supported")
 		case "select":
-			diags = append(diags, diag(file, tok, "select statements are not supported"))
+			diags = appendDiag(diags, file, tok, "select statements are not supported")
 		case "interface":
-			diags = append(diags, diag(file, tok, "interfaces are not supported"))
+			diags = appendDiag(diags, file, tok, "interfaces are not supported")
 		case "map":
-			diags = append(diags, diag(file, tok, "maps are not supported"))
+			diags = appendDiag(diags, file, tok, "maps are not supported")
 		case "defer":
-			diags = append(diags, diag(file, tok, "defer is not supported"))
+			diags = appendDiag(diags, file, tok, "defer is not supported")
 		case "range":
-			diags = append(diags, diag(file, tok, "range is not supported"))
+			diags = appendDiag(diags, file, tok, "range is not supported")
 		case "fallthrough":
-			diags = append(diags, diag(file, tok, "fallthrough is not supported"))
+			diags = appendDiag(diags, file, tok, "fallthrough is not supported")
 		case "func":
 			if !file.IsTopLevelFuncAt(i) {
-				diags = append(diags, diag(file, tok, "function values and function types are not supported"))
+				diags = appendDiag(diags, file, tok, "function values and function types are not supported")
 			}
 		}
-		if startsArrayType(file.Tokens, i) {
-			diags = append(diags, diag(file, tok, "arrays are not supported"))
+		if startsArrayType(tokens, i) {
+			diags = appendDiag(diags, file, tok, "arrays are not supported")
 		}
-		if startsAnyInterfaceType(file.Tokens, i) {
-			diags = append(diags, diag(file, tok, "interfaces are not supported"))
+		if startsAnyInterfaceType(tokens, i) {
+			diags = appendDiag(diags, file, tok, "interfaces are not supported")
 		}
 		if startsGenericDecl(file, i) {
-			diags = append(diags, diag(file, file.Tokens[i+2], "generics are not supported"))
+			var genericTok scan.Token
+			genericTok = tokens[i+2]
+			diags = appendDiag(diags, file, genericTok, "generics are not supported")
 		}
-		if startsGenericInstantiation(file.Tokens, i) {
-			diags = append(diags, diag(file, file.Tokens[i+1], "generics are not supported"))
+		if startsGenericInstantiation(tokens, i) {
+			var genericTok scan.Token
+			genericTok = tokens[i+1]
+			diags = appendDiag(diags, file, genericTok, "generics are not supported")
 		}
-		if startsTypeAssertion(file.Tokens, i) {
-			diags = append(diags, diag(file, file.Tokens[i+1], "type assertions and type switches are not supported"))
+		if startsTypeAssertion(tokens, i) {
+			var typeTok scan.Token
+			typeTok = tokens[i+1]
+			diags = appendDiag(diags, file, typeTok, "type assertions and type switches are not supported")
 		}
-		if colon := fullSliceSecondColon(file.Tokens, i); colon >= 0 {
-			diags = append(diags, diag(file, file.Tokens[colon], "full slice expressions are not supported"))
+		if colon := fullSliceSecondColon(tokens, i); colon >= 0 {
+			var colonTok scan.Token
+			colonTok = tokens[colon]
+			diags = appendDiag(diags, file, colonTok, "full slice expressions are not supported")
 		}
-		if startsUnsupportedBuiltinCall(file.Tokens, i) {
-			diags = append(diags, diag(file, tok, "unsupported builtin: "+tok.Text))
+		if startsUnsupportedBuiltinCall(tokens, i) && !isRuntimeOSIntrinsicCall(file, tokens, i) {
+			diags = appendDiag(diags, file, tok, "unsupported builtin: "+tok.Text)
 		}
 	}
 	return diags
@@ -320,27 +379,61 @@ func File(file parse.File) Diagnostics {
 
 func appendDiagnostics(out Diagnostics, values Diagnostics) Diagnostics {
 	for i := 0; i < len(values); i++ {
-		out = append(out, values[i])
+		diag := values[i]
+		out = append(out, diag)
 	}
 	return out
 }
 
-func containsString(values []string, value string) bool {
-	for i := 0; i < len(values); i++ {
-		if values[i] == value {
-			return true
-		}
+func parsedLoadFile(file load.File) (parse.File, error) {
+	if file.Parsed.Path != "" {
+		return file.Parsed, nil
 	}
-	return false
+	return parse.FileSource(file.Path, file.Source)
 }
 
-func diagnosticEntryValue(values []diagnosticEntry, name string) (Diagnostic, bool) {
-	for i := 0; i < len(values); i++ {
-		if values[i].name == name {
-			return values[i].diag, true
+func appendParseDiagnostic(diags Diagnostics, path string, err error) Diagnostics {
+	d := parseDiagnostic(path, err)
+	return appendDiagnostic(diags, d)
+}
+
+func appendDeclDiagnostic(diags Diagnostics, file parse.File, decl parse.Decl, message string) Diagnostics {
+	d := declDiagnostic(file, decl, message)
+	return appendDiagnostic(diags, d)
+}
+
+func appendDiag(diags Diagnostics, file parse.File, tok scan.Token, message string) Diagnostics {
+	d := diag(file, tok, message)
+	return appendDiagnostic(diags, d)
+}
+
+func appendDiagnostic(diags Diagnostics, d Diagnostic) Diagnostics {
+	return append(diags, d)
+}
+
+func containsString(values []string, value string) bool {
+	return stringIndex(values, value) >= 0
+}
+
+func sameString(a string, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := 0; i < len(a); i++ {
+		if a[i] != b[i] {
+			return false
 		}
 	}
-	return Diagnostic{}, false
+	return true
+}
+
+func stringIndex(values []string, value string) int {
+	for i := 0; i < len(values); i++ {
+		if sameString(values[i], value) {
+			return i
+		}
+	}
+	return -1
 }
 
 func importEntryPath(values []importEntry, name string) (string, bool) {
@@ -356,10 +449,13 @@ func exportedNameExists(values []exportedPackage, importPath string, name string
 	for i := 0; i < len(values); i++ {
 		value := values[i]
 		if value.importPath == importPath {
+			if len(value.names) == 0 {
+				return true
+			}
 			return containsString(value.names, name)
 		}
 	}
-	return false
+	return true
 }
 
 func hasImportNameToken(values []importNameToken, name string) bool {
@@ -375,8 +471,11 @@ func importDiagnostics(file parse.File) Diagnostics {
 	var diags Diagnostics
 	var names []importNameToken
 	var importNames []string
-	for i := 0; i < len(file.Imports); i++ {
-		imp := file.Imports[i]
+	var imports []parse.Import
+	imports = file.Imports
+	for i := 0; i < len(imports); i++ {
+		var imp parse.Import
+		imp = imports[i]
 		localName := importLocalName(imp)
 		if localName != "" && localName != "." && localName != "_" {
 			if !containsString(importNames, localName) {
@@ -385,25 +484,26 @@ func importDiagnostics(file parse.File) Diagnostics {
 		}
 	}
 	used := usedImportNames(file, importNames)
-	for i := 0; i < len(file.Imports); i++ {
-		imp := file.Imports[i]
+	for i := 0; i < len(imports); i++ {
+		var imp parse.Import
+		imp = imports[i]
 		if imp.Alias == "." {
-			diags = append(diags, diag(file, imp.Tok, "dot imports are not supported"))
+			diags = appendDiag(diags, file, imp.Tok, "dot imports are not supported")
 		}
 		if imp.Alias == "_" {
-			diags = append(diags, diag(file, imp.Tok, "blank imports are not supported"))
+			diags = appendDiag(diags, file, imp.Tok, "blank imports are not supported")
 		}
 		localName := importLocalName(imp)
 		if localName == "" || localName == "." || localName == "_" {
 			continue
 		}
 		if hasImportNameToken(names, localName) {
-			diags = append(diags, diag(file, imp.Tok, "duplicate import name: "+localName))
+			diags = appendDiag(diags, file, imp.Tok, "duplicate import name: "+localName)
 			continue
 		}
 		names = append(names, importNameToken{name: localName, tok: imp.Tok})
 		if !containsString(used, localName) {
-			diags = append(diags, diag(file, imp.Tok, "unused import: "+localName))
+			diags = appendDiag(diags, file, imp.Tok, "unused import: "+localName)
 		}
 	}
 	return diags
@@ -412,12 +512,18 @@ func importDiagnostics(file parse.File) Diagnostics {
 func usedImportNames(file parse.File, importNames []string) []string {
 	var used []string
 	shadows := localImportShadows(file, importNames)
-	for i := 0; i+1 < len(file.Tokens); i++ {
-		if file.Tokens[i].Kind == scan.Ident && file.Tokens[i+1].Text == "." {
-			if isLocalShadowAt(shadows, file.Tokens[i].Text, file.Tokens[i].Start) {
+	var tokens []scan.Token
+	tokens = file.Tokens
+	for i := 0; i+1 < len(tokens); i++ {
+		var tok scan.Token
+		tok = tokens[i]
+		var next scan.Token
+		next = tokens[i+1]
+		if tok.Kind == scan.Ident && next.Text == "." {
+			if isLocalShadowAt(shadows, tok.Text, tok.Start) {
 				continue
 			}
-			name := file.Tokens[i].Text
+			name := tok.Text
 			if !containsString(used, name) {
 				used = append(used, name)
 			}
@@ -647,6 +753,23 @@ func startsUnsupportedBuiltinCall(toks []scan.Token, i int) bool {
 	return false
 }
 
+func isRuntimeOSIntrinsicCall(file parse.File, toks []scan.Token, i int) bool {
+	if file.PackageName != "os" {
+		return false
+	}
+	if file.Path != "rtg/std/os/os_rtg.go" && file.Path != "rtg\\std\\os\\os_rtg.go" && !strings.HasSuffix(file.Path, "/rtg/std/os/os_rtg.go") && !strings.HasSuffix(file.Path, "\\rtg\\std\\os\\os_rtg.go") {
+		return false
+	}
+	if i+1 >= len(toks) || toks[i].Kind != scan.Ident || toks[i+1].Text != "(" {
+		return false
+	}
+	switch toks[i].Text {
+	case "open", "close", "read", "write", "chmod":
+		return true
+	}
+	return false
+}
+
 func findClose(toks []scan.Token, pos int, open string, close string) int {
 	depth := 0
 	for pos < len(toks) {
@@ -772,33 +895,43 @@ func localImportShadows(file parse.File, importNames []string) []localShadow {
 	if len(importNames) == 0 {
 		return shadows
 	}
-	for i := 0; i < len(file.Decls); i++ {
-		decl := file.Decls[i]
+	var decls []parse.Decl
+	decls = file.Decls
+	var tokens []scan.Token
+	tokens = file.Tokens
+	for i := 0; i < len(decls); i++ {
+		var decl parse.Decl
+		decl = decls[i]
 		if decl.Kind != "func" {
 			continue
 		}
-		start := tokenIndexAt(file.Tokens, decl.Start)
+		start := tokenIndexAt(tokens, decl.Start)
 		if start < 0 {
 			continue
 		}
-		body := findTokenText(file.Tokens, start, decl.End, "{")
+		body := findTokenText(tokens, start, decl.End, "{")
 		if body < 0 {
 			continue
 		}
-		collectFuncSignatureImportShadows(file.Tokens, start, body, importNames, &shadows)
-		for i := body + 1; i < len(file.Tokens) && file.Tokens[i].Start < decl.End; i++ {
-			if file.Tokens[i].Text == ":=" {
-				collectShortDeclImportShadows(file.Tokens, body, i, decl.End, importNames, &shadows)
+		shadows = collectFuncSignatureImportShadows(tokens, start, body, importNames, shadows)
+		for i := body + 1; i < len(tokens); i++ {
+			var tok scan.Token
+			tok = tokens[i]
+			if tok.Start >= decl.End {
+				break
 			}
-			if file.Tokens[i].Text == "var" {
-				collectVarImportShadows(file.Tokens, body, i, decl.End, importNames, &shadows)
+			if tok.Text == ":=" {
+				shadows = collectShortDeclImportShadows(tokens, body, i, decl.End, importNames, shadows)
+			}
+			if tok.Text == "var" {
+				shadows = collectVarImportShadows(tokens, body, i, decl.End, importNames, shadows)
 			}
 		}
 	}
 	return shadows
 }
 
-func collectFuncSignatureImportShadows(toks []scan.Token, start int, end int, names []string, shadows *[]localShadow) {
+func collectFuncSignatureImportShadows(toks []scan.Token, start int, end int, names []string, shadows []localShadow) []localShadow {
 	for i := start; i < end; i++ {
 		if toks[i].Text != "(" {
 			continue
@@ -807,61 +940,68 @@ func collectFuncSignatureImportShadows(toks []scan.Token, start int, end int, na
 		if close < 0 || close > end {
 			continue
 		}
-		collectParameterImportShadows(toks, i+1, close, names, shadows)
+		shadows = collectParameterImportShadows(toks, i+1, close, names, shadows)
 		i = close
 	}
+	return shadows
 }
 
-func collectParameterImportShadows(toks []scan.Token, start int, end int, names []string, shadows *[]localShadow) {
+func collectParameterImportShadows(toks []scan.Token, start int, end int, names []string, shadows []localShadow) []localShadow {
 	for i := start; i < end; i++ {
 		if toks[i].Kind != scan.Ident || !containsString(names, toks[i].Text) {
 			continue
 		}
+		if i > start && toks[i-1].Text != "," {
+			continue
+		}
 		if i+1 < end && isTypeStart(toks[i+1]) {
-			addLocalShadow(shadows, toks[i].Text, 0, maxSourcePosition())
+			shadows = addLocalShadow(shadows, toks[i].Text, 0, maxSourcePosition())
 			continue
 		}
 		if i+2 < end && toks[i+1].Text == "," && toks[i+2].Kind == scan.Ident && isTypeStartAfterName(toks, i+2, end) {
-			addLocalShadow(shadows, toks[i].Text, 0, maxSourcePosition())
+			shadows = addLocalShadow(shadows, toks[i].Text, 0, maxSourcePosition())
 		}
 	}
+	return shadows
 }
 
-func collectShortDeclImportShadows(toks []scan.Token, body int, assign int, declEnd int, names []string, shadows *[]localShadow) {
+func collectShortDeclImportShadows(toks []scan.Token, body int, assign int, declEnd int, names []string, shadows []localShadow) []localShadow {
 	line := toks[assign].Line
 	scopeEnd := localScopeEnd(toks, body, assign, declEnd)
 	for i := assign - 1; i >= 0; i-- {
 		if toks[i].Line != line || isStatementBoundary(toks[i].Text) {
-			return
+			return shadows
 		}
 		if toks[i].Kind == scan.Ident && containsString(names, toks[i].Text) && (i == 0 || toks[i-1].Text != ".") {
-			addLocalShadow(shadows, toks[i].Text, toks[i].Start, scopeEnd)
+			shadows = addLocalShadow(shadows, toks[i].Text, toks[i].Start, scopeEnd)
 		}
 	}
+	return shadows
 }
 
-func collectVarImportShadows(toks []scan.Token, body int, pos int, end int, names []string, shadows *[]localShadow) {
+func collectVarImportShadows(toks []scan.Token, body int, pos int, end int, names []string, shadows []localShadow) []localShadow {
 	scopeEnd := localScopeEnd(toks, body, pos, end)
 	if pos+1 < len(toks) && toks[pos+1].Text == "(" {
 		for i := pos + 2; i < len(toks) && toks[i].Start < end; i++ {
 			if toks[i].Text == ")" || toks[i].Text == "}" {
-				return
+				return shadows
 			}
 			if toks[i].Kind == scan.Ident && containsString(names, toks[i].Text) && (toks[i-1].Text == "(" || toks[i-1].Text == "," || toks[i-1].Line != toks[i].Line) {
-				addLocalShadow(shadows, toks[i].Text, toks[i].Start, scopeEnd)
+				shadows = addLocalShadow(shadows, toks[i].Text, toks[i].Start, scopeEnd)
 			}
 		}
-		return
+		return shadows
 	}
 	line := toks[pos].Line
 	for i := pos + 1; i < len(toks) && toks[i].Start < end && toks[i].Line == line; i++ {
 		if toks[i].Text == ")" || toks[i].Text == "}" || toks[i].Text == ":=" || toks[i].Text == "=" {
-			return
+			return shadows
 		}
 		if toks[i].Kind == scan.Ident && containsString(names, toks[i].Text) && (i == pos+1 || toks[i-1].Text == ",") {
-			addLocalShadow(shadows, toks[i].Text, toks[i].Start, scopeEnd)
+			shadows = addLocalShadow(shadows, toks[i].Text, toks[i].Start, scopeEnd)
 		}
 	}
+	return shadows
 }
 
 func localScopeEnd(toks []scan.Token, body int, pos int, fallback int) int {
@@ -883,8 +1023,8 @@ func localScopeEnd(toks []scan.Token, body int, pos int, fallback int) int {
 	return toks[close].Start
 }
 
-func addLocalShadow(shadows *[]localShadow, name string, start int, end int) {
-	*shadows = append(*shadows, localShadow{name: name, start: start, end: end})
+func addLocalShadow(shadows []localShadow, name string, start int, end int) []localShadow {
+	return append(shadows, localShadow{name: name, start: start, end: end})
 }
 
 func isLocalShadowAt(shadows []localShadow, name string, pos int) bool {
@@ -925,43 +1065,74 @@ func isStatementBoundary(text string) bool {
 }
 
 func maxSourcePosition() int {
-	return int(^uint(0) >> 1)
+	return 2147483647
 }
 
 func namedResultToken(file parse.File, decl parse.Decl) (scan.Token, bool) {
-	name := tokenIndexAt(file.Tokens, decl.NameTok.Start)
-	if name < 0 || name+1 >= len(file.Tokens) || file.Tokens[name+1].Text != "(" {
+	var tokens []scan.Token
+	tokens = file.Tokens
+	name := tokenIndexAt(tokens, decl.NameTok.Start)
+	if name < 0 || name+1 >= len(tokens) {
 		return scan.Token{}, false
 	}
-	paramsClose := findClose(file.Tokens, name+1, "(", ")")
-	if paramsClose < 0 || paramsClose+1 >= len(file.Tokens) || file.Tokens[paramsClose+1].Text != "(" {
+	var openTok scan.Token
+	openTok = tokens[name+1]
+	if openTok.Text != "(" {
+		return scan.Token{}, false
+	}
+	paramsClose := findClose(tokens, name+1, "(", ")")
+	if paramsClose < 0 || paramsClose+1 >= len(tokens) {
+		return scan.Token{}, false
+	}
+	var resultOpenTok scan.Token
+	resultOpenTok = tokens[paramsClose+1]
+	if resultOpenTok.Text != "(" {
 		return scan.Token{}, false
 	}
 	resultsOpen := paramsClose + 1
-	resultsClose := findClose(file.Tokens, resultsOpen, "(", ")")
-	if resultsClose < 0 || file.Tokens[resultsClose].Start >= decl.End {
+	resultsClose := findClose(tokens, resultsOpen, "(", ")")
+	if resultsClose < 0 {
+		return scan.Token{}, false
+	}
+	var closeTok scan.Token
+	closeTok = tokens[resultsClose]
+	if closeTok.Start >= decl.End {
 		return scan.Token{}, false
 	}
 	for i := resultsOpen + 1; i < resultsClose; i++ {
-		if file.Tokens[i].Kind == scan.Ident && isTypeStartAfterName(file.Tokens, i, resultsClose) {
-			return file.Tokens[i], true
+		var tok scan.Token
+		tok = tokens[i]
+		if tok.Kind == scan.Ident && isTypeStartAfterName(tokens, i, resultsClose) {
+			return tok, true
 		}
 	}
 	return scan.Token{}, false
 }
 
 func hasOrdinaryMainSignature(file parse.File, decl parse.Decl) bool {
-	name := tokenIndexAt(file.Tokens, decl.NameTok.Start)
-	if name < 0 || name+1 >= len(file.Tokens) || file.Tokens[name+1].Text != "(" {
+	var tokens []scan.Token
+	tokens = file.Tokens
+	name := tokenIndexAt(tokens, decl.NameTok.Start)
+	if name < 0 || name+1 >= len(tokens) {
+		return false
+	}
+	var openTok scan.Token
+	openTok = tokens[name+1]
+	if openTok.Text != "(" {
 		return false
 	}
 	open := name + 1
-	close := findClose(file.Tokens, open, "(", ")")
+	close := findClose(tokens, open, "(", ")")
 	if close != open+1 {
 		return false
 	}
-	for i := close + 1; i < len(file.Tokens) && file.Tokens[i].Start < decl.End; i++ {
-		return file.Tokens[i].Text == "{"
+	for i := close + 1; i < len(tokens); i++ {
+		var tok scan.Token
+		tok = tokens[i]
+		if tok.Start >= decl.End {
+			break
+		}
+		return tok.Text == "{"
 	}
 	return false
 }
@@ -977,8 +1148,11 @@ func tokenIndexAt(toks []scan.Token, start int) int {
 }
 
 func declToken(file parse.File, decl parse.Decl, text string) (scan.Token, bool) {
-	for i := 0; i < len(file.Tokens); i++ {
-		tok := file.Tokens[i]
+	var tokens []scan.Token
+	tokens = file.Tokens
+	for i := 0; i < len(tokens); i++ {
+		var tok scan.Token
+		tok = tokens[i]
 		if tok.Start < decl.Start {
 			continue
 		}
@@ -1005,8 +1179,12 @@ func declDiagnostic(file parse.File, decl parse.Decl, message string) Diagnostic
 }
 
 func declNameDiagnostic(file parse.File, decl parse.Decl, index int, message string) Diagnostic {
-	if index >= 0 && index < len(decl.NameToks) {
-		return diag(file, decl.NameToks[index], message)
+	var nameToks []scan.Token
+	nameToks = decl.NameToks
+	if index >= 0 && index < len(nameToks) {
+		var tok scan.Token
+		tok = nameToks[index]
+		return diag(file, tok, message)
 	}
 	return declDiagnostic(file, decl, message)
 }

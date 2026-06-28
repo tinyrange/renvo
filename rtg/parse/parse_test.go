@@ -144,6 +144,44 @@ type Box struct { value int }
 	}
 }
 
+func TestFileSourceMarksTopLevelFuncsAfterCompositeLiteralReturn(t *testing.T) {
+	file, err := FileSource("funcs.go", []byte(`package pkg
+
+type Package struct{}
+
+func packageByImportPath() (Package, bool) {
+	return Package{}, false
+}
+
+func nextFunc() int {
+	return 1
+}
+`))
+	if err != nil {
+		t.Fatalf("FileSource failed: %v", err)
+	}
+	if len(file.Decls) != 3 {
+		t.Fatalf("decls = %#v, want type plus two funcs", file.Decls)
+	}
+	nextFuncToken := -1
+	for i := 0; i+1 < len(file.Tokens); i++ {
+		if file.Tokens[i].Text == "func" && file.Tokens[i+1].Text == "nextFunc" {
+			nextFuncToken = i
+			break
+		}
+	}
+	if nextFuncToken < 0 {
+		t.Fatalf("did not find nextFunc token")
+	}
+	if !file.IsTopLevelFuncAt(nextFuncToken) {
+		t.Fatalf("nextFunc token was not marked as top-level")
+	}
+	file.Decls = file.Decls[:1]
+	if !file.IsTopLevelFuncAt(nextFuncToken) {
+		t.Fatalf("column-1 nextFunc token was not recognized as top-level without decl bookkeeping")
+	}
+}
+
 func sameStrings(got []string, want []string) bool {
 	if len(got) != len(want) {
 		return false

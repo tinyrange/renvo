@@ -27,7 +27,10 @@ func (e scanError) Error() string {
 }
 
 func posError(line int, column int, message string) error {
-	return scanError(strconv.Itoa(line) + ":" + strconv.Itoa(column) + ": " + message)
+	lineText := strconv.Itoa(line)
+	columnText := strconv.Itoa(column)
+	text := lineText + ":" + columnText + ": " + message
+	return scanError(text)
 }
 
 func Tokens(src []byte) ([]Token, error) {

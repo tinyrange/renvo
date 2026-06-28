@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"j5.nz/rtg/rtg/mod"
+	"j5.nz/rtg/rtg/parse"
 	targetpkg "j5.nz/rtg/rtg/target"
 )
 
@@ -14,12 +15,14 @@ type File struct {
 	Path     string
 	UnitPath string
 	Source   []byte
+	Parsed   parse.File
 }
 
 type Package struct {
 	ImportPath      string
 	Dir             string
 	Name            string
+	Entry           bool
 	Files           []File
 	Imports         []string
 	ImportPositions []ImportPosition
@@ -55,13 +58,22 @@ func LoadEntries(entries []string, opts Options) (*Graph, error) {
 	if err != nil {
 		return nil, err
 	}
+	if module.Root == "" {
+		root, err := filepath.Abs(".")
+		if err != nil {
+			return nil, err
+		}
+		module = moduleWithRoot(module, root)
+	}
 	if opts.StdRoot == "" {
 		opts.StdRoot = defaultStdRoot(module.Root)
 	}
 	if opts.Target == "" {
 		opts.Target = targetpkg.Default()
 	}
-	g := &Graph{Module: module}
+	var graph Graph
+	graph.Module = module
+	g := &graph
 	var seen []string
 	var fileEntries []fileEntryGroup
 	var fileDirs []string
@@ -74,8 +86,11 @@ func LoadEntries(entries []string, opts Options) (*Graph, error) {
 		if !isWithinModuleRoot(module.Root, dir) {
 			return nil, fmt.Errorf("%s: entry is outside module root %s", dir, module.Root)
 		}
-		if nested, ok := nestedModuleRoot(module.Root, dir); ok {
-			return nil, fmt.Errorf("%s: entry is inside nested module root %s", dir, nested)
+		if canCheckNestedModuleRoots(module.Root) {
+			nested := nestedModuleRoot(module.Root, dir)
+			if nested != "" {
+				return nil, fmt.Errorf("%s: entry is inside nested module root %s", dir, nested)
+			}
 		}
 		if len(files) > 0 {
 			index := fileEntryGroupIndex(fileEntries, dir)
@@ -106,16 +121,22 @@ func LoadEntries(entries []string, opts Options) (*Graph, error) {
 	return g, nil
 }
 
+func moduleWithRoot(module mod.Module, root string) mod.Module {
+	return mod.Module{Root: root, Path: module.Path, Requires: module.Requires, Replaces: module.Replaces}
+}
+
 func defaultStdRoot(moduleRoot string) string {
 	if env := os.Getenv("RTG_STD"); env != "" {
 		return env
 	}
-	moduleStd := filepath.Join(moduleRoot, "rtg", "std")
-	if info, err := os.Stat(moduleStd); err == nil && info.IsDir() {
+	moduleStd := filepath.Join(filepath.Join(moduleRoot, "rtg"), "std")
+	if info, err := os.Stat(moduleStd); err == nil && fileInfoIsDir(info) {
 		return moduleStd
 	}
-	if cwd, err := os.Getwd(); err == nil {
-		if root, ok := findStdRootUpward(cwd); ok {
+	cwd, err := os.Getwd()
+	if err == nil {
+		root, ok := findStdRootUpward(cwd)
+		if ok {
 			return root
 		}
 	}
@@ -125,8 +146,8 @@ func defaultStdRoot(moduleRoot string) string {
 func findStdRootUpward(start string) (string, bool) {
 	dir := filepath.Clean(start)
 	for {
-		candidate := filepath.Join(dir, "rtg", "std")
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+		candidate := filepath.Join(filepath.Join(dir, "rtg"), "std")
+		if info, err := os.Stat(candidate); err == nil && fileInfoIsDir(info) {
 			return candidate, true
 		}
 		parent := filepath.Dir(dir)
@@ -142,7 +163,7 @@ func entryInput(entry string) (string, []string, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	if info.IsDir() {
+	if fileInfoIsDir(info) {
 		dir, err := filepath.Abs(entry)
 		return dir, nil, err
 	}
@@ -171,32 +192,41 @@ func validateFrontendFileInput(path string) error {
 }
 
 func loadPackageRecursive(g *Graph, opts Options, seen *[]string, dir string) error {
-	return loadPackageRecursiveAs(g, opts, seen, dir, importPathForDir(g.Module, dir))
+	importPath := importPathForDir(g.Module, dir)
+	return loadPackageRecursiveAs(g, opts, seen, dir, importPath, true)
 }
 
 func loadPackageFilesRecursive(g *Graph, opts Options, seen *[]string, dir string, files []string) error {
-	return loadPackageFilesRecursiveAs(g, opts, seen, dir, importPathForDir(g.Module, dir), files)
+	importPath := importPathForDir(g.Module, dir)
+	return loadPackageFilesRecursiveAs(g, opts, seen, dir, importPath, files, true)
 }
 
-func loadPackageRecursiveAs(g *Graph, opts Options, seen *[]string, dir string, importPath string) error {
+func loadPackageRecursiveAs(g *Graph, opts Options, seen *[]string, dir string, importPath string, entry bool) error {
 	dir = filepath.Clean(dir)
-	if containsString(*seen, dir) {
+	seenValues := *seen
+	if containsString(seenValues, dir) {
+		if entry {
+			markPackageEntry(g, importPath)
+		}
 		return nil
 	}
-	*seen = append(*seen, dir)
+	seenValues = append(seenValues, dir)
+	*seen = seenValues
 	pkg, err := readPackage(g.Module, dir, importPath, opts)
 	if err != nil {
 		return err
 	}
+	pkg.Entry = entry
 	g.Packages = append(g.Packages, pkg)
-	for i := 0; i < len(pkg.Imports); i++ {
-		imp := pkg.Imports[i]
+	pkgImports := pkg.Imports
+	for i := 0; i < len(pkgImports); i++ {
+		imp := pkgImports[i]
 		next, ok, err := resolveImport(g.Module, opts, imp)
 		if err != nil {
 			return importResolutionError(pkg, imp, err)
 		}
 		if ok {
-			if err := loadPackageRecursiveAs(g, opts, seen, next.Dir, next.ImportPath); err != nil {
+			if err := loadPackageRecursiveAs(g, opts, seen, next.Dir, next.ImportPath, false); err != nil {
 				return err
 			}
 		}
@@ -204,30 +234,46 @@ func loadPackageRecursiveAs(g *Graph, opts Options, seen *[]string, dir string, 
 	return nil
 }
 
-func loadPackageFilesRecursiveAs(g *Graph, opts Options, seen *[]string, dir string, importPath string, files []string) error {
+func loadPackageFilesRecursiveAs(g *Graph, opts Options, seen *[]string, dir string, importPath string, files []string, entry bool) error {
 	dir = filepath.Clean(dir)
-	if containsString(*seen, dir) {
+	seenValues := *seen
+	if containsString(seenValues, dir) {
+		if entry {
+			markPackageEntry(g, importPath)
+		}
 		return nil
 	}
-	*seen = append(*seen, dir)
+	seenValues = append(seenValues, dir)
+	*seen = seenValues
 	pkg, err := readPackageFiles(g.Module, dir, importPath, files)
 	if err != nil {
 		return err
 	}
+	pkg.Entry = entry
 	g.Packages = append(g.Packages, pkg)
-	for i := 0; i < len(pkg.Imports); i++ {
-		imp := pkg.Imports[i]
+	pkgImports := pkg.Imports
+	for i := 0; i < len(pkgImports); i++ {
+		imp := pkgImports[i]
 		next, ok, err := resolveImport(g.Module, opts, imp)
 		if err != nil {
 			return importResolutionError(pkg, imp, err)
 		}
 		if ok {
-			if err := loadPackageRecursiveAs(g, opts, seen, next.Dir, next.ImportPath); err != nil {
+			if err := loadPackageRecursiveAs(g, opts, seen, next.Dir, next.ImportPath, false); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+func markPackageEntry(g *Graph, importPath string) {
+	for i := 0; i < len(g.Packages); i++ {
+		if g.Packages[i].ImportPath == importPath {
+			g.Packages[i].Entry = true
+			return
+		}
+	}
 }
 
 func readPackage(module mod.Module, dir string, importPath string, opts Options) (Package, error) {
@@ -256,26 +302,26 @@ func readPackageFiles(module mod.Module, dir string, importPath string, files []
 		if err != nil {
 			return Package{}, err
 		}
-		info, err := ParseSourceInfo(path, data)
+		source := copyBytes(data)
+		parsed, err := parse.FileSource(path, source)
 		if err != nil {
 			return Package{}, err
 		}
 		if pkg.Name == "" {
-			pkg.Name = info.PackageName
-		} else if pkg.Name != info.PackageName {
-			return Package{}, fmt.Errorf("%s: mixed package names %s and %s", dir, pkg.Name, info.PackageName)
+			pkg.Name = parsed.PackageName
+		} else if pkg.Name != parsed.PackageName {
+			return Package{}, fmt.Errorf("%s: mixed package names %s and %s", dir, pkg.Name, parsed.PackageName)
 		}
-		for j := 0; j < len(info.Imports); j++ {
-			imp := info.Imports[j]
-			if !containsString(importSet, imp.Path) {
-				importSet = append(importSet, imp.Path)
-				pkg.Imports = append(pkg.Imports, imp.Path)
-			}
-			if !hasImportPosition(pkg.ImportPositions, imp.Path) {
-				pkg.ImportPositions = append(pkg.ImportPositions, ImportPosition{ImportPath: imp.Path, Path: path, Line: imp.Line, Column: imp.Column})
-			}
+		for j := 0; j < len(parsed.Imports); j++ {
+			imp := parsed.Imports[j]
+			appendPackageImport(path, &pkg, &importSet, imp.Path, imp.Alias, imp.Tok.Line, imp.Tok.Column)
 		}
-		pkg.Files = append(pkg.Files, File{Path: path, UnitPath: unitFilePath(module, importPath, path), Source: data})
+		var file File
+		file.Path = path
+		file.UnitPath = unitFilePath(module, importPath, path)
+		file.Source = source
+		file.Parsed = parsed
+		pkg.Files = append(pkg.Files, file)
 	}
 	sortStrings(pkg.Imports)
 	return pkg, nil
@@ -352,6 +398,22 @@ func copyStrings(values []string) []string {
 	return out
 }
 
+func copyLoadString(value string) string {
+	var out []byte
+	for i := 0; i < len(value); i++ {
+		out = append(out, value[i])
+	}
+	return string(out)
+}
+
+func copyBytes(values []byte) []byte {
+	out := make([]byte, len(values))
+	for i := 0; i < len(values); i++ {
+		out[i] = values[i]
+	}
+	return out
+}
+
 func unitFilePath(module mod.Module, importPath string, path string) string {
 	if importPath == module.Path || strings.HasPrefix(importPath, module.Path+"/") {
 		rel, err := filepath.Rel(module.Root, path)
@@ -388,10 +450,10 @@ func goFiles(dir string, target string) ([]string, error) {
 	var files []string
 	for i := 0; i < len(entries); i++ {
 		entry := entries[i]
-		if entry.IsDir() {
+		if dirEntryIsDir(entry) {
 			continue
 		}
-		name := entry.Name()
+		name := dirEntryName(entry)
 		if !strings.HasSuffix(name, ".go") {
 			continue
 		}
@@ -422,7 +484,7 @@ func sortStrings(values []string) {
 	for i := 1; i < len(values); i++ {
 		value := values[i]
 		j := i - 1
-		for j >= 0 && values[j] > value {
+		for j >= 0 && stringGreater(values[j], value) {
 			values[j+1] = values[j]
 			j = j - 1
 		}
@@ -430,20 +492,43 @@ func sortStrings(values []string) {
 	}
 }
 
+func stringGreater(a string, b string) bool {
+	i := 0
+	for i < len(a) && i < len(b) {
+		if a[i] > b[i] {
+			return true
+		}
+		if a[i] < b[i] {
+			return false
+		}
+		i = i + 1
+	}
+	return len(a) > len(b)
+}
+
 func fileBuildTagsMatchTarget(path string, targetOS string, targetArch string) (bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return false, err
 	}
-	expr, ok := leadingGoBuildExpr(string(data))
+	src := bytesToString(data)
+	expr, ok := leadingGoBuildExpr(src)
 	if ok {
 		return evalGoBuildExpr(expr, targetOS, targetArch), nil
 	}
-	lines := leadingPlusBuildLines(string(data))
+	lines := leadingPlusBuildLines(src)
 	if len(lines) == 0 {
 		return true, nil
 	}
 	return evalPlusBuildLines(lines, targetOS, targetArch), nil
+}
+
+func bytesToString(data []byte) string {
+	var out []byte
+	for i := 0; i < len(data); i++ {
+		out = append(out, data[i])
+	}
+	return string(out)
 }
 
 func leadingGoBuildExpr(src string) (string, bool) {
@@ -589,8 +674,18 @@ func goBuildExprTokens(expr string) []string {
 			i++
 			continue
 		}
-		if c == '(' || c == ')' || c == '!' {
-			toks = append(toks, string(c))
+		if c == '(' {
+			toks = append(toks, "(")
+			i++
+			continue
+		}
+		if c == ')' {
+			toks = append(toks, ")")
+			i++
+			continue
+		}
+		if c == '!' {
+			toks = append(toks, "!")
 			i++
 			continue
 		}
@@ -769,22 +864,28 @@ func resolveImport(module mod.Module, opts Options, imp string) (resolvedImport,
 	prefix := module.Path + "/"
 	if strings.HasPrefix(imp, prefix) {
 		dir := filepath.Join(module.Root, filepath.FromSlash(strings.TrimPrefix(imp, prefix)))
-		if nested, ok := nestedModuleRoot(module.Root, dir); ok {
-			return resolvedImport{}, false, fmt.Errorf("import %q crosses nested module root %s", imp, nested)
+		if canCheckNestedModuleRoots(module.Root) {
+			nested := nestedModuleRoot(module.Root, dir)
+			if nested != "" {
+				return resolvedImport{}, false, fmt.Errorf("import %q crosses nested module root %s", imp, nested)
+			}
 		}
 		return resolvedImport{Dir: dir, ImportPath: imp}, true, nil
 	}
-	if next, ok, err := resolveReplacedImport(module, imp); ok || err != nil {
+	next, ok, err := resolveReplacedImport(module, imp)
+	if ok || err != nil {
 		return next, ok, err
 	}
-	if req, ok := requiredModuleForImport(module, imp); ok {
-		if next, ok := resolveVendorImport(module, req, imp); ok {
-			return next, true, nil
+	req, ok := requiredModuleForImport(module, imp)
+	if ok {
+		vendorNext, vendorOK := resolveVendorImport(module, req, imp)
+		if vendorOK {
+			return vendorNext, true, nil
 		}
 		return resolvedImport{}, false, fmt.Errorf("import %q uses required module %q; external module fetching is not supported", imp, req.Path)
 	}
 	stdDir := filepath.Join(opts.StdRoot, filepath.FromSlash(imp))
-	if info, err := os.Stat(stdDir); err == nil && info.IsDir() {
+	if info, err := os.Stat(stdDir); err == nil && fileInfoIsDir(info) {
 		return resolvedImport{Dir: stdDir, ImportPath: imp}, true, nil
 	}
 	if isStandardImportPath(imp) {
@@ -825,8 +926,8 @@ func resolveVendorImport(module mod.Module, req mod.Require, imp string) (resolv
 	if imp != req.Path && !strings.HasPrefix(imp, req.Path+"/") {
 		return resolvedImport{}, false
 	}
-	dir := filepath.Join(module.Root, "vendor", filepath.FromSlash(imp))
-	if info, err := os.Stat(dir); err == nil && info.IsDir() {
+	dir := filepath.Join(filepath.Join(module.Root, "vendor"), filepath.FromSlash(imp))
+	if info, err := os.Stat(dir); err == nil && fileInfoIsDir(info) {
 		return resolvedImport{Dir: dir, ImportPath: imp}, true
 	}
 	return resolvedImport{}, false
@@ -851,22 +952,27 @@ func isWithinModuleRoot(root string, path string) bool {
 	if err != nil {
 		return false
 	}
-	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel))
+	parentPrefix := "../"
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, parentPrefix) && !filepath.IsAbs(rel))
 }
 
-func nestedModuleRoot(root string, dir string) (string, bool) {
+func canCheckNestedModuleRoots(root string) bool {
+	return filepath.IsAbs(root)
+}
+
+func nestedModuleRoot(root string, dir string) string {
 	root = filepath.Clean(root)
 	dir = filepath.Clean(dir)
 	for {
 		if dir == root {
-			return "", false
+			return ""
 		}
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir, true
+			return dir
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", false
+			return ""
 		}
 		dir = parent
 	}
@@ -878,4 +984,16 @@ func importPathForDir(module mod.Module, dir string) string {
 		return module.Path
 	}
 	return module.Path + "/" + filepath.ToSlash(rel)
+}
+
+func fileInfoIsDir(info os.FileInfo) bool {
+	return info.IsDir()
+}
+
+func dirEntryIsDir(entry os.DirEntry) bool {
+	return entry.IsDir()
+}
+
+func dirEntryName(entry os.DirEntry) string {
+	return entry.Name()
 }

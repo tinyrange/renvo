@@ -1,3 +1,5 @@
+//go:build !rtg
+
 package os
 
 const O_RDONLY = 0
@@ -21,10 +23,17 @@ func (info FileInfo) IsDir() bool {
 	return info.isDir
 }
 
-type DirEntry = FileInfo
+type DirEntry struct {
+	name  string
+	isDir bool
+}
 
 func (entry DirEntry) Name() string {
 	return entry.name
+}
+
+func (entry DirEntry) IsDir() bool {
+	return entry.isDir
 }
 
 func Open(path string, flags int) int {
