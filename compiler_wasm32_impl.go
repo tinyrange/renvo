@@ -893,7 +893,7 @@ func rtgWasm32OpHasTarget(op int) bool {
 func rtgWasm32BuildBlockStartsLocal(instrs []rtgWasm32Instr, pcIndex []int, basePc int) []int {
 	starts := make([]int, 0, 512)
 	instrCount := len(instrs)
-	marks := make([]int, instrCount+1, 4096)
+	marks := make([]int, instrCount+1, instrCount+1)
 	for i := 0; i < len(marks); i++ {
 		marks[i] = 0
 	}
@@ -936,7 +936,7 @@ func rtgWasm32BlockEnd(starts []int, blockIndex int, instrCount int) int {
 }
 
 func rtgWasm32BuildInstrBlockIndex(starts []int, instrCount int) []int {
-	blockIndex := make([]int, instrCount+1, 4096)
+	blockIndex := make([]int, instrCount+1, instrCount+1)
 	block := 0
 	for i := 0; i < instrCount; i++ {
 		if block+1 < len(starts) && i >= starts[block+1] {

@@ -689,6 +689,10 @@ func rtgArmAsmStackMem(a *rtgAsm, offset int, base int, disp8 int, disp32 int) {
 		rtgArmAsmStoreRegStack(a, rtgArmRegRdx, offset)
 		return
 	}
+	if base == 0x8948 && disp8 == 0x4d {
+		rtgArmAsmStoreRegStack(a, rtgArmRegRcx, offset)
+		return
+	}
 	if base == 0x8b48 && disp8 == 0x45 {
 		rtgArmAsmLoadRegStack(a, rtgArmRegRax, offset)
 		return

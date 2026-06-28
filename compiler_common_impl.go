@@ -122,7 +122,7 @@ func rtgAsmInit(a *rtgAsm) {
 		absRelocs = make([]rtgAbsRef, 0, 2048)
 		symbols = make([]rtgAsmSymbol, 0, 2048)
 	} else {
-		code = make([]byte, 0, 786432)
+		code = make([]byte, 0, 2097152)
 		labelPos = make([]int, 0, 8192)
 		labelSet = make([]bool, 0, 8192)
 		relocs = make([]rtgLabelRef, 0, 24576)
@@ -144,18 +144,30 @@ func rtgAsmInit(a *rtgAsm) {
 }
 
 func rtgAsmNewLabel(a *rtgAsm) int {
-	a.labelPos = append(a.labelPos, 0)
-	a.labelSet = append(a.labelSet, false)
-	label := len(a.labelPos) - 1
+	labelPos := a.labelPos
+	labelSet := a.labelSet
+	labelPos = append(labelPos, 0)
+	labelSet = append(labelSet, false)
+	a.labelPos = labelPos
+	a.labelSet = labelSet
+	label := len(labelPos) - 1
 	return label
 }
 
 func rtgAsmMarkLabel(a *rtgAsm, label int) {
-	if label >= 0 && label < len(a.labelPos) {
-		codeLen := len(a.code)
-		a.labelPos[label] = codeLen
-		a.labelSet[label] = true
+	if label < 0 {
+		return
 	}
+	if label >= len(a.labelPos) || label >= len(a.labelSet) {
+		return
+	}
+	codeLen := len(a.code)
+	labelPos := a.labelPos
+	labelSet := a.labelSet
+	labelPos[label] = codeLen
+	labelSet[label] = true
+	a.labelPos = labelPos
+	a.labelSet = labelSet
 }
 
 func rtgAsmEmit8(a *rtgAsm, v int) {
@@ -227,13 +239,21 @@ func rtgAsmPatch(a *rtgAsm) {
 	if rtgTargetArch == rtgArchArm {
 		for i := 0; i < len(a.relocs); i++ {
 			r := a.relocs[i]
-			if r.label >= 0 && r.label < len(a.labelPos) && a.labelSet[r.label] {
-				target := a.labelPos[r.label]
-				disp := target - (r.at + 8)
-				insn := rtgGet32At(a.code, r.at)
-				if (insn & 0x0e000000) == 0x0a000000 {
-					rtgPut32At(a.code, r.at, (insn&0xff000000)|((disp/4)&0x00ffffff))
-				}
+			label := r.label
+			if label < 0 {
+				continue
+			}
+			if label >= len(a.labelPos) || label >= len(a.labelSet) {
+				continue
+			}
+			if !a.labelSet[label] {
+				continue
+			}
+			target := a.labelPos[label]
+			disp := target - (r.at + 8)
+			insn := rtgGet32At(a.code, r.at)
+			if (insn & 0x0e000000) == 0x0a000000 {
+				rtgPut32At(a.code, r.at, (insn&0xff000000)|((disp/4)&0x00ffffff))
 			}
 		}
 		a.dataOffset = a.codeOffset + len(a.code)
@@ -242,17 +262,25 @@ func rtgAsmPatch(a *rtgAsm) {
 	if rtgTargetArch == rtgArchAarch64 {
 		for i := 0; i < len(a.relocs); i++ {
 			r := a.relocs[i]
-			if r.label >= 0 && r.label < len(a.labelPos) && a.labelSet[r.label] {
-				target := a.labelPos[r.label]
-				disp := target - r.at
-				insn := rtgGet32At(a.code, r.at)
-				if (insn & 0xfc000000) == 0x94000000 {
-					rtgPut32At(a.code, r.at, 0x94000000|((disp/4)&0x03ffffff))
-				} else if (insn & 0xfc000000) == 0x14000000 {
-					rtgPut32At(a.code, r.at, 0x14000000|((disp/4)&0x03ffffff))
-				} else if (insn & 0xff000010) == 0x54000000 {
-					rtgPut32At(a.code, r.at, (insn&0xff00001f)|(((disp/4)&0x7ffff)<<5))
-				}
+			label := r.label
+			if label < 0 {
+				continue
+			}
+			if label >= len(a.labelPos) || label >= len(a.labelSet) {
+				continue
+			}
+			if !a.labelSet[label] {
+				continue
+			}
+			target := a.labelPos[label]
+			disp := target - r.at
+			insn := rtgGet32At(a.code, r.at)
+			if (insn & 0xfc000000) == 0x94000000 {
+				rtgPut32At(a.code, r.at, 0x94000000|((disp/4)&0x03ffffff))
+			} else if (insn & 0xfc000000) == 0x14000000 {
+				rtgPut32At(a.code, r.at, 0x14000000|((disp/4)&0x03ffffff))
+			} else if (insn & 0xff000010) == 0x54000000 {
+				rtgPut32At(a.code, r.at, (insn&0xff00001f)|(((disp/4)&0x7ffff)<<5))
 			}
 		}
 		a.dataOffset = a.codeOffset + len(a.code)
@@ -260,11 +288,19 @@ func rtgAsmPatch(a *rtgAsm) {
 	}
 	for i := 0; i < len(a.relocs); i++ {
 		r := a.relocs[i]
-		if r.label >= 0 && r.label < len(a.labelPos) && a.labelSet[r.label] {
-			target := a.labelPos[r.label]
-			disp := target - (r.at + 4)
-			rtgPut32At(a.code, r.at, disp)
+		label := r.label
+		if label < 0 {
+			continue
 		}
+		if label >= len(a.labelPos) || label >= len(a.labelSet) {
+			continue
+		}
+		if !a.labelSet[label] {
+			continue
+		}
+		target := a.labelPos[label]
+		disp := target - (r.at + 4)
+		rtgPut32At(a.code, r.at, disp)
 	}
 	a.dataOffset = a.codeOffset + len(a.code)
 	for i := 0; i < len(a.absRelocs); i++ {
@@ -421,12 +457,20 @@ func rtgBuildElf64SymbolSections(a *rtgAsm, base int, entryOff int, loadFileSize
 	sec.symtab = rtgAppendElf64Sym(sec.symtab, startName, 18, 1, base+entryOff, 0)
 	for i := 0; i < len(a.symbols); i++ {
 		s := a.symbols[i]
-		if s.label >= 0 && s.label < len(a.labelPos) && a.labelSet[s.label] {
-			nameOff := len(sec.strtab)
-			sec.strtab = rtgAppendBytesZ(sec.strtab, s.name)
-			value := base + a.codeOffset + a.labelPos[s.label]
-			sec.symtab = rtgAppendElf64Sym(sec.symtab, nameOff, 18, 1, value, 0)
+		label := s.label
+		if label < 0 {
+			continue
 		}
+		if label >= len(a.labelPos) || label >= len(a.labelSet) {
+			continue
+		}
+		if !a.labelSet[label] {
+			continue
+		}
+		nameOff := len(sec.strtab)
+		sec.strtab = rtgAppendBytesZ(sec.strtab, s.name)
+		value := base + a.codeOffset + a.labelPos[label]
+		sec.symtab = rtgAppendElf64Sym(sec.symtab, nameOff, 18, 1, value, 0)
 	}
 
 	sec.symtabOff = rtgAlignValue(loadFileSize, 8)
@@ -588,12 +632,20 @@ func rtgBuildElf32SymbolSections(a *rtgAsm, base int, entryOff int, loadFileSize
 	sec.symtab = rtgAppendElf32Sym(sec.symtab, startName, 18, 1, base+entryOff, 0)
 	for i := 0; i < len(a.symbols); i++ {
 		s := a.symbols[i]
-		if s.label >= 0 && s.label < len(a.labelPos) && a.labelSet[s.label] {
-			nameOff := len(sec.strtab)
-			sec.strtab = rtgAppendBytesZ(sec.strtab, s.name)
-			value := base + a.codeOffset + a.labelPos[s.label]
-			sec.symtab = rtgAppendElf32Sym(sec.symtab, nameOff, 18, 1, value, 0)
+		label := s.label
+		if label < 0 {
+			continue
 		}
+		if label >= len(a.labelPos) || label >= len(a.labelSet) {
+			continue
+		}
+		if !a.labelSet[label] {
+			continue
+		}
+		nameOff := len(sec.strtab)
+		sec.strtab = rtgAppendBytesZ(sec.strtab, s.name)
+		value := base + a.codeOffset + a.labelPos[label]
+		sec.symtab = rtgAppendElf32Sym(sec.symtab, nameOff, 18, 1, value, 0)
 	}
 
 	sec.symtabOff = rtgAlignValue(loadFileSize, 4)
@@ -850,11 +902,19 @@ func rtgPut64U32At(out []byte, at int, v int) {
 func rtgAsmPatchWindows(a *rtgAsm, layout rtgWinImportLayout, imageBase int, is64 bool) {
 	for i := 0; i < len(a.relocs); i++ {
 		r := a.relocs[i]
-		if r.label >= 0 && r.label < len(a.labelPos) && a.labelSet[r.label] {
-			target := a.labelPos[r.label]
-			disp := target - (r.at + 4)
-			rtgPut32At(a.code, r.at, disp)
+		label := r.label
+		if label < 0 {
+			continue
 		}
+		if label >= len(a.labelPos) || label >= len(a.labelSet) {
+			continue
+		}
+		if !a.labelSet[label] {
+			continue
+		}
+		target := a.labelPos[label]
+		disp := target - (r.at + 4)
+		rtgPut32At(a.code, r.at, disp)
 	}
 	if a.dataOffset == 0 {
 		a.dataOffset = a.codeOffset + len(a.code)
@@ -2990,7 +3050,8 @@ func rtgStatementLineEnd(p *rtgProgram, start int, end int) int {
 	if start >= end {
 		return end
 	}
-	line := p.toks[start].line
+	toks := p.toks
+	line := toks[start].line
 	i := start
 	paren := 0
 	brack := 0
@@ -3003,7 +3064,7 @@ func rtgStatementLineEnd(p *rtgProgram, start int, end int) int {
 			if rtgTokCharIs(p, i, ';') {
 				return i
 			}
-			if p.toks[i].line != line {
+			if toks[i].line != line {
 				if rtgTokCharIs(p, i, '{') {
 					return i
 				}
@@ -3011,7 +3072,7 @@ func rtgStatementLineEnd(p *rtgProgram, start int, end int) int {
 					return i
 				}
 				if rtgLineContinuesAfterPrevToken(p, i) {
-					line = p.toks[i].line
+					line = toks[i].line
 				} else {
 					return i
 				}
@@ -3037,9 +3098,9 @@ func rtgStatementLineEnd(p *rtgProgram, start int, end int) int {
 			brace--
 			closed = true
 		}
-		if i > start && p.toks[i].line != line && paren == 0 && brack == 0 && brace == 0 {
+		if i > start && toks[i].line != line && paren == 0 && brack == 0 && brace == 0 {
 			if rtgLineContinuesAfterPrevToken(p, i) {
-				line = p.toks[i].line
+				line = toks[i].line
 			} else {
 				if closed {
 					return i + 1
@@ -3057,8 +3118,9 @@ func rtgLineContinuesAfterPrevToken(p *rtgProgram, i int) bool {
 		return false
 	}
 	prev := i - 1
-	tokStart := p.toks[prev].start
-	tokEnd := p.toks[prev].end
+	tok := &p.toks[prev]
+	tokStart := tok.start
+	tokEnd := tok.end
 	if tokEnd <= tokStart {
 		return false
 	}
@@ -3713,8 +3775,20 @@ func rtgParseFuncInfo(m *rtgMeta, fnIndex int) {
 	if rparen+1 < fn.bodyStart {
 		resultType = rtgParseFuncResultType(m, p, rparen+1, fn.bodyStart)
 	}
-	linkStatic := rtgParseLinkStaticDirective(p, fn.startTok)
-	m.funcs = append(m.funcs, rtgFuncInfo{declIndex: fnIndex, nameStart: nameStart, nameEnd: nameEnd, firstParam: firstParam, paramCount: paramCount, resultType: resultType, receiverType: receiverType, bodyStart: fn.bodyStart + 1, bodyEnd: fn.bodyEnd, linkStatic: linkStatic.ok, linkDLLStart: linkStatic.dllStart, linkDLLEnd: linkStatic.dllEnd, linkMethodStart: linkStatic.methodStart, linkMethodEnd: linkStatic.methodEnd})
+	linkOK := 0
+	linkDLLStart := 0
+	linkDLLEnd := 0
+	linkMethodStart := 0
+	linkMethodEnd := 0
+	if rtgHasLinkStaticDirectivePrefix(p, fn.nameStart) {
+		linkStatic := rtgParseLinkStaticDirective(p, fn.nameStart)
+		linkOK = linkStatic.ok
+		linkDLLStart = linkStatic.dllStart
+		linkDLLEnd = linkStatic.dllEnd
+		linkMethodStart = linkStatic.methodStart
+		linkMethodEnd = linkStatic.methodEnd
+	}
+	m.funcs = append(m.funcs, rtgFuncInfo{declIndex: fnIndex, nameStart: nameStart, nameEnd: nameEnd, firstParam: firstParam, paramCount: paramCount, resultType: resultType, receiverType: receiverType, bodyStart: fn.bodyStart + 1, bodyEnd: fn.bodyEnd, linkStatic: linkOK, linkDLLStart: linkDLLStart, linkDLLEnd: linkDLLEnd, linkMethodStart: linkMethodStart, linkMethodEnd: linkMethodEnd})
 }
 
 type rtgLinkStaticDirective struct {
@@ -3725,20 +3799,71 @@ type rtgLinkStaticDirective struct {
 	methodEnd   int
 }
 
-func rtgParseLinkStaticDirective(p *rtgProgram, funcTok int) rtgLinkStaticDirective {
-	var d rtgLinkStaticDirective
-	if funcTok < 0 || funcTok >= len(p.toks) {
-		return d
-	}
+func rtgHasLinkStaticDirectivePrefix(p *rtgProgram, pos int) bool {
 	src := p.src
-	pos := p.toks[funcTok].start
+	if pos < 0 || pos > len(src) {
+		return false
+	}
 	lineStart := pos
-	for lineStart > 0 && src[lineStart-1] != '\n' {
+	for lineStart > 0 {
+		prev := lineStart - 1
+		c := src[prev]
+		if c == '\n' {
+			break
+		}
 		lineStart--
 	}
 	end := lineStart
 	for end > 0 {
-		c := src[end-1]
+		prev := end - 1
+		c := src[prev]
+		if c != ' ' && c != '\t' && c != '\r' && c != '\n' {
+			break
+		}
+		end--
+	}
+	if end <= 0 {
+		return false
+	}
+	start := end
+	for start > 0 {
+		prev := start - 1
+		c := src[prev]
+		if c == '\n' {
+			break
+		}
+		start--
+	}
+	for start < end {
+		c := src[start]
+		if c != ' ' && c != '\t' {
+			break
+		}
+		start++
+	}
+	prefix := "// rtg:linkstatic "
+	return rtgBytesHasText(src, start, end, prefix)
+}
+
+func rtgParseLinkStaticDirective(p *rtgProgram, pos int) rtgLinkStaticDirective {
+	var d rtgLinkStaticDirective
+	src := p.src
+	if pos < 0 || pos > len(src) {
+		return d
+	}
+	lineStart := pos
+	for lineStart > 0 {
+		prev := lineStart - 1
+		c := src[prev]
+		if c == '\n' {
+			break
+		}
+		lineStart--
+	}
+	end := lineStart
+	for end > 0 {
+		prev := end - 1
+		c := src[prev]
 		if c != ' ' && c != '\t' && c != '\r' && c != '\n' {
 			break
 		}
@@ -3748,7 +3873,12 @@ func rtgParseLinkStaticDirective(p *rtgProgram, funcTok int) rtgLinkStaticDirect
 		return d
 	}
 	start := end
-	for start > 0 && src[start-1] != '\n' {
+	for start > 0 {
+		prev := start - 1
+		c := src[prev]
+		if c == '\n' {
+			break
+		}
 		start--
 	}
 	for start < end && (src[start] == ' ' || src[start] == '\t') {
@@ -4761,26 +4891,24 @@ func rtgAddStringData(g *rtgLinearGen, msg []byte) int {
 func rtgEmitLinearRange(g *rtgLinearGen, start int, end int) bool {
 	var bp rtgBodyParse
 	stmts := make([]rtgStmt, 0, 1024)
-	bp.prog = g.prog
+	prog := g.meta.prog
+	bp.prog = prog
 	bp.stmts = stmts
 	bp.ok = true
 	i := start
 	lastKind := 0
 	for bp.ok && i < end {
-		if i < 0 || i >= len(bp.prog.toks) {
+		if i < 0 || i >= len(prog.toks) {
 			return true
 		}
-		if rtgTokCharIs(bp.prog, i, ';') {
+		if rtgTokCharIs(prog, i, ';') {
 			i++
 			continue
 		}
-		if bp.prog.toks[i].start < 0 || bp.prog.toks[i].start >= len(bp.prog.src) {
+		if rtgTokIsKind(prog, i, rtgTokEOF) {
 			return true
 		}
-		if rtgTokIsKind(bp.prog, i, rtgTokEOF) {
-			return true
-		}
-		if rtgTokCharIs(bp.prog, i, '}') {
+		if rtgTokCharIs(prog, i, '}') {
 			return true
 		}
 		before := len(bp.stmts)
@@ -4793,9 +4921,9 @@ func rtgEmitLinearRange(g *rtgLinearGen, start int, end int) bool {
 		i = next
 		if !rtgEmitLinearStmt(g, &stmt) {
 			rtgPrintErr("rtg: statement failed near line ")
-			rtgPrintIntErr(bp.prog.toks[stmt.startTok].line)
+			rtgPrintIntErr(prog.toks[stmt.startTok].line)
 			rtgPrintErr("\n")
-			write(2, bp.prog.src[bp.prog.toks[stmt.startTok].start:bp.prog.toks[stmt.endTok-1].end], -1)
+			write(2, prog.src[prog.toks[stmt.startTok].start:prog.toks[stmt.endTok-1].end], -1)
 			rtgPrintErr("\n")
 			return false
 		}
@@ -10486,7 +10614,7 @@ func rtgEmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		argResolved := rtgResolveType(g.meta, argType)
 		if argResolved.kind == rtgTypeSlice {
 			elem := rtgResolveType(g.meta, argResolved.elem)
-			if elem.kind == rtgTypeByte && rtgTargetArch == rtgArchAmd64 {
+			if elem.kind == rtgTypeByte {
 				return rtgEmitByteSliceStringCopyValueRegs(g, ep, argIndex)
 			}
 		}
@@ -10524,7 +10652,7 @@ func rtgStringHeapOffsets(g *rtgLinearGen) {
 	g.stringHeapOff = g.asm.bssSize
 	g.stringHeapDataOff = g.stringHeapOff + 8
 	arenaSize := 805306368
-	if rtgTargetArch != rtgArchWasm32 {
+	if rtgTargetArch == rtgArchAmd64 || rtgTargetArch == rtgArch386 {
 		arenaSize = 1073741824
 	}
 	g.asm.bssSize += 8 + arenaSize
@@ -10598,11 +10726,27 @@ func rtgEmitByteSliceStringCopyValueRegs(g *rtgLinearGen, ep *rtgExprParse, argI
 	}
 	srcOff := rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
 	lenOff := rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
-	destOff := rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
 	rtgAsmStoreRaxStack(a, srcOff)
 	rtgAsmPushRcx(a)
 	rtgAsmPopRax(a)
 	rtgAsmStoreRaxStack(a, lenOff)
+	if rtgTargetArch != rtgArchAmd64 {
+		byteSliceType := rtgAddType(g.meta, rtgTypeSlice, rtgTypeByte, 0, 0, 24, 0, 0)
+		destOff := rtgAddTypedLocal(g, 0, 0, byteSliceType)
+		rtgZeroLocalAtOffset(g, destOff)
+		loc := rtgSliceLocation{offset: destOff, typ: byteSliceType, ok: true}
+		if !rtgEmitSliceSlotAddrs(g, ep, &loc, 1) {
+			return false
+		}
+		rtgAsmLoadRaxStack(a, srcOff)
+		rtgAsmLoadRdxStack(a, lenOff)
+		label := rtgEnsureAppendBytesHelper(g)
+		rtgAsmCallLabel(a, label)
+		rtgAsmLoadRaxStack(a, destOff)
+		rtgAsmLoadRdxStack(a, destOff-8)
+		return true
+	}
+	destOff := rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
 	rtgEmitArenaAllocStackRax(g, lenOff)
 	rtgAsmStoreRaxStack(a, destOff)
 	rtgAsmLoadRaxStack(a, destOff)

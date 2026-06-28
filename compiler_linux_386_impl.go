@@ -365,7 +365,7 @@ func rtgAsmImage386(a *rtgAsm) []byte {
 	loadFileSize := a.codeOffset + len(a.code) + len(a.data)
 	memSize := loadFileSize + a.bssSize
 	sec := rtgBuildElf32SymbolSections(a, rtgLinux386LoadAddress, a.codeOffset, loadFileSize)
-	var out []byte
+	out := make([]byte, 0, sec.shoff+280)
 	out = rtgAppendElfHeader386(out, a.codeOffset, loadFileSize, memSize, sec.shoff)
 	for i := 0; i < len(a.code); i++ {
 		out = append(out, a.code[i])

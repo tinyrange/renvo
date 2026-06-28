@@ -209,7 +209,7 @@ func rtgAsmImageAarch64(a *rtgAsm) []byte {
 	loadFileSize := a.codeOffset + len(a.code) + len(a.data)
 	memSize := loadFileSize + a.bssSize
 	sec := rtgBuildElf64SymbolSections(a, rtgLinuxAarch64LoadAddress, a.codeOffset, loadFileSize)
-	var out []byte
+	out := make([]byte, 0, 1048576)
 	out = rtgAppendElfHeaderAarch64(out, a.codeOffset, loadFileSize, memSize, sec.shoff)
 	for i := 0; i < len(a.code); i++ {
 		out = append(out, a.code[i])

@@ -208,7 +208,7 @@ func rtgAsmImageArm(a *rtgAsm) []byte {
 	loadFileSize := a.codeOffset + len(a.code) + len(a.data)
 	memSize := loadFileSize + a.bssSize
 	sec := rtgBuildElf32SymbolSections(a, rtgLinuxArmLoadAddress, a.codeOffset, loadFileSize)
-	var out []byte
+	out := make([]byte, 0, sec.shoff+280)
 	out = rtgAppendElfHeaderArm(out, a.codeOffset, loadFileSize, memSize, sec.shoff)
 	for i := 0; i < len(a.code); i++ {
 		out = append(out, a.code[i])
