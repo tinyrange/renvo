@@ -64,14 +64,16 @@ func rtgTryCompileScalarProgramArm(p *rtgProgram, meta *rtgMeta) rtgCompileResul
 	a := &g.asm
 	rtgAsmInit(a)
 	a.codeOffset = rtgLinuxArmCodeOffset
+	if rtgCompilerFixedTarget != 0 {
+		g.funcLabels = make([]int, 0, 1536)
+	}
 	for i := 0; i < len(meta.funcs); i++ {
 		label := rtgAsmNewLabel(a)
 		g.funcLabels = append(g.funcLabels, label)
-		src := meta.prog.src
-		nameStart := meta.funcs[i].nameStart
-		nameEnd := meta.funcs[i].nameEnd
-		rtgAsmAddFuncSymbol(a, src, nameStart, nameEnd, label)
 	}
+	g.funcReachable = make([]bool, len(meta.funcs), len(meta.funcs))
+	g.funcQueue = make([]int, 0, len(meta.funcs))
+	rtgLinearMarkFunc(&g, appIndex)
 	if !rtgLinearInitGlobals(&g) {
 		var result rtgCompileResult
 		return result
@@ -84,7 +86,8 @@ func rtgTryCompileScalarProgramArm(p *rtgProgram, meta *rtgMeta) rtgCompileResul
 	rtgAsmMovRdiRax(a)
 	rtgAsmMovRaxImm(a, 1)
 	rtgAsmSyscall(a)
-	for i := 0; i < len(meta.funcs); i++ {
+	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
+		i := g.funcQueue[queueIndex]
 		if !rtgEmitScalarFunction(&g, i) {
 			var result rtgCompileResult
 			return result
@@ -207,6 +210,17 @@ func rtgAsmImageArm(a *rtgAsm) []byte {
 	rtgAsmPatchArm(a)
 	loadFileSize := a.codeOffset + len(a.code) + len(a.data)
 	memSize := loadFileSize + a.bssSize
+	if rtgCompilerStripSymbols {
+		out := make([]byte, 0, loadFileSize)
+		out = rtgAppendElfHeaderArm(out, a.codeOffset, loadFileSize, memSize, 0)
+		for i := 0; i < len(a.code); i++ {
+			out = append(out, a.code[i])
+		}
+		for i := 0; i < len(a.data); i++ {
+			out = append(out, a.data[i])
+		}
+		return out
+	}
 	sec := rtgBuildElf32SymbolSections(a, rtgLinuxArmLoadAddress, a.codeOffset, loadFileSize)
 	out := make([]byte, 0, sec.shoff+280)
 	out = rtgAppendElfHeaderArm(out, a.codeOffset, loadFileSize, memSize, sec.shoff)
@@ -271,9 +285,15 @@ func rtgAppendElfHeaderArm(out []byte, entryOff int, fileSize int, memSize int, 
 	out = rtgAppend16(out, 52)
 	out = rtgAppend16(out, 32)
 	out = rtgAppend16(out, 1)
-	out = rtgAppend16(out, 40)
-	out = rtgAppend16(out, 7)
-	out = rtgAppend16(out, 6)
+	if shoff == 0 {
+		out = rtgAppend16(out, 0)
+		out = rtgAppend16(out, 0)
+		out = rtgAppend16(out, 0)
+	} else {
+		out = rtgAppend16(out, 40)
+		out = rtgAppend16(out, 7)
+		out = rtgAppend16(out, 6)
+	}
 
 	out = rtgAppend32(out, 1)
 	out = rtgAppend32(out, 0)

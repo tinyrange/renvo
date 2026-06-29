@@ -21,6 +21,7 @@ Every time you find a miscompilation bug you should write a test in `./tests` to
 
 There are no restrictions on the specific `go test` command you run.
 Do not run `go test` in module mode inside `./tests`; those files intentionally contain conflicting package-level symbols and are meant to be compiled individually by the compiler test harness.
+Do not treat `go test ./...` as a valid whole-repo check. It descends into `./tests` and `./sandbox`, which intentionally contain standalone programs with conflicting symbols and scratch experiments. Prefer explicit package sets such as `go test ./rtg/...` plus the top-level compiler harness tests you intend to exercise.
 
 ## Bugfixing Workflow
 

@@ -34,7 +34,7 @@ func posError(line int, column int, message string) error {
 }
 
 func Tokens(src []byte) ([]Token, error) {
-	var toks []Token
+	toks := make([]Token, 0, 262144)
 	line := 1
 	col := 1
 	i := 0

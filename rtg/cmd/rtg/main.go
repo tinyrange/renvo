@@ -31,15 +31,19 @@ func main() {
 func appMain(args []string, env []string) int {
 	cfg, err := parseArgs(cliArgs(args))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		printError(err)
 		usage()
 		return 1
 	}
-	if err := run(cfg); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+	err = run(cfg)
+	if err != nil {
+		printError(err)
 		return 1
 	}
 	return 0
+}
+
+func printError(err error) {
 }
 
 func cliArgs(args []string) []string {
@@ -89,26 +93,33 @@ func runEmitUnit(cfg config, graph *load.Graph) error {
 		return err
 	}
 	if cfg.output == "" {
-		return writeUnitDirectory(defaultUnitCacheDir(graph), units)
+		dir := defaultUnitCacheDir(graph)
+		return writeUnitDirectory(dir, units)
 	}
-	if info, err := os.Stat(cfg.output); err == nil {
+	info, statErr := os.Stat(cfg.output)
+	if statErr == nil {
 		if fileInfoIsDir(info) {
 			return writeUnitDirectory(cfg.output, units)
 		}
 		if len(units) == 1 && isUnitFileOutput(cfg.output) {
-			return os.WriteFile(cfg.output, emit.Source(units[0]), 420)
+			data := emit.Source(units[0])
+			return os.WriteFile(cfg.output, data, 420)
 		}
 		if len(units) == 1 {
 			return fmt.Errorf("rtg: -emit-unit requires .rtg.go output file or output directory")
 		}
 		return fmt.Errorf("rtg: -emit-unit with multiple packages requires output directory")
-	} else if !os.IsNotExist(err) {
-		return err
+	}
+	if !os.IsNotExist(statErr) {
+		return statErr
 	}
 	if len(units) == 1 && isUnitFileOutput(cfg.output) {
-		return os.WriteFile(cfg.output, emit.Source(units[0]), 420)
+		data := emit.Source(units[0])
+		return os.WriteFile(cfg.output, data, 420)
 	}
-	if filepath.Ext(filepath.Base(cfg.output)) != "" {
+	base := filepath.Base(cfg.output)
+	ext := filepath.Ext(base)
+	if ext != "" {
 		if len(units) == 1 {
 			return fmt.Errorf("rtg: -emit-unit requires .rtg.go output file or output directory")
 		}
@@ -122,7 +133,8 @@ func defaultUnitCacheDir(graph *load.Graph) string {
 }
 
 func writeUnitDirectory(dir string, units []unit.Unit) error {
-	if err := os.MkdirAll(dir, 493); err != nil {
+	err := os.MkdirAll(dir, 493)
+	if err != nil {
 		return err
 	}
 	var names []unitFileName
@@ -134,7 +146,9 @@ func writeUnitDirectory(dir string, units []unit.Unit) error {
 		}
 		names = append(names, unitFileName{name: name, importPath: u.ImportPath})
 		path := filepath.Join(dir, name)
-		if err := os.WriteFile(path, emit.Source(u), 420); err != nil {
+		data := emit.Source(u)
+		err = os.WriteFile(path, data, 420)
+		if err != nil {
 			return err
 		}
 	}
@@ -274,11 +288,13 @@ func parseArgs(args []string) (config, error) {
 		if arg == "-t" {
 			i++
 			if i >= len(args) {
-				return cfg, fmt.Errorf("rtg: missing argument for -t")
+				err := fmt.Errorf("rtg: missing argument for -t")
+				return cfg, err
 			}
 			targetArg := args[i]
 			if !target.Supported(targetArg) {
-				return cfg, fmt.Errorf("rtg: unsupported target: %s\nrtg: supported targets: %s", targetArg, target.List())
+				err := fmt.Errorf("rtg: unsupported target: %s\nrtg: supported targets: %s", targetArg, target.List())
+				return cfg, err
 			}
 			cfg.target = targetArg
 			continue
@@ -286,7 +302,8 @@ func parseArgs(args []string) (config, error) {
 		if arg == "-o" {
 			i++
 			if i >= len(args) {
-				return cfg, fmt.Errorf("rtg: missing argument for -o")
+				err := fmt.Errorf("rtg: missing argument for -o")
+				return cfg, err
 			}
 			output := args[i]
 			cfg.output = output
@@ -305,14 +322,16 @@ func parseArgs(args []string) (config, error) {
 			continue
 		}
 		if len(arg) > 0 && arg[0] == '-' {
-			return cfg, fmt.Errorf("rtg: unknown option: %s", arg)
+			err := fmt.Errorf("rtg: unknown option: %s", arg)
+			return cfg, err
 		}
 		cfg.inputs = append(cfg.inputs, arg)
 	}
 	if len(cfg.inputs) == 0 && !cfg.link {
 		cfg.inputs = append(cfg.inputs, ".")
 	}
-	if err := validateConfig(cfg); err != nil {
+	err := validateConfig(cfg)
+	if err != nil {
 		return cfg, err
 	}
 	return cfg, nil
@@ -336,5 +355,4 @@ func validateConfig(cfg config) error {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: rtg [-t target] [-check] [-emit-unit [-o output.rtg.go|dir]] [-link -o output] [package-or-files...]\nsupported targets: %s\n", target.List())
 }

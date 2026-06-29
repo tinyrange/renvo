@@ -97,6 +97,67 @@ func TestSelfHostedFrontendBuildsHelloFixture(t *testing.T) {
 	}
 }
 
+func TestSelfHostedFrontendBuildsStage3(t *testing.T) {
+	if os.Getenv(selfHostTestsEnv) != "1" {
+		t.Skipf("set %s=1 to run self-hosted frontend test", selfHostTestsEnv)
+	}
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skipf("self-hosted frontend smoke requires linux/amd64 host, got %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	tmp := t.TempDir()
+	root := ".."
+	stage1 := filepath.Join(tmp, "stage1")
+	cmd := exec.Command("go", "run", "./rtg/cmd/rtg", "-t", "linux/amd64", "-o", stage1, "./rtg/cmd/rtg")
+	cmd.Dir = root
+	data, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("stage1 frontend build failed: %v\n%s", err, string(data))
+	}
+
+	unitDir := filepath.Join(tmp, "stage1-units")
+	if err := os.MkdirAll(unitDir, 0755); err != nil {
+		t.Fatalf("MkdirAll unit dir failed: %v", err)
+	}
+	cmd = exec.Command(stage1, "-emit-unit", "-o", unitDir, "./rtg/cmd/rtg")
+	cmd.Dir = root
+	data, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("stage1 emit-unit failed: %v\n%s", err, string(data))
+	}
+
+	stage2 := filepath.Join(tmp, "stage2")
+	cmd = exec.Command(stage1, "-link", "-t", "linux/amd64", "-o", stage2, unitDir)
+	cmd.Dir = root
+	data, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("stage1 link stage2 failed: %v\n%s", err, string(data))
+	}
+
+	stage3 := filepath.Join(tmp, "stage3")
+	cmd = exec.Command(stage2, "-t", "linux/amd64", "-o", stage3, "./rtg/cmd/rtg")
+	cmd.Dir = root
+	data, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("stage2 build stage3 failed: %v\n%s", err, string(data))
+	}
+
+	hello := filepath.Join(tmp, "hello")
+	cmd = exec.Command(stage3, "-t", "linux/amd64", "-o", hello, "./rtg/testdata/hello_module/cmd/app")
+	cmd.Dir = root
+	data, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("stage3 fixture build failed: %v\n%s", err, string(data))
+	}
+	cmd = exec.Command(hello)
+	data, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("stage3-built fixture failed: %v\n%s", err, string(data))
+	}
+	if string(data) != "PASS\n" {
+		t.Fatalf("stage3-built fixture output = %q, want PASS", string(data))
+	}
+}
+
 func TestNestedCallArgumentFrontendMatchesHostGo(t *testing.T) {
 	fixture := t.TempDir()
 	writeFixtureFile(t, fixture, "go.mod", "module example.com/nested\n")

@@ -14,6 +14,8 @@ func rtg386EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	oldLastRangeReturns := g.lastRangeReturns
 	var locals []rtgLocalInfo
 	var gotoLabels []rtgGlobalInfo
+	locals = make([]rtgLocalInfo, 0, 32768)
+	gotoLabels = make([]rtgGlobalInfo, 0, 0)
 	g.locals = locals
 	g.gotoLabels = gotoLabels
 	g.breakDepth = 0

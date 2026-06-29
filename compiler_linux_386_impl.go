@@ -97,14 +97,16 @@ func rtgTryCompileScalarProgram386(p *rtgProgram, meta *rtgMeta) rtgCompileResul
 	if rtgTargetIsWindows() {
 		a.codeOffset = rtgWinSectionRVA
 	}
+	if rtgCompilerFixedTarget != 0 {
+		g.funcLabels = make([]int, 0, 1536)
+	}
 	for i := 0; i < len(meta.funcs); i++ {
 		label := rtgAsmNewLabel(a)
 		g.funcLabels = append(g.funcLabels, label)
-		src := meta.prog.src
-		nameStart := meta.funcs[i].nameStart
-		nameEnd := meta.funcs[i].nameEnd
-		rtgAsmAddFuncSymbol(a, src, nameStart, nameEnd, label)
 	}
+	g.funcReachable = make([]bool, len(meta.funcs), len(meta.funcs))
+	g.funcQueue = make([]int, 0, len(meta.funcs))
+	rtgLinearMarkFunc(&g, appIndex)
 	if !rtgLinearInitGlobals(&g) {
 		var result rtgCompileResult
 		return result
@@ -123,15 +125,18 @@ func rtgTryCompileScalarProgram386(p *rtgProgram, meta *rtgMeta) rtgCompileResul
 		rtgAsmMovRaxImm(a, 1)
 		rtgAsmSyscall(a)
 	}
-	for i := 0; i < len(meta.funcs); i++ {
+	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
+		i := g.funcQueue[queueIndex]
 		if !rtgEmitScalarFunction(&g, i) {
 			var result rtgCompileResult
 			return result
 		}
 	}
-	data := rtgAsmImage386(a)
+	var data []byte
 	if rtgTargetIsWindows() {
 		data = rtgAsmImageWindows386(a)
+	} else {
+		data = rtgAsmImage386(a)
 	}
 	var result rtgCompileResult
 	result.data = data
@@ -364,6 +369,17 @@ func rtgAsmImage386(a *rtgAsm) []byte {
 	rtgAsmPatch386(a)
 	loadFileSize := a.codeOffset + len(a.code) + len(a.data)
 	memSize := loadFileSize + a.bssSize
+	if rtgCompilerStripSymbols {
+		out := make([]byte, 0, loadFileSize)
+		out = rtgAppendElfHeader386(out, a.codeOffset, loadFileSize, memSize, 0)
+		for i := 0; i < len(a.code); i++ {
+			out = append(out, a.code[i])
+		}
+		for i := 0; i < len(a.data); i++ {
+			out = append(out, a.data[i])
+		}
+		return out
+	}
 	sec := rtgBuildElf32SymbolSections(a, rtgLinux386LoadAddress, a.codeOffset, loadFileSize)
 	out := make([]byte, 0, sec.shoff+280)
 	out = rtgAppendElfHeader386(out, a.codeOffset, loadFileSize, memSize, sec.shoff)
@@ -426,9 +442,15 @@ func rtgAppendElfHeader386(out []byte, entryOff int, fileSize int, memSize int, 
 	out = rtgAppend16(out, 52)
 	out = rtgAppend16(out, 32)
 	out = rtgAppend16(out, 1)
-	out = rtgAppend16(out, 40)
-	out = rtgAppend16(out, 7)
-	out = rtgAppend16(out, 6)
+	if shoff == 0 {
+		out = rtgAppend16(out, 0)
+		out = rtgAppend16(out, 0)
+		out = rtgAppend16(out, 0)
+	} else {
+		out = rtgAppend16(out, 40)
+		out = rtgAppend16(out, 7)
+		out = rtgAppend16(out, 6)
+	}
 
 	out = rtgAppend32(out, 1)
 	out = rtgAppend32(out, 0)

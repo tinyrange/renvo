@@ -65,14 +65,16 @@ func rtgTryCompileScalarProgramAarch64(p *rtgProgram, meta *rtgMeta) rtgCompileR
 	a := &g.asm
 	rtgAsmInit(a)
 	a.codeOffset = rtgLinuxAarch64CodeOffset
+	if rtgCompilerFixedTarget != 0 {
+		g.funcLabels = make([]int, 0, 1536)
+	}
 	for i := 0; i < len(meta.funcs); i++ {
 		label := rtgAsmNewLabel(a)
 		g.funcLabels = append(g.funcLabels, label)
-		src := meta.prog.src
-		nameStart := meta.funcs[i].nameStart
-		nameEnd := meta.funcs[i].nameEnd
-		rtgAsmAddFuncSymbol(a, src, nameStart, nameEnd, label)
 	}
+	g.funcReachable = make([]bool, len(meta.funcs), len(meta.funcs))
+	g.funcQueue = make([]int, 0, len(meta.funcs))
+	rtgLinearMarkFunc(&g, appIndex)
 	if !rtgLinearInitGlobals(&g) {
 		var result rtgCompileResult
 		return result
@@ -85,7 +87,8 @@ func rtgTryCompileScalarProgramAarch64(p *rtgProgram, meta *rtgMeta) rtgCompileR
 	rtgAsmMovRdiRax(a)
 	rtgAsmMovRaxImm(a, 93)
 	rtgAsmSyscall(a)
-	for i := 0; i < len(meta.funcs); i++ {
+	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
+		i := g.funcQueue[queueIndex]
 		if !rtgEmitScalarFunction(&g, i) {
 			rtgPrintErr("rtg: aarch64 failed in function ")
 			write(2, meta.prog.src[meta.funcs[i].nameStart:meta.funcs[i].nameEnd], -1)
@@ -208,6 +211,17 @@ func rtgAsmImageAarch64(a *rtgAsm) []byte {
 	rtgAsmPatchAarch64Abs(a)
 	loadFileSize := a.codeOffset + len(a.code) + len(a.data)
 	memSize := loadFileSize + a.bssSize
+	if rtgCompilerStripSymbols {
+		out := make([]byte, 0, loadFileSize)
+		out = rtgAppendElfHeaderAarch64(out, a.codeOffset, loadFileSize, memSize, 0)
+		for i := 0; i < len(a.code); i++ {
+			out = append(out, a.code[i])
+		}
+		for i := 0; i < len(a.data); i++ {
+			out = append(out, a.data[i])
+		}
+		return out
+	}
 	sec := rtgBuildElf64SymbolSections(a, rtgLinuxAarch64LoadAddress, a.codeOffset, loadFileSize)
 	out := make([]byte, 0, 1048576)
 	out = rtgAppendElfHeaderAarch64(out, a.codeOffset, loadFileSize, memSize, sec.shoff)
@@ -271,9 +285,15 @@ func rtgAppendElfHeaderAarch64(out []byte, entryOff int, fileSize int, memSize i
 	out = rtgAppend16(out, 64)
 	out = rtgAppend16(out, 56)
 	out = rtgAppend16(out, 1)
-	out = rtgAppend16(out, 64)
-	out = rtgAppend16(out, 7)
-	out = rtgAppend16(out, 6)
+	if shoff == 0 {
+		out = rtgAppend16(out, 0)
+		out = rtgAppend16(out, 0)
+		out = rtgAppend16(out, 0)
+	} else {
+		out = rtgAppend16(out, 64)
+		out = rtgAppend16(out, 7)
+		out = rtgAppend16(out, 6)
+	}
 
 	out = rtgAppend32(out, 1)
 	out = rtgAppend32(out, 7)

@@ -971,6 +971,257 @@ func Join(a int, b int) int { return a*10 + b }
 	}
 }
 
+func TestPackageLowersFormattedErrorfToSubsetErrorf(t *testing.T) {
+	mainPkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Imports:    []string{"fmt"},
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+import "fmt"
+
+func fail(name string) error {
+	return fmt.Errorf("bad %s", name)
+}
+`),
+			},
+		},
+	}
+	fmtPkg := load.Package{
+		ImportPath: "fmt",
+		Name:       "fmt",
+		Files: []load.File{
+			{
+				Path: "fmt.go",
+				Source: []byte(`package fmt
+
+func Errorf(format string) error { return nil }
+type Error string
+`),
+			},
+		},
+	}
+	graph := &load.Graph{Packages: []load.Package{mainPkg, fmtPkg}}
+	u, err := PackageWithGraph(mainPkg, graph)
+	if err != nil {
+		t.Fatalf("PackageWithGraph failed: %v", err)
+	}
+	body := u.Decls[0].Body
+	if !strings.Contains(body, `return rtg_fmt_Error("bad %s")`) {
+		t.Fatalf("fmt.Errorf was not lowered to subset call: %q", body)
+	}
+	if strings.Contains(body, ", name") {
+		t.Fatalf("formatted fmt.Errorf retained non-subset operands: %q", body)
+	}
+}
+
+func TestPackageNormalizesCallOperandInMultiReturn(t *testing.T) {
+	mainPkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Imports:    []string{"fmt"},
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+import "fmt"
+
+type config struct { output string }
+
+func parse() (config, error) {
+	cfg := config{}
+	return cfg, fmt.Errorf("missing %s", cfg.output)
+}
+`),
+			},
+		},
+	}
+	fmtPkg := load.Package{
+		ImportPath: "fmt",
+		Name:       "fmt",
+		Files: []load.File{
+			{
+				Path: "fmt.go",
+				Source: []byte(`package fmt
+
+func Errorf(format string) error { return nil }
+type Error string
+`),
+			},
+		},
+	}
+	graph := &load.Graph{Packages: []load.Package{mainPkg, fmtPkg}}
+	u, err := PackageWithGraph(mainPkg, graph)
+	if err != nil {
+		t.Fatalf("PackageWithGraph failed: %v", err)
+	}
+	body := u.Decls[1].Body
+	if !strings.Contains(body, `rtg_example_com_app_parse_tmp_0 := rtg_fmt_Error("missing %s")`) {
+		t.Fatalf("multi-return call operand was not lifted: %q", body)
+	}
+	if !strings.Contains(body, "return cfg, rtg_example_com_app_parse_tmp_0") {
+		t.Fatalf("multi-return did not use lifted call operand: %q", body)
+	}
+}
+
+func TestPackageDoesNotLiftConversionOperandInMultiReturn(t *testing.T) {
+	pkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+func text(out []byte) (string, error) {
+	return string(out), nil
+}
+`),
+			},
+		},
+	}
+	u, err := Package(pkg)
+	if err != nil {
+		t.Fatalf("Package failed: %v", err)
+	}
+	body := u.Decls[0].Body
+	if strings.Contains(body, "_tmp_") {
+		t.Fatalf("builtin conversion operand was lifted unexpectedly: %q", body)
+	}
+	if !strings.Contains(body, "return string(out), nil") {
+		t.Fatalf("builtin conversion return changed unexpectedly: %q", body)
+	}
+}
+
+func TestPackageLowersFmtFprintToBuiltinPrint(t *testing.T) {
+	mainPkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Imports:    []string{"fmt", "os"},
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func appMain() int {
+	fmt.Fprint(os.Stdout, "PASS\n")
+	return 0
+}
+`),
+			},
+		},
+	}
+	fmtPkg := load.Package{
+		ImportPath: "fmt",
+		Name:       "fmt",
+		Files: []load.File{
+			{
+				Path: "fmt.go",
+				Source: []byte(`package fmt
+
+func Fprint(fd int, s string) int { return 0 }
+`),
+			},
+		},
+	}
+	osPkg := load.Package{
+		ImportPath: "os",
+		Name:       "os",
+		Files: []load.File{
+			{
+				Path: "os.go",
+				Source: []byte(`package os
+
+const Stdout = 1
+`),
+			},
+		},
+	}
+	graph := &load.Graph{Packages: []load.Package{mainPkg, fmtPkg, osPkg}}
+	u, err := PackageWithGraph(mainPkg, graph)
+	if err != nil {
+		t.Fatalf("PackageWithGraph failed: %v", err)
+	}
+	body := u.Decls[0].Body
+	if !strings.Contains(body, `print("PASS\n")`) {
+		t.Fatalf("fmt.Fprint was not lowered to builtin print: %q", body)
+	}
+}
+
+func TestPackageLowersFmtFprintByteStringToWrite(t *testing.T) {
+	mainPkg := load.Package{
+		ImportPath: "example.com/app",
+		Name:       "main",
+		Imports:    []string{"fmt", "os"},
+		Files: []load.File{
+			{
+				Path: "main.go",
+				Source: []byte(`package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func appMain() int {
+	data := []byte{80, 65, 83, 83, 10}
+	fmt.Fprint(os.Stdout, bytesToString(data))
+	return 0
+}
+
+func bytesToString(data []byte) string {
+	return string(data)
+}
+`),
+			},
+		},
+	}
+	fmtPkg := load.Package{
+		ImportPath: "fmt",
+		Name:       "fmt",
+		Files: []load.File{
+			{
+				Path: "fmt.go",
+				Source: []byte(`package fmt
+
+func Fprint(fd int, s string) int { return 0 }
+`),
+			},
+		},
+	}
+	osPkg := load.Package{
+		ImportPath: "os",
+		Name:       "os",
+		Files: []load.File{
+			{
+				Path: "os.go",
+				Source: []byte(`package os
+
+const Stdout = 1
+`),
+			},
+		},
+	}
+	graph := &load.Graph{Packages: []load.Package{mainPkg, fmtPkg, osPkg}}
+	u, err := PackageWithGraph(mainPkg, graph)
+	if err != nil {
+		t.Fatalf("PackageWithGraph failed: %v", err)
+	}
+	body := u.Decls[0].Body
+	if !strings.Contains(body, "write(1, data, 0)") {
+		t.Fatalf("fmt.Fprint byte-string output was not lowered to write: %q", body)
+	}
+}
+
 func TestPackageNormalizesNestedAssignmentCallArguments(t *testing.T) {
 	pkg := load.Package{
 		ImportPath: "example.com/app",

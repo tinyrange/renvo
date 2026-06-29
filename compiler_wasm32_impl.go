@@ -828,33 +828,10 @@ func rtgWasm32InstrLowerBound(instrs []rtgWasm32Instr, pc int) int {
 	return lo
 }
 
-func rtgWasm32BuildLocalPcIndex(instrs []rtgWasm32Instr) []int {
-	if len(instrs) == 0 {
-		return make([]int, 0, 1)
-	}
-	basePc := instrs[0].pc
-	limitPc := instrs[len(instrs)-1].next
-	if limitPc < basePc {
-		limitPc = basePc
-	}
-	pcIndex := make([]int, limitPc-basePc+1, 65536)
-	for i := 0; i < len(pcIndex); i++ {
-		pcIndex[i] = -1
-	}
-	for i := 0; i < len(instrs); i++ {
-		pc := instrs[i].pc - basePc
-		if pc >= 0 && pc < len(pcIndex) {
-			pcIndex[pc] = i
-		}
-	}
-	return pcIndex
-}
-
-func rtgWasm32InstrIndexForPcLocal(pcIndex []int, basePc int, instrCount int, pc int) int {
-	pc -= basePc
-	if pc >= 0 && pc < len(pcIndex) {
-		idx := pcIndex[pc]
-		if idx >= 0 {
+func rtgWasm32InstrIndexForPcLocal(instrs []rtgWasm32Instr, instrCount int, pc int) int {
+	idx := rtgWasm32InstrLowerBound(instrs, pc)
+	if idx < instrCount {
+		if instrs[idx].pc == pc {
 			return idx
 		}
 	}
@@ -890,7 +867,7 @@ func rtgWasm32OpHasTarget(op int) bool {
 	return false
 }
 
-func rtgWasm32BuildBlockStartsLocal(instrs []rtgWasm32Instr, pcIndex []int, basePc int) []int {
+func rtgWasm32BuildBlockStartsLocal(instrs []rtgWasm32Instr) []int {
 	starts := make([]int, 0, 512)
 	instrCount := len(instrs)
 	marks := make([]int, instrCount+1, instrCount+1)
@@ -908,13 +885,13 @@ func rtgWasm32BuildBlockStartsLocal(instrs []rtgWasm32Instr, pcIndex []int, base
 			}
 		}
 		if rtgWasm32OpHasTarget(ins.op) {
-			targetIndex := rtgWasm32InstrIndexForPcLocal(pcIndex, basePc, instrCount, ins.a)
+			targetIndex := rtgWasm32InstrIndexForPcLocal(instrs, instrCount, ins.a)
 			if targetIndex < instrCount {
 				marks[targetIndex] = 1
 			}
 		}
 		if ins.op == rtgWasm32OpJCond {
-			targetIndex := rtgWasm32InstrIndexForPcLocal(pcIndex, basePc, instrCount, ins.b)
+			targetIndex := rtgWasm32InstrIndexForPcLocal(instrs, instrCount, ins.b)
 			if targetIndex < instrCount {
 				marks[targetIndex] = 1
 			}
@@ -957,81 +934,96 @@ func rtgWasm32BlockForInstrFast(blockIndex []int, idx int) int {
 
 func rtgWasmLocalGet(out []byte, local int) []byte {
 	out = append(out, 0x20)
-	return rtgWasmAppendU32(out, local)
+	out = rtgWasmAppendU32(out, local)
+	return out
 }
 
 func rtgWasmLocalSet(out []byte, local int) []byte {
 	out = append(out, 0x21)
-	return rtgWasmAppendU32(out, local)
+	out = rtgWasmAppendU32(out, local)
+	return out
 }
 
 func rtgWasmLocalTee(out []byte, local int) []byte {
 	out = append(out, 0x22)
-	return rtgWasmAppendU32(out, local)
+	out = rtgWasmAppendU32(out, local)
+	return out
 }
 
 func rtgWasmI32Load(out []byte, align int, off int) []byte {
 	out = append(out, 0x28)
 	out = rtgWasmAppendU32(out, align)
-	return rtgWasmAppendU32(out, off)
+	out = rtgWasmAppendU32(out, off)
+	return out
 }
 
 func rtgWasmI32Load8U(out []byte) []byte {
 	out = append(out, 0x2d)
 	out = rtgWasmAppendU32(out, 0)
-	return rtgWasmAppendU32(out, 0)
+	out = rtgWasmAppendU32(out, 0)
+	return out
 }
 
 func rtgWasmI32Load16S(out []byte) []byte {
 	out = append(out, 0x2e)
 	out = rtgWasmAppendU32(out, 1)
-	return rtgWasmAppendU32(out, 0)
+	out = rtgWasmAppendU32(out, 0)
+	return out
 }
 
 func rtgWasmI32Store(out []byte, align int, off int) []byte {
 	out = append(out, 0x36)
 	out = rtgWasmAppendU32(out, align)
-	return rtgWasmAppendU32(out, off)
+	out = rtgWasmAppendU32(out, off)
+	return out
 }
 
 func rtgWasmI32Store8(out []byte) []byte {
 	out = append(out, 0x3a)
 	out = rtgWasmAppendU32(out, 0)
-	return rtgWasmAppendU32(out, 0)
+	out = rtgWasmAppendU32(out, 0)
+	return out
 }
 
 func rtgWasmI32Store16(out []byte) []byte {
 	out = append(out, 0x3b)
 	out = rtgWasmAppendU32(out, 1)
-	return rtgWasmAppendU32(out, 0)
+	out = rtgWasmAppendU32(out, 0)
+	return out
 }
 
 func rtgWasmI64Const(out []byte, value int) []byte {
 	out = append(out, 0x42)
-	return rtgWasmAppendS32(out, value)
+	out = rtgWasmAppendS32(out, value)
+	return out
 }
 
 func rtgWasmBr(out []byte, depth int) []byte {
 	out = append(out, 0x0c)
-	return rtgWasmAppendU32(out, depth)
+	out = rtgWasmAppendU32(out, depth)
+	return out
 }
 
 func rtgWasmBrIf(out []byte, depth int) []byte {
 	out = append(out, 0x0d)
-	return rtgWasmAppendU32(out, depth)
+	out = rtgWasmAppendU32(out, depth)
+	return out
 }
 
 func rtgWasm32SetPc(out []byte, pc int) []byte {
 	out = rtgWasmAppendI32Const(out, pc)
-	return rtgWasmLocalSet(out, rtgWasm32LocalPc)
+	out = rtgWasmLocalSet(out, rtgWasm32LocalPc)
+	return out
 }
 
 func rtgWasm32RegGet(out []byte, reg int) []byte {
-	return rtgWasmLocalGet(out, rtgWasm32RegLocal(reg))
+	out = rtgWasmLocalGet(out, rtgWasm32RegLocal(reg))
+	return out
 }
 
 func rtgWasm32RegSet(out []byte, reg int) []byte {
-	return rtgWasmLocalSet(out, rtgWasm32RegLocal(reg))
+	out = rtgWasmLocalSet(out, rtgWasm32RegLocal(reg))
+	return out
 }
 
 func rtgWasm32StackAddr(out []byte, offset int) []byte {
@@ -1067,22 +1059,28 @@ func rtgWasm32IndexAddr(out []byte, base int, index int, scale int, disp int) []
 
 func rtgWasm32LoadSized(out []byte, size int) []byte {
 	if size == 1 {
-		return rtgWasmI32Load8U(out)
+		out = rtgWasmI32Load8U(out)
+		return out
 	}
 	if size == 2 {
-		return rtgWasmI32Load16S(out)
+		out = rtgWasmI32Load16S(out)
+		return out
 	}
-	return rtgWasmI32Load(out, 2, 0)
+	out = rtgWasmI32Load(out, 2, 0)
+	return out
 }
 
 func rtgWasm32StoreSized(out []byte, size int) []byte {
 	if size == 1 {
-		return rtgWasmI32Store8(out)
+		out = rtgWasmI32Store8(out)
+		return out
 	}
 	if size == 2 {
-		return rtgWasmI32Store16(out)
+		out = rtgWasmI32Store16(out)
+		return out
 	}
-	return rtgWasmI32Store(out, 2, 0)
+	out = rtgWasmI32Store(out, 2, 0)
+	return out
 }
 
 func rtgWasm32AppendCond(out []byte, cond int) []byte {
@@ -1124,7 +1122,8 @@ func rtgWasm32Patch(a *rtgAsm, dataBase int, bssBase int) {
 func rtgWasm32AppendStoreConst(out []byte, addr int, value int) []byte {
 	out = rtgWasmAppendI32Const(out, addr)
 	out = rtgWasmAppendI32Const(out, value)
-	return rtgWasmI32Store(out, 2, 0)
+	out = rtgWasmI32Store(out, 2, 0)
+	return out
 }
 
 func rtgWasm32AppendIov(out []byte, ptrLocal int, lenLocal int) []byte {
@@ -1712,7 +1711,8 @@ func rtgWasm32AppendInstrDirect(out []byte, ins rtgWasm32Instr, nextIndex int, t
 	if ins.op == rtgWasm32OpCall {
 		routineIndex := rtgWasm32FindRoutineIndex(routinePcs, ins.a)
 		if routineIndex < 0 {
-			return rtgWasm32AppendInstr(out, ins, nextIndex, targetIndex, loopDepth, loopDepth+1, callStackBase, frameSize)
+			out = rtgWasm32AppendInstr(out, ins, nextIndex, targetIndex, loopDepth, loopDepth+1, callStackBase, frameSize)
+			return out
 		}
 		out = rtgWasm32AppendDirectCall(out, rtgWasm32VmFuncBase+routineIndex, frameSize)
 		if loopDepth < 0 {
@@ -1722,9 +1722,11 @@ func rtgWasm32AppendInstrDirect(out []byte, ins rtgWasm32Instr, nextIndex int, t
 		return rtgWasmBr(out, loopDepth)
 	}
 	if ins.op == rtgWasm32OpRet {
-		return rtgWasm32AppendStateReturn(out)
+		out = rtgWasm32AppendStateReturn(out)
+		return out
 	}
-	return rtgWasm32AppendInstr(out, ins, nextIndex, targetIndex, loopDepth, loopDepth+1, callStackBase, frameSize)
+	out = rtgWasm32AppendInstr(out, ins, nextIndex, targetIndex, loopDepth, loopDepth+1, callStackBase, frameSize)
+	return out
 }
 
 func rtgWasm32CanFusePair(first rtgWasm32Instr, second rtgWasm32Instr) bool {
@@ -1816,12 +1818,6 @@ func rtgWasm32RoutinePcs(a *rtgAsm, instrs []rtgWasm32Instr) []int {
 			pcs = rtgWasm32AppendUniquePc(pcs, a.labelPos[label])
 		}
 	}
-	for i := 0; i < len(instrs); i++ {
-		ins := instrs[i]
-		if ins.op == rtgWasm32OpCall {
-			pcs = rtgWasm32AppendUniquePc(pcs, ins.a)
-		}
-	}
 	return rtgWasm32SortPcs(pcs)
 }
 
@@ -1879,15 +1875,9 @@ func rtgWasm32RoutineEndPc(startPc int, codeLen int, symbolPcs []int, instrs []r
 	return rtgWasm32FirstRetAfter(instrs, startPc, nextSymbol)
 }
 
-func rtgWasm32DirectRoutineBody(instrs []rtgWasm32Instr, codeLen int, routinePcs []int, callStackBase int, frameSize int, hasFrame bool) []byte {
-	basePc := 0
-	if len(instrs) > 0 {
-		basePc = instrs[0].pc
-	}
-	pcIndex := rtgWasm32BuildLocalPcIndex(instrs)
-	blockStarts := rtgWasm32BuildBlockStartsLocal(instrs, pcIndex, basePc)
+func rtgWasm32AppendDirectRoutineBody(body []byte, instrs []rtgWasm32Instr, codeLen int, routinePcs []int, callStackBase int, frameSize int, hasFrame bool) []byte {
+	blockStarts := rtgWasm32BuildBlockStartsLocal(instrs)
 	instrBlockIndex := rtgWasm32BuildInstrBlockIndex(blockStarts, len(instrs))
-	body := make([]byte, 0, 65536)
 	body = rtgWasmAppendU32(body, 1)
 	body = rtgWasmAppendU32(body, 7)
 	body = append(body, 0x7f)
@@ -1929,7 +1919,7 @@ func rtgWasm32DirectRoutineBody(instrs []rtgWasm32Instr, codeLen int, routinePcs
 			if i+1 < end && rtgWasm32CanFusePair(ins, instrs[i+1]) {
 				body = rtgWasm32AppendFusedPair(body, ins, instrs[i+1])
 				if i+2 >= end {
-					nextIndex := rtgWasm32InstrIndexForPcLocal(pcIndex, basePc, len(instrs), instrs[i+1].next)
+					nextIndex := rtgWasm32InstrIndexForPcLocal(instrs, len(instrs), instrs[i+1].next)
 					nextBlock := rtgWasm32BlockForInstrFast(instrBlockIndex, nextIndex)
 					body = rtgWasm32SetPc(body, nextBlock)
 					body = rtgWasmBr(body, blockIndex)
@@ -1940,7 +1930,7 @@ func rtgWasm32DirectRoutineBody(instrs []rtgWasm32Instr, codeLen int, routinePcs
 			if i+1 < end {
 				body = rtgWasm32AppendInstrDirect(body, ins, 0, 0, -1, callStackBase, frameSize, routinePcs)
 			} else {
-				nextIndex := rtgWasm32InstrIndexForPcLocal(pcIndex, basePc, len(instrs), ins.next)
+				nextIndex := rtgWasm32InstrIndexForPcLocal(instrs, len(instrs), ins.next)
 				nextBlock := rtgWasm32BlockForInstrFast(instrBlockIndex, nextIndex)
 				targetBlock := 0
 				if rtgWasm32OpHasTarget(ins.op) || ins.op == rtgWasm32OpJCond {
@@ -1948,7 +1938,7 @@ func rtgWasm32DirectRoutineBody(instrs []rtgWasm32Instr, codeLen int, routinePcs
 					if ins.op == rtgWasm32OpJCond {
 						targetPc = ins.b
 					}
-					targetIndex := rtgWasm32InstrIndexForPcLocal(pcIndex, basePc, len(instrs), targetPc)
+					targetIndex := rtgWasm32InstrIndexForPcLocal(instrs, len(instrs), targetPc)
 					targetBlock = rtgWasm32BlockForInstrFast(instrBlockIndex, targetIndex)
 				}
 				body = rtgWasm32AppendInstrDirect(body, ins, nextBlock, targetBlock, blockIndex, callStackBase, frameSize, routinePcs)
@@ -1964,8 +1954,7 @@ func rtgWasm32DirectRoutineBody(instrs []rtgWasm32Instr, codeLen int, routinePcs
 	return body
 }
 
-func rtgWasm32DirectStartBody(topFunc int, exprStackBase int, callStackBase int, frameTop int) []byte {
-	body := make([]byte, 0, 256)
+func rtgWasm32AppendDirectStartBody(body []byte, topFunc int, exprStackBase int, callStackBase int, frameTop int) []byte {
 	body = rtgWasmAppendU32(body, 1)
 	body = rtgWasmAppendU32(body, 16)
 	body = append(body, 0x7f)
@@ -1986,6 +1975,16 @@ func rtgWasm32DirectStartBody(topFunc int, exprStackBase int, callStackBase int,
 	body = rtgWasmAppendCall(body, rtgWasm32ImportProcExit)
 	body = append(body, 0x0b)
 	return body
+}
+
+func rtgWasm32DirectRoutineBody(instrs []rtgWasm32Instr, codeLen int, routinePcs []int, callStackBase int, frameSize int, hasFrame bool) []byte {
+	body := make([]byte, 0, 8192)
+	return rtgWasm32AppendDirectRoutineBody(body, instrs, codeLen, routinePcs, callStackBase, frameSize, hasFrame)
+}
+
+func rtgWasm32DirectStartBody(topFunc int, exprStackBase int, callStackBase int, frameTop int) []byte {
+	body := make([]byte, 0, 32768)
+	return rtgWasm32AppendDirectStartBody(body, topFunc, exprStackBase, callStackBase, frameTop)
 }
 
 func rtgWasm32TypeSectionFull() []byte {
@@ -2172,6 +2171,8 @@ func rtgWasm32EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	oldLastRangeReturns := g.lastRangeReturns
 	var locals []rtgLocalInfo
 	var gotoLabels []rtgGlobalInfo
+	locals = make([]rtgLocalInfo, 0, 32768)
+	gotoLabels = make([]rtgGlobalInfo, 0, 0)
 	g.locals = locals
 	g.gotoLabels = gotoLabels
 	g.breakDepth = 0

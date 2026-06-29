@@ -1,6 +1,8 @@
 package main
 
 var rtgCompilerDefaultTarget int = rtgTargetLinuxAmd64
+var rtgCompilerFixedTarget int
+var rtgCompilerStripSymbols bool
 
 func rtgOpenArg(path string, env []string) int {
 	directFd := open(path, O_RDONLY)
@@ -78,7 +80,7 @@ func rtgPrintIntErr(v int) {
 }
 
 func rtgPrintUsage() {
-	rtgPrintErr("usage: rtg [-t linux/amd64|linux/386|linux/aarch64|linux/arm|windows/amd64|windows/386|wasi/wasm32] -o <output|-> <input.go|->...\n")
+	rtgPrintErr("usage: rtg [-s] [-t linux/amd64|linux/386|linux/aarch64|linux/arm|windows/amd64|windows/386|wasi/wasm32] -o <output|-> <input.go|->...\n")
 }
 
 func rtgPrintUnsupportedTarget(target string) {
@@ -95,6 +97,11 @@ func appMain(args []string, env []string) int {
 	i := 1
 	for i < len(args) {
 		arg := args[i]
+		if arg == "-s" {
+			rtgCompilerStripSymbols = true
+			i++
+			continue
+		}
 		if arg == "-o" {
 			i++
 			if i >= len(args) {

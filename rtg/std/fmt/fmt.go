@@ -6,6 +6,12 @@ func (err fmtError) Error() string {
 	return string(err)
 }
 
+type Error string
+
+func (err Error) Error() string {
+	return string(err)
+}
+
 func Print(s string) int {
 	print(s)
 	return 0
@@ -43,5 +49,5 @@ func Fprintf(fd int, format string) int {
 }
 
 func Errorf(format string) error {
-	return fmtError(format)
+	return Error(format)
 }

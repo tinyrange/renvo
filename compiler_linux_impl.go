@@ -50,12 +50,14 @@ func RtgCompileSourceToBytes(source []byte, targetName string) ([]byte, bool) {
 	rtgSetTarget(target)
 	var prog rtgProgram
 	prog = rtgParseProgram(source)
-	if !prog.ok {
+	progOK := prog.ok
+	if progOK == false {
 		return nil, false
 	}
 	var meta rtgMeta
 	rtgBuildMetaInto(&prog, &meta)
-	if !meta.ok {
+	metaOK := meta.ok
+	if metaOK == false {
 		return nil, false
 	}
 	var result rtgCompileResult
@@ -70,7 +72,8 @@ func RtgCompileSourceToBytes(source []byte, targetName string) ([]byte, bool) {
 	} else {
 		result = rtgTryCompileScalarProgramAmd64(&prog, &meta)
 	}
-	if !result.ok {
+	resultOK := result.ok
+	if resultOK == false {
 		return nil, false
 	}
 	return result.data, true
@@ -78,93 +81,93 @@ func RtgCompileSourceToBytes(source []byte, targetName string) ([]byte, bool) {
 
 func rtgLinuxSysWriteSeq() int {
 	if rtgTargetArch == rtgArchAarch64 {
-		return rtgLinuxAarch64SysWriteSeq
+		return 64
 	}
 	if rtgTargetArch == rtgArchArm {
-		return rtgLinuxArmSysWriteSeq
+		return 4
 	}
 	if rtgTargetArch == rtgArch386 {
-		return rtgLinux386SysWriteSeq
+		return 4
 	}
-	return rtgLinuxAmd64SysWriteSeq
+	return 1
 }
 
 func rtgLinuxSysReadSeq() int {
 	if rtgTargetArch == rtgArchAarch64 {
-		return rtgLinuxAarch64SysReadSeq
+		return 63
 	}
 	if rtgTargetArch == rtgArchArm {
-		return rtgLinuxArmSysReadSeq
+		return 3
 	}
 	if rtgTargetArch == rtgArch386 {
-		return rtgLinux386SysReadSeq
+		return 3
 	}
-	return rtgLinuxAmd64SysReadSeq
+	return 0
 }
 
 func rtgLinuxSysReadAt() int {
 	if rtgTargetArch == rtgArchAarch64 {
-		return rtgLinuxAarch64SysReadAt
+		return 67
 	}
 	if rtgTargetArch == rtgArchArm {
-		return rtgLinuxArmSysReadAt
+		return 180
 	}
 	if rtgTargetArch == rtgArch386 {
-		return rtgLinux386SysReadAt
+		return 180
 	}
-	return rtgLinuxAmd64SysReadAt
+	return 17
 }
 
 func rtgLinuxSysWriteAt() int {
 	if rtgTargetArch == rtgArchAarch64 {
-		return rtgLinuxAarch64SysWriteAt
+		return 68
 	}
 	if rtgTargetArch == rtgArchArm {
-		return rtgLinuxArmSysWriteAt
+		return 181
 	}
 	if rtgTargetArch == rtgArch386 {
-		return rtgLinux386SysWriteAt
+		return 181
 	}
-	return rtgLinuxAmd64SysWriteAt
+	return 18
 }
 
 func rtgLinuxSysOpen() int {
 	if rtgTargetArch == rtgArchAarch64 {
-		return rtgLinuxAarch64SysOpen
+		return 56
 	}
 	if rtgTargetArch == rtgArchArm {
-		return rtgLinuxArmSysOpen
+		return 5
 	}
 	if rtgTargetArch == rtgArch386 {
-		return rtgLinux386SysOpen
+		return 5
 	}
-	return rtgLinuxAmd64SysOpen
+	return 2
 }
 
 func rtgLinuxSysClose() int {
 	if rtgTargetArch == rtgArchAarch64 {
-		return rtgLinuxAarch64SysClose
+		return 57
 	}
 	if rtgTargetArch == rtgArchArm {
-		return rtgLinuxArmSysClose
+		return 6
 	}
 	if rtgTargetArch == rtgArch386 {
-		return rtgLinux386SysClose
+		return 6
 	}
-	return rtgLinuxAmd64SysClose
+	return 3
 }
 
 func rtgLinuxSysFchmod() int {
 	if rtgTargetArch == rtgArchAarch64 {
-		return rtgLinuxAarch64SysFchmod
+		return 52
 	}
 	if rtgTargetArch == rtgArchArm {
-		return rtgLinuxArmSysFchmod
+		return 94
 	}
 	if rtgTargetArch == rtgArch386 {
-		return rtgLinux386SysFchmod
+		return 94
 	}
-	return rtgLinuxAmd64SysFchmod
+	return 91
 }
 
 func rtgAsmPrepareReadWriteBuf(a *rtgAsm) {
@@ -217,7 +220,8 @@ func rtgEmitLinearPrintStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 	if stmt.exprStart < 0 || stmt.exprStart >= len(p.toks) || !rtgBytesEqualText(p.src, p.toks[stmt.exprStart].start, p.toks[stmt.exprStart].end, "print") {
 		return false
 	}
-	ep := rtgParseExpression(p, stmt.exprStart, stmt.exprEnd)
+	var ep rtgExprParse
+	rtgParseExpressionInto(&ep, p, stmt.exprStart, stmt.exprEnd)
 	if !ep.ok || len(ep.exprs) == 0 {
 		return false
 	}
@@ -246,7 +250,8 @@ func rtgEmitBuiltinReadWrite(g *rtgLinearGen, ep *rtgExprParse, idx int, seqSysc
 	}
 	fdStart := ep.exprs[idx].tok + 1
 	fdEnd := rtgFindExprBoundary(p, fdStart, ep.end)
-	fdEp := rtgParseExpression(p, fdStart, fdEnd)
+	var fdEp rtgExprParse
+	rtgParseExpressionInto(&fdEp, p, fdStart, fdEnd)
 	if !fdEp.ok || len(fdEp.exprs) == 0 {
 		return false
 	}
@@ -687,7 +692,8 @@ func rtgEmitWindowsReadWrite(g *rtgLinearGen, ep *rtgExprParse, idx int, isWrite
 	}
 	fdStart := ep.exprs[idx].tok + 1
 	fdEnd := rtgFindExprBoundary(p, fdStart, ep.end)
-	fdEp := rtgParseExpression(p, fdStart, fdEnd)
+	var fdEp rtgExprParse
+	rtgParseExpressionInto(&fdEp, p, fdStart, fdEnd)
 	if !fdEp.ok || len(fdEp.exprs) == 0 {
 		return false
 	}
@@ -734,7 +740,8 @@ func rtgEmitWindowsPrintStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 	if stmt.exprStart < 0 || stmt.exprStart >= len(p.toks) || !rtgBytesEqualText(p.src, p.toks[stmt.exprStart].start, p.toks[stmt.exprStart].end, "print") {
 		return false
 	}
-	ep := rtgParseExpression(p, stmt.exprStart, stmt.exprEnd)
+	var ep rtgExprParse
+	rtgParseExpressionInto(&ep, p, stmt.exprStart, stmt.exprEnd)
 	if !ep.ok || len(ep.exprs) == 0 {
 		return false
 	}
@@ -767,7 +774,7 @@ func rtgEmitWindowsPrintStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 
 func rtgEmitWindowsOpen(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	a := &g.asm
-	e := &ep.exprs[idx]
+	e := ep.exprs[idx]
 	if e.argCount != 2 {
 		return false
 	}
@@ -779,6 +786,7 @@ func rtgEmitWindowsOpen(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		return false
 	}
 	if rtgTargetArch == rtgArch386 {
+		createFileImport := rtgWinImportCreateFileA
 		rtgAsmEmit16(a, 0xc689)
 		rtgAsmPopRax(a)
 		rtgWin386TranslateCreateFileFlags(a)
@@ -789,9 +797,10 @@ func rtgEmitWindowsOpen(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		rtgAsmPushImm(a, 3)
 		rtgAsmPushRdx(a)
 		rtgAsmEmit8(a, 0x56)
-		rtgWin386CallImport(a, rtgWinImportCreateFileA)
+		rtgWin386CallImport(a, createFileImport)
 		return true
 	}
+	createFileImport := rtgWinImportCreateFileA
 	rtgAsmPushRax(a)
 	rtgAsmMovRcxRax(a)
 	rtgAsmPopRcx(a)
@@ -806,7 +815,7 @@ func rtgEmitWindowsOpen(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	rtgAsmEmit16(a, 0x15ff)
 	at := len(a.code)
 	rtgAsmEmit32(a, 0)
-	rtgAsmAddWinImportReloc(a, at, rtgWinImportCreateFileA)
+	rtgAsmAddWinImportReloc(a, at, createFileImport)
 	rtgAsmEmit4(a, 0x48, 0x83, 0xc4, 56)
 	return true
 }
@@ -898,7 +907,7 @@ func rtgWin386TranslateCreateFileFlags(a *rtgAsm) {
 
 func rtgEmitWindowsClose(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	a := &g.asm
-	e := &ep.exprs[idx]
+	e := ep.exprs[idx]
 	if e.argCount != 1 {
 		return false
 	}
@@ -933,7 +942,7 @@ func rtgEmitWindowsClose(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 
 func rtgEmitWindowsChmod(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	a := &g.asm
-	e := &ep.exprs[idx]
+	e := ep.exprs[idx]
 	if e.argCount != 2 {
 		return false
 	}

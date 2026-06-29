@@ -185,7 +185,8 @@ func rtgWasiWasm32EmitBinary(p *rtgProgram, meta *rtgMeta, body *rtgBodyParse) [
 	for i := 0; i < len(body.stmts); i++ {
 		stmt := &body.stmts[i]
 		if stmt.kind == rtgStmtExpr {
-			ep := rtgParseExpression(p, stmt.exprStart, stmt.exprEnd)
+			var ep rtgExprParse
+			rtgParseExpressionInto(&ep, p, stmt.exprStart, stmt.exprEnd)
 			if !ep.ok || len(ep.exprs) == 0 {
 				return nil
 			}
@@ -211,7 +212,8 @@ func rtgWasiWasm32EmitBinary(p *rtgProgram, meta *rtgMeta, body *rtgBodyParse) [
 				exitCode = 0
 				continue
 			}
-			ep := rtgParseExpression(p, stmt.exprStart, stmt.exprEnd)
+			var ep rtgExprParse
+			rtgParseExpressionInto(&ep, p, stmt.exprStart, stmt.exprEnd)
 			if !ep.ok || len(ep.exprs) == 0 {
 				return nil
 			}

@@ -258,10 +258,16 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 		}
 	}
 	if syntheticEntrypoint {
-		if containsString(pkg.Imports, "os") && !containsString(seenRefs, "os\x00Args") {
-			u.References = append(u.References, unit.Symbol{ImportPath: "os", Name: "Args", UnitName: SymbolName("os", "Args")})
+		hasOS := containsString(pkg.Imports, "os")
+		seenOSArgs := containsString(seenRefs, "os\x00Args")
+		if hasOS && !seenOSArgs {
+			osArgsUnitName := SymbolName("os", "Args")
+			u.References = append(u.References, unit.Symbol{ImportPath: "os", Name: "Args", UnitName: osArgsUnitName})
 		}
-		u.Decls = append(u.Decls, syntheticAppMainDecl(symbolNameTableUnitName(topNames, "appMain"), symbolNameTableUnitName(topNames, "main"), containsString(pkg.Imports, "os")))
+		appMainUnitName := symbolNameTableUnitName(topNames, "appMain")
+		mainUnitName := symbolNameTableUnitName(topNames, "main")
+		entryDecl := syntheticAppMainDecl(appMainUnitName, mainUnitName, hasOS)
+		u.Decls = append(u.Decls, entryDecl)
 	}
 	sortSymbolsByImportPathName(u.References)
 	return u, nil
@@ -536,6 +542,13 @@ func appendString(out []byte, s string) []byte {
 	return out
 }
 
+func appendStringRange(out []byte, s string, start int, end int) []byte {
+	for i := start; i < end; i++ {
+		out = append(out, s[i])
+	}
+	return out
+}
+
 func appendBytes(out []byte, values []byte) []byte {
 	for i := 0; i < len(values); i++ {
 		out = append(out, values[i])
@@ -586,7 +599,8 @@ func rewriteDecl(file *parse.File, decl *parse.Decl, topNames symbolNameTable, i
 	for end > start && (file.Source[end-1] == ' ' || file.Source[end-1] == '\t' || file.Source[end-1] == '\r' || file.Source[end-1] == '\n') {
 		end--
 	}
-	var out []byte
+	out := make([]byte, 0, 262144)
+	source := file.Source
 	localNames := localNamesForDecl(file, decl, topNames)
 	var importNames symbolNameTable
 	for i := 0; i < len(importRefs); i++ {
@@ -612,7 +626,8 @@ func rewriteDecl(file *parse.File, decl *parse.Decl, topNames symbolNameTable, i
 			break
 		}
 		if tok.Start > cursor {
-			out = appendBytes(out, file.Source[cursor:tok.Start])
+			part := source[cursor:tok.Start]
+			out = appendBytes(out, part)
 		}
 		if tok.Kind == scan.Ident && i+2 < len(tokens) && tokens[i+1].Text == "." && tokens[i+2].Kind == scan.Ident {
 			if i+3 < len(tokens) && tokens[i+3].Text == "(" {
@@ -653,6 +668,68 @@ func rewriteDecl(file *parse.File, decl *parse.Decl, topNames symbolNameTable, i
 					if sym.ImportPath != "" {
 						appendUnitSymbolRef(refs, sym)
 					}
+					if sym.ImportPath == "fmt" && sym.Name == "Errorf" && i+3 < len(tokens) && tokens[i+3].Text == "(" {
+						close := findClose(tokens, i+3, "(", ")")
+						if close > i+4 {
+							argStart, argEnd, argOK := callArgumentRange(tokens, i+4, close, 0)
+							if !argOK {
+								argStart = i + 4
+								argEnd = firstCallArgumentEnd(tokens, i+4, close)
+							}
+							errorSym, errorSymOK := symbolByName(symbols, "Error")
+							errorUnitName := SymbolName("fmt", "Error")
+							if errorSymOK {
+								errorUnitName = errorSym.UnitName
+								if errorSym.ImportPath != "" {
+									appendUnitSymbolRef(refs, errorSym)
+								}
+							}
+							out = appendString(out, errorUnitName)
+							out = append(out, '(')
+							firstArg := source[tokens[argStart].Start:tokens[argEnd-1].End]
+							out = appendBytes(out, firstArg)
+							out = append(out, ')')
+							cursor = tokens[close].End
+							prevText = ")"
+							i = close
+							continue
+						}
+					}
+					if sym.ImportPath == "fmt" && isFmtPrintName(sym.Name) && i+3 < len(tokens) && tokens[i+3].Text == "(" {
+						close := findClose(tokens, i+3, "(", ")")
+						if close > i+4 {
+							fdStart, fdEnd, fdOK := callArgumentRange(tokens, i+4, close, 0)
+							argStart, argEnd, argOK := callArgumentRange(tokens, i+4, close, 1)
+							if argOK {
+								innerStart, innerEnd, bytesOK := bytesToStringCallArgumentRange(tokens, argStart, argEnd)
+								if fdOK && bytesOK {
+									out = appendString(out, "write(")
+									if callArgumentIsStdout(tokens, fdStart, fdEnd) {
+										out = append(out, '1')
+									} else {
+										fdArg := source[tokens[fdStart].Start:tokens[fdEnd-1].End]
+										out = appendBytes(out, fdArg)
+									}
+									out = appendString(out, ", ")
+									innerArg := source[tokens[innerStart].Start:tokens[innerEnd-1].End]
+									out = appendBytes(out, innerArg)
+									out = appendString(out, ", 0)")
+									cursor = tokens[close].End
+									prevText = ")"
+									i = close
+									continue
+								}
+								out = appendString(out, "print(")
+								arg := source[tokens[argStart].Start:tokens[argEnd-1].End]
+								out = appendBytes(out, arg)
+								out = append(out, ')')
+								cursor = tokens[close].End
+								prevText = ")"
+								i = close
+								continue
+							}
+						}
+					}
 					out = appendString(out, sym.UnitName)
 					cursor = member.End
 					prevText = member.Text
@@ -670,14 +747,68 @@ func rewriteDecl(file *parse.File, decl *parse.Decl, topNames symbolNameTable, i
 				continue
 			}
 		}
-		out = appendBytes(out, file.Source[tok.Start:tok.End])
+		part := source[tok.Start:tok.End]
+		out = appendBytes(out, part)
 		cursor = tok.End
 		prevText = tok.Text
 	}
 	if cursor < end {
-		out = appendBytes(out, file.Source[cursor:end])
+		part := source[cursor:end]
+		out = appendBytes(out, part)
 	}
 	return string(out)
+}
+
+func firstCallArgumentEnd(toks []scan.Token, start int, end int) int {
+	paren := 0
+	brack := 0
+	brace := 0
+	for i := start; i < end; i++ {
+		if paren == 0 && brack == 0 && brace == 0 && toks[i].Text == "," {
+			return i
+		}
+		updateExpressionDepth(toks[i].Text, &paren, &brack, &brace)
+	}
+	return end
+}
+
+func callArgumentRange(toks []scan.Token, start int, end int, want int) (int, int, bool) {
+	argStart := start
+	argIndex := 0
+	paren := 0
+	brack := 0
+	brace := 0
+	for i := start; i <= end; i++ {
+		if i == end || (paren == 0 && brack == 0 && brace == 0 && toks[i].Text == ",") {
+			if argIndex == want && argStart < i {
+				return argStart, i, true
+			}
+			argIndex++
+			argStart = i + 1
+			continue
+		}
+		updateExpressionDepth(toks[i].Text, &paren, &brack, &brace)
+	}
+	return 0, 0, false
+}
+
+func isFmtPrintName(name string) bool {
+	return name == "Fprint" || name == "Fprintln" || name == "Fprintf"
+}
+
+func bytesToStringCallArgumentRange(toks []scan.Token, start int, end int) (int, int, bool) {
+	if start+3 >= end || toks[start].Kind != scan.Ident || toks[start+1].Text != "(" {
+		return 0, 0, false
+	}
+	close := findClose(toks, start+1, "(", ")")
+	if close != end-1 {
+		return 0, 0, false
+	}
+	return callArgumentRange(toks, start+2, close, 0)
+}
+
+func callArgumentIsStdout(toks []scan.Token, start int, end int) bool {
+	return start+3 == end && toks[start].Kind == scan.Ident && toks[start+1].Text == "." && toks[start+2].Text == "Stdout"
 }
 
 func appendUnitSymbolRef(refs *[]unit.Symbol, sym unit.Symbol) {
@@ -784,12 +915,14 @@ func appendByteRef(out *[]byte, c byte) {
 
 func rewriteReceiverSegment(file *parse.File, start int, end int, topNames symbolNameTable) string {
 	toks := file.Tokens
-	var out []byte
+	source := file.Source
+	out := make([]byte, 0, 262144)
 	cursor := toks[start].Start
 	for i := start; i < end; i++ {
 		tok := toks[i]
 		if tok.Start > cursor {
-			out = appendBytes(out, file.Source[cursor:tok.Start])
+			part := source[cursor:tok.Start]
+			out = appendBytes(out, part)
 		}
 		if tok.Kind == scan.Ident && (i > start || !receiverSegmentHasName(toks, start, end)) {
 			unitName := symbolNameTableUnitName(topNames, tok.Text)
@@ -799,11 +932,13 @@ func rewriteReceiverSegment(file *parse.File, start int, end int, topNames symbo
 				continue
 			}
 		}
-		out = appendBytes(out, file.Source[tok.Start:tok.End])
+		part := source[tok.Start:tok.End]
+		out = appendBytes(out, part)
 		cursor = tok.End
 	}
 	if end > start && cursor < toks[end-1].End {
-		out = appendBytes(out, file.Source[cursor:toks[end-1].End])
+		part := source[cursor:toks[end-1].End]
+		out = appendBytes(out, part)
 	}
 	return string(out)
 }
@@ -830,11 +965,13 @@ type expressionReplacement struct {
 }
 
 type expressionStatement struct {
-	token     int
-	exprStart int
-	exprEnd   int
-	kind      string
-	openBrace int
+	token           int
+	exprStart       int
+	exprEnd         int
+	kind            string
+	openBrace       int
+	returnStatement bool
+	forCondition    bool
 }
 
 type conditionalShortStatement struct {
@@ -889,7 +1026,7 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 	if !tokenSpansMatchSource(body, toks) {
 		return body
 	}
-	var out []byte
+	out := make([]byte, 0, 262144)
 	cursor := 0
 	for i := 0; i < len(toks); i++ {
 		short, ok := normalizationConditionalShortStatement(toks, i)
@@ -897,7 +1034,7 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 			initTemps, initReplacements := normalizeExpression(body, toks, short.initStart, short.semi, unitName, tempIndex)
 			condTemps, condReplacements := normalizeExpression(body, toks, short.condStart, short.condEnd, unitName, tempIndex)
 			insertStart := statementInsertStart(body, toks[short.token].Start)
-			out = appendString(out, body[cursor:insertStart])
+			out = appendStringRange(out, body, cursor, insertStart)
 			indent := statementIndent(body, toks[short.token].Start)
 			innerIndent := indent + "\t"
 			init := strings.TrimSpace(applyExpressionReplacements(body, toks[short.initStart].Start, toks[short.semi-1].End, initReplacements))
@@ -907,9 +1044,11 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 			for j := 0; j < len(initTemps); j++ {
 				temp := initTemps[j]
 				out = appendString(out, innerIndent)
-				out = appendString(out, temp.name)
+				tempName := temp.name
+				tempExpr := temp.expr
+				out = appendString(out, tempName)
 				out = appendString(out, " := ")
-				out = appendString(out, temp.expr)
+				out = appendString(out, tempExpr)
 				out = append(out, '\n')
 			}
 			out = appendString(out, innerIndent)
@@ -918,9 +1057,11 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 			for j := 0; j < len(condTemps); j++ {
 				temp := condTemps[j]
 				out = appendString(out, innerIndent)
-				out = appendString(out, temp.name)
+				tempName := temp.name
+				tempExpr := temp.expr
+				out = appendString(out, tempName)
 				out = appendString(out, " := ")
-				out = appendString(out, temp.expr)
+				out = appendString(out, tempExpr)
 				out = append(out, '\n')
 			}
 			out = appendString(out, innerIndent)
@@ -928,7 +1069,7 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 			out = append(out, ' ')
 			out = appendString(out, condition)
 			out = append(out, ' ')
-			out = appendString(out, body[toks[short.openBrace].Start:toks[short.end].End])
+			out = appendStringRange(out, body, toks[short.openBrace].Start, toks[short.end].End)
 			out = append(out, '\n')
 			out = appendString(out, indent)
 			out = append(out, '}')
@@ -943,7 +1084,7 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 				condTemps, condReplacements := normalizeExpression(body, toks, post.condStart, post.condEnd, unitName, tempIndex)
 				postTemps, postReplacements := normalizeExpression(body, toks, post.postStart, post.postEnd, unitName, tempIndex)
 				insertStart := statementInsertStart(body, toks[post.token].Start)
-				out = appendString(out, body[cursor:insertStart])
+				out = appendStringRange(out, body, cursor, insertStart)
 				indent := statementIndent(body, toks[post.token].Start)
 				innerIndent := indent + "\t"
 				loopIndent := innerIndent + "\t"
@@ -952,9 +1093,11 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 				for j := 0; j < len(initTemps); j++ {
 					temp := initTemps[j]
 					out = appendString(out, innerIndent)
-					out = appendString(out, temp.name)
+					tempName := temp.name
+					tempExpr := temp.expr
+					out = appendString(out, tempName)
 					out = appendString(out, " := ")
-					out = appendString(out, temp.expr)
+					out = appendString(out, tempExpr)
 					out = append(out, '\n')
 				}
 				if post.initStart < post.initEnd {
@@ -970,9 +1113,11 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 					for j := 0; j < len(condTemps); j++ {
 						temp := condTemps[j]
 						out = appendString(out, loopIndent)
-						out = appendString(out, temp.name)
+						tempName := temp.name
+						tempExpr := temp.expr
+						out = appendString(out, tempName)
 						out = appendString(out, " := ")
-						out = appendString(out, temp.expr)
+						out = appendString(out, tempExpr)
 						out = append(out, '\n')
 					}
 					out = appendString(out, loopIndent)
@@ -984,16 +1129,18 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 					out = appendString(out, loopIndent)
 					out = appendString(out, "}\n")
 				}
-				out = appendString(out, body[toks[post.openBrace].End:toks[post.end].Start])
+				out = appendStringRange(out, body, toks[post.openBrace].End, toks[post.end].Start)
 				if len(out) == 0 || out[len(out)-1] != '\n' {
 					out = append(out, '\n')
 				}
 				for j := 0; j < len(postTemps); j++ {
 					temp := postTemps[j]
 					out = appendString(out, loopIndent)
-					out = appendString(out, temp.name)
+					tempName := temp.name
+					tempExpr := temp.expr
+					out = appendString(out, tempName)
 					out = appendString(out, " := ")
-					out = appendString(out, temp.expr)
+					out = appendString(out, tempExpr)
 					out = append(out, '\n')
 				}
 				postExpr := strings.TrimSpace(applyExpressionReplacements(body, toks[post.postStart].Start, toks[post.postEnd-1].End, postReplacements))
@@ -1014,17 +1161,19 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 			temps, replacements := normalizeExpression(body, toks, classic.condStart, classic.condEnd, unitName, tempIndex)
 			if len(temps) > 0 {
 				condition := applyExpressionReplacements(body, toks[classic.condStart].Start, toks[classic.condEnd-1].End, replacements)
-				out = appendString(out, body[cursor:toks[classic.condStart].Start])
-				out = appendString(out, body[toks[classic.condEnd].Start:toks[classic.openBrace].End])
+				out = appendStringRange(out, body, cursor, toks[classic.condStart].Start)
+				out = appendStringRange(out, body, toks[classic.condEnd].Start, toks[classic.openBrace].End)
 				indent := statementIndent(body, toks[classic.token].Start)
 				innerIndent := indent + "\t"
 				out = append(out, '\n')
 				for j := 0; j < len(temps); j++ {
 					temp := temps[j]
 					out = appendString(out, innerIndent)
-					out = appendString(out, temp.name)
+					tempName := temp.name
+					tempExpr := temp.expr
+					out = appendString(out, tempName)
 					out = appendString(out, " := ")
-					out = appendString(out, temp.expr)
+					out = appendString(out, tempExpr)
 					out = append(out, '\n')
 				}
 				out = appendString(out, innerIndent)
@@ -1043,7 +1192,7 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 		shortCircuit, ok := normalizationShortCircuitIfStatement(toks, i)
 		if ok {
 			insertStart := statementInsertStart(body, toks[shortCircuit.token].Start)
-			out = appendString(out, body[cursor:insertStart])
+			out = appendStringRange(out, body, cursor, insertStart)
 			indent := statementIndent(body, toks[shortCircuit.token].Start)
 			appendShortCircuitIf(&out, body, toks, shortCircuit, indent, unitName, tempIndex)
 			cursor = toks[shortCircuit.end].End
@@ -1054,24 +1203,53 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 		if !ok {
 			continue
 		}
+		if stmt.returnStatement {
+			temps, replacements := normalizeReturnValues(body, toks, stmt.exprStart, stmt.exprEnd, unitName, tempIndex)
+			if len(temps) == 0 {
+				continue
+			}
+			insertStart := statementInsertStart(body, toks[stmt.token].Start)
+			out = appendStringRange(out, body, cursor, insertStart)
+			indent := statementIndent(body, toks[stmt.token].Start)
+			if insertStart == toks[stmt.token].Start {
+				out = append(out, '\n')
+			}
+			for j := 0; j < len(temps); j++ {
+				temp := temps[j]
+				tempName := temp.name
+				tempExpr := temp.expr
+				out = appendString(out, indent)
+				out = appendString(out, tempName)
+				out = appendString(out, " := ")
+				out = appendString(out, tempExpr)
+				out = append(out, '\n')
+			}
+			out = appendStringRange(out, body, insertStart, toks[stmt.exprStart].Start)
+			out = appendString(out, applyExpressionReplacements(body, toks[stmt.exprStart].Start, toks[stmt.exprEnd-1].End, replacements))
+			cursor = toks[stmt.exprEnd-1].End
+			i = stmt.exprEnd - 1
+			continue
+		}
 		temps, replacements := normalizeExpression(body, toks, stmt.exprStart, stmt.exprEnd, unitName, tempIndex)
 		if len(temps) == 0 {
 			continue
 		}
 		insertStart := statementInsertStart(body, toks[stmt.token].Start)
-		out = appendString(out, body[cursor:insertStart])
+		out = appendStringRange(out, body, cursor, insertStart)
 		indent := statementIndent(body, toks[stmt.token].Start)
-		if stmt.kind == "for-condition" {
+		if stmt.forCondition {
 			innerIndent := indent + "\t"
 			condition := applyExpressionReplacements(body, toks[stmt.exprStart].Start, toks[stmt.exprEnd-1].End, replacements)
-			out = appendString(out, body[insertStart:toks[stmt.token].Start])
+			out = appendStringRange(out, body, insertStart, toks[stmt.token].Start)
 			out = appendString(out, "for {\n")
 			for j := 0; j < len(temps); j++ {
 				temp := temps[j]
 				out = appendString(out, innerIndent)
-				out = appendString(out, temp.name)
+				tempName := temp.name
+				tempExpr := temp.expr
+				out = appendString(out, tempName)
 				out = appendString(out, " := ")
-				out = appendString(out, temp.expr)
+				out = appendString(out, tempExpr)
 				out = append(out, '\n')
 			}
 			out = appendString(out, innerIndent)
@@ -1091,13 +1269,15 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 		}
 		for j := 0; j < len(temps); j++ {
 			temp := temps[j]
+			tempName := temp.name
+			tempExpr := temp.expr
 			out = appendString(out, indent)
-			out = appendString(out, temp.name)
+			out = appendString(out, tempName)
 			out = appendString(out, " := ")
-			out = appendString(out, temp.expr)
+			out = appendString(out, tempExpr)
 			out = append(out, '\n')
 		}
-		out = appendString(out, body[insertStart:toks[stmt.exprStart].Start])
+		out = appendStringRange(out, body, insertStart, toks[stmt.exprStart].Start)
 		out = appendString(out, applyExpressionReplacements(body, toks[stmt.exprStart].Start, toks[stmt.exprEnd-1].End, replacements))
 		cursor = toks[stmt.exprEnd-1].End
 		i = stmt.exprEnd - 1
@@ -1105,7 +1285,7 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 	if len(out) == 0 {
 		return body
 	}
-	out = appendString(out, body[cursor:])
+	out = appendStringRange(out, body, cursor, len(body))
 	if strings.HasPrefix(strings.TrimSpace(body), "func ") && !trimmedBytesHavePrefix(out, "func ") {
 		return body
 	}
@@ -1120,9 +1300,11 @@ func appendShortCircuitIf(out *[]byte, body string, toks []scan.Token, stmt shor
 		for j := 0; j < len(temps); j++ {
 			temp := temps[j]
 			appendStringRef(out, currentIndent)
-			appendStringRef(out, temp.name)
+			tempName := temp.name
+			tempExpr := temp.expr
+			appendStringRef(out, tempName)
 			appendStringRef(out, " := ")
-			appendStringRef(out, temp.expr)
+			appendStringRef(out, tempExpr)
 			appendByteRef(out, '\n')
 		}
 		condition := strings.TrimSpace(applyExpressionReplacements(body, toks[operand.start].Start, toks[operand.end-1].End, replacements))
@@ -1132,7 +1314,10 @@ func appendShortCircuitIf(out *[]byte, body string, toks []scan.Token, stmt shor
 		appendStringRef(out, " {\n")
 		currentIndent = currentIndent + "\t"
 	}
-	innerBody := normalizeFunctionExpressionsWithTemp(body[toks[stmt.openBrace].End:toks[stmt.end].Start], unitName, tempIndex)
+	innerBodyStart := toks[stmt.openBrace].End
+	innerBodyEnd := toks[stmt.end].Start
+	innerBodySource := body[innerBodyStart:innerBodyEnd]
+	innerBody := normalizeFunctionExpressionsWithTemp(innerBodySource, unitName, tempIndex)
 	appendStringRef(out, innerBody)
 	if len(*out) == 0 || (*out)[len(*out)-1] != '\n' {
 		appendByteRef(out, '\n')
@@ -1169,7 +1354,8 @@ func tokenSpansMatchSource(body string, toks []scan.Token) bool {
 		if tok.Start < 0 || tok.End < tok.Start || tok.End > len(body) {
 			return false
 		}
-		if body[tok.Start:tok.End] != tok.Text {
+		part := body[tok.Start:tok.End]
+		if part != tok.Text {
 			return false
 		}
 	}
@@ -1305,7 +1491,7 @@ func normalizationStatement(toks []scan.Token, pos int) (expressionStatement, bo
 		if exprEnd <= exprStart {
 			return expressionStatement{}, false
 		}
-		return expressionStatement{token: pos, exprStart: exprStart, exprEnd: exprEnd}, true
+		return expressionStatement{token: pos, exprStart: exprStart, exprEnd: exprEnd, returnStatement: true}, true
 	}
 	if toks[pos].Text == "if" {
 		exprStart := pos + 1
@@ -1350,7 +1536,7 @@ func normalizationStatement(toks []scan.Token, pos int) (expressionStatement, bo
 			}
 			return expressionStatement{token: pos, exprStart: assign + 1, exprEnd: semi}, true
 		}
-		return expressionStatement{token: pos, exprStart: exprStart, exprEnd: exprEnd, kind: "for-condition", openBrace: exprEnd}, true
+		return expressionStatement{token: pos, exprStart: exprStart, exprEnd: exprEnd, openBrace: exprEnd, forCondition: true}, true
 	}
 	if isInsideClassicForHeader(toks, pos) {
 		return expressionStatement{}, false
@@ -1585,6 +1771,54 @@ func normalizeExpression(body string, toks []scan.Token, start int, end int, uni
 	return temps, replacements
 }
 
+func normalizeReturnValues(body string, toks []scan.Token, start int, end int, unitName string, tempIndex *int) ([]expressionTemp, []expressionReplacement) {
+	ranges := topLevelExpressionRanges(toks, start, end)
+	if len(ranges) <= 1 {
+		return normalizeExpression(body, toks, start, end, unitName, tempIndex)
+	}
+	var temps []expressionTemp
+	var replacements []expressionReplacement
+	for i := 0; i < len(ranges); i++ {
+		exprRange := ranges[i]
+		exprTemps, exprReplacements := normalizeExpression(body, toks, exprRange.start, exprRange.end, unitName, tempIndex)
+		temps = appendExpressionTemps(temps, exprTemps)
+		exprStart := toks[exprRange.start].Start
+		exprEnd := toks[exprRange.end-1].End
+		expr := applyExpressionReplacements(body, exprStart, exprEnd, exprReplacements)
+		if expressionContainsNonConversionCall(toks, exprRange.start, exprRange.end) {
+			name := nextExpressionTempName(body, unitName, tempIndex)
+			(*tempIndex)++
+			temps = append(temps, expressionTemp{name: name, expr: expr})
+			replacements = append(replacements, expressionReplacement{start: exprStart, end: exprEnd, text: name})
+			continue
+		}
+		replacements = appendExpressionReplacements(replacements, exprReplacements)
+	}
+	return temps, replacements
+}
+
+func topLevelExpressionRanges(toks []scan.Token, start int, end int) []expressionRange {
+	var out []expressionRange
+	exprStart := start
+	paren := 0
+	brack := 0
+	brace := 0
+	for i := start; i < end; i++ {
+		if paren == 0 && brack == 0 && brace == 0 && toks[i].Text == "," {
+			if exprStart < i {
+				out = append(out, expressionRange{start: exprStart, end: i})
+			}
+			exprStart = i + 1
+			continue
+		}
+		updateExpressionDepth(toks[i].Text, &paren, &brack, &brace)
+	}
+	if exprStart < end {
+		out = append(out, expressionRange{start: exprStart, end: end})
+	}
+	return out
+}
+
 func normalizeIndexBounds(body string, toks []scan.Token, start int, end int, unitName string, tempIndex *int) ([]expressionTemp, []expressionReplacement) {
 	var temps []expressionTemp
 	var replacements []expressionReplacement
@@ -1598,7 +1832,8 @@ func normalizeIndexBounds(body string, toks []scan.Token, start int, end int, un
 		(*tempIndex)++
 		exprStart := toks[bound.start].Start
 		exprEnd := toks[bound.end-1].End
-		temps = append(temps, expressionTemp{name: name, expr: body[exprStart:exprEnd]})
+		expr := body[exprStart:exprEnd]
+		temps = append(temps, expressionTemp{name: name, expr: expr})
 		replacements = append(replacements, expressionReplacement{start: exprStart, end: exprEnd, text: name})
 	}
 	return temps, replacements
@@ -1754,6 +1989,46 @@ func expressionContainsCall(toks []scan.Token, start int, end int) bool {
 	return false
 }
 
+func expressionContainsNonConversionCall(toks []scan.Token, start int, end int) bool {
+	for i := start; i+1 < end; i++ {
+		if toks[i].Kind == scan.Ident && toks[i+1].Text == "(" && !isBuiltinConversionName(toks[i].Text) {
+			return true
+		}
+	}
+	return false
+}
+
+func isBuiltinConversionName(name string) bool {
+	if name == "int" {
+		return true
+	}
+	if name == "int16" {
+		return true
+	}
+	if name == "int32" {
+		return true
+	}
+	if name == "int64" {
+		return true
+	}
+	if name == "byte" {
+		return true
+	}
+	if name == "bool" {
+		return true
+	}
+	if name == "string" {
+		return true
+	}
+	if name == "error" {
+		return true
+	}
+	if name == "float64" {
+		return true
+	}
+	return false
+}
+
 func expressionContainsTopLevelSemicolon(toks []scan.Token, start int, end int) bool {
 	return topLevelSemicolon(toks, start, end) >= 0
 }
@@ -1807,18 +2082,19 @@ func conditionalStatementEnd(toks []scan.Token, pos int, openBrace int) int {
 }
 
 func applyExpressionReplacements(body string, start int, end int, replacements []expressionReplacement) string {
-	var out []byte
+	out := make([]byte, 0, 65536)
 	cursor := start
 	for i := 0; i < len(replacements); i++ {
 		repl := replacements[i]
 		if repl.start < cursor || repl.end > end {
 			continue
 		}
-		out = appendString(out, body[cursor:repl.start])
-		out = appendString(out, repl.text)
+		out = appendStringRange(out, body, cursor, repl.start)
+		replText := repl.text
+		out = appendString(out, replText)
 		cursor = repl.end
 	}
-	out = appendString(out, body[cursor:end])
+	out = appendStringRange(out, body, cursor, end)
 	return string(out)
 }
 
@@ -1976,7 +2252,8 @@ func collectShortDeclLocalTypes(toks []scan.Token, assign int, types *localTypeT
 		return
 	}
 	if assign+2 < len(toks) && toks[assign+1].Text == "&" && toks[assign+2].Kind == scan.Ident {
-		if pointed := localTypeTableLookup(*types, toks[assign+2].Text); pointed.name != "" {
+		pointed := localTypeTableLookup(*types, toks[assign+2].Text)
+		if pointed.name != "" {
 			pointed.pointer = true
 			*types = localTypeTableSet(*types, toks[assign-1].Text, pointed)
 		}

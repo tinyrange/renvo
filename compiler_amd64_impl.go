@@ -14,6 +14,8 @@ func rtgAmd64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	oldLastRangeReturns := g.lastRangeReturns
 	var locals []rtgLocalInfo
 	var gotoLabels []rtgGlobalInfo
+	locals = make([]rtgLocalInfo, 0, 32768)
+	gotoLabels = make([]rtgGlobalInfo, 0, 0)
 	g.locals = locals
 	g.gotoLabels = gotoLabels
 	g.breakDepth = 0
@@ -22,7 +24,11 @@ func rtgAmd64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	g.returnStruct = 0
 	g.stackUsed = 0
 	rtgAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-	rtgAsmEmit32(a, 0x008000c8)
+	if rtgCompilerFixedTarget != 0 {
+		rtgAsmEmit32(a, 0x002000c8)
+	} else {
+		rtgAsmEmit32(a, 0x008000c8)
+	}
 	if rtgTypeIsStruct(g.meta, metaFn.resultType) {
 		g.returnStruct = rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
 		rtgAsmStackMem(a, g.returnStruct, 0x8948, 0x7d, 0xbd)
@@ -1364,6 +1370,7 @@ func rtgAmd64EnsureAppendAddrHelper(g *rtgLinearGen) int {
 	rtgAsmMarkLabel(a, afterLabel)
 	return g.appendAddrLabel
 }
+
 func rtgAmd64EnsureAppend8Helper(g *rtgLinearGen) int {
 	a := &g.asm
 	if g.append8Emitted {
@@ -1412,12 +1419,18 @@ func rtgAmd64EnsureAppendBytesHelper(g *rtgLinearGen) int {
 	afterLabel := rtgAsmNewLabel(a)
 	rtgAsmJmpLabel(a, afterLabel)
 	rtgAsmMarkLabel(a, g.appendBytesLabel)
-	rtgAsmEmit24(a, 0x0e8b48)
-	rtgAsmEmit24(a, 0x3f8b48)
-	rtgAsmEmit24(a, 0xcf0148)
-	rtgAsmEmit24(a, 0x160148)
-	rtgAsmEmit24(a, 0xc68948)
-	rtgAsmEmit24(a, 0xd18948)
+	opLoadDst := 0x0e8b48
+	opLoadSrc := 0x3f8b48
+	opAddDst := 0xcf0148
+	opAddSrc := 0x160148
+	opMovRsi := 0xc68948
+	opMovRcx := 0xd18948
+	rtgAsmEmit24(a, opLoadDst)
+	rtgAsmEmit24(a, opLoadSrc)
+	rtgAsmEmit24(a, opAddDst)
+	rtgAsmEmit24(a, opAddSrc)
+	rtgAsmEmit24(a, opMovRsi)
+	rtgAsmEmit24(a, opMovRcx)
 	rtgAsmEmit16(a, 0xa4f3)
 	rtgAsmRet(a)
 	rtgAsmMarkLabel(a, afterLabel)
