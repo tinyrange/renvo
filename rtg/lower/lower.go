@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"j5.nz/rtg/rtg/arena"
 	"j5.nz/rtg/rtg/load"
 	"j5.nz/rtg/rtg/parse"
 	"j5.nz/rtg/rtg/scan"
@@ -36,8 +37,9 @@ type methodEntry struct {
 }
 
 type importSymbolGroup struct {
-	localName string
-	symbols   []unit.Symbol
+	localName  string
+	importPath string
+	symbols    []unit.Symbol
 }
 
 type localNameRange struct {
@@ -62,23 +64,43 @@ type localNameTable []localNameRange
 type localTypeTable []localTypeEntry
 
 func symbolNameTableUnitName(table symbolNameTable, name string) string {
-	for i := 0; i < len(table); i++ {
-		entry := table[i]
-		if entry.name == name {
-			return entry.unitName
-		}
+	index, ok := symbolNameTableSearch(table, name)
+	if ok {
+		return table[index].unitName
 	}
 	return ""
 }
 
 func symbolNameTableSet(table symbolNameTable, name string, unitName string) symbolNameTable {
-	for i := 0; i < len(table); i++ {
-		if table[i].name == name {
-			table[i].unitName = unitName
-			return table
+	index, ok := symbolNameTableSearch(table, name)
+	if ok {
+		table[index].unitName = unitName
+		return table
+	}
+	table = append(table, symbolName{})
+	for i := len(table) - 1; i > index; i-- {
+		table[i] = table[i-1]
+	}
+	table[index] = symbolName{name: name, unitName: unitName}
+	return table
+}
+
+func symbolNameTableSearch(table symbolNameTable, name string) (int, bool) {
+	low := 0
+	high := len(table)
+	for low < high {
+		mid := (low + high) / 2
+		entryName := table[mid].name
+		if entryName == name {
+			return mid, true
+		}
+		if stringGreater(entryName, name) {
+			high = mid
+		} else {
+			low = mid + 1
 		}
 	}
-	return append(table, symbolName{name: name, unitName: unitName})
+	return low, false
 }
 
 func methodTableLookup(table methodTable, name string) methodInfo {
@@ -102,14 +124,14 @@ func methodTableSet(table methodTable, name string, info methodInfo) methodTable
 	return append(table, methodEntry{lookup: name, info: info})
 }
 
-func importSymbolTableSymbols(table importSymbolTable, localName string) ([]unit.Symbol, bool) {
+func importSymbolTableGroup(table importSymbolTable, localName string) (importSymbolGroup, bool) {
 	for i := 0; i < len(table); i++ {
 		entry := table[i]
 		if entry.localName == localName {
-			return entry.symbols, true
+			return entry, true
 		}
 	}
-	return nil, false
+	return importSymbolGroup{}, false
 }
 
 func symbolByName(symbols []unit.Symbol, name string) (unit.Symbol, bool) {
@@ -118,6 +140,21 @@ func symbolByName(symbols []unit.Symbol, name string) (unit.Symbol, bool) {
 		if sym.Name == name {
 			return sym, true
 		}
+	}
+	return unit.Symbol{}, false
+}
+
+func importSymbolByName(group importSymbolGroup, name string) (unit.Symbol, bool) {
+	sym, ok := symbolByName(group.symbols, name)
+	if ok {
+		return sym, true
+	}
+	if group.importPath != "" && isExported(name) {
+		importPath := arena.PersistString(group.importPath)
+		symbolName := arena.PersistString(name)
+		unitName := SymbolName(importPath, name)
+		unitName = arena.PersistString(unitName)
+		return unit.Symbol{ImportPath: importPath, Name: symbolName, UnitName: unitName}, true
 	}
 	return unit.Symbol{}, false
 }
@@ -157,64 +194,112 @@ func Package(pkg load.Package) (unit.Unit, error) {
 	return PackageWithGraph(pkg, nil)
 }
 
+func packageDeclCapacity(files []load.File) int {
+	size := len(files) * 8
+	for i := 0; i < len(files); i++ {
+		size += len(files[i].Source) / 512
+	}
+	if size < 16 {
+		size = 16
+	}
+	return size
+}
+
+func packageSymbolCapacity(declCap int, importCount int) int {
+	size := declCap + importCount*8 + 16
+	if size < 32 {
+		size = 32
+	}
+	return size
+}
+
 func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 	u := unit.Unit{ImportPath: pkg.ImportPath, Package: pkg.Name, Entry: pkg.Entry}
 	u.Imports = appendStrings(u.Imports, pkg.Imports)
 	files := copyLoadFiles(pkg.Files)
 	sortFilesByPath(files)
-	parsedFiles := make([]parse.File, 0, len(files))
-	var topNames symbolNameTable
-	var topNameOrder []string
-	var methods methodTable
-	var methodOrder []string
+	declCap := packageDeclCapacity(files)
+	symbolCap := packageSymbolCapacity(declCap, len(pkg.Imports))
+	u.Exports = make([]unit.Symbol, 0, symbolCap)
+	u.References = make([]unit.Symbol, 0, symbolCap*2)
+	u.Decls = make([]unit.Decl, 0, declCap)
+	topNames := make(symbolNameTable, 0, symbolCap)
+	topNameOrder := make([]string, 0, symbolCap)
+	methods := make(methodTable, 0, declCap)
+	methodOrder := make([]string, 0, declCap)
+	hasOrdinaryMainDecl := false
 	for fileIndex := 0; fileIndex < len(files); fileIndex++ {
+		mark := arena.Mark()
 		file := files[fileIndex]
 		parsed, err := parsedLoadFile(file)
 		if err != nil {
+			arena.Reset(mark)
 			return unit.Unit{}, err
 		}
 		if parsed.PackageName != pkg.Name {
+			arena.Reset(mark)
 			return unit.Unit{}, fmt.Errorf("%s: package name %s does not match loaded package %s", file.Path, parsed.PackageName, pkg.Name)
 		}
-		parsedFiles = append(parsedFiles, parsed)
 		decls := parsed.Decls
 		for declIndex := 0; declIndex < len(decls); declIndex++ {
-			decl := &decls[declIndex]
-			names := declTopNames(&parsed, decl)
+			decl := decls[declIndex]
+			if isOrdinaryMainDecl(parsed, decl) {
+				hasOrdinaryMainDecl = true
+			}
+			names := declTopNames(&parsed, &decl)
 			for nameIndex := 0; nameIndex < len(names); nameIndex++ {
-				name := names[nameIndex]
+				name := arena.PersistString(names[nameIndex])
 				if name != "" && name != "_" {
 					if symbolNameTableUnitName(topNames, name) == "" {
 						topNameOrder = append(topNameOrder, name)
 					}
-					topNames = symbolNameTableSet(topNames, name, SymbolName(pkg.ImportPath, name))
+					topNames = symbolNameTableSet(topNames, name, arena.PersistString(SymbolName(pkg.ImportPath, name)))
 				}
 			}
 		}
+		arena.Reset(mark)
 	}
-	for fileIndex := 0; fileIndex < len(parsedFiles); fileIndex++ {
-		parsed := parsedFiles[fileIndex]
+	for fileIndex := 0; fileIndex < len(files); fileIndex++ {
+		mark := arena.Mark()
+		file := files[fileIndex]
+		parsed, err := parsedLoadFile(file)
+		if err != nil {
+			arena.Reset(mark)
+			return unit.Unit{}, err
+		}
 		decls := parsed.Decls
 		for declIndex := 0; declIndex < len(decls); declIndex++ {
-			decl := &decls[declIndex]
+			decl := decls[declIndex]
 			if decl.Kind != "func" || !decl.Receiver {
 				continue
 			}
-			info := methodDeclInfo(&parsed, decl)
+			info := methodDeclInfo(&parsed, &decl)
 			if info.name != "" {
-				info.unitName = symbolNameTableUnitName(topNames, info.name)
+				unitName := symbolNameTableUnitName(topNames, info.name)
+				info.name = arena.PersistString(info.name)
+				info.receiverType = arena.PersistString(info.receiverType)
+				info.unitName = unitName
 				existingMethod := methodTableLookup(methods, info.name)
 				if existingMethod.unitName == "" {
 					methodOrder = append(methodOrder, info.name)
 				}
-				methods = methodTableSet(methods, info.name, info)
+				methods = append(methods, methodEntry{lookup: info.name, info: info})
+			}
+		}
+		arena.Reset(mark)
+	}
+	syntheticEntrypoint := false
+	needsSyntheticEntrypoint := false
+	if pkg.Name == "main" {
+		if symbolNameTableUnitName(topNames, "appMain") == "" {
+			if symbolNameTableUnitName(topNames, "main") != "" {
+				needsSyntheticEntrypoint = hasOrdinaryMainDecl
 			}
 		}
 	}
-	syntheticEntrypoint := false
-	if pkg.Name == "main" && symbolNameTableUnitName(topNames, "appMain") == "" && symbolNameTableUnitName(topNames, "main") != "" && hasOrdinaryMain(parsedFiles) {
+	if needsSyntheticEntrypoint {
 		topNameOrder = append(topNameOrder, "appMain")
-		topNames = symbolNameTableSet(topNames, "appMain", SymbolName(pkg.ImportPath, "appMain"))
+		topNames = symbolNameTableSet(topNames, "appMain", arena.PersistString(SymbolName(pkg.ImportPath, "appMain")))
 		syntheticEntrypoint = true
 	}
 	for i := 0; i < len(topNameOrder); i++ {
@@ -227,35 +312,44 @@ func PackageWithGraph(pkg load.Package, graph *load.Graph) (unit.Unit, error) {
 	sortSymbolsByName(u.Exports)
 	depPackages := dependencyPackages(graph)
 	var seenRefs []string
-	for fileIndex := 0; fileIndex < len(parsedFiles); fileIndex++ {
-		parsed := &parsedFiles[fileIndex]
+	for fileIndex := 0; fileIndex < len(files); fileIndex++ {
+		mark := arena.Mark()
+		file := files[fileIndex]
+		parsedValue, err := parsedLoadFile(file)
+		if err != nil {
+			arena.Reset(mark)
+			return unit.Unit{}, err
+		}
+		parsed := &parsedValue
 		importRefs, _ := importReferenceMap(parsed, depPackages)
-		importMethods, importMethodOrder := importMethodMap(parsed, depPackages)
+		importMethods, importMethodOrder := importMethodMap(parsed, depPackages, importedTypeLocalNames(parsed))
 		allMethods := mergedMethodMap(methods, methodOrder, importMethods, importMethodOrder)
 		decls := parsed.Decls
 		for declIndex := 0; declIndex < len(decls); declIndex++ {
-			decl := &decls[declIndex]
+			decl := decls[declIndex]
 			var refs []unit.Symbol
-			body := rewriteDecl(parsed, decl, topNames, importRefs, allMethods, &refs)
+			body := rewriteDecl(parsed, &decl, topNames, importRefs, allMethods, &refs)
 			if decl.Kind == "func" {
-				body = normalizeFunctionExpressions(body, unitDeclSymbol(decl, parsed, topNames))
+				body = normalizeFunctionExpressions(body, unitDeclSymbol(&decl, parsed, topNames))
 			}
 			for refIndex := 0; refIndex < len(refs); refIndex++ {
 				ref := refs[refIndex]
 				key := ref.ImportPath + "\x00" + ref.Name
 				if !containsString(seenRefs, key) {
-					seenRefs = append(seenRefs, key)
-					u.References = append(u.References, ref)
+					seenRefs = append(seenRefs, arena.PersistString(key))
+					persistedRef := persistUnitSymbol(ref)
+					u.References = append(u.References, persistedRef)
 				}
 			}
 			var outDecl unit.Decl
-			outDecl.Path = unitPathForDecl(files, parsed.Path)
-			outDecl.Kind = decl.Kind
-			outDecl.Name = unitDeclName(parsed, decl)
-			outDecl.UnitName = unitDeclSymbol(decl, parsed, topNames)
-			outDecl.Body = body
+			outDecl.Path = arena.PersistString(unitPathForDecl(files, parsed.Path))
+			outDecl.Kind = arena.PersistString(decl.Kind)
+			outDecl.Name = arena.PersistString(unitDeclName(parsed, &decl))
+			outDecl.UnitName = arena.PersistString(unitDeclSymbol(&decl, parsed, topNames))
+			outDecl.Body = arena.PersistString(body)
 			u.Decls = append(u.Decls, outDecl)
 		}
+		arena.Reset(mark)
 	}
 	if syntheticEntrypoint {
 		hasOS := containsString(pkg.Imports, "os")
@@ -461,7 +555,7 @@ func isOrdinaryMainDecl(file parse.File, decl parse.Decl) bool {
 	if decl.Kind != "func" || decl.Name != "main" || decl.Receiver {
 		return false
 	}
-	name := tokenIndexAt(file.Tokens, decl.NameTok.Start)
+	name := tokenIndexAt(file.Tokens, int(decl.NameTok.Start))
 	if name < 0 || name+1 >= len(file.Tokens) || file.Tokens[name+1].Text != "(" {
 		return false
 	}
@@ -470,7 +564,7 @@ func isOrdinaryMainDecl(file parse.File, decl parse.Decl) bool {
 	if close != open+1 {
 		return false
 	}
-	for i := close + 1; i < len(file.Tokens) && file.Tokens[i].Start < decl.End; i++ {
+	for i := close + 1; i < len(file.Tokens) && int(file.Tokens[i].Start) < decl.End; i++ {
 		if file.Tokens[i].Text == "{" {
 			return true
 		}
@@ -522,6 +616,16 @@ func unitPathForDecl(files []load.File, path string) string {
 
 func SymbolName(importPath string, name string) string {
 	out := []byte("rtg_")
+	if importPath == "j5.nz/rtg" {
+		out = append(out, 'm')
+		out = append(out, '_')
+		out = appendString(out, name)
+		return string(out)
+	}
+	if strings.HasPrefix(importPath, "j5.nz/rtg/") {
+		out = append(out, 'm')
+		importPath = importPath[len("j5.nz/rtg/"):]
+	}
 	for i := 0; i < len(importPath); i++ {
 		c := importPath[i]
 		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
@@ -554,6 +658,14 @@ func appendBytes(out []byte, values []byte) []byte {
 		out = append(out, values[i])
 	}
 	return out
+}
+
+func rewriteBufferCapacity(size int) int {
+	capacity := size + size/4 + 256
+	if capacity < 512 {
+		return 512
+	}
+	return capacity
 }
 
 func appendStrings(out []string, values []string) []string {
@@ -599,7 +711,8 @@ func rewriteDecl(file *parse.File, decl *parse.Decl, topNames symbolNameTable, i
 	for end > start && (file.Source[end-1] == ' ' || file.Source[end-1] == '\t' || file.Source[end-1] == '\r' || file.Source[end-1] == '\n') {
 		end--
 	}
-	out := make([]byte, 0, 262144)
+	out := make([]byte, 0, rewriteBufferCapacity(end-start))
+	mark := arena.Mark()
 	source := file.Source
 	localNames := localNamesForDecl(file, decl, topNames)
 	var importNames symbolNameTable
@@ -611,6 +724,7 @@ func rewriteDecl(file *parse.File, decl *parse.Decl, topNames symbolNameTable, i
 	var localTypes localTypeTable
 	localTypes = localTypesForDecl(file, decl)
 	cursor := start
+	checkStructFieldNames := decl.Kind != "func"
 	if decl.Kind == "func" && decl.Receiver {
 		cursor = appendMethodDeclPrefix(file, decl, topNames, &out)
 	}
@@ -618,15 +732,15 @@ func rewriteDecl(file *parse.File, decl *parse.Decl, topNames symbolNameTable, i
 	tokens := file.Tokens
 	for i := 0; i < len(tokens); i++ {
 		tok := tokens[i]
-		if tok.End <= cursor {
+		if int(tok.End) <= cursor {
 			prevText = tok.Text
 			continue
 		}
-		if tok.Start >= end {
+		if int(tok.Start) >= end {
 			break
 		}
-		if tok.Start > cursor {
-			part := source[cursor:tok.Start]
+		if int(tok.Start) > cursor {
+			part := source[cursor:int(tok.Start)]
 			out = appendBytes(out, part)
 		}
 		if tok.Kind == scan.Ident && i+2 < len(tokens) && tokens[i+1].Text == "." && tokens[i+2].Kind == scan.Ident {
@@ -649,21 +763,21 @@ func rewriteDecl(file *parse.File, decl *parse.Decl, topNames symbolNameTable, i
 							receiverArg = "*" + receiverArg
 						}
 						replacement := method.unitName + "(" + receiverArg
-						if close < 0 || open.End < tokens[close].Start {
+						if close < 0 || int(open.End) < int(tokens[close].Start) {
 							replacement = replacement + ", "
 						}
 						out = appendString(out, replacement)
-						cursor = open.End
+						cursor = int(open.End)
 						prevText = "("
 						i += 3
 						continue
 					}
 				}
 			}
-			symbols, symbolsOK := importSymbolTableSymbols(importRefs, tok.Text)
-			if symbolsOK && !isLocalNameAt(importLocalNames, tok.Text, tok.Start) {
+			symbolGroup, symbolsOK := importSymbolTableGroup(importRefs, tok.Text)
+			if symbolsOK && !isLocalNameAt(importLocalNames, tok.Text, int(tok.Start)) {
 				member := tokens[i+2]
-				sym, symOK := symbolByName(symbols, member.Text)
+				sym, symOK := importSymbolByName(symbolGroup, member.Text)
 				if symOK {
 					if sym.ImportPath != "" {
 						appendUnitSymbolRef(refs, sym)
@@ -676,7 +790,7 @@ func rewriteDecl(file *parse.File, decl *parse.Decl, topNames symbolNameTable, i
 								argStart = i + 4
 								argEnd = firstCallArgumentEnd(tokens, i+4, close)
 							}
-							errorSym, errorSymOK := symbolByName(symbols, "Error")
+							errorSym, errorSymOK := importSymbolByName(symbolGroup, "Error")
 							errorUnitName := SymbolName("fmt", "Error")
 							if errorSymOK {
 								errorUnitName = errorSym.UnitName
@@ -686,10 +800,10 @@ func rewriteDecl(file *parse.File, decl *parse.Decl, topNames symbolNameTable, i
 							}
 							out = appendString(out, errorUnitName)
 							out = append(out, '(')
-							firstArg := source[tokens[argStart].Start:tokens[argEnd-1].End]
+							firstArg := source[int(tokens[argStart].Start):int(tokens[argEnd-1].End)]
 							out = appendBytes(out, firstArg)
 							out = append(out, ')')
-							cursor = tokens[close].End
+							cursor = int(tokens[close].End)
 							prevText = ")"
 							i = close
 							continue
@@ -707,23 +821,23 @@ func rewriteDecl(file *parse.File, decl *parse.Decl, topNames symbolNameTable, i
 									if callArgumentIsStdout(tokens, fdStart, fdEnd) {
 										out = append(out, '1')
 									} else {
-										fdArg := source[tokens[fdStart].Start:tokens[fdEnd-1].End]
+										fdArg := source[int(tokens[fdStart].Start):int(tokens[fdEnd-1].End)]
 										out = appendBytes(out, fdArg)
 									}
 									out = appendString(out, ", ")
-									innerArg := source[tokens[innerStart].Start:tokens[innerEnd-1].End]
+									innerArg := source[int(tokens[innerStart].Start):int(tokens[innerEnd-1].End)]
 									out = appendBytes(out, innerArg)
 									out = appendString(out, ", 0)")
-									cursor = tokens[close].End
+									cursor = int(tokens[close].End)
 									prevText = ")"
 									i = close
 									continue
 								}
 								out = appendString(out, "print(")
-								arg := source[tokens[argStart].Start:tokens[argEnd-1].End]
+								arg := source[int(tokens[argStart].Start):int(tokens[argEnd-1].End)]
 								out = appendBytes(out, arg)
 								out = append(out, ')')
-								cursor = tokens[close].End
+								cursor = int(tokens[close].End)
 								prevText = ")"
 								i = close
 								continue
@@ -731,32 +845,35 @@ func rewriteDecl(file *parse.File, decl *parse.Decl, topNames symbolNameTable, i
 						}
 					}
 					out = appendString(out, sym.UnitName)
-					cursor = member.End
+					cursor = int(member.End)
 					prevText = member.Text
 					i += 2
 					continue
 				}
 			}
 		}
-		if tok.Kind == scan.Ident && prevText != "." && !isCompositeKey(tokens, i) && !isStructFieldName(tokens, i) && !isLocalNameAt(localNames, tok.Text, tok.Start) {
+		if tok.Kind == scan.Ident && prevText != "." && !isCompositeKey(tokens, i) && !(checkStructFieldNames && isStructFieldName(tokens, i)) && !isLocalNameAt(localNames, tok.Text, int(tok.Start)) {
 			unitName := symbolNameTableUnitName(topNames, tok.Text)
 			if unitName != "" {
 				out = appendString(out, unitName)
-				cursor = tok.End
+				cursor = int(tok.End)
 				prevText = tok.Text
 				continue
 			}
 		}
-		part := source[tok.Start:tok.End]
+		part := source[int(tok.Start):int(tok.End)]
 		out = appendBytes(out, part)
-		cursor = tok.End
+		cursor = int(tok.End)
 		prevText = tok.Text
 	}
 	if cursor < end {
 		part := source[cursor:end]
 		out = appendBytes(out, part)
 	}
-	return string(out)
+	body := string(out)
+	body = arena.PersistString(body)
+	arena.Reset(mark)
+	return body
 }
 
 func firstCallArgumentEnd(toks []scan.Token, start int, end int) int {
@@ -817,18 +934,26 @@ func appendUnitSymbolRef(refs *[]unit.Symbol, sym unit.Symbol) {
 	*refs = values
 }
 
+func persistUnitSymbol(sym unit.Symbol) unit.Symbol {
+	return unit.Symbol{
+		ImportPath: arena.PersistString(sym.ImportPath),
+		Name:       arena.PersistString(sym.Name),
+		UnitName:   arena.PersistString(sym.UnitName),
+	}
+}
+
 func isCompositeKey(toks []scan.Token, pos int) bool {
 	return pos+1 < len(toks) && toks[pos+1].Text == ":"
 }
 
 func isStructFieldName(toks []scan.Token, pos int) bool {
+	if !startsStructFieldName(toks, pos) {
+		return false
+	}
 	if pos+1 >= len(toks) || !isTypeStartAfterName(toks, pos, len(toks)) {
 		return false
 	}
 	if pos > 0 && toks[pos-1].Text == "type" {
-		return false
-	}
-	if !startsStructFieldName(toks, pos) {
 		return false
 	}
 	depth := 0
@@ -896,9 +1021,9 @@ func appendMethodDeclPrefix(file *parse.File, decl *parse.Decl, topNames symbolN
 	appendStringRef(out, rewriteReceiverSegment(file, receiverOpen+1, receiverClose, topNames))
 	if paramsOpen+1 < paramsClose {
 		appendStringRef(out, ", ")
-		return toks[paramsOpen].End
+		return int(toks[paramsOpen].End)
 	}
-	return toks[paramsClose].Start
+	return int(toks[paramsClose].Start)
 }
 
 func appendStringRef(out *[]byte, s string) {
@@ -916,28 +1041,32 @@ func appendByteRef(out *[]byte, c byte) {
 func rewriteReceiverSegment(file *parse.File, start int, end int, topNames symbolNameTable) string {
 	toks := file.Tokens
 	source := file.Source
-	out := make([]byte, 0, 262144)
-	cursor := toks[start].Start
+	capacity := 512
+	if end > start {
+		capacity = rewriteBufferCapacity(int(toks[end-1].End) - int(toks[start].Start))
+	}
+	out := make([]byte, 0, capacity)
+	cursor := int(toks[start].Start)
 	for i := start; i < end; i++ {
 		tok := toks[i]
-		if tok.Start > cursor {
-			part := source[cursor:tok.Start]
+		if int(tok.Start) > cursor {
+			part := source[cursor:int(tok.Start)]
 			out = appendBytes(out, part)
 		}
 		if tok.Kind == scan.Ident && (i > start || !receiverSegmentHasName(toks, start, end)) {
 			unitName := symbolNameTableUnitName(topNames, tok.Text)
 			if unitName != "" {
 				out = appendString(out, unitName)
-				cursor = tok.End
+				cursor = int(tok.End)
 				continue
 			}
 		}
-		part := source[tok.Start:tok.End]
+		part := source[int(tok.Start):int(tok.End)]
 		out = appendBytes(out, part)
-		cursor = tok.End
+		cursor = int(tok.End)
 	}
-	if end > start && cursor < toks[end-1].End {
-		part := source[cursor:toks[end-1].End]
+	if end > start && cursor < int(toks[end-1].End) {
+		part := source[cursor:int(toks[end-1].End)]
 		out = appendBytes(out, part)
 	}
 	return string(out)
@@ -1019,26 +1148,29 @@ func normalizeFunctionExpressions(body string, unitName string) string {
 }
 
 func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempIndex *int) string {
+	mark := arena.Mark()
 	toks, err := scan.Tokens([]byte(body))
 	if err != nil {
+		arena.Reset(mark)
 		return body
 	}
 	if !tokenSpansMatchSource(body, toks) {
+		arena.Reset(mark)
 		return body
 	}
-	out := make([]byte, 0, 262144)
+	out := make([]byte, 0, rewriteBufferCapacity(len(body)))
 	cursor := 0
 	for i := 0; i < len(toks); i++ {
 		short, ok := normalizationConditionalShortStatement(toks, i)
 		if ok {
 			initTemps, initReplacements := normalizeExpression(body, toks, short.initStart, short.semi, unitName, tempIndex)
 			condTemps, condReplacements := normalizeExpression(body, toks, short.condStart, short.condEnd, unitName, tempIndex)
-			insertStart := statementInsertStart(body, toks[short.token].Start)
+			insertStart := statementInsertStart(body, int(toks[short.token].Start))
 			out = appendStringRange(out, body, cursor, insertStart)
-			indent := statementIndent(body, toks[short.token].Start)
+			indent := statementIndent(body, int(toks[short.token].Start))
 			innerIndent := indent + "\t"
-			init := strings.TrimSpace(applyExpressionReplacements(body, toks[short.initStart].Start, toks[short.semi-1].End, initReplacements))
-			condition := strings.TrimSpace(applyExpressionReplacements(body, toks[short.condStart].Start, toks[short.condEnd-1].End, condReplacements))
+			init := strings.TrimSpace(applyExpressionReplacements(body, int(toks[short.initStart].Start), int(toks[short.semi-1].End), initReplacements))
+			condition := strings.TrimSpace(applyExpressionReplacements(body, int(toks[short.condStart].Start), int(toks[short.condEnd-1].End), condReplacements))
 			out = appendString(out, indent)
 			out = appendString(out, "{\n")
 			for j := 0; j < len(initTemps); j++ {
@@ -1069,12 +1201,22 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 			out = append(out, ' ')
 			out = appendString(out, condition)
 			out = append(out, ' ')
-			out = appendStringRange(out, body, toks[short.openBrace].Start, toks[short.end].End)
+			out = appendStringRange(out, body, int(toks[short.openBrace].Start), int(toks[short.end].End))
 			out = append(out, '\n')
 			out = appendString(out, indent)
 			out = append(out, '}')
-			cursor = toks[short.end].End
+			cursor = int(toks[short.end].End)
 			i = short.end
+			continue
+		}
+		shortCircuit, ok := normalizationShortCircuitIfStatement(toks, i)
+		if ok {
+			insertStart := statementInsertStart(body, int(toks[shortCircuit.token].Start))
+			out = appendStringRange(out, body, cursor, insertStart)
+			indent := statementIndent(body, int(toks[shortCircuit.token].Start))
+			appendShortCircuitIf(&out, body, toks, shortCircuit, indent, unitName, tempIndex)
+			cursor = int(toks[shortCircuit.end].End)
+			i = shortCircuit.end
 			continue
 		}
 		post, ok := normalizationClassicForPostStatement(toks, i)
@@ -1083,9 +1225,9 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 				initTemps, initReplacements := normalizeExpression(body, toks, post.initStart, post.initEnd, unitName, tempIndex)
 				condTemps, condReplacements := normalizeExpression(body, toks, post.condStart, post.condEnd, unitName, tempIndex)
 				postTemps, postReplacements := normalizeExpression(body, toks, post.postStart, post.postEnd, unitName, tempIndex)
-				insertStart := statementInsertStart(body, toks[post.token].Start)
+				insertStart := statementInsertStart(body, int(toks[post.token].Start))
 				out = appendStringRange(out, body, cursor, insertStart)
-				indent := statementIndent(body, toks[post.token].Start)
+				indent := statementIndent(body, int(toks[post.token].Start))
 				innerIndent := indent + "\t"
 				loopIndent := innerIndent + "\t"
 				out = appendString(out, indent)
@@ -1101,7 +1243,7 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 					out = append(out, '\n')
 				}
 				if post.initStart < post.initEnd {
-					init := strings.TrimSpace(applyExpressionReplacements(body, toks[post.initStart].Start, toks[post.initEnd-1].End, initReplacements))
+					init := strings.TrimSpace(applyExpressionReplacements(body, int(toks[post.initStart].Start), int(toks[post.initEnd-1].End), initReplacements))
 					out = appendString(out, innerIndent)
 					out = appendString(out, init)
 					out = append(out, '\n')
@@ -1109,7 +1251,7 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 				out = appendString(out, innerIndent)
 				out = appendString(out, "for {\n")
 				if post.condStart < post.condEnd {
-					condition := strings.TrimSpace(applyExpressionReplacements(body, toks[post.condStart].Start, toks[post.condEnd-1].End, condReplacements))
+					condition := strings.TrimSpace(applyExpressionReplacements(body, int(toks[post.condStart].Start), int(toks[post.condEnd-1].End), condReplacements))
 					for j := 0; j < len(condTemps); j++ {
 						temp := condTemps[j]
 						out = appendString(out, loopIndent)
@@ -1129,7 +1271,7 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 					out = appendString(out, loopIndent)
 					out = appendString(out, "}\n")
 				}
-				out = appendStringRange(out, body, toks[post.openBrace].End, toks[post.end].Start)
+				out = appendStringRange(out, body, int(toks[post.openBrace].End), int(toks[post.end].Start))
 				if len(out) == 0 || out[len(out)-1] != '\n' {
 					out = append(out, '\n')
 				}
@@ -1143,7 +1285,7 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 					out = appendString(out, tempExpr)
 					out = append(out, '\n')
 				}
-				postExpr := strings.TrimSpace(applyExpressionReplacements(body, toks[post.postStart].Start, toks[post.postEnd-1].End, postReplacements))
+				postExpr := strings.TrimSpace(applyExpressionReplacements(body, int(toks[post.postStart].Start), int(toks[post.postEnd-1].End), postReplacements))
 				out = appendString(out, loopIndent)
 				out = appendString(out, postExpr)
 				out = append(out, '\n')
@@ -1151,7 +1293,7 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 				out = appendString(out, "}\n")
 				out = appendString(out, indent)
 				out = append(out, '}')
-				cursor = toks[post.end].End
+				cursor = int(toks[post.end].End)
 				i = post.end
 				continue
 			}
@@ -1160,10 +1302,10 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 		if ok {
 			temps, replacements := normalizeExpression(body, toks, classic.condStart, classic.condEnd, unitName, tempIndex)
 			if len(temps) > 0 {
-				condition := applyExpressionReplacements(body, toks[classic.condStart].Start, toks[classic.condEnd-1].End, replacements)
-				out = appendStringRange(out, body, cursor, toks[classic.condStart].Start)
-				out = appendStringRange(out, body, toks[classic.condEnd].Start, toks[classic.openBrace].End)
-				indent := statementIndent(body, toks[classic.token].Start)
+				condition := applyExpressionReplacements(body, int(toks[classic.condStart].Start), int(toks[classic.condEnd-1].End), replacements)
+				out = appendStringRange(out, body, cursor, int(toks[classic.condStart].Start))
+				out = appendStringRange(out, body, int(toks[classic.condEnd].Start), int(toks[classic.openBrace].End))
+				indent := statementIndent(body, int(toks[classic.token].Start))
 				innerIndent := indent + "\t"
 				out = append(out, '\n')
 				for j := 0; j < len(temps); j++ {
@@ -1184,20 +1326,10 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 				out = appendString(out, "\tbreak\n")
 				out = appendString(out, innerIndent)
 				out = appendString(out, "}\n")
-				cursor = toks[classic.openBrace].End
+				cursor = int(toks[classic.openBrace].End)
 				i = classic.openBrace
 				continue
 			}
-		}
-		shortCircuit, ok := normalizationShortCircuitIfStatement(toks, i)
-		if ok {
-			insertStart := statementInsertStart(body, toks[shortCircuit.token].Start)
-			out = appendStringRange(out, body, cursor, insertStart)
-			indent := statementIndent(body, toks[shortCircuit.token].Start)
-			appendShortCircuitIf(&out, body, toks, shortCircuit, indent, unitName, tempIndex)
-			cursor = toks[shortCircuit.end].End
-			i = shortCircuit.end
-			continue
 		}
 		stmt, ok := normalizationStatement(toks, i)
 		if !ok {
@@ -1208,10 +1340,10 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 			if len(temps) == 0 {
 				continue
 			}
-			insertStart := statementInsertStart(body, toks[stmt.token].Start)
+			insertStart := statementInsertStart(body, int(toks[stmt.token].Start))
 			out = appendStringRange(out, body, cursor, insertStart)
-			indent := statementIndent(body, toks[stmt.token].Start)
-			if insertStart == toks[stmt.token].Start {
+			indent := statementIndent(body, int(toks[stmt.token].Start))
+			if insertStart == int(toks[stmt.token].Start) {
 				out = append(out, '\n')
 			}
 			for j := 0; j < len(temps); j++ {
@@ -1224,9 +1356,9 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 				out = appendString(out, tempExpr)
 				out = append(out, '\n')
 			}
-			out = appendStringRange(out, body, insertStart, toks[stmt.exprStart].Start)
-			out = appendString(out, applyExpressionReplacements(body, toks[stmt.exprStart].Start, toks[stmt.exprEnd-1].End, replacements))
-			cursor = toks[stmt.exprEnd-1].End
+			out = appendStringRange(out, body, insertStart, int(toks[stmt.exprStart].Start))
+			out = appendString(out, applyExpressionReplacements(body, int(toks[stmt.exprStart].Start), int(toks[stmt.exprEnd-1].End), replacements))
+			cursor = int(toks[stmt.exprEnd-1].End)
 			i = stmt.exprEnd - 1
 			continue
 		}
@@ -1234,13 +1366,13 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 		if len(temps) == 0 {
 			continue
 		}
-		insertStart := statementInsertStart(body, toks[stmt.token].Start)
+		insertStart := statementInsertStart(body, int(toks[stmt.token].Start))
 		out = appendStringRange(out, body, cursor, insertStart)
-		indent := statementIndent(body, toks[stmt.token].Start)
+		indent := statementIndent(body, int(toks[stmt.token].Start))
 		if stmt.forCondition {
 			innerIndent := indent + "\t"
-			condition := applyExpressionReplacements(body, toks[stmt.exprStart].Start, toks[stmt.exprEnd-1].End, replacements)
-			out = appendStringRange(out, body, insertStart, toks[stmt.token].Start)
+			condition := applyExpressionReplacements(body, int(toks[stmt.exprStart].Start), int(toks[stmt.exprEnd-1].End), replacements)
+			out = appendStringRange(out, body, insertStart, int(toks[stmt.token].Start))
 			out = appendString(out, "for {\n")
 			for j := 0; j < len(temps); j++ {
 				temp := temps[j]
@@ -1260,11 +1392,11 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 			out = appendString(out, "\tbreak\n")
 			out = appendString(out, innerIndent)
 			out = appendString(out, "}\n")
-			cursor = toks[stmt.openBrace].End
+			cursor = int(toks[stmt.openBrace].End)
 			i = stmt.openBrace
 			continue
 		}
-		if insertStart == toks[stmt.token].Start {
+		if insertStart == int(toks[stmt.token].Start) {
 			out = append(out, '\n')
 		}
 		for j := 0; j < len(temps); j++ {
@@ -1277,19 +1409,24 @@ func normalizeFunctionExpressionsWithTemp(body string, unitName string, tempInde
 			out = appendString(out, tempExpr)
 			out = append(out, '\n')
 		}
-		out = appendStringRange(out, body, insertStart, toks[stmt.exprStart].Start)
-		out = appendString(out, applyExpressionReplacements(body, toks[stmt.exprStart].Start, toks[stmt.exprEnd-1].End, replacements))
-		cursor = toks[stmt.exprEnd-1].End
+		out = appendStringRange(out, body, insertStart, int(toks[stmt.exprStart].Start))
+		out = appendString(out, applyExpressionReplacements(body, int(toks[stmt.exprStart].Start), int(toks[stmt.exprEnd-1].End), replacements))
+		cursor = int(toks[stmt.exprEnd-1].End)
 		i = stmt.exprEnd - 1
 	}
 	if len(out) == 0 {
+		arena.Reset(mark)
 		return body
 	}
 	out = appendStringRange(out, body, cursor, len(body))
 	if strings.HasPrefix(strings.TrimSpace(body), "func ") && !trimmedBytesHavePrefix(out, "func ") {
+		arena.Reset(mark)
 		return body
 	}
-	return string(out)
+	normalized := string(out)
+	normalized = arena.PersistString(normalized)
+	arena.Reset(mark)
+	return normalized
 }
 
 func appendShortCircuitIf(out *[]byte, body string, toks []scan.Token, stmt shortCircuitIfStatement, indent string, unitName string, tempIndex *int) {
@@ -1307,15 +1444,15 @@ func appendShortCircuitIf(out *[]byte, body string, toks []scan.Token, stmt shor
 			appendStringRef(out, tempExpr)
 			appendByteRef(out, '\n')
 		}
-		condition := strings.TrimSpace(applyExpressionReplacements(body, toks[operand.start].Start, toks[operand.end-1].End, replacements))
+		condition := strings.TrimSpace(applyExpressionReplacements(body, int(toks[operand.start].Start), int(toks[operand.end-1].End), replacements))
 		appendStringRef(out, currentIndent)
 		appendStringRef(out, "if ")
 		appendStringRef(out, condition)
 		appendStringRef(out, " {\n")
 		currentIndent = currentIndent + "\t"
 	}
-	innerBodyStart := toks[stmt.openBrace].End
-	innerBodyEnd := toks[stmt.end].Start
+	innerBodyStart := int(toks[stmt.openBrace].End)
+	innerBodyEnd := int(toks[stmt.end].Start)
 	innerBodySource := body[innerBodyStart:innerBodyEnd]
 	innerBody := normalizeFunctionExpressionsWithTemp(innerBodySource, unitName, tempIndex)
 	appendStringRef(out, innerBody)
@@ -1351,10 +1488,10 @@ func trimmedBytesHavePrefix(body []byte, prefix string) bool {
 func tokenSpansMatchSource(body string, toks []scan.Token) bool {
 	for i := 0; i < len(toks); i++ {
 		tok := toks[i]
-		if tok.Start < 0 || tok.End < tok.Start || tok.End > len(body) {
+		if int(tok.Start) < 0 || int(tok.End) < int(tok.Start) || int(tok.End) > len(body) {
 			return false
 		}
-		part := body[tok.Start:tok.End]
+		part := body[int(tok.Start):int(tok.End)]
 		if part != tok.Text {
 			return false
 		}
@@ -1782,8 +1919,8 @@ func normalizeReturnValues(body string, toks []scan.Token, start int, end int, u
 		exprRange := ranges[i]
 		exprTemps, exprReplacements := normalizeExpression(body, toks, exprRange.start, exprRange.end, unitName, tempIndex)
 		temps = appendExpressionTemps(temps, exprTemps)
-		exprStart := toks[exprRange.start].Start
-		exprEnd := toks[exprRange.end-1].End
+		exprStart := int(toks[exprRange.start].Start)
+		exprEnd := int(toks[exprRange.end-1].End)
 		expr := applyExpressionReplacements(body, exprStart, exprEnd, exprReplacements)
 		if expressionContainsNonConversionCall(toks, exprRange.start, exprRange.end) {
 			name := nextExpressionTempName(body, unitName, tempIndex)
@@ -1830,8 +1967,8 @@ func normalizeIndexBounds(body string, toks []scan.Token, start int, end int, un
 		}
 		name := nextExpressionTempName(body, unitName, tempIndex)
 		(*tempIndex)++
-		exprStart := toks[bound.start].Start
-		exprEnd := toks[bound.end-1].End
+		exprStart := int(toks[bound.start].Start)
+		exprEnd := int(toks[bound.end-1].End)
 		expr := body[exprStart:exprEnd]
 		temps = append(temps, expressionTemp{name: name, expr: expr})
 		replacements = append(replacements, expressionReplacement{start: exprStart, end: exprEnd, text: name})
@@ -1913,8 +2050,8 @@ func normalizeOneCallArguments(body string, toks []scan.Token, start int, end in
 				}
 				argTemps, argReplacements := normalizeExpression(body, toks, argStart, i, unitName, tempIndex)
 				temps = appendExpressionTemps(temps, argTemps)
-				exprStart := toks[argStart].Start
-				exprEnd := toks[i-1].End
+				exprStart := int(toks[argStart].Start)
+				exprEnd := int(toks[i-1].End)
 				expr := applyExpressionReplacements(body, exprStart, exprEnd, argReplacements)
 				if !expressionContainsCall(toks, argStart, i) {
 					replacements = appendExpressionReplacements(replacements, argReplacements)
@@ -2082,7 +2219,7 @@ func conditionalStatementEnd(toks []scan.Token, pos int, openBrace int) int {
 }
 
 func applyExpressionReplacements(body string, start int, end int, replacements []expressionReplacement) string {
-	out := make([]byte, 0, 65536)
+	out := make([]byte, 0, rewriteBufferCapacity(end-start))
 	cursor := start
 	for i := 0; i < len(replacements); i++ {
 		repl := replacements[i]
@@ -2143,7 +2280,7 @@ func localNamesForDecl(file *parse.File, decl *parse.Decl, namesOfInterest symbo
 		return names
 	}
 	collectFuncSignatureLocals(toks, start, body, namesOfInterest, &names)
-	for i := body + 1; i < len(toks) && toks[i].Start < decl.End; i++ {
+	for i := body + 1; i < len(toks) && int(toks[i].Start) < decl.End; i++ {
 		if toks[i].Text == ":=" {
 			collectShortDeclLocals(toks, body, i, decl.End, namesOfInterest, &names)
 			continue
@@ -2170,7 +2307,7 @@ func localTypesForDecl(file *parse.File, decl *parse.Decl) localTypeTable {
 		return types
 	}
 	collectFuncSignatureLocalTypes(toks, start, body, &types)
-	for i := body + 1; i < len(toks) && toks[i].Start < decl.End; i++ {
+	for i := body + 1; i < len(toks) && int(toks[i].Start) < decl.End; i++ {
 		if toks[i].Text == ":=" {
 			collectShortDeclLocalTypes(toks, i, &types)
 			continue
@@ -2390,7 +2527,7 @@ func collectShortDeclLocals(toks []scan.Token, body int, assign int, declEnd int
 			return
 		}
 		if toks[i].Kind == scan.Ident && symbolNameTableUnitName(topNames, toks[i].Text) != "" && (i == 0 || toks[i-1].Text != ".") {
-			addLocalName(names, toks[i].Text, toks[i].Start, scopeEnd)
+			addLocalName(names, toks[i].Text, int(toks[i].Start), scopeEnd)
 		}
 	}
 }
@@ -2398,7 +2535,7 @@ func collectShortDeclLocals(toks []scan.Token, body int, assign int, declEnd int
 func collectVarLocals(toks []scan.Token, body int, pos int, end int, topNames symbolNameTable, names *localNameTable) {
 	scopeEnd := localScopeEnd(toks, body, pos, end)
 	if pos+1 < len(toks) && toks[pos+1].Text == "(" {
-		for i := pos + 2; i < len(toks) && toks[i].Start < end; i++ {
+		for i := pos + 2; i < len(toks) && int(toks[i].Start) < end; i++ {
 			if toks[i].Text == ")" || toks[i].Text == "}" {
 				return
 			}
@@ -2406,13 +2543,13 @@ func collectVarLocals(toks []scan.Token, body int, pos int, end int, topNames sy
 				continue
 			}
 			if toks[i-1].Text == "(" || toks[i-1].Text == "," || toks[i-1].Line != toks[i].Line {
-				addLocalName(names, toks[i].Text, toks[i].Start, scopeEnd)
+				addLocalName(names, toks[i].Text, int(toks[i].Start), scopeEnd)
 			}
 		}
 		return
 	}
 	line := toks[pos].Line
-	for i := pos + 1; i < len(toks) && toks[i].Start < end && toks[i].Line == line; i++ {
+	for i := pos + 1; i < len(toks) && int(toks[i].Start) < end && toks[i].Line == line; i++ {
 		if toks[i].Text == ")" || toks[i].Text == "}" || toks[i].Text == ":=" {
 			return
 		}
@@ -2423,7 +2560,7 @@ func collectVarLocals(toks []scan.Token, body int, pos int, end int, topNames sy
 			continue
 		}
 		if i == pos+1 || toks[i-1].Text == "," {
-			addLocalName(names, toks[i].Text, toks[i].Start, scopeEnd)
+			addLocalName(names, toks[i].Text, int(toks[i].Start), scopeEnd)
 		}
 	}
 }
@@ -2444,7 +2581,7 @@ func localScopeEnd(toks []scan.Token, body int, pos int, fallback int) int {
 	if close < 0 {
 		return fallback
 	}
-	return toks[close].Start
+	return int(toks[close].Start)
 }
 
 func addLocalName(names *localNameTable, name string, start int, end int) {
@@ -2458,17 +2595,25 @@ func maxSourcePosition() int {
 }
 
 func tokenIndexAt(toks []scan.Token, start int) int {
-	for i := 0; i < len(toks); i++ {
-		tok := toks[i]
-		if tok.Start == start {
-			return i
+	low := 0
+	high := len(toks)
+	for low < high {
+		mid := (low + high) / 2
+		tokStart := int(toks[mid].Start)
+		if tokStart == start {
+			return mid
+		}
+		if tokStart > start {
+			high = mid
+		} else {
+			low = mid + 1
 		}
 	}
 	return -1
 }
 
 func findTokenText(toks []scan.Token, start int, end int, text string) int {
-	for i := start; i < len(toks) && toks[i].Start < end; i++ {
+	for i := start; i < len(toks) && int(toks[i].Start) < end; i++ {
 		if toks[i].Text == text {
 			return i
 		}
@@ -2583,14 +2728,6 @@ func importReferenceMap(file *parse.File, packages []load.Package) (importSymbol
 			continue
 		}
 		var symbols []unit.Symbol
-		for fileIndex := 0; fileIndex < len(dep.Files); fileIndex++ {
-			depFile := dep.Files[fileIndex]
-			names := dependencyExportedNames(depFile.Source)
-			for nameIndex := 0; nameIndex < len(names); nameIndex++ {
-				name := names[nameIndex]
-				symbols = setSymbol(symbols, unit.Symbol{ImportPath: importPath, Name: name, UnitName: SymbolName(importPath, name)})
-			}
-		}
 		intrinsicNames := intrinsicImportSymbolNames(importPath)
 		for i := 0; i < len(intrinsicNames); i++ {
 			name := intrinsicNames[i]
@@ -2598,12 +2735,12 @@ func importReferenceMap(file *parse.File, packages []load.Package) (importSymbol
 			symbols = setSymbol(symbols, unit.Symbol{Name: name, UnitName: intrinsic})
 		}
 		refNames = append(refNames, localName)
-		refs = append(refs, importSymbolGroup{localName: localName, symbols: symbols})
+		refs = append(refs, importSymbolGroup{localName: localName, importPath: dep.ImportPath, symbols: symbols})
 	}
 	return refs, refNames
 }
 
-func importMethodMap(file *parse.File, packages []load.Package) (methodTable, []string) {
+func importMethodMap(file *parse.File, packages []load.Package, typeLocalNames []string) (methodTable, []string) {
 	var methods methodTable
 	var methodNames []string
 	for impIndex := 0; impIndex < len(file.Imports); impIndex++ {
@@ -2612,6 +2749,9 @@ func importMethodMap(file *parse.File, packages []load.Package) (methodTable, []
 		importPath := imp.Path
 		dep, ok := packageByImportPath(packages, importPath)
 		if !ok || localName == "" {
+			continue
+		}
+		if !containsString(typeLocalNames, localName) {
 			continue
 		}
 		for fileIndex := 0; fileIndex < len(dep.Files); fileIndex++ {
@@ -2632,6 +2772,22 @@ func importMethodMap(file *parse.File, packages []load.Package) (methodTable, []
 		}
 	}
 	return methods, methodNames
+}
+
+func importedTypeLocalNames(file *parse.File) []string {
+	var names []string
+	decls := file.Decls
+	for declIndex := 0; declIndex < len(decls); declIndex++ {
+		decl := decls[declIndex]
+		types := localTypesForDecl(file, &decl)
+		for typeIndex := 0; typeIndex < len(types); typeIndex++ {
+			qualifier := types[typeIndex].info.qualifier
+			if qualifier != "" && !containsString(names, qualifier) {
+				names = append(names, qualifier)
+			}
+		}
+	}
+	return names
 }
 
 func dependencyExportedNames(src []byte) []string {
@@ -2716,7 +2872,7 @@ func dependencyExportedMethods(importPath string, src []byte) []methodInfo {
 				decl.Kind = "func"
 				decl.Name = toks[nameTok].Text
 				decl.Receiver = true
-				decl.Start = toks[pos].Start
+				decl.Start = int(toks[pos].Start)
 				info := methodDeclInfoFromTokens(toks, &decl)
 				if info.name != "" {
 					info.unitName = SymbolName(importPath, info.name)
@@ -2789,9 +2945,9 @@ func appendExportedGroupedNames(names []string, toks []scan.Token, start int, en
 	lastLine := -1
 	for i := start; i < end; i++ {
 		tok := toks[i]
-		if lastLine != tok.Line {
+		if lastLine != int(tok.Line) {
 			lineStart = true
-			lastLine = tok.Line
+			lastLine = int(tok.Line)
 		}
 		if lineStart && tok.Kind == scan.Ident {
 			if isExported(tok.Text) {

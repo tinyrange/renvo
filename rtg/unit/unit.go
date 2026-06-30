@@ -15,6 +15,11 @@ type SourceFile struct {
 	Source []byte
 }
 
+type TextSourceFile struct {
+	Path   string
+	Source string
+}
+
 type Symbol struct {
 	ImportPath string
 	Name       string

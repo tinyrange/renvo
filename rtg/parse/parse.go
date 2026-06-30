@@ -77,7 +77,7 @@ func FileSource(path string, src []byte) (File, error) {
 			}
 			continue
 		}
-		return File{}, newError(path, toks[pos].Line, toks[pos].Column, "expected top-level declaration")
+		return File{}, newError(path, int(toks[pos].Line), int(toks[pos].Column), "expected top-level declaration")
 	}
 	return file, nil
 }
@@ -92,7 +92,7 @@ func (file File) IsTopLevelFuncAt(pos int) bool {
 		decls := file.Decls
 		for i := 0; i < len(decls); i++ {
 			decl := decls[i]
-			if decl.Kind == "func" && decl.Start == start {
+			if decl.Kind == "func" && decl.Start == int(start) {
 				return true
 			}
 		}
@@ -122,16 +122,16 @@ func parseImportDecl(file *File, pos int) (int, error) {
 			if toks[pos].Kind == scan.String {
 				path, err := scan.UnquoteString(toks[pos].Text)
 				if err != nil {
-					return pos, newError(file.Path, toks[pos].Line, toks[pos].Column, err.Error())
+					return pos, newError(file.Path, int(toks[pos].Line), int(toks[pos].Column), err.Error())
 				}
 				file.Imports = append(file.Imports, Import{Path: path, Alias: alias, Tok: toks[pos]})
 				pos++
 				continue
 			}
-			return pos, newError(file.Path, toks[pos].Line, toks[pos].Column, "malformed import declaration")
+			return pos, newError(file.Path, int(toks[pos].Line), int(toks[pos].Column), "malformed import declaration")
 		}
 		if pos >= len(toks) || toks[pos].Text != ")" {
-			return pos, newError(file.Path, toks[pos-1].Line, toks[pos-1].Column, "unterminated import block")
+			return pos, newError(file.Path, int(toks[pos-1].Line), int(toks[pos-1].Column), "unterminated import block")
 		}
 		return pos + 1, nil
 	}
@@ -146,7 +146,7 @@ func parseImportDecl(file *File, pos int) (int, error) {
 		if toks[pos].Kind == scan.String {
 			path, err := scan.UnquoteString(toks[pos].Text)
 			if err != nil {
-				return pos, newError(file.Path, toks[pos].Line, toks[pos].Column, err.Error())
+				return pos, newError(file.Path, int(toks[pos].Line), int(toks[pos].Column), err.Error())
 			}
 			file.Imports = append(file.Imports, Import{Path: path, Alias: alias, Tok: toks[pos]})
 			return pos + 1, nil
@@ -156,7 +156,7 @@ func parseImportDecl(file *File, pos int) (int, error) {
 		}
 		pos++
 	}
-	return pos, newError(file.Path, toks[pos].Line, toks[pos].Column, "malformed import declaration")
+	return pos, newError(file.Path, int(toks[pos].Line), int(toks[pos].Column), "malformed import declaration")
 }
 
 func scannerError(path string, err error) Error {
@@ -191,7 +191,7 @@ func splitPositionMessage(message string) (int, int, string, bool) {
 func parseDecl(file *File, pos int) int {
 	toks := file.Tokens
 	kind := toks[pos].Text
-	decl := Decl{Kind: kind, Tok: toks[pos], Start: toks[pos].Start}
+	decl := Decl{Kind: kind, Tok: toks[pos], Start: int(toks[pos].Start)}
 	if kind == "func" {
 		file.TopLevelFuncs = append(file.TopLevelFuncs, pos)
 		namePos := pos + 1
@@ -277,7 +277,7 @@ func singleValueDeclNames(toks []scan.Token, start int, end int) ([]string, []sc
 func groupedDeclNames(toks []scan.Token, open int, close int) ([]string, []scan.Token) {
 	var names []string
 	var nameToks []scan.Token
-	line := -1
+	line := int32(-1)
 	expectName := true
 	paren := 0
 	brack := 0
@@ -354,7 +354,7 @@ func declEnd(file *File, next int) int {
 	tokens := file.Tokens
 	if next >= 0 && next < len(tokens) {
 		tok := tokens[next]
-		return tok.Start
+		return int(tok.Start)
 	}
 	return len(file.Source)
 }

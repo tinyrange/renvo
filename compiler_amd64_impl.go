@@ -14,7 +14,17 @@ func rtgAmd64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	oldLastRangeReturns := g.lastRangeReturns
 	var locals []rtgLocalInfo
 	var gotoLabels []rtgGlobalInfo
-	locals = make([]rtgLocalInfo, 0, 32768)
+	localCap := 32768
+	if rtgCompilerFixedTarget != 0 {
+		localCap = (fn.bodyEnd-fn.bodyStart)/2 + 64
+		if localCap < 64 {
+			localCap = 64
+		}
+		if localCap > 1024 {
+			localCap = 1024
+		}
+	}
+	locals = make([]rtgLocalInfo, 0, localCap)
 	gotoLabels = make([]rtgGlobalInfo, 0, 0)
 	g.locals = locals
 	g.gotoLabels = gotoLabels
@@ -24,11 +34,8 @@ func rtgAmd64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	g.returnStruct = 0
 	g.stackUsed = 0
 	rtgAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-	if rtgCompilerFixedTarget != 0 {
-		rtgAsmEmit32(a, 0x002000c8)
-	} else {
-		rtgAsmEmit32(a, 0x008000c8)
-	}
+	framePatch := len(a.code)
+	rtgAsmEmit32(a, 0x000000c8)
 	if rtgTypeIsStruct(g.meta, metaFn.resultType) {
 		g.returnStruct = rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
 		rtgAsmStackMem(a, g.returnStruct, 0x8948, 0x7d, 0xbd)
@@ -46,6 +53,7 @@ func rtgAmd64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 		rtgAsmLeave(a)
 		rtgAsmRet(a)
 	}
+	rtgAmd64PatchFunctionFrame(a, framePatch, g.stackUsed)
 	g.locals = oldLocals
 	g.breakDepth = oldBreak
 	g.continueDepth = oldContinue
@@ -56,6 +64,19 @@ func rtgAmd64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	g.lastRangeReturns = oldLastRangeReturns
 	return true
 }
+
+func rtgAmd64PatchFunctionFrame(a *rtgAsm, patch int, stackUsed int) {
+	frame := rtgAlignTo8(stackUsed + 2048)
+	if frame < 2048 {
+		frame = 2048
+	}
+	if frame > 32768 {
+		frame = 32768
+	}
+	a.code[patch+1] = byte(frame & 255)
+	a.code[patch+2] = byte((frame / 256) & 255)
+}
+
 func rtgAmd64StoreParamWord(g *rtgLinearGen, reg int, offset int) bool {
 	a := &g.asm
 	if reg == 0 {
@@ -381,11 +402,11 @@ func rtgAmd64EmitSwitchStringCaseTest(g *rtgLinearGen, valueOffset int, lenOffse
 func rtgAmd64EmitRaxRcxOp(g *rtgLinearGen, tok int) bool {
 	a := &g.asm
 	p := g.prog
-	if tok < 0 || tok >= len(p.toks) {
+	if tok < 0 || tok >= rtgTokCount(p) {
 		return false
 	}
-	start := p.toks[tok].start
-	end := p.toks[tok].end
+	start := rtgTokStart(p, tok)
+	end := rtgTokEnd(p, tok)
 	if start >= end {
 		return false
 	}
@@ -468,11 +489,11 @@ func rtgAmd64EmitRaxRcxOp(g *rtgLinearGen, tok int) bool {
 }
 func rtgAmd64EmitCompareJump(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, label int, jumpIfTrue bool) bool {
 	p := g.prog
-	if e.tok < 0 || e.tok >= len(p.toks) {
+	if e.tok < 0 || e.tok >= rtgTokCount(p) {
 		return false
 	}
-	start := p.toks[e.tok].start
-	end := p.toks[e.tok].end
+	start := rtgTokStart(p, e.tok)
+	end := rtgTokEnd(p, e.tok)
 	if start >= end {
 		return false
 	}
@@ -1316,6 +1337,7 @@ func rtgAmd64EmitSliceSlotAddrs(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSl
 			rtgAsmEmit16(a, 0x5f52)
 			rtgAsmEmit24(a, 0x728d48)
 			rtgAsmEmit8(a, 8)
+			rtgAsmEmit4(a, 0x4c, 0x8d, 0x4a, 16)
 		}
 		return true
 	}
@@ -1337,6 +1359,10 @@ func rtgAmd64EmitSliceSlotAddrs(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSl
 			at = len(a.code)
 			rtgAsmEmit32(a, 0)
 			rtgAsmAddAbsReloc(a, at, loc.offset+8, rtgAbsBssReloc)
+			rtgAsmEmit24(a, 0x0d8d4c)
+			at = len(a.code)
+			rtgAsmEmit32(a, 0)
+			rtgAsmAddAbsReloc(a, at, loc.offset+16, rtgAbsBssReloc)
 		}
 		return true
 	}
@@ -1347,8 +1373,25 @@ func rtgAmd64EmitSliceSlotAddrs(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSl
 	}
 	rtgAsmLeaRdiStack(a, loc.offset)
 	rtgAsmLeaRsiStack(a, loc.offset-8)
+	r9Offset := loc.offset - 16
+	rtgAsmEmit16(a, 0x8d4c)
+	if r9Offset >= 0 && r9Offset <= 128 {
+		rtgAsmEmit8(a, 0x4d)
+		rtgAsmEmit8(a, -r9Offset)
+		return true
+	}
+	rtgAsmEmit8(a, 0x8d)
+	rtgAsmEmit32(a, -r9Offset)
 	return true
 }
+
+func rtgAmd64AsmJccLabel(a *rtgAsm, op int, label int) {
+	rtgAsmEmit2(a, 0x0f, op)
+	at := len(a.code)
+	rtgAsmEmit32(a, 0)
+	rtgAsmAddReloc(a, at, label)
+}
+
 func rtgAmd64EnsureAppendAddrHelper(g *rtgLinearGen) int {
 	a := &g.asm
 	if g.appendAddrEmitted {
@@ -1359,6 +1402,64 @@ func rtgAmd64EnsureAppendAddrHelper(g *rtgLinearGen) int {
 	afterLabel := rtgAsmNewLabel(a)
 	rtgAsmJmpLabel(a, afterLabel)
 	rtgAsmMarkLabel(a, g.appendAddrLabel)
+	noGrowLabel := rtgAsmNewLabel(a)
+	haveCapLabel := rtgAsmNewLabel(a)
+	heapReadyLabel := rtgAsmNewLabel(a)
+	rtgStringHeapOffsets(g)
+	rtgAsmEmit24(a, 0x0e8b48)
+	rtgAsmEmit24(a, 0x018b4d)
+	rtgAsmEmit24(a, 0xc1394c)
+	rtgAmd64AsmJccLabel(a, 0x8c, noGrowLabel)
+	rtgAsmEmit8(a, 0x57)
+	rtgAsmEmit8(a, 0x56)
+	rtgAsmEmit16(a, 0x5141)
+	rtgAsmPushRdx(a)
+	rtgAsmPushRcx(a)
+	rtgAsmEmit24(a, 0xc0854d)
+	rtgAmd64AsmJccLabel(a, 0x85, haveCapLabel)
+	rtgAsmEmit24(a, 0xc0c749)
+	rtgAsmEmit32(a, 16)
+	rtgAsmMarkLabel(a, haveCapLabel)
+	rtgAsmEmit24(a, 0xc0014d)
+	rtgAsmEmit16(a, 0x5041)
+	rtgAsmEmit24(a, 0xc1894c)
+	rtgAsmEmit24(a, 0xcaaf0f)
+	rtgAsmLoadRaxBss(a, g.stringHeapOff)
+	rtgAsmCmpRaxImm8(a, 0)
+	rtgAsmJnzLabel(a, heapReadyLabel)
+	rtgAsmMovRaxBssAddr(a, g.stringHeapDataOff)
+	rtgAsmStoreRaxBss(a, g.stringHeapOff)
+	rtgAsmMarkLabel(a, heapReadyLabel)
+	rtgAsmLoadRaxBss(a, g.stringHeapOff)
+	rtgAsmPushRax(a)
+	rtgAsmAddRaxRcx(a)
+	rtgAsmStoreRaxBss(a, g.stringHeapOff)
+	rtgAsmEmit5(a, 0x48, 0x8b, 0x4c, 0x24, 16)
+	rtgAsmEmit5(a, 0x48, 0x8b, 0x54, 0x24, 24)
+	rtgAsmEmit24(a, 0xcaaf0f)
+	rtgAsmEmit5(a, 0x48, 0x8b, 0x7c, 0x24, 48)
+	rtgAsmEmit24(a, 0x378b48)
+	rtgAsmEmit32(a, 0x243c8b48)
+	rtgAsmEmit8(a, 0xfc)
+	rtgAsmEmit16(a, 0xa4f3)
+	rtgAsmEmit5(a, 0x48, 0x8b, 0x7c, 0x24, 48)
+	rtgAsmEmit32(a, 0x24048b48)
+	rtgAsmEmit24(a, 0x078948)
+	rtgAsmEmit5(a, 0x4c, 0x8b, 0x4c, 0x24, 32)
+	rtgAsmEmit5(a, 0x4c, 0x8b, 0x44, 0x24, 8)
+	rtgAsmEmit24(a, 0x01894d)
+	rtgAsmEmit32(a, 0x24048b48)
+	rtgAsmEmit5(a, 0x48, 0x8b, 0x4c, 0x24, 16)
+	rtgAsmEmit5(a, 0x48, 0x8b, 0x54, 0x24, 24)
+	rtgAsmEmit24(a, 0xcaaf0f)
+	rtgAsmAddRaxRcx(a)
+	rtgAsmEmit5(a, 0x48, 0x8b, 0x74, 0x24, 40)
+	rtgAsmEmit5(a, 0x48, 0x8b, 0x4c, 0x24, 16)
+	rtgAsmIncRcx(a)
+	rtgAsmEmit24(a, 0x0e8948)
+	rtgAsmEmit4(a, 0x48, 0x83, 0xc4, 56)
+	rtgAsmRet(a)
+	rtgAsmMarkLabel(a, noGrowLabel)
 	rtgAsmEmit24(a, 0x0e8b48)
 	rtgAsmEmit24(a, 0x078b48)
 	rtgAsmEmit32(a, 0xcaaf0f48)
@@ -1419,18 +1520,80 @@ func rtgAmd64EnsureAppendBytesHelper(g *rtgLinearGen) int {
 	afterLabel := rtgAsmNewLabel(a)
 	rtgAsmJmpLabel(a, afterLabel)
 	rtgAsmMarkLabel(a, g.appendBytesLabel)
-	opLoadDst := 0x0e8b48
-	opLoadSrc := 0x3f8b48
-	opAddDst := 0xcf0148
-	opAddSrc := 0x160148
-	opMovRsi := 0xc68948
-	opMovRcx := 0xd18948
-	rtgAsmEmit24(a, opLoadDst)
-	rtgAsmEmit24(a, opLoadSrc)
-	rtgAsmEmit24(a, opAddDst)
-	rtgAsmEmit24(a, opAddSrc)
-	rtgAsmEmit24(a, opMovRsi)
-	rtgAsmEmit24(a, opMovRcx)
+	noGrowLabel := rtgAsmNewLabel(a)
+	capNonZeroLabel := rtgAsmNewLabel(a)
+	capReadyLabel := rtgAsmNewLabel(a)
+	capOKLabel := rtgAsmNewLabel(a)
+	heapReadyLabel := rtgAsmNewLabel(a)
+	rtgStringHeapOffsets(g)
+	rtgAsmEmit24(a, 0x0e8b48)
+	rtgAsmEmit24(a, 0x018b4d)
+	rtgAsmEmit24(a, 0xca8949)
+	rtgAsmEmit24(a, 0xd20149)
+	rtgAsmEmit24(a, 0xc2394d)
+	rtgAmd64AsmJccLabel(a, 0x8e, noGrowLabel)
+	rtgAsmEmit8(a, 0x57)
+	rtgAsmEmit8(a, 0x56)
+	rtgAsmEmit16(a, 0x5141)
+	rtgAsmPushRax(a)
+	rtgAsmPushRdx(a)
+	rtgAsmPushRcx(a)
+	rtgAsmEmit16(a, 0x5241)
+	rtgAsmEmit24(a, 0xc0854d)
+	rtgAmd64AsmJccLabel(a, 0x85, capNonZeroLabel)
+	rtgAsmEmit24(a, 0xc0c749)
+	rtgAsmEmit32(a, 16)
+	rtgAsmJmpLabel(a, capReadyLabel)
+	rtgAsmMarkLabel(a, capNonZeroLabel)
+	rtgAsmEmit24(a, 0xc0014d)
+	rtgAsmMarkLabel(a, capReadyLabel)
+	rtgAsmEmit32(a, 0x24148b4c)
+	rtgAsmEmit24(a, 0xc2394d)
+	rtgAmd64AsmJccLabel(a, 0x8e, capOKLabel)
+	rtgAsmEmit24(a, 0xd0894d)
+	rtgAsmMarkLabel(a, capOKLabel)
+	rtgAsmEmit16(a, 0x5041)
+	rtgAsmEmit24(a, 0xc1894c)
+	rtgAsmLoadRaxBss(a, g.stringHeapOff)
+	rtgAsmCmpRaxImm8(a, 0)
+	rtgAsmJnzLabel(a, heapReadyLabel)
+	rtgAsmMovRaxBssAddr(a, g.stringHeapDataOff)
+	rtgAsmStoreRaxBss(a, g.stringHeapOff)
+	rtgAsmMarkLabel(a, heapReadyLabel)
+	rtgAsmLoadRaxBss(a, g.stringHeapOff)
+	rtgAsmPushRax(a)
+	rtgAsmAddRaxRcx(a)
+	rtgAsmStoreRaxBss(a, g.stringHeapOff)
+	rtgAsmEmit5(a, 0x48, 0x8b, 0x7c, 0x24, 64)
+	rtgAsmEmit24(a, 0x378b48)
+	rtgAsmEmit32(a, 0x243c8b48)
+	rtgAsmEmit5(a, 0x48, 0x8b, 0x4c, 0x24, 24)
+	rtgAsmEmit8(a, 0xfc)
+	rtgAsmEmit16(a, 0xa4f3)
+	rtgAsmEmit5(a, 0x48, 0x8b, 0x7c, 0x24, 64)
+	rtgAsmEmit32(a, 0x24048b48)
+	rtgAsmEmit24(a, 0x078948)
+	rtgAsmEmit5(a, 0x4c, 0x8b, 0x4c, 0x24, 48)
+	rtgAsmEmit5(a, 0x4c, 0x8b, 0x44, 0x24, 8)
+	rtgAsmEmit24(a, 0x01894d)
+	rtgAsmEmit32(a, 0x243c8b48)
+	rtgAsmEmit5(a, 0x48, 0x8b, 0x4c, 0x24, 24)
+	rtgAsmEmit24(a, 0xcf0148)
+	rtgAsmEmit5(a, 0x48, 0x8b, 0x74, 0x24, 40)
+	rtgAsmEmit5(a, 0x48, 0x8b, 0x4c, 0x24, 32)
+	rtgAsmEmit16(a, 0xa4f3)
+	rtgAsmEmit5(a, 0x48, 0x8b, 0x74, 0x24, 56)
+	rtgAsmEmit5(a, 0x48, 0x8b, 0x4c, 0x24, 16)
+	rtgAsmEmit24(a, 0x0e8948)
+	rtgAsmEmit4(a, 0x48, 0x83, 0xc4, 72)
+	rtgAsmRet(a)
+	rtgAsmMarkLabel(a, noGrowLabel)
+	rtgAsmEmit24(a, 0x0e8b48)
+	rtgAsmEmit24(a, 0x3f8b48)
+	rtgAsmEmit24(a, 0xcf0148)
+	rtgAsmEmit24(a, 0x160148)
+	rtgAsmEmit24(a, 0xc68948)
+	rtgAsmEmit24(a, 0xd18948)
 	rtgAsmEmit16(a, 0xa4f3)
 	rtgAsmRet(a)
 	rtgAsmMarkLabel(a, afterLabel)

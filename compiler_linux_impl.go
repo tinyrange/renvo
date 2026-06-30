@@ -18,6 +18,7 @@ func compileLinuxTarget(input []int, output int, target int) int {
 }
 
 func compileTarget(input []int, output int, target int) int {
+	rtgCompilerFixedTarget = target
 	if target == rtgTargetWindowsAmd64 {
 		return compileWindowsAmd64(input, output)
 	}
@@ -43,10 +44,16 @@ func compileTarget(input []int, output int, target int) int {
 }
 
 func RtgCompileSourceToBytes(source []byte, targetName string) ([]byte, bool) {
+	return RtgCompileSourceToBytesStrip(source, targetName, false)
+}
+
+func RtgCompileSourceToBytesStrip(source []byte, targetName string, stripSymbols bool) ([]byte, bool) {
 	target := rtgParseTargetArg(targetName)
 	if target == 0 {
 		return nil, false
 	}
+	rtgCompilerStripSymbols = stripSymbols
+	rtgCompilerFixedTarget = target
 	rtgSetTarget(target)
 	var prog rtgProgram
 	prog = rtgParseProgram(source)
@@ -77,6 +84,73 @@ func RtgCompileSourceToBytes(source []byte, targetName string) ([]byte, bool) {
 		return nil, false
 	}
 	return result.data, true
+}
+
+func RtgCompileSourceToOutputStrip(source []byte, targetName string, outputPath string, stripSymbols bool) bool {
+	target := rtgParseTargetArg(targetName)
+	if target == 0 {
+		return false
+	}
+	rtgCompilerStripSymbols = stripSymbols
+	rtgCompilerFixedTarget = target
+	rtgSetTarget(target)
+	var prog rtgProgram
+	prog = rtgParseProgram(source)
+	progOK := prog.ok
+	if progOK == false {
+		return false
+	}
+	var meta rtgMeta
+	rtgBuildMetaInto(&prog, &meta)
+	metaOK := meta.ok
+	if metaOK == false {
+		return false
+	}
+	output := 1
+	if outputPath != "-" {
+		output = open(rtgCString(outputPath), 578)
+		if output < 0 {
+			return false
+		}
+	}
+	if target == rtgTargetLinuxAmd64 {
+		if rtgCompileScalarProgramAmd64ToOutput(&prog, &meta, output) {
+			if outputPath != "-" {
+				chmod(output, 493)
+			}
+			return true
+		}
+		return false
+	}
+	var result rtgCompileResult
+	if target == rtgTargetLinux386 || target == rtgTargetWindows386 {
+		result = rtgTryCompileScalarProgram386(&prog, &meta)
+	} else if target == rtgTargetLinuxAarch64 {
+		result = rtgTryCompileScalarProgramAarch64(&prog, &meta)
+	} else if target == rtgTargetLinuxArm {
+		result = rtgTryCompileScalarProgramArm(&prog, &meta)
+	} else if target == rtgTargetWasiWasm32 {
+		result = rtgTryCompileScalarProgramWasm32(&prog, &meta)
+	} else {
+		result = rtgTryCompileScalarProgramAmd64(&prog, &meta)
+	}
+	if !result.ok {
+		return false
+	}
+	write(output, result.data, -1)
+	if outputPath != "-" {
+		chmod(output, 493)
+	}
+	return true
+}
+
+func rtgCString(s string) string {
+	var out []byte
+	for i := 0; i < len(s); i++ {
+		out = append(out, s[i])
+	}
+	out = append(out, 0)
+	return string(out)
 }
 
 func rtgLinuxSysWriteSeq() int {
@@ -217,7 +291,7 @@ func rtgEmitLinearPrintStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 	}
 	p := g.prog
 	a := &g.asm
-	if stmt.exprStart < 0 || stmt.exprStart >= len(p.toks) || !rtgBytesEqualText(p.src, p.toks[stmt.exprStart].start, p.toks[stmt.exprStart].end, "print") {
+	if stmt.exprStart < 0 || stmt.exprStart >= rtgTokCount(p) || !rtgBytesEqualText(p.src, int(rtgTokStart(p, stmt.exprStart)), int(rtgTokEnd(p, stmt.exprStart)), "print") {
 		return false
 	}
 	var ep rtgExprParse
@@ -737,7 +811,7 @@ func rtgEmitWindowsReadWrite(g *rtgLinearGen, ep *rtgExprParse, idx int, isWrite
 func rtgEmitWindowsPrintStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 	p := g.prog
 	a := &g.asm
-	if stmt.exprStart < 0 || stmt.exprStart >= len(p.toks) || !rtgBytesEqualText(p.src, p.toks[stmt.exprStart].start, p.toks[stmt.exprStart].end, "print") {
+	if stmt.exprStart < 0 || stmt.exprStart >= rtgTokCount(p) || !rtgBytesEqualText(p.src, int(rtgTokStart(p, stmt.exprStart)), int(rtgTokEnd(p, stmt.exprStart)), "print") {
 		return false
 	}
 	var ep rtgExprParse

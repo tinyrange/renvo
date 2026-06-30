@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	"j5.nz/rtg/rtg/arena"
 	"j5.nz/rtg/rtg/load"
 	"j5.nz/rtg/rtg/parse"
 	"j5.nz/rtg/rtg/scan"
@@ -67,7 +68,12 @@ func diagnosticString(diag Diagnostic) string {
 
 func Graph(g *load.Graph) error {
 	var diags Diagnostics
-	exported := exportedDecls(g)
+	var parseDiags Diagnostics
+	exported, parseDiags := exportedDecls(g)
+	diags = appendDiagnostics(diags, parseDiags)
+	if len(diags) > 0 {
+		return diagnosticError(diags.Error())
+	}
 	var packages []load.Package
 	packages = g.Packages
 	for pkgIndex := 0; pkgIndex < len(packages); pkgIndex++ {
@@ -80,6 +86,7 @@ func Graph(g *load.Graph) error {
 		for fileIndex := 0; fileIndex < len(files); fileIndex++ {
 			var file load.File
 			file = files[fileIndex]
+			mark := arena.Mark()
 			parsed, err := parsedLoadFile(file)
 			if err != nil {
 				diags = appendParseDiagnostic(diags, file.Path, err)
@@ -112,9 +119,12 @@ func Graph(g *load.Graph) error {
 						diags = append(diags, current)
 						continue
 					}
-					names = append(names, name)
+					names = append(names, arena.PersistString(name))
 					nameDiags = append(nameDiags, current)
 				}
+			}
+			if len(diags) == 0 {
+				arena.Reset(mark)
 			}
 		}
 	}
@@ -122,6 +132,26 @@ func Graph(g *load.Graph) error {
 		return diagnosticError(diags.Error())
 	}
 	return nil
+}
+
+func parseGraphFiles(g *load.Graph) Diagnostics {
+	var diags Diagnostics
+	for pkgIndex := 0; pkgIndex < len(g.Packages); pkgIndex++ {
+		files := g.Packages[pkgIndex].Files
+		for fileIndex := 0; fileIndex < len(files); fileIndex++ {
+			if files[fileIndex].Parsed.Path != "" {
+				continue
+			}
+			parsed, err := parse.FileSource(files[fileIndex].Path, files[fileIndex].Source)
+			if err != nil {
+				diags = appendParseDiagnostic(diags, files[fileIndex].Path, err)
+				continue
+			}
+			files[fileIndex].Parsed = parsed
+		}
+		g.Packages[pkgIndex].Files = files
+	}
+	return diags
 }
 
 func parseDiagnostic(path string, err error) Diagnostic {
@@ -190,8 +220,9 @@ func declDiagnostics(file parse.File) Diagnostics {
 	return diags
 }
 
-func exportedDecls(g *load.Graph) []exportedPackage {
+func exportedDecls(g *load.Graph) ([]exportedPackage, Diagnostics) {
 	var out []exportedPackage
+	var diags Diagnostics
 	var packages []load.Package
 	packages = g.Packages
 	for pkgIndex := 0; pkgIndex < len(packages); pkgIndex++ {
@@ -203,8 +234,10 @@ func exportedDecls(g *load.Graph) []exportedPackage {
 		for fileIndex := 0; fileIndex < len(files); fileIndex++ {
 			var file load.File
 			file = files[fileIndex]
+			mark := arena.Mark()
 			parsed, err := parsedLoadFile(file)
 			if err != nil {
+				diags = appendParseDiagnostic(diags, file.Path, err)
 				continue
 			}
 			var decls []parse.Decl
@@ -216,10 +249,11 @@ func exportedDecls(g *load.Graph) []exportedPackage {
 				for nameIndex := 0; nameIndex < len(namesForDecl); nameIndex++ {
 					name := namesForDecl[nameIndex]
 					if isExported(name) && !containsString(names, name) {
-						names = append(names, name)
+						names = append(names, arena.PersistString(name))
 					}
 				}
 			}
+			arena.Reset(mark)
 		}
 		var exported exportedPackage
 		exported.importPath = pkg.ImportPath
@@ -228,7 +262,7 @@ func exportedDecls(g *load.Graph) []exportedPackage {
 		}
 		out = append(out, exported)
 	}
-	return out
+	return out, diags
 }
 
 func packageLevelDeclNames(decl parse.Decl) []string {
@@ -288,7 +322,7 @@ func importedSelectorDiagnostics(file parse.File, exported []exportedPackage) Di
 		if !ok {
 			continue
 		}
-		if isLocalShadowAt(shadows, local.Text, local.Start) {
+		if isLocalShadowAt(shadows, local.Text, int(local.Start)) {
 			continue
 		}
 		if exportedNameExists(exported, importPath, member.Text) {
@@ -520,7 +554,7 @@ func usedImportNames(file parse.File, importNames []string) []string {
 		var next scan.Token
 		next = tokens[i+1]
 		if tok.Kind == scan.Ident && next.Text == "." {
-			if isLocalShadowAt(shadows, tok.Text, tok.Start) {
+			if isLocalShadowAt(shadows, tok.Text, int(tok.Start)) {
 				continue
 			}
 			name := tok.Text
@@ -567,11 +601,20 @@ func startsGenericDecl(file parse.File, i int) bool {
 }
 
 func startsGenericInstantiation(toks []scan.Token, i int) bool {
-	if i+3 >= len(toks) || toks[i].Kind != scan.Ident || toks[i+1].Text != "[" {
+	if i+3 >= len(toks) {
+		return false
+	}
+	if toks[i].Kind != scan.Ident {
+		return false
+	}
+	if toks[i+1].Text != "[" {
 		return false
 	}
 	close := findClose(toks, i+1, "[", "]")
-	if close < 0 || close+1 >= len(toks) {
+	if close < 0 {
+		return false
+	}
+	if close+1 >= len(toks) {
 		return false
 	}
 	if toks[close+1].Text == "{" && isControlBlockOpen(toks, close+1) {
@@ -633,7 +676,13 @@ func isOctalLiteral(text string) bool {
 }
 
 func startsArrayType(toks []scan.Token, i int) bool {
-	if i+1 >= len(toks) || toks[i].Text != "[" || toks[i+1].Text == "]" {
+	if i+1 >= len(toks) {
+		return false
+	}
+	if toks[i].Text != "[" {
+		return false
+	}
+	if toks[i+1].Text == "]" {
 		return false
 	}
 	if i == 0 {
@@ -674,7 +723,10 @@ func closesFunctionSignature(toks []scan.Token, close int) bool {
 }
 
 func startsAnyInterfaceType(toks []scan.Token, i int) bool {
-	if toks[i].Text != "any" || i == 0 {
+	if toks[i].Text != "any" {
+		return false
+	}
+	if i == 0 {
 		return false
 	}
 	prev := toks[i-1]
@@ -687,7 +739,10 @@ func startsAnyInterfaceType(toks []scan.Token, i int) bool {
 	if prev.Text == ")" {
 		return isFunctionSignatureResult(toks, i)
 	}
-	if prev.Kind != scan.Ident || i < 2 {
+	if prev.Kind != scan.Ident {
+		return false
+	}
+	if i < 2 {
 		return false
 	}
 	beforeName := toks[i-2].Text
@@ -707,7 +762,13 @@ func isFunctionSignatureResult(toks []scan.Token, pos int) bool {
 }
 
 func startsTypeAssertion(toks []scan.Token, i int) bool {
-	if i+2 >= len(toks) || toks[i].Text != "." || toks[i+1].Text != "(" {
+	if i+2 >= len(toks) {
+		return false
+	}
+	if toks[i].Text != "." {
+		return false
+	}
+	if toks[i+1].Text != "(" {
 		return false
 	}
 	close := findClose(toks, i+1, "(", ")")
@@ -715,7 +776,10 @@ func startsTypeAssertion(toks []scan.Token, i int) bool {
 }
 
 func fullSliceSecondColon(toks []scan.Token, i int) int {
-	if i >= len(toks) || toks[i].Text != "[" {
+	if i >= len(toks) {
+		return -1
+	}
+	if toks[i].Text != "[" {
 		return -1
 	}
 	close := findClose(toks, i, "[", "]")
@@ -740,7 +804,13 @@ func fullSliceSecondColon(toks []scan.Token, i int) int {
 }
 
 func startsUnsupportedBuiltinCall(toks []scan.Token, i int) bool {
-	if i+1 >= len(toks) || toks[i].Kind != scan.Ident || toks[i+1].Text != "(" {
+	if i+1 >= len(toks) {
+		return false
+	}
+	if toks[i].Kind != scan.Ident {
+		return false
+	}
+	if toks[i+1].Text != "(" {
 		return false
 	}
 	if i > 0 && toks[i-1].Text == "." {
@@ -760,7 +830,13 @@ func isRuntimeOSIntrinsicCall(file parse.File, toks []scan.Token, i int) bool {
 	if file.Path != "rtg/std/os/os_rtg.go" && file.Path != "rtg\\std\\os\\os_rtg.go" && !strings.HasSuffix(file.Path, "/rtg/std/os/os_rtg.go") && !strings.HasSuffix(file.Path, "\\rtg\\std\\os\\os_rtg.go") {
 		return false
 	}
-	if i+1 >= len(toks) || toks[i].Kind != scan.Ident || toks[i+1].Text != "(" {
+	if i+1 >= len(toks) {
+		return false
+	}
+	if toks[i].Kind != scan.Ident {
+		return false
+	}
+	if toks[i+1].Text != "(" {
 		return false
 	}
 	switch toks[i].Text {
@@ -917,7 +993,7 @@ func localImportShadows(file parse.File, importNames []string) []localShadow {
 		for i := body + 1; i < len(tokens); i++ {
 			var tok scan.Token
 			tok = tokens[i]
-			if tok.Start >= decl.End {
+			if int(tok.Start) >= decl.End {
 				break
 			}
 			if tok.Text == ":=" {
@@ -973,7 +1049,7 @@ func collectShortDeclImportShadows(toks []scan.Token, body int, assign int, decl
 			return shadows
 		}
 		if toks[i].Kind == scan.Ident && containsString(names, toks[i].Text) && (i == 0 || toks[i-1].Text != ".") {
-			shadows = addLocalShadow(shadows, toks[i].Text, toks[i].Start, scopeEnd)
+			shadows = addLocalShadow(shadows, toks[i].Text, int(toks[i].Start), scopeEnd)
 		}
 	}
 	return shadows
@@ -982,23 +1058,23 @@ func collectShortDeclImportShadows(toks []scan.Token, body int, assign int, decl
 func collectVarImportShadows(toks []scan.Token, body int, pos int, end int, names []string, shadows []localShadow) []localShadow {
 	scopeEnd := localScopeEnd(toks, body, pos, end)
 	if pos+1 < len(toks) && toks[pos+1].Text == "(" {
-		for i := pos + 2; i < len(toks) && toks[i].Start < end; i++ {
+		for i := pos + 2; i < len(toks) && int(toks[i].Start) < end; i++ {
 			if toks[i].Text == ")" || toks[i].Text == "}" {
 				return shadows
 			}
 			if toks[i].Kind == scan.Ident && containsString(names, toks[i].Text) && (toks[i-1].Text == "(" || toks[i-1].Text == "," || toks[i-1].Line != toks[i].Line) {
-				shadows = addLocalShadow(shadows, toks[i].Text, toks[i].Start, scopeEnd)
+				shadows = addLocalShadow(shadows, toks[i].Text, int(toks[i].Start), scopeEnd)
 			}
 		}
 		return shadows
 	}
 	line := toks[pos].Line
-	for i := pos + 1; i < len(toks) && toks[i].Start < end && toks[i].Line == line; i++ {
+	for i := pos + 1; i < len(toks) && int(toks[i].Start) < end && toks[i].Line == line; i++ {
 		if toks[i].Text == ")" || toks[i].Text == "}" || toks[i].Text == ":=" || toks[i].Text == "=" {
 			return shadows
 		}
 		if toks[i].Kind == scan.Ident && containsString(names, toks[i].Text) && (i == pos+1 || toks[i-1].Text == ",") {
-			shadows = addLocalShadow(shadows, toks[i].Text, toks[i].Start, scopeEnd)
+			shadows = addLocalShadow(shadows, toks[i].Text, int(toks[i].Start), scopeEnd)
 		}
 	}
 	return shadows
@@ -1020,7 +1096,7 @@ func localScopeEnd(toks []scan.Token, body int, pos int, fallback int) int {
 	if close < 0 {
 		return fallback
 	}
-	return toks[close].Start
+	return int(toks[close].Start)
 }
 
 func addLocalShadow(shadows []localShadow, name string, start int, end int) []localShadow {
@@ -1038,7 +1114,7 @@ func isLocalShadowAt(shadows []localShadow, name string, pos int) bool {
 }
 
 func findTokenText(toks []scan.Token, start int, end int, text string) int {
-	for i := start; i < len(toks) && toks[i].Start < end; i++ {
+	for i := start; i < len(toks) && int(toks[i].Start) < end; i++ {
 		if toks[i].Text == text {
 			return i
 		}
@@ -1071,7 +1147,7 @@ func maxSourcePosition() int {
 func namedResultToken(file parse.File, decl parse.Decl) (scan.Token, bool) {
 	var tokens []scan.Token
 	tokens = file.Tokens
-	name := tokenIndexAt(tokens, decl.NameTok.Start)
+	name := tokenIndexAt(tokens, int(decl.NameTok.Start))
 	if name < 0 || name+1 >= len(tokens) {
 		return scan.Token{}, false
 	}
@@ -1096,7 +1172,7 @@ func namedResultToken(file parse.File, decl parse.Decl) (scan.Token, bool) {
 	}
 	var closeTok scan.Token
 	closeTok = tokens[resultsClose]
-	if closeTok.Start >= decl.End {
+	if int(closeTok.Start) >= decl.End {
 		return scan.Token{}, false
 	}
 	for i := resultsOpen + 1; i < resultsClose; i++ {
@@ -1112,7 +1188,7 @@ func namedResultToken(file parse.File, decl parse.Decl) (scan.Token, bool) {
 func hasOrdinaryMainSignature(file parse.File, decl parse.Decl) bool {
 	var tokens []scan.Token
 	tokens = file.Tokens
-	name := tokenIndexAt(tokens, decl.NameTok.Start)
+	name := tokenIndexAt(tokens, int(decl.NameTok.Start))
 	if name < 0 || name+1 >= len(tokens) {
 		return false
 	}
@@ -1129,7 +1205,7 @@ func hasOrdinaryMainSignature(file parse.File, decl parse.Decl) bool {
 	for i := close + 1; i < len(tokens); i++ {
 		var tok scan.Token
 		tok = tokens[i]
-		if tok.Start >= decl.End {
+		if int(tok.Start) >= decl.End {
 			break
 		}
 		return tok.Text == "{"
@@ -1140,7 +1216,7 @@ func hasOrdinaryMainSignature(file parse.File, decl parse.Decl) bool {
 func tokenIndexAt(toks []scan.Token, start int) int {
 	for i := 0; i < len(toks); i++ {
 		tok := toks[i]
-		if tok.Start == start {
+		if int(tok.Start) == start {
 			return i
 		}
 	}
@@ -1153,10 +1229,10 @@ func declToken(file parse.File, decl parse.Decl, text string) (scan.Token, bool)
 	for i := 0; i < len(tokens); i++ {
 		var tok scan.Token
 		tok = tokens[i]
-		if tok.Start < decl.Start {
+		if int(tok.Start) < decl.Start {
 			continue
 		}
-		if tok.Start >= decl.End {
+		if int(tok.Start) >= decl.End {
 			break
 		}
 		if tok.Text == text {
@@ -1167,7 +1243,7 @@ func declToken(file parse.File, decl parse.Decl, text string) (scan.Token, bool)
 }
 
 func diag(file parse.File, tok scan.Token, message string) Diagnostic {
-	return Diagnostic{Path: file.Path, Line: tok.Line, Column: tok.Column, Message: message}
+	return Diagnostic{Path: file.Path, Line: int(tok.Line), Column: int(tok.Column), Message: message}
 }
 
 func declDiagnostic(file parse.File, decl parse.Decl, message string) Diagnostic {

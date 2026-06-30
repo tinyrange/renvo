@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"j5.nz/rtg/rtg/arena"
 	"j5.nz/rtg/rtg/mod"
 	"j5.nz/rtg/rtg/parse"
 	targetpkg "j5.nz/rtg/rtg/target"
@@ -302,25 +303,24 @@ func readPackageFiles(module mod.Module, dir string, importPath string, files []
 		if err != nil {
 			return Package{}, err
 		}
-		source := copyBytes(data)
-		parsed, err := parse.FileSource(path, source)
+		source := data
+		info, err := ParseSourceInfo(path, source)
 		if err != nil {
 			return Package{}, err
 		}
 		if pkg.Name == "" {
-			pkg.Name = parsed.PackageName
-		} else if pkg.Name != parsed.PackageName {
-			return Package{}, fmt.Errorf("%s: mixed package names %s and %s", dir, pkg.Name, parsed.PackageName)
+			pkg.Name = info.PackageName
+		} else if pkg.Name != info.PackageName {
+			return Package{}, fmt.Errorf("%s: mixed package names %s and %s", dir, pkg.Name, info.PackageName)
 		}
-		for j := 0; j < len(parsed.Imports); j++ {
-			imp := parsed.Imports[j]
-			appendPackageImport(path, &pkg, &importSet, imp.Path, imp.Alias, imp.Tok.Line, imp.Tok.Column)
+		for j := 0; j < len(info.Imports); j++ {
+			imp := info.Imports[j]
+			appendPackageImport(path, &pkg, &importSet, imp.Path, imp.Alias, imp.Line, imp.Column)
 		}
 		var file File
 		file.Path = path
 		file.UnitPath = unitFilePath(module, importPath, path)
 		file.Source = source
-		file.Parsed = parsed
 		pkg.Files = append(pkg.Files, file)
 	}
 	sortStrings(pkg.Imports)
@@ -467,10 +467,12 @@ func goFiles(dir string, target string) ([]string, error) {
 			continue
 		}
 		path := filepath.Join(dir, name)
+		mark := arena.Mark()
 		ok, err := fileBuildTagsMatchTarget(path, targetOS, targetArch)
 		if err != nil {
 			return nil, err
 		}
+		arena.Reset(mark)
 		if !ok {
 			continue
 		}
@@ -524,11 +526,7 @@ func fileBuildTagsMatchTarget(path string, targetOS string, targetArch string) (
 }
 
 func bytesToString(data []byte) string {
-	var out []byte
-	for i := 0; i < len(data); i++ {
-		out = append(out, data[i])
-	}
-	return string(out)
+	return string(data)
 }
 
 func leadingGoBuildExpr(src string) (string, bool) {
@@ -952,8 +950,20 @@ func isWithinModuleRoot(root string, path string) bool {
 	if err != nil {
 		return false
 	}
+	if rel == "." {
+		return true
+	}
+	if rel == ".." {
+		return false
+	}
 	parentPrefix := "../"
-	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, parentPrefix) && !filepath.IsAbs(rel))
+	if strings.HasPrefix(rel, parentPrefix) {
+		return false
+	}
+	if filepath.IsAbs(rel) {
+		return false
+	}
+	return true
 }
 
 func canCheckNestedModuleRoots(root string) bool {

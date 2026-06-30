@@ -25,47 +25,57 @@ func ParseSources(sources []SourceFile) ([]Unit, error) {
 	return units, nil
 }
 
+func ParseTextSources(sources []TextSourceFile) ([]Unit, error) {
+	units := make([]Unit, 0, len(sources))
+	for i := 0; i < len(sources); i++ {
+		source := sources[i]
+		u, err := ParseSourceText(source.Path, source.Source)
+		if err != nil {
+			return nil, err
+		}
+		units = append(units, u)
+	}
+	return units, nil
+}
+
 func ParseSource(path string, src []byte) (Unit, error) {
 	text := bytesToString(src)
-	lines := strings.Split(text, "\n")
-	if !hasRTGBuildConstraint(lines) {
-		return Unit{}, fmt.Errorf("%s: missing rtg build constraint", path)
+	return ParseSourceText(path, text)
+}
+
+func ParseSourceText(path string, text string) (Unit, error) {
+	if !hasRTGBuildConstraintText(text) {
+		return Unit{}, parseError(path + ": missing rtg build constraint")
 	}
 	var u Unit
 	currentDecl := -1
 	seenUnit := false
 	seenEntry := false
-	var seenImports []string
-	var seenExports []string
-	var seenRefs []string
+	seenImports := make([]string, 0, 8)
+	seenExports := make([]string, 0, 32)
+	seenRefs := make([]string, 0, 32)
 	currentBodyStart := -1
 	currentBodyEnd := -1
-	offset := 0
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
-		lineStart := offset
-		lineEnd := lineStart + len(line)
-		nextOffset := lineEnd + 1
-		if nextOffset > len(text) {
-			nextOffset = len(text)
-		}
+	for offset := 0; offset < len(text); {
+		line, lineStart, _, nextOffset := nextUnitLine(text, offset)
 		if strings.HasPrefix(line, "package ") && u.Package == "" {
 			u.Package = strings.TrimSpace(strings.TrimPrefix(line, "package "))
 			offset = nextOffset
 			continue
 		}
 		if !strings.HasPrefix(line, "// rtg:") {
-			body := bodyRange(text, currentBodyStart, currentBodyEnd)
-			if currentDecl >= 0 && strings.TrimSpace(body) == "" && strings.TrimSpace(line) == "" {
+			if currentDecl < 0 {
 				offset = nextOffset
 				continue
 			}
-			if currentDecl >= 0 {
-				if currentBodyStart < 0 {
-					currentBodyStart = lineStart
-				}
-				currentBodyEnd = nextOffset
+			if currentBodyStart < 0 && strings.TrimSpace(line) == "" {
+				offset = nextOffset
+				continue
 			}
+			if currentBodyStart < 0 {
+				currentBodyStart = lineStart
+			}
+			currentBodyEnd = nextOffset
 			offset = nextOffset
 			continue
 		}
@@ -201,12 +211,21 @@ func ParseSource(path string, src []byte) (Unit, error) {
 	return u, nil
 }
 
-func bytesToString(data []byte) string {
-	var out []byte
-	for i := 0; i < len(data); i++ {
-		out = append(out, data[i])
+func nextUnitLine(text string, offset int) (string, int, int, int) {
+	lineStart := offset
+	lineEnd := offset
+	for lineEnd < len(text) && text[lineEnd] != '\n' {
+		lineEnd++
 	}
-	return string(out)
+	nextOffset := lineEnd
+	if nextOffset < len(text) {
+		nextOffset++
+	}
+	return text[lineStart:lineEnd], lineStart, lineEnd, nextOffset
+}
+
+func bytesToString(data []byte) string {
+	return string(data)
 }
 
 func declAt(u Unit, index int) Decl {
@@ -231,11 +250,7 @@ func bodyRange(text string, start int, end int) string {
 	if end > len(text) {
 		end = len(text)
 	}
-	var out []byte
-	for i := start; i < end; i++ {
-		out = append(out, text[i])
-	}
-	return string(out)
+	return text[start:end]
 }
 
 func setDeclBody(u *Unit, index int, body string) {
@@ -326,11 +341,12 @@ func declBodyDelimitersComplete(kind string, body string) bool {
 	return paren == 0 && brack == 0 && depth == 0
 }
 
-func hasRTGBuildConstraint(lines []string) bool {
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
+func hasRTGBuildConstraintText(text string) bool {
+	for offset := 0; offset < len(text); {
+		line, _, _, nextOffset := nextUnitLine(text, offset)
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
+			offset = nextOffset
 			continue
 		}
 		return trimmed == "//go:build rtg"
@@ -433,7 +449,7 @@ func parseDecl(s string) (Decl, error) {
 }
 
 func metadataFields(s string) ([]string, error) {
-	var fields []string
+	fields := make([]string, 0, 8)
 	for i := 0; i < len(s); {
 		for i < len(s) && (s[i] == ' ' || s[i] == '\t' || s[i] == '\r') {
 			i++

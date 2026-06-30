@@ -2234,11 +2234,11 @@ func rtgWasm32EmitCallWithWordCount(g *rtgLinearGen, fnIndex int, wordCount int)
 func rtgWasm32EmitRaxRcxOp(g *rtgLinearGen, tok int) bool {
 	a := &g.asm
 	p := g.prog
-	if tok < 0 || tok >= len(p.toks) {
+	if tok < 0 || tok >= rtgTokCount(p) {
 		return false
 	}
-	start := p.toks[tok].start
-	end := p.toks[tok].end
+	start := rtgTokStart(p, tok)
+	end := rtgTokEnd(p, tok)
 	if start >= end {
 		return false
 	}

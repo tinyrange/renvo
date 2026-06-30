@@ -3,27 +3,31 @@ package scan
 import "strconv"
 
 const (
-	Ident  = "ident"
-	Number = "number"
-	String = "string"
-	Char   = "char"
-	Op     = "op"
-	EOF    = "eof"
+	Ident  = 1
+	Number = 2
+	String = 3
+	Char   = 4
+	Op     = 5
+	EOF    = 6
 )
 
 type Token struct {
-	Kind   string
+	Kind   int
 	Text   string
-	Start  int
-	End    int
-	Line   int
-	Column int
+	Start  int32
+	End    int32
+	Line   int32
+	Column int32
 }
 
 type scanError string
 
 func (e scanError) Error() string {
 	return string(e)
+}
+
+func token(kind int, text string, start int, end int, line int, column int) Token {
+	return Token{Kind: kind, Text: text, Start: int32(start), End: int32(end), Line: int32(line), Column: int32(column)}
 }
 
 func posError(line int, column int, message string) error {
@@ -34,13 +38,24 @@ func posError(line int, column int, message string) error {
 }
 
 func Tokens(src []byte) ([]Token, error) {
-	toks := make([]Token, 0, 262144)
+	toks := make([]Token, 0, tokenCapacity(src))
+	text := string(src)
 	line := 1
 	col := 1
 	i := 0
 	for i < len(src) {
 		c := src[i]
-		if c == ' ' || c == '\t' || c == '\r' {
+		if c == ' ' {
+			i++
+			col++
+			continue
+		}
+		if c == '\t' {
+			i++
+			col++
+			continue
+		}
+		if c == '\r' {
 			i++
 			col++
 			continue
@@ -51,41 +66,59 @@ func Tokens(src []byte) ([]Token, error) {
 			col = 1
 			continue
 		}
-		if c == '/' && i+1 < len(src) && src[i+1] == '/' {
-			i += 2
-			col += 2
-			for i < len(src) && src[i] != '\n' {
-				i++
-				col++
-			}
-			continue
-		}
-		if c == '/' && i+1 < len(src) && src[i+1] == '*' {
-			startLine := line
-			startCol := col
-			i += 2
-			col += 2
-			closed := false
-			for i+1 < len(src) {
-				if src[i] == '*' && src[i+1] == '/' {
+		if c == '/' {
+			if i+1 < len(src) {
+				next := src[i+1]
+				if next == '/' {
 					i += 2
 					col += 2
-					closed = true
-					break
-				}
-				if src[i] == '\n' {
-					i++
-					line++
-					col = 1
-				} else {
-					i++
-					col++
+					for i < len(src) {
+						ch := src[i]
+						if ch == '\n' {
+							break
+						}
+						i++
+						col++
+					}
+					continue
 				}
 			}
-			if !closed {
-				return nil, posError(startLine, startCol, "unterminated block comment")
+		}
+		if c == '/' {
+			if i+1 < len(src) {
+				next := src[i+1]
+				if next == '*' {
+					startLine := line
+					startCol := col
+					i += 2
+					col += 2
+					closed := false
+					for i+1 < len(src) {
+						ch := src[i]
+						nextCh := src[i+1]
+						if ch == '*' {
+							if nextCh == '/' {
+								i += 2
+								col += 2
+								closed = true
+								break
+							}
+						}
+						if ch == '\n' {
+							i++
+							line++
+							col = 1
+						} else {
+							i++
+							col++
+						}
+					}
+					if !closed {
+						return nil, posError(startLine, startCol, "unterminated block comment")
+					}
+					continue
+				}
 			}
-			continue
 		}
 		if isIdentStart(c) {
 			start := i
@@ -93,11 +126,15 @@ func Tokens(src []byte) ([]Token, error) {
 			startCol := col
 			i++
 			col++
-			for i < len(src) && isIdent(src[i]) {
+			for i < len(src) {
+				ch := src[i]
+				if !isIdent(ch) {
+					break
+				}
 				i++
 				col++
 			}
-			toks = append(toks, Token{Kind: Ident, Text: string(src[start:i]), Start: start, End: i, Line: startLine, Column: startCol})
+			toks = append(toks, token(Ident, text[start:i], start, i, startLine, startCol))
 			continue
 		}
 		if c >= '0' && c <= '9' {
@@ -106,11 +143,17 @@ func Tokens(src []byte) ([]Token, error) {
 			startCol := col
 			i++
 			col++
-			for i < len(src) && (isIdent(src[i]) || src[i] == '.') {
+			for i < len(src) {
+				ch := src[i]
+				if !isIdent(ch) {
+					if ch != '.' {
+						break
+					}
+				}
 				i++
 				col++
 			}
-			toks = append(toks, Token{Kind: Number, Text: string(src[start:i]), Start: start, End: i, Line: startLine, Column: startCol})
+			toks = append(toks, token(Number, text[start:i], start, i, startLine, startCol))
 			continue
 		}
 		if c == '"' || c == '`' || c == '\'' {
@@ -121,22 +164,25 @@ func Tokens(src []byte) ([]Token, error) {
 			i++
 			col++
 			for i < len(src) {
-				if quote != '`' && src[i] == '\\' {
-					i += 2
-					col += 2
-					continue
+				ch := src[i]
+				if quote != '`' {
+					if ch == '\\' {
+						i += 2
+						col += 2
+						continue
+					}
 				}
-				if src[i] == quote {
+				if ch == quote {
 					i++
 					col++
 					kind := String
 					if quote == '\'' {
 						kind = Char
 					}
-					toks = append(toks, Token{Kind: kind, Text: string(src[start:i]), Start: start, End: i, Line: startLine, Column: startCol})
+					toks = append(toks, token(kind, text[start:i], start, i, startLine, startCol))
 					break
 				}
-				if src[i] == '\n' {
+				if ch == '\n' {
 					i++
 					line++
 					col = 1
@@ -145,7 +191,10 @@ func Tokens(src []byte) ([]Token, error) {
 					col++
 				}
 			}
-			if len(toks) == 0 || toks[len(toks)-1].Start != start {
+			if len(toks) == 0 {
+				return nil, posError(startLine, startCol, "unterminated literal")
+			}
+			if int(toks[len(toks)-1].Start) != start {
 				return nil, posError(startLine, startCol, "unterminated literal")
 			}
 			continue
@@ -156,10 +205,18 @@ func Tokens(src []byte) ([]Token, error) {
 		width := opWidth(src, i)
 		i += width
 		col += width
-		toks = append(toks, Token{Kind: Op, Text: string(src[start:i]), Start: start, End: i, Line: startLine, Column: startCol})
+		toks = append(toks, token(Op, text[start:i], start, i, startLine, startCol))
 	}
-	toks = append(toks, Token{Kind: EOF, Text: "", Start: len(src), End: len(src), Line: line, Column: col})
+	toks = append(toks, token(EOF, "", len(src), len(src), line, col))
 	return toks, nil
+}
+
+func tokenCapacity(src []byte) int {
+	capacity := len(src)/3 + 32
+	if capacity < 64 {
+		return 64
+	}
+	return capacity
 }
 
 func UnquoteString(s string) (string, error) {

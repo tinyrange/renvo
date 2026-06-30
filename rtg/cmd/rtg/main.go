@@ -6,10 +6,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"j5.nz/rtg/rtg/build"
+	"j5.nz/rtg/rtg/arena"
 	"j5.nz/rtg/rtg/check"
 	"j5.nz/rtg/rtg/emit"
 	"j5.nz/rtg/rtg/load"
+	"j5.nz/rtg/rtg/lower"
+	"j5.nz/rtg/rtg/parse"
 	"j5.nz/rtg/rtg/rtgx"
 	"j5.nz/rtg/rtg/target"
 	"j5.nz/rtg/rtg/unit"
@@ -18,6 +20,7 @@ import (
 type config struct {
 	target   string
 	output   string
+	strip    bool
 	emitUnit bool
 	check    bool
 	link     bool
@@ -44,6 +47,7 @@ func appMain(args []string, env []string) int {
 }
 
 func printError(err error) {
+	fmt.Println(err.Error())
 }
 
 func cliArgs(args []string) []string {
@@ -60,6 +64,7 @@ func run(cfg config) error {
 	if cfg.link {
 		return runLink(cfg)
 	}
+	loadMark := arena.Mark()
 	graph, err := load.LoadEntries(cfg.inputs, load.Options{Target: cfg.target})
 	if err != nil {
 		return err
@@ -70,42 +75,68 @@ func run(cfg config) error {
 	if cfg.emitUnit {
 		return runEmitUnit(cfg, graph)
 	}
-	return runBuild(cfg, graph)
+	return runBuild(cfg, graph, loadMark)
 }
 
-func runBuild(cfg config, graph *load.Graph) error {
+func runBuild(cfg config, graph *load.Graph, loadMark int) error {
 	if cfg.output == "" {
 		return fmt.Errorf("rtg: build requires -o")
 	}
-	units, err := build.Units(graph)
-	if err != nil {
+	checkMark := arena.Mark()
+	if err := check.Graph(graph); err != nil {
+		arena.Reset(checkMark)
 		return err
 	}
-	return rtgx.CompileUnits(units, rtgx.Options{Target: cfg.target, Output: cfg.output})
+	arena.Reset(checkMark)
+	clearGraphParsedFiles(graph)
+	unitDir := cfg.output + ".units"
+	persistMark := arena.PersistMark()
+	if err := writeGraphUnitDirectory(unitDir, graph); err != nil {
+		arena.PersistReset(persistMark)
+		return err
+	}
+	arena.PersistReset(persistMark)
+	unitDir = arena.PersistString(unitDir)
+	target := arena.PersistString(cfg.target)
+	output := arena.PersistString(cfg.output)
+	strip := cfg.strip
+	arena.Reset(loadMark)
+	unitSourceMark := arena.Mark()
+	sources, err := readUnitTextInputs([]string{unitDir})
+	if err != nil {
+		arena.Reset(unitSourceMark)
+		return err
+	}
+	return rtgx.CompileTextUnitSourcesReset(sources, rtgx.Options{Target: target, Output: output, StripSymbols: strip}, unitSourceMark)
+}
+
+func clearGraphParsedFiles(graph *load.Graph) {
+	for i := 0; i < len(graph.Packages); i++ {
+		files := graph.Packages[i].Files
+		for j := 0; j < len(files); j++ {
+			files[j].Parsed = parse.File{}
+		}
+		graph.Packages[i].Files = files
+	}
 }
 
 func runEmitUnit(cfg config, graph *load.Graph) error {
 	if len(graph.Packages) == 0 {
 		return fmt.Errorf("rtg: no packages loaded")
 	}
-	units, err := build.Units(graph)
-	if err != nil {
-		return err
-	}
 	if cfg.output == "" {
 		dir := defaultUnitCacheDir(graph)
-		return writeUnitDirectory(dir, units)
+		return writeGraphUnitDirectory(dir, graph)
 	}
 	info, statErr := os.Stat(cfg.output)
 	if statErr == nil {
 		if fileInfoIsDir(info) {
-			return writeUnitDirectory(cfg.output, units)
+			return writeGraphUnitDirectory(cfg.output, graph)
 		}
-		if len(units) == 1 && isUnitFileOutput(cfg.output) {
-			data := emit.Source(units[0])
-			return os.WriteFile(cfg.output, data, 420)
+		if len(graph.Packages) == 1 && isUnitFileOutput(cfg.output) {
+			return writeSingleGraphUnitFile(cfg.output, graph)
 		}
-		if len(units) == 1 {
+		if len(graph.Packages) == 1 {
 			return fmt.Errorf("rtg: -emit-unit requires .rtg.go output file or output directory")
 		}
 		return fmt.Errorf("rtg: -emit-unit with multiple packages requires output directory")
@@ -113,19 +144,18 @@ func runEmitUnit(cfg config, graph *load.Graph) error {
 	if !os.IsNotExist(statErr) {
 		return statErr
 	}
-	if len(units) == 1 && isUnitFileOutput(cfg.output) {
-		data := emit.Source(units[0])
-		return os.WriteFile(cfg.output, data, 420)
+	if len(graph.Packages) == 1 && isUnitFileOutput(cfg.output) {
+		return writeSingleGraphUnitFile(cfg.output, graph)
 	}
 	base := filepath.Base(cfg.output)
 	ext := filepath.Ext(base)
 	if ext != "" {
-		if len(units) == 1 {
+		if len(graph.Packages) == 1 {
 			return fmt.Errorf("rtg: -emit-unit requires .rtg.go output file or output directory")
 		}
 		return fmt.Errorf("rtg: -emit-unit with multiple packages requires output directory")
 	}
-	return writeUnitDirectory(cfg.output, units)
+	return writeGraphUnitDirectory(cfg.output, graph)
 }
 
 func defaultUnitCacheDir(graph *load.Graph) string {
@@ -137,7 +167,7 @@ func writeUnitDirectory(dir string, units []unit.Unit) error {
 	if err != nil {
 		return err
 	}
-	var names []unitFileName
+	names := make([]unitFileName, 0, len(units))
 	for i := 0; i < len(units); i++ {
 		u := units[i]
 		name := emit.FileName(u.ImportPath)
@@ -153,6 +183,56 @@ func writeUnitDirectory(dir string, units []unit.Unit) error {
 		}
 	}
 	return nil
+}
+
+func writeGraphUnitDirectory(dir string, graph *load.Graph) error {
+	err := os.MkdirAll(dir, 493)
+	if err != nil {
+		return err
+	}
+	names := make([]unitFileName, 0, len(graph.Packages))
+	for i := 0; i < len(graph.Packages); i++ {
+		pkg := graph.Packages[i]
+		name := emit.FileName(pkg.ImportPath)
+		if existing, ok := findUnitFileName(names, name); ok {
+			return fmt.Errorf("rtg: emitted unit filename collision for %s: %s and %s", name, existing, pkg.ImportPath)
+		}
+		names = append(names, unitFileName{name: name, importPath: pkg.ImportPath})
+		mark := arena.Mark()
+		u, err := lower.PackageWithGraph(pkg, graph)
+		if err != nil {
+			arena.Reset(mark)
+			return err
+		}
+		path := filepath.Join(dir, name)
+		data := emit.Source(u)
+		err = os.WriteFile(path, data, 420)
+		if err != nil {
+			arena.Reset(mark)
+			return err
+		}
+		arena.Reset(mark)
+	}
+	return nil
+}
+
+func writeSingleGraphUnitFile(path string, graph *load.Graph) error {
+	u, err := lower.PackageWithGraph(graph.Packages[0], graph)
+	if err != nil {
+		return err
+	}
+	data := emit.Source(u)
+	return os.WriteFile(path, data, 420)
+}
+
+func graphUnitInputPaths(dir string, graph *load.Graph) []string {
+	paths := make([]string, 0, len(graph.Packages))
+	for i := 0; i < len(graph.Packages); i++ {
+		name := emit.FileName(graph.Packages[i].ImportPath)
+		paths = append(paths, filepath.Join(dir, name))
+	}
+	sortStrings(paths)
+	return paths
 }
 
 type unitFileName struct {
@@ -192,29 +272,69 @@ func runLink(cfg config) error {
 	if len(cfg.inputs) == 0 {
 		return fmt.Errorf("rtg: -link requires input units")
 	}
-	sources, err := readUnitInputs(cfg.inputs)
+	unitSourceMark := arena.Mark()
+	sources, err := readUnitTextInputs(cfg.inputs)
 	if err != nil {
+		arena.Reset(unitSourceMark)
 		return err
 	}
-	return rtgx.CompileUnitSources(sources, rtgx.Options{Target: cfg.target, Output: cfg.output})
+	target := arena.PersistString(cfg.target)
+	output := arena.PersistString(cfg.output)
+	strip := cfg.strip
+	return rtgx.CompileTextUnitSourcesReset(sources, rtgx.Options{Target: target, Output: output, StripSymbols: strip}, unitSourceMark)
 }
 
-func readUnitInputs(inputs []string) ([]unit.SourceFile, error) {
-	var sources []unit.SourceFile
+func readUnitTextInputs(inputs []string) ([]unit.TextSourceFile, error) {
+	var paths []string
 	for i := 0; i < len(inputs); i++ {
 		input := inputs[i]
-		paths, err := unitInputPaths(input)
+		inputPaths, err := unitInputPaths(input)
 		if err != nil {
 			return nil, err
 		}
-		for j := 0; j < len(paths); j++ {
-			path := paths[j]
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return nil, err
-			}
-			sources = append(sources, unit.SourceFile{Path: path, Source: data})
+		paths = appendStrings(paths, inputPaths)
+	}
+	return readUnitTextPaths(paths)
+}
+
+func readUnitTextPaths(paths []string) ([]unit.TextSourceFile, error) {
+	var sources []unit.TextSourceFile
+	for i := 0; i < len(paths); i++ {
+		path := paths[i]
+		text, err := readUnitTextFile(path)
+		if err != nil {
+			return nil, err
 		}
+		sources = append(sources, unit.TextSourceFile{Path: path, Source: text})
+	}
+	if len(sources) == 0 {
+		return nil, fmt.Errorf("rtg: no input units")
+	}
+	return sources, nil
+}
+
+func readUnitInputs(inputs []string) ([]unit.SourceFile, error) {
+	var paths []string
+	for i := 0; i < len(inputs); i++ {
+		input := inputs[i]
+		inputPaths, err := unitInputPaths(input)
+		if err != nil {
+			return nil, err
+		}
+		paths = appendStrings(paths, inputPaths)
+	}
+	return readUnitPaths(paths)
+}
+
+func readUnitPaths(paths []string) ([]unit.SourceFile, error) {
+	var sources []unit.SourceFile
+	for i := 0; i < len(paths); i++ {
+		path := paths[i]
+		data, err := readUnitFile(path)
+		if err != nil {
+			return nil, err
+		}
+		sources = append(sources, unit.SourceFile{Path: path, Source: data})
 	}
 	if len(sources) == 0 {
 		return nil, fmt.Errorf("rtg: no input units")
@@ -281,6 +401,13 @@ func stringGreater(a string, b string) bool {
 	return len(a) > len(b)
 }
 
+func appendStrings(out []string, values []string) []string {
+	for i := 0; i < len(values); i++ {
+		out = append(out, values[i])
+	}
+	return out
+}
+
 func parseArgs(args []string) (config, error) {
 	cfg := config{target: target.Default()}
 	for i := 0; i < len(args); i++ {
@@ -307,6 +434,10 @@ func parseArgs(args []string) (config, error) {
 			}
 			output := args[i]
 			cfg.output = output
+			continue
+		}
+		if arg == "-s" {
+			cfg.strip = true
 			continue
 		}
 		if arg == "-emit-unit" {

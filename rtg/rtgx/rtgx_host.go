@@ -10,12 +10,17 @@ import (
 	"path/filepath"
 )
 
-func compileSourceToBytes(source []byte, target string, backendRootOverride string) ([]byte, error) {
+func compileSourceToBytes(source []byte, target string, backendRootOverride string, stripSymbols bool) ([]byte, error) {
 	root, err := backendRoot(backendRootOverride)
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.Command("go", "run", ".", "-t", target, "-o", "-", "-")
+	args := []string{"run", ".", "-t", target, "-o", "-"}
+	if stripSymbols {
+		args = append(args, "-s")
+	}
+	args = append(args, "-")
+	cmd := exec.Command("go", args...)
 	cmd.Dir = root
 	cmd.Stdin = bytes.NewReader(source)
 	var stdout bytes.Buffer
@@ -29,6 +34,14 @@ func compileSourceToBytes(source []byte, target string, backendRootOverride stri
 		return nil, fmt.Errorf("rtgx compile failed: %w", err)
 	}
 	return stdout.Bytes(), nil
+}
+
+func compileSourceToOutput(source []byte, target string, backendRootOverride string, stripSymbols bool, output string) error {
+	data, err := compileSourceToBytes(source, target, backendRootOverride, stripSymbols)
+	if err != nil {
+		return err
+	}
+	return writeOutput(data, output)
 }
 
 func backendRoot(explicit string) (string, error) {

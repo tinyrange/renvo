@@ -143,6 +143,68 @@ func rtgTryCompileScalarProgramAmd64(p *rtgProgram, meta *rtgMeta) rtgCompileRes
 	return result
 }
 
+func rtgCompileScalarProgramAmd64ToOutput(p *rtgProgram, meta *rtgMeta, output int) bool {
+	appIndex := -1
+	for i := 0; i < len(meta.funcs); i++ {
+		if rtgBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
+			appIndex = i
+		}
+	}
+	if appIndex < 0 {
+		return false
+	}
+	var g rtgLinearGen
+	g.prog = p
+	g.meta = meta
+	a := &g.asm
+	rtgAsmInit(a)
+	a.codeOffset = rtgLinuxAmd64CodeOffset
+	if rtgTargetIsWindows() {
+		a.codeOffset = rtgWinSectionRVA
+	}
+	if rtgCompilerFixedTarget != 0 {
+		g.funcLabels = make([]int, 0, 1536)
+	}
+	for i := 0; i < len(meta.funcs); i++ {
+		label := rtgAsmNewLabel(a)
+		g.funcLabels = append(g.funcLabels, label)
+	}
+	g.funcReachable = make([]bool, len(meta.funcs), len(meta.funcs))
+	g.funcQueue = make([]int, 0, len(meta.funcs))
+	rtgLinearMarkFunc(&g, appIndex)
+	if !rtgLinearInitGlobals(&g) {
+		return false
+	}
+	if !rtgEmitProgramEntryArgsAmd64(&g, appIndex) {
+		return false
+	}
+	rtgAsmCallLabel(a, g.funcLabels[appIndex])
+	rtgAsmMovRdiRax(a)
+	rtgAsmMovRaxImm(a, 60)
+	rtgAsmSyscall(a)
+	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
+		i := g.funcQueue[queueIndex]
+		if !rtgEmitScalarFunction(&g, i) {
+			rtgPrintErr("rtg: amd64 failed in function ")
+			write(2, meta.prog.src[meta.funcs[i].nameStart:meta.funcs[i].nameEnd], -1)
+			rtgPrintErr("\n")
+			return false
+		}
+	}
+	if rtgTargetIsWindows() || !rtgCompilerStripSymbols {
+		var data []byte
+		if rtgTargetIsWindows() {
+			data = rtgAsmImageWindowsAmd64(a)
+		} else {
+			data = rtgAsmImageAmd64(a)
+		}
+		write(output, data, -1)
+		return true
+	}
+	rtgAsmWriteImageAmd64(a, output)
+	return true
+}
+
 func rtgEmitProgramEntryArgsAmd64(g *rtgLinearGen, appIndex int) bool {
 	app := &g.meta.funcs[appIndex]
 	if app.resultType != 0 && !rtgTypeIsInt(g.meta, app.resultType) {
@@ -369,19 +431,28 @@ func rtgAsmImageAmd64(a *rtgAsm) []byte {
 	loadFileSize := a.codeOffset + len(a.code) + len(a.data)
 	memSize := loadFileSize + a.bssSize
 	if rtgCompilerStripSymbols {
-		out := make([]byte, 0, loadFileSize)
-		out = rtgAppendElfHeaderAmd64(out, a.codeOffset, loadFileSize, memSize, 0)
-		for i := 0; i < len(a.code); i++ {
-			out = append(out, a.code[i])
+		oldCodeLen := len(a.code)
+		var out []byte
+		out = a.code[:loadFileSize]
+		for i := 0; i < oldCodeLen; i++ {
+			src := oldCodeLen - 1 - i
+			out[a.codeOffset+src] = out[src]
 		}
+		var header []byte
+		header = rtgAppendElfHeaderAmd64(header, a.codeOffset, loadFileSize, memSize, 0)
+		for i := 0; i < len(header); i++ {
+			out[i] = header[i]
+		}
+		pos := a.codeOffset + oldCodeLen
 		for i := 0; i < len(a.data); i++ {
-			out = append(out, a.data[i])
+			out[pos+i] = a.data[i]
 		}
 		return out
 	}
 	sec := rtgBuildElf64SymbolSections(a, 0x400000, a.codeOffset, loadFileSize)
 	finalSize := sec.shoff + 448
-	out := make([]byte, 0, finalSize)
+	out := make([]byte, finalSize)
+	out = out[:0]
 	out = rtgAppendElfHeaderAmd64(out, a.codeOffset, loadFileSize, memSize, sec.shoff)
 	for i := 0; i < len(a.code); i++ {
 		out = append(out, a.code[i])
@@ -404,6 +475,17 @@ func rtgAsmImageAmd64(a *rtgAsm) []byte {
 	out = rtgAppendUntil(out, sec.shoff)
 	out = rtgAppendElf64SectionHeaders(out, &sec, a, 0x400000)
 	return out
+}
+
+func rtgAsmWriteImageAmd64(a *rtgAsm, output int) {
+	rtgAsmPatch(a)
+	loadFileSize := a.codeOffset + len(a.code) + len(a.data)
+	memSize := loadFileSize + a.bssSize
+	var header []byte
+	header = rtgAppendElfHeaderAmd64(header, a.codeOffset, loadFileSize, memSize, 0)
+	write(output, header, -1)
+	write(output, a.code, -1)
+	write(output, a.data, -1)
 }
 
 func rtgAppendElfHeaderAmd64(out []byte, entryOff int, fileSize int, memSize int, shoff int) []byte {

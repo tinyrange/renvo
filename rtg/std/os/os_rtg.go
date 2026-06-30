@@ -85,36 +85,59 @@ func IsNotExist(err error) bool {
 }
 
 func ReadFile(path string) ([]byte, error) {
+	size, err := fileSize(path)
+	if err != nil {
+		return nil, err
+	}
 	fd := Open(path, O_RDONLY)
 	if fd < 0 {
 		return nil, statError("open failed: " + path)
 	}
-	out := make([]byte, 0, 4194304)
-	off := int64(0)
-	for {
-		buf := make([]byte, 4096)
-		n := Read(fd, buf, off)
+	out := make([]byte, size)
+	off := 0
+	for off < size {
+		n := Read(fd, out[off:], int64(off))
 		if n < 0 {
 			Close(fd)
 			return nil, statError("read failed")
 		}
 		if n == 0 {
+			Close(fd)
+			return nil, statError("short read")
+		}
+		off = off + n
+	}
+	Close(fd)
+	return out, nil
+}
+
+func fileSize(path string) (int, error) {
+	fd := Open(path, O_RDONLY)
+	if fd < 0 {
+		return 0, statError("open failed: " + path)
+	}
+	buf := make([]byte, 4096)
+	size := 0
+	for {
+		n := Read(fd, buf, int64(size))
+		if n < 0 {
+			Close(fd)
+			return 0, statError("read failed")
+		}
+		if n == 0 {
 			break
 		}
-		if len(out)+n > 4194304 {
+		size = size + n
+		if size > 4194304 {
 			Close(fd)
-			return nil, statError("file too large")
+			return 0, statError("file too large")
 		}
-		for i := 0; i < n; i++ {
-			out = append(out, buf[i])
-		}
-		off = off + int64(n)
 		if n < len(buf) {
 			break
 		}
 	}
 	Close(fd)
-	return out, nil
+	return size, nil
 }
 
 func WriteFile(path string, data []byte, mode int) error {
@@ -154,8 +177,14 @@ func ReadDir(path string) ([]DirEntry, error) {
 		}
 		pos := 0
 		for pos+19 < n {
-			reclen := int(buf[pos+16]) + int(buf[pos+17])*256
-			if reclen <= 19 || pos+reclen > n {
+			lenLow := buf[pos+16]
+			lenHigh := buf[pos+17]
+			reclen := int(lenLow) + int(lenHigh)*256
+			if reclen <= 19 {
+				Close(fd)
+				return nil, statError("invalid directory entry: " + path)
+			}
+			if pos+reclen > n {
 				Close(fd)
 				return nil, statError("invalid directory entry: " + path)
 			}
@@ -165,8 +194,13 @@ func ReadDir(path string) ([]DirEntry, error) {
 				nameEnd = nameEnd + 1
 			}
 			name := stringFromBytes(buf, nameStart, nameEnd)
-			if name != "." && name != ".." && name != "" {
-				out = append(out, DirEntry{name: name, isDir: buf[pos+18] == 4})
+			if name != "." {
+				if name != ".." {
+					if name != "" {
+						entryType := buf[pos+18]
+						out = append(out, DirEntry{name: name, isDir: entryType == 4})
+					}
+				}
 			}
 			pos = pos + reclen
 		}
@@ -176,6 +210,26 @@ func ReadDir(path string) ([]DirEntry, error) {
 }
 
 func MkdirAll(path string, mode int) error {
+	if path == "" {
+		return nil
+	}
+	start := 0
+	if path[0] == '/' {
+		start = 1
+	}
+	for i := start; i <= len(path); i++ {
+		if i < len(path) && path[i] != '/' {
+			continue
+		}
+		if i == 0 {
+			continue
+		}
+		part := path[:i]
+		if part == "" {
+			continue
+		}
+		mkdir(part, mode)
+	}
 	return nil
 }
 
@@ -200,6 +254,13 @@ func getdents64(fd int, buf []byte) int {
 		num = 61
 	}
 	return syscall(num, fd, buf, len(buf))
+}
+
+func mkdir(path string, mode int) int {
+	if runtime.GOOS != "linux" {
+		return -1
+	}
+	return syscall(83, cString(path), mode)
 }
 
 func stringFromBytes(buf []byte, start int, end int) string {

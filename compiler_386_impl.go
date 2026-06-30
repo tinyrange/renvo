@@ -410,11 +410,11 @@ func rtg386EmitSwitchStringCaseTest(g *rtgLinearGen, valueOffset int, lenOffset 
 func rtg386EmitRaxRcxOp(g *rtgLinearGen, tok int) bool {
 	a := &g.asm
 	p := g.prog
-	if tok < 0 || tok >= len(p.toks) {
+	if tok < 0 || tok >= rtgTokCount(p) {
 		return false
 	}
-	start := p.toks[tok].start
-	end := p.toks[tok].end
+	start := rtgTokStart(p, tok)
+	end := rtgTokEnd(p, tok)
 	if start >= end {
 		return false
 	}
@@ -500,11 +500,11 @@ func rtg386EmitRaxRcxOp(g *rtgLinearGen, tok int) bool {
 
 func rtg386EmitCompareJump(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, label int, jumpIfTrue bool) bool {
 	p := g.prog
-	if e.tok < 0 || e.tok >= len(p.toks) {
+	if e.tok < 0 || e.tok >= rtgTokCount(p) {
 		return false
 	}
-	start := p.toks[e.tok].start
-	end := p.toks[e.tok].end
+	start := rtgTokStart(p, e.tok)
+	end := rtgTokEnd(p, e.tok)
 	if start >= end {
 		return false
 	}
