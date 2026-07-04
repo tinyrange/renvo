@@ -11,6 +11,7 @@ const (
 	CheckErrDuplicate
 	CheckErrImport
 	CheckErrMethod
+	CheckErrBody
 )
 
 const (
@@ -35,6 +36,7 @@ type PackageInfo struct {
 	Name    string
 	Symbols []Symbol
 	Imports []Import
+	Bodies  []FuncBody
 }
 
 type Symbol struct {
@@ -53,6 +55,14 @@ type Import struct {
 	Token      int
 	Dot        bool
 	Blank      bool
+}
+
+type FuncBody struct {
+	Name string
+	Kind int
+	File int
+	Func int
+	Body syntax.Body
 }
 
 func CheckGraph(graph load.Graph) Program {
@@ -96,6 +106,15 @@ func LookupImport(info PackageInfo, file int, name string) int {
 	return -1
 }
 
+func LookupFuncBody(info PackageInfo, name string) int {
+	for i := 0; i < len(info.Bodies); i++ {
+		if info.Bodies[i].Name == name {
+			return i
+		}
+	}
+	return -1
+}
+
 func checkPackage(graph load.Graph, pkgIndex int) (PackageInfo, bool, int, int, int) {
 	pkg := graph.Packages[pkgIndex]
 	info := PackageInfo{Name: pkg.Name}
@@ -126,6 +145,11 @@ func checkPackage(graph load.Graph, pkgIndex int) (PackageInfo, bool, int, int, 
 				return info, false, CheckErrDuplicate, fileIndex, fn.NameTok
 			}
 			info.Symbols = append(info.Symbols, Symbol{Name: name, Kind: kind, Package: pkgIndex, File: fileIndex, Token: fn.NameTok})
+			body := syntax.ParseFuncBody(file, fn)
+			if !body.Ok {
+				return info, false, CheckErrBody, fileIndex, body.ErrorTok
+			}
+			info.Bodies = append(info.Bodies, FuncBody{Name: name, Kind: kind, File: fileIndex, Func: i, Body: body})
 		}
 		for i := 0; i < len(file.Imports); i++ {
 			imp, ok := buildImport(graph, pkgIndex, fileIndex, file, i)

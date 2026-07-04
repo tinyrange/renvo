@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"j5.nz/rtg/rtg/internal/load"
+	"j5.nz/rtg/rtg/internal/syntax"
 )
 
 func TestCheckGraphSymbolsAndImports(t *testing.T) {
@@ -47,6 +48,8 @@ func KeepAlive(v int) {}
 	assertSymbol(t, root, "item", SymbolType)
 	assertSymbol(t, root, "run", SymbolFunc)
 	assertSymbol(t, root, "item.Score", SymbolMethod)
+	assertBody(t, root, "run", SymbolFunc, 1)
+	assertBody(t, root, "item.Score", SymbolMethod, 2)
 
 	core := LookupImport(root, 0, "core")
 	if core < 0 || root.Imports[core].ImportPath != "example.com/case/pkg/lib" {
@@ -64,6 +67,46 @@ func KeepAlive(v int) {}
 	}
 	if !foundBlank {
 		t.Fatalf("blank runtime import not found: %#v", root.Imports)
+	}
+}
+
+func TestCheckGraphBodyIndexes(t *testing.T) {
+	graph := testGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+func appMain(v int) int {
+	if v > 0 {
+		return v
+	}
+	return 0
+}
+
+func helper() {
+	defer cleanup()
+}
+`)},
+	})
+	prog := CheckGraph(graph)
+	if !prog.Ok {
+		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
+	}
+	root := prog.Packages[0]
+	if len(root.Bodies) != 2 {
+		t.Fatalf("body count = %d, want 2: %#v", len(root.Bodies), root.Bodies)
+	}
+	appBody := LookupFuncBody(root, "appMain")
+	if appBody < 0 {
+		t.Fatalf("appMain body not found: %#v", root.Bodies)
+	}
+	if !bodyHasStmt(root.Bodies[appBody].Body, syntax.StmtIf) || !bodyHasStmt(root.Bodies[appBody].Body, syntax.StmtReturn) {
+		t.Fatalf("appMain body statements = %#v", root.Bodies[appBody].Body.Stmts)
+	}
+	helperBody := LookupFuncBody(root, "helper")
+	if helperBody < 0 {
+		t.Fatalf("helper body not found: %#v", root.Bodies)
+	}
+	if !bodyHasStmt(root.Bodies[helperBody].Body, syntax.StmtDefer) {
+		t.Fatalf("helper body statements = %#v", root.Bodies[helperBody].Body.Stmts)
 	}
 }
 
@@ -168,6 +211,36 @@ import (
 	}
 }
 
+func TestCheckGraphBodyError(t *testing.T) {
+	file := syntax.ParseFile([]byte(`package main
+
+func appMain() int {
+	return 0
+}
+`))
+	if !file.Ok {
+		t.Fatalf("ParseFile failed: err=%d tok=%d", file.Error, file.ErrorTok)
+	}
+	file.Funcs[0].BodyStart = -1
+	graph := load.Graph{
+		Root: "example.com/case/cmd/app",
+		Ok:   true,
+		Packages: []load.Package{{
+			Ref:  load.PackageRef{Kind: load.PackageInModule, ImportPath: "example.com/case/cmd/app", Dir: "/repo/case/cmd/app", Ok: true},
+			Name: "main",
+			Ok:   true,
+			Files: []load.ParsedFile{{
+				Path: "/repo/case/cmd/app/main.go",
+				File: file,
+			}},
+		}},
+	}
+	prog := CheckGraph(graph)
+	if prog.Ok || prog.Error != CheckErrBody || prog.ErrorPackage != 0 || prog.ErrorFile != 0 {
+		t.Fatalf("body error check = %#v", prog)
+	}
+}
+
 func testGraph(t *testing.T, files []load.SourceFile) load.Graph {
 	t.Helper()
 	mod := load.Module{Root: "/repo/case", Path: "example.com/case", Ok: true}
@@ -187,4 +260,30 @@ func assertSymbol(t *testing.T, info PackageInfo, name string, kind int) {
 	if info.Symbols[index].Kind != kind {
 		t.Fatalf("symbol %q kind = %d, want %d", name, info.Symbols[index].Kind, kind)
 	}
+}
+
+func assertBody(t *testing.T, info PackageInfo, name string, kind int, minStmts int) {
+	t.Helper()
+	index := LookupFuncBody(info, name)
+	if index < 0 {
+		t.Fatalf("body %q not found in %#v", name, info.Bodies)
+	}
+	if info.Bodies[index].Kind != kind {
+		t.Fatalf("body %q kind = %d, want %d", name, info.Bodies[index].Kind, kind)
+	}
+	if !info.Bodies[index].Body.Ok {
+		t.Fatalf("body %q parse failed: %#v", name, info.Bodies[index].Body)
+	}
+	if len(info.Bodies[index].Body.Stmts) < minStmts {
+		t.Fatalf("body %q stmt count = %d, want at least %d", name, len(info.Bodies[index].Body.Stmts), minStmts)
+	}
+}
+
+func bodyHasStmt(body syntax.Body, kind int) bool {
+	for i := 0; i < len(body.Stmts); i++ {
+		if body.Stmts[i].Kind == kind {
+			return true
+		}
+	}
+	return false
 }
