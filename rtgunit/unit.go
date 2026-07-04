@@ -21,6 +21,8 @@ const (
 	TagFuncs   = uint16(10)
 	TagIndexes = uint16(11)
 	TagComps   = uint16(12)
+	TagAssigns = uint16(13)
+	TagReturns = uint16(14)
 )
 
 const (
@@ -112,6 +114,41 @@ type CompositeExpr struct {
 	Elems      []ExprSpan
 }
 
+const (
+	AssignUnknown = iota
+	AssignSet
+	AssignDefine
+	AssignAdd
+	AssignSub
+	AssignMul
+	AssignDiv
+	AssignMod
+	AssignAnd
+	AssignOr
+	AssignXor
+)
+
+type Assignment struct {
+	FuncIndex  int
+	Kind       int
+	StartTok   int
+	EndTok     int
+	OpTok      int
+	LeftStart  int
+	LeftEnd    int
+	RightStart int
+	RightEnd   int
+	Targets    []ExprSpan
+	Values     []ExprSpan
+}
+
+type Return struct {
+	FuncIndex int
+	StartTok  int
+	EndTok    int
+	Values    []ExprSpan
+}
+
 type Program struct {
 	Package    string
 	Text       []byte
@@ -120,6 +157,8 @@ type Program struct {
 	Funcs      []Func
 	Indexes    []IndexExpr
 	Composites []CompositeExpr
+	Assigns    []Assignment
+	Returns    []Return
 }
 
 type sourceToken struct {
@@ -178,6 +217,8 @@ func Marshal(program Program) ([]byte, error) {
 		NewNode(TagFuncs, encodeFuncs(program.Funcs)),
 		NewNode(TagIndexes, encodeIndexes(program.Indexes)),
 		NewNode(TagComps, encodeComposites(program.Composites)),
+		NewNode(TagAssigns, encodeAssignments(program.Assigns)),
+		NewNode(TagReturns, encodeReturns(program.Returns)),
 	)
 
 	var out bytes.Buffer
@@ -217,8 +258,12 @@ func Unmarshal(data []byte) (Program, error) {
 	var tokenData []byte
 	var indexData []byte
 	var compData []byte
+	var assignData []byte
+	var returnData []byte
 	seenIndexes := false
 	seenComps := false
+	seenAssigns := false
+	seenReturns := false
 	pos := rootStart
 	for pos < rootEnd {
 		if pos+6 > rootEnd {
@@ -263,6 +308,18 @@ func Unmarshal(data []byte) (Program, error) {
 			}
 			seenComps = true
 			compData = payload
+		case TagAssigns:
+			if seenAssigns {
+				return program, fmt.Errorf("duplicate assignment table")
+			}
+			seenAssigns = true
+			assignData = payload
+		case TagReturns:
+			if seenReturns {
+				return program, fmt.Errorf("duplicate return table")
+			}
+			seenReturns = true
+			returnData = payload
 		default:
 			return program, fmt.Errorf("unknown unit child tag %d", tag)
 		}
@@ -292,6 +349,20 @@ func Unmarshal(data []byte) (Program, error) {
 			return program, err
 		}
 		program.Composites = composites
+	}
+	if seenAssigns {
+		assigns, err := decodeAssignments(assignData)
+		if err != nil {
+			return program, err
+		}
+		program.Assigns = assigns
+	}
+	if seenReturns {
+		returns, err := decodeReturns(returnData)
+		if err != nil {
+			return program, err
+		}
+		program.Returns = returns
 	}
 	if len(program.Tokens) == 0 {
 		return program, fmt.Errorf("unit missing token table")
@@ -1151,6 +1222,46 @@ func encodeComposites(composites []CompositeExpr) []byte {
 	return out
 }
 
+func encodeAssignments(assigns []Assignment) []byte {
+	var out []byte
+	out = appendVarint(out, len(assigns))
+	for _, assign := range assigns {
+		out = appendVarint(out, assign.FuncIndex)
+		out = appendVarint(out, assign.Kind)
+		out = appendVarint(out, assign.StartTok)
+		out = appendVarint(out, assign.EndTok-assign.StartTok)
+		out = appendVarint(out, assign.OpTok)
+		out = appendVarint(out, assign.LeftStart)
+		out = appendVarint(out, assign.LeftEnd-assign.LeftStart)
+		out = appendVarint(out, assign.RightStart)
+		out = appendVarint(out, assign.RightEnd-assign.RightStart)
+		out = appendSpanList(out, assign.Targets)
+		out = appendSpanList(out, assign.Values)
+	}
+	return out
+}
+
+func encodeReturns(returns []Return) []byte {
+	var out []byte
+	out = appendVarint(out, len(returns))
+	for _, ret := range returns {
+		out = appendVarint(out, ret.FuncIndex)
+		out = appendVarint(out, ret.StartTok)
+		out = appendVarint(out, ret.EndTok-ret.StartTok)
+		out = appendSpanList(out, ret.Values)
+	}
+	return out
+}
+
+func appendSpanList(out []byte, spans []ExprSpan) []byte {
+	out = appendVarint(out, len(spans))
+	for _, span := range spans {
+		out = appendVarint(out, span.StartTok)
+		out = appendVarint(out, span.EndTok-span.StartTok)
+	}
+	return out
+}
+
 func decodeDecls(data []byte) ([]Decl, error) {
 	pos := 0
 	count, next, ok := readVarint(data, pos)
@@ -1427,6 +1538,155 @@ func decodeComposites(data []byte) ([]CompositeExpr, error) {
 		return nil, fmt.Errorf("trailing composite data")
 	}
 	return composites, nil
+}
+
+func decodeAssignments(data []byte) ([]Assignment, error) {
+	pos := 0
+	count, next, ok := readVarint(data, pos)
+	if !ok {
+		return nil, fmt.Errorf("invalid assignment count")
+	}
+	pos = next
+	assigns := make([]Assignment, 0, count)
+	for i := 0; i < count; i++ {
+		funcIndex, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid assignment %d func", i)
+		}
+		pos = n
+		kind, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid assignment %d kind", i)
+		}
+		pos = n
+		startTok, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid assignment %d start", i)
+		}
+		pos = n
+		tokCount, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid assignment %d end", i)
+		}
+		pos = n
+		opTok, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid assignment %d op", i)
+		}
+		pos = n
+		leftStart, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid assignment %d left start", i)
+		}
+		pos = n
+		leftCount, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid assignment %d left end", i)
+		}
+		pos = n
+		rightStart, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid assignment %d right start", i)
+		}
+		pos = n
+		rightCount, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid assignment %d right end", i)
+		}
+		pos = n
+		targets, n, ok := readSpanList(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid assignment %d targets", i)
+		}
+		pos = n
+		values, n, ok := readSpanList(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid assignment %d values", i)
+		}
+		pos = n
+		assigns = append(assigns, Assignment{
+			FuncIndex:  funcIndex,
+			Kind:       kind,
+			StartTok:   startTok,
+			EndTok:     startTok + tokCount,
+			OpTok:      opTok,
+			LeftStart:  leftStart,
+			LeftEnd:    leftStart + leftCount,
+			RightStart: rightStart,
+			RightEnd:   rightStart + rightCount,
+			Targets:    targets,
+			Values:     values,
+		})
+	}
+	if pos != len(data) {
+		return nil, fmt.Errorf("trailing assignment data")
+	}
+	return assigns, nil
+}
+
+func decodeReturns(data []byte) ([]Return, error) {
+	pos := 0
+	count, next, ok := readVarint(data, pos)
+	if !ok {
+		return nil, fmt.Errorf("invalid return count")
+	}
+	pos = next
+	returns := make([]Return, 0, count)
+	for i := 0; i < count; i++ {
+		funcIndex, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid return %d func", i)
+		}
+		pos = n
+		startTok, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid return %d start", i)
+		}
+		pos = n
+		tokCount, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid return %d end", i)
+		}
+		pos = n
+		values, n, ok := readSpanList(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid return %d values", i)
+		}
+		pos = n
+		returns = append(returns, Return{
+			FuncIndex: funcIndex,
+			StartTok:  startTok,
+			EndTok:    startTok + tokCount,
+			Values:    values,
+		})
+	}
+	if pos != len(data) {
+		return nil, fmt.Errorf("trailing return data")
+	}
+	return returns, nil
+}
+
+func readSpanList(data []byte, pos int) ([]ExprSpan, int, bool) {
+	count, n, ok := readVarint(data, pos)
+	if !ok {
+		return nil, pos, false
+	}
+	pos = n
+	spans := make([]ExprSpan, 0, count)
+	for i := 0; i < count; i++ {
+		startTok, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, pos, false
+		}
+		pos = n
+		tokCount, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, pos, false
+		}
+		pos = n
+		spans = append(spans, ExprSpan{StartTok: startTok, EndTok: startTok + tokCount})
+	}
+	return spans, pos, true
 }
 
 func appendVarint(out []byte, v int) []byte {

@@ -178,6 +178,12 @@ func appMain() int {
 	if len(result.Program.Composites) != 3 {
 		t.Fatalf("composites = %#v, want 3", result.Program.Composites)
 	}
+	if len(result.Program.Assigns) != 1 {
+		t.Fatalf("assignments = %#v, want 1", result.Program.Assigns)
+	}
+	if len(result.Program.Returns) != 1 {
+		t.Fatalf("returns = %#v, want 1", result.Program.Returns)
+	}
 	global := findUnitDecl(result.Program, "global")
 	picked := findUnitDecl(result.Program, "picked")
 	appMain := findUnitFunc(result.Program, "appMain")
@@ -190,6 +196,8 @@ func appMain() int {
 	assertUnitComposite(t, result.Program, unit.OwnerFunc, appMain, "item", []string{"value: picked"})
 	assertUnitIndex(t, result.Program, unit.OwnerFunc, appMain, "global", "0")
 	assertUnitIndex(t, result.Program, unit.OwnerFunc, appMain, "local", "0")
+	assertUnitAssign(t, result.Program, appMain, unit.AssignSet, "local[0]", "item{value: picked}")
+	assertUnitReturn(t, result.Program, appMain, []string{"local[0].value"})
 
 	data, ok := unit.Marshal(result.Program)
 	if !ok {
@@ -201,6 +209,9 @@ func appMain() int {
 	}
 	if len(decoded.Indexes) != len(result.Program.Indexes) || len(decoded.Composites) != len(result.Program.Composites) {
 		t.Fatalf("decoded shapes = %d/%d, want %d/%d", len(decoded.Indexes), len(decoded.Composites), len(result.Program.Indexes), len(result.Program.Composites))
+	}
+	if len(decoded.Assigns) != len(result.Program.Assigns) || len(decoded.Returns) != len(result.Program.Returns) {
+		t.Fatalf("decoded flow = %d/%d, want %d/%d", len(decoded.Assigns), len(decoded.Returns), len(result.Program.Assigns), len(result.Program.Returns))
 	}
 }
 
@@ -409,6 +420,43 @@ func assertUnitComposite(t *testing.T, program unit.Program, ownerKind int, owne
 		}
 	}
 	t.Fatalf("composite owner=%d/%d %s not found in %#v", ownerKind, ownerIndex, typ, program.Composites)
+}
+
+func assertUnitAssign(t *testing.T, program unit.Program, funcIndex int, kind int, left string, right string) {
+	t.Helper()
+	for i := 0; i < len(program.Assigns); i++ {
+		assign := program.Assigns[i]
+		if assign.FuncIndex != funcIndex || assign.Kind != kind {
+			continue
+		}
+		if unitSpanText(program, assign.LeftStart, assign.LeftEnd) == left && unitSpanText(program, assign.RightStart, assign.RightEnd) == right {
+			return
+		}
+	}
+	t.Fatalf("assignment func=%d kind=%d %s = %s not found in %#v", funcIndex, kind, left, right, program.Assigns)
+}
+
+func assertUnitReturn(t *testing.T, program unit.Program, funcIndex int, values []string) {
+	t.Helper()
+	for i := 0; i < len(program.Returns); i++ {
+		ret := program.Returns[i]
+		if ret.FuncIndex != funcIndex {
+			continue
+		}
+		if len(ret.Values) != len(values) {
+			continue
+		}
+		matched := true
+		for j := 0; j < len(values); j++ {
+			if unitSpanText(program, ret.Values[j].StartTok, ret.Values[j].EndTok) != values[j] {
+				matched = false
+			}
+		}
+		if matched {
+			return
+		}
+	}
+	t.Fatalf("return func=%d values=%v not found in %#v", funcIndex, values, program.Returns)
 }
 
 func unitSpanText(program unit.Program, startTok int, endTok int) string {

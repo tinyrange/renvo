@@ -112,6 +112,25 @@ func TestMarshalRoundTripExpressionShapes(t *testing.T) {
 		CloseTok:   5,
 		Elems:      []ExprSpan{{StartTok: 5, EndTok: 6}},
 	}}
+	program.Assigns = []Assignment{{
+		FuncIndex:  0,
+		Kind:       AssignSet,
+		StartTok:   13,
+		EndTok:     14,
+		OpTok:      13,
+		LeftStart:  13,
+		LeftEnd:    14,
+		RightStart: 13,
+		RightEnd:   14,
+		Targets:    []ExprSpan{{StartTok: 13, EndTok: 14}},
+		Values:     []ExprSpan{{StartTok: 13, EndTok: 14}},
+	}}
+	program.Returns = []Return{{
+		FuncIndex: 0,
+		StartTok:  12,
+		EndTok:    14,
+		Values:    []ExprSpan{{StartTok: 13, EndTok: 14}},
+	}}
 	data, ok := Marshal(program)
 	if !ok {
 		t.Fatal("Marshal failed")
@@ -313,7 +332,8 @@ func equalPrograms(left Program, right Program) bool {
 		return false
 	}
 	if len(left.Tokens) != len(right.Tokens) || len(left.Decls) != len(right.Decls) || len(left.Funcs) != len(right.Funcs) ||
-		len(left.Indexes) != len(right.Indexes) || len(left.Composites) != len(right.Composites) {
+		len(left.Indexes) != len(right.Indexes) || len(left.Composites) != len(right.Composites) ||
+		len(left.Assigns) != len(right.Assigns) || len(left.Returns) != len(right.Returns) {
 		return false
 	}
 	for i := 0; i < len(left.Tokens); i++ {
@@ -350,6 +370,44 @@ func equalPrograms(left Program, right Program) bool {
 		}
 		for j := 0; j < len(left.Composites[i].Elems); j++ {
 			if left.Composites[i].Elems[j] != right.Composites[i].Elems[j] {
+				return false
+			}
+		}
+	}
+	for i := 0; i < len(left.Assigns); i++ {
+		if left.Assigns[i].FuncIndex != right.Assigns[i].FuncIndex ||
+			left.Assigns[i].Kind != right.Assigns[i].Kind ||
+			left.Assigns[i].StartTok != right.Assigns[i].StartTok ||
+			left.Assigns[i].EndTok != right.Assigns[i].EndTok ||
+			left.Assigns[i].OpTok != right.Assigns[i].OpTok ||
+			left.Assigns[i].LeftStart != right.Assigns[i].LeftStart ||
+			left.Assigns[i].LeftEnd != right.Assigns[i].LeftEnd ||
+			left.Assigns[i].RightStart != right.Assigns[i].RightStart ||
+			left.Assigns[i].RightEnd != right.Assigns[i].RightEnd ||
+			len(left.Assigns[i].Targets) != len(right.Assigns[i].Targets) ||
+			len(left.Assigns[i].Values) != len(right.Assigns[i].Values) {
+			return false
+		}
+		for j := 0; j < len(left.Assigns[i].Targets); j++ {
+			if left.Assigns[i].Targets[j] != right.Assigns[i].Targets[j] {
+				return false
+			}
+		}
+		for j := 0; j < len(left.Assigns[i].Values); j++ {
+			if left.Assigns[i].Values[j] != right.Assigns[i].Values[j] {
+				return false
+			}
+		}
+	}
+	for i := 0; i < len(left.Returns); i++ {
+		if left.Returns[i].FuncIndex != right.Returns[i].FuncIndex ||
+			left.Returns[i].StartTok != right.Returns[i].StartTok ||
+			left.Returns[i].EndTok != right.Returns[i].EndTok ||
+			len(left.Returns[i].Values) != len(right.Returns[i].Values) {
+			return false
+		}
+		for j := 0; j < len(left.Returns[i].Values); j++ {
+			if left.Returns[i].Values[j] != right.Returns[i].Values[j] {
 				return false
 			}
 		}

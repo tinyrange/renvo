@@ -14,6 +14,8 @@ const (
 	TagFuncs   = 10
 	TagIndexes = 11
 	TagComps   = 12
+	TagAssigns = 13
+	TagReturns = 14
 )
 
 const (
@@ -104,6 +106,41 @@ type CompositeExpr struct {
 	Elems      []ExprSpan
 }
 
+const (
+	AssignUnknown = iota
+	AssignSet
+	AssignDefine
+	AssignAdd
+	AssignSub
+	AssignMul
+	AssignDiv
+	AssignMod
+	AssignAnd
+	AssignOr
+	AssignXor
+)
+
+type Assignment struct {
+	FuncIndex  int
+	Kind       int
+	StartTok   int
+	EndTok     int
+	OpTok      int
+	LeftStart  int
+	LeftEnd    int
+	RightStart int
+	RightEnd   int
+	Targets    []ExprSpan
+	Values     []ExprSpan
+}
+
+type Return struct {
+	FuncIndex int
+	StartTok  int
+	EndTok    int
+	Values    []ExprSpan
+}
+
 type Program struct {
 	Package    string
 	Text       []byte
@@ -112,6 +149,8 @@ type Program struct {
 	Funcs      []Func
 	Indexes    []IndexExpr
 	Composites []CompositeExpr
+	Assigns    []Assignment
+	Returns    []Return
 }
 
 func Marshal(program Program) ([]byte, bool) {
@@ -138,6 +177,14 @@ func Marshal(program Program) ([]byte, bool) {
 	if !ok {
 		return nil, false
 	}
+	assignData, ok := encodeAssignments(program.Assigns, len(program.Tokens), len(program.Funcs))
+	if !ok {
+		return nil, false
+	}
+	returnData, ok := encodeReturns(program.Returns, len(program.Tokens), len(program.Funcs))
+	if !ok {
+		return nil, false
+	}
 	var root []byte
 	root = appendNode(root, TagPackage, []byte(program.Package))
 	root = appendNode(root, TagText, program.Text)
@@ -146,6 +193,8 @@ func Marshal(program Program) ([]byte, bool) {
 	root = appendNode(root, TagFuncs, funcData)
 	root = appendNode(root, TagIndexes, indexData)
 	root = appendNode(root, TagComps, compData)
+	root = appendNode(root, TagAssigns, assignData)
+	root = appendNode(root, TagReturns, returnData)
 
 	out := make([]byte, 0, 14+len(root))
 	out = append(out, 'R', 'T', 'G', 'U')
@@ -179,6 +228,8 @@ func Unmarshal(data []byte) (Program, bool) {
 	tokenData := []byte{}
 	indexData := []byte{}
 	compData := []byte{}
+	assignData := []byte{}
+	returnData := []byte{}
 	seenPackage := false
 	seenText := false
 	seenTokens := false
@@ -186,6 +237,8 @@ func Unmarshal(data []byte) (Program, bool) {
 	seenFuncs := false
 	seenIndexes := false
 	seenComps := false
+	seenAssigns := false
+	seenReturns := false
 	pos := rootStart
 	for pos < rootEnd {
 		if pos+6 > rootEnd {
@@ -249,6 +302,18 @@ func Unmarshal(data []byte) (Program, bool) {
 			}
 			seenComps = true
 			compData = payload
+		} else if tag == TagAssigns {
+			if seenAssigns {
+				return program, false
+			}
+			seenAssigns = true
+			assignData = payload
+		} else if tag == TagReturns {
+			if seenReturns {
+				return program, false
+			}
+			seenReturns = true
+			returnData = payload
 		} else {
 			return program, false
 		}
@@ -278,6 +343,20 @@ func Unmarshal(data []byte) (Program, bool) {
 			return program, false
 		}
 		program.Composites = composites
+	}
+	if seenAssigns {
+		assigns, ok := decodeAssignments(assignData, len(program.Tokens), len(program.Funcs))
+		if !ok {
+			return program, false
+		}
+		program.Assigns = assigns
+	}
+	if seenReturns {
+		returns, ok := decodeReturns(returnData, len(program.Tokens), len(program.Funcs))
+		if !ok {
+			return program, false
+		}
+		program.Returns = returns
 	}
 	return program, true
 }
@@ -752,6 +831,223 @@ func decodeComposites(data []byte, tokenLimit int, declLimit int, funcLimit int)
 		return nil, false
 	}
 	return composites, true
+}
+
+func encodeAssignments(assigns []Assignment, tokenLimit int, funcLimit int) ([]byte, bool) {
+	out := make([]byte, 0, len(assigns)*14+1)
+	out = appendVarint(out, len(assigns))
+	for i := 0; i < len(assigns); i++ {
+		assign := assigns[i]
+		ok := true
+		if assign.FuncIndex < 0 || assign.FuncIndex >= funcLimit || assign.Kind < AssignUnknown || assign.Kind > AssignXor {
+			return nil, false
+		}
+		if !validSpan(tokenLimit, assign.StartTok, assign.EndTok) ||
+			!validSpan(tokenLimit, assign.LeftStart, assign.LeftEnd) ||
+			!validSpan(tokenLimit, assign.RightStart, assign.RightEnd) ||
+			!validToken(tokenLimit, assign.OpTok) {
+			return nil, false
+		}
+		out = appendVarint(out, assign.FuncIndex)
+		out = appendVarint(out, assign.Kind)
+		out = appendVarint(out, assign.StartTok)
+		out = appendVarint(out, assign.EndTok-assign.StartTok)
+		out = appendVarint(out, assign.OpTok)
+		out = appendVarint(out, assign.LeftStart)
+		out = appendVarint(out, assign.LeftEnd-assign.LeftStart)
+		out = appendVarint(out, assign.RightStart)
+		out = appendVarint(out, assign.RightEnd-assign.RightStart)
+		out = appendExprSpans(out, assign.Targets, tokenLimit, &ok)
+		if !ok {
+			return nil, false
+		}
+		out = appendExprSpans(out, assign.Values, tokenLimit, &ok)
+		if !ok {
+			return nil, false
+		}
+	}
+	return out, true
+}
+
+func decodeAssignments(data []byte, tokenLimit int, funcLimit int) ([]Assignment, bool) {
+	pos := 0
+	count, ok := readVarint(data, &pos)
+	if !ok || count < 0 {
+		return nil, false
+	}
+	assigns := make([]Assignment, 0, count)
+	for i := 0; i < count; i++ {
+		funcIndex, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		kind, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		startTok, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		tokCount, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		opTok, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		leftStart, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		leftCount, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		rightStart, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		rightCount, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		targets, ok := readExprSpans(data, &pos, tokenLimit)
+		if !ok {
+			return nil, false
+		}
+		values, ok := readExprSpans(data, &pos, tokenLimit)
+		if !ok {
+			return nil, false
+		}
+		assign := Assignment{
+			FuncIndex:  funcIndex,
+			Kind:       kind,
+			StartTok:   startTok,
+			EndTok:     startTok + tokCount,
+			OpTok:      opTok,
+			LeftStart:  leftStart,
+			LeftEnd:    leftStart + leftCount,
+			RightStart: rightStart,
+			RightEnd:   rightStart + rightCount,
+			Targets:    targets,
+			Values:     values,
+		}
+		if assign.FuncIndex < 0 || assign.FuncIndex >= funcLimit || assign.Kind < AssignUnknown || assign.Kind > AssignXor {
+			return nil, false
+		}
+		if !validSpan(tokenLimit, assign.StartTok, assign.EndTok) ||
+			!validSpan(tokenLimit, assign.LeftStart, assign.LeftEnd) ||
+			!validSpan(tokenLimit, assign.RightStart, assign.RightEnd) ||
+			!validToken(tokenLimit, assign.OpTok) {
+			return nil, false
+		}
+		assigns = append(assigns, assign)
+	}
+	if pos != len(data) {
+		return nil, false
+	}
+	return assigns, true
+}
+
+func encodeReturns(returns []Return, tokenLimit int, funcLimit int) ([]byte, bool) {
+	out := make([]byte, 0, len(returns)*5+1)
+	out = appendVarint(out, len(returns))
+	ok := true
+	for i := 0; i < len(returns); i++ {
+		ret := returns[i]
+		if ret.FuncIndex < 0 || ret.FuncIndex >= funcLimit || !validSpan(tokenLimit, ret.StartTok, ret.EndTok) {
+			return nil, false
+		}
+		out = appendVarint(out, ret.FuncIndex)
+		out = appendVarint(out, ret.StartTok)
+		out = appendVarint(out, ret.EndTok-ret.StartTok)
+		out = appendExprSpans(out, ret.Values, tokenLimit, &ok)
+		if !ok {
+			return nil, false
+		}
+	}
+	return out, true
+}
+
+func decodeReturns(data []byte, tokenLimit int, funcLimit int) ([]Return, bool) {
+	pos := 0
+	count, ok := readVarint(data, &pos)
+	if !ok || count < 0 {
+		return nil, false
+	}
+	returns := make([]Return, 0, count)
+	for i := 0; i < count; i++ {
+		funcIndex, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		startTok, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		tokCount, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		values, ok := readExprSpans(data, &pos, tokenLimit)
+		if !ok {
+			return nil, false
+		}
+		ret := Return{
+			FuncIndex: funcIndex,
+			StartTok:  startTok,
+			EndTok:    startTok + tokCount,
+			Values:    values,
+		}
+		if ret.FuncIndex < 0 || ret.FuncIndex >= funcLimit || !validSpan(tokenLimit, ret.StartTok, ret.EndTok) {
+			return nil, false
+		}
+		returns = append(returns, ret)
+	}
+	if pos != len(data) {
+		return nil, false
+	}
+	return returns, true
+}
+
+func appendExprSpans(out []byte, spans []ExprSpan, tokenLimit int, ok *bool) []byte {
+	out = appendVarint(out, len(spans))
+	for i := 0; i < len(spans); i++ {
+		span := spans[i]
+		if !validSpan(tokenLimit, span.StartTok, span.EndTok) {
+			*ok = false
+			return out
+		}
+		out = appendVarint(out, span.StartTok)
+		out = appendVarint(out, span.EndTok-span.StartTok)
+	}
+	return out
+}
+
+func readExprSpans(data []byte, pos *int, tokenLimit int) ([]ExprSpan, bool) {
+	count, ok := readVarint(data, pos)
+	if !ok || count < 0 {
+		return nil, false
+	}
+	spans := make([]ExprSpan, 0, count)
+	for i := 0; i < count; i++ {
+		startTok, ok := readVarint(data, pos)
+		if !ok {
+			return nil, false
+		}
+		tokCount, ok := readVarint(data, pos)
+		if !ok {
+			return nil, false
+		}
+		span := ExprSpan{StartTok: startTok, EndTok: startTok + tokCount}
+		if !validSpan(tokenLimit, span.StartTok, span.EndTok) {
+			return nil, false
+		}
+		spans = append(spans, span)
+	}
+	return spans, true
 }
 
 func validOwner(kind int, index int, declLimit int, funcLimit int) bool {

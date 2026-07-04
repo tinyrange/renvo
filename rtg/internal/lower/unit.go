@@ -301,6 +301,9 @@ func (b *unitBuilder) addCheckedFuncs(info check.PackageInfo, files []fileTokens
 		if !b.addBodyShapes(body, files[body.File].oldToNew, ownerIndex) {
 			return false
 		}
+		if !b.addBodyFlow(body, files[body.File].oldToNew, ownerIndex) {
+			return false
+		}
 	}
 	return true
 }
@@ -341,6 +344,26 @@ func (b *unitBuilder) addBodyShapes(body check.FuncBody, oldToNew []int, ownerIn
 			return false
 		}
 		b.program.Composites = append(b.program.Composites, composite)
+	}
+	return true
+}
+
+func (b *unitBuilder) addBodyFlow(body check.FuncBody, oldToNew []int, funcIndex int) bool {
+	for i := 0; i < len(body.Assigns); i++ {
+		assign, ok := mapAssignment(body.Assigns[i], oldToNew, b.finalEOF, funcIndex)
+		if !ok {
+			b.setErr(EmitErrCheck, body.File, body.Body.ErrorTok)
+			return false
+		}
+		b.program.Assigns = append(b.program.Assigns, assign)
+	}
+	for i := 0; i < len(body.Returns); i++ {
+		ret, ok := mapReturn(body.Returns[i], oldToNew, b.finalEOF, funcIndex)
+		if !ok {
+			b.setErr(EmitErrCheck, body.File, body.Body.ErrorTok)
+			return false
+		}
+		b.program.Returns = append(b.program.Returns, ret)
 	}
 	return true
 }
@@ -395,6 +418,72 @@ func mapCompositeExpr(composite check.CompositeExpr, oldToNew []int, eof int, ow
 			return out, false
 		}
 		out.Elems = append(out.Elems, mapped)
+	}
+	return out, true
+}
+
+func mapAssignment(assign check.AssignInfo, oldToNew []int, eof int, funcIndex int) (unit.Assignment, bool) {
+	out := unit.Assignment{
+		FuncIndex:  funcIndex,
+		Kind:       assign.Kind,
+		StartTok:   mapToken(oldToNew, assign.StartTok, eof),
+		EndTok:     mapToken(oldToNew, assign.EndTok, eof),
+		OpTok:      mapToken(oldToNew, assign.OpTok, eof),
+		LeftStart:  mapToken(oldToNew, assign.LeftStart, eof),
+		LeftEnd:    mapToken(oldToNew, assign.LeftEnd, eof),
+		RightStart: mapToken(oldToNew, assign.RightStart, eof),
+		RightEnd:   mapToken(oldToNew, assign.RightEnd, eof),
+		Targets:    make([]unit.ExprSpan, 0, len(assign.Targets)),
+		Values:     make([]unit.ExprSpan, 0, len(assign.Values)),
+	}
+	if funcIndex < 0 || out.StartTok < 0 || out.EndTok < out.StartTok || out.OpTok < 0 ||
+		out.LeftStart < 0 || out.LeftEnd < out.LeftStart || out.RightStart < 0 || out.RightEnd < out.RightStart {
+		return out, false
+	}
+	for i := 0; i < len(assign.Targets); i++ {
+		span, ok := mapExprSpan(assign.Targets[i].Span, oldToNew, eof)
+		if !ok {
+			return out, false
+		}
+		out.Targets = append(out.Targets, span)
+	}
+	for i := 0; i < len(assign.Values); i++ {
+		span, ok := mapExprSpan(assign.Values[i], oldToNew, eof)
+		if !ok {
+			return out, false
+		}
+		out.Values = append(out.Values, span)
+	}
+	return out, true
+}
+
+func mapReturn(ret check.ReturnInfo, oldToNew []int, eof int, funcIndex int) (unit.Return, bool) {
+	out := unit.Return{
+		FuncIndex: funcIndex,
+		StartTok:  mapToken(oldToNew, ret.StartTok, eof),
+		EndTok:    mapToken(oldToNew, ret.EndTok, eof),
+		Values:    make([]unit.ExprSpan, 0, len(ret.Values)),
+	}
+	if funcIndex < 0 || out.StartTok < 0 || out.EndTok < out.StartTok {
+		return out, false
+	}
+	for i := 0; i < len(ret.Values); i++ {
+		span, ok := mapExprSpan(ret.Values[i], oldToNew, eof)
+		if !ok {
+			return out, false
+		}
+		out.Values = append(out.Values, span)
+	}
+	return out, true
+}
+
+func mapExprSpan(span check.ExprSpan, oldToNew []int, eof int) (unit.ExprSpan, bool) {
+	out := unit.ExprSpan{
+		StartTok: mapToken(oldToNew, span.StartTok, eof),
+		EndTok:   mapToken(oldToNew, span.EndTok, eof),
+	}
+	if out.StartTok < 0 || out.EndTok < out.StartTok {
+		return out, false
 	}
 	return out, true
 }

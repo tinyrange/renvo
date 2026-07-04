@@ -142,7 +142,10 @@ func appMain() int { return lib.Value(1) }
 
 var Values = []int{1, 2}
 
-func Value(i int) int { return Values[i] }
+func Value(i int) int {
+	out := Values[i]
+	return out
+}
 `)},
 	})
 	program, ok := LinkUnits(result.Units, result.Root)
@@ -160,6 +163,12 @@ func Value(i int) int { return Values[i] }
 	if len(program.Indexes) != 1 {
 		t.Fatalf("linked indexes = %#v, want 1", program.Indexes)
 	}
+	if len(program.Assigns) != 1 {
+		t.Fatalf("linked assignments = %#v, want 1", program.Assigns)
+	}
+	if len(program.Returns) != 2 {
+		t.Fatalf("linked returns = %#v, want 2", program.Returns)
+	}
 	composite := program.Composites[0]
 	if composite.OwnerKind != unit.OwnerDecl || composite.OwnerIndex != values || linkedSpanText(program, composite.TypeStart, composite.TypeEnd) != "[]int" {
 		t.Fatalf("linked composite = %#v, owner decl %d", composite, values)
@@ -169,6 +178,22 @@ func Value(i int) int { return Values[i] }
 		linkedSpanText(program, index.BaseStart, index.BaseEnd) != "Values" ||
 		linkedSpanText(program, index.IndexStart, index.IndexEnd) != "i" {
 		t.Fatalf("linked index = %#v, owner func %d", index, valueFn)
+	}
+	assign := program.Assigns[0]
+	if assign.FuncIndex != valueFn || assign.Kind != unit.AssignDefine ||
+		linkedSpanText(program, assign.LeftStart, assign.LeftEnd) != "out" ||
+		linkedSpanText(program, assign.RightStart, assign.RightEnd) != "Values[i]" {
+		t.Fatalf("linked assignment = %#v, owner func %d", assign, valueFn)
+	}
+	foundValueReturn := false
+	for i := 0; i < len(program.Returns); i++ {
+		ret := program.Returns[i]
+		if ret.FuncIndex == valueFn && len(ret.Values) == 1 && linkedSpanText(program, ret.Values[0].StartTok, ret.Values[0].EndTok) == "out" {
+			foundValueReturn = true
+		}
+	}
+	if !foundValueReturn {
+		t.Fatalf("linked Value return not found in %#v", program.Returns)
 	}
 }
 

@@ -152,6 +152,20 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		}
 		dst.Composites = append(dst.Composites, composite)
 	}
+	for i := 0; i < len(src.Assigns); i++ {
+		assign, ok := mapAssignment(src.Assigns[i], oldToNew, finalEOF, funcOffset)
+		if !ok {
+			return false
+		}
+		dst.Assigns = append(dst.Assigns, assign)
+	}
+	for i := 0; i < len(src.Returns); i++ {
+		ret, ok := mapReturn(src.Returns[i], oldToNew, finalEOF, funcOffset)
+		if !ok {
+			return false
+		}
+		dst.Returns = append(dst.Returns, ret)
+	}
 	if hasNext && (len(src.Text) == 0 || src.Text[len(src.Text)-1] != '\n') {
 		dst.Text = append(dst.Text, '\n')
 	}
@@ -192,6 +206,46 @@ func mapComposite(composite unit.CompositeExpr, oldToNew []int, eof int, declOff
 		composite.Elems[i].EndTok = mapToken(oldToNew, composite.Elems[i].EndTok, eof)
 	}
 	return composite, true
+}
+
+func mapAssignment(assign unit.Assignment, oldToNew []int, eof int, funcOffset int) (unit.Assignment, bool) {
+	if assign.FuncIndex < 0 {
+		return assign, false
+	}
+	assign.FuncIndex += funcOffset
+	assign.StartTok = mapToken(oldToNew, assign.StartTok, eof)
+	assign.EndTok = mapToken(oldToNew, assign.EndTok, eof)
+	assign.OpTok = mapToken(oldToNew, assign.OpTok, eof)
+	assign.LeftStart = mapToken(oldToNew, assign.LeftStart, eof)
+	assign.LeftEnd = mapToken(oldToNew, assign.LeftEnd, eof)
+	assign.RightStart = mapToken(oldToNew, assign.RightStart, eof)
+	assign.RightEnd = mapToken(oldToNew, assign.RightEnd, eof)
+	for i := 0; i < len(assign.Targets); i++ {
+		assign.Targets[i] = mapExprSpan(assign.Targets[i], oldToNew, eof)
+	}
+	for i := 0; i < len(assign.Values); i++ {
+		assign.Values[i] = mapExprSpan(assign.Values[i], oldToNew, eof)
+	}
+	return assign, true
+}
+
+func mapReturn(ret unit.Return, oldToNew []int, eof int, funcOffset int) (unit.Return, bool) {
+	if ret.FuncIndex < 0 {
+		return ret, false
+	}
+	ret.FuncIndex += funcOffset
+	ret.StartTok = mapToken(oldToNew, ret.StartTok, eof)
+	ret.EndTok = mapToken(oldToNew, ret.EndTok, eof)
+	for i := 0; i < len(ret.Values); i++ {
+		ret.Values[i] = mapExprSpan(ret.Values[i], oldToNew, eof)
+	}
+	return ret, true
+}
+
+func mapExprSpan(span unit.ExprSpan, oldToNew []int, eof int) unit.ExprSpan {
+	span.StartTok = mapToken(oldToNew, span.StartTok, eof)
+	span.EndTok = mapToken(oldToNew, span.EndTok, eof)
+	return span
 }
 
 func mapOwner(kind int, index int, declOffset int, funcOffset int) (int, bool) {

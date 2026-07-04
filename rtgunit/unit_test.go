@@ -105,6 +105,25 @@ func appMain() int { return values[0] }
 		CloseTok:   11,
 		Elems:      []ExprSpan{{StartTok: 8, EndTok: 9}, {StartTok: 10, EndTok: 11}},
 	}}
+	program.Assigns = []Assignment{{
+		FuncIndex:  0,
+		Kind:       AssignSet,
+		StartTok:   17,
+		EndTok:     21,
+		OpTok:      18,
+		LeftStart:  17,
+		LeftEnd:    18,
+		RightStart: 19,
+		RightEnd:   20,
+		Targets:    []ExprSpan{{StartTok: 17, EndTok: 18}},
+		Values:     []ExprSpan{{StartTok: 19, EndTok: 20}},
+	}}
+	program.Returns = []Return{{
+		FuncIndex: 0,
+		StartTok:  16,
+		EndTok:    21,
+		Values:    []ExprSpan{{StartTok: 17, EndTok: 21}},
+	}}
 	data, err := Marshal(program)
 	if err != nil {
 		t.Fatalf("Marshal failed: %v", err)
@@ -126,6 +145,14 @@ func appMain() int { return values[0] }
 		decoded.Composites[0].Elems[0] != program.Composites[0].Elems[0] ||
 		decoded.Composites[0].Elems[1] != program.Composites[0].Elems[1] {
 		t.Fatalf("decoded composite = %#v, want %#v", decoded.Composites[0], program.Composites[0])
+	}
+	if len(decoded.Assigns) != 1 || decoded.Assigns[0].Kind != AssignSet ||
+		decoded.Assigns[0].Targets[0] != program.Assigns[0].Targets[0] ||
+		decoded.Assigns[0].Values[0] != program.Assigns[0].Values[0] {
+		t.Fatalf("decoded assigns = %#v, want %#v", decoded.Assigns, program.Assigns)
+	}
+	if len(decoded.Returns) != 1 || decoded.Returns[0].Values[0] != program.Returns[0].Values[0] {
+		t.Fatalf("decoded returns = %#v, want %#v", decoded.Returns, program.Returns)
 	}
 }
 
