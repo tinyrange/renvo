@@ -65,6 +65,7 @@ type FuncBody struct {
 	Func  int
 	Body  syntax.Body
 	Scope FuncScope
+	Refs  []NameRef
 }
 
 func CheckGraph(graph load.Graph) Program {
@@ -147,16 +148,10 @@ func checkPackage(graph load.Graph, pkgIndex int) (PackageInfo, bool, int, int, 
 				return info, false, CheckErrDuplicate, fileIndex, fn.NameTok
 			}
 			info.Symbols = append(info.Symbols, Symbol{Name: name, Kind: kind, Package: pkgIndex, File: fileIndex, Token: fn.NameTok})
-			body := syntax.ParseFuncBody(file, fn)
-			if !body.Ok {
-				return info, false, CheckErrBody, fileIndex, body.ErrorTok
-			}
-			scope, ok, scopeTok := buildFuncScope(file, fn, body)
-			if !ok {
-				return info, false, CheckErrScope, fileIndex, scopeTok
-			}
-			info.Bodies = append(info.Bodies, FuncBody{Name: name, Kind: kind, File: fileIndex, Func: i, Body: body, Scope: scope})
 		}
+	}
+	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
+		file := pkg.Files[fileIndex].File
 		for i := 0; i < len(file.Imports); i++ {
 			imp, ok := buildImport(graph, pkgIndex, fileIndex, file, i)
 			if !ok {
@@ -170,6 +165,28 @@ func checkPackage(graph load.Graph, pkgIndex int) (PackageInfo, bool, int, int, 
 	}
 	sortSymbols(info.Symbols)
 	sortImports(info.Imports)
+	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
+		file := pkg.Files[fileIndex].File
+		for i := 0; i < len(file.Funcs); i++ {
+			fn := file.Funcs[i]
+			name := tokenString(file, fn.NameTok)
+			kind := SymbolFunc
+			if fn.ReceiverStart >= 0 {
+				name = receiverTypeName(file, fn) + "." + name
+				kind = SymbolMethod
+			}
+			body := syntax.ParseFuncBody(file, fn)
+			if !body.Ok {
+				return info, false, CheckErrBody, fileIndex, body.ErrorTok
+			}
+			scope, ok, scopeTok := buildFuncScope(file, fn, body)
+			if !ok {
+				return info, false, CheckErrScope, fileIndex, scopeTok
+			}
+			refs := buildFuncRefs(file, fileIndex, info, body, scope)
+			info.Bodies = append(info.Bodies, FuncBody{Name: name, Kind: kind, File: fileIndex, Func: i, Body: body, Scope: scope, Refs: refs})
+		}
+	}
 	return info, true, CheckOK, -1, -1
 }
 

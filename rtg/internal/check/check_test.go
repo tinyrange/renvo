@@ -149,6 +149,49 @@ start:
 	assertScopeName(t, scope, "start", NameLabel)
 }
 
+func TestCheckGraphFunctionReferences(t *testing.T) {
+	graph := testGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import lib "example.com/case/pkg/lib"
+
+const packageValue = 3
+
+func appMain(param int) int {
+	local := lib.Value() + packageValue + later() + len("x")
+	if local > param {
+		goto done
+	}
+done:
+	return local
+}
+
+func later() int { return 2 }
+`)},
+		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte(`package lib
+
+func Value() int { return 4 }
+`)},
+	})
+	prog := CheckGraph(graph)
+	if !prog.Ok {
+		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
+	}
+	root := prog.Packages[len(prog.Packages)-1]
+	bodyIndex := LookupFuncBody(root, "appMain")
+	if bodyIndex < 0 {
+		t.Fatalf("appMain body not found: %#v", root.Bodies)
+	}
+	body := root.Bodies[bodyIndex]
+	assertBodyRef(t, body, "param", RefScope)
+	assertBodyRef(t, body, "local", RefScope)
+	assertBodyRef(t, body, "packageValue", RefPackage)
+	assertBodyRef(t, body, "later", RefPackage)
+	assertBodyRef(t, body, "lib", RefImport)
+	assertBodyRef(t, body, "len", RefBuiltin)
+	assertBodyRef(t, body, "done", RefLabel)
+}
+
 func TestCheckGraphDuplicateParamScope(t *testing.T) {
 	graph := testGraph(t, []load.SourceFile{
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
@@ -357,6 +400,14 @@ func assertScopeName(t *testing.T, scope FuncScope, name string, kind int) {
 	}
 	if scope.Names[index].Kind != kind {
 		t.Fatalf("scope name %q kind = %d, want %d", name, scope.Names[index].Kind, kind)
+	}
+}
+
+func assertBodyRef(t *testing.T, body FuncBody, name string, kind int) {
+	t.Helper()
+	index := LookupBodyRef(body, name, kind)
+	if index < 0 {
+		t.Fatalf("body ref %q kind %d not found in %#v", name, kind, body.Refs)
 	}
 }
 
