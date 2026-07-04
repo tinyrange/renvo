@@ -18,6 +18,7 @@ const targetEnv = "RTG_FRONTEND_TARGET"
 
 var frontendOnce sync.Once
 var frontendPath string
+var frontendBackendPath string
 var frontendErr error
 
 type corpusCase struct {
@@ -28,6 +29,7 @@ type corpusCase struct {
 type frontendConfig struct {
 	compiler string
 	target   string
+	env      []string
 }
 
 func TestFrontendQuickCorpus(t *testing.T) {
@@ -120,6 +122,9 @@ func runFrontendCorpusCase(t *testing.T, frontend frontendConfig, dir string) {
 	out := filepath.Join(t.TempDir(), "app")
 	cmd := exec.Command(frontend.compiler, "-t", frontend.target, "-s", "-o", out, "./cmd/app")
 	cmd.Dir = dir
+	if len(frontend.env) > 0 {
+		cmd.Env = append(os.Environ(), frontend.env...)
+	}
 	compileOut, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("frontend compile failed: %v\n%s", err, string(compileOut))
@@ -168,12 +173,24 @@ func frontendCompiler(t *testing.T, root string) frontendConfig {
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			frontendErr = fmt.Errorf("host frontend build failed: %v\n%s", err, string(out))
+			return
+		}
+		frontendBackendPath = filepath.Join(dir, "rtgx-backend")
+		cmd = exec.Command("go", "build", "-o", frontendBackendPath, ".")
+		cmd.Dir = root
+		out, err = cmd.CombinedOutput()
+		if err != nil {
+			frontendErr = fmt.Errorf("backend build failed: %v\n%s", err, string(out))
 		}
 	})
 	if frontendErr != nil {
 		t.Fatal(frontendErr)
 	}
-	return frontendConfig{compiler: frontendPath, target: frontendTarget(t)}
+	return frontendConfig{
+		compiler: frontendPath,
+		target:   frontendTarget(t),
+		env:      []string{"RTG_BACKEND=" + frontendBackendPath},
+	}
 }
 
 func frontendTarget(t *testing.T) string {

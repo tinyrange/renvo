@@ -36,7 +36,9 @@ func Value() int { return answer }
 	if linked.Program.ImportPath != "example.com/case/cmd/app" {
 		t.Fatalf("linked import path = %q", linked.Program.ImportPath)
 	}
-	assertLinkedImport(t, linked.Program, "lib", "example.com/case/pkg/lib", false, false)
+	if len(linked.Program.Imports) != 0 {
+		t.Fatalf("linked imports = %#v, want none", linked.Program.Imports)
+	}
 	if !bytes.Contains(linked.Program.Text, []byte("package lib")) || !bytes.Contains(linked.Program.Text, []byte("package main")) {
 		t.Fatalf("linked text missing package sources: %q", string(linked.Program.Text))
 	}
@@ -47,7 +49,7 @@ func Value() int { return answer }
 	if decoded.Package != "main" {
 		t.Fatalf("decoded package = %q, want main", decoded.Package)
 	}
-	if decoded.ImportPath != "example.com/case/cmd/app" || len(decoded.Imports) != 1 || decoded.Imports[0].ImportPath != "example.com/case/pkg/lib" {
+	if decoded.ImportPath != "example.com/case/cmd/app" || len(decoded.Imports) != 0 {
 		t.Fatalf("decoded imports = %q %#v", decoded.ImportPath, decoded.Imports)
 	}
 	if len(decoded.Decls) != 1 {
@@ -223,7 +225,7 @@ func Value(i int) int {
 	assertLinkedSymbol(t, program, "Record", unit.SymbolType, unit.OwnerDecl, record)
 	assertLinkedSymbol(t, program, "Reader", unit.SymbolType, unit.OwnerDecl, reader)
 	valuesSym := assertLinkedSymbol(t, program, "Values", unit.SymbolVar, unit.OwnerDecl, values)
-	valueSym := assertLinkedSymbol(t, program, "Value", unit.SymbolFunc, unit.OwnerFunc, valueFn)
+	assertLinkedSymbol(t, program, "Value", unit.SymbolFunc, unit.OwnerFunc, valueFn)
 	assertLinkedSymbol(t, program, "appMain", unit.SymbolFunc, unit.OwnerFunc, appMain)
 	assertLinkedDeclMeta(t, program, numbers, numbersSym, "[]int", "", nil)
 	assertLinkedDeclMeta(t, program, values, valuesSym, "", "[]int{1, 2}", []string{"[]int{1, 2}"})
@@ -288,8 +290,8 @@ func Value(i int) int {
 	if len(program.Calls) != 1 {
 		t.Fatalf("linked calls = %#v, want 1", program.Calls)
 	}
-	if len(program.Selectors) != 1 {
-		t.Fatalf("linked selectors = %#v, want 1", program.Selectors)
+	if len(program.Selectors) != 0 {
+		t.Fatalf("linked selectors = %#v, want none", program.Selectors)
 	}
 	composite := program.Composites[0]
 	if composite.OwnerKind != unit.OwnerDecl || composite.OwnerIndex != values || linkedSpanText(program, composite.TypeStart, composite.TypeEnd) != "[]int" {
@@ -318,30 +320,17 @@ func Value(i int) int {
 		t.Fatalf("linked Value return not found in %#v", program.Returns)
 	}
 	call := program.Calls[0]
-	if call.OwnerKind != unit.OwnerFunc || call.OwnerIndex != appMain || call.Kind != unit.CallImportSelector ||
-		linkedTokenText(program, call.BaseTok) != "lib" ||
+	if call.OwnerKind != unit.OwnerFunc || call.OwnerIndex != appMain || call.Kind != unit.CallPackage ||
 		linkedTokenText(program, call.CalleeTok) != "Value" ||
 		len(call.Args) != 1 ||
 		linkedSpanText(program, call.Args[0].StartTok, call.Args[0].EndTok) != "1" {
 		t.Fatalf("linked call = %#v, owner func %d", call, appMain)
 	}
-	selector := program.Selectors[0]
-	if selector.OwnerKind != unit.OwnerFunc || selector.OwnerIndex != appMain || selector.Kind != unit.SelectorImport ||
-		linkedTokenText(program, selector.BaseTok) != "lib" ||
-		linkedTokenText(program, selector.NameTok) != "Value" ||
-		selector.BaseKind != unit.RefImport ||
-		selector.Symbol != valueSym {
-		t.Fatalf("linked selector = %#v, owner func %d value symbol %d", selector, appMain, valueSym)
-	}
-	foundLibRef := false
 	for i := 0; i < len(program.Refs); i++ {
 		ref := program.Refs[i]
-		if ref.OwnerKind == unit.OwnerFunc && ref.OwnerIndex == appMain && ref.Kind == unit.RefImport && linkedTokenText(program, ref.Token) == "lib" {
-			foundLibRef = true
+		if ref.Kind == unit.RefImport {
+			t.Fatalf("linked import ref survived: %#v in %#v", ref, program.Refs)
 		}
-	}
-	if !foundLibRef {
-		t.Fatalf("linked lib ref not found in %#v", program.Refs)
 	}
 }
 
@@ -392,7 +381,7 @@ done:
 	assertLinkedStatement(t, linked.Program, valueFn, unit.StmtBreak, "")
 	assertLinkedStatement(t, linked.Program, valueFn, unit.StmtLabel, "")
 	assertLinkedStatement(t, linked.Program, valueFn, unit.StmtReturn, "total")
-	assertLinkedStatement(t, linked.Program, appMain, unit.StmtReturn, "lib.Value(0)")
+	assertLinkedStatement(t, linked.Program, appMain, unit.StmtReturn, "Value(0)")
 
 	decoded, err := rtgunit.Unmarshal(linked.Data)
 	if err != nil {

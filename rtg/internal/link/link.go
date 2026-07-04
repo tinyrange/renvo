@@ -243,15 +243,19 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		return false
 	}
 	textOffset := len(dst.Text)
-	importOffset := len(dst.Imports)
 	symbolOffset := len(dst.Symbols)
 	declOffset := len(dst.Decls)
 	funcOffset := len(dst.Funcs)
 	typeOffset := len(dst.Types)
 	oldToNew := make([]int, len(src.Tokens))
+	skip, redirect := linkedTokenSkip(src)
 	for i := 0; i < len(src.Tokens); i++ {
 		tok := src.Tokens[i]
 		if tok.Kind == unit.TokenEOF {
+			oldToNew[i] = finalEOF
+			continue
+		}
+		if skip[i] {
 			oldToNew[i] = finalEOF
 			continue
 		}
@@ -260,14 +264,12 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		tok.Line += lineOffset
 		dst.Tokens = append(dst.Tokens, tok)
 	}
-	dst.Text = append(dst.Text, src.Text...)
-	for i := 0; i < len(src.Imports); i++ {
-		imp, ok := mapImport(src.Imports[i], oldToNew, finalEOF)
-		if !ok {
-			return false
+	for i := 0; i < len(redirect); i++ {
+		if skip[i] && redirect[i] >= 0 {
+			oldToNew[i] = mapToken(oldToNew, redirect[i], finalEOF)
 		}
-		dst.Imports = append(dst.Imports, imp)
 	}
+	dst.Text = append(dst.Text, src.Text...)
 	for i := 0; i < len(src.Decls); i++ {
 		decl := src.Decls[i]
 		decl.NameStart += textOffset
@@ -416,14 +418,20 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		dst.Calls = append(dst.Calls, call)
 	}
 	for i := 0; i < len(src.Refs); i++ {
-		ref, ok := mapRef(src.Refs[i], oldToNew, finalEOF, declOffset, funcOffset, importOffset, symbolOffsets)
+		if src.Refs[i].Kind == unit.RefImport {
+			continue
+		}
+		ref, ok := mapRef(src.Refs[i], oldToNew, finalEOF, declOffset, funcOffset, symbolOffsets)
 		if !ok {
 			return false
 		}
 		dst.Refs = append(dst.Refs, ref)
 	}
 	for i := 0; i < len(src.Selectors); i++ {
-		selector, ok := mapSelector(src.Selectors[i], oldToNew, finalEOF, declOffset, funcOffset, importOffset, symbolOffsets)
+		if src.Selectors[i].BaseKind == unit.RefImport {
+			continue
+		}
+		selector, ok := mapSelector(src.Selectors[i], oldToNew, finalEOF, declOffset, funcOffset, symbolOffsets)
 		if !ok {
 			return false
 		}
@@ -435,17 +443,66 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 	return true
 }
 
-func mapImport(imp unit.Import, oldToNew []int, eof int) (unit.Import, bool) {
-	imp.NameTok = mapNullableToken(imp.NameTok, oldToNew, eof)
-	imp.PathTok = mapToken(oldToNew, imp.PathTok, eof)
-	if len(imp.Name) == 0 || len(imp.ImportPath) == 0 ||
-		imp.Package < -1 ||
-		imp.NameTok < -1 ||
-		imp.PathTok < 0 ||
-		(imp.Dot && imp.Blank) {
-		return imp, false
+func linkedTokenSkip(program unit.Program) ([]bool, []int) {
+	skip := make([]bool, len(program.Tokens))
+	redirect := make([]int, len(program.Tokens))
+	for i := 0; i < len(redirect); i++ {
+		redirect[i] = -1
 	}
-	return imp, true
+	for i := 0; i < len(program.Imports); i++ {
+		markImportDeclTokens(program, skip, program.Imports[i])
+	}
+	for i := 0; i < len(program.Selectors); i++ {
+		selector := program.Selectors[i]
+		if selector.BaseKind == unit.RefImport {
+			markRedirectToken(skip, redirect, selector.BaseTok, selector.NameTok)
+			markRedirectToken(skip, redirect, selector.DotTok, selector.NameTok)
+		}
+	}
+	for i := 0; i < len(program.TypeRefs); i++ {
+		ref := program.TypeRefs[i]
+		if ref.Kind == unit.TypeRefImportSelector {
+			markRedirectToken(skip, redirect, ref.BaseTok, ref.Token)
+			markRedirectToken(skip, redirect, ref.DotTok, ref.Token)
+		}
+	}
+	for i := 0; i < len(program.Calls); i++ {
+		call := program.Calls[i]
+		if call.Kind == unit.CallImportSelector {
+			markRedirectToken(skip, redirect, call.BaseTok, call.CalleeTok)
+			markRedirectToken(skip, redirect, call.DotTok, call.CalleeTok)
+		}
+	}
+	return skip, redirect
+}
+
+func markImportDeclTokens(program unit.Program, skip []bool, imp unit.Import) {
+	if imp.PathTok < 0 || imp.PathTok >= len(program.Tokens) {
+		return
+	}
+	line := program.Tokens[imp.PathTok].Line
+	start := imp.PathTok
+	if imp.NameTok >= 0 && imp.NameTok < start {
+		start = imp.NameTok
+	}
+	for start > 0 && program.Tokens[start-1].Line == line {
+		start--
+	}
+	end := imp.PathTok
+	for end+1 < len(program.Tokens) && program.Tokens[end+1].Line == line {
+		end++
+	}
+	for i := start; i <= end; i++ {
+		skip[i] = true
+	}
+}
+
+func markRedirectToken(skip []bool, redirect []int, tok int, target int) {
+	if tok < 0 || tok >= len(skip) || target < 0 || target >= len(skip) {
+		return
+	}
+	skip[tok] = true
+	redirect[tok] = target
 }
 
 func mapSymbol(symbol unit.Symbol, oldToNew []int, eof int, declOffset int, funcOffset int) (unit.Symbol, bool) {
@@ -673,6 +730,11 @@ func mapTypeRef(ref unit.TypeRef, oldToNew []int, eof int, declOffset int, funcO
 	ref.Token = mapToken(oldToNew, ref.Token, eof)
 	ref.BaseTok = mapToken(oldToNew, ref.BaseTok, eof)
 	ref.DotTok = mapToken(oldToNew, ref.DotTok, eof)
+	if ref.Kind == unit.TypeRefImportSelector {
+		ref.Kind = unit.TypeRefPackage
+		ref.BaseTok = eof
+		ref.DotTok = eof
+	}
 	symbol, ok := mapPackageSymbol(ref.Package, ref.Symbol, symbolOffsets)
 	if !ok {
 		return ref, false
@@ -780,9 +842,16 @@ func mapCall(call unit.Call, oldToNew []int, eof int, declOffset int, funcOffset
 		return call, false
 	}
 	call.OwnerIndex = ownerIndex
+	if call.Kind == unit.CallImportSelector {
+		call.Kind = unit.CallPackage
+	}
 	call.CalleeTok = mapToken(oldToNew, call.CalleeTok, eof)
 	call.BaseTok = mapToken(oldToNew, call.BaseTok, eof)
 	call.DotTok = mapToken(oldToNew, call.DotTok, eof)
+	if call.Kind == unit.CallPackage {
+		call.BaseTok = eof
+		call.DotTok = eof
+	}
 	call.ArgsStart = mapToken(oldToNew, call.ArgsStart, eof)
 	call.ArgsEnd = mapToken(oldToNew, call.ArgsEnd, eof)
 	for i := 0; i < len(call.Args); i++ {
@@ -791,16 +860,14 @@ func mapCall(call unit.Call, oldToNew []int, eof int, declOffset int, funcOffset
 	return call, true
 }
 
-func mapRef(ref unit.NameRef, oldToNew []int, eof int, declOffset int, funcOffset int, importOffset int, symbolOffsets []int) (unit.NameRef, bool) {
+func mapRef(ref unit.NameRef, oldToNew []int, eof int, declOffset int, funcOffset int, symbolOffsets []int) (unit.NameRef, bool) {
 	ownerIndex, ok := mapOwner(ref.OwnerKind, ref.OwnerIndex, declOffset, funcOffset)
 	if !ok {
 		return ref, false
 	}
 	ref.OwnerIndex = ownerIndex
 	ref.Token = mapToken(oldToNew, ref.Token, eof)
-	if ref.Kind == unit.RefImport && ref.Index >= 0 {
-		ref.Index += importOffset
-	} else if ref.Kind == unit.RefPackage && ref.Index >= 0 {
+	if ref.Kind == unit.RefPackage && ref.Index >= 0 {
 		index, ok := mapPackageSymbol(ref.Package, ref.Index, symbolOffsets)
 		if !ok {
 			return ref, false
@@ -810,7 +877,7 @@ func mapRef(ref unit.NameRef, oldToNew []int, eof int, declOffset int, funcOffse
 	return ref, true
 }
 
-func mapSelector(selector unit.Selector, oldToNew []int, eof int, declOffset int, funcOffset int, importOffset int, symbolOffsets []int) (unit.Selector, bool) {
+func mapSelector(selector unit.Selector, oldToNew []int, eof int, declOffset int, funcOffset int, symbolOffsets []int) (unit.Selector, bool) {
 	ownerIndex, ok := mapOwner(selector.OwnerKind, selector.OwnerIndex, declOffset, funcOffset)
 	if !ok {
 		return selector, false
@@ -819,9 +886,7 @@ func mapSelector(selector unit.Selector, oldToNew []int, eof int, declOffset int
 	selector.BaseTok = mapToken(oldToNew, selector.BaseTok, eof)
 	selector.DotTok = mapToken(oldToNew, selector.DotTok, eof)
 	selector.NameTok = mapToken(oldToNew, selector.NameTok, eof)
-	if selector.BaseKind == unit.RefImport && selector.BaseIndex >= 0 {
-		selector.BaseIndex += importOffset
-	} else if selector.BaseKind == unit.RefPackage && selector.BaseIndex >= 0 {
+	if selector.BaseKind == unit.RefPackage && selector.BaseIndex >= 0 {
 		index, ok := mapPackageSymbol(selector.BasePackage, selector.BaseIndex, symbolOffsets)
 		if !ok {
 			return selector, false
@@ -897,8 +962,9 @@ func countLinkedTokens(programs []unit.Program) int {
 	count := 0
 	for i := 0; i < len(programs); i++ {
 		tokens := programs[i].Tokens
+		skip, _ := linkedTokenSkip(programs[i])
 		for j := 0; j < len(tokens); j++ {
-			if tokens[j].Kind != unit.TokenEOF {
+			if tokens[j].Kind != unit.TokenEOF && !skip[j] {
 				count++
 			}
 		}
