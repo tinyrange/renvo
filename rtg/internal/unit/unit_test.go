@@ -122,6 +122,7 @@ func TestMarshalRoundTripExpressionShapes(t *testing.T) {
 		ValueEnd:   6,
 		Values:     []ExprSpan{{StartTok: 5, EndTok: 6}},
 	}}
+	program.InitOrder = []int{0}
 	program.Signatures = []FuncSignature{{
 		FuncIndex: 0,
 		Results:   []Field{{NameTok: -1, TypeStart: 10, TypeEnd: 11}},
@@ -443,6 +444,7 @@ func equalPrograms(left Program, right Program) bool {
 		len(left.Symbols) != len(right.Symbols) ||
 		len(left.Decls) != len(right.Decls) || len(left.Funcs) != len(right.Funcs) ||
 		len(left.DeclMeta) != len(right.DeclMeta) ||
+		len(left.InitOrder) != len(right.InitOrder) ||
 		len(left.Signatures) != len(right.Signatures) ||
 		len(left.Types) != len(right.Types) ||
 		len(left.TypeRefs) != len(right.TypeRefs) ||
@@ -493,6 +495,11 @@ func equalPrograms(left Program, right Program) bool {
 			if left.DeclMeta[i].Values[j] != right.DeclMeta[i].Values[j] {
 				return false
 			}
+		}
+	}
+	for i := 0; i < len(left.InitOrder); i++ {
+		if left.InitOrder[i] != right.InitOrder[i] {
+			return false
 		}
 	}
 	for i := 0; i < len(left.Signatures); i++ {

@@ -27,6 +27,7 @@ const (
 	TagDeclMeta   = 22
 	TagImports    = 23
 	TagSymbols    = 24
+	TagInitOrder  = 25
 )
 
 const (
@@ -335,6 +336,7 @@ type Program struct {
 	Symbols    []Symbol
 	Decls      []Decl
 	DeclMeta   []DeclMeta
+	InitOrder  []int
 	Funcs      []Func
 	Signatures []FuncSignature
 	Types      []TypeInfo
@@ -370,6 +372,10 @@ func Marshal(program Program) ([]byte, bool) {
 		return nil, false
 	}
 	declMetaData, ok := encodeDeclMeta(program.DeclMeta, len(program.Tokens), len(program.Decls))
+	if !ok {
+		return nil, false
+	}
+	initOrderData, ok := encodeInitOrder(program.InitOrder, len(program.Decls))
 	if !ok {
 		return nil, false
 	}
@@ -430,6 +436,7 @@ func Marshal(program Program) ([]byte, bool) {
 	root = appendNode(root, TagSymbols, symbolData)
 	root = appendNode(root, TagDecls, declData)
 	root = appendNode(root, TagDeclMeta, declMetaData)
+	root = appendNode(root, TagInitOrder, initOrderData)
 	root = appendNode(root, TagFuncs, funcData)
 	root = appendNode(root, TagSigs, sigData)
 	root = appendNode(root, TagTypes, typeData)
@@ -476,6 +483,7 @@ func Unmarshal(data []byte) (Program, bool) {
 	importData := []byte{}
 	symbolData := []byte{}
 	declMetaData := []byte{}
+	initOrderData := []byte{}
 	sigData := []byte{}
 	typeData := []byte{}
 	typeRefData := []byte{}
@@ -495,6 +503,7 @@ func Unmarshal(data []byte) (Program, bool) {
 	seenSymbols := false
 	seenDecls := false
 	seenDeclMeta := false
+	seenInitOrder := false
 	seenFuncs := false
 	seenSigs := false
 	seenTypes := false
@@ -572,6 +581,12 @@ func Unmarshal(data []byte) (Program, bool) {
 			}
 			seenDeclMeta = true
 			declMetaData = payload
+		} else if tag == TagInitOrder {
+			if seenInitOrder {
+				return program, false
+			}
+			seenInitOrder = true
+			initOrderData = payload
 		} else if tag == TagFuncs {
 			if seenFuncs {
 				return program, false
@@ -684,6 +699,13 @@ func Unmarshal(data []byte) (Program, bool) {
 			return program, false
 		}
 		program.DeclMeta = declMeta
+	}
+	if seenInitOrder {
+		initOrder, ok := decodeInitOrder(initOrderData, len(program.Decls))
+		if !ok {
+			return program, false
+		}
+		program.InitOrder = initOrder
 	}
 	if seenSigs {
 		sigs, ok := decodeSignatures(sigData, len(program.Tokens), len(program.Funcs))
@@ -1170,6 +1192,46 @@ func decodeDeclMeta(data []byte, tokenLimit int, declLimit int) ([]DeclMeta, boo
 		return nil, false
 	}
 	return metas, true
+}
+
+func encodeInitOrder(order []int, declLimit int) ([]byte, bool) {
+	if len(order) > declLimit {
+		return nil, false
+	}
+	seen := make([]bool, declLimit)
+	out := make([]byte, 0, len(order)+1)
+	out = appendVarint(out, len(order))
+	for i := 0; i < len(order); i++ {
+		decl := order[i]
+		if decl < 0 || decl >= declLimit || seen[decl] {
+			return nil, false
+		}
+		seen[decl] = true
+		out = appendVarint(out, decl)
+	}
+	return out, true
+}
+
+func decodeInitOrder(data []byte, declLimit int) ([]int, bool) {
+	pos := 0
+	count, ok := readVarint(data, &pos)
+	if !ok || count < 0 || count > declLimit {
+		return nil, false
+	}
+	seen := make([]bool, declLimit)
+	out := make([]int, 0, count)
+	for i := 0; i < count; i++ {
+		decl, ok := readVarint(data, &pos)
+		if !ok || decl < 0 || decl >= declLimit || seen[decl] {
+			return nil, false
+		}
+		seen[decl] = true
+		out = append(out, decl)
+	}
+	if pos != len(data) {
+		return nil, false
+	}
+	return out, true
 }
 
 func encodeFuncs(funcs []Func) ([]byte, bool) {

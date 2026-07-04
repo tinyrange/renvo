@@ -175,6 +175,7 @@ func Value(i int) int {
 	assertLinkedSymbol(t, program, "appMain", unit.SymbolFunc, unit.OwnerFunc, appMain)
 	assertLinkedDeclMeta(t, program, numbers, numbersSym, "[]int", "", nil)
 	assertLinkedDeclMeta(t, program, values, valuesSym, "", "[]int{1, 2}", []string{"[]int{1, 2}"})
+	assertLinkedInitOrder(t, program, []int{values})
 	assertLinkedSignature(t, program, valueFn, nil, []string{"i:int"}, []string{":int"})
 	assertLinkedSignature(t, program, appMain, nil, nil, []string{":int"})
 	if len(program.Types) != 1 {
@@ -429,6 +430,18 @@ func assertLinkedDeclMeta(t *testing.T, program unit.Program, declIndex int, sym
 		return
 	}
 	t.Fatalf("linked decl metadata index=%d symbol=%d not found in %#v", declIndex, symbol, program.DeclMeta)
+}
+
+func assertLinkedInitOrder(t *testing.T, program unit.Program, want []int) {
+	t.Helper()
+	if len(program.InitOrder) != len(want) {
+		t.Fatalf("linked init order = %#v, want %#v", program.InitOrder, want)
+	}
+	for i := 0; i < len(want); i++ {
+		if program.InitOrder[i] != want[i] {
+			t.Fatalf("linked init order = %#v, want %#v", program.InitOrder, want)
+		}
+	}
 }
 
 func assertLinkedImport(t *testing.T, program unit.Program, name string, importPath string, dot bool, blank bool) {

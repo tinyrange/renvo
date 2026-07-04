@@ -142,6 +142,13 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		}
 		dst.DeclMeta = append(dst.DeclMeta, meta)
 	}
+	for i := 0; i < len(src.InitOrder); i++ {
+		decl := src.InitOrder[i]
+		if decl < 0 || decl >= len(src.Decls) {
+			return false
+		}
+		dst.InitOrder = append(dst.InitOrder, declOffset+decl)
+	}
 	for i := 0; i < len(src.Funcs); i++ {
 		fn := src.Funcs[i]
 		fn.NameStart += textOffset

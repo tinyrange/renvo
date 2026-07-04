@@ -108,6 +108,9 @@ func EmitCheckedPackage(pkg load.Package, info check.PackageInfo) Result {
 	if !builder.addCheckedDecls(info, files) {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
+	if !builder.addCheckedInitOrder(info) {
+		return emitFail(result, builder.err, builder.errFile, builder.errToken)
+	}
 	if !builder.addCheckedTypes(info, files) {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
@@ -401,6 +404,20 @@ func (b *unitBuilder) addCheckedDecls(info check.PackageInfo, files []fileTokens
 		if !b.addDeclResolution(declInfo, files[declInfo.File].oldToNew, ownerIndex) {
 			return false
 		}
+	}
+	return true
+}
+
+func (b *unitBuilder) addCheckedInitOrder(info check.PackageInfo) bool {
+	seen := make([]bool, len(info.Decls))
+	for i := 0; i < len(info.InitOrder); i++ {
+		index := info.InitOrder[i]
+		if index < 0 || index >= len(info.Decls) || seen[index] || info.Decls[index].Kind != check.SymbolVar || index >= len(b.declRows) || b.declRows[index] < 0 {
+			b.setErr(EmitErrCheck, -1, -1)
+			return false
+		}
+		seen[index] = true
+		b.program.InitOrder = append(b.program.InitOrder, b.declRows[index])
 	}
 	return true
 }

@@ -259,6 +259,9 @@ func appMain() int {
 	if len(result.Program.DeclMeta) != len(result.Program.Decls) {
 		t.Fatalf("decl metadata = %#v, want %d", result.Program.DeclMeta, len(result.Program.Decls))
 	}
+	if len(result.Program.InitOrder) != 2 {
+		t.Fatalf("init order = %#v, want two package variables", result.Program.InitOrder)
+	}
 	if len(result.Program.Signatures) != len(result.Program.Funcs) {
 		t.Fatalf("signatures = %#v, want %d", result.Program.Signatures, len(result.Program.Funcs))
 	}
@@ -288,6 +291,7 @@ func appMain() int {
 	assertUnitDeclMeta(t, result.Program, item, itemSym, "struct { value int }", "", nil, false)
 	assertUnitDeclMeta(t, result.Program, global, globalSym, "", "[]int{1, 2, 3}", []string{"[]int{1, 2, 3}"}, false)
 	assertUnitDeclMeta(t, result.Program, picked, pickedSym, "", "choose(global[1])", []string{"choose(global[1])"}, false)
+	assertUnitInitOrder(t, result.Program, []int{global, picked})
 	assertUnitSignature(t, result.Program, choose, nil, []string{"v:int"}, []string{":int"})
 	assertUnitSignature(t, result.Program, appMain, nil, nil, []string{":int"})
 	assertUnitComposite(t, result.Program, unit.OwnerDecl, global, "[]int", []string{"1", "2", "3"})
@@ -336,6 +340,9 @@ func appMain() int {
 	}
 	if len(decoded.DeclMeta) != len(result.Program.DeclMeta) {
 		t.Fatalf("decoded decl metadata = %d, want %d", len(decoded.DeclMeta), len(result.Program.DeclMeta))
+	}
+	if len(decoded.InitOrder) != len(result.Program.InitOrder) {
+		t.Fatalf("decoded init order = %d, want %d", len(decoded.InitOrder), len(result.Program.InitOrder))
 	}
 	if len(decoded.Signatures) != len(result.Program.Signatures) {
 		t.Fatalf("decoded signatures = %d, want %d", len(decoded.Signatures), len(result.Program.Signatures))
@@ -630,6 +637,18 @@ func assertUnitDeclMeta(t *testing.T, program unit.Program, declIndex int, symbo
 		return
 	}
 	t.Fatalf("decl metadata index=%d symbol=%d alias=%v not found in %#v", declIndex, symbol, alias, program.DeclMeta)
+}
+
+func assertUnitInitOrder(t *testing.T, program unit.Program, want []int) {
+	t.Helper()
+	if len(program.InitOrder) != len(want) {
+		t.Fatalf("init order = %#v, want %#v", program.InitOrder, want)
+	}
+	for i := 0; i < len(want); i++ {
+		if program.InitOrder[i] != want[i] {
+			t.Fatalf("init order = %#v, want %#v", program.InitOrder, want)
+		}
+	}
 }
 
 func assertUnitImport(t *testing.T, program unit.Program, name string, importPath string, dot bool, blank bool) {

@@ -34,6 +34,7 @@ const (
 	TagDeclMeta   = uint16(22)
 	TagImports    = uint16(23)
 	TagSymbols    = uint16(24)
+	TagInitOrder  = uint16(25)
 )
 
 const (
@@ -343,6 +344,7 @@ type Program struct {
 	Symbols    []Symbol
 	Decls      []Decl
 	DeclMeta   []DeclMeta
+	InitOrder  []int
 	Funcs      []Func
 	Signatures []FuncSignature
 	Types      []TypeInfo
@@ -414,6 +416,7 @@ func Marshal(program Program) ([]byte, error) {
 		NewNode(TagSymbols, encodeSymbols(program.Symbols)),
 		NewNode(TagDecls, encodeDecls(program.Decls)),
 		NewNode(TagDeclMeta, encodeDeclMeta(program.DeclMeta)),
+		NewNode(TagInitOrder, encodeInitOrder(program.InitOrder)),
 		NewNode(TagFuncs, encodeFuncs(program.Funcs)),
 		NewNode(TagSigs, encodeSignatures(program.Signatures)),
 		NewNode(TagTypes, encodeTypes(program.Types)),
@@ -466,6 +469,7 @@ func Unmarshal(data []byte) (Program, error) {
 	var importData []byte
 	var symbolData []byte
 	var declMetaData []byte
+	var initOrderData []byte
 	var sigData []byte
 	var typeData []byte
 	var typeRefData []byte
@@ -481,6 +485,7 @@ func Unmarshal(data []byte) (Program, error) {
 	seenImports := false
 	seenSymbols := false
 	seenDeclMeta := false
+	seenInitOrder := false
 	seenSigs := false
 	seenTypes := false
 	seenTypeRefs := false
@@ -542,6 +547,12 @@ func Unmarshal(data []byte) (Program, error) {
 			}
 			seenDeclMeta = true
 			declMetaData = payload
+		case TagInitOrder:
+			if seenInitOrder {
+				return program, fmt.Errorf("duplicate init order table")
+			}
+			seenInitOrder = true
+			initOrderData = payload
 		case TagFuncs:
 			funcs, err := decodeFuncs(payload)
 			if err != nil {
@@ -650,6 +661,13 @@ func Unmarshal(data []byte) (Program, error) {
 			return program, err
 		}
 		program.DeclMeta = declMeta
+	}
+	if seenInitOrder {
+		initOrder, err := decodeInitOrder(initOrderData)
+		if err != nil {
+			return program, err
+		}
+		program.InitOrder = initOrder
 	}
 	if seenSigs {
 		sigs, err := decodeSignatures(sigData)
@@ -1584,6 +1602,15 @@ func encodeDeclMeta(metas []DeclMeta) []byte {
 	return out
 }
 
+func encodeInitOrder(order []int) []byte {
+	var out []byte
+	out = appendVarint(out, len(order))
+	for _, decl := range order {
+		out = appendVarint(out, decl)
+	}
+	return out
+}
+
 func encodeFuncs(funcs []Func) []byte {
 	var out []byte
 	out = appendVarint(out, len(funcs))
@@ -2042,6 +2069,28 @@ func decodeDeclMeta(data []byte) ([]DeclMeta, error) {
 		return nil, fmt.Errorf("trailing decl metadata")
 	}
 	return metas, nil
+}
+
+func decodeInitOrder(data []byte) ([]int, error) {
+	pos := 0
+	count, next, ok := readVarint(data, pos)
+	if !ok {
+		return nil, fmt.Errorf("invalid init order count")
+	}
+	pos = next
+	order := make([]int, 0, count)
+	for i := 0; i < count; i++ {
+		decl, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid init order %d", i)
+		}
+		pos = n
+		order = append(order, decl)
+	}
+	if pos != len(data) {
+		return nil, fmt.Errorf("trailing init order data")
+	}
+	return order, nil
 }
 
 func decodeFuncs(data []byte) ([]Func, error) {
