@@ -213,6 +213,8 @@ const (
 
 var current, next = packageValue, lib.Value()
 var computed = later()
+var first = second + computed
+var second = packageValue
 
 type item struct { value int }
 
@@ -236,6 +238,8 @@ func Value() int { return 5 }
 	assertDeclSpan(t, file, root, "current", SymbolVar, "", "packageValue, lib.Value()")
 	assertDeclSpan(t, file, root, "next", SymbolVar, "", "packageValue, lib.Value()")
 	assertDeclSpan(t, file, root, "computed", SymbolVar, "", "later()")
+	assertDeclSpan(t, file, root, "first", SymbolVar, "", "second + computed")
+	assertDeclSpan(t, file, root, "second", SymbolVar, "", "packageValue")
 	assertDeclSpan(t, file, root, "item", SymbolType, "struct { value int }", "")
 	assertDeclValues(t, file, root, "packageValue", []string{"3"})
 	assertDeclValues(t, file, root, "left", []string{"1", "2"})
@@ -243,15 +247,21 @@ func Value() int { return 5 }
 	assertDeclValues(t, file, root, "current", []string{"packageValue", "lib.Value()"})
 	assertDeclValues(t, file, root, "next", []string{"packageValue", "lib.Value()"})
 	assertDeclValues(t, file, root, "computed", []string{"later()"})
+	assertDeclValues(t, file, root, "first", []string{"second + computed"})
+	assertDeclValues(t, file, root, "second", []string{"packageValue"})
 	assertDeclValues(t, file, root, "item", nil)
-	assertDeclLookupOrder(t, root, []string{"computed", "current", "item", "left", "next", "packageValue", "right"})
-	assertDeclSourceOrder(t, root, []string{"packageValue", "left", "right", "current", "next", "computed", "item"})
+	assertDeclLookupOrder(t, root, []string{"computed", "current", "first", "item", "left", "next", "packageValue", "right", "second"})
+	assertDeclSourceOrder(t, root, []string{"packageValue", "left", "right", "current", "next", "computed", "first", "second", "item"})
+	assertDeclInitOrder(t, root, []string{"current", "next", "computed", "second", "first"})
 	assertDeclRef(t, root, "current", "packageValue", RefPackage)
 	assertDeclRef(t, root, "current", "lib", RefImport)
 	assertDeclSelector(t, prog, root, "current", "lib", "Value")
 	assertDeclCall(t, prog, root, "current", "lib", "Value", CallImportSelector)
 	assertDeclRef(t, root, "computed", "later", RefPackage)
 	assertDeclCall(t, prog, root, "computed", "", "later", CallPackage)
+	assertDeclDeps(t, root, "current", []string{"packageValue"})
+	assertDeclDeps(t, root, "first", []string{"second", "computed"})
+	assertDeclDeps(t, root, "second", []string{"packageValue"})
 }
 
 func TestCheckGraphLocalDeclarations(t *testing.T) {
@@ -901,6 +911,43 @@ func assertDeclSourceOrder(t *testing.T, info PackageInfo, names []string) {
 		}
 		if info.Decls[index].Name != names[i] {
 			t.Fatalf("decl source order %d = %q, want %q in %#v", i, info.Decls[index].Name, names[i], info.DeclOrder)
+		}
+	}
+}
+
+func assertDeclInitOrder(t *testing.T, info PackageInfo, names []string) {
+	t.Helper()
+	if len(info.InitOrder) != len(names) {
+		t.Fatalf("init order = %#v, want %v", info.InitOrder, names)
+	}
+	for i := 0; i < len(names); i++ {
+		index := info.InitOrder[i]
+		if index < 0 || index >= len(info.Decls) {
+			t.Fatalf("init order %d index = %d in %#v", i, index, info.InitOrder)
+		}
+		if info.Decls[index].Name != names[i] {
+			t.Fatalf("init order %d = %q, want %q in %#v", i, info.Decls[index].Name, names[i], info.InitOrder)
+		}
+	}
+}
+
+func assertDeclDeps(t *testing.T, info PackageInfo, name string, deps []string) {
+	t.Helper()
+	index := LookupDecl(info, name)
+	if index < 0 {
+		t.Fatalf("decl %q not found in %#v", name, info.Decls)
+	}
+	decl := info.Decls[index]
+	if len(decl.Deps) != len(deps) {
+		t.Fatalf("decl %q deps = %#v, want %v", name, decl.Deps, deps)
+	}
+	for i := 0; i < len(deps); i++ {
+		dep := decl.Deps[i]
+		if dep < 0 || dep >= len(info.Decls) {
+			t.Fatalf("decl %q dep %d index = %d in %#v", name, i, dep, decl.Deps)
+		}
+		if info.Decls[dep].Name != deps[i] {
+			t.Fatalf("decl %q dep %d = %q, want %q in %#v", name, i, info.Decls[dep].Name, deps[i], decl.Deps)
 		}
 	}
 }

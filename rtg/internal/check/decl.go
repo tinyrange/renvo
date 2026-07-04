@@ -331,6 +331,57 @@ func buildDeclOrder(decls []DeclInfo) []int {
 	return order
 }
 
+func buildDeclDeps(info *PackageInfo) {
+	for i := 0; i < len(info.Decls); i++ {
+		decl := &info.Decls[i]
+		for j := 0; j < len(decl.Refs); j++ {
+			ref := decl.Refs[j]
+			if ref.Kind != RefPackage {
+				continue
+			}
+			dep := lookupDeclBySymbol(info.Decls, ref.Index)
+			if dep < 0 || dep == i || intSliceHas(decl.Deps, dep) {
+				continue
+			}
+			decl.Deps = append(decl.Deps, dep)
+		}
+	}
+}
+
+func buildInitOrder(decls []DeclInfo, sourceOrder []int) []int {
+	var order []int
+	state := make([]int, len(decls))
+	for i := 0; i < len(sourceOrder); i++ {
+		index := sourceOrder[i]
+		if index >= 0 && index < len(decls) && decls[index].Kind == SymbolVar {
+			order = appendInitVisit(order, decls, state, index)
+		}
+	}
+	return order
+}
+
+func appendInitVisit(order []int, decls []DeclInfo, state []int, index int) []int {
+	if index < 0 || index >= len(decls) || decls[index].Kind != SymbolVar {
+		return order
+	}
+	if state[index] == 2 {
+		return order
+	}
+	if state[index] == 1 {
+		return order
+	}
+	state[index] = 1
+	deps := decls[index].Deps
+	for i := 0; i < len(deps); i++ {
+		dep := deps[i]
+		if dep >= 0 && dep < len(decls) && decls[dep].Kind == SymbolVar {
+			order = appendInitVisit(order, decls, state, dep)
+		}
+	}
+	state[index] = 2
+	return append(order, index)
+}
+
 func declAfter(left DeclInfo, right DeclInfo) bool {
 	if left.Name != right.Name {
 		return left.Name > right.Name
@@ -354,4 +405,22 @@ func declIndexAfter(decls []DeclInfo, left int, right int) bool {
 		return leftDecl.Kind > rightDecl.Kind
 	}
 	return leftDecl.Name > rightDecl.Name
+}
+
+func lookupDeclBySymbol(decls []DeclInfo, symbol int) int {
+	for i := 0; i < len(decls); i++ {
+		if decls[i].Symbol == symbol {
+			return i
+		}
+	}
+	return -1
+}
+
+func intSliceHas(values []int, value int) bool {
+	for i := 0; i < len(values); i++ {
+		if values[i] == value {
+			return true
+		}
+	}
+	return false
 }

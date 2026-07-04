@@ -39,6 +39,7 @@ type PackageInfo struct {
 	Imports   []Import
 	Decls     []DeclInfo
 	DeclOrder []int
+	InitOrder []int
 	Types     []TypeInfo
 	TypeRefs  []TypeRef
 	Methods   []MethodInfo
@@ -77,6 +78,7 @@ type DeclInfo struct {
 	Refs       []NameRef
 	Selectors  []SelectorRef
 	Calls      []CallRef
+	Deps       []int
 	Alias      bool
 }
 
@@ -219,6 +221,8 @@ func checkPackage(graph load.Graph, pkgIndex int, checked []PackageInfo) (Packag
 	}
 	sortDecls(info.Decls)
 	info.DeclOrder = buildDeclOrder(info.Decls)
+	buildDeclDeps(&info)
+	info.InitOrder = buildInitOrder(info.Decls, info.DeclOrder)
 	for i := 0; i < len(info.Decls); i++ {
 		decl := info.Decls[i]
 		if decl.Kind == SymbolType {
