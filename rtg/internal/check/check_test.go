@@ -365,6 +365,56 @@ func Value(value int) int { return value }
 	assertLocalConstString(t, body, "text", "local")
 }
 
+func TestCheckGraphExpressionShapes(t *testing.T) {
+	graph := testGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+type item struct { value int }
+
+var global = []int{1, 2, 3}
+var picked = global[1]
+var inline = struct { value int }{value: 4}
+
+func appMain() int {
+	var local = []item{{value: global[0]}}
+	local[0] = item{value: picked}
+	return local[0].value
+}
+`)},
+	})
+	prog := CheckGraph(graph)
+	if !prog.Ok {
+		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
+	}
+	root := prog.Packages[0]
+	file := prog.Graph.Packages[0].Files[0].File
+	assertDeclComposite(t, file, root, "global", "[]int", []string{"1", "2", "3"})
+	assertDeclIndex(t, file, root, "picked", "global", "1")
+	inline := requireDecl(t, root, "inline")
+	if len(inline.Composites) != 1 {
+		t.Fatalf("inline composites = %#v, want 1", inline.Composites)
+	}
+	assertDeclComposite(t, file, root, "inline", "struct { value int }", []string{"value: 4"})
+
+	bodyIndex := LookupFuncBody(root, "appMain")
+	if bodyIndex < 0 {
+		t.Fatalf("appMain body not found: %#v", root.Bodies)
+	}
+	body := root.Bodies[bodyIndex]
+	if len(body.Indexes) != 3 {
+		t.Fatalf("body indexes = %#v, want 3", body.Indexes)
+	}
+	if len(body.Composites) != 2 {
+		t.Fatalf("body composites = %#v, want 2", body.Composites)
+	}
+	assertBodyIndex(t, file, body, "global", "0")
+	assertBodyIndex(t, file, body, "local", "0")
+	assertBodyComposite(t, file, body, "[]item", []string{"{value: global[0]}"})
+	assertBodyComposite(t, file, body, "item", []string{"value: picked"})
+	assertLocalIndex(t, file, body, "local", "global", "0")
+	assertLocalComposite(t, file, body, "local", "[]item", []string{"{value: global[0]}"})
+}
+
 func TestCheckGraphTypes(t *testing.T) {
 	graph := testGraph(t, []load.SourceFile{
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
@@ -869,6 +919,18 @@ func assertDeclValues(t *testing.T, file syntax.File, info PackageInfo, name str
 	assertExprSpans(t, file, info.Decls[index].Values, values)
 }
 
+func assertDeclIndex(t *testing.T, file syntax.File, info PackageInfo, name string, base string, indexText string) {
+	t.Helper()
+	decl := requireDecl(t, info, name)
+	assertIndexExpr(t, file, decl.Indexes, base, indexText)
+}
+
+func assertDeclComposite(t *testing.T, file syntax.File, info PackageInfo, name string, typ string, elems []string) {
+	t.Helper()
+	decl := requireDecl(t, info, name)
+	assertCompositeExpr(t, file, decl.Composites, typ, elems)
+}
+
 func assertDeclConstInt(t *testing.T, info PackageInfo, name string, value int) {
 	t.Helper()
 	decl := requireDecl(t, info, name)
@@ -1049,6 +1111,18 @@ func assertLocalDeclValues(t *testing.T, file syntax.File, body FuncBody, name s
 		t.Fatalf("local decl %q not found in %#v", name, body.Locals)
 	}
 	assertExprSpans(t, file, body.Locals[index].Values, values)
+}
+
+func assertLocalIndex(t *testing.T, file syntax.File, body FuncBody, name string, base string, indexText string) {
+	t.Helper()
+	decl := requireLocalDecl(t, body, name)
+	assertIndexExpr(t, file, decl.Indexes, base, indexText)
+}
+
+func assertLocalComposite(t *testing.T, file syntax.File, body FuncBody, name string, typ string, elems []string) {
+	t.Helper()
+	decl := requireLocalDecl(t, body, name)
+	assertCompositeExpr(t, file, decl.Composites, typ, elems)
 }
 
 func assertLocalConstInt(t *testing.T, body FuncBody, name string, value int) {
@@ -1379,6 +1453,39 @@ func assertExprSpans(t *testing.T, file syntax.File, spans []ExprSpan, want []st
 			t.Fatalf("expr span %d = %q, want %q in %#v", i, got, want[i], spans)
 		}
 	}
+}
+
+func assertBodyIndex(t *testing.T, file syntax.File, body FuncBody, base string, indexText string) {
+	t.Helper()
+	assertIndexExpr(t, file, body.Indexes, base, indexText)
+}
+
+func assertBodyComposite(t *testing.T, file syntax.File, body FuncBody, typ string, elems []string) {
+	t.Helper()
+	assertCompositeExpr(t, file, body.Composites, typ, elems)
+}
+
+func assertIndexExpr(t *testing.T, file syntax.File, indexes []IndexExpr, base string, indexText string) {
+	t.Helper()
+	for i := 0; i < len(indexes); i++ {
+		index := indexes[i]
+		if spanText(file, index.BaseStart, index.BaseEnd) == base && spanText(file, index.IndexStart, index.IndexEnd) == indexText {
+			return
+		}
+	}
+	t.Fatalf("index %s[%s] not found in %#v", base, indexText, indexes)
+}
+
+func assertCompositeExpr(t *testing.T, file syntax.File, composites []CompositeExpr, typ string, elems []string) {
+	t.Helper()
+	for i := 0; i < len(composites); i++ {
+		composite := composites[i]
+		if spanText(file, composite.TypeStart, composite.TypeEnd) == typ {
+			assertExprSpans(t, file, composite.Elems, elems)
+			return
+		}
+	}
+	t.Fatalf("composite %s not found in %#v", typ, composites)
 }
 
 func bodyHasStmt(body syntax.Body, kind int) bool {

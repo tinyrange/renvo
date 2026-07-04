@@ -110,6 +110,8 @@ func buildDeclInfo(file syntax.File, fileIndex int, info PackageInfo, checked []
 		out.Refs = appendExprRefs(out.Refs, file, fileIndex, info, FuncScope{}, out.ValueStart, out.ValueEnd)
 		out.Selectors = appendExprSelectors(out.Selectors, file, fileIndex, info, checked, FuncScope{}, out.ValueStart, out.ValueEnd)
 		out.Calls = appendExprCalls(out.Calls, file, fileIndex, info, checked, FuncScope{}, out.ValueStart, out.ValueEnd)
+		out.Indexes = appendExprIndexes(out.Indexes, file, out.ValueStart, out.ValueEnd)
+		out.Composites = appendExprComposites(out.Composites, file, out.ValueStart, out.ValueEnd)
 		if out.Kind == SymbolConst {
 			out.Const = evalConstValue(file, out.Values, out.ValueIndex)
 		}
@@ -178,6 +180,8 @@ func appendLocalDeclSpec(decls []LocalDeclInfo, file syntax.File, fileIndex int,
 	refs := appendExprRefs(nil, file, fileIndex, info, scope, valueSpanStart, valueSpanEnd)
 	selectors := appendExprSelectors(nil, file, fileIndex, info, checked, scope, valueSpanStart, valueSpanEnd)
 	calls := appendExprCalls(nil, file, fileIndex, info, checked, scope, valueSpanStart, valueSpanEnd)
+	indexes := appendExprIndexes(nil, file, valueSpanStart, valueSpanEnd)
+	composites := appendExprComposites(nil, file, valueSpanStart, valueSpanEnd)
 	for i := 0; i < len(names); i++ {
 		name := tokenString(file, names[i])
 		if name == "_" {
@@ -198,6 +202,8 @@ func appendLocalDeclSpec(decls []LocalDeclInfo, file syntax.File, fileIndex int,
 			Refs:       refs,
 			Selectors:  selectors,
 			Calls:      calls,
+			Indexes:    indexes,
+			Composites: composites,
 		})
 		if kind == SymbolConst {
 			decls[len(decls)-1].Const = evalConstValue(file, values, i)

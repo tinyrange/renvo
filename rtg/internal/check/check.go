@@ -86,6 +86,8 @@ type DeclInfo struct {
 	Refs       []NameRef
 	Selectors  []SelectorRef
 	Calls      []CallRef
+	Indexes    []IndexExpr
+	Composites []CompositeExpr
 	Deps       []int
 	Const      ConstValue
 	Alias      bool
@@ -106,6 +108,8 @@ type LocalDeclInfo struct {
 	Refs       []NameRef
 	Selectors  []SelectorRef
 	Calls      []CallRef
+	Indexes    []IndexExpr
+	Composites []CompositeExpr
 	Const      ConstValue
 	Alias      bool
 }
@@ -119,20 +123,22 @@ type ConstValue struct {
 }
 
 type FuncBody struct {
-	Name      string
-	Kind      int
-	File      int
-	Func      int
-	Signature FuncSignature
-	Body      syntax.Body
-	Scope     FuncScope
-	Refs      []NameRef
-	Selectors []SelectorRef
-	Calls     []CallRef
-	Locals    []LocalDeclInfo
-	TypeRefs  []TypeRef
-	Assigns   []AssignInfo
-	Returns   []ReturnInfo
+	Name       string
+	Kind       int
+	File       int
+	Func       int
+	Signature  FuncSignature
+	Body       syntax.Body
+	Scope      FuncScope
+	Refs       []NameRef
+	Selectors  []SelectorRef
+	Calls      []CallRef
+	Indexes    []IndexExpr
+	Composites []CompositeExpr
+	Locals     []LocalDeclInfo
+	TypeRefs   []TypeRef
+	Assigns    []AssignInfo
+	Returns    []ReturnInfo
 }
 
 func CheckGraph(graph load.Graph) Program {
@@ -273,11 +279,13 @@ func checkPackage(graph load.Graph, pkgIndex int, checked []PackageInfo) (Packag
 			refs := buildFuncRefs(file, fileIndex, info, body, scope)
 			selectors := buildFuncSelectors(file, fileIndex, info, checked, body, scope)
 			calls := buildFuncCalls(file, fileIndex, info, checked, body, scope)
+			indexes := buildFuncIndexExprs(file, body)
+			composites := buildFuncCompositeExprs(file, body)
 			locals := buildFuncLocalDecls(file, fileIndex, info, checked, body, scope)
 			typeRefs := buildFuncTypeRefs(file, fileIndex, info, checked, signature, locals, scope)
 			assigns := buildFuncAssignments(file, fileIndex, info, body, scope)
 			returns := buildFuncReturns(file, body)
-			info.Bodies = append(info.Bodies, FuncBody{Name: name, Kind: kind, File: fileIndex, Func: i, Signature: signature, Body: body, Scope: scope, Refs: refs, Selectors: selectors, Calls: calls, Locals: locals, TypeRefs: typeRefs, Assigns: assigns, Returns: returns})
+			info.Bodies = append(info.Bodies, FuncBody{Name: name, Kind: kind, File: fileIndex, Func: i, Signature: signature, Body: body, Scope: scope, Refs: refs, Selectors: selectors, Calls: calls, Indexes: indexes, Composites: composites, Locals: locals, TypeRefs: typeRefs, Assigns: assigns, Returns: returns})
 		}
 	}
 	buildMethodSets(&info, pkg)
