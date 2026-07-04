@@ -149,6 +149,13 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		}
 		dst.InitOrder = append(dst.InitOrder, declOffset+decl)
 	}
+	for i := 0; i < len(src.Consts); i++ {
+		value, ok := mapConst(src.Consts[i], declOffset, len(src.Decls))
+		if !ok {
+			return false
+		}
+		dst.Consts = append(dst.Consts, value)
+	}
 	for i := 0; i < len(src.Funcs); i++ {
 		fn := src.Funcs[i]
 		fn.NameStart += textOffset
@@ -281,6 +288,15 @@ func mapSymbol(symbol unit.Symbol, oldToNew []int, eof int, declOffset int, func
 		return symbol, false
 	}
 	return symbol, true
+}
+
+func mapConst(value unit.ConstValue, declOffset int, declLimit int) (unit.ConstValue, bool) {
+	if value.DeclIndex < 0 || value.DeclIndex >= declLimit ||
+		value.Kind < unit.ConstInt || value.Kind > unit.ConstBool {
+		return value, false
+	}
+	value.DeclIndex += declOffset
+	return value, true
 }
 
 func mapDeclMeta(meta unit.DeclMeta, oldToNew []int, eof int, declOffset int, symbolOffset int) (unit.DeclMeta, bool) {

@@ -147,6 +147,8 @@ func appMain() int { return lib.Value(1) }
 `)},
 		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte(`package lib
 
+const Answer = -7
+
 type Numbers []int
 
 var Values = []int{1, 2}
@@ -163,12 +165,14 @@ func Value(i int) int {
 		t.Fatal("LinkUnits failed")
 	}
 	numbers := findLinkedDecl(program, "Numbers")
+	answer := findLinkedDecl(program, "Answer")
 	values := findLinkedDecl(program, "Values")
 	valueFn := findLinkedFunc(program, "Value")
 	appMain := findLinkedFunc(program, "appMain")
-	if numbers < 0 || values < 0 || valueFn < 0 || appMain < 0 {
+	if numbers < 0 || answer < 0 || values < 0 || valueFn < 0 || appMain < 0 {
 		t.Fatalf("linked rows missing: decls=%#v funcs=%#v", program.Decls, program.Funcs)
 	}
+	assertLinkedConstInt(t, program, answer, -7)
 	numbersSym := assertLinkedSymbol(t, program, "Numbers", unit.SymbolType, unit.OwnerDecl, numbers)
 	valuesSym := assertLinkedSymbol(t, program, "Values", unit.SymbolVar, unit.OwnerDecl, values)
 	valueSym := assertLinkedSymbol(t, program, "Value", unit.SymbolFunc, unit.OwnerFunc, valueFn)
@@ -442,6 +446,17 @@ func assertLinkedInitOrder(t *testing.T, program unit.Program, want []int) {
 			t.Fatalf("linked init order = %#v, want %#v", program.InitOrder, want)
 		}
 	}
+}
+
+func assertLinkedConstInt(t *testing.T, program unit.Program, declIndex int, value int) {
+	t.Helper()
+	for i := 0; i < len(program.Consts); i++ {
+		c := program.Consts[i]
+		if c.DeclIndex == declIndex && c.Kind == unit.ConstInt && c.Int == value {
+			return
+		}
+	}
+	t.Fatalf("linked const int decl=%d value=%d not found in %#v", declIndex, value, program.Consts)
 }
 
 func assertLinkedImport(t *testing.T, program unit.Program, name string, importPath string, dot bool, blank bool) {

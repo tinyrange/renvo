@@ -113,6 +113,7 @@ func appMain() int { return values[0] }
 		Values:     []ExprSpan{{StartTok: 4, EndTok: 12}},
 	}}
 	program.InitOrder = []int{0}
+	program.Consts = []ConstValue{{DeclIndex: 0, Kind: ConstInt, Int: -7}}
 	program.Signatures = []FuncSignature{{
 		FuncIndex: 0,
 		Results:   []Field{{NameTok: -1, TypeStart: 17, TypeEnd: 18}},
@@ -256,6 +257,9 @@ func appMain() int { return values[0] }
 	}
 	if len(decoded.InitOrder) != 1 || decoded.InitOrder[0] != program.InitOrder[0] {
 		t.Fatalf("decoded init order = %#v, want %#v", decoded.InitOrder, program.InitOrder)
+	}
+	if len(decoded.Consts) != 1 || decoded.Consts[0] != program.Consts[0] {
+		t.Fatalf("decoded consts = %#v, want %#v", decoded.Consts, program.Consts)
 	}
 	if len(decoded.Signatures) != 1 || len(decoded.Signatures[0].Results) != 1 || decoded.Signatures[0].Results[0] != program.Signatures[0].Results[0] {
 		t.Fatalf("decoded signatures = %#v, want %#v", decoded.Signatures, program.Signatures)

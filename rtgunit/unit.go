@@ -35,6 +35,7 @@ const (
 	TagImports    = uint16(23)
 	TagSymbols    = uint16(24)
 	TagInitOrder  = uint16(25)
+	TagConsts     = uint16(26)
 )
 
 const (
@@ -116,6 +117,20 @@ type DeclMeta struct {
 	ValueEnd   int
 	Values     []ExprSpan
 	Alias      bool
+}
+
+const (
+	ConstInt = iota + 1
+	ConstString
+	ConstBool
+)
+
+type ConstValue struct {
+	DeclIndex int
+	Kind      int
+	Int       int
+	String    string
+	Bool      bool
 }
 
 type Func struct {
@@ -345,6 +360,7 @@ type Program struct {
 	Decls      []Decl
 	DeclMeta   []DeclMeta
 	InitOrder  []int
+	Consts     []ConstValue
 	Funcs      []Func
 	Signatures []FuncSignature
 	Types      []TypeInfo
@@ -417,6 +433,7 @@ func Marshal(program Program) ([]byte, error) {
 		NewNode(TagDecls, encodeDecls(program.Decls)),
 		NewNode(TagDeclMeta, encodeDeclMeta(program.DeclMeta)),
 		NewNode(TagInitOrder, encodeInitOrder(program.InitOrder)),
+		NewNode(TagConsts, encodeConsts(program.Consts)),
 		NewNode(TagFuncs, encodeFuncs(program.Funcs)),
 		NewNode(TagSigs, encodeSignatures(program.Signatures)),
 		NewNode(TagTypes, encodeTypes(program.Types)),
@@ -470,6 +487,7 @@ func Unmarshal(data []byte) (Program, error) {
 	var symbolData []byte
 	var declMetaData []byte
 	var initOrderData []byte
+	var constData []byte
 	var sigData []byte
 	var typeData []byte
 	var typeRefData []byte
@@ -486,6 +504,7 @@ func Unmarshal(data []byte) (Program, error) {
 	seenSymbols := false
 	seenDeclMeta := false
 	seenInitOrder := false
+	seenConsts := false
 	seenSigs := false
 	seenTypes := false
 	seenTypeRefs := false
@@ -553,6 +572,12 @@ func Unmarshal(data []byte) (Program, error) {
 			}
 			seenInitOrder = true
 			initOrderData = payload
+		case TagConsts:
+			if seenConsts {
+				return program, fmt.Errorf("duplicate const table")
+			}
+			seenConsts = true
+			constData = payload
 		case TagFuncs:
 			funcs, err := decodeFuncs(payload)
 			if err != nil {
@@ -668,6 +693,13 @@ func Unmarshal(data []byte) (Program, error) {
 			return program, err
 		}
 		program.InitOrder = initOrder
+	}
+	if seenConsts {
+		consts, err := decodeConsts(constData)
+		if err != nil {
+			return program, err
+		}
+		program.Consts = consts
 	}
 	if seenSigs {
 		sigs, err := decodeSignatures(sigData)
@@ -1611,6 +1643,27 @@ func encodeInitOrder(order []int) []byte {
 	return out
 }
 
+func encodeConsts(values []ConstValue) []byte {
+	var out []byte
+	out = appendVarint(out, len(values))
+	for _, value := range values {
+		out = appendVarint(out, value.DeclIndex)
+		out = appendVarint(out, value.Kind)
+		if value.Kind == ConstInt {
+			out = appendSigned(out, value.Int)
+		} else if value.Kind == ConstString {
+			out = appendString(out, value.String)
+		} else {
+			if value.Bool {
+				out = appendVarint(out, 1)
+			} else {
+				out = appendVarint(out, 0)
+			}
+		}
+	}
+	return out
+}
+
 func encodeFuncs(funcs []Func) []byte {
 	var out []byte
 	out = appendVarint(out, len(funcs))
@@ -2091,6 +2144,56 @@ func decodeInitOrder(data []byte) ([]int, error) {
 		return nil, fmt.Errorf("trailing init order data")
 	}
 	return order, nil
+}
+
+func decodeConsts(data []byte) ([]ConstValue, error) {
+	pos := 0
+	count, next, ok := readVarint(data, pos)
+	if !ok {
+		return nil, fmt.Errorf("invalid const count")
+	}
+	pos = next
+	values := make([]ConstValue, 0, count)
+	for i := 0; i < count; i++ {
+		decl, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid const %d decl", i)
+		}
+		pos = n
+		kind, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid const %d kind", i)
+		}
+		pos = n
+		value := ConstValue{DeclIndex: decl, Kind: kind}
+		if value.Kind == ConstInt {
+			value.Int, n, ok = readSigned(data, pos)
+			if !ok {
+				return nil, fmt.Errorf("invalid const %d int", i)
+			}
+			pos = n
+		} else if value.Kind == ConstString {
+			value.String, n, ok = readString(data, pos)
+			if !ok {
+				return nil, fmt.Errorf("invalid const %d string", i)
+			}
+			pos = n
+		} else if value.Kind == ConstBool {
+			boolValue, n, ok := readVarint(data, pos)
+			if !ok || boolValue > 1 {
+				return nil, fmt.Errorf("invalid const %d bool", i)
+			}
+			pos = n
+			value.Bool = boolValue == 1
+		} else {
+			return nil, fmt.Errorf("invalid const %d kind %d", i, value.Kind)
+		}
+		values = append(values, value)
+	}
+	if pos != len(data) {
+		return nil, fmt.Errorf("trailing const data")
+	}
+	return values, nil
 }
 
 func decodeFuncs(data []byte) ([]Func, error) {
@@ -3047,6 +3150,24 @@ func readString(data []byte, pos int) (string, int, bool) {
 		return "", pos, false
 	}
 	return string(data[pos:end]), end, true
+}
+
+func appendSigned(out []byte, v int) []byte {
+	if v < 0 {
+		return appendVarint(out, -v*2-1)
+	}
+	return appendVarint(out, v*2)
+}
+
+func readSigned(data []byte, pos int) (int, int, bool) {
+	value, next, ok := readVarint(data, pos)
+	if !ok {
+		return 0, pos, false
+	}
+	if value&1 == 1 {
+		return -(value / 2) - 1, next, true
+	}
+	return value / 2, next, true
 }
 
 func appendVarint(out []byte, v int) []byte {

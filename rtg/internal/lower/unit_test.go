@@ -212,6 +212,11 @@ func TestEmitCheckedPackageExpressionShapes(t *testing.T) {
 	graph := loadTestGraph(t, []load.SourceFile{
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
 
+const answer = 42
+const message = "ok"
+const enabled = true
+const negative = -4
+
 type item struct { value int }
 
 var global = []int{1, 2, 3}
@@ -262,6 +267,9 @@ func appMain() int {
 	if len(result.Program.InitOrder) != 2 {
 		t.Fatalf("init order = %#v, want two package variables", result.Program.InitOrder)
 	}
+	if len(result.Program.Consts) != 4 {
+		t.Fatalf("consts = %#v, want four constants", result.Program.Consts)
+	}
 	if len(result.Program.Signatures) != len(result.Program.Funcs) {
 		t.Fatalf("signatures = %#v, want %d", result.Program.Signatures, len(result.Program.Funcs))
 	}
@@ -275,13 +283,21 @@ func appMain() int {
 		t.Fatalf("refs = %#v, want refs", result.Program.Refs)
 	}
 	item := findUnitDecl(result.Program, "item")
+	answer := findUnitDecl(result.Program, "answer")
+	message := findUnitDecl(result.Program, "message")
+	enabled := findUnitDecl(result.Program, "enabled")
+	negative := findUnitDecl(result.Program, "negative")
 	global := findUnitDecl(result.Program, "global")
 	picked := findUnitDecl(result.Program, "picked")
 	appMain := findUnitFunc(result.Program, "appMain")
 	choose := findUnitFunc(result.Program, "choose")
-	if item < 0 || global < 0 || picked < 0 || appMain < 0 || choose < 0 {
+	if item < 0 || answer < 0 || message < 0 || enabled < 0 || negative < 0 || global < 0 || picked < 0 || appMain < 0 || choose < 0 {
 		t.Fatalf("unit rows missing: decls=%#v funcs=%#v", result.Program.Decls, result.Program.Funcs)
 	}
+	assertUnitConstInt(t, result.Program, answer, 42)
+	assertUnitConstString(t, result.Program, message, "ok")
+	assertUnitConstBool(t, result.Program, enabled, true)
+	assertUnitConstInt(t, result.Program, negative, -4)
 	itemSym := assertUnitSymbol(t, result.Program, "item", unit.SymbolType, unit.OwnerDecl, item)
 	globalSym := assertUnitSymbol(t, result.Program, "global", unit.SymbolVar, unit.OwnerDecl, global)
 	pickedSym := assertUnitSymbol(t, result.Program, "picked", unit.SymbolVar, unit.OwnerDecl, picked)
@@ -343,6 +359,9 @@ func appMain() int {
 	}
 	if len(decoded.InitOrder) != len(result.Program.InitOrder) {
 		t.Fatalf("decoded init order = %d, want %d", len(decoded.InitOrder), len(result.Program.InitOrder))
+	}
+	if len(decoded.Consts) != len(result.Program.Consts) {
+		t.Fatalf("decoded consts = %d, want %d", len(decoded.Consts), len(result.Program.Consts))
 	}
 	if len(decoded.Signatures) != len(result.Program.Signatures) {
 		t.Fatalf("decoded signatures = %d, want %d", len(decoded.Signatures), len(result.Program.Signatures))
@@ -649,6 +668,39 @@ func assertUnitInitOrder(t *testing.T, program unit.Program, want []int) {
 			t.Fatalf("init order = %#v, want %#v", program.InitOrder, want)
 		}
 	}
+}
+
+func assertUnitConstInt(t *testing.T, program unit.Program, declIndex int, value int) {
+	t.Helper()
+	for i := 0; i < len(program.Consts); i++ {
+		c := program.Consts[i]
+		if c.DeclIndex == declIndex && c.Kind == unit.ConstInt && c.Int == value {
+			return
+		}
+	}
+	t.Fatalf("const int decl=%d value=%d not found in %#v", declIndex, value, program.Consts)
+}
+
+func assertUnitConstString(t *testing.T, program unit.Program, declIndex int, value string) {
+	t.Helper()
+	for i := 0; i < len(program.Consts); i++ {
+		c := program.Consts[i]
+		if c.DeclIndex == declIndex && c.Kind == unit.ConstString && c.String == value {
+			return
+		}
+	}
+	t.Fatalf("const string decl=%d value=%q not found in %#v", declIndex, value, program.Consts)
+}
+
+func assertUnitConstBool(t *testing.T, program unit.Program, declIndex int, value bool) {
+	t.Helper()
+	for i := 0; i < len(program.Consts); i++ {
+		c := program.Consts[i]
+		if c.DeclIndex == declIndex && c.Kind == unit.ConstBool && c.Bool == value {
+			return
+		}
+	}
+	t.Fatalf("const bool decl=%d value=%v not found in %#v", declIndex, value, program.Consts)
 }
 
 func assertUnitImport(t *testing.T, program unit.Program, name string, importPath string, dot bool, blank bool) {

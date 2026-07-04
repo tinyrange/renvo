@@ -111,6 +111,9 @@ func EmitCheckedPackage(pkg load.Package, info check.PackageInfo) Result {
 	if !builder.addCheckedInitOrder(info) {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
+	if !builder.addCheckedConsts(info) {
+		return emitFail(result, builder.err, builder.errFile, builder.errToken)
+	}
 	if !builder.addCheckedTypes(info, files) {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
@@ -420,6 +423,49 @@ func (b *unitBuilder) addCheckedInitOrder(info check.PackageInfo) bool {
 		b.program.InitOrder = append(b.program.InitOrder, b.declRows[index])
 	}
 	return true
+}
+
+func (b *unitBuilder) addCheckedConsts(info check.PackageInfo) bool {
+	for i := 0; i < len(info.Decls); i++ {
+		decl := info.Decls[i]
+		if decl.Kind != check.SymbolConst || !decl.Const.Ok {
+			continue
+		}
+		if i >= len(b.declRows) || b.declRows[i] < 0 {
+			b.setErr(EmitErrCheck, decl.File, decl.Token)
+			return false
+		}
+		value, ok := mapConstValue(decl.Const, b.declRows[i])
+		if !ok {
+			b.setErr(EmitErrCheck, decl.File, decl.Token)
+			return false
+		}
+		b.program.Consts = append(b.program.Consts, value)
+	}
+	return true
+}
+
+func mapConstValue(value check.ConstValue, declIndex int) (unit.ConstValue, bool) {
+	out := unit.ConstValue{DeclIndex: declIndex}
+	if declIndex < 0 || !value.Ok {
+		return out, false
+	}
+	if value.Kind == check.ConstInt {
+		out.Kind = unit.ConstInt
+		out.Int = value.Int
+		return out, true
+	}
+	if value.Kind == check.ConstString {
+		out.Kind = unit.ConstString
+		out.String = value.String
+		return out, true
+	}
+	if value.Kind == check.ConstBool {
+		out.Kind = unit.ConstBool
+		out.Bool = value.Bool
+		return out, true
+	}
+	return out, false
 }
 
 func (b *unitBuilder) mapDeclMeta(decl check.DeclInfo, oldToNew []int, declIndex int) (unit.DeclMeta, bool) {

@@ -28,6 +28,7 @@ const (
 	TagImports    = 23
 	TagSymbols    = 24
 	TagInitOrder  = 25
+	TagConsts     = 26
 )
 
 const (
@@ -108,6 +109,20 @@ type DeclMeta struct {
 	ValueEnd   int
 	Values     []ExprSpan
 	Alias      bool
+}
+
+const (
+	ConstInt = iota + 1
+	ConstString
+	ConstBool
+)
+
+type ConstValue struct {
+	DeclIndex int
+	Kind      int
+	Int       int
+	String    string
+	Bool      bool
 }
 
 type Func struct {
@@ -337,6 +352,7 @@ type Program struct {
 	Decls      []Decl
 	DeclMeta   []DeclMeta
 	InitOrder  []int
+	Consts     []ConstValue
 	Funcs      []Func
 	Signatures []FuncSignature
 	Types      []TypeInfo
@@ -376,6 +392,10 @@ func Marshal(program Program) ([]byte, bool) {
 		return nil, false
 	}
 	initOrderData, ok := encodeInitOrder(program.InitOrder, len(program.Decls))
+	if !ok {
+		return nil, false
+	}
+	constData, ok := encodeConsts(program.Consts, len(program.Decls))
 	if !ok {
 		return nil, false
 	}
@@ -437,6 +457,7 @@ func Marshal(program Program) ([]byte, bool) {
 	root = appendNode(root, TagDecls, declData)
 	root = appendNode(root, TagDeclMeta, declMetaData)
 	root = appendNode(root, TagInitOrder, initOrderData)
+	root = appendNode(root, TagConsts, constData)
 	root = appendNode(root, TagFuncs, funcData)
 	root = appendNode(root, TagSigs, sigData)
 	root = appendNode(root, TagTypes, typeData)
@@ -484,6 +505,7 @@ func Unmarshal(data []byte) (Program, bool) {
 	symbolData := []byte{}
 	declMetaData := []byte{}
 	initOrderData := []byte{}
+	constData := []byte{}
 	sigData := []byte{}
 	typeData := []byte{}
 	typeRefData := []byte{}
@@ -504,6 +526,7 @@ func Unmarshal(data []byte) (Program, bool) {
 	seenDecls := false
 	seenDeclMeta := false
 	seenInitOrder := false
+	seenConsts := false
 	seenFuncs := false
 	seenSigs := false
 	seenTypes := false
@@ -587,6 +610,12 @@ func Unmarshal(data []byte) (Program, bool) {
 			}
 			seenInitOrder = true
 			initOrderData = payload
+		} else if tag == TagConsts {
+			if seenConsts {
+				return program, false
+			}
+			seenConsts = true
+			constData = payload
 		} else if tag == TagFuncs {
 			if seenFuncs {
 				return program, false
@@ -706,6 +735,13 @@ func Unmarshal(data []byte) (Program, bool) {
 			return program, false
 		}
 		program.InitOrder = initOrder
+	}
+	if seenConsts {
+		consts, ok := decodeConsts(constData, len(program.Decls))
+		if !ok {
+			return program, false
+		}
+		program.Consts = consts
 	}
 	if seenSigs {
 		sigs, ok := decodeSignatures(sigData, len(program.Tokens), len(program.Funcs))
@@ -1227,6 +1263,84 @@ func decodeInitOrder(data []byte, declLimit int) ([]int, bool) {
 		}
 		seen[decl] = true
 		out = append(out, decl)
+	}
+	if pos != len(data) {
+		return nil, false
+	}
+	return out, true
+}
+
+func encodeConsts(values []ConstValue, declLimit int) ([]byte, bool) {
+	out := make([]byte, 0, len(values)*5+1)
+	out = appendVarint(out, len(values))
+	seen := make([]bool, declLimit)
+	for i := 0; i < len(values); i++ {
+		value := values[i]
+		if value.DeclIndex < 0 || value.DeclIndex >= declLimit ||
+			value.Kind < ConstInt || value.Kind > ConstBool ||
+			seen[value.DeclIndex] {
+			return nil, false
+		}
+		seen[value.DeclIndex] = true
+		out = appendVarint(out, value.DeclIndex)
+		out = appendVarint(out, value.Kind)
+		if value.Kind == ConstInt {
+			out = appendSigned(out, value.Int)
+		} else if value.Kind == ConstString {
+			out = appendString(out, value.String)
+		} else {
+			if value.Bool {
+				out = appendVarint(out, 1)
+			} else {
+				out = appendVarint(out, 0)
+			}
+		}
+	}
+	return out, true
+}
+
+func decodeConsts(data []byte, declLimit int) ([]ConstValue, bool) {
+	pos := 0
+	count, ok := readVarint(data, &pos)
+	if !ok || count < 0 {
+		return nil, false
+	}
+	seen := make([]bool, declLimit)
+	out := make([]ConstValue, 0, count)
+	for i := 0; i < count; i++ {
+		decl, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		kind, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		value := ConstValue{DeclIndex: decl, Kind: kind}
+		if value.DeclIndex < 0 || value.DeclIndex >= declLimit ||
+			value.Kind < ConstInt || value.Kind > ConstBool ||
+			seen[value.DeclIndex] {
+			return nil, false
+		}
+		seen[value.DeclIndex] = true
+		if value.Kind == ConstInt {
+			value.Int, ok = readSigned(data, &pos)
+			if !ok {
+				return nil, false
+			}
+		} else if value.Kind == ConstString {
+			value.String, ok = readString(data, &pos)
+			if !ok {
+				return nil, false
+			}
+		} else {
+			boolValue, ok := readVarint(data, &pos)
+			if !ok || boolValue > 1 {
+				return nil, false
+			}
+			value.Bool = boolValue == 1
+		}
+		out = append(out, value)
 	}
 	if pos != len(data) {
 		return nil, false
@@ -2599,6 +2713,24 @@ func readString(data []byte, pos *int) (string, bool) {
 	text := string(data[*pos:end])
 	*pos = end
 	return text, true
+}
+
+func appendSigned(out []byte, v int) []byte {
+	if v < 0 {
+		return appendVarint(out, -v*2-1)
+	}
+	return appendVarint(out, v*2)
+}
+
+func readSigned(data []byte, pos *int) (int, bool) {
+	value, ok := readVarint(data, pos)
+	if !ok {
+		return 0, false
+	}
+	if value&1 == 1 {
+		return -(value / 2) - 1, true
+	}
+	return value / 2, true
 }
 
 func appendNode(out []byte, tag int, payload []byte) []byte {
