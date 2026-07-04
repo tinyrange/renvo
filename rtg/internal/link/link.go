@@ -184,6 +184,13 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		}
 		dst.Signatures = append(dst.Signatures, sig)
 	}
+	for i := 0; i < len(src.Stmts); i++ {
+		stmt, ok := mapStatement(src.Stmts[i], oldToNew, finalEOF, funcOffset, len(src.Funcs))
+		if !ok {
+			return false
+		}
+		dst.Stmts = append(dst.Stmts, stmt)
+	}
 	for i := 0; i < len(src.Types); i++ {
 		typ, ok := mapType(src.Types[i], oldToNew, finalEOF, textOffset, declOffset, symbolOffset)
 		if !ok {
@@ -370,6 +377,32 @@ func mapSignature(sig unit.FuncSignature, oldToNew []int, eof int, funcOffset in
 		return sig, false
 	}
 	return sig, true
+}
+
+func mapStatement(stmt unit.Statement, oldToNew []int, eof int, funcOffset int, funcLimit int) (unit.Statement, bool) {
+	if stmt.FuncIndex < 0 || stmt.FuncIndex >= funcLimit || stmt.Kind < unit.StmtOther || stmt.Kind > unit.StmtLabel {
+		return stmt, false
+	}
+	stmt.FuncIndex += funcOffset
+	stmt.StartTok = mapToken(oldToNew, stmt.StartTok, eof)
+	stmt.EndTok = mapToken(oldToNew, stmt.EndTok, eof)
+	var ok bool
+	stmt.ExprStart, stmt.ExprEnd, ok = mapNullableSpan(stmt.ExprStart, stmt.ExprEnd, oldToNew, eof)
+	if !ok {
+		return stmt, false
+	}
+	stmt.BodyStart, stmt.BodyEnd, ok = mapNullableSpan(stmt.BodyStart, stmt.BodyEnd, oldToNew, eof)
+	if !ok {
+		return stmt, false
+	}
+	stmt.ElseStart, stmt.ElseEnd, ok = mapNullableSpan(stmt.ElseStart, stmt.ElseEnd, oldToNew, eof)
+	if !ok {
+		return stmt, false
+	}
+	if stmt.StartTok < 0 || stmt.EndTok < stmt.StartTok {
+		return stmt, false
+	}
+	return stmt, true
 }
 
 func mapFields(fields []unit.Field, oldToNew []int, eof int) ([]unit.Field, bool) {

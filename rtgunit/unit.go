@@ -40,6 +40,7 @@ const (
 	TagTypeIfaces = uint16(28)
 	TagMethods    = uint16(29)
 	TagTypeFuncs  = uint16(30)
+	TagStmts      = uint16(31)
 )
 
 const (
@@ -238,6 +239,40 @@ type ExprSpan struct {
 	EndTok   int
 }
 
+const (
+	StmtOther = iota
+	StmtReturn
+	StmtIf
+	StmtFor
+	StmtSwitch
+	StmtCase
+	StmtDefault
+	StmtDecl
+	StmtAssign
+	StmtExpr
+	StmtBlock
+	StmtBreak
+	StmtContinue
+	StmtGoto
+	StmtDefer
+	StmtGo
+	StmtFallthrough
+	StmtLabel
+)
+
+type Statement struct {
+	FuncIndex int
+	Kind      int
+	StartTok  int
+	EndTok    int
+	ExprStart int
+	ExprEnd   int
+	BodyStart int
+	BodyEnd   int
+	ElseStart int
+	ElseEnd   int
+}
+
 type IndexExpr struct {
 	OwnerKind  int
 	OwnerIndex int
@@ -403,6 +438,7 @@ type Program struct {
 	Consts     []ConstValue
 	Funcs      []Func
 	Signatures []FuncSignature
+	Stmts      []Statement
 	Types      []TypeInfo
 	TypeFields []TypeFields
 	TypeIfaces []TypeIface
@@ -480,6 +516,7 @@ func Marshal(program Program) ([]byte, error) {
 		NewNode(TagConsts, encodeConsts(program.Consts)),
 		NewNode(TagFuncs, encodeFuncs(program.Funcs)),
 		NewNode(TagSigs, encodeSignatures(program.Signatures)),
+		NewNode(TagStmts, encodeStatements(program.Stmts)),
 		NewNode(TagTypes, encodeTypes(program.Types)),
 		NewNode(TagTypeFields, encodeTypeFields(program.TypeFields)),
 		NewNode(TagTypeIfaces, encodeTypeInterfaces(program.TypeIfaces)),
@@ -537,6 +574,7 @@ func Unmarshal(data []byte) (Program, error) {
 	var initOrderData []byte
 	var constData []byte
 	var sigData []byte
+	var stmtData []byte
 	var typeData []byte
 	var typeFieldData []byte
 	var typeIfaceData []byte
@@ -558,6 +596,7 @@ func Unmarshal(data []byte) (Program, error) {
 	seenInitOrder := false
 	seenConsts := false
 	seenSigs := false
+	seenStmts := false
 	seenTypes := false
 	seenTypeFields := false
 	seenTypeIfaces := false
@@ -646,6 +685,12 @@ func Unmarshal(data []byte) (Program, error) {
 			}
 			seenSigs = true
 			sigData = payload
+		case TagStmts:
+			if seenStmts {
+				return program, fmt.Errorf("duplicate statement table")
+			}
+			seenStmts = true
+			stmtData = payload
 		case TagTypes:
 			if seenTypes {
 				return program, fmt.Errorf("duplicate type table")
@@ -787,6 +832,13 @@ func Unmarshal(data []byte) (Program, error) {
 			return program, err
 		}
 		program.Signatures = sigs
+	}
+	if seenStmts {
+		stmts, err := decodeStatements(stmtData)
+		if err != nil {
+			return program, err
+		}
+		program.Stmts = stmts
 	}
 	if seenTypes {
 		types, err := decodeTypes(typeData)
@@ -1801,6 +1853,21 @@ func encodeSignatures(signatures []FuncSignature) []byte {
 	return out
 }
 
+func encodeStatements(stmts []Statement) []byte {
+	var out []byte
+	out = appendVarint(out, len(stmts))
+	for _, stmt := range stmts {
+		out = appendVarint(out, stmt.FuncIndex)
+		out = appendVarint(out, stmt.Kind)
+		out = appendVarint(out, stmt.StartTok)
+		out = appendVarint(out, stmt.EndTok-stmt.StartTok)
+		out = appendNullableSpan(out, stmt.ExprStart, stmt.ExprEnd)
+		out = appendNullableSpan(out, stmt.BodyStart, stmt.BodyEnd)
+		out = appendNullableSpan(out, stmt.ElseStart, stmt.ElseEnd)
+	}
+	return out
+}
+
 func encodeTypes(types []TypeInfo) []byte {
 	var out []byte
 	out = appendVarint(out, len(types))
@@ -2474,6 +2541,69 @@ func decodeSignatures(data []byte) ([]FuncSignature, error) {
 		return nil, fmt.Errorf("trailing signature data")
 	}
 	return signatures, nil
+}
+
+func decodeStatements(data []byte) ([]Statement, error) {
+	pos := 0
+	count, next, ok := readVarint(data, pos)
+	if !ok {
+		return nil, fmt.Errorf("invalid statement count")
+	}
+	pos = next
+	stmts := make([]Statement, 0, count)
+	for i := 0; i < count; i++ {
+		funcIndex, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid statement %d func", i)
+		}
+		pos = n
+		kind, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid statement %d kind", i)
+		}
+		pos = n
+		startTok, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid statement %d start", i)
+		}
+		pos = n
+		tokCount, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid statement %d end", i)
+		}
+		pos = n
+		exprStart, exprEnd, n, ok := readNullableSpan(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid statement %d expr", i)
+		}
+		pos = n
+		bodyStart, bodyEnd, n, ok := readNullableSpan(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid statement %d body", i)
+		}
+		pos = n
+		elseStart, elseEnd, n, ok := readNullableSpan(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid statement %d else", i)
+		}
+		pos = n
+		stmts = append(stmts, Statement{
+			FuncIndex: funcIndex,
+			Kind:      kind,
+			StartTok:  startTok,
+			EndTok:    startTok + tokCount,
+			ExprStart: exprStart,
+			ExprEnd:   exprEnd,
+			BodyStart: bodyStart,
+			BodyEnd:   bodyEnd,
+			ElseStart: elseStart,
+			ElseEnd:   elseEnd,
+		})
+	}
+	if pos != len(data) {
+		return nil, fmt.Errorf("trailing statement data")
+	}
+	return stmts, nil
 }
 
 func decodeTypes(data []byte) ([]TypeInfo, error) {

@@ -128,6 +128,18 @@ func TestMarshalRoundTripExpressionShapes(t *testing.T) {
 		FuncIndex: 0,
 		Results:   []Field{{NameTok: -1, TypeStart: 10, TypeEnd: 11}},
 	}}
+	program.Stmts = []Statement{{
+		FuncIndex: 0,
+		Kind:      StmtReturn,
+		StartTok:  12,
+		EndTok:    14,
+		ExprStart: 13,
+		ExprEnd:   14,
+		BodyStart: -1,
+		BodyEnd:   -1,
+		ElseStart: -1,
+		ElseEnd:   -1,
+	}}
 	program.Types = []TypeInfo{{
 		NameStart: program.Decls[0].NameStart,
 		NameEnd:   program.Decls[0].NameEnd,
@@ -473,6 +485,7 @@ func equalPrograms(left Program, right Program) bool {
 		len(left.InitOrder) != len(right.InitOrder) ||
 		len(left.Consts) != len(right.Consts) ||
 		len(left.Signatures) != len(right.Signatures) ||
+		len(left.Stmts) != len(right.Stmts) ||
 		len(left.Types) != len(right.Types) ||
 		len(left.TypeFields) != len(right.TypeFields) ||
 		len(left.TypeIfaces) != len(right.TypeIfaces) ||
@@ -540,6 +553,11 @@ func equalPrograms(left Program, right Program) bool {
 	}
 	for i := 0; i < len(left.Signatures); i++ {
 		if !equalSignature(left.Signatures[i], right.Signatures[i]) {
+			return false
+		}
+	}
+	for i := 0; i < len(left.Stmts); i++ {
+		if left.Stmts[i] != right.Stmts[i] {
 			return false
 		}
 	}

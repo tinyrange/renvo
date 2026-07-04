@@ -484,6 +484,65 @@ func appMain() int {
 	}
 }
 
+func TestEmitCheckedPackagePreservesStatements(t *testing.T) {
+	graph := loadTestGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+func appMain(total int) int {
+	if total == 0 {
+		return 1
+	} else {
+		total = total + 2
+	}
+	for total < 5 {
+		total += 1
+	}
+	switch total {
+	case 7:
+		goto done
+	default:
+		break
+	}
+done:
+	return total
+}
+`)},
+	})
+	prog := check.CheckGraph(graph)
+	if !prog.Ok {
+		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
+	}
+	result := EmitCheckedPackage(graph.Packages[0], prog.Packages[0])
+	if !result.Ok {
+		t.Fatalf("EmitCheckedPackage failed: err=%d file=%d tok=%d", result.Error, result.ErrorFile, result.ErrorToken)
+	}
+	appMain := findUnitFunc(result.Program, "appMain")
+	if appMain < 0 {
+		t.Fatalf("appMain not found in %#v", result.Program.Funcs)
+	}
+	assertUnitStatement(t, result.Program, appMain, unit.StmtIf, "total == 0")
+	assertUnitStatement(t, result.Program, appMain, unit.StmtFor, "total < 5")
+	assertUnitStatement(t, result.Program, appMain, unit.StmtSwitch, "total")
+	assertUnitStatement(t, result.Program, appMain, unit.StmtCase, "7")
+	assertUnitStatement(t, result.Program, appMain, unit.StmtDefault, "")
+	assertUnitStatement(t, result.Program, appMain, unit.StmtGoto, "done")
+	assertUnitStatement(t, result.Program, appMain, unit.StmtBreak, "")
+	assertUnitStatement(t, result.Program, appMain, unit.StmtLabel, "")
+	assertUnitStatement(t, result.Program, appMain, unit.StmtReturn, "total")
+
+	data, ok := unit.Marshal(result.Program)
+	if !ok {
+		t.Fatal("unit Marshal failed")
+	}
+	decoded, err := rtgunit.Unmarshal(data)
+	if err != nil {
+		t.Fatalf("host unit decode failed: %v", err)
+	}
+	if len(decoded.Stmts) != len(result.Program.Stmts) {
+		t.Fatalf("decoded statements = %d, want %d", len(decoded.Stmts), len(result.Program.Stmts))
+	}
+}
+
 func TestEmitCheckedPackageRejectsInvalidCheckedMetadata(t *testing.T) {
 	graph := loadTestGraph(t, []load.SourceFile{
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
@@ -959,6 +1018,24 @@ func assertUnitSignature(t *testing.T, program unit.Program, funcIndex int, rece
 		return
 	}
 	t.Fatalf("signature func=%d not found in %#v", funcIndex, program.Signatures)
+}
+
+func assertUnitStatement(t *testing.T, program unit.Program, funcIndex int, kind int, expr string) {
+	t.Helper()
+	for i := 0; i < len(program.Stmts); i++ {
+		stmt := program.Stmts[i]
+		if stmt.FuncIndex != funcIndex || stmt.Kind != kind {
+			continue
+		}
+		if unitSpanText(program, stmt.ExprStart, stmt.ExprEnd) != expr {
+			continue
+		}
+		if stmt.StartTok < 0 || stmt.EndTok < stmt.StartTok {
+			t.Fatalf("statement kind=%d has invalid span: %#v", kind, stmt)
+		}
+		return
+	}
+	t.Fatalf("statement func=%d kind=%d expr=%q not found in %#v", funcIndex, kind, expr, program.Stmts)
 }
 
 func assertUnitFields(t *testing.T, program unit.Program, fields []unit.Field, want []string) {

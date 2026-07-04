@@ -118,6 +118,18 @@ func appMain() int { return values[0] }
 		FuncIndex: 0,
 		Results:   []Field{{NameTok: -1, TypeStart: 17, TypeEnd: 18}},
 	}}
+	program.Stmts = []Statement{{
+		FuncIndex: 0,
+		Kind:      StmtReturn,
+		StartTok:  16,
+		EndTok:    21,
+		ExprStart: 17,
+		ExprEnd:   21,
+		BodyStart: -1,
+		BodyEnd:   -1,
+		ElseStart: -1,
+		ElseEnd:   -1,
+	}}
 	program.Types = []TypeInfo{{
 		NameStart: program.Decls[0].NameStart,
 		NameEnd:   program.Decls[0].NameEnd,
@@ -309,6 +321,9 @@ func appMain() int { return values[0] }
 	}
 	if len(decoded.Signatures) != 1 || len(decoded.Signatures[0].Results) != 1 || decoded.Signatures[0].Results[0] != program.Signatures[0].Results[0] {
 		t.Fatalf("decoded signatures = %#v, want %#v", decoded.Signatures, program.Signatures)
+	}
+	if len(decoded.Stmts) != 1 || decoded.Stmts[0] != program.Stmts[0] {
+		t.Fatalf("decoded statements = %#v, want %#v", decoded.Stmts, program.Stmts)
 	}
 	if len(decoded.DeclMeta) != 1 || len(decoded.DeclMeta[0].Values) != 1 || decoded.DeclMeta[0].Values[0] != program.DeclMeta[0].Values[0] {
 		t.Fatalf("decoded decl metadata = %#v, want %#v", decoded.DeclMeta, program.DeclMeta)

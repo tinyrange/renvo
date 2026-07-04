@@ -306,6 +306,64 @@ func Value(i int) int {
 	}
 }
 
+func TestLinkBuildPreservesStatements(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import "example.com/case/pkg/lib"
+
+func appMain() int { return lib.Value(0) }
+`)},
+		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte(`package lib
+
+func Value(total int) int {
+	if total == 0 {
+		return 1
+	}
+	for total < 3 {
+		total += 1
+	}
+	switch total {
+	case 7:
+		goto done
+	default:
+		break
+	}
+done:
+	return total
+}
+`)},
+	})
+	linked := LinkBuild(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuild failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	valueFn := findLinkedFunc(linked.Program, "Value")
+	appMain := findLinkedFunc(linked.Program, "appMain")
+	if valueFn < 0 || appMain < 0 {
+		t.Fatalf("linked funcs missing: %#v", linked.Program.Funcs)
+	}
+	assertLinkedStatement(t, linked.Program, valueFn, unit.StmtIf, "total == 0")
+	assertLinkedStatement(t, linked.Program, valueFn, unit.StmtFor, "total < 3")
+	assertLinkedStatement(t, linked.Program, valueFn, unit.StmtSwitch, "total")
+	assertLinkedStatement(t, linked.Program, valueFn, unit.StmtCase, "7")
+	assertLinkedStatement(t, linked.Program, valueFn, unit.StmtDefault, "")
+	assertLinkedStatement(t, linked.Program, valueFn, unit.StmtGoto, "done")
+	assertLinkedStatement(t, linked.Program, valueFn, unit.StmtBreak, "")
+	assertLinkedStatement(t, linked.Program, valueFn, unit.StmtLabel, "")
+	assertLinkedStatement(t, linked.Program, valueFn, unit.StmtReturn, "total")
+	assertLinkedStatement(t, linked.Program, appMain, unit.StmtReturn, "lib.Value(0)")
+
+	decoded, err := rtgunit.Unmarshal(linked.Data)
+	if err != nil {
+		t.Fatalf("linked unit did not decode: %v", err)
+	}
+	if len(decoded.Stmts) != len(linked.Program.Stmts) {
+		t.Fatalf("decoded statements = %d, want %d", len(decoded.Stmts), len(linked.Program.Stmts))
+	}
+}
+
 func TestLinkUnitsPreservesMethodSets(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
@@ -692,6 +750,24 @@ func assertLinkedMethod(t *testing.T, program unit.Program, decl int, name strin
 		return
 	}
 	t.Fatalf("linked method %s pointer=%v func=%d type=%d not found in %#v", name, pointer, funcIndex, typeIndex, program.Methods)
+}
+
+func assertLinkedStatement(t *testing.T, program unit.Program, funcIndex int, kind int, expr string) {
+	t.Helper()
+	for i := 0; i < len(program.Stmts); i++ {
+		stmt := program.Stmts[i]
+		if stmt.FuncIndex != funcIndex || stmt.Kind != kind {
+			continue
+		}
+		if linkedSpanText(program, stmt.ExprStart, stmt.ExprEnd) != expr {
+			continue
+		}
+		if stmt.StartTok < 0 || stmt.EndTok < stmt.StartTok {
+			t.Fatalf("linked statement kind=%d has invalid span: %#v", kind, stmt)
+		}
+		return
+	}
+	t.Fatalf("linked statement func=%d kind=%d expr=%q not found in %#v", funcIndex, kind, expr, program.Stmts)
 }
 
 func assertLinkedFields(t *testing.T, program unit.Program, fields []unit.Field, want []string) {

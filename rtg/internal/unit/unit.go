@@ -33,6 +33,7 @@ const (
 	TagTypeIfaces = 28
 	TagMethods    = 29
 	TagTypeFuncs  = 30
+	TagStmts      = 31
 )
 
 const (
@@ -230,6 +231,40 @@ type ExprSpan struct {
 	EndTok   int
 }
 
+const (
+	StmtOther = iota
+	StmtReturn
+	StmtIf
+	StmtFor
+	StmtSwitch
+	StmtCase
+	StmtDefault
+	StmtDecl
+	StmtAssign
+	StmtExpr
+	StmtBlock
+	StmtBreak
+	StmtContinue
+	StmtGoto
+	StmtDefer
+	StmtGo
+	StmtFallthrough
+	StmtLabel
+)
+
+type Statement struct {
+	FuncIndex int
+	Kind      int
+	StartTok  int
+	EndTok    int
+	ExprStart int
+	ExprEnd   int
+	BodyStart int
+	BodyEnd   int
+	ElseStart int
+	ElseEnd   int
+}
+
 type IndexExpr struct {
 	OwnerKind  int
 	OwnerIndex int
@@ -395,6 +430,7 @@ type Program struct {
 	Consts     []ConstValue
 	Funcs      []Func
 	Signatures []FuncSignature
+	Stmts      []Statement
 	Types      []TypeInfo
 	TypeFields []TypeFields
 	TypeIfaces []TypeIface
@@ -448,6 +484,10 @@ func Marshal(program Program) ([]byte, bool) {
 		return nil, false
 	}
 	sigData, ok := encodeSignatures(program.Signatures, len(program.Tokens), len(program.Funcs))
+	if !ok {
+		return nil, false
+	}
+	stmtData, ok := encodeStatements(program.Stmts, len(program.Tokens), len(program.Funcs))
 	if !ok {
 		return nil, false
 	}
@@ -520,6 +560,7 @@ func Marshal(program Program) ([]byte, bool) {
 	root = appendNode(root, TagConsts, constData)
 	root = appendNode(root, TagFuncs, funcData)
 	root = appendNode(root, TagSigs, sigData)
+	root = appendNode(root, TagStmts, stmtData)
 	root = appendNode(root, TagTypes, typeData)
 	root = appendNode(root, TagTypeFields, typeFieldData)
 	root = appendNode(root, TagTypeIfaces, typeIfaceData)
@@ -571,6 +612,7 @@ func Unmarshal(data []byte) (Program, bool) {
 	initOrderData := []byte{}
 	constData := []byte{}
 	sigData := []byte{}
+	stmtData := []byte{}
 	typeData := []byte{}
 	typeFieldData := []byte{}
 	typeIfaceData := []byte{}
@@ -597,6 +639,7 @@ func Unmarshal(data []byte) (Program, bool) {
 	seenConsts := false
 	seenFuncs := false
 	seenSigs := false
+	seenStmts := false
 	seenTypes := false
 	seenTypeFields := false
 	seenTypeIfaces := false
@@ -704,6 +747,12 @@ func Unmarshal(data []byte) (Program, bool) {
 			}
 			seenSigs = true
 			sigData = payload
+		} else if tag == TagStmts {
+			if seenStmts {
+				return program, false
+			}
+			seenStmts = true
+			stmtData = payload
 		} else if tag == TagTypes {
 			if seenTypes {
 				return program, false
@@ -845,6 +894,13 @@ func Unmarshal(data []byte) (Program, bool) {
 			return program, false
 		}
 		program.Signatures = sigs
+	}
+	if seenStmts {
+		stmts, ok := decodeStatements(stmtData, len(program.Tokens), len(program.Funcs))
+		if !ok {
+			return program, false
+		}
+		program.Stmts = stmts
 	}
 	if seenTypes {
 		types, ok := decodeTypes(typeData, len(program.Text), len(program.Tokens), len(program.Decls))
@@ -1624,6 +1680,92 @@ func decodeSignatures(data []byte, tokenLimit int, funcLimit int) ([]FuncSignatu
 		return nil, false
 	}
 	return signatures, true
+}
+
+func encodeStatements(stmts []Statement, tokenLimit int, funcLimit int) ([]byte, bool) {
+	out := make([]byte, 0, len(stmts)*11+1)
+	out = appendVarint(out, len(stmts))
+	ok := true
+	for i := 0; i < len(stmts); i++ {
+		stmt := stmts[i]
+		if stmt.FuncIndex < 0 || stmt.FuncIndex >= funcLimit ||
+			stmt.Kind < StmtOther || stmt.Kind > StmtLabel ||
+			!validSpan(tokenLimit, stmt.StartTok, stmt.EndTok) {
+			return nil, false
+		}
+		out = appendVarint(out, stmt.FuncIndex)
+		out = appendVarint(out, stmt.Kind)
+		out = appendVarint(out, stmt.StartTok)
+		out = appendVarint(out, stmt.EndTok-stmt.StartTok)
+		out = appendNullableSpan(out, stmt.ExprStart, stmt.ExprEnd, tokenLimit, &ok)
+		out = appendNullableSpan(out, stmt.BodyStart, stmt.BodyEnd, tokenLimit, &ok)
+		out = appendNullableSpan(out, stmt.ElseStart, stmt.ElseEnd, tokenLimit, &ok)
+		if !ok {
+			return nil, false
+		}
+	}
+	return out, true
+}
+
+func decodeStatements(data []byte, tokenLimit int, funcLimit int) ([]Statement, bool) {
+	pos := 0
+	count, ok := readVarint(data, &pos)
+	if !ok || count < 0 {
+		return nil, false
+	}
+	stmts := make([]Statement, 0, count)
+	for i := 0; i < count; i++ {
+		funcIndex, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		kind, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		startTok, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		tokCount, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		exprStart, exprEnd, ok := readNullableSpan(data, &pos, tokenLimit)
+		if !ok {
+			return nil, false
+		}
+		bodyStart, bodyEnd, ok := readNullableSpan(data, &pos, tokenLimit)
+		if !ok {
+			return nil, false
+		}
+		elseStart, elseEnd, ok := readNullableSpan(data, &pos, tokenLimit)
+		if !ok {
+			return nil, false
+		}
+		stmt := Statement{
+			FuncIndex: funcIndex,
+			Kind:      kind,
+			StartTok:  startTok,
+			EndTok:    startTok + tokCount,
+			ExprStart: exprStart,
+			ExprEnd:   exprEnd,
+			BodyStart: bodyStart,
+			BodyEnd:   bodyEnd,
+			ElseStart: elseStart,
+			ElseEnd:   elseEnd,
+		}
+		if stmt.FuncIndex < 0 || stmt.FuncIndex >= funcLimit ||
+			stmt.Kind < StmtOther || stmt.Kind > StmtLabel ||
+			!validSpan(tokenLimit, stmt.StartTok, stmt.EndTok) {
+			return nil, false
+		}
+		stmts = append(stmts, stmt)
+	}
+	if pos != len(data) {
+		return nil, false
+	}
+	return stmts, true
 }
 
 func encodeTypes(types []TypeInfo, textLimit int, tokenLimit int, declLimit int) ([]byte, bool) {

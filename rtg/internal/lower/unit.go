@@ -670,6 +670,9 @@ func (b *unitBuilder) addCheckedFuncs(info check.PackageInfo, files []fileTokens
 		if !b.addBodySignature(body, files[body.File].oldToNew, ownerIndex) {
 			return false
 		}
+		if !b.addBodyStatements(body, files[body.File].oldToNew, ownerIndex) {
+			return false
+		}
 		if !b.addBodyLocals(body, files[body.File].oldToNew, ownerIndex) {
 			return false
 		}
@@ -699,6 +702,18 @@ func (b *unitBuilder) addBodySignature(body check.FuncBody, oldToNew []int, func
 		return false
 	}
 	b.program.Signatures = append(b.program.Signatures, sig)
+	return true
+}
+
+func (b *unitBuilder) addBodyStatements(body check.FuncBody, oldToNew []int, funcIndex int) bool {
+	for i := 0; i < len(body.Body.Stmts); i++ {
+		stmt, ok := mapStatement(body.Body.Stmts[i], oldToNew, b.finalEOF, funcIndex)
+		if !ok {
+			b.setErr(EmitErrCheck, body.File, body.Body.Stmts[i].StartTok)
+			return false
+		}
+		b.program.Stmts = append(b.program.Stmts, stmt)
+	}
 	return true
 }
 
@@ -875,6 +890,93 @@ func mapSignature(sig check.FuncSignature, oldToNew []int, eof int, funcIndex in
 		return out, false
 	}
 	return out, funcIndex >= 0
+}
+
+func mapStatement(stmt syntax.Stmt, oldToNew []int, eof int, funcIndex int) (unit.Statement, bool) {
+	kind, ok := unitStmtKind(stmt.Kind)
+	if !ok {
+		return unit.Statement{}, false
+	}
+	out := unit.Statement{
+		FuncIndex: funcIndex,
+		Kind:      kind,
+		StartTok:  mapToken(oldToNew, stmt.StartTok, eof),
+		EndTok:    mapToken(oldToNew, stmt.EndTok, eof),
+	}
+	out.ExprStart, out.ExprEnd, ok = mapNullableTokenSpan(stmt.ExprStart, stmt.ExprEnd, oldToNew, eof)
+	if !ok {
+		return out, false
+	}
+	out.BodyStart, out.BodyEnd, ok = mapNullableTokenSpan(stmt.BodyStart, stmt.BodyEnd, oldToNew, eof)
+	if !ok {
+		return out, false
+	}
+	out.ElseStart, out.ElseEnd, ok = mapNullableTokenSpan(stmt.ElseStart, stmt.ElseEnd, oldToNew, eof)
+	if !ok {
+		return out, false
+	}
+	if funcIndex < 0 || out.StartTok < 0 || out.EndTok < out.StartTok {
+		return out, false
+	}
+	return out, true
+}
+
+func unitStmtKind(kind int) (int, bool) {
+	if kind == syntax.StmtOther {
+		return unit.StmtOther, true
+	}
+	if kind == syntax.StmtReturn {
+		return unit.StmtReturn, true
+	}
+	if kind == syntax.StmtIf {
+		return unit.StmtIf, true
+	}
+	if kind == syntax.StmtFor {
+		return unit.StmtFor, true
+	}
+	if kind == syntax.StmtSwitch {
+		return unit.StmtSwitch, true
+	}
+	if kind == syntax.StmtCase {
+		return unit.StmtCase, true
+	}
+	if kind == syntax.StmtDefault {
+		return unit.StmtDefault, true
+	}
+	if kind == syntax.StmtDecl {
+		return unit.StmtDecl, true
+	}
+	if kind == syntax.StmtAssign {
+		return unit.StmtAssign, true
+	}
+	if kind == syntax.StmtExpr {
+		return unit.StmtExpr, true
+	}
+	if kind == syntax.StmtBlock {
+		return unit.StmtBlock, true
+	}
+	if kind == syntax.StmtBreak {
+		return unit.StmtBreak, true
+	}
+	if kind == syntax.StmtContinue {
+		return unit.StmtContinue, true
+	}
+	if kind == syntax.StmtGoto {
+		return unit.StmtGoto, true
+	}
+	if kind == syntax.StmtDefer {
+		return unit.StmtDefer, true
+	}
+	if kind == syntax.StmtGo {
+		return unit.StmtGo, true
+	}
+	if kind == syntax.StmtFallthrough {
+		return unit.StmtFallthrough, true
+	}
+	if kind == syntax.StmtLabel {
+		return unit.StmtLabel, true
+	}
+	return 0, false
 }
 
 func mapFields(fields []check.Field, oldToNew []int, eof int) ([]unit.Field, bool) {
