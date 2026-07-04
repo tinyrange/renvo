@@ -38,6 +38,7 @@ const (
 	TagConsts     = uint16(26)
 	TagTypeFields = uint16(27)
 	TagTypeIfaces = uint16(28)
+	TagMethods    = uint16(29)
 )
 
 const (
@@ -210,6 +211,14 @@ type TypeIface struct {
 	TypeIndex int
 	Methods   []InterfaceMethod
 	Embeds    []InterfaceEmbed
+}
+
+type MethodInfo struct {
+	NameTok   int
+	TypeIndex int
+	Symbol    int
+	FuncIndex int
+	Pointer   bool
 }
 
 const (
@@ -390,6 +399,7 @@ type Program struct {
 	Types      []TypeInfo
 	TypeFields []TypeFields
 	TypeIfaces []TypeIface
+	Methods    []MethodInfo
 	TypeRefs   []TypeRef
 	Locals     []LocalDecl
 	Indexes    []IndexExpr
@@ -465,6 +475,7 @@ func Marshal(program Program) ([]byte, error) {
 		NewNode(TagTypes, encodeTypes(program.Types)),
 		NewNode(TagTypeFields, encodeTypeFields(program.TypeFields)),
 		NewNode(TagTypeIfaces, encodeTypeInterfaces(program.TypeIfaces)),
+		NewNode(TagMethods, encodeMethods(program.Methods)),
 		NewNode(TagTypeRefs, encodeTypeRefs(program.TypeRefs)),
 		NewNode(TagLocals, encodeLocals(program.Locals)),
 		NewNode(TagIndexes, encodeIndexes(program.Indexes)),
@@ -520,6 +531,7 @@ func Unmarshal(data []byte) (Program, error) {
 	var typeData []byte
 	var typeFieldData []byte
 	var typeIfaceData []byte
+	var methodData []byte
 	var typeRefData []byte
 	var localData []byte
 	var indexData []byte
@@ -539,6 +551,7 @@ func Unmarshal(data []byte) (Program, error) {
 	seenTypes := false
 	seenTypeFields := false
 	seenTypeIfaces := false
+	seenMethods := false
 	seenTypeRefs := false
 	seenLocals := false
 	seenIndexes := false
@@ -640,6 +653,12 @@ func Unmarshal(data []byte) (Program, error) {
 			}
 			seenTypeIfaces = true
 			typeIfaceData = payload
+		case TagMethods:
+			if seenMethods {
+				return program, fmt.Errorf("duplicate method table")
+			}
+			seenMethods = true
+			methodData = payload
 		case TagTypeRefs:
 			if seenTypeRefs {
 				return program, fmt.Errorf("duplicate type ref table")
@@ -772,6 +791,13 @@ func Unmarshal(data []byte) (Program, error) {
 			return program, err
 		}
 		program.TypeIfaces = typeIfaces
+	}
+	if seenMethods {
+		methods, err := decodeMethods(methodData)
+		if err != nil {
+			return program, err
+		}
+		program.Methods = methods
 	}
 	if seenTypeRefs {
 		typeRefs, err := decodeTypeRefs(typeRefData)
@@ -1803,6 +1829,23 @@ func encodeTypeInterfaces(rows []TypeIface) []byte {
 	return out
 }
 
+func encodeMethods(methods []MethodInfo) []byte {
+	var out []byte
+	out = appendVarint(out, len(methods))
+	for _, method := range methods {
+		out = appendVarint(out, method.NameTok)
+		out = appendVarint(out, method.TypeIndex)
+		out = appendVarint(out, method.Symbol)
+		out = appendVarint(out, method.FuncIndex)
+		if method.Pointer {
+			out = appendVarint(out, 1)
+		} else {
+			out = appendVarint(out, 0)
+		}
+	}
+	return out
+}
+
 func encodeTypeRefs(refs []TypeRef) []byte {
 	var out []byte
 	out = appendVarint(out, len(refs))
@@ -2570,6 +2613,54 @@ func decodeTypeInterfaces(data []byte) ([]TypeIface, error) {
 		return nil, fmt.Errorf("trailing type interface data")
 	}
 	return rows, nil
+}
+
+func decodeMethods(data []byte) ([]MethodInfo, error) {
+	pos := 0
+	count, next, ok := readVarint(data, pos)
+	if !ok {
+		return nil, fmt.Errorf("invalid method count")
+	}
+	pos = next
+	methods := make([]MethodInfo, 0, count)
+	for i := 0; i < count; i++ {
+		nameTok, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid method %d name", i)
+		}
+		pos = n
+		typeIndex, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid method %d type", i)
+		}
+		pos = n
+		symbol, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid method %d symbol", i)
+		}
+		pos = n
+		funcIndex, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid method %d func", i)
+		}
+		pos = n
+		pointerValue, n, ok := readVarint(data, pos)
+		if !ok || pointerValue > 1 {
+			return nil, fmt.Errorf("invalid method %d pointer", i)
+		}
+		pos = n
+		methods = append(methods, MethodInfo{
+			NameTok:   nameTok,
+			TypeIndex: typeIndex,
+			Symbol:    symbol,
+			FuncIndex: funcIndex,
+			Pointer:   pointerValue == 1,
+		})
+	}
+	if pos != len(data) {
+		return nil, fmt.Errorf("trailing method data")
+	}
+	return methods, nil
 }
 
 func decodeTypeRefs(data []byte) ([]TypeRef, error) {

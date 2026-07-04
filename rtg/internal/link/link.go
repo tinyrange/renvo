@@ -205,6 +205,13 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		}
 		dst.TypeIfaces = append(dst.TypeIfaces, iface)
 	}
+	for i := 0; i < len(src.Methods); i++ {
+		method, ok := mapMethod(src.Methods[i], oldToNew, finalEOF, typeOffset, symbolOffset, funcOffset, len(src.Types), len(src.Symbols), len(src.Funcs))
+		if !ok {
+			return false
+		}
+		dst.Methods = append(dst.Methods, method)
+	}
 	for i := 0; i < len(src.TypeRefs); i++ {
 		ref, ok := mapTypeRef(src.TypeRefs[i], oldToNew, finalEOF, declOffset, funcOffset, symbolOffsets)
 		if !ok {
@@ -442,6 +449,22 @@ func mapTypeInterface(row unit.TypeIface, oldToNew []int, eof int, typeOffset in
 		}
 	}
 	return row, true
+}
+
+func mapMethod(method unit.MethodInfo, oldToNew []int, eof int, typeOffset int, symbolOffset int, funcOffset int, typeLimit int, symbolLimit int, funcLimit int) (unit.MethodInfo, bool) {
+	if method.TypeIndex < 0 || method.TypeIndex >= typeLimit ||
+		method.Symbol < 0 || method.Symbol >= symbolLimit ||
+		method.FuncIndex < 0 || method.FuncIndex >= funcLimit {
+		return method, false
+	}
+	method.NameTok = mapToken(oldToNew, method.NameTok, eof)
+	if method.NameTok < 0 {
+		return method, false
+	}
+	method.TypeIndex += typeOffset
+	method.Symbol += symbolOffset
+	method.FuncIndex += funcOffset
+	return method, true
 }
 
 func mapTypeRef(ref unit.TypeRef, oldToNew []int, eof int, declOffset int, funcOffset int, symbolOffsets []int) (unit.TypeRef, bool) {

@@ -306,6 +306,42 @@ func Value(i int) int {
 	}
 }
 
+func TestLinkUnitsPreservesMethodSets(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import "example.com/case/pkg/lib"
+
+func appMain() int { return 0 }
+`)},
+		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte(`package lib
+
+type Item struct { Value int }
+
+func (it Item) Read() int { return it.Value }
+func (it *Item) Set(value int) int { return value }
+`)},
+	})
+	program, ok := LinkUnits(result.Units, result.Root)
+	if !ok {
+		t.Fatal("LinkUnits failed")
+	}
+	item := findLinkedDecl(program, "Item")
+	readFn := findLinkedFunc(program, "Read")
+	setFn := findLinkedFunc(program, "Set")
+	if item < 0 || readFn < 0 || setFn < 0 {
+		t.Fatalf("linked rows missing: decls=%#v funcs=%#v", program.Decls, program.Funcs)
+	}
+	if len(program.Methods) != 2 {
+		t.Fatalf("linked methods = %#v, want 2", program.Methods)
+	}
+	assertLinkedSignature(t, program, readFn, []string{"it:Item"}, nil, []string{":int"})
+	assertLinkedSignature(t, program, setFn, []string{"it:*Item"}, []string{"value:int"}, []string{":int"})
+	assertLinkedMethod(t, program, item, "Read", false, readFn)
+	assertLinkedMethod(t, program, item, "Set", true, setFn)
+}
+
 func TestLinkBuildRejectsInvalidInput(t *testing.T) {
 	badBuild := build.Result{Ok: false, ErrorPackage: 7}
 	linked := LinkBuild(badBuild)
@@ -566,6 +602,37 @@ func assertLinkedTypeInterface(t *testing.T, program unit.Program, decl int, emb
 		t.Fatalf("linked interface method %s not found in %#v", method, iface.Methods)
 	}
 	t.Fatalf("linked interface row for type=%d not found in %#v", typeIndex, program.TypeIfaces)
+}
+
+func assertLinkedMethod(t *testing.T, program unit.Program, decl int, name string, pointer bool, funcIndex int) {
+	t.Helper()
+	typeIndex := -1
+	typeName := ""
+	for i := 0; i < len(program.Types); i++ {
+		if program.Types[i].Decl == decl {
+			typeIndex = i
+			typeName = linkedText(program, program.Types[i].NameStart, program.Types[i].NameEnd)
+			break
+		}
+	}
+	if typeIndex < 0 {
+		t.Fatalf("linked type decl=%d not found in %#v", decl, program.Types)
+	}
+	for i := 0; i < len(program.Methods); i++ {
+		method := program.Methods[i]
+		if method.TypeIndex != typeIndex || method.FuncIndex != funcIndex || method.Pointer != pointer || linkedTokenText(program, method.NameTok) != name {
+			continue
+		}
+		if method.Symbol < 0 || method.Symbol >= len(program.Symbols) {
+			t.Fatalf("linked method %s symbol = %d in %#v", name, method.Symbol, program.Symbols)
+		}
+		symbol := program.Symbols[method.Symbol]
+		if symbol.Kind != unit.SymbolMethod || symbol.Name != typeName+"."+name || symbol.OwnerKind != unit.OwnerFunc || symbol.OwnerIndex != funcIndex {
+			t.Fatalf("linked method %s symbol row = %#v, type %s func %d", name, symbol, typeName, funcIndex)
+		}
+		return
+	}
+	t.Fatalf("linked method %s pointer=%v func=%d type=%d not found in %#v", name, pointer, funcIndex, typeIndex, program.Methods)
 }
 
 func assertLinkedFields(t *testing.T, program unit.Program, fields []unit.Field, want []string) {

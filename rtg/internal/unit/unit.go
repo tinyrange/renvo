@@ -31,6 +31,7 @@ const (
 	TagConsts     = 26
 	TagTypeFields = 27
 	TagTypeIfaces = 28
+	TagMethods    = 29
 )
 
 const (
@@ -202,6 +203,14 @@ type TypeIface struct {
 	TypeIndex int
 	Methods   []InterfaceMethod
 	Embeds    []InterfaceEmbed
+}
+
+type MethodInfo struct {
+	NameTok   int
+	TypeIndex int
+	Symbol    int
+	FuncIndex int
+	Pointer   bool
 }
 
 const (
@@ -382,6 +391,7 @@ type Program struct {
 	Types      []TypeInfo
 	TypeFields []TypeFields
 	TypeIfaces []TypeIface
+	Methods    []MethodInfo
 	TypeRefs   []TypeRef
 	Locals     []LocalDecl
 	Indexes    []IndexExpr
@@ -445,6 +455,10 @@ func Marshal(program Program) ([]byte, bool) {
 	if !ok {
 		return nil, false
 	}
+	methodData, ok := encodeMethods(program.Methods, len(program.Tokens), len(program.Types), len(program.Symbols), len(program.Funcs))
+	if !ok {
+		return nil, false
+	}
 	typeRefData, ok := encodeTypeRefs(program.TypeRefs, len(program.Tokens), len(program.Decls), len(program.Funcs))
 	if !ok {
 		return nil, false
@@ -497,6 +511,7 @@ func Marshal(program Program) ([]byte, bool) {
 	root = appendNode(root, TagTypes, typeData)
 	root = appendNode(root, TagTypeFields, typeFieldData)
 	root = appendNode(root, TagTypeIfaces, typeIfaceData)
+	root = appendNode(root, TagMethods, methodData)
 	root = appendNode(root, TagTypeRefs, typeRefData)
 	root = appendNode(root, TagLocals, localData)
 	root = appendNode(root, TagIndexes, indexData)
@@ -546,6 +561,7 @@ func Unmarshal(data []byte) (Program, bool) {
 	typeData := []byte{}
 	typeFieldData := []byte{}
 	typeIfaceData := []byte{}
+	methodData := []byte{}
 	typeRefData := []byte{}
 	localData := []byte{}
 	indexData := []byte{}
@@ -570,6 +586,7 @@ func Unmarshal(data []byte) (Program, bool) {
 	seenTypes := false
 	seenTypeFields := false
 	seenTypeIfaces := false
+	seenMethods := false
 	seenTypeRefs := false
 	seenLocals := false
 	seenIndexes := false
@@ -690,6 +707,12 @@ func Unmarshal(data []byte) (Program, bool) {
 			}
 			seenTypeIfaces = true
 			typeIfaceData = payload
+		} else if tag == TagMethods {
+			if seenMethods {
+				return program, false
+			}
+			seenMethods = true
+			methodData = payload
 		} else if tag == TagTypeRefs {
 			if seenTypeRefs {
 				return program, false
@@ -822,6 +845,13 @@ func Unmarshal(data []byte) (Program, bool) {
 			return program, false
 		}
 		program.TypeIfaces = typeIfaces
+	}
+	if seenMethods {
+		methods, ok := decodeMethods(methodData, len(program.Tokens), len(program.Types), len(program.Symbols), len(program.Funcs))
+		if !ok {
+			return program, false
+		}
+		program.Methods = methods
 	}
 	if seenTypeRefs {
 		typeRefs, ok := decodeTypeRefs(typeRefData, len(program.Tokens), len(program.Decls), len(program.Funcs))
@@ -1823,6 +1853,79 @@ func decodeTypeInterfaces(data []byte, tokenLimit int, typeLimit int) ([]TypeIfa
 		return nil, false
 	}
 	return rows, true
+}
+
+func encodeMethods(methods []MethodInfo, tokenLimit int, typeLimit int, symbolLimit int, funcLimit int) ([]byte, bool) {
+	out := make([]byte, 0, len(methods)*6+1)
+	out = appendVarint(out, len(methods))
+	for i := 0; i < len(methods); i++ {
+		method := methods[i]
+		if !validToken(tokenLimit, method.NameTok) ||
+			method.TypeIndex < 0 || method.TypeIndex >= typeLimit ||
+			method.Symbol < 0 || method.Symbol >= symbolLimit ||
+			method.FuncIndex < 0 || method.FuncIndex >= funcLimit {
+			return nil, false
+		}
+		out = appendVarint(out, method.NameTok)
+		out = appendVarint(out, method.TypeIndex)
+		out = appendVarint(out, method.Symbol)
+		out = appendVarint(out, method.FuncIndex)
+		if method.Pointer {
+			out = appendVarint(out, 1)
+		} else {
+			out = appendVarint(out, 0)
+		}
+	}
+	return out, true
+}
+
+func decodeMethods(data []byte, tokenLimit int, typeLimit int, symbolLimit int, funcLimit int) ([]MethodInfo, bool) {
+	pos := 0
+	count, ok := readVarint(data, &pos)
+	if !ok || count < 0 || count > funcLimit {
+		return nil, false
+	}
+	methods := make([]MethodInfo, 0, count)
+	for i := 0; i < count; i++ {
+		nameTok, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		typeIndex, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		symbol, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		funcIndex, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		pointerValue, ok := readVarint(data, &pos)
+		if !ok || pointerValue > 1 {
+			return nil, false
+		}
+		method := MethodInfo{
+			NameTok:   nameTok,
+			TypeIndex: typeIndex,
+			Symbol:    symbol,
+			FuncIndex: funcIndex,
+			Pointer:   pointerValue == 1,
+		}
+		if !validToken(tokenLimit, method.NameTok) ||
+			method.TypeIndex < 0 || method.TypeIndex >= typeLimit ||
+			method.Symbol < 0 || method.Symbol >= symbolLimit ||
+			method.FuncIndex < 0 || method.FuncIndex >= funcLimit {
+			return nil, false
+		}
+		methods = append(methods, method)
+	}
+	if pos != len(data) {
+		return nil, false
+	}
+	return methods, true
 }
 
 func encodeTypeRefs(refs []TypeRef, tokenLimit int, declLimit int, funcLimit int) ([]byte, bool) {

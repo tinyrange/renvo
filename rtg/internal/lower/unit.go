@@ -132,6 +132,9 @@ func EmitCheckedPackage(pkg load.Package, info check.PackageInfo) Result {
 	if !builder.addCheckedSymbols(info, files) {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
+	if !builder.addCheckedMethods(info, files) {
+		return emitFail(result, builder.err, builder.errFile, builder.errToken)
+	}
 	if !builder.finishUnit() {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
@@ -332,6 +335,36 @@ func (b *unitBuilder) addCheckedSymbols(info check.PackageInfo, files []fileToke
 			Token:      token,
 			OwnerKind:  ownerKind,
 			OwnerIndex: ownerIndex,
+		})
+	}
+	return true
+}
+
+func (b *unitBuilder) addCheckedMethods(info check.PackageInfo, files []fileTokens) bool {
+	for i := 0; i < len(info.Methods); i++ {
+		method := info.Methods[i]
+		if method.File < 0 || method.File >= len(files) {
+			b.setErr(EmitErrCheck, -1, method.Token)
+			return false
+		}
+		if method.Type < 0 || method.Type >= len(b.program.Types) ||
+			method.Symbol < 0 || method.Symbol >= len(b.program.Symbols) ||
+			method.Body < 0 || method.Body >= len(b.funcRows) ||
+			b.funcRows[method.Body] < 0 {
+			b.setErr(EmitErrCheck, method.File, method.Token)
+			return false
+		}
+		nameTok := mapToken(files[method.File].oldToNew, method.Token, b.finalEOF)
+		if nameTok < 0 {
+			b.setErr(EmitErrCheck, method.File, method.Token)
+			return false
+		}
+		b.program.Methods = append(b.program.Methods, unit.MethodInfo{
+			NameTok:   nameTok,
+			TypeIndex: method.Type,
+			Symbol:    method.Symbol,
+			FuncIndex: b.funcRows[method.Body],
+			Pointer:   method.Pointer,
 		})
 	}
 	return true

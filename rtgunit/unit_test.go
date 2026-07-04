@@ -147,6 +147,13 @@ func appMain() int { return values[0] }
 			Results: []Field{{NameTok: -1, TypeStart: 17, TypeEnd: 18}},
 		}},
 	}}
+	program.Methods = []MethodInfo{{
+		NameTok:   17,
+		TypeIndex: 0,
+		Symbol:    0,
+		FuncIndex: 0,
+		Pointer:   true,
+	}}
 	program.TypeRefs = []TypeRef{{
 		OwnerKind:  OwnerDecl,
 		OwnerIndex: 0,
@@ -272,6 +279,9 @@ func appMain() int { return values[0] }
 	}
 	if len(decoded.TypeRefs) != 1 || decoded.TypeRefs[0] != program.TypeRefs[0] {
 		t.Fatalf("decoded type refs = %#v, want %#v", decoded.TypeRefs, program.TypeRefs)
+	}
+	if len(decoded.Methods) != 1 || decoded.Methods[0] != program.Methods[0] {
+		t.Fatalf("decoded methods = %#v, want %#v", decoded.Methods, program.Methods)
 	}
 	if decoded.ImportPath != program.ImportPath || len(decoded.Imports) != 1 || decoded.Imports[0] != program.Imports[0] {
 		t.Fatalf("decoded imports = %q %#v, want %q %#v", decoded.ImportPath, decoded.Imports, program.ImportPath, program.Imports)

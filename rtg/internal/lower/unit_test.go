@@ -208,6 +208,51 @@ func appMain() int { return first() + second() }
 	}
 }
 
+func TestEmitCheckedPackagePreservesMethodSets(t *testing.T) {
+	graph := loadTestGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+type item struct { value int }
+
+func (it item) Value() int { return it.value }
+func (it *item) Set(value int) int { return value }
+`)},
+	})
+	prog := check.CheckGraph(graph)
+	if !prog.Ok {
+		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
+	}
+	result := EmitCheckedPackage(graph.Packages[0], prog.Packages[0])
+	if !result.Ok {
+		t.Fatalf("EmitCheckedPackage failed: err=%d file=%d tok=%d", result.Error, result.ErrorFile, result.ErrorToken)
+	}
+	item := findUnitDecl(result.Program, "item")
+	valueFn := findUnitFunc(result.Program, "Value")
+	setFn := findUnitFunc(result.Program, "Set")
+	if item < 0 || valueFn < 0 || setFn < 0 {
+		t.Fatalf("unit rows missing: decls=%#v funcs=%#v", result.Program.Decls, result.Program.Funcs)
+	}
+	if len(result.Program.Methods) != 2 {
+		t.Fatalf("methods = %#v, want 2", result.Program.Methods)
+	}
+	assertUnitSignature(t, result.Program, valueFn, []string{"it:item"}, nil, []string{":int"})
+	assertUnitSignature(t, result.Program, setFn, []string{"it:*item"}, []string{"value:int"}, []string{":int"})
+	assertUnitMethod(t, result.Program, item, "Value", false, valueFn)
+	assertUnitMethod(t, result.Program, item, "Set", true, setFn)
+
+	data, ok := unit.Marshal(result.Program)
+	if !ok {
+		t.Fatal("unit Marshal failed")
+	}
+	decoded, err := rtgunit.Unmarshal(data)
+	if err != nil {
+		t.Fatalf("host unit decode failed: %v", err)
+	}
+	if len(decoded.Methods) != len(result.Program.Methods) {
+		t.Fatalf("decoded methods = %d, want %d", len(decoded.Methods), len(result.Program.Methods))
+	}
+}
+
 func TestEmitCheckedPackageExpressionShapes(t *testing.T) {
 	graph := loadTestGraph(t, []load.SourceFile{
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
@@ -698,6 +743,37 @@ func assertUnitTypeInterface(t *testing.T, program unit.Program, decl int, embed
 		t.Fatalf("interface method %s not found in %#v", method, iface.Methods)
 	}
 	t.Fatalf("interface row for type=%d not found in %#v", typeIndex, program.TypeIfaces)
+}
+
+func assertUnitMethod(t *testing.T, program unit.Program, decl int, name string, pointer bool, funcIndex int) {
+	t.Helper()
+	typeIndex := -1
+	typeName := ""
+	for i := 0; i < len(program.Types); i++ {
+		if program.Types[i].Decl == decl {
+			typeIndex = i
+			typeName = unitText(program, program.Types[i].NameStart, program.Types[i].NameEnd)
+			break
+		}
+	}
+	if typeIndex < 0 {
+		t.Fatalf("type decl=%d not found in %#v", decl, program.Types)
+	}
+	for i := 0; i < len(program.Methods); i++ {
+		method := program.Methods[i]
+		if method.TypeIndex != typeIndex || method.FuncIndex != funcIndex || method.Pointer != pointer || tokenTextUnit(program, method.NameTok) != name {
+			continue
+		}
+		if method.Symbol < 0 || method.Symbol >= len(program.Symbols) {
+			t.Fatalf("method %s symbol = %d in %#v", name, method.Symbol, program.Symbols)
+		}
+		symbol := program.Symbols[method.Symbol]
+		if symbol.Kind != unit.SymbolMethod || symbol.Name != typeName+"."+name || symbol.OwnerKind != unit.OwnerFunc || symbol.OwnerIndex != funcIndex {
+			t.Fatalf("method %s symbol row = %#v, type %s func %d", name, symbol, typeName, funcIndex)
+		}
+		return
+	}
+	t.Fatalf("method %s pointer=%v func=%d type=%d not found in %#v", name, pointer, funcIndex, typeIndex, program.Methods)
 }
 
 func assertUnitSymbol(t *testing.T, program unit.Program, name string, kind int, ownerKind int, ownerIndex int) int {

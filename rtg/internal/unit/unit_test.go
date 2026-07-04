@@ -156,6 +156,13 @@ func TestMarshalRoundTripExpressionShapes(t *testing.T) {
 			Results: []Field{{NameTok: -1, TypeStart: 10, TypeEnd: 11}},
 		}},
 	}}
+	program.Methods = []MethodInfo{{
+		NameTok:   7,
+		TypeIndex: 0,
+		Symbol:    1,
+		FuncIndex: 0,
+		Pointer:   true,
+	}}
 	program.TypeRefs = []TypeRef{{
 		OwnerKind:  OwnerDecl,
 		OwnerIndex: 0,
@@ -464,6 +471,7 @@ func equalPrograms(left Program, right Program) bool {
 		len(left.Types) != len(right.Types) ||
 		len(left.TypeFields) != len(right.TypeFields) ||
 		len(left.TypeIfaces) != len(right.TypeIfaces) ||
+		len(left.Methods) != len(right.Methods) ||
 		len(left.TypeRefs) != len(right.TypeRefs) ||
 		len(left.Locals) != len(right.Locals) ||
 		len(left.Indexes) != len(right.Indexes) || len(left.Composites) != len(right.Composites) ||
@@ -547,6 +555,11 @@ func equalPrograms(left Program, right Program) bool {
 	}
 	for i := 0; i < len(left.TypeIfaces); i++ {
 		if !equalTypeInterface(left.TypeIfaces[i], right.TypeIfaces[i]) {
+			return false
+		}
+	}
+	for i := 0; i < len(left.Methods); i++ {
+		if left.Methods[i] != right.Methods[i] {
 			return false
 		}
 	}
