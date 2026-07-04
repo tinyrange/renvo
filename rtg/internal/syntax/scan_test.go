@@ -81,3 +81,28 @@ func TestScanInvalidString(t *testing.T) {
 		t.Fatal("scanner succeeded on invalid string")
 	}
 }
+
+func TestStringLiteralValue(t *testing.T) {
+	src := []byte("package main\nvar a = \"x\\ny\\x2fz\"\nvar b = `raw/path`\n")
+	toks := Scan(src)
+	found := 0
+	for i := 0; i < len(toks); i++ {
+		if toks[i].Kind != TokenString {
+			continue
+		}
+		value, ok := StringLiteralValue(src, toks[i])
+		if !ok {
+			t.Fatalf("StringLiteralValue failed for %q", string(TokenText(src, toks[i])))
+		}
+		if found == 0 && value != "x\ny/z" {
+			t.Fatalf("first value = %q, want x\\ny/z", value)
+		}
+		if found == 1 && value != "raw/path" {
+			t.Fatalf("second value = %q, want raw/path", value)
+		}
+		found++
+	}
+	if found != 2 {
+		t.Fatalf("string count = %d, want 2", found)
+	}
+}
