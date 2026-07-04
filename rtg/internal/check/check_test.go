@@ -206,6 +206,9 @@ func TestCheckGraphDeclarations(t *testing.T) {
 import lib "example.com/case/pkg/lib"
 
 const packageValue = 3
+const message = "ok"
+const enabled = true
+const negative = -4
 
 const (
 	left, right int = 1, 2
@@ -233,6 +236,9 @@ func Value() int { return 5 }
 	root := prog.Packages[rootPackage]
 	file := prog.Graph.Packages[rootPackage].Files[0].File
 	assertDeclSpan(t, file, root, "packageValue", SymbolConst, "", "3")
+	assertDeclSpan(t, file, root, "message", SymbolConst, "", `"ok"`)
+	assertDeclSpan(t, file, root, "enabled", SymbolConst, "", "true")
+	assertDeclSpan(t, file, root, "negative", SymbolConst, "", "-4")
 	assertDeclSpan(t, file, root, "left", SymbolConst, "int", "1, 2")
 	assertDeclSpan(t, file, root, "right", SymbolConst, "int", "1, 2")
 	assertDeclSpan(t, file, root, "current", SymbolVar, "", "packageValue, lib.Value()")
@@ -242,6 +248,9 @@ func Value() int { return 5 }
 	assertDeclSpan(t, file, root, "second", SymbolVar, "", "packageValue")
 	assertDeclSpan(t, file, root, "item", SymbolType, "struct { value int }", "")
 	assertDeclValues(t, file, root, "packageValue", []string{"3"})
+	assertDeclValues(t, file, root, "message", []string{`"ok"`})
+	assertDeclValues(t, file, root, "enabled", []string{"true"})
+	assertDeclValues(t, file, root, "negative", []string{"-4"})
 	assertDeclValues(t, file, root, "left", []string{"1", "2"})
 	assertDeclValues(t, file, root, "right", []string{"1", "2"})
 	assertDeclValues(t, file, root, "current", []string{"packageValue", "lib.Value()"})
@@ -250,8 +259,14 @@ func Value() int { return 5 }
 	assertDeclValues(t, file, root, "first", []string{"second + computed"})
 	assertDeclValues(t, file, root, "second", []string{"packageValue"})
 	assertDeclValues(t, file, root, "item", nil)
-	assertDeclLookupOrder(t, root, []string{"computed", "current", "first", "item", "left", "next", "packageValue", "right", "second"})
-	assertDeclSourceOrder(t, root, []string{"packageValue", "left", "right", "current", "next", "computed", "first", "second", "item"})
+	assertDeclConstInt(t, root, "packageValue", 3)
+	assertDeclConstString(t, root, "message", "ok")
+	assertDeclConstBool(t, root, "enabled", true)
+	assertDeclConstInt(t, root, "negative", -4)
+	assertDeclConstInt(t, root, "left", 1)
+	assertDeclConstInt(t, root, "right", 2)
+	assertDeclLookupOrder(t, root, []string{"computed", "current", "enabled", "first", "item", "left", "message", "negative", "next", "packageValue", "right", "second"})
+	assertDeclSourceOrder(t, root, []string{"packageValue", "message", "enabled", "negative", "left", "right", "current", "next", "computed", "first", "second", "item"})
 	assertDeclInitOrder(t, root, []string{"current", "next", "computed", "second", "first"})
 	assertDeclRef(t, root, "current", "packageValue", RefPackage)
 	assertDeclRef(t, root, "current", "lib", RefImport)
@@ -273,6 +288,8 @@ import lib "example.com/case/pkg/lib"
 func appMain() int {
 	const named = 1
 	const typed int = 2
+	const flag = false
+	const text = "local"
 	var left, right int = named, typed
 	var empty string
 	type alias = int
@@ -305,11 +322,13 @@ func Value(value int) int { return value }
 	}
 	body := root.Bodies[bodyIndex]
 	file := prog.Graph.Packages[rootPackage].Files[body.File].File
-	if len(body.Locals) != 12 {
-		t.Fatalf("local decls = %#v, want 12", body.Locals)
+	if len(body.Locals) != 14 {
+		t.Fatalf("local decls = %#v, want 14", body.Locals)
 	}
 	assertLocalDeclSpan(t, file, body, "named", SymbolConst, "", "1", false)
 	assertLocalDeclSpan(t, file, body, "typed", SymbolConst, "int", "2", false)
+	assertLocalDeclSpan(t, file, body, "flag", SymbolConst, "", "false", false)
+	assertLocalDeclSpan(t, file, body, "text", SymbolConst, "", `"local"`, false)
 	assertLocalDeclSpan(t, file, body, "left", SymbolVar, "int", "named, typed", false)
 	assertLocalDeclSpan(t, file, body, "right", SymbolVar, "int", "named, typed", false)
 	assertLocalDeclSpan(t, file, body, "empty", SymbolVar, "string", "", false)
@@ -322,6 +341,8 @@ func Value(value int) int { return value }
 	assertLocalDeclSpan(t, file, body, "groupedC", SymbolVar, "string", "", false)
 	assertLocalDeclValues(t, file, body, "named", []string{"1"})
 	assertLocalDeclValues(t, file, body, "typed", []string{"2"})
+	assertLocalDeclValues(t, file, body, "flag", []string{"false"})
+	assertLocalDeclValues(t, file, body, "text", []string{`"local"`})
 	assertLocalDeclValues(t, file, body, "left", []string{"named", "typed"})
 	assertLocalDeclValues(t, file, body, "right", []string{"named", "typed"})
 	assertLocalDeclValues(t, file, body, "empty", nil)
@@ -338,6 +359,10 @@ func Value(value int) int { return value }
 	assertLocalDeclRef(t, body, "imported", "fromHelper", RefScope)
 	assertLocalDeclSelector(t, prog, body, "imported", "lib", "Value")
 	assertLocalDeclCall(t, prog, body, "imported", "lib", "Value", CallImportSelector)
+	assertLocalConstInt(t, body, "named", 1)
+	assertLocalConstInt(t, body, "typed", 2)
+	assertLocalConstBool(t, body, "flag", false)
+	assertLocalConstString(t, body, "text", "local")
 }
 
 func TestCheckGraphTypes(t *testing.T) {
@@ -836,6 +861,39 @@ func assertDeclValues(t *testing.T, file syntax.File, info PackageInfo, name str
 	assertExprSpans(t, file, info.Decls[index].Values, values)
 }
 
+func assertDeclConstInt(t *testing.T, info PackageInfo, name string, value int) {
+	t.Helper()
+	decl := requireDecl(t, info, name)
+	if !decl.Const.Ok || decl.Const.Kind != ConstInt || decl.Const.Int != value {
+		t.Fatalf("decl %q const = %#v, want int %d", name, decl.Const, value)
+	}
+}
+
+func assertDeclConstString(t *testing.T, info PackageInfo, name string, value string) {
+	t.Helper()
+	decl := requireDecl(t, info, name)
+	if !decl.Const.Ok || decl.Const.Kind != ConstString || decl.Const.String != value {
+		t.Fatalf("decl %q const = %#v, want string %q", name, decl.Const, value)
+	}
+}
+
+func assertDeclConstBool(t *testing.T, info PackageInfo, name string, value bool) {
+	t.Helper()
+	decl := requireDecl(t, info, name)
+	if !decl.Const.Ok || decl.Const.Kind != ConstBool || decl.Const.Bool != value {
+		t.Fatalf("decl %q const = %#v, want bool %v", name, decl.Const, value)
+	}
+}
+
+func requireDecl(t *testing.T, info PackageInfo, name string) DeclInfo {
+	t.Helper()
+	index := LookupDecl(info, name)
+	if index < 0 {
+		t.Fatalf("decl %q not found in %#v", name, info.Decls)
+	}
+	return info.Decls[index]
+}
+
 func assertDeclRef(t *testing.T, info PackageInfo, declName string, refName string, kind int) {
 	t.Helper()
 	index := LookupDecl(info, declName)
@@ -983,6 +1041,39 @@ func assertLocalDeclValues(t *testing.T, file syntax.File, body FuncBody, name s
 		t.Fatalf("local decl %q not found in %#v", name, body.Locals)
 	}
 	assertExprSpans(t, file, body.Locals[index].Values, values)
+}
+
+func assertLocalConstInt(t *testing.T, body FuncBody, name string, value int) {
+	t.Helper()
+	decl := requireLocalDecl(t, body, name)
+	if !decl.Const.Ok || decl.Const.Kind != ConstInt || decl.Const.Int != value {
+		t.Fatalf("local decl %q const = %#v, want int %d", name, decl.Const, value)
+	}
+}
+
+func assertLocalConstString(t *testing.T, body FuncBody, name string, value string) {
+	t.Helper()
+	decl := requireLocalDecl(t, body, name)
+	if !decl.Const.Ok || decl.Const.Kind != ConstString || decl.Const.String != value {
+		t.Fatalf("local decl %q const = %#v, want string %q", name, decl.Const, value)
+	}
+}
+
+func assertLocalConstBool(t *testing.T, body FuncBody, name string, value bool) {
+	t.Helper()
+	decl := requireLocalDecl(t, body, name)
+	if !decl.Const.Ok || decl.Const.Kind != ConstBool || decl.Const.Bool != value {
+		t.Fatalf("local decl %q const = %#v, want bool %v", name, decl.Const, value)
+	}
+}
+
+func requireLocalDecl(t *testing.T, body FuncBody, name string) LocalDeclInfo {
+	t.Helper()
+	index := LookupLocalDecl(body, name)
+	if index < 0 {
+		t.Fatalf("local decl %q not found in %#v", name, body.Locals)
+	}
+	return body.Locals[index]
 }
 
 func assertLocalDeclRef(t *testing.T, body FuncBody, declName string, refName string, kind int) {

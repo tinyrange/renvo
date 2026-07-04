@@ -23,6 +23,13 @@ const (
 	SymbolMethod
 )
 
+const (
+	ConstInvalid = iota
+	ConstInt
+	ConstString
+	ConstBool
+)
+
 type Program struct {
 	Graph        load.Graph
 	Packages     []PackageInfo
@@ -70,6 +77,7 @@ type DeclInfo struct {
 	File       int
 	Token      int
 	Symbol     int
+	ValueIndex int
 	TypeStart  int
 	TypeEnd    int
 	ValueStart int
@@ -79,6 +87,7 @@ type DeclInfo struct {
 	Selectors  []SelectorRef
 	Calls      []CallRef
 	Deps       []int
+	Const      ConstValue
 	Alias      bool
 }
 
@@ -88,6 +97,7 @@ type LocalDeclInfo struct {
 	File       int
 	Token      int
 	Scope      int
+	ValueIndex int
 	TypeStart  int
 	TypeEnd    int
 	ValueStart int
@@ -96,7 +106,16 @@ type LocalDeclInfo struct {
 	Refs       []NameRef
 	Selectors  []SelectorRef
 	Calls      []CallRef
+	Const      ConstValue
 	Alias      bool
+}
+
+type ConstValue struct {
+	Kind   int
+	Int    int
+	String string
+	Bool   bool
+	Ok     bool
 }
 
 type FuncBody struct {

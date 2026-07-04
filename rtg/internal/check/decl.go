@@ -86,6 +86,7 @@ func buildDeclInfo(file syntax.File, fileIndex int, info PackageInfo, checked []
 		File:       fileIndex,
 		Token:      decl.NameTok,
 		Symbol:     LookupPackageSymbol(info, name),
+		ValueIndex: declNameIndex(file, decl),
 		TypeStart:  -1,
 		TypeEnd:    -1,
 		ValueStart: -1,
@@ -109,6 +110,9 @@ func buildDeclInfo(file syntax.File, fileIndex int, info PackageInfo, checked []
 		out.Refs = appendExprRefs(out.Refs, file, fileIndex, info, FuncScope{}, out.ValueStart, out.ValueEnd)
 		out.Selectors = appendExprSelectors(out.Selectors, file, fileIndex, info, checked, FuncScope{}, out.ValueStart, out.ValueEnd)
 		out.Calls = appendExprCalls(out.Calls, file, fileIndex, info, checked, FuncScope{}, out.ValueStart, out.ValueEnd)
+		if out.Kind == SymbolConst {
+			out.Const = evalConstValue(file, out.Values, out.ValueIndex)
+		}
 	} else {
 		out.TypeStart, out.TypeEnd = trimDeclSpan(file, typeStart, decl.EndTok)
 	}
@@ -185,6 +189,7 @@ func appendLocalDeclSpec(decls []LocalDeclInfo, file syntax.File, fileIndex int,
 			File:       fileIndex,
 			Token:      names[i],
 			Scope:      LookupScopeName(scope, name),
+			ValueIndex: i,
 			TypeStart:  typeStart,
 			TypeEnd:    typeEnd,
 			ValueStart: valueSpanStart,
@@ -194,6 +199,9 @@ func appendLocalDeclSpec(decls []LocalDeclInfo, file syntax.File, fileIndex int,
 			Selectors:  selectors,
 			Calls:      calls,
 		})
+		if kind == SymbolConst {
+			decls[len(decls)-1].Const = evalConstValue(file, values, i)
+		}
 	}
 	return decls
 }
@@ -253,6 +261,21 @@ func declNameListEnd(file syntax.File, decl syntax.TopDecl) int {
 		i++
 	}
 	return i
+}
+
+func declNameIndex(file syntax.File, decl syntax.TopDecl) int {
+	index := 0
+	i := decl.StartTok
+	for i < decl.EndTok {
+		if i == decl.NameTok {
+			return index
+		}
+		if file.Tokens[i].Kind == syntax.TokenIdent {
+			index++
+		}
+		i++
+	}
+	return -1
 }
 
 func findDeclAssign(file syntax.File, start int, end int) int {
