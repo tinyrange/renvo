@@ -143,6 +143,10 @@ func TestMarshalRoundTripExpressionShapes(t *testing.T) {
 		ElemStart: -1,
 		ElemEnd:   -1,
 	}}
+	program.TypeFields = []TypeFields{{
+		TypeIndex: 0,
+		Fields:    []Field{{NameTok: 3, TypeStart: 5, TypeEnd: 6}},
+	}}
 	program.TypeRefs = []TypeRef{{
 		OwnerKind:  OwnerDecl,
 		OwnerIndex: 0,
@@ -449,6 +453,7 @@ func equalPrograms(left Program, right Program) bool {
 		len(left.Consts) != len(right.Consts) ||
 		len(left.Signatures) != len(right.Signatures) ||
 		len(left.Types) != len(right.Types) ||
+		len(left.TypeFields) != len(right.TypeFields) ||
 		len(left.TypeRefs) != len(right.TypeRefs) ||
 		len(left.Locals) != len(right.Locals) ||
 		len(left.Indexes) != len(right.Indexes) || len(left.Composites) != len(right.Composites) ||
@@ -517,6 +522,17 @@ func equalPrograms(left Program, right Program) bool {
 	for i := 0; i < len(left.Types); i++ {
 		if left.Types[i] != right.Types[i] {
 			return false
+		}
+	}
+	for i := 0; i < len(left.TypeFields); i++ {
+		if left.TypeFields[i].TypeIndex != right.TypeFields[i].TypeIndex ||
+			len(left.TypeFields[i].Fields) != len(right.TypeFields[i].Fields) {
+			return false
+		}
+		for j := 0; j < len(left.TypeFields[i].Fields); j++ {
+			if left.TypeFields[i].Fields[j] != right.TypeFields[i].Fields[j] {
+				return false
+			}
 		}
 	}
 	for i := 0; i < len(left.TypeRefs); i++ {

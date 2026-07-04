@@ -117,6 +117,9 @@ func EmitCheckedPackage(pkg load.Package, info check.PackageInfo) Result {
 	if !builder.addCheckedTypes(info, files) {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
+	if !builder.addCheckedTypeFields(info, files) {
+		return emitFail(result, builder.err, builder.errFile, builder.errToken)
+	}
 	if !builder.addCheckedTypeRefs(info, files) {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
@@ -514,6 +517,26 @@ func (b *unitBuilder) addCheckedTypes(info check.PackageInfo, files []fileTokens
 			return false
 		}
 		b.program.Types = append(b.program.Types, mapped)
+	}
+	return true
+}
+
+func (b *unitBuilder) addCheckedTypeFields(info check.PackageInfo, files []fileTokens) bool {
+	for i := 0; i < len(info.Types); i++ {
+		typ := info.Types[i]
+		if typ.Kind != check.TypeStruct {
+			continue
+		}
+		if typ.File < 0 || typ.File >= len(files) || i >= len(b.program.Types) {
+			b.setErr(EmitErrCheck, -1, typ.Token)
+			return false
+		}
+		fields, ok := mapFields(typ.Fields, files[typ.File].oldToNew, b.finalEOF)
+		if !ok {
+			b.setErr(EmitErrCheck, typ.File, typ.Token)
+			return false
+		}
+		b.program.TypeFields = append(b.program.TypeFields, unit.TypeFields{TypeIndex: i, Fields: fields})
 	}
 	return true
 }

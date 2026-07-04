@@ -36,6 +36,7 @@ const (
 	TagSymbols    = uint16(24)
 	TagInitOrder  = uint16(25)
 	TagConsts     = uint16(26)
+	TagTypeFields = uint16(27)
 )
 
 const (
@@ -186,6 +187,11 @@ type TypeInfo struct {
 	KeyEnd    int
 	ElemStart int
 	ElemEnd   int
+}
+
+type TypeFields struct {
+	TypeIndex int
+	Fields    []Field
 }
 
 const (
@@ -364,6 +370,7 @@ type Program struct {
 	Funcs      []Func
 	Signatures []FuncSignature
 	Types      []TypeInfo
+	TypeFields []TypeFields
 	TypeRefs   []TypeRef
 	Locals     []LocalDecl
 	Indexes    []IndexExpr
@@ -437,6 +444,7 @@ func Marshal(program Program) ([]byte, error) {
 		NewNode(TagFuncs, encodeFuncs(program.Funcs)),
 		NewNode(TagSigs, encodeSignatures(program.Signatures)),
 		NewNode(TagTypes, encodeTypes(program.Types)),
+		NewNode(TagTypeFields, encodeTypeFields(program.TypeFields)),
 		NewNode(TagTypeRefs, encodeTypeRefs(program.TypeRefs)),
 		NewNode(TagLocals, encodeLocals(program.Locals)),
 		NewNode(TagIndexes, encodeIndexes(program.Indexes)),
@@ -490,6 +498,7 @@ func Unmarshal(data []byte) (Program, error) {
 	var constData []byte
 	var sigData []byte
 	var typeData []byte
+	var typeFieldData []byte
 	var typeRefData []byte
 	var localData []byte
 	var indexData []byte
@@ -507,6 +516,7 @@ func Unmarshal(data []byte) (Program, error) {
 	seenConsts := false
 	seenSigs := false
 	seenTypes := false
+	seenTypeFields := false
 	seenTypeRefs := false
 	seenLocals := false
 	seenIndexes := false
@@ -596,6 +606,12 @@ func Unmarshal(data []byte) (Program, error) {
 			}
 			seenTypes = true
 			typeData = payload
+		case TagTypeFields:
+			if seenTypeFields {
+				return program, fmt.Errorf("duplicate type field table")
+			}
+			seenTypeFields = true
+			typeFieldData = payload
 		case TagTypeRefs:
 			if seenTypeRefs {
 				return program, fmt.Errorf("duplicate type ref table")
@@ -714,6 +730,13 @@ func Unmarshal(data []byte) (Program, error) {
 			return program, err
 		}
 		program.Types = types
+	}
+	if seenTypeFields {
+		typeFields, err := decodeTypeFields(typeFieldData)
+		if err != nil {
+			return program, err
+		}
+		program.TypeFields = typeFields
 	}
 	if seenTypeRefs {
 		typeRefs, err := decodeTypeRefs(typeRefData)
@@ -1715,6 +1738,16 @@ func encodeTypes(types []TypeInfo) []byte {
 	return out
 }
 
+func encodeTypeFields(rows []TypeFields) []byte {
+	var out []byte
+	out = appendVarint(out, len(rows))
+	for _, row := range rows {
+		out = appendVarint(out, row.TypeIndex)
+		out = appendFieldList(out, row.Fields)
+	}
+	return out
+}
+
 func encodeTypeRefs(refs []TypeRef) []byte {
 	var out []byte
 	out = appendVarint(out, len(refs))
@@ -2390,6 +2423,33 @@ func decodeTypes(data []byte) ([]TypeInfo, error) {
 		return nil, fmt.Errorf("trailing type data")
 	}
 	return types, nil
+}
+
+func decodeTypeFields(data []byte) ([]TypeFields, error) {
+	pos := 0
+	count, next, ok := readVarint(data, pos)
+	if !ok {
+		return nil, fmt.Errorf("invalid type field count")
+	}
+	pos = next
+	rows := make([]TypeFields, 0, count)
+	for i := 0; i < count; i++ {
+		typeIndex, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid type field %d type", i)
+		}
+		pos = n
+		fields, n, ok := readFieldList(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid type field %d fields", i)
+		}
+		pos = n
+		rows = append(rows, TypeFields{TypeIndex: typeIndex, Fields: fields})
+	}
+	if pos != len(data) {
+		return nil, fmt.Errorf("trailing type field data")
+	}
+	return rows, nil
 }
 
 func decodeTypeRefs(data []byte) ([]TypeRef, error) {

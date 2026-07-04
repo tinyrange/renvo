@@ -107,6 +107,7 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 	symbolOffset := len(dst.Symbols)
 	declOffset := len(dst.Decls)
 	funcOffset := len(dst.Funcs)
+	typeOffset := len(dst.Types)
 	oldToNew := make([]int, len(src.Tokens))
 	for i := 0; i < len(src.Tokens); i++ {
 		tok := src.Tokens[i]
@@ -189,6 +190,13 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 			return false
 		}
 		dst.Types = append(dst.Types, typ)
+	}
+	for i := 0; i < len(src.TypeFields); i++ {
+		fields, ok := mapTypeFields(src.TypeFields[i], oldToNew, finalEOF, typeOffset, len(src.Types))
+		if !ok {
+			return false
+		}
+		dst.TypeFields = append(dst.TypeFields, fields)
 	}
 	for i := 0; i < len(src.TypeRefs); i++ {
 		ref, ok := mapTypeRef(src.TypeRefs[i], oldToNew, finalEOF, declOffset, funcOffset, symbolOffsets)
@@ -383,6 +391,19 @@ func mapType(typ unit.TypeInfo, oldToNew []int, eof int, textOffset int, declOff
 		return typ, false
 	}
 	return typ, true
+}
+
+func mapTypeFields(row unit.TypeFields, oldToNew []int, eof int, typeOffset int, typeLimit int) (unit.TypeFields, bool) {
+	if row.TypeIndex < 0 || row.TypeIndex >= typeLimit {
+		return row, false
+	}
+	row.TypeIndex += typeOffset
+	var ok bool
+	row.Fields, ok = mapFields(row.Fields, oldToNew, eof)
+	if !ok {
+		return row, false
+	}
+	return row, true
 }
 
 func mapTypeRef(ref unit.TypeRef, oldToNew []int, eof int, declOffset int, funcOffset int, symbolOffsets []int) (unit.TypeRef, bool) {

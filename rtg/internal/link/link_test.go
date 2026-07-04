@@ -150,6 +150,7 @@ func appMain() int { return lib.Value(1) }
 const Answer = -7
 
 type Numbers []int
+type Record struct { Value int }
 
 var Values = []int{1, 2}
 
@@ -165,15 +166,17 @@ func Value(i int) int {
 		t.Fatal("LinkUnits failed")
 	}
 	numbers := findLinkedDecl(program, "Numbers")
+	record := findLinkedDecl(program, "Record")
 	answer := findLinkedDecl(program, "Answer")
 	values := findLinkedDecl(program, "Values")
 	valueFn := findLinkedFunc(program, "Value")
 	appMain := findLinkedFunc(program, "appMain")
-	if numbers < 0 || answer < 0 || values < 0 || valueFn < 0 || appMain < 0 {
+	if numbers < 0 || record < 0 || answer < 0 || values < 0 || valueFn < 0 || appMain < 0 {
 		t.Fatalf("linked rows missing: decls=%#v funcs=%#v", program.Decls, program.Funcs)
 	}
 	assertLinkedConstInt(t, program, answer, -7)
 	numbersSym := assertLinkedSymbol(t, program, "Numbers", unit.SymbolType, unit.OwnerDecl, numbers)
+	assertLinkedSymbol(t, program, "Record", unit.SymbolType, unit.OwnerDecl, record)
 	valuesSym := assertLinkedSymbol(t, program, "Values", unit.SymbolVar, unit.OwnerDecl, values)
 	valueSym := assertLinkedSymbol(t, program, "Value", unit.SymbolFunc, unit.OwnerFunc, valueFn)
 	assertLinkedSymbol(t, program, "appMain", unit.SymbolFunc, unit.OwnerFunc, appMain)
@@ -182,16 +185,17 @@ func Value(i int) int {
 	assertLinkedInitOrder(t, program, []int{values})
 	assertLinkedSignature(t, program, valueFn, nil, []string{"i:int"}, []string{":int"})
 	assertLinkedSignature(t, program, appMain, nil, nil, []string{":int"})
-	if len(program.Types) != 1 {
-		t.Fatalf("linked types = %#v, want 1", program.Types)
+	if len(program.Types) != 2 {
+		t.Fatalf("linked types = %#v, want 2", program.Types)
 	}
-	typ := program.Types[0]
+	typ := findLinkedTypeByDecl(program, numbers)
 	if typ.Decl != numbers || linkedText(program, typ.NameStart, typ.NameEnd) != "Numbers" ||
 		typ.Kind != unit.TypeSlice ||
 		linkedSpanText(program, typ.TypeStart, typ.TypeEnd) != "[]int" ||
 		linkedSpanText(program, typ.ElemStart, typ.ElemEnd) != "int" {
 		t.Fatalf("linked type = %#v, decl %d", typ, numbers)
 	}
+	assertLinkedTypeFields(t, program, record, []string{"Value:int"})
 	foundNumberElemRef := false
 	for i := 0; i < len(program.TypeRefs); i++ {
 		ref := program.TypeRefs[i]
@@ -346,6 +350,16 @@ func findLinkedFunc(program unit.Program, name string) int {
 	return -1
 }
 
+func findLinkedTypeByDecl(program unit.Program, decl int) unit.TypeInfo {
+	for i := 0; i < len(program.Types); i++ {
+		typ := program.Types[i]
+		if typ.Decl == decl {
+			return typ
+		}
+	}
+	return unit.TypeInfo{Decl: -1}
+}
+
 func linkedSpanText(program unit.Program, startTok int, endTok int) string {
 	if startTok < 0 || endTok <= startTok || endTok > len(program.Tokens) {
 		return ""
@@ -478,6 +492,28 @@ func assertLinkedImport(t *testing.T, program unit.Program, name string, importP
 		return
 	}
 	t.Fatalf("linked import %s %s not found in %#v", name, importPath, program.Imports)
+}
+
+func assertLinkedTypeFields(t *testing.T, program unit.Program, decl int, want []string) {
+	t.Helper()
+	typeIndex := -1
+	for i := 0; i < len(program.Types); i++ {
+		if program.Types[i].Decl == decl {
+			typeIndex = i
+			break
+		}
+	}
+	if typeIndex < 0 {
+		t.Fatalf("linked type decl=%d not found in %#v", decl, program.Types)
+	}
+	for i := 0; i < len(program.TypeFields); i++ {
+		fields := program.TypeFields[i]
+		if fields.TypeIndex == typeIndex {
+			assertLinkedFields(t, program, fields.Fields, want)
+			return
+		}
+	}
+	t.Fatalf("linked type fields for type=%d not found in %#v", typeIndex, program.TypeFields)
 }
 
 func assertLinkedFields(t *testing.T, program unit.Program, fields []unit.Field, want []string) {

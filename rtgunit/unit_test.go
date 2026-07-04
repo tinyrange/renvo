@@ -134,6 +134,10 @@ func appMain() int { return values[0] }
 		ElemStart: 6,
 		ElemEnd:   7,
 	}}
+	program.TypeFields = []TypeFields{{
+		TypeIndex: 0,
+		Fields:    []Field{{NameTok: 3, TypeStart: 4, TypeEnd: 7}},
+	}}
 	program.TypeRefs = []TypeRef{{
 		OwnerKind:  OwnerDecl,
 		OwnerIndex: 0,
@@ -245,6 +249,9 @@ func appMain() int { return values[0] }
 	}
 	if len(decoded.Types) != 1 || decoded.Types[0] != program.Types[0] {
 		t.Fatalf("decoded types = %#v, want %#v", decoded.Types, program.Types)
+	}
+	if len(decoded.TypeFields) != 1 || len(decoded.TypeFields[0].Fields) != 1 || decoded.TypeFields[0].Fields[0] != program.TypeFields[0].Fields[0] {
+		t.Fatalf("decoded type fields = %#v, want %#v", decoded.TypeFields, program.TypeFields)
 	}
 	if len(decoded.TypeRefs) != 1 || decoded.TypeRefs[0] != program.TypeRefs[0] {
 		t.Fatalf("decoded type refs = %#v, want %#v", decoded.TypeRefs, program.TypeRefs)

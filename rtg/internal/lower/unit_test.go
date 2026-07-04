@@ -258,6 +258,9 @@ func appMain() int {
 	if len(result.Program.Types) != 1 {
 		t.Fatalf("types = %#v, want 1", result.Program.Types)
 	}
+	if len(result.Program.TypeFields) != 1 {
+		t.Fatalf("type fields = %#v, want 1", result.Program.TypeFields)
+	}
 	if len(result.Program.Symbols) == 0 {
 		t.Fatalf("symbols = %#v, want symbols", result.Program.Symbols)
 	}
@@ -304,6 +307,7 @@ func appMain() int {
 	assertUnitSymbol(t, result.Program, "choose", unit.SymbolFunc, unit.OwnerFunc, choose)
 	assertUnitSymbol(t, result.Program, "appMain", unit.SymbolFunc, unit.OwnerFunc, appMain)
 	assertUnitType(t, result.Program, "item", unit.TypeStruct, item, "struct { value int }", "", "", "")
+	assertUnitTypeFields(t, result.Program, item, []string{"value:int"})
 	assertUnitDeclMeta(t, result.Program, item, itemSym, "struct { value int }", "", nil, false)
 	assertUnitDeclMeta(t, result.Program, global, globalSym, "", "[]int{1, 2, 3}", []string{"[]int{1, 2, 3}"}, false)
 	assertUnitDeclMeta(t, result.Program, picked, pickedSym, "", "choose(global[1])", []string{"choose(global[1])"}, false)
@@ -350,6 +354,9 @@ func appMain() int {
 	}
 	if len(decoded.Types) != len(result.Program.Types) {
 		t.Fatalf("decoded types = %d, want %d", len(decoded.Types), len(result.Program.Types))
+	}
+	if len(decoded.TypeFields) != len(result.Program.TypeFields) {
+		t.Fatalf("decoded type fields = %d, want %d", len(decoded.TypeFields), len(result.Program.TypeFields))
 	}
 	if len(decoded.Symbols) != len(result.Program.Symbols) {
 		t.Fatalf("decoded symbols = %d, want %d", len(decoded.Symbols), len(result.Program.Symbols))
@@ -615,6 +622,28 @@ func assertUnitType(t *testing.T, program unit.Program, name string, kind int, d
 		return
 	}
 	t.Fatalf("type name=%s kind=%d decl=%d not found in %#v", name, kind, decl, program.Types)
+}
+
+func assertUnitTypeFields(t *testing.T, program unit.Program, decl int, want []string) {
+	t.Helper()
+	typeIndex := -1
+	for i := 0; i < len(program.Types); i++ {
+		if program.Types[i].Decl == decl {
+			typeIndex = i
+			break
+		}
+	}
+	if typeIndex < 0 {
+		t.Fatalf("type decl=%d not found in %#v", decl, program.Types)
+	}
+	for i := 0; i < len(program.TypeFields); i++ {
+		fields := program.TypeFields[i]
+		if fields.TypeIndex == typeIndex {
+			assertUnitFields(t, program, fields.Fields, want)
+			return
+		}
+	}
+	t.Fatalf("type fields for type=%d not found in %#v", typeIndex, program.TypeFields)
 }
 
 func assertUnitSymbol(t *testing.T, program unit.Program, name string, kind int, ownerKind int, ownerIndex int) int {

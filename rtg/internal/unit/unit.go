@@ -29,6 +29,7 @@ const (
 	TagSymbols    = 24
 	TagInitOrder  = 25
 	TagConsts     = 26
+	TagTypeFields = 27
 )
 
 const (
@@ -178,6 +179,11 @@ type TypeInfo struct {
 	KeyEnd    int
 	ElemStart int
 	ElemEnd   int
+}
+
+type TypeFields struct {
+	TypeIndex int
+	Fields    []Field
 }
 
 const (
@@ -356,6 +362,7 @@ type Program struct {
 	Funcs      []Func
 	Signatures []FuncSignature
 	Types      []TypeInfo
+	TypeFields []TypeFields
 	TypeRefs   []TypeRef
 	Locals     []LocalDecl
 	Indexes    []IndexExpr
@@ -411,6 +418,10 @@ func Marshal(program Program) ([]byte, bool) {
 	if !ok {
 		return nil, false
 	}
+	typeFieldData, ok := encodeTypeFields(program.TypeFields, len(program.Tokens), len(program.Types))
+	if !ok {
+		return nil, false
+	}
 	typeRefData, ok := encodeTypeRefs(program.TypeRefs, len(program.Tokens), len(program.Decls), len(program.Funcs))
 	if !ok {
 		return nil, false
@@ -461,6 +472,7 @@ func Marshal(program Program) ([]byte, bool) {
 	root = appendNode(root, TagFuncs, funcData)
 	root = appendNode(root, TagSigs, sigData)
 	root = appendNode(root, TagTypes, typeData)
+	root = appendNode(root, TagTypeFields, typeFieldData)
 	root = appendNode(root, TagTypeRefs, typeRefData)
 	root = appendNode(root, TagLocals, localData)
 	root = appendNode(root, TagIndexes, indexData)
@@ -508,6 +520,7 @@ func Unmarshal(data []byte) (Program, bool) {
 	constData := []byte{}
 	sigData := []byte{}
 	typeData := []byte{}
+	typeFieldData := []byte{}
 	typeRefData := []byte{}
 	localData := []byte{}
 	indexData := []byte{}
@@ -530,6 +543,7 @@ func Unmarshal(data []byte) (Program, bool) {
 	seenFuncs := false
 	seenSigs := false
 	seenTypes := false
+	seenTypeFields := false
 	seenTypeRefs := false
 	seenLocals := false
 	seenIndexes := false
@@ -638,6 +652,12 @@ func Unmarshal(data []byte) (Program, bool) {
 			}
 			seenTypes = true
 			typeData = payload
+		} else if tag == TagTypeFields {
+			if seenTypeFields {
+				return program, false
+			}
+			seenTypeFields = true
+			typeFieldData = payload
 		} else if tag == TagTypeRefs {
 			if seenTypeRefs {
 				return program, false
@@ -756,6 +776,13 @@ func Unmarshal(data []byte) (Program, bool) {
 			return program, false
 		}
 		program.Types = types
+	}
+	if seenTypeFields {
+		typeFields, ok := decodeTypeFields(typeFieldData, len(program.Tokens), len(program.Types))
+		if !ok {
+			return program, false
+		}
+		program.TypeFields = typeFields
 	}
 	if seenTypeRefs {
 		typeRefs, ok := decodeTypeRefs(typeRefData, len(program.Tokens), len(program.Decls), len(program.Funcs))
@@ -1611,6 +1638,52 @@ func decodeTypes(data []byte, textLimit int, tokenLimit int, declLimit int) ([]T
 		return nil, false
 	}
 	return types, true
+}
+
+func encodeTypeFields(rows []TypeFields, tokenLimit int, typeLimit int) ([]byte, bool) {
+	out := make([]byte, 0, len(rows)*8+1)
+	out = appendVarint(out, len(rows))
+	seen := make([]bool, typeLimit)
+	ok := true
+	for i := 0; i < len(rows); i++ {
+		row := rows[i]
+		if row.TypeIndex < 0 || row.TypeIndex >= typeLimit || seen[row.TypeIndex] {
+			return nil, false
+		}
+		seen[row.TypeIndex] = true
+		out = appendVarint(out, row.TypeIndex)
+		out = appendFields(out, row.Fields, tokenLimit, &ok)
+		if !ok {
+			return nil, false
+		}
+	}
+	return out, true
+}
+
+func decodeTypeFields(data []byte, tokenLimit int, typeLimit int) ([]TypeFields, bool) {
+	pos := 0
+	count, ok := readVarint(data, &pos)
+	if !ok || count < 0 || count > typeLimit {
+		return nil, false
+	}
+	seen := make([]bool, typeLimit)
+	rows := make([]TypeFields, 0, count)
+	for i := 0; i < count; i++ {
+		typeIndex, ok := readVarint(data, &pos)
+		if !ok || typeIndex < 0 || typeIndex >= typeLimit || seen[typeIndex] {
+			return nil, false
+		}
+		seen[typeIndex] = true
+		fields, ok := readFields(data, &pos, tokenLimit)
+		if !ok {
+			return nil, false
+		}
+		rows = append(rows, TypeFields{TypeIndex: typeIndex, Fields: fields})
+	}
+	if pos != len(data) {
+		return nil, false
+	}
+	return rows, true
 }
 
 func encodeTypeRefs(refs []TypeRef, tokenLimit int, declLimit int, funcLimit int) ([]byte, bool) {
