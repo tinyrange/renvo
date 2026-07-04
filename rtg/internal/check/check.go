@@ -83,6 +83,7 @@ type FuncBody struct {
 	Body      syntax.Body
 	Scope     FuncScope
 	Refs      []NameRef
+	Selectors []SelectorRef
 }
 
 func CheckGraph(graph load.Graph) Program {
@@ -98,7 +99,7 @@ func CheckGraph(graph load.Graph) Program {
 		return checkFail(prog, CheckErrGraph, graph.ErrorPackage, -1, -1)
 	}
 	for i := 0; i < len(graph.Packages); i++ {
-		info, ok, err, file, tok := checkPackage(graph, i)
+		info, ok, err, file, tok := checkPackage(graph, i, prog.Packages)
 		prog.Packages = append(prog.Packages, info)
 		if !ok {
 			return checkFail(prog, err, i, file, tok)
@@ -135,7 +136,7 @@ func LookupFuncBody(info PackageInfo, name string) int {
 	return -1
 }
 
-func checkPackage(graph load.Graph, pkgIndex int) (PackageInfo, bool, int, int, int) {
+func checkPackage(graph load.Graph, pkgIndex int, checked []PackageInfo) (PackageInfo, bool, int, int, int) {
 	pkg := graph.Packages[pkgIndex]
 	info := PackageInfo{Name: pkg.Name}
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
@@ -217,7 +218,8 @@ func checkPackage(graph load.Graph, pkgIndex int) (PackageInfo, bool, int, int, 
 				return info, false, CheckErrScope, fileIndex, scopeTok
 			}
 			refs := buildFuncRefs(file, fileIndex, info, body, scope)
-			info.Bodies = append(info.Bodies, FuncBody{Name: name, Kind: kind, File: fileIndex, Func: i, Signature: signature, Body: body, Scope: scope, Refs: refs})
+			selectors := buildFuncSelectors(file, fileIndex, info, checked, body, scope)
+			info.Bodies = append(info.Bodies, FuncBody{Name: name, Kind: kind, File: fileIndex, Func: i, Signature: signature, Body: body, Scope: scope, Refs: refs, Selectors: selectors})
 		}
 	}
 	buildMethodSets(&info, pkg)

@@ -357,6 +357,7 @@ func Value() int { return 4 }
 	assertBodyRef(t, body, "lib", RefImport)
 	assertBodyRef(t, body, "len", RefBuiltin)
 	assertBodyRef(t, body, "done", RefLabel)
+	assertPackageSelector(t, prog, body, "lib", "Value")
 }
 
 func TestCheckGraphDuplicateParamScope(t *testing.T) {
@@ -719,6 +720,22 @@ func assertBodyRef(t *testing.T, body FuncBody, name string, kind int) {
 	index := LookupBodyRef(body, name, kind)
 	if index < 0 {
 		t.Fatalf("body ref %q kind %d not found in %#v", name, kind, body.Refs)
+	}
+}
+
+func assertPackageSelector(t *testing.T, prog Program, body FuncBody, base string, name string) {
+	t.Helper()
+	index := LookupSelector(body, base, name, SelectorImport)
+	if index < 0 {
+		t.Fatalf("selector %s.%s not found in %#v", base, name, body.Selectors)
+	}
+	selector := body.Selectors[index]
+	if selector.Package < 0 || selector.Package >= len(prog.Packages) {
+		t.Fatalf("selector %s.%s package = %d in %#v", base, name, selector.Package, prog.Packages)
+	}
+	target := prog.Packages[selector.Package]
+	if selector.Symbol < 0 || selector.Symbol >= len(target.Symbols) || target.Symbols[selector.Symbol].Name != name {
+		t.Fatalf("selector %s.%s symbol = %d in package %#v", base, name, selector.Symbol, target)
 	}
 }
 
