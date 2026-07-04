@@ -74,6 +74,19 @@ type DeclInfo struct {
 	Alias      bool
 }
 
+type LocalDeclInfo struct {
+	Name       string
+	Kind       int
+	File       int
+	Token      int
+	Scope      int
+	TypeStart  int
+	TypeEnd    int
+	ValueStart int
+	ValueEnd   int
+	Alias      bool
+}
+
 type FuncBody struct {
 	Name      string
 	Kind      int
@@ -85,6 +98,7 @@ type FuncBody struct {
 	Refs      []NameRef
 	Selectors []SelectorRef
 	Calls     []CallRef
+	Locals    []LocalDeclInfo
 	Assigns   []AssignInfo
 	Returns   []ReturnInfo
 }
@@ -223,9 +237,10 @@ func checkPackage(graph load.Graph, pkgIndex int, checked []PackageInfo) (Packag
 			refs := buildFuncRefs(file, fileIndex, info, body, scope)
 			selectors := buildFuncSelectors(file, fileIndex, info, checked, body, scope)
 			calls := buildFuncCalls(file, fileIndex, info, checked, body, scope)
+			locals := buildFuncLocalDecls(file, fileIndex, body, scope)
 			assigns := buildFuncAssignments(file, fileIndex, info, body, scope)
 			returns := buildFuncReturns(file, body)
-			info.Bodies = append(info.Bodies, FuncBody{Name: name, Kind: kind, File: fileIndex, Func: i, Signature: signature, Body: body, Scope: scope, Refs: refs, Selectors: selectors, Calls: calls, Assigns: assigns, Returns: returns})
+			info.Bodies = append(info.Bodies, FuncBody{Name: name, Kind: kind, File: fileIndex, Func: i, Signature: signature, Body: body, Scope: scope, Refs: refs, Selectors: selectors, Calls: calls, Locals: locals, Assigns: assigns, Returns: returns})
 		}
 	}
 	buildMethodSets(&info, pkg)

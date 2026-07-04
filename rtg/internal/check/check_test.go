@@ -230,6 +230,51 @@ func later() int { return 4 }
 	assertDeclSpan(t, file, root, "item", SymbolType, "struct { value int }", "")
 }
 
+func TestCheckGraphLocalDeclarations(t *testing.T) {
+	graph := testGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+func appMain() int {
+	const named = 1
+	const typed int = 2
+	var left, right int = named, typed
+	var empty string
+	type alias = int
+	type local struct { value int }
+	var (
+		groupedA, groupedB = left, right
+		groupedC string
+	)
+	return left + right + groupedA + groupedB
+}
+`)},
+	})
+	prog := CheckGraph(graph)
+	if !prog.Ok {
+		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
+	}
+	root := prog.Packages[0]
+	bodyIndex := LookupFuncBody(root, "appMain")
+	if bodyIndex < 0 {
+		t.Fatalf("appMain body not found: %#v", root.Bodies)
+	}
+	body := root.Bodies[bodyIndex]
+	file := prog.Graph.Packages[0].Files[body.File].File
+	if len(body.Locals) != 10 {
+		t.Fatalf("local decls = %#v, want 10", body.Locals)
+	}
+	assertLocalDeclSpan(t, file, body, "named", SymbolConst, "", "1", false)
+	assertLocalDeclSpan(t, file, body, "typed", SymbolConst, "int", "2", false)
+	assertLocalDeclSpan(t, file, body, "left", SymbolVar, "int", "named, typed", false)
+	assertLocalDeclSpan(t, file, body, "right", SymbolVar, "int", "named, typed", false)
+	assertLocalDeclSpan(t, file, body, "empty", SymbolVar, "string", "", false)
+	assertLocalDeclSpan(t, file, body, "alias", SymbolType, "int", "", true)
+	assertLocalDeclSpan(t, file, body, "local", SymbolType, "struct { value int }", "", false)
+	assertLocalDeclSpan(t, file, body, "groupedA", SymbolVar, "", "left, right", false)
+	assertLocalDeclSpan(t, file, body, "groupedB", SymbolVar, "", "left, right", false)
+	assertLocalDeclSpan(t, file, body, "groupedC", SymbolVar, "string", "", false)
+}
+
 func TestCheckGraphTypes(t *testing.T) {
 	graph := testGraph(t, []load.SourceFile{
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
@@ -661,6 +706,30 @@ func assertDeclSpan(t *testing.T, file syntax.File, info PackageInfo, name strin
 	}
 	if got := spanText(file, decl.ValueStart, decl.ValueEnd); got != value {
 		t.Fatalf("decl %q value = %q, want %q", name, got, value)
+	}
+}
+
+func assertLocalDeclSpan(t *testing.T, file syntax.File, body FuncBody, name string, kind int, typ string, value string, alias bool) {
+	t.Helper()
+	index := LookupLocalDecl(body, name)
+	if index < 0 {
+		t.Fatalf("local decl %q not found in %#v", name, body.Locals)
+	}
+	decl := body.Locals[index]
+	if decl.Kind != kind {
+		t.Fatalf("local decl %q kind = %d, want %d", name, decl.Kind, kind)
+	}
+	if decl.Scope < 0 || decl.Scope >= len(body.Scope.Names) || body.Scope.Names[decl.Scope].Name != name {
+		t.Fatalf("local decl %q scope = %d in %#v", name, decl.Scope, body.Scope.Names)
+	}
+	if decl.Alias != alias {
+		t.Fatalf("local decl %q alias = %v, want %v", name, decl.Alias, alias)
+	}
+	if got := spanText(file, decl.TypeStart, decl.TypeEnd); got != typ {
+		t.Fatalf("local decl %q type = %q, want %q", name, got, typ)
+	}
+	if got := spanText(file, decl.ValueStart, decl.ValueEnd); got != value {
+		t.Fatalf("local decl %q value = %q, want %q", name, got, value)
 	}
 }
 
