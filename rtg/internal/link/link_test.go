@@ -138,6 +138,43 @@ func appMain() int { return lib.Value() }
 	}
 }
 
+func TestLinkUnitsManglesDuplicatePackageSymbols(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import "example.com/case/pkg/a"
+import "example.com/case/pkg/b"
+
+func appMain() int { return a.Value()+b.Value() }
+`)},
+		{Path: "/repo/case/pkg/a/a.go", Src: []byte(`package a
+
+func Value() int { return 1 }
+`)},
+		{Path: "/repo/case/pkg/b/b.go", Src: []byte(`package b
+
+func Value() int { return 2 }
+`)},
+	})
+	program, ok := LinkUnits(result.Units, result.Root)
+	if !ok {
+		t.Fatal("LinkUnits failed")
+	}
+	left := findLinkedFunc(program, "rtgp0_Value")
+	right := findLinkedFunc(program, "rtgp1_Value")
+	appMain := findLinkedFunc(program, "appMain")
+	if left < 0 || right < 0 || appMain < 0 {
+		t.Fatalf("linked funcs missing aliases: %#v", program.Funcs)
+	}
+	assertLinkedStatement(t, program, appMain, unit.StmtReturn, "rtgp0_Value()+rtgp1_Value()")
+	for i := 0; i < len(program.Refs); i++ {
+		if program.Refs[i].Kind == unit.RefImport {
+			t.Fatalf("linked import ref survived: %#v", program.Refs[i])
+		}
+	}
+}
+
 func TestLinkBuildAddsRootEntrypointWrapper(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},

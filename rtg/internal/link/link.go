@@ -85,9 +85,10 @@ func LinkPrograms(programs []unit.Program, root int, rootName string) (unit.Prog
 	program := unit.Program{Package: rootName, ImportPath: programs[root].ImportPath}
 	finalEOF := countLinkedTokens(programs)
 	symbolOffsets := packageSymbolOffsets(programs)
+	aliases := packageSymbolAliases(programs, root)
 	lineOffset := 0
 	for i := 0; i < len(programs); i++ {
-		ok := appendProgram(&program, programs[i], finalEOF, lineOffset, symbolOffsets, i+1 < len(programs))
+		ok := appendProgram(&program, programs[i], finalEOF, lineOffset, symbolOffsets, aliases, i+1 < len(programs))
 		if !ok {
 			return unit.Program{}, false
 		}
@@ -238,44 +239,66 @@ func linkedProgramText(program unit.Program, start int, end int) string {
 	return string(program.Text[start:end])
 }
 
-func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset int, symbolOffsets []int, hasNext bool) bool {
+func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset int, symbolOffsets []int, aliases [][]string, hasNext bool) bool {
 	if src.Package == "" || len(src.Text) == 0 || len(src.Tokens) == 0 {
 		return false
 	}
-	textOffset := len(dst.Text)
 	symbolOffset := len(dst.Symbols)
 	declOffset := len(dst.Decls)
 	funcOffset := len(dst.Funcs)
 	typeOffset := len(dst.Types)
 	oldToNew := make([]int, len(src.Tokens))
 	skip, redirect := linkedTokenSkip(src)
+	replacements := linkedTokenReplacements(src, aliases)
+	prevEnd := 0
 	for i := 0; i < len(src.Tokens); i++ {
 		tok := src.Tokens[i]
 		if tok.Kind == unit.TokenEOF {
 			oldToNew[i] = finalEOF
 			continue
 		}
+		tokStart := tok.Start
+		tokEnd := tok.Start + tok.Size
 		if skip[i] {
 			oldToNew[i] = finalEOF
+			if tokEnd > prevEnd {
+				prevEnd = tokEnd
+			}
 			continue
 		}
+		if tok.Start > prevEnd {
+			dst.Text = append(dst.Text, src.Text[prevEnd:tok.Start]...)
+		}
 		oldToNew[i] = len(dst.Tokens)
-		tok.Start += textOffset
+		tok.Start = len(dst.Text)
+		if replacements[i] != "" {
+			dst.Text = append(dst.Text, []byte(replacements[i])...)
+			tok.Size = len(replacements[i])
+		} else {
+			dst.Text = append(dst.Text, src.Text[tokStart:tokEnd]...)
+		}
 		tok.Line += lineOffset
 		dst.Tokens = append(dst.Tokens, tok)
+		prevEnd = tokEnd
+	}
+	if prevEnd < len(src.Text) {
+		dst.Text = append(dst.Text, src.Text[prevEnd:]...)
 	}
 	for i := 0; i < len(redirect); i++ {
 		if skip[i] && redirect[i] >= 0 {
 			oldToNew[i] = mapToken(oldToNew, redirect[i], finalEOF)
 		}
 	}
-	dst.Text = append(dst.Text, src.Text...)
 	for i := 0; i < len(src.Decls); i++ {
 		decl := src.Decls[i]
-		decl.NameStart += textOffset
-		decl.NameEnd += textOffset
 		decl.StartTok = mapToken(oldToNew, decl.StartTok, finalEOF)
 		decl.EndTok = mapToken(oldToNew, decl.EndTok, finalEOF)
+		nameStart, nameEnd, ok := mapTextSpanByToken(src, dst, oldToNew, finalEOF, decl.NameStart, decl.NameEnd)
+		if !ok {
+			return false
+		}
+		decl.NameStart = nameStart
+		decl.NameEnd = nameEnd
 		dst.Decls = append(dst.Decls, decl)
 	}
 	for i := 0; i < len(src.DeclMeta); i++ {
@@ -301,10 +324,14 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 	}
 	for i := 0; i < len(src.Funcs); i++ {
 		fn := src.Funcs[i]
-		fn.NameStart += textOffset
-		fn.NameEnd += textOffset
 		fn.StartTok = mapToken(oldToNew, fn.StartTok, finalEOF)
 		fn.NameTok = mapToken(oldToNew, fn.NameTok, finalEOF)
+		nameStart, nameEnd, ok := mappedTokenTextSpan(dst, fn.NameTok)
+		if !ok {
+			return false
+		}
+		fn.NameStart = nameStart
+		fn.NameEnd = nameEnd
 		fn.ReceiverStart = mapToken(oldToNew, fn.ReceiverStart, finalEOF)
 		fn.ReceiverEnd = mapToken(oldToNew, fn.ReceiverEnd, finalEOF)
 		fn.BodyStart = mapToken(oldToNew, fn.BodyStart, finalEOF)
@@ -313,7 +340,11 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		dst.Funcs = append(dst.Funcs, fn)
 	}
 	for i := 0; i < len(src.Symbols); i++ {
-		symbol, ok := mapSymbol(src.Symbols[i], oldToNew, finalEOF, declOffset, funcOffset)
+		symbol := src.Symbols[i]
+		if symbol.Token >= 0 && symbol.Token < len(replacements) && replacements[symbol.Token] != "" {
+			symbol.Name = replacements[symbol.Token]
+		}
+		symbol, ok := mapSymbol(symbol, oldToNew, finalEOF, declOffset, funcOffset)
 		if !ok {
 			return false
 		}
@@ -334,7 +365,7 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		dst.Stmts = append(dst.Stmts, stmt)
 	}
 	for i := 0; i < len(src.Types); i++ {
-		typ, ok := mapType(src.Types[i], oldToNew, finalEOF, textOffset, declOffset, symbolOffset)
+		typ, ok := mapType(src, dst, src.Types[i], oldToNew, finalEOF, declOffset, symbolOffset)
 		if !ok {
 			return false
 		}
@@ -376,7 +407,7 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		dst.TypeRefs = append(dst.TypeRefs, ref)
 	}
 	for i := 0; i < len(src.Locals); i++ {
-		local, ok := mapLocal(src.Locals[i], oldToNew, finalEOF, textOffset, funcOffset)
+		local, ok := mapLocal(dst, src.Locals[i], oldToNew, finalEOF, funcOffset)
 		if !ok {
 			return false
 		}
@@ -505,6 +536,130 @@ func markRedirectToken(skip []bool, redirect []int, tok int, target int) {
 	redirect[tok] = target
 }
 
+func linkedTokenReplacements(program unit.Program, aliases [][]string) []string {
+	out := make([]string, len(program.Tokens))
+	for i := 0; i < len(program.Symbols); i++ {
+		symbol := program.Symbols[i]
+		name := packageSymbolAlias(aliases, symbol.Package, i)
+		if name != "" && symbol.Token >= 0 && symbol.Token < len(out) {
+			out[symbol.Token] = name
+		}
+	}
+	for i := 0; i < len(program.Refs); i++ {
+		ref := program.Refs[i]
+		if ref.Kind == unit.RefPackage {
+			name := packageSymbolAlias(aliases, ref.Package, ref.Index)
+			if name != "" && ref.Token >= 0 && ref.Token < len(out) {
+				out[ref.Token] = name
+			}
+		}
+	}
+	for i := 0; i < len(program.Selectors); i++ {
+		selector := program.Selectors[i]
+		name := packageSymbolAlias(aliases, selector.Package, selector.Symbol)
+		if name != "" && selector.NameTok >= 0 && selector.NameTok < len(out) {
+			out[selector.NameTok] = name
+		}
+	}
+	for i := 0; i < len(program.TypeRefs); i++ {
+		ref := program.TypeRefs[i]
+		name := packageSymbolAlias(aliases, ref.Package, ref.Symbol)
+		if name != "" && ref.Token >= 0 && ref.Token < len(out) {
+			out[ref.Token] = name
+		}
+	}
+	return out
+}
+
+func packageSymbolAliases(programs []unit.Program, root int) [][]string {
+	out := make([][]string, len(programs))
+	for i := 0; i < len(programs); i++ {
+		out[i] = make([]string, len(programs[i].Symbols))
+		for j := 0; j < len(programs[i].Symbols); j++ {
+			if symbolNeedsAlias(programs, i, j) {
+				out[i][j] = symbolAliasName(i, programs[i].Symbols[j].Name)
+			}
+		}
+	}
+	return out
+}
+
+func symbolNeedsAlias(programs []unit.Program, pkg int, symbol int) bool {
+	name := programs[pkg].Symbols[symbol].Name
+	for i := 0; i < len(programs); i++ {
+		for j := 0; j < len(programs[i].Symbols); j++ {
+			if i == pkg && j == symbol {
+				continue
+			}
+			if programs[i].Symbols[j].Name == name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func packageSymbolAlias(aliases [][]string, pkg int, symbol int) string {
+	if pkg < 0 || pkg >= len(aliases) || symbol < 0 || symbol >= len(aliases[pkg]) {
+		return ""
+	}
+	return aliases[pkg][symbol]
+}
+
+func symbolAliasName(pkg int, name string) string {
+	out := []byte("rtgp")
+	out = appendInt(out, pkg)
+	out = append(out, '_')
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
+			out = append(out, c)
+		} else {
+			out = append(out, '_')
+		}
+	}
+	return string(out)
+}
+
+func appendInt(out []byte, value int) []byte {
+	if value == 0 {
+		return append(out, '0')
+	}
+	var digits [20]byte
+	n := 0
+	for value > 0 {
+		digits[n] = byte('0' + value%10)
+		value = value / 10
+		n++
+	}
+	for i := n - 1; i >= 0; i-- {
+		out = append(out, digits[i])
+	}
+	return out
+}
+
+func mapTextSpanByToken(src unit.Program, dst *unit.Program, oldToNew []int, eof int, start int, end int) (int, int, bool) {
+	for i := 0; i < len(src.Tokens); i++ {
+		tok := src.Tokens[i]
+		if tok.Start == start && tok.Start+tok.Size == end {
+			mapped := mapToken(oldToNew, i, eof)
+			return mappedTokenTextSpan(dst, mapped)
+		}
+	}
+	return 0, 0, false
+}
+
+func mappedTokenTextSpan(program *unit.Program, tok int) (int, int, bool) {
+	if tok < 0 || tok >= len(program.Tokens) {
+		return 0, 0, false
+	}
+	token := program.Tokens[tok]
+	if token.Kind == unit.TokenEOF || token.Start < 0 || token.Start+token.Size > len(program.Text) {
+		return 0, 0, false
+	}
+	return token.Start, token.Start + token.Size, true
+}
+
 func mapSymbol(symbol unit.Symbol, oldToNew []int, eof int, declOffset int, funcOffset int) (unit.Symbol, bool) {
 	if len(symbol.Name) == 0 ||
 		symbol.Kind < unit.SymbolConst || symbol.Kind > unit.SymbolMethod ||
@@ -614,17 +769,20 @@ func mapFields(fields []unit.Field, oldToNew []int, eof int) ([]unit.Field, bool
 	return fields, true
 }
 
-func mapType(typ unit.TypeInfo, oldToNew []int, eof int, textOffset int, declOffset int, symbolOffset int) (unit.TypeInfo, bool) {
+func mapType(src unit.Program, dst *unit.Program, typ unit.TypeInfo, oldToNew []int, eof int, declOffset int, symbolOffset int) (unit.TypeInfo, bool) {
 	if typ.NameStart < 0 || typ.NameEnd < typ.NameStart || typ.Decl < 0 {
 		return typ, false
 	}
-	typ.NameStart += textOffset
-	typ.NameEnd += textOffset
+	nameStart, nameEnd, ok := mapTextSpanByToken(src, dst, oldToNew, eof, typ.NameStart, typ.NameEnd)
+	if !ok {
+		return typ, false
+	}
+	typ.NameStart = nameStart
+	typ.NameEnd = nameEnd
 	typ.Decl += declOffset
 	if typ.Symbol >= 0 {
 		typ.Symbol += symbolOffset
 	}
-	var ok bool
 	typ.TypeStart, typ.TypeEnd, ok = mapNullableSpan(typ.TypeStart, typ.TypeEnd, oldToNew, eof)
 	if !ok {
 		return typ, false
@@ -743,15 +901,18 @@ func mapTypeRef(ref unit.TypeRef, oldToNew []int, eof int, declOffset int, funcO
 	return ref, true
 }
 
-func mapLocal(local unit.LocalDecl, oldToNew []int, eof int, textOffset int, funcOffset int) (unit.LocalDecl, bool) {
+func mapLocal(dst *unit.Program, local unit.LocalDecl, oldToNew []int, eof int, funcOffset int) (unit.LocalDecl, bool) {
 	if local.FuncIndex < 0 || local.NameStart < 0 || local.NameEnd < local.NameStart {
 		return local, false
 	}
 	local.FuncIndex += funcOffset
-	local.NameStart += textOffset
-	local.NameEnd += textOffset
 	local.Token = mapToken(oldToNew, local.Token, eof)
-	var ok bool
+	nameStart, nameEnd, ok := mappedTokenTextSpan(dst, local.Token)
+	if !ok {
+		return local, false
+	}
+	local.NameStart = nameStart
+	local.NameEnd = nameEnd
 	local.TypeStart, local.TypeEnd, ok = mapNullableSpan(local.TypeStart, local.TypeEnd, oldToNew, eof)
 	if !ok {
 		return local, false
