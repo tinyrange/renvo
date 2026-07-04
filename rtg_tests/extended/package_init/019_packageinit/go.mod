@@ -1,0 +1,3 @@
+module example.com/rtgtests/extended/packageinit/case019
+
+go 1.25

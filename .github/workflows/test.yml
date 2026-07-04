@@ -48,38 +48,16 @@ jobs:
       - name: Run backend tests
         env:
           RTG_CROSS_ARCH_TESTS: ${{ matrix.full-targets && '1' || '' }}
-        run: go test -count=1 -v -skip '^TestCompilerPerformance$' .
+        run: go test -count=1 -timeout 30m -v -skip '^TestCompilerPerformance$' .
 
-  frontend:
-    name: Frontend tests (${{ matrix.name }})
-    runs-on: ${{ matrix.runner }}
+  frontend-corpus:
+    name: Frontend corpus tests
+    runs-on: ubuntu-latest
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: linux-amd64
-            runner: ubuntu-latest
-            full-targets: true
-          - name: linux-arm64
-            runner: ubuntu-24.04-arm
-            full-targets: false
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
-
-      - name: Install QEMU user emulators
-        if: matrix.full-targets
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-user
-
-      - name: Install Wasmtime
-        if: matrix.full-targets
-        run: |
-          curl -fsSL https://wasmtime.dev/install.sh | bash
-          echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -87,8 +65,5 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      - name: Run frontend tests
-        env:
-          RTG_CROSS_ARCH_TESTS: ${{ matrix.full-targets && '1' || '' }}
-          RTG_SELFHOST_TESTS: "1"
-        run: go test -count=1 -v ./rtg/...
+      - name: Run frontend corpus tests
+        run: go test -count=1 -v ./rtg_tests

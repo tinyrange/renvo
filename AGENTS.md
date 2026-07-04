@@ -7,14 +7,14 @@ The compiler will eventually target many operating systems and architectures. Th
 ## Restrictions
 
 - Backend compiler edits are limited to `./compiler_*_impl.go` and `./compiler_main.go`.
-- Any edits under `./rtg/` are allowed.
+- The old frontend tree `./rtg/` has been removed. Frontend acceptance tests
+  live under `./rtg_tests/` until a replacement frontend exists.
 - You can add new regression programs in `./tests` but you should avoid modifying existing ones unless they are broken.
 - Do not modify `./main_test.go`.
 - The only syscalls are `open`, `close`, `read`, `write`, `chmod`, and `print`.
 - Performance requirements are strictly defined in `./main_test.go` and cannot be violated.
 - Do not hardcode test cases, emit prebuilt/self-copying binaries, copy the compiler executable or source as the compiled output, or patch the test harness/runtime instead of implementing the compiler from parsed source semantics.
 - You are allowed to write one-off custom tests in `./sandbox`, but this folder is not part of the repo and should only be used for local compiler experiments. Do not use it to modify or replace the test harness.
-- Do not expand `./rtg/std` just to mirror the Go standard library. Add APIs only when code we are writing benefits directly, a frontend feature needs a small compatibility shim, or a self-hosting milestone requires it; document the caller or milestone that justifies the addition.
 
 ## Workflow
 
@@ -26,7 +26,7 @@ The frontend exclusion list is closed: goroutines, channels, `select`, cgo, and 
 
 There are no restrictions on the specific `go test` command you run.
 Do not run `go test` in module mode inside `./tests`; those files intentionally contain conflicting package-level symbols and are meant to be compiled individually by the compiler test harness.
-Do not treat `go test ./...` as a valid whole-repo check. It descends into `./tests` and `./sandbox`, which intentionally contain standalone programs with conflicting symbols and scratch experiments. Prefer explicit package sets such as `go test ./rtg/...` plus the top-level compiler harness tests you intend to exercise.
+Do not treat `go test ./...` as a valid whole-repo check. It descends into `./tests` and `./sandbox`, which intentionally contain standalone programs with conflicting symbols and scratch experiments. Prefer explicit package sets such as `go test ./rtg_tests` plus the top-level compiler harness tests you intend to exercise.
 
 ## Bugfixing Workflow
 
