@@ -136,6 +136,45 @@ func appMain() int { return lib.Value() }
 	}
 }
 
+func TestLinkBuildAddsRootEntrypointWrapper(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+func main() {
+	print("PASS\n")
+}
+`)},
+	})
+	linked := LinkBuild(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuild failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	mainFn := findLinkedFunc(linked.Program, "main")
+	appMain := findLinkedFunc(linked.Program, "appMain")
+	if mainFn < 0 || appMain < 0 {
+		t.Fatalf("linked funcs missing main/appMain: %#v", linked.Program.Funcs)
+	}
+	assertLinkedSymbol(t, linked.Program, "appMain", unit.SymbolFunc, unit.OwnerFunc, appMain)
+	assertLinkedSignature(t, linked.Program, appMain, nil, nil, []string{":int"})
+	assertLinkedStatement(t, linked.Program, appMain, unit.StmtExpr, "main()")
+	assertLinkedStatement(t, linked.Program, appMain, unit.StmtReturn, "0")
+
+	decoded, err := rtgunit.Unmarshal(linked.Data)
+	if err != nil {
+		t.Fatalf("linked unit did not decode: %v", err)
+	}
+	foundAppMain := false
+	for i := 0; i < len(decoded.Funcs); i++ {
+		if functionName(decoded, decoded.Funcs[i]) == "appMain" {
+			foundAppMain = true
+		}
+	}
+	if !foundAppMain {
+		t.Fatalf("decoded funcs missing appMain: %#v", decoded.Funcs)
+	}
+}
+
 func TestLinkUnitsPreservesExpressionShapes(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},

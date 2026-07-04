@@ -78,6 +78,10 @@ func LinkPrograms(programs []unit.Program, root int, rootName string) (unit.Prog
 	if root < 0 || root >= len(programs) || rootName == "" {
 		return unit.Program{}, false
 	}
+	programs, ok := preparePrograms(programs, root)
+	if !ok {
+		return unit.Program{}, false
+	}
 	program := unit.Program{Package: rootName, ImportPath: programs[root].ImportPath}
 	finalEOF := countLinkedTokens(programs)
 	symbolOffsets := packageSymbolOffsets(programs)
@@ -96,6 +100,142 @@ func LinkPrograms(programs []unit.Program, root int, rootName string) (unit.Prog
 		Line:  lineOffset + 1,
 	})
 	return program, true
+}
+
+func preparePrograms(programs []unit.Program, root int) ([]unit.Program, bool) {
+	out := make([]unit.Program, len(programs))
+	copy(out, programs)
+	rootProgram, ok := addRootEntrypoint(out[root], root)
+	if !ok {
+		return nil, false
+	}
+	out[root] = rootProgram
+	return out, true
+}
+
+func addRootEntrypoint(src unit.Program, packageIndex int) (unit.Program, bool) {
+	if src.Package != "main" || findFuncByName(src, "appMain") >= 0 || findFuncByName(src, "main") < 0 {
+		return src, true
+	}
+	if len(src.Tokens) == 0 || src.Tokens[len(src.Tokens)-1].Kind != unit.TokenEOF {
+		return src, false
+	}
+	src.Text = append([]byte{}, src.Text...)
+	src.Tokens = append([]unit.Token{}, src.Tokens[:len(src.Tokens)-1]...)
+	src.Funcs = append([]unit.Func{}, src.Funcs...)
+	src.Signatures = append([]unit.FuncSignature{}, src.Signatures...)
+	src.Stmts = append([]unit.Statement{}, src.Stmts...)
+	src.Returns = append([]unit.Return{}, src.Returns...)
+	src.Calls = append([]unit.Call{}, src.Calls...)
+	src.Refs = append([]unit.NameRef{}, src.Refs...)
+	src.Symbols = append([]unit.Symbol{}, src.Symbols...)
+	if len(src.Text) > 0 && src.Text[len(src.Text)-1] != '\n' {
+		src.Text = append(src.Text, '\n')
+	}
+	start := len(src.Text)
+	line := countNewlines(src.Text) + 1
+	wrapper := []byte("func appMain() int { main(); return 0 }\n")
+	src.Text = append(src.Text, wrapper...)
+	base := len(src.Tokens)
+	src.Tokens = append(src.Tokens,
+		unit.Token{Kind: unit.TokenFunc, Start: start, Size: 4, Line: line},
+		unit.Token{Kind: unit.TokenIdent, Start: start + 5, Size: 7, Line: line},
+		unit.Token{Kind: unit.TokenOp, Start: start + 12, Size: 1, Line: line},
+		unit.Token{Kind: unit.TokenOp, Start: start + 13, Size: 1, Line: line},
+		unit.Token{Kind: unit.TokenIdent, Start: start + 15, Size: 3, Line: line},
+		unit.Token{Kind: unit.TokenOp, Start: start + 19, Size: 1, Line: line},
+		unit.Token{Kind: unit.TokenIdent, Start: start + 21, Size: 4, Line: line},
+		unit.Token{Kind: unit.TokenOp, Start: start + 25, Size: 1, Line: line},
+		unit.Token{Kind: unit.TokenOp, Start: start + 26, Size: 1, Line: line},
+		unit.Token{Kind: unit.TokenOp, Start: start + 27, Size: 1, Line: line},
+		unit.Token{Kind: unit.TokenReturn, Start: start + 29, Size: 6, Line: line},
+		unit.Token{Kind: unit.TokenNumber, Start: start + 36, Size: 1, Line: line},
+		unit.Token{Kind: unit.TokenOp, Start: start + 38, Size: 1, Line: line},
+	)
+	eof := len(src.Tokens)
+	src.Tokens = append(src.Tokens, unit.Token{Kind: unit.TokenEOF, Start: len(src.Text), Size: 0, Line: countNewlines(src.Text) + 1})
+	funcIndex := len(src.Funcs)
+	src.Funcs = append(src.Funcs, unit.Func{
+		NameStart:     start + 5,
+		NameEnd:       start + 12,
+		StartTok:      base,
+		NameTok:       base + 1,
+		ReceiverStart: eof,
+		ReceiverEnd:   eof,
+		BodyStart:     base + 5,
+		BodyEnd:       base + 12,
+		EndTok:        base + 13,
+	})
+	src.Signatures = append(src.Signatures, unit.FuncSignature{
+		FuncIndex: funcIndex,
+		Results:   []unit.Field{{NameTok: -1, TypeStart: base + 4, TypeEnd: base + 5}},
+	})
+	src.Stmts = append(src.Stmts,
+		unit.Statement{FuncIndex: funcIndex, Kind: unit.StmtBlock, StartTok: base + 5, EndTok: base + 13, ExprStart: -1, ExprEnd: -1, BodyStart: base + 5, BodyEnd: base + 13, ElseStart: -1, ElseEnd: -1},
+		unit.Statement{FuncIndex: funcIndex, Kind: unit.StmtExpr, StartTok: base + 6, EndTok: base + 10, ExprStart: base + 6, ExprEnd: base + 9, BodyStart: -1, BodyEnd: -1, ElseStart: -1, ElseEnd: -1},
+		unit.Statement{FuncIndex: funcIndex, Kind: unit.StmtReturn, StartTok: base + 10, EndTok: base + 12, ExprStart: base + 11, ExprEnd: base + 12, BodyStart: -1, BodyEnd: -1, ElseStart: -1, ElseEnd: -1},
+	)
+	src.Returns = append(src.Returns, unit.Return{
+		FuncIndex: funcIndex,
+		StartTok:  base + 10,
+		EndTok:    base + 12,
+		Values:    []unit.ExprSpan{{StartTok: base + 11, EndTok: base + 12}},
+	})
+	src.Calls = append(src.Calls, unit.Call{
+		OwnerKind:  unit.OwnerFunc,
+		OwnerIndex: funcIndex,
+		Kind:       unit.CallPackage,
+		CalleeTok:  base + 6,
+		BaseTok:    eof,
+		DotTok:     eof,
+		ArgsStart:  base + 8,
+		ArgsEnd:    base + 8,
+	})
+	mainSymbol := findFuncSymbol(src, "main")
+	src.Refs = append(src.Refs, unit.NameRef{
+		OwnerKind:  unit.OwnerFunc,
+		OwnerIndex: funcIndex,
+		Kind:       unit.RefPackage,
+		Token:      base + 6,
+		Index:      mainSymbol,
+		Package:    packageIndex,
+	})
+	src.Symbols = append(src.Symbols, unit.Symbol{
+		Name:       "appMain",
+		Kind:       unit.SymbolFunc,
+		Package:    packageIndex,
+		Token:      base + 1,
+		OwnerKind:  unit.OwnerFunc,
+		OwnerIndex: funcIndex,
+	})
+	return src, true
+}
+
+func findFuncByName(program unit.Program, name string) int {
+	for i := 0; i < len(program.Funcs); i++ {
+		fn := program.Funcs[i]
+		if linkedProgramText(program, fn.NameStart, fn.NameEnd) == name {
+			return i
+		}
+	}
+	return -1
+}
+
+func findFuncSymbol(program unit.Program, name string) int {
+	for i := 0; i < len(program.Symbols); i++ {
+		symbol := program.Symbols[i]
+		if symbol.Kind == unit.SymbolFunc && symbol.Name == name {
+			return i
+		}
+	}
+	return -1
+}
+
+func linkedProgramText(program unit.Program, start int, end int) string {
+	if start < 0 || end < start || end > len(program.Text) {
+		return ""
+	}
+	return string(program.Text[start:end])
 }
 
 func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset int, symbolOffsets []int, hasNext bool) bool {
