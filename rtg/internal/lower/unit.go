@@ -120,6 +120,9 @@ func EmitCheckedPackage(pkg load.Package, info check.PackageInfo) Result {
 	if !builder.addCheckedTypeFields(info, files) {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
+	if !builder.addCheckedTypeInterfaces(info, files) {
+		return emitFail(result, builder.err, builder.errFile, builder.errToken)
+	}
 	if !builder.addCheckedTypeRefs(info, files) {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
@@ -541,6 +544,26 @@ func (b *unitBuilder) addCheckedTypeFields(info check.PackageInfo, files []fileT
 	return true
 }
 
+func (b *unitBuilder) addCheckedTypeInterfaces(info check.PackageInfo, files []fileTokens) bool {
+	for i := 0; i < len(info.Types); i++ {
+		typ := info.Types[i]
+		if typ.Kind != check.TypeInterface {
+			continue
+		}
+		if typ.File < 0 || typ.File >= len(files) || i >= len(b.program.Types) {
+			b.setErr(EmitErrCheck, -1, typ.Token)
+			return false
+		}
+		row, ok := b.mapTypeInterface(i, typ, files[typ.File].oldToNew)
+		if !ok {
+			b.setErr(EmitErrCheck, typ.File, typ.Token)
+			return false
+		}
+		b.program.TypeIfaces = append(b.program.TypeIfaces, row)
+	}
+	return true
+}
+
 func (b *unitBuilder) addCheckedTypeRefs(info check.PackageInfo, files []fileTokens) bool {
 	for i := 0; i < len(info.TypeRefs); i++ {
 		ref := info.TypeRefs[i]
@@ -907,6 +930,35 @@ func (b *unitBuilder) mapTypeInfo(typ check.TypeInfo, oldToNew []int) (unit.Type
 		ElemStart: elemStart,
 		ElemEnd:   elemEnd,
 	}, true
+}
+
+func (b *unitBuilder) mapTypeInterface(typeIndex int, typ check.TypeInfo, oldToNew []int) (unit.TypeIface, bool) {
+	row := unit.TypeIface{TypeIndex: typeIndex}
+	for i := 0; i < len(typ.InterfaceEmbeds); i++ {
+		embed := typ.InterfaceEmbeds[i]
+		typeStart, typeEnd, ok := mapNullableTokenSpan(embed.TypeStart, embed.TypeEnd, oldToNew, b.finalEOF)
+		if !ok || typeStart < 0 {
+			return row, false
+		}
+		row.Embeds = append(row.Embeds, unit.InterfaceEmbed{TypeStart: typeStart, TypeEnd: typeEnd})
+	}
+	for i := 0; i < len(typ.InterfaceMethods); i++ {
+		method := typ.InterfaceMethods[i]
+		nameTok := mapToken(oldToNew, method.NameTok, b.finalEOF)
+		params, ok := mapFields(method.Signature.Params, oldToNew, b.finalEOF)
+		if !ok {
+			return row, false
+		}
+		results, ok := mapFields(method.Signature.Results, oldToNew, b.finalEOF)
+		if !ok {
+			return row, false
+		}
+		if nameTok < 0 {
+			return row, false
+		}
+		row.Methods = append(row.Methods, unit.InterfaceMethod{NameTok: nameTok, Params: params, Results: results})
+	}
+	return row, true
 }
 
 func unitTypeKind(kind int) (int, bool) {

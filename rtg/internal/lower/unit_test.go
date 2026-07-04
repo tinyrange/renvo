@@ -218,6 +218,10 @@ const enabled = true
 const negative = -4
 
 type item struct { value int }
+type reader interface {
+	item
+	Read(p []byte) int
+}
 
 var global = []int{1, 2, 3}
 var picked = choose(global[1])
@@ -255,11 +259,14 @@ func appMain() int {
 	if len(result.Program.Calls) != 2 {
 		t.Fatalf("calls = %#v, want 2", result.Program.Calls)
 	}
-	if len(result.Program.Types) != 1 {
-		t.Fatalf("types = %#v, want 1", result.Program.Types)
+	if len(result.Program.Types) != 2 {
+		t.Fatalf("types = %#v, want 2", result.Program.Types)
 	}
 	if len(result.Program.TypeFields) != 1 {
 		t.Fatalf("type fields = %#v, want 1", result.Program.TypeFields)
+	}
+	if len(result.Program.TypeIfaces) != 1 {
+		t.Fatalf("type interfaces = %#v, want 1", result.Program.TypeIfaces)
 	}
 	if len(result.Program.Symbols) == 0 {
 		t.Fatalf("symbols = %#v, want symbols", result.Program.Symbols)
@@ -286,6 +293,7 @@ func appMain() int {
 		t.Fatalf("refs = %#v, want refs", result.Program.Refs)
 	}
 	item := findUnitDecl(result.Program, "item")
+	reader := findUnitDecl(result.Program, "reader")
 	answer := findUnitDecl(result.Program, "answer")
 	message := findUnitDecl(result.Program, "message")
 	enabled := findUnitDecl(result.Program, "enabled")
@@ -294,7 +302,7 @@ func appMain() int {
 	picked := findUnitDecl(result.Program, "picked")
 	appMain := findUnitFunc(result.Program, "appMain")
 	choose := findUnitFunc(result.Program, "choose")
-	if item < 0 || answer < 0 || message < 0 || enabled < 0 || negative < 0 || global < 0 || picked < 0 || appMain < 0 || choose < 0 {
+	if item < 0 || reader < 0 || answer < 0 || message < 0 || enabled < 0 || negative < 0 || global < 0 || picked < 0 || appMain < 0 || choose < 0 {
 		t.Fatalf("unit rows missing: decls=%#v funcs=%#v", result.Program.Decls, result.Program.Funcs)
 	}
 	assertUnitConstInt(t, result.Program, answer, 42)
@@ -302,13 +310,17 @@ func appMain() int {
 	assertUnitConstBool(t, result.Program, enabled, true)
 	assertUnitConstInt(t, result.Program, negative, -4)
 	itemSym := assertUnitSymbol(t, result.Program, "item", unit.SymbolType, unit.OwnerDecl, item)
+	readerSym := assertUnitSymbol(t, result.Program, "reader", unit.SymbolType, unit.OwnerDecl, reader)
 	globalSym := assertUnitSymbol(t, result.Program, "global", unit.SymbolVar, unit.OwnerDecl, global)
 	pickedSym := assertUnitSymbol(t, result.Program, "picked", unit.SymbolVar, unit.OwnerDecl, picked)
 	assertUnitSymbol(t, result.Program, "choose", unit.SymbolFunc, unit.OwnerFunc, choose)
 	assertUnitSymbol(t, result.Program, "appMain", unit.SymbolFunc, unit.OwnerFunc, appMain)
 	assertUnitType(t, result.Program, "item", unit.TypeStruct, item, "struct { value int }", "", "", "")
 	assertUnitTypeFields(t, result.Program, item, []string{"value:int"})
+	assertUnitType(t, result.Program, "reader", unit.TypeInterface, reader, "interface {\n\titem\n\tRead(p []byte) int\n}", "", "", "")
+	assertUnitTypeInterface(t, result.Program, reader, []string{"item"}, "Read", []string{"p:[]byte"}, []string{":int"})
 	assertUnitDeclMeta(t, result.Program, item, itemSym, "struct { value int }", "", nil, false)
+	assertUnitDeclMeta(t, result.Program, reader, readerSym, "interface {\n\titem\n\tRead(p []byte) int\n}", "", nil, false)
 	assertUnitDeclMeta(t, result.Program, global, globalSym, "", "[]int{1, 2, 3}", []string{"[]int{1, 2, 3}"}, false)
 	assertUnitDeclMeta(t, result.Program, picked, pickedSym, "", "choose(global[1])", []string{"choose(global[1])"}, false)
 	assertUnitInitOrder(t, result.Program, []int{global, picked})
@@ -357,6 +369,9 @@ func appMain() int {
 	}
 	if len(decoded.TypeFields) != len(result.Program.TypeFields) {
 		t.Fatalf("decoded type fields = %d, want %d", len(decoded.TypeFields), len(result.Program.TypeFields))
+	}
+	if len(decoded.TypeIfaces) != len(result.Program.TypeIfaces) {
+		t.Fatalf("decoded type interfaces = %d, want %d", len(decoded.TypeIfaces), len(result.Program.TypeIfaces))
 	}
 	if len(decoded.Symbols) != len(result.Program.Symbols) {
 		t.Fatalf("decoded symbols = %d, want %d", len(decoded.Symbols), len(result.Program.Symbols))
@@ -644,6 +659,45 @@ func assertUnitTypeFields(t *testing.T, program unit.Program, decl int, want []s
 		}
 	}
 	t.Fatalf("type fields for type=%d not found in %#v", typeIndex, program.TypeFields)
+}
+
+func assertUnitTypeInterface(t *testing.T, program unit.Program, decl int, embeds []string, method string, params []string, results []string) {
+	t.Helper()
+	typeIndex := -1
+	for i := 0; i < len(program.Types); i++ {
+		if program.Types[i].Decl == decl {
+			typeIndex = i
+			break
+		}
+	}
+	if typeIndex < 0 {
+		t.Fatalf("type decl=%d not found in %#v", decl, program.Types)
+	}
+	for i := 0; i < len(program.TypeIfaces); i++ {
+		iface := program.TypeIfaces[i]
+		if iface.TypeIndex != typeIndex {
+			continue
+		}
+		if len(iface.Embeds) != len(embeds) {
+			t.Fatalf("interface embeds = %#v, want %v", iface.Embeds, embeds)
+		}
+		for j := 0; j < len(embeds); j++ {
+			got := unitSpanText(program, iface.Embeds[j].TypeStart, iface.Embeds[j].TypeEnd)
+			if got != embeds[j] {
+				t.Fatalf("interface embed %d = %q, want %q", j, got, embeds[j])
+			}
+		}
+		for j := 0; j < len(iface.Methods); j++ {
+			m := iface.Methods[j]
+			if tokenTextUnit(program, m.NameTok) == method {
+				assertUnitFields(t, program, m.Params, params)
+				assertUnitFields(t, program, m.Results, results)
+				return
+			}
+		}
+		t.Fatalf("interface method %s not found in %#v", method, iface.Methods)
+	}
+	t.Fatalf("interface row for type=%d not found in %#v", typeIndex, program.TypeIfaces)
 }
 
 func assertUnitSymbol(t *testing.T, program unit.Program, name string, kind int, ownerKind int, ownerIndex int) int {

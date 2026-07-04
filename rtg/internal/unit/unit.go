@@ -30,6 +30,7 @@ const (
 	TagInitOrder  = 25
 	TagConsts     = 26
 	TagTypeFields = 27
+	TagTypeIfaces = 28
 )
 
 const (
@@ -184,6 +185,23 @@ type TypeInfo struct {
 type TypeFields struct {
 	TypeIndex int
 	Fields    []Field
+}
+
+type InterfaceMethod struct {
+	NameTok int
+	Params  []Field
+	Results []Field
+}
+
+type InterfaceEmbed struct {
+	TypeStart int
+	TypeEnd   int
+}
+
+type TypeIface struct {
+	TypeIndex int
+	Methods   []InterfaceMethod
+	Embeds    []InterfaceEmbed
 }
 
 const (
@@ -363,6 +381,7 @@ type Program struct {
 	Signatures []FuncSignature
 	Types      []TypeInfo
 	TypeFields []TypeFields
+	TypeIfaces []TypeIface
 	TypeRefs   []TypeRef
 	Locals     []LocalDecl
 	Indexes    []IndexExpr
@@ -422,6 +441,10 @@ func Marshal(program Program) ([]byte, bool) {
 	if !ok {
 		return nil, false
 	}
+	typeIfaceData, ok := encodeTypeInterfaces(program.TypeIfaces, len(program.Tokens), len(program.Types))
+	if !ok {
+		return nil, false
+	}
 	typeRefData, ok := encodeTypeRefs(program.TypeRefs, len(program.Tokens), len(program.Decls), len(program.Funcs))
 	if !ok {
 		return nil, false
@@ -473,6 +496,7 @@ func Marshal(program Program) ([]byte, bool) {
 	root = appendNode(root, TagSigs, sigData)
 	root = appendNode(root, TagTypes, typeData)
 	root = appendNode(root, TagTypeFields, typeFieldData)
+	root = appendNode(root, TagTypeIfaces, typeIfaceData)
 	root = appendNode(root, TagTypeRefs, typeRefData)
 	root = appendNode(root, TagLocals, localData)
 	root = appendNode(root, TagIndexes, indexData)
@@ -521,6 +545,7 @@ func Unmarshal(data []byte) (Program, bool) {
 	sigData := []byte{}
 	typeData := []byte{}
 	typeFieldData := []byte{}
+	typeIfaceData := []byte{}
 	typeRefData := []byte{}
 	localData := []byte{}
 	indexData := []byte{}
@@ -544,6 +569,7 @@ func Unmarshal(data []byte) (Program, bool) {
 	seenSigs := false
 	seenTypes := false
 	seenTypeFields := false
+	seenTypeIfaces := false
 	seenTypeRefs := false
 	seenLocals := false
 	seenIndexes := false
@@ -658,6 +684,12 @@ func Unmarshal(data []byte) (Program, bool) {
 			}
 			seenTypeFields = true
 			typeFieldData = payload
+		} else if tag == TagTypeIfaces {
+			if seenTypeIfaces {
+				return program, false
+			}
+			seenTypeIfaces = true
+			typeIfaceData = payload
 		} else if tag == TagTypeRefs {
 			if seenTypeRefs {
 				return program, false
@@ -783,6 +815,13 @@ func Unmarshal(data []byte) (Program, bool) {
 			return program, false
 		}
 		program.TypeFields = typeFields
+	}
+	if seenTypeIfaces {
+		typeIfaces, ok := decodeTypeInterfaces(typeIfaceData, len(program.Tokens), len(program.Types))
+		if !ok {
+			return program, false
+		}
+		program.TypeIfaces = typeIfaces
 	}
 	if seenTypeRefs {
 		typeRefs, ok := decodeTypeRefs(typeRefData, len(program.Tokens), len(program.Decls), len(program.Funcs))
@@ -1679,6 +1718,106 @@ func decodeTypeFields(data []byte, tokenLimit int, typeLimit int) ([]TypeFields,
 			return nil, false
 		}
 		rows = append(rows, TypeFields{TypeIndex: typeIndex, Fields: fields})
+	}
+	if pos != len(data) {
+		return nil, false
+	}
+	return rows, true
+}
+
+func encodeTypeInterfaces(rows []TypeIface, tokenLimit int, typeLimit int) ([]byte, bool) {
+	out := make([]byte, 0, len(rows)*8+1)
+	out = appendVarint(out, len(rows))
+	seen := make([]bool, typeLimit)
+	ok := true
+	for i := 0; i < len(rows); i++ {
+		row := rows[i]
+		if row.TypeIndex < 0 || row.TypeIndex >= typeLimit || seen[row.TypeIndex] {
+			return nil, false
+		}
+		seen[row.TypeIndex] = true
+		out = appendVarint(out, row.TypeIndex)
+		out = appendVarint(out, len(row.Embeds))
+		for j := 0; j < len(row.Embeds); j++ {
+			embed := row.Embeds[j]
+			if !validSpan(tokenLimit, embed.TypeStart, embed.TypeEnd) {
+				return nil, false
+			}
+			out = appendVarint(out, embed.TypeStart)
+			out = appendVarint(out, embed.TypeEnd-embed.TypeStart)
+		}
+		out = appendVarint(out, len(row.Methods))
+		for j := 0; j < len(row.Methods); j++ {
+			method := row.Methods[j]
+			if !validToken(tokenLimit, method.NameTok) {
+				return nil, false
+			}
+			out = appendVarint(out, method.NameTok)
+			out = appendFields(out, method.Params, tokenLimit, &ok)
+			out = appendFields(out, method.Results, tokenLimit, &ok)
+			if !ok {
+				return nil, false
+			}
+		}
+	}
+	return out, true
+}
+
+func decodeTypeInterfaces(data []byte, tokenLimit int, typeLimit int) ([]TypeIface, bool) {
+	pos := 0
+	count, ok := readVarint(data, &pos)
+	if !ok || count < 0 || count > typeLimit {
+		return nil, false
+	}
+	seen := make([]bool, typeLimit)
+	rows := make([]TypeIface, 0, count)
+	for i := 0; i < count; i++ {
+		typeIndex, ok := readVarint(data, &pos)
+		if !ok || typeIndex < 0 || typeIndex >= typeLimit || seen[typeIndex] {
+			return nil, false
+		}
+		seen[typeIndex] = true
+		embedCount, ok := readVarint(data, &pos)
+		if !ok || embedCount < 0 {
+			return nil, false
+		}
+		embeds := make([]InterfaceEmbed, 0, embedCount)
+		for j := 0; j < embedCount; j++ {
+			typeStart, ok := readVarint(data, &pos)
+			if !ok {
+				return nil, false
+			}
+			typeCount, ok := readVarint(data, &pos)
+			if !ok {
+				return nil, false
+			}
+			embed := InterfaceEmbed{TypeStart: typeStart, TypeEnd: typeStart + typeCount}
+			if !validSpan(tokenLimit, embed.TypeStart, embed.TypeEnd) {
+				return nil, false
+			}
+			embeds = append(embeds, embed)
+		}
+		methodCount, ok := readVarint(data, &pos)
+		if !ok || methodCount < 0 {
+			return nil, false
+		}
+		methods := make([]InterfaceMethod, 0, methodCount)
+		for j := 0; j < methodCount; j++ {
+			nameTok, ok := readVarint(data, &pos)
+			if !ok || !validToken(tokenLimit, nameTok) {
+				return nil, false
+			}
+			params, ok := readFields(data, &pos, tokenLimit)
+			if !ok {
+				return nil, false
+			}
+			results, ok := readFields(data, &pos, tokenLimit)
+			if !ok {
+				return nil, false
+			}
+			methods = append(methods, InterfaceMethod{NameTok: nameTok, Params: params, Results: results})
+		}
+		rows = append(rows, TypeIface{TypeIndex: typeIndex, Methods: methods, Embeds: embeds})
 	}
 	if pos != len(data) {
 		return nil, false

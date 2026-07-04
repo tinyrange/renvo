@@ -138,6 +138,15 @@ func appMain() int { return values[0] }
 		TypeIndex: 0,
 		Fields:    []Field{{NameTok: 3, TypeStart: 4, TypeEnd: 7}},
 	}}
+	program.TypeIfaces = []TypeIface{{
+		TypeIndex: 0,
+		Embeds:    []InterfaceEmbed{{TypeStart: 6, TypeEnd: 7}},
+		Methods: []InterfaceMethod{{
+			NameTok: 17,
+			Params:  []Field{{NameTok: -1, TypeStart: 17, TypeEnd: 18}},
+			Results: []Field{{NameTok: -1, TypeStart: 17, TypeEnd: 18}},
+		}},
+	}}
 	program.TypeRefs = []TypeRef{{
 		OwnerKind:  OwnerDecl,
 		OwnerIndex: 0,
@@ -252,6 +261,14 @@ func appMain() int { return values[0] }
 	}
 	if len(decoded.TypeFields) != 1 || len(decoded.TypeFields[0].Fields) != 1 || decoded.TypeFields[0].Fields[0] != program.TypeFields[0].Fields[0] {
 		t.Fatalf("decoded type fields = %#v, want %#v", decoded.TypeFields, program.TypeFields)
+	}
+	if len(decoded.TypeIfaces) != 1 || len(decoded.TypeIfaces[0].Embeds) != 1 ||
+		len(decoded.TypeIfaces[0].Methods) != 1 ||
+		decoded.TypeIfaces[0].Embeds[0] != program.TypeIfaces[0].Embeds[0] ||
+		decoded.TypeIfaces[0].Methods[0].NameTok != program.TypeIfaces[0].Methods[0].NameTok ||
+		decoded.TypeIfaces[0].Methods[0].Params[0] != program.TypeIfaces[0].Methods[0].Params[0] ||
+		decoded.TypeIfaces[0].Methods[0].Results[0] != program.TypeIfaces[0].Methods[0].Results[0] {
+		t.Fatalf("decoded type interfaces = %#v, want %#v", decoded.TypeIfaces, program.TypeIfaces)
 	}
 	if len(decoded.TypeRefs) != 1 || decoded.TypeRefs[0] != program.TypeRefs[0] {
 		t.Fatalf("decoded type refs = %#v, want %#v", decoded.TypeRefs, program.TypeRefs)

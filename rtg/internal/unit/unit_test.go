@@ -147,6 +147,15 @@ func TestMarshalRoundTripExpressionShapes(t *testing.T) {
 		TypeIndex: 0,
 		Fields:    []Field{{NameTok: 3, TypeStart: 5, TypeEnd: 6}},
 	}}
+	program.TypeIfaces = []TypeIface{{
+		TypeIndex: 0,
+		Embeds:    []InterfaceEmbed{{TypeStart: 10, TypeEnd: 11}},
+		Methods: []InterfaceMethod{{
+			NameTok: 13,
+			Params:  []Field{{NameTok: -1, TypeStart: 10, TypeEnd: 11}},
+			Results: []Field{{NameTok: -1, TypeStart: 10, TypeEnd: 11}},
+		}},
+	}}
 	program.TypeRefs = []TypeRef{{
 		OwnerKind:  OwnerDecl,
 		OwnerIndex: 0,
@@ -454,6 +463,7 @@ func equalPrograms(left Program, right Program) bool {
 		len(left.Signatures) != len(right.Signatures) ||
 		len(left.Types) != len(right.Types) ||
 		len(left.TypeFields) != len(right.TypeFields) ||
+		len(left.TypeIfaces) != len(right.TypeIfaces) ||
 		len(left.TypeRefs) != len(right.TypeRefs) ||
 		len(left.Locals) != len(right.Locals) ||
 		len(left.Indexes) != len(right.Indexes) || len(left.Composites) != len(right.Composites) ||
@@ -533,6 +543,11 @@ func equalPrograms(left Program, right Program) bool {
 			if left.TypeFields[i].Fields[j] != right.TypeFields[i].Fields[j] {
 				return false
 			}
+		}
+	}
+	for i := 0; i < len(left.TypeIfaces); i++ {
+		if !equalTypeInterface(left.TypeIfaces[i], right.TypeIfaces[i]) {
+			return false
 		}
 	}
 	for i := 0; i < len(left.TypeRefs); i++ {
@@ -674,6 +689,37 @@ func equalSignature(left FuncSignature, right FuncSignature) bool {
 	for i := 0; i < len(left.Results); i++ {
 		if left.Results[i] != right.Results[i] {
 			return false
+		}
+	}
+	return true
+}
+
+func equalTypeInterface(left TypeIface, right TypeIface) bool {
+	if left.TypeIndex != right.TypeIndex ||
+		len(left.Embeds) != len(right.Embeds) ||
+		len(left.Methods) != len(right.Methods) {
+		return false
+	}
+	for i := 0; i < len(left.Embeds); i++ {
+		if left.Embeds[i] != right.Embeds[i] {
+			return false
+		}
+	}
+	for i := 0; i < len(left.Methods); i++ {
+		if left.Methods[i].NameTok != right.Methods[i].NameTok ||
+			len(left.Methods[i].Params) != len(right.Methods[i].Params) ||
+			len(left.Methods[i].Results) != len(right.Methods[i].Results) {
+			return false
+		}
+		for j := 0; j < len(left.Methods[i].Params); j++ {
+			if left.Methods[i].Params[j] != right.Methods[i].Params[j] {
+				return false
+			}
+		}
+		for j := 0; j < len(left.Methods[i].Results); j++ {
+			if left.Methods[i].Results[j] != right.Methods[i].Results[j] {
+				return false
+			}
 		}
 	}
 	return true

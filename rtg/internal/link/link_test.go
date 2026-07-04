@@ -151,6 +151,10 @@ const Answer = -7
 
 type Numbers []int
 type Record struct { Value int }
+type Reader interface {
+	Record
+	Read(p []byte) int
+}
 
 var Values = []int{1, 2}
 
@@ -167,16 +171,18 @@ func Value(i int) int {
 	}
 	numbers := findLinkedDecl(program, "Numbers")
 	record := findLinkedDecl(program, "Record")
+	reader := findLinkedDecl(program, "Reader")
 	answer := findLinkedDecl(program, "Answer")
 	values := findLinkedDecl(program, "Values")
 	valueFn := findLinkedFunc(program, "Value")
 	appMain := findLinkedFunc(program, "appMain")
-	if numbers < 0 || record < 0 || answer < 0 || values < 0 || valueFn < 0 || appMain < 0 {
+	if numbers < 0 || record < 0 || reader < 0 || answer < 0 || values < 0 || valueFn < 0 || appMain < 0 {
 		t.Fatalf("linked rows missing: decls=%#v funcs=%#v", program.Decls, program.Funcs)
 	}
 	assertLinkedConstInt(t, program, answer, -7)
 	numbersSym := assertLinkedSymbol(t, program, "Numbers", unit.SymbolType, unit.OwnerDecl, numbers)
 	assertLinkedSymbol(t, program, "Record", unit.SymbolType, unit.OwnerDecl, record)
+	assertLinkedSymbol(t, program, "Reader", unit.SymbolType, unit.OwnerDecl, reader)
 	valuesSym := assertLinkedSymbol(t, program, "Values", unit.SymbolVar, unit.OwnerDecl, values)
 	valueSym := assertLinkedSymbol(t, program, "Value", unit.SymbolFunc, unit.OwnerFunc, valueFn)
 	assertLinkedSymbol(t, program, "appMain", unit.SymbolFunc, unit.OwnerFunc, appMain)
@@ -185,8 +191,8 @@ func Value(i int) int {
 	assertLinkedInitOrder(t, program, []int{values})
 	assertLinkedSignature(t, program, valueFn, nil, []string{"i:int"}, []string{":int"})
 	assertLinkedSignature(t, program, appMain, nil, nil, []string{":int"})
-	if len(program.Types) != 2 {
-		t.Fatalf("linked types = %#v, want 2", program.Types)
+	if len(program.Types) != 3 {
+		t.Fatalf("linked types = %#v, want 3", program.Types)
 	}
 	typ := findLinkedTypeByDecl(program, numbers)
 	if typ.Decl != numbers || linkedText(program, typ.NameStart, typ.NameEnd) != "Numbers" ||
@@ -196,6 +202,13 @@ func Value(i int) int {
 		t.Fatalf("linked type = %#v, decl %d", typ, numbers)
 	}
 	assertLinkedTypeFields(t, program, record, []string{"Value:int"})
+	readerType := findLinkedTypeByDecl(program, reader)
+	if readerType.Decl != reader || linkedText(program, readerType.NameStart, readerType.NameEnd) != "Reader" ||
+		readerType.Kind != unit.TypeInterface ||
+		linkedSpanText(program, readerType.TypeStart, readerType.TypeEnd) != "interface {\n\tRecord\n\tRead(p []byte) int\n}" {
+		t.Fatalf("linked interface type = %#v, decl %d", readerType, reader)
+	}
+	assertLinkedTypeInterface(t, program, reader, []string{"Record"}, "Read", []string{"p:[]byte"}, []string{":int"})
 	foundNumberElemRef := false
 	for i := 0; i < len(program.TypeRefs); i++ {
 		ref := program.TypeRefs[i]
@@ -514,6 +527,45 @@ func assertLinkedTypeFields(t *testing.T, program unit.Program, decl int, want [
 		}
 	}
 	t.Fatalf("linked type fields for type=%d not found in %#v", typeIndex, program.TypeFields)
+}
+
+func assertLinkedTypeInterface(t *testing.T, program unit.Program, decl int, embeds []string, method string, params []string, results []string) {
+	t.Helper()
+	typeIndex := -1
+	for i := 0; i < len(program.Types); i++ {
+		if program.Types[i].Decl == decl {
+			typeIndex = i
+			break
+		}
+	}
+	if typeIndex < 0 {
+		t.Fatalf("linked type decl=%d not found in %#v", decl, program.Types)
+	}
+	for i := 0; i < len(program.TypeIfaces); i++ {
+		iface := program.TypeIfaces[i]
+		if iface.TypeIndex != typeIndex {
+			continue
+		}
+		if len(iface.Embeds) != len(embeds) {
+			t.Fatalf("linked interface embeds = %#v, want %v", iface.Embeds, embeds)
+		}
+		for j := 0; j < len(embeds); j++ {
+			got := linkedSpanText(program, iface.Embeds[j].TypeStart, iface.Embeds[j].TypeEnd)
+			if got != embeds[j] {
+				t.Fatalf("linked interface embed %d = %q, want %q", j, got, embeds[j])
+			}
+		}
+		for j := 0; j < len(iface.Methods); j++ {
+			m := iface.Methods[j]
+			if linkedTokenText(program, m.NameTok) == method {
+				assertLinkedFields(t, program, m.Params, params)
+				assertLinkedFields(t, program, m.Results, results)
+				return
+			}
+		}
+		t.Fatalf("linked interface method %s not found in %#v", method, iface.Methods)
+	}
+	t.Fatalf("linked interface row for type=%d not found in %#v", typeIndex, program.TypeIfaces)
 }
 
 func assertLinkedFields(t *testing.T, program unit.Program, fields []unit.Field, want []string) {

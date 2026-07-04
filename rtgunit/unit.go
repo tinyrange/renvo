@@ -37,6 +37,7 @@ const (
 	TagInitOrder  = uint16(25)
 	TagConsts     = uint16(26)
 	TagTypeFields = uint16(27)
+	TagTypeIfaces = uint16(28)
 )
 
 const (
@@ -192,6 +193,23 @@ type TypeInfo struct {
 type TypeFields struct {
 	TypeIndex int
 	Fields    []Field
+}
+
+type InterfaceMethod struct {
+	NameTok int
+	Params  []Field
+	Results []Field
+}
+
+type InterfaceEmbed struct {
+	TypeStart int
+	TypeEnd   int
+}
+
+type TypeIface struct {
+	TypeIndex int
+	Methods   []InterfaceMethod
+	Embeds    []InterfaceEmbed
 }
 
 const (
@@ -371,6 +389,7 @@ type Program struct {
 	Signatures []FuncSignature
 	Types      []TypeInfo
 	TypeFields []TypeFields
+	TypeIfaces []TypeIface
 	TypeRefs   []TypeRef
 	Locals     []LocalDecl
 	Indexes    []IndexExpr
@@ -445,6 +464,7 @@ func Marshal(program Program) ([]byte, error) {
 		NewNode(TagSigs, encodeSignatures(program.Signatures)),
 		NewNode(TagTypes, encodeTypes(program.Types)),
 		NewNode(TagTypeFields, encodeTypeFields(program.TypeFields)),
+		NewNode(TagTypeIfaces, encodeTypeInterfaces(program.TypeIfaces)),
 		NewNode(TagTypeRefs, encodeTypeRefs(program.TypeRefs)),
 		NewNode(TagLocals, encodeLocals(program.Locals)),
 		NewNode(TagIndexes, encodeIndexes(program.Indexes)),
@@ -499,6 +519,7 @@ func Unmarshal(data []byte) (Program, error) {
 	var sigData []byte
 	var typeData []byte
 	var typeFieldData []byte
+	var typeIfaceData []byte
 	var typeRefData []byte
 	var localData []byte
 	var indexData []byte
@@ -517,6 +538,7 @@ func Unmarshal(data []byte) (Program, error) {
 	seenSigs := false
 	seenTypes := false
 	seenTypeFields := false
+	seenTypeIfaces := false
 	seenTypeRefs := false
 	seenLocals := false
 	seenIndexes := false
@@ -612,6 +634,12 @@ func Unmarshal(data []byte) (Program, error) {
 			}
 			seenTypeFields = true
 			typeFieldData = payload
+		case TagTypeIfaces:
+			if seenTypeIfaces {
+				return program, fmt.Errorf("duplicate type interface table")
+			}
+			seenTypeIfaces = true
+			typeIfaceData = payload
 		case TagTypeRefs:
 			if seenTypeRefs {
 				return program, fmt.Errorf("duplicate type ref table")
@@ -737,6 +765,13 @@ func Unmarshal(data []byte) (Program, error) {
 			return program, err
 		}
 		program.TypeFields = typeFields
+	}
+	if seenTypeIfaces {
+		typeIfaces, err := decodeTypeInterfaces(typeIfaceData)
+		if err != nil {
+			return program, err
+		}
+		program.TypeIfaces = typeIfaces
 	}
 	if seenTypeRefs {
 		typeRefs, err := decodeTypeRefs(typeRefData)
@@ -1748,6 +1783,26 @@ func encodeTypeFields(rows []TypeFields) []byte {
 	return out
 }
 
+func encodeTypeInterfaces(rows []TypeIface) []byte {
+	var out []byte
+	out = appendVarint(out, len(rows))
+	for _, row := range rows {
+		out = appendVarint(out, row.TypeIndex)
+		out = appendVarint(out, len(row.Embeds))
+		for _, embed := range row.Embeds {
+			out = appendVarint(out, embed.TypeStart)
+			out = appendVarint(out, embed.TypeEnd-embed.TypeStart)
+		}
+		out = appendVarint(out, len(row.Methods))
+		for _, method := range row.Methods {
+			out = appendVarint(out, method.NameTok)
+			out = appendFieldList(out, method.Params)
+			out = appendFieldList(out, method.Results)
+		}
+	}
+	return out
+}
+
 func encodeTypeRefs(refs []TypeRef) []byte {
 	var out []byte
 	out = appendVarint(out, len(refs))
@@ -2448,6 +2503,71 @@ func decodeTypeFields(data []byte) ([]TypeFields, error) {
 	}
 	if pos != len(data) {
 		return nil, fmt.Errorf("trailing type field data")
+	}
+	return rows, nil
+}
+
+func decodeTypeInterfaces(data []byte) ([]TypeIface, error) {
+	pos := 0
+	count, next, ok := readVarint(data, pos)
+	if !ok {
+		return nil, fmt.Errorf("invalid type interface count")
+	}
+	pos = next
+	rows := make([]TypeIface, 0, count)
+	for i := 0; i < count; i++ {
+		typeIndex, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid type interface %d type", i)
+		}
+		pos = n
+		embedCount, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid type interface %d embed count", i)
+		}
+		pos = n
+		embeds := make([]InterfaceEmbed, 0, embedCount)
+		for j := 0; j < embedCount; j++ {
+			typeStart, n, ok := readVarint(data, pos)
+			if !ok {
+				return nil, fmt.Errorf("invalid type interface %d embed %d start", i, j)
+			}
+			pos = n
+			typeCount, n, ok := readVarint(data, pos)
+			if !ok {
+				return nil, fmt.Errorf("invalid type interface %d embed %d size", i, j)
+			}
+			pos = n
+			embeds = append(embeds, InterfaceEmbed{TypeStart: typeStart, TypeEnd: typeStart + typeCount})
+		}
+		methodCount, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid type interface %d method count", i)
+		}
+		pos = n
+		methods := make([]InterfaceMethod, 0, methodCount)
+		for j := 0; j < methodCount; j++ {
+			nameTok, n, ok := readVarint(data, pos)
+			if !ok {
+				return nil, fmt.Errorf("invalid type interface %d method %d name", i, j)
+			}
+			pos = n
+			params, n, ok := readFieldList(data, pos)
+			if !ok {
+				return nil, fmt.Errorf("invalid type interface %d method %d params", i, j)
+			}
+			pos = n
+			results, n, ok := readFieldList(data, pos)
+			if !ok {
+				return nil, fmt.Errorf("invalid type interface %d method %d results", i, j)
+			}
+			pos = n
+			methods = append(methods, InterfaceMethod{NameTok: nameTok, Params: params, Results: results})
+		}
+		rows = append(rows, TypeIface{TypeIndex: typeIndex, Methods: methods, Embeds: embeds})
+	}
+	if pos != len(data) {
+		return nil, fmt.Errorf("trailing type interface data")
 	}
 	return rows, nil
 }

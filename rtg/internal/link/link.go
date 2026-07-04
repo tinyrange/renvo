@@ -198,6 +198,13 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		}
 		dst.TypeFields = append(dst.TypeFields, fields)
 	}
+	for i := 0; i < len(src.TypeIfaces); i++ {
+		iface, ok := mapTypeInterface(src.TypeIfaces[i], oldToNew, finalEOF, typeOffset, len(src.Types))
+		if !ok {
+			return false
+		}
+		dst.TypeIfaces = append(dst.TypeIfaces, iface)
+	}
 	for i := 0; i < len(src.TypeRefs); i++ {
 		ref, ok := mapTypeRef(src.TypeRefs[i], oldToNew, finalEOF, declOffset, funcOffset, symbolOffsets)
 		if !ok {
@@ -402,6 +409,37 @@ func mapTypeFields(row unit.TypeFields, oldToNew []int, eof int, typeOffset int,
 	row.Fields, ok = mapFields(row.Fields, oldToNew, eof)
 	if !ok {
 		return row, false
+	}
+	return row, true
+}
+
+func mapTypeInterface(row unit.TypeIface, oldToNew []int, eof int, typeOffset int, typeLimit int) (unit.TypeIface, bool) {
+	if row.TypeIndex < 0 || row.TypeIndex >= typeLimit {
+		return row, false
+	}
+	row.TypeIndex += typeOffset
+	for i := 0; i < len(row.Embeds); i++ {
+		typeStart, typeEnd, ok := mapNullableSpan(row.Embeds[i].TypeStart, row.Embeds[i].TypeEnd, oldToNew, eof)
+		if !ok || typeStart < 0 {
+			return row, false
+		}
+		row.Embeds[i].TypeStart = typeStart
+		row.Embeds[i].TypeEnd = typeEnd
+	}
+	for i := 0; i < len(row.Methods); i++ {
+		row.Methods[i].NameTok = mapToken(oldToNew, row.Methods[i].NameTok, eof)
+		if row.Methods[i].NameTok < 0 {
+			return row, false
+		}
+		var ok bool
+		row.Methods[i].Params, ok = mapFields(row.Methods[i].Params, oldToNew, eof)
+		if !ok {
+			return row, false
+		}
+		row.Methods[i].Results, ok = mapFields(row.Methods[i].Results, oldToNew, eof)
+		if !ok {
+			return row, false
+		}
 	}
 	return row, true
 }
