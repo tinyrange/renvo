@@ -1381,6 +1381,7 @@ const rtgTypePointer = 9
 const rtgTypeSlice = 10
 const rtgTypeStruct = 11
 const rtgTypeNamed = 12
+const rtgTypeArray = 13
 
 type rtgTypeInfo struct {
 	kind      int
@@ -2782,35 +2783,7 @@ func rtgParsePostfixExpr(ep *rtgExprParse) int {
 			compositeFields := rtgFixedCompositeFieldScratch(8)
 			ep.pos++
 			for ep.ok && ep.pos < ep.end && !rtgTokCharIs(ep.prog, ep.pos, '}') {
-				var field rtgCompositeField
-				if rtgTokIsKind(ep.prog, ep.pos, rtgTokIdent) && rtgTokCharIs(ep.prog, ep.pos+1, ':') {
-					nameTok := rtgTokAt(ep.prog, ep.pos)
-					ep.pos += 2
-					fieldEnd := rtgFindExprBoundary(ep.prog, ep.pos, ep.end)
-					oldEnd := ep.end
-					ep.end = fieldEnd
-					fieldRoot := rtgParseBinaryExpr(ep, 1)
-					ep.end = oldEnd
-					field.nameStart = int(nameTok.start)
-					field.nameEnd = int(nameTok.end)
-					field.expr = fieldRoot
-					ep.pos = fieldEnd
-				} else if rtgTokCharIs(ep.prog, ep.pos, '{') {
-					fieldEnd := rtgFindExprBoundary(ep.prog, ep.pos, ep.end)
-					oldEnd := ep.end
-					ep.end = fieldEnd
-					field.expr = rtgParseImplicitCompositeExpr(ep)
-					ep.end = oldEnd
-					ep.pos = fieldEnd
-				} else {
-					fieldEnd := rtgFindExprBoundary(ep.prog, ep.pos, ep.end)
-					oldEnd := ep.end
-					ep.end = fieldEnd
-					field.expr = rtgParseBinaryExpr(ep, 1)
-					ep.end = oldEnd
-					ep.pos = fieldEnd
-				}
-				compositeFields = append(compositeFields, field)
+				compositeFields = append(compositeFields, rtgParseCompositeField(ep))
 				if rtgTokCharIs(ep.prog, ep.pos, ',') {
 					ep.pos++
 				}
@@ -2986,19 +2959,7 @@ func rtgParseImplicitCompositeExpr(ep *rtgExprParse) int {
 	compositeFields := rtgFixedCompositeFieldScratch(8)
 	ep.pos++
 	for ep.ok && ep.pos < ep.end && !rtgTokCharIs(ep.prog, ep.pos, '}') {
-		if !rtgTokIsKind(ep.prog, ep.pos, rtgTokIdent) || !rtgTokCharIs(ep.prog, ep.pos+1, ':') {
-			rtgExprError(ep, rtgDiagParseComposite)
-			return 0
-		}
-		nameTok := rtgTokAt(ep.prog, ep.pos)
-		ep.pos += 2
-		fieldEnd := rtgFindExprBoundary(ep.prog, ep.pos, ep.end)
-		oldEnd := ep.end
-		ep.end = fieldEnd
-		fieldRoot := rtgParseBinaryExpr(ep, 1)
-		ep.end = oldEnd
-		compositeFields = append(compositeFields, rtgCompositeField{nameStart: int(nameTok.start), nameEnd: int(nameTok.end), expr: fieldRoot})
-		ep.pos = fieldEnd
+		compositeFields = append(compositeFields, rtgParseCompositeField(ep))
 		if rtgTokCharIs(ep.prog, ep.pos, ',') {
 			ep.pos++
 		}
@@ -3017,10 +2978,42 @@ func rtgParseImplicitCompositeExpr(ep *rtgExprParse) int {
 	return rtgAddExpr(ep, rtgExprComposite, openTok, 0, 0, first, count, 0, 0)
 }
 
+func rtgParseCompositeField(ep *rtgExprParse) rtgCompositeField {
+	var field rtgCompositeField
+	if rtgTokIsKind(ep.prog, ep.pos, rtgTokIdent) && rtgTokCharIs(ep.prog, ep.pos+1, ':') {
+		field.nameStart = int(rtgTokStart(ep.prog, ep.pos))
+		field.nameEnd = int(rtgTokEnd(ep.prog, ep.pos))
+		ep.pos += 2
+	}
+	fieldEnd := rtgFindExprBoundary(ep.prog, ep.pos, ep.end)
+	oldEnd := ep.end
+	ep.end = fieldEnd
+	if rtgTokCharIs(ep.prog, ep.pos, '{') {
+		field.expr = rtgParseImplicitCompositeExpr(ep)
+	} else {
+		field.expr = rtgParseBinaryExpr(ep, 1)
+	}
+	ep.end = oldEnd
+	ep.pos = fieldEnd
+	return field
+}
+
 func rtgParsePrimaryExpr(ep *rtgExprParse) int {
 	if ep.pos >= ep.end {
 		rtgExprError(ep, rtgDiagParseExpression)
 		return 0
+	}
+	if rtgTokCharIs(ep.prog, ep.pos, '[') && rtgTokIsKind(ep.prog, ep.pos+1, rtgTokNumber) && rtgTokCharIs(ep.prog, ep.pos+2, ']') {
+		startTok := ep.pos
+		typeEnd := ep.pos + 3
+		for rtgTokCharIs(ep.prog, typeEnd, '[') && rtgTokIsKind(ep.prog, typeEnd+1, rtgTokNumber) && rtgTokCharIs(ep.prog, typeEnd+2, ']') {
+			typeEnd += 3
+		}
+		if rtgTokIsKind(ep.prog, typeEnd, rtgTokIdent) {
+			nameEnd := int(rtgTokEnd(ep.prog, typeEnd))
+			ep.pos = typeEnd + 1
+			return rtgAddExpr(ep, rtgExprIdent, startTok, 0, 0, 0, 0, int(rtgTokStart(ep.prog, startTok)), nameEnd)
+		}
 	}
 	if rtgTokCharIs(ep.prog, ep.pos, '[') && rtgTokCharIs(ep.prog, ep.pos+1, ']') && rtgTokIsKind(ep.prog, ep.pos+2, rtgTokIdent) {
 		startTok := ep.pos
@@ -4372,6 +4365,14 @@ func rtgParseType(m *rtgMeta, p *rtgProgram, start int, end int) rtgTypeResult {
 		}
 		typ := rtgAddType(m, rtgTypePointer, elem.typ, 0, 0, 8, 0, 0)
 		return rtgTypeResult{typ: typ, next: elem.next}
+	}
+	if rtgTokCharIs(p, start, '[') && rtgTokIsKind(p, start+1, rtgTokNumber) && rtgTokCharIs(p, start+2, ']') {
+		count := rtgParseIntToken(p, start+1)
+		elem := rtgParseType(m, p, start+3, end)
+		if elem.typ == 0 {
+			return rtgTypeResult{next: start}
+		}
+		return rtgTypeResult{typ: rtgAddType(m, rtgTypeArray, elem.typ, 0, count, count*rtgTypeSize(m, elem.typ), 0, 0), next: elem.next}
 	}
 	if rtgTokCharIs(p, start, '[') && rtgTokCharIs(p, start+1, ']') {
 		elem := rtgParseType(m, p, start+2, end)
@@ -7761,7 +7762,7 @@ func rtgInferParsedExprType(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 	if e.kind == rtgExprIndex {
 		leftType := rtgInferParsedExprType(g, ep, e.left)
 		t := rtgResolveType(meta, leftType)
-		if t.kind == rtgTypeSlice {
+		if t.kind == rtgTypeSlice || t.kind == rtgTypeArray {
 			return t.elem
 		}
 		if t.kind == rtgTypeString {
@@ -7902,6 +7903,9 @@ func rtgEmitTypedAssign(g *rtgLinearGen, ep *rtgExprParse, idx int, offset int) 
 	destType := rtgLocalTypeAtOffset(g, offset)
 	e := &ep.exprs[idx]
 	destResolved := rtgResolveType(meta, destType)
+	if destResolved.kind == rtgTypeArray {
+		return rtgEmitCompositeFieldToStack(g, ep, idx, destType, offset)
+	}
 	if destResolved.kind == rtgTypeStruct {
 		if e.kind == rtgExprIdent {
 			localIndex := rtgFindLocalIndex(g, e.nameStart, e.nameEnd)
@@ -8685,8 +8689,21 @@ func rtgEmitByteSliceConversionRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 	return true
 }
 func rtgEmitCompositeFieldToStack(g *rtgLinearGen, ep *rtgExprParse, idx int, fieldType int, destOffset int) bool {
-	a := &g.asm
 	fieldResolved := rtgResolveType(g.meta, fieldType)
+	if fieldResolved.kind == rtgTypeArray {
+		e := &ep.exprs[idx]
+		if e.kind != rtgExprComposite {
+			return false
+		}
+		elemSize := rtgTypeSize(g.meta, fieldResolved.elem)
+		for i := 0; i < e.argCount && i < fieldResolved.count; i++ {
+			if !rtgEmitCompositeFieldToStack(g, ep, ep.fields[e.firstArg+i].expr, fieldResolved.elem, destOffset-i*elemSize) {
+				return false
+			}
+		}
+		return true
+	}
+	a := &g.asm
 	if fieldResolved.kind == rtgTypeSlice {
 		if !rtgEmitSliceValueRegs(g, ep, idx) {
 			return false
@@ -10845,21 +10862,34 @@ func rtgEmitSlicePtrCap(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 func rtgEmitIndexAddressRax(g *rtgLinearGen, ep *rtgExprParse, indexIdx int) bool {
 	a := &g.asm
 	indexExpr := &ep.exprs[indexIdx]
-	leftType := rtgInferParsedExprType(g, ep, indexExpr.left)
-	sliceType := rtgResolveType(g.meta, leftType)
-	if sliceType.kind != rtgTypeSlice {
-		return false
-	}
+	sliceType := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, indexExpr.left))
 	elemSize := rtgTypeSize(g.meta, sliceType.elem)
-	if elemSize < 1 {
-		elemSize = 8
+	if sliceType.kind != rtgTypeArray && sliceType.kind != rtgTypeSlice {
+		return false
 	}
 	if !rtgEmitIntExpr(g, ep, indexExpr.right) {
 		return false
 	}
 	rtgAsmPushRax(a)
-	if !rtgEmitSlicePtrLen(g, ep, indexExpr.left) {
-		return false
+	if sliceType.kind == rtgTypeArray {
+		base := &ep.exprs[indexExpr.left]
+		if base.kind == rtgExprIdent {
+			localIndex := rtgFindLocalIndex(g, base.nameStart, base.nameEnd)
+			if localIndex < 0 {
+				return false
+			}
+			rtgAsmLeaRaxStack(a, g.locals[localIndex].offset)
+		} else if base.kind == rtgExprIndex {
+			if !rtgEmitIndexAddressRax(g, ep, indexExpr.left) {
+				return false
+			}
+		} else {
+			return false
+		}
+	} else {
+		if !rtgEmitSlicePtrLen(g, ep, indexExpr.left) {
+			return false
+		}
 	}
 	rtgAsmPopRcx(a)
 	if elemSize != 1 {
@@ -10868,6 +10898,7 @@ func rtgEmitIndexAddressRax(g *rtgLinearGen, ep *rtgExprParse, indexIdx int) boo
 	rtgAsmAddRaxRcx(a)
 	return true
 }
+
 func rtgEmitIndexExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	meta := g.meta
 	p := g.prog
@@ -10884,6 +10915,16 @@ func rtgEmitIndexExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		rtgAsmMovRaxDataAddr(a, msgOff)
 		rtgAsmPopRcx(a)
 		rtgAsmLoadByteRaxIndexRcx(a)
+		return true
+	}
+	baseResolved := rtgResolveType(meta, rtgInferParsedExprType(g, ep, e.left))
+	if baseResolved.kind == rtgTypeArray {
+		elemSize := rtgTypeSize(meta, baseResolved.elem)
+		if !rtgEmitIndexAddressRax(g, ep, idx) {
+			return false
+		}
+		rtgAsmMovRdxRax(a)
+		rtgAsmLoadRaxMemRdxDispSize(a, 0, elemSize)
 		return true
 	}
 	if left.kind == rtgExprIdent {
