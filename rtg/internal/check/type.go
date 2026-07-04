@@ -15,17 +15,19 @@ const (
 )
 
 type TypeInfo struct {
-	Name      string
-	Kind      int
-	File      int
-	Token     int
-	Decl      int
-	Symbol    int
-	Alias     bool
-	TypeStart int
-	TypeEnd   int
-	Fields    []Field
-	Methods   []int
+	Name             string
+	Kind             int
+	File             int
+	Token            int
+	Decl             int
+	Symbol           int
+	Alias            bool
+	TypeStart        int
+	TypeEnd          int
+	Fields           []Field
+	InterfaceMethods []InterfaceMethod
+	InterfaceEmbeds  []InterfaceEmbed
+	Methods          []int
 }
 
 func LookupType(info PackageInfo, name string) int {
@@ -54,6 +56,12 @@ func buildTypeInfo(file syntax.File, decl DeclInfo, declIndex int) TypeInfo {
 		close := findTypeMatching(file, open, '{', '}')
 		if open >= 0 && close > open && close <= decl.TypeEnd {
 			out.Fields = parseStructFields(file, open+1, close-1)
+		}
+	} else if out.Kind == TypeInterface {
+		open := findTypeTopLevelChar(file, decl.TypeStart, decl.TypeEnd, '{')
+		close := findTypeMatching(file, open, '{', '}')
+		if open >= 0 && close > open && close <= decl.TypeEnd {
+			out.InterfaceMethods, out.InterfaceEmbeds = parseInterfaceElements(file, open+1, close-1)
 		}
 	}
 	return out

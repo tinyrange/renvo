@@ -26,21 +26,25 @@ func LookupField(fields []Field, name string) int {
 }
 
 func buildFuncSignature(file syntax.File, fn syntax.FuncDecl) FuncSignature {
+	return buildSignatureFromParts(file, fn.ReceiverStart, fn.ReceiverEnd, fn.ParamsStart, fn.ParamsEnd, fn.ResultStart, fn.ResultEnd)
+}
+
+func buildSignatureFromParts(file syntax.File, receiverStart int, receiverEnd int, paramsStart int, paramsEnd int, resultStart int, resultEnd int) FuncSignature {
 	var sig FuncSignature
-	if fn.ReceiverStart >= 0 && fn.ReceiverEnd > fn.ReceiverStart {
-		sig.Receiver = parseFieldList(file, fn.ReceiverStart, fn.ReceiverEnd)
+	if receiverStart >= 0 && receiverEnd > receiverStart {
+		sig.Receiver = parseFieldList(file, receiverStart, receiverEnd)
 	}
-	if fn.ParamsStart >= 0 && fn.ParamsEnd > fn.ParamsStart {
-		sig.Params = parseFieldList(file, fn.ParamsStart+1, fn.ParamsEnd-1)
+	if paramsStart >= 0 && paramsEnd > paramsStart {
+		sig.Params = parseFieldList(file, paramsStart+1, paramsEnd-1)
 	}
-	if fn.ResultStart >= 0 && fn.ResultEnd > fn.ResultStart {
-		if tokCharIs(file, fn.ResultStart, '(') {
-			end := fn.ResultEnd - 1
+	if resultStart >= 0 && resultEnd > resultStart {
+		if tokCharIs(file, resultStart, '(') {
+			end := resultEnd - 1
 			if tokCharIs(file, end, ')') {
-				sig.Results = parseFieldList(file, fn.ResultStart+1, end)
+				sig.Results = parseFieldList(file, resultStart+1, end)
 			}
 		} else {
-			start, end := trimFieldSpan(file, fn.ResultStart, fn.ResultEnd)
+			start, end := trimFieldSpan(file, resultStart, resultEnd)
 			if start < end {
 				sig.Results = append(sig.Results, Field{NameTok: -1, TypeStart: start, TypeEnd: end, Variadic: fieldIsVariadic(file, start)})
 			}

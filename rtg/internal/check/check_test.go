@@ -249,6 +249,11 @@ type fixed [4]int
 type ptr *item
 type callback func(int) string
 type face interface { Value() int }
+type reader interface {
+	Embedded
+	Read(p []byte) (n int, err error)
+	Close() error
+}
 `)},
 	})
 	prog := CheckGraph(graph)
@@ -265,6 +270,7 @@ type face interface { Value() int }
 	assertType(t, file, root, "ptr", TypePointer, false, "*item")
 	assertType(t, file, root, "callback", TypeFunc, false, "func(int) string")
 	assertType(t, file, root, "face", TypeInterface, false, "interface { Value() int }")
+	assertType(t, file, root, "reader", TypeInterface, false, "interface {\n\tEmbedded\n\tRead(p []byte) (n int, err error)\n\tClose() error\n}")
 
 	item := root.Types[LookupType(root, "item")]
 	assertField(t, file, item.Fields, "value", "int")
@@ -273,6 +279,11 @@ type face interface { Value() int }
 	assertField(t, file, item.Fields, "data", "[]byte")
 	assertStructUnnamedField(t, file, item.Fields, "Embedded")
 	assertStructUnnamedField(t, file, item.Fields, "*Pointer")
+
+	reader := root.Types[LookupType(root, "reader")]
+	assertInterfaceEmbed(t, file, reader, "Embedded")
+	assertInterfaceMethod(t, file, reader, "Read", []string{"p:[]byte"}, []string{"n:int", "err:error"})
+	assertInterfaceMethod(t, file, reader, "Close", nil, []string{":error"})
 }
 
 func TestCheckGraphMethodSets(t *testing.T) {
@@ -634,6 +645,40 @@ func assertStructUnnamedField(t *testing.T, file syntax.File, fields []Field, ty
 		}
 	}
 	t.Fatalf("unnamed field type %q not found in %#v", typ, fields)
+}
+
+func assertInterfaceMethod(t *testing.T, file syntax.File, tp TypeInfo, name string, params []string, results []string) {
+	t.Helper()
+	index := LookupInterfaceMethod(tp.InterfaceMethods, name)
+	if index < 0 {
+		t.Fatalf("interface method %q not found in %#v", name, tp.InterfaceMethods)
+	}
+	method := tp.InterfaceMethods[index]
+	assertSignatureFields(t, file, method.Signature.Params, params)
+	assertSignatureFields(t, file, method.Signature.Results, results)
+}
+
+func assertInterfaceEmbed(t *testing.T, file syntax.File, tp TypeInfo, typ string) {
+	t.Helper()
+	for i := 0; i < len(tp.InterfaceEmbeds); i++ {
+		if spanText(file, tp.InterfaceEmbeds[i].TypeStart, tp.InterfaceEmbeds[i].TypeEnd) == typ {
+			return
+		}
+	}
+	t.Fatalf("interface embed %q not found in %#v", typ, tp.InterfaceEmbeds)
+}
+
+func assertSignatureFields(t *testing.T, file syntax.File, fields []Field, want []string) {
+	t.Helper()
+	if len(fields) != len(want) {
+		t.Fatalf("signature fields = %#v, want %d", fields, len(want))
+	}
+	for i := 0; i < len(want); i++ {
+		got := fields[i].Name + ":" + fieldTypeText(file, fields[i])
+		if got != want[i] {
+			t.Fatalf("signature field %d = %q, want %q in %#v", i, got, want[i], fields)
+		}
+	}
 }
 
 func assertMethod(t *testing.T, info PackageInfo, receiver string, name string, pointer bool) {
