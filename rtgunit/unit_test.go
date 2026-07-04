@@ -124,6 +124,17 @@ func appMain() int { return values[0] }
 		EndTok:    21,
 		Values:    []ExprSpan{{StartTok: 17, EndTok: 21}},
 	}}
+	program.Calls = []Call{{
+		OwnerKind:  OwnerFunc,
+		OwnerIndex: 0,
+		Kind:       CallPackage,
+		CalleeTok:  17,
+		BaseTok:    len(program.Tokens)/tokenStride - 1,
+		DotTok:     len(program.Tokens)/tokenStride - 1,
+		ArgsStart:  19,
+		ArgsEnd:    20,
+		Args:       []ExprSpan{{StartTok: 19, EndTok: 20}},
+	}}
 	data, err := Marshal(program)
 	if err != nil {
 		t.Fatalf("Marshal failed: %v", err)
@@ -153,6 +164,9 @@ func appMain() int { return values[0] }
 	}
 	if len(decoded.Returns) != 1 || decoded.Returns[0].Values[0] != program.Returns[0].Values[0] {
 		t.Fatalf("decoded returns = %#v, want %#v", decoded.Returns, program.Returns)
+	}
+	if len(decoded.Calls) != 1 || decoded.Calls[0].Kind != CallPackage || decoded.Calls[0].Args[0] != program.Calls[0].Args[0] {
+		t.Fatalf("decoded calls = %#v, want %#v", decoded.Calls, program.Calls)
 	}
 }
 

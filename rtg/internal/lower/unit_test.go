@@ -155,12 +155,14 @@ func TestEmitCheckedPackageExpressionShapes(t *testing.T) {
 type item struct { value int }
 
 var global = []int{1, 2, 3}
-var picked = global[1]
+var picked = choose(global[1])
+
+func choose(v int) int { return v }
 
 func appMain() int {
 	var local = []item{{value: global[0]}}
 	local[0] = item{value: picked}
-	return local[0].value
+	return choose(local[0].value)
 }
 `)},
 	})
@@ -181,23 +183,30 @@ func appMain() int {
 	if len(result.Program.Assigns) != 1 {
 		t.Fatalf("assignments = %#v, want 1", result.Program.Assigns)
 	}
-	if len(result.Program.Returns) != 1 {
-		t.Fatalf("returns = %#v, want 1", result.Program.Returns)
+	if len(result.Program.Returns) != 2 {
+		t.Fatalf("returns = %#v, want 2", result.Program.Returns)
+	}
+	if len(result.Program.Calls) != 2 {
+		t.Fatalf("calls = %#v, want 2", result.Program.Calls)
 	}
 	global := findUnitDecl(result.Program, "global")
 	picked := findUnitDecl(result.Program, "picked")
 	appMain := findUnitFunc(result.Program, "appMain")
-	if global < 0 || picked < 0 || appMain < 0 {
+	choose := findUnitFunc(result.Program, "choose")
+	if global < 0 || picked < 0 || appMain < 0 || choose < 0 {
 		t.Fatalf("unit rows missing: decls=%#v funcs=%#v", result.Program.Decls, result.Program.Funcs)
 	}
 	assertUnitComposite(t, result.Program, unit.OwnerDecl, global, "[]int", []string{"1", "2", "3"})
 	assertUnitIndex(t, result.Program, unit.OwnerDecl, picked, "global", "1")
+	assertUnitCall(t, result.Program, unit.OwnerDecl, picked, unit.CallPackage, "", "choose", []string{"global[1]"})
 	assertUnitComposite(t, result.Program, unit.OwnerFunc, appMain, "[]item", []string{"{value: global[0]}"})
 	assertUnitComposite(t, result.Program, unit.OwnerFunc, appMain, "item", []string{"value: picked"})
 	assertUnitIndex(t, result.Program, unit.OwnerFunc, appMain, "global", "0")
 	assertUnitIndex(t, result.Program, unit.OwnerFunc, appMain, "local", "0")
 	assertUnitAssign(t, result.Program, appMain, unit.AssignSet, "local[0]", "item{value: picked}")
-	assertUnitReturn(t, result.Program, appMain, []string{"local[0].value"})
+	assertUnitReturn(t, result.Program, choose, []string{"v"})
+	assertUnitReturn(t, result.Program, appMain, []string{"choose(local[0].value)"})
+	assertUnitCall(t, result.Program, unit.OwnerFunc, appMain, unit.CallPackage, "", "choose", []string{"local[0].value"})
 
 	data, ok := unit.Marshal(result.Program)
 	if !ok {
@@ -212,6 +221,9 @@ func appMain() int {
 	}
 	if len(decoded.Assigns) != len(result.Program.Assigns) || len(decoded.Returns) != len(result.Program.Returns) {
 		t.Fatalf("decoded flow = %d/%d, want %d/%d", len(decoded.Assigns), len(decoded.Returns), len(result.Program.Assigns), len(result.Program.Returns))
+	}
+	if len(decoded.Calls) != len(result.Program.Calls) {
+		t.Fatalf("decoded calls = %d, want %d", len(decoded.Calls), len(result.Program.Calls))
 	}
 }
 
@@ -457,6 +469,46 @@ func assertUnitReturn(t *testing.T, program unit.Program, funcIndex int, values 
 		}
 	}
 	t.Fatalf("return func=%d values=%v not found in %#v", funcIndex, values, program.Returns)
+}
+
+func assertUnitCall(t *testing.T, program unit.Program, ownerKind int, ownerIndex int, kind int, base string, callee string, args []string) {
+	t.Helper()
+	for i := 0; i < len(program.Calls); i++ {
+		call := program.Calls[i]
+		if call.OwnerKind != ownerKind || call.OwnerIndex != ownerIndex || call.Kind != kind {
+			continue
+		}
+		if tokenTextUnit(program, call.BaseTok) != base || tokenTextUnit(program, call.CalleeTok) != callee {
+			continue
+		}
+		if len(call.Args) != len(args) {
+			continue
+		}
+		matched := true
+		for j := 0; j < len(args); j++ {
+			if unitSpanText(program, call.Args[j].StartTok, call.Args[j].EndTok) != args[j] {
+				matched = false
+			}
+		}
+		if matched {
+			return
+		}
+	}
+	t.Fatalf("call owner=%d/%d %s.%s args=%v not found in %#v", ownerKind, ownerIndex, base, callee, args, program.Calls)
+}
+
+func tokenTextUnit(program unit.Program, tok int) string {
+	if tok < 0 || tok >= len(program.Tokens) {
+		return ""
+	}
+	token := program.Tokens[tok]
+	if token.Kind == unit.TokenEOF || token.Size == 0 {
+		return ""
+	}
+	if token.Start < 0 || token.Start+token.Size > len(program.Text) {
+		return ""
+	}
+	return string(program.Text[token.Start : token.Start+token.Size])
 }
 
 func unitSpanText(program unit.Program, startTok int, endTok int) string {

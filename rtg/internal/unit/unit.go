@@ -16,6 +16,7 @@ const (
 	TagComps   = 12
 	TagAssigns = 13
 	TagReturns = 14
+	TagCalls   = 15
 )
 
 const (
@@ -141,6 +142,26 @@ type Return struct {
 	Values    []ExprSpan
 }
 
+const (
+	CallUnknown = iota
+	CallScope
+	CallPackage
+	CallImportSelector
+	CallBuiltin
+)
+
+type Call struct {
+	OwnerKind  int
+	OwnerIndex int
+	Kind       int
+	CalleeTok  int
+	BaseTok    int
+	DotTok     int
+	ArgsStart  int
+	ArgsEnd    int
+	Args       []ExprSpan
+}
+
 type Program struct {
 	Package    string
 	Text       []byte
@@ -151,6 +172,7 @@ type Program struct {
 	Composites []CompositeExpr
 	Assigns    []Assignment
 	Returns    []Return
+	Calls      []Call
 }
 
 func Marshal(program Program) ([]byte, bool) {
@@ -185,6 +207,10 @@ func Marshal(program Program) ([]byte, bool) {
 	if !ok {
 		return nil, false
 	}
+	callData, ok := encodeCalls(program.Calls, len(program.Tokens), len(program.Decls), len(program.Funcs))
+	if !ok {
+		return nil, false
+	}
 	var root []byte
 	root = appendNode(root, TagPackage, []byte(program.Package))
 	root = appendNode(root, TagText, program.Text)
@@ -195,6 +221,7 @@ func Marshal(program Program) ([]byte, bool) {
 	root = appendNode(root, TagComps, compData)
 	root = appendNode(root, TagAssigns, assignData)
 	root = appendNode(root, TagReturns, returnData)
+	root = appendNode(root, TagCalls, callData)
 
 	out := make([]byte, 0, 14+len(root))
 	out = append(out, 'R', 'T', 'G', 'U')
@@ -230,6 +257,7 @@ func Unmarshal(data []byte) (Program, bool) {
 	compData := []byte{}
 	assignData := []byte{}
 	returnData := []byte{}
+	callData := []byte{}
 	seenPackage := false
 	seenText := false
 	seenTokens := false
@@ -239,6 +267,7 @@ func Unmarshal(data []byte) (Program, bool) {
 	seenComps := false
 	seenAssigns := false
 	seenReturns := false
+	seenCalls := false
 	pos := rootStart
 	for pos < rootEnd {
 		if pos+6 > rootEnd {
@@ -314,6 +343,12 @@ func Unmarshal(data []byte) (Program, bool) {
 			}
 			seenReturns = true
 			returnData = payload
+		} else if tag == TagCalls {
+			if seenCalls {
+				return program, false
+			}
+			seenCalls = true
+			callData = payload
 		} else {
 			return program, false
 		}
@@ -357,6 +392,13 @@ func Unmarshal(data []byte) (Program, bool) {
 			return program, false
 		}
 		program.Returns = returns
+	}
+	if seenCalls {
+		calls, ok := decodeCalls(callData, len(program.Tokens), len(program.Decls), len(program.Funcs))
+		if !ok {
+			return program, false
+		}
+		program.Calls = calls
 	}
 	return program, true
 }
@@ -1010,6 +1052,109 @@ func decodeReturns(data []byte, tokenLimit int, funcLimit int) ([]Return, bool) 
 		return nil, false
 	}
 	return returns, true
+}
+
+func encodeCalls(calls []Call, tokenLimit int, declLimit int, funcLimit int) ([]byte, bool) {
+	out := make([]byte, 0, len(calls)*10+1)
+	out = appendVarint(out, len(calls))
+	for i := 0; i < len(calls); i++ {
+		call := calls[i]
+		ok := true
+		if !validOwner(call.OwnerKind, call.OwnerIndex, declLimit, funcLimit) || call.Kind < CallUnknown || call.Kind > CallBuiltin {
+			return nil, false
+		}
+		if !validToken(tokenLimit, call.CalleeTok) ||
+			!validToken(tokenLimit, call.BaseTok) ||
+			!validToken(tokenLimit, call.DotTok) ||
+			!validSpan(tokenLimit, call.ArgsStart, call.ArgsEnd) {
+			return nil, false
+		}
+		out = appendVarint(out, call.OwnerKind)
+		out = appendVarint(out, call.OwnerIndex)
+		out = appendVarint(out, call.Kind)
+		out = appendVarint(out, call.CalleeTok)
+		out = appendVarint(out, call.BaseTok)
+		out = appendVarint(out, call.DotTok)
+		out = appendVarint(out, call.ArgsStart)
+		out = appendVarint(out, call.ArgsEnd-call.ArgsStart)
+		out = appendExprSpans(out, call.Args, tokenLimit, &ok)
+		if !ok {
+			return nil, false
+		}
+	}
+	return out, true
+}
+
+func decodeCalls(data []byte, tokenLimit int, declLimit int, funcLimit int) ([]Call, bool) {
+	pos := 0
+	count, ok := readVarint(data, &pos)
+	if !ok || count < 0 {
+		return nil, false
+	}
+	calls := make([]Call, 0, count)
+	for i := 0; i < count; i++ {
+		ownerKind, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		ownerIndex, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		kind, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		calleeTok, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		baseTok, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		dotTok, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		argsStart, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		argsCount, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		args, ok := readExprSpans(data, &pos, tokenLimit)
+		if !ok {
+			return nil, false
+		}
+		call := Call{
+			OwnerKind:  ownerKind,
+			OwnerIndex: ownerIndex,
+			Kind:       kind,
+			CalleeTok:  calleeTok,
+			BaseTok:    baseTok,
+			DotTok:     dotTok,
+			ArgsStart:  argsStart,
+			ArgsEnd:    argsStart + argsCount,
+			Args:       args,
+		}
+		if !validOwner(call.OwnerKind, call.OwnerIndex, declLimit, funcLimit) || call.Kind < CallUnknown || call.Kind > CallBuiltin {
+			return nil, false
+		}
+		if !validToken(tokenLimit, call.CalleeTok) ||
+			!validToken(tokenLimit, call.BaseTok) ||
+			!validToken(tokenLimit, call.DotTok) ||
+			!validSpan(tokenLimit, call.ArgsStart, call.ArgsEnd) {
+			return nil, false
+		}
+		calls = append(calls, call)
+	}
+	if pos != len(data) {
+		return nil, false
+	}
+	return calls, true
 }
 
 func appendExprSpans(out []byte, spans []ExprSpan, tokenLimit int, ok *bool) []byte {

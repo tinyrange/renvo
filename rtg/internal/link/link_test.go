@@ -154,7 +154,8 @@ func Value(i int) int {
 	}
 	values := findLinkedDecl(program, "Values")
 	valueFn := findLinkedFunc(program, "Value")
-	if values < 0 || valueFn < 0 {
+	appMain := findLinkedFunc(program, "appMain")
+	if values < 0 || valueFn < 0 || appMain < 0 {
 		t.Fatalf("linked rows missing: decls=%#v funcs=%#v", program.Decls, program.Funcs)
 	}
 	if len(program.Composites) != 1 {
@@ -168,6 +169,9 @@ func Value(i int) int {
 	}
 	if len(program.Returns) != 2 {
 		t.Fatalf("linked returns = %#v, want 2", program.Returns)
+	}
+	if len(program.Calls) != 1 {
+		t.Fatalf("linked calls = %#v, want 1", program.Calls)
 	}
 	composite := program.Composites[0]
 	if composite.OwnerKind != unit.OwnerDecl || composite.OwnerIndex != values || linkedSpanText(program, composite.TypeStart, composite.TypeEnd) != "[]int" {
@@ -194,6 +198,14 @@ func Value(i int) int {
 	}
 	if !foundValueReturn {
 		t.Fatalf("linked Value return not found in %#v", program.Returns)
+	}
+	call := program.Calls[0]
+	if call.OwnerKind != unit.OwnerFunc || call.OwnerIndex != appMain || call.Kind != unit.CallImportSelector ||
+		linkedTokenText(program, call.BaseTok) != "lib" ||
+		linkedTokenText(program, call.CalleeTok) != "Value" ||
+		len(call.Args) != 1 ||
+		linkedSpanText(program, call.Args[0].StartTok, call.Args[0].EndTok) != "1" {
+		t.Fatalf("linked call = %#v, owner func %d", call, appMain)
 	}
 }
 
@@ -265,4 +277,18 @@ func linkedSpanText(program unit.Program, startTok int, endTok int) string {
 		return ""
 	}
 	return string(program.Text[start:end])
+}
+
+func linkedTokenText(program unit.Program, tok int) string {
+	if tok < 0 || tok >= len(program.Tokens) {
+		return ""
+	}
+	token := program.Tokens[tok]
+	if token.Kind == unit.TokenEOF || token.Size == 0 {
+		return ""
+	}
+	if token.Start < 0 || token.Start+token.Size > len(program.Text) {
+		return ""
+	}
+	return string(program.Text[token.Start : token.Start+token.Size])
 }

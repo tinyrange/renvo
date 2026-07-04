@@ -131,6 +131,17 @@ func TestMarshalRoundTripExpressionShapes(t *testing.T) {
 		EndTok:    14,
 		Values:    []ExprSpan{{StartTok: 13, EndTok: 14}},
 	}}
+	program.Calls = []Call{{
+		OwnerKind:  OwnerFunc,
+		OwnerIndex: 0,
+		Kind:       CallPackage,
+		CalleeTok:  13,
+		BaseTok:    len(program.Tokens) - 1,
+		DotTok:     len(program.Tokens) - 1,
+		ArgsStart:  13,
+		ArgsEnd:    14,
+		Args:       []ExprSpan{{StartTok: 13, EndTok: 14}},
+	}}
 	data, ok := Marshal(program)
 	if !ok {
 		t.Fatal("Marshal failed")
@@ -333,7 +344,7 @@ func equalPrograms(left Program, right Program) bool {
 	}
 	if len(left.Tokens) != len(right.Tokens) || len(left.Decls) != len(right.Decls) || len(left.Funcs) != len(right.Funcs) ||
 		len(left.Indexes) != len(right.Indexes) || len(left.Composites) != len(right.Composites) ||
-		len(left.Assigns) != len(right.Assigns) || len(left.Returns) != len(right.Returns) {
+		len(left.Assigns) != len(right.Assigns) || len(left.Returns) != len(right.Returns) || len(left.Calls) != len(right.Calls) {
 		return false
 	}
 	for i := 0; i < len(left.Tokens); i++ {
@@ -408,6 +419,24 @@ func equalPrograms(left Program, right Program) bool {
 		}
 		for j := 0; j < len(left.Returns[i].Values); j++ {
 			if left.Returns[i].Values[j] != right.Returns[i].Values[j] {
+				return false
+			}
+		}
+	}
+	for i := 0; i < len(left.Calls); i++ {
+		if left.Calls[i].OwnerKind != right.Calls[i].OwnerKind ||
+			left.Calls[i].OwnerIndex != right.Calls[i].OwnerIndex ||
+			left.Calls[i].Kind != right.Calls[i].Kind ||
+			left.Calls[i].CalleeTok != right.Calls[i].CalleeTok ||
+			left.Calls[i].BaseTok != right.Calls[i].BaseTok ||
+			left.Calls[i].DotTok != right.Calls[i].DotTok ||
+			left.Calls[i].ArgsStart != right.Calls[i].ArgsStart ||
+			left.Calls[i].ArgsEnd != right.Calls[i].ArgsEnd ||
+			len(left.Calls[i].Args) != len(right.Calls[i].Args) {
+			return false
+		}
+		for j := 0; j < len(left.Calls[i].Args); j++ {
+			if left.Calls[i].Args[j] != right.Calls[i].Args[j] {
 				return false
 			}
 		}

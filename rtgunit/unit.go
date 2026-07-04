@@ -23,6 +23,7 @@ const (
 	TagComps   = uint16(12)
 	TagAssigns = uint16(13)
 	TagReturns = uint16(14)
+	TagCalls   = uint16(15)
 )
 
 const (
@@ -149,6 +150,26 @@ type Return struct {
 	Values    []ExprSpan
 }
 
+const (
+	CallUnknown = iota
+	CallScope
+	CallPackage
+	CallImportSelector
+	CallBuiltin
+)
+
+type Call struct {
+	OwnerKind  int
+	OwnerIndex int
+	Kind       int
+	CalleeTok  int
+	BaseTok    int
+	DotTok     int
+	ArgsStart  int
+	ArgsEnd    int
+	Args       []ExprSpan
+}
+
 type Program struct {
 	Package    string
 	Text       []byte
@@ -159,6 +180,7 @@ type Program struct {
 	Composites []CompositeExpr
 	Assigns    []Assignment
 	Returns    []Return
+	Calls      []Call
 }
 
 type sourceToken struct {
@@ -219,6 +241,7 @@ func Marshal(program Program) ([]byte, error) {
 		NewNode(TagComps, encodeComposites(program.Composites)),
 		NewNode(TagAssigns, encodeAssignments(program.Assigns)),
 		NewNode(TagReturns, encodeReturns(program.Returns)),
+		NewNode(TagCalls, encodeCalls(program.Calls)),
 	)
 
 	var out bytes.Buffer
@@ -260,10 +283,12 @@ func Unmarshal(data []byte) (Program, error) {
 	var compData []byte
 	var assignData []byte
 	var returnData []byte
+	var callData []byte
 	seenIndexes := false
 	seenComps := false
 	seenAssigns := false
 	seenReturns := false
+	seenCalls := false
 	pos := rootStart
 	for pos < rootEnd {
 		if pos+6 > rootEnd {
@@ -320,6 +345,12 @@ func Unmarshal(data []byte) (Program, error) {
 			}
 			seenReturns = true
 			returnData = payload
+		case TagCalls:
+			if seenCalls {
+				return program, fmt.Errorf("duplicate call table")
+			}
+			seenCalls = true
+			callData = payload
 		default:
 			return program, fmt.Errorf("unknown unit child tag %d", tag)
 		}
@@ -363,6 +394,13 @@ func Unmarshal(data []byte) (Program, error) {
 			return program, err
 		}
 		program.Returns = returns
+	}
+	if seenCalls {
+		calls, err := decodeCalls(callData)
+		if err != nil {
+			return program, err
+		}
+		program.Calls = calls
 	}
 	if len(program.Tokens) == 0 {
 		return program, fmt.Errorf("unit missing token table")
@@ -1253,6 +1291,23 @@ func encodeReturns(returns []Return) []byte {
 	return out
 }
 
+func encodeCalls(calls []Call) []byte {
+	var out []byte
+	out = appendVarint(out, len(calls))
+	for _, call := range calls {
+		out = appendVarint(out, call.OwnerKind)
+		out = appendVarint(out, call.OwnerIndex)
+		out = appendVarint(out, call.Kind)
+		out = appendVarint(out, call.CalleeTok)
+		out = appendVarint(out, call.BaseTok)
+		out = appendVarint(out, call.DotTok)
+		out = appendVarint(out, call.ArgsStart)
+		out = appendVarint(out, call.ArgsEnd-call.ArgsStart)
+		out = appendSpanList(out, call.Args)
+	}
+	return out
+}
+
 func appendSpanList(out []byte, spans []ExprSpan) []byte {
 	out = appendVarint(out, len(spans))
 	for _, span := range spans {
@@ -1664,6 +1719,78 @@ func decodeReturns(data []byte) ([]Return, error) {
 		return nil, fmt.Errorf("trailing return data")
 	}
 	return returns, nil
+}
+
+func decodeCalls(data []byte) ([]Call, error) {
+	pos := 0
+	count, next, ok := readVarint(data, pos)
+	if !ok {
+		return nil, fmt.Errorf("invalid call count")
+	}
+	pos = next
+	calls := make([]Call, 0, count)
+	for i := 0; i < count; i++ {
+		ownerKind, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid call %d owner kind", i)
+		}
+		pos = n
+		ownerIndex, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid call %d owner index", i)
+		}
+		pos = n
+		kind, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid call %d kind", i)
+		}
+		pos = n
+		calleeTok, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid call %d callee", i)
+		}
+		pos = n
+		baseTok, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid call %d base", i)
+		}
+		pos = n
+		dotTok, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid call %d dot", i)
+		}
+		pos = n
+		argsStart, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid call %d args start", i)
+		}
+		pos = n
+		argsCount, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid call %d args end", i)
+		}
+		pos = n
+		args, n, ok := readSpanList(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid call %d args", i)
+		}
+		pos = n
+		calls = append(calls, Call{
+			OwnerKind:  ownerKind,
+			OwnerIndex: ownerIndex,
+			Kind:       kind,
+			CalleeTok:  calleeTok,
+			BaseTok:    baseTok,
+			DotTok:     dotTok,
+			ArgsStart:  argsStart,
+			ArgsEnd:    argsStart + argsCount,
+			Args:       args,
+		})
+	}
+	if pos != len(data) {
+		return nil, fmt.Errorf("trailing call data")
+	}
+	return calls, nil
 }
 
 func readSpanList(data []byte, pos int) ([]ExprSpan, int, bool) {

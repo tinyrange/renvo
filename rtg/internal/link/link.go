@@ -166,6 +166,13 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		}
 		dst.Returns = append(dst.Returns, ret)
 	}
+	for i := 0; i < len(src.Calls); i++ {
+		call, ok := mapCall(src.Calls[i], oldToNew, finalEOF, declOffset, funcOffset)
+		if !ok {
+			return false
+		}
+		dst.Calls = append(dst.Calls, call)
+	}
 	if hasNext && (len(src.Text) == 0 || src.Text[len(src.Text)-1] != '\n') {
 		dst.Text = append(dst.Text, '\n')
 	}
@@ -240,6 +247,23 @@ func mapReturn(ret unit.Return, oldToNew []int, eof int, funcOffset int) (unit.R
 		ret.Values[i] = mapExprSpan(ret.Values[i], oldToNew, eof)
 	}
 	return ret, true
+}
+
+func mapCall(call unit.Call, oldToNew []int, eof int, declOffset int, funcOffset int) (unit.Call, bool) {
+	ownerIndex, ok := mapOwner(call.OwnerKind, call.OwnerIndex, declOffset, funcOffset)
+	if !ok {
+		return call, false
+	}
+	call.OwnerIndex = ownerIndex
+	call.CalleeTok = mapToken(oldToNew, call.CalleeTok, eof)
+	call.BaseTok = mapToken(oldToNew, call.BaseTok, eof)
+	call.DotTok = mapToken(oldToNew, call.DotTok, eof)
+	call.ArgsStart = mapToken(oldToNew, call.ArgsStart, eof)
+	call.ArgsEnd = mapToken(oldToNew, call.ArgsEnd, eof)
+	for i := 0; i < len(call.Args); i++ {
+		call.Args[i] = mapExprSpan(call.Args[i], oldToNew, eof)
+	}
+	return call, true
 }
 
 func mapExprSpan(span unit.ExprSpan, oldToNew []int, eof int) unit.ExprSpan {

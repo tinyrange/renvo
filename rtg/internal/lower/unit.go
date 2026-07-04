@@ -273,6 +273,9 @@ func (b *unitBuilder) addCheckedDecls(info check.PackageInfo, files []fileTokens
 		if !b.addDeclShapes(declInfo, files[declInfo.File].oldToNew, ownerIndex) {
 			return false
 		}
+		if !b.addDeclCalls(declInfo, files[declInfo.File].oldToNew, ownerIndex) {
+			return false
+		}
 	}
 	return true
 }
@@ -302,6 +305,9 @@ func (b *unitBuilder) addCheckedFuncs(info check.PackageInfo, files []fileTokens
 			return false
 		}
 		if !b.addBodyFlow(body, files[body.File].oldToNew, ownerIndex) {
+			return false
+		}
+		if !b.addBodyCalls(body, files[body.File].oldToNew, ownerIndex) {
 			return false
 		}
 	}
@@ -348,6 +354,18 @@ func (b *unitBuilder) addBodyShapes(body check.FuncBody, oldToNew []int, ownerIn
 	return true
 }
 
+func (b *unitBuilder) addDeclCalls(decl check.DeclInfo, oldToNew []int, ownerIndex int) bool {
+	for i := 0; i < len(decl.Calls); i++ {
+		call, ok := mapCallRef(decl.Calls[i], oldToNew, b.finalEOF, unit.OwnerDecl, ownerIndex)
+		if !ok {
+			b.setErr(EmitErrCheck, decl.File, decl.Token)
+			return false
+		}
+		b.program.Calls = append(b.program.Calls, call)
+	}
+	return true
+}
+
 func (b *unitBuilder) addBodyFlow(body check.FuncBody, oldToNew []int, funcIndex int) bool {
 	for i := 0; i < len(body.Assigns); i++ {
 		assign, ok := mapAssignment(body.Assigns[i], oldToNew, b.finalEOF, funcIndex)
@@ -364,6 +382,18 @@ func (b *unitBuilder) addBodyFlow(body check.FuncBody, oldToNew []int, funcIndex
 			return false
 		}
 		b.program.Returns = append(b.program.Returns, ret)
+	}
+	return true
+}
+
+func (b *unitBuilder) addBodyCalls(body check.FuncBody, oldToNew []int, ownerIndex int) bool {
+	for i := 0; i < len(body.Calls); i++ {
+		call, ok := mapCallRef(body.Calls[i], oldToNew, b.finalEOF, unit.OwnerFunc, ownerIndex)
+		if !ok {
+			b.setErr(EmitErrCheck, body.File, body.Body.ErrorTok)
+			return false
+		}
+		b.program.Calls = append(b.program.Calls, call)
 	}
 	return true
 }
@@ -418,6 +448,31 @@ func mapCompositeExpr(composite check.CompositeExpr, oldToNew []int, eof int, ow
 			return out, false
 		}
 		out.Elems = append(out.Elems, mapped)
+	}
+	return out, true
+}
+
+func mapCallRef(call check.CallRef, oldToNew []int, eof int, ownerKind int, ownerIndex int) (unit.Call, bool) {
+	out := unit.Call{
+		OwnerKind:  ownerKind,
+		OwnerIndex: ownerIndex,
+		Kind:       call.Kind,
+		CalleeTok:  mapToken(oldToNew, call.CalleeToken, eof),
+		BaseTok:    mapToken(oldToNew, call.BaseToken, eof),
+		DotTok:     mapToken(oldToNew, call.DotToken, eof),
+		ArgsStart:  mapToken(oldToNew, call.ArgsStart, eof),
+		ArgsEnd:    mapToken(oldToNew, call.ArgsEnd, eof),
+		Args:       make([]unit.ExprSpan, 0, len(call.Args)),
+	}
+	if ownerIndex < 0 || out.CalleeTok < 0 || out.BaseTok < 0 || out.DotTok < 0 || out.ArgsStart < 0 || out.ArgsEnd < out.ArgsStart {
+		return out, false
+	}
+	for i := 0; i < len(call.Args); i++ {
+		span, ok := mapExprSpan(call.Args[i], oldToNew, eof)
+		if !ok {
+			return out, false
+		}
+		out.Args = append(out.Args, span)
 	}
 	return out, true
 }
