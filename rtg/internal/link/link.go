@@ -152,6 +152,13 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		}
 		dst.TypeRefs = append(dst.TypeRefs, ref)
 	}
+	for i := 0; i < len(src.Locals); i++ {
+		local, ok := mapLocal(src.Locals[i], oldToNew, finalEOF, textOffset, funcOffset)
+		if !ok {
+			return false
+		}
+		dst.Locals = append(dst.Locals, local)
+	}
 	for i := 0; i < len(src.Indexes); i++ {
 		index, ok := mapIndex(src.Indexes[i], oldToNew, finalEOF, declOffset, funcOffset)
 		if !ok {
@@ -244,6 +251,29 @@ func mapTypeRef(ref unit.TypeRef, oldToNew []int, eof int, declOffset int, funcO
 	ref.BaseTok = mapToken(oldToNew, ref.BaseTok, eof)
 	ref.DotTok = mapToken(oldToNew, ref.DotTok, eof)
 	return ref, true
+}
+
+func mapLocal(local unit.LocalDecl, oldToNew []int, eof int, textOffset int, funcOffset int) (unit.LocalDecl, bool) {
+	if local.FuncIndex < 0 || local.NameStart < 0 || local.NameEnd < local.NameStart {
+		return local, false
+	}
+	local.FuncIndex += funcOffset
+	local.NameStart += textOffset
+	local.NameEnd += textOffset
+	local.Token = mapToken(oldToNew, local.Token, eof)
+	var ok bool
+	local.TypeStart, local.TypeEnd, ok = mapNullableSpan(local.TypeStart, local.TypeEnd, oldToNew, eof)
+	if !ok {
+		return local, false
+	}
+	local.ValueStart, local.ValueEnd, ok = mapNullableSpan(local.ValueStart, local.ValueEnd, oldToNew, eof)
+	if !ok {
+		return local, false
+	}
+	for i := 0; i < len(local.Values); i++ {
+		local.Values[i] = mapExprSpan(local.Values[i], oldToNew, eof)
+	}
+	return local, true
 }
 
 func mapIndex(index unit.IndexExpr, oldToNew []int, eof int, declOffset int, funcOffset int) (unit.IndexExpr, bool) {

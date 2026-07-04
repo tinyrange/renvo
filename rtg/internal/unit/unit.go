@@ -21,6 +21,7 @@ const (
 	TagSels     = 17
 	TagTypes    = 18
 	TagTypeRefs = 19
+	TagLocals   = 20
 )
 
 const (
@@ -251,6 +252,22 @@ type TypeRef struct {
 	Symbol     int
 }
 
+type LocalDecl struct {
+	FuncIndex  int
+	Kind       int
+	NameStart  int
+	NameEnd    int
+	Token      int
+	Scope      int
+	ValueIndex int
+	TypeStart  int
+	TypeEnd    int
+	ValueStart int
+	ValueEnd   int
+	Values     []ExprSpan
+	Alias      bool
+}
+
 type Program struct {
 	Package    string
 	Text       []byte
@@ -259,6 +276,7 @@ type Program struct {
 	Funcs      []Func
 	Types      []TypeInfo
 	TypeRefs   []TypeRef
+	Locals     []LocalDecl
 	Indexes    []IndexExpr
 	Composites []CompositeExpr
 	Assigns    []Assignment
@@ -289,6 +307,10 @@ func Marshal(program Program) ([]byte, bool) {
 		return nil, false
 	}
 	typeRefData, ok := encodeTypeRefs(program.TypeRefs, len(program.Tokens), len(program.Decls), len(program.Funcs))
+	if !ok {
+		return nil, false
+	}
+	localData, ok := encodeLocals(program.Locals, len(program.Text), len(program.Tokens), len(program.Funcs))
 	if !ok {
 		return nil, false
 	}
@@ -328,6 +350,7 @@ func Marshal(program Program) ([]byte, bool) {
 	root = appendNode(root, TagFuncs, funcData)
 	root = appendNode(root, TagTypes, typeData)
 	root = appendNode(root, TagTypeRefs, typeRefData)
+	root = appendNode(root, TagLocals, localData)
 	root = appendNode(root, TagIndexes, indexData)
 	root = appendNode(root, TagComps, compData)
 	root = appendNode(root, TagAssigns, assignData)
@@ -368,6 +391,7 @@ func Unmarshal(data []byte) (Program, bool) {
 	tokenData := []byte{}
 	typeData := []byte{}
 	typeRefData := []byte{}
+	localData := []byte{}
 	indexData := []byte{}
 	compData := []byte{}
 	assignData := []byte{}
@@ -382,6 +406,7 @@ func Unmarshal(data []byte) (Program, bool) {
 	seenFuncs := false
 	seenTypes := false
 	seenTypeRefs := false
+	seenLocals := false
 	seenIndexes := false
 	seenComps := false
 	seenAssigns := false
@@ -452,6 +477,12 @@ func Unmarshal(data []byte) (Program, bool) {
 			}
 			seenTypeRefs = true
 			typeRefData = payload
+		} else if tag == TagLocals {
+			if seenLocals {
+				return program, false
+			}
+			seenLocals = true
+			localData = payload
 		} else if tag == TagIndexes {
 			if seenIndexes {
 				return program, false
@@ -523,6 +554,13 @@ func Unmarshal(data []byte) (Program, bool) {
 			return program, false
 		}
 		program.TypeRefs = typeRefs
+	}
+	if seenLocals {
+		locals, ok := decodeLocals(localData, len(program.Text), len(program.Tokens), len(program.Funcs))
+		if !ok {
+			return program, false
+		}
+		program.Locals = locals
 	}
 	if seenIndexes {
 		indexes, ok := decodeIndexes(indexData, len(program.Tokens), len(program.Decls), len(program.Funcs))
@@ -1025,6 +1063,125 @@ func decodeTypeRefs(data []byte, tokenLimit int, declLimit int, funcLimit int) (
 		return nil, false
 	}
 	return refs, true
+}
+
+func encodeLocals(locals []LocalDecl, textLimit int, tokenLimit int, funcLimit int) ([]byte, bool) {
+	out := make([]byte, 0, len(locals)*14+1)
+	out = appendVarint(out, len(locals))
+	ok := true
+	for i := 0; i < len(locals); i++ {
+		local := locals[i]
+		if local.FuncIndex < 0 || local.FuncIndex >= funcLimit ||
+			!validLocalKind(local.Kind) ||
+			!validTextSpan(textLimit, local.NameStart, local.NameEnd) ||
+			!validToken(tokenLimit, local.Token) ||
+			!validNullable(local.Scope) ||
+			local.ValueIndex < 0 {
+			return nil, false
+		}
+		out = appendVarint(out, local.FuncIndex)
+		out = appendVarint(out, local.Kind)
+		out = appendVarint(out, local.NameStart)
+		out = appendVarint(out, local.NameEnd-local.NameStart)
+		out = appendVarint(out, local.Token)
+		out = appendNullable(out, local.Scope)
+		out = appendVarint(out, local.ValueIndex)
+		if local.Alias {
+			out = appendVarint(out, 1)
+		} else {
+			out = appendVarint(out, 0)
+		}
+		out = appendNullableSpan(out, local.TypeStart, local.TypeEnd, tokenLimit, &ok)
+		out = appendNullableSpan(out, local.ValueStart, local.ValueEnd, tokenLimit, &ok)
+		out = appendExprSpans(out, local.Values, tokenLimit, &ok)
+		if !ok {
+			return nil, false
+		}
+	}
+	return out, true
+}
+
+func decodeLocals(data []byte, textLimit int, tokenLimit int, funcLimit int) ([]LocalDecl, bool) {
+	pos := 0
+	count, ok := readVarint(data, &pos)
+	if !ok || count < 0 {
+		return nil, false
+	}
+	locals := make([]LocalDecl, 0, count)
+	for i := 0; i < count; i++ {
+		funcIndex, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		kind, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		nameStart, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		nameSize, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		token, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		scope, ok := readNullable(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		valueIndex, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		aliasValue, ok := readVarint(data, &pos)
+		if !ok || aliasValue > 1 {
+			return nil, false
+		}
+		typeStart, typeEnd, ok := readNullableSpan(data, &pos, tokenLimit)
+		if !ok {
+			return nil, false
+		}
+		valueStart, valueEnd, ok := readNullableSpan(data, &pos, tokenLimit)
+		if !ok {
+			return nil, false
+		}
+		values, ok := readExprSpans(data, &pos, tokenLimit)
+		if !ok {
+			return nil, false
+		}
+		local := LocalDecl{
+			FuncIndex:  funcIndex,
+			Kind:       kind,
+			NameStart:  nameStart,
+			NameEnd:    nameStart + nameSize,
+			Token:      token,
+			Scope:      scope,
+			ValueIndex: valueIndex,
+			TypeStart:  typeStart,
+			TypeEnd:    typeEnd,
+			ValueStart: valueStart,
+			ValueEnd:   valueEnd,
+			Values:     values,
+			Alias:      aliasValue == 1,
+		}
+		if local.FuncIndex < 0 || local.FuncIndex >= funcLimit ||
+			!validLocalKind(local.Kind) ||
+			!validTextSpan(textLimit, local.NameStart, local.NameEnd) ||
+			!validToken(tokenLimit, local.Token) ||
+			!validNullable(local.Scope) ||
+			local.ValueIndex < 0 {
+			return nil, false
+		}
+		locals = append(locals, local)
+	}
+	if pos != len(data) {
+		return nil, false
+	}
+	return locals, true
 }
 
 func encodeIndexes(indexes []IndexExpr, tokenLimit int, declLimit int, funcLimit int) ([]byte, bool) {
@@ -1815,6 +1972,10 @@ func validSpan(tokenLimit int, start int, end int) bool {
 
 func validTextSpan(textLimit int, start int, end int) bool {
 	return start >= 0 && end >= start && end <= textLimit
+}
+
+func validLocalKind(kind int) bool {
+	return kind == TokenConst || kind == TokenVar || kind == TokenType
 }
 
 func validToken(tokenLimit int, tok int) bool {

@@ -145,6 +145,7 @@ type Numbers []int
 var Values = []int{1, 2}
 
 func Value(i int) int {
+	var typed Numbers = Values
 	out := Values[i]
 	return out
 }
@@ -181,6 +182,20 @@ func Value(i int) int {
 	}
 	if !foundNumberElemRef {
 		t.Fatalf("linked Numbers int type ref not found in %#v", program.TypeRefs)
+	}
+	foundTypedLocal := false
+	for i := 0; i < len(program.Locals); i++ {
+		local := program.Locals[i]
+		if local.FuncIndex == valueFn &&
+			local.Kind == unit.TokenVar &&
+			linkedText(program, local.NameStart, local.NameEnd) == "typed" &&
+			linkedSpanText(program, local.TypeStart, local.TypeEnd) == "Numbers" &&
+			linkedSpanText(program, local.ValueStart, local.ValueEnd) == "Values" {
+			foundTypedLocal = true
+		}
+	}
+	if !foundTypedLocal {
+		t.Fatalf("linked typed local not found in %#v", program.Locals)
 	}
 	if len(program.Composites) != 1 {
 		t.Fatalf("linked composites = %#v, want 1", program.Composites)

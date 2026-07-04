@@ -28,6 +28,7 @@ const (
 	TagSels     = uint16(17)
 	TagTypes    = uint16(18)
 	TagTypeRefs = uint16(19)
+	TagLocals   = uint16(20)
 )
 
 const (
@@ -259,6 +260,22 @@ type TypeRef struct {
 	Symbol     int
 }
 
+type LocalDecl struct {
+	FuncIndex  int
+	Kind       int
+	NameStart  int
+	NameEnd    int
+	Token      int
+	Scope      int
+	ValueIndex int
+	TypeStart  int
+	TypeEnd    int
+	ValueStart int
+	ValueEnd   int
+	Values     []ExprSpan
+	Alias      bool
+}
+
 type Program struct {
 	Package    string
 	Text       []byte
@@ -267,6 +284,7 @@ type Program struct {
 	Funcs      []Func
 	Types      []TypeInfo
 	TypeRefs   []TypeRef
+	Locals     []LocalDecl
 	Indexes    []IndexExpr
 	Composites []CompositeExpr
 	Assigns    []Assignment
@@ -332,6 +350,7 @@ func Marshal(program Program) ([]byte, error) {
 		NewNode(TagFuncs, encodeFuncs(program.Funcs)),
 		NewNode(TagTypes, encodeTypes(program.Types)),
 		NewNode(TagTypeRefs, encodeTypeRefs(program.TypeRefs)),
+		NewNode(TagLocals, encodeLocals(program.Locals)),
 		NewNode(TagIndexes, encodeIndexes(program.Indexes)),
 		NewNode(TagComps, encodeComposites(program.Composites)),
 		NewNode(TagAssigns, encodeAssignments(program.Assigns)),
@@ -378,6 +397,7 @@ func Unmarshal(data []byte) (Program, error) {
 	var tokenData []byte
 	var typeData []byte
 	var typeRefData []byte
+	var localData []byte
 	var indexData []byte
 	var compData []byte
 	var assignData []byte
@@ -387,6 +407,7 @@ func Unmarshal(data []byte) (Program, error) {
 	var selectorData []byte
 	seenTypes := false
 	seenTypeRefs := false
+	seenLocals := false
 	seenIndexes := false
 	seenComps := false
 	seenAssigns := false
@@ -438,6 +459,12 @@ func Unmarshal(data []byte) (Program, error) {
 			}
 			seenTypeRefs = true
 			typeRefData = payload
+		case TagLocals:
+			if seenLocals {
+				return program, fmt.Errorf("duplicate local table")
+			}
+			seenLocals = true
+			localData = payload
 		case TagIndexes:
 			if seenIndexes {
 				return program, fmt.Errorf("duplicate index table")
@@ -509,6 +536,13 @@ func Unmarshal(data []byte) (Program, error) {
 			return program, err
 		}
 		program.TypeRefs = typeRefs
+	}
+	if seenLocals {
+		locals, err := decodeLocals(localData)
+		if err != nil {
+			return program, err
+		}
+		program.Locals = locals
 	}
 	if seenIndexes {
 		indexes, err := decodeIndexes(indexData)
@@ -1416,6 +1450,29 @@ func encodeTypeRefs(refs []TypeRef) []byte {
 	return out
 }
 
+func encodeLocals(locals []LocalDecl) []byte {
+	var out []byte
+	out = appendVarint(out, len(locals))
+	for _, local := range locals {
+		out = appendVarint(out, local.FuncIndex)
+		out = appendVarint(out, local.Kind)
+		out = appendVarint(out, local.NameStart)
+		out = appendVarint(out, local.NameEnd-local.NameStart)
+		out = appendVarint(out, local.Token)
+		out = appendNullable(out, local.Scope)
+		out = appendVarint(out, local.ValueIndex)
+		if local.Alias {
+			out = appendVarint(out, 1)
+		} else {
+			out = appendVarint(out, 0)
+		}
+		out = appendNullableSpan(out, local.TypeStart, local.TypeEnd)
+		out = appendNullableSpan(out, local.ValueStart, local.ValueEnd)
+		out = appendSpanList(out, local.Values)
+	}
+	return out
+}
+
 func encodeIndexes(indexes []IndexExpr) []byte {
 	var out []byte
 	out = appendVarint(out, len(indexes))
@@ -1814,6 +1871,92 @@ func decodeTypeRefs(data []byte) ([]TypeRef, error) {
 		return nil, fmt.Errorf("trailing type ref data")
 	}
 	return refs, nil
+}
+
+func decodeLocals(data []byte) ([]LocalDecl, error) {
+	pos := 0
+	count, next, ok := readVarint(data, pos)
+	if !ok {
+		return nil, fmt.Errorf("invalid local count")
+	}
+	pos = next
+	locals := make([]LocalDecl, 0, count)
+	for i := 0; i < count; i++ {
+		funcIndex, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid local %d func", i)
+		}
+		pos = n
+		kind, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid local %d kind", i)
+		}
+		pos = n
+		nameStart, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid local %d name", i)
+		}
+		pos = n
+		nameSize, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid local %d name size", i)
+		}
+		pos = n
+		token, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid local %d token", i)
+		}
+		pos = n
+		scope, n, ok := readNullable(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid local %d scope", i)
+		}
+		pos = n
+		valueIndex, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid local %d value index", i)
+		}
+		pos = n
+		aliasValue, n, ok := readVarint(data, pos)
+		if !ok || aliasValue > 1 {
+			return nil, fmt.Errorf("invalid local %d alias", i)
+		}
+		pos = n
+		typeStart, typeEnd, n, ok := readNullableSpan(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid local %d type span", i)
+		}
+		pos = n
+		valueStart, valueEnd, n, ok := readNullableSpan(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid local %d value span", i)
+		}
+		pos = n
+		values, n, ok := readSpanList(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid local %d values", i)
+		}
+		pos = n
+		locals = append(locals, LocalDecl{
+			FuncIndex:  funcIndex,
+			Kind:       kind,
+			NameStart:  nameStart,
+			NameEnd:    nameStart + nameSize,
+			Token:      token,
+			Scope:      scope,
+			ValueIndex: valueIndex,
+			TypeStart:  typeStart,
+			TypeEnd:    typeEnd,
+			ValueStart: valueStart,
+			ValueEnd:   valueEnd,
+			Values:     values,
+			Alias:      aliasValue == 1,
+		})
+	}
+	if pos != len(data) {
+		return nil, fmt.Errorf("trailing local data")
+	}
+	return locals, nil
 }
 
 func decodeIndexes(data []byte) ([]IndexExpr, error) {

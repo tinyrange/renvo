@@ -82,6 +82,10 @@ var values = []int{1, 2}
 
 func appMain() int { return values[0] }
 `))
+	localNameTok := 20
+	localNamePos := localNameTok * tokenStride
+	localNameStart := readTokenStart(program.Tokens, localNamePos)
+	localNameSize := int(program.Tokens[localNamePos+4]) | int(program.Tokens[localNamePos+5])<<8
 	program.Types = []TypeInfo{{
 		NameStart: program.Decls[0].NameStart,
 		NameEnd:   program.Decls[0].NameEnd,
@@ -107,6 +111,20 @@ func appMain() int { return values[0] }
 		DotTok:     len(program.Tokens)/tokenStride - 1,
 		Package:    -1,
 		Symbol:     -1,
+	}}
+	program.Locals = []LocalDecl{{
+		FuncIndex:  0,
+		Kind:       rtgTokVar,
+		NameStart:  localNameStart,
+		NameEnd:    localNameStart + localNameSize,
+		Token:      localNameTok,
+		Scope:      -1,
+		ValueIndex: 0,
+		TypeStart:  -1,
+		TypeEnd:    -1,
+		ValueStart: localNameTok,
+		ValueEnd:   localNameTok + 1,
+		Values:     []ExprSpan{{StartTok: localNameTok, EndTok: localNameTok + 1}},
 	}}
 	program.Indexes = []IndexExpr{{
 		OwnerKind:  OwnerFunc,
@@ -198,6 +216,9 @@ func appMain() int { return values[0] }
 	}
 	if len(decoded.TypeRefs) != 1 || decoded.TypeRefs[0] != program.TypeRefs[0] {
 		t.Fatalf("decoded type refs = %#v, want %#v", decoded.TypeRefs, program.TypeRefs)
+	}
+	if len(decoded.Locals) != 1 || decoded.Locals[0].Kind != rtgTokVar || decoded.Locals[0].Values[0] != program.Locals[0].Values[0] {
+		t.Fatalf("decoded locals = %#v, want %#v", decoded.Locals, program.Locals)
 	}
 	if len(decoded.Composites) != 1 || len(decoded.Composites[0].Elems) != 2 {
 		t.Fatalf("decoded composites = %#v, want %#v", decoded.Composites, program.Composites)

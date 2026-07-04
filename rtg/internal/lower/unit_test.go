@@ -196,6 +196,9 @@ func appMain() int {
 	if len(result.Program.TypeRefs) == 0 {
 		t.Fatalf("type refs = %#v, want refs", result.Program.TypeRefs)
 	}
+	if len(result.Program.Locals) != 2 {
+		t.Fatalf("locals = %#v, want 2", result.Program.Locals)
+	}
 	if len(result.Program.Refs) == 0 {
 		t.Fatalf("refs = %#v, want refs", result.Program.Refs)
 	}
@@ -218,6 +221,8 @@ func appMain() int {
 	assertUnitTypeRef(t, result.Program, unit.OwnerDecl, item, unit.TypeRefBuiltin, "", "int")
 	assertUnitTypeRef(t, result.Program, unit.OwnerFunc, choose, unit.TypeRefBuiltin, "", "int")
 	assertUnitTypeRef(t, result.Program, unit.OwnerFunc, appMain, unit.TypeRefPackage, "", "item")
+	assertUnitLocal(t, result.Program, appMain, unit.TokenVar, "typed", "item", "", nil, false)
+	assertUnitLocal(t, result.Program, appMain, unit.TokenVar, "local", "", "[]item{{value: global[0]}}", []string{"[]item{{value: global[0]}}"}, false)
 	assertUnitIndex(t, result.Program, unit.OwnerFunc, appMain, "global", "0")
 	assertUnitIndex(t, result.Program, unit.OwnerFunc, appMain, "local", "0")
 	assertUnitAssign(t, result.Program, appMain, unit.AssignSet, "local[0]", "item{value: picked}")
@@ -249,6 +254,9 @@ func appMain() int {
 	}
 	if len(decoded.TypeRefs) != len(result.Program.TypeRefs) {
 		t.Fatalf("decoded type refs = %d, want %d", len(decoded.TypeRefs), len(result.Program.TypeRefs))
+	}
+	if len(decoded.Locals) != len(result.Program.Locals) {
+		t.Fatalf("decoded locals = %d, want %d", len(decoded.Locals), len(result.Program.Locals))
 	}
 	if len(decoded.Refs) != len(result.Program.Refs) || len(decoded.Selectors) != len(result.Program.Selectors) {
 		t.Fatalf("decoded resolution = %d/%d, want %d/%d", len(decoded.Refs), len(decoded.Selectors), len(result.Program.Refs), len(result.Program.Selectors))
@@ -496,6 +504,32 @@ func assertUnitTypeRef(t *testing.T, program unit.Program, ownerKind int, ownerI
 		}
 	}
 	t.Fatalf("type ref owner=%d/%d kind=%d %s.%s not found in %#v", ownerKind, ownerIndex, kind, base, name, program.TypeRefs)
+}
+
+func assertUnitLocal(t *testing.T, program unit.Program, funcIndex int, kind int, name string, typ string, value string, values []string, alias bool) {
+	t.Helper()
+	for i := 0; i < len(program.Locals); i++ {
+		local := program.Locals[i]
+		if local.FuncIndex != funcIndex || local.Kind != kind || unitText(program, local.NameStart, local.NameEnd) != name || local.Alias != alias {
+			continue
+		}
+		if unitSpanText(program, local.TypeStart, local.TypeEnd) != typ {
+			t.Fatalf("local %s type = %q, want %q", name, unitSpanText(program, local.TypeStart, local.TypeEnd), typ)
+		}
+		if unitSpanText(program, local.ValueStart, local.ValueEnd) != value {
+			t.Fatalf("local %s value = %q, want %q", name, unitSpanText(program, local.ValueStart, local.ValueEnd), value)
+		}
+		if len(local.Values) != len(values) {
+			t.Fatalf("local %s values = %#v, want %v", name, local.Values, values)
+		}
+		for j := 0; j < len(values); j++ {
+			if got := unitSpanText(program, local.Values[j].StartTok, local.Values[j].EndTok); got != values[j] {
+				t.Fatalf("local %s value %d = %q, want %q", name, j, got, values[j])
+			}
+		}
+		return
+	}
+	t.Fatalf("local func=%d kind=%d name=%s not found in %#v", funcIndex, kind, name, program.Locals)
 }
 
 func assertUnitAssign(t *testing.T, program unit.Program, funcIndex int, kind int, left string, right string) {

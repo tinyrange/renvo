@@ -354,6 +354,9 @@ func (b *unitBuilder) addCheckedFuncs(info check.PackageInfo, files []fileTokens
 			return false
 		}
 		ownerIndex := len(b.program.Funcs) - 1
+		if !b.addBodyLocals(body, files[body.File].oldToNew, ownerIndex) {
+			return false
+		}
 		if !b.addBodyShapes(body, files[body.File].oldToNew, ownerIndex) {
 			return false
 		}
@@ -369,6 +372,23 @@ func (b *unitBuilder) addCheckedFuncs(info check.PackageInfo, files []fileTokens
 		if !b.addBodyTypeRefs(body, files[body.File].oldToNew, ownerIndex) {
 			return false
 		}
+	}
+	return true
+}
+
+func (b *unitBuilder) addBodyLocals(body check.FuncBody, oldToNew []int, funcIndex int) bool {
+	for i := 0; i < len(body.Locals); i++ {
+		local := body.Locals[i]
+		if local.File != body.File {
+			b.setErr(EmitErrCheck, body.File, body.Body.ErrorTok)
+			return false
+		}
+		mapped, ok := b.mapLocalDecl(local, oldToNew, funcIndex)
+		if !ok {
+			b.setErr(EmitErrCheck, body.File, local.Token)
+			return false
+		}
+		b.program.Locals = append(b.program.Locals, mapped)
 	}
 	return true
 }
@@ -511,6 +531,52 @@ func (b *unitBuilder) addBodyTypeRefs(body check.FuncBody, oldToNew []int, owner
 		b.program.TypeRefs = append(b.program.TypeRefs, ref)
 	}
 	return true
+}
+
+func (b *unitBuilder) mapLocalDecl(local check.LocalDeclInfo, oldToNew []int, funcIndex int) (unit.LocalDecl, bool) {
+	kind, ok := unitDeclKindFromSymbol(local.Kind)
+	if !ok {
+		return unit.LocalDecl{}, false
+	}
+	nameTok := mapToken(oldToNew, local.Token, b.finalEOF)
+	if nameTok < 0 || nameTok >= len(b.program.Tokens) {
+		return unit.LocalDecl{}, false
+	}
+	typeStart, typeEnd, ok := mapNullableTokenSpan(local.TypeStart, local.TypeEnd, oldToNew, b.finalEOF)
+	if !ok {
+		return unit.LocalDecl{}, false
+	}
+	valueStart, valueEnd, ok := mapNullableTokenSpan(local.ValueStart, local.ValueEnd, oldToNew, b.finalEOF)
+	if !ok {
+		return unit.LocalDecl{}, false
+	}
+	out := unit.LocalDecl{
+		FuncIndex:  funcIndex,
+		Kind:       kind,
+		Token:      nameTok,
+		Scope:      local.Scope,
+		ValueIndex: local.ValueIndex,
+		TypeStart:  typeStart,
+		TypeEnd:    typeEnd,
+		ValueStart: valueStart,
+		ValueEnd:   valueEnd,
+		Values:     make([]unit.ExprSpan, 0, len(local.Values)),
+		Alias:      local.Alias,
+	}
+	name := b.program.Tokens[nameTok]
+	out.NameStart = name.Start
+	out.NameEnd = name.Start + name.Size
+	if funcIndex < 0 || out.Scope < -1 || out.ValueIndex < 0 {
+		return out, false
+	}
+	for i := 0; i < len(local.Values); i++ {
+		span, ok := mapExprSpan(local.Values[i], oldToNew, b.finalEOF)
+		if !ok {
+			return out, false
+		}
+		out.Values = append(out.Values, span)
+	}
+	return out, true
 }
 
 func (b *unitBuilder) mapTypeInfo(typ check.TypeInfo, oldToNew []int) (unit.TypeInfo, bool) {
@@ -936,6 +1002,19 @@ func unitDeclKind(kind int) (int, bool) {
 		return unit.TokenVar, true
 	}
 	if kind == syntax.TokenType {
+		return unit.TokenType, true
+	}
+	return 0, false
+}
+
+func unitDeclKindFromSymbol(kind int) (int, bool) {
+	if kind == check.SymbolConst {
+		return unit.TokenConst, true
+	}
+	if kind == check.SymbolVar {
+		return unit.TokenVar, true
+	}
+	if kind == check.SymbolType {
 		return unit.TokenType, true
 	}
 	return 0, false

@@ -114,6 +114,20 @@ func TestMarshalRoundTripExpressionShapes(t *testing.T) {
 		Package:    -1,
 		Symbol:     -1,
 	}}
+	program.Locals = []LocalDecl{{
+		FuncIndex:  0,
+		Kind:       TokenVar,
+		NameStart:  program.Tokens[13].Start,
+		NameEnd:    program.Tokens[13].Start + program.Tokens[13].Size,
+		Token:      13,
+		Scope:      -1,
+		ValueIndex: 0,
+		TypeStart:  -1,
+		TypeEnd:    -1,
+		ValueStart: 13,
+		ValueEnd:   14,
+		Values:     []ExprSpan{{StartTok: 13, EndTok: 14}},
+	}}
 	program.Indexes = []IndexExpr{{
 		OwnerKind:  OwnerFunc,
 		OwnerIndex: 0,
@@ -391,6 +405,7 @@ func equalPrograms(left Program, right Program) bool {
 	if len(left.Tokens) != len(right.Tokens) || len(left.Decls) != len(right.Decls) || len(left.Funcs) != len(right.Funcs) ||
 		len(left.Types) != len(right.Types) ||
 		len(left.TypeRefs) != len(right.TypeRefs) ||
+		len(left.Locals) != len(right.Locals) ||
 		len(left.Indexes) != len(right.Indexes) || len(left.Composites) != len(right.Composites) ||
 		len(left.Assigns) != len(right.Assigns) || len(left.Returns) != len(right.Returns) || len(left.Calls) != len(right.Calls) ||
 		len(left.Refs) != len(right.Refs) || len(left.Selectors) != len(right.Selectors) {
@@ -419,6 +434,28 @@ func equalPrograms(left Program, right Program) bool {
 	for i := 0; i < len(left.TypeRefs); i++ {
 		if left.TypeRefs[i] != right.TypeRefs[i] {
 			return false
+		}
+	}
+	for i := 0; i < len(left.Locals); i++ {
+		if left.Locals[i].FuncIndex != right.Locals[i].FuncIndex ||
+			left.Locals[i].Kind != right.Locals[i].Kind ||
+			left.Locals[i].NameStart != right.Locals[i].NameStart ||
+			left.Locals[i].NameEnd != right.Locals[i].NameEnd ||
+			left.Locals[i].Token != right.Locals[i].Token ||
+			left.Locals[i].Scope != right.Locals[i].Scope ||
+			left.Locals[i].ValueIndex != right.Locals[i].ValueIndex ||
+			left.Locals[i].TypeStart != right.Locals[i].TypeStart ||
+			left.Locals[i].TypeEnd != right.Locals[i].TypeEnd ||
+			left.Locals[i].ValueStart != right.Locals[i].ValueStart ||
+			left.Locals[i].ValueEnd != right.Locals[i].ValueEnd ||
+			left.Locals[i].Alias != right.Locals[i].Alias ||
+			len(left.Locals[i].Values) != len(right.Locals[i].Values) {
+			return false
+		}
+		for j := 0; j < len(left.Locals[i].Values); j++ {
+			if left.Locals[i].Values[j] != right.Locals[i].Values[j] {
+				return false
+			}
 		}
 	}
 	for i := 0; i < len(left.Indexes); i++ {
