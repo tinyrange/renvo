@@ -39,6 +39,7 @@ type PackageInfo struct {
 	Imports []Import
 	Decls   []DeclInfo
 	Types   []TypeInfo
+	Methods []MethodInfo
 	Bodies  []FuncBody
 }
 
@@ -219,6 +220,7 @@ func checkPackage(graph load.Graph, pkgIndex int) (PackageInfo, bool, int, int, 
 			info.Bodies = append(info.Bodies, FuncBody{Name: name, Kind: kind, File: fileIndex, Func: i, Signature: signature, Body: body, Scope: scope, Refs: refs})
 		}
 	}
+	buildMethodSets(&info, pkg)
 	return info, true, CheckOK, -1, -1
 }
 

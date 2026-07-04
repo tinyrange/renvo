@@ -275,6 +275,36 @@ type face interface { Value() int }
 	assertStructUnnamedField(t, file, item.Fields, "*Pointer")
 }
 
+func TestCheckGraphMethodSets(t *testing.T) {
+	graph := testGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+type item struct { value int }
+type other struct{}
+
+func (it item) Value() int { return it.value }
+func (it *item) Set(value int) { it.value = value }
+func (o other) Value() int { return 0 }
+`)},
+	})
+	prog := CheckGraph(graph)
+	if !prog.Ok {
+		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
+	}
+	root := prog.Packages[0]
+	assertMethod(t, root, "item", "Value", false)
+	assertMethod(t, root, "item", "Set", true)
+	assertMethod(t, root, "other", "Value", false)
+	itemIndex := LookupType(root, "item")
+	if itemIndex < 0 {
+		t.Fatalf("item type not found: %#v", root.Types)
+	}
+	itemMethods := root.Types[itemIndex].Methods
+	if len(itemMethods) != 2 {
+		t.Fatalf("item methods = %#v, want 2 methods in %#v", itemMethods, root.Methods)
+	}
+}
+
 func TestCheckGraphFunctionReferences(t *testing.T) {
 	graph := testGraph(t, []load.SourceFile{
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
@@ -604,6 +634,27 @@ func assertStructUnnamedField(t *testing.T, file syntax.File, fields []Field, ty
 		}
 	}
 	t.Fatalf("unnamed field type %q not found in %#v", typ, fields)
+}
+
+func assertMethod(t *testing.T, info PackageInfo, receiver string, name string, pointer bool) {
+	t.Helper()
+	index := LookupMethod(info, receiver, name)
+	if index < 0 {
+		t.Fatalf("method %s.%s not found in %#v", receiver, name, info.Methods)
+	}
+	method := info.Methods[index]
+	if method.Pointer != pointer {
+		t.Fatalf("method %s.%s pointer = %v, want %v", receiver, name, method.Pointer, pointer)
+	}
+	if method.Type < 0 || method.Type >= len(info.Types) || info.Types[method.Type].Name != receiver {
+		t.Fatalf("method %s.%s type = %d in %#v", receiver, name, method.Type, info.Types)
+	}
+	if method.Symbol < 0 || method.Symbol >= len(info.Symbols) || info.Symbols[method.Symbol].Name != receiver+"."+name {
+		t.Fatalf("method %s.%s symbol = %d in %#v", receiver, name, method.Symbol, info.Symbols)
+	}
+	if method.Body < 0 || method.Body >= len(info.Bodies) || info.Bodies[method.Body].Name != receiver+"."+name {
+		t.Fatalf("method %s.%s body = %d in %#v", receiver, name, method.Body, info.Bodies)
+	}
 }
 
 func spanText(file syntax.File, startTok int, endTok int) string {

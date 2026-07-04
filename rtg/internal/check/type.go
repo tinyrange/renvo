@@ -25,6 +25,7 @@ type TypeInfo struct {
 	TypeStart int
 	TypeEnd   int
 	Fields    []Field
+	Methods   []int
 }
 
 func LookupType(info PackageInfo, name string) int {
