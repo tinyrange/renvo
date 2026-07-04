@@ -47,6 +47,7 @@ func buildDeclInfo(file syntax.File, fileIndex int, info PackageInfo, decl synta
 	if valueStart >= 0 {
 		out.TypeStart, out.TypeEnd = trimDeclSpan(file, typeStart, valueStart)
 		out.ValueStart, out.ValueEnd = trimDeclSpan(file, valueStart+1, decl.EndTok)
+		out.Values = splitExprList(file, out.ValueStart, out.ValueEnd)
 	} else {
 		out.TypeStart, out.TypeEnd = trimDeclSpan(file, typeStart, decl.EndTok)
 	}
@@ -108,6 +109,7 @@ func appendLocalDeclSpec(decls []LocalDeclInfo, file syntax.File, fileIndex int,
 	} else {
 		typeStart, typeEnd = trimDeclSpan(file, namesEnd, end)
 	}
+	values := splitExprList(file, valueSpanStart, valueSpanEnd)
 	for i := 0; i < len(names); i++ {
 		name := tokenString(file, names[i])
 		if name == "_" {
@@ -123,6 +125,7 @@ func appendLocalDeclSpec(decls []LocalDeclInfo, file syntax.File, fileIndex int,
 			TypeEnd:    typeEnd,
 			ValueStart: valueSpanStart,
 			ValueEnd:   valueSpanEnd,
+			Values:     values,
 		})
 	}
 	return decls

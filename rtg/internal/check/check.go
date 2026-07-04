@@ -71,6 +71,7 @@ type DeclInfo struct {
 	TypeEnd    int
 	ValueStart int
 	ValueEnd   int
+	Values     []ExprSpan
 	Alias      bool
 }
 
@@ -84,6 +85,7 @@ type LocalDeclInfo struct {
 	TypeEnd    int
 	ValueStart int
 	ValueEnd   int
+	Values     []ExprSpan
 	Alias      bool
 }
 

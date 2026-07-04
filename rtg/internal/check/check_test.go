@@ -228,6 +228,12 @@ func later() int { return 4 }
 	assertDeclSpan(t, file, root, "current", SymbolVar, "", "packageValue, later()")
 	assertDeclSpan(t, file, root, "next", SymbolVar, "", "packageValue, later()")
 	assertDeclSpan(t, file, root, "item", SymbolType, "struct { value int }", "")
+	assertDeclValues(t, file, root, "packageValue", []string{"3"})
+	assertDeclValues(t, file, root, "left", []string{"1", "2"})
+	assertDeclValues(t, file, root, "right", []string{"1", "2"})
+	assertDeclValues(t, file, root, "current", []string{"packageValue", "later()"})
+	assertDeclValues(t, file, root, "next", []string{"packageValue", "later()"})
+	assertDeclValues(t, file, root, "item", nil)
 }
 
 func TestCheckGraphLocalDeclarations(t *testing.T) {
@@ -273,6 +279,15 @@ func appMain() int {
 	assertLocalDeclSpan(t, file, body, "groupedA", SymbolVar, "", "left, right", false)
 	assertLocalDeclSpan(t, file, body, "groupedB", SymbolVar, "", "left, right", false)
 	assertLocalDeclSpan(t, file, body, "groupedC", SymbolVar, "string", "", false)
+	assertLocalDeclValues(t, file, body, "named", []string{"1"})
+	assertLocalDeclValues(t, file, body, "typed", []string{"2"})
+	assertLocalDeclValues(t, file, body, "left", []string{"named", "typed"})
+	assertLocalDeclValues(t, file, body, "right", []string{"named", "typed"})
+	assertLocalDeclValues(t, file, body, "empty", nil)
+	assertLocalDeclValues(t, file, body, "alias", nil)
+	assertLocalDeclValues(t, file, body, "groupedA", []string{"left", "right"})
+	assertLocalDeclValues(t, file, body, "groupedB", []string{"left", "right"})
+	assertLocalDeclValues(t, file, body, "groupedC", nil)
 }
 
 func TestCheckGraphTypes(t *testing.T) {
@@ -709,6 +724,15 @@ func assertDeclSpan(t *testing.T, file syntax.File, info PackageInfo, name strin
 	}
 }
 
+func assertDeclValues(t *testing.T, file syntax.File, info PackageInfo, name string, values []string) {
+	t.Helper()
+	index := LookupDecl(info, name)
+	if index < 0 {
+		t.Fatalf("decl %q not found in %#v", name, info.Decls)
+	}
+	assertExprSpans(t, file, info.Decls[index].Values, values)
+}
+
 func assertLocalDeclSpan(t *testing.T, file syntax.File, body FuncBody, name string, kind int, typ string, value string, alias bool) {
 	t.Helper()
 	index := LookupLocalDecl(body, name)
@@ -731,6 +755,15 @@ func assertLocalDeclSpan(t *testing.T, file syntax.File, body FuncBody, name str
 	if got := spanText(file, decl.ValueStart, decl.ValueEnd); got != value {
 		t.Fatalf("local decl %q value = %q, want %q", name, got, value)
 	}
+}
+
+func assertLocalDeclValues(t *testing.T, file syntax.File, body FuncBody, name string, values []string) {
+	t.Helper()
+	index := LookupLocalDecl(body, name)
+	if index < 0 {
+		t.Fatalf("local decl %q not found in %#v", name, body.Locals)
+	}
+	assertExprSpans(t, file, body.Locals[index].Values, values)
 }
 
 func assertType(t *testing.T, file syntax.File, info PackageInfo, name string, kind int, alias bool, typ string) {
