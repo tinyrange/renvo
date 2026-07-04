@@ -22,6 +22,7 @@ const (
 	TagTypes    = 18
 	TagTypeRefs = 19
 	TagLocals   = 20
+	TagSigs     = 21
 )
 
 const (
@@ -75,6 +76,20 @@ type Func struct {
 	BodyStart     int
 	BodyEnd       int
 	EndTok        int
+}
+
+type Field struct {
+	NameTok   int
+	TypeStart int
+	TypeEnd   int
+	Variadic  bool
+}
+
+type FuncSignature struct {
+	FuncIndex int
+	Receiver  []Field
+	Params    []Field
+	Results   []Field
 }
 
 const (
@@ -274,6 +289,7 @@ type Program struct {
 	Tokens     []Token
 	Decls      []Decl
 	Funcs      []Func
+	Signatures []FuncSignature
 	Types      []TypeInfo
 	TypeRefs   []TypeRef
 	Locals     []LocalDecl
@@ -299,6 +315,10 @@ func Marshal(program Program) ([]byte, bool) {
 		return nil, false
 	}
 	funcData, ok := encodeFuncs(program.Funcs)
+	if !ok {
+		return nil, false
+	}
+	sigData, ok := encodeSignatures(program.Signatures, len(program.Tokens), len(program.Funcs))
 	if !ok {
 		return nil, false
 	}
@@ -348,6 +368,7 @@ func Marshal(program Program) ([]byte, bool) {
 	root = appendNode(root, TagTokens, tokenData)
 	root = appendNode(root, TagDecls, declData)
 	root = appendNode(root, TagFuncs, funcData)
+	root = appendNode(root, TagSigs, sigData)
 	root = appendNode(root, TagTypes, typeData)
 	root = appendNode(root, TagTypeRefs, typeRefData)
 	root = appendNode(root, TagLocals, localData)
@@ -389,6 +410,7 @@ func Unmarshal(data []byte) (Program, bool) {
 		return program, false
 	}
 	tokenData := []byte{}
+	sigData := []byte{}
 	typeData := []byte{}
 	typeRefData := []byte{}
 	localData := []byte{}
@@ -404,6 +426,7 @@ func Unmarshal(data []byte) (Program, bool) {
 	seenTokens := false
 	seenDecls := false
 	seenFuncs := false
+	seenSigs := false
 	seenTypes := false
 	seenTypeRefs := false
 	seenLocals := false
@@ -465,6 +488,12 @@ func Unmarshal(data []byte) (Program, bool) {
 				return program, false
 			}
 			program.Funcs = funcs
+		} else if tag == TagSigs {
+			if seenSigs {
+				return program, false
+			}
+			seenSigs = true
+			sigData = payload
 		} else if tag == TagTypes {
 			if seenTypes {
 				return program, false
@@ -541,6 +570,13 @@ func Unmarshal(data []byte) (Program, bool) {
 		return program, false
 	}
 	program.Tokens = tokens
+	if seenSigs {
+		sigs, ok := decodeSignatures(sigData, len(program.Tokens), len(program.Funcs))
+		if !ok {
+			return program, false
+		}
+		program.Signatures = sigs
+	}
 	if seenTypes {
 		types, ok := decodeTypes(typeData, len(program.Text), len(program.Tokens), len(program.Decls))
 		if !ok {
@@ -859,6 +895,67 @@ func decodeFuncs(data []byte) ([]Func, bool) {
 		return nil, false
 	}
 	return funcs, true
+}
+
+func encodeSignatures(signatures []FuncSignature, tokenLimit int, funcLimit int) ([]byte, bool) {
+	out := make([]byte, 0, len(signatures)*10+1)
+	out = appendVarint(out, len(signatures))
+	ok := true
+	for i := 0; i < len(signatures); i++ {
+		sig := signatures[i]
+		if sig.FuncIndex < 0 || sig.FuncIndex >= funcLimit {
+			return nil, false
+		}
+		out = appendVarint(out, sig.FuncIndex)
+		out = appendFields(out, sig.Receiver, tokenLimit, &ok)
+		out = appendFields(out, sig.Params, tokenLimit, &ok)
+		out = appendFields(out, sig.Results, tokenLimit, &ok)
+		if !ok {
+			return nil, false
+		}
+	}
+	return out, true
+}
+
+func decodeSignatures(data []byte, tokenLimit int, funcLimit int) ([]FuncSignature, bool) {
+	pos := 0
+	count, ok := readVarint(data, &pos)
+	if !ok || count < 0 {
+		return nil, false
+	}
+	signatures := make([]FuncSignature, 0, count)
+	for i := 0; i < count; i++ {
+		funcIndex, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		receiver, ok := readFields(data, &pos, tokenLimit)
+		if !ok {
+			return nil, false
+		}
+		params, ok := readFields(data, &pos, tokenLimit)
+		if !ok {
+			return nil, false
+		}
+		results, ok := readFields(data, &pos, tokenLimit)
+		if !ok {
+			return nil, false
+		}
+		sig := FuncSignature{
+			FuncIndex: funcIndex,
+			Receiver:  receiver,
+			Params:    params,
+			Results:   results,
+		}
+		if sig.FuncIndex < 0 || sig.FuncIndex >= funcLimit {
+			return nil, false
+		}
+		signatures = append(signatures, sig)
+	}
+	if pos != len(data) {
+		return nil, false
+	}
+	return signatures, true
 }
 
 func encodeTypes(types []TypeInfo, textLimit int, tokenLimit int, declLimit int) ([]byte, bool) {
@@ -1921,6 +2018,63 @@ func readExprSpans(data []byte, pos *int, tokenLimit int) ([]ExprSpan, bool) {
 		spans = append(spans, span)
 	}
 	return spans, true
+}
+
+func appendFields(out []byte, fields []Field, tokenLimit int, ok *bool) []byte {
+	out = appendVarint(out, len(fields))
+	for i := 0; i < len(fields); i++ {
+		field := fields[i]
+		if !validNullable(field.NameTok) || (field.NameTok >= 0 && !validToken(tokenLimit, field.NameTok)) || !validSpan(tokenLimit, field.TypeStart, field.TypeEnd) {
+			*ok = false
+			return out
+		}
+		out = appendNullable(out, field.NameTok)
+		out = appendVarint(out, field.TypeStart)
+		out = appendVarint(out, field.TypeEnd-field.TypeStart)
+		if field.Variadic {
+			out = appendVarint(out, 1)
+		} else {
+			out = appendVarint(out, 0)
+		}
+	}
+	return out
+}
+
+func readFields(data []byte, pos *int, tokenLimit int) ([]Field, bool) {
+	count, ok := readVarint(data, pos)
+	if !ok || count < 0 {
+		return nil, false
+	}
+	fields := make([]Field, 0, count)
+	for i := 0; i < count; i++ {
+		nameTok, ok := readNullable(data, pos)
+		if !ok {
+			return nil, false
+		}
+		typeStart, ok := readVarint(data, pos)
+		if !ok {
+			return nil, false
+		}
+		typeCount, ok := readVarint(data, pos)
+		if !ok {
+			return nil, false
+		}
+		variadicValue, ok := readVarint(data, pos)
+		if !ok || variadicValue > 1 {
+			return nil, false
+		}
+		field := Field{
+			NameTok:   nameTok,
+			TypeStart: typeStart,
+			TypeEnd:   typeStart + typeCount,
+			Variadic:  variadicValue == 1,
+		}
+		if !validNullable(field.NameTok) || (field.NameTok >= 0 && !validToken(tokenLimit, field.NameTok)) || !validSpan(tokenLimit, field.TypeStart, field.TypeEnd) {
+			return nil, false
+		}
+		fields = append(fields, field)
+	}
+	return fields, true
 }
 
 func appendNullableSpan(out []byte, start int, end int, tokenLimit int, ok *bool) []byte {

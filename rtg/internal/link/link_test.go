@@ -162,6 +162,8 @@ func Value(i int) int {
 	if numbers < 0 || values < 0 || valueFn < 0 || appMain < 0 {
 		t.Fatalf("linked rows missing: decls=%#v funcs=%#v", program.Decls, program.Funcs)
 	}
+	assertLinkedSignature(t, program, valueFn, nil, []string{"i:int"}, []string{":int"})
+	assertLinkedSignature(t, program, appMain, nil, nil, []string{":int"})
 	if len(program.Types) != 1 {
 		t.Fatalf("linked types = %#v, want 1", program.Types)
 	}
@@ -357,4 +359,32 @@ func linkedText(program unit.Program, start int, end int) string {
 		return ""
 	}
 	return string(program.Text[start:end])
+}
+
+func assertLinkedSignature(t *testing.T, program unit.Program, funcIndex int, receiver []string, params []string, results []string) {
+	t.Helper()
+	for i := 0; i < len(program.Signatures); i++ {
+		sig := program.Signatures[i]
+		if sig.FuncIndex != funcIndex {
+			continue
+		}
+		assertLinkedFields(t, program, sig.Receiver, receiver)
+		assertLinkedFields(t, program, sig.Params, params)
+		assertLinkedFields(t, program, sig.Results, results)
+		return
+	}
+	t.Fatalf("linked signature func=%d not found in %#v", funcIndex, program.Signatures)
+}
+
+func assertLinkedFields(t *testing.T, program unit.Program, fields []unit.Field, want []string) {
+	t.Helper()
+	if len(fields) != len(want) {
+		t.Fatalf("linked fields = %#v, want %v", fields, want)
+	}
+	for i := 0; i < len(want); i++ {
+		got := linkedTokenText(program, fields[i].NameTok) + ":" + linkedSpanText(program, fields[i].TypeStart, fields[i].TypeEnd)
+		if got != want[i] {
+			t.Fatalf("linked field %d = %q, want %q in %#v", i, got, want[i], fields)
+		}
+	}
 }

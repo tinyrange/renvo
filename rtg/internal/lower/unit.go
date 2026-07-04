@@ -354,6 +354,9 @@ func (b *unitBuilder) addCheckedFuncs(info check.PackageInfo, files []fileTokens
 			return false
 		}
 		ownerIndex := len(b.program.Funcs) - 1
+		if !b.addBodySignature(body, files[body.File].oldToNew, ownerIndex) {
+			return false
+		}
 		if !b.addBodyLocals(body, files[body.File].oldToNew, ownerIndex) {
 			return false
 		}
@@ -373,6 +376,16 @@ func (b *unitBuilder) addCheckedFuncs(info check.PackageInfo, files []fileTokens
 			return false
 		}
 	}
+	return true
+}
+
+func (b *unitBuilder) addBodySignature(body check.FuncBody, oldToNew []int, funcIndex int) bool {
+	sig, ok := mapSignature(body.Signature, oldToNew, b.finalEOF, funcIndex)
+	if !ok {
+		b.setErr(EmitErrCheck, body.File, body.Body.ErrorTok)
+		return false
+	}
+	b.program.Signatures = append(b.program.Signatures, sig)
 	return true
 }
 
@@ -531,6 +544,42 @@ func (b *unitBuilder) addBodyTypeRefs(body check.FuncBody, oldToNew []int, owner
 		b.program.TypeRefs = append(b.program.TypeRefs, ref)
 	}
 	return true
+}
+
+func mapSignature(sig check.FuncSignature, oldToNew []int, eof int, funcIndex int) (unit.FuncSignature, bool) {
+	out := unit.FuncSignature{FuncIndex: funcIndex}
+	var ok bool
+	out.Receiver, ok = mapFields(sig.Receiver, oldToNew, eof)
+	if !ok {
+		return out, false
+	}
+	out.Params, ok = mapFields(sig.Params, oldToNew, eof)
+	if !ok {
+		return out, false
+	}
+	out.Results, ok = mapFields(sig.Results, oldToNew, eof)
+	if !ok {
+		return out, false
+	}
+	return out, funcIndex >= 0
+}
+
+func mapFields(fields []check.Field, oldToNew []int, eof int) ([]unit.Field, bool) {
+	out := make([]unit.Field, 0, len(fields))
+	for i := 0; i < len(fields); i++ {
+		field := fields[i]
+		mapped := unit.Field{
+			NameTok:   mapNullableToken(field.NameTok, oldToNew, eof),
+			TypeStart: mapToken(oldToNew, field.TypeStart, eof),
+			TypeEnd:   mapToken(oldToNew, field.TypeEnd, eof),
+			Variadic:  field.Variadic,
+		}
+		if mapped.NameTok < -1 || mapped.TypeStart < 0 || mapped.TypeEnd < mapped.TypeStart {
+			return nil, false
+		}
+		out = append(out, mapped)
+	}
+	return out, true
 }
 
 func (b *unitBuilder) mapLocalDecl(local check.LocalDeclInfo, oldToNew []int, funcIndex int) (unit.LocalDecl, bool) {
@@ -1025,6 +1074,13 @@ func mapToken(oldToNew []int, tok int, eof int) int {
 		return eof
 	}
 	return oldToNew[tok]
+}
+
+func mapNullableToken(tok int, oldToNew []int, eof int) int {
+	if tok < 0 {
+		return -1
+	}
+	return mapToken(oldToNew, tok, eof)
 }
 
 func countNewlines(src []byte) int {

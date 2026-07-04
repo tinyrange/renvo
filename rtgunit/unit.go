@@ -29,6 +29,7 @@ const (
 	TagTypes    = uint16(18)
 	TagTypeRefs = uint16(19)
 	TagLocals   = uint16(20)
+	TagSigs     = uint16(21)
 )
 
 const (
@@ -83,6 +84,20 @@ type Func struct {
 	BodyStart     int
 	BodyEnd       int
 	EndTok        int
+}
+
+type Field struct {
+	NameTok   int
+	TypeStart int
+	TypeEnd   int
+	Variadic  bool
+}
+
+type FuncSignature struct {
+	FuncIndex int
+	Receiver  []Field
+	Params    []Field
+	Results   []Field
 }
 
 const (
@@ -282,6 +297,7 @@ type Program struct {
 	Tokens     []byte
 	Decls      []Decl
 	Funcs      []Func
+	Signatures []FuncSignature
 	Types      []TypeInfo
 	TypeRefs   []TypeRef
 	Locals     []LocalDecl
@@ -348,6 +364,7 @@ func Marshal(program Program) ([]byte, error) {
 		NewNode(TagTokens, tokens),
 		NewNode(TagDecls, encodeDecls(program.Decls)),
 		NewNode(TagFuncs, encodeFuncs(program.Funcs)),
+		NewNode(TagSigs, encodeSignatures(program.Signatures)),
 		NewNode(TagTypes, encodeTypes(program.Types)),
 		NewNode(TagTypeRefs, encodeTypeRefs(program.TypeRefs)),
 		NewNode(TagLocals, encodeLocals(program.Locals)),
@@ -395,6 +412,7 @@ func Unmarshal(data []byte) (Program, error) {
 		return program, fmt.Errorf("invalid root length")
 	}
 	var tokenData []byte
+	var sigData []byte
 	var typeData []byte
 	var typeRefData []byte
 	var localData []byte
@@ -405,6 +423,7 @@ func Unmarshal(data []byte) (Program, error) {
 	var callData []byte
 	var refData []byte
 	var selectorData []byte
+	seenSigs := false
 	seenTypes := false
 	seenTypeRefs := false
 	seenLocals := false
@@ -447,6 +466,12 @@ func Unmarshal(data []byte) (Program, error) {
 				return program, err
 			}
 			program.Funcs = funcs
+		case TagSigs:
+			if seenSigs {
+				return program, fmt.Errorf("duplicate signature table")
+			}
+			seenSigs = true
+			sigData = payload
 		case TagTypes:
 			if seenTypes {
 				return program, fmt.Errorf("duplicate type table")
@@ -523,6 +548,13 @@ func Unmarshal(data []byte) (Program, error) {
 		return program, err
 	}
 	program.Tokens = tokens
+	if seenSigs {
+		sigs, err := decodeSignatures(sigData)
+		if err != nil {
+			return program, err
+		}
+		program.Signatures = sigs
+	}
 	if seenTypes {
 		types, err := decodeTypes(typeData)
 		if err != nil {
@@ -1412,6 +1444,18 @@ func encodeFuncs(funcs []Func) []byte {
 	return out
 }
 
+func encodeSignatures(signatures []FuncSignature) []byte {
+	var out []byte
+	out = appendVarint(out, len(signatures))
+	for _, sig := range signatures {
+		out = appendVarint(out, sig.FuncIndex)
+		out = appendFieldList(out, sig.Receiver)
+		out = appendFieldList(out, sig.Params)
+		out = appendFieldList(out, sig.Results)
+	}
+	return out
+}
+
 func encodeTypes(types []TypeInfo) []byte {
 	var out []byte
 	out = appendVarint(out, len(types))
@@ -1602,6 +1646,21 @@ func appendSpanList(out []byte, spans []ExprSpan) []byte {
 	return out
 }
 
+func appendFieldList(out []byte, fields []Field) []byte {
+	out = appendVarint(out, len(fields))
+	for _, field := range fields {
+		out = appendNullable(out, field.NameTok)
+		out = appendVarint(out, field.TypeStart)
+		out = appendVarint(out, field.TypeEnd-field.TypeStart)
+		if field.Variadic {
+			out = appendVarint(out, 1)
+		} else {
+			out = appendVarint(out, 0)
+		}
+	}
+	return out
+}
+
 func appendNullableSpan(out []byte, start int, end int) []byte {
 	if start < 0 && end < 0 {
 		return appendVarint(out, 0)
@@ -1723,6 +1782,48 @@ func decodeFuncs(data []byte) ([]Func, error) {
 		return nil, fmt.Errorf("trailing func data")
 	}
 	return funcs, nil
+}
+
+func decodeSignatures(data []byte) ([]FuncSignature, error) {
+	pos := 0
+	count, next, ok := readVarint(data, pos)
+	if !ok {
+		return nil, fmt.Errorf("invalid signature count")
+	}
+	pos = next
+	signatures := make([]FuncSignature, 0, count)
+	for i := 0; i < count; i++ {
+		funcIndex, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid signature %d func", i)
+		}
+		pos = n
+		receiver, n, ok := readFieldList(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid signature %d receiver", i)
+		}
+		pos = n
+		params, n, ok := readFieldList(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid signature %d params", i)
+		}
+		pos = n
+		results, n, ok := readFieldList(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid signature %d results", i)
+		}
+		pos = n
+		signatures = append(signatures, FuncSignature{
+			FuncIndex: funcIndex,
+			Receiver:  receiver,
+			Params:    params,
+			Results:   results,
+		})
+	}
+	if pos != len(data) {
+		return nil, fmt.Errorf("trailing signature data")
+	}
+	return signatures, nil
 }
 
 func decodeTypes(data []byte) ([]TypeInfo, error) {
@@ -2480,6 +2581,44 @@ func readSpanList(data []byte, pos int) ([]ExprSpan, int, bool) {
 		spans = append(spans, ExprSpan{StartTok: startTok, EndTok: startTok + tokCount})
 	}
 	return spans, pos, true
+}
+
+func readFieldList(data []byte, pos int) ([]Field, int, bool) {
+	count, n, ok := readVarint(data, pos)
+	if !ok {
+		return nil, pos, false
+	}
+	pos = n
+	fields := make([]Field, 0, count)
+	for i := 0; i < count; i++ {
+		nameTok, n, ok := readNullable(data, pos)
+		if !ok {
+			return nil, pos, false
+		}
+		pos = n
+		typeStart, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, pos, false
+		}
+		pos = n
+		typeCount, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, pos, false
+		}
+		pos = n
+		variadicValue, n, ok := readVarint(data, pos)
+		if !ok || variadicValue > 1 {
+			return nil, pos, false
+		}
+		pos = n
+		fields = append(fields, Field{
+			NameTok:   nameTok,
+			TypeStart: typeStart,
+			TypeEnd:   typeStart + typeCount,
+			Variadic:  variadicValue == 1,
+		})
+	}
+	return fields, pos, true
 }
 
 func readNullableSpan(data []byte, pos int) (int, int, int, bool) {

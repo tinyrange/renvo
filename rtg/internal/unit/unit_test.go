@@ -89,6 +89,10 @@ func TestMarshalRoundTripInternalDecoder(t *testing.T) {
 
 func TestMarshalRoundTripExpressionShapes(t *testing.T) {
 	program := declProgram()
+	program.Signatures = []FuncSignature{{
+		FuncIndex: 0,
+		Results:   []Field{{NameTok: -1, TypeStart: 10, TypeEnd: 11}},
+	}}
 	program.Types = []TypeInfo{{
 		NameStart: program.Decls[0].NameStart,
 		NameEnd:   program.Decls[0].NameEnd,
@@ -403,6 +407,7 @@ func equalPrograms(left Program, right Program) bool {
 		return false
 	}
 	if len(left.Tokens) != len(right.Tokens) || len(left.Decls) != len(right.Decls) || len(left.Funcs) != len(right.Funcs) ||
+		len(left.Signatures) != len(right.Signatures) ||
 		len(left.Types) != len(right.Types) ||
 		len(left.TypeRefs) != len(right.TypeRefs) ||
 		len(left.Locals) != len(right.Locals) ||
@@ -423,6 +428,11 @@ func equalPrograms(left Program, right Program) bool {
 	}
 	for i := 0; i < len(left.Funcs); i++ {
 		if left.Funcs[i] != right.Funcs[i] {
+			return false
+		}
+	}
+	for i := 0; i < len(left.Signatures); i++ {
+		if !equalSignature(left.Signatures[i], right.Signatures[i]) {
 			return false
 		}
 	}
@@ -544,6 +554,31 @@ func equalPrograms(left Program, right Program) bool {
 	}
 	for i := 0; i < len(left.Selectors); i++ {
 		if left.Selectors[i] != right.Selectors[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func equalSignature(left FuncSignature, right FuncSignature) bool {
+	if left.FuncIndex != right.FuncIndex ||
+		len(left.Receiver) != len(right.Receiver) ||
+		len(left.Params) != len(right.Params) ||
+		len(left.Results) != len(right.Results) {
+		return false
+	}
+	for i := 0; i < len(left.Receiver); i++ {
+		if left.Receiver[i] != right.Receiver[i] {
+			return false
+		}
+	}
+	for i := 0; i < len(left.Params); i++ {
+		if left.Params[i] != right.Params[i] {
+			return false
+		}
+	}
+	for i := 0; i < len(left.Results); i++ {
+		if left.Results[i] != right.Results[i] {
 			return false
 		}
 	}

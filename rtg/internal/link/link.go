@@ -138,6 +138,13 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		fn.EndTok = mapToken(oldToNew, fn.EndTok, finalEOF)
 		dst.Funcs = append(dst.Funcs, fn)
 	}
+	for i := 0; i < len(src.Signatures); i++ {
+		sig, ok := mapSignature(src.Signatures[i], oldToNew, finalEOF, funcOffset)
+		if !ok {
+			return false
+		}
+		dst.Signatures = append(dst.Signatures, sig)
+	}
 	for i := 0; i < len(src.Types); i++ {
 		typ, ok := mapType(src.Types[i], oldToNew, finalEOF, textOffset, declOffset)
 		if !ok {
@@ -212,6 +219,39 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		dst.Text = append(dst.Text, '\n')
 	}
 	return true
+}
+
+func mapSignature(sig unit.FuncSignature, oldToNew []int, eof int, funcOffset int) (unit.FuncSignature, bool) {
+	if sig.FuncIndex < 0 {
+		return sig, false
+	}
+	sig.FuncIndex += funcOffset
+	var ok bool
+	sig.Receiver, ok = mapFields(sig.Receiver, oldToNew, eof)
+	if !ok {
+		return sig, false
+	}
+	sig.Params, ok = mapFields(sig.Params, oldToNew, eof)
+	if !ok {
+		return sig, false
+	}
+	sig.Results, ok = mapFields(sig.Results, oldToNew, eof)
+	if !ok {
+		return sig, false
+	}
+	return sig, true
+}
+
+func mapFields(fields []unit.Field, oldToNew []int, eof int) ([]unit.Field, bool) {
+	for i := 0; i < len(fields); i++ {
+		fields[i].NameTok = mapNullableToken(fields[i].NameTok, oldToNew, eof)
+		fields[i].TypeStart = mapToken(oldToNew, fields[i].TypeStart, eof)
+		fields[i].TypeEnd = mapToken(oldToNew, fields[i].TypeEnd, eof)
+		if fields[i].NameTok < -1 || fields[i].TypeStart < 0 || fields[i].TypeEnd < fields[i].TypeStart {
+			return fields, false
+		}
+	}
+	return fields, true
 }
 
 func mapType(typ unit.TypeInfo, oldToNew []int, eof int, textOffset int, declOffset int) (unit.TypeInfo, bool) {
@@ -448,6 +488,13 @@ func mapToken(oldToNew []int, tok int, eof int) int {
 		return eof
 	}
 	return oldToNew[tok]
+}
+
+func mapNullableToken(tok int, oldToNew []int, eof int) int {
+	if tok < 0 {
+		return -1
+	}
+	return mapToken(oldToNew, tok, eof)
 }
 
 func countNewlines(text []byte) int {

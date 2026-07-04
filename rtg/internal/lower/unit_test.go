@@ -193,6 +193,9 @@ func appMain() int {
 	if len(result.Program.Types) != 1 {
 		t.Fatalf("types = %#v, want 1", result.Program.Types)
 	}
+	if len(result.Program.Signatures) != len(result.Program.Funcs) {
+		t.Fatalf("signatures = %#v, want %d", result.Program.Signatures, len(result.Program.Funcs))
+	}
 	if len(result.Program.TypeRefs) == 0 {
 		t.Fatalf("type refs = %#v, want refs", result.Program.TypeRefs)
 	}
@@ -211,6 +214,8 @@ func appMain() int {
 		t.Fatalf("unit rows missing: decls=%#v funcs=%#v", result.Program.Decls, result.Program.Funcs)
 	}
 	assertUnitType(t, result.Program, "item", unit.TypeStruct, item, "struct { value int }", "", "", "")
+	assertUnitSignature(t, result.Program, choose, nil, []string{"v:int"}, []string{":int"})
+	assertUnitSignature(t, result.Program, appMain, nil, nil, []string{":int"})
 	assertUnitComposite(t, result.Program, unit.OwnerDecl, global, "[]int", []string{"1", "2", "3"})
 	assertUnitIndex(t, result.Program, unit.OwnerDecl, picked, "global", "1")
 	assertUnitCall(t, result.Program, unit.OwnerDecl, picked, unit.CallPackage, "", "choose", []string{"global[1]"})
@@ -251,6 +256,9 @@ func appMain() int {
 	}
 	if len(decoded.Types) != len(result.Program.Types) {
 		t.Fatalf("decoded types = %d, want %d", len(decoded.Types), len(result.Program.Types))
+	}
+	if len(decoded.Signatures) != len(result.Program.Signatures) {
+		t.Fatalf("decoded signatures = %d, want %d", len(decoded.Signatures), len(result.Program.Signatures))
 	}
 	if len(decoded.TypeRefs) != len(result.Program.TypeRefs) {
 		t.Fatalf("decoded type refs = %d, want %d", len(decoded.TypeRefs), len(result.Program.TypeRefs))
@@ -492,6 +500,34 @@ func assertUnitType(t *testing.T, program unit.Program, name string, kind int, d
 		return
 	}
 	t.Fatalf("type name=%s kind=%d decl=%d not found in %#v", name, kind, decl, program.Types)
+}
+
+func assertUnitSignature(t *testing.T, program unit.Program, funcIndex int, receiver []string, params []string, results []string) {
+	t.Helper()
+	for i := 0; i < len(program.Signatures); i++ {
+		sig := program.Signatures[i]
+		if sig.FuncIndex != funcIndex {
+			continue
+		}
+		assertUnitFields(t, program, sig.Receiver, receiver)
+		assertUnitFields(t, program, sig.Params, params)
+		assertUnitFields(t, program, sig.Results, results)
+		return
+	}
+	t.Fatalf("signature func=%d not found in %#v", funcIndex, program.Signatures)
+}
+
+func assertUnitFields(t *testing.T, program unit.Program, fields []unit.Field, want []string) {
+	t.Helper()
+	if len(fields) != len(want) {
+		t.Fatalf("fields = %#v, want %v", fields, want)
+	}
+	for i := 0; i < len(want); i++ {
+		got := tokenTextUnit(program, fields[i].NameTok) + ":" + unitSpanText(program, fields[i].TypeStart, fields[i].TypeEnd)
+		if got != want[i] {
+			t.Fatalf("field %d = %q, want %q in %#v", i, got, want[i], fields)
+		}
+	}
 }
 
 func assertUnitTypeRef(t *testing.T, program unit.Program, ownerKind int, ownerIndex int, kind int, base string, name string) {
