@@ -171,6 +171,17 @@ func Value(i int) int {
 		linkedSpanText(program, typ.ElemStart, typ.ElemEnd) != "int" {
 		t.Fatalf("linked type = %#v, decl %d", typ, numbers)
 	}
+	foundNumberElemRef := false
+	for i := 0; i < len(program.TypeRefs); i++ {
+		ref := program.TypeRefs[i]
+		if ref.OwnerKind == unit.OwnerDecl && ref.OwnerIndex == numbers &&
+			ref.Kind == unit.TypeRefBuiltin && linkedTokenText(program, ref.Token) == "int" {
+			foundNumberElemRef = true
+		}
+	}
+	if !foundNumberElemRef {
+		t.Fatalf("linked Numbers int type ref not found in %#v", program.TypeRefs)
+	}
 	if len(program.Composites) != 1 {
 		t.Fatalf("linked composites = %#v, want 1", program.Composites)
 	}

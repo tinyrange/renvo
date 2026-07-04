@@ -98,6 +98,16 @@ func appMain() int { return values[0] }
 		ElemStart: 6,
 		ElemEnd:   7,
 	}}
+	program.TypeRefs = []TypeRef{{
+		OwnerKind:  OwnerDecl,
+		OwnerIndex: 0,
+		Kind:       TypeRefBuiltin,
+		Token:      6,
+		BaseTok:    len(program.Tokens)/tokenStride - 1,
+		DotTok:     len(program.Tokens)/tokenStride - 1,
+		Package:    -1,
+		Symbol:     -1,
+	}}
 	program.Indexes = []IndexExpr{{
 		OwnerKind:  OwnerFunc,
 		OwnerIndex: 0,
@@ -185,6 +195,9 @@ func appMain() int { return values[0] }
 	}
 	if len(decoded.Types) != 1 || decoded.Types[0] != program.Types[0] {
 		t.Fatalf("decoded types = %#v, want %#v", decoded.Types, program.Types)
+	}
+	if len(decoded.TypeRefs) != 1 || decoded.TypeRefs[0] != program.TypeRefs[0] {
+		t.Fatalf("decoded type refs = %#v, want %#v", decoded.TypeRefs, program.TypeRefs)
 	}
 	if len(decoded.Composites) != 1 || len(decoded.Composites[0].Elems) != 2 {
 		t.Fatalf("decoded composites = %#v, want %#v", decoded.Composites, program.Composites)

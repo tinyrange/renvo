@@ -145,6 +145,13 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		}
 		dst.Types = append(dst.Types, typ)
 	}
+	for i := 0; i < len(src.TypeRefs); i++ {
+		ref, ok := mapTypeRef(src.TypeRefs[i], oldToNew, finalEOF, declOffset, funcOffset)
+		if !ok {
+			return false
+		}
+		dst.TypeRefs = append(dst.TypeRefs, ref)
+	}
 	for i := 0; i < len(src.Indexes); i++ {
 		index, ok := mapIndex(src.Indexes[i], oldToNew, finalEOF, declOffset, funcOffset)
 		if !ok {
@@ -225,6 +232,18 @@ func mapType(typ unit.TypeInfo, oldToNew []int, eof int, textOffset int, declOff
 		return typ, false
 	}
 	return typ, true
+}
+
+func mapTypeRef(ref unit.TypeRef, oldToNew []int, eof int, declOffset int, funcOffset int) (unit.TypeRef, bool) {
+	ownerIndex, ok := mapOwner(ref.OwnerKind, ref.OwnerIndex, declOffset, funcOffset)
+	if !ok {
+		return ref, false
+	}
+	ref.OwnerIndex = ownerIndex
+	ref.Token = mapToken(oldToNew, ref.Token, eof)
+	ref.BaseTok = mapToken(oldToNew, ref.BaseTok, eof)
+	ref.DotTok = mapToken(oldToNew, ref.DotTok, eof)
+	return ref, true
 }
 
 func mapIndex(index unit.IndexExpr, oldToNew []int, eof int, declOffset int, funcOffset int) (unit.IndexExpr, bool) {

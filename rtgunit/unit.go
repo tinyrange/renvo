@@ -13,20 +13,21 @@ const (
 )
 
 const (
-	TagUnit    = uint16(1)
-	TagPackage = uint16(2)
-	TagText    = uint16(7)
-	TagTokens  = uint16(8)
-	TagDecls   = uint16(9)
-	TagFuncs   = uint16(10)
-	TagIndexes = uint16(11)
-	TagComps   = uint16(12)
-	TagAssigns = uint16(13)
-	TagReturns = uint16(14)
-	TagCalls   = uint16(15)
-	TagRefs    = uint16(16)
-	TagSels    = uint16(17)
-	TagTypes   = uint16(18)
+	TagUnit     = uint16(1)
+	TagPackage  = uint16(2)
+	TagText     = uint16(7)
+	TagTokens   = uint16(8)
+	TagDecls    = uint16(9)
+	TagFuncs    = uint16(10)
+	TagIndexes  = uint16(11)
+	TagComps    = uint16(12)
+	TagAssigns  = uint16(13)
+	TagReturns  = uint16(14)
+	TagCalls    = uint16(15)
+	TagRefs     = uint16(16)
+	TagSels     = uint16(17)
+	TagTypes    = uint16(18)
+	TagTypeRefs = uint16(19)
 )
 
 const (
@@ -239,6 +240,25 @@ type Selector struct {
 	Symbol      int
 }
 
+const (
+	TypeRefUnknown = iota
+	TypeRefScope
+	TypeRefPackage
+	TypeRefImportSelector
+	TypeRefBuiltin
+)
+
+type TypeRef struct {
+	OwnerKind  int
+	OwnerIndex int
+	Kind       int
+	Token      int
+	BaseTok    int
+	DotTok     int
+	Package    int
+	Symbol     int
+}
+
 type Program struct {
 	Package    string
 	Text       []byte
@@ -246,6 +266,7 @@ type Program struct {
 	Decls      []Decl
 	Funcs      []Func
 	Types      []TypeInfo
+	TypeRefs   []TypeRef
 	Indexes    []IndexExpr
 	Composites []CompositeExpr
 	Assigns    []Assignment
@@ -310,6 +331,7 @@ func Marshal(program Program) ([]byte, error) {
 		NewNode(TagDecls, encodeDecls(program.Decls)),
 		NewNode(TagFuncs, encodeFuncs(program.Funcs)),
 		NewNode(TagTypes, encodeTypes(program.Types)),
+		NewNode(TagTypeRefs, encodeTypeRefs(program.TypeRefs)),
 		NewNode(TagIndexes, encodeIndexes(program.Indexes)),
 		NewNode(TagComps, encodeComposites(program.Composites)),
 		NewNode(TagAssigns, encodeAssignments(program.Assigns)),
@@ -355,6 +377,7 @@ func Unmarshal(data []byte) (Program, error) {
 	}
 	var tokenData []byte
 	var typeData []byte
+	var typeRefData []byte
 	var indexData []byte
 	var compData []byte
 	var assignData []byte
@@ -363,6 +386,7 @@ func Unmarshal(data []byte) (Program, error) {
 	var refData []byte
 	var selectorData []byte
 	seenTypes := false
+	seenTypeRefs := false
 	seenIndexes := false
 	seenComps := false
 	seenAssigns := false
@@ -408,6 +432,12 @@ func Unmarshal(data []byte) (Program, error) {
 			}
 			seenTypes = true
 			typeData = payload
+		case TagTypeRefs:
+			if seenTypeRefs {
+				return program, fmt.Errorf("duplicate type ref table")
+			}
+			seenTypeRefs = true
+			typeRefData = payload
 		case TagIndexes:
 			if seenIndexes {
 				return program, fmt.Errorf("duplicate index table")
@@ -472,6 +502,13 @@ func Unmarshal(data []byte) (Program, error) {
 			return program, err
 		}
 		program.Types = types
+	}
+	if seenTypeRefs {
+		typeRefs, err := decodeTypeRefs(typeRefData)
+		if err != nil {
+			return program, err
+		}
+		program.TypeRefs = typeRefs
 	}
 	if seenIndexes {
 		indexes, err := decodeIndexes(indexData)
@@ -1363,6 +1400,22 @@ func encodeTypes(types []TypeInfo) []byte {
 	return out
 }
 
+func encodeTypeRefs(refs []TypeRef) []byte {
+	var out []byte
+	out = appendVarint(out, len(refs))
+	for _, ref := range refs {
+		out = appendVarint(out, ref.OwnerKind)
+		out = appendVarint(out, ref.OwnerIndex)
+		out = appendVarint(out, ref.Kind)
+		out = appendVarint(out, ref.Token)
+		out = appendVarint(out, ref.BaseTok)
+		out = appendVarint(out, ref.DotTok)
+		out = appendNullable(out, ref.Package)
+		out = appendNullable(out, ref.Symbol)
+	}
+	return out
+}
+
 func encodeIndexes(indexes []IndexExpr) []byte {
 	var out []byte
 	out = appendVarint(out, len(indexes))
@@ -1695,6 +1748,72 @@ func decodeTypes(data []byte) ([]TypeInfo, error) {
 		return nil, fmt.Errorf("trailing type data")
 	}
 	return types, nil
+}
+
+func decodeTypeRefs(data []byte) ([]TypeRef, error) {
+	pos := 0
+	count, next, ok := readVarint(data, pos)
+	if !ok {
+		return nil, fmt.Errorf("invalid type ref count")
+	}
+	pos = next
+	refs := make([]TypeRef, 0, count)
+	for i := 0; i < count; i++ {
+		ownerKind, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid type ref %d owner kind", i)
+		}
+		pos = n
+		ownerIndex, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid type ref %d owner index", i)
+		}
+		pos = n
+		kind, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid type ref %d kind", i)
+		}
+		pos = n
+		token, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid type ref %d token", i)
+		}
+		pos = n
+		baseTok, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid type ref %d base", i)
+		}
+		pos = n
+		dotTok, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid type ref %d dot", i)
+		}
+		pos = n
+		pkg, n, ok := readNullable(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid type ref %d package", i)
+		}
+		pos = n
+		symbol, n, ok := readNullable(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid type ref %d symbol", i)
+		}
+		pos = n
+		refs = append(refs, TypeRef{
+			OwnerKind:  ownerKind,
+			OwnerIndex: ownerIndex,
+			Kind:       kind,
+			Token:      token,
+			BaseTok:    baseTok,
+			DotTok:     dotTok,
+			Package:    pkg,
+			Symbol:     symbol,
+		})
+	}
+	if pos != len(data) {
+		return nil, fmt.Errorf("trailing type ref data")
+	}
+	return refs, nil
 }
 
 func decodeIndexes(data []byte) ([]IndexExpr, error) {

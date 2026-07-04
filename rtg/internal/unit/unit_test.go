@@ -104,6 +104,16 @@ func TestMarshalRoundTripExpressionShapes(t *testing.T) {
 		ElemStart: -1,
 		ElemEnd:   -1,
 	}}
+	program.TypeRefs = []TypeRef{{
+		OwnerKind:  OwnerDecl,
+		OwnerIndex: 0,
+		Kind:       TypeRefBuiltin,
+		Token:      5,
+		BaseTok:    len(program.Tokens) - 1,
+		DotTok:     len(program.Tokens) - 1,
+		Package:    -1,
+		Symbol:     -1,
+	}}
 	program.Indexes = []IndexExpr{{
 		OwnerKind:  OwnerFunc,
 		OwnerIndex: 0,
@@ -380,6 +390,7 @@ func equalPrograms(left Program, right Program) bool {
 	}
 	if len(left.Tokens) != len(right.Tokens) || len(left.Decls) != len(right.Decls) || len(left.Funcs) != len(right.Funcs) ||
 		len(left.Types) != len(right.Types) ||
+		len(left.TypeRefs) != len(right.TypeRefs) ||
 		len(left.Indexes) != len(right.Indexes) || len(left.Composites) != len(right.Composites) ||
 		len(left.Assigns) != len(right.Assigns) || len(left.Returns) != len(right.Returns) || len(left.Calls) != len(right.Calls) ||
 		len(left.Refs) != len(right.Refs) || len(left.Selectors) != len(right.Selectors) {
@@ -402,6 +413,11 @@ func equalPrograms(left Program, right Program) bool {
 	}
 	for i := 0; i < len(left.Types); i++ {
 		if left.Types[i] != right.Types[i] {
+			return false
+		}
+	}
+	for i := 0; i < len(left.TypeRefs); i++ {
+		if left.TypeRefs[i] != right.TypeRefs[i] {
 			return false
 		}
 	}

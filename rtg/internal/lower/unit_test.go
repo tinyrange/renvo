@@ -160,6 +160,7 @@ var picked = choose(global[1])
 func choose(v int) int { return v }
 
 func appMain() int {
+	var typed item
 	var local = []item{{value: global[0]}}
 	local[0] = item{value: picked}
 	return choose(local[0].value)
@@ -192,6 +193,9 @@ func appMain() int {
 	if len(result.Program.Types) != 1 {
 		t.Fatalf("types = %#v, want 1", result.Program.Types)
 	}
+	if len(result.Program.TypeRefs) == 0 {
+		t.Fatalf("type refs = %#v, want refs", result.Program.TypeRefs)
+	}
 	if len(result.Program.Refs) == 0 {
 		t.Fatalf("refs = %#v, want refs", result.Program.Refs)
 	}
@@ -211,6 +215,9 @@ func appMain() int {
 	assertUnitRef(t, result.Program, unit.OwnerDecl, picked, unit.RefPackage, "global")
 	assertUnitComposite(t, result.Program, unit.OwnerFunc, appMain, "[]item", []string{"{value: global[0]}"})
 	assertUnitComposite(t, result.Program, unit.OwnerFunc, appMain, "item", []string{"value: picked"})
+	assertUnitTypeRef(t, result.Program, unit.OwnerDecl, item, unit.TypeRefBuiltin, "", "int")
+	assertUnitTypeRef(t, result.Program, unit.OwnerFunc, choose, unit.TypeRefBuiltin, "", "int")
+	assertUnitTypeRef(t, result.Program, unit.OwnerFunc, appMain, unit.TypeRefPackage, "", "item")
 	assertUnitIndex(t, result.Program, unit.OwnerFunc, appMain, "global", "0")
 	assertUnitIndex(t, result.Program, unit.OwnerFunc, appMain, "local", "0")
 	assertUnitAssign(t, result.Program, appMain, unit.AssignSet, "local[0]", "item{value: picked}")
@@ -239,6 +246,9 @@ func appMain() int {
 	}
 	if len(decoded.Types) != len(result.Program.Types) {
 		t.Fatalf("decoded types = %d, want %d", len(decoded.Types), len(result.Program.Types))
+	}
+	if len(decoded.TypeRefs) != len(result.Program.TypeRefs) {
+		t.Fatalf("decoded type refs = %d, want %d", len(decoded.TypeRefs), len(result.Program.TypeRefs))
 	}
 	if len(decoded.Refs) != len(result.Program.Refs) || len(decoded.Selectors) != len(result.Program.Selectors) {
 		t.Fatalf("decoded resolution = %d/%d, want %d/%d", len(decoded.Refs), len(decoded.Selectors), len(result.Program.Refs), len(result.Program.Selectors))
@@ -474,6 +484,18 @@ func assertUnitType(t *testing.T, program unit.Program, name string, kind int, d
 		return
 	}
 	t.Fatalf("type name=%s kind=%d decl=%d not found in %#v", name, kind, decl, program.Types)
+}
+
+func assertUnitTypeRef(t *testing.T, program unit.Program, ownerKind int, ownerIndex int, kind int, base string, name string) {
+	t.Helper()
+	for i := 0; i < len(program.TypeRefs); i++ {
+		ref := program.TypeRefs[i]
+		if ref.OwnerKind == ownerKind && ref.OwnerIndex == ownerIndex && ref.Kind == kind &&
+			tokenTextUnit(program, ref.BaseTok) == base && tokenTextUnit(program, ref.Token) == name {
+			return
+		}
+	}
+	t.Fatalf("type ref owner=%d/%d kind=%d %s.%s not found in %#v", ownerKind, ownerIndex, kind, base, name, program.TypeRefs)
 }
 
 func assertUnitAssign(t *testing.T, program unit.Program, funcIndex int, kind int, left string, right string) {

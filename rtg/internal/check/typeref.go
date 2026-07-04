@@ -17,6 +17,8 @@ type TypeRef struct {
 	Kind      int
 	Name      string
 	BaseName  string
+	File      int
+	OwnerDecl int
 	Token     int
 	BaseToken int
 	DotToken  int
@@ -47,35 +49,37 @@ func buildPackageTypeRefs(pkg load.Package, info PackageInfo, checked []PackageI
 		if decl.Kind == SymbolType {
 			typeIndex := LookupType(info, decl.Name)
 			if typeIndex >= 0 {
-				refs = appendTypeInfoRefs(refs, pkg, info, checked, info.Types[typeIndex])
+				refs = appendTypeInfoRefs(refs, pkg, info, checked, info.Types[typeIndex], i)
 				continue
 			}
 		}
-		refs = appendTypeSpanRefs(refs, file, decl.File, info, checked, FuncScope{}, decl.TypeStart, decl.TypeEnd)
+		refs = appendDeclTypeSpanRefs(refs, file, decl.File, info, checked, FuncScope{}, i, decl.TypeStart, decl.TypeEnd)
 	}
 	return refs
 }
 
-func appendTypeInfoRefs(refs []TypeRef, pkg load.Package, info PackageInfo, checked []PackageInfo, typ TypeInfo) []TypeRef {
+func appendTypeInfoRefs(refs []TypeRef, pkg load.Package, info PackageInfo, checked []PackageInfo, typ TypeInfo, ownerDecl int) []TypeRef {
 	file := pkg.Files[typ.File].File
 	if typ.Kind == TypeStruct {
 		for i := 0; i < len(typ.Fields); i++ {
 			field := typ.Fields[i]
-			refs = appendTypeSpanRefs(refs, file, typ.File, info, checked, FuncScope{}, field.TypeStart, field.TypeEnd)
+			refs = appendDeclTypeSpanRefs(refs, file, typ.File, info, checked, FuncScope{}, ownerDecl, field.TypeStart, field.TypeEnd)
 		}
 		return refs
 	}
 	if typ.Kind == TypeInterface {
 		for i := 0; i < len(typ.InterfaceEmbeds); i++ {
 			embed := typ.InterfaceEmbeds[i]
-			refs = appendTypeSpanRefs(refs, file, typ.File, info, checked, FuncScope{}, embed.TypeStart, embed.TypeEnd)
+			refs = appendDeclTypeSpanRefs(refs, file, typ.File, info, checked, FuncScope{}, ownerDecl, embed.TypeStart, embed.TypeEnd)
 		}
 		for i := 0; i < len(typ.InterfaceMethods); i++ {
+			base := len(refs)
 			refs = appendSignatureTypeRefs(refs, file, typ.File, info, checked, FuncScope{}, typ.InterfaceMethods[i].Signature)
+			markTypeRefOwnerDecl(refs, base, ownerDecl)
 		}
 		return refs
 	}
-	return appendTypeSpanRefs(refs, file, typ.File, info, checked, FuncScope{}, typ.TypeStart, typ.TypeEnd)
+	return appendDeclTypeSpanRefs(refs, file, typ.File, info, checked, FuncScope{}, ownerDecl, typ.TypeStart, typ.TypeEnd)
 }
 
 func buildFuncTypeRefs(file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, signature FuncSignature, locals []LocalDeclInfo, scope FuncScope) []TypeRef {
@@ -106,6 +110,19 @@ func appendSignatureTypeRefs(refs []TypeRef, file syntax.File, fileIndex int, in
 	return refs
 }
 
+func appendDeclTypeSpanRefs(refs []TypeRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, ownerDecl int, start int, end int) []TypeRef {
+	base := len(refs)
+	refs = appendTypeSpanRefs(refs, file, fileIndex, info, checked, scope, start, end)
+	markTypeRefOwnerDecl(refs, base, ownerDecl)
+	return refs
+}
+
+func markTypeRefOwnerDecl(refs []TypeRef, start int, ownerDecl int) {
+	for i := start; i < len(refs); i++ {
+		refs[i].OwnerDecl = ownerDecl
+	}
+}
+
 func appendTypeSpanRefs(refs []TypeRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, start int, end int) []TypeRef {
 	for i := start; i < end && i < len(file.Tokens); i++ {
 		if file.Tokens[i].Kind != syntax.TokenIdent {
@@ -133,6 +150,8 @@ func resolveDirectTypeRef(fileIndex int, info PackageInfo, scope FuncScope, name
 	out := TypeRef{
 		Kind:      TypeRefUnknown,
 		Name:      name,
+		File:      fileIndex,
+		OwnerDecl: -1,
 		Token:     tok,
 		BaseToken: -1,
 		DotToken:  -1,
@@ -158,6 +177,8 @@ func resolveSelectorTypeRef(fileIndex int, info PackageInfo, checked []PackageIn
 		Kind:      TypeRefUnknown,
 		Name:      name,
 		BaseName:  base,
+		File:      fileIndex,
+		OwnerDecl: -1,
 		Token:     nameTok,
 		BaseToken: baseTok,
 		DotToken:  dotTok,

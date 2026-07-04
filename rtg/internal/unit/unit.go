@@ -6,20 +6,21 @@ const (
 )
 
 const (
-	TagUnit    = 1
-	TagPackage = 2
-	TagText    = 7
-	TagTokens  = 8
-	TagDecls   = 9
-	TagFuncs   = 10
-	TagIndexes = 11
-	TagComps   = 12
-	TagAssigns = 13
-	TagReturns = 14
-	TagCalls   = 15
-	TagRefs    = 16
-	TagSels    = 17
-	TagTypes   = 18
+	TagUnit     = 1
+	TagPackage  = 2
+	TagText     = 7
+	TagTokens   = 8
+	TagDecls    = 9
+	TagFuncs    = 10
+	TagIndexes  = 11
+	TagComps    = 12
+	TagAssigns  = 13
+	TagReturns  = 14
+	TagCalls    = 15
+	TagRefs     = 16
+	TagSels     = 17
+	TagTypes    = 18
+	TagTypeRefs = 19
 )
 
 const (
@@ -231,6 +232,25 @@ type Selector struct {
 	Symbol      int
 }
 
+const (
+	TypeRefUnknown = iota
+	TypeRefScope
+	TypeRefPackage
+	TypeRefImportSelector
+	TypeRefBuiltin
+)
+
+type TypeRef struct {
+	OwnerKind  int
+	OwnerIndex int
+	Kind       int
+	Token      int
+	BaseTok    int
+	DotTok     int
+	Package    int
+	Symbol     int
+}
+
 type Program struct {
 	Package    string
 	Text       []byte
@@ -238,6 +258,7 @@ type Program struct {
 	Decls      []Decl
 	Funcs      []Func
 	Types      []TypeInfo
+	TypeRefs   []TypeRef
 	Indexes    []IndexExpr
 	Composites []CompositeExpr
 	Assigns    []Assignment
@@ -264,6 +285,10 @@ func Marshal(program Program) ([]byte, bool) {
 		return nil, false
 	}
 	typeData, ok := encodeTypes(program.Types, len(program.Text), len(program.Tokens), len(program.Decls))
+	if !ok {
+		return nil, false
+	}
+	typeRefData, ok := encodeTypeRefs(program.TypeRefs, len(program.Tokens), len(program.Decls), len(program.Funcs))
 	if !ok {
 		return nil, false
 	}
@@ -302,6 +327,7 @@ func Marshal(program Program) ([]byte, bool) {
 	root = appendNode(root, TagDecls, declData)
 	root = appendNode(root, TagFuncs, funcData)
 	root = appendNode(root, TagTypes, typeData)
+	root = appendNode(root, TagTypeRefs, typeRefData)
 	root = appendNode(root, TagIndexes, indexData)
 	root = appendNode(root, TagComps, compData)
 	root = appendNode(root, TagAssigns, assignData)
@@ -341,6 +367,7 @@ func Unmarshal(data []byte) (Program, bool) {
 	}
 	tokenData := []byte{}
 	typeData := []byte{}
+	typeRefData := []byte{}
 	indexData := []byte{}
 	compData := []byte{}
 	assignData := []byte{}
@@ -354,6 +381,7 @@ func Unmarshal(data []byte) (Program, bool) {
 	seenDecls := false
 	seenFuncs := false
 	seenTypes := false
+	seenTypeRefs := false
 	seenIndexes := false
 	seenComps := false
 	seenAssigns := false
@@ -418,6 +446,12 @@ func Unmarshal(data []byte) (Program, bool) {
 			}
 			seenTypes = true
 			typeData = payload
+		} else if tag == TagTypeRefs {
+			if seenTypeRefs {
+				return program, false
+			}
+			seenTypeRefs = true
+			typeRefData = payload
 		} else if tag == TagIndexes {
 			if seenIndexes {
 				return program, false
@@ -482,6 +516,13 @@ func Unmarshal(data []byte) (Program, bool) {
 			return program, false
 		}
 		program.Types = types
+	}
+	if seenTypeRefs {
+		typeRefs, ok := decodeTypeRefs(typeRefData, len(program.Tokens), len(program.Decls), len(program.Funcs))
+		if !ok {
+			return program, false
+		}
+		program.TypeRefs = typeRefs
 	}
 	if seenIndexes {
 		indexes, ok := decodeIndexes(indexData, len(program.Tokens), len(program.Decls), len(program.Funcs))
@@ -891,6 +932,99 @@ func decodeTypes(data []byte, textLimit int, tokenLimit int, declLimit int) ([]T
 		return nil, false
 	}
 	return types, true
+}
+
+func encodeTypeRefs(refs []TypeRef, tokenLimit int, declLimit int, funcLimit int) ([]byte, bool) {
+	out := make([]byte, 0, len(refs)*9+1)
+	out = appendVarint(out, len(refs))
+	for i := 0; i < len(refs); i++ {
+		ref := refs[i]
+		if !validOwner(ref.OwnerKind, ref.OwnerIndex, declLimit, funcLimit) ||
+			ref.Kind < TypeRefUnknown || ref.Kind > TypeRefBuiltin ||
+			!validToken(tokenLimit, ref.Token) ||
+			!validToken(tokenLimit, ref.BaseTok) ||
+			!validToken(tokenLimit, ref.DotTok) ||
+			!validNullable(ref.Package) ||
+			!validNullable(ref.Symbol) {
+			return nil, false
+		}
+		out = appendVarint(out, ref.OwnerKind)
+		out = appendVarint(out, ref.OwnerIndex)
+		out = appendVarint(out, ref.Kind)
+		out = appendVarint(out, ref.Token)
+		out = appendVarint(out, ref.BaseTok)
+		out = appendVarint(out, ref.DotTok)
+		out = appendNullable(out, ref.Package)
+		out = appendNullable(out, ref.Symbol)
+	}
+	return out, true
+}
+
+func decodeTypeRefs(data []byte, tokenLimit int, declLimit int, funcLimit int) ([]TypeRef, bool) {
+	pos := 0
+	count, ok := readVarint(data, &pos)
+	if !ok || count < 0 {
+		return nil, false
+	}
+	refs := make([]TypeRef, 0, count)
+	for i := 0; i < count; i++ {
+		ownerKind, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		ownerIndex, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		kind, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		token, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		baseTok, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		dotTok, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		pkg, ok := readNullable(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		symbol, ok := readNullable(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		ref := TypeRef{
+			OwnerKind:  ownerKind,
+			OwnerIndex: ownerIndex,
+			Kind:       kind,
+			Token:      token,
+			BaseTok:    baseTok,
+			DotTok:     dotTok,
+			Package:    pkg,
+			Symbol:     symbol,
+		}
+		if !validOwner(ref.OwnerKind, ref.OwnerIndex, declLimit, funcLimit) ||
+			ref.Kind < TypeRefUnknown || ref.Kind > TypeRefBuiltin ||
+			!validToken(tokenLimit, ref.Token) ||
+			!validToken(tokenLimit, ref.BaseTok) ||
+			!validToken(tokenLimit, ref.DotTok) ||
+			!validNullable(ref.Package) ||
+			!validNullable(ref.Symbol) {
+			return nil, false
+		}
+		refs = append(refs, ref)
+	}
+	if pos != len(data) {
+		return nil, false
+	}
+	return refs, true
 }
 
 func encodeIndexes(indexes []IndexExpr, tokenLimit int, declLimit int, funcLimit int) ([]byte, bool) {

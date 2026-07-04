@@ -106,6 +106,9 @@ func EmitCheckedPackage(pkg load.Package, info check.PackageInfo) Result {
 	if !builder.addCheckedTypes(info, files) {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
+	if !builder.addCheckedTypeRefs(info, files) {
+		return emitFail(result, builder.err, builder.errFile, builder.errToken)
+	}
 	if !builder.addCheckedFuncs(info, files) {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
@@ -309,6 +312,27 @@ func (b *unitBuilder) addCheckedTypes(info check.PackageInfo, files []fileTokens
 	return true
 }
 
+func (b *unitBuilder) addCheckedTypeRefs(info check.PackageInfo, files []fileTokens) bool {
+	for i := 0; i < len(info.TypeRefs); i++ {
+		ref := info.TypeRefs[i]
+		if ref.File < 0 || ref.File >= len(files) {
+			b.setErr(EmitErrCheck, -1, ref.Token)
+			return false
+		}
+		if ref.OwnerDecl < 0 || ref.OwnerDecl >= len(b.declRows) || b.declRows[ref.OwnerDecl] < 0 {
+			b.setErr(EmitErrCheck, ref.File, ref.Token)
+			return false
+		}
+		mapped, ok := mapTypeRef(ref, files[ref.File].oldToNew, b.finalEOF, unit.OwnerDecl, b.declRows[ref.OwnerDecl])
+		if !ok {
+			b.setErr(EmitErrCheck, ref.File, ref.Token)
+			return false
+		}
+		b.program.TypeRefs = append(b.program.TypeRefs, mapped)
+	}
+	return true
+}
+
 func (b *unitBuilder) addCheckedFuncs(info check.PackageInfo, files []fileTokens) bool {
 	for i := 0; i < len(info.Bodies); i++ {
 		body := info.Bodies[i]
@@ -340,6 +364,9 @@ func (b *unitBuilder) addCheckedFuncs(info check.PackageInfo, files []fileTokens
 			return false
 		}
 		if !b.addBodyResolution(body, files[body.File].oldToNew, ownerIndex) {
+			return false
+		}
+		if !b.addBodyTypeRefs(body, files[body.File].oldToNew, ownerIndex) {
 			return false
 		}
 	}
@@ -470,6 +497,22 @@ func (b *unitBuilder) addBodyCalls(body check.FuncBody, oldToNew []int, ownerInd
 	return true
 }
 
+func (b *unitBuilder) addBodyTypeRefs(body check.FuncBody, oldToNew []int, ownerIndex int) bool {
+	for i := 0; i < len(body.TypeRefs); i++ {
+		if body.TypeRefs[i].File != body.File {
+			b.setErr(EmitErrCheck, body.File, body.Body.ErrorTok)
+			return false
+		}
+		ref, ok := mapTypeRef(body.TypeRefs[i], oldToNew, b.finalEOF, unit.OwnerFunc, ownerIndex)
+		if !ok {
+			b.setErr(EmitErrCheck, body.File, body.Body.ErrorTok)
+			return false
+		}
+		b.program.TypeRefs = append(b.program.TypeRefs, ref)
+	}
+	return true
+}
+
 func (b *unitBuilder) mapTypeInfo(typ check.TypeInfo, oldToNew []int) (unit.TypeInfo, bool) {
 	kind, ok := unitTypeKind(typ.Kind)
 	if !ok {
@@ -544,6 +587,46 @@ func unitTypeKind(kind int) (int, bool) {
 	}
 	if kind == check.TypeFunc {
 		return unit.TypeFunc, true
+	}
+	return 0, false
+}
+
+func mapTypeRef(ref check.TypeRef, oldToNew []int, eof int, ownerKind int, ownerIndex int) (unit.TypeRef, bool) {
+	kind, ok := unitTypeRefKind(ref.Kind)
+	if !ok {
+		return unit.TypeRef{}, false
+	}
+	out := unit.TypeRef{
+		OwnerKind:  ownerKind,
+		OwnerIndex: ownerIndex,
+		Kind:       kind,
+		Token:      mapToken(oldToNew, ref.Token, eof),
+		BaseTok:    mapToken(oldToNew, ref.BaseToken, eof),
+		DotTok:     mapToken(oldToNew, ref.DotToken, eof),
+		Package:    ref.Package,
+		Symbol:     ref.Symbol,
+	}
+	if ownerIndex < 0 || out.Token < 0 || out.BaseTok < 0 || out.DotTok < 0 || out.Package < -1 || out.Symbol < -1 {
+		return out, false
+	}
+	return out, true
+}
+
+func unitTypeRefKind(kind int) (int, bool) {
+	if kind == check.TypeRefUnknown {
+		return unit.TypeRefUnknown, true
+	}
+	if kind == check.TypeRefScope {
+		return unit.TypeRefScope, true
+	}
+	if kind == check.TypeRefPackage {
+		return unit.TypeRefPackage, true
+	}
+	if kind == check.TypeRefImportSelector {
+		return unit.TypeRefImportSelector, true
+	}
+	if kind == check.TypeRefBuiltin {
+		return unit.TypeRefBuiltin, true
 	}
 	return 0, false
 }
