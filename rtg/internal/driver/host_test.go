@@ -108,6 +108,73 @@ func TestCompileAndWriteReportsCompileFailure(t *testing.T) {
 	}
 }
 
+func TestRunCommandDropsProgramName(t *testing.T) {
+	dir := writeHostCase(t)
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd failed: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir failed: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(oldwd); err != nil {
+			t.Fatalf("restore Chdir failed: %v", err)
+		}
+	}()
+
+	backend := &recordingBackend{binary: []byte("binary")}
+	result := RunCommand([]string{"rtg", "-o", "app", "./cmd/app"}, nil, backend)
+	if !result.Ok {
+		t.Fatalf("RunCommand failed: err=%d compile=%#v", result.Error, result.Compile)
+	}
+	if !backend.called {
+		t.Fatal("backend was not called")
+	}
+	if result.Compile.Build.Options.Package != "./cmd/app" || result.Compile.Build.Options.Output != "app" {
+		t.Fatalf("options = %#v", result.Compile.Build.Options)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "app"))
+	if err != nil {
+		t.Fatalf("failed to read output: %v", err)
+	}
+	if string(data) != "binary" {
+		t.Fatalf("output = %q", string(data))
+	}
+}
+
+func TestCompileAndWriteWithEnvReportsMissingBackend(t *testing.T) {
+	result := CompileAndWriteWithEnv([]string{"-o", "app", "./cmd/app"}, nil, nil)
+	if result.Ok || result.Error != HostErrBackend {
+		t.Fatalf("missing backend result = %#v", result)
+	}
+}
+
+func TestHostEnvHelpers(t *testing.T) {
+	env := []string{
+		"OTHER=value",
+		BackendEnv + "=/tmp/backend",
+		StdRootEnv + "=/tmp/std",
+		BackendEnv + "_EXTRA=ignored",
+	}
+	backend, ok := CommandBackendFromEnv(env)
+	if !ok {
+		t.Fatal("CommandBackendFromEnv failed")
+	}
+	if backend.Path != "/tmp/backend" {
+		t.Fatalf("backend path = %q", backend.Path)
+	}
+	if got := StdRootFromEnv(env); got != "/tmp/std" {
+		t.Fatalf("std root = %q", got)
+	}
+	if got := StdRootFromEnv(nil); got != DefaultStdRoot {
+		t.Fatalf("default std root = %q", got)
+	}
+	if got := EnvValue(env, BackendEnv+"_EXTRA"); got != "ignored" {
+		t.Fatalf("extra env = %q", got)
+	}
+}
+
 func writeHostCase(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
