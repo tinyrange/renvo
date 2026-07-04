@@ -103,6 +103,9 @@ func EmitCheckedPackage(pkg load.Package, info check.PackageInfo) Result {
 	if !builder.addCheckedDecls(info, files) {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
+	if !builder.addCheckedTypes(info, files) {
+		return emitFail(result, builder.err, builder.errFile, builder.errToken)
+	}
 	if !builder.addCheckedFuncs(info, files) {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
@@ -120,6 +123,7 @@ type unitBuilder struct {
 	err        int
 	errFile    int
 	errToken   int
+	declRows   []int
 }
 
 type fileTokens struct {
@@ -247,6 +251,10 @@ func (b *unitBuilder) addCheckedDecls(info check.PackageInfo, files []fileTokens
 		return false
 	}
 	seen := make([]bool, len(info.Decls))
+	b.declRows = make([]int, len(info.Decls))
+	for i := 0; i < len(b.declRows); i++ {
+		b.declRows[i] = -1
+	}
 	for i := 0; i < len(info.DeclOrder); i++ {
 		index := info.DeclOrder[i]
 		if index < 0 || index >= len(info.Decls) || seen[index] {
@@ -270,6 +278,7 @@ func (b *unitBuilder) addCheckedDecls(info check.PackageInfo, files []fileTokens
 			return false
 		}
 		ownerIndex := len(b.program.Decls) - 1
+		b.declRows[index] = ownerIndex
 		if !b.addDeclShapes(declInfo, files[declInfo.File].oldToNew, ownerIndex) {
 			return false
 		}
@@ -279,6 +288,23 @@ func (b *unitBuilder) addCheckedDecls(info check.PackageInfo, files []fileTokens
 		if !b.addDeclResolution(declInfo, files[declInfo.File].oldToNew, ownerIndex) {
 			return false
 		}
+	}
+	return true
+}
+
+func (b *unitBuilder) addCheckedTypes(info check.PackageInfo, files []fileTokens) bool {
+	for i := 0; i < len(info.Types); i++ {
+		typ := info.Types[i]
+		if typ.File < 0 || typ.File >= len(files) {
+			b.setErr(EmitErrCheck, -1, typ.Token)
+			return false
+		}
+		mapped, ok := b.mapTypeInfo(typ, files[typ.File].oldToNew)
+		if !ok {
+			b.setErr(EmitErrCheck, typ.File, typ.Token)
+			return false
+		}
+		b.program.Types = append(b.program.Types, mapped)
 	}
 	return true
 }
@@ -442,6 +468,84 @@ func (b *unitBuilder) addBodyCalls(body check.FuncBody, oldToNew []int, ownerInd
 		b.program.Calls = append(b.program.Calls, call)
 	}
 	return true
+}
+
+func (b *unitBuilder) mapTypeInfo(typ check.TypeInfo, oldToNew []int) (unit.TypeInfo, bool) {
+	kind, ok := unitTypeKind(typ.Kind)
+	if !ok {
+		return unit.TypeInfo{}, false
+	}
+	if typ.Decl < 0 || typ.Decl >= len(b.declRows) || b.declRows[typ.Decl] < 0 {
+		return unit.TypeInfo{}, false
+	}
+	nameTok := mapToken(oldToNew, typ.Token, b.finalEOF)
+	if nameTok < 0 || nameTok >= len(b.program.Tokens) {
+		return unit.TypeInfo{}, false
+	}
+	typeStart, typeEnd, ok := mapNullableTokenSpan(typ.TypeStart, typ.TypeEnd, oldToNew, b.finalEOF)
+	if !ok {
+		return unit.TypeInfo{}, false
+	}
+	lenStart, lenEnd, ok := mapNullableTokenSpan(typ.LenStart, typ.LenEnd, oldToNew, b.finalEOF)
+	if !ok {
+		return unit.TypeInfo{}, false
+	}
+	keyStart, keyEnd, ok := mapNullableTokenSpan(typ.KeyStart, typ.KeyEnd, oldToNew, b.finalEOF)
+	if !ok {
+		return unit.TypeInfo{}, false
+	}
+	elemStart, elemEnd, ok := mapNullableTokenSpan(typ.ElemStart, typ.ElemEnd, oldToNew, b.finalEOF)
+	if !ok {
+		return unit.TypeInfo{}, false
+	}
+	name := b.program.Tokens[nameTok]
+	return unit.TypeInfo{
+		NameStart: name.Start,
+		NameEnd:   name.Start + name.Size,
+		Kind:      kind,
+		Decl:      b.declRows[typ.Decl],
+		Symbol:    typ.Symbol,
+		Alias:     typ.Alias,
+		TypeStart: typeStart,
+		TypeEnd:   typeEnd,
+		LenStart:  lenStart,
+		LenEnd:    lenEnd,
+		KeyStart:  keyStart,
+		KeyEnd:    keyEnd,
+		ElemStart: elemStart,
+		ElemEnd:   elemEnd,
+	}, true
+}
+
+func unitTypeKind(kind int) (int, bool) {
+	if kind == check.TypeOther {
+		return unit.TypeOther, true
+	}
+	if kind == check.TypeNamed {
+		return unit.TypeNamed, true
+	}
+	if kind == check.TypeStruct {
+		return unit.TypeStruct, true
+	}
+	if kind == check.TypeInterface {
+		return unit.TypeInterface, true
+	}
+	if kind == check.TypeMap {
+		return unit.TypeMap, true
+	}
+	if kind == check.TypeSlice {
+		return unit.TypeSlice, true
+	}
+	if kind == check.TypeArray {
+		return unit.TypeArray, true
+	}
+	if kind == check.TypePointer {
+		return unit.TypePointer, true
+	}
+	if kind == check.TypeFunc {
+		return unit.TypeFunc, true
+	}
+	return 0, false
 }
 
 func mapIndexExpr(index check.IndexExpr, oldToNew []int, eof int, ownerKind int, ownerIndex int) (unit.IndexExpr, bool) {
@@ -623,6 +727,21 @@ func mapExprSpan(span check.ExprSpan, oldToNew []int, eof int) (unit.ExprSpan, b
 		return out, false
 	}
 	return out, true
+}
+
+func mapNullableTokenSpan(start int, end int, oldToNew []int, eof int) (int, int, bool) {
+	if start < 0 && end < 0 {
+		return -1, -1, true
+	}
+	if start < 0 || end < start {
+		return 0, 0, false
+	}
+	mappedStart := mapToken(oldToNew, start, eof)
+	mappedEnd := mapToken(oldToNew, end, eof)
+	if mappedStart < 0 || mappedEnd < mappedStart {
+		return 0, 0, false
+	}
+	return mappedStart, mappedEnd, true
 }
 
 func findFileDecl(file syntax.File, nameTok int) syntax.TopDecl {

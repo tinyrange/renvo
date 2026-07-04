@@ -26,6 +26,7 @@ const (
 	TagCalls   = uint16(15)
 	TagRefs    = uint16(16)
 	TagSels    = uint16(17)
+	TagTypes   = uint16(18)
 )
 
 const (
@@ -80,6 +81,35 @@ type Func struct {
 	BodyStart     int
 	BodyEnd       int
 	EndTok        int
+}
+
+const (
+	TypeOther = iota
+	TypeNamed
+	TypeStruct
+	TypeInterface
+	TypeMap
+	TypeSlice
+	TypeArray
+	TypePointer
+	TypeFunc
+)
+
+type TypeInfo struct {
+	NameStart int
+	NameEnd   int
+	Kind      int
+	Decl      int
+	Symbol    int
+	Alias     bool
+	TypeStart int
+	TypeEnd   int
+	LenStart  int
+	LenEnd    int
+	KeyStart  int
+	KeyEnd    int
+	ElemStart int
+	ElemEnd   int
 }
 
 const (
@@ -215,6 +245,7 @@ type Program struct {
 	Tokens     []byte
 	Decls      []Decl
 	Funcs      []Func
+	Types      []TypeInfo
 	Indexes    []IndexExpr
 	Composites []CompositeExpr
 	Assigns    []Assignment
@@ -278,6 +309,7 @@ func Marshal(program Program) ([]byte, error) {
 		NewNode(TagTokens, tokens),
 		NewNode(TagDecls, encodeDecls(program.Decls)),
 		NewNode(TagFuncs, encodeFuncs(program.Funcs)),
+		NewNode(TagTypes, encodeTypes(program.Types)),
 		NewNode(TagIndexes, encodeIndexes(program.Indexes)),
 		NewNode(TagComps, encodeComposites(program.Composites)),
 		NewNode(TagAssigns, encodeAssignments(program.Assigns)),
@@ -322,6 +354,7 @@ func Unmarshal(data []byte) (Program, error) {
 		return program, fmt.Errorf("invalid root length")
 	}
 	var tokenData []byte
+	var typeData []byte
 	var indexData []byte
 	var compData []byte
 	var assignData []byte
@@ -329,6 +362,7 @@ func Unmarshal(data []byte) (Program, error) {
 	var callData []byte
 	var refData []byte
 	var selectorData []byte
+	seenTypes := false
 	seenIndexes := false
 	seenComps := false
 	seenAssigns := false
@@ -368,6 +402,12 @@ func Unmarshal(data []byte) (Program, error) {
 				return program, err
 			}
 			program.Funcs = funcs
+		case TagTypes:
+			if seenTypes {
+				return program, fmt.Errorf("duplicate type table")
+			}
+			seenTypes = true
+			typeData = payload
 		case TagIndexes:
 			if seenIndexes {
 				return program, fmt.Errorf("duplicate index table")
@@ -426,6 +466,13 @@ func Unmarshal(data []byte) (Program, error) {
 		return program, err
 	}
 	program.Tokens = tokens
+	if seenTypes {
+		types, err := decodeTypes(typeData)
+		if err != nil {
+			return program, err
+		}
+		program.Types = types
+	}
 	if seenIndexes {
 		indexes, err := decodeIndexes(indexData)
 		if err != nil {
@@ -1294,6 +1341,28 @@ func encodeFuncs(funcs []Func) []byte {
 	return out
 }
 
+func encodeTypes(types []TypeInfo) []byte {
+	var out []byte
+	out = appendVarint(out, len(types))
+	for _, typ := range types {
+		out = appendVarint(out, typ.Kind)
+		out = appendVarint(out, typ.NameStart)
+		out = appendVarint(out, typ.NameEnd-typ.NameStart)
+		out = appendVarint(out, typ.Decl)
+		out = appendNullable(out, typ.Symbol)
+		if typ.Alias {
+			out = appendVarint(out, 1)
+		} else {
+			out = appendVarint(out, 0)
+		}
+		out = appendNullableSpan(out, typ.TypeStart, typ.TypeEnd)
+		out = appendNullableSpan(out, typ.LenStart, typ.LenEnd)
+		out = appendNullableSpan(out, typ.KeyStart, typ.KeyEnd)
+		out = appendNullableSpan(out, typ.ElemStart, typ.ElemEnd)
+	}
+	return out
+}
+
 func encodeIndexes(indexes []IndexExpr) []byte {
 	var out []byte
 	out = appendVarint(out, len(indexes))
@@ -1423,6 +1492,15 @@ func appendSpanList(out []byte, spans []ExprSpan) []byte {
 	return out
 }
 
+func appendNullableSpan(out []byte, start int, end int) []byte {
+	if start < 0 && end < 0 {
+		return appendVarint(out, 0)
+	}
+	out = appendVarint(out, start+1)
+	out = appendVarint(out, end-start)
+	return out
+}
+
 func decodeDecls(data []byte) ([]Decl, error) {
 	pos := 0
 	count, next, ok := readVarint(data, pos)
@@ -1535,6 +1613,88 @@ func decodeFuncs(data []byte) ([]Func, error) {
 		return nil, fmt.Errorf("trailing func data")
 	}
 	return funcs, nil
+}
+
+func decodeTypes(data []byte) ([]TypeInfo, error) {
+	pos := 0
+	count, next, ok := readVarint(data, pos)
+	if !ok {
+		return nil, fmt.Errorf("invalid type count")
+	}
+	pos = next
+	types := make([]TypeInfo, 0, count)
+	for i := 0; i < count; i++ {
+		kind, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid type %d kind", i)
+		}
+		pos = n
+		nameStart, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid type %d name", i)
+		}
+		pos = n
+		nameSize, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid type %d name size", i)
+		}
+		pos = n
+		decl, n, ok := readVarint(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid type %d decl", i)
+		}
+		pos = n
+		symbol, n, ok := readNullable(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid type %d symbol", i)
+		}
+		pos = n
+		aliasValue, n, ok := readVarint(data, pos)
+		if !ok || aliasValue > 1 {
+			return nil, fmt.Errorf("invalid type %d alias", i)
+		}
+		pos = n
+		typeStart, typeEnd, n, ok := readNullableSpan(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid type %d type span", i)
+		}
+		pos = n
+		lenStart, lenEnd, n, ok := readNullableSpan(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid type %d length span", i)
+		}
+		pos = n
+		keyStart, keyEnd, n, ok := readNullableSpan(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid type %d key span", i)
+		}
+		pos = n
+		elemStart, elemEnd, n, ok := readNullableSpan(data, pos)
+		if !ok {
+			return nil, fmt.Errorf("invalid type %d element span", i)
+		}
+		pos = n
+		types = append(types, TypeInfo{
+			NameStart: nameStart,
+			NameEnd:   nameStart + nameSize,
+			Kind:      kind,
+			Decl:      decl,
+			Symbol:    symbol,
+			Alias:     aliasValue == 1,
+			TypeStart: typeStart,
+			TypeEnd:   typeEnd,
+			LenStart:  lenStart,
+			LenEnd:    lenEnd,
+			KeyStart:  keyStart,
+			KeyEnd:    keyEnd,
+			ElemStart: elemStart,
+			ElemEnd:   elemEnd,
+		})
+	}
+	if pos != len(data) {
+		return nil, fmt.Errorf("trailing type data")
+	}
+	return types, nil
 }
 
 func decodeIndexes(data []byte) ([]IndexExpr, error) {
@@ -2058,6 +2218,23 @@ func readSpanList(data []byte, pos int) ([]ExprSpan, int, bool) {
 		spans = append(spans, ExprSpan{StartTok: startTok, EndTok: startTok + tokCount})
 	}
 	return spans, pos, true
+}
+
+func readNullableSpan(data []byte, pos int) (int, int, int, bool) {
+	encodedStart, next, ok := readVarint(data, pos)
+	if !ok {
+		return 0, 0, pos, false
+	}
+	pos = next
+	if encodedStart == 0 {
+		return -1, -1, pos, true
+	}
+	count, next, ok := readVarint(data, pos)
+	if !ok {
+		return 0, 0, pos, false
+	}
+	start := encodedStart - 1
+	return start, start + count, next, true
 }
 
 func appendNullable(out []byte, v int) []byte {

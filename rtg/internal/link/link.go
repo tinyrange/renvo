@@ -138,6 +138,13 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		fn.EndTok = mapToken(oldToNew, fn.EndTok, finalEOF)
 		dst.Funcs = append(dst.Funcs, fn)
 	}
+	for i := 0; i < len(src.Types); i++ {
+		typ, ok := mapType(src.Types[i], oldToNew, finalEOF, textOffset, declOffset)
+		if !ok {
+			return false
+		}
+		dst.Types = append(dst.Types, typ)
+	}
 	for i := 0; i < len(src.Indexes); i++ {
 		index, ok := mapIndex(src.Indexes[i], oldToNew, finalEOF, declOffset, funcOffset)
 		if !ok {
@@ -191,6 +198,33 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		dst.Text = append(dst.Text, '\n')
 	}
 	return true
+}
+
+func mapType(typ unit.TypeInfo, oldToNew []int, eof int, textOffset int, declOffset int) (unit.TypeInfo, bool) {
+	if typ.NameStart < 0 || typ.NameEnd < typ.NameStart || typ.Decl < 0 {
+		return typ, false
+	}
+	typ.NameStart += textOffset
+	typ.NameEnd += textOffset
+	typ.Decl += declOffset
+	var ok bool
+	typ.TypeStart, typ.TypeEnd, ok = mapNullableSpan(typ.TypeStart, typ.TypeEnd, oldToNew, eof)
+	if !ok {
+		return typ, false
+	}
+	typ.LenStart, typ.LenEnd, ok = mapNullableSpan(typ.LenStart, typ.LenEnd, oldToNew, eof)
+	if !ok {
+		return typ, false
+	}
+	typ.KeyStart, typ.KeyEnd, ok = mapNullableSpan(typ.KeyStart, typ.KeyEnd, oldToNew, eof)
+	if !ok {
+		return typ, false
+	}
+	typ.ElemStart, typ.ElemEnd, ok = mapNullableSpan(typ.ElemStart, typ.ElemEnd, oldToNew, eof)
+	if !ok {
+		return typ, false
+	}
+	return typ, true
 }
 
 func mapIndex(index unit.IndexExpr, oldToNew []int, eof int, declOffset int, funcOffset int) (unit.IndexExpr, bool) {
@@ -306,6 +340,21 @@ func mapExprSpan(span unit.ExprSpan, oldToNew []int, eof int) unit.ExprSpan {
 	span.StartTok = mapToken(oldToNew, span.StartTok, eof)
 	span.EndTok = mapToken(oldToNew, span.EndTok, eof)
 	return span
+}
+
+func mapNullableSpan(start int, end int, oldToNew []int, eof int) (int, int, bool) {
+	if start < 0 && end < 0 {
+		return -1, -1, true
+	}
+	if start < 0 || end < start {
+		return 0, 0, false
+	}
+	mappedStart := mapToken(oldToNew, start, eof)
+	mappedEnd := mapToken(oldToNew, end, eof)
+	if mappedStart < 0 || mappedEnd < mappedStart {
+		return 0, 0, false
+	}
+	return mappedStart, mappedEnd, true
 }
 
 func mapOwner(kind int, index int, declOffset int, funcOffset int) (int, bool) {

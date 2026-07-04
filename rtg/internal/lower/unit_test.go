@@ -189,16 +189,21 @@ func appMain() int {
 	if len(result.Program.Calls) != 2 {
 		t.Fatalf("calls = %#v, want 2", result.Program.Calls)
 	}
+	if len(result.Program.Types) != 1 {
+		t.Fatalf("types = %#v, want 1", result.Program.Types)
+	}
 	if len(result.Program.Refs) == 0 {
 		t.Fatalf("refs = %#v, want refs", result.Program.Refs)
 	}
+	item := findUnitDecl(result.Program, "item")
 	global := findUnitDecl(result.Program, "global")
 	picked := findUnitDecl(result.Program, "picked")
 	appMain := findUnitFunc(result.Program, "appMain")
 	choose := findUnitFunc(result.Program, "choose")
-	if global < 0 || picked < 0 || appMain < 0 || choose < 0 {
+	if item < 0 || global < 0 || picked < 0 || appMain < 0 || choose < 0 {
 		t.Fatalf("unit rows missing: decls=%#v funcs=%#v", result.Program.Decls, result.Program.Funcs)
 	}
+	assertUnitType(t, result.Program, "item", unit.TypeStruct, item, "struct { value int }", "", "", "")
 	assertUnitComposite(t, result.Program, unit.OwnerDecl, global, "[]int", []string{"1", "2", "3"})
 	assertUnitIndex(t, result.Program, unit.OwnerDecl, picked, "global", "1")
 	assertUnitCall(t, result.Program, unit.OwnerDecl, picked, unit.CallPackage, "", "choose", []string{"global[1]"})
@@ -231,6 +236,9 @@ func appMain() int {
 	}
 	if len(decoded.Calls) != len(result.Program.Calls) {
 		t.Fatalf("decoded calls = %d, want %d", len(decoded.Calls), len(result.Program.Calls))
+	}
+	if len(decoded.Types) != len(result.Program.Types) {
+		t.Fatalf("decoded types = %d, want %d", len(decoded.Types), len(result.Program.Types))
 	}
 	if len(decoded.Refs) != len(result.Program.Refs) || len(decoded.Selectors) != len(result.Program.Selectors) {
 		t.Fatalf("decoded resolution = %d/%d, want %d/%d", len(decoded.Refs), len(decoded.Selectors), len(result.Program.Refs), len(result.Program.Selectors))
@@ -444,6 +452,30 @@ func assertUnitComposite(t *testing.T, program unit.Program, ownerKind int, owne
 	t.Fatalf("composite owner=%d/%d %s not found in %#v", ownerKind, ownerIndex, typ, program.Composites)
 }
 
+func assertUnitType(t *testing.T, program unit.Program, name string, kind int, decl int, typeText string, lenText string, keyText string, elemText string) {
+	t.Helper()
+	for i := 0; i < len(program.Types); i++ {
+		typ := program.Types[i]
+		if unitText(program, typ.NameStart, typ.NameEnd) != name || typ.Kind != kind || typ.Decl != decl {
+			continue
+		}
+		if unitSpanText(program, typ.TypeStart, typ.TypeEnd) != typeText {
+			t.Fatalf("type %s span = %q, want %q", name, unitSpanText(program, typ.TypeStart, typ.TypeEnd), typeText)
+		}
+		if unitSpanText(program, typ.LenStart, typ.LenEnd) != lenText {
+			t.Fatalf("type %s length span = %q, want %q", name, unitSpanText(program, typ.LenStart, typ.LenEnd), lenText)
+		}
+		if unitSpanText(program, typ.KeyStart, typ.KeyEnd) != keyText {
+			t.Fatalf("type %s key span = %q, want %q", name, unitSpanText(program, typ.KeyStart, typ.KeyEnd), keyText)
+		}
+		if unitSpanText(program, typ.ElemStart, typ.ElemEnd) != elemText {
+			t.Fatalf("type %s element span = %q, want %q", name, unitSpanText(program, typ.ElemStart, typ.ElemEnd), elemText)
+		}
+		return
+	}
+	t.Fatalf("type name=%s kind=%d decl=%d not found in %#v", name, kind, decl, program.Types)
+}
+
 func assertUnitAssign(t *testing.T, program unit.Program, funcIndex int, kind int, left string, right string) {
 	t.Helper()
 	for i := 0; i < len(program.Assigns); i++ {
@@ -530,6 +562,13 @@ func tokenTextUnit(program unit.Program, tok int) string {
 		return ""
 	}
 	return string(program.Text[token.Start : token.Start+token.Size])
+}
+
+func unitText(program unit.Program, start int, end int) string {
+	if start < 0 || end < start || end > len(program.Text) {
+		return ""
+	}
+	return string(program.Text[start:end])
 }
 
 func unitSpanText(program unit.Program, startTok int, endTok int) string {

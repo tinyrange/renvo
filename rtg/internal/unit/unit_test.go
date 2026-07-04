@@ -89,6 +89,21 @@ func TestMarshalRoundTripInternalDecoder(t *testing.T) {
 
 func TestMarshalRoundTripExpressionShapes(t *testing.T) {
 	program := declProgram()
+	program.Types = []TypeInfo{{
+		NameStart: program.Decls[0].NameStart,
+		NameEnd:   program.Decls[0].NameEnd,
+		Kind:      TypeOther,
+		Decl:      0,
+		Symbol:    -1,
+		TypeStart: 5,
+		TypeEnd:   6,
+		LenStart:  -1,
+		LenEnd:    -1,
+		KeyStart:  -1,
+		KeyEnd:    -1,
+		ElemStart: -1,
+		ElemEnd:   -1,
+	}}
 	program.Indexes = []IndexExpr{{
 		OwnerKind:  OwnerFunc,
 		OwnerIndex: 0,
@@ -364,6 +379,7 @@ func equalPrograms(left Program, right Program) bool {
 		return false
 	}
 	if len(left.Tokens) != len(right.Tokens) || len(left.Decls) != len(right.Decls) || len(left.Funcs) != len(right.Funcs) ||
+		len(left.Types) != len(right.Types) ||
 		len(left.Indexes) != len(right.Indexes) || len(left.Composites) != len(right.Composites) ||
 		len(left.Assigns) != len(right.Assigns) || len(left.Returns) != len(right.Returns) || len(left.Calls) != len(right.Calls) ||
 		len(left.Refs) != len(right.Refs) || len(left.Selectors) != len(right.Selectors) {
@@ -381,6 +397,11 @@ func equalPrograms(left Program, right Program) bool {
 	}
 	for i := 0; i < len(left.Funcs); i++ {
 		if left.Funcs[i] != right.Funcs[i] {
+			return false
+		}
+	}
+	for i := 0; i < len(left.Types); i++ {
+		if left.Types[i] != right.Types[i] {
 			return false
 		}
 	}

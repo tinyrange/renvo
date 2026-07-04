@@ -82,6 +82,22 @@ var values = []int{1, 2}
 
 func appMain() int { return values[0] }
 `))
+	program.Types = []TypeInfo{{
+		NameStart: program.Decls[0].NameStart,
+		NameEnd:   program.Decls[0].NameEnd,
+		Kind:      TypeSlice,
+		Decl:      0,
+		Symbol:    -1,
+		Alias:     true,
+		TypeStart: 4,
+		TypeEnd:   7,
+		LenStart:  -1,
+		LenEnd:    -1,
+		KeyStart:  -1,
+		KeyEnd:    -1,
+		ElemStart: 6,
+		ElemEnd:   7,
+	}}
 	program.Indexes = []IndexExpr{{
 		OwnerKind:  OwnerFunc,
 		OwnerIndex: 0,
@@ -166,6 +182,9 @@ func appMain() int { return values[0] }
 	}
 	if len(decoded.Indexes) != 1 || decoded.Indexes[0] != program.Indexes[0] {
 		t.Fatalf("decoded indexes = %#v, want %#v", decoded.Indexes, program.Indexes)
+	}
+	if len(decoded.Types) != 1 || decoded.Types[0] != program.Types[0] {
+		t.Fatalf("decoded types = %#v, want %#v", decoded.Types, program.Types)
 	}
 	if len(decoded.Composites) != 1 || len(decoded.Composites[0].Elems) != 2 {
 		t.Fatalf("decoded composites = %#v, want %#v", decoded.Composites, program.Composites)

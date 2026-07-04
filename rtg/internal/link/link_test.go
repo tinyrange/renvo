@@ -140,6 +140,8 @@ func appMain() int { return lib.Value(1) }
 `)},
 		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte(`package lib
 
+type Numbers []int
+
 var Values = []int{1, 2}
 
 func Value(i int) int {
@@ -152,11 +154,22 @@ func Value(i int) int {
 	if !ok {
 		t.Fatal("LinkUnits failed")
 	}
+	numbers := findLinkedDecl(program, "Numbers")
 	values := findLinkedDecl(program, "Values")
 	valueFn := findLinkedFunc(program, "Value")
 	appMain := findLinkedFunc(program, "appMain")
-	if values < 0 || valueFn < 0 || appMain < 0 {
+	if numbers < 0 || values < 0 || valueFn < 0 || appMain < 0 {
 		t.Fatalf("linked rows missing: decls=%#v funcs=%#v", program.Decls, program.Funcs)
+	}
+	if len(program.Types) != 1 {
+		t.Fatalf("linked types = %#v, want 1", program.Types)
+	}
+	typ := program.Types[0]
+	if typ.Decl != numbers || linkedText(program, typ.NameStart, typ.NameEnd) != "Numbers" ||
+		typ.Kind != unit.TypeSlice ||
+		linkedSpanText(program, typ.TypeStart, typ.TypeEnd) != "[]int" ||
+		linkedSpanText(program, typ.ElemStart, typ.ElemEnd) != "int" {
+		t.Fatalf("linked type = %#v, decl %d", typ, numbers)
 	}
 	if len(program.Composites) != 1 {
 		t.Fatalf("linked composites = %#v, want 1", program.Composites)
@@ -311,4 +324,11 @@ func linkedTokenText(program unit.Program, tok int) string {
 		return ""
 	}
 	return string(program.Text[token.Start : token.Start+token.Size])
+}
+
+func linkedText(program unit.Program, start int, end int) string {
+	if start < 0 || end < start || end > len(program.Text) {
+		return ""
+	}
+	return string(program.Text[start:end])
 }

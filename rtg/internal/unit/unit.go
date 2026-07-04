@@ -19,6 +19,7 @@ const (
 	TagCalls   = 15
 	TagRefs    = 16
 	TagSels    = 17
+	TagTypes   = 18
 )
 
 const (
@@ -72,6 +73,35 @@ type Func struct {
 	BodyStart     int
 	BodyEnd       int
 	EndTok        int
+}
+
+const (
+	TypeOther = iota
+	TypeNamed
+	TypeStruct
+	TypeInterface
+	TypeMap
+	TypeSlice
+	TypeArray
+	TypePointer
+	TypeFunc
+)
+
+type TypeInfo struct {
+	NameStart int
+	NameEnd   int
+	Kind      int
+	Decl      int
+	Symbol    int
+	Alias     bool
+	TypeStart int
+	TypeEnd   int
+	LenStart  int
+	LenEnd    int
+	KeyStart  int
+	KeyEnd    int
+	ElemStart int
+	ElemEnd   int
 }
 
 const (
@@ -207,6 +237,7 @@ type Program struct {
 	Tokens     []Token
 	Decls      []Decl
 	Funcs      []Func
+	Types      []TypeInfo
 	Indexes    []IndexExpr
 	Composites []CompositeExpr
 	Assigns    []Assignment
@@ -229,6 +260,10 @@ func Marshal(program Program) ([]byte, bool) {
 		return nil, false
 	}
 	funcData, ok := encodeFuncs(program.Funcs)
+	if !ok {
+		return nil, false
+	}
+	typeData, ok := encodeTypes(program.Types, len(program.Text), len(program.Tokens), len(program.Decls))
 	if !ok {
 		return nil, false
 	}
@@ -266,6 +301,7 @@ func Marshal(program Program) ([]byte, bool) {
 	root = appendNode(root, TagTokens, tokenData)
 	root = appendNode(root, TagDecls, declData)
 	root = appendNode(root, TagFuncs, funcData)
+	root = appendNode(root, TagTypes, typeData)
 	root = appendNode(root, TagIndexes, indexData)
 	root = appendNode(root, TagComps, compData)
 	root = appendNode(root, TagAssigns, assignData)
@@ -304,6 +340,7 @@ func Unmarshal(data []byte) (Program, bool) {
 		return program, false
 	}
 	tokenData := []byte{}
+	typeData := []byte{}
 	indexData := []byte{}
 	compData := []byte{}
 	assignData := []byte{}
@@ -316,6 +353,7 @@ func Unmarshal(data []byte) (Program, bool) {
 	seenTokens := false
 	seenDecls := false
 	seenFuncs := false
+	seenTypes := false
 	seenIndexes := false
 	seenComps := false
 	seenAssigns := false
@@ -374,6 +412,12 @@ func Unmarshal(data []byte) (Program, bool) {
 				return program, false
 			}
 			program.Funcs = funcs
+		} else if tag == TagTypes {
+			if seenTypes {
+				return program, false
+			}
+			seenTypes = true
+			typeData = payload
 		} else if tag == TagIndexes {
 			if seenIndexes {
 				return program, false
@@ -432,6 +476,13 @@ func Unmarshal(data []byte) (Program, bool) {
 		return program, false
 	}
 	program.Tokens = tokens
+	if seenTypes {
+		types, ok := decodeTypes(typeData, len(program.Text), len(program.Tokens), len(program.Decls))
+		if !ok {
+			return program, false
+		}
+		program.Types = types
+	}
 	if seenIndexes {
 		indexes, ok := decodeIndexes(indexData, len(program.Tokens), len(program.Decls), len(program.Funcs))
 		if !ok {
@@ -729,6 +780,117 @@ func decodeFuncs(data []byte) ([]Func, bool) {
 		return nil, false
 	}
 	return funcs, true
+}
+
+func encodeTypes(types []TypeInfo, textLimit int, tokenLimit int, declLimit int) ([]byte, bool) {
+	out := make([]byte, 0, len(types)*14+1)
+	out = appendVarint(out, len(types))
+	ok := true
+	for i := 0; i < len(types); i++ {
+		typ := types[i]
+		if typ.Kind < TypeOther || typ.Kind > TypeFunc ||
+			!validTextSpan(textLimit, typ.NameStart, typ.NameEnd) ||
+			typ.Decl < 0 || typ.Decl >= declLimit ||
+			!validNullable(typ.Symbol) {
+			return nil, false
+		}
+		out = appendVarint(out, typ.Kind)
+		out = appendVarint(out, typ.NameStart)
+		out = appendVarint(out, typ.NameEnd-typ.NameStart)
+		out = appendVarint(out, typ.Decl)
+		out = appendNullable(out, typ.Symbol)
+		if typ.Alias {
+			out = appendVarint(out, 1)
+		} else {
+			out = appendVarint(out, 0)
+		}
+		out = appendNullableSpan(out, typ.TypeStart, typ.TypeEnd, tokenLimit, &ok)
+		out = appendNullableSpan(out, typ.LenStart, typ.LenEnd, tokenLimit, &ok)
+		out = appendNullableSpan(out, typ.KeyStart, typ.KeyEnd, tokenLimit, &ok)
+		out = appendNullableSpan(out, typ.ElemStart, typ.ElemEnd, tokenLimit, &ok)
+		if !ok {
+			return nil, false
+		}
+	}
+	return out, true
+}
+
+func decodeTypes(data []byte, textLimit int, tokenLimit int, declLimit int) ([]TypeInfo, bool) {
+	pos := 0
+	count, ok := readVarint(data, &pos)
+	if !ok || count < 0 {
+		return nil, false
+	}
+	types := make([]TypeInfo, 0, count)
+	for i := 0; i < count; i++ {
+		kind, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		nameStart, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		nameSize, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		decl, ok := readVarint(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		symbol, ok := readNullable(data, &pos)
+		if !ok {
+			return nil, false
+		}
+		aliasValue, ok := readVarint(data, &pos)
+		if !ok || aliasValue > 1 {
+			return nil, false
+		}
+		typeStart, typeEnd, ok := readNullableSpan(data, &pos, tokenLimit)
+		if !ok {
+			return nil, false
+		}
+		lenStart, lenEnd, ok := readNullableSpan(data, &pos, tokenLimit)
+		if !ok {
+			return nil, false
+		}
+		keyStart, keyEnd, ok := readNullableSpan(data, &pos, tokenLimit)
+		if !ok {
+			return nil, false
+		}
+		elemStart, elemEnd, ok := readNullableSpan(data, &pos, tokenLimit)
+		if !ok {
+			return nil, false
+		}
+		typ := TypeInfo{
+			NameStart: nameStart,
+			NameEnd:   nameStart + nameSize,
+			Kind:      kind,
+			Decl:      decl,
+			Symbol:    symbol,
+			Alias:     aliasValue == 1,
+			TypeStart: typeStart,
+			TypeEnd:   typeEnd,
+			LenStart:  lenStart,
+			LenEnd:    lenEnd,
+			KeyStart:  keyStart,
+			KeyEnd:    keyEnd,
+			ElemStart: elemStart,
+			ElemEnd:   elemEnd,
+		}
+		if typ.Kind < TypeOther || typ.Kind > TypeFunc ||
+			!validTextSpan(textLimit, typ.NameStart, typ.NameEnd) ||
+			typ.Decl < 0 || typ.Decl >= declLimit ||
+			!validNullable(typ.Symbol) {
+			return nil, false
+		}
+		types = append(types, typ)
+	}
+	if pos != len(data) {
+		return nil, false
+	}
+	return types, true
 }
 
 func encodeIndexes(indexes []IndexExpr, tokenLimit int, declLimit int, funcLimit int) ([]byte, bool) {
@@ -1470,6 +1632,39 @@ func readExprSpans(data []byte, pos *int, tokenLimit int) ([]ExprSpan, bool) {
 	return spans, true
 }
 
+func appendNullableSpan(out []byte, start int, end int, tokenLimit int, ok *bool) []byte {
+	if start < 0 && end < 0 {
+		return appendVarint(out, 0)
+	}
+	if !validSpan(tokenLimit, start, end) {
+		*ok = false
+		return out
+	}
+	out = appendVarint(out, start+1)
+	out = appendVarint(out, end-start)
+	return out
+}
+
+func readNullableSpan(data []byte, pos *int, tokenLimit int) (int, int, bool) {
+	encodedStart, ok := readVarint(data, pos)
+	if !ok {
+		return 0, 0, false
+	}
+	if encodedStart == 0 {
+		return -1, -1, true
+	}
+	start := encodedStart - 1
+	count, ok := readVarint(data, pos)
+	if !ok {
+		return 0, 0, false
+	}
+	end := start + count
+	if !validSpan(tokenLimit, start, end) {
+		return 0, 0, false
+	}
+	return start, end, true
+}
+
 func validOwner(kind int, index int, declLimit int, funcLimit int) bool {
 	if kind == OwnerDecl {
 		return index >= 0 && index < declLimit
@@ -1482,6 +1677,10 @@ func validOwner(kind int, index int, declLimit int, funcLimit int) bool {
 
 func validSpan(tokenLimit int, start int, end int) bool {
 	return start >= 0 && end >= start && end <= tokenLimit
+}
+
+func validTextSpan(textLimit int, start int, end int) bool {
+	return start >= 0 && end >= start && end <= textLimit
 }
 
 func validToken(tokenLimit int, tok int) bool {
