@@ -73,6 +73,7 @@ func LinkProgramsCore(programs []unit.Program, root int, rootName string) (unit.
 	if !ok {
 		return empty, false
 	}
+	ensureCoreProgramSymbols(programs)
 	program := unit.Program{Package: rootName, ImportPath: programs[root].ImportPath}
 	reserveCoreLinkedProgram(&program, programs)
 	finalEOF := countCoreLinkedEOF(programs)
@@ -93,6 +94,52 @@ func LinkProgramsCore(programs []unit.Program, root int, rootName string) (unit.
 		Line:  lineOffset + 1,
 	})
 	return program, true
+}
+
+func ensureCoreProgramSymbols(programs []unit.Program) {
+	for i := 0; i < len(programs); i++ {
+		if len(programs[i].Symbols) == 0 {
+			programs[i].Symbols = synthesizeCoreSymbols(programs[i], i)
+		}
+	}
+}
+
+func synthesizeCoreSymbols(program unit.Program, pkg int) []unit.Symbol {
+	out := make([]unit.Symbol, 0, len(program.Decls)+len(program.Funcs))
+	for i := 0; i < len(program.Decls); i++ {
+		decl := program.Decls[i]
+		var symbol unit.Symbol
+		symbol.Name = coreText(program.Text, decl.NameStart, decl.NameEnd)
+		symbol.Package = pkg
+		symbol.Token = coreTokenAt(program, decl.NameStart, decl.NameEnd)
+		out = append(out, symbol)
+	}
+	for i := 0; i < len(program.Funcs); i++ {
+		fn := program.Funcs[i]
+		var symbol unit.Symbol
+		symbol.Name = coreText(program.Text, fn.NameStart, fn.NameEnd)
+		symbol.Package = pkg
+		symbol.Token = fn.NameTok
+		out = append(out, symbol)
+	}
+	return out
+}
+
+func coreText(text []byte, start int, end int) string {
+	if start < 0 || end < start || end > len(text) {
+		return ""
+	}
+	return string(text[start:end])
+}
+
+func coreTokenAt(program unit.Program, start int, end int) int {
+	for i := 0; i < len(program.Tokens); i++ {
+		tok := program.Tokens[i]
+		if tok.Start == start && tok.Start+tok.Size == end {
+			return i
+		}
+	}
+	return -1
 }
 
 func reserveCoreLinkedProgram(program *unit.Program, programs []unit.Program) {
@@ -187,6 +234,9 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, lineOf
 		tokEnd := tok.Start + tok.Size
 		if skip[i] {
 			oldToNew[i] = finalEOF
+			if redirect[i] >= 0 && tok.Start > prevEnd {
+				dst.Text = appendBytes(dst.Text, src.Text[prevEnd:tok.Start])
+			}
 			if tokEnd > prevEnd {
 				prevEnd = tokEnd
 			}

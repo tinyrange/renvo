@@ -50,11 +50,13 @@ func EmitCheckedPackageFast(pkg load.Package, info check.PackageInfo) Result {
 		if !pkg.Files[i].File.Ok {
 			return emitFail(result, EmitErrPackage, i, pkg.Files[i].File.ErrorTok)
 		}
-		oldToNew, ok := builder.addFileTokens(pkg.Files[i].File, i, i+1 < len(pkg.Files))
+		file := pkg.Files[i].File
+		src := pkg.Files[i].Src
+		oldToNew, ok := builder.addFileTokens(file, src, i, i+1 < len(pkg.Files))
 		if !ok {
 			return emitFail(result, builder.err, builder.errFile, builder.errToken)
 		}
-		files[i] = fileTokens{file: pkg.Files[i].File, oldToNew: oldToNew}
+		files[i] = fileTokens{file: file, src: src, oldToNew: oldToNew}
 	}
 	if !builder.addCheckedImports(info, files) {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
@@ -91,6 +93,7 @@ type unitBuilder struct {
 
 type fileTokens struct {
 	file     syntax.File
+	src      []byte
 	oldToNew []int
 }
 
@@ -98,7 +101,7 @@ func (b *unitBuilder) reserveCheckedPackage(pkg load.Package, info check.Package
 	textCap := 0
 	tokenCap := 1
 	for i := 0; i < len(pkg.Files); i++ {
-		src := pkg.Files[i].File.Src
+		src := pkg.Files[i].Src
 		textCap += len(src)
 		tokenCap += len(pkg.Files[i].File.Tokens)
 		if i+1 < len(pkg.Files) && (len(src) == 0 || src[len(src)-1] != '\n') {
@@ -134,7 +137,7 @@ func (b *unitBuilder) reserveCheckedPackage(pkg load.Package, info check.Package
 	b.program.Selectors = make([]unit.Selector, 0, selectorCap)
 }
 
-func (b *unitBuilder) addFileTokens(file syntax.File, fileIndex int, hasNext bool) ([]int, bool) {
+func (b *unitBuilder) addFileTokens(file syntax.File, src []byte, fileIndex int, hasNext bool) ([]int, bool) {
 	base := len(b.program.Text)
 	lineOffset := b.lineOffset
 	oldToNew := make([]int, len(file.Tokens))
@@ -144,7 +147,7 @@ func (b *unitBuilder) addFileTokens(file syntax.File, fileIndex int, hasNext boo
 			oldToNew[i] = b.finalEOF
 			continue
 		}
-		kind, ok := unitTokenKind(file.Src, tok)
+		kind, ok := unitTokenKind(src, tok)
 		if !ok {
 			b.setErr(EmitErrToken, fileIndex, i)
 			return nil, false
@@ -157,9 +160,9 @@ func (b *unitBuilder) addFileTokens(file syntax.File, fileIndex int, hasNext boo
 			Line:  lineOffset + tok.Line,
 		})
 	}
-	b.program.Text = appendBytes(b.program.Text, file.Src)
-	b.lineOffset += countNewlines(file.Src)
-	if hasNext && (len(file.Src) == 0 || file.Src[len(file.Src)-1] != '\n') {
+	b.program.Text = appendBytes(b.program.Text, src)
+	b.lineOffset += countNewlines(src)
+	if hasNext && (len(src) == 0 || src[len(src)-1] != '\n') {
 		b.program.Text = append(b.program.Text, '\n')
 		b.lineOffset++
 	}
@@ -364,24 +367,33 @@ func (b *unitBuilder) addCheckedFuncs(info check.PackageInfo, files []fileTokens
 }
 
 func (b *unitBuilder) addCheckedSymbols(info check.PackageInfo, files []fileTokens) bool {
-	for i := 0; i < len(info.Symbols); i++ {
-		symbol := info.Symbols[i]
-		if symbol.File < 0 || symbol.File >= len(files) {
-			b.setErr(EmitErrCheck, -1, symbol.Token)
+	symbols := info.Symbols
+	for i := 0; i < len(symbols); i++ {
+		symbolFile := symbols[i].File
+		symbolToken := symbols[i].Token
+		if symbolFile < 0 || symbolFile >= len(files) {
+			b.setErr(EmitErrCheck, -1, symbolToken)
 			return false
 		}
-		token := mapToken(files[symbol.File].oldToNew, symbol.Token, b.finalEOF)
+		token := mapToken(files[symbolFile].oldToNew, symbolToken, b.finalEOF)
 		if token < 0 {
-			b.setErr(EmitErrCheck, symbol.File, symbol.Token)
+			b.setErr(EmitErrCheck, symbolFile, symbolToken)
 			return false
 		}
-		b.program.Symbols = append(b.program.Symbols, unit.Symbol{
-			Name:    symbol.Name,
-			Package: symbol.Package,
-			Token:   token,
-		})
+		var out unit.Symbol
+		out.Name = lowerTokenString(files[symbolFile], symbolToken)
+		out.Package = symbols[i].Package
+		out.Token = token
+		b.program.Symbols = append(b.program.Symbols, out)
 	}
 	return true
+}
+
+func lowerTokenString(file fileTokens, tok int) string {
+	if tok < 0 || tok >= len(file.file.Tokens) {
+		return ""
+	}
+	return string(syntax.TokenText(file.src, file.file.Tokens[tok]))
 }
 
 func (b *unitBuilder) addDeclCalls(decl check.DeclInfo, oldToNew []int, ownerIndex int) bool {

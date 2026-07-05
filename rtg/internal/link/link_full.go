@@ -444,6 +444,9 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		tokEnd := tok.Start + tok.Size
 		if skip[i] {
 			oldToNew[i] = finalEOF
+			if redirect[i] >= 0 && tok.Start > prevEnd {
+				dst.Text = appendBytes(dst.Text, src.Text[prevEnd:tok.Start])
+			}
 			if tokEnd > prevEnd {
 				prevEnd = tokEnd
 			}

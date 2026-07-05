@@ -175,6 +175,33 @@ func Value() int { return 2 }
 	}
 }
 
+func TestLinkUnitsPreservesWhitespaceBeforeImportedTypeSelector(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import "example.com/case/pkg/lib"
+
+func Use(graph lib.Graph) int { return graph.Value }
+func appMain() int { return Use(lib.Graph{Value: 1}) }
+`)},
+		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte(`package lib
+
+type Graph struct { Value int }
+`)},
+	})
+	program, ok := LinkUnits(result.Units, result.Root)
+	if !ok {
+		t.Fatal("LinkUnits failed")
+	}
+	if bytes.Contains(program.Text, []byte("graphGraph")) {
+		t.Fatalf("linked text joined parameter name and imported type:\n%s", string(program.Text))
+	}
+	if !bytes.Contains(program.Text, []byte("Use(graph Graph)")) {
+		t.Fatalf("linked text missing rewritten imported type parameter:\n%s", string(program.Text))
+	}
+}
+
 func TestLinkBuildAddsRootEntrypointWrapper(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},

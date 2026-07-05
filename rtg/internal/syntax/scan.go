@@ -1,19 +1,140 @@
 package syntax
 
 type Scanner struct {
-	Src    []byte
-	Tokens []Token
 	Ok     bool
+	Tokens []Token
 }
 
 func Scan(src []byte) []Token {
-	var s Scanner
-	s.Scan(src)
-	return s.Tokens
+	var tokens []Token
+	i := 0
+	line := 1
+	for i < len(src) {
+		c := src[i]
+		if c == ' ' || c == '\t' || c == '\r' {
+			i++
+			continue
+		}
+		if c == '\n' {
+			line++
+			i++
+			continue
+		}
+		if c == '/' && i+1 < len(src) && src[i+1] == '/' {
+			i += 2
+			for i < len(src) && src[i] != '\n' {
+				i++
+			}
+			continue
+		}
+		if c == '/' && i+1 < len(src) && src[i+1] == '*' {
+			i += 2
+			for i+1 < len(src) && !(src[i] == '*' && src[i+1] == '/') {
+				if src[i] == '\n' {
+					line++
+				}
+				i++
+			}
+			if i+1 >= len(src) {
+				break
+			}
+			i += 2
+			continue
+		}
+		if isIdentStart(c) {
+			start := i
+			i++
+			for i < len(src) && isIdentPart(src[i]) {
+				i++
+			}
+			tokens = appendScanToken(tokens, keywordKind(src, start, i), start, i, line)
+			continue
+		}
+		if c >= '0' && c <= '9' {
+			start := i
+			kind := TokenNumber
+			i++
+			for i < len(src) && isIdentPart(src[i]) {
+				i++
+			}
+			if i < len(src) && src[i] == '.' {
+				i++
+				for i < len(src) && isIdentPart(src[i]) {
+					i++
+				}
+			}
+			tokens = appendScanToken(tokens, kind, start, i, line)
+			continue
+		}
+		if c == '"' {
+			start := i
+			i++
+			for i < len(src) && src[i] != '"' {
+				if src[i] == '\\' && i+1 < len(src) {
+					i += 2
+					continue
+				}
+				if src[i] == '\n' {
+					break
+				}
+				i++
+			}
+			if i < len(src) && src[i] == '"' {
+				i++
+			}
+			tokens = appendScanToken(tokens, TokenString, start, i, line)
+			continue
+		}
+		if c == '`' {
+			start := i
+			tokenLine := line
+			i++
+			for i < len(src) && src[i] != '`' {
+				if src[i] == '\n' {
+					line++
+				}
+				i++
+			}
+			if i < len(src) && src[i] == '`' {
+				i++
+			}
+			tokens = appendScanToken(tokens, TokenString, start, i, tokenLine)
+			continue
+		}
+		if c == '\'' {
+			start := i
+			i++
+			for i < len(src) && src[i] != '\'' {
+				if src[i] == '\\' && i+1 < len(src) {
+					i += 2
+					continue
+				}
+				if src[i] == '\n' {
+					break
+				}
+				i++
+			}
+			if i < len(src) && src[i] == '\'' {
+				i++
+			}
+			tokens = appendScanToken(tokens, TokenChar, start, i, line)
+			continue
+		}
+		start := i
+		i++
+		if i < len(src) && isTwoByteOperator(c, src[i]) {
+			i++
+			if i < len(src) && isThreeByteOperator(c, src[start+1], src[i]) {
+				i++
+			}
+		}
+		tokens = appendScanToken(tokens, TokenOperator, start, i, line)
+	}
+	tokens = appendScanToken(tokens, TokenEOF, len(src), len(src), line)
+	return tokens
 }
 
 func (s *Scanner) Scan(src []byte) {
-	s.Src = src
 	s.Tokens = nil
 	s.Ok = true
 	i := 0
@@ -187,6 +308,15 @@ func (s *Scanner) Scan(src []byte) {
 		s.add(TokenOperator, start, i, line)
 	}
 	s.add(TokenEOF, len(src), len(src), line)
+}
+
+func appendScanToken(tokens []Token, kind int, start int, end int, line int) []Token {
+	var tok Token
+	tok.Kind = kind
+	tok.Start = start
+	tok.End = end
+	tok.Line = line
+	return append(tokens, tok)
 }
 
 func (s *Scanner) add(kind int, start int, end int, line int) {

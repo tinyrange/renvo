@@ -51,18 +51,17 @@ type FuncDecl struct {
 }
 
 func ParseFile(src []byte) File {
-	var scanner Scanner
-	scanner.Scan(src)
+	tokens, scanOK := parseScanTokens(src)
 	file := File{
 		Src:         src,
-		Tokens:      scanner.Tokens,
+		Tokens:      tokens,
 		PackageName: -1,
 		Ok:          true,
 		Error:       ParseOK,
 		ErrorTok:    -1,
 	}
-	if !scanner.Ok {
-		return parseFail(file, ParseErrScan, len(scanner.Tokens)-1)
+	if !scanOK {
+		return parseFail(file, ParseErrScan, len(tokens)-1)
 	}
 	return parseTokens(file)
 }

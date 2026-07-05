@@ -28,14 +28,7 @@ type BuildResult struct {
 }
 
 func BuildUnit(args []string, workDir string, stdRoot string, files []load.SourceFile) BuildResult {
-	result := BuildResult{
-		Ok:           true,
-		Error:        BuildOK,
-		ErrorAt:      -1,
-		ErrorPackage: -1,
-		ErrorFile:    -1,
-		ErrorToken:   -1,
-	}
+	result := newBuildResult()
 	options := ParseOptions(args)
 	result.Options = options
 	if !options.Ok {
@@ -51,14 +44,7 @@ func BuildUnit(args []string, workDir string, stdRoot string, files []load.Sourc
 }
 
 func BuildFromFS(args []string, workDir string, stdRoot string, fs SourceFS) BuildResult {
-	result := BuildResult{
-		Ok:           true,
-		Error:        BuildOK,
-		ErrorAt:      -1,
-		ErrorPackage: -1,
-		ErrorFile:    -1,
-		ErrorToken:   -1,
-	}
+	result := newBuildResult()
 	options := ParseOptions(args)
 	result.Options = options
 	if !options.Ok {
@@ -75,6 +61,17 @@ func BuildFromFS(args []string, workDir string, stdRoot string, fs SourceFS) Bui
 		return buildFail(result, BuildErrPipeline, "", "", -1, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
 	result.Unit = built.Link.Data
+	return result
+}
+
+func newBuildResult() BuildResult {
+	var result BuildResult
+	result.Ok = true
+	result.Error = BuildOK
+	result.ErrorAt = -1
+	result.ErrorPackage = -1
+	result.ErrorFile = -1
+	result.ErrorToken = -1
 	return result
 }
 
