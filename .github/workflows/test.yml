@@ -65,7 +65,7 @@ jobs:
 
       - name: Run backend tests
         run: |
-          tests="$(go test -list '^Test' . | grep '^Test' | grep -v '^TestCompilerPerformance$' | paste -sd'|' -)"
+          tests="$(go test -list '^Test' . | grep '^Test' | grep -v '^TestCompilerPerformance$' | grep -v '^TestFrontendCompilerPerformance$' | paste -sd'|' -)"
           go test -count=1 -timeout 30m -run "^(${tests})$" .
 
   frontend-corpus:

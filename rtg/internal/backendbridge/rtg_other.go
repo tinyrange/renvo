@@ -1,4 +1,4 @@
-//go:build rtg && !(linux && amd64)
+//go:build rtg && !(linux && (amd64 || aarch64 || arm64))
 
 package backendbridge
 

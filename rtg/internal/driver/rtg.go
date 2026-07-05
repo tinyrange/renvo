@@ -5,6 +5,8 @@ package driver
 import "j5.nz/rtg/rtg/internal/backendbridge"
 
 const rtgGetdents64LinuxAmd64 = 217
+const rtgGetdents64LinuxAarch64 = 61
+const rtgGetdents64Linux386 = 220
 
 type RTGFS struct{}
 
@@ -111,6 +113,12 @@ func (fs RTGFS) ReadDir(path string) ([]DirEntry, bool) {
 	for {
 		n := syscall(rtgGetdents64LinuxAmd64, fd, buf, len(buf))
 		if n < 0 {
+			n = syscall(rtgGetdents64LinuxAarch64, fd, buf, len(buf))
+		}
+		if n < 0 {
+			n = syscall(rtgGetdents64Linux386, fd, buf, len(buf))
+		}
+		if n < 0 {
 			close(fd)
 			return nil, false
 		}
@@ -187,7 +195,40 @@ func printRTGBuildError(result BuildResult) {
 		return
 	}
 	if result.Error == BuildErrPipeline {
-		print("rtg: frontend pipeline failed\n")
+		print("rtg: frontend pipeline failed: error=")
+		rtgPrintInt(result.Pipeline.Error)
+		print(" workspace=")
+		rtgPrintInt(result.Pipeline.Workspace.Error)
+		print(" graph=")
+		rtgPrintInt(result.Pipeline.Workspace.Graph.Error)
+		print(" graphPackage=")
+		rtgPrintInt(result.Pipeline.Workspace.Graph.ErrorPackage)
+		graphPackage := result.Pipeline.Workspace.Graph.ErrorPackage
+		if graphPackage >= 0 && graphPackage < len(result.Pipeline.Workspace.Graph.Packages) {
+			graphPkg := result.Pipeline.Workspace.Graph.Packages[graphPackage]
+			print(" packageError=")
+			rtgPrintInt(graphPkg.Error)
+			print(" packageFile=")
+			rtgPrintInt(graphPkg.ErrorFile)
+			print(" packageImport=")
+			rtgPrintInt(graphPkg.ErrorImport)
+			if graphPkg.ErrorFile >= 0 && graphPkg.ErrorFile < len(graphPkg.Files) {
+				graphFile := graphPkg.Files[graphPkg.ErrorFile]
+				print(" packagePath=")
+				print(graphFile.Path)
+				print(" parseError=")
+				rtgPrintInt(graphFile.File.Error)
+				print(" parseToken=")
+				rtgPrintInt(graphFile.File.ErrorTok)
+			}
+		}
+		print(" package=")
+		rtgPrintInt(result.ErrorPackage)
+		print(" file=")
+		rtgPrintInt(result.ErrorFile)
+		print(" token=")
+		rtgPrintInt(result.ErrorToken)
+		print("\n")
 		return
 	}
 	print("rtg: build failed\n")
