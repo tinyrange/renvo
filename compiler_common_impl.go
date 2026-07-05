@@ -118,11 +118,11 @@ func rtgAsmInit(a *rtgAsm) {
 	var winImports []rtgWinStaticImport
 	var data []byte
 	if rtgCompilerFixedTarget != 0 {
-		code = make([]byte, 0, 2097152)
-		labelPos = make([]int, 0, 32768)
-		labelSet = make([]bool, 0, 32768)
-		relocs = make([]rtgLabelRef, 0, 65536)
-		absRelocs = make([]rtgAbsRef, 0, 32768)
+		code = make([]byte, 0, 524288)
+		labelPos = make([]int, 0, 16384)
+		labelSet = make([]bool, 0, 16384)
+		relocs = make([]rtgLabelRef, 0, 32768)
+		absRelocs = make([]rtgAbsRef, 0, 16384)
 		symbols = make([]rtgAsmSymbol, 0, 1024)
 		if rtgCompilerStripSymbols && rtgTargetArch != rtgArchWasm32 {
 			symbols = make([]rtgAsmSymbol, 0, 0)
