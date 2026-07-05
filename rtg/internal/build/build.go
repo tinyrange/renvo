@@ -23,14 +23,21 @@ type PackageUnit struct {
 }
 
 type Result struct {
-	Check        check.Program
-	Units        []PackageUnit
-	Root         int
-	Ok           bool
-	Error        int
-	ErrorPackage int
-	ErrorFile    int
-	ErrorToken   int
+	Check           check.Program
+	Units           []PackageUnit
+	Root            int
+	Ok              bool
+	Error           int
+	LowerError      int
+	LowerUnitError  int
+	LowerUnitIndex  int
+	LowerUnitDetail int
+	LowerUnitA      int
+	LowerUnitB      int
+	LowerUnitC      int
+	ErrorPackage    int
+	ErrorFile       int
+	ErrorToken      int
 }
 
 func BuildUnits(graph load.Graph) Result {
@@ -51,6 +58,13 @@ func BuildUnits(graph load.Graph) Result {
 		pkg := graph.Packages[i]
 		emit := lower.EmitCheckedPackage(pkg, prog.Packages[i])
 		if !emit.Ok {
+			result.LowerError = emit.Error
+			result.LowerUnitError = emit.UnitError
+			result.LowerUnitIndex = emit.UnitIndex
+			result.LowerUnitDetail = emit.UnitDetail
+			result.LowerUnitA = emit.UnitA
+			result.LowerUnitB = emit.UnitB
+			result.LowerUnitC = emit.UnitC
 			return buildFail(result, BuildErrLower, i, emit.ErrorFile, emit.ErrorToken)
 		}
 		data, ok := unit.Marshal(emit.Program)

@@ -138,9 +138,10 @@ func rtgTryCompileWasiWasm32(p *rtgProgram, meta *rtgMeta) rtgCompileResult {
 	}
 	fn := &p.funcs[app.declIndex]
 	var body rtgBodyParse
-	stmts := make([]rtgStmt, 0, 1024)
+	stmtData := make([]int, 1024*rtgStmtWordCount)
+	rtgBodyStmtData = stmtData
 	body.prog = p
-	body.stmts = stmts
+	body.stmtCount = 0
 	body.ok = true
 	i := fn.bodyStart + 1
 	for body.ok && i < fn.bodyEnd {
@@ -151,9 +152,10 @@ func rtgTryCompileWasiWasm32(p *rtgProgram, meta *rtgMeta) rtgCompileResult {
 		if rtgTokCharIs(p, i, '}') || rtgTokIsKind(p, i, rtgTokEOF) {
 			break
 		}
-		before := len(body.stmts)
+		rtgBodyStmtData = stmtData
+		before := body.stmtCount
 		next := rtgParseOneStatement(&body, i, fn.bodyEnd)
-		if !body.ok || next <= i || len(body.stmts) <= before {
+		if !body.ok || next <= i || body.stmtCount <= before {
 			var result rtgCompileResult
 			return result
 		}
@@ -182,8 +184,12 @@ func rtgWasiWasm32EmitBinary(p *rtgProgram, meta *rtgMeta, body *rtgBodyParse) [
 	var gen rtgLinearGen
 	gen.prog = p
 	gen.meta = meta
-	for i := 0; i < len(body.stmts); i++ {
-		stmt := &body.stmts[i]
+	for i := 0; i < body.stmtCount; i++ {
+		stmtValue := rtgBodyStmtAt(body, i)
+		if !body.ok {
+			return nil
+		}
+		stmt := &stmtValue
 		if stmt.kind == rtgStmtExpr {
 			var ep rtgExprParse
 			rtgParseExpressionInto(&ep, p, stmt.exprStart, stmt.exprEnd)

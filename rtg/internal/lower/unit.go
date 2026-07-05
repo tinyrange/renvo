@@ -20,6 +20,12 @@ type Result struct {
 	Program    unit.Program
 	Ok         bool
 	Error      int
+	UnitError  int
+	UnitIndex  int
+	UnitDetail int
+	UnitA      int
+	UnitB      int
+	UnitC      int
 	ErrorFile  int
 	ErrorToken int
 }
@@ -60,7 +66,14 @@ func EmitPackage(pkg load.Package) Result {
 		Size:  0,
 		Line:  line,
 	})
-	if _, ok := unit.Marshal(builder.program); !ok {
+	_, ok := unit.Marshal(builder.program)
+	if !ok {
+		result.UnitError = unit.LastMarshalError
+		result.UnitIndex = unit.LastMarshalIndex
+		result.UnitDetail = unit.LastMarshalDetail
+		result.UnitA = unit.LastMarshalA
+		result.UnitB = unit.LastMarshalB
+		result.UnitC = unit.LastMarshalC
 		return emitFail(result, EmitErrUnit, -1, -1)
 	}
 	result.Program = builder.program
@@ -139,6 +152,12 @@ func EmitCheckedPackage(pkg load.Package, info check.PackageInfo) Result {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
 	if !builder.finishUnit() {
+		result.UnitError = builder.unitError
+		result.UnitIndex = builder.unitIndex
+		result.UnitDetail = builder.unitDetail
+		result.UnitA = builder.unitA
+		result.UnitB = builder.unitB
+		result.UnitC = builder.unitC
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
 	result.Program = builder.program
@@ -152,6 +171,12 @@ type unitBuilder struct {
 	err        int
 	errFile    int
 	errToken   int
+	unitError  int
+	unitIndex  int
+	unitDetail int
+	unitA      int
+	unitB      int
+	unitC      int
 	declRows   []int
 	funcRows   []int
 }
@@ -204,13 +229,20 @@ func (b *unitBuilder) addFileTokens(file syntax.File, fileIndex int, hasNext boo
 			Line:  lineOffset + tok.Line,
 		})
 	}
-	b.program.Text = append(b.program.Text, file.Src...)
+	b.program.Text = appendBytes(b.program.Text, file.Src)
 	b.lineOffset += countNewlines(file.Src)
 	if hasNext && (len(file.Src) == 0 || file.Src[len(file.Src)-1] != '\n') {
 		b.program.Text = append(b.program.Text, '\n')
 		b.lineOffset++
 	}
 	return oldToNew, true
+}
+
+func appendBytes(out []byte, data []byte) []byte {
+	for i := 0; i < len(data); i++ {
+		out = append(out, data[i])
+	}
+	return out
 }
 
 func (b *unitBuilder) finishUnit() bool {
@@ -221,7 +253,14 @@ func (b *unitBuilder) finishUnit() bool {
 		Size:  0,
 		Line:  line,
 	})
-	if _, ok := unit.Marshal(b.program); !ok {
+	_, ok := unit.Marshal(b.program)
+	if !ok {
+		b.unitError = unit.LastMarshalError
+		b.unitIndex = unit.LastMarshalIndex
+		b.unitDetail = unit.LastMarshalDetail
+		b.unitA = unit.LastMarshalA
+		b.unitB = unit.LastMarshalB
+		b.unitC = unit.LastMarshalC
 		b.setErr(EmitErrUnit, -1, -1)
 		return false
 	}
@@ -1589,7 +1628,30 @@ func countNewlines(src []byte) int {
 }
 
 func isFloatNumber(src []byte, tok syntax.Token) bool {
-	for i := tok.Start; i < tok.End && i < len(src); i++ {
+	start := tok.Start
+	end := tok.End
+	if start < 0 {
+		start = 0
+	}
+	if end > len(src) {
+		end = len(src)
+	}
+	if end-start > 2 && src[start] == '0' {
+		prefix := src[start+1]
+		if prefix == 'x' || prefix == 'X' {
+			for i := start + 2; i < end; i++ {
+				c := src[i]
+				if c == '.' || c == 'p' || c == 'P' {
+					return true
+				}
+			}
+			return false
+		}
+		if prefix == 'b' || prefix == 'B' || prefix == 'o' || prefix == 'O' {
+			return false
+		}
+	}
+	for i := start; i < end; i++ {
 		c := src[i]
 		if c == '.' || c == 'e' || c == 'E' || c == 'p' || c == 'P' {
 			return true

@@ -196,7 +196,10 @@ func parseStructFields(file syntax.File, start int, end int) []Field {
 			if file.Tokens[last-1].Kind == syntax.TokenString {
 				last--
 			}
-			fields = append(fields, parseFieldList(file, first, last)...)
+			parsed := parseFieldList(file, first, last)
+			for j := 0; j < len(parsed); j++ {
+				fields = append(fields, parsed[j])
+			}
 		}
 		if fieldEnd <= i {
 			i++
@@ -299,10 +302,30 @@ func sortTypes(types []TypeInfo) {
 
 func typeAfter(left TypeInfo, right TypeInfo) bool {
 	if left.Name != right.Name {
-		return left.Name > right.Name
+		return checkStringAfter(left.Name, right.Name)
 	}
 	if left.File != right.File {
 		return left.File > right.File
 	}
 	return left.Token > right.Token
+}
+
+func checkStringAfter(left string, right string) bool {
+	return checkStringBefore(right, left)
+}
+
+func checkStringBefore(left string, right string) bool {
+	limit := len(left)
+	if len(right) < limit {
+		limit = len(right)
+	}
+	for i := 0; i < limit; i++ {
+		if left[i] < right[i] {
+			return true
+		}
+		if left[i] > right[i] {
+			return false
+		}
+	}
+	return len(left) < len(right)
 }

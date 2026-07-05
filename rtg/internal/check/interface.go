@@ -107,7 +107,7 @@ func sortInterfaceMethods(methods []InterfaceMethod) {
 	for i := 1; i < len(methods); i++ {
 		item := methods[i]
 		j := i - 1
-		for j >= 0 && methods[j].Name > item.Name {
+		for j >= 0 && checkStringAfter(methods[j].Name, item.Name) {
 			methods[j+1] = methods[j]
 			j--
 		}

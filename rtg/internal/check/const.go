@@ -58,16 +58,44 @@ func parseConstInt(file syntax.File, tok int) (int, bool) {
 	if token.Kind != syntax.TokenNumber || token.Start < 0 || token.End > len(file.Src) || token.Start >= token.End {
 		return 0, false
 	}
+	start := token.Start
+	end := token.End
+	base := 10
+	if end-start > 2 && file.Src[start] == '0' {
+		prefix := file.Src[start+1]
+		if prefix == 'x' || prefix == 'X' {
+			base = 16
+			start += 2
+		} else if prefix == 'b' || prefix == 'B' {
+			base = 2
+			start += 2
+		} else if prefix == 'o' || prefix == 'O' {
+			base = 8
+			start += 2
+		}
+	}
+	if base == 10 && end-start > 1 && file.Src[start] == '0' {
+		base = 8
+		start++
+	}
 	value := 0
-	for i := token.Start; i < token.End; i++ {
+	for i := start; i < end; i++ {
 		c := file.Src[i]
 		if c == '_' {
 			continue
 		}
-		if c < '0' || c > '9' {
+		digit := -1
+		if c >= '0' && c <= '9' {
+			digit = int(c - '0')
+		} else if c >= 'a' && c <= 'f' {
+			digit = int(c-'a') + 10
+		} else if c >= 'A' && c <= 'F' {
+			digit = int(c-'A') + 10
+		}
+		if digit < 0 || digit >= base {
 			return 0, false
 		}
-		value = value*10 + int(c-'0')
+		value = value*base + digit
 	}
 	return value, true
 }

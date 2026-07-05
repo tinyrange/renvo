@@ -21,6 +21,7 @@ func rtgArmEmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	metaFn := &g.meta.funcs[fnInfoIndex]
 	fn := &g.prog.funcs[metaFn.declIndex]
 	oldLocals := g.locals
+	oldLocalCount := g.localCount
 	oldBreak := g.breakDepth
 	oldContinue := g.continueDepth
 	oldCurrent := g.currentFunc
@@ -30,9 +31,10 @@ func rtgArmEmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	oldLastRangeReturns := g.lastRangeReturns
 	var locals []rtgLocalInfo
 	var gotoLabels []rtgGlobalInfo
-	locals = make([]rtgLocalInfo, 0, rtgFunctionLocalCap(fn))
+	locals = make([]rtgLocalInfo, rtgFunctionLocalCap(fn))
 	gotoLabels = make([]rtgGlobalInfo, 0, 0)
 	g.locals = locals
+	g.localCount = 0
 	g.gotoLabels = gotoLabels
 	g.breakDepth = 0
 	g.continueDepth = 0
@@ -60,6 +62,7 @@ func rtgArmEmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 		rtgAsmRet(a)
 	}
 	g.locals = oldLocals
+	g.localCount = oldLocalCount
 	g.breakDepth = oldBreak
 	g.continueDepth = oldContinue
 	g.currentFunc = oldCurrent

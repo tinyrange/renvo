@@ -447,104 +447,142 @@ type Program struct {
 	Selectors  []Selector
 }
 
+var LastMarshalError int
+var LastMarshalIndex int
+var LastMarshalDetail int
+var LastMarshalA int
+var LastMarshalB int
+var LastMarshalC int
+
 func Marshal(program Program) ([]byte, bool) {
+	LastMarshalError = 0
+	LastMarshalIndex = -1
+	LastMarshalDetail = 0
+	LastMarshalA = 0
+	LastMarshalB = 0
+	LastMarshalC = 0
 	if len(program.Package) == 0 || len(program.Text) == 0 || len(program.Tokens) == 0 {
+		LastMarshalError = 1
 		return nil, false
 	}
 	tokenData, ok := encodeTokens(program.Text, program.Tokens)
 	if !ok {
+		LastMarshalError = 2
 		return nil, false
 	}
 	importData, ok := encodeImports(program.Imports, len(program.Tokens))
 	if !ok {
+		LastMarshalError = 3
 		return nil, false
 	}
 	symbolData, ok := encodeSymbols(program.Symbols, len(program.Tokens), len(program.Decls), len(program.Funcs))
 	if !ok {
+		LastMarshalError = 4
 		return nil, false
 	}
 	declData, ok := encodeDecls(program.Decls)
 	if !ok {
+		LastMarshalError = 5
 		return nil, false
 	}
 	declMetaData, ok := encodeDeclMeta(program.DeclMeta, len(program.Tokens), len(program.Decls))
 	if !ok {
+		LastMarshalError = 6
 		return nil, false
 	}
 	initOrderData, ok := encodeInitOrder(program.InitOrder, len(program.Decls))
 	if !ok {
+		LastMarshalError = 7
 		return nil, false
 	}
 	constData, ok := encodeConsts(program.Consts, len(program.Decls))
 	if !ok {
+		LastMarshalError = 8
 		return nil, false
 	}
 	funcData, ok := encodeFuncs(program.Funcs)
 	if !ok {
+		LastMarshalError = 9
 		return nil, false
 	}
 	sigData, ok := encodeSignatures(program.Signatures, len(program.Tokens), len(program.Funcs))
 	if !ok {
+		LastMarshalError = 10
 		return nil, false
 	}
 	stmtData, ok := encodeStatements(program.Stmts, len(program.Tokens), len(program.Funcs))
 	if !ok {
+		LastMarshalError = 11
 		return nil, false
 	}
 	typeData, ok := encodeTypes(program.Types, len(program.Text), len(program.Tokens), len(program.Decls))
 	if !ok {
+		LastMarshalError = 12
 		return nil, false
 	}
 	typeFieldData, ok := encodeTypeFields(program.TypeFields, len(program.Tokens), len(program.Types))
 	if !ok {
+		LastMarshalError = 13
 		return nil, false
 	}
 	typeIfaceData, ok := encodeTypeInterfaces(program.TypeIfaces, len(program.Tokens), len(program.Types))
 	if !ok {
+		LastMarshalError = 14
 		return nil, false
 	}
 	typeFuncData, ok := encodeTypeFuncs(program.TypeFuncs, len(program.Tokens), len(program.Types))
 	if !ok {
+		LastMarshalError = 15
 		return nil, false
 	}
 	methodData, ok := encodeMethods(program.Methods, len(program.Tokens), len(program.Types), len(program.Symbols), len(program.Funcs))
 	if !ok {
+		LastMarshalError = 16
 		return nil, false
 	}
 	typeRefData, ok := encodeTypeRefs(program.TypeRefs, len(program.Tokens), len(program.Decls), len(program.Funcs))
 	if !ok {
+		LastMarshalError = 17
 		return nil, false
 	}
 	localData, ok := encodeLocals(program.Locals, len(program.Text), len(program.Tokens), len(program.Funcs))
 	if !ok {
+		LastMarshalError = 18
 		return nil, false
 	}
 	indexData, ok := encodeIndexes(program.Indexes, len(program.Tokens), len(program.Decls), len(program.Funcs))
 	if !ok {
+		LastMarshalError = 19
 		return nil, false
 	}
 	compData, ok := encodeComposites(program.Composites, len(program.Tokens), len(program.Decls), len(program.Funcs))
 	if !ok {
+		LastMarshalError = 20
 		return nil, false
 	}
 	assignData, ok := encodeAssignments(program.Assigns, len(program.Tokens), len(program.Funcs))
 	if !ok {
+		LastMarshalError = 21
 		return nil, false
 	}
 	returnData, ok := encodeReturns(program.Returns, len(program.Tokens), len(program.Funcs))
 	if !ok {
+		LastMarshalError = 22
 		return nil, false
 	}
 	callData, ok := encodeCalls(program.Calls, len(program.Tokens), len(program.Decls), len(program.Funcs))
 	if !ok {
+		LastMarshalError = 23
 		return nil, false
 	}
 	refData, ok := encodeRefs(program.Refs, len(program.Tokens), len(program.Decls), len(program.Funcs))
 	if !ok {
+		LastMarshalError = 24
 		return nil, false
 	}
 	selectorData, ok := encodeSelectors(program.Selectors, len(program.Tokens), len(program.Decls), len(program.Funcs))
 	if !ok {
+		LastMarshalError = 25
 		return nil, false
 	}
 	var root []byte
@@ -577,7 +615,10 @@ func Marshal(program Program) ([]byte, bool) {
 	root = appendNode(root, TagSels, selectorData)
 
 	out := make([]byte, 0, 14+len(root))
-	out = append(out, 'R', 'T', 'G', 'U')
+	out = append(out, 'R')
+	out = append(out, 'T')
+	out = append(out, 'G')
+	out = append(out, 'U')
 	out = appendUint16(out, Version)
 	out = appendUint16(out, 0)
 	out = appendNode(out, TagUnit, root)
@@ -1011,19 +1052,32 @@ func encodeTokens(text []byte, tokens []Token) ([]byte, bool) {
 	for i := 0; i < len(tokens); i++ {
 		tok := tokens[i]
 		if tok.Kind < 0 || tok.Kind > 255 || tok.Start < prevStart || tok.Line < prevLine || tok.Size < 0 {
+			LastMarshalIndex = i
+			LastMarshalDetail = 1
 			return nil, false
 		}
 		if tok.Start > len(text) || tok.Start+tok.Size > len(text) {
+			LastMarshalIndex = i
+			LastMarshalDetail = 2
+			LastMarshalA = tok.Start
+			LastMarshalB = tok.Size
+			LastMarshalC = len(text)
 			return nil, false
 		}
 		if tok.Start > 0xffffff || tok.Line > 0xffff {
+			LastMarshalIndex = i
+			LastMarshalDetail = 3
 			return nil, false
 		}
 		if tok.Kind == TokenOp {
 			if tok.Size > 255 {
+				LastMarshalIndex = i
+				LastMarshalDetail = 4
 				return nil, false
 			}
 		} else if tok.Size > 0xffff {
+			LastMarshalIndex = i
+			LastMarshalDetail = 5
 			return nil, false
 		}
 		out = appendVarint(out, tok.Kind)
@@ -1114,10 +1168,10 @@ func encodeImports(imports []Import, tokenLimit int) ([]byte, bool) {
 		out = appendVarint(out, imp.PathTok)
 		flags := 0
 		if imp.Dot {
-			flags |= 1
+			flags = flags | 1
 		}
 		if imp.Blank {
-			flags |= 2
+			flags = flags | 2
 		}
 		out = appendVarint(out, flags)
 	}
@@ -3234,7 +3288,10 @@ func readNullable(data []byte, pos *int) (int, bool) {
 
 func appendString(out []byte, text string) []byte {
 	out = appendVarint(out, len(text))
-	return append(out, text...)
+	for i := 0; i < len(text); i++ {
+		out = append(out, text[i])
+	}
+	return out
 }
 
 func readString(data []byte, pos *int) (string, bool) {
@@ -3272,16 +3329,24 @@ func readSigned(data []byte, pos *int) (int, bool) {
 func appendNode(out []byte, tag int, payload []byte) []byte {
 	out = appendUint16(out, tag)
 	out = appendUint32(out, len(payload))
-	out = append(out, payload...)
+	for i := 0; i < len(payload); i++ {
+		out = append(out, payload[i])
+	}
 	return out
 }
 
 func appendUint16(out []byte, v int) []byte {
-	return append(out, byte(v), byte(v>>8))
+	out = append(out, byte(v))
+	out = append(out, byte(v>>8))
+	return out
 }
 
 func appendUint32(out []byte, v int) []byte {
-	return append(out, byte(v), byte(v>>8), byte(v>>16), byte(v>>24))
+	out = append(out, byte(v))
+	out = append(out, byte(v>>8))
+	out = append(out, byte(v>>16))
+	out = append(out, byte(v>>24))
+	return out
 }
 
 func readUint16(data []byte, pos int) int {

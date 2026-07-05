@@ -124,10 +124,10 @@ func sortMethods(methods []MethodInfo) {
 
 func methodAfter(left MethodInfo, right MethodInfo) bool {
 	if left.Receiver != right.Receiver {
-		return left.Receiver > right.Receiver
+		return checkStringAfter(left.Receiver, right.Receiver)
 	}
 	if left.Name != right.Name {
-		return left.Name > right.Name
+		return checkStringAfter(left.Name, right.Name)
 	}
 	if left.Pointer != right.Pointer {
 		return left.Pointer && !right.Pointer

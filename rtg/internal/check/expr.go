@@ -198,21 +198,44 @@ func exprOperandStartBefore(file syntax.File, start int, before int) int {
 }
 
 func isExprLeftBoundary(file syntax.File, tok int) bool {
-	return tokCharIs(file, tok, ',') || tokCharIs(file, tok, ';') || tokCharIs(file, tok, ':') ||
-		isAssignOp(file, tok) || isExprBinaryOp(file, tok)
+	if tokCharIs(file, tok, ',') || tokCharIs(file, tok, ';') || tokCharIs(file, tok, ':') {
+		return true
+	}
+	if isAssignOp(file, tok) {
+		return true
+	}
+	return isExprBinaryOp(file, tok)
 }
 
 func isExprBinaryOp(file syntax.File, tok int) bool {
-	return tokenTextIs(file, tok, "||") || tokenTextIs(file, tok, "&&") ||
-		tokenTextIs(file, tok, "==") || tokenTextIs(file, tok, "!=") ||
-		tokenTextIs(file, tok, "<") || tokenTextIs(file, tok, "<=") ||
-		tokenTextIs(file, tok, ">") || tokenTextIs(file, tok, ">=") ||
-		tokenTextIs(file, tok, "+") || tokenTextIs(file, tok, "-") ||
-		tokenTextIs(file, tok, "*") || tokenTextIs(file, tok, "/") ||
-		tokenTextIs(file, tok, "%") || tokenTextIs(file, tok, "&") ||
-		tokenTextIs(file, tok, "|") || tokenTextIs(file, tok, "^") ||
-		tokenTextIs(file, tok, "<<") || tokenTextIs(file, tok, ">>") ||
-		tokenTextIs(file, tok, "&^")
+	if tokenTextIs(file, tok, "||") || tokenTextIs(file, tok, "&&") {
+		return true
+	}
+	if tokenTextIs(file, tok, "==") || tokenTextIs(file, tok, "!=") {
+		return true
+	}
+	if tokenTextIs(file, tok, "<") || tokenTextIs(file, tok, "<=") {
+		return true
+	}
+	if tokenTextIs(file, tok, ">") || tokenTextIs(file, tok, ">=") {
+		return true
+	}
+	if tokenTextIs(file, tok, "+") || tokenTextIs(file, tok, "-") {
+		return true
+	}
+	if tokenTextIs(file, tok, "*") || tokenTextIs(file, tok, "/") {
+		return true
+	}
+	if tokenTextIs(file, tok, "%") || tokenTextIs(file, tok, "&") {
+		return true
+	}
+	if tokenTextIs(file, tok, "|") || tokenTextIs(file, tok, "^") {
+		return true
+	}
+	if tokenTextIs(file, tok, "<<") || tokenTextIs(file, tok, ">>") {
+		return true
+	}
+	return tokenTextIs(file, tok, "&^")
 }
 
 func isIndexTypePrefix(file syntax.File, start int) bool {

@@ -23,18 +23,32 @@ type Result struct {
 func LinkBuild(result build.Result) Result {
 	out := Result{Ok: true, Error: LinkOK, ErrorPackage: -1}
 	if !result.Ok {
-		return linkFail(out, LinkErrBuild, result.ErrorPackage)
+		out.Ok = false
+		out.Error = LinkErrBuild
+		out.ErrorPackage = result.ErrorPackage
+		return out
 	}
 	if result.Root < 0 || result.Root >= len(result.Units) {
-		return linkFail(out, LinkErrRoot, -1)
+		out.Ok = false
+		out.Error = LinkErrRoot
+		return out
 	}
-	program, pkg, ok := LinkUnitData(result.Units, result.Root)
+	var program unit.Program
+	pkg := 0
+	ok := false
+	program, pkg, ok = LinkUnitData(result.Units, result.Root)
 	if !ok {
-		return linkFail(out, LinkErrUnit, pkg)
+		out.Ok = false
+		out.Error = LinkErrUnit
+		out.ErrorPackage = pkg
+		return out
 	}
-	data, ok := unit.Marshal(program)
+	var data []byte
+	data, ok = unit.Marshal(program)
 	if !ok {
-		return linkFail(out, LinkErrUnit, -1)
+		out.Ok = false
+		out.Error = LinkErrUnit
+		return out
 	}
 	out.Program = program
 	out.Data = data
@@ -42,30 +56,32 @@ func LinkBuild(result build.Result) Result {
 }
 
 func LinkUnitData(units []build.PackageUnit, root int) (unit.Program, int, bool) {
+	var empty unit.Program
 	if root < 0 || root >= len(units) {
-		return unit.Program{}, -1, false
+		return empty, -1, false
 	}
 	programs := make([]unit.Program, len(units))
 	for i := 0; i < len(units); i++ {
 		prog, ok := unit.Unmarshal(units[i].Data)
 		if !ok {
-			return unit.Program{}, i, false
+			return empty, i, false
 		}
 		if units[i].Name != "" && prog.Package != units[i].Name {
-			return unit.Program{}, i, false
+			return empty, i, false
 		}
 		programs[i] = prog
 	}
 	program, ok := LinkPrograms(programs, root, units[root].Name)
 	if !ok {
-		return unit.Program{}, -1, false
+		return empty, -1, false
 	}
 	return program, -1, true
 }
 
 func LinkUnits(units []build.PackageUnit, root int) (unit.Program, bool) {
+	var empty unit.Program
 	if root < 0 || root >= len(units) {
-		return unit.Program{}, false
+		return empty, false
 	}
 	programs := make([]unit.Program, len(units))
 	for i := 0; i < len(units); i++ {
@@ -75,22 +91,23 @@ func LinkUnits(units []build.PackageUnit, root int) (unit.Program, bool) {
 }
 
 func LinkPrograms(programs []unit.Program, root int, rootName string) (unit.Program, bool) {
+	var empty unit.Program
 	if root < 0 || root >= len(programs) || rootName == "" {
-		return unit.Program{}, false
+		return empty, false
 	}
 	programs, ok := preparePrograms(programs, root)
 	if !ok {
-		return unit.Program{}, false
+		return empty, false
 	}
 	program := unit.Program{Package: rootName, ImportPath: programs[root].ImportPath}
 	finalEOF := countLinkedTokens(programs)
 	symbolOffsets := packageSymbolOffsets(programs)
-	aliases := packageSymbolAliases(programs, root)
+	aliases := packageSymbolAliases(programs, root, symbolOffsets)
 	lineOffset := 0
 	for i := 0; i < len(programs); i++ {
 		ok := appendProgram(&program, programs[i], finalEOF, lineOffset, symbolOffsets, aliases, i+1 < len(programs))
 		if !ok {
-			return unit.Program{}, false
+			return empty, false
 		}
 		lineOffset = nextLineOffset(lineOffset, programs[i].Text, i+1 < len(programs))
 	}
@@ -121,38 +138,36 @@ func addRootEntrypoint(src unit.Program, packageIndex int) (unit.Program, bool) 
 	if len(src.Tokens) == 0 || src.Tokens[len(src.Tokens)-1].Kind != unit.TokenEOF {
 		return src, false
 	}
-	src.Text = append([]byte{}, src.Text...)
-	src.Tokens = append([]unit.Token{}, src.Tokens[:len(src.Tokens)-1]...)
-	src.Funcs = append([]unit.Func{}, src.Funcs...)
-	src.Signatures = append([]unit.FuncSignature{}, src.Signatures...)
-	src.Stmts = append([]unit.Statement{}, src.Stmts...)
-	src.Returns = append([]unit.Return{}, src.Returns...)
-	src.Calls = append([]unit.Call{}, src.Calls...)
-	src.Refs = append([]unit.NameRef{}, src.Refs...)
-	src.Symbols = append([]unit.Symbol{}, src.Symbols...)
+	var textCopy []byte
+	src.Text = appendBytes(textCopy, src.Text)
+	src.Tokens = copyTokens(src.Tokens, len(src.Tokens)-1)
+	src.Funcs = copyFuncs(src.Funcs)
+	src.Signatures = copySignatures(src.Signatures)
+	src.Stmts = copyStatements(src.Stmts)
+	src.Returns = copyReturns(src.Returns)
+	src.Calls = copyCalls(src.Calls)
+	src.Refs = copyRefs(src.Refs)
+	src.Symbols = copySymbols(src.Symbols)
 	if len(src.Text) > 0 && src.Text[len(src.Text)-1] != '\n' {
 		src.Text = append(src.Text, '\n')
 	}
 	start := len(src.Text)
 	line := countNewlines(src.Text) + 1
-	wrapper := []byte("func appMain() int { main(); return 0 }\n")
-	src.Text = append(src.Text, wrapper...)
+	src.Text = appendStringBytes(src.Text, "func appMain() int { main(); return 0 }\n")
 	base := len(src.Tokens)
-	src.Tokens = append(src.Tokens,
-		unit.Token{Kind: unit.TokenFunc, Start: start, Size: 4, Line: line},
-		unit.Token{Kind: unit.TokenIdent, Start: start + 5, Size: 7, Line: line},
-		unit.Token{Kind: unit.TokenOp, Start: start + 12, Size: 1, Line: line},
-		unit.Token{Kind: unit.TokenOp, Start: start + 13, Size: 1, Line: line},
-		unit.Token{Kind: unit.TokenIdent, Start: start + 15, Size: 3, Line: line},
-		unit.Token{Kind: unit.TokenOp, Start: start + 19, Size: 1, Line: line},
-		unit.Token{Kind: unit.TokenIdent, Start: start + 21, Size: 4, Line: line},
-		unit.Token{Kind: unit.TokenOp, Start: start + 25, Size: 1, Line: line},
-		unit.Token{Kind: unit.TokenOp, Start: start + 26, Size: 1, Line: line},
-		unit.Token{Kind: unit.TokenOp, Start: start + 27, Size: 1, Line: line},
-		unit.Token{Kind: unit.TokenReturn, Start: start + 29, Size: 6, Line: line},
-		unit.Token{Kind: unit.TokenNumber, Start: start + 36, Size: 1, Line: line},
-		unit.Token{Kind: unit.TokenOp, Start: start + 38, Size: 1, Line: line},
-	)
+	src.Tokens = append(src.Tokens, unit.Token{Kind: unit.TokenFunc, Start: start, Size: 4, Line: line})
+	src.Tokens = append(src.Tokens, unit.Token{Kind: unit.TokenIdent, Start: start + 5, Size: 7, Line: line})
+	src.Tokens = append(src.Tokens, unit.Token{Kind: unit.TokenOp, Start: start + 12, Size: 1, Line: line})
+	src.Tokens = append(src.Tokens, unit.Token{Kind: unit.TokenOp, Start: start + 13, Size: 1, Line: line})
+	src.Tokens = append(src.Tokens, unit.Token{Kind: unit.TokenIdent, Start: start + 15, Size: 3, Line: line})
+	src.Tokens = append(src.Tokens, unit.Token{Kind: unit.TokenOp, Start: start + 19, Size: 1, Line: line})
+	src.Tokens = append(src.Tokens, unit.Token{Kind: unit.TokenIdent, Start: start + 21, Size: 4, Line: line})
+	src.Tokens = append(src.Tokens, unit.Token{Kind: unit.TokenOp, Start: start + 25, Size: 1, Line: line})
+	src.Tokens = append(src.Tokens, unit.Token{Kind: unit.TokenOp, Start: start + 26, Size: 1, Line: line})
+	src.Tokens = append(src.Tokens, unit.Token{Kind: unit.TokenOp, Start: start + 27, Size: 1, Line: line})
+	src.Tokens = append(src.Tokens, unit.Token{Kind: unit.TokenReturn, Start: start + 29, Size: 6, Line: line})
+	src.Tokens = append(src.Tokens, unit.Token{Kind: unit.TokenNumber, Start: start + 36, Size: 1, Line: line})
+	src.Tokens = append(src.Tokens, unit.Token{Kind: unit.TokenOp, Start: start + 38, Size: 1, Line: line})
 	eof := len(src.Tokens)
 	src.Tokens = append(src.Tokens, unit.Token{Kind: unit.TokenEOF, Start: len(src.Text), Size: 0, Line: countNewlines(src.Text) + 1})
 	funcIndex := len(src.Funcs)
@@ -171,11 +186,9 @@ func addRootEntrypoint(src unit.Program, packageIndex int) (unit.Program, bool) 
 		FuncIndex: funcIndex,
 		Results:   []unit.Field{{NameTok: -1, TypeStart: base + 4, TypeEnd: base + 5}},
 	})
-	src.Stmts = append(src.Stmts,
-		unit.Statement{FuncIndex: funcIndex, Kind: unit.StmtBlock, StartTok: base + 5, EndTok: base + 13, ExprStart: -1, ExprEnd: -1, BodyStart: base + 5, BodyEnd: base + 13, ElseStart: -1, ElseEnd: -1},
-		unit.Statement{FuncIndex: funcIndex, Kind: unit.StmtExpr, StartTok: base + 6, EndTok: base + 10, ExprStart: base + 6, ExprEnd: base + 9, BodyStart: -1, BodyEnd: -1, ElseStart: -1, ElseEnd: -1},
-		unit.Statement{FuncIndex: funcIndex, Kind: unit.StmtReturn, StartTok: base + 10, EndTok: base + 12, ExprStart: base + 11, ExprEnd: base + 12, BodyStart: -1, BodyEnd: -1, ElseStart: -1, ElseEnd: -1},
-	)
+	src.Stmts = append(src.Stmts, unit.Statement{FuncIndex: funcIndex, Kind: unit.StmtBlock, StartTok: base + 5, EndTok: base + 13, ExprStart: -1, ExprEnd: -1, BodyStart: base + 5, BodyEnd: base + 13, ElseStart: -1, ElseEnd: -1})
+	src.Stmts = append(src.Stmts, unit.Statement{FuncIndex: funcIndex, Kind: unit.StmtExpr, StartTok: base + 6, EndTok: base + 10, ExprStart: base + 6, ExprEnd: base + 9, BodyStart: -1, BodyEnd: -1, ElseStart: -1, ElseEnd: -1})
+	src.Stmts = append(src.Stmts, unit.Statement{FuncIndex: funcIndex, Kind: unit.StmtReturn, StartTok: base + 10, EndTok: base + 12, ExprStart: base + 11, ExprEnd: base + 12, BodyStart: -1, BodyEnd: -1, ElseStart: -1, ElseEnd: -1})
 	src.Returns = append(src.Returns, unit.Return{
 		FuncIndex: funcIndex,
 		StartTok:  base + 10,
@@ -239,7 +252,7 @@ func linkedProgramText(program unit.Program, start int, end int) string {
 	return string(program.Text[start:end])
 }
 
-func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset int, symbolOffsets []int, aliases [][]string, hasNext bool) bool {
+func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset int, symbolOffsets []int, aliases []string, hasNext bool) bool {
 	if src.Package == "" || len(src.Text) == 0 || len(src.Tokens) == 0 {
 		return false
 	}
@@ -249,7 +262,7 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 	typeOffset := len(dst.Types)
 	oldToNew := make([]int, len(src.Tokens))
 	skip, redirect := linkedTokenSkip(src)
-	replacements := linkedTokenReplacements(src, aliases)
+	replacements := linkedTokenReplacements(src, aliases, symbolOffsets)
 	prevEnd := 0
 	for i := 0; i < len(src.Tokens); i++ {
 		tok := src.Tokens[i]
@@ -267,22 +280,22 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 			continue
 		}
 		if tok.Start > prevEnd {
-			dst.Text = append(dst.Text, src.Text[prevEnd:tok.Start]...)
+			dst.Text = appendBytes(dst.Text, src.Text[prevEnd:tok.Start])
 		}
 		oldToNew[i] = len(dst.Tokens)
 		tok.Start = len(dst.Text)
 		if replacements[i] != "" {
-			dst.Text = append(dst.Text, []byte(replacements[i])...)
+			dst.Text = appendStringBytes(dst.Text, replacements[i])
 			tok.Size = len(replacements[i])
 		} else {
-			dst.Text = append(dst.Text, src.Text[tokStart:tokEnd]...)
+			dst.Text = appendBytes(dst.Text, src.Text[tokStart:tokEnd])
 		}
 		tok.Line += lineOffset
 		dst.Tokens = append(dst.Tokens, tok)
 		prevEnd = tokEnd
 	}
 	if prevEnd < len(src.Text) {
-		dst.Text = append(dst.Text, src.Text[prevEnd:]...)
+		dst.Text = appendBytes(dst.Text, src.Text[prevEnd:])
 	}
 	for i := 0; i < len(redirect); i++ {
 		if skip[i] && redirect[i] >= 0 {
@@ -536,11 +549,11 @@ func markRedirectToken(skip []bool, redirect []int, tok int, target int) {
 	redirect[tok] = target
 }
 
-func linkedTokenReplacements(program unit.Program, aliases [][]string) []string {
+func linkedTokenReplacements(program unit.Program, aliases []string, symbolOffsets []int) []string {
 	out := make([]string, len(program.Tokens))
 	for i := 0; i < len(program.Symbols); i++ {
 		symbol := program.Symbols[i]
-		name := packageSymbolAlias(aliases, symbol.Package, i)
+		name := packageSymbolAlias(aliases, symbolOffsets, symbol.Package, i)
 		if name != "" && symbol.Token >= 0 && symbol.Token < len(out) {
 			out[symbol.Token] = name
 		}
@@ -548,7 +561,7 @@ func linkedTokenReplacements(program unit.Program, aliases [][]string) []string 
 	for i := 0; i < len(program.Refs); i++ {
 		ref := program.Refs[i]
 		if ref.Kind == unit.RefPackage {
-			name := packageSymbolAlias(aliases, ref.Package, ref.Index)
+			name := packageSymbolAlias(aliases, symbolOffsets, ref.Package, ref.Index)
 			if name != "" && ref.Token >= 0 && ref.Token < len(out) {
 				out[ref.Token] = name
 			}
@@ -556,14 +569,14 @@ func linkedTokenReplacements(program unit.Program, aliases [][]string) []string 
 	}
 	for i := 0; i < len(program.Selectors); i++ {
 		selector := program.Selectors[i]
-		name := packageSymbolAlias(aliases, selector.Package, selector.Symbol)
+		name := packageSymbolAlias(aliases, symbolOffsets, selector.Package, selector.Symbol)
 		if name != "" && selector.NameTok >= 0 && selector.NameTok < len(out) {
 			out[selector.NameTok] = name
 		}
 	}
 	for i := 0; i < len(program.TypeRefs); i++ {
 		ref := program.TypeRefs[i]
-		name := packageSymbolAlias(aliases, ref.Package, ref.Symbol)
+		name := packageSymbolAlias(aliases, symbolOffsets, ref.Package, ref.Symbol)
 		if name != "" && ref.Token >= 0 && ref.Token < len(out) {
 			out[ref.Token] = name
 		}
@@ -571,13 +584,20 @@ func linkedTokenReplacements(program unit.Program, aliases [][]string) []string 
 	return out
 }
 
-func packageSymbolAliases(programs []unit.Program, root int) [][]string {
-	out := make([][]string, len(programs))
+func packageSymbolAliases(programs []unit.Program, root int, symbolOffsets []int) []string {
+	total := 0
+	if len(programs) > 0 {
+		last := len(programs) - 1
+		total = symbolOffsets[last] + len(programs[last].Symbols)
+	}
+	out := make([]string, total)
 	for i := 0; i < len(programs); i++ {
-		out[i] = make([]string, len(programs[i].Symbols))
+		if i == root {
+			continue
+		}
 		for j := 0; j < len(programs[i].Symbols); j++ {
 			if symbolNeedsAlias(programs, i, j) {
-				out[i][j] = symbolAliasName(i, programs[i].Symbols[j].Name)
+				out[symbolOffsets[i]+j] = symbolAliasName(i, programs[i].Symbols[j].Name)
 			}
 		}
 	}
@@ -599,11 +619,15 @@ func symbolNeedsAlias(programs []unit.Program, pkg int, symbol int) bool {
 	return false
 }
 
-func packageSymbolAlias(aliases [][]string, pkg int, symbol int) string {
-	if pkg < 0 || pkg >= len(aliases) || symbol < 0 || symbol >= len(aliases[pkg]) {
+func packageSymbolAlias(aliases []string, symbolOffsets []int, pkg int, symbol int) string {
+	if pkg < 0 || pkg >= len(symbolOffsets) || symbol < 0 {
 		return ""
 	}
-	return aliases[pkg][symbol]
+	index := symbolOffsets[pkg] + symbol
+	if index < 0 || index >= len(aliases) {
+		return ""
+	}
+	return aliases[index]
 }
 
 func symbolAliasName(pkg int, name string) string {
@@ -625,15 +649,91 @@ func appendInt(out []byte, value int) []byte {
 	if value == 0 {
 		return append(out, '0')
 	}
-	var digits [20]byte
-	n := 0
+	var digits []byte
 	for value > 0 {
-		digits[n] = byte('0' + value%10)
+		digits = append(digits, byte('0'+value%10))
 		value = value / 10
-		n++
 	}
-	for i := n - 1; i >= 0; i-- {
+	for i := len(digits) - 1; i >= 0; i-- {
 		out = append(out, digits[i])
+	}
+	return out
+}
+
+func appendBytes(out []byte, data []byte) []byte {
+	for i := 0; i < len(data); i++ {
+		out = append(out, data[i])
+	}
+	return out
+}
+
+func appendStringBytes(out []byte, data string) []byte {
+	for i := 0; i < len(data); i++ {
+		out = append(out, data[i])
+	}
+	return out
+}
+
+func copyTokens(src []unit.Token, limit int) []unit.Token {
+	var out []unit.Token
+	for i := 0; i < limit && i < len(src); i++ {
+		out = append(out, src[i])
+	}
+	return out
+}
+
+func copyFuncs(src []unit.Func) []unit.Func {
+	var out []unit.Func
+	for i := 0; i < len(src); i++ {
+		out = append(out, src[i])
+	}
+	return out
+}
+
+func copySignatures(src []unit.FuncSignature) []unit.FuncSignature {
+	var out []unit.FuncSignature
+	for i := 0; i < len(src); i++ {
+		out = append(out, src[i])
+	}
+	return out
+}
+
+func copyStatements(src []unit.Statement) []unit.Statement {
+	var out []unit.Statement
+	for i := 0; i < len(src); i++ {
+		out = append(out, src[i])
+	}
+	return out
+}
+
+func copyReturns(src []unit.Return) []unit.Return {
+	var out []unit.Return
+	for i := 0; i < len(src); i++ {
+		out = append(out, src[i])
+	}
+	return out
+}
+
+func copyCalls(src []unit.Call) []unit.Call {
+	var out []unit.Call
+	for i := 0; i < len(src); i++ {
+		out = append(out, src[i])
+	}
+	return out
+}
+
+func copyRefs(src []unit.NameRef) []unit.NameRef {
+	var out []unit.NameRef
+	for i := 0; i < len(src); i++ {
+		out = append(out, src[i])
+	}
+	return out
+}
+
+func copySymbols(src []unit.Symbol) []unit.Symbol {
+	var out []unit.Symbol
+	for i := 0; i < len(src); i++ {
+		out = append(out, src[i])
 	}
 	return out
 }

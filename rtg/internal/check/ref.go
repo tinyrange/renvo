@@ -165,14 +165,32 @@ func lookupScopeNameKind(scope FuncScope, name string, kind int) int {
 }
 
 func isBuiltinName(name string) bool {
-	return name == "append" || name == "bool" || name == "byte" || name == "cap" ||
-		name == "close" || name == "complex" || name == "complex64" || name == "complex128" ||
-		name == "copy" || name == "delete" || name == "error" || name == "false" ||
-		name == "float32" || name == "float64" || name == "imag" || name == "int" ||
-		name == "int8" || name == "int16" || name == "int32" || name == "int64" ||
-		name == "iota" || name == "len" || name == "make" || name == "new" ||
-		name == "nil" || name == "panic" || name == "print" || name == "println" ||
-		name == "real" || name == "recover" || name == "rune" || name == "string" ||
-		name == "true" || name == "uint" || name == "uint8" || name == "uint16" ||
-		name == "uint32" || name == "uint64" || name == "uintptr"
+	if name == "append" || name == "bool" || name == "byte" || name == "cap" {
+		return true
+	}
+	if name == "close" || name == "complex" || name == "complex64" || name == "complex128" {
+		return true
+	}
+	if name == "copy" || name == "delete" || name == "error" || name == "false" {
+		return true
+	}
+	if name == "float32" || name == "float64" || name == "imag" || name == "int" {
+		return true
+	}
+	if name == "int8" || name == "int16" || name == "int32" || name == "int64" {
+		return true
+	}
+	if name == "iota" || name == "len" || name == "make" || name == "new" {
+		return true
+	}
+	if name == "nil" || name == "panic" || name == "print" || name == "println" {
+		return true
+	}
+	if name == "real" || name == "recover" || name == "rune" || name == "string" {
+		return true
+	}
+	if name == "true" || name == "uint" || name == "uint8" || name == "uint16" {
+		return true
+	}
+	return name == "uint32" || name == "uint64" || name == "uintptr"
 }

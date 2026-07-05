@@ -98,6 +98,8 @@ func collectFieldNames(file syntax.File, start int, end int, kind int, scope *Fu
 			next := first + 1
 			if next >= segEnd {
 				pending = append(pending, first)
+			} else if tokCharIs(file, next, '.') {
+				pending = pending[:0]
 			} else {
 				if !addPendingNames(file, pending, kind, scope) {
 					return false, pending[0]

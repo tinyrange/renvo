@@ -501,6 +501,10 @@ func appMain(param lib.Item) item {
 	_ = other
 	return current
 }
+
+func importedResult() (lib.Item, int, bool) {
+	return lib.Item{}, 1, true
+}
 `)},
 		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte(`package lib
 
@@ -526,6 +530,16 @@ type Item struct {
 	assertTypeRef(t, body.TypeRefs, "lib", "Item", TypeRefImportSelector)
 	assertTypeRef(t, body.TypeRefs, "", "item", TypeRefPackage)
 	assertTypeRef(t, body.TypeRefs, "", "local", TypeRefScope)
+
+	resultIndex := LookupFuncBody(root, "importedResult")
+	if resultIndex < 0 {
+		t.Fatalf("importedResult body not found: %#v", root.Bodies)
+	}
+	resultBody := root.Bodies[resultIndex]
+	assertTypeRef(t, resultBody.TypeRefs, "lib", "Item", TypeRefImportSelector)
+	if LookupScopeName(resultBody.Scope, "lib") >= 0 {
+		t.Fatalf("import selector base was added to result scope: %#v", resultBody.Scope.Names)
+	}
 }
 
 func TestCheckGraphMethodSets(t *testing.T) {

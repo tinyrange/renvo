@@ -517,23 +517,47 @@ func hasTopLevelBinary(file File, start int, end int) bool {
 }
 
 func isBinaryOp(file File, i int) bool {
-	return tokenTextIs(file.Src, file.Tokens[i], "||") || tokenTextIs(file.Src, file.Tokens[i], "&&") ||
-		tokenTextIs(file.Src, file.Tokens[i], "==") || tokenTextIs(file.Src, file.Tokens[i], "!=") ||
-		tokenTextIs(file.Src, file.Tokens[i], "<") || tokenTextIs(file.Src, file.Tokens[i], "<=") ||
-		tokenTextIs(file.Src, file.Tokens[i], ">") || tokenTextIs(file.Src, file.Tokens[i], ">=") ||
-		tokenTextIs(file.Src, file.Tokens[i], "+") || tokenTextIs(file.Src, file.Tokens[i], "-") ||
-		tokenTextIs(file.Src, file.Tokens[i], "*") || tokenTextIs(file.Src, file.Tokens[i], "/") ||
-		tokenTextIs(file.Src, file.Tokens[i], "%") || tokenTextIs(file.Src, file.Tokens[i], "&") ||
-		tokenTextIs(file.Src, file.Tokens[i], "|") || tokenTextIs(file.Src, file.Tokens[i], "^") ||
-		tokenTextIs(file.Src, file.Tokens[i], "<<") || tokenTextIs(file.Src, file.Tokens[i], ">>") ||
-		tokenTextIs(file.Src, file.Tokens[i], "&^")
+	if tokenTextIs(file.Src, file.Tokens[i], "||") || tokenTextIs(file.Src, file.Tokens[i], "&&") {
+		return true
+	}
+	if tokenTextIs(file.Src, file.Tokens[i], "==") || tokenTextIs(file.Src, file.Tokens[i], "!=") {
+		return true
+	}
+	if tokenTextIs(file.Src, file.Tokens[i], "<") || tokenTextIs(file.Src, file.Tokens[i], "<=") {
+		return true
+	}
+	if tokenTextIs(file.Src, file.Tokens[i], ">") || tokenTextIs(file.Src, file.Tokens[i], ">=") {
+		return true
+	}
+	if tokenTextIs(file.Src, file.Tokens[i], "+") || tokenTextIs(file.Src, file.Tokens[i], "-") {
+		return true
+	}
+	if tokenTextIs(file.Src, file.Tokens[i], "*") || tokenTextIs(file.Src, file.Tokens[i], "/") {
+		return true
+	}
+	if tokenTextIs(file.Src, file.Tokens[i], "%") || tokenTextIs(file.Src, file.Tokens[i], "&") {
+		return true
+	}
+	if tokenTextIs(file.Src, file.Tokens[i], "|") || tokenTextIs(file.Src, file.Tokens[i], "^") {
+		return true
+	}
+	if tokenTextIs(file.Src, file.Tokens[i], "<<") || tokenTextIs(file.Src, file.Tokens[i], ">>") {
+		return true
+	}
+	return tokenTextIs(file.Src, file.Tokens[i], "&^")
 }
 
 func isUnaryExpr(file File, start int) bool {
-	return tokenTextIs(file.Src, file.Tokens[start], "+") || tokenTextIs(file.Src, file.Tokens[start], "-") ||
-		tokenTextIs(file.Src, file.Tokens[start], "!") || tokenTextIs(file.Src, file.Tokens[start], "^") ||
-		tokenTextIs(file.Src, file.Tokens[start], "*") || tokenTextIs(file.Src, file.Tokens[start], "&") ||
-		tokenTextIs(file.Src, file.Tokens[start], "<-")
+	if tokenTextIs(file.Src, file.Tokens[start], "+") || tokenTextIs(file.Src, file.Tokens[start], "-") {
+		return true
+	}
+	if tokenTextIs(file.Src, file.Tokens[start], "!") || tokenTextIs(file.Src, file.Tokens[start], "^") {
+		return true
+	}
+	if tokenTextIs(file.Src, file.Tokens[start], "*") || tokenTextIs(file.Src, file.Tokens[start], "&") {
+		return true
+	}
+	return tokenTextIs(file.Src, file.Tokens[start], "<-")
 }
 
 func spanHasCall(file File, start int, end int) bool {

@@ -1363,10 +1363,14 @@ type rtgStmt struct {
 }
 
 type rtgBodyParse struct {
-	prog  *rtgProgram
-	stmts []rtgStmt
-	ok    bool
+	prog      *rtgProgram
+	stmtCount int
+	ok        bool
 }
+
+const rtgStmtWordCount = 11
+
+var rtgBodyStmtData []int
 
 const rtgTypeInvalid = 0
 const rtgTypeInt = 1
@@ -3225,7 +3229,7 @@ func rtgParseOneStatement(bp *rtgBodyParse, start int, end int) int {
 				next = elseBodyEnd + 1
 			}
 		}
-		bp.stmts = append(bp.stmts, stmt)
+		rtgAppendStmt(bp, stmt)
 		return next
 	}
 	if rtgTokIsKind(p, start, rtgTokSwitch) {
@@ -3330,7 +3334,48 @@ func rtgAddStmt(bp *rtgBodyParse, kind int, startTok int, endTok int, exprStart 
 	stmt.elseEnd = elseEnd
 	stmt.nameStart = nameStart
 	stmt.nameEnd = nameEnd
-	bp.stmts = append(bp.stmts, stmt)
+	rtgAppendStmt(bp, stmt)
+}
+
+func rtgAppendStmt(bp *rtgBodyParse, stmt rtgStmt) {
+	base := bp.stmtCount * rtgStmtWordCount
+	if bp.stmtCount < 0 || base < 0 || base+rtgStmtWordCount > len(rtgBodyStmtData) {
+		bp.ok = false
+		return
+	}
+	rtgBodyStmtData[base+0] = stmt.kind
+	rtgBodyStmtData[base+1] = stmt.startTok
+	rtgBodyStmtData[base+2] = stmt.endTok
+	rtgBodyStmtData[base+3] = stmt.exprStart
+	rtgBodyStmtData[base+4] = stmt.exprEnd
+	rtgBodyStmtData[base+5] = stmt.bodyStart
+	rtgBodyStmtData[base+6] = stmt.bodyEnd
+	rtgBodyStmtData[base+7] = stmt.elseStart
+	rtgBodyStmtData[base+8] = stmt.elseEnd
+	rtgBodyStmtData[base+9] = stmt.nameStart
+	rtgBodyStmtData[base+10] = stmt.nameEnd
+	bp.stmtCount++
+}
+
+func rtgBodyStmtAt(bp *rtgBodyParse, index int) rtgStmt {
+	var stmt rtgStmt
+	base := index * rtgStmtWordCount
+	if index < 0 || base < 0 || base+rtgStmtWordCount > len(rtgBodyStmtData) {
+		bp.ok = false
+		return stmt
+	}
+	stmt.kind = rtgBodyStmtData[base+0]
+	stmt.startTok = rtgBodyStmtData[base+1]
+	stmt.endTok = rtgBodyStmtData[base+2]
+	stmt.exprStart = rtgBodyStmtData[base+3]
+	stmt.exprEnd = rtgBodyStmtData[base+4]
+	stmt.bodyStart = rtgBodyStmtData[base+5]
+	stmt.bodyEnd = rtgBodyStmtData[base+6]
+	stmt.elseStart = rtgBodyStmtData[base+7]
+	stmt.elseEnd = rtgBodyStmtData[base+8]
+	stmt.nameStart = rtgBodyStmtData[base+9]
+	stmt.nameEnd = rtgBodyStmtData[base+10]
+	return stmt
 }
 
 func rtgFindIfStatementEnd(p *rtgProgram, start int, end int) int {
@@ -3763,8 +3808,11 @@ func rtgParseConstDecls(m *rtgMeta, p *rtgProgram, start int, end int) {
 		if eq > j {
 			prevTypeStart = k
 			prevTypeEnd = headEnd
-			newValues := rtgFixedIntScratch(8)
-			newValues = rtgSplitTopLevelComma(p, eq+1, specEnd, newValues)
+			newValues, ok := rtgSplitTopLevelComma(p, eq+1, specEnd)
+			if !ok {
+				rtgMetaError(m, rtgDiagMetaConstDecl)
+				return
+			}
 			prevValues = newValues
 		}
 		valueCount := len(prevValues) / 2
@@ -4038,9 +4086,14 @@ func rtgParseVarDeclEntry(m *rtgMeta, p *rtgProgram, start int, end int) {
 		typeResult := rtgParseType(m, p, k, headEnd)
 		typ = typeResult.typ
 	}
-	values := rtgFixedIntScratch(4)
+	var values []int
 	if eq > start {
-		values = rtgSplitTopLevelComma(p, eq+1, end, values)
+		valueBuf, ok := rtgSplitTopLevelComma(p, eq+1, end)
+		if !ok {
+			rtgMetaError(m, rtgDiagMetaTopDecl)
+			return
+		}
+		values = valueBuf
 	}
 	valueCount := len(values) / 2
 	if valueCount != 0 && valueCount != len(names) {
@@ -4296,8 +4349,10 @@ func rtgParseFuncResultType(m *rtgMeta, p *rtgProgram, start int, end int) int {
 	if rtgTokCharIs(p, start, '(') {
 		closeTok := rtgFindMatchingExprClose(p, start+1, end, '(', ')')
 		if closeTok > start && closeTok <= end {
-			parts := rtgFixedIntScratch(4)
-			parts = rtgSplitTopLevelComma(p, start+1, closeTok, parts)
+			parts, ok := rtgSplitTopLevelComma(p, start+1, closeTok)
+			if !ok {
+				return 0
+			}
 			count := len(parts) / 2
 			if count > 1 {
 				return rtgBuildTupleType(m, p, parts)
@@ -5351,6 +5406,7 @@ type rtgLinearGen struct {
 	currentFunc        int
 	returnStruct       int
 	locals             []rtgLocalInfo
+	localCount         int
 	stackUsed          int
 	globals            []rtgGlobalInfo
 	gotoLabels         []rtgGlobalInfo
@@ -5397,32 +5453,24 @@ func rtgAddStringData(g *rtgLinearGen, msg []byte) int {
 }
 
 func rtgFunctionLocalCap(fn *rtgFuncDecl) int {
-	localCap := (fn.bodyEnd-fn.bodyStart)/56 + 5
-	if localCap < 5 {
-		localCap = 5
-	}
-	if localCap > 40 {
-		localCap = 40
+	localCap := fn.bodyEnd - fn.bodyStart + 64
+	if localCap < 64 {
+		localCap = 64
 	}
 	return localCap
 }
 
 func rtgEmitLinearRange(g *rtgLinearGen, start int, end int) bool {
 	var bp rtgBodyParse
-	stmtCap := 1024
-	if rtgCompilerFixedTarget != 0 {
-		stmtCap = (end-start)/4 + 4
-		if stmtCap < 8 {
-			stmtCap = 8
-		}
-		if stmtCap > 64 {
-			stmtCap = 64
-		}
+	stmtCap := end - start + 4
+	if stmtCap < 8 {
+		stmtCap = 8
 	}
-	stmts := make([]rtgStmt, 0, stmtCap)
+	stmtData := make([]int, stmtCap*rtgStmtWordCount)
+	rtgBodyStmtData = stmtData
 	prog := g.meta.prog
 	bp.prog = prog
-	bp.stmts = stmts
+	bp.stmtCount = 0
 	bp.ok = true
 	i := start
 	lastKind := 0
@@ -5440,12 +5488,16 @@ func rtgEmitLinearRange(g *rtgLinearGen, start int, end int) bool {
 		if rtgTokCharIs(prog, i, '}') {
 			return true
 		}
-		before := len(bp.stmts)
+		rtgBodyStmtData = stmtData
+		before := bp.stmtCount
 		next := rtgParseOneStatement(&bp, i, end)
-		if !bp.ok || next <= i || len(bp.stmts) <= before {
+		if !bp.ok || next <= i || bp.stmtCount <= before {
 			return false
 		}
-		stmt := bp.stmts[len(bp.stmts)-1]
+		stmt := rtgBodyStmtAt(&bp, bp.stmtCount-1)
+		if !bp.ok {
+			return false
+		}
 		lastKind = stmt.kind
 		i = next
 		if !rtgEmitLinearStmt(g, &stmt) {
@@ -5463,13 +5515,15 @@ func rtgEmitLinearRange(g *rtgLinearGen, start int, end int) bool {
 	return true
 }
 func rtgEmitScopedRange(g *rtgLinearGen, start int, end int) bool {
-	oldLocals := g.locals
+	oldLocalCount := g.localCount
 	oldScopeBase := g.scopeBase
-	g.scopeBase = len(oldLocals)
+	g.scopeBase = oldLocalCount
 	if !rtgEmitLinearRange(g, start, end) {
+		g.localCount = oldLocalCount
+		g.scopeBase = oldScopeBase
 		return false
 	}
-	g.locals = oldLocals
+	g.localCount = oldLocalCount
 	g.scopeBase = oldScopeBase
 	return true
 }
@@ -5807,15 +5861,23 @@ func rtgEmitLinearElse(g *rtgLinearGen, stmt *rtgStmt) bool {
 	}
 	if rtgTokIsKind(p, stmt.elseStart, rtgTokIf) && rtgTokIsKind(p, stmt.elseStart-1, rtgTokElse) {
 		var nested rtgBodyParse
-		stmts := make([]rtgStmt, 0, 16)
+		oldStmtData := rtgBodyStmtData
+		stmtData := make([]int, 16*rtgStmtWordCount)
+		rtgBodyStmtData = stmtData
 		nested.prog = p
-		nested.stmts = stmts
+		nested.stmtCount = 0
 		nested.ok = true
 		next := rtgParseOneStatement(&nested, stmt.elseStart, stmt.elseEnd)
-		if !nested.ok || next != stmt.elseEnd || len(nested.stmts) != 1 {
+		if !nested.ok || next != stmt.elseEnd || nested.stmtCount != 1 {
+			rtgBodyStmtData = oldStmtData
 			return false
 		}
-		nestedStmt := nested.stmts[0]
+		nestedStmt := rtgBodyStmtAt(&nested, 0)
+		if !nested.ok {
+			rtgBodyStmtData = oldStmtData
+			return false
+		}
+		rtgBodyStmtData = oldStmtData
 		return rtgEmitLinearStmt(g, &nestedStmt)
 	}
 	return rtgEmitScopedRange(g, stmt.elseStart, stmt.elseEnd)
@@ -7321,15 +7383,14 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 }
 func rtgEmitMultiAssign(g *rtgLinearGen, stmt *rtgStmt, assignTok int) bool {
 	p := g.prog
-	lhs := rtgFixedIntScratch(8)
-	rhs := rtgFixedIntScratch(8)
-	lhs = rtgSplitTopLevelComma(p, stmt.startTok, assignTok, lhs)
-	lhsCopy := rtgFixedIntScratch(len(lhs))
-	for i := 0; i < len(lhs); i++ {
-		lhsCopy = append(lhsCopy, lhs[i])
+	lhs, ok := rtgSplitTopLevelComma(p, stmt.startTok, assignTok)
+	if !ok {
+		return false
 	}
-	lhs = lhsCopy
-	rhs = rtgSplitTopLevelComma(p, assignTok+1, stmt.endTok, rhs)
+	rhs, ok := rtgSplitTopLevelComma(p, assignTok+1, stmt.endTok)
+	if !ok {
+		return false
+	}
 	lhsCount := len(lhs) / 2
 	rhsCount := len(rhs) / 2
 	if lhsCount <= 1 && rhsCount <= 1 {
@@ -7545,7 +7606,7 @@ func rtgFindLocalIndexInCurrentScope(g *rtgLinearGen, nameStart int, nameEnd int
 	if start < 0 {
 		start = 0
 	}
-	for i := len(g.locals) - 1; i >= start; i-- {
+	for i := g.localCount - 1; i >= start; i-- {
 		if rtgBytesEqualRange(g.prog.src, g.locals[i].nameStart, g.locals[i].nameEnd, nameStart, nameEnd) {
 			return i
 		}
@@ -7554,7 +7615,7 @@ func rtgFindLocalIndexInCurrentScope(g *rtgLinearGen, nameStart int, nameEnd int
 }
 
 func rtgSetLocalConstAtOffset(g *rtgLinearGen, offset int, value int) {
-	for i := len(g.locals) - 1; i >= 0; i-- {
+	for i := g.localCount - 1; i >= 0; i-- {
 		if g.locals[i].offset == offset {
 			g.locals[i].constValue = value
 			g.locals[i].constValid = 1
@@ -7564,7 +7625,7 @@ func rtgSetLocalConstAtOffset(g *rtgLinearGen, offset int, value int) {
 }
 
 func rtgClearLocalConstAtOffset(g *rtgLinearGen, offset int) {
-	for i := len(g.locals) - 1; i >= 0; i-- {
+	for i := g.localCount - 1; i >= 0; i-- {
 		if g.locals[i].offset == offset {
 			g.locals[i].constValid = 0
 			return
@@ -7615,8 +7676,10 @@ func rtgLocalNameWrittenAfter(g *rtgLinearGen, nameStart int, nameEnd int, after
 	return false
 }
 
-func rtgSplitTopLevelComma(p *rtgProgram, start int, end int, ranges []int) []int {
+func rtgSplitTopLevelComma(p *rtgProgram, start int, end int) ([]int, bool) {
+	ranges := make([]int, 1024)
 	partStart := start
+	count := 0
 	paren := 0
 	brack := 0
 	brace := 0
@@ -7641,23 +7704,48 @@ func rtgSplitTopLevelComma(p *rtgProgram, start int, end int, ranges []int) []in
 				brace--
 			}
 		} else if paren == 0 && brack == 0 && brace == 0 && rtgTokCharIs(p, i, ',') {
-			ranges = append(ranges, partStart)
-			ranges = append(ranges, i)
+			if count+1 >= len(ranges) {
+				return nil, false
+			}
+			ranges[count] = partStart
+			ranges[count+1] = i
+			count += 2
 			partStart = i + 1
 		}
 		i++
 	}
 	if partStart < end {
-		ranges = append(ranges, partStart)
-		ranges = append(ranges, end)
+		if count+1 >= len(ranges) {
+			return nil, false
+		}
+		ranges[count] = partStart
+		ranges[count+1] = end
+		count += 2
 	}
-	return ranges
+	return rtgIntSlicePrefix(ranges, count), true
 }
+
+func rtgIntSlicePrefix(src []int, count int) []int {
+	if count < 0 {
+		count = 0
+	}
+	if count > len(src) {
+		count = len(src)
+	}
+	out := make([]int, count)
+	for i := 0; i < count; i++ {
+		out[i] = src[i]
+	}
+	return out
+}
+
 func rtgEmitTupleReturn(g *rtgLinearGen, start int, end int) bool {
 	resultType := g.meta.funcs[g.currentFunc].resultType
 	tuple := rtgResolveType(g.meta, resultType)
-	parts := rtgFixedIntScratch(4)
-	parts = rtgSplitTopLevelComma(g.prog, start, end, parts)
+	parts, ok := rtgSplitTopLevelComma(g.prog, start, end)
+	if !ok {
+		return false
+	}
 	count := len(parts) / 2
 	if count == tuple.count {
 		for i := 0; i < count; i++ {
@@ -7921,12 +8009,12 @@ func rtgFindTypeByRange(g *rtgLinearGen, nameStart int, nameEnd int) int {
 	return 0
 }
 func rtgLocalTypeAtOffset(g *rtgLinearGen, offset int) int {
-	for i := 0; i < len(g.locals); i++ {
+	for i := 0; i < g.localCount; i++ {
 		if g.locals[i].offset == offset {
 			return g.locals[i].typ
 		}
 	}
-	for i := 0; i < len(g.locals); i++ {
+	for i := 0; i < g.localCount; i++ {
 		t := rtgResolveType(g.meta, g.locals[i].typ)
 		if t.kind == rtgTypeStruct {
 			for j := 0; j < t.count; j++ {
@@ -8110,7 +8198,7 @@ func rtgCallSliceResultCanReuseDescriptor(g *rtgLinearGen, ep *rtgExprParse, idx
 }
 
 func rtgLocalIsCurrentFuncParam(g *rtgLinearGen, localIndex int) bool {
-	if localIndex < 0 || localIndex >= len(g.locals) {
+	if localIndex < 0 || localIndex >= g.localCount {
 		return false
 	}
 	if g.currentFunc < 0 || g.currentFunc >= len(g.meta.funcs) {
@@ -8851,12 +8939,36 @@ func rtgEmitStructCallToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, destTy
 		return false
 	}
 	fn := &g.meta.funcs[fnIndex]
+	receiverIndex := -1
+	receiverDotTok := 0
+	if fn.receiverType != 0 {
+		callee := &ep.exprs[e.left]
+		if callee.kind != rtgExprSelector {
+			return false
+		}
+		receiverIndex = callee.left
+		receiverDotTok = callee.tok
+	}
 	wordCount := 1
 	for i := e.argCount - 1; i >= 0; i-- {
 		argIndex := ep.args[e.firstArg+i]
-		words := rtgEmitCallParamArgReverse(g, ep, argIndex, fn.firstParam+i)
+		paramIndex := i
+		if receiverIndex >= 0 {
+			paramIndex = i + 1
+		}
+		words := rtgEmitCallParamArgReverse(g, ep, argIndex, fn.firstParam+paramIndex)
 		if words < 0 {
 			return false
+		}
+		wordCount += words
+	}
+	if receiverIndex >= 0 {
+		words := rtgEmitMethodReceiverArgReverse(g, ep, receiverIndex, g.meta.params[fn.firstParam].typ)
+		if words < 0 {
+			words = rtgEmitMethodReceiverArgTokensReverse(g, receiverDotTok, g.meta.params[fn.firstParam].typ)
+			if words < 0 {
+				return false
+			}
 		}
 		wordCount += words
 	}
@@ -11132,7 +11244,7 @@ func rtgFindLocalOffset(g *rtgLinearGen, nameStart int, nameEnd int) int {
 	return g.locals[localIndex].offset
 }
 func rtgFindLocalIndex(g *rtgLinearGen, nameStart int, nameEnd int) int {
-	for i := len(g.locals) - 1; i >= 0; i-- {
+	for i := g.localCount - 1; i >= 0; i-- {
 		if rtgBytesEqualRange(g.prog.src, g.locals[i].nameStart, g.locals[i].nameEnd, nameStart, nameEnd) {
 			return i
 		}
@@ -11245,14 +11357,31 @@ func rtgAddTypedLocal(g *rtgLinearGen, nameStart int, nameEnd int, typ int) int 
 	}
 	g.stackUsed = rtgAlignTo8(g.stackUsed + size)
 	offset := g.stackUsed
-	g.locals = append(g.locals, rtgLocalInfo{nameStart: nameStart, nameEnd: nameEnd, offset: offset, typ: typ, size: size})
+	if g.localCount >= len(g.locals) {
+		rtgGrowLocalTable(g)
+	}
+	g.locals[g.localCount] = rtgLocalInfo{nameStart: nameStart, nameEnd: nameEnd, offset: offset, typ: typ, size: size}
+	g.localCount++
 	return offset
 }
+
+func rtgGrowLocalTable(g *rtgLinearGen) {
+	newCap := len(g.locals) * 2
+	if newCap < 64 {
+		newCap = 64
+	}
+	newLocals := make([]rtgLocalInfo, newCap)
+	for i := 0; i < g.localCount; i++ {
+		newLocals[i] = g.locals[i]
+	}
+	g.locals = newLocals
+}
+
 func rtgZeroLocalAtOffset(g *rtgLinearGen, offset int) {
 	a := &g.asm
 	size := 8
 	typ := rtgTypeInt
-	for i := 0; i < len(g.locals); i++ {
+	for i := 0; i < g.localCount; i++ {
 		if g.locals[i].offset == offset {
 			size = g.locals[i].size
 			typ = g.locals[i].typ

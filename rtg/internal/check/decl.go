@@ -413,7 +413,7 @@ func appendInitVisit(order []int, decls []DeclInfo, state []int, index int) []in
 
 func declAfter(left DeclInfo, right DeclInfo) bool {
 	if left.Name != right.Name {
-		return left.Name > right.Name
+		return checkStringAfter(left.Name, right.Name)
 	}
 	if left.File != right.File {
 		return left.File > right.File
@@ -433,7 +433,7 @@ func declIndexAfter(decls []DeclInfo, left int, right int) bool {
 	if leftDecl.Kind != rightDecl.Kind {
 		return leftDecl.Kind > rightDecl.Kind
 	}
-	return leftDecl.Name > rightDecl.Name
+	return checkStringAfter(leftDecl.Name, rightDecl.Name)
 }
 
 func lookupDeclBySymbol(decls []DeclInfo, symbol int) int {

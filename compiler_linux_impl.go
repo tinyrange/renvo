@@ -52,8 +52,7 @@ func RtgCompileSourceToBytesStrip(source []byte, targetName string, stripSymbols
 	if target == 0 {
 		return nil, false
 	}
-	rtgCompilerStripSymbols = stripSymbols
-	rtgCompilerFixedTarget = target
+	rtgSetStripSymbols(stripSymbols)
 	rtgSetTarget(target)
 	var prog rtgProgram
 	prog = rtgParseProgram(source)
@@ -91,8 +90,7 @@ func RtgCompileSourceToOutputStrip(source []byte, targetName string, outputPath 
 	if target == 0 {
 		return false
 	}
-	rtgCompilerStripSymbols = stripSymbols
-	rtgCompilerFixedTarget = target
+	rtgSetStripSymbols(stripSymbols)
 	rtgSetTarget(target)
 	var prog rtgProgram
 	prog = rtgParseProgram(source)
@@ -133,6 +131,40 @@ func RtgCompileSourceToOutputStrip(source []byte, targetName string, outputPath 
 		chmod(output, 493)
 	}
 	return true
+}
+
+func RtgCompileUnitToOutputStrip(unit []byte, targetName string, outputPath string, stripSymbols bool) bool {
+	target := rtgParseTargetArg(targetName)
+	if target == 0 {
+		return false
+	}
+	rtgSetStripSymbols(stripSymbols)
+	rtgSetTarget(target)
+	prog, isUnit, ok := rtgDecodeUnitProgram(unit)
+	if !isUnit || !ok {
+		return false
+	}
+	output := 1
+	if outputPath != "-" {
+		output = open(rtgCString(outputPath), O_RDWR|O_CREATE|O_TRUNC)
+		if output < 0 {
+			return false
+		}
+	}
+	result := rtgCompileProgramToOutput(&prog, output, target)
+	if outputPath != "-" {
+		chmod(output, 493)
+		close(output)
+	}
+	return result == 0
+}
+
+func rtgSetStripSymbols(stripSymbols bool) {
+	if stripSymbols {
+		rtgCompilerStripSymbols = true
+		return
+	}
+	rtgCompilerStripSymbols = false
 }
 
 func rtgCString(s string) string {

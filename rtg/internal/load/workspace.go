@@ -79,18 +79,10 @@ func findNearestModule(workDir string, files []SourceFile) (string, []byte, int)
 
 func findSourceFile(files []SourceFile, path string) int {
 	path = CleanPath(path)
-	lo := 0
-	hi := len(files)
-	for lo < hi {
-		mid := lo + (hi-lo)/2
-		if files[mid].Path < path {
-			lo = mid + 1
-		} else {
-			hi = mid
+	for i := 0; i < len(files); i++ {
+		if files[i].Path == path {
+			return i
 		}
-	}
-	if lo < len(files) && files[lo].Path == path {
-		return lo
 	}
 	return -1
 }

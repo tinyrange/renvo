@@ -137,46 +137,109 @@ func CleanPath(path string) string {
 		return "."
 	}
 	absolute := path[0] == '/'
-	parts := make([]string, 0, 8)
+	var out []byte
+	if absolute {
+		out = append(out, '/')
+	}
 	i := 0
-	for i <= len(path) {
-		start := i
-		for i < len(path) && path[i] != '/' {
+	for i < len(path) {
+		for i < len(path) && path[i] == '/' {
 			i++
-		}
-		part := path[start:i]
-		if part == "" || part == "." {
-		} else if part == ".." {
-			if len(parts) > 0 && parts[len(parts)-1] != ".." {
-				parts = parts[:len(parts)-1]
-			} else if !absolute {
-				parts = append(parts, part)
-			}
-		} else {
-			parts = append(parts, part)
 		}
 		if i >= len(path) {
 			break
 		}
-		i++
-	}
-	if len(parts) == 0 {
-		if absolute {
-			return "/"
+		start := i
+		for i < len(path) && path[i] != '/' {
+			i++
 		}
-		return "."
-	}
-	out := make([]byte, 0, len(path))
-	if absolute {
-		out = append(out, '/')
-	}
-	for i = 0; i < len(parts); i++ {
-		if i > 0 {
+		dotPart := cleanPathPartIsDot(path, start, i)
+		if dotPart {
+			continue
+		}
+		dotDotPart := cleanPathPartIsDotDot(path, start, i)
+		if dotDotPart {
+			canPop := false
+			if len(out) > 0 {
+				lastDotDot := cleanPathLastSegmentIsDotDot(out)
+				rootOnly := false
+				if absolute {
+					if len(out) == 1 {
+						rootOnly = true
+					}
+				}
+				if !rootOnly {
+					if !lastDotDot {
+						canPop = true
+					}
+				}
+			}
+			if canPop {
+				popEnd := len(out)
+				for popEnd > 0 && out[popEnd-1] == '/' {
+					popEnd--
+				}
+				popStart := popEnd
+				for popStart > 0 && out[popStart-1] != '/' {
+					popStart--
+				}
+				if popStart > 0 {
+					popStart--
+				}
+				if absolute && popStart <= 0 {
+					out = out[:1]
+				} else {
+					out = out[:popStart]
+				}
+			}
+			if !canPop {
+				if !absolute {
+					if len(out) > 0 {
+						out = append(out, '/')
+					}
+					out = append(out, '.')
+					out = append(out, '.')
+				}
+			}
+			continue
+		}
+		if len(out) > 0 && out[len(out)-1] != '/' {
 			out = append(out, '/')
 		}
-		out = append(out, parts[i]...)
+		for j := start; j < i; j++ {
+			out = append(out, path[j])
+		}
+	}
+	if len(out) == 0 {
+		return "."
 	}
 	return string(out)
+}
+
+func cleanPathPartIsDot(path string, start int, end int) bool {
+	if end-start != 1 {
+		return false
+	}
+	return path[start] == '.'
+}
+
+func cleanPathPartIsDotDot(path string, start int, end int) bool {
+	if end-start != 2 {
+		return false
+	}
+	if path[start] != '.' {
+		return false
+	}
+	next := start + 1
+	return path[next] == '.'
+}
+
+func cleanPathLastSegmentIsDotDot(path []byte) bool {
+	start := len(path)
+	for start > 0 && path[start-1] != '/' {
+		start--
+	}
+	return len(path)-start == 2 && path[start] == '.' && path[start+1] == '.'
 }
 
 func JoinPath(base string, elem string) string {

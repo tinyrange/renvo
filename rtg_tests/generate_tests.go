@@ -37,6 +37,7 @@ func quickCases() []testCase {
 	out = append(out, quickPackages(40)...)
 	out = append(out, quickArrays(25)...)
 	out = append(out, quickFunctions(20)...)
+	out = append(out, quickLiterals(1)...)
 	return out
 }
 
@@ -301,6 +302,42 @@ func main() {
 }
 `, v, want)
 		out = append(out, simpleCase("quick", "functions", i, body))
+	}
+	return out
+}
+
+func quickLiterals(n int) []testCase {
+	var out []testCase
+	for i := 0; i < n; i++ {
+		body := `package main
+
+const hexValue = 0x3e
+
+func append16(out []byte, v int) []byte {
+	out = append(out, byte(v))
+	out = append(out, byte(v>>8))
+	return out
+}
+
+func main() {
+	var out []byte
+	out = append16(out, hexValue)
+	if len(out) != 2 {
+		print("FAIL\n")
+		return
+	}
+	if out[0] != 0x3e {
+		print("FAIL\n")
+		return
+	}
+	if out[1] != 0 {
+		print("FAIL\n")
+		return
+	}
+	print("PASS\n")
+}
+`
+		out = append(out, simpleCase("quick", "literals", i, body))
 	}
 	return out
 }

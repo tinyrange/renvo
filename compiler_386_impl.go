@@ -5,6 +5,7 @@ func rtg386EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	metaFn := &g.meta.funcs[fnInfoIndex]
 	fn := &g.prog.funcs[metaFn.declIndex]
 	oldLocals := g.locals
+	oldLocalCount := g.localCount
 	oldBreak := g.breakDepth
 	oldContinue := g.continueDepth
 	oldCurrent := g.currentFunc
@@ -14,9 +15,10 @@ func rtg386EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	oldLastRangeReturns := g.lastRangeReturns
 	var locals []rtgLocalInfo
 	var gotoLabels []rtgGlobalInfo
-	locals = make([]rtgLocalInfo, 0, rtgFunctionLocalCap(fn))
+	locals = make([]rtgLocalInfo, rtgFunctionLocalCap(fn))
 	gotoLabels = make([]rtgGlobalInfo, 0, 0)
 	g.locals = locals
+	g.localCount = 0
 	g.gotoLabels = gotoLabels
 	g.breakDepth = 0
 	g.continueDepth = 0
@@ -41,6 +43,7 @@ func rtg386EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 		rtgAsmRet(a)
 	}
 	g.locals = oldLocals
+	g.localCount = oldLocalCount
 	g.breakDepth = oldBreak
 	g.continueDepth = oldContinue
 	g.currentFunc = oldCurrent
@@ -813,12 +816,36 @@ func rtg386EmitStructReturnExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool
 			return false
 		}
 		fn := &meta.funcs[fnIndex]
+		receiverIndex := -1
+		receiverDotTok := 0
+		if fn.receiverType != 0 {
+			callee := &ep.exprs[e.left]
+			if callee.kind != rtgExprSelector {
+				return false
+			}
+			receiverIndex = callee.left
+			receiverDotTok = callee.tok
+		}
 		wordCount := 1
 		for i := e.argCount - 1; i >= 0; i-- {
 			argIndex := ep.args[e.firstArg+i]
-			words := rtgEmitCallParamArgReverse(g, ep, argIndex, fn.firstParam+i)
+			paramIndex := i
+			if receiverIndex >= 0 {
+				paramIndex = i + 1
+			}
+			words := rtgEmitCallParamArgReverse(g, ep, argIndex, fn.firstParam+paramIndex)
 			if words < 0 {
 				return false
+			}
+			wordCount += words
+		}
+		if receiverIndex >= 0 {
+			words := rtgEmitMethodReceiverArgReverse(g, ep, receiverIndex, meta.params[fn.firstParam].typ)
+			if words < 0 {
+				words = rtgEmitMethodReceiverArgTokensReverse(g, receiverDotTok, meta.params[fn.firstParam].typ)
+				if words < 0 {
+					return false
+				}
 			}
 			wordCount += words
 		}

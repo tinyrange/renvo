@@ -202,12 +202,32 @@ func sortSourceFiles(files []SourceFile) {
 	for i := 1; i < len(files); i++ {
 		item := files[i]
 		j := i - 1
-		for j >= 0 && files[j].Path > item.Path {
+		for j >= 0 && stringAfter(files[j].Path, item.Path) {
 			files[j+1] = files[j]
 			j--
 		}
 		files[j+1] = item
 	}
+}
+
+func stringAfter(left string, right string) bool {
+	return stringBefore(right, left)
+}
+
+func stringBefore(left string, right string) bool {
+	limit := len(left)
+	if len(right) < limit {
+		limit = len(right)
+	}
+	for i := 0; i < limit; i++ {
+		if left[i] < right[i] {
+			return true
+		}
+		if left[i] > right[i] {
+			return false
+		}
+	}
+	return len(left) < len(right)
 }
 
 func appendImport(imports []PackageRef, ref PackageRef) []PackageRef {

@@ -154,8 +154,15 @@ func CheckGraph(graph load.Graph) Program {
 		return checkFail(prog, CheckErrGraph, graph.ErrorPackage, -1, -1)
 	}
 	for i := 0; i < len(graph.Packages); i++ {
-		info, ok, err, file, tok := checkPackage(graph, i, prog.Packages)
+		info, ok, err, file, tok := checkPackageHeader(graph, i)
 		prog.Packages = append(prog.Packages, info)
+		if !ok {
+			return checkFail(prog, err, i, file, tok)
+		}
+	}
+	for i := 0; i < len(graph.Packages); i++ {
+		info, ok, err, file, tok := checkPackageBody(graph, i, prog.Packages[i], prog.Packages)
+		prog.Packages[i] = info
 		if !ok {
 			return checkFail(prog, err, i, file, tok)
 		}
@@ -191,7 +198,7 @@ func LookupFuncBody(info PackageInfo, name string) int {
 	return -1
 }
 
-func checkPackage(graph load.Graph, pkgIndex int, checked []PackageInfo) (PackageInfo, bool, int, int, int) {
+func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int, int, int) {
 	pkg := graph.Packages[pkgIndex]
 	info := PackageInfo{Name: pkg.Name}
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
@@ -238,6 +245,11 @@ func checkPackage(graph load.Graph, pkgIndex int, checked []PackageInfo) (Packag
 	}
 	sortSymbols(info.Symbols)
 	sortImports(info.Imports)
+	return info, true, CheckOK, -1, -1
+}
+
+func checkPackageBody(graph load.Graph, pkgIndex int, info PackageInfo, checked []PackageInfo) (PackageInfo, bool, int, int, int) {
+	pkg := graph.Packages[pkgIndex]
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
 		file := pkg.Files[fileIndex].File
 		for i := 0; i < len(file.Decls); i++ {
@@ -390,7 +402,7 @@ func sortSymbols(symbols []Symbol) {
 
 func symbolAfter(left Symbol, right Symbol) bool {
 	if left.Name != right.Name {
-		return left.Name > right.Name
+		return checkStringAfter(left.Name, right.Name)
 	}
 	if left.Kind != right.Kind {
 		return left.Kind > right.Kind
@@ -418,9 +430,9 @@ func importAfter(left Import, right Import) bool {
 		return left.File > right.File
 	}
 	if left.Name != right.Name {
-		return left.Name > right.Name
+		return checkStringAfter(left.Name, right.Name)
 	}
-	return left.ImportPath > right.ImportPath
+	return checkStringAfter(left.ImportPath, right.ImportPath)
 }
 
 func checkFail(prog Program, err int, pkg int, file int, tok int) Program {

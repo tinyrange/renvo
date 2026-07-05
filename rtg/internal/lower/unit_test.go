@@ -603,6 +603,7 @@ func TestEmitTokenKinds(t *testing.T) {
 
 const whole = 1
 const fractional = 1.5
+const hex = 0x3e
 const imported = import
 
 func appMain() int {
@@ -618,6 +619,7 @@ func appMain() int {
 		t.Fatalf("EmitRoot failed: err=%d file=%d tok=%d", result.Error, result.ErrorFile, result.ErrorToken)
 	}
 	foundFloat := false
+	foundHexNumber := false
 	foundImportIdent := false
 	foundIf := false
 	for i := 0; i < len(result.Program.Tokens); i++ {
@@ -625,6 +627,9 @@ func appMain() int {
 		text := string(result.Program.Text[tok.Start : tok.Start+tok.Size])
 		if text == "1.5" && tok.Kind == unit.TokenFloat {
 			foundFloat = true
+		}
+		if text == "0x3e" && tok.Kind == unit.TokenNumber {
+			foundHexNumber = true
 		}
 		if text == "import" && tok.Kind == unit.TokenIdent {
 			foundImportIdent = true
@@ -635,6 +640,9 @@ func appMain() int {
 	}
 	if !foundFloat {
 		t.Fatal("float literal was not emitted as unit.TokenFloat")
+	}
+	if !foundHexNumber {
+		t.Fatal("hex integer literal was not emitted as unit.TokenNumber")
 	}
 	if !foundImportIdent {
 		t.Fatal("unsupported import keyword was not downgraded to unit.TokenIdent")

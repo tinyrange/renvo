@@ -177,11 +177,19 @@ func findTopLevelAssignOp(file syntax.File, start int, end int) int {
 }
 
 func isAssignOp(file syntax.File, tok int) bool {
-	return tokenTextIs(file, tok, "=") || tokenTextIs(file, tok, ":=") ||
-		tokenTextIs(file, tok, "+=") || tokenTextIs(file, tok, "-=") ||
-		tokenTextIs(file, tok, "*=") || tokenTextIs(file, tok, "/=") ||
-		tokenTextIs(file, tok, "%=") || tokenTextIs(file, tok, "&=") ||
-		tokenTextIs(file, tok, "|=") || tokenTextIs(file, tok, "^=")
+	if tokenTextIs(file, tok, "=") || tokenTextIs(file, tok, ":=") {
+		return true
+	}
+	if tokenTextIs(file, tok, "+=") || tokenTextIs(file, tok, "-=") {
+		return true
+	}
+	if tokenTextIs(file, tok, "*=") || tokenTextIs(file, tok, "/=") {
+		return true
+	}
+	if tokenTextIs(file, tok, "%=") || tokenTextIs(file, tok, "&=") {
+		return true
+	}
+	return tokenTextIs(file, tok, "|=") || tokenTextIs(file, tok, "^=")
 }
 
 func assignKind(file syntax.File, tok int) int {
