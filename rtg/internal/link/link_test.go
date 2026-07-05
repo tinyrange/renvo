@@ -250,6 +250,54 @@ func appMain() int {
 	}
 }
 
+func TestLinkUnitsLowersSimpleClosureAdder(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+func makeAdder(base int) func(int) int {
+	return func(v int) int {
+		return base + v
+	}
+}
+
+func appMain() int {
+	add := makeAdder(0)
+	if add(0) == 0 {
+		print("PASS\n")
+		return 0
+	}
+	print("FAIL\n")
+	return 1
+}
+`)},
+	})
+	program, ok := LinkUnits(result.Units, result.Root)
+	if !ok {
+		t.Fatal("LinkUnits failed")
+	}
+	if bytes.Contains(program.Text, []byte("func(v int)")) || bytes.Contains(program.Text, []byte("func(int) int")) {
+		t.Fatalf("linked text still contains closure syntax:\n%s", string(program.Text))
+	}
+	if !bytes.Contains(program.Text, []byte("func makeAdder(base int) int")) ||
+		!bytes.Contains(program.Text, []byte("return base")) ||
+		!bytes.Contains(program.Text, []byte("add+0 == 0")) {
+		t.Fatalf("linked text missing lowered closure shape:\n%s", string(program.Text))
+	}
+	makeAdder := findLinkedFunc(program, "makeAdder")
+	if makeAdder < 0 {
+		t.Fatalf("makeAdder not found in %#v", program.Funcs)
+	}
+	assertLinkedStatement(t, program, makeAdder, unit.StmtReturn, "base")
+	linked := LinkBuild(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuild failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	if _, err := rtgunit.Unmarshal(linked.Data); err != nil {
+		t.Fatalf("linked unit did not decode: %v", err)
+	}
+}
+
 func TestLinkBuildAddsRootEntrypointWrapper(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},

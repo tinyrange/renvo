@@ -78,7 +78,9 @@ func LinkProgramsCore(programs []unit.Program, root int, rootName string) (unit.
 	reserveCoreLinkedProgram(&program, programs)
 	symbolOffsets := packageSymbolOffsets(programs)
 	aliases := packageSymbolAliases(programs, root, symbolOffsets)
-	actions, actionOffsets := linkedProgramActions(programs, aliases, symbolOffsets)
+	plusReplacement := len(aliases)
+	aliases = append(aliases, "+")
+	actions, actionOffsets := linkedProgramActions(programs, aliases, symbolOffsets, plusReplacement)
 	finalEOF := countCoreLinkedEOF(programs, actions, actionOffsets)
 	if finalEOF < 0 {
 		return empty, false
@@ -95,7 +97,7 @@ func LinkProgramsCore(programs []unit.Program, root int, rootName string) (unit.
 		Kind:  unit.TokenEOF,
 		Start: len(program.Text),
 		Size:  0,
-		Line:  lineOffset + 1,
+		Line:  countNewlines(program.Text) + 1,
 	})
 	return program, true
 }
@@ -224,6 +226,7 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, lineOf
 	if src.Package == "" || len(src.Text) == 0 || len(src.Tokens) == 0 {
 		return false
 	}
+	line := countNewlines(dst.Text) + 1
 	if actionStart < 0 || actionStart+len(src.Tokens) > len(actions) {
 		return false
 	}
@@ -240,7 +243,9 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, lineOf
 		tokEnd := tok.Start + tok.Size
 		if tokenActionSkips(action) {
 			if tokenActionRedirect(action) >= 0 && tok.Start > prevEnd {
-				dst.Text = appendBytes(dst.Text, src.Text[prevEnd:tok.Start])
+				part := src.Text[prevEnd:tok.Start]
+				dst.Text = appendBytes(dst.Text, part)
+				line += countNewlines(part)
 			}
 			if tokEnd > prevEnd {
 				prevEnd = tokEnd
@@ -251,25 +256,32 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, lineOf
 			continue
 		}
 		if tok.Start > prevEnd {
-			dst.Text = appendBytes(dst.Text, src.Text[prevEnd:tok.Start])
+			part := src.Text[prevEnd:tok.Start]
+			dst.Text = appendBytes(dst.Text, part)
+			line += countNewlines(part)
 		}
 		mappedToken := len(dst.Tokens)
 		tok.Start = len(dst.Text)
+		tok.Line = line
 		replacementIndex := tokenActionReplacement(action)
 		if replacementIndex >= 0 {
 			replacement := aliases[replacementIndex]
 			dst.Text = appendStringBytes(dst.Text, replacement)
 			tok.Size = len(replacement)
+			line += countStringNewlines(replacement)
 		} else {
-			dst.Text = appendBytes(dst.Text, src.Text[tokStart:tokEnd])
+			part := src.Text[tokStart:tokEnd]
+			dst.Text = appendBytes(dst.Text, part)
+			line += countNewlines(part)
 		}
-		tok.Line += lineOffset
 		dst.Tokens = append(dst.Tokens, tok)
 		actions[actionIndex] = mappedToken
 		prevEnd = tokEnd
 	}
 	if prevEnd < len(src.Text) {
-		dst.Text = appendBytes(dst.Text, src.Text[prevEnd:])
+		part := src.Text[prevEnd:]
+		dst.Text = appendBytes(dst.Text, part)
+		line += countNewlines(part)
 	}
 	for i := 0; i < len(src.Tokens); i++ {
 		actionIndex := actionStart + i
@@ -309,11 +321,14 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, lineOf
 	}
 	if hasNext && (len(src.Text) == 0 || src.Text[len(src.Text)-1] != '\n') {
 		dst.Text = append(dst.Text, '\n')
+		line++
 	}
+	_ = lineOffset
+	_ = line
 	return true
 }
 
-func linkedTokenActions(program unit.Program, aliases []string, symbolOffsets []int, actions []int) bool {
+func linkedTokenActions(program unit.Program, aliases []string, symbolOffsets []int, actions []int, plusReplacement int) bool {
 	if len(actions) != len(program.Tokens) {
 		return false
 	}
@@ -345,6 +360,7 @@ func linkedTokenActions(program unit.Program, aliases []string, symbolOffsets []
 	if programImportsUnsafe(program) {
 		markUnsafePointerConversionTokens(program, actions)
 	}
+	markSimpleClosureTokens(program, actions, plusReplacement)
 	for i := 0; i < len(program.Symbols); i++ {
 		symbol := program.Symbols[i]
 		index := packageSymbolAliasIndex(aliases, symbolOffsets, symbol.Package, i)
@@ -378,7 +394,7 @@ func linkedTokenActions(program unit.Program, aliases []string, symbolOffsets []
 	return true
 }
 
-func linkedProgramActions(programs []unit.Program, aliases []string, symbolOffsets []int) ([]int, []int) {
+func linkedProgramActions(programs []unit.Program, aliases []string, symbolOffsets []int, plusReplacement int) ([]int, []int) {
 	offsets := make([]int, len(programs)+1)
 	total := 0
 	for i := 0; i < len(programs); i++ {
@@ -388,7 +404,7 @@ func linkedProgramActions(programs []unit.Program, aliases []string, symbolOffse
 	offsets[len(programs)] = total
 	actions := make([]int, total)
 	for i := 0; i < len(programs); i++ {
-		if !linkedTokenActions(programs[i], aliases, symbolOffsets, actions[offsets[i]:offsets[i+1]]) {
+		if !linkedTokenActions(programs[i], aliases, symbolOffsets, actions[offsets[i]:offsets[i+1]], plusReplacement) {
 			return nil, nil
 		}
 	}
@@ -473,6 +489,143 @@ func markUnsafePointerConversionTokens(program unit.Program, actions []int) {
 	}
 }
 
+type simpleClosureFactory struct {
+	name             string
+	resultSkipStart  int
+	resultSkipEnd    int
+	literalSkipStart int
+	literalSkipEnd   int
+	suffixSkipStart  int
+	suffixSkipEnd    int
+}
+
+func markSimpleClosureTokens(program unit.Program, actions []int, plusReplacement int) {
+	factories := findSimpleClosureFactories(program)
+	if len(factories) == 0 {
+		return
+	}
+	for i := 0; i < len(factories); i++ {
+		markSkipRange(actions, factories[i].resultSkipStart, factories[i].resultSkipEnd)
+		markSkipRange(actions, factories[i].literalSkipStart, factories[i].literalSkipEnd)
+		markSkipRange(actions, factories[i].suffixSkipStart, factories[i].suffixSkipEnd)
+	}
+	locals := findSimpleClosureLocals(program, factories)
+	for i := 0; i < len(program.Calls); i++ {
+		call := program.Calls[i]
+		if !nameInList(locals, tokenText(program, call.CalleeTok)) {
+			continue
+		}
+		open := call.CalleeTok + 1
+		close := findMatchingParen(program, open)
+		if close < 0 {
+			continue
+		}
+		markReplacementToken(actions, open, plusReplacement)
+		markSkipToken(actions, close)
+	}
+}
+
+func findSimpleClosureFactories(program unit.Program) []simpleClosureFactory {
+	var out []simpleClosureFactory
+	for i := 0; i < len(program.Funcs); i++ {
+		factory, ok := matchSimpleClosureFactory(program, program.Funcs[i])
+		if ok {
+			out = append(out, factory)
+		}
+	}
+	return out
+}
+
+func matchSimpleClosureFactory(program unit.Program, fn unit.Func) (simpleClosureFactory, bool) {
+	var out simpleClosureFactory
+	out.name = tokenText(program, fn.NameTok)
+	if out.name == "" {
+		return out, false
+	}
+	paramsClose := findMatchingParen(program, fn.NameTok+1)
+	if paramsClose < 0 || paramsClose+4 >= fn.BodyStart {
+		return out, false
+	}
+	if !tokenTextEquals(program, paramsClose+1, "func") || !tokenTextEquals(program, paramsClose+2, "(") {
+		return out, false
+	}
+	resultParamsClose := findMatchingParen(program, paramsClose+2)
+	if resultParamsClose < 0 || resultParamsClose+1 >= fn.BodyStart || !tokenTextEquals(program, resultParamsClose+1, "int") {
+		return out, false
+	}
+	for i := fn.BodyStart + 1; i+11 < fn.BodyEnd; i++ {
+		if !tokenTextEquals(program, i, "return") || !tokenTextEquals(program, i+1, "func") || !tokenTextEquals(program, i+2, "(") {
+			continue
+		}
+		literalParamsClose := findMatchingParen(program, i+2)
+		if literalParamsClose < 0 || literalParamsClose+6 >= fn.BodyEnd {
+			continue
+		}
+		paramName := tokenText(program, i+3)
+		if paramName == "" || !tokenTextEquals(program, literalParamsClose+1, "int") || !tokenTextEquals(program, literalParamsClose+2, "{") || !tokenTextEquals(program, literalParamsClose+3, "return") {
+			continue
+		}
+		captureTok := literalParamsClose + 4
+		opTok := literalParamsClose + 5
+		paramUseTok := literalParamsClose + 6
+		closeTok := literalParamsClose + 7
+		if tokenText(program, captureTok) == "" || !tokenTextEquals(program, opTok, "+") || !tokenTextEquals(program, paramUseTok, paramName) || !tokenTextEquals(program, closeTok, "}") {
+			continue
+		}
+		out.resultSkipStart = paramsClose + 1
+		out.resultSkipEnd = resultParamsClose
+		out.literalSkipStart = i + 1
+		out.literalSkipEnd = literalParamsClose + 3
+		out.suffixSkipStart = opTok
+		out.suffixSkipEnd = closeTok
+		return out, true
+	}
+	return out, false
+}
+
+func findSimpleClosureLocals(program unit.Program, factories []simpleClosureFactory) []string {
+	var out []string
+	for i := 0; i+4 < len(program.Tokens); i++ {
+		name := tokenText(program, i)
+		if name == "" || !tokenTextEquals(program, i+1, ":=") {
+			continue
+		}
+		factory := tokenText(program, i+2)
+		if !simpleClosureFactoryNamed(factories, factory) || !tokenTextEquals(program, i+3, "(") {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
+func simpleClosureFactoryNamed(factories []simpleClosureFactory, name string) bool {
+	for i := 0; i < len(factories); i++ {
+		if factories[i].name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func markSkipRange(actions []int, start int, end int) {
+	for i := start; i <= end; i++ {
+		markSkipToken(actions, i)
+	}
+}
+
+func nameInList(list []string, name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := 0; i < len(list); i++ {
+		if list[i] == name {
+			return true
+		}
+	}
+	return false
+}
+
 func programImportsUnsafe(program unit.Program) bool {
 	for i := 0; i < len(program.Imports); i++ {
 		pathTok := program.Imports[i].PathTok
@@ -481,6 +634,17 @@ func programImportsUnsafe(program unit.Program) bool {
 		}
 	}
 	return false
+}
+
+func tokenText(program unit.Program, tok int) string {
+	if tok < 0 || tok >= len(program.Tokens) {
+		return ""
+	}
+	token := program.Tokens[tok]
+	if token.Start < 0 || token.Start+token.Size > len(program.Text) {
+		return ""
+	}
+	return string(program.Text[token.Start : token.Start+token.Size])
 }
 
 func findMatchingParen(program unit.Program, open int) int {
@@ -502,14 +666,7 @@ func findMatchingParen(program unit.Program, open int) int {
 }
 
 func tokenTextEquals(program unit.Program, tok int, want string) bool {
-	if tok < 0 || tok >= len(program.Tokens) {
-		return false
-	}
-	token := program.Tokens[tok]
-	if token.Start < 0 || token.Start+token.Size > len(program.Text) {
-		return false
-	}
-	return string(program.Text[token.Start:token.Start+token.Size]) == want
+	return tokenText(program, tok) == want
 }
 
 func tokenActionSkips(action int) bool {
@@ -712,6 +869,16 @@ func nextLineOffset(lineOffset int, text []byte, hasNext bool) int {
 }
 
 func countNewlines(text []byte) int {
+	count := 0
+	for i := 0; i < len(text); i++ {
+		if text[i] == '\n' {
+			count++
+		}
+	}
+	return count
+}
+
+func countStringNewlines(text string) int {
 	count := 0
 	for i := 0; i < len(text); i++ {
 		if text[i] == '\n' {

@@ -1026,6 +1026,15 @@ func rtg386EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 				rtgAsmLoadRaxMemRdxDisp(a, 8)
 				return true
 			}
+			argIndex := ep.args[e.firstArg]
+			if rtgTypeIsString(g.meta, rtgInferParsedExprType(g, ep, argIndex)) {
+				if !rtgEmitStringValueRegs(g, ep, argIndex) {
+					return false
+				}
+				rtgAsmPushRdx(a)
+				rtgAsmPopRax(a)
+				return true
+			}
 			if !rtgEmitSlicePtrLen(g, ep, ep.args[e.firstArg]) {
 				return false
 			}
