@@ -119,12 +119,14 @@ func (b *unitBuilder) reserveCheckedPackage(pkg load.Package, info check.Package
 	selectorCap := 0
 	for i := 0; i < len(info.Decls); i++ {
 		decl := info.Decls[i]
+		callCap += len(decl.Calls)
 		refCap += len(decl.CoreRefs)
 		selectorCap += len(decl.CoreSelectors)
 	}
 	for i := 0; i < len(info.Bodies); i++ {
 		body := info.Bodies[i]
 		typeRefCap += len(body.CoreTypeRefs)
+		callCap += len(body.Calls)
 		refCap += len(body.CoreRefs)
 		selectorCap += len(body.CoreSelectors)
 	}
@@ -297,6 +299,9 @@ func (b *unitBuilder) addCheckedDecls(info check.PackageInfo, files []fileTokens
 		}
 		ownerIndex := len(b.program.Decls) - 1
 		b.declRows[index] = ownerIndex
+		if !b.addDeclCalls(declInfo, files[declInfo.File].tokens, ownerIndex) {
+			return false
+		}
 		if !b.addDeclResolution(declInfo, files[declInfo.File].tokens, ownerIndex) {
 			return false
 		}
@@ -351,6 +356,9 @@ func (b *unitBuilder) addCheckedFuncs(info check.PackageInfo, files []fileTokens
 		}
 		ownerIndex := len(b.program.Funcs) - 1
 		b.funcRows[i] = ownerIndex
+		if !b.addBodyCalls(body, files[body.File].tokens, ownerIndex) {
+			return false
+		}
 		if !b.addBodyResolution(body, files[body.File].tokens, ownerIndex) {
 			return false
 		}
@@ -380,6 +388,18 @@ func (b *unitBuilder) addCheckedSymbols(info check.PackageInfo, files []fileToke
 		out.Package = symbols[i].Package
 		out.Token = token
 		b.program.Symbols = append(b.program.Symbols, out)
+	}
+	return true
+}
+
+func (b *unitBuilder) addDeclCalls(decl check.DeclInfo, mapping tokenMap, ownerIndex int) bool {
+	for i := 0; i < len(decl.Calls); i++ {
+		call, ok := mapCallRef(decl.Calls[i], mapping, b.finalEOF)
+		if !ok || ownerIndex < 0 {
+			b.setErr(EmitErrCheck, decl.File, decl.Token)
+			return false
+		}
+		b.program.Calls = append(b.program.Calls, call)
 	}
 	return true
 }
@@ -420,6 +440,18 @@ func (b *unitBuilder) addBodyResolution(body check.FuncBody, mapping tokenMap, o
 			return false
 		}
 		b.program.Selectors = append(b.program.Selectors, selector)
+	}
+	return true
+}
+
+func (b *unitBuilder) addBodyCalls(body check.FuncBody, mapping tokenMap, ownerIndex int) bool {
+	for i := 0; i < len(body.Calls); i++ {
+		call, ok := mapCallRef(body.Calls[i], mapping, b.finalEOF)
+		if !ok || ownerIndex < 0 {
+			b.setErr(EmitErrCheck, body.File, body.Body.ErrorTok)
+			return false
+		}
+		b.program.Calls = append(b.program.Calls, call)
 	}
 	return true
 }
@@ -476,6 +508,19 @@ func unitTypeRefKind(kind int) (int, bool) {
 		return unit.TypeRefBuiltin, true
 	}
 	return 0, false
+}
+
+func mapCallRef(call check.CallRef, mapping tokenMap, eof int) (unit.Call, bool) {
+	out := unit.Call{
+		Kind:      call.Kind,
+		CalleeTok: mapToken(mapping, call.CalleeToken, eof),
+		BaseTok:   mapToken(mapping, call.BaseToken, eof),
+		DotTok:    mapToken(mapping, call.DotToken, eof),
+	}
+	if out.CalleeTok < 0 || out.BaseTok < 0 || out.DotTok < 0 {
+		return out, false
+	}
+	return out, true
 }
 
 func mapCoreNameRef(ref check.CoreNameRef, mapping tokenMap, eof int, ownerIndex int) (unit.NameRef, bool) {

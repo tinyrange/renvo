@@ -81,6 +81,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			out.CoreSelectors = make([]CoreSelectorRef, 0, countImportSelectorsCore(file, fileIndex, info, checked, scope, bodyStart, bodyEnd))
 			out.CoreRefs = appendExprPackageRefsCore(out.CoreRefs, file, fileIndex, info, scope, bodyStart, bodyEnd)
 			out.CoreSelectors = appendImportSelectorsCore(out.CoreSelectors, file, fileIndex, info, checked, scope, bodyStart, bodyEnd)
+			out.Calls = appendCallsCore(out.Calls, file, fileIndex, info, checked, scope, bodyStart, bodyEnd)
 			locals := buildFuncLocalTypeSpansCore(file, fn)
 			out.CoreTypeRefs = buildFuncTypeRefsCore(file, fileIndex, info, checked, signature, locals, scope)
 			info.Bodies = append(info.Bodies, out)
@@ -147,10 +148,44 @@ func buildDeclInfoCore(file syntax.File, fileIndex int, info PackageInfo, checke
 		out.CoreSelectors = make([]CoreSelectorRef, 0, countImportSelectorsCore(file, fileIndex, info, checked, CoreScope{}, out.ValueStart, out.ValueEnd))
 		out.CoreRefs = appendExprPackageRefsCore(out.CoreRefs, file, fileIndex, info, CoreScope{}, out.ValueStart, out.ValueEnd)
 		out.CoreSelectors = appendImportSelectorsCore(out.CoreSelectors, file, fileIndex, info, checked, CoreScope{}, out.ValueStart, out.ValueEnd)
+		out.Calls = appendCallsCore(out.Calls, file, fileIndex, info, checked, CoreScope{}, out.ValueStart, out.ValueEnd)
 	} else {
 		out.TypeStart, out.TypeEnd = trimDeclSpan(file, typeStart, decl.EndTok)
 	}
 	return out
+}
+
+func appendCallsCore(calls []CallRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope CoreScope, start int, end int) []CallRef {
+	for i := start; i < end && i < len(file.Tokens); i++ {
+		if !tokCharIs(file, i, '(') {
+			continue
+		}
+		closeTok := findTypeMatching(file, i, '(', ')')
+		if closeTok <= i || closeTok > end+1 {
+			continue
+		}
+		callee := i - 1
+		if callee < start || file.Tokens[callee].Kind != syntax.TokenIdent {
+			continue
+		}
+		var call CallRef
+		call.Kind = CallUnknown
+		call.CalleeToken = callee
+		call.BaseToken = -1
+		call.DotToken = -1
+		if callee-1 >= start && tokenTextIs(file, callee-1, ".") && callee-2 >= start && file.Tokens[callee-2].Kind == syntax.TokenIdent {
+			selector := resolveImportSelectorCore(fileIndex, info, checked, scope, file, callee-2, callee-1, callee)
+			call.BaseToken = callee - 2
+			call.DotToken = callee - 1
+			if selector.Kind == SelectorImport {
+				call.Kind = CallImportSelector
+				call.Package = selector.Package
+				call.Symbol = selector.Symbol
+			}
+		}
+		calls = append(calls, call)
+	}
+	return calls
 }
 
 type CoreScope struct {

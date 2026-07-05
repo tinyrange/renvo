@@ -15,11 +15,16 @@ import (
 const extendedTestsEnv = "RTG_FRONTEND_EXTENDED_TESTS"
 const frontendEnv = "RTG_FRONTEND"
 const targetEnv = "RTG_FRONTEND_TARGET"
+const selfHostTestsEnv = "RTG_FRONTEND_SELFHOST_TESTS"
 
 var frontendOnce sync.Once
 var frontendPath string
 var frontendBackendPath string
 var frontendErr error
+var selfHostOnce sync.Once
+var selfHostPath string
+var selfHostBackendPath string
+var selfHostErr error
 
 type corpusCase struct {
 	name string
@@ -43,16 +48,40 @@ func TestFrontendExtendedCorpus(t *testing.T) {
 	runFrontendCorpus(t, "extended", false)
 }
 
+func TestFrontendStage3QuickCorpus(t *testing.T) {
+	if os.Getenv(selfHostTestsEnv) != "1" {
+		t.Skipf("set %s=1 to run self-hosted frontend corpus", selfHostTestsEnv)
+	}
+	root := repoRoot(t)
+	runFrontendCorpusWithConfig(t, root, "quick", true, selfHostedFrontendCompiler(t, root))
+}
+
+func TestFrontendStage3ExtendedCorpus(t *testing.T) {
+	if os.Getenv(selfHostTestsEnv) != "1" {
+		t.Skipf("set %s=1 to run self-hosted frontend corpus", selfHostTestsEnv)
+	}
+	if os.Getenv(extendedTestsEnv) != "1" {
+		t.Skipf("set %s=1 to run extended frontend corpus", extendedTestsEnv)
+	}
+	root := repoRoot(t)
+	runFrontendCorpusWithConfig(t, root, "extended", false, selfHostedFrontendCompiler(t, root))
+}
+
 func runFrontendCorpus(t *testing.T, tier string, parallel bool) {
 	t.Helper()
 
 	root := repoRoot(t)
+	runFrontendCorpusWithConfig(t, root, tier, parallel, frontendCompiler(t, root))
+}
+
+func runFrontendCorpusWithConfig(t *testing.T, root string, tier string, parallel bool, frontend frontendConfig) {
+	t.Helper()
+
 	cases := discoverCorpusCases(t, filepath.Join(root, "rtg_tests", tier))
 	if len(cases) == 0 {
 		t.Fatalf("no %s frontend corpus cases found", tier)
 	}
 
-	frontend := frontendCompiler(t, root)
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -108,6 +137,76 @@ func sortCorpusCases(cases []corpusCase) {
 	}
 }
 
+func selfHostedFrontendCompiler(t *testing.T, root string) frontendConfig {
+	t.Helper()
+
+	target := frontendTarget(t)
+	selfHostOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "rtg-frontend-selfhost-*")
+		if err != nil {
+			selfHostErr = err
+			return
+		}
+		selfHostBackendPath = filepath.Join(dir, "rtgx-backend")
+		cmd := exec.Command("go", "build", "-o", selfHostBackendPath, ".")
+		cmd.Dir = root
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			selfHostErr = fmt.Errorf("backend build failed: %v\n%s", err, string(out))
+			return
+		}
+		stage0 := filepath.Join(dir, "rtg-stage0")
+		cmd = exec.Command("go", "build", "-o", stage0, "./rtg/cmd/rtg")
+		cmd.Dir = root
+		out, err = cmd.CombinedOutput()
+		if err != nil {
+			selfHostErr = fmt.Errorf("frontend stage0 host build failed: %v\n%s", err, string(out))
+			return
+		}
+		stage1 := filepath.Join(dir, "rtg-stage1")
+		stage2 := filepath.Join(dir, "rtg-stage2")
+		selfHostPath = filepath.Join(dir, "rtg-stage3")
+		env := []string{"RTG_BACKEND=" + selfHostBackendPath, "RTG_STDROOT=" + filepath.Join(root, "rtg", "std")}
+		if err := compileFrontendSource(root, stage0, target, stage1, env); err != nil {
+			selfHostErr = fmt.Errorf("frontend stage1 build failed: %w", err)
+			return
+		}
+		if err := compileFrontendSource(root, stage1, target, stage2, env); err != nil {
+			selfHostErr = fmt.Errorf("frontend stage2 build failed: %w", err)
+			return
+		}
+		if err := compileFrontendSource(root, stage2, target, selfHostPath, env); err != nil {
+			selfHostErr = fmt.Errorf("frontend stage3 build failed: %w", err)
+			return
+		}
+	})
+	if selfHostErr != nil {
+		t.Fatal(selfHostErr)
+	}
+	return frontendConfig{
+		compiler: selfHostPath,
+		target:   target,
+		env:      []string{"RTG_BACKEND=" + selfHostBackendPath, "RTG_STDROOT=" + filepath.Join(root, "rtg", "std")},
+	}
+}
+
+func compileFrontendSource(root string, compiler string, target string, output string, env []string) error {
+	cmd := exec.Command(compiler, "-t", target, "-s", "-o", output, "./rtg/cmd/rtg")
+	cmd.Dir = root
+	cmd.Env = frontendCommandEnv(env, root)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%v\n%s", err, string(out))
+	}
+	return nil
+}
+
+func frontendCommandEnv(extra []string, pwd string) []string {
+	env := append([]string{}, extra...)
+	env = append(env, "PWD="+pwd)
+	return append(os.Environ(), env...)
+}
+
 func runFrontendCorpusCase(t *testing.T, frontend frontendConfig, dir string) {
 	t.Helper()
 
@@ -122,9 +221,7 @@ func runFrontendCorpusCase(t *testing.T, frontend frontendConfig, dir string) {
 	out := filepath.Join(t.TempDir(), "app")
 	cmd := exec.Command(frontend.compiler, "-t", frontend.target, "-s", "-o", out, "./cmd/app")
 	cmd.Dir = dir
-	if len(frontend.env) > 0 {
-		cmd.Env = append(os.Environ(), frontend.env...)
-	}
+	cmd.Env = frontendCommandEnv(frontend.env, dir)
 	compileOut, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("frontend compile failed: %v\n%s", err, string(compileOut))
