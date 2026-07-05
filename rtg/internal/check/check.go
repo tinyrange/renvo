@@ -41,16 +41,17 @@ type Program struct {
 }
 
 type PackageInfo struct {
-	Name      string
-	Symbols   []Symbol
-	Imports   []Import
-	Decls     []DeclInfo
-	DeclOrder []int
-	InitOrder []int
-	Types     []TypeInfo
-	TypeRefs  []TypeRef
-	Methods   []MethodInfo
-	Bodies    []FuncBody
+	Name         string
+	Symbols      []Symbol
+	Imports      []Import
+	Decls        []DeclInfo
+	DeclOrder    []int
+	InitOrder    []int
+	Types        []TypeInfo
+	TypeRefs     []TypeRef
+	CoreTypeRefs []CoreTypeRef
+	Methods      []MethodInfo
+	Bodies       []FuncBody
 }
 
 type Symbol struct {
@@ -72,25 +73,27 @@ type Import struct {
 }
 
 type DeclInfo struct {
-	Name       string
-	Kind       int
-	File       int
-	Token      int
-	Symbol     int
-	ValueIndex int
-	TypeStart  int
-	TypeEnd    int
-	ValueStart int
-	ValueEnd   int
-	Values     []ExprSpan
-	Refs       []NameRef
-	Selectors  []SelectorRef
-	Calls      []CallRef
-	Indexes    []IndexExpr
-	Composites []CompositeExpr
-	Deps       []int
-	Const      ConstValue
-	Alias      bool
+	Name          string
+	Kind          int
+	File          int
+	Token         int
+	Symbol        int
+	ValueIndex    int
+	TypeStart     int
+	TypeEnd       int
+	ValueStart    int
+	ValueEnd      int
+	Values        []ExprSpan
+	Refs          []NameRef
+	CoreRefs      []CoreNameRef
+	Selectors     []SelectorRef
+	CoreSelectors []CoreSelectorRef
+	Calls         []CallRef
+	Indexes       []IndexExpr
+	Composites    []CompositeExpr
+	Deps          []int
+	Const         ConstValue
+	Alias         bool
 }
 
 type LocalDeclInfo struct {
@@ -123,22 +126,55 @@ type ConstValue struct {
 }
 
 type FuncBody struct {
-	Name       string
-	Kind       int
-	File       int
-	Func       int
-	Signature  FuncSignature
-	Body       syntax.Body
-	Scope      FuncScope
-	Refs       []NameRef
-	Selectors  []SelectorRef
-	Calls      []CallRef
-	Indexes    []IndexExpr
-	Composites []CompositeExpr
-	Locals     []LocalDeclInfo
-	TypeRefs   []TypeRef
-	Assigns    []AssignInfo
-	Returns    []ReturnInfo
+	Name          string
+	Kind          int
+	File          int
+	Func          int
+	Signature     FuncSignature
+	Body          syntax.Body
+	Scope         FuncScope
+	Refs          []NameRef
+	CoreRefs      []CoreNameRef
+	Selectors     []SelectorRef
+	CoreSelectors []CoreSelectorRef
+	Calls         []CallRef
+	Indexes       []IndexExpr
+	Composites    []CompositeExpr
+	Locals        []LocalDeclInfo
+	TypeRefs      []TypeRef
+	CoreTypeRefs  []CoreTypeRef
+	Assigns       []AssignInfo
+	Returns       []ReturnInfo
+}
+
+type CoreNameRef struct {
+	Kind    int
+	Token   int
+	Index   int
+	Package int
+}
+
+type CoreSelectorRef struct {
+	Kind        int
+	BaseTok     int
+	DotTok      int
+	NameTok     int
+	BaseKind    int
+	BaseIndex   int
+	BasePackage int
+	Package     int
+	Symbol      int
+}
+
+type CoreTypeRef struct {
+	Kind      int
+	File      int
+	OwnerDecl int
+	Token     int
+	BaseTok   int
+	DotTok    int
+	Package   int
+	Symbol    int
 }
 
 func CheckGraph(graph load.Graph) Program {
