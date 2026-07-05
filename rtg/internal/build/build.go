@@ -24,7 +24,6 @@ type PackageUnit struct {
 }
 
 type Result struct {
-	Check        check.Program
 	Units        []PackageUnit
 	Root         int
 	Ok           bool
@@ -41,7 +40,6 @@ func BuildUnits(graph load.Graph) Result {
 func BuildPrograms(graph load.Graph) Result {
 	prog := check.CheckGraphCore(graph)
 	result := Result{
-		Check:        prog,
 		Root:         -1,
 		Ok:           true,
 		Error:        BuildOK,
