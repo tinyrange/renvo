@@ -52,11 +52,11 @@ func EmitCheckedPackageFast(pkg load.Package, info check.PackageInfo) Result {
 		}
 		file := pkg.Files[i].File
 		src := pkg.Files[i].Src
-		oldToNew, ok := builder.addFileTokens(file, src, i, i+1 < len(pkg.Files))
+		tokens, ok := builder.addFileTokens(file, src, i, i+1 < len(pkg.Files))
 		if !ok {
 			return emitFail(result, builder.err, builder.errFile, builder.errToken)
 		}
-		files[i] = fileTokens{file: file, src: src, oldToNew: oldToNew}
+		files[i] = fileTokens{file: file, src: src, tokens: tokens}
 	}
 	if !builder.addCheckedImports(info, files) {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
@@ -92,9 +92,14 @@ type unitBuilder struct {
 }
 
 type fileTokens struct {
-	file     syntax.File
-	src      []byte
-	oldToNew []int
+	file   syntax.File
+	src    []byte
+	tokens tokenMap
+}
+
+type tokenMap struct {
+	base  int
+	limit int
 }
 
 func (b *unitBuilder) reserveCheckedPackage(pkg load.Package, info check.PackageInfo) {
@@ -137,22 +142,20 @@ func (b *unitBuilder) reserveCheckedPackage(pkg load.Package, info check.Package
 	b.program.Selectors = make([]unit.Selector, 0, selectorCap)
 }
 
-func (b *unitBuilder) addFileTokens(file syntax.File, src []byte, fileIndex int, hasNext bool) ([]int, bool) {
+func (b *unitBuilder) addFileTokens(file syntax.File, src []byte, fileIndex int, hasNext bool) (tokenMap, bool) {
 	base := len(b.program.Text)
+	tokenBase := len(b.program.Tokens)
 	lineOffset := b.lineOffset
-	oldToNew := make([]int, len(file.Tokens))
 	for i := 0; i < len(file.Tokens); i++ {
 		tok := file.Tokens[i]
 		if tok.Kind == syntax.TokenEOF {
-			oldToNew[i] = b.finalEOF
 			continue
 		}
 		kind, ok := unitTokenKind(src, tok)
 		if !ok {
 			b.setErr(EmitErrToken, fileIndex, i)
-			return nil, false
+			return tokenMap{}, false
 		}
-		oldToNew[i] = len(b.program.Tokens)
 		b.program.Tokens = append(b.program.Tokens, unit.Token{
 			Kind:  kind,
 			Start: base + tok.Start,
@@ -166,7 +169,7 @@ func (b *unitBuilder) addFileTokens(file syntax.File, src []byte, fileIndex int,
 		b.program.Text = append(b.program.Text, '\n')
 		b.lineOffset++
 	}
-	return oldToNew, true
+	return tokenMap{base: tokenBase, limit: len(file.Tokens)}, true
 }
 
 func appendBytes(out []byte, data []byte) []byte {
@@ -187,7 +190,7 @@ func (b *unitBuilder) finishUnit() bool {
 	return true
 }
 
-func (b *unitBuilder) addDecl(file syntax.File, decl syntax.TopDecl, nameTok int, oldToNew []int, fileIndex int) bool {
+func (b *unitBuilder) addDecl(file syntax.File, decl syntax.TopDecl, nameTok int, mapping tokenMap, fileIndex int) bool {
 	if nameTok < 0 || nameTok >= len(b.program.Tokens) {
 		b.setErr(EmitErrToken, fileIndex, decl.NameTok)
 		return false
@@ -202,22 +205,22 @@ func (b *unitBuilder) addDecl(file syntax.File, decl syntax.TopDecl, nameTok int
 		Kind:      kind,
 		NameStart: name.Start,
 		NameEnd:   name.Start + name.Size,
-		StartTok:  mapDeclStartToken(file, decl, oldToNew, b.finalEOF),
-		EndTok:    mapToken(oldToNew, decl.EndTok, b.finalEOF),
+		StartTok:  mapDeclStartToken(file, decl, mapping, b.finalEOF),
+		EndTok:    mapToken(mapping, decl.EndTok, b.finalEOF),
 	})
 	return true
 }
 
-func mapDeclStartToken(file syntax.File, decl syntax.TopDecl, oldToNew []int, eof int) int {
+func mapDeclStartToken(file syntax.File, decl syntax.TopDecl, mapping tokenMap, eof int) int {
 	start := decl.StartTok
 	if start > 0 && start < len(file.Tokens) && file.Tokens[start-1].Kind == decl.Kind {
 		start--
 	}
-	return mapToken(oldToNew, start, eof)
+	return mapToken(mapping, start, eof)
 }
 
-func (b *unitBuilder) addFunc(file syntax.File, fn syntax.FuncDecl, oldToNew []int, fileIndex int) bool {
-	nameTok := mapToken(oldToNew, fn.NameTok, b.finalEOF)
+func (b *unitBuilder) addFunc(file syntax.File, fn syntax.FuncDecl, mapping tokenMap, fileIndex int) bool {
+	nameTok := mapToken(mapping, fn.NameTok, b.finalEOF)
 	if nameTok < 0 || nameTok >= len(b.program.Tokens) {
 		b.setErr(EmitErrToken, fileIndex, fn.NameTok)
 		return false
@@ -231,13 +234,13 @@ func (b *unitBuilder) addFunc(file syntax.File, fn syntax.FuncDecl, oldToNew []i
 	b.program.Funcs = append(b.program.Funcs, unit.Func{
 		NameStart:     name.Start,
 		NameEnd:       name.Start + name.Size,
-		StartTok:      mapToken(oldToNew, fn.StartTok, b.finalEOF),
+		StartTok:      mapToken(mapping, fn.StartTok, b.finalEOF),
 		NameTok:       nameTok,
-		ReceiverStart: mapToken(oldToNew, fn.ReceiverStart, b.finalEOF),
-		ReceiverEnd:   mapToken(oldToNew, fn.ReceiverEnd, b.finalEOF),
-		BodyStart:     mapToken(oldToNew, fn.BodyStart, b.finalEOF),
-		BodyEnd:       mapToken(oldToNew, bodyEnd, b.finalEOF),
-		EndTok:        mapToken(oldToNew, fn.EndTok, b.finalEOF),
+		ReceiverStart: mapToken(mapping, fn.ReceiverStart, b.finalEOF),
+		ReceiverEnd:   mapToken(mapping, fn.ReceiverEnd, b.finalEOF),
+		BodyStart:     mapToken(mapping, fn.BodyStart, b.finalEOF),
+		BodyEnd:       mapToken(mapping, bodyEnd, b.finalEOF),
+		EndTok:        mapToken(mapping, fn.EndTok, b.finalEOF),
 	})
 	return true
 }
@@ -255,8 +258,8 @@ func (b *unitBuilder) addCheckedImports(info check.PackageInfo, files []fileToke
 			return false
 		}
 		b.program.Imports = append(b.program.Imports, unit.Import{
-			NameTok: mapNullableToken(decl.NameTok, files[imp.File].oldToNew, b.finalEOF),
-			PathTok: mapToken(files[imp.File].oldToNew, decl.PathTok, b.finalEOF),
+			NameTok: mapNullableToken(decl.NameTok, files[imp.File].tokens, b.finalEOF),
+			PathTok: mapToken(files[imp.File].tokens, decl.PathTok, b.finalEOF),
 		})
 	}
 	return true
@@ -290,16 +293,16 @@ func (b *unitBuilder) addCheckedDecls(info check.PackageInfo, files []fileTokens
 			b.setErr(EmitErrCheck, declInfo.File, declInfo.Token)
 			return false
 		}
-		nameTok := mapToken(files[declInfo.File].oldToNew, decl.NameTok, b.finalEOF)
-		if !b.addDecl(file, decl, nameTok, files[declInfo.File].oldToNew, declInfo.File) {
+		nameTok := mapToken(files[declInfo.File].tokens, decl.NameTok, b.finalEOF)
+		if !b.addDecl(file, decl, nameTok, files[declInfo.File].tokens, declInfo.File) {
 			return false
 		}
 		ownerIndex := len(b.program.Decls) - 1
 		b.declRows[index] = ownerIndex
-		if !b.addDeclCalls(declInfo, files[declInfo.File].oldToNew, ownerIndex) {
+		if !b.addDeclCalls(declInfo, files[declInfo.File].tokens, ownerIndex) {
 			return false
 		}
-		if !b.addDeclResolution(declInfo, files[declInfo.File].oldToNew, ownerIndex) {
+		if !b.addDeclResolution(declInfo, files[declInfo.File].tokens, ownerIndex) {
 			return false
 		}
 	}
@@ -317,7 +320,7 @@ func (b *unitBuilder) addCheckedTypeRefs(info check.PackageInfo, files []fileTok
 			b.setErr(EmitErrCheck, ref.File, ref.Token)
 			return false
 		}
-		mapped, ok := mapTypeRef(ref, files[ref.File].oldToNew, b.finalEOF, b.declRows[ref.OwnerDecl])
+		mapped, ok := mapTypeRef(ref, files[ref.File].tokens, b.finalEOF, b.declRows[ref.OwnerDecl])
 		if !ok {
 			b.setErr(EmitErrCheck, ref.File, ref.Token)
 			return false
@@ -348,18 +351,18 @@ func (b *unitBuilder) addCheckedFuncs(info check.PackageInfo, files []fileTokens
 			b.setErr(EmitErrCheck, body.File, fn.NameTok)
 			return false
 		}
-		if !b.addFunc(file, fn, files[body.File].oldToNew, body.File) {
+		if !b.addFunc(file, fn, files[body.File].tokens, body.File) {
 			return false
 		}
 		ownerIndex := len(b.program.Funcs) - 1
 		b.funcRows[i] = ownerIndex
-		if !b.addBodyCalls(body, files[body.File].oldToNew, ownerIndex) {
+		if !b.addBodyCalls(body, files[body.File].tokens, ownerIndex) {
 			return false
 		}
-		if !b.addBodyResolution(body, files[body.File].oldToNew, ownerIndex) {
+		if !b.addBodyResolution(body, files[body.File].tokens, ownerIndex) {
 			return false
 		}
-		if !b.addBodyTypeRefs(body, files[body.File].oldToNew, ownerIndex) {
+		if !b.addBodyTypeRefs(body, files[body.File].tokens, ownerIndex) {
 			return false
 		}
 	}
@@ -375,7 +378,7 @@ func (b *unitBuilder) addCheckedSymbols(info check.PackageInfo, files []fileToke
 			b.setErr(EmitErrCheck, -1, symbolToken)
 			return false
 		}
-		token := mapToken(files[symbolFile].oldToNew, symbolToken, b.finalEOF)
+		token := mapToken(files[symbolFile].tokens, symbolToken, b.finalEOF)
 		if token < 0 {
 			b.setErr(EmitErrCheck, symbolFile, symbolToken)
 			return false
@@ -396,9 +399,9 @@ func lowerTokenString(file fileTokens, tok int) string {
 	return string(syntax.TokenText(file.src, file.file.Tokens[tok]))
 }
 
-func (b *unitBuilder) addDeclCalls(decl check.DeclInfo, oldToNew []int, ownerIndex int) bool {
+func (b *unitBuilder) addDeclCalls(decl check.DeclInfo, mapping tokenMap, ownerIndex int) bool {
 	for i := 0; i < len(decl.Calls); i++ {
-		call, ok := mapCallRef(decl.Calls[i], oldToNew, b.finalEOF, ownerIndex)
+		call, ok := mapCallRef(decl.Calls[i], mapping, b.finalEOF, ownerIndex)
 		if !ok {
 			b.setErr(EmitErrCheck, decl.File, decl.Token)
 			return false
@@ -408,9 +411,9 @@ func (b *unitBuilder) addDeclCalls(decl check.DeclInfo, oldToNew []int, ownerInd
 	return true
 }
 
-func (b *unitBuilder) addDeclResolution(decl check.DeclInfo, oldToNew []int, ownerIndex int) bool {
+func (b *unitBuilder) addDeclResolution(decl check.DeclInfo, mapping tokenMap, ownerIndex int) bool {
 	for i := 0; i < len(decl.Refs); i++ {
-		ref, ok := mapNameRef(decl.Refs[i], oldToNew, b.finalEOF, ownerIndex)
+		ref, ok := mapNameRef(decl.Refs[i], mapping, b.finalEOF, ownerIndex)
 		if !ok {
 			b.setErr(EmitErrCheck, decl.File, decl.Token)
 			return false
@@ -418,7 +421,7 @@ func (b *unitBuilder) addDeclResolution(decl check.DeclInfo, oldToNew []int, own
 		b.program.Refs = append(b.program.Refs, ref)
 	}
 	for i := 0; i < len(decl.Selectors); i++ {
-		selector, ok := mapSelectorRef(decl.Selectors[i], oldToNew, b.finalEOF, ownerIndex)
+		selector, ok := mapSelectorRef(decl.Selectors[i], mapping, b.finalEOF, ownerIndex)
 		if !ok {
 			b.setErr(EmitErrCheck, decl.File, decl.Token)
 			return false
@@ -428,9 +431,9 @@ func (b *unitBuilder) addDeclResolution(decl check.DeclInfo, oldToNew []int, own
 	return true
 }
 
-func (b *unitBuilder) addBodyCalls(body check.FuncBody, oldToNew []int, ownerIndex int) bool {
+func (b *unitBuilder) addBodyCalls(body check.FuncBody, mapping tokenMap, ownerIndex int) bool {
 	for i := 0; i < len(body.Calls); i++ {
-		call, ok := mapCallRef(body.Calls[i], oldToNew, b.finalEOF, ownerIndex)
+		call, ok := mapCallRef(body.Calls[i], mapping, b.finalEOF, ownerIndex)
 		if !ok {
 			b.setErr(EmitErrCheck, body.File, body.Body.ErrorTok)
 			return false
@@ -440,9 +443,9 @@ func (b *unitBuilder) addBodyCalls(body check.FuncBody, oldToNew []int, ownerInd
 	return true
 }
 
-func (b *unitBuilder) addBodyResolution(body check.FuncBody, oldToNew []int, ownerIndex int) bool {
+func (b *unitBuilder) addBodyResolution(body check.FuncBody, mapping tokenMap, ownerIndex int) bool {
 	for i := 0; i < len(body.Refs); i++ {
-		ref, ok := mapNameRef(body.Refs[i], oldToNew, b.finalEOF, ownerIndex)
+		ref, ok := mapNameRef(body.Refs[i], mapping, b.finalEOF, ownerIndex)
 		if !ok {
 			b.setErr(EmitErrCheck, body.File, body.Body.ErrorTok)
 			return false
@@ -450,7 +453,7 @@ func (b *unitBuilder) addBodyResolution(body check.FuncBody, oldToNew []int, own
 		b.program.Refs = append(b.program.Refs, ref)
 	}
 	for i := 0; i < len(body.Selectors); i++ {
-		selector, ok := mapSelectorRef(body.Selectors[i], oldToNew, b.finalEOF, ownerIndex)
+		selector, ok := mapSelectorRef(body.Selectors[i], mapping, b.finalEOF, ownerIndex)
 		if !ok {
 			b.setErr(EmitErrCheck, body.File, body.Body.ErrorTok)
 			return false
@@ -460,13 +463,13 @@ func (b *unitBuilder) addBodyResolution(body check.FuncBody, oldToNew []int, own
 	return true
 }
 
-func (b *unitBuilder) addBodyTypeRefs(body check.FuncBody, oldToNew []int, ownerIndex int) bool {
+func (b *unitBuilder) addBodyTypeRefs(body check.FuncBody, mapping tokenMap, ownerIndex int) bool {
 	for i := 0; i < len(body.TypeRefs); i++ {
 		if body.TypeRefs[i].File != body.File {
 			b.setErr(EmitErrCheck, body.File, body.Body.ErrorTok)
 			return false
 		}
-		ref, ok := mapTypeRef(body.TypeRefs[i], oldToNew, b.finalEOF, ownerIndex)
+		ref, ok := mapTypeRef(body.TypeRefs[i], mapping, b.finalEOF, ownerIndex)
 		if !ok {
 			b.setErr(EmitErrCheck, body.File, body.Body.ErrorTok)
 			return false
@@ -476,16 +479,16 @@ func (b *unitBuilder) addBodyTypeRefs(body check.FuncBody, oldToNew []int, owner
 	return true
 }
 
-func mapTypeRef(ref check.TypeRef, oldToNew []int, eof int, ownerIndex int) (unit.TypeRef, bool) {
+func mapTypeRef(ref check.TypeRef, mapping tokenMap, eof int, ownerIndex int) (unit.TypeRef, bool) {
 	kind, ok := unitTypeRefKind(ref.Kind)
 	if !ok {
 		return unit.TypeRef{}, false
 	}
 	out := unit.TypeRef{
 		Kind:    kind,
-		Token:   mapToken(oldToNew, ref.Token, eof),
-		BaseTok: mapToken(oldToNew, ref.BaseToken, eof),
-		DotTok:  mapToken(oldToNew, ref.DotToken, eof),
+		Token:   mapToken(mapping, ref.Token, eof),
+		BaseTok: mapToken(mapping, ref.BaseToken, eof),
+		DotTok:  mapToken(mapping, ref.DotToken, eof),
 		Package: ref.Package,
 		Symbol:  ref.Symbol,
 	}
@@ -514,10 +517,10 @@ func unitTypeRefKind(kind int) (int, bool) {
 	return 0, false
 }
 
-func mapNameRef(ref check.NameRef, oldToNew []int, eof int, ownerIndex int) (unit.NameRef, bool) {
+func mapNameRef(ref check.NameRef, mapping tokenMap, eof int, ownerIndex int) (unit.NameRef, bool) {
 	out := unit.NameRef{
 		Kind:    ref.Kind,
-		Token:   mapToken(oldToNew, ref.Token, eof),
+		Token:   mapToken(mapping, ref.Token, eof),
 		Index:   ref.Index,
 		Package: ref.Package,
 	}
@@ -527,11 +530,11 @@ func mapNameRef(ref check.NameRef, oldToNew []int, eof int, ownerIndex int) (uni
 	return out, true
 }
 
-func mapSelectorRef(selector check.SelectorRef, oldToNew []int, eof int, ownerIndex int) (unit.Selector, bool) {
+func mapSelectorRef(selector check.SelectorRef, mapping tokenMap, eof int, ownerIndex int) (unit.Selector, bool) {
 	out := unit.Selector{
-		BaseTok:     mapToken(oldToNew, selector.BaseToken, eof),
-		DotTok:      mapToken(oldToNew, selector.DotToken, eof),
-		NameTok:     mapToken(oldToNew, selector.NameToken, eof),
+		BaseTok:     mapToken(mapping, selector.BaseToken, eof),
+		DotTok:      mapToken(mapping, selector.DotToken, eof),
+		NameTok:     mapToken(mapping, selector.NameToken, eof),
 		BaseKind:    selector.BaseRef.Kind,
 		BaseIndex:   selector.BaseRef.Index,
 		BasePackage: selector.BaseRef.Package,
@@ -545,12 +548,12 @@ func mapSelectorRef(selector check.SelectorRef, oldToNew []int, eof int, ownerIn
 	return out, true
 }
 
-func mapCallRef(call check.CallRef, oldToNew []int, eof int, ownerIndex int) (unit.Call, bool) {
+func mapCallRef(call check.CallRef, mapping tokenMap, eof int, ownerIndex int) (unit.Call, bool) {
 	out := unit.Call{
 		Kind:      call.Kind,
-		CalleeTok: mapToken(oldToNew, call.CalleeToken, eof),
-		BaseTok:   mapToken(oldToNew, call.BaseToken, eof),
-		DotTok:    mapToken(oldToNew, call.DotToken, eof),
+		CalleeTok: mapToken(mapping, call.CalleeToken, eof),
+		BaseTok:   mapToken(mapping, call.BaseToken, eof),
+		DotTok:    mapToken(mapping, call.DotToken, eof),
 	}
 	if ownerIndex < 0 || out.CalleeTok < 0 || out.BaseTok < 0 || out.DotTok < 0 {
 		return out, false
@@ -682,18 +685,21 @@ func unitDeclKind(kind int) (int, bool) {
 	return 0, false
 }
 
-func mapToken(oldToNew []int, tok int, eof int) int {
-	if tok < 0 || tok >= len(oldToNew) {
+func mapToken(mapping tokenMap, tok int, eof int) int {
+	if tok < 0 || tok >= mapping.limit {
 		return eof
 	}
-	return oldToNew[tok]
+	if tok == mapping.limit-1 {
+		return eof
+	}
+	return mapping.base + tok
 }
 
-func mapNullableToken(tok int, oldToNew []int, eof int) int {
+func mapNullableToken(tok int, mapping tokenMap, eof int) int {
 	if tok < 0 {
 		return -1
 	}
-	return mapToken(oldToNew, tok, eof)
+	return mapToken(mapping, tok, eof)
 }
 
 func countNewlines(src []byte) int {

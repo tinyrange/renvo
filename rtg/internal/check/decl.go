@@ -122,7 +122,7 @@ func buildDeclInfo(file syntax.File, fileIndex int, info PackageInfo, checked []
 }
 
 func buildFuncLocalDecls(file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, body syntax.Body, scope FuncScope) []LocalDeclInfo {
-	var decls []LocalDeclInfo
+	decls := make([]LocalDeclInfo, 0, countBodyStatements(body, syntax.StmtDecl))
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
 		if stmt.Kind != syntax.StmtDecl || stmt.StartTok < 0 || stmt.StartTok >= len(file.Tokens) {
@@ -237,7 +237,11 @@ func appendLocalTypeDecl(decls []LocalDeclInfo, file syntax.File, fileIndex int,
 }
 
 func localDeclNameTokens(file syntax.File, start int, end int) ([]int, int) {
-	var names []int
+	capacity := end - start
+	if capacity < 0 {
+		capacity = 0
+	}
+	names := make([]int, 0, capacity)
 	i := start
 	for i < end {
 		if file.Tokens[i].Kind != syntax.TokenIdent {

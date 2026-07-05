@@ -54,8 +54,12 @@ func buildSignatureFromParts(file syntax.File, receiverStart int, receiverEnd in
 }
 
 func parseFieldList(file syntax.File, start int, end int) []Field {
-	var fields []Field
-	var pending []int
+	capacity := end - start
+	if capacity < 0 {
+		capacity = 0
+	}
+	fields := make([]Field, 0, capacity)
+	pending := make([]int, 0, capacity)
 	i := start
 	for i < end {
 		segEnd := nextTopLevelComma(file, i, end)

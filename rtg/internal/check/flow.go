@@ -57,7 +57,7 @@ func LookupAssignTarget(assign AssignInfo, name string) int {
 }
 
 func buildFuncAssignments(file syntax.File, fileIndex int, info PackageInfo, body syntax.Body, scope FuncScope) []AssignInfo {
-	var assigns []AssignInfo
+	assigns := make([]AssignInfo, 0, countBodyStatements(body, syntax.StmtAssign))
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
 		if stmt.Kind != syntax.StmtAssign {
@@ -87,7 +87,7 @@ func buildFuncAssignments(file syntax.File, fileIndex int, info PackageInfo, bod
 }
 
 func buildFuncReturns(file syntax.File, body syntax.Body) []ReturnInfo {
-	var returns []ReturnInfo
+	returns := make([]ReturnInfo, 0, countBodyStatements(body, syntax.StmtReturn))
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
 		if stmt.Kind != syntax.StmtReturn {
@@ -103,8 +103,8 @@ func buildFuncReturns(file syntax.File, body syntax.Body) []ReturnInfo {
 }
 
 func buildAssignTargets(file syntax.File, fileIndex int, info PackageInfo, scope FuncScope, start int, end int) []AssignTarget {
-	var targets []AssignTarget
 	spans := splitExprList(file, start, end)
+	targets := make([]AssignTarget, 0, len(spans))
 	for i := 0; i < len(spans); i++ {
 		span := spans[i]
 		if span.EndTok-span.StartTok != 1 || span.StartTok < 0 || span.StartTok >= len(file.Tokens) {
@@ -133,6 +133,7 @@ func splitExprList(file syntax.File, start int, end int) []ExprSpan {
 	if start < 0 || end <= start {
 		return spans
 	}
+	spans = make([]ExprSpan, 0, countExprListItems(file, start, end))
 	i := start
 	for i < end {
 		next := nextTopLevelComma(file, i, end)
@@ -143,6 +144,30 @@ func splitExprList(file syntax.File, start int, end int) []ExprSpan {
 		i = next + 1
 	}
 	return spans
+}
+
+func countExprListItems(file syntax.File, start int, end int) int {
+	count := 0
+	i := start
+	for i < end {
+		next := nextTopLevelComma(file, i, end)
+		itemStart, itemEnd := trimExprSpan(file, i, next)
+		if itemEnd > itemStart {
+			count++
+		}
+		i = next + 1
+	}
+	return count
+}
+
+func countBodyStatements(body syntax.Body, kind int) int {
+	count := 0
+	for i := 0; i < len(body.Stmts); i++ {
+		if body.Stmts[i].Kind == kind {
+			count++
+		}
+	}
+	return count
 }
 
 func findTopLevelAssignOp(file syntax.File, start int, end int) int {
