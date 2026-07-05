@@ -8,35 +8,21 @@ permissions:
   contents: read
 
 jobs:
-  backend:
-    name: Backend compiler tests (${{ matrix.name }})
-    runs-on: ${{ matrix.runner }}
+  backend-amd64:
+    name: Backend compiler tests (linux-amd64)
+    runs-on: ubuntu-latest
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: linux-amd64
-            runner: ubuntu-latest
-            full-targets: true
-            performance_gate: true
-          - name: linux-arm64
-            runner: ubuntu-24.04-arm
-            full-targets: false
-            performance_gate: false
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
 
       - name: Install QEMU user emulators
-        if: matrix.full-targets
         run: |
           sudo apt-get update
           sudo apt-get install -y qemu-user
 
       - name: Install Wasmtime
-        if: matrix.full-targets
         run: |
           curl -fsSL https://wasmtime.dev/install.sh | bash
           echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
@@ -54,14 +40,33 @@ jobs:
 
       - name: Run backend tests
         env:
-          RTG_CROSS_ARCH_TESTS: ${{ matrix.full-targets && '1' || '' }}
+          RTG_CROSS_ARCH_TESTS: "1"
+        run: go test -count=1 -timeout 30m .
+
+  backend-arm64:
+    name: Backend compiler tests (linux-arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Build frontend backend
         run: |
-          if [ "${{ matrix.performance_gate }}" = "true" ]; then
-            go test -count=1 -timeout 30m .
-          else
-            tests="$(go test -list '^Test' . | grep '^Test' | grep -v '^TestCompilerPerformance$' | paste -sd'|' -)"
-            go test -count=1 -timeout 30m -run "^(${tests})$" .
-          fi
+          go build -o "$RUNNER_TEMP/rtg-backend" .
+          echo "RTG_BACKEND=$RUNNER_TEMP/rtg-backend" >> "$GITHUB_ENV"
+
+      - name: Run backend tests
+        run: |
+          tests="$(go test -list '^Test' . | grep '^Test' | grep -v '^TestCompilerPerformance$' | paste -sd'|' -)"
+          go test -count=1 -timeout 30m -run "^(${tests})$" .
 
   frontend-corpus:
     name: Frontend corpus tests
