@@ -298,6 +298,49 @@ func appMain() int {
 	}
 }
 
+func TestLinkBuildCoreFoldsPackageInitVarDeps(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import "example.com/case/pkg/lib"
+
+func main() {
+	if lib.Value() == 8 {
+		print("PASS\n")
+		return
+	}
+	print("FAIL\n")
+}
+`)},
+		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte(`package lib
+
+var base = 0
+var total = base + extra
+var extra = 8
+
+func Value() int {
+	return total
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	decoded, ok := unit.Unmarshal(linked.Data)
+	if !ok {
+		t.Fatal("linked core unit did not decode")
+	}
+	total := findLinkedDecl(decoded, "total")
+	if total < 0 {
+		t.Fatalf("total not found in %#v", decoded.Decls)
+	}
+	if got := linkedSpanText(decoded, decoded.Decls[total].StartTok, decoded.Decls[total].EndTok); got != "var total = 8" {
+		t.Fatalf("total decl span = %q, want folded literal\nfull text:\n%s", got, string(decoded.Text))
+	}
+}
+
 func TestLinkBuildAddsRootEntrypointWrapper(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},

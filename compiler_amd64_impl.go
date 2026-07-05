@@ -43,7 +43,15 @@ func rtgAmd64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 		rtgAsmLeave(a)
 		rtgAsmRet(a)
 	}
-	rtgAmd64PatchFunctionFrame(a, framePatch, g.stackUsed)
+	frame := rtgAlignTo8(g.stackUsed + 2048)
+	if frame < 2048 {
+		frame = 2048
+	}
+	if frame > 65528 {
+		frame = 65528
+	}
+	a.code[framePatch+1] = byte(frame & 255)
+	a.code[framePatch+2] = byte((frame / 256) & 255)
 	g.locals = oldLocals
 	g.localCount = oldLocalCount
 	g.breakDepth = oldBreak
@@ -54,18 +62,6 @@ func rtgAmd64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	g.gotoLabels = oldGotoLabels
 	g.lastRangeReturns = oldLastRangeReturns
 	return true
-}
-
-func rtgAmd64PatchFunctionFrame(a *rtgAsm, patch int, stackUsed int) {
-	frame := rtgAlignTo8(stackUsed + 2048)
-	if frame < 2048 {
-		frame = 2048
-	}
-	if frame > 65528 {
-		frame = 65528
-	}
-	a.code[patch+1] = byte(frame & 255)
-	a.code[patch+2] = byte((frame / 256) & 255)
 }
 
 func rtgAmd64StoreParamWord(g *rtgLinearGen, reg int, offset int) bool {
@@ -117,48 +113,6 @@ func rtgAmd64AsmMovRaxImm(a *rtgAsm, imm int) {
 	}
 	rtgAsmEmit16(a, 0xb848)
 	rtgAsmEmit64(a, imm)
-}
-func rtgAmd64AsmMovRaxImm64(a *rtgAsm, imm int) {
-	rtgAsmEmit16(a, 0xb848)
-	rtgAsmEmit64(a, imm)
-}
-func rtgAmd64AsmMovRdxImm(a *rtgAsm, imm int) {
-	if imm == 0 {
-		rtgAsmEmit16(a, 0xd231)
-		return
-	}
-	if rtgAsmImmFits8Signed(imm) {
-		rtgAsmEmit2(a, 0x6a, imm)
-		rtgAsmPopRdx(a)
-		return
-	}
-	if imm >= 0 {
-		if imm <= 2147483647 {
-			rtgAsmEmit8(a, 0xba)
-			rtgAsmEmit32(a, imm)
-			return
-		}
-	} else {
-		if imm >= -2147483647 {
-			rtgAsmEmit24(a, 0xc2c748)
-			rtgAsmEmit32(a, imm)
-			return
-		}
-	}
-	rtgAsmEmit16(a, 0xba48)
-	rtgAsmEmit64(a, imm)
-}
-func rtgAmd64AsmMovRaxDataAddr(a *rtgAsm, dataOff int) {
-	rtgAsmEmit24(a, 0x058d48)
-	at := len(a.code)
-	rtgAsmEmit32(a, 0)
-	rtgAsmAddAbsReloc(a, at, dataOff, 0)
-}
-func rtgAmd64AsmMovRaxBssAddr(a *rtgAsm, bssOff int) {
-	rtgAsmEmit24(a, 0x058d48)
-	at := len(a.code)
-	rtgAsmEmit32(a, 0)
-	rtgAsmAddAbsReloc(a, at, bssOff, rtgAbsBssReloc)
 }
 func rtgAmd64AsmMovR10BssAddr(a *rtgAsm, bssOff int) {
 	rtgAsmEmit24(a, 0x158d4c)

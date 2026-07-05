@@ -6552,11 +6552,9 @@ func rtgLinearInitGlobals(g *rtgLinearGen) bool {
 				rtgAsmStoreRaxBss(a, off)
 				continue
 			}
-			constResult := rtgEvalConstExpr(g, &ep, rootIndex)
-			if !constResult.ok {
+			if !rtgEmitIntExpr(g, &ep, rootIndex) {
 				return false
 			}
-			rtgAsmMovRaxImm(a, constResult.value)
 			rtgAsmNormalizeRaxForKind(a, resolved.kind)
 			rtgAsmStoreRaxBss(a, off)
 		} else if rtgTypeIsSlice(meta, s.typ) {
@@ -11468,7 +11466,8 @@ func rtgAsmMovRaxImm64(a *rtgAsm, imm int) {
 		rtg386AsmMovRaxImm64(a, imm)
 		return
 	}
-	rtgAmd64AsmMovRaxImm64(a, imm)
+	rtgAsmEmit16(a, 0xb848)
+	rtgAsmEmit64(a, imm)
 }
 func rtgAsmMovRdxImm(a *rtgAsm, imm int) {
 	if rtgTargetArch == rtgArchWasm32 {
@@ -11487,7 +11486,30 @@ func rtgAsmMovRdxImm(a *rtgAsm, imm int) {
 		rtg386AsmMovRdxImm(a, imm)
 		return
 	}
-	rtgAmd64AsmMovRdxImm(a, imm)
+	if imm == 0 {
+		rtgAsmEmit16(a, 0xd231)
+		return
+	}
+	if rtgAsmImmFits8Signed(imm) {
+		rtgAsmEmit2(a, 0x6a, imm)
+		rtgAsmPopRdx(a)
+		return
+	}
+	if imm >= 0 {
+		if imm <= 2147483647 {
+			rtgAsmEmit8(a, 0xba)
+			rtgAsmEmit32(a, imm)
+			return
+		}
+	} else {
+		if imm >= -2147483647 {
+			rtgAsmEmit24(a, 0xc2c748)
+			rtgAsmEmit32(a, imm)
+			return
+		}
+	}
+	rtgAsmEmit16(a, 0xba48)
+	rtgAsmEmit64(a, imm)
 }
 func rtgAsmMovRaxDataAddr(a *rtgAsm, dataOff int) {
 	if rtgTargetArch == rtgArchWasm32 {
@@ -11506,7 +11528,10 @@ func rtgAsmMovRaxDataAddr(a *rtgAsm, dataOff int) {
 		rtg386AsmMovRaxDataAddr(a, dataOff)
 		return
 	}
-	rtgAmd64AsmMovRaxDataAddr(a, dataOff)
+	rtgAsmEmit24(a, 0x058d48)
+	at := len(a.code)
+	rtgAsmEmit32(a, 0)
+	rtgAsmAddAbsReloc(a, at, dataOff, 0)
 }
 func rtgAsmMovRaxBssAddr(a *rtgAsm, bssOff int) {
 	if rtgTargetArch == rtgArchWasm32 {
@@ -11525,7 +11550,10 @@ func rtgAsmMovRaxBssAddr(a *rtgAsm, bssOff int) {
 		rtg386AsmMovRaxBssAddr(a, bssOff)
 		return
 	}
-	rtgAmd64AsmMovRaxBssAddr(a, bssOff)
+	rtgAsmEmit24(a, 0x058d48)
+	at := len(a.code)
+	rtgAsmEmit32(a, 0)
+	rtgAsmAddAbsReloc(a, at, bssOff, rtgAbsBssReloc)
 }
 func rtgAsmMovR10BssAddr(a *rtgAsm, bssOff int) {
 	if rtgTargetArch == rtgArchWasm32 {

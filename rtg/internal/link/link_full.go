@@ -3,6 +3,8 @@
 package link
 
 import (
+	"strconv"
+
 	"j5.nz/rtg/rtg/internal/build"
 	"j5.nz/rtg/rtg/internal/unit"
 )
@@ -47,7 +49,14 @@ func linkBuild(result build.Result, coreOnly bool) Result {
 	pkg := 0
 	ok := false
 	if coreOnly {
-		program, ok = LinkUnitsCore(result.Units, result.Root)
+		if linkCoreNeedsInitFold(result) {
+			program, ok = LinkUnits(result.Units, result.Root)
+			if ok {
+				lowerLinkedInitConstDecls(&program)
+			}
+		} else {
+			program, ok = LinkUnitsCore(result.Units, result.Root)
+		}
 	} else {
 		program, ok = LinkUnits(result.Units, result.Root)
 	}
@@ -76,6 +85,15 @@ func linkBuild(result build.Result, coreOnly bool) Result {
 	return out
 }
 
+func linkCoreNeedsInitFold(result build.Result) bool {
+	for i := 0; i < len(result.Units); i++ {
+		if len(result.Units[i].Program.InitOrder) > 0 && len(result.Units[i].Program.DeclMeta) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func marshalCoreProgram(program unit.Program) ([]byte, bool) {
 	program.Imports = nil
 	program.Symbols = nil
@@ -99,6 +117,165 @@ func marshalCoreProgram(program unit.Program) ([]byte, bool) {
 	program.Refs = nil
 	program.Selectors = nil
 	return unit.Marshal(program)
+}
+
+func lowerLinkedInitConstDecls(program *unit.Program) {
+	var names []string
+	var values []int
+	for i := 0; i < len(program.InitOrder); i++ {
+		declIndex := program.InitOrder[i]
+		if declIndex < 0 || declIndex >= len(program.Decls) || program.Decls[declIndex].Kind != unit.TokenVar {
+			continue
+		}
+		metaIndex := findDeclMeta(program, declIndex)
+		if metaIndex < 0 {
+			continue
+		}
+		meta := &program.DeclMeta[metaIndex]
+		if meta.ValueStart < 0 || meta.ValueEnd <= meta.ValueStart {
+			continue
+		}
+		value, ok := evalLinkedInitIntExpr(program, meta.ValueStart, meta.ValueEnd, names, values)
+		if !ok {
+			continue
+		}
+		name := linkedDeclName(program, declIndex)
+		if name != "" {
+			names = append(names, name)
+			values = append(values, value)
+		}
+		if !writeLinkedInitIntLiteral(program, declIndex, meta, value) {
+			continue
+		}
+	}
+}
+
+func findDeclMeta(program *unit.Program, declIndex int) int {
+	for i := 0; i < len(program.DeclMeta); i++ {
+		if program.DeclMeta[i].DeclIndex == declIndex {
+			return i
+		}
+	}
+	return -1
+}
+
+func linkedDeclName(program *unit.Program, declIndex int) string {
+	decl := program.Decls[declIndex]
+	if decl.NameStart < 0 || decl.NameEnd < decl.NameStart || decl.NameEnd > len(program.Text) {
+		return ""
+	}
+	return string(program.Text[decl.NameStart:decl.NameEnd])
+}
+
+func evalLinkedInitIntExpr(program *unit.Program, start int, end int, names []string, values []int) (int, bool) {
+	if start < 0 || end <= start || end > len(program.Tokens) {
+		return 0, false
+	}
+	if start+1 == end {
+		tok := program.Tokens[start]
+		text := tokenText(*program, start)
+		if tok.Kind == unit.TokenNumber {
+			value, err := strconv.Atoi(text)
+			return value, err == nil
+		}
+		if tok.Kind == unit.TokenIdent {
+			return lookupLinkedInitValue(names, values, text)
+		}
+		return 0, false
+	}
+	op := findLinkedInitBinaryOp(program, start, end, "+-")
+	if op < 0 {
+		op = findLinkedInitBinaryOp(program, start, end, "*/")
+	}
+	if op < 0 {
+		return 0, false
+	}
+	left, ok := evalLinkedInitIntExpr(program, start, op, names, values)
+	if !ok {
+		return 0, false
+	}
+	right, ok := evalLinkedInitIntExpr(program, op+1, end, names, values)
+	if !ok {
+		return 0, false
+	}
+	opText := tokenText(*program, op)
+	if opText == "+" {
+		return left + right, true
+	}
+	if opText == "-" {
+		return left - right, true
+	}
+	if opText == "*" {
+		return left * right, true
+	}
+	if opText == "/" && right != 0 {
+		return left / right, true
+	}
+	return 0, false
+}
+
+func findLinkedInitBinaryOp(program *unit.Program, start int, end int, ops string) int {
+	depth := 0
+	for i := end - 1; i >= start; i-- {
+		text := tokenText(*program, i)
+		if text == ")" || text == "]" || text == "}" {
+			depth++
+			continue
+		}
+		if text == "(" || text == "[" || text == "{" {
+			depth--
+			continue
+		}
+		if depth == 0 && program.Tokens[i].Kind == unit.TokenOp && stringHasByte(ops, text) {
+			return i
+		}
+	}
+	return -1
+}
+
+func stringHasByte(chars string, text string) bool {
+	if len(text) != 1 {
+		return false
+	}
+	for i := 0; i < len(chars); i++ {
+		if chars[i] == text[0] {
+			return true
+		}
+	}
+	return false
+}
+
+func lookupLinkedInitValue(names []string, values []int, name string) (int, bool) {
+	for i := len(names) - 1; i >= 0; i-- {
+		if names[i] == name {
+			return values[i], true
+		}
+	}
+	return 0, false
+}
+
+func writeLinkedInitIntLiteral(program *unit.Program, declIndex int, meta *unit.DeclMeta, value int) bool {
+	lit := strconv.Itoa(value)
+	tokIndex := meta.ValueStart
+	if tokIndex < 0 || tokIndex >= len(program.Tokens) {
+		return false
+	}
+	tok := &program.Tokens[tokIndex]
+	if tok.Start < 0 || tok.Start+tok.Size > len(program.Text) || len(lit) > tok.Size {
+		return false
+	}
+	for i := 0; i < tok.Size; i++ {
+		program.Text[tok.Start+i] = ' '
+	}
+	for i := 0; i < len(lit); i++ {
+		program.Text[tok.Start+i] = lit[i]
+	}
+	tok.Kind = unit.TokenNumber
+	tok.Size = len(lit)
+	program.Decls[declIndex].EndTok = tokIndex + 1
+	meta.ValueEnd = tokIndex + 1
+	meta.Values = []unit.ExprSpan{{StartTok: tokIndex, EndTok: tokIndex + 1}}
+	return true
 }
 
 func LinkUnitData(units []build.PackageUnit, root int) (unit.Program, int, bool) {
