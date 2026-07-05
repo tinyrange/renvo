@@ -222,7 +222,7 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, lineOf
 	}
 	oldToNew := make([]int, len(src.Tokens))
 	skip, redirect := linkedTokenSkip(src)
-	replacements := linkedTokenReplacements(src, aliases, symbolOffsets)
+	replacements := linkedTokenReplacementIndexes(src, aliases, symbolOffsets)
 	prevEnd := 0
 	for i := 0; i < len(src.Tokens); i++ {
 		tok := src.Tokens[i]
@@ -247,9 +247,11 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, lineOf
 		}
 		oldToNew[i] = len(dst.Tokens)
 		tok.Start = len(dst.Text)
-		if replacements[i] != "" {
-			dst.Text = appendStringBytes(dst.Text, replacements[i])
-			tok.Size = len(replacements[i])
+		replacementIndex := replacements[i]
+		if replacementIndex >= 0 {
+			replacement := aliases[replacementIndex]
+			dst.Text = appendStringBytes(dst.Text, replacement)
+			tok.Size = len(replacement)
 		} else {
 			dst.Text = appendBytes(dst.Text, src.Text[tokStart:tokEnd])
 		}
@@ -362,36 +364,39 @@ func markRedirectToken(skip []bool, redirect []int, tok int, target int) {
 	redirect[tok] = target
 }
 
-func linkedTokenReplacements(program unit.Program, aliases []string, symbolOffsets []int) []string {
-	out := make([]string, len(program.Tokens))
+func linkedTokenReplacementIndexes(program unit.Program, aliases []string, symbolOffsets []int) []int {
+	out := make([]int, len(program.Tokens))
+	for i := 0; i < len(out); i++ {
+		out[i] = -1
+	}
 	for i := 0; i < len(program.Symbols); i++ {
 		symbol := program.Symbols[i]
-		name := packageSymbolAlias(aliases, symbolOffsets, symbol.Package, i)
-		if name != "" && symbol.Token >= 0 && symbol.Token < len(out) {
-			out[symbol.Token] = name
+		index := packageSymbolAliasIndex(aliases, symbolOffsets, symbol.Package, i)
+		if index >= 0 && symbol.Token >= 0 && symbol.Token < len(out) {
+			out[symbol.Token] = index
 		}
 	}
 	for i := 0; i < len(program.Refs); i++ {
 		ref := program.Refs[i]
 		if ref.Kind == unit.RefPackage {
-			name := packageSymbolAlias(aliases, symbolOffsets, ref.Package, ref.Index)
-			if name != "" && ref.Token >= 0 && ref.Token < len(out) {
-				out[ref.Token] = name
+			index := packageSymbolAliasIndex(aliases, symbolOffsets, ref.Package, ref.Index)
+			if index >= 0 && ref.Token >= 0 && ref.Token < len(out) {
+				out[ref.Token] = index
 			}
 		}
 	}
 	for i := 0; i < len(program.Selectors); i++ {
 		selector := program.Selectors[i]
-		name := packageSymbolAlias(aliases, symbolOffsets, selector.Package, selector.Symbol)
-		if name != "" && selector.NameTok >= 0 && selector.NameTok < len(out) {
-			out[selector.NameTok] = name
+		index := packageSymbolAliasIndex(aliases, symbolOffsets, selector.Package, selector.Symbol)
+		if index >= 0 && selector.NameTok >= 0 && selector.NameTok < len(out) {
+			out[selector.NameTok] = index
 		}
 	}
 	for i := 0; i < len(program.TypeRefs); i++ {
 		ref := program.TypeRefs[i]
-		name := packageSymbolAlias(aliases, symbolOffsets, ref.Package, ref.Symbol)
-		if name != "" && ref.Token >= 0 && ref.Token < len(out) {
-			out[ref.Token] = name
+		index := packageSymbolAliasIndex(aliases, symbolOffsets, ref.Package, ref.Symbol)
+		if index >= 0 && ref.Token >= 0 && ref.Token < len(out) {
+			out[ref.Token] = index
 		}
 	}
 	return out
@@ -433,14 +438,25 @@ func symbolNeedsAlias(programs []unit.Program, pkg int, symbol int) bool {
 }
 
 func packageSymbolAlias(aliases []string, symbolOffsets []int, pkg int, symbol int) string {
-	if pkg < 0 || pkg >= len(symbolOffsets) || symbol < 0 {
-		return ""
-	}
-	index := symbolOffsets[pkg] + symbol
-	if index < 0 || index >= len(aliases) {
+	index := packageSymbolAliasIndex(aliases, symbolOffsets, pkg, symbol)
+	if index < 0 {
 		return ""
 	}
 	return aliases[index]
+}
+
+func packageSymbolAliasIndex(aliases []string, symbolOffsets []int, pkg int, symbol int) int {
+	if pkg < 0 || pkg >= len(symbolOffsets) || symbol < 0 {
+		return -1
+	}
+	index := symbolOffsets[pkg] + symbol
+	if index < 0 || index >= len(aliases) {
+		return -1
+	}
+	if aliases[index] == "" {
+		return -1
+	}
+	return index
 }
 
 func symbolAliasName(pkg int, name string) string {

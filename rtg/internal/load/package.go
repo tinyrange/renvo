@@ -24,13 +24,9 @@ type SourceFile struct {
 }
 
 type ParsedFile struct {
-	Path    string
-	Src     []byte
-	Tokens  []syntax.Token
-	Imports []syntax.ImportDecl
-	Decls   []syntax.TopDecl
-	Funcs   []syntax.FuncDecl
-	File    syntax.File
+	Path string
+	Src  []byte
+	File syntax.File
 }
 
 type Package struct {
@@ -117,13 +113,9 @@ func LoadPackage(module Module, stdRoot string, ref PackageRef, files []SourceFi
 
 func newParsedFile(path string, src []byte, file syntax.File) ParsedFile {
 	return ParsedFile{
-		Path:    path,
-		Src:     src,
-		Tokens:  file.Tokens,
-		Imports: file.Imports,
-		Decls:   file.Decls,
-		Funcs:   file.Funcs,
-		File:    file,
+		Path: path,
+		Src:  src,
+		File: file,
 	}
 }
 
