@@ -38,10 +38,15 @@ jobs:
           go build -o "$RUNNER_TEMP/rtg-backend" .
           echo "RTG_BACKEND=$RUNNER_TEMP/rtg-backend" >> "$GITHUB_ENV"
 
+      - name: Run compiler performance gate
+        run: go test -count=1 -timeout 5m -run '^TestCompilerPerformance$' .
+
       - name: Run backend tests
         env:
           RTG_CROSS_ARCH_TESTS: "1"
-        run: go test -count=1 -timeout 30m .
+        run: |
+          tests="$(go test -list '^Test' . | grep '^Test' | grep -v '^TestCompilerPerformance$' | paste -sd'|' -)"
+          go test -count=1 -timeout 30m -run "^(${tests})$" .
 
   backend-arm64:
     name: Backend compiler tests (linux-arm64)
