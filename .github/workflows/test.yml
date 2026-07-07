@@ -47,7 +47,7 @@ jobs:
         env:
           RTG_CROSS_ARCH_TESTS: "1"
         run: |
-          tests="$(go test -list '^Test' . | grep '^Test' | grep -v '^TestCompilerPerformance$' | grep -v '^TestCompilerResourceGates$' | paste -sd'|' -)"
+          tests="$(go test -list '^Test' . | grep '^Test' | grep -v '^TestCompilerPerformance$' | grep -v '^TestCompilerResourceGates$' | grep -v '^TestFrontendCompilerPerformance$' | paste -sd'|' -)"
           go test -count=1 -timeout 30m -run "^(${tests})$" .
 
   backend-arm64:

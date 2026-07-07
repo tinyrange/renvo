@@ -3,5 +3,7 @@
 package driver
 
 func rtgFrontendCanResetArena() bool {
-	return true
+	// The embedded backend decodes the unit after frontend lowering; keep the
+	// frontend arena live across that in-memory handoff.
+	return false
 }
