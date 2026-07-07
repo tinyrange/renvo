@@ -118,7 +118,7 @@ func rtgAsmInit(a *rtgAsm) {
 	var winImports []rtgWinStaticImport
 	var data []byte
 	if rtgCompilerFixedTarget != 0 {
-		code = make([]byte, 0, 524288)
+		code = make([]byte, 0, 2097152)
 		labelPos = make([]int, 0, 16384)
 		labelSet = make([]bool, 0, 16384)
 		relocs = make([]rtgLabelRef, 0, 32768)
@@ -5414,9 +5414,9 @@ func rtgAddStringData(g *rtgLinearGen, msg []byte) int {
 }
 
 func rtgFunctionLocalCap(fn *rtgFuncDecl) int {
-	localCap := fn.bodyEnd - fn.bodyStart + 64
-	if localCap < 64 {
-		localCap = 64
+	localCap := 16
+	if fn.bodyEnd-fn.bodyStart > 512 {
+		localCap = 32
 	}
 	return localCap
 }
@@ -9059,6 +9059,7 @@ func rtgEmitRuntimeArenaResetMadvise(g *rtgLinearGen) {
 	rtgAsmStoreRaxStack(a, markOff)
 	rtgAsmLoadRaxBss(a, g.stringHeapOff)
 	rtgAsmStoreRaxStack(a, oldOff)
+	rtgEmitRuntimeArenaClampOldToPersistent(g, oldOff)
 	rtgAsmLoadRaxStack(a, markOff)
 	rtgAsmStoreRaxBss(a, g.stringHeapOff)
 	rtgAsmLoadRaxStack(a, markOff)
@@ -9079,6 +9080,22 @@ func rtgEmitRuntimeArenaResetMadvise(g *rtgLinearGen) {
 	rtgAsmMovRdxImm(a, 4)
 	rtgAsmMovRaxImm(a, 28)
 	rtgAsmSyscall(a)
+	rtgAsmMarkLabel(a, doneLabel)
+}
+
+func rtgEmitRuntimeArenaClampOldToPersistent(g *rtgLinearGen, oldOff int) {
+	a := &g.asm
+	doneLabel := rtgAsmNewLabel(a)
+	rtgAsmLoadRaxBss(a, g.stringHeapEndOff)
+	rtgAsmCmpRaxImm8(a, 0)
+	rtgAsmJzLabel(a, doneLabel)
+	rtgAsmLoadRcxStack(a, oldOff)
+	rtgAsmLoadRaxBss(a, g.stringHeapEndOff)
+	rtgAsmCmpRcxRaxSet(a, 0x9f)
+	rtgAsmCmpRaxImm8(a, 0)
+	rtgAsmJzLabel(a, doneLabel)
+	rtgAsmLoadRaxBss(a, g.stringHeapEndOff)
+	rtgAsmStoreRaxStack(a, oldOff)
 	rtgAsmMarkLabel(a, doneLabel)
 }
 

@@ -53,7 +53,7 @@ func TestFrontendStage3QuickCorpus(t *testing.T) {
 		t.Skipf("set %s=1 to run self-hosted frontend corpus", selfHostTestsEnv)
 	}
 	root := repoRoot(t)
-	runFrontendCorpusWithConfig(t, root, "quick", true, selfHostedFrontendCompiler(t, root))
+	runFrontendCorpusWithConfig(t, root, "quick", false, selfHostedFrontendCompiler(t, root))
 }
 
 func TestFrontendStage3ExtendedCorpus(t *testing.T) {
@@ -147,6 +147,10 @@ func selfHostedFrontendCompiler(t *testing.T, root string) frontendConfig {
 			selfHostErr = err
 			return
 		}
+		if err := os.Symlink(filepath.Join(root, "rtg", "std"), filepath.Join(dir, "std")); err != nil {
+			selfHostErr = fmt.Errorf("frontend std symlink failed: %w", err)
+			return
+		}
 		selfHostBackendPath = filepath.Join(dir, "rtgx-backend")
 		cmd := exec.Command("go", "build", "-o", selfHostBackendPath, ".")
 		cmd.Dir = root
@@ -166,16 +170,16 @@ func selfHostedFrontendCompiler(t *testing.T, root string) frontendConfig {
 		stage1 := filepath.Join(dir, "rtg-stage1")
 		stage2 := filepath.Join(dir, "rtg-stage2")
 		selfHostPath = filepath.Join(dir, "rtg-stage3")
-		env := []string{"RTG_BACKEND=" + selfHostBackendPath, "RTG_STDROOT=" + filepath.Join(root, "rtg", "std")}
-		if err := compileFrontendSource(root, stage0, target, stage1, env); err != nil {
+		stage0Env := []string{"RTG_BACKEND=" + selfHostBackendPath, "RTG_STDROOT=" + filepath.Join(root, "rtg", "std")}
+		if err := compileFrontendSource(root, stage0, target, stage1, stage0Env); err != nil {
 			selfHostErr = fmt.Errorf("frontend stage1 build failed: %w", err)
 			return
 		}
-		if err := compileFrontendSource(root, stage1, target, stage2, env); err != nil {
+		if err := compileFrontendSource(root, stage1, target, stage2, nil); err != nil {
 			selfHostErr = fmt.Errorf("frontend stage2 build failed: %w", err)
 			return
 		}
-		if err := compileFrontendSource(root, stage2, target, selfHostPath, env); err != nil {
+		if err := compileFrontendSource(root, stage2, target, selfHostPath, nil); err != nil {
 			selfHostErr = fmt.Errorf("frontend stage3 build failed: %w", err)
 			return
 		}
@@ -186,7 +190,6 @@ func selfHostedFrontendCompiler(t *testing.T, root string) frontendConfig {
 	return frontendConfig{
 		compiler: selfHostPath,
 		target:   target,
-		env:      []string{"RTG_BACKEND=" + selfHostBackendPath, "RTG_STDROOT=" + filepath.Join(root, "rtg", "std")},
 	}
 }
 
@@ -202,9 +205,23 @@ func compileFrontendSource(root string, compiler string, target string, output s
 }
 
 func frontendCommandEnv(extra []string, pwd string) []string {
-	env := append([]string{}, extra...)
+	env := make([]string, 0, len(extra)+1)
+	for _, item := range extra {
+		if envKey(item) != "PWD" {
+			env = append(env, item)
+		}
+	}
 	env = append(env, "PWD="+pwd)
-	return append(os.Environ(), env...)
+	return env
+}
+
+func envKey(item string) string {
+	for i := 0; i < len(item); i++ {
+		if item[i] == '=' {
+			return item[:i]
+		}
+	}
+	return item
 }
 
 func runFrontendCorpusCase(t *testing.T, frontend frontendConfig, dir string) {
@@ -227,12 +244,24 @@ func runFrontendCorpusCase(t *testing.T, frontend frontendConfig, dir string) {
 		t.Fatalf("frontend compile failed: %v\n%s", err, string(compileOut))
 	}
 
-	frontOut, err := exec.Command(out).CombinedOutput()
+	runCmd := exec.Command(out)
+	runCmd.Dir = dir
+	runCmd.Env = []string{"PWD=" + dir}
+	frontOut, err := runCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("frontend executable failed: %v\n%s", err, string(frontOut))
 	}
 	if !bytes.Equal(frontOut, hostOut) {
-		t.Fatalf("frontend output = %q, host output = %q", string(frontOut), string(hostOut))
+		size := int64(-1)
+		if info, statErr := os.Stat(out); statErr == nil {
+			size = info.Size()
+		}
+		retryCmd := exec.Command(out)
+		retryCmd.Dir = dir
+		retryCmd.Env = []string{"PWD=" + dir}
+		retryOut, retryErr := retryCmd.CombinedOutput()
+		t.Fatalf("frontend output = %q, host output = %q, size=%d, retryErr=%v, retryOut=%q",
+			string(frontOut), string(hostOut), size, retryErr, string(retryOut))
 	}
 }
 

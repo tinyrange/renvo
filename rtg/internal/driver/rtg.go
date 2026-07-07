@@ -27,7 +27,7 @@ func RunRTGCommand(args []string, env []string) int {
 	if resetArena {
 		mark = rtg_runtime_ArenaMark()
 	}
-	built := BuildFromFS(commandArgs, rtgWorkDir(env), rtgStdRoot(env), RTGFS{})
+	built := BuildFromFS(commandArgs, rtgWorkDir(env), rtgStdRoot(args, env), RTGFS{})
 	if !built.Ok {
 		printRTGBuildError(built)
 		return 1
@@ -42,7 +42,7 @@ func RunRTGCommand(args []string, env []string) int {
 		output = rtg_runtime_ArenaPersistString(output)
 		rtg_runtime_ArenaReset(mark)
 	}
-	if !backendbridge.CompileUnitToOutputStripEnv(unit, target, output, strip, env) {
+	if !backendbridge.CompileUnitToOutputStripEnv(unit, target, output, strip, args, env) {
 		print("rtg: backend compilation failed\n")
 		return 1
 	}
@@ -66,7 +66,7 @@ func rtgWorkDir(env []string) string {
 	return "."
 }
 
-func rtgStdRoot(env []string) string {
+func rtgStdRoot(args []string, env []string) string {
 	for i := 0; i < len(env); i++ {
 		item := env[i]
 		if len(item) >= 12 &&
@@ -76,7 +76,77 @@ func rtgStdRoot(env []string) string {
 			return item[12:]
 		}
 	}
+	bundled := rtgBundledStdRoot(args)
+	if bundled != "" {
+		return bundled
+	}
 	return "/std"
+}
+
+func rtgBundledStdRoot(args []string) string {
+	dir := rtgExecutableDir(args)
+	if dir == "" {
+		return ""
+	}
+	path := rtgJoinPath(dir, "std")
+	if rtgPathExists(path) {
+		return path
+	}
+	path = rtgJoinPath(rtgJoinPath(dir, ".."), "std")
+	if rtgPathExists(path) {
+		return path
+	}
+	path = rtgJoinPath(rtgJoinPath(rtgJoinPath(dir, ".."), "share"), "rtg")
+	path = rtgJoinPath(path, "std")
+	if rtgPathExists(path) {
+		return path
+	}
+	return ""
+}
+
+func rtgExecutableDir(args []string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	return rtgDirPath(args[0])
+}
+
+func rtgDirPath(path string) string {
+	last := -1
+	for i := 0; i < len(path); i++ {
+		if path[i] == '/' {
+			last = i
+		}
+	}
+	if last < 0 {
+		return "."
+	}
+	if last == 0 {
+		return "/"
+	}
+	return path[:last]
+}
+
+func rtgJoinPath(base string, elem string) string {
+	if base == "" || base == "." {
+		return elem
+	}
+	if elem == "" {
+		return base
+	}
+	if base[len(base)-1] == '/' {
+		return base + elem
+	}
+	return base + "/" + elem
+}
+
+func rtgPathExists(path string) bool {
+	fd := open(rtgPathCString(path), 0)
+	if fd < 0 {
+		return false
+	}
+	close(fd)
+	return true
 }
 
 func (fs RTGFS) ReadFile(path string) ([]byte, bool) {

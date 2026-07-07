@@ -3,6 +3,7 @@
 package driver
 
 import (
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -69,7 +70,10 @@ func TestCommandBackendHelper(t *testing.T) {
 	if !ok {
 		os.Exit(3)
 	}
-	data, err := os.ReadFile(input)
+	if input != "-" || output != "-" {
+		os.Exit(7)
+	}
+	data, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		os.Exit(4)
 	}
@@ -82,7 +86,7 @@ func TestCommandBackendHelper(t *testing.T) {
 		text = text + " strip"
 	}
 	text = text + "\n"
-	if err := os.WriteFile(output, []byte(text), 0o755); err != nil {
+	if _, err := os.Stdout.Write([]byte(text)); err != nil {
 		os.Exit(6)
 	}
 	os.Exit(0)
@@ -126,10 +130,10 @@ func parseHelperBackendArgs(args []string) (string, string, string, bool, bool) 
 			i += 2
 			continue
 		}
-		if strings.HasPrefix(arg, "-") {
+		if input != "" {
 			return "", "", "", false, false
 		}
-		if input != "" {
+		if arg != "-" && strings.HasPrefix(arg, "-") {
 			return "", "", "", false, false
 		}
 		input = arg

@@ -409,6 +409,23 @@ func rtgCompileUnitInput(input []int, output int, target int) int {
 	if len(input) != 1 {
 		return -1
 	}
+	if input[0] == 0 {
+		var src []byte
+		src = rtgReadAll(input[0], src)
+		if len(src) >= 4 && src[0] == 'R' && src[1] == 'T' && src[2] == 'G' && src[3] == 'U' {
+			prog, isUnit, ok := rtgDecodeUnitProgram(src)
+			if !isUnit {
+				return -1
+			}
+			if !ok {
+				rtgPrintErr("rtg: invalid unit input\n")
+				return 1
+			}
+			return rtgCompileProgramToOutput(&prog, output, target)
+		}
+		prog := rtgParseProgram(src)
+		return rtgCompileProgramToOutput(&prog, output, target)
+	}
 	header := make([]byte, 4)
 	n := read(input[0], header, 0)
 	if n != 4 || header[0] != 'R' || header[1] != 'T' || header[2] != 'G' || header[3] != 'U' {

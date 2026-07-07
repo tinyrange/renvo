@@ -10,8 +10,8 @@ permissions:
   contents: write
 
 jobs:
-  build-stage2:
-    name: Build stage 2 compiler
+  build-release:
+    name: Build release compilers
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -25,7 +25,7 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      - name: Build stage 2 compiler
+      - name: Build backend compilers
         run: |
           set -eux
           mkdir -p dist
@@ -37,22 +37,61 @@ jobs:
             compiler_386_impl.go
             compiler_aarch64_impl.go
             compiler_arm_impl.go
+            compiler_wasm32_impl.go
             compiler_linux_amd64_impl.go
             compiler_linux_386_impl.go
             compiler_linux_aarch64_impl.go
             compiler_linux_arm_impl.go
+            compiler_wasi_wasm32_impl.go
           )
           go build -o dist/rtgx-stage0 \
             rtg_main.go \
             "${compiler_files[@]}"
-          ./dist/rtgx-stage0 -t linux/amd64 -o dist/rtgx-stage1 \
+          ./dist/rtgx-stage0 -t linux/amd64 -s -o dist/rtgx-stage1 \
             "${compiler_files[@]}"
           chmod +x dist/rtgx-stage1
-          ./dist/rtgx-stage1 -t linux/amd64 -o dist/rtgx-linux-amd64 \
+          ./dist/rtgx-stage1 -t linux/amd64 -s -o dist/rtgx-linux-amd64 \
             "${compiler_files[@]}"
-          ./dist/rtgx-stage1 -t linux/aarch64 -o dist/rtgx-linux-arm64 \
+          ./dist/rtgx-stage1 -t linux/aarch64 -s -o dist/rtgx-linux-arm64 \
             "${compiler_files[@]}"
           chmod +x dist/rtgx-linux-amd64 dist/rtgx-linux-arm64
+
+      - name: Build frontend compilers
+        run: |
+          set -eux
+          cp -R rtg/std dist/std
+          go build -o dist/rtg-stage0 ./rtg/cmd/rtg
+          RTG_BACKEND="$PWD/dist/rtgx-linux-amd64" RTG_STDROOT="$PWD/rtg/std" \
+            ./dist/rtg-stage0 -t linux/amd64 -s -o dist/rtg-linux-amd64-stage1 ./rtg/cmd/rtg
+          ./dist/rtg-linux-amd64-stage1 -t linux/amd64 -s -o dist/rtg-linux-amd64 ./rtg/cmd/rtg
+          ./dist/rtg-linux-amd64-stage1 -t linux/aarch64 -s -o dist/rtg-linux-arm64 ./rtg/cmd/rtg
+          chmod +x dist/rtg-linux-amd64 dist/rtg-linux-arm64
+
+      - name: Package frontend releases
+        run: |
+          set -eux
+          mkdir -p package/rtg-linux-amd64/bin package/rtg-linux-amd64/share/rtg
+          cp dist/rtg-linux-amd64 package/rtg-linux-amd64/bin/rtg
+          cp dist/rtgx-linux-amd64 package/rtg-linux-amd64/bin/rtgx
+          cp -R rtg/std package/rtg-linux-amd64/share/rtg/std
+          tar -C package -czf dist/rtg-linux-amd64.tar.gz rtg-linux-amd64
+
+          mkdir -p package/rtg-linux-arm64/bin package/rtg-linux-arm64/share/rtg
+          cp dist/rtg-linux-arm64 package/rtg-linux-arm64/bin/rtg
+          cp dist/rtgx-linux-arm64 package/rtg-linux-arm64/bin/rtgx
+          cp -R rtg/std package/rtg-linux-arm64/share/rtg/std
+          tar -C package -czf dist/rtg-linux-arm64.tar.gz rtg-linux-arm64
+
+      - name: Package backend releases
+        run: |
+          set -eux
+          mkdir -p package/rtgx-linux-amd64/bin
+          cp dist/rtgx-linux-amd64 package/rtgx-linux-amd64/bin/rtgx
+          tar -C package -czf dist/rtgx-linux-amd64.tar.gz rtgx-linux-amd64
+
+          mkdir -p package/rtgx-linux-arm64/bin
+          cp dist/rtgx-linux-arm64 package/rtgx-linux-arm64/bin/rtgx
+          tar -C package -czf dist/rtgx-linux-arm64.tar.gz rtgx-linux-arm64
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v7
@@ -61,10 +100,26 @@ jobs:
           path: |
             dist/rtgx-linux-amd64
             dist/rtgx-linux-arm64
+            dist/rtg-linux-amd64
+            dist/rtg-linux-arm64
+            dist/rtg-linux-amd64.tar.gz
+            dist/rtg-linux-arm64.tar.gz
+            dist/rtgx-linux-amd64.tar.gz
+            dist/rtgx-linux-arm64.tar.gz
           if-no-files-found: error
 
       - name: Upload release asset
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" dist/rtgx-linux-amd64 dist/rtgx-linux-arm64 --clobber
+        run: |
+          gh release upload "$GITHUB_REF_NAME" \
+            dist/rtgx-linux-amd64 \
+            dist/rtgx-linux-arm64 \
+            dist/rtg-linux-amd64 \
+            dist/rtg-linux-arm64 \
+            dist/rtg-linux-amd64.tar.gz \
+            dist/rtg-linux-arm64.tar.gz \
+            dist/rtgx-linux-amd64.tar.gz \
+            dist/rtgx-linux-arm64.tar.gz \
+            --clobber
