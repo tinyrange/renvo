@@ -121,12 +121,13 @@ func rewriteFile(name string, src []byte) ([]byte, []string, error) {
 
 func testNames(file *ast.File) ([]string, error) {
 	var names []string
+	testingNames := testingImportNames(file)
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok || fn.Name == nil || !isTestName(fn.Name.Name) {
 			continue
 		}
-		if !isTestFunc(fn) {
+		if !isTestFunc(fn, testingNames) {
 			return nil, fmt.Errorf("%s: invalid test signature", fn.Name.Name)
 		}
 		names = append(names, fn.Name.Name)
@@ -134,7 +135,22 @@ func testNames(file *ast.File) ([]string, error) {
 	return names, nil
 }
 
-func isTestFunc(fn *ast.FuncDecl) bool {
+func testingImportNames(file *ast.File) []string {
+	var names []string
+	for _, imp := range file.Imports {
+		if imp.Path == nil || imp.Path.Value != "\"testing\"" {
+			continue
+		}
+		name := "testing"
+		if imp.Name != nil {
+			name = imp.Name.Name
+		}
+		names = append(names, name)
+	}
+	return names
+}
+
+func isTestFunc(fn *ast.FuncDecl, testingNames []string) bool {
 	if fn.Recv != nil || fn.Name == nil || !isTestName(fn.Name.Name) || fn.Type == nil {
 		return false
 	}
@@ -148,7 +164,7 @@ func isTestFunc(fn *ast.FuncDecl) bool {
 	if len(param.Names) > 1 {
 		return false
 	}
-	return isTestingT(param.Type)
+	return isTestingT(param.Type, testingNames)
 }
 
 func isTestName(name string) bool {
@@ -162,7 +178,7 @@ func isTestName(name string) bool {
 	return r == utf8.RuneError || !unicode.IsLower(r)
 }
 
-func isTestingT(expr ast.Expr) bool {
+func isTestingT(expr ast.Expr, testingNames []string) bool {
 	ptr, ok := expr.(*ast.StarExpr)
 	if !ok {
 		return false
@@ -172,7 +188,15 @@ func isTestingT(expr ast.Expr) bool {
 		return false
 	}
 	base, ok := sel.X.(*ast.Ident)
-	return ok && base.Name == "testing"
+	if !ok {
+		return false
+	}
+	for _, name := range testingNames {
+		if base.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func testMainSource(tests []string) []byte {

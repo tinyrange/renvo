@@ -23,15 +23,15 @@ func add(a int, b int) int {
 `)
 	writeTestFile(t, srcDir, "calc_test.go", `package calc
 
-import "testing"
+import checktest "testing"
 
-func TestAdd(t *testing.T) {
+func TestAdd(t *checktest.T) {
 	if add(2, 3) != 5 {
 		t.Fatalf("bad sum")
 	}
 }
 
-func Testlower(t *testing.T) {
+func Testlower(t *checktest.T) {
 	t.Fatalf("should not be discovered")
 }
 `)

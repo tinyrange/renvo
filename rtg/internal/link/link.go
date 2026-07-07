@@ -270,6 +270,17 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, lineOf
 			tok.Kind = linkedReplacementTokenKind(tok.Kind, replacement)
 			tok.Size = len(replacement)
 			line += countStringNewlines(replacement)
+		} else if linkedTokenIsEllipsis(tok, src.Text, tokStart, tokEnd) {
+			dst.Text = appendStringBytes(dst.Text, "...")
+			for j := 0; j < 3; j++ {
+				dot := tok
+				dot.Start = tok.Start + j
+				dot.Size = 1
+				dst.Tokens = append(dst.Tokens, dot)
+			}
+			actions[actionIndex] = mappedToken
+			prevEnd = tokEnd
+			continue
 		} else {
 			part := src.Text[tokStart:tokEnd]
 			dst.Text = appendBytes(dst.Text, part)
@@ -315,9 +326,10 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, lineOf
 		fn.NameEnd = nameEnd
 		fn.ReceiverStart = mapLinkedToken(actions, actionStart, len(src.Tokens), fn.ReceiverStart, finalEOF)
 		fn.ReceiverEnd = mapLinkedToken(actions, actionStart, len(src.Tokens), fn.ReceiverEnd, finalEOF)
+		normalizeLinkedReceiver(&fn, finalEOF)
 		fn.BodyStart = mapLinkedToken(actions, actionStart, len(src.Tokens), fn.BodyStart, finalEOF)
 		fn.BodyEnd = mapLinkedToken(actions, actionStart, len(src.Tokens), fn.BodyEnd, finalEOF)
-		fn.EndTok = mapLinkedToken(actions, actionStart, len(src.Tokens), fn.EndTok, finalEOF)
+		fn.EndTok = mapLinkedFuncEndToken(actions, actionStart, len(src.Tokens), fn.EndTok, fn.BodyEnd, finalEOF)
 		dst.Funcs = append(dst.Funcs, fn)
 	}
 	if hasNext && (len(src.Text) == 0 || src.Text[len(src.Text)-1] != '\n') {
@@ -361,10 +373,12 @@ func linkedTokenActions(program unit.Program, aliases *[]string, symbolOffsets [
 	if programImportsUnsafe(program) {
 		markUnsafePointerConversionTokens(program, actions)
 	}
+	markEndianSelectorTokens(program, actions)
 	markSimpleClosureTokens(program, actions, plusReplacement)
 	markSimpleMapTokens(program, actions, plusReplacement)
 	markSimpleDeferPanicRecoverTokens(program, actions, aliases)
 	markSimpleFunctionValueTokens(program, actions, aliases)
+	markSimpleSearchClosureTokens(program, actions, aliases)
 	for i := 0; i < len(program.Symbols); i++ {
 		symbol := program.Symbols[i]
 		index := packageSymbolAliasIndex(*aliases, symbolOffsets, symbol.Package, i)
@@ -490,6 +504,15 @@ func markUnsafePointerConversionTokens(program unit.Program, actions []int) {
 		markSkipToken(actions, typeEnd+1)
 		markSkipToken(actions, valueEnd)
 		i = valueEnd
+	}
+}
+
+func markEndianSelectorTokens(program unit.Program, actions []int) {
+	for i := 0; i+2 < len(program.Tokens); i++ {
+		if (tokenTextEquals(program, i, "LittleEndian") || tokenTextEquals(program, i, "BigEndian")) && tokenTextEquals(program, i+1, ".") {
+			markRedirectToken(actions, i, i+2)
+			markRedirectToken(actions, i+1, i+2)
+		}
 	}
 }
 
@@ -1036,6 +1059,97 @@ func evalSimpleFunctionValueCondition(program unit.Program, start int, end int) 
 	return left%divisor == right
 }
 
+type simpleSearchClosureInfo struct {
+	funcTok   int
+	skipStart int
+	skipEnd   int
+	threshold string
+}
+
+func markSimpleSearchClosureTokens(program unit.Program, actions []int, aliases *[]string) {
+	infos := findSimpleSearchClosureInfos(program)
+	for i := 0; i < len(infos); i++ {
+		markSkipRange(actions, infos[i].skipStart, infos[i].skipEnd)
+		replacement := len(*aliases)
+		*aliases = append(*aliases, infos[i].threshold)
+		markReplacementToken(actions, infos[i].funcTok, replacement)
+	}
+}
+
+func findSimpleSearchClosureInfos(program unit.Program) []simpleSearchClosureInfo {
+	var out []simpleSearchClosureInfo
+	for i := 0; i+2 < len(program.Tokens); i++ {
+		if !tokenTextEquals(program, i, "Search") || !tokenTextEquals(program, i+1, "(") {
+			continue
+		}
+		close := findMatchingParen(program, i+1)
+		if close < 0 {
+			continue
+		}
+		comma := findTopLevelTokenText(program, i+2, close, ",")
+		if comma < 0 || comma+1 >= close || !tokenTextEquals(program, comma+1, "func") {
+			continue
+		}
+		info, ok := matchSimpleSearchClosure(program, comma+1, close)
+		if ok {
+			out = append(out, info)
+		}
+		i = close
+	}
+	return out
+}
+
+func matchSimpleSearchClosure(program unit.Program, funcTok int, callClose int) (simpleSearchClosureInfo, bool) {
+	var info simpleSearchClosureInfo
+	if !tokenTextEquals(program, funcTok, "func") || !tokenTextEquals(program, funcTok+1, "(") {
+		return info, false
+	}
+	paramsClose := findMatchingParen(program, funcTok+1)
+	if paramsClose < 0 || paramsClose+2 >= callClose {
+		return info, false
+	}
+	param := tokenText(program, funcTok+2)
+	if param == "" || !tokenTextEquals(program, funcTok+3, "int") || !tokenTextEquals(program, paramsClose+1, "bool") || !tokenTextEquals(program, paramsClose+2, "{") {
+		return info, false
+	}
+	bodyOpen := paramsClose + 2
+	bodyEnd := findMatchingBrace(program, bodyOpen)
+	if bodyEnd < 0 || bodyEnd+1 != callClose {
+		return info, false
+	}
+	if bodyOpen+5 != bodyEnd ||
+		!tokenTextEquals(program, bodyOpen+1, "return") ||
+		!tokenTextEquals(program, bodyOpen+2, param) ||
+		!tokenTextEquals(program, bodyOpen+3, ">=") ||
+		tokenText(program, bodyOpen+4) == "" {
+		return info, false
+	}
+	info.funcTok = funcTok
+	info.skipStart = funcTok + 1
+	info.skipEnd = bodyEnd
+	info.threshold = tokenText(program, bodyOpen+4)
+	return info, true
+}
+
+func findTopLevelTokenText(program unit.Program, start int, end int, text string) int {
+	depth := 0
+	for i := start; i < end; i++ {
+		tok := tokenText(program, i)
+		if tok == "(" || tok == "[" || tok == "{" {
+			depth++
+			continue
+		}
+		if tok == ")" || tok == "]" || tok == "}" {
+			depth--
+			continue
+		}
+		if depth == 0 && tok == text {
+			return i
+		}
+	}
+	return -1
+}
+
 func findNextTokenText(program unit.Program, start int, text string) int {
 	for i := start; i < len(program.Tokens); i++ {
 		if tokenTextEquals(program, i, text) {
@@ -1148,7 +1262,39 @@ func linkedReplacementTokenKind(kind int, replacement string) int {
 	if replacement == "true" || replacement == "false" {
 		return unit.TokenIdent
 	}
+	if replacementTokenIsNumber(replacement) {
+		return unit.TokenNumber
+	}
+	if replacementTokenIsString(replacement) {
+		return unit.TokenString
+	}
 	return kind
+}
+
+func linkedTokenIsEllipsis(tok unit.Token, text []byte, start int, end int) bool {
+	return tok.Kind == unit.TokenOp &&
+		end-start == 3 &&
+		end <= len(text) &&
+		text[start] == '.' &&
+		text[start+1] == '.' &&
+		text[start+2] == '.'
+}
+
+func replacementTokenIsNumber(text string) bool {
+	if len(text) == 0 {
+		return false
+	}
+	for i := 0; i < len(text); i++ {
+		c := text[i]
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func replacementTokenIsString(text string) bool {
+	return len(text) >= 2 && text[0] == '"' && text[len(text)-1] == '"'
 }
 
 func tokenActionSkips(action int) bool {
@@ -1317,6 +1463,22 @@ func mapLinkedToken(tokenMap []int, tokenStart int, tokenCount int, tok int, eof
 	return mapped
 }
 
+func mapLinkedFuncEndToken(tokenMap []int, tokenStart int, tokenCount int, tok int, bodyEnd int, eof int) int {
+	mapped := mapLinkedToken(tokenMap, tokenStart, tokenCount, tok, eof)
+	if mapped == eof && bodyEnd >= 0 && bodyEnd+1 <= eof {
+		return bodyEnd + 1
+	}
+	return mapped
+}
+
+func normalizeLinkedReceiver(fn *unit.Func, eof int) {
+	_ = eof
+	if fn.ReceiverStart == fn.ReceiverEnd {
+		fn.ReceiverStart = 0
+		fn.ReceiverEnd = 0
+	}
+}
+
 func countCoreLinkedEOF(programs []unit.Program, actions []int, actionOffsets []int) int {
 	total := 0
 	for i := 0; i < len(programs); i++ {
@@ -1325,11 +1487,18 @@ func countCoreLinkedEOF(programs []unit.Program, actions []int, actionOffsets []
 		}
 		for j := 0; j < len(programs[i].Tokens); j++ {
 			if programs[i].Tokens[j].Kind != unit.TokenEOF && !tokenActionSkips(actions[actionOffsets[i]+j]) {
-				total++
+				total += linkedTokenOutputCount(programs[i], programs[i].Tokens[j])
 			}
 		}
 	}
 	return total
+}
+
+func linkedTokenOutputCount(program unit.Program, tok unit.Token) int {
+	if linkedTokenIsEllipsis(tok, program.Text, tok.Start, tok.Start+tok.Size) {
+		return 3
+	}
+	return 1
 }
 
 func packageSymbolOffsets(programs []unit.Program) []int {

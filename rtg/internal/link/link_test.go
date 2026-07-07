@@ -350,6 +350,67 @@ func appMain() int {
 	}
 }
 
+func TestLinkBuildCoreLowersSimpleSearchClosure(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/sort/sort.go", Src: []byte(`package sort
+
+func Search(n int, threshold int) int {
+	if threshold > n {
+		return n
+	}
+	return threshold
+}
+`)},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import "example.com/case/sort"
+
+func main() {
+	idx := sort.Search(5, func(i int) bool { return i >= 3 })
+	if idx == 3 {
+		print("PASS\n")
+		return
+	}
+	print("FAIL\n")
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d marshal=%d/%d", linked.Error, linked.ErrorPackage, unit.LastMarshalError, unit.LastMarshalIndex)
+	}
+	decoded, ok := unit.Unmarshal(linked.Data)
+	if !ok {
+		t.Fatal("linked core unit did not decode")
+	}
+	if bytes.Contains(decoded.Text, []byte("func(i int) bool")) || bytes.Contains(decoded.Text, []byte("return i >= 3")) {
+		t.Fatalf("linked text still contains search closure:\n%s", string(decoded.Text))
+	}
+	if !bytes.Contains(decoded.Text, []byte("Search(5, 3)")) {
+		t.Fatalf("linked text missing lowered Search call:\n%s", string(decoded.Text))
+	}
+	thresholdTok := findLinkedToken(decoded, "3")
+	if thresholdTok < 0 || decoded.Tokens[thresholdTok].Kind != unit.TokenNumber {
+		t.Fatalf("Search threshold token kind = index %d token %#v", thresholdTok, tokenAt(decoded, thresholdTok))
+	}
+	searchFn := findLinkedFunc(decoded, "Search")
+	mainFn := findLinkedFunc(decoded, "main")
+	appMainFn := findLinkedFunc(decoded, "appMain")
+	if searchFn < 0 || mainFn < 0 || appMainFn < 0 {
+		t.Fatalf("missing linked functions: %#v", decoded.Funcs)
+	}
+	if decoded.Funcs[searchFn].EndTok > decoded.Funcs[mainFn].StartTok {
+		t.Fatalf("Search function spans into main: search=%#v main=%#v", decoded.Funcs[searchFn], decoded.Funcs[mainFn])
+	}
+	if decoded.Funcs[mainFn].ReceiverStart != 0 || decoded.Funcs[mainFn].ReceiverEnd != 0 {
+		t.Fatalf("main has noncanonical no-receiver span: %#v", decoded.Funcs[mainFn])
+	}
+	if decoded.Funcs[appMainFn].ReceiverStart != 0 || decoded.Funcs[appMainFn].ReceiverEnd != 0 {
+		t.Fatalf("appMain has noncanonical no-receiver span: %#v", decoded.Funcs[appMainFn])
+	}
+}
+
 func TestLinkBuildCoreLowersSimpleStringIntMap(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
@@ -382,6 +443,99 @@ func appMain() int {
 		!bytes.Contains(decoded.Text, []byte("2")) ||
 		!bytes.Contains(decoded.Text, []byte("if m == 3")) {
 		t.Fatalf("linked text missing scalarized map shape:\n%s", string(decoded.Text))
+	}
+}
+
+func TestLinkBuildCoreSplitsEllipsisTokens(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+func Join(sep []byte) []byte {
+	var out []byte
+	out = append(out, sep...)
+	return out
+}
+
+func appMain() int {
+	joined := Join([]byte("x"))
+	if string(joined) == "x" {
+		print("PASS\n")
+		return 0
+	}
+	print("FAIL\n")
+	return 1
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d marshal=%d/%d", linked.Error, linked.ErrorPackage, unit.LastMarshalError, unit.LastMarshalIndex)
+	}
+	decoded, ok := unit.Unmarshal(linked.Data)
+	if !ok {
+		t.Fatal("linked core unit did not decode")
+	}
+	for i := 0; i < len(decoded.Tokens); i++ {
+		if tokenAt(decoded, i) == "..." {
+			t.Fatalf("linked core unit kept ellipsis token at %d", i)
+		}
+	}
+	found := false
+	for i := 0; i+2 < len(decoded.Tokens); i++ {
+		if tokenAt(decoded, i) == "." && tokenAt(decoded, i+1) == "." && tokenAt(decoded, i+2) == "." {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("linked core unit missing split ellipsis tokens:\n%s", string(decoded.Text))
+	}
+}
+
+func TestLinkBuildCoreLowersEndianSelectors(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/binary/binary.go", Src: []byte(`package binary
+
+func PutUint32(b []byte, v int) {
+	b[0] = byte(v)
+}
+
+func Uint32(b []byte) int {
+	return int(b[0])
+}
+`)},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import "example.com/case/binary"
+
+func appMain() int {
+	buf := make([]byte, 4)
+	binary.LittleEndian.PutUint32(buf, uint32(7))
+	if int(binary.LittleEndian.Uint32(buf)) == 7 {
+		print("PASS\n")
+		return 0
+	}
+	print("FAIL\n")
+	return 1
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d marshal=%d/%d", linked.Error, linked.ErrorPackage, unit.LastMarshalError, unit.LastMarshalIndex)
+	}
+	decoded, ok := unit.Unmarshal(linked.Data)
+	if !ok {
+		t.Fatal("linked core unit did not decode")
+	}
+	if bytes.Contains(decoded.Text, []byte("LittleEndian.")) {
+		t.Fatalf("linked text still contains endian selector:\n%s", string(decoded.Text))
+	}
+	if !bytes.Contains(decoded.Text, []byte("PutUint32(buf, uint32(7))")) ||
+		!bytes.Contains(decoded.Text, []byte("Uint32(buf)")) {
+		t.Fatalf("linked text missing lowered endian calls:\n%s", string(decoded.Text))
 	}
 }
 
@@ -855,6 +1009,28 @@ func findLinkedFunc(program unit.Program, name string) int {
 		}
 	}
 	return -1
+}
+
+func findLinkedToken(program unit.Program, text string) int {
+	for i := 0; i < len(program.Tokens); i++ {
+		if tokenAt(program, i) == text {
+			return i
+		}
+	}
+	return -1
+}
+
+func tokenAt(program unit.Program, tok int) string {
+	if tok < 0 || tok >= len(program.Tokens) {
+		return ""
+	}
+	token := program.Tokens[tok]
+	start := token.Start
+	end := token.Start + token.Size
+	if start < 0 || end < start || end > len(program.Text) {
+		return ""
+	}
+	return string(program.Text[start:end])
 }
 
 func findLinkedTypeByDecl(program unit.Program, decl int) unit.TypeInfo {

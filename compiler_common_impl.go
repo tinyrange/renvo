@@ -2030,6 +2030,9 @@ func rtgExprIdentCode(p *rtgProgram, ep *rtgExprParse, idx int) int {
 		if src[start] == 'm' && src[start+1] == 'a' && src[start+2] == 'k' && src[start+3] == 'e' {
 			return rtgIdentMake
 		}
+		if src[start] == 'u' && src[start+1] == 'i' && src[start+2] == 'n' && src[start+3] == 't' {
+			return rtgIdentInt
+		}
 		if src[start] == 'b' && src[start+1] == 'y' && src[start+2] == 't' && src[start+3] == 'e' {
 			return rtgIdentByte
 		}
@@ -2044,6 +2047,9 @@ func rtgExprIdentCode(p *rtgProgram, ep *rtgExprParse, idx int) int {
 		}
 	}
 	if n == 5 {
+		if src[start] == 'u' && src[start+1] == 'i' && src[start+2] == 'n' && src[start+3] == 't' && src[start+4] == '8' {
+			return rtgIdentInt
+		}
 		if src[start] == 'i' && src[start+1] == 'n' && src[start+2] == 't' {
 			if src[start+3] == '1' && src[start+4] == '6' {
 				return rtgIdentInt16
@@ -2066,6 +2072,17 @@ func rtgExprIdentCode(p *rtgProgram, ep *rtgExprParse, idx int) int {
 		}
 	}
 	if n == 6 {
+		if src[start] == 'u' && src[start+1] == 'i' && src[start+2] == 'n' && src[start+3] == 't' {
+			if src[start+4] == '1' && src[start+5] == '6' {
+				return rtgIdentInt
+			}
+			if src[start+4] == '3' && src[start+5] == '2' {
+				return rtgIdentInt
+			}
+			if src[start+4] == '6' && src[start+5] == '4' {
+				return rtgIdentInt
+			}
+		}
 		if src[start] == 'a' && src[start+1] == 'p' && src[start+2] == 'p' && src[start+3] == 'e' && src[start+4] == 'n' && src[start+5] == 'd' {
 			return rtgIdentAppend
 		}
@@ -4469,6 +4486,21 @@ func rtgBuiltinTypeFromToken(p *rtgProgram, tokIndex int) int {
 	}
 	if rtgBytesEqualText(p.src, start, end, "int64") {
 		return rtgTypeInt64
+	}
+	if rtgBytesEqualText(p.src, start, end, "uint") {
+		return rtgTypeInt
+	}
+	if rtgBytesEqualText(p.src, start, end, "uint8") {
+		return rtgTypeInt
+	}
+	if rtgBytesEqualText(p.src, start, end, "uint16") {
+		return rtgTypeInt
+	}
+	if rtgBytesEqualText(p.src, start, end, "uint32") {
+		return rtgTypeInt
+	}
+	if rtgBytesEqualText(p.src, start, end, "uint64") {
+		return rtgTypeInt
 	}
 	if rtgBytesEqualText(p.src, start, end, "byte") {
 		return rtgTypeByte
