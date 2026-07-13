@@ -26,6 +26,9 @@ func compileTarget(input []int, output int, target int) int {
 	if target == rtgTargetWasiWasm32 {
 		return compileWasiWasm32(input, output)
 	}
+	if target == rtgTargetDarwinArm64 {
+		return compileDarwinArm64(input, output)
+	}
 	if target == rtgTargetLinux386 {
 		return compileLinux386(input, output)
 	}
@@ -67,7 +70,7 @@ func RtgCompileSourceToBytesStrip(source []byte, targetName string, stripSymbols
 	var result rtgCompileResult
 	if target == rtgTargetLinux386 || target == rtgTargetWindows386 {
 		result = rtgTryCompileScalarProgram386(&prog, &meta)
-	} else if target == rtgTargetLinuxAarch64 {
+	} else if target == rtgTargetLinuxAarch64 || target == rtgTargetDarwinArm64 {
 		result = rtgTryCompileScalarProgramAarch64(&prog, &meta)
 	} else if target == rtgTargetLinuxArm {
 		result = rtgTryCompileScalarProgramArm(&prog, &meta)
@@ -112,7 +115,7 @@ func RtgCompileSourceToOutputStrip(source []byte, targetName string, outputPath 
 	var result rtgCompileResult
 	if target == rtgTargetLinux386 || target == rtgTargetWindows386 {
 		result = rtgTryCompileScalarProgram386(&prog, &meta)
-	} else if target == rtgTargetLinuxAarch64 {
+	} else if target == rtgTargetLinuxAarch64 || target == rtgTargetDarwinArm64 {
 		result = rtgTryCompileScalarProgramAarch64(&prog, &meta)
 	} else if target == rtgTargetLinuxArm {
 		result = rtgTryCompileScalarProgramArm(&prog, &meta)
@@ -327,6 +330,13 @@ func rtgEmitLinearPrintStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 	if !rtgEmitStringValueRegs(g, &ep, ep.args[root.firstArg]) {
 		return false
 	}
+	if rtgTargetIsDarwin() {
+		rtgAarch64AsmMovRegReg(a, 2, rtgAarch64RegRdx)
+		rtgAarch64AsmMovRegReg(a, 1, rtgAarch64RegRax)
+		rtgAarch64AsmMovRegImm(a, 0, 1)
+		rtgDarwinArm64CallImport(a, rtgDarwinImportWrite)
+		return true
+	}
 	rtgAsmPushImm(a, 1)
 	rtgAsmPopRdi(a)
 	rtgAsmMovRsiRax(a)
@@ -384,6 +394,18 @@ func rtgEmitBuiltinReadWrite(g *rtgLinearGen, ep *rtgExprParse, idx int, seqSysc
 		rtgAsmMovRaxImm(a, offSyscall)
 	} else {
 		rtgAsmMovRaxImm(a, seqSyscall)
+	}
+	if rtgTargetIsDarwin() {
+		importID := seqSyscall
+		if offsetRead {
+			importID = offSyscall
+		}
+		argCount := 3
+		if offsetRead {
+			argCount = 4
+		}
+		rtgDarwinArm64CallVirtualArgs(a, importID, argCount)
+		return true
 	}
 	rtgAsmSyscall(a)
 	return true
@@ -1105,9 +1127,15 @@ func rtgEvalBuiltinConst(g *rtgLinearGen, nameStart int, nameEnd int) rtgConstRe
 		return rtgConstResultOk(2)
 	}
 	if rtgBytesEqualText(p.src, nameStart, nameEnd, "O_CREATE") {
+		if rtgTargetIsDarwin() {
+			return rtgConstResultOk(512)
+		}
 		return rtgConstResultOk(64)
 	}
 	if rtgBytesEqualText(p.src, nameStart, nameEnd, "O_TRUNC") {
+		if rtgTargetIsDarwin() {
+			return rtgConstResultOk(1024)
+		}
 		return rtgConstResultOk(512)
 	}
 	var r rtgConstResult

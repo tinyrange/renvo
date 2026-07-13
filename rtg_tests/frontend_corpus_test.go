@@ -323,13 +323,16 @@ func frontendTarget(t *testing.T) string {
 	t.Helper()
 
 	if target := os.Getenv(targetEnv); target != "" {
-		if !strings.HasPrefix(target, "linux/") {
+		if !strings.HasPrefix(target, "linux/") && target != "darwin/arm64" {
 			t.Skipf("%s=%s is not runnable by this corpus harness", targetEnv, target)
 		}
 		return target
 	}
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+		return "darwin/arm64"
+	}
 	if runtime.GOOS != "linux" {
-		t.Skipf("frontend corpus executable comparison requires linux host, got %s/%s", runtime.GOOS, runtime.GOARCH)
+		t.Skipf("frontend corpus executable comparison requires a supported host, got %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 	switch runtime.GOARCH {
 	case "amd64", "386", "arm":

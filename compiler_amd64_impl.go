@@ -1018,6 +1018,24 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			if e.argCount != 2 {
 				return false
 			}
+			if rtgTargetIsDarwin() {
+				if !rtgEmitIntExpr(g, ep, ep.args[e.firstArg+1]) {
+					return false
+				}
+				rtgAsmPushRax(a)
+				if !rtgEmitStringPtrExpr(g, ep, ep.args[e.firstArg]) {
+					return false
+				}
+				rtgAsmMovRdiRax(a)
+				rtgAsmPopRsi(a)
+				rtgAsmMovRdxImm(a, 493)
+				// mode is the first variadic argument to open. Darwin's arm64
+				// ABI passes variadic arguments on the stack.
+				rtgAarch64AsmPushReg(a, rtgAarch64RegRdx)
+				rtgDarwinArm64CallVirtualArgs(a, rtgDarwinImportOpen, 2)
+				rtgAarch64AsmAddRegImm(a, 31, 31, 16)
+				return true
+			}
 			if rtgTargetArch == rtgArchAarch64 {
 				if !rtgEmitIntExpr(g, ep, ep.args[e.firstArg+1]) {
 					return false
@@ -1073,6 +1091,10 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 				return false
 			}
 			rtgAsmMovRdiRax(a)
+			if rtgTargetIsDarwin() {
+				rtgDarwinArm64CallVirtualArgs(a, rtgDarwinImportClose, 1)
+				return true
+			}
 			rtgAsmMovRaxImm(a, rtgLinuxSysClose())
 			rtgAsmSyscall(a)
 			return true
@@ -1093,6 +1115,10 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			}
 			rtgAsmMovRsiRax(a)
 			rtgAsmPopRdi(a)
+			if rtgTargetIsDarwin() {
+				rtgDarwinArm64CallVirtualArgs(a, rtgDarwinImportFchmod, 2)
+				return true
+			}
 			rtgAsmMovRaxImm(a, rtgLinuxSysFchmod())
 			rtgAsmSyscall(a)
 			return true
@@ -1101,11 +1127,17 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			if rtgTargetIsWindows() {
 				return rtgEmitWindowsReadWrite(g, ep, idx, false)
 			}
+			if rtgTargetIsDarwin() {
+				return rtgEmitBuiltinReadWrite(g, ep, idx, rtgDarwinImportRead, rtgDarwinImportPread)
+			}
 			return rtgEmitBuiltinReadWrite(g, ep, idx, rtgLinuxSysReadSeq(), rtgLinuxSysReadAt())
 		}
 		if callee == rtgIdentWrite {
 			if rtgTargetIsWindows() {
 				return rtgEmitWindowsReadWrite(g, ep, idx, true)
+			}
+			if rtgTargetIsDarwin() {
+				return rtgEmitBuiltinReadWrite(g, ep, idx, rtgDarwinImportWrite, rtgDarwinImportPwrite)
 			}
 			return rtgEmitBuiltinReadWrite(g, ep, idx, rtgLinuxSysWriteSeq(), rtgLinuxSysWriteAt())
 		}

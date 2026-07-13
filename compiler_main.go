@@ -53,6 +53,9 @@ func rtgParseTargetArg(target string) int {
 	if len(target) == 11 && target[0] == 'w' && target[1] == 'a' && target[2] == 's' && target[3] == 'i' && target[4] == '/' && target[5] == 'w' && target[6] == 'a' && target[7] == 's' && target[8] == 'm' && target[9] == '3' && target[10] == '2' {
 		return rtgTargetWasiWasm32
 	}
+	if len(target) == 12 && target[0] == 'd' && target[1] == 'a' && target[2] == 'r' && target[3] == 'w' && target[4] == 'i' && target[5] == 'n' && target[6] == '/' && target[7] == 'a' && target[8] == 'r' && target[9] == 'm' && target[10] == '6' && target[11] == '4' {
+		return rtgTargetDarwinArm64
+	}
 	return 0
 }
 
@@ -80,14 +83,14 @@ func rtgPrintIntErr(v int) {
 }
 
 func rtgPrintUsage() {
-	rtgPrintErr("usage: rtg [-s] [-t linux/amd64|linux/386|linux/aarch64|linux/arm|windows/amd64|windows/386|wasi/wasm32] -o <output|-> <input.go|->...\n")
+	rtgPrintErr("usage: rtg [-s] [-t linux/amd64|linux/386|linux/aarch64|linux/arm|windows/amd64|windows/386|wasi/wasm32|darwin/arm64] -o <output|-> <input.go|->...\n")
 }
 
 func rtgPrintUnsupportedTarget(target string) {
 	rtgPrintErr("rtg: unsupported target: ")
 	rtgPrintErr(target)
 	rtgPrintErr("\n")
-	rtgPrintErr("rtg: supported targets: linux/amd64, linux/386, linux/aarch64, linux/arm, windows/amd64, windows/386, wasi/wasm32\n")
+	rtgPrintErr("rtg: supported targets: linux/amd64, linux/386, linux/aarch64, linux/arm, windows/amd64, windows/386, wasi/wasm32, darwin/arm64\n")
 }
 
 func rtgUnitRead32(src []byte, pos int) int {
@@ -388,7 +391,7 @@ func rtgCompileProgramToOutput(prog *rtgProgram, output int, target int) int {
 	var result rtgCompileResult
 	if target == rtgTargetLinux386 || target == rtgTargetWindows386 {
 		result = rtgTryCompileScalarProgram386(prog, &meta)
-	} else if target == rtgTargetLinuxAarch64 {
+	} else if target == rtgTargetLinuxAarch64 || target == rtgTargetDarwinArm64 {
 		result = rtgTryCompileScalarProgramAarch64(prog, &meta)
 	} else if target == rtgTargetLinuxArm {
 		result = rtgTryCompileScalarProgramArm(prog, &meta)

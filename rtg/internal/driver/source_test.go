@@ -89,6 +89,33 @@ func Value() int { return 42 }
 	assertSourcePaths(t, result.Files, want)
 }
 
+func TestCollectSourcesAppliesDarwinArm64BuildTags(t *testing.T) {
+	fs := memorySourceFS{files: []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/darwin.go", Src: []byte(`//go:build rtg && darwin && unix && arm64
+
+package main
+
+func appMain() int { return 0 }
+`)},
+		{Path: "/repo/case/cmd/app/linux.go", Src: []byte(`//go:build linux
+
+package main
+
+func appMain() int { return 1 }
+`)},
+	}}
+	result := CollectSourcesForTarget("/repo/case/cmd/app", "/std", ".", "darwin/arm64", fs)
+	if !result.Ok {
+		t.Fatalf("CollectSources failed: err=%d path=%q", result.Error, result.ErrorPath)
+	}
+	want := []string{
+		"/repo/case/go.mod",
+		"/repo/case/cmd/app/darwin.go",
+	}
+	assertSourcePaths(t, result.Files, want)
+}
+
 func TestCollectSourcesReportsErrors(t *testing.T) {
 	missingModule := CollectSources("/repo/case", "/std", "./cmd/app", memorySourceFS{})
 	if missingModule.Ok || missingModule.Error != SourceErrMissingModule {

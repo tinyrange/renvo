@@ -10,6 +10,7 @@ const rtgTargetLinuxArm = 4
 const rtgTargetWindowsAmd64 = 5
 const rtgTargetWindows386 = 6
 const rtgTargetWasiWasm32 = 7
+const rtgTargetDarwinArm64 = 8
 
 const rtgArchAmd64 = 1
 const rtgArch386 = 2
@@ -19,6 +20,7 @@ const rtgArchWasm32 = 5
 
 const rtgOSLinux = 1
 const rtgOSWindows = 2
+const rtgOSDarwin = 3
 
 var rtgTargetArch int = rtgArchAmd64
 var rtgTargetOS int = rtgOSLinux
@@ -40,6 +42,12 @@ func rtgSetTarget(target int) {
 		return
 	}
 	if target == rtgTargetLinuxAarch64 {
+		rtgTargetArch = rtgArchAarch64
+		rtgNativeIntSize = 8
+		return
+	}
+	if target == rtgTargetDarwinArm64 {
+		rtgTargetOS = rtgOSDarwin
 		rtgTargetArch = rtgArchAarch64
 		rtgNativeIntSize = 8
 		return
@@ -68,6 +76,10 @@ func rtgTargetIsWindows() bool {
 	return rtgTargetOS == rtgOSWindows
 }
 
+func rtgTargetIsDarwin() bool {
+	return rtgTargetOS == rtgOSDarwin
+}
+
 type rtgLabelRef struct {
 	at    int
 	label int
@@ -91,18 +103,20 @@ type rtgWinStaticImport struct {
 }
 
 type rtgAsm struct {
-	code       []byte
-	labelPos   []int
-	labelSet   []bool
-	relocs     []rtgLabelRef
-	absRelocs  []rtgAbsRef
-	symbols    []rtgAsmSymbol
-	symbolName []byte
-	winImports []rtgWinStaticImport
-	data       []byte
-	bssSize    int
-	codeOffset int
-	dataOffset int
+	code               []byte
+	labelPos           []int
+	labelSet           []bool
+	relocs             []rtgLabelRef
+	absRelocs          []rtgAbsRef
+	symbols            []rtgAsmSymbol
+	symbolName         []byte
+	winImports         []rtgWinStaticImport
+	darwinImportLabels []int
+	darwinImportUsed   []bool
+	data               []byte
+	bssSize            int
+	codeOffset         int
+	dataOffset         int
 }
 
 const rtgWasm32FallbackSliceBackingSize = 4096
@@ -116,6 +130,8 @@ func rtgAsmInit(a *rtgAsm) {
 	var symbols []rtgAsmSymbol
 	var symbolName []byte
 	var winImports []rtgWinStaticImport
+	var darwinImportLabels []int
+	var darwinImportUsed []bool
 	var data []byte
 	if rtgCompilerFixedTarget != 0 {
 		code = make([]byte, 0, 2097152)
@@ -156,6 +172,8 @@ func rtgAsmInit(a *rtgAsm) {
 	a.symbols = symbols
 	a.symbolName = symbolName
 	a.winImports = winImports
+	a.darwinImportLabels = darwinImportLabels
+	a.darwinImportUsed = darwinImportUsed
 	a.data = data
 	a.bssSize = 0
 	a.codeOffset = 0
@@ -5395,6 +5413,7 @@ type rtgLinearGen struct {
 	winReadEmitted     bool
 	winWriteLabel      int
 	winWriteEmitted    bool
+	darwinEntryOff     int
 	lastRangeReturns   bool
 	scopeBase          int
 	constEvalIota      int
@@ -5670,7 +5689,7 @@ func rtgFixedTargetArch(target int) int {
 	if target == rtgTargetLinux386 || target == rtgTargetWindows386 {
 		return rtgArch386
 	}
-	if target == rtgTargetLinuxAarch64 {
+	if target == rtgTargetLinuxAarch64 || target == rtgTargetDarwinArm64 {
 		return rtgArchAarch64
 	}
 	if target == rtgTargetLinuxArm {
@@ -5687,6 +5706,9 @@ func rtgFixedTargetArch(target int) int {
 func rtgFixedTargetOS(target int) int {
 	if target == rtgTargetWindowsAmd64 || target == rtgTargetWindows386 {
 		return rtgOSWindows
+	}
+	if target == rtgTargetDarwinArm64 {
+		return rtgOSDarwin
 	}
 	if target != 0 {
 		return rtgOSLinux
@@ -9412,6 +9434,20 @@ func rtgEmitSyscallFromStack(g *rtgLinearGen, wordCount int) bool {
 		return true
 	}
 	if rtgTargetArch == rtgArchAarch64 {
+		if rtgTargetIsDarwin() {
+			if wordCount != 4 {
+				return false
+			}
+			rtgAarch64AsmPopReg(a, 9)
+			rtgAarch64AsmPopReg(a, 0)
+			rtgAarch64AsmPopReg(a, 1)
+			rtgAarch64AsmPopReg(a, 2)
+			baseOff := a.bssSize
+			a.bssSize += 8
+			rtgAarch64AsmMovRegAbs(a, 3, baseOff, rtgAbsBssReloc)
+			rtgDarwinArm64CallImport(a, rtgDarwinImportGetdirentries)
+			return true
+		}
 		rtgAarch64AsmPopReg(a, rtgAarch64RegSys)
 		if wordCount > 1 {
 			rtgAarch64AsmPopReg(a, 0)

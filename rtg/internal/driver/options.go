@@ -98,6 +98,9 @@ func IsSupportedTarget(target string) bool {
 	if target == "wasi/wasm32" {
 		return true
 	}
+	if target == "darwin/arm64" {
+		return true
+	}
 	return false
 }
 

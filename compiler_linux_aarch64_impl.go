@@ -22,6 +22,10 @@ func rtgAarch64AsmMoveOffsetArg(a *rtgAsm) {
 
 func compileLinuxAarch64(input []int, output int) int {
 	rtgSetTarget(rtgTargetLinuxAarch64)
+	return rtgCompileAarch64(input, output)
+}
+
+func rtgCompileAarch64(input []int, output int) int {
 	src := make([]byte, 0, 589824)
 	for i := 0; i < len(input); i++ {
 		src = rtgReadAll(input[i], src)
@@ -64,6 +68,15 @@ func rtgTryCompileScalarProgramAarch64(p *rtgProgram, meta *rtgMeta) rtgCompileR
 	a := &g.asm
 	rtgAsmInit(a)
 	a.codeOffset = rtgLinuxAarch64CodeOffset
+	if rtgTargetIsDarwin() {
+		a.codeOffset = rtgDarwinArm64CodeOffset
+		g.darwinEntryOff = a.bssSize
+		a.bssSize += 24
+		rtgAarch64AsmMovRegAbs(a, 9, g.darwinEntryOff, rtgAbsBssReloc)
+		rtgAarch64AsmStoreRegMem(a, 0, 9, 0, 8)
+		rtgAarch64AsmStoreRegMem(a, 1, 9, 8, 8)
+		rtgAarch64AsmStoreRegMem(a, 2, 9, 16, 8)
+	}
 	if rtgCompilerFixedTarget != 0 {
 		g.funcLabels = make([]int, 0, len(meta.funcs))
 	}
@@ -78,22 +91,42 @@ func rtgTryCompileScalarProgramAarch64(p *rtgProgram, meta *rtgMeta) rtgCompileR
 		var result rtgCompileResult
 		return result
 	}
-	if !rtgEmitProgramEntryArgsAarch64(&g, appIndex) {
+	entryOK := false
+	if rtgTargetIsDarwin() {
+		entryOK = rtgEmitProgramEntryArgsDarwinArm64(&g, appIndex)
+	} else {
+		entryOK = rtgEmitProgramEntryArgsAarch64(&g, appIndex)
+	}
+	if !entryOK {
 		var result rtgCompileResult
 		return result
 	}
 	rtgAsmCallLabel(a, g.funcLabels[appIndex])
-	rtgAsmMovRdiRax(a)
-	rtgAsmMovRaxImm(a, 93)
-	rtgAsmSyscall(a)
+	if rtgTargetIsDarwin() {
+		rtgAarch64AsmMovRegReg(a, 0, rtgAarch64RegRax)
+		rtgDarwinArm64CallImport(a, rtgDarwinImportExit)
+		rtgAsmRet(a)
+	} else {
+		rtgAsmMovRdiRax(a)
+		rtgAsmMovRaxImm(a, 93)
+		rtgAsmSyscall(a)
+	}
 	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
 		i := g.funcQueue[queueIndex]
 		if !rtgEmitScalarFunction(&g, i) {
+			if rtgTargetIsDarwin() {
+				rtgPrintErr("rtg: failed to emit function ")
+				write(2, p.src[meta.funcs[i].nameStart:meta.funcs[i].nameEnd], -1)
+				rtgPrintErr("\n")
+			}
 			var result rtgCompileResult
 			return result
 		}
 	}
 	data := rtgAsmImageAarch64(a)
+	if rtgTargetIsDarwin() {
+		data = rtgAsmImageDarwinArm64(a)
+	}
 	var result rtgCompileResult
 	result.data = data
 	result.ok = true

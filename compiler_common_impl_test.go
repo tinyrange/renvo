@@ -89,6 +89,7 @@ func appMain(args []string, env []string) int {
 	syscall(1, 1, "PASS\n", 5)
 	return 0
 }
+
 `)
 	data, ok := RtgCompileSourceToBytes(src, "linux/amd64")
 	if !ok {
@@ -105,6 +106,58 @@ func appMain(args []string, env []string) int {
 	}
 	if string(got) != "PASS\n" {
 		t.Fatalf("compiled syscall output = %q, want PASS", string(got))
+	}
+}
+
+func TestDarwinArm64LibSystemRuntime(t *testing.T) {
+	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
+		t.Skipf("darwin/arm64 execution test requires darwin/arm64 host, got %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	src := []byte(`package main
+
+func syscall(num int, fd int, buf []byte, size int) int { return 0 }
+
+func appMain(args []string, env []string) int {
+	fd := open("darwin-runtime.tmp", O_RDWR|O_CREATE|O_TRUNC)
+	if fd < 0 { return 1 }
+	if write(fd, []byte("PASS\n"), -1) != 5 { return 2 }
+	if chmod(fd, 420) != 0 { return 3 }
+	if close(fd) != 0 { return 4 }
+	fd = open("darwin-runtime.tmp", O_RDONLY)
+	if fd < 0 { return 5 }
+	buf := make([]byte, 5)
+	if read(fd, buf, -1) != 5 { return 6 }
+	if close(fd) != 0 { return 7 }
+	fd = open(".", O_RDONLY)
+	if fd < 0 { return 8 }
+	dirbuf := make([]byte, 4096)
+	n := syscall(217, fd, dirbuf, len(dirbuf))
+	if close(fd) != 0 { return 9 }
+	if n < 12 { return 10 }
+	reclen := int(dirbuf[4]) | int(dirbuf[5])<<8
+	if reclen < 12 || reclen > n { return 11 }
+	if dirbuf[6] != 4 || dirbuf[8] != '.' { return 12 }
+	print(string(buf))
+	return 0
+}
+`)
+	data, ok := RtgCompileSourceToBytesStrip(src, "darwin/arm64", true)
+	if !ok {
+		t.Fatal("RtgCompileSourceToBytesStrip failed")
+	}
+	dir := t.TempDir()
+	out := filepath.Join(dir, "darwin-runtime")
+	if err := os.WriteFile(out, data, 0755); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	cmd := exec.Command(out)
+	cmd.Dir = dir
+	got, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("compiled Darwin test failed: %v\n%s", err, string(got))
+	}
+	if string(got) != "PASS\n" {
+		t.Fatalf("compiled Darwin output = %q, want PASS", string(got))
 	}
 }
 

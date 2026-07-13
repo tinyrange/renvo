@@ -196,19 +196,21 @@ func (fs RTGFS) ReadDir(path string) ([]DirEntry, bool) {
 			break
 		}
 		pos := 0
-		for pos+19 <= n {
-			reclen := int(buf[pos+16]) | int(buf[pos+17])<<8
-			if reclen <= 19 || pos+reclen > n {
+		minimum := rtgDirentMinimum()
+		for pos+minimum <= n {
+			reclen := rtgDirentRecordLength(buf, pos)
+			if reclen <= minimum || pos+reclen > n {
 				close(fd)
 				return nil, false
 			}
-			nameStart := pos + 19
+			nameStart := rtgDirentNameStart(pos)
+			typeAt := rtgDirentTypeOffset(pos)
 			nameEnd := nameStart
 			for nameEnd < pos+reclen && buf[nameEnd] != 0 {
 				nameEnd++
 			}
 			if nameEnd > nameStart && !rtgDirNameIsDot(buf, nameStart, nameEnd) {
-				out = append(out, DirEntry{Name: string(buf[nameStart:nameEnd]), IsDir: buf[pos+18] == 4})
+				out = append(out, DirEntry{Name: string(buf[nameStart:nameEnd]), IsDir: buf[typeAt] == 4})
 			}
 			pos += reclen
 		}

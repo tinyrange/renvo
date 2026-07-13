@@ -337,8 +337,14 @@ func hasBuildTag(target string, tag string) bool {
 	if tag == "rtg" {
 		return true
 	}
-	if tag == "linux" || tag == "unix" {
+	if tag == "linux" {
 		return stringHasPrefix(target, "linux/")
+	}
+	if tag == "darwin" {
+		return stringHasPrefix(target, "darwin/")
+	}
+	if tag == "unix" {
+		return stringHasPrefix(target, "linux/") || stringHasPrefix(target, "darwin/")
 	}
 	if tag == "windows" {
 		return stringHasPrefix(target, "windows/")
@@ -356,7 +362,7 @@ func hasBuildTag(target string, tag string) bool {
 		return stringHasSuffix(target, "/arm")
 	}
 	if tag == "aarch64" || tag == "arm64" {
-		return stringHasSuffix(target, "/aarch64")
+		return stringHasSuffix(target, "/aarch64") || stringHasSuffix(target, "/arm64")
 	}
 	if tag == "wasm32" || tag == "wasm" {
 		return stringHasSuffix(target, "/wasm32")

@@ -72,6 +72,7 @@ func TestIsSupportedTarget(t *testing.T) {
 		"linux/aarch64",
 		"linux/arm",
 		"windows/amd64",
+		"darwin/arm64",
 		"windows/386",
 		"wasi/wasm32",
 	}

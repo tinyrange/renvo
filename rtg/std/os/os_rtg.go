@@ -113,14 +113,16 @@ func ReadDir(name string) ([]DirEntry, *osError) {
 			break
 		}
 		pos := 0
-		for pos+19 <= n {
-			reclen := int(buf[pos+16]) | int(buf[pos+17])<<8
-			if reclen <= 19 || pos+reclen > n {
+		minimum := rtgDirentMinimum()
+		for pos+minimum <= n {
+			reclen := rtgDirentRecordLength(buf, pos)
+			if reclen <= minimum || pos+reclen > n {
 				close(fd)
 				return nil, errIO()
 			}
-			typ := buf[pos+18]
-			nameStart := pos + 19
+			typeAt := rtgDirentTypeOffset(pos)
+			nameStart := rtgDirentNameStart(pos)
+			typ := buf[typeAt]
 			nameEnd := nameStart
 			for nameEnd < pos+reclen && buf[nameEnd] != 0 {
 				nameEnd++
