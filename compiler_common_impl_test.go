@@ -334,6 +334,24 @@ func appMain(args []string, env []string) int {
 	}
 }
 
+func TestMethodLookupRejectsDifferentReceiverWithSameMethodName(t *testing.T) {
+	src := []byte(`package main
+
+type firstReceiver struct { value int }
+type secondReceiver struct { value int }
+
+func (receiver firstReceiver) read() int { return receiver.value }
+
+func appMain(args []string, env []string) int {
+	var receiver secondReceiver
+	return receiver.read()
+}
+`)
+	if _, ok := RtgCompileSourceToBytes(src, "linux/amd64"); ok {
+		t.Fatal("method from a different receiver type compiled successfully")
+	}
+}
+
 func unitProgramFromSource(t *testing.T, src []byte) rtgunit.Program {
 	t.Helper()
 	dir := t.TempDir()

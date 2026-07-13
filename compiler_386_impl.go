@@ -983,6 +983,13 @@ func rtg386EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			}
 			return true
 		}
+		if e.argCount == 1 && (callee == rtgIdentCap || callee == rtgIdentLen) {
+			count := rtgArrayBuiltinCount(g, ep, e)
+			if count >= 0 {
+				rtgAsmMovRaxImm(a, count)
+				return true
+			}
+		}
 		if e.argCount == 1 && callee == rtgIdentCap {
 			if !rtgEmitSlicePtrCap(g, ep, ep.args[e.firstArg]) {
 				return false
