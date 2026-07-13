@@ -16,6 +16,41 @@ func compileLinuxTarget(input []int, output int, target int) int {
 }
 
 func compileTarget(input []int, output int, target int) int {
+	// A stage compiler is specialized while its parent is lowering this source.
+	// Keep that dispatch expressed in terms of the specialization global so the
+	// fixed-target branch pruner can remove every unrelated backend call.
+	if rtgCompilerFixedTarget != 0 {
+		if rtgCompilerFixedTarget == rtgTargetWindowsAmd64 {
+			rtgCompilerFixedTarget = rtgTargetWindowsAmd64
+			return compileWindowsAmd64(input, output)
+		}
+		if rtgCompilerFixedTarget == rtgTargetWindows386 {
+			rtgCompilerFixedTarget = rtgTargetWindows386
+			return compileWindows386(input, output)
+		}
+		if rtgCompilerFixedTarget == rtgTargetWasiWasm32 {
+			rtgCompilerFixedTarget = rtgTargetWasiWasm32
+			return compileWasiWasm32(input, output)
+		}
+		if rtgCompilerFixedTarget == rtgTargetDarwinArm64 {
+			rtgCompilerFixedTarget = rtgTargetDarwinArm64
+			return compileDarwinArm64(input, output)
+		}
+		if rtgCompilerFixedTarget == rtgTargetLinux386 {
+			rtgCompilerFixedTarget = rtgTargetLinux386
+			return compileLinux386(input, output)
+		}
+		if rtgCompilerFixedTarget == rtgTargetLinuxAarch64 {
+			rtgCompilerFixedTarget = rtgTargetLinuxAarch64
+			return compileLinuxAarch64(input, output)
+		}
+		if rtgCompilerFixedTarget == rtgTargetLinuxArm {
+			rtgCompilerFixedTarget = rtgTargetLinuxArm
+			return compileLinuxArm(input, output)
+		}
+		rtgCompilerFixedTarget = rtgTargetLinuxAmd64
+		return compileLinuxAmd64(input, output)
+	}
 	rtgCompilerFixedTarget = target
 	if target == rtgTargetWindowsAmd64 {
 		return compileWindowsAmd64(input, output)

@@ -45,6 +45,14 @@ func BuildUnit(args []string, workDir string, stdRoot string, files []load.Sourc
 }
 
 func BuildFromFS(args []string, workDir string, stdRoot string, fs SourceFS) BuildResult {
+	return buildFromFS(args, workDir, stdRoot, fs, false)
+}
+
+func buildFromFSCompact(args []string, workDir string, stdRoot string, fs SourceFS) BuildResult {
+	return buildFromFS(args, workDir, stdRoot, fs, true)
+}
+
+func buildFromFS(args []string, workDir string, stdRoot string, fs SourceFS, compact bool) BuildResult {
 	result := newBuildResult()
 	options := ParseOptions(args)
 	result.Options = options
@@ -58,12 +66,20 @@ func BuildFromFS(args []string, workDir string, stdRoot string, fs SourceFS) Bui
 	if !sources.Ok {
 		return buildFail(result, BuildErrSource, "", sources.ErrorPath, -1, -1, -1, -1)
 	}
-	built := pipeline.BuildUnitWithTransientFiles(workDir, stdRoot, options.Package, sources.Files, sourcesStart, sourcesEnd)
+	var built pipeline.Result
+	if compact {
+		built = pipeline.BuildUnitWithTransientFiles(workDir, stdRoot, options.Package, sources.Files, sourcesStart, sourcesEnd)
+	} else {
+		built = pipeline.BuildUnit(workDir, stdRoot, options.Package, sources.Files)
+	}
 	result.Pipeline = built
 	if !built.Ok {
 		return buildFail(result, BuildErrPipeline, "", "", -1, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
 	result.Unit = built.Link.Data
+	if compact {
+		result.Sources = SourceResult{}
+	}
 	return result
 }
 

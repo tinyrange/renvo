@@ -411,7 +411,17 @@ func rtgCompileProgramToOutput(prog *rtgProgram, output int, target int) int {
 		return 1
 	}
 	var result rtgCompileResult
-	if target == rtgTargetLinux386 || target == rtgTargetWindows386 {
+	if rtgCompilerFixedTarget == rtgTargetLinux386 || rtgCompilerFixedTarget == rtgTargetWindows386 {
+		result = rtgTryCompileScalarProgram386(prog, &meta)
+	} else if rtgCompilerFixedTarget == rtgTargetLinuxAarch64 || rtgCompilerFixedTarget == rtgTargetDarwinArm64 {
+		result = rtgTryCompileScalarProgramAarch64(prog, &meta)
+	} else if rtgCompilerFixedTarget == rtgTargetLinuxArm {
+		result = rtgTryCompileScalarProgramArm(prog, &meta)
+	} else if rtgCompilerFixedTarget == rtgTargetWasiWasm32 {
+		result = rtgTryCompileScalarProgramWasm32(prog, &meta)
+	} else if rtgCompilerFixedTarget != 0 {
+		result = rtgTryCompileScalarProgramAmd64(prog, &meta)
+	} else if target == rtgTargetLinux386 || target == rtgTargetWindows386 {
 		result = rtgTryCompileScalarProgram386(prog, &meta)
 	} else if target == rtgTargetLinuxAarch64 || target == rtgTargetDarwinArm64 {
 		result = rtgTryCompileScalarProgramAarch64(prog, &meta)

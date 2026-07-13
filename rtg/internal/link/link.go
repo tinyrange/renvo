@@ -24,6 +24,14 @@ type Result struct {
 }
 
 func LinkBuildCore(result build.Result) Result {
+	return linkBuildCore(result, false)
+}
+
+func LinkBuildCoreTransient(result build.Result) Result {
+	return linkBuildCore(result, true)
+}
+
+func linkBuildCore(result build.Result, transient bool) Result {
 	out := Result{Ok: true, Error: LinkOK, ErrorPackage: -1}
 	if !result.Ok {
 		out.Ok = false
@@ -42,9 +50,6 @@ func LinkBuildCore(result build.Result) Result {
 		out.Error = LinkErrUnit
 		return out
 	}
-	for i := 0; i < len(result.Units); i++ {
-		arena.Discard(result.Units[i].ArenaStart, result.Units[i].ArenaEnd)
-	}
 	data, ok := unit.Marshal(program)
 	if !ok {
 		out.Ok = false
@@ -53,6 +58,11 @@ func LinkBuildCore(result build.Result) Result {
 	}
 	out.Program = program
 	out.Data = data
+	if transient {
+		for i := 0; i < len(result.Units); i++ {
+			arena.Discard(result.Units[i].ArenaStart, result.Units[i].ArenaEnd)
+		}
+	}
 	return out
 }
 
@@ -82,30 +92,47 @@ func LinkProgramsCore(programs []unit.Program, root int, rootName string) (unit.
 	aliases := packageSymbolAliases(programs, root, symbolOffsets)
 	plusReplacement := len(aliases)
 	aliases = append(aliases, "+")
+	actionsOK := true
 	for i := 0; i < len(programs); i++ {
 		actionStart := arena.Mark()
 		actions := make([]int, len(programs[i].Tokens))
 		actionEnd := arena.Mark()
 		if !linkedTokenActions(programs[i], &aliases, symbolOffsets, actions, plusReplacement) {
-			return empty, false
+			actionsOK = false
+			arena.Discard(actionStart, actionEnd)
+			break
 		}
 		for j := 0; j < len(actions); j++ {
 			programs[i].Tokens[j].Line = actions[j]
 		}
 		arena.Discard(actionStart, actionEnd)
 	}
+	if !actionsOK {
+		for i := 0; i < len(programs); i++ {
+			restoreCoreTokenLines(programs[i].Text, programs[i].Tokens)
+		}
+		return empty, false
+	}
 	finalEOF := countCoreLinkedEOF(programs)
 	if finalEOF < 0 {
 		return empty, false
 	}
-	program := unit.Program{Package: rootName, ImportPath: programs[root].ImportPath}
+	program := unit.Program{Package: cloneCoreLinkString(rootName), ImportPath: cloneCoreLinkString(programs[root].ImportPath)}
 	reserveCoreLinkedProgram(&program, programs)
 	lineOffset := 0
+	appendOK := true
 	for i := 0; i < len(programs); i++ {
 		if !appendProgramCore(&program, programs[i], finalEOF, lineOffset, aliases, i+1 < len(programs)) {
-			return empty, false
+			appendOK = false
+			break
 		}
 		lineOffset = nextLineOffset(lineOffset, programs[i].Text, i+1 < len(programs))
+	}
+	for i := 0; i < len(programs); i++ {
+		restoreCoreTokenLines(programs[i].Text, programs[i].Tokens)
+	}
+	if !appendOK {
+		return empty, false
 	}
 	program.Tokens = append(program.Tokens, unit.Token{
 		Kind:  unit.TokenEOF,
@@ -114,6 +141,26 @@ func LinkProgramsCore(programs []unit.Program, root int, rootName string) (unit.
 		Line:  countNewlines(program.Text) + 1,
 	})
 	return program, true
+}
+
+func cloneCoreLinkString(value string) string {
+	data := make([]byte, len(value))
+	copy(data, []byte(value))
+	return string(data)
+}
+
+func restoreCoreTokenLines(text []byte, tokens []unit.Token) {
+	line := 1
+	position := 0
+	for i := 0; i < len(tokens); i++ {
+		start := tokens[i].Start
+		if start < position || start > len(text) {
+			return
+		}
+		line += countNewlines(text[position:start])
+		tokens[i].Line = line
+		position = start
+	}
 }
 
 func ensureCoreProgramSymbols(programs []unit.Program) {

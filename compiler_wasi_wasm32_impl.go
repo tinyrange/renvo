@@ -41,6 +41,8 @@ func rtgTryCompileScalarProgramWasm32(p *rtgProgram, meta *rtgMeta) rtgCompileRe
 	var g rtgLinearGen
 	g.prog = p
 	g.meta = meta
+	g.fixedTargetState = 1
+	g.fixedTargetValue = rtgTargetWasiWasm32
 	a := &g.asm
 	rtgAsmInit(a)
 	for i := 0; i < len(meta.funcs); i++ {

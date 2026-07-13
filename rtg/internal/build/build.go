@@ -41,6 +41,17 @@ func BuildUnits(graph load.Graph) Result {
 }
 
 func BuildPrograms(graph load.Graph) Result {
+	return buildPrograms(graph, false)
+}
+
+// BuildProgramsTransient allows the command pipeline to release parsed and
+// checked package storage after each lowered unit has taken ownership of the
+// data needed by the linker.
+func BuildProgramsTransient(graph load.Graph) Result {
+	return buildPrograms(graph, true)
+}
+
+func buildPrograms(graph load.Graph, transient bool) Result {
 	headerStart := arena.Mark()
 	prog := check.CheckGraphHeadersCore(graph)
 	headerEnd := arena.Mark()
@@ -77,13 +88,17 @@ func BuildPrograms(graph load.Graph) Result {
 			ArenaStart: unitStart,
 			ArenaEnd:   unitEnd,
 		})
-		arena.Discard(prog.Packages[i].CoreArenaStart, prog.Packages[i].CoreArenaEnd)
-		arena.Discard(pkg.CoreArenaStart, pkg.CoreArenaEnd)
+		if transient {
+			arena.Discard(prog.Packages[i].CoreArenaStart, prog.Packages[i].CoreArenaEnd)
+			arena.Discard(pkg.CoreArenaStart, pkg.CoreArenaEnd)
+		}
 	}
 	if result.Root < 0 {
 		return buildFail(result, BuildErrRoot, -1, -1, -1)
 	}
-	arena.Discard(headerStart, headerEnd)
+	if transient {
+		arena.Discard(headerStart, headerEnd)
+	}
 	return result
 }
 

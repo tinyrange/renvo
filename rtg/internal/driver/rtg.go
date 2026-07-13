@@ -22,7 +22,7 @@ func RunRTGCommand(args []string, env []string) int {
 	if resetArena {
 		mark = arena.Mark()
 	}
-	built := BuildFromFS(commandArgs, rtgWorkDir(env), rtgStdRoot(args, env), RTGFS{})
+	built := buildFromFSCompact(commandArgs, rtgWorkDir(env), rtgStdRoot(args, env), RTGFS{})
 	if !built.Ok {
 		printRTGBuildError(built)
 		return 1

@@ -5741,14 +5741,17 @@ func rtgEmitLinearRange(g *rtgLinearGen, start int, end int) bool {
 func rtgEmitScopedRange(g *rtgLinearGen, start int, end int) bool {
 	oldLocalCount := g.localCount
 	oldScopeBase := g.scopeBase
+	oldStackUsed := g.stackUsed
 	g.scopeBase = oldLocalCount
 	if !rtgEmitLinearRange(g, start, end) {
 		g.localCount = oldLocalCount
 		g.scopeBase = oldScopeBase
+		g.stackUsed = oldStackUsed
 		return false
 	}
 	g.localCount = oldLocalCount
 	g.scopeBase = oldScopeBase
+	g.stackUsed = oldStackUsed
 	return true
 }
 func rtgEmitLinearStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
@@ -5900,6 +5903,7 @@ func rtgLoadCompilerFixedTarget(g *rtgLinearGen) {
 		}
 	}
 }
+
 func rtgFindCompilerFixedTarget(g *rtgLinearGen) int {
 	rtgLoadCompilerFixedTarget(g)
 	return g.fixedTargetValue
@@ -7454,6 +7458,13 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 		}
 		return rtgEmitIntExpr(g, &ep, rootIndex)
 	}
+	var ep rtgExprParse
+	if assignTok > stmt.startTok {
+		rtgParseExpressionInto(&ep, p, assignTok+1, stmt.endTok)
+		if !ep.ok || len(ep.exprs) == 0 {
+			return false
+		}
+	}
 	declaresLocal := stmt.kind == rtgStmtVar || rtgTokIsKind(p, stmt.startTok, rtgTokVar) || stmt.kind == rtgStmtShort
 	offset := rtgFindLocalOffset(g, nameStart, nameEnd)
 	if declaresLocal {
@@ -7499,7 +7510,7 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 				}
 			}
 			if stmt.kind == rtgStmtShort {
-				inferredType := rtgInferExprType(g, assignTok+1, stmt.endTok)
+				inferredType := rtgInferParsedExprType(g, &ep, len(ep.exprs)-1)
 				if assignTok+2 < stmt.endTok && rtgTokIsKind(p, assignTok+1, rtgTokIdent) && rtgTokCharIs(p, assignTok+2, '(') {
 					fnIndex := -1
 					for i := 0; i < len(g.meta.funcs); i++ {
@@ -7533,11 +7544,6 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 			}
 		}
 		return true
-	}
-	var ep rtgExprParse
-	rtgParseExpressionInto(&ep, p, assignTok+1, stmt.endTok)
-	if !ep.ok || len(ep.exprs) == 0 {
-		return false
 	}
 	rootIndex := len(ep.exprs) - 1
 	targetType := rtgTypeInt
@@ -8343,7 +8349,7 @@ func rtgEmitTypedAssign(g *rtgLinearGen, ep *rtgExprParse, idx int, offset int) 
 		rtgAsmStoreRdxStack(&g.asm, offset-8)
 		return true
 	}
-	if rtgTypeKindIsScalarInt(destResolved.kind) {
+	if rtgTypeKindIsScalarIntOrPointer(destResolved.kind) {
 		if !rtgEmitIntExpr(g, ep, idx) {
 			return false
 		}
@@ -8946,11 +8952,6 @@ func rtgEmitMakeSliceRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		rtgAsmImulRcxImm(a, elemSize)
 		rtgAsmPushRcx(a)
 		rtgAsmPopRax(a)
-		if rtgTargetArch == rtgArchWasm32 {
-			rtgAsmPushImm(a, 65536)
-			rtgAsmPopRcx(a)
-			rtgAsmAddRaxRcx(a)
-		}
 		rtgAsmStoreRaxStack(a, sizeOffset)
 		rtgEmitArenaAllocStackRax(g, sizeOffset)
 	}
@@ -11555,6 +11556,7 @@ func rtgFindLocalOffset(g *rtgLinearGen, nameStart int, nameEnd int) int {
 	}
 	return g.locals[localIndex].offset
 }
+
 func rtgFindLocalIndex(g *rtgLinearGen, nameStart int, nameEnd int) int {
 	for i := g.localCount - 1; i >= 0; i-- {
 		if rtgBytesEqualRange(g.prog.src, g.locals[i].nameStart, g.locals[i].nameEnd, nameStart, nameEnd) {

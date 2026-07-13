@@ -32,6 +32,10 @@ func LinkBuildCore(result build.Result) Result {
 	return linkBuild(result, true)
 }
 
+func LinkBuildCoreTransient(result build.Result) Result {
+	return LinkBuildCore(result)
+}
+
 func linkBuild(result build.Result, coreOnly bool) Result {
 	out := Result{Ok: true, Error: LinkOK, ErrorPackage: -1}
 	if !result.Ok {

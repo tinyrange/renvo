@@ -50,6 +50,10 @@ func BuildPrograms(graph load.Graph) Result {
 	return buildUnits(graph, false)
 }
 
+func BuildProgramsTransient(graph load.Graph) Result {
+	return BuildPrograms(graph)
+}
+
 func buildUnits(graph load.Graph, encodePackages bool) Result {
 	prog := check.CheckGraph(graph)
 	result := Result{
