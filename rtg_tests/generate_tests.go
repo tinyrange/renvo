@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"go/format"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,7 +39,492 @@ func quickCases() []testCase {
 	out = append(out, quickArrays(25)...)
 	out = append(out, quickFunctions(20)...)
 	out = append(out, quickLiterals(1)...)
+	out = append(out, legacyIssueRegressions()...)
 	return out
+}
+
+// legacyIssueRegressions preserves distinct semantic reproducers collected
+// from an older compiler implementation.
+func legacyIssueRegressions() []testCase {
+	cases := []struct {
+		issue  int
+		source string
+	}{
+		{54, `package main
+
+import "strings"
+
+func main() {
+	parts := strings.Split("abc", "")
+	if len(parts) == 3 && parts[0] == "a" && parts[1] == "b" && parts[2] == "c" {
+		print("PASS\n")
+		return
+	}
+	print("FAIL\n")
+}
+`},
+		{53, `package main
+
+func pair() (int, int) { return 2, 3 }
+func add(a, b int) int { return a + b }
+
+func main() {
+	if add(pair()) == 5 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{52, `package main
+
+type inner struct{ n int }
+type outer struct{ in inner }
+
+func main() {
+	o := outer{in: inner{n: 1}}
+	o.in = inner{n: 7}
+	if o.in.n == 7 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{51, `package main
+
+func main() {
+	n := 0
+	for range []int{1, 2} { n++ }
+	if n == 2 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{50, `package main
+
+func main() {
+	m := map[string]int{"ab": 7}
+	a := "a"
+	if m[a+"b"] == 7 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{49, `package main
+
+func main() {
+	if "abcdef"[1:4] == "bcd" { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{48, `package main
+
+func main() {
+	x := 4
+	p := &x
+	(*p)++
+	if x == 5 && *p == 5 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{47, `package main
+
+func main() {
+	s := make([]int, 1, 1)
+	s[0] = 3
+	t := append(s, 4)
+	if s[0] == 3 && t[0] == 3 && t[1] == 4 && len(t) == 2 && cap(t) >= 2 {
+		print("PASS\n")
+		return
+	}
+	print("FAIL\n")
+}
+`},
+		{46, `package main
+
+func main() {
+	if 7 / -3 == -2 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{45, `package main
+
+func main() {
+	a, b := map[string]int{"x": 1}, map[string]int{"y": 2}
+	if a["x"] == 1 && b["y"] == 2 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{44, `package main
+
+type issue44S struct{ x int }
+func (s issue44S) Bump() int { s.x++; return s.x }
+
+func main() {
+	s := issue44S{x: 3}
+	if s.Bump() == 4 && s.x == 3 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{43, `package main
+
+func main() {
+	if "abc"[1] == byte('b') { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{42, `package main
+
+func main() {
+	if 3 * -2 == -6 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{41, `package main
+
+func main() {
+	a := "x"
+	b := "xy"[0:1]
+	if a == b { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{40, `package main
+
+type issue40A struct{ n int }
+type issue40B struct{ n int }
+func (x issue40A) val() int { return x.n + 1 }
+func (x issue40B) val() int { return x.n + 10 }
+
+func main() {
+	aa := issue40A{n: 2}
+	bb := issue40B{n: 3}
+	if aa.val() == 3 && bb.val() == 13 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{39, `package main
+
+type issue39I interface{ V() int }
+type issue39P struct{ n int }
+func (p issue39P) V() int { return p.n }
+
+func main() {
+	p := issue39P{n: 1}
+	var i issue39I = p
+	p.n = 9
+	if i.V() == 1 && p.n == 9 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{38, `package main
+
+func main() {
+	a, b := 1, 2
+	p := &a
+	*p, b = b, *p
+	if a == 2 && b == 1 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{37, `package main
+
+func main() {
+	m := map[string]int{"a": 1}
+	x := 2
+	m["a"], x = x, m["a"]
+	if m["a"] == 2 && x == 1 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{36, `package main
+
+func main() {
+	a := [2]int{1, 2}
+	a[0], a[1] = 9, 8
+	if a[0] == 9 && a[1] == 8 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{35, `package main
+
+func main() {
+	xs := []int{1, 2}
+	ys := xs
+	if len(ys) == 2 && cap(ys) == 2 && ys[0] == 1 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{34, `package main
+
+type issue34T struct{ s string }
+
+func main() {
+	t := issue34T{s: "a"}
+	t.s = "b" + "c"
+	if t.s == "bc" { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{33, `package main
+
+func main() {
+	i := 9
+	for i := 0; i < 3; i++ {}
+	if i == 9 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{31, `package main
+
+func main() {
+	a := [0]int{}
+	if len(a) == 0 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{30, `package main
+
+func main() {
+	xs := []int{1, 2}
+	xs[0], xs[1] = xs[1], xs[0]
+	if xs[0] == 2 && xs[1] == 1 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{29, `package main
+
+func main() {
+	total := 0
+	for _, v := range [1]int{7} { total += v }
+	if total == 7 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{28, `package main
+
+func main() {
+	if 7 % -4 == 3 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{27, `package main
+
+type issue27Pair struct{ a int; b int }
+
+func main() {
+	p := issue27Pair{}
+	p.a, p.b = 3, 4
+	if p.a == 3 && p.b == 4 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{26, `package main
+
+func main() {
+	var m map[string]int
+	m = make(map[string]int)
+	m["x"] = 3
+	if m["x"] == 3 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{25, `package main
+
+type issue25S struct{ n int }
+
+func main() {
+	var a, b = issue25S{n: 1}, issue25S{n: 2}
+	if a.n == 1 && b.n == 2 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{24, `package main
+
+func issue24Pair() (int, string) { return 3, "ok" }
+
+func main() {
+	_, s := issue24Pair()
+	if s == "ok" { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{23, `package main
+
+func main() {
+	k := "a"
+	m := map[string]int{k: 2}
+	if m["a"] == 2 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{22, `package main
+
+import "strings"
+
+func main() {
+	parts := strings.Split("abc", ",")
+	if len(parts) == 1 && parts[0] == "abc" { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{21, `package main
+
+func main() {
+	var a = [2]int{1, 2}
+	if len(a) == 2 && a[0] == 1 && a[1] == 2 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{20, `package main
+
+import "strings"
+
+func main() {
+	if strings.Count("abc", "") == 4 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{19, `package main
+
+type issue19T struct{ N int }
+func (t issue19T) Name() string { return "ok" }
+
+func main() {
+	v := issue19T{N: 1}
+	if v.Name() == "ok" { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{18, `package main
+
+type issue18T struct{ x int }
+func issue18Set(t issue18T) { t.x = 9 }
+
+func main() {
+	t := issue18T{x: 3}
+	issue18Set(t)
+	if t.x == 3 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{17, `package main
+
+func main() {
+	m := map[string]int{"a": 1}
+	got := ""
+	for k := range m { got = k }
+	if got == "a" { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{16, `package main
+
+import "strings"
+
+func main() {
+	parts := strings.Split("a--b--", "--")
+	if len(parts) == 3 && parts[0] == "a" && parts[1] == "b" && parts[2] == "" && strings.Join(parts, ":") == "a:b:" {
+		print("PASS\n")
+		return
+	}
+	print("FAIL\n")
+}
+`},
+		{15, `package main
+
+func main() {
+	xs := []int{1, 2}
+	ys := append(xs, 3)
+	if len(ys) == 3 && ys[2] == 3 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{14, `package main
+
+func main() {
+	x := 1
+	inner := 0
+	{
+		x := 2
+		inner = x
+	}
+	if inner == 2 && x == 1 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{13, `package main
+
+func issue13Mutate(a [2]int) int { a[0] = 9; return a[0] + a[1] }
+
+func main() {
+	a := [2]int{1, 2}
+	if issue13Mutate(a) == 11 && a[0] == 1 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{12, `package main
+
+type issue12Pair struct{ a int; b string }
+
+func main() {
+	p := issue12Pair{a: 1, b: "x"}
+	q := p
+	q.a = 9
+	if p.a == 1 && q.a == 9 && q.b == "x" { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{11, `package main
+
+func main() {
+	xs := make([]int, 1, 2)
+	xs = append(xs, 8)
+	xs = append(xs, 9)
+	if len(xs) == 3 && cap(xs) >= 3 && xs[2] == 9 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{10, `package main
+
+func main() {
+	var s []int
+	if len(s) == 0 && cap(s) == 0 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+		{8, `package main
+
+func main() {
+	s := []int{1}
+	m := map[string]int{"x": s[0]}
+	if m["x"] == 1 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`},
+	}
+
+	var out []testCase
+	for _, tc := range cases {
+		out = append(out, simpleCase(legacyIssueTier(tc.issue), "legacy_regressions", tc.issue, tc.source))
+	}
+	out = append(out, moduleCase("quick", "legacy_regressions", 9, map[string]string{
+		"cmd/app/config.go": `package main
+
+var (
+	base = 40
+	zero int
+)
+`,
+		"cmd/app/main.go": `package main
+
+const inc = 2
+
+func main() {
+	base++
+	if base+inc+zero == 43 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`,
+	}))
+	return out
+}
+
+func legacyIssueTier(_ int) string {
+	return "quick"
 }
 
 func extendedCases() []testCase {
@@ -780,6 +1266,11 @@ func writeCase(root string, tc testCase) {
 	for name, content := range tc.files {
 		path := filepath.Join(dir, name)
 		must(os.MkdirAll(filepath.Dir(path), 0755))
+		if tc.group == "legacy_regressions" && strings.HasSuffix(name, ".go") {
+			formatted, err := format.Source([]byte(content))
+			must(err)
+			content = string(formatted)
+		}
 		must(os.WriteFile(path, []byte(content), 0644))
 	}
 }

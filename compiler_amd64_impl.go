@@ -944,6 +944,11 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			return true
 		}
 		if e.argCount == 1 && callee == rtgIdentCap {
+			argType := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, ep.args[e.firstArg]))
+			if argType.kind == rtgTypeArray {
+				rtgAsmMovRaxImm(a, argType.count)
+				return true
+			}
 			if !rtgEmitSlicePtrCap(g, ep, ep.args[e.firstArg]) {
 				return false
 			}
@@ -956,6 +961,11 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			return true
 		}
 		if e.argCount == 1 && callee == rtgIdentLen {
+			argType := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, ep.args[e.firstArg]))
+			if argType.kind == rtgTypeArray {
+				rtgAsmMovRaxImm(a, argType.count)
+				return true
+			}
 			arg := &ep.exprs[ep.args[e.firstArg]]
 			if arg.kind == rtgExprString {
 				msg := rtgDecodeStringToken(p, arg.tok)

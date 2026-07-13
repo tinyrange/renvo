@@ -48,6 +48,29 @@ func LastIndex(s string, substr string) int {
 	return -1
 }
 
+func Count(s string, substr string) int {
+	if len(substr) == 0 {
+		count := 1
+		for i := 0; i < len(s); i++ {
+			if s[i]&0xc0 != 0x80 {
+				count++
+			}
+		}
+		return count
+	}
+	count := 0
+	start := 0
+	for start+len(substr) <= len(s) {
+		i := Index(s[start:], substr)
+		if i < 0 {
+			break
+		}
+		count++
+		start += i + len(substr)
+	}
+	return count
+}
+
 func TrimSpace(s string) string {
 	start := 0
 	for start < len(s) && isSpace(s[start]) {
