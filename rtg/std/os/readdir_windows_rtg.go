@@ -1,8 +1,6 @@
 //go:build rtg && windows
 
-package driver
-
-import "j5.nz/rtg/rtg/internal/load"
+package os
 
 const rtgWindowsFindDataSize = 320
 const rtgWindowsFindNameOffset = 44
@@ -18,24 +16,24 @@ func rtgWindowsFindNextFile(handle int, data *byte) int { return 0 }
 // rtg:linkstatic kernel32.dll,FindClose
 func rtgWindowsFindClose(handle int) int { return 0 }
 
-func rtgReadDirNative(path string) ([]DirEntry, bool) {
-	pattern := rtgWindowsPathBytes(load.JoinPath(path, "*"))
+func ReadDir(path string) ([]DirEntry, *osError) {
+	pattern := rtgWindowsPathBytes(rtgWindowsJoinGlob(path))
 	data := make([]byte, rtgWindowsFindDataSize)
 	handle := rtgWindowsFindFirstFile(&pattern[0], &data[0])
 	if handle == -1 {
-		return nil, false
+		return nil, errIO()
 	}
-	out := make([]DirEntry, 0, 32)
+	var out []DirEntry
 	for {
 		nameEnd := rtgWindowsFindNameOffset
 		for nameEnd < rtgWindowsFindNameLimit && data[nameEnd] != 0 {
 			nameEnd++
 		}
-		if nameEnd > rtgWindowsFindNameOffset && !rtgDirNameIsDot(data, rtgWindowsFindNameOffset, nameEnd) {
+		if nameEnd > rtgWindowsFindNameOffset && !dirNameIsDot(data, rtgWindowsFindNameOffset, nameEnd) {
 			attributes := int(data[0]) | int(data[1])<<8 | int(data[2])<<16 | int(data[3])<<24
 			out = append(out, DirEntry{
-				Name:  string(data[rtgWindowsFindNameOffset:nameEnd]),
-				IsDir: attributes&rtgWindowsFileAttributeDirectory != 0,
+				name:  string(data[rtgWindowsFindNameOffset:nameEnd]),
+				isDir: attributes&rtgWindowsFileAttributeDirectory != 0,
 			})
 		}
 		if rtgWindowsFindNextFile(handle, &data[0]) == 0 {
@@ -44,7 +42,18 @@ func rtgReadDirNative(path string) ([]DirEntry, bool) {
 	}
 	rtgWindowsFindClose(handle)
 	sortDirEntries(out)
-	return out, true
+	return out, nil
+}
+
+func rtgWindowsJoinGlob(path string) string {
+	if path == "" || path == "." {
+		return "*"
+	}
+	last := path[len(path)-1]
+	if last == '/' || last == '\\' {
+		return path + "*"
+	}
+	return path + "/*"
 }
 
 func rtgWindowsPathBytes(path string) []byte {
@@ -56,6 +65,5 @@ func rtgWindowsPathBytes(path string) []byte {
 		}
 		out = append(out, c)
 	}
-	out = append(out, 0)
-	return out
+	return append(out, 0)
 }

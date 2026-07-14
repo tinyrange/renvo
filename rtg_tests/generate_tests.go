@@ -11,10 +11,11 @@ import (
 )
 
 type testCase struct {
-	tier  string
-	group string
-	name  string
-	files map[string]string
+	tier   string
+	group  string
+	name   string
+	module string
+	files  map[string]string
 }
 
 func main() {
@@ -41,7 +42,48 @@ func quickCases() []testCase {
 	out = append(out, quickLiterals(1)...)
 	out = append(out, legacyIssueRegressions()...)
 	out = append(out, quickBuildConstraints()...)
+	out = append(out, aarch64IdentPartRegression())
 	return out
+}
+
+func aarch64IdentPartRegression() testCase {
+	return testCase{
+		tier:   "quick",
+		group:  "regressions",
+		name:   "000_aarch64_ident_part",
+		module: "example.com/rtgtests/quick/regressions/aarch64identpart",
+		files: map[string]string{
+			"cmd/app/main.go": `package main
+
+func identStart(c byte) bool {
+	return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+func identPart(c byte) bool {
+	return identStart(c) || (c >= '0' && c <= '9')
+}
+
+func scanIdent(src []byte, pos int) int {
+	if pos >= len(src) || !identStart(src[pos]) {
+		return pos
+	}
+	pos++
+	for pos < len(src) && identPart(src[pos]) {
+		pos++
+	}
+	return pos
+}
+
+func main() {
+	if scanIdent([]byte("package main"), 0) != 7 {
+		print("FAIL\n")
+		return
+	}
+	print("PASS\n")
+}
+`,
+		},
+	}
 }
 
 func quickBuildConstraints() []testCase {
@@ -95,6 +137,26 @@ func legacyIssueRegressions() []testCase {
 		issue  int
 		source string
 	}{
+		{55, `package main
+
+import "os"
+
+func countEntries(path string) int {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return -1
+	}
+	return len(entries)
+}
+
+func main() {
+	if countEntries(".") > 0 {
+		print("PASS\n")
+		return
+	}
+	print("FAIL\n")
+}
+`},
 		{54, `package main
 
 import "strings"
@@ -1306,7 +1368,10 @@ func moduleCase(tier string, group string, index int, files map[string]string) t
 func writeCase(root string, tc testCase) {
 	dir := filepath.Join(root, tc.tier, tc.group, tc.name)
 	must(os.MkdirAll(dir, 0755))
-	mod := modulePath(tc.tier, tc.group, caseIndex(tc.name))
+	mod := tc.module
+	if mod == "" {
+		mod = modulePath(tc.tier, tc.group, caseIndex(tc.name))
+	}
 	must(os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module "+mod+"\n\ngo 1.25\n"), 0644))
 	for name, content := range tc.files {
 		path := filepath.Join(dir, name)

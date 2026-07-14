@@ -1,4 +1,4 @@
-//go:build rtg && !darwin && !wasi && !wasip1
+//go:build rtg && linux
 
 package os
 

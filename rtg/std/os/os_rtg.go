@@ -7,10 +7,6 @@ const O_RDWR = 2
 const O_CREATE = 64
 const O_TRUNC = 512
 
-const getdents64LinuxAmd64 = 217
-const getdents64LinuxAarch64 = 61
-const getdents64Linux386 = 220
-
 type FileMode int
 
 var Args []string
@@ -39,8 +35,6 @@ func errIO() *osError {
 	return nil
 }
 
-func syscall(num int, fd int, buf []byte, size int) int { return 0 }
-
 func Environ() []string {
 	return nil
 }
@@ -52,7 +46,7 @@ func Getwd() (string, *osError) {
 }
 
 func ReadFile(name string) ([]byte, *osError) {
-	fd := open(name, O_RDONLY)
+	fd := open(rtgPathCString(name), O_RDONLY)
 	if fd < 0 {
 		return nil, errIO()
 	}
@@ -74,7 +68,7 @@ func ReadFile(name string) ([]byte, *osError) {
 }
 
 func WriteFile(name string, data []byte, perm FileMode) *osError {
-	fd := open(name, O_RDWR|O_CREATE|O_TRUNC)
+	fd := open(rtgPathCString(name), O_RDWR|O_CREATE|O_TRUNC)
 	if fd < 0 {
 		return errIO()
 	}
@@ -90,56 +84,8 @@ func WriteFile(name string, data []byte, perm FileMode) *osError {
 	return nil
 }
 
-func ReadDir(name string) ([]DirEntry, *osError) {
-	fd := open(name, O_RDONLY)
-	if fd < 0 {
-		return nil, errIO()
-	}
-	buf := make([]byte, 32768)
-	var out []DirEntry
-	for {
-		n := syscall(getdents64LinuxAmd64, fd, buf, len(buf))
-		if n < 0 {
-			n = syscall(getdents64LinuxAarch64, fd, buf, len(buf))
-		}
-		if n < 0 {
-			n = syscall(getdents64Linux386, fd, buf, len(buf))
-		}
-		if n < 0 {
-			close(fd)
-			return nil, errIO()
-		}
-		if n == 0 {
-			break
-		}
-		pos := 0
-		minimum := rtgDirentMinimum()
-		for pos+minimum <= n {
-			reclen := rtgDirentRecordLength(buf, pos)
-			if reclen <= minimum || pos+reclen > n {
-				close(fd)
-				return nil, errIO()
-			}
-			typeAt := rtgDirentTypeOffset(pos)
-			nameStart := rtgDirentNameStart(pos)
-			typ := buf[typeAt]
-			nameEnd := nameStart
-			for nameEnd < pos+reclen && buf[nameEnd] != 0 {
-				nameEnd++
-			}
-			if nameEnd > nameStart && !dirNameIsDot(buf, nameStart, nameEnd) {
-				out = append(out, DirEntry{name: string(buf[nameStart:nameEnd]), isDir: rtgDirentIsDirectory(typ)})
-			}
-			pos += reclen
-		}
-	}
-	close(fd)
-	sortDirEntries(out)
-	return out, nil
-}
-
 func Open(name string) (File, *osError) {
-	fd := open(name, O_RDONLY)
+	fd := open(rtgPathCString(name), O_RDONLY)
 	if fd < 0 {
 		return File{}, errIO()
 	}
@@ -147,7 +93,7 @@ func Open(name string) (File, *osError) {
 }
 
 func Create(name string) (File, *osError) {
-	fd := open(name, O_RDWR|O_CREATE|O_TRUNC)
+	fd := open(rtgPathCString(name), O_RDWR|O_CREATE|O_TRUNC)
 	if fd < 0 {
 		return File{}, errIO()
 	}

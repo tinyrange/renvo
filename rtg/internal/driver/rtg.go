@@ -3,18 +3,14 @@
 package driver
 
 import (
+	"os"
+
 	"j5.nz/rtg/rtg/internal/arena"
 	"j5.nz/rtg/rtg/internal/backendbridge"
 	"j5.nz/rtg/rtg/internal/load"
 )
 
-const rtgGetdents64LinuxAmd64 = 217
-const rtgGetdents64LinuxAarch64 = 61
-const rtgGetdents64Linux386 = 220
-
 type RTGFS struct{}
-
-func syscall(num int, fd int, buf []byte, size int) int { return 0 }
 
 func RunRTGCommand(args []string, env []string) int {
 	if CommandHelpRequested(args) {
@@ -32,10 +28,10 @@ func RunRTGCommand(args []string, env []string) int {
 	}
 	built := buildFromFSCompact(commandArgs, rtgWorkDir(env), rtgStdRoot(args, env), RTGFS{})
 	if !built.Ok {
+		printRTGBuildError(built)
 		if resetArena {
 			arena.Reset(mark)
 		}
-		printRTGBuildError(built)
 		return 1
 	}
 	unit := built.Unit
@@ -177,12 +173,15 @@ func (fs RTGFS) ReadDir(path string) ([]DirEntry, bool) {
 	if entries, bundled := bundledStdReadDir(path); bundled {
 		return entries, true
 	}
-	return rtgReadDirNative(path)
-}
-
-func rtgDirNameIsDot(buf []byte, start int, end int) bool {
-	size := end - start
-	return size == 1 && buf[start] == '.' || size == 2 && buf[start] == '.' && buf[start+1] == '.'
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, false
+	}
+	out := make([]DirEntry, 0, len(entries))
+	for i := 0; i < len(entries); i++ {
+		out = append(out, DirEntry{Name: entries[i].Name(), IsDir: entries[i].IsDir()})
+	}
+	return out, true
 }
 
 func printRTGBuildError(result BuildResult) {

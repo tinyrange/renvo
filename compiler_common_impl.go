@@ -9988,10 +9988,10 @@ func rtgEmitArbitrarySyscall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			return false
 		}
 		number := rtgEvalConstExpr(g, ep, ep.args[e.firstArg])
-		// The portable frontend tries each supported Linux getdents64 number.
-		// On Darwin they all lower to libc getdirentries; only one is reached
-		// after the first successful call.
-		if !number.ok || (number.value != 217 && number.value != 61 && number.value != 220) {
+		// The Darwin directory adapter uses one compiler-intrinsic selector,
+		// which is lowered to libc getdirentries rather than issued as a raw
+		// Darwin syscall number.
+		if !number.ok || number.value != 217 {
 			return false
 		}
 	}
