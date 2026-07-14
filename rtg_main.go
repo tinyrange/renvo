@@ -39,7 +39,13 @@ func open(path string, flags int) int {
 		slog.Error("failed to open file", "path", path, "error", err)
 		return -1
 	}
-	fd := len(files) + 3 // Start after standard fds
+	fd := 3
+	for {
+		if _, occupied := files[fd]; !occupied {
+			break
+		}
+		fd++
+	}
 	files[fd] = f
 	return fd
 }
