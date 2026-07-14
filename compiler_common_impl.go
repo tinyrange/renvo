@@ -342,6 +342,13 @@ type rtgWinStaticImport struct {
 	name string
 }
 
+type rtgDarwinStaticImport struct {
+	dylib string
+	name  string
+	label int
+	used  bool
+}
+
 type rtgAsm struct {
 	code               []byte
 	labelPos           []int
@@ -351,6 +358,7 @@ type rtgAsm struct {
 	symbols            []rtgAsmSymbol
 	symbolName         []byte
 	winImports         []rtgWinStaticImport
+	darwinImports      []rtgDarwinStaticImport
 	darwinImportLabels []int
 	darwinImportUsed   []bool
 	data               []byte
@@ -370,6 +378,7 @@ func rtgAsmInit(a *rtgAsm) {
 	var symbols []rtgAsmSymbol
 	var symbolName []byte
 	var winImports []rtgWinStaticImport
+	var darwinImports []rtgDarwinStaticImport
 	var data []byte
 	if rtgCompilerFixedTarget != 0 {
 		code = make([]byte, 0, 2097152)
@@ -410,6 +419,7 @@ func rtgAsmInit(a *rtgAsm) {
 	a.symbols = symbols
 	a.symbolName = symbolName
 	a.winImports = winImports
+	a.darwinImports = darwinImports
 	a.data = data
 	a.bssSize = 0
 	a.codeOffset = 0
@@ -5237,10 +5247,6 @@ func rtgScalarKindSize(kind int) int {
 }
 
 func rtgAsmLoadPrimaryIndexTertiaryScalarOrPointer(a *rtgAsm, kind int) {
-	if kind == rtgTypePointer {
-		rtgAsmLoadQwordPrimaryIndexTertiary8(a)
-		return
-	}
 	elemSize := rtgScalarKindSize(kind)
 	rtgAsmLoadPrimaryIndexTertiarySize(a, elemSize)
 }
@@ -6035,6 +6041,9 @@ func rtgEmitLinearRange(g *rtgLinearGen, start int, end int) bool {
 		lastKind = stmt.kind
 		i = next
 		if !rtgEmitLinearStmt(g, &stmt) {
+			rtgPrintErr("rtg: failed to emit statement: ")
+			write(2, prog.src[rtgTokStart(prog, stmt.startTok):rtgTokEnd(prog, stmt.endTok-1)], -1)
+			rtgPrintErr("\n")
 			return false
 		}
 		if g.fixedPrunedReturns {
@@ -10373,6 +10382,9 @@ func rtgEmitPersistentArenaReady(g *rtgLinearGen) {
 }
 
 func rtgEmitLinkStaticCall(g *rtgLinearGen, fn *rtgFuncInfo, wordCount int) bool {
+	if rtgTargetIsDarwin() {
+		return rtgDarwinArm64EmitLinkStaticCall(g, fn, wordCount)
+	}
 	if rtgTargetOS != rtgOSWindows {
 		return false
 	}
