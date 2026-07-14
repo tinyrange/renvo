@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "source_digest": "07469e1a9268f4f894ce71d4343714172c0730208217cd34ac9c420c8ffb63c8",
+  "source_digest": "2355d0726765fd4cafb65c47c4a5f0e779201684d5af5ac220e543466d483471",
   "runs": [
     {
       "stage": "host",
       "target": "linux/amd64",
-      "commit": "c6eb5c28c272aa402c42e8202619beb3ea403ec0",
-      "captured_at": "2026-07-14T13:10:14Z",
+      "commit": "a60760b401d511b75c8d9de0edc6bd67b5977e58",
+      "captured_at": "2026-07-14T13:30:46Z",
       "observations": [
         {
           "id": 1,
@@ -583,8 +583,8 @@
     {
       "stage": "stage3",
       "target": "linux/amd64",
-      "commit": "c6eb5c28c272aa402c42e8202619beb3ea403ec0",
-      "captured_at": "2026-07-14T13:10:14Z",
+      "commit": "a60760b401d511b75c8d9de0edc6bd67b5977e58",
+      "captured_at": "2026-07-14T13:30:46Z",
       "observations": [
         {
           "id": 1,

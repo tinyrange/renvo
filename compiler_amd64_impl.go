@@ -695,10 +695,9 @@ func rtgAmd64EmitCompositeFieldToMem(g *rtgLinearGen, ep *rtgExprParse, idx int,
 		rtgEmitCopyStackToMemSecondary(g, tempOffset, fieldOffset, size)
 		return true
 	}
-	if !rtgEmitIntExpr(g, ep, idx) {
+	if !rtgEmitScalarExprForKind(g, ep, idx, fieldResolved.kind) {
 		return false
 	}
-	rtgAsmNormalizePrimaryForKind(a, fieldResolved.kind)
 	rtgAsmLoadSecondaryStack(a, addrOffset)
 	rtgAsmStorePrimaryMemSecondaryDisp(a, fieldOffset)
 	return true
@@ -935,20 +934,15 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			return rtgEmitArbitrarySyscall(g, ep, idx)
 		}
 		if e.argCount == 1 && (callee == rtgIdentInt || callee == rtgIdentInt64) {
-			return rtgEmitIntExpr(g, ep, ep.args[e.firstArg])
+			return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeInt)
 		}
 		if e.argCount == 1 && (callee == rtgIdentByte || callee == rtgIdentInt16 || callee == rtgIdentInt32) {
-			if !rtgEmitIntExpr(g, ep, ep.args[e.firstArg]) {
-				return false
-			}
 			if callee == rtgIdentByte {
-				rtgAsmNormalizePrimaryForKind(a, rtgTypeByte)
+				return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeByte)
 			} else if callee == rtgIdentInt16 {
-				rtgAsmNormalizePrimaryForKind(a, rtgTypeInt16)
-			} else {
-				rtgAsmNormalizePrimaryForKind(a, rtgTypeInt32)
+				return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeInt16)
 			}
-			return true
+			return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeInt32)
 		}
 		if e.argCount == 1 && (callee == rtgIdentCap || callee == rtgIdentLen) {
 			count := rtgArrayBuiltinCount(g, ep, e)
@@ -1332,11 +1326,11 @@ func rtgAmd64EmitFloatBinaryExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) boo
 	a := &g.asm
 	e := &ep.exprs[idx]
 	if rtgTokCharIs(p, e.tok, '*') {
-		if !rtgEmitIntExpr(g, ep, e.left) {
+		if !rtgEmitScalarExprForKind(g, ep, e.left, rtgTypeFloat64) {
 			return false
 		}
 		rtgAsmPushPrimary(a)
-		if !rtgEmitIntExpr(g, ep, e.right) {
+		if !rtgEmitScalarExprForKind(g, ep, e.right, rtgTypeFloat64) {
 			return false
 		}
 		rtgAsmPopTertiary(a)
@@ -1345,23 +1339,23 @@ func rtgAmd64EmitFloatBinaryExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) boo
 		return true
 	}
 	if rtgTokCharIs(p, e.tok, '/') {
-		if !rtgEmitIntExpr(g, ep, e.left) {
+		if !rtgEmitScalarExprForKind(g, ep, e.left, rtgTypeFloat64) {
 			return false
 		}
 		rtgAsmShlPrimaryImm(a, 2)
 		rtgAsmPushPrimary(a)
-		if !rtgEmitIntExpr(g, ep, e.right) {
+		if !rtgEmitScalarExprForKind(g, ep, e.right, rtgTypeFloat64) {
 			return false
 		}
 		rtgAsmPopTertiary(a)
 		rtgAsmDivLeftTertiaryRightPrimary(a, false)
 		return true
 	}
-	if !rtgEmitIntExpr(g, ep, e.left) {
+	if !rtgEmitScalarExprForKind(g, ep, e.left, rtgTypeFloat64) {
 		return false
 	}
 	rtgAsmPushPrimary(a)
-	if !rtgEmitIntExpr(g, ep, e.right) {
+	if !rtgEmitScalarExprForKind(g, ep, e.right, rtgTypeFloat64) {
 		return false
 	}
 	rtgAsmPopTertiary(a)
