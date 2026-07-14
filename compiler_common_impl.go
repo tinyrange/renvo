@@ -7754,15 +7754,15 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 					return false
 				}
 				rtgAsmPushSecondary(a)
+				lhsResolved := rtgResolveType(meta, lhsType)
 				var rhs rtgExprParse
 				rhsIndex := rtgParseExpressionRoot(&rhs, p, assignTok+1, stmt.endTok)
 				if rhsIndex < 0 {
 					return false
 				}
-				if !rtgEmitIntExpr(g, &rhs, rhsIndex) {
+				if !rtgEmitScalarExprForKind(g, &rhs, rhsIndex, lhsResolved.kind) {
 					return false
 				}
-				lhsResolved := rtgResolveType(meta, lhsType)
 				rtgAsmNormalizePrimaryForKind(a, lhsResolved.kind)
 				rtgAsmPopSecondary(a)
 				lhsSize := rtgScalarKindSize(lhsResolved.kind)
