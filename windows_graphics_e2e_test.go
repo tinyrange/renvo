@@ -37,7 +37,12 @@ func fail(message string) {
 func main() {
 	w := graphics.NewWindow(graphics.WindowOptions{Title: "RTG Windows/amd64 ✓", Width: 32, Height: 24, Hidden: true})
 	if w == nil {
-		fail("new window")
+		err := graphics.LastWindowError()
+		if err != nil {
+			fail("new window: " + err.Message)
+		} else {
+			fail("new window")
+		}
 		return
 	}
 	surface := w.Surface()

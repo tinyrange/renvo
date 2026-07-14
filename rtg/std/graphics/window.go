@@ -62,7 +62,32 @@ type Event struct {
 	Repeat    bool
 }
 
-type Error struct{ Message string }
+type Error struct {
+	Message string
+	Code    int
+}
+
+var lastWindowError Error
+var hasLastWindowError bool
+
+// LastWindowError reports why the most recent NewWindow call failed.
+// It returns nil after a successful call or before window creation is attempted.
+func LastWindowError() *Error {
+	if !hasLastWindowError {
+		return nil
+	}
+	return &lastWindowError
+}
+
+func clearLastWindowError() {
+	hasLastWindowError = false
+	lastWindowError = Error{}
+}
+
+func setLastWindowError(message string, code int) {
+	hasLastWindowError = true
+	lastWindowError = Error{Message: message, Code: code}
+}
 
 func (e *Error) Error() string {
 	if e == nil {

@@ -12,6 +12,9 @@ func windowsGetModuleHandle(name *byte) int { return 0 }
 // rtg:linkstatic kernel32.dll,GetProcAddress
 func windowsGetProcAddress(module int, name *byte) int { return 0 }
 
+// rtg:linkstatic kernel32.dll,GetLastError
+func windowsGetLastError() int { return 0 }
+
 // rtg:linkstatic kernel32.dll,GlobalAlloc
 func windowsGlobalAlloc(flags, size int) int { return 0 }
 
@@ -444,6 +447,7 @@ func windowsRegisterGraphicsClass() bool {
 	}
 	instance := windowsGetModuleHandle(nil)
 	if instance == 0 {
+		setLastWindowError("GetModuleHandleW failed", windowsGetLastError())
 		return false
 	}
 	user32 := windowsUTF16("user32.dll")
@@ -451,6 +455,7 @@ func windowsRegisterGraphicsClass() bool {
 	procName := windowsASCII("DefWindowProcW")
 	windowProc := windowsGetProcAddress(module, &procName[0])
 	if module == 0 || windowProc == 0 {
+		setLastWindowError("DefWindowProcW lookup failed", windowsGetLastError())
 		return false
 	}
 	class := windowsWindowClass{
@@ -462,6 +467,7 @@ func windowsRegisterGraphicsClass() bool {
 		ClassName:  &windowsClassName[0],
 	}
 	if windowsRegisterClass(&class) == 0 {
+		setLastWindowError("RegisterClassExW failed", windowsGetLastError())
 		return false
 	}
 	windowsClassReady = true
@@ -495,7 +501,12 @@ func forgetWindowsWindow(window *Window) {
 }
 
 func NewWindow(options WindowOptions) *Window {
-	if options.Width <= 0 || options.Height <= 0 || !windowsRegisterGraphicsClass() {
+	clearLastWindowError()
+	if options.Width <= 0 || options.Height <= 0 {
+		setLastWindowError("window dimensions must be positive", 0)
+		return nil
+	}
+	if !windowsRegisterGraphicsClass() {
 		return nil
 	}
 	w := allocWindowsWindow()
@@ -509,17 +520,20 @@ func NewWindow(options WindowOptions) *Window {
 	style := windowsStyleOverlapped | windowsStyleClipChildren | windowsStyleClipSiblings
 	rect := windowsRect{Right: int32(w.width), Bottom: int32(w.height)}
 	if windowsAdjustWindowRect(&rect, style, 0, 0) == 0 {
+		setLastWindowError("AdjustWindowRectEx failed", windowsGetLastError())
 		w.Close()
 		return nil
 	}
 	title := windowsUTF16(options.Title)
 	w.native = windowsCreateWindow(0, &windowsClassName[0], &title[0], style, windowsUseDefault, windowsUseDefault, int(rect.Right-rect.Left), int(rect.Bottom-rect.Top), 0, 0, w.instance, 0)
 	if w.native == 0 {
+		setLastWindowError("CreateWindowExW failed", windowsGetLastError())
 		w.Close()
 		return nil
 	}
 	w.device = windowsGetDC(w.native)
 	if w.device == 0 {
+		setLastWindowError("GetDC failed", windowsGetLastError())
 		w.Close()
 		return nil
 	}
@@ -534,12 +548,24 @@ func NewWindow(options WindowOptions) *Window {
 		LayerType: windowsMainPlane,
 	}
 	formatIndex := windowsChoosePixelFormat(w.device, &format)
-	if formatIndex == 0 || windowsSetPixelFormat(w.device, formatIndex, &format) == 0 {
+	if formatIndex == 0 {
+		setLastWindowError("ChoosePixelFormat failed", windowsGetLastError())
+		w.Close()
+		return nil
+	}
+	if windowsSetPixelFormat(w.device, formatIndex, &format) == 0 {
+		setLastWindowError("SetPixelFormat failed", windowsGetLastError())
 		w.Close()
 		return nil
 	}
 	w.context = windowsWGLCreateContext(w.device)
-	if w.context == 0 || windowsWGLMakeCurrent(w.device, w.context) == 0 {
+	if w.context == 0 {
+		setLastWindowError("wglCreateContext failed", windowsGetLastError())
+		w.Close()
+		return nil
+	}
+	if windowsWGLMakeCurrent(w.device, w.context) == 0 {
+		setLastWindowError("wglMakeCurrent failed", windowsGetLastError())
 		w.Close()
 		return nil
 	}

@@ -8,7 +8,9 @@ var hostClipboard string
 // renderer directly testable with the Go toolchain; RTG target files own native
 // windows and presentation.
 func NewWindow(options WindowOptions) *Window {
+	clearLastWindowError()
 	if options.Width <= 0 || options.Height <= 0 {
+		setLastWindowError("window dimensions must be positive", 0)
 		return nil
 	}
 	w := &Window{width: options.Width, height: options.Height, active: true, shown: !options.Hidden}
