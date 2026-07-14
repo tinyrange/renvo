@@ -219,11 +219,11 @@ func rtgArmEmitFloatBinaryExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool 
 	a := &g.asm
 	e := &ep.exprs[idx]
 	if rtgTokCharIs(p, e.tok, '*') {
-		if !rtgEmitIntExpr(g, ep, e.left) {
+		if !rtgEmitScalarExprForKind(g, ep, e.left, rtgTypeFloat64) {
 			return false
 		}
 		rtgAsmPushPrimary(a)
-		if !rtgEmitIntExpr(g, ep, e.right) {
+		if !rtgEmitScalarExprForKind(g, ep, e.right, rtgTypeFloat64) {
 			return false
 		}
 		rtgAsmPopTertiary(a)
@@ -232,23 +232,23 @@ func rtgArmEmitFloatBinaryExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool 
 		return true
 	}
 	if rtgTokCharIs(p, e.tok, '/') {
-		if !rtgEmitIntExpr(g, ep, e.left) {
+		if !rtgEmitScalarExprForKind(g, ep, e.left, rtgTypeFloat64) {
 			return false
 		}
 		rtgAsmShlPrimaryImm(a, 2)
 		rtgAsmPushPrimary(a)
-		if !rtgEmitIntExpr(g, ep, e.right) {
+		if !rtgEmitScalarExprForKind(g, ep, e.right, rtgTypeFloat64) {
 			return false
 		}
 		rtgAsmPopTertiary(a)
 		rtgAsmDivLeftTertiaryRightPrimary(a, false)
 		return true
 	}
-	if !rtgEmitIntExpr(g, ep, e.left) {
+	if !rtgEmitScalarExprForKind(g, ep, e.left, rtgTypeFloat64) {
 		return false
 	}
 	rtgAsmPushPrimary(a)
-	if !rtgEmitIntExpr(g, ep, e.right) {
+	if !rtgEmitScalarExprForKind(g, ep, e.right, rtgTypeFloat64) {
 		return false
 	}
 	rtgAsmPopTertiary(a)

@@ -2726,6 +2726,16 @@ func rtgConvertConstInt(value int, kind int) int {
 	return value
 }
 
+func rtgConvertConstScalar(value int, sourceKind int, destKind int) int {
+	if destKind == rtgTypeFloat64 && sourceKind != rtgTypeFloat64 {
+		return value << 2
+	}
+	if destKind != rtgTypeFloat64 && sourceKind == rtgTypeFloat64 {
+		value = value >> 2
+	}
+	return rtgConvertConstInt(value, destKind)
+}
+
 func rtgEvalConstExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) rtgConstResult {
 	p := g.prog
 	e := ep.exprs[idx]
@@ -2760,36 +2770,37 @@ func rtgEvalConstExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) rtgConstResult
 	if e.kind == rtgExprCall {
 		callee := rtgExprIdentCode(p, ep, e.left)
 		if e.argCount == 1 && (callee == rtgIdentInt || callee == rtgIdentByte || callee == rtgIdentInt16 || callee == rtgIdentInt32 || callee == rtgIdentInt64) {
-			result := rtgEvalConstExpr(g, ep, ep.args[e.firstArg])
+			argIndex := ep.args[e.firstArg]
+			result := rtgEvalConstExpr(g, ep, argIndex)
 			if result.ok {
+				destKind := rtgTypeInt
 				if callee == rtgIdentByte {
-					result.value = rtgConvertConstInt(result.value, rtgTypeByte)
+					destKind = rtgTypeByte
 				}
 				if callee == rtgIdentInt16 {
-					result.value = rtgConvertConstInt(result.value, rtgTypeInt16)
+					destKind = rtgTypeInt16
 				}
 				if callee == rtgIdentInt32 {
-					result.value = rtgConvertConstInt(result.value, rtgTypeInt32)
+					destKind = rtgTypeInt32
 				}
+				if callee == rtgIdentInt64 {
+					destKind = rtgTypeInt64
+				}
+				source := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, argIndex))
+				result.value = rtgConvertConstScalar(result.value, source.kind, destKind)
 			}
 			return result
 		}
 		if e.argCount == 1 {
-			calleeExpr := &ep.exprs[e.left]
-			if calleeExpr.kind == rtgExprIdent {
-				namedType := rtgFindTypeByRange(g, calleeExpr.nameStart, calleeExpr.nameEnd)
-				resolved := rtgResolveType(g.meta, namedType)
-				if resolved.kind == rtgTypeInt || resolved.kind == rtgTypeInt16 || resolved.kind == rtgTypeInt32 || resolved.kind == rtgTypeInt64 || resolved.kind == rtgTypeBool {
-					result := rtgEvalConstExpr(g, ep, ep.args[e.firstArg])
+			conversionType := rtgConversionTypeFromExpr(g, ep, e.left)
+			if conversionType != 0 {
+				resolved := rtgResolveType(g.meta, conversionType)
+				if rtgTypeKindIsScalarValue(resolved.kind) {
+					argIndex := ep.args[e.firstArg]
+					result := rtgEvalConstExpr(g, ep, argIndex)
 					if result.ok {
-						result.value = rtgConvertConstInt(result.value, resolved.kind)
-					}
-					return result
-				}
-				if resolved.kind == rtgTypeByte {
-					result := rtgEvalConstExpr(g, ep, ep.args[e.firstArg])
-					if result.ok {
-						result.value = rtgConvertConstInt(result.value, rtgTypeByte)
+						source := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, argIndex))
+						result.value = rtgConvertConstScalar(result.value, source.kind, resolved.kind)
 					}
 					return result
 				}
@@ -5124,6 +5135,10 @@ func rtgTypeKindIsScalarIntOrPointer(kind int) bool {
 	return kind == rtgTypePointer
 }
 
+func rtgTypeKindIsScalarValue(kind int) bool {
+	return rtgTypeKindIsScalarInt(kind) || kind == rtgTypeFloat64
+}
+
 func rtgScalarKindSize(kind int) int {
 	if kind == rtgTypeByte || kind == rtgTypeBool {
 		return 1
@@ -6016,11 +6031,10 @@ func rtgEmitLinearStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 				return false
 			}
 		} else {
-			if !rtgEmitIntExpr(g, &ep, rootIndex) {
+			resultResolved := rtgResolveType(g.meta, resultType)
+			if !rtgEmitScalarExprForKind(g, &ep, rootIndex, resultResolved.kind) {
 				return false
 			}
-			resultResolved := rtgResolveType(g.meta, resultType)
-			rtgAsmNormalizePrimaryForKind(a, resultResolved.kind)
 		}
 		rtgAsmLeave(a)
 		rtgAsmRet(a)
@@ -7259,10 +7273,9 @@ func rtgLinearInitGlobals(g *rtgLinearGen) bool {
 				rtgAsmStorePrimaryBss(a, off)
 				continue
 			}
-			if !rtgEmitIntExpr(g, &ep, rootIndex) {
+			if !rtgEmitScalarExprForKind(g, &ep, rootIndex, resolved.kind) {
 				return false
 			}
-			rtgAsmNormalizePrimaryForKind(a, resolved.kind)
 			rtgAsmStorePrimaryBss(a, off)
 		} else if rtgTypeIsSlice(meta, s.typ) {
 			rtgEmitInitEmptySliceBss(g, s.typ, off)
@@ -7302,12 +7315,9 @@ func rtgEmitGlobalStructInit(g *rtgLinearGen, ep *rtgExprParse, rootIndex int, t
 			}
 			rtgAsmStoreSliceBss(&g.asm, off+fieldOffset)
 		} else {
-			constResult := rtgEvalConstExpr(g, ep, field.expr)
-			if !constResult.ok {
+			if !rtgEmitScalarExprForKind(g, ep, field.expr, fieldResolved.kind) {
 				return false
 			}
-			rtgAsmPrimaryImm(&g.asm, constResult.value)
-			rtgAsmNormalizePrimaryForKind(&g.asm, fieldResolved.kind)
 			rtgAsmStorePrimaryBss(&g.asm, off+fieldOffset)
 		}
 	}
@@ -7721,7 +7731,7 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 			if rightIndex < 0 {
 				return false
 			}
-			if !rtgEmitIntExpr(g, &right, rightIndex) {
+			if !rtgEmitScalarExprForKind(g, &right, rightIndex, targetKind) {
 				return false
 			}
 			rtgAsmPopTertiary(a)
@@ -7794,10 +7804,9 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 			if rightIndex < 0 {
 				return false
 			}
-			if !rtgEmitIntExpr(g, &right, rightIndex) {
+			if !rtgEmitScalarExprForKind(g, &right, rightIndex, targetKind) {
 				return false
 			}
-			rtgAsmNormalizePrimaryForKind(a, targetKind)
 			rtgAsmPopSecondary(a)
 			rtgAsmStorePrimaryMemSecondaryDispSize(a, 0, targetSize)
 			return true
@@ -7953,7 +7962,7 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 			rtgAsmLoadPrimaryStack(a, offset)
 		}
 		rtgAsmPushPrimary(a)
-		if !rtgEmitIntExpr(g, &ep, rootIndex) {
+		if !rtgEmitScalarExprForKind(g, &ep, rootIndex, targetResolved.kind) {
 			return false
 		}
 		rtgAsmPopTertiary(a)
@@ -8004,10 +8013,9 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 		}
 		return true
 	}
-	if !rtgEmitIntExpr(g, &ep, rootIndex) {
+	if !rtgEmitScalarExprForKind(g, &ep, rootIndex, targetResolved.kind) {
 		return false
 	}
-	rtgAsmNormalizePrimaryForKind(a, targetResolved.kind)
 	if globalOffset >= 0 {
 		rtgAsmStorePrimaryBss(a, globalOffset)
 	} else {
@@ -8493,12 +8501,9 @@ func rtgInferParsedExprType(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 			return meta.funcs[fnIndex].resultType
 		}
 		if e.argCount == 1 {
-			calleeExpr := &ep.exprs[e.left]
-			if calleeExpr.kind == rtgExprIdent {
-				namedType := rtgFindTypeByRange(g, calleeExpr.nameStart, calleeExpr.nameEnd)
-				if namedType > 0 {
-					return namedType
-				}
+			conversionType := rtgConversionTypeFromExpr(g, ep, e.left)
+			if conversionType != 0 {
+				return conversionType
 			}
 		}
 	}
@@ -8622,6 +8627,20 @@ func rtgFindTypeByRange(g *rtgLinearGen, nameStart int, nameEnd int) int {
 	}
 	return 0
 }
+func rtgConversionTypeFromExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
+	if idx < 0 || idx >= len(ep.exprs) {
+		return 0
+	}
+	callee := &ep.exprs[idx]
+	if callee.kind != rtgExprIdent {
+		return 0
+	}
+	builtin := rtgBuiltinTypeFromToken(g.prog, callee.tok)
+	if builtin != 0 {
+		return builtin
+	}
+	return rtgFindTypeByRange(g, callee.nameStart, callee.nameEnd)
+}
 func rtgLocalTypeAtOffset(g *rtgLinearGen, offset int) int {
 	for i := 0; i < g.localCount; i++ {
 		if g.locals[i].offset == offset {
@@ -8730,11 +8749,10 @@ func rtgEmitTypedAssign(g *rtgLinearGen, ep *rtgExprParse, idx int, offset int) 
 		rtgAsmStoreSecondaryStack(&g.asm, offset-8)
 		return true
 	}
-	if rtgTypeKindIsScalarIntOrPointer(destResolved.kind) {
-		if !rtgEmitIntExpr(g, ep, idx) {
+	if rtgTypeKindIsScalarValue(destResolved.kind) || destResolved.kind == rtgTypePointer {
+		if !rtgEmitScalarExprForKind(g, ep, idx, destResolved.kind) {
 			return false
 		}
-		rtgAsmNormalizePrimaryForKind(&g.asm, destResolved.kind)
 		rtgAsmStorePrimaryStack(&g.asm, offset)
 		return true
 	}
@@ -9568,10 +9586,9 @@ func rtgEmitCompositeFieldToStack(g *rtgLinearGen, ep *rtgExprParse, idx int, fi
 		rtgEmitCopyStackToStack(g, tempOffset, destOffset, size)
 		return true
 	}
-	if !rtgEmitIntExpr(g, ep, idx) {
+	if !rtgEmitScalarExprForKind(g, ep, idx, fieldResolved.kind) {
 		return false
 	}
-	rtgAsmNormalizePrimaryForKind(a, fieldResolved.kind)
 	rtgAsmStorePrimaryStack(a, destOffset)
 	return true
 }
@@ -10405,6 +10422,15 @@ func rtgEmitCallParamArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int, para
 				return 3
 			}
 		}
+		resolved := rtgResolveType(g.meta, param.typ)
+		source := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, idx))
+		if resolved.kind == rtgTypeFloat64 || source.kind == rtgTypeFloat64 {
+			if !rtgEmitScalarExprForKind(g, ep, idx, resolved.kind) {
+				return -1
+			}
+			rtgAsmPushPrimary(&g.asm)
+			return 1
+		}
 	}
 	return rtgEmitCallArgReverse(g, ep, idx)
 }
@@ -10523,7 +10549,7 @@ func rtgEmitVariadicArgSliceFromCallReverse(g *rtgLinearGen, ep *rtgExprParse, c
 		return false
 	}
 	elem := rtgResolveType(g.meta, t.elem)
-	if !rtgTypeKindIsScalarInt(elem.kind) {
+	if !rtgTypeKindIsScalarValue(elem.kind) {
 		return false
 	}
 	elemSize := rtgTypeSize(g.meta, t.elem)
@@ -10555,10 +10581,9 @@ func rtgEmitVariadicArgSliceFromCallReverse(g *rtgLinearGen, ep *rtgExprParse, c
 			if rootIndex < 0 {
 				return false
 			}
-			if !rtgEmitIntExpr(g, &argEp, rootIndex) {
+			if !rtgEmitScalarExprForKind(g, &argEp, rootIndex, elem.kind) {
 				return false
 			}
-			rtgAsmNormalizePrimaryForKind(a, elem.kind)
 			disp := emitted * elemSize
 			rtgAsmPushPrimary(a)
 			rtgAsmPrimaryBssAddr(a, backingOff)
@@ -11012,6 +11037,12 @@ func rtgEmitAppendToLocation(g *rtgLinearGen, stmt *rtgStmt, ep *rtgExprParse, l
 		}
 		return true
 	}
+	if elem.kind == rtgTypeFloat64 {
+		if !rtgEmitAppendScalarToLocation(g, ep, locEp, loc, elem.kind, valueIndex) {
+			return false
+		}
+		return true
+	}
 	if elem.kind == rtgTypeString {
 		if !rtgEmitAppendStringToLocation(g, ep, locEp, loc, valueIndex) {
 			return false
@@ -11311,10 +11342,9 @@ func rtgFindAppendCompositeTypeToken(p *rtgProgram, openTok int, end int) int {
 func rtgEmitAppendScalarToLocation(g *rtgLinearGen, ep *rtgExprParse, locEp *rtgExprParse, loc *rtgSliceLocation, elemKind int, valueIndex int) bool {
 	a := &g.asm
 	elemSize := rtgScalarKindSize(elemKind)
-	if !rtgEmitIntExpr(g, ep, valueIndex) {
+	if !rtgEmitScalarExprForKind(g, ep, valueIndex, elemKind) {
 		return false
 	}
-	rtgAsmNormalizePrimaryForKind(a, elemKind)
 	rtgAsmPushPrimary(a)
 	if rtgTargetArch == rtgArchAmd64 || rtgTargetArch == rtgArchAarch64 || elemSize == 1 || elemSize == 2 || elemSize == 4 {
 		if !rtgEmitAppendDestPrimary(g, locEp, loc, elemSize) {
@@ -12057,7 +12087,7 @@ func rtgEmitIndexExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			if globalOffset >= 0 && rtgTypeIsSlice(meta, globalType) {
 				t := rtgResolveType(meta, globalType)
 				elem := rtgResolveType(meta, t.elem)
-				if !rtgTypeKindIsScalarIntOrPointer(elem.kind) {
+				if !rtgTypeKindIsScalarValue(elem.kind) && elem.kind != rtgTypePointer {
 					return false
 				}
 				if !rtgEmitIntExpr(g, ep, e.right) {
@@ -12097,7 +12127,7 @@ func rtgEmitIndexExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		}
 		if t.kind == rtgTypeSlice {
 			elem := rtgResolveType(meta, t.elem)
-			if !rtgTypeKindIsScalarIntOrPointer(elem.kind) {
+			if !rtgTypeKindIsScalarValue(elem.kind) && elem.kind != rtgTypePointer {
 				return false
 			}
 			if !rtgEmitIntExpr(g, ep, e.right) {
@@ -12128,7 +12158,7 @@ func rtgEmitIndexExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		}
 		if t.kind == rtgTypeSlice {
 			elem := rtgResolveType(meta, t.elem)
-			if !rtgTypeKindIsScalarIntOrPointer(elem.kind) {
+			if !rtgTypeKindIsScalarValue(elem.kind) && elem.kind != rtgTypePointer {
 				return false
 			}
 			if !rtgEmitIntExpr(g, ep, e.right) {
@@ -12149,7 +12179,7 @@ func rtgEmitIndexExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		t := rtgResolveType(meta, valueType)
 		if t.kind == rtgTypeSlice {
 			elem := rtgResolveType(meta, t.elem)
-			if !rtgTypeKindIsScalarIntOrPointer(elem.kind) {
+			if !rtgTypeKindIsScalarValue(elem.kind) && elem.kind != rtgTypePointer {
 				return false
 			}
 			if !rtgEmitIntExpr(g, ep, e.right) {
@@ -13810,6 +13840,16 @@ func rtgEmitStructReturnExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	return rtgAmd64EmitStructReturnExpr(g, ep, idx)
 }
 func rtgEmitNamedConversionCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	e := &ep.exprs[idx]
+	if e.argCount == 1 {
+		conversionType := rtgConversionTypeFromExpr(g, ep, e.left)
+		if conversionType != 0 {
+			resolved := rtgResolveType(g.meta, conversionType)
+			if rtgTypeKindIsScalarValue(resolved.kind) {
+				return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], resolved.kind)
+			}
+		}
+	}
 	if rtgTargetArch == rtgArch386 {
 		return rtg386EmitNamedConversionCall(g, ep, idx)
 	}
@@ -13866,6 +13906,20 @@ func rtgEmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		return rtg386EmitIntExpr(g, ep, idx)
 	}
 	return rtgAmd64EmitIntExpr(g, ep, idx)
+}
+
+func rtgEmitScalarExprForKind(g *rtgLinearGen, ep *rtgExprParse, idx int, destKind int) bool {
+	source := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, idx))
+	if !rtgEmitIntExpr(g, ep, idx) {
+		return false
+	}
+	if destKind == rtgTypeFloat64 && source.kind != rtgTypeFloat64 {
+		rtgAsmShlPrimaryImm(&g.asm, 2)
+	} else if destKind != rtgTypeFloat64 && source.kind == rtgTypeFloat64 {
+		rtgAsmSarPrimaryImm(&g.asm, 2)
+	}
+	rtgAsmNormalizePrimaryForKind(&g.asm, destKind)
+	return true
 }
 
 func rtgArrayBuiltinCount(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr) int {
