@@ -3,42 +3,6 @@
 package unit
 
 const (
-	Magic   = "RTGU"
-	Version = 1
-)
-
-const (
-	TagUnit       = 1
-	TagPackage    = 2
-	TagImportPath = 3
-	TagText       = 7
-	TagTokens     = 8
-	TagDecls      = 9
-	TagFuncs      = 10
-	TagIndexes    = 11
-	TagComps      = 12
-	TagAssigns    = 13
-	TagReturns    = 14
-	TagCalls      = 15
-	TagRefs       = 16
-	TagSels       = 17
-	TagTypes      = 18
-	TagTypeRefs   = 19
-	TagLocals     = 20
-	TagSigs       = 21
-	TagDeclMeta   = 22
-	TagImports    = 23
-	TagSymbols    = 24
-	TagInitOrder  = 25
-	TagConsts     = 26
-	TagTypeFields = 27
-	TagTypeIfaces = 28
-	TagMethods    = 29
-	TagTypeFuncs  = 30
-	TagStmts      = 31
-)
-
-const (
 	TokenEOF = iota
 	TokenIdent
 	TokenNumber
@@ -617,10 +581,9 @@ func Marshal(program Program) ([]byte, bool) {
 	rootLen += nodeSize(selectorData)
 
 	out := make([]byte, 0, 14+rootLen)
-	out = append(out, 'R')
-	out = append(out, 'T')
-	out = append(out, 'G')
-	out = append(out, 'U')
+	for i := 0; i < len(Magic); i++ {
+		out = append(out, Magic[i])
+	}
 	out = appendUint16(out, Version)
 	out = appendUint16(out, 0)
 	out = appendUint16(out, TagUnit)
@@ -660,10 +623,13 @@ func Unmarshal(data []byte) (Program, bool) {
 	if len(data) < 14 {
 		return program, false
 	}
-	if data[0] != 'R' || data[1] != 'T' || data[2] != 'G' || data[3] != 'U' {
+	if data[0] != Magic[0] || data[1] != Magic[1] || data[2] != Magic[2] || data[3] != Magic[3] {
 		return program, false
 	}
 	if readUint16(data, 4) != Version {
+		return program, false
+	}
+	if readUint16(data, 6) != 0 {
 		return program, false
 	}
 	rootTag := readUint16(data, 8)
@@ -725,6 +691,8 @@ func Unmarshal(data []byte) (Program, bool) {
 	seenCalls := false
 	seenRefs := false
 	seenSelectors := false
+	seenTagMaskLow := 0
+	seenTagMaskHigh := 0
 	pos := rootStart
 	for pos < rootEnd {
 		if pos+6 > rootEnd {
@@ -738,6 +706,25 @@ func Unmarshal(data []byte) (Program, bool) {
 			return program, false
 		}
 		payload := data[pos:next]
+		if tag == TagUnit {
+			return program, false
+		}
+		tagIndex := schemaChildTagIndex(tag)
+		if tagIndex >= 0 {
+			if tagIndex < 16 {
+				bit := 1 << tagIndex
+				if seenTagMaskLow&bit != 0 {
+					return program, false
+				}
+				seenTagMaskLow = seenTagMaskLow | bit
+			} else {
+				bit := 1 << (tagIndex - 16)
+				if seenTagMaskHigh&bit != 0 {
+					return program, false
+				}
+				seenTagMaskHigh = seenTagMaskHigh | bit
+			}
+		}
 		if tag == TagPackage {
 			if seenPackage {
 				return program, false
@@ -909,11 +896,13 @@ func Unmarshal(data []byte) (Program, bool) {
 			seenSelectors = true
 			selectorData = payload
 		} else {
-			return program, false
+			// Unknown version-1 child tags are optional extensions. Their
+			// length has already been checked, so an older reader skips them.
 		}
 		pos = next
 	}
-	if !seenPackage || !seenText || !seenTokens || !seenDecls || !seenFuncs {
+	if seenTagMaskLow&schemaRequiredChildMaskLow != schemaRequiredChildMaskLow ||
+		seenTagMaskHigh&schemaRequiredChildMaskHigh != schemaRequiredChildMaskHigh {
 		return program, false
 	}
 	if len(program.Package) == 0 || len(program.Text) == 0 {
@@ -3414,6 +3403,9 @@ func readVarint(data []byte, pos *int) (int, bool) {
 		}
 		value = value | (b&0x7f)<<shift
 		if b < 0x80 {
+			if shift > 0 && b == 0 {
+				return 0, false
+			}
 			return value, true
 		}
 		shift += 7

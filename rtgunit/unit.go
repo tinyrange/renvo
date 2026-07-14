@@ -8,42 +8,6 @@ import (
 )
 
 const (
-	Magic   = "RTGU"
-	Version = uint16(1)
-)
-
-const (
-	TagUnit       = uint16(1)
-	TagPackage    = uint16(2)
-	TagImportPath = uint16(3)
-	TagText       = uint16(7)
-	TagTokens     = uint16(8)
-	TagDecls      = uint16(9)
-	TagFuncs      = uint16(10)
-	TagIndexes    = uint16(11)
-	TagComps      = uint16(12)
-	TagAssigns    = uint16(13)
-	TagReturns    = uint16(14)
-	TagCalls      = uint16(15)
-	TagRefs       = uint16(16)
-	TagSels       = uint16(17)
-	TagTypes      = uint16(18)
-	TagTypeRefs   = uint16(19)
-	TagLocals     = uint16(20)
-	TagSigs       = uint16(21)
-	TagDeclMeta   = uint16(22)
-	TagImports    = uint16(23)
-	TagSymbols    = uint16(24)
-	TagInitOrder  = uint16(25)
-	TagConsts     = uint16(26)
-	TagTypeFields = uint16(27)
-	TagTypeIfaces = uint16(28)
-	TagMethods    = uint16(29)
-	TagTypeFuncs  = uint16(30)
-	TagStmts      = uint16(31)
-)
-
-const (
 	rtgTokEOF      = 0
 	rtgTokIdent    = 1
 	rtgTokNumber   = 2
@@ -496,8 +460,8 @@ func Parent(tag uint16, children ...Node) Node {
 }
 
 func Marshal(program Program) ([]byte, error) {
-	if len(program.Tokens)%tokenStride != 0 {
-		return nil, fmt.Errorf("token data length %d is not a multiple of %d", len(program.Tokens), tokenStride)
+	if err := validateCoreUnitRanges(program); err != nil {
+		return nil, err
 	}
 	tokens, err := encodeTokens(program.Text, program.Tokens)
 	if err != nil {
@@ -557,6 +521,9 @@ func Unmarshal(data []byte) (Program, error) {
 	if version != Version {
 		return program, fmt.Errorf("unsupported unit version %d", version)
 	}
+	if binary.LittleEndian.Uint16(data[6:8]) != 0 {
+		return program, fmt.Errorf("unsupported unit flags")
+	}
 	rootTag := binary.LittleEndian.Uint16(data[8:10])
 	rootLength := int(binary.LittleEndian.Uint32(data[10:14]))
 	if rootTag != TagUnit {
@@ -589,7 +556,12 @@ func Unmarshal(data []byte) (Program, error) {
 	var callData []byte
 	var refData []byte
 	var selectorData []byte
+	seenPackage := false
 	seenImportPath := false
+	seenText := false
+	seenTokens := false
+	seenDecls := false
+	seenFuncs := false
 	seenImports := false
 	seenSymbols := false
 	seenDeclMeta := false
@@ -611,6 +583,8 @@ func Unmarshal(data []byte) (Program, error) {
 	seenCalls := false
 	seenRefs := false
 	seenSelectors := false
+	seenTagMaskLow := 0
+	seenTagMaskHigh := 0
 	pos := rootStart
 	for pos < rootEnd {
 		if pos+6 > rootEnd {
@@ -624,8 +598,31 @@ func Unmarshal(data []byte) (Program, error) {
 			return program, fmt.Errorf("invalid child length")
 		}
 		payload := data[pos:next]
+		if tag == TagUnit {
+			return program, fmt.Errorf("unit tag cannot be nested")
+		}
+		tagIndex := schemaChildTagIndex(int(tag))
+		if tagIndex >= 0 {
+			if tagIndex < 16 {
+				bit := 1 << tagIndex
+				if seenTagMaskLow&bit != 0 {
+					return program, fmt.Errorf("duplicate unit child tag %d", tag)
+				}
+				seenTagMaskLow |= bit
+			} else {
+				bit := 1 << (tagIndex - 16)
+				if seenTagMaskHigh&bit != 0 {
+					return program, fmt.Errorf("duplicate unit child tag %d", tag)
+				}
+				seenTagMaskHigh |= bit
+			}
+		}
 		switch tag {
 		case TagPackage:
+			if seenPackage {
+				return program, fmt.Errorf("duplicate package")
+			}
+			seenPackage = true
 			program.Package = string(payload)
 		case TagImportPath:
 			if seenImportPath {
@@ -634,8 +631,16 @@ func Unmarshal(data []byte) (Program, error) {
 			seenImportPath = true
 			program.ImportPath = string(payload)
 		case TagText:
+			if seenText {
+				return program, fmt.Errorf("duplicate text pool")
+			}
+			seenText = true
 			program.Text = payload
 		case TagTokens:
+			if seenTokens {
+				return program, fmt.Errorf("duplicate token table")
+			}
+			seenTokens = true
 			tokenData = payload
 		case TagImports:
 			if seenImports {
@@ -650,6 +655,10 @@ func Unmarshal(data []byte) (Program, error) {
 			seenSymbols = true
 			symbolData = payload
 		case TagDecls:
+			if seenDecls {
+				return program, fmt.Errorf("duplicate declaration table")
+			}
+			seenDecls = true
 			decls, err := decodeDecls(payload)
 			if err != nil {
 				return program, err
@@ -674,6 +683,10 @@ func Unmarshal(data []byte) (Program, error) {
 			seenConsts = true
 			constData = payload
 		case TagFuncs:
+			if seenFuncs {
+				return program, fmt.Errorf("duplicate function table")
+			}
+			seenFuncs = true
 			funcs, err := decodeFuncs(payload)
 			if err != nil {
 				return program, err
@@ -776,9 +789,14 @@ func Unmarshal(data []byte) (Program, error) {
 			seenSelectors = true
 			selectorData = payload
 		default:
-			return program, fmt.Errorf("unknown unit child tag %d", tag)
+			// Version 1 is length-delimited so older readers can safely skip
+			// optional tables introduced by newer version-1 writers.
 		}
 		pos = next
+	}
+	if seenTagMaskLow&schemaRequiredChildMaskLow != schemaRequiredChildMaskLow ||
+		seenTagMaskHigh&schemaRequiredChildMaskHigh != schemaRequiredChildMaskHigh {
+		return program, fmt.Errorf("unit missing required table")
 	}
 	if program.Package == "" {
 		return program, fmt.Errorf("unit missing package")
@@ -941,7 +959,45 @@ func Unmarshal(data []byte) (Program, error) {
 	if len(program.Tokens) == 0 {
 		return program, fmt.Errorf("unit missing token table")
 	}
+	if err := validateCoreUnitRanges(program); err != nil {
+		return program, err
+	}
 	return program, nil
+}
+
+func validateCoreUnitRanges(program Program) error {
+	if program.Package == "" {
+		return fmt.Errorf("unit missing package")
+	}
+	if len(program.Text) == 0 {
+		return fmt.Errorf("unit missing text pool")
+	}
+	if len(program.Tokens) == 0 || len(program.Tokens)%tokenStride != 0 {
+		return fmt.Errorf("token data length %d is not a positive multiple of %d", len(program.Tokens), tokenStride)
+	}
+	tokenCount := len(program.Tokens) / tokenStride
+	if int(program.Tokens[(tokenCount-1)*tokenStride]) != rtgTokEOF {
+		return fmt.Errorf("token table does not end with EOF")
+	}
+	for i, decl := range program.Decls {
+		if !unitRangeValid(len(program.Text), decl.NameStart, decl.NameEnd) || !unitRangeValid(tokenCount, decl.StartTok, decl.EndTok) {
+			return fmt.Errorf("declaration %d has an invalid range", i)
+		}
+	}
+	for i, fn := range program.Funcs {
+		if !unitRangeValid(len(program.Text), fn.NameStart, fn.NameEnd) ||
+			!unitRangeValid(tokenCount, fn.StartTok, fn.EndTok) ||
+			!unitRangeValid(tokenCount, fn.ReceiverStart, fn.ReceiverEnd) ||
+			!unitRangeValid(tokenCount, fn.BodyStart, fn.BodyEnd) ||
+			fn.NameTok < fn.StartTok || fn.NameTok >= fn.EndTok {
+			return fmt.Errorf("function %d has an invalid range", i)
+		}
+	}
+	return nil
+}
+
+func unitRangeValid(limit int, start int, end int) bool {
+	return start >= 0 && end >= start && end <= limit
 }
 
 func Source(program Program) []byte {
@@ -3652,8 +3708,14 @@ func readVarint(data []byte, pos int) (int, int, bool) {
 	for pos < len(data) && shift <= 28 {
 		b := data[pos]
 		pos++
+		if shift >= 28 && b >= 0x10 {
+			return 0, pos, false
+		}
 		value = value | int(b&0x7f)<<shift
 		if b < 0x80 {
+			if shift > 0 && b == 0 {
+				return 0, pos, false
+			}
 			return value, pos, true
 		}
 		shift += 7

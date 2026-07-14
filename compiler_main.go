@@ -125,8 +125,14 @@ func rtgUnitReadVar(src []byte, pos int, end int) (int, int, bool) {
 	for pos < end && shift <= 28 {
 		b := src[pos]
 		pos++
+		if shift >= 28 && b >= 0x10 {
+			return 0, pos, false
+		}
 		value = value | (int(b&0x7f) << shift)
 		if b < 0x80 {
+			if shift > 0 && b == 0 {
+				return 0, pos, false
+			}
 			return value, pos, true
 		}
 		shift = shift + 7
@@ -207,28 +213,32 @@ func rtgDecodeUnitProgram(src []byte) (rtgProgram, bool, bool) {
 	if len(src) < 4 {
 		return prog, false, true
 	}
-	if src[0] != 'R' || src[1] != 'T' || src[2] != 'G' || src[3] != 'U' {
+	if src[0] != rtgUnitMagic[0] || src[1] != rtgUnitMagic[1] || src[2] != rtgUnitMagic[2] || src[3] != rtgUnitMagic[3] {
 		return prog, false, true
 	}
 	if len(src) < 14 {
 		return prog, true, false
 	}
-	if int(src[4])|(int(src[5])<<8) != 1 {
+	if int(src[4])|(int(src[5])<<8) != rtgUnitVersion {
+		return prog, true, false
+	}
+	if int(src[6])|(int(src[7])<<8) != 0 {
 		return prog, true, false
 	}
 	length := rtgUnitRead32(src, 10)
-	if int(src[8])|(int(src[9])<<8) != 1 || length < 0 {
+	if int(src[8])|(int(src[9])<<8) != rtgUnitTagUnit || length < 0 {
 		return prog, true, false
 	}
 	rootStart := 14
 	rootEnd := rootStart + length
-	if rootEnd > len(src) || rootEnd < rootStart {
+	if rootEnd != len(src) || rootEnd < rootStart {
 		return prog, true, false
 	}
 	var text []byte
 	var tokenData []byte
 	var declData []byte
 	var funcData []byte
+	seen := 0
 	pos := rootStart
 	for pos < rootEnd {
 		if pos+6 > rootEnd {
@@ -244,19 +254,39 @@ func rtgDecodeUnitProgram(src []byte) (rtgProgram, bool, bool) {
 		if next < pos || next > rootEnd {
 			return prog, true, false
 		}
-		if tag == 7 {
+		if tag == rtgUnitTagUnit {
+			return prog, true, false
+		}
+		knownTag := tag == rtgUnitTagPackage || tag == rtgUnitTagImportPath || tag >= rtgUnitTagText && tag <= rtgUnitTagStmts
+		if knownTag {
+			bit := 1 << tag
+			if seen&bit != 0 {
+				return prog, true, false
+			}
+			seen = seen | bit
+		}
+		if tag == rtgUnitTagPackage {
+			if length == 0 {
+				return prog, true, false
+			}
+		}
+		if tag == rtgUnitTagText {
 			text = src[pos:next]
 		}
-		if tag == 8 {
+		if tag == rtgUnitTagTokens {
 			tokenData = src[pos:next]
 		}
-		if tag == 9 {
+		if tag == rtgUnitTagDecls {
 			declData = src[pos:next]
 		}
-		if tag == 10 {
+		if tag == rtgUnitTagFuncs {
 			funcData = src[pos:next]
 		}
 		pos = next
+	}
+	required := 1<<rtgUnitTagPackage | 1<<rtgUnitTagImportPath | 1<<rtgUnitTagText | 1<<rtgUnitTagTokens | 1<<rtgUnitTagDecls | 1<<rtgUnitTagFuncs
+	if seen&required != required {
+		return prog, true, false
 	}
 	if len(text) == 0 || len(tokenData) == 0 {
 		return prog, true, false

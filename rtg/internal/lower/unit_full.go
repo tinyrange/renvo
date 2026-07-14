@@ -310,7 +310,7 @@ func (b *unitBuilder) addFileTokens(file syntax.File, fileIndex int, hasNext boo
 	for i := 0; i < len(file.Tokens); i++ {
 		tok := file.Tokens[i]
 		if tok.Kind == syntax.TokenEOF {
-			oldToNew[i] = b.finalEOF
+			oldToNew[i] = len(b.program.Tokens)
 			continue
 		}
 		kind, ok := unitTokenKind(file.Src, tok)

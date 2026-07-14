@@ -670,9 +670,6 @@ func mapToken(mapping tokenMap, tok int, eof int) int {
 	if tok < 0 || tok >= mapping.limit {
 		return eof
 	}
-	if tok == mapping.limit-1 {
-		return eof
-	}
 	return mapping.base + tok
 }
 

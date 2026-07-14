@@ -144,6 +144,41 @@ func TestEmitPackagePreservesTextAndFileOrder(t *testing.T) {
 	}
 }
 
+func TestEmitPackageMapsFileEOFToFileBoundary(t *testing.T) {
+	graph := loadTestGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/a.go", Src: []byte(`package main
+
+const (
+	first = iota
+	second
+)
+
+const last = 2
+`)},
+		{Path: "/repo/case/cmd/app/z.go", Src: []byte(`package main
+
+func use(file int) int { return file }
+`)},
+	})
+	result := EmitRoot(graph)
+	if !result.Ok {
+		t.Fatalf("EmitRoot failed: err=%d file=%d tok=%d", result.Error, result.ErrorFile, result.ErrorToken)
+	}
+	if len(result.Program.Decls) != 3 {
+		t.Fatalf("decl count = %d, want 3", len(result.Program.Decls))
+	}
+	decl := result.Program.Decls[2]
+	if got := declName(result.Program, 2); got != "last" {
+		t.Fatalf("final declaration = %q, want last", got)
+	}
+	if decl.EndTok >= len(result.Program.Tokens)-1 {
+		t.Fatalf("final declaration ends at linked EOF %d, want first-file boundary", decl.EndTok)
+	}
+	if got := tokenTextUnit(result.Program, decl.EndTok); got != "package" {
+		t.Fatalf("final declaration end token = %q, want next file package", got)
+	}
+}
+
 func TestEmitCheckedPackageUsesCheckedDeclOrder(t *testing.T) {
 	graph := loadTestGraph(t, []load.SourceFile{
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main

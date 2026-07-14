@@ -1,3 +1,5 @@
+//go:build !rtg
+
 package unit
 
 import (

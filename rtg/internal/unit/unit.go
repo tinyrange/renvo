@@ -2,18 +2,6 @@
 
 package unit
 
-const Version = 1
-
-const (
-	TagUnit       = 1
-	TagPackage    = 2
-	TagImportPath = 3
-	TagText       = 7
-	TagTokens     = 8
-	TagDecls      = 9
-	TagFuncs      = 10
-)
-
 const (
 	TokenEOF = iota
 	TokenIdent
@@ -159,10 +147,9 @@ func Marshal(program Program) ([]byte, bool) {
 	rootLen := 36 + len(program.Package) + len(program.ImportPath) + len(program.Text) + tokenLen + declLen + funcLen
 
 	out := make([]byte, 0, 14+rootLen)
-	out = append(out, 'R')
-	out = append(out, 'T')
-	out = append(out, 'G')
-	out = append(out, 'U')
+	for i := 0; i < len(Magic); i++ {
+		out = append(out, Magic[i])
+	}
 	out = appendUint16(out, Version)
 	out = appendUint16(out, 0)
 	out = appendUint16(out, TagUnit)

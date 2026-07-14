@@ -10388,7 +10388,7 @@ func rtgEmitCallArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 		return 1
 	}
 	if e.kind == rtgExprIdent {
-		constResult := rtgEvalConstByName(g, e.nameStart, e.nameEnd)
+		constResult := rtgEvalConstExpr(g, ep, idx)
 		if constResult.ok {
 			rtgAsmPushImm(a, constResult.value)
 			return 1
