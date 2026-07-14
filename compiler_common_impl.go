@@ -9943,7 +9943,7 @@ func rtgEmitUserCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 				return false
 			}
 		} else {
-			if !rtgEmitVariadicArgSliceFromCallReverse(g, ep, idx, fixed, argCount-fixed, g.meta.params[fn.firstParam+fn.paramCount-1].typ) {
+			if !rtgEmitVariadicArgSliceReverse(g, ep, firstArg+fixed, argCount-fixed, g.meta.params[fn.firstParam+fn.paramCount-1].typ) {
 				return false
 			}
 		}
@@ -10741,75 +10741,6 @@ func rtgEmitVariadicArgSliceReverse(g *rtgLinearGen, ep *rtgExprParse, first int
 		return false
 	}
 	rtgAsmPushSliceRegs(&g.asm)
-	return true
-}
-func rtgEmitVariadicArgSliceFromCallReverse(g *rtgLinearGen, ep *rtgExprParse, callIdx int, skip int, count int, sliceType int) bool {
-	a := &g.asm
-	call := &ep.exprs[callIdx]
-	t := rtgResolveType(g.meta, sliceType)
-	if t.kind != rtgTypeSlice {
-		return false
-	}
-	elem := rtgResolveType(g.meta, t.elem)
-	if !rtgTypeKindIsScalarValue(elem.kind) {
-		return false
-	}
-	elemSize := rtgTypeSize(g.meta, t.elem)
-	if elemSize < 1 {
-		elemSize = 8
-	}
-	needSize := count * elemSize
-	backingSize := rtgStaticSliceBackingSize(needSize, elemSize)
-	backingOff := g.asm.bssSize
-	g.asm.bssSize += backingSize
-	closeTok := rtgFindMatchingExprClose(g.prog, call.tok+1, ep.end, '(', ')')
-	if closeTok <= call.tok {
-		return false
-	}
-	pos := call.tok + 1
-	argIndex := 0
-	emitted := 0
-	for pos < closeTok && emitted < count {
-		argEnd := rtgFindExprBoundary(g.prog, pos, closeTok)
-		if rtgTokCharIs(g.prog, argEnd, '{') {
-			compositeEnd := rtgSkipBalanced(g.prog, argEnd, '{', '}')
-			if compositeEnd > argEnd {
-				argEnd = compositeEnd
-			}
-		}
-		if argIndex >= skip {
-			var argEp rtgExprParse
-			rootIndex := rtgParseExpressionRoot(&argEp, g.prog, pos, argEnd)
-			if rootIndex < 0 {
-				return false
-			}
-			if !rtgEmitScalarExprForKind(g, &argEp, rootIndex, elem.kind) {
-				return false
-			}
-			disp := emitted * elemSize
-			rtgAsmPushPrimary(a)
-			rtgAsmPrimaryBssAddr(a, backingOff)
-			rtgAsmCopyPrimaryToSecondary(a)
-			rtgAsmPopPrimary(a)
-			rtgAsmStorePrimaryMemSecondaryDispSize(a, disp, elemSize)
-			emitted++
-		}
-		pos = argEnd
-		if rtgTokCharIs(g.prog, pos, ',') {
-			pos++
-		}
-		argIndex++
-	}
-	if emitted != count {
-		return false
-	}
-	capacity := backingSize / elemSize
-	rtgAsmPrimaryImm(a, capacity)
-	rtgAsmPushPrimary(a)
-	rtgAsmPrimaryBssAddr(a, backingOff)
-	rtgAsmSecondaryImm(a, count)
-	rtgAsmPopTertiary(a)
-	rtgAsmPushSliceRegs(a)
 	return true
 }
 func rtgEmitCallArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
