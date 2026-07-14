@@ -12,14 +12,14 @@ const rtgLinux386SysReadAt = 180
 const rtgLinux386SysWriteAt = 181
 
 func rtg386AsmPrepareReadWriteBuf(a *rtgAsm) {
-	rtgAsmPushRcx(a)
-	rtgAsmMovRsiRax(a)
-	rtgAsmPopRdx(a)
+	rtgAsmPushTertiary(a)
+	rtgAsmCopyPrimaryToCallWord1(a)
+	rtgAsmPopSecondary(a)
 }
 
 func rtg386AsmMoveOffsetArg(a *rtgAsm) {
 	rtgAsmEmit16(a, 0xc689)
-	rtgAsmMovRaxImm(a, 0)
+	rtgAsmPrimaryImm(a, 0)
 	rtgAsmEmit16(a, 0xc789)
 }
 
@@ -116,12 +116,12 @@ func rtgTryCompileScalarProgram386(p *rtgProgram, meta *rtgMeta) rtgCompileResul
 	}
 	rtgAsmCallLabel(a, g.funcLabels[appIndex])
 	if rtgTargetIsWindows() {
-		rtgAsmPushRax(a)
+		rtgAsmPushPrimary(a)
 		rtgWin386CallImport(a, rtgWinImportExitProcess)
 		rtgAsmRet(a)
 	} else {
-		rtgAsmMovRdiRax(a)
-		rtgAsmMovRaxImm(a, 1)
+		rtgAsmCopyPrimaryToCallWord0(a)
+		rtgAsmPrimaryImm(a, 1)
 		rtgAsmSyscall(a)
 	}
 	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
@@ -207,7 +207,7 @@ func rtgAsmBuildWindowsArgvEnvSlices386(a *rtgAsm, bssOff int, argsTextOff int, 
 	rtgWin386CallImport(a, rtgWinImportGetCommandLineA)
 	rtgAsmEmit16(a, 0xc689)
 	rtgWin386MovEdiBssAddr(a, bssOff)
-	rtgAsmMovRaxBssAddr(a, argsTextOff)
+	rtgAsmPrimaryBssAddr(a, argsTextOff)
 	rtgAsmEmit16(a, 0xc289)
 	rtgAsmEmit16(a, 0xdb31)
 
@@ -262,15 +262,15 @@ func rtgAsmBuildWindowsArgvEnvSlices386(a *rtgAsm, bssOff int, argsTextOff int, 
 
 	rtgAsmMarkLabel(a, finishLabel)
 	rtgAsmEmit16(a, 0xd889)
-	rtgAsmStoreRaxBss(a, argsLenOff)
+	rtgAsmStorePrimaryBss(a, argsLenOff)
 
 	rtgWin386MovEdiBssAddr(a, envOff)
-	rtgAsmMovRaxDataAddr(a, pathNameOff)
+	rtgAsmPrimaryDataAddr(a, pathNameOff)
 	rtgAsmEmit16(a, 0x0789)
-	rtgAsmMovRaxImm(a, 5)
+	rtgAsmPrimaryImm(a, 5)
 	rtgAsmEmit3(a, 0x89, 0x47, 8)
-	rtgAsmMovRaxImm(a, 1)
-	rtgAsmStoreRaxBss(a, envLenOff)
+	rtgAsmPrimaryImm(a, 1)
+	rtgAsmStorePrimaryBss(a, envLenOff)
 
 	rtgWin386MovEbxBssAddr(a, bssOff)
 	rtgWin386LoadEsiBss(a, argsLenOff)

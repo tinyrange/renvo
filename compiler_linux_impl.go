@@ -360,9 +360,9 @@ func rtgEmitLinearPrintStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 		return true
 	}
 	rtgAsmPushImm(a, 1)
-	rtgAsmPopRdi(a)
-	rtgAsmMovRsiRax(a)
-	rtgAsmMovRaxImm(a, rtgLinuxSysWriteSeq())
+	rtgAsmPopCallWord0(a)
+	rtgAsmCopyPrimaryToCallWord1(a)
+	rtgAsmPrimaryImm(a, rtgLinuxSysWriteSeq())
 	rtgAsmSyscall(a)
 	return true
 }
@@ -386,7 +386,7 @@ func rtgEmitBuiltinReadWrite(g *rtgLinearGen, ep *rtgExprParse, idx int, seqSysc
 	if !rtgEmitIntExpr(g, &fdEp, fdIndex) {
 		return false
 	}
-	rtgAsmPushRax(a)
+	rtgAsmPushPrimary(a)
 	offIndex := ep.args[firstArg+2]
 	offConst := rtgEvalConstExpr(g, ep, offIndex)
 	offsetRead := true
@@ -395,27 +395,27 @@ func rtgEmitBuiltinReadWrite(g *rtgLinearGen, ep *rtgExprParse, idx int, seqSysc
 	}
 	if offsetRead {
 		if offConst.ok {
-			rtgAsmMovRaxImm(a, offConst.value)
+			rtgAsmPrimaryImm(a, offConst.value)
 		} else {
 			if !rtgEmitIntExpr(g, ep, offIndex) {
 				return false
 			}
 		}
-		rtgAsmPushRax(a)
+		rtgAsmPushPrimary(a)
 	}
 	if !rtgEmitSlicePtrLen(g, ep, ep.args[firstArg+1]) {
 		return false
 	}
 	rtgAsmPrepareReadWriteBuf(a)
 	if offsetRead {
-		rtgAsmPopRax(a)
+		rtgAsmPopPrimary(a)
 		rtgAsmMoveOffsetArg(a)
 	}
-	rtgAsmPopRdi(a)
+	rtgAsmPopCallWord0(a)
 	if offsetRead {
-		rtgAsmMovRaxImm(a, offSyscall)
+		rtgAsmPrimaryImm(a, offSyscall)
 	} else {
-		rtgAsmMovRaxImm(a, seqSyscall)
+		rtgAsmPrimaryImm(a, seqSyscall)
 	}
 	if rtgTargetIsDarwin() {
 		importID := seqSyscall
@@ -621,7 +621,7 @@ func rtgWinAmd64EmitReadWriteHelper(g *rtgLinearGen, isWrite bool) int {
 	rtgAsmEmit8(a, 0xb9)
 	rtgAsmEmit32(a, 1)
 	rtgWinAmd64CallImport(a, rtgWinImportSetFilePointer, 40)
-	rtgAsmStoreRaxBss(a, posOff)
+	rtgAsmStorePrimaryBss(a, posOff)
 
 	rtgWinAmd64LoadSavedHandle(a)
 	rtgAsmEmit32(a, 0x24148b48)
@@ -631,34 +631,34 @@ func rtgWinAmd64EmitReadWriteHelper(g *rtgLinearGen, isWrite bool) int {
 	rtgWinAmd64EmitKernelReadWriteCall(a, importID, countOff)
 	rtgAsmEmit3(a, 0x83, 0xf8, 0)
 	rtgAsmJzLabel(a, failLabel)
-	rtgAsmLoadRaxBss(a, countOff)
+	rtgAsmLoadPrimaryBss(a, countOff)
 	rtgAsmJmpLabel(a, doneLabel)
 
 	rtgAsmMarkLabel(a, seqLabel)
 	rtgWinAmd64EmitKernelReadWriteCall(a, importID, countOff)
 	rtgAsmEmit3(a, 0x83, 0xf8, 0)
 	rtgAsmJzLabel(a, seqFailLabel)
-	rtgAsmLoadRaxBss(a, countOff)
+	rtgAsmLoadPrimaryBss(a, countOff)
 	rtgAsmEmit4(a, 0x48, 0x83, 0xc4, 32)
 	rtgAsmRet(a)
 
 	rtgAsmMarkLabel(a, seqFailLabel)
-	rtgAsmMovRaxImm(a, -1)
+	rtgAsmPrimaryImm(a, -1)
 	rtgAsmEmit4(a, 0x48, 0x83, 0xc4, 32)
 	rtgAsmRet(a)
 
 	rtgAsmMarkLabel(a, failLabel)
-	rtgAsmMovRaxImm(a, -1)
+	rtgAsmPrimaryImm(a, -1)
 
 	rtgAsmMarkLabel(a, doneLabel)
-	rtgAsmStoreRaxBss(a, countOff)
+	rtgAsmStorePrimaryBss(a, countOff)
 	rtgWinAmd64LoadSavedHandle(a)
-	rtgAsmLoadRaxBss(a, posOff)
-	rtgAsmMovRdxRax(a)
+	rtgAsmLoadPrimaryBss(a, posOff)
+	rtgAsmCopyPrimaryToSecondary(a)
 	rtgAsmEmit24(a, 0xc03145)
 	rtgAsmEmit24(a, 0xc93145)
 	rtgWinAmd64CallImport(a, rtgWinImportSetFilePointer, 40)
-	rtgAsmLoadRaxBss(a, countOff)
+	rtgAsmLoadPrimaryBss(a, countOff)
 	rtgAsmEmit4(a, 0x48, 0x83, 0xc4, 32)
 	rtgAsmRet(a)
 	rtgAsmMarkLabel(a, afterLabel)
@@ -680,8 +680,8 @@ func rtgWinAmd64EmitKernelReadWriteCall(a *rtgAsm, importID int, countOff int) {
 	rtgWinAmd64LoadSavedHandle(a)
 	rtgAsmEmit5(a, 0x48, 0x8b, 0x54, 0x24, 16)
 	rtgAsmEmit5(a, 0x4c, 0x8b, 0x44, 0x24, 8)
-	rtgAsmMovRaxBssAddr(a, countOff)
-	rtgAsmMovR9Rax(a)
+	rtgAsmPrimaryBssAddr(a, countOff)
+	rtgAsmCopyPrimaryToCallWord5(a)
 	rtgAsmEmit4(a, 0x48, 0x83, 0xec, 40)
 	rtgAsmEmit5(a, 0x48, 0xc7, 0x44, 0x24, 32)
 	rtgAsmEmit32(a, 0)
@@ -753,54 +753,54 @@ func rtgWin386EmitReadWriteHelper(g *rtgLinearGen, isWrite bool) int {
 	rtgAsmJlLabel(a, seqLabel)
 
 	rtgAsmEmit8(a, 0x51)
-	rtgAsmPushRdx(a)
+	rtgAsmPushSecondary(a)
 	rtgAsmPushImm(a, 1)
 	rtgAsmPushImm(a, 0)
 	rtgAsmPushImm(a, 0)
 	rtgAsmEmit8(a, 0x53)
 	rtgWin386CallImport(a, rtgWinImportSetFilePointer)
-	rtgAsmStoreRaxBss(a, posOff)
-	rtgAsmPopRdx(a)
-	rtgAsmPopRcx(a)
+	rtgAsmStorePrimaryBss(a, posOff)
+	rtgAsmPopSecondary(a)
+	rtgAsmPopTertiary(a)
 
 	rtgAsmEmit8(a, 0x51)
-	rtgAsmPushRdx(a)
+	rtgAsmPushSecondary(a)
 	rtgAsmPushImm(a, 0)
 	rtgAsmPushImm(a, 0)
-	rtgAsmPushRcx(a)
+	rtgAsmPushTertiary(a)
 	rtgAsmEmit8(a, 0x53)
 	rtgWin386CallImport(a, rtgWinImportSetFilePointer)
-	rtgAsmPopRdx(a)
-	rtgAsmPopRcx(a)
+	rtgAsmPopSecondary(a)
+	rtgAsmPopTertiary(a)
 	rtgWin386EmitKernelReadWriteCall(a, importID, countOff)
 	rtgAsmEmit3(a, 0x83, 0xf8, 0)
 	rtgAsmJzLabel(a, failLabel)
-	rtgAsmLoadRaxBss(a, countOff)
+	rtgAsmLoadPrimaryBss(a, countOff)
 	rtgAsmJmpLabel(a, doneLabel)
 
 	rtgAsmMarkLabel(a, seqLabel)
 	rtgWin386EmitKernelReadWriteCall(a, importID, countOff)
 	rtgAsmEmit3(a, 0x83, 0xf8, 0)
 	rtgAsmJzLabel(a, seqFailLabel)
-	rtgAsmLoadRaxBss(a, countOff)
+	rtgAsmLoadPrimaryBss(a, countOff)
 	rtgAsmRet(a)
 
 	rtgAsmMarkLabel(a, seqFailLabel)
-	rtgAsmMovRaxImm(a, -1)
+	rtgAsmPrimaryImm(a, -1)
 	rtgAsmRet(a)
 
 	rtgAsmMarkLabel(a, failLabel)
-	rtgAsmMovRaxImm(a, -1)
+	rtgAsmPrimaryImm(a, -1)
 
 	rtgAsmMarkLabel(a, doneLabel)
-	rtgAsmStoreRaxBss(a, countOff)
+	rtgAsmStorePrimaryBss(a, countOff)
 	rtgAsmPushImm(a, 0)
 	rtgAsmPushImm(a, 0)
 	rtgWin386LoadEaxBss(a, posOff)
-	rtgAsmPushRax(a)
+	rtgAsmPushPrimary(a)
 	rtgAsmEmit8(a, 0x53)
 	rtgWin386CallImport(a, rtgWinImportSetFilePointer)
-	rtgAsmLoadRaxBss(a, countOff)
+	rtgAsmLoadPrimaryBss(a, countOff)
 	rtgAsmRet(a)
 	rtgAsmMarkLabel(a, afterLabel)
 	return label
@@ -809,13 +809,13 @@ func rtgWin386EmitReadWriteHelper(g *rtgLinearGen, isWrite bool) int {
 func rtgWin386SetStdHandle(a *rtgAsm, stdHandle int) {
 	rtgAsmPushImm(a, stdHandle)
 	rtgWin386CallImport(a, rtgWinImportGetStdHandle)
-	rtgAsmMovRdiRax(a)
+	rtgAsmCopyPrimaryToCallWord0(a)
 }
 
 func rtgWin386EmitKernelReadWriteCall(a *rtgAsm, importID int, countOff int) {
 	rtgAsmPushImm(a, 0)
 	rtgWin386PushBssAddr(a, countOff)
-	rtgAsmPushRdx(a)
+	rtgAsmPushSecondary(a)
 	rtgAsmEmit8(a, 0x56)
 	rtgAsmEmit8(a, 0x53)
 	rtgWin386CallImport(a, importID)
@@ -839,19 +839,19 @@ func rtgEmitWindowsReadWrite(g *rtgLinearGen, ep *rtgExprParse, idx int, isWrite
 	if !rtgEmitIntExpr(g, &fdEp, len(fdEp.exprs)-1) {
 		return false
 	}
-	rtgAsmPushRax(a)
+	rtgAsmPushPrimary(a)
 	offIndex := ep.args[firstArg+2]
 	offConst := rtgEvalConstExpr(g, ep, offIndex)
 	if offConst.ok && offConst.value < 0 {
-		rtgAsmMovRaxImm(a, -1)
+		rtgAsmPrimaryImm(a, -1)
 	} else if offConst.ok {
-		rtgAsmMovRaxImm(a, offConst.value)
+		rtgAsmPrimaryImm(a, offConst.value)
 	} else {
 		if !rtgEmitIntExpr(g, ep, offIndex) {
 			return false
 		}
 	}
-	rtgAsmPushRax(a)
+	rtgAsmPushPrimary(a)
 	if !rtgEmitSlicePtrLen(g, ep, ep.args[firstArg+1]) {
 		return false
 	}
@@ -859,16 +859,16 @@ func rtgEmitWindowsReadWrite(g *rtgLinearGen, ep *rtgExprParse, idx int, isWrite
 		label := rtgWin386EmitReadWriteHelper(g, isWrite)
 		rtgAsmEmit16(a, 0xc689)
 		rtgAsmEmit16(a, 0xca89)
-		rtgAsmPopRcx(a)
-		rtgAsmPopRdi(a)
+		rtgAsmPopTertiary(a)
+		rtgAsmPopCallWord0(a)
 		rtgAsmCallLabel(a, label)
 		return true
 	}
 	label := rtgWinAmd64EmitReadWriteHelper(g, isWrite)
-	rtgAsmMovRsiRax(a)
+	rtgAsmCopyPrimaryToCallWord1(a)
 	rtgAsmEmit24(a, 0xca8948)
-	rtgAsmPopRcx(a)
-	rtgAsmPopRdi(a)
+	rtgAsmPopTertiary(a)
+	rtgAsmPopCallWord0(a)
 	rtgAsmCallLabel(a, label)
 	return true
 }
@@ -894,19 +894,19 @@ func rtgEmitWindowsPrintStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 	if rtgTargetArch == rtgArch386 {
 		label := rtgWin386EmitReadWriteHelper(g, true)
 		rtgAsmEmit16(a, 0xc689)
-		rtgAsmMovRaxImm(a, -1)
-		rtgAsmMovRcxRax(a)
-		rtgAsmMovRaxImm(a, 1)
-		rtgAsmMovRdiRax(a)
+		rtgAsmPrimaryImm(a, -1)
+		rtgAsmCopyPrimaryToTertiary(a)
+		rtgAsmPrimaryImm(a, 1)
+		rtgAsmCopyPrimaryToCallWord0(a)
 		rtgAsmCallLabel(a, label)
 		return true
 	}
 	label := rtgWinAmd64EmitReadWriteHelper(g, true)
-	rtgAsmMovRsiRax(a)
-	rtgAsmMovRaxImm(a, 1)
-	rtgAsmMovRdiRax(a)
-	rtgAsmMovRaxImm(a, -1)
-	rtgAsmMovRcxRax(a)
+	rtgAsmCopyPrimaryToCallWord1(a)
+	rtgAsmPrimaryImm(a, 1)
+	rtgAsmCopyPrimaryToCallWord0(a)
+	rtgAsmPrimaryImm(a, -1)
+	rtgAsmCopyPrimaryToTertiary(a)
 	rtgAsmCallLabel(a, label)
 	return true
 }
@@ -920,30 +920,30 @@ func rtgEmitWindowsOpen(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	if !rtgEmitIntExpr(g, ep, ep.args[e.firstArg+1]) {
 		return false
 	}
-	rtgAsmPushRax(a)
+	rtgAsmPushPrimary(a)
 	if !rtgEmitStringPtrExpr(g, ep, ep.args[e.firstArg]) {
 		return false
 	}
 	if rtgTargetArch == rtgArch386 {
 		createFileImport := rtgWinImportCreateFileA
 		rtgAsmEmit16(a, 0xc689)
-		rtgAsmPopRax(a)
+		rtgAsmPopPrimary(a)
 		rtgWin386TranslateCreateFileFlags(a)
 		rtgAsmPushImm(a, 0)
 		rtgAsmPushImm(a, 0x80)
-		rtgAsmPushRcx(a)
+		rtgAsmPushTertiary(a)
 		rtgAsmPushImm(a, 0)
 		rtgAsmPushImm(a, 3)
-		rtgAsmPushRdx(a)
+		rtgAsmPushSecondary(a)
 		rtgAsmEmit8(a, 0x56)
 		rtgWin386CallImport(a, createFileImport)
 		return true
 	}
 	createFileImport := rtgWinImportCreateFileA
-	rtgAsmPushRax(a)
-	rtgAsmMovRcxRax(a)
-	rtgAsmPopRcx(a)
-	rtgAsmPopRax(a)
+	rtgAsmPushPrimary(a)
+	rtgAsmCopyPrimaryToTertiary(a)
+	rtgAsmPopTertiary(a)
+	rtgAsmPopPrimary(a)
 	rtgWinAmd64TranslateCreateFileFlags(a)
 	rtgAsmEmit4(a, 0x48, 0x83, 0xec, 56)
 	rtgAsmEmit5(a, 0x44, 0x89, 0x54, 0x24, 32)
@@ -965,15 +965,15 @@ func rtgWinAmd64TranslateCreateFileFlags(a *rtgAsm) {
 	noCreateLabel := rtgAsmNewLabel(a)
 	createDoneLabel := rtgAsmNewLabel(a)
 
-	rtgAsmMovRdxImm(a, -2147483648)
+	rtgAsmSecondaryImm(a, -2147483648)
 	rtgAsmEmit2(a, 0xa8, 2)
 	rtgAsmJzLabel(a, notRDWRLabel)
-	rtgAsmMovRdxImm(a, -1073741824)
+	rtgAsmSecondaryImm(a, -1073741824)
 	rtgAsmJmpLabel(a, accessDoneLabel)
 	rtgAsmMarkLabel(a, notRDWRLabel)
 	rtgAsmEmit2(a, 0xa8, 1)
 	rtgAsmJzLabel(a, accessDoneLabel)
-	rtgAsmMovRdxImm(a, 0x40000000)
+	rtgAsmSecondaryImm(a, 0x40000000)
 	rtgAsmMarkLabel(a, accessDoneLabel)
 
 	rtgWinAmd64MovR10Imm(a, 3)
@@ -1056,25 +1056,25 @@ func rtgEmitWindowsClose(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	failLabel := rtgAsmNewLabel(a)
 	doneLabel := rtgAsmNewLabel(a)
 	if rtgTargetArch == rtgArch386 {
-		rtgAsmPushRax(a)
+		rtgAsmPushPrimary(a)
 		rtgWin386CallImport(a, rtgWinImportCloseHandle)
 		rtgAsmEmit3(a, 0x83, 0xf8, 0)
 		rtgAsmJzLabel(a, failLabel)
-		rtgAsmMovRaxImm(a, 0)
+		rtgAsmPrimaryImm(a, 0)
 		rtgAsmJmpLabel(a, doneLabel)
 		rtgAsmMarkLabel(a, failLabel)
-		rtgAsmMovRaxImm(a, -1)
+		rtgAsmPrimaryImm(a, -1)
 		rtgAsmMarkLabel(a, doneLabel)
 		return true
 	}
-	rtgAsmMovRcxRax(a)
+	rtgAsmCopyPrimaryToTertiary(a)
 	rtgWinAmd64CallImport(a, rtgWinImportCloseHandle, 40)
 	rtgAsmEmit3(a, 0x83, 0xf8, 0)
 	rtgAsmJzLabel(a, failLabel)
-	rtgAsmMovRaxImm(a, 0)
+	rtgAsmPrimaryImm(a, 0)
 	rtgAsmJmpLabel(a, doneLabel)
 	rtgAsmMarkLabel(a, failLabel)
-	rtgAsmMovRaxImm(a, -1)
+	rtgAsmPrimaryImm(a, -1)
 	rtgAsmMarkLabel(a, doneLabel)
 	return true
 }
@@ -1088,29 +1088,29 @@ func rtgEmitWindowsChmod(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	if !rtgEmitIntExpr(g, ep, ep.args[e.firstArg]) {
 		return false
 	}
-	rtgAsmPushRax(a)
+	rtgAsmPushPrimary(a)
 	if !rtgEmitIntExpr(g, ep, ep.args[e.firstArg+1]) {
 		return false
 	}
 	if rtgTargetArch == rtgArch386 {
-		rtgAsmPopRax(a)
+		rtgAsmPopPrimary(a)
 		rtgAsmPushImm(a, 1)
 		rtgAsmPushImm(a, 0)
 		rtgAsmPushImm(a, 0)
-		rtgAsmPushRax(a)
+		rtgAsmPushPrimary(a)
 		rtgWin386CallImport(a, rtgWinImportSetFilePointer)
 		rtgAsmEmit3(a, 0x83, 0xf8, -1)
 		failLabel := rtgAsmNewLabel(a)
 		doneLabel := rtgAsmNewLabel(a)
 		rtgAsmJzLabel(a, failLabel)
-		rtgAsmMovRaxImm(a, 0)
+		rtgAsmPrimaryImm(a, 0)
 		rtgAsmJmpLabel(a, doneLabel)
 		rtgAsmMarkLabel(a, failLabel)
-		rtgAsmMovRaxImm(a, -1)
+		rtgAsmPrimaryImm(a, -1)
 		rtgAsmMarkLabel(a, doneLabel)
 		return true
 	}
-	rtgAsmPopRcx(a)
+	rtgAsmPopTertiary(a)
 	rtgAsmEmit16(a, 0xd231)
 	rtgAsmEmit8(a, 0x41)
 	rtgAsmEmit8(a, 0xb9)
@@ -1121,10 +1121,10 @@ func rtgEmitWindowsChmod(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	failLabel := rtgAsmNewLabel(a)
 	doneLabel := rtgAsmNewLabel(a)
 	rtgAsmJzLabel(a, failLabel)
-	rtgAsmMovRaxImm(a, 0)
+	rtgAsmPrimaryImm(a, 0)
 	rtgAsmJmpLabel(a, doneLabel)
 	rtgAsmMarkLabel(a, failLabel)
-	rtgAsmMovRaxImm(a, -1)
+	rtgAsmPrimaryImm(a, -1)
 	rtgAsmMarkLabel(a, doneLabel)
 	return true
 }

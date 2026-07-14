@@ -82,8 +82,8 @@ func rtgTryCompileScalarProgramArm(p *rtgProgram, meta *rtgMeta) rtgCompileResul
 		return result
 	}
 	rtgAsmCallLabel(a, g.funcLabels[appIndex])
-	rtgAsmMovRdiRax(a)
-	rtgAsmMovRaxImm(a, 1)
+	rtgAsmCopyPrimaryToCallWord0(a)
+	rtgAsmPrimaryImm(a, 1)
 	rtgAsmSyscall(a)
 	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
 		i := g.funcQueue[queueIndex]

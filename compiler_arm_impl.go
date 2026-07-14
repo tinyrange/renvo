@@ -57,7 +57,7 @@ func rtgArmEmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 		return false
 	}
 	if !g.lastRangeReturns {
-		rtgAsmMovRaxImm(a, 0)
+		rtgAsmPrimaryImm(a, 0)
 		rtgAsmLeave(a)
 		rtgAsmRet(a)
 	}
@@ -222,43 +222,43 @@ func rtgArmEmitFloatBinaryExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool 
 		if !rtgEmitIntExpr(g, ep, e.left) {
 			return false
 		}
-		rtgAsmPushRax(a)
+		rtgAsmPushPrimary(a)
 		if !rtgEmitIntExpr(g, ep, e.right) {
 			return false
 		}
-		rtgAsmPopRcx(a)
+		rtgAsmPopTertiary(a)
 		rtgArmAsmMulRegReg(a, rtgArmRegRax, rtgArmRegRcx, rtgArmRegRax)
-		rtgAsmSarRaxImm(a, 2)
+		rtgAsmSarPrimaryImm(a, 2)
 		return true
 	}
 	if rtgTokCharIs(p, e.tok, '/') {
 		if !rtgEmitIntExpr(g, ep, e.left) {
 			return false
 		}
-		rtgAsmShlRaxImm(a, 2)
-		rtgAsmPushRax(a)
+		rtgAsmShlPrimaryImm(a, 2)
+		rtgAsmPushPrimary(a)
 		if !rtgEmitIntExpr(g, ep, e.right) {
 			return false
 		}
-		rtgAsmPopRcx(a)
-		rtgAsmDivLeftRcxRightRax(a, false)
+		rtgAsmPopTertiary(a)
+		rtgAsmDivLeftTertiaryRightPrimary(a, false)
 		return true
 	}
 	if !rtgEmitIntExpr(g, ep, e.left) {
 		return false
 	}
-	rtgAsmPushRax(a)
+	rtgAsmPushPrimary(a)
 	if !rtgEmitIntExpr(g, ep, e.right) {
 		return false
 	}
-	rtgAsmPopRcx(a)
-	return rtgEmitRaxRcxOp(g, e.tok)
+	rtgAsmPopTertiary(a)
+	return rtgEmitPrimaryTertiaryOp(g, e.tok)
 }
 
 func rtgArmEmitSliceSlotAddrs(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSliceLocation, elemSize int) bool {
 	a := &g.asm
 	if loc.mem {
-		if !rtgEmitSliceLocationHeaderAddressRdx(g, locEp, loc) {
+		if !rtgEmitSliceLocationHeaderAddressSecondary(g, locEp, loc) {
 			return false
 		}
 		rtgArmAsmMovRegReg(a, rtgArmRegRdi, rtgArmRegRdx)
@@ -305,12 +305,12 @@ func rtgArmEnsureAppendAddrHelper(g *rtgLinearGen) int {
 	rtgArmAsmAddRegReg(a, rtgArmRegRcx, rtgArmRegRcx, rtgArmRegR8)
 	rtgAsmMarkLabel(a, capReadyLabel)
 	rtgArmAsmMulRegReg(a, rtgArmRegTmp, rtgArmRegRcx, rtgArmRegR9)
-	rtgAsmPushRcx(a)
+	rtgAsmPushTertiary(a)
 	rtgArmAsmMovRegReg(a, rtgArmRegRax, rtgArmRegTmp)
 	rtgArmAsmPushReg(a, rtgArmRegLr)
 	rtgAsmCallLabel(a, arenaAllocLabel)
 	rtgArmAsmPopReg(a, rtgArmRegLr)
-	rtgAsmPopRcx(a)
+	rtgAsmPopTertiary(a)
 	rtgArmAsmMovRegReg(a, rtgArmRegRdx, rtgArmRegRax)
 	rtgArmAsmMovRegReg(a, rtgArmRegRdi, rtgArmRegRdx)
 	rtgArmAsmLoadRegMem(a, rtgArmRegTmp2, rtgArmRegR10, 0, 4)
@@ -460,7 +460,7 @@ func rtgArmEnsureStringEqualHelper(g *rtgLinearGen) int {
 	loopLabel := rtgAsmNewLabel(a)
 	rtgAsmJmpLabel(a, afterLabel)
 	rtgAsmMarkLabel(a, g.streqLabel)
-	rtgAsmMovRaxImm(a, 0)
+	rtgAsmPrimaryImm(a, 0)
 	rtgArmAsmCmpRegReg(a, rtgArmRegRsi, rtgArmRegRcx)
 	rtgArmAsmBCondLabel(a, notEqualLabel, 1)
 	rtgArmAsmCmpRegImm(a, rtgArmRegRsi, 0)
@@ -476,7 +476,7 @@ func rtgArmEnsureStringEqualHelper(g *rtgLinearGen) int {
 	rtgArmAsmCmpRegImm(a, rtgArmRegRsi, 0)
 	rtgArmAsmBCondLabel(a, loopLabel, 1)
 	rtgAsmMarkLabel(a, equalLabel)
-	rtgAsmMovRaxImm(a, 1)
+	rtgAsmPrimaryImm(a, 1)
 	rtgAsmMarkLabel(a, notEqualLabel)
 	rtgAsmRet(a)
 	rtgAsmMarkLabel(a, afterLabel)

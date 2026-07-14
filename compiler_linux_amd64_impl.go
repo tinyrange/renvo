@@ -11,7 +11,7 @@ const rtgLinuxAmd64SysWriteAt = 18
 const rtgLinuxAmd64SysFchmod = 91
 
 func rtgAmd64AsmPrepareReadWriteBuf(a *rtgAsm) {
-	rtgAsmMovRsiRax(a)
+	rtgAsmCopyPrimaryToCallWord1(a)
 	rtgAsmEmit16(a, 0x5a51)
 }
 
@@ -94,12 +94,12 @@ func rtgTryCompileScalarProgramAmd64(p *rtgProgram, meta *rtgMeta) rtgCompileRes
 	}
 	rtgAsmCallLabel(a, g.funcLabels[appIndex])
 	if rtgTargetIsWindows() {
-		rtgAsmMovRcxRax(a)
+		rtgAsmCopyPrimaryToTertiary(a)
 		rtgWinAmd64CallImport(a, rtgWinImportExitProcess, 40)
 		rtgAsmRet(a)
 	} else {
-		rtgAsmMovRdiRax(a)
-		rtgAsmMovRaxImm(a, 60)
+		rtgAsmCopyPrimaryToCallWord0(a)
+		rtgAsmPrimaryImm(a, 60)
 		rtgAsmSyscall(a)
 	}
 	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
@@ -184,9 +184,9 @@ func rtgAsmBuildWindowsArgvEnvSlicesAmd64(a *rtgAsm, bssOff int, argsTextOff int
 
 	rtgWinAmd64CallImport(a, rtgWinImportGetCommandLineA, 40)
 	rtgAsmEmit24(a, 0xc68948)
-	rtgAsmMovR10BssAddr(a, bssOff)
-	rtgAsmMovRaxBssAddr(a, argsTextOff)
-	rtgAsmMovRdxRax(a)
+	rtgAsmScratchBssAddr(a, bssOff)
+	rtgAsmPrimaryBssAddr(a, argsTextOff)
+	rtgAsmCopyPrimaryToSecondary(a)
 	rtgAsmEmit24(a, 0xdb314d)
 
 	rtgAsmMarkLabel(a, skipLabel)
@@ -240,26 +240,26 @@ func rtgAsmBuildWindowsArgvEnvSlicesAmd64(a *rtgAsm, bssOff int, argsTextOff int
 
 	rtgAsmMarkLabel(a, finishLabel)
 	rtgAsmEmit24(a, 0xd8894c)
-	rtgAsmStoreRaxBss(a, argsLenOff)
+	rtgAsmStorePrimaryBss(a, argsLenOff)
 
-	rtgAsmMovR10BssAddr(a, envOff)
-	rtgAsmMovRaxDataAddr(a, pathNameOff)
+	rtgAsmScratchBssAddr(a, envOff)
+	rtgAsmPrimaryDataAddr(a, pathNameOff)
 	rtgAsmEmit24(a, 0x028949)
-	rtgAsmMovRaxImm(a, 5)
+	rtgAsmPrimaryImm(a, 5)
 	rtgAsmEmit32(a, 0x08428949)
-	rtgAsmMovRaxImm(a, 1)
-	rtgAsmStoreRaxBss(a, envLenOff)
+	rtgAsmPrimaryImm(a, 1)
+	rtgAsmStorePrimaryBss(a, envLenOff)
 
-	rtgAsmMovRaxBssAddr(a, bssOff)
-	rtgAsmMovRdiRax(a)
-	rtgAsmLoadRaxBss(a, argsLenOff)
-	rtgAsmMovRsiRax(a)
-	rtgAsmMovRdxRax(a)
-	rtgAsmMovRaxBssAddr(a, envOff)
-	rtgAsmMovRcxRax(a)
-	rtgAsmLoadRaxBss(a, envLenOff)
-	rtgAsmMovR8Rax(a)
-	rtgAsmMovR9Rax(a)
+	rtgAsmPrimaryBssAddr(a, bssOff)
+	rtgAsmCopyPrimaryToCallWord0(a)
+	rtgAsmLoadPrimaryBss(a, argsLenOff)
+	rtgAsmCopyPrimaryToCallWord1(a)
+	rtgAsmCopyPrimaryToSecondary(a)
+	rtgAsmPrimaryBssAddr(a, envOff)
+	rtgAsmCopyPrimaryToTertiary(a)
+	rtgAsmLoadPrimaryBss(a, envLenOff)
+	rtgAsmCopyPrimaryToCallWord4(a)
+	rtgAsmCopyPrimaryToCallWord5(a)
 }
 
 func rtgAsmBuildArgvEnvSlicesAmd64(a *rtgAsm, bssOff int, envOff int, envLenOff int) {
@@ -277,7 +277,7 @@ func rtgAsmBuildArgvEnvSlicesAmd64(a *rtgAsm, bssOff int, envOff int, envLenOff 
 	rtgAsmEmit24(a, 0xc08949)
 	rtgAsmEmit32(a, 0x244c8d4c)
 	rtgAsmEmit8(a, 0x8)
-	rtgAsmMovR10BssAddr(a, bssOff)
+	rtgAsmScratchBssAddr(a, bssOff)
 	rtgAsmEmit32(a, 0x4dd4894d)
 	rtgAsmEmit16(a, 0xdb31)
 	rtgAsmMarkLabel(a, loopLabel)
@@ -310,7 +310,7 @@ func rtgAsmBuildArgvEnvSlicesAmd64(a *rtgAsm, bssOff int, envOff int, envLenOff 
 	rtgAsmJmpLabel(a, envScanLabel)
 	rtgAsmMarkLabel(a, envStartLabel)
 	rtgAsmEmit32(a, 0x08c18349)
-	rtgAsmMovR10BssAddr(a, envOff)
+	rtgAsmScratchBssAddr(a, envOff)
 	rtgAsmEmit24(a, 0xdb314d)
 	rtgAsmMarkLabel(a, envLoopLabel)
 	rtgAsmEmit32(a, 0xd93c8b4b)
@@ -330,16 +330,16 @@ func rtgAsmBuildArgvEnvSlicesAmd64(a *rtgAsm, bssOff int, envOff int, envLenOff 
 	rtgAsmJmpLabel(a, envLoopLabel)
 	rtgAsmMarkLabel(a, envDoneLabel)
 	rtgAsmEmit24(a, 0xd8894c)
-	rtgAsmStoreRaxBss(a, envLenOff)
+	rtgAsmStorePrimaryBss(a, envLenOff)
 
 	rtgAsmEmit32(a, 0x4ce7894c)
 	rtgAsmEmit32(a, 0x894cc689)
 	rtgAsmEmit8(a, 0xc2)
-	rtgAsmMovRaxBssAddr(a, envOff)
-	rtgAsmMovRcxRax(a)
-	rtgAsmLoadRaxBss(a, envLenOff)
-	rtgAsmMovR8Rax(a)
-	rtgAsmMovR9Rax(a)
+	rtgAsmPrimaryBssAddr(a, envOff)
+	rtgAsmCopyPrimaryToTertiary(a)
+	rtgAsmLoadPrimaryBss(a, envLenOff)
+	rtgAsmCopyPrimaryToCallWord4(a)
+	rtgAsmCopyPrimaryToCallWord5(a)
 }
 
 func rtgAsmImageAmd64(a *rtgAsm) []byte {

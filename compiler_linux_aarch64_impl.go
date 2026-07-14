@@ -106,8 +106,8 @@ func rtgTryCompileScalarProgramAarch64(p *rtgProgram, meta *rtgMeta) rtgCompileR
 		rtgDarwinArm64CallImport(a, rtgDarwinImportExit)
 		rtgAsmRet(a)
 	} else {
-		rtgAsmMovRdiRax(a)
-		rtgAsmMovRaxImm(a, 93)
+		rtgAsmCopyPrimaryToCallWord0(a)
+		rtgAsmPrimaryImm(a, 93)
 		rtgAsmSyscall(a)
 	}
 	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {

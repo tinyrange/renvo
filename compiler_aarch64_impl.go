@@ -57,7 +57,7 @@ func rtgAarch64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 		return false
 	}
 	if !g.lastRangeReturns {
-		rtgAsmMovRaxImm(a, 0)
+		rtgAsmPrimaryImm(a, 0)
 		rtgAsmLeave(a)
 		rtgAsmRet(a)
 	}
@@ -221,37 +221,37 @@ func rtgAarch64EmitFloatBinaryExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) b
 		if !rtgEmitIntExpr(g, ep, e.left) {
 			return false
 		}
-		rtgAsmPushRax(a)
+		rtgAsmPushPrimary(a)
 		if !rtgEmitIntExpr(g, ep, e.right) {
 			return false
 		}
-		rtgAsmPopRcx(a)
+		rtgAsmPopTertiary(a)
 		rtgAarch64AsmEmit(a, 0x9b007c40)
-		rtgAsmSarRaxImm(a, 2)
+		rtgAsmSarPrimaryImm(a, 2)
 		return true
 	}
 	if rtgTokCharIs(p, e.tok, '/') {
 		if !rtgEmitIntExpr(g, ep, e.left) {
 			return false
 		}
-		rtgAsmShlRaxImm(a, 2)
-		rtgAsmPushRax(a)
+		rtgAsmShlPrimaryImm(a, 2)
+		rtgAsmPushPrimary(a)
 		if !rtgEmitIntExpr(g, ep, e.right) {
 			return false
 		}
-		rtgAsmPopRcx(a)
-		rtgAsmDivLeftRcxRightRax(a, false)
+		rtgAsmPopTertiary(a)
+		rtgAsmDivLeftTertiaryRightPrimary(a, false)
 		return true
 	}
 	if !rtgEmitIntExpr(g, ep, e.left) {
 		return false
 	}
-	rtgAsmPushRax(a)
+	rtgAsmPushPrimary(a)
 	if !rtgEmitIntExpr(g, ep, e.right) {
 		return false
 	}
-	rtgAsmPopRcx(a)
-	return rtgEmitRaxRcxOp(g, e.tok)
+	rtgAsmPopTertiary(a)
+	return rtgEmitPrimaryTertiaryOp(g, e.tok)
 }
 
 func rtgAarch64EnsureAppendAddrHelper(g *rtgLinearGen) int {
@@ -284,12 +284,12 @@ func rtgAarch64EnsureAppendAddrHelper(g *rtgLinearGen) int {
 	rtgAarch64AsmAddRegReg(a, rtgAarch64RegRcx, rtgAarch64RegRcx, rtgAarch64RegR8)
 	rtgAsmMarkLabel(a, capReadyLabel)
 	rtgAarch64AsmMulRegReg(a, rtgAarch64RegTmp, rtgAarch64RegRcx, rtgAarch64RegR9)
-	rtgAsmPushRcx(a)
+	rtgAsmPushTertiary(a)
 	rtgAarch64AsmMovRegReg(a, rtgAarch64RegRax, rtgAarch64RegTmp)
 	rtgAarch64AsmPushReg(a, rtgAarch64RegLr)
 	rtgAsmCallLabel(a, arenaAllocLabel)
 	rtgAarch64AsmPopReg(a, rtgAarch64RegLr)
-	rtgAsmPopRcx(a)
+	rtgAsmPopTertiary(a)
 	rtgAarch64AsmMovRegReg(a, rtgAarch64RegRdx, rtgAarch64RegRax)
 	rtgAarch64AsmMovRegReg(a, rtgAarch64RegRdi, rtgAarch64RegRdx)
 	rtgAarch64AsmLoadRegMem(a, rtgAarch64RegTmp2, rtgAarch64RegR10, 0, 8)
@@ -437,7 +437,7 @@ func rtgAarch64EnsureStringEqualHelper(g *rtgLinearGen) int {
 	loopLabel := rtgAsmNewLabel(a)
 	rtgAsmJmpLabel(a, afterLabel)
 	rtgAsmMarkLabel(a, g.streqLabel)
-	rtgAsmMovRaxImm(a, 0)
+	rtgAsmPrimaryImm(a, 0)
 	rtgAarch64AsmCmpRegReg(a, rtgAarch64RegRsi, rtgAarch64RegRcx)
 	rtgAarch64AsmBCondLabel(a, notEqualLabel, 1)
 	rtgAarch64AsmCmpRegImm(a, rtgAarch64RegRsi, 0)
@@ -453,7 +453,7 @@ func rtgAarch64EnsureStringEqualHelper(g *rtgLinearGen) int {
 	rtgAarch64AsmCmpRegImm(a, rtgAarch64RegRsi, 0)
 	rtgAarch64AsmBCondLabel(a, loopLabel, 1)
 	rtgAsmMarkLabel(a, equalLabel)
-	rtgAsmMovRaxImm(a, 1)
+	rtgAsmPrimaryImm(a, 1)
 	rtgAsmMarkLabel(a, notEqualLabel)
 	rtgAsmRet(a)
 	rtgAsmMarkLabel(a, afterLabel)
