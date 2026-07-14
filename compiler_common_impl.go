@@ -3986,6 +3986,7 @@ func rtgBuildMetaInto(pp *rtgProgram, m *rtgMeta) {
 		rtgParseFuncInfo(m, i)
 	}
 	rtgBuildFuncLookup(m)
+	rtgResolveGlobalCallTypes(m)
 }
 
 func rtgFindContainingTopDeclGroup(p *rtgProgram, kind int, start int, end int) (int, int, bool) {
@@ -4079,6 +4080,48 @@ func rtgBuildFuncLookup(m *rtgMeta) {
 		bucket := hash % len(m.funcBuckets)
 		m.funcNext[i] = m.funcBuckets[bucket]
 		m.funcBuckets[bucket] = i
+	}
+}
+
+func rtgFindMetaFunction(m *rtgMeta, nameStart int, nameEnd int) int {
+	if len(m.funcBuckets) == 0 {
+		return -1
+	}
+	hash := rtgHashRange(m.prog.src, nameStart, nameEnd)
+	i := m.funcBuckets[hash%len(m.funcBuckets)]
+	for i >= 0 {
+		fn := &m.funcs[i]
+		if fn.receiverType == 0 && rtgBytesEqualRange(m.prog.src, fn.nameStart, fn.nameEnd, nameStart, nameEnd) {
+			return i
+		}
+		i = m.funcNext[i]
+	}
+	return -1
+}
+
+func rtgResolveGlobalCallTypes(m *rtgMeta) {
+	for i := 0; i < len(m.globals); i++ {
+		global := &m.globals[i]
+		if global.typ != 0 || global.initStart >= global.initEnd {
+			continue
+		}
+		var ep rtgExprParse
+		rootIndex := rtgParseExpressionRoot(&ep, m.prog, global.initStart, global.initEnd)
+		if rootIndex < 0 {
+			continue
+		}
+		root := &ep.exprs[rootIndex]
+		if root.kind != rtgExprCall || root.left < 0 || root.left >= len(ep.exprs) {
+			continue
+		}
+		callee := &ep.exprs[root.left]
+		if callee.kind != rtgExprIdent {
+			continue
+		}
+		fnIndex := rtgFindMetaFunction(m, callee.nameStart, callee.nameEnd)
+		if fnIndex >= 0 {
+			global.typ = m.funcs[fnIndex].resultType
+		}
 	}
 }
 
@@ -7288,6 +7331,9 @@ func rtgLinearInitGlobals(g *rtgLinearGen) bool {
 }
 func rtgEmitGlobalStructInit(g *rtgLinearGen, ep *rtgExprParse, rootIndex int, typ int, off int) bool {
 	root := &ep.exprs[rootIndex]
+	if root.kind == rtgExprCall {
+		return rtgEmitStructCallToBss(g, ep, rootIndex, typ, off)
+	}
 	if root.kind != rtgExprComposite {
 		return false
 	}
@@ -9669,14 +9715,14 @@ func rtgEmitIndexedStructToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, des
 	rtgEmitCopyMemSecondaryToStack(g, offset, elemSize)
 	return true
 }
-func rtgEmitStructCallToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, destType int, offset int) bool {
+func rtgPrepareStructCall(g *rtgLinearGen, ep *rtgExprParse, idx int, destType int) (int, int) {
 	e := &ep.exprs[idx]
 	fnIndex := rtgFuncInfoFromCall(g, ep, e.left)
 	if fnIndex < 0 || !rtgTypeIsStruct(g.meta, g.meta.funcs[fnIndex].resultType) {
-		return false
+		return -1, 0
 	}
 	if rtgTypeSize(g.meta, destType) != rtgTypeSize(g.meta, g.meta.funcs[fnIndex].resultType) {
-		return false
+		return -1, 0
 	}
 	fn := &g.meta.funcs[fnIndex]
 	receiverIndex := -1
@@ -9684,7 +9730,7 @@ func rtgEmitStructCallToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, destTy
 	if fn.receiverType != 0 {
 		callee := &ep.exprs[e.left]
 		if callee.kind != rtgExprSelector {
-			return false
+			return -1, 0
 		}
 		receiverIndex = callee.left
 		receiverDotTok = callee.tok
@@ -9698,7 +9744,7 @@ func rtgEmitStructCallToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, destTy
 		}
 		words := rtgEmitCallParamArgReverse(g, ep, argIndex, fn.firstParam+paramIndex)
 		if words < 0 {
-			return false
+			return -1, 0
 		}
 		wordCount += words
 	}
@@ -9707,12 +9753,29 @@ func rtgEmitStructCallToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, destTy
 		if words < 0 {
 			words = rtgEmitMethodReceiverArgTokensReverse(g, receiverDotTok, g.meta.params[fn.firstParam].typ)
 			if words < 0 {
-				return false
+				return -1, 0
 			}
 		}
 		wordCount += words
 	}
+	return fnIndex, wordCount
+}
+func rtgEmitStructCallToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, destType int, offset int) bool {
+	fnIndex, wordCount := rtgPrepareStructCall(g, ep, idx, destType)
+	if fnIndex < 0 {
+		return false
+	}
 	rtgAsmStackMem(&g.asm, offset, 0x8d48, 0x45, 0x85)
+	rtgAsmPushPrimary(&g.asm)
+	rtgEmitCallWithWordCount(g, fnIndex, wordCount)
+	return true
+}
+func rtgEmitStructCallToBss(g *rtgLinearGen, ep *rtgExprParse, idx int, destType int, offset int) bool {
+	fnIndex, wordCount := rtgPrepareStructCall(g, ep, idx, destType)
+	if fnIndex < 0 {
+		return false
+	}
+	rtgAsmPrimaryBssAddr(&g.asm, offset)
 	rtgAsmPushPrimary(&g.asm)
 	rtgEmitCallWithWordCount(g, fnIndex, wordCount)
 	return true
