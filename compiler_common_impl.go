@@ -2732,7 +2732,7 @@ func rtgConvertConstScalar(value int, sourceKind int, destKind int) int {
 		return value << 2
 	}
 	if destKind != rtgTypeFloat64 && sourceKind == rtgTypeFloat64 {
-		value = value >> 2
+		value = value / 4
 	}
 	return rtgConvertConstInt(value, destKind)
 }
@@ -14280,7 +14280,9 @@ func rtgEmitScalarExprForKind(g *rtgLinearGen, ep *rtgExprParse, idx int, destKi
 	if destKind == rtgTypeFloat64 && source.kind != rtgTypeFloat64 {
 		rtgAsmShlPrimaryImm(&g.asm, 2)
 	} else if destKind != rtgTypeFloat64 && source.kind == rtgTypeFloat64 {
-		rtgAsmSarPrimaryImm(&g.asm, 2)
+		rtgAsmCopyPrimaryToTertiary(&g.asm)
+		rtgAsmPrimaryImm(&g.asm, 4)
+		rtgAsmDivLeftTertiaryRightPrimary(&g.asm, false)
 	}
 	rtgAsmNormalizePrimaryForKind(&g.asm, destKind)
 	return true
