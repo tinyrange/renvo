@@ -498,7 +498,6 @@ func linkedTokenActions(program unit.Program, aliases *[]string, symbolOffsets [
 	}
 	markEndianSelectorTokens(program, actions)
 	markSimpleClosureTokens(program, actions, plusReplacement)
-	markSimpleMapTokens(program, actions, plusReplacement)
 	markSimpleDeferPanicRecoverTokens(program, actions, aliases)
 	markSimpleFunctionValueTokens(program, actions, aliases)
 	markSimpleSearchClosureTokens(program, actions, aliases)
@@ -744,106 +743,6 @@ func simpleClosureFactoryNamed(factories []simpleClosureFactory, name string) bo
 		}
 	}
 	return false
-}
-
-type simpleMapInfo struct {
-	local             string
-	keyA              string
-	keyB              string
-	initTypeSkipStart int
-	initTypeSkipEnd   int
-	initCommaTok      int
-	initKeyBSkipStart int
-	initKeyBSkipEnd   int
-	initCloseTok      int
-	updateStart       int
-	updateEnd         int
-}
-
-func markSimpleMapTokens(program unit.Program, actions []int, plusReplacement int) {
-	info, ok := findSimpleMapInfo(program)
-	if !ok {
-		return
-	}
-	markSkipRange(actions, info.initTypeSkipStart, info.initTypeSkipEnd)
-	markReplacementToken(actions, info.initCommaTok, plusReplacement)
-	markSkipRange(actions, info.initKeyBSkipStart, info.initKeyBSkipEnd)
-	markSkipToken(actions, info.initCloseTok)
-	markSkipRange(actions, info.updateStart, info.updateEnd)
-	markSimpleMapIndexTokens(program, actions, info)
-}
-
-func markSimpleMapIndexTokens(program unit.Program, actions []int, info simpleMapInfo) {
-	for i := 0; i+3 < len(program.Tokens); i++ {
-		if !tokenTextEquals(program, i, info.local) || !tokenTextEquals(program, i+1, "[") || !tokenTextEquals(program, i+2, info.keyA) || !tokenTextEquals(program, i+3, "]") {
-			continue
-		}
-		markSkipToken(actions, i+1)
-		markSkipToken(actions, i+2)
-		markSkipToken(actions, i+3)
-	}
-}
-
-func findSimpleMapInfo(program unit.Program) (simpleMapInfo, bool) {
-	var info simpleMapInfo
-	info.initCommaTok = -1
-	for i := 0; i+15 < len(program.Tokens); i++ {
-		if !tokenTextEquals(program, i+1, ":=") ||
-			!tokenTextEquals(program, i+2, "map") ||
-			!tokenTextEquals(program, i+3, "[") ||
-			!tokenTextEquals(program, i+4, "string") ||
-			!tokenTextEquals(program, i+5, "]") ||
-			!tokenTextEquals(program, i+6, "int") ||
-			!tokenTextEquals(program, i+7, "{") ||
-			!tokenTextEquals(program, i+9, ":") ||
-			!tokenTextEquals(program, i+11, ",") ||
-			!tokenTextEquals(program, i+13, ":") ||
-			!tokenTextEquals(program, i+15, "}") {
-			continue
-		}
-		info.local = tokenText(program, i)
-		info.keyA = tokenText(program, i+8)
-		info.keyB = tokenText(program, i+12)
-		if info.local == "" || info.keyA == "" || info.keyB == "" {
-			continue
-		}
-		updateStart, updateEnd, ok := findSimpleMapUpdate(program, i+16, info.local, info.keyA, info.keyB)
-		if !ok {
-			continue
-		}
-		info.initTypeSkipStart = i + 2
-		info.initTypeSkipEnd = i + 9
-		info.initCommaTok = i + 11
-		info.initKeyBSkipStart = i + 12
-		info.initKeyBSkipEnd = i + 13
-		info.initCloseTok = i + 15
-		info.updateStart = updateStart
-		info.updateEnd = updateEnd
-		return info, true
-	}
-	return info, false
-}
-
-func findSimpleMapUpdate(program unit.Program, start int, local string, keyA string, keyB string) (int, int, bool) {
-	for i := start; i+13 < len(program.Tokens); i++ {
-		if tokenTextEquals(program, i, local) &&
-			tokenTextEquals(program, i+1, "[") &&
-			tokenTextEquals(program, i+2, keyA) &&
-			tokenTextEquals(program, i+3, "]") &&
-			tokenTextEquals(program, i+4, "=") &&
-			tokenTextEquals(program, i+5, local) &&
-			tokenTextEquals(program, i+6, "[") &&
-			tokenTextEquals(program, i+7, keyA) &&
-			tokenTextEquals(program, i+8, "]") &&
-			tokenTextEquals(program, i+9, "+") &&
-			tokenTextEquals(program, i+10, local) &&
-			tokenTextEquals(program, i+11, "[") &&
-			tokenTextEquals(program, i+12, keyB) &&
-			tokenTextEquals(program, i+13, "]") {
-			return i, i + 13, true
-		}
-	}
-	return -1, -1, false
 }
 
 type simpleDeferPanicRecoverInfo struct {
