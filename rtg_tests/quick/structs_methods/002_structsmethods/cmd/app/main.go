@@ -19,6 +19,8 @@ func main() {
 	if p.score() == 41 {
 		print("PASS\n")
 		return
+	} else {
+
+		print("FAIL\n")
 	}
-	print("FAIL\n")
 }

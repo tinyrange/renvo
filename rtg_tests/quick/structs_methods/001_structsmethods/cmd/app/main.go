@@ -16,9 +16,12 @@ func (p *pair) add(v int) {
 func main() {
 	p := pair{a: 2, b: 5}
 	p.add(3)
-	if p.score() == 28 {
-		print("PASS\n")
+	corpusOK := p.score() == 28
+	if !corpusOK {
+
+		print("FAIL\n")
 		return
 	}
-	print("FAIL\n")
+	print("PASS\n")
+
 }

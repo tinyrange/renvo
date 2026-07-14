@@ -8,9 +8,12 @@ func fib(n int) int {
 }
 
 func main() {
-	if fib(4) == 3 {
-		print("PASS\n")
+	corpusOK := fib(4) == 3
+	if !corpusOK {
+
+		print("FAIL\n")
 		return
 	}
-	print("FAIL\n")
+	print("PASS\n")
+
 }

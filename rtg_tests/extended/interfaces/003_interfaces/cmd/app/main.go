@@ -17,9 +17,12 @@ func check(s scorer) bool {
 }
 
 func main() {
-	if check(item{value: 6}) {
-		print("PASS\n")
-		return
+	for corpusAttempt := 0; corpusAttempt < 1; corpusAttempt++ {
+		if check(item{value: 6}) {
+			print("PASS\n")
+			return
+		}
 	}
+
 	print("FAIL\n")
 }

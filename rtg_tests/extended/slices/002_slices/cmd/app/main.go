@@ -6,6 +6,8 @@ func main() {
 	if len(values) == 2 && values[0]+values[1] == 8 {
 		print("PASS\n")
 		return
+	} else {
+
+		print("FAIL\n")
 	}
-	print("FAIL\n")
 }

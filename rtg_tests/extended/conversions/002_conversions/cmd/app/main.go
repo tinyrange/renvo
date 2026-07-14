@@ -9,6 +9,8 @@ func main() {
 	if int(v)+len(string(s)) == 7 {
 		print(string(s))
 		return
+	} else {
+
+		print("FAIL\n")
 	}
-	print("FAIL\n")
 }

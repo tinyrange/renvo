@@ -15,9 +15,12 @@ func score(limit int) int {
 }
 
 func main() {
-	if score(8) == 35 {
-		print("PASS\n")
-		return
+	for corpusAttempt := 0; corpusAttempt < 1; corpusAttempt++ {
+		if score(8) == 35 {
+			print("PASS\n")
+			return
+		}
 	}
+
 	print("FAIL\n")
 }

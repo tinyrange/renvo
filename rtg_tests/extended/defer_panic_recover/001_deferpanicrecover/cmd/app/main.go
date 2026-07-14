@@ -13,9 +13,12 @@ func guarded(v int) (ok bool) {
 }
 
 func main() {
-	if guarded(1) {
-		print("PASS\n")
+	corpusOK := guarded(1)
+	if !corpusOK {
+
+		print("FAIL\n")
 		return
 	}
-	print("FAIL\n")
+	print("PASS\n")
+
 }

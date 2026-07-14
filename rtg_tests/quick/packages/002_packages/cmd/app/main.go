@@ -6,6 +6,8 @@ func main() {
 	if lib.Score(13) == 23 {
 		print(lib.Text())
 		return
+	} else {
+
+		print("FAIL\n")
 	}
-	print("FAIL\n")
 }

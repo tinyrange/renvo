@@ -11,6 +11,8 @@ func main() {
 	if fib(5) == 5 {
 		print("PASS\n")
 		return
+	} else {
+
+		print("FAIL\n")
 	}
-	print("FAIL\n")
 }

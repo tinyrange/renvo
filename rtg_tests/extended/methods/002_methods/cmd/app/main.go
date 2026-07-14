@@ -11,6 +11,8 @@ func main() {
 	if int(c.add(2)) == 4 {
 		print("PASS\n")
 		return
+	} else {
+
+		print("FAIL\n")
 	}
-	print("FAIL\n")
 }

@@ -260,8 +260,8 @@ func TestCollectSourcesReportsErrors(t *testing.T) {
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc f()\n")},
 	}})
-	if badSyntax.Ok || badSyntax.Error != SourceErrParse || badSyntax.ErrorPath != "/repo/case/cmd/app/main.go" {
-		t.Fatalf("bad syntax result = %#v", badSyntax)
+	if !badSyntax.Ok || len(badSyntax.Files) != 2 {
+		t.Fatalf("source collection should leave full syntax validation to the parser: %#v", badSyntax)
 	}
 
 	badImport := CollectSources("/repo/case", "/std", "./cmd/app", memorySourceFS{files: []load.SourceFile{

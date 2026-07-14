@@ -11,9 +11,14 @@ func main() {
 		}
 		total = total + i
 	}
+	corpusOK := false
 	if total == 31 {
+		corpusOK = true
+	}
+	if corpusOK {
 		print("PASS\n")
 		return
 	}
+
 	print("FAIL\n")
 }

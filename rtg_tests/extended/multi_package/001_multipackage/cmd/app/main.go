@@ -4,9 +4,12 @@ import "example.com/rtgtests/extended/multipackage/case001/pkg/a"
 import "example.com/rtgtests/extended/multipackage/case001/pkg/b"
 
 func main() {
-	if a.Value()+b.Value() == 5 {
-		print("PASS\n")
+	corpusOK := a.Value()+b.Value() == 5
+	if !corpusOK {
+
+		print("FAIL\n")
 		return
 	}
-	print("FAIL\n")
+	print("PASS\n")
+
 }

@@ -8,9 +8,12 @@ func fib(n int) int {
 }
 
 func main() {
-	if fib(6) == 8 {
-		print("PASS\n")
-		return
+	for corpusAttempt := 0; corpusAttempt < 1; corpusAttempt++ {
+		if fib(6) == 8 {
+			print("PASS\n")
+			return
+		}
 	}
+
 	print("FAIL\n")
 }

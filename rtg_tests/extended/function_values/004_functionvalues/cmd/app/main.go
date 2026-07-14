@@ -17,9 +17,14 @@ func main() {
 	if 4%2 == 1 {
 		fn = mul
 	}
+	corpusOK := false
 	if apply(fn, 6, 7) == 13 {
+		corpusOK = true
+	}
+	if corpusOK {
 		print("PASS\n")
 		return
 	}
+
 	print("FAIL\n")
 }

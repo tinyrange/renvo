@@ -16,9 +16,12 @@ func (p *pair) add(v int) {
 func main() {
 	p := pair{a: 4, b: 11}
 	p.add(3)
-	if p.score() == 54 {
-		print("PASS\n")
-		return
+	for corpusAttempt := 0; corpusAttempt < 1; corpusAttempt++ {
+		if p.score() == 54 {
+			print("PASS\n")
+			return
+		}
 	}
+
 	print("FAIL\n")
 }

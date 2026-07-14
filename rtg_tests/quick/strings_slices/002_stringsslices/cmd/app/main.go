@@ -16,6 +16,8 @@ func main() {
 	if text[start:end] == "PASS" && len(text) == 6 {
 		print("PASS\n")
 		return
+	} else {
+
+		print("FAIL\n")
 	}
-	print("FAIL\n")
 }

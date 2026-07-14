@@ -6,9 +6,12 @@ type text string
 func main() {
 	v := count(1)
 	s := text("PASS\n")
-	if int(v)+len(string(s)) == 6 {
-		print(string(s))
+	corpusOK := int(v)+len(string(s)) == 6
+	if !corpusOK {
+
+		print("FAIL\n")
 		return
 	}
-	print("FAIL\n")
+	print(string(s))
+
 }

@@ -6,6 +6,8 @@ func main() {
 	if m["a"] == 7 {
 		print("PASS\n")
 		return
+	} else {
+
+		print("FAIL\n")
 	}
-	print("FAIL\n")
 }

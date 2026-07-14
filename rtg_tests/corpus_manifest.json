@@ -1,0 +1,349 @@
+{
+  "version": 1,
+  "groups": [
+    {
+      "tier": "extended",
+      "group": "arrays",
+      "cases": 150,
+      "structural_shapes": 6,
+      "variants": {
+        "control_shape_0": 1,
+        "control_shape_1": 1,
+        "control_shape_2": 1,
+        "control_shape_3": 1,
+        "control_shape_4": 1,
+        "parameter_set": 145
+      }
+    },
+    {
+      "tier": "extended",
+      "group": "closures",
+      "cases": 150,
+      "structural_shapes": 6,
+      "variants": {
+        "control_shape_0": 1,
+        "control_shape_1": 1,
+        "control_shape_2": 1,
+        "control_shape_3": 1,
+        "control_shape_4": 1,
+        "parameter_set": 145
+      }
+    },
+    {
+      "tier": "extended",
+      "group": "composites",
+      "cases": 150,
+      "structural_shapes": 5,
+      "variants": {
+        "control_shape_0": 1,
+        "control_shape_1": 1,
+        "control_shape_2": 1,
+        "control_shape_3": 1,
+        "control_shape_4": 1,
+        "parameter_set": 145
+      }
+    },
+    {
+      "tier": "extended",
+      "group": "control_flow",
+      "cases": 150,
+      "structural_shapes": 5,
+      "variants": {
+        "control_shape_0": 1,
+        "control_shape_1": 1,
+        "control_shape_2": 1,
+        "control_shape_3": 1,
+        "control_shape_4": 1,
+        "parameter_set": 145
+      }
+    },
+    {
+      "tier": "extended",
+      "group": "conversions",
+      "cases": 150,
+      "structural_shapes": 5,
+      "variants": {
+        "control_shape_0": 1,
+        "control_shape_1": 1,
+        "control_shape_2": 1,
+        "control_shape_3": 1,
+        "control_shape_4": 1,
+        "parameter_set": 145
+      }
+    },
+    {
+      "tier": "extended",
+      "group": "defer_panic_recover",
+      "cases": 150,
+      "structural_shapes": 5,
+      "variants": {
+        "control_shape_0": 1,
+        "control_shape_1": 1,
+        "control_shape_2": 1,
+        "control_shape_3": 1,
+        "control_shape_4": 1,
+        "parameter_set": 145
+      }
+    },
+    {
+      "tier": "extended",
+      "group": "function_values",
+      "cases": 150,
+      "structural_shapes": 6,
+      "variants": {
+        "control_shape_0": 1,
+        "control_shape_1": 1,
+        "control_shape_2": 1,
+        "control_shape_3": 1,
+        "control_shape_4": 1,
+        "parameter_set": 145
+      }
+    },
+    {
+      "tier": "extended",
+      "group": "interfaces",
+      "cases": 150,
+      "structural_shapes": 6,
+      "variants": {
+        "control_shape_0": 1,
+        "control_shape_1": 1,
+        "control_shape_2": 1,
+        "control_shape_3": 1,
+        "control_shape_4": 1,
+        "parameter_set": 145
+      }
+    },
+    {
+      "tier": "extended",
+      "group": "maps",
+      "cases": 150,
+      "structural_shapes": 6,
+      "variants": {
+        "control_shape_0": 1,
+        "control_shape_1": 1,
+        "control_shape_2": 1,
+        "control_shape_3": 1,
+        "control_shape_4": 1,
+        "parameter_set": 145
+      }
+    },
+    {
+      "tier": "extended",
+      "group": "methods",
+      "cases": 150,
+      "structural_shapes": 5,
+      "variants": {
+        "control_shape_0": 1,
+        "control_shape_1": 1,
+        "control_shape_2": 1,
+        "control_shape_3": 1,
+        "control_shape_4": 1,
+        "parameter_set": 145
+      }
+    },
+    {
+      "tier": "extended",
+      "group": "multi_package",
+      "cases": 150,
+      "structural_shapes": 5,
+      "variants": {
+        "control_shape_0": 1,
+        "control_shape_1": 1,
+        "control_shape_2": 1,
+        "control_shape_3": 1,
+        "control_shape_4": 1,
+        "parameter_set": 145
+      }
+    },
+    {
+      "tier": "extended",
+      "group": "package_init",
+      "cases": 150,
+      "structural_shapes": 5,
+      "variants": {
+        "control_shape_0": 1,
+        "control_shape_1": 1,
+        "control_shape_2": 1,
+        "control_shape_3": 1,
+        "control_shape_4": 1,
+        "parameter_set": 145
+      }
+    },
+    {
+      "tier": "extended",
+      "group": "slices",
+      "cases": 150,
+      "structural_shapes": 5,
+      "variants": {
+        "control_shape_0": 1,
+        "control_shape_1": 1,
+        "control_shape_2": 1,
+        "control_shape_3": 1,
+        "control_shape_4": 1,
+        "parameter_set": 145
+      }
+    },
+    {
+      "tier": "extended",
+      "group": "strings",
+      "cases": 150,
+      "structural_shapes": 5,
+      "variants": {
+        "control_shape_0": 1,
+        "control_shape_1": 1,
+        "control_shape_2": 1,
+        "control_shape_3": 1,
+        "control_shape_4": 1,
+        "parameter_set": 145
+      }
+    },
+    {
+      "tier": "extended",
+      "group": "unsafe",
+      "cases": 150,
+      "structural_shapes": 5,
+      "variants": {
+        "control_shape_0": 1,
+        "control_shape_1": 1,
+        "control_shape_2": 1,
+        "control_shape_3": 1,
+        "control_shape_4": 1,
+        "parameter_set": 145
+      }
+    },
+    {
+      "tier": "quick",
+      "group": "arithmetic",
+      "cases": 40,
+      "structural_shapes": 5,
+      "variants": {
+        "control_shape_0": 1,
+        "control_shape_1": 1,
+        "control_shape_2": 1,
+        "control_shape_3": 1,
+        "control_shape_4": 1,
+        "parameter_set": 35
+      }
+    },
+    {
+      "tier": "quick",
+      "group": "arrays",
+      "cases": 25,
+      "structural_shapes": 5,
+      "variants": {
+        "control_shape_0": 1,
+        "control_shape_1": 1,
+        "control_shape_2": 1,
+        "control_shape_3": 1,
+        "control_shape_4": 1,
+        "parameter_set": 20
+      }
+    },
+    {
+      "tier": "quick",
+      "group": "build_constraints",
+      "cases": 1,
+      "structural_shapes": 1,
+      "variants": {
+        "control_shape_0": 1
+      }
+    },
+    {
+      "tier": "quick",
+      "group": "control",
+      "cases": 35,
+      "structural_shapes": 5,
+      "variants": {
+        "control_shape_0": 1,
+        "control_shape_1": 1,
+        "control_shape_2": 1,
+        "control_shape_3": 1,
+        "control_shape_4": 1,
+        "parameter_set": 30
+      }
+    },
+    {
+      "tier": "quick",
+      "group": "functions",
+      "cases": 20,
+      "structural_shapes": 5,
+      "variants": {
+        "control_shape_0": 1,
+        "control_shape_1": 1,
+        "control_shape_2": 1,
+        "control_shape_3": 1,
+        "control_shape_4": 1,
+        "parameter_set": 15
+      }
+    },
+    {
+      "tier": "quick",
+      "group": "legacy_regressions",
+      "cases": 47,
+      "structural_shapes": 46,
+      "variants": {
+        "curated": 47
+      }
+    },
+    {
+      "tier": "quick",
+      "group": "literals",
+      "cases": 1,
+      "structural_shapes": 1,
+      "variants": {
+        "control_shape_0": 1
+      }
+    },
+    {
+      "tier": "quick",
+      "group": "packages",
+      "cases": 40,
+      "structural_shapes": 5,
+      "variants": {
+        "control_shape_0": 1,
+        "control_shape_1": 1,
+        "control_shape_2": 1,
+        "control_shape_3": 1,
+        "control_shape_4": 1,
+        "parameter_set": 35
+      }
+    },
+    {
+      "tier": "quick",
+      "group": "regressions",
+      "cases": 1,
+      "structural_shapes": 1,
+      "variants": {
+        "curated": 1
+      }
+    },
+    {
+      "tier": "quick",
+      "group": "strings_slices",
+      "cases": 45,
+      "structural_shapes": 5,
+      "variants": {
+        "control_shape_0": 1,
+        "control_shape_1": 1,
+        "control_shape_2": 1,
+        "control_shape_3": 1,
+        "control_shape_4": 1,
+        "parameter_set": 40
+      }
+    },
+    {
+      "tier": "quick",
+      "group": "structs_methods",
+      "cases": 45,
+      "structural_shapes": 5,
+      "variants": {
+        "control_shape_0": 1,
+        "control_shape_1": 1,
+        "control_shape_2": 1,
+        "control_shape_3": 1,
+        "control_shape_4": 1,
+        "parameter_set": 40
+      }
+    }
+  ]
+}

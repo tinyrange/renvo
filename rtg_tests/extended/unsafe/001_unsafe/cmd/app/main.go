@@ -11,9 +11,12 @@ func main() {
 	v := pair{a: 1, b: 1}
 	p := unsafe.Pointer(&v)
 	q := (*pair)(p)
-	if int(q.a)+int(q.b) == 2 {
-		print("PASS\n")
+	corpusOK := int(q.a)+int(q.b) == 2
+	if !corpusOK {
+
+		print("FAIL\n")
 		return
 	}
-	print("FAIL\n")
+	print("PASS\n")
+
 }

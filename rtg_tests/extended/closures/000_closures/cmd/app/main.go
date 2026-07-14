@@ -1,16 +1,12 @@
 package main
 
-func makeAdder(base int) func(int) int {
-	return func(v int) int {
-		return base + v
-	}
-}
+func mark(trace *int, step int) int { *trace = *trace*10+step; return step }
+func makeAdder(base int) func(int) int { return func(value int) int { return base+value } }
 
 func main() {
-	add := makeAdder(0)
-	if add(0) == 0 {
-		print("PASS\n")
-		return
-	}
+	trace := 0
+	next := makeAdder(mark(&trace, 1))
+	got := next(mark(&trace, 2))
+	if trace == 12 && got == 3 { print("PASS\n"); return }
 	print("FAIL\n")
 }

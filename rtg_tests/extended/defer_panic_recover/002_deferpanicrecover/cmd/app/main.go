@@ -16,6 +16,8 @@ func main() {
 	if guarded(2) {
 		print("PASS\n")
 		return
+	} else {
+
+		print("FAIL\n")
 	}
-	print("FAIL\n")
 }

@@ -1,0 +1,8 @@
+{
+  "phase": "parser",
+  "code": "RTG-PARSE-001",
+  "file": "cmd/app/main.go",
+  "line": 3,
+  "column": 1,
+  "message": "source syntax is invalid"
+}

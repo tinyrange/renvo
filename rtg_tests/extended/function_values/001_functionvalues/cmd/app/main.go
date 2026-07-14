@@ -17,9 +17,12 @@ func main() {
 	if 1%2 == 1 {
 		fn = mul
 	}
-	if apply(fn, 3, 4) == 12 {
-		print("PASS\n")
+	corpusOK := apply(fn, 3, 4) == 12
+	if !corpusOK {
+
+		print("FAIL\n")
 		return
 	}
-	print("FAIL\n")
+	print("PASS\n")
+
 }

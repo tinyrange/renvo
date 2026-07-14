@@ -6,6 +6,8 @@ func main() {
 	if lib.Value() == 10 {
 		print("PASS\n")
 		return
+	} else {
+
+		print("FAIL\n")
 	}
-	print("FAIL\n")
 }

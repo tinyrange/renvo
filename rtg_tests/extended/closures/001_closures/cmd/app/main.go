@@ -8,9 +8,12 @@ func makeAdder(base int) func(int) int {
 
 func main() {
 	add := makeAdder(1)
-	if add(1) == 2 {
-		print("PASS\n")
+	corpusOK := add(1) == 2
+	if !corpusOK {
+
+		print("FAIL\n")
 		return
 	}
-	print("FAIL\n")
+	print("PASS\n")
+
 }

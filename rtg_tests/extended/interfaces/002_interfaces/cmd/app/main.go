@@ -20,6 +20,8 @@ func main() {
 	if check(item{value: 5}) {
 		print("PASS\n")
 		return
+	} else {
+
+		print("FAIL\n")
 	}
-	print("FAIL\n")
 }

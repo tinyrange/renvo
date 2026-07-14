@@ -11,9 +11,12 @@ type outer struct {
 
 func main() {
 	v := outer{name: "ok", list: []inner{{a: 1}, {a: 1}}}
-	if v.name == "ok" && v.list[0].a+v.list[1].a == 2 {
-		print("PASS\n")
+	corpusOK := v.name == "ok" && v.list[0].a+v.list[1].a == 2
+	if !corpusOK {
+
+		print("FAIL\n")
 		return
 	}
-	print("FAIL\n")
+	print("PASS\n")
+
 }
