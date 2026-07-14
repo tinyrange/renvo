@@ -30,6 +30,9 @@ type HostResult struct {
 }
 
 func (OSFS) ReadDir(path string) ([]DirEntry, bool) {
+	if entries, ok := bundledStdReadDir(path); ok {
+		return entries, true
+	}
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		return nil, false
@@ -42,6 +45,9 @@ func (OSFS) ReadDir(path string) ([]DirEntry, bool) {
 }
 
 func (OSFS) ReadFile(path string) ([]byte, bool) {
+	if data, ok := bundledStdReadFile(path); ok {
+		return data, true
+	}
 	data, err := os.ReadFile(path)
 	return data, err == nil
 }

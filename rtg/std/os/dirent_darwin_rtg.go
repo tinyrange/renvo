@@ -11,3 +11,5 @@ func rtgDirentRecordLength(buf []byte, pos int) int {
 func rtgDirentTypeOffset(pos int) int { return pos + 6 }
 
 func rtgDirentNameStart(pos int) int { return pos + 8 }
+
+func rtgDirentIsDirectory(typ byte) bool { return typ == 4 }

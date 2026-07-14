@@ -6,21 +6,30 @@ const (
 	ParseErrMissingTarget
 	ParseErrUnsupportedTarget
 	ParseErrUnknownOption
+	ParseErrMissingTags
+	ParseErrInvalidTags
 	ParseErrMissingPackage
 	ParseErrExtraPackage
 )
 
 const DefaultTarget = "linux/amd64"
 
+const HelpText = "Usage: rtg [options] <package>\n\nOptions:\n  -o <file>    output (required)\n  -t <target>  target (default linux/amd64)\n  -tags <list>\n  -s           strip\n  --help\n\nTargets:\n  linux/amd64 linux/386 linux/aarch64 linux/arm\n  windows/amd64 windows/386 darwin/arm64 wasi/wasm32\n"
+
 type Options struct {
 	Target   string
 	Output   string
 	Package  string
 	Strip    bool
+	Tags     []string
 	Ok       bool
 	Error    int
 	ErrorArg string
 	ErrorAt  int
+}
+
+func CommandHelpRequested(args []string) bool {
+	return len(args) <= 1 || len(args) == 2 && args[1] == "--help"
 }
 
 func ParseOptions(args []string) Options {
@@ -58,6 +67,22 @@ func ParseOptions(args []string) Options {
 			i += 2
 			continue
 		}
+		if arg == "-tags" {
+			if i+1 >= len(args) {
+				return parseFail(options, ParseErrMissingTags, arg, i)
+			}
+			tags, ok := parseBuildTags(args[i+1])
+			if !ok {
+				return parseFail(options, ParseErrInvalidTags, args[i+1], i+1)
+			}
+			for j := 0; j < len(tags); j++ {
+				if findString(options.Tags, tags[j]) < 0 {
+					options.Tags = append(options.Tags, tags[j])
+				}
+			}
+			i += 2
+			continue
+		}
 		if len(arg) > 0 && arg[0] == '-' {
 			return parseFail(options, ParseErrUnknownOption, arg, i)
 		}
@@ -74,6 +99,28 @@ func ParseOptions(args []string) Options {
 		return parseFail(options, ParseErrMissingPackage, "", len(args))
 	}
 	return options
+}
+
+func parseBuildTags(value string) ([]string, bool) {
+	if len(value) == 0 {
+		return nil, false
+	}
+	var tags []string
+	start := 0
+	for i := 0; i <= len(value); i++ {
+		if i < len(value) && value[i] != ',' {
+			if !isBuildTagChar(value[i]) {
+				return nil, false
+			}
+			continue
+		}
+		if i == start {
+			return nil, false
+		}
+		tags = append(tags, value[start:i])
+		start = i + 1
+	}
+	return tags, true
 }
 
 func IsSupportedTarget(target string) bool {

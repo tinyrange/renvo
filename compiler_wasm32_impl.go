@@ -685,14 +685,15 @@ const rtgWasm32ImportFdPwrite = 3
 const rtgWasm32ImportPathOpen = 4
 const rtgWasm32ImportFdClose = 5
 const rtgWasm32ImportFdstatGet = 6
-const rtgWasm32ImportArgsSizesGet = 7
-const rtgWasm32ImportArgsGet = 8
-const rtgWasm32ImportEnvironSizesGet = 9
-const rtgWasm32ImportEnvironGet = 10
-const rtgWasm32ImportProcExit = 11
-const rtgWasm32StartFuncIndex = 12
+const rtgWasm32ImportFdReaddir = 7
+const rtgWasm32ImportArgsSizesGet = 8
+const rtgWasm32ImportArgsGet = 9
+const rtgWasm32ImportEnvironSizesGet = 10
+const rtgWasm32ImportEnvironGet = 11
+const rtgWasm32ImportProcExit = 12
+const rtgWasm32StartFuncIndex = 13
 const rtgWasm32VmFuncType = 7
-const rtgWasm32VmFuncBase = 13
+const rtgWasm32VmFuncBase = 14
 
 const rtgWasm32LocalSp = 0
 const rtgWasm32LocalFp = 1
@@ -1263,7 +1264,20 @@ func rtgWasm32AppendSyscall(out []byte) []byte {
 	out = rtgWasmAppendCall(out, rtgWasm32ImportFdstatGet)
 	out = rtgWasm32AppendErrnoOnlyResult(out)
 	out = append(out, 0x05)
+	out = rtgWasmLocalGet(out, rtgWasm32LocalRax)
+	out = rtgWasmAppendI32Const(out, 217)
+	out = append(out, 0x46)
+	out = rtgWasmAppend2(out, 0x04, 0x40)
+	out = rtgWasmLocalGet(out, rtgWasm32LocalRdi)
+	out = rtgWasmLocalGet(out, rtgWasm32LocalRsi)
+	out = rtgWasmLocalGet(out, rtgWasm32LocalRdx)
+	out = rtgWasmI64Const(out, 0)
+	out = rtgWasmAppendI32Const(out, rtgWasm32ScratchN)
+	out = rtgWasmAppendCall(out, rtgWasm32ImportFdReaddir)
+	out = rtgWasm32AppendErrnoResult(out, rtgWasm32ScratchN)
+	out = append(out, 0x05)
 	out = rtgWasm32AppendOpen(out)
+	out = append(out, 0x0b)
 	out = append(out, 0x0b)
 	out = append(out, 0x0b)
 	out = append(out, 0x0b)
@@ -1274,6 +1288,24 @@ func rtgWasm32AppendSyscall(out []byte) []byte {
 }
 
 func rtgWasm32AppendOpen(out []byte) []byte {
+	out = rtgWasmLocalGet(out, rtgWasm32LocalRdx)
+	out = rtgWasmAppendI32Const(out, 0)
+	out = append(out, 0x4b)
+	out = rtgWasmAppend2(out, 0x04, 0x40)
+	out = rtgWasmLocalGet(out, rtgWasm32LocalRdi)
+	out = rtgWasmLocalGet(out, rtgWasm32LocalRdx)
+	out = rtgWasmAppendI32Const(out, 1)
+	out = rtgWasmAppend2(out, 0x6b, 0x6a)
+	out = rtgWasmI32Load8U(out)
+	out = append(out, 0x45)
+	out = rtgWasmAppend2(out, 0x04, 0x40)
+	out = rtgWasmLocalGet(out, rtgWasm32LocalRdx)
+	out = rtgWasmAppendI32Const(out, 1)
+	out = append(out, 0x6b)
+	out = rtgWasmLocalSet(out, rtgWasm32LocalRdx)
+	out = append(out, 0x0b)
+	out = append(out, 0x0b)
+
 	out = rtgWasmAppendI32Const(out, 0)
 	out = rtgWasmLocalSet(out, rtgWasm32LocalTmp)
 	out = rtgWasmLocalGet(out, rtgWasm32LocalRsi)
@@ -1319,7 +1351,14 @@ func rtgWasm32AppendOpen(out []byte) []byte {
 	out = rtgWasmLocalGet(out, rtgWasm32LocalRdi)
 	out = rtgWasmLocalGet(out, rtgWasm32LocalRdx)
 	out = rtgWasmLocalGet(out, rtgWasm32LocalTmp)
+	out = rtgWasmLocalGet(out, rtgWasm32LocalRsi)
+	out = rtgWasmAppendI32Const(out, 2)
+	out = rtgWasmAppend2(out, 0x71, 0x45)
+	out = rtgWasmAppend2(out, 0x04, 0x7e)
+	out = rtgWasmI64Const(out, 16386)
+	out = append(out, 0x05)
 	out = rtgWasmI64Const(out, 2097254)
+	out = append(out, 0x0b)
 	out = rtgWasmI64Const(out, 0)
 	out = rtgWasmAppendI32Const(out, 0)
 	out = rtgWasmAppendI32Const(out, rtgWasm32ScratchFd)
@@ -2127,7 +2166,7 @@ func rtgWasm32AppendImport(out []byte, name string, typ int) []byte {
 
 func rtgWasm32ImportSectionFull() []byte {
 	var out []byte
-	out = rtgWasmAppendU32(out, 12)
+	out = rtgWasmAppendU32(out, 13)
 	out = rtgWasm32AppendImport(out, "fd_write", 0)
 	out = rtgWasm32AppendImport(out, "fd_read", 0)
 	out = rtgWasm32AppendImport(out, "fd_pread", 1)
@@ -2135,6 +2174,7 @@ func rtgWasm32ImportSectionFull() []byte {
 	out = rtgWasm32AppendImport(out, "path_open", 2)
 	out = rtgWasm32AppendImport(out, "fd_close", 3)
 	out = rtgWasm32AppendImport(out, "fd_fdstat_get", 6)
+	out = rtgWasm32AppendImport(out, "fd_readdir", 1)
 	out = rtgWasm32AppendImport(out, "args_sizes_get", 6)
 	out = rtgWasm32AppendImport(out, "args_get", 6)
 	out = rtgWasm32AppendImport(out, "environ_sizes_get", 6)

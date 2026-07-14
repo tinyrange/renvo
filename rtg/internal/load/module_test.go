@@ -74,6 +74,12 @@ func TestResolvePackageArg(t *testing.T) {
 	if outside.Ok || outside.Error != ResolveErrOutsideModule {
 		t.Fatalf("outside package = %#v", outside)
 	}
+
+	windowsMod := Module{Root: `C:\repo\case`, Path: "example.com/case", Ok: true}
+	windows := ResolvePackageArg(windowsMod, `C:\repo\case`, `.\cmd\app`)
+	if !windows.Ok || windows.Dir != "C:/repo/case/cmd/app" || windows.ImportPath != "example.com/case/cmd/app" {
+		t.Fatalf("windows package = %#v", windows)
+	}
 }
 
 func TestResolveImport(t *testing.T) {
@@ -138,6 +144,7 @@ func TestCleanAndRelPath(t *testing.T) {
 		{in: "/repo//case/./cmd/../pkg", want: "/repo/case/pkg"},
 		{in: "a/b/../../c", want: "c"},
 		{in: "../a", want: "../a"},
+		{in: `C:\repo\\case\.\cmd\..\pkg`, want: "C:/repo/case/pkg"},
 	}
 	for _, tc := range cases {
 		got := CleanPath(tc.in)
@@ -152,5 +159,11 @@ func TestCleanAndRelPath(t *testing.T) {
 	_, ok = RelPath("/repo/case", "/repo/case2/pkg")
 	if ok {
 		t.Fatal("RelPath accepted sibling prefix")
+	}
+	if rel, ok := RelPath(".", "cmd/app"); !ok || rel != "cmd/app" {
+		t.Fatalf("RelPath relative root = %q %v", rel, ok)
+	}
+	if _, ok := RelPath(".", "../outside"); ok {
+		t.Fatal("RelPath accepted path above relative root")
 	}
 }

@@ -13,7 +13,7 @@ jobs:
   build-release:
     name: Build release compilers
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     steps:
       - name: Check out repository
@@ -45,28 +45,72 @@ jobs:
       - name: Build frontend compilers
         run: |
           set -eux
-          cp -R rtg/std dist/std
-          go build -o dist/rtg-stage0 ./rtg/cmd/rtg
-          RTG_BACKEND="$PWD/dist/rtgx-linux-amd64" RTG_STDROOT="$PWD/rtg/std" \
-            ./dist/rtg-stage0 -t linux/amd64 -s -o dist/rtg-linux-amd64-stage1 ./rtg/cmd/rtg
-          ./dist/rtg-linux-amd64-stage1 -t linux/amd64 -s -o dist/rtg-linux-amd64 ./rtg/cmd/rtg
-          ./dist/rtg-linux-amd64-stage1 -t linux/aarch64 -s -o dist/rtg-linux-arm64 ./rtg/cmd/rtg
-          chmod +x dist/rtg-linux-amd64 dist/rtg-linux-arm64
+          go generate ./rtg/internal/driver
+          go build -tags rtg_bundle -o dist/rtg-stage0 ./rtg/cmd/rtg
+          RTG_BACKEND="$PWD/dist/rtgx-linux-amd64" \
+            ./dist/rtg-stage0 -tags rtg_bundle -t linux/amd64 -s -o dist/rtg-linux-amd64-stage1 ./rtg/cmd/rtg
+          ./dist/rtg-linux-amd64-stage1 -tags rtg_bundle -t linux/amd64 -s -o dist/rtg-linux-amd64 ./rtg/cmd/rtg
+          ./dist/rtg-linux-amd64-stage1 -tags rtg_bundle -t linux/386 -s -o dist/rtg-linux-386 ./rtg/cmd/rtg
+          ./dist/rtg-linux-amd64-stage1 -tags rtg_bundle -t linux/aarch64 -s -o dist/rtg-linux-arm64 ./rtg/cmd/rtg
+          ./dist/rtg-linux-amd64-stage1 -tags rtg_bundle -t linux/arm -s -o dist/rtg-linux-arm ./rtg/cmd/rtg
+          ./dist/rtg-linux-amd64-stage1 -tags rtg_bundle -t windows/amd64 -s -o dist/rtg-windows-amd64.exe ./rtg/cmd/rtg
+          ./dist/rtg-linux-amd64-stage1 -tags rtg_bundle -t windows/386 -s -o dist/rtg-windows-386.exe ./rtg/cmd/rtg
+          ./dist/rtg-linux-amd64-stage1 -tags rtg_bundle -t darwin/arm64 -s -o dist/rtg-darwin-arm64 ./rtg/cmd/rtg
+          ./dist/rtg-linux-amd64-stage1 -tags rtg_bundle -t wasi/wasm32 -s -o dist/rtg-wasi-wasm32.wasm ./rtg/cmd/rtg
+          chmod +x \
+            dist/rtg-linux-amd64 \
+            dist/rtg-linux-386 \
+            dist/rtg-linux-arm64 \
+            dist/rtg-linux-arm \
+            dist/rtg-darwin-arm64
+
+      - name: Check release frontend help
+        run: |
+          set -eux
+          ./dist/rtg-linux-amd64 > dist/rtg-help.txt
+          grep -F "Usage: rtg" dist/rtg-help.txt
+          grep -F "windows/amd64" dist/rtg-help.txt
+          grep -F "darwin/arm64" dist/rtg-help.txt
+          grep -F "wasi/wasm32" dist/rtg-help.txt
 
       - name: Package frontend releases
         run: |
           set -eux
-          mkdir -p package/rtg-linux-amd64/bin package/rtg-linux-amd64/share/rtg
+          mkdir -p package/rtg-linux-amd64/bin
           cp dist/rtg-linux-amd64 package/rtg-linux-amd64/bin/rtg
-          cp dist/rtgx-linux-amd64 package/rtg-linux-amd64/bin/rtgx
-          cp -R rtg/std package/rtg-linux-amd64/share/rtg/std
           tar -C package -czf dist/rtg-linux-amd64.tar.gz rtg-linux-amd64
 
-          mkdir -p package/rtg-linux-arm64/bin package/rtg-linux-arm64/share/rtg
+          mkdir -p package/rtg-linux-386/bin
+          cp dist/rtg-linux-386 package/rtg-linux-386/bin/rtg
+          tar -C package -czf dist/rtg-linux-386.tar.gz rtg-linux-386
+
+          mkdir -p package/rtg-linux-arm64/bin
           cp dist/rtg-linux-arm64 package/rtg-linux-arm64/bin/rtg
-          cp dist/rtgx-linux-arm64 package/rtg-linux-arm64/bin/rtgx
-          cp -R rtg/std package/rtg-linux-arm64/share/rtg/std
           tar -C package -czf dist/rtg-linux-arm64.tar.gz rtg-linux-arm64
+
+          mkdir -p package/rtg-linux-arm/bin
+          cp dist/rtg-linux-arm package/rtg-linux-arm/bin/rtg
+          tar -C package -czf dist/rtg-linux-arm.tar.gz rtg-linux-arm
+
+          mkdir -p package/rtg-darwin-arm64/bin
+          cp dist/rtg-darwin-arm64 package/rtg-darwin-arm64/bin/rtg
+          tar -C package -czf dist/rtg-darwin-arm64.tar.gz rtg-darwin-arm64
+
+          mkdir -p package/rtg-wasi-wasm32/bin
+          cp dist/rtg-wasi-wasm32.wasm package/rtg-wasi-wasm32/bin/rtg.wasm
+          tar -C package -czf dist/rtg-wasi-wasm32.tar.gz rtg-wasi-wasm32
+
+          mkdir -p package/rtg-windows-amd64/bin
+          cp dist/rtg-windows-amd64.exe package/rtg-windows-amd64/bin/rtg.exe
+          cd package
+          zip -qr ../dist/rtg-windows-amd64.zip rtg-windows-amd64
+          cd ..
+
+          mkdir -p package/rtg-windows-386/bin
+          cp dist/rtg-windows-386.exe package/rtg-windows-386/bin/rtg.exe
+          cd package
+          zip -qr ../dist/rtg-windows-386.zip rtg-windows-386
+          cd ..
 
       - name: Package backend releases
         run: |
@@ -87,9 +131,21 @@ jobs:
             dist/rtgx-linux-amd64
             dist/rtgx-linux-arm64
             dist/rtg-linux-amd64
+            dist/rtg-linux-386
             dist/rtg-linux-arm64
+            dist/rtg-linux-arm
+            dist/rtg-windows-amd64.exe
+            dist/rtg-windows-386.exe
+            dist/rtg-darwin-arm64
+            dist/rtg-wasi-wasm32.wasm
             dist/rtg-linux-amd64.tar.gz
+            dist/rtg-linux-386.tar.gz
             dist/rtg-linux-arm64.tar.gz
+            dist/rtg-linux-arm.tar.gz
+            dist/rtg-windows-amd64.zip
+            dist/rtg-windows-386.zip
+            dist/rtg-darwin-arm64.tar.gz
+            dist/rtg-wasi-wasm32.tar.gz
             dist/rtgx-linux-amd64.tar.gz
             dist/rtgx-linux-arm64.tar.gz
           if-no-files-found: error
@@ -103,9 +159,21 @@ jobs:
             dist/rtgx-linux-amd64 \
             dist/rtgx-linux-arm64 \
             dist/rtg-linux-amd64 \
+            dist/rtg-linux-386 \
             dist/rtg-linux-arm64 \
+            dist/rtg-linux-arm \
+            dist/rtg-windows-amd64.exe \
+            dist/rtg-windows-386.exe \
+            dist/rtg-darwin-arm64 \
+            dist/rtg-wasi-wasm32.wasm \
             dist/rtg-linux-amd64.tar.gz \
+            dist/rtg-linux-386.tar.gz \
             dist/rtg-linux-arm64.tar.gz \
+            dist/rtg-linux-arm.tar.gz \
+            dist/rtg-windows-amd64.zip \
+            dist/rtg-windows-386.zip \
+            dist/rtg-darwin-arm64.tar.gz \
+            dist/rtg-wasi-wasm32.tar.gz \
             dist/rtgx-linux-amd64.tar.gz \
             dist/rtgx-linux-arm64.tar.gz \
             --clobber

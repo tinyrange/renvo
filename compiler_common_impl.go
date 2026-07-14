@@ -5806,16 +5806,11 @@ func rtgEmitScopedRange(g *rtgLinearGen, start int, end int) bool {
 	oldScopeBase := g.scopeBase
 	oldStackUsed := g.stackUsed
 	g.scopeBase = oldLocalCount
-	if !rtgEmitLinearRange(g, start, end) {
-		g.localCount = oldLocalCount
-		g.scopeBase = oldScopeBase
-		g.stackUsed = oldStackUsed
-		return false
-	}
+	ok := rtgEmitLinearRange(g, start, end)
 	g.localCount = oldLocalCount
 	g.scopeBase = oldScopeBase
 	g.stackUsed = oldStackUsed
-	return true
+	return ok
 }
 func rtgEmitLinearStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 	a := &g.asm
@@ -6219,27 +6214,25 @@ func rtgEmitLinearElse(g *rtgLinearGen, stmt *rtgStmt) bool {
 func rtgEmitLinearIf(g *rtgLinearGen, stmt *rtgStmt) bool {
 	a := &g.asm
 	p := g.prog
+	semi := rtgFindTokenTextInRange(p, stmt.exprStart, stmt.exprEnd, ';')
+	if semi >= stmt.exprStart {
+		return rtgEmitLinearScopedControl(g, stmt, semi)
+	}
 	fixedValue := -1
 	if rtgExprRangeMayUseFixedTarget(p, stmt.exprStart, stmt.exprEnd) {
-		fixedTarget := rtgFindCompilerFixedTarget(g)
-		fixedTargetKnown := rtgCompilerFixedTargetKnown(g)
 		var fixedEp rtgExprParse
 		if rtgParseExpressionOK(&fixedEp, p, stmt.exprStart, stmt.exprEnd) {
-			fixedRoot := len(fixedEp.exprs) - 1
-			fixedValue = rtgEvalFixedTargetBool(g, &fixedEp, fixedRoot, fixedTarget, fixedTargetKnown)
+			fixedValue = rtgEvalFixedTargetBool(g, &fixedEp, len(fixedEp.exprs)-1, rtgFindCompilerFixedTarget(g), rtgCompilerFixedTargetKnown(g))
 		}
 	}
-	if fixedValue == 1 {
-		if !rtgEmitScopedRange(g, stmt.bodyStart, stmt.bodyEnd) {
-			return false
+	if fixedValue >= 0 {
+		ok := false
+		if fixedValue == 1 {
+			ok = rtgEmitScopedRange(g, stmt.bodyStart, stmt.bodyEnd)
+		} else {
+			ok = rtgEmitLinearElse(g, stmt)
 		}
-		if g.lastRangeReturns {
-			g.fixedPrunedReturns = true
-		}
-		return true
-	}
-	if fixedValue == 0 {
-		if !rtgEmitLinearElse(g, stmt) {
+		if !ok {
 			return false
 		}
 		if g.lastRangeReturns {
@@ -6283,11 +6276,11 @@ func rtgEmitLinearFor(g *rtgLinearGen, stmt *rtgStmt) bool {
 	p := g.prog
 	semi1 := rtgFindTokenTextInRange(p, stmt.exprStart, stmt.exprEnd, ';')
 	if semi1 >= stmt.exprStart {
-		return rtgEmitLinearClassicFor(g, stmt, semi1)
+		return rtgEmitLinearScopedControl(g, stmt, semi1)
 	}
 	rangeTok := rtgFindRangeToken(p, stmt.exprStart, stmt.exprEnd)
 	if rangeTok >= stmt.exprStart {
-		return rtgEmitLinearRangeFor(g, stmt, rangeTok)
+		return rtgEmitLinearScopedControl(g, stmt, rangeTok)
 	}
 	startLabel := rtgAsmNewLabel(a)
 	endLabel := rtgAsmNewLabel(a)
@@ -6341,11 +6334,23 @@ func rtgFindRangeToken(p *rtgProgram, start int, end int) int {
 	return start - 1
 }
 
-func rtgEmitLinearRangeFor(g *rtgLinearGen, stmt *rtgStmt, rangeTok int) bool {
+func rtgEmitLinearScopedControl(g *rtgLinearGen, stmt *rtgStmt, split int) bool {
 	oldLocalCount := g.localCount
 	oldScopeBase := g.scopeBase
 	g.scopeBase = oldLocalCount
-	ok := rtgEmitLinearRangeForScoped(g, stmt, rangeTok)
+	ok := false
+	if stmt.kind == rtgStmtIf {
+		if rtgEmitLinearSimpleRange(g, stmt.exprStart, split) {
+			oldExprStart := stmt.exprStart
+			stmt.exprStart = split + 1
+			ok = rtgEmitLinearIf(g, stmt)
+			stmt.exprStart = oldExprStart
+		}
+	} else if rtgTokCharIs(g.prog, split, ';') {
+		ok = rtgEmitLinearClassicForScoped(g, stmt, split)
+	} else {
+		ok = rtgEmitLinearRangeForScoped(g, stmt, split)
+	}
 	g.localCount = oldLocalCount
 	g.scopeBase = oldScopeBase
 	return ok
@@ -6654,16 +6659,6 @@ func rtgFindSwitchClauseColon(p *rtgProgram, start int, end int) int {
 	}
 	return end
 }
-func rtgEmitLinearClassicFor(g *rtgLinearGen, stmt *rtgStmt, semi1 int) bool {
-	oldLocalCount := g.localCount
-	oldScopeBase := g.scopeBase
-	g.scopeBase = oldLocalCount
-	ok := rtgEmitLinearClassicForScoped(g, stmt, semi1)
-	g.localCount = oldLocalCount
-	g.scopeBase = oldScopeBase
-	return ok
-}
-
 func rtgEmitLinearClassicForScoped(g *rtgLinearGen, stmt *rtgStmt, semi1 int) bool {
 	a := &g.asm
 	p := g.prog
@@ -9931,15 +9926,6 @@ func rtgEmitLinkStaticCall(g *rtgLinearGen, fn *rtgFuncInfo, wordCount int) bool
 	importID := rtgAsmAddWinStaticImport(&g.asm, fn.linkDLLStart, fn.linkDLLEnd, fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
 	if rtgTargetArch == rtgArch386 {
 		rtgWin386CallImport(&g.asm, importID)
-		if wordCount > 0 {
-			imm := wordCount * 4
-			if rtgAsmImmFits8Signed(imm) {
-				rtgAsmEmit3(&g.asm, 0x83, 0xc4, imm)
-			} else {
-				rtgAsmEmit16(&g.asm, 0xc481)
-				rtgAsmEmit32(&g.asm, imm)
-			}
-		}
 		return true
 	}
 	if rtgTargetArch != rtgArchAmd64 {
@@ -9963,10 +9949,14 @@ func rtgWinAmd64CallStaticImport(a *rtgAsm, importID int, wordCount int) {
 		rtgAsmEmit16(a, 0x5941)
 	}
 	stackWords := 0
+	shadow := 40
+	// The RTG amd64 call frame is eight bytes off the Windows call-site
+	// alignment when all arguments fit in registers. Reserve the usual shadow
+	// space plus one alignment slot for that common case.
 	if wordCount > 4 {
 		stackWords = wordCount - 4
+		shadow = 32
 	}
-	shadow := 32
 	rtgAsmEmit4(a, 0x48, 0x83, 0xec, shadow)
 	rtgAsmEmit16(a, 0x15ff)
 	at := len(a.code)

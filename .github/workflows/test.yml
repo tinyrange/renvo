@@ -128,7 +128,9 @@ jobs:
           cache: false
 
       - name: Run tracked package suites
-        run: go test -count=1 ./rtg/internal/... ./rtg/std/... ./rtg/cmd/... ./rtgunit ./cmd/...
+        run: |
+          go test -count=1 ./rtg/internal/... ./rtg/std/... ./rtg/cmd/... ./rtgunit ./cmd/...
+          go test -count=1 -tags rtg_bundle ./rtg/internal/driver ./rtg/cmd/rtg
 
   frontend-corpus:
     name: Frontend corpus tests
@@ -149,4 +151,5 @@ jobs:
         env:
           RTG_FRONTEND_EXTENDED_TESTS: "1"
           RTG_FRONTEND_SELFHOST_TESTS: "1"
+          RTG_FRONTEND_BUNDLE_TESTS: "1"
         run: go test -count=1 ./rtg_tests
