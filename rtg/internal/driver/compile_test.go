@@ -81,17 +81,17 @@ type recordingBackend struct {
 	program unit.Program
 }
 
-func (b *recordingBackend) CompileUnit(data []byte, target string, strip bool) ([]byte, bool) {
+func (b *recordingBackend) CompileUnit(data []byte, target string, strip bool) BackendResult {
 	b.called = true
 	b.target = target
 	b.strip = strip
 	program, ok := unit.Unmarshal(data)
 	if !ok {
-		return nil, false
+		return BackendResult{}
 	}
 	b.program = program
 	if len(b.binary) == 0 {
-		return nil, false
+		return BackendResult{Diagnostic: Diagnostic{Phase: "backend", Code: "TEST-BACKEND-001", Message: "intentional backend failure"}}
 	}
-	return b.binary, true
+	return BackendResult{Binary: b.binary, Ok: true}
 }

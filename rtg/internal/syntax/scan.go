@@ -400,85 +400,85 @@ func keywordKind(src []byte, start int, end int) int {
 		h = h*5 + int(src[i])
 	}
 	if n == 2 {
-		if h == 627 {
+		if h == 627 && bytesEqualText(src, start, end, "if") {
 			return TokenIf
 		}
-		if h == 626 {
+		if h == 626 && bytesEqualText(src, start, end, "go") {
 			return TokenGo
 		}
 	}
 	if n == 3 {
-		if h == 3549 {
+		if h == 3549 && bytesEqualText(src, start, end, "var") {
 			return TokenVar
 		}
-		if h == 3219 {
+		if h == 3219 && bytesEqualText(src, start, end, "for") {
 			return TokenFor
 		}
-		if h == 3322 {
+		if h == 3322 && bytesEqualText(src, start, end, "map") {
 			return TokenMap
 		}
 	}
 	if n == 4 {
-		if h == 18186 {
+		if h == 18186 && bytesEqualText(src, start, end, "type") {
 			return TokenType
 		}
-		if h == 16324 {
+		if h == 16324 && bytesEqualText(src, start, end, "func") {
 			return TokenFunc
 		}
-		if h == 16001 {
+		if h == 16001 && bytesEqualText(src, start, end, "else") {
 			return TokenElse
 		}
-		if h == 16341 {
+		if h == 16341 && bytesEqualText(src, start, end, "goto") {
 			return TokenGoto
 		}
-		if h == 15476 {
+		if h == 15476 && bytesEqualText(src, start, end, "case") {
 			return TokenCase
 		}
-		if h == 15570 {
+		if h == 15570 && bytesEqualText(src, start, end, "chan") {
 			return TokenChan
 		}
 	}
 	if n == 5 {
-		if h == 79191 {
+		if h == 79191 && bytesEqualText(src, start, end, "const") {
 			return TokenConst
 		}
-		if h == 78617 {
+		if h == 78617 && bytesEqualText(src, start, end, "break") {
 			return TokenBreak
 		}
-		if h == 86741 {
+		if h == 86741 && bytesEqualText(src, start, end, "range") {
 			return TokenRange
 		}
-		if h == 78294 {
+		if h == 78294 && bytesEqualText(src, start, end, "defer") {
 			return TokenDefer
 		}
 	}
 	if n == 6 {
-		if h == 449661 {
+		if h == 449661 && bytesEqualText(src, start, end, "struct") {
 			return TokenStruct
 		}
-		if h == 437480 {
+		if h == 437480 && bytesEqualText(src, start, end, "return") {
 			return TokenReturn
 		}
-		if h == 450374 {
+		if h == 450374 && bytesEqualText(src, start, end, "switch") {
 			return TokenSwitch
 		}
-		if h == 413711 {
+		if h == 413711 && bytesEqualText(src, start, end, "import") {
 			return TokenImport
 		}
-		if h == 439136 {
+		if h == 439136 && bytesEqualText(src, start, end, "select") {
 			return TokenSelect
 		}
 	}
 	if n == 7 {
-		if h == 2131416 {
+		if h == 2131416 && bytesEqualText(src, start, end, "package") {
 			return TokenPackage
 		}
-		if h == 1957581 {
+		if h == 1957581 && bytesEqualText(src, start, end, "default") {
 			return TokenDefault
 		}
 	}
 	if n == 8 {
-		if h == 9901561 {
+		if h == 9901561 && bytesEqualText(src, start, end, "continue") {
 			return TokenContinue
 		}
 	}

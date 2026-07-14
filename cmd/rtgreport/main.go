@@ -366,6 +366,9 @@ func normalizeMessage(root string, fixture string, message string) string {
 }
 
 func isFrontendDiagnostic(message string) bool {
+	if strings.Contains(message, "error RTG-") && !strings.Contains(message, "error RTG-BACKEND-") {
+		return true
+	}
 	markers := []string{
 		"frontend pipeline failed", "source error at", "missing module at", "invalid module at",
 		"bad package:", "directory read failed:", "file read failed:", "bad build constraint:",

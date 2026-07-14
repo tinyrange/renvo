@@ -26,6 +26,7 @@ type BuildResult struct {
 	ErrorPackage int
 	ErrorFile    int
 	ErrorToken   int
+	Diagnostic   Diagnostic
 }
 
 func BuildUnit(args []string, workDir string, stdRoot string, files []load.SourceFile) BuildResult {
@@ -108,5 +109,6 @@ func buildFail(result BuildResult, err int, arg string, path string, at int, pkg
 	result.ErrorPackage = pkg
 	result.ErrorFile = file
 	result.ErrorToken = tok
+	result.Diagnostic = diagnosticForBuild(result)
 	return result
 }

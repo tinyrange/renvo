@@ -13,6 +13,9 @@ const (
 	CheckErrMethod
 	CheckErrBody
 	CheckErrScope
+	CheckErrReturnCount
+	CheckErrType
+	CheckErrExcluded
 )
 
 const (
@@ -252,6 +255,9 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 		}
 		for i := 0; i < len(file.Funcs); i++ {
 			fn := file.Funcs[i]
+			if excludedTok := excludedFeatureToken(file, fn); excludedTok >= 0 {
+				return info, false, CheckErrExcluded, fileIndex, excludedTok
+			}
 			name := tokenString(file, fn.NameTok)
 			kind := SymbolFunc
 			if fn.ReceiverStart >= 0 {
@@ -321,6 +327,12 @@ func checkPackageBody(graph load.Graph, pkgIndex int, info PackageInfo, checked 
 			body := syntax.ParseFuncBody(file, fn)
 			if !body.Ok {
 				return info, false, CheckErrBody, fileIndex, body.ErrorTok
+			}
+			if returnTok := invalidReturnCount(file, fn, signature); returnTok >= 0 {
+				return info, false, CheckErrReturnCount, fileIndex, returnTok
+			}
+			if typeTok := invalidDefiniteAssignmentType(file, fn); typeTok >= 0 {
+				return info, false, CheckErrType, fileIndex, typeTok
 			}
 			scope, ok, scopeTok := buildFuncScope(file, fn, body)
 			if !ok {

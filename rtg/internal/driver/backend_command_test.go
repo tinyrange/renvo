@@ -26,17 +26,17 @@ func TestCommandBackendCompileUnit(t *testing.T) {
 		Args: []string{"-test.run=TestCommandBackendHelper", "--"},
 		Env:  []string{"RTG_DRIVER_COMMAND_BACKEND_HELPER=1"},
 	}
-	binary, ok := backend.CompileUnit(built.Unit, "linux/386", true)
-	if !ok {
+	result := backend.CompileUnit(built.Unit, "linux/386", true)
+	if !result.Ok {
 		t.Fatal("CommandBackend failed")
 	}
-	if string(binary) != "compiled linux/386 strip\n" {
-		t.Fatalf("binary = %q", string(binary))
+	if string(result.Binary) != "compiled linux/386 strip\n" {
+		t.Fatalf("binary = %q", string(result.Binary))
 	}
 }
 
 func TestCommandBackendFailure(t *testing.T) {
-	if _, ok := (CommandBackend{}).CompileUnit([]byte("unit"), "linux/amd64", false); ok {
+	if result := (CommandBackend{}).CompileUnit([]byte("unit"), "linux/amd64", false); result.Ok {
 		t.Fatal("empty backend path was accepted")
 	}
 
@@ -53,8 +53,15 @@ func TestCommandBackendFailure(t *testing.T) {
 		Args: []string{"-test.run=TestCommandBackendHelper", "--"},
 		Env:  []string{"RTG_DRIVER_COMMAND_BACKEND_HELPER=1", "RTG_DRIVER_COMMAND_BACKEND_FAIL=1"},
 	}
-	if _, ok := backend.CompileUnit(built.Unit, "linux/amd64", false); ok {
+	result := backend.CompileUnit(built.Unit, "linux/amd64", false)
+	if result.Ok {
 		t.Fatal("failing backend was accepted")
+	}
+	if result.Diagnostic.Code != "RTG-BACKEND-003" {
+		t.Fatalf("backend diagnostic = %#v", result.Diagnostic)
+	}
+	if !strings.Contains(result.Diagnostic.Message, "intentional backend failure") {
+		t.Fatalf("backend stderr was lost: %#v", result.Diagnostic)
 	}
 }
 
@@ -63,6 +70,7 @@ func TestCommandBackendHelper(t *testing.T) {
 		return
 	}
 	if os.Getenv("RTG_DRIVER_COMMAND_BACKEND_FAIL") == "1" {
+		_, _ = os.Stderr.Write([]byte("intentional backend failure\n"))
 		os.Exit(2)
 	}
 	args := helperBackendArgs(os.Args)

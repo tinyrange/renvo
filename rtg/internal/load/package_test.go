@@ -149,4 +149,7 @@ import "example.com/case/cmd/app"
 	if cycle.Ok || cycle.Error != GraphErrCycle {
 		t.Fatalf("cycle graph = %#v", cycle)
 	}
+	if cycle.ErrorPath != "/repo/case/pkg/lib/lib.go" || cycle.ErrorOffset <= 0 {
+		t.Fatalf("cycle location = %q:%d, want importing source location", cycle.ErrorPath, cycle.ErrorOffset)
+	}
 }

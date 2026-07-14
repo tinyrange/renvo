@@ -805,6 +805,39 @@ func TestCheckGraphBodyError(t *testing.T) {
 func appMain() int {
 	return 0
 }
+
+func TestCheckGraphRejectsDefiniteReturnCountMismatch(t *testing.T) {
+	graph := testGraph(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc broken() (int, int) { return 1 }\nfunc appMain() int { return 0 }\n")},
+	})
+	prog := CheckGraph(graph)
+	if prog.Ok || prog.Error != CheckErrReturnCount || prog.ErrorPackage != 0 || prog.ErrorFile != 0 || prog.ErrorToken < 0 {
+		t.Fatalf("return count mismatch = %#v", prog)
+	}
+}
+
+func TestCheckGraphRejectsDefiniteAssignmentTypeMismatch(t *testing.T) {
+	graph := testGraph(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc appMain() int { var x int; x = \"wrong\"; return x }\n")},
+	})
+	prog := CheckGraph(graph)
+	if prog.Ok || prog.Error != CheckErrType || prog.ErrorPackage != 0 || prog.ErrorFile != 0 || prog.ErrorToken < 0 {
+		t.Fatalf("assignment type mismatch = %#v", prog)
+	}
+}
+
+func TestCheckGraphRejectsExcludedGoroutineBeforeLowering(t *testing.T) {
+	graph := testGraph(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc work() {}\nfunc appMain() int { go work(); return 0 }\n")},
+	})
+	prog := CheckGraph(graph)
+	if prog.Ok || prog.Error != CheckErrExcluded || prog.ErrorPackage != 0 || prog.ErrorFile != 0 || prog.ErrorToken < 0 {
+		t.Fatalf("excluded goroutine = %#v", prog)
+	}
+}
 `))
 	if !file.Ok {
 		t.Fatalf("ParseFile failed: err=%d tok=%d", file.Error, file.ErrorTok)

@@ -42,6 +42,10 @@ func printHostError(result driver.HostResult) {
 }
 
 func printCompileError(result driver.CompileResult) {
+	if result.Diagnostic.Valid() {
+		fmt.Fprint(os.Stderr, driver.FormatDiagnostic(result.Diagnostic))
+		return
+	}
 	switch result.Error {
 	case driver.CompileErrBuild:
 		printBuildError(result.Build)
@@ -53,6 +57,10 @@ func printCompileError(result driver.CompileResult) {
 }
 
 func printBuildError(result driver.BuildResult) {
+	if result.Diagnostic.Valid() {
+		fmt.Fprint(os.Stderr, driver.FormatDiagnostic(result.Diagnostic))
+		return
+	}
 	switch result.Error {
 	case driver.BuildErrOptions:
 		printOptionError(result.Options)

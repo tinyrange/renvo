@@ -40,6 +40,7 @@ type Result struct {
 	ErrorPackage    int
 	ErrorFile       int
 	ErrorToken      int
+	ErrorDetail     int
 }
 
 func BuildUnits(graph load.Graph) Result {
@@ -66,6 +67,7 @@ func buildUnits(graph load.Graph, encodePackages bool) Result {
 		ErrorToken:   -1,
 	}
 	if !prog.Ok {
+		result.ErrorDetail = prog.Error
 		return buildFail(result, BuildErrCheck, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
 	}
 	for i := 0; i < len(graph.Packages); i++ {
@@ -77,6 +79,7 @@ func buildUnits(graph load.Graph, encodePackages bool) Result {
 			emit = lower.EmitCheckedPackageFast(pkg, prog.Packages[i])
 		}
 		if !emit.Ok {
+			result.ErrorDetail = emit.Error
 			result.LowerError = emit.Error
 			result.LowerUnitError = emit.UnitError
 			result.LowerUnitIndex = emit.UnitIndex

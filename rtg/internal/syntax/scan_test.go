@@ -74,6 +74,20 @@ func TestScanFrontendKeywords(t *testing.T) {
 	}
 }
 
+func TestKeywordHashCollisionRemainsIdentifier(t *testing.T) {
+	src := []byte("bits chan")
+	toks := Scan(src)
+	if len(toks) != 3 {
+		t.Fatalf("token count = %d, want 3", len(toks))
+	}
+	if toks[0].Kind != TokenIdent {
+		t.Fatalf("bits token kind = %d, want identifier", toks[0].Kind)
+	}
+	if toks[1].Kind != TokenChan {
+		t.Fatalf("chan token kind = %d, want chan", toks[1].Kind)
+	}
+}
+
 func TestScanInvalidString(t *testing.T) {
 	var scanner Scanner
 	scanner.Scan([]byte("package main\nvar s = \"unterminated\n"))
