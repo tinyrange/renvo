@@ -1649,6 +1649,7 @@ const rtgTypeStruct = 11
 const rtgTypeNamed = 12
 const rtgTypeArray = 13
 const rtgTypeMap = 14
+const rtgNamedTypeAlias = 1
 
 type rtgTypeInfo struct {
 	kind      int
@@ -4406,7 +4407,8 @@ func rtgParseTopDeclEntry(m *rtgMeta, p *rtgProgram, kind int, start int, end in
 	}
 	if kind == rtgTokType {
 		typeStart := start + 1
-		if rtgTokCharIs(p, typeStart, '=') {
+		isAlias := rtgTokCharIs(p, typeStart, '=')
+		if isAlias {
 			typeStart++
 		}
 		typeResult := rtgParseType(m, p, typeStart, end)
@@ -4414,13 +4416,16 @@ func rtgParseTopDeclEntry(m *rtgMeta, p *rtgProgram, kind int, start int, end in
 			rtgMetaError(m, rtgDiagMetaTopDecl)
 			return
 		}
-		directNamedType := rtgTokIsKind(p, typeStart, rtgTokStruct) || rtgTokCharIs(p, typeStart, '*') || rtgTokCharIs(p, typeStart, '[')
+		directNamedType := !isAlias && (rtgTokIsKind(p, typeStart, rtgTokStruct) || rtgTokCharIs(p, typeStart, '*') || rtgTokCharIs(p, typeStart, '['))
 		if directNamedType && (m.types[typeResult.typ].kind == rtgTypeStruct || m.types[typeResult.typ].kind == rtgTypePointer || m.types[typeResult.typ].kind == rtgTypeSlice) {
 			m.types[typeResult.typ].nameStart = int(name.start)
 			m.types[typeResult.typ].nameEnd = int(name.end)
 		} else {
 			size := rtgTypeSize(m, typeResult.typ)
-			rtgAddType(m, rtgTypeNamed, typeResult.typ, 0, 0, size, int(name.start), int(name.end))
+			namedType := rtgAddType(m, rtgTypeNamed, typeResult.typ, 0, 0, size, int(name.start), int(name.end))
+			if isAlias {
+				m.types[namedType].first = rtgNamedTypeAlias
+			}
 		}
 		return
 	}
@@ -12703,15 +12708,25 @@ func rtgMethodReceiverTypeMatches(meta *rtgMeta, actual int, declared int) bool 
 	if actual == 0 {
 		return false
 	}
-	actualType := rtgResolveType(meta, actual)
-	if actualType.kind == rtgTypePointer {
-		actual = actualType.elem
-	}
-	declaredType := rtgResolveType(meta, declared)
-	if declaredType.kind == rtgTypePointer {
-		declared = declaredType.elem
-	}
+	actual = rtgCanonicalMethodReceiverType(meta, actual)
+	declared = rtgCanonicalMethodReceiverType(meta, declared)
 	return actual == declared
+}
+
+func rtgCanonicalMethodReceiverType(meta *rtgMeta, typ int) int {
+	for typ > 0 && typ < len(meta.types) {
+		t := meta.types[typ]
+		if t.kind == rtgTypePointer {
+			typ = t.elem
+			continue
+		}
+		if t.kind == rtgTypeNamed && t.first == rtgNamedTypeAlias && t.elem > 0 && t.elem < len(meta.types) {
+			typ = t.elem
+			continue
+		}
+		break
+	}
+	return typ
 }
 
 // Architecture target dispatch wrappers.
