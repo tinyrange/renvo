@@ -343,11 +343,7 @@ func rtgAsmMoveOffsetArg(a *rtgAsm) {
 }
 
 func rtgEmitLinearPrintStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
-	if rtgTargetIsWindows() {
-		return rtgEmitWindowsPrintStmt(g, stmt)
-	}
 	p := g.prog
-	a := &g.asm
 	if stmt.exprStart < 0 || stmt.exprStart >= rtgTokCount(p) || !rtgBytesEqualText(p.src, int(rtgTokStart(p, stmt.exprStart)), int(rtgTokEnd(p, stmt.exprStart)), "print") {
 		return false
 	}
@@ -360,8 +356,45 @@ func rtgEmitLinearPrintStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 	if root.kind != rtgExprCall || root.argCount != 1 || !rtgExprIsIdentText(p, &ep, root.left, "print") {
 		return false
 	}
-	if !rtgEmitStringValueRegs(g, &ep, ep.args[root.firstArg]) {
+	argIndex := ep.args[root.firstArg]
+	argType := rtgResolveType(g.meta, rtgInferParsedExprType(g, &ep, argIndex))
+	if argType.kind == rtgTypeString {
+		if !rtgEmitStringValueRegs(g, &ep, argIndex) {
+			return false
+		}
+	} else if rtgTypeKindIsScalarInt(argType.kind) {
+		if !rtgEmitIntExpr(g, &ep, argIndex) {
+			return false
+		}
+		rtgAsmNormalizePrimaryForKind(&g.asm, argType.kind)
+		rtgAsmCallLabel(&g.asm, rtgEnsurePrintIntHelper(g))
+	} else {
 		return false
+	}
+	return rtgEmitPrintValueRegs(g)
+}
+
+func rtgEmitPrintValueRegs(g *rtgLinearGen) bool {
+	a := &g.asm
+	if rtgTargetIsWindows() {
+		if rtgTargetArch == rtgArch386 {
+			label := rtgWin386EmitReadWriteHelper(g, true)
+			rtgAsmEmit16(a, 0xc689)
+			rtgAsmPrimaryImm(a, -1)
+			rtgAsmCopyPrimaryToTertiary(a)
+			rtgAsmPrimaryImm(a, 1)
+			rtgAsmCopyPrimaryToCallWord0(a)
+			rtgAsmCallLabel(a, label)
+			return true
+		}
+		label := rtgWinAmd64EmitReadWriteHelper(g, true)
+		rtgAsmCopyPrimaryToCallWord1(a)
+		rtgAsmPrimaryImm(a, 1)
+		rtgAsmCopyPrimaryToCallWord0(a)
+		rtgAsmPrimaryImm(a, -1)
+		rtgAsmCopyPrimaryToTertiary(a)
+		rtgAsmCallLabel(a, label)
+		return true
 	}
 	if rtgTargetIsDarwin() {
 		rtgAarch64AsmMovRegReg(a, 2, rtgAarch64RegRdx)
@@ -880,44 +913,6 @@ func rtgEmitWindowsReadWrite(g *rtgLinearGen, ep *rtgExprParse, idx int, isWrite
 	rtgAsmEmit24(a, 0xca8948)
 	rtgAsmPopTertiary(a)
 	rtgAsmPopCallWord0(a)
-	rtgAsmCallLabel(a, label)
-	return true
-}
-
-func rtgEmitWindowsPrintStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
-	p := g.prog
-	a := &g.asm
-	if stmt.exprStart < 0 || stmt.exprStart >= rtgTokCount(p) || !rtgBytesEqualText(p.src, int(rtgTokStart(p, stmt.exprStart)), int(rtgTokEnd(p, stmt.exprStart)), "print") {
-		return false
-	}
-	var ep rtgExprParse
-	rtgParseExpressionInto(&ep, p, stmt.exprStart, stmt.exprEnd)
-	if !ep.ok || len(ep.exprs) == 0 {
-		return false
-	}
-	root := &ep.exprs[len(ep.exprs)-1]
-	if root.kind != rtgExprCall || root.argCount != 1 || !rtgExprIsIdentText(p, &ep, root.left, "print") {
-		return false
-	}
-	if !rtgEmitStringValueRegs(g, &ep, ep.args[root.firstArg]) {
-		return false
-	}
-	if rtgTargetArch == rtgArch386 {
-		label := rtgWin386EmitReadWriteHelper(g, true)
-		rtgAsmEmit16(a, 0xc689)
-		rtgAsmPrimaryImm(a, -1)
-		rtgAsmCopyPrimaryToTertiary(a)
-		rtgAsmPrimaryImm(a, 1)
-		rtgAsmCopyPrimaryToCallWord0(a)
-		rtgAsmCallLabel(a, label)
-		return true
-	}
-	label := rtgWinAmd64EmitReadWriteHelper(g, true)
-	rtgAsmCopyPrimaryToCallWord1(a)
-	rtgAsmPrimaryImm(a, 1)
-	rtgAsmCopyPrimaryToCallWord0(a)
-	rtgAsmPrimaryImm(a, -1)
-	rtgAsmCopyPrimaryToTertiary(a)
 	rtgAsmCallLabel(a, label)
 	return true
 }

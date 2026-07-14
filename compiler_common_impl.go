@@ -5879,6 +5879,9 @@ type rtgLinearGen struct {
 	winReadEmitted     bool
 	winWriteLabel      int
 	winWriteEmitted    bool
+	printIntLabel      int
+	printIntEmitted    bool
+	printIntBufferOff  int
 	darwinEntryOff     int
 	lastRangeReturns   bool
 	scopeBase          int
@@ -13624,6 +13627,96 @@ func rtgEnsureArenaAllocHelper(g *rtgLinearGen) int {
 	rtgAsmRet(a)
 	rtgAsmMarkLabel(a, afterLabel)
 	return g.arenaAllocLabel
+}
+
+const rtgPrintIntBufferSize = 24
+
+func rtgEmitPrintIntBufferByte(g *rtgLinearGen) {
+	a := &g.asm
+	lenOff := g.printIntBufferOff + rtgPrintIntBufferSize + 8
+	rtgAsmPushPrimary(a)
+	rtgAsmLoadPrimaryBss(a, lenOff)
+	rtgAsmPushPrimary(a)
+	rtgAsmPrimaryImm(a, rtgPrintIntBufferSize-1)
+	rtgAsmPopTertiary(a)
+	rtgAsmSubPrimaryTertiary(a)
+	rtgAsmCopyPrimaryToTertiary(a)
+	rtgAsmPrimaryBssAddr(a, g.printIntBufferOff)
+	rtgAsmCopyPrimaryToSecondary(a)
+	rtgAsmPopPrimary(a)
+	rtgAsmStoreByteMemSecondaryTertiary(a)
+	rtgAsmLoadPrimaryBss(a, lenOff)
+	rtgAsmIncPrimary(a)
+	rtgAsmStorePrimaryBss(a, lenOff)
+}
+
+func rtgEnsurePrintIntHelper(g *rtgLinearGen) int {
+	a := &g.asm
+	if g.printIntEmitted {
+		return g.printIntLabel
+	}
+	g.printIntEmitted = true
+	g.printIntBufferOff = a.bssSize
+	a.bssSize += rtgPrintIntBufferSize + 24
+	g.printIntLabel = rtgAsmNewLabel(a)
+	afterLabel := rtgAsmNewLabel(a)
+	loopLabel := rtgAsmNewLabel(a)
+	positiveDigitLabel := rtgAsmNewLabel(a)
+	digitReadyLabel := rtgAsmNewLabel(a)
+	doneLabel := rtgAsmNewLabel(a)
+	valueOff := g.printIntBufferOff + rtgPrintIntBufferSize
+	lenOff := valueOff + 8
+	negativeOff := lenOff + 8
+	rtgAsmJmpLabel(a, afterLabel)
+	rtgAsmMarkLabel(a, g.printIntLabel)
+	rtgAsmStorePrimaryBss(a, valueOff)
+	rtgAsmCopyPrimaryToTertiary(a)
+	rtgAsmPrimaryImm(a, 0)
+	rtgAsmCmpTertiaryPrimarySet(a, 0x9c)
+	rtgAsmStorePrimaryBss(a, negativeOff)
+	rtgAsmPrimaryImm(a, 0)
+	rtgAsmStorePrimaryBss(a, lenOff)
+	rtgAsmMarkLabel(a, loopLabel)
+	rtgAsmLoadPrimaryBss(a, valueOff)
+	rtgAsmCopyPrimaryToTertiary(a)
+	rtgAsmPrimaryImm(a, 10)
+	rtgAsmDivLeftTertiaryRightPrimary(a, true)
+	rtgAsmPushPrimary(a)
+	rtgAsmLoadPrimaryBss(a, negativeOff)
+	rtgAsmCmpPrimaryImm8(a, 0)
+	rtgAsmJzLabel(a, positiveDigitLabel)
+	rtgAsmPrimaryImm(a, '0')
+	rtgAsmPopTertiary(a)
+	rtgAsmSubPrimaryTertiary(a)
+	rtgAsmJmpLabel(a, digitReadyLabel)
+	rtgAsmMarkLabel(a, positiveDigitLabel)
+	rtgAsmPrimaryImm(a, '0')
+	rtgAsmPopTertiary(a)
+	rtgAsmAddPrimaryTertiary(a)
+	rtgAsmMarkLabel(a, digitReadyLabel)
+	rtgEmitPrintIntBufferByte(g)
+	rtgAsmLoadPrimaryBss(a, valueOff)
+	rtgAsmCopyPrimaryToTertiary(a)
+	rtgAsmPrimaryImm(a, 10)
+	rtgAsmDivLeftTertiaryRightPrimary(a, false)
+	rtgAsmStorePrimaryBss(a, valueOff)
+	rtgAsmCmpPrimaryImm8(a, 0)
+	rtgAsmJnzLabel(a, loopLabel)
+	rtgAsmLoadPrimaryBss(a, negativeOff)
+	rtgAsmCmpPrimaryImm8(a, 0)
+	rtgAsmJzLabel(a, doneLabel)
+	rtgAsmPrimaryImm(a, '-')
+	rtgEmitPrintIntBufferByte(g)
+	rtgAsmMarkLabel(a, doneLabel)
+	rtgAsmLoadPrimaryBss(a, lenOff)
+	rtgAsmCopyPrimaryToSecondary(a)
+	rtgAsmCopySecondaryToPrimary(a)
+	rtgAsmCopyPrimaryToTertiary(a)
+	rtgAsmPrimaryBssAddr(a, g.printIntBufferOff+rtgPrintIntBufferSize)
+	rtgAsmSubPrimaryTertiary(a)
+	rtgAsmRet(a)
+	rtgAsmMarkLabel(a, afterLabel)
+	return g.printIntLabel
 }
 
 func rtgAmd64SliceBackingSize(elemSize int) int {
