@@ -8320,6 +8320,29 @@ func rtgEmitGroupedTypedVarDecl(g *rtgLinearGen, stmt *rtgStmt, assignTok int) i
 	if typeResult.typ == 0 || typeResult.next != typeEnd {
 		return -1
 	}
+	var temps []int
+	if assignTok > stmt.startTok {
+		rhs, ok := rtgSplitTopLevelComma(p, assignTok+1, stmt.endTok)
+		if !ok || len(rhs)/2 != nameCount {
+			return -1
+		}
+		temps = rtgFixedIntScratch(nameCount)
+		// Evaluate every initializer before the new names enter scope and before
+		// assigning any destination. This preserves Go's VarSpec scope and
+		// left-to-right multi-assignment semantics.
+		for i := 0; i < nameCount; i++ {
+			var ep rtgExprParse
+			rootIndex := rtgParseExpressionRoot(&ep, p, rhs[i*2], rhs[i*2+1])
+			if rootIndex < 0 {
+				return -1
+			}
+			temp := rtgAddUnnamedLocal(g, typeResult.typ)
+			if !rtgEmitExprToLocal(g, &ep, rootIndex, temp) {
+				return -1
+			}
+			temps = append(temps, temp)
+		}
+	}
 	offsets := rtgFixedIntScratch(nameCount)
 	for i := 0; i < nameCount; i++ {
 		tok := nameRanges[i*2]
@@ -8339,30 +8362,17 @@ func rtgEmitGroupedTypedVarDecl(g *rtgLinearGen, stmt *rtgStmt, assignTok int) i
 		}
 		return 1
 	}
-	rhs, ok := rtgSplitTopLevelComma(p, assignTok+1, stmt.endTok)
-	if !ok || len(rhs)/2 != nameCount {
-		return -1
-	}
-	temps := rtgFixedIntScratch(nameCount)
-	for i := 0; i < nameCount; i++ {
-		var ep rtgExprParse
-		rootIndex := rtgParseExpressionRoot(&ep, p, rhs[i*2], rhs[i*2+1])
-		if rootIndex < 0 {
-			return -1
-		}
-		temp := rtgAddUnnamedLocal(g, typeResult.typ)
-		if !rtgEmitExprToLocal(g, &ep, rootIndex, temp) {
-			return -1
-		}
-		temps = append(temps, temp)
-	}
 	size := rtgTypeSize(g.meta, typeResult.typ)
 	if size < rtgBackendValueSlotSize {
 		size = rtgBackendValueSlotSize
 	}
 	for i := 0; i < nameCount; i++ {
 		if offsets[i] != 0 {
-			rtgEmitCopyStackToStack(g, temps[i], offsets[i], size)
+			if rtgResolveType(g.meta, typeResult.typ).kind == rtgTypeArray {
+				rtgEmitCopyArrayStackToStack(g, temps[i], offsets[i], size)
+			} else {
+				rtgEmitCopyStackToStack(g, temps[i], offsets[i], size)
+			}
 		}
 	}
 	return 1
