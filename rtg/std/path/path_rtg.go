@@ -20,8 +20,7 @@ func Clean(path string) string {
 	return out
 }
 
-func Join(a string, b string, c string, d string) string {
-	elem := []string{a, b, c, d}
+func Join(elem ...string) string {
 	var out []byte
 	for i := 0; i < len(elem); i++ {
 		if elem[i] == "" {
@@ -32,11 +31,7 @@ func Join(a string, b string, c string, d string) string {
 		}
 		out = appendString(out, elem[i])
 	}
-	result := cleanPath(string(out))
-	if result == "" {
-		return "."
-	}
-	return result
+	return CleanNoJoin(string(out))
 }
 
 func Base(path string) string {
@@ -84,6 +79,10 @@ func Split(path string) (string, string) {
 		i--
 	}
 	return path[:i+1], path[i+1:]
+}
+
+func CleanNoJoin(path string) string {
+	return cleanPath(path)
 }
 
 func cleanPath(path string) string {
