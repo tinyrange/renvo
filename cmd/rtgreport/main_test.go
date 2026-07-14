@@ -25,6 +25,12 @@ func TestFrontendDiagnosticClassification(t *testing.T) {
 	if !isFrontendDiagnostic("rtg: frontend pipeline failed at package=0 file=0 token=3") {
 		t.Fatal("frontend pipeline error was not classified as a frontend diagnostic")
 	}
+	if !isFrontendDiagnostic("./cmd/app/main.go:5:2: error RTG-CHECK-002 (checker): duplicate declaration") {
+		t.Fatal("structured checker error was not classified as a frontend diagnostic")
+	}
+	if isFrontendDiagnostic("rtg: error RTG-BACKEND-003 (backend): compiler failed") {
+		t.Fatal("structured backend error was classified as a frontend diagnostic")
+	}
 	if isFrontendDiagnostic("rtg: backend compilation failed") {
 		t.Fatal("backend failure was classified as a frontend diagnostic")
 	}

@@ -95,7 +95,16 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 		file := pkg.Files[fileIndex].File
 		for i := 0; i < len(file.Funcs); i++ {
 			fn := file.Funcs[i]
+			if excludedTok := excludedFeatureToken(file, fn); excludedTok >= 0 {
+				return info, false, CheckErrExcluded, fileIndex, excludedTok
+			}
 			signature := buildFuncSignature(file, fn)
+			if returnTok := invalidReturnCount(file, fn, signature); returnTok >= 0 {
+				return info, false, CheckErrReturnCount, fileIndex, returnTok
+			}
+			if typeTok := invalidDefiniteAssignmentType(file, fn); typeTok >= 0 {
+				return info, false, CheckErrType, fileIndex, typeTok
+			}
 			scope, ok, scopeTok := buildFuncScopeCore(file, fn)
 			if !ok {
 				return info, false, CheckErrScope, fileIndex, scopeTok

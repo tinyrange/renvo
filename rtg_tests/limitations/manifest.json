@@ -582,16 +582,16 @@
       "id": 73,
       "area": "diagnostics",
       "title": "Invalid return count",
-      "expected": "backend-failure",
-      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "expected": "frontend-diagnostic",
+      "commentary_html": "The checker rejects the invalid return arity with a stable source-located diagnostic before invoking the backend.",
       "fixture": "rtg_tests/limitations/case_073"
     },
     {
       "id": 74,
       "area": "diagnostics",
       "title": "Invalid assignment type",
-      "expected": "backend-failure",
-      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "expected": "frontend-diagnostic",
+      "commentary_html": "The checker rejects the definite assignment mismatch with a stable source-located diagnostic before invoking the backend.",
       "fixture": "rtg_tests/limitations/case_074"
     },
     {

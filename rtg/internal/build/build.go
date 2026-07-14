@@ -34,6 +34,7 @@ type Result struct {
 	ErrorPackage int
 	ErrorFile    int
 	ErrorToken   int
+	ErrorDetail  int
 }
 
 func BuildUnits(graph load.Graph) Result {
@@ -64,11 +65,13 @@ func buildPrograms(graph load.Graph, transient bool) Result {
 		ErrorToken:   -1,
 	}
 	if !prog.Ok {
+		result.ErrorDetail = prog.Error
 		return buildFail(result, BuildErrCheck, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
 	}
 	for i := 0; i < len(graph.Packages); i++ {
 		prog = check.CheckGraphPackageCore(graph, prog, i)
 		if !prog.Ok {
+			result.ErrorDetail = prog.Error
 			return buildFail(result, BuildErrCheck, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
 		}
 		pkg := graph.Packages[i]
@@ -76,6 +79,7 @@ func buildPrograms(graph load.Graph, transient bool) Result {
 		emit := lower.EmitCheckedPackageFast(pkg, prog.Packages[i])
 		unitEnd := arena.Mark()
 		if !emit.Ok {
+			result.ErrorDetail = emit.Error
 			return buildFail(result, BuildErrLower, i, emit.ErrorFile, emit.ErrorToken)
 		}
 		if pkg.Ref.ImportPath == graph.Root {

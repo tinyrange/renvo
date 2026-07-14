@@ -28,7 +28,7 @@ func RunRTGCommand(args []string, env []string) int {
 	}
 	built := buildFromFSCompact(commandArgs, rtgWorkDir(env), rtgStdRoot(args, env), RTGFS{})
 	if !built.Ok {
-		printRTGBuildError(built)
+		printRTGDiagnostic(built.Diagnostic)
 		if resetArena {
 			arena.Reset(mark)
 		}
@@ -56,7 +56,7 @@ func RunRTGCommand(args []string, env []string) int {
 		arena.PersistReset(persistMark)
 	}
 	if !ok {
-		print("rtg: backend compilation failed\n")
+		printRTGDiagnostic(Diagnostic{Phase: "backend", Code: "RTG-BACKEND-001", Message: "backend compilation failed"})
 		return 1
 	}
 	return 0
@@ -184,46 +184,6 @@ func (fs RTGFS) ReadDir(path string) ([]DirEntry, bool) {
 	return out, true
 }
 
-func printRTGBuildError(result BuildResult) {
-	if result.Error == BuildErrOptions {
-		printOptionError(result.Options)
-		return
-	}
-	if result.Error == BuildErrSource {
-		messages := []string{
-			"source error at ",
-			"missing module at ",
-			"invalid module at ",
-			"bad package: ",
-			"directory read failed: ",
-			"file read failed: ",
-			"bad build constraint: ",
-			"source parse failed: ",
-			"unresolved import: ",
-		}
-		err := result.Sources.Error
-		if err < 1 || err >= len(messages) {
-			err = 0
-		}
-		print("rtg: ")
-		print(messages[err])
-		print(result.ErrorPath)
-		print("\n")
-		return
-	}
-	if result.Error == BuildErrPipeline {
-		print("rtg: frontend pipeline failed at package=")
-		rtgPrintInt(result.ErrorPackage)
-		print(" file=")
-		rtgPrintInt(result.ErrorFile)
-		print(" token=")
-		rtgPrintInt(result.ErrorToken)
-		print("\n")
-		return
-	}
-	print("rtg: build failed\n")
-}
-
 func rtgPrintInt(value int) {
 	if value == 0 {
 		print("0")
@@ -241,48 +201,4 @@ func rtgPrintInt(value int) {
 	for i := len(digits) - 1; i >= 0; i-- {
 		print(string(digits[i : i+1]))
 	}
-}
-
-func printOptionError(options Options) {
-	if options.Error == ParseErrMissingOutput {
-		print("rtg: missing output after -o\n")
-		return
-	}
-	if options.Error == ParseErrMissingTarget {
-		print("rtg: missing target after -t\n")
-		return
-	}
-	if options.Error == ParseErrUnsupportedTarget {
-		print("rtg: unsupported target: ")
-		print(options.ErrorArg)
-		print("\n")
-		return
-	}
-	if options.Error == ParseErrUnknownOption {
-		print("rtg: unknown option: ")
-		print(options.ErrorArg)
-		print("\n")
-		return
-	}
-	if options.Error == ParseErrMissingTags {
-		print("rtg: missing tags after -tags\n")
-		return
-	}
-	if options.Error == ParseErrInvalidTags {
-		print("rtg: invalid build tags: ")
-		print(options.ErrorArg)
-		print("\n")
-		return
-	}
-	if options.Error == ParseErrMissingPackage {
-		print("rtg: missing package path\n")
-		return
-	}
-	if options.Error == ParseErrExtraPackage {
-		print("rtg: extra package path: ")
-		print(options.ErrorArg)
-		print("\n")
-		return
-	}
-	print("rtg: option parse failed\n")
 }

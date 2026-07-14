@@ -1,3 +1,5 @@
+//go:build !rtg
+
 package driver
 
 import "j5.nz/rtg/rtg/internal/load"
@@ -9,14 +11,21 @@ const (
 )
 
 type Backend interface {
-	CompileUnit(unit []byte, target string, strip bool) ([]byte, bool)
+	CompileUnit(unit []byte, target string, strip bool) BackendResult
+}
+
+type BackendResult struct {
+	Binary     []byte
+	Ok         bool
+	Diagnostic Diagnostic
 }
 
 type CompileResult struct {
-	Build  BuildResult
-	Binary []byte
-	Ok     bool
-	Error  int
+	Build      BuildResult
+	Binary     []byte
+	Ok         bool
+	Error      int
+	Diagnostic Diagnostic
 }
 
 func CompileUnit(args []string, workDir string, stdRoot string, files []load.SourceFile, backend Backend) CompileResult {
@@ -24,6 +33,7 @@ func CompileUnit(args []string, workDir string, stdRoot string, files []load.Sou
 	built := BuildUnit(args, workDir, stdRoot, files)
 	result.Build = built
 	if !built.Ok {
+		result.Diagnostic = built.Diagnostic
 		return compileFail(result, CompileErrBuild)
 	}
 	return compileBuiltUnit(result, built, backend)
@@ -34,6 +44,7 @@ func CompileFromFS(args []string, workDir string, stdRoot string, fs SourceFS, b
 	built := BuildFromFS(args, workDir, stdRoot, fs)
 	result.Build = built
 	if !built.Ok {
+		result.Diagnostic = built.Diagnostic
 		return compileFail(result, CompileErrBuild)
 	}
 	return compileBuiltUnit(result, built, backend)
@@ -43,11 +54,15 @@ func compileBuiltUnit(result CompileResult, built BuildResult, backend Backend) 
 	if backend == nil {
 		return compileFail(result, CompileErrBackend)
 	}
-	binary, ok := backend.CompileUnit(built.Unit, built.Options.Target, built.Options.Strip)
-	if !ok || len(binary) == 0 {
+	backendResult := backend.CompileUnit(built.Unit, built.Options.Target, built.Options.Strip)
+	if !backendResult.Ok || len(backendResult.Binary) == 0 {
+		result.Diagnostic = backendResult.Diagnostic
+		if !result.Diagnostic.Valid() {
+			result.Diagnostic = Diagnostic{Phase: "backend", Code: "RTG-BACKEND-001", Message: "backend compilation failed"}
+		}
 		return compileFail(result, CompileErrBackend)
 	}
-	result.Binary = binary
+	result.Binary = backendResult.Binary
 	return result
 }
 

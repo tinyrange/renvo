@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "source_digest": "0ae6f61f66d5e20c11592cb12a1ab04f0012b39b036ec2d0adc3cf095b23cd69",
+  "source_digest": "33afa2c85b6d5d5d5f94ba0b18522bd586ea156326c3bd958312e7e090af25d5",
   "runs": [
     {
       "stage": "host",
       "target": "linux/amd64",
-      "commit": "38c845c94cbcf978e5a4f424ee0a3e2870b413b4",
-      "captured_at": "2026-07-14T14:59:48Z",
+      "commit": "698a19ba2ee4884622850eb3550249f08ce4bf0f",
+      "captured_at": "2026-07-14T15:02:12Z",
       "observations": [
         {
           "id": 1,
@@ -16,7 +16,7 @@
         {
           "id": 2,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 3,
@@ -66,12 +66,12 @@
         {
           "id": 12,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 13,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 14,
@@ -86,7 +86,7 @@
         {
           "id": 16,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 17,
@@ -96,7 +96,7 @@
         {
           "id": 18,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 19,
@@ -131,12 +131,12 @@
         {
           "id": 25,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 26,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 27,
@@ -146,7 +146,7 @@
         {
           "id": 28,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 29,
@@ -176,12 +176,12 @@
         {
           "id": 34,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 35,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 36,
@@ -191,47 +191,47 @@
         {
           "id": 37,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 38,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 39,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 40,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: meta failed"
         },
         {
           "id": 41,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: meta failed"
         },
         {
           "id": 42,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 43,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 44,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: meta failed"
         },
         {
           "id": 45,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: meta failed"
         },
         {
           "id": 46,
@@ -246,7 +246,7 @@
         {
           "id": 48,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 49,
@@ -256,7 +256,7 @@
         {
           "id": 50,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 51,
@@ -266,12 +266,12 @@
         {
           "id": 52,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 53,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 54,
@@ -286,7 +286,7 @@
         {
           "id": 56,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 57,
@@ -301,47 +301,47 @@
         {
           "id": 59,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 60,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 61,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 62,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 63,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 64,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 65,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 66,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 67,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 68,
@@ -361,47 +361,47 @@
         {
           "id": 71,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 72,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 73,
-          "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "status": "frontend-diagnostic",
+          "message": "./cmd/app/main.go:3:23: error RTG-CHECK-007 (checker): return value count does not match function results"
         },
         {
           "id": 74,
-          "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "status": "frontend-diagnostic",
+          "message": "./cmd/app/main.go:3:30: error RTG-CHECK-008 (checker): assignment value is not assignable to its destination"
         },
         {
           "id": 75,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 76,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 77,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 78,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 79,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 80,
@@ -411,7 +411,7 @@
         {
           "id": 81,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 82,
@@ -421,22 +421,22 @@
         {
           "id": 83,
           "status": "frontend-diagnostic",
-          "message": "rtg: frontend pipeline failed at package=2 file=0 token=6"
+          "message": "./cmd/app/main.go:5:2: error RTG-CHECK-002 (checker): duplicate declaration"
         },
         {
           "id": 84,
           "status": "frontend-diagnostic",
-          "message": "rtg: source error at \u003crepo\u003e/rtg/std/math"
+          "message": "\u003crepo\u003e/rtg/std/math: error RTG-LOAD-005 (loader): package directory could not be read"
         },
         {
           "id": 85,
           "status": "frontend-diagnostic",
-          "message": "rtg: source error at \u003crepo\u003e/rtg/std/time"
+          "message": "\u003crepo\u003e/rtg/std/time: error RTG-LOAD-005 (loader): package directory could not be read"
         },
         {
           "id": 86,
           "status": "frontend-diagnostic",
-          "message": "rtg: source error at \u003crepo\u003e/rtg/std/encoding/json"
+          "message": "\u003crepo\u003e/rtg/std/encoding/json: error RTG-LOAD-005 (loader): package directory could not be read"
         },
         {
           "id": 87,
@@ -446,7 +446,7 @@
         {
           "id": 88,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 89,
@@ -461,12 +461,12 @@
         {
           "id": 91,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 92,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 93,
@@ -476,97 +476,97 @@
         {
           "id": 94,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: meta failed"
         },
         {
           "id": 95,
           "status": "frontend-diagnostic",
-          "message": "rtg: source error at \u003crepo\u003e/rtg/std/regexp"
+          "message": "\u003crepo\u003e/rtg/std/regexp: error RTG-LOAD-005 (loader): package directory could not be read"
         },
         {
           "id": 96,
           "status": "frontend-diagnostic",
-          "message": "rtg: source error at \u003crepo\u003e/rtg/std/reflect"
+          "message": "\u003crepo\u003e/rtg/std/reflect: error RTG-LOAD-005 (loader): package directory could not be read"
         },
         {
           "id": 97,
           "status": "frontend-diagnostic",
-          "message": "rtg: source error at \u003crepo\u003e/rtg/std/net/http"
+          "message": "\u003crepo\u003e/rtg/std/net/http: error RTG-LOAD-005 (loader): package directory could not be read"
         },
         {
           "id": 98,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 99,
           "status": "frontend-diagnostic",
-          "message": "rtg: source error at \u003crepo\u003e/rtg/std/C"
+          "message": "\u003crepo\u003e/rtg/std/C: error RTG-LOAD-005 (loader): package directory could not be read"
         },
         {
           "id": 100,
           "status": "frontend-diagnostic",
-          "message": "rtg: source error at \u003crepo\u003e/rtg/std/embed"
+          "message": "\u003crepo\u003e/rtg/std/embed: error RTG-LOAD-005 (loader): package directory could not be read"
         },
         {
           "id": 101,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 102,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 103,
           "status": "frontend-diagnostic",
-          "message": "rtg: source error at github.com/example/missing"
+          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-008 (loader): unresolved import github.com/example/missing"
         },
         {
           "id": 104,
           "status": "frontend-diagnostic",
-          "message": "rtg: source error at \u003crepo\u003e/rtg/std/C"
+          "message": "\u003crepo\u003e/rtg/std/C: error RTG-LOAD-005 (loader): package directory could not be read"
         },
         {
           "id": 105,
           "status": "frontend-diagnostic",
-          "message": "rtg: source error at example.com/lib/pkg"
+          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-008 (loader): unresolved import example.com/lib/pkg"
         },
         {
           "id": 106,
           "status": "frontend-diagnostic",
-          "message": "rtg: source error at example.com/lib/pkg"
+          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-008 (loader): unresolved import example.com/lib/pkg"
         },
         {
           "id": 107,
           "status": "frontend-diagnostic",
-          "message": "rtg: frontend pipeline failed at package=-1 file=-1 token=-1"
+          "message": "./pkg/b/b.go:3:10: error RTG-LOAD-011 (loader): import cycle detected"
         },
         {
           "id": 108,
           "status": "frontend-diagnostic",
-          "message": "rtg: frontend pipeline failed at package=-1 file=0 token=-1"
+          "message": "./pkg/two.go: error RTG-LOAD-012 (loader): files in one directory declare different packages"
         },
         {
           "id": 109,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 110,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 111,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 112,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         },
         {
           "id": 113,
@@ -576,15 +576,15 @@
         {
           "id": 114,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
         }
       ]
     },
     {
       "stage": "stage3",
       "target": "linux/amd64",
-      "commit": "38c845c94cbcf978e5a4f424ee0a3e2870b413b4",
-      "captured_at": "2026-07-14T14:59:48Z",
+      "commit": "698a19ba2ee4884622850eb3550249f08ce4bf0f",
+      "captured_at": "2026-07-14T15:02:12Z",
       "observations": [
         {
           "id": 1,
@@ -594,7 +594,7 @@
         {
           "id": 2,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 3,
@@ -644,12 +644,12 @@
         {
           "id": 12,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 13,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 14,
@@ -664,7 +664,7 @@
         {
           "id": 16,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 17,
@@ -674,7 +674,7 @@
         {
           "id": 18,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 19,
@@ -709,12 +709,12 @@
         {
           "id": 25,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 26,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 27,
@@ -724,7 +724,7 @@
         {
           "id": 28,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 29,
@@ -754,12 +754,12 @@
         {
           "id": 34,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 35,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 36,
@@ -769,47 +769,47 @@
         {
           "id": 37,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 38,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 39,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 40,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 41,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 42,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 43,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 44,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 45,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 46,
@@ -824,7 +824,7 @@
         {
           "id": 48,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 49,
@@ -834,7 +834,7 @@
         {
           "id": 50,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 51,
@@ -844,12 +844,12 @@
         {
           "id": 52,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 53,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 54,
@@ -864,7 +864,7 @@
         {
           "id": 56,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 57,
@@ -879,47 +879,47 @@
         {
           "id": 59,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 60,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 61,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 62,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 63,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 64,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 65,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 66,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 67,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 68,
@@ -939,47 +939,47 @@
         {
           "id": 71,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 72,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 73,
-          "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "status": "frontend-diagnostic",
+          "message": "./cmd/app/main.go:3:23: error RTG-CHECK-007 (checker): return value count does not match function results"
         },
         {
           "id": 74,
-          "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "status": "frontend-diagnostic",
+          "message": "./cmd/app/main.go:3:30: error RTG-CHECK-008 (checker): assignment value is not assignable to its destination"
         },
         {
           "id": 75,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 76,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 77,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 78,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 79,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 80,
@@ -989,7 +989,7 @@
         {
           "id": 81,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 82,
@@ -999,22 +999,22 @@
         {
           "id": 83,
           "status": "frontend-diagnostic",
-          "message": "rtg: frontend pipeline failed at package=2 file=0 token=6"
+          "message": "./cmd/app/main.go:5:2: error RTG-CHECK-001 (checker): type checking failed"
         },
         {
           "id": 84,
           "status": "frontend-diagnostic",
-          "message": "rtg: directory read failed: \u003crepo\u003e/rtg/std/math"
+          "message": "\u003crepo\u003e/rtg/std/math: error RTG-LOAD-001 (loader): source collection failed"
         },
         {
           "id": 85,
           "status": "frontend-diagnostic",
-          "message": "rtg: directory read failed: \u003crepo\u003e/rtg/std/time"
+          "message": "\u003crepo\u003e/rtg/std/time: error RTG-LOAD-001 (loader): source collection failed"
         },
         {
           "id": 86,
           "status": "frontend-diagnostic",
-          "message": "rtg: directory read failed: \u003crepo\u003e/rtg/std/encoding/json"
+          "message": "\u003crepo\u003e/rtg/std/encoding/json: error RTG-LOAD-001 (loader): source collection failed"
         },
         {
           "id": 87,
@@ -1024,7 +1024,7 @@
         {
           "id": 88,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 89,
@@ -1039,12 +1039,12 @@
         {
           "id": 91,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 92,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 93,
@@ -1054,97 +1054,97 @@
         {
           "id": 94,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 95,
           "status": "frontend-diagnostic",
-          "message": "rtg: directory read failed: \u003crepo\u003e/rtg/std/regexp"
+          "message": "\u003crepo\u003e/rtg/std/regexp: error RTG-LOAD-001 (loader): source collection failed"
         },
         {
           "id": 96,
           "status": "frontend-diagnostic",
-          "message": "rtg: directory read failed: \u003crepo\u003e/rtg/std/reflect"
+          "message": "\u003crepo\u003e/rtg/std/reflect: error RTG-LOAD-001 (loader): source collection failed"
         },
         {
           "id": 97,
           "status": "frontend-diagnostic",
-          "message": "rtg: directory read failed: \u003crepo\u003e/rtg/std/net/http"
+          "message": "\u003crepo\u003e/rtg/std/net/http: error RTG-LOAD-001 (loader): source collection failed"
         },
         {
           "id": 98,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 99,
           "status": "frontend-diagnostic",
-          "message": "rtg: directory read failed: \u003crepo\u003e/rtg/std/C"
+          "message": "\u003crepo\u003e/rtg/std/C: error RTG-LOAD-001 (loader): source collection failed"
         },
         {
           "id": 100,
           "status": "frontend-diagnostic",
-          "message": "rtg: directory read failed: \u003crepo\u003e/rtg/std/embed"
+          "message": "\u003crepo\u003e/rtg/std/embed: error RTG-LOAD-001 (loader): source collection failed"
         },
         {
           "id": 101,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 102,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 103,
           "status": "frontend-diagnostic",
-          "message": "rtg: unresolved import: github.com/example/missing"
+          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-008 (loader): unresolved import github.com/example/missing"
         },
         {
           "id": 104,
           "status": "frontend-diagnostic",
-          "message": "rtg: directory read failed: \u003crepo\u003e/rtg/std/C"
+          "message": "\u003crepo\u003e/rtg/std/C: error RTG-LOAD-001 (loader): source collection failed"
         },
         {
           "id": 105,
           "status": "frontend-diagnostic",
-          "message": "rtg: unresolved import: example.com/lib/pkg"
+          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-008 (loader): unresolved import example.com/lib/pkg"
         },
         {
           "id": 106,
           "status": "frontend-diagnostic",
-          "message": "rtg: unresolved import: example.com/lib/pkg"
+          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-008 (loader): unresolved import example.com/lib/pkg"
         },
         {
           "id": 107,
           "status": "frontend-diagnostic",
-          "message": "rtg: frontend pipeline failed at package=-1 file=-1 token=-1"
+          "message": "./pkg/b/b.go:3:10: error RTG-LOAD-011 (loader): import cycle detected"
         },
         {
           "id": 108,
           "status": "frontend-diagnostic",
-          "message": "rtg: frontend pipeline failed at package=-1 file=0 token=-1"
+          "message": "rtg: error RTG-LOAD-009 (loader): workspace loading failed"
         },
         {
           "id": 109,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 110,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 111,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 112,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 113,
@@ -1154,7 +1154,7 @@
         {
           "id": 114,
           "status": "backend-failure",
-          "message": "rtg: backend compilation failed"
+          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         }
       ]
     }

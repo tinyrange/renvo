@@ -52,6 +52,8 @@ type Graph struct {
 	Ok           bool
 	Error        int
 	ErrorPackage int
+	ErrorPath    string
+	ErrorOffset  int
 }
 
 func LoadGraph(module Module, stdRoot string, workDir string, arg string, files []SourceFile) Graph {
@@ -164,6 +166,9 @@ func (b *graphBuilder) load(ref PackageRef) int {
 		if imp.Kind == PackageInModule || imp.Kind == PackageStandard {
 			b.load(imp)
 			if !b.graph.Ok {
+				if b.graph.Error == GraphErrCycle && b.graph.ErrorPath == "" {
+					b.graph.ErrorPath, b.graph.ErrorOffset = packageImportLocation(pkg, imp.ImportPath)
+				}
 				b.loading = b.loading[:len(b.loading)-1]
 				return -1
 			}
@@ -181,6 +186,23 @@ func (b *graphBuilder) load(ref PackageRef) int {
 	}
 	b.graph.Packages = append(b.graph.Packages, pkg)
 	return len(b.graph.Packages) - 1
+}
+
+func packageImportLocation(pkg Package, importPath string) (string, int) {
+	for i := 0; i < len(pkg.Files); i++ {
+		file := pkg.Files[i]
+		for j := 0; j < len(file.File.Imports); j++ {
+			tokenIndex := file.File.Imports[j].PathTok
+			if tokenIndex < 0 || tokenIndex >= len(file.File.Tokens) {
+				continue
+			}
+			path, ok := syntax.StringLiteralValue(file.Src, file.File.Tokens[tokenIndex])
+			if ok && path == importPath {
+				return file.Path, file.File.Tokens[tokenIndex].Start
+			}
+		}
+	}
+	return "", 0
 }
 
 func packageFail(pkg Package, err int, file int, imp int) Package {

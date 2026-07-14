@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"strings"
 	"testing"
 
 	"j5.nz/rtg/rtg/internal/load"
@@ -98,6 +99,41 @@ func TestBuildUnitReportsPipelineError(t *testing.T) {
 	}
 	if result.ErrorPackage != 0 || result.ErrorFile != 1 || result.ErrorToken < 0 {
 		t.Fatalf("pipeline location = pkg %d file %d tok %d", result.ErrorPackage, result.ErrorFile, result.ErrorToken)
+	}
+}
+
+func TestBuildUnitReportsStructuredReturnDiagnostic(t *testing.T) {
+	result := BuildUnit([]string{"-o", "app", "./cmd/app"}, "/repo/case", "/std", []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\n\nfunc broken() (int, int) { return 1 }\nfunc appMain() int { return 0 }\n")},
+	})
+	if result.Ok {
+		t.Fatal("invalid return count accepted")
+	}
+	want := Diagnostic{
+		Phase:   "checker",
+		Code:    "RTG-CHECK-007",
+		Message: "return value count does not match function results",
+		Path:    "/repo/case/cmd/app/main.go",
+		Line:    3,
+		Column:  28,
+	}
+	if result.Diagnostic.Phase != want.Phase || result.Diagnostic.Code != want.Code || result.Diagnostic.Message != want.Message || result.Diagnostic.Path != want.Path || result.Diagnostic.Line != want.Line || result.Diagnostic.Column != want.Column {
+		t.Fatalf("diagnostic = %#v, want key fields %#v", result.Diagnostic, want)
+	}
+	formatted := FormatDiagnostic(result.Diagnostic)
+	if !strings.Contains(formatted, "/repo/case/cmd/app/main.go:3:28: error RTG-CHECK-007 (checker):") {
+		t.Fatalf("formatted diagnostic = %q", formatted)
+	}
+}
+
+func TestBuildUnitReportsStructuredParserDiagnostic(t *testing.T) {
+	result := BuildUnit([]string{"-o", "app", "./cmd/app"}, "/repo/case", "/std", []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc broken( {\n")},
+	})
+	if result.Ok || result.Diagnostic.Code != "RTG-PARSE-001" || result.Diagnostic.Path != "/repo/case/cmd/app/main.go" || result.Diagnostic.Line < 1 || result.Diagnostic.Column < 1 {
+		t.Fatalf("parser diagnostic = %#v", result.Diagnostic)
 	}
 }
 

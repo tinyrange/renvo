@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 type CommandBackend struct {
@@ -14,9 +15,9 @@ type CommandBackend struct {
 	Env  []string
 }
 
-func (b CommandBackend) CompileUnit(unit []byte, target string, strip bool) ([]byte, bool) {
+func (b CommandBackend) CompileUnit(unit []byte, target string, strip bool) BackendResult {
 	if b.Path == "" || target == "" || len(unit) == 0 {
-		return nil, false
+		return BackendResult{Diagnostic: Diagnostic{Phase: "backend", Code: "RTG-BACKEND-002", Message: "backend command is not configured"}}
 	}
 	args := make([]string, 0, len(b.Args)+7)
 	args = append(args, b.Args...)
@@ -27,15 +28,24 @@ func (b CommandBackend) CompileUnit(unit []byte, target string, strip bool) ([]b
 	args = append(args, "-o", "-", "-")
 	cmd := exec.Command(b.Path, args...)
 	cmd.Stdin = bytes.NewReader(unit)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 	if len(b.Env) > 0 {
 		cmd.Env = append(os.Environ(), b.Env...)
 	}
-	data, err := cmd.Output()
+	err := cmd.Run()
 	if err != nil {
-		return nil, false
+		message := strings.TrimSpace(stderr.String())
+		if message == "" {
+			message = "backend command failed: " + err.Error()
+		}
+		return BackendResult{Diagnostic: Diagnostic{Phase: "backend", Code: "RTG-BACKEND-003", Message: message}}
 	}
+	data := stdout.Bytes()
 	if len(data) == 0 {
-		return nil, false
+		return BackendResult{Diagnostic: Diagnostic{Phase: "backend", Code: "RTG-BACKEND-004", Message: "backend produced an empty object"}}
 	}
-	return data, true
+	return BackendResult{Binary: data, Ok: true}
 }

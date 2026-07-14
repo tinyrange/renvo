@@ -27,26 +27,30 @@ type SourceFS interface {
 }
 
 type SourceResult struct {
-	Files     []load.SourceFile
-	Module    load.Module
-	Root      load.PackageRef
-	Ok        bool
-	Error     int
-	ErrorPath string
+	Files           []load.SourceFile
+	Module          load.Module
+	Root            load.PackageRef
+	Ok              bool
+	Error           int
+	ErrorPath       string
+	ErrorSourcePath string
+	ErrorOffset     int
 }
 
 type sourceCollector struct {
-	fs      SourceFS
-	module  load.Module
-	stdRoot string
-	target  string
-	tags    []string
-	files   []load.SourceFile
-	loaded  []string
-	loading []string
-	ok      bool
-	err     int
-	errPath string
+	fs            SourceFS
+	module        load.Module
+	stdRoot       string
+	target        string
+	tags          []string
+	files         []load.SourceFile
+	loaded        []string
+	loading       []string
+	ok            bool
+	err           int
+	errPath       string
+	errSourcePath string
+	errOffset     int
 }
 
 func CollectSources(workDir string, stdRoot string, arg string, fs SourceFS) SourceResult {
@@ -89,7 +93,10 @@ func CollectSourcesForTargetTags(workDir string, stdRoot string, arg string, tar
 	collector.collectPackage(root)
 	result.Files = collector.files
 	if !collector.ok {
-		return sourceFail(result, collector.err, collector.errPath)
+		result = sourceFail(result, collector.err, collector.errPath)
+		result.ErrorSourcePath = collector.errSourcePath
+		result.ErrorOffset = collector.errOffset
+		return result
 	}
 	return result
 }
@@ -156,12 +163,12 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 		c.files = append(c.files, load.SourceFile{Path: path, Src: src})
 		imports, importsOK := collectSourceImports(c.module, c.stdRoot, src)
 		if !importsOK {
-			c.fail(SourceErrParse, path)
+			c.failAt(SourceErrParse, path, path, len(src))
 			return
 		}
 		for j := 0; j < len(imports); j++ {
 			if !imports[j].Ok {
-				c.fail(SourceErrImport, imports[j].ImportPath)
+				c.failAt(SourceErrImport, imports[j].ImportPath, path, sourceTextOffset(src, imports[j].ImportPath))
 				return
 			}
 			c.collectPackage(imports[j])
@@ -182,6 +189,31 @@ func (c *sourceCollector) fail(err int, path string) {
 	c.ok = false
 	c.err = err
 	c.errPath = path
+}
+
+func (c *sourceCollector) failAt(err int, path string, sourcePath string, offset int) {
+	c.fail(err, path)
+	c.errSourcePath = sourcePath
+	c.errOffset = offset
+}
+
+func sourceTextOffset(src []byte, text string) int {
+	if len(text) == 0 || len(text) > len(src) {
+		return 0
+	}
+	for i := 0; i+len(text) <= len(src); i++ {
+		matched := true
+		for j := 0; j < len(text); j++ {
+			if src[i+j] != text[j] {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return i
+		}
+	}
+	return 0
 }
 
 func sortDirEntries(entries []DirEntry) {
