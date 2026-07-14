@@ -1194,6 +1194,15 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		base := &ep.exprs[e.left]
 		if base.kind == rtgExprCall {
 			baseType := rtgInferParsedExprType(g, ep, e.left)
+			baseResolved := rtgResolveType(g.meta, baseType)
+			if baseResolved.kind == rtgTypePointer {
+				if !rtgEmitSelectorAddressSecondary(g, ep, idx) {
+					return false
+				}
+				fieldType := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, idx))
+				rtgAsmLoadPrimaryMemSecondaryDispSize(a, 0, rtgScalarKindSize(fieldType.kind))
+				return true
+			}
 			if !rtgTypeIsStruct(g.meta, baseType) {
 				return false
 			}
@@ -1840,6 +1849,20 @@ func rtgAmd64EmitSelectorAddressRdx(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 	fieldOffset := rtgStructFieldOffset(g, baseType, e.nameStart, e.nameEnd)
 	if fieldOffset < 0 {
 		return false
+	}
+	if base.kind == rtgExprCall {
+		baseResolved := rtgResolveType(meta, baseType)
+		if baseResolved.kind != rtgTypePointer {
+			return false
+		}
+		if !rtgEmitIntExpr(g, ep, e.left) {
+			return false
+		}
+		rtgAsmCopyPrimaryToSecondary(a)
+		if fieldOffset != 0 {
+			rtgAsmAddSecondaryImm(a, fieldOffset)
+		}
+		return true
 	}
 	if rtgTargetArch == rtgArchAmd64 && base.kind == rtgExprSelector {
 		totalOffset := fieldOffset
