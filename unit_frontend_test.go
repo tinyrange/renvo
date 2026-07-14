@@ -54,10 +54,7 @@ func TestUnitFrontendCompileTests(t *testing.T) {
 						t.Fatalf("unit write failed: %v", err)
 					}
 
-					outputFile := filepath.Join(testOutDir, "test")
-					if err := runTargetCompilerBinary(t, target, stage2, outputFile, []string{unitPath}); err != nil {
-						t.Fatalf("unit compilation failed: %v", err)
-					}
+					outputFile := cachedTargetProgram(t, target, stage2, "unit", []string{unitPath})
 
 					actual, err := runTargetCommand(t, target, outputFile)
 					if err != nil {
@@ -88,10 +85,7 @@ func TestUnitFrontendCompilerCompiler(t *testing.T) {
 				t.Fatalf("compiler unit write failed: %v", err)
 			}
 
-			stage3 := filepath.Join(outDir, "stage3-"+target.safeName())
-			if err := runTargetCompilerBinary(t, target, stage2, stage3, []string{unitPath}); err != nil {
-				t.Fatalf("stage3 unit compilation failed: %v", err)
-			}
+			stage3 := cachedStage3Compiler(t, target, stage2, unitPath)
 
 			smoke := filepath.Join(outDir, "smoke")
 			if err := runTargetCompilerBinary(t, target, stage3, smoke, []string{"tests/appmain_no_args.go"}); err != nil {
