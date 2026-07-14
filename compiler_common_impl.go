@@ -7524,7 +7524,7 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 				sliceType := rtgResolveType(meta, leftType)
 				elemType := rtgResolveType(meta, sliceType.elem)
 				mapIndex := sliceType.kind == rtgTypeMap && rtgTypeKindIsScalarIntOrPointer(elemType.kind)
-				arrayIndex := sliceType.kind == rtgTypeArray && rtgTypeKindIsScalarInt(elemType.kind)
+				arrayIndex := sliceType.kind == rtgTypeArray && rtgTypeKindIsScalarValue(elemType.kind)
 				if mapIndex || arrayIndex {
 					if mapIndex {
 						if !rtgEmitMapEntryAddress(g, &lhs, lhsIndex, true) {
@@ -7536,7 +7536,15 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 					addrOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
 					rtgAsmStorePrimaryStack(a, addrOffset)
 					var rhs rtgExprParse
-					if !rtgParseExpressionOK(&rhs, p, assignTok+1, stmt.endTok) || !rtgEmitIntExpr(g, &rhs, len(rhs.exprs)-1) {
+					if !rtgParseExpressionOK(&rhs, p, assignTok+1, stmt.endTok) {
+						return false
+					}
+					rhsIndex := len(rhs.exprs) - 1
+					if arrayIndex {
+						if !rtgEmitScalarExprForKind(g, &rhs, rhsIndex, elemType.kind) {
+							return false
+						}
+					} else if !rtgEmitIntExpr(g, &rhs, rhsIndex) {
 						return false
 					}
 					rtgAsmNormalizePrimaryForKind(a, elemType.kind)
@@ -12022,6 +12030,11 @@ func rtgEmitIndexAddressPrimary(g *rtgLinearGen, ep *rtgExprParse, indexIdx int)
 			if !rtgEmitIndexAddressPrimary(g, ep, indexExpr.left) {
 				return false
 			}
+		} else if base.kind == rtgExprSelector {
+			if !rtgEmitSelectorAddressSecondary(g, ep, indexExpr.left) {
+				return false
+			}
+			rtgAsmCopySecondaryToPrimary(a)
 		} else {
 			return false
 		}
