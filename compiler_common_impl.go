@@ -3953,7 +3953,7 @@ func rtgBuildMetaInto(pp *rtgProgram, m *rtgMeta) {
 	parsedGroupEnd := -1
 	for i := 0; i < len(p.decls); i++ {
 		decl := p.decls[i]
-		if decl.kind != rtgTokType && decl.kind != rtgTokVar && decl.kind != rtgTokConst {
+		if decl.kind != rtgTokConst {
 			continue
 		}
 		if !rtgTokIsKind(p, decl.startTok, decl.kind) {
@@ -3975,11 +3975,36 @@ func rtgBuildMetaInto(pp *rtgProgram, m *rtgMeta) {
 			rtgParseTopDeclGroup(m, p, decl.kind, entryStart, decl.endTok)
 			continue
 		}
-		if decl.kind == rtgTokConst {
-			rtgParseConstDecls(m, p, entryStart, decl.endTok)
-		} else {
-			rtgParseTopDeclEntry(m, p, decl.kind, entryStart, decl.endTok)
+		rtgParseConstDecls(m, p, entryStart, decl.endTok)
+	}
+
+	parsedGroupStart = -1
+	parsedGroupEnd = -1
+	for i := 0; i < len(p.decls); i++ {
+		decl := p.decls[i]
+		if decl.kind != rtgTokType && decl.kind != rtgTokVar {
+			continue
 		}
+		if !rtgTokIsKind(p, decl.startTok, decl.kind) {
+			groupStart, groupEnd, isGroup := rtgFindContainingTopDeclGroup(p, decl.kind, decl.startTok, decl.endTok)
+			if isGroup {
+				if parsedGroupStart == groupStart && parsedGroupEnd == groupEnd {
+					continue
+				}
+				rtgParseTopDeclGroup(m, p, decl.kind, groupStart+1, groupEnd)
+				parsedGroupStart = groupStart
+				parsedGroupEnd = groupEnd
+				continue
+			}
+			rtgParseTopDeclEntry(m, p, decl.kind, decl.startTok, decl.endTok)
+			continue
+		}
+		entryStart := decl.startTok + 1
+		if rtgTokCharIs(p, entryStart, '(') {
+			rtgParseTopDeclGroup(m, p, decl.kind, entryStart, decl.endTok)
+			continue
+		}
+		rtgParseTopDeclEntry(m, p, decl.kind, entryStart, decl.endTok)
 	}
 	rtgFinalizeTypeLayouts(m)
 	for i := 0; i < len(p.funcs); i++ {
@@ -4858,9 +4883,17 @@ func rtgParseType(m *rtgMeta, p *rtgProgram, start int, end int) rtgTypeResult {
 		}
 		return rtgTypeResult{typ: rtgAddType(m, rtgTypeMap, value.typ, key.typ, 0, 24, 0, 0), next: value.next}
 	}
-	if rtgTokCharIs(p, start, '[') && rtgTokIsKind(p, start+1, rtgTokNumber) && rtgTokCharIs(p, start+2, ']') {
-		count := rtgParseIntToken(p, start+1)
-		elem := rtgParseType(m, p, start+3, end)
+	if rtgTokCharIs(p, start, '[') && !rtgTokCharIs(p, start+1, ']') {
+		closeTok := rtgFindMatchingExprClose(p, start+1, end, '[', ']')
+		if closeTok <= start+1 {
+			return rtgTypeResult{next: start}
+		}
+		length := rtgEvalMetaConstExpr(m, p, start+1, closeTok, 0)
+		if !length.ok || length.value < 0 {
+			return rtgTypeResult{next: start}
+		}
+		count := length.value
+		elem := rtgParseType(m, p, closeTok+1, end)
 		if elem.typ == 0 {
 			return rtgTypeResult{next: start}
 		}
@@ -12073,9 +12106,15 @@ func rtgEmitIndexAddressPrimary(g *rtgLinearGen, ep *rtgExprParse, indexIdx int)
 		if base.kind == rtgExprIdent {
 			localIndex := rtgFindLocalIndex(g, base.nameStart, base.nameEnd)
 			if localIndex < 0 {
-				return false
+				globalOffset := rtgFindGlobalOffset(g, base.nameStart, base.nameEnd)
+				globalType := rtgResolveType(g.meta, rtgFindGlobalType(g, base.nameStart, base.nameEnd))
+				if globalOffset < 0 || globalType.kind != rtgTypeArray {
+					return false
+				}
+				rtgAsmPrimaryBssAddr(a, globalOffset)
+			} else {
+				rtgAsmAddressPrimaryStack(a, g.locals[localIndex].offset)
 			}
-			rtgAsmAddressPrimaryStack(a, g.locals[localIndex].offset)
 		} else if base.kind == rtgExprIndex {
 			if !rtgEmitIndexAddressPrimary(g, ep, indexExpr.left) {
 				return false
