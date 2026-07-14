@@ -667,6 +667,32 @@ func pair() (int, int) {
 	assertReturnValues(t, pairFile, pairBody.Returns, [][]string{{"1", "2"}})
 }
 
+func TestCheckGraphMultilineReturnList(t *testing.T) {
+	graph := testGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+func values() (int, int, int, int) {
+	return 1,
+		2,
+		3,
+		4
+}
+`)},
+	})
+	prog := CheckGraph(graph)
+	if !prog.Ok {
+		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
+	}
+	root := prog.Packages[0]
+	bodyIndex := LookupFuncBody(root, "values")
+	if bodyIndex < 0 {
+		t.Fatalf("values body not found: %#v", root.Bodies)
+	}
+	body := root.Bodies[bodyIndex]
+	file := prog.Graph.Packages[0].Files[body.File].File
+	assertReturnValues(t, file, body.Returns, [][]string{{"1", "2", "3", "4"}})
+}
+
 func TestCheckGraphDuplicateParamScope(t *testing.T) {
 	graph := testGraph(t, []load.SourceFile{
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
