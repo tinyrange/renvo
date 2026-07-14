@@ -446,8 +446,8 @@
       "id": 56,
       "area": "functions",
       "title": "Bare returns with named results",
-      "expected": "backend-failure",
-      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "expected": "accepted",
+      "commentary_html": "Named result variables are bound on entry and bare returns emit their current values across scalar and aggregate result shapes.",
       "fixture": "rtg_tests/limitations/case_056"
     },
     {
