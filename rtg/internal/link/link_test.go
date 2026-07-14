@@ -202,6 +202,43 @@ type Graph struct { Value int }
 	}
 }
 
+func TestLinkBuildCorePreservesImportedTypeAliasMethodIdentity(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import "example.com/case/pkg/lib"
+
+func appMain() {
+	var image *lib.Image = lib.NewSurface()
+	image.Destroy()
+}
+`)},
+		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte(`package lib
+
+type Surface struct { Value int }
+type Image = Surface
+
+func NewSurface() *Surface { return &Surface{Value: 1} }
+func (s *Surface) Destroy() { s.Value = 0 }
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	for _, want := range []string{
+		"type Image = Surface",
+		"func (s *Surface) Destroy()",
+		"var image *Image = NewSurface()",
+		"image.Destroy()",
+	} {
+		if !bytes.Contains(linked.Program.Text, []byte(want)) {
+			t.Fatalf("linked source missing %q:\n%s", want, string(linked.Program.Text))
+		}
+	}
+}
+
 func TestLinkUnitsErasesUnsafePointerRoundTrip(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},

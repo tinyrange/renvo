@@ -13116,6 +13116,13 @@ func rtgCanonicalMethodReceiverType(meta *rtgMeta, typ int) int {
 			typ = t.elem
 			continue
 		}
+		if t.kind == rtgTypeNamed && t.elem == 0 && t.nameEnd > t.nameStart {
+			resolved := rtgFindResolvedNamedTypeIndex(meta, typ)
+			if resolved > 0 && resolved < len(meta.types) {
+				typ = resolved
+				continue
+			}
+		}
 		break
 	}
 	return typ
