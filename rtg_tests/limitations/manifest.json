@@ -526,8 +526,8 @@
       "id": 66,
       "area": "slices",
       "title": "append with multiple scalar values",
-      "expected": "backend-failure",
-      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "expected": "accepted",
+      "commentary_html": "Multiple append elements are evaluated left to right before the destination slice is mutated, then appended in source order.",
       "fixture": "rtg_tests/limitations/case_066"
     },
     {
