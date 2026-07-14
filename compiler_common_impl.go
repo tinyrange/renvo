@@ -2141,7 +2141,7 @@ func rtgScan(src []byte) rtgTokens {
 			c1 := src[i]
 			two := false
 			if c1 == '=' {
-				if c == ':' || c == '=' || c == '!' || c == '<' || c == '>' || c == '+' || c == '-' || c == '*' || c == '/' || c == '%' {
+				if c == ':' || c == '=' || c == '!' || c == '<' || c == '>' || c == '+' || c == '-' || c == '*' || c == '/' || c == '%' || c == '&' || c == '|' || c == '^' {
 					two = true
 				}
 			} else if c == '&' && (c1 == '&' || c1 == '^') {
@@ -2159,6 +2159,9 @@ func rtgScan(src []byte) rtgTokens {
 			}
 			if two {
 				i++
+				if i < srcLen && src[i] == '=' && (c == '<' && c1 == '<' || c == '>' && c1 == '>' || c == '&' && c1 == '^') {
+					i++
+				}
 			}
 		}
 		base := len(toks.data)
@@ -3926,13 +3929,31 @@ func rtgFindAssignmentToken(p *rtgProgram, start int, end int) int {
 		} else if rtgTokCharIs(p, i, ']') {
 			brack--
 		} else if paren == 0 && brack == 0 {
-			if rtgTokCharIs(p, i, '=') || rtgTok2Is(p, i, ':', '=') || rtgTok2Is(p, i, '+', '=') || rtgTok2Is(p, i, '-', '=') || rtgTok2Is(p, i, '*', '=') || rtgTok2Is(p, i, '/', '=') || rtgTok2Is(p, i, '%', '=') {
+			if rtgTokCharIs(p, i, '=') || rtgTok2Is(p, i, ':', '=') || rtgTokIsCompoundAssignment(p, i) {
 				return i
 			}
 		}
 		i++
 	}
 	return start
+}
+
+func rtgTokIsCompoundAssignment(p *rtgProgram, tok int) bool {
+	if !rtgTokIsKind(p, tok, rtgTokOp) {
+		return false
+	}
+	start := int(rtgTokStart(p, tok))
+	end := int(rtgTokEnd(p, tok))
+	if end-start == 2 && p.src[start+1] == '=' {
+		operator := p.src[start]
+		return operator == '+' || operator == '-' || operator == '*' || operator == '/' || operator == '%' || operator == '&' || operator == '|' || operator == '^'
+	}
+	if end-start != 3 || p.src[start+2] != '=' {
+		return false
+	}
+	first := p.src[start]
+	second := p.src[start+1]
+	return first == '<' && second == '<' || first == '>' && second == '>' || first == '&' && second == '^'
 }
 
 func rtgBuildMeta(pp *rtgProgram) rtgMeta {
@@ -7467,14 +7488,7 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 		nameEnd = int(rtgTokEnd(p, stmt.startTok))
 	}
 	assignTok := rtgFindAssignmentToken(p, stmt.startTok, stmt.endTok)
-	compoundAssign := false
-	if assignTok >= 0 && assignTok < rtgTokCount(p) {
-		tok := rtgTokAt(p, assignTok)
-		if tok.end-tok.start == 2 && p.src[tok.start+1] == '=' {
-			c := p.src[tok.start]
-			compoundAssign = c == '+' || c == '-' || c == '*' || c == '/' || c == '%'
-		}
-	}
+	compoundAssign := assignTok >= 0 && assignTok < rtgTokCount(p) && rtgTokIsCompoundAssignment(p, assignTok)
 	if assignTok > stmt.startTok && rtgEmitMultiAssign(g, stmt, assignTok) {
 		return true
 	}
