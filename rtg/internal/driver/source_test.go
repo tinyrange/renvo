@@ -116,6 +116,33 @@ func appMain() int { return 1 }
 	assertSourcePaths(t, result.Files, want)
 }
 
+func TestCollectSourcesAppliesCustomBuildTags(t *testing.T) {
+	fs := memorySourceFS{files: []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/plain.go", Src: []byte(`//go:build !rtg_bundle
+
+package main
+
+func appMain() int { return 0 }
+`)},
+		{Path: "/repo/case/cmd/app/bundle.go", Src: []byte(`//go:build rtg_bundle
+
+package main
+
+func appMain() int { return 1 }
+`)},
+	}}
+	result := CollectSourcesForTargetTags("/repo/case/cmd/app", "/std", ".", "linux/amd64", []string{"rtg_bundle"}, fs)
+	if !result.Ok {
+		t.Fatalf("CollectSources failed: err=%d path=%q", result.Error, result.ErrorPath)
+	}
+	want := []string{
+		"/repo/case/go.mod",
+		"/repo/case/cmd/app/bundle.go",
+	}
+	assertSourcePaths(t, result.Files, want)
+}
+
 func TestCollectSourcesReportsErrors(t *testing.T) {
 	missingModule := CollectSources("/repo/case", "/std", "./cmd/app", memorySourceFS{})
 	if missingModule.Ok || missingModule.Error != SourceErrMissingModule {

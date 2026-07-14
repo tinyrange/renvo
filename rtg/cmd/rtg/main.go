@@ -14,6 +14,10 @@ func main() {
 }
 
 func run(args []string, env []string) int {
+	if driver.CommandHelpRequested(args) {
+		fmt.Fprint(os.Stdout, driver.HelpText)
+		return 0
+	}
 	result := driver.RunCommand(args, env, nil)
 	if result.Ok {
 		return 0
@@ -71,6 +75,10 @@ func printOptionError(options driver.Options) {
 		fmt.Fprintf(os.Stderr, "rtg: unsupported target: %s\n", options.ErrorArg)
 	case driver.ParseErrUnknownOption:
 		fmt.Fprintf(os.Stderr, "rtg: unknown option: %s\n", options.ErrorArg)
+	case driver.ParseErrMissingTags:
+		fmt.Fprintln(os.Stderr, "rtg: missing tags after -tags")
+	case driver.ParseErrInvalidTags:
+		fmt.Fprintf(os.Stderr, "rtg: invalid build tags: %s\n", options.ErrorArg)
 	case driver.ParseErrMissingPackage:
 		fmt.Fprintln(os.Stderr, "rtg: missing package path")
 	case driver.ParseErrExtraPackage:

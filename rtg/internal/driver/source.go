@@ -39,6 +39,7 @@ type sourceCollector struct {
 	module  load.Module
 	stdRoot string
 	target  string
+	tags    []string
 	files   []load.SourceFile
 	loaded  []string
 	loading []string
@@ -52,6 +53,10 @@ func CollectSources(workDir string, stdRoot string, arg string, fs SourceFS) Sou
 }
 
 func CollectSourcesForTarget(workDir string, stdRoot string, arg string, target string, fs SourceFS) SourceResult {
+	return CollectSourcesForTargetTags(workDir, stdRoot, arg, target, nil, fs)
+}
+
+func CollectSourcesForTargetTags(workDir string, stdRoot string, arg string, target string, tags []string, fs SourceFS) SourceResult {
 	result := SourceResult{Ok: true, Error: SourceOK}
 	workDir = load.CleanPath(workDir)
 	stdRoot = load.CleanPath(stdRoot)
@@ -75,6 +80,7 @@ func CollectSourcesForTarget(workDir string, stdRoot string, arg string, target 
 		module:  module,
 		stdRoot: stdRoot,
 		target:  target,
+		tags:    tags,
 		files:   result.Files,
 		ok:      true,
 		err:     SourceOK,
@@ -134,7 +140,7 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 			c.fail(SourceErrReadFile, path)
 			return
 		}
-		if !sourceFileEnabled(src, c.target) {
+		if !sourceFileEnabledWithTags(src, c.target, c.tags) {
 			continue
 		}
 		found = true
@@ -205,11 +211,11 @@ func isGoSourceName(name string) bool {
 	return stringHasSuffix(name, ".go") && !stringHasSuffix(name, "_test.go")
 }
 
-func filterSourcesForTarget(files []load.SourceFile, target string) []load.SourceFile {
+func filterSourcesForTargetTags(files []load.SourceFile, target string, tags []string) []load.SourceFile {
 	out := make([]load.SourceFile, 0, len(files))
 	for i := 0; i < len(files); i++ {
 		file := files[i]
-		if isGoSourceName(load.BasePath(file.Path)) && !sourceFileEnabled(file.Src, target) {
+		if isGoSourceName(load.BasePath(file.Path)) && !sourceFileEnabledWithTags(file.Src, target, tags) {
 			continue
 		}
 		out = append(out, file)
@@ -217,7 +223,7 @@ func filterSourcesForTarget(files []load.SourceFile, target string) []load.Sourc
 	return out
 }
 
-func sourceFileEnabled(src []byte, target string) bool {
+func sourceFileEnabledWithTags(src []byte, target string, tags []string) bool {
 	pos := 0
 	for pos < len(src) {
 		lineStart := pos
@@ -234,7 +240,7 @@ func sourceFileEnabled(src []byte, target string) bool {
 		}
 		if bytesHasPrefix(line, []byte("//go:build")) && (len(line) == len("//go:build") || isBuildSpace(line[len("//go:build")])) {
 			expr := trimBuildLine(line[len("//go:build"):])
-			return evalBuildExpr(expr, target)
+			return evalBuildExprWithTags(expr, target, tags)
 		}
 		if bytesHasPrefix(line, []byte("//")) {
 			continue
@@ -248,11 +254,12 @@ type buildExprParser struct {
 	src    []byte
 	pos    int
 	target string
+	tags   []string
 	ok     bool
 }
 
-func evalBuildExpr(src []byte, target string) bool {
-	parser := buildExprParser{src: src, target: target, ok: true}
+func evalBuildExprWithTags(src []byte, target string, tags []string) bool {
+	parser := buildExprParser{src: src, target: target, tags: tags, ok: true}
 	value := parser.parseOr()
 	parser.skipSpace()
 	if parser.pos != len(parser.src) {
@@ -311,7 +318,7 @@ func (p *buildExprParser) parseTag() bool {
 		p.ok = false
 		return false
 	}
-	return hasBuildTag(p.target, string(p.src[start:p.pos]))
+	return hasBuildTag(p.target, string(p.src[start:p.pos]), p.tags)
 }
 
 func (p *buildExprParser) skipSpace() {
@@ -333,7 +340,10 @@ func (p *buildExprParser) consume(text []byte) bool {
 	return true
 }
 
-func hasBuildTag(target string, tag string) bool {
+func hasBuildTag(target string, tag string, tags []string) bool {
+	if findString(tags, tag) >= 0 {
+		return true
+	}
 	if tag == "rtg" {
 		return true
 	}

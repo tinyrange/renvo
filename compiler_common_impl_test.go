@@ -418,3 +418,18 @@ func appMain(args []string, env []string) int {
 		})
 	}
 }
+
+func TestWindowsAmd64LinkStaticCallReservesAlignedShadowSpace(t *testing.T) {
+	var asm rtgAsm
+	rtgAsmInit(&asm)
+	rtgWinAmd64CallStaticImport(&asm, 0, 2)
+	// pop rcx; pop rdx; sub rsp,40
+	want := []byte{0x59, 0x5a, 0x48, 0x83, 0xec, 40}
+	match := len(asm.code) >= len(want)
+	for i := 0; match && i < len(want); i++ {
+		match = asm.code[i] == want[i]
+	}
+	if !match {
+		t.Fatalf("linkstatic call prefix = % x, want % x", asm.code, want)
+	}
+}

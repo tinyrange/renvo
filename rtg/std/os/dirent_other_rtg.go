@@ -1,4 +1,4 @@
-//go:build rtg && !darwin
+//go:build rtg && !darwin && !wasi && !wasip1
 
 package os
 
@@ -11,3 +11,5 @@ func rtgDirentRecordLength(buf []byte, pos int) int {
 func rtgDirentTypeOffset(pos int) int { return pos + 18 }
 
 func rtgDirentNameStart(pos int) int { return pos + 19 }
+
+func rtgDirentIsDirectory(typ byte) bool { return typ == 4 }

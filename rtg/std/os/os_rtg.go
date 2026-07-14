@@ -128,7 +128,7 @@ func ReadDir(name string) ([]DirEntry, *osError) {
 				nameEnd++
 			}
 			if nameEnd > nameStart && !dirNameIsDot(buf, nameStart, nameEnd) {
-				out = append(out, DirEntry{name: string(buf[nameStart:nameEnd]), isDir: typ == 4})
+				out = append(out, DirEntry{name: string(buf[nameStart:nameEnd]), isDir: rtgDirentIsDirectory(typ)})
 			}
 			pos += reclen
 		}

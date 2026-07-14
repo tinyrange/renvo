@@ -16,6 +16,10 @@ type RTGFS struct{}
 func syscall(num int, fd int, buf []byte, size int) int { return 0 }
 
 func RunRTGCommand(args []string, env []string) int {
+	if CommandHelpRequested(args) {
+		print(HelpText)
+		return 0
+	}
 	commandArgs := dropProgramArg(args)
 	resetArena := rtgFrontendCanResetArena()
 	mark := 0
@@ -84,6 +88,9 @@ func rtgStdRoot(args []string, env []string) string {
 			item[8] == 'O' && item[9] == 'O' && item[10] == 'T' && item[11] == '=' {
 			return item[12:]
 		}
+	}
+	if rtgBundledStdEnabled {
+		return "/std"
 	}
 	bundled := rtgBundledStdRoot(args)
 	if bundled != "" {
@@ -159,6 +166,9 @@ func rtgPathExists(path string) bool {
 }
 
 func (fs RTGFS) ReadFile(path string) ([]byte, bool) {
+	if data, bundled := bundledStdReadFile(path); bundled {
+		return data, true
+	}
 	fd := open(rtgPathCString(path), 0)
 	if fd < 0 {
 		return nil, false
@@ -183,69 +193,15 @@ func (fs RTGFS) ReadFile(path string) ([]byte, bool) {
 }
 
 func (fs RTGFS) ReadDir(path string) ([]DirEntry, bool) {
-	fd := open(rtgPathCString(path), 0)
-	if fd < 0 {
-		return nil, false
+	if entries, bundled := bundledStdReadDir(path); bundled {
+		return entries, true
 	}
-	buf := make([]byte, 32768)
-	out := make([]DirEntry, 0, 32)
-	for {
-		n := syscall(rtgGetdents64LinuxAmd64, fd, buf, len(buf))
-		if n < 0 {
-			n = syscall(rtgGetdents64LinuxAarch64, fd, buf, len(buf))
-		}
-		if n < 0 {
-			n = syscall(rtgGetdents64Linux386, fd, buf, len(buf))
-		}
-		if n < 0 {
-			close(fd)
-			return nil, false
-		}
-		if n == 0 {
-			break
-		}
-		pos := 0
-		minimum := rtgDirentMinimum()
-		for pos+minimum <= n {
-			reclen := rtgDirentRecordLength(buf, pos)
-			if reclen <= minimum || pos+reclen > n {
-				close(fd)
-				return nil, false
-			}
-			nameStart := rtgDirentNameStart(pos)
-			typeAt := rtgDirentTypeOffset(pos)
-			nameEnd := nameStart
-			for nameEnd < pos+reclen && buf[nameEnd] != 0 {
-				nameEnd++
-			}
-			if nameEnd > nameStart && !rtgDirNameIsDot(buf, nameStart, nameEnd) {
-				out = append(out, DirEntry{Name: string(buf[nameStart:nameEnd]), IsDir: buf[typeAt] == 4})
-			}
-			pos += reclen
-		}
-	}
-	close(fd)
-	sortDirEntries(out)
-	return out, true
+	return rtgReadDirNative(path)
 }
 
 func rtgDirNameIsDot(buf []byte, start int, end int) bool {
-	if end-start == 1 && buf[start] == '.' {
-		return true
-	}
-	if end-start == 2 && buf[start] == '.' && buf[start+1] == '.' {
-		return true
-	}
-	return false
-}
-
-func rtgPathCString(path string) string {
-	var out []byte
-	for i := 0; i < len(path); i++ {
-		out = append(out, path[i])
-	}
-	out = append(out, 0)
-	return string(out)
+	size := end - start
+	return size == 1 && buf[start] == '.' || size == 2 && buf[start] == '.' && buf[start+1] == '.'
 }
 
 func printRTGBuildError(result BuildResult) {
@@ -351,6 +307,16 @@ func printOptionError(options Options) {
 	}
 	if options.Error == ParseErrUnknownOption {
 		print("rtg: unknown option: ")
+		print(options.ErrorArg)
+		print("\n")
+		return
+	}
+	if options.Error == ParseErrMissingTags {
+		print("rtg: missing tags after -tags\n")
+		return
+	}
+	if options.Error == ParseErrInvalidTags {
+		print("rtg: invalid build tags: ")
 		print(options.ErrorArg)
 		print("\n")
 		return
