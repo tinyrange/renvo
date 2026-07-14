@@ -411,7 +411,7 @@ func main() {
 	}
 }
 
-func TestLinkBuildCoreLowersSimpleStringIntMap(t *testing.T) {
+func TestLinkBuildCorePreservesStringIntMapSemantics(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
@@ -436,13 +436,10 @@ func appMain() int {
 	if !ok {
 		t.Fatal("linked core unit did not decode")
 	}
-	if bytes.Contains(decoded.Text, []byte("map[string]int")) || bytes.Contains(decoded.Text, []byte("m[")) {
-		t.Fatalf("linked text still contains map syntax:\n%s", string(decoded.Text))
-	}
-	if !bytes.Contains(decoded.Text, []byte("m := 1+")) ||
-		!bytes.Contains(decoded.Text, []byte("2")) ||
-		!bytes.Contains(decoded.Text, []byte("if m == 3")) {
-		t.Fatalf("linked text missing scalarized map shape:\n%s", string(decoded.Text))
+	if !bytes.Contains(decoded.Text, []byte(`map[string]int{"a": 1, "b": 2}`)) ||
+		!bytes.Contains(decoded.Text, []byte(`m["a"] = m["a"] + m["b"]`)) ||
+		!bytes.Contains(decoded.Text, []byte(`if m["a"] == 3`)) {
+		t.Fatalf("linked text did not preserve map semantics:\\n%s", string(decoded.Text))
 	}
 }
 
