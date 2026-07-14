@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "source_digest": "5c69524217df67ab3501226758ce74875d032b8bcb6439ec31bc31d21b83620f",
+  "source_digest": "3d2b162654dbf2b387303c7dcedef6e2d0041fab4494d27c6c10cf31a79f849b",
   "runs": [
     {
       "stage": "host",
       "target": "linux/amd64",
-      "commit": "5bcfdd3ab15aa6d852f3ed9cb645f5002c797063",
-      "captured_at": "2026-07-14T09:50:10Z",
+      "commit": "2b5b681c582b6dbd329ffe1c0bd8c87da518e952",
+      "captured_at": "2026-07-14T10:11:24Z",
       "observations": [
         {
           "id": 1,
@@ -583,8 +583,8 @@
     {
       "stage": "stage3",
       "target": "linux/amd64",
-      "commit": "5bcfdd3ab15aa6d852f3ed9cb645f5002c797063",
-      "captured_at": "2026-07-14T09:50:10Z",
+      "commit": "2b5b681c582b6dbd329ffe1c0bd8c87da518e952",
+      "captured_at": "2026-07-14T10:11:24Z",
       "observations": [
         {
           "id": 1,
@@ -1004,17 +1004,17 @@
         {
           "id": 84,
           "status": "frontend-diagnostic",
-          "message": "rtg: directory read failed: \\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00"
+          "message": "rtg: directory read failed: \u003crepo\u003e/rtg/std/math"
         },
         {
           "id": 85,
           "status": "frontend-diagnostic",
-          "message": "rtg: directory read failed: \\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00"
+          "message": "rtg: directory read failed: \u003crepo\u003e/rtg/std/time"
         },
         {
           "id": 86,
           "status": "frontend-diagnostic",
-          "message": "rtg: directory read failed: \\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00"
+          "message": "rtg: directory read failed: \u003crepo\u003e/rtg/std/encoding/json"
         },
         {
           "id": 87,
@@ -1059,17 +1059,17 @@
         {
           "id": 95,
           "status": "frontend-diagnostic",
-          "message": "rtg: directory read failed: \\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00"
+          "message": "rtg: directory read failed: \u003crepo\u003e/rtg/std/regexp"
         },
         {
           "id": 96,
           "status": "frontend-diagnostic",
-          "message": "rtg: directory read failed: \\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00"
+          "message": "rtg: directory read failed: \u003crepo\u003e/rtg/std/reflect"
         },
         {
           "id": 97,
           "status": "frontend-diagnostic",
-          "message": "rtg: directory read failed: \\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00"
+          "message": "rtg: directory read failed: \u003crepo\u003e/rtg/std/net/http"
         },
         {
           "id": 98,
@@ -1079,12 +1079,12 @@
         {
           "id": 99,
           "status": "frontend-diagnostic",
-          "message": "rtg: directory read failed: \\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00"
+          "message": "rtg: directory read failed: \u003crepo\u003e/rtg/std/C"
         },
         {
           "id": 100,
           "status": "frontend-diagnostic",
-          "message": "rtg: directory read failed: \\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00"
+          "message": "rtg: directory read failed: \u003crepo\u003e/rtg/std/embed"
         },
         {
           "id": 101,
@@ -1104,7 +1104,7 @@
         {
           "id": 104,
           "status": "frontend-diagnostic",
-          "message": "rtg: directory read failed: \\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00"
+          "message": "rtg: directory read failed: \u003crepo\u003e/rtg/std/C"
         },
         {
           "id": 105,
