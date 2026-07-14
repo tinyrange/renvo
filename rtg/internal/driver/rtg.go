@@ -26,7 +26,7 @@ func RunRTGCommand(args []string, env []string) int {
 	if resetArena {
 		mark = arena.Mark()
 	}
-	built := buildFromFSCompact(commandArgs, rtgWorkDir(env), rtgStdRoot(args, env), RTGFS{})
+	built := buildFromFSCompactWithModuleCache(commandArgs, rtgWorkDir(env), rtgStdRoot(args, env), rtgEnvValue(env, "RTG_MODCACHE"), RTGFS{})
 	if !built.Ok {
 		printRTGDiagnostic(built.Diagnostic)
 		if resetArena {

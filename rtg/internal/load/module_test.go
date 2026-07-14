@@ -49,6 +49,51 @@ func TestParseModuleErrors(t *testing.T) {
 	}
 }
 
+func TestParseModuleDependencyDirectives(t *testing.T) {
+	config := &ModuleConfig{}
+	mod := ParseModuleConfig("/repo/app", []byte(`module example.com/app
+
+require (
+	example.com/lib v1.2.3
+	example.com/feature v0.4.0 // indirect
+)
+replace example.com/lib v1.2.3 => ../lib
+	replace example.com/feature => mirror.example/feature v0.4.1
+exclude example.com/lib v1.1.0
+exclude (
+	example.com/lib v1.0.0
+)
+`), config)
+	if !mod.Ok {
+		t.Fatalf("ParseModule failed: %#v", mod)
+	}
+	if len(config.Requires) != 2 || config.Requires[0].Path != "example.com/lib" || config.Requires[0].Version != "v1.2.3" {
+		t.Fatalf("requires = %#v", config.Requires)
+	}
+	if len(config.Replaces) != 2 || !config.Replaces[0].Local || config.Replaces[0].NewPath != "../lib" || config.Replaces[1].Local || config.Replaces[1].NewVersion != "v0.4.1" {
+		t.Fatalf("replaces = %#v", config.Replaces)
+	}
+	if len(config.Excludes) != 2 {
+		t.Fatalf("excludes = %#v", config.Excludes)
+	}
+}
+
+func TestParseModuleRejectsConflictingOrMalformedDirectives(t *testing.T) {
+	for _, src := range []string{
+		"module example.com/app\nrequire example.com/lib v1\nrequire example.com/lib v2\n",
+		"module example.com/app\nreplace example.com/lib => mirror.example/lib\n",
+		"module example.com/app\nrequire (\nexample.com/lib v1\n",
+		"module example.com/app\nexclude example.com/lib\n",
+		"module example.com/app\nrequire example.com/lib latest\n",
+		"module example.com/app\nreplace example.com/lib => mirror.example/lib latest\n",
+	} {
+		mod := ParseModule("/repo/app", []byte(src))
+		if mod.Ok || mod.Error != ModuleErrDirective {
+			t.Fatalf("malformed module accepted: %q => %#v", src, mod)
+		}
+	}
+}
+
 func TestResolvePackageArg(t *testing.T) {
 	mod := Module{Root: "/repo/case", Path: "example.com/case", Ok: true}
 	ref := ResolvePackageArg(mod, "/repo/case", "./cmd/app")
@@ -102,6 +147,23 @@ func TestResolveImport(t *testing.T) {
 	relative := ResolveImport(mod, "/rtg/std", "./pkg")
 	if relative.Ok || relative.Error != ResolveErrImport {
 		t.Fatalf("relative import = %#v", relative)
+	}
+}
+
+func TestResolveImportUsesLongestDependencyModule(t *testing.T) {
+	mod := Module{Root: "/repo/app", Path: "example.com/app", Ok: true}
+	dependencies := []ModuleDependency{
+		{Path: "example.com/lib", Root: "/cache/lib"},
+		{Path: "example.com/lib/plugin", Root: "/cache/plugin"},
+		{Path: "example.com/app/nested", Root: "/cache/nested"},
+	}
+	plugin := ResolveImportWithDependencies(mod, "/std", "example.com/lib/plugin/api", dependencies)
+	if !plugin.Ok || plugin.Kind != PackageDependency || plugin.Dir != "/cache/plugin/api" {
+		t.Fatalf("plugin import = %#v", plugin)
+	}
+	nested := ResolveImportWithDependencies(mod, "/std", "example.com/app/nested/pkg", dependencies)
+	if !nested.Ok || nested.Kind != PackageDependency || nested.Dir != "/cache/nested/pkg" {
+		t.Fatalf("nested import = %#v", nested)
 	}
 }
 

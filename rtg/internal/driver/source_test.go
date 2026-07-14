@@ -273,6 +273,179 @@ func TestCollectSourcesReportsErrors(t *testing.T) {
 	}
 }
 
+func TestCollectSourcesResolvesLocalReplacementGraph(t *testing.T) {
+	fs := memorySourceFS{files: []load.SourceFile{
+		{Path: "/repo/app/go.mod", Src: []byte("module example.com/app\nrequire example.com/lib v1.0.0\nreplace example.com/lib => ../lib\nreplace example.com/value => ../value\n")},
+		{Path: "/repo/app/main.go", Src: []byte("package main\nimport \"example.com/lib\"\nfunc appMain() int { return lib.Value() }\n")},
+		{Path: "/repo/lib/go.mod", Src: []byte("module example.com/lib\nrequire example.com/value v1.0.0\nreplace example.com/value => ../value\n")},
+		{Path: "/repo/lib/lib.go", Src: []byte("package lib\nimport \"example.com/value\"\nfunc Value() int { return value.Number() }\n")},
+		{Path: "/repo/value/go.mod", Src: []byte("module example.com/value\n")},
+		{Path: "/repo/value/value.go", Src: []byte("package value\nfunc Number() int { return 42 }\n")},
+	}}
+	result := CollectSources("/repo/app", "/std", ".", fs)
+	if !result.Ok {
+		t.Fatalf("local replacement graph failed: %#v", result)
+	}
+	assertSourcePaths(t, result.Files, []string{
+		"/repo/app/go.mod", "/repo/app/main.go",
+		"/repo/lib/go.mod", "/repo/lib/lib.go",
+		"/repo/value/go.mod", "/repo/value/value.go",
+	})
+	built := BuildFromFS([]string{"-o", "app", "."}, "/repo/app", "/std", fs)
+	if !built.Ok {
+		t.Fatalf("multi-module build failed: %#v diagnostic=%#v", built, built.Diagnostic)
+	}
+}
+
+func TestCollectSourcesRestartsAfterTransitiveVersionUpgrade(t *testing.T) {
+	fs := memorySourceFS{files: []load.SourceFile{
+		{Path: "/repo/app/go.mod", Src: []byte("module example.com/app\nrequire (\nexample.com/a v1.0.0\nexample.com/b v1.0.0\n)\nreplace example.com/a => ../a\nreplace example.com/b => ../b\n")},
+		{Path: "/repo/app/main.go", Src: []byte("package main\nimport (\n\"example.com/a\"\n_ \"example.com/b\"\n)\nfunc appMain() int { return a.Value() }\n")},
+		{Path: "/repo/a/go.mod", Src: []byte("module example.com/a\nrequire example.com/value v1.9.0\n")},
+		{Path: "/repo/a/a.go", Src: []byte("package a\nimport \"example.com/value\"\nfunc Value() int { return value.Number() }\n")},
+		{Path: "/repo/b/go.mod", Src: []byte("module example.com/b\nrequire example.com/value v1.10.0\n")},
+		{Path: "/repo/b/b.go", Src: []byte("package b\nimport _ \"example.com/value\"\n")},
+		{Path: "/cache/example.com/value@v1.9.0/go.mod", Src: []byte("module example.com/value\n")},
+		{Path: "/cache/example.com/value@v1.9.0/value.go", Src: []byte("package value\nfunc Number() int { return 9 }\n")},
+		{Path: "/cache/example.com/value@v1.10.0/go.mod", Src: []byte("module example.com/value\n")},
+		{Path: "/cache/example.com/value@v1.10.0/value.go", Src: []byte("package value\nfunc Number() int { return 10 }\n")},
+	}}
+	result := CollectSourcesForTargetTagsWithModuleCache("/repo/app", "/std", ".", "linux/amd64", nil, "/cache", fs)
+	if !result.Ok {
+		t.Fatalf("transitive version selection failed: %#v", result)
+	}
+	foundSelected := false
+	for i := 0; i < len(result.Files); i++ {
+		if result.Files[i].Path == "/cache/example.com/value@v1.9.0/value.go" {
+			t.Fatalf("retained superseded module source: %#v", result.Files)
+		}
+		if result.Files[i].Path == "/cache/example.com/value@v1.10.0/value.go" {
+			foundSelected = true
+		}
+	}
+	if !foundSelected {
+		t.Fatalf("selected module source missing: %#v", result.Files)
+	}
+	built := BuildFromFSWithModuleCache([]string{"-o", "app", "."}, "/repo/app", "/std", "/cache", fs)
+	if !built.Ok {
+		t.Fatalf("selected module build failed: %#v diagnostic=%#v", built, built.Diagnostic)
+	}
+}
+
+func TestCompareModuleVersion(t *testing.T) {
+	for _, test := range []struct {
+		left  string
+		right string
+		want  int
+	}{
+		{left: "v1.10.0", right: "v1.9.0", want: 1},
+		{left: "v2.0.0", right: "v10.0.0", want: -1},
+		{left: "v1.0.0", right: "v1.0.0-rc.1", want: 1},
+		{left: "v1.0.0-rc.10", right: "v1.0.0-rc.2", want: 1},
+		{left: "v1.0.0+meta", right: "v1.0.0", want: 0},
+	} {
+		got := compareModuleVersion(test.left, test.right)
+		if got < 0 {
+			got = -1
+		} else if got > 0 {
+			got = 1
+		}
+		if got != test.want {
+			t.Fatalf("compareModuleVersion(%q, %q) = %d, want %d", test.left, test.right, got, test.want)
+		}
+	}
+}
+
+func TestCollectSourcesResolvesVendorBeforeCache(t *testing.T) {
+	fs := memorySourceFS{files: []load.SourceFile{
+		{Path: "/repo/app/go.mod", Src: []byte("module example.com/app\nrequire example.com/lib v1.0.0\n")},
+		{Path: "/repo/app/main.go", Src: []byte("package main\nimport \"example.com/lib/pkg\"\nfunc appMain() int { return pkg.Value() }\n")},
+		{Path: "/repo/app/vendor/example.com/lib/pkg/lib.go", Src: []byte("package pkg\nfunc Value() int { return 42 }\n")},
+		{Path: "/cache/example.com/lib@v1.0.0/go.mod", Src: []byte("module example.com/lib\n")},
+		{Path: "/cache/example.com/lib@v1.0.0/pkg/lib.go", Src: []byte("package pkg\nfunc Value() int { return 7 }\n")},
+	}}
+	result := CollectSourcesForTargetTagsWithModuleCache("/repo/app", "/std", ".", "linux/amd64", nil, "/cache", fs)
+	if !result.Ok {
+		t.Fatalf("vendor collection failed: %#v", result)
+	}
+	if len(result.Files) != 4 || result.Files[2].Path != "/repo/app/vendor/example.com/lib/go.mod" || result.Files[3].Path != "/repo/app/vendor/example.com/lib/pkg/lib.go" {
+		t.Fatalf("vendor did not take precedence: %#v", result.Files)
+	}
+}
+
+func TestCollectSourcesResolvesLocalReplacementBeforeVendor(t *testing.T) {
+	fs := memorySourceFS{files: []load.SourceFile{
+		{Path: "/repo/app/go.mod", Src: []byte("module example.com/app\nrequire example.com/lib v1.0.0\nreplace example.com/lib => ../lib\n")},
+		{Path: "/repo/app/main.go", Src: []byte("package main\nimport \"example.com/lib\"\nfunc appMain() int { return lib.Value() }\n")},
+		{Path: "/repo/app/vendor/example.com/lib/lib.go", Src: []byte("package lib\nfunc Value() int { return 7 }\n")},
+		{Path: "/repo/lib/go.mod", Src: []byte("module example.com/lib\n")},
+		{Path: "/repo/lib/lib.go", Src: []byte("package lib\nfunc Value() int { return 42 }\n")},
+	}}
+	result := CollectSources("/repo/app", "/std", ".", fs)
+	if !result.Ok {
+		t.Fatalf("local replacement collection failed: %#v", result)
+	}
+	if len(result.Files) != 4 || result.Files[3].Path != "/repo/lib/lib.go" {
+		t.Fatalf("local replacement did not take precedence: %#v", result.Files)
+	}
+}
+
+func TestCollectSourcesResolvesReplacementFromReadOnlyCache(t *testing.T) {
+	fs := memorySourceFS{files: []load.SourceFile{
+		{Path: "/repo/app/go.mod", Src: []byte("module example.com/app\nrequire example.com/Upper v1.0.0\nreplace example.com/Upper => mirror.example/Upper v1.4.0\n")},
+		{Path: "/repo/app/main.go", Src: []byte("package main\nimport \"example.com/Upper/pkg\"\nfunc appMain() int { return pkg.Value() }\n")},
+		{Path: "/cache/mirror.example/!upper@v1.4.0/go.mod", Src: []byte("module mirror.example/Upper\n")},
+		{Path: "/cache/mirror.example/!upper@v1.4.0/pkg/lib.go", Src: []byte("package pkg\nfunc Value() int { return 42 }\n")},
+	}}
+	result := CollectSourcesForTargetTagsWithModuleCache("/repo/app", "/std", ".", "linux/amd64", nil, "/cache", fs)
+	if !result.Ok {
+		t.Fatalf("cache collection failed: %#v", result)
+	}
+	if len(result.Files) != 4 || result.Files[3].Path != "/cache/mirror.example/!upper@v1.4.0/pkg/lib.go" {
+		t.Fatalf("replacement cache mapping = %#v", result.Files)
+	}
+}
+
+func TestCollectSourcesReportsOfflineModuleFailuresAtImport(t *testing.T) {
+	tests := []struct {
+		name      string
+		goMod     string
+		cache     string
+		wantError int
+		wantPath  string
+	}{
+		{name: "missing", goMod: "module example.com/app\nrequire example.com/lib v1.0.0\n", wantError: SourceErrDependencyMissing, wantPath: "example.com/lib@v1.0.0"},
+		{name: "missing cache entry", goMod: "module example.com/app\nrequire example.com/lib v1.0.0\n", cache: "/cache", wantError: SourceErrDependencyMissing, wantPath: "example.com/lib@v1.0.0"},
+		{name: "excluded", goMod: "module example.com/app\nrequire example.com/lib v1.0.0\nexclude example.com/lib v1.0.0\n", wantError: SourceErrDependencyExcluded, wantPath: "example.com/lib@v1.0.0"},
+	}
+	for _, test := range tests {
+		fs := memorySourceFS{files: []load.SourceFile{
+			{Path: "/repo/app/go.mod", Src: []byte(test.goMod)},
+			{Path: "/repo/app/main.go", Src: []byte("package main\nimport \"example.com/lib\"\nfunc appMain() int { return 0 }\n")},
+		}}
+		result := BuildFromFSWithModuleCache([]string{"-o", "app", "."}, "/repo/app", "/std", test.cache, fs)
+		if result.Ok || result.Sources.Error != test.wantError || result.Sources.ErrorPath != test.wantPath {
+			t.Fatalf("%s result = %#v", test.name, result)
+		}
+		if result.Diagnostic.Path != "/repo/app/main.go" || result.Diagnostic.Line != 2 || result.Diagnostic.Column < 1 {
+			t.Fatalf("%s diagnostic location = %#v", test.name, result.Diagnostic)
+		}
+	}
+}
+
+func TestCollectSourcesRejectsNestedModuleAsMainPackage(t *testing.T) {
+	fs := memorySourceFS{files: []load.SourceFile{
+		{Path: "/repo/app/go.mod", Src: []byte("module example.com/app\n")},
+		{Path: "/repo/app/main.go", Src: []byte("package main\nimport \"example.com/app/nested\"\nfunc appMain() int { return 0 }\n")},
+		{Path: "/repo/app/nested/go.mod", Src: []byte("module example.com/app/nested\n")},
+		{Path: "/repo/app/nested/nested.go", Src: []byte("package nested\n")},
+	}}
+	result := CollectSources("/repo/app", "/std", ".", fs)
+	if result.Ok || result.Error != SourceErrDependencyAmbiguous || result.ErrorPath != "example.com/app/nested" || result.ErrorSourcePath != "/repo/app/main.go" {
+		t.Fatalf("nested module boundary result = %#v", result)
+	}
+}
+
 func TestBuildFromFS(t *testing.T) {
 	result := BuildFromFS([]string{"-t", "linux/amd64", "-s", "-o", "app", "./cmd/app"}, "/repo/case", "/std", memorySourceFS{files: driverTestFiles()})
 	if !result.Ok {

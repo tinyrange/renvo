@@ -51,14 +51,22 @@ func BuildUnit(args []string, workDir string, stdRoot string, files []load.Sourc
 }
 
 func BuildFromFS(args []string, workDir string, stdRoot string, fs SourceFS) BuildResult {
-	return buildFromFS(args, workDir, stdRoot, fs, false)
+	return buildFromFS(args, workDir, stdRoot, "", fs, false)
 }
 
 func buildFromFSCompact(args []string, workDir string, stdRoot string, fs SourceFS) BuildResult {
-	return buildFromFS(args, workDir, stdRoot, fs, true)
+	return buildFromFS(args, workDir, stdRoot, "", fs, true)
 }
 
-func buildFromFS(args []string, workDir string, stdRoot string, fs SourceFS, compact bool) BuildResult {
+func BuildFromFSWithModuleCache(args []string, workDir string, stdRoot string, moduleCache string, fs SourceFS) BuildResult {
+	return buildFromFS(args, workDir, stdRoot, moduleCache, fs, false)
+}
+
+func buildFromFSCompactWithModuleCache(args []string, workDir string, stdRoot string, moduleCache string, fs SourceFS) BuildResult {
+	return buildFromFS(args, workDir, stdRoot, moduleCache, fs, true)
+}
+
+func buildFromFS(args []string, workDir string, stdRoot string, moduleCache string, fs SourceFS, compact bool) BuildResult {
 	result := newBuildResult()
 	options := ParseOptions(args)
 	result.Options = options
@@ -66,7 +74,7 @@ func buildFromFS(args []string, workDir string, stdRoot string, fs SourceFS, com
 		return buildFail(result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
 	}
 	sourcesStart := arena.Mark()
-	sources := CollectSourcesForTargetTags(workDir, stdRoot, options.Package, options.Target, options.Tags, fs)
+	sources := CollectSourcesForTargetTagsWithModuleCache(workDir, stdRoot, options.Package, options.Target, options.Tags, moduleCache, fs)
 	sourcesEnd := arena.Mark()
 	result.Sources = sources
 	if !sources.Ok {

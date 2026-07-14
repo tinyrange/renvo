@@ -57,17 +57,26 @@ type Graph struct {
 }
 
 func LoadGraph(module Module, stdRoot string, workDir string, arg string, files []SourceFile) Graph {
+	return LoadGraphWithDependencies(module, stdRoot, workDir, arg, nil, files)
+}
+
+func LoadGraphWithDependencies(module Module, stdRoot string, workDir string, arg string, dependencies []ModuleDependency, files []SourceFile) Graph {
 	ref := ResolvePackageArg(module, workDir, arg)
 	if !ref.Ok {
 		return Graph{Module: module, Ok: false, Error: GraphErrRoot, ErrorPackage: -1}
 	}
-	return LoadGraphFromRoot(module, stdRoot, ref, files)
+	return loadGraphFromRoot(module, stdRoot, ref, dependencies, files)
 }
 
 func LoadGraphFromRoot(module Module, stdRoot string, root PackageRef, files []SourceFile) Graph {
+	return loadGraphFromRoot(module, stdRoot, root, nil, files)
+}
+
+func loadGraphFromRoot(module Module, stdRoot string, root PackageRef, dependencies []ModuleDependency, files []SourceFile) Graph {
 	var builder graphBuilder
 	builder.module = module
 	builder.stdRoot = CleanPath(stdRoot)
+	builder.dependencies = dependencies
 	builder.files = files
 	builder.graph = Graph{Module: module, Root: root.ImportPath, Ok: true, Error: GraphOK, ErrorPackage: -1}
 	builder.load(root)
@@ -78,6 +87,10 @@ func LoadGraphFromRoot(module Module, stdRoot string, root PackageRef, files []S
 }
 
 func LoadPackage(module Module, stdRoot string, ref PackageRef, files []SourceFile) Package {
+	return loadPackage(module, stdRoot, ref, nil, files)
+}
+
+func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []ModuleDependency, files []SourceFile) Package {
 	pkg := Package{
 		Ref:         ref,
 		Ok:          true,
@@ -105,7 +118,7 @@ func LoadPackage(module Module, stdRoot string, ref PackageRef, files []SourceFi
 			pkg.Files = append(pkg.Files, newParsedFile(selected[i].Path, selected[i].Src, parsed))
 			return packageFail(pkg, PackageErrName, i, -1)
 		}
-		refs := FileImports(module, stdRoot, parsed)
+		refs := FileImportsWithDependencies(module, stdRoot, dependencies, parsed)
 		for j := 0; j < len(refs); j++ {
 			pkg.Imports = appendImport(pkg.Imports, refs[j])
 			if !refs[j].Ok {
@@ -127,18 +140,19 @@ func newParsedFile(path string, src []byte, file syntax.File) ParsedFile {
 }
 
 type graphBuilder struct {
-	module  Module
-	stdRoot string
-	files   []SourceFile
-	loading []string
-	graph   Graph
+	module       Module
+	stdRoot      string
+	dependencies []ModuleDependency
+	files        []SourceFile
+	loading      []string
+	graph        Graph
 }
 
 func (b *graphBuilder) load(ref PackageRef) int {
 	if !b.graph.Ok {
 		return -1
 	}
-	if ref.Kind != PackageInModule && ref.Kind != PackageStandard {
+	if ref.Kind != PackageInModule && ref.Kind != PackageStandard && ref.Kind != PackageDependency {
 		b.graph = graphFail(b.graph, GraphErrPackage, -1)
 		return -1
 	}
@@ -152,7 +166,7 @@ func (b *graphBuilder) load(ref PackageRef) int {
 	}
 	b.loading = append(b.loading, ref.ImportPath)
 	packageStart := arena.Mark()
-	pkg := LoadPackage(b.module, b.stdRoot, ref, b.files)
+	pkg := loadPackage(b.module, b.stdRoot, ref, b.dependencies, b.files)
 	pkg.CoreArenaStart = packageStart
 	pkg.CoreArenaEnd = arena.Mark()
 	if !pkg.Ok {
@@ -163,7 +177,7 @@ func (b *graphBuilder) load(ref PackageRef) int {
 	}
 	for i := 0; i < len(pkg.Imports); i++ {
 		imp := pkg.Imports[i]
-		if imp.Kind == PackageInModule || imp.Kind == PackageStandard {
+		if imp.Kind == PackageInModule || imp.Kind == PackageStandard || imp.Kind == PackageDependency {
 			b.load(imp)
 			if !b.graph.Ok {
 				if b.graph.Error == GraphErrCycle && b.graph.ErrorPath == "" {

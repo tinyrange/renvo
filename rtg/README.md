@@ -37,6 +37,16 @@ include `rtg`, `unix`, and the project aliases `wasi`, `aarch64`, and `wasm32`.
 Custom tags, including an explicit `go1.x` release policy when needed, are
 provided with `-tags`; RTG does not infer a Go toolchain release tag.
 
+Module dependencies are resolved deterministically without network access.
+The frontend understands `require`, `replace`, and `exclude` directives and
+searches, in order, local replacement paths, the main module's `vendor` tree,
+and the read-only Go-style module cache named by `RTG_MODCACHE`. Required
+versions are selected across the on-disk module graph before a conflicting
+earlier package collection is retained. A missing
+module is reported as an offline dependency error; RTG does not fetch modules,
+consult proxies, or use authentication credentials. Populate the cache or add
+a local replacement before compiling.
+
 Release builds are published for every host currently supported by the RTG
 backend:
 

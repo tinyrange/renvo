@@ -1,0 +1,8 @@
+{
+  "phase": "loader",
+  "code": "RTG-LOAD-015",
+  "file": "cmd/app/main.go",
+  "line": 3,
+  "column": 11,
+  "message": "dependency version is excluded: example.com/excluded@v1.0.0"
+}

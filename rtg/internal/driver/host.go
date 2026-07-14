@@ -18,6 +18,7 @@ const (
 
 const BackendEnv = "RTG_BACKEND"
 const StdRootEnv = "RTG_STDROOT"
+const ModuleCacheEnv = "RTG_MODCACHE"
 const DefaultStdRoot = "/std"
 
 type OSFS struct{}
@@ -67,7 +68,7 @@ func CompileAndWriteWithEnv(args []string, env []string, backend Backend) HostRe
 		}
 		backend = commandBackend
 	}
-	return CompileAndWrite(args, StdRootFromEnv(env), backend)
+	return compileAndWrite(args, StdRootFromEnv(env), EnvValue(env, ModuleCacheEnv), backend)
 }
 
 func CommandBackendFromEnv(env []string) (CommandBackend, bool) {
@@ -108,12 +109,16 @@ func EnvValue(env []string, key string) string {
 }
 
 func CompileAndWrite(args []string, stdRoot string, backend Backend) HostResult {
+	return compileAndWrite(args, stdRoot, "", backend)
+}
+
+func compileAndWrite(args []string, stdRoot string, moduleCache string, backend Backend) HostResult {
 	result := HostResult{Ok: true, Error: HostOK}
 	workDir, err := os.Getwd()
 	if err != nil {
 		return hostFail(result, HostErrWorkDir, "")
 	}
-	compiled := CompileFromFS(args, load.CleanPath(workDir), stdRoot, OSFS{}, backend)
+	compiled := CompileFromFSWithModuleCache(args, load.CleanPath(workDir), stdRoot, moduleCache, OSFS{}, backend)
 	result.Compile = compiled
 	if !compiled.Ok {
 		return hostFail(result, HostErrCompile, "")

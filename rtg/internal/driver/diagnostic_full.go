@@ -113,6 +113,14 @@ func sourceDiagnostic(result BuildResult) Diagnostic {
 		phase, code, message = "parser", "RTG-PARSE-001", "source syntax is invalid"
 	case SourceErrImport:
 		code, message = "RTG-LOAD-008", "unresolved import "+result.Sources.ErrorPath
+	case SourceErrDependencyMissing:
+		code, message = "RTG-LOAD-014", "dependency source is unavailable for "+result.Sources.ErrorPath
+	case SourceErrDependencyExcluded:
+		code, message = "RTG-LOAD-015", "dependency version is excluded: "+result.Sources.ErrorPath
+	case SourceErrDependencyModule:
+		code, message = "RTG-LOAD-016", "dependency has an invalid or missing go.mod: "+result.Sources.ErrorPath
+	case SourceErrDependencyAmbiguous:
+		code, message = "RTG-LOAD-017", "dependency import is ambiguous: "+result.Sources.ErrorPath
 	}
 	path := result.ErrorPath
 	if result.Sources.ErrorSourcePath != "" {

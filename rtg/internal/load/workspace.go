@@ -35,7 +35,20 @@ func LoadWorkspace(workDir string, stdRoot string, arg string, files []SourceFil
 	if !module.Ok {
 		return workspaceFail(workspace, WorkspaceErrModule, moduleFile)
 	}
-	graph := LoadGraph(module, stdRoot, workDir, arg, normalized)
+	var dependencies []ModuleDependency
+	for i := 0; i < len(normalized); i++ {
+		if i == moduleFile || BasePath(normalized[i].Path) != "go.mod" {
+			continue
+		}
+		// Dependency go.mod entries are collector manifests: their physical
+		// path supplies the root and their payload is the logical module path.
+		path := string(normalized[i].Src)
+		if path == "" {
+			return workspaceFail(workspace, WorkspaceErrModule, i)
+		}
+		dependencies = append(dependencies, ModuleDependency{Path: path, Root: DirPath(normalized[i].Path)})
+	}
+	graph := LoadGraphWithDependencies(module, stdRoot, workDir, arg, dependencies, normalized)
 	workspace.Graph = graph
 	if !graph.Ok {
 		return workspaceFail(workspace, WorkspaceErrGraph, graph.ErrorPackage)

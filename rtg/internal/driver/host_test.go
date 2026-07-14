@@ -157,6 +157,7 @@ func TestHostEnvHelpers(t *testing.T) {
 		"OTHER=value",
 		BackendEnv + "=/tmp/backend",
 		StdRootEnv + "=/tmp/std",
+		ModuleCacheEnv + "=/tmp/modcache",
 		BackendEnv + "_EXTRA=ignored",
 	}
 	backend, ok := CommandBackendFromEnv(env)
@@ -171,6 +172,9 @@ func TestHostEnvHelpers(t *testing.T) {
 	}
 	if got := StdRootFromEnv(nil); got != DefaultStdRoot {
 		t.Fatalf("default std root = %q", got)
+	}
+	if got := EnvValue(env, ModuleCacheEnv); got != "/tmp/modcache" {
+		t.Fatalf("module cache = %q", got)
 	}
 	if got := EnvValue(env, BackendEnv+"_EXTRA"); got != "ignored" {
 		t.Fatalf("extra env = %q", got)

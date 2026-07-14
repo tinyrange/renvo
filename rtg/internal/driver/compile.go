@@ -40,8 +40,12 @@ func CompileUnit(args []string, workDir string, stdRoot string, files []load.Sou
 }
 
 func CompileFromFS(args []string, workDir string, stdRoot string, fs SourceFS, backend Backend) CompileResult {
+	return CompileFromFSWithModuleCache(args, workDir, stdRoot, "", fs, backend)
+}
+
+func CompileFromFSWithModuleCache(args []string, workDir string, stdRoot string, moduleCache string, fs SourceFS, backend Backend) CompileResult {
 	result := CompileResult{Ok: true, Error: CompileOK}
-	built := BuildFromFS(args, workDir, stdRoot, fs)
+	built := BuildFromFSWithModuleCache(args, workDir, stdRoot, moduleCache, fs)
 	result.Build = built
 	if !built.Ok {
 		result.Diagnostic = built.Diagnostic
