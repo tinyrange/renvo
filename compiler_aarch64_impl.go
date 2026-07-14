@@ -864,6 +864,10 @@ func rtgAarch64AsmNormalizeRaxForKind(a *rtgAsm, kind int) {
 		rtgAarch64AsmEmit(a, 0x92401c00)
 		return
 	}
+	if kind == rtgTypeInt8 {
+		rtgAarch64AsmEmit(a, 0x93401c00)
+		return
+	}
 	if kind == rtgTypeInt16 {
 		rtgAarch64AsmEmit(a, 0x93403c00)
 		return
