@@ -14076,7 +14076,63 @@ func rtgEmitCallWithWordCount(g *rtgLinearGen, fnIndex int, wordCount int) {
 	}
 	rtgAmd64EmitCallWithWordCount(g, fnIndex, wordCount)
 }
+func rtgExprIsPointerCompositeLiteral(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	if idx < 0 || idx >= len(ep.exprs) {
+		return false
+	}
+	e := &ep.exprs[idx]
+	if e.kind != rtgExprUnary || !rtgTokCharIs(g.prog, e.tok, '&') || e.left < 0 || e.left >= len(ep.exprs) {
+		return false
+	}
+	return ep.exprs[e.left].kind == rtgExprComposite
+}
+func rtgEmitPointerCompositeLiteral(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	e := &ep.exprs[idx]
+	innerIndex := e.left
+	inner := &ep.exprs[innerIndex]
+	elemType := rtgInferParsedExprType(g, ep, innerIndex)
+	resolved := rtgResolveType(g.meta, elemType)
+	if resolved.kind != rtgTypeStruct {
+		return false
+	}
+	size := rtgTypeSize(g.meta, elemType)
+	if size <= 0 {
+		return false
+	}
+
+	a := &g.asm
+	sizeOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
+	addrOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
+	rtgAsmStoreStackImm(a, sizeOffset, size)
+	rtgEmitPersistentAllocToPrimary(g, sizeOffset)
+	rtgAsmStorePrimaryStack(a, addrOffset)
+
+	// Persistent storage begins in zero-filled BSS, but explicitly initialize
+	// every value slot so this remains correct if the allocator later reuses
+	// storage.
+	rtgAsmCopyPrimaryToSecondary(a)
+	rtgAsmPrimaryImm(a, 0)
+	for at := 0; at < size; at += rtgBackendValueSlotSize {
+		rtgAsmStorePrimaryMemSecondaryDisp(a, at)
+	}
+	for i := 0; i < inner.argCount; i++ {
+		field := ep.fields[inner.firstArg+i]
+		fieldIndex := rtgCompositeStructFieldIndex(g, elemType, &field, i)
+		if fieldIndex < 0 {
+			return false
+		}
+		fieldInfo := &g.meta.fields[fieldIndex]
+		if fieldInfo.typ == 0 || !rtgEmitCompositeFieldToMem(g, ep, field.expr, fieldInfo.typ, addrOffset, fieldInfo.offset) {
+			return false
+		}
+	}
+	rtgAsmLoadPrimaryStack(a, addrOffset)
+	return true
+}
 func rtgEmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	if rtgExprIsPointerCompositeLiteral(g, ep, idx) {
+		return rtgEmitPointerCompositeLiteral(g, ep, idx)
+	}
 	if rtgTargetArch == rtgArch386 {
 		return rtg386EmitIntExpr(g, ep, idx)
 	}
