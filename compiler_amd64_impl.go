@@ -285,8 +285,16 @@ func rtgAmd64AsmNormalizeRaxForKind(a *rtgAsm, kind int) {
 		rtgAsmEmit32(a, 0xc0bf0f48)
 		return
 	}
+	if kind == rtgTypeUint16 {
+		rtgAsmEmit32(a, 0xc0b70f48)
+		return
+	}
 	if kind == rtgTypeInt32 {
 		rtgAsmEmit24(a, 0xc06348)
+		return
+	}
+	if kind == rtgTypeUint32 {
+		rtgAsmEmit16(a, 0xc089)
 	}
 }
 func rtgAmd64AsmIncMemRdx(a *rtgAsm) {
@@ -718,14 +726,14 @@ func rtgAmd64EmitCompositeFieldToMem(g *rtgLinearGen, ep *rtgExprParse, idx int,
 		}
 		size := rtgTypeSize(g.meta, fieldType)
 		rtgAsmLoadSecondaryStack(a, addrOffset)
-		rtgEmitCopyStackToMemSecondary(g, tempOffset, fieldOffset, size)
+		rtgEmitCopyTypedStackToMemSecondary(g, fieldType, tempOffset, fieldOffset, size)
 		return true
 	}
 	if !rtgEmitScalarExprForKind(g, ep, idx, fieldResolved.kind) {
 		return false
 	}
 	rtgAsmLoadSecondaryStack(a, addrOffset)
-	rtgAsmStorePrimaryMemSecondaryDisp(a, fieldOffset)
+	rtgAsmStorePrimaryMemSecondaryDispSize(a, fieldOffset, rtgNativeScalarStorageSize(fieldResolved.kind))
 	return true
 }
 func rtgAmd64EmitStructReturnExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
@@ -913,7 +921,7 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	if (e.kind == rtgExprUnary || e.kind == rtgExprBinary || e.kind == rtgExprCall) && rtgExprCanFoldConst(g, ep, idx) {
 		resultType := rtgInferParsedExprType(g, ep, idx)
 		result := rtgResolveType(g.meta, resultType)
-		if result.kind != rtgTypeByte && result.kind != rtgTypeInt8 && result.kind != rtgTypeInt16 && result.kind != rtgTypeInt32 {
+		if result.kind != rtgTypeByte && result.kind != rtgTypeInt8 && result.kind != rtgTypeInt16 && result.kind != rtgTypeInt32 && result.kind != rtgTypeUint16 && result.kind != rtgTypeUint32 {
 			constResult := rtgEvalConstExpr(g, ep, idx)
 			if constResult.ok {
 				rtgAsmPrimaryImm(a, constResult.value)
@@ -969,15 +977,22 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		if e.argCount == 1 && (callee == rtgIdentInt || callee == rtgIdentInt64) {
 			return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeInt)
 		}
-		if e.argCount == 1 && (callee == rtgIdentByte || callee == rtgIdentInt8 || callee == rtgIdentInt16 || callee == rtgIdentInt32) {
+		if e.argCount == 1 && (callee == rtgIdentByte || callee == rtgIdentInt8 || callee == rtgIdentInt16 || callee == rtgIdentInt32 || callee == rtgIdentUint16 || callee == rtgIdentUint32) {
 			if callee == rtgIdentByte {
 				return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeByte)
 			} else if callee == rtgIdentInt8 {
 				return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeInt8)
 			} else if callee == rtgIdentInt16 {
 				return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeInt16)
+			} else if callee == rtgIdentUint16 {
+				return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeUint16)
+			} else if callee == rtgIdentUint32 {
+				return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeUint32)
 			}
 			return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeInt32)
+		}
+		if e.argCount == 1 && callee == rtgIdentUint64 {
+			return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeUint64)
 		}
 		if e.argCount == 1 && (callee == rtgIdentCap || callee == rtgIdentLen) {
 			count := rtgArrayBuiltinCount(g, ep, e)
@@ -1207,6 +1222,8 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		return rtgEmitIndexExpr(g, ep, idx)
 	}
 	if e.kind == rtgExprSelector {
+		fieldType := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, idx))
+		fieldSize := rtgNativeScalarStorageSize(fieldType.kind)
 		base := &ep.exprs[e.left]
 		if base.kind == rtgExprCall {
 			baseType := rtgInferParsedExprType(g, ep, e.left)
@@ -1215,8 +1232,8 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 				if !rtgEmitSelectorAddressSecondary(g, ep, idx) {
 					return false
 				}
-				fieldType := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, idx))
-				rtgAsmLoadPrimaryMemSecondaryDispSize(a, 0, rtgScalarKindSize(fieldType.kind))
+				rtgAsmLoadPrimaryMemSecondaryDispSize(a, 0, fieldSize)
+				rtgAsmNormalizePrimaryForKind(a, fieldType.kind)
 				return true
 			}
 			if !rtgTypeIsStruct(g.meta, baseType) {
@@ -1230,20 +1247,27 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			if !rtgEmitStructCallToLocal(g, ep, e.left, baseType, offset) {
 				return false
 			}
-			rtgAsmLoadPrimaryStack(a, offset-fieldOffset)
+			rtgAsmAddressPrimaryStack(a, offset-fieldOffset)
+			rtgAsmCopyPrimaryToSecondary(a)
+			rtgAsmLoadPrimaryMemSecondaryDispSize(a, 0, fieldSize)
+			rtgAsmNormalizePrimaryForKind(a, fieldType.kind)
 			return true
 		}
 		if base.kind == rtgExprIndex {
 			return rtgEmitIndexedStructField(g, ep, e.left, e.nameStart, e.nameEnd)
 		}
 		if offset, ok := rtgLocalStructSelectorOffset(g, ep, idx); ok {
-			rtgAsmLoadPrimaryStack(a, offset)
+			rtgAsmAddressPrimaryStack(a, offset)
+			rtgAsmCopyPrimaryToSecondary(a)
+			rtgAsmLoadPrimaryMemSecondaryDispSize(a, 0, fieldSize)
+			rtgAsmNormalizePrimaryForKind(a, fieldType.kind)
 			return true
 		}
 		if !rtgEmitSelectorAddressSecondary(g, ep, idx) {
 			return false
 		}
-		rtgAsmLoadPrimaryMemSecondaryDisp(a, 0)
+		rtgAsmLoadPrimaryMemSecondaryDispSize(a, 0, fieldSize)
+		rtgAsmNormalizePrimaryForKind(a, fieldType.kind)
 		return true
 	}
 	if e.kind == rtgExprUnary {

@@ -577,6 +577,11 @@ func rtgWasm32AsmNormalizeRaxForKind(a *rtgAsm, kind int) {
 		rtgWasm32EmitRegReg(a, rtgWasm32OpShlRegReg, rtgWasm32RegRax, rtgWasm32RegRdx)
 		rtgWasm32EmitRegImm(a, rtgWasm32OpMovRegImm, rtgWasm32RegRdx, 16)
 		rtgWasm32EmitRegReg(a, rtgWasm32OpShrRegReg, rtgWasm32RegRax, rtgWasm32RegRdx)
+		return
+	}
+	if kind == rtgTypeUint16 {
+		rtgWasm32EmitRegImm(a, rtgWasm32OpMovRegImm, rtgWasm32RegRdx, 65535)
+		rtgWasm32EmitRegReg(a, rtgWasm32OpAndRegReg, rtgWasm32RegRax, rtgWasm32RegRdx)
 	}
 }
 

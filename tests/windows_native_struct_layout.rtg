@@ -1,0 +1,22 @@
+package main
+
+type nativePair struct {
+	A uint32
+	B uint32
+}
+
+// rtg:linkstatic ntdll.dll,RtlMoveMemory
+func moveMemory(destination *byte, source *nativePair, size int) {
+}
+
+func appMain(args []string) int {
+	value := nativePair{A: 0x11223344, B: 0xd5667788}
+	bytes := [8]byte{}
+	moveMemory(&bytes[0], &value, len(bytes))
+	if bytes[0] != 0x44 || bytes[3] != 0x11 || bytes[4] != 0x88 || bytes[7] != 0xd5 {
+		print("FAIL\n")
+		return 1
+	}
+	print("PASS\n")
+	return 0
+}

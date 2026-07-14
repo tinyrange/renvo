@@ -150,6 +150,190 @@ func TestPointerTypesRetainAddressSpace(t *testing.T) {
 	}
 }
 
+func TestStructLayoutsFollowTargetFieldAlignment(t *testing.T) {
+	oldFixedTarget := rtgCompilerFixedTarget
+	oldCurrentTarget := rtgCurrentTarget
+	oldOS := rtgTargetOS
+	oldArch := rtgTargetArch
+	oldIntSize := rtgNativeIntSize
+	t.Cleanup(func() {
+		rtgCompilerFixedTarget = oldFixedTarget
+		rtgCurrentTarget = oldCurrentTarget
+		rtgTargetOS = oldOS
+		rtgTargetArch = oldArch
+		rtgNativeIntSize = oldIntSize
+	})
+	rtgCompilerFixedTarget = 0
+	rtgSetTarget(rtgTargetWindowsAmd64)
+
+	program := rtgParseProgram([]byte(`package main
+
+type pair struct {
+	A uint32
+	B uint32
+}
+
+type mixed struct {
+	A byte
+	B uint32
+	C uint16
+	D byte
+}
+
+type outer struct {
+	Flag byte
+	Pair pair
+	Tail uint16
+}
+
+type arrayed struct {
+	Flag byte
+	Values [2]uint32
+	Tail byte
+}
+
+// rtg:linkstatic test.dll,consumeLayouts
+func consumeLayouts(pairValue *pair, mixedValue *mixed, outerValue *outer, arrayedValue *arrayed) {}
+`))
+	if !program.ok {
+		t.Fatal("struct layout test program did not parse")
+	}
+	meta := rtgBuildMeta(&program)
+	if !meta.ok {
+		t.Fatal("struct layout test metadata failed")
+	}
+
+	tests := []struct {
+		name    string
+		offsets []int
+		size    int
+	}{
+		{name: "pair", offsets: []int{0, 4}, size: 8},
+		{name: "mixed", offsets: []int{0, 4, 8, 10}, size: 12},
+		{name: "outer", offsets: []int{0, 4, 12}, size: 16},
+		{name: "arrayed", offsets: []int{0, 4, 12}, size: 16},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			typeIndex := -1
+			for i := 0; i < len(meta.types); i++ {
+				if rtgBytesEqualText(program.src, meta.types[i].nameStart, meta.types[i].nameEnd, test.name) {
+					typeIndex = i
+					break
+				}
+			}
+			if typeIndex < 0 {
+				t.Fatalf("type %s not found", test.name)
+			}
+			resolved := rtgResolveType(&meta, typeIndex)
+			if resolved.size != test.size || resolved.count != len(test.offsets) {
+				t.Fatalf("%s layout = size %d fields %d, want size %d fields %d", test.name, resolved.size, resolved.count, test.size, len(test.offsets))
+			}
+			for i := 0; i < len(test.offsets); i++ {
+				got := meta.fields[resolved.first+i].offset
+				if got != test.offsets[i] {
+					t.Fatalf("%s field %d offset = %d, want %d", test.name, i, got, test.offsets[i])
+				}
+			}
+		})
+	}
+}
+
+func TestStructLayoutHonorsTargetMaximumAlignment(t *testing.T) {
+	oldFixedTarget := rtgCompilerFixedTarget
+	oldCurrentTarget := rtgCurrentTarget
+	oldOS := rtgTargetOS
+	oldArch := rtgTargetArch
+	oldIntSize := rtgNativeIntSize
+	t.Cleanup(func() {
+		rtgCompilerFixedTarget = oldFixedTarget
+		rtgCurrentTarget = oldCurrentTarget
+		rtgTargetOS = oldOS
+		rtgTargetArch = oldArch
+		rtgNativeIntSize = oldIntSize
+	})
+	rtgCompilerFixedTarget = 0
+
+	tests := []struct {
+		name           string
+		target         int
+		offsets        []int
+		size           int
+		pointerOffsets []int
+		pointerSize    int
+	}{
+		{name: "windows-amd64", target: rtgTargetWindowsAmd64, offsets: []int{0, 8, 16}, size: 24, pointerOffsets: []int{0, 8, 16}, pointerSize: 24},
+		{name: "windows-386", target: rtgTargetWindows386, offsets: []int{0, 4, 12}, size: 16, pointerOffsets: []int{0, 4, 8}, pointerSize: 12},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			rtgSetTarget(test.target)
+			program := rtgParseProgram([]byte(`package main
+
+type wide struct {
+	Head byte
+	Value uint64
+	Tail byte
+}
+
+type pointerLayout struct {
+	Head byte
+	Value *byte
+	Tail byte
+}
+
+// rtg:linkstatic test.dll,consumeWide
+func consumeWide(value *wide, pointerValue *pointerLayout) {}
+`))
+			meta := rtgBuildMeta(&program)
+			if !program.ok || !meta.ok {
+				t.Fatal("wide struct metadata failed")
+			}
+			typeIndex := -1
+			for i := 0; i < len(meta.types); i++ {
+				if rtgBytesEqualText(program.src, meta.types[i].nameStart, meta.types[i].nameEnd, "wide") {
+					typeIndex = i
+					break
+				}
+			}
+			if typeIndex < 0 {
+				t.Fatal("wide type not found")
+			}
+			resolved := rtgResolveType(&meta, typeIndex)
+			if resolved.size != test.size {
+				t.Fatalf("wide size = %d, want %d", resolved.size, test.size)
+			}
+			for i := 0; i < len(test.offsets); i++ {
+				got := meta.fields[resolved.first+i].offset
+				if got != test.offsets[i] {
+					t.Fatalf("wide field %d offset = %d, want %d", i, got, test.offsets[i])
+				}
+			}
+
+			pointerIndex := -1
+			for i := 0; i < len(meta.types); i++ {
+				if rtgBytesEqualText(program.src, meta.types[i].nameStart, meta.types[i].nameEnd, "pointerLayout") {
+					pointerIndex = i
+					break
+				}
+			}
+			if pointerIndex < 0 {
+				t.Fatal("pointerLayout type not found")
+			}
+			pointerType := rtgResolveType(&meta, pointerIndex)
+			if pointerType.size != test.pointerSize {
+				t.Fatalf("pointerLayout size = %d, want %d", pointerType.size, test.pointerSize)
+			}
+			for i := 0; i < len(test.pointerOffsets); i++ {
+				got := meta.fields[pointerType.first+i].offset
+				if got != test.pointerOffsets[i] {
+					t.Fatalf("pointerLayout field %d offset = %d, want %d", i, got, test.pointerOffsets[i])
+				}
+			}
+		})
+	}
+}
+
 func TestExpressionParserCapacityTracksTokenRange(t *testing.T) {
 	oldFixedTarget := rtgCompilerFixedTarget
 	rtgCompilerFixedTarget = 0
