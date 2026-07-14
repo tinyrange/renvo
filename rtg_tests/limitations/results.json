@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "source_digest": "e3a1dc3c39b5fd3f47c35ecb600030ab60ad76d56194c9fe6dd471e25d43189e",
+  "source_digest": "86cafab3cab10640e5f3f72aa939bf13aac1226a470639dad205758bcc6f94bb",
   "runs": [
     {
       "stage": "host",
       "target": "linux/amd64",
-      "commit": "4e9b1a6390f0f46fec467965c67a6c9ced9bca08",
-      "captured_at": "2026-07-14T19:55:28Z",
+      "commit": "7a00586c55f9be18ec8775cc8ab9b05bec00f3d8",
+      "captured_at": "2026-07-14T20:15:38Z",
       "observations": [
         {
           "id": 1,
@@ -16,7 +16,7 @@
         {
           "id": 2,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: Println(\"x\")\nrtg: compilation failed"
         },
         {
           "id": 3,
@@ -66,7 +66,7 @@
         {
           "id": 12,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: _ = [...]int{1,2,3}\nrtg: compilation failed"
         },
         {
           "id": 13,
@@ -86,7 +86,7 @@
         {
           "id": 16,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: _ = [][2]int{{1,2}}\nrtg: compilation failed"
         },
         {
           "id": 17,
@@ -96,7 +96,7 @@
         {
           "id": 18,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: _ = [2]int{1,2} == [2]int{1,2}\nrtg: compilation failed"
         },
         {
           "id": 19,
@@ -131,12 +131,12 @@
         {
           "id": 25,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: delete(m, \"a\")\nrtg: compilation failed"
         },
         {
           "id": 26,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: _ = len(m)\nrtg: compilation failed"
         },
         {
           "id": 27,
@@ -146,7 +146,7 @@
         {
           "id": 28,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: _ = []map[string]int{{}}\nrtg: compilation failed"
         },
         {
           "id": 29,
@@ -176,12 +176,12 @@
         {
           "id": 34,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: _ = x.(int)\nrtg: compilation failed"
         },
         {
           "id": 35,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: switch x.(type) { case int: }\nrtg: compilation failed"
         },
         {
           "id": 36,
@@ -191,17 +191,17 @@
         {
           "id": 37,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: _ = func() int { return 1 }\nrtg: compilation failed"
         },
         {
           "id": 38,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: f := func() int { x = x + 1; return x }\nrtg: compilation failed"
         },
         {
           "id": 39,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: f := add\nrtg: compilation failed"
         },
         {
           "id": 40,
@@ -216,12 +216,12 @@
         {
           "id": 42,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: f := t.Inc\nrtg: compilation failed"
         },
         {
           "id": 43,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: f := T.Inc\nrtg: compilation failed"
         },
         {
           "id": 44,
@@ -246,7 +246,7 @@
         {
           "id": 48,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: defer done()\nrtg: compilation failed"
         },
         {
           "id": 49,
@@ -256,7 +256,7 @@
         {
           "id": 50,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: for _, c := range \"abc\" { _ = c }\nrtg: compilation failed"
         },
         {
           "id": 51,
@@ -266,12 +266,12 @@
         {
           "id": 52,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: switch { case x == 1: }\nrtg: compilation failed"
         },
         {
           "id": 53,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: fallthrough\nrtg: failed to emit statement: switch 1 { case 1: fallthrough; case 2: }\nrtg: compilation failed"
         },
         {
           "id": 54,
@@ -286,7 +286,7 @@
         {
           "id": 56,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: x = 1\nrtg: compilation failed"
         },
         {
           "id": 57,
@@ -301,47 +301,47 @@
         {
           "id": 59,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: _ = new(int)\nrtg: compilation failed"
         },
         {
           "id": 60,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: panic(\"x\")\nrtg: compilation failed"
         },
         {
           "id": 61,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: _ = recover()\nrtg: compilation failed"
         },
         {
           "id": 62,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: println(\"x\")\nrtg: compilation failed"
         },
         {
           "id": 63,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: _ = real(1+2i)\nrtg: compilation failed"
         },
         {
           "id": 64,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: _ = imag(1+2i)\nrtg: compilation failed"
         },
         {
           "id": 65,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: _ = complex(1, 2)\nrtg: compilation failed"
         },
         {
           "id": 66,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: xs = append(xs, 1, 2, 3)\nrtg: compilation failed"
         },
         {
           "id": 67,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: s += \"b\"\nrtg: compilation failed"
         },
         {
           "id": 68,
@@ -366,7 +366,7 @@
         {
           "id": 72,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: type T int\nrtg: compilation failed"
         },
         {
           "id": 73,
@@ -381,27 +381,27 @@
         {
           "id": 75,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: x()\nrtg: compilation failed"
         },
         {
           "id": 76,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: 1 = 2\nrtg: compilation failed"
         },
         {
           "id": 77,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: _, _ = a, b\nrtg: compilation failed"
         },
         {
           "id": 78,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: break\nrtg: compilation failed"
         },
         {
           "id": 79,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: continue\nrtg: compilation failed"
         },
         {
           "id": 80,
@@ -411,7 +411,7 @@
         {
           "id": 81,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: Println(\"x\")\nrtg: compilation failed"
         },
         {
           "id": 82,
@@ -446,7 +446,7 @@
         {
           "id": 88,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: return rune(c0), 1\nrtg: failed to emit statement: if c0 \u003c RuneSelf {\n\t\treturn rune(c0), 1\n\t}\nrtg: compilation failed"
         },
         {
           "id": 89,
@@ -461,12 +461,12 @@
         {
           "id": 91,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: _, _ = ParseInt(\"1\", 10, 64)\nrtg: compilation failed"
         },
         {
           "id": 92,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: _ = NewBufferString(\"x\")\nrtg: compilation failed"
         },
         {
           "id": 93,
@@ -496,7 +496,7 @@
         {
           "id": 98,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: _ = Sizeof(T{})\nrtg: compilation failed"
         },
         {
           "id": 99,
@@ -511,12 +511,12 @@
         {
           "id": 101,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: _ = Create\nrtg: compilation failed"
         },
         {
           "id": 102,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: f, _ := OpenFile(\"x\", O_RDONLY, 0)\nrtg: compilation failed"
         },
         {
           "id": 103,
@@ -551,22 +551,22 @@
         {
           "id": 109,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: for _, c := range s { _ = c }\nrtg: compilation failed"
         },
         {
           "id": 110,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: for _, c := range \"é\" { _ = c }\nrtg: compilation failed"
         },
         {
           "id": 111,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: y := struct{ A int }{1}\nrtg: compilation failed"
         },
         {
           "id": 112,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: _ = Sizeof(x) + Sizeof(\u0026x) + Sizeof([2]byte{})\nrtg: compilation failed"
         },
         {
           "id": 113,
@@ -576,15 +576,15 @@
         {
           "id": 114,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: compilation failed"
+          "message": "rtg: error RTG-BACKEND-003 (backend): rtg: failed to emit statement: _ = same(left, right) \u0026\u0026 left == right \u0026\u0026 !(left != right) \u0026\u0026 emptyLeft == emptyRight \u0026\u0026 namedLeft == namedRight \u0026\u0026 Box{1, \"a\", true, nil, [2]int{1, 2}, Inner{3, \"b\", [2]bool{true, false}}} == Box{1, \"a\", true, nil, [2]int{1, 2}, Inner{3, \"b\", [2]bool{true, false}}} \u0026\u0026 makeBox(1) == makeBox(1)\nrtg: compilation failed"
         }
       ]
     },
     {
       "stage": "stage3",
       "target": "linux/amd64",
-      "commit": "4e9b1a6390f0f46fec467965c67a6c9ced9bca08",
-      "captured_at": "2026-07-14T19:55:28Z",
+      "commit": "7a00586c55f9be18ec8775cc8ab9b05bec00f3d8",
+      "captured_at": "2026-07-14T20:15:38Z",
       "observations": [
         {
           "id": 1,
@@ -594,7 +594,7 @@
         {
           "id": 2,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: fmt.Println(\"x\")\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 3,
@@ -644,7 +644,7 @@
         {
           "id": 12,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: _ = [...]int{1,2,3}\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 13,
@@ -664,7 +664,7 @@
         {
           "id": 16,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: _ = [][2]int{{1,2}}\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 17,
@@ -674,7 +674,7 @@
         {
           "id": 18,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: _ = [2]int{1,2} == [2]int{1,2}\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 19,
@@ -709,12 +709,12 @@
         {
           "id": 25,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: delete(m, \"a\")\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 26,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: _ = len(m)\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 27,
@@ -724,7 +724,7 @@
         {
           "id": 28,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: _ = []map[string]int{{}}\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 29,
@@ -754,12 +754,12 @@
         {
           "id": 34,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: _ = x.(int)\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 35,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: switch x.(type) { case int: }\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 36,
@@ -769,17 +769,17 @@
         {
           "id": 37,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: _ = func() int { return 1 }\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 38,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: f := func() int { x = x + 1; return x }\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 39,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: f := add\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 40,
@@ -794,12 +794,12 @@
         {
           "id": 42,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: f := t.Inc\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 43,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: f := T.Inc\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 44,
@@ -824,7 +824,7 @@
         {
           "id": 48,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: defer done()\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 49,
@@ -834,7 +834,7 @@
         {
           "id": 50,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: for _, c := range \"abc\" { _ = c }\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 51,
@@ -844,12 +844,12 @@
         {
           "id": 52,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: switch { case x == 1: }\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 53,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: fallthrough\nrtg: failed to emit statement: switch 1 { case 1: fallthrough; case 2: }\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 54,
@@ -864,7 +864,7 @@
         {
           "id": 56,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: x = 1\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 57,
@@ -879,47 +879,47 @@
         {
           "id": 59,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: _ = new(int)\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 60,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: panic(\"x\")\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 61,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: _ = recover()\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 62,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: println(\"x\")\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 63,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: _ = real(1+2i)\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 64,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: _ = imag(1+2i)\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 65,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: _ = complex(1, 2)\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 66,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: xs = append(xs, 1, 2, 3)\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 67,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: s += \"b\"\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 68,
@@ -944,7 +944,7 @@
         {
           "id": 72,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: type T int\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 73,
@@ -959,27 +959,27 @@
         {
           "id": 75,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: x()\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 76,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: 1 = 2\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 77,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: _, _ = a, b\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 78,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: break\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 79,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: continue\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 80,
@@ -989,7 +989,7 @@
         {
           "id": 81,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: Println(\"x\")\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 82,
@@ -1024,7 +1024,7 @@
         {
           "id": 88,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: return rune(c0), 1\nrtg: failed to emit statement: if c0 \u003c RuneSelf {\n\t\treturn rune(c0), 1\n\t}\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 89,
@@ -1039,12 +1039,12 @@
         {
           "id": 91,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: _, _ = strconv.ParseInt(\"1\", 10, 64)\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 92,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: _ = bytes.NewBufferString(\"x\")\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 93,
@@ -1074,7 +1074,7 @@
         {
           "id": 98,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: _ = unsafe.Sizeof(T{})\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 99,
@@ -1089,12 +1089,12 @@
         {
           "id": 101,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: _ = Create\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 102,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: f, _ := os.OpenFile(\"x\", O_RDONLY, 0)\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 103,
@@ -1129,22 +1129,22 @@
         {
           "id": 109,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: for _, c := range s { _ = c }\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 110,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: for _, c := range \"é\" { _ = c }\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 111,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: y := struct{ A int }{1}\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 112,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: _ = unsafe.Sizeof(x) + unsafe.Sizeof(\u0026x) + unsafe.Sizeof([2]byte{})\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         },
         {
           "id": 113,
@@ -1154,7 +1154,7 @@
         {
           "id": 114,
           "status": "backend-failure",
-          "message": "rtg: error RTG-BACKEND-001 (backend): backend compilation failed"
+          "message": "rtg: failed to emit statement: _ = same(left, right) \u0026\u0026 left == right \u0026\u0026 !(left != right) \u0026\u0026 emptyLeft == emptyRight \u0026\u0026 namedLeft == namedRight \u0026\u0026 Box{1, \"a\", true, nil, [2]int{1, 2}, Inner{3, \"b\", [2]bool{true, false}}} == Box{1, \"a\", true, nil, [2]int{1, 2}, Inner{3, \"b\", [2]bool{true, false}}} \u0026\u0026 makeBox(1) == makeBox(1)\nrtg: error RTG-BACKEND-001 (backend): backend compilation failed"
         }
       ]
     }
