@@ -28,7 +28,7 @@ func rtg386EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	rtgAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
 	framePatch := len(a.code)
 	rtgAsmEmit32(a, 0x000000c8)
-	if rtgTypeIsStruct(g.meta, metaFn.resultType) {
+	if rtgTypeUsesHiddenResult(g.meta, metaFn.resultType) {
 		g.returnStruct = rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
 		rtgAsmStackMem(a, g.returnStruct, 0x89, 0x5d, 0x9d)
 	}
@@ -818,7 +818,7 @@ func rtg386EmitStructReturnExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool
 	}
 	if e.kind == rtgExprCall {
 		fnIndex := rtgFuncInfoFromCall(g, ep, e.left)
-		if fnIndex < 0 || !rtgTypeIsStruct(meta, meta.funcs[fnIndex].resultType) {
+		if fnIndex < 0 || !rtgTypeUsesHiddenResult(meta, meta.funcs[fnIndex].resultType) {
 			return false
 		}
 		if rtgTypeSize(meta, meta.funcs[fnIndex].resultType) != size {

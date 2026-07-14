@@ -5209,6 +5209,11 @@ func rtgTypeIsStruct(m *rtgMeta, typ int) bool {
 	return t.kind == rtgTypeStruct
 }
 
+func rtgTypeUsesHiddenResult(m *rtgMeta, typ int) bool {
+	t := rtgResolveType(m, typ)
+	return t.kind == rtgTypeStruct || t.kind == rtgTypeArray
+}
+
 func rtgTypeIsTuple(m *rtgMeta, typ int) bool {
 	t := rtgResolveType(m, typ)
 	if t.kind != rtgTypeStruct || t.count <= 1 {
@@ -5259,7 +5264,7 @@ func rtgBindFunctionParams(g *rtgLinearGen, fnIndex int) bool {
 	meta := g.meta
 	fn := &meta.funcs[fnIndex]
 	callWord := 0
-	if rtgTypeIsStruct(meta, fn.resultType) {
+	if rtgTypeUsesHiddenResult(meta, fn.resultType) {
 		callWord = rtgBackendHiddenResultWordCount
 	}
 	for i := 0; i < fn.paramCount; i++ {
@@ -6064,7 +6069,7 @@ func rtgEmitLinearStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 		if rootIndex < 0 {
 			return false
 		}
-		if rtgTypeIsStruct(g.meta, resultType) {
+		if rtgTypeUsesHiddenResult(g.meta, resultType) {
 			if !rtgEmitStructReturnExpr(g, &ep, rootIndex) {
 				return false
 			}
@@ -8326,6 +8331,15 @@ func rtgEmitCopyStackToBss(g *rtgLinearGen, srcOffset int, bssOffset int, size i
 		rtgAsmStorePrimaryBss(&g.asm, bssOffset+at)
 	}
 }
+func rtgEmitCopyBssToStack(g *rtgLinearGen, bssOffset int, destOffset int, size int) {
+	if size < rtgBackendValueSlotSize {
+		size = rtgBackendValueSlotSize
+	}
+	for at := 0; at < size; at += 8 {
+		rtgAsmLoadPrimaryBss(&g.asm, bssOffset+at)
+		rtgAsmStorePrimaryStack(&g.asm, destOffset-at)
+	}
+}
 func rtgFindLocalIndexInCurrentScope(g *rtgLinearGen, nameStart int, nameEnd int) int {
 	start := g.scopeBase
 	if start < 0 {
@@ -8732,12 +8746,60 @@ func rtgEmitTypedAssign(g *rtgLinearGen, ep *rtgExprParse, idx int, offset int) 
 	if destResolved.kind == rtgTypeArray {
 		if e.kind == rtgExprIdent {
 			localIndex := rtgFindLocalIndex(g, e.nameStart, e.nameEnd)
-			if localIndex < 0 || rtgTypeSize(meta, g.locals[localIndex].typ) != rtgTypeSize(meta, destType) {
+			if localIndex >= 0 {
+				if rtgTypeSize(meta, g.locals[localIndex].typ) != rtgTypeSize(meta, destType) {
+					return false
+				}
+				rtgEmitCopyStackToStack(g, g.locals[localIndex].offset, offset, rtgTypeSize(meta, destType))
+				return true
+			}
+			globalOffset := rtgFindGlobalOffset(g, e.nameStart, e.nameEnd)
+			globalType := rtgFindGlobalType(g, e.nameStart, e.nameEnd)
+			if globalOffset < 0 || rtgTypeSize(meta, globalType) != rtgTypeSize(meta, destType) {
 				return false
 			}
-			rtgEmitCopyStackToStack(g, g.locals[localIndex].offset, offset, rtgTypeSize(meta, destType))
+			rtgEmitCopyBssToStack(g, globalOffset, offset, rtgTypeSize(meta, destType))
 			return true
 		}
+		if e.kind == rtgExprCall {
+			return rtgEmitStructCallToLocal(g, ep, idx, destType, offset)
+		}
+		if e.kind == rtgExprIndex {
+			valueType := rtgInferParsedExprType(g, ep, idx)
+			if rtgTypeSize(meta, valueType) != rtgTypeSize(meta, destType) || !rtgEmitIndexAddressPrimary(g, ep, idx) {
+				return false
+			}
+			rtgAsmCopyPrimaryToSecondary(&g.asm)
+			rtgEmitCopyMemSecondaryToStack(g, offset, rtgTypeSize(meta, destType))
+			return true
+		}
+		if e.kind == rtgExprSelector {
+			fieldType := rtgInferParsedExprType(g, ep, idx)
+			if rtgResolveType(meta, fieldType).kind != rtgTypeArray || rtgTypeSize(meta, fieldType) != rtgTypeSize(meta, destType) {
+				return false
+			}
+			if !rtgEmitSelectorAddressSecondary(g, ep, idx) {
+				return false
+			}
+			rtgEmitCopyMemSecondaryToStack(g, offset, rtgTypeSize(meta, destType))
+			return true
+		}
+		if e.kind == rtgExprUnary && rtgTokCharIs(g.prog, e.tok, '*') {
+			valueType := rtgInferParsedExprType(g, ep, idx)
+			if rtgResolveType(meta, valueType).kind != rtgTypeArray || rtgTypeSize(meta, valueType) != rtgTypeSize(meta, destType) {
+				return false
+			}
+			if !rtgEmitIntExpr(g, ep, e.left) {
+				return false
+			}
+			rtgAsmCopyPrimaryToSecondary(&g.asm)
+			rtgEmitCopyMemSecondaryToStack(g, offset, rtgTypeSize(meta, destType))
+			return true
+		}
+		if e.kind != rtgExprComposite {
+			return false
+		}
+		rtgZeroLocalAtOffset(g, offset)
 		return rtgEmitCompositeFieldToStack(g, ep, idx, destType, offset)
 	}
 	if destResolved.kind == rtgTypeStruct {
@@ -9674,18 +9736,21 @@ func rtgEmitCopyMemSecondaryToStack(g *rtgLinearGen, destOffset int, size int) {
 	}
 }
 func rtgEmitPushStackWords(g *rtgLinearGen, offset int, size int, wordSize int) {
+	size = rtgAlignValue(size, wordSize)
 	for at := size - wordSize; at >= 0; at -= wordSize {
 		rtgAsmLoadPrimaryStack(&g.asm, offset-at)
 		rtgAsmPushPrimary(&g.asm)
 	}
 }
 func rtgEmitPushBssWords(g *rtgLinearGen, offset int, size int, wordSize int) {
+	size = rtgAlignValue(size, wordSize)
 	for at := size - wordSize; at >= 0; at -= wordSize {
 		rtgAsmLoadPrimaryBss(&g.asm, offset+at)
 		rtgAsmPushPrimary(&g.asm)
 	}
 }
 func rtgEmitPushMemSecondaryWords(g *rtgLinearGen, size int, wordSize int) {
+	size = rtgAlignValue(size, wordSize)
 	for at := size - wordSize; at >= 0; at -= wordSize {
 		rtgAsmLoadPrimaryMemSecondaryDisp(&g.asm, at)
 		rtgAsmPushPrimary(&g.asm)
@@ -9726,7 +9791,7 @@ func rtgEmitIndexedStructToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, des
 func rtgPrepareStructCall(g *rtgLinearGen, ep *rtgExprParse, idx int, destType int) (int, int) {
 	e := &ep.exprs[idx]
 	fnIndex := rtgFuncInfoFromCall(g, ep, e.left)
-	if fnIndex < 0 || !rtgTypeIsStruct(g.meta, g.meta.funcs[fnIndex].resultType) {
+	if fnIndex < 0 || !rtgTypeUsesHiddenResult(g.meta, g.meta.funcs[fnIndex].resultType) {
 		return -1, 0
 	}
 	if rtgTypeSize(g.meta, destType) != rtgTypeSize(g.meta, g.meta.funcs[fnIndex].resultType) {
@@ -10842,6 +10907,7 @@ func rtgEmitStructArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int, typ int
 	if rtgResolveType(meta, typ).kind == rtgTypeArray {
 		wordSize = rtgNativeIntSize
 	}
+	wordCount := rtgAlignValue(size, wordSize) / wordSize
 	if e.kind == rtgExprIdent {
 		localIndex := rtgFindLocalIndex(g, e.nameStart, e.nameEnd)
 		if localIndex >= 0 {
@@ -10849,7 +10915,7 @@ func rtgEmitStructArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int, typ int
 				return -1
 			}
 			rtgEmitPushStackWords(g, g.locals[localIndex].offset, size, wordSize)
-			return size / wordSize
+			return wordCount
 		}
 		globalOffset := rtgFindGlobalOffset(g, e.nameStart, e.nameEnd)
 		globalType := rtgFindGlobalType(g, e.nameStart, e.nameEnd)
@@ -10857,43 +10923,37 @@ func rtgEmitStructArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int, typ int
 			return -1
 		}
 		rtgEmitPushBssWords(g, globalOffset, size, wordSize)
-		return size / wordSize
+		return wordCount
 	}
 	if e.kind == rtgExprIndex {
 		leftType := rtgInferParsedExprType(g, ep, e.left)
 		sliceType := rtgResolveType(meta, leftType)
 		elemType := rtgResolveType(meta, sliceType.elem)
-		if sliceType.kind != rtgTypeSlice || elemType.kind != rtgTypeStruct || rtgTypeSize(meta, sliceType.elem) != size {
+		if (sliceType.kind != rtgTypeSlice && sliceType.kind != rtgTypeArray) ||
+			(elemType.kind != rtgTypeStruct && elemType.kind != rtgTypeArray) || rtgTypeSize(meta, sliceType.elem) != size {
 			return -1
 		}
-		if !rtgEmitIntExpr(g, ep, e.right) {
+		if !rtgEmitIndexAddressPrimary(g, ep, idx) {
 			return -1
 		}
-		rtgAsmPushPrimary(a)
-		if !rtgEmitSlicePtrLen(g, ep, e.left) {
-			return -1
-		}
-		rtgAsmPopTertiary(a)
-		rtgAsmMulTertiaryImm(a, size)
 		rtgAsmCopyPrimaryToSecondary(a)
-		rtgAsmAddSecondaryTertiary(a)
 		rtgEmitPushMemSecondaryWords(g, size, wordSize)
-		return size / wordSize
+		return wordCount
 	}
 	if e.kind == rtgExprSelector {
 		fieldType := rtgInferParsedExprType(g, ep, idx)
-		if !rtgTypeIsStruct(meta, fieldType) || rtgTypeSize(meta, fieldType) != size {
+		if !rtgTypeUsesHiddenResult(meta, fieldType) || rtgTypeSize(meta, fieldType) != size {
 			return -1
 		}
 		if !rtgEmitSelectorAddressSecondary(g, ep, idx) {
 			return -1
 		}
 		rtgEmitPushMemSecondaryWords(g, size, wordSize)
-		return size / wordSize
+		return wordCount
 	}
 	if e.kind == rtgExprUnary && rtgTokCharIs(g.prog, e.tok, '*') {
 		valueType := rtgInferParsedExprType(g, ep, idx)
-		if !rtgTypeIsStruct(meta, valueType) || rtgTypeSize(meta, valueType) != size {
+		if !rtgTypeUsesHiddenResult(meta, valueType) || rtgTypeSize(meta, valueType) != size {
 			return -1
 		}
 		if !rtgEmitIntExpr(g, ep, e.left) {
@@ -10901,25 +10961,15 @@ func rtgEmitStructArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int, typ int
 		}
 		rtgAsmCopyPrimaryToSecondary(a)
 		rtgEmitPushMemSecondaryWords(g, size, wordSize)
-		return size / wordSize
+		return wordCount
 	}
 	if e.kind == rtgExprComposite {
 		offset := rtgAddUnnamedLocal(g, typ)
-		rtgZeroLocalAtOffset(g, offset)
-		for i := 0; i < e.argCount; i++ {
-			field := ep.fields[e.firstArg+i]
-			fieldIndex := rtgCompositeStructFieldIndex(g, typ, &field, i)
-			if fieldIndex < 0 {
-				return -1
-			}
-			fieldOffset := g.meta.fields[fieldIndex].offset
-			fieldType := g.meta.fields[fieldIndex].typ
-			if !rtgEmitCompositeFieldToStack(g, ep, field.expr, fieldType, offset-fieldOffset) {
-				return -1
-			}
+		if !rtgEmitTypedAssign(g, ep, idx, offset) {
+			return -1
 		}
 		rtgEmitPushStackWords(g, offset, size, wordSize)
-		return size / wordSize
+		return wordCount
 	}
 	if e.kind == rtgExprCall {
 		offset := rtgAddUnnamedLocal(g, typ)
@@ -10927,7 +10977,7 @@ func rtgEmitStructArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int, typ int
 			return -1
 		}
 		rtgEmitPushStackWords(g, offset, size, wordSize)
-		return size / wordSize
+		return wordCount
 	}
 	return -1
 }
@@ -12035,6 +12085,13 @@ func rtgEmitIndexAddressPrimary(g *rtgLinearGen, ep *rtgExprParse, indexIdx int)
 				return false
 			}
 			rtgAsmCopySecondaryToPrimary(a)
+		} else if base.kind == rtgExprCall {
+			baseType := rtgInferParsedExprType(g, ep, indexExpr.left)
+			tempOffset := rtgAddUnnamedLocal(g, baseType)
+			if !rtgEmitTypedAssign(g, ep, indexExpr.left, tempOffset) {
+				return false
+			}
+			rtgAsmAddressPrimaryStack(a, tempOffset)
 		} else {
 			return false
 		}
@@ -14007,8 +14064,20 @@ func rtgEmitCompositeFieldToMem(g *rtgLinearGen, ep *rtgExprParse, idx int, fiel
 	return rtgAmd64EmitCompositeFieldToMem(g, ep, idx, fieldType, addrOffset, fieldOffset)
 }
 func rtgEmitStructReturnExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	resultType := g.meta.funcs[g.currentFunc].resultType
+	if rtgResolveType(g.meta, resultType).kind == rtgTypeArray {
+		if g.returnStruct <= 0 {
+			return false
+		}
+		tempOffset := rtgAddUnnamedLocal(g, resultType)
+		if !rtgEmitTypedAssign(g, ep, idx, tempOffset) {
+			return false
+		}
+		rtgAsmLoadSecondaryStack(&g.asm, g.returnStruct)
+		rtgEmitCopyStackToMemSecondary(g, tempOffset, 0, rtgTypeSize(g.meta, resultType))
+		return true
+	}
 	if idx >= 0 && idx < len(ep.exprs) && ep.exprs[idx].kind == rtgExprSelector {
-		resultType := g.meta.funcs[g.currentFunc].resultType
 		size := rtgTypeSize(g.meta, resultType)
 		valueType := rtgInferParsedExprType(g, ep, idx)
 		if !rtgTypeIsStruct(g.meta, valueType) || rtgTypeSize(g.meta, valueType) != size || g.returnStruct <= 0 {

@@ -46,7 +46,7 @@ func rtgArmEmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	rtgArmAsmEmit(a, 0xe92d4800)
 	rtgArmAsmMovRegReg(a, rtgArmRegFp, rtgArmRegSp)
 	rtgArmAsmAddRegImm(a, rtgArmRegSp, rtgArmRegSp, -32768)
-	if rtgTypeIsStruct(g.meta, metaFn.resultType) {
+	if rtgTypeUsesHiddenResult(g.meta, metaFn.resultType) {
 		g.returnStruct = rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
 		rtgArmAsmStoreRegStack(a, rtgArmRegRdi, g.returnStruct)
 	}

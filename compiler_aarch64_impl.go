@@ -46,7 +46,7 @@ func rtgAarch64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	rtgAarch64AsmEmit(a, 0xa9bf7bfd)
 	rtgAarch64AsmEmit(a, 0x910003fd)
 	rtgAarch64AsmEmit(a, 0xd14023ff)
-	if rtgTypeIsStruct(g.meta, metaFn.resultType) {
+	if rtgTypeUsesHiddenResult(g.meta, metaFn.resultType) {
 		g.returnStruct = rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
 		rtgAarch64AsmStoreRegStack(a, rtgAarch64RegRdi, g.returnStruct)
 	}

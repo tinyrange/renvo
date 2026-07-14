@@ -2137,7 +2137,7 @@ func rtgWasm32EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	g.returnStruct = 0
 	g.stackUsed = 0
 	rtgAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-	if rtgTypeIsStruct(g.meta, metaFn.resultType) {
+	if rtgTypeUsesHiddenResult(g.meta, metaFn.resultType) {
 		g.returnStruct = rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
 		rtgWasm32EmitStack(a, rtgWasm32OpStoreStack, rtgWasm32RegRdi, g.returnStruct)
 	}
