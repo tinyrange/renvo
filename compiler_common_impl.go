@@ -690,7 +690,7 @@ func rtgAsmPatch(a *rtgAsm) {
 		a.dataOffset = a.codeOffset + len(a.code)
 		return
 	}
-	if rtgTargetArch == rtgArchAmd64 {
+	if rtgTargetArch == rtgArchAmd64 && rtgCompilerFixedTarget == 0 {
 		rtgAmd64RelaxBranches(a)
 	}
 	for i := 0; i < len(a.relocs); i++ {
