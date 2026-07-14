@@ -5454,7 +5454,11 @@ func rtgEmitBareReturnValues(g *rtgLinearGen) bool {
 				return false
 			}
 			rtgAsmLoadSecondaryStack(&g.asm, g.returnStruct)
-			rtgEmitCopyStackToMemSecondary(g, offset, 0, rtgTypeSize(g.meta, result.typ))
+			if resolved.kind == rtgTypeArray {
+				rtgEmitCopyArrayStackToMemSecondary(g, offset, 0, rtgTypeSize(g.meta, result.typ))
+			} else {
+				rtgEmitCopyStackToMemSecondary(g, offset, 0, rtgTypeSize(g.meta, result.typ))
+			}
 			return true
 		}
 		if resolved.kind == rtgTypeSlice {
@@ -5483,7 +5487,11 @@ func rtgEmitBareReturnValues(g *rtgLinearGen) bool {
 		}
 		field := &g.meta.fields[tuple.first+i]
 		rtgAsmLoadSecondaryStack(&g.asm, g.returnStruct)
-		rtgEmitCopyStackToMemSecondary(g, offset, field.offset, rtgTypeSize(g.meta, result.typ))
+		if rtgResolveType(g.meta, result.typ).kind == rtgTypeArray {
+			rtgEmitCopyArrayStackToMemSecondary(g, offset, field.offset, rtgTypeSize(g.meta, result.typ))
+		} else {
+			rtgEmitCopyStackToMemSecondary(g, offset, field.offset, rtgTypeSize(g.meta, result.typ))
+		}
 	}
 	return true
 }
@@ -8427,13 +8435,21 @@ func rtgEmitTempToTarget(g *rtgLinearGen, kind int, targetStart int, targetEnd i
 			}
 			if localIndex < 0 {
 				offset := rtgAddTypedLocal(g, root.nameStart, root.nameEnd, tempType)
-				rtgEmitCopyStackToStack(g, tempOffset, offset, size)
+				if rtgResolveType(g.meta, tempType).kind == rtgTypeArray {
+					rtgEmitCopyArrayStackToStack(g, tempOffset, offset, size)
+				} else {
+					rtgEmitCopyStackToStack(g, tempOffset, offset, size)
+				}
 				rtgClearLocalConstAtOffset(g, offset)
 				return true
 			}
 		}
 		if localIndex >= 0 {
-			rtgEmitCopyStackToStack(g, tempOffset, g.locals[localIndex].offset, size)
+			if rtgResolveType(g.meta, tempType).kind == rtgTypeArray {
+				rtgEmitCopyArrayStackToStack(g, tempOffset, g.locals[localIndex].offset, size)
+			} else {
+				rtgEmitCopyStackToStack(g, tempOffset, g.locals[localIndex].offset, size)
+			}
 			rtgClearLocalConstAtOffset(g, g.locals[localIndex].offset)
 			return true
 		}
@@ -8678,7 +8694,11 @@ func rtgEmitTupleReturnField(g *rtgLinearGen, start int, end int, typ int, field
 		size = rtgBackendValueSlotSize
 	}
 	rtgAsmLoadSecondaryStack(&g.asm, g.returnStruct)
-	rtgEmitCopyStackToMemSecondary(g, tempOffset, fieldOffset, size)
+	if rtgResolveType(g.meta, typ).kind == rtgTypeArray {
+		rtgEmitCopyArrayStackToMemSecondary(g, tempOffset, fieldOffset, size)
+	} else {
+		rtgEmitCopyStackToMemSecondary(g, tempOffset, fieldOffset, size)
+	}
 	return true
 }
 func rtgInferParsedExprType(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
@@ -9897,9 +9917,23 @@ func rtgEmitCopyStackToStack(g *rtgLinearGen, srcOffset int, destOffset int, siz
 		rtgAsmCopyStackSlot(a, srcOffset-at, destOffset-at)
 	}
 }
+func rtgEmitCopyArrayStackToStack(g *rtgLinearGen, srcOffset int, destOffset int, size int) {
+	a := &g.asm
+	for at := 0; at < size; at += rtgNativeIntSize {
+		rtgAsmLoadPrimaryStack(a, srcOffset-at)
+		rtgAsmStorePrimaryStack(a, destOffset-at)
+	}
+}
 func rtgEmitCopyStackToMemSecondary(g *rtgLinearGen, srcOffset int, destDisp int, size int) {
 	a := &g.asm
 	for at := 0; at < size; at += 8 {
+		rtgAsmLoadPrimaryStack(a, srcOffset-at)
+		rtgAsmStorePrimaryMemSecondaryDisp(a, destDisp+at)
+	}
+}
+func rtgEmitCopyArrayStackToMemSecondary(g *rtgLinearGen, srcOffset int, destDisp int, size int) {
+	a := &g.asm
+	for at := 0; at < size; at += rtgNativeIntSize {
 		rtgAsmLoadPrimaryStack(a, srcOffset-at)
 		rtgAsmStorePrimaryMemSecondaryDisp(a, destDisp+at)
 	}
@@ -12701,7 +12735,11 @@ func rtgZeroLocalAtOffset(g *rtgLinearGen, offset int) {
 		return
 	}
 	rtgAsmPrimaryImm(a, 0)
-	for at := 0; at < size; at += 8 {
+	step := rtgBackendValueSlotSize
+	if t.kind == rtgTypeArray {
+		step = rtgNativeIntSize
+	}
+	for at := 0; at < size; at += step {
 		rtgAsmStorePrimaryStack(a, offset-at)
 	}
 	if t.kind == rtgTypeStruct {
@@ -14243,7 +14281,7 @@ func rtgEmitStructReturnExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			return false
 		}
 		rtgAsmLoadSecondaryStack(&g.asm, g.returnStruct)
-		rtgEmitCopyStackToMemSecondary(g, tempOffset, 0, rtgTypeSize(g.meta, resultType))
+		rtgEmitCopyArrayStackToMemSecondary(g, tempOffset, 0, rtgTypeSize(g.meta, resultType))
 		return true
 	}
 	if idx >= 0 && idx < len(ep.exprs) && ep.exprs[idx].kind == rtgExprSelector {
