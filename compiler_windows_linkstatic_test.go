@@ -2,7 +2,15 @@ package main
 
 import "testing"
 
+func useWindowsAmd64LinkStaticTestTarget(t *testing.T) {
+	t.Helper()
+	oldArch := rtgTargetArch
+	t.Cleanup(func() { rtgTargetArch = oldArch })
+	rtgTargetArch = rtgArchAmd64
+}
+
 func TestWindowsAmd64LinkStaticCallAlignsEvenStackArguments(t *testing.T) {
+	useWindowsAmd64LinkStaticTestTarget(t)
 	var asm rtgAsm
 	rtgAsmInit(&asm)
 	rtgWinAmd64CallStaticImport(&asm, 0, 12)
@@ -40,6 +48,7 @@ func TestWindowsAmd64LinkStaticCallAlignsEvenStackArguments(t *testing.T) {
 }
 
 func TestWindowsAmd64LinkStaticCallKeepsOddStackArgumentsAtABIOffset(t *testing.T) {
+	useWindowsAmd64LinkStaticTestTarget(t)
 	var asm rtgAsm
 	rtgAsmInit(&asm)
 	rtgWinAmd64CallStaticImport(&asm, 0, 5)
