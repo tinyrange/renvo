@@ -143,6 +143,106 @@ func appMain() int { return 1 }
 	assertSourcePaths(t, result.Files, want)
 }
 
+func TestSourceFilenameSelectionAcrossTargets(t *testing.T) {
+	tests := []struct {
+		name   string
+		target string
+		want   bool
+	}{
+		{"main_linux.go", "linux/amd64", true},
+		{"main_linux.go", "windows/amd64", false},
+		{"main_linux_386.go", "linux/386", true},
+		{"main_arm64.go", "linux/aarch64", true},
+		{"main_arm64.go", "darwin/arm64", true},
+		{"main_arm64.go", "linux/arm", false},
+		{"main_linux_arm64.go", "linux/aarch64", true},
+		{"main_linux_arm64.go", "darwin/arm64", false},
+		{"main_windows_386.go", "windows/386", true},
+		{"main_windows_386.go", "windows/amd64", false},
+		{"main_wasip1_wasm.go", "wasi/wasm32", true},
+		{"main_wasi_wasm32.go", "wasi/wasm32", true},
+		{"main_plan9.go", "linux/amd64", false},
+		{"main_feature.go", "linux/amd64", true},
+	}
+	for _, test := range tests {
+		if got := sourceFilenameEnabled(test.name, test.target); got != test.want {
+			t.Errorf("sourceFilenameEnabled(%q, %q) = %v, want %v", test.name, test.target, got, test.want)
+		}
+	}
+}
+
+func TestCollectSourcesCombinesFilenameAndBuildConstraints(t *testing.T) {
+	fs := memorySourceFS{files: []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/platform_linux_amd64.go", Src: []byte("//go:build rtg\n\npackage main\nfunc appMain() int { return 0 }\n")},
+		{Path: "/repo/case/cmd/app/platform_linux_arm64.go", Src: []byte("//go:build rtg\n\npackage main\nfunc appMain() int { return 1 }\n")},
+		{Path: "/repo/case/cmd/app/platform_windows_amd64.go", Src: []byte("package main\nfunc appMain() int { return 2 }\n")},
+	}}
+	result := CollectSourcesForTarget("/repo/case/cmd/app", "/std", ".", "linux/amd64", fs)
+	if !result.Ok {
+		t.Fatalf("CollectSources failed: err=%d path=%q", result.Error, result.ErrorPath)
+	}
+	assertSourcePaths(t, result.Files, []string{
+		"/repo/case/go.mod",
+		"/repo/case/cmd/app/platform_linux_amd64.go",
+	})
+}
+
+func TestCollectSourcesAppliesLegacyBuildConstraints(t *testing.T) {
+	fs := memorySourceFS{files: []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/linux.go", Src: []byte("// +build linux,amd64 darwin\n\npackage main\nfunc appMain() int { return 0 }\n")},
+		{Path: "/repo/case/cmd/app/windows.go", Src: []byte("// +build windows\n\npackage main\nfunc appMain() int { return 1 }\n")},
+	}}
+	result := CollectSourcesForTarget("/repo/case/cmd/app", "/std", ".", "linux/amd64", fs)
+	if !result.Ok {
+		t.Fatalf("CollectSources failed: err=%d path=%q", result.Error, result.ErrorPath)
+	}
+	assertSourcePaths(t, result.Files, []string{
+		"/repo/case/go.mod",
+		"/repo/case/cmd/app/linux.go",
+	})
+}
+
+func TestLegacyBuildConstraintExpressions(t *testing.T) {
+	tests := []struct {
+		expr    string
+		target  string
+		enabled bool
+		valid   bool
+	}{
+		{"linux,amd64 darwin", "linux/amd64", true, true},
+		{"linux,amd64 darwin", "linux/arm", false, true},
+		{"!windows", "linux/amd64", true, true},
+		{"linux,!amd64", "linux/amd64", false, true},
+		{"linux,,amd64", "linux/amd64", false, false},
+		{"!", "linux/amd64", false, false},
+		{"", "linux/amd64", false, false},
+	}
+	for _, test := range tests {
+		enabled, valid := evalPlusBuildLine([]byte(test.expr), test.target, nil)
+		if enabled != test.enabled || valid != test.valid {
+			t.Errorf("evalPlusBuildLine(%q, %q) = (%v, %v), want (%v, %v)", test.expr, test.target, enabled, valid, test.enabled, test.valid)
+		}
+	}
+}
+
+func TestCollectSourcesRejectsMalformedBuildConstraints(t *testing.T) {
+	for _, src := range []string{
+		"//go:build linux &&\n\npackage main\n",
+		"//go:build linux\n//go:build amd64\n\npackage main\n",
+		"// +build linux,,amd64\n\npackage main\n",
+	} {
+		result := CollectSourcesForTarget("/repo/case/cmd/app", "/std", ".", "linux/amd64", memorySourceFS{files: []load.SourceFile{
+			{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+			{Path: "/repo/case/cmd/app/main.go", Src: []byte(src)},
+		}})
+		if result.Ok || result.Error != SourceErrBuildConstraint || result.ErrorPath != "/repo/case/cmd/app/main.go" {
+			t.Fatalf("malformed constraint result = %#v", result)
+		}
+	}
+}
+
 func TestCollectSourcesReportsErrors(t *testing.T) {
 	missingModule := CollectSources("/repo/case", "/std", "./cmd/app", memorySourceFS{})
 	if missingModule.Ok || missingModule.Error != SourceErrMissingModule {

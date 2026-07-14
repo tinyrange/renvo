@@ -31,3 +31,18 @@ func TestGeneratedBundleIsCurrent(t *testing.T) {
 		t.Fatal("standard library bundle is stale; run go generate ./rtg/internal/driver")
 	}
 }
+
+func TestHostOnlySource(t *testing.T) {
+	if !hostOnlySource([]byte("//go:build !rtg\n\npackage os\n")) {
+		t.Fatal("exact !rtg constraint was not host-only")
+	}
+	for _, source := range []string{
+		"//go:build rtg\n\npackage os\n",
+		"//go:build rtg && linux\n\npackage os\n",
+		"package strings\n",
+	} {
+		if hostOnlySource([]byte(source)) {
+			t.Fatalf("source unexpectedly host-only: %q", source)
+		}
+	}
+}

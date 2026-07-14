@@ -2,6 +2,8 @@
 
 package driver
 
+import "j5.nz/rtg/rtg/internal/load"
+
 const rtgWindowsFindDataSize = 320
 const rtgWindowsFindNameOffset = 44
 const rtgWindowsFindNameLimit = 304
@@ -17,7 +19,7 @@ func rtgWindowsFindNextFile(handle int, data *byte) int { return 0 }
 func rtgWindowsFindClose(handle int) int { return 0 }
 
 func rtgReadDirNative(path string) ([]DirEntry, bool) {
-	pattern := rtgWindowsPathBytes(rtgJoinPath(path, "*"))
+	pattern := rtgWindowsPathBytes(load.JoinPath(path, "*"))
 	data := make([]byte, rtgWindowsFindDataSize)
 	handle := rtgWindowsFindFirstFile(&pattern[0], &data[0])
 	if handle == -1 {

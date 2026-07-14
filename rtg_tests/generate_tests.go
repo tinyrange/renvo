@@ -40,7 +40,52 @@ func quickCases() []testCase {
 	out = append(out, quickFunctions(20)...)
 	out = append(out, quickLiterals(1)...)
 	out = append(out, legacyIssueRegressions()...)
+	out = append(out, quickBuildConstraints()...)
 	return out
+}
+
+func quickBuildConstraints() []testCase {
+	files := map[string]string{
+		"cmd/app/main.go": `package main
+
+func main() {
+	if platformValue()+legacyValue()+modernValue() == 44 {
+		print("PASS\n")
+		return
+	}
+	print("FAIL\n")
+}
+`,
+		"cmd/app/platform_linux_amd64.go":   "package main\nfunc platformValue() int { return 42 }\n",
+		"cmd/app/platform_linux_arm64.go":   "package main\nfunc platformValue() int { return 42 }\n",
+		"cmd/app/platform_linux_386.go":     "package main\nfunc platformValue() int { return 42 }\n",
+		"cmd/app/platform_linux_arm.go":     "package main\nfunc platformValue() int { return 42 }\n",
+		"cmd/app/platform_darwin_arm64.go":  "package main\nfunc platformValue() int { return 42 }\n",
+		"cmd/app/platform_windows_amd64.go": "package main\nfunc platformValue() int { return 42 }\n",
+		"cmd/app/platform_windows_386.go":   "package main\nfunc platformValue() int { return 42 }\n",
+		"cmd/app/platform_wasip1_wasm.go":   "package main\nfunc platformValue() int { return 42 }\n",
+		"cmd/app/legacy_unix.go": `// +build linux darwin
+
+package main
+func legacyValue() int { return 1 }
+`,
+		"cmd/app/legacy_other.go": `// +build windows wasip1
+
+package main
+func legacyValue() int { return 1 }
+`,
+		"cmd/app/modern_unix.go": `//go:build linux || darwin
+
+package main
+func modernValue() int { return 1 }
+`,
+		"cmd/app/modern_other.go": `//go:build windows || wasip1
+
+package main
+func modernValue() int { return 1 }
+`,
+	}
+	return []testCase{moduleCase("quick", "build_constraints", 0, files)}
 }
 
 // legacyIssueRegressions preserves distinct semantic reproducers collected

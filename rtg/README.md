@@ -31,6 +31,12 @@ The resulting `rtg` can emit every supported target. Setting `RTG_STDROOT`
 explicitly overrides the embedded library, which is useful when developing or
 testing standard-library changes.
 
+Source selection honors Go filename suffixes, `//go:build`, and legacy
+`// +build` constraints. Built-in tags describe the selected RTG target and
+include `rtg`, `unix`, and the project aliases `wasi`, `aarch64`, and `wasm32`.
+Custom tags, including an explicit `go1.x` release policy when needed, are
+provided with `-tags`; RTG does not infer a Go toolchain release tag.
+
 Release builds are published for every host currently supported by the RTG
 backend:
 

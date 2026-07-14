@@ -5,6 +5,7 @@ package driver
 import (
 	"j5.nz/rtg/rtg/internal/arena"
 	"j5.nz/rtg/rtg/internal/backendbridge"
+	"j5.nz/rtg/rtg/internal/load"
 )
 
 const rtgGetdents64LinuxAmd64 = 217
@@ -20,7 +21,10 @@ func RunRTGCommand(args []string, env []string) int {
 		print(HelpText)
 		return 0
 	}
-	commandArgs := dropProgramArg(args)
+	commandArgs := args
+	if len(commandArgs) > 0 {
+		commandArgs = commandArgs[1:]
+	}
 	resetArena := rtgFrontendCanResetArena()
 	mark := 0
 	if resetArena {
@@ -62,32 +66,18 @@ func RunRTGCommand(args []string, env []string) int {
 	return 0
 }
 
-func dropProgramArg(args []string) []string {
-	if len(args) == 0 {
-		return args
-	}
-	return args[1:]
-}
-
 func rtgWorkDir(env []string) string {
-	for i := 0; i < len(env); i++ {
-		item := env[i]
-		if len(item) >= 4 && item[0] == 'P' && item[1] == 'W' && item[2] == 'D' && item[3] == '=' {
-			return item[4:]
-		}
+	value := rtgEnvValue(env, "PWD")
+	if value != "" {
+		return value
 	}
 	return "."
 }
 
 func rtgStdRoot(args []string, env []string) string {
-	for i := 0; i < len(env); i++ {
-		item := env[i]
-		if len(item) >= 12 &&
-			item[0] == 'R' && item[1] == 'T' && item[2] == 'G' && item[3] == '_' &&
-			item[4] == 'S' && item[5] == 'T' && item[6] == 'D' && item[7] == 'R' &&
-			item[8] == 'O' && item[9] == 'O' && item[10] == 'T' && item[11] == '=' {
-			return item[12:]
-		}
+	value := rtgEnvValue(env, "RTG_STDROOT")
+	if value != "" {
+		return value
 	}
 	if rtgBundledStdEnabled {
 		return "/std"
@@ -99,21 +89,41 @@ func rtgStdRoot(args []string, env []string) string {
 	return "/std"
 }
 
+func rtgEnvValue(env []string, key string) string {
+	for i := 0; i < len(env); i++ {
+		item := env[i]
+		if len(item) <= len(key) || item[len(key)] != '=' {
+			continue
+		}
+		matched := true
+		for j := 0; j < len(key); j++ {
+			if item[j] != key[j] {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return item[len(key)+1:]
+		}
+	}
+	return ""
+}
+
 func rtgBundledStdRoot(args []string) string {
 	dir := rtgExecutableDir(args)
 	if dir == "" {
 		return ""
 	}
-	path := rtgJoinPath(dir, "std")
+	path := load.JoinPath(dir, "std")
 	if rtgPathExists(path) {
 		return path
 	}
-	path = rtgJoinPath(rtgJoinPath(dir, ".."), "std")
+	path = load.JoinPath(load.JoinPath(dir, ".."), "std")
 	if rtgPathExists(path) {
 		return path
 	}
-	path = rtgJoinPath(rtgJoinPath(rtgJoinPath(dir, ".."), "share"), "rtg")
-	path = rtgJoinPath(path, "std")
+	path = load.JoinPath(load.JoinPath(load.JoinPath(dir, ".."), "share"), "rtg")
+	path = load.JoinPath(path, "std")
 	if rtgPathExists(path) {
 		return path
 	}
@@ -124,36 +134,7 @@ func rtgExecutableDir(args []string) string {
 	if len(args) == 0 {
 		return ""
 	}
-	return rtgDirPath(args[0])
-}
-
-func rtgDirPath(path string) string {
-	last := -1
-	for i := 0; i < len(path); i++ {
-		if path[i] == '/' {
-			last = i
-		}
-	}
-	if last < 0 {
-		return "."
-	}
-	if last == 0 {
-		return "/"
-	}
-	return path[:last]
-}
-
-func rtgJoinPath(base string, elem string) string {
-	if base == "" || base == "." {
-		return elem
-	}
-	if elem == "" {
-		return base
-	}
-	if base[len(base)-1] == '/' {
-		return base + elem
-	}
-	return base + "/" + elem
+	return load.DirPath(args[0])
 }
 
 func rtgPathExists(path string) bool {
@@ -210,56 +191,29 @@ func printRTGBuildError(result BuildResult) {
 		return
 	}
 	if result.Error == BuildErrSource {
-		if result.Sources.Error == SourceErrMissingModule {
-			print("rtg: missing module at ")
-		} else if result.Sources.Error == SourceErrModule {
-			print("rtg: invalid module at ")
-		} else if result.Sources.Error == SourceErrPackageArg {
-			print("rtg: invalid package argument: ")
-		} else if result.Sources.Error == SourceErrReadDir {
-			print("rtg: failed to read directory: ")
-		} else if result.Sources.Error == SourceErrReadFile {
-			print("rtg: failed to read file: ")
-		} else if result.Sources.Error == SourceErrParse {
-			print("rtg: failed to parse source: ")
-		} else if result.Sources.Error == SourceErrImport {
-			print("rtg: failed to resolve import: ")
-		} else {
-			print("rtg: source error at ")
+		messages := []string{
+			"source error at ",
+			"missing module at ",
+			"invalid module at ",
+			"bad package: ",
+			"directory read failed: ",
+			"file read failed: ",
+			"bad build constraint: ",
+			"source parse failed: ",
+			"unresolved import: ",
 		}
+		err := result.Sources.Error
+		if err < 1 || err >= len(messages) {
+			err = 0
+		}
+		print("rtg: ")
+		print(messages[err])
 		print(result.ErrorPath)
 		print("\n")
 		return
 	}
 	if result.Error == BuildErrPipeline {
-		print("rtg: frontend pipeline failed: error=")
-		rtgPrintInt(result.Pipeline.Error)
-		print(" workspace=")
-		rtgPrintInt(result.Pipeline.Workspace.Error)
-		print(" graph=")
-		rtgPrintInt(result.Pipeline.Workspace.Graph.Error)
-		print(" graphPackage=")
-		rtgPrintInt(result.Pipeline.Workspace.Graph.ErrorPackage)
-		graphPackage := result.Pipeline.Workspace.Graph.ErrorPackage
-		if graphPackage >= 0 && graphPackage < len(result.Pipeline.Workspace.Graph.Packages) {
-			graphPkg := result.Pipeline.Workspace.Graph.Packages[graphPackage]
-			print(" packageError=")
-			rtgPrintInt(graphPkg.Error)
-			print(" packageFile=")
-			rtgPrintInt(graphPkg.ErrorFile)
-			print(" packageImport=")
-			rtgPrintInt(graphPkg.ErrorImport)
-			if graphPkg.ErrorFile >= 0 && graphPkg.ErrorFile < len(graphPkg.Files) {
-				graphFile := graphPkg.Files[graphPkg.ErrorFile]
-				print(" packagePath=")
-				print(graphFile.Path)
-				print(" parseError=")
-				rtgPrintInt(graphFile.File.Error)
-				print(" parseToken=")
-				rtgPrintInt(graphFile.File.ErrorTok)
-			}
-		}
-		print(" package=")
+		print("rtg: frontend pipeline failed at package=")
 		rtgPrintInt(result.ErrorPackage)
 		print(" file=")
 		rtgPrintInt(result.ErrorFile)

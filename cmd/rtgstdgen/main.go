@@ -71,6 +71,9 @@ func collect(root string) ([]bundleFile, map[string][]bundleEntry, error) {
 		if err != nil {
 			return err
 		}
+		if hostOnlySource(data) {
+			return nil
+		}
 		bundlePath := "/std/" + rel
 		files = append(files, bundleFile{path: bundlePath, data: data})
 		addPathEntries(dirs, rel)
@@ -86,6 +89,14 @@ func collect(root string) ([]bundleFile, map[string][]bundleEntry, error) {
 		dirs[dir] = entries
 	}
 	return files, dirs, nil
+}
+
+func hostOnlySource(data []byte) bool {
+	line := data
+	if end := bytes.IndexByte(line, '\n'); end >= 0 {
+		line = line[:end]
+	}
+	return string(bytes.TrimSpace(line)) == "//go:build !rtg"
 }
 
 func addPathEntries(dirs map[string][]bundleEntry, rel string) {

@@ -35,7 +35,12 @@ func BuildUnit(args []string, workDir string, stdRoot string, files []load.Sourc
 	if !options.Ok {
 		return buildFail(result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
 	}
-	built := pipeline.BuildUnit(workDir, stdRoot, options.Package, filterSourcesForTargetTags(files, options.Target, options.Tags))
+	filtered, errorPath, ok := filterSourcesForTargetTags(files, options.Target, options.Tags)
+	if !ok {
+		result.Sources = SourceResult{Error: SourceErrBuildConstraint, ErrorPath: errorPath}
+		return buildFail(result, BuildErrSource, "", errorPath, -1, -1, -1, -1)
+	}
+	built := pipeline.BuildUnit(workDir, stdRoot, options.Package, filtered)
 	result.Pipeline = built
 	if !built.Ok {
 		return buildFail(result, BuildErrPipeline, "", "", -1, built.ErrorPackage, built.ErrorFile, built.ErrorToken)

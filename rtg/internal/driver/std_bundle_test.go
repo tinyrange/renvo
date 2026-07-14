@@ -23,4 +23,10 @@ func TestBundledStandardLibraryFS(t *testing.T) {
 	if _, ok := fs.ReadFile("/std/strings/strings_test.go"); ok {
 		t.Fatal("standard library tests were embedded")
 	}
+	if _, ok := fs.ReadFile("/std/bytes/bytes.go"); ok {
+		t.Fatal("host-only standard library source was embedded")
+	}
+	if _, ok := fs.ReadFile("/std/bytes/bytes_rtg.go"); !ok {
+		t.Fatal("RTG standard library source was not embedded")
+	}
 }

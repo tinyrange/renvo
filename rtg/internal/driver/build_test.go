@@ -58,6 +58,19 @@ func appMain() int { return value() }
 	}
 }
 
+func TestBuildUnitReportsMalformedBuildConstraint(t *testing.T) {
+	result := BuildUnit([]string{"-o", "app", "./cmd/app"}, "/repo/case", "/std", []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte("//go:build linux &&\n\npackage main\n")},
+	})
+	if result.Ok || result.Error != BuildErrSource {
+		t.Fatalf("malformed build result = %#v", result)
+	}
+	if result.Sources.Error != SourceErrBuildConstraint || result.ErrorPath != "/repo/case/cmd/app/main.go" {
+		t.Fatalf("malformed build location = %#v", result)
+	}
+}
+
 func TestBuildUnitReportsOptionError(t *testing.T) {
 	result := BuildUnit([]string{"-t", "plan9/amd64", "-o", "app", "./cmd/app"}, "/repo/case", "/std", driverTestFiles())
 	if result.Ok || result.Error != BuildErrOptions {

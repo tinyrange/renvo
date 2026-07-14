@@ -14,7 +14,7 @@ const (
 
 const DefaultTarget = "linux/amd64"
 
-const HelpText = "Usage: rtg [options] <package>\n\nOptions:\n  -o <file>    output (required)\n  -t <target>  target (default linux/amd64)\n  -tags <list>\n  -s           strip\n  --help\n\nTargets:\n  linux/amd64 linux/386 linux/aarch64 linux/arm\n  windows/amd64 windows/386 darwin/arm64 wasi/wasm32\n"
+const HelpText = "Usage: rtg -o <file> [-t <target>] [-tags <list>] [-s] <package>\nTargets:\n  linux/amd64 linux/386 linux/aarch64 linux/arm\n  windows/amd64 windows/386 darwin/arm64 wasi/wasm32\n"
 
 type Options struct {
 	Target   string
