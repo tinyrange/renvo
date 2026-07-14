@@ -856,6 +856,10 @@ func rtgArmAsmNormalizeRaxForKind(a *rtgAsm, kind int) {
 		rtgArmAsmEmit(a, 0xe6ef0070)
 		return
 	}
+	if kind == rtgTypeInt8 {
+		rtgArmAsmEmit(a, 0xe6af0070)
+		return
+	}
 	if kind == rtgTypeInt16 {
 		rtgArmAsmEmit(a, 0xe6bf0070)
 	}

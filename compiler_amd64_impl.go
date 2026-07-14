@@ -277,6 +277,10 @@ func rtgAmd64AsmNormalizeRaxForKind(a *rtgAsm, kind int) {
 		rtgAsmEmit32(a, 0xff)
 		return
 	}
+	if kind == rtgTypeInt8 {
+		rtgAsmEmit32(a, 0xc0be0f48)
+		return
+	}
 	if kind == rtgTypeInt16 {
 		rtgAsmEmit32(a, 0xc0bf0f48)
 		return
@@ -907,10 +911,14 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	a := &g.asm
 	e := &ep.exprs[idx]
 	if (e.kind == rtgExprUnary || e.kind == rtgExprBinary || e.kind == rtgExprCall) && rtgExprCanFoldConst(g, ep, idx) {
-		constResult := rtgEvalConstExpr(g, ep, idx)
-		if constResult.ok {
-			rtgAsmPrimaryImm(a, constResult.value)
-			return true
+		resultType := rtgInferParsedExprType(g, ep, idx)
+		result := rtgResolveType(g.meta, resultType)
+		if result.kind != rtgTypeByte && result.kind != rtgTypeInt8 && result.kind != rtgTypeInt16 && result.kind != rtgTypeInt32 {
+			constResult := rtgEvalConstExpr(g, ep, idx)
+			if constResult.ok {
+				rtgAsmPrimaryImm(a, constResult.value)
+				return true
+			}
 		}
 	}
 	if e.kind == rtgExprInt {
@@ -961,9 +969,11 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		if e.argCount == 1 && (callee == rtgIdentInt || callee == rtgIdentInt64) {
 			return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeInt)
 		}
-		if e.argCount == 1 && (callee == rtgIdentByte || callee == rtgIdentInt16 || callee == rtgIdentInt32) {
+		if e.argCount == 1 && (callee == rtgIdentByte || callee == rtgIdentInt8 || callee == rtgIdentInt16 || callee == rtgIdentInt32) {
 			if callee == rtgIdentByte {
 				return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeByte)
+			} else if callee == rtgIdentInt8 {
+				return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeInt8)
 			} else if callee == rtgIdentInt16 {
 				return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeInt16)
 			}
@@ -1291,9 +1301,15 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			} else {
 				rtgAsmEmit24(a, 0xd8f748)
 			}
+			resultType := rtgInferParsedExprType(g, ep, idx)
+			result := rtgResolveType(g.meta, resultType)
+			rtgAsmNormalizePrimaryForKind(a, result.kind)
 			return true
 		}
 		if rtgTokCharIs(p, e.tok, '+') {
+			resultType := rtgInferParsedExprType(g, ep, idx)
+			result := rtgResolveType(g.meta, resultType)
+			rtgAsmNormalizePrimaryForKind(a, result.kind)
 			return true
 		}
 		if rtgTokCharIs(p, e.tok, '!') {
@@ -1351,6 +1367,9 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		if !rtgEmitPrimaryTertiaryOp(g, e.tok) {
 			return false
 		}
+		resultType := rtgInferParsedExprType(g, ep, idx)
+		result := rtgResolveType(g.meta, resultType)
+		rtgAsmNormalizePrimaryForKind(a, result.kind)
 		return true
 	}
 	return false
