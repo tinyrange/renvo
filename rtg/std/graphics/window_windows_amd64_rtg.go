@@ -566,6 +566,11 @@ func windowsRegisterGraphicsClass() bool {
 	if len(windowsClassName) == 0 {
 		windowsClassName = windowsUTF16("RTGGraphicsWindow")
 	}
+	instance := windowsGetModuleHandle(nil)
+	if instance == 0 {
+		setLastWindowError("GetModuleHandleW failed", windowsGetLastError())
+		return false
+	}
 	user32 := windowsUTF16("user32.dll")
 	module := windowsGetModuleHandle(&user32[0])
 	procName := windowsASCII("DefWindowProcW")
@@ -587,7 +592,7 @@ func windowsRegisterGraphicsClass() bool {
 		return false
 	}
 	windowsMoveMemory(classNameAddress, &windowsClassName[0], len(windowsClassName))
-	registered := windowsRegisterClass(windowsClassOwnDC|windowsClassHRedraw|windowsClassVRedraw, windowProc, module, windowsLoadCursor(0, windowsCursorArrow), classNameAddress)
+	registered := windowsRegisterClass(windowsClassOwnDC|windowsClassHRedraw|windowsClassVRedraw, windowProc, instance, windowsLoadCursor(0, windowsCursorArrow), classNameAddress)
 	if registered == 0 {
 		code := windowsGetLastError()
 		windowsGlobalUnlock(classNameMemory)
@@ -597,7 +602,7 @@ func windowsRegisterGraphicsClass() bool {
 	}
 	windowsGlobalUnlock(classNameMemory)
 	windowsGlobalFree(classNameMemory)
-	windowsClassInstance = module
+	windowsClassInstance = instance
 	windowsClassReady = true
 	return true
 }
