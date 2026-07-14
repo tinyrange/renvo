@@ -462,6 +462,12 @@ func rtgAmd64EmitCompareJump(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, labe
 	if !isCompare {
 		return false
 	}
+	// The immediate compare fast path operates on the backend's raw integer
+	// representation. Let the ordinary expression emitter apply float
+	// conversions before comparing mixed float/untyped-constant operands.
+	if rtgBinaryUsesFloat(g, ep, e) {
+		return false
+	}
 	leftIndex := e.left
 	rightIndex := e.right
 	right := &ep.exprs[rightIndex]

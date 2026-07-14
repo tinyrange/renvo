@@ -95,6 +95,123 @@ func rtgDarwinArm64CallVirtualArgs(a *rtgAsm, id int, argCount int) {
 	rtgDarwinArm64CallImport(a, id)
 }
 
+func rtgDarwinStaticSymbolName(name string) string {
+	if len(name) > 0 && name[0] == '_' {
+		return name
+	}
+	return "_" + name
+}
+
+func rtgAsmAddDarwinStaticImport(a *rtgAsm, dylib string, name string) int {
+	name = rtgDarwinStaticSymbolName(name)
+	for i := 0; i < len(a.darwinImports); i++ {
+		if a.darwinImports[i].dylib == dylib && a.darwinImports[i].name == name {
+			a.darwinImports[i].used = true
+			return i
+		}
+	}
+	label := rtgAsmNewLabel(a)
+	a.darwinImports = append(a.darwinImports, rtgDarwinStaticImport{dylib: dylib, name: name, label: label, used: true})
+	return len(a.darwinImports) - 1
+}
+
+func rtgDarwinArm64EmitLinkStaticCall(g *rtgLinearGen, fn *rtgFuncInfo, wordCount int) bool {
+	if rtgTargetArch != rtgArchAarch64 {
+		return false
+	}
+	dylib := rtgStringFromBytes(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd)
+	name := rtgStringFromBytes(g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
+	importIndex := rtgAsmAddDarwinStaticImport(&g.asm, dylib, name)
+	a := &g.asm
+	intReg := 0
+	floatReg := 0
+	consumed := 0
+	objcRectCall := rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "objcMsgRect")
+	objcSizeCall := rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "objcMsgSize")
+	glOrthoCall := name == "glOrtho" || name == "_glOrtho"
+	glPixelZoomCall := name == "glPixelZoom" || name == "_glPixelZoom"
+	for i := 0; i < fn.paramCount; i++ {
+		typ := rtgResolveType(g.meta, g.meta.params[fn.firstParam+i].typ)
+		integerDouble := glOrthoCall || (objcRectCall && i >= 2 && i < 6) || (objcSizeCall && i >= 2 && i < 4)
+		integerSingle := glPixelZoomCall
+		if typ.kind == rtgTypeFloat64 || integerDouble || integerSingle {
+			if floatReg >= 8 {
+				return false
+			}
+			rtgAarch64AsmPopReg(a, 16)
+			if integerSingle {
+				rtgAarch64AsmEmit(a, 0x9e220000|(16<<5)|floatReg)
+			} else {
+				rtgAarch64AsmEmit(a, 0x9e620000|(16<<5)|floatReg)
+			}
+			if typ.kind == rtgTypeFloat64 && !integerDouble {
+				// RTG represents float64 values as integers scaled by four. Convert
+				// them to an ABI double only at the foreign-call boundary.
+				rtgAarch64AsmMovRegImm(a, 16, 4)
+				rtgAarch64AsmEmit(a, 0x9e620000|(16<<5)|31)
+				rtgAarch64AsmEmit(a, 0x1e601800|(31<<16)|(floatReg<<5)|floatReg)
+			}
+			floatReg++
+			consumed++
+			continue
+		}
+		if intReg >= 8 {
+			return false
+		}
+		if typ.kind == rtgTypeString {
+			rtgAarch64AsmPopReg(a, intReg)
+			rtgAarch64AsmPopReg(a, 16)
+			consumed += 2
+			intReg++
+			continue
+		}
+		if typ.kind == rtgTypeSlice {
+			rtgAarch64AsmPopReg(a, intReg)
+			rtgAarch64AsmPopReg(a, 16)
+			rtgAarch64AsmPopReg(a, 16)
+			consumed += 3
+			intReg++
+			continue
+		}
+		if typ.kind == rtgTypeStruct || typ.kind == rtgTypeArray {
+			return false
+		}
+		rtgAarch64AsmPopReg(a, intReg)
+		consumed++
+		intReg++
+	}
+	if consumed != wordCount {
+		rtgPrintErr("rtg: Darwin foreign-call argument layout mismatch\n")
+		return false
+	}
+	for intReg < 8 {
+		rtgAarch64AsmMovRegImm(a, intReg, 0)
+		intReg++
+	}
+	rtgAsmCallLabel(a, a.darwinImports[importIndex].label)
+	if rtgResolveType(g.meta, fn.resultType).kind == rtgTypeFloat64 {
+		resultFloatReg := 0
+		if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "objcMsgPointY") {
+			resultFloatReg = 1
+		}
+		if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "objcMsgRectY") {
+			resultFloatReg = 1
+		}
+		if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "objcMsgRectWidth") {
+			resultFloatReg = 2
+		}
+		if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "objcMsgRectHeight") {
+			resultFloatReg = 3
+		}
+		// Convert an ABI double result back to RTG's scaled representation.
+		rtgAarch64AsmMovRegImm(a, 16, 4)
+		rtgAarch64AsmEmit(a, 0x9e620000|(16<<5)|31)
+		rtgAarch64AsmEmit(a, 0x1e600800|(31<<16)|(resultFloatReg<<5)|resultFloatReg)
+		rtgAarch64AsmEmit(a, 0x9e780000|(resultFloatReg<<5))
+	}
+	return true
+}
+
 func rtgEmitProgramEntryArgsDarwinArm64(g *rtgLinearGen, appIndex int) bool {
 	app := &g.meta.funcs[appIndex]
 	if app.resultType != 0 && !rtgTypeIsInt(g.meta, app.resultType) {
@@ -296,14 +413,69 @@ func rtgDarwinPatchArm64Adrp(code []byte, at int, pc int, target int) {
 	rtgPut32At(code, at, insn)
 }
 
+func rtgDarwinStaticDylibs(a *rtgAsm) []string {
+	var out []string
+	for i := 0; i < len(a.darwinImports); i++ {
+		imp := a.darwinImports[i]
+		if !imp.used || imp.dylib == "/usr/lib/libSystem.B.dylib" {
+			continue
+		}
+		found := false
+		for j := 0; j < len(out); j++ {
+			if out[j] == imp.dylib {
+				found = true
+			}
+		}
+		if !found {
+			out = append(out, imp.dylib)
+		}
+	}
+	return out
+}
+
+func rtgDarwinDylibOrdinal(a *rtgAsm, dylib string) int {
+	if dylib == "/usr/lib/libSystem.B.dylib" {
+		return 1
+	}
+	dylibs := rtgDarwinStaticDylibs(a)
+	for i := 0; i < len(dylibs); i++ {
+		if dylibs[i] == dylib {
+			return i + 2
+		}
+	}
+	return 0
+}
+
+func rtgDarwinDylibCommandSize(path string) int {
+	return rtgAlignValue(24+len(path)+1, 8)
+}
+
+func rtgDarwinAppendDylibCommand(out []byte, path string) []byte {
+	start := len(out)
+	size := rtgDarwinDylibCommandSize(path)
+	out = rtgAppend32(out, 0x0c)
+	out = rtgAppend32(out, size)
+	out = rtgAppend32(out, 24)
+	out = rtgAppend32(out, 2)
+	out = rtgAppend32(out, 0x00010000)
+	out = rtgAppend32(out, 0x00010000)
+	out = rtgAppendStringZ(out, path)
+	return rtgAppendUntil(out, start+size)
+}
+
 func rtgDarwinMachHeader(a *rtgAsm, textFileSize int, dataFileOff int, dataFileSize int, dataVMSize int, linkeditOff int, linkeditSize int, bindOff int, bindSize int, symOff int, symbolCount int, strOff int, strSize int, undefinedCount int, sigOff int, sigSize int) []byte {
+	dylibs := rtgDarwinStaticDylibs(a)
+	commandSize := 856
+	for i := 0; i < len(dylibs); i++ {
+		commandSize += rtgDarwinDylibCommandSize(dylibs[i])
+	}
 	out := make([]byte, 0, a.codeOffset)
 	out = rtgAppend32(out, 0xfeedfacf)
 	out = rtgAppend32(out, 0x0100000c)
 	out = rtgAppend32(out, 0)
 	out = rtgAppend32(out, 2)
-	out = rtgAppend32(out, 13)
-	out = rtgAppend32(out, 856)
+	out = rtgAppend32(out, 13+len(dylibs))
+	out = rtgAppend32(out, commandSize)
 	out = rtgAppend32(out, 0x200085)
 	out = rtgAppend32(out, 0)
 	out = rtgDarwinAppendSegment64(out, "__PAGEZERO", 0, rtgDarwinArm64ImageBase, 0, 0, 0, 0)
@@ -342,15 +514,10 @@ func rtgDarwinMachHeader(a *rtgAsm, textFileSize int, dataFileOff int, dataFileS
 	out = rtgAppend32(out, 12)
 	out = rtgAppendStringZ(out, "/usr/lib/dyld")
 	out = rtgAppendUntil(out, cmdStart+32)
-	cmdStart = len(out)
-	out = rtgAppend32(out, 0x0c)
-	out = rtgAppend32(out, 56)
-	out = rtgAppend32(out, 24)
-	out = rtgAppend32(out, 2)
-	out = rtgAppend32(out, 0x00010000)
-	out = rtgAppend32(out, 0x00010000)
-	out = rtgAppendStringZ(out, "/usr/lib/libSystem.B.dylib")
-	out = rtgAppendUntil(out, cmdStart+56)
+	out = rtgDarwinAppendDylibCommand(out, "/usr/lib/libSystem.B.dylib")
+	for i := 0; i < len(dylibs); i++ {
+		out = rtgDarwinAppendDylibCommand(out, dylibs[i])
+	}
 	out = rtgAppend32(out, 0x1b)
 	out = rtgAppend32(out, 24)
 	out = rtgAppend32(out, 0x52544758)
@@ -375,13 +542,16 @@ func rtgDarwinMachHeader(a *rtgAsm, textFileSize int, dataFileOff int, dataFileS
 }
 
 type rtgDarwinImportLayout struct {
-	gotOffs []int
+	gotOffs       []int
+	staticGotOffs []int
 }
 
 func rtgDarwinPrepareImports(a *rtgAsm) rtgDarwinImportLayout {
 	var layout rtgDarwinImportLayout
 	layout.gotOffs = make([]int, rtgDarwinImportCount+1)
+	layout.staticGotOffs = make([]int, len(a.darwinImports))
 	stubAts := make([]int, rtgDarwinImportCount+1)
+	staticStubAts := make([]int, len(a.darwinImports))
 	for id := 1; id <= rtgDarwinImportCount; id++ {
 		if len(a.darwinImportUsed) <= id || !a.darwinImportUsed[id] {
 			continue
@@ -390,6 +560,17 @@ func rtgDarwinPrepareImports(a *rtgAsm) rtgDarwinImportLayout {
 		rtgAarch64AsmAlign(a)
 		rtgAsmMarkLabel(a, label)
 		stubAts[id] = len(a.code)
+		rtgAarch64AsmEmit(a, 0x90000010)
+		rtgAarch64AsmEmit(a, 0xf9400210)
+		rtgAarch64AsmEmit(a, 0xd61f0200)
+	}
+	for i := 0; i < len(a.darwinImports); i++ {
+		if !a.darwinImports[i].used {
+			continue
+		}
+		rtgAarch64AsmAlign(a)
+		rtgAsmMarkLabel(a, a.darwinImports[i].label)
+		staticStubAts[i] = len(a.code)
 		rtgAarch64AsmEmit(a, 0x90000010)
 		rtgAarch64AsmEmit(a, 0xf9400210)
 		rtgAarch64AsmEmit(a, 0xd61f0200)
@@ -405,6 +586,13 @@ func rtgDarwinPrepareImports(a *rtgAsm) rtgDarwinImportLayout {
 		layout.gotOffs[id] = len(a.data)
 		a.data = rtgAppend64U32(a.data, 0)
 	}
+	for i := 0; i < len(a.darwinImports); i++ {
+		if !a.darwinImports[i].used {
+			continue
+		}
+		layout.staticGotOffs[i] = len(a.data)
+		a.data = rtgAppend64U32(a.data, 0)
+	}
 	a.data = rtgAppendUntil(a.data, rtgAlignValue(len(a.data), rtgDarwinArm64PageSize))
 	rtgAsmPatchAarch64AbsDarwin(a)
 	for id := 1; id <= rtgDarwinImportCount; id++ {
@@ -418,10 +606,21 @@ func rtgDarwinPrepareImports(a *rtgAsm) rtgDarwinImportLayout {
 		pageOff := target & 0xfff
 		rtgPut32At(a.code, stubAt+4, 0xf9400210|((pageOff/8)<<10))
 	}
+	for i := 0; i < len(a.darwinImports); i++ {
+		if !a.darwinImports[i].used {
+			continue
+		}
+		stubAt := staticStubAts[i]
+		target := rtgDarwinArm64ImageBase + dataFileOff + layout.staticGotOffs[i]
+		pc := rtgDarwinArm64ImageBase + a.codeOffset + stubAt
+		rtgDarwinPatchArm64Adrp(a.code, stubAt, pc, target)
+		pageOff := target & 0xfff
+		rtgPut32At(a.code, stubAt+4, 0xf9400210|((pageOff/8)<<10))
+	}
 	return layout
 }
 
-func rtgDarwinBuildBindData(a *rtgAsm, gotOffs []int) []byte {
+func rtgDarwinBuildBindData(a *rtgAsm, gotOffs []int, staticGotOffs []int) []byte {
 	bind := make([]byte, 0, 256)
 	bind = append(bind, 0x11)
 	bind = append(bind, 0x51)
@@ -433,6 +632,21 @@ func rtgDarwinBuildBindData(a *rtgAsm, gotOffs []int) []byte {
 		bind = rtgAppendStringZ(bind, rtgDarwinImportName(id))
 		bind = append(bind, 0x72)
 		bind = rtgDarwinAppendULEB(bind, gotOffs[id])
+		bind = append(bind, 0x90)
+	}
+	for i := 0; i < len(a.darwinImports); i++ {
+		if !a.darwinImports[i].used {
+			continue
+		}
+		ordinal := rtgDarwinDylibOrdinal(a, a.darwinImports[i].dylib)
+		if ordinal <= 0 || ordinal >= 16 {
+			continue
+		}
+		bind = append(bind, byte(0x10|ordinal))
+		bind = append(bind, 0x40)
+		bind = rtgAppendStringZ(bind, a.darwinImports[i].name)
+		bind = append(bind, 0x72)
+		bind = rtgDarwinAppendULEB(bind, staticGotOffs[i])
 		bind = append(bind, 0x90)
 	}
 	return append(bind, 0)
@@ -447,6 +661,11 @@ func rtgDarwinBuildStringTable(a *rtgAsm) []byte {
 			continue
 		}
 		strtab = rtgAppendStringZ(strtab, rtgDarwinImportName(id))
+	}
+	for i := 0; i < len(a.darwinImports); i++ {
+		if a.darwinImports[i].used {
+			strtab = rtgAppendStringZ(strtab, a.darwinImports[i].name)
+		}
 	}
 	return strtab
 }
@@ -470,6 +689,17 @@ func rtgDarwinBuildSymbolTable(a *rtgAsm) []byte {
 		symtab = rtgAppend64(symtab, 0)
 		nameOff += len(rtgDarwinImportName(id)) + 1
 	}
+	for i := 0; i < len(a.darwinImports); i++ {
+		if !a.darwinImports[i].used {
+			continue
+		}
+		symtab = rtgAppend32(symtab, nameOff)
+		symtab = append(symtab, 1)
+		symtab = append(symtab, 0)
+		symtab = rtgAppend16(symtab, 0x100)
+		symtab = rtgAppend64(symtab, 0)
+		nameOff += len(a.darwinImports[i].name) + 1
+	}
 	return symtab
 }
 
@@ -480,13 +710,18 @@ func rtgDarwinUsedImportCount(a *rtgAsm) int {
 			count++
 		}
 	}
+	for i := 0; i < len(a.darwinImports); i++ {
+		if a.darwinImports[i].used {
+			count++
+		}
+	}
 	return count
 }
 
 func rtgAsmImageDarwinArm64(a *rtgAsm) []byte {
 	imports := rtgDarwinPrepareImports(a)
 	dataFileOff := rtgAlignValue(a.codeOffset+len(a.code), rtgDarwinArm64PageSize)
-	bind := rtgDarwinBuildBindData(a, imports.gotOffs)
+	bind := rtgDarwinBuildBindData(a, imports.gotOffs, imports.staticGotOffs)
 	symtab := rtgDarwinBuildSymbolTable(a)
 	strtab := rtgDarwinBuildStringTable(a)
 	undefinedCount := rtgDarwinUsedImportCount(a)
