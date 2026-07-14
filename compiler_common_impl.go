@@ -10097,11 +10097,21 @@ func rtgEmitBuiltinPanic(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	}
 	argIndex := ep.args[e.firstArg]
 	argType := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, argIndex))
+	if argType.kind == rtgTypeString {
+		if !rtgEmitStringValueRegs(g, ep, argIndex) {
+			return false
+		}
+		rtgAsmPushStringRegs(&g.asm)
+	} else if !rtgEmitIntExpr(g, ep, argIndex) {
+		return false
+	}
 	if !rtgEmitStaticWrite(g, "panic: ", 2) {
 		return false
 	}
 	if argType.kind == rtgTypeString {
-		if !rtgEmitStringValueRegs(g, ep, argIndex) || !rtgEmitWriteValueRegs(g, 2) {
+		rtgAsmPopPrimary(&g.asm)
+		rtgAsmPopSecondary(&g.asm)
+		if !rtgEmitWriteValueRegs(g, 2) {
 			return false
 		}
 	} else if !rtgEmitStaticWrite(g, "value", 2) {
