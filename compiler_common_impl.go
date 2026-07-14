@@ -7551,7 +7551,7 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 				if sliceType.kind != rtgTypeSlice {
 					return false
 				}
-				scalarElem := rtgTypeKindIsScalarInt(elemType.kind)
+				scalarElem := rtgTypeKindIsScalarValue(elemType.kind)
 				indexOffset := 0
 				if scalarElem {
 					indexOffset = rtgAddUnnamedLocal(g, rtgTypeInt)
@@ -7566,7 +7566,7 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 					return false
 				}
 				if scalarElem {
-					if !rtgEmitIntExpr(g, &rhs, rhsIndex) {
+					if !rtgEmitScalarExprForKind(g, &rhs, rhsIndex, elemType.kind) {
 						return false
 					}
 					rtgAsmNormalizePrimaryForKind(a, elemType.kind)
