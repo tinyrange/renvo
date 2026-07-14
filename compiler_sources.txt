@@ -1,6 +1,7 @@
 compiler_common_impl.go
 compiler_main.go
 compiler_linux_impl.go
+compiler_target_impl.go
 compiler_amd64_impl.go
 compiler_386_impl.go
 compiler_aarch64_impl.go
