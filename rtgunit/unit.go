@@ -1417,6 +1417,9 @@ func scanSource(src []byte) ([]sourceToken, int) {
 		i++
 		if i < len(src) && isTwoByteOp(c, src[i]) {
 			i++
+			if i < len(src) && isThreeByteOp(c, src[start+1], src[i]) {
+				i++
+			}
 		}
 		toks = append(toks, sourceToken{kind: rtgTokOp, text: string(src[start:i]), line: line, start: start, end: i})
 	}
@@ -1434,7 +1437,7 @@ func isIdentPart(c byte) bool {
 
 func isTwoByteOp(c0 byte, c1 byte) bool {
 	if c1 == '=' {
-		return c0 == ':' || c0 == '=' || c0 == '!' || c0 == '<' || c0 == '>' || c0 == '+' || c0 == '-' || c0 == '*' || c0 == '/' || c0 == '%'
+		return c0 == ':' || c0 == '=' || c0 == '!' || c0 == '<' || c0 == '>' || c0 == '+' || c0 == '-' || c0 == '*' || c0 == '/' || c0 == '%' || c0 == '&' || c0 == '|' || c0 == '^'
 	}
 	if c0 == '&' && (c1 == '&' || c1 == '^') {
 		return true
@@ -1452,6 +1455,22 @@ func isTwoByteOp(c0 byte, c1 byte) bool {
 		return true
 	}
 	if c0 == '-' && c1 == '-' {
+		return true
+	}
+	return false
+}
+
+func isThreeByteOp(c0 byte, c1 byte, c2 byte) bool {
+	if c2 != '=' {
+		return false
+	}
+	if c0 == '<' && c1 == '<' {
+		return true
+	}
+	if c0 == '>' && c1 == '>' {
+		return true
+	}
+	if c0 == '&' && c1 == '^' {
 		return true
 	}
 	return false
