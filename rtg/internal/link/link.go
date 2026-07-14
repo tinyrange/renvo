@@ -230,7 +230,7 @@ func reserveCoreLinkedProgram(program *unit.Program, programs []unit.Program) {
 func prepareProgramsCore(programs []unit.Program, root int) ([]unit.Program, bool) {
 	out := make([]unit.Program, len(programs))
 	copy(out, programs)
-	rootProgram, ok := addRootEntrypointCore(out[root], root)
+	rootProgram, ok := addRootEntrypointCore(out[root], root, programsContainCoreFunc(out, "rtg_runtime_SetProcess"))
 	if !ok {
 		return nil, false
 	}
@@ -238,9 +238,12 @@ func prepareProgramsCore(programs []unit.Program, root int) ([]unit.Program, boo
 	return out, true
 }
 
-func addRootEntrypointCore(src unit.Program, packageIndex int) (unit.Program, bool) {
+func addRootEntrypointCore(src unit.Program, packageIndex int, processState bool) (unit.Program, bool) {
 	if src.Package != "main" || findFuncByName(src, "appMain") >= 0 || findFuncByName(src, "main") < 0 {
 		return src, true
+	}
+	if processState {
+		return addRootProcessEntrypointCore(src, packageIndex)
 	}
 	if len(src.Tokens) == 0 || src.Tokens[len(src.Tokens)-1].Kind != unit.TokenEOF {
 		return src, false
@@ -281,6 +284,77 @@ func addRootEntrypointCore(src unit.Program, packageIndex int) (unit.Program, bo
 	})
 	_ = packageIndex
 	return src, true
+}
+
+func programsContainCoreFunc(programs []unit.Program, name string) bool {
+	for i := 0; i < len(programs); i++ {
+		if findFuncByName(programs[i], name) >= 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func addRootProcessEntrypointCore(src unit.Program, packageIndex int) (unit.Program, bool) {
+	if len(src.Tokens) == 0 || src.Tokens[len(src.Tokens)-1].Kind != unit.TokenEOF {
+		return src, false
+	}
+	src.Tokens = copyTokens(src.Tokens, len(src.Tokens)-1)
+	if len(src.Text) > 0 && src.Text[len(src.Text)-1] != '\n' {
+		src.Text = append(src.Text, '\n')
+	}
+	start := len(src.Text)
+	line := countNewlines(src.Text) + 1
+	src.Text = appendStringBytes(src.Text, "func appMain(args []string, env []string) int { rtg_runtime_SetProcess(args, env); main(); return 0 }\n")
+	base := len(src.Tokens)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenFunc, start, 0, 4, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenIdent, start, 5, 7, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenOp, start, 12, 1, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenIdent, start, 13, 4, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenOp, start, 18, 1, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenOp, start, 19, 1, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenIdent, start, 20, 6, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenOp, start, 26, 1, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenIdent, start, 28, 3, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenOp, start, 32, 1, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenOp, start, 33, 1, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenIdent, start, 34, 6, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenOp, start, 40, 1, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenIdent, start, 42, 3, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenOp, start, 46, 1, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenIdent, start, 48, 22, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenOp, start, 70, 1, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenIdent, start, 71, 4, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenOp, start, 75, 1, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenIdent, start, 77, 3, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenOp, start, 80, 1, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenOp, start, 81, 1, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenIdent, start, 83, 4, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenOp, start, 87, 1, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenOp, start, 88, 1, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenOp, start, 89, 1, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenReturn, start, 91, 6, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenNumber, start, 98, 1, line)
+	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenOp, start, 100, 1, line)
+	eof := len(src.Tokens)
+	src.Tokens = append(src.Tokens, unit.Token{Kind: unit.TokenEOF, Start: len(src.Text), Size: 0, Line: countNewlines(src.Text) + 1})
+	src.Funcs = append(src.Funcs, unit.Func{
+		NameStart:     start + 5,
+		NameEnd:       start + 12,
+		StartTok:      base,
+		NameTok:       base + 1,
+		ReceiverStart: eof,
+		ReceiverEnd:   eof,
+		BodyStart:     base + 14,
+		BodyEnd:       base + 28,
+		EndTok:        eof,
+	})
+	_ = packageIndex
+	return src, true
+}
+
+func appendRootProcessTokenCore(tokens []unit.Token, kind int, base int, start int, size int, line int) []unit.Token {
+	return append(tokens, unit.Token{Kind: kind, Start: base + start, Size: size, Line: line})
 }
 
 func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, lineOffset int, aliases []string, hasNext bool) bool {

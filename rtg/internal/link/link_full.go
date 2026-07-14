@@ -474,7 +474,8 @@ func reserveLinkedProgram(program *unit.Program, programs []unit.Program) {
 func preparePrograms(programs []unit.Program, root int) ([]unit.Program, bool) {
 	out := make([]unit.Program, len(programs))
 	copy(out, programs)
-	rootProgram, ok := addRootEntrypoint(out[root], root)
+	processPackage, processSymbol := findProgramSymbol(out, "rtg_runtime_SetProcess")
+	rootProgram, ok := addRootEntrypoint(out[root], root, processPackage, processSymbol)
 	if !ok {
 		return nil, false
 	}
@@ -482,9 +483,12 @@ func preparePrograms(programs []unit.Program, root int) ([]unit.Program, bool) {
 	return out, true
 }
 
-func addRootEntrypoint(src unit.Program, packageIndex int) (unit.Program, bool) {
+func addRootEntrypoint(src unit.Program, packageIndex int, processPackage int, processSymbol int) (unit.Program, bool) {
 	if src.Package != "main" || findFuncByName(src, "appMain") >= 0 || findFuncByName(src, "main") < 0 {
 		return src, true
+	}
+	if processPackage >= 0 && processSymbol >= 0 {
+		return addRootProcessEntrypoint(src, packageIndex, processPackage, processSymbol)
 	}
 	if len(src.Tokens) == 0 || src.Tokens[len(src.Tokens)-1].Kind != unit.TokenEOF {
 		return src, false
@@ -565,6 +569,133 @@ func addRootEntrypoint(src unit.Program, packageIndex int) (unit.Program, bool) 
 		Index:      mainSymbol,
 		Package:    packageIndex,
 	})
+	src.Symbols = append(src.Symbols, unit.Symbol{
+		Name:       "appMain",
+		Kind:       unit.SymbolFunc,
+		Package:    packageIndex,
+		Token:      base + 1,
+		OwnerKind:  unit.OwnerFunc,
+		OwnerIndex: funcIndex,
+	})
+	return src, true
+}
+
+func findProgramSymbol(programs []unit.Program, name string) (int, int) {
+	for i := 0; i < len(programs); i++ {
+		for j := 0; j < len(programs[i].Symbols); j++ {
+			if programs[i].Symbols[j].Name == name && programs[i].Symbols[j].Kind == unit.SymbolFunc {
+				return i, j
+			}
+		}
+	}
+	return -1, -1
+}
+
+func addRootProcessEntrypoint(src unit.Program, packageIndex int, processPackage int, processSymbol int) (unit.Program, bool) {
+	if len(src.Tokens) == 0 || src.Tokens[len(src.Tokens)-1].Kind != unit.TokenEOF {
+		return src, false
+	}
+	var textCopy []byte
+	src.Text = appendBytes(textCopy, src.Text)
+	src.Tokens = copyTokens(src.Tokens, len(src.Tokens)-1)
+	src.Funcs = copyFuncs(src.Funcs)
+	src.Signatures = copySignatures(src.Signatures)
+	src.Stmts = copyStatements(src.Stmts)
+	src.Returns = copyReturns(src.Returns)
+	src.Calls = copyCalls(src.Calls)
+	src.Refs = copyRefs(src.Refs)
+	src.Symbols = copySymbols(src.Symbols)
+	if len(src.Text) > 0 && src.Text[len(src.Text)-1] != '\n' {
+		src.Text = append(src.Text, '\n')
+	}
+	start := len(src.Text)
+	line := countNewlines(src.Text) + 1
+	src.Text = appendStringBytes(src.Text, "func appMain(args []string, env []string) int { rtg_runtime_SetProcess(args, env); main(); return 0 }\n")
+	base := len(src.Tokens)
+	items := []struct {
+		kind  int
+		start int
+		size  int
+	}{
+		{unit.TokenFunc, 0, 4}, {unit.TokenIdent, 5, 7}, {unit.TokenOp, 12, 1},
+		{unit.TokenIdent, 13, 4}, {unit.TokenOp, 18, 1}, {unit.TokenOp, 19, 1}, {unit.TokenIdent, 20, 6}, {unit.TokenOp, 26, 1},
+		{unit.TokenIdent, 28, 3}, {unit.TokenOp, 32, 1}, {unit.TokenOp, 33, 1}, {unit.TokenIdent, 34, 6}, {unit.TokenOp, 40, 1},
+		{unit.TokenIdent, 42, 3}, {unit.TokenOp, 46, 1},
+		{unit.TokenIdent, 48, 22}, {unit.TokenOp, 70, 1}, {unit.TokenIdent, 71, 4}, {unit.TokenOp, 75, 1}, {unit.TokenIdent, 77, 3}, {unit.TokenOp, 80, 1}, {unit.TokenOp, 81, 1},
+		{unit.TokenIdent, 83, 4}, {unit.TokenOp, 87, 1}, {unit.TokenOp, 88, 1}, {unit.TokenOp, 89, 1},
+		{unit.TokenReturn, 91, 6}, {unit.TokenNumber, 98, 1}, {unit.TokenOp, 100, 1},
+	}
+	for i := 0; i < len(items); i++ {
+		item := items[i]
+		src.Tokens = append(src.Tokens, unit.Token{Kind: item.kind, Start: start + item.start, Size: item.size, Line: line})
+	}
+	eof := len(src.Tokens)
+	src.Tokens = append(src.Tokens, unit.Token{Kind: unit.TokenEOF, Start: len(src.Text), Size: 0, Line: countNewlines(src.Text) + 1})
+	funcIndex := len(src.Funcs)
+	src.Funcs = append(src.Funcs, unit.Func{
+		NameStart:     start + 5,
+		NameEnd:       start + 12,
+		StartTok:      base,
+		NameTok:       base + 1,
+		ReceiverStart: eof,
+		ReceiverEnd:   eof,
+		BodyStart:     base + 14,
+		BodyEnd:       base + 28,
+		EndTok:        eof,
+	})
+	src.Signatures = append(src.Signatures, unit.FuncSignature{
+		FuncIndex: funcIndex,
+		Params: []unit.Field{
+			{NameTok: base + 3, TypeStart: base + 4, TypeEnd: base + 7},
+			{NameTok: base + 8, TypeStart: base + 9, TypeEnd: base + 12},
+		},
+		Results: []unit.Field{{NameTok: -1, TypeStart: base + 13, TypeEnd: base + 14}},
+	})
+	src.Stmts = append(src.Stmts,
+		unit.Statement{FuncIndex: funcIndex, Kind: unit.StmtBlock, StartTok: base + 14, EndTok: eof, ExprStart: -1, ExprEnd: -1, BodyStart: base + 14, BodyEnd: eof, ElseStart: -1, ElseEnd: -1},
+		unit.Statement{FuncIndex: funcIndex, Kind: unit.StmtExpr, StartTok: base + 15, EndTok: base + 22, ExprStart: base + 15, ExprEnd: base + 21, BodyStart: -1, BodyEnd: -1, ElseStart: -1, ElseEnd: -1},
+		unit.Statement{FuncIndex: funcIndex, Kind: unit.StmtExpr, StartTok: base + 22, EndTok: base + 26, ExprStart: base + 22, ExprEnd: base + 25, BodyStart: -1, BodyEnd: -1, ElseStart: -1, ElseEnd: -1},
+		unit.Statement{FuncIndex: funcIndex, Kind: unit.StmtReturn, StartTok: base + 26, EndTok: base + 28, ExprStart: base + 27, ExprEnd: base + 28, BodyStart: -1, BodyEnd: -1, ElseStart: -1, ElseEnd: -1},
+	)
+	src.Returns = append(src.Returns, unit.Return{
+		FuncIndex: funcIndex,
+		StartTok:  base + 26,
+		EndTok:    base + 28,
+		Values:    []unit.ExprSpan{{StartTok: base + 27, EndTok: base + 28}},
+	})
+	src.Calls = append(src.Calls,
+		unit.Call{
+			OwnerKind:  unit.OwnerFunc,
+			OwnerIndex: funcIndex,
+			Kind:       unit.CallPackage,
+			CalleeTok:  base + 15,
+			BaseTok:    eof,
+			DotTok:     eof,
+			ArgsStart:  base + 17,
+			ArgsEnd:    base + 20,
+			Args: []unit.ExprSpan{
+				{StartTok: base + 17, EndTok: base + 18},
+				{StartTok: base + 19, EndTok: base + 20},
+			},
+		},
+		unit.Call{
+			OwnerKind:  unit.OwnerFunc,
+			OwnerIndex: funcIndex,
+			Kind:       unit.CallPackage,
+			CalleeTok:  base + 22,
+			BaseTok:    eof,
+			DotTok:     eof,
+			ArgsStart:  base + 24,
+			ArgsEnd:    base + 24,
+		},
+	)
+	mainSymbol := findFuncSymbol(src, "main")
+	src.Refs = append(src.Refs,
+		unit.NameRef{OwnerKind: unit.OwnerFunc, OwnerIndex: funcIndex, Kind: unit.RefPackage, Token: base + 15, Index: processSymbol, Package: processPackage},
+		unit.NameRef{OwnerKind: unit.OwnerFunc, OwnerIndex: funcIndex, Kind: unit.RefScope, Token: base + 17, Index: 0, Package: -1},
+		unit.NameRef{OwnerKind: unit.OwnerFunc, OwnerIndex: funcIndex, Kind: unit.RefScope, Token: base + 19, Index: 1, Package: -1},
+		unit.NameRef{OwnerKind: unit.OwnerFunc, OwnerIndex: funcIndex, Kind: unit.RefPackage, Token: base + 22, Index: mainSymbol, Package: packageIndex},
+	)
 	src.Symbols = append(src.Symbols, unit.Symbol{
 		Name:       "appMain",
 		Kind:       unit.SymbolFunc,

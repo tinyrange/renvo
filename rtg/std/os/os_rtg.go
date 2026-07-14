@@ -11,6 +11,8 @@ type FileMode int
 
 var Args []string
 
+var processEnv []string
+
 type File struct {
 	fd int
 }
@@ -24,6 +26,9 @@ type osError struct {
 	text string
 }
 
+var ioErrorValue = osError{text: "I/O error"}
+var eofErrorValue = osError{text: "EOF"}
+
 func (e *osError) Error() string {
 	if e == nil {
 		return ""
@@ -32,18 +37,29 @@ func (e *osError) Error() string {
 }
 
 func errIO() *osError {
-	return nil
+	return &ioErrorValue
+}
+
+func errEOF() *osError {
+	return &eofErrorValue
 }
 
 func Environ() []string {
-	return nil
+	out := make([]string, len(processEnv))
+	for i := 0; i < len(processEnv); i++ {
+		out[i] = processEnv[i]
+	}
+	return out
 }
 
-func Exit(code int) {}
-
-func Getwd() (string, *osError) {
-	return ".", nil
+func rtg_runtime_SetProcess(args []string, env []string) {
+	Args = args
+	processEnv = env
 }
+
+func rtg_runtime_Exit(code int) {}
+
+func Exit(code int) { rtg_runtime_Exit(code) }
 
 func ReadFile(name string) ([]byte, *osError) {
 	fd := open(rtgPathCString(name), O_RDONLY)
@@ -72,15 +88,22 @@ func WriteFile(name string, data []byte, perm FileMode) *osError {
 	if fd < 0 {
 		return errIO()
 	}
-	if write(fd, data, -1) != len(data) {
-		close(fd)
-		return errIO()
+	written := 0
+	for written < len(data) {
+		n := write(fd, data[written:], -1)
+		if n <= 0 {
+			close(fd)
+			return errIO()
+		}
+		written += n
 	}
 	if chmod(fd, int(perm)) != 0 {
 		close(fd)
 		return errIO()
 	}
-	close(fd)
+	if close(fd) != 0 {
+		return errIO()
+	}
 	return nil
 }
 
@@ -101,17 +124,29 @@ func Create(name string) (File, *osError) {
 }
 
 func (f File) Read(p []byte) (int, *osError) {
+	if len(p) == 0 {
+		return 0, nil
+	}
 	n := read(f.fd, p, -1)
 	if n < 0 {
 		return 0, errIO()
+	}
+	if n == 0 {
+		return 0, errEOF()
 	}
 	return n, nil
 }
 
 func (f File) Write(p []byte) (int, *osError) {
+	if len(p) == 0 {
+		return 0, nil
+	}
 	n := write(f.fd, p, -1)
 	if n < 0 {
 		return 0, errIO()
+	}
+	if n != len(p) {
+		return n, errIO()
 	}
 	return n, nil
 }

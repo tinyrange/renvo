@@ -1016,7 +1016,8 @@ const rtgWinImportSetFilePointer = 5
 const rtgWinImportGetStdHandle = 6
 const rtgWinImportGetCommandLineA = 7
 const rtgWinImportExitProcess = 8
-const rtgWinImportFixedCount = 8
+const rtgWinImportGetEnvironmentStringsA = 9
+const rtgWinImportFixedCount = 9
 
 type rtgWinImportLayout struct {
 	importRVA    int
@@ -1047,6 +1048,9 @@ func rtgWinImportName(id int) string {
 	}
 	if id == rtgWinImportGetCommandLineA {
 		return "GetCommandLineA"
+	}
+	if id == rtgWinImportGetEnvironmentStringsA {
+		return "GetEnvironmentStringsA"
 	}
 	return "ExitProcess"
 }
@@ -9599,6 +9603,9 @@ func rtgEmitUserCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgEmitRuntimeArenaCall(g *rtgLinearGen, ep *rtgExprParse, idx int, fn *rtgFuncInfo) bool {
+	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_Exit") {
+		return rtgEmitRuntimeExit(g, ep, idx)
+	}
 	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaMark") {
 		return rtgEmitRuntimeArenaMark(g, ep, idx)
 	}
@@ -9621,6 +9628,58 @@ func rtgEmitRuntimeArenaCall(g *rtgLinearGen, ep *rtgExprParse, idx int, fn *rtg
 		return rtgEmitRuntimeArenaDiscard(g, ep, idx)
 	}
 	return false
+}
+
+func rtgEmitRuntimeExit(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	e := ep.exprs[idx]
+	if e.argCount != 1 || !rtgEmitIntExpr(g, ep, ep.args[e.firstArg]) {
+		return false
+	}
+	a := &g.asm
+	if rtgTargetArch == rtgArchWasm32 {
+		rtgWasm32AsmExit(a)
+		return true
+	}
+	if rtgTargetArch == rtgArchAarch64 {
+		if rtgTargetIsDarwin() {
+			rtgAarch64AsmMovRegReg(a, 0, rtgAarch64RegRax)
+			rtgDarwinArm64CallImport(a, rtgDarwinImportExit)
+		} else {
+			rtgAsmCopyPrimaryToCallWord0(a)
+			rtgAsmPrimaryImm(a, 93)
+			rtgAsmSyscall(a)
+		}
+		return true
+	}
+	if rtgTargetArch == rtgArchArm {
+		rtgAsmCopyPrimaryToCallWord0(a)
+		rtgAsmPrimaryImm(a, 1)
+		rtgAsmSyscall(a)
+		return true
+	}
+	if rtgTargetArch == rtgArch386 {
+		if rtgTargetIsWindows() {
+			rtgAsmPushPrimary(a)
+			rtgWin386CallImport(a, rtgWinImportExitProcess)
+		} else {
+			rtgAsmCopyPrimaryToCallWord0(a)
+			rtgAsmPrimaryImm(a, 1)
+			rtgAsmSyscall(a)
+		}
+		return true
+	}
+	if rtgTargetArch != rtgArchAmd64 {
+		return false
+	}
+	if rtgTargetIsWindows() {
+		rtgAsmCopyPrimaryToTertiary(a)
+		rtgWinAmd64CallImport(a, rtgWinImportExitProcess, 40)
+	} else {
+		rtgAsmCopyPrimaryToCallWord0(a)
+		rtgAsmPrimaryImm(a, 60)
+		rtgAsmSyscall(a)
+	}
+	return true
 }
 
 func rtgEmitRuntimeArenaDiscard(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {

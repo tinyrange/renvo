@@ -667,6 +667,43 @@ func main() {
 	}
 }
 
+func TestLinkBuildPassesProcessStateWhenRuntimeHookIsLinked(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import "example.com/case/process"
+
+func main() { process.Use() }
+`)},
+		{Path: "/repo/case/process/process.go", Src: []byte(`package process
+
+func rtg_runtime_SetProcess(args []string, env []string) {}
+func Use() {}
+`)},
+	})
+	linked := LinkBuild(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuild failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	appMain := findLinkedFunc(linked.Program, "appMain")
+	if appMain < 0 {
+		t.Fatalf("linked funcs missing appMain: %#v", linked.Program.Funcs)
+	}
+	assertLinkedSignature(t, linked.Program, appMain, nil, []string{"args:[]string", "env:[]string"}, []string{":int"})
+	assertLinkedStatement(t, linked.Program, appMain, unit.StmtExpr, "rtg_runtime_SetProcess(args, env)")
+	assertLinkedStatement(t, linked.Program, appMain, unit.StmtExpr, "main()")
+	assertLinkedStatement(t, linked.Program, appMain, unit.StmtReturn, "0")
+
+	decoded, err := rtgunit.Unmarshal(linked.Data)
+	if err != nil {
+		t.Fatalf("linked unit did not decode: %v", err)
+	}
+	if !bytes.Contains(decoded.Text, []byte("func appMain(args []string, env []string) int")) {
+		t.Fatalf("decoded process-aware entrypoint missing:\n%s", string(decoded.Text))
+	}
+}
+
 func TestLinkUnitsPreservesExpressionShapes(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
