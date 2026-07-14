@@ -279,6 +279,7 @@ const (
 	glPackAlignment   = 0x0d05
 	glFront           = 0x0404
 	glBack            = 0x0405
+	glFrontAndBack    = 0x0408
 )
 
 var windowsClassName []byte
@@ -1153,7 +1154,7 @@ func (w *Window) Present() bool {
 	glLoadIdentity()
 	glMatrixMode(glModelView)
 	glLoadIdentity()
-	glDrawBuffer(glBack)
+	glDrawBuffer(glFrontAndBack)
 	glRasterPos2i(-1, -1)
 	glPixelStorei(glUnpackAlignment, 1)
 	glDrawPixels(w.width, w.height, glRGBA, glUnsignedByte, w.bottomUp)
