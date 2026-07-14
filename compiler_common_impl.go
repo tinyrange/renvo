@@ -7605,6 +7605,10 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 	}
 	assignTok := rtgFindAssignmentToken(p, stmt.startTok, stmt.endTok)
 	compoundAssign := assignTok >= 0 && assignTok < rtgTokCount(p) && rtgTokIsCompoundAssignment(p, assignTok)
+	groupedVar := rtgEmitGroupedTypedVarDecl(g, stmt, assignTok)
+	if groupedVar != 0 {
+		return groupedVar > 0
+	}
 	if assignTok > stmt.startTok && rtgEmitMultiAssign(g, stmt, assignTok) {
 		return true
 	}
@@ -8280,6 +8284,90 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 	}
 	return true
 }
+
+// rtgEmitGroupedTypedVarDecl handles VarSpecs whose identifier list shares one
+// explicit type, such as "var first, second int". It returns zero when the
+// statement is not such a declaration, one on success, and -1 on an emission
+// failure.
+func rtgEmitGroupedTypedVarDecl(g *rtgLinearGen, stmt *rtgStmt, assignTok int) int {
+	p := g.prog
+	if stmt.kind != rtgStmtVar || !rtgTokIsKind(p, stmt.startTok, rtgTokVar) {
+		return 0
+	}
+	typeEnd := stmt.endTok
+	if assignTok > stmt.startTok {
+		typeEnd = assignTok
+	}
+	nameRanges := rtgFixedIntScratch(4)
+	pos := stmt.startTok + 1
+	for {
+		if pos >= typeEnd || !rtgTokIsKind(p, pos, rtgTokIdent) {
+			return 0
+		}
+		nameRanges = append(nameRanges, pos)
+		nameRanges = append(nameRanges, pos+1)
+		pos++
+		if pos >= typeEnd || !rtgTokCharIs(p, pos, ',') {
+			break
+		}
+		pos++
+	}
+	nameCount := len(nameRanges) / 2
+	if nameCount < 2 || pos >= typeEnd {
+		return 0
+	}
+	typeResult := rtgParseType(g.meta, p, pos, typeEnd)
+	if typeResult.typ == 0 || typeResult.next != typeEnd {
+		return -1
+	}
+	offsets := rtgFixedIntScratch(nameCount)
+	for i := 0; i < nameCount; i++ {
+		tok := nameRanges[i*2]
+		nameStart := int(rtgTokStart(p, tok))
+		nameEnd := int(rtgTokEnd(p, tok))
+		offset := 0
+		if nameEnd != nameStart+1 || p.src[nameStart] != '_' {
+			offset = rtgAddTypedLocal(g, nameStart, nameEnd, typeResult.typ)
+		}
+		offsets = append(offsets, offset)
+	}
+	if assignTok <= stmt.startTok {
+		for i := 0; i < nameCount; i++ {
+			if offsets[i] != 0 {
+				rtgZeroLocalAtOffset(g, offsets[i])
+			}
+		}
+		return 1
+	}
+	rhs, ok := rtgSplitTopLevelComma(p, assignTok+1, stmt.endTok)
+	if !ok || len(rhs)/2 != nameCount {
+		return -1
+	}
+	temps := rtgFixedIntScratch(nameCount)
+	for i := 0; i < nameCount; i++ {
+		var ep rtgExprParse
+		rootIndex := rtgParseExpressionRoot(&ep, p, rhs[i*2], rhs[i*2+1])
+		if rootIndex < 0 {
+			return -1
+		}
+		temp := rtgAddUnnamedLocal(g, typeResult.typ)
+		if !rtgEmitExprToLocal(g, &ep, rootIndex, temp) {
+			return -1
+		}
+		temps = append(temps, temp)
+	}
+	size := rtgTypeSize(g.meta, typeResult.typ)
+	if size < rtgBackendValueSlotSize {
+		size = rtgBackendValueSlotSize
+	}
+	for i := 0; i < nameCount; i++ {
+		if offsets[i] != 0 {
+			rtgEmitCopyStackToStack(g, temps[i], offsets[i], size)
+		}
+	}
+	return 1
+}
+
 func rtgEmitMultiAssign(g *rtgLinearGen, stmt *rtgStmt, assignTok int) bool {
 	p := g.prog
 	lhsStart := stmt.startTok
