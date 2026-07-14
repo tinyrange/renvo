@@ -1,0 +1,3 @@
+package main
+
+func main() { a, b := 1; _, _ = a, b }

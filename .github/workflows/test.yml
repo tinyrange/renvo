@@ -181,6 +181,9 @@ jobs:
           go test -count=1 ./rtg/internal/... ./rtg/std/... ./rtg/cmd/... ./rtgunit ./cmd/...
           go test -count=1 -tags rtg_bundle ./rtg/internal/driver ./rtg/cmd/rtg
 
+      - name: Check generated capability reports
+        run: go run ./cmd/rtgreport -check
+
   frontend-corpus:
     name: Frontend corpus tests
     runs-on: ubuntu-latest

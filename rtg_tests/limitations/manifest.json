@@ -1,0 +1,918 @@
+{
+  "version": 1,
+  "policy": "Ordinary Go features are frontend work unless explicitly excluded. Generics, goroutines, channels, select, and cgo are currently excluded; diagnostics for other features identify implementation backlog, not language exclusions.",
+  "cases": [
+    {
+      "id": 1,
+      "area": "literals",
+      "title": "Raw string literals",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_001"
+    },
+    {
+      "id": 2,
+      "area": "imports",
+      "title": "Raw-string import paths",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_002"
+    },
+    {
+      "id": 3,
+      "area": "literals",
+      "title": "Legacy octal integer literals",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_003"
+    },
+    {
+      "id": 4,
+      "area": "literals",
+      "title": "0o octal integer literals",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_004"
+    },
+    {
+      "id": 5,
+      "area": "literals",
+      "title": "Imaginary literals",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_005"
+    },
+    {
+      "id": 6,
+      "area": "literals",
+      "title": "Hexadecimal floating literals",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_006"
+    },
+    {
+      "id": 7,
+      "area": "constants",
+      "title": "Basic iota constants",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_007"
+    },
+    {
+      "id": 8,
+      "area": "constants",
+      "title": "Grouped iota constants",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_008"
+    },
+    {
+      "id": 9,
+      "area": "constants",
+      "title": "Iota expressions",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_009"
+    },
+    {
+      "id": 10,
+      "area": "arrays",
+      "title": "Fixed local array variables",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_010"
+    },
+    {
+      "id": 11,
+      "area": "arrays",
+      "title": "Fixed array literals outside lowerable contexts",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_011"
+    },
+    {
+      "id": 12,
+      "area": "arrays",
+      "title": "Inferred array literals outside lowerable contexts",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_012"
+    },
+    {
+      "id": 13,
+      "area": "arrays",
+      "title": "Array parameters and results",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_013"
+    },
+    {
+      "id": 14,
+      "area": "arrays",
+      "title": "Array struct fields",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_014"
+    },
+    {
+      "id": 15,
+      "area": "arrays",
+      "title": "Multidimensional arrays",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_015"
+    },
+    {
+      "id": 16,
+      "area": "arrays",
+      "title": "Slices of arrays",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_016"
+    },
+    {
+      "id": 17,
+      "area": "arrays",
+      "title": "len/cap on lowered arrays",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_017"
+    },
+    {
+      "id": 18,
+      "area": "arrays",
+      "title": "Array comparisons",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_018"
+    },
+    {
+      "id": 19,
+      "area": "maps",
+      "title": "Inert named map type declarations",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_019"
+    },
+    {
+      "id": 20,
+      "area": "maps",
+      "title": "Map literals",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_020"
+    },
+    {
+      "id": 21,
+      "area": "maps",
+      "title": "make(map[K]V)",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_021"
+    },
+    {
+      "id": 22,
+      "area": "maps",
+      "title": "Map indexing",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_022"
+    },
+    {
+      "id": 23,
+      "area": "maps",
+      "title": "Map element assignment",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_023"
+    },
+    {
+      "id": 24,
+      "area": "maps",
+      "title": "Two-value map lookup",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_024"
+    },
+    {
+      "id": 25,
+      "area": "maps",
+      "title": "delete builtin",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_025"
+    },
+    {
+      "id": 26,
+      "area": "maps",
+      "title": "len on maps",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_026"
+    },
+    {
+      "id": 27,
+      "area": "maps",
+      "title": "Map struct fields",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_027"
+    },
+    {
+      "id": 28,
+      "area": "maps",
+      "title": "Slices of maps",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_028"
+    },
+    {
+      "id": 29,
+      "area": "interfaces",
+      "title": "Empty interface type",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_029"
+    },
+    {
+      "id": 30,
+      "area": "interfaces",
+      "title": "Predeclared any",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_030"
+    },
+    {
+      "id": 31,
+      "area": "interfaces",
+      "title": "Interface method sets",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_031"
+    },
+    {
+      "id": 32,
+      "area": "interfaces",
+      "title": "Interface parameters",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_032"
+    },
+    {
+      "id": 33,
+      "area": "interfaces",
+      "title": "Interface return values",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_033"
+    },
+    {
+      "id": 34,
+      "area": "interfaces",
+      "title": "Type assertions",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_034"
+    },
+    {
+      "id": 35,
+      "area": "interfaces",
+      "title": "Type switches",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_035"
+    },
+    {
+      "id": 36,
+      "area": "interfaces",
+      "title": "Embedded interfaces",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_036"
+    },
+    {
+      "id": 37,
+      "area": "functions",
+      "title": "Function literals",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_037"
+    },
+    {
+      "id": 38,
+      "area": "functions",
+      "title": "Closures",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_038"
+    },
+    {
+      "id": 39,
+      "area": "functions",
+      "title": "Function value assignment",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_039"
+    },
+    {
+      "id": 40,
+      "area": "functions",
+      "title": "Function-typed parameters",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_040"
+    },
+    {
+      "id": 41,
+      "area": "functions",
+      "title": "Named function types",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_041"
+    },
+    {
+      "id": 42,
+      "area": "methods",
+      "title": "Method values",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_042"
+    },
+    {
+      "id": 43,
+      "area": "methods",
+      "title": "Method expressions",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_043"
+    },
+    {
+      "id": 44,
+      "area": "structs",
+      "title": "Embedded struct fields",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_044"
+    },
+    {
+      "id": 45,
+      "area": "structs",
+      "title": "Embedded pointer fields",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_045"
+    },
+    {
+      "id": 46,
+      "area": "structs",
+      "title": "Struct field tags",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_046"
+    },
+    {
+      "id": 47,
+      "area": "structs",
+      "title": "Other anonymous struct contexts",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_047"
+    },
+    {
+      "id": 48,
+      "area": "control",
+      "title": "defer statements",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_048"
+    },
+    {
+      "id": 49,
+      "area": "control",
+      "title": "range over slices",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_049"
+    },
+    {
+      "id": 50,
+      "area": "control",
+      "title": "range over ASCII string literals",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_050"
+    },
+    {
+      "id": 51,
+      "area": "control",
+      "title": "range over maps",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_051"
+    },
+    {
+      "id": 52,
+      "area": "control",
+      "title": "Expressionless switch",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_052"
+    },
+    {
+      "id": 53,
+      "area": "control",
+      "title": "fallthrough",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_053"
+    },
+    {
+      "id": 54,
+      "area": "program shape",
+      "title": "init functions",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_054"
+    },
+    {
+      "id": 55,
+      "area": "functions",
+      "title": "Named result parameters",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_055"
+    },
+    {
+      "id": 56,
+      "area": "functions",
+      "title": "Bare returns with named results",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_056"
+    },
+    {
+      "id": 57,
+      "area": "slices",
+      "title": "Full slice expressions",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_057"
+    },
+    {
+      "id": 58,
+      "area": "builtins",
+      "title": "cap builtin",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_058"
+    },
+    {
+      "id": 59,
+      "area": "builtins",
+      "title": "new builtin",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_059"
+    },
+    {
+      "id": 60,
+      "area": "builtins",
+      "title": "panic builtin",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_060"
+    },
+    {
+      "id": 61,
+      "area": "builtins",
+      "title": "recover builtin",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_061"
+    },
+    {
+      "id": 62,
+      "area": "builtins",
+      "title": "println builtin",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_062"
+    },
+    {
+      "id": 63,
+      "area": "builtins",
+      "title": "real builtin",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_063"
+    },
+    {
+      "id": 64,
+      "area": "builtins",
+      "title": "imag builtin",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_064"
+    },
+    {
+      "id": 65,
+      "area": "builtins",
+      "title": "complex builtin",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_065"
+    },
+    {
+      "id": 66,
+      "area": "slices",
+      "title": "append with multiple scalar values",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_066"
+    },
+    {
+      "id": 67,
+      "area": "strings",
+      "title": "String += assignment",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_067"
+    },
+    {
+      "id": 68,
+      "area": "numeric types",
+      "title": "complex64 type",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_068"
+    },
+    {
+      "id": 69,
+      "area": "numeric types",
+      "title": "complex128 type",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_069"
+    },
+    {
+      "id": 70,
+      "area": "declarations",
+      "title": "Package var initialized by call",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_070"
+    },
+    {
+      "id": 71,
+      "area": "declarations",
+      "title": "Package composite initializer with call",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_071"
+    },
+    {
+      "id": 72,
+      "area": "declarations",
+      "title": "Local type declarations",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_072"
+    },
+    {
+      "id": 73,
+      "area": "diagnostics",
+      "title": "Invalid return count",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_073"
+    },
+    {
+      "id": 74,
+      "area": "diagnostics",
+      "title": "Invalid assignment type",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_074"
+    },
+    {
+      "id": 75,
+      "area": "diagnostics",
+      "title": "Invalid non-function call",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_075"
+    },
+    {
+      "id": 76,
+      "area": "diagnostics",
+      "title": "Invalid assignment target",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_076"
+    },
+    {
+      "id": 77,
+      "area": "diagnostics",
+      "title": "Invalid assignment count",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_077"
+    },
+    {
+      "id": 78,
+      "area": "diagnostics",
+      "title": "Invalid break placement",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_078"
+    },
+    {
+      "id": 79,
+      "area": "diagnostics",
+      "title": "Invalid continue placement",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_079"
+    },
+    {
+      "id": 80,
+      "area": "imports",
+      "title": "Blank imports",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_080"
+    },
+    {
+      "id": 81,
+      "area": "imports",
+      "title": "Dot imports",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_081"
+    },
+    {
+      "id": 82,
+      "area": "imports",
+      "title": "Unused imports",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_082"
+    },
+    {
+      "id": 83,
+      "area": "imports",
+      "title": "Duplicate import local names",
+      "expected": "frontend-diagnostic",
+      "commentary_html": "This checked fixture currently stops in the frontend or module loader. The captured message is authoritative.",
+      "fixture": "rtg_tests/limitations/case_083"
+    },
+    {
+      "id": 84,
+      "area": "rtg/std",
+      "title": "Missing std package: math",
+      "expected": "frontend-diagnostic",
+      "commentary_html": "This checked fixture currently stops in the frontend or module loader. The captured message is authoritative.",
+      "fixture": "rtg_tests/limitations/case_084"
+    },
+    {
+      "id": 85,
+      "area": "rtg/std",
+      "title": "Missing std package: time",
+      "expected": "frontend-diagnostic",
+      "commentary_html": "This checked fixture currently stops in the frontend or module loader. The captured message is authoritative.",
+      "fixture": "rtg_tests/limitations/case_085"
+    },
+    {
+      "id": 86,
+      "area": "rtg/std",
+      "title": "Missing std package: encoding/json",
+      "expected": "frontend-diagnostic",
+      "commentary_html": "This checked fixture currently stops in the frontend or module loader. The captured message is authoritative.",
+      "fixture": "rtg_tests/limitations/case_086"
+    },
+    {
+      "id": 87,
+      "area": "rtg/std",
+      "title": "Missing std package: sort",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_087"
+    },
+    {
+      "id": 88,
+      "area": "rtg/std",
+      "title": "Missing std package: unicode/utf8",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_088"
+    },
+    {
+      "id": 89,
+      "area": "rtg/std",
+      "title": "Missing fmt.Sprintf",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_089"
+    },
+    {
+      "id": 90,
+      "area": "rtg/std",
+      "title": "strings.ReplaceAll",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_090"
+    },
+    {
+      "id": 91,
+      "area": "rtg/std",
+      "title": "strconv.ParseInt",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_091"
+    },
+    {
+      "id": 92,
+      "area": "rtg/std",
+      "title": "bytes.Buffer constructors",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_092"
+    },
+    {
+      "id": 93,
+      "area": "rtg/std",
+      "title": "Missing errors.New",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_093"
+    },
+    {
+      "id": 94,
+      "area": "rtg/std",
+      "title": "Missing io.Reader",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_094"
+    },
+    {
+      "id": 95,
+      "area": "rtg/std",
+      "title": "Missing regexp",
+      "expected": "frontend-diagnostic",
+      "commentary_html": "This checked fixture currently stops in the frontend or module loader. The captured message is authoritative.",
+      "fixture": "rtg_tests/limitations/case_095"
+    },
+    {
+      "id": 96,
+      "area": "rtg/std",
+      "title": "Missing reflect",
+      "expected": "frontend-diagnostic",
+      "commentary_html": "This checked fixture currently stops in the frontend or module loader. The captured message is authoritative.",
+      "fixture": "rtg_tests/limitations/case_096"
+    },
+    {
+      "id": 97,
+      "area": "rtg/std",
+      "title": "Missing net/http",
+      "expected": "frontend-diagnostic",
+      "commentary_html": "This checked fixture currently stops in the frontend or module loader. The captured message is authoritative.",
+      "fixture": "rtg_tests/limitations/case_097"
+    },
+    {
+      "id": 98,
+      "area": "intrinsics",
+      "title": "Struct and broader unsafe.Sizeof layout operands",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_098"
+    },
+    {
+      "id": 99,
+      "area": "imports",
+      "title": "cgo import C",
+      "expected": "excluded",
+      "commentary_html": "This feature is explicitly outside the current frontend scope and is expected to stop before backend compilation.",
+      "fixture": "rtg_tests/limitations/case_099"
+    },
+    {
+      "id": 100,
+      "area": "directives",
+      "title": "go:embed",
+      "expected": "frontend-diagnostic",
+      "commentary_html": "This checked fixture currently stops in the frontend or module loader. The captured message is authoritative.",
+      "fixture": "rtg_tests/limitations/case_100"
+    },
+    {
+      "id": 101,
+      "area": "rtg/std",
+      "title": "Missing os.Create",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_101"
+    },
+    {
+      "id": 102,
+      "area": "rtg/std",
+      "title": "Missing *os.File API",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_102"
+    },
+    {
+      "id": 103,
+      "area": "modules",
+      "title": "External module fetching",
+      "expected": "frontend-diagnostic",
+      "commentary_html": "This checked fixture currently stops in the frontend or module loader. The captured message is authoritative.",
+      "fixture": "rtg_tests/limitations/case_103"
+    },
+    {
+      "id": 104,
+      "area": "modules",
+      "title": "cgo file exclusion",
+      "expected": "frontend-diagnostic",
+      "commentary_html": "This checked fixture currently stops in the frontend or module loader. The captured message is authoritative.",
+      "fixture": "rtg_tests/limitations/case_104"
+    },
+    {
+      "id": 105,
+      "area": "modules",
+      "title": "Non-local replace targets",
+      "expected": "frontend-diagnostic",
+      "commentary_html": "This checked fixture currently stops in the frontend or module loader. The captured message is authoritative.",
+      "fixture": "rtg_tests/limitations/case_105"
+    },
+    {
+      "id": 106,
+      "area": "modules",
+      "title": "Missing local replaced module files",
+      "expected": "frontend-diagnostic",
+      "commentary_html": "This checked fixture currently stops in the frontend or module loader. The captured message is authoritative.",
+      "fixture": "rtg_tests/limitations/case_106"
+    },
+    {
+      "id": 107,
+      "area": "modules",
+      "title": "Import cycles",
+      "expected": "frontend-diagnostic",
+      "commentary_html": "This checked fixture currently stops in the frontend or module loader. The captured message is authoritative.",
+      "fixture": "rtg_tests/limitations/case_107"
+    },
+    {
+      "id": 108,
+      "area": "modules",
+      "title": "Mixed package names in one directory",
+      "expected": "frontend-diagnostic",
+      "commentary_html": "This checked fixture currently stops in the frontend or module loader. The captured message is authoritative.",
+      "fixture": "rtg_tests/limitations/case_108"
+    },
+    {
+      "id": 109,
+      "area": "control",
+      "title": "Dynamic string range",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_109"
+    },
+    {
+      "id": 110,
+      "area": "control",
+      "title": "Non-ASCII string literal range",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_110"
+    },
+    {
+      "id": 111,
+      "area": "structs",
+      "title": "Simple local anonymous structs",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_111"
+    },
+    {
+      "id": 112,
+      "area": "intrinsics",
+      "title": "unsafe.Sizeof fixed-size, word-sized, fixed-array, and simple struct operands",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_112"
+    },
+    {
+      "id": 113,
+      "area": "control",
+      "title": "Labeled break and continue",
+      "expected": "accepted",
+      "commentary_html": "This checked fixture currently compiles end to end in both recorded compiler stages. Broader forms may have different coverage.",
+      "fixture": "rtg_tests/limitations/case_113"
+    },
+    {
+      "id": 114,
+      "area": "structs",
+      "title": "Simple named struct comparisons",
+      "expected": "backend-failure",
+      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "fixture": "rtg_tests/limitations/case_114"
+    }
+  ]
+}
