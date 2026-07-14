@@ -8,9 +8,14 @@ func calc(a int, b int, c int) int {
 }
 
 func main() {
+	corpusOK := false
 	if calc(7, 14, 3) == 51 {
+		corpusOK = true
+	}
+	if corpusOK {
 		print("PASS\n")
 		return
 	}
+
 	print("FAIL\n")
 }

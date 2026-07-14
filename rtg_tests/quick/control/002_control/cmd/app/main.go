@@ -18,6 +18,8 @@ func main() {
 	if score(7) == 24 {
 		print("PASS\n")
 		return
+	} else {
+
+		print("FAIL\n")
 	}
-	print("FAIL\n")
 }

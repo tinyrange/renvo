@@ -1,25 +1,16 @@
 package main
 
-type scorer interface {
-	score() int
-}
+type scorer interface { score() int }
+type item struct { value int }
 
-type item struct {
-	value int
-}
-
-func (i item) score() int {
-	return i.value + 0
-}
-
-func check(s scorer) bool {
-	return s.score() == 3
-}
+func mark(trace *int, step int) int { *trace = *trace*10+step; return 7 }
+func (i item) score() int { return i.value }
 
 func main() {
-	if check(item{value: 3}) {
-		print("PASS\n")
-		return
-	}
+	trace := 0
+	value := item{value: mark(&trace, 1)}
+	var dynamic scorer = value
+	got := dynamic.score()
+	if trace == 1 && got == 7 { print("PASS\n"); return }
 	print("FAIL\n")
 }

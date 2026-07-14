@@ -15,9 +15,14 @@ func score(limit int) int {
 }
 
 func main() {
+	corpusOK := false
 	if score(9) == 27 {
+		corpusOK = true
+	}
+	if corpusOK {
 		print("PASS\n")
 		return
 	}
+
 	print("FAIL\n")
 }

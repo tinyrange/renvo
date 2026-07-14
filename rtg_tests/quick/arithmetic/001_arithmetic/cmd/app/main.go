@@ -8,9 +8,12 @@ func calc(a int, b int, c int) int {
 }
 
 func main() {
-	if calc(4, 12, 5) == 72 {
-		print("PASS\n")
+	corpusOK := calc(4, 12, 5) == 72
+	if !corpusOK {
+
+		print("FAIL\n")
 		return
 	}
-	print("FAIL\n")
+	print("PASS\n")
+
 }

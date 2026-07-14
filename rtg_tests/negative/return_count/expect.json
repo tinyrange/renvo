@@ -1,0 +1,8 @@
+{
+  "phase": "checker",
+  "code": "RTG-CHECK-007",
+  "file": "cmd/app/main.go",
+  "line": 3,
+  "column": 20,
+  "message": "return value count does not match function results"
+}

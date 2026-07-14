@@ -3,19 +3,41 @@
 package main
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"go/ast"
 	"go/format"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
 type testCase struct {
-	tier   string
-	group  string
-	name   string
-	module string
-	files  map[string]string
+	tier    string
+	group   string
+	name    string
+	module  string
+	files   map[string]string
+	variant string
+}
+
+type corpusManifest struct {
+	Version int                   `json:"version"`
+	Groups  []corpusManifestGroup `json:"groups"`
+}
+
+type corpusManifestGroup struct {
+	Tier             string         `json:"tier"`
+	Group            string         `json:"group"`
+	Cases            int            `json:"cases"`
+	StructuralShapes int            `json:"structural_shapes"`
+	Variants         map[string]int `json:"variants"`
 }
 
 func main() {
@@ -27,7 +49,12 @@ func main() {
 	for _, tc := range cases {
 		writeCase(root, tc)
 	}
-	fmt.Printf("generated %d frontend corpus cases\n", len(cases))
+	manifest := buildCorpusManifest(root, cases)
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	must(err)
+	data = append(data, '\n')
+	must(os.WriteFile(filepath.Join(root, "corpus_manifest.json"), data, 0644))
+	fmt.Printf("generated %d frontend corpus cases across %d structural groups\n", len(cases), len(manifest.Groups))
 }
 
 func quickCases() []testCase {
@@ -950,6 +977,26 @@ func main() {
 	print("FAIL\n")
 }
 `, i%17+1, i%13+2, i%17+1+i%13+2)
+		if i == 0 {
+			body = `package main
+
+var trace int
+
+func key(step int) string {
+	trace = trace*10 + step
+	if step == 1 { return "a" }
+	if step == 2 { return "b" }
+	return "c"
+}
+
+func main() {
+	m := map[string]int{"a": 0, "b": 2, "c": 3}
+	m[key(1)] = m[key(2)] + m[key(3)]
+	if trace == 123 && m["a"] == 5 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`
+		}
 		out = append(out, simpleCase("extended", "maps", i, body))
 	}
 	return out
@@ -984,6 +1031,25 @@ func main() {
 	print("FAIL\n")
 }
 `, i%9, i%11+3+i%9, i%11+3)
+		if i == 0 {
+			body = `package main
+
+type scorer interface { score() int }
+type item struct { value int }
+
+func mark(trace *int, step int) int { *trace = *trace*10+step; return 7 }
+func (i item) score() int { return i.value }
+
+func main() {
+	trace := 0
+	value := item{value: mark(&trace, 1)}
+	var dynamic scorer = value
+	got := dynamic.score()
+	if trace == 1 && got == 7 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`
+		}
 		out = append(out, simpleCase("extended", "interfaces", i, body))
 	}
 	return out
@@ -1003,6 +1069,19 @@ func main() {
 	print("FAIL\n")
 }
 `, i%10, i%7+2, i%10+i%7+2)
+		if i == 0 {
+			body = `package main
+
+var trace int
+func value(n int) int { trace = trace*10 + n; return n*10 }
+
+func main() {
+	a := [2]int{value(1), value(2)}
+	if trace == 12 && a[0] == 10 && a[1] == 20 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`
+		}
 		out = append(out, simpleCase("extended", "arrays", i, body))
 	}
 	return out
@@ -1037,6 +1116,24 @@ func main() {
 	print("FAIL\n")
 }
 `, i, i%8+2, i%5+3, choose(i%2 == 1, (i%8+2)*(i%5+3), (i%8+2)+(i%5+3)))
+		if i == 0 {
+			body = `package main
+
+func add(a int, b int) int { return a+b }
+func mark(trace *int, step int) int { *trace = *trace*10+step; return step }
+func apply(fn func(int, int) int, a int, b int) int { return fn(a, b) }
+
+func main() {
+	trace := 0
+	fn := add
+	left := mark(&trace, 2)
+	right := mark(&trace, 3)
+	got := apply(fn, left, right)
+	if trace == 23 && got == 5 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`
+		}
 		out = append(out, simpleCase("extended", "function_values", i, body))
 	}
 	return out
@@ -1062,6 +1159,21 @@ func main() {
 	print("FAIL\n")
 }
 `, i%17, i%19, i%17+i%19)
+		if i == 0 {
+			body = `package main
+
+func mark(trace *int, step int) int { *trace = *trace*10+step; return step }
+func makeAdder(base int) func(int) int { return func(value int) int { return base+value } }
+
+func main() {
+	trace := 0
+	next := makeAdder(mark(&trace, 1))
+	got := next(mark(&trace, 2))
+	if trace == 12 && got == 3 { print("PASS\n"); return }
+	print("FAIL\n")
+}
+`
+		}
 		out = append(out, simpleCase("extended", "closures", i, body))
 	}
 	return out
@@ -1362,7 +1474,14 @@ func simpleCase(tier string, group string, index int, main string) testCase {
 
 func moduleCase(tier string, group string, index int, files map[string]string) testCase {
 	name := fmt.Sprintf("%03d_%s", index, strings.ReplaceAll(group, "_", ""))
-	return testCase{tier: tier, group: group, name: name, files: files}
+	variant := "parameter_set"
+	if index < 5 {
+		variant = fmt.Sprintf("control_shape_%d", index)
+	}
+	if group == "legacy_regressions" {
+		variant = "curated"
+	}
+	return testCase{tier: tier, group: group, name: name, files: files, variant: variant}
 }
 
 func writeCase(root string, tc testCase) {
@@ -1380,9 +1499,164 @@ func writeCase(root string, tc testCase) {
 			formatted, err := format.Source([]byte(content))
 			must(err)
 			content = string(formatted)
+		} else if name == "cmd/app/main.go" && strings.HasPrefix(tc.variant, "control_shape_") {
+			content = structuralVariant(content, caseIndex(tc.name)%5)
 		}
 		must(os.WriteFile(path, []byte(content), 0644))
 	}
+}
+
+// structuralVariant rewrites only the final success/failure decision. The
+// feature operation and its evaluation count stay unchanged while the corpus
+// exercises distinct control-flow shapes around it.
+func structuralVariant(source string, variant int) string {
+	if variant == 0 {
+		return source
+	}
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "main.go", source, parser.SkipObjectResolution)
+	if err != nil {
+		return source
+	}
+	var mainFn *ast.FuncDecl
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Recv == nil && fn.Name.Name == "main" {
+			mainFn = fn
+			break
+		}
+	}
+	if mainFn == nil || mainFn.Body == nil || len(mainFn.Body.List) < 2 {
+		return source
+	}
+	last := len(mainFn.Body.List) - 1
+	check, ok := mainFn.Body.List[last-1].(*ast.IfStmt)
+	if !ok || check.Else != nil || len(check.Body.List) < 2 || !isTerminalReturn(check.Body.List[len(check.Body.List)-1]) || !isFailurePrint(mainFn.Body.List[last]) {
+		return source
+	}
+	success := append([]ast.Stmt(nil), check.Body.List[:len(check.Body.List)-1]...)
+	failure := mainFn.Body.List[last]
+	if variant == 1 {
+		mainFn.Body.List = append(mainFn.Body.List[:last-1],
+			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("corpusOK")}, Tok: token.DEFINE, Rhs: []ast.Expr{check.Cond}},
+			&ast.IfStmt{Cond: &ast.UnaryExpr{Op: token.NOT, X: ast.NewIdent("corpusOK")}, Body: &ast.BlockStmt{List: []ast.Stmt{failure, &ast.ReturnStmt{}}}},
+		)
+		mainFn.Body.List = append(mainFn.Body.List, success...)
+	} else if variant == 2 {
+		mainFn.Body.List = append(mainFn.Body.List[:last-1], &ast.IfStmt{
+			Cond: check.Cond,
+			Body: &ast.BlockStmt{List: append(success, &ast.ReturnStmt{})},
+			Else: &ast.BlockStmt{List: []ast.Stmt{failure}},
+		})
+	} else if variant == 3 {
+		loopCheck := &ast.IfStmt{Cond: check.Cond, Body: &ast.BlockStmt{List: append(success, &ast.ReturnStmt{})}}
+		loop := &ast.ForStmt{
+			Init: &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("corpusAttempt")}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: "0"}}},
+			Cond: &ast.BinaryExpr{X: ast.NewIdent("corpusAttempt"), Op: token.LSS, Y: &ast.BasicLit{Kind: token.INT, Value: "1"}},
+			Post: &ast.IncDecStmt{X: ast.NewIdent("corpusAttempt"), Tok: token.INC},
+			Body: &ast.BlockStmt{List: []ast.Stmt{loopCheck}},
+		}
+		mainFn.Body.List = append(mainFn.Body.List[:last-1], loop, failure)
+	} else {
+		mainFn.Body.List = append(mainFn.Body.List[:last-1],
+			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("corpusOK")}, Tok: token.DEFINE, Rhs: []ast.Expr{ast.NewIdent("false")}},
+			&ast.IfStmt{Cond: check.Cond, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("corpusOK")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent("true")}}}}},
+			&ast.IfStmt{Cond: ast.NewIdent("corpusOK"), Body: &ast.BlockStmt{List: append(success, &ast.ReturnStmt{})}},
+			failure,
+		)
+	}
+	var out bytes.Buffer
+	if format.Node(&out, fset, file) != nil {
+		return source
+	}
+	return out.String()
+}
+
+func isTerminalReturn(stmt ast.Stmt) bool {
+	ret, ok := stmt.(*ast.ReturnStmt)
+	return ok && len(ret.Results) == 0
+}
+
+func isFailurePrint(stmt ast.Stmt) bool {
+	expr, ok := stmt.(*ast.ExprStmt)
+	if !ok {
+		return false
+	}
+	call, ok := expr.X.(*ast.CallExpr)
+	if !ok || len(call.Args) != 1 {
+		return false
+	}
+	name, ok := call.Fun.(*ast.Ident)
+	if !ok || name.Name != "print" {
+		return false
+	}
+	lit, ok := call.Args[0].(*ast.BasicLit)
+	return ok && lit.Kind == token.STRING && strings.Contains(lit.Value, "FAIL")
+}
+
+func buildCorpusManifest(root string, cases []testCase) corpusManifest {
+	type groupState struct {
+		entry  corpusManifestGroup
+		shapes map[string]bool
+	}
+	groups := make(map[string]*groupState)
+	for _, tc := range cases {
+		key := tc.tier + "/" + tc.group
+		state := groups[key]
+		if state == nil {
+			state = &groupState{entry: corpusManifestGroup{Tier: tc.tier, Group: tc.group, Variants: make(map[string]int)}, shapes: make(map[string]bool)}
+			groups[key] = state
+		}
+		state.entry.Cases++
+		variant := tc.variant
+		if variant == "" {
+			variant = "curated"
+		}
+		state.entry.Variants[variant]++
+		dir := filepath.Join(root, tc.tier, tc.group, tc.name)
+		state.shapes[structuralFingerprint(dir)] = true
+	}
+	keys := make([]string, 0, len(groups))
+	for key := range groups {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	manifest := corpusManifest{Version: 1}
+	for _, key := range keys {
+		state := groups[key]
+		state.entry.StructuralShapes = len(state.shapes)
+		manifest.Groups = append(manifest.Groups, state.entry)
+	}
+	return manifest
+}
+
+func structuralFingerprint(dir string) string {
+	var paths []string
+	must(filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".go") {
+			paths = append(paths, path)
+		}
+		return nil
+	}))
+	sort.Strings(paths)
+	hash := sha256.New()
+	for _, path := range paths {
+		source, err := os.ReadFile(path)
+		must(err)
+		file, err := parser.ParseFile(token.NewFileSet(), path, source, parser.SkipObjectResolution)
+		must(err)
+		hash.Write([]byte(filepath.Base(path)))
+		ast.Inspect(file, func(node ast.Node) bool {
+			if node != nil {
+				fmt.Fprintf(hash, "%T;", node)
+			}
+			return true
+		})
+	}
+	return hex.EncodeToString(hash.Sum(nil))
 }
 
 func modulePath(tier string, group string, index int) string {

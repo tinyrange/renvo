@@ -4,9 +4,12 @@ func main() {
 	text := "aPASS\nb"
 	start := len("a")
 	end := len(text) - len("b")
-	if text[start:end] == "PASS\n" {
-		print(text[start:end])
+	corpusOK := text[start:end] == "PASS\n"
+	if !corpusOK {
+
+		print("FAIL\n")
 		return
 	}
-	print("FAIL\n")
+	print(text[start:end])
+
 }

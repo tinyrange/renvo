@@ -11,6 +11,8 @@ func main() {
 	if calc(5, 19, 8) == 173 {
 		print("PASS\n")
 		return
+	} else {
+
+		print("FAIL\n")
 	}
-	print("FAIL\n")
 }

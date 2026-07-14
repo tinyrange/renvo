@@ -13,9 +13,12 @@ func main() {
 	text := makeText()
 	start := len("x")
 	end := len(text) - len("")
-	if text[start:end] == "PASS" && len(text) == 5 {
-		print("PASS\n")
+	corpusOK := text[start:end] == "PASS" && len(text) == 5
+	if !corpusOK {
+
+		print("FAIL\n")
 		return
 	}
-	print("FAIL\n")
+	print("PASS\n")
+
 }

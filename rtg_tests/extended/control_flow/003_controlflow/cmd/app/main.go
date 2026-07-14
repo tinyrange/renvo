@@ -11,9 +11,12 @@ func main() {
 		}
 		total = total + i
 	}
-	if total == 23 {
-		print("PASS\n")
-		return
+	for corpusAttempt := 0; corpusAttempt < 1; corpusAttempt++ {
+		if total == 23 {
+			print("PASS\n")
+			return
+		}
 	}
+
 	print("FAIL\n")
 }

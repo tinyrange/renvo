@@ -41,6 +41,11 @@ func TestFrontendQuickCorpus(t *testing.T) {
 	runFrontendCorpus(t, "quick", true)
 }
 
+func TestFrontendRegressionCorpus(t *testing.T) {
+	root := repoRoot(t)
+	runFrontendCorpusDirectory(t, filepath.Join(root, "rtg_tests", "regressions"), true, frontendCompiler(t, root))
+}
+
 func TestFrontendExtendedCorpus(t *testing.T) {
 	if os.Getenv(extendedTestsEnv) != "1" {
 		t.Skipf("set %s=1 to run extended frontend corpus", extendedTestsEnv)
@@ -54,6 +59,14 @@ func TestFrontendStage3QuickCorpus(t *testing.T) {
 	}
 	root := repoRoot(t)
 	runFrontendCorpusWithConfig(t, root, "quick", false, selfHostedFrontendCompiler(t, root))
+}
+
+func TestFrontendStage3RegressionCorpus(t *testing.T) {
+	if os.Getenv(selfHostTestsEnv) != "1" {
+		t.Skipf("set %s=1 to run self-hosted frontend regressions", selfHostTestsEnv)
+	}
+	root := repoRoot(t)
+	runFrontendCorpusDirectory(t, filepath.Join(root, "rtg_tests", "regressions"), false, selfHostedFrontendCompiler(t, root))
 }
 
 func TestFrontendStage3ExtendedCorpus(t *testing.T) {
@@ -76,10 +89,15 @@ func runFrontendCorpus(t *testing.T, tier string, parallel bool) {
 
 func runFrontendCorpusWithConfig(t *testing.T, root string, tier string, parallel bool, frontend frontendConfig) {
 	t.Helper()
+	runFrontendCorpusDirectory(t, filepath.Join(root, "rtg_tests", tier), parallel, frontend)
+}
 
-	cases := discoverCorpusCases(t, filepath.Join(root, "rtg_tests", tier))
+func runFrontendCorpusDirectory(t *testing.T, corpusRoot string, parallel bool, frontend frontendConfig) {
+	t.Helper()
+
+	cases := discoverCorpusCases(t, corpusRoot)
 	if len(cases) == 0 {
-		t.Fatalf("no %s frontend corpus cases found", tier)
+		t.Fatalf("no frontend corpus cases found in %s", corpusRoot)
 	}
 
 	for _, tc := range cases {

@@ -8,9 +8,12 @@ func (c counter) add(v int) counter {
 
 func main() {
 	var c counter = 1
-	if int(c.add(1)) == 2 {
-		print("PASS\n")
+	corpusOK := int(c.add(1)) == 2
+	if !corpusOK {
+
+		print("FAIL\n")
 		return
 	}
-	print("FAIL\n")
+	print("PASS\n")
+
 }

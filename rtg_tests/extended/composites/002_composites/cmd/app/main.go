@@ -14,6 +14,8 @@ func main() {
 	if v.name == "ok" && v.list[0].a+v.list[1].a == 4 {
 		print("PASS\n")
 		return
+	} else {
+
+		print("FAIL\n")
 	}
-	print("FAIL\n")
 }

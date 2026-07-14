@@ -1,10 +1,10 @@
 package main
 
+var trace int
+func value(n int) int { trace = trace*10 + n; return n*10 }
+
 func main() {
-	grid := [2][3]int{{1, 0, 3}, {4, 5, 2}}
-	if grid[0][1]+grid[1][2] == 2 {
-		print("PASS\n")
-		return
-	}
+	a := [2]int{value(1), value(2)}
+	if trace == 12 && a[0] == 10 && a[1] == 20 { print("PASS\n"); return }
 	print("FAIL\n")
 }

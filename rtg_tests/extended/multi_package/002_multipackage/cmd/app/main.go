@@ -7,6 +7,8 @@ func main() {
 	if a.Value()+b.Value() == 7 {
 		print("PASS\n")
 		return
+	} else {
+
+		print("FAIL\n")
 	}
-	print("FAIL\n")
 }

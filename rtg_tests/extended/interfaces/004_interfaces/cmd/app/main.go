@@ -17,9 +17,14 @@ func check(s scorer) bool {
 }
 
 func main() {
+	corpusOK := false
 	if check(item{value: 7}) {
+		corpusOK = true
+	}
+	if corpusOK {
 		print("PASS\n")
 		return
 	}
+
 	print("FAIL\n")
 }

@@ -14,6 +14,8 @@ func main() {
 	if total == 16 {
 		print("PASS\n")
 		return
+	} else {
+
+		print("FAIL\n")
 	}
-	print("FAIL\n")
 }

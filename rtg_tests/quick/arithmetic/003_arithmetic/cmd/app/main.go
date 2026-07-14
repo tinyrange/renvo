@@ -8,9 +8,12 @@ func calc(a int, b int, c int) int {
 }
 
 func main() {
-	if calc(6, 7, 11) == 137 {
-		print("PASS\n")
-		return
+	for corpusAttempt := 0; corpusAttempt < 1; corpusAttempt++ {
+		if calc(6, 7, 11) == 137 {
+			print("PASS\n")
+			return
+		}
 	}
+
 	print("FAIL\n")
 }

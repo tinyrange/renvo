@@ -3,9 +3,12 @@ package main
 import "example.com/rtgtests/extended/packageinit/case001/pkg/lib"
 
 func main() {
-	if lib.Value() == 9 {
-		print("PASS\n")
+	corpusOK := lib.Value() == 9
+	if !corpusOK {
+
+		print("FAIL\n")
 		return
 	}
-	print("FAIL\n")
+	print("PASS\n")
+
 }

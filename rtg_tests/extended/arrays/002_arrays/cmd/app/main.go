@@ -5,6 +5,8 @@ func main() {
 	if grid[0][1]+grid[1][2] == 6 {
 		print("PASS\n")
 		return
+	} else {
+
+		print("FAIL\n")
 	}
-	print("FAIL\n")
 }

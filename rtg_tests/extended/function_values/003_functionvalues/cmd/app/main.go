@@ -17,9 +17,12 @@ func main() {
 	if 3%2 == 1 {
 		fn = mul
 	}
-	if apply(fn, 5, 6) == 30 {
-		print("PASS\n")
-		return
+	for corpusAttempt := 0; corpusAttempt < 1; corpusAttempt++ {
+		if apply(fn, 5, 6) == 30 {
+			print("PASS\n")
+			return
+		}
 	}
+
 	print("FAIL\n")
 }

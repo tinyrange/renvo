@@ -20,6 +20,8 @@ func main() {
 	if apply(fn, 4, 5) == 9 {
 		print("PASS\n")
 		return
+	} else {
+
+		print("FAIL\n")
 	}
-	print("FAIL\n")
 }

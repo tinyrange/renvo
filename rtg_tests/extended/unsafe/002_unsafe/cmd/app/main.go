@@ -14,6 +14,8 @@ func main() {
 	if int(q.a)+int(q.b) == 4 {
 		print("PASS\n")
 		return
+	} else {
+
+		print("FAIL\n")
 	}
-	print("FAIL\n")
 }

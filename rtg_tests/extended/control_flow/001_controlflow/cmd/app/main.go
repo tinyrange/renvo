@@ -11,9 +11,12 @@ func main() {
 		}
 		total = total + i
 	}
-	if total == 10 {
-		print("PASS\n")
+	corpusOK := total == 10
+	if !corpusOK {
+
+		print("FAIL\n")
 		return
 	}
-	print("FAIL\n")
+	print("PASS\n")
+
 }

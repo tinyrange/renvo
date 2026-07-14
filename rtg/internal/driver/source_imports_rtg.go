@@ -1,5 +1,3 @@
-//go:build rtg
-
 package driver
 
 import "j5.nz/rtg/rtg/internal/load"

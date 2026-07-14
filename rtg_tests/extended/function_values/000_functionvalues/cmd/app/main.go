@@ -1,25 +1,15 @@
 package main
 
-func add(a int, b int) int {
-	return a + b
-}
-
-func mul(a int, b int) int {
-	return a * b
-}
-
-func apply(fn func(int, int) int, a int, b int) int {
-	return fn(a, b)
-}
+func add(a int, b int) int { return a+b }
+func mark(trace *int, step int) int { *trace = *trace*10+step; return step }
+func apply(fn func(int, int) int, a int, b int) int { return fn(a, b) }
 
 func main() {
+	trace := 0
 	fn := add
-	if 0%2 == 1 {
-		fn = mul
-	}
-	if apply(fn, 2, 3) == 5 {
-		print("PASS\n")
-		return
-	}
+	left := mark(&trace, 2)
+	right := mark(&trace, 3)
+	got := apply(fn, left, right)
+	if trace == 23 && got == 5 { print("PASS\n"); return }
 	print("FAIL\n")
 }
