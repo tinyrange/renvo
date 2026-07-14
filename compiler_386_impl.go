@@ -1560,15 +1560,13 @@ func rtg386EnsureStringEqualHelper(g *rtgLinearGen) int {
 func rtg386EmitIndexedStructField(g *rtgLinearGen, ep *rtgExprParse, indexIdx int, fieldStart int, fieldEnd int) bool {
 	a := &g.asm
 	indexExpr := &ep.exprs[indexIdx]
-	leftIndex := indexExpr.left
-	rightIndex := indexExpr.right
-	leftType := rtgInferParsedExprType(g, ep, leftIndex)
+	leftType := rtgInferParsedExprType(g, ep, indexExpr.left)
 	sliceType := rtgResolveType(g.meta, leftType)
 	if sliceType.kind != rtgTypeSlice {
 		return false
 	}
 	elemType := rtgResolveType(g.meta, sliceType.elem)
-	if elemType.kind != rtgTypeStruct {
+	if elemType.kind != rtgTypeStruct && elemType.kind != rtgTypePointer {
 		return false
 	}
 	fieldOffset := rtgStructFieldOffset(g, sliceType.elem, fieldStart, fieldEnd)
@@ -1576,21 +1574,12 @@ func rtg386EmitIndexedStructField(g *rtgLinearGen, ep *rtgExprParse, indexIdx in
 		return false
 	}
 	fieldType := rtgStructFieldType(g, sliceType.elem, fieldStart, fieldEnd)
-	if !rtgEmitIntExpr(g, ep, rightIndex) {
+	if !rtgEmitIndexedSelectorAddressSecondary(g, ep, indexIdx, fieldOffset) {
 		return false
 	}
-	rtgAsmPushPrimary(a)
-	if !rtgEmitSlicePtrLen(g, ep, leftIndex) {
-		return false
-	}
-	rtgAsmPopTertiary(a)
-	elemSize := rtgTypeSize(g.meta, sliceType.elem)
-	rtgAsmMulTertiaryImm(a, elemSize)
-	rtgAsmAddPrimaryTertiary(a)
-	rtgAsmCopyPrimaryToSecondary(a)
 	fieldResolved := rtgResolveType(g.meta, fieldType)
 	fieldSize := rtgScalarKindSize(fieldResolved.kind)
-	rtgAsmLoadPrimaryMemSecondaryDispSize(a, fieldOffset, fieldSize)
+	rtgAsmLoadPrimaryMemSecondaryDispSize(a, 0, fieldSize)
 	return true
 }
 
@@ -1698,28 +1687,7 @@ func rtg386EmitSelectorAddressRdx(g *rtgLinearGen, ep *rtgExprParse, idx int) bo
 		return false
 	}
 	if base.kind == rtgExprIndex {
-		leftType := rtgInferParsedExprType(g, ep, base.left)
-		sliceType := rtgResolveType(meta, leftType)
-		elemType := rtgResolveType(meta, sliceType.elem)
-		if sliceType.kind != rtgTypeSlice || elemType.kind != rtgTypeStruct {
-			return false
-		}
-		if !rtgEmitIntExpr(g, ep, base.right) {
-			return false
-		}
-		rtgAsmPushPrimary(a)
-		if !rtgEmitSlicePtrLen(g, ep, base.left) {
-			return false
-		}
-		rtgAsmPopTertiary(a)
-		elemSize := rtgTypeSize(meta, sliceType.elem)
-		rtgAsmMulTertiaryImm(a, elemSize)
-		rtgAsmCopyPrimaryToSecondary(a)
-		rtgAsmAddSecondaryTertiary(a)
-		if fieldOffset != 0 {
-			rtgAsmAddSecondaryImm(a, fieldOffset)
-		}
-		return true
+		return rtgEmitIndexedSelectorAddressSecondary(g, ep, e.left, fieldOffset)
 	}
 	if base.kind == rtgExprIdent {
 		localIndex := rtgFindLocalIndex(g, base.nameStart, base.nameEnd)

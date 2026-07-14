@@ -14445,3 +14445,37 @@ func rtgEmitSelectorAddressSecondary(g *rtgLinearGen, ep *rtgExprParse, idx int)
 	}
 	return rtgAmd64EmitSelectorAddressRdx(g, ep, idx)
 }
+
+func rtgEmitIndexedSelectorAddressSecondary(g *rtgLinearGen, ep *rtgExprParse, idx int, fieldOffset int) bool {
+	meta := g.meta
+	a := &g.asm
+	indexExpr := &ep.exprs[idx]
+	leftType := rtgInferParsedExprType(g, ep, indexExpr.left)
+	sliceType := rtgResolveType(meta, leftType)
+	if sliceType.kind != rtgTypeSlice {
+		return false
+	}
+	elemType := rtgResolveType(meta, sliceType.elem)
+	if elemType.kind != rtgTypeStruct && elemType.kind != rtgTypePointer {
+		return false
+	}
+	if !rtgEmitIntExpr(g, ep, indexExpr.right) {
+		return false
+	}
+	rtgAsmPushPrimary(a)
+	if !rtgEmitSlicePtrLen(g, ep, indexExpr.left) {
+		return false
+	}
+	rtgAsmPopTertiary(a)
+	rtgAsmMulTertiaryImm(a, rtgTypeSize(meta, sliceType.elem))
+	rtgAsmCopyPrimaryToSecondary(a)
+	rtgAsmAddSecondaryTertiary(a)
+	if elemType.kind == rtgTypePointer {
+		rtgAsmLoadPrimaryMemSecondaryDisp(a, 0)
+		rtgAsmCopyPrimaryToSecondary(a)
+	}
+	if fieldOffset != 0 {
+		rtgAsmAddSecondaryImm(a, fieldOffset)
+	}
+	return true
+}

@@ -1701,34 +1701,23 @@ func rtgAmd64EnsureStringEqualHelper(g *rtgLinearGen) int {
 func rtgAmd64EmitIndexedStructField(g *rtgLinearGen, ep *rtgExprParse, indexIdx int, fieldStart int, fieldEnd int) bool {
 	a := &g.asm
 	indexExpr := &ep.exprs[indexIdx]
-	leftIndex := indexExpr.left
-	rightIndex := indexExpr.right
-	leftType := rtgInferParsedExprType(g, ep, leftIndex)
+	leftType := rtgInferParsedExprType(g, ep, indexExpr.left)
 	sliceType := rtgResolveType(g.meta, leftType)
 	if sliceType.kind != rtgTypeSlice {
 		return false
 	}
 	elemType := rtgResolveType(g.meta, sliceType.elem)
-	if elemType.kind != rtgTypeStruct {
+	if elemType.kind != rtgTypeStruct && elemType.kind != rtgTypePointer {
 		return false
 	}
 	fieldOffset := rtgStructFieldOffset(g, sliceType.elem, fieldStart, fieldEnd)
 	if fieldOffset < 0 {
 		return false
 	}
-	if !rtgEmitIntExpr(g, ep, rightIndex) {
+	if !rtgEmitIndexedSelectorAddressSecondary(g, ep, indexIdx, fieldOffset) {
 		return false
 	}
-	rtgAsmPushPrimary(a)
-	if !rtgEmitSlicePtrLen(g, ep, leftIndex) {
-		return false
-	}
-	rtgAsmPopTertiary(a)
-	elemSize := rtgTypeSize(g.meta, sliceType.elem)
-	rtgAsmMulTertiaryImm(a, elemSize)
-	rtgAsmAddPrimaryTertiary(a)
-	rtgAsmCopyPrimaryToSecondary(a)
-	rtgAsmLoadPrimaryMemSecondaryDisp(a, fieldOffset)
+	rtgAsmLoadPrimaryMemSecondaryDisp(a, 0)
 	return true
 }
 func rtgAmd64EmitStringPtrExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
@@ -1866,28 +1855,7 @@ func rtgAmd64EmitSelectorAddressRdx(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 		}
 	}
 	if base.kind == rtgExprIndex {
-		leftType := rtgInferParsedExprType(g, ep, base.left)
-		sliceType := rtgResolveType(meta, leftType)
-		elemType := rtgResolveType(meta, sliceType.elem)
-		if sliceType.kind != rtgTypeSlice || elemType.kind != rtgTypeStruct {
-			return false
-		}
-		if !rtgEmitIntExpr(g, ep, base.right) {
-			return false
-		}
-		rtgAsmPushPrimary(a)
-		if !rtgEmitSlicePtrLen(g, ep, base.left) {
-			return false
-		}
-		rtgAsmPopTertiary(a)
-		elemSize := rtgTypeSize(meta, sliceType.elem)
-		rtgAsmMulTertiaryImm(a, elemSize)
-		rtgAsmCopyPrimaryToSecondary(a)
-		rtgAsmAddSecondaryTertiary(a)
-		if fieldOffset != 0 {
-			rtgAsmAddSecondaryImm(a, fieldOffset)
-		}
-		return true
+		return rtgEmitIndexedSelectorAddressSecondary(g, ep, e.left, fieldOffset)
 	}
 	if base.kind == rtgExprIdent {
 		localIndex := rtgFindLocalIndex(g, base.nameStart, base.nameEnd)
