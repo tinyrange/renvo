@@ -34,12 +34,28 @@ func fail(message string) {
 	print("\n")
 }
 
+func decimal(value int) string {
+	if value == 0 {
+		return "0"
+	}
+	var reversed []byte
+	for value > 0 {
+		reversed = append(reversed, byte('0'+value%10))
+		value = value / 10
+	}
+	out := make([]byte, len(reversed))
+	for i := 0; i < len(reversed); i++ {
+		out[i] = reversed[len(reversed)-1-i]
+	}
+	return string(out)
+}
+
 func main() {
 	w := graphics.NewWindow(graphics.WindowOptions{Title: "RTG Windows/amd64 ✓", Width: 32, Height: 24, Hidden: true})
 	if w == nil {
 		err := graphics.LastWindowError()
 		if err != nil {
-			fail("new window: " + err.Message)
+			fail("new window: " + err.Message + " (" + decimal(err.Code) + ")")
 		} else {
 			fail("new window")
 		}
