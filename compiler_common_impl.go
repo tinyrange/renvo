@@ -5222,6 +5222,9 @@ func rtgScalarKindSize(kind int) int {
 	if kind == rtgTypeInt {
 		return rtgNativeIntSize
 	}
+	if kind == rtgTypePointer {
+		return rtgBackendValueSlotSize
+	}
 	if kind >= rtgTypeInt16 {
 		return (kind - 6) * 2
 	}
@@ -11207,13 +11210,7 @@ func rtgEmitAppendToLocation(g *rtgLinearGen, stmt *rtgStmt, ep *rtgExprParse, l
 		}
 		return true
 	}
-	if rtgTypeKindIsScalarInt(elem.kind) {
-		if !rtgEmitAppendScalarToLocation(g, ep, locEp, loc, elem.kind, valueIndex) {
-			return false
-		}
-		return true
-	}
-	if elem.kind == rtgTypeFloat64 {
+	if rtgTypeKindIsScalarValue(elem.kind) || elem.kind == rtgTypePointer {
 		if !rtgEmitAppendScalarToLocation(g, ep, locEp, loc, elem.kind, valueIndex) {
 			return false
 		}
