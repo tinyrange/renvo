@@ -52,6 +52,9 @@ func TestWindowsTargetsEndToEnd(t *testing.T) {
 		target := target
 		t.Run(target.name, func(t *testing.T) {
 			targetDir := t.TempDir()
+			t.Run("stage0_smoke", func(t *testing.T) {
+				compileAndRunWindowsInput(t, target.name, stage0, []string{"tests/print_pass_smoke.go"})
+			})
 			stage1 := buildWindowsStage1(t, stage0, target.name, files, targetDir)
 			stage2 := filepath.Join(targetDir, "rtg-stage2.exe")
 			compileArgs := []string{"-t", target.name, "-s", "-o", stage2}
@@ -160,10 +163,11 @@ func runWindowsCommand(t *testing.T, dir string, path string, args ...string) (c
 	}
 	gdbArgs := []string{
 		"--batch",
-		"-ex", "set pagination off",
-		"-ex", "run",
-		"-ex", "info registers",
-		"-ex", "x/16i $pc-32",
+		"-ex=set pagination off",
+		"-ex=run",
+		"-ex=info all-registers",
+		"-ex=bt",
+		"-ex=x/16i $pc-32",
 		"--args", path,
 	}
 	gdbArgs = append(gdbArgs, args...)
