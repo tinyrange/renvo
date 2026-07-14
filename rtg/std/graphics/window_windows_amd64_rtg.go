@@ -125,7 +125,7 @@ func windowsGetClipboardData(format int) int { return 0 }
 // rtg:linkstatic user32.dll,SetClipboardData
 func windowsSetClipboardData(format, memory int) int { return 0 }
 
-// rtg:linkstatic gdi32.dll,GetDC
+// rtg:linkstatic user32.dll,GetDC
 func windowsGetDC(window int) int { return 0 }
 
 // rtg:linkstatic user32.dll,ReleaseDC

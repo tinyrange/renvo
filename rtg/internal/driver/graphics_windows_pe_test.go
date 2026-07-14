@@ -90,6 +90,7 @@ func main() {
 	}
 	for _, expected := range []string{
 		"CreateWindowExW:user32.dll",
+		"GetDC:user32.dll",
 		"SetClipboardData:user32.dll",
 		"ChoosePixelFormat:gdi32.dll",
 		"wglCreateContext:opengl32.dll",
