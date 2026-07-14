@@ -12,6 +12,13 @@ stack/guard collisions, bad entry and vector placement, implicit hosted
 imports, and aggregate flash/RAM budget overflow. Its `Usage` result reports
 static RAM, heap, stack, guard, flash use, and remaining headroom separately.
 
+`target.ArtifactFromELF` derives that validation input from a linked ELF image.
+It records allocatable section VMA and flags, obtains LMA from `PT_LOAD`
+physical addresses, keeps `SHT_NOBITS` out of the flash image, locates the
+descriptor-selected vector symbol, and carries unresolved imports into the
+forbidden-runtime check. It rejects relocatable objects because board budgets
+must be evaluated against the actual linked image.
+
 `target.CH32V003` is the initial forcing profile: reusable RV32EC instruction
 selection, the ilp32e ABI, ELF32 little-endian objects, 16 KiB flash, and 2 KiB
 SRAM. It intentionally supplies no hosted imports. Startup/vector code and
