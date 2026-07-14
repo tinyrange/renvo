@@ -33,6 +33,14 @@ jobs:
           go-version-file: go.mod
           cache: false
 
+      - name: Restore compiler test cache
+        uses: actions/cache@v5
+        with:
+          path: .rtg/test-cache
+          key: rtg-test-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'compiler*.go', 'rtg_main.go', 'tests/*.go', 'unit_frontend_test.go', 'test_cache_test.go') }}
+          restore-keys: |
+            rtg-test-v2-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Build frontend backend
         run: |
           go build -o "$RUNNER_TEMP/rtg-backend" .
@@ -65,6 +73,14 @@ jobs:
           go-version-file: go.mod
           cache: false
 
+      - name: Restore compiler test cache
+        uses: actions/cache@v5
+        with:
+          path: .rtg/test-cache
+          key: rtg-test-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'compiler*.go', 'rtg_main.go', 'tests/*.go', 'unit_frontend_test.go', 'test_cache_test.go') }}
+          restore-keys: |
+            rtg-test-v2-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Build frontend backend
         run: |
           go build -o "$RUNNER_TEMP/rtg-backend" .
@@ -89,6 +105,14 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+
+      - name: Restore compiler test cache
+        uses: actions/cache@v5
+        with:
+          path: .rtg/test-cache
+          key: rtg-test-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'compiler*.go', 'rtg_main.go', 'tests/*.go', 'unit_frontend_test.go', 'test_cache_test.go') }}
+          restore-keys: |
+            rtg-test-v2-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Build frontend backend
         run: |
