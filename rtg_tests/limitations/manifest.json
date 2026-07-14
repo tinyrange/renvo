@@ -102,8 +102,8 @@
       "id": 13,
       "area": "arrays",
       "title": "Array parameters and results",
-      "expected": "backend-failure",
-      "commentary_html": "This checked fixture currently reaches the backend but does not produce an object. It records a remaining frontend/backend contract gap.",
+      "expected": "accepted",
+      "commentary_html": "Fixed arrays use value-copy parameter and hidden-result semantics. This probe and the backend regression suite cover literals, zero values, locals, forwarded calls, and direct indexing of returned arrays.",
       "fixture": "rtg_tests/limitations/case_013"
     },
     {
