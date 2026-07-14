@@ -551,6 +551,8 @@ func runCommand(t *testing.T, path string, args ...string) (commandResult, error
 
 func runCommandInDir(t *testing.T, dir string, path string, args ...string) (commandResult, error) {
 	t.Helper()
+	release := acquireTestProcess()
+	defer release()
 
 	var result commandResult
 	var stdout bytes.Buffer
@@ -828,29 +830,25 @@ func TestStage1CompilerCanEmitSmokeTargets(t *testing.T) {
 
 func buildStage2Compiler(t *testing.T, target compilerTarget, outDir string) string {
 	t.Helper()
-
-	stage0 := filepath.Join(outDir, "stage0-"+target.safeName())
-	if err := compile(target.files, stage0); err != nil {
-		t.Fatalf("stage0 compilation failed: %v", err)
-	}
-
-	stage1 := filepath.Join(outDir, "stage1-"+target.safeName())
-	if err := runHostCompilerBinaryForTarget(t, target, stage0, stage1, target.files); err != nil {
-		t.Fatalf("stage1 compilation failed: %v", err)
-	}
-
-	stage2 := filepath.Join(outDir, "stage2-"+target.safeName())
-	if err := runTargetCompilerBinary(t, target, stage1, stage2, target.files); err != nil {
-		t.Fatalf("stage2 compilation failed: %v", err)
-	}
-
-	return stage2
+	key := testArtifactKeyForFiles(t, []string{"stage2", target.name}, target.files)
+	return cachedTestArtifact(t, "stage2", key, func(stage2 string) error {
+		stage0 := filepath.Join(outDir, "stage0-"+target.safeName())
+		if err := compile(target.files, stage0); err != nil {
+			return fmt.Errorf("stage0 compilation failed: %w", err)
+		}
+		stage1 := filepath.Join(outDir, "stage1-"+target.safeName())
+		if err := runHostCompilerBinaryForTarget(t, target, stage0, stage1, target.files); err != nil {
+			return fmt.Errorf("stage1 compilation failed: %w", err)
+		}
+		if err := runTargetCompilerBinary(t, target, stage1, stage2, target.files); err != nil {
+			return fmt.Errorf("stage2 compilation failed: %w", err)
+		}
+		return nil
+	})
 }
 
 func runWithHostGo(t *testing.T, path string) commandResult {
 	t.Helper()
-
-	outDir := t.TempDir()
 	runtimeData, err := os.ReadFile("rtg_main.go")
 	if err != nil {
 		t.Fatalf("failed to read runtime: %v", err)
@@ -859,27 +857,29 @@ func runWithHostGo(t *testing.T, path string) commandResult {
 	if err != nil {
 		t.Fatalf("failed to read test source: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(outDir, "rtg_main.go"), runtimeData, 0644); err != nil {
-		t.Fatalf("failed to write runtime copy: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(outDir, "test.go"), testData, 0644); err != nil {
-		t.Fatalf("failed to write test copy: %v", err)
-	}
-
-	hostBinary := filepath.Join(outDir, "host-test")
-	buildResult, err := runCommandInDir(t, outDir, "go", "build", "-o", hostBinary, "rtg_main.go", "test.go")
-	if err != nil {
-		t.Fatalf("host go build failed: %v", err)
-	}
-	if buildResult.exitCode != 0 {
-		t.Fatalf("host go build failed with exit code %d\nstdout: %sstderr: %s", buildResult.exitCode, buildResult.stdout, buildResult.stderr)
-	}
-
-	result, err := runCommand(t, hostBinary)
-	if err != nil {
-		t.Fatalf("host-built execution failed: %v", err)
-	}
-	return result
+	key := testArtifactKey([]byte("host-go-result"), []byte(path), runtimeData, testData)
+	return cachedCommandResult(t, "host-go-result", key, func() (commandResult, error) {
+		outDir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(outDir, "rtg_main.go"), runtimeData, 0644); err != nil {
+			return commandResult{}, fmt.Errorf("write runtime copy: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(outDir, "test.go"), testData, 0644); err != nil {
+			return commandResult{}, fmt.Errorf("write test copy: %w", err)
+		}
+		hostBinary := filepath.Join(outDir, "host-test")
+		buildResult, err := runCommandInDir(t, outDir, "go", "build", "-o", hostBinary, "rtg_main.go", "test.go")
+		if err != nil {
+			return commandResult{}, fmt.Errorf("host go build failed: %w", err)
+		}
+		if buildResult.exitCode != 0 {
+			return commandResult{}, fmt.Errorf("host go build failed with exit code %d\nstdout: %sstderr: %s", buildResult.exitCode, buildResult.stdout, buildResult.stderr)
+		}
+		result, err := runCommand(t, hostBinary)
+		if err != nil {
+			return commandResult{}, fmt.Errorf("host-built execution failed: %w", err)
+		}
+		return result, nil
+	})
 }
 
 func compareCommandResult(t *testing.T, expected commandResult, actual commandResult) {
@@ -926,12 +926,7 @@ func TestCompileTests(t *testing.T) {
 
 					expected := runWithHostGo(t, path)
 
-					testOutDir := t.TempDir()
-					outputFile := filepath.Join(testOutDir, "test")
-
-					if err := runTargetCompilerBinary(t, target, stage2, outputFile, []string{path}); err != nil {
-						t.Fatalf("compilation failed: %v", err)
-					}
+					outputFile := cachedTargetProgram(t, target, stage2, "source", []string{path})
 
 					actual, err := runTargetCommand(t, target, outputFile)
 					if err != nil {
