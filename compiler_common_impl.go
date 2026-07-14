@@ -562,7 +562,7 @@ func rtgAsmEmit24(a *rtgAsm, v int) {
 func rtgAmd64RelaxBranches(a *rtgAsm) {
 	oldCode := a.code
 	oldLen := len(oldCode)
-	shortOp := make([]int, oldLen, oldLen)
+	shortOp := make([]byte, oldLen, oldLen)
 	for i := 0; i < len(a.relocs); i++ {
 		at := a.relocs[i].at & 2147483647
 		label := a.relocs[i].label & 2147483647
@@ -575,18 +575,18 @@ func rtgAmd64RelaxBranches(a *rtgAsm) {
 			continue
 		}
 		if at >= 1 && oldCode[at-1] == 0xe9 {
-			shortOp[at-1] = 0xeb
+			shortOp[at-1] = byte(0xeb)
 			continue
 		}
 		if at >= 2 && oldCode[at-2] == 0x0f && oldCode[at-1] >= 0x80 && oldCode[at-1] <= 0x8f {
-			shortOp[at-2] = int(oldCode[at-1]) - 0x10
+			shortOp[at-2] = oldCode[at-1] - 0x10
 		}
 	}
-	positions := make([]int, oldLen+1, oldLen+1)
+	positions := make([]int32, oldLen+1, oldLen+1)
 	next := make([]byte, 0, cap(oldCode))
 	for i := 0; i < oldLen; {
-		positions[i] = len(next)
-		op := shortOp[i]
+		positions[i] = int32(len(next))
+		op := int(shortOp[i])
 		if op != 0 {
 			n := 5
 			if oldCode[i] == 0x0f {
@@ -595,7 +595,7 @@ func rtgAmd64RelaxBranches(a *rtgAsm) {
 			next = append(next, byte(op))
 			next = append(next, 0)
 			for j := 1; j < n; j++ {
-				positions[i+j] = len(next) - 1
+				positions[i+j] = int32(len(next) - 1)
 			}
 			i += n
 			continue
@@ -603,7 +603,7 @@ func rtgAmd64RelaxBranches(a *rtgAsm) {
 		next = append(next, oldCode[i])
 		i++
 	}
-	positions[oldLen] = len(next)
+	positions[oldLen] = int32(len(next))
 	var relocs []rtgLabelRef
 	relocs = make([]rtgLabelRef, 0, len(a.relocs))
 	for i := 0; i < len(a.relocs); i++ {
@@ -615,24 +615,24 @@ func rtgAmd64RelaxBranches(a *rtgAsm) {
 			start = at - 2
 		}
 		if start >= 0 && start < oldLen && shortOp[start] != 0 && label >= 0 && label < len(a.labelPos) && label < len(a.labelSet) && a.labelSet[label] {
-			newAt := positions[start] + 1
-			target := positions[a.labelPos[label]]
+			newAt := int(positions[start]) + 1
+			target := int(positions[a.labelPos[label]])
 			disp := target - (newAt + 1)
 			if disp >= -128 && disp <= 127 {
 				next[newAt] = byte(disp)
 				continue
 			}
 		}
-		r.at = positions[at]
+		r.at = int(positions[at])
 		relocs = append(relocs, r)
 	}
 	for i := 0; i < len(a.absRelocs); i++ {
 		at := a.absRelocs[i].at & 2147483647
-		a.absRelocs[i].at = positions[at]
+		a.absRelocs[i].at = int(positions[at])
 	}
 	for i := 0; i < len(a.labelPos); i++ {
 		if a.labelSet[i] {
-			a.labelPos[i] = positions[a.labelPos[i]]
+			a.labelPos[i] = int(positions[a.labelPos[i]])
 		}
 	}
 	a.code = next
@@ -690,7 +690,7 @@ func rtgAsmPatch(a *rtgAsm) {
 		a.dataOffset = a.codeOffset + len(a.code)
 		return
 	}
-	if rtgTargetArch == rtgArchAmd64 && rtgCompilerFixedTarget == 0 {
+	if rtgTargetArch == rtgArchAmd64 {
 		rtgAmd64RelaxBranches(a)
 	}
 	for i := 0; i < len(a.relocs); i++ {
