@@ -26,7 +26,8 @@ func rtg386EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	g.returnStruct = 0
 	g.stackUsed = 0
 	rtgAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-	rtgAsmEmit32(a, 0x008000c8)
+	framePatch := len(a.code)
+	rtgAsmEmit32(a, 0x000000c8)
 	if rtgTypeIsStruct(g.meta, metaFn.resultType) {
 		g.returnStruct = rtgAddTypedLocal(g, 0, 0, rtgTypeInt)
 		rtgAsmStackMem(a, g.returnStruct, 0x89, 0x5d, 0x9d)
@@ -42,6 +43,15 @@ func rtg386EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 		rtgAsmLeave(a)
 		rtgAsmRet(a)
 	}
+	frame := rtgAlignTo8(g.stackUsed + 2048)
+	if frame < 2048 {
+		frame = 2048
+	}
+	if frame > 65528 {
+		frame = 65528
+	}
+	a.code[framePatch+1] = byte(frame & 255)
+	a.code[framePatch+2] = byte((frame / 256) & 255)
 	g.locals = oldLocals
 	g.localCount = oldLocalCount
 	g.breakDepth = oldBreak

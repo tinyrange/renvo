@@ -43,18 +43,12 @@ func rtgAmd64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 		rtgAsmLeave(a)
 		rtgAsmRet(a)
 	}
-	frameAlign := 8
-	frameMax := 65528
-	if rtgTargetIsWindows() {
-		frameAlign = 16
-		frameMax = 65520
-	}
-	frame := rtgAlignValue(g.stackUsed+2048, frameAlign)
+	frame := rtgAlignValue(g.stackUsed+2048, 16)
 	if frame < 2048 {
 		frame = 2048
 	}
-	if frame > frameMax {
-		frame = frameMax
+	if frame > 65520 {
+		frame = 65520
 	}
 	a.code[framePatch+1] = byte(frame & 255)
 	a.code[framePatch+2] = byte((frame / 256) & 255)
