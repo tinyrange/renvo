@@ -132,6 +132,26 @@ jobs:
           RTG_FRONTEND_SELFHOST_TESTS: "1"
         run: go test -count=1 -timeout 30m ./rtg_tests
 
+  windows-e2e:
+    name: Windows targets end to end (amd64 and 386)
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Build, validate, and execute Windows targets
+        env:
+          RTG_WINDOWS_GDB: "1"
+        run: go test -count=1 -timeout 15m -run '^TestWindows(PEImages|TargetsEndToEnd)$' .
+
   package-tests:
     name: Package tests (${{ matrix.runner }})
     runs-on: ${{ matrix.runner }}
