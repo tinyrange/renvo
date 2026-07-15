@@ -67,22 +67,6 @@ const rtgFloatScaledInteger = 1
 const rtgFloatIEEEHardware = 2
 const rtgFloatIEEESoft = 3
 
-const rtgABI386SysV = 1
-const rtgABI386Windows = 2
-const rtgABIAmd64SysV = 3
-const rtgABIAmd64Windows = 4
-const rtgABIAarch64Linux = 5
-const rtgABIAarch64Darwin = 6
-const rtgABIArmLinux = 7
-const rtgABIWasi = 8
-
-const rtgImageELF32 = 1
-const rtgImageELF64 = 2
-const rtgImagePE32 = 3
-const rtgImagePE64 = 4
-const rtgImageMachO64 = 5
-const rtgImageWasm = 6
-
 // The current normalized backend stores scalar values in eight-byte virtual
 // slots even when the target address or language int is narrower. Keep this
 // distinct from the target data model so future C and small-device backends do
@@ -114,13 +98,29 @@ type rtgTargetProfile struct {
 	volatileWidths  int
 	interruptModel  int
 	floatModel      int
-	abi             int
-	imageFormat     int
 }
+
+// The target IDs are dense. Keep the core identity fields in compact tables so
+// profile construction and active compiler state consume the same source of
+// truth without pulling the full machine-profile builder into every compiler.
+const rtgTargetOSTable = "\x00\x01\x01\x01\x01\x02\x02\x04\x03"
+const rtgTargetArchTable = "\x00\x01\x02\x03\x04\x01\x02\x05\x03"
+const rtgTargetIntBitsTable = "\x00\x40\x20\x40\x20\x40\x20\x20\x40"
 
 func rtgProfileForTarget(target int) (rtgTargetProfile, bool) {
 	var p rtgTargetProfile
+	if target < rtgTargetLinuxAmd64 || target > rtgTargetDarwinArm64 {
+		return p, false
+	}
 	p.target = target
+	p.os = int(rtgTargetOSTable[target])
+	p.arch = int(rtgTargetArchTable[target])
+	p.intBits = int(rtgTargetIntBitsTable[target])
+	p.pointerBits = p.intBits
+	p.maxAlign = p.intBits / 8
+	if target == rtgTargetWasiWasm32 {
+		p.maxAlign = 8
+	}
 	p.charBits = 8
 	p.endian = rtgEndianLittle
 	p.backendSlotSize = rtgBackendValueSlotSize
@@ -130,75 +130,8 @@ func rtgProfileForTarget(target int) (rtgTargetProfile, bool) {
 	p.oomModel = rtgOOMResult
 	p.interruptModel = rtgInterruptNone
 	p.floatModel = rtgFloatScaledInteger
-	if target == rtgTargetLinux386 || target == rtgTargetWindows386 {
-		p.arch = rtgArch386
-		p.intBits = 32
-		p.pointerBits = 32
-		p.maxAlign = 4
-	} else if target == rtgTargetLinuxArm {
-		p.arch = rtgArchArm
-		p.intBits = 32
-		p.pointerBits = 32
-		p.maxAlign = 4
-	} else if target == rtgTargetWasiWasm32 {
-		p.arch = rtgArchWasm32
-		p.intBits = 32
-		p.pointerBits = 32
-		p.maxAlign = 8
-	} else if target == rtgTargetLinuxAarch64 || target == rtgTargetDarwinArm64 {
-		p.arch = rtgArchAarch64
-		p.intBits = 64
-		p.pointerBits = 64
-		p.maxAlign = 8
-	} else if target == rtgTargetLinuxAmd64 || target == rtgTargetWindowsAmd64 {
-		p.arch = rtgArchAmd64
-		p.intBits = 64
-		p.pointerBits = 64
-		p.maxAlign = 8
-	} else {
-		return p, false
-	}
-	p.os = rtgOSLinux
-	if target == rtgTargetWindowsAmd64 || target == rtgTargetWindows386 {
-		p.os = rtgOSWindows
-	}
-	if target == rtgTargetDarwinArm64 {
-		p.os = rtgOSDarwin
-	}
-	if target == rtgTargetWasiWasm32 {
-		p.os = rtgOSWasi
-	}
 	p.codePointerBits = p.pointerBits
 	p.funcPointerBits = p.pointerBits
-	if p.os == rtgOSLinux {
-		if p.arch == rtgArch386 {
-			p.abi = rtgABI386SysV
-			p.imageFormat = rtgImageELF32
-		} else if p.arch == rtgArchAmd64 {
-			p.abi = rtgABIAmd64SysV
-			p.imageFormat = rtgImageELF64
-		} else if p.arch == rtgArchAarch64 {
-			p.abi = rtgABIAarch64Linux
-			p.imageFormat = rtgImageELF64
-		} else if p.arch == rtgArchArm {
-			p.abi = rtgABIArmLinux
-			p.imageFormat = rtgImageELF32
-		}
-	} else if p.os == rtgOSWindows {
-		if p.arch == rtgArch386 {
-			p.abi = rtgABI386Windows
-			p.imageFormat = rtgImagePE32
-		} else {
-			p.abi = rtgABIAmd64Windows
-			p.imageFormat = rtgImagePE64
-		}
-	} else if p.os == rtgOSDarwin {
-		p.abi = rtgABIAarch64Darwin
-		p.imageFormat = rtgImageMachO64
-	} else if p.os == rtgOSWasi {
-		p.abi = rtgABIWasi
-		p.imageFormat = rtgImageWasm
-	}
 	return p, true
 }
 
@@ -249,12 +182,6 @@ func rtgProfileIsValid(p rtgTargetProfile) bool {
 	if p.floatModel < rtgFloatScaledInteger || p.floatModel > rtgFloatIEEESoft {
 		return false
 	}
-	if p.abi < rtgABI386SysV || p.abi > rtgABIWasi {
-		return false
-	}
-	if p.imageFormat < rtgImageELF32 || p.imageFormat > rtgImageWasm {
-		return false
-	}
 	return true
 }
 
@@ -275,11 +202,10 @@ func rtgSetTarget(target int) {
 		target = rtgCompilerFixedTarget
 	}
 	rtgCurrentTarget = target
-	profile, ok := rtgProfileForTarget(target)
-	if ok {
-		rtgTargetOS = profile.os
-		rtgTargetArch = profile.arch
-		rtgNativeIntSize = profile.intBits / 8
+	if target >= rtgTargetLinuxAmd64 && target <= rtgTargetDarwinArm64 {
+		rtgTargetOS = int(rtgTargetOSTable[target])
+		rtgTargetArch = int(rtgTargetArchTable[target])
+		rtgNativeIntSize = int(rtgTargetIntBitsTable[target]) / 8
 		return
 	}
 	// Preserve the historical fallback for internal callers that pass an

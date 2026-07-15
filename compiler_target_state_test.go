@@ -2,6 +2,13 @@ package main
 
 import "testing"
 
+func TestTargetCoreTablesCoverEveryTarget(t *testing.T) {
+	want := rtgTargetDarwinArm64 + 1
+	if len(rtgTargetOSTable) != want || len(rtgTargetArchTable) != want || len(rtgTargetIntBitsTable) != want {
+		t.Fatalf("core target table lengths = os:%d arch:%d int:%d, want %d", len(rtgTargetOSTable), len(rtgTargetArchTable), len(rtgTargetIntBitsTable), want)
+	}
+}
+
 func TestSetTargetDerivesStateFromTargetProfile(t *testing.T) {
 	savedFixed := rtgCompilerFixedTarget
 	savedTarget := rtgCurrentTarget
@@ -31,9 +38,6 @@ func TestSetTargetDerivesStateFromTargetProfile(t *testing.T) {
 		profile, ok := rtgProfileForTarget(target)
 		if !ok {
 			t.Fatalf("target %d has no profile", target)
-		}
-		if profile.abi == 0 || profile.imageFormat == 0 {
-			t.Fatalf("target %d profile lacks ABI or image format: %#v", target, profile)
 		}
 		rtgSetTarget(target)
 		if rtgCurrentTarget != target || rtgTargetOS != profile.os || rtgTargetArch != profile.arch || rtgNativeIntSize != profile.intBits/8 {
