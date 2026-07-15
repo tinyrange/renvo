@@ -12,7 +12,16 @@ exports, undefined symbols, relocation-section links, or relocation kinds do
 not satisfy the current milestone contract. Trusted shell imports and supported
 relocations must be allowlisted; hosted symbols are never accepted implicitly.
 
-This establishes the host-side object contract and malformed-artifact tests for
-#22. Building both objects from the canonical omnibus unit, invoking the target
-linker/simulator, and comparing result blocks are the next pipeline layers once
-the C and candidate emitters from #19 are available.
+`RunPipeline` executes the reference and candidate build commands without a
+shell, validates both milestone objects before either link runs, links and runs
+the two artifacts, decodes their debugger memory dumps through the shared
+result ABI, and requires both the independently supplied profile/signature and
+the completed-probe count to agree. Errors retain the reference/candidate side
+and the first failed build, object, link, run, decode, validation, or comparison
+step. A standalone-image milestone may omit relocatable objects; earlier
+milestones must supply them.
+
+The C and candidate emitters from #19 provide the concrete build commands and
+the target configuration supplies linker, runner/debug-reader, object, image,
+and memory-dump paths. This keeps orchestration independent of a particular
+toolchain while making the trusted boundary explicit.
