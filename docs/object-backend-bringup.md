@@ -12,7 +12,13 @@ exports, undefined symbols, relocation-section links, or relocation kinds do
 not satisfy the current milestone contract. Trusted shell imports and supported
 relocations must be allowlisted; hosted symbols are never accepted implicitly.
 
-`RunPipeline` executes the reference and candidate build commands without a
+`RunPipeline` requires one canonical linked-unit path and lowercase SHA-256.
+Both build commands must declare that exact input and digest and consume the
+path directly. The pipeline hashes the file again before either emitter runs,
+so a stale, substituted, or separately lowered reference input fails at plan
+validation rather than producing a misleading target comparison.
+
+The pipeline executes the reference and candidate build commands without a
 shell, validates both milestone objects before either link runs, links and runs
 the two artifacts, decodes their debugger memory dumps through the shared
 result ABI, and requires both the independently supplied profile/signature and
@@ -20,6 +26,13 @@ the completed-probe count to agree. Errors retain the reference/candidate side
 and the first failed build, object, link, run, decode, validation, or comparison
 step. A standalone-image milestone may omit relocatable objects; earlier
 milestones must supply them.
+
+For freestanding targets, a plan can also carry a board descriptor and ELF
+vector options. After both links and before either runner starts, the pipeline
+derives section placement and imports from each final ELF and applies the same
+flash, RAM, stack, vector, entry, and forbidden-import gate used by `rtgboard`.
+An invalid reference or candidate image therefore cannot reach a simulator or
+physical flasher.
 
 The C and candidate emitters from #19 provide the concrete build commands and
 the target configuration supplies linker, runner/debug-reader, object, image,
