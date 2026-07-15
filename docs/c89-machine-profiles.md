@@ -32,6 +32,14 @@ Readable helper names are macros over external symbols of five characters or
 fewer so linkers with six-character external-name significance cannot merge
 distinct helpers.
 
+`target.MangleC89Symbols` applies the same constraint to linked-unit symbols.
+It sorts canonical package-qualified names and assigns unique monocase names
+from the six-character `rg0000` namespace. Generated declarations therefore
+do not inherit long package paths or punctuation, and input traversal order
+cannot change the mapping. The emitter retains the canonical-to-C table for
+exports and diagnostics; a documented toolchain profile may select a wider
+significant-name limit.
+
 This establishes the machine-profile, compile-time-assumption, and defined
-integer-semantics layers of #19; unit-to-C operation emission remains the next
-layer.
+integer-semantics and symbol-policy layers of #19; unit-to-C operation emission
+remains the next layer.
