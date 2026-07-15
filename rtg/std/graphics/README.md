@@ -4,10 +4,11 @@
 baseline is intentionally small enough to map to modern OpenGL and a future
 Win98 GDI/DIB backend without changing application code.
 
-Darwin/arm64 is the first native target. It creates Cocoa windows through
-Objective-C runtime calls declared with `rtg:linkstatic`, creates a legacy
-OpenGL context, and presents the platform-neutral software surface with
-`glDrawPixels`. It uses no cgo or third-party library.
+Darwin/arm64 and Windows/amd64 are native targets. Darwin creates Cocoa windows
+through Objective-C runtime calls; Windows uses Unicode Win32 and WGL. Both
+backends declare their platform entry points with `rtg:linkstatic`, create a
+legacy OpenGL context, and present the platform-neutral software surface with
+`glDrawPixels`. They use no cgo or third-party library.
 
 ## Coordinate and pixel contract
 
@@ -51,11 +52,11 @@ or externally rasterized glyph runs.
 
 ## Windowing
 
-The Darwin backend implements:
+The native backends implement:
 
 - create, close, show, hide, title, client size, repaint requests and present;
 - top-down RGBA8 window capture, using `glReadPixels` from the displayed front
-  buffer on Darwin (physical pixels on high-DPI displays);
+  buffer (physical pixels on high-DPI Darwin displays);
 - dependency-free binary PPM export through `Image.EncodePPM`;
 - multiple simultaneous windows;
 - poll and blocking wait event loops;
@@ -65,14 +66,22 @@ The Darwin backend implements:
 - cursor selection;
 - one-shot timers;
 - UTF-8 clipboard text;
-- live-resize and backing-scale-aware OpenGL presentation with dirty-row uploads.
+- live resize and OpenGL presentation; Darwin additionally provides
+  backing-scale-aware dirty-row uploads.
+
+The Windows/amd64 implementation uses a `CS_OWNDC` Unicode window class, a
+legacy double-buffered WGL context, and the original OpenGL 1.1 exports from
+`opengl32.dll`. RTG owns the Win32 message pump and translates messages before
+passing unhandled work to `DefWindowProcW`, so no cgo-style Go callback bridge
+is required. Clipboard text uses `CF_UNICODETEXT`; public strings and text-input
+events remain UTF-8.
 
 Events and drawing coordinates are client-relative logical pixels. Wheel
 values are backend-independent scalar deltas rather than Win32 constants.
 
 The ordinary Go (`!rtg`) window implementation is deliberately headless; it
 exists to test portable rendering with the Go toolchain. Native windowing is
-currently supported only by RTG Darwin/arm64 builds.
+currently supported by RTG Darwin/arm64 and Windows/amd64 builds.
 
 ## Deliberate baseline exclusions
 

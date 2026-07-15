@@ -168,14 +168,18 @@ func cocoaString(text string) int {
 }
 
 func NewWindow(options WindowOptions) *Window {
+	clearLastWindowError()
 	if options.Width <= 0 || options.Height <= 0 {
+		setLastWindowError("window dimensions must be positive", 0)
 		return nil
 	}
 	if nsApplicationLoad() == 0 {
+		setLastWindowError("NSApplicationLoad failed", 0)
 		return nil
 	}
 	w := allocDarwinWindow()
 	if w == nil {
+		setLastWindowError("window allocation failed", 0)
 		return nil
 	}
 	w.width = options.Width
@@ -193,6 +197,7 @@ func NewWindow(options WindowOptions) *Window {
 	w.bottomUp = make([]byte, len(w.surface.Pixels))
 	w.app = objcMsg0(objcGetClass("NSApplication"), selector("sharedApplication"))
 	if w.app == 0 {
+		setLastWindowError("NSApplication sharedApplication failed", 0)
 		w.Close()
 		return nil
 	}
@@ -204,6 +209,7 @@ func NewWindow(options WindowOptions) *Window {
 	w.native = objcMsg0(objcGetClass("NSWindow"), selector("alloc"))
 	w.native = objcMsgRect(w.native, selector("initWithContentRect:styleMask:backing:defer:"), 100, 100, w.width, w.height, style, nsBackingStoreBuffered)
 	if w.native == 0 {
+		setLastWindowError("NSWindow initialization failed", 0)
 		w.Close()
 		return nil
 	}
@@ -223,6 +229,7 @@ func NewWindow(options WindowOptions) *Window {
 		objcMsg0(format, selector("release"))
 	}
 	if w.context == 0 {
+		setLastWindowError("NSOpenGLContext initialization failed", 0)
 		w.Close()
 		return nil
 	}

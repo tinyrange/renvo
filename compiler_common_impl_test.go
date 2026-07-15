@@ -120,14 +120,22 @@ func TestArenaSizeConfigurationIsBounded(t *testing.T) {
 
 	oldSize := rtgCompilerArenaSize
 	oldArch := rtgTargetArch
+	oldOS := rtgTargetOS
 	t.Cleanup(func() {
 		rtgCompilerArenaSize = oldSize
 		rtgTargetArch = oldArch
+		rtgTargetOS = oldOS
 	})
 	rtgCompilerArenaSize = 2048
 	rtgTargetArch = rtgArchAmd64
 	if got := rtgStringArenaSize(); got != 2048 {
 		t.Fatalf("configured arena size = %d, want 2048", got)
+	}
+	rtgCompilerArenaSize = 0
+	rtgTargetArch = rtgArch386
+	rtgTargetOS = rtgOSWindows
+	if got := rtgStringArenaSize(); got != 67108864 {
+		t.Fatalf("Windows/386 arena size = %d, want 67108864", got)
 	}
 }
 
@@ -607,8 +615,8 @@ func TestWindowsAmd64LinkStaticCallReservesAlignedShadowSpace(t *testing.T) {
 	var asm rtgAsm
 	rtgAsmInit(&asm)
 	rtgWinAmd64CallStaticImport(&asm, 0, 2)
-	// pop rcx; pop rdx; sub rsp,40
-	want := []byte{0x59, 0x5a, 0x48, 0x83, 0xec, 40}
+	// pop rcx; pop rdx; save rsp; align rsp; reserve shadow/save space.
+	want := []byte{0x59, 0x5a, 0x49, 0x89, 0xe2, 0x48, 0x83, 0xe4, 0xf0, 0x48, 0x83, 0xec, 48}
 	match := len(asm.code) >= len(want)
 	for i := 0; match && i < len(want); i++ {
 		match = asm.code[i] == want[i]
@@ -629,9 +637,11 @@ func TestWindowsAmd64LinkStaticCallAlignsStackArguments(t *testing.T) {
 			wordCount: 5,
 			want: []byte{
 				0x59, 0x5a, 0x41, 0x58, 0x41, 0x59,
-				0x48, 0x83, 0xec, 32,
-				0xff, 0x15, 0, 0, 0, 0,
-				0x48, 0x83, 0xc4, 40,
+				0x49, 0x89, 0xe2,
+				0x48, 0x83, 0xe4, 0xf0,
+				0x48, 0x83, 0xec, 48,
+				0x49, 0x8b, 0x42, 0,
+				0x48, 0x89, 0x44, 0x24, 32,
 			},
 		},
 		{
@@ -639,13 +649,11 @@ func TestWindowsAmd64LinkStaticCallAlignsStackArguments(t *testing.T) {
 			wordCount: 6,
 			want: []byte{
 				0x59, 0x5a, 0x41, 0x58, 0x41, 0x59,
-				0x48, 0x8b, 0x04, 0x24,
-				0x48, 0x89, 0x44, 0x24, 0xf8,
-				0x48, 0x8b, 0x44, 0x24, 0x08,
-				0x48, 0x89, 0x04, 0x24,
-				0x48, 0x83, 0xec, 40,
-				0xff, 0x15, 0, 0, 0, 0,
-				0x48, 0x83, 0xc4, 56,
+				0x49, 0x89, 0xe2,
+				0x48, 0x83, 0xe4, 0xf0,
+				0x48, 0x83, 0xec, 64,
+				0x49, 0x8b, 0x42, 0,
+				0x48, 0x89, 0x44, 0x24, 32,
 			},
 		},
 	}
@@ -654,8 +662,8 @@ func TestWindowsAmd64LinkStaticCallAlignsStackArguments(t *testing.T) {
 			var asm rtgAsm
 			rtgAsmInit(&asm)
 			rtgWinAmd64CallStaticImport(&asm, 0, test.wordCount)
-			if len(asm.code) != len(test.want) {
-				t.Fatalf("linkstatic call = % x, want % x", asm.code, test.want)
+			if len(asm.code) < len(test.want) {
+				t.Fatalf("linkstatic call length = %d, want at least %d", len(asm.code), len(test.want))
 			}
 			for i := 0; i < len(test.want); i++ {
 				if asm.code[i] != test.want[i] {
@@ -670,22 +678,42 @@ func TestWindowsAmd64LinkStaticCallAlignsTwelveWordImport(t *testing.T) {
 	var asm rtgAsm
 	rtgAsmInit(&asm)
 	rtgWinAmd64CallStaticImport(&asm, 0, 12)
-	if len(asm.code) != 98 {
-		t.Fatalf("12-word linkstatic call length = %d, code % x", len(asm.code), asm.code)
+	wantPrefix := []byte{
+		0x59, 0x5a, 0x41, 0x58, 0x41, 0x59,
+		0x49, 0x89, 0xe2,
+		0x48, 0x83, 0xe4, 0xf0,
+		0x48, 0x83, 0xec, 112,
+		0x49, 0x8b, 0x42, 0,
+		0x48, 0x89, 0x44, 0x24, 32,
 	}
-	// The eighth pending stack word moves from rsp+56 to rsp+48, proving that
-	// every argument was shifted and that argument 5 can occupy rsp+32 after
-	// the following 40-byte reservation.
-	wantLastMove := []byte{0x48, 0x8b, 0x44, 0x24, 56, 0x48, 0x89, 0x44, 0x24, 48}
-	for i := 0; i < len(wantLastMove); i++ {
-		if asm.code[74+i] != wantLastMove[i] {
-			t.Fatalf("12-word final shift = % x, want % x", asm.code[74:84], wantLastMove)
+	if len(asm.code) < len(wantPrefix) {
+		t.Fatalf("12-word linkstatic call length = %d, want at least %d", len(asm.code), len(wantPrefix))
+	}
+	for i := 0; i < len(wantPrefix); i++ {
+		if asm.code[i] != wantPrefix[i] {
+			t.Fatalf("12-word call prefix = % x, want % x", asm.code[:len(wantPrefix)], wantPrefix)
 		}
 	}
-	wantTail := []byte{0x48, 0x83, 0xec, 40, 0xff, 0x15, 0, 0, 0, 0, 0x48, 0x83, 0xc4, 104}
-	for i := 0; i < len(wantTail); i++ {
-		if asm.code[84+i] != wantTail[i] {
-			t.Fatalf("12-word call tail = % x, want % x", asm.code[84:], wantTail)
+	wantCleanup := []byte{
+		0x49, 0x89, 0xc2,
+		0x48, 0x8b, 0x44, 0x24, 96,
+		0x48, 0x89, 0xc4,
+		0x48, 0x83, 0xc4, 64,
+		0x4c, 0x89, 0xd0,
+	}
+	foundCleanup := false
+	for i := 0; i+len(wantCleanup) <= len(asm.code); i++ {
+		matched := true
+		for j := 0; j < len(wantCleanup); j++ {
+			if asm.code[i+j] != wantCleanup[j] {
+				matched = false
+			}
 		}
+		if matched {
+			foundCleanup = true
+		}
+	}
+	if !foundCleanup {
+		t.Fatalf("12-word linkstatic call missing dynamic cleanup: % x", asm.code)
 	}
 }

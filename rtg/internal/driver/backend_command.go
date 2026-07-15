@@ -15,7 +15,7 @@ type CommandBackend struct {
 	Env  []string
 }
 
-func (b CommandBackend) CompileUnit(unit []byte, target string, strip bool) BackendResult {
+func (b CommandBackend) CompileUnit(unit []byte, target string, strip bool, windowsGUI bool) BackendResult {
 	if b.Path == "" || target == "" || len(unit) == 0 {
 		return BackendResult{Diagnostic: Diagnostic{Phase: "backend", Code: "RTG-BACKEND-002", Message: "backend command is not configured"}}
 	}
@@ -24,6 +24,9 @@ func (b CommandBackend) CompileUnit(unit []byte, target string, strip bool) Back
 	args = append(args, "-t", target)
 	if strip {
 		args = append(args, "-s")
+	}
+	if windowsGUI {
+		args = append(args, "-windows-gui")
 	}
 	args = append(args, "-o", "-", "-")
 	cmd := exec.Command(b.Path, args...)

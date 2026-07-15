@@ -150,7 +150,7 @@ jobs:
       - name: Build, validate, and execute Windows targets
         env:
           RTG_WINDOWS_GDB: "1"
-        run: go test -count=1 -timeout 15m -run '^TestWindows(PEImages|TargetsEndToEnd)$' .
+        run: go test -count=1 -timeout 15m -run '^TestWindows(PEImages|TargetsEndToEnd|GraphicsEndToEnd)$' .
 
   package-tests:
     name: Package tests (${{ matrix.runner }})

@@ -78,6 +78,7 @@ func RtgCompileSourceToBytesStrip(source []byte, targetName string, stripSymbols
 		return nil, false
 	}
 	rtgSetStripSymbols(stripSymbols)
+	rtgCompilerWindowsSubsystem = 3
 	rtgSetTarget(target)
 	var prog rtgProgram
 	prog = rtgParseProgram(source)
@@ -94,6 +95,7 @@ func RtgCompileSourceToOutputStrip(source []byte, targetName string, outputPath 
 		return false
 	}
 	rtgSetStripSymbols(stripSymbols)
+	rtgCompilerWindowsSubsystem = 3
 	rtgSetTarget(target)
 	var prog rtgProgram
 	prog = rtgParseProgram(source)
@@ -117,11 +119,19 @@ func RtgCompileSourceToOutputStrip(source []byte, targetName string, outputPath 
 }
 
 func RtgCompileUnitToOutputStrip(unit []byte, targetName string, outputPath string, stripSymbols bool) bool {
+	return RtgCompileUnitToOutputStripWindowsGUI(unit, targetName, outputPath, stripSymbols, false)
+}
+
+func RtgCompileUnitToOutputStripWindowsGUI(unit []byte, targetName string, outputPath string, stripSymbols bool, windowsGUI bool) bool {
 	target := rtgParseTargetArg(targetName)
-	if target == 0 {
+	if target == 0 || windowsGUI && target != rtgTargetWindowsAmd64 && target != rtgTargetWindows386 {
 		return false
 	}
 	rtgSetStripSymbols(stripSymbols)
+	rtgCompilerWindowsSubsystem = 3
+	if windowsGUI {
+		rtgCompilerWindowsSubsystem = 2
+	}
 	rtgSetTarget(target)
 	prog, isUnit, ok := rtgDecodeUnitProgram(unit)
 	if !isUnit || !ok {

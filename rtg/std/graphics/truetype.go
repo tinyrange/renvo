@@ -178,10 +178,7 @@ func (font *trueTypeInfo) GetGlyphHMetrics(glyphIndex int) (int, int) {
 }
 
 func (font *trueTypeInfo) GetFontBoundingBox() (int, int, int, int) {
-	return int(int16(u16(font.data, font.head+36))),
-		int(int16(u16(font.data, font.head+38))),
-		int(int16(u16(font.data, font.head+40))),
-		int(int16(u16(font.data, font.head+42)))
+	return int(int16(u16(font.data, font.head+36))), int(int16(u16(font.data, font.head+38))), int(int16(u16(font.data, font.head+40))), int(int16(u16(font.data, font.head+42)))
 }
 
 func (font *trueTypeInfo) GetCodepointBitmapBox(codepoint int, scaleX, scaleY float64) (int, int, int, int) {
