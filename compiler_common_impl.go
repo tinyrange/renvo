@@ -3256,11 +3256,20 @@ func rtgParsePrimaryExpr(ep *rtgExprParse) int {
 			return rtgAddExpr(ep, rtgExprIdent, startTok, 0, 0, 0, 0, int(rtgTokStart(ep.prog, startTok)), nameEnd)
 		}
 	}
-	if rtgTokCharIs(ep.prog, ep.pos, '[') && rtgTokCharIs(ep.prog, ep.pos+1, ']') && rtgTokIsKind(ep.prog, ep.pos+2, rtgTokIdent) {
+	if rtgTokCharIs(ep.prog, ep.pos, '[') && rtgTokCharIs(ep.prog, ep.pos+1, ']') {
 		startTok := ep.pos
-		nameEnd := int(rtgTokEnd(ep.prog, ep.pos+2))
-		ep.pos += 3
-		return rtgAddExpr(ep, rtgExprIdent, startTok, 0, 0, 0, 0, int(rtgTokStart(ep.prog, startTok)), nameEnd)
+		typeEnd := ep.pos
+		for rtgTokCharIs(ep.prog, typeEnd, '[') && rtgTokCharIs(ep.prog, typeEnd+1, ']') {
+			typeEnd += 2
+		}
+		if rtgTokCharIs(ep.prog, typeEnd, '*') {
+			typeEnd++
+		}
+		if rtgTokIsKind(ep.prog, typeEnd, rtgTokIdent) {
+			nameEnd := int(rtgTokEnd(ep.prog, typeEnd))
+			ep.pos = typeEnd + 1
+			return rtgAddExpr(ep, rtgExprIdent, startTok, 0, 0, 0, 0, int(rtgTokStart(ep.prog, startTok)), nameEnd)
+		}
 	}
 	if rtgTokCharIs(ep.prog, ep.pos, '[') && rtgTokCharIs(ep.prog, ep.pos+1, ']') && rtgTokCharIs(ep.prog, ep.pos+2, '*') && rtgTokIsKind(ep.prog, ep.pos+3, rtgTokIdent) {
 		startTok := ep.pos
@@ -7822,6 +7831,28 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 					rtgAsmPopStoreStringMemSecondary(a, 0)
 					return true
 				}
+				if elemType.kind == rtgTypeSlice {
+					indexOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
+					ptrOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
+					if !rtgEmitIntExpr(g, &lhs, lhsRoot.right) {
+						return false
+					}
+					rtgAsmStorePrimaryStack(a, indexOffset)
+					if !rtgEmitSliceBasePtrLenTokens(g, p, stmt.startTok, baseEnd, &baseEp, baseIndex) {
+						return false
+					}
+					rtgAsmStorePrimaryStack(a, ptrOffset)
+					if !rtgEmitSliceValueRegs(g, &rhs, rhsIndex) {
+						return false
+					}
+					rtgAsmPushSliceRegs(a)
+					rtgAsmLoadSecondaryStack(a, ptrOffset)
+					rtgAsmLoadTertiaryStack(a, indexOffset)
+					rtgAsmMulTertiaryImm(a, rtgTypeSize(meta, sliceType.elem))
+					rtgAsmAddSecondaryTertiary(a)
+					rtgAsmPopStoreSliceMemSecondary(a, 0)
+					return true
+				}
 				if elemType.kind == rtgTypeStruct {
 					indexOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
 					ptrOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
@@ -9581,6 +9612,22 @@ func rtgEmitSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		rtgAsmLoadPrimaryStack(a, g.locals[localIndex].offset)
 		rtgAsmLoadSecondaryStack(a, g.locals[localIndex].offset-8)
 		rtgAsmLoadTertiaryStack(a, g.locals[localIndex].offset-16)
+		return true
+	}
+	if e.kind == rtgExprIndex {
+		valueType := rtgInferParsedExprType(g, ep, idx)
+		if !rtgTypeIsSlice(meta, valueType) || !rtgEmitIndexAddressPrimary(g, ep, idx) {
+			return false
+		}
+		rtgAsmCopyPrimaryToSecondary(a)
+		rtgAsmLoadPrimaryMemSecondaryDisp(a, 0)
+		rtgAsmPushPrimary(a)
+		rtgAsmLoadPrimaryMemSecondaryDisp(a, 8)
+		rtgAsmPushPrimary(a)
+		rtgAsmLoadPrimaryMemSecondaryDisp(a, 16)
+		rtgAsmCopyPrimaryToTertiary(a)
+		rtgAsmPopSecondary(a)
+		rtgAsmPopPrimary(a)
 		return true
 	}
 	if e.kind == rtgExprUnary && rtgTokCharIs(g.prog, e.tok, '*') {
