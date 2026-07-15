@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"j5.nz/rtg/omnibus/resultabi"
@@ -36,15 +37,13 @@ func TestRunPipelineStopsAtCandidateObjectContract(t *testing.T) {
 	compiler := cCompilerForPipelineTest(t)
 	dir := t.TempDir()
 	referenceSource := filepath.Join(dir, "reference.c")
-	candidateSource := filepath.Join(dir, "candidate.c")
 	writePipelineCSource(t, referenceSource, "rtg_stage0")
-	writePipelineCSource(t, candidateSource, "wrong_export")
 	profile := uint32(0x10001)
 	signature := writePassingPipelineResult(t, filepath.Join(dir, "reference.bin"), profile)
 	writePassingPipelineResult(t, filepath.Join(dir, "candidate.bin"), profile)
 
 	plan := testPipelinePlan(compiler, dir, referenceSource, signature, profile)
-	plan.CandidateBuild.Args[1] = candidateSource
+	plan.CandidateBuild.Args = []string{"-std=c89", "-Drtg_stage0=wrong_export", referenceSource, "-c", "-o", plan.Candidate.Object}
 	_, err := RunPipeline(plan, ExecCommandRunner{})
 	if err == nil {
 		t.Fatal("pipeline accepted candidate without milestone export")
@@ -58,16 +57,50 @@ func TestRunPipelineStopsAtCandidateObjectContract(t *testing.T) {
 	}
 }
 
+func TestPipelineRejectsDifferentOrChangedCanonicalUnits(t *testing.T) {
+	compiler := cCompilerForPipelineTest(t)
+	dir := t.TempDir()
+	source := filepath.Join(dir, "omnibus.c")
+	writePipelineCSource(t, source, "rtg_stage0")
+	digest, err := CanonicalInputSHA256(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := uint32(0x10001)
+	signature := writePassingPipelineResult(t, filepath.Join(dir, "reference.bin"), profile)
+	writePassingPipelineResult(t, filepath.Join(dir, "candidate.bin"), profile)
+
+	plan := testPipelinePlan(compiler, dir, source, signature, profile)
+	plan.CandidateBuild.CanonicalInput = filepath.Join(dir, "different.rtgu")
+	if _, err := RunPipeline(plan, ExecCommandRunner{}); err == nil || !strings.Contains(err.Error(), "candidate build") {
+		t.Fatalf("different candidate input error = %v", err)
+	}
+
+	plan = testPipelinePlan(compiler, dir, source, signature, profile)
+	if err := os.WriteFile(source, []byte("changed after planning\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RunPipeline(plan, ExecCommandRunner{}); err == nil || !strings.Contains(err.Error(), digest) {
+		t.Fatalf("changed canonical input error = %v", err)
+	}
+}
+
 func testPipelinePlan(compiler string, dir string, source string, signature uint64, profile uint32) PipelinePlan {
 	referenceObject := filepath.Join(dir, "reference.o")
 	candidateObject := filepath.Join(dir, "candidate.o")
 	referenceImage := filepath.Join(dir, "reference")
 	candidateImage := filepath.Join(dir, "candidate")
+	digest, err := CanonicalInputSHA256(source)
+	if err != nil {
+		panic(err)
+	}
 	return PipelinePlan{
 		Toolchain:         Toolchain{CCompiler: compiler, Linker: compiler, ObjectFormat: "elf", ABI: "host-test", TargetShell: "host-test"},
 		Stage:             StandardStages("rtg")[0],
-		ReferenceBuild:    Command{Path: compiler, Args: []string{"-std=c89", source, "-c", "-o", referenceObject}},
-		CandidateBuild:    Command{Path: compiler, Args: []string{"-std=c89", source, "-c", "-o", candidateObject}},
+		CanonicalInput:    source,
+		CanonicalSHA256:   digest,
+		ReferenceBuild:    Command{Path: compiler, Args: []string{"-std=c89", source, "-c", "-o", referenceObject}, CanonicalInput: source, CanonicalSHA256: digest},
+		CandidateBuild:    Command{Path: compiler, Args: []string{"-std=c89", source, "-c", "-o", candidateObject}, CanonicalInput: source, CanonicalSHA256: digest},
 		ReferenceLink:     Command{Path: compiler, Args: []string{referenceObject, "-o", referenceImage}},
 		CandidateLink:     Command{Path: compiler, Args: []string{candidateObject, "-o", candidateImage}},
 		Reference:         PipelineArtifact{Object: referenceObject, Image: referenceImage, MemoryDump: filepath.Join(dir, "reference.bin"), MemoryAtResultSymbol: true},

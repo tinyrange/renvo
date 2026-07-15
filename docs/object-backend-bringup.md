@@ -12,7 +12,13 @@ exports, undefined symbols, relocation-section links, or relocation kinds do
 not satisfy the current milestone contract. Trusted shell imports and supported
 relocations must be allowlisted; hosted symbols are never accepted implicitly.
 
-`RunPipeline` executes the reference and candidate build commands without a
+`RunPipeline` requires one canonical linked-unit path and lowercase SHA-256.
+Both build commands must declare that exact input and digest and consume the
+path directly. The pipeline hashes the file again before either emitter runs,
+so a stale, substituted, or separately lowered reference input fails at plan
+validation rather than producing a misleading target comparison.
+
+The pipeline executes the reference and candidate build commands without a
 shell, validates both milestone objects before either link runs, links and runs
 the two artifacts, decodes their debugger memory dumps through the shared
 result ABI, and requires both the independently supplied profile/signature and
