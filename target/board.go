@@ -41,21 +41,21 @@ type Section struct {
 	Flags       SectionFlags
 }
 
-type Board struct {
-	Name             string
-	ISA              string
-	ABI              string
-	ObjectFormat     string
-	Regions          []Region
-	VectorAddress    uint64
-	StackTop         uint64
-	DefaultStackSize uint64
-	StackGuardSize   uint64
-	AllowedImports   []string
+// ArtifactFormat is read from the final linked image. It is deliberately
+// separate from ObjectFormat: the latter is an expectation, while this is
+// evidence supplied by the artifact being validated.
+type ArtifactFormat struct {
+	Container   string
+	AddressBits int
+	Endian      Endian
+	MachineID   uint16
+	Flags       uint32
 }
 
 type Artifact struct {
+	Format        ArtifactFormat
 	Entry         uint64
+	VectorSymbol  string
 	VectorAddress uint64
 	Sections      []Section
 	Imports       []string
@@ -79,6 +79,7 @@ type ViolationCode string
 
 const (
 	ViolationBoard            ViolationCode = "invalid-board"
+	ViolationObjectTarget     ViolationCode = "object-target-mismatch"
 	ViolationSectionRegion    ViolationCode = "section-outside-region"
 	ViolationSectionOverlap   ViolationCode = "section-overlap"
 	ViolationReservedOverlap  ViolationCode = "reserved-overlap"
@@ -88,6 +89,7 @@ const (
 	ViolationStackOverlap     ViolationCode = "stack-overlap"
 	ViolationEntry            ViolationCode = "bad-entry"
 	ViolationVector           ViolationCode = "bad-vector"
+	ViolationRuntime          ViolationCode = "unsupported-runtime"
 	ViolationUnresolvedImport ViolationCode = "forbidden-import"
 )
 
@@ -113,31 +115,54 @@ func (v Validation) OK() bool {
 	return len(v.Violations) == 0
 }
 
-func Validate(board Board, artifact Artifact) Validation {
+func Validate(composition Composition, artifact Artifact) Validation {
 	var result Validation
-	flash, ram, boardViolations := validateBoard(board)
+	board := composition.Board
+	flash, ram, boardViolations := validateComposition(composition)
 	result.Violations = append(result.Violations, boardViolations...)
+	if !artifactMatchesObjectTarget(composition.Object, artifact.Format) {
+		result.Violations = append(result.Violations, Violation{
+			Code: ViolationObjectTarget,
+			Detail: fmt.Sprintf("artifact is %s%d/%s machine %#x flags %#x; want %s%d/%s machine %#x flags %#x/%#x",
+				artifact.Format.Container, artifact.Format.AddressBits, artifact.Format.Endian, artifact.Format.MachineID, artifact.Format.Flags,
+				composition.Object.Format.Container, composition.Object.Format.AddressBits, composition.Object.Format.Endian,
+				composition.Object.Format.MachineID, composition.Object.Format.FlagsValue, composition.Object.Format.FlagsMask),
+		})
+	}
 	var flashCapacityOverflow bool
 	var ramCapacityOverflow bool
-	result.Usage.FlashCapacity, flashCapacityOverflow = regionCapacity(flash)
-	result.Usage.RAMCapacity, ramCapacityOverflow = regionCapacity(ram)
+	result.Usage.FlashCapacity, flashCapacityOverflow = usableRegionCapacity(flash, board.Regions)
+	result.Usage.RAMCapacity, ramCapacityOverflow = usableRegionCapacity(ram, board.Regions)
 	if flashCapacityOverflow || ramCapacityOverflow {
 		result.Violations = append(result.Violations, Violation{Code: ViolationBoard, Detail: "aggregate memory-region capacity overflows the address space"})
 	}
 
 	stackSize := artifact.StackSize
 	if stackSize == 0 {
-		stackSize = board.DefaultStackSize
+		stackSize = board.Stack.DefaultSize
 	}
 	result.Usage.HeapReserved = artifact.HeapSize
+	if artifact.HeapSize != 0 && board.Runtime.Heap.Model == HeapNone {
+		result.Violations = append(result.Violations, Violation{Code: ViolationRuntime, Subject: "heap", Detail: "artifact reserves a heap that the board runtime does not supply"})
+	}
 	result.Usage.StackReserved = stackSize
-	result.Usage.GuardReserved = board.StackGuardSize
+	result.Usage.GuardReserved = board.Stack.GuardSize
 
-	stackReservation, stackOverflow := saturatingAdd(stackSize, board.StackGuardSize)
-	stackStart := uint64(0)
-	stackValid := !stackOverflow && stackReservation <= board.StackTop
+	stackStart, stackReservation, stackValid := stackRange(board.Stack, stackSize)
+	if !aligned(stackSize, board.Stack.Alignment) {
+		stackValid = false
+		result.Violations = append(result.Violations, Violation{Code: ViolationStackOverlap, Detail: fmt.Sprintf("stack size %d does not satisfy %d-byte alignment", stackSize, board.Stack.Alignment)})
+	}
+	if stackValid && !containedByRegions(ram, stackStart, stackReservation) {
+		stackValid = false
+		result.Violations = append(result.Violations, Violation{Code: ViolationStackOverlap, Detail: "configured stack and guard are not contained by one RAM region"})
+	}
 	if stackValid {
-		stackStart = board.StackTop - stackReservation
+		for _, region := range board.Regions {
+			if region.Kind == RegionReserved && rangesOverlap(stackStart, stackReservation, region.Start, region.Size) {
+				result.Violations = append(result.Violations, Violation{Code: ViolationStackOverlap, Subject: region.Name, Detail: "reserved region overlaps configured stack or guard"})
+			}
+		}
 	}
 	flashUsageOverflow := false
 	ramUsageOverflow := false
@@ -197,26 +222,27 @@ func Validate(board Board, artifact Artifact) Validation {
 		result.Usage.RAMFree = result.Usage.RAMCapacity - ramNeed
 	}
 
-	if artifact.VectorAddress != board.VectorAddress || !addressInAllocatedSection(artifact.Sections, artifact.VectorAddress, SectionExec) {
-		result.Violations = append(result.Violations, Violation{Code: ViolationVector, Detail: fmt.Sprintf("vector address %#x; want %#x in an executable section", artifact.VectorAddress, board.VectorAddress)})
+	if artifact.VectorSymbol != board.Startup.VectorSymbol || artifact.VectorAddress != board.Startup.VectorAddress || !aligned(artifact.VectorAddress, board.Startup.VectorAlignment) || !addressInAllocatedSection(artifact.Sections, artifact.VectorAddress, SectionExec) {
+		result.Violations = append(result.Violations, Violation{Code: ViolationVector, Detail: fmt.Sprintf("vector %q at %#x; want %q at %#x with %d-byte alignment in an executable section", artifact.VectorSymbol, artifact.VectorAddress, board.Startup.VectorSymbol, board.Startup.VectorAddress, board.Startup.VectorAlignment)})
 	}
-	if !addressInAllocatedSection(artifact.Sections, artifact.Entry, SectionExec) {
-		result.Violations = append(result.Violations, Violation{Code: ViolationEntry, Detail: fmt.Sprintf("entry %#x is not in an executable section", artifact.Entry)})
+	if !aligned(artifact.Entry, board.Startup.EntryAlignment) || !addressInAllocatedSection(artifact.Sections, artifact.Entry, SectionExec) {
+		result.Violations = append(result.Violations, Violation{Code: ViolationEntry, Detail: fmt.Sprintf("entry %#x is not %d-byte aligned in an executable section", artifact.Entry, board.Startup.EntryAlignment)})
 	}
 	for _, name := range artifact.Imports {
-		if !stringInList(board.AllowedImports, name) {
+		if !stringInList(board.Runtime.ProvidedImports, name) {
 			result.Violations = append(result.Violations, Violation{Code: ViolationUnresolvedImport, Subject: name, Detail: "not provided by the freestanding runtime contract"})
 		}
 	}
 	return result
 }
 
-func validateBoard(board Board) ([]Region, []Region, []Violation) {
+func validateComposition(composition Composition) ([]Region, []Region, []Violation) {
+	board := composition.Board
 	var flash []Region
 	var ram []Region
 	var violations []Violation
-	if board.Name == "" || board.ISA == "" || board.ABI == "" || board.ObjectFormat == "" {
-		violations = append(violations, Violation{Code: ViolationBoard, Detail: "name, ISA, ABI, and object format are required"})
+	if err := validateCompositionContract(composition); err != nil {
+		violations = append(violations, Violation{Code: ViolationBoard, Detail: err.Error()})
 	}
 	for i, region := range board.Regions {
 		if _, valid := checkedEnd(region.Start, region.Size); region.Name == "" || !valid {
@@ -234,24 +260,99 @@ func validateBoard(board Board) ([]Region, []Region, []Violation) {
 			if region.Kind != RegionReserved && other.Kind != RegionReserved && rangesOverlap(region.Start, region.Size, other.Start, other.Size) {
 				violations = append(violations, Violation{Code: ViolationBoard, Subject: region.Name, Detail: "overlaps board region " + other.Name})
 			}
+			if region.Kind == RegionReserved && other.Kind == RegionReserved && rangesOverlap(region.Start, region.Size, other.Start, other.Size) {
+				violations = append(violations, Violation{Code: ViolationBoard, Subject: region.Name, Detail: "overlaps reserved region " + other.Name})
+			}
 		}
 	}
 	if len(flash) == 0 || len(ram) == 0 {
 		violations = append(violations, Violation{Code: ViolationBoard, Detail: "at least one flash and one RAM region are required"})
 	}
-	if board.StackTop == 0 || !containedByRegions(ram, board.StackTop-1, 1) {
-		violations = append(violations, Violation{Code: ViolationBoard, Detail: "stack top is outside RAM"})
+	if start, size, ok := stackRange(board.Stack, board.Stack.DefaultSize); !ok || !containedByRegions(ram, start, size) {
+		violations = append(violations, Violation{Code: ViolationBoard, Detail: "default stack and guard are not contained by one RAM region"})
+	} else {
+		for _, region := range board.Regions {
+			if region.Kind == RegionReserved && rangesOverlap(start, size, region.Start, region.Size) {
+				violations = append(violations, Violation{Code: ViolationBoard, Subject: region.Name, Detail: "reserved region overlaps default stack or guard"})
+			}
+		}
 	}
 	return flash, ram, violations
 }
 
-func regionCapacity(regions []Region) (uint64, bool) {
+func artifactMatchesObjectTarget(target ObjectTarget, artifact ArtifactFormat) bool {
+	format := target.Format
+	return artifact.Container == format.Container &&
+		artifact.AddressBits == format.AddressBits &&
+		artifact.Endian == format.Endian &&
+		artifact.MachineID == format.MachineID &&
+		artifact.Flags&format.FlagsMask == format.FlagsValue
+}
+
+func stackRange(stack StackContract, stackSize uint64) (uint64, uint64, bool) {
+	reservation, overflow := saturatingAdd(stackSize, stack.GuardSize)
+	if overflow || reservation == 0 {
+		return 0, reservation, false
+	}
+	if stack.Direction == StackGrowsDown {
+		if reservation > stack.InitialPointer {
+			return 0, reservation, false
+		}
+		return stack.InitialPointer - reservation, reservation, true
+	}
+	if stack.Direction == StackGrowsUp {
+		if _, valid := checkedEnd(stack.InitialPointer, reservation); !valid {
+			return 0, reservation, false
+		}
+		return stack.InitialPointer, reservation, true
+	}
+	return 0, reservation, false
+}
+
+func aligned(value uint64, alignment uint64) bool {
+	return alignment != 0 && value%alignment == 0
+}
+
+func usableRegionCapacity(regions []Region, memoryMap []Region) (uint64, bool) {
 	var total uint64
 	overflow := false
 	for _, region := range regions {
-		total, overflow = addWithOverflow(total, region.Size, overflow)
+		usable := region.Size
+		for _, reserved := range memoryMap {
+			if reserved.Kind != RegionReserved {
+				continue
+			}
+			overlap, valid := rangeIntersectionSize(region.Start, region.Size, reserved.Start, reserved.Size)
+			if !valid || overlap > usable {
+				overflow = true
+				usable = 0
+				continue
+			}
+			usable -= overlap
+		}
+		total, overflow = addWithOverflow(total, usable, overflow)
 	}
 	return total, overflow
+}
+
+func rangeIntersectionSize(leftStart uint64, leftSize uint64, rightStart uint64, rightSize uint64) (uint64, bool) {
+	leftEnd, leftValid := checkedEnd(leftStart, leftSize)
+	rightEnd, rightValid := checkedEnd(rightStart, rightSize)
+	if !leftValid || !rightValid {
+		return 0, false
+	}
+	start := leftStart
+	if rightStart > start {
+		start = rightStart
+	}
+	end := leftEnd
+	if rightEnd < end {
+		end = rightEnd
+	}
+	if start >= end {
+		return 0, true
+	}
+	return end - start, true
 }
 
 func containedByKind(regions []Region, kind RegionKind, start uint64, size uint64) bool {

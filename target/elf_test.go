@@ -19,6 +19,9 @@ func TestArtifactFromLinkedELF(t *testing.T) {
 	if artifact.Entry == 0 || artifact.VectorAddress == 0 || artifact.HeapSize != 128 || artifact.StackSize != 512 {
 		t.Fatalf("artifact header = %+v", artifact)
 	}
+	if artifact.Format.Container != "elf" || artifact.Format.MachineID == 0 || (artifact.Format.AddressBits != 32 && artifact.Format.AddressBits != 64) {
+		t.Fatalf("artifact format = %+v", artifact.Format)
+	}
 	var executable bool
 	var bssWithoutLoad bool
 	for _, section := range artifact.Sections {
@@ -64,6 +67,18 @@ func TestArtifactFromELFRejectsObjectAndMissingVector(t *testing.T) {
 	image := compileLinkedELFFixture(t)
 	if _, err := ArtifactFromELF(image, ELFArtifactOptions{VectorSymbol: "missing"}); err == nil || !strings.Contains(err.Error(), "not defined") {
 		t.Fatalf("missing vector error = %v", err)
+	}
+}
+
+func TestHostELFCannotMasqueradeAsCH32Firmware(t *testing.T) {
+	image := compileLinkedELFFixture(t)
+	artifact, err := ArtifactFromELF(image, ELFArtifactOptions{VectorSymbol: "rtg_vectors"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	validation := Validate(CH32V003(), artifact)
+	if !hasViolation(validation, ViolationObjectTarget) {
+		t.Fatalf("host ELF target violations = %v; format = %+v", validation.Violations, artifact.Format)
 	}
 }
 

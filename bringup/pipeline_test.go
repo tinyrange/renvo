@@ -96,8 +96,10 @@ func TestPipelineRejectsBoardImageBeforeRunningTarget(t *testing.T) {
 	writePassingPipelineResult(t, filepath.Join(dir, "candidate.bin"), profile)
 
 	plan := testPipelinePlan(compiler, dir, source, signature, profile)
-	plan.Board = target.CH32V003()
-	plan.BoardELF = target.ELFArtifactOptions{VectorSymbol: "main"}
+	plan.Composition = target.CH32V003()
+	plan.Toolchain.ObjectFormat = plan.Composition.Object.Format.Name
+	plan.Toolchain.ABI = plan.Composition.Object.ABI
+	plan.BoardELF = target.ELFArtifactOptions{VectorSymbol: "rtg_vectors"}
 	plan.ReferenceRun = Command{Path: "reference-run-must-not-start"}
 	plan.CandidateRun = Command{Path: "candidate-run-must-not-start"}
 	runner := &recordingRunner{}
@@ -113,6 +115,36 @@ func TestPipelineRejectsBoardImageBeforeRunningTarget(t *testing.T) {
 		if strings.Contains(command.Path, "must-not-start") {
 			t.Fatalf("target run started before board validation: %#v", command)
 		}
+	}
+}
+
+func TestPipelineRejectsToolchainCompositionDrift(t *testing.T) {
+	compiler := cCompilerForPipelineTest(t)
+	dir := t.TempDir()
+	source := filepath.Join(dir, "omnibus.c")
+	writePipelineCSource(t, source, "rtg_stage0")
+	profile := uint32(0x10001)
+	signature := writePassingPipelineResult(t, filepath.Join(dir, "reference.bin"), profile)
+	writePassingPipelineResult(t, filepath.Join(dir, "candidate.bin"), profile)
+
+	plan := testPipelinePlan(compiler, dir, source, signature, profile)
+	plan.Composition = target.CH32V003()
+	plan.BoardELF = target.ELFArtifactOptions{VectorSymbol: "rtg_vectors"}
+	if _, err := RunPipeline(plan, nil); err == nil || !strings.Contains(err.Error(), "does not match composition") {
+		t.Fatalf("toolchain/composition drift error = %v", err)
+	}
+
+	plan.Toolchain.ObjectFormat = plan.Composition.Object.Format.Name
+	plan.Toolchain.ABI = plan.Composition.Object.ABI
+	plan.BoardELF.VectorSymbol = "different_vectors"
+	if _, err := RunPipeline(plan, nil); err == nil || !strings.Contains(err.Error(), "vector symbol") {
+		t.Fatalf("vector/composition drift error = %v", err)
+	}
+
+	plan.BoardELF.VectorSymbol = plan.Composition.Board.Startup.VectorSymbol
+	plan.ResultSymbol = "different_result"
+	if _, err := RunPipeline(plan, nil); err == nil || !strings.Contains(err.Error(), "result symbol") {
+		t.Fatalf("result/composition drift error = %v", err)
 	}
 }
 
@@ -164,7 +196,7 @@ func cCompilerForPipelineTest(t *testing.T) string {
 
 func writePipelineCSource(t *testing.T, path string, export string) {
 	t.Helper()
-	source := "unsigned char rtgres[64];\nunsigned long " + export + "(void) { return 37UL; }\nint main(void) { return 0; }\n"
+	source := "unsigned char rtgres[64];\nunsigned long rtg_vectors(void) { return 0UL; }\nunsigned long " + export + "(void) { return 37UL; }\nint main(void) { return 0; }\n"
 	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
