@@ -38,6 +38,17 @@ func RunRTGCommand(args []string, env []string) int {
 	target := built.Options.Target
 	output := built.Options.Output
 	strip := built.Options.Strip
+	if built.Options.EmitUnit {
+		if output == "-" {
+			print(string(unit))
+			return 0
+		}
+		if os.WriteFile(output, unit, 0644) != nil {
+			printRTGDiagnostic(Diagnostic{Phase: "unit", Code: "RTG-UNIT-002", Message: "failed to write linked unit"})
+			return 1
+		}
+		return 0
+	}
 	persistMark := 0
 	if resetArena {
 		persistMark = arena.PersistMark()

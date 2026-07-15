@@ -61,7 +61,8 @@ func RunCommand(args []string, env []string, backend Backend) HostResult {
 }
 
 func CompileAndWriteWithEnv(args []string, env []string, backend Backend) HostResult {
-	if backend == nil {
+	options := ParseOptions(args)
+	if backend == nil && options.Ok && !options.EmitUnit {
 		commandBackend, ok := CommandBackendFromEnv(env)
 		if !ok {
 			return hostFail(HostResult{}, HostErrBackend, "")
@@ -124,10 +125,14 @@ func compileAndWrite(args []string, stdRoot string, moduleCache string, backend 
 		return hostFail(result, HostErrCompile, "")
 	}
 	output := compiled.Build.Options.Output
+	mode := os.FileMode(0o755)
+	if compiled.Build.Options.EmitUnit {
+		mode = 0o644
+	}
 	if output == "-" {
 		_, err = os.Stdout.Write(compiled.Binary)
 	} else {
-		err = os.WriteFile(output, compiled.Binary, 0o755)
+		err = os.WriteFile(output, compiled.Binary, mode)
 	}
 	if err != nil {
 		return hostFail(result, HostErrWrite, output)

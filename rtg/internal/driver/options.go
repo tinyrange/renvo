@@ -14,13 +14,14 @@ const (
 
 const DefaultTarget = "linux/amd64"
 
-const HelpText = "Usage: rtg -o <file> [-t <target>] [-tags <list>] [-s] <package>\nTargets:\n  linux/amd64 linux/386 linux/aarch64 linux/arm\n  windows/amd64 windows/386 darwin/arm64 wasi/wasm32\n"
+const HelpText = "Usage: rtg -o <file> [-t <target>] [-tags <list>] [-s] [-emit-unit] <package>\nOptions:\n  -emit-unit  write the canonical linked RTGU unit without invoking a backend\nTargets:\n  linux/amd64 linux/386 linux/aarch64 linux/arm\n  windows/amd64 windows/386 darwin/arm64 wasi/wasm32\n"
 
 type Options struct {
 	Target   string
 	Output   string
 	Package  string
 	Strip    bool
+	EmitUnit bool
 	Tags     []string
 	Ok       bool
 	Error    int
@@ -44,6 +45,11 @@ func ParseOptions(args []string) Options {
 		arg := args[i]
 		if arg == "-s" {
 			options.Strip = true
+			i++
+			continue
+		}
+		if arg == "-emit-unit" {
+			options.EmitUnit = true
 			i++
 			continue
 		}

@@ -55,6 +55,10 @@ func CompileFromFSWithModuleCache(args []string, workDir string, stdRoot string,
 }
 
 func compileBuiltUnit(result CompileResult, built BuildResult, backend Backend) CompileResult {
+	if built.Options.EmitUnit {
+		result.Binary = built.Unit
+		return result
+	}
 	if backend == nil {
 		return compileFail(result, CompileErrBackend)
 	}

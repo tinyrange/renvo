@@ -64,6 +64,13 @@ func TestParseOptionsBuildTags(t *testing.T) {
 	}
 }
 
+func TestParseOptionsEmitUnit(t *testing.T) {
+	options := ParseOptions([]string{"-emit-unit", "-o", "program.rtgu", "./cmd/app"})
+	if !options.Ok || !options.EmitUnit || options.Output != "program.rtgu" {
+		t.Fatalf("emit-unit options = %#v", options)
+	}
+}
+
 func TestParseOptionsRejectsInvalidInputs(t *testing.T) {
 	tests := []struct {
 		name string

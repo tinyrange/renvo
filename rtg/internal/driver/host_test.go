@@ -3,6 +3,7 @@
 package driver
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -82,6 +83,41 @@ func TestCompileAndWrite(t *testing.T) {
 	}
 	if info.Mode().Perm()&0o111 == 0 {
 		t.Fatalf("output mode = %v, want executable bit", info.Mode().Perm())
+	}
+}
+
+func TestCompileAndWriteEmitsUnitWithoutBackend(t *testing.T) {
+	dir := writeHostCase(t)
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(oldwd); err != nil {
+			t.Fatalf("restore Chdir failed: %v", err)
+		}
+	}()
+
+	result := CompileAndWriteWithEnv([]string{"-emit-unit", "-o", "program.rtgu", "./cmd/app"}, nil, nil)
+	if !result.Ok {
+		t.Fatalf("unit emission failed: %#v", result)
+	}
+	data, err := os.ReadFile("program.rtgu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(data, result.Compile.Build.Unit) || !bytes.HasPrefix(data, []byte("RTGU")) {
+		t.Fatalf("unit output does not match the linked unit: %x", data)
+	}
+	info, err := os.Stat("program.rtgu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Fatalf("unit output mode = %v, want 0644", info.Mode().Perm())
 	}
 }
 
