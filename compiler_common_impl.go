@@ -100,9 +100,27 @@ type rtgTargetProfile struct {
 	floatModel      int
 }
 
+// The target IDs are dense. Keep the core identity fields in compact tables so
+// profile construction and active compiler state consume the same source of
+// truth without pulling the full machine-profile builder into every compiler.
+const rtgTargetOSTable = "\x00\x01\x01\x01\x01\x02\x02\x04\x03"
+const rtgTargetArchTable = "\x00\x01\x02\x03\x04\x01\x02\x05\x03"
+const rtgTargetIntBitsTable = "\x00\x40\x20\x40\x20\x40\x20\x20\x40"
+
 func rtgProfileForTarget(target int) (rtgTargetProfile, bool) {
 	var p rtgTargetProfile
+	if target < rtgTargetLinuxAmd64 || target > rtgTargetDarwinArm64 {
+		return p, false
+	}
 	p.target = target
+	p.os = int(rtgTargetOSTable[target])
+	p.arch = int(rtgTargetArchTable[target])
+	p.intBits = int(rtgTargetIntBitsTable[target])
+	p.pointerBits = p.intBits
+	p.maxAlign = p.intBits / 8
+	if target == rtgTargetWasiWasm32 {
+		p.maxAlign = 8
+	}
 	p.charBits = 8
 	p.endian = rtgEndianLittle
 	p.backendSlotSize = rtgBackendValueSlotSize
@@ -112,44 +130,6 @@ func rtgProfileForTarget(target int) (rtgTargetProfile, bool) {
 	p.oomModel = rtgOOMResult
 	p.interruptModel = rtgInterruptNone
 	p.floatModel = rtgFloatScaledInteger
-	if target == rtgTargetLinux386 || target == rtgTargetWindows386 {
-		p.arch = rtgArch386
-		p.intBits = 32
-		p.pointerBits = 32
-		p.maxAlign = 4
-	} else if target == rtgTargetLinuxArm {
-		p.arch = rtgArchArm
-		p.intBits = 32
-		p.pointerBits = 32
-		p.maxAlign = 4
-	} else if target == rtgTargetWasiWasm32 {
-		p.arch = rtgArchWasm32
-		p.intBits = 32
-		p.pointerBits = 32
-		p.maxAlign = 8
-	} else if target == rtgTargetLinuxAarch64 || target == rtgTargetDarwinArm64 {
-		p.arch = rtgArchAarch64
-		p.intBits = 64
-		p.pointerBits = 64
-		p.maxAlign = 8
-	} else if target == rtgTargetLinuxAmd64 || target == rtgTargetWindowsAmd64 {
-		p.arch = rtgArchAmd64
-		p.intBits = 64
-		p.pointerBits = 64
-		p.maxAlign = 8
-	} else {
-		return p, false
-	}
-	p.os = rtgOSLinux
-	if target == rtgTargetWindowsAmd64 || target == rtgTargetWindows386 {
-		p.os = rtgOSWindows
-	}
-	if target == rtgTargetDarwinArm64 {
-		p.os = rtgOSDarwin
-	}
-	if target == rtgTargetWasiWasm32 {
-		p.os = rtgOSWasi
-	}
 	p.codePointerBits = p.pointerBits
 	p.funcPointerBits = p.pointerBits
 	return p, true
@@ -219,95 +199,18 @@ func rtg_runtime_ArenaReset(mark int) {}
 
 func rtgSetTarget(target int) {
 	if rtgCompilerFixedTarget != 0 {
-		rtgCurrentTarget = rtgCompilerFixedTarget
-		if rtgCompilerFixedTarget == rtgTargetWindows386 {
-			rtgTargetOS = rtgOSWindows
-			rtgTargetArch = rtgArch386
-			rtgNativeIntSize = 4
-			return
-		}
-		if rtgCompilerFixedTarget == rtgTargetWindowsAmd64 {
-			rtgTargetOS = rtgOSWindows
-			rtgTargetArch = rtgArchAmd64
-			rtgNativeIntSize = 8
-			return
-		}
-		if rtgCompilerFixedTarget == rtgTargetDarwinArm64 {
-			rtgTargetOS = rtgOSDarwin
-			rtgTargetArch = rtgArchAarch64
-			rtgNativeIntSize = 8
-			return
-		}
-		if rtgCompilerFixedTarget == rtgTargetWasiWasm32 {
-			rtgTargetOS = rtgOSWasi
-			rtgTargetArch = rtgArchWasm32
-			rtgNativeIntSize = 4
-			return
-		}
-		if rtgCompilerFixedTarget == rtgTargetLinux386 {
-			rtgTargetOS = rtgOSLinux
-			rtgTargetArch = rtgArch386
-			rtgNativeIntSize = 4
-			return
-		}
-		if rtgCompilerFixedTarget == rtgTargetLinuxArm {
-			rtgTargetOS = rtgOSLinux
-			rtgTargetArch = rtgArchArm
-			rtgNativeIntSize = 4
-			return
-		}
-		if rtgCompilerFixedTarget == rtgTargetLinuxAarch64 {
-			rtgTargetOS = rtgOSLinux
-			rtgTargetArch = rtgArchAarch64
-			rtgNativeIntSize = 8
-			return
-		}
-		rtgTargetOS = rtgOSLinux
-		rtgTargetArch = rtgArchAmd64
-		rtgNativeIntSize = 8
-		return
+		target = rtgCompilerFixedTarget
 	}
 	rtgCurrentTarget = target
+	if target >= rtgTargetLinuxAmd64 && target <= rtgTargetDarwinArm64 {
+		rtgTargetOS = int(rtgTargetOSTable[target])
+		rtgTargetArch = int(rtgTargetArchTable[target])
+		rtgNativeIntSize = int(rtgTargetIntBitsTable[target]) / 8
+		return
+	}
+	// Preserve the historical fallback for internal callers that pass an
+	// invalid target. Public entry points reject it before reaching this code.
 	rtgTargetOS = rtgOSLinux
-	if target == rtgTargetLinux386 {
-		rtgTargetArch = rtgArch386
-		rtgNativeIntSize = 4
-		return
-	}
-	if target == rtgTargetWindows386 {
-		rtgTargetOS = rtgOSWindows
-		rtgTargetArch = rtgArch386
-		rtgNativeIntSize = 4
-		return
-	}
-	if target == rtgTargetLinuxAarch64 {
-		rtgTargetArch = rtgArchAarch64
-		rtgNativeIntSize = 8
-		return
-	}
-	if target == rtgTargetDarwinArm64 {
-		rtgTargetOS = rtgOSDarwin
-		rtgTargetArch = rtgArchAarch64
-		rtgNativeIntSize = 8
-		return
-	}
-	if target == rtgTargetLinuxArm {
-		rtgTargetArch = rtgArchArm
-		rtgNativeIntSize = 4
-		return
-	}
-	if target == rtgTargetWindowsAmd64 {
-		rtgTargetOS = rtgOSWindows
-		rtgTargetArch = rtgArchAmd64
-		rtgNativeIntSize = 8
-		return
-	}
-	if target == rtgTargetWasiWasm32 {
-		rtgTargetOS = rtgOSWasi
-		rtgTargetArch = rtgArchWasm32
-		rtgNativeIntSize = 4
-		return
-	}
 	rtgTargetArch = rtgArchAmd64
 	rtgNativeIntSize = 8
 }
