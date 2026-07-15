@@ -18,7 +18,14 @@ path directly. The pipeline hashes the file again before either emitter runs,
 so a stale, substituted, or separately lowered reference input fails at plan
 validation rather than producing a misleading target comparison.
 
-The pipeline executes the reference and candidate build commands without a
+Create that input with `rtg -emit-unit -o program.rtgu ./cmd/app`. Host and
+self-hosted frontend executables both stop after their normal link phase in
+this mode, do not require or invoke a native backend, and write a non-executable
+RTGU file. `-o -` streams the binary unit to stdout. CI compares the required
+core unit fields from both frontend builds on representative workspaces while
+the optional rich metadata tables continue their staged convergence.
+
+`RunPipeline` executes the reference and candidate build commands without a
 shell, validates both milestone objects before either link runs, links and runs
 the two artifacts, decodes their debugger memory dumps through the shared
 result ABI, and requires both the independently supplied profile/signature and

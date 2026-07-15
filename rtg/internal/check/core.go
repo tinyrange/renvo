@@ -77,10 +77,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 		}
 	}
 	sortDecls(info.Decls)
-	info.DeclOrder = make([]int, len(info.Decls))
-	for i := 0; i < len(info.DeclOrder); i++ {
-		info.DeclOrder[i] = i
-	}
+	info.DeclOrder = buildDeclOrder(info.Decls)
 	info.Types = make([]TypeInfo, 0, countTypeDeclsCore(info.Decls))
 	for i := 0; i < len(info.Decls); i++ {
 		decl := info.Decls[i]
