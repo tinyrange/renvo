@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "source_digest": "41ea1402e0a02ce7767765fb02408aedf05f35a3b74cc33b2fabb503dfcde402",
+  "source_digest": "fdcf4a1737a4fc6205ae67f130abcdf56179fc0eaed9c6f34f78a877555f50d1",
   "runs": [
     {
       "stage": "host",
       "target": "linux/amd64",
-      "commit": "1993240f8bdc9facf0ec1579dfbbab08e8fc453f",
-      "captured_at": "2026-07-15T03:08:51Z",
+      "commit": "2c792872d6ae720ce3ddf76dbd0ca0bad5f2f04f",
+      "captured_at": "2026-07-15T03:22:02Z",
       "observations": [
         {
           "id": 1,
@@ -426,17 +426,17 @@
         {
           "id": 84,
           "status": "frontend-diagnostic",
-          "message": "\u003crepo\u003e/rtg/std/math: error RTG-LOAD-005 (loader): package directory could not be read"
+          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-005 (loader): package directory could not be read"
         },
         {
           "id": 85,
           "status": "frontend-diagnostic",
-          "message": "\u003crepo\u003e/rtg/std/time: error RTG-LOAD-005 (loader): package directory could not be read"
+          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-005 (loader): package directory could not be read"
         },
         {
           "id": 86,
           "status": "frontend-diagnostic",
-          "message": "\u003crepo\u003e/rtg/std/encoding/json: error RTG-LOAD-005 (loader): package directory could not be read"
+          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-005 (loader): package directory could not be read"
         },
         {
           "id": 87,
@@ -481,17 +481,17 @@
         {
           "id": 95,
           "status": "frontend-diagnostic",
-          "message": "\u003crepo\u003e/rtg/std/regexp: error RTG-LOAD-005 (loader): package directory could not be read"
+          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-005 (loader): package directory could not be read"
         },
         {
           "id": 96,
           "status": "frontend-diagnostic",
-          "message": "\u003crepo\u003e/rtg/std/reflect: error RTG-LOAD-005 (loader): package directory could not be read"
+          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-005 (loader): package directory could not be read"
         },
         {
           "id": 97,
           "status": "frontend-diagnostic",
-          "message": "\u003crepo\u003e/rtg/std/net/http: error RTG-LOAD-005 (loader): package directory could not be read"
+          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-005 (loader): package directory could not be read"
         },
         {
           "id": 98,
@@ -501,12 +501,12 @@
         {
           "id": 99,
           "status": "frontend-diagnostic",
-          "message": "\u003crepo\u003e/rtg/std/C: error RTG-LOAD-005 (loader): package directory could not be read"
+          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-005 (loader): package directory could not be read"
         },
         {
           "id": 100,
           "status": "frontend-diagnostic",
-          "message": "\u003crepo\u003e/rtg/std/embed: error RTG-LOAD-005 (loader): package directory could not be read"
+          "message": "./cmd/app/main.go:3:11: error RTG-LOAD-005 (loader): package directory could not be read"
         },
         {
           "id": 101,
@@ -526,17 +526,17 @@
         {
           "id": 104,
           "status": "frontend-diagnostic",
-          "message": "\u003crepo\u003e/rtg/std/C: error RTG-LOAD-005 (loader): package directory could not be read"
+          "message": "./cmd/app/cgo_ignored.go:3:9: error RTG-LOAD-005 (loader): package directory could not be read"
         },
         {
           "id": 105,
           "status": "frontend-diagnostic",
-          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-008 (loader): unresolved import example.com/lib/pkg"
+          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-014 (loader): dependency source is unavailable for example.com/lib@v0.0.0"
         },
         {
           "id": 106,
           "status": "frontend-diagnostic",
-          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-008 (loader): unresolved import example.com/lib/pkg"
+          "message": "./cmd/app/main.go:3:9: error RTG-LOAD-016 (loader): dependency has an invalid or missing go.mod: ./missing/go.mod"
         },
         {
           "id": 107,
@@ -583,8 +583,8 @@
     {
       "stage": "stage3",
       "target": "linux/amd64",
-      "commit": "1993240f8bdc9facf0ec1579dfbbab08e8fc453f",
-      "captured_at": "2026-07-15T03:08:51Z",
+      "commit": "2c792872d6ae720ce3ddf76dbd0ca0bad5f2f04f",
+      "captured_at": "2026-07-15T03:22:02Z",
       "observations": [
         {
           "id": 1,
