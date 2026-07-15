@@ -10848,64 +10848,81 @@ func rtgWinAmd64CallStaticImport(a *rtgAsm, importID int, wordCount int) {
 		rtgAsmEmit16(a, 0x5941)
 	}
 	stackWords := 0
-	shadow := 40
-	// The RTG amd64 call frame is eight bytes off the Windows call-site
-	// alignment when all arguments fit in registers. Reserve the usual shadow
-	// space plus one alignment slot for that common case.
 	if wordCount > 4 {
 		stackWords = wordCount - 4
-		shadow = 32
-		if stackWords%2 == 0 {
-			// An even number of pending stack arguments leaves rsp eight bytes
-			// short of the Win64 call-site alignment. Make room for an alignment
-			// slot below argument 5, then reserve that slot with the shadow space.
-			// Moving low addresses first is safe because every destination is the
-			// preceding source slot.
-			for i := 0; i < stackWords; i++ {
-				rtgWinAmd64LoadRaxRspDisp(a, i*8)
-				rtgWinAmd64StoreRaxRspDisp(a, i*8-8)
-			}
-			shadow = 40
-		}
 	}
-	rtgAsmEmit4(a, 0x48, 0x83, 0xec, shadow)
+	// RTG internal calls may leave the stack at either 16-byte parity while
+	// evaluating an expression. Preserve the exact pending-argument pointer in
+	// r10, align dynamically, then construct a fresh Win64 call area containing
+	// shadow space, copied stack arguments, and a saved original rsp slot.
+	rtgAsmEmit24(a, 0xe28949) // mov r10, rsp
+	rtgAsmEmit4(a, 0x48, 0x83, 0xe4, 0xf0)
+	savedRSPOff := 32 + stackWords*8
+	allocation := rtgAlignValue(savedRSPOff+8, 16)
+	if rtgAsmImmFits8Signed(allocation) {
+		rtgAsmEmit4(a, 0x48, 0x83, 0xec, allocation)
+	} else {
+		rtgAsmEmit24(a, 0xec8148)
+		rtgAsmEmit32(a, allocation)
+	}
+	for i := 0; i < stackWords; i++ {
+		rtgWinAmd64LoadRAXFromR10(a, i*8)
+		rtgWinAmd64StoreRAXToRSP(a, 32+i*8)
+	}
+	rtgWinAmd64StoreR10ToRSP(a, savedRSPOff)
 	rtgAsmEmit16(a, 0x15ff)
 	at := len(a.code)
 	rtgAsmEmit32(a, 0)
 	rtgAsmAddWinImportReloc(a, at, importID)
-	adjust := shadow + stackWords*8
-	if rtgAsmImmFits8Signed(adjust) {
-		rtgAsmEmit4(a, 0x48, 0x83, 0xc4, adjust)
-	} else {
-		rtgAsmEmit24(a, 0xc48148)
-		rtgAsmEmit32(a, adjust)
+	rtgAsmEmit24(a, 0xc28949) // mov r10, rax
+	rtgWinAmd64LoadRAXFromRSP(a, savedRSPOff)
+	rtgAsmEmit24(a, 0xc48948) // mov rsp, rax
+	if stackWords > 0 {
+		adjust := stackWords * 8
+		if rtgAsmImmFits8Signed(adjust) {
+			rtgAsmEmit4(a, 0x48, 0x83, 0xc4, adjust)
+		} else {
+			rtgAsmEmit24(a, 0xc48148)
+			rtgAsmEmit32(a, adjust)
+		}
 	}
+	rtgAsmEmit24(a, 0xd0894c) // mov rax, r10
 }
 
-func rtgWinAmd64LoadRaxRspDisp(a *rtgAsm, disp int) {
-	if disp == 0 {
-		rtgAsmEmit4(a, 0x48, 0x8b, 0x04, 0x24)
+func rtgWinAmd64LoadRAXFromR10(a *rtgAsm, offset int) {
+	if offset <= 127 {
+		rtgAsmEmit4(a, 0x49, 0x8b, 0x42, offset)
 		return
 	}
-	if rtgAsmImmFits8Signed(disp) {
-		rtgAsmEmit5(a, 0x48, 0x8b, 0x44, 0x24, disp)
+	rtgAsmEmit24(a, 0x828b49)
+	rtgAsmEmit32(a, offset)
+}
+
+func rtgWinAmd64LoadRAXFromRSP(a *rtgAsm, offset int) {
+	if offset <= 127 {
+		rtgAsmEmit5(a, 0x48, 0x8b, 0x44, 0x24, offset)
 		return
 	}
 	rtgAsmEmit4(a, 0x48, 0x8b, 0x84, 0x24)
-	rtgAsmEmit32(a, disp)
+	rtgAsmEmit32(a, offset)
 }
 
-func rtgWinAmd64StoreRaxRspDisp(a *rtgAsm, disp int) {
-	if disp == 0 {
-		rtgAsmEmit4(a, 0x48, 0x89, 0x04, 0x24)
-		return
-	}
-	if rtgAsmImmFits8Signed(disp) {
-		rtgAsmEmit5(a, 0x48, 0x89, 0x44, 0x24, disp)
+func rtgWinAmd64StoreRAXToRSP(a *rtgAsm, offset int) {
+	if offset <= 127 {
+		rtgAsmEmit5(a, 0x48, 0x89, 0x44, 0x24, offset)
 		return
 	}
 	rtgAsmEmit4(a, 0x48, 0x89, 0x84, 0x24)
-	rtgAsmEmit32(a, disp)
+	rtgAsmEmit32(a, offset)
+}
+
+func rtgWinAmd64StoreR10ToRSP(a *rtgAsm, offset int) {
+	if offset <= 127 {
+		rtgAsmEmit5(a, 0x4c, 0x89, 0x54, 0x24, offset)
+		return
+	}
+	rtgAsmEmit4(a, 0x4c, 0x89, 0x94, 0x24)
+	rtgAsmEmit32(a, offset)
 }
 
 func rtgEmitArbitrarySyscall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {

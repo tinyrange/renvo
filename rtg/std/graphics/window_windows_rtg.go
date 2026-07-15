@@ -1161,10 +1161,14 @@ func (w *Window) ReadPixels() *Image {
 	glLoadIdentity()
 	glMatrixMode(glModelView)
 	glLoadIdentity()
+	glDrawBuffer(glBack)
+	glRasterPos2i(-1, -1)
+	glPixelStorei(glUnpackAlignment, 1)
+	glDrawPixels(w.width, w.height, glRGBA, glUnsignedByte, w.bottomUp)
 	glFinish()
-	// Capture the frame that Present made visible. Redrawing the software
-	// surface into GL_BACK here hid front-buffer presentation failures.
-	glReadBuffer(glFront)
+	// Hidden windows do not have a reliably readable front buffer. Rebuild the
+	// current software frame in the back buffer so capture is deterministic.
+	glReadBuffer(glBack)
 	glPixelStorei(glPackAlignment, 1)
 	glReadPixels(0, 0, w.width, w.height, glRGBA, glUnsignedByte, bottomUp)
 	image := NewImage(w.width, w.height, nil)
