@@ -3271,12 +3271,6 @@ func rtgParsePrimaryExpr(ep *rtgExprParse) int {
 			return rtgAddExpr(ep, rtgExprIdent, startTok, 0, 0, 0, 0, int(rtgTokStart(ep.prog, startTok)), nameEnd)
 		}
 	}
-	if rtgTokCharIs(ep.prog, ep.pos, '[') && rtgTokCharIs(ep.prog, ep.pos+1, ']') && rtgTokCharIs(ep.prog, ep.pos+2, '*') && rtgTokIsKind(ep.prog, ep.pos+3, rtgTokIdent) {
-		startTok := ep.pos
-		nameEnd := int(rtgTokEnd(ep.prog, ep.pos+3))
-		ep.pos += 4
-		return rtgAddExpr(ep, rtgExprIdent, startTok, 0, 0, 0, 0, int(rtgTokStart(ep.prog, startTok)), nameEnd)
-	}
 	if rtgTokIdentIs(ep.prog, ep.pos, "map") && rtgTokCharIs(ep.prog, ep.pos+1, '[') {
 		startTok := ep.pos
 		closeTok := rtgFindMatchingExprClose(ep.prog, ep.pos+2, ep.end, '[', ']')
