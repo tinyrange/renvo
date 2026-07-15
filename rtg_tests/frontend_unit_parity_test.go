@@ -51,9 +51,37 @@ func coreUnit(program rtgunit.Program) canonicalUnitCore {
 		ImportPath: program.ImportPath,
 		Text:       program.Text,
 		Tokens:     program.Tokens,
-		Decls:      program.Decls,
+		Decls:      declarationsInSourceOrder(program.Decls),
 		Funcs:      program.Funcs,
 	}
+}
+
+// Declaration row order is not semantic: every row carries its source token
+// range. The compact linker currently uses stable name order while the rich
+// host linker uses source order, so compare the required rows in source order
+// until their optional semantic metadata tables converge as well.
+func declarationsInSourceOrder(decls []rtgunit.Decl) []rtgunit.Decl {
+	out := append([]rtgunit.Decl(nil), decls...)
+	for i := 1; i < len(out); i++ {
+		item := out[i]
+		j := i - 1
+		for j >= 0 && declarationAfter(out[j], item) {
+			out[j+1] = out[j]
+			j--
+		}
+		out[j+1] = item
+	}
+	return out
+}
+
+func declarationAfter(left rtgunit.Decl, right rtgunit.Decl) bool {
+	if left.StartTok != right.StartTok {
+		return left.StartTok > right.StartTok
+	}
+	if left.EndTok != right.EndTok {
+		return left.EndTok > right.EndTok
+	}
+	return left.Kind > right.Kind
 }
 
 func emitFrontendUnit(t *testing.T, frontend frontendConfig, dir string, output string) rtgunit.Program {
