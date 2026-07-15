@@ -21,7 +21,7 @@ func run(args []string, stdout io.Writer, stderr io.Writer, load artifactLoader)
 	flags := flag.NewFlagSet("rtgboard", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	boardName := flags.String("board", "ch32v003", "freestanding board profile")
-	vector := flags.String("vector", "rtg_vectors", "linked vector-table symbol")
+	vector := flags.String("vector", "", "linked vector-table symbol (defaults to the board contract)")
 	heap := flags.Uint64("heap", 0, "reserved heap bytes")
 	stack := flags.Uint64("stack", 0, "reserved stack bytes (zero uses the board default)")
 	flags.Usage = func() {
@@ -39,13 +39,21 @@ func run(args []string, stdout io.Writer, stderr io.Writer, load artifactLoader)
 		flags.Usage()
 		return 2
 	}
-	board, ok := boardByName(*boardName)
+	composition, ok := boardByName(*boardName)
 	if !ok {
 		fmt.Fprintf(stderr, "rtgboard: unsupported board %q\n", *boardName)
 		return 2
 	}
+	vectorSymbol := *vector
+	if vectorSymbol == "" {
+		vectorSymbol = composition.Board.Startup.VectorSymbol
+	}
+	if vectorSymbol != composition.Board.Startup.VectorSymbol {
+		fmt.Fprintf(stderr, "rtgboard: vector symbol %q does not match board contract %q\n", vectorSymbol, composition.Board.Startup.VectorSymbol)
+		return 2
+	}
 	artifact, err := load(flags.Arg(0), target.ELFArtifactOptions{
-		VectorSymbol: *vector,
+		VectorSymbol: vectorSymbol,
 		HeapSize:     *heap,
 		StackSize:    *stack,
 	})
@@ -53,8 +61,8 @@ func run(args []string, stdout io.Writer, stderr io.Writer, load artifactLoader)
 		fmt.Fprintf(stderr, "rtgboard: inspect artifact: %v\n", err)
 		return 1
 	}
-	validation := target.Validate(board, artifact)
-	writeReport(stdout, board, artifact, validation)
+	validation := target.Validate(composition, artifact)
+	writeReport(stdout, composition, artifact, validation)
 	if !validation.OK() {
 		for _, violation := range validation.Violations {
 			fmt.Fprintf(stderr, "rtgboard: %s\n", violation.Error())
@@ -64,15 +72,16 @@ func run(args []string, stdout io.Writer, stderr io.Writer, load artifactLoader)
 	return 0
 }
 
-func boardByName(name string) (target.Board, bool) {
+func boardByName(name string) (target.Composition, bool) {
 	if name == "ch32v003" || name == "wch-ch32v003" {
 		return target.CH32V003(), true
 	}
-	return target.Board{}, false
+	return target.Composition{}, false
 }
 
-func writeReport(out io.Writer, board target.Board, artifact target.Artifact, validation target.Validation) {
-	fmt.Fprintf(out, "board=%s isa=%s abi=%s format=%s\n", board.Name, board.ISA, board.ABI, board.ObjectFormat)
+func writeReport(out io.Writer, composition target.Composition, artifact target.Artifact, validation target.Validation) {
+	fmt.Fprintf(out, "board=%s object=%s isa=%s abi=%s format=%s\n",
+		composition.Board.Name, composition.Object.Name, composition.Object.ISA, composition.Object.ABI, composition.Object.Format.Name)
 	sections := append([]target.Section(nil), artifact.Sections...)
 	sort.Slice(sections, func(i int, j int) bool {
 		if sections[i].Address != sections[j].Address {

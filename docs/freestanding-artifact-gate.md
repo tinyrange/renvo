@@ -1,9 +1,10 @@
 # Freestanding artifact gate
 
-`rtgboard` validates a linked ELF image against a board descriptor before the
-image is flashed. The gate reads allocated sections and unresolved symbols
-from the actual linker output, then applies the board's placement, entry,
-vector, import, flash, static RAM, heap, stack, and guard constraints.
+`rtgboard` validates a linked ELF image against an object-target plus board
+composition before the image is flashed. The gate reads the ELF class, byte
+order, machine, ABI flags, allocated sections, and unresolved symbols from the
+actual linker output, then applies the composition's placement, entry, vector,
+import, flash, static RAM, heap, stack, guard, and reserved-memory constraints.
 
 For the initial CH32V003 profile:
 

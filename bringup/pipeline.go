@@ -73,7 +73,7 @@ type PipelinePlan struct {
 	Candidate PipelineArtifact
 
 	ObjectContract    ELFContract
-	Board             target.Board
+	Composition       target.Composition
 	BoardELF          target.ELFArtifactOptions
 	ResultSymbol      string
 	ExpectedProfile   uint32
@@ -136,8 +136,25 @@ func (p PipelinePlan) Validate() error {
 	if p.ExpectedProfile == 0 {
 		return fmt.Errorf("expected result profile is required")
 	}
-	if p.Board.Name != "" && p.BoardELF.VectorSymbol == "" {
-		return fmt.Errorf("board image gate requires an ELF vector symbol")
+	if p.Composition.Board.Name != "" {
+		if err := p.Composition.Validate(); err != nil {
+			return fmt.Errorf("invalid board composition: %w", err)
+		}
+		if p.Toolchain.ObjectFormat != p.Composition.Object.Format.Name || p.Toolchain.ABI != p.Composition.Object.ABI {
+			return fmt.Errorf("toolchain object format/ABI %s/%s does not match composition %s/%s",
+				p.Toolchain.ObjectFormat, p.Toolchain.ABI, p.Composition.Object.Format.Name, p.Composition.Object.ABI)
+		}
+		if p.BoardELF.VectorSymbol != p.Composition.Board.Startup.VectorSymbol {
+			return fmt.Errorf("board image vector symbol %q does not match composition %q",
+				p.BoardELF.VectorSymbol, p.Composition.Board.Startup.VectorSymbol)
+		}
+		resultSymbol := p.ResultSymbol
+		if resultSymbol == "" {
+			resultSymbol = resultabi.SymbolName
+		}
+		if p.Composition.Board.Runtime.Result.Transport == target.ResultTransportDebuggerMemory && resultSymbol != p.Composition.Board.Runtime.Result.Symbol {
+			return fmt.Errorf("result symbol %q does not match composition %q", resultSymbol, p.Composition.Board.Runtime.Result.Symbol)
+		}
 	}
 	return nil
 }
@@ -233,11 +250,11 @@ func RunPipeline(plan PipelinePlan, runner CommandRunner) (PipelineResult, error
 			return result, err
 		}
 	}
-	if plan.Board.Name != "" {
-		if err := validatePipelineImage("reference", plan.Reference.Image, plan.Board, plan.BoardELF); err != nil {
+	if plan.Composition.Board.Name != "" {
+		if err := validatePipelineImage("reference", plan.Reference.Image, plan.Composition, plan.BoardELF); err != nil {
 			return result, err
 		}
-		if err := validatePipelineImage("candidate", plan.Candidate.Image, plan.Board, plan.BoardELF); err != nil {
+		if err := validatePipelineImage("candidate", plan.Candidate.Image, plan.Composition, plan.BoardELF); err != nil {
 			return result, err
 		}
 	}
@@ -280,12 +297,12 @@ func RunPipeline(plan PipelinePlan, runner CommandRunner) (PipelineResult, error
 	return result, nil
 }
 
-func validatePipelineImage(side string, path string, board target.Board, options target.ELFArtifactOptions) error {
+func validatePipelineImage(side string, path string, composition target.Composition, options target.ELFArtifactOptions) error {
 	artifact, err := target.ArtifactFromELF(path, options)
 	if err != nil {
 		return &PipelineError{Side: side, Step: "validate-image", Err: err}
 	}
-	validation := target.Validate(board, artifact)
+	validation := target.Validate(composition, artifact)
 	if validation.OK() {
 		return nil
 	}

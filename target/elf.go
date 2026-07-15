@@ -3,6 +3,7 @@ package target
 import (
 	"debug/elf"
 	"fmt"
+	"os"
 )
 
 type ELFArtifactOptions struct {
@@ -29,8 +30,18 @@ func ArtifactFromELF(path string, options ELFArtifactOptions) (Artifact, error) 
 	if err != nil {
 		return Artifact{}, err
 	}
+	flags, err := linkedELFFlags(path, file)
+	if err != nil {
+		return Artifact{}, err
+	}
+	format, err := elfArtifactFormat(file, flags)
+	if err != nil {
+		return Artifact{}, err
+	}
 	artifact := Artifact{
+		Format:        format,
 		Entry:         file.Entry,
+		VectorSymbol:  options.VectorSymbol,
 		VectorAddress: vectorAddress,
 		HeapSize:      options.HeapSize,
 		StackSize:     options.StackSize,
@@ -58,6 +69,56 @@ func ArtifactFromELF(path string, options ELFArtifactOptions) (Artifact, error) 
 	}
 	artifact.Imports = linkedELFImports(file)
 	return artifact, nil
+}
+
+func linkedELFFlags(path string, file *elf.File) (uint32, error) {
+	offset := int64(0)
+	switch file.Class {
+	case elf.ELFCLASS32:
+		offset = 36
+	case elf.ELFCLASS64:
+		offset = 48
+	default:
+		return 0, fmt.Errorf("unsupported ELF class %s", file.Class)
+	}
+	raw, err := os.Open(path)
+	if err != nil {
+		return 0, fmt.Errorf("open ELF header: %w", err)
+	}
+	defer raw.Close()
+	var data [4]byte
+	if _, err := raw.ReadAt(data[:], offset); err != nil {
+		return 0, fmt.Errorf("read ELF flags: %w", err)
+	}
+	return file.ByteOrder.Uint32(data[:]), nil
+}
+
+func elfArtifactFormat(file *elf.File, flags uint32) (ArtifactFormat, error) {
+	bits := 0
+	switch file.Class {
+	case elf.ELFCLASS32:
+		bits = 32
+	case elf.ELFCLASS64:
+		bits = 64
+	default:
+		return ArtifactFormat{}, fmt.Errorf("unsupported ELF class %s", file.Class)
+	}
+	endian := Endian("")
+	switch file.Data {
+	case elf.ELFDATA2LSB:
+		endian = EndianLittle
+	case elf.ELFDATA2MSB:
+		endian = EndianBig
+	default:
+		return ArtifactFormat{}, fmt.Errorf("unsupported ELF byte order %s", file.Data)
+	}
+	return ArtifactFormat{
+		Container:   "elf",
+		AddressBits: bits,
+		Endian:      endian,
+		MachineID:   uint16(file.Machine),
+		Flags:       flags,
+	}, nil
 }
 
 func elfSectionLoadAddress(file *elf.File, section *elf.Section) (uint64, bool) {

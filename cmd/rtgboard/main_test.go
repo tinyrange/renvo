@@ -15,7 +15,7 @@ func TestRunReportsValidBoardArtifact(t *testing.T) {
 		if path != "firmware.elf" {
 			t.Fatalf("path = %q", path)
 		}
-		if options.VectorSymbol != "vectors" || options.HeapSize != 128 || options.StackSize != 256 {
+		if options.VectorSymbol != "rtg_vectors" || options.HeapSize != 128 || options.StackSize != 256 {
 			t.Fatalf("options = %+v", options)
 		}
 		artifact.HeapSize = options.HeapSize
@@ -24,12 +24,12 @@ func TestRunReportsValidBoardArtifact(t *testing.T) {
 	}
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := run([]string{"-vector", "vectors", "-heap", "128", "-stack", "256", "firmware.elf"}, &stdout, &stderr, loader)
+	code := run([]string{"-heap", "128", "-stack", "256", "firmware.elf"}, &stdout, &stderr, loader)
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %s", code, stderr.String())
 	}
 	want := []string{
-		"board=wch-ch32v003 isa=rv32ec abi=ilp32e format=elf32-littleriscv",
+		"board=wch-ch32v003 object=rv32ec-ilp32e isa=rv32ec abi=ilp32e format=elf32-littleriscv",
 		"section=.vectors region=flash address=0x8000000 size=64",
 		"section=.text region=flash address=0x8000040 size=1024",
 		"section=.data region=ram address=0x20000000 size=128",
@@ -78,6 +78,7 @@ func TestRunRejectsUsageBoardAndInspectionErrors(t *testing.T) {
 		{name: "help", args: []string{"-h"}, code: 0, want: "usage: rtgboard"},
 		{name: "missing", args: nil, code: 2, want: "usage: rtgboard"},
 		{name: "board", args: []string{"-board", "unknown", "image.elf"}, code: 2, want: "unsupported board"},
+		{name: "vector", args: []string{"-vector", "vectors", "image.elf"}, code: 2, want: "does not match board contract"},
 		{name: "inspect", args: []string{"image.elf"}, code: 1, want: "broken ELF"},
 	}
 	for _, test := range tests {
@@ -95,8 +96,11 @@ func TestRunRejectsUsageBoardAndInspectionErrors(t *testing.T) {
 }
 
 func validArtifact() target.Artifact {
+	composition := target.CH32V003()
 	return target.Artifact{
+		Format:        composition.Object.ExpectedArtifactFormat(),
 		Entry:         0x08000040,
+		VectorSymbol:  composition.Board.Startup.VectorSymbol,
 		VectorAddress: 0x08000000,
 		Sections: []target.Section{
 			{Name: ".data", Address: 0x20000000, Size: 128, LoadAddress: 0x08000440, LoadSize: 128, Flags: target.SectionAlloc | target.SectionWrite},
