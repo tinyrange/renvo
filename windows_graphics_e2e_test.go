@@ -9,8 +9,8 @@ import (
 )
 
 func TestWindowsGraphicsEndToEnd(t *testing.T) {
-	if runtime.GOOS != "windows" || runtime.GOARCH != "amd64" {
-		t.Skip("Windows graphics execution requires a native Windows/amd64 host")
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows graphics execution requires a native Windows host")
 	}
 	repoRoot, err := os.Getwd()
 	if err != nil {
@@ -51,7 +51,7 @@ func decimal(value int) string {
 }
 
 func main() {
-	w := graphics.NewWindow(graphics.WindowOptions{Title: "RTG Windows/amd64 ✓", Width: 32, Height: 24, Hidden: true})
+	w := graphics.NewWindow(graphics.WindowOptions{Title: "RTG Windows graphics ✓", Width: 32, Height: 24, Hidden: true})
 	if w == nil {
 		err := graphics.LastWindowError()
 		if err != nil {
@@ -94,17 +94,23 @@ func main() {
 		t.Fatalf("build frontend: %v", err)
 	}
 	assertWindowsCommandOK(t, "frontend build", buildFrontend)
-	compile := exec.Command(frontend, "-t", "windows/amd64", "-s", "-o", "graphics.exe", "./cmd/app")
-	compile.Dir = workDir
-	compile.Env = append(os.Environ(), "RTG_BACKEND="+backend, "RTG_STDROOT="+filepath.Join(repoRoot, "rtg", "std"))
-	if output, err := compile.CombinedOutput(); err != nil {
-		t.Fatalf("compile Windows graphics test: %v\n%s", err, output)
-	}
-	command, err := runWindowsCommand(t, workDir, filepath.Join(workDir, "graphics.exe"))
-	if err != nil {
-		t.Fatalf("run Windows graphics test: %v", err)
-	}
-	if command.exitCode != 0 || command.stdout != "PASS\n" || command.stderr != "" {
-		t.Fatalf("Windows graphics output mismatch: exit=%d stdout=%q stderr=%q", command.exitCode, command.stdout, command.stderr)
+	for _, target := range windowsE2ETargets {
+		target := target
+		t.Run(target.name, func(t *testing.T) {
+			outputName := "graphics-" + target.name[len("windows/"):] + ".exe"
+			compile := exec.Command(frontend, "-t", target.name, "-s", "-o", outputName, "./cmd/app")
+			compile.Dir = workDir
+			compile.Env = append(os.Environ(), "RTG_BACKEND="+backend, "RTG_STDROOT="+filepath.Join(repoRoot, "rtg", "std"))
+			if output, err := compile.CombinedOutput(); err != nil {
+				t.Fatalf("compile Windows graphics test: %v\n%s", err, output)
+			}
+			command, err := runWindowsCommand(t, workDir, filepath.Join(workDir, outputName))
+			if err != nil {
+				t.Fatalf("run Windows graphics test: %v", err)
+			}
+			if command.exitCode != 0 || command.stdout != "PASS\n" || command.stderr != "" {
+				t.Fatalf("Windows graphics output mismatch: exit=%d stdout=%q stderr=%q", command.exitCode, command.stdout, command.stderr)
+			}
+		})
 	}
 }

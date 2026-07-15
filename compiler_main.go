@@ -83,7 +83,7 @@ func rtgPrintIntErr(v int) {
 }
 
 func rtgPrintUsage() {
-	rtgPrintErr("usage: rtg [-s] [-arena-size bytes] [-t linux/amd64|linux/386|linux/aarch64|linux/arm|windows/amd64|windows/386|wasi/wasm32|darwin/arm64] -o <output|-> <input.go|->...\n")
+	rtgPrintErr("usage: rtg [-s] [-windows-gui] [-arena-size bytes] [-t linux/amd64|linux/386|linux/aarch64|linux/arm|windows/amd64|windows/386|wasi/wasm32|darwin/arm64] -o <output|-> <input.go|->...\n")
 }
 
 func rtgParsePositiveDecimal(value string) (int, bool) {
@@ -515,6 +515,8 @@ func appMain(args []string, env []string) int {
 	var outputPath string
 	target := rtgCompilerDefaultTarget
 	rtgCompilerArenaSize = 0
+	rtgCompilerStripSymbols = false
+	rtgCompilerWindowsSubsystem = 3
 	if len(args) == 0 {
 		rtgPrintErr("rtg: missing output path (-o)\n")
 		rtgPrintUsage()
@@ -525,6 +527,11 @@ func appMain(args []string, env []string) int {
 		arg := args[i]
 		if len(arg) == 2 && arg[0] == '-' && arg[1] == 's' {
 			rtgCompilerStripSymbols = true
+			i++
+			continue
+		}
+		if len(arg) == 12 && arg[0] == '-' && arg[1] == 'w' && arg[2] == 'i' && arg[3] == 'n' && arg[4] == 'd' && arg[5] == 'o' && arg[6] == 'w' && arg[7] == 's' && arg[8] == '-' && arg[9] == 'g' && arg[10] == 'u' && arg[11] == 'i' {
+			rtgCompilerWindowsSubsystem = 2
 			i++
 			continue
 		}
@@ -616,6 +623,10 @@ func appMain(args []string, env []string) int {
 	if inputCount == 0 {
 		rtgPrintErr("rtg: no input files\n")
 		rtgPrintUsage()
+		return 1
+	}
+	if rtgCompilerWindowsSubsystem == 2 && target != rtgTargetWindowsAmd64 && target != rtgTargetWindows386 {
+		rtgPrintErr("rtg: -windows-gui requires a Windows target\n")
 		return 1
 	}
 	output := 1

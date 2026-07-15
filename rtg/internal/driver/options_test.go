@@ -6,11 +6,11 @@ import (
 )
 
 func TestParseOptionsCorpusShape(t *testing.T) {
-	options := ParseOptions([]string{"-t", "linux/386", "-s", "-o", "/tmp/app", "./cmd/app"})
+	options := ParseOptions([]string{"-t", "windows/386", "-s", "-windows-gui", "-o", "/tmp/app", "./cmd/app"})
 	if !options.Ok {
 		t.Fatalf("ParseOptions failed: err=%d arg=%q at=%d", options.Error, options.ErrorArg, options.ErrorAt)
 	}
-	if options.Target != "linux/386" || options.Output != "/tmp/app" || options.Package != "./cmd/app" || !options.Strip {
+	if options.Target != "windows/386" || options.Output != "/tmp/app" || options.Package != "./cmd/app" || !options.Strip || !options.WindowsGUI {
 		t.Fatalf("options = %#v", options)
 	}
 }
@@ -90,6 +90,7 @@ func TestParseOptionsRejectsInvalidInputs(t *testing.T) {
 		{name: "empty tag item", args: []string{"-tags", "rtg_bundle,,debug", "-o", "app", "./cmd/app"}, err: ParseErrInvalidTags, arg: "rtg_bundle,,debug", at: 1},
 		{name: "missing package", args: []string{"-o", "app"}, err: ParseErrMissingPackage, arg: "", at: 2},
 		{name: "extra package", args: []string{"-o", "app", "./cmd/app", "./other"}, err: ParseErrExtraPackage, arg: "./other", at: 3},
+		{name: "GUI subsystem on non-Windows target", args: []string{"-windows-gui", "-o", "app", "./cmd/app"}, err: ParseErrWindowsGUIRequiresWindows, arg: "linux/amd64", at: 0},
 	}
 	for i := 0; i < len(tests); i++ {
 		tc := tests[i]

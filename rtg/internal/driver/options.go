@@ -10,23 +10,25 @@ const (
 	ParseErrInvalidTags
 	ParseErrMissingPackage
 	ParseErrExtraPackage
+	ParseErrWindowsGUIRequiresWindows
 )
 
 const DefaultTarget = "linux/amd64"
 
-const HelpText = "Usage: rtg -o <file> [-t <target>] [-tags <list>] [-s] [-emit-unit] <package>\nOptions:\n  -emit-unit  write the canonical linked RTGU unit without invoking a backend\nTargets:\n  linux/amd64 linux/386 linux/aarch64 linux/arm\n  windows/amd64 windows/386 darwin/arm64 wasi/wasm32\n"
+const HelpText = "Usage: rtg -o <file> [-t <target>] [-tags <list>] [-s] [-emit-unit] [-windows-gui] <package>\nOptions:\n  -emit-unit    write the canonical linked RTGU unit without invoking a backend\n  -windows-gui  select the Windows GUI subsystem instead of the console subsystem\nTargets:\n  linux/amd64 linux/386 linux/aarch64 linux/arm\n  windows/amd64 windows/386 darwin/arm64 wasi/wasm32\n"
 
 type Options struct {
-	Target   string
-	Output   string
-	Package  string
-	Strip    bool
-	EmitUnit bool
-	Tags     []string
-	Ok       bool
-	Error    int
-	ErrorArg string
-	ErrorAt  int
+	Target     string
+	Output     string
+	Package    string
+	Strip      bool
+	EmitUnit   bool
+	WindowsGUI bool
+	Tags       []string
+	Ok         bool
+	Error      int
+	ErrorArg   string
+	ErrorAt    int
 }
 
 func CommandHelpRequested(args []string) bool {
@@ -41,6 +43,7 @@ func ParseOptions(args []string) Options {
 		ErrorAt: -1,
 	}
 	i := 0
+	windowsGUIAt := -1
 	for i < len(args) {
 		arg := args[i]
 		if arg == "-s" {
@@ -50,6 +53,12 @@ func ParseOptions(args []string) Options {
 		}
 		if arg == "-emit-unit" {
 			options.EmitUnit = true
+			i++
+			continue
+		}
+		if arg == "-windows-gui" {
+			options.WindowsGUI = true
+			windowsGUIAt = i
 			i++
 			continue
 		}
@@ -103,6 +112,9 @@ func ParseOptions(args []string) Options {
 	}
 	if options.Package == "" {
 		return parseFail(options, ParseErrMissingPackage, "", len(args))
+	}
+	if options.WindowsGUI && options.Target != "windows/amd64" && options.Target != "windows/386" {
+		return parseFail(options, ParseErrWindowsGUIRequiresWindows, options.Target, windowsGUIAt)
 	}
 	return options
 }

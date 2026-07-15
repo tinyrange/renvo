@@ -88,6 +88,8 @@ func optionDiagnostic(options Options) Diagnostic {
 		code, message = "RTG-OPTION-008", "missing package path"
 	case ParseErrExtraPackage:
 		code, message = "RTG-OPTION-009", "extra package path "+options.ErrorArg
+	case ParseErrWindowsGUIRequiresWindows:
+		code, message = "RTG-OPTION-010", "-windows-gui requires a Windows target"
 	}
 	return Diagnostic{Phase: "options", Code: code, Message: message}
 }

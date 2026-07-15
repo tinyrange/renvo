@@ -26,17 +26,17 @@ func TestCommandBackendCompileUnit(t *testing.T) {
 		Args: []string{"-test.run=TestCommandBackendHelper", "--"},
 		Env:  []string{"RTG_DRIVER_COMMAND_BACKEND_HELPER=1"},
 	}
-	result := backend.CompileUnit(built.Unit, "linux/386", true)
+	result := backend.CompileUnit(built.Unit, "windows/386", true, true)
 	if !result.Ok {
 		t.Fatal("CommandBackend failed")
 	}
-	if string(result.Binary) != "compiled linux/386 strip\n" {
+	if string(result.Binary) != "compiled windows/386 strip windows-gui\n" {
 		t.Fatalf("binary = %q", string(result.Binary))
 	}
 }
 
 func TestCommandBackendFailure(t *testing.T) {
-	if result := (CommandBackend{}).CompileUnit([]byte("unit"), "linux/amd64", false); result.Ok {
+	if result := (CommandBackend{}).CompileUnit([]byte("unit"), "linux/amd64", false, false); result.Ok {
 		t.Fatal("empty backend path was accepted")
 	}
 
@@ -53,7 +53,7 @@ func TestCommandBackendFailure(t *testing.T) {
 		Args: []string{"-test.run=TestCommandBackendHelper", "--"},
 		Env:  []string{"RTG_DRIVER_COMMAND_BACKEND_HELPER=1", "RTG_DRIVER_COMMAND_BACKEND_FAIL=1"},
 	}
-	result := backend.CompileUnit(built.Unit, "linux/amd64", false)
+	result := backend.CompileUnit(built.Unit, "linux/amd64", false, false)
 	if result.Ok {
 		t.Fatal("failing backend was accepted")
 	}
@@ -74,7 +74,7 @@ func TestCommandBackendHelper(t *testing.T) {
 		os.Exit(2)
 	}
 	args := helperBackendArgs(os.Args)
-	target, output, input, strip, ok := parseHelperBackendArgs(args)
+	target, output, input, strip, windowsGUI, ok := parseHelperBackendArgs(args)
 	if !ok {
 		os.Exit(3)
 	}
@@ -93,6 +93,9 @@ func TestCommandBackendHelper(t *testing.T) {
 	if strip {
 		text = text + " strip"
 	}
+	if windowsGUI {
+		text = text + " windows-gui"
+	}
 	text = text + "\n"
 	if _, err := os.Stdout.Write([]byte(text)); err != nil {
 		os.Exit(6)
@@ -109,11 +112,12 @@ func helperBackendArgs(args []string) []string {
 	return nil
 }
 
-func parseHelperBackendArgs(args []string) (string, string, string, bool, bool) {
+func parseHelperBackendArgs(args []string) (string, string, string, bool, bool, bool) {
 	target := ""
 	output := ""
 	input := ""
 	strip := false
+	windowsGUI := false
 	i := 0
 	for i < len(args) {
 		arg := args[i]
@@ -122,9 +126,14 @@ func parseHelperBackendArgs(args []string) (string, string, string, bool, bool) 
 			i++
 			continue
 		}
+		if arg == "-windows-gui" {
+			windowsGUI = true
+			i++
+			continue
+		}
 		if arg == "-t" {
 			if i+1 >= len(args) {
-				return "", "", "", false, false
+				return "", "", "", false, false, false
 			}
 			target = args[i+1]
 			i += 2
@@ -132,20 +141,20 @@ func parseHelperBackendArgs(args []string) (string, string, string, bool, bool) 
 		}
 		if arg == "-o" {
 			if i+1 >= len(args) {
-				return "", "", "", false, false
+				return "", "", "", false, false, false
 			}
 			output = args[i+1]
 			i += 2
 			continue
 		}
 		if input != "" {
-			return "", "", "", false, false
+			return "", "", "", false, false, false
 		}
 		if arg != "-" && strings.HasPrefix(arg, "-") {
-			return "", "", "", false, false
+			return "", "", "", false, false, false
 		}
 		input = arg
 		i++
 	}
-	return target, output, input, strip, target != "" && output != "" && input != ""
+	return target, output, input, strip, windowsGUI, target != "" && output != "" && input != ""
 }

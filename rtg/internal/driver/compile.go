@@ -11,7 +11,7 @@ const (
 )
 
 type Backend interface {
-	CompileUnit(unit []byte, target string, strip bool) BackendResult
+	CompileUnit(unit []byte, target string, strip bool, windowsGUI bool) BackendResult
 }
 
 type BackendResult struct {
@@ -62,7 +62,7 @@ func compileBuiltUnit(result CompileResult, built BuildResult, backend Backend) 
 	if backend == nil {
 		return compileFail(result, CompileErrBackend)
 	}
-	backendResult := backend.CompileUnit(built.Unit, built.Options.Target, built.Options.Strip)
+	backendResult := backend.CompileUnit(built.Unit, built.Options.Target, built.Options.Strip, built.Options.WindowsGUI)
 	if !backendResult.Ok || len(backendResult.Binary) == 0 {
 		result.Diagnostic = backendResult.Diagnostic
 		if !result.Diagnostic.Valid() {

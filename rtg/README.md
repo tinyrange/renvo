@@ -47,6 +47,13 @@ module is reported as an offline dependency error; RTG does not fetch modules,
 consult proxies, or use authentication credentials. Populate the cache or add
 a local replacement before compiling.
 
+For Windows applications, `-windows-gui` selects the GUI PE subsystem instead
+of the default console subsystem. For example:
+
+```sh
+rtg -t windows/386 -windows-gui -o app.exe ./cmd/app
+```
+
 Release builds are published for every host currently supported by the RTG
 backend:
 

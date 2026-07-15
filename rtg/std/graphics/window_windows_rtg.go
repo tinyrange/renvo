@@ -1,13 +1,10 @@
-//go:build rtg && windows && amd64
+//go:build rtg && windows && (amd64 || 386)
 
 package graphics
 
 // The Windows backend deliberately uses the original WGL/OpenGL 1.1 entry
 // points exported by opengl32.dll. Rendering remains backend-neutral and is
 // performed into Surface.Pixels; WGL is only the presentation layer.
-
-// rtg:linkstatic kernel32.dll,GetModuleHandleW
-func windowsGetModuleHandle(name *byte) int { return 0 }
 
 // rtg:linkstatic kernel32.dll,GetProcAddress
 func windowsGetProcAddress(module int, name *byte) int { return 0 }
@@ -30,34 +27,23 @@ func windowsGlobalUnlock(memory int) int { return 0 }
 // rtg:linkstatic kernel32.dll,GlobalSize
 func windowsGlobalSize(memory int) int { return 0 }
 
-// rtg:linkstatic ntdll.dll,RtlMoveMemory
+// RtlMoveMemory is exported by Kernel32 on both Windows 98 and NT-family
+// systems. Importing the native NT implementation directly prevents the image
+// loader from starting the program on Windows 9x, which has no ntdll.dll.
+// rtg:linkstatic kernel32.dll,RtlMoveMemory
 func windowsMoveMemory(destination int, source *byte, size int) {}
 
-// rtg:linkstatic ntdll.dll,RtlMoveMemory
+// rtg:linkstatic kernel32.dll,RtlMoveMemory
 func windowsReadMemory(destination *byte, source int, size int) {}
-
-// rtg:linkstatic user32.dll,RegisterClassW
-func windowsRegisterClassRaw(value *byte) int { return 0 }
-
-// rtg:linkstatic user32.dll,CreateWindowExW
-func windowsCreateWindow(exStyle, className, title, style, x, y, width, height, parent, menu, instance, param int) int {
-	return 0
-}
 
 // rtg:linkstatic user32.dll,DestroyWindow
 func windowsDestroyWindow(window int) int { return 0 }
-
-// rtg:linkstatic user32.dll,DefWindowProcW
-func windowsDefWindowProc(window, message, wParam, lParam int) int { return 0 }
 
 // rtg:linkstatic user32.dll,ShowWindow
 func windowsShowWindow(window, command int) int { return 0 }
 
 // rtg:linkstatic user32.dll,UpdateWindow
 func windowsUpdateWindow(window int) int { return 0 }
-
-// rtg:linkstatic user32.dll,SetWindowTextW
-func windowsSetWindowText(window int, text *byte) int { return 0 }
 
 // rtg:linkstatic user32.dll,AdjustWindowRectEx
 func windowsAdjustWindowRectRaw(rect *byte, style, menu, exStyle int) int { return 0 }
@@ -74,17 +60,8 @@ func windowsGetUpdateRectRaw(window int, rect *byte, erase int) int { return 0 }
 // rtg:linkstatic user32.dll,ValidateRect
 func windowsValidateRectRaw(window int, rect *byte) int { return 0 }
 
-// rtg:linkstatic user32.dll,PeekMessageW
-func windowsPeekMessageRaw(message *byte, window, first, last, remove int) int { return 0 }
-
-// rtg:linkstatic user32.dll,GetMessageW
-func windowsGetMessageRaw(message *byte, window, first, last int) int { return 0 }
-
 // rtg:linkstatic user32.dll,TranslateMessage
 func windowsTranslateMessageRaw(message *byte) int { return 0 }
-
-// rtg:linkstatic user32.dll,DispatchMessageW
-func windowsDispatchMessageRaw(message *byte) int { return 0 }
 
 // rtg:linkstatic user32.dll,GetKeyState
 func windowsGetKeyState(key int) int { return 0 }
@@ -100,9 +77,6 @@ func windowsSetCapture(window int) int { return 0 }
 
 // rtg:linkstatic user32.dll,ReleaseCapture
 func windowsReleaseCapture() int { return 0 }
-
-// rtg:linkstatic user32.dll,LoadCursorW
-func windowsLoadCursor(instance, resource int) int { return 0 }
 
 // rtg:linkstatic user32.dll,SetCursor
 func windowsSetCursor(cursor int) int { return 0 }
@@ -233,7 +207,6 @@ const (
 	windowsFormatRGBA          = 0
 	windowsMainPlane           = 0
 	windowsGlobalMoveable      = 0x0002
-	windowsClipboardUnicode    = 13
 
 	windowsMessageSize          = 0x0005
 	windowsMessageSetFocus      = 0x0007
@@ -279,7 +252,6 @@ const (
 	glPackAlignment   = 0x0d05
 	glFront           = 0x0404
 	glBack            = 0x0405
-	glFrontAndBack    = 0x0408
 )
 
 var windowsClassName []byte
@@ -308,9 +280,11 @@ func windowsPut32(data []byte, offset, value int) {
 	data[offset+3] = byte(value >> 24)
 }
 
-func windowsPut64(data []byte, offset, value int) {
+func windowsPutPointer(data []byte, offset, value int) {
 	windowsPut32(data, offset, value)
-	windowsPut32(data, offset+4, value>>32)
+	if windowsPointerSize == 8 {
+		windowsPut32(data, offset+4, value>>32)
+	}
 }
 
 func windowsGet32(data []byte, offset int) int {
@@ -325,18 +299,24 @@ func windowsGetSigned32(data []byte, offset int) int {
 	return value
 }
 
-func windowsGet64(data []byte, offset int) int {
-	return windowsGet32(data, offset) | windowsGet32(data, offset+4)<<32
+func windowsGetPointer(data []byte, offset int) int {
+	value := windowsGet32(data, offset)
+	if windowsPointerSize == 8 {
+		value = value | windowsGet32(data, offset+4)<<32
+	}
+	return value
 }
 
 func windowsRegisterClass(style, windowProc, instance, cursor, className int) int {
-	data := make([]byte, 72)
+	data := make([]byte, windowsWindowClassSize)
 	windowsPut32(data, 0, style)
-	windowsPut64(data, 8, windowProc)
-	windowsPut64(data, 24, instance)
-	windowsPut64(data, 40, cursor)
-	windowsPut64(data, 64, className)
-	return windowsRegisterClassRaw(&data[0])
+	windowsPutPointer(data, windowsWindowClassProcOffset, windowProc)
+	windowsPutPointer(data, windowsWindowClassInstanceOffset, instance)
+	windowsPutPointer(data, windowsWindowClassCursorOffset, cursor)
+	windowsPutPointer(data, windowsWindowClassNameOffset, className)
+	// RegisterClass returns ATOM, a 16-bit value. The upper half of EAX is not
+	// part of the ABI result and is left nonzero by User32 on Windows XP.
+	return windowsRegisterClassRaw(&data[0]) & 0xffff
 }
 
 func windowsRectData(rect *windowsRect) []byte {
@@ -394,27 +374,27 @@ func windowsValidateRect(window int, rect *windowsRect) int {
 }
 
 func windowsMessageData(message *windowsMessage) []byte {
-	data := make([]byte, 48)
-	windowsPut64(data, 0, message.Window)
-	windowsPut32(data, 8, int(message.Message))
-	windowsPut64(data, 16, message.WParam)
-	windowsPut64(data, 24, message.LParam)
-	windowsPut32(data, 32, int(message.Time))
-	windowsPut32(data, 36, int(message.Point.X))
-	windowsPut32(data, 40, int(message.Point.Y))
-	windowsPut32(data, 44, int(message.Private))
+	data := make([]byte, windowsMessageStructSize)
+	windowsPutPointer(data, windowsMessageWindowOffset, message.Window)
+	windowsPut32(data, windowsMessageKindOffset, int(message.Message))
+	windowsPutPointer(data, windowsMessageWParamOffset, message.WParam)
+	windowsPutPointer(data, windowsMessageLParamOffset, message.LParam)
+	windowsPut32(data, windowsMessageTimeOffset, int(message.Time))
+	windowsPut32(data, windowsMessagePointXOffset, int(message.Point.X))
+	windowsPut32(data, windowsMessagePointYOffset, int(message.Point.Y))
+	windowsPut32(data, windowsMessagePrivateOffset, int(message.Private))
 	return data
 }
 
 func windowsReadMessage(data []byte, message *windowsMessage) {
-	message.Window = windowsGet64(data, 0)
-	message.Message = uint32(windowsGet32(data, 8))
-	message.WParam = windowsGet64(data, 16)
-	message.LParam = windowsGet64(data, 24)
-	message.Time = uint32(windowsGet32(data, 32))
-	message.Point.X = int32(windowsGetSigned32(data, 36))
-	message.Point.Y = int32(windowsGetSigned32(data, 40))
-	message.Private = uint32(windowsGet32(data, 44))
+	message.Window = windowsGetPointer(data, windowsMessageWindowOffset)
+	message.Message = uint32(windowsGet32(data, windowsMessageKindOffset))
+	message.WParam = windowsGetPointer(data, windowsMessageWParamOffset)
+	message.LParam = windowsGetPointer(data, windowsMessageLParamOffset)
+	message.Time = uint32(windowsGet32(data, windowsMessageTimeOffset))
+	message.Point.X = int32(windowsGetSigned32(data, windowsMessagePointXOffset))
+	message.Point.Y = int32(windowsGetSigned32(data, windowsMessagePointYOffset))
+	message.Private = uint32(windowsGet32(data, windowsMessagePrivateOffset))
 }
 
 func windowsPeekMessage(message *windowsMessage, window, first, last, remove int) int {
@@ -442,11 +422,11 @@ func windowsDispatchMessage(message *windowsMessage) int {
 }
 
 func windowsBeginTrackMouseEvent(event *windowsTrackMouseEvent) int {
-	data := make([]byte, 24)
+	data := make([]byte, windowsTrackMouseEventSize)
 	windowsPut32(data, 0, int(event.Size))
 	windowsPut32(data, 4, int(event.Flags))
-	windowsPut64(data, 8, event.Window)
-	windowsPut32(data, 16, int(event.HoverTime))
+	windowsPutPointer(data, 8, event.Window)
+	windowsPut32(data, windowsTrackMouseEventHoverTimeOffset, int(event.HoverTime))
 	return windowsBeginTrackMouseEventRaw(&data[0])
 }
 
@@ -580,19 +560,19 @@ func windowsRegisterGraphicsClass() bool {
 		return true
 	}
 	if len(windowsClassName) == 0 {
-		windowsClassName = windowsUTF16("RTGGraphicsWindow")
+		windowsClassName = windowsNativeString("RTGGraphicsWindow")
 	}
 	instance := windowsGetModuleHandle(nil)
 	if instance == 0 {
-		setLastWindowError("GetModuleHandleW failed", windowsGetLastError())
+		setLastWindowError("GetModuleHandle failed", windowsGetLastError())
 		return false
 	}
-	user32 := windowsUTF16("user32.dll")
+	user32 := windowsNativeString("user32.dll")
 	module := windowsGetModuleHandle(&user32[0])
-	procName := windowsASCII("DefWindowProcW")
+	procName := windowsASCII(windowsDefWindowProcName)
 	windowProc := windowsGetProcAddress(module, &procName[0])
 	if module == 0 || windowProc == 0 {
-		setLastWindowError("DefWindowProcW lookup failed", windowsGetLastError())
+		setLastWindowError("DefWindowProc lookup failed", windowsGetLastError())
 		return false
 	}
 	classNameMemory, classNameAddress := windowsNativeBytes(windowsClassName)
@@ -605,7 +585,7 @@ func windowsRegisterGraphicsClass() bool {
 		code := windowsGetLastError()
 		windowsGlobalUnlock(classNameMemory)
 		windowsGlobalFree(classNameMemory)
-		setLastWindowError("RegisterClassW failed", code)
+		setLastWindowError("RegisterClass failed", code)
 		return false
 	}
 	windowsGlobalUnlock(classNameMemory)
@@ -666,7 +646,7 @@ func NewWindow(options WindowOptions) *Window {
 		w.Close()
 		return nil
 	}
-	titleMemory, titleAddress := windowsNativeBytes(windowsUTF16(options.Title))
+	titleMemory, titleAddress := windowsNativeBytes(windowsNativeString(options.Title))
 	if titleMemory == 0 {
 		setLastWindowError("window title allocation failed", windowsGetLastError())
 		w.Close()
@@ -676,7 +656,7 @@ func NewWindow(options WindowOptions) *Window {
 	windowsGlobalUnlock(titleMemory)
 	windowsGlobalFree(titleMemory)
 	if w.native == 0 {
-		setLastWindowError("CreateWindowExW failed", windowsGetLastError())
+		setLastWindowError("CreateWindowEx failed", windowsGetLastError())
 		w.Close()
 		return nil
 	}
@@ -729,7 +709,7 @@ func (w *Window) SetTitle(title string) bool {
 	if w == nil || w.closed || w.native == 0 {
 		return false
 	}
-	text := windowsUTF16(title)
+	text := windowsNativeString(title)
 	return windowsSetWindowText(w.native, &text[0]) != 0
 }
 
@@ -934,7 +914,7 @@ func (w *Window) queuePointer(message int, x, y int, modifiers Modifiers) {
 		button = 3
 	}
 	if message == windowsMessageMouseMove && !w.tracking {
-		tracking := windowsTrackMouseEvent{Size: 24, Flags: windowsTrackLeave, Window: w.native}
+		tracking := windowsTrackMouseEvent{Size: windowsTrackMouseEventSize, Flags: windowsTrackLeave, Window: w.native}
 		if windowsBeginTrackMouseEvent(&tracking) != 0 {
 			w.tracking = true
 		}
@@ -993,7 +973,7 @@ func (w *Window) dispatchWindowsMessage(message *windowsMessage) bool {
 		w.queue(Event{Type: eventType, Key: message.WParam, Modifiers: modifiers, Repeat: message.LParam&(1<<30) != 0})
 	}
 	if typ == windowsMessageCharacter {
-		w.queueUTF16(message.WParam&0xffff, modifiers)
+		w.queueWindowsCharacter(message.WParam&0xffff, modifiers)
 	}
 	if typ == windowsMessageMouseMove || typ == windowsMessageLeftDown || typ == windowsMessageLeftUp || typ == windowsMessageRightDown || typ == windowsMessageRightUp || typ == windowsMessageMiddleDown || typ == windowsMessageMiddleUp {
 		w.queuePointer(typ, windowsSignedWord(message.LParam), windowsSignedWord(message.LParam>>16), modifiers)
@@ -1082,7 +1062,7 @@ func (w *Window) Wait() (Event, bool) {
 }
 
 func SetClipboardText(text string) bool {
-	data := windowsUTF16(text)
+	data := windowsClipboardEncode(text)
 	memory := windowsGlobalAlloc(windowsGlobalMoveable, len(data))
 	if memory == 0 {
 		return false
@@ -1099,7 +1079,7 @@ func SetClipboardText(text string) bool {
 		return false
 	}
 	windowsEmptyClipboard()
-	result := windowsSetClipboardData(windowsClipboardUnicode, memory)
+	result := windowsSetClipboardData(windowsClipboardTextFormat, memory)
 	windowsCloseClipboard()
 	if result == 0 {
 		windowsGlobalFree(memory)
@@ -1112,7 +1092,7 @@ func ClipboardText() (string, bool) {
 	if windowsOpenClipboard(0) == 0 {
 		return "", false
 	}
-	memory := windowsGetClipboardData(windowsClipboardUnicode)
+	memory := windowsGetClipboardData(windowsClipboardTextFormat)
 	if memory == 0 {
 		windowsCloseClipboard()
 		return "", false
@@ -1130,7 +1110,7 @@ func ClipboardText() (string, bool) {
 	windowsReadMemory(&data[0], pointer, size)
 	windowsGlobalUnlock(memory)
 	windowsCloseClipboard()
-	return windowsUTF16BytesToString(data), true
+	return windowsClipboardDecode(data), true
 }
 
 func (w *Window) Present() bool {
@@ -1154,7 +1134,10 @@ func (w *Window) Present() bool {
 	glLoadIdentity()
 	glMatrixMode(glModelView)
 	glLoadIdentity()
-	glDrawBuffer(glFrontAndBack)
+	// Render exclusively into the back buffer. Drawing into GL_FRONT_AND_BACK
+	// exposes glDrawPixels directly to the compositor before SwapBuffers and
+	// produces visible flashing while a frame is being uploaded.
+	glDrawBuffer(glBack)
 	glRasterPos2i(-1, -1)
 	glPixelStorei(glUnpackAlignment, 1)
 	glDrawPixels(w.width, w.height, glRGBA, glUnsignedByte, w.bottomUp)
@@ -1178,12 +1161,10 @@ func (w *Window) ReadPixels() *Image {
 	glLoadIdentity()
 	glMatrixMode(glModelView)
 	glLoadIdentity()
-	glDrawBuffer(glBack)
-	glRasterPos2i(-1, -1)
-	glPixelStorei(glUnpackAlignment, 1)
-	glDrawPixels(w.width, w.height, glRGBA, glUnsignedByte, w.bottomUp)
 	glFinish()
-	glReadBuffer(glBack)
+	// Capture the frame that Present made visible. Redrawing the software
+	// surface into GL_BACK here hid front-buffer presentation failures.
+	glReadBuffer(glFront)
 	glPixelStorei(glPackAlignment, 1)
 	glReadPixels(0, 0, w.width, w.height, glRGBA, glUnsignedByte, bottomUp)
 	image := NewImage(w.width, w.height, nil)

@@ -91,6 +91,8 @@ func printOptionError(options driver.Options) {
 		fmt.Fprintln(os.Stderr, "rtg: missing package path")
 	case driver.ParseErrExtraPackage:
 		fmt.Fprintf(os.Stderr, "rtg: extra package path: %s\n", options.ErrorArg)
+	case driver.ParseErrWindowsGUIRequiresWindows:
+		fmt.Fprintln(os.Stderr, "rtg: -windows-gui requires a Windows target")
 	default:
 		fmt.Fprintf(os.Stderr, "rtg: option parse failed with error %d\n", options.Error)
 	}

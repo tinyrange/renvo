@@ -316,6 +316,26 @@ func (s *Surface) drawBuiltinGlyph(font *Font, position Point, r int, color Colo
 	}
 }
 
+func (s *Surface) drawGlyphMask(mask *Image, x, y int, color Color) {
+	if mask == nil || mask.Format != PixelA8 {
+		return
+	}
+	for maskY := 0; maskY < mask.Height; maskY++ {
+		for maskX := 0; maskX < mask.Width; maskX++ {
+			alpha := int(mask.Pixels[maskY*mask.Stride+maskX])
+			if alpha != 0 {
+				tinted := Color{
+					R: byte((int(color.R)*alpha + 127) / 255),
+					G: byte((int(color.G)*alpha + 127) / 255),
+					B: byte((int(color.B)*alpha + 127) / 255),
+					A: byte((int(color.A)*alpha + 127) / 255),
+				}
+				s.putPixel(x+maskX, y+maskY, tinted)
+			}
+		}
+	}
+}
+
 func (s *Surface) DrawText(font *Font, baseline Point, text string, color Color) {
 	if font == nil {
 		return
@@ -347,9 +367,12 @@ func (s *Surface) DrawText(font *Font, baseline Point, text string, color Color)
 			glyph := font.cachedGlyph(r)
 			x += font.kern(previous, glyph.index)
 			if glyph.mask != nil {
-				width := Scalar(glyph.mask.Width)
-				height := Scalar(glyph.mask.Height)
-				s.DrawImage(glyph.mask, R(0, 0, width, height), R(x+glyph.xOffset, y+glyph.yOffset, width, height), SamplingNearest, color)
+				// Glyph bitmaps are rasterized without a subpixel shift, so place
+				// them on the corresponding nearest pixel and composite the A8 mask
+				// directly. A 1:1 glyph upload does not require affine resampling.
+				drawX := scalarFloor(x + glyph.xOffset + 0.5)
+				drawY := scalarFloor(y + glyph.yOffset + 0.5)
+				s.drawGlyphMask(glyph.mask, drawX, drawY, color)
 			}
 			x += glyph.advance
 			previous = glyph.index

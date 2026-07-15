@@ -10,15 +10,15 @@ import (
 
 func TestCompileUnitInvokesBackend(t *testing.T) {
 	backend := &recordingBackend{binary: []byte("binary")}
-	result := CompileUnit([]string{"-t", "linux/386", "-s", "-o", "app", "./cmd/app"}, "/repo/case", "/std", driverTestFiles(), backend)
+	result := CompileUnit([]string{"-t", "windows/386", "-s", "-windows-gui", "-o", "app", "./cmd/app"}, "/repo/case", "/std", driverTestFiles(), backend)
 	if !result.Ok {
 		t.Fatalf("CompileUnit failed: err=%d build=%#v", result.Error, result.Build)
 	}
 	if !bytes.Equal(result.Binary, []byte("binary")) {
 		t.Fatalf("binary = %q", string(result.Binary))
 	}
-	if backend.target != "linux/386" || !backend.strip {
-		t.Fatalf("backend target/strip = %q/%v", backend.target, backend.strip)
+	if backend.target != "windows/386" || !backend.strip || !backend.windowsGUI {
+		t.Fatalf("backend target/strip/windowsGUI = %q/%v/%v", backend.target, backend.strip, backend.windowsGUI)
 	}
 	if backend.program.Package != "main" || len(backend.program.Funcs) != 2 {
 		t.Fatalf("backend program = package %q funcs %d", backend.program.Package, len(backend.program.Funcs))
@@ -74,17 +74,19 @@ func TestCompileReportsBackendFailure(t *testing.T) {
 }
 
 type recordingBackend struct {
-	binary  []byte
-	called  bool
-	target  string
-	strip   bool
-	program unit.Program
+	binary     []byte
+	called     bool
+	target     string
+	strip      bool
+	windowsGUI bool
+	program    unit.Program
 }
 
-func (b *recordingBackend) CompileUnit(data []byte, target string, strip bool) BackendResult {
+func (b *recordingBackend) CompileUnit(data []byte, target string, strip bool, windowsGUI bool) BackendResult {
 	b.called = true
 	b.target = target
 	b.strip = strip
+	b.windowsGUI = windowsGUI
 	program, ok := unit.Unmarshal(data)
 	if !ok {
 		return BackendResult{}

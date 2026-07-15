@@ -190,6 +190,7 @@ var rtgTargetOS int = rtgOSLinux
 var rtgNativeIntSize int = 8
 var rtgCurrentTarget int = rtgTargetLinuxAmd64
 var rtgCompilerArenaSize int
+var rtgCompilerWindowsSubsystem int = 3
 
 // These bodies are used by the host Go build. Self-hosted compilers lower the
 // calls as arena intrinsics so large, phase-local scratch data can be reclaimed.
@@ -1230,7 +1231,7 @@ func rtgAppendPEHeader64(out []byte, entryRVA int, textRawSize int, textVirtualS
 	out = rtgAppend32(out, sizeOfImage)
 	out = rtgAppend32(out, rtgWinHeadersSize)
 	out = rtgAppend32(out, 0)
-	out = rtgAppend32(out, 3)
+	out = rtgAppend32(out, rtgCompilerWindowsSubsystem)
 	for i := 0; i < 3; i++ {
 		out = rtgAppend64U32(out, 0x100000)
 	}
@@ -1280,7 +1281,7 @@ func rtgAppendPEHeader32(out []byte, entryRVA int, textRawSize int, textVirtualS
 	out = rtgAppend32(out, sizeOfImage)
 	out = rtgAppend32(out, rtgWinHeadersSize)
 	out = rtgAppend32(out, 0)
-	out = rtgAppend32(out, 3)
+	out = rtgAppend32(out, rtgCompilerWindowsSubsystem)
 	out = rtgAppend32(out, 0x100000)
 	out = rtgAppend32(out, 0x100000)
 	out = rtgAppend32(out, 0x100000)
@@ -14225,6 +14226,12 @@ func rtgStringHeapOffsets(g *rtgLinearGen) {
 func rtgStringArenaSize() int {
 	if rtgCompilerArenaSize > 0 {
 		return rtgCompilerArenaSize
+	}
+	// A one-gibibyte image section consumes roughly that much commit charge on
+	// Windows even though most arena pages are never touched. Keep the 32-bit
+	// Windows default practical for Windows 98-era address spaces and pagefiles.
+	if rtgTargetOS == rtgOSWindows && rtgTargetArch == rtgArch386 {
+		return 67108864
 	}
 	if rtgTargetArch == rtgArchAmd64 || rtgTargetArch == rtgArch386 || rtgTargetArch == rtgArchWasm32 {
 		return 1073741824
