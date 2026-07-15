@@ -388,68 +388,6 @@ func rtgArmEnsureAppend64Helper(g *rtgLinearGen) int {
 	return g.append64Label
 }
 
-func rtgArmEnsureAppendBytesHelper(g *rtgLinearGen) int {
-	a := &g.asm
-	if g.appendBytesEmitted {
-		return g.appendBytesLabel
-	}
-	g.appendBytesEmitted = true
-	g.appendBytesLabel = rtgAsmNewLabel(a)
-	afterLabel := rtgAsmNewLabel(a)
-	loopLabel := rtgAsmNewLabel(a)
-	doneLabel := rtgAsmNewLabel(a)
-	rtgAsmJmpLabel(a, afterLabel)
-	rtgAsmMarkLabel(a, g.appendBytesLabel)
-	rtgArmAsmLoadRegMem(a, rtgArmRegRcx, rtgArmRegRsi, 0, 4)
-	rtgArmAsmLoadRegMem(a, rtgArmRegRdi, rtgArmRegRdi, 0, 4)
-	rtgArmAsmAddRegReg(a, rtgArmRegRdi, rtgArmRegRdi, rtgArmRegRcx)
-	rtgArmAsmAddRegReg(a, rtgArmRegRcx, rtgArmRegRcx, rtgArmRegRdx)
-	rtgArmAsmStoreRegMem(a, rtgArmRegRcx, rtgArmRegRsi, 0, 4)
-	rtgAsmMarkLabel(a, loopLabel)
-	rtgArmAsmCmpRegImm(a, rtgArmRegRdx, 0)
-	rtgArmAsmBCondLabel(a, doneLabel, 0)
-	rtgArmAsmLoadRegMem(a, rtgArmRegTmp, rtgArmRegRax, 0, 1)
-	rtgArmAsmStoreRegMem(a, rtgArmRegTmp, rtgArmRegRdi, 0, 1)
-	rtgArmAsmAddRegImm(a, rtgArmRegRax, rtgArmRegRax, 1)
-	rtgArmAsmAddRegImm(a, rtgArmRegRdi, rtgArmRegRdi, 1)
-	rtgArmAsmAddRegImm(a, rtgArmRegRdx, rtgArmRegRdx, -1)
-	rtgAsmJmpLabel(a, loopLabel)
-	rtgAsmMarkLabel(a, doneLabel)
-	rtgAsmRet(a)
-	rtgAsmMarkLabel(a, afterLabel)
-	return g.appendBytesLabel
-}
-
-func rtgArmEnsureCopyWordsHelper(g *rtgLinearGen) int {
-	a := &g.asm
-	if g.copyWordsEmitted {
-		return g.copyWordsLabel
-	}
-	g.copyWordsEmitted = true
-	g.copyWordsLabel = rtgAsmNewLabel(a)
-	afterLabel := rtgAsmNewLabel(a)
-	loopLabel := rtgAsmNewLabel(a)
-	doneLabel := rtgAsmNewLabel(a)
-	rtgAsmJmpLabel(a, afterLabel)
-	rtgAsmMarkLabel(a, g.copyWordsLabel)
-	rtgArmAsmCmpRegImm(a, rtgArmRegRdx, 0)
-	rtgArmAsmBCondLabel(a, doneLabel, 0)
-	rtgAsmMarkLabel(a, loopLabel)
-	rtgArmAsmLoadRegMem(a, rtgArmRegRax, rtgArmRegRsi, 0, 4)
-	rtgArmAsmStoreRegMem(a, rtgArmRegRax, rtgArmRegRdi, 0, 4)
-	rtgArmAsmLoadRegMem(a, rtgArmRegRax, rtgArmRegRsi, 4, 4)
-	rtgArmAsmStoreRegMem(a, rtgArmRegRax, rtgArmRegRdi, 4, 4)
-	rtgArmAsmAddRegImm(a, rtgArmRegRsi, rtgArmRegRsi, 8)
-	rtgArmAsmAddRegImm(a, rtgArmRegRdi, rtgArmRegRdi, 8)
-	rtgArmAsmAddRegImm(a, rtgArmRegRdx, rtgArmRegRdx, -1)
-	rtgArmAsmCmpRegImm(a, rtgArmRegRdx, 0)
-	rtgArmAsmBCondLabel(a, loopLabel, 1)
-	rtgAsmMarkLabel(a, doneLabel)
-	rtgAsmRet(a)
-	rtgAsmMarkLabel(a, afterLabel)
-	return g.copyWordsLabel
-}
-
 func rtgArmEnsureStringEqualHelper(g *rtgLinearGen) int {
 	a := &g.asm
 	if g.streqEmitted {
@@ -862,6 +800,10 @@ func rtgArmAsmNormalizeRaxForKind(a *rtgAsm, kind int) {
 	}
 	if kind == rtgTypeInt16 {
 		rtgArmAsmEmit(a, 0xe6bf0070)
+		return
+	}
+	if kind == rtgTypeUint16 {
+		rtgArmAsmEmit(a, 0xe6ff0070)
 	}
 }
 

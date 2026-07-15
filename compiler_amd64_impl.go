@@ -285,8 +285,16 @@ func rtgAmd64AsmNormalizeRaxForKind(a *rtgAsm, kind int) {
 		rtgAsmEmit32(a, 0xc0bf0f48)
 		return
 	}
+	if kind == rtgTypeUint16 {
+		rtgAsmEmit32(a, 0xc0b70f48)
+		return
+	}
 	if kind == rtgTypeInt32 {
 		rtgAsmEmit24(a, 0xc06348)
+		return
+	}
+	if kind == rtgTypeUint32 {
+		rtgAsmEmit16(a, 0xc089)
 	}
 }
 func rtgAmd64AsmIncMemRdx(a *rtgAsm) {
@@ -718,14 +726,14 @@ func rtgAmd64EmitCompositeFieldToMem(g *rtgLinearGen, ep *rtgExprParse, idx int,
 		}
 		size := rtgTypeSize(g.meta, fieldType)
 		rtgAsmLoadSecondaryStack(a, addrOffset)
-		rtgEmitCopyStackToMemSecondary(g, tempOffset, fieldOffset, size)
+		rtgEmitCopyTypedStackToMemSecondary(g, fieldType, tempOffset, fieldOffset, size)
 		return true
 	}
 	if !rtgEmitScalarExprForKind(g, ep, idx, fieldResolved.kind) {
 		return false
 	}
 	rtgAsmLoadSecondaryStack(a, addrOffset)
-	rtgAsmStorePrimaryMemSecondaryDisp(a, fieldOffset)
+	rtgAsmStorePrimaryMemSecondaryDispSize(a, fieldOffset, rtgNativeScalarStorageSize(fieldResolved.kind))
 	return true
 }
 func rtgAmd64EmitStructReturnExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
@@ -913,7 +921,7 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	if (e.kind == rtgExprUnary || e.kind == rtgExprBinary || e.kind == rtgExprCall) && rtgExprCanFoldConst(g, ep, idx) {
 		resultType := rtgInferParsedExprType(g, ep, idx)
 		result := rtgResolveType(g.meta, resultType)
-		if result.kind != rtgTypeByte && result.kind != rtgTypeInt8 && result.kind != rtgTypeInt16 && result.kind != rtgTypeInt32 {
+		if result.kind != rtgTypeByte && result.kind != rtgTypeInt8 && result.kind != rtgTypeInt16 && result.kind != rtgTypeInt32 && result.kind != rtgTypeUint16 && result.kind != rtgTypeUint32 {
 			constResult := rtgEvalConstExpr(g, ep, idx)
 			if constResult.ok {
 				rtgAsmPrimaryImm(a, constResult.value)
@@ -969,15 +977,22 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		if e.argCount == 1 && (callee == rtgIdentInt || callee == rtgIdentInt64) {
 			return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeInt)
 		}
-		if e.argCount == 1 && (callee == rtgIdentByte || callee == rtgIdentInt8 || callee == rtgIdentInt16 || callee == rtgIdentInt32) {
+		if e.argCount == 1 && (callee == rtgIdentByte || callee == rtgIdentInt8 || callee == rtgIdentInt16 || callee == rtgIdentInt32 || callee == rtgIdentUint16 || callee == rtgIdentUint32) {
 			if callee == rtgIdentByte {
 				return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeByte)
 			} else if callee == rtgIdentInt8 {
 				return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeInt8)
 			} else if callee == rtgIdentInt16 {
 				return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeInt16)
+			} else if callee == rtgIdentUint16 {
+				return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeUint16)
+			} else if callee == rtgIdentUint32 {
+				return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeUint32)
 			}
 			return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeInt32)
+		}
+		if e.argCount == 1 && callee == rtgIdentUint64 {
+			return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeUint64)
 		}
 		if e.argCount == 1 && (callee == rtgIdentCap || callee == rtgIdentLen) {
 			count := rtgArrayBuiltinCount(g, ep, e)
@@ -1207,16 +1222,21 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		return rtgEmitIndexExpr(g, ep, idx)
 	}
 	if e.kind == rtgExprSelector {
+		baseType := rtgInferParsedExprType(g, ep, e.left)
+		nativeABI := rtgTypeUsesNativeABI(g.meta, baseType)
+		fieldType := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, idx))
+		fieldSize := rtgNativeScalarStorageSize(fieldType.kind)
 		base := &ep.exprs[e.left]
 		if base.kind == rtgExprCall {
-			baseType := rtgInferParsedExprType(g, ep, e.left)
 			baseResolved := rtgResolveType(g.meta, baseType)
 			if baseResolved.kind == rtgTypePointer {
 				if !rtgEmitSelectorAddressSecondary(g, ep, idx) {
 					return false
 				}
-				fieldType := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, idx))
-				rtgAsmLoadPrimaryMemSecondaryDispSize(a, 0, rtgScalarKindSize(fieldType.kind))
+				rtgAsmLoadPrimaryMemSecondaryDispSize(a, 0, fieldSize)
+				if nativeABI {
+					rtgAsmNormalizePrimaryForKind(a, fieldType.kind)
+				}
 				return true
 			}
 			if !rtgTypeIsStruct(g.meta, baseType) {
@@ -1230,20 +1250,39 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			if !rtgEmitStructCallToLocal(g, ep, e.left, baseType, offset) {
 				return false
 			}
-			rtgAsmLoadPrimaryStack(a, offset-fieldOffset)
+			if nativeABI {
+				rtgAsmAddressPrimaryStack(a, offset-fieldOffset)
+				rtgAsmCopyPrimaryToSecondary(a)
+				rtgAsmLoadPrimaryMemSecondaryDispSize(a, 0, fieldSize)
+				rtgAsmNormalizePrimaryForKind(a, fieldType.kind)
+			} else {
+				rtgAsmLoadPrimaryStack(a, offset-fieldOffset)
+			}
 			return true
 		}
 		if base.kind == rtgExprIndex {
 			return rtgEmitIndexedStructField(g, ep, e.left, e.nameStart, e.nameEnd)
 		}
 		if offset, ok := rtgLocalStructSelectorOffset(g, ep, idx); ok {
-			rtgAsmLoadPrimaryStack(a, offset)
+			if nativeABI {
+				rtgAsmAddressPrimaryStack(a, offset)
+				rtgAsmCopyPrimaryToSecondary(a)
+				rtgAsmLoadPrimaryMemSecondaryDispSize(a, 0, fieldSize)
+				rtgAsmNormalizePrimaryForKind(a, fieldType.kind)
+			} else {
+				rtgAsmLoadPrimaryStack(a, offset)
+			}
 			return true
 		}
 		if !rtgEmitSelectorAddressSecondary(g, ep, idx) {
 			return false
 		}
-		rtgAsmLoadPrimaryMemSecondaryDisp(a, 0)
+		if nativeABI {
+			rtgAsmLoadPrimaryMemSecondaryDispSize(a, 0, fieldSize)
+			rtgAsmNormalizePrimaryForKind(a, fieldType.kind)
+		} else {
+			rtgAsmLoadPrimaryMemSecondaryDisp(a, 0)
+		}
 		return true
 	}
 	if e.kind == rtgExprUnary {
@@ -1610,113 +1649,14 @@ func rtgAmd64EnsureAppend64Helper(g *rtgLinearGen) int {
 	rtgAsmMarkLabel(a, afterLabel)
 	return g.append64Label
 }
+
+// Kept as empty compatibility hooks for the performance source slicer. The
+// legacy helpers have no callers in the compiler.
 func rtgAmd64EnsureAppendBytesHelper(g *rtgLinearGen) int {
-	a := &g.asm
-	if g.appendBytesEmitted {
-		return g.appendBytesLabel
-	}
-	arenaAllocLabel := rtgEnsureArenaAllocHelper(g)
-	g.appendBytesEmitted = true
-	g.appendBytesLabel = rtgAsmNewLabel(a)
-	afterLabel := rtgAsmNewLabel(a)
-	rtgAsmJmpLabel(a, afterLabel)
-	rtgAsmMarkLabel(a, g.appendBytesLabel)
-	noGrowLabel := rtgAsmNewLabel(a)
-	capNonZeroLabel := rtgAsmNewLabel(a)
-	capReadyLabel := rtgAsmNewLabel(a)
-	capOKLabel := rtgAsmNewLabel(a)
-	rtgAsmEmit24(a, 0x0e8b48)
-	rtgAsmEmit24(a, 0x018b4d)
-	rtgAsmEmit24(a, 0xca8949)
-	rtgAsmEmit24(a, 0xd20149)
-	rtgAsmEmit24(a, 0xc2394d)
-	rtgAmd64AsmJccLabel(a, 0x8e, noGrowLabel)
-	rtgAsmEmit8(a, 0x57)
-	rtgAsmEmit8(a, 0x56)
-	rtgAsmEmit16(a, 0x5141)
-	rtgAsmPushPrimary(a)
-	rtgAsmPushSecondary(a)
-	rtgAsmPushTertiary(a)
-	rtgAsmEmit16(a, 0x5241)
-	rtgAsmEmit24(a, 0xc0854d)
-	rtgAmd64AsmJccLabel(a, 0x85, capNonZeroLabel)
-	rtgAsmEmit24(a, 0xc0c749)
-	rtgAsmEmit32(a, 16)
-	rtgAsmJmpLabel(a, capReadyLabel)
-	rtgAsmMarkLabel(a, capNonZeroLabel)
-	rtgAsmEmit24(a, 0xc0014d)
-	rtgAsmMarkLabel(a, capReadyLabel)
-	rtgAsmEmit32(a, 0x24148b4c)
-	rtgAsmEmit24(a, 0xc2394d)
-	rtgAmd64AsmJccLabel(a, 0x8e, capOKLabel)
-	rtgAsmEmit24(a, 0xd0894d)
-	rtgAsmMarkLabel(a, capOKLabel)
-	rtgAsmEmit16(a, 0x5041)
-	rtgAsmEmit24(a, 0xc1894c)
-	rtgAsmPushTertiary(a)
-	rtgAsmPopPrimary(a)
-	rtgAsmCallLabel(a, arenaAllocLabel)
-	rtgAsmPushPrimary(a)
-	rtgAsmEmit5(a, 0x48, 0x8b, 0x7c, 0x24, 64)
-	rtgAsmEmit24(a, 0x378b48)
-	rtgAsmEmit32(a, 0x243c8b48)
-	rtgAsmEmit5(a, 0x48, 0x8b, 0x4c, 0x24, 24)
-	rtgAsmEmit8(a, 0xfc)
-	rtgAsmEmit16(a, 0xa4f3)
-	rtgAsmEmit5(a, 0x48, 0x8b, 0x7c, 0x24, 64)
-	rtgAsmEmit32(a, 0x24048b48)
-	rtgAsmEmit24(a, 0x078948)
-	rtgAsmEmit5(a, 0x4c, 0x8b, 0x4c, 0x24, 48)
-	rtgAsmEmit5(a, 0x4c, 0x8b, 0x44, 0x24, 8)
-	rtgAsmEmit24(a, 0x01894d)
-	rtgAsmEmit32(a, 0x243c8b48)
-	rtgAsmEmit5(a, 0x48, 0x8b, 0x4c, 0x24, 24)
-	rtgAsmEmit24(a, 0xcf0148)
-	rtgAsmEmit5(a, 0x48, 0x8b, 0x74, 0x24, 40)
-	rtgAsmEmit5(a, 0x48, 0x8b, 0x4c, 0x24, 32)
-	rtgAsmEmit16(a, 0xa4f3)
-	rtgAsmEmit5(a, 0x48, 0x8b, 0x74, 0x24, 56)
-	rtgAsmEmit5(a, 0x48, 0x8b, 0x4c, 0x24, 16)
-	rtgAsmEmit24(a, 0x0e8948)
-	rtgAsmEmit4(a, 0x48, 0x83, 0xc4, 72)
-	rtgAsmRet(a)
-	rtgAsmMarkLabel(a, noGrowLabel)
-	rtgAsmEmit24(a, 0x0e8b48)
-	rtgAsmEmit24(a, 0x3f8b48)
-	rtgAsmEmit24(a, 0xcf0148)
-	rtgAsmEmit24(a, 0x160148)
-	rtgAsmEmit24(a, 0xc68948)
-	rtgAsmEmit24(a, 0xd18948)
-	rtgAsmEmit16(a, 0xa4f3)
-	rtgAsmRet(a)
-	rtgAsmMarkLabel(a, afterLabel)
-	return g.appendBytesLabel
+	return 0
 }
 func rtgAmd64EnsureCopyWordsHelper(g *rtgLinearGen) int {
-	a := &g.asm
-	if g.copyWordsEmitted {
-		return g.copyWordsLabel
-	}
-	g.copyWordsEmitted = true
-	g.copyWordsLabel = rtgAsmNewLabel(a)
-	afterLabel := rtgAsmNewLabel(a)
-	rtgAsmJmpLabel(a, afterLabel)
-	rtgAsmMarkLabel(a, g.copyWordsLabel)
-	loopLabel := rtgAsmNewLabel(a)
-	doneLabel := rtgAsmNewLabel(a)
-	rtgAsmEmit24(a, 0xd28548)
-	rtgAsmJzLabel(a, doneLabel)
-	rtgAsmMarkLabel(a, loopLabel)
-	rtgAsmEmit24(a, 0x068b48)
-	rtgAsmEmit24(a, 0x078948)
-	rtgAsmEmit4(a, 0x48, 0x83, 0xc6, 8)
-	rtgAsmEmit4(a, 0x48, 0x83, 0xc7, 8)
-	rtgAsmEmit24(a, 0xcaff48)
-	rtgAsmJnzLabel(a, loopLabel)
-	rtgAsmMarkLabel(a, doneLabel)
-	rtgAsmRet(a)
-	rtgAsmMarkLabel(a, afterLabel)
-	return g.copyWordsLabel
+	return 0
 }
 func rtgAmd64EnsureStringEqualHelper(g *rtgLinearGen) int {
 	a := &g.asm

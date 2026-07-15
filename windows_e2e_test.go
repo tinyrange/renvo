@@ -46,6 +46,7 @@ func TestWindowsTargetsEndToEnd(t *testing.T) {
 		"tests/globals_multiple_globals_combine_into_checksum.go",
 		"tests/functions_call_int_helper.go",
 		"tests/control_integration_final_checksum.go",
+		"tests/windows_native_struct_layout.rtg",
 	}
 	amd64TestSources := []string{
 		"tests/windows_amd64_linkstatic_even_stack_args.rtg",

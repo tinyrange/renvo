@@ -577,6 +577,11 @@ func rtgWasm32AsmNormalizeRaxForKind(a *rtgAsm, kind int) {
 		rtgWasm32EmitRegReg(a, rtgWasm32OpShlRegReg, rtgWasm32RegRax, rtgWasm32RegRdx)
 		rtgWasm32EmitRegImm(a, rtgWasm32OpMovRegImm, rtgWasm32RegRdx, 16)
 		rtgWasm32EmitRegReg(a, rtgWasm32OpShrRegReg, rtgWasm32RegRax, rtgWasm32RegRdx)
+		return
+	}
+	if kind == rtgTypeUint16 {
+		rtgWasm32EmitRegImm(a, rtgWasm32OpMovRegImm, rtgWasm32RegRdx, 65535)
+		rtgWasm32EmitRegReg(a, rtgWasm32OpAndRegReg, rtgWasm32RegRax, rtgWasm32RegRdx)
 	}
 }
 
@@ -2508,70 +2513,6 @@ func rtgWasm32EnsureAppend64Helper(g *rtgLinearGen) int {
 	rtgAsmRet(a)
 	rtgAsmMarkLabel(a, afterLabel)
 	return g.append64Label
-}
-
-func rtgWasm32EnsureAppendBytesHelper(g *rtgLinearGen) int {
-	a := &g.asm
-	if g.appendBytesEmitted {
-		return g.appendBytesLabel
-	}
-	g.appendBytesEmitted = true
-	g.appendBytesLabel = rtgAsmNewLabel(a)
-	afterLabel := rtgAsmNewLabel(a)
-	loopLabel := rtgAsmNewLabel(a)
-	doneLabel := rtgAsmNewLabel(a)
-	rtgAsmJmpLabel(a, afterLabel)
-	rtgAsmMarkLabel(a, g.appendBytesLabel)
-	rtgWasm32EmitRegReg(a, rtgWasm32OpMovRegReg, rtgWasm32RegR9, rtgWasm32RegRdx)
-	rtgWasm32EmitRegReg(a, rtgWasm32OpMovRegReg, rtgWasm32RegR8, rtgWasm32RegRdx)
-	rtgWasm32EmitRegReg(a, rtgWasm32OpMovRegReg, rtgWasm32RegRdx, rtgWasm32RegRax)
-	rtgWasm32EmitMem(a, rtgWasm32OpLoadMem, rtgWasm32RegRcx, rtgWasm32RegRsi, 0, 4)
-	rtgWasm32EmitMem(a, rtgWasm32OpLoadMem, rtgWasm32RegR10, rtgWasm32RegRdi, 0, 4)
-	rtgWasm32EmitRegReg(a, rtgWasm32OpAddRegReg, rtgWasm32RegR10, rtgWasm32RegRcx)
-	rtgAsmMarkLabel(a, loopLabel)
-	rtgWasm32EmitRegImm(a, rtgWasm32OpCmpRegImm, rtgWasm32RegR9, 0)
-	rtgAsmJzLabel(a, doneLabel)
-	rtgWasm32EmitMem(a, rtgWasm32OpLoadMem, rtgWasm32RegRax, rtgWasm32RegRdx, 0, 1)
-	rtgWasm32EmitMem(a, rtgWasm32OpStoreMem, rtgWasm32RegRax, rtgWasm32RegR10, 0, 1)
-	rtgWasm32EmitRegImm(a, rtgWasm32OpAddRegImm, rtgWasm32RegRdx, 1)
-	rtgWasm32EmitRegImm(a, rtgWasm32OpAddRegImm, rtgWasm32RegR10, 1)
-	rtgWasm32EmitRegImm(a, rtgWasm32OpAddRegImm, rtgWasm32RegR9, -1)
-	rtgAsmJmpLabel(a, loopLabel)
-	rtgAsmMarkLabel(a, doneLabel)
-	rtgWasm32EmitMem(a, rtgWasm32OpLoadMem, rtgWasm32RegRax, rtgWasm32RegRsi, 0, 4)
-	rtgWasm32EmitRegReg(a, rtgWasm32OpAddRegReg, rtgWasm32RegRax, rtgWasm32RegR8)
-	rtgWasm32EmitMem(a, rtgWasm32OpStoreMem, rtgWasm32RegRax, rtgWasm32RegRsi, 0, 4)
-	rtgAsmRet(a)
-	rtgAsmMarkLabel(a, afterLabel)
-	return g.appendBytesLabel
-}
-
-func rtgWasm32EnsureCopyWordsHelper(g *rtgLinearGen) int {
-	a := &g.asm
-	if g.copyWordsEmitted {
-		return g.copyWordsLabel
-	}
-	g.copyWordsEmitted = true
-	g.copyWordsLabel = rtgAsmNewLabel(a)
-	afterLabel := rtgAsmNewLabel(a)
-	loopLabel := rtgAsmNewLabel(a)
-	doneLabel := rtgAsmNewLabel(a)
-	rtgAsmJmpLabel(a, afterLabel)
-	rtgAsmMarkLabel(a, g.copyWordsLabel)
-	rtgWasm32EmitRegImm(a, rtgWasm32OpCmpRegImm, rtgWasm32RegRdx, 0)
-	rtgAsmJzLabel(a, doneLabel)
-	rtgAsmMarkLabel(a, loopLabel)
-	rtgWasm32EmitMem(a, rtgWasm32OpLoadMem, rtgWasm32RegRax, rtgWasm32RegRsi, 0, 4)
-	rtgWasm32EmitMem(a, rtgWasm32OpStoreMem, rtgWasm32RegRax, rtgWasm32RegRdi, 0, 4)
-	rtgWasm32EmitRegImm(a, rtgWasm32OpAddRegImm, rtgWasm32RegRsi, 8)
-	rtgWasm32EmitRegImm(a, rtgWasm32OpAddRegImm, rtgWasm32RegRdi, 8)
-	rtgWasm32EmitRegImm(a, rtgWasm32OpAddRegImm, rtgWasm32RegRdx, -1)
-	rtgWasm32EmitRegImm(a, rtgWasm32OpCmpRegImm, rtgWasm32RegRdx, 0)
-	rtgAsmJnzLabel(a, loopLabel)
-	rtgAsmMarkLabel(a, doneLabel)
-	rtgAsmRet(a)
-	rtgAsmMarkLabel(a, afterLabel)
-	return g.copyWordsLabel
 }
 
 func rtgWasm32EnsureStringEqualHelper(g *rtgLinearGen) int {
