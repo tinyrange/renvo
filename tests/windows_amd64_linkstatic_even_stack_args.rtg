@@ -1,0 +1,20 @@
+package main
+
+// rtg:linkstatic kernel32.dll,WideCharToMultiByte
+func wideCharToMultiByte(codePage int, flags int, wide *uint16, wideLen int, multi *byte, multiLen int, defaultChar *byte, usedDefault *int) int {
+	return 0
+}
+
+func appMain(args []string) int {
+	wide := [1]uint16{65}
+	multi := [4]byte{}
+	defaultChar := byte(0)
+	usedDefault := 0
+	count := wideCharToMultiByte(65001, 0, &wide[0], 1, &multi[0], len(multi), &defaultChar, &usedDefault)
+	if count != 1 || multi[0] != 65 {
+		print("FAIL\n")
+		return 1
+	}
+	print("PASS\n")
+	return 0
+}

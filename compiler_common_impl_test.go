@@ -433,3 +433,75 @@ func TestWindowsAmd64LinkStaticCallReservesAlignedShadowSpace(t *testing.T) {
 		t.Fatalf("linkstatic call prefix = % x, want % x", asm.code, want)
 	}
 }
+
+func TestWindowsAmd64LinkStaticCallAlignsStackArguments(t *testing.T) {
+	tests := []struct {
+		name      string
+		wordCount int
+		want      []byte
+	}{
+		{
+			name:      "odd stack word count",
+			wordCount: 5,
+			want: []byte{
+				0x59, 0x5a, 0x41, 0x58, 0x41, 0x59,
+				0x48, 0x83, 0xec, 32,
+				0xff, 0x15, 0, 0, 0, 0,
+				0x48, 0x83, 0xc4, 40,
+			},
+		},
+		{
+			name:      "even stack word count",
+			wordCount: 6,
+			want: []byte{
+				0x59, 0x5a, 0x41, 0x58, 0x41, 0x59,
+				0x48, 0x8b, 0x04, 0x24,
+				0x48, 0x89, 0x44, 0x24, 0xf8,
+				0x48, 0x8b, 0x44, 0x24, 0x08,
+				0x48, 0x89, 0x04, 0x24,
+				0x48, 0x83, 0xec, 40,
+				0xff, 0x15, 0, 0, 0, 0,
+				0x48, 0x83, 0xc4, 56,
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var asm rtgAsm
+			rtgAsmInit(&asm)
+			rtgWinAmd64CallStaticImport(&asm, 0, test.wordCount)
+			if len(asm.code) != len(test.want) {
+				t.Fatalf("linkstatic call = % x, want % x", asm.code, test.want)
+			}
+			for i := 0; i < len(test.want); i++ {
+				if asm.code[i] != test.want[i] {
+					t.Fatalf("linkstatic call = % x, want % x", asm.code, test.want)
+				}
+			}
+		})
+	}
+}
+
+func TestWindowsAmd64LinkStaticCallAlignsTwelveWordImport(t *testing.T) {
+	var asm rtgAsm
+	rtgAsmInit(&asm)
+	rtgWinAmd64CallStaticImport(&asm, 0, 12)
+	if len(asm.code) != 98 {
+		t.Fatalf("12-word linkstatic call length = %d, code % x", len(asm.code), asm.code)
+	}
+	// The eighth pending stack word moves from rsp+56 to rsp+48, proving that
+	// every argument was shifted and that argument 5 can occupy rsp+32 after
+	// the following 40-byte reservation.
+	wantLastMove := []byte{0x48, 0x8b, 0x44, 0x24, 56, 0x48, 0x89, 0x44, 0x24, 48}
+	for i := 0; i < len(wantLastMove); i++ {
+		if asm.code[74+i] != wantLastMove[i] {
+			t.Fatalf("12-word final shift = % x, want % x", asm.code[74:84], wantLastMove)
+		}
+	}
+	wantTail := []byte{0x48, 0x83, 0xec, 40, 0xff, 0x15, 0, 0, 0, 0, 0x48, 0x83, 0xc4, 104}
+	for i := 0; i < len(wantTail); i++ {
+		if asm.code[84+i] != wantTail[i] {
+			t.Fatalf("12-word call tail = % x, want % x", asm.code[84:], wantTail)
+		}
+	}
+}

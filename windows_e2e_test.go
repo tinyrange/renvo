@@ -47,11 +47,18 @@ func TestWindowsTargetsEndToEnd(t *testing.T) {
 		"tests/functions_call_int_helper.go",
 		"tests/control_integration_final_checksum.go",
 	}
+	amd64TestSources := []string{
+		"tests/windows_amd64_linkstatic_even_stack_args.rtg",
+	}
 
 	for _, target := range windowsE2ETargets {
 		target := target
 		t.Run(target.name, func(t *testing.T) {
 			targetDir := t.TempDir()
+			targetTestSources := append([]string(nil), testSources...)
+			if target.name == "windows/amd64" {
+				targetTestSources = append(targetTestSources, amd64TestSources...)
+			}
 			t.Run("stage0_print_smoke", func(t *testing.T) {
 				compileAndRunWindowsInput(t, target.name, stage0, []string{"tests/print_pass_smoke.go"})
 			})
@@ -69,7 +76,7 @@ func TestWindowsTargetsEndToEnd(t *testing.T) {
 			assertWindowsCommandOK(t, "stage1 compiler", result)
 			validateWindowsPE(t, stage2, target.machine)
 
-			for _, source := range testSources {
+			for _, source := range targetTestSources {
 				source := source
 				t.Run(filepath.Base(source), func(t *testing.T) {
 					compileAndRunWindowsInput(t, target.name, stage2, []string{source})
