@@ -1,5 +1,7 @@
 package syntax
 
+import "j5.nz/rtg/rtg/internal/arena"
+
 const (
 	ParseOK = iota
 	ParseErrScan
@@ -51,7 +53,9 @@ type FuncDecl struct {
 }
 
 func ParseFile(src []byte) File {
+	tokenArenaStart := arena.Mark()
 	tokens, scanOK := parseScanTokens(src)
+	tokenArenaEnd := arena.Mark()
 	file := File{
 		Src:         src,
 		Tokens:      tokens,
@@ -59,6 +63,15 @@ func ParseFile(src []byte) File {
 		Ok:          true,
 		Error:       ParseOK,
 		ErrorTok:    -1,
+	}
+	// RTG represents these four integer fields in four eight-byte arena slots.
+	// Scanning performs no other allocation, so the final backing array ends at
+	// tokenArenaEnd even when append replaced one or more smaller arrays. Drop
+	// those superseded arrays now so they do not contribute to peak RSS.
+	const tokenArenaElementSize = 32
+	finalTokenStart := tokenArenaEnd - cap(tokens)*tokenArenaElementSize
+	if tokenArenaEnd > tokenArenaStart {
+		arena.Discard(tokenArenaStart, finalTokenStart)
 	}
 	if !scanOK {
 		return parseFail(file, ParseErrScan, len(tokens)-1)

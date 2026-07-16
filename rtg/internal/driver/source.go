@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"j5.nz/rtg/rtg/internal/arena"
 	"j5.nz/rtg/rtg/internal/load"
 )
 
@@ -187,7 +188,9 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 			continue
 		}
 		path := load.JoinPath(ref.Dir, entry.Name)
+		arenaStart := arena.Mark()
 		src, ok := c.fs.ReadFile(path)
+		arenaEnd := arena.Mark()
 		if !ok {
 			c.fail(SourceErrReadFile, path)
 			return
@@ -198,10 +201,11 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 			return
 		}
 		if !enabled {
+			arena.Discard(arenaStart, arenaEnd)
 			continue
 		}
 		found = true
-		c.files = append(c.files, load.SourceFile{Path: path, Src: src})
+		c.files = append(c.files, load.SourceFile{Path: path, Src: src, ArenaStart: arenaStart, ArenaEnd: arenaEnd})
 		imports, importsOK := collectSourceImports(owner, c.stdRoot, src)
 		if !importsOK {
 			c.failAt(SourceErrParse, path, path, len(src))

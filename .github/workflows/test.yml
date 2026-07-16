@@ -53,6 +53,11 @@ jobs:
           RTG_COMPILER_RESOURCE_GATES: "1"
         run: go test -count=1 -timeout 5m -run '^TestCompilerResourceGates$' .
 
+      - name: Run frontend compiler performance gate
+        env:
+          RTG_STDROOT: ${{ github.workspace }}/rtg/std
+        run: go test -count=1 -timeout 5m -run '^TestFrontendCompilerPerformance$' .
+
       - name: Run backend tests
         env:
           RTG_CROSS_ARCH_TESTS: "1"

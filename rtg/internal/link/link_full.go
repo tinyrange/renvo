@@ -1906,32 +1906,56 @@ func packageSymbolAliases(programs []unit.Program, root int, symbolOffsets []int
 		total = symbolOffsets[last] + len(programs[last].Symbols)
 	}
 	out := make([]string, total)
+	if total == 0 {
+		return out
+	}
+	buckets := make([]int, total*2+1)
+	for i := 0; i < len(buckets); i++ {
+		buckets[i] = -1
+	}
+	next := make([]int, total)
+	names := make([]string, total)
+	duplicate := make([]bool, total)
+	for i := 0; i < len(programs); i++ {
+		for j := 0; j < len(programs[i].Symbols); j++ {
+			index := symbolOffsets[i] + j
+			name := programs[i].Symbols[j].Name
+			names[index] = name
+			bucket := symbolAliasHash(name) % len(buckets)
+			next[index] = buckets[bucket]
+			for prior := buckets[bucket]; prior >= 0; prior = next[prior] {
+				if names[prior] == name {
+					duplicate[index] = true
+					duplicate[prior] = true
+				}
+			}
+			buckets[bucket] = index
+		}
+	}
 	for i := 0; i < len(programs); i++ {
 		if i == root {
 			continue
 		}
 		for j := 0; j < len(programs[i].Symbols); j++ {
-			if symbolNeedsAlias(programs, i, j) {
-				out[symbolOffsets[i]+j] = symbolAliasName(i, programs[i].Symbols[j].Name)
+			index := symbolOffsets[i] + j
+			if duplicate[index] && !symbolKeepsRuntimeName(programs[i].Symbols[j].Name) {
+				out[index] = symbolAliasName(i, programs[i].Symbols[j].Name)
 			}
 		}
 	}
 	return out
 }
 
-func symbolNeedsAlias(programs []unit.Program, pkg int, symbol int) bool {
-	name := programs[pkg].Symbols[symbol].Name
-	for i := 0; i < len(programs); i++ {
-		for j := 0; j < len(programs[i].Symbols); j++ {
-			if i == pkg && j == symbol {
-				continue
-			}
-			if programs[i].Symbols[j].Name == name {
-				return true
-			}
-		}
+func symbolKeepsRuntimeName(name string) bool {
+	return name == "rtg_runtime_ArenaMark" || name == "rtg_runtime_ArenaReset"
+}
+
+func symbolAliasHash(name string) int {
+	hash := 5381
+	for i := 0; i < len(name); i++ {
+		hash = ((hash << 5) + hash) ^ int(name[i])
 	}
-	return false
+	return hash & 2147483647
 }
 
 func packageSymbolAlias(aliases []string, symbolOffsets []int, pkg int, symbol int) string {

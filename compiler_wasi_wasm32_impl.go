@@ -63,7 +63,7 @@ func rtgTryCompileScalarProgramWasm32(p *rtgProgram, meta *rtgMeta) rtgCompileRe
 	rtgWasm32AsmExit(a)
 	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
 		i := g.funcQueue[queueIndex]
-		if !rtgWasm32EmitScalarFunctionScratch(&g, i) {
+		if !rtgEmitScalarFunctionScratch(&g, i) {
 			rtgPrintErr("rtg: wasm32 failed in function ")
 			write(2, meta.prog.src[meta.funcs[i].nameStart:meta.funcs[i].nameEnd], -1)
 			rtgPrintErr("\n")
@@ -77,23 +77,6 @@ func rtgTryCompileScalarProgramWasm32(p *rtgProgram, meta *rtgMeta) rtgCompileRe
 	result.ok = true
 	return result
 }
-
-func rtgWasm32EmitScalarFunctionScratch(g *rtgLinearGen, fnIndex int) bool {
-	mark := rtg_runtime_ArenaMark()
-	persistentCapacity := rtgWasm32PersistentCapacity(g)
-	ok := rtgEmitScalarFunction(g, fnIndex)
-	if persistentCapacity == rtgWasm32PersistentCapacity(g) {
-		rtg_runtime_ArenaReset(mark)
-	}
-	return ok
-}
-
-func rtgWasm32PersistentCapacity(g *rtgLinearGen) int {
-	a := &g.asm
-	m := g.meta
-	return cap(a.code) + cap(a.labelPos) + cap(a.labelSet) + cap(a.relocs) + cap(a.absRelocs) + cap(a.symbols) + cap(a.symbolName) + cap(a.winImports) + cap(a.darwinImportLabels) + cap(a.darwinImportUsed) + cap(a.data) + cap(g.funcLabels) + cap(g.funcReachable) + cap(g.funcQueue) + cap(g.globals) + cap(g.breakLabels) + cap(g.continueLabels) + cap(m.types) + cap(m.fields) + cap(m.globals) + cap(m.globalNext) + cap(m.params) + cap(m.funcs) + cap(m.globalBuckets) + cap(m.funcBuckets) + cap(m.funcNext)
-}
-
 func rtgEmitProgramEntryArgsWasm32(g *rtgLinearGen, appIndex int) bool {
 	app := &g.meta.funcs[appIndex]
 	if app.resultType != 0 && !rtgTypeIsInt(g.meta, app.resultType) {

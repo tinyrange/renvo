@@ -121,7 +121,7 @@ func rtgTryCompileScalarProgramAarch64(p *rtgProgram, meta *rtgMeta) rtgCompileR
 	}
 	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
 		i := g.funcQueue[queueIndex]
-		if !rtgEmitScalarFunction(&g, i) {
+		if !rtgEmitScalarFunctionScratch(&g, i) {
 			if rtgTargetIsDarwin() {
 				rtgPrintErr("rtg: failed to emit function ")
 				write(2, p.src[meta.funcs[i].nameStart:meta.funcs[i].nameEnd], -1)

@@ -41,29 +41,43 @@ func Scan(src []byte) []Token {
 			i += 2
 			continue
 		}
-		if isIdentStart(c) {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' {
 			start := i
+			hash := int(c)
 			i++
-			for i < len(src) && isIdentPart(src[i]) {
+			for i < len(src) {
+				part := src[i]
+				if !((part >= 'a' && part <= 'z') || (part >= 'A' && part <= 'Z') || (part >= '0' && part <= '9') || part == '_') {
+					break
+				}
+				hash = hash*5 + int(part)
 				i++
 			}
-			tokens = appendScanToken(tokens, keywordKind(src, start, i), start, i, line)
+			tokens = append(tokens, Token{Kind: keywordKindHash(src, start, i, hash), Start: start, End: i, Line: line})
 			continue
 		}
 		if c >= '0' && c <= '9' {
 			start := i
 			kind := TokenNumber
 			i++
-			for i < len(src) && isIdentPart(src[i]) {
+			for i < len(src) {
+				part := src[i]
+				if !((part >= 'a' && part <= 'z') || (part >= 'A' && part <= 'Z') || (part >= '0' && part <= '9') || part == '_') {
+					break
+				}
 				i++
 			}
 			if i < len(src) && src[i] == '.' {
 				i++
-				for i < len(src) && isIdentPart(src[i]) {
+				for i < len(src) {
+					part := src[i]
+					if !((part >= 'a' && part <= 'z') || (part >= 'A' && part <= 'Z') || (part >= '0' && part <= '9') || part == '_') {
+						break
+					}
 					i++
 				}
 			}
-			tokens = appendScanToken(tokens, kind, start, i, line)
+			tokens = append(tokens, Token{Kind: kind, Start: start, End: i, Line: line})
 			continue
 		}
 		if c == '"' {
@@ -82,7 +96,7 @@ func Scan(src []byte) []Token {
 			if i < len(src) && src[i] == '"' {
 				i++
 			}
-			tokens = appendScanToken(tokens, TokenString, start, i, line)
+			tokens = append(tokens, Token{Kind: TokenString, Start: start, End: i, Line: line})
 			continue
 		}
 		if c == '`' {
@@ -98,7 +112,7 @@ func Scan(src []byte) []Token {
 			if i < len(src) && src[i] == '`' {
 				i++
 			}
-			tokens = appendScanToken(tokens, TokenString, start, i, tokenLine)
+			tokens = append(tokens, Token{Kind: TokenString, Start: start, End: i, Line: tokenLine})
 			continue
 		}
 		if c == '\'' {
@@ -117,7 +131,7 @@ func Scan(src []byte) []Token {
 			if i < len(src) && src[i] == '\'' {
 				i++
 			}
-			tokens = appendScanToken(tokens, TokenChar, start, i, line)
+			tokens = append(tokens, Token{Kind: TokenChar, Start: start, End: i, Line: line})
 			continue
 		}
 		start := i
@@ -128,9 +142,9 @@ func Scan(src []byte) []Token {
 				i++
 			}
 		}
-		tokens = appendScanToken(tokens, TokenOperator, start, i, line)
+		tokens = append(tokens, Token{Kind: TokenOperator, Start: start, End: i, Line: line})
 	}
-	tokens = appendScanToken(tokens, TokenEOF, len(src), len(src), line)
+	tokens = append(tokens, Token{Kind: TokenEOF, Start: len(src), End: len(src), Line: line})
 	return tokens
 }
 
@@ -310,15 +324,6 @@ func (s *Scanner) Scan(src []byte) {
 	s.add(TokenEOF, len(src), len(src), line)
 }
 
-func appendScanToken(tokens []Token, kind int, start int, end int, line int) []Token {
-	var tok Token
-	tok.Kind = kind
-	tok.Start = start
-	tok.End = end
-	tok.Line = line
-	return append(tokens, tok)
-}
-
 func scanTokenCapacity(src []byte) int {
 	capacity := len(src) / 4
 	if capacity < 16 {
@@ -391,13 +396,17 @@ func isThreeByteOperator(a byte, b byte, c byte) bool {
 }
 
 func keywordKind(src []byte, start int, end int) int {
-	n := end - start
-	if n > 11 {
-		return TokenIdent
-	}
 	h := 0
 	for i := start; i < end; i++ {
 		h = h*5 + int(src[i])
+	}
+	return keywordKindHash(src, start, end, h)
+}
+
+func keywordKindHash(src []byte, start int, end int, h int) int {
+	n := end - start
+	if n > 11 {
+		return TokenIdent
 	}
 	if n == 2 {
 		if h == 627 && bytesEqualText(src, start, end, "if") {

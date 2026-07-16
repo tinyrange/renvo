@@ -22,14 +22,18 @@ const (
 )
 
 type SourceFile struct {
-	Path string
-	Src  []byte
+	Path       string
+	Src        []byte
+	ArenaStart int
+	ArenaEnd   int
 }
 
 type ParsedFile struct {
-	Path string
-	Src  []byte
-	File syntax.File
+	Path       string
+	Src        []byte
+	File       syntax.File
+	ArenaStart int
+	ArenaEnd   int
 }
 
 type Package struct {
@@ -108,34 +112,36 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 	for i := 0; i < len(selected); i++ {
 		parsed := syntax.ParseFile(selected[i].Src)
 		if !parsed.Ok {
-			pkg.Files = append(pkg.Files, newParsedFile(selected[i].Path, selected[i].Src, parsed))
+			pkg.Files = append(pkg.Files, newParsedFile(selected[i], parsed))
 			return packageFail(pkg, PackageErrParse, i, -1)
 		}
 		name := string(syntax.TokenText(parsed.Src, parsed.Tokens[parsed.PackageName]))
 		if pkg.Name == "" {
 			pkg.Name = name
 		} else if pkg.Name != name {
-			pkg.Files = append(pkg.Files, newParsedFile(selected[i].Path, selected[i].Src, parsed))
+			pkg.Files = append(pkg.Files, newParsedFile(selected[i], parsed))
 			return packageFail(pkg, PackageErrName, i, -1)
 		}
 		refs := FileImportsWithDependencies(module, stdRoot, dependencies, parsed)
 		for j := 0; j < len(refs); j++ {
 			pkg.Imports = appendImport(pkg.Imports, refs[j])
 			if !refs[j].Ok {
-				pkg.Files = append(pkg.Files, newParsedFile(selected[i].Path, selected[i].Src, parsed))
+				pkg.Files = append(pkg.Files, newParsedFile(selected[i], parsed))
 				return packageFail(pkg, PackageErrImport, i, len(pkg.Imports)-1)
 			}
 		}
-		pkg.Files = append(pkg.Files, newParsedFile(selected[i].Path, selected[i].Src, parsed))
+		pkg.Files = append(pkg.Files, newParsedFile(selected[i], parsed))
 	}
 	return pkg
 }
 
-func newParsedFile(path string, src []byte, file syntax.File) ParsedFile {
+func newParsedFile(source SourceFile, file syntax.File) ParsedFile {
 	return ParsedFile{
-		Path: path,
-		Src:  src,
-		File: file,
+		Path:       source.Path,
+		Src:        source.Src,
+		File:       file,
+		ArenaStart: source.ArenaStart,
+		ArenaEnd:   source.ArenaEnd,
 	}
 }
 
@@ -245,7 +251,7 @@ func selectPackageFiles(dir string, files []SourceFile) []SourceFile {
 		if DirPath(path) != dir {
 			continue
 		}
-		selected = append(selected, SourceFile{Path: path, Src: files[i].Src})
+		selected = append(selected, SourceFile{Path: path, Src: files[i].Src, ArenaStart: files[i].ArenaStart, ArenaEnd: files[i].ArenaEnd})
 	}
 	sortSourceFiles(selected)
 	return selected

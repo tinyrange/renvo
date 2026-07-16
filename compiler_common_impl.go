@@ -10186,6 +10186,10 @@ func rtgEmitCopyTypedMemSecondaryToStack(g *rtgLinearGen, typ int, destOffset in
 func rtgEmitPushStackWords(g *rtgLinearGen, offset int, size int, wordSize int) {
 	size = rtgAlignValue(size, wordSize)
 	for at := size - wordSize; at >= 0; at -= wordSize {
+		if wordSize == rtgNativeIntSize && (rtgTargetArch == rtgArchAmd64 || rtgTargetArch == rtgArch386) {
+			rtgAsmPushStackWord(&g.asm, offset-at)
+			continue
+		}
 		rtgAsmLoadPrimaryStack(&g.asm, offset-at)
 		rtgAsmPushPrimary(&g.asm)
 	}
@@ -10586,62 +10590,8 @@ func rtgEmitRuntimeArenaReset(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	}
 	rtgStringHeapOffsets(g)
 	a := &g.asm
-	if rtgTargetArch == rtgArchAmd64 && rtgTargetOS == rtgOSLinux {
-		rtgEmitRuntimeArenaResetMadvise(g)
-		return true
-	}
 	rtgAsmStorePrimaryBss(a, g.stringHeapOff)
 	return true
-}
-
-func rtgEmitRuntimeArenaResetMadvise(g *rtgLinearGen) {
-	a := &g.asm
-	markOff := rtgAddUnnamedLocal(g, rtgTypeInt)
-	oldOff := rtgAddUnnamedLocal(g, rtgTypeInt)
-	startOff := rtgAddUnnamedLocal(g, rtgTypeInt)
-	lenOff := rtgAddUnnamedLocal(g, rtgTypeInt)
-	doneLabel := rtgAsmNewLabel(a)
-	rtgAsmStorePrimaryStack(a, markOff)
-	rtgAsmLoadPrimaryBss(a, g.stringHeapOff)
-	rtgAsmStorePrimaryStack(a, oldOff)
-	rtgEmitRuntimeArenaClampOldToPersistent(g, oldOff)
-	rtgAsmLoadPrimaryStack(a, markOff)
-	rtgAsmStorePrimaryBss(a, g.stringHeapOff)
-	rtgAsmLoadPrimaryStack(a, markOff)
-	rtgAmd64AsmAddRaxImm32(a, 4095)
-	rtgAmd64AsmAndRaxImm32(a, -4096)
-	rtgAsmStorePrimaryStack(a, startOff)
-	rtgAsmLoadPrimaryStack(a, oldOff)
-	rtgAmd64AsmAndRaxImm32(a, -4096)
-	rtgAsmLoadTertiaryStack(a, startOff)
-	rtgAsmSubPrimaryTertiary(a)
-	rtgAsmStorePrimaryStack(a, lenOff)
-	rtgAsmCmpPrimaryImm8(a, 0)
-	rtgAmd64AsmJccLabel(a, 0x8e, doneLabel)
-	rtgAsmLoadPrimaryStack(a, startOff)
-	rtgAsmCopyPrimaryToCallWord0(a)
-	rtgAsmLoadPrimaryStack(a, lenOff)
-	rtgAsmCopyPrimaryToCallWord1(a)
-	rtgAsmSecondaryImm(a, 4)
-	rtgAsmPrimaryImm(a, 28)
-	rtgAsmSyscall(a)
-	rtgAsmMarkLabel(a, doneLabel)
-}
-
-func rtgEmitRuntimeArenaClampOldToPersistent(g *rtgLinearGen, oldOff int) {
-	a := &g.asm
-	doneLabel := rtgAsmNewLabel(a)
-	rtgAsmLoadPrimaryBss(a, g.stringHeapEndOff)
-	rtgAsmCmpPrimaryImm8(a, 0)
-	rtgAsmJzLabel(a, doneLabel)
-	rtgAsmLoadTertiaryStack(a, oldOff)
-	rtgAsmLoadPrimaryBss(a, g.stringHeapEndOff)
-	rtgAsmCmpTertiaryPrimarySet(a, 0x9f)
-	rtgAsmCmpPrimaryImm8(a, 0)
-	rtgAsmJzLabel(a, doneLabel)
-	rtgAsmLoadPrimaryBss(a, g.stringHeapEndOff)
-	rtgAsmStorePrimaryStack(a, oldOff)
-	rtgAsmMarkLabel(a, doneLabel)
 }
 
 func rtgEmitRuntimeArenaPersistMark(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
@@ -13245,6 +13195,26 @@ func rtgEmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 	}
 	return rtgAmd64EmitScalarFunction(g, fnInfoIndex)
 }
+
+func rtgEmitScalarFunctionScratch(g *rtgLinearGen, fnInfoIndex int) bool {
+	persistentCapacity := rtgLinearPersistentCapacity(g)
+	mark := rtg_runtime_ArenaMark()
+	ok := rtgEmitScalarFunction(g, fnInfoIndex)
+	if persistentCapacity == rtgLinearPersistentCapacity(g) {
+		rtg_runtime_ArenaReset(mark)
+	}
+	return ok
+}
+
+func rtgLinearPersistentCapacity(g *rtgLinearGen) int {
+	a := &g.asm
+	m := g.meta
+	// The remaining slices are either fixed-size or completely populated before
+	// function emission begins. Only slices which can grow while a function is
+	// emitted need to prevent the scratch arena from being rewound.
+	return cap(a.code) + cap(a.labelPos) + cap(a.labelSet) + cap(a.relocs) + cap(a.absRelocs) + cap(a.symbols) + cap(a.symbolName) + cap(a.winImports) + cap(a.darwinImports) + cap(a.darwinImportLabels) + cap(a.darwinImportUsed) + cap(a.data) + cap(g.breakLabels) + cap(g.continueLabels) + cap(m.types) + cap(m.fields)
+}
+
 func rtgStoreIncomingCallWord(g *rtgLinearGen, word int, offset int) bool {
 	if rtgTargetArch == rtgArchWasm32 {
 		return rtgWasm32StoreParamWord(g, word, offset)

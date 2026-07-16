@@ -87,7 +87,7 @@ func rtgTryCompileScalarProgramArm(p *rtgProgram, meta *rtgMeta) rtgCompileResul
 	rtgAsmSyscall(a)
 	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
 		i := g.funcQueue[queueIndex]
-		if !rtgEmitScalarFunction(&g, i) {
+		if !rtgEmitScalarFunctionScratch(&g, i) {
 			var result rtgCompileResult
 			return result
 		}

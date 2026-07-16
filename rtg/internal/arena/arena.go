@@ -16,7 +16,11 @@ func rtg_runtime_ArenaDiscard(start int, end int) {}
 
 func Mark() int { return rtg_runtime_ArenaMark() }
 
-func Reset(mark int) { rtg_runtime_ArenaReset(mark) }
+func Reset(mark int) {
+	end := rtg_runtime_ArenaMark()
+	rtg_runtime_ArenaDiscard(mark, end)
+	rtg_runtime_ArenaReset(mark)
+}
 
 func PersistMark() int { return rtg_runtime_ArenaPersistMark() }
 

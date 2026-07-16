@@ -3,6 +3,7 @@
 package lower
 
 import (
+	"j5.nz/rtg/rtg/internal/arena"
 	"j5.nz/rtg/rtg/internal/check"
 	"j5.nz/rtg/rtg/internal/load"
 	"j5.nz/rtg/rtg/internal/syntax"
@@ -33,6 +34,18 @@ type Result struct {
 }
 
 func EmitCheckedPackageFast(pkg load.Package, info check.PackageInfo) Result {
+	return emitCheckedPackageFast(pkg, info, false)
+}
+
+// EmitCheckedPackageFastTransient releases body-checker storage as soon as
+// all checked metadata has been copied into the unit. Package syntax remains
+// live until token conversion completes, so lowerer diagnostics retain their
+// source location even if token conversion fails.
+func EmitCheckedPackageFastTransient(pkg load.Package, info check.PackageInfo) Result {
+	return emitCheckedPackageFast(pkg, info, true)
+}
+
+func emitCheckedPackageFast(pkg load.Package, info check.PackageInfo, transient bool) Result {
 	result := Result{Ok: true, Error: EmitOK, ErrorFile: -1, ErrorToken: -1}
 	if !pkg.Ok || pkg.Name == "" || len(pkg.Files) == 0 {
 		return emitFail(result, EmitErrPackage, -1, -1)
@@ -43,21 +56,11 @@ func EmitCheckedPackageFast(pkg load.Package, info check.PackageInfo) Result {
 	var builder unitBuilder
 	builder.program.Package = cloneCoreString(pkg.Name)
 	builder.program.ImportPath = cloneCoreString(pkg.Ref.ImportPath)
-	builder.finalEOF = countPackageTokens(pkg)
-	builder.reserveCheckedPackage(pkg, info)
-	files := make([]fileTokens, len(pkg.Files))
-	for i := 0; i < len(pkg.Files); i++ {
-		if !pkg.Files[i].File.Ok {
-			return emitFail(result, EmitErrPackage, i, pkg.Files[i].File.ErrorTok)
-		}
-		file := pkg.Files[i].File
-		src := pkg.Files[i].Src
-		tokens, ok := builder.addFileTokens(file, src, i, i+1 < len(pkg.Files))
-		if !ok {
-			return emitFail(result, builder.err, builder.errFile, builder.errToken)
-		}
-		files[i] = fileTokens{file: file, src: src, tokens: tokens}
+	files, ok := builder.prepareFileTokens(pkg)
+	if !ok {
+		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
+	builder.reserveCheckedPackage(pkg, info)
 	if !builder.addCheckedImports(info, files) {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
@@ -72,6 +75,15 @@ func EmitCheckedPackageFast(pkg load.Package, info check.PackageInfo) Result {
 	}
 	if !builder.addCheckedSymbols(info, files) {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
+	}
+	if transient {
+		arena.Discard(info.CoreArenaStart, info.CoreArenaEnd)
+	}
+	for i := 0; i < len(pkg.Files); i++ {
+		file := pkg.Files[i].File
+		if _, ok := builder.addFileTokens(file, pkg.Files[i].Src, i, i+1 < len(pkg.Files)); !ok {
+			return emitFail(result, builder.err, builder.errFile, builder.errToken)
+		}
 	}
 	if !builder.finishUnit() {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
@@ -92,14 +104,44 @@ type unitBuilder struct {
 }
 
 type fileTokens struct {
-	file   syntax.File
-	src    []byte
-	tokens tokenMap
+	file     syntax.File
+	tokens   tokenMap
+	textBase int
 }
 
 type tokenMap struct {
 	base  int
 	limit int
+}
+
+func (b *unitBuilder) prepareFileTokens(pkg load.Package) ([]fileTokens, bool) {
+	files := make([]fileTokens, len(pkg.Files))
+	textBase := 0
+	tokenBase := 0
+	for i := 0; i < len(pkg.Files); i++ {
+		file := pkg.Files[i].File
+		if !file.Ok {
+			b.setErr(EmitErrPackage, i, file.ErrorTok)
+			return files, false
+		}
+		files[i] = fileTokens{
+			file:     file,
+			tokens:   tokenMap{base: tokenBase, limit: len(file.Tokens)},
+			textBase: textBase,
+		}
+		for j := 0; j < len(file.Tokens); j++ {
+			if file.Tokens[j].Kind != syntax.TokenEOF {
+				tokenBase++
+			}
+		}
+		src := pkg.Files[i].Src
+		textBase += len(src)
+		if i+1 < len(pkg.Files) && (len(src) == 0 || src[len(src)-1] != '\n') {
+			textBase++
+		}
+	}
+	b.finalEOF = tokenBase
+	return files, true
 }
 
 func (b *unitBuilder) reserveCheckedPackage(pkg load.Package, info check.PackageInfo) {
@@ -122,8 +164,8 @@ func (b *unitBuilder) reserveCheckedPackage(pkg load.Package, info check.Package
 		refCap += len(decl.CoreRefs)
 		selectorCap += len(decl.CoreSelectors)
 	}
-	for i := 0; i < len(info.Bodies); i++ {
-		body := info.Bodies[i]
+	for i := 0; i < len(info.CoreBodies); i++ {
+		body := info.CoreBodies[i]
 		typeRefCap += len(body.CoreTypeRefs)
 		refCap += len(body.CoreRefs)
 		selectorCap += len(body.CoreSelectors)
@@ -133,7 +175,7 @@ func (b *unitBuilder) reserveCheckedPackage(pkg load.Package, info check.Package
 	b.program.Imports = make([]unit.Import, 0, len(info.Imports))
 	b.program.Symbols = make([]unit.Symbol, 0, len(info.Symbols))
 	b.program.Decls = make([]unit.Decl, 0, len(info.Decls))
-	b.program.Funcs = make([]unit.Func, 0, len(info.Bodies))
+	b.program.Funcs = make([]unit.Func, 0, len(info.CoreBodies))
 	b.program.TypeRefs = make([]unit.TypeRef, 0, typeRefCap)
 	b.program.Calls = make([]unit.Call, 0, callCap)
 	b.program.Refs = make([]unit.NameRef, 0, refCap)
@@ -188,8 +230,8 @@ func (b *unitBuilder) finishUnit() bool {
 	return true
 }
 
-func (b *unitBuilder) addDecl(file syntax.File, decl syntax.TopDecl, nameTok int, mapping tokenMap, fileIndex int) bool {
-	if nameTok < 0 || nameTok >= len(b.program.Tokens) {
+func (b *unitBuilder) addDecl(file syntax.File, decl syntax.TopDecl, mapping tokenMap, textBase int, fileIndex int) bool {
+	if decl.NameTok < 0 || decl.NameTok >= len(file.Tokens) {
 		b.setErr(EmitErrToken, fileIndex, decl.NameTok)
 		return false
 	}
@@ -198,11 +240,15 @@ func (b *unitBuilder) addDecl(file syntax.File, decl syntax.TopDecl, nameTok int
 		b.setErr(EmitErrToken, fileIndex, decl.NameTok)
 		return false
 	}
-	name := b.program.Tokens[nameTok]
+	name := file.Tokens[decl.NameTok]
+	if name.Start < 0 || name.End < name.Start || name.End > len(file.Src) {
+		b.setErr(EmitErrToken, fileIndex, decl.NameTok)
+		return false
+	}
 	b.program.Decls = append(b.program.Decls, unit.Decl{
 		Kind:      kind,
-		NameStart: name.Start,
-		NameEnd:   name.Start + name.Size,
+		NameStart: textBase + name.Start,
+		NameEnd:   textBase + name.End,
 		StartTok:  mapDeclStartToken(file, decl, mapping, b.finalEOF),
 		EndTok:    mapToken(mapping, decl.EndTok, b.finalEOF),
 	})
@@ -217,21 +263,25 @@ func mapDeclStartToken(file syntax.File, decl syntax.TopDecl, mapping tokenMap, 
 	return mapToken(mapping, start, eof)
 }
 
-func (b *unitBuilder) addFunc(file syntax.File, fn syntax.FuncDecl, mapping tokenMap, fileIndex int) bool {
-	nameTok := mapToken(mapping, fn.NameTok, b.finalEOF)
-	if nameTok < 0 || nameTok >= len(b.program.Tokens) {
+func (b *unitBuilder) addFunc(file syntax.File, fn syntax.FuncDecl, mapping tokenMap, textBase int, fileIndex int) bool {
+	if fn.NameTok < 0 || fn.NameTok >= len(file.Tokens) {
 		b.setErr(EmitErrToken, fileIndex, fn.NameTok)
 		return false
 	}
+	nameTok := mapToken(mapping, fn.NameTok, b.finalEOF)
 	bodyEnd := fn.BodyEnd - 1
 	if bodyEnd < fn.BodyStart {
 		b.setErr(EmitErrToken, fileIndex, fn.BodyEnd)
 		return false
 	}
-	name := b.program.Tokens[nameTok]
+	name := file.Tokens[fn.NameTok]
+	if name.Start < 0 || name.End < name.Start || name.End > len(file.Src) {
+		b.setErr(EmitErrToken, fileIndex, fn.NameTok)
+		return false
+	}
 	b.program.Funcs = append(b.program.Funcs, unit.Func{
-		NameStart:     name.Start,
-		NameEnd:       name.Start + name.Size,
+		NameStart:     textBase + name.Start,
+		NameEnd:       textBase + name.End,
 		StartTok:      mapToken(mapping, fn.StartTok, b.finalEOF),
 		NameTok:       nameTok,
 		ReceiverStart: mapToken(mapping, fn.ReceiverStart, b.finalEOF),
@@ -291,8 +341,7 @@ func (b *unitBuilder) addCheckedDecls(info check.PackageInfo, files []fileTokens
 			b.setErr(EmitErrCheck, declInfo.File, declInfo.Token)
 			return false
 		}
-		nameTok := mapToken(files[declInfo.File].tokens, decl.NameTok, b.finalEOF)
-		if !b.addDecl(file, decl, nameTok, files[declInfo.File].tokens, declInfo.File) {
+		if !b.addDecl(file, decl, files[declInfo.File].tokens, files[declInfo.File].textBase, declInfo.File) {
 			return false
 		}
 		ownerIndex := len(b.program.Decls) - 1
@@ -329,12 +378,12 @@ func (b *unitBuilder) addCheckedTypeRefs(info check.PackageInfo, files []fileTok
 }
 
 func (b *unitBuilder) addCheckedFuncs(info check.PackageInfo, files []fileTokens) bool {
-	b.funcRows = make([]int, len(info.Bodies))
+	b.funcRows = make([]int, len(info.CoreBodies))
 	for i := 0; i < len(b.funcRows); i++ {
 		b.funcRows[i] = -1
 	}
-	for i := 0; i < len(info.Bodies); i++ {
-		body := info.Bodies[i]
+	for i := 0; i < len(info.CoreBodies); i++ {
+		body := info.CoreBodies[i]
 		if body.File < 0 || body.File >= len(files) {
 			b.setErr(EmitErrCheck, -1, -1)
 			return false
@@ -349,7 +398,7 @@ func (b *unitBuilder) addCheckedFuncs(info check.PackageInfo, files []fileTokens
 			b.setErr(EmitErrCheck, body.File, fn.NameTok)
 			return false
 		}
-		if !b.addFunc(file, fn, files[body.File].tokens, body.File) {
+		if !b.addFunc(file, fn, files[body.File].tokens, files[body.File].textBase, body.File) {
 			return false
 		}
 		ownerIndex := len(b.program.Funcs) - 1
@@ -420,11 +469,11 @@ func (b *unitBuilder) addDeclResolution(decl check.DeclInfo, mapping tokenMap, o
 	return true
 }
 
-func (b *unitBuilder) addBodyResolution(body check.FuncBody, mapping tokenMap, ownerIndex int) bool {
+func (b *unitBuilder) addBodyResolution(body check.CoreFuncBody, mapping tokenMap, ownerIndex int) bool {
 	for i := 0; i < len(body.CoreRefs); i++ {
 		ref, ok := mapCoreNameRef(body.CoreRefs[i], mapping, b.finalEOF, ownerIndex)
 		if !ok {
-			b.setErr(EmitErrCheck, body.File, body.Body.ErrorTok)
+			b.setErr(EmitErrCheck, body.File, body.ErrorToken)
 			return false
 		}
 		b.program.Refs = append(b.program.Refs, ref)
@@ -432,7 +481,7 @@ func (b *unitBuilder) addBodyResolution(body check.FuncBody, mapping tokenMap, o
 	for i := 0; i < len(body.CoreSelectors); i++ {
 		selector, ok := mapCoreSelectorRef(body.CoreSelectors[i], mapping, b.finalEOF, ownerIndex)
 		if !ok {
-			b.setErr(EmitErrCheck, body.File, body.Body.ErrorTok)
+			b.setErr(EmitErrCheck, body.File, body.ErrorToken)
 			return false
 		}
 		b.program.Selectors = append(b.program.Selectors, selector)
@@ -440,19 +489,19 @@ func (b *unitBuilder) addBodyResolution(body check.FuncBody, mapping tokenMap, o
 	return true
 }
 
-func (b *unitBuilder) addBodyCalls(body check.FuncBody, mapping tokenMap, ownerIndex int) bool {
+func (b *unitBuilder) addBodyCalls(body check.CoreFuncBody, mapping tokenMap, ownerIndex int) bool {
 	return true
 }
 
-func (b *unitBuilder) addBodyTypeRefs(body check.FuncBody, mapping tokenMap, ownerIndex int) bool {
+func (b *unitBuilder) addBodyTypeRefs(body check.CoreFuncBody, mapping tokenMap, ownerIndex int) bool {
 	for i := 0; i < len(body.CoreTypeRefs); i++ {
 		if body.CoreTypeRefs[i].File != body.File {
-			b.setErr(EmitErrCheck, body.File, body.Body.ErrorTok)
+			b.setErr(EmitErrCheck, body.File, body.ErrorToken)
 			return false
 		}
 		ref, ok := mapCoreTypeRef(body.CoreTypeRefs[i], mapping, b.finalEOF, ownerIndex)
 		if !ok {
-			b.setErr(EmitErrCheck, body.File, body.Body.ErrorTok)
+			b.setErr(EmitErrCheck, body.File, body.ErrorToken)
 			return false
 		}
 		b.program.TypeRefs = append(b.program.TypeRefs, ref)
@@ -513,7 +562,7 @@ func mapCallRef(call check.CallRef, mapping tokenMap, eof int) (unit.Call, bool)
 
 func mapCoreNameRef(ref check.CoreNameRef, mapping tokenMap, eof int, ownerIndex int) (unit.NameRef, bool) {
 	out := unit.NameRef{
-		Kind:    ref.Kind,
+		Kind:    unit.RefPackage,
 		Token:   mapToken(mapping, ref.Token, eof),
 		Index:   ref.Index,
 		Package: ref.Package,
@@ -529,10 +578,10 @@ func mapCoreSelectorRef(selector check.CoreSelectorRef, mapping tokenMap, eof in
 		BaseTok:     mapToken(mapping, selector.BaseTok, eof),
 		DotTok:      mapToken(mapping, selector.DotTok, eof),
 		NameTok:     mapToken(mapping, selector.NameTok, eof),
-		BaseKind:    selector.BaseKind,
+		BaseKind:    unit.RefImport,
 		BaseIndex:   selector.BaseIndex,
 		BasePackage: selector.BasePackage,
-		Package:     selector.Package,
+		Package:     selector.BasePackage,
 		Symbol:      selector.Symbol,
 	}
 	if ownerIndex < 0 || out.BaseTok < 0 || out.DotTok < 0 || out.NameTok < 0 ||
@@ -565,19 +614,6 @@ func (b *unitBuilder) setErr(err int, file int, tok int) {
 	b.err = err
 	b.errFile = file
 	b.errToken = tok
-}
-
-func countPackageTokens(pkg load.Package) int {
-	count := 0
-	for i := 0; i < len(pkg.Files); i++ {
-		file := pkg.Files[i].File
-		for j := 0; j < len(file.Tokens); j++ {
-			if file.Tokens[j].Kind != syntax.TokenEOF {
-				count++
-			}
-		}
-	}
-	return count
 }
 
 func unitTokenKind(src []byte, tok syntax.Token) (int, bool) {

@@ -57,6 +57,7 @@ type PackageInfo struct {
 	CoreArenaEnd   int
 	Methods        []MethodInfo
 	Bodies         []FuncBody
+	CoreBodies     []CoreFuncBody
 }
 
 type Symbol struct {
@@ -153,21 +154,17 @@ type FuncBody struct {
 }
 
 type CoreNameRef struct {
-	Kind    int
 	Token   int
 	Index   int
 	Package int
 }
 
 type CoreSelectorRef struct {
-	Kind        int
 	BaseTok     int
 	DotTok      int
 	NameTok     int
-	BaseKind    int
 	BaseIndex   int
 	BasePackage int
-	Package     int
 	Symbol      int
 }
 
@@ -180,6 +177,16 @@ type CoreTypeRef struct {
 	DotTok    int
 	Package   int
 	Symbol    int
+}
+
+type CoreFuncBody struct {
+	Kind          int
+	File          int
+	Func          int
+	ErrorToken    int
+	CoreRefs      []CoreNameRef
+	CoreSelectors []CoreSelectorRef
+	CoreTypeRefs  []CoreTypeRef
 }
 
 func CheckGraph(graph load.Graph) Program {
@@ -445,14 +452,29 @@ func tokenString(file syntax.File, tok int) string {
 }
 
 func sortSymbols(symbols []Symbol) {
-	for i := 1; i < len(symbols); i++ {
-		item := symbols[i]
-		j := i - 1
-		for j >= 0 && symbolAfter(symbols[j], item) {
-			symbols[j+1] = symbols[j]
-			j--
+	for root := len(symbols)/2 - 1; root >= 0; root-- {
+		siftDownSymbols(symbols, root, len(symbols))
+	}
+	for end := len(symbols) - 1; end > 0; end-- {
+		symbols[0], symbols[end] = symbols[end], symbols[0]
+		siftDownSymbols(symbols, 0, end)
+	}
+}
+
+func siftDownSymbols(symbols []Symbol, root int, end int) {
+	for {
+		child := root*2 + 1
+		if child >= end {
+			return
 		}
-		symbols[j+1] = item
+		if child+1 < end && symbolAfter(symbols[child+1], symbols[child]) {
+			child++
+		}
+		if !symbolAfter(symbols[child], symbols[root]) {
+			return
+		}
+		symbols[root], symbols[child] = symbols[child], symbols[root]
+		root = child
 	}
 }
 

@@ -45,9 +45,36 @@ const frontendPerformanceSourceEnv = "RTG_FRONTEND_SOURCE"
 const frontendPerformanceTargetEnv = "RTG_FRONTEND_TARGET"
 const frontendPerformanceDefaultSource = "rtg/cmd/rtg"
 const frontendPerformanceAttempts = 3
-const frontendPerformanceMaxElapsed = 500 * time.Millisecond
+const frontendPerformanceCalibrationScale = 1000
+const frontendPerformanceMaxCPUPerCalibration = 2 * frontendPerformanceCalibrationScale
 const frontendPerformanceMaxRSSKB = 32 * 1024
 const frontendPerformanceMaxBinarySize = 1024 * 1024
+
+const frontendPerformanceCalibrationSource = `package main
+
+func mix(data []byte, value int, round int) int {
+	index := round & 4095
+	current := int(data[index])
+	if value&15 == 0 {
+		value = value*33 + current + round
+	} else {
+		value = value*17 - current + round
+	}
+	value = value ^ value<<7
+	value = value ^ value>>9
+	data[index] = byte(value)
+	return value
+}
+
+func main() {
+	data := make([]byte, 4096)
+	value := 216613626
+	for i := 0; i < 23500000; i++ {
+		value = mix(data, value, i)
+	}
+	print(value)
+}
+`
 
 func getCompilerFiles(config targetConfig) ([]string, error) {
 	switch config.os + "/" + config.arch {
@@ -694,10 +721,43 @@ func runFrontendCompile(t *testing.T, compiler string, target string, source str
 	}
 }
 
+func buildFrontendCPUCalibration(t *testing.T, compiler string, target string, outDir string) string {
+	t.Helper()
+	sourceDir, err := os.MkdirTemp(".", "frontend-cpu-calibration-")
+	if err != nil {
+		t.Fatalf("failed to create frontend CPU calibration source directory: %v", err)
+	}
+	defer os.RemoveAll(sourceDir)
+	if err := os.WriteFile(filepath.Join(sourceDir, "main.go"), []byte(frontendPerformanceCalibrationSource), 0o644); err != nil {
+		t.Fatalf("failed to write frontend CPU calibration source: %v", err)
+	}
+	output := filepath.Join(outDir, "frontend-cpu-calibration-bin")
+	runFrontendCompile(t, compiler, target, sourceDir, output)
+	return output
+}
+
+func runFrontendCPUCalibration(t *testing.T, executable string) time.Duration {
+	t.Helper()
+	cmd := exec.Command(executable)
+	cmd.Env = []string{}
+	err := cmd.Run()
+	if err != nil {
+		t.Fatalf("frontend CPU calibration failed: %v", err)
+	}
+	if cmd.ProcessState == nil {
+		t.Fatal("frontend CPU calibration did not report process usage")
+	}
+	cpu := cmd.ProcessState.UserTime() + cmd.ProcessState.SystemTime()
+	if cpu <= 0 {
+		t.Fatalf("frontend CPU calibration reported invalid CPU time %s", cpu)
+	}
+	return cpu
+}
+
 func runMeasuredFrontendCompile(t *testing.T, compiler string, target string, source string, output string, rssFile string) (time.Duration, int) {
 	t.Helper()
 	timeArgs := []string{
-		"-f", "%e %M",
+		"-f", "%U %S %M",
 		"-o", rssFile,
 		compiler,
 		"-t", target,
@@ -717,18 +777,22 @@ func runMeasuredFrontendCompile(t *testing.T, compiler string, target string, so
 		t.Fatalf("failed to read frontend compile resource usage: %v", err)
 	}
 	rssFields := strings.Fields(string(rssData))
-	if len(rssFields) < 2 {
+	if len(rssFields) != 3 {
 		t.Fatalf("failed to read frontend compile resource usage %q", string(rssData))
 	}
-	elapsedSeconds, err := strconv.ParseFloat(rssFields[0], 64)
+	userSeconds, err := strconv.ParseFloat(rssFields[0], 64)
 	if err != nil {
-		t.Fatalf("failed to parse frontend compile elapsed time %q: %v", string(rssData), err)
+		t.Fatalf("failed to parse frontend compile user CPU time %q: %v", string(rssData), err)
 	}
-	maxRSS, err := strconv.Atoi(rssFields[len(rssFields)-1])
+	systemSeconds, err := strconv.ParseFloat(rssFields[1], 64)
+	if err != nil {
+		t.Fatalf("failed to parse frontend compile system CPU time %q: %v", string(rssData), err)
+	}
+	maxRSS, err := strconv.Atoi(rssFields[2])
 	if err != nil {
 		t.Fatalf("failed to parse frontend compile max RSS %q: %v", string(rssData), err)
 	}
-	return time.Duration(elapsedSeconds * float64(time.Second)), maxRSS
+	return time.Duration((userSeconds + systemSeconds) * float64(time.Second)), maxRSS
 }
 
 func TestCompilerTargetDiagnostics(t *testing.T) {
@@ -1085,7 +1149,9 @@ func TestCompilerPerformance(t *testing.T) {
 
 // The replacement frontend must self-host quickly enough to stay usable as it
 // grows. Stage0 builds stage1, stage1 builds stage2, and the measured run is
-// stage2 building the stripped stage3 compiler.
+// stage2 building the stripped stage3 compiler. CPU time is normalized against
+// a deterministic RTG-generated workload on the same runner so heterogeneous
+// CI hosts do not turn a fixed wall-clock threshold into noise.
 func TestFrontendCompilerPerformance(t *testing.T) {
 	source := frontendPerformanceSource(t)
 	target := frontendPerformanceTarget(t)
@@ -1096,21 +1162,30 @@ func TestFrontendCompilerPerformance(t *testing.T) {
 	stage2 := filepath.Join(outDir, "rtg-stage2")
 	runFrontendCompile(t, stage0, target, source, stage1)
 	runFrontendCompile(t, stage1, target, source, stage2)
+	calibration := buildFrontendCPUCalibration(t, stage2, target, outDir)
 
-	bestElapsed := 24 * time.Hour
+	bestCPUPerCalibration := int64(1 << 62)
+	bestCPU := 24 * time.Hour
+	bestCalibrationCPU := time.Duration(0)
 	bestRSS := 1 << 30
 	var bestSize int64 = 1 << 62
 	for attempt := 0; attempt < frontendPerformanceAttempts; attempt++ {
+		calibrationCPU := runFrontendCPUCalibration(t, calibration)
 		stage3 := filepath.Join(outDir, fmt.Sprintf("rtg-stage3-%d", attempt))
 		rssFile := filepath.Join(outDir, fmt.Sprintf("frontend-rss-%d", attempt))
-		elapsed, maxRSS := runMeasuredFrontendCompile(t, stage2, target, source, stage3, rssFile)
+		cpu, maxRSS := runMeasuredFrontendCompile(t, stage2, target, source, stage3, rssFile)
+		cpuPerCalibration := int64(cpu) * frontendPerformanceCalibrationScale / int64(calibrationCPU)
 		stage3Info, err := os.Stat(stage3)
 		if err != nil {
 			t.Fatalf("failed to stat frontend stage3 compiler: %v", err)
 		}
 		stage3Size := stage3Info.Size()
-		if elapsed < bestElapsed {
-			bestElapsed = elapsed
+		t.Logf("frontend performance attempt %d: CPU=%s calibration=%s normalized=%d/%d RSS=%dKB size=%dB",
+			attempt+1, cpu, calibrationCPU, cpuPerCalibration, frontendPerformanceCalibrationScale, maxRSS, stage3Size)
+		if cpuPerCalibration < bestCPUPerCalibration {
+			bestCPUPerCalibration = cpuPerCalibration
+			bestCPU = cpu
+			bestCalibrationCPU = calibrationCPU
 		}
 		if maxRSS < bestRSS {
 			bestRSS = maxRSS
@@ -1118,7 +1193,7 @@ func TestFrontendCompilerPerformance(t *testing.T) {
 		if stage3Size < bestSize {
 			bestSize = stage3Size
 		}
-		if elapsed <= frontendPerformanceMaxElapsed &&
+		if cpuPerCalibration <= frontendPerformanceMaxCPUPerCalibration &&
 			maxRSS <= frontendPerformanceMaxRSSKB &&
 			stage3Size <= frontendPerformanceMaxBinarySize {
 			return
@@ -1126,8 +1201,8 @@ func TestFrontendCompilerPerformance(t *testing.T) {
 	}
 
 	var failures []string
-	if bestElapsed > frontendPerformanceMaxElapsed {
-		failures = append(failures, fmt.Sprintf("stage3 self-host runtime %s > %s", bestElapsed, frontendPerformanceMaxElapsed))
+	if bestCPUPerCalibration > frontendPerformanceMaxCPUPerCalibration {
+		failures = append(failures, fmt.Sprintf("stage3 normalized CPU %d/%d calibration units > %d/%d", bestCPUPerCalibration, frontendPerformanceCalibrationScale, frontendPerformanceMaxCPUPerCalibration, frontendPerformanceCalibrationScale))
 	}
 	if bestRSS > frontendPerformanceMaxRSSKB {
 		failures = append(failures, fmt.Sprintf("stage3 self-host max RSS %dKB > %dKB", bestRSS, frontendPerformanceMaxRSSKB))
@@ -1136,7 +1211,7 @@ func TestFrontendCompilerPerformance(t *testing.T) {
 		failures = append(failures, fmt.Sprintf("stage3 compiler binary size %dB > %dB", bestSize, frontendPerformanceMaxBinarySize))
 	}
 	if len(failures) > 0 {
-		t.Fatalf("frontend performance limits failed: best stage3 self-host runtime=%s, best max RSS=%dKB, best stage3 compiler binary size=%dB; failures: %s",
-			bestElapsed, bestRSS, bestSize, strings.Join(failures, "; "))
+		t.Fatalf("frontend performance limits failed: best stage3 CPU=%s, calibration CPU=%s, normalized CPU=%d/%d, best max RSS=%dKB, best stage3 compiler binary size=%dB; failures: %s",
+			bestCPU, bestCalibrationCPU, bestCPUPerCalibration, frontendPerformanceCalibrationScale, bestRSS, bestSize, strings.Join(failures, "; "))
 	}
 }
