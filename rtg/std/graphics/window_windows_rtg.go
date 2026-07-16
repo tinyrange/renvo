@@ -1,4 +1,4 @@
-//go:build rtg && windows && (amd64 || 386)
+//go:build rtg && windows && (amd64 || 386 || arm64)
 
 package graphics
 

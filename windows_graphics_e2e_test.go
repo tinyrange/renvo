@@ -104,6 +104,9 @@ func main() {
 			if output, err := compile.CombinedOutput(); err != nil {
 				t.Fatalf("compile Windows graphics test: %v\n%s", err, output)
 			}
+			if target.name == "windows/arm64" && runtime.GOARCH != "arm64" {
+				t.Skip("Windows ARM64 execution requires a native ARM64 host")
+			}
 			command, err := runWindowsCommand(t, workDir, filepath.Join(workDir, outputName))
 			if err != nil {
 				t.Fatalf("run Windows graphics test: %v", err)
