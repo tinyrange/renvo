@@ -44,7 +44,13 @@ func linkBuildCore(result build.Result, transient bool) Result {
 		out.Error = LinkErrRoot
 		return out
 	}
-	program, ok := LinkUnitsCore(result.Units, result.Root)
+	var program unit.Program
+	var ok bool
+	if transient {
+		program, ok = linkUnitsCore(result.Units, result.Root, true)
+	} else {
+		program, ok = LinkUnitsCore(result.Units, result.Root)
+	}
 	if !ok {
 		out.Ok = false
 		out.Error = LinkErrUnit
@@ -58,15 +64,14 @@ func linkBuildCore(result build.Result, transient bool) Result {
 	}
 	out.Program = program
 	out.Data = data
-	if transient {
-		for i := 0; i < len(result.Units); i++ {
-			arena.Discard(result.Units[i].ArenaStart, result.Units[i].ArenaEnd)
-		}
-	}
 	return out
 }
 
 func LinkUnitsCore(units []build.PackageUnit, root int) (unit.Program, bool) {
+	return linkUnitsCore(units, root, false)
+}
+
+func linkUnitsCore(units []build.PackageUnit, root int, transient bool) (unit.Program, bool) {
 	var empty unit.Program
 	if root < 0 || root >= len(units) {
 		return empty, false
@@ -75,10 +80,14 @@ func LinkUnitsCore(units []build.PackageUnit, root int) (unit.Program, bool) {
 	for i := 0; i < len(units); i++ {
 		programs[i] = units[i].Program
 	}
-	return LinkProgramsCore(programs, root, units[root].Name)
+	return linkProgramsCore(programs, root, units[root].Name, units, transient)
 }
 
 func LinkProgramsCore(programs []unit.Program, root int, rootName string) (unit.Program, bool) {
+	return linkProgramsCore(programs, root, rootName, nil, false)
+}
+
+func linkProgramsCore(programs []unit.Program, root int, rootName string, units []build.PackageUnit, transient bool) (unit.Program, bool) {
 	var empty unit.Program
 	if root < 0 || root >= len(programs) || rootName == "" {
 		return empty, false
@@ -92,6 +101,11 @@ func LinkProgramsCore(programs []unit.Program, root int, rootName string) (unit.
 	aliases := packageSymbolAliases(programs, root, symbolOffsets)
 	plusReplacement := len(aliases)
 	aliases = append(aliases, "+")
+	if transient {
+		for i := 0; i < len(aliases); i++ {
+			aliases[i] = cloneCoreLinkString(aliases[i])
+		}
+	}
 	actionsOK := true
 	for i := 0; i < len(programs); i++ {
 		actionStart := arena.Mark()
@@ -119,17 +133,23 @@ func LinkProgramsCore(programs []unit.Program, root int, rootName string) (unit.
 	}
 	program := unit.Program{Package: cloneCoreLinkString(rootName), ImportPath: cloneCoreLinkString(programs[root].ImportPath)}
 	reserveCoreLinkedProgram(&program, programs)
-	lineOffset := 0
+	line := 1
 	appendOK := true
 	for i := 0; i < len(programs); i++ {
-		if !appendProgramCore(&program, programs[i], finalEOF, lineOffset, aliases, i+1 < len(programs)) {
+		var ok bool
+		ok, line = appendProgramCore(&program, programs[i], finalEOF, line, aliases, i+1 < len(programs))
+		if !ok {
 			appendOK = false
 			break
 		}
-		lineOffset = nextLineOffset(lineOffset, programs[i].Text, i+1 < len(programs))
+		if transient {
+			arena.Discard(units[i].ArenaStart, units[i].ArenaEnd)
+		}
 	}
-	for i := 0; i < len(programs); i++ {
-		restoreCoreTokenLines(programs[i].Text, programs[i].Tokens)
+	if !transient {
+		for i := 0; i < len(programs); i++ {
+			restoreCoreTokenLines(programs[i].Text, programs[i].Tokens)
+		}
 	}
 	if !appendOK {
 		return empty, false
@@ -138,7 +158,7 @@ func LinkProgramsCore(programs []unit.Program, root int, rootName string) (unit.
 		Kind:  unit.TokenEOF,
 		Start: len(program.Text),
 		Size:  0,
-		Line:  countNewlines(program.Text) + 1,
+		Line:  line,
 	})
 	return program, true
 }
@@ -357,11 +377,10 @@ func appendRootProcessTokenCore(tokens []unit.Token, kind int, base int, start i
 	return append(tokens, unit.Token{Kind: kind, Start: base + start, Size: size, Line: line})
 }
 
-func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, lineOffset int, aliases []string, hasNext bool) bool {
+func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, line int, aliases []string, hasNext bool) (bool, int) {
 	if src.Package == "" || len(src.Text) == 0 || len(src.Tokens) == 0 {
-		return false
+		return false, line
 	}
-	line := countNewlines(dst.Text) + 1
 	prevEnd := 0
 	for i := 0; i < len(src.Tokens); i++ {
 		action := src.Tokens[i].Line
@@ -438,7 +457,7 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, lineOf
 		decl.EndTok = mapLinkedToken(src.Tokens, decl.EndTok, finalEOF)
 		nameStart, nameEnd, ok := mapTextSpanByToken(src, dst, finalEOF, decl.NameStart, decl.NameEnd)
 		if !ok {
-			return false
+			return false, line
 		}
 		decl.NameStart = nameStart
 		decl.NameEnd = nameEnd
@@ -450,7 +469,7 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, lineOf
 		fn.NameTok = mapLinkedToken(src.Tokens, fn.NameTok, finalEOF)
 		nameStart, nameEnd, ok := mappedTokenTextSpan(dst, fn.NameTok)
 		if !ok {
-			return false
+			return false, line
 		}
 		fn.NameStart = nameStart
 		fn.NameEnd = nameEnd
@@ -466,9 +485,7 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, lineOf
 		dst.Text = append(dst.Text, '\n')
 		line++
 	}
-	_ = lineOffset
-	_ = line
-	return true
+	return true, line
 }
 
 func linkedTokenActions(program unit.Program, aliases *[]string, symbolOffsets []int, actions []int, plusReplacement int) bool {
@@ -1246,7 +1263,19 @@ func findMatchingBrace(program unit.Program, open int) int {
 }
 
 func tokenTextEquals(program unit.Program, tok int, want string) bool {
-	return tokenText(program, tok) == want
+	if tok < 0 || tok >= len(program.Tokens) {
+		return false
+	}
+	token := program.Tokens[tok]
+	if token.Start < 0 || token.Size != len(want) || token.Start+token.Size > len(program.Text) {
+		return false
+	}
+	for i := 0; i < len(want); i++ {
+		if program.Text[token.Start+i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func parseTokenInt(program unit.Program, tok int) (int, bool) {
@@ -1549,14 +1578,6 @@ func packageSymbolOffsets(programs []unit.Program) []int {
 		next += len(programs[i].Symbols)
 	}
 	return out
-}
-
-func nextLineOffset(lineOffset int, text []byte, hasNext bool) int {
-	lineOffset += countNewlines(text)
-	if hasNext && (len(text) == 0 || text[len(text)-1] != '\n') {
-		lineOffset++
-	}
-	return lineOffset
 }
 
 func countNewlines(text []byte) int {

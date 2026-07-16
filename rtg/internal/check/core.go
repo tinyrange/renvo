@@ -116,7 +116,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			out.File = fileIndex
 			out.Func = i
 			out.ErrorToken = fn.NameTok
-			refCount, selectorCount := countResolutionRefsCore(file, fileIndex, info, checked, scope, bodyStart, bodyEnd)
+			refCount, selectorCount := countResolutionCandidatesCore(file, bodyStart, bodyEnd)
 			out.CoreRefs = make([]CoreNameRef, 0, refCount)
 			out.CoreSelectors = make([]CoreSelectorRef, 0, selectorCount)
 			out.CoreRefs, out.CoreSelectors = appendResolutionRefsCore(out.CoreRefs, out.CoreSelectors, file, fileIndex, info, checked, scope, bodyStart, bodyEnd)
@@ -182,7 +182,7 @@ func buildDeclInfoCore(file syntax.File, fileIndex int, info PackageInfo, checke
 	if valueStart >= 0 {
 		out.TypeStart, out.TypeEnd = trimDeclSpan(file, typeStart, valueStart)
 		out.ValueStart, out.ValueEnd = trimDeclSpan(file, valueStart+1, decl.EndTok)
-		refCount, selectorCount := countResolutionRefsCore(file, fileIndex, info, checked, CoreScope{}, out.ValueStart, out.ValueEnd)
+		refCount, selectorCount := countResolutionCandidatesCore(file, out.ValueStart, out.ValueEnd)
 		out.CoreRefs = make([]CoreNameRef, 0, refCount)
 		out.CoreSelectors = make([]CoreSelectorRef, 0, selectorCount)
 		out.CoreRefs, out.CoreSelectors = appendResolutionRefsCore(out.CoreRefs, out.CoreSelectors, file, fileIndex, info, checked, CoreScope{}, out.ValueStart, out.ValueEnd)
@@ -201,23 +201,16 @@ type CoreScopeName struct {
 	Token int
 }
 
-func countResolutionRefsCore(file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope CoreScope, start int, end int) (int, int) {
+func countResolutionCandidatesCore(file syntax.File, start int, end int) (int, int) {
 	refCount := 0
 	selectorCount := 0
 	for i := start; i < end && i < len(file.Tokens); i++ {
-		if file.Tokens[i].Kind == syntax.TokenIdent && !shouldSkipIdentRef(file, i, end) &&
-			!tokenTextIs(file, i, "_") && lookupScopeTokenNameCore(scope, file, i) < 0 &&
-			lookupImportTokenNameCore(info, fileIndex, file, i) < 0 &&
-			lookupPackageSymbolTokenCore(info, file, fileIndex, i) >= 0 {
+		if file.Tokens[i].Kind == syntax.TokenIdent {
 			refCount++
 		}
 		if i > start && i+1 < end && i+1 < len(file.Tokens) && tokenTextIs(file, i, ".") &&
-			file.Tokens[i-1].Kind == syntax.TokenIdent && file.Tokens[i+1].Kind == syntax.TokenIdent &&
-			!tokenTextIs(file, i-1, "_") && !tokenTextIs(file, i+1, "_") {
-			selector := resolveImportSelectorCore(fileIndex, info, checked, scope, file, i-1, i, i+1)
-			if selector.Symbol >= 0 {
-				selectorCount++
-			}
+			file.Tokens[i-1].Kind == syntax.TokenIdent && file.Tokens[i+1].Kind == syntax.TokenIdent {
+			selectorCount++
 		}
 	}
 	return refCount, selectorCount
