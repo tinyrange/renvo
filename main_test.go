@@ -43,7 +43,6 @@ const crossArchTestsEnv = "RTG_CROSS_ARCH_TESTS"
 const frontendPerformanceCompilerEnv = "RTG_FRONTEND"
 const frontendPerformanceSourceEnv = "RTG_FRONTEND_SOURCE"
 const frontendPerformanceTargetEnv = "RTG_FRONTEND_TARGET"
-const frontendPerformanceCalibrationEnv = "RTG_FRONTEND_CPU_CALIBRATION"
 const frontendPerformanceDefaultSource = "rtg/cmd/rtg"
 const frontendPerformanceAttempts = 3
 const frontendPerformanceCalibrationScale = 1000
@@ -51,7 +50,31 @@ const frontendPerformanceMaxCPUPerCalibration = 2 * frontendPerformanceCalibrati
 const frontendPerformanceMaxRSSKB = 32 * 1024
 const frontendPerformanceMaxBinarySize = 1024 * 1024
 
-var frontendPerformanceCalibrationSink uint
+const frontendPerformanceCalibrationSource = `package main
+
+func mix(data []byte, value int, round int) int {
+	index := round & 4095
+	current := int(data[index])
+	if value&15 == 0 {
+		value = value*33 + current + round
+	} else {
+		value = value*17 - current + round
+	}
+	value = value ^ value<<7
+	value = value ^ value>>9
+	data[index] = byte(value)
+	return value
+}
+
+func main() {
+	data := make([]byte, 4096)
+	value := 216613626
+	for i := 0; i < 23500000; i++ {
+		value = mix(data, value, i)
+	}
+	print(value)
+}
+`
 
 func getCompilerFiles(config targetConfig) ([]string, error) {
 	switch config.os + "/" + config.arch {
@@ -698,17 +721,28 @@ func runFrontendCompile(t *testing.T, compiler string, target string, source str
 	}
 }
 
-func runFrontendCPUCalibration(t *testing.T) time.Duration {
+func buildFrontendCPUCalibration(t *testing.T, compiler string, target string, outDir string) string {
 	t.Helper()
-	executable, err := os.Executable()
+	sourceDir, err := os.MkdirTemp(".", "frontend-cpu-calibration-")
 	if err != nil {
-		t.Fatalf("failed to locate frontend CPU calibration executable: %v", err)
+		t.Fatalf("failed to create frontend CPU calibration source directory: %v", err)
 	}
-	cmd := exec.Command(executable, "-test.run=^TestFrontendCPUCalibrationWork$", "-test.count=1")
-	cmd.Env = append(os.Environ(), frontendPerformanceCalibrationEnv+"=1")
-	combined, err := cmd.CombinedOutput()
+	defer os.RemoveAll(sourceDir)
+	if err := os.WriteFile(filepath.Join(sourceDir, "main.go"), []byte(frontendPerformanceCalibrationSource), 0o644); err != nil {
+		t.Fatalf("failed to write frontend CPU calibration source: %v", err)
+	}
+	output := filepath.Join(outDir, "frontend-cpu-calibration-bin")
+	runFrontendCompile(t, compiler, target, sourceDir, output)
+	return output
+}
+
+func runFrontendCPUCalibration(t *testing.T, executable string) time.Duration {
+	t.Helper()
+	cmd := exec.Command(executable)
+	cmd.Env = []string{}
+	err := cmd.Run()
 	if err != nil {
-		t.Fatalf("frontend CPU calibration failed: %v\nOutput: %s", err, string(combined))
+		t.Fatalf("frontend CPU calibration failed: %v", err)
 	}
 	if cmd.ProcessState == nil {
 		t.Fatal("frontend CPU calibration did not report process usage")
@@ -759,22 +793,6 @@ func runMeasuredFrontendCompile(t *testing.T, compiler string, target string, so
 		t.Fatalf("failed to parse frontend compile max RSS %q: %v", string(rssData), err)
 	}
 	return time.Duration((userSeconds + systemSeconds) * float64(time.Second)), maxRSS
-}
-
-func TestFrontendCPUCalibrationWork(t *testing.T) {
-	if os.Getenv(frontendPerformanceCalibrationEnv) != "1" {
-		t.Skip("helper workload for normalized frontend CPU measurements")
-	}
-	x := uint(2166136261)
-	// This is roughly 250ms on the machine used to establish the old 500ms
-	// budget. The gate permits two calibration units instead of assuming every
-	// CI runner executes those units in the same wall-clock time.
-	for i := 0; i < 120000000; i++ {
-		x = x*33 + uint(i&255)
-		x = x ^ x<<7
-		x = x ^ x>>9
-	}
-	frontendPerformanceCalibrationSink = x
 }
 
 func TestCompilerTargetDiagnostics(t *testing.T) {
@@ -1132,8 +1150,8 @@ func TestCompilerPerformance(t *testing.T) {
 // The replacement frontend must self-host quickly enough to stay usable as it
 // grows. Stage0 builds stage1, stage1 builds stage2, and the measured run is
 // stage2 building the stripped stage3 compiler. CPU time is normalized against
-// a deterministic workload on the same runner so heterogeneous CI hosts do not
-// turn a fixed wall-clock threshold into noise.
+// a deterministic RTG-generated workload on the same runner so heterogeneous
+// CI hosts do not turn a fixed wall-clock threshold into noise.
 func TestFrontendCompilerPerformance(t *testing.T) {
 	source := frontendPerformanceSource(t)
 	target := frontendPerformanceTarget(t)
@@ -1144,6 +1162,7 @@ func TestFrontendCompilerPerformance(t *testing.T) {
 	stage2 := filepath.Join(outDir, "rtg-stage2")
 	runFrontendCompile(t, stage0, target, source, stage1)
 	runFrontendCompile(t, stage1, target, source, stage2)
+	calibration := buildFrontendCPUCalibration(t, stage2, target, outDir)
 
 	bestCPUPerCalibration := int64(1 << 62)
 	bestCPU := 24 * time.Hour
@@ -1151,7 +1170,7 @@ func TestFrontendCompilerPerformance(t *testing.T) {
 	bestRSS := 1 << 30
 	var bestSize int64 = 1 << 62
 	for attempt := 0; attempt < frontendPerformanceAttempts; attempt++ {
-		calibrationCPU := runFrontendCPUCalibration(t)
+		calibrationCPU := runFrontendCPUCalibration(t, calibration)
 		stage3 := filepath.Join(outDir, fmt.Sprintf("rtg-stage3-%d", attempt))
 		rssFile := filepath.Join(outDir, fmt.Sprintf("frontend-rss-%d", attempt))
 		cpu, maxRSS := runMeasuredFrontendCompile(t, stage2, target, source, stage3, rssFile)
