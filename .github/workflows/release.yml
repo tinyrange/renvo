@@ -75,27 +75,6 @@ jobs:
           grep -F "darwin/arm64" dist/rtg-help.txt
           grep -F "wasi/wasm32" dist/rtg-help.txt
 
-      - name: Package Windows frontend releases
-        run: |
-          set -eux
-          mkdir -p package/rtg-windows-amd64/bin
-          cp dist/rtg-windows-amd64.exe package/rtg-windows-amd64/bin/rtg.exe
-          cd package
-          zip -qr ../dist/rtg-windows-amd64.zip rtg-windows-amd64
-          cd ..
-
-          mkdir -p package/rtg-windows-386/bin
-          cp dist/rtg-windows-386.exe package/rtg-windows-386/bin/rtg.exe
-          cd package
-          zip -qr ../dist/rtg-windows-386.zip rtg-windows-386
-          cd ..
-
-          mkdir -p package/rtg-windows-arm64/bin
-          cp dist/rtg-windows-arm64.exe package/rtg-windows-arm64/bin/rtg.exe
-          cd package
-          zip -qr ../dist/rtg-windows-arm64.zip rtg-windows-arm64
-          cd ..
-
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v7
         with:
@@ -112,9 +91,6 @@ jobs:
             dist/rtg-windows-arm64.exe
             dist/rtg-darwin-arm64
             dist/rtg-wasi-wasm32.wasm
-            dist/rtg-windows-amd64.zip
-            dist/rtg-windows-386.zip
-            dist/rtg-windows-arm64.zip
           if-no-files-found: error
 
       - name: Upload release asset
@@ -134,7 +110,4 @@ jobs:
             dist/rtg-windows-arm64.exe \
             dist/rtg-darwin-arm64 \
             dist/rtg-wasi-wasm32.wasm \
-            dist/rtg-windows-amd64.zip \
-            dist/rtg-windows-386.zip \
-            dist/rtg-windows-arm64.zip \
             --clobber
