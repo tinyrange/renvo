@@ -8569,23 +8569,32 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 				rtgAsmStorePrimaryMemSecondaryTertiarySize(a, elemSize)
 				return true
 			}
-			if lhsRoot.kind == rtgExprSelector && !rtgTypeIsString(meta, rtgInferParsedExprType(g, lhs, lhsIndex)) {
+			if lhsRoot.kind == rtgExprSelector {
 				if !rtgEmitSelectorAddressSecondary(g, lhs, lhsIndex) {
 					return false
 				}
 				lhsType := rtgInferParsedExprType(g, lhs, lhsIndex)
 				lhsResolved := rtgResolveType(meta, lhsType)
-				lhsSize := rtgScalarKindSize(lhsResolved.kind)
 				addrOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
 				rtgAsmStoreSecondaryStack(a, addrOffset)
 				rhs := rtgNewExprParse()
 				if !rtgParseExpressionOK(rhs, p, assignTok+1, stmt.endTok) {
 					return false
 				}
+				rhsIndex := len(rhs.exprs) - 1
+				if lhsResolved.kind == rtgTypeString {
+					if !rtgTok2Is(p, assignTok, '+', '=') || lhs.exprs[lhsRoot.left].kind != rtgExprIdent || !rtgEmitStringConcatPairValueRegs(g, lhs, lhsIndex, rhs, rhsIndex) {
+						return false
+					}
+					rtgAsmPushStringRegs(a)
+					rtgAsmLoadSecondaryStack(a, addrOffset)
+					rtgAsmPopStoreStringMemSecondary(a, 0)
+					return true
+				}
+				lhsSize := rtgScalarKindSize(lhsResolved.kind)
 				rtgAsmLoadSecondaryStack(a, addrOffset)
 				rtgAsmLoadPrimaryMemSecondaryDispSize(a, 0, lhsSize)
 				rtgAsmPushPrimary(a)
-				rhsIndex := len(rhs.exprs) - 1
 				if !rtgEmitIntExpr(g, rhs, rhsIndex) {
 					return false
 				}
