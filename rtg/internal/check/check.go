@@ -419,7 +419,7 @@ func checkPackageBody(graph load.Graph, pkgIndex int, info PackageInfo, checked 
 			if typeTok := invalidDefiniteAssignmentType(file, fn); typeTok >= 0 {
 				return info, false, CheckErrType, fileIndex, typeTok
 			}
-			if typeTok := invalidDefiniteCallArgumentType(pkg, fileIndex, fn); typeTok >= 0 {
+			if typeTok := invalidDefiniteCallArgumentType(pkg, info, fileIndex, fn); typeTok >= 0 {
 				return info, false, CheckErrCallArgument, fileIndex, typeTok
 			}
 			scope, ok, scopeTok := buildFuncScope(file, fn, body)

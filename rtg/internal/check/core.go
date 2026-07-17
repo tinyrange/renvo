@@ -116,7 +116,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 				return info, false, CheckErrType, fileIndex, typeTok
 			}
 			callCheckArenaStart := arena.Mark()
-			callTypeTok := invalidDefiniteCallArgumentType(pkg, fileIndex, fn)
+			callTypeTok := invalidDefiniteCallArgumentType(pkg, info, fileIndex, fn)
 			arena.Reset(callCheckArenaStart)
 			if callTypeTok >= 0 {
 				return info, false, CheckErrCallArgument, fileIndex, callTypeTok

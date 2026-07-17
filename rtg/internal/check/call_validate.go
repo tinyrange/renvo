@@ -1,6 +1,7 @@
 package check
 
 import (
+	"j5.nz/rtg/rtg/internal/arena"
 	"j5.nz/rtg/rtg/internal/load"
 	"j5.nz/rtg/rtg/internal/syntax"
 )
@@ -14,8 +15,9 @@ const (
 // invalidDefiniteCallArgumentType rejects representation-changing argument
 // mismatches that can be proven from declarations alone. Unknown expressions
 // remain for later, richer checking rather than being guessed here.
-func invalidDefiniteCallArgumentType(pkg load.Package, fileIndex int, caller syntax.FuncDecl) int {
+func invalidDefiniteCallArgumentType(pkg load.Package, info PackageInfo, fileIndex int, caller syntax.FuncDecl) int {
 	file := pkg.Files[fileIndex].File
+	callerSignature := buildFuncSignature(file, caller)
 	for open := caller.BodyStart + 1; open < caller.BodyEnd; open++ {
 		if !tokCharIs(file, open, '(') || open == 0 || file.Tokens[open-1].Kind != syntax.TokenIdent {
 			continue
@@ -24,50 +26,62 @@ func invalidDefiniteCallArgumentType(pkg load.Package, fileIndex int, caller syn
 		if calleeTok > caller.BodyStart && tokCharIs(file, calleeTok-1, '.') {
 			continue
 		}
-		calleeName := tokenString(file, calleeTok)
-		if definiteCallNameShadowed(file, caller, calleeName, calleeTok) {
+		calleeFileIndex, callee, ok := findDefinitePackageFunc(pkg, info, file, calleeTok)
+		if !ok {
 			continue
 		}
-		calleeFileIndex, callee, ok := findDefinitePackageFunc(pkg, calleeName)
-		if !ok {
+		if definiteCallNameShadowed(file, caller, callerSignature, calleeTok) {
 			continue
 		}
 		close := findTypeMatching(file, open, '(', ')')
 		if close <= open || close > caller.BodyEnd {
 			continue
 		}
+		callArenaStart := arena.Mark()
 		args := splitExprList(file, open+1, close-1)
 		calleeFile := pkg.Files[calleeFileIndex].File
 		calleeSignature := buildFuncSignature(calleeFile, callee)
 		params := calleeSignature.Params
+		invalidTok := -1
 		for i := 0; i < len(args) && i < len(params); i++ {
 			param := params[i]
 			if definiteTypeKind(pkg, calleeFileIndex, param.TypeStart, param.TypeEnd, 0) != definiteTypePointer {
 				continue
 			}
 			arg := args[i]
-			if definiteArgumentTypeKind(pkg, fileIndex, caller, arg, calleeTok) == definiteTypeNonPointer {
-				return arg.StartTok
+			if definiteArgumentTypeKind(pkg, fileIndex, caller, callerSignature, arg, calleeTok) == definiteTypeNonPointer {
+				invalidTok = arg.StartTok
+				break
 			}
+		}
+		arena.Reset(callArenaStart)
+		if invalidTok >= 0 {
+			return invalidTok
 		}
 	}
 	return -1
 }
 
-func findDefinitePackageFunc(pkg load.Package, name string) (int, syntax.FuncDecl, bool) {
-	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
-		file := pkg.Files[fileIndex].File
-		for i := 0; i < len(file.Funcs); i++ {
-			fn := file.Funcs[i]
-			if fn.ReceiverStart < 0 && tokenString(file, fn.NameTok) == name {
-				return fileIndex, fn, true
-			}
+func findDefinitePackageFunc(pkg load.Package, info PackageInfo, callerFile syntax.File, calleeTok int) (int, syntax.FuncDecl, bool) {
+	symbolIndex := lookupPackageSymbolTextCore(info, callerFile, calleeTok)
+	if symbolIndex < 0 || symbolIndex >= len(info.Symbols) || info.Symbols[symbolIndex].Kind != SymbolFunc {
+		return -1, syntax.FuncDecl{}, false
+	}
+	symbol := info.Symbols[symbolIndex]
+	if symbol.File < 0 || symbol.File >= len(pkg.Files) {
+		return -1, syntax.FuncDecl{}, false
+	}
+	file := pkg.Files[symbol.File].File
+	for i := 0; i < len(file.Funcs); i++ {
+		fn := file.Funcs[i]
+		if fn.ReceiverStart < 0 && fn.NameTok == symbol.Token {
+			return symbol.File, fn, true
 		}
 	}
 	return -1, syntax.FuncDecl{}, false
 }
 
-func definiteArgumentTypeKind(pkg load.Package, fileIndex int, caller syntax.FuncDecl, arg ExprSpan, before int) int {
+func definiteArgumentTypeKind(pkg load.Package, fileIndex int, caller syntax.FuncDecl, signature FuncSignature, arg ExprSpan, before int) int {
 	file := pkg.Files[fileIndex].File
 	start, end := trimExprSpan(file, arg.StartTok, arg.EndTok)
 	if start < 0 || end <= start {
@@ -83,7 +97,6 @@ func definiteArgumentTypeKind(pkg load.Package, fileIndex int, caller syntax.Fun
 	if name == "nil" {
 		return definiteTypePointer
 	}
-	signature := buildFuncSignature(file, caller)
 	if kind := definiteNamedFieldTypeKind(pkg, fileIndex, signature.Receiver, name); kind != definiteTypeUnknown {
 		return kind
 	}
@@ -185,15 +198,14 @@ func definiteLocalSpecType(file syntax.File, start int, end int, name string) (i
 	return typeStart, typeEnd, typeStart >= 0 && typeEnd > typeStart
 }
 
-func definiteCallNameShadowed(file syntax.File, caller syntax.FuncDecl, name string, before int) bool {
-	signature := buildFuncSignature(file, caller)
-	if LookupField(signature.Receiver, name) >= 0 || LookupField(signature.Params, name) >= 0 || LookupField(signature.Results, name) >= 0 {
+func definiteCallNameShadowed(file syntax.File, caller syntax.FuncDecl, signature FuncSignature, calleeTok int) bool {
+	if definiteFieldsHaveTokenName(file, signature.Receiver, calleeTok) || definiteFieldsHaveTokenName(file, signature.Params, calleeTok) || definiteFieldsHaveTokenName(file, signature.Results, calleeTok) {
 		return true
 	}
-	if definiteLocalNameDeclared(file, caller, name, before) {
+	if definiteLocalNameDeclared(file, caller, calleeTok) {
 		return true
 	}
-	for i := caller.BodyStart + 1; i < before; i++ {
+	for i := caller.BodyStart + 1; i < calleeTok; i++ {
 		if !tokenTextIs(file, i, ":=") {
 			continue
 		}
@@ -201,7 +213,7 @@ func definiteCallNameShadowed(file syntax.File, caller syntax.FuncDecl, name str
 			if tokCharIs(file, j, ';') || tokCharIs(file, j, '{') || tokCharIs(file, j, '}') || file.Tokens[j].Line != file.Tokens[i].Line {
 				break
 			}
-			if file.Tokens[j].Kind == syntax.TokenIdent && tokenString(file, j) == name {
+			if file.Tokens[j].Kind == syntax.TokenIdent && statementTokensEqual(file, j, calleeTok) {
 				return true
 			}
 		}
@@ -209,17 +221,28 @@ func definiteCallNameShadowed(file syntax.File, caller syntax.FuncDecl, name str
 	return false
 }
 
-func definiteLocalNameDeclared(file syntax.File, caller syntax.FuncDecl, name string, before int) bool {
-	for i := caller.BodyStart + 1; i < before; i++ {
+func definiteFieldsHaveTokenName(file syntax.File, fields []Field, tok int) bool {
+	for i := 0; i < len(fields); i++ {
+		name := fields[i].Name
+		token := file.Tokens[tok]
+		if tokenMatchesCoreSymbol(file.Src, token.Start, token.End-token.Start, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func definiteLocalNameDeclared(file syntax.File, caller syntax.FuncDecl, calleeTok int) bool {
+	for i := caller.BodyStart + 1; i < calleeTok; i++ {
 		kind := file.Tokens[i].Kind
 		if kind != syntax.TokenVar && kind != syntax.TokenConst && kind != syntax.TokenType {
 			continue
 		}
 		start := i + 1
-		end := statementSpecEnd(file, start, before)
-		if start < before && tokCharIs(file, start, '(') {
+		end := statementSpecEnd(file, start, calleeTok)
+		if start < calleeTok && tokCharIs(file, start, '(') {
 			close := findTypeMatching(file, start, '(', ')')
-			if close <= start || close > before {
+			if close <= start || close > calleeTok {
 				continue
 			}
 			end = close - 1
@@ -230,7 +253,7 @@ func definiteLocalNameDeclared(file syntax.File, caller syntax.FuncDecl, name st
 			specEnd := statementSpecEnd(file, start, end)
 			names, _ := localDeclNameTokens(file, start, specEnd)
 			for j := 0; j < len(names); j++ {
-				if tokenString(file, names[j]) == name {
+				if statementTokensEqual(file, names[j], calleeTok) {
 					return true
 				}
 			}
