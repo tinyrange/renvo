@@ -74,7 +74,7 @@ func receiverIsPointer(pkg load.Package, fileIndex int, field Field) bool {
 		return false
 	}
 	file := pkg.Files[fileIndex].File
-	return tokCharIs(file, field.TypeStart, '*')
+	return tokCharIs(&file, field.TypeStart, '*')
 }
 
 func receiverBaseName(pkg load.Package, fileIndex int, field Field) string {
@@ -84,7 +84,7 @@ func receiverBaseName(pkg load.Package, fileIndex int, field Field) string {
 	file := pkg.Files[fileIndex].File
 	for i := field.TypeEnd - 1; i >= field.TypeStart; i-- {
 		if file.Tokens[i].Kind == syntax.TokenIdent {
-			return tokenString(file, i)
+			return tokenString(&file, i)
 		}
 	}
 	return ""

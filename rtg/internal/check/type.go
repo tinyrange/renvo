@@ -104,11 +104,11 @@ func classifyType(file syntax.File, start int, end int) int {
 	if file.Tokens[start].Kind == syntax.TokenFunc {
 		return TypeFunc
 	}
-	if tokCharIs(file, start, '*') {
+	if tokCharIs(&file, start, '*') {
 		return TypePointer
 	}
-	if tokCharIs(file, start, '[') {
-		if start+1 < end && tokCharIs(file, start+1, ']') {
+	if tokCharIs(&file, start, '[') {
+		if start+1 < end && tokCharIs(&file, start+1, ']') {
 			return TypeSlice
 		}
 		return TypeArray
@@ -120,7 +120,7 @@ func classifyType(file syntax.File, start int, end int) int {
 }
 
 func parseMapTypeShape(file syntax.File, start int, end int) (int, int, int, int) {
-	if start+1 >= end || !tokCharIs(file, start+1, '[') {
+	if start+1 >= end || !tokCharIs(&file, start+1, '[') {
 		return -1, -1, -1, -1
 	}
 	close := findTypeMatching(file, start+1, '[', ']')
@@ -133,7 +133,7 @@ func parseMapTypeShape(file syntax.File, start int, end int) (int, int, int, int
 }
 
 func parseArrayTypeShape(file syntax.File, start int, end int) (int, int, int, int) {
-	if start >= end || !tokCharIs(file, start, '[') {
+	if start >= end || !tokCharIs(&file, start, '[') {
 		return -1, -1, -1, -1
 	}
 	close := findTypeMatching(file, start, '[', ']')
@@ -150,7 +150,7 @@ func parseArrayTypeShape(file syntax.File, start int, end int) (int, int, int, i
 }
 
 func parseFuncTypeSignature(file syntax.File, start int, end int) FuncSignature {
-	if start+1 >= end || !tokCharIs(file, start+1, '(') {
+	if start+1 >= end || !tokCharIs(&file, start+1, '(') {
 		return FuncSignature{}
 	}
 	paramsEnd := findTypeMatching(file, start+1, '(', ')')
@@ -179,14 +179,14 @@ func trimTypeSpan(file syntax.File, start int, end int) (int, int) {
 }
 
 func isTypeSpanSeparator(file syntax.File, tok int) bool {
-	return tokCharIs(file, tok, ';') || tokCharIs(file, tok, ',')
+	return tokCharIs(&file, tok, ';') || tokCharIs(&file, tok, ',')
 }
 
 func parseStructFields(file syntax.File, start int, end int) []Field {
 	var fields []Field
 	i := start
 	for i < end {
-		if tokCharIs(file, i, ';') {
+		if tokCharIs(&file, i, ';') {
 			i++
 			continue
 		}
@@ -219,24 +219,24 @@ func nextStructFieldEnd(file syntax.File, start int, end int) int {
 		if i > start && parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && file.Tokens[i].Line != file.Tokens[i-1].Line {
 			return i
 		}
-		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && tokCharIs(file, i, ';') {
+		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && tokCharIs(&file, i, ';') {
 			return i
 		}
-		if tokCharIs(file, i, '(') {
+		if tokCharIs(&file, i, '(') {
 			parenDepth++
-		} else if tokCharIs(file, i, ')') {
+		} else if tokCharIs(&file, i, ')') {
 			if parenDepth > 0 {
 				parenDepth--
 			}
-		} else if tokCharIs(file, i, '[') {
+		} else if tokCharIs(&file, i, '[') {
 			bracketDepth++
-		} else if tokCharIs(file, i, ']') {
+		} else if tokCharIs(&file, i, ']') {
 			if bracketDepth > 0 {
 				bracketDepth--
 			}
-		} else if tokCharIs(file, i, '{') {
+		} else if tokCharIs(&file, i, '{') {
 			braceDepth++
-		} else if tokCharIs(file, i, '}') {
+		} else if tokCharIs(&file, i, '}') {
 			if braceDepth > 0 {
 				braceDepth--
 			}
@@ -250,18 +250,18 @@ func findTypeTopLevelChar(file syntax.File, start int, end int, c byte) int {
 	parenDepth := 0
 	bracketDepth := 0
 	for i := start; i < end; i++ {
-		if parenDepth == 0 && bracketDepth == 0 && tokCharIs(file, i, c) {
+		if parenDepth == 0 && bracketDepth == 0 && tokCharIs(&file, i, c) {
 			return i
 		}
-		if tokCharIs(file, i, '(') {
+		if tokCharIs(&file, i, '(') {
 			parenDepth++
-		} else if tokCharIs(file, i, ')') {
+		} else if tokCharIs(&file, i, ')') {
 			if parenDepth > 0 {
 				parenDepth--
 			}
-		} else if tokCharIs(file, i, '[') {
+		} else if tokCharIs(&file, i, '[') {
 			bracketDepth++
-		} else if tokCharIs(file, i, ']') {
+		} else if tokCharIs(&file, i, ']') {
 			if bracketDepth > 0 {
 				bracketDepth--
 			}
@@ -271,14 +271,14 @@ func findTypeTopLevelChar(file syntax.File, start int, end int, c byte) int {
 }
 
 func findTypeMatching(file syntax.File, open int, left byte, right byte) int {
-	if open < 0 || !tokCharIs(file, open, left) {
+	if open < 0 || !tokCharIs(&file, open, left) {
 		return -1
 	}
 	depth := 0
 	for i := open; i < len(file.Tokens); i++ {
-		if tokCharIs(file, i, left) {
+		if tokCharIs(&file, i, left) {
 			depth++
-		} else if tokCharIs(file, i, right) {
+		} else if tokCharIs(&file, i, right) {
 			depth--
 			if depth == 0 {
 				return i + 1

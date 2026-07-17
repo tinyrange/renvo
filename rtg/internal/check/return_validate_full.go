@@ -6,19 +6,19 @@ import "j5.nz/rtg/rtg/internal/syntax"
 
 func invalidDefiniteAssignmentType(file syntax.File, fn syntax.FuncDecl) int {
 	for i := fn.BodyStart + 2; i+1 < fn.BodyEnd; i++ {
-		if !tokenTextIs(file, i, "=") || file.Tokens[i-1].Kind != syntax.TokenIdent {
+		if !tokenTextIs(&file, i, "=") || file.Tokens[i-1].Kind != syntax.TokenIdent {
 			continue
 		}
 		valueKind := definiteLiteralKind(file, i+1)
 		if valueKind == "" {
 			continue
 		}
-		name := tokenString(file, i-1)
+		name := tokenString(&file, i-1)
 		for j := i - 2; j >= fn.BodyStart+1; j-- {
-			if file.Tokens[j].Kind != syntax.TokenVar || j+2 >= i || file.Tokens[j+1].Kind != syntax.TokenIdent || tokenString(file, j+1) != name {
+			if file.Tokens[j].Kind != syntax.TokenVar || j+2 >= i || file.Tokens[j+1].Kind != syntax.TokenIdent || tokenString(&file, j+1) != name {
 				continue
 			}
-			declared := tokenString(file, j+2)
+			declared := tokenString(&file, j+2)
 			if definiteBuiltinType(declared) && declared != valueKind {
 				return i + 1
 			}
@@ -48,7 +48,7 @@ func definiteLiteralKind(file syntax.File, tok int) string {
 	if file.Tokens[tok].Kind == syntax.TokenNumber {
 		return "int"
 	}
-	if tokenTextIs(file, tok, "true") || tokenTextIs(file, tok, "false") {
+	if tokenTextIs(&file, tok, "true") || tokenTextIs(&file, tok, "false") {
 		return "bool"
 	}
 	return ""

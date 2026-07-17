@@ -64,11 +64,11 @@ func appendDeclRefs(refs []NameRef, file syntax.File, fileIndex int, info Packag
 	if start >= end {
 		return refs
 	}
-	if tokCharIs(file, start, '(') {
+	if tokCharIs(&file, start, '(') {
 		i := start + 1
 		for i < end {
 			i = skipLocalSeparators(file, i, end)
-			if i >= end || tokCharIs(file, i, ')') {
+			if i >= end || tokCharIs(&file, i, ')') {
 				break
 			}
 			specEnd := statementSpecEnd(file, i, end)
@@ -93,7 +93,7 @@ func appendBranchLabelRef(refs []NameRef, file syntax.File, scope FuncScope, stm
 	if tok >= stmt.EndTok || tok >= len(file.Tokens) || file.Tokens[tok].Kind != syntax.TokenIdent {
 		return refs
 	}
-	name := tokenString(file, tok)
+	name := tokenString(&file, tok)
 	index := lookupScopeNameKind(scope, name, NameLabel)
 	kind := RefUnknown
 	if index >= 0 {
@@ -107,7 +107,7 @@ func appendExprRefs(refs []NameRef, file syntax.File, fileIndex int, info Packag
 		if file.Tokens[i].Kind != syntax.TokenIdent || shouldSkipIdentRef(file, i, end) {
 			continue
 		}
-		name := tokenString(file, i)
+		name := tokenString(&file, i)
 		if name == "_" {
 			continue
 		}
@@ -117,10 +117,10 @@ func appendExprRefs(refs []NameRef, file syntax.File, fileIndex int, info Packag
 }
 
 func shouldSkipIdentRef(file syntax.File, tok int, end int) bool {
-	if tok > 0 && tokCharIs(file, tok-1, '.') {
+	if tok > 0 && tokCharIs(&file, tok-1, '.') {
 		return true
 	}
-	if tok+1 < end && tokCharIs(file, tok+1, ':') && !tokenTextIs(file, tok+1, ":=") {
+	if tok+1 < end && tokCharIs(&file, tok+1, ':') && !tokenTextIs(&file, tok+1, ":=") {
 		return true
 	}
 	return false

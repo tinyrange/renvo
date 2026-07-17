@@ -70,11 +70,11 @@ func appendDeclCalls(calls []CallRef, file syntax.File, fileIndex int, info Pack
 	if start >= end {
 		return calls
 	}
-	if tokCharIs(file, start, '(') {
+	if tokCharIs(&file, start, '(') {
 		i := start + 1
 		for i < end {
 			i = skipLocalSeparators(file, i, end)
-			if i >= end || tokCharIs(file, i, ')') {
+			if i >= end || tokCharIs(&file, i, ')') {
 				break
 			}
 			specEnd := statementSpecEnd(file, i, end)
@@ -96,7 +96,7 @@ func appendSpecInitializerCalls(calls []CallRef, file syntax.File, fileIndex int
 
 func appendExprCalls(calls []CallRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, start int, end int) []CallRef {
 	for i := start; i < end && i < len(file.Tokens); i++ {
-		if !tokCharIs(file, i, '(') {
+		if !tokCharIs(&file, i, '(') {
 			continue
 		}
 		closeTok := findTypeMatching(file, i, '(', ')')
@@ -107,10 +107,10 @@ func appendExprCalls(calls []CallRef, file syntax.File, fileIndex int, info Pack
 		if callee < start || file.Tokens[callee].Kind != syntax.TokenIdent {
 			continue
 		}
-		if callee-1 >= start && tokenTextIs(file, callee-1, ".") && callee-2 >= start && file.Tokens[callee-2].Kind == syntax.TokenIdent {
-			calls = append(calls, resolveSelectorCall(file, fileIndex, info, checked, scope, tokenString(file, callee-2), tokenString(file, callee), callee-2, callee-1, callee, i, closeTok-1))
+		if callee-1 >= start && tokenTextIs(&file, callee-1, ".") && callee-2 >= start && file.Tokens[callee-2].Kind == syntax.TokenIdent {
+			calls = append(calls, resolveSelectorCall(file, fileIndex, info, checked, scope, tokenString(&file, callee-2), tokenString(&file, callee), callee-2, callee-1, callee, i, closeTok-1))
 		} else {
-			calls = append(calls, resolveDirectCall(file, fileIndex, info, scope, tokenString(file, callee), callee, i, closeTok-1))
+			calls = append(calls, resolveDirectCall(file, fileIndex, info, scope, tokenString(&file, callee), callee, i, closeTok-1))
 		}
 	}
 	return calls

@@ -63,11 +63,11 @@ func appendDeclSelectors(selectors []SelectorRef, file syntax.File, fileIndex in
 	if start >= end {
 		return selectors
 	}
-	if tokCharIs(file, start, '(') {
+	if tokCharIs(&file, start, '(') {
 		i := start + 1
 		for i < end {
 			i = skipLocalSeparators(file, i, end)
-			if i >= end || tokCharIs(file, i, ')') {
+			if i >= end || tokCharIs(&file, i, ')') {
 				break
 			}
 			specEnd := statementSpecEnd(file, i, end)
@@ -89,14 +89,14 @@ func appendSpecInitializerSelectors(selectors []SelectorRef, file syntax.File, f
 
 func appendExprSelectors(selectors []SelectorRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, start int, end int) []SelectorRef {
 	for i := start + 1; i+1 < end && i+1 < len(file.Tokens); i++ {
-		if !tokenTextIs(file, i, ".") {
+		if !tokenTextIs(&file, i, ".") {
 			continue
 		}
 		if file.Tokens[i-1].Kind != syntax.TokenIdent || file.Tokens[i+1].Kind != syntax.TokenIdent {
 			continue
 		}
-		baseName := tokenString(file, i-1)
-		name := tokenString(file, i+1)
+		baseName := tokenString(&file, i-1)
+		name := tokenString(&file, i+1)
 		if baseName == "_" || name == "_" {
 			continue
 		}

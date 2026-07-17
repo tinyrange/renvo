@@ -79,7 +79,7 @@ func LookupLocalDeclCall(decl LocalDeclInfo, base string, name string, kind int)
 }
 
 func buildDeclInfo(file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, decl syntax.TopDecl) DeclInfo {
-	name := tokenString(file, decl.NameTok)
+	name := tokenString(&file, decl.NameTok)
 	out := DeclInfo{
 		Name:       name,
 		Kind:       declSymbolKind(decl.Kind),
@@ -94,7 +94,7 @@ func buildDeclInfo(file syntax.File, fileIndex int, info PackageInfo, checked []
 	}
 	if decl.Kind == syntax.TokenType {
 		typeStart := decl.NameTok + 1
-		if tokenTextIs(file, typeStart, "=") {
+		if tokenTextIs(&file, typeStart, "=") {
 			out.Alias = true
 			typeStart++
 		}
@@ -131,11 +131,11 @@ func buildFuncLocalDecls(file syntax.File, fileIndex int, info PackageInfo, chec
 		kind := declSymbolKind(file.Tokens[stmt.StartTok].Kind)
 		start := stmt.StartTok + 1
 		end := stmt.EndTok
-		if start < end && tokCharIs(file, start, '(') {
+		if start < end && tokCharIs(&file, start, '(') {
 			j := start + 1
 			for j < end {
 				j = skipLocalSeparators(file, j, end)
-				if j >= end || tokCharIs(file, j, ')') {
+				if j >= end || tokCharIs(&file, j, ')') {
 					break
 				}
 				specEnd := statementSpecEnd(file, j, end)
@@ -183,7 +183,7 @@ func appendLocalDeclSpec(decls []LocalDeclInfo, file syntax.File, fileIndex int,
 	indexes := appendExprIndexes(nil, file, valueSpanStart, valueSpanEnd)
 	composites := appendExprComposites(nil, file, valueSpanStart, valueSpanEnd)
 	for i := 0; i < len(names); i++ {
-		name := tokenString(file, names[i])
+		name := tokenString(&file, names[i])
 		if name == "_" {
 			continue
 		}
@@ -213,13 +213,13 @@ func appendLocalDeclSpec(decls []LocalDeclInfo, file syntax.File, fileIndex int,
 }
 
 func appendLocalTypeDecl(decls []LocalDeclInfo, file syntax.File, fileIndex int, scope FuncScope, start int, end int) []LocalDeclInfo {
-	name := tokenString(file, start)
+	name := tokenString(&file, start)
 	if name == "_" {
 		return decls
 	}
 	typeStart := start + 1
 	alias := false
-	if tokenTextIs(file, typeStart, "=") {
+	if tokenTextIs(&file, typeStart, "=") {
 		alias = true
 		typeStart++
 	}
@@ -249,7 +249,7 @@ func localDeclNameTokens(file syntax.File, start int, end int) ([]int, int) {
 		}
 		names = append(names, i)
 		i++
-		if i < end && tokCharIs(file, i, ',') {
+		if i < end && tokCharIs(&file, i, ',') {
 			i++
 			continue
 		}
@@ -261,7 +261,7 @@ func localDeclNameTokens(file syntax.File, start int, end int) ([]int, int) {
 func declNameListEnd(file syntax.File, decl syntax.TopDecl) int {
 	i := decl.StartTok + 1
 	for i < decl.EndTok {
-		if !tokCharIs(file, i, ',') {
+		if !tokCharIs(&file, i, ',') {
 			return i
 		}
 		i++
@@ -293,25 +293,25 @@ func findDeclAssign(file syntax.File, start int, end int) int {
 	bracketDepth := 0
 	braceDepth := 0
 	for i := start; i < end; i++ {
-		if tokCharIs(file, i, '(') {
+		if tokCharIs(&file, i, '(') {
 			parenDepth++
-		} else if tokCharIs(file, i, ')') {
+		} else if tokCharIs(&file, i, ')') {
 			if parenDepth > 0 {
 				parenDepth--
 			}
-		} else if tokCharIs(file, i, '[') {
+		} else if tokCharIs(&file, i, '[') {
 			bracketDepth++
-		} else if tokCharIs(file, i, ']') {
+		} else if tokCharIs(&file, i, ']') {
 			if bracketDepth > 0 {
 				bracketDepth--
 			}
-		} else if tokCharIs(file, i, '{') {
+		} else if tokCharIs(&file, i, '{') {
 			braceDepth++
-		} else if tokCharIs(file, i, '}') {
+		} else if tokCharIs(&file, i, '}') {
 			if braceDepth > 0 {
 				braceDepth--
 			}
-		} else if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && tokenTextIs(file, i, "=") {
+		} else if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && tokenTextIs(&file, i, "=") {
 			return i
 		}
 	}
@@ -332,7 +332,7 @@ func trimDeclSpan(file syntax.File, start int, end int) (int, int) {
 }
 
 func isDeclSpanSeparator(file syntax.File, tok int) bool {
-	return tokCharIs(file, tok, ';')
+	return tokCharIs(&file, tok, ';')
 }
 
 func sortDecls(decls []DeclInfo) {

@@ -27,7 +27,7 @@ func parseInterfaceElements(file syntax.File, start int, end int) ([]InterfaceMe
 	var embeds []InterfaceEmbed
 	i := start
 	for i < end {
-		if tokCharIs(file, i, ';') {
+		if tokCharIs(&file, i, ';') {
 			i++
 			continue
 		}
@@ -51,7 +51,7 @@ func parseInterfaceElements(file syntax.File, start int, end int) ([]InterfaceMe
 }
 
 func isInterfaceMethodSpec(file syntax.File, start int, end int) bool {
-	return start+1 < end && file.Tokens[start].Kind == syntax.TokenIdent && tokCharIs(file, start+1, '(')
+	return start+1 < end && file.Tokens[start].Kind == syntax.TokenIdent && tokCharIs(&file, start+1, '(')
 }
 
 func parseInterfaceMethod(file syntax.File, start int, end int) InterfaceMethod {
@@ -61,7 +61,7 @@ func parseInterfaceMethod(file syntax.File, start int, end int) InterfaceMethod 
 		paramsEnd = paramsStart + 1
 	}
 	return InterfaceMethod{
-		Name:      tokenString(file, start),
+		Name:      tokenString(&file, start),
 		NameTok:   start,
 		Signature: buildSignatureFromParts(file, -1, -1, paramsStart, paramsEnd, paramsEnd, end),
 	}
@@ -76,24 +76,24 @@ func nextInterfaceElementEnd(file syntax.File, start int, end int) int {
 		if i > start && parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && file.Tokens[i].Line != file.Tokens[i-1].Line {
 			return i
 		}
-		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && tokCharIs(file, i, ';') {
+		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && tokCharIs(&file, i, ';') {
 			return i
 		}
-		if tokCharIs(file, i, '(') {
+		if tokCharIs(&file, i, '(') {
 			parenDepth++
-		} else if tokCharIs(file, i, ')') {
+		} else if tokCharIs(&file, i, ')') {
 			if parenDepth > 0 {
 				parenDepth--
 			}
-		} else if tokCharIs(file, i, '[') {
+		} else if tokCharIs(&file, i, '[') {
 			bracketDepth++
-		} else if tokCharIs(file, i, ']') {
+		} else if tokCharIs(&file, i, ']') {
 			if bracketDepth > 0 {
 				bracketDepth--
 			}
-		} else if tokCharIs(file, i, '{') {
+		} else if tokCharIs(&file, i, '{') {
 			braceDepth++
-		} else if tokCharIs(file, i, '}') {
+		} else if tokCharIs(&file, i, '}') {
 			if braceDepth > 0 {
 				braceDepth--
 			}

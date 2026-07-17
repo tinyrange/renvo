@@ -121,18 +121,24 @@ func expandSourceEmbeds(fs SourceFS, path string, moduleRoot string, src []byte)
 }
 
 func embedSourceContainsDirective(src []byte) bool {
-	const marker = "//go:embed"
-	for i := 0; i+len(marker) <= len(src); i++ {
-		matched := true
-		for j := 0; j < len(marker); j++ {
-			if src[i+j] != marker[j] {
-				matched = false
-				break
+	i := 0
+	for i+17 <= len(src) {
+		if src[i] != '/' && src[i+1] != '/' && src[i+2] != '/' && src[i+3] != '/' &&
+			src[i+4] != '/' && src[i+5] != '/' && src[i+6] != '/' && src[i+7] != '/' {
+			i += 8
+			continue
+		}
+		for end := i + 8; i < end; i++ {
+			if src[i] == '/' && src[i+1] == '/' && src[i+2] == 'g' && src[i+3] == 'o' && src[i+4] == ':' && src[i+5] == 'e' && src[i+6] == 'm' && src[i+7] == 'b' && src[i+8] == 'e' && src[i+9] == 'd' {
+				return true
 			}
 		}
-		if matched {
+	}
+	for i+10 <= len(src) {
+		if src[i] == '/' && src[i+1] == '/' && src[i+2] == 'g' && src[i+3] == 'o' && src[i+4] == ':' && src[i+5] == 'e' && src[i+6] == 'm' && src[i+7] == 'b' && src[i+8] == 'e' && src[i+9] == 'd' {
 			return true
 		}
+		i++
 	}
 	return false
 }

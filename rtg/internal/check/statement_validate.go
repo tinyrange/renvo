@@ -26,7 +26,7 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body) (int, int) {
 			callEnd = stmt.ExprEnd
 		}
 		for tok := callStart; tok >= 0 && tok+1 < callEnd; tok++ {
-			if file.Tokens[tok].Kind == syntax.TokenIdent && file.Tokens[tok].Line == file.Tokens[tok+1].Line && tokCharIs(file, tok+1, '(') && (tok == 0 || !tokCharIs(file, tok-1, '.')) && definiteLiteralLocal(literalLocals, file, tok) {
+			if file.Tokens[tok].Kind == syntax.TokenIdent && file.Tokens[tok].Line == file.Tokens[tok+1].Line && tokCharIs(&file, tok+1, '(') && (tok == 0 || !tokCharIs(&file, tok-1, '.')) && definiteLiteralLocal(literalLocals, file, tok) {
 				return CheckErrCall, tok
 			}
 		}
@@ -48,7 +48,7 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body) (int, int) {
 		if leftCount == 1 && rightCount == 1 && leftFirst.EndTok-leftFirst.StartTok == 1 && file.Tokens[leftFirst.StartTok].Kind == syntax.TokenIdent {
 			literal := expressionIsDefiniteLiteral(file, rightFirst)
 			updated := false
-			if !tokenTextIs(file, op, ":=") {
+			if !tokenTextIs(&file, op, ":=") {
 				for j := len(literalLocals) - 3; j >= 0; j -= 3 {
 					if stmt.StartTok < literalLocals[j+1] && statementTokensEqual(file, literalLocals[j], leftFirst.StartTok) {
 						literalLocals[j+2] = 0
@@ -117,7 +117,7 @@ func definiteStatementScopeEnd(body syntax.Body, tok int) int {
 
 func branchIsBare(file syntax.File, stmt syntax.Stmt) bool {
 	for tok := stmt.StartTok + 1; tok < stmt.EndTok; tok++ {
-		if tokCharIs(file, tok, ';') {
+		if tokCharIs(&file, tok, ';') {
 			continue
 		}
 		return false
@@ -147,7 +147,7 @@ func definitelyInvalidAssignTarget(file syntax.File, span ExprSpan) bool {
 	if kind == syntax.TokenNumber || kind == syntax.TokenString || kind == syntax.TokenChar {
 		return true
 	}
-	return tokenTextIs(file, start, "true") || tokenTextIs(file, start, "false") || tokenTextIs(file, start, "nil")
+	return tokenTextIs(&file, start, "true") || tokenTextIs(&file, start, "false") || tokenTextIs(&file, start, "nil")
 }
 
 func expressionMayBeMultiValued(file syntax.File, span ExprSpan) bool {
@@ -155,14 +155,14 @@ func expressionMayBeMultiValued(file syntax.File, span ExprSpan) bool {
 	if end <= start {
 		return false
 	}
-	if tokCharIs(file, end-1, ')') || tokCharIs(file, end-1, ']') {
+	if tokCharIs(&file, end-1, ')') || tokCharIs(&file, end-1, ']') {
 		return true
 	}
-	return tokenTextIs(file, start, "<-")
+	return tokenTextIs(&file, start, "<-")
 }
 
 func stripOuterParens(file syntax.File, start int, end int) (int, int) {
-	for end-start >= 2 && tokCharIs(file, start, '(') && findTypeMatching(file, start, '(', ')') == end {
+	for end-start >= 2 && tokCharIs(&file, start, '(') && findTypeMatching(file, start, '(', ')') == end {
 		start++
 		end--
 	}
@@ -193,5 +193,5 @@ func expressionIsDefiniteLiteral(file syntax.File, span ExprSpan) bool {
 		return false
 	}
 	kind := file.Tokens[start].Kind
-	return kind == syntax.TokenNumber || kind == syntax.TokenString || kind == syntax.TokenChar || tokenTextIs(file, start, "true") || tokenTextIs(file, start, "false") || tokenTextIs(file, start, "nil")
+	return kind == syntax.TokenNumber || kind == syntax.TokenString || kind == syntax.TokenChar || tokenTextIs(&file, start, "true") || tokenTextIs(&file, start, "false") || tokenTextIs(&file, start, "nil")
 }

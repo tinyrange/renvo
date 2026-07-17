@@ -41,11 +41,11 @@ func invalidReturnCount(file syntax.File, fn syntax.FuncDecl, signature FuncSign
 func skipNestedFunction(file syntax.File, start int, limit int) int {
 	open := -1
 	for i := start + 1; i < limit; i++ {
-		if tokCharIs(file, i, '{') {
+		if tokCharIs(&file, i, '{') {
 			open = i
 			break
 		}
-		if tokCharIs(file, i, ';') {
+		if tokCharIs(&file, i, ';') {
 			return start
 		}
 	}
@@ -54,9 +54,9 @@ func skipNestedFunction(file syntax.File, start int, limit int) int {
 	}
 	depth := 1
 	for i := open + 1; i < limit; i++ {
-		if tokCharIs(file, i, '{') {
+		if tokCharIs(&file, i, '{') {
 			depth++
-		} else if tokCharIs(file, i, '}') {
+		} else if tokCharIs(&file, i, '}') {
 			depth--
 			if depth == 0 {
 				return i
@@ -68,7 +68,7 @@ func skipNestedFunction(file syntax.File, start int, limit int) int {
 
 func returnValueList(file syntax.File, returnTok int, limit int) (int, int, int) {
 	start := returnTok + 1
-	if start >= limit || tokCharIs(file, start, ';') || tokCharIs(file, start, '}') || file.Tokens[start].Line > file.Tokens[returnTok].Line {
+	if start >= limit || tokCharIs(&file, start, ';') || tokCharIs(&file, start, '}') || file.Tokens[start].Line > file.Tokens[returnTok].Line {
 		return start, start, 0
 	}
 	parenDepth := 0
@@ -81,24 +81,24 @@ func returnValueList(file syntax.File, returnTok int, limit int) (int, int, int)
 			break
 		}
 		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 {
-			if tokCharIs(file, i, ';') || tokCharIs(file, i, '}') {
+			if tokCharIs(&file, i, ';') || tokCharIs(&file, i, '}') {
 				break
 			}
-			if tokCharIs(file, i, ',') {
+			if tokCharIs(&file, i, ',') {
 				count++
 			}
 		}
-		if tokCharIs(file, i, '(') {
+		if tokCharIs(&file, i, '(') {
 			parenDepth++
-		} else if tokCharIs(file, i, ')') && parenDepth > 0 {
+		} else if tokCharIs(&file, i, ')') && parenDepth > 0 {
 			parenDepth--
-		} else if tokCharIs(file, i, '[') {
+		} else if tokCharIs(&file, i, '[') {
 			bracketDepth++
-		} else if tokCharIs(file, i, ']') && bracketDepth > 0 {
+		} else if tokCharIs(&file, i, ']') && bracketDepth > 0 {
 			bracketDepth--
-		} else if tokCharIs(file, i, '{') {
+		} else if tokCharIs(&file, i, '{') {
 			braceDepth++
-		} else if tokCharIs(file, i, '}') && braceDepth > 0 {
+		} else if tokCharIs(&file, i, '}') && braceDepth > 0 {
 			braceDepth--
 		}
 		end = i + 1
@@ -120,7 +120,7 @@ func returnLineContinues(file syntax.File, tok int) bool {
 
 func returnMayBeMultiValueCall(file syntax.File, start int, end int) bool {
 	for i := start; i < end; i++ {
-		if tokCharIs(file, i, '(') {
+		if tokCharIs(&file, i, '(') {
 			return true
 		}
 	}
