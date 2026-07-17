@@ -6,6 +6,12 @@ type Writer interface {
 	Write(p []byte) (n int, err error)
 }
 
+func Println(a ...interface{}) (int, error) {
+	text := Sprint(a...) + "\n"
+	print(text)
+	return len(text), nil
+}
+
 func Sprint(a ...interface{}) string {
 	out := ""
 	prevString := false

@@ -3,11 +3,15 @@
 package errors
 
 type errorString struct {
-	s string
+	s  string
+	id int
 }
 
+var nextErrorID int
+
 func New(text string) error {
-	return &errorString{s: text}
+	nextErrorID++
+	return errorString{s: text, id: nextErrorID}
 }
 
 func (e errorString) Error() string {

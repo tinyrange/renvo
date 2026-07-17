@@ -1,12 +1,10 @@
-//go:build !rtg
-
 package strconv
 
-var ErrSyntax error = syntaxError{}
-var ErrRange error = rangeError{}
+var ErrSyntax = syntaxError{marker: 1}
+var ErrRange = rangeError{marker: 2}
 
-type syntaxError struct{}
-type rangeError struct{}
+type syntaxError struct{ marker int }
+type rangeError struct{ marker int }
 
 func (syntaxError) Error() string { return "invalid syntax" }
 func (rangeError) Error() string  { return "value out of range" }
@@ -57,20 +55,22 @@ func FormatUint(i uint64, base int) string {
 	if i == 0 {
 		return "0"
 	}
-	var buf [65]byte
-	pos := len(buf)
+	var reversed []byte
 	b := uint64(base)
 	for i > 0 {
 		d := i % b
-		pos--
 		if d < 10 {
-			buf[pos] = byte('0' + d)
+			reversed = append(reversed, byte('0'+d))
 		} else {
-			buf[pos] = byte('a' + d - 10)
+			reversed = append(reversed, byte('a'+d-10))
 		}
 		i = i / b
 	}
-	return string(buf[pos:])
+	var out []byte
+	for i := len(reversed) - 1; i >= 0; i-- {
+		out = append(out, reversed[i])
+	}
+	return string(out)
 }
 
 func ParseInt(s string, base int, bitSize int) (int64, error) {
@@ -105,6 +105,11 @@ func ParseUint(s string, base int, bitSize int) (uint64, error) {
 			base = 8
 			if len(s) > 2 && (s[1] == 'x' || s[1] == 'X') {
 				base = 16
+				s = s[2:]
+			} else if len(s) > 2 && (s[1] == 'b' || s[1] == 'B') {
+				base = 2
+				s = s[2:]
+			} else if len(s) > 2 && (s[1] == 'o' || s[1] == 'O') {
 				s = s[2:]
 			}
 		}

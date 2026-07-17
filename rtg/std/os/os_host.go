@@ -7,7 +7,7 @@ import (
 	stdos "os"
 )
 
-type FileMode = stdfs.FileMode
+type FileMode int
 
 var Args = stdos.Args
 
@@ -36,7 +36,7 @@ func ReadFile(name string) ([]byte, error) {
 }
 
 func WriteFile(name string, data []byte, perm FileMode) error {
-	return stdos.WriteFile(name, data, perm)
+	return stdos.WriteFile(name, data, stdfs.FileMode(perm))
 }
 
 func ReadDir(name string) ([]DirEntry, error) {

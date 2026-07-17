@@ -5227,6 +5227,12 @@ func rtgAddPointerType(m *rtgMeta, elem int, addressSpace int) int {
 	if addressSpace < rtgPointerSpaceData || addressSpace > rtgPointerSpaceGeneric {
 		addressSpace = rtgPointerSpaceData
 	}
+	for i := 1; i < len(m.types); i++ {
+		typ := &m.types[i]
+		if typ.kind == rtgTypePointer && typ.elem == elem && typ.first == addressSpace {
+			return i
+		}
+	}
 	return rtgAddType(m, rtgTypePointer, elem, addressSpace, 0, rtgBackendValueSlotSize, 0, 0)
 }
 
@@ -6733,6 +6739,11 @@ func rtgEmitLinearStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 		}
 		if rtgExprIdentCode(p, ep, root.left) == rtgIdentDelete && rtgFuncInfoFromCall(g, ep, root.left) < 0 {
 			return rtgEmitBuiltinDelete(g, ep, rootIndex)
+		}
+		resultType := rtgInferParsedExprType(g, ep, rootIndex)
+		if rtgTypeUsesHiddenResult(g.meta, resultType) {
+			offset := rtgAddUnnamedLocal(g, resultType)
+			return rtgEmitStructCallToLocal(g, ep, rootIndex, resultType, offset)
 		}
 		if !rtgEmitIntExpr(g, ep, rootIndex) {
 			return false
@@ -9575,7 +9586,10 @@ func rtgInferParsedExprTypeUncached(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 	if (e.kind == rtgExprInt || e.kind == rtgExprFloat) && rtgExprTokenIsImaginary(p, e.tok) {
 		return rtgBuiltinTypeComplex
 	}
-	if e.kind == rtgExprInt || e.kind == rtgExprChar || e.kind == rtgExprBool {
+	if e.kind == rtgExprBool {
+		return rtgTypeBool
+	}
+	if e.kind == rtgExprInt || e.kind == rtgExprChar {
 		return rtgTypeInt
 	}
 	if e.kind == rtgExprFloat {
@@ -10040,6 +10054,14 @@ func rtgEmitInterfaceAssignToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, o
 		e := &ep.exprs[idx]
 		if e.kind == rtgExprCall {
 			return rtgEmitStructCallToLocal(g, ep, idx, sourceType, offset)
+		}
+		if e.kind == rtgExprIndex {
+			if !rtgEmitIndexAddressPrimary(g, ep, idx) {
+				return false
+			}
+			rtgAsmCopyPrimaryToSecondary(&g.asm)
+			rtgEmitCopyMemSecondaryToStack(g, offset, rtgTypeSize(g.meta, sourceType))
+			return true
 		}
 		if e.kind != rtgExprIdent {
 			return false
@@ -10668,6 +10690,14 @@ func rtgEmitSliceLiteralBacking(g *rtgLinearGen, ep *rtgExprParse, idx int, slic
 			rtgAsmPopStoreStringMemSecondary(a, disp)
 			continue
 		}
+		if elemResolved.kind == rtgTypeInterface {
+			tempOffset := rtgAddUnnamedLocal(g, elemType)
+			if !rtgEmitInterfaceAssignToLocal(g, ep, field.expr, tempOffset) {
+				return false
+			}
+			rtgEmitCopyStackToBss(g, tempOffset, backingOff+disp, elemSize)
+			continue
+		}
 		if elemResolved.kind == rtgTypeStruct {
 			addrOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
 			rtgAsmPrimaryBssAddr(a, backingOff)
@@ -11080,19 +11110,11 @@ func rtgPrepareStructCall(g *rtgLinearGen, ep *rtgExprParse, idx int, destType i
 		receiverIndex = callee.left
 		receiverDotTok = callee.tok
 	}
-	wordCount := 1
-	for i := e.argCount - 1; i >= 0; i-- {
-		argIndex := ep.args[e.firstArg+i]
-		paramIndex := i
-		if receiverIndex >= 0 {
-			paramIndex = i + 1
-		}
-		words := rtgEmitCallParamArgReverse(g, ep, argIndex, fn.firstParam+paramIndex)
-		if words < 0 {
-			return -1, 0
-		}
-		wordCount += words
+	wordCount := rtgEmitCallArgsReverse(g, ep, e, fn, receiverIndex)
+	if wordCount < 0 {
+		return -1, 0
 	}
+	wordCount++
 	if receiverIndex >= 0 {
 		words := rtgEmitMethodReceiverArgReverse(g, ep, receiverIndex, g.meta.params[fn.firstParam].typ)
 		if words < 0 {
@@ -11104,6 +11126,35 @@ func rtgPrepareStructCall(g *rtgLinearGen, ep *rtgExprParse, idx int, destType i
 		wordCount += words
 	}
 	return fnIndex, wordCount
+}
+
+func rtgEmitCallArgsReverse(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, fn *rtgFuncInfo, receiverIndex int) int {
+	fixed := fn.paramCount
+	if receiverIndex >= 0 {
+		fixed--
+	}
+	wordCount := 0
+	if e.nameStart == 0 && fn.paramCount > 0 && g.meta.params[fn.firstParam+fn.paramCount-1].initStart == 1 {
+		fixed--
+		if e.argCount < fixed || !rtgEmitVariadicArgSliceReverse(g, ep, e.firstArg+fixed, e.argCount-fixed, g.meta.params[fn.firstParam+fn.paramCount-1].typ) {
+			return -1
+		}
+		wordCount = rtgBackendSliceWordCount
+	} else {
+		fixed = e.argCount
+	}
+	for i := fixed - 1; i >= 0; i-- {
+		paramIndex := i
+		if receiverIndex >= 0 {
+			paramIndex++
+		}
+		words := rtgEmitCallParamArgReverse(g, ep, ep.args[e.firstArg+i], fn.firstParam+paramIndex)
+		if words < 0 {
+			return -1
+		}
+		wordCount += words
+	}
+	return wordCount
 }
 func rtgEmitStructCallToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, destType int, offset int) bool {
 	if rtgIsInterfaceMethodCall(g, ep, idx) {
@@ -11143,10 +11194,6 @@ func rtgEmitUserCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	if fnIndex >= len(g.funcLabels) {
 		return false
 	}
-	firstArg := e.firstArg
-	argCount := e.argCount
-	expanded := e.nameStart
-	wordCount := 0
 	fn := &g.meta.funcs[fnIndex]
 	if rtgEmitRuntimeArenaCall(g, ep, idx, fn) {
 		return true
@@ -11161,49 +11208,9 @@ func rtgEmitUserCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		receiverIndex = callee.left
 		receiverDotTok = callee.tok
 	}
-	if expanded == 0 && fn.paramCount > 0 && g.meta.params[fn.firstParam+fn.paramCount-1].initStart == 1 {
-		fixed := fn.paramCount - 1
-		if receiverIndex >= 0 {
-			fixed--
-		}
-		if argCount < fixed {
-			return false
-		}
-		if receiverIndex >= 0 {
-			if !rtgEmitVariadicArgSliceReverse(g, ep, firstArg+fixed, argCount-fixed, g.meta.params[fn.firstParam+fn.paramCount-1].typ) {
-				return false
-			}
-		} else {
-			if !rtgEmitVariadicArgSliceReverse(g, ep, firstArg+fixed, argCount-fixed, g.meta.params[fn.firstParam+fn.paramCount-1].typ) {
-				return false
-			}
-		}
-		wordCount = 3
-		for i := fixed - 1; i >= 0; i-- {
-			argIndex := ep.args[firstArg+i]
-			paramIndex := i
-			if receiverIndex >= 0 {
-				paramIndex = i + 1
-			}
-			words := rtgEmitCallParamArgReverse(g, ep, argIndex, fn.firstParam+paramIndex)
-			if words < 0 {
-				return false
-			}
-			wordCount += words
-		}
-	} else {
-		for i := argCount - 1; i >= 0; i-- {
-			argIndex := ep.args[firstArg+i]
-			paramIndex := i
-			if receiverIndex >= 0 {
-				paramIndex = i + 1
-			}
-			words := rtgEmitCallParamArgReverse(g, ep, argIndex, fn.firstParam+paramIndex)
-			if words < 0 {
-				return false
-			}
-			wordCount += words
-		}
+	wordCount := rtgEmitCallArgsReverse(g, ep, &e, fn, receiverIndex)
+	if wordCount < 0 {
+		return false
 	}
 	if receiverIndex >= 0 {
 		words := rtgEmitMethodReceiverArgReverse(g, ep, receiverIndex, g.meta.params[fn.firstParam].typ)
@@ -15657,6 +15664,18 @@ func rtgEmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	if e.kind == rtgExprIdent && rtgBytesEqualText(g.prog.src, e.nameStart, e.nameEnd, "nil") {
 		rtgAsmPrimaryImm(&g.asm, 0)
 		rtgAsmSecondaryImm(&g.asm, 0)
+		return true
+	}
+	if e.kind == rtgExprAssert {
+		if !rtgEmitTypeAssertionPrimary(g, ep, idx) {
+			return false
+		}
+		rtgAsmCopyPrimaryToSecondary(&g.asm)
+		rtgAsmLoadPrimaryMemSecondaryDisp(&g.asm, 0)
+		rtgAsmPushPrimary(&g.asm)
+		rtgAsmLoadPrimaryMemSecondaryDisp(&g.asm, 8)
+		rtgAsmCopyPrimaryToSecondary(&g.asm)
+		rtgAsmPopPrimary(&g.asm)
 		return true
 	}
 	if rtgExprIsErrorStringCall(g, ep, idx) {

@@ -2,7 +2,7 @@
 
 package os
 
-func ReadDir(name string) ([]DirEntry, *osError) {
+func ReadDir(name string) ([]DirEntry, error) {
 	fd := open(rtgPathCString(name), O_RDONLY)
 	if fd < 0 {
 		return nil, errIO()

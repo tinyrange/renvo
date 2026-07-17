@@ -61,7 +61,7 @@ func rtg_runtime_Exit(code int) {}
 
 func Exit(code int) { rtg_runtime_Exit(code) }
 
-func ReadFile(name string) ([]byte, *osError) {
+func ReadFile(name string) ([]byte, error) {
 	fd := open(rtgPathCString(name), O_RDONLY)
 	if fd < 0 {
 		return nil, errIO()
@@ -83,7 +83,7 @@ func ReadFile(name string) ([]byte, *osError) {
 	return out, nil
 }
 
-func WriteFile(name string, data []byte, perm FileMode) *osError {
+func WriteFile(name string, data []byte, perm FileMode) error {
 	fd := open(rtgPathCString(name), O_RDWR|O_CREATE|O_TRUNC)
 	if fd < 0 {
 		return errIO()
@@ -107,27 +107,27 @@ func WriteFile(name string, data []byte, perm FileMode) *osError {
 	return nil
 }
 
-func Open(name string) (File, *osError) {
+func Open(name string) (*File, error) {
 	return OpenFile(name, O_RDONLY, 0)
 }
 
-func OpenFile(name string, flag int, perm FileMode) (File, *osError) {
+func OpenFile(name string, flag int, perm FileMode) (*File, error) {
 	fd := open(rtgPathCString(name), flag)
 	if fd < 0 {
-		return File{}, errIO()
+		return nil, errIO()
 	}
 	if flag&O_CREATE != 0 && chmod(fd, int(perm)) != 0 {
 		close(fd)
-		return File{}, errIO()
+		return nil, errIO()
 	}
-	return File{fd: fd}, nil
+	return &File{fd: fd}, nil
 }
 
-func Create(name string) (File, *osError) {
+func Create(name string) (*File, error) {
 	return OpenFile(name, O_RDWR|O_CREATE|O_TRUNC, 0666)
 }
 
-func (f File) Read(p []byte) (int, *osError) {
+func (f *File) Read(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
@@ -141,7 +141,7 @@ func (f File) Read(p []byte) (int, *osError) {
 	return n, nil
 }
 
-func (f File) Write(p []byte) (int, *osError) {
+func (f *File) Write(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
@@ -155,7 +155,7 @@ func (f File) Write(p []byte) (int, *osError) {
 	return n, nil
 }
 
-func (f File) Close() *osError {
+func (f *File) Close() error {
 	if close(f.fd) != 0 {
 		return errIO()
 	}

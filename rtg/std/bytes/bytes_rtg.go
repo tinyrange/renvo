@@ -6,7 +6,7 @@ type eofError struct {
 	marker int
 }
 
-func (value *eofError) Error() string {
+func (value eofError) Error() string {
 	return "EOF"
 }
 
@@ -167,7 +167,7 @@ func (b *Buffer) WriteString(s string) (int, error) {
 
 func (b *Buffer) Read(p []byte) (int, error) {
 	if b.off >= len(b.buf) {
-		return 0, &errEOFValue
+		return 0, errEOFValue
 	}
 	n := copy(p, b.buf[b.off:])
 	b.off += n

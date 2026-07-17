@@ -124,6 +124,14 @@ type Buffer struct {
 	off int
 }
 
+func NewBuffer(buf []byte) *Buffer {
+	return &Buffer{buf: buf}
+}
+
+func NewBufferString(s string) *Buffer {
+	return NewBuffer([]byte(s))
+}
+
 func (b *Buffer) Write(p []byte) (int, error) {
 	b.buf = append(b.buf, p...)
 	return len(p), nil

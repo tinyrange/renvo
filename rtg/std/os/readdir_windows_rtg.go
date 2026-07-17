@@ -16,7 +16,7 @@ func rtgWindowsFindNextFile(handle int, data *byte) int { return 0 }
 // rtg:linkstatic kernel32.dll,FindClose
 func rtgWindowsFindClose(handle int) int { return 0 }
 
-func ReadDir(path string) ([]DirEntry, *osError) {
+func ReadDir(path string) ([]DirEntry, error) {
 	pattern := rtgWindowsPathBytes(rtgWindowsJoinGlob(path))
 	data := make([]byte, rtgWindowsFindDataSize)
 	handle := rtgWindowsFindFirstFile(&pattern[0], &data[0])
