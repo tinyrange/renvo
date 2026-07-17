@@ -12,6 +12,13 @@ const (
 	definiteTypeNonPointer
 )
 
+type definiteLocalTypeSpan struct {
+	nameTok   int
+	typeStart int
+	typeEnd   int
+	visible   int
+}
+
 // invalidDefiniteCallArgumentType rejects representation-changing argument
 // mismatches that can be proven from declarations alone. Unknown expressions
 // remain for later, richer checking rather than being guessed here.
@@ -19,15 +26,16 @@ func invalidDefiniteCallArgumentType(pkg load.Package, info PackageInfo, fileInd
 	file := pkg.Files[fileIndex].File
 	var callerSignature FuncSignature
 	callerSignatureReady := false
+	var localTypes []definiteLocalTypeSpan
 	for open := caller.BodyStart + 1; open < caller.BodyEnd; open++ {
-		if !tokCharIs(file, open, '(') || open == 0 || file.Tokens[open-1].Kind != syntax.TokenIdent {
+		if !tokCharIs(&file, open, '(') || open == 0 || file.Tokens[open-1].Kind != syntax.TokenIdent {
 			continue
 		}
 		calleeTok := open - 1
-		if calleeTok > caller.BodyStart && tokCharIs(file, calleeTok-1, '.') {
+		if calleeTok > caller.BodyStart && tokCharIs(&file, calleeTok-1, '.') {
 			continue
 		}
-		calleeFileIndex, callee, ok := findDefinitePackageFunc(pkg, info, file, calleeTok)
+		calleeFileIndex, callee, ok := findDefinitePackageFunc(&pkg, &info, &file, calleeTok)
 		if !ok {
 			continue
 		}
@@ -37,9 +45,10 @@ func invalidDefiniteCallArgumentType(pkg load.Package, info PackageInfo, fileInd
 		}
 		if !callerSignatureReady {
 			callerSignature = buildFuncSignature(file, caller)
+			localTypes = collectDefiniteLocalTypes(file, caller)
 			callerSignatureReady = true
 		}
-		if definiteCallNameShadowed(file, caller, callerSignature, calleeTok) {
+		if definiteCallNameShadowed(&file, caller, callerSignature, calleeTok) {
 			continue
 		}
 		close := findTypeMatching(file, open, '(', ')')
@@ -53,11 +62,11 @@ func invalidDefiniteCallArgumentType(pkg load.Package, info PackageInfo, fileInd
 		invalidTok := -1
 		for i := 0; i < len(args) && i < len(params); i++ {
 			param := params[i]
-			if definiteTypeKind(pkg, calleeFileIndex, param.TypeStart, param.TypeEnd, 0) != definiteTypePointer {
+			if definiteTypeKind(&pkg, &info, calleeFileIndex, param.TypeStart, param.TypeEnd, 0) != definiteTypePointer {
 				continue
 			}
 			arg := args[i]
-			if definiteArgumentTypeKind(pkg, fileIndex, caller, callerSignature, arg, calleeTok) == definiteTypeNonPointer {
+			if definiteArgumentTypeKind(&pkg, &info, fileIndex, callerSignature, localTypes, arg, calleeTok) == definiteTypeNonPointer {
 				invalidTok = arg.StartTok
 				break
 			}
@@ -72,14 +81,14 @@ func invalidDefiniteCallArgumentType(pkg load.Package, info PackageInfo, fileInd
 
 func definiteSignatureHasPointer(file syntax.File, fn syntax.FuncDecl) bool {
 	for i := fn.ParamsStart; i < fn.ParamsEnd; i++ {
-		if tokCharIs(file, i, '*') {
+		if tokCharIs(&file, i, '*') {
 			return true
 		}
 	}
 	return false
 }
 
-func findDefinitePackageFunc(pkg load.Package, info PackageInfo, callerFile syntax.File, calleeTok int) (int, syntax.FuncDecl, bool) {
+func findDefinitePackageFunc(pkg *load.Package, info *PackageInfo, callerFile *syntax.File, calleeTok int) (int, syntax.FuncDecl, bool) {
 	symbolIndex := lookupPackageSymbolTextCore(info, callerFile, calleeTok)
 	if symbolIndex < 0 || symbolIndex >= len(info.Symbols) || info.Symbols[symbolIndex].Kind != SymbolFunc {
 		return -1, syntax.FuncDecl{}, false
@@ -89,8 +98,18 @@ func findDefinitePackageFunc(pkg load.Package, info PackageInfo, callerFile synt
 		return -1, syntax.FuncDecl{}, false
 	}
 	file := pkg.Files[symbol.File].File
-	for i := 0; i < len(file.Funcs); i++ {
-		fn := file.Funcs[i]
+	low := 0
+	high := len(file.Funcs)
+	for low < high {
+		mid := low + (high-low)/2
+		if file.Funcs[mid].NameTok < symbol.Token {
+			low = mid + 1
+		} else {
+			high = mid
+		}
+	}
+	if low < len(file.Funcs) {
+		fn := file.Funcs[low]
 		if fn.ReceiverStart < 0 && fn.NameTok == symbol.Token {
 			return symbol.File, fn, true
 		}
@@ -98,82 +117,87 @@ func findDefinitePackageFunc(pkg load.Package, info PackageInfo, callerFile synt
 	return -1, syntax.FuncDecl{}, false
 }
 
-func definiteArgumentTypeKind(pkg load.Package, fileIndex int, caller syntax.FuncDecl, signature FuncSignature, arg ExprSpan, before int) int {
+func definiteArgumentTypeKind(pkg *load.Package, info *PackageInfo, fileIndex int, signature FuncSignature, localTypes []definiteLocalTypeSpan, arg ExprSpan, before int) int {
 	file := pkg.Files[fileIndex].File
 	start, end := trimExprSpan(file, arg.StartTok, arg.EndTok)
 	if start < 0 || end <= start {
 		return definiteTypeUnknown
 	}
-	if tokCharIs(file, start, '&') {
+	if tokCharIs(&file, start, '&') {
 		return definiteTypePointer
 	}
 	if end-start != 1 || file.Tokens[start].Kind != syntax.TokenIdent {
 		return definiteTypeUnknown
 	}
-	name := tokenString(file, start)
+	name := tokenString(&file, start)
 	if name == "nil" {
 		return definiteTypePointer
 	}
-	if kind := definiteNamedFieldTypeKind(pkg, fileIndex, signature.Receiver, name); kind != definiteTypeUnknown {
+	if kind := definiteNamedFieldTypeKind(pkg, info, fileIndex, signature.Receiver, name); kind != definiteTypeUnknown {
 		return kind
 	}
-	if kind := definiteNamedFieldTypeKind(pkg, fileIndex, signature.Params, name); kind != definiteTypeUnknown {
+	if kind := definiteNamedFieldTypeKind(pkg, info, fileIndex, signature.Params, name); kind != definiteTypeUnknown {
 		return kind
 	}
-	if kind := definiteNamedFieldTypeKind(pkg, fileIndex, signature.Results, name); kind != definiteTypeUnknown {
+	if kind := definiteNamedFieldTypeKind(pkg, info, fileIndex, signature.Results, name); kind != definiteTypeUnknown {
 		return kind
 	}
-	if typeStart, typeEnd, ok := findDefiniteLocalType(file, caller, name, before); ok {
-		return definiteTypeKind(pkg, fileIndex, typeStart, typeEnd, 0)
-	}
-	for declFileIndex := 0; declFileIndex < len(pkg.Files); declFileIndex++ {
-		declFile := pkg.Files[declFileIndex].File
-		for i := 0; i < len(declFile.Decls); i++ {
-			decl := declFile.Decls[i]
-			if decl.Kind != syntax.TokenVar || tokenString(declFile, decl.NameTok) != name {
-				continue
-			}
-			typeStart := declNameListEnd(declFile, decl)
-			valueStart := findDeclAssign(declFile, typeStart, decl.EndTok)
-			if valueStart >= 0 {
-				typeStart, valueStart = trimDeclSpan(declFile, typeStart, valueStart)
-				return definiteTypeKind(pkg, declFileIndex, typeStart, valueStart, 0)
-			}
-			typeStart, typeEnd := trimDeclSpan(declFile, typeStart, decl.EndTok)
-			return definiteTypeKind(pkg, declFileIndex, typeStart, typeEnd, 0)
+	if typeStart, typeEnd, ok := findDefiniteLocalType(file, localTypes, start, before); ok {
+		if typeStart < 0 || typeEnd <= typeStart {
+			return definiteTypeUnknown
 		}
+		return definiteTypeKind(pkg, info, fileIndex, typeStart, typeEnd, 0)
+	}
+	symbolIndex := lookupPackageSymbolTextCore(info, &file, start)
+	for i := 0; i < len(info.Decls); i++ {
+		declInfo := info.Decls[i]
+		if declInfo.Symbol != symbolIndex || declInfo.Kind != SymbolVar {
+			continue
+		}
+		return definiteTypeKind(pkg, info, declInfo.File, declInfo.TypeStart, declInfo.TypeEnd, 0)
 	}
 	return definiteTypeUnknown
 }
 
-func definiteNamedFieldTypeKind(pkg load.Package, fileIndex int, fields []Field, name string) int {
+func definiteNamedFieldTypeKind(pkg *load.Package, info *PackageInfo, fileIndex int, fields []Field, name string) int {
 	for i := 0; i < len(fields); i++ {
 		if fields[i].Name == name {
-			return definiteTypeKind(pkg, fileIndex, fields[i].TypeStart, fields[i].TypeEnd, 0)
+			return definiteTypeKind(pkg, info, fileIndex, fields[i].TypeStart, fields[i].TypeEnd, 0)
 		}
 	}
 	return definiteTypeUnknown
 }
 
-func findDefiniteLocalType(file syntax.File, caller syntax.FuncDecl, name string, before int) (int, int, bool) {
+func findDefiniteLocalType(file syntax.File, locals []definiteLocalTypeSpan, nameTok int, before int) (int, int, bool) {
 	foundStart := -1
 	foundEnd := -1
-	for i := caller.BodyStart + 1; i < before; i++ {
+	found := false
+	for i := 0; i < len(locals); i++ {
+		if locals[i].visible <= before && statementTokensEqual(file, locals[i].nameTok, nameTok) {
+			foundStart = locals[i].typeStart
+			foundEnd = locals[i].typeEnd
+			found = true
+		}
+	}
+	return foundStart, foundEnd, found
+}
+
+func collectDefiniteLocalTypes(file syntax.File, caller syntax.FuncDecl) []definiteLocalTypeSpan {
+	var locals []definiteLocalTypeSpan
+	for i := caller.BodyStart + 1; i < caller.BodyEnd; i++ {
 		if file.Tokens[i].Kind != syntax.TokenVar {
 			continue
 		}
 		specStart := i + 1
-		if specStart < before && tokCharIs(file, specStart, '(') {
+		if specStart < caller.BodyEnd && tokCharIs(&file, specStart, '(') {
 			close := findTypeMatching(file, specStart, '(', ')')
-			if close <= specStart || close > before {
+			if close <= specStart || close > caller.BodyEnd {
 				continue
 			}
 			for j := specStart + 1; j < close-1; {
 				j = skipLocalSeparators(file, j, close-1)
 				specEnd := statementSpecEnd(file, j, close-1)
-				if start, end, ok := definiteLocalSpecType(file, j, specEnd, name); ok {
-					foundStart, foundEnd = start, end
-				}
+				locals = appendDefiniteLocalSpecTypes(locals, file, j, specEnd)
 				if specEnd <= j {
 					j++
 				} else {
@@ -183,39 +207,31 @@ func findDefiniteLocalType(file syntax.File, caller syntax.FuncDecl, name string
 			i = close - 1
 			continue
 		}
-		specEnd := statementSpecEnd(file, specStart, before)
-		if start, end, ok := definiteLocalSpecType(file, specStart, specEnd, name); ok {
-			foundStart, foundEnd = start, end
-		}
+		specEnd := statementSpecEnd(file, specStart, caller.BodyEnd)
+		locals = appendDefiniteLocalSpecTypes(locals, file, specStart, specEnd)
 		i = specEnd - 1
 	}
-	return foundStart, foundEnd, foundStart >= 0
+	return locals
 }
 
-func definiteLocalSpecType(file syntax.File, start int, end int, name string) (int, int, bool) {
+func appendDefiniteLocalSpecTypes(locals []definiteLocalTypeSpan, file syntax.File, start int, end int) []definiteLocalTypeSpan {
 	start, end = trimDeclSpan(file, start, end)
 	if start < 0 || end <= start {
-		return -1, -1, false
+		return locals
 	}
 	names, namesEnd := localDeclNameTokens(file, start, end)
-	found := false
-	for i := 0; i < len(names); i++ {
-		if tokenString(file, names[i]) == name {
-			found = true
-		}
-	}
-	if !found {
-		return -1, -1, false
-	}
 	typeEnd := end
 	if valueStart := findDeclAssign(file, namesEnd, end); valueStart >= 0 {
 		typeEnd = valueStart
 	}
 	typeStart, typeEnd := trimDeclSpan(file, namesEnd, typeEnd)
-	return typeStart, typeEnd, typeStart >= 0 && typeEnd > typeStart
+	for i := 0; i < len(names); i++ {
+		locals = append(locals, definiteLocalTypeSpan{nameTok: names[i], typeStart: typeStart, typeEnd: typeEnd, visible: end})
+	}
+	return locals
 }
 
-func definiteCallNameShadowed(file syntax.File, caller syntax.FuncDecl, signature FuncSignature, calleeTok int) bool {
+func definiteCallNameShadowed(file *syntax.File, caller syntax.FuncDecl, signature FuncSignature, calleeTok int) bool {
 	if definiteFieldsHaveTokenName(file, signature.Receiver, calleeTok) || definiteFieldsHaveTokenName(file, signature.Params, calleeTok) || definiteFieldsHaveTokenName(file, signature.Results, calleeTok) {
 		return true
 	}
@@ -230,7 +246,7 @@ func definiteCallNameShadowed(file syntax.File, caller syntax.FuncDecl, signatur
 			if tokCharIs(file, j, ';') || tokCharIs(file, j, '{') || tokCharIs(file, j, '}') || file.Tokens[j].Line != file.Tokens[i].Line {
 				break
 			}
-			if file.Tokens[j].Kind == syntax.TokenIdent && statementTokensEqual(file, j, calleeTok) {
+			if file.Tokens[j].Kind == syntax.TokenIdent && statementTokensEqual(*file, j, calleeTok) {
 				return true
 			}
 		}
@@ -238,7 +254,7 @@ func definiteCallNameShadowed(file syntax.File, caller syntax.FuncDecl, signatur
 	return false
 }
 
-func definiteFieldsHaveTokenName(file syntax.File, fields []Field, tok int) bool {
+func definiteFieldsHaveTokenName(file *syntax.File, fields []Field, tok int) bool {
 	for i := 0; i < len(fields); i++ {
 		name := fields[i].Name
 		token := file.Tokens[tok]
@@ -249,16 +265,16 @@ func definiteFieldsHaveTokenName(file syntax.File, fields []Field, tok int) bool
 	return false
 }
 
-func definiteLocalNameDeclared(file syntax.File, caller syntax.FuncDecl, calleeTok int) bool {
+func definiteLocalNameDeclared(file *syntax.File, caller syntax.FuncDecl, calleeTok int) bool {
 	for i := caller.BodyStart + 1; i < calleeTok; i++ {
 		kind := file.Tokens[i].Kind
 		if kind != syntax.TokenVar && kind != syntax.TokenConst && kind != syntax.TokenType {
 			continue
 		}
 		start := i + 1
-		end := statementSpecEnd(file, start, calleeTok)
+		end := statementSpecEnd(*file, start, calleeTok)
 		if start < calleeTok && tokCharIs(file, start, '(') {
-			close := findTypeMatching(file, start, '(', ')')
+			close := findTypeMatching(*file, start, '(', ')')
 			if close <= start || close > calleeTok {
 				continue
 			}
@@ -266,11 +282,11 @@ func definiteLocalNameDeclared(file syntax.File, caller syntax.FuncDecl, calleeT
 			start++
 		}
 		for start < end {
-			start = skipLocalSeparators(file, start, end)
-			specEnd := statementSpecEnd(file, start, end)
-			names, _ := localDeclNameTokens(file, start, specEnd)
+			start = skipLocalSeparators(*file, start, end)
+			specEnd := statementSpecEnd(*file, start, end)
+			names, _ := localDeclNameTokens(*file, start, specEnd)
 			for j := 0; j < len(names); j++ {
-				if statementTokensEqual(file, names[j], calleeTok) {
+				if statementTokensEqual(*file, names[j], calleeTok) {
 					return true
 				}
 			}
@@ -284,7 +300,7 @@ func definiteLocalNameDeclared(file syntax.File, caller syntax.FuncDecl, calleeT
 	return false
 }
 
-func definiteTypeKind(pkg load.Package, fileIndex int, start int, end int, depth int) int {
+func definiteTypeKind(pkg *load.Package, info *PackageInfo, fileIndex int, start int, end int, depth int) int {
 	if fileIndex < 0 || fileIndex >= len(pkg.Files) || depth > 16 {
 		return definiteTypeUnknown
 	}
@@ -293,35 +309,37 @@ func definiteTypeKind(pkg load.Package, fileIndex int, start int, end int, depth
 	if start < 0 || end <= start {
 		return definiteTypeUnknown
 	}
-	if tokenTextIs(file, start, "...") {
+	if tokenTextIs(&file, start, "...") {
 		start++
 	}
 	if start >= end {
 		return definiteTypeUnknown
 	}
-	if tokCharIs(file, start, '*') {
+	if tokCharIs(&file, start, '*') {
 		return definiteTypePointer
 	}
 	if file.Tokens[start].Kind != syntax.TokenIdent {
 		return definiteTypeNonPointer
 	}
-	if start+1 < end && tokCharIs(file, start+1, '.') {
+	if start+1 < end && tokCharIs(&file, start+1, '.') {
 		return definiteTypeUnknown
 	}
-	name := tokenString(file, start)
-	for declFileIndex := 0; declFileIndex < len(pkg.Files); declFileIndex++ {
-		declFile := pkg.Files[declFileIndex].File
-		for i := 0; i < len(declFile.Decls); i++ {
-			decl := declFile.Decls[i]
-			if decl.Kind != syntax.TokenType || tokenString(declFile, decl.NameTok) != name {
-				continue
-			}
-			typeStart := decl.NameTok + 1
-			if tokenTextIs(declFile, typeStart, "=") {
-				typeStart++
-			}
-			return definiteTypeKind(pkg, declFileIndex, typeStart, decl.EndTok, depth+1)
+	symbolIndex := lookupPackageSymbolTextCore(info, &file, start)
+	if symbolIndex < 0 || symbolIndex >= len(info.Symbols) || info.Symbols[symbolIndex].Kind != SymbolType {
+		return definiteTypeUnknown
+	}
+	for i := 0; i < len(info.Types); i++ {
+		typ := info.Types[i]
+		if typ.Symbol != symbolIndex {
+			continue
 		}
+		if typ.Kind == TypePointer {
+			return definiteTypePointer
+		}
+		if typ.Kind != TypeNamed {
+			return definiteTypeNonPointer
+		}
+		return definiteTypeKind(pkg, info, typ.File, typ.TypeStart, typ.TypeEnd, depth+1)
 	}
 	return definiteTypeUnknown
 }

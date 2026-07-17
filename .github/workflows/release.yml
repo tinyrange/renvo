@@ -45,7 +45,6 @@ jobs:
       - name: Build frontend compilers
         run: |
           set -eux
-          go generate ./rtg/internal/driver
           go build -tags rtg_bundle -o dist/rtg-stage0 ./rtg/cmd/rtg
           RTG_BACKEND="$PWD/dist/rtgx-linux-amd64" \
             ./dist/rtg-stage0 -tags rtg_bundle -t linux/amd64 -s -o dist/rtg-linux-amd64-stage1 ./rtg/cmd/rtg

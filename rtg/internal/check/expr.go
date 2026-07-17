@@ -60,11 +60,11 @@ func appendDeclIndexExprs(indexes []IndexExpr, file syntax.File, stmt syntax.Stm
 	if start >= end {
 		return indexes
 	}
-	if tokCharIs(file, start, '(') {
+	if tokCharIs(&file, start, '(') {
 		i := start + 1
 		for i < end {
 			i = skipLocalSeparators(file, i, end)
-			if i >= end || tokCharIs(file, i, ')') {
+			if i >= end || tokCharIs(&file, i, ')') {
 				break
 			}
 			specEnd := statementSpecEnd(file, i, end)
@@ -82,11 +82,11 @@ func appendDeclCompositeExprs(composites []CompositeExpr, file syntax.File, stmt
 	if start >= end {
 		return composites
 	}
-	if tokCharIs(file, start, '(') {
+	if tokCharIs(&file, start, '(') {
 		i := start + 1
 		for i < end {
 			i = skipLocalSeparators(file, i, end)
-			if i >= end || tokCharIs(file, i, ')') {
+			if i >= end || tokCharIs(&file, i, ')') {
 				break
 			}
 			specEnd := statementSpecEnd(file, i, end)
@@ -116,7 +116,7 @@ func appendSpecInitializerComposites(composites []CompositeExpr, file syntax.Fil
 
 func appendExprIndexes(indexes []IndexExpr, file syntax.File, start int, end int) []IndexExpr {
 	for i := start; i < end && i < len(file.Tokens); i++ {
-		if !tokCharIs(file, i, '[') {
+		if !tokCharIs(&file, i, '[') {
 			continue
 		}
 		close := findTypeMatching(file, i, '[', ']')
@@ -145,7 +145,7 @@ func appendExprIndexes(indexes []IndexExpr, file syntax.File, start int, end int
 
 func appendExprComposites(composites []CompositeExpr, file syntax.File, start int, end int) []CompositeExpr {
 	for i := start; i < end && i < len(file.Tokens); i++ {
-		if !tokCharIs(file, i, '{') {
+		if !tokCharIs(&file, i, '{') {
 			continue
 		}
 		if isCompositeTypeBodyOpen(file, i) {
@@ -179,11 +179,11 @@ func appendExprComposites(composites []CompositeExpr, file syntax.File, start in
 func exprOperandStartBefore(file syntax.File, start int, before int) int {
 	depth := 0
 	for i := before - 1; i >= start; i-- {
-		if tokCharIs(file, i, ']') || tokCharIs(file, i, ')') || tokCharIs(file, i, '}') {
+		if tokCharIs(&file, i, ']') || tokCharIs(&file, i, ')') || tokCharIs(&file, i, '}') {
 			depth++
 			continue
 		}
-		if tokCharIs(file, i, '[') || tokCharIs(file, i, '(') || tokCharIs(file, i, '{') {
+		if tokCharIs(&file, i, '[') || tokCharIs(&file, i, '(') || tokCharIs(&file, i, '{') {
 			if depth > 0 {
 				depth--
 				continue
@@ -198,7 +198,7 @@ func exprOperandStartBefore(file syntax.File, start int, before int) int {
 }
 
 func isExprLeftBoundary(file syntax.File, tok int) bool {
-	if tokCharIs(file, tok, ',') || tokCharIs(file, tok, ';') || tokCharIs(file, tok, ':') {
+	if tokCharIs(&file, tok, ',') || tokCharIs(&file, tok, ';') || tokCharIs(&file, tok, ':') {
 		return true
 	}
 	if isAssignOp(file, tok) {
@@ -208,34 +208,34 @@ func isExprLeftBoundary(file syntax.File, tok int) bool {
 }
 
 func isExprBinaryOp(file syntax.File, tok int) bool {
-	if tokenTextIs(file, tok, "||") || tokenTextIs(file, tok, "&&") {
+	if tokenTextIs(&file, tok, "||") || tokenTextIs(&file, tok, "&&") {
 		return true
 	}
-	if tokenTextIs(file, tok, "==") || tokenTextIs(file, tok, "!=") {
+	if tokenTextIs(&file, tok, "==") || tokenTextIs(&file, tok, "!=") {
 		return true
 	}
-	if tokenTextIs(file, tok, "<") || tokenTextIs(file, tok, "<=") {
+	if tokenTextIs(&file, tok, "<") || tokenTextIs(&file, tok, "<=") {
 		return true
 	}
-	if tokenTextIs(file, tok, ">") || tokenTextIs(file, tok, ">=") {
+	if tokenTextIs(&file, tok, ">") || tokenTextIs(&file, tok, ">=") {
 		return true
 	}
-	if tokenTextIs(file, tok, "+") || tokenTextIs(file, tok, "-") {
+	if tokenTextIs(&file, tok, "+") || tokenTextIs(&file, tok, "-") {
 		return true
 	}
-	if tokenTextIs(file, tok, "*") || tokenTextIs(file, tok, "/") {
+	if tokenTextIs(&file, tok, "*") || tokenTextIs(&file, tok, "/") {
 		return true
 	}
-	if tokenTextIs(file, tok, "%") || tokenTextIs(file, tok, "&") {
+	if tokenTextIs(&file, tok, "%") || tokenTextIs(&file, tok, "&") {
 		return true
 	}
-	if tokenTextIs(file, tok, "|") || tokenTextIs(file, tok, "^") {
+	if tokenTextIs(&file, tok, "|") || tokenTextIs(&file, tok, "^") {
 		return true
 	}
-	if tokenTextIs(file, tok, "<<") || tokenTextIs(file, tok, ">>") {
+	if tokenTextIs(&file, tok, "<<") || tokenTextIs(&file, tok, ">>") {
 		return true
 	}
-	return tokenTextIs(file, tok, "&^")
+	return tokenTextIs(&file, tok, "&^")
 }
 
 func isIndexTypePrefix(file syntax.File, start int) bool {

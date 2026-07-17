@@ -113,7 +113,7 @@ func buildAssignTargets(file syntax.File, fileIndex int, info PackageInfo, scope
 		if file.Tokens[span.StartTok].Kind != syntax.TokenIdent {
 			continue
 		}
-		name := tokenString(file, span.StartTok)
+		name := tokenString(&file, span.StartTok)
 		if name == "_" {
 			continue
 		}
@@ -231,44 +231,44 @@ func isAssignOp(file syntax.File, tok int) bool {
 }
 
 func assignKind(file syntax.File, tok int) int {
-	if tokenTextIs(file, tok, "=") {
+	if tokenTextIs(&file, tok, "=") {
 		return AssignSet
 	}
-	if tokenTextIs(file, tok, ":=") {
+	if tokenTextIs(&file, tok, ":=") {
 		return AssignDefine
 	}
-	if tokenTextIs(file, tok, "+=") {
+	if tokenTextIs(&file, tok, "+=") {
 		return AssignAdd
 	}
-	if tokenTextIs(file, tok, "-=") {
+	if tokenTextIs(&file, tok, "-=") {
 		return AssignSub
 	}
-	if tokenTextIs(file, tok, "*=") {
+	if tokenTextIs(&file, tok, "*=") {
 		return AssignMul
 	}
-	if tokenTextIs(file, tok, "/=") {
+	if tokenTextIs(&file, tok, "/=") {
 		return AssignDiv
 	}
-	if tokenTextIs(file, tok, "%=") {
+	if tokenTextIs(&file, tok, "%=") {
 		return AssignMod
 	}
-	if tokenTextIs(file, tok, "&=") {
+	if tokenTextIs(&file, tok, "&=") {
 		return AssignAnd
 	}
-	if tokenTextIs(file, tok, "|=") {
+	if tokenTextIs(&file, tok, "|=") {
 		return AssignOr
 	}
-	if tokenTextIs(file, tok, "^=") {
+	if tokenTextIs(&file, tok, "^=") {
 		return AssignXor
 	}
 	return AssignUnknown
 }
 
 func trimExprSpan(file syntax.File, start int, end int) (int, int) {
-	for start < end && (tokCharIs(file, start, ';') || tokCharIs(file, start, ',')) {
+	for start < end && (tokCharIs(&file, start, ';') || tokCharIs(&file, start, ',')) {
 		start++
 	}
-	for end > start && (tokCharIs(file, end-1, ';') || tokCharIs(file, end-1, ',')) {
+	for end > start && (tokCharIs(&file, end-1, ';') || tokCharIs(&file, end-1, ',')) {
 		end--
 	}
 	return start, end

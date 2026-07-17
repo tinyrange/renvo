@@ -19,6 +19,7 @@ const (
 	SourceErrDependencyExcluded
 	SourceErrDependencyModule
 	SourceErrDependencyAmbiguous
+	SourceErrEmbed
 )
 
 type DirEntry struct {
@@ -204,6 +205,14 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 			arena.Discard(arenaStart, arenaEnd)
 			continue
 		}
+		expanded, embedOK, embedOffset, embedPath := expandSourceEmbeds(c.fs, path, owner.Root, src)
+		if !embedOK {
+			c.files = append(c.files, load.SourceFile{Path: path, Src: src, ArenaStart: arenaStart, ArenaEnd: arena.Mark()})
+			c.failAt(SourceErrEmbed, embedPath, path, embedOffset)
+			return
+		}
+		src = expanded
+		arenaEnd = arena.Mark()
 		found = true
 		c.files = append(c.files, load.SourceFile{Path: path, Src: src, ArenaStart: arenaStart, ArenaEnd: arenaEnd})
 		imports, importsOK := collectSourceImports(owner, c.stdRoot, src)

@@ -38,9 +38,9 @@ func buildSignatureFromParts(file syntax.File, receiverStart int, receiverEnd in
 		sig.Params = parseFieldList(file, paramsStart+1, paramsEnd-1)
 	}
 	if resultStart >= 0 && resultEnd > resultStart {
-		if tokCharIs(file, resultStart, '(') {
+		if tokCharIs(&file, resultStart, '(') {
 			end := resultEnd - 1
-			if tokCharIs(file, end, ')') {
+			if tokCharIs(&file, end, ')') {
 				sig.Results = parseFieldList(file, resultStart+1, end)
 			}
 		} else {
@@ -73,7 +73,7 @@ func parseFieldList(file syntax.File, start int, end int) []Field {
 			i = segEnd + 1
 			continue
 		}
-		if file.Tokens[first].Kind == syntax.TokenIdent && first+1 < last && !tokCharIs(file, first+1, '.') {
+		if file.Tokens[first].Kind == syntax.TokenIdent && first+1 < last && !tokCharIs(&file, first+1, '.') {
 			fields = appendNamedFields(fields, file, pending, first, first+1, last)
 			pending = pending[:0]
 		} else {
@@ -89,7 +89,7 @@ func parseFieldList(file syntax.File, start int, end int) []Field {
 func appendNamedFields(fields []Field, file syntax.File, pending []int, current int, typeStart int, typeEnd int) []Field {
 	for i := 0; i < len(pending); i++ {
 		fields = append(fields, Field{
-			Name:      tokenString(file, pending[i]),
+			Name:      tokenString(&file, pending[i]),
 			NameTok:   pending[i],
 			TypeStart: typeStart,
 			TypeEnd:   typeEnd,
@@ -97,7 +97,7 @@ func appendNamedFields(fields []Field, file syntax.File, pending []int, current 
 		})
 	}
 	fields = append(fields, Field{
-		Name:      tokenString(file, current),
+		Name:      tokenString(&file, current),
 		NameTok:   current,
 		TypeStart: typeStart,
 		TypeEnd:   typeEnd,
@@ -124,7 +124,7 @@ func trimFieldSpan(file syntax.File, start int, end int) (int, int) {
 }
 
 func isFieldSeparator(file syntax.File, tok int) bool {
-	return tokCharIs(file, tok, ',') || tokCharIs(file, tok, ';')
+	return tokCharIs(&file, tok, ',') || tokCharIs(&file, tok, ';')
 }
 
 func isSingleIdent(file syntax.File, start int, end int) bool {
@@ -132,5 +132,5 @@ func isSingleIdent(file syntax.File, start int, end int) bool {
 }
 
 func fieldIsVariadic(file syntax.File, start int) bool {
-	return tokenTextIs(file, start, "...")
+	return tokenTextIs(&file, start, "...")
 }

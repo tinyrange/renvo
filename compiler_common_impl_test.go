@@ -140,6 +140,32 @@ func TestArenaSizeConfigurationIsBounded(t *testing.T) {
 	}
 }
 
+func TestLargeStaticSliceZeroingHasBoundedCodeSize(t *testing.T) {
+	oldArch := rtgTargetArch
+	oldOS := rtgTargetOS
+	oldFixedTarget := rtgCompilerFixedTarget
+	t.Cleanup(func() {
+		rtgTargetArch = oldArch
+		rtgTargetOS = oldOS
+		rtgCompilerFixedTarget = oldFixedTarget
+	})
+	rtgSetTarget(rtgTargetLinuxAmd64)
+	rtgCompilerFixedTarget = rtgTargetLinuxAmd64
+
+	var g rtgLinearGen
+	var meta rtgMeta
+	g.meta = &meta
+	rtgAsmInit(&g.asm)
+	rtgEmitMakeStaticRingPrimary(&g, 65536*8, 65536*8)
+
+	if got := len(g.asm.code); got > 512 {
+		t.Fatalf("large static make emitted %d bytes of code, want at most 512", got)
+	}
+	if !g.makeZeroEmitted {
+		t.Fatal("large static make did not use the bounded zeroing helper")
+	}
+}
+
 func TestPointerTypesRetainAddressSpace(t *testing.T) {
 	var m rtgMeta
 	dataPointer := rtgAddPointerType(&m, 0, rtgPointerSpaceData)

@@ -276,7 +276,7 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 		file := pkg.Files[fileIndex].File
 		for i := 0; i < len(file.Decls); i++ {
 			decl := file.Decls[i]
-			name := tokenString(file, decl.NameTok)
+			name := tokenString(&file, decl.NameTok)
 			kind := declSymbolKind(decl.Kind)
 			if findSymbolHashed(info.Symbols, symbolHash, name, kind) >= 0 {
 				return info, false, CheckErrDuplicate, fileIndex, decl.NameTok
@@ -289,7 +289,7 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 			if excludedTok := excludedFeatureToken(file, fn); excludedTok >= 0 {
 				return info, false, CheckErrExcluded, fileIndex, excludedTok
 			}
-			name := tokenString(file, fn.NameTok)
+			name := tokenString(&file, fn.NameTok)
 			kind := SymbolFunc
 			if fn.ReceiverStart >= 0 {
 				receiver := receiverTypeName(file, fn)
@@ -399,7 +399,7 @@ func checkPackageBody(graph load.Graph, pkgIndex int, info PackageInfo, checked 
 		file := pkg.Files[fileIndex].File
 		for i := 0; i < len(file.Funcs); i++ {
 			fn := file.Funcs[i]
-			name := tokenString(file, fn.NameTok)
+			name := tokenString(&file, fn.NameTok)
 			kind := SymbolFunc
 			if fn.ReceiverStart >= 0 {
 				name = receiverTypeName(file, fn) + "." + name
@@ -464,7 +464,7 @@ func buildImport(graph load.Graph, pkgIndex int, fileIndex int, file syntax.File
 	tok := decl.PathTok
 	if decl.NameTok >= 0 {
 		tok = decl.NameTok
-		explicit := tokenString(file, decl.NameTok)
+		explicit := tokenString(&file, decl.NameTok)
 		if explicit == "." {
 			dot = true
 			name = "."
@@ -525,13 +525,13 @@ func receiverTypeName(file syntax.File, fn syntax.FuncDecl) string {
 	}
 	for i := end - 1; i >= fn.ReceiverStart; i-- {
 		if file.Tokens[i].Kind == syntax.TokenIdent {
-			return tokenString(file, i)
+			return tokenString(&file, i)
 		}
 	}
 	return ""
 }
 
-func tokenString(file syntax.File, tok int) string {
+func tokenString(file *syntax.File, tok int) string {
 	if tok < 0 || tok >= len(file.Tokens) {
 		return ""
 	}

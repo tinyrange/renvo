@@ -46,6 +46,13 @@ func TestFrontendStructuredDiagnostics(t *testing.T) {
 			wantDetail: "unresolved import github.com/example/missing",
 		},
 		{
+			name:       "embed_pattern",
+			files:      map[string]string{"cmd/app/main.go": "package main\n\nimport _ \"embed\"\n\n//go:embed missing.txt\nvar value string\n\nfunc main() {}\n"},
+			wantCode:   "RTG-LOAD-018",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "invalid go:embed directive or pattern: missing.txt",
+		},
+		{
 			name: "import_cycle",
 			files: map[string]string{
 				"cmd/app/main.go": "package main\n\nimport _ \"example.com/diagnostic/lib\"\n\nfunc main() {}\n",

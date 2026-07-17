@@ -1,18 +1,17 @@
 # RTG frontend
 
 The release frontend is a standalone executable. It contains the RTG backend
-and a generated copy of the supported standard-library sources, so it can
+and an embedded copy of the supported standard-library sources, so it can
 compile a module without `RTG_BACKEND`, `RTG_STDROOT`, or files installed next
 to the executable.
 
-Bundling is optional for development builds. Generate the source bundle with:
+The frontend resolves `//go:embed` directives for `string`, `[]byte`, and
+`embed.FS` package variables. Embedded file-system payloads are compressed in
+the linked program, which is also how release frontends carry `rtg/std` without
+a generated source bundle.
 
-```sh
-go generate ./rtg/internal/driver
-```
-
-A Go-built bootstrap frontend includes the standard library when built with
-the `rtg_bundle` tag:
+Bundling is optional for development builds. A Go-built bootstrap frontend
+includes the standard library when built with the `rtg_bundle` tag:
 
 ```sh
 go build -tags rtg_bundle -o rtg-stage0 ./rtg/cmd/rtg

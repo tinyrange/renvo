@@ -63,6 +63,8 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			d.Code, d.Message = "RTG-LOAD-016", "dependency has an invalid or missing go.mod: "+result.ErrorPath
 		} else if result.Sources.Error == SourceErrDependencyAmbiguous {
 			d.Code, d.Message = "RTG-LOAD-017", "dependency import is ambiguous: "+result.ErrorPath
+		} else if result.Sources.Error == SourceErrEmbed {
+			d.Code, d.Message = "RTG-LOAD-018", "invalid go:embed directive or pattern: "+result.ErrorPath
 		}
 		if result.Sources.ErrorSourcePath != "" {
 			d.Path = result.Sources.ErrorSourcePath
