@@ -276,8 +276,7 @@ func rtgWinArm64EmitReadWriteHelper(g *rtgLinearGen, isWrite bool) int {
 	restoreLabel := rtgAsmNewLabel(a)
 	failLabel := rtgAsmNewLabel(a)
 	doneLabel := rtgAsmNewLabel(a)
-	rtgAsmJmpLabel(a, afterLabel)
-	rtgAsmMarkLabel(a, label)
+	rtgAsmJmpMarkLabel(a, afterLabel, label)
 	// Preserve the helper return address and its internal-convention arguments:
 	// x3=fd, x4=buffer, x1=count, x2=offset.
 	rtgAarch64AsmPushReg(a, rtgAarch64RegLr)

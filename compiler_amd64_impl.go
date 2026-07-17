@@ -67,7 +67,9 @@ func rtgAmd64EmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 		if !rtgEmitClosureCaptureWriteback(g) {
 			return false
 		}
-		rtgAsmPrimaryImm(a, 0)
+		if metaFn.resultType != 0 {
+			rtgAsmPrimaryImm(a, 0)
+		}
 		rtgAsmLeave(a)
 		rtgAsmRet(a)
 	}
@@ -636,8 +638,7 @@ func rtgAmd64EmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) boo
 			if !rtgTypeIsString(meta, g.locals[localIndex].typ) {
 				return false
 			}
-			rtgAsmLoadPrimaryStack(a, g.locals[localIndex].offset)
-			rtgAsmLoadSecondaryStack(a, g.locals[localIndex].offset-8)
+			rtgAsmLoadPrimarySecondaryStack(a, g.locals[localIndex].offset, g.locals[localIndex].offset-8)
 			return true
 		}
 		globalOffset := rtgFindGlobalOffset(g, e.nameStart, e.nameEnd)
@@ -704,8 +705,7 @@ func rtgAmd64EmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) boo
 			return false
 		}
 		if offset, ok := rtgLocalStructSelectorOffset(g, ep, idx); ok {
-			rtgAsmLoadPrimaryStack(a, offset)
-			rtgAsmLoadSecondaryStack(a, offset-8)
+			rtgAsmLoadPrimarySecondaryStack(a, offset, offset-8)
 			return true
 		}
 		if !rtgEmitSelectorAddressSecondary(g, ep, idx) {
@@ -1402,8 +1402,7 @@ func rtgAmd64EmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 				return false
 			}
 			rtgAsmPrimaryImm(a, 1)
-			rtgAsmJmpLabel(a, endLabel)
-			rtgAsmMarkLabel(a, falseLabel)
+			rtgAsmJmpMarkLabel(a, endLabel, falseLabel)
 			rtgAsmPrimaryImm(a, 0)
 			rtgAsmMarkLabel(a, endLabel)
 			return true
@@ -1637,8 +1636,7 @@ func rtgAmd64EnsureAppendAddrHelper(g *rtgLinearGen) int {
 	g.appendAddrEmitted = true
 	g.appendAddrLabel = rtgAsmNewLabel(a)
 	afterLabel := rtgAsmNewLabel(a)
-	rtgAsmJmpLabel(a, afterLabel)
-	rtgAsmMarkLabel(a, g.appendAddrLabel)
+	rtgAsmJmpMarkLabel(a, afterLabel, g.appendAddrLabel)
 	noGrowLabel := rtgAsmNewLabel(a)
 	haveCapLabel := rtgAsmNewLabel(a)
 	rtgAsmEmit24(a, 0x0e8b48)
@@ -1709,8 +1707,7 @@ func rtgAmd64EnsureAppend8Helper(g *rtgLinearGen) int {
 	g.append8Emitted = true
 	g.append8Label = rtgAsmNewLabel(a)
 	afterLabel := rtgAsmNewLabel(a)
-	rtgAsmJmpLabel(a, afterLabel)
-	rtgAsmMarkLabel(a, g.append8Label)
+	rtgAsmJmpMarkLabel(a, afterLabel, g.append8Label)
 	rtgAsmEmit24(a, 0x0e8b48)
 	rtgAsmEmit24(a, 0x078b4c)
 	rtgAsmEmit32(a, 0x08148841)
@@ -1728,8 +1725,7 @@ func rtgAmd64EnsureAppend64Helper(g *rtgLinearGen) int {
 	g.append64Emitted = true
 	g.append64Label = rtgAsmNewLabel(a)
 	afterLabel := rtgAsmNewLabel(a)
-	rtgAsmJmpLabel(a, afterLabel)
-	rtgAsmMarkLabel(a, g.append64Label)
+	rtgAsmJmpMarkLabel(a, afterLabel, g.append64Label)
 	rtgAsmEmit24(a, 0x0e8b48)
 	rtgAsmEmit24(a, 0x078b4c)
 	rtgAsmEmit32(a, 0xc8148949)
@@ -1756,8 +1752,7 @@ func rtgAmd64EnsureStringEqualHelper(g *rtgLinearGen) int {
 	g.streqEmitted = true
 	g.streqLabel = rtgAsmNewLabel(a)
 	afterLabel := rtgAsmNewLabel(a)
-	rtgAsmJmpLabel(a, afterLabel)
-	rtgAsmMarkLabel(a, g.streqLabel)
+	rtgAsmJmpMarkLabel(a, afterLabel, g.streqLabel)
 	notEqualLabel := rtgAsmNewLabel(a)
 	equalLabel := rtgAsmNewLabel(a)
 	loopLabel := rtgAsmNewLabel(a)
