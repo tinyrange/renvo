@@ -299,6 +299,8 @@ func buildPhaseDiagnostic(result BuildResult, built pipeline.Result) Diagnostic 
 			code, message = "RTG-CHECK-022", "func main must have no parameters or results"
 		case check.CheckErrMainMethod:
 			code, message = "RTG-CHECK-023", "method main does not define the package entry point"
+		case check.CheckErrSliceOperand:
+			code, message = "RTG-CHECK-024", "cannot slice an unaddressable array value"
 		}
 	} else if built.Build.Error == build.BuildErrLower {
 		phase, code, message = "lowerer", "RTG-LOWER-001", "checked program could not be lowered"

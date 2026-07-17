@@ -30,6 +30,7 @@ const (
 	CheckErrMissingMain
 	CheckErrMainSignature
 	CheckErrMainMethod
+	CheckErrSliceOperand
 )
 
 const (

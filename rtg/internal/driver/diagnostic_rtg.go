@@ -184,6 +184,8 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			d.Code, d.Message = "RTG-CHECK-022", "func main must have no parameters or results"
 		} else if built.Build.ErrorDetail == check.CheckErrMainMethod {
 			d.Code, d.Message = "RTG-CHECK-023", "method main does not define the package entry point"
+		} else if built.Build.ErrorDetail == check.CheckErrSliceOperand {
+			d.Code, d.Message = "RTG-CHECK-024", "cannot slice an unaddressable array value"
 		}
 	} else {
 		d.Phase, d.Code, d.Message = "linker", "RTG-LINK-001", "package linking failed"
