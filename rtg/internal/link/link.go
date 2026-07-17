@@ -54,7 +54,7 @@ func linkBuildCore(result build.Result, transient bool) Result {
 		out.Error = LinkErrUnit
 		return out
 	}
-	data, ok := unit.Marshal(program)
+	data, ok := unit.MarshalCore(program)
 	if !ok {
 		out.Ok = false
 		out.Error = LinkErrUnit
