@@ -13300,9 +13300,7 @@ func rtgEmitEnsureMemSlice(g *rtgLinearGen, elemSize int) {
 	if rtgTargetArch == rtgArchWasm32 {
 		backingSize = rtgWasm32FallbackSliceBackingSize
 	}
-	rtgAsmPushSecondary(a)
 	rtgEmitArenaAllocPrimary(g, backingSize)
-	rtgAsmPopSecondary(a)
 	rtgAsmStorePrimaryMemSecondaryDisp(a, 0)
 	rtgAsmPrimaryImm(a, backingSize/elemSize)
 	rtgAsmStorePrimaryMemSecondaryDisp(a, 16)
@@ -14482,7 +14480,7 @@ func rtgZeroLocalAtOffset(g *rtgLinearGen, offset int) {
 	}
 	t := rtgResolveType(g.meta, typ)
 	if t.kind == rtgTypeSlice {
-		rtgInitEmptySliceStack(g, offset, typ)
+		rtgInitEmptySliceStack(g, offset)
 		return
 	}
 	if rtgTargetArch == rtgArchAmd64 && size >= 64 {
@@ -14508,12 +14506,11 @@ func rtgZeroLocalAtOffset(g *rtgLinearGen, offset int) {
 		rtgInitStructSliceFields(g, typ, offset)
 	}
 }
-func rtgInitEmptySliceStack(g *rtgLinearGen, offset int, typ int) {
+func rtgInitEmptySliceStack(g *rtgLinearGen, offset int) {
 	a := &g.asm
-	_ = typ
 	rtgAsmStoreStackImm(a, offset, 0)
-	rtgAsmStoreStackImm(a, offset-8, 0)
-	rtgAsmStoreStackImm(a, offset-16, 0)
+	rtgAsmStorePrimaryStack(a, offset-8)
+	rtgAsmStorePrimaryStack(a, offset-16)
 }
 func rtgInitStructSliceFields(g *rtgLinearGen, typ int, offset int) {
 	t := rtgResolveType(g.meta, typ)
@@ -14525,7 +14522,7 @@ func rtgInitStructSliceFields(g *rtgLinearGen, typ int, offset int) {
 		fieldOffset := offset - field.offset
 		fieldType := rtgResolveType(g.meta, field.typ)
 		if fieldType.kind == rtgTypeSlice {
-			rtgInitEmptySliceStack(g, fieldOffset, field.typ)
+			rtgInitEmptySliceStack(g, fieldOffset)
 		} else if fieldType.kind == rtgTypeStruct {
 			rtgInitStructSliceFields(g, field.typ, fieldOffset)
 		}

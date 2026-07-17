@@ -377,15 +377,15 @@ func rtgWasm32AsmMovR10BssAddr(a *rtgAsm, bssOff int) {
 }
 
 func rtgWasm32AsmLoadRaxBss(a *rtgAsm, bssOff int) {
-	rtgWasm32EmitRegImm(a, rtgWasm32OpMovRegImm, rtgWasm32RegRdx, 0)
+	rtgWasm32EmitRegImm(a, rtgWasm32OpMovRegImm, rtgWasm32RegR10, 0)
 	rtgAsmAddAbsReloc(a, len(a.code)-4, bssOff, rtgAbsBssReloc)
-	rtgWasm32EmitMem(a, rtgWasm32OpLoadMem, rtgWasm32RegRax, rtgWasm32RegRdx, 0, 4)
+	rtgWasm32EmitMem(a, rtgWasm32OpLoadMem, rtgWasm32RegRax, rtgWasm32RegR10, 0, 4)
 }
 
 func rtgWasm32AsmStoreRaxBss(a *rtgAsm, bssOff int) {
-	rtgWasm32EmitRegImm(a, rtgWasm32OpMovRegImm, rtgWasm32RegRdx, 0)
+	rtgWasm32EmitRegImm(a, rtgWasm32OpMovRegImm, rtgWasm32RegR10, 0)
 	rtgAsmAddAbsReloc(a, len(a.code)-4, bssOff, rtgAbsBssReloc)
-	rtgWasm32EmitMem(a, rtgWasm32OpStoreMem, rtgWasm32RegRax, rtgWasm32RegRdx, 0, 4)
+	rtgWasm32EmitMem(a, rtgWasm32OpStoreMem, rtgWasm32RegRax, rtgWasm32RegR10, 0, 4)
 }
 
 func rtgWasm32AsmMovRdiRax(a *rtgAsm) {
