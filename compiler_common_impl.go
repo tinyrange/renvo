@@ -13296,20 +13296,13 @@ func rtgEmitEnsureMemSlice(g *rtgLinearGen, elemSize int) {
 	rtgAsmLoadPrimaryMemSecondaryDisp(a, 0)
 	rtgAsmCmpPrimaryImm8(a, 0)
 	rtgAsmJnzLabel(a, okLabel)
-	backingSize := 2097152
+	backingSize := rtgSliceBackingSize(elemSize)
 	if rtgTargetArch == rtgArchWasm32 {
 		backingSize = rtgWasm32FallbackSliceBackingSize
 	}
-	if rtgTargetArch == rtgArchAmd64 {
-		backingSize = rtgAmd64SliceBackingSize(elemSize)
-	}
-	if rtgTargetArch == rtgArchAmd64 {
-		rtgEmitArenaAllocPrimary(g, backingSize)
-	} else {
-		backingOff := g.asm.bssSize
-		g.asm.bssSize += backingSize
-		rtgAsmPrimaryBssAddr(a, backingOff)
-	}
+	rtgAsmPushSecondary(a)
+	rtgEmitArenaAllocPrimary(g, backingSize)
+	rtgAsmPopSecondary(a)
 	rtgAsmStorePrimaryMemSecondaryDisp(a, 0)
 	rtgAsmPrimaryImm(a, backingSize/elemSize)
 	rtgAsmStorePrimaryMemSecondaryDisp(a, 16)
@@ -14517,31 +14510,10 @@ func rtgZeroLocalAtOffset(g *rtgLinearGen, offset int) {
 }
 func rtgInitEmptySliceStack(g *rtgLinearGen, offset int, typ int) {
 	a := &g.asm
-	t := rtgResolveType(g.meta, typ)
-	elemSize := rtgTypeSize(g.meta, t.elem)
-	if elemSize < 1 {
-		elemSize = 8
-	}
-	if rtgTargetArch == rtgArchAmd64 || rtgTargetArch == rtgArch386 || rtgTargetArch == rtgArchAarch64 || rtgTargetArch == rtgArchArm {
-		rtgAsmStoreStackImm(a, offset, 0)
-		rtgAsmStorePrimaryStack(a, offset-8)
-		rtgAsmStorePrimaryStack(a, offset-16)
-		return
-	}
-	backingSize := 2097152
-	if rtgTargetArch == rtgArchWasm32 {
-		backingSize = rtgWasm32FallbackSliceBackingSize
-	}
-	if rtgTargetArch == rtgArchAmd64 {
-		rtgEmitArenaAllocPrimary(g, backingSize)
-	} else {
-		backingOff := g.asm.bssSize
-		g.asm.bssSize += backingSize
-		rtgAsmPrimaryBssAddr(a, backingOff)
-	}
-	rtgAsmStorePrimaryStack(a, offset)
+	_ = typ
+	rtgAsmStoreStackImm(a, offset, 0)
 	rtgAsmStoreStackImm(a, offset-8, 0)
-	rtgAsmStoreStackImm(a, offset-16, backingSize/elemSize)
+	rtgAsmStoreStackImm(a, offset-16, 0)
 }
 func rtgInitStructSliceFields(g *rtgLinearGen, typ int, offset int) {
 	t := rtgResolveType(g.meta, typ)
@@ -16022,7 +15994,7 @@ func rtgEnsurePrintIntHelper(g *rtgLinearGen) int {
 	return g.printIntLabel
 }
 
-func rtgAmd64SliceBackingSize(elemSize int) int {
+func rtgSliceBackingSize(elemSize int) int {
 	if elemSize < 1 {
 		elemSize = 8
 	}
