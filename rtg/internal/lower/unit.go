@@ -1,6 +1,7 @@
 package lower
 
 import (
+	"j5.nz/rtg/rtg/internal/arena"
 	"j5.nz/rtg/rtg/internal/check"
 	"j5.nz/rtg/rtg/internal/load"
 	"j5.nz/rtg/rtg/internal/syntax"
@@ -41,7 +42,7 @@ func EmitCheckedPackageCore(pkg load.Package, info check.PackageInfo, transient 
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
 	if transient {
-		discardCoreCheckStorage(info)
+		arena.Discard(info.CoreArenaStart, info.CoreArenaEnd)
 	}
 	for i := 0; i < len(pkg.Files); i++ {
 		file := pkg.Files[i].File

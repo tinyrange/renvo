@@ -1,5 +1,3 @@
-//go:build !rtg
-
 package check
 
 import "j5.nz/rtg/rtg/internal/syntax"

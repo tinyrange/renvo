@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"j5.nz/rtg/rtg/internal/load"
+	"j5.nz/rtg/rtg/internal/unit"
 	"j5.nz/rtg/rtgunit"
 )
 
@@ -42,7 +43,7 @@ func Value() int { return 42 }
 		t.Fatalf("RootUnit = %#v", root)
 	}
 	for i := 0; i < len(result.Units); i++ {
-		decoded, err := rtgunit.Unmarshal(result.Units[i].Data)
+		decoded, err := rtgunit.Unmarshal(marshalPackageUnit(t, result.Units[i]))
 		if err != nil {
 			t.Fatalf("unit %d did not decode: %v", i, err)
 		}
@@ -71,7 +72,7 @@ func appMain() int { return answer }
 	if len(result.Units) != 1 || result.Root != 0 {
 		t.Fatalf("units/root = %d/%d", len(result.Units), result.Root)
 	}
-	decoded, err := rtgunit.Unmarshal(RootUnit(result).Data)
+	decoded, err := rtgunit.Unmarshal(marshalPackageUnit(t, RootUnit(result)))
 	if err != nil {
 		t.Fatalf("root unit decode failed: %v", err)
 	}
@@ -98,9 +99,18 @@ func TestBuildUnitsCheckError(t *testing.T) {
 }
 
 func TestRootUnitInvalidResult(t *testing.T) {
-	if got := RootUnit(Result{}); got.ImportPath != "" || len(got.Data) != 0 {
+	if got := RootUnit(Result{}); got.ImportPath != "" || got.Program.Package != "" {
 		t.Fatalf("RootUnit invalid result = %#v", got)
 	}
+}
+
+func marshalPackageUnit(t *testing.T, pkg PackageUnit) []byte {
+	t.Helper()
+	data, ok := unit.MarshalCore(unit.CoreProgramFrom(pkg.Program))
+	if !ok {
+		t.Fatal("MarshalCore failed")
+	}
+	return data
 }
 
 func buildTestGraph(t *testing.T, files []load.SourceFile) load.Graph {

@@ -199,32 +199,7 @@ type CoreFuncBody struct {
 }
 
 func CheckGraph(graph load.Graph) Program {
-	prog := Program{
-		Graph:        graph,
-		Ok:           true,
-		Error:        CheckOK,
-		ErrorPackage: -1,
-		ErrorFile:    -1,
-		ErrorToken:   -1,
-	}
-	if !graph.Ok {
-		return checkFail(prog, CheckErrGraph, graph.ErrorPackage, -1, -1)
-	}
-	for i := 0; i < len(graph.Packages); i++ {
-		info, ok, err, file, tok := checkPackageHeader(graph, i)
-		prog.Packages = append(prog.Packages, info)
-		if !ok {
-			return checkFail(prog, err, i, file, tok)
-		}
-	}
-	for i := 0; i < len(graph.Packages); i++ {
-		info, ok, err, file, tok := checkPackageBody(graph, i, prog.Packages[i], prog.Packages)
-		prog.Packages[i] = info
-		if !ok {
-			return checkFail(prog, err, i, file, tok)
-		}
-	}
-	return prog
+	return CheckGraphCore(graph)
 }
 
 func LookupPackageSymbol(info PackageInfo, name string) int {
@@ -240,15 +215,6 @@ func LookupImport(info PackageInfo, file int, name string) int {
 	for i := 0; i < len(info.Imports); i++ {
 		imp := info.Imports[i]
 		if imp.File == file && imp.Name == name {
-			return i
-		}
-	}
-	return -1
-}
-
-func LookupFuncBody(info PackageInfo, name string) int {
-	for i := 0; i < len(info.Bodies); i++ {
-		if info.Bodies[i].Name == name {
 			return i
 		}
 	}
@@ -372,80 +338,6 @@ func hashCheckString(value string) int {
 		hash = ((hash << 5) + hash + int(value[i])) & 2147483647
 	}
 	return hash
-}
-
-func checkPackageBody(graph load.Graph, pkgIndex int, info PackageInfo, checked []PackageInfo) (PackageInfo, bool, int, int, int) {
-	pkg := graph.Packages[pkgIndex]
-	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
-		file := pkg.Files[fileIndex].File
-		for i := 0; i < len(file.Decls); i++ {
-			info.Decls = append(info.Decls, buildDeclInfo(file, fileIndex, info, checked, file.Decls[i]))
-		}
-	}
-	sortDecls(info.Decls)
-	info.DeclOrder = buildDeclOrder(info.Decls)
-	buildDeclDeps(&info)
-	info.InitOrder = buildInitOrder(info.Decls, info.DeclOrder)
-	for i := 0; i < len(info.Decls); i++ {
-		decl := info.Decls[i]
-		if decl.Kind == SymbolType {
-			file := pkg.Files[decl.File].File
-			info.Types = append(info.Types, buildTypeInfo(file, decl, i))
-		}
-	}
-	sortTypes(info.Types)
-	info.TypeRefs = buildPackageTypeRefs(pkg, info, checked)
-	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
-		file := pkg.Files[fileIndex].File
-		for i := 0; i < len(file.Funcs); i++ {
-			fn := file.Funcs[i]
-			name := tokenString(&file, fn.NameTok)
-			kind := SymbolFunc
-			if fn.ReceiverStart >= 0 {
-				name = receiverTypeName(file, fn) + "." + name
-				kind = SymbolMethod
-			}
-			signature := buildFuncSignature(file, fn)
-			body := syntax.ParseFuncBody(file, fn)
-			if !body.Ok {
-				return info, false, CheckErrBody, fileIndex, body.ErrorTok
-			}
-			if statementErr, statementTok := invalidDefiniteStatement(file, body); statementErr != CheckOK {
-				return info, false, statementErr, fileIndex, statementTok
-			}
-			if returnTok := invalidReturnCount(file, fn, signature); returnTok >= 0 {
-				return info, false, CheckErrReturnCount, fileIndex, returnTok
-			}
-			if typeTok := invalidDefiniteAssignmentType(file, fn); typeTok >= 0 {
-				return info, false, CheckErrType, fileIndex, typeTok
-			}
-			if typeTok := invalidDefiniteCallArgumentType(pkg, info, fileIndex, fn); typeTok >= 0 {
-				return info, false, CheckErrCallArgument, fileIndex, typeTok
-			}
-			scope, ok, scopeTok := buildFuncScope(file, fn, body)
-			if !ok {
-				return info, false, CheckErrScope, fileIndex, scopeTok
-			}
-			refs := buildFuncRefs(file, fileIndex, info, body, scope)
-			selectors := buildFuncSelectors(file, fileIndex, info, checked, body, scope)
-			calls := buildFuncCalls(file, fileIndex, info, checked, body, scope)
-			indexes := buildFuncIndexExprs(file, body)
-			composites := buildFuncCompositeExprs(file, body)
-			locals := buildFuncLocalDecls(file, fileIndex, info, checked, body, scope)
-			typeRefs := buildFuncTypeRefs(file, fileIndex, info, checked, signature, locals, scope)
-			assigns := buildFuncAssignments(file, fileIndex, info, body, scope)
-			returns := buildFuncReturns(file, body)
-			info.Bodies = append(info.Bodies, FuncBody{Name: name, Kind: kind, File: fileIndex, Func: i, Signature: signature, Body: body, Scope: scope, Refs: refs, Selectors: selectors, Calls: calls, Indexes: indexes, Composites: composites, Locals: locals, TypeRefs: typeRefs, Assigns: assigns, Returns: returns})
-		}
-	}
-	buildMethodSets(&info, pkg)
-	for i := 0; i < len(info.Imports); i++ {
-		imp := info.Imports[i]
-		if !imp.Blank && !imp.Dot && !imp.Used {
-			return info, false, CheckErrUnusedImport, imp.File, imp.Token
-		}
-	}
-	return info, true, CheckOK, -1, -1
 }
 
 func buildImport(graph load.Graph, pkgIndex int, fileIndex int, file syntax.File, importIndex int) (Import, bool) {

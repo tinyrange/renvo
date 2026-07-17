@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"j5.nz/rtg/rtg/internal/load"
-	"j5.nz/rtg/rtg/internal/unit"
+	"j5.nz/rtg/rtgunit"
 )
 
 func TestCompileUnitInvokesBackend(t *testing.T) {
@@ -79,7 +79,7 @@ type recordingBackend struct {
 	target     string
 	strip      bool
 	windowsGUI bool
-	program    unit.Program
+	program    rtgunit.Program
 }
 
 func (b *recordingBackend) CompileUnit(data []byte, target string, strip bool, windowsGUI bool) BackendResult {
@@ -87,8 +87,8 @@ func (b *recordingBackend) CompileUnit(data []byte, target string, strip bool, w
 	b.target = target
 	b.strip = strip
 	b.windowsGUI = windowsGUI
-	program, ok := unit.Unmarshal(data)
-	if !ok {
+	program, err := rtgunit.Unmarshal(data)
+	if err != nil {
 		return BackendResult{}
 	}
 	b.program = program

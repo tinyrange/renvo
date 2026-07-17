@@ -2,7 +2,7 @@ package unit
 
 // MarshalCore encodes the compact unit contract consumed by every backend.
 // Frontend-only semantic tables deliberately remain outside this boundary.
-func MarshalCore(program Program) ([]byte, bool) {
+func MarshalCore(program CoreProgram) ([]byte, bool) {
 	capacity := 50 + len(program.Package) + len(program.ImportPath) + len(program.Text) + len(program.Tokens)*5 + len(program.Decls)*8 + len(program.Funcs)*12
 	out := make([]byte, 0, capacity)
 	for i := 0; i < len(Magic); i++ {
@@ -33,6 +33,12 @@ func MarshalCore(program Program) ([]byte, bool) {
 	patchUint32Core(out, funcHeader+2, len(out)-funcStart)
 	patchUint32Core(out, rootLength, len(out)-14)
 	return out, true
+}
+
+// Marshal is the canonical unit encoder used by both host-built and
+// self-hosted frontends.
+func Marshal(program Program) ([]byte, bool) {
+	return MarshalCore(CoreProgramFrom(program))
 }
 
 func appendEncodedTokensCore(out []byte, tokens []Token) []byte {

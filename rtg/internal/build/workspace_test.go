@@ -32,7 +32,7 @@ func Value() int { return 42 }
 	if root.ImportPath != "example.com/case/cmd/app" {
 		t.Fatalf("root = %#v", root)
 	}
-	decoded, err := rtgunit.Unmarshal(root.Data)
+	decoded, err := rtgunit.Unmarshal(marshalPackageUnit(t, root))
 	if err != nil {
 		t.Fatalf("root unit decode failed: %v", err)
 	}

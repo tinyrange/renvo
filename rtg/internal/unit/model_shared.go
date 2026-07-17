@@ -53,6 +53,90 @@ type Func struct {
 	EndTok        int
 }
 
+type Import struct {
+	NameTok int
+	PathTok int
+}
+
+type Symbol struct {
+	Name    string
+	Package int
+	Token   int
+}
+
+type Call struct {
+	Kind      int
+	CalleeTok int
+	BaseTok   int
+	DotTok    int
+}
+
+type NameRef struct {
+	Kind    int
+	Token   int
+	Index   int
+	Package int
+}
+
+type Selector struct {
+	BaseTok     int
+	DotTok      int
+	NameTok     int
+	BaseKind    int
+	BaseIndex   int
+	BasePackage int
+	Package     int
+	Symbol      int
+}
+
+type TypeRef struct {
+	Kind    int
+	Token   int
+	BaseTok int
+	DotTok  int
+	Package int
+	Symbol  int
+}
+
+// Program is the shared lowering and linking model. Checker-only semantic
+// tables stay outside this boundary.
+type Program struct {
+	Package    string
+	ImportPath string
+	Text       []byte
+	Tokens     []Token
+	Imports    []Import
+	Symbols    []Symbol
+	Decls      []Decl
+	Funcs      []Func
+	TypeRefs   []TypeRef
+	Calls      []Call
+	Refs       []NameRef
+	Selectors  []Selector
+}
+
+// CoreProgram is the complete serialized contract consumed by compiler
+// backends. Link-only resolution tables are deliberately absent.
+type CoreProgram struct {
+	Package    string
+	ImportPath string
+	Text       []byte
+	Tokens     []Token
+	Decls      []Decl
+	Funcs      []Func
+}
+
+func CoreProgramFrom(program Program) CoreProgram {
+	return CoreProgram{
+		Package:    program.Package,
+		ImportPath: program.ImportPath,
+		Text:       program.Text,
+		Tokens:     program.Tokens,
+		Decls:      program.Decls,
+		Funcs:      program.Funcs,
+	}
+}
+
 const (
 	CallUnknown = iota
 	CallScope

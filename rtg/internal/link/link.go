@@ -54,7 +54,7 @@ func linkBuildCore(result build.Result, transient bool) Result {
 		out.Error = LinkErrUnit
 		return out
 	}
-	data, ok := unit.MarshalCore(program)
+	data, ok := unit.MarshalCore(unit.CoreProgramFrom(program))
 	if !ok {
 		out.Ok = false
 		out.Error = LinkErrUnit
@@ -144,7 +144,7 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 			break
 		}
 		if transient {
-			discardLinkedPackageUnit(units[i])
+			arena.Discard(units[i].ArenaStart, units[i].ArenaEnd)
 		}
 	}
 	if !transient {

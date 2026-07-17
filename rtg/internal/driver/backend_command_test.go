@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"j5.nz/rtg/rtg/internal/unit"
+	"j5.nz/rtg/rtgunit"
 )
 
 func TestCommandBackendCompileUnit(t *testing.T) {
@@ -85,8 +85,8 @@ func TestCommandBackendHelper(t *testing.T) {
 	if err != nil {
 		os.Exit(4)
 	}
-	program, unitOk := unit.Unmarshal(data)
-	if !unitOk || program.Package != "main" {
+	program, err := rtgunit.Unmarshal(data)
+	if err != nil || program.Package != "main" {
 		os.Exit(5)
 	}
 	text := "compiled " + target

@@ -26,12 +26,17 @@ func TestCoreLinkerAlgorithmIsSharedAcrossFrontends(t *testing.T) {
 		}
 	}
 
-	for _, name := range []string{"link_full.go", "link_rtg.go"} {
-		source := readLinkSource(t, name)
-		for _, declaration := range sharedDeclarations {
-			if strings.Contains(source, declaration) {
-				t.Errorf("%s redeclares shared linker algorithm %s", name, declaration)
-			}
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		if source := readLinkSource(t, name); strings.Contains(source, "//go:build") {
+			t.Errorf("production linker file %s is build-tagged", name)
 		}
 	}
 }

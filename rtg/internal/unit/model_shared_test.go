@@ -1,54 +1,47 @@
-//go:build !rtg
-
 package unit
 
 import (
-	"go/ast"
-	"go/parser"
-	"go/token"
+	"reflect"
 	"testing"
 )
 
-func TestCoreUnitModelStaysOutOfBuildTaggedForks(t *testing.T) {
-	shared := declaredNames(t, "model_shared.go")
-	for _, name := range []string{"Token", "Decl", "Func", "CallUnknown", "RefUnknown", "TypeRefUnknown", "appendNode", "appendUint16", "appendUint32", "appendVarint"} {
-		if !shared[name] {
-			t.Fatalf("shared unit model is missing %s", name)
-		}
+func TestProgramIsTheExplicitSharedLinkingContract(t *testing.T) {
+	typeOf := reflect.TypeOf(Program{})
+	want := []string{
+		"Package", "ImportPath", "Text", "Tokens", "Imports", "Symbols",
+		"Decls", "Funcs", "TypeRefs", "Calls", "Refs", "Selectors",
 	}
-	for _, path := range []string{"unit.go", "unit_full.go"} {
-		fork := declaredNames(t, path)
-		for name := range shared {
-			if fork[name] {
-				t.Fatalf("%s redeclares shared unit model name %s", path, name)
-			}
+	if typeOf.NumField() != len(want) {
+		t.Fatalf("Program has %d fields, want %d", typeOf.NumField(), len(want))
+	}
+	for i := 0; i < len(want); i++ {
+		if got := typeOf.Field(i).Name; got != want[i] {
+			t.Fatalf("Program field %d = %s, want %s", i, got, want[i])
 		}
 	}
 }
 
-func declaredNames(t *testing.T, path string) map[string]bool {
-	t.Helper()
-	file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
-	if err != nil {
-		t.Fatal(err)
+func TestCoreProgramIsTheExplicitSerializedContract(t *testing.T) {
+	typeOf := reflect.TypeOf(CoreProgram{})
+	want := []string{"Package", "ImportPath", "Text", "Tokens", "Decls", "Funcs"}
+	if typeOf.NumField() != len(want) {
+		t.Fatalf("CoreProgram has %d fields, want %d", typeOf.NumField(), len(want))
 	}
-	names := make(map[string]bool)
-	for _, decl := range file.Decls {
-		switch value := decl.(type) {
-		case *ast.FuncDecl:
-			names[value.Name.Name] = true
-		case *ast.GenDecl:
-			for _, spec := range value.Specs {
-				switch item := spec.(type) {
-				case *ast.TypeSpec:
-					names[item.Name.Name] = true
-				case *ast.ValueSpec:
-					for _, name := range item.Names {
-						names[name.Name] = true
-					}
-				}
-			}
+	for i := 0; i < len(want); i++ {
+		if got := typeOf.Field(i).Name; got != want[i] {
+			t.Fatalf("CoreProgram field %d = %s, want %s", i, got, want[i])
 		}
 	}
-	return names
+}
+
+func TestSharedProgramTypesHaveNoRichFrontendOwnershipFields(t *testing.T) {
+	for _, value := range []any{Import{}, Symbol{}, Call{}, NameRef{}, Selector{}, TypeRef{}} {
+		typeOf := reflect.TypeOf(value)
+		if _, ok := typeOf.FieldByName("OwnerKind"); ok {
+			t.Fatalf("%s leaks checker ownership into the backend contract", typeOf.Name())
+		}
+		if _, ok := typeOf.FieldByName("OwnerIndex"); ok {
+			t.Fatalf("%s leaks checker ownership into the backend contract", typeOf.Name())
+		}
+	}
 }

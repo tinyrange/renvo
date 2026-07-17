@@ -1,5 +1,3 @@
-//go:build rtg
-
 package unit
 
 import (
@@ -8,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"j5.nz/rtg/rtgunit"
 )
 
 func coreGoldenProgram() Program {
@@ -30,7 +30,25 @@ func TestCoreGoldenVector(t *testing.T) {
 	}
 	want := readGoldenHex(t, "../../../rtgunit/testdata/v1-core.hex")
 	if !bytes.Equal(data, want) {
-		t.Fatalf("self-hosted encoder drift\ngot  %x\nwant %x", data, want)
+		t.Fatalf("shared encoder drift\ngot  %x\nwant %x", data, want)
+	}
+}
+
+func TestCoreUnitDecodesWithPublicReader(t *testing.T) {
+	program := coreGoldenProgram()
+	data, ok := MarshalCore(CoreProgramFrom(program))
+	if !ok {
+		t.Fatal("MarshalCore failed")
+	}
+	decoded, err := rtgunit.Unmarshal(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Package != program.Package || decoded.ImportPath != program.ImportPath || !bytes.Equal(decoded.Text, program.Text) {
+		t.Fatalf("decoded unit = %#v", decoded)
+	}
+	if len(decoded.Decls) != len(program.Decls) || len(decoded.Funcs) != len(program.Funcs) {
+		t.Fatalf("decoded declarations/functions = %d/%d", len(decoded.Decls), len(decoded.Funcs))
 	}
 }
 

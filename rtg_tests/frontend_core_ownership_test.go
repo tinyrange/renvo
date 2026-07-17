@@ -13,6 +13,7 @@ func TestFrontendCoreAlgorithmsAreSharedAcrossBuilds(t *testing.T) {
 		path        string
 		declaration string
 	}{
+		{"rtg/internal/syntax/parse.go", "func ParseFile("},
 		{"rtg/internal/check/core.go", "func CheckGraphHeadersCore("},
 		{"rtg/internal/build/core.go", "func buildProgramsCore("},
 		{"rtg/internal/lower/unit.go", "func EmitCheckedPackageCore("},
@@ -28,19 +29,27 @@ func TestFrontendCoreAlgorithmsAreSharedAcrossBuilds(t *testing.T) {
 		}
 	}
 
-	adapters := []string{
-		"rtg/internal/build/build.go",
-		"rtg/internal/build/build_full.go",
-		"rtg/internal/lower/unit_rtg.go",
-		"rtg/internal/lower/unit_full.go",
-		"rtg/internal/unit/unit.go",
-		"rtg/internal/unit/unit_full.go",
-	}
-	for _, path := range adapters {
-		source := readFrontendCoreSource(t, root, path)
-		for _, item := range shared {
-			if strings.Contains(source, item.declaration) {
-				t.Errorf("%s redeclares shared algorithm %s", path, item.declaration)
+	for _, relative := range []string{
+		"rtg/internal/syntax",
+		"rtg/internal/check",
+		"rtg/internal/build",
+		"rtg/internal/link",
+		"rtg/internal/lower",
+		"rtg/internal/unit",
+	} {
+		dir := filepath.Join(root, filepath.FromSlash(relative))
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range entries {
+			name := entry.Name()
+			if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+				continue
+			}
+			path := filepath.Join(relative, name)
+			if source := readFrontendCoreSource(t, root, path); strings.Contains(source, "//go:build") {
+				t.Errorf("frontend core implementation %s is build-tagged", path)
 			}
 		}
 	}

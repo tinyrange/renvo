@@ -77,6 +77,20 @@ func TestFrontendStructuredDiagnostics(t *testing.T) {
 			wantDetail: "assignment value is not assignable to its destination",
 		},
 		{
+			name:       "assignment_type_bool_from_int",
+			files:      map[string]string{"cmd/app/main.go": "package main\n\nfunc main() { var value bool; value = 1; _ = value }\n"},
+			wantCode:   "RTG-CHECK-008",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "assignment value is not assignable to its destination",
+		},
+		{
+			name:       "unterminated_string",
+			files:      map[string]string{"cmd/app/main.go": "package main\n\nfunc main() { print(\"unterminated\n) }\n"},
+			wantCode:   "RTG-PARSE-001",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "source syntax is invalid",
+		},
+		{
 			name:       "excluded_goroutine",
 			files:      map[string]string{"cmd/app/main.go": "package main\n\nfunc work() {}\nfunc main() { go work() }\n"},
 			wantCode:   "RTG-CHECK-009",

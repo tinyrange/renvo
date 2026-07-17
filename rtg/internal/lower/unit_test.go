@@ -7,1236 +7,136 @@ import (
 	"j5.nz/rtg/rtg/internal/check"
 	"j5.nz/rtg/rtg/internal/load"
 	"j5.nz/rtg/rtg/internal/unit"
-	"j5.nz/rtg/rtgunit"
 )
 
-func TestEmitRootPackageUnit(t *testing.T) {
-	graph := loadTestGraph(t, []load.SourceFile{
+func TestEmitCheckedPackageCorePreservesCanonicalModel(t *testing.T) {
+	graph := lowerTestGraph(t, []load.SourceFile{
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import "example.com/case/pkg/lib"
 
 const answer = 42
-
-func appMain() int {
-	return answer
-}
-`)},
-	})
-	result := EmitRoot(graph)
-	if !result.Ok {
-		t.Fatalf("EmitRoot failed: err=%d file=%d tok=%d", result.Error, result.ErrorFile, result.ErrorToken)
-	}
-	data, ok := unit.Marshal(result.Program)
-	if !ok {
-		t.Fatal("unit Marshal failed")
-	}
-	decoded, err := rtgunit.Unmarshal(data)
-	if err != nil {
-		t.Fatalf("host unit decode failed: %v", err)
-	}
-	if decoded.Package != "main" {
-		t.Fatalf("package = %q, want main", decoded.Package)
-	}
-	if !bytes.Equal(decoded.Text, result.Program.Text) {
-		t.Fatalf("decoded text mismatch")
-	}
-	if len(decoded.Decls) != 1 || decoded.Decls[0].NameStart >= decoded.Decls[0].NameEnd {
-		t.Fatalf("decls = %#v", decoded.Decls)
-	}
-	if string(decoded.Text[decoded.Decls[0].NameStart:decoded.Decls[0].NameEnd]) != "answer" {
-		t.Fatalf("decl name = %q", string(decoded.Text[decoded.Decls[0].NameStart:decoded.Decls[0].NameEnd]))
-	}
-	if tokenText(decoded, decoded.Decls[0].StartTok) != "const" {
-		t.Fatalf("decl start token = %q, want const", tokenText(decoded, decoded.Decls[0].StartTok))
-	}
-	if len(decoded.Funcs) != 1 {
-		t.Fatalf("funcs = %#v", decoded.Funcs)
-	}
-	fn := decoded.Funcs[0]
-	if string(decoded.Text[fn.NameStart:fn.NameEnd]) != "appMain" {
-		t.Fatalf("func name = %q", string(decoded.Text[fn.NameStart:fn.NameEnd]))
-	}
-	if tokenText(decoded, fn.BodyStart) != "{" || tokenText(decoded, fn.BodyEnd) != "}" {
-		t.Fatalf("body tokens = %q:%q", tokenText(decoded, fn.BodyStart), tokenText(decoded, fn.BodyEnd))
-	}
-}
-
-func TestEmitCheckedPackagePreservesImports(t *testing.T) {
-	graph := loadTestGraph(t, []load.SourceFile{
-		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
-
-import (
-	core "example.com/case/pkg/lib"
-	. "example.com/case/pkg/dot"
-	_ "example.com/case/pkg/side"
-)
-
-func appMain() int { return core.Value() }
+func appMain() int { return answer + lib.Value() }
 `)},
 		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte(`package lib
 
 func Value() int { return 1 }
 `)},
-		{Path: "/repo/case/pkg/dot/dot.go", Src: []byte(`package dot
-
-const DotValue = 2
-`)},
-		{Path: "/repo/case/pkg/side/side.go", Src: []byte(`package side
-
-const SideValue = 3
-`)},
 	})
-	prog := check.CheckGraph(graph)
-	if !prog.Ok {
-		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
+	checked := check.CheckGraphCore(graph)
+	if !checked.Ok {
+		t.Fatalf("CheckGraphCore failed: err=%d pkg=%d file=%d tok=%d", checked.Error, checked.ErrorPackage, checked.ErrorFile, checked.ErrorToken)
 	}
-	root := findGraphPackage(graph, graph.Root)
-	if root < 0 {
-		t.Fatalf("root package %q not found in %#v", graph.Root, graph.Packages)
-	}
-	result := EmitCheckedPackage(graph.Packages[root], prog.Packages[root])
+	root := lowerRootPackage(t, graph)
+	result := EmitCheckedPackageCore(graph.Packages[root], checked.Packages[root], false)
 	if !result.Ok {
-		t.Fatalf("EmitCheckedPackage failed: err=%d file=%d tok=%d", result.Error, result.ErrorFile, result.ErrorToken)
+		t.Fatalf("EmitCheckedPackageCore failed: err=%d file=%d tok=%d", result.Error, result.ErrorFile, result.ErrorToken)
 	}
-	if result.Program.ImportPath != "example.com/case/cmd/app" {
-		t.Fatalf("unit import path = %q", result.Program.ImportPath)
+	program := result.Program
+	if program.Package != "main" || program.ImportPath != "example.com/case/cmd/app" {
+		t.Fatalf("program identity = %q %q", program.Package, program.ImportPath)
 	}
-	if len(result.Program.Imports) != 3 {
-		t.Fatalf("imports = %#v, want 3", result.Program.Imports)
+	if len(program.Imports) != 1 || lowerTokenText(program, program.Imports[0].PathTok) != `"example.com/case/pkg/lib"` {
+		t.Fatalf("imports = %#v", program.Imports)
 	}
-	assertUnitImport(t, result.Program, "core", "example.com/case/pkg/lib", false, false)
-	assertUnitImport(t, result.Program, ".", "example.com/case/pkg/dot", true, false)
-	assertUnitImport(t, result.Program, "_", "example.com/case/pkg/side", false, true)
-
-	data, ok := unit.Marshal(result.Program)
-	if !ok {
-		t.Fatal("unit Marshal failed")
+	if len(program.Decls) != 1 || lowerSpanText(program, program.Decls[0].NameStart, program.Decls[0].NameEnd) != "answer" {
+		t.Fatalf("declarations = %#v", program.Decls)
 	}
-	decoded, err := rtgunit.Unmarshal(data)
-	if err != nil {
-		t.Fatalf("host unit decode failed: %v", err)
+	if len(program.Funcs) != 1 || lowerSpanText(program, program.Funcs[0].NameStart, program.Funcs[0].NameEnd) != "appMain" {
+		t.Fatalf("functions = %#v", program.Funcs)
 	}
-	if decoded.ImportPath != result.Program.ImportPath || len(decoded.Imports) != len(result.Program.Imports) {
-		t.Fatalf("decoded imports = %q %#v, want %q %#v", decoded.ImportPath, decoded.Imports, result.Program.ImportPath, result.Program.Imports)
+	if len(program.Symbols) != 2 {
+		t.Fatalf("symbols = %#v", program.Symbols)
+	}
+	if len(program.Tokens) == 0 || program.Tokens[len(program.Tokens)-1].Kind != unit.TokenEOF {
+		t.Fatal("canonical unit has no final EOF token")
+	}
+	if len(program.Selectors) == 0 || lowerTokenText(program, program.Selectors[0].NameTok) != "Value" {
+		t.Fatalf("selectors = %#v", program.Selectors)
 	}
 }
 
-func TestEmitPackagePreservesTextAndFileOrder(t *testing.T) {
-	graph := loadTestGraph(t, []load.SourceFile{
-		{Path: "/repo/case/cmd/app/z.go", Src: []byte("package main\n\nfunc z() int { return 2 }\n")},
-		{Path: "/repo/case/cmd/app/a.go", Src: []byte("package main\n\nfunc a() int { return 1 }\n")},
+func TestEmitCheckedPackageCorePreservesFileOrderAndBoundaries(t *testing.T) {
+	graph := lowerTestGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/z.go", Src: []byte("package main\nfunc zed() int { return 2 }\n")},
+		{Path: "/repo/case/cmd/app/a.go", Src: []byte("package main\nfunc alpha() int { return 1 }")},
 	})
-	result := EmitRoot(graph)
+	checked := check.CheckGraphCore(graph)
+	if !checked.Ok {
+		t.Fatalf("CheckGraphCore failed: err=%d", checked.Error)
+	}
+	result := EmitCheckedPackageCore(graph.Packages[0], checked.Packages[0], false)
 	if !result.Ok {
-		t.Fatalf("EmitRoot failed: err=%d file=%d tok=%d", result.Error, result.ErrorFile, result.ErrorToken)
-	}
-	wantText := []byte("package main\n\nfunc a() int { return 1 }\npackage main\n\nfunc z() int { return 2 }\n")
-	if !bytes.Equal(result.Program.Text, wantText) {
-		t.Fatalf("text = %q, want %q", string(result.Program.Text), string(wantText))
-	}
-	if len(result.Program.Funcs) != 2 {
-		t.Fatalf("func count = %d, want 2", len(result.Program.Funcs))
-	}
-	if string(result.Program.Text[result.Program.Funcs[0].NameStart:result.Program.Funcs[0].NameEnd]) != "a" {
-		t.Fatalf("first func = %q", string(result.Program.Text[result.Program.Funcs[0].NameStart:result.Program.Funcs[0].NameEnd]))
-	}
-	if string(result.Program.Text[result.Program.Funcs[1].NameStart:result.Program.Funcs[1].NameEnd]) != "z" {
-		t.Fatalf("second func = %q", string(result.Program.Text[result.Program.Funcs[1].NameStart:result.Program.Funcs[1].NameEnd]))
-	}
-}
-
-func TestEmitPackageMapsFileEOFToFileBoundary(t *testing.T) {
-	graph := loadTestGraph(t, []load.SourceFile{
-		{Path: "/repo/case/cmd/app/a.go", Src: []byte(`package main
-
-const (
-	first = iota
-	second
-)
-
-const last = 2
-`)},
-		{Path: "/repo/case/cmd/app/z.go", Src: []byte(`package main
-
-func use(file int) int { return file }
-`)},
-	})
-	result := EmitRoot(graph)
-	if !result.Ok {
-		t.Fatalf("EmitRoot failed: err=%d file=%d tok=%d", result.Error, result.ErrorFile, result.ErrorToken)
-	}
-	if len(result.Program.Decls) != 3 {
-		t.Fatalf("decl count = %d, want 3", len(result.Program.Decls))
-	}
-	decl := result.Program.Decls[2]
-	if got := declName(result.Program, 2); got != "last" {
-		t.Fatalf("final declaration = %q, want last", got)
-	}
-	if decl.EndTok >= len(result.Program.Tokens)-1 {
-		t.Fatalf("final declaration ends at linked EOF %d, want first-file boundary", decl.EndTok)
-	}
-	if got := tokenTextUnit(result.Program, decl.EndTok); got != "package" {
-		t.Fatalf("final declaration end token = %q, want next file package", got)
-	}
-}
-
-func TestEmitCheckedPackageUsesCheckedDeclOrder(t *testing.T) {
-	graph := loadTestGraph(t, []load.SourceFile{
-		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
-
-const first = 1
-const second = 2
-
-func appMain() int {
-	return first + second
-}
-`)},
-	})
-	prog := check.CheckGraph(graph)
-	if !prog.Ok {
-		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
-	}
-	info := prog.Packages[0]
-	if len(info.DeclOrder) != 2 {
-		t.Fatalf("decl order = %#v, want two declarations", info.DeclOrder)
-	}
-	info.DeclOrder[0], info.DeclOrder[1] = info.DeclOrder[1], info.DeclOrder[0]
-
-	result := EmitCheckedPackage(graph.Packages[0], info)
-	if !result.Ok {
-		t.Fatalf("EmitCheckedPackage failed: err=%d file=%d tok=%d", result.Error, result.ErrorFile, result.ErrorToken)
-	}
-	if len(result.Program.Decls) != 2 {
-		t.Fatalf("decl count = %d, want 2", len(result.Program.Decls))
-	}
-	if declName(result.Program, 0) != "second" || declName(result.Program, 1) != "first" {
-		t.Fatalf("decl order = %q, %q; want second, first", declName(result.Program, 0), declName(result.Program, 1))
-	}
-}
-
-func TestEmitCheckedPackageUsesCheckedFunctionOrder(t *testing.T) {
-	graph := loadTestGraph(t, []load.SourceFile{
-		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
-
-func first() int { return 1 }
-func second() int { return 2 }
-func appMain() int { return first() + second() }
-`)},
-	})
-	prog := check.CheckGraph(graph)
-	if !prog.Ok {
-		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
-	}
-	info := prog.Packages[0]
-	first := check.LookupFuncBody(info, "first")
-	second := check.LookupFuncBody(info, "second")
-	if first < 0 || second < 0 {
-		t.Fatalf("missing function bodies in %#v", info.Bodies)
-	}
-	info.Bodies[0], info.Bodies[1] = info.Bodies[second], info.Bodies[first]
-
-	result := EmitCheckedPackage(graph.Packages[0], info)
-	if !result.Ok {
-		t.Fatalf("EmitCheckedPackage failed: err=%d file=%d tok=%d", result.Error, result.ErrorFile, result.ErrorToken)
-	}
-	if len(result.Program.Funcs) != 3 {
-		t.Fatalf("func count = %d, want 3", len(result.Program.Funcs))
-	}
-	if funcName(result.Program, 0) != "second" || funcName(result.Program, 1) != "first" {
-		t.Fatalf("func order = %q, %q; want second, first", funcName(result.Program, 0), funcName(result.Program, 1))
-	}
-}
-
-func TestEmitCheckedPackagePreservesMethodSets(t *testing.T) {
-	graph := loadTestGraph(t, []load.SourceFile{
-		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
-
-type item struct { value int }
-
-func (it item) Value() int { return it.value }
-func (it *item) Set(value int) int { return value }
-`)},
-	})
-	prog := check.CheckGraph(graph)
-	if !prog.Ok {
-		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
-	}
-	result := EmitCheckedPackage(graph.Packages[0], prog.Packages[0])
-	if !result.Ok {
-		t.Fatalf("EmitCheckedPackage failed: err=%d file=%d tok=%d", result.Error, result.ErrorFile, result.ErrorToken)
-	}
-	item := findUnitDecl(result.Program, "item")
-	valueFn := findUnitFunc(result.Program, "Value")
-	setFn := findUnitFunc(result.Program, "Set")
-	if item < 0 || valueFn < 0 || setFn < 0 {
-		t.Fatalf("unit rows missing: decls=%#v funcs=%#v", result.Program.Decls, result.Program.Funcs)
-	}
-	if len(result.Program.Methods) != 2 {
-		t.Fatalf("methods = %#v, want 2", result.Program.Methods)
-	}
-	assertUnitSignature(t, result.Program, valueFn, []string{"it:item"}, nil, []string{":int"})
-	assertUnitSignature(t, result.Program, setFn, []string{"it:*item"}, []string{"value:int"}, []string{":int"})
-	assertUnitMethod(t, result.Program, item, "Value", false, valueFn)
-	assertUnitMethod(t, result.Program, item, "Set", true, setFn)
-
-	data, ok := unit.Marshal(result.Program)
-	if !ok {
-		t.Fatal("unit Marshal failed")
-	}
-	decoded, err := rtgunit.Unmarshal(data)
-	if err != nil {
-		t.Fatalf("host unit decode failed: %v", err)
-	}
-	if len(decoded.Methods) != len(result.Program.Methods) {
-		t.Fatalf("decoded methods = %d, want %d", len(decoded.Methods), len(result.Program.Methods))
-	}
-}
-
-func TestEmitCheckedPackagePreservesFunctionTypes(t *testing.T) {
-	graph := loadTestGraph(t, []load.SourceFile{
-		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
-
-type callback func(value int) string
-
-func appMain() int { return 0 }
-`)},
-	})
-	prog := check.CheckGraph(graph)
-	if !prog.Ok {
-		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
-	}
-	result := EmitCheckedPackage(graph.Packages[0], prog.Packages[0])
-	if !result.Ok {
-		t.Fatalf("EmitCheckedPackage failed: err=%d file=%d tok=%d", result.Error, result.ErrorFile, result.ErrorToken)
-	}
-	callback := findUnitDecl(result.Program, "callback")
-	if callback < 0 {
-		t.Fatalf("callback decl missing: %#v", result.Program.Decls)
-	}
-	if len(result.Program.TypeFuncs) != 1 {
-		t.Fatalf("type funcs = %#v, want 1", result.Program.TypeFuncs)
-	}
-	assertUnitType(t, result.Program, "callback", unit.TypeFunc, callback, "func(value int) string", "", "", "")
-	assertUnitTypeFunc(t, result.Program, callback, []string{"value:int"}, []string{":string"})
-
-	data, ok := unit.Marshal(result.Program)
-	if !ok {
-		t.Fatal("unit Marshal failed")
-	}
-	decoded, err := rtgunit.Unmarshal(data)
-	if err != nil {
-		t.Fatalf("host unit decode failed: %v", err)
-	}
-	if len(decoded.TypeFuncs) != len(result.Program.TypeFuncs) {
-		t.Fatalf("decoded type funcs = %d, want %d", len(decoded.TypeFuncs), len(result.Program.TypeFuncs))
-	}
-}
-
-func TestEmitCheckedPackageExpressionShapes(t *testing.T) {
-	graph := loadTestGraph(t, []load.SourceFile{
-		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
-
-const answer = 42
-const message = "ok"
-const enabled = true
-const negative = -4
-
-type item struct { value int }
-type reader interface {
-	item
-	Read(p []byte) int
-}
-
-var global = []int{1, 2, 3}
-var picked = choose(global[1])
-
-func choose(v int) int { return v }
-
-func appMain() int {
-	var typed item
-	var local = []item{{value: global[0]}}
-	local[0] = item{value: picked}
-	return choose(local[0].value)
-}
-`)},
-	})
-	prog := check.CheckGraph(graph)
-	if !prog.Ok {
-		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
-	}
-	result := EmitCheckedPackage(graph.Packages[0], prog.Packages[0])
-	if !result.Ok {
-		t.Fatalf("EmitCheckedPackage failed: err=%d file=%d tok=%d", result.Error, result.ErrorFile, result.ErrorToken)
-	}
-	if len(result.Program.Indexes) != 4 {
-		t.Fatalf("indexes = %#v, want 4", result.Program.Indexes)
-	}
-	if len(result.Program.Composites) != 3 {
-		t.Fatalf("composites = %#v, want 3", result.Program.Composites)
-	}
-	if len(result.Program.Assigns) != 1 {
-		t.Fatalf("assignments = %#v, want 1", result.Program.Assigns)
-	}
-	if len(result.Program.Returns) != 2 {
-		t.Fatalf("returns = %#v, want 2", result.Program.Returns)
-	}
-	if len(result.Program.Calls) != 2 {
-		t.Fatalf("calls = %#v, want 2", result.Program.Calls)
-	}
-	if len(result.Program.Types) != 2 {
-		t.Fatalf("types = %#v, want 2", result.Program.Types)
-	}
-	if len(result.Program.TypeFields) != 1 {
-		t.Fatalf("type fields = %#v, want 1", result.Program.TypeFields)
-	}
-	if len(result.Program.TypeIfaces) != 1 {
-		t.Fatalf("type interfaces = %#v, want 1", result.Program.TypeIfaces)
-	}
-	if len(result.Program.Symbols) == 0 {
-		t.Fatalf("symbols = %#v, want symbols", result.Program.Symbols)
-	}
-	if len(result.Program.DeclMeta) != len(result.Program.Decls) {
-		t.Fatalf("decl metadata = %#v, want %d", result.Program.DeclMeta, len(result.Program.Decls))
-	}
-	if len(result.Program.InitOrder) != 2 {
-		t.Fatalf("init order = %#v, want two package variables", result.Program.InitOrder)
-	}
-	if len(result.Program.Consts) != 4 {
-		t.Fatalf("consts = %#v, want four constants", result.Program.Consts)
-	}
-	if len(result.Program.Signatures) != len(result.Program.Funcs) {
-		t.Fatalf("signatures = %#v, want %d", result.Program.Signatures, len(result.Program.Funcs))
-	}
-	if len(result.Program.TypeRefs) == 0 {
-		t.Fatalf("type refs = %#v, want refs", result.Program.TypeRefs)
-	}
-	if len(result.Program.Locals) != 2 {
-		t.Fatalf("locals = %#v, want 2", result.Program.Locals)
-	}
-	if len(result.Program.Refs) == 0 {
-		t.Fatalf("refs = %#v, want refs", result.Program.Refs)
-	}
-	item := findUnitDecl(result.Program, "item")
-	reader := findUnitDecl(result.Program, "reader")
-	answer := findUnitDecl(result.Program, "answer")
-	message := findUnitDecl(result.Program, "message")
-	enabled := findUnitDecl(result.Program, "enabled")
-	negative := findUnitDecl(result.Program, "negative")
-	global := findUnitDecl(result.Program, "global")
-	picked := findUnitDecl(result.Program, "picked")
-	appMain := findUnitFunc(result.Program, "appMain")
-	choose := findUnitFunc(result.Program, "choose")
-	if item < 0 || reader < 0 || answer < 0 || message < 0 || enabled < 0 || negative < 0 || global < 0 || picked < 0 || appMain < 0 || choose < 0 {
-		t.Fatalf("unit rows missing: decls=%#v funcs=%#v", result.Program.Decls, result.Program.Funcs)
-	}
-	assertUnitConstInt(t, result.Program, answer, 42)
-	assertUnitConstString(t, result.Program, message, "ok")
-	assertUnitConstBool(t, result.Program, enabled, true)
-	assertUnitConstInt(t, result.Program, negative, -4)
-	itemSym := assertUnitSymbol(t, result.Program, "item", unit.SymbolType, unit.OwnerDecl, item)
-	readerSym := assertUnitSymbol(t, result.Program, "reader", unit.SymbolType, unit.OwnerDecl, reader)
-	globalSym := assertUnitSymbol(t, result.Program, "global", unit.SymbolVar, unit.OwnerDecl, global)
-	pickedSym := assertUnitSymbol(t, result.Program, "picked", unit.SymbolVar, unit.OwnerDecl, picked)
-	assertUnitSymbol(t, result.Program, "choose", unit.SymbolFunc, unit.OwnerFunc, choose)
-	assertUnitSymbol(t, result.Program, "appMain", unit.SymbolFunc, unit.OwnerFunc, appMain)
-	assertUnitType(t, result.Program, "item", unit.TypeStruct, item, "struct { value int }", "", "", "")
-	assertUnitTypeFields(t, result.Program, item, []string{"value:int"})
-	assertUnitType(t, result.Program, "reader", unit.TypeInterface, reader, "interface {\n\titem\n\tRead(p []byte) int\n}", "", "", "")
-	assertUnitTypeInterface(t, result.Program, reader, []string{"item"}, "Read", []string{"p:[]byte"}, []string{":int"})
-	assertUnitDeclMeta(t, result.Program, item, itemSym, "struct { value int }", "", nil, false)
-	assertUnitDeclMeta(t, result.Program, reader, readerSym, "interface {\n\titem\n\tRead(p []byte) int\n}", "", nil, false)
-	assertUnitDeclMeta(t, result.Program, global, globalSym, "", "[]int{1, 2, 3}", []string{"[]int{1, 2, 3}"}, false)
-	assertUnitDeclMeta(t, result.Program, picked, pickedSym, "", "choose(global[1])", []string{"choose(global[1])"}, false)
-	assertUnitInitOrder(t, result.Program, []int{global, picked})
-	assertUnitSignature(t, result.Program, choose, nil, []string{"v:int"}, []string{":int"})
-	assertUnitSignature(t, result.Program, appMain, nil, nil, []string{":int"})
-	assertUnitComposite(t, result.Program, unit.OwnerDecl, global, "[]int", []string{"1", "2", "3"})
-	assertUnitIndex(t, result.Program, unit.OwnerDecl, picked, "global", "1")
-	assertUnitCall(t, result.Program, unit.OwnerDecl, picked, unit.CallPackage, "", "choose", []string{"global[1]"})
-	assertUnitRef(t, result.Program, unit.OwnerDecl, picked, unit.RefPackage, "choose")
-	assertUnitRef(t, result.Program, unit.OwnerDecl, picked, unit.RefPackage, "global")
-	assertUnitComposite(t, result.Program, unit.OwnerFunc, appMain, "[]item", []string{"{value: global[0]}"})
-	assertUnitComposite(t, result.Program, unit.OwnerFunc, appMain, "item", []string{"value: picked"})
-	assertUnitTypeRef(t, result.Program, unit.OwnerDecl, item, unit.TypeRefBuiltin, "", "int")
-	assertUnitTypeRef(t, result.Program, unit.OwnerFunc, choose, unit.TypeRefBuiltin, "", "int")
-	assertUnitTypeRef(t, result.Program, unit.OwnerFunc, appMain, unit.TypeRefPackage, "", "item")
-	assertUnitLocal(t, result.Program, appMain, unit.TokenVar, "typed", "item", "", nil, false)
-	assertUnitLocal(t, result.Program, appMain, unit.TokenVar, "local", "", "[]item{{value: global[0]}}", []string{"[]item{{value: global[0]}}"}, false)
-	assertUnitIndex(t, result.Program, unit.OwnerFunc, appMain, "global", "0")
-	assertUnitIndex(t, result.Program, unit.OwnerFunc, appMain, "local", "0")
-	assertUnitAssign(t, result.Program, appMain, unit.AssignSet, "local[0]", "item{value: picked}")
-	assertUnitReturn(t, result.Program, choose, []string{"v"})
-	assertUnitReturn(t, result.Program, appMain, []string{"choose(local[0].value)"})
-	assertUnitCall(t, result.Program, unit.OwnerFunc, appMain, unit.CallPackage, "", "choose", []string{"local[0].value"})
-	assertUnitRef(t, result.Program, unit.OwnerFunc, appMain, unit.RefPackage, "choose")
-	assertUnitRef(t, result.Program, unit.OwnerFunc, appMain, unit.RefScope, "local")
-
-	data, ok := unit.Marshal(result.Program)
-	if !ok {
-		t.Fatal("unit Marshal failed")
-	}
-	decoded, err := rtgunit.Unmarshal(data)
-	if err != nil {
-		t.Fatalf("host unit decode failed: %v", err)
-	}
-	if len(decoded.Indexes) != len(result.Program.Indexes) || len(decoded.Composites) != len(result.Program.Composites) {
-		t.Fatalf("decoded shapes = %d/%d, want %d/%d", len(decoded.Indexes), len(decoded.Composites), len(result.Program.Indexes), len(result.Program.Composites))
-	}
-	if len(decoded.Assigns) != len(result.Program.Assigns) || len(decoded.Returns) != len(result.Program.Returns) {
-		t.Fatalf("decoded flow = %d/%d, want %d/%d", len(decoded.Assigns), len(decoded.Returns), len(result.Program.Assigns), len(result.Program.Returns))
-	}
-	if len(decoded.Calls) != len(result.Program.Calls) {
-		t.Fatalf("decoded calls = %d, want %d", len(decoded.Calls), len(result.Program.Calls))
-	}
-	if len(decoded.Types) != len(result.Program.Types) {
-		t.Fatalf("decoded types = %d, want %d", len(decoded.Types), len(result.Program.Types))
-	}
-	if len(decoded.TypeFields) != len(result.Program.TypeFields) {
-		t.Fatalf("decoded type fields = %d, want %d", len(decoded.TypeFields), len(result.Program.TypeFields))
-	}
-	if len(decoded.TypeIfaces) != len(result.Program.TypeIfaces) {
-		t.Fatalf("decoded type interfaces = %d, want %d", len(decoded.TypeIfaces), len(result.Program.TypeIfaces))
-	}
-	if len(decoded.Symbols) != len(result.Program.Symbols) {
-		t.Fatalf("decoded symbols = %d, want %d", len(decoded.Symbols), len(result.Program.Symbols))
-	}
-	if len(decoded.DeclMeta) != len(result.Program.DeclMeta) {
-		t.Fatalf("decoded decl metadata = %d, want %d", len(decoded.DeclMeta), len(result.Program.DeclMeta))
-	}
-	if len(decoded.InitOrder) != len(result.Program.InitOrder) {
-		t.Fatalf("decoded init order = %d, want %d", len(decoded.InitOrder), len(result.Program.InitOrder))
-	}
-	if len(decoded.Consts) != len(result.Program.Consts) {
-		t.Fatalf("decoded consts = %d, want %d", len(decoded.Consts), len(result.Program.Consts))
-	}
-	if len(decoded.Signatures) != len(result.Program.Signatures) {
-		t.Fatalf("decoded signatures = %d, want %d", len(decoded.Signatures), len(result.Program.Signatures))
-	}
-	if len(decoded.TypeRefs) != len(result.Program.TypeRefs) {
-		t.Fatalf("decoded type refs = %d, want %d", len(decoded.TypeRefs), len(result.Program.TypeRefs))
-	}
-	if len(decoded.Locals) != len(result.Program.Locals) {
-		t.Fatalf("decoded locals = %d, want %d", len(decoded.Locals), len(result.Program.Locals))
-	}
-	if len(decoded.Refs) != len(result.Program.Refs) || len(decoded.Selectors) != len(result.Program.Selectors) {
-		t.Fatalf("decoded resolution = %d/%d, want %d/%d", len(decoded.Refs), len(decoded.Selectors), len(result.Program.Refs), len(result.Program.Selectors))
-	}
-}
-
-func TestEmitCheckedPackagePreservesStatements(t *testing.T) {
-	graph := loadTestGraph(t, []load.SourceFile{
-		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
-
-func appMain(total int) int {
-	if total == 0 {
-		return 1
-	} else {
-		total = total + 2
-	}
-	for total < 5 {
-		total += 1
-	}
-	switch total {
-	case 7:
-		goto done
-	default:
-		break
-	}
-done:
-	return total
-}
-`)},
-	})
-	prog := check.CheckGraph(graph)
-	if !prog.Ok {
-		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
-	}
-	result := EmitCheckedPackage(graph.Packages[0], prog.Packages[0])
-	if !result.Ok {
-		t.Fatalf("EmitCheckedPackage failed: err=%d file=%d tok=%d", result.Error, result.ErrorFile, result.ErrorToken)
-	}
-	appMain := findUnitFunc(result.Program, "appMain")
-	if appMain < 0 {
-		t.Fatalf("appMain not found in %#v", result.Program.Funcs)
-	}
-	assertUnitStatement(t, result.Program, appMain, unit.StmtIf, "total == 0")
-	assertUnitStatement(t, result.Program, appMain, unit.StmtFor, "total < 5")
-	assertUnitStatement(t, result.Program, appMain, unit.StmtSwitch, "total")
-	assertUnitStatement(t, result.Program, appMain, unit.StmtCase, "7")
-	assertUnitStatement(t, result.Program, appMain, unit.StmtDefault, "")
-	assertUnitStatement(t, result.Program, appMain, unit.StmtGoto, "done")
-	assertUnitStatement(t, result.Program, appMain, unit.StmtBreak, "")
-	assertUnitStatement(t, result.Program, appMain, unit.StmtLabel, "")
-	assertUnitStatement(t, result.Program, appMain, unit.StmtReturn, "total")
-
-	data, ok := unit.Marshal(result.Program)
-	if !ok {
-		t.Fatal("unit Marshal failed")
-	}
-	decoded, err := rtgunit.Unmarshal(data)
-	if err != nil {
-		t.Fatalf("host unit decode failed: %v", err)
-	}
-	if len(decoded.Stmts) != len(result.Program.Stmts) {
-		t.Fatalf("decoded statements = %d, want %d", len(decoded.Stmts), len(result.Program.Stmts))
-	}
-}
-
-func TestEmitCheckedPackageRejectsInvalidCheckedMetadata(t *testing.T) {
-	graph := loadTestGraph(t, []load.SourceFile{
-		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
-
-const first = 1
-const second = 2
-`)},
-	})
-	prog := check.CheckGraph(graph)
-	if !prog.Ok {
-		t.Fatalf("CheckGraph failed: err=%d pkg=%d file=%d tok=%d", prog.Error, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
-	}
-	info := prog.Packages[0]
-	info.DeclOrder[1] = info.DeclOrder[0]
-
-	result := EmitCheckedPackage(graph.Packages[0], info)
-	if result.Ok || result.Error != EmitErrCheck {
-		t.Fatalf("invalid metadata result = %#v", result)
-	}
-}
-
-func TestEmitPackagePreservesLinkStaticDirective(t *testing.T) {
-	graph := loadTestGraph(t, []load.SourceFile{
-		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
-
-// rtg:linkstatic libc,puts
-func puts(s string) int { return 0 }
-
-func appMain() int { return puts("PASS\n") }
-`)},
-	})
-	result := EmitRoot(graph)
-	if !result.Ok {
-		t.Fatalf("EmitRoot failed: err=%d file=%d tok=%d", result.Error, result.ErrorFile, result.ErrorToken)
-	}
-	if !bytes.Contains(result.Program.Text, []byte("// rtg:linkstatic libc,puts\nfunc puts")) {
-		t.Fatalf("linkstatic directive was not preserved: %q", string(result.Program.Text))
-	}
-	data, ok := unit.Marshal(result.Program)
-	if !ok {
-		t.Fatal("unit Marshal failed")
-	}
-	decoded, err := rtgunit.Unmarshal(data)
-	if err != nil {
-		t.Fatalf("host unit decode failed: %v", err)
-	}
-	if !bytes.Contains(decoded.Text, []byte("// rtg:linkstatic libc,puts\nfunc puts")) {
-		t.Fatalf("decoded text lost directive: %q", string(decoded.Text))
-	}
-}
-
-func TestEmitTokenKinds(t *testing.T) {
-	graph := loadTestGraph(t, []load.SourceFile{
-		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
-
-const whole = 1
-const fractional = 1.5
-const hex = 0x3e
-const imported = import
-
-func appMain() int {
-	if whole > 0 {
-		return whole
-	}
-	return 0
-}
-`)},
-	})
-	result := EmitRoot(graph)
-	if !result.Ok {
-		t.Fatalf("EmitRoot failed: err=%d file=%d tok=%d", result.Error, result.ErrorFile, result.ErrorToken)
-	}
-	foundFloat := false
-	foundHexNumber := false
-	foundImportIdent := false
-	foundIf := false
-	for i := 0; i < len(result.Program.Tokens); i++ {
-		tok := result.Program.Tokens[i]
-		text := string(result.Program.Text[tok.Start : tok.Start+tok.Size])
-		if text == "1.5" && tok.Kind == unit.TokenFloat {
-			foundFloat = true
-		}
-		if text == "0x3e" && tok.Kind == unit.TokenNumber {
-			foundHexNumber = true
-		}
-		if text == "import" && tok.Kind == unit.TokenIdent {
-			foundImportIdent = true
-		}
-		if text == "if" && tok.Kind == unit.TokenIf {
-			foundIf = true
+		t.Fatalf("EmitCheckedPackageCore failed: err=%d", result.Error)
+	}
+	program := result.Program
+	alpha := bytes.Index(program.Text, []byte("func alpha"))
+	zed := bytes.Index(program.Text, []byte("func zed"))
+	if alpha < 0 || zed <= alpha {
+		t.Fatalf("file order was not preserved: %q", program.Text)
+	}
+	if len(program.Funcs) != 2 {
+		t.Fatalf("function count = %d, want 2", len(program.Funcs))
+	}
+	for i := 0; i+1 < len(program.Tokens); i++ {
+		if program.Tokens[i].Kind == unit.TokenEOF {
+			t.Fatalf("file-local EOF leaked into token %d", i)
 		}
 	}
-	if !foundFloat {
-		t.Fatal("float literal was not emitted as unit.TokenFloat")
-	}
-	if !foundHexNumber {
-		t.Fatal("hex integer literal was not emitted as unit.TokenNumber")
-	}
-	if !foundImportIdent {
-		t.Fatal("unsupported import keyword was not downgraded to unit.TokenIdent")
-	}
-	if !foundIf {
-		t.Fatal("if keyword was not emitted as unit.TokenIf")
+	if got := program.Tokens[len(program.Tokens)-1].Start; got != len(program.Text) {
+		t.Fatalf("EOF start = %d, want %d", got, len(program.Text))
 	}
 }
 
-func TestEmitPackageRejectsInvalidPackage(t *testing.T) {
-	result := EmitPackage(load.Package{})
-	if result.Ok || result.Error != EmitErrPackage {
+func TestEmitCheckedPackageCoreRejectsInvalidInputs(t *testing.T) {
+	if result := EmitCheckedPackageCore(load.Package{}, check.PackageInfo{}, false); result.Ok || result.Error != EmitErrPackage {
 		t.Fatalf("empty package result = %#v", result)
 	}
+	graph := lowerTestGraph(t, []load.SourceFile{{
+		Path: "/repo/case/cmd/app/main.go",
+		Src:  []byte("package main\nfunc appMain() {}\n"),
+	}})
+	checked := check.CheckGraphCore(graph)
+	if !checked.Ok {
+		t.Fatalf("CheckGraphCore failed: %d", checked.Error)
+	}
+	info := checked.Packages[0]
+	info.Name = "wrong"
+	if result := EmitCheckedPackageCore(graph.Packages[0], info, false); result.Ok || result.Error != EmitErrCheck {
+		t.Fatalf("mismatched checker result = %#v", result)
+	}
 }
 
-func loadTestGraph(t *testing.T, files []load.SourceFile) load.Graph {
+func lowerTestGraph(t *testing.T, files []load.SourceFile) load.Graph {
 	t.Helper()
-	mod := load.Module{Root: "/repo/case", Path: "example.com/case", Ok: true}
-	graph := load.LoadGraph(mod, "/std", "/repo/case", "./cmd/app", files)
+	module := load.Module{Root: "/repo/case", Path: "example.com/case", Ok: true}
+	graph := load.LoadGraph(module, "/std", "/repo/case", "./cmd/app", files)
 	if !graph.Ok {
-		t.Fatalf("LoadGraph failed: err=%d pkg=%d graph=%#v", graph.Error, graph.ErrorPackage, graph)
+		t.Fatalf("LoadGraph failed: err=%d pkg=%d", graph.Error, graph.ErrorPackage)
 	}
 	return graph
 }
 
-func findGraphPackage(graph load.Graph, importPath string) int {
+func lowerRootPackage(t *testing.T, graph load.Graph) int {
+	t.Helper()
 	for i := 0; i < len(graph.Packages); i++ {
-		if graph.Packages[i].Ref.ImportPath == importPath {
+		if graph.Packages[i].Ref.ImportPath == graph.Root {
 			return i
 		}
 	}
+	t.Fatal("root package not found")
 	return -1
 }
 
-func tokenText(program rtgunit.Program, index int) string {
-	if index < 0 || index*8+8 > len(program.Tokens) {
+func lowerTokenText(program unit.Program, index int) string {
+	if index < 0 || index >= len(program.Tokens) {
 		return ""
 	}
-	pos := index * 8
-	start := int(program.Tokens[pos+1]) | int(program.Tokens[pos+2])<<8 | int(program.Tokens[pos+3])<<16
-	size := int(program.Tokens[pos+4])
-	if int(program.Tokens[pos]) != unit.TokenOp {
-		size = size | int(program.Tokens[pos+5])<<8
-	}
-	if start < 0 || size < 0 || start+size > len(program.Text) {
-		return ""
-	}
-	return string(program.Text[start : start+size])
+	tok := program.Tokens[index]
+	return lowerSpanText(program, tok.Start, tok.Start+tok.Size)
 }
 
-func declName(program unit.Program, index int) string {
-	if index < 0 || index >= len(program.Decls) {
-		return ""
-	}
-	decl := program.Decls[index]
-	if decl.NameStart < 0 || decl.NameEnd > len(program.Text) || decl.NameEnd < decl.NameStart {
-		return ""
-	}
-	return string(program.Text[decl.NameStart:decl.NameEnd])
-}
-
-func funcName(program unit.Program, index int) string {
-	if index < 0 || index >= len(program.Funcs) {
-		return ""
-	}
-	fn := program.Funcs[index]
-	if fn.NameStart < 0 || fn.NameEnd > len(program.Text) || fn.NameEnd < fn.NameStart {
-		return ""
-	}
-	return string(program.Text[fn.NameStart:fn.NameEnd])
-}
-
-func findUnitDecl(program unit.Program, name string) int {
-	for i := 0; i < len(program.Decls); i++ {
-		if declName(program, i) == name {
-			return i
-		}
-	}
-	return -1
-}
-
-func findUnitFunc(program unit.Program, name string) int {
-	for i := 0; i < len(program.Funcs); i++ {
-		if funcName(program, i) == name {
-			return i
-		}
-	}
-	return -1
-}
-
-func assertUnitIndex(t *testing.T, program unit.Program, ownerKind int, ownerIndex int, base string, indexText string) {
-	t.Helper()
-	for i := 0; i < len(program.Indexes); i++ {
-		index := program.Indexes[i]
-		if index.OwnerKind != ownerKind || index.OwnerIndex != ownerIndex {
-			continue
-		}
-		if unitSpanText(program, index.BaseStart, index.BaseEnd) == base && unitSpanText(program, index.IndexStart, index.IndexEnd) == indexText {
-			return
-		}
-	}
-	t.Fatalf("index owner=%d/%d %s[%s] not found in %#v", ownerKind, ownerIndex, base, indexText, program.Indexes)
-}
-
-func assertUnitComposite(t *testing.T, program unit.Program, ownerKind int, ownerIndex int, typ string, elems []string) {
-	t.Helper()
-	for i := 0; i < len(program.Composites); i++ {
-		composite := program.Composites[i]
-		if composite.OwnerKind != ownerKind || composite.OwnerIndex != ownerIndex {
-			continue
-		}
-		if unitSpanText(program, composite.TypeStart, composite.TypeEnd) == typ {
-			if len(composite.Elems) != len(elems) {
-				t.Fatalf("composite %s elems = %#v, want %v", typ, composite.Elems, elems)
-			}
-			for j := 0; j < len(elems); j++ {
-				if got := unitSpanText(program, composite.Elems[j].StartTok, composite.Elems[j].EndTok); got != elems[j] {
-					t.Fatalf("composite %s elem %d = %q, want %q", typ, j, got, elems[j])
-				}
-			}
-			return
-		}
-	}
-	t.Fatalf("composite owner=%d/%d %s not found in %#v", ownerKind, ownerIndex, typ, program.Composites)
-}
-
-func assertUnitType(t *testing.T, program unit.Program, name string, kind int, decl int, typeText string, lenText string, keyText string, elemText string) {
-	t.Helper()
-	for i := 0; i < len(program.Types); i++ {
-		typ := program.Types[i]
-		if unitText(program, typ.NameStart, typ.NameEnd) != name || typ.Kind != kind || typ.Decl != decl {
-			continue
-		}
-		if unitSpanText(program, typ.TypeStart, typ.TypeEnd) != typeText {
-			t.Fatalf("type %s span = %q, want %q", name, unitSpanText(program, typ.TypeStart, typ.TypeEnd), typeText)
-		}
-		if unitSpanText(program, typ.LenStart, typ.LenEnd) != lenText {
-			t.Fatalf("type %s length span = %q, want %q", name, unitSpanText(program, typ.LenStart, typ.LenEnd), lenText)
-		}
-		if unitSpanText(program, typ.KeyStart, typ.KeyEnd) != keyText {
-			t.Fatalf("type %s key span = %q, want %q", name, unitSpanText(program, typ.KeyStart, typ.KeyEnd), keyText)
-		}
-		if unitSpanText(program, typ.ElemStart, typ.ElemEnd) != elemText {
-			t.Fatalf("type %s element span = %q, want %q", name, unitSpanText(program, typ.ElemStart, typ.ElemEnd), elemText)
-		}
-		return
-	}
-	t.Fatalf("type name=%s kind=%d decl=%d not found in %#v", name, kind, decl, program.Types)
-}
-
-func assertUnitTypeFields(t *testing.T, program unit.Program, decl int, want []string) {
-	t.Helper()
-	typeIndex := -1
-	for i := 0; i < len(program.Types); i++ {
-		if program.Types[i].Decl == decl {
-			typeIndex = i
-			break
-		}
-	}
-	if typeIndex < 0 {
-		t.Fatalf("type decl=%d not found in %#v", decl, program.Types)
-	}
-	for i := 0; i < len(program.TypeFields); i++ {
-		fields := program.TypeFields[i]
-		if fields.TypeIndex == typeIndex {
-			assertUnitFields(t, program, fields.Fields, want)
-			return
-		}
-	}
-	t.Fatalf("type fields for type=%d not found in %#v", typeIndex, program.TypeFields)
-}
-
-func assertUnitTypeInterface(t *testing.T, program unit.Program, decl int, embeds []string, method string, params []string, results []string) {
-	t.Helper()
-	typeIndex := -1
-	for i := 0; i < len(program.Types); i++ {
-		if program.Types[i].Decl == decl {
-			typeIndex = i
-			break
-		}
-	}
-	if typeIndex < 0 {
-		t.Fatalf("type decl=%d not found in %#v", decl, program.Types)
-	}
-	for i := 0; i < len(program.TypeIfaces); i++ {
-		iface := program.TypeIfaces[i]
-		if iface.TypeIndex != typeIndex {
-			continue
-		}
-		if len(iface.Embeds) != len(embeds) {
-			t.Fatalf("interface embeds = %#v, want %v", iface.Embeds, embeds)
-		}
-		for j := 0; j < len(embeds); j++ {
-			got := unitSpanText(program, iface.Embeds[j].TypeStart, iface.Embeds[j].TypeEnd)
-			if got != embeds[j] {
-				t.Fatalf("interface embed %d = %q, want %q", j, got, embeds[j])
-			}
-		}
-		for j := 0; j < len(iface.Methods); j++ {
-			m := iface.Methods[j]
-			if tokenTextUnit(program, m.NameTok) == method {
-				assertUnitFields(t, program, m.Params, params)
-				assertUnitFields(t, program, m.Results, results)
-				return
-			}
-		}
-		t.Fatalf("interface method %s not found in %#v", method, iface.Methods)
-	}
-	t.Fatalf("interface row for type=%d not found in %#v", typeIndex, program.TypeIfaces)
-}
-
-func assertUnitTypeFunc(t *testing.T, program unit.Program, decl int, params []string, results []string) {
-	t.Helper()
-	typeIndex := -1
-	for i := 0; i < len(program.Types); i++ {
-		if program.Types[i].Decl == decl {
-			typeIndex = i
-			break
-		}
-	}
-	if typeIndex < 0 {
-		t.Fatalf("type decl=%d not found in %#v", decl, program.Types)
-	}
-	for i := 0; i < len(program.TypeFuncs); i++ {
-		fn := program.TypeFuncs[i]
-		if fn.TypeIndex == typeIndex {
-			assertUnitFields(t, program, fn.Params, params)
-			assertUnitFields(t, program, fn.Results, results)
-			return
-		}
-	}
-	t.Fatalf("function type row for type=%d not found in %#v", typeIndex, program.TypeFuncs)
-}
-
-func assertUnitMethod(t *testing.T, program unit.Program, decl int, name string, pointer bool, funcIndex int) {
-	t.Helper()
-	typeIndex := -1
-	typeName := ""
-	for i := 0; i < len(program.Types); i++ {
-		if program.Types[i].Decl == decl {
-			typeIndex = i
-			typeName = unitText(program, program.Types[i].NameStart, program.Types[i].NameEnd)
-			break
-		}
-	}
-	if typeIndex < 0 {
-		t.Fatalf("type decl=%d not found in %#v", decl, program.Types)
-	}
-	for i := 0; i < len(program.Methods); i++ {
-		method := program.Methods[i]
-		if method.TypeIndex != typeIndex || method.FuncIndex != funcIndex || method.Pointer != pointer || tokenTextUnit(program, method.NameTok) != name {
-			continue
-		}
-		if method.Symbol < 0 || method.Symbol >= len(program.Symbols) {
-			t.Fatalf("method %s symbol = %d in %#v", name, method.Symbol, program.Symbols)
-		}
-		symbol := program.Symbols[method.Symbol]
-		if symbol.Kind != unit.SymbolMethod || symbol.Name != typeName+"."+name || symbol.OwnerKind != unit.OwnerFunc || symbol.OwnerIndex != funcIndex {
-			t.Fatalf("method %s symbol row = %#v, type %s func %d", name, symbol, typeName, funcIndex)
-		}
-		return
-	}
-	t.Fatalf("method %s pointer=%v func=%d type=%d not found in %#v", name, pointer, funcIndex, typeIndex, program.Methods)
-}
-
-func assertUnitSymbol(t *testing.T, program unit.Program, name string, kind int, ownerKind int, ownerIndex int) int {
-	t.Helper()
-	for i := 0; i < len(program.Symbols); i++ {
-		symbol := program.Symbols[i]
-		if symbol.Name == name && symbol.Kind == kind && symbol.OwnerKind == ownerKind && symbol.OwnerIndex == ownerIndex {
-			if tokenTextUnit(program, symbol.Token) == "" {
-				t.Fatalf("symbol %s token text is empty: %#v", name, symbol)
-			}
-			return i
-		}
-	}
-	t.Fatalf("symbol %s kind=%d owner=%d/%d not found in %#v", name, kind, ownerKind, ownerIndex, program.Symbols)
-	return -1
-}
-
-func assertUnitDeclMeta(t *testing.T, program unit.Program, declIndex int, symbol int, typ string, value string, values []string, alias bool) {
-	t.Helper()
-	for i := 0; i < len(program.DeclMeta); i++ {
-		meta := program.DeclMeta[i]
-		if meta.DeclIndex != declIndex || meta.Symbol != symbol || meta.Alias != alias {
-			continue
-		}
-		if unitSpanText(program, meta.TypeStart, meta.TypeEnd) != typ {
-			t.Fatalf("decl meta %d type = %q, want %q", declIndex, unitSpanText(program, meta.TypeStart, meta.TypeEnd), typ)
-		}
-		if unitSpanText(program, meta.ValueStart, meta.ValueEnd) != value {
-			t.Fatalf("decl meta %d value = %q, want %q", declIndex, unitSpanText(program, meta.ValueStart, meta.ValueEnd), value)
-		}
-		if len(meta.Values) != len(values) {
-			t.Fatalf("decl meta %d values = %#v, want %v", declIndex, meta.Values, values)
-		}
-		for j := 0; j < len(values); j++ {
-			if got := unitSpanText(program, meta.Values[j].StartTok, meta.Values[j].EndTok); got != values[j] {
-				t.Fatalf("decl meta %d value %d = %q, want %q", declIndex, j, got, values[j])
-			}
-		}
-		return
-	}
-	t.Fatalf("decl metadata index=%d symbol=%d alias=%v not found in %#v", declIndex, symbol, alias, program.DeclMeta)
-}
-
-func assertUnitInitOrder(t *testing.T, program unit.Program, want []int) {
-	t.Helper()
-	if len(program.InitOrder) != len(want) {
-		t.Fatalf("init order = %#v, want %#v", program.InitOrder, want)
-	}
-	for i := 0; i < len(want); i++ {
-		if program.InitOrder[i] != want[i] {
-			t.Fatalf("init order = %#v, want %#v", program.InitOrder, want)
-		}
-	}
-}
-
-func assertUnitConstInt(t *testing.T, program unit.Program, declIndex int, value int) {
-	t.Helper()
-	for i := 0; i < len(program.Consts); i++ {
-		c := program.Consts[i]
-		if c.DeclIndex == declIndex && c.Kind == unit.ConstInt && c.Int == value {
-			return
-		}
-	}
-	t.Fatalf("const int decl=%d value=%d not found in %#v", declIndex, value, program.Consts)
-}
-
-func assertUnitConstString(t *testing.T, program unit.Program, declIndex int, value string) {
-	t.Helper()
-	for i := 0; i < len(program.Consts); i++ {
-		c := program.Consts[i]
-		if c.DeclIndex == declIndex && c.Kind == unit.ConstString && c.String == value {
-			return
-		}
-	}
-	t.Fatalf("const string decl=%d value=%q not found in %#v", declIndex, value, program.Consts)
-}
-
-func assertUnitConstBool(t *testing.T, program unit.Program, declIndex int, value bool) {
-	t.Helper()
-	for i := 0; i < len(program.Consts); i++ {
-		c := program.Consts[i]
-		if c.DeclIndex == declIndex && c.Kind == unit.ConstBool && c.Bool == value {
-			return
-		}
-	}
-	t.Fatalf("const bool decl=%d value=%v not found in %#v", declIndex, value, program.Consts)
-}
-
-func assertUnitImport(t *testing.T, program unit.Program, name string, importPath string, dot bool, blank bool) {
-	t.Helper()
-	for i := 0; i < len(program.Imports); i++ {
-		imp := program.Imports[i]
-		if imp.Name != name || imp.ImportPath != importPath || imp.Dot != dot || imp.Blank != blank {
-			continue
-		}
-		if imp.Package < 0 {
-			t.Fatalf("import %s package = %d", importPath, imp.Package)
-		}
-		if tokenTextUnit(program, imp.PathTok) != `"`+importPath+`"` {
-			t.Fatalf("import %s path token = %q", importPath, tokenTextUnit(program, imp.PathTok))
-		}
-		if name != "." && name != "_" && imp.NameTok >= 0 && tokenTextUnit(program, imp.NameTok) != name {
-			t.Fatalf("import %s name token = %q", importPath, tokenTextUnit(program, imp.NameTok))
-		}
-		return
-	}
-	t.Fatalf("import %s %s not found in %#v", name, importPath, program.Imports)
-}
-
-func assertUnitSignature(t *testing.T, program unit.Program, funcIndex int, receiver []string, params []string, results []string) {
-	t.Helper()
-	for i := 0; i < len(program.Signatures); i++ {
-		sig := program.Signatures[i]
-		if sig.FuncIndex != funcIndex {
-			continue
-		}
-		assertUnitFields(t, program, sig.Receiver, receiver)
-		assertUnitFields(t, program, sig.Params, params)
-		assertUnitFields(t, program, sig.Results, results)
-		return
-	}
-	t.Fatalf("signature func=%d not found in %#v", funcIndex, program.Signatures)
-}
-
-func assertUnitStatement(t *testing.T, program unit.Program, funcIndex int, kind int, expr string) {
-	t.Helper()
-	for i := 0; i < len(program.Stmts); i++ {
-		stmt := program.Stmts[i]
-		if stmt.FuncIndex != funcIndex || stmt.Kind != kind {
-			continue
-		}
-		if unitSpanText(program, stmt.ExprStart, stmt.ExprEnd) != expr {
-			continue
-		}
-		if stmt.StartTok < 0 || stmt.EndTok < stmt.StartTok {
-			t.Fatalf("statement kind=%d has invalid span: %#v", kind, stmt)
-		}
-		return
-	}
-	t.Fatalf("statement func=%d kind=%d expr=%q not found in %#v", funcIndex, kind, expr, program.Stmts)
-}
-
-func assertUnitFields(t *testing.T, program unit.Program, fields []unit.Field, want []string) {
-	t.Helper()
-	if len(fields) != len(want) {
-		t.Fatalf("fields = %#v, want %v", fields, want)
-	}
-	for i := 0; i < len(want); i++ {
-		got := tokenTextUnit(program, fields[i].NameTok) + ":" + unitSpanText(program, fields[i].TypeStart, fields[i].TypeEnd)
-		if got != want[i] {
-			t.Fatalf("field %d = %q, want %q in %#v", i, got, want[i], fields)
-		}
-	}
-}
-
-func assertUnitTypeRef(t *testing.T, program unit.Program, ownerKind int, ownerIndex int, kind int, base string, name string) {
-	t.Helper()
-	for i := 0; i < len(program.TypeRefs); i++ {
-		ref := program.TypeRefs[i]
-		if ref.OwnerKind == ownerKind && ref.OwnerIndex == ownerIndex && ref.Kind == kind &&
-			tokenTextUnit(program, ref.BaseTok) == base && tokenTextUnit(program, ref.Token) == name {
-			return
-		}
-	}
-	t.Fatalf("type ref owner=%d/%d kind=%d %s.%s not found in %#v", ownerKind, ownerIndex, kind, base, name, program.TypeRefs)
-}
-
-func assertUnitLocal(t *testing.T, program unit.Program, funcIndex int, kind int, name string, typ string, value string, values []string, alias bool) {
-	t.Helper()
-	for i := 0; i < len(program.Locals); i++ {
-		local := program.Locals[i]
-		if local.FuncIndex != funcIndex || local.Kind != kind || unitText(program, local.NameStart, local.NameEnd) != name || local.Alias != alias {
-			continue
-		}
-		if unitSpanText(program, local.TypeStart, local.TypeEnd) != typ {
-			t.Fatalf("local %s type = %q, want %q", name, unitSpanText(program, local.TypeStart, local.TypeEnd), typ)
-		}
-		if unitSpanText(program, local.ValueStart, local.ValueEnd) != value {
-			t.Fatalf("local %s value = %q, want %q", name, unitSpanText(program, local.ValueStart, local.ValueEnd), value)
-		}
-		if len(local.Values) != len(values) {
-			t.Fatalf("local %s values = %#v, want %v", name, local.Values, values)
-		}
-		for j := 0; j < len(values); j++ {
-			if got := unitSpanText(program, local.Values[j].StartTok, local.Values[j].EndTok); got != values[j] {
-				t.Fatalf("local %s value %d = %q, want %q", name, j, got, values[j])
-			}
-		}
-		return
-	}
-	t.Fatalf("local func=%d kind=%d name=%s not found in %#v", funcIndex, kind, name, program.Locals)
-}
-
-func assertUnitAssign(t *testing.T, program unit.Program, funcIndex int, kind int, left string, right string) {
-	t.Helper()
-	for i := 0; i < len(program.Assigns); i++ {
-		assign := program.Assigns[i]
-		if assign.FuncIndex != funcIndex || assign.Kind != kind {
-			continue
-		}
-		if unitSpanText(program, assign.LeftStart, assign.LeftEnd) == left && unitSpanText(program, assign.RightStart, assign.RightEnd) == right {
-			return
-		}
-	}
-	t.Fatalf("assignment func=%d kind=%d %s = %s not found in %#v", funcIndex, kind, left, right, program.Assigns)
-}
-
-func assertUnitReturn(t *testing.T, program unit.Program, funcIndex int, values []string) {
-	t.Helper()
-	for i := 0; i < len(program.Returns); i++ {
-		ret := program.Returns[i]
-		if ret.FuncIndex != funcIndex {
-			continue
-		}
-		if len(ret.Values) != len(values) {
-			continue
-		}
-		matched := true
-		for j := 0; j < len(values); j++ {
-			if unitSpanText(program, ret.Values[j].StartTok, ret.Values[j].EndTok) != values[j] {
-				matched = false
-			}
-		}
-		if matched {
-			return
-		}
-	}
-	t.Fatalf("return func=%d values=%v not found in %#v", funcIndex, values, program.Returns)
-}
-
-func assertUnitCall(t *testing.T, program unit.Program, ownerKind int, ownerIndex int, kind int, base string, callee string, args []string) {
-	t.Helper()
-	for i := 0; i < len(program.Calls); i++ {
-		call := program.Calls[i]
-		if call.OwnerKind != ownerKind || call.OwnerIndex != ownerIndex || call.Kind != kind {
-			continue
-		}
-		if tokenTextUnit(program, call.BaseTok) != base || tokenTextUnit(program, call.CalleeTok) != callee {
-			continue
-		}
-		if len(call.Args) != len(args) {
-			continue
-		}
-		matched := true
-		for j := 0; j < len(args); j++ {
-			if unitSpanText(program, call.Args[j].StartTok, call.Args[j].EndTok) != args[j] {
-				matched = false
-			}
-		}
-		if matched {
-			return
-		}
-	}
-	t.Fatalf("call owner=%d/%d %s.%s args=%v not found in %#v", ownerKind, ownerIndex, base, callee, args, program.Calls)
-}
-
-func assertUnitRef(t *testing.T, program unit.Program, ownerKind int, ownerIndex int, kind int, name string) {
-	t.Helper()
-	for i := 0; i < len(program.Refs); i++ {
-		ref := program.Refs[i]
-		if ref.OwnerKind == ownerKind && ref.OwnerIndex == ownerIndex && ref.Kind == kind && tokenTextUnit(program, ref.Token) == name {
-			return
-		}
-	}
-	t.Fatalf("ref owner=%d/%d kind=%d name=%s not found in %#v", ownerKind, ownerIndex, kind, name, program.Refs)
-}
-
-func tokenTextUnit(program unit.Program, tok int) string {
-	if tok < 0 || tok >= len(program.Tokens) {
-		return ""
-	}
-	token := program.Tokens[tok]
-	if token.Kind == unit.TokenEOF || token.Size == 0 {
-		return ""
-	}
-	if token.Start < 0 || token.Start+token.Size > len(program.Text) {
-		return ""
-	}
-	return string(program.Text[token.Start : token.Start+token.Size])
-}
-
-func unitText(program unit.Program, start int, end int) string {
-	if start < 0 || end < start || end > len(program.Text) {
-		return ""
-	}
-	return string(program.Text[start:end])
-}
-
-func unitSpanText(program unit.Program, startTok int, endTok int) string {
-	if startTok < 0 || endTok <= startTok || endTok > len(program.Tokens) {
-		return ""
-	}
-	start := program.Tokens[startTok].Start
-	last := program.Tokens[endTok-1]
-	end := last.Start + last.Size
+func lowerSpanText(program unit.Program, start int, end int) string {
 	if start < 0 || end < start || end > len(program.Text) {
 		return ""
 	}

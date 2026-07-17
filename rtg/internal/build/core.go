@@ -1,10 +1,12 @@
 package build
 
 import (
+	"j5.nz/rtg/rtg/internal/arena"
 	"j5.nz/rtg/rtg/internal/check"
 	"j5.nz/rtg/rtg/internal/load"
 	"j5.nz/rtg/rtg/internal/lower"
 	"j5.nz/rtg/rtg/internal/semantic"
+	"j5.nz/rtg/rtg/internal/unit"
 )
 
 const (
@@ -15,11 +17,44 @@ const (
 	BuildErrRoot
 )
 
+type PackageUnit struct {
+	ImportPath string
+	Name       string
+	Program    unit.Program
+	ArenaStart int
+	ArenaEnd   int
+}
+
+type Result struct {
+	Units        []PackageUnit
+	Root         int
+	Ok           bool
+	Error        int
+	ErrorPackage int
+	ErrorFile    int
+	ErrorToken   int
+	ErrorDetail  int
+}
+
+func BuildUnits(graph load.Graph) Result {
+	return buildProgramsCore(graph, false)
+}
+
+func BuildPrograms(graph load.Graph) Result {
+	return buildProgramsCore(graph, false)
+}
+
+// BuildProgramsTransient releases parsed and checked package storage after
+// each lowered unit has taken ownership of the data needed by the linker.
+func BuildProgramsTransient(graph load.Graph) Result {
+	return buildProgramsCore(graph, true)
+}
+
 func buildProgramsCore(graph load.Graph, transient bool) Result {
 	semantic.LowerInterfaces(&graph)
-	headerStart := markCoreBuildArena()
+	headerStart := arena.Mark()
 	prog := check.CheckGraphHeadersCore(graph)
-	headerEnd := markCoreBuildArena()
+	headerEnd := arena.Mark()
 	result := Result{
 		Root:         -1,
 		Ok:           true,
@@ -28,40 +63,46 @@ func buildProgramsCore(graph load.Graph, transient bool) Result {
 		ErrorFile:    -1,
 		ErrorToken:   -1,
 	}
-	result = retainCoreCheckResult(result, prog)
 	if !prog.Ok {
 		result.ErrorDetail = prog.Error
 		return buildFail(result, BuildErrCheck, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
 	}
 	for i := 0; i < len(graph.Packages); i++ {
 		prog = check.CheckGraphPackageCore(graph, prog, i)
-		result = retainCoreCheckResult(result, prog)
 		if !prog.Ok {
 			result.ErrorDetail = prog.Error
 			return buildFail(result, BuildErrCheck, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
 		}
 		pkg := graph.Packages[i]
-		unitStart := markCoreBuildArena()
+		unitStart := arena.Mark()
 		emit := lower.EmitCheckedPackageCore(pkg, prog.Packages[i], transient)
-		unitEnd := markCoreBuildArena()
+		unitEnd := arena.Mark()
 		if !emit.Ok {
 			result.ErrorDetail = emit.Error
-			result = retainCoreLowerError(result, emit)
 			return buildFail(result, BuildErrLower, i, emit.ErrorFile, emit.ErrorToken)
 		}
 		if pkg.Ref.ImportPath == graph.Root {
 			result.Root = len(result.Units)
 		}
-		result.Units = append(result.Units, makeCorePackageUnit(emit.Program, unitStart, unitEnd))
+		result.Units = append(result.Units, PackageUnit{
+			ImportPath: emit.Program.ImportPath,
+			Name:       emit.Program.Package,
+			Program:    emit.Program,
+			ArenaStart: unitStart,
+			ArenaEnd:   unitEnd,
+		})
 		if transient {
-			discardCorePackageSources(pkg)
+			for j := 0; j < len(pkg.Files); j++ {
+				arena.Discard(pkg.Files[j].ArenaStart, pkg.Files[j].ArenaEnd)
+			}
+			arena.Discard(pkg.CoreArenaStart, pkg.CoreArenaEnd)
 		}
 	}
 	if result.Root < 0 {
 		return buildFail(result, BuildErrRoot, -1, -1, -1)
 	}
 	if transient {
-		discardCoreBuildArena(headerStart, headerEnd)
+		arena.Discard(headerStart, headerEnd)
 	}
 	return result
 }
