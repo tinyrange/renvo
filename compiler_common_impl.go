@@ -6286,6 +6286,14 @@ func rtgAsmJgeStackStack(a *rtgAsm, left int, right int, label int) {
 	rtgAsmJnzLabel(a, label)
 }
 
+func rtgAsmJltStackStack(a *rtgAsm, left int, right int, label int) {
+	notLess := rtgAsmNewLabel(a)
+	rtgAsmJgeStackStack(a, left, right, notLess)
+	rtgAsmIncPrimary(a)
+	rtgAsmJmpLabel(a, label)
+	rtgAsmMarkLabel(a, notLess)
+}
+
 func rtgAsmAddressPrimaryStack(a *rtgAsm, offset int) {
 	rtgAsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
 }
@@ -10501,7 +10509,7 @@ func rtgEmitSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 				return false
 			}
 		}
-		if e.firstArg >= 0 || e.nameStart >= 0 {
+		if e.firstArg >= 0 || e.nameStart >= 0 || arrayType.kind == rtgTypeArray && e.right >= 0 {
 			elemSize := rtgTypeSize(meta, arrayType.elem)
 			if elemSize < 1 {
 				elemSize = 8
@@ -10534,6 +10542,18 @@ func rtgEmitSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 				rtgAsmStorePrimaryStack(a, maxOff)
 			} else {
 				rtgAsmCopyStackSlot(a, baseOff-16, maxOff)
+			}
+			if arrayType.kind == rtgTypeArray {
+				invalid := rtgAsmNewLabel(a)
+				done := rtgAsmNewLabel(a)
+				rtgEmitStackLessImmJump(g, lowOff, 0, invalid)
+				rtgAsmJltStackStack(a, highOff, lowOff, invalid)
+				rtgAsmJltStackStack(a, maxOff, highOff, invalid)
+				rtgAsmJltStackStack(a, baseOff-16, maxOff, invalid)
+				rtgAsmJmpLabel(a, done)
+				rtgAsmMarkLabel(a, invalid)
+				rtgEmitRuntimeFault(g)
+				rtgAsmMarkLabel(a, done)
 			}
 			rtgAsmLoadPrimaryStack(a, maxOff)
 			rtgAsmLoadTertiaryStack(a, lowOff)
@@ -10665,6 +10685,7 @@ func rtgEmitSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	}
 	return false
 }
+
 func rtgEmitStringSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	meta := g.meta
 	a := &g.asm
@@ -11696,11 +11717,15 @@ func rtgEmitBuiltinPanic(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		return false
 	}
 	argIndex := ep.args[e.firstArg]
-	if g.deferReturnLabel <= 0 {
-		return false
-	}
 	valueOffset := rtgAddUnnamedLocal(g, rtgBuiltinTypeInterface)
 	if !rtgEmitInterfaceAssignToLocal(g, ep, argIndex, valueOffset) {
+		return false
+	}
+	return rtgEmitPanicState(g, valueOffset)
+}
+
+func rtgEmitPanicState(g *rtgLinearGen, valueOffset int) bool {
+	if g.deferReturnLabel <= 0 {
 		return false
 	}
 	noPrevious := rtgAsmNewLabel(&g.asm)
@@ -11719,9 +11744,17 @@ func rtgEmitBuiltinPanic(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	rtgAsmLoadPrimaryStack(&g.asm, nodeOffset)
 	rtgAsmStorePrimaryBss(&g.asm, g.panicPrevOff)
 	rtgAsmMarkLabel(&g.asm, noPrevious)
-	rtgAsmLoadPrimaryStack(&g.asm, valueOffset)
+	if valueOffset > 0 {
+		rtgAsmLoadPrimaryStack(&g.asm, valueOffset)
+	} else {
+		rtgAsmPrimaryImm(&g.asm, 1)
+	}
 	rtgAsmStorePrimaryBss(&g.asm, g.panicValueOff)
-	rtgAsmLoadPrimaryStack(&g.asm, valueOffset-rtgBackendValueSlotSize)
+	if valueOffset > 0 {
+		rtgAsmLoadPrimaryStack(&g.asm, valueOffset-rtgBackendValueSlotSize)
+	} else {
+		rtgAsmPrimaryImm(&g.asm, rtgTypeInt)
+	}
 	rtgAsmStorePrimaryBss(&g.asm, g.panicTypeOff)
 	rtgAsmLoadPrimaryBss(&g.asm, g.panicNextIDOff)
 	rtgAsmIncPrimary(&g.asm)
@@ -11731,6 +11764,14 @@ func rtgEmitBuiltinPanic(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	rtgAsmStorePrimaryBss(&g.asm, g.panicRecoveredOff)
 	rtgAsmJmpLabel(&g.asm, g.deferReturnLabel)
 	return true
+}
+
+func rtgEmitRuntimeFault(g *rtgLinearGen) {
+	if g.meta.panicEnabled {
+		rtgEmitPanicState(g, 0)
+	} else {
+		rtgEmitExitStatus(g)
+	}
 }
 
 func rtgEmitBuiltinRecover(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
