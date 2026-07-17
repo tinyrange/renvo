@@ -18,39 +18,19 @@ func invalidDefiniteSliceOperand(pkg load.Package, info PackageInfo, fileIndex i
 		if close <= open || close > fn.BodyEnd || findTypeTopLevelChar(file, open+1, close-1, ':') < 0 {
 			continue
 		}
-		baseStart := exprOperandStartBefore(file, fn.BodyStart+1, open)
-		baseStart, baseEnd := unwrapDefiniteSliceOperand(file, baseStart, open)
-		if definiteArrayComposite(pkg, info, fileIndex, file, baseStart, baseEnd) || definiteArrayCall(pkg, info, fileIndex, file, baseStart, baseEnd) {
+		baseStart, baseEnd := stripOuterParens(file, exprOperandStartBefore(file, fn.BodyStart+1, open), open)
+		if definiteUnaddressableArray(pkg, info, fileIndex, file, baseStart, baseEnd) {
 			return open
 		}
 	}
 	return -1
 }
 
-func unwrapDefiniteSliceOperand(file syntax.File, start int, end int) (int, int) {
-	for start < end && tokCharIs(&file, start, '(') && tokCharIs(&file, end-1, ')') {
-		close := findTypeMatching(file, start, '(', ')')
-		if close != end {
-			break
-		}
-		start++
-		end--
+func definiteUnaddressableArray(pkg load.Package, info PackageInfo, fileIndex int, file syntax.File, start int, end int) bool {
+	if start < end && tokCharIs(&file, end-1, '}') {
+		open := findTypeTopLevelChar(file, start, end, '{')
+		return open > start && definiteTypeSpanIsArray(pkg, info, fileIndex, start, open, 0)
 	}
-	return start, end
-}
-
-func definiteArrayComposite(pkg load.Package, info PackageInfo, fileIndex int, file syntax.File, start int, end int) bool {
-	if start >= end || !tokCharIs(&file, end-1, '}') {
-		return false
-	}
-	open := matchingOpenBefore(file, end-1, '{', '}')
-	if open <= start {
-		return false
-	}
-	return definiteTypeSpanIsArray(pkg, info, fileIndex, start, open, 0)
-}
-
-func definiteArrayCall(pkg load.Package, info PackageInfo, fileIndex int, file syntax.File, start int, end int) bool {
 	if end-start < 3 || file.Tokens[start].Kind != syntax.TokenIdent || !tokCharIs(&file, start+1, '(') || findTypeMatching(file, start+1, '(', ')') != end {
 		return false
 	}
@@ -63,8 +43,7 @@ func definiteArrayCall(pkg load.Package, info PackageInfo, fileIndex int, file s
 	if len(signature.Results) != 1 {
 		return false
 	}
-	result := signature.Results[0]
-	return definiteTypeSpanIsArray(pkg, info, calleeFileIndex, result.TypeStart, result.TypeEnd, 0)
+	return definiteTypeSpanIsArray(pkg, info, calleeFileIndex, signature.Results[0].TypeStart, signature.Results[0].TypeEnd, 0)
 }
 
 func definiteTypeSpanIsArray(pkg load.Package, info PackageInfo, fileIndex int, start int, end int, depth int) bool {
@@ -89,19 +68,4 @@ func definiteTypeSpanIsArray(pkg load.Package, info PackageInfo, fileIndex int, 
 	}
 	typ := info.Types[typeIndex]
 	return definiteTypeSpanIsArray(pkg, info, typ.File, typ.TypeStart, typ.TypeEnd, depth+1)
-}
-
-func matchingOpenBefore(file syntax.File, close int, left byte, right byte) int {
-	depth := 0
-	for i := close; i >= 0; i-- {
-		if tokCharIs(&file, i, right) {
-			depth++
-		} else if tokCharIs(&file, i, left) {
-			depth--
-			if depth == 0 {
-				return i
-			}
-		}
-	}
-	return -1
 }

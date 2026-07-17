@@ -9747,14 +9747,11 @@ func rtgInferParsedExprTypeUncached(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 	if e.kind == rtgExprSlice {
 		baseType := rtgInferParsedExprType(g, ep, e.left)
 		base := rtgResolveType(meta, baseType)
+		if base.kind == rtgTypePointer {
+			base = rtgResolveType(meta, base.elem)
+		}
 		if base.kind == rtgTypeArray {
 			return rtgAddType(meta, rtgTypeSlice, base.elem, 0, 0, rtgBackendSliceValueSize, 0, 0)
-		}
-		if base.kind == rtgTypePointer {
-			array := rtgResolveType(meta, base.elem)
-			if array.kind == rtgTypeArray {
-				return rtgAddType(meta, rtgTypeSlice, array.elem, 0, 0, rtgBackendSliceValueSize, 0, 0)
-			}
 		}
 		return baseType
 	}
@@ -11717,6 +11714,9 @@ func rtgEmitBuiltinPanic(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		return false
 	}
 	argIndex := ep.args[e.firstArg]
+	if g.deferReturnLabel <= 0 {
+		return false
+	}
 	valueOffset := rtgAddUnnamedLocal(g, rtgBuiltinTypeInterface)
 	if !rtgEmitInterfaceAssignToLocal(g, ep, argIndex, valueOffset) {
 		return false
@@ -11725,9 +11725,6 @@ func rtgEmitBuiltinPanic(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgEmitPanicState(g *rtgLinearGen, valueOffset int) bool {
-	if g.deferReturnLabel <= 0 {
-		return false
-	}
 	noPrevious := rtgAsmNewLabel(&g.asm)
 	rtgAsmLoadPrimaryBss(&g.asm, g.panicIDOff)
 	rtgAsmCmpPrimaryImm8(&g.asm, 0)
@@ -11744,17 +11741,9 @@ func rtgEmitPanicState(g *rtgLinearGen, valueOffset int) bool {
 	rtgAsmLoadPrimaryStack(&g.asm, nodeOffset)
 	rtgAsmStorePrimaryBss(&g.asm, g.panicPrevOff)
 	rtgAsmMarkLabel(&g.asm, noPrevious)
-	if valueOffset > 0 {
-		rtgAsmLoadPrimaryStack(&g.asm, valueOffset)
-	} else {
-		rtgAsmPrimaryImm(&g.asm, 1)
-	}
+	rtgAsmLoadPrimaryStack(&g.asm, valueOffset)
 	rtgAsmStorePrimaryBss(&g.asm, g.panicValueOff)
-	if valueOffset > 0 {
-		rtgAsmLoadPrimaryStack(&g.asm, valueOffset-rtgBackendValueSlotSize)
-	} else {
-		rtgAsmPrimaryImm(&g.asm, rtgTypeInt)
-	}
+	rtgAsmLoadPrimaryStack(&g.asm, valueOffset-rtgBackendValueSlotSize)
 	rtgAsmStorePrimaryBss(&g.asm, g.panicTypeOff)
 	rtgAsmLoadPrimaryBss(&g.asm, g.panicNextIDOff)
 	rtgAsmIncPrimary(&g.asm)
@@ -11768,7 +11757,10 @@ func rtgEmitPanicState(g *rtgLinearGen, valueOffset int) bool {
 
 func rtgEmitRuntimeFault(g *rtgLinearGen) {
 	if g.meta.panicEnabled {
-		rtgEmitPanicState(g, 0)
+		valueOffset := rtgAddUnnamedLocal(g, rtgBuiltinTypeInterface)
+		rtgAsmStoreStackImm(&g.asm, valueOffset, 1)
+		rtgAsmStoreStackImm(&g.asm, valueOffset-rtgBackendValueSlotSize, rtgTypeInt)
+		rtgEmitPanicState(g, valueOffset)
 	} else {
 		rtgEmitExitStatus(g)
 	}
