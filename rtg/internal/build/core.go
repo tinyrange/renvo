@@ -74,6 +74,12 @@ func buildProgramsCore(graph load.Graph, transient bool) Result {
 			return buildFail(result, BuildErrCheck, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
 		}
 		pkg := graph.Packages[i]
+		if pkg.Ref.ImportPath == graph.Root && pkg.Name == "main" {
+			if mainErr, mainFile, mainTok := check.CheckRootMain(pkg); mainErr != check.CheckOK {
+				result.ErrorDetail = mainErr
+				return buildFail(result, BuildErrCheck, i, mainFile, mainTok)
+			}
+		}
 		unitStart := arena.Mark()
 		emit := lower.EmitCheckedPackageCore(pkg, prog.Packages[i], transient)
 		unitEnd := arena.Mark()

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"testing"
 
+	"j5.nz/rtg/rtg/internal/check"
 	"j5.nz/rtg/rtg/internal/load"
 	"j5.nz/rtg/rtg/internal/unit"
 	"j5.nz/rtg/rtgunit"
@@ -95,6 +96,32 @@ func TestBuildUnitsCheckError(t *testing.T) {
 	}
 	if result.ErrorPackage != 0 || result.ErrorFile != 1 {
 		t.Fatalf("error location = pkg %d file %d", result.ErrorPackage, result.ErrorFile)
+	}
+}
+
+func TestBuildUnitsRejectsMissingRootMain(t *testing.T) {
+	graph := buildTestGraph(t, []load.SourceFile{{
+		Path: "/repo/case/cmd/app/main.go",
+		Src:  []byte("package main\nfunc helper() {}\n"),
+	}})
+	result := BuildUnits(graph)
+	if result.Ok || result.Error != BuildErrCheck || result.ErrorDetail != check.CheckErrMissingMain {
+		t.Fatalf("missing main result = %#v", result)
+	}
+}
+
+func TestBuildUnitsAllowsLibraryRootWithoutMain(t *testing.T) {
+	module := load.Module{Root: "/repo/case", Path: "example.com/case", Ok: true}
+	graph := load.LoadGraph(module, "/std", "/repo/case", "./lib", []load.SourceFile{{
+		Path: "/repo/case/lib/lib.go",
+		Src:  []byte("package lib\nfunc Value() int { return 42 }\n"),
+	}})
+	if !graph.Ok {
+		t.Fatalf("LoadGraph failed: %#v", graph)
+	}
+	result := BuildUnits(graph)
+	if !result.Ok || len(result.Units) != 1 || result.Units[0].Name != "lib" {
+		t.Fatalf("library root result = %#v", result)
 	}
 }
 

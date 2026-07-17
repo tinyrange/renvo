@@ -8,6 +8,8 @@ const (
 	NameResult
 	NameLocal
 	NameLabel
+	NameVariable
+	NameVariableUsed
 )
 
 type FuncScope struct {

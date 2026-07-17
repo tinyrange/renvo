@@ -140,6 +140,12 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 		d.Phase, d.Code, d.Message = "checker", "RTG-CHECK-001", "type checking failed"
 		if built.Build.Error == build.BuildErrLower {
 			d.Phase, d.Code, d.Message = "lowerer", "RTG-LOWER-001", "checked program could not be lowered"
+		} else if built.Build.ErrorDetail == check.CheckErrDuplicate {
+			d.Code, d.Message = "RTG-CHECK-002", "duplicate declaration"
+		} else if built.Build.ErrorDetail == check.CheckErrImport {
+			d.Code, d.Message = "RTG-CHECK-003", "invalid import declaration"
+		} else if built.Build.ErrorDetail == check.CheckErrMethod {
+			d.Code, d.Message = "RTG-CHECK-004", "invalid method declaration"
 		} else if built.Build.ErrorDetail == check.CheckErrReturnCount {
 			d.Code, d.Message = "RTG-CHECK-007", "return value count does not match function results"
 		} else if built.Build.ErrorDetail == check.CheckErrType {
@@ -170,6 +176,14 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			d.Code, d.Message = "RTG-CHECK-018", "channels are not supported by RTG"
 		} else if built.Build.ErrorDetail == check.CheckErrSelect {
 			d.Code, d.Message = "RTG-CHECK-019", "select statements are not supported by RTG"
+		} else if built.Build.ErrorDetail == check.CheckErrUnusedLocal {
+			d.Code, d.Message = "RTG-CHECK-020", "local variable is declared but not used"
+		} else if built.Build.ErrorDetail == check.CheckErrMissingMain {
+			d.Code, d.Message = "RTG-CHECK-021", "package main has no top-level func main()"
+		} else if built.Build.ErrorDetail == check.CheckErrMainSignature {
+			d.Code, d.Message = "RTG-CHECK-022", "func main must have no parameters or results"
+		} else if built.Build.ErrorDetail == check.CheckErrMainMethod {
+			d.Code, d.Message = "RTG-CHECK-023", "method main does not define the package entry point"
 		}
 	} else {
 		d.Phase, d.Code, d.Message = "linker", "RTG-LINK-001", "package linking failed"

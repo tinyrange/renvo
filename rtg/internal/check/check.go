@@ -26,6 +26,10 @@ const (
 	CheckErrGoroutine
 	CheckErrChannel
 	CheckErrSelect
+	CheckErrUnusedLocal
+	CheckErrMissingMain
+	CheckErrMainSignature
+	CheckErrMainMethod
 )
 
 const (
@@ -292,6 +296,36 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 	sortSymbols(info.Symbols)
 	sortImports(info.Imports)
 	return info, true, CheckOK, -1, -1
+}
+
+func CheckRootMain(pkg load.Package) (int, int, int) {
+	methodFile, methodTok := -1, -1
+	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
+		file := pkg.Files[fileIndex].File
+		for i := 0; i < len(file.Funcs); i++ {
+			fn := file.Funcs[i]
+			name := tokenString(&file, fn.NameTok)
+			if fn.ReceiverStart >= 0 {
+				if name == "main" {
+					methodFile, methodTok = fileIndex, fn.NameTok
+				}
+				continue
+			}
+			if name == "appMain" {
+				return CheckOK, -1, -1
+			}
+			if name == "main" {
+				if fn.ParamsEnd != fn.ParamsStart+2 || fn.ResultEnd != fn.ResultStart {
+					return CheckErrMainSignature, fileIndex, fn.NameTok
+				}
+				return CheckOK, -1, -1
+			}
+		}
+	}
+	if methodTok >= 0 {
+		return CheckErrMainMethod, methodFile, methodTok
+	}
+	return CheckErrMissingMain, 0, pkg.Files[0].File.PackageName
 }
 
 func findSymbolHashed(symbols []Symbol, buckets []int, name string, kind int) int {

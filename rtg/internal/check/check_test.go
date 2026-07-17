@@ -116,6 +116,25 @@ func TestCheckGraphCoreAllowsMultipleInitFunctions(t *testing.T) {
 	}
 }
 
+func TestCheckGraphCoreRecognizesDeferredLocalUse(t *testing.T) {
+	graph := checkTestGraph(t, []load.SourceFile{{
+		Path: "/repo/case/cmd/app/main.go",
+		Src: []byte(`package main
+
+func consume(value int) {}
+
+func main() {
+	value := 1
+	defer consume(value)
+}
+`),
+	}})
+	program := CheckGraphCore(graph)
+	if !program.Ok {
+		t.Fatalf("deferred local use was rejected: %#v", program)
+	}
+}
+
 func checkTestGraph(t *testing.T, files []load.SourceFile) load.Graph {
 	t.Helper()
 	module := load.Module{Root: "/repo/case", Path: "example.com/case", Ok: true}

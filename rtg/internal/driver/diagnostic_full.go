@@ -291,6 +291,14 @@ func buildPhaseDiagnostic(result BuildResult, built pipeline.Result) Diagnostic 
 			code, message = "RTG-CHECK-018", "channels are not supported by RTG"
 		case check.CheckErrSelect:
 			code, message = "RTG-CHECK-019", "select statements are not supported by RTG"
+		case check.CheckErrUnusedLocal:
+			code, message = "RTG-CHECK-020", "local variable is declared but not used"
+		case check.CheckErrMissingMain:
+			code, message = "RTG-CHECK-021", "package main has no top-level func main()"
+		case check.CheckErrMainSignature:
+			code, message = "RTG-CHECK-022", "func main must have no parameters or results"
+		case check.CheckErrMainMethod:
+			code, message = "RTG-CHECK-023", "method main does not define the package entry point"
 		}
 	} else if built.Build.Error == build.BuildErrLower {
 		phase, code, message = "lowerer", "RTG-LOWER-001", "checked program could not be lowered"
