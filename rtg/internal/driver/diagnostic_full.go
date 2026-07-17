@@ -125,6 +125,10 @@ func sourceDiagnostic(result BuildResult) Diagnostic {
 		code, message = "RTG-LOAD-017", "dependency import is ambiguous: "+result.Sources.ErrorPath
 	case SourceErrEmbed:
 		code, message = "RTG-LOAD-018", "invalid go:embed directive or pattern: "+result.Sources.ErrorPath
+	case SourceErrCgo:
+		code, message = "RTG-LOAD-019", "cgo is not supported by RTG"
+	case SourceErrStandardPackage:
+		code, message = "RTG-LOAD-020", "standard library package "+result.Sources.ErrorPath+" is not included in this RTG build"
 	}
 	path := result.ErrorPath
 	if result.Sources.ErrorSourcePath != "" {
@@ -233,6 +237,10 @@ func loadDiagnostic(result BuildResult, built pipeline.Result) Diagnostic {
 		file := pkg.Files[pkg.ErrorFile]
 		diagnostic.Path = file.Path
 		if pkg.Error == load.PackageErrParse {
+			if offset := sourceGenericsOffset(file.Src); offset >= 0 {
+				diagnostic.Code, diagnostic.Message = "RTG-PARSE-002", "generics are not supported by RTG"
+				return diagnosticAtOffset(diagnostic, load.SourceFile{Path: file.Path, Src: file.Src}, offset)
+			}
 			diagnostic = diagnosticAtToken(diagnostic, load.SourceFile{Path: file.Path, Src: file.Src}, file.File.Tokens, file.File.ErrorTok)
 		}
 	} else {
@@ -262,7 +270,7 @@ func buildPhaseDiagnostic(result BuildResult, built pipeline.Result) Diagnostic 
 		case check.CheckErrType:
 			code, message = "RTG-CHECK-008", "assignment value is not assignable to its destination"
 		case check.CheckErrExcluded:
-			code, message = "RTG-CHECK-009", "feature is excluded from the current frontend scope"
+			code, message = "RTG-CHECK-009", "feature is not supported by RTG"
 		case check.CheckErrUnusedImport:
 			code, message = "RTG-CHECK-010", "import is not used"
 		case check.CheckErrCall:
@@ -277,6 +285,12 @@ func buildPhaseDiagnostic(result BuildResult, built pipeline.Result) Diagnostic 
 			code, message = "RTG-CHECK-015", "continue is not inside a loop"
 		case check.CheckErrCallArgument:
 			code, message = "RTG-CHECK-016", "call argument is not assignable to its parameter"
+		case check.CheckErrGoroutine:
+			code, message = "RTG-CHECK-017", "goroutines are not supported by RTG"
+		case check.CheckErrChannel:
+			code, message = "RTG-CHECK-018", "channels are not supported by RTG"
+		case check.CheckErrSelect:
+			code, message = "RTG-CHECK-019", "select statements are not supported by RTG"
 		}
 	} else if built.Build.Error == build.BuildErrLower {
 		phase, code, message = "lowerer", "RTG-LOWER-001", "checked program could not be lowered"

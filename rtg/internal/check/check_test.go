@@ -68,7 +68,17 @@ func TestCheckGraphCoreDiagnostics(t *testing.T) {
 		{
 			name:  "excluded goroutine",
 			files: []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc work() {}\nfunc main() { go work() }\n")}},
-			err:   CheckErrExcluded,
+			err:   CheckErrGoroutine,
+		},
+		{
+			name:  "excluded channel declaration",
+			files: []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nvar values chan int\nfunc main() {}\n")}},
+			err:   CheckErrChannel,
+		},
+		{
+			name:  "excluded select",
+			files: []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc main() { select {} }\n")}},
+			err:   CheckErrSelect,
 		},
 		{
 			name: "unused import",

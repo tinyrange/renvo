@@ -20,6 +20,8 @@ const (
 	SourceErrDependencyModule
 	SourceErrDependencyAmbiguous
 	SourceErrEmbed
+	SourceErrCgo
+	SourceErrStandardPackage
 )
 
 type DirEntry struct {
@@ -202,6 +204,11 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 			return
 		}
 		if !enabled {
+			if sourceRequiresCgo(src, c.target, c.tags) {
+				c.files = append(c.files, load.SourceFile{Path: path, Src: src, ArenaStart: arenaStart, ArenaEnd: arenaEnd})
+				c.failAt(SourceErrCgo, "cgo", path, sourceTextOffset(src, "cgo"))
+				return
+			}
 			arena.Discard(arenaStart, arenaEnd)
 			continue
 		}
@@ -221,6 +228,17 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 			return
 		}
 		for j := 0; j < len(imports); j++ {
+			importOffset := sourceTextOffset(src, imports[j].ImportPath)
+			if imports[j].ImportPath == "C" {
+				c.failAt(SourceErrCgo, "C", path, importOffset)
+				return
+			}
+			if imports[j].Kind == load.PackageStandard {
+				if _, present := c.fs.ReadDir(imports[j].Dir); !present {
+					c.failAt(SourceErrStandardPackage, imports[j].ImportPath, path, importOffset)
+					return
+				}
+			}
 			if !imports[j].Ok {
 				loaded := c.resolveLoadedImport(imports[j].ImportPath)
 				if loaded.Ok {
@@ -233,7 +251,7 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 				resolved := c.resolveDependency(imports[j].ImportPath)
 				if !resolved.Ok {
 					if c.ok {
-						c.failAt(SourceErrImport, imports[j].ImportPath, path, sourceTextOffset(src, imports[j].ImportPath))
+						c.failAt(SourceErrImport, imports[j].ImportPath, path, importOffset)
 					} else {
 						c.errSourcePath = path
 						c.errOffset = sourceTextOffset(src, imports[j].ImportPath)
@@ -258,6 +276,45 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 	}
 	c.loading = c.loading[:len(c.loading)-1]
 	c.loaded = append(c.loaded, ref.ImportPath)
+}
+
+func sourceGenericsOffset(src []byte) int {
+	for pos := 0; pos < len(src); {
+		pos = rtgImportSkipSpace(src, pos)
+		if pos >= len(src) {
+			break
+		}
+		if src[pos] == '"' || src[pos] == '\'' || src[pos] == '`' {
+			pos = sourceEmbedSkipQuoted(src, pos, src[pos])
+			continue
+		}
+		start, end, next, ok := rtgImportIdent(src, pos)
+		if !ok {
+			pos++
+			continue
+		}
+		pos = next
+		if !rtgImportTextIs(src, start, end, "func") && !rtgImportTextIs(src, start, end, "type") {
+			continue
+		}
+		pos = rtgImportSkipSpace(src, pos)
+		_, _, pos, ok = rtgImportIdent(src, pos)
+		if !ok {
+			continue
+		}
+		pos = rtgImportSkipSpace(src, pos)
+		if pos < len(src) && src[pos] == '[' {
+			return pos
+		}
+	}
+	return -1
+}
+
+func sourceRequiresCgo(src []byte, target string, tags []string) bool {
+	disabled, disabledOK := sourceConstraintsEnabled(src, target, tags)
+	with := append(tags, "cgo")
+	enabled, enabledOK := sourceConstraintsEnabled(src, target, with)
+	return disabledOK && enabledOK && !disabled && enabled
 }
 
 func (c *sourceCollector) resolveLoadedImport(importPath string) load.PackageRef {

@@ -15,7 +15,7 @@ const (
 
 const DefaultTarget = "linux/amd64"
 
-const HelpText = "Usage: rtg -o <file> [-t <target>] [-tags <list>] [-s] [-emit-unit] [-windows-gui] <package>\nOptions:\n  -emit-unit    write the canonical linked RTGU unit without invoking a backend\n  -windows-gui  select the Windows GUI subsystem instead of the console subsystem\nTargets:\n  linux/amd64 linux/386 linux/aarch64 linux/arm\n  windows/amd64 windows/386 windows/arm64 darwin/arm64 wasi/wasm32\n"
+const HelpText = "Usage: rtg -o <file> [-t <target>] [-tags <list>] [-s] [-emit-unit] [-windows-gui] <package>\nOptions:\n  -emit-unit    write the canonical linked RTGU unit without invoking a backend\n  -windows-gui  select the Windows GUI subsystem instead of the console subsystem\nTargets:\n  linux/amd64 linux/386 linux/aarch64 linux/arm\n  windows/amd64 windows/386 windows/arm64 darwin/arm64 wasi/wasm32\nUnsupported language/toolchain features:\n  generics, goroutines, channels, select, cgo\n"
 
 type Options struct {
 	Target     string

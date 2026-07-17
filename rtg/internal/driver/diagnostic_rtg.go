@@ -65,6 +65,10 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			d.Code, d.Message = "RTG-LOAD-017", "dependency import is ambiguous: "+result.ErrorPath
 		} else if result.Sources.Error == SourceErrEmbed {
 			d.Code, d.Message = "RTG-LOAD-018", "invalid go:embed directive or pattern: "+result.ErrorPath
+		} else if result.Sources.Error == SourceErrCgo {
+			d.Code, d.Message = "RTG-LOAD-019", "cgo is not supported by RTG"
+		} else if result.Sources.Error == SourceErrStandardPackage {
+			d.Code, d.Message = "RTG-LOAD-020", "standard library package "+result.ErrorPath+" is not included in this RTG build"
 		}
 		if result.Sources.ErrorSourcePath != "" {
 			d.Path = result.Sources.ErrorSourcePath
@@ -118,7 +122,17 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 				result.ErrorPackage = pkg
 				result.ErrorFile = graph.Packages[pkg].ErrorFile
 				if result.ErrorFile >= 0 && result.ErrorFile < len(graph.Packages[pkg].Files) {
-					result.ErrorToken = graph.Packages[pkg].Files[result.ErrorFile].File.ErrorTok
+					file := graph.Packages[pkg].Files[result.ErrorFile]
+					if offset := sourceGenericsOffset(file.Src); offset >= 0 {
+						d.Code, d.Message = "RTG-PARSE-002", "generics are not supported by RTG"
+						for i := 0; i < len(file.File.Tokens); i++ {
+							if file.File.Tokens[i].Start == offset {
+								file.File.ErrorTok = i
+								break
+							}
+						}
+					}
+					result.ErrorToken = file.File.ErrorTok
 				}
 			}
 		}
@@ -135,7 +149,7 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 		} else if built.Build.ErrorDetail == check.CheckErrScope {
 			d.Code, d.Message = "RTG-CHECK-006", "invalid name or scope"
 		} else if built.Build.ErrorDetail == check.CheckErrExcluded {
-			d.Code, d.Message = "RTG-CHECK-009", "feature is excluded from the current frontend scope"
+			d.Code, d.Message = "RTG-CHECK-009", "feature is not supported by RTG"
 		} else if built.Build.ErrorDetail == check.CheckErrUnusedImport {
 			d.Code, d.Message = "RTG-CHECK-010", "import is not used"
 		} else if built.Build.ErrorDetail == check.CheckErrCall {
@@ -150,6 +164,12 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			d.Code, d.Message = "RTG-CHECK-015", "continue is not inside a loop"
 		} else if built.Build.ErrorDetail == check.CheckErrCallArgument {
 			d.Code, d.Message = "RTG-CHECK-016", "call argument is not assignable to its parameter"
+		} else if built.Build.ErrorDetail == check.CheckErrGoroutine {
+			d.Code, d.Message = "RTG-CHECK-017", "goroutines are not supported by RTG"
+		} else if built.Build.ErrorDetail == check.CheckErrChannel {
+			d.Code, d.Message = "RTG-CHECK-018", "channels are not supported by RTG"
+		} else if built.Build.ErrorDetail == check.CheckErrSelect {
+			d.Code, d.Message = "RTG-CHECK-019", "select statements are not supported by RTG"
 		}
 	} else {
 		d.Phase, d.Code, d.Message = "linker", "RTG-LINK-001", "package linking failed"

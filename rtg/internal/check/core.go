@@ -94,9 +94,6 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 		file := pkg.Files[fileIndex].File
 		for i := 0; i < len(file.Funcs); i++ {
 			fn := file.Funcs[i]
-			if excludedTok := excludedFeatureToken(file, fn); excludedTok >= 0 {
-				return info, false, CheckErrExcluded, fileIndex, excludedTok
-			}
 			bodyArenaStart := arena.Mark()
 			body := syntax.ParseFuncBodyStatements(file, fn)
 			if !body.Ok {

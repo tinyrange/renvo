@@ -1,0 +1,8 @@
+{
+  "phase": "checker",
+  "code": "RTG-CHECK-018",
+  "file": "cmd/app/main.go",
+  "line": 3,
+  "column": 12,
+  "message": "channels are not supported by RTG"
+}
