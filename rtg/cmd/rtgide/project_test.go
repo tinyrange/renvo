@@ -10,7 +10,7 @@ import (
 )
 
 func TestGeneratedHelloFormIsGoSourceWithDesignerOwnedStructAndWiring(t *testing.T) {
-	source := generatedHelloFormSource(defaultHelloFormDesign())
+	source := generatedFormSource(defaultFormDesign())
 	if _, err := parser.ParseFile(token.NewFileSet(), projectGeneratedFormFile, source, parser.AllErrors); err != nil {
 		t.Fatalf("generated form is not valid Go: %v\n%s", err, source)
 	}
@@ -24,6 +24,33 @@ func TestGeneratedHelloFormIsGoSourceWithDesignerOwnedStructAndWiring(t *testing
 		if !strings.Contains(text, want) {
 			t.Fatalf("generated form missing %q", want)
 		}
+	}
+}
+
+func TestGeneratedFormIsTheRoundTrippableDesignerDocument(t *testing.T) {
+	design := formDesign{
+		width:  640,
+		height: 360,
+		controls: []designerControl{
+			{kind: designerLabel, name: "statusLabel", text: "Ready\nnow", x: 17, y: 21, width: 180, height: 30},
+			{kind: designerButton, name: "launchButton", text: "Launch \"app\"", x: 220, y: 260, width: 140, height: 42, clickHandler: "launchButtonClick"},
+		},
+	}
+	source := generatedFormSource(design)
+	parsed, message := parseFormDesign(source)
+	if message != "" {
+		t.Fatal(message)
+	}
+	if parsed.width != design.width || parsed.height != design.height || len(parsed.controls) != len(design.controls) {
+		t.Fatalf("parsed design = %#v", parsed)
+	}
+	for i := 0; i < len(design.controls); i++ {
+		if parsed.controls[i] != design.controls[i] {
+			t.Fatalf("control %d = %#v, want %#v", i, parsed.controls[i], design.controls[i])
+		}
+	}
+	if regenerated := generatedFormSource(parsed); string(regenerated) != string(source) {
+		t.Fatal("designer generation was not deterministic after parsing")
 	}
 }
 

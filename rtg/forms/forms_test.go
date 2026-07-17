@@ -97,6 +97,27 @@ func TestGeneratedStyleEventWiringDispatchesToFocusedControl(t *testing.T) {
 	}
 }
 
+func TestPressedControlKeepsPointerCaptureUntilRelease(t *testing.T) {
+	var form Form
+	form.Initialize(100, 50)
+	control := NewControl()
+	control.SetBounds(graphics.R(5, 5, 20, 20))
+	moves := 0
+	releases := 0
+	clicks := 0
+	control.PointerMove = func(x, y graphics.Scalar) { moves++ }
+	control.PointerUp = func(x, y graphics.Scalar) { releases++ }
+	control.Click = func() { clicks++ }
+	form.Add(control)
+
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerDown, X: 10, Y: 10})
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerMove, X: 90, Y: 40})
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerUp, X: 90, Y: 40})
+	if moves != 1 || releases != 1 || clicks != 0 {
+		t.Fatalf("captured events = moves %d releases %d clicks %d", moves, releases, clicks)
+	}
+}
+
 func TestShortcutTextDoesNotLeakIntoFocusedControl(t *testing.T) {
 	var form Form
 	form.Initialize(80, 40)

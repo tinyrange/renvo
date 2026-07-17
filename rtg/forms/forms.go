@@ -336,18 +336,25 @@ func (f *Form) Dispatch(event graphics.Event) {
 		return
 	}
 	if event.Type == graphics.EventPointerUp {
-		control := f.hitTest(event.X, event.Y)
+		hit := f.hitTest(event.X, event.Y)
+		control := f.pressed
+		if control == nil {
+			control = hit
+		}
 		if control != nil && control.PointerUp != nil {
 			control.PointerUp(event.X-control.bounds.MinX, event.Y-control.bounds.MinY)
 		}
-		if control != nil && control == f.pressed && control.Click != nil {
+		if control != nil && control == hit && control == f.pressed && control.Click != nil {
 			control.Click()
 		}
 		f.pressed = nil
 		return
 	}
 	if event.Type == graphics.EventPointerMove {
-		control := f.hitTest(event.X, event.Y)
+		control := f.pressed
+		if control == nil {
+			control = f.hitTest(event.X, event.Y)
+		}
 		if control != nil && control.PointerMove != nil {
 			control.PointerMove(event.X-control.bounds.MinX, event.Y-control.bounds.MinY)
 		}

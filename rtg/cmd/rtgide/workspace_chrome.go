@@ -231,24 +231,153 @@ func (c *workspaceEditorFrame) paint(surface *graphics.Surface) {
 
 type workspaceDesigner struct {
 	forms.Control
-	font     *graphics.Font
-	ShowCode func()
-	design   helloFormDesign
+	font             *graphics.Font
+	ShowCode         func()
+	Changed          func()
+	SelectionChanged func(index int)
+	design           *formDesign
+	selected         int
+	dragMode         int
+	dragStartX       graphics.Scalar
+	dragStartY       graphics.Scalar
+	dragOriginal     designerControl
 }
 
 func newWorkspaceDesigner(font *graphics.Font) *workspaceDesigner {
-	control := &workspaceDesigner{font: font, design: defaultHelloFormDesign()}
+	control := &workspaceDesigner{font: font, selected: -1}
 	control.Control = *forms.NewControl()
 	control.SetTabStop(false)
 	control.SetBackground(workspaceCanvas)
 	control.Paint = control.paint
 	control.PointerDown = control.pointerDown
+	control.PointerMove = control.pointerMove
+	control.PointerUp = control.pointerUp
 	return control
+}
+
+func (c *workspaceDesigner) SetDesign(design *formDesign) {
+	c.design = design
+	if design == nil || c.selected >= len(design.controls) {
+		c.selected = -1
+	}
+	c.Invalidate()
+}
+
+func (c *workspaceDesigner) InvalidatePreview() {
+	if c.design == nil || c.Form() == nil {
+		return
+	}
+	layout := calculateDesignerPreview(graphics.R(0, workspacePaneHeaderHeight+workspaceDesignerToolbarHeight, c.Bounds().Width(), c.Bounds().Height()-workspacePaneHeaderHeight-workspaceDesignerToolbarHeight-workspaceStatusHeight), c.design)
+	c.invalidateLocal(workspaceExpandRect(layout.outer, 7))
+}
+
+func (c *workspaceDesigner) SetSelection(index int) {
+	if c.design == nil || index < -1 || index >= len(c.design.controls) || c.selected == index {
+		return
+	}
+	c.invalidateSelection(c.selected)
+	c.selected = index
+	c.invalidateSelection(c.selected)
 }
 
 func (c *workspaceDesigner) pointerDown(x, y graphics.Scalar) {
 	if y >= 0 && y < workspacePaneHeaderHeight && x >= 0 && x < 170 && c.ShowCode != nil {
 		c.ShowCode()
+		return
+	}
+	if c.design == nil {
+		return
+	}
+	layout := calculateDesignerPreview(graphics.R(0, workspacePaneHeaderHeight+workspaceDesignerToolbarHeight, c.Bounds().Width(), c.Bounds().Height()-workspacePaneHeaderHeight-workspaceDesignerToolbarHeight-workspaceStatusHeight), c.design)
+	if c.selected >= 0 {
+		selectedBounds := designerControlBounds(layout, c.design.controls[c.selected])
+		if designerNear(x, selectedBounds.MaxX, 8) && designerNear(y, selectedBounds.MaxY, 8) {
+			c.dragMode = 2
+			c.dragStartX = x
+			c.dragStartY = y
+			c.dragOriginal = c.design.controls[c.selected]
+			return
+		}
+	}
+	selected := -1
+	for i := len(c.design.controls) - 1; i >= 0; i-- {
+		if workspacePointInRect(x, y, designerControlBounds(layout, c.design.controls[i])) {
+			selected = i
+			break
+		}
+	}
+	c.SetSelection(selected)
+	if c.SelectionChanged != nil {
+		c.SelectionChanged(selected)
+	}
+	if selected >= 0 {
+		c.dragMode = 1
+		c.dragStartX = x
+		c.dragStartY = y
+		c.dragOriginal = c.design.controls[selected]
+	}
+}
+
+func (c *workspaceDesigner) pointerMove(x, y graphics.Scalar) {
+	if c.design == nil || c.selected < 0 || c.dragMode == 0 {
+		return
+	}
+	layout := calculateDesignerPreview(graphics.R(0, workspacePaneHeaderHeight+workspaceDesignerToolbarHeight, c.Bounds().Width(), c.Bounds().Height()-workspacePaneHeaderHeight-workspaceDesignerToolbarHeight-workspaceStatusHeight), c.design)
+	if layout.scale <= 0 {
+		return
+	}
+	old := c.design.controls[c.selected]
+	dx := int((x - c.dragStartX) / layout.scale)
+	dy := int((y - c.dragStartY) / layout.scale)
+	next := c.dragOriginal
+	if c.dragMode == 1 {
+		next.x += dx
+		next.y += dy
+		if next.x < 0 {
+			next.x = 0
+		}
+		if next.y < 0 {
+			next.y = 0
+		}
+		if next.x+next.width > c.design.width {
+			next.x = c.design.width - next.width
+		}
+		if next.y+next.height > c.design.height {
+			next.y = c.design.height - next.height
+		}
+	} else {
+		next.width += dx
+		next.height += dy
+		if next.width < 16 {
+			next.width = 16
+		}
+		if next.height < 16 {
+			next.height = 16
+		}
+		if next.x+next.width > c.design.width {
+			next.width = c.design.width - next.x
+		}
+		if next.y+next.height > c.design.height {
+			next.height = c.design.height - next.y
+		}
+	}
+	if old.x == next.x && old.y == next.y && old.width == next.width && old.height == next.height {
+		return
+	}
+	oldBounds := designerControlBounds(layout, old)
+	c.design.controls[c.selected] = next
+	newBounds := designerControlBounds(layout, next)
+	c.invalidateLocal(workspaceExpandRect(workspaceUnionRect(oldBounds, newBounds), 6))
+}
+
+func (c *workspaceDesigner) pointerUp(x, y graphics.Scalar) {
+	if c.dragMode == 0 {
+		return
+	}
+	changed := c.design != nil && c.selected >= 0 && c.design.controls[c.selected] != c.dragOriginal
+	c.dragMode = 0
+	if changed && c.Changed != nil {
+		c.Changed()
 	}
 }
 
@@ -312,55 +441,340 @@ func (c *workspaceOutput) paint(surface *graphics.Surface) {
 }
 
 func (c *workspaceDesigner) drawForm(surface *graphics.Surface, canvas graphics.Rect) {
-	width := canvas.Width() - 74
-	if width > graphics.Scalar(c.design.width) {
-		width = graphics.Scalar(c.design.width)
+	if c.design == nil {
+		return
 	}
-	if width < 170 {
-		width = 170
+	layout := calculateDesignerPreview(canvas, c.design)
+	surface.FillRect(graphics.R(layout.outer.MinX+3, layout.outer.MinY+4, layout.outer.Width(), layout.outer.Height()), graphics.RGBA(227, 230, 235, 255))
+	surface.FillRect(layout.outer, workspaceWhite)
+	surface.StrokeRect(layout.outer, 1, workspaceBorder)
+	surface.FillRect(graphics.R(layout.outer.MinX, layout.client.MinY-1, layout.outer.Width(), 1), workspaceBorder)
+	drawCenteredWorkspaceText(surface, c.font, graphics.R(layout.outer.MinX, layout.outer.MinY, layout.outer.Width(), layout.client.MinY-layout.outer.MinY), "MainForm", workspaceText)
+	for i := 0; i < len(c.design.controls); i++ {
+		control := c.design.controls[i]
+		bounds := designerControlBounds(layout, control)
+		if control.kind == designerButton {
+			surface.FillRect(bounds, workspaceBlue)
+			drawCenteredWorkspaceText(surface, c.font, bounds, control.text, workspaceWhite)
+		} else {
+			baseline := bounds.MinY + (bounds.Height()-c.font.Metrics.Ascent-c.font.Metrics.Descent)/2 + c.font.Metrics.Ascent
+			drawWorkspaceText(surface, c.font, bounds.MinX, baseline, control.text, workspaceText)
+		}
+		if i == c.selected {
+			surface.StrokeRect(bounds, 2, workspaceBlue)
+			drawSelectionHandles(surface, bounds)
+		}
 	}
-	height := width * graphics.Scalar(c.design.height) / graphics.Scalar(c.design.width)
-	if height > canvas.Height()-24 {
-		height = canvas.Height() - 24
+}
+
+type designerPreview struct {
+	outer  graphics.Rect
+	client graphics.Rect
+	scale  graphics.Scalar
+}
+
+func calculateDesignerPreview(canvas graphics.Rect, design *formDesign) designerPreview {
+	if design == nil || design.width < 1 || design.height < 1 {
+		return designerPreview{}
 	}
-	if height < 150 {
-		height = 150
+	availableWidth := canvas.Width() - 64
+	availableHeight := canvas.Height() - 52
+	header := graphics.Scalar(30)
+	scaleX := availableWidth / graphics.Scalar(design.width)
+	scaleY := (availableHeight - header) / graphics.Scalar(design.height)
+	scale := scaleX
+	if scaleY < scale {
+		scale = scaleY
 	}
-	x := canvas.MinX + (canvas.Width()-width)/2
-	y := canvas.MinY + (canvas.Height()-height)/2
-	selection := graphics.R(x, y, width, height)
-	surface.StrokeRect(selection, 2, workspaceBlue)
-	drawSelectionHandles(surface, selection)
-	form := graphics.R(selection.MinX+16, selection.MinY+9, selection.Width()-32, selection.Height()-18)
-	surface.FillRect(graphics.R(form.MinX+3, form.MinY+4, form.Width(), form.Height()), graphics.RGBA(227, 230, 235, 255))
-	surface.FillRect(form, workspaceWhite)
-	surface.StrokeRect(form, 1, workspaceBorder)
-	headerHeight := graphics.Scalar(36)
-	surface.FillRect(graphics.R(form.MinX, form.MinY+headerHeight-1, form.Width(), 1), workspaceBorder)
-	drawCenteredWorkspaceText(surface, c.font, graphics.R(form.MinX, form.MinY, form.Width(), headerHeight), c.design.title, workspaceText)
-	contentX := form.MinX + 20
-	contentWidth := form.Width() - 40
-	labelY := form.MinY + 79
-	drawWorkspaceText(surface, c.font, contentX, labelY, c.design.messageText, workspaceText)
-	buttonY := labelY + 26
-	buttonHeight := graphics.Scalar(38)
-	surface.FillRect(graphics.R(contentX, buttonY, contentWidth, buttonHeight), workspaceBlue)
-	drawCenteredWorkspaceText(surface, c.font, graphics.R(contentX, buttonY, contentWidth, buttonHeight), c.design.buttonText, workspaceWhite)
+	if scale > 1 {
+		scale = 1
+	}
+	if scale < 0.15 {
+		scale = 0.15
+	}
+	width := graphics.Scalar(design.width) * scale
+	height := graphics.Scalar(design.height) * scale
+	outer := graphics.R(canvas.MinX+(canvas.Width()-width)/2, canvas.MinY+(canvas.Height()-height-header)/2, width, height+header)
+	return designerPreview{outer: outer, client: graphics.R(outer.MinX, outer.MinY+header, width, height), scale: scale}
+}
+
+func designerControlBounds(layout designerPreview, control designerControl) graphics.Rect {
+	return graphics.R(layout.client.MinX+graphics.Scalar(control.x)*layout.scale, layout.client.MinY+graphics.Scalar(control.y)*layout.scale, graphics.Scalar(control.width)*layout.scale, graphics.Scalar(control.height)*layout.scale)
+}
+
+func designerNear(a, b, distance graphics.Scalar) bool {
+	return a >= b-distance && a <= b+distance
+}
+
+func workspacePointInRect(x, y graphics.Scalar, bounds graphics.Rect) bool {
+	return x >= bounds.MinX && x < bounds.MaxX && y >= bounds.MinY && y < bounds.MaxY
+}
+
+func workspaceUnionRect(a, b graphics.Rect) graphics.Rect {
+	if b.MinX < a.MinX {
+		a.MinX = b.MinX
+	}
+	if b.MinY < a.MinY {
+		a.MinY = b.MinY
+	}
+	if b.MaxX > a.MaxX {
+		a.MaxX = b.MaxX
+	}
+	if b.MaxY > a.MaxY {
+		a.MaxY = b.MaxY
+	}
+	return a
+}
+
+func workspaceExpandRect(rect graphics.Rect, amount graphics.Scalar) graphics.Rect {
+	return graphics.R(rect.MinX-amount, rect.MinY-amount, rect.Width()+amount*2, rect.Height()+amount*2)
+}
+
+func (c *workspaceDesigner) invalidateLocal(rect graphics.Rect) {
+	if c.Form() == nil {
+		return
+	}
+	bounds := c.Bounds()
+	c.Form().Invalidate(graphics.R(bounds.MinX+rect.MinX, bounds.MinY+rect.MinY, rect.Width(), rect.Height()))
+}
+
+func (c *workspaceDesigner) invalidateSelection(index int) {
+	if c.design == nil || index < 0 || index >= len(c.design.controls) {
+		return
+	}
+	layout := calculateDesignerPreview(graphics.R(0, workspacePaneHeaderHeight+workspaceDesignerToolbarHeight, c.Bounds().Width(), c.Bounds().Height()-workspacePaneHeaderHeight-workspaceDesignerToolbarHeight-workspaceStatusHeight), c.design)
+	c.invalidateLocal(workspaceExpandRect(designerControlBounds(layout, c.design.controls[index]), 6))
 }
 
 type workspaceInspector struct {
 	forms.Control
-	font   *graphics.Font
-	design helloFormDesign
+	font        *graphics.Font
+	design      *formDesign
+	selected    int
+	active      string
+	editBuffer  string
+	selectValue bool
+	AddControl  func(kind string)
+	Changed     func()
+	CreateEvent func(handler string)
 }
 
 func newWorkspaceInspector(font *graphics.Font) *workspaceInspector {
-	control := &workspaceInspector{font: font, design: defaultHelloFormDesign()}
+	control := &workspaceInspector{font: font, selected: -1}
 	control.Control = *forms.NewControl()
-	control.SetTabStop(false)
 	control.SetBackground(workspaceWhite)
 	control.Paint = control.paint
+	control.PointerDown = control.pointerDown
+	control.TextInput = control.textInput
+	control.KeyDown = control.keyDown
 	return control
+}
+
+func (c *workspaceInspector) SetDesign(design *formDesign) {
+	c.design = design
+	if design == nil || c.selected >= len(design.controls) {
+		c.selected = -1
+	}
+	c.active = ""
+	c.Invalidate()
+}
+
+func (c *workspaceInspector) SetSelection(index int) {
+	if c.design == nil || index < -1 || index >= len(c.design.controls) || c.selected == index {
+		return
+	}
+	c.commitEdit()
+	c.selected = index
+	c.active = ""
+	c.Invalidate()
+}
+
+func (c *workspaceInspector) InvalidateProperties() {
+	if c.Form() == nil {
+		return
+	}
+	bounds := c.Bounds()
+	paletteWidth := bounds.Width() * 39 / 100
+	c.Form().Invalidate(graphics.R(bounds.MinX+paletteWidth, bounds.MinY, bounds.Width()-paletteWidth, bounds.Height()))
+}
+
+func (c *workspaceInspector) pointerDown(x, y graphics.Scalar) {
+	if c.design == nil || y < workspacePaneHeaderHeight {
+		return
+	}
+	paletteWidth := c.Bounds().Width() * 39 / 100
+	if x < paletteWidth {
+		index := int(y-graphics.Scalar(workspacePaneHeaderHeight+35)) / 39
+		if index == 0 && c.AddControl != nil {
+			c.AddControl(designerLabel)
+		} else if index == 1 && c.AddControl != nil {
+			c.AddControl(designerButton)
+		}
+		return
+	}
+	if y < workspacePaneHeaderHeight+48 {
+		return
+	}
+	properties := c.propertyNames()
+	row := int(y-graphics.Scalar(workspacePaneHeaderHeight+48)) / 40
+	if row < 0 || row >= len(properties) {
+		c.commitEdit()
+		c.active = ""
+		c.InvalidateProperties()
+		return
+	}
+	c.commitEdit()
+	c.active = properties[row]
+	c.editBuffer = c.propertyValue(c.active)
+	c.selectValue = true
+	if c.active == "Click" && c.editBuffer == "" && c.selected >= 0 {
+		c.editBuffer = c.design.controls[c.selected].name + "Click"
+		c.selectValue = false
+		c.commitEdit()
+	}
+	c.InvalidateProperties()
+}
+
+func (c *workspaceInspector) textInput(text string) {
+	if c.active == "" || text == "" {
+		return
+	}
+	if c.selectValue {
+		c.editBuffer = text
+		c.selectValue = false
+	} else {
+		c.editBuffer = c.editBuffer + text
+	}
+	c.InvalidateProperties()
+}
+
+func (c *workspaceInspector) keyDown(event graphics.Event) {
+	if c.active == "" {
+		return
+	}
+	if event.Key == graphics.KeyEnter {
+		c.commitEdit()
+		c.active = ""
+		c.InvalidateProperties()
+	} else if event.Key == graphics.KeyEscape {
+		c.active = ""
+		c.InvalidateProperties()
+	} else if event.Key == graphics.KeyBackspace {
+		if c.selectValue {
+			c.editBuffer = ""
+			c.selectValue = false
+		} else if len(c.editBuffer) > 0 {
+			c.editBuffer = c.editBuffer[:len(c.editBuffer)-1]
+		}
+		c.InvalidateProperties()
+	}
+}
+
+func (c *workspaceInspector) commitEdit() {
+	if c.design == nil || c.active == "" {
+		return
+	}
+	changed := false
+	createdEvent := ""
+	if c.selected < 0 {
+		value, ok := designerParseInt(c.editBuffer)
+		if ok && value >= 100 {
+			if c.active == "Width" && c.design.width != value {
+				c.design.width = value
+				changed = true
+			} else if c.active == "Height" && c.design.height != value {
+				c.design.height = value
+				changed = true
+			}
+		}
+	} else if c.selected < len(c.design.controls) {
+		control := &c.design.controls[c.selected]
+		if c.active == "Name" && designerIdentifier(c.editBuffer) && !c.nameInUse(c.editBuffer) && control.name != c.editBuffer {
+			control.name = c.editBuffer
+			changed = true
+		} else if c.active == "Text" && control.text != c.editBuffer {
+			control.text = c.editBuffer
+			changed = true
+		} else if c.active == "Click" && (c.editBuffer == "" || designerIdentifier(c.editBuffer)) && control.clickHandler != c.editBuffer {
+			control.clickHandler = c.editBuffer
+			createdEvent = c.editBuffer
+			changed = true
+		} else {
+			value, ok := designerParseInt(c.editBuffer)
+			if ok {
+				if c.active == "X" && value >= 0 && value+control.width <= c.design.width && control.x != value {
+					control.x = value
+					changed = true
+				} else if c.active == "Y" && value >= 0 && value+control.height <= c.design.height && control.y != value {
+					control.y = value
+					changed = true
+				} else if c.active == "Width" && value >= 16 && control.x+value <= c.design.width && control.width != value {
+					control.width = value
+					changed = true
+				} else if c.active == "Height" && value >= 16 && control.y+value <= c.design.height && control.height != value {
+					control.height = value
+					changed = true
+				}
+			}
+		}
+	}
+	if changed && c.Changed != nil {
+		c.Changed()
+	}
+	if createdEvent != "" && c.CreateEvent != nil {
+		c.CreateEvent(createdEvent)
+	}
+}
+
+func (c *workspaceInspector) nameInUse(name string) bool {
+	for i := 0; i < len(c.design.controls); i++ {
+		if i != c.selected && c.design.controls[i].name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *workspaceInspector) propertyNames() []string {
+	if c.design == nil || c.selected < 0 || c.selected >= len(c.design.controls) {
+		return []string{"Width", "Height"}
+	}
+	if c.design.controls[c.selected].kind == designerButton {
+		return []string{"Name", "Text", "X", "Y", "Width", "Height", "Click"}
+	}
+	return []string{"Name", "Text", "X", "Y", "Width", "Height"}
+}
+
+func (c *workspaceInspector) propertyValue(name string) string {
+	if c.design == nil {
+		return ""
+	}
+	if c.selected < 0 || c.selected >= len(c.design.controls) {
+		if name == "Width" {
+			return workspaceDecimal(c.design.width)
+		}
+		return workspaceDecimal(c.design.height)
+	}
+	control := c.design.controls[c.selected]
+	if name == "Name" {
+		return control.name
+	}
+	if name == "Text" {
+		return control.text
+	}
+	if name == "X" {
+		return workspaceDecimal(control.x)
+	}
+	if name == "Y" {
+		return workspaceDecimal(control.y)
+	}
+	if name == "Width" {
+		return workspaceDecimal(control.width)
+	}
+	if name == "Height" {
+		return workspaceDecimal(control.height)
+	}
+	return control.clickHandler
 }
 
 func (c *workspaceInspector) paint(surface *graphics.Surface) {
@@ -390,45 +804,46 @@ func (c *workspaceInspector) drawPalette(surface *graphics.Surface, bounds graph
 	items := []string{"Label", "Button", "Text Input", "Text Area", "Check Box", "Radio Button", "Image", "Container"}
 	for i := 0; i < len(items); i++ {
 		y := bounds.MinY + 55 + graphics.Scalar(i*39)
-		drawPaletteIcon(surface, bounds.MinX+21, y-7, i, workspaceMuted)
-		drawWorkspaceText(surface, c.font, bounds.MinX+42, y, items[i], workspaceText)
+		color := workspaceMuted
+		textColor := workspaceText
+		if i > 1 {
+			color = workspaceBorder
+			textColor = graphics.RGBA(157, 162, 171, 255)
+		}
+		drawPaletteIcon(surface, bounds.MinX+21, y-7, i, color)
+		drawWorkspaceText(surface, c.font, bounds.MinX+42, y, items[i], textColor)
 	}
 	surface.PopClip()
 }
 
 func (c *workspaceInspector) drawProperties(surface *graphics.Surface, bounds graphics.Rect) {
 	surface.PushClipRect(bounds)
-	drawWorkspaceText(surface, c.font, bounds.MinX+16, bounds.MinY+28, "Button", workspaceText)
-	y := bounds.MinY + 48
-	drawPropertyField(surface, c.font, bounds, y, "ID", "button1", 0)
-	y += 40
-	drawPropertyField(surface, c.font, bounds, y, "Text", c.design.buttonText, 0)
-	y += 40
-	drawPropertyField(surface, c.font, bounds, y, "Width", "160", 1)
-	y += 40
-	drawPropertyField(surface, c.font, bounds, y, "Height", "36", 1)
-	y += 40
-	drawPropertyField(surface, c.font, bounds, y, "Background", "#1976D2", 2)
-	y += 40
-	drawPropertyField(surface, c.font, bounds, y, "Text Color", "#FFFFFF", 3)
-	y += 40
-	drawPropertyField(surface, c.font, bounds, y, "Radius", "4", 1)
-	y += 42
-	drawWorkspaceText(surface, c.font, bounds.MinX+16, y+18, "Alignment", workspaceText)
-	fieldX := bounds.MinX + 78
-	fieldWidth := bounds.MaxX - fieldX - 14
-	if fieldWidth > 0 {
-		surface.FillRect(graphics.R(fieldX, y, fieldWidth, 27), workspaceField)
-		surface.StrokeRect(graphics.R(fieldX, y, fieldWidth, 27), 1, workspaceBorder)
-		third := fieldWidth / 3
-		surface.FillRect(graphics.R(fieldX+third, y+1, third, 25), workspaceBlueLight)
-		drawWorkspaceText(surface, c.font, fieldX+12, y+19, "E", workspaceMuted)
-		drawWorkspaceText(surface, c.font, fieldX+third+12, y+19, "=", workspaceBlue)
-		drawWorkspaceText(surface, c.font, fieldX+third*2+12, y+19, "E", workspaceMuted)
+	title := "MainForm"
+	if c.design != nil && c.selected >= 0 && c.selected < len(c.design.controls) {
+		title = c.design.controls[c.selected].name
 	}
-	y += 58
-	drawChevron(surface, bounds.MinX+20, y+4, false, workspaceMuted)
-	drawWorkspaceText(surface, c.font, bounds.MinX+34, y+9, "EVENTS", workspaceText)
+	drawWorkspaceText(surface, c.font, bounds.MinX+16, bounds.MinY+28, title, workspaceText)
+	properties := c.propertyNames()
+	y := bounds.MinY + 48
+	for i := 0; i < len(properties); i++ {
+		value := c.propertyValue(properties[i])
+		if c.active == properties[i] {
+			value = c.editBuffer
+		}
+		kind := 0
+		if properties[i] == "X" || properties[i] == "Y" || properties[i] == "Width" || properties[i] == "Height" {
+			kind = 1
+		}
+		drawPropertyField(surface, c.font, bounds, y, properties[i], value, kind)
+		if c.active == properties[i] {
+			fieldX := bounds.MinX + 78
+			surface.StrokeRect(graphics.R(fieldX, y, bounds.MaxX-fieldX-14, 27), 2, workspaceBlue)
+		}
+		y += 40
+	}
+	if c.design != nil && c.selected >= 0 && c.selected < len(c.design.controls) && c.design.controls[c.selected].kind == designerButton && c.design.controls[c.selected].clickHandler == "" {
+		drawWorkspaceText(surface, c.font, bounds.MinX+78, y-13, "Click to create handler", workspaceBlue)
+	}
 	surface.PopClip()
 }
 

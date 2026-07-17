@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"j5.nz/rtg/rtg/ide"
@@ -104,6 +105,79 @@ func TestCodeAndDesignerAreSeparateViewsSharingDocumentBounds(t *testing.T) {
 	form.showCode()
 	if !form.editor.Visible() || form.designer.Visible() || form.designerView {
 		t.Fatal("code view did not replace designer view")
+	}
+}
+
+func TestDesignerAddsMovesEditsAndWiresAControlThroughGoSource(t *testing.T) {
+	root := t.TempDir()
+	form := NewMainForm(root)
+	form.showDesigner()
+	if !form.designerView {
+		t.Fatal("designer did not open generated form source")
+	}
+
+	// Pick Button from the live palette. It is inserted and selected.
+	inspector := form.inspector.Bounds()
+	paletteX := inspector.MinX + 24
+	buttonY := inspector.MinY + workspacePaneHeaderHeight + 94
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerDown, X: paletteX, Y: buttonY, Button: 1})
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerUp, X: paletteX, Y: buttonY, Button: 1})
+	selected := len(form.design.controls) - 1
+	if selected != 2 || form.design.controls[selected].name != "button1" || form.designer.selected != selected || form.inspector.selected != selected {
+		t.Fatalf("inserted control state = %#v, designer %d inspector %d", form.design.controls, form.designer.selected, form.inspector.selected)
+	}
+
+	// Drag the selected control through normal form dispatch. Pointer capture
+	// keeps the operation attached to the designer until pointer-up.
+	designer := form.designer.Bounds()
+	canvas := graphics.R(designer.MinX, designer.MinY+workspacePaneHeaderHeight+workspaceDesignerToolbarHeight, designer.Width(), designer.Height()-workspacePaneHeaderHeight-workspaceDesignerToolbarHeight-workspaceStatusHeight)
+	layout := calculateDesignerPreview(canvas, &form.design)
+	controlBounds := designerControlBounds(layout, form.design.controls[selected])
+	startX := controlBounds.MinX + controlBounds.Width()/2
+	startY := controlBounds.MinY + controlBounds.Height()/2
+	oldX := form.design.controls[selected].x
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerDown, X: startX, Y: startY, Button: 1})
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerMove, X: startX + 24, Y: startY + 12, Button: 1})
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerUp, X: startX + 24, Y: startY + 12, Button: 1})
+	if form.design.controls[selected].x <= oldX {
+		t.Fatalf("drag did not move control: %#v", form.design.controls[selected])
+	}
+	layout = calculateDesignerPreview(canvas, &form.design)
+	controlBounds = designerControlBounds(layout, form.design.controls[selected])
+	resizeX := controlBounds.MaxX
+	resizeY := controlBounds.MaxY
+	oldWidth := form.design.controls[selected].width
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerDown, X: resizeX, Y: resizeY, Button: 1})
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerMove, X: resizeX + 20, Y: resizeY + 8, Button: 1})
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerUp, X: resizeX + 20, Y: resizeY + 8, Button: 1})
+	if form.design.controls[selected].width <= oldWidth {
+		t.Fatalf("resize handle did not resize control: %#v", form.design.controls[selected])
+	}
+
+	// Replace Text in the property grid, then create the empty Click event.
+	paletteWidth := inspector.Width() * 39 / 100
+	propertyX := inspector.MinX + paletteWidth + 100
+	textY := inspector.MinY + workspacePaneHeaderHeight + 48 + 40 + 10
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerDown, X: propertyX, Y: textY, Button: 1})
+	form.Dispatch(graphics.Event{Type: graphics.EventTextInput, Text: "Launch"})
+	form.Dispatch(graphics.Event{Type: graphics.EventKeyDown, Key: graphics.KeyEnter})
+	clickY := inspector.MinY + workspacePaneHeaderHeight + 48 + 6*40 + 10
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerDown, X: propertyX, Y: clickY, Button: 1})
+
+	generated, err := os.ReadFile(filepath.Join(root, projectGeneratedFormFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	generatedText := string(generated)
+	if !strings.Contains(generatedText, `f.button1.SetText("Launch")`) || !strings.Contains(generatedText, "f.button1.Click = f.button1Click") {
+		t.Fatalf("generated source did not own edited properties and event:\n%s", generated)
+	}
+	user, err := os.ReadFile(filepath.Join(root, projectUserFormFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(user), "func (f *MainForm) button1Click()") != 1 {
+		t.Fatalf("user callback was not created exactly once:\n%s", user)
 	}
 }
 

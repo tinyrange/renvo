@@ -22,6 +22,13 @@ func (f *MainForm) initializeComponent(root string) {
 	f.appBar.Run = f.runProject
 	f.editorFrame.ShowDesigner = f.showDesigner
 	f.designer.ShowCode = f.showCode
+	f.designer.SetDesign(&f.design)
+	f.designer.Changed = f.designerChanged
+	f.designer.SelectionChanged = f.designerSelectionChanged
+	f.inspector.SetDesign(&f.design)
+	f.inspector.AddControl = f.addDesignerControl
+	f.inspector.Changed = f.designerChanged
+	f.inspector.CreateEvent = f.createDesignerEvent
 
 	f.explorer = ide.NewExplorerControl(ide.OpenExplorer(root))
 	f.explorer.SetFont(uiFont)
