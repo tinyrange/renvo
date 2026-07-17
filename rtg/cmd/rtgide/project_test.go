@@ -17,6 +17,7 @@ func TestGeneratedHelloFormIsGoSourceWithDesignerOwnedStructAndWiring(t *testing
 	text := string(source)
 	for _, want := range []string{
 		"type MainForm struct",
+		"f.uiFont = gofont.New(15)",
 		"f.messageLabel = forms.NewLabel()",
 		"f.helloButton = forms.NewButton()",
 		"f.helloButton.Click = f.helloButtonClick",
@@ -34,6 +35,12 @@ func TestGeneratedFormIsTheRoundTrippableDesignerDocument(t *testing.T) {
 		controls: []designerControl{
 			{kind: designerLabel, name: "statusLabel", text: "Ready\nnow", x: 17, y: 21, width: 180, height: 30},
 			{kind: designerButton, name: "launchButton", text: "Launch \"app\"", x: 220, y: 260, width: 140, height: 42, clickHandler: "launchButtonClick"},
+			{kind: designerTextBox, name: "nameTextBox", text: "Ada", x: 20, y: 70, width: 180, height: 32},
+			{kind: designerTextArea, name: "notesTextArea", text: "one\ntwo", x: 20, y: 110, width: 220, height: 90},
+			{kind: designerCheckBox, name: "enabledCheckBox", text: "Enabled", x: 270, y: 70, width: 140, height: 28, checked: true},
+			{kind: designerRadioButton, name: "modeRadioButton", text: "Mode", x: 270, y: 105, width: 140, height: 28},
+			{kind: designerPictureBox, name: "logoPictureBox", x: 450, y: 30, width: 120, height: 90},
+			{kind: designerPanel, name: "settingsPanel", x: 260, y: 150, width: 250, height: 100},
 		},
 	}
 	source := generatedFormSource(design)

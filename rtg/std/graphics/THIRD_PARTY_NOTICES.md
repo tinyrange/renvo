@@ -25,3 +25,7 @@ freely, subject to the following restrictions:
    misrepresented as being the original software.
 3. This notice may not be removed or altered from any source distribution.
 ```
+
+The embedded Go Regular TrueType font in `gofont/` was created by Bigelow &
+Holmes for the Go project. It is distributed under the BSD-style terms in
+[`gofont/LICENSE`](gofont/LICENSE).

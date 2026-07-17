@@ -60,7 +60,8 @@ func TestMainFormRendersAndResizesOnlyItsPanes(t *testing.T) {
 	if form.explorer.Bounds() != layout.explorer {
 		t.Fatalf("explorer bounds = %#v", form.explorer.Bounds())
 	}
-	if form.editor.Bounds() != layout.editor {
+	wantEditor := rect(int(layout.editor.MinX), int(layout.editor.MinY), 720-int(layout.editor.MinX), int(layout.editor.Height()))
+	if form.editor.Bounds() != wantEditor {
 		t.Fatalf("editor bounds = %#v", form.editor.Bounds())
 	}
 	if form.designer.Bounds() != layout.designer || form.inspector.Bounds() != layout.inspector {
@@ -92,18 +93,18 @@ func TestWorkspaceReferenceGeometry(t *testing.T) {
 
 func TestCodeAndDesignerAreSeparateViewsSharingDocumentBounds(t *testing.T) {
 	form := NewMainForm(t.TempDir())
-	if !form.editor.Visible() || form.designer.Visible() || form.designerView {
+	if !form.editor.Visible() || form.designer.Visible() || form.inspector.Visible() || form.designerView {
 		t.Fatal("new form did not start in code view")
 	}
 	form.showDesigner()
-	if form.editor.Visible() || !form.designer.Visible() || !form.designerView {
+	if form.editor.Visible() || !form.designer.Visible() || !form.inspector.Visible() || !form.designerView {
 		t.Fatal("designer view did not replace code view")
 	}
 	if form.editorFrame.Bounds() != form.designer.Bounds() {
 		t.Fatalf("code/designer document bounds differ: %#v %#v", form.editorFrame.Bounds(), form.designer.Bounds())
 	}
 	form.showCode()
-	if !form.editor.Visible() || form.designer.Visible() || form.designerView {
+	if !form.editor.Visible() || form.designer.Visible() || form.inspector.Visible() || form.designerView {
 		t.Fatal("code view did not replace designer view")
 	}
 }
@@ -117,9 +118,9 @@ func TestDesignerAddsMovesEditsAndWiresAControlThroughGoSource(t *testing.T) {
 	}
 
 	// Pick Button from the live palette. It is inserted and selected.
-	inspector := form.inspector.Bounds()
-	paletteX := inspector.MinX + 24
-	buttonY := inspector.MinY + workspacePaneHeaderHeight + 94
+	designer := form.designer.Bounds()
+	paletteX := designer.MinX + 48 + 88 + 20
+	buttonY := designer.MinY + workspacePaneHeaderHeight + 20
 	form.Dispatch(graphics.Event{Type: graphics.EventPointerDown, X: paletteX, Y: buttonY, Button: 1})
 	form.Dispatch(graphics.Event{Type: graphics.EventPointerUp, X: paletteX, Y: buttonY, Button: 1})
 	selected := len(form.design.controls) - 1
@@ -129,7 +130,6 @@ func TestDesignerAddsMovesEditsAndWiresAControlThroughGoSource(t *testing.T) {
 
 	// Drag the selected control through normal form dispatch. Pointer capture
 	// keeps the operation attached to the designer until pointer-up.
-	designer := form.designer.Bounds()
 	canvas := graphics.R(designer.MinX, designer.MinY+workspacePaneHeaderHeight+workspaceDesignerToolbarHeight, designer.Width(), designer.Height()-workspacePaneHeaderHeight-workspaceDesignerToolbarHeight-workspaceStatusHeight)
 	layout := calculateDesignerPreview(canvas, &form.design)
 	controlBounds := designerControlBounds(layout, form.design.controls[selected])
@@ -155,8 +155,8 @@ func TestDesignerAddsMovesEditsAndWiresAControlThroughGoSource(t *testing.T) {
 	}
 
 	// Replace Text in the property grid, then create the empty Click event.
-	paletteWidth := inspector.Width() * 39 / 100
-	propertyX := inspector.MinX + paletteWidth + 100
+	inspector := form.inspector.Bounds()
+	propertyX := inspector.MinX + 100
 	textY := inspector.MinY + workspacePaneHeaderHeight + 48 + 40 + 10
 	form.Dispatch(graphics.Event{Type: graphics.EventPointerDown, X: propertyX, Y: textY, Button: 1})
 	form.Dispatch(graphics.Event{Type: graphics.EventTextInput, Text: "Launch"})
@@ -179,6 +179,35 @@ func TestDesignerAddsMovesEditsAndWiresAControlThroughGoSource(t *testing.T) {
 	if strings.Count(string(user), "func (f *MainForm) button1Click()") != 1 {
 		t.Fatalf("user callback was not created exactly once:\n%s", user)
 	}
+
+	for paletteIndex := 2; paletteIndex < 8; paletteIndex++ {
+		x := designer.MinX + 48 + graphics.Scalar(paletteIndex*88+20)
+		y := designer.MinY + workspacePaneHeaderHeight + 20
+		form.Dispatch(graphics.Event{Type: graphics.EventPointerDown, X: x, Y: y, Button: 1})
+		form.Dispatch(graphics.Event{Type: graphics.EventPointerUp, X: x, Y: y, Button: 1})
+		if paletteIndex == 4 {
+			checkedY := inspector.MinY + workspacePaneHeaderHeight + 48 + 6*40 + 10
+			form.Dispatch(graphics.Event{Type: graphics.EventPointerDown, X: propertyX, Y: checkedY, Button: 1})
+			form.Dispatch(graphics.Event{Type: graphics.EventPointerUp, X: propertyX, Y: checkedY, Button: 1})
+		}
+	}
+	if len(form.design.controls) != 9 {
+		t.Fatalf("complete palette created %d controls, want 9", len(form.design.controls))
+	}
+	generated, err = os.ReadFile(filepath.Join(root, projectGeneratedFormFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, constructor := range []string{"forms.NewTextBox()", "forms.NewTextArea()", "forms.NewCheckBox()", "forms.NewRadioButton()", "forms.NewPictureBox()", "forms.NewPanel()"} {
+		if !strings.Contains(string(generated), constructor) {
+			t.Fatalf("generated source missing %s", constructor)
+		}
+	}
+	if !strings.Contains(string(generated), ".SetChecked(true)") {
+		t.Fatal("checked property was not regenerated")
+	}
+	surface := graphics.NewSurface(1440, 520)
+	writeUIAutomationScreenshot(t, form, surface, "06_designer_controls.ppm")
 }
 
 func TestEditorNavigationDoesNotDamageMockWorkspacePanes(t *testing.T) {

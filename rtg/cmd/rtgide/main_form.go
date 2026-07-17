@@ -74,6 +74,12 @@ func (f *MainForm) saveCurrentFile() {
 func (f *MainForm) formResize() {
 	width, height := f.Size()
 	layout := calculateWorkspaceLayout(width, height)
+	if !f.designerView {
+		documentX := int(layout.editorFrame.MinX)
+		layout.editorFrame = rect(documentX, workspaceAppBarHeight, width-documentX, int(layout.editorFrame.Height()))
+		layout.output = rect(documentX, int(layout.output.MinY), width-documentX, int(layout.output.Height()))
+		layout.editor = rect(documentX, int(layout.editor.MinY), width-documentX, int(layout.editor.Height()))
+	}
 	f.appBar.SetBounds(rect(0, 0, width, workspaceAppBarHeight))
 	f.explorerFrame.SetBounds(layout.explorerFrame)
 	f.editorFrame.SetBounds(layout.editorFrame)
@@ -91,8 +97,10 @@ func (f *MainForm) showCode() {
 	}
 	f.designerView = false
 	f.designer.SetVisible(false)
+	f.inspector.SetVisible(false)
 	f.editorFrame.SetVisible(true)
 	f.editor.SetVisible(true)
+	f.formResize()
 }
 
 func (f *MainForm) showDesigner() {
@@ -117,6 +125,8 @@ func (f *MainForm) showDesigner() {
 	f.editorFrame.SetVisible(false)
 	f.editor.SetVisible(false)
 	f.designer.SetVisible(true)
+	f.inspector.SetVisible(true)
+	f.formResize()
 }
 
 func (f *MainForm) designerSelectionChanged(index int) {
@@ -131,8 +141,35 @@ func (f *MainForm) addDesignerControl(kind string) {
 	if kind == designerButton {
 		base = "button"
 		text = "Button"
-		width = 120
 		height = 36
+	} else if kind == designerTextBox {
+		base = "textBox"
+		text = "Text input"
+		width = 180
+		height = 32
+	} else if kind == designerTextArea {
+		base = "textArea"
+		text = "Text area"
+		width = 220
+		height = 90
+	} else if kind == designerCheckBox {
+		base = "checkBox"
+		text = "Check box"
+		width = 140
+	} else if kind == designerRadioButton {
+		base = "radioButton"
+		text = "Radio button"
+		width = 150
+	} else if kind == designerPictureBox {
+		base = "pictureBox"
+		text = ""
+		width = 140
+		height = 100
+	} else if kind == designerPanel {
+		base = "panel"
+		text = ""
+		width = 240
+		height = 140
 	}
 	name := f.nextDesignerName(base)
 	offset := len(f.design.controls) * 12
@@ -144,8 +181,16 @@ func (f *MainForm) addDesignerControl(kind string) {
 	if y+height > f.design.height {
 		y = 24
 	}
-	f.design.controls = append(f.design.controls, designerControl{kind: kind, name: name, text: text, x: x, y: y, width: width, height: height})
-	index := len(f.design.controls) - 1
+	control := designerControl{kind: kind, name: name, text: text, x: x, y: y, width: width, height: height}
+	index := len(f.design.controls)
+	if kind == designerPanel {
+		f.design.controls = append(f.design.controls, designerControl{})
+		copy(f.design.controls[1:], f.design.controls[:len(f.design.controls)-1])
+		f.design.controls[0] = control
+		index = 0
+	} else {
+		f.design.controls = append(f.design.controls, control)
+	}
 	f.designer.SetSelection(index)
 	f.inspector.SetSelection(index)
 	f.designer.Invalidate()

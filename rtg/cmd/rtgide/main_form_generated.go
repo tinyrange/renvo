@@ -25,8 +25,8 @@ func (f *MainForm) initializeComponent(root string) {
 	f.designer.SetDesign(&f.design)
 	f.designer.Changed = f.designerChanged
 	f.designer.SelectionChanged = f.designerSelectionChanged
+	f.designer.AddControl = f.addDesignerControl
 	f.inspector.SetDesign(&f.design)
-	f.inspector.AddControl = f.addDesignerControl
 	f.inspector.Changed = f.designerChanged
 	f.inspector.CreateEvent = f.createDesignerEvent
 
@@ -48,6 +48,7 @@ func (f *MainForm) initializeComponent(root string) {
 	f.Add(&f.explorer.Control)
 	f.Add(&f.editor.Control)
 	f.designer.SetVisible(false)
+	f.inspector.SetVisible(false)
 	f.formResize()
 }
 

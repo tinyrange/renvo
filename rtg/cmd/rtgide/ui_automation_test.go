@@ -15,7 +15,7 @@ func TestIDEUIAutomationScreenshots(t *testing.T) {
 	source := "package main\n\nimport \"fmt\"\n\nfunc main() {\n"
 	for i := 0; i < 32; i++ {
 		n := strconv.Itoa(i)
-		source += "\tvalue" + n + " := \"this deliberately long highlighted editor line " + n + " keeps the caret away from every viewport edge\" // row " + n + "\n"
+		source += "\tvalue" + n + " := \"this deliberately long highlighted editor line " + n + " keeps the caret away from every viewport edge even in the expanded code-only layout\" // row " + n + "\n"
 	}
 	source += "\tfmt.Println(value31)\n}\n"
 	if err := os.WriteFile(path, []byte(source), 0644); err != nil {
