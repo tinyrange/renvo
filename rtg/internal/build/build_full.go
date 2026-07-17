@@ -10,14 +10,6 @@ import (
 	"j5.nz/rtg/rtg/internal/unit"
 )
 
-const (
-	BuildOK = iota
-	BuildErrCheck
-	BuildErrLower
-	BuildErrUnit
-	BuildErrRoot
-)
-
 type PackageUnit struct {
 	ImportPath string
 	Name       string
@@ -45,18 +37,18 @@ type Result struct {
 }
 
 func BuildUnits(graph load.Graph) Result {
-	return buildUnits(graph, true)
+	return buildUnits(graph)
 }
 
 func BuildPrograms(graph load.Graph) Result {
-	return buildUnits(graph, false)
+	return buildProgramsCore(graph, false)
 }
 
 func BuildProgramsTransient(graph load.Graph) Result {
-	return BuildPrograms(graph)
+	return buildProgramsCore(graph, true)
 }
 
-func buildUnits(graph load.Graph, encodePackages bool) Result {
+func buildUnits(graph load.Graph) Result {
 	semantic.LowerInterfaces(&graph)
 	prog := check.CheckGraph(graph)
 	result := Result{
@@ -74,12 +66,7 @@ func buildUnits(graph load.Graph, encodePackages bool) Result {
 	}
 	for i := 0; i < len(graph.Packages); i++ {
 		pkg := graph.Packages[i]
-		var emit lower.Result
-		if encodePackages {
-			emit = lower.EmitCheckedPackage(pkg, prog.Packages[i])
-		} else {
-			emit = lower.EmitCheckedPackageFast(pkg, prog.Packages[i])
-		}
+		emit := lower.EmitCheckedPackage(pkg, prog.Packages[i])
 		if !emit.Ok {
 			result.ErrorDetail = emit.Error
 			result.LowerError = emit.Error
@@ -91,13 +78,9 @@ func buildUnits(graph load.Graph, encodePackages bool) Result {
 			result.LowerUnitC = emit.UnitC
 			return buildFail(result, BuildErrLower, i, emit.ErrorFile, emit.ErrorToken)
 		}
-		var data []byte
-		if encodePackages {
-			var ok bool
-			data, ok = unit.Marshal(emit.Program)
-			if !ok {
-				return buildFail(result, BuildErrUnit, i, -1, -1)
-			}
+		data, ok := unit.Marshal(emit.Program)
+		if !ok {
+			return buildFail(result, BuildErrUnit, i, -1, -1)
 		}
 		if pkg.Ref.ImportPath == graph.Root {
 			result.Root = len(result.Units)
@@ -115,18 +98,32 @@ func buildUnits(graph load.Graph, encodePackages bool) Result {
 	return result
 }
 
-func RootUnit(result Result) PackageUnit {
-	if !result.Ok || result.Root < 0 || result.Root >= len(result.Units) {
-		return PackageUnit{}
+func markCoreBuildArena() int { return 0 }
+
+func makeCorePackageUnit(program unit.Program, arenaStart int, arenaEnd int) PackageUnit {
+	return PackageUnit{
+		ImportPath: program.ImportPath,
+		Name:       program.Package,
+		Program:    program,
 	}
-	return result.Units[result.Root]
 }
 
-func buildFail(result Result, err int, pkg int, file int, tok int) Result {
-	result.Ok = false
-	result.Error = err
-	result.ErrorPackage = pkg
-	result.ErrorFile = file
-	result.ErrorToken = tok
+func discardCoreBuildArena(start int, end int) {}
+
+func discardCorePackageSources(pkg load.Package) {}
+
+func retainCoreCheckResult(result Result, prog check.Program) Result {
+	result.Check = prog
+	return result
+}
+
+func retainCoreLowerError(result Result, emit lower.Result) Result {
+	result.LowerError = emit.Error
+	result.LowerUnitError = emit.UnitError
+	result.LowerUnitIndex = emit.UnitIndex
+	result.LowerUnitDetail = emit.UnitDetail
+	result.LowerUnitA = emit.UnitA
+	result.LowerUnitB = emit.UnitB
+	result.LowerUnitC = emit.UnitC
 	return result
 }
