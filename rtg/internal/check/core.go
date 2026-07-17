@@ -99,13 +99,17 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			if excludedTok := excludedFeatureToken(file, fn); excludedTok >= 0 {
 				return info, false, CheckErrExcluded, fileIndex, excludedTok
 			}
+			bodyArenaStart := arena.Mark()
 			body := syntax.ParseFuncBodyStatements(file, fn)
 			if !body.Ok {
+				arena.Reset(bodyArenaStart)
 				return info, false, CheckErrBody, fileIndex, body.ErrorTok
 			}
 			if statementErr, statementTok := invalidDefiniteStatement(file, body); statementErr != CheckOK {
+				arena.Reset(bodyArenaStart)
 				return info, false, statementErr, fileIndex, statementTok
 			}
+			arena.Reset(bodyArenaStart)
 			signature := buildFuncSignature(file, fn)
 			if returnTok := invalidReturnCount(file, fn, signature); returnTok >= 0 {
 				return info, false, CheckErrReturnCount, fileIndex, returnTok
@@ -219,10 +223,11 @@ func resolutionCapacitiesCore(tokens int) (int, int) {
 	if tokens < 0 {
 		tokens = 0
 	}
-	// Package references and import selectors are a small subset of the token
-	// stream. These starting capacities avoid a second full resolution scan and
-	// still let append grow for unusually reference-dense source.
-	return tokens/8 + 4, tokens/64 + 2
+	// Package references are usually fewer than one per fourteen tokens. Import
+	// selectors are rarer still, so let that slice grow only in packages that
+	// actually use one. This avoids reserving thousands of empty selector rows
+	// while self-hosting the import-free backend package.
+	return tokens/14 + 4, 0
 }
 
 func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope CoreScope, start int, end int) ([]CoreNameRef, []CoreSelectorRef) {

@@ -6,37 +6,55 @@ import (
 )
 
 type interfaceMethod struct {
-	name      string
-	signature string
+	name      semanticText
+	signature semanticTokens
 }
 
 type interfaceType struct {
 	pkg       int
 	file      int
-	name      string
+	name      semanticText
 	start     int
 	end       int
 	methods   []interfaceMethod
-	candidate string
+	candidate semanticText
 }
 
 type concreteMethod struct {
 	pkg       int
-	receiver  string
+	receiver  semanticText
 	pointer   bool
-	name      string
-	signature string
+	name      semanticText
+	signature semanticTokens
 }
 
 type concreteType struct {
 	pkg  int
-	name string
+	name semanticText
+}
+
+// semanticText and semanticTokens retain spans in the already-loaded source
+// instead of materializing a string for every token inspected by the pass.
+// That distinction matters to the self-hosted compiler: its bump arena cannot
+// reclaim short-lived strings until the frontend phase finishes.
+type semanticText struct {
+	src   []byte
+	start int
+	end   int
+}
+
+type semanticTokens struct {
+	src    []byte
+	tokens []syntax.Token
+	start  int
+	end    int
 }
 
 type sourceEdit struct {
-	start int
-	end   int
-	text  string
+	start       int
+	end         int
+	literal     string
+	replacement semanticText
 }
 
 // LowerInterfaces performs closed-world devirtualization only when an
@@ -48,13 +66,13 @@ func LowerInterfaces(graph *load.Graph) {
 	}
 	interfaces, methods, concrete := collectInterfaceTypes(graph)
 	for i := 0; i < len(interfaces); i++ {
-		candidate := ""
+		candidate := semanticText{}
 		for j := 0; j < len(concrete); j++ {
 			if concrete[j].pkg != interfaces[i].pkg || !implementsInterface(methods, &concrete[j], &interfaces[i]) {
 				continue
 			}
-			if candidate != "" {
-				candidate = ""
+			if semanticTextValid(candidate) {
+				candidate = semanticText{}
 				break
 			}
 			candidate = concrete[j].name
@@ -87,17 +105,17 @@ func collectInterfaceTypes(graph *load.Graph) ([]interfaceType, []concreteMethod
 				if decl.Kind != syntax.TokenType {
 					continue
 				}
-				name := semanticToken(&file, decl.NameTok)
+				name := semanticTokenText(&file, decl.NameTok)
 				typeStart := decl.NameTok + 1
-				if semanticToken(&file, typeStart) == "=" {
+				if semanticTokenEquals(&file, typeStart, "=") {
 					typeStart++
 				}
-				if typeStart < decl.EndTok && file.Tokens[typeStart].Kind == syntax.TokenInterface && semanticToken(&file, typeStart+1) == "{" {
+				if typeStart < decl.EndTok && file.Tokens[typeStart].Kind == syntax.TokenInterface && semanticTokenEquals(&file, typeStart+1, "{") {
 					closeTok := semanticMatching(&file, typeStart+1, "{", "}")
 					if closeTok > typeStart+1 {
 						interfaces = append(interfaces, interfaceType{pkg: pkgIndex, file: fileIndex, name: name, start: file.Tokens[typeStart].Start, end: file.Tokens[closeTok].End, methods: semanticInterfaceMethods(&file, typeStart+2, closeTok)})
 					}
-				} else if name != "" {
+				} else if semanticTextValid(name) {
 					concrete = append(concrete, concreteType{pkg: pkgIndex, name: name})
 				}
 			}
@@ -106,20 +124,20 @@ func collectInterfaceTypes(graph *load.Graph) ([]interfaceType, []concreteMethod
 				if fn.ReceiverStart < 0 {
 					continue
 				}
-				receiver := ""
+				receiver := semanticText{}
 				pointer := false
 				for tok := fn.ReceiverStart; tok < fn.ReceiverEnd; tok++ {
-					if semanticToken(&file, tok) == "*" {
+					if semanticTokenEquals(&file, tok, "*") {
 						pointer = true
 					}
 					if file.Tokens[tok].Kind == syntax.TokenIdent {
-						receiver = semanticToken(&file, tok)
+						receiver = semanticTokenText(&file, tok)
 					}
 				}
 				openTok := fn.NameTok + 1
 				closeTok := semanticMatching(&file, openTok, "(", ")")
-				if receiver != "" && closeTok > openTok {
-					methods = append(methods, concreteMethod{pkg: pkgIndex, receiver: receiver, pointer: pointer, name: semanticToken(&file, fn.NameTok), signature: semanticTokenSpan(&file, openTok, fn.BodyStart)})
+				if semanticTextValid(receiver) && closeTok > openTok {
+					methods = append(methods, concreteMethod{pkg: pkgIndex, receiver: receiver, pointer: pointer, name: semanticTokenText(&file, fn.NameTok), signature: semanticTokenSequence(&file, openTok, fn.BodyStart)})
 				}
 			}
 		}
@@ -130,7 +148,7 @@ func collectInterfaceTypes(graph *load.Graph) ([]interfaceType, []concreteMethod
 func semanticInterfaceMethods(file *syntax.File, start int, end int) []interfaceMethod {
 	var out []interfaceMethod
 	for i := start; i+1 < end; i++ {
-		if file.Tokens[i].Kind != syntax.TokenIdent || semanticToken(file, i+1) != "(" {
+		if file.Tokens[i].Kind != syntax.TokenIdent || !semanticTokenEquals(file, i+1, "(") {
 			continue
 		}
 		closeTok := semanticMatching(file, i+1, "(", ")")
@@ -138,10 +156,10 @@ func semanticInterfaceMethods(file *syntax.File, start int, end int) []interface
 			return nil
 		}
 		resultEnd := closeTok + 1
-		for resultEnd < end && semanticToken(file, resultEnd) != ";" && file.Tokens[resultEnd].Line == file.Tokens[closeTok].Line {
+		for resultEnd < end && !semanticTokenEquals(file, resultEnd, ";") && file.Tokens[resultEnd].Line == file.Tokens[closeTok].Line {
 			resultEnd++
 		}
-		out = append(out, interfaceMethod{name: semanticToken(file, i), signature: semanticTokenSpan(file, i+1, resultEnd)})
+		out = append(out, interfaceMethod{name: semanticTokenText(file, i), signature: semanticTokenSequence(file, i+1, resultEnd)})
 		i = resultEnd
 	}
 	return out
@@ -155,7 +173,7 @@ func implementsInterface(methods []concreteMethod, concrete *concreteType, iface
 		found := false
 		for j := 0; j < len(methods); j++ {
 			method := methods[j]
-			if method.pkg == concrete.pkg && method.receiver == concrete.name && !method.pointer && method.name == iface.methods[i].name && method.signature == iface.methods[i].signature {
+			if method.pkg == concrete.pkg && semanticTextEqual(method.receiver, concrete.name) && !method.pointer && semanticTextEqual(method.name, iface.methods[i].name) && semanticTokensEqual(method.signature, iface.methods[i].signature) {
 				found = true
 				break
 			}
@@ -169,68 +187,67 @@ func implementsInterface(methods []concreteMethod, concrete *concreteType, iface
 
 func interfaceFileEdits(file *syntax.File, interfaces []interfaceType, pkgIndex int, fileIndex int) []sourceEdit {
 	var edits []sourceEdit
-	var names []string
-	var candidates []string
+	var names []semanticText
+	var candidates []semanticText
 	for i := 0; i < len(interfaces); i++ {
 		iface := interfaces[i]
-		if iface.pkg != pkgIndex || iface.candidate == "" {
+		if iface.pkg != pkgIndex || !semanticTextValid(iface.candidate) {
 			continue
 		}
 		names = append(names, iface.name)
 		candidates = append(candidates, iface.candidate)
 		if iface.file == fileIndex {
-			edits = append(edits, sourceEdit{start: iface.start, end: iface.end, text: "= " + iface.candidate})
+			edits = append(edits, sourceEdit{start: iface.start, end: iface.end, literal: "= ", replacement: iface.candidate})
 		}
 	}
 	if len(names) == 0 {
 		return edits
 	}
-	var values []string
+	var values []semanticText
 	for i := 0; i+1 < len(file.Tokens); i++ {
-		nameIndex := semanticStringIndex(names, semanticToken(file, i+1))
+		nameIndex := semanticTextIndexToken(names, file, i+1)
 		if file.Tokens[i].Kind == syntax.TokenIdent && nameIndex >= 0 {
-			values = semanticAppendUnique(values, semanticToken(file, i))
-			edits = append(edits, sourceEdit{start: file.Tokens[i+1].Start, end: file.Tokens[i+1].End, text: candidates[nameIndex]})
+			values = semanticAppendUnique(values, semanticTokenText(file, i))
+			edits = append(edits, sourceEdit{start: file.Tokens[i+1].Start, end: file.Tokens[i+1].End, replacement: candidates[nameIndex]})
 		}
 	}
 	for i := 1; i+4 < len(file.Tokens); i++ {
-		base := semanticToken(file, i-1)
-		if semanticStringIndex(values, base) < 0 || semanticToken(file, i) != "." || semanticToken(file, i+1) != "(" || semanticToken(file, i+3) != ")" {
+		if semanticTextIndexToken(values, file, i-1) < 0 || !semanticTokenEquals(file, i, ".") || !semanticTokenEquals(file, i+1, "(") || !semanticTokenEquals(file, i+3, ")") {
 			continue
 		}
-		if semanticToken(file, i+2) == "type" {
+		if semanticTokenEquals(file, i+2, "type") {
 			if i >= 2 && file.Tokens[i-2].Kind == syntax.TokenSwitch {
 				closeBrace := semanticMatching(file, i+4, "{", "}")
 				if closeBrace > i+4 {
-					edits = append(edits, sourceEdit{start: file.Tokens[i-1].Start, end: file.Tokens[i+3].End, text: "1"})
+					edits = append(edits, sourceEdit{start: file.Tokens[i-1].Start, end: file.Tokens[i+3].End, literal: "1"})
 					edits = append(edits, semanticTypeSwitchCaseEdits(file, i+5, closeBrace, candidates)...)
 				}
 			}
 			continue
 		}
-		if semanticStringIndex(candidates, semanticToken(file, i+2)) < 0 {
+		if semanticTextIndexToken(candidates, file, i+2) < 0 {
 			continue
 		}
 		replacement := ""
 		if semanticCommaOK(file, i-1) {
 			replacement = ", true"
 		}
-		edits = append(edits, sourceEdit{start: file.Tokens[i].Start, end: file.Tokens[i+3].End, text: replacement})
+		edits = append(edits, sourceEdit{start: file.Tokens[i].Start, end: file.Tokens[i+3].End, literal: replacement})
 	}
 	return edits
 }
 
-func semanticTypeSwitchCaseEdits(file *syntax.File, start int, end int, candidates []string) []sourceEdit {
+func semanticTypeSwitchCaseEdits(file *syntax.File, start int, end int, candidates []semanticText) []sourceEdit {
 	var edits []sourceEdit
 	for i := start; i+1 < end; i++ {
 		if file.Tokens[i].Kind != syntax.TokenCase || file.Tokens[i+1].Kind != syntax.TokenIdent {
 			continue
 		}
 		value := "0"
-		if semanticStringIndex(candidates, semanticToken(file, i+1)) >= 0 {
+		if semanticTextIndexToken(candidates, file, i+1) >= 0 {
 			value = "1"
 		}
-		edits = append(edits, sourceEdit{start: file.Tokens[i+1].Start, end: file.Tokens[i+1].End, text: value})
+		edits = append(edits, sourceEdit{start: file.Tokens[i+1].Start, end: file.Tokens[i+1].End, literal: value})
 	}
 	return edits
 }
@@ -238,12 +255,11 @@ func semanticTypeSwitchCaseEdits(file *syntax.File, start int, end int, candidat
 func semanticCommaOK(file *syntax.File, rhs int) bool {
 	assignment := false
 	for i := rhs - 1; i >= 0 && file.Tokens[i].Line == file.Tokens[rhs].Line; i-- {
-		text := semanticToken(file, i)
-		if text == ":=" || text == "=" {
+		if semanticTokenEquals(file, i, ":=") || semanticTokenEquals(file, i, "=") {
 			assignment = true
 			continue
 		}
-		if assignment && text == "," {
+		if assignment && semanticTokenEquals(file, i, ",") {
 			return true
 		}
 	}
@@ -268,21 +284,24 @@ func applySourceEdits(src []byte, edits []sourceEdit) []byte {
 			continue
 		}
 		out = append(out, src[at:edit.start]...)
-		out = append(out, []byte(edit.text)...)
+		out = append(out, edit.literal...)
+		if semanticTextValid(edit.replacement) {
+			out = append(out, edit.replacement.src[edit.replacement.start:edit.replacement.end]...)
+		}
 		at = edit.end
 	}
 	return append(out, src[at:]...)
 }
 
 func semanticMatching(file *syntax.File, open int, left string, right string) int {
-	if semanticToken(file, open) != left {
+	if !semanticTokenEquals(file, open, left) {
 		return -1
 	}
 	depth := 0
 	for i := open; i < len(file.Tokens); i++ {
-		if semanticToken(file, i) == left {
+		if semanticTokenEquals(file, i, left) {
 			depth++
-		} else if semanticToken(file, i) == right {
+		} else if semanticTokenEquals(file, i, right) {
 			depth--
 			if depth == 0 {
 				return i
@@ -292,32 +311,88 @@ func semanticMatching(file *syntax.File, open int, left string, right string) in
 	return -1
 }
 
-func semanticTokenSpan(file *syntax.File, start int, end int) string {
-	out := ""
-	for i := start; i < end; i++ {
-		out += semanticToken(file, i)
-	}
-	return out
+func semanticTokenSequence(file *syntax.File, start int, end int) semanticTokens {
+	return semanticTokens{src: file.Src, tokens: file.Tokens, start: start, end: end}
 }
 
-func semanticToken(file *syntax.File, index int) string {
-	if index < 0 || index >= len(file.Tokens) {
-		return ""
-	}
-	return string(syntax.TokenText(file.Src, file.Tokens[index]))
+func semanticTokenText(file *syntax.File, index int) semanticText {
+	return semanticTokenTextFrom(file.Src, file.Tokens, index)
 }
 
-func semanticStringIndex(values []string, value string) int {
+func semanticTokenTextFrom(src []byte, tokens []syntax.Token, index int) semanticText {
+	if index < 0 || index >= len(tokens) {
+		return semanticText{}
+	}
+	tok := tokens[index]
+	if tok.Start < 0 || tok.End < tok.Start || tok.End > len(src) {
+		return semanticText{}
+	}
+	return semanticText{src: src, start: tok.Start, end: tok.End}
+}
+
+func semanticTokenEquals(file *syntax.File, index int, value string) bool {
+	return semanticTextEqualsString(semanticTokenText(file, index), value)
+}
+
+func semanticTextValid(value semanticText) bool {
+	return value.src != nil && value.start >= 0 && value.end > value.start && value.end <= len(value.src)
+}
+
+func semanticTextEqual(left semanticText, right semanticText) bool {
+	if !semanticTextValid(left) || !semanticTextValid(right) || left.end-left.start != right.end-right.start {
+		return false
+	}
+	for i := 0; i < left.end-left.start; i++ {
+		if left.src[left.start+i] != right.src[right.start+i] {
+			return false
+		}
+	}
+	return true
+}
+
+func semanticTextEqualsString(left semanticText, right string) bool {
+	if !semanticTextValid(left) || left.end-left.start != len(right) {
+		return false
+	}
+	for i := 0; i < len(right); i++ {
+		if left.src[left.start+i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func semanticTokensEqual(left semanticTokens, right semanticTokens) bool {
+	leftCount := left.end - left.start
+	if leftCount < 0 || leftCount != right.end-right.start {
+		return false
+	}
+	for i := 0; i < leftCount; i++ {
+		leftText := semanticTokenTextFrom(left.src, left.tokens, left.start+i)
+		rightText := semanticTokenTextFrom(right.src, right.tokens, right.start+i)
+		if !semanticTextEqual(leftText, rightText) {
+			return false
+		}
+	}
+	return true
+}
+
+func semanticTextIndexToken(values []semanticText, file *syntax.File, token int) int {
+	value := semanticTokenText(file, token)
+	return semanticTextIndex(values, value)
+}
+
+func semanticTextIndex(values []semanticText, value semanticText) int {
 	for i := 0; i < len(values); i++ {
-		if values[i] == value {
+		if semanticTextEqual(values[i], value) {
 			return i
 		}
 	}
 	return -1
 }
 
-func semanticAppendUnique(values []string, value string) []string {
-	if value != "" && semanticStringIndex(values, value) < 0 {
+func semanticAppendUnique(values []semanticText, value semanticText) []semanticText {
+	if semanticTextValid(value) && semanticTextIndex(values, value) < 0 {
 		return append(values, value)
 	}
 	return values
