@@ -8830,13 +8830,6 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 			}
 			if stmt.kind == rtgStmtShort {
 				inferredType := rtgInferParsedExprType(g, ep, len(ep.exprs)-1)
-				if assignTok+2 < stmt.endTok && rtgTokIsKind(p, assignTok+1, rtgTokIdent) && rtgTokCharIs(p, assignTok+2, '(') {
-					fnNameBase := (assignTok + 1) * rtgTokenStride
-					fnIndex := rtgFindMetaFunction(meta, int(tokenData[fnNameBase+1]), int(tokenData[fnNameBase+2]))
-					if fnIndex >= 0 {
-						inferredType = meta.funcs[fnIndex].resultType
-					}
-				}
 				if inferredType != 0 {
 					localType = inferredType
 				}

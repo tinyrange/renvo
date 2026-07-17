@@ -1705,19 +1705,21 @@ func rtg386EmitSelectorAddressRdx(g *rtgLinearGen, ep *rtgExprParse, idx int) bo
 	}
 	if base.kind == rtgExprCall {
 		baseResolved := rtgResolveType(meta, baseType)
-		if baseResolved.kind != rtgTypePointer {
+		if baseResolved.kind != rtgTypePointer && baseResolved.kind != rtgTypeStruct {
 			return false
 		}
-		if !rtgEmitIntExpr(g, ep, e.left) {
-			return false
+		if baseResolved.kind == rtgTypePointer {
+			if !rtgEmitIntExpr(g, ep, e.left) {
+				return false
+			}
+			rtgAsmCopyPrimaryToSecondary(a)
+			if fieldOffset != 0 {
+				rtgAsmAddSecondaryImm(a, fieldOffset)
+			}
+			return true
 		}
-		rtgAsmCopyPrimaryToSecondary(a)
-		if fieldOffset != 0 {
-			rtgAsmAddSecondaryImm(a, fieldOffset)
-		}
-		return true
 	}
-	if base.kind == rtgExprComposite {
+	if base.kind == rtgExprComposite || base.kind == rtgExprCall {
 		offset := rtgAddUnnamedLocal(g, baseType)
 		if !rtgEmitTypedAssign(g, ep, e.left, offset) {
 			return false
