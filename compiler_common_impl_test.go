@@ -390,6 +390,52 @@ func TestExpressionParserCapacityTracksTokenRange(t *testing.T) {
 	}
 }
 
+func TestAppendAssignmentRecognizesSameSource(t *testing.T) {
+	program := rtgParseProgram([]byte(`package main
+
+func appMain() int {
+	var out []byte
+	out = append(out, []byte("x")...)
+	return len(out)
+}
+`))
+	if !program.ok {
+		t.Fatal("test program did not parse")
+	}
+
+	lhsTok := -1
+	for i := 0; i+2 < rtgTokCount(&program); i++ {
+		if rtgBytesEqualText(program.src, rtgTokStart(&program, i), rtgTokEnd(&program, i), "out") &&
+			rtgTokCharIs(&program, i+1, '=') && rtgTokIdentIs(&program, i+2, "append") {
+			lhsTok = i
+			break
+		}
+	}
+	if lhsTok < 0 {
+		t.Fatal("append assignment tokens not found")
+	}
+	assignTok := lhsTok + 1
+	appendTok := lhsTok + 2
+	openTok := appendTok + 1
+	if !rtgTokCharIs(&program, openTok, '(') {
+		t.Fatal("append call opening parenthesis not found")
+	}
+	closeTok := rtgFindMatchingExprClose(&program, openTok+1, rtgTokCount(&program), '(', ')')
+	if closeTok <= openTok {
+		t.Fatal("append call closing parenthesis not found")
+	}
+
+	ep := rtgNewExprParse()
+	rootIndex := rtgParseExpressionRoot(ep, &program, appendTok, closeTok+1)
+	if rootIndex < 0 {
+		t.Fatal("append call expression did not parse")
+	}
+	stmt := rtgStmt{startTok: lhsTok, endTok: closeTok + 1}
+	if !rtgAppendAssignLhsMatchesSource(&program, &stmt, ep, &ep.exprs[rootIndex], assignTok) {
+		t.Fatal("out = append(out, ...) was not recognized as an in-place append")
+	}
+}
+
 func TestBuildMetaHandlesMoreThanInitialFuncCapacity(t *testing.T) {
 	src := []byte("package main\n")
 	for i := 0; i < 1301; i++ {

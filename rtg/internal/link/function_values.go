@@ -680,15 +680,25 @@ func reparseFunctionValueProgram(original *unit.Program, text []byte) bool {
 		return false
 	}
 	out := unit.Program{Package: original.Package, ImportPath: original.ImportPath, Text: text}
+	tokenMap := make([]int, len(file.Tokens)+1)
 	for i := 0; i < len(file.Tokens); i++ {
 		tok := file.Tokens[i]
-		out.Tokens = append(out.Tokens, unit.Token{Kind: functionValueUnitTokenKind(text, tok), Start: tok.Start, Size: tok.End - tok.Start, Line: tok.Line})
+		tokenMap[i] = len(out.Tokens)
+		kind := functionValueUnitTokenKind(text, tok)
+		if functionValueTokenIsEllipsis(text, tok) {
+			for dot := 0; dot < 3; dot++ {
+				out.Tokens = append(out.Tokens, unit.Token{Kind: kind, Start: tok.Start + dot, Size: 1, Line: tok.Line})
+			}
+		} else {
+			out.Tokens = append(out.Tokens, unit.Token{Kind: kind, Start: tok.Start, Size: tok.End - tok.Start, Line: tok.Line})
+		}
 	}
+	tokenMap[len(file.Tokens)] = len(out.Tokens)
 	eof := len(out.Tokens) - 1
 	for i := 0; i < len(file.Decls); i++ {
 		decl := file.Decls[i]
 		name := file.Tokens[decl.NameTok]
-		out.Decls = append(out.Decls, unit.Decl{Kind: functionValueDeclKind(decl.Kind), NameStart: name.Start, NameEnd: name.End, StartTok: decl.StartTok, EndTok: decl.EndTok})
+		out.Decls = append(out.Decls, unit.Decl{Kind: functionValueDeclKind(decl.Kind), NameStart: name.Start, NameEnd: name.End, StartTok: tokenMap[decl.StartTok], EndTok: tokenMap[decl.EndTok]})
 	}
 	for i := 0; i < len(file.Funcs); i++ {
 		fn := file.Funcs[i]
@@ -698,11 +708,18 @@ func reparseFunctionValueProgram(original *unit.Program, text []byte) bool {
 		if receiverStart < 0 {
 			receiverStart = eof
 			receiverEnd = eof
+		} else {
+			receiverStart = tokenMap[receiverStart]
+			receiverEnd = tokenMap[receiverEnd]
 		}
-		out.Funcs = append(out.Funcs, unit.Func{NameStart: name.Start, NameEnd: name.End, StartTok: fn.StartTok, NameTok: fn.NameTok, ReceiverStart: receiverStart, ReceiverEnd: receiverEnd, BodyStart: fn.BodyStart, BodyEnd: fn.BodyEnd, EndTok: fn.EndTok})
+		out.Funcs = append(out.Funcs, unit.Func{NameStart: name.Start, NameEnd: name.End, StartTok: tokenMap[fn.StartTok], NameTok: tokenMap[fn.NameTok], ReceiverStart: receiverStart, ReceiverEnd: receiverEnd, BodyStart: tokenMap[fn.BodyStart], BodyEnd: tokenMap[fn.BodyEnd], EndTok: tokenMap[fn.EndTok]})
 	}
 	replaceFunctionValueProgram(original, &out)
 	return true
+}
+
+func functionValueTokenIsEllipsis(src []byte, tok syntax.Token) bool {
+	return tok.Kind == syntax.TokenOperator && tok.End-tok.Start == 3 && tok.Start >= 0 && tok.End <= len(src) && src[tok.Start] == '.' && src[tok.Start+1] == '.' && src[tok.Start+2] == '.'
 }
 
 func functionValueUnitTokenKind(src []byte, tok syntax.Token) int {

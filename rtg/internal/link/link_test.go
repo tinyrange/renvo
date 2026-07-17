@@ -702,6 +702,57 @@ func appMain() int {
 	}
 }
 
+func TestLinkBuildCoreKeepsEllipsisSplitAfterFunctionValueReparse(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+type transform func(int) int
+
+func apply(fn transform, value int) int {
+	return fn(value)
+}
+
+func join(src []byte) []byte {
+	var out []byte
+	out = append(out, src...)
+	return out
+}
+
+func appMain() int {
+	inc := func(value int) int { return value + 1 }
+	joined := join([]byte("x"))
+	if apply(inc, 1) == 2 && string(joined) == "x" {
+		print("PASS\n")
+		return 0
+	}
+	print("FAIL\n")
+	return 1
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d marshal=%d/%d", linked.Error, linked.ErrorPackage, unit.LastMarshalError, unit.LastMarshalIndex)
+	}
+	decoded, ok := unit.Unmarshal(linked.Data)
+	if !ok {
+		t.Fatal("linked core unit did not decode")
+	}
+	found := false
+	for i := 0; i < len(decoded.Tokens); i++ {
+		if tokenAt(decoded, i) == "..." {
+			t.Fatalf("function-value reparse recombined ellipsis token at %d", i)
+		}
+		if i+2 < len(decoded.Tokens) && tokenAt(decoded, i) == "." && tokenAt(decoded, i+1) == "." && tokenAt(decoded, i+2) == "." {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("linked core unit missing split ellipsis after function-value reparse:\n%s", string(decoded.Text))
+	}
+}
+
 func TestLinkBuildCoreLowersEndianSelectors(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},

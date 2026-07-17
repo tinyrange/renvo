@@ -12707,7 +12707,7 @@ func rtgEmitSliceLocationHeaderAddressSecondary(g *rtgLinearGen, locEp *rtgExprP
 }
 
 func rtgAppendAssignLhsMatchesSource(p *rtgProgram, stmt *rtgStmt, ep *rtgExprParse, root *rtgExpr, assignTok int) bool {
-	firstStart := root.tok + 2
+	firstStart := root.tok + 1
 	closeTok := rtgFindMatchingExprClose(p, root.tok+1, ep.end, '(', ')')
 	if closeTok <= firstStart {
 		return false
