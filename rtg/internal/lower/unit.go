@@ -584,7 +584,7 @@ func coreUnitTokenKind(src []byte, tok syntax.Token) (int, bool) {
 		return kind, true
 	}
 	if kind == syntax.TokenNumber {
-		if isCoreFloatNumber(src, tok) {
+		if syntax.NumberTokenIsFloat(src, tok) {
 			return unit.TokenFloat, true
 		}
 		return unit.TokenNumber, true
@@ -648,37 +648,4 @@ func countCoreNewlines(src []byte) int {
 		}
 	}
 	return count
-}
-
-func isCoreFloatNumber(src []byte, tok syntax.Token) bool {
-	start := tok.Start
-	end := tok.End
-	if start < 0 {
-		start = 0
-	}
-	if end > len(src) {
-		end = len(src)
-	}
-	if end-start > 2 && src[start] == '0' {
-		prefix := src[start+1]
-		if prefix == 'x' || prefix == 'X' {
-			for i := start + 2; i < end; i++ {
-				c := src[i]
-				if c == '.' || c == 'p' || c == 'P' {
-					return true
-				}
-			}
-			return false
-		}
-		if prefix == 'b' || prefix == 'B' || prefix == 'o' || prefix == 'O' {
-			return false
-		}
-	}
-	for i := start; i < end; i++ {
-		c := src[i]
-		if c == '.' || c == 'e' || c == 'E' || c == 'p' || c == 'P' {
-			return true
-		}
-	}
-	return false
 }

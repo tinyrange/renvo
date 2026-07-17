@@ -730,10 +730,8 @@ func functionValueUnitTokenKind(src []byte, tok syntax.Token) int {
 		return unit.TokenIdent
 	}
 	if tok.Kind == syntax.TokenNumber {
-		for i := tok.Start; i < tok.End; i++ {
-			if src[i] == '.' || src[i] == 'e' || src[i] == 'E' || src[i] == 'p' || src[i] == 'P' {
-				return unit.TokenFloat
-			}
+		if syntax.NumberTokenIsFloat(src, tok) {
+			return unit.TokenFloat
 		}
 		return unit.TokenNumber
 	}

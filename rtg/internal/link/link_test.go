@@ -705,6 +705,51 @@ func appMain() int {
 	}
 }
 
+func TestLinkBuildCoreClassifiesNumbersAfterFunctionValueReparse(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+type callback func() int
+
+func appMain() int {
+	fn := callback(func() int { return 0xe9b5dba5 })
+	if fn() == 0xe9b5dba5 && 1e2 == 100 && 0x1.ep+2 == 7.5 {
+		print("PASS\n")
+		return 0
+	}
+	return 1
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	wantKinds := map[string]int{
+		"0xe9b5dba5": unit.TokenNumber,
+		"1e2":        unit.TokenFloat,
+		"0x1.ep+2":   unit.TokenFloat,
+	}
+	found := make(map[string]bool)
+	for i := 0; i < len(linked.Program.Tokens); i++ {
+		text := tokenAt(linked.Program, i)
+		want, ok := wantKinds[text]
+		if !ok {
+			continue
+		}
+		if got := linked.Program.Tokens[i].Kind; got != want {
+			t.Fatalf("token %q kind = %d, want %d", text, got, want)
+		}
+		found[text] = true
+	}
+	for text := range wantKinds {
+		if !found[text] {
+			t.Fatalf("linked program missing token %q:\n%s", text, string(linked.Program.Text))
+		}
+	}
+}
+
 func TestLinkBuildCoreLowersEndianSelectors(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
