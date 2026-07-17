@@ -17,7 +17,8 @@ const (
 // remain for later, richer checking rather than being guessed here.
 func invalidDefiniteCallArgumentType(pkg load.Package, info PackageInfo, fileIndex int, caller syntax.FuncDecl) int {
 	file := pkg.Files[fileIndex].File
-	callerSignature := buildFuncSignature(file, caller)
+	var callerSignature FuncSignature
+	callerSignatureReady := false
 	for open := caller.BodyStart + 1; open < caller.BodyEnd; open++ {
 		if !tokCharIs(file, open, '(') || open == 0 || file.Tokens[open-1].Kind != syntax.TokenIdent {
 			continue
@@ -30,6 +31,14 @@ func invalidDefiniteCallArgumentType(pkg load.Package, info PackageInfo, fileInd
 		if !ok {
 			continue
 		}
+		calleeFile := pkg.Files[calleeFileIndex].File
+		if !definiteSignatureHasPointer(calleeFile, callee) {
+			continue
+		}
+		if !callerSignatureReady {
+			callerSignature = buildFuncSignature(file, caller)
+			callerSignatureReady = true
+		}
 		if definiteCallNameShadowed(file, caller, callerSignature, calleeTok) {
 			continue
 		}
@@ -39,7 +48,6 @@ func invalidDefiniteCallArgumentType(pkg load.Package, info PackageInfo, fileInd
 		}
 		callArenaStart := arena.Mark()
 		args := splitExprList(file, open+1, close-1)
-		calleeFile := pkg.Files[calleeFileIndex].File
 		calleeSignature := buildFuncSignature(calleeFile, callee)
 		params := calleeSignature.Params
 		invalidTok := -1
@@ -60,6 +68,15 @@ func invalidDefiniteCallArgumentType(pkg load.Package, info PackageInfo, fileInd
 		}
 	}
 	return -1
+}
+
+func definiteSignatureHasPointer(file syntax.File, fn syntax.FuncDecl) bool {
+	for i := fn.ParamsStart; i < fn.ParamsEnd; i++ {
+		if tokCharIs(file, i, '*') {
+			return true
+		}
+	}
+	return false
 }
 
 func findDefinitePackageFunc(pkg load.Package, info PackageInfo, callerFile syntax.File, calleeTok int) (int, syntax.FuncDecl, bool) {
