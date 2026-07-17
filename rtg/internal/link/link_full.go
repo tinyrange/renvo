@@ -3,40 +3,17 @@
 package link
 
 import (
-	"strconv"
-
 	"j5.nz/rtg/rtg/internal/build"
 	"j5.nz/rtg/rtg/internal/unit"
 )
 
-const (
-	LinkOK = iota
-	LinkErrBuild
-	LinkErrRoot
-	LinkErrUnit
-)
-
-type Result struct {
-	Program      unit.Program
-	Data         []byte
-	Ok           bool
-	Error        int
-	ErrorPackage int
-}
+func discardLinkedPackageUnit(pkg build.PackageUnit) {}
 
 func LinkBuild(result build.Result) Result {
-	return linkBuild(result, false)
+	return linkBuild(result)
 }
 
-func LinkBuildCore(result build.Result) Result {
-	return linkBuild(result, true)
-}
-
-func LinkBuildCoreTransient(result build.Result) Result {
-	return LinkBuildCore(result)
-}
-
-func linkBuild(result build.Result, coreOnly bool) Result {
+func linkBuild(result build.Result) Result {
 	out := Result{Ok: true, Error: LinkOK, ErrorPackage: -1}
 	if !result.Ok {
 		out.Ok = false
@@ -52,18 +29,7 @@ func linkBuild(result build.Result, coreOnly bool) Result {
 	var program unit.Program
 	pkg := 0
 	ok := false
-	if coreOnly {
-		if linkCoreNeedsInitFold(result) {
-			program, ok = LinkUnits(result.Units, result.Root)
-			if ok {
-				lowerLinkedInitConstDecls(&program)
-			}
-		} else {
-			program, ok = LinkUnitsCore(result.Units, result.Root)
-		}
-	} else {
-		program, ok = LinkUnits(result.Units, result.Root)
-	}
+	program, ok = LinkUnits(result.Units, result.Root)
 	if !ok {
 		program, pkg, ok = LinkUnitData(result.Units, result.Root)
 	}
@@ -73,12 +39,7 @@ func linkBuild(result build.Result, coreOnly bool) Result {
 		out.ErrorPackage = pkg
 		return out
 	}
-	var data []byte
-	if coreOnly {
-		data, ok = marshalCoreProgram(program)
-	} else {
-		data, ok = unit.Marshal(program)
-	}
+	data, ok := unit.Marshal(program)
 	if !ok {
 		out.Ok = false
 		out.Error = LinkErrUnit
@@ -87,199 +48,6 @@ func linkBuild(result build.Result, coreOnly bool) Result {
 	out.Program = program
 	out.Data = data
 	return out
-}
-
-func linkCoreNeedsInitFold(result build.Result) bool {
-	for i := 0; i < len(result.Units); i++ {
-		if len(result.Units[i].Program.InitOrder) > 0 && len(result.Units[i].Program.DeclMeta) > 0 {
-			return true
-		}
-	}
-	return false
-}
-
-func marshalCoreProgram(program unit.Program) ([]byte, bool) {
-	program.Imports = nil
-	program.Symbols = nil
-	program.DeclMeta = nil
-	program.InitOrder = nil
-	program.Consts = nil
-	program.Signatures = nil
-	program.Stmts = nil
-	program.Types = nil
-	program.TypeFields = nil
-	program.TypeIfaces = nil
-	program.TypeFuncs = nil
-	program.Methods = nil
-	program.TypeRefs = nil
-	program.Locals = nil
-	program.Indexes = nil
-	program.Composites = nil
-	program.Assigns = nil
-	program.Returns = nil
-	program.Calls = nil
-	program.Refs = nil
-	program.Selectors = nil
-	return unit.Marshal(program)
-}
-
-func lowerLinkedInitConstDecls(program *unit.Program) {
-	var names []string
-	var values []int
-	for i := 0; i < len(program.InitOrder); i++ {
-		declIndex := program.InitOrder[i]
-		if declIndex < 0 || declIndex >= len(program.Decls) || program.Decls[declIndex].Kind != unit.TokenVar {
-			continue
-		}
-		metaIndex := findDeclMeta(program, declIndex)
-		if metaIndex < 0 {
-			continue
-		}
-		meta := &program.DeclMeta[metaIndex]
-		if meta.ValueStart < 0 || meta.ValueEnd <= meta.ValueStart {
-			continue
-		}
-		value, ok := evalLinkedInitIntExpr(program, meta.ValueStart, meta.ValueEnd, names, values)
-		if !ok {
-			continue
-		}
-		name := linkedDeclName(program, declIndex)
-		if name != "" {
-			names = append(names, name)
-			values = append(values, value)
-		}
-		if !writeLinkedInitIntLiteral(program, declIndex, meta, value) {
-			continue
-		}
-	}
-}
-
-func findDeclMeta(program *unit.Program, declIndex int) int {
-	for i := 0; i < len(program.DeclMeta); i++ {
-		if program.DeclMeta[i].DeclIndex == declIndex {
-			return i
-		}
-	}
-	return -1
-}
-
-func linkedDeclName(program *unit.Program, declIndex int) string {
-	decl := program.Decls[declIndex]
-	if decl.NameStart < 0 || decl.NameEnd < decl.NameStart || decl.NameEnd > len(program.Text) {
-		return ""
-	}
-	return string(program.Text[decl.NameStart:decl.NameEnd])
-}
-
-func evalLinkedInitIntExpr(program *unit.Program, start int, end int, names []string, values []int) (int, bool) {
-	if start < 0 || end <= start || end > len(program.Tokens) {
-		return 0, false
-	}
-	if start+1 == end {
-		tok := program.Tokens[start]
-		text := tokenText(*program, start)
-		if tok.Kind == unit.TokenNumber {
-			value, err := strconv.Atoi(text)
-			return value, err == nil
-		}
-		if tok.Kind == unit.TokenIdent {
-			return lookupLinkedInitValue(names, values, text)
-		}
-		return 0, false
-	}
-	op := findLinkedInitBinaryOp(program, start, end, "+-")
-	if op < 0 {
-		op = findLinkedInitBinaryOp(program, start, end, "*/")
-	}
-	if op < 0 {
-		return 0, false
-	}
-	left, ok := evalLinkedInitIntExpr(program, start, op, names, values)
-	if !ok {
-		return 0, false
-	}
-	right, ok := evalLinkedInitIntExpr(program, op+1, end, names, values)
-	if !ok {
-		return 0, false
-	}
-	opText := tokenText(*program, op)
-	if opText == "+" {
-		return left + right, true
-	}
-	if opText == "-" {
-		return left - right, true
-	}
-	if opText == "*" {
-		return left * right, true
-	}
-	if opText == "/" && right != 0 {
-		return left / right, true
-	}
-	return 0, false
-}
-
-func findLinkedInitBinaryOp(program *unit.Program, start int, end int, ops string) int {
-	depth := 0
-	for i := end - 1; i >= start; i-- {
-		text := tokenText(*program, i)
-		if text == ")" || text == "]" || text == "}" {
-			depth++
-			continue
-		}
-		if text == "(" || text == "[" || text == "{" {
-			depth--
-			continue
-		}
-		if depth == 0 && program.Tokens[i].Kind == unit.TokenOp && stringHasByte(ops, text) {
-			return i
-		}
-	}
-	return -1
-}
-
-func stringHasByte(chars string, text string) bool {
-	if len(text) != 1 {
-		return false
-	}
-	for i := 0; i < len(chars); i++ {
-		if chars[i] == text[0] {
-			return true
-		}
-	}
-	return false
-}
-
-func lookupLinkedInitValue(names []string, values []int, name string) (int, bool) {
-	for i := len(names) - 1; i >= 0; i-- {
-		if names[i] == name {
-			return values[i], true
-		}
-	}
-	return 0, false
-}
-
-func writeLinkedInitIntLiteral(program *unit.Program, declIndex int, meta *unit.DeclMeta, value int) bool {
-	lit := strconv.Itoa(value)
-	tokIndex := meta.ValueStart
-	if tokIndex < 0 || tokIndex >= len(program.Tokens) {
-		return false
-	}
-	tok := &program.Tokens[tokIndex]
-	if tok.Start < 0 || tok.Start+tok.Size > len(program.Text) || len(lit) > tok.Size {
-		return false
-	}
-	for i := 0; i < tok.Size; i++ {
-		program.Text[tok.Start+i] = ' '
-	}
-	for i := 0; i < len(lit); i++ {
-		program.Text[tok.Start+i] = lit[i]
-	}
-	tok.Kind = unit.TokenNumber
-	tok.Size = len(lit)
-	program.Decls[declIndex].EndTok = tokIndex + 1
-	meta.ValueEnd = tokIndex + 1
-	meta.Values = []unit.ExprSpan{{StartTok: tokIndex, EndTok: tokIndex + 1}}
-	return true
 }
 
 func LinkUnitData(units []build.PackageUnit, root int) (unit.Program, int, bool) {
@@ -317,27 +85,11 @@ func LinkUnits(units []build.PackageUnit, root int) (unit.Program, bool) {
 	return LinkPrograms(programs, root, units[root].Name)
 }
 
-func LinkUnitsCore(units []build.PackageUnit, root int) (unit.Program, bool) {
-	var empty unit.Program
-	if root < 0 || root >= len(units) {
-		return empty, false
-	}
-	programs := make([]unit.Program, len(units))
-	for i := 0; i < len(units); i++ {
-		programs[i] = units[i].Program
-	}
-	return LinkProgramsCore(programs, root, units[root].Name)
-}
-
 func LinkPrograms(programs []unit.Program, root int, rootName string) (unit.Program, bool) {
-	return linkPrograms(programs, root, rootName, false)
+	return linkPrograms(programs, root, rootName)
 }
 
-func LinkProgramsCore(programs []unit.Program, root int, rootName string) (unit.Program, bool) {
-	return linkPrograms(programs, root, rootName, true)
-}
-
-func linkPrograms(programs []unit.Program, root int, rootName string, coreOnly bool) (unit.Program, bool) {
+func linkPrograms(programs []unit.Program, root int, rootName string) (unit.Program, bool) {
 	var empty unit.Program
 	if root < 0 || root >= len(programs) || rootName == "" {
 		return empty, false
@@ -347,17 +99,13 @@ func linkPrograms(programs []unit.Program, root int, rootName string, coreOnly b
 		return empty, false
 	}
 	program := unit.Program{Package: rootName, ImportPath: programs[root].ImportPath}
-	if coreOnly {
-		reserveCoreLinkedProgram(&program, programs)
-	} else {
-		reserveLinkedProgram(&program, programs)
-	}
-	finalEOF := countLinkedTokens(programs, coreOnly)
+	reserveLinkedProgram(&program, programs)
+	finalEOF := countLinkedTokens(programs)
 	symbolOffsets := packageSymbolOffsets(programs)
 	aliases := packageSymbolAliases(programs, root, symbolOffsets)
 	lineOffset := 0
 	for i := 0; i < len(programs); i++ {
-		ok := appendProgram(&program, programs[i], finalEOF, lineOffset, symbolOffsets, aliases, i+1 < len(programs), coreOnly)
+		ok := appendProgram(&program, programs[i], finalEOF, lineOffset, symbolOffsets, aliases, i+1 < len(programs))
 		if !ok {
 			return empty, false
 		}
@@ -370,24 +118,6 @@ func linkPrograms(programs []unit.Program, root int, rootName string, coreOnly b
 		Line:  countNewlines(program.Text) + 1,
 	})
 	return program, true
-}
-
-func reserveCoreLinkedProgram(program *unit.Program, programs []unit.Program) {
-	textCap := 0
-	tokenCap := 1
-	declCap := 0
-	funcCap := 0
-	for i := 0; i < len(programs); i++ {
-		p := programs[i]
-		textCap += len(p.Text) + 1
-		tokenCap += len(p.Tokens)
-		declCap += len(p.Decls)
-		funcCap += len(p.Funcs)
-	}
-	program.Text = make([]byte, 0, textCap)
-	program.Tokens = make([]unit.Token, 0, tokenCap)
-	program.Decls = make([]unit.Decl, 0, declCap)
-	program.Funcs = make([]unit.Func, 0, funcCap)
 }
 
 func reserveLinkedProgram(program *unit.Program, programs []unit.Program) {
@@ -791,7 +521,7 @@ func linkedProgramText(program unit.Program, start int, end int) string {
 	return string(program.Text[start:end])
 }
 
-func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset int, symbolOffsets []int, aliases []string, hasNext bool, coreOnly bool) bool {
+func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset int, symbolOffsets []int, aliases []string, hasNext bool) bool {
 	if src.Package == "" || len(src.Text) == 0 || len(src.Tokens) == 0 {
 		return false
 	}
@@ -800,8 +530,8 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 	funcOffset := len(dst.Funcs)
 	typeOffset := len(dst.Types)
 	oldToNew := make([]int, len(src.Tokens))
-	skip, redirect := linkedTokenSkip(src, coreOnly)
-	replacements := linkedTokenReplacements(src, aliases, symbolOffsets, coreOnly)
+	skip, redirect := linkedTokenSkip(src)
+	replacements := linkedTokenReplacements(src, aliases, symbolOffsets)
 	prevEnd := 0
 	line := countNewlines(dst.Text) + 1
 	for i := 0; i < len(src.Tokens); i++ {
@@ -877,28 +607,26 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		decl.NameEnd = nameEnd
 		dst.Decls = append(dst.Decls, decl)
 	}
-	if !coreOnly {
-		for i := 0; i < len(src.DeclMeta); i++ {
-			meta, ok := mapDeclMeta(src.DeclMeta[i], oldToNew, finalEOF, declOffset, symbolOffset)
-			if !ok {
-				return false
-			}
-			dst.DeclMeta = append(dst.DeclMeta, meta)
+	for i := 0; i < len(src.DeclMeta); i++ {
+		meta, ok := mapDeclMeta(src.DeclMeta[i], oldToNew, finalEOF, declOffset, symbolOffset)
+		if !ok {
+			return false
 		}
-		for i := 0; i < len(src.InitOrder); i++ {
-			decl := src.InitOrder[i]
-			if decl < 0 || decl >= len(src.Decls) {
-				return false
-			}
-			dst.InitOrder = append(dst.InitOrder, declOffset+decl)
+		dst.DeclMeta = append(dst.DeclMeta, meta)
+	}
+	for i := 0; i < len(src.InitOrder); i++ {
+		decl := src.InitOrder[i]
+		if decl < 0 || decl >= len(src.Decls) {
+			return false
 		}
-		for i := 0; i < len(src.Consts); i++ {
-			value, ok := mapConst(src.Consts[i], declOffset, len(src.Decls))
-			if !ok {
-				return false
-			}
-			dst.Consts = append(dst.Consts, value)
+		dst.InitOrder = append(dst.InitOrder, declOffset+decl)
+	}
+	for i := 0; i < len(src.Consts); i++ {
+		value, ok := mapConst(src.Consts[i], declOffset, len(src.Decls))
+		if !ok {
+			return false
 		}
+		dst.Consts = append(dst.Consts, value)
 	}
 	for i := 0; i < len(src.Funcs); i++ {
 		fn := src.Funcs[i]
@@ -920,12 +648,6 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 		fn.BodyEnd = mapToken(oldToNew, fn.BodyEnd, finalEOF)
 		fn.EndTok = mapFuncEndToken(oldToNew, fn.EndTok, fn.BodyEnd, finalEOF)
 		dst.Funcs = append(dst.Funcs, fn)
-	}
-	if coreOnly {
-		if hasNext && (len(src.Text) == 0 || src.Text[len(src.Text)-1] != '\n') {
-			dst.Text = append(dst.Text, '\n')
-		}
-		return true
 	}
 	for i := 0; i < len(src.Symbols); i++ {
 		symbol := src.Symbols[i]
@@ -1077,7 +799,7 @@ func appendProgram(dst *unit.Program, src unit.Program, finalEOF int, lineOffset
 	return true
 }
 
-func linkedTokenSkip(program unit.Program, coreOnly bool) ([]bool, []int) {
+func linkedTokenSkip(program unit.Program) ([]bool, []int) {
 	skip := make([]bool, len(program.Tokens))
 	redirect := make([]int, len(program.Tokens))
 	for i := 0; i < len(redirect); i++ {
@@ -1113,7 +835,6 @@ func linkedTokenSkip(program unit.Program, coreOnly bool) ([]bool, []int) {
 		markUnsafePointerConversionTokens(program, skip)
 	}
 	markEndianSelectorTokens(program, skip, redirect)
-	_ = coreOnly
 	return skip, redirect
 }
 
@@ -1267,7 +988,7 @@ func tokenTextEquals(program unit.Program, tok int, want string) bool {
 	return tokenText(program, tok) == want
 }
 
-func linkedTokenReplacements(program unit.Program, aliases []string, symbolOffsets []int, coreOnly bool) []string {
+func linkedTokenReplacements(program unit.Program, aliases []string, symbolOffsets []int) []string {
 	out := make([]string, len(program.Tokens))
 	for i := 0; i < len(program.Symbols); i++ {
 		symbol := program.Symbols[i]
@@ -1299,7 +1020,6 @@ func linkedTokenReplacements(program unit.Program, aliases []string, symbolOffse
 			out[ref.Token] = name
 		}
 	}
-	_ = coreOnly
 	return out
 }
 
@@ -2061,11 +1781,11 @@ func packageSymbolOffsets(programs []unit.Program) []int {
 	return out
 }
 
-func countLinkedTokens(programs []unit.Program, coreOnly bool) int {
+func countLinkedTokens(programs []unit.Program) int {
 	count := 0
 	for i := 0; i < len(programs); i++ {
 		tokens := programs[i].Tokens
-		skip, _ := linkedTokenSkip(programs[i], coreOnly)
+		skip, _ := linkedTokenSkip(programs[i])
 		for j := 0; j < len(tokens); j++ {
 			if tokens[j].Kind != unit.TokenEOF && !skip[j] {
 				count += linkedTokenOutputCount(programs[i], tokens[j])

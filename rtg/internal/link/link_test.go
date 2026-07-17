@@ -661,7 +661,7 @@ func appMain() int {
 	}
 }
 
-func TestLinkBuildCoreFoldsPackageInitVarDeps(t *testing.T) {
+func TestLinkBuildCorePreservesPackageInitVarDeps(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
@@ -699,8 +699,8 @@ func Value() int {
 	if total < 0 {
 		t.Fatalf("total not found in %#v", decoded.Decls)
 	}
-	if got := linkedSpanText(decoded, decoded.Decls[total].StartTok, decoded.Decls[total].EndTok); got != "var total = 8" {
-		t.Fatalf("total decl span = %q, want folded literal\nfull text:\n%s", got, string(decoded.Text))
+	if got := linkedSpanText(decoded, decoded.Decls[total].StartTok, decoded.Decls[total].EndTok); got != "var total = base + extra" {
+		t.Fatalf("total decl span = %q, want preserved initializer\nfull text:\n%s", got, string(decoded.Text))
 	}
 }
 
