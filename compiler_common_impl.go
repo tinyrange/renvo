@@ -10724,10 +10724,14 @@ func rtgEmitSliceLiteralBacking(g *rtgLinearGen, ep *rtgExprParse, idx int, slic
 			rtgEmitCopyStackToMemSecondary(g, tempOffset, 0, elemSize)
 			continue
 		}
-		if !rtgTypeKindIsScalarInt(elemResolved.kind) && elemResolved.kind != rtgTypePointer {
+		if !rtgTypeKindIsScalarValue(elemResolved.kind) && elemResolved.kind != rtgTypePointer {
 			return false
 		}
-		if !rtgEmitIntExpr(g, ep, field.expr) {
+		if elemResolved.kind == rtgTypeFloat64 {
+			if !rtgEmitScalarExprForKind(g, ep, field.expr, rtgTypeFloat64) {
+				return false
+			}
+		} else if !rtgEmitIntExpr(g, ep, field.expr) {
 			return false
 		}
 		rtgAsmNormalizePrimaryForKind(a, elemResolved.kind)
