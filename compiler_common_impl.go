@@ -9737,7 +9737,18 @@ func rtgInferParsedExprTypeUncached(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 		}
 	}
 	if e.kind == rtgExprSlice {
-		return rtgInferParsedExprType(g, ep, e.left)
+		baseType := rtgInferParsedExprType(g, ep, e.left)
+		base := rtgResolveType(meta, baseType)
+		if base.kind == rtgTypeArray {
+			return rtgAddType(meta, rtgTypeSlice, base.elem, 0, 0, rtgBackendSliceValueSize, 0, 0)
+		}
+		if base.kind == rtgTypePointer {
+			array := rtgResolveType(meta, base.elem)
+			if array.kind == rtgTypeArray {
+				return rtgAddType(meta, rtgTypeSlice, array.elem, 0, 0, rtgBackendSliceValueSize, 0, 0)
+			}
+		}
+		return baseType
 	}
 	if e.kind == rtgExprSelector {
 		baseType := rtgInferParsedExprType(g, ep, e.left)
@@ -10469,16 +10480,29 @@ func rtgEmitSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	a := &g.asm
 	e := &ep.exprs[idx]
 	if e.kind == rtgExprSlice {
-		if !rtgEmitSliceValueRegs(g, ep, e.left) {
-			return false
+		baseType := rtgInferParsedExprType(g, ep, e.left)
+		baseResolved := rtgResolveType(meta, baseType)
+		arrayType := baseResolved
+		if baseResolved.kind == rtgTypePointer {
+			arrayType = rtgResolveType(meta, baseResolved.elem)
 		}
-		if e.firstArg >= 0 || e.nameStart >= 0 {
-			baseType := rtgInferParsedExprType(g, ep, e.left)
-			baseResolved := rtgResolveType(meta, baseType)
-			if baseResolved.kind != rtgTypeSlice {
+		if arrayType.kind == rtgTypeArray {
+			if baseResolved.kind == rtgTypePointer {
+				if !rtgEmitIntExpr(g, ep, e.left) {
+					return false
+				}
+			} else if !rtgEmitAddressPrimary(g, ep, e.left) {
 				return false
 			}
-			elemSize := rtgTypeSize(meta, baseResolved.elem)
+			rtgAsmSecondaryImm(a, arrayType.count)
+			rtgAsmCopySecondaryToTertiary(a)
+		} else {
+			if baseResolved.kind != rtgTypeSlice || !rtgEmitSliceValueRegs(g, ep, e.left) {
+				return false
+			}
+		}
+		if e.firstArg >= 0 || e.nameStart >= 0 {
+			elemSize := rtgTypeSize(meta, arrayType.elem)
 			if elemSize < 1 {
 				elemSize = 8
 			}
@@ -12486,6 +12510,9 @@ func rtgEmitAddressPrimary(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			return false
 		}
 		return true
+	}
+	if e.kind == rtgExprUnary && rtgTokCharIs(g.prog, e.tok, '*') {
+		return rtgEmitIntExpr(g, ep, e.left)
 	}
 	return false
 }
