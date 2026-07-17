@@ -36,12 +36,16 @@ func BuildUnit(args []string, workDir string, stdRoot string, files []load.Sourc
 	if !options.Ok {
 		return buildFail(result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
 	}
-	filtered, errorPath, ok := filterSourcesForTargetTags(files, options.Target, options.Tags)
-	if !ok {
-		result.Sources = SourceResult{Error: SourceErrBuildConstraint, ErrorPath: errorPath}
+	filtered, errorPath, sourceError := filterSourcesForOptions(files, workDir, options)
+	if sourceError != SourceOK {
+		result.Sources = SourceResult{Error: sourceError, ErrorPath: errorPath}
 		return buildFail(result, BuildErrSource, "", errorPath, -1, -1, -1, -1)
 	}
-	built := pipeline.BuildUnit(workDir, stdRoot, options.Package, filtered)
+	rootArg := options.Package
+	if len(options.Files) > 0 {
+		rootArg = load.DirPath(load.JoinPath(workDir, options.Files[0]))
+	}
+	built := pipeline.BuildUnit(workDir, stdRoot, rootArg, filtered)
 	result.Pipeline = built
 	if !built.Ok {
 		return buildFail(result, BuildErrPipeline, "", "", -1, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
@@ -74,17 +78,26 @@ func buildFromFS(args []string, workDir string, stdRoot string, moduleCache stri
 		return buildFail(result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
 	}
 	sourcesStart := arena.Mark()
-	sources := CollectSourcesForTargetTagsWithModuleCache(workDir, stdRoot, options.Package, options.Target, options.Tags, moduleCache, fs)
+	var sources SourceResult
+	if len(options.Files) > 0 {
+		sources = CollectSourceFilesForTargetTagsWithModuleCache(workDir, stdRoot, options.Files, options.Target, options.Tags, moduleCache, fs)
+	} else {
+		sources = CollectSourcesForTargetTagsWithModuleCache(workDir, stdRoot, options.Package, options.Target, options.Tags, moduleCache, fs)
+	}
 	sourcesEnd := arena.Mark()
 	result.Sources = sources
 	if !sources.Ok {
 		return buildFail(result, BuildErrSource, "", sources.ErrorPath, -1, -1, -1, -1)
 	}
+	rootArg := options.Package
+	if len(options.Files) > 0 {
+		rootArg = sources.Root.Dir
+	}
 	var built pipeline.Result
 	if compact {
-		built = pipeline.BuildUnitWithTransientFiles(workDir, stdRoot, options.Package, sources.Files, sourcesStart, sourcesEnd)
+		built = pipeline.BuildUnitWithTransientFiles(workDir, stdRoot, rootArg, sources.Files, sourcesStart, sourcesEnd)
 	} else {
-		built = pipeline.BuildUnit(workDir, stdRoot, options.Package, sources.Files)
+		built = pipeline.BuildUnit(workDir, stdRoot, rootArg, sources.Files)
 	}
 	result.Pipeline = built
 	if !built.Ok {

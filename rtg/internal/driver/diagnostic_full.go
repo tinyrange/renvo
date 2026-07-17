@@ -90,6 +90,8 @@ func optionDiagnostic(options Options) Diagnostic {
 		code, message = "RTG-OPTION-009", "extra package path "+options.ErrorArg
 	case ParseErrWindowsGUIRequiresWindows:
 		code, message = "RTG-OPTION-010", "-windows-gui requires a Windows target"
+	case ParseErrMixedFileList:
+		code, message = "RTG-OPTION-011", "explicit source list contains a non-.go argument "+options.ErrorArg
 	}
 	return Diagnostic{Phase: "options", Code: code, Message: message}
 }
@@ -129,6 +131,10 @@ func sourceDiagnostic(result BuildResult) Diagnostic {
 		code, message = "RTG-LOAD-019", "cgo is not supported by RTG"
 	case SourceErrStandardPackage:
 		code, message = "RTG-LOAD-020", "standard library package "+result.Sources.ErrorPath+" is not included in this RTG build"
+	case SourceErrFileDirectory:
+		code, message = "RTG-LOAD-021", "named source files must all be in one directory"
+	case SourceErrFileListEmpty:
+		code, message = "RTG-LOAD-022", "explicit source list contains no buildable Go files"
 	}
 	path := result.ErrorPath
 	if result.Sources.ErrorSourcePath != "" {

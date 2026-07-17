@@ -38,6 +38,13 @@ func TestParseOptionsAllowsOptionsAfterPackage(t *testing.T) {
 	}
 }
 
+func TestParseOptionsAcceptsExplicitGoFiles(t *testing.T) {
+	options := ParseOptions([]string{"main.go", "-o", "app", "helper.go"})
+	if !options.Ok || options.Package != "main.go" || len(options.Files) != 2 || options.Files[0] != "main.go" || options.Files[1] != "helper.go" {
+		t.Fatalf("file-list options = %#v", options)
+	}
+}
+
 func TestCommandHelpRequested(t *testing.T) {
 	for _, args := range [][]string{nil, {"rtg"}, {"rtg", "--help"}} {
 		if !CommandHelpRequested(args) {
@@ -47,7 +54,7 @@ func TestCommandHelpRequested(t *testing.T) {
 	if CommandHelpRequested([]string{"rtg", "-o", "app", "."}) {
 		t.Fatal("compile command requested help")
 	}
-	for _, want := range []string{"Usage: rtg", "-o <file>", "windows/amd64", "windows/arm64", "darwin/arm64", "wasi/wasm32"} {
+	for _, want := range []string{"Usage: rtg", "-o <file>", "file.go...", "Exactly the named files", "windows/amd64", "windows/arm64", "darwin/arm64", "wasi/wasm32"} {
 		if !strings.Contains(HelpText, want) {
 			t.Fatalf("HelpText missing %q", want)
 		}
@@ -90,6 +97,7 @@ func TestParseOptionsRejectsInvalidInputs(t *testing.T) {
 		{name: "empty tag item", args: []string{"-tags", "rtg_bundle,,debug", "-o", "app", "./cmd/app"}, err: ParseErrInvalidTags, arg: "rtg_bundle,,debug", at: 1},
 		{name: "missing package", args: []string{"-o", "app"}, err: ParseErrMissingPackage, arg: "", at: 2},
 		{name: "extra package", args: []string{"-o", "app", "./cmd/app", "./other"}, err: ParseErrExtraPackage, arg: "./other", at: 3},
+		{name: "mixed file list", args: []string{"-o", "app", "main.go", "./other"}, err: ParseErrMixedFileList, arg: "./other", at: 3},
 		{name: "GUI subsystem on non-Windows target", args: []string{"-windows-gui", "-o", "app", "./cmd/app"}, err: ParseErrWindowsGUIRequiresWindows, arg: "linux/amd64", at: 0},
 	}
 	for i := 0; i < len(tests); i++ {

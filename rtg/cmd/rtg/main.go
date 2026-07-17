@@ -93,6 +93,8 @@ func printOptionError(options driver.Options) {
 		fmt.Fprintf(os.Stderr, "rtg: extra package path: %s\n", options.ErrorArg)
 	case driver.ParseErrWindowsGUIRequiresWindows:
 		fmt.Fprintln(os.Stderr, "rtg: -windows-gui requires a Windows target")
+	case driver.ParseErrMixedFileList:
+		fmt.Fprintf(os.Stderr, "rtg: explicit source list contains a non-.go argument: %s\n", options.ErrorArg)
 	default:
 		fmt.Fprintf(os.Stderr, "rtg: option parse failed with error %d\n", options.Error)
 	}

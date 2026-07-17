@@ -22,6 +22,8 @@ const (
 	SourceErrEmbed
 	SourceErrCgo
 	SourceErrStandardPackage
+	SourceErrFileDirectory
+	SourceErrFileListEmpty
 )
 
 type DirEntry struct {
@@ -64,6 +66,8 @@ type sourceCollector struct {
 	errPath       string
 	errSourcePath string
 	errOffset     int
+	explicitRoot  string
+	explicitFiles []string
 }
 
 func CollectSources(workDir string, stdRoot string, arg string, fs SourceFS) SourceResult {
@@ -82,6 +86,14 @@ func CollectSourcesForTargetTags(workDir string, stdRoot string, arg string, tar
 // the main module's vendor tree, local replacements, or this read-only cache.
 // It never performs network access.
 func CollectSourcesForTargetTagsWithModuleCache(workDir string, stdRoot string, arg string, target string, tags []string, moduleCache string, fs SourceFS) SourceResult {
+	return collectSourcesForTargetTagsWithModuleCache(workDir, stdRoot, arg, nil, target, tags, moduleCache, fs)
+}
+
+func CollectSourceFilesForTargetTagsWithModuleCache(workDir string, stdRoot string, files []string, target string, tags []string, moduleCache string, fs SourceFS) SourceResult {
+	return collectSourcesForTargetTagsWithModuleCache(workDir, stdRoot, "", files, target, tags, moduleCache, fs)
+}
+
+func collectSourcesForTargetTagsWithModuleCache(workDir string, stdRoot string, arg string, explicitFiles []string, target string, tags []string, moduleCache string, fs SourceFS) SourceResult {
 	result := SourceResult{Ok: true, Error: SourceOK}
 	workDir = load.CleanPath(workDir)
 	stdRoot = load.CleanPath(stdRoot)
@@ -99,6 +111,27 @@ func CollectSourcesForTargetTagsWithModuleCache(workDir string, stdRoot string, 
 		return sourceFail(result, SourceErrModule, modulePath)
 	}
 	result.Files = append(result.Files, load.SourceFile{Path: modulePath, Src: moduleSrc})
+	var normalizedFiles []string
+	if len(explicitFiles) > 0 {
+		rootDir := ""
+		for i := 0; i < len(explicitFiles); i++ {
+			path := load.JoinPath(workDir, explicitFiles[i])
+			if !isGoSourceName(load.BasePath(path)) {
+				continue
+			}
+			dir := load.DirPath(path)
+			if rootDir == "" {
+				rootDir = dir
+			} else if dir != rootDir {
+				return sourceFail(result, SourceErrFileDirectory, path)
+			}
+			normalizedFiles = append(normalizedFiles, path)
+		}
+		if len(normalizedFiles) == 0 {
+			return sourceFail(result, SourceErrFileListEmpty, explicitFiles[0])
+		}
+		arg = rootDir
+	}
 	root := load.ResolvePackageArg(module, workDir, arg)
 	result.Root = root
 	if !root.Ok {
@@ -106,17 +139,19 @@ func CollectSourcesForTargetTagsWithModuleCache(workDir string, stdRoot string, 
 	}
 	for attempt := 0; attempt < 64; attempt++ {
 		collector := sourceCollector{
-			fs:          fs,
-			module:      module,
-			config:      config,
-			modules:     []load.Module{module},
-			stdRoot:     stdRoot,
-			moduleCache: moduleCache,
-			target:      target,
-			tags:        tags,
-			files:       result.Files,
-			ok:          true,
-			err:         SourceOK,
+			fs:            fs,
+			module:        module,
+			config:        config,
+			modules:       []load.Module{module},
+			stdRoot:       stdRoot,
+			moduleCache:   moduleCache,
+			target:        target,
+			tags:          tags,
+			files:         result.Files,
+			ok:            true,
+			err:           SourceOK,
+			explicitRoot:  root.ImportPath,
+			explicitFiles: normalizedFiles,
 		}
 		collector.collectPackage(root)
 		if collector.restart {
@@ -175,22 +210,29 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 			return
 		}
 	}
-	entries, ok := c.fs.ReadDir(ref.Dir)
-	if !ok {
-		c.fail(SourceErrReadDir, ref.Dir)
-		return
+	explicit := ref.ImportPath == c.explicitRoot && len(c.explicitFiles) > 0
+	var paths []string
+	if explicit {
+		paths = c.explicitFiles
+	} else {
+		entries, ok := c.fs.ReadDir(ref.Dir)
+		if !ok {
+			c.fail(SourceErrReadDir, ref.Dir)
+			return
+		}
+		sortDirEntries(entries)
+		for i := 0; i < len(entries); i++ {
+			if !entries[i].IsDir && isGoSourceName(entries[i].Name) {
+				paths = append(paths, load.JoinPath(ref.Dir, entries[i].Name))
+			}
+		}
 	}
-	sortDirEntries(entries)
 	found := false
-	for i := 0; i < len(entries); i++ {
-		entry := entries[i]
-		if entry.IsDir || !isGoSourceName(entry.Name) {
+	for i := 0; i < len(paths); i++ {
+		path := paths[i]
+		if !explicit && !sourceFilenameEnabled(load.BasePath(path), c.target) {
 			continue
 		}
-		if !sourceFilenameEnabled(entry.Name, c.target) {
-			continue
-		}
-		path := load.JoinPath(ref.Dir, entry.Name)
 		arenaStart := arena.Mark()
 		src, ok := c.fs.ReadFile(path)
 		arenaEnd := arena.Mark()
@@ -198,19 +240,21 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 			c.fail(SourceErrReadFile, path)
 			return
 		}
-		enabled, valid := sourceConstraintsEnabled(src, c.target, c.tags)
-		if !valid {
-			c.fail(SourceErrBuildConstraint, path)
-			return
-		}
-		if !enabled {
-			if sourceRequiresCgo(src, c.target, c.tags) {
-				c.files = append(c.files, load.SourceFile{Path: path, Src: src, ArenaStart: arenaStart, ArenaEnd: arenaEnd})
-				c.failAt(SourceErrCgo, "cgo", path, sourceTextOffset(src, "cgo"))
+		if !explicit {
+			enabled, valid := sourceConstraintsEnabled(src, c.target, c.tags)
+			if !valid {
+				c.fail(SourceErrBuildConstraint, path)
 				return
 			}
-			arena.Discard(arenaStart, arenaEnd)
-			continue
+			if !enabled {
+				if sourceRequiresCgo(src, c.target, c.tags) {
+					c.files = append(c.files, load.SourceFile{Path: path, Src: src, ArenaStart: arenaStart, ArenaEnd: arenaEnd})
+					c.failAt(SourceErrCgo, "cgo", path, sourceTextOffset(src, "cgo"))
+					return
+				}
+				arena.Discard(arenaStart, arenaEnd)
+				continue
+			}
 		}
 		expanded, embedOK, embedOffset, embedPath := expandSourceEmbeds(c.fs, path, owner.Root, src)
 		if !embedOK {
@@ -788,6 +832,46 @@ func filterSourcesForTargetTags(files []load.SourceFile, target string, tags []s
 		out = append(out, file)
 	}
 	return out, "", true
+}
+
+func filterSourcesForOptions(files []load.SourceFile, workDir string, options Options) ([]load.SourceFile, string, int) {
+	if len(options.Files) == 0 {
+		filtered, errorPath, ok := filterSourcesForTargetTags(files, options.Target, options.Tags)
+		if !ok {
+			return nil, errorPath, SourceErrBuildConstraint
+		}
+		return filtered, "", SourceOK
+	}
+	rootDir := load.DirPath(load.JoinPath(workDir, options.Files[0]))
+	var selected []string
+	for i := 0; i < len(options.Files); i++ {
+		path := load.JoinPath(workDir, options.Files[i])
+		if load.DirPath(path) != rootDir {
+			return nil, path, SourceErrFileDirectory
+		}
+		if isGoSourceName(load.BasePath(path)) {
+			selected = append(selected, path)
+		}
+	}
+	var out []load.SourceFile
+	for i := 0; i < len(files); i++ {
+		path := load.CleanPath(files[i].Path)
+		if load.DirPath(path) == rootDir && isGoSourceName(load.BasePath(path)) {
+			if findString(selected, path) >= 0 {
+				out = append(out, files[i])
+			}
+			continue
+		}
+		filtered, errorPath, ok := filterSourcesForTargetTags(files[i:i+1], options.Target, options.Tags)
+		if !ok {
+			return nil, errorPath, SourceErrBuildConstraint
+		}
+		out = append(out, filtered...)
+	}
+	if len(selected) == 0 {
+		return nil, options.Files[0], SourceErrFileListEmpty
+	}
+	return out, "", SourceOK
 }
 
 func sourceFilenameEnabled(name string, target string) bool {

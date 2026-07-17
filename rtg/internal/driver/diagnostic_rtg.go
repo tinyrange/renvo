@@ -47,6 +47,9 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 	d := Diagnostic{Phase: "frontend", Code: "RTG-FRONTEND-001", Message: "frontend build failed"}
 	if result.Error == BuildErrOptions {
 		d.Phase, d.Code, d.Message = "options", "RTG-OPTION-001", "invalid command options"
+		if result.Options.Error == ParseErrMixedFileList {
+			d.Code, d.Message = "RTG-OPTION-011", "explicit source list contains a non-.go argument "+result.Options.ErrorArg
+		}
 		return d
 	}
 	if result.Error == BuildErrSource {
@@ -69,6 +72,10 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			d.Code, d.Message = "RTG-LOAD-019", "cgo is not supported by RTG"
 		} else if result.Sources.Error == SourceErrStandardPackage {
 			d.Code, d.Message = "RTG-LOAD-020", "standard library package "+result.ErrorPath+" is not included in this RTG build"
+		} else if result.Sources.Error == SourceErrFileDirectory {
+			d.Code, d.Message = "RTG-LOAD-021", "named source files must all be in one directory"
+		} else if result.Sources.Error == SourceErrFileListEmpty {
+			d.Code, d.Message = "RTG-LOAD-022", "explicit source list contains no buildable Go files"
 		}
 		if result.Sources.ErrorSourcePath != "" {
 			d.Path = result.Sources.ErrorSourcePath
@@ -117,11 +124,20 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			if pkg < 0 {
 				pkg = built.Workspace.ErrorFile
 			}
-			if pkg >= 0 && pkg < len(graph.Packages) && graph.Packages[pkg].Error == load.PackageErrParse {
-				d.Phase, d.Code, d.Message = "parser", "RTG-PARSE-001", "source syntax is invalid"
+			if pkg >= 0 && pkg < len(graph.Packages) {
+				packageError := graph.Packages[pkg].Error
+				if packageError == load.PackageErrParse {
+					d.Phase, d.Code, d.Message = "parser", "RTG-PARSE-001", "source syntax is invalid"
+				} else if packageError == load.PackageErrName {
+					d.Code, d.Message = "RTG-LOAD-012", "files in one directory declare different packages"
+				} else if packageError == load.PackageErrImport {
+					d.Code, d.Message = "RTG-LOAD-008", "import could not be resolved"
+				} else if packageError == load.PackageErrNoFiles {
+					d.Code, d.Message = "RTG-LOAD-013", "package contains no selected Go files"
+				}
 				result.ErrorPackage = pkg
 				result.ErrorFile = graph.Packages[pkg].ErrorFile
-				if result.ErrorFile >= 0 && result.ErrorFile < len(graph.Packages[pkg].Files) {
+				if packageError == load.PackageErrParse && result.ErrorFile >= 0 && result.ErrorFile < len(graph.Packages[pkg].Files) {
 					file := graph.Packages[pkg].Files[result.ErrorFile]
 					if offset := sourceGenericsOffset(file.Src); offset >= 0 {
 						d.Code, d.Message = "RTG-PARSE-002", "generics are not supported by RTG"

@@ -486,6 +486,64 @@ func TestBuildFromFS(t *testing.T) {
 	}
 }
 
+func TestBuildFromFSExplicitFileListUsesOnlyNamedFiles(t *testing.T) {
+	fs := memorySourceFS{files: []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte("//go:build windows\n\npackage main\nimport \"example.com/case/lib\"\nfunc main() { print(message() + lib.Value()) }\n")},
+		{Path: "/repo/case/cmd/app/helper_linux_arm64.go", Src: []byte("//go:build windows\n\npackage main\nfunc message() string { return \"PASS\" }\n")},
+		{Path: "/repo/case/cmd/app/sibling.go", Src: []byte("package main\nfunc message() string { return \"FAIL\" }\n")},
+		{Path: "/repo/case/lib/lib.go", Src: []byte("package lib\nfunc Value() string { return \"\\n\" }\n")},
+	}}
+	result := BuildFromFS([]string{"-o", "app", "./cmd/app/main.go", "./cmd/app/helper_linux_arm64.go"}, "/repo/case", "/std", fs)
+	if !result.Ok {
+		t.Fatalf("explicit BuildFromFS failed: diagnostic=%#v result=%#v", result.Diagnostic, result)
+	}
+	assertSourcePaths(t, result.Sources.Files, []string{
+		"/repo/case/go.mod",
+		"/repo/case/cmd/app/main.go",
+		"/repo/case/lib/lib.go",
+		"/repo/case/cmd/app/helper_linux_arm64.go",
+	})
+}
+
+func TestBuildFromFSExplicitFileListDiagnostics(t *testing.T) {
+	base := []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/a/main.go", Src: []byte("package main\nfunc main() {}\n")},
+		{Path: "/repo/case/a/other.go", Src: []byte("package other\n")},
+		{Path: "/repo/case/b/helper.go", Src: []byte("package main\n")},
+	}
+	differentDirs := BuildFromFS([]string{"-o", "app", "./a/main.go", "./b/helper.go"}, "/repo/case", "/std", memorySourceFS{files: base})
+	if differentDirs.Ok || differentDirs.Diagnostic.Code != "RTG-LOAD-021" || differentDirs.Diagnostic.Path != "/repo/case/b/helper.go" {
+		t.Fatalf("different-directory diagnostic = %#v", differentDirs)
+	}
+	differentPackages := BuildFromFS([]string{"-o", "app", "./a/main.go", "./a/other.go"}, "/repo/case", "/std", memorySourceFS{files: base})
+	if differentPackages.Ok || differentPackages.Diagnostic.Code != "RTG-LOAD-012" || differentPackages.Diagnostic.Path != "/repo/case/a/other.go" {
+		t.Fatalf("different-package diagnostic = %#v", differentPackages)
+	}
+	testOnly := append(base, load.SourceFile{Path: "/repo/case/a/main_test.go", Src: []byte("package main\n")})
+	empty := BuildFromFS([]string{"-o", "app", "./a/main_test.go"}, "/repo/case", "/std", memorySourceFS{files: testOnly})
+	if empty.Ok || empty.Diagnostic.Code != "RTG-LOAD-022" {
+		t.Fatalf("test-only diagnostic = %#v", empty)
+	}
+}
+
+func TestBuildFromFSExplicitFileListRetainsSemanticDiagnostics(t *testing.T) {
+	files := []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/main.go", Src: []byte("package main\nfunc main() { unused := 1 }\n")},
+		{Path: "/repo/case/no_main.go", Src: []byte("package main\nfunc helper() {}\n")},
+	}
+	unused := BuildFromFS([]string{"-o", "app", "main.go"}, "/repo/case", "/std", memorySourceFS{files: files})
+	if unused.Ok || unused.Diagnostic.Code != "RTG-CHECK-020" || unused.Diagnostic.Path != "/repo/case/main.go" || unused.Diagnostic.Line != 2 {
+		t.Fatalf("explicit unused-local diagnostic = %#v", unused)
+	}
+	missingMain := BuildFromFS([]string{"-o", "app", "no_main.go"}, "/repo/case", "/std", memorySourceFS{files: files})
+	if missingMain.Ok || missingMain.Diagnostic.Code != "RTG-CHECK-021" {
+		t.Fatalf("explicit missing-main diagnostic = %#v", missingMain)
+	}
+}
+
 func TestBuildFromFSReportsSourceError(t *testing.T) {
 	result := BuildFromFS([]string{"-o", "app", "./cmd/app"}, "/repo/case", "/std", memorySourceFS{files: []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},

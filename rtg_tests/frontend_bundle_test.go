@@ -93,7 +93,7 @@ func TestBundledFrontendStandaloneAllTargets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("standalone frontend help failed: %v\n%s", err, string(help))
 	}
-	for _, want := range []string{"Usage: rtg", "Targets:", "windows/amd64", "darwin/arm64", "wasi/wasm32"} {
+	for _, want := range []string{"Usage: rtg", "file.go...", "Exactly the named files", "Targets:", "windows/amd64", "darwin/arm64", "wasi/wasm32"} {
 		if !strings.Contains(string(help), want) {
 			t.Fatalf("standalone frontend help missing %q:\n%s", want, string(help))
 		}
@@ -130,6 +130,32 @@ func TestBundledFrontendStandaloneAllTargets(t *testing.T) {
 	}
 	if string(out) != "PASS\n" {
 		t.Fatalf("standalone bundled output = %q", string(out))
+	}
+
+	fileOutput := filepath.Join(project, "file-mode-app")
+	cmd = exec.Command(standalone, "-s", "-o", fileOutput, "./probe/main_linux_arm64.go")
+	cmd.Dir = project
+	cmd.Env = []string{"PWD=" + project}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("standalone explicit-file compile failed: %v\n%s", err, string(out))
+	}
+	cmd = exec.Command(fileOutput)
+	cmd.Dir = project
+	cmd.Env = []string{"PWD=" + project}
+	if out, err := cmd.CombinedOutput(); err != nil || string(out) != "PASS\n" {
+		t.Fatalf("standalone explicit-file output failed: err=%v output=%q", err, string(out))
+	}
+	cmd = exec.Command(standalone, "-o", fileOutput, "./probe/main_linux_arm64.go", "./probe/other.go")
+	cmd.Dir = project
+	cmd.Env = []string{"PWD=" + project}
+	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "RTG-LOAD-012") || !strings.Contains(string(out), "other.go") {
+		t.Fatalf("standalone mixed-package diagnostic: err=%v output=%q", err, string(out))
+	}
+	cmd = exec.Command(standalone, "-o", fileOutput, "./probe/main_linux_arm64.go", "./cmd/app/main.go")
+	cmd.Dir = project
+	cmd.Env = []string{"PWD=" + project}
+	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "RTG-LOAD-021") {
+		t.Fatalf("standalone mixed-directory diagnostic: err=%v output=%q", err, string(out))
 	}
 }
 
@@ -172,6 +198,32 @@ func main() {
 `
 	if err := os.WriteFile(filepath.Join(appDir, "main.go"), []byte(source), 0o644); err != nil {
 		t.Fatalf("write app source failed: %v", err)
+	}
+	probeDir := filepath.Join(dir, "probe")
+	if err := os.MkdirAll(probeDir, 0o755); err != nil {
+		t.Fatalf("create file-mode probe directory failed: %v", err)
+	}
+	probe := `//go:build windows
+
+package main
+
+import "strings"
+
+func main() {
+	if strings.Join([]string{"PA", "SS", "\n"}, "") == "PASS\n" {
+		print("PASS\n")
+	}
+}
+`
+	if err := os.WriteFile(filepath.Join(probeDir, "main_linux_arm64.go"), []byte(probe), 0o644); err != nil {
+		t.Fatalf("write file-mode probe failed: %v", err)
+	}
+	sibling := "package main\nfunc main() { print(\"FAIL sibling included\\n\") }\n"
+	if err := os.WriteFile(filepath.Join(probeDir, "sibling.go"), []byte(sibling), 0o644); err != nil {
+		t.Fatalf("write file-mode sibling failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(probeDir, "other.go"), []byte("package other\n"), 0o644); err != nil {
+		t.Fatalf("write file-mode mixed-package source failed: %v", err)
 	}
 	return dir
 }
