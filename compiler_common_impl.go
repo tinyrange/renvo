@@ -10964,16 +10964,16 @@ func rtgEmitByteSliceConversionRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 	}
 	srcOff := rtgAddUnnamedLocal(g, rtgTypeInt)
 	lenOff := rtgAddUnnamedLocal(g, rtgTypeInt)
+	destOff := rtgAddUnnamedLocal(g, rtgTypeInt)
 	idxOff := rtgAddUnnamedLocal(g, rtgTypeInt)
-	backingSize := 32768
-	backingOff := g.asm.bssSize
-	g.asm.bssSize += backingSize
 	argIndex := ep.args[e.firstArg]
 	if !rtgEmitStringValueRegs(g, ep, argIndex) {
 		return false
 	}
 	rtgAsmStorePrimaryStack(a, srcOff)
 	rtgAsmStoreSecondaryStack(a, lenOff)
+	rtgEmitArenaAllocStackPrimary(g, lenOff)
+	rtgAsmStorePrimaryStack(a, destOff)
 	rtgAsmStoreStackImm(a, idxOff, 0)
 	loopLabel := rtgAsmNewLabel(a)
 	doneLabel := rtgAsmNewLabel(a)
@@ -10987,7 +10987,7 @@ func rtgEmitByteSliceConversionRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 	rtgAsmPushPrimary(a)
 	rtgAsmLoadPrimaryStack(a, idxOff)
 	rtgAsmPushPrimary(a)
-	rtgAsmPrimaryBssAddr(a, backingOff)
+	rtgAsmLoadPrimaryStack(a, destOff)
 	rtgAsmCopyPrimaryToSecondary(a)
 	rtgAsmPopTertiary(a)
 	rtgAsmPopPrimary(a)
@@ -10995,7 +10995,7 @@ func rtgEmitByteSliceConversionRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 	rtgAsmIncStack(a, idxOff)
 	rtgAsmJmpLabel(a, loopLabel)
 	rtgAsmMarkLabel(a, doneLabel)
-	rtgAsmPrimaryBssAddr(a, backingOff)
+	rtgAsmLoadPrimaryStack(a, destOff)
 	rtgAsmLoadSecondaryStack(a, lenOff)
 	rtgAsmCopySecondaryToTertiary(a)
 	return true
