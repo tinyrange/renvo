@@ -11,16 +11,18 @@ const (
 	ParseErrMissingPackage
 	ParseErrExtraPackage
 	ParseErrWindowsGUIRequiresWindows
+	ParseErrMixedFileList
 )
 
 const DefaultTarget = "linux/amd64"
 
-const HelpText = "Usage: rtg -o <file> [-t <target>] [-tags <list>] [-s] [-emit-unit] [-windows-gui] <package>\nOptions:\n  -emit-unit    write the canonical linked RTGU unit without invoking a backend\n  -windows-gui  select the Windows GUI subsystem instead of the console subsystem\nTargets:\n  linux/amd64 linux/386 linux/aarch64 linux/arm\n  windows/amd64 windows/386 windows/arm64 darwin/arm64 wasi/wasm32\nUnsupported language/toolchain features:\n  generics, goroutines, channels, select, cgo\n"
+const HelpText = "Usage: rtg -o <file> [-t <target>] [-tags <list>] [-s] [-emit-unit] [-windows-gui] <package | file.go...>\nOptions:\n  -emit-unit    write the canonical linked RTGU unit without invoking a backend\n  -windows-gui  select the Windows GUI subsystem instead of the console subsystem\nSource files:\n  Explicit .go files must share one directory and package. Exactly the named files are used;\n  build constraints and OS/architecture suffixes are ignored, while _test.go files are skipped.\nTargets:\n  linux/amd64 linux/386 linux/aarch64 linux/arm\n  windows/amd64 windows/386 windows/arm64 darwin/arm64 wasi/wasm32\nUnsupported language/toolchain features:\n  generics, goroutines, channels, select, cgo\n"
 
 type Options struct {
 	Target     string
 	Output     string
 	Package    string
+	Files      []string
 	Strip      bool
 	EmitUnit   bool
 	WindowsGUI bool
@@ -101,10 +103,21 @@ func ParseOptions(args []string) Options {
 		if len(arg) > 0 && arg[0] == '-' {
 			return parseFail(options, ParseErrUnknownOption, arg, i)
 		}
-		if options.Package != "" {
+		if options.Package == "" {
+			options.Package = arg
+			if optionArgIsGoFile(arg) {
+				options.Files = append(options.Files, arg)
+			}
+			i++
+			continue
+		}
+		if len(options.Files) == 0 {
 			return parseFail(options, ParseErrExtraPackage, arg, i)
 		}
-		options.Package = arg
+		if !optionArgIsGoFile(arg) {
+			return parseFail(options, ParseErrMixedFileList, arg, i)
+		}
+		options.Files = append(options.Files, arg)
 		i++
 	}
 	if options.Output == "" {
@@ -117,6 +130,10 @@ func ParseOptions(args []string) Options {
 		return parseFail(options, ParseErrWindowsGUIRequiresWindows, options.Target, windowsGUIAt)
 	}
 	return options
+}
+
+func optionArgIsGoFile(arg string) bool {
+	return len(arg) > 3 && arg[len(arg)-3:] == ".go"
 }
 
 func parseBuildTags(value string) ([]string, bool) {
