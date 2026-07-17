@@ -1,5 +1,7 @@
 package main
 
+func rtg_runtime_ArenaPersistString(value string) string { return value }
+
 const rtgDarwinArm64CodeOffset = 0x1000
 const rtgDarwinArm64ImageBase = 0x100000000
 const rtgDarwinArm64PageSize = 0x4000
@@ -95,15 +97,10 @@ func rtgDarwinArm64CallVirtualArgs(a *rtgAsm, id int, argCount int) {
 	rtgDarwinArm64CallImport(a, id)
 }
 
-func rtgDarwinStaticSymbolName(name string) string {
-	if len(name) > 0 && name[0] == '_' {
-		return name
-	}
-	return "_" + name
-}
-
 func rtgAsmAddDarwinStaticImport(a *rtgAsm, dylib string, name string) int {
-	name = rtgDarwinStaticSymbolName(name)
+	if len(name) == 0 || name[0] != '_' {
+		name = rtg_runtime_ArenaPersistString("_" + name)
+	}
 	for i := 0; i < len(a.darwinImports); i++ {
 		if a.darwinImports[i].dylib == dylib && a.darwinImports[i].name == name {
 			a.darwinImports[i].used = true
@@ -119,8 +116,8 @@ func rtgDarwinArm64EmitLinkStaticCall(g *rtgLinearGen, fn *rtgFuncInfo, wordCoun
 	if rtgTargetArch != rtgArchAarch64 {
 		return false
 	}
-	dylib := rtgStringFromBytes(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd)
-	name := rtgStringFromBytes(g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
+	dylib := rtg_runtime_ArenaPersistString(rtgStringFromBytes(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd))
+	name := rtg_runtime_ArenaPersistString(rtgStringFromBytes(g.prog.src, fn.linkMethodStart, fn.linkMethodEnd))
 	importIndex := rtgAsmAddDarwinStaticImport(&g.asm, dylib, name)
 	a := &g.asm
 	intReg := 0
