@@ -1,8 +1,8 @@
 {
   "phase": "checker",
-  "code": "RTG-CHECK-009",
+  "code": "RTG-CHECK-017",
   "file": "cmd/app/main.go",
   "line": 4,
   "column": 15,
-  "message": "feature is excluded from the current frontend scope"
+  "message": "goroutines are not supported by RTG"
 }

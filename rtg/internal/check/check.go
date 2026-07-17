@@ -23,6 +23,9 @@ const (
 	CheckErrBreak
 	CheckErrContinue
 	CheckErrCallArgument
+	CheckErrGoroutine
+	CheckErrChannel
+	CheckErrSelect
 )
 
 const (
@@ -240,6 +243,9 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 	}
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
 		file := pkg.Files[fileIndex].File
+		if excludedErr, excludedTok := excludedFileFeature(file); excludedErr != CheckOK {
+			return info, false, excludedErr, fileIndex, excludedTok
+		}
 		for i := 0; i < len(file.Decls); i++ {
 			decl := file.Decls[i]
 			name := tokenString(&file, decl.NameTok)
@@ -252,9 +258,6 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 		}
 		for i := 0; i < len(file.Funcs); i++ {
 			fn := file.Funcs[i]
-			if excludedTok := excludedFeatureToken(file, fn); excludedTok >= 0 {
-				return info, false, CheckErrExcluded, fileIndex, excludedTok
-			}
 			name := tokenString(&file, fn.NameTok)
 			kind := SymbolFunc
 			if fn.ReceiverStart >= 0 {

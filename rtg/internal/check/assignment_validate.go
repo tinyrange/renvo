@@ -26,14 +26,22 @@ func invalidDefiniteAssignmentType(file syntax.File, fn syntax.FuncDecl) int {
 	return -1
 }
 
-func excludedFeatureToken(file syntax.File, fn syntax.FuncDecl) int {
-	for i := fn.StartTok; i < fn.EndTok && i < len(file.Tokens); i++ {
-		kind := file.Tokens[i].Kind
-		if kind == syntax.TokenGo || kind == syntax.TokenChan || kind == syntax.TokenSelect {
-			return i
+func excludedFileFeature(file syntax.File) (int, int) {
+	for i := 0; i < len(file.Tokens); i++ {
+		if file.Tokens[i].Kind == syntax.TokenSelect {
+			return CheckErrSelect, i
 		}
 	}
-	return -1
+	for i := 0; i < len(file.Tokens); i++ {
+		kind := file.Tokens[i].Kind
+		if kind == syntax.TokenGo {
+			return CheckErrGoroutine, i
+		}
+		if kind == syntax.TokenChan || tokenTextIs(&file, i, "<-") {
+			return CheckErrChannel, i
+		}
+	}
+	return CheckOK, -1
 }
 
 func definiteLiteralKind(file syntax.File, tok int) string {
