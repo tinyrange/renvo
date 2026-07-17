@@ -79,6 +79,9 @@ func (c *Control) SetVisible(visible bool) {
 		c.form.Invalidate(c.bounds)
 	}
 	c.visible = visible
+	if !visible && c.form != nil && c.form.focused == c {
+		c.form.focused = nil
+	}
 	if c.form != nil && c.visible {
 		c.form.Invalidate(c.bounds)
 	}

@@ -485,7 +485,11 @@ func (w *Window) dispatchNativeEvent(event int) {
 }
 
 func (w *Window) syncWindowState() {
-	if objcMsg0(w.native, selector("isVisible")) == 0 && w.shown {
+	visible := objcMsg0(w.native, selector("isVisible")) != 0
+	if visible {
+		w.wasVisible = true
+	}
+	if !visible && w.shown && w.wasVisible {
 		w.closed = true
 		w.queue(Event{Type: EventWindowClose})
 		return

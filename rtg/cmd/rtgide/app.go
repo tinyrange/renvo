@@ -2,16 +2,16 @@ package main
 
 import "j5.nz/rtg/rtg/std/graphics"
 
-func run(args []string) int {
+func run(args []string, env []string) int {
 	root := "."
 	if len(args) > 1 && args[1] != "" {
 		root = args[1]
 	}
-	window := graphics.NewWindow(graphics.WindowOptions{Title: "RTG Forms", Width: 1000, Height: 700})
+	window := graphics.NewWindow(graphics.WindowOptions{Title: "MiniIDE", Width: 1440, Height: 520})
 	if window == nil {
 		return 1
 	}
-	form := NewMainForm(root)
+	form := NewMainFormWithEnv(root, env)
 	for {
 		if form.Paint(window.Surface()) {
 			if !window.Present() {

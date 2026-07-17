@@ -8,22 +8,40 @@ import (
 )
 
 func (f *MainForm) initializeComponent(root string) {
-	f.Form.Initialize(1000, 700)
-	uiFont := ide.NewUIFont()
+	f.Form.Initialize(1440, 520)
+	uiFont := ide.NewInterfaceFont()
+	codeFont := ide.NewUIFont()
+
+	f.appBar = newWorkspaceAppBar(uiFont)
+	f.explorerFrame = newWorkspaceExplorerFrame(uiFont)
+	f.editorFrame = newWorkspaceEditorFrame(uiFont)
+	f.designer = newWorkspaceDesigner(uiFont)
+	f.inspector = newWorkspaceInspector(uiFont)
+	f.output = newWorkspaceOutput(uiFont)
+	f.appBar.Build = f.buildProject
+	f.appBar.Run = f.runProject
+	f.editorFrame.ShowDesigner = f.showDesigner
+	f.designer.ShowCode = f.showCode
 
 	f.explorer = ide.NewExplorerControl(ide.OpenExplorer(root))
-	f.explorer.SetBounds(rect(0, 0, 260, 700))
 	f.explorer.SetFont(uiFont)
 	f.explorer.OpenFile = f.explorerOpenFile
 
 	f.editor = ide.NewEditorControl(ide.NewDocument(nil))
-	f.editor.SetBounds(rect(260, 0, 740, 700))
-	f.editor.SetFont(uiFont)
+	f.editor.SetFont(codeFont)
 	f.editor.Save = f.saveCurrentFile
 
 	f.Resize = f.formResize
+	f.Add(&f.appBar.Control)
+	f.Add(&f.explorerFrame.Control)
+	f.Add(&f.editorFrame.Control)
+	f.Add(&f.designer.Control)
+	f.Add(&f.inspector.Control)
+	f.Add(&f.output.Control)
 	f.Add(&f.explorer.Control)
 	f.Add(&f.editor.Control)
+	f.designer.SetVisible(false)
+	f.formResize()
 }
 
 func rect(x, y, width, height int) graphics.Rect {

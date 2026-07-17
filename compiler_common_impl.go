@@ -1041,7 +1041,14 @@ func rtgStringFromBytes(src []byte, start int, end int) string {
 	for i := start; i < end; i++ {
 		out = append(out, src[i])
 	}
-	return string(out)
+	return rtg_runtime_ArenaPersistString(string(out))
+}
+
+// The self-hosted compiler retains import names until the final object image
+// is assembled. Keep those strings out of the temporary expression arena,
+// which is reset between decoded package units.
+func rtg_runtime_ArenaPersistString(value string) string {
+	return value
 }
 
 func rtgAsmHasWinImportRelocs(a *rtgAsm) bool {
@@ -1971,7 +1978,9 @@ func rtgScan(src []byte, toks *rtgTokens) {
 		if i < srcLen {
 			c1 := src[i]
 			two := false
-			if c1 == '=' {
+			if c == '.' && c1 == '.' && i+1 < srcLen && src[i+1] == '.' {
+				i += 2
+			} else if c1 == '=' {
 				if c == ':' || c == '=' || c == '!' || c == '<' || c == '>' || c == '+' || c == '-' || c == '*' || c == '/' || c == '%' || c == '&' || c == '|' || c == '^' {
 					two = true
 				}
@@ -2166,6 +2175,22 @@ func rtgTok2Is(p *rtgProgram, i int, a byte, b byte) bool {
 	return p.src[start+1] == b
 }
 
+func rtgTok3Is(p *rtgProgram, i int, a byte, b byte, c byte) bool {
+	if i < 0 {
+		return false
+	}
+	data := p.toks.data
+	base := i * rtgTokenStride
+	if base >= len(data) || int(data[base])&255 != rtgTokOp {
+		return false
+	}
+	start := int(data[base+1])
+	if int(data[base+2])-start != 3 {
+		return false
+	}
+	return p.src[start] == a && p.src[start+1] == b && p.src[start+2] == c
+}
+
 func rtgBoolTokenValue(p *rtgProgram, tok int) int {
 	start := rtgTokStart(p, tok)
 	if p.src[start] == 't' {
@@ -2223,6 +2248,32 @@ func rtgBytesEqualText(src []byte, start int, end int, text string) bool {
 		}
 	}
 	return true
+}
+
+func rtgBytesEqualRuntimeName(src []byte, start int, end int, text string) bool {
+	if rtgBytesEqualText(src, start, end, text) {
+		return true
+	}
+	// The frontend prefixes package-owned symbols as rtgp<index>_. Runtime
+	// intrinsics keep their semantics when the compiler/runtime is embedded as
+	// a library rather than built as package main.
+	if start < 0 || end > len(src) || end-start <= len(text)+5 {
+		return false
+	}
+	if src[start] != 'r' || src[start+1] != 't' || src[start+2] != 'g' || src[start+3] != 'p' {
+		return false
+	}
+	i := start + 4
+	if i >= end || src[i] < '0' || src[i] > '9' {
+		return false
+	}
+	for i < end && src[i] >= '0' && src[i] <= '9' {
+		i++
+	}
+	if i >= end || src[i] != '_' || end-(i+1) != len(text) {
+		return false
+	}
+	return rtgBytesEqualText(src, i+1, end, text)
 }
 
 func rtgHexDigitValue(ch byte) int {
@@ -2987,7 +3038,10 @@ func rtgParsePostfixExpr(ep *rtgExprParse) int {
 					}
 				}
 				parseEnd := argEnd
-				if argEnd-ep.pos >= 4 && rtgTokCharIs(ep.prog, argEnd-3, '.') && rtgTokCharIs(ep.prog, argEnd-2, '.') && rtgTokCharIs(ep.prog, argEnd-1, '.') {
+				if argEnd-ep.pos >= 2 && rtgTok3Is(ep.prog, argEnd-1, '.', '.', '.') {
+					callExpanded = true
+					parseEnd = argEnd - 1
+				} else if argEnd-ep.pos >= 4 && rtgTokCharIs(ep.prog, argEnd-3, '.') && rtgTokCharIs(ep.prog, argEnd-2, '.') && rtgTokCharIs(ep.prog, argEnd-1, '.') {
 					callExpanded = true
 					parseEnd = argEnd - 3
 				}
@@ -10624,7 +10678,7 @@ func rtgReturnedSliceCanReuseDescriptor(g *rtgLinearGen, ep *rtgExprParse, idx i
 		fnIndex := rtgFuncInfoFromCall(g, ep, e.left)
 		if fnIndex >= 0 && fnIndex < len(g.meta.funcs) {
 			fn := &g.meta.funcs[fnIndex]
-			if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistBytes") {
+			if rtgBytesEqualRuntimeName(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistBytes") {
 				return true
 			}
 			return rtgCallSliceResultCanReuseDescriptor(g, ep, idx, fnIndex)
@@ -11092,6 +11146,13 @@ func rtgEmitSliceLiteralBacking(g *rtgLinearGen, ep *rtgExprParse, idx int, slic
 			rtgAsmPrimaryBssAddr(a, backingOff)
 			rtgAsmCopyPrimaryToSecondary(a)
 			rtgAsmPopStoreStringMemSecondary(a, disp)
+			continue
+		}
+		if elemResolved.kind == rtgTypeSlice {
+			if !rtgEmitSliceValueRegs(g, ep, field.expr) {
+				return false
+			}
+			rtgAsmStoreSliceBss(a, backingOff+disp)
 			continue
 		}
 		if elemResolved.kind == rtgTypeInterface {
@@ -12042,28 +12103,28 @@ func rtgReloadClosureCaptures(g *rtgLinearGen, fnIndex int, _ int) bool {
 }
 
 func rtgEmitRuntimeArenaCall(g *rtgLinearGen, ep *rtgExprParse, idx int, fn *rtgFuncInfo) bool {
-	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_Exit") {
+	if rtgBytesEqualRuntimeName(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_Exit") {
 		return rtgEmitRuntimeExit(g, ep, idx)
 	}
-	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaMark") {
+	if rtgBytesEqualRuntimeName(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaMark") {
 		return rtgEmitRuntimeArenaMark(g, ep, idx)
 	}
-	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaReset") {
+	if rtgBytesEqualRuntimeName(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaReset") {
 		return rtgEmitRuntimeArenaReset(g, ep, idx)
 	}
-	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistMark") {
+	if rtgBytesEqualRuntimeName(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistMark") {
 		return rtgEmitRuntimeArenaPersistMark(g, ep, idx)
 	}
-	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistReset") {
+	if rtgBytesEqualRuntimeName(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistReset") {
 		return rtgEmitRuntimeArenaPersistReset(g, ep, idx)
 	}
-	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistString") {
+	if rtgBytesEqualRuntimeName(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistString") {
 		return rtgEmitRuntimeArenaPersistString(g, ep, idx)
 	}
-	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistBytes") {
+	if rtgBytesEqualRuntimeName(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistBytes") {
 		return rtgEmitRuntimeArenaPersistBytes(g, ep, idx)
 	}
-	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaDiscard") {
+	if rtgBytesEqualRuntimeName(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaDiscard") {
 		return rtgEmitRuntimeArenaDiscard(g, ep, idx)
 	}
 	return false

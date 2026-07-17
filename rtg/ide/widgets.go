@@ -5,11 +5,11 @@ import (
 	"j5.nz/rtg/rtg/std/graphics"
 )
 
-var explorerBackground = graphics.RGBA(247, 248, 250, 255)
+var explorerBackground = graphics.RGBA(255, 255, 255, 255)
 var editorBackground = graphics.RGBA(255, 255, 255, 255)
 var borderColor = graphics.RGBA(214, 218, 224, 255)
-var selectionColor = graphics.RGBA(215, 231, 255, 255)
-var selectionTextColor = graphics.RGBA(22, 67, 128, 255)
+var selectionColor = graphics.RGBA(226, 239, 255, 255)
+var selectionTextColor = graphics.RGBA(35, 39, 47, 255)
 var textColor = graphics.RGBA(35, 39, 47, 255)
 var lineNumberColor = graphics.RGBA(132, 139, 150, 255)
 var currentLineColor = graphics.RGBA(248, 250, 253, 255)
@@ -53,10 +53,12 @@ func (c *ExplorerControl) SetFont(font *graphics.Font) {
 		font = graphics.NewBuiltinFont(2)
 	}
 	c.Font = font
-	c.rowHeight = fontLineHeight(font) + 4
-	c.baseline = fontPixelCeil(font.Metrics.Ascent) + 2
+	c.rowHeight = fontLineHeight(font) + 6
+	c.baseline = fontPixelCeil(font.Metrics.Ascent) + 3
 	c.Invalidate()
 }
+
+func (c *ExplorerControl) RowHeight() int { return c.rowHeight }
 
 func (c *ExplorerControl) paint(surface *graphics.Surface) {
 	bounds := c.Bounds()
@@ -82,18 +84,64 @@ func (c *ExplorerControl) paint(surface *graphics.Surface) {
 			color = selectionTextColor
 		}
 		node := rows[i].Node
-		x := bounds.MinX + 7 + graphics.Scalar(rows[i].Depth*14)
-		marker := " "
+		x := bounds.MinX + 16 + graphics.Scalar(rows[i].Depth*18)
 		if node.Directory {
-			marker = "+"
-			if node.Expanded {
-				marker = "-"
-			}
+			drawExplorerChevron(surface, x, y+graphics.Scalar(c.rowHeight/2-3), node.Expanded, color)
+			drawExplorerFolder(surface, x+15, y+graphics.Scalar(c.rowHeight/2-7))
+		} else {
+			drawExplorerFile(surface, c.Font, x+15, y+graphics.Scalar(c.rowHeight/2-8), node.Name)
 		}
-		surface.DrawText(c.Font, graphics.Point{X: x, Y: y + graphics.Scalar(c.baseline)}, marker, color)
-		surface.DrawText(c.Font, graphics.Point{X: x + 11, Y: y + graphics.Scalar(c.baseline)}, node.Name, color)
+		surface.DrawText(c.Font, graphics.Point{X: x + 36, Y: y + graphics.Scalar(c.baseline)}, node.Name, color)
 	}
 	surface.FillRect(graphics.R(bounds.MaxX-1, bounds.MinY, 1, bounds.Height()), borderColor)
+}
+
+func drawExplorerChevron(surface *graphics.Surface, x, y graphics.Scalar, expanded bool, color graphics.Color) {
+	if expanded {
+		surface.DrawLine(graphics.Point{X: x, Y: y}, graphics.Point{X: x + 4, Y: y + 4}, 1, color)
+		surface.DrawLine(graphics.Point{X: x + 4, Y: y + 4}, graphics.Point{X: x + 8, Y: y}, 1, color)
+		return
+	}
+	surface.DrawLine(graphics.Point{X: x, Y: y}, graphics.Point{X: x + 4, Y: y + 4}, 1, color)
+	surface.DrawLine(graphics.Point{X: x + 4, Y: y + 4}, graphics.Point{X: x, Y: y + 8}, 1, color)
+}
+
+func drawExplorerFolder(surface *graphics.Surface, x, y graphics.Scalar) {
+	fill := graphics.RGBA(224, 228, 233, 255)
+	stroke := graphics.RGBA(102, 109, 119, 255)
+	surface.FillRect(graphics.R(x+1, y, 7, 3), fill)
+	surface.FillRect(graphics.R(x, y+3, 16, 11), fill)
+	surface.StrokeRect(graphics.R(x, y+3, 16, 11), 1, stroke)
+}
+
+func drawExplorerFile(surface *graphics.Surface, font *graphics.Font, x, y graphics.Scalar, name string) {
+	if ideHasSuffix(name, ".go") {
+		surface.DrawText(font, graphics.Point{X: x, Y: y + font.Metrics.Ascent + 2}, "go", graphics.RGBA(20, 105, 214, 255))
+		return
+	}
+	color := graphics.RGBA(99, 106, 116, 255)
+	if ideHasSuffix(name, ".ui") {
+		color = graphics.RGBA(126, 55, 221, 255)
+	}
+	surface.StrokeRect(graphics.R(x+2, y, 12, 15), 1, color)
+	if ideHasSuffix(name, ".png") || ideHasSuffix(name, ".jpg") {
+		surface.FillEllipse(graphics.R(x+5, y+3, 3, 3), color)
+		surface.DrawLine(graphics.Point{X: x + 4, Y: y + 12}, graphics.Point{X: x + 8, Y: y + 8}, 1, color)
+		surface.DrawLine(graphics.Point{X: x + 8, Y: y + 8}, graphics.Point{X: x + 12, Y: y + 12}, 1, color)
+	}
+}
+
+func ideHasSuffix(text, suffix string) bool {
+	if len(suffix) > len(text) {
+		return false
+	}
+	start := len(text) - len(suffix)
+	for i := 0; i < len(suffix); i++ {
+		if text[start+i] != suffix[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *ExplorerControl) pointerDown(x, y graphics.Scalar) {
@@ -237,7 +285,7 @@ func (c *EditorControl) SetFont(font *graphics.Font) {
 		font = graphics.NewBuiltinFont(2)
 	}
 	c.Font = font
-	c.lineHeight = fontLineHeight(font) + 2
+	c.lineHeight = fontLineHeight(font) + 4
 	c.characterWidth = fontCellWidth(font)
 	c.baseline = fontPixelCeil(font.Metrics.Ascent) + 1
 	c.Invalidate()

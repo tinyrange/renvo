@@ -2,4 +2,4 @@
 
 package main
 
-func appMain(args []string, env []string) int { return run(args) }
+func appMain(args []string, env []string) int { return run(args, env) }

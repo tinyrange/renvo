@@ -23,13 +23,16 @@ func TestIDEUIAutomationScreenshots(t *testing.T) {
 	}
 
 	form := NewMainForm(root)
-	form.Dispatch(graphics.Event{Type: graphics.EventWindowResize, Dirty: graphics.R(0, 0, 640, 360)})
-	surface := graphics.NewSurface(640, 360)
+	form.Dispatch(graphics.Event{Type: graphics.EventWindowResize, Dirty: graphics.R(0, 0, 1440, 520)})
+	surface := graphics.NewSurface(1440, 520)
 	form.Paint(surface)
 
 	// Activate main.go through the same pointer-down/up route as the window.
-	form.Dispatch(graphics.Event{Type: graphics.EventPointerDown, X: 20, Y: 30, Button: 1})
-	form.Dispatch(graphics.Event{Type: graphics.EventPointerUp, X: 20, Y: 30, Button: 1})
+	explorerBounds := form.explorer.Bounds()
+	explorerX := explorerBounds.MinX + 20
+	explorerY := explorerBounds.MinY + graphics.Scalar(form.explorer.RowHeight()+form.explorer.RowHeight()/2)
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerDown, X: explorerX, Y: explorerY, Button: 1})
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerUp, X: explorerX, Y: explorerY, Button: 1})
 	if form.currentPath != path {
 		t.Fatalf("automation did not open main.go: %q", form.currentPath)
 	}
@@ -37,8 +40,11 @@ func TestIDEUIAutomationScreenshots(t *testing.T) {
 
 	// Focus the editor and walk the caret far enough to exercise contextual
 	// vertical scrolling.
-	form.Dispatch(graphics.Event{Type: graphics.EventPointerDown, X: 320, Y: 8, Button: 1})
-	form.Dispatch(graphics.Event{Type: graphics.EventPointerUp, X: 320, Y: 8, Button: 1})
+	editorBounds := form.editor.Bounds()
+	editorX := editorBounds.MinX + 80
+	editorY := editorBounds.MinY + 8
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerDown, X: editorX, Y: editorY, Button: 1})
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerUp, X: editorX, Y: editorY, Button: 1})
 	for i := 0; i < 27; i++ {
 		form.Dispatch(graphics.Event{Type: graphics.EventKeyDown, Key: graphics.KeyDown})
 	}

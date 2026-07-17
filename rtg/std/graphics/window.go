@@ -161,6 +161,7 @@ type Window struct {
 	closed         bool
 	active         bool
 	shown          bool
+	wasVisible     bool
 	focused        bool
 	captured       bool
 	pointerInside  bool

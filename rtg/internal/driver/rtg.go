@@ -3,11 +3,10 @@
 package driver
 
 import (
-	"os"
-
 	"j5.nz/rtg/rtg/internal/arena"
 	"j5.nz/rtg/rtg/internal/backendbridge"
 	"j5.nz/rtg/rtg/internal/load"
+	"j5.nz/rtg/rtg/std/os"
 )
 
 type RTGFS struct{}

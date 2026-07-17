@@ -23,6 +23,32 @@ func NewUIFont() *graphics.Font {
 		if readError != nil {
 			continue
 		}
+		font, fontError := graphics.NewTrueTypeFont(data, 16)
+		if fontError == nil {
+			return font
+		}
+	}
+	return graphics.NewBuiltinFont(2)
+}
+
+// NewInterfaceFont returns the proportional face used by application chrome,
+// tree rows, labels, property sheets, and future Forms controls. The editor
+// keeps NewUIFont's monospace contract.
+func NewInterfaceFont() *graphics.Font {
+	paths := []string{
+		"/System/Library/Fonts/SFNS.ttf",
+		"/System/Library/Fonts/Helvetica.ttc",
+		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+		"/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+		"C:/Windows/Fonts/segoeui.ttf",
+		"C:/Windows/Fonts/tahoma.ttf",
+		"C:/Windows/Fonts/arial.ttf",
+	}
+	for i := 0; i < len(paths); i++ {
+		data, readError := rtgos.ReadFile(paths[i])
+		if readError != nil {
+			continue
+		}
 		font, fontError := graphics.NewTrueTypeFont(data, 14)
 		if fontError == nil {
 			return font

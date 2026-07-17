@@ -12,6 +12,20 @@ import (
 	"j5.nz/rtg/rtgunit"
 )
 
+func TestRuntimeIntrinsicNameRecognizesFrontendPackagePrefix(t *testing.T) {
+	name := "rtg_runtime_ArenaPersistString"
+	for _, source := range []string{name, "rtgp14_" + name} {
+		if !rtgBytesEqualRuntimeName([]byte(source), 0, len(source), name) {
+			t.Fatalf("runtime intrinsic name %q was not recognized", source)
+		}
+	}
+	for _, source := range []string{"other_" + name, "rtgp_" + name, "rtgp14x_" + name} {
+		if rtgBytesEqualRuntimeName([]byte(source), 0, len(source), name) {
+			t.Fatalf("non-frontend runtime name %q was recognized", source)
+		}
+	}
+}
+
 func TestTargetProfilesSeparateMachineWidthsFromBackendSlots(t *testing.T) {
 	tests := []struct {
 		target      int

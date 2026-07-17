@@ -46,3 +46,41 @@ func appMain() int {
 		t.Fatalf("compiled Objective-C output = %q", string(got))
 	}
 }
+
+func TestDarwinArm64SelfHostedLinkStaticNamesSurvivePackageUnits(t *testing.T) {
+	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
+		t.Skipf("Darwin self-host linkstatic test requires darwin/arm64, got %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	root, err := filepath.Abs(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := getCompilerFiles(targetConfig{os: "darwin", arch: "arm64"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := compilerTarget{name: "darwin/arm64", files: files}
+	outDir := t.TempDir()
+	backend := buildStage2Compiler(t, target, outDir)
+	caseDir := filepath.Join(root, "rtg_tests", "regressions", "darwin_linkstatic_selfhost")
+	frontend := filepath.Join(outDir, "frontend")
+	buildFrontend := exec.Command("go", "build", "-o", frontend, "./rtg/cmd/rtg")
+	buildFrontend.Dir = root
+	if got, err := buildFrontend.CombinedOutput(); err != nil {
+		t.Fatalf("frontend build failed: %v\n%s", err, got)
+	}
+	output := filepath.Join(outDir, "app")
+	compile := exec.Command(frontend, "-t", target.name, "-s", "-o", output, "./cmd/app")
+	compile.Dir = caseDir
+	compile.Env = append(os.Environ(), "RTG_BACKEND="+backend, "RTG_STDROOT="+filepath.Join(root, "rtg", "std"))
+	if got, err := compile.CombinedOutput(); err != nil {
+		t.Fatalf("self-hosted graphics compile failed: %v\n%s", err, got)
+	}
+	got, err := exec.Command(output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("self-hosted linkstatic output failed: %v\n%s", err, got)
+	}
+	if string(got) != "PASS\n" {
+		t.Fatalf("self-hosted linkstatic output = %q", got)
+	}
+}
