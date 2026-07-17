@@ -1978,9 +1978,7 @@ func rtgScan(src []byte, toks *rtgTokens) {
 		if i < srcLen {
 			c1 := src[i]
 			two := false
-			if c == '.' && c1 == '.' && i+1 < srcLen && src[i+1] == '.' {
-				i += 2
-			} else if c1 == '=' {
+			if c1 == '=' {
 				if c == ':' || c == '=' || c == '!' || c == '<' || c == '>' || c == '+' || c == '-' || c == '*' || c == '/' || c == '%' || c == '&' || c == '|' || c == '^' {
 					two = true
 				}
@@ -2173,22 +2171,6 @@ func rtgTok2Is(p *rtgProgram, i int, a byte, b byte) bool {
 		return false
 	}
 	return p.src[start+1] == b
-}
-
-func rtgTok3Is(p *rtgProgram, i int, a byte, b byte, c byte) bool {
-	if i < 0 {
-		return false
-	}
-	data := p.toks.data
-	base := i * rtgTokenStride
-	if base >= len(data) || int(data[base])&255 != rtgTokOp {
-		return false
-	}
-	start := int(data[base+1])
-	if int(data[base+2])-start != 3 {
-		return false
-	}
-	return p.src[start] == a && p.src[start+1] == b && p.src[start+2] == c
 }
 
 func rtgBoolTokenValue(p *rtgProgram, tok int) int {
@@ -3038,10 +3020,7 @@ func rtgParsePostfixExpr(ep *rtgExprParse) int {
 					}
 				}
 				parseEnd := argEnd
-				if argEnd-ep.pos >= 2 && rtgTok3Is(ep.prog, argEnd-1, '.', '.', '.') {
-					callExpanded = true
-					parseEnd = argEnd - 1
-				} else if argEnd-ep.pos >= 4 && rtgTokCharIs(ep.prog, argEnd-3, '.') && rtgTokCharIs(ep.prog, argEnd-2, '.') && rtgTokCharIs(ep.prog, argEnd-1, '.') {
+				if argEnd-ep.pos >= 4 && rtgTokCharIs(ep.prog, argEnd-3, '.') && rtgTokCharIs(ep.prog, argEnd-2, '.') && rtgTokCharIs(ep.prog, argEnd-1, '.') {
 					callExpanded = true
 					parseEnd = argEnd - 3
 				}

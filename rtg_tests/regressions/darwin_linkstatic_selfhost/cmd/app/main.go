@@ -8,9 +8,9 @@ func main() {
 	// test. On Darwin this pulls its AppKit, Objective-C, and OpenGL imports into
 	// a separate decoded package unit.
 	if len(message) == 0 {
-		window := graphics.NewWindow(graphics.WindowOptions{Title: "unused", Width: 8, Height: 8})
-		if window != nil {
-			window.Close()
+		font := graphics.NewBuiltinFont(1)
+		if font == nil {
+			message = "FAIL\n"
 		}
 	}
 	print(message)
