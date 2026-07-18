@@ -315,36 +315,38 @@ func (d *Document) Paste(text string) {
 	d.insertBytes(normalizeLineEndings([]byte(text)), editReplace, false)
 }
 
-func (d *Document) Backspace() {
+func (d *Document) Backspace() bool {
 	if d == nil {
-		return
+		return false
 	}
 	start, end := d.Selection()
 	if start != end {
 		d.replace(start, end, nil, editReplace, false)
-		return
+		return true
 	}
 	if d.Caret == 0 {
-		return
+		return false
 	}
 	start = previousRuneStart(d.text, d.Caret)
 	d.replace(start, d.Caret, nil, editBackspace, true)
+	return true
 }
 
-func (d *Document) Delete() {
+func (d *Document) Delete() bool {
 	if d == nil {
-		return
+		return false
 	}
 	start, end := d.Selection()
 	if start != end {
 		d.replace(start, end, nil, editReplace, false)
-		return
+		return true
 	}
 	if d.Caret == len(d.text) {
-		return
+		return false
 	}
 	end = nextRuneEnd(d.text, d.Caret)
 	d.replace(d.Caret, end, nil, editDelete, true)
+	return true
 }
 
 func (d *Document) Undo() bool {

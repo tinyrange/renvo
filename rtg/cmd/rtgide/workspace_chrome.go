@@ -224,7 +224,19 @@ type workspaceEditorFrame struct {
 	dirty        bool
 	line         int
 	column       int
+	diagnostic   string
 	ShowDesigner func()
+}
+
+func (c *workspaceEditorFrame) SetDiagnostic(message string) {
+	if c == nil || c.diagnostic == message {
+		return
+	}
+	c.diagnostic = message
+	if c.Form() != nil {
+		bounds := c.Bounds()
+		c.Form().Invalidate(graphics.R(bounds.MinX, bounds.MaxY-workspaceStatusHeight, bounds.Width(), workspaceStatusHeight))
+	}
 }
 
 func newWorkspaceEditorFrame(font *graphics.Font) *workspaceEditorFrame {
@@ -278,7 +290,17 @@ func (c *workspaceEditorFrame) paint(surface *graphics.Surface) {
 	surface.StrokeEllipse(graphics.R(bounds.MinX+18, statusY+11, 10, 10), 2, workspaceBlue)
 	drawWorkspaceText(surface, c.font, bounds.MinX+34, statusY+23, "Go 1.22", workspaceMuted)
 	drawWorkspaceText(surface, c.font, bounds.MinX+142, statusY+23, "Ln "+workspaceDecimal(c.line)+", Col "+workspaceDecimal(c.column), workspaceMuted)
-	drawWorkspaceText(surface, c.font, bounds.MinX+246, statusY+23, "Tab Size: 4", workspaceMuted)
+	if c.diagnostic != "" {
+		messageWidth := bounds.Width() - 330
+		if messageWidth < 0 {
+			messageWidth = 0
+		}
+		surface.PushClipRect(graphics.R(bounds.MinX+238, statusY+1, messageWidth, workspaceStatusHeight-1))
+		drawWorkspaceText(surface, c.font, bounds.MinX+246, statusY+23, "1 Error: "+c.diagnostic, graphics.RGBA(176, 55, 48, 255))
+		surface.PopClip()
+	} else {
+		drawWorkspaceText(surface, c.font, bounds.MinX+246, statusY+23, "No Problems", workspaceMuted)
+	}
 	if bounds.Width() > 360 {
 		drawWorkspaceText(surface, c.font, bounds.MaxX-78, statusY+23, "UTF-8    LF", workspaceMuted)
 	}

@@ -70,6 +70,7 @@ const (
 	KeyPageDown
 	KeyA
 	KeyC
+	KeyI
 	KeyS
 	KeyV
 	KeyX
@@ -247,6 +248,9 @@ func windowsKeyFromVirtual(key int) Key {
 	if key == 67 {
 		return KeyC
 	}
+	if key == 73 {
+		return KeyI
+	}
 	if key == 83 {
 		return KeyS
 	}
@@ -313,6 +317,9 @@ func darwinKeyFromCode(key int) Key {
 	}
 	if key == 8 {
 		return KeyC
+	}
+	if key == 34 {
+		return KeyI
 	}
 	if key == 1 {
 		return KeyS

@@ -42,7 +42,9 @@ func (f *MainForm) initializeComponent(root string) {
 	f.editor = ide.NewEditorControl(ide.NewDocument(nil))
 	f.editor.SetFont(codeFont)
 	f.editor.Save = f.saveCurrentFile
+	f.editor.Changed = f.editorChanged
 	f.editor.Complete = f.completeEditor
+	f.editor.Signature = f.signatureEditor
 
 	f.Resize = f.formResize
 	f.Add(&f.appBar.Control)

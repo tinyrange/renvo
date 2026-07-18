@@ -16,9 +16,23 @@ const (
 )
 
 type CompletionItem struct {
-	Name   string
-	Detail string
-	Kind   int
+	Name       string
+	Detail     string
+	Kind       int
+	Signature  string
+	Parameters []CompletionParameter
+}
+
+type CompletionParameter struct {
+	Name string
+	Type string
+}
+
+type SignatureHelp struct {
+	Ok              bool
+	Label           string
+	Parameters      []CompletionParameter
+	ActiveParameter int
 }
 
 type completionType struct {
@@ -30,6 +44,12 @@ type completionType struct {
 // deliberately a query over the frontend graph: editor widgets remain unaware
 // of Go packages and the same answer is available in host and self-hosted IDEs.
 func CompleteGraph(graph load.Graph, path string, offset int) []CompletionItem {
+	return CompleteProgram(graph, completionProgram(graph), path, offset)
+}
+
+// CompleteProgram queries an existing checked snapshot. Interactive callers
+// use this path so completion, diagnostics, and signature help share one check.
+func CompleteProgram(graph load.Graph, prog Program, path string, offset int) []CompletionItem {
 	pkgIndex, fileIndex := completionFile(graph, path)
 	if pkgIndex < 0 || fileIndex < 0 {
 		return nil
@@ -43,7 +63,6 @@ func CompleteGraph(graph load.Graph, path string, offset int) []CompletionItem {
 	}
 	prefixStart := completionIdentifierStart(file.Src, offset)
 	prefix := string(file.Src[prefixStart:offset])
-	prog := completionProgram(graph)
 	if pkgIndex >= len(prog.Packages) {
 		return nil
 	}
@@ -54,7 +73,7 @@ func CompleteGraph(graph load.Graph, path string, offset int) []CompletionItem {
 	} else {
 		items = completionScopeItems(items, graph, prog, pkgIndex, fileIndex, file, offset, prefix)
 	}
-	completionSort(items)
+	completionSort(items, prefix)
 	return items
 }
 
@@ -123,7 +142,11 @@ func completionScopeItems(items []CompletionItem, graph load.Graph, prog Program
 		} else if symbol.Kind == SymbolConst {
 			detail = "constant"
 		}
-		items = completionAdd(items, symbol.Name, detail, kind, prefix)
+		if symbol.Kind == SymbolFunc {
+			items = completionAddSymbol(items, graph, pkgIndex, symbol, symbol.Name, prefix)
+		} else {
+			items = completionAdd(items, symbol.Name, detail, kind, prefix)
+		}
 	}
 	builtins := []string{"append", "cap", "close", "complex", "copy", "delete", "imag", "len", "make", "new", "panic", "print", "println", "real", "recover"}
 	for i := 0; i < len(builtins); i++ {
@@ -181,7 +204,11 @@ func completionPackageItems(items []CompletionItem, prog Program, pkg int, prefi
 		} else if symbol.Kind == SymbolConst {
 			detail = "constant"
 		}
-		items = completionAdd(items, symbol.Name, detail, kind, prefix)
+		if symbol.Kind == SymbolFunc {
+			items = completionAddSymbol(items, prog.Graph, pkg, symbol, symbol.Name, prefix)
+		} else {
+			items = completionAdd(items, symbol.Name, detail, kind, prefix)
+		}
 	}
 	return items
 }
@@ -211,11 +238,12 @@ func completionTypeItems(items []CompletionItem, graph load.Graph, prog Program,
 	}
 	prefixName := typ.Name + "."
 	for i := 0; i < len(info.Symbols); i++ {
-		name := info.Symbols[i].Name
-		if info.Symbols[i].Kind == SymbolMethod && completionStartsWith(name, prefixName) {
+		symbol := info.Symbols[i]
+		name := symbol.Name
+		if symbol.Kind == SymbolMethod && completionStartsWith(name, prefixName) {
 			method := name[len(prefixName):]
 			if typ.Package == origin || completionExported(method) {
-				items = completionAdd(items, method, "method", CompletionMethod, prefix)
+				items = completionAddSymbol(items, graph, typ.Package, symbol, method, prefix)
 			}
 		}
 	}
@@ -448,7 +476,7 @@ func completionScopeDetail(kind int) string {
 }
 
 func completionAdd(items []CompletionItem, name, detail string, kind int, prefix string) []CompletionItem {
-	if name == "" || name == prefix || !completionPrefixFold(name, prefix) {
+	if name == "" || name == prefix || !completionFuzzyMatch(name, prefix) {
 		return items
 	}
 	for i := 0; i < len(items); i++ {
@@ -459,16 +487,106 @@ func completionAdd(items []CompletionItem, name, detail string, kind int, prefix
 	return append(items, CompletionItem{Name: name, Detail: detail, Kind: kind})
 }
 
-func completionSort(items []CompletionItem) {
+func completionAddSymbol(items []CompletionItem, graph load.Graph, pkg int, symbol Symbol, displayName, prefix string) []CompletionItem {
+	if displayName == "" || displayName == prefix || !completionFuzzyMatch(displayName, prefix) {
+		return items
+	}
+	for i := 0; i < len(items); i++ {
+		if items[i].Name == displayName {
+			return items
+		}
+	}
+	file, fn, ok := completionSymbolFunction(graph, pkg, symbol)
+	if !ok {
+		kind := CompletionFunction
+		if symbol.Kind == SymbolMethod {
+			kind = CompletionMethod
+		}
+		return append(items, CompletionItem{Name: displayName, Detail: "function", Kind: kind})
+	}
+	parameters := completionParameters(file, buildFuncSignature(file, fn).Params)
+	label, detail := completionFunctionLabels(file, fn, displayName)
+	kind := CompletionFunction
+	if symbol.Kind == SymbolMethod {
+		kind = CompletionMethod
+	}
+	return append(items, CompletionItem{Name: displayName, Detail: detail, Kind: kind, Signature: label, Parameters: parameters})
+}
+
+func completionSymbolFunction(graph load.Graph, pkg int, symbol Symbol) (syntax.File, syntax.FuncDecl, bool) {
+	if pkg < 0 || pkg >= len(graph.Packages) || symbol.File < 0 || symbol.File >= len(graph.Packages[pkg].Files) {
+		return syntax.File{}, syntax.FuncDecl{}, false
+	}
+	file := graph.Packages[pkg].Files[symbol.File].File
+	for i := 0; i < len(file.Funcs); i++ {
+		if file.Funcs[i].NameTok == symbol.Token {
+			return file, file.Funcs[i], true
+		}
+	}
+	return syntax.File{}, syntax.FuncDecl{}, false
+}
+
+func completionFunctionLabels(file syntax.File, fn syntax.FuncDecl, name string) (string, string) {
+	start := fn.ParamsStart
+	end := fn.ResultEnd
+	if start < 0 || start >= len(file.Tokens) {
+		return name, "function"
+	}
+	if end <= start || end > len(file.Tokens) {
+		end = fn.ParamsEnd
+	}
+	if end <= start || end > len(file.Tokens) {
+		return name, "function"
+	}
+	startOffset := file.Tokens[start].Start
+	endOffset := file.Tokens[end-1].End
+	if startOffset < 0 || endOffset < startOffset || endOffset > len(file.Src) {
+		return name, "function"
+	}
+	detail := string(file.Src[startOffset:endOffset])
+	return name + detail, detail
+}
+
+func completionParameters(file syntax.File, fields []Field) []CompletionParameter {
+	parameters := make([]CompletionParameter, 0, len(fields))
+	for i := 0; i < len(fields); i++ {
+		field := fields[i]
+		parameters = append(parameters, CompletionParameter{Name: field.Name, Type: completionFieldTypeText(file, field)})
+	}
+	return parameters
+}
+
+func completionFieldTypeText(file syntax.File, field Field) string {
+	if field.TypeStart < 0 || field.TypeEnd <= field.TypeStart || field.TypeEnd > len(file.Tokens) {
+		return ""
+	}
+	start := file.Tokens[field.TypeStart].Start
+	end := file.Tokens[field.TypeEnd-1].End
+	if start < 0 || end < start || end > len(file.Src) {
+		return ""
+	}
+	return string(file.Src[start:end])
+}
+
+func completionSort(items []CompletionItem, pattern string) {
 	for i := 1; i < len(items); i++ {
 		item := items[i]
 		j := i - 1
-		for j >= 0 && completionAfter(items[j].Name, item.Name) {
+		for j >= 0 && completionAfterMatch(items[j].Name, item.Name, pattern) {
 			items[j+1] = items[j]
 			j--
 		}
 		items[j+1] = item
 	}
+}
+
+func completionAfterMatch(left, right, pattern string) bool {
+	leftScore, _ := completionFuzzyScore(left, pattern)
+	rightScore, _ := completionFuzzyScore(right, pattern)
+	if leftScore != rightScore {
+		return leftScore < rightScore
+	}
+	return completionAfter(left, right)
 }
 
 func completionAfter(left, right string) bool {
@@ -495,6 +613,61 @@ func completionPrefixFold(name, prefix string) bool {
 		}
 	}
 	return true
+}
+
+func completionFuzzyMatch(name, pattern string) bool {
+	_, ok := completionFuzzyScore(name, pattern)
+	return ok
+}
+
+// completionFuzzyScore treats the typed text as a case-insensitive
+// subsequence. Prefixes remain strongest, followed by adjacent characters and
+// word/camel-case boundaries, so fuzzy results never displace an exact prefix.
+func completionFuzzyScore(name, pattern string) (int, bool) {
+	if pattern == "" {
+		return -len(name), true
+	}
+	searchAt := 0
+	previous := -2
+	score := 0
+	for p := 0; p < len(pattern); p++ {
+		matched := -1
+		want := completionLower(pattern[p])
+		for n := searchAt; n < len(name); n++ {
+			if completionLower(name[n]) == want {
+				matched = n
+				break
+			}
+		}
+		if matched < 0 {
+			return 0, false
+		}
+		score += 10
+		if matched == previous+1 {
+			score += 12
+		}
+		if completionWordStart(name, matched) {
+			score += 8
+		}
+		if name[matched] == pattern[p] {
+			score++
+		}
+		previous = matched
+		searchAt = matched + 1
+	}
+	if completionPrefixFold(name, pattern) {
+		score += 1000
+	}
+	return score - len(name), true
+}
+
+func completionWordStart(name string, at int) bool {
+	if at == 0 {
+		return true
+	}
+	previous := name[at-1]
+	current := name[at]
+	return previous == '_' || previous == '-' || previous >= 'a' && previous <= 'z' && current >= 'A' && current <= 'Z'
 }
 
 func completionStartsWith(value, prefix string) bool {

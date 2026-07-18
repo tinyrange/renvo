@@ -414,10 +414,10 @@ func TestEncodePPM(t *testing.T) {
 }
 
 func TestPlatformKeyNormalization(t *testing.T) {
-	if windowsKeyFromVirtual(37) != KeyLeft || windowsKeyFromVirtual(83) != KeyS || windowsKeyFromVirtual(-1) != KeyUnknown {
+	if windowsKeyFromVirtual(37) != KeyLeft || windowsKeyFromVirtual(73) != KeyI || windowsKeyFromVirtual(83) != KeyS || windowsKeyFromVirtual(-1) != KeyUnknown {
 		t.Fatal("Windows key normalization drifted")
 	}
-	if darwinKeyFromCode(123) != KeyLeft || darwinKeyFromCode(1) != KeyS || darwinKeyFromCode(-1) != KeyUnknown {
+	if darwinKeyFromCode(123) != KeyLeft || darwinKeyFromCode(34) != KeyI || darwinKeyFromCode(1) != KeyS || darwinKeyFromCode(-1) != KeyUnknown {
 		t.Fatal("Darwin key normalization drifted")
 	}
 }

@@ -277,3 +277,41 @@ func TestEditorNavigationDoesNotDamageMockWorkspacePanes(t *testing.T) {
 		}
 	}
 }
+
+func TestEditorAnalysisTimerPublishesAndClearsLiveDiagnostic(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "main.go")
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/live\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("package main\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	form := NewMainForm(root)
+	form.explorerOpenFile(path)
+	form.editor.SetDocument(ide.NewDocument([]byte("package main\nfunc main() { var value bool; value = 1; _ = value }\n")))
+	form.editorChanged()
+	if !form.takeEditorAnalysisTimer() {
+		t.Fatal("edit did not request analysis timer")
+	}
+	form.Dispatch(graphics.Event{Type: graphics.EventTimer, TimerID: editorAnalysisTimerID})
+	if form.editorFrame.diagnostic != "assignment value is not assignable to its destination" {
+		t.Fatalf("live diagnostic = %q", form.editorFrame.diagnostic)
+	}
+
+	form.editor.SetDocument(ide.NewDocument([]byte("package main\nfunc main( {\n")))
+	form.editorChanged()
+	form.takeEditorAnalysisTimer()
+	form.Dispatch(graphics.Event{Type: graphics.EventTimer, TimerID: editorAnalysisTimerID})
+	if form.editorFrame.diagnostic != "source syntax is invalid" {
+		t.Fatalf("live syntax diagnostic = %q", form.editorFrame.diagnostic)
+	}
+
+	form.editor.SetDocument(ide.NewDocument([]byte("package main\nfunc main() {}\n")))
+	form.editorChanged()
+	form.takeEditorAnalysisTimer()
+	form.Dispatch(graphics.Event{Type: graphics.EventTimer, TimerID: editorAnalysisTimerID})
+	if form.editorFrame.diagnostic != "" {
+		t.Fatalf("cleared diagnostic = %q", form.editorFrame.diagnostic)
+	}
+}

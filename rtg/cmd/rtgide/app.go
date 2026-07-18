@@ -29,5 +29,9 @@ func run(args []string, env []string) int {
 			return 0
 		}
 		form.Dispatch(event)
+		if form.takeEditorAnalysisTimer() {
+			window.CancelTimer(editorAnalysisTimerID)
+			window.SetTimer(editorAnalysisTimerID, 0.06)
+		}
 	}
 }

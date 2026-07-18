@@ -28,6 +28,8 @@ type MainForm struct {
 	lastBuildOK    bool
 	projectOutput  string
 	selectedTarget string
+	analysis       editorAnalysisSession
+	analysisTimer  bool
 }
 
 func NewMainForm(root string) *MainForm {
@@ -51,6 +53,7 @@ func NewMainFormWithEnv(root string, env []string) *MainForm {
 		form.currentPath = initial
 		form.editor.SetDocument(ide.NewDocument(data))
 		form.syncEditorFrame()
+		form.requestEditorAnalysis()
 	}
 	return form
 }
@@ -63,6 +66,7 @@ func (f *MainForm) explorerOpenFile(path string) {
 	f.currentPath = path
 	f.editor.SetDocument(ide.NewDocument(data))
 	f.syncEditorFrame()
+	f.requestEditorAnalysis()
 	f.showCode()
 }
 
@@ -345,9 +349,10 @@ func (f *MainForm) buildProject() {
 }
 
 func (f *MainForm) runProject() {
-	if !f.lastBuildOK || (f.editor.Document != nil && f.editor.Document.Dirty()) {
-		f.buildProject()
-	}
+	// Always rebuild before Run. Files can be edited by another process, and a
+	// cached successful result does not prove that the executable still matches
+	// the project currently on disk.
+	f.buildProject()
 	if !f.lastBuildOK {
 		return
 	}
@@ -376,6 +381,8 @@ func (f *MainForm) selectBuildTarget(target string) {
 	f.lastBuildOK = false
 	f.appBar.SetTarget(target)
 	f.output.SetMessage("Build target: "+target, true)
+	f.analysis = editorAnalysisSession{}
+	f.requestEditorAnalysis()
 }
 
 func workspaceTargets() []string {
@@ -395,6 +402,9 @@ func workspaceProjectOutput(root, target string) string {
 // Dispatch keeps the working editor model and the surrounding status chrome
 // synchronized without coupling editor commands to this particular shell.
 func (f *MainForm) Dispatch(event graphics.Event) {
+	if event.Type == graphics.EventTimer && event.TimerID == editorAnalysisTimerID {
+		f.runEditorAnalysis()
+	}
 	f.Form.Dispatch(event)
 	if f.editor.Document != nil && f.editor.Document.Dirty() {
 		f.lastBuildOK = false

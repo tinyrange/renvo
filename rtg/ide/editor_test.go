@@ -110,6 +110,19 @@ func TestDocumentTypingAndDeletionCoalesceUndo(t *testing.T) {
 	}
 }
 
+func TestDocumentDeletionReportsWhetherTextChanged(t *testing.T) {
+	document := NewDocument([]byte("a"))
+	if document.Backspace() {
+		t.Fatal("Backspace at document start reported a change")
+	}
+	if !document.Delete() || document.Text() != "" {
+		t.Fatalf("Delete did not remove text: %q", document.Text())
+	}
+	if document.Delete() || document.Backspace() {
+		t.Fatal("deletion in an empty document reported a change")
+	}
+}
+
 func TestDocumentSavePointSurvivesUndoAndBranches(t *testing.T) {
 	document := NewDocument([]byte("one"))
 	document.MoveDocumentEnd(false)
