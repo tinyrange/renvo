@@ -299,6 +299,7 @@ type rtgAsm struct {
 	bssSize             int
 	codeOffset          int
 	dataOffset          int
+	bssOffset           int
 	lastPrimaryStoreEnd int
 	lastPrimaryStoreOff int
 }
@@ -360,6 +361,7 @@ func rtgAsmInit(a *rtgAsm) {
 	a.bssSize = 0
 	a.codeOffset = 0
 	a.dataOffset = 0
+	a.bssOffset = 0
 	a.lastPrimaryStoreEnd = -1
 	a.lastPrimaryStoreOff = 0
 }
@@ -641,7 +643,7 @@ func rtgAsmPatch(a *rtgAsm) {
 				rtgPut32At(a.code, at, (insn&0xff000000)|((disp/4)&0x00ffffff))
 			}
 		}
-		a.dataOffset = a.codeOffset + len(a.code)
+		rtgAsmSetDataOffsets(a)
 		return
 	}
 	if rtgTargetArch == rtgArchAarch64 {
@@ -668,7 +670,7 @@ func rtgAsmPatch(a *rtgAsm) {
 				rtgPut32At(a.code, at, (insn&0xff00001f)|(((disp/4)&0x7ffff)<<5))
 			}
 		}
-		a.dataOffset = a.codeOffset + len(a.code)
+		rtgAsmSetDataOffsets(a)
 		return
 	}
 	if rtgTargetArch == rtgArchAmd64 {
@@ -690,19 +692,33 @@ func rtgAsmPatch(a *rtgAsm) {
 		disp := target - (at + 4)
 		rtgPut32At(a.code, at, disp)
 	}
-	a.dataOffset = a.codeOffset + len(a.code)
+	rtgAsmSetDataOffsets(a)
 	for i := 0; i < len(a.absRelocs); i++ {
 		at := a.absRelocs[i].at & 2147483647
 		off := a.absRelocs[i].off & 2147483647
 		kind := a.absRelocs[i].kind & 2147483647
 		target := a.dataOffset + off
 		if kind == rtgAbsBssReloc {
-			target = a.dataOffset + len(a.data) + off
+			target = rtgAsmBssOffset(a) + off
 		}
 		next := a.codeOffset + at + 4
 		disp := target - next
 		rtgPut32At(a.code, at, disp)
 	}
+}
+
+func rtgAsmSetDataOffsets(a *rtgAsm) {
+	a.dataOffset = a.codeOffset + len(a.code)
+	if rtgTargetOS == rtgOSLinux {
+		a.bssOffset = rtgAlignValue(a.dataOffset+len(a.data), 0x1000)
+	}
+}
+
+func rtgAsmBssOffset(a *rtgAsm) int {
+	if a.bssOffset > 0 {
+		return a.bssOffset
+	}
+	return a.dataOffset + len(a.data)
 }
 
 func rtgGet32At(in []byte, at int) int {
@@ -817,19 +833,43 @@ func rtgAppendElf64Shdr(out []byte, name int, typ int, flags int, addr int, off 
 	return out
 }
 
+func rtgAppendElf64LoadProgram(out []byte, flags int, offset int, address int, fileSize int, memorySize int) []byte {
+	out = rtgAppend32(out, 1)
+	out = rtgAppend32(out, flags)
+	out = rtgAppend64U32(out, offset)
+	out = rtgAppend64U32(out, address)
+	out = rtgAppend64U32(out, address)
+	out = rtgAppend64U32(out, fileSize)
+	out = rtgAppend64U32(out, memorySize)
+	out = rtgAppend64U32(out, 0x1000)
+	return out
+}
+
+func rtgAppendElf32LoadProgram(out []byte, flags int, offset int, address int, fileSize int, memorySize int) []byte {
+	out = rtgAppend32(out, 1)
+	out = rtgAppend32(out, offset)
+	out = rtgAppend32(out, address)
+	out = rtgAppend32(out, address)
+	out = rtgAppend32(out, fileSize)
+	out = rtgAppend32(out, memorySize)
+	out = rtgAppend32(out, flags)
+	out = rtgAppend32(out, 0x1000)
+	return out
+}
+
 func rtgBuildElf64SymbolSections(a *rtgAsm, base int, entryOff int, loadFileSize int) rtgElf64SymbolSections {
 	var sec rtgElf64SymbolSections
 	sec.symtab = make([]byte, 0, (len(a.symbols)+2)*24)
 	sec.strtab = make([]byte, 0, len(a.symbolName)+16)
 	sec.shstrtab = make([]byte, 0, 64)
-	sectionNames := "\x00.text\x00.data\x00.bss\x00.symtab\x00.strtab\x00.shstrtab\x00"
+	sectionNames := "\x00.text\x00.rodata\x00.bss\x00.symtab\x00.strtab\x00.shstrtab\x00"
 	sec.shstrtab = append(sec.shstrtab, sectionNames...)
 	sec.textName = 1
 	sec.dataName = 7
-	sec.bssName = 13
-	sec.symtabName = 18
-	sec.strtabName = 26
-	sec.shstrName = 34
+	sec.bssName = 15
+	sec.symtabName = 20
+	sec.strtabName = 28
+	sec.shstrName = 36
 	sec.strtab = append(sec.strtab, "\x00_start\x00"...)
 	startName := 1
 	sec.symtab = rtgAppendElf64Sym(sec.symtab, 0, 0, 0, 0, 0)
@@ -865,8 +905,8 @@ func rtgAppendElf64SectionHeaders(out []byte, sec *rtgElf64SymbolSections, a *rt
 
 	out = rtgAppendElf64Shdr(out, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 	out = rtgAppendElf64Shdr(out, sec.textName, 1, 6, base+codeOff, codeOff, codeSize, 0, 0, 16, 0)
-	out = rtgAppendElf64Shdr(out, sec.dataName, 1, 3, base+dataOff, dataOff, dataSize, 0, 0, 8, 0)
-	out = rtgAppendElf64Shdr(out, sec.bssName, 8, 3, base+dataOff+dataSize, dataOff+dataSize, bssSize, 0, 0, 8, 0)
+	out = rtgAppendElf64Shdr(out, sec.dataName, 1, 2, base+dataOff, dataOff, dataSize, 0, 0, 8, 0)
+	out = rtgAppendElf64Shdr(out, sec.bssName, 8, 3, base+rtgAsmBssOffset(a), rtgAsmBssOffset(a), bssSize, 0, 0, 8, 0)
 	out = rtgAppendElf64Shdr(out, sec.symtabName, 2, 0, 0, sec.symtabOff, symtabSize, 5, 1, 8, 24)
 	out = rtgAppendElf64Shdr(out, sec.strtabName, 3, 0, 0, sec.strtabOff, strtabSize, 0, 0, 1, 0)
 	out = rtgAppendElf64Shdr(out, sec.shstrName, 3, 0, 0, sec.shstrOff, shstrtabSize, 0, 0, 1, 0)
@@ -922,7 +962,7 @@ func rtgBuildElf32SymbolSections(a *rtgAsm, base int, entryOff int, loadFileSize
 	sec.textName = len(sec.shstrtab)
 	sec.shstrtab = rtgAppendStringZ(sec.shstrtab, ".text")
 	sec.dataName = len(sec.shstrtab)
-	sec.shstrtab = rtgAppendStringZ(sec.shstrtab, ".data")
+	sec.shstrtab = rtgAppendStringZ(sec.shstrtab, ".rodata")
 	sec.bssName = len(sec.shstrtab)
 	sec.shstrtab = rtgAppendStringZ(sec.shstrtab, ".bss")
 	sec.symtabName = len(sec.shstrtab)
@@ -974,8 +1014,8 @@ func rtgAppendElf32SectionHeaders(out []byte, sec *rtgElf32SymbolSections, a *rt
 
 	out = rtgAppendElf32Shdr(out, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 	out = rtgAppendElf32Shdr(out, sec.textName, 1, 6, base+codeOff, codeOff, codeSize, 0, 0, 16, 0)
-	out = rtgAppendElf32Shdr(out, sec.dataName, 1, 3, base+dataOff, dataOff, dataSize, 0, 0, 4, 0)
-	out = rtgAppendElf32Shdr(out, sec.bssName, 8, 3, base+dataOff+dataSize, dataOff+dataSize, bssSize, 0, 0, 4, 0)
+	out = rtgAppendElf32Shdr(out, sec.dataName, 1, 2, base+dataOff, dataOff, dataSize, 0, 0, 4, 0)
+	out = rtgAppendElf32Shdr(out, sec.bssName, 8, 3, base+rtgAsmBssOffset(a), rtgAsmBssOffset(a), bssSize, 0, 0, 4, 0)
 	out = rtgAppendElf32Shdr(out, sec.symtabName, 2, 0, 0, sec.symtabOff, symtabSize, 5, 1, 4, 16)
 	out = rtgAppendElf32Shdr(out, sec.strtabName, 3, 0, 0, sec.strtabOff, strtabSize, 0, 0, 1, 0)
 	out = rtgAppendElf32Shdr(out, sec.shstrName, 3, 0, 0, sec.shstrOff, shstrtabSize, 0, 0, 1, 0)
@@ -1189,7 +1229,7 @@ func rtgAsmPatchWindows(a *rtgAsm, layout rtgWinImportLayout) {
 		}
 		target := a.dataOffset + r.off
 		if r.kind == rtgAbsBssReloc {
-			target = a.dataOffset + len(a.data) + r.off
+			target = rtgAsmBssOffset(a) + r.off
 		}
 		if rtgTargetArch != rtgArch386 {
 			next := a.codeOffset + r.at + 4
@@ -1231,7 +1271,7 @@ func rtgAppendPEHeader64(out []byte, textRawSize int, textVirtualSize int, dataR
 	rtgPut32At(out, opt+24, imageBase)
 	rtgPut32At(out, opt+28, imageBase>>32)
 	rtgPut32At(out, opt+56, sizeOfImage)
-	rtgPut32At(out, opt+68, rtgCompilerWindowsSubsystem)
+	rtgPut32At(out, opt+68, 0x01000000|rtgCompilerWindowsSubsystem)
 	rtgPut32At(out, opt+72, stackReserve)
 	rtgPut32At(out, opt+80, stackCommit)
 	rtgPut32At(out, opt+120, importRVA)
@@ -1268,7 +1308,7 @@ func rtgAppendPEHeader32(out []byte, entryRVA int, textRawSize int, textVirtualS
 	out = rtgAppend32(out, sizeOfImage)
 	out = rtgAppend32(out, rtgWinHeadersSize)
 	out = rtgAppend32(out, 0)
-	out = rtgAppend32(out, rtgCompilerWindowsSubsystem)
+	out = rtgAppend32(out, 0x01000000|rtgCompilerWindowsSubsystem)
 	out = rtgAppend32(out, 0x100000)
 	out = rtgAppend32(out, 0x100000)
 	out = rtgAppend32(out, 0x100000)

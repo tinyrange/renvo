@@ -1,6 +1,6 @@
 package main
 
-const rtgLinux386CodeOffset = 0x54
+const rtgLinux386CodeOffset = 0x74
 const rtgLinux386LoadAddress = 0x08048000
 
 const rtgLinux386SysReadSeq = 3
@@ -390,10 +390,10 @@ func rtgAsmBuildArgvEnvSlices386(a *rtgAsm, bssOff int, envOff int, envLenOff in
 func rtgAsmImage386(a *rtgAsm) []byte {
 	rtgAsmPatch386(a)
 	loadFileSize := a.codeOffset + len(a.code) + len(a.data)
-	memSize := loadFileSize + a.bssSize
+	bssOffset := rtgAsmBssOffset(a)
 	if rtgCompilerStripSymbols {
 		out := make([]byte, 0, loadFileSize)
-		out = rtgAppendElfHeader386(out, a.codeOffset, loadFileSize, memSize, 0)
+		out = rtgAppendElfHeader386(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, 0)
 		for i := 0; i < len(a.code); i++ {
 			out = append(out, a.code[i])
 		}
@@ -404,7 +404,7 @@ func rtgAsmImage386(a *rtgAsm) []byte {
 	}
 	sec := rtgBuildElf32SymbolSections(a, rtgLinux386LoadAddress, a.codeOffset, loadFileSize)
 	out := make([]byte, 0, sec.shoff+280)
-	out = rtgAppendElfHeader386(out, a.codeOffset, loadFileSize, memSize, sec.shoff)
+	out = rtgAppendElfHeader386(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff)
 	for i := 0; i < len(a.code); i++ {
 		out = append(out, a.code[i])
 	}
@@ -434,13 +434,13 @@ func rtgAsmPatch386(a *rtgAsm) {
 		r := a.absRelocs[i]
 		target := a.dataOffset + r.off
 		if r.kind == rtgAbsBssReloc {
-			target = a.dataOffset + len(a.data) + r.off
+			target = rtgAsmBssOffset(a) + r.off
 		}
 		rtgPut32At(a.code, r.at, rtgLinux386LoadAddress+target)
 	}
 }
 
-func rtgAppendElfHeader386(out []byte, entryOff int, fileSize int, memSize int, shoff int) []byte {
+func rtgAppendElfHeader386(out []byte, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int) []byte {
 	base := rtgLinux386LoadAddress
 
 	out = append(out, 0x7f)
@@ -463,7 +463,7 @@ func rtgAppendElfHeader386(out []byte, entryOff int, fileSize int, memSize int, 
 	out = rtgAppend32(out, 0)
 	out = rtgAppend16(out, 52)
 	out = rtgAppend16(out, 32)
-	out = rtgAppend16(out, 1)
+	out = rtgAppend16(out, 2)
 	if shoff == 0 {
 		out = rtgAppend16(out, 0)
 		out = rtgAppend16(out, 0)
@@ -479,9 +479,10 @@ func rtgAppendElfHeader386(out []byte, entryOff int, fileSize int, memSize int, 
 	out = rtgAppend32(out, base)
 	out = rtgAppend32(out, base)
 	out = rtgAppend32(out, fileSize)
-	out = rtgAppend32(out, memSize)
-	out = rtgAppend32(out, 7)
+	out = rtgAppend32(out, fileSize)
+	out = rtgAppend32(out, 5)
 	out = rtgAppend32(out, 0x1000)
+	out = rtgAppendElf32LoadProgram(out, 6, bssOffset, base+bssOffset, 0, bssSize)
 	return out
 }
 
