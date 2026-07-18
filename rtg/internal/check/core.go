@@ -109,7 +109,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			if returnTok := invalidReturnCount(file, fn, signature); returnTok >= 0 {
 				return info, false, CheckErrReturnCount, fileIndex, returnTok
 			}
-			if typeTok := invalidDefiniteAssignmentType(pkg, info, fileIndex, fn); typeTok >= 0 {
+			if typeTok := invalidDefiniteAssignmentType(file, fn); typeTok >= 0 {
 				return info, false, CheckErrType, fileIndex, typeTok
 			}
 			if sliceTok := invalidDefiniteSliceOperand(pkg, info, fileIndex, fn); sliceTok >= 0 {

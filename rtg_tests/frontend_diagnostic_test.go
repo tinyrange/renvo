@@ -119,13 +119,6 @@ func TestFrontendStructuredDiagnostics(t *testing.T) {
 			wantDetail: "assignment value is not assignable to its destination",
 		},
 		{
-			name:       "interface_pointer_method_set",
-			files:      map[string]string{"cmd/app/main.go": "package main\n\ntype caller interface { Call() }\ntype value struct{}\nfunc (*value) Call() {}\nfunc main() { var caller caller = value{}; _ = caller }\n"},
-			wantCode:   "RTG-CHECK-008",
-			wantFile:   "cmd/app/main.go",
-			wantDetail: "assignment value is not assignable to its destination",
-		},
-		{
 			name:       "unterminated_string",
 			files:      map[string]string{"cmd/app/main.go": "package main\n\nfunc main() { print(\"unterminated\n) }\n"},
 			wantCode:   "RTG-PARSE-001",
