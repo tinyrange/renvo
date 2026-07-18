@@ -400,6 +400,89 @@ func appMain() int {
 	}
 }
 
+func TestLinkBuildCoreLowersFunctionValueSliceResult(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+type item struct { value int }
+type completion func(source []byte, caret int) []item
+type editor struct { Complete completion }
+type provider struct{}
+
+func (p *provider) complete(source []byte, caret int) []item {
+	return []item{{value: len(source) + caret}}
+}
+
+func appMain() int {
+	var editor editor
+	var provider provider
+	editor.Complete = provider.complete
+	items := editor.Complete([]byte("abc"), 2)
+	if len(items) == 1 && items[0].value == 5 {
+		print("PASS\n")
+		return 0
+	}
+	return 1
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	if !bytes.Contains(linked.Program.Text, []byte(") []item")) || !bytes.Contains(linked.Program.Text, []byte("return nil")) {
+		t.Fatalf("linked function-value dispatcher lost the slice result:\n%s", string(linked.Program.Text))
+	}
+}
+
+func TestDiscoverFunctionValueCompleteResultTypes(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/lib/lib.go", Src: []byte("package lib\ntype Item struct { Value int }\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import "example.com/case/lib"
+
+type item struct { value int }
+type pointerResult func() *item
+type sliceResult func() []item
+type arrayResult func() [2]item
+type mapResult func() map[string]item
+type qualifiedResult func() lib.Item
+type structResult func() struct { value int }
+type interfaceResult func() interface { Value() int }
+type functionResult func() func(int) int
+
+func appMain() int { return 0 }
+`)},
+	})
+	program := &result.Units[result.Root].Program
+	signatures, _, _, ok := discoverFunctionValueTypes(program)
+	if !ok {
+		t.Fatal("discoverFunctionValueTypes failed")
+	}
+	want := map[string]string{
+		"pointerResult":   "*item",
+		"sliceResult":     "[]item",
+		"arrayResult":     "[2]item",
+		"mapResult":       "map[string]item",
+		"qualifiedResult": "lib.Item",
+		"structResult":    "struct { value int }",
+		"interfaceResult": "interface { Value() int }",
+		"functionResult":  "func(int) int",
+	}
+	if len(signatures) != len(want) {
+		t.Fatalf("signature count = %d, want %d", len(signatures), len(want))
+	}
+	for i := 0; i < len(signatures); i++ {
+		sig := signatures[i]
+		if expected, found := want[sig.name]; !found || sig.result != expected {
+			t.Fatalf("signature %q result = %q, want %q", sig.name, sig.result, expected)
+		}
+	}
+}
+
 func TestLinkBuildCoreLowersBoundCallbackField(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},

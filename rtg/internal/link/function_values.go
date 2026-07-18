@@ -236,15 +236,88 @@ func parseFunctionValueSignature(program *unit.Program, funcTok int, name string
 		sig.result = functionValueTokensText(program, end, resultClose+1)
 		end = resultClose + 1
 	} else if functionValueTokenCanStartType(program, end) && program.Tokens[end].Line == program.Tokens[close].Line {
-		sig.result = functionValueTokenText(program, end)
-		if sig.result == "*" && end+1 < len(program.Tokens) {
-			sig.result = sig.result + functionValueTokenText(program, end+1)
-			end += 2
-		} else {
-			end++
+		resultEnd := functionValueTypeEnd(program, end)
+		if resultEnd <= end {
+			return sig, funcTok, false
 		}
+		sig.result = functionValueTokensText(program, end, resultEnd)
+		end = resultEnd
 	}
 	return sig, end, true
+}
+
+func functionValueTypeEnd(program *unit.Program, start int) int {
+	if start < 0 || start >= len(program.Tokens) {
+		return start
+	}
+	text := functionValueTokenText(program, start)
+	if text == "*" {
+		return functionValueTypeEnd(program, start+1)
+	}
+	if text == "[" {
+		close := functionValueFindMatching(program, start, "[", "]")
+		if close < 0 {
+			return start
+		}
+		return functionValueTypeEnd(program, close+1)
+	}
+	if text == "map" {
+		if !functionValueTokenEquals(program, start+1, "[") {
+			return start
+		}
+		close := functionValueFindMatching(program, start+1, "[", "]")
+		if close < 0 {
+			return start
+		}
+		return functionValueTypeEnd(program, close+1)
+	}
+	if text == "struct" || text == "interface" {
+		if !functionValueTokenEquals(program, start+1, "{") {
+			return start
+		}
+		close := functionValueFindMatchingBrace(program, start+1)
+		if close < 0 {
+			return start
+		}
+		return close + 1
+	}
+	if text == "func" {
+		if !functionValueTokenEquals(program, start+1, "(") {
+			return start
+		}
+		close := functionValueFindMatchingParen(program, start+1)
+		if close < 0 {
+			return start
+		}
+		end := close + 1
+		if functionValueTokenEquals(program, end, "(") {
+			resultClose := functionValueFindMatchingParen(program, end)
+			if resultClose < 0 {
+				return start
+			}
+			return resultClose + 1
+		}
+		resultEnd := functionValueTypeEnd(program, end)
+		if resultEnd > end {
+			return resultEnd
+		}
+		return end
+	}
+	if text == "(" {
+		close := functionValueFindMatchingParen(program, start)
+		if close < 0 {
+			return start
+		}
+		return close + 1
+	}
+	if program.Tokens[start].Kind == unit.TokenIdent {
+		end := start + 1
+		if functionValueTokenEquals(program, end, ".") && end+1 < len(program.Tokens) && program.Tokens[end+1].Kind == unit.TokenIdent {
+			end += 2
+		}
+		return end
+	}
+	return start
 }
 
 func normalizedFunctionValueParams(program *unit.Program, start int, end int) (string, []string, bool) {
@@ -1063,7 +1136,7 @@ func functionValueTokenCanStartType(program *unit.Program, tok int) bool {
 		return false
 	}
 	text := functionValueTokenText(program, tok)
-	return program.Tokens[tok].Kind == unit.TokenIdent || text == "*" || text == "[" || text == "struct"
+	return program.Tokens[tok].Kind == unit.TokenIdent || text == "*" || text == "[" || text == "struct" || text == "interface" || text == "map" || text == "func"
 }
 
 func functionValueTokenAtSpan(program *unit.Program, start int, end int) int {
@@ -1153,10 +1226,36 @@ func functionValueZero(result string) string {
 	if result == "bool" {
 		return "false"
 	}
-	if len(result) > 0 && result[0] == '*' {
+	nilable := len(result) > 0 && result[0] == '*'
+	if len(result) > 0 && result[0] == '[' {
+		i := 1
+		for i < len(result) && functionValueIsSpace(result[i]) {
+			i++
+		}
+		nilable = i < len(result) && result[i] == ']'
+	}
+	if nilable || functionValueHasPrefix(result, "map[") || functionValueHasPrefix(result, "func(") || functionValueHasPrefix(result, "interface{") {
 		return "nil"
 	}
 	return "0"
+}
+
+func functionValueHasPrefix(value string, prefix string) bool {
+	i := 0
+	for p := 0; p < len(prefix); p++ {
+		for i < len(value) && functionValueIsSpace(value[i]) {
+			i++
+		}
+		if i >= len(value) || value[i] != prefix[p] {
+			return false
+		}
+		i++
+	}
+	return true
+}
+
+func functionValueIsSpace(value byte) bool {
+	return value == ' ' || value == '\t' || value == '\n' || value == '\r'
 }
 
 func functionValueDecimal(value int) string {
