@@ -1,6 +1,6 @@
 package main
 
-const rtgLinuxAarch64CodeOffset = 0x78
+const rtgLinuxAarch64CodeOffset = 0xb0
 const rtgLinuxAarch64LoadAddress = 0x400000
 
 const rtgLinuxAarch64SysReadSeq = 63
@@ -260,10 +260,10 @@ func rtgAsmImageAarch64(a *rtgAsm) []byte {
 	rtgAsmPatch(a)
 	rtgAsmPatchAarch64Abs(a)
 	loadFileSize := a.codeOffset + len(a.code) + len(a.data)
-	memSize := loadFileSize + a.bssSize
+	bssOffset := rtgAsmBssOffset(a)
 	if rtgCompilerStripSymbols {
 		out := make([]byte, 0, loadFileSize)
-		out = rtgAppendElfHeaderAarch64(out, a.codeOffset, loadFileSize, memSize, 0)
+		out = rtgAppendElfHeaderAarch64(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, 0)
 		for i := 0; i < len(a.code); i++ {
 			out = append(out, a.code[i])
 		}
@@ -274,7 +274,7 @@ func rtgAsmImageAarch64(a *rtgAsm) []byte {
 	}
 	sec := rtgBuildElf64SymbolSections(a, rtgLinuxAarch64LoadAddress, a.codeOffset, loadFileSize)
 	out := make([]byte, 0, 1048576)
-	out = rtgAppendElfHeaderAarch64(out, a.codeOffset, loadFileSize, memSize, sec.shoff)
+	out = rtgAppendElfHeaderAarch64(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff)
 	for i := 0; i < len(a.code); i++ {
 		out = append(out, a.code[i])
 	}
@@ -303,7 +303,7 @@ func rtgAsmPatchAarch64Abs(a *rtgAsm) {
 		r := a.absRelocs[i]
 		target := a.dataOffset + r.off
 		if r.kind == rtgAbsBssReloc {
-			target = a.dataOffset + len(a.data) + r.off
+			target = rtgAsmBssOffset(a) + r.off
 		}
 		insn := rtgGet32At(a.code, r.at)
 		reg := insn & 31
@@ -311,7 +311,7 @@ func rtgAsmPatchAarch64Abs(a *rtgAsm) {
 	}
 }
 
-func rtgAppendElfHeaderAarch64(out []byte, entryOff int, fileSize int, memSize int, shoff int) []byte {
+func rtgAppendElfHeaderAarch64(out []byte, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int) []byte {
 	base := rtgLinuxAarch64LoadAddress
 
 	out = append(out, 0x7f)
@@ -334,7 +334,7 @@ func rtgAppendElfHeaderAarch64(out []byte, entryOff int, fileSize int, memSize i
 	out = rtgAppend32(out, 0)
 	out = rtgAppend16(out, 64)
 	out = rtgAppend16(out, 56)
-	out = rtgAppend16(out, 1)
+	out = rtgAppend16(out, 2)
 	if shoff == 0 {
 		out = rtgAppend16(out, 0)
 		out = rtgAppend16(out, 0)
@@ -346,12 +346,13 @@ func rtgAppendElfHeaderAarch64(out []byte, entryOff int, fileSize int, memSize i
 	}
 
 	out = rtgAppend32(out, 1)
-	out = rtgAppend32(out, 7)
+	out = rtgAppend32(out, 5)
 	out = rtgAppend64U32(out, 0)
 	out = rtgAppend64U32(out, base)
 	out = rtgAppend64U32(out, base)
 	out = rtgAppend64U32(out, fileSize)
-	out = rtgAppend64U32(out, memSize)
+	out = rtgAppend64U32(out, fileSize)
 	out = rtgAppend64U32(out, 0x1000)
+	out = rtgAppendElf64LoadProgram(out, 6, bssOffset, base+bssOffset, 0, bssSize)
 	return out
 }

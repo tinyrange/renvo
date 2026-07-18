@@ -770,7 +770,7 @@ func rtgAsmPatchAarch64AbsDarwin(a *rtgAsm) {
 		r := a.absRelocs[i]
 		target := a.dataOffset + r.off
 		if r.kind == rtgAbsBssReloc {
-			target = a.dataOffset + len(a.data) + r.off
+			target = rtgAsmBssOffset(a) + r.off
 		}
 		insn := rtgGet32At(a.code, r.at)
 		reg := insn & 31

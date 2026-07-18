@@ -1,6 +1,6 @@
 package main
 
-const rtgLinuxAmd64CodeOffset = 0x78
+const rtgLinuxAmd64CodeOffset = 0xb0
 
 const rtgLinuxAmd64SysReadSeq = 0
 const rtgLinuxAmd64SysWriteSeq = 1
@@ -276,7 +276,7 @@ func rtgAsmBuildArgvEnvSlicesAmd64(a *rtgAsm, bssOff int, envOff int, envLenOff 
 func rtgAsmImageAmd64(a *rtgAsm) []byte {
 	rtgAsmPatch(a)
 	loadFileSize := a.codeOffset + len(a.code) + len(a.data)
-	memSize := loadFileSize + a.bssSize
+	bssOffset := rtgAsmBssOffset(a)
 	if rtgCompilerStripSymbols {
 		oldCodeLen := len(a.code)
 		var out []byte
@@ -286,7 +286,7 @@ func rtgAsmImageAmd64(a *rtgAsm) []byte {
 			out[a.codeOffset+src] = out[src]
 		}
 		var header []byte
-		header = rtgAppendElfHeaderAmd64(header, a.codeOffset, loadFileSize, memSize, 0)
+		header = rtgAppendElfHeaderAmd64(header, a.codeOffset, loadFileSize, bssOffset, a.bssSize, 0)
 		for i := 0; i < len(header); i++ {
 			out[i] = header[i]
 		}
@@ -300,7 +300,7 @@ func rtgAsmImageAmd64(a *rtgAsm) []byte {
 	finalSize := sec.shoff + 448
 	out := make([]byte, finalSize)
 	out = out[:0]
-	out = rtgAppendElfHeaderAmd64(out, a.codeOffset, loadFileSize, memSize, sec.shoff)
+	out = rtgAppendElfHeaderAmd64(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff)
 	for i := 0; i < len(a.code); i++ {
 		out = append(out, a.code[i])
 	}
@@ -324,11 +324,13 @@ func rtgAsmImageAmd64(a *rtgAsm) []byte {
 	return out
 }
 
-func rtgAppendElfHeaderAmd64(out []byte, entryOff int, fileSize int, memSize int, shoff int) []byte {
+func rtgAppendElfHeaderAmd64(out []byte, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int) []byte {
 	start := len(out)
 	base := 0x400000
 	header := "\x7f\x45\x4c\x46\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x3e\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x38\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x07\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00"
 	out = append(out, header...)
+	out[start+56] = 2
+	out[start+68] = 5
 	rtgPut32At(out, start+24, base+entryOff)
 	rtgPut32At(out, start+40, shoff)
 	if shoff != 0 {
@@ -337,7 +339,8 @@ func rtgAppendElfHeaderAmd64(out []byte, entryOff int, fileSize int, memSize int
 		out[start+62] = 6
 	}
 	rtgPut32At(out, start+96, fileSize)
-	rtgPut32At(out, start+104, memSize)
+	rtgPut32At(out, start+104, fileSize)
+	out = rtgAppendElf64LoadProgram(out, 6, bssOffset, base+bssOffset, 0, bssSize)
 	return out
 }
 

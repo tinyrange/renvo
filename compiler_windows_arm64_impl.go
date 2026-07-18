@@ -400,7 +400,7 @@ func rtgAsmPatchWindowsArm64(a *rtgAsm, layout rtgWinImportLayout) {
 		if r.kind == rtgAbsWinImportReloc {
 			target = rtgWinImportIATRVA(layout, r.off)
 		} else if r.kind == rtgAbsBssReloc {
-			target = a.dataOffset + len(a.data) + r.off
+			target = rtgAsmBssOffset(a) + r.off
 		}
 		insn := rtgGet32At(a.code, r.at)
 		reg := insn & 31
@@ -445,7 +445,7 @@ func rtgAsmImageWindowsArm64(a *rtgAsm) []byte {
 	out[0xca] = 1
 	out[0x9a] = 3
 	out[0x96] = 0x22
-	out[0xde] = 0x60
+	out[0xde] = 0x00
 	out[0xdf] = 0x81
 	for i := 0; i < len(a.code); i++ {
 		out = append(out, a.code[i])
