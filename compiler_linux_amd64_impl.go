@@ -20,16 +20,24 @@ func rtgAmd64AsmMoveOffsetArg(a *rtgAsm) {
 }
 
 func compileLinuxAmd64(input []int, output int) int {
+	return compileLinuxAmd64Arena(input, output, 0)
+}
+
+func compileLinuxAmd64Arena(input []int, output int, arenaSize int) int {
 	rtgSetTarget(rtgTargetLinuxAmd64)
-	return rtgCompileAmd64(input, output)
+	return rtgCompileAmd64(input, output, arenaSize)
 }
 
 func compileWindowsAmd64(input []int, output int) int {
-	rtgSetTarget(rtgTargetWindowsAmd64)
-	return rtgCompileAmd64(input, output)
+	return compileWindowsAmd64Arena(input, output, 0)
 }
 
-func rtgCompileAmd64(input []int, output int) int {
+func compileWindowsAmd64Arena(input []int, output int, arenaSize int) int {
+	rtgSetTarget(rtgTargetWindowsAmd64)
+	return rtgCompileAmd64(input, output, arenaSize)
+}
+
+func rtgCompileAmd64(input []int, output int, arenaSize int) int {
 	src := make([]byte, 0, 589824)
 	for i := 0; i < len(input); i++ {
 		src = rtgReadAll(input[i], src)
@@ -45,6 +53,7 @@ func rtgCompileAmd64(input []int, output int) int {
 	if !meta.ok {
 		return 1
 	}
+	meta.arenaSize = rtgResolveArenaSize(rtgCurrentTarget, arenaSize)
 	var result rtgCompileResult
 	result = rtgTryCompileScalarProgramAmd64(&prog, &meta)
 	if result.ok {
@@ -69,6 +78,7 @@ func rtgTryCompileScalarProgramAmd64(p *rtgProgram, meta *rtgMeta) rtgCompileRes
 	var g rtgLinearGen
 	g.prog = p
 	g.meta = meta
+	g.arenaSize = meta.arenaSize
 	a := &g.asm
 	rtgAsmInit(a)
 	a.codeOffset = rtgLinuxAmd64CodeOffset

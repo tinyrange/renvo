@@ -21,11 +21,15 @@ func rtgAarch64AsmMoveOffsetArg(a *rtgAsm) {
 }
 
 func compileLinuxAarch64(input []int, output int) int {
-	rtgSetTarget(rtgTargetLinuxAarch64)
-	return rtgCompileAarch64(input, output)
+	return compileLinuxAarch64Arena(input, output, 0)
 }
 
-func rtgCompileAarch64(input []int, output int) int {
+func compileLinuxAarch64Arena(input []int, output int, arenaSize int) int {
+	rtgSetTarget(rtgTargetLinuxAarch64)
+	return rtgCompileAarch64(input, output, arenaSize)
+}
+
+func rtgCompileAarch64(input []int, output int, arenaSize int) int {
 	src := make([]byte, 0, 589824)
 	for i := 0; i < len(input); i++ {
 		src = rtgReadAll(input[i], src)
@@ -41,6 +45,7 @@ func rtgCompileAarch64(input []int, output int) int {
 	if !meta.ok {
 		return 1
 	}
+	meta.arenaSize = rtgResolveArenaSize(rtgCurrentTarget, arenaSize)
 	var result rtgCompileResult
 	result = rtgTryCompileScalarProgramAarch64(&prog, &meta)
 	if result.ok {
@@ -65,6 +70,7 @@ func rtgTryCompileScalarProgramAarch64(p *rtgProgram, meta *rtgMeta) rtgCompileR
 	var g rtgLinearGen
 	g.prog = p
 	g.meta = meta
+	g.arenaSize = meta.arenaSize
 	a := &g.asm
 	rtgAsmInit(a)
 	a.codeOffset = rtgLinuxAarch64CodeOffset

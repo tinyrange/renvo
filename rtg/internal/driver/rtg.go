@@ -38,6 +38,7 @@ func RunRTGCommand(args []string, env []string) int {
 	output := built.Options.Output
 	strip := built.Options.Strip
 	windowsGUI := built.Options.WindowsGUI
+	arenaSize := built.Options.ArenaSize
 	if built.Options.EmitUnit {
 		ok := true
 		if output == "-" {
@@ -67,7 +68,7 @@ func RunRTGCommand(args []string, env []string) int {
 		}
 		arena.Reset(backendMark)
 	}
-	ok := backendbridge.CompileUnitToOutputStripEnv(unit, target, output, strip, windowsGUI, args, env)
+	ok := backendbridge.CompileUnitToOutputStripEnv(unit, target, output, strip, windowsGUI, arenaSize, args, env)
 	if resetArena {
 		arena.PersistReset(persistMark)
 	}

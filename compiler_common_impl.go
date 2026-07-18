@@ -190,8 +190,37 @@ var rtgTargetArch int = rtgArchAmd64
 var rtgTargetOS int = rtgOSLinux
 var rtgNativeIntSize int = 8
 var rtgCurrentTarget int = rtgTargetLinuxAmd64
-var rtgCompilerArenaSize int
 var rtgCompilerWindowsSubsystem int = 3
+
+const rtgArenaSize64BitHosted = 134217728
+const rtgArenaSize32BitHosted = 67108864
+const rtgArenaSizeWasi = 33554432
+const rtgArenaSizeMinimum = 256
+const rtgArenaSizeMaximum = 1073741824
+
+func rtgDefaultArenaSize(target int) int {
+	if target == rtgTargetWasiWasm32 {
+		return rtgArenaSizeWasi
+	}
+	if target > 0 && target < len(rtgTargetIntBitsTable) && int(rtgTargetIntBitsTable[target]) == 32 {
+		return rtgArenaSize32BitHosted
+	}
+	return rtgArenaSize64BitHosted
+}
+
+func rtgArenaSizeValid(target int, size int) bool {
+	if target <= 0 || target >= len(rtgTargetIntBitsTable) {
+		return false
+	}
+	return size >= rtgArenaSizeMinimum && size <= rtgArenaSizeMaximum
+}
+
+func rtgResolveArenaSize(target int, requested int) int {
+	if requested == 0 {
+		return rtgDefaultArenaSize(target)
+	}
+	return requested
+}
 
 // These bodies are used by the host Go build. Self-hosted compilers lower the
 // calls as arena intrinsics so large, phase-local scratch data can be reclaimed.
@@ -1583,6 +1612,7 @@ type rtgMeta struct {
 	closures      []rtgClosureInfo
 	captures      []rtgSymbolInfo
 	panicEnabled  bool
+	arenaSize     int
 	ok            bool
 }
 
@@ -6724,6 +6754,7 @@ type rtgLinearGen struct {
 	localCount                int
 	stackUsed                 int
 	stackPeak                 int
+	arenaSize                 int
 	fieldIndex                int
 	fieldOffset               int
 	fieldPointerIndex         int
@@ -12531,7 +12562,7 @@ func rtgEmitPersistentArenaReady(g *rtgLinearGen) {
 	rtgAsmLoadPrimaryBss(a, g.stringHeapEndOff)
 	rtgAsmJnzPrimary(a, readyLabel)
 	rtgAsmPrimaryBssAddr(a, g.stringHeapDataOff)
-	rtgAsmPushImm(a, rtgStringArenaSize())
+	rtgAsmPushImm(a, rtgStringArenaSize(g))
 	rtgAsmPopTertiary(a)
 	rtgAsmAddPrimaryTertiary(a)
 	rtgAsmStorePrimaryBss(a, g.stringHeapEndOff)
@@ -16440,23 +16471,14 @@ func rtgStringHeapOffsets(g *rtgLinearGen) {
 	g.stringHeapOff = g.asm.bssSize
 	g.stringHeapEndOff = g.stringHeapOff + 8
 	g.stringHeapDataOff = g.stringHeapOff + 16
-	g.asm.bssSize += 16 + rtgStringArenaSize()
+	g.asm.bssSize += 16 + rtgStringArenaSize(g)
 }
 
-func rtgStringArenaSize() int {
-	if rtgCompilerArenaSize > 0 {
-		return rtgCompilerArenaSize
+func rtgStringArenaSize(g *rtgLinearGen) int {
+	if g.arenaSize > 0 {
+		return g.arenaSize
 	}
-	// A one-gibibyte image section consumes roughly that much commit charge on
-	// Windows even though most arena pages are never touched. Keep the 32-bit
-	// Windows default practical for Windows 98-era address spaces and pagefiles.
-	if rtgTargetOS == rtgOSWindows && rtgTargetArch == rtgArch386 {
-		return 67108864
-	}
-	if rtgTargetArch == rtgArchAmd64 || rtgTargetArch == rtgArch386 || rtgTargetArch == rtgArchWasm32 {
-		return 1073741824
-	}
-	return 805306368
+	return rtgDefaultArenaSize(rtgCurrentTarget)
 }
 
 func rtgEmitArenaAllocPrimary(g *rtgLinearGen, size int) {
@@ -16499,7 +16521,7 @@ func rtgEnsureArenaAllocHelper(g *rtgLinearGen) int {
 	rtgAsmCmpTertiaryPrimarySet(a, 0x9d)
 	rtgAsmJzPrimary(a, oomLabel)
 	rtgAsmPushTertiary(a)
-	rtgAsmPrimaryBssAddr(a, g.stringHeapDataOff+rtgStringArenaSize())
+	rtgAsmPrimaryBssAddr(a, g.stringHeapDataOff+rtgStringArenaSize(g))
 	rtgAsmPopTertiary(a)
 	rtgAsmCmpTertiaryPrimarySet(a, 0x9e)
 	rtgAsmJzPrimary(a, oomLabel)

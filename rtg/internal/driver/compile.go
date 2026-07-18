@@ -14,6 +14,10 @@ type Backend interface {
 	CompileUnit(unit []byte, target string, strip bool, windowsGUI bool) BackendResult
 }
 
+type ArenaBackend interface {
+	CompileUnitWithArena(unit []byte, target string, strip bool, windowsGUI bool, arenaSize int) BackendResult
+}
+
 type BackendResult struct {
 	Binary     []byte
 	Ok         bool
@@ -62,7 +66,15 @@ func compileBuiltUnit(result CompileResult, built BuildResult, backend Backend) 
 	if backend == nil {
 		return compileFail(result, CompileErrBackend)
 	}
-	backendResult := backend.CompileUnit(built.Unit, built.Options.Target, built.Options.Strip, built.Options.WindowsGUI)
+	var backendResult BackendResult
+	arenaBackend, acceptsArena := backend.(ArenaBackend)
+	if acceptsArena {
+		backendResult = arenaBackend.CompileUnitWithArena(built.Unit, built.Options.Target, built.Options.Strip, built.Options.WindowsGUI, built.Options.ArenaSize)
+	} else if built.Options.ArenaSize != 0 {
+		backendResult.Diagnostic = Diagnostic{Phase: "backend", Code: "RTG-BACKEND-005", Message: "backend does not accept an arena policy"}
+	} else {
+		backendResult = backend.CompileUnit(built.Unit, built.Options.Target, built.Options.Strip, built.Options.WindowsGUI)
+	}
 	if !backendResult.Ok || len(backendResult.Binary) == 0 {
 		result.Diagnostic = backendResult.Diagnostic
 		if !result.Diagnostic.Valid() {

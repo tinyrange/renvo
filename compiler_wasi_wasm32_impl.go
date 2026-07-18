@@ -1,6 +1,10 @@
 package main
 
 func compileWasiWasm32(input []int, output int) int {
+	return compileWasiWasm32Arena(input, output, 0)
+}
+
+func compileWasiWasm32Arena(input []int, output int, arenaSize int) int {
 	rtgSetTarget(rtgTargetWasiWasm32)
 	src := make([]byte, 0, 655360)
 	for i := 0; i < len(input); i++ {
@@ -17,6 +21,7 @@ func compileWasiWasm32(input []int, output int) int {
 	if !meta.ok {
 		return 1
 	}
+	meta.arenaSize = rtgResolveArenaSize(rtgCurrentTarget, arenaSize)
 	var result rtgCompileResult
 	result = rtgTryCompileScalarProgramWasm32(&prog, &meta)
 	if result.ok {
@@ -41,6 +46,7 @@ func rtgTryCompileScalarProgramWasm32(p *rtgProgram, meta *rtgMeta) rtgCompileRe
 	var g rtgLinearGen
 	g.prog = p
 	g.meta = meta
+	g.arenaSize = meta.arenaSize
 	g.fixedTargetState = 1
 	g.fixedTargetValue = rtgTargetWasiWasm32
 	a := &g.asm

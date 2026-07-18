@@ -400,7 +400,7 @@ func rtgUnitValidTokenRange(limit int, start int, end int) bool {
 	return end <= limit
 }
 
-func rtgCompileProgramToOutput(prog *rtgProgram, output int, target int) int {
+func rtgCompileProgramToOutput(prog *rtgProgram, output int, target int, arenaSize int) int {
 	rtgCompilerFixedTarget = target
 	rtgSetTarget(target)
 	if !prog.ok {
@@ -413,6 +413,7 @@ func rtgCompileProgramToOutput(prog *rtgProgram, output int, target int) int {
 		rtgPrintErr("rtg: meta failed\n")
 		return 1
 	}
+	meta.arenaSize = rtgResolveArenaSize(target, arenaSize)
 	var result rtgCompileResult
 	if rtgCompilerFixedTarget == rtgTargetLinux386 || rtgCompilerFixedTarget == rtgTargetWindows386 {
 		result = rtgTryCompileScalarProgram386(prog, &meta)
@@ -443,7 +444,7 @@ func rtgCompileProgramToOutput(prog *rtgProgram, output int, target int) int {
 	return 1
 }
 
-func rtgCompileUnitInput(input []int, output int, target int) int {
+func rtgCompileUnitInput(input []int, output int, target int, arenaSize int) int {
 	if len(input) != 1 {
 		return -1
 	}
@@ -459,10 +460,10 @@ func rtgCompileUnitInput(input []int, output int, target int) int {
 				rtgPrintErr("rtg: invalid unit input\n")
 				return 1
 			}
-			return rtgCompileProgramToOutput(&prog, output, target)
+			return rtgCompileProgramToOutput(&prog, output, target, arenaSize)
 		}
 		prog := rtgParseProgram(src)
-		return rtgCompileProgramToOutput(&prog, output, target)
+		return rtgCompileProgramToOutput(&prog, output, target, arenaSize)
 	}
 	header := make([]byte, 4)
 	n := read(input[0], header, 0)
@@ -479,7 +480,7 @@ func rtgCompileUnitInput(input []int, output int, target int) int {
 		rtgPrintErr("rtg: invalid unit input\n")
 		return 1
 	}
-	return rtgCompileProgramToOutput(&prog, output, target)
+	return rtgCompileProgramToOutput(&prog, output, target, arenaSize)
 }
 
 func appMain(args []string, env []string) int {
@@ -487,7 +488,7 @@ func appMain(args []string, env []string) int {
 	inputCount := 0
 	var outputPath string
 	target := rtgCompilerDefaultTarget
-	rtgCompilerArenaSize = 0
+	arenaSize := 0
 	rtgCompilerStripSymbols = false
 	rtgCompilerWindowsSubsystem = 3
 	if len(args) == 0 {
@@ -543,14 +544,14 @@ func appMain(args []string, env []string) int {
 				rtgPrintUsage()
 				return 1
 			}
-			arenaSize, ok := rtgParsePositiveDecimal(args[i])
+			parsedArenaSize, ok := rtgParsePositiveDecimal(args[i])
 			if !ok {
 				rtgPrintErr("rtg: invalid arena size: ")
 				rtgPrintErr(args[i])
 				rtgPrintErr("\n")
 				return 1
 			}
-			rtgCompilerArenaSize = arenaSize
+			arenaSize = parsedArenaSize
 			i++
 			continue
 		}
@@ -612,9 +613,9 @@ func appMain(args []string, env []string) int {
 			return 1
 		}
 	}
-	unitResult := rtgCompileUnitInput(input[:inputCount], output, target)
+	unitResult := rtgCompileUnitInput(input[:inputCount], output, target, arenaSize)
 	if unitResult >= 0 {
 		return unitResult
 	}
-	return compileTarget(input[:inputCount], output, target)
+	return compileTarget(input[:inputCount], output, target, arenaSize)
 }

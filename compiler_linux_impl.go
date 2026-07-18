@@ -23,7 +23,7 @@ func rtgReadAll(fd int, out []byte) []byte {
 }
 
 func compileLinuxTarget(input []int, output int, target int) int {
-	return compileTarget(input, output, target)
+	return compileTarget(input, output, target, 0)
 }
 
 func rtgLinuxSysWriteSeq() int {

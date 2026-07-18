@@ -21,6 +21,10 @@ func rtgArmAsmMoveOffsetArg(a *rtgAsm) {
 }
 
 func compileLinuxArm(input []int, output int) int {
+	return compileLinuxArmArena(input, output, 0)
+}
+
+func compileLinuxArmArena(input []int, output int, arenaSize int) int {
 	rtgSetTarget(rtgTargetLinuxArm)
 	src := make([]byte, 0, 589824)
 	for i := 0; i < len(input); i++ {
@@ -37,6 +41,7 @@ func compileLinuxArm(input []int, output int) int {
 	if !meta.ok {
 		return 1
 	}
+	meta.arenaSize = rtgResolveArenaSize(rtgCurrentTarget, arenaSize)
 	var result rtgCompileResult
 	result = rtgTryCompileScalarProgramArm(&prog, &meta)
 	if result.ok {
@@ -61,6 +66,7 @@ func rtgTryCompileScalarProgramArm(p *rtgProgram, meta *rtgMeta) rtgCompileResul
 	var g rtgLinearGen
 	g.prog = p
 	g.meta = meta
+	g.arenaSize = meta.arenaSize
 	a := &g.asm
 	rtgAsmInit(a)
 	a.codeOffset = rtgLinuxArmCodeOffset

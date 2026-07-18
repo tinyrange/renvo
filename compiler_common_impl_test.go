@@ -119,24 +119,22 @@ func TestArenaSizeConfigurationIsBounded(t *testing.T) {
 		}
 	}
 
-	oldSize := rtgCompilerArenaSize
 	oldArch := rtgTargetArch
 	oldOS := rtgTargetOS
+	oldTarget := rtgCurrentTarget
 	t.Cleanup(func() {
-		rtgCompilerArenaSize = oldSize
 		rtgTargetArch = oldArch
 		rtgTargetOS = oldOS
+		rtgCurrentTarget = oldTarget
 	})
-	rtgCompilerArenaSize = 2048
-	rtgTargetArch = rtgArchAmd64
-	if got := rtgStringArenaSize(); got != 2048 {
+	g := rtgLinearGen{arenaSize: 2048}
+	if got := rtgStringArenaSize(&g); got != 2048 {
 		t.Fatalf("configured arena size = %d, want 2048", got)
 	}
-	rtgCompilerArenaSize = 0
-	rtgTargetArch = rtgArch386
-	rtgTargetOS = rtgOSWindows
-	if got := rtgStringArenaSize(); got != 67108864 {
-		t.Fatalf("Windows/386 arena size = %d, want 67108864", got)
+	g.arenaSize = 0
+	rtgSetTarget(rtgTargetWindows386)
+	if got := rtgStringArenaSize(&g); got != rtgArenaSize32BitHosted {
+		t.Fatalf("Windows/386 arena size = %d, want %d", got, rtgArenaSize32BitHosted)
 	}
 }
 

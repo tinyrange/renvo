@@ -95,6 +95,10 @@ func printOptionError(options driver.Options) {
 		fmt.Fprintln(os.Stderr, "rtg: -windows-gui requires a Windows target")
 	case driver.ParseErrMixedFileList:
 		fmt.Fprintf(os.Stderr, "rtg: explicit source list contains a non-.go argument: %s\n", options.ErrorArg)
+	case driver.ParseErrMissingArenaSize:
+		fmt.Fprintln(os.Stderr, "rtg: missing arena size after -arena-size")
+	case driver.ParseErrInvalidArenaSize:
+		fmt.Fprintf(os.Stderr, "rtg: invalid arena size: %s\n", options.ErrorArg)
 	default:
 		fmt.Fprintf(os.Stderr, "rtg: option parse failed with error %d\n", options.Error)
 	}

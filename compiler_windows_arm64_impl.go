@@ -4,8 +4,12 @@ const rtgWinArm64Machine = 0xaa64
 const rtgWinArm64ImageBase = 0x140000000
 
 func compileWindowsArm64(input []int, output int) int {
+	return compileWindowsArm64Arena(input, output, 0)
+}
+
+func compileWindowsArm64Arena(input []int, output int, arenaSize int) int {
 	rtgSetTarget(rtgTargetWindowsArm64)
-	return rtgCompileAarch64(input, output)
+	return rtgCompileAarch64(input, output, arenaSize)
 }
 
 func rtgEmitProgramEntryArgsWindowsArm64(g *rtgLinearGen, appIndex int) bool {

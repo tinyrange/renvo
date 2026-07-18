@@ -53,6 +53,18 @@ of the default console subsystem. For example:
 rtg -t windows/386 -windows-gui -o app.exe ./cmd/app
 ```
 
+Generated programs use a bounded allocation arena. The default is 128 MiB on
+64-bit hosted targets, 64 MiB on 32-bit hosted targets, and 32 MiB on WASI.
+Use `-arena-size <bytes>` to select an explicit limit between 256 bytes and
+1 GiB; the frontend passes the same policy to either its embedded backend or an
+`RTG_BACKEND` command. Invalid limits are rejected before an output artifact is
+opened, and exhausting a valid limit follows the backend's deterministic OOM
+path rather than extending beyond the image's declared writable storage.
+
+```sh
+rtg -arena-size 16777216 -o app ./cmd/app
+```
+
 Release builds are published for every host currently supported by the RTG
 backend:
 

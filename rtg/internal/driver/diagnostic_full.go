@@ -92,6 +92,10 @@ func optionDiagnostic(options Options) Diagnostic {
 		code, message = "RTG-OPTION-010", "-windows-gui requires a Windows target"
 	case ParseErrMixedFileList:
 		code, message = "RTG-OPTION-011", "explicit source list contains a non-.go argument "+options.ErrorArg
+	case ParseErrMissingArenaSize:
+		code, message = "RTG-OPTION-012", "missing arena size after -arena-size"
+	case ParseErrInvalidArenaSize:
+		code, message = "RTG-OPTION-013", "invalid arena size "+options.ErrorArg
 	}
 	return Diagnostic{Phase: "options", Code: code, Message: message}
 }

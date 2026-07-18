@@ -20,8 +20,12 @@ const rtgDarwinImportGetdirentries = 9
 const rtgDarwinImportCount = 9
 
 func compileDarwinArm64(input []int, output int) int {
+	return compileDarwinArm64Arena(input, output, 0)
+}
+
+func compileDarwinArm64Arena(input []int, output int, arenaSize int) int {
 	rtgSetTarget(rtgTargetDarwinArm64)
-	return rtgCompileAarch64(input, output)
+	return rtgCompileAarch64(input, output, arenaSize)
 }
 
 func rtgDarwinImportName(id int) string {

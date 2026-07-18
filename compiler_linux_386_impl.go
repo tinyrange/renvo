@@ -24,6 +24,10 @@ func rtg386AsmMoveOffsetArg(a *rtgAsm) {
 }
 
 func compileLinux386(input []int, output int) int {
+	return compileLinux386Arena(input, output, 0)
+}
+
+func compileLinux386Arena(input []int, output int, arenaSize int) int {
 	rtgSetTarget(rtgTargetLinux386)
 	src := make([]byte, 0, 589824)
 	for i := 0; i < len(input); i++ {
@@ -40,6 +44,7 @@ func compileLinux386(input []int, output int) int {
 	if !meta.ok {
 		return 1
 	}
+	meta.arenaSize = rtgResolveArenaSize(rtgCurrentTarget, arenaSize)
 	var result rtgCompileResult
 	result = rtgTryCompileScalarProgram386(&prog, &meta)
 	if result.ok {
@@ -51,6 +56,10 @@ func compileLinux386(input []int, output int) int {
 }
 
 func compileWindows386(input []int, output int) int {
+	return compileWindows386Arena(input, output, 0)
+}
+
+func compileWindows386Arena(input []int, output int, arenaSize int) int {
 	rtgSetTarget(rtgTargetWindows386)
 	var src []byte
 	for i := 0; i < len(input); i++ {
@@ -67,6 +76,7 @@ func compileWindows386(input []int, output int) int {
 	if !meta.ok {
 		return 1
 	}
+	meta.arenaSize = rtgResolveArenaSize(rtgCurrentTarget, arenaSize)
 	var result rtgCompileResult
 	result = rtgTryCompileScalarProgram386(&prog, &meta)
 	if result.ok {
@@ -91,6 +101,7 @@ func rtgTryCompileScalarProgram386(p *rtgProgram, meta *rtgMeta) rtgCompileResul
 	var g rtgLinearGen
 	g.prog = p
 	g.meta = meta
+	g.arenaSize = meta.arenaSize
 	a := &g.asm
 	rtgAsmInit(a)
 	a.codeOffset = rtgLinux386CodeOffset

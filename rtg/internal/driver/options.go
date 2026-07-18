@@ -12,11 +12,13 @@ const (
 	ParseErrExtraPackage
 	ParseErrWindowsGUIRequiresWindows
 	ParseErrMixedFileList
+	ParseErrMissingArenaSize
+	ParseErrInvalidArenaSize
 )
 
 const DefaultTarget = "linux/amd64"
 
-const HelpText = "Usage: rtg -o <file> [-t <target>] [-tags <list>] [-s] [-emit-unit] [-windows-gui] <package | file.go...>\nOptions:\n  -emit-unit    write the canonical linked RTGU unit without invoking a backend\n  -windows-gui  select the Windows GUI subsystem instead of the console subsystem\nSource files:\n  Explicit .go files must share one directory and package. Exactly the named files are used;\n  build constraints and OS/architecture suffixes are ignored, while _test.go files are skipped.\nTargets:\n  linux/amd64 linux/386 linux/aarch64 linux/arm\n  windows/amd64 windows/386 windows/arm64 darwin/arm64 wasi/wasm32\nUnsupported language/toolchain features:\n  generics, goroutines, channels, select, cgo\n"
+const HelpText = "Usage: rtg -o <file> [-t <target>] [-tags <list>] [-arena-size <bytes>] [-s] [-emit-unit] [-windows-gui] <package | file.go...>\nOptions:\n  -arena-size   set the generated program arena limit in bytes (256..1073741824)\n  -emit-unit    write the canonical linked RTGU unit without invoking a backend\n  -windows-gui  select the Windows GUI subsystem instead of the console subsystem\nSource files:\n  Explicit .go files must share one directory and package. Exactly the named files are used;\n  build constraints and OS/architecture suffixes are ignored, while _test.go files are skipped.\nTargets:\n  linux/amd64 linux/386 linux/aarch64 linux/arm\n  windows/amd64 windows/386 windows/arm64 darwin/arm64 wasi/wasm32\nUnsupported language/toolchain features:\n  generics, goroutines, channels, select, cgo\n"
 
 type Options struct {
 	Target     string
@@ -26,6 +28,7 @@ type Options struct {
 	Strip      bool
 	EmitUnit   bool
 	WindowsGUI bool
+	ArenaSize  int
 	Tags       []string
 	Ok         bool
 	Error      int
@@ -62,6 +65,18 @@ func ParseOptions(args []string) Options {
 			options.WindowsGUI = true
 			windowsGUIAt = i
 			i++
+			continue
+		}
+		if arg == "-arena-size" {
+			if i+1 >= len(args) {
+				return parseFail(options, ParseErrMissingArenaSize, arg, i)
+			}
+			size, ok := parseArenaSize(args[i+1])
+			if !ok {
+				return parseFail(options, ParseErrInvalidArenaSize, args[i+1], i+1)
+			}
+			options.ArenaSize = size
+			i += 2
 			continue
 		}
 		if arg == "-o" {
@@ -130,6 +145,28 @@ func ParseOptions(args []string) Options {
 		return parseFail(options, ParseErrWindowsGUIRequiresWindows, options.Target, windowsGUIAt)
 	}
 	return options
+}
+
+func parseArenaSize(value string) (int, bool) {
+	if len(value) == 0 {
+		return 0, false
+	}
+	result := 0
+	for i := 0; i < len(value); i++ {
+		ch := value[i]
+		if ch < '0' || ch > '9' {
+			return 0, false
+		}
+		digit := int(ch - '0')
+		if result > (1073741824-digit)/10 {
+			return 0, false
+		}
+		result = result*10 + digit
+	}
+	if result < 256 || result > 1073741824 {
+		return 0, false
+	}
+	return result, true
 }
 
 func optionArgIsGoFile(arg string) bool {
