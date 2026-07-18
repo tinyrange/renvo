@@ -95,13 +95,33 @@ func TestEditorTabCompletionSelectsAndReplacesPrefix(t *testing.T) {
 	form.Initialize(500, 200)
 	form.Add(&control.Control)
 	control.Focus()
-	control.keyDown(graphics.Event{Key: graphics.KeyTab})
+	form.Dispatch(graphics.Event{Type: graphics.EventKeyDown, Key: graphics.KeyTab})
+	form.Dispatch(graphics.Event{Type: graphics.EventTextInput, Text: "\t"})
 	if len(control.completions) != 2 {
 		t.Fatalf("completion popup = %#v", control.completions)
 	}
-	control.keyDown(graphics.Event{Key: graphics.KeyDown})
-	control.keyDown(graphics.Event{Key: graphics.KeyTab})
+	form.Dispatch(graphics.Event{Type: graphics.EventKeyDown, Key: graphics.KeyDown})
+	form.Dispatch(graphics.Event{Type: graphics.EventKeyDown, Key: graphics.KeyTab})
+	form.Dispatch(graphics.Event{Type: graphics.EventTextInput, Text: "\t"})
 	if document.Text() != "f.SetTitle" {
 		t.Fatalf("completed document = %q", document.Text())
+	}
+}
+
+func TestEditorTabIndentsWhitespaceWithoutTextInputDuplication(t *testing.T) {
+	document := NewDocument([]byte("    "))
+	document.MoveDocumentEnd(false)
+	control := NewEditorControl(document)
+	control.Complete = func(source []byte, caret int) []Completion {
+		return []Completion{{Text: "ignored", Detail: "variable"}}
+	}
+	var form forms.Form
+	form.Initialize(500, 200)
+	form.Add(&control.Control)
+	control.Focus()
+	form.Dispatch(graphics.Event{Type: graphics.EventKeyDown, Key: graphics.KeyTab})
+	form.Dispatch(graphics.Event{Type: graphics.EventTextInput, Text: "\t"})
+	if document.Text() != "    \t" {
+		t.Fatalf("indented document = %q", document.Text())
 	}
 }

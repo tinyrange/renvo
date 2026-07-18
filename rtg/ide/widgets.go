@@ -475,19 +475,19 @@ func (c *EditorControl) placeCaret(x, y graphics.Scalar, extend bool) {
 }
 
 func (c *EditorControl) textInput(text string) {
-	c.closeCompletion()
 	var filtered []byte
 	for i := 0; i < len(text); i++ {
 		value := text[i]
 		if value == '\r' {
 			filtered = append(filtered, '\n')
-		} else if value == '\n' || value == '\t' || value >= 32 {
+		} else if value == '\n' || value >= 32 {
 			filtered = append(filtered, value)
 		}
 	}
 	if len(filtered) == 0 {
 		return
 	}
+	c.closeCompletion()
 	startLine, _ := c.Document.Position(c.Document.Caret)
 	oldLines := c.Document.LineCount()
 	c.Document.Insert(string(filtered))
@@ -597,11 +597,10 @@ func (c *EditorControl) openCompletion() bool {
 	if c.Complete == nil || c.Document == nil {
 		return false
 	}
-	start := completionWordStart(c.Document.text, c.Document.Caret)
-	selector := start > 0 && c.Document.text[start-1] == '.'
-	if start == c.Document.Caret && !selector {
+	if c.Document.Caret <= 0 || completionWhitespace(c.Document.text[c.Document.Caret-1]) {
 		return false
 	}
+	start := completionWordStart(c.Document.text, c.Document.Caret)
 	items := c.Complete(c.Document.text, c.Document.Caret)
 	if len(items) == 0 {
 		return false
@@ -699,6 +698,10 @@ func completionWordStart(data []byte, offset int) int {
 		offset--
 	}
 	return offset
+}
+
+func completionWhitespace(value byte) bool {
+	return value == ' ' || value == '\t' || value == '\n' || value == '\r'
 }
 
 func (c *EditorControl) afterEdit(startLine, oldLines int) {
