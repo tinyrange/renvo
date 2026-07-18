@@ -1041,14 +1041,7 @@ func rtgStringFromBytes(src []byte, start int, end int) string {
 	for i := start; i < end; i++ {
 		out = append(out, src[i])
 	}
-	return rtg_runtime_ArenaPersistString(string(out))
-}
-
-// The self-hosted compiler retains import names until the final object image
-// is assembled. Keep those strings out of the temporary expression arena,
-// which is reset between decoded package units.
-func rtg_runtime_ArenaPersistString(value string) string {
-	return value
+	return string(out)
 }
 
 func rtgAsmHasWinImportRelocs(a *rtgAsm) bool {
