@@ -30,8 +30,9 @@ func TestGeneratedHelloFormIsGoSourceWithDesignerOwnedStructAndWiring(t *testing
 
 func TestGeneratedFormIsTheRoundTrippableDesignerDocument(t *testing.T) {
 	design := formDesign{
-		width:  640,
-		height: 360,
+		width:        640,
+		height:       360,
+		paintHandler: "mainFormPaint",
 		controls: []designerControl{
 			{kind: designerLabel, name: "statusLabel", text: "Ready\nnow", x: 17, y: 21, width: 180, height: 30},
 			{kind: designerButton, name: "launchButton", text: "Launch \"app\"", x: 220, y: 260, width: 140, height: 42, clickHandler: "launchButtonClick"},
@@ -39,7 +40,7 @@ func TestGeneratedFormIsTheRoundTrippableDesignerDocument(t *testing.T) {
 			{kind: designerTextArea, name: "notesTextArea", text: "one\ntwo", x: 20, y: 110, width: 220, height: 90},
 			{kind: designerCheckBox, name: "enabledCheckBox", text: "Enabled", x: 270, y: 70, width: 140, height: 28, checked: true},
 			{kind: designerRadioButton, name: "modeRadioButton", text: "Mode", x: 270, y: 105, width: 140, height: 28},
-			{kind: designerPictureBox, name: "logoPictureBox", x: 450, y: 30, width: 120, height: 90},
+			{kind: designerPictureBox, name: "logoPictureBox", x: 450, y: 30, width: 120, height: 90, paintHandler: "logoPictureBoxPaint"},
 			{kind: designerPanel, name: "settingsPanel", x: 260, y: 150, width: 250, height: 100},
 		},
 	}

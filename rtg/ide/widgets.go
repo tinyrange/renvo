@@ -255,6 +255,7 @@ type EditorControl struct {
 	Document       *Document
 	Font           *graphics.Font
 	Save           func()
+	Complete       func(source []byte, caret int) []Completion
 	scrollY        graphics.Scalar
 	scrollX        graphics.Scalar
 	dragging       bool
@@ -263,6 +264,15 @@ type EditorControl struct {
 	baseline       int
 	syntaxScratch  []syntaxSpan
 	syntaxStates   []goSyntaxState
+	completions    []Completion
+	completionAt   int
+	completionPick int
+}
+
+type Completion struct {
+	Text   string
+	Detail string
+	Kind   int
 }
 
 func NewEditorControl(document *Document) *EditorControl {
@@ -299,6 +309,7 @@ func (c *EditorControl) SetDocument(document *Document) {
 	c.scrollY = 0.0
 	c.scrollX = 0.0
 	c.syntaxStates = nil
+	c.closeCompletion()
 	c.rebuildSyntaxStates(0)
 	c.Invalidate()
 }
@@ -390,6 +401,7 @@ func (c *EditorControl) paint(surface *graphics.Surface) {
 		surface.FillRect(graphics.R(x, y+1, 1, graphics.Scalar(c.lineHeight-2)), textColor)
 		surface.PopClip()
 	}
+	c.paintCompletion(surface)
 	surface.FillRect(graphics.R(bounds.MinX, bounds.MinY, 1, bounds.Height()), borderColor)
 }
 
@@ -422,6 +434,7 @@ func syntaxColor(kind syntaxKind) graphics.Color {
 }
 
 func (c *EditorControl) pointerDown(x, y graphics.Scalar) {
+	c.closeCompletion()
 	c.dragging = true
 	c.placeCaret(x, y, false)
 }
@@ -462,6 +475,7 @@ func (c *EditorControl) placeCaret(x, y graphics.Scalar, extend bool) {
 }
 
 func (c *EditorControl) textInput(text string) {
+	c.closeCompletion()
 	var filtered []byte
 	for i := 0; i < len(text); i++ {
 		value := text[i]
@@ -486,6 +500,33 @@ func (c *EditorControl) keyDown(event graphics.Event) {
 	oldLine, _ := c.Document.Position(c.Document.Caret)
 	oldLines := c.Document.LineCount()
 	changed := false
+	if len(c.completions) > 0 {
+		if event.Key == graphics.KeyUp {
+			c.completionPick--
+			if c.completionPick < 0 {
+				c.completionPick = len(c.completions) - 1
+			}
+			c.invalidateCompletion()
+			return
+		}
+		if event.Key == graphics.KeyDown {
+			c.completionPick++
+			if c.completionPick >= len(c.completions) {
+				c.completionPick = 0
+			}
+			c.invalidateCompletion()
+			return
+		}
+		if event.Key == graphics.KeyTab || event.Key == graphics.KeyEnter {
+			c.acceptCompletion()
+			return
+		}
+		if event.Key == graphics.KeyEscape {
+			c.closeCompletion()
+			return
+		}
+		c.closeCompletion()
+	}
 	if primary && event.Key == graphics.KeyA {
 		c.Document.SelectAll()
 	} else if primary && event.Key == graphics.KeyC {
@@ -515,6 +556,12 @@ func (c *EditorControl) keyDown(event graphics.Event) {
 			c.Save()
 		}
 		return
+	} else if event.Key == graphics.KeyTab {
+		if c.openCompletion() {
+			return
+		}
+		c.Document.Insert("\t")
+		changed = true
 	} else if event.Key == graphics.KeyLeft {
 		c.Document.MoveCharacter(-1, extend)
 	} else if event.Key == graphics.KeyRight {
@@ -544,6 +591,114 @@ func (c *EditorControl) keyDown(event graphics.Event) {
 	newLine, _ := c.Document.Position(c.Document.Caret)
 	c.invalidateEditorLine(oldLine)
 	c.invalidateEditorLine(newLine)
+}
+
+func (c *EditorControl) openCompletion() bool {
+	if c.Complete == nil || c.Document == nil {
+		return false
+	}
+	start := completionWordStart(c.Document.text, c.Document.Caret)
+	selector := start > 0 && c.Document.text[start-1] == '.'
+	if start == c.Document.Caret && !selector {
+		return false
+	}
+	items := c.Complete(c.Document.text, c.Document.Caret)
+	if len(items) == 0 {
+		return false
+	}
+	c.completionAt = start
+	c.completionPick = 0
+	if len(items) == 1 {
+		c.completions = items
+		c.acceptCompletion()
+		return true
+	}
+	c.completions = items
+	if len(c.completions) > 8 {
+		c.completions = c.completions[:8]
+	}
+	c.invalidateCompletion()
+	return true
+}
+
+func (c *EditorControl) acceptCompletion() {
+	if len(c.completions) == 0 || c.completionPick < 0 || c.completionPick >= len(c.completions) {
+		return
+	}
+	startLine, _ := c.Document.Position(c.completionAt)
+	oldLines := c.Document.LineCount()
+	text := c.completions[c.completionPick].Text
+	c.Document.SetSelection(c.completionAt, c.Document.Caret)
+	c.Document.Insert(text)
+	c.completions = nil
+	c.completionPick = 0
+	c.afterEdit(startLine, oldLines)
+}
+
+func (c *EditorControl) closeCompletion() {
+	if len(c.completions) == 0 {
+		return
+	}
+	c.invalidateCompletion()
+	c.completions = nil
+	c.completionPick = 0
+}
+
+func (c *EditorControl) paintCompletion(surface *graphics.Surface) {
+	if len(c.completions) == 0 || c.Font == nil {
+		return
+	}
+	bounds := c.completionBounds()
+	surface.FillRect(bounds, graphics.RGBA(255, 255, 255, 255))
+	surface.StrokeRect(bounds, 1, borderColor)
+	rowHeight := graphics.Scalar(c.lineHeight + 4)
+	for i := 0; i < len(c.completions); i++ {
+		row := graphics.R(bounds.MinX+1, bounds.MinY+1+graphics.Scalar(i)*rowHeight, bounds.Width()-2, rowHeight)
+		if i == c.completionPick {
+			surface.FillRect(row, selectionColor)
+		}
+		surface.DrawText(c.Font, graphics.Point{X: row.MinX + 8, Y: row.MinY + graphics.Scalar(c.baseline+2)}, c.completions[i].Text, textColor)
+		detailWidth := graphics.MeasureText(c.Font, c.completions[i].Detail).Width
+		surface.DrawText(c.Font, graphics.Point{X: row.MaxX - detailWidth - 8, Y: row.MinY + graphics.Scalar(c.baseline+2)}, c.completions[i].Detail, lineNumberColor)
+	}
+}
+
+func (c *EditorControl) completionBounds() graphics.Rect {
+	line, column := c.Document.VisualPosition(c.Document.Caret)
+	width := graphics.Scalar(330)
+	if width > c.Bounds().Width()-editorGutterWidth-8 {
+		width = c.Bounds().Width() - editorGutterWidth - 8
+	}
+	height := graphics.Scalar(len(c.completions)*(c.lineHeight+4) + 2)
+	x := c.Bounds().MinX + editorGutterWidth + graphics.Scalar(column)*c.characterWidth - c.scrollX
+	y := c.Bounds().MinY + graphics.Scalar((line+1)*c.lineHeight) - c.scrollY
+	if x+width > c.Bounds().MaxX-4 {
+		x = c.Bounds().MaxX - width - 4
+	}
+	if y+height > c.Bounds().MaxY-4 {
+		y = c.Bounds().MinY + graphics.Scalar(line*c.lineHeight) - c.scrollY - height
+	}
+	return graphics.R(x, y, width, height)
+}
+
+func (c *EditorControl) invalidateCompletion() {
+	if c.Form() != nil && len(c.completions) > 0 {
+		c.Form().Invalidate(c.completionBounds())
+	}
+}
+
+func completionWordStart(data []byte, offset int) int {
+	if offset > len(data) {
+		offset = len(data)
+	}
+	for offset > 0 {
+		value := data[offset-1]
+		if value != '_' && (value < 'a' || value > 'z') && (value < 'A' || value > 'Z') && (value < '0' || value > '9') {
+			break
+		}
+		offset--
+	}
+	return offset
 }
 
 func (c *EditorControl) afterEdit(startLine, oldLines int) {

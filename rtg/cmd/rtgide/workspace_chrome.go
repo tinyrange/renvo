@@ -10,6 +10,7 @@ const workspacePaneHeaderHeight = 36
 const workspaceDesignerToolbarHeight = 76
 const workspaceStatusHeight = 34
 const workspaceOutputHeight = 112
+const designerGridSize = 10
 
 var workspaceWhite = graphics.RGBA(255, 255, 255, 255)
 var workspaceCanvas = graphics.RGBA(250, 251, 253, 255)
@@ -80,9 +81,11 @@ func calculateWorkspaceLayout(width, height int) workspaceLayout {
 
 type workspaceAppBar struct {
 	forms.Control
-	font  *graphics.Font
-	Build func()
-	Run   func()
+	font        *graphics.Font
+	target      string
+	Build       func()
+	Run         func()
+	OpenTargets func()
 }
 
 func newWorkspaceAppBar(font *graphics.Font) *workspaceAppBar {
@@ -96,13 +99,25 @@ func newWorkspaceAppBar(font *graphics.Font) *workspaceAppBar {
 }
 
 func (c *workspaceAppBar) pointerDown(x, y graphics.Scalar) {
-	if x >= 170 && x < 242 && c.Build != nil {
+	if x >= 170 && x < 326 && c.OpenTargets != nil {
+		c.OpenTargets()
+		return
+	}
+	if x >= 334 && x < 406 && c.Build != nil {
 		c.Build()
 		return
 	}
-	if x >= 250 && x < 316 && c.Run != nil {
+	if x >= 414 && x < 480 && c.Run != nil {
 		c.Run()
 	}
+}
+
+func (c *workspaceAppBar) SetTarget(target string) {
+	if c.target == target {
+		return
+	}
+	c.target = target
+	c.Invalidate()
 }
 
 func (c *workspaceAppBar) paint(surface *graphics.Surface) {
@@ -119,10 +134,15 @@ func (c *workspaceAppBar) paint(surface *graphics.Surface) {
 		y := bounds.MinY + 18 + graphics.Scalar(i*5)
 		surface.DrawLine(graphics.Point{X: menuX, Y: y}, graphics.Point{X: menuX + 13, Y: y}, 1, workspaceMuted)
 	}
-	buildBounds := graphics.R(bounds.MinX+170, bounds.MinY+9, 72, 28)
+	targetBounds := graphics.R(bounds.MinX+170, bounds.MinY+9, 156, 28)
+	surface.FillRect(targetBounds, workspaceField)
+	surface.StrokeRect(targetBounds, 1, workspaceBorder)
+	drawWorkspaceText(surface, c.font, targetBounds.MinX+10, targetBounds.MinY+19, c.target, workspaceText)
+	drawChevron(surface, targetBounds.MaxX-18, targetBounds.MinY+12, true, workspaceMuted)
+	buildBounds := graphics.R(bounds.MinX+334, bounds.MinY+9, 72, 28)
 	surface.FillRect(buildBounds, workspaceBlueLight)
 	drawWorkspaceText(surface, c.font, buildBounds.MinX+15, buildBounds.MinY+19, "BUILD", workspaceBlue)
-	runBounds := graphics.R(bounds.MinX+250, bounds.MinY+9, 66, 28)
+	runBounds := graphics.R(bounds.MinX+414, bounds.MinY+9, 66, 28)
 	surface.FillRect(runBounds, workspaceBlue)
 	drawRunIcon(surface, runBounds.MinX+11, runBounds.MinY+8, workspaceWhite)
 	drawWorkspaceText(surface, c.font, runBounds.MinX+28, runBounds.MinY+19, "RUN", workspaceWhite)
@@ -131,6 +151,41 @@ func (c *workspaceAppBar) paint(surface *graphics.Surface) {
 	surface.StrokeRect(graphics.R(buttonX+43, bounds.MinY+17, 10, 10), 1, workspaceMuted)
 	surface.DrawLine(graphics.Point{X: buttonX + 88, Y: bounds.MinY + 18}, graphics.Point{X: buttonX + 98, Y: bounds.MinY + 28}, 1, workspaceMuted)
 	surface.DrawLine(graphics.Point{X: buttonX + 98, Y: bounds.MinY + 18}, graphics.Point{X: buttonX + 88, Y: bounds.MinY + 28}, 1, workspaceMuted)
+}
+
+type workspaceTargetMenu struct {
+	forms.Control
+	font    *graphics.Font
+	targets []string
+	Select  func(target string)
+}
+
+func newWorkspaceTargetMenu(font *graphics.Font, targets []string) *workspaceTargetMenu {
+	menu := &workspaceTargetMenu{font: font}
+	menu.targets = append(menu.targets, targets...)
+	menu.Control = *forms.NewControl()
+	menu.SetTabStop(false)
+	menu.SetBackground(workspaceWhite)
+	menu.Paint = menu.paint
+	menu.PointerDown = menu.pointerDown
+	return menu
+}
+
+func (c *workspaceTargetMenu) pointerDown(x, y graphics.Scalar) {
+	row := int(y-5) / 27
+	if row >= 0 && row < len(c.targets) && c.Select != nil {
+		c.Select(c.targets[row])
+	}
+}
+
+func (c *workspaceTargetMenu) paint(surface *graphics.Surface) {
+	bounds := c.Bounds()
+	surface.FillRect(bounds, workspaceWhite)
+	surface.StrokeRect(bounds, 1, workspaceBorder)
+	for i := 0; i < len(c.targets); i++ {
+		y := bounds.MinY + 5 + graphics.Scalar(i*27)
+		drawWorkspaceText(surface, c.font, bounds.MinX+12, y+18, c.targets[i], workspaceText)
+	}
 }
 
 type workspaceExplorerFrame struct {
@@ -236,6 +291,7 @@ type workspaceDesigner struct {
 	Changed          func()
 	SelectionChanged func(index int)
 	AddControl       func(kind string)
+	DeleteSelection  func(index int)
 	design           *formDesign
 	selected         int
 	dragMode         int
@@ -247,12 +303,13 @@ type workspaceDesigner struct {
 func newWorkspaceDesigner(font *graphics.Font) *workspaceDesigner {
 	control := &workspaceDesigner{font: font, selected: -1}
 	control.Control = *forms.NewControl()
-	control.SetTabStop(false)
+	control.SetTabStop(true)
 	control.SetBackground(workspaceCanvas)
 	control.Paint = control.paint
 	control.PointerDown = control.pointerDown
 	control.PointerMove = control.pointerMove
 	control.PointerUp = control.pointerUp
+	control.KeyDown = control.keyDown
 	return control
 }
 
@@ -287,6 +344,10 @@ func (c *workspaceDesigner) pointerDown(x, y graphics.Scalar) {
 		return
 	}
 	if y >= workspacePaneHeaderHeight && y < workspacePaneHeaderHeight+workspaceDesignerToolbarHeight {
+		if c.selected >= 0 && c.Bounds().Width() >= 780 && x >= c.Bounds().Width()-72 && y < workspacePaneHeaderHeight+38 {
+			c.deleteSelection()
+			return
+		}
 		kind := designerPaletteKindAt(c.Bounds().Width(), x, y-workspacePaneHeaderHeight)
 		if kind != "" && c.AddControl != nil {
 			c.AddControl(kind)
@@ -326,6 +387,18 @@ func (c *workspaceDesigner) pointerDown(x, y graphics.Scalar) {
 	}
 }
 
+func (c *workspaceDesigner) keyDown(event graphics.Event) {
+	if event.Key == graphics.KeyDelete || event.Key == graphics.KeyBackspace && event.Modifiers&graphics.ModifierCommand != 0 {
+		c.deleteSelection()
+	}
+}
+
+func (c *workspaceDesigner) deleteSelection() {
+	if c.selected >= 0 && c.DeleteSelection != nil {
+		c.DeleteSelection(c.selected)
+	}
+}
+
 func (c *workspaceDesigner) pointerMove(x, y graphics.Scalar) {
 	if c.design == nil || c.selected < 0 || c.dragMode == 0 {
 		return
@@ -339,8 +412,8 @@ func (c *workspaceDesigner) pointerMove(x, y graphics.Scalar) {
 	dy := int((y - c.dragStartY) / layout.scale)
 	next := c.dragOriginal
 	if c.dragMode == 1 {
-		next.x += dx
-		next.y += dy
+		next.x = designerSnap(next.x + dx)
+		next.y = designerSnap(next.y + dy)
 		if next.x < 0 {
 			next.x = 0
 		}
@@ -354,8 +427,8 @@ func (c *workspaceDesigner) pointerMove(x, y graphics.Scalar) {
 			next.y = c.design.height - next.height
 		}
 	} else {
-		next.width += dx
-		next.height += dy
+		next.width = designerSnap(next.width + dx)
+		next.height = designerSnap(next.height + dy)
 		if next.width < 16 {
 			next.width = 16
 		}
@@ -399,6 +472,11 @@ func (c *workspaceDesigner) paint(surface *graphics.Surface) {
 	toolbarBottom := headerBottom + workspaceDesignerToolbarHeight
 	surface.FillRect(graphics.R(bounds.MinX, toolbarBottom-1, bounds.Width(), 1), workspaceBorder)
 	drawDesignerToolbar(surface, c.font, bounds.MinX, headerBottom, bounds.Width())
+	if c.selected >= 0 && bounds.Width() >= 780 {
+		deleteBounds := graphics.R(bounds.MaxX-72, headerBottom+6, 62, 27)
+		surface.FillRect(deleteBounds, graphics.RGBA(255, 241, 239, 255))
+		drawWorkspaceText(surface, c.font, deleteBounds.MinX+11, deleteBounds.MinY+18, "DELETE", graphics.RGBA(176, 55, 48, 255))
+	}
 	statusY := bounds.MaxY - workspaceStatusHeight
 	canvas := graphics.R(bounds.MinX, toolbarBottom, bounds.Width(), statusY-toolbarBottom)
 	surface.FillRect(canvas, workspaceCanvas)
@@ -550,6 +628,13 @@ func designerNear(a, b, distance graphics.Scalar) bool {
 	return a >= b-distance && a <= b+distance
 }
 
+func designerSnap(value int) int {
+	if value <= 0 {
+		return 0
+	}
+	return (value + designerGridSize/2) / designerGridSize * designerGridSize
+}
+
 func workspacePointInRect(x, y graphics.Scalar, bounds graphics.Rect) bool {
 	return x >= bounds.MinX && x < bounds.MaxX && y >= bounds.MinY && y < bounds.MaxY
 }
@@ -599,7 +684,7 @@ type workspaceInspector struct {
 	editBuffer  string
 	selectValue bool
 	Changed     func()
-	CreateEvent func(handler string)
+	CreateEvent func(handler string, paint bool)
 }
 
 func newWorkspaceInspector(font *graphics.Font) *workspaceInspector {
@@ -659,8 +744,12 @@ func (c *workspaceInspector) pointerDown(x, y graphics.Scalar) {
 	c.active = properties[row]
 	c.editBuffer = c.propertyValue(c.active)
 	c.selectValue = true
-	if c.active == "Click" && c.editBuffer == "" && c.selected >= 0 {
-		c.editBuffer = c.design.controls[c.selected].name + "Click"
+	if (c.active == "Click" || c.active == "Paint") && c.editBuffer == "" {
+		base := "mainForm"
+		if c.selected >= 0 {
+			base = c.design.controls[c.selected].name
+		}
+		c.editBuffer = base + c.active
 		c.selectValue = false
 		c.commitEdit()
 	} else if c.active == "Checked" && c.selected >= 0 {
@@ -716,9 +805,15 @@ func (c *workspaceInspector) commitEdit() {
 	}
 	changed := false
 	createdEvent := ""
+	createdPaintEvent := false
 	if c.selected < 0 {
 		value, ok := designerParseInt(c.editBuffer)
-		if ok && value >= 100 {
+		if c.active == "Paint" && (c.editBuffer == "" || designerIdentifier(c.editBuffer)) && c.design.paintHandler != c.editBuffer {
+			c.design.paintHandler = c.editBuffer
+			createdEvent = c.editBuffer
+			createdPaintEvent = true
+			changed = true
+		} else if ok && value >= 100 {
 			if c.active == "Width" && c.design.width != value {
 				c.design.width = value
 				changed = true
@@ -738,6 +833,11 @@ func (c *workspaceInspector) commitEdit() {
 		} else if c.active == "Click" && (c.editBuffer == "" || designerIdentifier(c.editBuffer)) && control.clickHandler != c.editBuffer {
 			control.clickHandler = c.editBuffer
 			createdEvent = c.editBuffer
+			changed = true
+		} else if c.active == "Paint" && (c.editBuffer == "" || designerIdentifier(c.editBuffer)) && control.paintHandler != c.editBuffer {
+			control.paintHandler = c.editBuffer
+			createdEvent = c.editBuffer
+			createdPaintEvent = true
 			changed = true
 		} else if c.active == "Checked" && (c.editBuffer == "true" || c.editBuffer == "false") {
 			checked := c.editBuffer == "true"
@@ -768,7 +868,7 @@ func (c *workspaceInspector) commitEdit() {
 		c.Changed()
 	}
 	if createdEvent != "" && c.CreateEvent != nil {
-		c.CreateEvent(createdEvent)
+		c.CreateEvent(createdEvent, createdPaintEvent)
 	}
 }
 
@@ -783,7 +883,7 @@ func (c *workspaceInspector) nameInUse(name string) bool {
 
 func (c *workspaceInspector) propertyNames() []string {
 	if c.design == nil || c.selected < 0 || c.selected >= len(c.design.controls) {
-		return []string{"Width", "Height"}
+		return []string{"Width", "Height", "Paint"}
 	}
 	control := c.design.controls[c.selected]
 	properties := []string{"Name"}
@@ -797,6 +897,7 @@ func (c *workspaceInspector) propertyNames() []string {
 	if control.kind == designerButton {
 		properties = append(properties, "Click")
 	}
+	properties = append(properties, "Paint")
 	return properties
 }
 
@@ -808,7 +909,10 @@ func (c *workspaceInspector) propertyValue(name string) string {
 		if name == "Width" {
 			return workspaceDecimal(c.design.width)
 		}
-		return workspaceDecimal(c.design.height)
+		if name == "Height" {
+			return workspaceDecimal(c.design.height)
+		}
+		return c.design.paintHandler
 	}
 	control := c.design.controls[c.selected]
 	if name == "Name" {
@@ -835,7 +939,10 @@ func (c *workspaceInspector) propertyValue(name string) string {
 		}
 		return "false"
 	}
-	return control.clickHandler
+	if name == "Click" {
+		return control.clickHandler
+	}
+	return control.paintHandler
 }
 
 func (c *workspaceInspector) paint(surface *graphics.Surface) {
@@ -871,9 +978,6 @@ func (c *workspaceInspector) drawProperties(surface *graphics.Surface, bounds gr
 			surface.StrokeRect(graphics.R(fieldX, y, bounds.MaxX-fieldX-14, 27), 2, workspaceBlue)
 		}
 		y += 40
-	}
-	if c.design != nil && c.selected >= 0 && c.selected < len(c.design.controls) && c.design.controls[c.selected].kind == designerButton && c.design.controls[c.selected].clickHandler == "" {
-		drawWorkspaceText(surface, c.font, bounds.MinX+78, y-13, "Click to create handler", workspaceBlue)
 	}
 	surface.PopClip()
 }

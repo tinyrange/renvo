@@ -78,6 +78,19 @@ func TestPaintClipsControlsToInvalidRegions(t *testing.T) {
 	}
 }
 
+func TestFormPaintBackgroundOverridesDefaultDrawing(t *testing.T) {
+	var form Form
+	form.Initialize(80, 50)
+	painted := 0
+	form.PaintBackground = func(surface *graphics.Surface) {
+		painted++
+		surface.FillRect(graphics.R(0, 0, 80, 50), graphics.RGBA(12, 34, 56, 255))
+	}
+	if !form.Paint(graphics.NewSurface(80, 50)) || painted != 1 {
+		t.Fatalf("custom background paint count = %d", painted)
+	}
+}
+
 func TestGeneratedStyleEventWiringDispatchesToFocusedControl(t *testing.T) {
 	var form Form
 	form.Initialize(80, 40)

@@ -11,21 +11,23 @@ import (
 // and property assignment; this file contains application state and callbacks.
 type MainForm struct {
 	forms.Form
-	appBar        *workspaceAppBar
-	explorerFrame *workspaceExplorerFrame
-	editorFrame   *workspaceEditorFrame
-	designer      *workspaceDesigner
-	inspector     *workspaceInspector
-	output        *workspaceOutput
-	explorer      *ide.ExplorerControl
-	editor        *ide.EditorControl
-	currentPath   string
-	root          string
-	env           []string
-	design        formDesign
-	designerView  bool
-	lastBuildOK   bool
-	projectOutput string
+	appBar         *workspaceAppBar
+	targetMenu     *workspaceTargetMenu
+	explorerFrame  *workspaceExplorerFrame
+	editorFrame    *workspaceEditorFrame
+	designer       *workspaceDesigner
+	inspector      *workspaceInspector
+	output         *workspaceOutput
+	explorer       *ide.ExplorerControl
+	editor         *ide.EditorControl
+	currentPath    string
+	root           string
+	env            []string
+	design         formDesign
+	designerView   bool
+	lastBuildOK    bool
+	projectOutput  string
+	selectedTarget string
 }
 
 func NewMainForm(root string) *MainForm {
@@ -33,7 +35,11 @@ func NewMainForm(root string) *MainForm {
 }
 
 func NewMainFormWithEnv(root string, env []string) *MainForm {
-	form := &MainForm{root: root, projectOutput: workspaceJoinPath(root, projectOutputFile), design: defaultFormDesign()}
+	target := defaultIDETarget()
+	if target == "" {
+		target = workspaceTargets()[0]
+	}
+	form := &MainForm{root: root, selectedTarget: target, projectOutput: workspaceProjectOutput(root, target), design: defaultFormDesign()}
 	form.env = append(form.env, env...)
 	created, message := ensureHelloWorldProject(root)
 	form.initializeComponent(root)
@@ -81,6 +87,7 @@ func (f *MainForm) formResize() {
 		layout.editor = rect(documentX, int(layout.editor.MinY), width-documentX, int(layout.editor.Height()))
 	}
 	f.appBar.SetBounds(rect(0, 0, width, workspaceAppBarHeight))
+	f.targetMenu.SetBounds(rect(170, 39, 184, len(workspaceTargets())*27+10))
 	f.explorerFrame.SetBounds(layout.explorerFrame)
 	f.editorFrame.SetBounds(layout.editorFrame)
 	f.designer.SetBounds(layout.designer)
@@ -172,14 +179,14 @@ func (f *MainForm) addDesignerControl(kind string) {
 		height = 140
 	}
 	name := f.nextDesignerName(base)
-	offset := len(f.design.controls) * 12
-	x := 24 + offset
-	y := 24 + offset
+	offset := len(f.design.controls) * designerGridSize
+	x := designerSnap(20 + offset)
+	y := designerSnap(20 + offset)
 	if x+width > f.design.width {
-		x = 24
+		x = 20
 	}
 	if y+height > f.design.height {
-		y = 24
+		y = 20
 	}
 	control := designerControl{kind: kind, name: name, text: text, x: x, y: y, width: width, height: height}
 	index := len(f.design.controls)
@@ -193,6 +200,25 @@ func (f *MainForm) addDesignerControl(kind string) {
 	}
 	f.designer.SetSelection(index)
 	f.inspector.SetSelection(index)
+	f.designer.Invalidate()
+	f.inspector.Invalidate()
+	f.persistDesigner()
+}
+
+func (f *MainForm) deleteDesignerControl(index int) {
+	if index < 0 || index >= len(f.design.controls) {
+		return
+	}
+	copy(f.design.controls[index:], f.design.controls[index+1:])
+	f.design.controls = f.design.controls[:len(f.design.controls)-1]
+	next := index
+	if next >= len(f.design.controls) {
+		next = len(f.design.controls) - 1
+	}
+	f.designer.selected = -1
+	f.inspector.selected = -1
+	f.designer.SetSelection(next)
+	f.inspector.SetSelection(next)
 	f.designer.Invalidate()
 	f.inspector.Invalidate()
 	f.persistDesigner()
@@ -239,7 +265,7 @@ func (f *MainForm) persistDesigner() {
 	}
 }
 
-func (f *MainForm) createDesignerEvent(handler string) {
+func (f *MainForm) createDesignerEvent(handler string, paint bool) {
 	if handler == "" {
 		return
 	}
@@ -250,8 +276,14 @@ func (f *MainForm) createDesignerEvent(handler string) {
 		return
 	}
 	signature := "func (f *MainForm) " + handler + "()"
+	if paint {
+		signature = "func (f *MainForm) " + handler + "(surface *graphics.Surface)"
+	}
 	if workspaceContains(string(data), signature) {
 		return
+	}
+	if paint {
+		data = ensureUserGraphicsImport(data)
 	}
 	if len(data) > 0 && data[len(data)-1] != '\n' {
 		data = append(data, '\n')
@@ -269,6 +301,29 @@ func (f *MainForm) createDesignerEvent(handler string) {
 	}
 }
 
+func ensureUserGraphicsImport(data []byte) []byte {
+	const importPath = `"j5.nz/rtg/rtg/std/graphics"`
+	if workspaceContains(string(data), importPath) {
+		return data
+	}
+	const packageLine = "package main\n"
+	text := string(data)
+	for i := 0; i+len(packageLine) <= len(text); i++ {
+		if text[i:i+len(packageLine)] != packageLine {
+			continue
+		}
+		out := make([]byte, 0, len(data)+len(importPath)+10)
+		out = append(out, data[:i+len(packageLine)]...)
+		out = append(out, '\n')
+		out = append(out, "import "...)
+		out = append(out, importPath...)
+		out = append(out, "\n"...)
+		out = append(out, data[i+len(packageLine):]...)
+		return out
+	}
+	return data
+}
+
 func workspaceContains(value, fragment string) bool {
 	if fragment == "" {
 		return true
@@ -284,7 +339,7 @@ func workspaceContains(value, fragment string) bool {
 func (f *MainForm) buildProject() {
 	f.saveCurrentFile()
 	f.output.SetMessage("Building the project…", true)
-	result := compileIDEProject(f.root, f.projectOutput, f.env)
+	result := compileIDEProject(f.root, f.projectOutput, f.selectedTarget, f.env)
 	f.lastBuildOK = result.ok
 	f.output.SetMessage(result.message, result.ok)
 }
@@ -296,8 +351,45 @@ func (f *MainForm) runProject() {
 	if !f.lastBuildOK {
 		return
 	}
+	if f.selectedTarget != defaultIDETarget() {
+		f.output.SetMessage("Build succeeded for "+f.selectedTarget+". Run is available only for "+defaultIDETarget()+" on this host.", true)
+		return
+	}
 	result := launchIDEProject(f.projectOutput, f.root)
 	f.output.SetMessage(result.message, result.ok)
+}
+
+func (f *MainForm) toggleTargetMenu() {
+	f.targetMenu.SetVisible(!f.targetMenu.Visible())
+}
+
+func (f *MainForm) selectBuildTarget(target string) {
+	if target == "" {
+		return
+	}
+	f.targetMenu.SetVisible(false)
+	if target == f.selectedTarget {
+		return
+	}
+	f.selectedTarget = target
+	f.projectOutput = workspaceProjectOutput(f.root, target)
+	f.lastBuildOK = false
+	f.appBar.SetTarget(target)
+	f.output.SetMessage("Build target: "+target, true)
+}
+
+func workspaceTargets() []string {
+	return []string{"darwin/arm64", "windows/amd64", "windows/386", "windows/arm64"}
+}
+
+func workspaceProjectOutput(root, target string) string {
+	name := projectOutputFile
+	if workspaceHasPrefix(target, "windows/") {
+		name += ".exe"
+	} else if target == "wasi/wasm32" {
+		name += ".wasm"
+	}
+	return workspaceJoinPath(root, name)
 }
 
 // Dispatch keeps the working editor model and the surrounding status chrome

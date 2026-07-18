@@ -13,6 +13,10 @@ func (f *MainForm) initializeComponent(root string) {
 	codeFont := ide.NewUIFont()
 
 	f.appBar = newWorkspaceAppBar(uiFont)
+	f.appBar.SetTarget(f.selectedTarget)
+	f.appBar.OpenTargets = f.toggleTargetMenu
+	f.targetMenu = newWorkspaceTargetMenu(uiFont, workspaceTargets())
+	f.targetMenu.Select = f.selectBuildTarget
 	f.explorerFrame = newWorkspaceExplorerFrame(uiFont)
 	f.editorFrame = newWorkspaceEditorFrame(uiFont)
 	f.designer = newWorkspaceDesigner(uiFont)
@@ -26,6 +30,7 @@ func (f *MainForm) initializeComponent(root string) {
 	f.designer.Changed = f.designerChanged
 	f.designer.SelectionChanged = f.designerSelectionChanged
 	f.designer.AddControl = f.addDesignerControl
+	f.designer.DeleteSelection = f.deleteDesignerControl
 	f.inspector.SetDesign(&f.design)
 	f.inspector.Changed = f.designerChanged
 	f.inspector.CreateEvent = f.createDesignerEvent
@@ -37,6 +42,7 @@ func (f *MainForm) initializeComponent(root string) {
 	f.editor = ide.NewEditorControl(ide.NewDocument(nil))
 	f.editor.SetFont(codeFont)
 	f.editor.Save = f.saveCurrentFile
+	f.editor.Complete = f.completeEditor
 
 	f.Resize = f.formResize
 	f.Add(&f.appBar.Control)
@@ -47,8 +53,10 @@ func (f *MainForm) initializeComponent(root string) {
 	f.Add(&f.output.Control)
 	f.Add(&f.explorer.Control)
 	f.Add(&f.editor.Control)
+	f.Add(&f.targetMenu.Control)
 	f.designer.SetVisible(false)
 	f.inspector.SetVisible(false)
+	f.targetMenu.SetVisible(false)
 	f.formResize()
 }
 

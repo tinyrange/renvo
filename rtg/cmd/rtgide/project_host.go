@@ -10,14 +10,13 @@ import (
 	"j5.nz/rtg/rtg/internal/driver"
 )
 
-func compileIDEProject(root, output string, env []string) projectActionResult {
+func compileIDEProject(root, output, target string, env []string) projectActionResult {
 	backend, ok := driver.CommandBackendFromEnv(env)
 	if !ok {
 		return projectActionResult{message: "Build failed: set RTG_BACKEND to a compiler backend.", ok: false}
 	}
-	target := hostIDETarget()
 	if target == "" {
-		return projectActionResult{message: "Build failed: this host is not an RTG target yet.", ok: false}
+		return projectActionResult{message: "Build failed: select an RTG target.", ok: false}
 	}
 	args := []string{"-t", target, "-s", "-o", output, "."}
 	compiled := driver.CompileFromFSWithModuleCache(args, root, driver.StdRootFromEnv(env), driver.EnvValue(env, driver.ModuleCacheEnv), driver.OSFS{}, backend)
@@ -33,6 +32,8 @@ func compileIDEProject(root, output string, env []string) projectActionResult {
 	}
 	return projectActionResult{message: "Build succeeded: " + output, ok: true}
 }
+
+func defaultIDETarget() string { return hostIDETarget() }
 
 func launchIDEProject(output, root string) projectActionResult {
 	command := exec.Command(output)

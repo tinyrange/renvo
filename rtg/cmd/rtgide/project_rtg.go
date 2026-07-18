@@ -8,10 +8,9 @@ import (
 	"j5.nz/rtg/rtg/std/process"
 )
 
-func compileIDEProject(root, output string, env []string) projectActionResult {
-	target := currentIDETarget()
+func compileIDEProject(root, output, target string, env []string) projectActionResult {
 	if target == "" {
-		return projectActionResult{message: "Build failed: this host is not an RTG target yet.", ok: false}
+		return projectActionResult{message: "Build failed: select an RTG target.", ok: false}
 	}
 	args := []string{"rtg", "-t", target, "-s", "-o", output, "."}
 	buildEnv := projectEnvironment(env, root)
@@ -25,6 +24,8 @@ func compileIDEProject(root, output string, env []string) projectActionResult {
 	file.Close()
 	return projectActionResult{message: "Build succeeded: " + output, ok: true}
 }
+
+func defaultIDETarget() string { return currentIDETarget() }
 
 func launchIDEProject(output, root string) projectActionResult {
 	if !process.Start(output, root) {
@@ -42,16 +43,4 @@ func projectEnvironment(env []string, root string) []string {
 	}
 	out = append(out, "PWD="+root)
 	return out
-}
-
-func workspaceHasPrefix(value, prefix string) bool {
-	if len(value) < len(prefix) {
-		return false
-	}
-	for i := 0; i < len(prefix); i++ {
-		if value[i] != prefix[i] {
-			return false
-		}
-	}
-	return true
 }

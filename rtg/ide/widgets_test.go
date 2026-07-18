@@ -82,3 +82,26 @@ func TestEditorControlNewlineDamagesOnlyFollowingEditorArea(t *testing.T) {
 		t.Fatalf("newline damage = %#v", invalid[0])
 	}
 }
+
+func TestEditorTabCompletionSelectsAndReplacesPrefix(t *testing.T) {
+	document := NewDocument([]byte("f.SetT"))
+	document.MoveDocumentEnd(false)
+	control := NewEditorControl(document)
+	control.SetBounds(graphics.R(0, 0, 500, 200))
+	control.Complete = func(source []byte, caret int) []Completion {
+		return []Completion{{Text: "SetText", Detail: "method"}, {Text: "SetTitle", Detail: "method"}}
+	}
+	var form forms.Form
+	form.Initialize(500, 200)
+	form.Add(&control.Control)
+	control.Focus()
+	control.keyDown(graphics.Event{Key: graphics.KeyTab})
+	if len(control.completions) != 2 {
+		t.Fatalf("completion popup = %#v", control.completions)
+	}
+	control.keyDown(graphics.Event{Key: graphics.KeyDown})
+	control.keyDown(graphics.Event{Key: graphics.KeyTab})
+	if document.Text() != "f.SetTitle" {
+		t.Fatalf("completed document = %q", document.Text())
+	}
+}

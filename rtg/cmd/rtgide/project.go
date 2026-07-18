@@ -10,9 +10,10 @@ const projectGeneratedFormFile = "main_form_generated.go"
 const projectOutputFile = "hello-app"
 
 type formDesign struct {
-	width    int
-	height   int
-	controls []designerControl
+	width        int
+	height       int
+	paintHandler string
+	controls     []designerControl
 }
 
 type designerControl struct {
@@ -25,6 +26,7 @@ type designerControl struct {
 	height       int
 	checked      bool
 	clickHandler string
+	paintHandler string
 }
 
 const designerLabel = "label"
@@ -39,6 +41,18 @@ const designerPanel = "panel"
 type projectActionResult struct {
 	message string
 	ok      bool
+}
+
+func workspaceHasPrefix(value, prefix string) bool {
+	if len(value) < len(prefix) {
+		return false
+	}
+	for i := 0; i < len(prefix); i++ {
+		if value[i] != prefix[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func defaultFormDesign() formDesign {
@@ -137,6 +151,11 @@ func generatedFormSource(design formDesign) []byte {
 	out = append(out, workspaceDecimal(design.height)...)
 	out = append(out, ")\n"...)
 	out = append(out, "\tf.Form.SetBackground(graphics.RGBA(250, 251, 253, 255))\n\tf.uiFont = gofont.New(15)\n\n"...)
+	if design.paintHandler != "" {
+		out = append(out, "\tf.Form.PaintBackground = f."...)
+		out = append(out, design.paintHandler...)
+		out = append(out, "\n\n"...)
+	}
 	for i := 0; i < len(design.controls); i++ {
 		control := design.controls[i]
 		out = append(out, "\tf."...)
@@ -188,6 +207,13 @@ func generatedFormSource(design formDesign) []byte {
 			out = append(out, control.clickHandler...)
 			out = append(out, '\n')
 		}
+		if control.paintHandler != "" {
+			out = append(out, "\tf."...)
+			out = append(out, control.name...)
+			out = append(out, ".Paint = f."...)
+			out = append(out, control.paintHandler...)
+			out = append(out, '\n')
+		}
 		out = append(out, '\n')
 	}
 	for i := 0; i < len(design.controls); i++ {
@@ -217,6 +243,10 @@ func parseFormDesign(source []byte) (formDesign, string) {
 			design.height = values[1]
 			continue
 		}
+		if designerHasPrefix(line, "f.Form.PaintBackground = f.") {
+			design.paintHandler = line[len("f.Form.PaintBackground = f."):]
+			continue
+		}
 		name, kind := designerConstructor(line)
 		if name != "" {
 			design.controls = append(design.controls, designerControl{kind: kind, name: name, width: 80, height: 28})
@@ -242,6 +272,8 @@ func parseFormDesign(source []byte) (formDesign, string) {
 				control.text = value
 			} else if designerHasPrefix(line, prefix+".Click = f.") {
 				control.clickHandler = line[len(prefix+".Click = f."):]
+			} else if designerHasPrefix(line, prefix+".Paint = f.") {
+				control.paintHandler = line[len(prefix+".Paint = f."):]
 			} else if line == prefix+".SetChecked(true)" {
 				control.checked = true
 			} else if line == prefix+".SetChecked(false)" {

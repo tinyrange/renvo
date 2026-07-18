@@ -18,7 +18,7 @@ func TestMainFormGeneratedLayoutAndOpenSaveCallbacks(t *testing.T) {
 	}
 	form := NewMainForm(root)
 	controls := form.Controls()
-	if len(controls) != 8 || controls[0] != &form.appBar.Control || controls[1] != &form.explorerFrame.Control || controls[2] != &form.editorFrame.Control || controls[3] != &form.designer.Control || controls[4] != &form.inspector.Control || controls[5] != &form.output.Control || controls[6] != &form.explorer.Control || controls[7] != &form.editor.Control {
+	if len(controls) != 9 || controls[0] != &form.appBar.Control || controls[1] != &form.explorerFrame.Control || controls[2] != &form.editorFrame.Control || controls[3] != &form.designer.Control || controls[4] != &form.inspector.Control || controls[5] != &form.output.Control || controls[6] != &form.explorer.Control || controls[7] != &form.editor.Control || controls[8] != &form.targetMenu.Control {
 		t.Fatalf("generated controls = %#v", controls)
 	}
 	if form.explorer.Font == nil || form.editor.Font == nil || form.explorer.Font == form.editor.Font {
@@ -142,6 +142,9 @@ func TestDesignerAddsMovesEditsAndWiresAControlThroughGoSource(t *testing.T) {
 	if form.design.controls[selected].x <= oldX {
 		t.Fatalf("drag did not move control: %#v", form.design.controls[selected])
 	}
+	if form.design.controls[selected].x%designerGridSize != 0 || form.design.controls[selected].y%designerGridSize != 0 {
+		t.Fatalf("drag did not snap to grid: %#v", form.design.controls[selected])
+	}
 	layout = calculateDesignerPreview(canvas, &form.design)
 	controlBounds = designerControlBounds(layout, form.design.controls[selected])
 	resizeX := controlBounds.MaxX
@@ -152,6 +155,9 @@ func TestDesignerAddsMovesEditsAndWiresAControlThroughGoSource(t *testing.T) {
 	form.Dispatch(graphics.Event{Type: graphics.EventPointerUp, X: resizeX + 20, Y: resizeY + 8, Button: 1})
 	if form.design.controls[selected].width <= oldWidth {
 		t.Fatalf("resize handle did not resize control: %#v", form.design.controls[selected])
+	}
+	if form.design.controls[selected].width%designerGridSize != 0 || form.design.controls[selected].height%designerGridSize != 0 {
+		t.Fatalf("resize did not snap to grid: %#v", form.design.controls[selected])
 	}
 
 	// Replace Text in the property grid, then create the empty Click event.
@@ -208,6 +214,45 @@ func TestDesignerAddsMovesEditsAndWiresAControlThroughGoSource(t *testing.T) {
 	}
 	surface := graphics.NewSurface(1440, 520)
 	writeUIAutomationScreenshot(t, form, surface, "06_designer_controls.ppm")
+}
+
+func TestDesignerDeletesSelectionAndTargetMenuChangesCrossCompileOutput(t *testing.T) {
+	root := t.TempDir()
+	form := NewMainForm(root)
+	form.showDesigner()
+	form.designer.SetSelection(1)
+	form.inspector.SetSelection(1)
+	form.designer.Focus()
+	form.Dispatch(graphics.Event{Type: graphics.EventKeyDown, Key: graphics.KeyDelete})
+	if len(form.design.controls) != 1 || form.design.controls[0].name != "messageLabel" {
+		t.Fatalf("delete left controls %#v", form.design.controls)
+	}
+	generated, err := os.ReadFile(filepath.Join(root, projectGeneratedFormFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(generated), "helloButton") {
+		t.Fatalf("deleted control remained in generated source:\n%s", generated)
+	}
+
+	form.selectBuildTarget("windows/386")
+	if form.selectedTarget != "windows/386" || !strings.HasSuffix(form.projectOutput, ".exe") || form.appBar.target != "windows/386" {
+		t.Fatalf("cross compile selection = %q, %q, %q", form.selectedTarget, form.projectOutput, form.appBar.target)
+	}
+}
+
+func TestDesignerCreatesTypedPaintHandlerInUserCode(t *testing.T) {
+	root := t.TempDir()
+	form := NewMainForm(root)
+	form.createDesignerEvent("mainFormPaint", true)
+	user, err := os.ReadFile(filepath.Join(root, projectUserFormFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(user)
+	if !strings.Contains(text, `import "j5.nz/rtg/rtg/std/graphics"`) || !strings.Contains(text, "func (f *MainForm) mainFormPaint(surface *graphics.Surface)") {
+		t.Fatalf("paint handler source =\n%s", text)
+	}
 }
 
 func TestEditorNavigationDoesNotDamageMockWorkspacePanes(t *testing.T) {

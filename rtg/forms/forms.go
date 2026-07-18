@@ -149,7 +149,8 @@ type Form struct {
 	focused    *Control
 	pressed    *Control
 
-	Resize EventHandler
+	Resize          EventHandler
+	PaintBackground PaintHandler
 }
 
 func (f *Form) Initialize(width, height int) {
@@ -294,7 +295,11 @@ func (f *Form) Paint(surface *graphics.Surface) bool {
 		dirty := invalid[i]
 		surface.BeginDamage(dirty)
 		surface.PushClipRect(dirty)
-		surface.FillRect(dirty, f.background)
+		if f.PaintBackground != nil {
+			f.PaintBackground(surface)
+		} else {
+			surface.FillRect(dirty, f.background)
+		}
 		for j := 0; j < len(f.controls); j++ {
 			control := f.controls[j]
 			if control.visible && control.Paint != nil && rectIntersects(control.bounds, dirty) {
