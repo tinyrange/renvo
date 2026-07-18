@@ -4018,9 +4018,6 @@ func rtgMetaAppendGlobal(m *rtgMeta, sym rtgSymbolInfo) {
 }
 
 func rtgFindMetaGlobalIndex(m *rtgMeta, nameStart int, nameEnd int, kind int) int {
-	if len(m.globalBuckets) == 0 {
-		return -1
-	}
 	hash := rtgHashRange(m.prog.src, nameStart, nameEnd)
 	i := m.globalBuckets[hash%len(m.globalBuckets)]
 	for i >= 0 {
@@ -4048,9 +4045,6 @@ func rtgBuildFuncLookup(m *rtgMeta) {
 }
 
 func rtgFindMetaFunction(m *rtgMeta, nameStart int, nameEnd int) int {
-	if len(m.funcBuckets) == 0 {
-		return -1
-	}
 	hash := rtgHashRange(m.prog.src, nameStart, nameEnd)
 	i := m.funcBuckets[hash%len(m.funcBuckets)]
 	for i >= 0 {
@@ -4577,6 +4571,9 @@ func rtgParseFuncInfo(m *rtgMeta, fnIndex int) {
 		linkMethodEnd = linkStatic.methodEnd
 	}
 	m.funcs = append(m.funcs, rtgFuncInfo{declIndex: fnIndex, nameStart: nameStart, nameEnd: nameEnd, firstParam: firstParam, paramCount: paramCount, firstResult: firstResult, resultCount: resultCount, resultType: resultType, receiverType: receiverType, bodyStart: fn.bodyStart + 1, bodyEnd: fn.bodyEnd, linkStatic: linkOK, linkDLLStart: linkDLLStart, linkDLLEnd: linkDLLEnd, linkMethodStart: linkMethodStart, linkMethodEnd: linkMethodEnd})
+	if receiverType != 0 && rtgResolveType(m, receiverType).kind != rtgTypePointer {
+		rtgAddPointerType(m, receiverType, rtgPointerSpaceData)
+	}
 }
 
 func rtgParseFuncLiterals(m *rtgMeta, p *rtgProgram) {
@@ -5235,7 +5232,7 @@ func rtgAddType(m *rtgMeta, kind int, elem int, first int, count int, size int, 
 }
 
 func rtgIndexNamedType(m *rtgMeta, index int) {
-	if index < 0 || index >= len(m.types) || len(m.typeBuckets) == 0 {
+	if index >= len(m.types) {
 		return
 	}
 	t := &m.types[index]
@@ -5267,9 +5264,6 @@ func rtgRebuildNamedTypeIndex(m *rtgMeta) {
 
 func rtgFindNamedType(m *rtgMeta, nameStart int, nameEnd int) int {
 	buckets := m.typeBuckets
-	if len(buckets) == 0 {
-		return -1
-	}
 	bucket := rtgHashRange(m.prog.src, nameStart, nameEnd) % len(buckets)
 	for probes := 0; probes < len(buckets); probes++ {
 		entry := buckets[bucket]
@@ -5859,21 +5853,23 @@ func rtgEmitDeferredReturn(g *rtgLinearGen, stmt *rtgStmt) bool {
 				}
 			}
 		} else {
-			ep := rtgNewExprParse()
-			root := rtgParseExpressionRoot(ep, g.prog, stmt.exprStart, stmt.exprEnd)
-			if root < 0 {
-				return false
-			}
 			if rtgTypeIsTuple(g.meta, fn.resultType) {
 				if !rtgEmitTupleReturn(g, stmt.exprStart, stmt.exprEnd) {
 					return false
 				}
-			} else if rtgTypeUsesHiddenResult(g.meta, fn.resultType) {
-				if !rtgEmitStructReturnExpr(g, ep, root) {
+			} else {
+				ep := rtgNewExprParse()
+				root := rtgParseExpressionRoot(ep, g.prog, stmt.exprStart, stmt.exprEnd)
+				if root < 0 {
 					return false
 				}
-			} else if g.deferResultOffset <= 0 || !rtgEmitExprToLocal(g, ep, root, g.deferResultOffset) {
-				return false
+				if rtgTypeUsesHiddenResult(g.meta, fn.resultType) {
+					if !rtgEmitStructReturnExpr(g, ep, root) {
+						return false
+					}
+				} else if g.deferResultOffset <= 0 || !rtgEmitExprToLocal(g, ep, root, g.deferResultOffset) {
+					return false
+				}
 			}
 		}
 	}
@@ -11603,9 +11599,6 @@ func rtgMethodSelectorInfo(g *rtgLinearGen, ep *rtgExprParse, idx int) (int, boo
 }
 
 func rtgFindMethodByTypeAndName(g *rtgLinearGen, typ int, nameStart int, nameEnd int) int {
-	if len(g.meta.funcBuckets) == 0 {
-		return -1
-	}
 	hash := rtgHashRange(g.prog.src, nameStart, nameEnd)
 	i := g.meta.funcBuckets[hash%len(g.meta.funcBuckets)]
 	for i >= 0 {
@@ -15065,14 +15058,8 @@ func rtgFuncInfoFromCall(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 	} else if e.kind != rtgExprIdent {
 		return -1
 	}
-	if len(g.meta.funcBuckets) == 0 {
-		return -1
-	}
 	hash := rtgHashRange(g.prog.src, nameStart, nameEnd)
 	i := g.meta.funcBuckets[hash%len(g.meta.funcBuckets)]
-	interfaceCandidate := -1
-	actualResolved := rtgResolveType(g.meta, wantReceiverType)
-	allowInterfaceFallback := wantMethod && actualResolved.kind == rtgTypeNamed && actualResolved.elem == 0
 	for i >= 0 {
 		f := g.meta.funcs[i]
 		isMethod := f.receiverType != 0
@@ -15081,19 +15068,10 @@ func rtgFuncInfoFromCall(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 				e.right = i + 1
 				return i
 			}
-			if allowInterfaceFallback {
-				if interfaceCandidate >= 0 {
-					return -1
-				}
-				interfaceCandidate = i
-			}
 		}
 		i = g.meta.funcNext[i]
 	}
-	if interfaceCandidate >= 0 {
-		e.right = interfaceCandidate + 1
-	}
-	return interfaceCandidate
+	return -1
 }
 
 func rtgIsInterfaceMethodCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
@@ -15135,9 +15113,6 @@ func rtgInterfaceMethodCallResultType(g *rtgLinearGen, ep *rtgExprParse, idx int
 }
 
 func rtgEmitInterfaceMethodCall(g *rtgLinearGen, ep *rtgExprParse, idx int, resultOffset int, resultType int) bool {
-	if !rtgIsInterfaceMethodCall(g, ep, idx) {
-		return false
-	}
 	call := &ep.exprs[idx]
 	selector := &ep.exprs[call.left]
 	receiverType := rtgInferParsedExprType(g, ep, selector.left)
@@ -15162,12 +15137,9 @@ func rtgEmitInterfaceMethodCall(g *rtgLinearGen, ep *rtgExprParse, idx int, resu
 		if rtgTypeUsesHiddenResult(g.meta, fn.resultType) != usesHiddenResult {
 			continue
 		}
-		receiverSize := rtgTypeSize(g.meta, fn.receiverType)
-		if receiverSize <= 0 {
-			continue
-		}
 		matched = true
 		nextLabel := rtgAsmNewLabel(&g.asm)
+		receiverSize := rtgTypeSize(g.meta, fn.receiverType)
 		rtgEmitInterfaceReceiverMatch(g, receiverOffset, fn.receiverType, nextLabel)
 
 		wordCount := 0
@@ -15209,15 +15181,25 @@ func rtgInterfaceMethodNamed(g *rtgLinearGen, fn *rtgFuncInfo, selector *rtgExpr
 }
 
 func rtgEmitInterfaceReceiverMatch(g *rtgLinearGen, receiverOffset int, receiverType int, nextLabel int) {
-	rtgAsmJcmpStackImm(&g.asm, receiverOffset-rtgBackendValueSlotSize, rtgRuntimeTypeTag(g.meta, receiverType), nextLabel, 0x95)
+	if rtgResolveType(g.meta, receiverType).kind == rtgTypePointer {
+		rtgAsmJcmpStackImm(&g.asm, receiverOffset-rtgBackendValueSlotSize, rtgRuntimeTypeTag(g.meta, receiverType), nextLabel, 0x95)
+		return
+	}
+	pointerType := rtgAddPointerType(g.meta, receiverType, rtgPointerSpaceData)
+	matchedLabel := rtgAsmNewLabel(&g.asm)
+	rtgAsmJcmpStackImm(&g.asm, receiverOffset-rtgBackendValueSlotSize, rtgRuntimeTypeTag(g.meta, receiverType), matchedLabel, 0x94)
+	rtgAsmJcmpStackImm(&g.asm, receiverOffset-rtgBackendValueSlotSize, rtgRuntimeTypeTag(g.meta, pointerType), nextLabel, 0x95)
+	if rtgTypeSize(g.meta, receiverType) <= rtgBackendValueSlotSize {
+		rtgAsmLoadSecondaryStack(&g.asm, receiverOffset)
+		rtgAsmLoadPrimaryMemSecondaryDisp(&g.asm, 0)
+		rtgAsmStorePrimaryStack(&g.asm, receiverOffset)
+	}
+	rtgAsmMarkLabel(&g.asm, matchedLabel)
 }
 
 func rtgMethodReceiverTypeMatches(meta *rtgMeta, actual int, declared int) bool {
 	if actual == declared {
 		return true
-	}
-	if actual == 0 {
-		return false
 	}
 	actual = rtgCanonicalMethodReceiverType(meta, actual)
 	declared = rtgCanonicalMethodReceiverType(meta, declared)

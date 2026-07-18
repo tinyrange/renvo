@@ -62,6 +62,24 @@ stack is LIFO and is also used to stage call words. Backends may implement that
 stack using the hardware stack, Wasm locals plus linear memory, or an
 equivalent private mechanism.
 
+### Interface dispatch
+
+Interface calls evaluate and store the receiver once, then compare its dynamic
+type tag against every compatible method implementation in linked-symbol
+order. Dispatch never selects a concrete type from source spelling or assumes
+that an interface has only one implementation. The selected payload is
+normalized to the declared method receiver before the ordinary RTG call ABI is
+used. In particular, `*T` can invoke methods declared on `T`, as required by
+Go's method sets, while methods declared on `*T` still require a pointer dynamic
+value. Aggregate and multiple results use the same hidden-result contract as a
+direct call.
+
+Pointer variants of value receivers are registered before dispatch code is
+emitted. This keeps runtime tags and candidate tables independent of the order
+in which function bodies happen to mention `&T`. Linked function and type order
+therefore determines metadata reproducibly for host-built and self-hosted
+compilers.
+
 ## Calls and returns
 
 Arguments are flattened left to right into numbered call words. The caller

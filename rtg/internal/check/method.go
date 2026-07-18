@@ -45,6 +45,39 @@ func buildMethodSets(info *PackageInfo, pkg load.Package) {
 	remapTypeMethods(info)
 }
 
+func buildMethodSetsCore(info *PackageInfo, pkg load.Package) {
+	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
+		file := pkg.Files[fileIndex].File
+		for funcIndex := 0; funcIndex < len(file.Funcs); funcIndex++ {
+			fn := file.Funcs[funcIndex]
+			if fn.ReceiverStart < 0 {
+				continue
+			}
+			signature := buildFuncSignature(file, fn)
+			if len(signature.Receiver) == 0 {
+				continue
+			}
+			receiver := receiverBaseName(pkg, fileIndex, signature.Receiver[0])
+			name := tokenString(&file, fn.NameTok)
+			method := MethodInfo{
+				Name:      name,
+				Receiver:  receiver,
+				Pointer:   receiverIsPointer(pkg, fileIndex, signature.Receiver[0]),
+				Type:      LookupType(*info, receiver),
+				Symbol:    LookupPackageSymbol(*info, receiver+"."+name),
+				Body:      -1,
+				File:      fileIndex,
+				Token:     fn.NameTok,
+				Func:      funcIndex,
+				Signature: signature,
+			}
+			info.Methods = append(info.Methods, method)
+		}
+	}
+	sortMethods(info.Methods)
+	remapTypeMethods(info)
+}
+
 func buildMethodInfo(info PackageInfo, pkg load.Package, body FuncBody, bodyIndex int) MethodInfo {
 	name := methodName(body.Name)
 	receiver := ""
