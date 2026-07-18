@@ -363,6 +363,12 @@ func rtgAsmEmit8(a *rtgAsm, v int) {
 	a.code[index] = byte(v)
 }
 
+func rtgAsmEmitText(a *rtgAsm, code string) {
+	for i := 0; i < len(code); i++ {
+		a.code = append(a.code, code[i])
+	}
+}
+
 func rtgAsmEmit2(a *rtgAsm, v0 int, v1 int) {
 	a.code = rtgAppend16(a.code, v0|(v1<<8))
 }
@@ -1558,7 +1564,6 @@ type rtgClosureInfo struct {
 }
 
 type rtgDeferSite struct {
-	tag      int
 	funcType int
 }
 
@@ -5043,9 +5048,13 @@ func rtgParseType(m *rtgMeta, p *rtgProgram, start int, end int) rtgTypeResult {
 }
 
 func rtgFindOrAddFuncTypeFromParams(m *rtgMeta, first int, count int, resultType int) int {
+	variadic := 0
+	if count > 0 && m.params[first+count-1].initStart == 1 {
+		variadic = 1
+	}
 	for i := 0; i < len(m.types); i++ {
 		t := &m.types[i]
-		if t.kind != rtgTypeFunc || t.elem != resultType || t.count != count {
+		if t.kind != rtgTypeFunc || t.elem != resultType || t.count != count || t.resolved != variadic {
 			continue
 		}
 		match := true
@@ -5063,7 +5072,9 @@ func rtgFindOrAddFuncTypeFromParams(m *rtgMeta, first int, count int, resultType
 	for i := 0; i < count; i++ {
 		m.fields = append(m.fields, rtgFieldInfo{typ: m.params[first+i].typ})
 	}
-	return rtgAddType(m, rtgTypeFunc, resultType, firstField, count, rtgBackendValueSlotSize, 0, 0)
+	typ := rtgAddType(m, rtgTypeFunc, resultType, firstField, count, rtgBackendValueSlotSize, 0, 0)
+	m.types[typ].resolved = variadic
+	return typ
 }
 
 func rtgFunctionTypeFromInfo(m *rtgMeta, fnIndex int) int {
@@ -5582,10 +5593,7 @@ func rtgBindFunctionParams(g *rtgLinearGen, fnIndex int) bool {
 		}
 		if paramType.kind == rtgTypeStruct || paramType.kind == rtgTypeArray {
 			size := rtgTypeSize(meta, param.typ)
-			wordSize := rtgBackendValueSlotSize
-			if paramType.kind == rtgTypeArray {
-				wordSize = rtgNativeIntSize
-			}
+			wordSize := rtgCallWordSize(paramType.kind)
 			for at := 0; at < size; at += wordSize {
 				if !rtgStoreIncomingCallWord(g, callWord, offset-at) {
 					return false
@@ -5783,7 +5791,6 @@ func rtgEmitFunctionControlEpilogue(g *rtgLinearGen) bool {
 	doneDefers := rtgAsmNewLabel(a)
 	recordOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
 	tagOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
-	handleOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
 	savedPanicIDOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
 	savedPanicPrevOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
 	rtgAsmMarkLabel(a, loopLabel)
@@ -5799,18 +5806,31 @@ func rtgEmitFunctionControlEpilogue(g *rtgLinearGen) bool {
 		site := g.deferSites[i]
 		nextLabel := rtgAsmNewLabel(a)
 		rtgAsmPushStack(a, tagOffset)
-		rtgAsmPrimaryImm(a, site.tag)
+		rtgAsmPrimaryImm(a, i+1)
 		rtgAsmPopTertiary(a)
 		rtgAsmCmpTertiaryPrimarySet(a, 0x94)
 		rtgAsmJzPrimary(a, nextLabel)
+		handleOffset := rtgAddUnnamedLocal(g, site.funcType)
 		rtgAsmLoadPrimaryStackMemory(a, recordOffset, 2*rtgBackendValueSlotSize)
 		rtgAsmStorePrimaryStack(a, handleOffset)
+		funcType := rtgResolveType(g.meta, site.funcType)
+		argOffsets := make([]int, funcType.count)
+		disp := 3 * rtgBackendValueSlotSize
+		for j := 0; j < funcType.count; j++ {
+			typ := g.meta.fields[funcType.first+j].typ
+			argOffsets[j] = rtgAddUnnamedLocal(g, typ)
+			rtgAsmLoadSecondaryStack(a, recordOffset)
+			rtgAsmAddSecondaryImm(a, disp)
+			size := rtgTypeCopySize(g.meta, typ)
+			rtgEmitCopyMemSecondaryToStack(g, argOffsets[j], size)
+			disp += rtgAlignTo8(size)
+		}
 		rtgAsmCopyBssToStackSlot(a, g.panicIDOff, savedPanicIDOffset)
 		rtgAsmCopyBssToStackSlot(a, g.panicPrevOff, savedPanicPrevOffset)
 		rtgAsmPrimaryImm(a, 0)
 		rtgAsmStorePrimaryBss(a, g.panicRecoveredOff)
 		g.emittingDefers = true
-		if !rtgEmitFunctionValueDispatch(g, site.funcType, handleOffset, nil) {
+		if !rtgEmitFunctionValueDispatch(g, site.funcType, handleOffset, argOffsets) {
 			g.emittingDefers = false
 			return false
 		}
@@ -6649,6 +6669,15 @@ type rtgLinearGen struct {
 }
 
 func rtgAddStringData(g *rtgLinearGen, msg []byte) int {
+	for off := 0; off+len(msg) < len(g.asm.data); off++ {
+		match := g.asm.data[off+len(msg)] == 0
+		for i := 0; match && i < len(msg); i++ {
+			match = g.asm.data[off+i] == msg[i]
+		}
+		if match {
+			return off
+		}
+	}
 	msgOff := len(g.asm.data)
 	for i := 0; i < len(msg); i++ {
 		g.asm.data = append(g.asm.data, msg[i])
@@ -6952,25 +6981,47 @@ func rtgEmitDeferStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 		return false
 	}
 	call := &ep.exprs[rootIndex]
-	if call.kind != rtgExprCall || call.argCount != 0 {
+	if call.kind != rtgExprCall {
 		return false
 	}
-	funcType := rtgFunctionValueCalleeType(g, ep, call.left)
-	if funcType == 0 {
-		funcType = rtgInferParsedExprType(g, ep, call.left)
+	interfaceCall := rtgIsInterfaceMethodCall(g, ep, rootIndex)
+	funcType := 0
+	payloadOffset := 0
+	if interfaceCall {
+		selector := &ep.exprs[call.left]
+		payloadOffset = rtgAddUnnamedLocal(g, rtgTypeInt)
+		funcType = rtgEmitDeferredInterfaceMethodValue(g, ep, selector, call, payloadOffset)
+		if funcType == 0 {
+			return false
+		}
+	} else {
+		funcType = rtgFunctionValueCalleeType(g, ep, call.left)
+		if funcType == 0 {
+			funcType = rtgInferParsedExprType(g, ep, call.left)
+		}
+		payloadOffset = rtgAddUnnamedLocal(g, funcType)
+		if !rtgEmitExprToLocal(g, ep, call.left, payloadOffset) {
+			return false
+		}
 	}
-	if rtgResolveType(g.meta, funcType).kind != rtgTypeFunc {
+	t := rtgResolveType(g.meta, funcType)
+	if t.kind != rtgTypeFunc || !rtgCallMatchesFuncType(t, call) {
 		return false
 	}
-	handleOffset := rtgAddUnnamedLocal(g, funcType)
-	if !rtgEmitExprToLocal(g, ep, call.left, handleOffset) {
+	argOffsets := make([]int, t.count)
+	if !rtgPrepareFunctionValueArgs(g, ep, call, t, argOffsets) {
 		return false
 	}
 	tag := len(g.deferSites) + 1
-	g.deferSites = append(g.deferSites, rtgDeferSite{tag: tag, funcType: funcType})
+	disp := 3 * rtgBackendValueSlotSize
+	for i := 0; i < len(argOffsets); i++ {
+		typ := g.meta.fields[t.first+i].typ
+		disp += rtgAlignTo8(rtgTypeCopySize(g.meta, typ))
+	}
+	g.deferSites = append(g.deferSites, rtgDeferSite{funcType: funcType})
 	sizeOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
 	recordOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
-	rtgAsmStoreStackImm(&g.asm, sizeOffset, 3*rtgBackendValueSlotSize)
+	rtgAsmStoreStackImm(&g.asm, sizeOffset, disp)
 	rtgEmitPersistentAllocToPrimary(g, sizeOffset)
 	rtgAsmStorePrimaryStack(&g.asm, recordOffset)
 	rtgAsmLoadPrimarySecondaryStack(&g.asm, g.deferHeadOffset, recordOffset)
@@ -6978,11 +7029,54 @@ func rtgEmitDeferStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 	rtgAsmPrimaryImm(&g.asm, tag)
 	rtgAsmLoadSecondaryStack(&g.asm, recordOffset)
 	rtgAsmStorePrimaryMemSecondaryDisp(&g.asm, rtgBackendValueSlotSize)
-	rtgAsmLoadPrimarySecondaryStack(&g.asm, handleOffset, recordOffset)
+	rtgAsmLoadPrimarySecondaryStack(&g.asm, payloadOffset, recordOffset)
 	rtgAsmStorePrimaryMemSecondaryDisp(&g.asm, 2*rtgBackendValueSlotSize)
+	disp = 3 * rtgBackendValueSlotSize
+	for i := 0; i < len(argOffsets); i++ {
+		typ := g.meta.fields[t.first+i].typ
+		rtgAsmLoadSecondaryStack(&g.asm, recordOffset)
+		size := rtgTypeCopySize(g.meta, typ)
+		rtgEmitCopyStackToMemSecondary(g, argOffsets[i], disp, size)
+		disp += rtgAlignTo8(size)
+	}
 	rtgAsmLoadPrimaryStack(&g.asm, recordOffset)
 	rtgAsmStorePrimaryStack(&g.asm, g.deferHeadOffset)
 	return true
+}
+
+func rtgEmitDeferredInterfaceMethodValue(g *rtgLinearGen, ep *rtgExprParse, selector *rtgExpr, call *rtgExpr, offset int) int {
+	receiverType := rtgInferParsedExprType(g, ep, selector.left)
+	receiverOffset := rtgAddUnnamedLocal(g, receiverType)
+	if !rtgEmitInterfaceAssignToLocal(g, ep, selector.left, receiverOffset) {
+		return 0
+	}
+	rtgAsmStoreStackImm(&g.asm, offset, 0)
+	doneLabel := rtgAsmNewLabel(&g.asm)
+	funcType := 0
+	for fnIndex := 0; fnIndex < len(g.meta.funcs); fnIndex++ {
+		fn := &g.meta.funcs[fnIndex]
+		if !rtgInterfaceMethodNamed(g, fn, selector) {
+			continue
+		}
+		candidate := rtgFunctionTypeFromInfoStart(g.meta, fnIndex, 1)
+		if !rtgCallMatchesFuncType(rtgResolveType(g.meta, candidate), call) {
+			continue
+		}
+		if funcType == 0 {
+			funcType = candidate
+		} else if !rtgTypesEquivalent(g.meta, funcType, candidate) {
+			return 0
+		}
+		nextLabel := rtgAsmNewLabel(&g.asm)
+		rtgEmitInterfaceReceiverMatch(g, receiverOffset, fn.receiverType, nextLabel)
+		rtgEmitBoundMethodHandle(g, fnIndex, fn.receiverType, receiverOffset, rtgTypeSize(g.meta, fn.receiverType) > rtgBackendValueSlotSize, offset)
+		rtgAsmJmpMarkLabel(&g.asm, doneLabel, nextLabel)
+	}
+	if funcType == 0 {
+		return 0
+	}
+	rtgAsmMarkLabel(&g.asm, doneLabel)
+	return funcType
 }
 
 func rtgNewControlLabel(g *rtgLinearGen, delta int) int {
@@ -11452,7 +11546,7 @@ func rtgTypesEquivalent(meta *rtgMeta, left int, right int) bool {
 		return rtgTypesEquivalent(meta, l.first, r.first) && rtgTypesEquivalent(meta, l.elem, r.elem)
 	}
 	if l.kind == rtgTypeFunc {
-		if l.count != r.count || !rtgTypesEquivalent(meta, l.elem, r.elem) {
+		if l.count != r.count || l.resolved != r.resolved || !rtgTypesEquivalent(meta, l.elem, r.elem) {
 			return false
 		}
 		for i := 0; i < l.count; i++ {
@@ -11500,11 +11594,11 @@ func rtgFunctionValueMode(meta *rtgMeta, fnIndex int, funcType int) int {
 }
 
 func rtgFunctionParamsMatchType(meta *rtgMeta, fn *rtgFuncInfo, t *rtgTypeInfo, first int) bool {
-	if fn.paramCount-first != t.count {
+	if fn.paramCount-first != t.count || t.count > 0 && meta.params[fn.firstParam+fn.paramCount-1].initStart != t.resolved {
 		return false
 	}
-	for i := first; i < fn.paramCount; i++ {
-		if !rtgTypesEquivalent(meta, meta.params[fn.firstParam+i].typ, meta.fields[t.first+i-first].typ) {
+	for i := 0; i < t.count; i++ {
+		if !rtgTypesEquivalent(meta, meta.params[fn.firstParam+first+i].typ, meta.fields[t.first+i].typ) {
 			return false
 		}
 	}
@@ -11515,37 +11609,116 @@ func rtgEmitFunctionValueCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	e := &ep.exprs[idx]
 	funcType := rtgFunctionValueCalleeType(g, ep, e.left)
 	t := rtgResolveType(g.meta, funcType)
-	if t.kind != rtgTypeFunc || e.argCount != t.count {
+	if t.kind != rtgTypeFunc || !rtgCallMatchesFuncType(t, e) {
 		return false
 	}
 	handleOffset := rtgAddUnnamedLocal(g, funcType)
 	if !rtgEmitExprToLocal(g, ep, e.left, handleOffset) {
 		return false
 	}
-	argOffsets := make([]int, e.argCount)
-	for i := 0; i < e.argCount; i++ {
+	argOffsets := make([]int, t.count)
+	if !rtgPrepareFunctionValueArgs(g, ep, e, t, argOffsets) {
+		return false
+	}
+	return rtgEmitFunctionValueDispatch(g, funcType, handleOffset, argOffsets)
+}
+
+func rtgCallMatchesFuncType(t *rtgTypeInfo, e *rtgExpr) bool {
+	if t.resolved == 0 || e.nameStart != 0 {
+		return e.argCount == t.count
+	}
+	return e.argCount >= t.count-1
+}
+
+func rtgPrepareFunctionValueArgs(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, t *rtgTypeInfo, argOffsets []int) bool {
+	fixed := t.count
+	if t.resolved != 0 && e.nameStart == 0 {
+		fixed--
+	}
+	for i := 0; i < fixed; i++ {
 		paramType := g.meta.fields[t.first+i].typ
-		resolved := rtgResolveType(g.meta, paramType)
-		oneWordAggregate := (resolved.kind == rtgTypeStruct || resolved.kind == rtgTypeArray) && rtgTypeSize(g.meta, paramType) <= rtgBackendValueSlotSize
-		if !rtgTypeKindIsScalarValue(resolved.kind) && resolved.kind != rtgTypePointer && resolved.kind != rtgTypeMap && resolved.kind != rtgTypeFunc && !oneWordAggregate {
-			return false
-		}
 		argOffsets[i] = rtgAddUnnamedLocal(g, paramType)
 		if !rtgEmitExprToLocal(g, ep, ep.args[e.firstArg+i], argOffsets[i]) {
 			return false
 		}
 	}
-	return rtgEmitFunctionValueDispatch(g, funcType, handleOffset, argOffsets)
+	if fixed < t.count {
+		paramType := g.meta.fields[t.first+t.count-1].typ
+		argOffsets[t.count-1] = rtgAddUnnamedLocal(g, paramType)
+		if !rtgEmitVariadicArgsToLocal(g, ep, e.firstArg+fixed, e.argCount-fixed, paramType, argOffsets[t.count-1]) {
+			return false
+		}
+	}
+	return true
+}
+
+func rtgEmitVariadicArgsToLocal(g *rtgLinearGen, ep *rtgExprParse, first int, count int, sliceType int, offset int) bool {
+	t := rtgResolveType(g.meta, sliceType)
+	if t.kind != rtgTypeSlice {
+		return false
+	}
+	elemSize := rtgTypeSize(g.meta, t.elem)
+	if elemSize < 1 {
+		return false
+	}
+	addrOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
+	if count == 0 {
+		rtgAsmStoreStackImm(&g.asm, addrOffset, 0)
+	} else {
+		sizeOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
+		rtgAsmStoreStackImm(&g.asm, sizeOffset, count*elemSize)
+		rtgEmitPersistentAllocToPrimary(g, sizeOffset)
+		rtgAsmStorePrimaryStack(&g.asm, addrOffset)
+	}
+	for i := 0; i < count; i++ {
+		tempOffset := rtgAddUnnamedLocal(g, t.elem)
+		if !rtgEmitExprToLocal(g, ep, ep.args[first+i], tempOffset) {
+			return false
+		}
+		rtgAsmLoadSecondaryStack(&g.asm, addrOffset)
+		rtgEmitCopyStackToMemSecondary(g, tempOffset, i*elemSize, elemSize)
+	}
+	rtgAsmPrimaryImm(&g.asm, count)
+	rtgAsmCopyPrimaryToSecondary(&g.asm)
+	rtgAsmCopyPrimaryToTertiary(&g.asm)
+	rtgAsmLoadPrimaryStack(&g.asm, addrOffset)
+	rtgAsmStoreSliceStack(&g.asm, offset)
+	return true
+}
+
+func rtgEmitTypedLocalArgReverse(g *rtgLinearGen, offset int, typ int) int {
+	t := rtgResolveType(g.meta, typ)
+	size := rtgTypeSize(g.meta, typ)
+	if size < rtgBackendValueSlotSize {
+		size = rtgBackendValueSlotSize
+	}
+	wordSize := rtgCallWordSize(t.kind)
+	rtgEmitPushWords(g, offset, size, wordSize, rtgPushStack)
+	return rtgAlignValue(size, wordSize) / wordSize
+}
+
+func rtgCallWordSize(kind int) int {
+	if kind == rtgTypeArray {
+		return rtgNativeIntSize
+	}
+	return rtgBackendValueSlotSize
 }
 
 func rtgEmitFunctionValueDispatch(g *rtgLinearGen, funcType int, handleOffset int, argOffsets []int) bool {
 	doneLabel := rtgAsmNewLabel(&g.asm)
+	funcInfo := rtgResolveType(g.meta, funcType)
 	matched := false
 	closureTagOffset := -1
 	previousDeferPendingOffset := 0
 	if g.emittingDefers {
 		previousDeferPendingOffset = rtgAddUnnamedLocal(g, rtgTypeInt)
 		rtgAsmCopyBssToStackSlot(&g.asm, g.panicDeferPendingOff, previousDeferPendingOffset)
+	}
+	hiddenResultOffset := 0
+	resultType := funcInfo.elem
+	if rtgTypeUsesHiddenResult(g.meta, resultType) {
+		hiddenResultOffset = rtgAddUnnamedLocal(g, resultType)
+		rtgZeroLocalAtOffset(g, hiddenResultOffset)
 	}
 	for fnIndex := 0; fnIndex < len(g.meta.funcs); fnIndex++ {
 		mode := rtgFunctionValueMode(g.meta, fnIndex, funcType)
@@ -11586,17 +11759,26 @@ func rtgEmitFunctionValueDispatch(g *rtgLinearGen, funcType int, handleOffset in
 		rtgAsmPopTertiary(&g.asm)
 		rtgAsmCmpTertiaryPrimarySet(&g.asm, 0x94)
 		rtgAsmJzPrimary(&g.asm, nextLabel)
+		wordCount := 0
 		for i := len(argOffsets) - 1; i >= 0; i-- {
-			rtgAsmPushStackWord(&g.asm, argOffsets[i])
+			wordCount += rtgEmitTypedLocalArgReverse(g, argOffsets[i], g.meta.fields[funcInfo.first+i].typ)
 		}
 		extra := 0
 		if mode == rtgFunctionValueClosure {
 			rtgAsmPushStackWord(&g.asm, handleOffset)
 			extra = 1
 		} else if mode == rtgFunctionValueBoundMethod {
-			rtgAsmLoadPrimaryStackMemory(&g.asm, handleOffset, rtgBackendValueSlotSize)
+			receiverType := g.meta.params[g.meta.funcs[fnIndex].firstParam].typ
+			receiverOffset := rtgAddUnnamedLocal(g, receiverType)
+			rtgAsmLoadSecondaryStack(&g.asm, handleOffset)
+			rtgAsmAddSecondaryImm(&g.asm, rtgBackendValueSlotSize)
+			rtgEmitCopyMemSecondaryToStack(g, receiverOffset, rtgTypeCopySize(g.meta, receiverType))
+			extra = rtgEmitTypedLocalArgReverse(g, receiverOffset, receiverType)
+		}
+		if hiddenResultOffset > 0 {
+			rtgAsmAddressPrimaryStack(&g.asm, hiddenResultOffset)
 			rtgAsmPushPrimary(&g.asm)
-			extra = 1
+			extra++
 		}
 		oldSuppress := g.suppressPanicCheck
 		g.suppressPanicCheck = true
@@ -11604,7 +11786,7 @@ func rtgEmitFunctionValueDispatch(g *rtgLinearGen, funcType int, handleOffset in
 			rtgAsmPrimaryImm(&g.asm, 1)
 			rtgAsmStorePrimaryBss(&g.asm, g.panicDeferPendingOff)
 		}
-		rtgEmitCallWithWordCount(g, fnIndex, len(argOffsets)+extra)
+		rtgEmitCallWithWordCount(g, fnIndex, wordCount+extra)
 		if g.emittingDefers {
 			rtgAsmLoadPrimaryStack(&g.asm, previousDeferPendingOffset)
 			rtgAsmStorePrimaryBss(&g.asm, g.panicDeferPendingOff)
@@ -12572,23 +12754,8 @@ func rtgEmitAddressPrimary(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	return false
 }
 func rtgEmitVariadicArgSliceReverse(g *rtgLinearGen, ep *rtgExprParse, first int, count int, sliceType int) bool {
-	fieldFirst := len(ep.fields)
-	for i := 0; i < count; i++ {
-		var field rtgCompositeField
-		field.expr = ep.args[first+i]
-		ep.fields = append(ep.fields, field)
-	}
-	idx := len(ep.exprs)
-	var expr rtgExpr
-	expr.kind = rtgExprComposite
-	expr.firstArg = fieldFirst
-	expr.argCount = count
-	ep.exprs = append(ep.exprs, expr)
-	if !rtgEmitSliceLiteralRegs(g, ep, idx, sliceType) {
-		return false
-	}
-	rtgAsmPushSliceRegs(&g.asm)
-	return true
+	offset := rtgAddUnnamedLocal(g, sliceType)
+	return rtgEmitVariadicArgsToLocal(g, ep, first, count, sliceType, offset) && rtgEmitTypedLocalArgReverse(g, offset, sliceType) == rtgBackendSliceWordCount
 }
 func rtgEmitCallArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 	p := g.prog
@@ -12744,10 +12911,7 @@ func rtgEmitStructArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int, typ int
 		return -1
 	}
 	e := &ep.exprs[idx]
-	wordSize := rtgBackendValueSlotSize
-	if rtgResolveType(meta, typ).kind == rtgTypeArray {
-		wordSize = rtgNativeIntSize
-	}
+	wordSize := rtgCallWordSize(rtgResolveType(meta, typ).kind)
 	wordCount := rtgAlignValue(size, wordSize) / wordSize
 	if e.kind == rtgExprIdent {
 		localIndex := rtgFindLocalIndex(g, e.nameStart, e.nameEnd)
@@ -14862,7 +15026,7 @@ func rtgInterfaceMethodCallResultType(g *rtgLinearGen, ep *rtgExprParse, idx int
 	resultType := 0
 	for i := 0; i < len(g.meta.funcs); i++ {
 		fn := &g.meta.funcs[i]
-		if fn.receiverType == 0 || fn.paramCount != call.argCount+1 || !rtgBytesEqualRange(g.prog.src, fn.nameStart, fn.nameEnd, selector.nameStart, selector.nameEnd) {
+		if fn.paramCount != call.argCount+1 || !rtgInterfaceMethodNamed(g, fn, selector) {
 			continue
 		}
 		if resultType == 0 {
@@ -14895,7 +15059,7 @@ func rtgEmitInterfaceMethodCall(g *rtgLinearGen, ep *rtgExprParse, idx int, resu
 	matched := false
 	for fnIndex := 0; fnIndex < len(g.meta.funcs); fnIndex++ {
 		fn := &g.meta.funcs[fnIndex]
-		if fn.receiverType == 0 || fn.paramCount != call.argCount+1 || !rtgBytesEqualRange(g.prog.src, fn.nameStart, fn.nameEnd, selector.nameStart, selector.nameEnd) {
+		if fn.paramCount != call.argCount+1 || !rtgInterfaceMethodNamed(g, fn, selector) {
 			continue
 		}
 		if resultType != 0 && !rtgTypesEquivalent(g.meta, resultType, fn.resultType) {
@@ -14910,11 +15074,7 @@ func rtgEmitInterfaceMethodCall(g *rtgLinearGen, ep *rtgExprParse, idx int, resu
 		}
 		matched = true
 		nextLabel := rtgAsmNewLabel(&g.asm)
-		rtgAsmPushStack(&g.asm, receiverOffset-rtgBackendValueSlotSize)
-		rtgAsmPrimaryImm(&g.asm, rtgRuntimeTypeTag(g.meta, fn.receiverType))
-		rtgAsmPopTertiary(&g.asm)
-		rtgAsmCmpTertiaryPrimarySet(&g.asm, 0x94)
-		rtgAsmJzPrimary(&g.asm, nextLabel)
+		rtgEmitInterfaceReceiverMatch(g, receiverOffset, fn.receiverType, nextLabel)
 
 		wordCount := 0
 		for i := call.argCount - 1; i >= 0; i-- {
@@ -14948,6 +15108,18 @@ func rtgEmitInterfaceMethodCall(g *rtgLinearGen, ep *rtgExprParse, idx int, resu
 	}
 	rtgAsmMarkLabel(&g.asm, doneLabel)
 	return true
+}
+
+func rtgInterfaceMethodNamed(g *rtgLinearGen, fn *rtgFuncInfo, selector *rtgExpr) bool {
+	return fn.receiverType != 0 && rtgBytesEqualRange(g.prog.src, fn.nameStart, fn.nameEnd, selector.nameStart, selector.nameEnd)
+}
+
+func rtgEmitInterfaceReceiverMatch(g *rtgLinearGen, receiverOffset int, receiverType int, nextLabel int) {
+	rtgAsmPushStack(&g.asm, receiverOffset-rtgBackendValueSlotSize)
+	rtgAsmPrimaryImm(&g.asm, rtgRuntimeTypeTag(g.meta, receiverType))
+	rtgAsmPopTertiary(&g.asm)
+	rtgAsmCmpTertiaryPrimarySet(&g.asm, 0x94)
+	rtgAsmJzPrimary(&g.asm, nextLabel)
 }
 
 func rtgMethodReceiverTypeMatches(meta *rtgMeta, actual int, declared int) bool {
@@ -16904,26 +17076,64 @@ func rtgEmitMethodSelectorValuePrimary(g *rtgLinearGen, ep *rtgExprParse, idx in
 		return true
 	}
 	e := &ep.exprs[idx]
-	receiverType := rtgInferParsedExprType(g, ep, e.left)
-	receiver := rtgResolveType(g.meta, receiverType)
-	if receiver.kind == rtgTypeStruct && rtgTypeSize(g.meta, receiverType) > rtgBackendValueSlotSize {
+	fn := &g.meta.funcs[fnIndex]
+	if fn.paramCount == 0 {
 		return false
 	}
+	receiverType := g.meta.params[fn.firstParam].typ
 	receiverOffset := rtgAddUnnamedLocal(g, receiverType)
-	if !rtgEmitExprToLocal(g, ep, e.left, receiverOffset) {
+	if !rtgEmitMethodReceiverToLocal(g, ep, e.left, receiverType, receiverOffset) {
 		return false
 	}
+	handleOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
+	rtgEmitBoundMethodHandle(g, fnIndex, receiverType, receiverOffset, false, handleOffset)
+	rtgAsmLoadPrimaryStack(&g.asm, handleOffset)
+	return true
+}
+
+func rtgEmitBoundMethodHandle(g *rtgLinearGen, fnIndex int, receiverType int, receiverOffset int, indirect bool, offset int) {
+	receiverSize := rtgTypeCopySize(g.meta, receiverType)
 	sizeOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
 	addrOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
-	rtgAsmStoreStackImm(&g.asm, sizeOffset, 2*rtgBackendValueSlotSize)
+	rtgAsmStoreStackImm(&g.asm, sizeOffset, rtgBackendValueSlotSize+receiverSize)
 	rtgEmitPersistentAllocToPrimary(g, sizeOffset)
 	rtgAsmStorePrimaryStack(&g.asm, addrOffset)
 	rtgAsmCopyPrimaryToSecondary(&g.asm)
 	rtgAsmPrimaryImm(&g.asm, fnIndex+1)
 	rtgAsmStorePrimaryMemSecondaryDisp(&g.asm, 0)
-	rtgAsmLoadPrimarySecondaryStack(&g.asm, receiverOffset, addrOffset)
-	rtgAsmStorePrimaryMemSecondaryDisp(&g.asm, rtgBackendValueSlotSize)
-	rtgAsmLoadPrimaryStack(&g.asm, addrOffset)
+	if indirect {
+		tempOffset := rtgAddUnnamedLocal(g, receiverType)
+		rtgAsmLoadSecondaryStack(&g.asm, receiverOffset)
+		rtgEmitCopyMemSecondaryToStack(g, tempOffset, receiverSize)
+		receiverOffset = tempOffset
+	}
+	rtgAsmLoadSecondaryStack(&g.asm, addrOffset)
+	rtgEmitCopyStackToMemSecondary(g, receiverOffset, rtgBackendValueSlotSize, receiverSize)
+	rtgAsmCopyStackSlot(&g.asm, addrOffset, offset)
+}
+
+func rtgEmitMethodReceiverToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, receiverType int, offset int) bool {
+	declared := rtgResolveType(g.meta, receiverType)
+	actualType := rtgInferParsedExprType(g, ep, idx)
+	actual := rtgResolveType(g.meta, actualType)
+	if declared.kind == rtgTypePointer {
+		if actual.kind == rtgTypePointer {
+			return rtgEmitExprToLocal(g, ep, idx, offset)
+		}
+		if !rtgEmitAddressPrimary(g, ep, idx) {
+			return false
+		}
+		rtgAsmStorePrimaryStack(&g.asm, offset)
+		return true
+	}
+	if actual.kind != rtgTypePointer {
+		return rtgEmitExprToLocal(g, ep, idx, offset)
+	}
+	if !rtgEmitIntExpr(g, ep, idx) {
+		return false
+	}
+	rtgAsmCopyPrimaryToSecondary(&g.asm)
+	rtgEmitCopyMemSecondaryToStack(g, offset, rtgTypeSize(g.meta, receiverType))
 	return true
 }
 
@@ -17129,10 +17339,7 @@ func rtgEmitIndexedStructField(g *rtgLinearGen, ep *rtgExprParse, indexIdx int, 
 	return rtgAmd64EmitIndexedStructField(g, ep, indexIdx, fieldStart, fieldEnd)
 }
 func rtgEmitStringPtrExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
-	if rtgTargetArch == rtgArch386 {
-		return rtg386EmitStringPtrExpr(g, ep, idx)
-	}
-	return rtgAmd64EmitStringPtrExpr(g, ep, idx)
+	return rtgEmitStringValueRegs(g, ep, idx)
 }
 
 func rtgExprIsErrorStringCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
