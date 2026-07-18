@@ -30,6 +30,42 @@ func (assertionSwitchWrong) Number(extra int) int {
 	return extra
 }
 
+type assertionSwitchWrongEntry struct{}
+
+func (assertionSwitchWrongEntry) Name() string {
+	return "wrong"
+}
+
+type assertionSwitchWrongFS struct{}
+
+func (assertionSwitchWrongFS) ReadDir(path string) ([]assertionSwitchWrongEntry, bool) {
+	return []assertionSwitchWrongEntry{{}}, path == "wrong"
+}
+
+type assertionSwitchEntry struct {
+	Name string
+}
+
+type assertionSwitchFS interface {
+	ReadDir(path string) ([]assertionSwitchEntry, bool)
+}
+
+type assertionSwitchEmbeddedFS interface {
+	assertionSwitchFS
+}
+
+type assertionSwitchGoodFS struct{}
+
+func (assertionSwitchGoodFS) ReadDir(path string) ([]assertionSwitchEntry, bool) {
+	return []assertionSwitchEntry{{Name: path}}, true
+}
+
+func assertionSwitchInterfaceResult() bool {
+	var fs assertionSwitchEmbeddedFS = assertionSwitchGoodFS{}
+	entries, ok := fs.ReadDir("right")
+	return ok && len(entries) == 1 && entries[0].Name == "right"
+}
+
 var assertionSwitchCalls int
 
 func assertionSwitchValue(which int) interface{} {
@@ -140,6 +176,10 @@ func appMain() int {
 	var wrong interface{} = assertionSwitchWrong{}
 	if _, ok = wrong.(assertionSwitchNumber); ok {
 		print("FAIL signature match\n")
+		return 1
+	}
+	if !assertionSwitchInterfaceResult() {
+		print("FAIL interface result identity\n")
 		return 1
 	}
 	var sequence interface{} = []int{3, 4}

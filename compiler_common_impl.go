@@ -10044,9 +10044,6 @@ func rtgExprTokenIsImaginary(p *rtgProgram, tok int) bool {
 }
 
 func rtgExprIsUntypedInteger(ep *rtgExprParse, idx int) bool {
-	if idx < 0 || idx >= len(ep.exprs) {
-		return false
-	}
 	e := &ep.exprs[idx]
 	if e.kind == rtgExprInt || e.kind == rtgExprChar {
 		return true
@@ -10126,9 +10123,6 @@ func rtgFindTypeByRange(g *rtgLinearGen, nameStart int, nameEnd int) int {
 	return 0
 }
 func rtgConversionTypeFromExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
-	if idx < 0 || idx >= len(ep.exprs) {
-		return 0
-	}
 	callee := &ep.exprs[idx]
 	if callee.kind != rtgExprIdent {
 		return 0
@@ -11671,9 +11665,6 @@ func rtgEmitUserCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgFunctionValueCalleeType(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
-	if idx < 0 || idx >= len(ep.exprs) {
-		return 0
-	}
 	e := &ep.exprs[idx]
 	if e.kind == rtgExprSelector {
 		fnIndex, expression := rtgMethodSelectorInfo(g, ep, idx)
@@ -11701,11 +11692,8 @@ func rtgFunctionValueCalleeType(g *rtgLinearGen, ep *rtgExprParse, idx int) int 
 }
 
 func rtgMethodSelectorInfo(g *rtgLinearGen, ep *rtgExprParse, idx int) (int, bool) {
-	if idx < 0 || idx >= len(ep.exprs) {
-		return -1, false
-	}
 	e := &ep.exprs[idx]
-	if e.kind != rtgExprSelector || e.left < 0 || e.left >= len(ep.exprs) {
+	if e.kind != rtgExprSelector {
 		return -1, false
 	}
 	base := &ep.exprs[e.left]
@@ -15210,41 +15198,46 @@ func rtgFuncInfoFromCall(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 }
 
 func rtgIsInterfaceMethodCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
-	if idx < 0 || idx >= len(ep.exprs) {
-		return false
-	}
 	call := &ep.exprs[idx]
-	if call.kind != rtgExprCall || call.left < 0 || call.left >= len(ep.exprs) {
+	if call.kind != rtgExprCall {
 		return false
 	}
 	selector := &ep.exprs[call.left]
-	if selector.kind != rtgExprSelector || selector.left < 0 || selector.left >= len(ep.exprs) {
-		return false
-	}
-	return rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, selector.left)).kind == rtgTypeInterface
+	return selector.kind == rtgExprSelector && rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, selector.left)).kind == rtgTypeInterface
 }
 
 func rtgInterfaceMethodCallResultType(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 	if !rtgIsInterfaceMethodCall(g, ep, idx) {
 		return 0
 	}
-	call := &ep.exprs[idx]
-	selector := &ep.exprs[call.left]
-	resultType := 0
-	for i := 0; i < len(g.meta.funcs); i++ {
-		fn := &g.meta.funcs[i]
-		if fn.paramCount != call.argCount+1 || !rtgInterfaceMethodNamed(g, fn, selector) {
-			continue
+	selector := &ep.exprs[ep.exprs[idx].left]
+	return rtgInterfaceMethodResultType(g, rtgInferParsedExprType(g, ep, selector.left), selector)
+}
+
+func rtgInterfaceMethodResultType(g *rtgLinearGen, interfaceType int, selector *rtgExpr) int {
+	iface := rtgResolveType(g.meta, interfaceType)
+	for required := iface.first; required < iface.count; {
+		end := rtgStatementLineEnd(g.prog, required, iface.count)
+		if rtgTokCharIs(g.prog, required+1, '(') {
+			if rtgBytesEqualRange(g.prog.src, int(rtgTokStart(g.prog, required)), int(rtgTokEnd(g.prog, required)), selector.nameStart, selector.nameEnd) {
+				var parsed rtgTypeResult
+				rtgParseFuncSignatureInto(g.meta, g.prog, required+1, end, &parsed)
+				return rtgResolveType(g.meta, parsed.typ).elem
+			}
+		} else {
+			embedded := rtgParseType(g.meta, g.prog, required, end)
+			if embedded.typ != 0 {
+				if result := rtgInterfaceMethodResultType(g, embedded.typ, selector); result != 0 {
+					return result
+				}
+			}
 		}
-		if resultType == 0 {
-			resultType = fn.resultType
-			continue
-		}
-		if !rtgTypesEquivalent(g.meta, resultType, fn.resultType) {
-			return 0
-		}
+		required = end
 	}
-	return resultType
+	if iface.first >= iface.count && rtgBytesEqualText(g.prog.src, selector.nameStart, selector.nameEnd, "Error") {
+		return rtgTypeString
+	}
+	return 0
 }
 
 func rtgEmitInterfaceMethodCall(g *rtgLinearGen, ep *rtgExprParse, idx int, resultOffset int, resultType int) bool {
@@ -17564,33 +17557,12 @@ func rtgEmitStringPtrExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgExprIsErrorStringCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
-	if idx < 0 {
-		return false
-	}
-	if idx >= len(ep.exprs) {
-		return false
-	}
 	e := &ep.exprs[idx]
-	if e.kind != rtgExprCall {
-		return false
-	}
-	if e.argCount != 0 {
-		return false
-	}
-	if e.left < 0 {
-		return false
-	}
-	if e.left >= len(ep.exprs) {
+	if e.kind != rtgExprCall || e.argCount != 0 {
 		return false
 	}
 	callee := &ep.exprs[e.left]
-	if callee.kind != rtgExprSelector {
-		return false
-	}
-	if !rtgBytesEqualText(g.prog.src, callee.nameStart, callee.nameEnd, "Error") {
-		return false
-	}
-	return rtgTypeIsString(g.meta, rtgInferParsedExprType(g, ep, callee.left))
+	return callee.kind == rtgExprSelector && rtgBytesEqualText(g.prog.src, callee.nameStart, callee.nameEnd, "Error") && rtgTypeIsString(g.meta, rtgInferParsedExprType(g, ep, callee.left))
 }
 
 func rtgEmitSelectorAddressSecondary(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
