@@ -571,43 +571,19 @@ func rtg386EmitCompareJump(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, label 
 	if start+1 < end {
 		c1 = p.src[start+1]
 	}
-	isCompare := false
-	if c0 == '=' && c1 == '=' {
-		isCompare = true
-	} else if c0 == '!' && c1 == '=' {
-		isCompare = true
-	} else if c0 == '<' && c1 != '<' {
-		isCompare = true
-	} else if c0 == '>' && c1 != '>' {
-		isCompare = true
-	}
-	if !isCompare {
+	if !((c0 == '=' || c0 == '!') && c1 == '=' || c0 == '<' && c1 != '<' || c0 == '>' && c1 != '>') {
 		return false
 	}
 	leftIndex := e.left
 	rightIndex := e.right
 	usesFloat := rtgBinaryUsesFloat(g, ep, e)
 	right := &ep.exprs[rightIndex]
-	rightValue := 0
-	rightOK := false
-	if right.kind == rtgExprInt {
-		rightValue = rtgParseIntToken(p, right.tok)
-		rightOK = true
-	} else if right.kind == rtgExprChar {
-		rightValue = rtgParseCharToken(p, right.tok)
-		rightOK = true
-	} else if right.kind == rtgExprBool {
-		rightValue = rtgBoolTokenValue(p, right.tok)
-		rightOK = true
-	} else if right.kind == rtgExprIdent {
-		rightValue = rtgFindSmallConstByName(g, right.nameStart, right.nameEnd)
-		rightOK = rightValue >= -128
-	}
-	if !usesFloat && rightOK && rtgAsmImmFits8Signed(rightValue) {
+	rightConst := rtgEvalConstExpr(g, ep, rightIndex)
+	if !usesFloat && rightConst.ok && rtgAsmImmFits8Signed(rightConst.value) {
 		if !rtgEmitIntExpr(g, ep, leftIndex) {
 			return false
 		}
-		rtgAsmCmpPrimaryImm8(&g.asm, rightValue)
+		rtgAsmCmpPrimaryImm8(&g.asm, rightConst.value)
 		rtgEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue)
 		return true
 	}
@@ -633,24 +609,12 @@ func rtg386EmitCompareJump(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, label 
 			}
 		}
 	}
-	if usesFloat {
-		if !rtgEmitScalarExprForKind(g, ep, rightIndex, rtgTypeFloat64) {
-			return false
-		}
-	} else {
-		if !rtgEmitIntExpr(g, ep, rightIndex) {
-			return false
-		}
+	if !rtg386EmitCompareOperand(g, ep, rightIndex, usesFloat) {
+		return false
 	}
 	rtgAsmPushPrimary(&g.asm)
-	if usesFloat {
-		if !rtgEmitScalarExprForKind(g, ep, leftIndex, rtgTypeFloat64) {
-			return false
-		}
-	} else {
-		if !rtgEmitIntExpr(g, ep, leftIndex) {
-			return false
-		}
+	if !rtg386EmitCompareOperand(g, ep, leftIndex, usesFloat) {
+		return false
 	}
 	rtgAsmPopTertiary(&g.asm)
 	rtgAsmEmit16(&g.asm, 0xc139)
@@ -661,6 +625,13 @@ func rtg386EmitCompareJump(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, label 
 	}
 	rtgEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue)
 	return true
+}
+
+func rtg386EmitCompareOperand(g *rtgLinearGen, ep *rtgExprParse, idx int, useFloat bool) bool {
+	if useFloat {
+		return rtgEmitScalarExprForKind(g, ep, idx, rtgTypeFloat64)
+	}
+	return rtgEmitIntExpr(g, ep, idx)
 }
 
 func rtg386EmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
@@ -822,56 +793,16 @@ func rtg386EmitStructReturnExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool
 			}
 			fieldOffset := g.meta.fields[fieldIndex].offset
 			fieldType := g.meta.fields[fieldIndex].typ
-			if fieldType == 0 {
-				return false
-			}
-			if !rtgEmitCompositeFieldToMem(g, ep, field.expr, fieldType, g.returnStruct, fieldOffset) {
+			if fieldType == 0 || !rtgEmitCompositeFieldToMem(g, ep, field.expr, fieldType, g.returnStruct, fieldOffset) {
 				return false
 			}
 		}
 		return true
 	}
 	if e.kind == rtgExprCall {
-		fnIndex := rtgFuncInfoFromCall(g, ep, e.left)
-		if fnIndex < 0 || !rtgTypeUsesHiddenResult(meta, meta.funcs[fnIndex].resultType) {
+		fnIndex, wordCount := rtgPrepareStructCall(g, ep, idx, resultType)
+		if fnIndex < 0 {
 			return false
-		}
-		if rtgTypeSize(meta, meta.funcs[fnIndex].resultType) != size {
-			return false
-		}
-		fn := &meta.funcs[fnIndex]
-		receiverIndex := -1
-		receiverDotTok := 0
-		if fn.receiverType != 0 {
-			callee := &ep.exprs[e.left]
-			if callee.kind != rtgExprSelector {
-				return false
-			}
-			receiverIndex = callee.left
-			receiverDotTok = callee.tok
-		}
-		wordCount := 1
-		for i := e.argCount - 1; i >= 0; i-- {
-			argIndex := ep.args[e.firstArg+i]
-			paramIndex := i
-			if receiverIndex >= 0 {
-				paramIndex = i + 1
-			}
-			words := rtgEmitCallParamArgReverse(g, ep, argIndex, fn.firstParam+paramIndex)
-			if words < 0 {
-				return false
-			}
-			wordCount += words
-		}
-		if receiverIndex >= 0 {
-			words := rtgEmitMethodReceiverArgReverse(g, ep, receiverIndex, meta.params[fn.firstParam].typ)
-			if words < 0 {
-				words = rtgEmitMethodReceiverArgTokensReverse(g, receiverDotTok, meta.params[fn.firstParam].typ)
-				if words < 0 {
-					return false
-				}
-			}
-			wordCount += words
 		}
 		rtgAsmLoadPrimaryStack(a, g.returnStruct)
 		rtgAsmPushPrimary(a)
