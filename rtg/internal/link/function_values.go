@@ -16,6 +16,7 @@ type functionValueSignature struct {
 	params      string
 	paramNames  []string
 	result      string
+	zeroType    string
 	fields      []string
 	fieldTypes  []string
 	impls       []functionValueImpl
@@ -234,6 +235,10 @@ func parseFunctionValueSignature(program *unit.Program, funcTok int, name string
 			return sig, funcTok, false
 		}
 		sig.result = functionValueTokensText(program, end, resultClose+1)
+		zeroType := functionValueSingleResultType(program, end+1, resultClose)
+		if functionValueZero(zeroType) == "0" && !functionValueCanUseScalarZero(zeroType) {
+			sig.zeroType = zeroType
+		}
 		end = resultClose + 1
 	} else if functionValueTokenCanStartType(program, end) && program.Tokens[end].Line == program.Tokens[close].Line {
 		resultEnd := functionValueTypeEnd(program, end)
@@ -241,6 +246,9 @@ func parseFunctionValueSignature(program *unit.Program, funcTok int, name string
 			return sig, funcTok, false
 		}
 		sig.result = functionValueTokensText(program, end, resultEnd)
+		if functionValueZero(sig.result) == "0" && !functionValueCanUseScalarZero(sig.result) {
+			sig.zeroType = sig.result
+		}
 		end = resultEnd
 	}
 	return sig, end, true
@@ -318,6 +326,31 @@ func functionValueTypeEnd(program *unit.Program, start int) int {
 		return end
 	}
 	return start
+}
+
+func functionValueSingleResultType(program *unit.Program, start int, end int) string {
+	if start >= end {
+		return ""
+	}
+	depth := 0
+	for i := start; i < end; i++ {
+		text := functionValueTokenText(program, i)
+		if text == "(" || text == "[" || text == "{" {
+			depth++
+		} else if text == ")" || text == "]" || text == "}" {
+			depth--
+		} else if text == "," && depth == 0 {
+			return ""
+		}
+	}
+	typeStart := start
+	if start+1 < end && program.Tokens[start].Kind == unit.TokenIdent && functionValueTypeEnd(program, start+1) == end {
+		typeStart++
+	}
+	if functionValueTypeEnd(program, typeStart) != end {
+		return ""
+	}
+	return functionValueTokensText(program, typeStart, end)
 }
 
 func normalizedFunctionValueParams(program *unit.Program, start int, end int) (string, []string, bool) {
@@ -506,7 +539,11 @@ func functionValueGeneratedText(signatures []functionValueSignature, closures []
 			out = out + " }\n"
 		}
 		if sig.result != "" {
-			out = out + "return " + functionValueZero(sig.result) + "\n"
+			if sig.zeroType != "" {
+				out = out + "var __rtg_zero " + sig.zeroType + "\nreturn __rtg_zero\n"
+			} else {
+				out = out + "return " + functionValueZero(sig.result) + "\n"
+			}
 		} else {
 			out = out + "return\n"
 		}
@@ -1238,6 +1275,16 @@ func functionValueZero(result string) string {
 		return "nil"
 	}
 	return "0"
+}
+
+func functionValueCanUseScalarZero(result string) bool {
+	scalar := []string{"int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64", "uintptr", "byte", "rune", "float32", "float64", "complex64", "complex128"}
+	for i := 0; i < len(scalar); i++ {
+		if result == scalar[i] {
+			return true
+		}
+	}
+	return false
 }
 
 func functionValueHasPrefix(value string, prefix string) bool {
