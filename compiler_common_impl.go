@@ -14310,8 +14310,14 @@ func rtgEmitSlicePtrLen(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	if e.kind == rtgExprIndex {
 		valueType := rtgInferParsedExprType(g, ep, idx)
 		valueKind := rtgResolveType(meta, valueType).kind
-		if valueKind != rtgTypeString || !rtgEmitStringValueRegs(g, ep, idx) {
-			return false
+		if valueKind == rtgTypeSlice {
+			if !rtgEmitSliceValueRegs(g, ep, idx) {
+				return false
+			}
+		} else {
+			if valueKind != rtgTypeString || !rtgEmitStringValueRegs(g, ep, idx) {
+				return false
+			}
 		}
 		rtgAsmCopySecondaryToTertiary(a)
 		return true
@@ -14386,15 +14392,8 @@ func rtgEmitSlicePtrCap(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		rtgAsmPopPrimary(a)
 		return true
 	}
-	if e.kind == rtgExprUnary && rtgTokCharIs(g.prog, e.tok, '*') {
+	if e.kind == rtgExprUnary && rtgTokCharIs(g.prog, e.tok, '*') || e.kind == rtgExprIndex || e.kind == rtgExprCall {
 		if !rtgTypeIsSlice(meta, rtgInferParsedExprType(g, ep, idx)) {
-			return false
-		}
-		return rtgEmitSliceValueRegs(g, ep, idx)
-	}
-	if e.kind == rtgExprCall {
-		valueType := rtgInferParsedExprType(g, ep, idx)
-		if !rtgTypeIsSlice(meta, valueType) {
 			return false
 		}
 		return rtgEmitSliceValueRegs(g, ep, idx)
