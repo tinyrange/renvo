@@ -5834,9 +5834,7 @@ func rtgEmitFunctionControlEpilogue(g *rtgLinearGen) bool {
 		rtgAsmJmpMarkLabel(a, loopLabel, nextLabel)
 	}
 	rtgAsmJmpMarkLabel(a, loopLabel, doneDefers)
-	if !rtgEmitClosureCaptureWriteback(g) {
-		return false
-	}
+	rtgMoveCapturedLocals(g, true)
 	panicReturn := rtgAsmNewLabel(a)
 	normalReturn := rtgAsmNewLabel(a)
 	rtgAsmLoadPrimaryBss(a, g.panicIDOff)
@@ -6838,9 +6836,7 @@ func rtgEmitLinearStmtCore(g *rtgLinearGen, stmt *rtgStmt) bool {
 		if g.deferReturnLabel > 0 {
 			return rtgEmitDeferredReturn(g, stmt)
 		}
-		if !rtgEmitClosureCaptureWriteback(g) {
-			return false
-		}
+		rtgMoveCapturedLocals(g, true)
 		if stmt.exprStart == stmt.exprEnd {
 			if !rtgEmitBareReturnValues(g) {
 				return false

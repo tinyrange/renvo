@@ -454,31 +454,31 @@ func rtgWinAmd64EmitText(a *rtgAsm, code string) {
 
 func rtgWinAmd64EmitReadWriteHelper(g *rtgLinearGen, isWrite bool) int {
 	// The template is the relaxed form of the instruction sequence previously
-	// assembled one operation at a time. Its compact recipe records the BSS and
-	// import operands that still vary between compiler invocations.
+	// assembled one operation at a time. Explicit relocations record the BSS and
+	// import operands that still vary between compiler invocations and self-host.
 	a := &g.asm
 	if isWrite {
 		if g.winWriteEmitted {
 			return g.winWriteLabel
 		}
+	} else if g.winReadEmitted {
+		return g.winReadLabel
+	}
+	label := rtgAsmNewLabel(a)
+	if isWrite {
 		g.winWriteEmitted = true
-		g.winWriteLabel = rtgAsmNewLabel(a)
+		g.winWriteLabel = label
 	} else {
-		if g.winReadEmitted {
-			return g.winReadLabel
-		}
 		g.winReadEmitted = true
-		g.winReadLabel = rtgAsmNewLabel(a)
+		g.winReadLabel = label
 	}
 	countOff := a.bssSize
 	a.bssSize += 8
 	posOff := a.bssSize
 	a.bssSize += 8
-	label := g.winReadLabel
 	importID := rtgWinImportReadFile
 	prefix := "\xe9\x32\x01\x00\x00\x57\x56\x52\x51\x48\x83\x7c\x24\x18\x00\x74\x02\xeb\x18\xb9\xf6"
 	if isWrite {
-		label = g.winWriteLabel
 		importID = rtgWinImportWriteFile
 		prefix = "\xe9\x54\x01\x00\x00\x57\x56\x52\x51\x48\x83\x7c\x24\x18\x01\x74\x0a\x48\x83\x7c\x24\x18\x02\x74\x1c\xeb\x32\xb9\xf5\xff\xff\xff\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\x44\x24\x18\xeb\x18\xb9\xf4"
 	}
@@ -489,25 +489,20 @@ func rtgWinAmd64EmitReadWriteHelper(g *rtgLinearGen, isWrite bool) int {
 	a.lastPrimaryStoreEnd = -1
 	commonBase := len(a.code)
 	rtgWinAmd64EmitText(a, "\xff\xff\xff\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\x44\x24\x18\x48\x83\x3c\x24\x00\x0f\x8c\x80\x00\x00\x00\x48\x8b\x4c\x24\x18\x31\xd2\x45\x31\xc0\x41\xb9\x01\x00\x00\x00\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\x05\x00\x00\x00\x00\x48\x8b\x4c\x24\x18\x48\x8b\x14\x24\x45\x31\xc0\x45\x31\xc9\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x8b\x4c\x24\x18\x48\x8b\x54\x24\x10\x4c\x8b\x44\x24\x08\x48\x8d\x05\x00\x00\x00\x00\x49\x89\xc1\x48\x83\xec\x28\x48\xc7\x44\x24\x20\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x83\xf8\x00\x74\x52\x48\x8b\x05\x00\x00\x00\x00\xeb\x4c\x48\x8b\x4c\x24\x18\x48\x8b\x54\x24\x10\x4c\x8b\x44\x24\x08\x48\x8d\x05\x00\x00\x00\x00\x49\x89\xc1\x48\x83\xec\x28\x48\xc7\x44\x24\x20\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x83\xf8\x00\x74\x0c\x48\x8b\x05\x00\x00\x00\x00\x48\x83\xc4\x20\xc3\x6a\xff\x58\x48\x83\xc4\x20\xc3\x6a\xff\x58\x48\x89\x05\x00\x00\x00\x00\x48\x8b\x4c\x24\x18\x48\x8b\x05\x00\x00\x00\x00\x50\x5a\x45\x31\xc0\x45\x31\xc9\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x8b\x05\x00\x00\x00\x00\x48\x83\xc4\x20\xc3")
-	relocs := "\x09\x00\x04\x37\x00\x02\x42\x00\x01\x5b\x00\x02\x75\x00\x00\x8b\x00\x03\x9b\x00\x00\xb3\x00\x00\xc9\x00\x03\xd9\x00\x00\xf0\x00\x00\xfc\x00\x01\x0e\x01\x02\x19\x01\x00"
-	for i := 0; i < len(relocs); i += 3 {
-		at := commonBase + int(relocs[i]) + int(relocs[i+1])<<8
-		kind := int(relocs[i+2])
-		off := countOff
-		relocKind := rtgAbsBssReloc
-		if kind == 1 {
-			off = posOff
-		} else if kind >= 2 {
-			relocKind = rtgAbsWinImportReloc
-			off = rtgWinImportSetFilePointer
-			if kind == 3 {
-				off = importID
-			} else if kind == 4 {
-				off = rtgWinImportGetStdHandle
-			}
-		}
-		rtgAsmAddAbsReloc(a, at, off, relocKind)
-	}
+	rtgAsmAddWinImportReloc(a, commonBase+9, rtgWinImportGetStdHandle)
+	rtgAsmAddWinImportReloc(a, commonBase+55, rtgWinImportSetFilePointer)
+	rtgAsmAddAbsReloc(a, commonBase+66, posOff, rtgAbsBssReloc)
+	rtgAsmAddWinImportReloc(a, commonBase+91, rtgWinImportSetFilePointer)
+	rtgAsmAddAbsReloc(a, commonBase+117, countOff, rtgAbsBssReloc)
+	rtgAsmAddWinImportReloc(a, commonBase+139, importID)
+	rtgAsmAddAbsReloc(a, commonBase+155, countOff, rtgAbsBssReloc)
+	rtgAsmAddAbsReloc(a, commonBase+179, countOff, rtgAbsBssReloc)
+	rtgAsmAddWinImportReloc(a, commonBase+201, importID)
+	rtgAsmAddAbsReloc(a, commonBase+217, countOff, rtgAbsBssReloc)
+	rtgAsmAddAbsReloc(a, commonBase+240, countOff, rtgAbsBssReloc)
+	rtgAsmAddAbsReloc(a, commonBase+252, posOff, rtgAbsBssReloc)
+	rtgAsmAddWinImportReloc(a, commonBase+270, rtgWinImportSetFilePointer)
+	rtgAsmAddAbsReloc(a, commonBase+281, countOff, rtgAbsBssReloc)
 	return label
 }
 
