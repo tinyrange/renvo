@@ -337,10 +337,8 @@ func rtgAsmInit(a *rtgAsm) {
 
 func rtgAsmNewLabel(a *rtgAsm) int {
 	label := len(a.labelPos)
-	a.labelPos = a.labelPos[:label+1]
-	a.labelSet = a.labelSet[:label+1]
-	a.labelPos[label] = 0
-	a.labelSet[label] = false
+	a.labelPos = append(a.labelPos, 0)
+	a.labelSet = append(a.labelSet, false)
 	return label
 }
 
