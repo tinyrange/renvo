@@ -8892,16 +8892,20 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 			}
 			lhsResolved := rtgResolveType(meta, lhsType)
 			if lhsRoot.kind == rtgExprSelector && rtgTypeKindUsesMemory(lhsResolved.kind) {
-				if !rtgEmitSelectorAddressSecondary(g, lhs, lhsIndex) {
-					return false
-				}
-				addrOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
-				rtgAsmStoreSecondaryStack(a, addrOffset)
 				rhs := rtgNewExprParse()
 				rhsIndex := rtgParseExpressionRoot(rhs, p, assignTok+1, stmt.endTok)
 				if rhsIndex < 0 {
 					return false
 				}
+				rhsRoot := &rhs.exprs[rhsIndex]
+				if lhsResolved.kind == rtgTypeSlice && rhsRoot.kind == rtgExprCall && rhsRoot.argCount >= 2 && rtgExprIdentCode(p, rhs, rhsRoot.left) == rtgIdentAppend {
+					return rtgEmitAppendAssignGeneral(g, stmt, rhs, assignTok)
+				}
+				if !rtgEmitSelectorAddressSecondary(g, lhs, lhsIndex) {
+					return false
+				}
+				addrOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
+				rtgAsmStoreSecondaryStack(a, addrOffset)
 				return rtgEmitTypedExprToSavedMem(g, rhs, rhsIndex, lhsType, addrOffset)
 			}
 			if lhsRoot.kind == rtgExprSelector {
