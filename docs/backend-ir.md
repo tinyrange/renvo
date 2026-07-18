@@ -43,6 +43,11 @@ Machine properties come from `rtgTargetProfile`.
   stored form is pointer at offset 0 and length at offset 8.
 - A slice is three words: pointer in primary, length in secondary, then
   capacity in tertiary. Its stored form uses offsets 0, 8, and 16.
+- An interface is two words: payload at offset 0 and canonical dynamic-type
+  tag at offset 8. A nil interface has both words zero. Boxing a typed nil
+  pointer retains its nonzero type tag. Values larger than one slot are held
+  in persistent storage and the payload word points at that copy. Assignment,
+  calls, returns, and aggregate storage must preserve both words.
 - Struct fields are laid out in declaration order at eight-byte-aligned
   offsets. Struct size is rounded to eight bytes.
 - Tuples use the same aggregate layout as anonymous structs.
@@ -70,6 +75,7 @@ after the call.
 | scalar or pointer | one |
 | string | pointer, length |
 | slice | pointer, length, capacity |
+| interface | payload, dynamic-type tag |
 | struct or tuple | flattened storage words in field order |
 | array | flattened native-width element words |
 
