@@ -81,6 +81,59 @@ func TestCheckGraphCoreDiagnostics(t *testing.T) {
 			err:   CheckErrSelect,
 		},
 		{
+			name:  "undefined value",
+			files: []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc main() { print(missing) }\n")}},
+			err:   CheckErrUndefined,
+		},
+		{
+			name:  "undefined package initializer",
+			files: []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nvar value = missing\nfunc main() { _ = value }\n")}},
+			err:   CheckErrUndefined,
+		},
+		{
+			name:  "undefined type",
+			files: []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nvar value Missing\nfunc main() { _ = value }\n")}},
+			err:   CheckErrUndefined,
+		},
+		{
+			name:  "invalid operands",
+			files: []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc main() { value := 1 + true; _ = value }\n")}},
+			err:   CheckErrOperand,
+		},
+		{
+			name:  "invalid inferred assignment",
+			files: []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc main() { var value int; other := \"bad\"; value = other; _ = value }\n")}},
+			err:   CheckErrType,
+		},
+		{
+			name:  "invalid call argument",
+			files: []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc consume(value int) {}\nfunc main() { consume(\"bad\") }\n")}},
+			err:   CheckErrCallArgument,
+		},
+		{
+			name:  "invalid grouped call argument",
+			files: []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc consume(first, second int) {}\nfunc main() { consume(1, \"bad\") }\n")}},
+			err:   CheckErrCallArgument,
+		},
+		{
+			name:  "invalid unnamed call argument",
+			files: []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc consume(int, string) {}\nfunc main() { consume(1, true) }\n")}},
+			err:   CheckErrCallArgument,
+		},
+		{
+			name:  "invalid return type",
+			files: []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc value() int { return \"bad\" }\nfunc main() { _ = value() }\n")}},
+			err:   CheckErrReturnType,
+		},
+		{
+			name: "undefined imported selector",
+			files: []load.SourceFile{
+				{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nimport \"example.com/case/lib\"\nfunc main() { lib.Missing() }\n")},
+				{Path: "/repo/case/lib/lib.go", Src: []byte("package lib\nfunc Present() {}\n")},
+			},
+			err: CheckErrUndefined,
+		},
+		{
 			name: "unused import",
 			files: []load.SourceFile{
 				{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nimport \"example.com/case/lib\"\nfunc main() {}\n")},
@@ -132,6 +185,89 @@ func main() {
 	program := CheckGraphCore(graph)
 	if !program.Ok {
 		t.Fatalf("deferred local use was rejected: %#v", program)
+	}
+}
+
+func TestCheckGraphCoreRecognizesFunctionLiteralScope(t *testing.T) {
+	graph := checkTestGraph(t, []load.SourceFile{{
+		Path: "/repo/case/cmd/app/main.go",
+		Src: []byte(`package main
+
+func consume(callback func(int) bool) {}
+
+func main() {
+	consume(func(value int) bool {
+		copy := value
+		return copy > 0
+	})
+}
+`),
+	}})
+	program := CheckGraphCore(graph)
+	if !program.Ok {
+		t.Fatalf("function literal scope was rejected: %#v", program)
+	}
+}
+
+func TestCheckGraphCoreAllowsLiteralComparisonsJoinedByLogicalOperators(t *testing.T) {
+	graph := checkTestGraph(t, []load.SourceFile{{
+		Path: "/repo/case/cmd/app/main.go",
+		Src: []byte(`package main
+
+func main() {
+	if 0xe9b5dba5 == 0xe9b5dba5 && 1e2 == 100 && 0x1.ep+2 == 7.5 {
+		print("PASS\n")
+	}
+}
+`),
+	}})
+	program := CheckGraphCore(graph)
+	if !program.Ok {
+		t.Fatalf("literal comparisons were rejected as logical operands: %#v", program)
+	}
+}
+
+func TestCheckGraphCoreInfersLocalCallResult(t *testing.T) {
+	graph := checkTestGraph(t, []load.SourceFile{{
+		Path: "/repo/case/cmd/app/main.go",
+		Src: []byte(`package main
+
+func makeText() string { return "value" }
+func consume(text string) {}
+
+func main() {
+	text := makeText()
+	consume(text)
+}
+`),
+	}})
+	program := CheckGraphCore(graph)
+	if !program.Ok {
+		t.Fatalf("local call result was rejected: %#v", program)
+	}
+}
+
+func TestCheckGraphCoreDoesNotInferFromClosedInnerScope(t *testing.T) {
+	graph := checkTestGraph(t, []load.SourceFile{{
+		Path: "/repo/case/cmd/app/main.go",
+		Src: []byte(`package main
+
+func makeBytes() ([]byte, bool) { return nil, true }
+func consumeBytes(value []byte) {}
+
+func main() {
+	value, ok := makeBytes()
+	if ok {
+		value := "shadow"
+		_ = value
+	}
+	consumeBytes(value)
+}
+`),
+	}})
+	program := CheckGraphCore(graph)
+	if !program.Ok {
+		t.Fatalf("closed inner scope affected type inference: %#v", program)
 	}
 }
 

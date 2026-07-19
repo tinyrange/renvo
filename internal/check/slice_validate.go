@@ -20,7 +20,7 @@ func invalidDefiniteSliceOperand(pkg load.Package, info PackageInfo, fileIndex i
 		if start < end && tokCharIs(&file, end-1, '}') {
 			typeEnd := findTypeTopLevelChar(file, start, end, '{')
 			array = definiteArrayType(pkg, info, file, start, typeEnd)
-		} else if end-start >= 3 && file.Tokens[start].Kind == syntax.TokenIdent && tokCharIs(&file, end-1, ')') {
+		} else if end-start >= 3 && file.Tokens[start].KindLine&255 == syntax.TokenIdent && tokCharIs(&file, end-1, ')') {
 			calleeFile, callee, ok := findDefinitePackageFunc(&pkg, &info, &file, start)
 			if ok {
 				signature := buildFuncSignature(pkg.Files[calleeFile].File, callee)

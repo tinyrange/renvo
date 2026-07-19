@@ -6,9 +6,20 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unsafe"
 
 	wireunit "renvo.dev/backend/unit"
 )
+
+func TestTokenCompactLayout(t *testing.T) {
+	tok := MakeToken(TokenIdent, 12, 6, 345)
+	if tok.KindLine&255 != TokenIdent || tok.KindLine>>8 != 345 || tok.Start != 12 || tok.Size != 6 {
+		t.Fatalf("token fields were not preserved: %#v", tok)
+	}
+	if got, want := unsafe.Sizeof(tok), 3*unsafe.Sizeof(int(0)); got != want {
+		t.Fatalf("token size = %d, want %d", got, want)
+	}
+}
 
 func coreGoldenProgram() Program {
 	return Program{
@@ -16,9 +27,9 @@ func coreGoldenProgram() Program {
 		ImportPath: "example/p",
 		Text:       []byte("package p\n"),
 		Tokens: []Token{
-			{Kind: TokenPackage, Start: 0, Size: 7, Line: 1},
-			{Kind: TokenIdent, Start: 8, Size: 1, Line: 1},
-			{Kind: TokenEOF, Start: 10, Size: 0, Line: 2},
+			MakeToken(TokenPackage, 0, 7, 1),
+			MakeToken(TokenIdent, 8, 1, 1),
+			MakeToken(TokenEOF, 10, 0, 2),
 		},
 	}
 }
@@ -57,7 +68,7 @@ func TestTransientCoreMarshalPreservesCanonicalEncoding(t *testing.T) {
 	program.Text = bytes.Repeat([]byte("package p\n"), transientMarshalChunk)
 	program.Tokens = make([]Token, transientMarshalChunk+17)
 	for i := 0; i < len(program.Tokens); i++ {
-		program.Tokens[i] = Token{Kind: TokenIdent, Start: i, Size: 1, Line: i/10 + 1}
+		program.Tokens[i] = MakeToken(TokenIdent, i, 1, i/10+1)
 	}
 	want, ok := MarshalCore(CoreProgramFrom(program))
 	if !ok {

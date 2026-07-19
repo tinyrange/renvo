@@ -62,13 +62,13 @@ func scanTokens(src []byte) ([]Token, bool) {
 			if i-start <= 11 {
 				kind = keywordKind(src, start, i)
 			}
-			tokens = append(tokens, Token{Kind: kind, Start: start, End: i, Line: line})
+			tokens = append(tokens, MakeToken(kind, start, i, line))
 			continue
 		}
 		if c >= '0' && c <= '9' {
 			start := i
 			i = scanNumberEnd(src, i)
-			tokens = append(tokens, Token{Kind: TokenNumber, Start: start, End: i, Line: line})
+			tokens = append(tokens, MakeToken(TokenNumber, start, i, line))
 			continue
 		}
 		if c == '"' {
@@ -89,7 +89,7 @@ func scanTokens(src []byte) ([]Token, bool) {
 				break
 			}
 			i++
-			tokens = append(tokens, Token{Kind: TokenString, Start: start, End: i, Line: line})
+			tokens = append(tokens, MakeToken(TokenString, start, i, line))
 			continue
 		}
 		if c == '`' {
@@ -107,7 +107,7 @@ func scanTokens(src []byte) ([]Token, bool) {
 				break
 			}
 			i++
-			tokens = append(tokens, Token{Kind: TokenString, Start: start, End: i, Line: tokenLine})
+			tokens = append(tokens, MakeToken(TokenString, start, i, tokenLine))
 			continue
 		}
 		if c == '\'' {
@@ -128,7 +128,7 @@ func scanTokens(src []byte) ([]Token, bool) {
 				break
 			}
 			i++
-			tokens = append(tokens, Token{Kind: TokenChar, Start: start, End: i, Line: line})
+			tokens = append(tokens, MakeToken(TokenChar, start, i, line))
 			continue
 		}
 		start := i
@@ -155,9 +155,9 @@ func scanTokens(src []byte) ([]Token, bool) {
 				}
 			}
 		}
-		tokens = append(tokens, Token{Kind: TokenOperator, Start: start, End: i, Line: line})
+		tokens = append(tokens, MakeToken(TokenOperator, start, i, line))
 	}
-	tokens = append(tokens, Token{Kind: TokenEOF, Start: len(src), End: len(src), Line: line})
+	tokens = append(tokens, MakeToken(TokenEOF, len(src), len(src), line))
 	return tokens, ok
 }
 

@@ -107,6 +107,12 @@ func analysisCheckDiagnostic(graph load.Graph, program check.Program) Diagnostic
 		code, message = "RENVO-CHECK-027", "invalid number of arguments to builtin"
 	case check.CheckErrBuiltinOperand:
 		code, message = "RENVO-CHECK-028", "invalid operand type for builtin"
+	case check.CheckErrUndefined:
+		code, message = "RENVO-CHECK-029", "undefined identifier"
+	case check.CheckErrOperand:
+		code, message = "RENVO-CHECK-030", "invalid operation for operand types"
+	case check.CheckErrReturnType:
+		code, message = "RENVO-CHECK-031", "return value is not assignable to the function result"
 	}
 	diagnostic := Diagnostic{Phase: "checker", Code: code, Message: message}
 	if program.ErrorPackage < 0 || program.ErrorPackage >= len(graph.Packages) {
@@ -124,7 +130,7 @@ func analysisDiagnosticAtToken(diagnostic Diagnostic, file load.ParsedFile, toke
 	start, end, line := len(file.Src), len(file.Src), 1
 	if tokenIndex >= 0 && tokenIndex < len(file.File.Tokens) {
 		token := file.File.Tokens[tokenIndex]
-		start, end, line = token.Start, token.End, token.Line
+		start, end, line = token.Start, token.End, token.KindLine>>8
 	}
 	diagnostic.Start, diagnostic.End, diagnostic.Line = start, end, line
 	diagnostic.Column = 1

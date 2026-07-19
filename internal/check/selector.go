@@ -92,7 +92,7 @@ func appendExprSelectors(selectors []SelectorRef, file syntax.File, fileIndex in
 		if !tokenTextIs(&file, i, ".") {
 			continue
 		}
-		if file.Tokens[i-1].Kind != syntax.TokenIdent || file.Tokens[i+1].Kind != syntax.TokenIdent {
+		if file.Tokens[i-1].KindLine&255 != syntax.TokenIdent || file.Tokens[i+1].KindLine&255 != syntax.TokenIdent {
 			continue
 		}
 		baseName := tokenString(&file, i-1)

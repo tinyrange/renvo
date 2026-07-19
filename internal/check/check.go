@@ -35,6 +35,9 @@ const (
 	CheckErrDeferBuiltin
 	CheckErrBuiltinArity
 	CheckErrBuiltinOperand
+	CheckErrUndefined
+	CheckErrOperand
+	CheckErrReturnType
 )
 
 const (
@@ -457,7 +460,7 @@ func receiverTypeName(file syntax.File, fn syntax.FuncDecl) string {
 		end = len(file.Tokens)
 	}
 	for i := end - 1; i >= fn.ReceiverStart; i-- {
-		if file.Tokens[i].Kind == syntax.TokenIdent {
+		if file.Tokens[i].KindLine&255 == syntax.TokenIdent {
 			return tokenString(&file, i)
 		}
 	}

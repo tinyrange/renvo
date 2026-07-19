@@ -48,7 +48,7 @@ func Value() int { return 1 }
 	if len(program.Symbols) != 2 {
 		t.Fatalf("symbols = %#v", program.Symbols)
 	}
-	if len(program.Tokens) == 0 || program.Tokens[len(program.Tokens)-1].Kind != unit.TokenEOF {
+	if len(program.Tokens) == 0 || program.Tokens[len(program.Tokens)-1].KindLine&255 != unit.TokenEOF {
 		t.Fatal("canonical unit has no final EOF token")
 	}
 	if len(program.Selectors) == 0 || lowerTokenText(program, program.Selectors[0].NameTok) != "Value" {
@@ -79,7 +79,7 @@ func TestEmitCheckedPackageCorePreservesFileOrderAndBoundaries(t *testing.T) {
 		t.Fatalf("function count = %d, want 2", len(program.Funcs))
 	}
 	for i := 0; i+1 < len(program.Tokens); i++ {
-		if program.Tokens[i].Kind == unit.TokenEOF {
+		if program.Tokens[i].KindLine&255 == unit.TokenEOF {
 			t.Fatalf("file-local EOF leaked into token %d", i)
 		}
 	}

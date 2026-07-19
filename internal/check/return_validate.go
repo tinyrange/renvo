@@ -5,7 +5,7 @@ import "renvo.dev/internal/syntax"
 // invalidReturnCount rejects return lists whose arity is statically certain
 // to disagree with the function signature. A single call expression is left
 // to later tuple-aware checking because it may return multiple values.
-func invalidReturnCount(file syntax.File, fn syntax.FuncDecl, signature FuncSignature) int {
+func invalidReturnCount(file syntax.File, fn syntax.FuncDecl, signature FuncSignature) (int, int) {
 	start := fn.BodyStart + 1
 	end := fn.BodyEnd - 1
 	if start < 0 {
@@ -15,16 +15,22 @@ func invalidReturnCount(file syntax.File, fn syntax.FuncDecl, signature FuncSign
 		end = len(file.Tokens)
 	}
 	for i := start; i < end; i++ {
-		if file.Tokens[i].Kind == syntax.TokenFunc {
+		if file.Tokens[i].KindLine&255 == syntax.TokenFunc {
 			i = skipNestedFunction(file, i, end)
 			continue
 		}
-		if file.Tokens[i].Kind != syntax.TokenReturn {
+		if file.Tokens[i].KindLine&255 != syntax.TokenReturn {
 			continue
 		}
 		valueStart, valueEnd, count := returnValueList(file, i, end)
 		expected := len(signature.Results)
 		if count == expected {
+			if count == 1 && valueEnd-valueStart == 1 && signature.Results[0].TypeEnd-signature.Results[0].TypeStart == 1 {
+				want := tokenString(&file, signature.Results[0].TypeStart)
+				if primitiveTypeMismatch(want, definiteLiteralKind(file, valueStart)) {
+					return CheckErrReturnType, valueStart
+				}
+			}
 			continue
 		}
 		if count == 0 && resultsAreNamed(signature.Results) {
@@ -33,9 +39,9 @@ func invalidReturnCount(file syntax.File, fn syntax.FuncDecl, signature FuncSign
 		if count == 1 && expected > 1 && returnMayBeMultiValueCall(file, valueStart, valueEnd) {
 			continue
 		}
-		return i
+		return CheckErrReturnCount, i
 	}
-	return -1
+	return CheckOK, -1
 }
 
 func skipNestedFunction(file syntax.File, start int, limit int) int {
@@ -68,7 +74,7 @@ func skipNestedFunction(file syntax.File, start int, limit int) int {
 
 func returnValueList(file syntax.File, returnTok int, limit int) (int, int, int) {
 	start := returnTok + 1
-	if start >= limit || tokCharIs(&file, start, ';') || tokCharIs(&file, start, '}') || file.Tokens[start].Line > file.Tokens[returnTok].Line {
+	if start >= limit || tokCharIs(&file, start, ';') || tokCharIs(&file, start, '}') || file.Tokens[start].KindLine>>8 > file.Tokens[returnTok].KindLine>>8 {
 		return start, start, 0
 	}
 	parenDepth := 0
@@ -77,7 +83,7 @@ func returnValueList(file syntax.File, returnTok int, limit int) (int, int, int)
 	count := 1
 	end := start
 	for i := start; i < limit; i++ {
-		if i > start && parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && file.Tokens[i].Line > file.Tokens[i-1].Line && !returnLineContinues(file, i-1) {
+		if i > start && parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && file.Tokens[i].KindLine>>8 > file.Tokens[i-1].KindLine>>8 && !returnLineContinues(file, i-1) {
 			break
 		}
 		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 {

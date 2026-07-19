@@ -79,10 +79,10 @@ func definiteBuiltinExprTypeName(pkg *load.Package, info *PackageInfo, fileIndex
 	if start < 0 || end <= start {
 		return ""
 	}
-	if end-start == 1 && file.Tokens[start].Kind == syntax.TokenIdent {
+	if end-start == 1 && file.Tokens[start].KindLine&255 == syntax.TokenIdent {
 		return definiteBuiltinNamedValueTypeName(pkg, info, fileIndex, signature, locals, start, before, depth+1)
 	}
-	if file.Tokens[start].Kind == syntax.TokenIdent && start+1 < end && tokCharIs(file, start+1, '(') {
+	if file.Tokens[start].KindLine&255 == syntax.TokenIdent && start+1 < end && tokCharIs(file, start+1, '(') {
 		name := tokenString(file, start)
 		if name != "make" {
 			return definiteBuiltinCanonicalTypeName(pkg, info, name, depth+1)
@@ -153,7 +153,7 @@ func definiteBuiltinTypeSpanName(pkg *load.Package, info *PackageInfo, fileIndex
 	}
 	file := &pkg.Files[fileIndex].File
 	start, end = trimTypeSpan(*file, start, end)
-	if end-start != 1 || file.Tokens[start].Kind != syntax.TokenIdent {
+	if end-start != 1 || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return ""
 	}
 	return definiteBuiltinCanonicalTypeName(pkg, info, tokenString(file, start), depth+1)
@@ -188,7 +188,7 @@ func definiteBuiltinExprType(pkg *load.Package, info *PackageInfo, fileIndex int
 		return builtinTypeUnknown
 	}
 	if end-start == 1 {
-		kind := file.Tokens[start].Kind
+		kind := file.Tokens[start].KindLine & 255
 		if kind == syntax.TokenString {
 			return builtinTypeString
 		}
@@ -205,7 +205,7 @@ func definiteBuiltinExprType(pkg *load.Package, info *PackageInfo, fileIndex int
 			}
 		}
 	}
-	if file.Tokens[start].Kind == syntax.TokenIdent && start+1 < end && tokCharIs(file, start+1, '(') {
+	if file.Tokens[start].KindLine&255 == syntax.TokenIdent && start+1 < end && tokCharIs(file, start+1, '(') {
 		name := tokenString(file, start)
 		if name == "make" && start+2 < end {
 			return definiteBuiltinTypeSpan(pkg, info, fileIndex, start+2, nextTopLevelComma(*file, start+2, end-1), depth+1)
@@ -265,7 +265,7 @@ func definiteBuiltinTypeSpan(pkg *load.Package, info *PackageInfo, fileIndex int
 	if start < 0 || end <= start {
 		return builtinTypeUnknown
 	}
-	if file.Tokens[start].Kind == syntax.TokenMap {
+	if file.Tokens[start].KindLine&255 == syntax.TokenMap {
 		return builtinTypeMap
 	}
 	if tokCharIs(&file, start, '[') {
@@ -274,7 +274,7 @@ func definiteBuiltinTypeSpan(pkg *load.Package, info *PackageInfo, fileIndex int
 		}
 		return builtinTypeInvalid
 	}
-	if file.Tokens[start].Kind != syntax.TokenIdent {
+	if file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return builtinTypeInvalid
 	}
 	return definiteBuiltinTypeName(pkg, info, tokenString(&file, start), depth+1)

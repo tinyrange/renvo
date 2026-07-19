@@ -110,7 +110,7 @@ func buildAssignTargets(file syntax.File, fileIndex int, info PackageInfo, scope
 		if span.EndTok-span.StartTok != 1 || span.StartTok < 0 || span.StartTok >= len(file.Tokens) {
 			continue
 		}
-		if file.Tokens[span.StartTok].Kind != syntax.TokenIdent {
+		if file.Tokens[span.StartTok].KindLine&255 != syntax.TokenIdent {
 			continue
 		}
 		name := tokenString(&file, span.StartTok)
@@ -180,7 +180,7 @@ func findTopLevelAssignOp(file syntax.File, start int, end int) int {
 		}
 		tok := file.Tokens[i]
 		c := byte(0)
-		if tok.Kind == syntax.TokenOperator && tok.End == tok.Start+1 {
+		if tok.KindLine&255 == syntax.TokenOperator && tok.End == tok.Start+1 {
 			c = file.Src[tok.Start]
 		}
 		if c == '(' {
@@ -211,7 +211,7 @@ func isAssignOp(file syntax.File, tok int) bool {
 		return false
 	}
 	token := file.Tokens[tok]
-	if token.Kind != syntax.TokenOperator || token.Start < 0 || token.End > len(file.Src) {
+	if token.KindLine&255 != syntax.TokenOperator || token.Start < 0 || token.End > len(file.Src) {
 		return false
 	}
 	size := token.End - token.Start

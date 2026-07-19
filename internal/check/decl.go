@@ -128,7 +128,7 @@ func buildFuncLocalDecls(file syntax.File, fileIndex int, info PackageInfo, chec
 		if stmt.Kind != syntax.StmtDecl || stmt.StartTok < 0 || stmt.StartTok >= len(file.Tokens) {
 			continue
 		}
-		kind := declSymbolKind(file.Tokens[stmt.StartTok].Kind)
+		kind := declSymbolKind(file.Tokens[stmt.StartTok].KindLine & 255)
 		start := stmt.StartTok + 1
 		end := stmt.EndTok
 		if start < end && tokCharIs(&file, start, '(') {
@@ -155,7 +155,7 @@ func buildFuncLocalDecls(file syntax.File, fileIndex int, info PackageInfo, chec
 
 func appendLocalDeclSpec(decls []LocalDeclInfo, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, kind int, start int, end int) []LocalDeclInfo {
 	start, end = trimDeclSpan(file, start, end)
-	if start < 0 || end <= start || start >= len(file.Tokens) || file.Tokens[start].Kind != syntax.TokenIdent {
+	if start < 0 || end <= start || start >= len(file.Tokens) || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return decls
 	}
 	if kind == SymbolType {
@@ -244,7 +244,7 @@ func localDeclNameTokens(file syntax.File, start int, end int) ([]int, int) {
 	names := make([]int, 0, capacity)
 	i := start
 	for i < end {
-		if file.Tokens[i].Kind != syntax.TokenIdent {
+		if file.Tokens[i].KindLine&255 != syntax.TokenIdent {
 			break
 		}
 		names = append(names, i)
@@ -265,7 +265,7 @@ func declNameListEnd(file syntax.File, decl syntax.TopDecl) int {
 			return i
 		}
 		i++
-		if i >= decl.EndTok || file.Tokens[i].Kind != syntax.TokenIdent {
+		if i >= decl.EndTok || file.Tokens[i].KindLine&255 != syntax.TokenIdent {
 			return i
 		}
 		i++
@@ -280,7 +280,7 @@ func declNameIndex(file syntax.File, decl syntax.TopDecl) int {
 		if i == decl.NameTok {
 			return index
 		}
-		if file.Tokens[i].Kind == syntax.TokenIdent {
+		if file.Tokens[i].KindLine&255 == syntax.TokenIdent {
 			index++
 		}
 		i++

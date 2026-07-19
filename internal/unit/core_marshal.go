@@ -69,12 +69,13 @@ func appendEncodedTokensCore(out []byte, tokens []Token, transient bool) []byte 
 	prevLine := 0
 	for i := 0; i < len(tokens); i++ {
 		tok := tokens[i]
-		out = appendVarint(out, tok.Kind)
+		out = appendVarint(out, tok.KindLine&255)
 		out = appendVarint(out, tok.Start-prevStart)
 		out = appendVarint(out, tok.Size)
-		out = appendVarint(out, tok.Line-prevLine)
+		line := tok.KindLine >> 8
+		out = appendVarint(out, line-prevLine)
 		prevStart = tok.Start
-		prevLine = tok.Line
+		prevLine = line
 		if transient && (i+1)%transientMarshalChunk == 0 {
 			renvo_runtime_ArenaDiscardUnitTokens(tokens[i+1-transientMarshalChunk : i+1])
 		}

@@ -13,6 +13,16 @@ type embedMemorySourceFS struct {
 	files []load.SourceFile
 }
 
+type embedRejectHiddenReadFS struct{ embedMemorySourceFS }
+
+func (fs embedRejectHiddenReadFS) ReadDir(path string) ([]DirEntry, bool) {
+	clean := load.CleanPath(path)
+	if strings.Contains(clean, "/.cache") || strings.Contains(clean, "/scratch") {
+		return nil, false
+	}
+	return fs.embedMemorySourceFS.ReadDir(path)
+}
+
 func (fs embedMemorySourceFS) ReadFile(path string) ([]byte, bool) {
 	path = load.CleanPath(path)
 	for i := 0; i < len(fs.files); i++ {
@@ -150,6 +160,18 @@ func TestSourceEmbedArchiveRoundTripAndDirectoryRules(t *testing.T) {
 	allFiles, ok, detail := resolveSourceEmbedPatterns(fs, "/repo/app/cmd/app", "/repo/app", []string{"all:assets"})
 	if !ok || detail != "" || len(allFiles) != 4 {
 		t.Fatalf("all: directory match = %#v, %v, %q", allFiles, ok, detail)
+	}
+}
+
+func TestSourceEmbedPrunesHiddenDirectoriesBeforeWalking(t *testing.T) {
+	fs := embedRejectHiddenReadFS{embedMemorySourceFS{files: []load.SourceFile{
+		{Path: "/repo/app/cmd/app/assets/message.txt", Src: []byte("message")},
+		{Path: "/repo/app/cmd/app/.cache/large.bin", Src: []byte("ignored")},
+		{Path: "/repo/app/cmd/app/scratch/large.bin", Src: []byte("unmatched")},
+	}}}
+	files, ok, detail := resolveSourceEmbedPatterns(fs, "/repo/app/cmd/app", "/repo/app", []string{"assets"})
+	if !ok || detail != "" || len(files) != 1 || files[0].name != "assets/message.txt" {
+		t.Fatalf("hidden directory affected embed walk: %#v, %v, %q", files, ok, detail)
 	}
 }
 

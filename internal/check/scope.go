@@ -80,7 +80,7 @@ func receiverNameToken(file syntax.File, fn syntax.FuncDecl) int {
 	if start < 0 || end <= start || end > len(file.Tokens) {
 		return -1
 	}
-	if file.Tokens[start].Kind != syntax.TokenIdent {
+	if file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return -1
 	}
 	if end-start <= 1 {
@@ -96,7 +96,7 @@ func collectFieldNames(file syntax.File, start int, end int, kind int, scope *Fu
 		segStart := i
 		segEnd := nextTopLevelComma(file, i, end)
 		first := firstNonSeparator(file, segStart, segEnd)
-		if first < segEnd && file.Tokens[first].Kind == syntax.TokenIdent {
+		if first < segEnd && file.Tokens[first].KindLine&255 == syntax.TokenIdent {
 			next := first + 1
 			if next >= segEnd {
 				pending = append(pending, first)
@@ -156,7 +156,7 @@ func collectShortDeclNames(file syntax.File, stmt syntax.Stmt, scope *FuncScope)
 	}
 	i := stmt.StartTok
 	for i < assign {
-		if file.Tokens[i].Kind == syntax.TokenIdent && tokenString(&file, i) != "_" {
+		if file.Tokens[i].KindLine&255 == syntax.TokenIdent && tokenString(&file, i) != "_" {
 			if LookupScopeName(*scope, tokenString(&file, i)) < 0 {
 				addScopeName(scope, tokenString(&file, i), NameLocal, i, false, false)
 			}
@@ -168,7 +168,7 @@ func collectShortDeclNames(file syntax.File, stmt syntax.Stmt, scope *FuncScope)
 func collectLeadingIdentList(file syntax.File, start int, end int, scope *FuncScope) {
 	i := start
 	for i < end {
-		if file.Tokens[i].Kind != syntax.TokenIdent {
+		if file.Tokens[i].KindLine&255 != syntax.TokenIdent {
 			return
 		}
 		name := tokenString(&file, i)
@@ -185,13 +185,13 @@ func collectLeadingIdentList(file syntax.File, start int, end int, scope *FuncSc
 }
 
 func statementSpecEnd(file syntax.File, start int, end int) int {
-	line := file.Tokens[start].Line
+	line := file.Tokens[start].KindLine >> 8
 	i := start
 	for i < end {
 		if tokCharIs(&file, i, ';') {
 			return i + 1
 		}
-		if i > start && file.Tokens[i].Line != line {
+		if i > start && file.Tokens[i].KindLine>>8 != line {
 			return i
 		}
 		i++
@@ -214,7 +214,7 @@ func nextTopLevelComma(file syntax.File, start int, end int) int {
 	for i < end {
 		tok := file.Tokens[i]
 		c := byte(0)
-		if tok.Kind == syntax.TokenOperator && tok.End == tok.Start+1 {
+		if tok.KindLine&255 == syntax.TokenOperator && tok.End == tok.Start+1 {
 			c = file.Src[tok.Start]
 		}
 		if c == '(' {
@@ -287,7 +287,7 @@ func tokCharIs(file *syntax.File, tok int, c byte) bool {
 	if tok < 0 || tok >= len(file.Tokens) {
 		return false
 	}
-	if file.Tokens[tok].Kind != syntax.TokenOperator {
+	if file.Tokens[tok].KindLine&255 != syntax.TokenOperator {
 		return false
 	}
 	if file.Tokens[tok].End-file.Tokens[tok].Start != 1 {

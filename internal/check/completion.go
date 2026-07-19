@@ -269,10 +269,10 @@ func completionNameType(graph load.Graph, prog Program, pkgIndex, fileIndex int,
 	}
 	for i := fn.BodyStart + 1; i < fn.BodyEnd && i < len(file.Tokens); i++ {
 		tok := file.Tokens[i]
-		if tok.Start >= offset || tok.Kind != syntax.TokenIdent || tokenString(&file, i) != name {
+		if tok.Start >= offset || tok.KindLine&255 != syntax.TokenIdent || tokenString(&file, i) != name {
 			continue
 		}
-		if i > 0 && file.Tokens[i-1].Kind == syntax.TokenVar {
+		if i > 0 && file.Tokens[i-1].KindLine&255 == syntax.TokenVar {
 			end := completionStatementEnd(file, i+1, fn.BodyEnd)
 			value := findDeclAssign(file, i+1, end)
 			typeEnd := end
@@ -302,12 +302,12 @@ func completionExpressionType(graph load.Graph, prog Program, pkgIndex, fileInde
 	for start < end && start < len(file.Tokens) && tokenTextIs(&file, start, "&") {
 		start++
 	}
-	if start >= end || start >= len(file.Tokens) || file.Tokens[start].Kind != syntax.TokenIdent {
+	if start >= end || start >= len(file.Tokens) || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return completionType{}, false
 	}
 	owner := pkgIndex
 	nameTok := start
-	if start+2 < end && tokenTextIs(&file, start+1, ".") && file.Tokens[start+2].Kind == syntax.TokenIdent {
+	if start+2 < end && tokenTextIs(&file, start+1, ".") && file.Tokens[start+2].KindLine&255 == syntax.TokenIdent {
 		owner = completionImportPackage(prog.Packages[pkgIndex], fileIndex, tokenString(&file, start))
 		nameTok = start + 2
 	}
@@ -371,7 +371,7 @@ func completionSpanType(graph load.Graph, prog Program, pkg, fileIndex, start, e
 		return completionType{}, false
 	}
 	file := graph.Packages[pkg].Files[fileIndex].File
-	for start < end && start < len(file.Tokens) && file.Tokens[start].Kind != syntax.TokenIdent {
+	for start < end && start < len(file.Tokens) && file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		start++
 	}
 	if start >= end || start >= len(file.Tokens) {
@@ -379,7 +379,7 @@ func completionSpanType(graph load.Graph, prog Program, pkg, fileIndex, start, e
 	}
 	name := tokenString(&file, start)
 	owner := pkg
-	if start+2 < end && tokenTextIs(&file, start+1, ".") && file.Tokens[start+2].Kind == syntax.TokenIdent {
+	if start+2 < end && tokenTextIs(&file, start+1, ".") && file.Tokens[start+2].KindLine&255 == syntax.TokenIdent {
 		owner = completionImportPackage(prog.Packages[pkg], fileIndex, name)
 		name = tokenString(&file, start+2)
 	}
@@ -437,8 +437,8 @@ func completionSelectorComponents(src []byte, dot int) []string {
 }
 
 func completionFindShortAssign(file syntax.File, name, end int) int {
-	line := file.Tokens[name].Line
-	for i := name + 1; i < end && i < len(file.Tokens) && file.Tokens[i].Line == line; i++ {
+	line := file.Tokens[name].KindLine >> 8
+	for i := name + 1; i < end && i < len(file.Tokens) && file.Tokens[i].KindLine>>8 == line; i++ {
 		if tokenTextIs(&file, i, ":=") {
 			return i
 		}
@@ -453,9 +453,9 @@ func completionStatementEnd(file syntax.File, start, limit int) int {
 	if start >= len(file.Tokens) {
 		return start
 	}
-	line := file.Tokens[start].Line
+	line := file.Tokens[start].KindLine >> 8
 	for i := start; i < limit && i < len(file.Tokens); i++ {
-		if tokenTextIs(&file, i, ";") || i > start && file.Tokens[i].Line != line {
+		if tokenTextIs(&file, i, ";") || i > start && file.Tokens[i].KindLine>>8 != line {
 			return i
 		}
 	}

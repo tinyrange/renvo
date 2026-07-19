@@ -124,10 +124,10 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 		}
 		for j := 0; j < len(actions); j++ {
 			tok := programs[i].Tokens[j]
-			programs[i].Tokens[j].Line = actions[j]
-			if tok.Kind != unit.TokenEOF && actions[j] >= 0 {
+			programs[i].Tokens[j].KindLine = programs[i].Tokens[j].KindLine&255 | actions[j]<<8
+			if tok.KindLine&255 != unit.TokenEOF && actions[j] >= 0 {
 				finalEOF++
-				if tok.Kind == unit.TokenOp && tok.Size == 3 && tok.Start+2 < len(programs[i].Text) && programs[i].Text[tok.Start] == '.' && programs[i].Text[tok.Start+1] == '.' && programs[i].Text[tok.Start+2] == '.' {
+				if tok.KindLine&255 == unit.TokenOp && tok.Size == 3 && tok.Start+2 < len(programs[i].Text) && programs[i].Text[tok.Start] == '.' && programs[i].Text[tok.Start+1] == '.' && programs[i].Text[tok.Start+2] == '.' {
 					finalEOF += 2
 				}
 			}
@@ -163,12 +163,7 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 	if !appendOK {
 		return empty, false
 	}
-	program.Tokens = append(program.Tokens, unit.Token{
-		Kind:  unit.TokenEOF,
-		Start: len(program.Text),
-		Size:  0,
-		Line:  line,
-	})
+	program.Tokens = append(program.Tokens, unit.MakeToken(unit.TokenEOF, len(program.Text), 0, line))
 	if !lowerFunctionValuesCore(&program, transient) {
 		return empty, false
 	}
@@ -205,7 +200,7 @@ func restoreCoreTokenLines(text []byte, tokens []unit.Token) {
 			return
 		}
 		line += countCoreNewlines(text[position:start])
-		tokens[i].Line = line
+		tokens[i].KindLine = tokens[i].KindLine&255 | line<<8
 		position = start
 	}
 }
@@ -291,7 +286,7 @@ func addRootEntrypointCore(src unit.Program, packageIndex int, processState bool
 	if processState {
 		return addRootProcessEntrypointCore(src, packageIndex, initNames)
 	}
-	if len(src.Tokens) == 0 || src.Tokens[len(src.Tokens)-1].Kind != unit.TokenEOF {
+	if len(src.Tokens) == 0 || src.Tokens[len(src.Tokens)-1].KindLine&255 != unit.TokenEOF {
 		return src, false
 	}
 	src.Tokens = copyCoreTokens(src.Tokens, len(src.Tokens)-1)
@@ -302,12 +297,12 @@ func addRootEntrypointCore(src unit.Program, packageIndex int, processState bool
 	line := countCoreNewlines(src.Text) + 1
 	src.Text = appendCoreStringBytes(src.Text, "func appMain() int { ")
 	base := len(src.Tokens)
-	src.Tokens = append(src.Tokens, unit.Token{Kind: unit.TokenFunc, Start: start, Size: 4, Line: line})
-	src.Tokens = append(src.Tokens, unit.Token{Kind: unit.TokenIdent, Start: start + 5, Size: 7, Line: line})
-	src.Tokens = append(src.Tokens, unit.Token{Kind: unit.TokenOp, Start: start + 12, Size: 1, Line: line})
-	src.Tokens = append(src.Tokens, unit.Token{Kind: unit.TokenOp, Start: start + 13, Size: 1, Line: line})
-	src.Tokens = append(src.Tokens, unit.Token{Kind: unit.TokenIdent, Start: start + 15, Size: 3, Line: line})
-	src.Tokens = append(src.Tokens, unit.Token{Kind: unit.TokenOp, Start: start + 19, Size: 1, Line: line})
+	src.Tokens = append(src.Tokens, unit.MakeToken(unit.TokenFunc, start, 4, line))
+	src.Tokens = append(src.Tokens, unit.MakeToken(unit.TokenIdent, start+5, 7, line))
+	src.Tokens = append(src.Tokens, unit.MakeToken(unit.TokenOp, start+12, 1, line))
+	src.Tokens = append(src.Tokens, unit.MakeToken(unit.TokenOp, start+13, 1, line))
+	src.Tokens = append(src.Tokens, unit.MakeToken(unit.TokenIdent, start+15, 3, line))
+	src.Tokens = append(src.Tokens, unit.MakeToken(unit.TokenOp, start+19, 1, line))
 	mainTok, eof := appendRootEntrypointTailCore(&src, initNames, line)
 	src.Funcs = append(src.Funcs, unit.Func{
 		NameStart:     start + 5,
@@ -334,7 +329,7 @@ func programsContainCoreFunc(programs []unit.Program, name string) bool {
 }
 
 func addRootProcessEntrypointCore(src unit.Program, packageIndex int, initNames []string) (unit.Program, bool) {
-	if len(src.Tokens) == 0 || src.Tokens[len(src.Tokens)-1].Kind != unit.TokenEOF {
+	if len(src.Tokens) == 0 || src.Tokens[len(src.Tokens)-1].KindLine&255 != unit.TokenEOF {
 		return src, false
 	}
 	src.Tokens = copyCoreTokens(src.Tokens, len(src.Tokens)-1)
@@ -405,7 +400,7 @@ func coreProgramInitFunctionNames(programs []unit.Program) []string {
 }
 
 func appendRootProcessTokenCore(tokens []unit.Token, kind int, base int, start int, size int, line int) []unit.Token {
-	return append(tokens, unit.Token{Kind: kind, Start: base + start, Size: size, Line: line})
+	return append(tokens, unit.MakeToken(kind, base+start, size, line))
 }
 
 func appendRootCallCore(src *unit.Program, name string, line int) int {
@@ -441,10 +436,10 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, line i
 	}
 	prevEnd := 0
 	for i := 0; i < len(src.Tokens); i++ {
-		action := src.Tokens[i].Line
+		action := src.Tokens[i].KindLine >> 8
 		tok := src.Tokens[i]
-		if tok.Kind == unit.TokenEOF {
-			src.Tokens[i].Line = len(dst.Tokens)
+		if tok.KindLine&255 == unit.TokenEOF {
+			src.Tokens[i].KindLine = src.Tokens[i].KindLine&255 | len(dst.Tokens)<<8
 			continue
 		}
 		tokStart := tok.Start
@@ -459,7 +454,7 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, line i
 				prevEnd = tokEnd
 			}
 			if tokenActionRedirect(action) < 0 {
-				src.Tokens[i].Line = finalEOF
+				src.Tokens[i].KindLine = src.Tokens[i].KindLine&255 | finalEOF<<8
 			}
 			continue
 		}
@@ -470,15 +465,15 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, line i
 		}
 		mappedToken := len(dst.Tokens)
 		tok.Start = len(dst.Text)
-		tok.Line = line
+		tok.KindLine = tok.KindLine&255 | line<<8
 		replacementIndex := tokenActionReplacement(action)
 		if replacementIndex >= 0 {
 			replacement := aliases[replacementIndex]
 			dst.Text = appendCoreStringBytes(dst.Text, replacement)
-			tok.Kind = coreLinkedReplacementTokenKind(tok.Kind, replacement)
+			tok.KindLine = tok.KindLine>>8<<8 | coreLinkedReplacementTokenKind(tok.KindLine&255, replacement)
 			tok.Size = len(replacement)
 			line += countCoreStringNewlines(replacement)
-		} else if tok.Kind == unit.TokenOp && tok.Size == 3 && tokStart+2 < len(src.Text) && src.Text[tokStart] == '.' && src.Text[tokStart+1] == '.' && src.Text[tokStart+2] == '.' {
+		} else if tok.KindLine&255 == unit.TokenOp && tok.Size == 3 && tokStart+2 < len(src.Text) && src.Text[tokStart] == '.' && src.Text[tokStart+1] == '.' && src.Text[tokStart+2] == '.' {
 			dst.Text = appendCoreStringBytes(dst.Text, "...")
 			for j := 0; j < 3; j++ {
 				dot := tok
@@ -486,7 +481,7 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, line i
 				dot.Size = 1
 				dst.Tokens = append(dst.Tokens, dot)
 			}
-			src.Tokens[i].Line = mappedToken
+			src.Tokens[i].KindLine = src.Tokens[i].KindLine&255 | mappedToken<<8
 			prevEnd = tokEnd
 			continue
 		} else {
@@ -495,7 +490,7 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, line i
 			line += countCoreNewlines(part)
 		}
 		dst.Tokens = append(dst.Tokens, tok)
-		src.Tokens[i].Line = mappedToken
+		src.Tokens[i].KindLine = src.Tokens[i].KindLine&255 | mappedToken<<8
 		prevEnd = tokEnd
 	}
 	if prevEnd < len(src.Text) {
@@ -504,9 +499,9 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, line i
 		line += countCoreNewlines(part)
 	}
 	for i := 0; i < len(src.Tokens); i++ {
-		target := tokenActionRedirect(src.Tokens[i].Line)
+		target := tokenActionRedirect(src.Tokens[i].KindLine >> 8)
 		if target >= 0 {
-			src.Tokens[i].Line = mapLinkedToken(src.Tokens, target, finalEOF)
+			src.Tokens[i].KindLine = src.Tokens[i].KindLine&255 | mapLinkedToken(src.Tokens, target, finalEOF)<<8
 		}
 	}
 	for i := 0; i < len(src.Decls); i++ {
@@ -610,16 +605,16 @@ func markCoreImportDeclTokens(program *unit.Program, actions []int, imp unit.Imp
 	if imp.PathTok < 0 || imp.PathTok >= len(program.Tokens) {
 		return
 	}
-	line := program.Tokens[imp.PathTok].Line
+	line := program.Tokens[imp.PathTok].KindLine >> 8
 	start := imp.PathTok
 	if imp.NameTok >= 0 && imp.NameTok < start {
 		start = imp.NameTok
 	}
-	for start > 0 && program.Tokens[start-1].Line == line {
+	for start > 0 && program.Tokens[start-1].KindLine>>8 == line {
 		start--
 	}
 	end := imp.PathTok
-	for end+1 < len(program.Tokens) && program.Tokens[end+1].Line == line {
+	for end+1 < len(program.Tokens) && program.Tokens[end+1].KindLine>>8 == line {
 		end++
 	}
 	for i := start; i <= end; i++ {
@@ -1020,7 +1015,7 @@ func mappedCoreTokenTextSpan(program *unit.Program, tok int) (int, int, bool) {
 		return 0, 0, false
 	}
 	token := program.Tokens[tok]
-	if token.Kind == unit.TokenEOF || token.Start < 0 || token.Start+token.Size > len(program.Text) {
+	if token.KindLine&255 == unit.TokenEOF || token.Start < 0 || token.Start+token.Size > len(program.Text) {
 		return 0, 0, false
 	}
 	return token.Start, token.Start + token.Size, true
@@ -1033,7 +1028,7 @@ func mapLinkedToken(tokens []unit.Token, tok int, eof int) int {
 	if tok >= len(tokens) {
 		return -1
 	}
-	mapped := tokens[tok].Line
+	mapped := tokens[tok].KindLine >> 8
 	if mapped < 0 {
 		return -1
 	}

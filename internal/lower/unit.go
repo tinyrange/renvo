@@ -99,7 +99,7 @@ func (b *coreUnitBuilder) prepareFileTokens(pkg load.Package) ([]coreFileTokens,
 			textBase: textBase,
 		}
 		for j := 0; j < len(file.Tokens); j++ {
-			if file.Tokens[j].Kind != syntax.TokenEOF {
+			if file.Tokens[j].KindLine&255 != syntax.TokenEOF {
 				tokenBase++
 			}
 		}
@@ -157,7 +157,7 @@ func (b *coreUnitBuilder) addFileTokens(file syntax.File, src []byte, fileIndex 
 	lineOffset := b.lineOffset
 	for i := 0; i < len(file.Tokens); i++ {
 		tok := file.Tokens[i]
-		if tok.Kind == syntax.TokenEOF {
+		if tok.KindLine&255 == syntax.TokenEOF {
 			continue
 		}
 		kind, ok := coreUnitTokenKind(src, tok)
@@ -165,12 +165,7 @@ func (b *coreUnitBuilder) addFileTokens(file syntax.File, src []byte, fileIndex 
 			b.setErr(EmitErrToken, fileIndex, i)
 			return coreTokenMap{}, false
 		}
-		b.program.Tokens = append(b.program.Tokens, unit.Token{
-			Kind:  kind,
-			Start: base + tok.Start,
-			Size:  tok.End - tok.Start,
-			Line:  lineOffset + tok.Line,
-		})
+		b.program.Tokens = append(b.program.Tokens, unit.MakeToken(kind, base+tok.Start, tok.End-tok.Start, lineOffset+tok.KindLine>>8))
 	}
 	if transient {
 		renvo_runtime_ArenaDiscardLowerTokens(file.Tokens)
@@ -199,12 +194,7 @@ func appendCoreBytes(out []byte, data []byte) []byte {
 
 func (b *coreUnitBuilder) finishUnit() bool {
 	line := b.lineOffset + 1
-	b.program.Tokens = append(b.program.Tokens, unit.Token{
-		Kind:  unit.TokenEOF,
-		Start: len(b.program.Text),
-		Size:  0,
-		Line:  line,
-	})
+	b.program.Tokens = append(b.program.Tokens, unit.MakeToken(unit.TokenEOF, len(b.program.Text), 0, line))
 	return true
 }
 
@@ -235,7 +225,7 @@ func (b *coreUnitBuilder) addDecl(file syntax.File, decl syntax.TopDecl, mapping
 
 func mapCoreDeclStartToken(file syntax.File, decl syntax.TopDecl, mapping coreTokenMap, eof int) int {
 	start := decl.StartTok
-	if start > 0 && start < len(file.Tokens) && file.Tokens[start-1].Kind == decl.Kind {
+	if start > 0 && start < len(file.Tokens) && file.Tokens[start-1].KindLine&255 == decl.Kind {
 		start--
 	}
 	return mapCoreToken(mapping, start, eof)
@@ -601,7 +591,7 @@ func (b *coreUnitBuilder) setErr(err int, file int, tok int) {
 }
 
 func coreUnitTokenKind(src []byte, tok syntax.Token) (int, bool) {
-	kind := tok.Kind
+	kind := tok.KindLine & 255
 	if kind >= syntax.TokenEOF && kind <= syntax.TokenIdent {
 		return kind, true
 	}

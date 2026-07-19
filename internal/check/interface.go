@@ -51,7 +51,7 @@ func parseInterfaceElements(file syntax.File, start int, end int) ([]InterfaceMe
 }
 
 func isInterfaceMethodSpec(file syntax.File, start int, end int) bool {
-	return start+1 < end && file.Tokens[start].Kind == syntax.TokenIdent && tokCharIs(&file, start+1, '(')
+	return start+1 < end && file.Tokens[start].KindLine&255 == syntax.TokenIdent && tokCharIs(&file, start+1, '(')
 }
 
 func parseInterfaceMethod(file syntax.File, start int, end int) InterfaceMethod {
@@ -73,7 +73,7 @@ func nextInterfaceElementEnd(file syntax.File, start int, end int) int {
 	braceDepth := 0
 	i := start
 	for i < end {
-		if i > start && parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && file.Tokens[i].Line != file.Tokens[i-1].Line {
+		if i > start && parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && file.Tokens[i].KindLine>>8 != file.Tokens[i-1].KindLine>>8 {
 			return i
 		}
 		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && tokCharIs(&file, i, ';') {

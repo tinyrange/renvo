@@ -292,6 +292,12 @@ func buildPhaseDiagnostic(result BuildResult, built pipeline.Result) Diagnostic 
 			code, message = "RENVO-CHECK-027", "invalid number of arguments to builtin"
 		case check.CheckErrBuiltinOperand:
 			code, message = "RENVO-CHECK-028", "invalid operand type for builtin"
+		case check.CheckErrUndefined:
+			code, message = "RENVO-CHECK-029", "undefined identifier"
+		case check.CheckErrOperand:
+			code, message = "RENVO-CHECK-030", "invalid operation for operand types"
+		case check.CheckErrReturnType:
+			code, message = "RENVO-CHECK-031", "return value is not assignable to the function result"
 		}
 	} else if built.Build.Error == build.BuildErrLower {
 		phase, code, message = "lowerer", "RENVO-LOWER-001", "checked program could not be lowered"
@@ -324,7 +330,7 @@ func diagnosticAtToken(diagnostic Diagnostic, source load.SourceFile, tokens []s
 	line := 1
 	if tokenIndex >= 0 && tokenIndex < len(tokens) {
 		token := tokens[tokenIndex]
-		start, end, line = token.Start, token.End, token.Line
+		start, end, line = token.Start, token.End, token.KindLine>>8
 	} else if len(source.Src) > 0 {
 		start, end = len(source.Src), len(source.Src)
 		line = lineAtOffset(source.Src, start)

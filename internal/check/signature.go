@@ -77,7 +77,7 @@ func parseFieldList(file syntax.File, start int, end int) []Field {
 			i = segEnd + 1
 			continue
 		}
-		if file.Tokens[first].Kind == syntax.TokenIdent && first+1 < last && !tokCharIs(&file, first+1, '.') {
+		if file.Tokens[first].KindLine&255 == syntax.TokenIdent && first+1 < last && !tokCharIs(&file, first+1, '.') {
 			fields = appendNamedFields(fields, file, pending, first, first+1, last)
 			pending = pending[:0]
 		} else {
@@ -132,7 +132,7 @@ func isFieldSeparator(file syntax.File, tok int) bool {
 }
 
 func isSingleIdent(file syntax.File, start int, end int) bool {
-	return end-start == 1 && file.Tokens[start].Kind == syntax.TokenIdent
+	return end-start == 1 && file.Tokens[start].KindLine&255 == syntax.TokenIdent
 }
 
 func fieldIsVariadic(file syntax.File, start int) bool {

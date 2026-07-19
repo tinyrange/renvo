@@ -242,7 +242,7 @@ func isIndexTypePrefix(file syntax.File, start int) bool {
 	if start < 0 || start >= len(file.Tokens) {
 		return false
 	}
-	return file.Tokens[start].Kind == syntax.TokenMap
+	return file.Tokens[start].KindLine&255 == syntax.TokenMap
 }
 
 func isCompositeTypeBodyOpen(file syntax.File, open int) bool {
@@ -250,5 +250,5 @@ func isCompositeTypeBodyOpen(file syntax.File, open int) bool {
 	if prev < 0 || prev >= len(file.Tokens) {
 		return false
 	}
-	return file.Tokens[prev].Kind == syntax.TokenStruct || file.Tokens[prev].Kind == syntax.TokenInterface
+	return file.Tokens[prev].KindLine&255 == syntax.TokenStruct || file.Tokens[prev].KindLine&255 == syntax.TokenInterface
 }
