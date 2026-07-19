@@ -7156,7 +7156,14 @@ type renvoLinearGen struct {
 
 func renvoAddStringData(g *renvoLinearGen, msg []byte) int {
 	renvoNonNil(g)
-	for off := 0; off+len(msg) < len(g.asm.data); off++ {
+	// Keep interning bounded. Large embedded assets should not make every later
+	// literal rescan the entire static-data segment; missing an old match only
+	// emits another copy and does not change program semantics.
+	searchStart := len(g.asm.data) - 4096
+	if searchStart < 0 {
+		searchStart = 0
+	}
+	for off := searchStart; off+len(msg) < len(g.asm.data); off++ {
 		match := g.asm.data[off+len(msg)] == 0
 		for i := 0; match && i < len(msg); i++ {
 			match = g.asm.data[off+i] == msg[i]
