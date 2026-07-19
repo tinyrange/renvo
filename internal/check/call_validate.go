@@ -49,9 +49,15 @@ func invalidDefiniteCallArgumentType(pkg *load.Package, info *PackageInfo, fileI
 		if ref.Index < 0 || ref.Index >= len(info.Symbols) || ref.Index >= len(targets) {
 			continue
 		}
+		firstArg := file.Tokens[open+1]
+		hasLiteral := firstArg.Kind == syntax.TokenNumber || firstArg.Kind == syntax.TokenString
+		if !hasLiteral && firstArg.Kind == syntax.TokenIdent {
+			size := firstArg.End - firstArg.Start
+			hasLiteral = size == 4 && tokenTextIs(file, open+1, "true") || size == 5 && tokenTextIs(file, open+1, "false")
+		}
 		target := &targets[ref.Index]
 		prepareDefiniteCallTarget(pkg, info, ref.Index, target)
-		if len(target.pointerParams) == 0 {
+		if len(target.pointerParams) == 0 && !hasLiteral {
 			continue
 		}
 		close := findTypeMatching(*file, open, '(', ')')
@@ -71,6 +77,12 @@ func invalidDefiniteCallArgumentType(pkg *load.Package, info *PackageInfo, fileI
 		}
 		if invalidTok >= 0 {
 			return invalidTok
+		}
+		if hasLiteral {
+			invalidTok = invalidDefinitePrimitiveCallAt(pkg, info, fileIndex, calleeTok, close)
+			if invalidTok >= 0 {
+				return invalidTok
+			}
 		}
 	}
 	return -1

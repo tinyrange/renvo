@@ -72,7 +72,11 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
 		file := pkg.Files[fileIndex].File
 		for i := 0; i < len(file.Decls); i++ {
-			info.Decls = append(info.Decls, buildDeclInfoCore(file, fileIndex, info, checked, file.Decls[i]))
+			decl, undefinedTok := buildDeclInfoCore(file, fileIndex, info, checked, file.Decls[i])
+			info.Decls = append(info.Decls, decl)
+			if undefinedTok >= 0 {
+				return info, false, CheckErrUndefined, fileIndex, undefinedTok
+			}
 		}
 	}
 	sortDecls(info.Decls)
@@ -93,6 +97,9 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 		}
 	}
 	sortTypes(info.Types)
+	if file, tok := undefinedSimplePackageTypeCore(pkg, info); tok >= 0 {
+		return info, false, CheckErrUndefined, file, tok
+	}
 	info.CoreTypeRefs = buildPackageTypeRefsCore(pkg, info, checked)
 	callTargets := make([]definiteCallTarget, len(info.Symbols))
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
@@ -115,11 +122,11 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			}
 			arena.Reset(functionArenaStart)
 			signature := buildFuncSignature(file, fn)
-			if returnTok := invalidReturnCount(file, fn, signature); returnTok >= 0 {
-				return info, false, CheckErrReturnCount, fileIndex, returnTok
+			if returnErr, returnTok := invalidReturnCount(file, fn, signature); returnErr != CheckOK {
+				return info, false, returnErr, fileIndex, returnTok
 			}
-			if typeTok := invalidDefiniteAssignmentType(file, fn); typeTok >= 0 {
-				return info, false, CheckErrType, fileIndex, typeTok
+			if assignmentErr, assignmentTok := invalidDefiniteAssignmentType(file, fn); assignmentErr != CheckOK {
+				return info, false, assignmentErr, fileIndex, assignmentTok
 			}
 			if sliceTok := invalidDefiniteSliceOperand(pkg, info, fileIndex, fn); sliceTok >= 0 {
 				return info, false, CheckErrSliceOperand, fileIndex, sliceTok
@@ -139,7 +146,11 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			out.CoreRefs = make([]CoreNameRef, 0, refCount)
 			out.CoreSelectors = make([]CoreSelectorRef, 0, selectorCount)
 			var builtinCalls []int
-			out.CoreRefs, out.CoreSelectors = appendResolutionRefsCore(out.CoreRefs, out.CoreSelectors, &file, fileIndex, &info, checked, scope, bodyStart, bodyEnd, &builtinCalls)
+			var undefinedTok int
+			out.CoreRefs, out.CoreSelectors, undefinedTok = appendResolutionRefsCore(out.CoreRefs, out.CoreSelectors, &file, fileIndex, &info, checked, scope, bodyStart, bodyEnd, &builtinCalls)
+			if undefinedTok >= 0 {
+				return info, false, CheckErrUndefined, fileIndex, undefinedTok
+			}
 			if builtinErr, builtinTok := invalidBuiltinCalls(&pkg, &info, fileIndex, fn, &signature, builtinCalls); builtinErr != CheckOK {
 				return info, false, builtinErr, fileIndex, builtinTok
 			}
@@ -197,7 +208,21 @@ func countTypeDeclsCore(decls []DeclInfo) int {
 	return count
 }
 
-func buildDeclInfoCore(file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, decl syntax.TopDecl) DeclInfo {
+func undefinedSimplePackageTypeCore(pkg load.Package, info PackageInfo) (int, int) {
+	for i := 0; i < len(info.Decls); i++ {
+		decl := info.Decls[i]
+		if decl.TypeEnd-decl.TypeStart != 1 {
+			continue
+		}
+		file := &pkg.Files[decl.File].File
+		if file.Tokens[decl.TypeStart].Kind == syntax.TokenIdent && !corePredeclaredToken(file, decl.TypeStart) && lookupPackageSymbolTokenCore(&info, file, decl.File, decl.TypeStart) < 0 && !hasDotImportCore(&info, decl.File) {
+			return decl.File, decl.TypeStart
+		}
+	}
+	return -1, -1
+}
+
+func buildDeclInfoCore(file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, decl syntax.TopDecl) (DeclInfo, int) {
 	name := tokenString(&file, decl.NameTok)
 	out := DeclInfo{
 		Name:       name,
@@ -218,7 +243,7 @@ func buildDeclInfoCore(file syntax.File, fileIndex int, info PackageInfo, checke
 			typeStart++
 		}
 		out.TypeStart, out.TypeEnd = trimDeclSpan(file, typeStart, decl.EndTok)
-		return out
+		return out, -1
 	}
 	typeStart := declNameListEnd(file, decl)
 	valueStart := findDeclAssign(file, typeStart, decl.EndTok)
@@ -228,11 +253,13 @@ func buildDeclInfoCore(file syntax.File, fileIndex int, info PackageInfo, checke
 		refCount, selectorCount := resolutionCapacitiesCore(out.ValueEnd - out.ValueStart)
 		out.CoreRefs = make([]CoreNameRef, 0, refCount)
 		out.CoreSelectors = make([]CoreSelectorRef, 0, selectorCount)
-		out.CoreRefs, out.CoreSelectors = appendResolutionRefsCore(out.CoreRefs, out.CoreSelectors, &file, fileIndex, &info, checked, CoreScope{}, out.ValueStart, out.ValueEnd, nil)
+		var undefinedTok int
+		out.CoreRefs, out.CoreSelectors, undefinedTok = appendResolutionRefsCore(out.CoreRefs, out.CoreSelectors, &file, fileIndex, &info, checked, CoreScope{}, out.ValueStart, out.ValueEnd, nil)
+		return out, undefinedTok
 	} else {
 		out.TypeStart, out.TypeEnd = trimDeclSpan(file, typeStart, decl.EndTok)
 	}
-	return out
+	return out, -1
 }
 
 type CoreScope struct {
@@ -255,7 +282,8 @@ func resolutionCapacitiesCore(tokens int) (int, int) {
 	return tokens/14 + 4, 0
 }
 
-func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, file *syntax.File, fileIndex int, info *PackageInfo, checked []PackageInfo, scope CoreScope, start int, end int, builtinCalls *[]int) ([]CoreNameRef, []CoreSelectorRef) {
+func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, file *syntax.File, fileIndex int, info *PackageInfo, checked []PackageInfo, scope CoreScope, start int, end int, builtinCalls *[]int) ([]CoreNameRef, []CoreSelectorRef, int) {
+	undefined := -1
 	for i := start; i < end && i < len(file.Tokens); i++ {
 		token := file.Tokens[i]
 		blank := token.Kind == syntax.TokenIdent && token.End == token.Start+1 && file.Src[token.Start] == '_'
@@ -271,13 +299,16 @@ func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, f
 		if scopeIndex >= 0 && scope.Names[scopeIndex].Kind == NameVariable && i != scope.Names[scopeIndex].Token && !coreLocalWriteOnly(file, i, end) {
 			scope.Names[scopeIndex].Kind = NameVariableUsed
 		}
-		if !skipRef && scopeIndex < 0 &&
-			lookupImportTokenNameCore(info, fileIndex, file, i) < 0 {
+		if !skipRef && scopeIndex < 0 && lookupImportTokenNameCore(info, fileIndex, file, i) < 0 {
 			symbolIndex := lookupPackageSymbolTokenCore(info, file, fileIndex, i)
 			if symbolIndex >= 0 {
 				refs = append(refs, CoreNameRef{Token: i, Index: symbolIndex})
-			} else if builtinCalls != nil && i+1 < end && tokCharIs(file, i+1, '(') && coreOrdinaryBuiltinToken(file, i) {
-				*builtinCalls = append(*builtinCalls, i)
+			} else if corePredeclaredToken(file, i) {
+				if builtinCalls != nil && i+1 < end && tokCharIs(file, i+1, '(') && coreOrdinaryBuiltinToken(file, i) {
+					*builtinCalls = append(*builtinCalls, i)
+				}
+			} else if !hasDotImportCore(info, fileIndex) && undefined < 0 {
+				undefined = i
 			}
 		}
 		dot := token.Kind == syntax.TokenOperator && token.End == token.Start+1 && file.Src[token.Start] == '.'
@@ -288,10 +319,63 @@ func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, f
 			selector := resolveImportSelectorCore(fileIndex, info, checked, scope, file, i-1, i, i+1)
 			if selector.Symbol >= 0 {
 				selectors = append(selectors, selector)
+			} else if selector.BasePackage >= 0 && !coreSelectorContinues(file, i+1, end) && !coreUnsafeSelector(info, fileIndex, file, i-1) && undefined < 0 {
+				undefined = i + 1
 			}
 		}
 	}
-	return refs, selectors
+	return refs, selectors, undefined
+}
+
+func corePredeclaredToken(file *syntax.File, tok int) bool {
+	token := file.Tokens[tok]
+	// These are the Go predeclared identifiers plus Renvo's syscall surface,
+	// ordered by hash. Packing the hashes, offsets, and spelling table into
+	// constants keeps this hot lookup allocation-free in a self-hosted compiler;
+	// the final spelling comparison makes hash collisions harmless.
+	const names = "anycapintlenmaxminnewnilchmodclearcloseerrorfalseint16int32int64panicprintuint8complex128writeO_CREATEstringuint16uint32uint64O_TRUNCuintptrfloat32float64O_RDONLYrecovercomplex64printlnO_WRONLYO_RDWRcomplexappenddeleteboolbytecopyimagint8iotamakeopenreadrealrunetrueuint"
+	const hashes = "\x2d\x5e\x88\x0b\xf9\x64\x88\x0b\x30\x80\x88\x0b\xc4\x8b\x88\x0b\x8b\x8f\x88\x0b\x89\x90\x88\x0b\x4f\x94\x88\x0b\xc8\x94\x88\x0b\xd0\x5f\x39\x0f\x8c\x6d\x3b\x0f\x5b\x9a\x3b\x0f\xef\x21\x63\x0f\xf0\xce\x6b\x0f\xb7\x52\xa9\x0f\xf5\x52\xa9\x0f\x5a\x53\xa9\x0f\x30\xcb\x20\x10\x12\x09\x2a\x10\xfd\xa9\x7f\x10\x18\xaa\x8e\x10\x50\xb5\xa8\x10\x47\xf8\x1c\x17\xfc\xaf\x93\x1c\xec\xe8\x74\x20\x2a\xe9\x74\x20\x8f\xe9\x74\x20\xff\xe5\xb0\x28\xdb\x1a\x13\x2f\x20\xbb\x70\x33\x85\xbb\x70\x33\xcb\xb4\x22\x39\x3b\x0e\x06\x3e\x87\xee\x70\x42\xec\xa3\xd0\x42\xfe\xd6\xc9\x45\x32\xca\x0b\x47\x1d\x6c\x65\x53\xdd\x48\x4d\x72\x78\x84\x83\x78\x91\xb3\x94\x7c\xb9\xde\x94\x7c\x20\x40\x95\x7c\xe3\x7f\x98\x7c\x68\x86\x98\x7c\xd2\x8a\x98\x7c\xa3\x7f\x9a\x7c\x77\xd7\x9b\x7c\x41\x4d\x9d\x7c\x49\x4d\x9d\x7c\xff\x92\x9d\x7c\xe5\x9f\x9e\x7c\x25\x05\x9f\x7c"
+	const offsets = "\x00\x00\x03\x00\x06\x00\x09\x00\x0c\x00\x0f\x00\x12\x00\x15\x00\x18\x00\x1d\x00\x22\x00\x27\x00\x2c\x00\x31\x00\x36\x00\x3b\x00\x40\x00\x45\x00\x4a\x00\x4f\x00\x59\x00\x5e\x00\x66\x00\x6c\x00\x72\x00\x78\x00\x7e\x00\x85\x00\x8c\x00\x93\x00\x9a\x00\xa2\x00\xa9\x00\xb2\x00\xb9\x00\xc1\x00\xc7\x00\xce\x00\xd4\x00\xda\x00\xde\x00\xe2\x00\xe6\x00\xea\x00\xee\x00\xf2\x00\xf6\x00\xfa\x00\xfe\x00\x02\x01\x06\x01\x0a\x01\x0e\x01"
+	hash := hashCoreToken(file.Src, token.Start, token.End-token.Start)
+	low, high := 0, len(hashes)/4
+	for low < high {
+		mid := low + (high-low)/2
+		at := mid * 4
+		candidate := int(hashes[at]) | int(hashes[at+1])<<8 | int(hashes[at+2])<<16 | int(hashes[at+3])<<24
+		if candidate < hash {
+			low = mid + 1
+		} else {
+			high = mid
+		}
+	}
+	if low >= len(hashes)/4 {
+		return false
+	}
+	at := low * 4
+	if int(hashes[at])|int(hashes[at+1])<<8|int(hashes[at+2])<<16|int(hashes[at+3])<<24 != hash {
+		return false
+	}
+	start := int(offsets[low*2]) | int(offsets[low*2+1])<<8
+	end := int(offsets[low*2+2]) | int(offsets[low*2+3])<<8
+	return tokenMatchesCoreSymbol(file.Src, token.Start, token.End-token.Start, names[start:end])
+}
+
+func hasDotImportCore(info *PackageInfo, fileIndex int) bool {
+	for i := 0; i < len(info.Imports); i++ {
+		if info.Imports[i].File == fileIndex && info.Imports[i].Dot {
+			return true
+		}
+	}
+	return false
+}
+
+func coreSelectorContinues(file *syntax.File, nameTok int, end int) bool {
+	return nameTok+1 < end && tokCharIs(file, nameTok+1, '.')
+}
+
+func coreUnsafeSelector(info *PackageInfo, fileIndex int, file *syntax.File, baseTok int) bool {
+	imp := lookupImportTokenNameCore(info, fileIndex, file, baseTok)
+	return imp >= 0 && imp < len(info.Imports) && info.Imports[imp].ImportPath == "unsafe"
 }
 
 func coreOrdinaryBuiltinToken(file *syntax.File, tok int) bool {
@@ -452,11 +536,12 @@ func appendTypeSpanRefsCore(refs []CoreTypeRef, file syntax.File, fileIndex int,
 
 func resolveImportSelectorCore(fileIndex int, info *PackageInfo, checked []PackageInfo, scope CoreScope, file *syntax.File, baseTok int, dotTok int, nameTok int) CoreSelectorRef {
 	selector := CoreSelectorRef{
-		BaseTok:   baseTok,
-		DotTok:    dotTok,
-		NameTok:   nameTok,
-		BaseIndex: -1,
-		Symbol:    -1,
+		BaseTok:     baseTok,
+		DotTok:      dotTok,
+		NameTok:     nameTok,
+		BaseIndex:   -1,
+		BasePackage: -1,
+		Symbol:      -1,
 	}
 	scopeIndex := lookupScopeTokenNameCore(scope, file, baseTok)
 	if scopeIndex >= 0 && scope.Names[scopeIndex].Kind != NameLabel {
@@ -722,6 +807,20 @@ func buildFuncScopeCore(file syntax.File, fn syntax.FuncDecl) (CoreScope, bool, 
 	for i := start; i < end; i++ {
 		token := file.Tokens[i]
 		kind := token.Kind
+		if kind == syntax.TokenFunc && i+1 < end && tokCharIs(&file, i+1, '(') {
+			paramsEnd := findTypeMatching(file, i+1, '(', ')')
+			if paramsEnd > i+1 && paramsEnd <= end {
+				var literal CoreScope
+				ok, tok := collectCoreFieldNames(file, i+2, paramsEnd-1, NameParam, &literal)
+				if !ok {
+					return scope, false, tok
+				}
+				for j := 0; j < len(literal.Names); j++ {
+					name := literal.Names[j]
+					addCoreScopeName(&scope, file, name.Token, name.Kind, false, false, false)
+				}
+			}
+		}
 		if kind == syntax.TokenConst || kind == syntax.TokenVar || kind == syntax.TokenType {
 			i = collectCoreDeclScope(file, i, end, &scope)
 			continue
@@ -880,11 +979,11 @@ func collectCoreDeclScope(file syntax.File, start int, end int, scope *CoreScope
 				i = specEnd
 			}
 		}
-		return closeTok
+		return closeTok - 1
 	}
 	specEnd := statementSpecEnd(file, specStart, end)
 	collectCoreLeadingIdentList(file, specStart, specEnd, scope, variable)
-	return specEnd
+	return specEnd - 1
 }
 
 func collectCoreShortDeclScope(file syntax.File, start int, end int, scope *CoreScope) {

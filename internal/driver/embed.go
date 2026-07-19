@@ -395,7 +395,13 @@ func sourceEmbedTokenChar(file syntax.File, tok int, want byte) bool {
 }
 
 func resolveSourceEmbedPatterns(fs SourceFS, packageDir string, moduleRoot string, patterns []string) ([]sourceEmbedFile, bool, string) {
-	paths, ok := collectSourceEmbedPaths(fs, packageDir, moduleRoot)
+	includeAll := false
+	for i := 0; i < len(patterns); i++ {
+		if len(patterns[i]) > 4 && patterns[i][:4] == "all:" {
+			includeAll = true
+		}
+	}
+	paths, ok := collectSourceEmbedPaths(fs, packageDir, moduleRoot, patterns, includeAll)
 	if !ok {
 		return nil, false, "go:embed"
 	}
@@ -450,12 +456,12 @@ func resolveSourceEmbedPatterns(fs SourceFS, packageDir string, moduleRoot strin
 	return files, true, ""
 }
 
-func collectSourceEmbedPaths(fs SourceFS, packageDir string, moduleRoot string) ([]sourceEmbedPath, bool) {
+func collectSourceEmbedPaths(fs SourceFS, packageDir string, moduleRoot string, patterns []string, all bool) ([]sourceEmbedPath, bool) {
 	var out []sourceEmbedPath
-	return collectSourceEmbedDir(fs, packageDir, moduleRoot, "", out)
+	return collectSourceEmbedDir(fs, packageDir, moduleRoot, "", out, patterns, all)
 }
 
-func collectSourceEmbedDir(fs SourceFS, packageDir string, moduleRoot string, relative string, out []sourceEmbedPath) ([]sourceEmbedPath, bool) {
+func collectSourceEmbedDir(fs SourceFS, packageDir string, moduleRoot string, relative string, out []sourceEmbedPath, patterns []string, all bool) ([]sourceEmbedPath, bool) {
 	dir := packageDir
 	if relative != "" {
 		dir = load.JoinPath(packageDir, relative)
@@ -473,7 +479,10 @@ func collectSourceEmbedDir(fs SourceFS, packageDir string, moduleRoot string, re
 	sortDirEntries(entries)
 	for i := 0; i < len(entries); i++ {
 		name := entries[i].Name
-		if name == "" || name == "." || name == ".." || name == "vendor" {
+		if name == "" || name == "." || name == ".." || name == "vendor" || !sourceEmbedWalkFileAllowed(name, all) {
+			continue
+		}
+		if relative == "" && !sourceEmbedTopNameAllowed(patterns, name) {
 			continue
 		}
 		rel := name
@@ -483,13 +492,33 @@ func collectSourceEmbedDir(fs SourceFS, packageDir string, moduleRoot string, re
 		out = append(out, sourceEmbedPath{name: rel, isDir: entries[i].IsDir})
 		if entries[i].IsDir {
 			var childOK bool
-			out, childOK = collectSourceEmbedDir(fs, packageDir, moduleRoot, rel, out)
+			out, childOK = collectSourceEmbedDir(fs, packageDir, moduleRoot, rel, out, patterns, all)
 			if !childOK {
 				return out, false
 			}
 		}
 	}
 	return out, true
+}
+
+func sourceEmbedTopNameAllowed(patterns []string, name string) bool {
+	for i := 0; i < len(patterns); i++ {
+		pattern := patterns[i]
+		if len(pattern) > 4 && pattern[:4] == "all:" {
+			pattern = pattern[4:]
+		}
+		end := sourceEmbedStringByte(pattern, '/', 0)
+		segment := pattern[:end]
+		// A wildcard may match any root entry, so only literal leading path
+		// segments can prune the directory walk.
+		if sourceEmbedStringByte(segment, '*', 0) < len(segment) || sourceEmbedStringByte(segment, '?', 0) < len(segment) || sourceEmbedStringByte(segment, '[', 0) < len(segment) {
+			return true
+		}
+		if segment == name {
+			return true
+		}
+	}
+	return false
 }
 
 func validSourceEmbedPattern(pattern string) bool {

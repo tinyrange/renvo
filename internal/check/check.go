@@ -35,6 +35,9 @@ const (
 	CheckErrDeferBuiltin
 	CheckErrBuiltinArity
 	CheckErrBuiltinOperand
+	CheckErrUndefined
+	CheckErrOperand
+	CheckErrReturnType
 )
 
 const (

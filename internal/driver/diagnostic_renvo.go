@@ -222,6 +222,12 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			d.Code, d.Message = "RENVO-CHECK-027", "invalid number of arguments to builtin"
 		} else if built.Build.ErrorDetail == check.CheckErrBuiltinOperand {
 			d.Code, d.Message = "RENVO-CHECK-028", "invalid operand type for builtin"
+		} else if built.Build.ErrorDetail == check.CheckErrUndefined {
+			d.Code, d.Message = "RENVO-CHECK-029", "undefined identifier"
+		} else if built.Build.ErrorDetail == check.CheckErrOperand {
+			d.Code, d.Message = "RENVO-CHECK-030", "invalid operation for operand types"
+		} else if built.Build.ErrorDetail == check.CheckErrReturnType {
+			d.Code, d.Message = "RENVO-CHECK-031", "return value is not assignable to the function result"
 		}
 	} else {
 		d.Phase, d.Code, d.Message = "linker", "RENVO-LINK-001", "package linking failed"
