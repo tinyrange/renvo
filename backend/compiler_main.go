@@ -1,7 +1,7 @@
 package main
 
-var compilerDefaultTarget int = renvoTargetLinuxAmd64
-var compilerFixedTarget int
+var renvoDefaultTarget int = renvoTargetLinuxAmd64
+var renvoFixedTarget int
 var renvoCompilerStripSymbols bool
 
 func renvoOpenArg(path string, env []string) int {
@@ -130,7 +130,7 @@ type renvoUnitReader struct {
 }
 
 func renvoUnitReadVar(r *renvoUnitReader) int {
-	trustNonNil(r)
+	renvoNonNil(r)
 	if !r.ok || r.pos >= r.end {
 		r.ok = false
 		return 0
@@ -209,7 +209,7 @@ func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, bool) {
 }
 
 func renvoUnitUsesPanic(p *renvoProgram) bool {
-	trustNonNil(p)
+	renvoNonNil(p)
 	for i := 0; i < renvoTokCount(p); i++ {
 		if renvoTokIdentIs(p, i, "defer") || renvoTokIdentIs(p, i, "panic") || renvoTokIdentIs(p, i, "recover") || renvoTokCharIs(p, i, '.') && renvoTokCharIs(p, i+1, '(') {
 			return true
@@ -404,8 +404,8 @@ func renvoUnitValidTokenRange(limit int, start int, end int) bool {
 }
 
 func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, arenaSize int) int {
-	trustNonNil(prog)
-	compilerFixedTarget = target
+	renvoNonNil(prog)
+	renvoFixedTarget = target
 	renvoSetTarget(target)
 	if !prog.ok {
 		renvoPrintErr("renvo: parse failed\n")
@@ -419,15 +419,15 @@ func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, are
 	}
 	meta.arenaSize = renvoResolveArenaSize(target, arenaSize)
 	var result renvoCompileResult
-	if compilerFixedTarget == renvoTargetLinux386 || compilerFixedTarget == renvoTargetWindows386 {
+	if renvoFixedTarget == renvoTargetLinux386 || renvoFixedTarget == renvoTargetWindows386 {
 		result = renvoTryCompileScalarProgram386(prog, &meta)
-	} else if compilerFixedTarget == renvoTargetLinuxAarch64 || compilerFixedTarget == renvoTargetDarwinArm64 || compilerFixedTarget == renvoTargetWindowsArm64 {
+	} else if renvoFixedTarget == renvoTargetLinuxAarch64 || renvoFixedTarget == renvoTargetDarwinArm64 || renvoFixedTarget == renvoTargetWindowsArm64 {
 		result = renvoTryCompileScalarProgramAarch64(prog, &meta)
-	} else if compilerFixedTarget == renvoTargetLinuxArm {
+	} else if renvoFixedTarget == renvoTargetLinuxArm {
 		result = renvoTryCompileScalarProgramArm(prog, &meta)
-	} else if compilerFixedTarget == renvoTargetWasiWasm32 {
+	} else if renvoFixedTarget == renvoTargetWasiWasm32 {
 		result = renvoTryCompileScalarProgramWasm32(prog, &meta)
-	} else if compilerFixedTarget != 0 {
+	} else if renvoFixedTarget != 0 {
 		result = renvoTryCompileScalarProgramAmd64(prog, &meta)
 	} else if target == renvoTargetLinux386 || target == renvoTargetWindows386 {
 		result = renvoTryCompileScalarProgram386(prog, &meta)
@@ -491,7 +491,7 @@ func appMain(args []string, env []string) int {
 	input := make([]int, 256)
 	inputCount := 0
 	var outputPath string
-	target := compilerDefaultTarget
+	target := renvoDefaultTarget
 	arenaSize := 0
 	renvoCompilerStripSymbols = false
 	renvoCompilerWindowsSubsystem = 3

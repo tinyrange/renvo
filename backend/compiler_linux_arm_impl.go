@@ -41,7 +41,7 @@ func compileLinuxArmArena(input []int, output int, arenaSize int) int {
 	if !meta.ok {
 		return 1
 	}
-	meta.arenaSize = renvoResolveArenaSize(currentTarget, arenaSize)
+	meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
 	var result renvoCompileResult
 	result = renvoTryCompileScalarProgramArm(&prog, &meta)
 	if result.ok {
@@ -70,7 +70,7 @@ func renvoTryCompileScalarProgramArm(p *renvoProgram, meta *renvoMeta) renvoComp
 	a := &g.asm
 	renvoAsmInit(a)
 	a.codeOffset = renvoLinuxArmCodeOffset
-	if compilerFixedTarget != 0 {
+	if renvoFixedTarget != 0 {
 		g.funcLabels = make([]int, 0, len(meta.funcs))
 	}
 	for i := 0; i < len(meta.funcs); i++ {

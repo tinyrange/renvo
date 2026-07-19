@@ -6,9 +6,9 @@ import (
 )
 
 func TestLargeGlobalByteSliceGrowsAbsoluteRelocations(t *testing.T) {
-	oldFixedTarget := compilerFixedTarget
-	t.Cleanup(func() { compilerFixedTarget = oldFixedTarget })
-	compilerFixedTarget = renvoTargetDarwinArm64
+	oldFixedTarget := renvoFixedTarget
+	t.Cleanup(func() { renvoFixedTarget = oldFixedTarget })
+	renvoFixedTarget = renvoTargetDarwinArm64
 
 	var source strings.Builder
 	source.WriteString("package main\nvar data = []byte{")

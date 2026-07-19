@@ -21,7 +21,7 @@ func compileWasiWasm32Arena(input []int, output int, arenaSize int) int {
 	if !meta.ok {
 		return 1
 	}
-	meta.arenaSize = renvoResolveArenaSize(currentTarget, arenaSize)
+	meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
 	var result renvoCompileResult
 	result = renvoTryCompileScalarProgramWasm32(&prog, &meta)
 	if result.ok {

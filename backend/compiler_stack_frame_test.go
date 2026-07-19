@@ -19,9 +19,9 @@ func TestStackPeakRetainsReleasedTemporaryStorage(t *testing.T) {
 }
 
 func TestAarch64FrameUsesCalculatedStorage(t *testing.T) {
-	oldOS := targetOS
-	t.Cleanup(func() { targetOS = oldOS })
-	targetOS = renvoOSLinux
+	oldOS := renvoTargetOS
+	t.Cleanup(func() { renvoTargetOS = oldOS })
+	renvoTargetOS = renvoOSLinux
 
 	var asm renvoAsm
 	at := renvoAarch64AsmFrameStart(&asm)
@@ -36,9 +36,9 @@ func TestAarch64FrameUsesCalculatedStorage(t *testing.T) {
 }
 
 func TestWindowsAarch64FrameProbesCalculatedPages(t *testing.T) {
-	oldOS := targetOS
-	t.Cleanup(func() { targetOS = oldOS })
-	targetOS = renvoOSWindows
+	oldOS := renvoTargetOS
+	t.Cleanup(func() { renvoTargetOS = oldOS })
+	renvoTargetOS = renvoOSWindows
 
 	var asm renvoAsm
 	at := renvoAarch64AsmFrameStart(&asm)

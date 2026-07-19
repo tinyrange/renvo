@@ -119,13 +119,13 @@ func TestArenaSizeConfigurationIsBounded(t *testing.T) {
 		}
 	}
 
-	oldArch := targetArch
-	oldOS := targetOS
-	oldTarget := currentTarget
+	oldArch := renvoTargetArch
+	oldOS := renvoTargetOS
+	oldTarget := renvoTarget
 	t.Cleanup(func() {
-		targetArch = oldArch
-		targetOS = oldOS
-		currentTarget = oldTarget
+		renvoTargetArch = oldArch
+		renvoTargetOS = oldOS
+		renvoTarget = oldTarget
 	})
 	g := renvoLinearGen{arenaSize: 2048}
 	if got := renvoStringArenaSize(&g); got != 2048 {
@@ -139,16 +139,16 @@ func TestArenaSizeConfigurationIsBounded(t *testing.T) {
 }
 
 func TestLargeStaticSliceZeroingHasBoundedCodeSize(t *testing.T) {
-	oldArch := targetArch
-	oldOS := targetOS
-	oldFixedTarget := compilerFixedTarget
+	oldArch := renvoTargetArch
+	oldOS := renvoTargetOS
+	oldFixedTarget := renvoFixedTarget
 	t.Cleanup(func() {
-		targetArch = oldArch
-		targetOS = oldOS
-		compilerFixedTarget = oldFixedTarget
+		renvoTargetArch = oldArch
+		renvoTargetOS = oldOS
+		renvoFixedTarget = oldFixedTarget
 	})
 	renvoSetTarget(renvoTargetLinuxAmd64)
-	compilerFixedTarget = renvoTargetLinuxAmd64
+	renvoFixedTarget = renvoTargetLinuxAmd64
 
 	var g renvoLinearGen
 	var meta renvoMeta
@@ -184,19 +184,19 @@ func TestPointerTypesRetainAddressSpace(t *testing.T) {
 }
 
 func TestStructLayoutsFollowTargetFieldAlignment(t *testing.T) {
-	oldFixedTarget := compilerFixedTarget
-	oldCurrentTarget := currentTarget
-	oldOS := targetOS
-	oldArch := targetArch
+	oldFixedTarget := renvoFixedTarget
+	oldCurrentTarget := renvoTarget
+	oldOS := renvoTargetOS
+	oldArch := renvoTargetArch
 	oldIntSize := renvoNativeIntSize
 	t.Cleanup(func() {
-		compilerFixedTarget = oldFixedTarget
-		currentTarget = oldCurrentTarget
-		targetOS = oldOS
-		targetArch = oldArch
+		renvoFixedTarget = oldFixedTarget
+		renvoTarget = oldCurrentTarget
+		renvoTargetOS = oldOS
+		renvoTargetArch = oldArch
 		renvoNativeIntSize = oldIntSize
 	})
-	compilerFixedTarget = 0
+	renvoFixedTarget = 0
 	renvoSetTarget(renvoTargetWindowsAmd64)
 
 	program := renvoParseProgram([]byte(`package main
@@ -273,19 +273,19 @@ func consumeLayouts(pairValue *pair, mixedValue *mixed, outerValue *outer, array
 }
 
 func TestStructLayoutHonorsTargetMaximumAlignment(t *testing.T) {
-	oldFixedTarget := compilerFixedTarget
-	oldCurrentTarget := currentTarget
-	oldOS := targetOS
-	oldArch := targetArch
+	oldFixedTarget := renvoFixedTarget
+	oldCurrentTarget := renvoTarget
+	oldOS := renvoTargetOS
+	oldArch := renvoTargetArch
 	oldIntSize := renvoNativeIntSize
 	t.Cleanup(func() {
-		compilerFixedTarget = oldFixedTarget
-		currentTarget = oldCurrentTarget
-		targetOS = oldOS
-		targetArch = oldArch
+		renvoFixedTarget = oldFixedTarget
+		renvoTarget = oldCurrentTarget
+		renvoTargetOS = oldOS
+		renvoTargetArch = oldArch
 		renvoNativeIntSize = oldIntSize
 	})
-	compilerFixedTarget = 0
+	renvoFixedTarget = 0
 
 	tests := []struct {
 		name           string
@@ -369,9 +369,9 @@ func consumeWide(value *wide, pointerValue *pointerLayout) {}
 }
 
 func TestExpressionParserCapacityTracksTokenRange(t *testing.T) {
-	oldFixedTarget := compilerFixedTarget
-	compilerFixedTarget = 0
-	t.Cleanup(func() { compilerFixedTarget = oldFixedTarget })
+	oldFixedTarget := renvoFixedTarget
+	renvoFixedTarget = 0
+	t.Cleanup(func() { renvoFixedTarget = oldFixedTarget })
 
 	program := renvoParseProgram([]byte("package main\nvar value = 1 + 2\n"))
 	if !program.ok {

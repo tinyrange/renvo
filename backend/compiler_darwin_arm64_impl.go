@@ -117,7 +117,7 @@ func renvoAsmAddDarwinStaticImport(a *renvoAsm, dylib string, name string) int {
 }
 
 func renvoDarwinArm64EmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
-	if targetArch != renvoArchAarch64 {
+	if renvoTargetArch != renvoArchAarch64 {
 		return false
 	}
 	dylib := renvo_runtime_ArenaPersistString(renvoStringFromBytes(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd))

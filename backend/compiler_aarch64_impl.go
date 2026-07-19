@@ -518,7 +518,7 @@ func renvoAarch64AsmAddRegImm(a *renvoAsm, dst int, src int, imm int) {
 func renvoAarch64AsmFrameStart(a *renvoAsm) int {
 	at := len(a.code)
 	count := 2
-	if targetOS == renvoOSWindows {
+	if renvoTargetOS == renvoOSWindows {
 		// Windows requires every intervening page to be touched when a frame
 		// crosses a guard page. The compact loop patched below handles an
 		// arbitrary calculated frame without reserving one probe per page.
@@ -532,7 +532,7 @@ func renvoAarch64AsmFrameStart(a *renvoAsm) int {
 
 func renvoAarch64AsmPatchFrame(a *renvoAsm, at int, stackUsed int) {
 	frame := renvoAlignValue(stackUsed, 16)
-	if targetOS == renvoOSWindows {
+	if renvoTargetOS == renvoOSWindows {
 		pages := frame / 4096
 		tail := frame % 4096
 		if frame == 0 {

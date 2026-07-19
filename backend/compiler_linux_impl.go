@@ -2,18 +2,18 @@ package main
 
 func renvoReadAll(fd int, out []byte) []byte {
 	buf := make([]byte, 0, 1024)
-	truncateBytes(&buf, cap(buf))
+	renvoTruncBytes(&buf, cap(buf))
 	for {
 		base := len(out)
 		if base < cap(out) {
 			expanded := out
-			truncateBytes(&expanded, cap(out))
+			renvoTruncBytes(&expanded, cap(out))
 			n := read(fd, expanded[base:], -1)
 			if n <= 0 {
 				return out
 			}
 			out = expanded
-			truncateBytes(&out, base+n)
+			renvoTruncBytes(&out, base+n)
 			continue
 		}
 		n := read(fd, buf, -1)
@@ -21,7 +21,7 @@ func renvoReadAll(fd int, out []byte) []byte {
 			return out
 		}
 		chunk := buf
-		truncateBytes(&chunk, n)
+		renvoTruncBytes(&chunk, n)
 		out = append(out, chunk...)
 	}
 }
@@ -31,112 +31,112 @@ func compileLinuxTarget(input []int, output int, target int) int {
 }
 
 func renvoLinuxSysWriteSeq() int {
-	if targetArch == renvoArchAarch64 {
+	if renvoTargetArch == renvoArchAarch64 {
 		return 64
 	}
-	if targetArch == renvoArchArm {
+	if renvoTargetArch == renvoArchArm {
 		return 4
 	}
-	if targetArch == renvoArch386 {
+	if renvoTargetArch == renvoArch386 {
 		return 4
 	}
 	return 1
 }
 
 func renvoLinuxSysReadSeq() int {
-	if targetArch == renvoArchAarch64 {
+	if renvoTargetArch == renvoArchAarch64 {
 		return 63
 	}
-	if targetArch == renvoArchArm {
+	if renvoTargetArch == renvoArchArm {
 		return 3
 	}
-	if targetArch == renvoArch386 {
+	if renvoTargetArch == renvoArch386 {
 		return 3
 	}
 	return 0
 }
 
 func renvoLinuxSysReadAt() int {
-	if targetArch == renvoArchAarch64 {
+	if renvoTargetArch == renvoArchAarch64 {
 		return 67
 	}
-	if targetArch == renvoArchArm {
+	if renvoTargetArch == renvoArchArm {
 		return 180
 	}
-	if targetArch == renvoArch386 {
+	if renvoTargetArch == renvoArch386 {
 		return 180
 	}
 	return 17
 }
 
 func renvoLinuxSysWriteAt() int {
-	if targetArch == renvoArchAarch64 {
+	if renvoTargetArch == renvoArchAarch64 {
 		return 68
 	}
-	if targetArch == renvoArchArm {
+	if renvoTargetArch == renvoArchArm {
 		return 181
 	}
-	if targetArch == renvoArch386 {
+	if renvoTargetArch == renvoArch386 {
 		return 181
 	}
 	return 18
 }
 
 func renvoLinuxSysOpen() int {
-	if targetArch == renvoArchAarch64 {
+	if renvoTargetArch == renvoArchAarch64 {
 		return 56
 	}
-	if targetArch == renvoArchArm {
+	if renvoTargetArch == renvoArchArm {
 		return 5
 	}
-	if targetArch == renvoArch386 {
+	if renvoTargetArch == renvoArch386 {
 		return 5
 	}
 	return 2
 }
 
 func renvoLinuxSysClose() int {
-	if targetArch == renvoArchAarch64 {
+	if renvoTargetArch == renvoArchAarch64 {
 		return 57
 	}
-	if targetArch == renvoArchArm {
+	if renvoTargetArch == renvoArchArm {
 		return 6
 	}
-	if targetArch == renvoArch386 {
+	if renvoTargetArch == renvoArch386 {
 		return 6
 	}
 	return 3
 }
 
 func renvoLinuxSysFchmod() int {
-	if targetArch == renvoArchAarch64 {
+	if renvoTargetArch == renvoArchAarch64 {
 		return 52
 	}
-	if targetArch == renvoArchArm {
+	if renvoTargetArch == renvoArchArm {
 		return 94
 	}
-	if targetArch == renvoArch386 {
+	if renvoTargetArch == renvoArch386 {
 		return 94
 	}
 	return 91
 }
 
 func renvoAsmPrepareReadWriteBuf(a *renvoAsm) {
-	trustNonNil(a)
-	if targetArch == renvoArchWasm32 {
+	renvoNonNil(a)
+	if renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32AsmMovRsiRax(a)
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRcx)
 		return
 	}
-	if targetArch == renvoArchAarch64 {
+	if renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmPrepareReadWriteBuf(a)
 		return
 	}
-	if targetArch == renvoArchArm {
+	if renvoTargetArch == renvoArchArm {
 		renvoArmAsmPrepareReadWriteBuf(a)
 		return
 	}
-	if targetArch == renvoArch386 {
+	if renvoTargetArch == renvoArch386 {
 		renvo386AsmPrepareReadWriteBuf(a)
 		return
 	}
@@ -144,20 +144,20 @@ func renvoAsmPrepareReadWriteBuf(a *renvoAsm) {
 }
 
 func renvoAsmMoveOffsetArg(a *renvoAsm) {
-	trustNonNil(a)
-	if targetArch == renvoArchWasm32 {
+	renvoNonNil(a)
+	if renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegR10, renvoWasm32RegRax)
 		return
 	}
-	if targetArch == renvoArchAarch64 {
+	if renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmMoveOffsetArg(a)
 		return
 	}
-	if targetArch == renvoArchArm {
+	if renvoTargetArch == renvoArchArm {
 		renvoArmAsmMoveOffsetArg(a)
 		return
 	}
-	if targetArch == renvoArch386 {
+	if renvoTargetArch == renvoArch386 {
 		renvo386AsmMoveOffsetArg(a)
 		return
 	}
@@ -165,7 +165,7 @@ func renvoAsmMoveOffsetArg(a *renvoAsm) {
 }
 
 func renvoEmitLinearPrintStmt(g *renvoLinearGen, stmt *renvoStmt) bool {
-	trustNonNil(g, stmt)
+	renvoNonNil(g, stmt)
 	p := g.prog
 	if stmt.exprStart < 0 || stmt.exprStart >= renvoTokCount(p) {
 		return false
@@ -198,7 +198,7 @@ func renvoEmitLinearPrintStmt(g *renvoLinearGen, stmt *renvoStmt) bool {
 		}
 		argIndex := ep.args[root.firstArg+i]
 		argType := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, argIndex))
-		trustNonNil(argType)
+		renvoNonNil(argType)
 		if argType.kind == renvoTypeString {
 			if !renvoEmitStringValueRegs(g, ep, argIndex) {
 				return false
@@ -220,7 +220,7 @@ func renvoEmitLinearPrintStmt(g *renvoLinearGen, stmt *renvoStmt) bool {
 }
 
 func renvoEmitPrintStaticByte(g *renvoLinearGen, value byte, fd int) bool {
-	trustNonNil(g)
+	renvoNonNil(g)
 	offset := len(g.asm.data)
 	g.asm.data = append(g.asm.data, value)
 	renvoAsmPrimaryDataAddr(&g.asm, offset)
@@ -229,10 +229,10 @@ func renvoEmitPrintStaticByte(g *renvoLinearGen, value byte, fd int) bool {
 }
 
 func renvoEmitWriteValueRegs(g *renvoLinearGen, fd int) bool {
-	trustNonNil(g)
+	renvoNonNil(g)
 	a := &g.asm
 	if targetIsWindows() {
-		if targetArch == renvoArch386 {
+		if renvoTargetArch == renvoArch386 {
 			label := renvoWin386EmitReadWriteHelper(g, true)
 			renvoAsmEmit16(a, 0xc689)
 			renvoAsmPrimaryImm(a, -1)
@@ -242,7 +242,7 @@ func renvoEmitWriteValueRegs(g *renvoLinearGen, fd int) bool {
 			renvoAsmCallLabel(a, label)
 			return true
 		}
-		if targetArch == renvoArchAarch64 {
+		if renvoTargetArch == renvoArchAarch64 {
 			label := renvoWinArm64EmitReadWriteHelper(g, true)
 			renvoAsmCopyPrimaryToCallWord1(a)
 			renvoAsmPrimaryImm(a, fd)
@@ -277,7 +277,7 @@ func renvoEmitWriteValueRegs(g *renvoLinearGen, fd int) bool {
 }
 
 func renvoEmitBuiltinReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, seqSyscall int, offSyscall int) bool {
-	trustNonNil(g, ep)
+	renvoNonNil(g, ep)
 	a := &g.asm
 	p := g.prog
 	firstArg := ep.exprs[idx].firstArg
@@ -344,7 +344,7 @@ func renvoEmitBuiltinReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, s
 }
 
 func renvoAsmJgeLabel(a *renvoAsm, label int) {
-	trustNonNil(a)
+	renvoNonNil(a)
 	renvoAsmEmit16(a, 0x8d0f)
 	at := len(a.code)
 	renvoAsmEmit32(a, 0)
@@ -352,7 +352,7 @@ func renvoAsmJgeLabel(a *renvoAsm, label int) {
 }
 
 func renvoAsmJlLabel(a *renvoAsm, label int) {
-	trustNonNil(a)
+	renvoNonNil(a)
 	renvoAsmEmit16(a, 0x8c0f)
 	at := len(a.code)
 	renvoAsmEmit32(a, 0)
@@ -360,7 +360,7 @@ func renvoAsmJlLabel(a *renvoAsm, label int) {
 }
 
 func renvoWinAmd64CallImport(a *renvoAsm, importID int, shadow int) {
-	trustNonNil(a)
+	renvoNonNil(a)
 	renvoAsmEmit4(a, 0x48, 0x83, 0xec, shadow)
 	renvoAsmEmit16(a, 0x15ff)
 	at := len(a.code)
@@ -370,7 +370,7 @@ func renvoWinAmd64CallImport(a *renvoAsm, importID int, shadow int) {
 }
 
 func renvoWin386CallImport(a *renvoAsm, importID int) {
-	trustNonNil(a)
+	renvoNonNil(a)
 	renvoAsmEmit16(a, 0x15ff)
 	at := len(a.code)
 	renvoAsmEmit32(a, 0)
@@ -378,7 +378,7 @@ func renvoWin386CallImport(a *renvoAsm, importID int) {
 }
 
 func renvoWinAmd64LoadImportPtrRax(a *renvoAsm, importID int) {
-	trustNonNil(a)
+	renvoNonNil(a)
 	renvoAsmEmit24(a, 0x058b48)
 	at := len(a.code)
 	renvoAsmEmit32(a, 0)
@@ -386,7 +386,7 @@ func renvoWinAmd64LoadImportPtrRax(a *renvoAsm, importID int) {
 }
 
 func renvoWinAmd64LoadImportPtrR9(a *renvoAsm, importID int) {
-	trustNonNil(a)
+	renvoNonNil(a)
 	renvoAsmEmit24(a, 0x0d8b4c)
 	at := len(a.code)
 	renvoAsmEmit32(a, 0)
@@ -394,7 +394,7 @@ func renvoWinAmd64LoadImportPtrR9(a *renvoAsm, importID int) {
 }
 
 func renvoWinAmd64LoadImportPtrR10(a *renvoAsm, importID int) {
-	trustNonNil(a)
+	renvoNonNil(a)
 	renvoAsmEmit24(a, 0x158b4c)
 	at := len(a.code)
 	renvoAsmEmit32(a, 0)
@@ -402,7 +402,7 @@ func renvoWinAmd64LoadImportPtrR10(a *renvoAsm, importID int) {
 }
 
 func renvoWin386LoadImportPtrRax(a *renvoAsm, importID int) {
-	trustNonNil(a)
+	renvoNonNil(a)
 	renvoAsmEmit8(a, 0xa1)
 	at := len(a.code)
 	renvoAsmEmit32(a, 0)
@@ -410,7 +410,7 @@ func renvoWin386LoadImportPtrRax(a *renvoAsm, importID int) {
 }
 
 func renvoWin386LoadImportPtrRsi(a *renvoAsm, importID int) {
-	trustNonNil(a)
+	renvoNonNil(a)
 	renvoAsmEmit16(a, 0x358b)
 	at := len(a.code)
 	renvoAsmEmit32(a, 0)
@@ -418,7 +418,7 @@ func renvoWin386LoadImportPtrRsi(a *renvoAsm, importID int) {
 }
 
 func renvoWin386StoreEcxBss(a *renvoAsm, bssOff int) {
-	trustNonNil(a)
+	renvoNonNil(a)
 	renvoAsmEmit16(a, 0x0d89)
 	at := len(a.code)
 	renvoAsmEmit32(a, 0)
@@ -426,7 +426,7 @@ func renvoWin386StoreEcxBss(a *renvoAsm, bssOff int) {
 }
 
 func renvoWin386MovEbxBssAddr(a *renvoAsm, bssOff int) {
-	trustNonNil(a)
+	renvoNonNil(a)
 	renvoAsmEmit8(a, 0xbb)
 	at := len(a.code)
 	renvoAsmEmit32(a, 0)
@@ -434,7 +434,7 @@ func renvoWin386MovEbxBssAddr(a *renvoAsm, bssOff int) {
 }
 
 func renvoWin386MovEcxBssAddr(a *renvoAsm, bssOff int) {
-	trustNonNil(a)
+	renvoNonNil(a)
 	renvoAsmEmit8(a, 0xb9)
 	at := len(a.code)
 	renvoAsmEmit32(a, 0)
@@ -442,7 +442,7 @@ func renvoWin386MovEcxBssAddr(a *renvoAsm, bssOff int) {
 }
 
 func renvoWin386MovEdiBssAddr(a *renvoAsm, bssOff int) {
-	trustNonNil(a)
+	renvoNonNil(a)
 	renvoAsmEmit8(a, 0xbf)
 	at := len(a.code)
 	renvoAsmEmit32(a, 0)
@@ -450,7 +450,7 @@ func renvoWin386MovEdiBssAddr(a *renvoAsm, bssOff int) {
 }
 
 func renvoWin386PushBssAddr(a *renvoAsm, bssOff int) {
-	trustNonNil(a)
+	renvoNonNil(a)
 	renvoAsmEmit8(a, 0x68)
 	at := len(a.code)
 	renvoAsmEmit32(a, 0)
@@ -458,7 +458,7 @@ func renvoWin386PushBssAddr(a *renvoAsm, bssOff int) {
 }
 
 func renvoWin386LoadEsiBss(a *renvoAsm, bssOff int) {
-	trustNonNil(a)
+	renvoNonNil(a)
 	renvoAsmEmit16(a, 0x358b)
 	at := len(a.code)
 	renvoAsmEmit32(a, 0)
@@ -466,7 +466,7 @@ func renvoWin386LoadEsiBss(a *renvoAsm, bssOff int) {
 }
 
 func renvoWin386LoadEaxBss(a *renvoAsm, bssOff int) {
-	trustNonNil(a)
+	renvoNonNil(a)
 	renvoAsmEmit8(a, 0xa1)
 	at := len(a.code)
 	renvoAsmEmit32(a, 0)
@@ -474,7 +474,7 @@ func renvoWin386LoadEaxBss(a *renvoAsm, bssOff int) {
 }
 
 func renvoWinAmd64EmitReadWriteHelper(g *renvoLinearGen, isWrite bool) int {
-	trustNonNil(g)
+	renvoNonNil(g)
 	// The template is the relaxed form of the instruction sequence previously
 	// assembled one operation at a time. Explicit relocations record the BSS and
 	// import operands that still vary between compiler invocations and self-host.
@@ -532,7 +532,7 @@ func renvoWinAmd64EmitReadWriteHelper(g *renvoLinearGen, isWrite bool) int {
 }
 
 func renvoWin386EmitReadWriteHelper(g *renvoLinearGen, isWrite bool) int {
-	trustNonNil(g)
+	renvoNonNil(g)
 	a := &g.asm
 	if isWrite {
 		if g.winWriteEmitted {
@@ -643,14 +643,14 @@ func renvoWin386EmitReadWriteHelper(g *renvoLinearGen, isWrite bool) int {
 }
 
 func renvoWin386SetStdHandle(a *renvoAsm, stdHandle int) {
-	trustNonNil(a)
+	renvoNonNil(a)
 	renvoAsmPushImm(a, stdHandle)
 	renvoWin386CallImport(a, renvoWinImportGetStdHandle)
 	renvoAsmCopyPrimaryToCallWord0(a)
 }
 
 func renvoWin386EmitKernelReadWriteCall(a *renvoAsm, importID int, countOff int) {
-	trustNonNil(a)
+	renvoNonNil(a)
 	renvoAsmPushImm(a, 0)
 	renvoWin386PushBssAddr(a, countOff)
 	renvoAsmPushSecondary(a)
@@ -660,7 +660,7 @@ func renvoWin386EmitKernelReadWriteCall(a *renvoAsm, importID int, countOff int)
 }
 
 func renvoEmitWindowsReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, isWrite bool) bool {
-	trustNonNil(g, ep)
+	renvoNonNil(g, ep)
 	a := &g.asm
 	p := g.prog
 	firstArg := ep.exprs[idx].firstArg
@@ -694,7 +694,7 @@ func renvoEmitWindowsReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, i
 	if !renvoEmitSlicePtrLen(g, ep, ep.args[firstArg+1]) {
 		return false
 	}
-	if targetArch == renvoArch386 {
+	if renvoTargetArch == renvoArch386 {
 		label := renvoWin386EmitReadWriteHelper(g, isWrite)
 		renvoAsmEmit16(a, 0xc689)
 		renvoAsmEmit16(a, 0xca89)
@@ -703,7 +703,7 @@ func renvoEmitWindowsReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, i
 		renvoAsmCallLabel(a, label)
 		return true
 	}
-	if targetArch == renvoArchAarch64 {
+	if renvoTargetArch == renvoArchAarch64 {
 		label := renvoWinArm64EmitReadWriteHelper(g, isWrite)
 		renvoAsmCopyPrimaryToCallWord1(a)
 		renvoAarch64AsmMovRegReg(a, renvoAarch64RegRdx, renvoAarch64RegRcx)
@@ -722,7 +722,7 @@ func renvoEmitWindowsReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, i
 }
 
 func renvoEmitWindowsOpen(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-	trustNonNil(g, ep)
+	renvoNonNil(g, ep)
 	a := &g.asm
 	e := ep.exprs[idx]
 	if e.argCount != 2 {
@@ -735,7 +735,7 @@ func renvoEmitWindowsOpen(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	if !renvoEmitStringPtrExpr(g, ep, ep.args[e.firstArg]) {
 		return false
 	}
-	if targetArch == renvoArch386 {
+	if renvoTargetArch == renvoArch386 {
 		createFileImport := renvoWinImportCreateFileA
 		renvoAsmEmit16(a, 0xc689)
 		renvoAsmPopPrimary(a)
@@ -750,7 +750,7 @@ func renvoEmitWindowsOpen(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		renvoWin386CallImport(a, createFileImport)
 		return true
 	}
-	if targetArch == renvoArchAarch64 {
+	if renvoTargetArch == renvoArchAarch64 {
 		createFileImport := renvoWinImportCreateFileA
 		renvoAarch64AsmMovRegReg(a, 9, 0)
 		renvoAsmPopPrimary(a)
@@ -780,7 +780,7 @@ func renvoEmitWindowsOpen(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 }
 
 func renvoWinAmd64TranslateCreateFileFlags(a *renvoAsm) {
-	trustNonNil(a)
+	renvoNonNil(a)
 	notRDWRLabel := renvoAsmNewLabel(a)
 	accessDoneLabel := renvoAsmNewLabel(a)
 	noCreateLabel := renvoAsmNewLabel(a)
@@ -817,14 +817,14 @@ func renvoWinAmd64TranslateCreateFileFlags(a *renvoAsm) {
 }
 
 func renvoWinAmd64MovR10Imm(a *renvoAsm, imm int) {
-	trustNonNil(a)
+	renvoNonNil(a)
 	renvoAsmEmit8(a, 0x41)
 	renvoAsmEmit8(a, 0xba)
 	renvoAsmEmit32(a, imm)
 }
 
 func renvoWin386TranslateCreateFileFlags(a *renvoAsm) {
-	trustNonNil(a)
+	renvoNonNil(a)
 	notRDWRLabel := renvoAsmNewLabel(a)
 	accessDoneLabel := renvoAsmNewLabel(a)
 	noCreateLabel := renvoAsmNewLabel(a)
@@ -864,7 +864,7 @@ func renvoWin386TranslateCreateFileFlags(a *renvoAsm) {
 }
 
 func renvoEmitWindowsClose(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-	trustNonNil(g, ep)
+	renvoNonNil(g, ep)
 	a := &g.asm
 	e := ep.exprs[idx]
 	if e.argCount != 1 {
@@ -875,7 +875,7 @@ func renvoEmitWindowsClose(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 	}
 	failLabel := renvoAsmNewLabel(a)
 	doneLabel := renvoAsmNewLabel(a)
-	if targetArch == renvoArch386 {
+	if renvoTargetArch == renvoArch386 {
 		renvoAsmPushPrimary(a)
 		renvoWin386CallImport(a, renvoWinImportCloseHandle)
 		renvoAsmEmit3(a, 0x83, 0xf8, 0)
@@ -886,7 +886,7 @@ func renvoEmitWindowsClose(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 		renvoAsmMarkLabel(a, doneLabel)
 		return true
 	}
-	if targetArch == renvoArchAarch64 {
+	if renvoTargetArch == renvoArchAarch64 {
 		renvoWinArm64CallImport(a, renvoWinImportCloseHandle)
 		renvoAsmCmpPrimaryImm8(a, 0)
 		renvoAsmJzLabel(a, failLabel)
@@ -908,7 +908,7 @@ func renvoEmitWindowsClose(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 }
 
 func renvoEmitWindowsChmod(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-	trustNonNil(g, ep)
+	renvoNonNil(g, ep)
 	a := &g.asm
 	e := ep.exprs[idx]
 	if e.argCount != 2 {
@@ -921,7 +921,7 @@ func renvoEmitWindowsChmod(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 	if !renvoEmitIntExpr(g, ep, ep.args[e.firstArg+1]) {
 		return false
 	}
-	if targetArch == renvoArch386 {
+	if renvoTargetArch == renvoArch386 {
 		renvoAsmPopPrimary(a)
 		renvoAsmPushImm(a, 1)
 		renvoAsmPushImm(a, 0)
@@ -938,7 +938,7 @@ func renvoEmitWindowsChmod(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 		renvoAsmMarkLabel(a, doneLabel)
 		return true
 	}
-	if targetArch == renvoArchAarch64 {
+	if renvoTargetArch == renvoArchAarch64 {
 		renvoAsmPopPrimary(a)
 		renvoAarch64AsmMovRegImm(a, 1, 0)
 		renvoAarch64AsmMovRegImm(a, 2, 0)
@@ -973,7 +973,7 @@ func renvoEmitWindowsChmod(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 }
 
 func renvoEvalBuiltinConst(g *renvoLinearGen, nameStart int, nameEnd int) renvoConstResult {
-	trustNonNil(g)
+	renvoNonNil(g)
 	p := g.prog
 	if renvoBytesEqualText(p.src, nameStart, nameEnd, "iota") {
 		if g.constEvalIotaValid != 0 {

@@ -107,8 +107,8 @@ func getPerformanceCompilerFiles(t *testing.T, target compilerTarget, outDir str
 	wrapper := filepath.Join(outDir, "performance_main.go")
 	content := fmt.Sprintf(`package main
 
-var compilerDefaultTarget int = %[1]s
-var compilerFixedTarget int = %[1]s
+var renvoDefaultTarget int = %[1]s
+var renvoFixedTarget int = %[1]s
 var renvoCompilerStripSymbols bool
 
 func renvoOpenArg(path string, env []string) int {

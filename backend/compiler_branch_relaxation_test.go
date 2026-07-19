@@ -3,15 +3,15 @@ package main
 import "testing"
 
 func TestAmd64BranchRelaxationRunsForFixedTarget(t *testing.T) {
-	oldArch := targetArch
-	oldFixed := compilerFixedTarget
+	oldArch := renvoTargetArch
+	oldFixed := renvoFixedTarget
 	defer func() {
-		targetArch = oldArch
-		compilerFixedTarget = oldFixed
+		renvoTargetArch = oldArch
+		renvoFixedTarget = oldFixed
 	}()
 
-	targetArch = renvoArchAmd64
-	compilerFixedTarget = renvoTargetLinuxAmd64
+	renvoTargetArch = renvoArchAmd64
+	renvoFixedTarget = renvoTargetLinuxAmd64
 	var asm renvoAsm
 	renvoAsmInit(&asm)
 	target := renvoAsmNewLabel(&asm)

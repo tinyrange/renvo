@@ -44,7 +44,7 @@ func compileLinux386Arena(input []int, output int, arenaSize int) int {
 	if !meta.ok {
 		return 1
 	}
-	meta.arenaSize = renvoResolveArenaSize(currentTarget, arenaSize)
+	meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
 	var result renvoCompileResult
 	result = renvoTryCompileScalarProgram386(&prog, &meta)
 	if result.ok {
@@ -76,7 +76,7 @@ func compileWindows386Arena(input []int, output int, arenaSize int) int {
 	if !meta.ok {
 		return 1
 	}
-	meta.arenaSize = renvoResolveArenaSize(currentTarget, arenaSize)
+	meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
 	var result renvoCompileResult
 	result = renvoTryCompileScalarProgram386(&prog, &meta)
 	if result.ok {
@@ -108,7 +108,7 @@ func renvoTryCompileScalarProgram386(p *renvoProgram, meta *renvoMeta) renvoComp
 	if targetIsWindows() {
 		a.codeOffset = renvoWinSectionRVA
 	}
-	if compilerFixedTarget != 0 {
+	if renvoFixedTarget != 0 {
 		g.funcLabels = make([]int, 0, len(meta.funcs))
 	}
 	for i := 0; i < len(meta.funcs); i++ {

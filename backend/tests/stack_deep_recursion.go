@@ -1,6 +1,6 @@
 package main
 
-var compilerDefaultTarget int
+var renvoDefaultTarget int
 
 const stackTestTargetWasiWasm32 = 7
 
@@ -14,7 +14,7 @@ func stackDeepRecurse(n int) int {
 func appMain() int {
 	// WASI uses a virtual value/frame stack and the embedding engine owns the
 	// native call-stack limit. This regression covers native frame emitters.
-	if compilerDefaultTarget == stackTestTargetWasiWasm32 {
+	if renvoDefaultTarget == stackTestTargetWasiWasm32 {
 		print("PASS\n")
 		return 0
 	}

@@ -924,7 +924,7 @@ func renvo386EmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		return true
 	}
 	if e.kind == renvoExprCall {
-		if renvoExprIsIdentText(p, ep, e.left, "trustNonNil") {
+		if renvoExprIsIdentText(p, ep, e.left, "renvoNonNil") {
 			return renvoEmitRuntimeTrustPointer(g, ep, e)
 		}
 		if renvoExprIsIdentText(p, ep, e.left, "renvo_runtime_UnsafeByteAt") {
@@ -936,7 +936,7 @@ func renvo386EmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		if renvoExprIsIdentText(p, ep, e.left, "renvo_runtime_UnsafeIntAt") {
 			return renvoEmitRuntimeUnsafeIndex(g, ep, e, renvoNativeIntSize)
 		}
-		if renvoExprIsIdentText(p, ep, e.left, "truncateBytes") || renvoExprIsIdentText(p, ep, e.left, "truncateParams") || renvoExprIsIdentText(p, ep, e.left, "truncateTypes") || renvoExprIsIdentText(p, ep, e.left, "truncateFields") {
+		if renvoExprIsIdentText(p, ep, e.left, "renvoTruncBytes") || renvoExprIsIdentText(p, ep, e.left, "renvoTruncParams") || renvoExprIsIdentText(p, ep, e.left, "renvoTruncTypes") || renvoExprIsIdentText(p, ep, e.left, "renvoTruncFields") {
 			return renvoEmitRuntimeTruncateSlice(g, ep, e)
 		}
 		callee := renvoExprIdentCode(p, ep, e.left)

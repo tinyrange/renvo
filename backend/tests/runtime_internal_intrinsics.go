@@ -12,7 +12,7 @@ func renvo_runtime_UnsafeIntAt(data []int, index int) int {
 	return data[index]
 }
 
-func trustNonNil(values ...interface{}) {}
+func renvoNonNil(values ...interface{}) {}
 
 type renvoIntrinsicValue struct {
 	value int
@@ -23,7 +23,7 @@ func appMain() int {
 	words32 := []int32{-9, 11, 13}
 	words := []int{17, 19, 23}
 	value := &renvoIntrinsicValue{value: 29}
-	trustNonNil(value)
+	renvoNonNil(value)
 	if renvo_runtime_UnsafeByteAt(bytes, 2) != 7 {
 		return 1
 	}

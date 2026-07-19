@@ -11,13 +11,13 @@ const renvoLinuxAmd64SysWriteAt = 18
 const renvoLinuxAmd64SysFchmod = 91
 
 func renvoAmd64AsmPrepareReadWriteBuf(a *renvoAsm) {
-	trustNonNil(a)
+	renvoNonNil(a)
 	renvoAsmCopyPrimaryToCallWord1(a)
 	renvoAsmEmit16(a, 0x5a51)
 }
 
 func renvoAmd64AsmMoveOffsetArg(a *renvoAsm) {
-	trustNonNil(a)
+	renvoNonNil(a)
 	renvoAsmEmit24(a, 0xc28949)
 }
 
@@ -55,7 +55,7 @@ func renvoCompileAmd64(input []int, output int, arenaSize int) int {
 	if !meta.ok {
 		return 1
 	}
-	meta.arenaSize = renvoResolveArenaSize(currentTarget, arenaSize)
+	meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
 	var result renvoCompileResult
 	result = renvoTryCompileScalarProgramAmd64(&prog, &meta)
 	if result.ok {
@@ -67,7 +67,7 @@ func renvoCompileAmd64(input []int, output int, arenaSize int) int {
 }
 
 func renvoTryCompileScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-	trustNonNil(p, meta)
+	renvoNonNil(p, meta)
 	appIndex := -1
 	for i := 0; i < len(meta.funcs); i++ {
 		if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
@@ -88,7 +88,7 @@ func renvoTryCompileScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) renvoCo
 	if targetIsWindows() {
 		a.codeOffset = renvoWinSectionRVA
 	}
-	if compilerFixedTarget != 0 {
+	if renvoFixedTarget != 0 {
 		g.funcLabels = make([]int, 0, len(meta.funcs))
 	}
 	for i := 0; i < len(meta.funcs); i++ {
@@ -148,7 +148,7 @@ func renvoTryCompileScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) renvoCo
 }
 
 func renvoEmitProgramEntryArgsAmd64(g *renvoLinearGen, appIndex int) bool {
-	trustNonNil(g)
+	renvoNonNil(g)
 	app := &g.meta.funcs[appIndex]
 	if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
 		return false
@@ -193,7 +193,7 @@ func renvoEmitProgramEntryArgsAmd64(g *renvoLinearGen, appIndex int) bool {
 }
 
 func renvoAsmBuildWindowsArgvEnvSlicesAmd64(a *renvoAsm, bssOff int, argsTextOff int, argsLenOff int, envOff int, envLenOff int) {
-	trustNonNil(a)
+	renvoNonNil(a)
 	// This pre-relaxed instruction template is invariant except for its import
 	// and BSS operands, whose relocations are recorded immediately after it.
 	base := len(a.code)
@@ -212,7 +212,7 @@ func renvoAsmBuildWindowsArgvEnvSlicesAmd64(a *renvoAsm, bssOff int, argsTextOff
 }
 
 func renvoAsmBuildArgvEnvSlicesAmd64(a *renvoAsm, bssOff int, envOff int, envLenOff int) {
-	trustNonNil(a)
+	renvoNonNil(a)
 	loopLabel := renvoAsmNewLabel(a)
 	strlenLabel := renvoAsmNewLabel(a)
 	afterLenLabel := renvoAsmNewLabel(a)
@@ -288,7 +288,7 @@ func renvoAsmBuildArgvEnvSlicesAmd64(a *renvoAsm, bssOff int, envOff int, envLen
 }
 
 func renvoAsmImageAmd64(a *renvoAsm) []byte {
-	trustNonNil(a)
+	renvoNonNil(a)
 	renvoAsmPatch(a)
 	loadFileSize := a.codeOffset + len(a.code) + len(a.data)
 	bssOffset := renvoAsmBssOffset(a)
@@ -296,7 +296,7 @@ func renvoAsmImageAmd64(a *renvoAsm) []byte {
 		oldCodeLen := len(a.code)
 		var out []byte
 		out = a.code
-		truncateBytes(&out, loadFileSize)
+		renvoTruncBytes(&out, loadFileSize)
 		for i := 0; i < oldCodeLen; i++ {
 			src := oldCodeLen - 1 - i
 			out[a.codeOffset+src] = out[src]
@@ -315,7 +315,7 @@ func renvoAsmImageAmd64(a *renvoAsm) []byte {
 	sec := renvoBuildElf64SymbolSections(a, 0x400000, a.codeOffset, loadFileSize)
 	finalSize := sec.shoff + 448
 	out := make([]byte, finalSize)
-	truncateBytes(&out, 0)
+	renvoTruncBytes(&out, 0)
 	out = renvoAppendElfHeaderAmd64(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff)
 	for i := 0; i < len(a.code); i++ {
 		out = append(out, a.code[i])
@@ -361,7 +361,7 @@ func renvoAppendElfHeaderAmd64(out []byte, entryOff int, fileSize int, bssOffset
 }
 
 func renvoAsmImageWindowsAmd64(a *renvoAsm) []byte {
-	trustNonNil(a)
+	renvoNonNil(a)
 	for (a.codeOffset+len(a.code))%8 != 0 {
 		a.code = append(a.code, 0)
 	}

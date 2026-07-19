@@ -8,43 +8,43 @@ func compileTarget(input []int, output int, target int, arenaSize int) int {
 	// A stage compiler is specialized while its parent is lowering this source.
 	// Keep that dispatch expressed in terms of the specialization global so the
 	// fixed-target branch pruner can remove every unrelated backend call.
-	if compilerFixedTarget != 0 {
-		if compilerFixedTarget == renvoTargetWindowsAmd64 {
-			compilerFixedTarget = renvoTargetWindowsAmd64
+	if renvoFixedTarget != 0 {
+		if renvoFixedTarget == renvoTargetWindowsAmd64 {
+			renvoFixedTarget = renvoTargetWindowsAmd64
 			return compileWindowsAmd64Arena(input, output, arenaSize)
 		}
-		if compilerFixedTarget == renvoTargetWindows386 {
-			compilerFixedTarget = renvoTargetWindows386
+		if renvoFixedTarget == renvoTargetWindows386 {
+			renvoFixedTarget = renvoTargetWindows386
 			return compileWindows386Arena(input, output, arenaSize)
 		}
-		if compilerFixedTarget == renvoTargetWindowsArm64 {
-			compilerFixedTarget = renvoTargetWindowsArm64
+		if renvoFixedTarget == renvoTargetWindowsArm64 {
+			renvoFixedTarget = renvoTargetWindowsArm64
 			return compileWindowsArm64Arena(input, output, arenaSize)
 		}
-		if compilerFixedTarget == renvoTargetWasiWasm32 {
-			compilerFixedTarget = renvoTargetWasiWasm32
+		if renvoFixedTarget == renvoTargetWasiWasm32 {
+			renvoFixedTarget = renvoTargetWasiWasm32
 			return compileWasiWasm32Arena(input, output, arenaSize)
 		}
-		if compilerFixedTarget == renvoTargetDarwinArm64 {
-			compilerFixedTarget = renvoTargetDarwinArm64
+		if renvoFixedTarget == renvoTargetDarwinArm64 {
+			renvoFixedTarget = renvoTargetDarwinArm64
 			return compileDarwinArm64Arena(input, output, arenaSize)
 		}
-		if compilerFixedTarget == renvoTargetLinux386 {
-			compilerFixedTarget = renvoTargetLinux386
+		if renvoFixedTarget == renvoTargetLinux386 {
+			renvoFixedTarget = renvoTargetLinux386
 			return compileLinux386Arena(input, output, arenaSize)
 		}
-		if compilerFixedTarget == renvoTargetLinuxAarch64 {
-			compilerFixedTarget = renvoTargetLinuxAarch64
+		if renvoFixedTarget == renvoTargetLinuxAarch64 {
+			renvoFixedTarget = renvoTargetLinuxAarch64
 			return compileLinuxAarch64Arena(input, output, arenaSize)
 		}
-		if compilerFixedTarget == renvoTargetLinuxArm {
-			compilerFixedTarget = renvoTargetLinuxArm
+		if renvoFixedTarget == renvoTargetLinuxArm {
+			renvoFixedTarget = renvoTargetLinuxArm
 			return compileLinuxArmArena(input, output, arenaSize)
 		}
-		compilerFixedTarget = renvoTargetLinuxAmd64
+		renvoFixedTarget = renvoTargetLinuxAmd64
 		return compileLinuxAmd64Arena(input, output, arenaSize)
 	}
-	compilerFixedTarget = target
+	renvoFixedTarget = target
 	if target == renvoTargetWindowsAmd64 {
 		return compileWindowsAmd64Arena(input, output, arenaSize)
 	}
