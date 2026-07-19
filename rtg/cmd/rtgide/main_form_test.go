@@ -8,6 +8,7 @@ import (
 
 	"j5.nz/rtg/rtg/ide"
 	"j5.nz/rtg/rtg/std/graphics"
+	"j5.nz/rtg/rtg/std/graphics/gofont"
 )
 
 func TestMainFormGeneratedLayoutAndOpenSaveCallbacks(t *testing.T) {
@@ -88,6 +89,24 @@ func TestWorkspaceReferenceGeometry(t *testing.T) {
 	}
 	if layout.explorer != graphics.R(0, 82, 263, 404) || layout.editor != graphics.R(263, 82, 825, 292) {
 		t.Fatalf("live pane geometry = explorer %#v editor %#v", layout.explorer, layout.editor)
+	}
+}
+
+func TestWorkspaceOutputWrapsLongCompilerDiagnostics(t *testing.T) {
+	font := gofont.New(15)
+	diagnostic := "/Users/example/Documents/RTGProjects/HelloWorld/main.go:12:7: error RTG-CHECK-006 (checker): undefined name greeting"
+	wrapped := wrapWorkspaceOutput(font, diagnostic, 360, 3)
+	if !strings.Contains(wrapped, "\n") {
+		t.Fatalf("diagnostic was not wrapped: %q", wrapped)
+	}
+	continuous := strings.ReplaceAll(wrapped, "\n", " ")
+	if !strings.Contains(continuous, "RTG-CHECK-006") || !strings.Contains(continuous, "undefined name greeting") {
+		t.Fatalf("wrapped diagnostic lost useful failure details: %q", wrapped)
+	}
+	for _, line := range strings.Split(wrapped, "\n") {
+		if width := graphics.MeasureText(font, line).Width; width > 360 {
+			t.Fatalf("wrapped line width = %v, want <= 360: %q", width, line)
+		}
 	}
 }
 

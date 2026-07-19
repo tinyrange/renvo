@@ -54,7 +54,19 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 	}
 	if result.Error == BuildErrSource {
 		d.Phase, d.Code, d.Message, d.Path = "loader", "RTG-LOAD-001", "source collection failed", result.ErrorPath
-		if result.Sources.Error == SourceErrParse {
+		if result.Sources.Error == SourceErrMissingModule {
+			d.Code, d.Message = "RTG-LOAD-002", "go.mod was not found"
+		} else if result.Sources.Error == SourceErrModule {
+			d.Code, d.Message = "RTG-LOAD-003", "invalid module declaration"
+		} else if result.Sources.Error == SourceErrPackageArg {
+			d.Code, d.Message = "RTG-LOAD-004", "package path is outside the main module"
+		} else if result.Sources.Error == SourceErrReadDir {
+			d.Code, d.Message = "RTG-LOAD-005", "package directory could not be read"
+		} else if result.Sources.Error == SourceErrReadFile {
+			d.Code, d.Message = "RTG-LOAD-006", "source file could not be read"
+		} else if result.Sources.Error == SourceErrBuildConstraint {
+			d.Code, d.Message = "RTG-LOAD-007", "invalid build constraint"
+		} else if result.Sources.Error == SourceErrParse {
 			d.Phase, d.Code, d.Message = "parser", "RTG-PARSE-001", "source syntax is invalid"
 		} else if result.Sources.Error == SourceErrImport {
 			d.Code, d.Message = "RTG-LOAD-008", "unresolved import "+result.ErrorPath

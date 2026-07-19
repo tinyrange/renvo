@@ -14,8 +14,12 @@ func compileIDEProject(root, output, target string, env []string) projectActionR
 	}
 	args := []string{"rtg", "-t", target, "-s", "-o", output, "."}
 	buildEnv := projectEnvironment(env, root)
-	if driver.RunRTGCommand(args, buildEnv) != 0 {
-		return projectActionResult{message: "Build failed. See the compiler diagnostic on stderr.", ok: false}
+	status, diagnostic := driver.RunRTGCommandCapture(args, buildEnv)
+	if status != 0 {
+		if diagnostic == "" {
+			diagnostic = "Build failed."
+		}
+		return projectActionResult{message: diagnostic, ok: false}
 	}
 	file, err := rtgos.Open(output)
 	if err != nil {

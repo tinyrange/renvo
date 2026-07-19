@@ -543,9 +543,87 @@ func (c *workspaceOutput) paint(surface *graphics.Surface) {
 		color = graphics.RGBA(34, 137, 72, 255)
 	}
 	surface.FillEllipse(graphics.R(bounds.MinX+79, bounds.MinY+17, 7, 7), color)
-	surface.PushClipRect(graphics.R(bounds.MinX+12, bounds.MinY+35, bounds.Width()-24, bounds.Height()-39))
-	drawWorkspaceText(surface, c.font, bounds.MinX+16, bounds.MinY+57, c.message, workspaceMuted)
+	textBounds := graphics.R(bounds.MinX+12, bounds.MinY+35, bounds.Width()-24, bounds.Height()-39)
+	surface.PushClipRect(textBounds)
+	message := wrapWorkspaceOutput(c.font, c.message, textBounds.Width()-8, 3)
+	drawWorkspaceText(surface, c.font, bounds.MinX+16, bounds.MinY+57, message, workspaceMuted)
 	surface.PopClip()
+}
+
+func wrapWorkspaceOutput(font *graphics.Font, text string, maxWidth graphics.Scalar, maxLines int) string {
+	if font == nil || text == "" || maxWidth <= 0 || maxLines <= 0 {
+		return ""
+	}
+	out := ""
+	lines := 0
+	for len(text) > 0 && lines < maxLines {
+		lineEnd := 0
+		for lineEnd < len(text) && text[lineEnd] != '\n' {
+			lineEnd++
+		}
+		line := text[:lineEnd]
+		consumed := lineEnd
+		if graphics.MeasureText(font, line).Width > maxWidth {
+			fit := workspaceOutputFit(font, line, maxWidth)
+			if fit == 0 {
+				fit = workspaceOutputNextUTF8(line, 0)
+			}
+			breakAt := fit
+			for i := 0; i < fit; i++ {
+				if line[i] == ' ' || line[i] == '\t' {
+					breakAt = i
+				}
+			}
+			if breakAt == 0 {
+				breakAt = fit
+			}
+			line = line[:breakAt]
+			consumed = breakAt
+			for consumed < len(text) && (text[consumed] == ' ' || text[consumed] == '\t') {
+				consumed++
+			}
+		} else if consumed < len(text) && text[consumed] == '\n' {
+			consumed++
+		}
+		if out != "" {
+			out += "\n"
+		}
+		out += line
+		lines++
+		text = text[consumed:]
+	}
+	return out
+}
+
+func workspaceOutputFit(font *graphics.Font, text string, maxWidth graphics.Scalar) int {
+	fit := 0
+	for fit < len(text) {
+		next := workspaceOutputNextUTF8(text, fit)
+		if graphics.MeasureText(font, text[:next]).Width > maxWidth {
+			break
+		}
+		fit = next
+	}
+	return fit
+}
+
+func workspaceOutputNextUTF8(text string, at int) int {
+	if at >= len(text) {
+		return len(text)
+	}
+	width := 1
+	first := text[at]
+	if first&0xe0 == 0xc0 {
+		width = 2
+	} else if first&0xf0 == 0xe0 {
+		width = 3
+	} else if first&0xf8 == 0xf0 {
+		width = 4
+	}
+	if at+width > len(text) {
+		return at + 1
+	}
+	return at + width
 }
 
 func (c *workspaceDesigner) drawForm(surface *graphics.Surface, canvas graphics.Rect) {
