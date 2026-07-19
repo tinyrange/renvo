@@ -130,6 +130,7 @@ type rtgUnitReader struct {
 }
 
 func rtgUnitReadVar(r *rtgUnitReader) int {
+	rtgTrustNonNil(r)
 	if !r.ok || r.pos >= r.end {
 		r.ok = false
 		return 0
@@ -208,6 +209,7 @@ func rtgDecodeUnitTokens(text []byte, data []byte) ([]int32, bool) {
 }
 
 func rtgUnitUsesPanic(p *rtgProgram) bool {
+	rtgTrustNonNil(p)
 	for i := 0; i < rtgTokCount(p); i++ {
 		if rtgTokIdentIs(p, i, "defer") || rtgTokIdentIs(p, i, "panic") || rtgTokIdentIs(p, i, "recover") || rtgTokCharIs(p, i, '.') && rtgTokCharIs(p, i+1, '(') {
 			return true
@@ -312,6 +314,7 @@ func rtgDecodeUnitProgram(src []byte) (rtgProgram, bool, bool) {
 	}
 	prog.src = text
 	prog.toks.data = tokens
+	prog.toks.count = tokenCount
 	prog.toks.panicEnabled = rtgUnitUsesPanic(&prog)
 	declReader := rtgUnitReader{src: declData, end: len(declData), ok: true}
 	declCount := rtgUnitReadVar(&declReader)
@@ -401,6 +404,7 @@ func rtgUnitValidTokenRange(limit int, start int, end int) bool {
 }
 
 func rtgCompileProgramToOutput(prog *rtgProgram, output int, target int, arenaSize int) int {
+	rtgTrustNonNil(prog)
 	rtgCompilerFixedTarget = target
 	rtgSetTarget(target)
 	if !prog.ok {

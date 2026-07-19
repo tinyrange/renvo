@@ -2,23 +2,27 @@ package main
 
 func rtgReadAll(fd int, out []byte) []byte {
 	buf := make([]byte, 0, 1024)
-	buf = buf[:cap(buf)]
+	rtgTruncateBytes(&buf, cap(buf))
 	for {
 		base := len(out)
 		if base < cap(out) {
-			expanded := out[:cap(out)]
+			expanded := out
+			rtgTruncateBytes(&expanded, cap(out))
 			n := read(fd, expanded[base:], -1)
 			if n <= 0 {
 				return out
 			}
-			out = expanded[:base+n]
+			out = expanded
+			rtgTruncateBytes(&out, base+n)
 			continue
 		}
 		n := read(fd, buf, -1)
 		if n <= 0 {
 			return out
 		}
-		out = append(out, buf[:n]...)
+		chunk := buf
+		rtgTruncateBytes(&chunk, n)
+		out = append(out, chunk...)
 	}
 }
 
@@ -118,6 +122,7 @@ func rtgLinuxSysFchmod() int {
 }
 
 func rtgAsmPrepareReadWriteBuf(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmMovRsiRax(a)
 		rtgWasm32EmitRegReg(a, rtgWasm32OpMovRegReg, rtgWasm32RegRdx, rtgWasm32RegRcx)
@@ -139,6 +144,7 @@ func rtgAsmPrepareReadWriteBuf(a *rtgAsm) {
 }
 
 func rtgAsmMoveOffsetArg(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32EmitRegReg(a, rtgWasm32OpMovRegReg, rtgWasm32RegR10, rtgWasm32RegRax)
 		return
@@ -159,6 +165,7 @@ func rtgAsmMoveOffsetArg(a *rtgAsm) {
 }
 
 func rtgEmitLinearPrintStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
+	rtgTrustNonNil(g, stmt)
 	p := g.prog
 	if stmt.exprStart < 0 || stmt.exprStart >= rtgTokCount(p) {
 		return false
@@ -191,6 +198,7 @@ func rtgEmitLinearPrintStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 		}
 		argIndex := ep.args[root.firstArg+i]
 		argType := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, argIndex))
+		rtgTrustNonNil(argType)
 		if argType.kind == rtgTypeString {
 			if !rtgEmitStringValueRegs(g, ep, argIndex) {
 				return false
@@ -212,6 +220,7 @@ func rtgEmitLinearPrintStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 }
 
 func rtgEmitPrintStaticByte(g *rtgLinearGen, value byte, fd int) bool {
+	rtgTrustNonNil(g)
 	offset := len(g.asm.data)
 	g.asm.data = append(g.asm.data, value)
 	rtgAsmPrimaryDataAddr(&g.asm, offset)
@@ -220,6 +229,7 @@ func rtgEmitPrintStaticByte(g *rtgLinearGen, value byte, fd int) bool {
 }
 
 func rtgEmitWriteValueRegs(g *rtgLinearGen, fd int) bool {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	if rtgTargetIsWindows() {
 		if rtgTargetArch == rtgArch386 {
@@ -267,6 +277,7 @@ func rtgEmitWriteValueRegs(g *rtgLinearGen, fd int) bool {
 }
 
 func rtgEmitBuiltinReadWrite(g *rtgLinearGen, ep *rtgExprParse, idx int, seqSyscall int, offSyscall int) bool {
+	rtgTrustNonNil(g, ep)
 	a := &g.asm
 	p := g.prog
 	firstArg := ep.exprs[idx].firstArg
@@ -333,6 +344,7 @@ func rtgEmitBuiltinReadWrite(g *rtgLinearGen, ep *rtgExprParse, idx int, seqSysc
 }
 
 func rtgAsmJgeLabel(a *rtgAsm, label int) {
+	rtgTrustNonNil(a)
 	rtgAsmEmit16(a, 0x8d0f)
 	at := len(a.code)
 	rtgAsmEmit32(a, 0)
@@ -340,6 +352,7 @@ func rtgAsmJgeLabel(a *rtgAsm, label int) {
 }
 
 func rtgAsmJlLabel(a *rtgAsm, label int) {
+	rtgTrustNonNil(a)
 	rtgAsmEmit16(a, 0x8c0f)
 	at := len(a.code)
 	rtgAsmEmit32(a, 0)
@@ -347,6 +360,7 @@ func rtgAsmJlLabel(a *rtgAsm, label int) {
 }
 
 func rtgWinAmd64CallImport(a *rtgAsm, importID int, shadow int) {
+	rtgTrustNonNil(a)
 	rtgAsmEmit4(a, 0x48, 0x83, 0xec, shadow)
 	rtgAsmEmit16(a, 0x15ff)
 	at := len(a.code)
@@ -356,6 +370,7 @@ func rtgWinAmd64CallImport(a *rtgAsm, importID int, shadow int) {
 }
 
 func rtgWin386CallImport(a *rtgAsm, importID int) {
+	rtgTrustNonNil(a)
 	rtgAsmEmit16(a, 0x15ff)
 	at := len(a.code)
 	rtgAsmEmit32(a, 0)
@@ -363,6 +378,7 @@ func rtgWin386CallImport(a *rtgAsm, importID int) {
 }
 
 func rtgWinAmd64LoadImportPtrRax(a *rtgAsm, importID int) {
+	rtgTrustNonNil(a)
 	rtgAsmEmit24(a, 0x058b48)
 	at := len(a.code)
 	rtgAsmEmit32(a, 0)
@@ -370,6 +386,7 @@ func rtgWinAmd64LoadImportPtrRax(a *rtgAsm, importID int) {
 }
 
 func rtgWinAmd64LoadImportPtrR9(a *rtgAsm, importID int) {
+	rtgTrustNonNil(a)
 	rtgAsmEmit24(a, 0x0d8b4c)
 	at := len(a.code)
 	rtgAsmEmit32(a, 0)
@@ -377,6 +394,7 @@ func rtgWinAmd64LoadImportPtrR9(a *rtgAsm, importID int) {
 }
 
 func rtgWinAmd64LoadImportPtrR10(a *rtgAsm, importID int) {
+	rtgTrustNonNil(a)
 	rtgAsmEmit24(a, 0x158b4c)
 	at := len(a.code)
 	rtgAsmEmit32(a, 0)
@@ -384,6 +402,7 @@ func rtgWinAmd64LoadImportPtrR10(a *rtgAsm, importID int) {
 }
 
 func rtgWin386LoadImportPtrRax(a *rtgAsm, importID int) {
+	rtgTrustNonNil(a)
 	rtgAsmEmit8(a, 0xa1)
 	at := len(a.code)
 	rtgAsmEmit32(a, 0)
@@ -391,6 +410,7 @@ func rtgWin386LoadImportPtrRax(a *rtgAsm, importID int) {
 }
 
 func rtgWin386LoadImportPtrRsi(a *rtgAsm, importID int) {
+	rtgTrustNonNil(a)
 	rtgAsmEmit16(a, 0x358b)
 	at := len(a.code)
 	rtgAsmEmit32(a, 0)
@@ -398,6 +418,7 @@ func rtgWin386LoadImportPtrRsi(a *rtgAsm, importID int) {
 }
 
 func rtgWin386StoreEcxBss(a *rtgAsm, bssOff int) {
+	rtgTrustNonNil(a)
 	rtgAsmEmit16(a, 0x0d89)
 	at := len(a.code)
 	rtgAsmEmit32(a, 0)
@@ -405,6 +426,7 @@ func rtgWin386StoreEcxBss(a *rtgAsm, bssOff int) {
 }
 
 func rtgWin386MovEbxBssAddr(a *rtgAsm, bssOff int) {
+	rtgTrustNonNil(a)
 	rtgAsmEmit8(a, 0xbb)
 	at := len(a.code)
 	rtgAsmEmit32(a, 0)
@@ -412,6 +434,7 @@ func rtgWin386MovEbxBssAddr(a *rtgAsm, bssOff int) {
 }
 
 func rtgWin386MovEcxBssAddr(a *rtgAsm, bssOff int) {
+	rtgTrustNonNil(a)
 	rtgAsmEmit8(a, 0xb9)
 	at := len(a.code)
 	rtgAsmEmit32(a, 0)
@@ -419,6 +442,7 @@ func rtgWin386MovEcxBssAddr(a *rtgAsm, bssOff int) {
 }
 
 func rtgWin386MovEdiBssAddr(a *rtgAsm, bssOff int) {
+	rtgTrustNonNil(a)
 	rtgAsmEmit8(a, 0xbf)
 	at := len(a.code)
 	rtgAsmEmit32(a, 0)
@@ -426,6 +450,7 @@ func rtgWin386MovEdiBssAddr(a *rtgAsm, bssOff int) {
 }
 
 func rtgWin386PushBssAddr(a *rtgAsm, bssOff int) {
+	rtgTrustNonNil(a)
 	rtgAsmEmit8(a, 0x68)
 	at := len(a.code)
 	rtgAsmEmit32(a, 0)
@@ -433,6 +458,7 @@ func rtgWin386PushBssAddr(a *rtgAsm, bssOff int) {
 }
 
 func rtgWin386LoadEsiBss(a *rtgAsm, bssOff int) {
+	rtgTrustNonNil(a)
 	rtgAsmEmit16(a, 0x358b)
 	at := len(a.code)
 	rtgAsmEmit32(a, 0)
@@ -440,6 +466,7 @@ func rtgWin386LoadEsiBss(a *rtgAsm, bssOff int) {
 }
 
 func rtgWin386LoadEaxBss(a *rtgAsm, bssOff int) {
+	rtgTrustNonNil(a)
 	rtgAsmEmit8(a, 0xa1)
 	at := len(a.code)
 	rtgAsmEmit32(a, 0)
@@ -447,6 +474,7 @@ func rtgWin386LoadEaxBss(a *rtgAsm, bssOff int) {
 }
 
 func rtgWinAmd64EmitReadWriteHelper(g *rtgLinearGen, isWrite bool) int {
+	rtgTrustNonNil(g)
 	// The template is the relaxed form of the instruction sequence previously
 	// assembled one operation at a time. Explicit relocations record the BSS and
 	// import operands that still vary between compiler invocations and self-host.
@@ -504,6 +532,7 @@ func rtgWinAmd64EmitReadWriteHelper(g *rtgLinearGen, isWrite bool) int {
 }
 
 func rtgWin386EmitReadWriteHelper(g *rtgLinearGen, isWrite bool) int {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	if isWrite {
 		if g.winWriteEmitted {
@@ -614,12 +643,14 @@ func rtgWin386EmitReadWriteHelper(g *rtgLinearGen, isWrite bool) int {
 }
 
 func rtgWin386SetStdHandle(a *rtgAsm, stdHandle int) {
+	rtgTrustNonNil(a)
 	rtgAsmPushImm(a, stdHandle)
 	rtgWin386CallImport(a, rtgWinImportGetStdHandle)
 	rtgAsmCopyPrimaryToCallWord0(a)
 }
 
 func rtgWin386EmitKernelReadWriteCall(a *rtgAsm, importID int, countOff int) {
+	rtgTrustNonNil(a)
 	rtgAsmPushImm(a, 0)
 	rtgWin386PushBssAddr(a, countOff)
 	rtgAsmPushSecondary(a)
@@ -629,6 +660,7 @@ func rtgWin386EmitKernelReadWriteCall(a *rtgAsm, importID int, countOff int) {
 }
 
 func rtgEmitWindowsReadWrite(g *rtgLinearGen, ep *rtgExprParse, idx int, isWrite bool) bool {
+	rtgTrustNonNil(g, ep)
 	a := &g.asm
 	p := g.prog
 	firstArg := ep.exprs[idx].firstArg
@@ -690,6 +722,7 @@ func rtgEmitWindowsReadWrite(g *rtgLinearGen, ep *rtgExprParse, idx int, isWrite
 }
 
 func rtgEmitWindowsOpen(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	a := &g.asm
 	e := ep.exprs[idx]
 	if e.argCount != 2 {
@@ -747,6 +780,7 @@ func rtgEmitWindowsOpen(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgWinAmd64TranslateCreateFileFlags(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	notRDWRLabel := rtgAsmNewLabel(a)
 	accessDoneLabel := rtgAsmNewLabel(a)
 	noCreateLabel := rtgAsmNewLabel(a)
@@ -783,12 +817,14 @@ func rtgWinAmd64TranslateCreateFileFlags(a *rtgAsm) {
 }
 
 func rtgWinAmd64MovR10Imm(a *rtgAsm, imm int) {
+	rtgTrustNonNil(a)
 	rtgAsmEmit8(a, 0x41)
 	rtgAsmEmit8(a, 0xba)
 	rtgAsmEmit32(a, imm)
 }
 
 func rtgWin386TranslateCreateFileFlags(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	notRDWRLabel := rtgAsmNewLabel(a)
 	accessDoneLabel := rtgAsmNewLabel(a)
 	noCreateLabel := rtgAsmNewLabel(a)
@@ -828,6 +864,7 @@ func rtgWin386TranslateCreateFileFlags(a *rtgAsm) {
 }
 
 func rtgEmitWindowsClose(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	a := &g.asm
 	e := ep.exprs[idx]
 	if e.argCount != 1 {
@@ -871,6 +908,7 @@ func rtgEmitWindowsClose(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgEmitWindowsChmod(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	a := &g.asm
 	e := ep.exprs[idx]
 	if e.argCount != 2 {
@@ -935,6 +973,7 @@ func rtgEmitWindowsChmod(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgEvalBuiltinConst(g *rtgLinearGen, nameStart int, nameEnd int) rtgConstResult {
+	rtgTrustNonNil(g)
 	p := g.prog
 	if rtgBytesEqualText(p.src, nameStart, nameEnd, "iota") {
 		if g.constEvalIotaValid != 0 {

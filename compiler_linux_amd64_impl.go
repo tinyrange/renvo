@@ -11,11 +11,13 @@ const rtgLinuxAmd64SysWriteAt = 18
 const rtgLinuxAmd64SysFchmod = 91
 
 func rtgAmd64AsmPrepareReadWriteBuf(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	rtgAsmCopyPrimaryToCallWord1(a)
 	rtgAsmEmit16(a, 0x5a51)
 }
 
 func rtgAmd64AsmMoveOffsetArg(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	rtgAsmEmit24(a, 0xc28949)
 }
 
@@ -65,6 +67,7 @@ func rtgCompileAmd64(input []int, output int, arenaSize int) int {
 }
 
 func rtgTryCompileScalarProgramAmd64(p *rtgProgram, meta *rtgMeta) rtgCompileResult {
+	rtgTrustNonNil(p, meta)
 	appIndex := -1
 	for i := 0; i < len(meta.funcs); i++ {
 		if rtgBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
@@ -94,6 +97,9 @@ func rtgTryCompileScalarProgramAmd64(p *rtgProgram, meta *rtgMeta) rtgCompileRes
 	}
 	rtgInitFuncQueue(&g, len(meta.funcs))
 	rtgLinearMarkFunc(&g, appIndex)
+	if !meta.panicEnabled {
+		rtgAmd64InitRuntimeCheckRegs(&g)
+	}
 	rtgEmitPersistentArenaReady(&g)
 	if !rtgLinearInitGlobals(&g) {
 		var result rtgCompileResult
@@ -102,6 +108,11 @@ func rtgTryCompileScalarProgramAmd64(p *rtgProgram, meta *rtgMeta) rtgCompileRes
 	if !rtgEmitProgramEntryArgsAmd64(&g, appIndex) {
 		var result rtgCompileResult
 		return result
+	}
+	// Entry argument setup uses R12 as scratch, so restore all reserved runtime
+	// check registers after it has consumed the process stack.
+	if !meta.panicEnabled {
+		rtgAmd64InitRuntimeCheckRegs(&g)
 	}
 	rtgAsmCallLabel(a, g.funcLabels[appIndex])
 	if !rtgEmitProgramPanicCheck(&g) {
@@ -137,6 +148,7 @@ func rtgTryCompileScalarProgramAmd64(p *rtgProgram, meta *rtgMeta) rtgCompileRes
 }
 
 func rtgEmitProgramEntryArgsAmd64(g *rtgLinearGen, appIndex int) bool {
+	rtgTrustNonNil(g)
 	app := &g.meta.funcs[appIndex]
 	if app.resultType != 0 && !rtgTypeIsInt(g.meta, app.resultType) {
 		return false
@@ -181,6 +193,7 @@ func rtgEmitProgramEntryArgsAmd64(g *rtgLinearGen, appIndex int) bool {
 }
 
 func rtgAsmBuildWindowsArgvEnvSlicesAmd64(a *rtgAsm, bssOff int, argsTextOff int, argsLenOff int, envOff int, envLenOff int) {
+	rtgTrustNonNil(a)
 	// This pre-relaxed instruction template is invariant except for its import
 	// and BSS operands, whose relocations are recorded immediately after it.
 	base := len(a.code)
@@ -199,6 +212,7 @@ func rtgAsmBuildWindowsArgvEnvSlicesAmd64(a *rtgAsm, bssOff int, argsTextOff int
 }
 
 func rtgAsmBuildArgvEnvSlicesAmd64(a *rtgAsm, bssOff int, envOff int, envLenOff int) {
+	rtgTrustNonNil(a)
 	loopLabel := rtgAsmNewLabel(a)
 	strlenLabel := rtgAsmNewLabel(a)
 	afterLenLabel := rtgAsmNewLabel(a)
@@ -274,13 +288,15 @@ func rtgAsmBuildArgvEnvSlicesAmd64(a *rtgAsm, bssOff int, envOff int, envLenOff 
 }
 
 func rtgAsmImageAmd64(a *rtgAsm) []byte {
+	rtgTrustNonNil(a)
 	rtgAsmPatch(a)
 	loadFileSize := a.codeOffset + len(a.code) + len(a.data)
 	bssOffset := rtgAsmBssOffset(a)
 	if rtgCompilerStripSymbols {
 		oldCodeLen := len(a.code)
 		var out []byte
-		out = a.code[:loadFileSize]
+		out = a.code
+		rtgTruncateBytes(&out, loadFileSize)
 		for i := 0; i < oldCodeLen; i++ {
 			src := oldCodeLen - 1 - i
 			out[a.codeOffset+src] = out[src]
@@ -299,7 +315,7 @@ func rtgAsmImageAmd64(a *rtgAsm) []byte {
 	sec := rtgBuildElf64SymbolSections(a, 0x400000, a.codeOffset, loadFileSize)
 	finalSize := sec.shoff + 448
 	out := make([]byte, finalSize)
-	out = out[:0]
+	rtgTruncateBytes(&out, 0)
 	out = rtgAppendElfHeaderAmd64(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff)
 	for i := 0; i < len(a.code); i++ {
 		out = append(out, a.code[i])
@@ -345,6 +361,7 @@ func rtgAppendElfHeaderAmd64(out []byte, entryOff int, fileSize int, bssOffset i
 }
 
 func rtgAsmImageWindowsAmd64(a *rtgAsm) []byte {
+	rtgTrustNonNil(a)
 	for (a.codeOffset+len(a.code))%8 != 0 {
 		a.code = append(a.code, 0)
 	}

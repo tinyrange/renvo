@@ -228,6 +228,17 @@ func rtg_runtime_ArenaMark() int { return 0 }
 
 func rtg_runtime_ArenaReset(mark int) {}
 
+// These internal intrinsics are only used after compiler code has established
+// the corresponding index invariant. Host builds retain Go's checked access;
+// self-hosted builds lower the calls to an explicitly unsafe load.
+func rtg_runtime_UnsafeByteAt(data []byte, index int) byte { return data[index] }
+
+func rtg_runtime_UnsafeInt32At(data []int32, index int) int32 { return data[index] }
+
+func rtg_runtime_UnsafeIntAt(data []int, index int) int { return data[index] }
+
+func rtgTrustNonNil(values ...interface{}) {}
+
 func rtgSetTarget(target int) {
 	if rtgCompilerFixedTarget != 0 {
 		target = rtgCompilerFixedTarget
@@ -302,11 +313,13 @@ type rtgAsm struct {
 	bssOffset           int
 	lastPrimaryStoreEnd int
 	lastPrimaryStoreOff int
+	lastPrimaryLoad     int
 }
 
 const rtgWasm32FallbackSliceBackingSize = 4096
 
 func rtgAsmInit(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	var code []byte
 	var labelPos []int
 	var labelSet []bool
@@ -364,9 +377,11 @@ func rtgAsmInit(a *rtgAsm) {
 	a.bssOffset = 0
 	a.lastPrimaryStoreEnd = -1
 	a.lastPrimaryStoreOff = 0
+	a.lastPrimaryLoad = 0
 }
 
 func rtgAsmNewLabel(a *rtgAsm) int {
+	rtgTrustNonNil(a)
 	label := len(a.labelPos)
 	a.labelPos = append(a.labelPos, 0)
 	a.labelSet = append(a.labelSet, false)
@@ -374,6 +389,7 @@ func rtgAsmNewLabel(a *rtgAsm) int {
 }
 
 func rtgAsmMarkLabel(a *rtgAsm, label int) {
+	rtgTrustNonNil(a)
 	if label < 0 {
 		return
 	}
@@ -384,52 +400,60 @@ func rtgAsmMarkLabel(a *rtgAsm, label int) {
 	a.labelPos[label] = codeLen
 	a.labelSet[label] = true
 	a.lastPrimaryStoreEnd = -1
+	a.lastPrimaryLoad = 0
 }
 
 func rtgAsmEmit8(a *rtgAsm, v int) {
-	index := len(a.code)
-	a.code = a.code[:index+1]
-	a.code[index] = byte(v)
+	rtgTrustNonNil(a)
+	a.code = append(a.code, byte(v))
 }
 
 func rtgAsmEmitText(a *rtgAsm, code string) {
+	rtgTrustNonNil(a)
 	for i := 0; i < len(code); i++ {
 		a.code = append(a.code, code[i])
 	}
 }
 
 func rtgAsmEmit2(a *rtgAsm, v0 int, v1 int) {
+	rtgTrustNonNil(a)
 	a.code = rtgAppend16(a.code, v0|(v1<<8))
 }
 
 func rtgAsmEmit3(a *rtgAsm, v0 int, v1 int, v2 int) {
+	rtgTrustNonNil(a)
 	rtgAsmEmit24(a, v0|(v1<<8)|(v2<<16))
 }
 
 func rtgAsmEmit4(a *rtgAsm, v0 int, v1 int, v2 int, v3 int) {
+	rtgTrustNonNil(a)
 	a.code = rtgAppend32(a.code, v0|(v1<<8)|(v2<<16)|(v3<<24))
 }
 
 func rtgAsmEmit5(a *rtgAsm, v0 int, v1 int, v2 int, v3 int, v4 int) {
+	rtgTrustNonNil(a)
 	rtgAsmEmit4(a, v0, v1, v2, v3)
 	rtgAsmEmit8(a, v4)
 }
 
 func rtgAsmAddAbsReloc(a *rtgAsm, at int, off int, kind int) {
+	rtgTrustNonNil(a)
 	a.absRelocs = append(a.absRelocs, rtgAbsRef{at: at & 2147483647, off: off & 2147483647, kind: kind & 2147483647})
 }
 
 func rtgAsmAddReloc(a *rtgAsm, at int, label int) {
+	rtgTrustNonNil(a)
 	a.relocs = append(a.relocs, rtgLabelRef{at: at & 2147483647, label: label & 2147483647})
 }
 
 func rtgAsmAddFuncSymbol(a *rtgAsm, src []byte, nameStart int, nameEnd int, label int) {
+	rtgTrustNonNil(a)
 	if rtgCompilerStripSymbols && rtgTargetArch != rtgArchWasm32 {
 		return
 	}
 	start := len(a.symbolName)
 	for i := nameStart; i < nameEnd; i++ {
-		a.symbolName = append(a.symbolName, src[i])
+		a.symbolName = append(a.symbolName, rtg_runtime_UnsafeByteAt(src, i))
 	}
 	end := len(a.symbolName)
 	var sym rtgAsmSymbol
@@ -440,6 +464,7 @@ func rtgAsmAddFuncSymbol(a *rtgAsm, src []byte, nameStart int, nameEnd int, labe
 }
 
 func rtgAsmEmit32(a *rtgAsm, v int) {
+	rtgTrustNonNil(a)
 	a.code = rtgAppend32(a.code, v)
 }
 
@@ -476,20 +501,24 @@ func rtgFixedCompositeFieldScratch(capacity int) []rtgCompositeField {
 }
 
 func rtgAsmEmit64(a *rtgAsm, v int) {
+	rtgTrustNonNil(a)
 	a.code = rtgAppend64(a.code, v)
 }
 
 func rtgAsmEmit16(a *rtgAsm, v int) {
+	rtgTrustNonNil(a)
 	a.code = rtgAppend16(a.code, v)
 }
 
 func rtgAsmEmit24(a *rtgAsm, v int) {
+	rtgTrustNonNil(a)
 	a.code = append(a.code, byte(v))
 	a.code = append(a.code, byte(v>>8))
 	a.code = append(a.code, byte(v>>16))
 }
 
 func rtgAmd64RelaxBranches(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	oldLen := len(a.code)
 	// Keep only the positions of branches that become short. The previous
 	// representation used one byte plus one int32 for every byte of generated
@@ -552,7 +581,7 @@ func rtgAmd64RelaxBranches(a *rtgAsm) {
 		write++
 		read++
 	}
-	a.code = a.code[:write]
+	rtgTruncateBytes(&a.code, write)
 	relocCount := 0
 	for i := 0; i < len(a.relocs); i++ {
 		r := a.relocs[i]
@@ -592,14 +621,14 @@ func rtgAmd64RelaxedBranchIndex(branches []int32, position int) int {
 	hi := len(branches)
 	for lo < hi {
 		mid := lo + (hi-lo)/2
-		at := int(branches[mid]) / 2
+		at := int(rtg_runtime_UnsafeInt32At(branches, mid)) / 2
 		if at < position {
 			lo = mid + 1
 		} else {
 			hi = mid
 		}
 	}
-	if lo < len(branches) && int(branches[lo])/2 == position {
+	if lo < len(branches) && int(rtg_runtime_UnsafeInt32At(branches, lo))/2 == position {
 		return lo
 	}
 	return -1
@@ -610,7 +639,7 @@ func rtgAmd64RelaxedPosition(branches []int32, savings []int32, position int) in
 	hi := len(branches)
 	for lo < hi {
 		mid := lo + (hi-lo)/2
-		if int(branches[mid])/2 < position {
+		if int(rtg_runtime_UnsafeInt32At(branches, mid))/2 < position {
 			lo = mid + 1
 		} else {
 			hi = mid
@@ -619,10 +648,11 @@ func rtgAmd64RelaxedPosition(branches []int32, savings []int32, position int) in
 	if lo == 0 {
 		return position
 	}
-	return position - int(savings[lo-1])
+	return position - int(rtg_runtime_UnsafeInt32At(savings, lo-1))
 }
 
 func rtgAsmPatch(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchArm {
 		for i := 0; i < len(a.relocs); i++ {
 			at := a.relocs[i].at & 2147483647
@@ -708,6 +738,7 @@ func rtgAsmPatch(a *rtgAsm) {
 }
 
 func rtgAsmSetDataOffsets(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	a.dataOffset = a.codeOffset + len(a.code)
 	if rtgTargetOS == rtgOSLinux {
 		a.bssOffset = rtgAlignValue(a.dataOffset+len(a.data), 0x1000)
@@ -715,6 +746,7 @@ func rtgAsmSetDataOffsets(a *rtgAsm) {
 }
 
 func rtgAsmBssOffset(a *rtgAsm) int {
+	rtgTrustNonNil(a)
 	if a.bssOffset > 0 {
 		return a.bssOffset
 	}
@@ -858,6 +890,7 @@ func rtgAppendElf32LoadProgram(out []byte, flags int, offset int, address int, f
 }
 
 func rtgBuildElf64SymbolSections(a *rtgAsm, base int, entryOff int, loadFileSize int) rtgElf64SymbolSections {
+	rtgTrustNonNil(a)
 	var sec rtgElf64SymbolSections
 	sec.symtab = make([]byte, 0, (len(a.symbols)+2)*24)
 	sec.strtab = make([]byte, 0, len(a.symbolName)+16)
@@ -894,6 +927,7 @@ func rtgBuildElf64SymbolSections(a *rtgAsm, base int, entryOff int, loadFileSize
 }
 
 func rtgAppendElf64SectionHeaders(out []byte, sec *rtgElf64SymbolSections, a *rtgAsm, base int) []byte {
+	rtgTrustNonNil(sec, a)
 	codeOff := a.codeOffset
 	codeSize := len(a.code)
 	dataOff := a.dataOffset
@@ -954,6 +988,7 @@ func rtgAppendElf32Shdr(out []byte, name int, typ int, flags int, addr int, off 
 }
 
 func rtgBuildElf32SymbolSections(a *rtgAsm, base int, entryOff int, loadFileSize int) rtgElf32SymbolSections {
+	rtgTrustNonNil(a)
 	var sec rtgElf32SymbolSections
 	sec.symtab = make([]byte, 0, (len(a.symbols)+2)*16)
 	sec.strtab = make([]byte, 0, len(a.symbolName)+16)
@@ -1003,6 +1038,7 @@ func rtgBuildElf32SymbolSections(a *rtgAsm, base int, entryOff int, loadFileSize
 }
 
 func rtgAppendElf32SectionHeaders(out []byte, sec *rtgElf32SymbolSections, a *rtgAsm, base int) []byte {
+	rtgTrustNonNil(sec, a)
 	codeOff := a.codeOffset
 	codeSize := len(a.code)
 	dataOff := a.dataOffset
@@ -1083,10 +1119,12 @@ func rtgWinImportIATRVA(layout rtgWinImportLayout, id int) int {
 }
 
 func rtgAsmAddWinImportReloc(a *rtgAsm, at int, importID int) {
+	rtgTrustNonNil(a)
 	rtgAsmAddAbsReloc(a, at, importID, rtgAbsWinImportReloc)
 }
 
 func rtgAsmAddWinStaticImport(a *rtgAsm, dllStart int, dllEnd int, nameStart int, nameEnd int, src []byte) int {
+	rtgTrustNonNil(a)
 	dll := rtgStringFromBytes(src, dllStart, dllEnd)
 	name := rtgStringFromBytes(src, nameStart, nameEnd)
 	for i := 0; i < len(a.winImports); i++ {
@@ -1108,12 +1146,13 @@ func rtgStringFromBytes(src []byte, start int, end int) string {
 	}
 	out := rtgFixedByteScratch(end - start)
 	for i := start; i < end; i++ {
-		out = append(out, src[i])
+		out = append(out, rtg_runtime_UnsafeByteAt(src, i))
 	}
 	return string(out)
 }
 
 func rtgAsmHasWinImportRelocs(a *rtgAsm) bool {
+	rtgTrustNonNil(a)
 	for i := 0; i < len(a.absRelocs); i++ {
 		if a.absRelocs[i].kind == rtgAbsWinImportReloc {
 			return true
@@ -1123,6 +1162,7 @@ func rtgAsmHasWinImportRelocs(a *rtgAsm) bool {
 }
 
 func rtgAppendWinImports(a *rtgAsm) rtgWinImportLayout {
+	rtgTrustNonNil(a)
 	var layout rtgWinImportLayout
 	thunkSize := 4
 	if rtgTargetArch != rtgArch386 {
@@ -1176,6 +1216,7 @@ func rtgAppendWinImports(a *rtgAsm) rtgWinImportLayout {
 }
 
 func rtgAppendWinImportEntry(a *rtgAsm, layout *rtgWinImportLayout, iltOff int, iatOff int, dataRVA int, id int, slot int, name string) {
+	rtgTrustNonNil(a, layout)
 	nameAt := len(a.data)
 	a.data = rtgAppend16(a.data, 0)
 	a.data = rtgAppendStringZ(a.data, name)
@@ -1196,6 +1237,7 @@ func rtgAppendWinImportEntry(a *rtgAsm, layout *rtgWinImportLayout, iltOff int, 
 }
 
 func rtgAsmPatchWindows(a *rtgAsm, layout rtgWinImportLayout) {
+	rtgTrustNonNil(a)
 	for i := 0; i < len(a.relocs); i++ {
 		r := a.relocs[i]
 		label := r.label
@@ -1261,7 +1303,7 @@ func rtgAppendPEHeader64(out []byte, textRawSize int, textVirtualSize int, dataR
 	// patched below; representing the fixed layout as data keeps fixed-target
 	// Windows compilers within the binary-size budget.
 	out = rtgAppendStringZ(out, "\x50\x45\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xf0\x00\x22\x00\x0b\x02\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x02\x00\x00\x04\x00\x00\x00\x00\x00\x00\x00\x04\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00")
-	out = out[:len(out)-1]
+	rtgTruncateBytes(&out, len(out)-1)
 	out = rtgAppendUntil(out, pe+24+240)
 	rtgPut32At(out, pe+4, 0x00020000|machine)
 	opt := pe + 24
@@ -1383,6 +1425,7 @@ const rtgTokOp = 22
 
 type rtgTokens struct {
 	data         []int32
+	count        int
 	panicEnabled bool
 }
 
@@ -1394,32 +1437,38 @@ type rtgToken struct {
 const rtgTokenStride = 3
 
 func rtgTokCount(p *rtgProgram) int {
-	return len(p.toks.data) / rtgTokenStride
+	rtgTrustNonNil(p)
+	return p.toks.count
 }
 
 func rtgTokKind(p *rtgProgram, i int) int {
-	return int(p.toks.data[i*rtgTokenStride]) & 255
+	rtgTrustNonNil(p)
+	return int(rtg_runtime_UnsafeInt32At(p.toks.data, i*rtgTokenStride)) & 255
 }
 
 func rtgTokStart(p *rtgProgram, i int) int {
-	return int(p.toks.data[i*rtgTokenStride+1])
+	rtgTrustNonNil(p)
+	return int(rtg_runtime_UnsafeInt32At(p.toks.data, i*rtgTokenStride+1))
 }
 
 func rtgTokEnd(p *rtgProgram, i int) int {
-	return int(p.toks.data[i*rtgTokenStride+2])
+	rtgTrustNonNil(p)
+	return int(rtg_runtime_UnsafeInt32At(p.toks.data, i*rtgTokenStride+2))
 }
 
 func rtgTokLine(p *rtgProgram, i int) int {
+	rtgTrustNonNil(p)
 	data := p.toks.data
-	return int(data[i*rtgTokenStride]) >> 8 & 65535
+	return int(rtg_runtime_UnsafeInt32At(data, i*rtgTokenStride)) >> 8 & 65535
 }
 
 func rtgTokAt(p *rtgProgram, i int) rtgToken {
+	rtgTrustNonNil(p)
 	var tok rtgToken
 	base := i * rtgTokenStride
 	data := p.toks.data
-	tok.start = int(data[base+1])
-	tok.end = int(data[base+2])
+	tok.start = int(rtg_runtime_UnsafeInt32At(data, base+1))
+	tok.end = int(rtg_runtime_UnsafeInt32At(data, base+2))
 	return tok
 }
 
@@ -1703,14 +1752,17 @@ const rtgIdentImag = 30
 const rtgIdentComplex = 31
 
 func rtgProgramError(p *rtgProgram) {
+	rtgTrustNonNil(p)
 	p.ok = false
 }
 
 func rtgMetaError(m *rtgMeta) {
+	rtgTrustNonNil(m)
 	m.ok = false
 }
 
 func rtgExprError(ep *rtgExprParse) {
+	rtgTrustNonNil(ep)
 	ep.ok = false
 }
 
@@ -1721,6 +1773,7 @@ func rtgParseProgram(src []byte) rtgProgram {
 }
 
 func rtgParseProgramInto(src []byte, p *rtgProgram) {
+	rtgTrustNonNil(p)
 	var zero rtgProgram
 	*p = zero
 	p.src = src
@@ -1807,6 +1860,7 @@ func rtgParseProgramInto(src []byte, p *rtgProgram) {
 }
 
 func rtgParseFuncDecl(p *rtgProgram, start int, fn *rtgFuncDecl) {
+	rtgTrustNonNil(p, fn)
 	fn.startTok = start
 	tokenCount := rtgTokCount(p)
 	i := start + 1
@@ -1852,6 +1906,7 @@ func rtgParseFuncDecl(p *rtgProgram, start int, fn *rtgFuncDecl) {
 }
 
 func rtgSkipBalanced(p *rtgProgram, start int, open byte, close byte) int {
+	rtgTrustNonNil(p)
 	if rtgTokSingleChar(p, start) != open {
 		return start
 	}
@@ -1874,6 +1929,7 @@ func rtgSkipBalanced(p *rtgProgram, start int, open byte, close byte) int {
 }
 
 func rtgSkipTopLevelLine(p *rtgProgram, start int) int {
+	rtgTrustNonNil(p)
 	tokenCount := rtgTokCount(p)
 	if start >= tokenCount {
 		return start
@@ -1900,6 +1956,7 @@ func rtgSkipTopLevelLine(p *rtgProgram, start int) int {
 }
 
 func rtgScan(src []byte, toks *rtgTokens) {
+	rtgTrustNonNil(toks)
 	srcLen := len(src)
 	tokenCap := 524288
 	if rtgCompilerFixedTarget != 0 {
@@ -1909,8 +1966,8 @@ func rtgScan(src []byte, toks *rtgTokens) {
 	i := 0
 	line := 1
 	for i < srcLen {
-		c := src[i]
-		if c == ' ' || c == '\t' || c == '\r' {
+		c := rtg_runtime_UnsafeByteAt(src, i)
+		if c >= '\t' && c <= ' ' && (0x800011>>(c-'\t'))&1 != 0 {
 			i++
 			continue
 		}
@@ -1919,17 +1976,17 @@ func rtgScan(src []byte, toks *rtgTokens) {
 			i++
 			continue
 		}
-		if c == '/' && i+1 < srcLen && src[i+1] == '/' {
+		if c == '/' && i+1 < srcLen && rtg_runtime_UnsafeByteAt(src, i+1) == '/' {
 			i += 2
-			for i < srcLen && src[i] != '\n' {
+			for i < srcLen && rtg_runtime_UnsafeByteAt(src, i) != '\n' {
 				i++
 			}
 			continue
 		}
-		if c == '/' && i+1 < srcLen && src[i+1] == '*' {
+		if c == '/' && i+1 < srcLen && rtg_runtime_UnsafeByteAt(src, i+1) == '*' {
 			i += 2
-			for i+1 < srcLen && !(src[i] == '*' && src[i+1] == '/') {
-				if src[i] == '\n' {
+			for i+1 < srcLen && !(rtg_runtime_UnsafeByteAt(src, i) == '*' && rtg_runtime_UnsafeByteAt(src, i+1) == '/') {
+				if rtg_runtime_UnsafeByteAt(src, i) == '\n' {
 					line++
 				}
 				i++
@@ -1939,12 +1996,14 @@ func rtgScan(src []byte, toks *rtgTokens) {
 			}
 			continue
 		}
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' {
+		lower := c | 32
+		if lower-'a' <= 'z'-'a' || c == '_' {
 			i++
 			start := i - 1
 			for i < srcLen {
-				cc := src[i]
-				if !((cc >= 'a' && cc <= 'z') || (cc >= 'A' && cc <= 'Z') || (cc >= '0' && cc <= '9') || cc == '_') {
+				cc := rtg_runtime_UnsafeByteAt(src, i)
+				lower = cc | 32
+				if !(lower-'a' <= 'z'-'a' || cc-'0' <= 9 || cc == '_') {
 					break
 				}
 				i++
@@ -1952,14 +2011,15 @@ func rtgScan(src []byte, toks *rtgTokens) {
 			rtgScanAppendToken(toks, rtgKeywordKind(src, start, i, toks), start, i-start, line)
 			continue
 		}
-		if c >= '0' && c <= '9' {
+		if c-'0' <= 9 {
 			start := i
 			kind := rtgTokNumber
-			if c == '0' && i+1 < srcLen && (src[i+1] == 'x' || src[i+1] == 'X' || src[i+1] == 'b' || src[i+1] == 'B') {
-				hex := src[i+1] == 'x' || src[i+1] == 'X'
+			if c == '0' && i+1 < srcLen && (rtg_runtime_UnsafeByteAt(src, i+1) == 'x' || rtg_runtime_UnsafeByteAt(src, i+1) == 'X' || rtg_runtime_UnsafeByteAt(src, i+1) == 'b' || rtg_runtime_UnsafeByteAt(src, i+1) == 'B') {
+				hex := rtg_runtime_UnsafeByteAt(src, i+1) == 'x' || rtg_runtime_UnsafeByteAt(src, i+1) == 'X'
 				i += 2
 				for i < srcLen {
-					cc := src[i]
+					cc := rtg_runtime_UnsafeByteAt(src, i)
+					lower = cc | 32
 					if cc == '.' && hex {
 						kind = rtgTokFloat
 						i++
@@ -1968,33 +2028,33 @@ func rtgScan(src []byte, toks *rtgTokens) {
 					if hex && (cc == 'p' || cc == 'P') {
 						kind = rtgTokFloat
 						i++
-						if i < srcLen && (src[i] == '+' || src[i] == '-') {
+						if i < srcLen && (rtg_runtime_UnsafeByteAt(src, i) == '+' || rtg_runtime_UnsafeByteAt(src, i) == '-') {
 							i++
 						}
-						for i < srcLen && ((src[i] >= '0' && src[i] <= '9') || src[i] == '_') {
+						for i < srcLen && (rtg_runtime_UnsafeByteAt(src, i)-'0' <= 9 || rtg_runtime_UnsafeByteAt(src, i) == '_') {
 							i++
 						}
 						break
 					}
-					if !((cc >= 'a' && cc <= 'z') || (cc >= 'A' && cc <= 'Z') || (cc >= '0' && cc <= '9') || cc == '_') {
+					if !(lower-'a' <= 'z'-'a' || cc-'0' <= 9 || cc == '_') {
 						break
 					}
 					i++
 				}
 			} else {
 				i++
-				for i < srcLen && src[i] >= '0' && src[i] <= '9' {
+				for i < srcLen && rtg_runtime_UnsafeByteAt(src, i)-'0' <= 9 {
 					i++
 				}
-				if i < srcLen && src[i] == '.' {
+				if i < srcLen && rtg_runtime_UnsafeByteAt(src, i) == '.' {
 					kind = rtgTokFloat
 					i++
-					for i < srcLen && src[i] >= '0' && src[i] <= '9' {
+					for i < srcLen && rtg_runtime_UnsafeByteAt(src, i)-'0' <= 9 {
 						i++
 					}
 				}
 			}
-			if i < srcLen && src[i] == 'i' {
+			if i < srcLen && rtg_runtime_UnsafeByteAt(src, i) == 'i' {
 				kind = rtgTokFloat
 				i++
 			}
@@ -2004,11 +2064,11 @@ func rtgScan(src []byte, toks *rtgTokens) {
 		if c == '"' {
 			start := i
 			i++
-			for i < srcLen && src[i] != '"' {
-				if src[i] == '\\' && i+1 < srcLen {
+			for i < srcLen && rtg_runtime_UnsafeByteAt(src, i) != '"' {
+				if rtg_runtime_UnsafeByteAt(src, i) == '\\' && i+1 < srcLen {
 					i += 2
 				} else {
-					if src[i] == '\n' {
+					if rtg_runtime_UnsafeByteAt(src, i) == '\n' {
 						line++
 					}
 					i++
@@ -2023,8 +2083,8 @@ func rtgScan(src []byte, toks *rtgTokens) {
 		if c == '\'' {
 			start := i
 			i++
-			for i < srcLen && src[i] != '\'' {
-				if src[i] == '\\' && i+1 < srcLen {
+			for i < srcLen && rtg_runtime_UnsafeByteAt(src, i) != '\'' {
+				if rtg_runtime_UnsafeByteAt(src, i) == '\\' && i+1 < srcLen {
 					i += 2
 				} else {
 					i++
@@ -2039,28 +2099,11 @@ func rtgScan(src []byte, toks *rtgTokens) {
 		start := i
 		i++
 		if i < srcLen {
-			c1 := src[i]
-			two := false
-			if c1 == '=' {
-				if c == ':' || c == '=' || c == '!' || c == '<' || c == '>' || c == '+' || c == '-' || c == '*' || c == '/' || c == '%' || c == '&' || c == '|' || c == '^' {
-					two = true
-				}
-			} else if c == '&' && (c1 == '&' || c1 == '^') {
-				two = true
-			} else if c == '|' && c1 == '|' {
-				two = true
-			} else if c == '<' && c1 == '<' {
-				two = true
-			} else if c == '>' && c1 == '>' {
-				two = true
-			} else if c == '+' && c1 == '+' {
-				two = true
-			} else if c == '-' && c1 == '-' {
-				two = true
-			}
+			c1 := rtg_runtime_UnsafeByteAt(src, i)
+			two := c1 == '=' && (c == '^' || c == '|' || c >= '!' && c <= '>' && (0x3a005631>>(c-'!'))&1 != 0) || c == c1 && (c == '|' || c >= '&' && c <= '>' && (0x14000a1>>(c-'&'))&1 != 0) || c == '&' && c1 == '^'
 			if two {
 				i++
-				if i < srcLen && src[i] == '=' && (c == '<' && c1 == '<' || c == '>' && c1 == '>' || c == '&' && c1 == '^') {
+				if i < srcLen && rtg_runtime_UnsafeByteAt(src, i) == '=' && (c == '<' || c == '>' || c1 == '^') {
 					i++
 				}
 			}
@@ -2068,7 +2111,7 @@ func rtgScan(src []byte, toks *rtgTokens) {
 		size := i - start
 		charBits := 0
 		if size == 1 {
-			charBits = int(src[start]) << 24
+			charBits = int(rtg_runtime_UnsafeByteAt(src, start)) << 24
 		}
 		if c == '(' && len(toks.data) >= rtgTokenStride && byte(int(toks.data[len(toks.data)-rtgTokenStride])>>24) == '.' {
 			toks.panicEnabled = true
@@ -2079,17 +2122,20 @@ func rtgScan(src []byte, toks *rtgTokens) {
 }
 
 func rtgScanAppendToken(toks *rtgTokens, kind int, start int, size int, line int) {
+	rtgTrustNonNil(toks)
 	toks.data = append(toks.data, int32(kind|line<<8), int32(start), int32(start+size))
+	toks.count++
 }
 
 func rtgKeywordKind(src []byte, start int, end int, toks *rtgTokens) int {
+	rtgTrustNonNil(toks)
 	n := end - start
 	if n > 8 {
 		return rtgTokIdent
 	}
 	h := 0
 	for i := start; i < end; i++ {
-		h = h*5 + int(src[i])
+		h = h*5 + int(rtg_runtime_UnsafeByteAt(src, i))
 	}
 	if n == 2 {
 		if h == 627 {
@@ -2163,6 +2209,7 @@ func rtgKeywordKind(src []byte, start int, end int, toks *rtgTokens) int {
 }
 
 func rtgTokIsKind(p *rtgProgram, i int, kind int) bool {
+	rtgTrustNonNil(p)
 	if i < 0 {
 		return false
 	}
@@ -2171,21 +2218,22 @@ func rtgTokIsKind(p *rtgProgram, i int, kind int) bool {
 	if base >= len(data) {
 		return false
 	}
-	return int(data[base])&255 == kind
+	return int(rtg_runtime_UnsafeInt32At(data, base))&255 == kind
 }
 
 func rtgTokIdentIs(p *rtgProgram, i int, text string) bool {
+	rtgTrustNonNil(p)
 	data := p.toks.data
 	base := i * rtgTokenStride
-	if i < 0 || base >= len(data) || int(data[base])&255 != rtgTokIdent {
+	if i < 0 || base >= len(data) || int(rtg_runtime_UnsafeInt32At(data, base))&255 != rtgTokIdent {
 		return false
 	}
-	start := int(data[base+1])
-	if int(data[base+2])-start != len(text) {
+	start := int(rtg_runtime_UnsafeInt32At(data, base+1))
+	if int(rtg_runtime_UnsafeInt32At(data, base+2))-start != len(text) {
 		return false
 	}
 	for j := 0; j < len(text); j++ {
-		if p.src[start+j] != text[j] {
+		if rtg_runtime_UnsafeByteAt(p.src, start+j) != text[j] {
 			return false
 		}
 	}
@@ -2193,6 +2241,7 @@ func rtgTokIdentIs(p *rtgProgram, i int, text string) bool {
 }
 
 func rtgTokSingleChar(p *rtgProgram, i int) byte {
+	rtgTrustNonNil(p)
 	if i < 0 {
 		return 0
 	}
@@ -2201,19 +2250,21 @@ func rtgTokSingleChar(p *rtgProgram, i int) byte {
 	if base >= len(data) {
 		return 0
 	}
-	return byte(int(data[base]) >> 24)
+	return byte(int(rtg_runtime_UnsafeInt32At(data, base)) >> 24)
 }
 
 func rtgTokCharIs(p *rtgProgram, i int, c byte) bool {
+	rtgTrustNonNil(p)
 	if i < 0 {
 		return false
 	}
 	data := p.toks.data
 	base := i * rtgTokenStride
-	return base < len(data) && byte(int(data[base])>>24) == c
+	return base < len(data) && byte(int(rtg_runtime_UnsafeInt32At(data, base))>>24) == c
 }
 
 func rtgTok2Is(p *rtgProgram, i int, a byte, b byte) bool {
+	rtgTrustNonNil(p)
 	if i < 0 {
 		return false
 	}
@@ -2222,23 +2273,24 @@ func rtgTok2Is(p *rtgProgram, i int, a byte, b byte) bool {
 	if base >= len(data) {
 		return false
 	}
-	if int(data[base])&255 != rtgTokOp {
+	if int(rtg_runtime_UnsafeInt32At(data, base))&255 != rtgTokOp {
 		return false
 	}
-	start := int(data[base+1])
-	size := int(data[base+2]) - start
+	start := int(rtg_runtime_UnsafeInt32At(data, base+1))
+	size := int(rtg_runtime_UnsafeInt32At(data, base+2)) - start
 	if size != 2 {
 		return false
 	}
-	if p.src[start] != a {
+	if rtg_runtime_UnsafeByteAt(p.src, start) != a {
 		return false
 	}
-	return p.src[start+1] == b
+	return rtg_runtime_UnsafeByteAt(p.src, start+1) == b
 }
 
 func rtgBoolTokenValue(p *rtgProgram, tok int) int {
+	rtgTrustNonNil(p)
 	start := rtgTokStart(p, tok)
-	if p.src[start] == 't' {
+	if rtg_runtime_UnsafeByteAt(p.src, start) == 't' {
 		return 1
 	}
 	return 0
@@ -2254,7 +2306,7 @@ func rtgIdentEntry(src []byte, start int, end int) int {
 	if start < 0 || end > len(src) || n <= 0 || n > 7 {
 		return 0
 	}
-	hash := (n + 10*int(src[start]) + 5*int(src[end-1]) + 13*int(src[start+n/2])) & 63
+	hash := (n + 10*int(rtg_runtime_UnsafeByteAt(src, start)) + 5*int(rtg_runtime_UnsafeByteAt(src, end-1)) + 13*int(rtg_runtime_UnsafeByteAt(src, start+n/2))) & 63
 	entry := int(rtgIdentHashTable[hash])
 	if entry == 0 {
 		return 0
@@ -2264,7 +2316,7 @@ func rtgIdentEntry(src []byte, start int, end int) int {
 		return 0
 	}
 	for i := 0; i < n; i++ {
-		if src[start+i] != rtgIdentNames[nameStart+i] {
+		if rtg_runtime_UnsafeByteAt(src, start+i) != rtgIdentNames[nameStart+i] {
 			return 0
 		}
 	}
@@ -2272,6 +2324,7 @@ func rtgIdentEntry(src []byte, start int, end int) int {
 }
 
 func rtgExprIdentCode(p *rtgProgram, ep *rtgExprParse, idx int) int {
+	rtgTrustNonNil(p, ep)
 	e := ep.exprs[idx]
 	if e.kind != rtgExprIdent {
 		return 0
@@ -2288,7 +2341,7 @@ func rtgBytesEqualText(src []byte, start int, end int, text string) bool {
 		return false
 	}
 	for i := 0; i < len(text); i++ {
-		if src[start+i] != text[i] {
+		if rtg_runtime_UnsafeByteAt(src, start+i) != text[i] {
 			return false
 		}
 	}
@@ -2296,66 +2349,66 @@ func rtgBytesEqualText(src []byte, start int, end int, text string) bool {
 }
 
 func rtgHexDigitValue(ch byte) int {
-	if ch >= '0' && ch <= '9' {
+	if ch-'0' <= 9 {
 		return int(ch - '0')
 	}
-	if ch >= 'a' && ch <= 'f' {
-		return int(ch-'a') + 10
-	}
-	if ch >= 'A' && ch <= 'F' {
-		return int(ch-'A') + 10
+	lower := ch | 32
+	if lower-'a' <= 5 {
+		return int(lower-'a') + 10
 	}
 	return -1
 }
 
 func rtgDecodeStringToken(p *rtgProgram, tokIndex int) []byte {
+	rtgTrustNonNil(p)
 	tok := rtgTokAt(p, tokIndex)
 	src := p.src
 	i := int(tok.start) + 1
 	end := int(tok.end) - 1
 	out := rtgFixedByteScratch(end - i)
 	for i < end {
-		if src[i] == '\\' && i+1 < end {
+		if rtg_runtime_UnsafeByteAt(src, i) == '\\' && i+1 < end {
 			i++
-			if src[i] == 'x' && i+2 < end {
-				hi := rtgHexDigitValue(src[i+1])
-				lo := rtgHexDigitValue(src[i+2])
+			if rtg_runtime_UnsafeByteAt(src, i) == 'x' && i+2 < end {
+				hi := rtgHexDigitValue(rtg_runtime_UnsafeByteAt(src, i+1))
+				lo := rtgHexDigitValue(rtg_runtime_UnsafeByteAt(src, i+2))
 				if hi >= 0 && lo >= 0 {
 					out = append(out, byte(hi*16+lo))
 					i += 3
 					continue
 				}
 			}
-			if src[i] == 'n' {
+			if rtg_runtime_UnsafeByteAt(src, i) == 'n' {
 				out = append(out, '\n')
-			} else if src[i] == 't' {
+			} else if rtg_runtime_UnsafeByteAt(src, i) == 't' {
 				out = append(out, '\t')
-			} else if src[i] == 'r' {
+			} else if rtg_runtime_UnsafeByteAt(src, i) == 'r' {
 				out = append(out, '\r')
-			} else if src[i] == '"' {
+			} else if rtg_runtime_UnsafeByteAt(src, i) == '"' {
 				out = append(out, '"')
-			} else if src[i] == '\\' {
+			} else if rtg_runtime_UnsafeByteAt(src, i) == '\\' {
 				out = append(out, '\\')
 			} else {
-				out = append(out, src[i])
+				out = append(out, rtg_runtime_UnsafeByteAt(src, i))
 			}
 			i++
 			continue
 		}
-		out = append(out, src[i])
+		out = append(out, rtg_runtime_UnsafeByteAt(src, i))
 		i++
 	}
 	return out
 }
 
 func rtgParseIntToken(p *rtgProgram, tokIndex int) int {
+	rtgTrustNonNil(p)
 	tok := rtgTokAt(p, tokIndex)
 	src := p.src
 	start := int(tok.start)
 	end := int(tok.end)
 	base := 10
-	if end-start > 2 && src[start] == '0' {
-		prefix := src[start+1]
+	if end-start > 2 && rtg_runtime_UnsafeByteAt(src, start) == '0' {
+		prefix := rtg_runtime_UnsafeByteAt(src, start+1)
 		if prefix == 'x' || prefix == 'X' {
 			base = 16
 			start += 2
@@ -2364,19 +2417,19 @@ func rtgParseIntToken(p *rtgProgram, tokIndex int) int {
 			start += 2
 		}
 	}
-	if base == 10 && end-start > 1 && src[start] == '0' {
+	if base == 10 && end-start > 1 && rtg_runtime_UnsafeByteAt(src, start) == '0' {
 		base = 8
 		start++
 	}
 	n := 0
 	for i := start; i < end; i++ {
 		d := 0
-		if src[i] >= '0' && src[i] <= '9' {
-			d = int(src[i] - '0')
-		} else if src[i] >= 'a' && src[i] <= 'f' {
-			d = int(src[i]-'a') + 10
-		} else if src[i] >= 'A' && src[i] <= 'F' {
-			d = int(src[i]-'A') + 10
+		if rtg_runtime_UnsafeByteAt(src, i)-'0' <= 9 {
+			d = int(rtg_runtime_UnsafeByteAt(src, i) - '0')
+		} else if rtg_runtime_UnsafeByteAt(src, i) >= 'a' && rtg_runtime_UnsafeByteAt(src, i) <= 'f' {
+			d = int(rtg_runtime_UnsafeByteAt(src, i)-'a') + 10
+		} else if rtg_runtime_UnsafeByteAt(src, i) >= 'A' && rtg_runtime_UnsafeByteAt(src, i) <= 'F' {
+			d = int(rtg_runtime_UnsafeByteAt(src, i)-'A') + 10
 		}
 		n = n*base + d
 	}
@@ -2384,26 +2437,27 @@ func rtgParseIntToken(p *rtgProgram, tokIndex int) int {
 }
 
 func rtgParseFloatTokenScaled(p *rtgProgram, tokIndex int) int {
+	rtgTrustNonNil(p)
 	tok := rtgTokAt(p, tokIndex)
-	if tok.start+2 < tok.end && p.src[tok.start] == '0' && (p.src[tok.start+1] == 'x' || p.src[tok.start+1] == 'X') {
+	if tok.start+2 < tok.end && rtg_runtime_UnsafeByteAt(p.src, tok.start) == '0' && (rtg_runtime_UnsafeByteAt(p.src, tok.start+1) == 'x' || rtg_runtime_UnsafeByteAt(p.src, tok.start+1) == 'X') {
 		return rtgParseHexFloatTokenScaled(p, tokIndex)
 	}
 	value := 0
 	i := tok.start
-	for i < tok.end && p.src[i] != '.' {
-		if p.src[i] >= '0' && p.src[i] <= '9' {
-			value = value*10 + int(p.src[i]-'0')
+	for i < tok.end && rtg_runtime_UnsafeByteAt(p.src, i) != '.' {
+		if rtg_runtime_UnsafeByteAt(p.src, i)-'0' <= 9 {
+			value = value*10 + int(rtg_runtime_UnsafeByteAt(p.src, i)-'0')
 		}
 		i++
 	}
 	value = value * 4
-	if i < tok.end && p.src[i] == '.' {
+	if i < tok.end && rtg_runtime_UnsafeByteAt(p.src, i) == '.' {
 		i++
 		frac := 0
 		scale := 1
 		for i < tok.end {
-			if p.src[i] >= '0' && p.src[i] <= '9' {
-				frac = frac*10 + int(p.src[i]-'0')
+			if rtg_runtime_UnsafeByteAt(p.src, i)-'0' <= 9 {
+				frac = frac*10 + int(rtg_runtime_UnsafeByteAt(p.src, i)-'0')
 				scale = scale * 10
 			}
 			i++
@@ -2416,6 +2470,7 @@ func rtgParseFloatTokenScaled(p *rtgProgram, tokIndex int) int {
 }
 
 func rtgParseHexFloatTokenScaled(p *rtgProgram, tokIndex int) int {
+	rtgTrustNonNil(p)
 	tok := rtgTokAt(p, tokIndex)
 	src := p.src
 	i := tok.start + 2
@@ -2423,7 +2478,7 @@ func rtgParseHexFloatTokenScaled(p *rtgProgram, tokIndex int) int {
 	fracDigits := 0
 	afterDot := false
 	for i < tok.end {
-		c := src[i]
+		c := rtg_runtime_UnsafeByteAt(src, i)
 		if c == '_' {
 			i++
 			continue
@@ -2447,17 +2502,17 @@ func rtgParseHexFloatTokenScaled(p *rtgProgram, tokIndex int) int {
 	}
 	exponent := 0
 	sign := 1
-	if i < tok.end && (src[i] == 'p' || src[i] == 'P') {
+	if i < tok.end && (rtg_runtime_UnsafeByteAt(src, i) == 'p' || rtg_runtime_UnsafeByteAt(src, i) == 'P') {
 		i++
-		if i < tok.end && src[i] == '-' {
+		if i < tok.end && rtg_runtime_UnsafeByteAt(src, i) == '-' {
 			sign = -1
 			i++
-		} else if i < tok.end && src[i] == '+' {
+		} else if i < tok.end && rtg_runtime_UnsafeByteAt(src, i) == '+' {
 			i++
 		}
 		for i < tok.end {
-			c := src[i]
-			if c >= '0' && c <= '9' {
+			c := rtg_runtime_UnsafeByteAt(src, i)
+			if c-'0' <= 9 {
 				exponent = exponent*10 + int(c-'0')
 			}
 			i++
@@ -2476,27 +2531,26 @@ func rtgParseHexFloatTokenScaled(p *rtgProgram, tokIndex int) int {
 }
 
 func rtgHexFloatDigit(c byte) int {
-	if c >= '0' && c <= '9' {
+	if c-'0' <= 9 {
 		return int(c - '0')
 	}
-	if c >= 'a' && c <= 'f' {
-		return int(c-'a') + 10
-	}
-	if c >= 'A' && c <= 'F' {
-		return int(c-'A') + 10
+	lower := c | 32
+	if lower-'a' <= 5 {
+		return int(lower-'a') + 10
 	}
 	return -1
 }
 
 func rtgParseCharToken(p *rtgProgram, tokIndex int) int {
+	rtgTrustNonNil(p)
 	tok := rtgTokAt(p, tokIndex)
 	src := p.src
 	i := tok.start + 1
 	if i >= tok.end-1 {
 		return 0
 	}
-	if src[i] != '\\' {
-		c0 := int(src[i])
+	if rtg_runtime_UnsafeByteAt(src, i) != '\\' {
+		c0 := int(rtg_runtime_UnsafeByteAt(src, i))
 		if c0 < 128 {
 			return c0
 		}
@@ -2514,7 +2568,7 @@ func rtgParseCharToken(p *rtgProgram, tokIndex int) int {
 		}
 		value := c0 - bias
 		for j := 1; j < width; j++ {
-			value = value*64 + int(src[i+j]-128)
+			value = value*64 + int(rtg_runtime_UnsafeByteAt(src, i+j)-128)
 		}
 		return value
 	}
@@ -2525,31 +2579,31 @@ func rtgParseCharToken(p *rtgProgram, tokIndex int) int {
 	simple := "abfnrtv\\'\""
 	values := "\a\b\f\n\r\t\v\\'\""
 	for j := 0; j < len(simple); j++ {
-		if src[i] == simple[j] {
+		if rtg_runtime_UnsafeByteAt(src, i) == simple[j] {
 			return int(values[j])
 		}
 	}
 	digits := 0
-	if src[i] == 'x' {
+	if rtg_runtime_UnsafeByteAt(src, i) == 'x' {
 		digits = 2
-	} else if src[i] == 'u' {
+	} else if rtg_runtime_UnsafeByteAt(src, i) == 'u' {
 		digits = 4
-	} else if src[i] == 'U' {
+	} else if rtg_runtime_UnsafeByteAt(src, i) == 'U' {
 		digits = 8
 	}
 	if digits > 0 {
 		return rtgParseEscapeDigits(src, i+1, digits, 16)
 	}
-	if src[i] >= '0' && src[i] <= '7' {
+	if rtg_runtime_UnsafeByteAt(src, i) >= '0' && rtg_runtime_UnsafeByteAt(src, i) <= '7' {
 		return rtgParseEscapeDigits(src, i, 3, 8)
 	}
-	return int(src[i])
+	return int(rtg_runtime_UnsafeByteAt(src, i))
 }
 
 func rtgParseEscapeDigits(src []byte, start int, count int, base int) int {
 	value := 0
 	for i := 0; i < count; i++ {
-		digit := rtgHexFloatDigit(src[start+i])
+		digit := rtgHexFloatDigit(rtg_runtime_UnsafeByteAt(src, start+i))
 		if digit < 0 || digit >= base {
 			return 0
 		}
@@ -2559,12 +2613,14 @@ func rtgParseEscapeDigits(src []byte, start int, count int, base int) int {
 }
 
 func rtgEvalConstByName(g *rtgLinearGen, nameStart int, nameEnd int) rtgConstResult {
+	rtgTrustNonNil(g)
 	var result rtgConstResult
 	rtgEvalConstByNameInto(g, nameStart, nameEnd, &result)
 	return result
 }
 
 func rtgEvalConstByNameInto(g *rtgLinearGen, nameStart int, nameEnd int, out *rtgConstResult) {
+	rtgTrustNonNil(g, out)
 	builtin := rtgEvalBuiltinConst(g, nameStart, nameEnd)
 	if builtin.ok {
 		*out = builtin
@@ -2578,6 +2634,7 @@ func rtgEvalConstByNameInto(g *rtgLinearGen, nameStart int, nameEnd int, out *rt
 			return
 		}
 		ep := rtgNewExprParse()
+		rtgTrustNonNil(ep)
 		if !rtgParseExpressionOK(ep, g.prog, s.initStart, s.initEnd) {
 			rtgSetConstResult(out, 0, false)
 			return
@@ -2659,17 +2716,20 @@ func rtgConvertConstScalar(value int, sourceKind int, destKind int) int {
 }
 
 func rtgSetConstResult(result *rtgConstResult, value int, ok bool) {
+	rtgTrustNonNil(result)
 	result.value = value
 	result.ok = ok
 }
 
 func rtgEvalConstExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) rtgConstResult {
+	rtgTrustNonNil(g, ep)
 	var result rtgConstResult
 	rtgEvalConstExprInto(g, ep, idx, &result)
 	return result
 }
 
 func rtgEvalConstExprInto(g *rtgLinearGen, ep *rtgExprParse, idx int, out *rtgConstResult) {
+	rtgTrustNonNil(g, ep, out)
 	p := g.prog
 	e := ep.exprs[idx]
 	if e.kind == rtgExprInt {
@@ -2710,11 +2770,13 @@ func rtgEvalConstExprInto(g *rtgLinearGen, ep *rtgExprParse, idx int, out *rtgCo
 			conversionType := rtgConversionTypeFromExpr(g, ep, e.left)
 			if conversionType != 0 {
 				resolved := rtgResolveType(g.meta, conversionType)
+				rtgTrustNonNil(resolved)
 				if rtgTypeKindIsScalarValue(resolved.kind) {
-					argIndex := ep.args[e.firstArg]
+					argIndex := rtg_runtime_UnsafeIntAt(ep.args, e.firstArg)
 					result := rtgEvalConstExpr(g, ep, argIndex)
 					if result.ok {
 						source := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, argIndex))
+						rtgTrustNonNil(source)
 						result.value = rtgConvertConstScalar(result.value, source.kind, resolved.kind)
 					}
 					*out = result
@@ -2819,6 +2881,7 @@ func rtgEvalConstExprInto(g *rtgLinearGen, ep *rtgExprParse, idx int, out *rtgCo
 }
 
 func rtgEvalConstBinaryInto(g *rtgLinearGen, tok int, left int, right int, out *rtgConstResult) {
+	rtgTrustNonNil(g, out)
 	p := g.prog
 	if tok < 0 || tok >= rtgTokCount(p) {
 		rtgSetConstResult(out, 0, false)
@@ -2830,7 +2893,7 @@ func rtgEvalConstBinaryInto(g *rtgLinearGen, tok int, left int, right int, out *
 	value := 0
 	ok := true
 	if n == 1 {
-		c := p.src[start]
+		c := rtg_runtime_UnsafeByteAt(p.src, start)
 		if c == '+' {
 			value = left + right
 		} else if c == '-' {
@@ -2871,8 +2934,8 @@ func rtgEvalConstBinaryInto(g *rtgLinearGen, tok int, left int, right int, out *
 			ok = false
 		}
 	} else if n == 2 {
-		c0 := p.src[start]
-		c1 := p.src[start+1]
+		c0 := rtg_runtime_UnsafeByteAt(p.src, start)
+		c1 := rtg_runtime_UnsafeByteAt(p.src, start+1)
 		if c0 == '&' && c1 == '^' {
 			value = left & (right ^ -1)
 		} else if c0 == '<' && c1 == '<' {
@@ -2917,6 +2980,7 @@ func rtgEvalConstBinaryInto(g *rtgLinearGen, tok int, left int, right int, out *
 }
 
 func rtgExprIsIdentText(p *rtgProgram, ep *rtgExprParse, idx int, text string) bool {
+	rtgTrustNonNil(p, ep)
 	e := ep.exprs[idx]
 	if e.kind != rtgExprIdent {
 		return false
@@ -2925,6 +2989,7 @@ func rtgExprIsIdentText(p *rtgProgram, ep *rtgExprParse, idx int, text string) b
 }
 
 func rtgParseExpressionInto(ep *rtgExprParse, p *rtgProgram, start int, end int) {
+	rtgTrustNonNil(ep, p)
 	var zero rtgExprParse
 	*ep = zero
 	ep.prog = p
@@ -2949,10 +3014,12 @@ func rtgParseExpressionInto(ep *rtgExprParse, p *rtgProgram, start int, end int)
 }
 
 func rtgParseExpressionOK(ep *rtgExprParse, p *rtgProgram, start int, end int) bool {
+	rtgTrustNonNil(ep, p)
 	return rtgParseExpressionRoot(ep, p, start, end) >= 0
 }
 
 func rtgParseExpressionRoot(ep *rtgExprParse, p *rtgProgram, start int, end int) int {
+	rtgTrustNonNil(ep, p)
 	rtgParseExpressionInto(ep, p, start, end)
 	if !ep.ok || len(ep.exprs) == 0 {
 		return -1
@@ -2961,6 +3028,7 @@ func rtgParseExpressionRoot(ep *rtgExprParse, p *rtgProgram, start int, end int)
 }
 
 func rtgParseBinaryExpr(ep *rtgExprParse, minPrec int) int {
+	rtgTrustNonNil(ep)
 	left := rtgParseUnaryExpr(ep)
 	for ep.ok && ep.pos < ep.end {
 		prec := rtgTokenPrecedence(ep.prog, ep.pos)
@@ -2976,6 +3044,7 @@ func rtgParseBinaryExpr(ep *rtgExprParse, minPrec int) int {
 }
 
 func rtgParseUnaryExpr(ep *rtgExprParse) int {
+	rtgTrustNonNil(ep)
 	if ep.pos >= ep.end {
 		rtgExprError(ep)
 		return 0
@@ -2991,6 +3060,7 @@ func rtgParseUnaryExpr(ep *rtgExprParse) int {
 }
 
 func rtgParsePostfixExpr(ep *rtgExprParse) int {
+	rtgTrustNonNil(ep)
 	left := rtgParsePrimaryExpr(ep)
 	for ep.ok && ep.pos < ep.end {
 		if rtgTokCharIs(ep.prog, ep.pos, '{') {
@@ -3157,6 +3227,7 @@ func rtgParsePostfixExpr(ep *rtgExprParse) int {
 }
 
 func rtgFindSliceColon(p *rtgProgram, start int, end int) int {
+	rtgTrustNonNil(p)
 	paren := 0
 	brack := 0
 	brace := 0
@@ -3182,6 +3253,7 @@ func rtgFindSliceColon(p *rtgProgram, start int, end int) int {
 }
 
 func rtgParseImplicitCompositeExpr(ep *rtgExprParse) int {
+	rtgTrustNonNil(ep)
 	openTok := ep.pos
 	if !rtgTokCharIs(ep.prog, ep.pos, '{') {
 		rtgExprError(ep)
@@ -3210,6 +3282,7 @@ func rtgParseImplicitCompositeExpr(ep *rtgExprParse) int {
 }
 
 func rtgParseCompositeField(ep *rtgExprParse) rtgCompositeField {
+	rtgTrustNonNil(ep)
 	var field rtgCompositeField
 	field.key = -1
 	fieldEnd := rtgFindExprBoundary(ep.prog, ep.pos, ep.end)
@@ -3237,6 +3310,7 @@ func rtgParseCompositeField(ep *rtgExprParse) rtgCompositeField {
 }
 
 func rtgParsePrimaryExpr(ep *rtgExprParse) int {
+	rtgTrustNonNil(ep)
 	if ep.pos >= ep.end {
 		rtgExprError(ep)
 		return 0
@@ -3308,6 +3382,7 @@ func rtgParsePrimaryExpr(ep *rtgExprParse) int {
 }
 
 func rtgFuncLiteralBodyOpen(p *rtgProgram, funcTok int, end int) int {
+	rtgTrustNonNil(p)
 	if funcTok < 0 || funcTok+1 >= end || !rtgTokIsKind(p, funcTok, rtgTokFunc) || !rtgTokCharIs(p, funcTok+1, '(') {
 		return -1
 	}
@@ -3327,6 +3402,7 @@ func rtgFuncLiteralBodyOpen(p *rtgProgram, funcTok int, end int) int {
 }
 
 func rtgPrimaryTypeEnd(p *rtgProgram, start int, end int) int {
+	rtgTrustNonNil(p)
 	if start >= end {
 		return start
 	}
@@ -3358,6 +3434,7 @@ func rtgPrimaryTypeEnd(p *rtgProgram, start int, end int) int {
 }
 
 func rtgAddExpr(ep *rtgExprParse, kind int, tok int, left int, right int, firstArg int, argCount int, nameStart int, nameEnd int) int {
+	rtgTrustNonNil(ep)
 	var e rtgExpr
 	e.kind = kind
 	e.tok = tok
@@ -3373,13 +3450,14 @@ func rtgAddExpr(ep *rtgExprParse, kind int, tok int, left int, right int, firstA
 }
 
 func rtgTokenPrecedence(p *rtgProgram, pos int) int {
+	rtgTrustNonNil(p)
 	if pos < 0 || pos >= rtgTokCount(p) {
 		return 0
 	}
 	start := rtgTokStart(p, pos)
 	end := rtgTokEnd(p, pos)
 	if end-start == 1 {
-		c := p.src[start]
+		c := rtg_runtime_UnsafeByteAt(p.src, start)
 		if c == '<' || c == '>' {
 			return 3
 		}
@@ -3392,8 +3470,8 @@ func rtgTokenPrecedence(p *rtgProgram, pos int) int {
 		return 0
 	}
 	if end-start == 2 {
-		c0 := p.src[start]
-		c1 := p.src[start+1]
+		c0 := rtg_runtime_UnsafeByteAt(p.src, start)
+		c1 := rtg_runtime_UnsafeByteAt(p.src, start+1)
 		if c0 == '|' && c1 == '|' {
 			return 1
 		}
@@ -3411,6 +3489,7 @@ func rtgTokenPrecedence(p *rtgProgram, pos int) int {
 }
 
 func rtgFindExprBoundary(p *rtgProgram, start int, end int) int {
+	rtgTrustNonNil(p)
 	i := start
 	paren := 0
 	brack := 0
@@ -3455,6 +3534,7 @@ func rtgFindExprBoundary(p *rtgProgram, start int, end int) int {
 }
 
 func rtgFindMatchingExprClose(p *rtgProgram, start int, end int, open byte, close byte) int {
+	rtgTrustNonNil(p)
 	depth := 0
 	i := start
 	for i < end {
@@ -3473,6 +3553,7 @@ func rtgFindMatchingExprClose(p *rtgProgram, start int, end int, open byte, clos
 }
 
 func rtgParseOneStatement(bp *rtgBodyParse, start int, end int) int {
+	rtgTrustNonNil(bp)
 	p := bp.prog
 	if start >= end {
 		return end
@@ -3622,6 +3703,7 @@ func rtgParseOneStatement(bp *rtgBodyParse, start int, end int) int {
 }
 
 func rtgAddStmt(bp *rtgBodyParse, kind int, startTok int, endTok int, exprStart int, exprEnd int, bodyStart int, bodyEnd int, elseStart int, elseEnd int, nameStart int, nameEnd int) {
+	rtgTrustNonNil(bp)
 	var stmt rtgStmt
 	stmt.kind = kind
 	stmt.startTok = startTok
@@ -3638,6 +3720,7 @@ func rtgAddStmt(bp *rtgBodyParse, kind int, startTok int, endTok int, exprStart 
 }
 
 func rtgAppendStmt(bp *rtgBodyParse, stmt rtgStmt) {
+	rtgTrustNonNil(bp)
 	base := bp.stmtCount * rtgStmtWordCount
 	if bp.stmtCount < 0 || base < 0 || base+rtgStmtWordCount > len(rtgBodyStmtData) {
 		bp.ok = false
@@ -3658,6 +3741,7 @@ func rtgAppendStmt(bp *rtgBodyParse, stmt rtgStmt) {
 }
 
 func rtgBodyStmtAt(bp *rtgBodyParse, index int) rtgStmt {
+	rtgTrustNonNil(bp)
 	var stmt rtgStmt
 	base := index * rtgStmtWordCount
 	if index < 0 || base < 0 || base+rtgStmtWordCount > len(rtgBodyStmtData) {
@@ -3679,6 +3763,7 @@ func rtgBodyStmtAt(bp *rtgBodyParse, index int) rtgStmt {
 }
 
 func rtgFindIfStatementEnd(p *rtgProgram, start int, end int) int {
+	rtgTrustNonNil(p)
 	if !(rtgTokIsKind(p, start, rtgTokIf)) {
 		return start
 	}
@@ -3707,6 +3792,7 @@ func rtgFindIfStatementEnd(p *rtgProgram, start int, end int) int {
 }
 
 func rtgStatementLineEnd(p *rtgProgram, start int, end int) int {
+	rtgTrustNonNil(p)
 	if start >= end {
 		return end
 	}
@@ -3784,6 +3870,7 @@ func rtgStatementLineEnd(p *rtgProgram, start int, end int) int {
 }
 
 func rtgLineContinuesAfterPrevToken(p *rtgProgram, i int) bool {
+	rtgTrustNonNil(p)
 	if i <= 0 {
 		return false
 	}
@@ -3794,7 +3881,7 @@ func rtgLineContinuesAfterPrevToken(p *rtgProgram, i int) bool {
 	if tokEnd <= tokStart {
 		return false
 	}
-	c := p.src[tokStart]
+	c := rtg_runtime_UnsafeByteAt(p.src, tokStart)
 	if c == ',' {
 		return true
 	}
@@ -3802,7 +3889,7 @@ func rtgLineContinuesAfterPrevToken(p *rtgProgram, i int) bool {
 		return true
 	}
 	if c == '+' {
-		if tokEnd == tokStart+1 || p.src[tokStart+1] != '+' {
+		if tokEnd == tokStart+1 || rtg_runtime_UnsafeByteAt(p.src, tokStart+1) != '+' {
 			return true
 		}
 	}
@@ -3810,6 +3897,7 @@ func rtgLineContinuesAfterPrevToken(p *rtgProgram, i int) bool {
 }
 
 func rtgFindNextTokenText(p *rtgProgram, start int, end int, text byte) int {
+	rtgTrustNonNil(p)
 	i := start
 	for i < end {
 		if rtgTokCharIs(p, i, text) {
@@ -3821,13 +3909,14 @@ func rtgFindNextTokenText(p *rtgProgram, start int, end int, text byte) int {
 }
 
 func rtgFindStatementBodyOpen(p *rtgProgram, start int, end int) int {
+	rtgTrustNonNil(p)
 	i := start
 	paren := 0
 	brack := 0
 	for i < end {
 		tok := rtgTokAt(p, i)
 		if tok.end == tok.start+1 {
-			c := p.src[tok.start]
+			c := rtg_runtime_UnsafeByteAt(p.src, tok.start)
 			if c == '(' {
 				paren++
 			} else if c == ')' {
@@ -3862,6 +3951,7 @@ func rtgFindStatementBodyOpen(p *rtgProgram, start int, end int) int {
 }
 
 func rtgFindMatchingBrace(p *rtgProgram, openTok int, end int) int {
+	rtgTrustNonNil(p)
 	if rtgTokSingleChar(p, openTok) != '{' {
 		return openTok
 	}
@@ -3883,6 +3973,7 @@ func rtgFindMatchingBrace(p *rtgProgram, openTok int, end int) int {
 }
 
 func rtgFindAssignmentToken(p *rtgProgram, start int, end int) int {
+	rtgTrustNonNil(p)
 	i := start
 	paren := 0
 	brack := 0
@@ -3907,30 +3998,33 @@ func rtgFindAssignmentToken(p *rtgProgram, start int, end int) int {
 }
 
 func rtgTokIsCompoundAssignment(p *rtgProgram, tok int) bool {
+	rtgTrustNonNil(p)
 	if !rtgTokIsKind(p, tok, rtgTokOp) {
 		return false
 	}
 	start := int(rtgTokStart(p, tok))
 	end := int(rtgTokEnd(p, tok))
-	if end-start == 2 && p.src[start+1] == '=' {
-		operator := p.src[start]
+	if end-start == 2 && rtg_runtime_UnsafeByteAt(p.src, start+1) == '=' {
+		operator := rtg_runtime_UnsafeByteAt(p.src, start)
 		return operator == '+' || operator == '-' || operator == '*' || operator == '/' || operator == '%' || operator == '&' || operator == '|' || operator == '^'
 	}
-	if end-start != 3 || p.src[start+2] != '=' {
+	if end-start != 3 || rtg_runtime_UnsafeByteAt(p.src, start+2) != '=' {
 		return false
 	}
-	first := p.src[start]
-	second := p.src[start+1]
+	first := rtg_runtime_UnsafeByteAt(p.src, start)
+	second := rtg_runtime_UnsafeByteAt(p.src, start+1)
 	return first == '<' && second == '<' || first == '>' && second == '>' || first == '&' && second == '^'
 }
 
 func rtgBuildMeta(pp *rtgProgram) rtgMeta {
+	rtgTrustNonNil(pp)
 	var m rtgMeta
 	rtgBuildMetaInto(pp, &m)
 	return m
 }
 
 func rtgBuildMetaInto(pp *rtgProgram, m *rtgMeta) {
+	rtgTrustNonNil(pp, m)
 	p := pp
 	m.prog = p
 	typeCap := len(p.decls)*4 + 256
@@ -4024,6 +4118,7 @@ func rtgBuildMetaInto(pp *rtgProgram, m *rtgMeta) {
 }
 
 func rtgFindContainingTopDeclGroup(p *rtgProgram, kind int, start int, end int) (int, int, bool) {
+	rtgTrustNonNil(p)
 	i := start - 1
 	for i >= 0 {
 		if rtgTokIsKind(p, i, kind) && rtgTokCharIs(p, i+1, '(') {
@@ -4038,6 +4133,7 @@ func rtgFindContainingTopDeclGroup(p *rtgProgram, kind int, start int, end int) 
 }
 
 func rtgParseTopDeclGroup(m *rtgMeta, p *rtgProgram, kind int, openTok int, endTok int) {
+	rtgTrustNonNil(m, p)
 	if !rtgTokCharIs(p, openTok, '(') || endTok <= openTok+1 {
 		rtgMetaError(m)
 		return
@@ -4073,10 +4169,11 @@ func rtgHashRange(src []byte, start int, end int) int {
 	}
 	// This is only a bucket fingerprint; every lookup still verifies all bytes.
 	// Sampling keeps identifier lookup bounded even for long generated names.
-	return (((size*33+int(src[start]))*33+int(src[end-1]))*33 + int(src[start+size/2])) & 2147483647
+	return (((size*33+int(rtg_runtime_UnsafeByteAt(src, start)))*33+int(rtg_runtime_UnsafeByteAt(src, end-1)))*33 + int(rtg_runtime_UnsafeByteAt(src, start+size/2))) & 2147483647
 }
 
 func rtgMetaAppendGlobal(m *rtgMeta, sym rtgSymbolInfo) {
+	rtgTrustNonNil(m)
 	index := len(m.globals)
 	m.globals = append(m.globals, sym)
 	if len(m.globalBuckets) == 0 {
@@ -4090,6 +4187,7 @@ func rtgMetaAppendGlobal(m *rtgMeta, sym rtgSymbolInfo) {
 }
 
 func rtgFindMetaGlobalIndex(m *rtgMeta, nameStart int, nameEnd int, kind int) int {
+	rtgTrustNonNil(m)
 	hash := rtgHashRange(m.prog.src, nameStart, nameEnd)
 	i := m.globalBuckets[hash%len(m.globalBuckets)]
 	for i >= 0 {
@@ -4103,6 +4201,7 @@ func rtgFindMetaGlobalIndex(m *rtgMeta, nameStart int, nameEnd int, kind int) in
 }
 
 func rtgBuildFuncLookup(m *rtgMeta) {
+	rtgTrustNonNil(m)
 	m.funcNext = make([]int, len(m.funcs))
 	for i := 0; i < len(m.funcNext); i++ {
 		m.funcNext[i] = -1
@@ -4117,6 +4216,7 @@ func rtgBuildFuncLookup(m *rtgMeta) {
 }
 
 func rtgFindMetaFunction(m *rtgMeta, nameStart int, nameEnd int) int {
+	rtgTrustNonNil(m)
 	hash := rtgHashRange(m.prog.src, nameStart, nameEnd)
 	i := m.funcBuckets[hash%len(m.funcBuckets)]
 	for i >= 0 {
@@ -4130,12 +4230,14 @@ func rtgFindMetaFunction(m *rtgMeta, nameStart int, nameEnd int) int {
 }
 
 func rtgResolveGlobalCallTypes(m *rtgMeta) {
+	rtgTrustNonNil(m)
 	for i := 0; i < len(m.globals); i++ {
 		global := &m.globals[i]
 		if global.typ != 0 || global.initStart >= global.initEnd {
 			continue
 		}
 		ep := rtgNewExprParse()
+		rtgTrustNonNil(ep)
 		rootIndex := rtgParseExpressionRoot(ep, m.prog, global.initStart, global.initEnd)
 		if rootIndex < 0 {
 			continue
@@ -4163,6 +4265,7 @@ func rtgResolveGlobalCallTypes(m *rtgMeta) {
 }
 
 func rtgInitBuiltinTypes(m *rtgMeta) {
+	rtgTrustNonNil(m)
 	rtgAddBuiltinType(m, rtgTypeInvalid, 0)
 	rtgAddBuiltinType(m, rtgTypeInt, rtgNativeIntSize)
 	rtgAddBuiltinType(m, rtgTypeInt64, 8)
@@ -4181,10 +4284,12 @@ func rtgInitBuiltinTypes(m *rtgMeta) {
 }
 
 func rtgAddBuiltinType(m *rtgMeta, kind int, size int) {
+	rtgTrustNonNil(m)
 	m.types = append(m.types, rtgTypeInfo{kind: kind, size: size})
 }
 
 func rtgParseConstDecls(m *rtgMeta, p *rtgProgram, start int, end int) {
+	rtgTrustNonNil(m, p)
 	prevTypeStart := 0
 	prevTypeEnd := 0
 	prevValues := rtgFixedIntScratch(8)
@@ -4283,7 +4388,9 @@ func rtgParseConstDecls(m *rtgMeta, p *rtgProgram, start int, end int) {
 }
 
 func rtgEvalMetaConstExpr(m *rtgMeta, p *rtgProgram, start int, end int, iotaValue int) rtgConstResult {
+	rtgTrustNonNil(m, p)
 	ep := rtgNewExprParse()
+	rtgTrustNonNil(ep)
 	if !rtgParseExpressionOK(ep, p, start, end) {
 		var r rtgConstResult
 		return r
@@ -4293,12 +4400,14 @@ func rtgEvalMetaConstExpr(m *rtgMeta, p *rtgProgram, start int, end int, iotaVal
 }
 
 func rtgEvalMetaParsedConstExpr(m *rtgMeta, p *rtgProgram, ep *rtgExprParse, idx int, iotaValue int) rtgConstResult {
+	rtgTrustNonNil(m, p, ep)
 	var result rtgConstResult
 	rtgEvalMetaParsedConstExprInto(m, p, ep, idx, iotaValue, &result)
 	return result
 }
 
 func rtgEvalMetaParsedConstExprInto(m *rtgMeta, p *rtgProgram, ep *rtgExprParse, idx int, iotaValue int, out *rtgConstResult) {
+	rtgTrustNonNil(m, p, ep, out)
 	e := ep.exprs[idx]
 	if e.kind == rtgExprInt {
 		rtgSetConstResult(out, rtgParseIntToken(p, e.tok), true)
@@ -4334,12 +4443,13 @@ func rtgEvalMetaParsedConstExprInto(m *rtgMeta, p *rtgProgram, ep *rtgExprParse,
 	}
 	if e.kind == rtgExprCall {
 		if e.argCount == 1 {
-			result := rtgEvalMetaParsedConstExpr(m, p, ep, ep.args[e.firstArg], iotaValue)
+			result := rtgEvalMetaParsedConstExpr(m, p, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg), iotaValue)
 			if result.ok {
 				callee := &ep.exprs[e.left]
 				conversionType := rtgBuiltinTypeFromToken(p, callee.tok)
 				if conversionType != 0 {
 					conversion := rtgResolveType(m, conversionType)
+					rtgTrustNonNil(conversion)
 					result.value = rtgConvertConstInt(result.value, conversion.kind)
 				}
 			}
@@ -4394,6 +4504,7 @@ func rtgEvalMetaParsedConstExprInto(m *rtgMeta, p *rtgProgram, ep *rtgExprParse,
 }
 
 func rtgFindConstSpecEqual(p *rtgProgram, start int, end int) int {
+	rtgTrustNonNil(p)
 	paren := 0
 	brack := 0
 	brace := 0
@@ -4426,6 +4537,7 @@ func rtgFindConstSpecEqual(p *rtgProgram, start int, end int) int {
 }
 
 func rtgParseTopDeclEntry(m *rtgMeta, p *rtgProgram, kind int, start int, end int) {
+	rtgTrustNonNil(m, p)
 	if start >= end || !rtgTokIsKind(p, start, rtgTokIdent) {
 		rtgMetaError(m)
 		return
@@ -4465,7 +4577,7 @@ func rtgParseTopDeclEntry(m *rtgMeta, p *rtgProgram, kind int, start int, end in
 	for j < end {
 		if j >= 0 && j < rtgTokCount(p) {
 			tok := rtgTokAt(p, j)
-			if rtgTokKind(p, j) == rtgTokOp && tok.end-tok.start == 1 && p.src[tok.start] == '=' {
+			if rtgTokKind(p, j) == rtgTokOp && tok.end-tok.start == 1 && rtg_runtime_UnsafeByteAt(p.src, tok.start) == '=' {
 				eq = j
 				j = end
 				continue
@@ -4493,6 +4605,7 @@ func rtgParseTopDeclEntry(m *rtgMeta, p *rtgProgram, kind int, start int, end in
 }
 
 func rtgParseVarDeclEntry(m *rtgMeta, p *rtgProgram, start int, end int) {
+	rtgTrustNonNil(m, p)
 	eq := rtgFindConstSpecEqual(p, start, end)
 	headEnd := end
 	if eq > start {
@@ -4556,6 +4669,7 @@ func rtgParseVarDeclEntry(m *rtgMeta, p *rtgProgram, start int, end int) {
 }
 
 func rtgInferTopLiteralType(m *rtgMeta, p *rtgProgram, start int, end int) int {
+	rtgTrustNonNil(m, p)
 	if start+1 == end && rtgTokIsKind(p, start, rtgTokString) {
 		return rtgTypeString
 	}
@@ -4585,6 +4699,7 @@ func rtgInferTopLiteralType(m *rtgMeta, p *rtgProgram, start int, end int) int {
 }
 
 func rtgParseFuncInfo(m *rtgMeta, fnIndex int) {
+	rtgTrustNonNil(m)
 	p := m.prog
 	fn := p.funcs[fnIndex]
 	nameStart := fn.nameStart
@@ -4649,6 +4764,7 @@ func rtgParseFuncInfo(m *rtgMeta, fnIndex int) {
 }
 
 func rtgParseFuncLiterals(m *rtgMeta, p *rtgProgram) {
+	rtgTrustNonNil(m, p)
 	tokenCount := rtgTokCount(p)
 	for tok := 0; tok < tokenCount; tok++ {
 		if int(p.toks.data[tok*rtgTokenStride])&255 != rtgTokFunc || !rtgTokCharIs(p, tok+1, '(') || rtgFuncTokenIsDeclarationOrSignature(p, tok) {
@@ -4684,7 +4800,7 @@ func rtgParseFuncLiterals(m *rtgMeta, p *rtgProgram) {
 		m.params = append(m.params, rtgSymbolInfo{typ: rtgTypeInt})
 		literalParamCount := rtgParseParamsInto(m, p, tok+2, paramsClose)
 		if literalParamCount < 0 {
-			m.params = m.params[:firstParam]
+			rtgTruncateParams(&m.params, firstParam)
 			continue
 		}
 		firstResult := len(m.params)
@@ -4693,7 +4809,7 @@ func rtgParseFuncLiterals(m *rtgMeta, p *rtgProgram) {
 		if resultStart < bodyOpen {
 			resultType, resultCount = rtgParseFuncResults(m, p, resultStart, bodyOpen)
 			if resultType == 0 {
-				m.params = m.params[:firstParam]
+				rtgTruncateParams(&m.params, firstParam)
 				continue
 			}
 		}
@@ -4707,6 +4823,7 @@ func rtgParseFuncLiterals(m *rtgMeta, p *rtgProgram) {
 }
 
 func rtgFuncTokenIsDeclarationOrSignature(p *rtgProgram, tok int) bool {
+	rtgTrustNonNil(p)
 	for i := 0; i < len(p.funcs); i++ {
 		if p.funcs[i].startTok == tok || tok > p.funcs[i].startTok && tok < p.funcs[i].bodyStart {
 			return true
@@ -4716,6 +4833,7 @@ func rtgFuncTokenIsDeclarationOrSignature(p *rtgProgram, tok int) bool {
 }
 
 func rtgParseParamsInto(m *rtgMeta, p *rtgProgram, start int, end int) int {
+	rtgTrustNonNil(m, p)
 	base := len(m.params)
 	if start == end {
 		return 0
@@ -4789,6 +4907,7 @@ type rtgLinkStaticDirective struct {
 }
 
 func rtgHasLinkStaticDirectivePrefix(p *rtgProgram, pos int) bool {
+	rtgTrustNonNil(p)
 	src := p.src
 	if pos < 0 || pos > len(src) {
 		return false
@@ -4796,7 +4915,7 @@ func rtgHasLinkStaticDirectivePrefix(p *rtgProgram, pos int) bool {
 	lineStart := pos
 	for lineStart > 0 {
 		prev := lineStart - 1
-		c := src[prev]
+		c := rtg_runtime_UnsafeByteAt(src, prev)
 		if c == '\n' {
 			break
 		}
@@ -4805,7 +4924,7 @@ func rtgHasLinkStaticDirectivePrefix(p *rtgProgram, pos int) bool {
 	end := lineStart
 	for end > 0 {
 		prev := end - 1
-		c := src[prev]
+		c := rtg_runtime_UnsafeByteAt(src, prev)
 		if c != ' ' && c != '\t' && c != '\r' && c != '\n' {
 			break
 		}
@@ -4817,14 +4936,14 @@ func rtgHasLinkStaticDirectivePrefix(p *rtgProgram, pos int) bool {
 	start := end
 	for start > 0 {
 		prev := start - 1
-		c := src[prev]
+		c := rtg_runtime_UnsafeByteAt(src, prev)
 		if c == '\n' {
 			break
 		}
 		start--
 	}
 	for start < end {
-		c := src[start]
+		c := rtg_runtime_UnsafeByteAt(src, start)
 		if c != ' ' && c != '\t' {
 			break
 		}
@@ -4835,6 +4954,7 @@ func rtgHasLinkStaticDirectivePrefix(p *rtgProgram, pos int) bool {
 }
 
 func rtgParseLinkStaticDirective(p *rtgProgram, pos int) rtgLinkStaticDirective {
+	rtgTrustNonNil(p)
 	var d rtgLinkStaticDirective
 	src := p.src
 	if pos < 0 || pos > len(src) {
@@ -4843,7 +4963,7 @@ func rtgParseLinkStaticDirective(p *rtgProgram, pos int) rtgLinkStaticDirective 
 	lineStart := pos
 	for lineStart > 0 {
 		prev := lineStart - 1
-		c := src[prev]
+		c := rtg_runtime_UnsafeByteAt(src, prev)
 		if c == '\n' {
 			break
 		}
@@ -4852,7 +4972,7 @@ func rtgParseLinkStaticDirective(p *rtgProgram, pos int) rtgLinkStaticDirective 
 	end := lineStart
 	for end > 0 {
 		prev := end - 1
-		c := src[prev]
+		c := rtg_runtime_UnsafeByteAt(src, prev)
 		if c != ' ' && c != '\t' && c != '\r' && c != '\n' {
 			break
 		}
@@ -4864,13 +4984,13 @@ func rtgParseLinkStaticDirective(p *rtgProgram, pos int) rtgLinkStaticDirective 
 	start := end
 	for start > 0 {
 		prev := start - 1
-		c := src[prev]
+		c := rtg_runtime_UnsafeByteAt(src, prev)
 		if c == '\n' {
 			break
 		}
 		start--
 	}
-	for start < end && (src[start] == ' ' || src[start] == '\t') {
+	for start < end && (rtg_runtime_UnsafeByteAt(src, start) == ' ' || rtg_runtime_UnsafeByteAt(src, start) == '\t') {
 		start++
 	}
 	prefix := "// rtg:linkstatic "
@@ -4878,26 +4998,26 @@ func rtgParseLinkStaticDirective(p *rtgProgram, pos int) rtgLinkStaticDirective 
 		return d
 	}
 	bodyStart := start + len(prefix)
-	for bodyStart < end && (src[bodyStart] == ' ' || src[bodyStart] == '\t') {
+	for bodyStart < end && (rtg_runtime_UnsafeByteAt(src, bodyStart) == ' ' || rtg_runtime_UnsafeByteAt(src, bodyStart) == '\t') {
 		bodyStart++
 	}
 	comma := bodyStart
-	for comma < end && src[comma] != ',' {
+	for comma < end && rtg_runtime_UnsafeByteAt(src, comma) != ',' {
 		comma++
 	}
 	if comma <= bodyStart || comma >= end {
 		return d
 	}
 	dllEnd := comma
-	for dllEnd > bodyStart && (src[dllEnd-1] == ' ' || src[dllEnd-1] == '\t') {
+	for dllEnd > bodyStart && (rtg_runtime_UnsafeByteAt(src, dllEnd-1) == ' ' || rtg_runtime_UnsafeByteAt(src, dllEnd-1) == '\t') {
 		dllEnd--
 	}
 	methodStart := comma + 1
-	for methodStart < end && (src[methodStart] == ' ' || src[methodStart] == '\t') {
+	for methodStart < end && (rtg_runtime_UnsafeByteAt(src, methodStart) == ' ' || rtg_runtime_UnsafeByteAt(src, methodStart) == '\t') {
 		methodStart++
 	}
 	methodEnd := end
-	for methodEnd > methodStart && (src[methodEnd-1] == ' ' || src[methodEnd-1] == '\t') {
+	for methodEnd > methodStart && (rtg_runtime_UnsafeByteAt(src, methodEnd-1) == ' ' || rtg_runtime_UnsafeByteAt(src, methodEnd-1) == '\t') {
 		methodEnd--
 	}
 	if dllEnd <= bodyStart || methodEnd <= methodStart {
@@ -4916,7 +5036,7 @@ func rtgBytesHasText(src []byte, start int, end int, text string) bool {
 		return false
 	}
 	for i := 0; i < len(text); i++ {
-		if src[start+i] != text[i] {
+		if rtg_runtime_UnsafeByteAt(src, start+i) != text[i] {
 			return false
 		}
 	}
@@ -4924,6 +5044,7 @@ func rtgBytesHasText(src []byte, start int, end int, text string) bool {
 }
 
 func rtgParseFuncResults(m *rtgMeta, p *rtgProgram, start int, end int) (int, int) {
+	rtgTrustNonNil(m, p)
 	if rtgTokCharIs(p, start, '(') {
 		closeTok := rtgFindMatchingExprClose(p, start+1, end, '(', ')')
 		if closeTok > start && closeTok <= end {
@@ -4937,9 +5058,11 @@ func rtgParseFuncResults(m *rtgMeta, p *rtgProgram, start int, end int) (int, in
 			fieldCount := len(m.fields)
 			parsedTypes := make([]int, count)
 			for i := 0; i < count; i++ {
-				result := rtgParseType(m, p, parts[i*2], parts[i*2+1])
+				partStart := parts[i*2]
+				partEnd := parts[i*2+1]
+				result := rtgParseType(m, p, partStart, partEnd)
 				parsedTypes[i] = result.typ
-				if result.typ == 0 || result.next != parts[i*2+1] {
+				if result.typ == 0 || result.next != partEnd {
 					allUnnamed = false
 				}
 			}
@@ -4949,8 +5072,8 @@ func rtgParseFuncResults(m *rtgMeta, p *rtgProgram, start int, end int) (int, in
 				}
 				return parsedTypes[0], 0
 			}
-			m.types = m.types[:typeCount]
-			m.fields = m.fields[:fieldCount]
+			rtgTruncateTypes(&m.types, typeCount)
+			rtgTruncateFields(&m.fields, fieldCount)
 			rtgRebuildNamedTypeIndex(m)
 			firstResult := len(m.params)
 			resultCount := 0
@@ -4969,6 +5092,7 @@ func rtgParseFuncResults(m *rtgMeta, p *rtgProgram, start int, end int) (int, in
 }
 
 func rtgBuildTupleTypeFromParams(m *rtgMeta, first int, count int) int {
+	rtgTrustNonNil(m)
 	firstField := len(m.fields)
 	offset := 0
 	for i := 0; i < count; i++ {
@@ -4981,6 +5105,7 @@ func rtgBuildTupleTypeFromParams(m *rtgMeta, first int, count int) int {
 }
 
 func rtgBuildTupleType(m *rtgMeta, types []int) int {
+	rtgTrustNonNil(m)
 	firstField := len(m.fields)
 	offset := 0
 	for i := 0; i < len(types); i++ {
@@ -4994,6 +5119,7 @@ func rtgBuildTupleType(m *rtgMeta, types []int) int {
 }
 
 func rtgParseParamList(m *rtgMeta, p *rtgProgram, start int, end int, count *int) {
+	rtgTrustNonNil(m, p, count)
 	parsed := rtgParseParamsInto(m, p, start, end)
 	if parsed < 0 {
 		rtgMetaError(m)
@@ -5003,17 +5129,20 @@ func rtgParseParamList(m *rtgMeta, p *rtgProgram, start int, end int, count *int
 }
 
 func rtgParseType(m *rtgMeta, p *rtgProgram, start int, end int) rtgTypeResult {
+	rtgTrustNonNil(m, p)
 	var result rtgTypeResult
 	rtgParseTypeInto(m, p, start, end, &result)
 	return result
 }
 
 func rtgSetTypeResult(result *rtgTypeResult, typ int, next int) {
+	rtgTrustNonNil(result)
 	result.typ = typ
 	result.next = next
 }
 
 func rtgParseFuncSignatureInto(m *rtgMeta, p *rtgProgram, openTok int, end int, result *rtgTypeResult) {
+	rtgTrustNonNil(m, p, result)
 	rtgSetTypeResult(result, 0, openTok)
 	closeTok := rtgFindMatchingExprClose(p, openTok+1, end, '(', ')')
 	if closeTok <= openTok {
@@ -5022,7 +5151,7 @@ func rtgParseFuncSignatureInto(m *rtgMeta, p *rtgProgram, openTok int, end int, 
 	paramBase := len(m.params)
 	paramCount := rtgParseParamsInto(m, p, openTok+1, closeTok)
 	if paramCount < 0 {
-		m.params = m.params[:paramBase]
+		rtgTruncateParams(&m.params, paramBase)
 		return
 	}
 	resultType := 0
@@ -5030,17 +5159,18 @@ func rtgParseFuncSignatureInto(m *rtgMeta, p *rtgProgram, openTok int, end int, 
 	if next < end {
 		resultType, _ = rtgParseFuncResults(m, p, next, end)
 		if resultType == 0 {
-			m.params = m.params[:paramBase]
+			rtgTruncateParams(&m.params, paramBase)
 			return
 		}
 		next = end
 	}
 	typ := rtgFindOrAddFuncTypeFromParams(m, paramBase, paramCount, resultType)
-	m.params = m.params[:paramBase]
+	rtgTruncateParams(&m.params, paramBase)
 	rtgSetTypeResult(result, typ, next)
 }
 
 func rtgParseTypeInto(m *rtgMeta, p *rtgProgram, start int, end int, result *rtgTypeResult) {
+	rtgTrustNonNil(m, p, result)
 	if start >= end {
 		rtgSetTypeResult(result, 0, start)
 		return
@@ -5148,7 +5278,7 @@ func rtgParseTypeInto(m *rtgMeta, p *rtgProgram, start int, end int, result *rtg
 			}
 		}
 		firstField := len(m.fields)
-		m.fields = m.fields[:firstField+count]
+		rtgTruncateFields(&m.fields, firstField+count)
 		fieldIndex := 0
 		offset := 0
 		i = start + 2
@@ -5209,6 +5339,7 @@ func rtgParseTypeInto(m *rtgMeta, p *rtgProgram, start int, end int, result *rtg
 }
 
 func rtgFindOrAddFuncTypeFromParams(m *rtgMeta, first int, count int, resultType int) int {
+	rtgTrustNonNil(m)
 	variadic := 0
 	if count > 0 && m.params[first+count-1].initStart == 1 {
 		variadic = 1
@@ -5239,6 +5370,7 @@ func rtgFindOrAddFuncTypeFromParams(m *rtgMeta, first int, count int, resultType
 }
 
 func rtgFunctionTypeFromInfo(m *rtgMeta, fnIndex int) int {
+	rtgTrustNonNil(m)
 	if fnIndex < 0 || fnIndex >= len(m.funcs) {
 		return 0
 	}
@@ -5253,6 +5385,7 @@ func rtgFunctionTypeFromInfo(m *rtgMeta, fnIndex int) int {
 }
 
 func rtgFunctionTypeFromInfoStart(m *rtgMeta, fnIndex int, first int) int {
+	rtgTrustNonNil(m)
 	if fnIndex < 0 || fnIndex >= len(m.funcs) {
 		return 0
 	}
@@ -5264,6 +5397,7 @@ func rtgFunctionTypeFromInfoStart(m *rtgMeta, fnIndex int, first int) int {
 }
 
 func rtgClosureIndexByToken(meta *rtgMeta, tok int) int {
+	rtgTrustNonNil(meta)
 	for i := 0; i < len(meta.closures); i++ {
 		fnIndex := meta.closures[i].fnIndex
 		if fnIndex >= 0 && fnIndex < len(meta.funcs) && meta.funcs[fnIndex].literalTok == tok {
@@ -5274,6 +5408,7 @@ func rtgClosureIndexByToken(meta *rtgMeta, tok int) int {
 }
 
 func rtgBuiltinTypeFromToken(p *rtgProgram, tokIndex int) int {
+	rtgTrustNonNil(p)
 	tok := rtgTokAt(p, tokIndex)
 	if rtgBytesEqualText(p.src, int(tok.start), int(tok.end), "complex64") || rtgBytesEqualText(p.src, int(tok.start), int(tok.end), "complex128") {
 		return rtgBuiltinTypeComplex
@@ -5289,6 +5424,7 @@ func rtgBuiltinTypeFromToken(p *rtgProgram, tokIndex int) int {
 }
 
 func rtgNamedTypeFromToken(m *rtgMeta, p *rtgProgram, tokIndex int) int {
+	rtgTrustNonNil(m, p)
 	tok := rtgTokAt(p, tokIndex)
 	start := int(tok.start)
 	end := int(tok.end)
@@ -5299,6 +5435,7 @@ func rtgNamedTypeFromToken(m *rtgMeta, p *rtgProgram, tokIndex int) int {
 }
 
 func rtgAddType(m *rtgMeta, kind int, elem int, first int, count int, size int, nameStart int, nameEnd int) int {
+	rtgTrustNonNil(m)
 	m.types = append(m.types, rtgTypeInfo{kind: kind, elem: elem, first: first, count: count, size: size, nameStart: nameStart, nameEnd: nameEnd})
 	index := len(m.types) - 1
 	rtgIndexNamedType(m, index)
@@ -5306,6 +5443,7 @@ func rtgAddType(m *rtgMeta, kind int, elem int, first int, count int, size int, 
 }
 
 func rtgIndexNamedType(m *rtgMeta, index int) {
+	rtgTrustNonNil(m)
 	if index >= len(m.types) {
 		return
 	}
@@ -5328,6 +5466,7 @@ func rtgIndexNamedType(m *rtgMeta, index int) {
 }
 
 func rtgRebuildNamedTypeIndex(m *rtgMeta) {
+	rtgTrustNonNil(m)
 	for i := 0; i < len(m.typeBuckets); i++ {
 		m.typeBuckets[i] = 0
 	}
@@ -5337,6 +5476,7 @@ func rtgRebuildNamedTypeIndex(m *rtgMeta) {
 }
 
 func rtgFindNamedType(m *rtgMeta, nameStart int, nameEnd int) int {
+	rtgTrustNonNil(m)
 	buckets := m.typeBuckets
 	bucket := rtgHashRange(m.prog.src, nameStart, nameEnd) % len(buckets)
 	for probes := 0; probes < len(buckets); probes++ {
@@ -5358,6 +5498,7 @@ func rtgFindNamedType(m *rtgMeta, nameStart int, nameEnd int) int {
 }
 
 func rtgAddPointerType(m *rtgMeta, elem int, addressSpace int) int {
+	rtgTrustNonNil(m)
 	if addressSpace < rtgPointerSpaceData || addressSpace > rtgPointerSpaceGeneric {
 		addressSpace = rtgPointerSpaceData
 	}
@@ -5371,6 +5512,7 @@ func rtgAddPointerType(m *rtgMeta, elem int, addressSpace int) int {
 }
 
 func rtgAddSequenceType(m *rtgMeta, kind int, elem int, count int, size int) int {
+	rtgTrustNonNil(m)
 	for i := 1; i < len(m.types); i++ {
 		t := &m.types[i]
 		if t.kind == kind && t.elem == elem && t.count == count && t.nameStart == 0 {
@@ -5381,7 +5523,9 @@ func rtgAddSequenceType(m *rtgMeta, kind int, elem int, count int, size int) int
 }
 
 func rtgPointerAddressSpace(m *rtgMeta, typ int) int {
+	rtgTrustNonNil(m)
 	t := rtgResolveType(m, typ)
+	rtgTrustNonNil(t)
 	if t.kind != rtgTypePointer {
 		return 0
 	}
@@ -5392,6 +5536,7 @@ func rtgPointerAddressSpace(m *rtgMeta, typ int) int {
 }
 
 func rtgFinalizeTypeLayouts(m *rtgMeta) {
+	rtgTrustNonNil(m)
 	for i := 0; i < len(m.funcs); i++ {
 		fn := &m.funcs[i]
 		if fn.linkStatic == 0 {
@@ -5426,6 +5571,7 @@ func rtgFinalizeTypeLayouts(m *rtgMeta) {
 }
 
 func rtgNativeTypeLayout(m *rtgMeta, typ int) int {
+	rtgTrustNonNil(m)
 	if typ <= 0 || typ >= len(m.types) {
 		return rtgBackendValueSlotSize
 	}
@@ -5519,6 +5665,7 @@ func rtgAppendIntCopy(values []int, value int) []int {
 }
 
 func rtgFindResolvedNamedTypeIndex(m *rtgMeta, typ int) int {
+	rtgTrustNonNil(m)
 	if typ < 0 || typ >= len(m.types) {
 		return -1
 	}
@@ -5546,7 +5693,9 @@ func rtgFindResolvedNamedTypeIndex(m *rtgMeta, typ int) int {
 }
 
 func rtgTypeSize(m *rtgMeta, typ int) int {
+	rtgTrustNonNil(m)
 	t := rtgResolveType(m, typ)
+	rtgTrustNonNil(t)
 	if t.size > 0 {
 		return t.size
 	}
@@ -5554,6 +5703,7 @@ func rtgTypeSize(m *rtgMeta, typ int) int {
 }
 
 func rtgTypeCopySize(m *rtgMeta, typ int) int {
+	rtgTrustNonNil(m)
 	size := rtgTypeSize(m, typ)
 	if size < rtgBackendValueSlotSize {
 		return rtgBackendValueSlotSize
@@ -5564,6 +5714,7 @@ func rtgTypeCopySize(m *rtgMeta, typ int) int {
 var rtgInvalidType rtgTypeInfo
 
 func rtgResolveType(m *rtgMeta, typ int) *rtgTypeInfo {
+	rtgTrustNonNil(m)
 	if typ >= 0 && typ < len(m.types) {
 		t := &m.types[typ]
 		if t.kind == rtgTypeNamed && t.elem > 0 && t.elem < len(m.types) {
@@ -5581,11 +5732,14 @@ func rtgResolveType(m *rtgMeta, typ int) *rtgTypeInfo {
 }
 
 func rtgTypeIsSlice(m *rtgMeta, typ int) bool {
+	rtgTrustNonNil(m)
 	t := rtgResolveType(m, typ)
+	rtgTrustNonNil(t)
 	return t.kind == rtgTypeSlice
 }
 
 func rtgAsmLoadSliceMemSecondary(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	rtgAsmLoadPrimaryMemSecondaryDisp(a, 0)
 	rtgAsmPushPrimary(a)
 	rtgAsmLoadPrimaryMemSecondaryDisp(a, 8)
@@ -5597,7 +5751,9 @@ func rtgAsmLoadSliceMemSecondary(a *rtgAsm) {
 }
 
 func rtgTypeIsStringSlice(m *rtgMeta, typ int) bool {
+	rtgTrustNonNil(m)
 	t := rtgResolveType(m, typ)
+	rtgTrustNonNil(t)
 	if t.kind != rtgTypeSlice {
 		return false
 	}
@@ -5605,12 +5761,16 @@ func rtgTypeIsStringSlice(m *rtgMeta, typ int) bool {
 }
 
 func rtgTypeIsString(m *rtgMeta, typ int) bool {
+	rtgTrustNonNil(m)
 	t := rtgResolveType(m, typ)
+	rtgTrustNonNil(t)
 	return t.kind == rtgTypeString
 }
 
 func rtgTypeIsInt(m *rtgMeta, typ int) bool {
+	rtgTrustNonNil(m)
 	t := rtgResolveType(m, typ)
+	rtgTrustNonNil(t)
 	return t.kind == rtgTypeInt
 }
 
@@ -5653,17 +5813,21 @@ func rtgNativeScalarStorageSize(kind int) int {
 }
 
 func rtgAsmLoadPrimaryIndexTertiaryScalarOrPointer(a *rtgAsm, kind int) {
+	rtgTrustNonNil(a)
 	elemSize := rtgScalarKindSize(kind)
 	rtgAsmLoadPrimaryIndexTertiarySize(a, elemSize)
 	rtgAsmNormalizePrimaryForKind(a, kind)
 }
 
 func rtgTypeIsStruct(m *rtgMeta, typ int) bool {
+	rtgTrustNonNil(m)
 	t := rtgResolveType(m, typ)
+	rtgTrustNonNil(t)
 	return t.kind == rtgTypeStruct
 }
 
 func rtgTypeUsesNativeABI(m *rtgMeta, typ int) bool {
+	rtgTrustNonNil(m)
 	if typ <= 0 || typ >= len(m.types) {
 		return false
 	}
@@ -5671,16 +5835,21 @@ func rtgTypeUsesNativeABI(m *rtgMeta, typ int) bool {
 		return true
 	}
 	t := rtgResolveType(m, typ)
+	rtgTrustNonNil(t)
 	return t.kind == rtgTypePointer && t.elem >= 0 && t.elem < len(m.types) && m.types[t.elem].nativeAlign > 0
 }
 
 func rtgTypeUsesHiddenResult(m *rtgMeta, typ int) bool {
+	rtgTrustNonNil(m)
 	t := rtgResolveType(m, typ)
+	rtgTrustNonNil(t)
 	return t.kind == rtgTypeStruct || t.kind == rtgTypeArray || t.kind == rtgTypeInterface
 }
 
 func rtgTypeIsTuple(m *rtgMeta, typ int) bool {
+	rtgTrustNonNil(m)
 	t := rtgResolveType(m, typ)
+	rtgTrustNonNil(t)
 	if t.kind != rtgTypeStruct || t.count <= 1 {
 		return false
 	}
@@ -5698,6 +5867,7 @@ func rtgAlignTo8(v int) int {
 }
 
 func rtgFindTokenTextInRange(p *rtgProgram, start int, end int, text byte) int {
+	rtgTrustNonNil(p)
 	i := start
 	for i < end {
 		if rtgTokCharIs(p, i, text) {
@@ -5713,7 +5883,7 @@ func rtgBytesEqualRange(src []byte, aStart int, aEnd int, bStart int, bEnd int) 
 		return false
 	}
 	for i := 0; i < aEnd-aStart; i++ {
-		if src[aStart+i] != src[bStart+i] {
+		if rtg_runtime_UnsafeByteAt(src, aStart+i) != rtg_runtime_UnsafeByteAt(src, bStart+i) {
 			return false
 		}
 	}
@@ -5722,6 +5892,7 @@ func rtgBytesEqualRange(src []byte, aStart int, aEnd int, bStart int, bEnd int) 
 
 // Shared scalar code generation.
 func rtgBindFunctionParams(g *rtgLinearGen, fnIndex int) {
+	rtgTrustNonNil(g)
 	meta := g.meta
 	fn := &meta.funcs[fnIndex]
 	callWord := 0
@@ -5748,6 +5919,7 @@ func rtgBindFunctionParams(g *rtgLinearGen, fnIndex int) {
 			continue
 		}
 		paramType := rtgResolveType(meta, param.typ)
+		rtgTrustNonNil(paramType)
 		if paramType.kind == rtgTypeInterface {
 			rtgStoreIncomingCallWord(g, callWord, offset)
 			rtgStoreIncomingCallWord(g, callWord+1, offset-rtgBackendValueSlotSize)
@@ -5770,6 +5942,7 @@ func rtgBindFunctionParams(g *rtgLinearGen, fnIndex int) {
 }
 
 func rtgBindClosureCaptures(g *rtgLinearGen, fnIndex int) bool {
+	rtgTrustNonNil(g)
 	closureIndex := rtgClosureIndexByFunction(g.meta, fnIndex)
 	if closureIndex < 0 {
 		return true
@@ -5795,6 +5968,7 @@ func rtgBindClosureCaptures(g *rtgLinearGen, fnIndex int) bool {
 }
 
 func rtgClosureIndexByFunction(meta *rtgMeta, fnIndex int) int {
+	rtgTrustNonNil(meta)
 	for i := 0; i < len(meta.closures); i++ {
 		if meta.closures[i].fnIndex == fnIndex {
 			return i
@@ -5804,6 +5978,7 @@ func rtgClosureIndexByFunction(meta *rtgMeta, fnIndex int) int {
 }
 
 func rtgBindNamedResults(g *rtgLinearGen, fnIndex int) bool {
+	rtgTrustNonNil(g)
 	if fnIndex < 0 || fnIndex >= len(g.meta.funcs) {
 		return false
 	}
@@ -5821,6 +5996,7 @@ func rtgBindNamedResults(g *rtgLinearGen, fnIndex int) bool {
 }
 
 func rtgEnsurePanicState(g *rtgLinearGen) {
+	rtgTrustNonNil(g)
 	g.panicValueOff = g.asm.bssSize
 	g.panicTypeOff = g.panicValueOff + rtgBackendValueSlotSize
 	g.panicIDOff = g.panicTypeOff + rtgBackendValueSlotSize
@@ -5832,6 +6008,7 @@ func rtgEnsurePanicState(g *rtgLinearGen) {
 }
 
 func rtgEmitJumpIfBssEqualsStack(g *rtgLinearGen, bssOffset int, stackOffset int, label int) {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	rtgAsmLoadPrimaryBss(a, bssOffset)
 	rtgAsmPushPrimary(a)
@@ -5842,17 +6019,20 @@ func rtgEmitJumpIfBssEqualsStack(g *rtgLinearGen, bssOffset int, stackOffset int
 }
 
 func rtgEmitStorePanicNodeField(g *rtgLinearGen, nodeOffset int, bssOffset int, displacement int) {
+	rtgTrustNonNil(g)
 	rtgAsmLoadPrimaryBss(&g.asm, bssOffset)
 	rtgAsmLoadSecondaryStack(&g.asm, nodeOffset)
 	rtgAsmStorePrimaryMemSecondaryDisp(&g.asm, displacement)
 }
 
 func rtgEmitLoadPanicNodeField(g *rtgLinearGen, nodeOffset int, bssOffset int, displacement int) {
+	rtgTrustNonNil(g)
 	rtgAsmLoadPrimaryStackMemory(&g.asm, nodeOffset, displacement)
 	rtgAsmStorePrimaryBss(&g.asm, bssOffset)
 }
 
 func rtgPrepareFunctionControl(g *rtgLinearGen) bool {
+	rtgTrustNonNil(g)
 	g.deferHeadOffset = 0
 	g.deferReturnLabel = 0
 	g.deferResultOffset = 0
@@ -5882,6 +6062,7 @@ func rtgPrepareFunctionControl(g *rtgLinearGen) bool {
 }
 
 func rtgEmitPostCallPanicCheck(g *rtgLinearGen) {
+	rtgTrustNonNil(g)
 	if !g.meta.panicEnabled || g.deferReturnLabel <= 0 || g.suppressPanicCheck || g.emittingDefers {
 		return
 	}
@@ -5898,6 +6079,7 @@ func rtgEmitPostCallPanicCheck(g *rtgLinearGen) {
 }
 
 func rtgEmitDeferredReturn(g *rtgLinearGen, stmt *rtgStmt) bool {
+	rtgTrustNonNil(g, stmt)
 	fn := &g.meta.funcs[g.currentFunc]
 	if stmt.exprStart < stmt.exprEnd {
 		if fn.resultCount > 0 {
@@ -5912,6 +6094,7 @@ func rtgEmitDeferredReturn(g *rtgLinearGen, stmt *rtgStmt) bool {
 					return false
 				}
 				ep := rtgNewExprParse()
+				rtgTrustNonNil(ep)
 				root := rtgParseExpressionRoot(ep, g.prog, parts[i*2], parts[i*2+1])
 				if root < 0 || !rtgEmitExprToLocal(g, ep, root, offset) {
 					return false
@@ -5924,6 +6107,7 @@ func rtgEmitDeferredReturn(g *rtgLinearGen, stmt *rtgStmt) bool {
 				}
 			} else {
 				ep := rtgNewExprParse()
+				rtgTrustNonNil(ep)
 				root := rtgParseExpressionRoot(ep, g.prog, stmt.exprStart, stmt.exprEnd)
 				if root < 0 {
 					return false
@@ -5943,6 +6127,7 @@ func rtgEmitDeferredReturn(g *rtgLinearGen, stmt *rtgStmt) bool {
 }
 
 func rtgEmitFunctionControlEpilogue(g *rtgLinearGen) bool {
+	rtgTrustNonNil(g)
 	if g.deferReturnLabel <= 0 {
 		return false
 	}
@@ -5971,6 +6156,7 @@ func rtgEmitFunctionControlEpilogue(g *rtgLinearGen) bool {
 		rtgAsmLoadPrimaryStackMemory(a, recordOffset, 2*rtgBackendValueSlotSize)
 		rtgAsmStorePrimaryStack(a, handleOffset)
 		funcType := rtgResolveType(g.meta, site.funcType)
+		rtgTrustNonNil(funcType)
 		argOffsets := make([]int, funcType.count)
 		disp := 3 * rtgBackendValueSlotSize
 		for j := 0; j < funcType.count; j++ {
@@ -6043,20 +6229,24 @@ func rtgEmitFunctionControlEpilogue(g *rtgLinearGen) bool {
 }
 
 func rtgEmitBareReturnValues(g *rtgLinearGen) bool {
-	fn := &g.meta.funcs[g.currentFunc]
+	rtgTrustNonNil(g)
+	meta := g.meta
+	rtgTrustNonNil(meta)
+	fn := &meta.funcs[g.currentFunc]
 	if fn.resultCount == 0 {
 		return true
 	}
-	if fn.firstResult < 0 || fn.firstResult+fn.resultCount > len(g.meta.params) {
+	if fn.firstResult < 0 || fn.firstResult+fn.resultCount > len(meta.params) {
 		return false
 	}
 	if fn.resultCount == 1 {
-		result := &g.meta.params[fn.firstResult]
+		result := &meta.params[fn.firstResult]
 		offset := rtgFindLocalOffset(g, result.nameStart, result.nameEnd)
 		if offset < 0 {
 			return false
 		}
-		resolved := rtgResolveType(g.meta, result.typ)
+		resolved := rtgResolveType(meta, result.typ)
+		rtgTrustNonNil(resolved)
 		if resolved.kind == rtgTypeStruct || resolved.kind == rtgTypeArray {
 			if g.returnStruct <= 0 {
 				return false
@@ -6078,6 +6268,7 @@ func rtgEmitBareReturnValues(g *rtgLinearGen) bool {
 		return true
 	}
 	tuple := rtgResolveType(g.meta, fn.resultType)
+	rtgTrustNonNil(tuple)
 	if tuple.kind != rtgTypeStruct || tuple.count != fn.resultCount || g.returnStruct <= 0 {
 		return false
 	}
@@ -6097,6 +6288,7 @@ func rtgAsmImmFits8Signed(imm int) bool {
 	return imm >= -128 && imm <= 127
 }
 func rtgAsmLoadPrimaryIntToken(a *rtgAsm, p *rtgProgram, tokIndex int) {
+	rtgTrustNonNil(a, p)
 	value := rtgParseIntToken(p, tokIndex)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32EmitRegImm(a, rtgWasm32OpMovRegImm, rtgWasm32RegRax, value)
@@ -6110,10 +6302,11 @@ func rtgAsmLoadPrimaryIntToken(a *rtgAsm, p *rtgProgram, tokIndex int) {
 	rtgAsmPrimaryImm(a, value)
 }
 func rtgIntTokenNeedsMovabs(p *rtgProgram, tokIndex int) bool {
+	rtgTrustNonNil(p)
 	tok := rtgTokAt(p, tokIndex)
 	start := int(tok.start)
 	end := int(tok.end)
-	if end-start > 2 && p.src[start] == '0' {
+	if end-start > 2 && rtg_runtime_UnsafeByteAt(p.src, start) == '0' {
 		return false
 	}
 	digits := end - start
@@ -6125,7 +6318,7 @@ func rtgIntTokenNeedsMovabs(p *rtgProgram, tokIndex int) bool {
 	}
 	limit := "2147483647"
 	for i := 0; i < 10; i++ {
-		c := p.src[start+i]
+		c := rtg_runtime_UnsafeByteAt(p.src, start+i)
 		if c > limit[i] {
 			return true
 		}
@@ -6136,6 +6329,7 @@ func rtgIntTokenNeedsMovabs(p *rtgProgram, tokIndex int) bool {
 	return false
 }
 func rtgAsmCopyPrimaryToSecondary(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmMovRdxRax(a)
 		return
@@ -6148,9 +6342,13 @@ func rtgAsmCopyPrimaryToSecondary(a *rtgAsm) {
 		rtgArmAsmMovRdxRax(a)
 		return
 	}
+	if rtgTargetArch == rtgArchAmd64 && rtgAmd64RewritePrimaryLoad(a, 2, false) {
+		return
+	}
 	rtgAsmEmit16(a, 0x5a50)
 }
 func rtgAsmCopyPrimaryToTertiary(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmMovRcxRax(a)
 		return
@@ -6163,9 +6361,14 @@ func rtgAsmCopyPrimaryToTertiary(a *rtgAsm) {
 		rtgArmAsmMovRcxRax(a)
 		return
 	}
+	if rtgTargetArch == rtgArchAmd64 && rtgAmd64RewritePrimaryLoad(a, 1, false) {
+		return
+	}
 	rtgAsmEmit16(a, 0x5950)
 }
+
 func rtgAsmCopySecondaryToTertiary(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmMovRcxRdx(a)
 		return
@@ -6181,10 +6384,12 @@ func rtgAsmCopySecondaryToTertiary(a *rtgAsm) {
 	rtgAsmEmit16(a, 0x5952)
 }
 func rtgAsmCopyTertiaryToPrimary(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	rtgAsmPushTertiary(a)
 	rtgAsmPopPrimary(a)
 }
 func rtgAsmPushPrimary(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmPushRax(a)
 		return
@@ -6197,15 +6402,22 @@ func rtgAsmPushPrimary(a *rtgAsm) {
 		rtgArmAsmPushRax(a)
 		return
 	}
+	load := a.lastPrimaryLoad
+	fold := rtgTargetArch == rtgArchAmd64 && load > 0 && load/8 == len(a.code)
 	rtgAsmEmit8(a, 0x50)
+	if fold {
+		a.lastPrimaryLoad = -load
+	}
 }
 
 func rtgAsmPushStack(a *rtgAsm, offset int) {
+	rtgTrustNonNil(a)
 	rtgAsmLoadPrimaryStack(a, offset)
 	rtgAsmPushPrimary(a)
 }
 
 func rtgAsmPushStackWord(a *rtgAsm, offset int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchAmd64 || rtgTargetArch == rtgArch386 {
 		rtgAsmEmit8(a, 0xff)
 		if offset >= 0 && offset <= 128 {
@@ -6220,6 +6432,7 @@ func rtgAsmPushStackWord(a *rtgAsm, offset int) {
 	rtgAsmPushStack(a, offset)
 }
 func rtgAsmPushTertiary(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmPushRcx(a)
 		return
@@ -6235,6 +6448,7 @@ func rtgAsmPushTertiary(a *rtgAsm) {
 	rtgAsmEmit8(a, 0x51)
 }
 func rtgAsmPushSecondary(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmPushRdx(a)
 		return
@@ -6250,6 +6464,7 @@ func rtgAsmPushSecondary(a *rtgAsm) {
 	rtgAsmEmit8(a, 0x52)
 }
 func rtgAsmPushImm(a *rtgAsm, imm int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmPushImm(a, imm)
 		return
@@ -6275,15 +6490,18 @@ func rtgAsmPushImm(a *rtgAsm, imm int) {
 	rtgAsmPushPrimary(a)
 }
 func rtgAsmPushSliceRegs(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	rtgAsmPushTertiary(a)
 	rtgAsmPushSecondary(a)
 	rtgAsmPushPrimary(a)
 }
 func rtgAsmPushStringRegs(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	rtgAsmPushSecondary(a)
 	rtgAsmPushPrimary(a)
 }
 func rtgAsmPopPrimary(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmPopRax(a)
 		return
@@ -6296,9 +6514,13 @@ func rtgAsmPopPrimary(a *rtgAsm) {
 		rtgArmAsmPopRax(a)
 		return
 	}
+	if rtgTargetArch == rtgArchAmd64 && rtgAmd64RewritePrimaryLoad(a, 0, true) {
+		return
+	}
 	rtgAsmEmit8(a, 0x58)
 }
 func rtgAsmPopTertiary(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmPopRcx(a)
 		return
@@ -6311,9 +6533,13 @@ func rtgAsmPopTertiary(a *rtgAsm) {
 		rtgArmAsmPopRcx(a)
 		return
 	}
+	if rtgTargetArch == rtgArchAmd64 && rtgAmd64RewritePrimaryLoad(a, 1, true) {
+		return
+	}
 	rtgAsmEmit8(a, 0x59)
 }
 func rtgAsmPopSecondary(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmPopRdx(a)
 		return
@@ -6326,9 +6552,13 @@ func rtgAsmPopSecondary(a *rtgAsm) {
 		rtgArmAsmPopRdx(a)
 		return
 	}
+	if rtgTargetArch == rtgArchAmd64 && rtgAmd64RewritePrimaryLoad(a, 2, true) {
+		return
+	}
 	rtgAsmEmit8(a, 0x5a)
 }
 func rtgAsmPopCallWord1(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmPopRsi(a)
 		return
@@ -6341,9 +6571,13 @@ func rtgAsmPopCallWord1(a *rtgAsm) {
 		rtgArmAsmPopRsi(a)
 		return
 	}
+	if rtgTargetArch == rtgArchAmd64 && rtgAmd64RewritePrimaryLoad(a, 6, true) {
+		return
+	}
 	rtgAsmEmit8(a, 0x5e)
 }
 func rtgAsmStorePrimaryStack(a *rtgAsm, offset int) {
+	rtgTrustNonNil(a)
 	rtgAsmStackMem(a, offset, 0x8948, 0x45, 0x85)
 	if rtgTargetArch == rtgArchAmd64 {
 		a.lastPrimaryStoreEnd = len(a.code)
@@ -6351,6 +6585,7 @@ func rtgAsmStorePrimaryStack(a *rtgAsm, offset int) {
 	}
 }
 func rtgAsmStorePrimaryStackSize(a *rtgAsm, offset int, size int) {
+	rtgTrustNonNil(a)
 	if size >= rtgNativeIntSize {
 		rtgAsmStorePrimaryStack(a, offset)
 		return
@@ -6364,13 +6599,16 @@ func rtgAsmStorePrimaryStackSize(a *rtgAsm, offset int, size int) {
 	rtgAsmStorePrimaryMemSecondaryDispSize(a, 0, size)
 }
 func rtgAsmStoreSecondaryStack(a *rtgAsm, offset int) {
+	rtgTrustNonNil(a)
 	rtgAsmStackMem(a, offset, 0x8948, 0x55, 0x95)
 }
 func rtgAsmStorePrimarySecondaryStack(a *rtgAsm, primaryOffset int, secondaryOffset int) {
+	rtgTrustNonNil(a)
 	rtgAsmStorePrimaryStack(a, primaryOffset)
 	rtgAsmStoreSecondaryStack(a, secondaryOffset)
 }
 func rtgAsmLoadPrimaryStack(a *rtgAsm, offset int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchAmd64 {
 		n := len(a.code)
 		if a.lastPrimaryStoreEnd == n && a.lastPrimaryStoreOff == offset {
@@ -6378,29 +6616,41 @@ func rtgAsmLoadPrimaryStack(a *rtgAsm, offset int) {
 		}
 	}
 	rtgAsmStackMem(a, offset, 0x8b48, 0x45, 0x85)
+	if rtgTargetArch == rtgArchAmd64 {
+		distance := 2
+		if offset < 0 || offset > 128 {
+			distance = 5
+		}
+		a.lastPrimaryLoad = len(a.code)*8 + distance
+	}
 }
 
 func rtgAsmStoreStackImm(a *rtgAsm, offset int, value int) {
+	rtgTrustNonNil(a)
 	rtgAsmPrimaryImm(a, value)
 	rtgAsmStorePrimaryStack(a, offset)
 }
 
 func rtgAsmCopyBssToStackSlot(a *rtgAsm, bssOffset int, stackOffset int) {
+	rtgTrustNonNil(a)
 	rtgAsmLoadPrimaryBss(a, bssOffset)
 	rtgAsmStorePrimaryStack(a, stackOffset)
 }
 
 func rtgAsmLoadPrimaryStackMemory(a *rtgAsm, stackOffset int, displacement int) {
+	rtgTrustNonNil(a)
 	rtgAsmLoadSecondaryStack(a, stackOffset)
 	rtgAsmLoadPrimaryMemSecondaryDisp(a, displacement)
 }
 
 func rtgAsmCopyStackSlot(a *rtgAsm, src int, dest int) {
+	rtgTrustNonNil(a)
 	rtgAsmLoadPrimaryStack(a, src)
 	rtgAsmStorePrimaryStack(a, dest)
 }
 
 func rtgAsmIncStack(a *rtgAsm, offset int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchAmd64 {
 		// incq directly in the frame slot.  Loading the value into the primary
 		// register and storing it back costs another seven to ten bytes at the
@@ -6414,6 +6664,7 @@ func rtgAsmIncStack(a *rtgAsm, offset int) {
 }
 
 func rtgAsmJcmpStackStack(a *rtgAsm, left int, right int, label int, setcc int) {
+	rtgTrustNonNil(a)
 	rtgAsmPushStack(a, left)
 	rtgAsmLoadPrimaryStack(a, right)
 	rtgAsmPopTertiary(a)
@@ -6422,6 +6673,7 @@ func rtgAsmJcmpStackStack(a *rtgAsm, left int, right int, label int, setcc int) 
 }
 
 func rtgAsmJcmpStackImm(a *rtgAsm, offset int, value int, label int, setcc int) {
+	rtgTrustNonNil(a)
 	rtgAsmPushStack(a, offset)
 	rtgAsmPrimaryImm(a, value)
 	rtgAsmPopTertiary(a)
@@ -6430,10 +6682,12 @@ func rtgAsmJcmpStackImm(a *rtgAsm, offset int, value int, label int, setcc int) 
 }
 
 func rtgAsmJgeStackStack(a *rtgAsm, left int, right int, label int) {
+	rtgTrustNonNil(a)
 	rtgAsmJcmpStackStack(a, left, right, label, 0x9d)
 }
 
 func rtgAsmJltStackStack(a *rtgAsm, left int, right int, label int) {
+	rtgTrustNonNil(a)
 	notLess := rtgAsmNewLabel(a)
 	rtgAsmJgeStackStack(a, left, right, notLess)
 	rtgAsmIncPrimary(a)
@@ -6441,22 +6695,28 @@ func rtgAsmJltStackStack(a *rtgAsm, left int, right int, label int) {
 }
 
 func rtgAsmAddressPrimaryStack(a *rtgAsm, offset int) {
+	rtgTrustNonNil(a)
 	rtgAsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
 }
 func rtgAsmAddressCallWord0Stack(a *rtgAsm, offset int) {
+	rtgTrustNonNil(a)
 	rtgAsmStackMem(a, offset, 0x8d48, 0x7d, 0xbd)
 }
 func rtgAsmAddressCallWord1Stack(a *rtgAsm, offset int) {
+	rtgTrustNonNil(a)
 	rtgAsmStackMem(a, offset, 0x8d48, 0x75, 0xb5)
 }
 func rtgAsmLoadSecondaryStack(a *rtgAsm, offset int) {
+	rtgTrustNonNil(a)
 	rtgAsmStackMem(a, offset, 0x8b48, 0x55, 0x95)
 }
 func rtgAsmLoadPrimarySecondaryStack(a *rtgAsm, primaryOffset int, secondaryOffset int) {
+	rtgTrustNonNil(a)
 	rtgAsmLoadPrimaryStack(a, primaryOffset)
 	rtgAsmLoadSecondaryStack(a, secondaryOffset)
 }
 func rtgAsmSecondaryDisp(a *rtgAsm, disp int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchAarch64 || rtgTargetArch == rtgArchArm {
 		return
 	}
@@ -6472,17 +6732,21 @@ func rtgAsmSecondaryDisp(a *rtgAsm, disp int) {
 	rtgAsmEmit32(a, disp)
 }
 func rtgAsmLoadTertiaryStack(a *rtgAsm, offset int) {
+	rtgTrustNonNil(a)
 	rtgAsmStackMem(a, offset, 0x8b48, 0x4d, 0x8d)
 }
 func rtgAsmLoadPrimaryTertiaryStack(a *rtgAsm, primaryOffset int, tertiaryOffset int) {
+	rtgTrustNonNil(a)
 	rtgAsmLoadPrimaryStack(a, primaryOffset)
 	rtgAsmLoadTertiaryStack(a, tertiaryOffset)
 }
 func rtgAsmLoadSecondaryTertiaryStack(a *rtgAsm, secondaryOffset int, tertiaryOffset int) {
+	rtgTrustNonNil(a)
 	rtgAsmLoadSecondaryStack(a, secondaryOffset)
 	rtgAsmLoadTertiaryStack(a, tertiaryOffset)
 }
 func rtgAsmStoreSliceStack(a *rtgAsm, offset int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmStoreSliceStack(a, offset)
 		return
@@ -6499,12 +6763,14 @@ func rtgAsmStoreSliceStack(a *rtgAsm, offset int) {
 	rtgAsmStackMem(a, offset-16, 0x8948, 0x4d, 0x8d)
 }
 func rtgAsmStoreStringBss(a *rtgAsm, offset int) {
+	rtgTrustNonNil(a)
 	rtgAsmPushSecondary(a)
 	rtgAsmStorePrimaryBss(a, offset)
 	rtgAsmPopPrimary(a)
 	rtgAsmStorePrimaryBss(a, offset+8)
 }
 func rtgAsmStoreSliceBss(a *rtgAsm, offset int) {
+	rtgTrustNonNil(a)
 	rtgAsmPushTertiary(a)
 	rtgAsmPushSecondary(a)
 	rtgAsmStorePrimaryBss(a, offset)
@@ -6514,12 +6780,14 @@ func rtgAsmStoreSliceBss(a *rtgAsm, offset int) {
 	rtgAsmStorePrimaryBss(a, offset+16)
 }
 func rtgAsmPopStoreStringMemSecondary(a *rtgAsm, disp int) {
+	rtgTrustNonNil(a)
 	rtgAsmPopPrimary(a)
 	rtgAsmStorePrimaryMemSecondaryDisp(a, disp)
 	rtgAsmPopPrimary(a)
 	rtgAsmStorePrimaryMemSecondaryDisp(a, disp+8)
 }
 func rtgAsmPopStoreSliceMemSecondary(a *rtgAsm, disp int) {
+	rtgTrustNonNil(a)
 	rtgAsmPopPrimary(a)
 	rtgAsmStorePrimaryMemSecondaryDisp(a, disp)
 	rtgAsmPopPrimary(a)
@@ -6528,6 +6796,7 @@ func rtgAsmPopStoreSliceMemSecondary(a *rtgAsm, disp int) {
 	rtgAsmStorePrimaryMemSecondaryDisp(a, disp+16)
 }
 func rtgAsmStoreByteMemSecondaryTertiary(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmStoreRaxMemRdxRcxSize(a, 1)
 		return
@@ -6543,6 +6812,7 @@ func rtgAsmStoreByteMemSecondaryTertiary(a *rtgAsm) {
 	rtgAsmEmit24(a, 0x0a0488)
 }
 func rtgAsmStorePrimaryMemSecondaryTertiarySize(a *rtgAsm, size int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmStoreRaxMemRdxRcxSize(a, size)
 		return
@@ -6570,6 +6840,7 @@ func rtgAsmStorePrimaryMemSecondaryTertiarySize(a *rtgAsm, size int) {
 	rtgAsmStorePrimaryMemSecondaryTertiary8(a)
 }
 func rtgAsmIncTertiary(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmIncRcx(a)
 		return
@@ -6585,6 +6856,7 @@ func rtgAsmIncTertiary(a *rtgAsm) {
 	rtgAsmEmit16(a, 0xc1ff)
 }
 func rtgAsmIncPrimary(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmIncRax(a)
 		return
@@ -6600,6 +6872,7 @@ func rtgAsmIncPrimary(a *rtgAsm) {
 	rtgAsmEmit16(a, 0xc0ff)
 }
 func rtgAsmMulTertiaryImm(a *rtgAsm, imm int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmImulRcxImm(a, imm)
 		return
@@ -6620,6 +6893,7 @@ func rtgAsmMulTertiaryImm(a *rtgAsm, imm int) {
 	rtgAsmEmit32(a, imm)
 }
 func rtgAsmRet(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmRet(a)
 		return
@@ -6635,6 +6909,7 @@ func rtgAsmRet(a *rtgAsm) {
 	rtgAsmEmit8(a, 0xc3)
 }
 func rtgAsmLeave(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmLeave(a)
 		return
@@ -6650,6 +6925,7 @@ func rtgAsmLeave(a *rtgAsm) {
 	rtgAsmEmit8(a, 0xc9)
 }
 func rtgAsmCallLabel(a *rtgAsm, label int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmCallLabel(a, label)
 		return
@@ -6668,6 +6944,7 @@ func rtgAsmCallLabel(a *rtgAsm, label int) {
 	rtgAsmAddReloc(a, at, label)
 }
 func rtgAsmJmpLabel(a *rtgAsm, label int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmJmpLabel(a, label)
 		return
@@ -6686,10 +6963,12 @@ func rtgAsmJmpLabel(a *rtgAsm, label int) {
 	rtgAsmAddReloc(a, at, label)
 }
 func rtgAsmJmpMarkLabel(a *rtgAsm, jumpLabel int, markLabel int) {
+	rtgTrustNonNil(a)
 	rtgAsmJmpLabel(a, jumpLabel)
 	rtgAsmMarkLabel(a, markLabel)
 }
 func rtgAsmJzLabel(a *rtgAsm, label int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmJzLabel(a, label)
 		return
@@ -6708,6 +6987,7 @@ func rtgAsmJzLabel(a *rtgAsm, label int) {
 	rtgAsmAddReloc(a, at, label)
 }
 func rtgAsmJnzLabel(a *rtgAsm, label int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmJnzLabel(a, label)
 		return
@@ -6726,10 +7006,12 @@ func rtgAsmJnzLabel(a *rtgAsm, label int) {
 	rtgAsmAddReloc(a, at, label)
 }
 func rtgAsmJzPrimary(a *rtgAsm, label int) {
+	rtgTrustNonNil(a)
 	rtgAsmCmpPrimaryImm8(a, 0)
 	rtgAsmJzLabel(a, label)
 }
 func rtgAsmJnzPrimary(a *rtgAsm, label int) {
+	rtgTrustNonNil(a)
 	rtgAsmCmpPrimaryImm8(a, 0)
 	rtgAsmJnzLabel(a, label)
 }
@@ -6790,60 +7072,78 @@ type rtgLinearGen struct {
 	panicPrevOff              int
 	panicDeferPendingOff      int
 	panicRecoveredOff         int
-	locals                    []rtgLocalInfo
-	localCount                int
-	stackUsed                 int
-	stackPeak                 int
-	arenaSize                 int
-	fieldIndex                int
-	fieldOffset               int
-	fieldPointerIndex         int
-	fieldPointerOffset        int
-	globals                   []rtgGlobalInfo
-	gotoLabels                []rtgGlobalInfo
-	breakLabels               []int
-	continueLabels            []int
-	breakDepth                int
-	continueDepth             int
-	pendingControl            int
-	streqLabel                int
-	streqEmitted              bool
-	append8Label              int
-	append8Emitted            bool
-	append64Label             int
-	append64Emitted           bool
-	appendAddrLabel           int
-	appendAddrEmitted         bool
-	arenaAllocLabel           int
-	arenaAllocEmitted         bool
-	makeZeroLabel             int
-	makeZeroEmitted           bool
-	stringHeapOff             int
-	stringHeapEndOff          int
-	stringHeapDataOff         int
-	stringHeapReady           int
-	winReadLabel              int
-	winReadEmitted            bool
-	winWriteLabel             int
-	winWriteEmitted           bool
-	printIntLabel             int
-	printIntEmitted           bool
-	printIntBufferOff         int
-	darwinEntryOff            int
-	lastRangeReturns          bool
-	scopeBase                 int
-	scopeValueType            int
-	scopeValueOffset          int
-	scopeValueNameStart       int
-	scopeValueNameEnd         int
-	constEvalIota             int
-	constEvalIotaValid        int
-	fixedTargetValue          int
-	fixedTargetState          int
-	fixedPrunedReturns        bool
+	runtimeFaultLabel         int
+	// Runtime helpers have distinct calling conventions, so keep their label
+	// state named and pass the exact slot to architecture-specific emitters.
+	runtimeNonNilLabel       int
+	runtimeSecondaryLabel    int
+	runtimeBoundsLabel       int
+	runtimeByteIndexLabel    int
+	runtimeWordIndexLabel    int
+	runtimeWideIndexLabel    int
+	runtimeSliceBoundsLabel  int
+	checkedPointerLocals     int
+	invalidatedPointerLocals int
+	divideCheckLabel         int
+	remainderCheckLabel      int
+	locals                   []rtgLocalInfo
+	localCount               int
+	localCacheStart          int
+	localCacheCount          int
+	localCacheIndex          int
+	stackUsed                int
+	stackPeak                int
+	arenaSize                int
+	fieldIndex               int
+	fieldOffset              int
+	fieldPointerIndex        int
+	fieldPointerOffset       int
+	globals                  []rtgGlobalInfo
+	gotoLabels               []rtgGlobalInfo
+	breakLabels              []int
+	continueLabels           []int
+	breakDepth               int
+	continueDepth            int
+	pendingControl           int
+	streqLabel               int
+	streqEmitted             bool
+	append8Label             int
+	append8Emitted           bool
+	append64Label            int
+	append64Emitted          bool
+	appendAddrLabel          int
+	appendAddrEmitted        bool
+	arenaAllocLabel          int
+	arenaAllocEmitted        bool
+	makeZeroLabel            int
+	makeZeroEmitted          bool
+	stringHeapOff            int
+	stringHeapEndOff         int
+	stringHeapDataOff        int
+	stringHeapReady          int
+	winReadLabel             int
+	winReadEmitted           bool
+	winWriteLabel            int
+	winWriteEmitted          bool
+	printIntLabel            int
+	printIntEmitted          bool
+	printIntBufferOff        int
+	darwinEntryOff           int
+	lastRangeReturns         bool
+	scopeBase                int
+	scopeValueType           int
+	scopeValueOffset         int
+	scopeValueNameStart      int
+	scopeValueNameEnd        int
+	constEvalIota            int
+	constEvalIotaValid       int
+	fixedTargetValue         int
+	fixedTargetState         int
+	fixedPrunedReturns       bool
 }
 
 func rtgAddStringData(g *rtgLinearGen, msg []byte) int {
+	rtgTrustNonNil(g)
 	for off := 0; off+len(msg) < len(g.asm.data); off++ {
 		match := g.asm.data[off+len(msg)] == 0
 		for i := 0; match && i < len(msg); i++ {
@@ -6862,6 +7162,7 @@ func rtgAddStringData(g *rtgLinearGen, msg []byte) int {
 }
 
 func rtgFunctionLocalCap(fn *rtgFuncDecl) int {
+	rtgTrustNonNil(fn)
 	localCap := 16
 	if fn.bodyEnd-fn.bodyStart > 512 {
 		localCap = 32
@@ -6870,6 +7171,7 @@ func rtgFunctionLocalCap(fn *rtgFuncDecl) int {
 }
 
 func rtgEmitLinearRange(g *rtgLinearGen, start int, end int) bool {
+	rtgTrustNonNil(g)
 	var bp rtgBodyParse
 	stmtData := make([]int, rtgStmtWordCount)
 	rtgBodyStmtData = stmtData
@@ -6928,6 +7230,7 @@ func rtgEmitLinearRange(g *rtgLinearGen, start int, end int) bool {
 }
 
 func rtgReleaseStatementTemps(g *rtgLinearGen, localBase int, stackBase int) {
+	rtgTrustNonNil(g)
 	for g.localCount > localBase {
 		local := &g.locals[g.localCount-1]
 		if local.nameStart != 0 || local.nameEnd != 0 {
@@ -6943,9 +7246,13 @@ func rtgReleaseStatementTemps(g *rtgLinearGen, localBase int, stackBase int) {
 }
 
 func rtgEmitScopedRange(g *rtgLinearGen, start int, end int) bool {
+	rtgTrustNonNil(g)
 	oldLocalCount := g.localCount
 	oldScopeBase := g.scopeBase
 	oldStackUsed := g.stackUsed
+	oldCheckedPointerLocals := g.checkedPointerLocals
+	oldInvalidatedPointerLocals := g.invalidatedPointerLocals
+	g.invalidatedPointerLocals = 0
 	g.scopeBase = oldLocalCount
 	typ := g.scopeValueType
 	g.scopeValueType = 0
@@ -6957,9 +7264,13 @@ func rtgEmitScopedRange(g *rtgLinearGen, start int, end int) bool {
 	g.localCount = oldLocalCount
 	g.scopeBase = oldScopeBase
 	g.stackUsed = oldStackUsed
+	childInvalidations := g.invalidatedPointerLocals
+	g.checkedPointerLocals = oldCheckedPointerLocals &^ childInvalidations
+	g.invalidatedPointerLocals = oldInvalidatedPointerLocals | childInvalidations
 	return ok
 }
 func rtgSyncCapturedStmtTargets(g *rtgLinearGen, stmt *rtgStmt) {
+	rtgTrustNonNil(g, stmt)
 	lhsStart := stmt.startTok
 	lhsEnd := -1
 	if stmt.kind == rtgStmtVar || stmt.kind == rtgStmtShort || stmt.kind == rtgStmtAssign {
@@ -6970,30 +7281,65 @@ func rtgSyncCapturedStmtTargets(g *rtgLinearGen, stmt *rtgStmt) {
 	} else if stmt.kind == rtgStmtExpr && stmt.endTok > stmt.startTok && (rtgTok2Is(g.prog, stmt.endTok-1, '+', '+') || rtgTok2Is(g.prog, stmt.endTok-1, '-', '-')) {
 		lhsEnd = stmt.endTok - 1
 	}
-	if lhsEnd <= lhsStart {
-		return
-	}
-	for tok := lhsStart; tok < lhsEnd; tok++ {
-		if !rtgTokIsKind(g.prog, tok, rtgTokIdent) {
-			continue
+	if lhsEnd > lhsStart {
+		rhs := lhsEnd + 1
+		for rhs < stmt.endTok && rtgTokCharIs(g.prog, rhs, '(') {
+			rhs++
 		}
-		localIndex := rtgFindLocalIndex(g, int(rtgTokStart(g.prog, tok)), int(rtgTokEnd(g.prog, tok)))
-		if localIndex >= 0 {
+		addressResult := rhs < stmt.endTok && rtgTokCharIs(g.prog, rhs, '&')
+		for tok := lhsStart; tok < lhsEnd; tok++ {
+			if !rtgTokIsKind(g.prog, tok, rtgTokIdent) {
+				continue
+			}
+			localIndex := rtgFindLocalIndex(g, int(rtgTokStart(g.prog, tok)), int(rtgTokEnd(g.prog, tok)))
+			if localIndex < 0 {
+				continue
+			}
 			rtgMoveCapturedLocal(g, localIndex, true)
+			if stmt.kind == rtgStmtShort || stmt.kind == rtgStmtAssign {
+				next := tok + 1
+				for next < lhsEnd && rtgTokCharIs(g.prog, next, ')') {
+					next++
+				}
+				if (next == lhsEnd || rtgTokCharIs(g.prog, next, ',')) && (tok == lhsStart || !rtgTokCharIs(g.prog, tok-1, '*')) {
+					rtgInvalidateCheckedPointerLocal(g, localIndex)
+				}
+			}
+			if addressResult && localIndex < rtgNativeIntSize*8-1 && int(rtgTokStart(g.prog, tok)) == stmt.nameStart {
+				g.checkedPointerLocals |= 1 << localIndex
+			}
 		}
 	}
 }
 
 func rtgEmitLinearStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
+	rtgTrustNonNil(g, stmt)
+	if stmt.kind == rtgStmtLabel || stmt.kind == rtgStmtGoto || stmt.kind == rtgStmtBreak || stmt.kind == rtgStmtContinue {
+		g.checkedPointerLocals = 0
+	}
 	rtgMoveCapturedLocals(g, false)
 	if !rtgEmitLinearStmtCore(g, stmt) {
 		return false
 	}
 	rtgSyncCapturedStmtTargets(g, stmt)
+	if stmt.kind == rtgStmtLabel || stmt.kind == rtgStmtGoto || stmt.kind == rtgStmtBreak || stmt.kind == rtgStmtContinue {
+		g.checkedPointerLocals = 0
+	}
 	return true
 }
 
+func rtgInvalidateCheckedPointerLocal(g *rtgLinearGen, localIndex int) {
+	rtgTrustNonNil(g)
+	if localIndex >= rtgNativeIntSize*8-1 {
+		return
+	}
+	bit := 1 << localIndex
+	g.checkedPointerLocals &^= bit
+	g.invalidatedPointerLocals |= bit
+}
+
 func rtgEmitLinearStmtCore(g *rtgLinearGen, stmt *rtgStmt) bool {
+	rtgTrustNonNil(g, stmt)
 	a := &g.asm
 	p := g.prog
 	if stmt.kind != rtgStmtLabel && stmt.kind != rtgStmtFor && stmt.kind != rtgStmtSwitch {
@@ -7007,6 +7353,7 @@ func rtgEmitLinearStmtCore(g *rtgLinearGen, stmt *rtgStmt) bool {
 			return true
 		}
 		ep := rtgNewExprParse()
+		rtgTrustNonNil(ep)
 		rootIndex := rtgParseExpressionRoot(ep, p, stmt.exprStart, stmt.exprEnd)
 		if rootIndex < 0 {
 			return false
@@ -7060,6 +7407,7 @@ func rtgEmitLinearStmtCore(g *rtgLinearGen, stmt *rtgStmt) bool {
 			return true
 		}
 		ep := rtgNewExprParse()
+		rtgTrustNonNil(ep)
 		rootIndex := rtgParseExpressionRoot(ep, p, stmt.exprStart, stmt.exprEnd)
 		if rootIndex < 0 {
 			return false
@@ -7078,6 +7426,7 @@ func rtgEmitLinearStmtCore(g *rtgLinearGen, stmt *rtgStmt) bool {
 			}
 		} else {
 			resultResolved := rtgResolveType(g.meta, resultType)
+			rtgTrustNonNil(resultResolved)
 			if !rtgEmitScalarExprForKind(g, ep, rootIndex, resultResolved.kind) {
 				return false
 			}
@@ -7139,6 +7488,7 @@ func rtgEmitLinearStmtCore(g *rtgLinearGen, stmt *rtgStmt) bool {
 }
 
 func rtgFindOrCreateGotoLabel(g *rtgLinearGen, nameStart int, nameEnd int) int {
+	rtgTrustNonNil(g)
 	for i := 0; i < len(g.gotoLabels); i++ {
 		info := g.gotoLabels[i]
 		if rtgBytesEqualRange(g.prog.src, info.nameStart, info.nameEnd, nameStart, nameEnd) {
@@ -7153,10 +7503,12 @@ func rtgFindOrCreateGotoLabel(g *rtgLinearGen, nameStart int, nameEnd int) int {
 }
 
 func rtgEmitDeferStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
+	rtgTrustNonNil(g, stmt)
 	if g.deferHeadOffset <= 0 || stmt.exprStart >= stmt.exprEnd {
 		return false
 	}
 	ep := rtgNewExprParse()
+	rtgTrustNonNil(ep)
 	rootIndex := rtgParseExpressionRoot(ep, g.prog, stmt.exprStart, stmt.exprEnd)
 	if rootIndex < 0 {
 		return false
@@ -7186,6 +7538,7 @@ func rtgEmitDeferStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 		}
 	}
 	t := rtgResolveType(g.meta, funcType)
+	rtgTrustNonNil(t)
 	if t.kind != rtgTypeFunc || !rtgCallMatchesFuncType(t, call) {
 		return false
 	}
@@ -7226,6 +7579,7 @@ func rtgEmitDeferStmt(g *rtgLinearGen, stmt *rtgStmt) bool {
 }
 
 func rtgEmitDeferredInterfaceMethodValue(g *rtgLinearGen, ep *rtgExprParse, selector *rtgExpr, call *rtgExpr, offset int) int {
+	rtgTrustNonNil(g, ep, selector, call)
 	receiverType := rtgInferParsedExprType(g, ep, selector.left)
 	receiverOffset := rtgAddUnnamedLocal(g, receiverType)
 	if !rtgEmitInterfaceAssignToLocal(g, ep, selector.left, receiverOffset) {
@@ -7261,12 +7615,14 @@ func rtgEmitDeferredInterfaceMethodValue(g *rtgLinearGen, ep *rtgExprParse, sele
 }
 
 func rtgNewControlLabel(g *rtgLinearGen, delta int) int {
+	rtgTrustNonNil(g)
 	if g.pendingControl > 0 {
 		return g.pendingControl + delta
 	}
 	return rtgAsmNewLabel(&g.asm)
 }
 func rtgLoadCompilerFixedTarget(g *rtgLinearGen) {
+	rtgTrustNonNil(g)
 	if g.fixedTargetState != 0 {
 		return
 	}
@@ -7291,28 +7647,31 @@ func rtgLoadCompilerFixedTarget(g *rtgLinearGen) {
 const rtgFixedTargetUnknown = -2147483647
 
 func rtgEvalFixedTargetInt(g *rtgLinearGen, ep *rtgExprParse, idx int, fixedTarget int, fixedTargetKnown bool) int {
+	rtgTrustNonNil(g, ep)
+	p := g.prog
+	rtgTrustNonNil(p)
 	if idx < 0 || idx >= len(ep.exprs) {
 		return rtgFixedTargetUnknown
 	}
 	e := ep.exprs[idx]
 	if e.kind == rtgExprInt {
-		return rtgParseIntToken(g.prog, e.tok)
+		return rtgParseIntToken(p, e.tok)
 	}
 	if e.kind == rtgExprChar {
-		return rtgParseCharToken(g.prog, e.tok)
+		return rtgParseCharToken(p, e.tok)
 	}
 	if e.kind == rtgExprBool {
-		return rtgBoolTokenValue(g.prog, e.tok)
+		return rtgBoolTokenValue(p, e.tok)
 	}
 	if e.kind == rtgExprIdent {
 		if fixedTarget >= rtgTargetLinuxAmd64 && fixedTarget <= rtgTargetWindowsArm64 {
-			if rtgBytesEqualText(g.prog.src, e.nameStart, e.nameEnd, "rtgTargetArch") {
+			if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "rtgTargetArch") {
 				return int(rtgTargetArchTable[fixedTarget])
 			}
-			if rtgBytesEqualText(g.prog.src, e.nameStart, e.nameEnd, "rtgTargetOS") {
+			if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "rtgTargetOS") {
 				return int(rtgTargetOSTable[fixedTarget])
 			}
-			if rtgBytesEqualText(g.prog.src, e.nameStart, e.nameEnd, "rtgCurrentTarget") {
+			if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "rtgCurrentTarget") {
 				return fixedTarget
 			}
 		}
@@ -7327,6 +7686,7 @@ func rtgEvalFixedTargetInt(g *rtgLinearGen, ep *rtgExprParse, idx int, fixedTarg
 	return rtgFixedTargetUnknown
 }
 func rtgEvalFixedTargetBool(g *rtgLinearGen, ep *rtgExprParse, idx int, fixedTarget int, fixedTargetKnown bool) int {
+	rtgTrustNonNil(g, ep)
 	if !fixedTargetKnown && fixedTarget == 0 || idx < 0 || idx >= len(ep.exprs) {
 		return -1
 	}
@@ -7406,6 +7766,7 @@ func rtgEvalFixedTargetBool(g *rtgLinearGen, ep *rtgExprParse, idx int, fixedTar
 	return -1
 }
 func rtgEmitLinearElse(g *rtgLinearGen, stmt *rtgStmt) bool {
+	rtgTrustNonNil(g, stmt)
 	p := g.prog
 	if stmt.elseStart <= 0 {
 		g.lastRangeReturns = false
@@ -7434,7 +7795,9 @@ func rtgEmitLinearElse(g *rtgLinearGen, stmt *rtgStmt) bool {
 	}
 	return rtgEmitScopedRange(g, stmt.elseStart, stmt.elseEnd)
 }
+
 func rtgEmitLinearIf(g *rtgLinearGen, stmt *rtgStmt) bool {
+	rtgTrustNonNil(g, stmt)
 	a := &g.asm
 	p := g.prog
 	semi := rtgFindTokenTextInRange(p, stmt.exprStart, stmt.exprEnd, ';')
@@ -7442,6 +7805,7 @@ func rtgEmitLinearIf(g *rtgLinearGen, stmt *rtgStmt) bool {
 		return rtgEmitLinearScopedControl(g, stmt, semi)
 	}
 	ep := rtgNewExprParse()
+	rtgTrustNonNil(ep)
 	rootIndex := rtgParseExpressionRoot(ep, p, stmt.exprStart, stmt.exprEnd)
 	if rootIndex < 0 {
 		return false
@@ -7490,6 +7854,7 @@ func rtgEmitLinearIf(g *rtgLinearGen, stmt *rtgStmt) bool {
 	return true
 }
 func rtgEmitLinearFor(g *rtgLinearGen, stmt *rtgStmt) bool {
+	rtgTrustNonNil(g, stmt)
 	a := &g.asm
 	p := g.prog
 	semi1 := rtgFindTokenTextInRange(p, stmt.exprStart, stmt.exprEnd, ';')
@@ -7507,6 +7872,7 @@ func rtgEmitLinearFor(g *rtgLinearGen, stmt *rtgStmt) bool {
 	rtgAsmMarkLabel(a, startLabel)
 	if stmt.exprStart < stmt.exprEnd {
 		ep := rtgNewExprParse()
+		rtgTrustNonNil(ep)
 		rootIndex := rtgParseExpressionRoot(ep, p, stmt.exprStart, stmt.exprEnd)
 		if rootIndex < 0 {
 			return false
@@ -7524,6 +7890,7 @@ func rtgEmitLinearFor(g *rtgLinearGen, stmt *rtgStmt) bool {
 }
 
 func rtgPushLoopLabels(g *rtgLinearGen, breakLabel int, continueLabel int) {
+	rtgTrustNonNil(g)
 	if g.breakDepth < len(g.breakLabels) {
 		g.breakLabels[g.breakDepth] = breakLabel
 	} else {
@@ -7539,11 +7906,13 @@ func rtgPushLoopLabels(g *rtgLinearGen, breakLabel int, continueLabel int) {
 }
 
 func rtgPopLoopLabels(g *rtgLinearGen) {
+	rtgTrustNonNil(g)
 	g.breakDepth--
 	g.continueDepth--
 }
 
 func rtgFindRangeToken(p *rtgProgram, start int, end int) int {
+	rtgTrustNonNil(p)
 	for i := start; i < end; i++ {
 		if rtgTokIdentIs(p, i, "range") {
 			return i
@@ -7553,6 +7922,7 @@ func rtgFindRangeToken(p *rtgProgram, start int, end int) int {
 }
 
 func rtgEmitLinearScopedControl(g *rtgLinearGen, stmt *rtgStmt, split int) bool {
+	rtgTrustNonNil(g, stmt)
 	oldLocalCount := g.localCount
 	oldScopeBase := g.scopeBase
 	oldStackUsed := g.stackUsed
@@ -7577,18 +7947,21 @@ func rtgEmitLinearScopedControl(g *rtgLinearGen, stmt *rtgStmt, split int) bool 
 }
 
 func rtgEmitLinearRangeForScoped(g *rtgLinearGen, stmt *rtgStmt, rangeTok int) bool {
+	rtgTrustNonNil(g, stmt)
 	p := g.prog
 	a := &g.asm
 	if rangeTok+1 >= stmt.exprEnd {
 		return false
 	}
 	source := rtgNewExprParse()
+	rtgTrustNonNil(source)
 	sourceIndex := rtgParseExpressionRoot(source, p, rangeTok+1, stmt.exprEnd)
 	if sourceIndex < 0 {
 		return false
 	}
 	sourceType := rtgInferParsedExprType(g, source, sourceIndex)
 	resolved := rtgResolveType(g.meta, sourceType)
+	rtgTrustNonNil(resolved)
 	if resolved.kind != rtgTypeArray && resolved.kind != rtgTypeSlice && resolved.kind != rtgTypeMap && resolved.kind != rtgTypeString {
 		return false
 	}
@@ -7727,6 +8100,7 @@ func rtgEmitLinearRangeForScoped(g *rtgLinearGen, stmt *rtgStmt, rangeTok int) b
 }
 
 func rtgEmitStringRangeDecode(g *rtgLinearGen, ptr int, length int, index int, runeOffset int, width int) {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	b0 := rtgAddUnnamedLocal(g, rtgTypeByte)
 	b1 := rtgAddUnnamedLocal(g, rtgTypeByte)
@@ -7801,6 +8175,7 @@ func rtgEmitStringRangeDecode(g *rtgLinearGen, ptr int, length int, index int, r
 }
 
 func rtgEmitStringByteAt(g *rtgLinearGen, ptr int, index int, dest int) {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	rtgAsmLoadPrimaryTertiaryStack(a, ptr, index)
 	rtgAsmLoadPrimaryIndexTertiarySize(a, 1)
@@ -7808,6 +8183,7 @@ func rtgEmitStringByteAt(g *rtgLinearGen, ptr int, index int, dest int) {
 }
 
 func rtgEmitNextStringByte(g *rtgLinearGen, ptr int, length int, from int, next int, dest int, invalid int) {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	rtgAsmLoadPrimaryStack(a, from)
 	rtgAsmIncPrimary(a)
@@ -7819,6 +8195,7 @@ func rtgEmitNextStringByte(g *rtgLinearGen, ptr int, length int, from int, next 
 }
 
 func rtgEmitRunePart(g *rtgLinearGen, dest int, source int, bias int, scale int, first bool) {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	rtgAsmPrimaryImm(a, bias)
 	rtgAsmPushPrimary(a)
@@ -7838,14 +8215,17 @@ func rtgEmitRunePart(g *rtgLinearGen, dest int, source int, bias int, scale int,
 }
 
 func rtgEmitStackLessImmJump(g *rtgLinearGen, offset int, value int, label int) {
+	rtgTrustNonNil(g)
 	rtgAsmJcmpStackImm(&g.asm, offset, value, label, 0x9c)
 }
 
 func rtgEmitStackGreaterEqualImmJump(g *rtgLinearGen, offset int, value int, label int) {
+	rtgTrustNonNil(g)
 	rtgAsmJcmpStackImm(&g.asm, offset, value, label, 0x9d)
 }
 
 func rtgRangeTargetOffset(g *rtgLinearGen, start int, end int, typ int, short bool) int {
+	rtgTrustNonNil(g)
 	p := g.prog
 	if end != start+1 || !rtgTokIsKind(p, start, rtgTokIdent) {
 		return -1
@@ -7868,9 +8248,11 @@ func rtgRangeTargetOffset(g *rtgLinearGen, start int, end int, typ int, short bo
 	return g.locals[localIndex].offset
 }
 func rtgEmitLinearSwitch(g *rtgLinearGen, stmt *rtgStmt) bool {
+	rtgTrustNonNil(g, stmt)
 	a := &g.asm
 	p := g.prog
 	ep := rtgNewExprParse()
+	rtgTrustNonNil(ep)
 	rootIndex := -1
 	typeSwitch, typeOperandEnd := rtgTypeSwitchOperandEnd(p, stmt.exprStart, stmt.exprEnd)
 	typeOperandStart := stmt.exprStart
@@ -8012,6 +8394,7 @@ func rtgEmitLinearSwitch(g *rtgLinearGen, stmt *rtgStmt) bool {
 	return true
 }
 func rtgTypeSwitchOperandEnd(p *rtgProgram, start int, end int) (bool, int) {
+	rtgTrustNonNil(p)
 	if end-start < 5 || !rtgTokCharIs(p, end-4, '.') || !rtgTokCharIs(p, end-3, '(') || !rtgBytesEqualText(p.src, int(rtgTokStart(p, end-2)), int(rtgTokEnd(p, end-2)), "type") || !rtgTokCharIs(p, end-1, ')') {
 		return false, end
 	}
@@ -8019,6 +8402,7 @@ func rtgTypeSwitchOperandEnd(p *rtgProgram, start int, end int) (bool, int) {
 }
 
 func rtgCopyInterfaceValueToLocal(g *rtgLinearGen, sourceOffset int, typ int, valueOffset int) {
+	rtgTrustNonNil(g)
 	if rtgResolveType(g.meta, typ).kind == rtgTypeInterface {
 		rtgEmitCopyStackToStack(g, sourceOffset, valueOffset, 2*rtgBackendValueSlotSize)
 		return
@@ -8033,11 +8417,13 @@ func rtgCopyInterfaceValueToLocal(g *rtgLinearGen, sourceOffset int, typ int, va
 }
 
 func rtgEmitTypeMatchJump(g *rtgLinearGen, tagOffset int, typ int, matchLabel int) {
+	rtgTrustNonNil(g)
 	if rtgResolveType(g.meta, typ).kind != rtgTypeInterface {
 		rtgAsmJcmpStackImm(&g.asm, tagOffset, rtgRuntimeTypeTag(g.meta, typ), matchLabel, 0x94)
 		return
 	}
 	iface := rtgResolveType(g.meta, typ)
+	rtgTrustNonNil(iface)
 	if iface.first >= iface.count {
 		rtgAsmLoadPrimaryStack(&g.asm, tagOffset)
 		rtgAsmJnzPrimary(&g.asm, matchLabel)
@@ -8054,8 +8440,10 @@ func rtgEmitTypeMatchJump(g *rtgLinearGen, tagOffset int, typ int, matchLabel in
 }
 
 func rtgTypeImplementsInterface(g *rtgLinearGen, typ int, interfaceType int) bool {
+	rtgTrustNonNil(g)
 	meta := g.meta
 	iface := rtgResolveType(meta, interfaceType)
+	rtgTrustNonNil(iface)
 	for required := iface.first; required < iface.count; {
 		if !rtgTokIsKind(meta.prog, required, rtgTokIdent) {
 			required++
@@ -8076,6 +8464,7 @@ func rtgTypeImplementsInterface(g *rtgLinearGen, typ int, interfaceType int) boo
 			return false
 		}
 		signature := rtgResolveType(meta, parsed.typ)
+		rtgTrustNonNil(signature)
 		fnIndex := rtgFindMethodByTypeAndName(g, typ, int(rtgTokStart(meta.prog, required)), int(rtgTokEnd(meta.prog, required)))
 		if fnIndex < 0 {
 			return false
@@ -8090,6 +8479,7 @@ func rtgTypeImplementsInterface(g *rtgLinearGen, typ int, interfaceType int) boo
 }
 
 func rtgEmitSwitchCaseTests(g *rtgLinearGen, stmt *rtgStmt, clause int, valueOffset int, lenOffset int, stringSwitch bool, typeSwitch bool, matchLabel int) bool {
+	rtgTrustNonNil(g, stmt)
 	a := &g.asm
 	p := g.prog
 	colon := rtgFindSwitchClauseColon(p, clause+1, stmt.bodyEnd)
@@ -8103,6 +8493,7 @@ func rtgEmitSwitchCaseTests(g *rtgLinearGen, stmt *rtgStmt, clause int, valueOff
 			return false
 		}
 		ep := rtgNewExprParse()
+		rtgTrustNonNil(ep)
 		rootIndex := -1
 		if !typeSwitch {
 			rootIndex = rtgParseExpressionRoot(ep, p, i, valueEnd)
@@ -8141,6 +8532,7 @@ func rtgEmitSwitchCaseTests(g *rtgLinearGen, stmt *rtgStmt, clause int, valueOff
 	return true
 }
 func rtgFindNextSwitchClause(p *rtgProgram, start int, end int) int {
+	rtgTrustNonNil(p)
 	depth := 0
 	i := start
 	for i < end {
@@ -8159,6 +8551,7 @@ func rtgFindNextSwitchClause(p *rtgProgram, start int, end int) int {
 	return end
 }
 func rtgFindSwitchClauseColon(p *rtgProgram, start int, end int) int {
+	rtgTrustNonNil(p)
 	paren := 0
 	brack := 0
 	brace := 0
@@ -8188,6 +8581,7 @@ func rtgFindSwitchClauseColon(p *rtgProgram, start int, end int) int {
 	return end
 }
 func rtgEmitLinearClassicForScoped(g *rtgLinearGen, stmt *rtgStmt, semi1 int) bool {
+	rtgTrustNonNil(g, stmt)
 	a := &g.asm
 	p := g.prog
 	semi2 := rtgFindTokenTextInRange(p, semi1+1, stmt.exprEnd, ';')
@@ -8208,6 +8602,7 @@ func rtgEmitLinearClassicForScoped(g *rtgLinearGen, stmt *rtgStmt, semi1 int) bo
 	rtgAsmMarkLabel(a, startLabel)
 	if semi1+1 < semi2 {
 		ep := rtgNewExprParse()
+		rtgTrustNonNil(ep)
 		rootIndex := rtgParseExpressionRoot(ep, p, semi1+1, semi2)
 		if rootIndex < 0 {
 			return false
@@ -8233,6 +8628,7 @@ func rtgEmitLinearClassicForScoped(g *rtgLinearGen, stmt *rtgStmt, semi1 int) bo
 	return true
 }
 func rtgEmitLinearSimpleRange(g *rtgLinearGen, start int, end int) bool {
+	rtgTrustNonNil(g)
 	p := g.prog
 	if start >= end {
 		return true
@@ -8264,6 +8660,7 @@ func rtgEmitLinearSimpleRange(g *rtgLinearGen, start int, end int) bool {
 	return false
 }
 func rtgEmitLinearIncDec(g *rtgLinearGen, start int, end int) bool {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	p := g.prog
 	if start+2 > end {
@@ -8274,6 +8671,7 @@ func rtgEmitLinearIncDec(g *rtgLinearGen, start int, end int) bool {
 		return false
 	}
 	ep := rtgNewExprParse()
+	rtgTrustNonNil(ep)
 	rootIndex := rtgParseExpressionRoot(ep, p, start, opTok)
 	if rootIndex < 0 {
 		return false
@@ -8367,6 +8765,7 @@ func rtgEmitLinearIncDec(g *rtgLinearGen, start int, end int) bool {
 		if !rtgEmitIntExpr(g, ep, root.left) {
 			return false
 		}
+		rtgEmitRuntimeNonNilPrimary(g)
 		rtgAsmCopyPrimaryToSecondary(a)
 		if inc {
 			rtgAsmIncMemSecondary(a)
@@ -8378,12 +8777,16 @@ func rtgEmitLinearIncDec(g *rtgLinearGen, start int, end int) bool {
 	return false
 }
 func rtgEmitJumpIfFalse(g *rtgLinearGen, ep *rtgExprParse, idx int, falseLabel int) bool {
+	rtgTrustNonNil(g, ep)
 	return rtgEmitJump(g, ep, idx, falseLabel, false)
 }
 func rtgEmitJumpIfTrue(g *rtgLinearGen, ep *rtgExprParse, idx int, trueLabel int) bool {
+	rtgTrustNonNil(g, ep)
 	return rtgEmitJump(g, ep, idx, trueLabel, true)
 }
+
 func rtgEmitJump(g *rtgLinearGen, ep *rtgExprParse, idx int, label int, jumpIfTrue bool) bool {
+	rtgTrustNonNil(g, ep)
 	p := g.prog
 	a := &g.asm
 	e := &ep.exprs[idx]
@@ -8426,6 +8829,7 @@ func rtgEmitJump(g *rtgLinearGen, ep *rtgExprParse, idx int, label int, jumpIfTr
 	return true
 }
 func rtgEmitCompareJumpOp(a *rtgAsm, c0 byte, c1 byte, label int, jumpIfTrue bool) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		cond := rtgWasm32CondEq
 		if c0 == '=' {
@@ -8571,7 +8975,9 @@ const (
 )
 
 func rtgLinearInitGlobal(g *rtgLinearGen, index int) bool {
+	rtgTrustNonNil(g)
 	meta := g.meta
+	rtgTrustNonNil(meta)
 	var s *rtgSymbolInfo
 	start := 0
 	end := 0
@@ -8618,6 +9024,7 @@ func rtgLinearInitGlobal(g *rtgLinearGen, index int) bool {
 		localBase := g.localCount
 		stackBase := g.stackUsed
 		ep := rtgNewExprParse()
+		rtgTrustNonNil(ep)
 		rootIndex := rtgParseExpressionRoot(ep, g.prog, s.initStart, s.initEnd)
 		if rootIndex < 0 {
 			return false
@@ -8637,6 +9044,7 @@ func rtgLinearInitGlobal(g *rtgLinearGen, index int) bool {
 }
 
 func rtgLinearInitGlobals(g *rtgLinearGen) bool {
+	rtgTrustNonNil(g)
 	g.localCount = 0
 	g.stackUsed = 0
 	g.stackPeak = 0
@@ -8665,6 +9073,7 @@ func rtgLinearInitGlobals(g *rtgLinearGen) bool {
 }
 
 func rtgEmitGlobalInitFrameStart(g *rtgLinearGen) int {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	if rtgTargetArch == rtgArchWasm32 {
 		return -1
@@ -8685,6 +9094,7 @@ func rtgEmitGlobalInitFrameStart(g *rtgLinearGen) int {
 }
 
 func rtgEmitGlobalInitFrameEnd(g *rtgLinearGen, framePatch int) {
+	rtgTrustNonNil(g)
 	if rtgTargetArch != rtgArchWasm32 {
 		rtgAsmLeave(&g.asm)
 	}
@@ -8707,8 +9117,10 @@ func rtgEmitGlobalInitFrameEnd(g *rtgLinearGen, framePatch int) {
 	g.asm.code[framePatch+2] = byte((frame >> 8) & 255)
 }
 func rtgEmitInitEmptySliceBss(g *rtgLinearGen, sliceType int, off int) {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	t := rtgResolveType(g.meta, sliceType)
+	rtgTrustNonNil(t)
 	elemSize := rtgTypeSize(g.meta, t.elem)
 	if elemSize < 1 {
 		elemSize = 8
@@ -8725,8 +9137,11 @@ func rtgEmitInitEmptySliceBss(g *rtgLinearGen, sliceType int, off int) {
 }
 
 func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
+	rtgTrustNonNil(g, stmt)
 	meta := g.meta
 	p := g.prog
+	rtgTrustNonNil(meta)
+	rtgTrustNonNil(p)
 	a := &g.asm
 	tokenData := p.toks.data
 	startBase := stmt.startTok * rtgTokenStride
@@ -8758,40 +9173,29 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 	}
 	if assignTok > stmt.startTok && compoundAssign {
 		lhs := rtgNewExprParse()
+		rtgTrustNonNil(lhs)
 		if rtgParseExpressionOK(lhs, p, stmt.startTok, assignTok) {
 			lhsIndex := len(lhs.exprs) - 1
 			lhsRoot := &lhs.exprs[lhsIndex]
 			if lhsRoot.kind == rtgExprIndex {
-				baseEnd := lhsRoot.tok
-				if baseEnd <= stmt.startTok {
-					return false
-				}
-				baseEp := rtgNewExprParse()
-				baseIndex := rtgParseExpressionRoot(baseEp, p, stmt.startTok, baseEnd)
-				if baseIndex < 0 {
-					return false
-				}
-				leftType := rtgInferParsedExprType(g, baseEp, baseIndex)
-				sliceType := rtgResolveType(meta, leftType)
-				elemType := rtgResolveType(meta, sliceType.elem)
-				if sliceType.kind != rtgTypeSlice || !rtgTypeKindIsScalarInt(elemType.kind) {
+				container := rtgResolveType(meta, rtgInferParsedExprType(g, lhs, lhsRoot.left))
+				rtgTrustNonNil(container)
+				elemType := rtgResolveType(meta, container.elem)
+				rtgTrustNonNil(elemType)
+				if (container.kind != rtgTypeArray && container.kind != rtgTypeSlice) || !rtgTypeKindIsScalarInt(elemType.kind) {
 					return false
 				}
 				elemSize := rtgScalarKindSize(elemType.kind)
-				indexOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
-				ptrOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
-				if !rtgEmitIntExpr(g, lhs, lhsRoot.right) {
+				addrOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
+				if !rtgEmitIndexAddressPrimary(g, lhs, lhsIndex) {
 					return false
 				}
-				rtgAsmStorePrimaryStack(a, indexOffset)
-				if !rtgEmitSliceBasePtrLenTokens(g, p, stmt.startTok, baseEnd, baseEp, baseIndex) {
-					return false
-				}
-				rtgAsmStorePrimaryStack(a, ptrOffset)
-				rtgAsmLoadSecondaryTertiaryStack(a, ptrOffset, indexOffset)
-				rtgAsmLoadPrimaryIndexTertiarySize(a, elemSize)
+				rtgAsmStorePrimaryStack(a, addrOffset)
+				rtgAsmCopyPrimaryToSecondary(a)
+				rtgAsmLoadPrimaryMemSecondaryDispSize(a, 0, elemSize)
 				rtgAsmPushPrimary(a)
 				rhs := rtgNewExprParse()
+				rtgTrustNonNil(rhs)
 				rhsIndex := rtgParseExpressionRoot(rhs, p, assignTok+1, stmt.endTok)
 				if rhsIndex < 0 {
 					return false
@@ -8804,8 +9208,8 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 					return false
 				}
 				rtgAsmNormalizePrimaryForKind(a, elemType.kind)
-				rtgAsmLoadSecondaryTertiaryStack(a, ptrOffset, indexOffset)
-				rtgAsmStorePrimaryMemSecondaryTertiarySize(a, elemSize)
+				rtgAsmLoadSecondaryStack(a, addrOffset)
+				rtgAsmStorePrimaryMemSecondaryDispSize(a, 0, elemSize)
 				return true
 			}
 			if lhsRoot.kind == rtgExprSelector {
@@ -8814,9 +9218,11 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 				}
 				lhsType := rtgInferParsedExprType(g, lhs, lhsIndex)
 				lhsResolved := rtgResolveType(meta, lhsType)
+				rtgTrustNonNil(lhsResolved)
 				addrOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
 				rtgAsmStoreSecondaryStack(a, addrOffset)
 				rhs := rtgNewExprParse()
+				rtgTrustNonNil(rhs)
 				if !rtgParseExpressionOK(rhs, p, assignTok+1, stmt.endTok) {
 					return false
 				}
@@ -8850,119 +9256,54 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 	}
 	if assignTok > stmt.startTok && rtgTokCharIs(p, assignTok, '=') && (startKind != rtgTokIdent || assignTok != stmt.startTok+1) {
 		lhs := rtgNewExprParse()
+		rtgTrustNonNil(lhs)
 		if rtgParseExpressionOK(lhs, p, stmt.startTok, assignTok) {
 			lhsIndex := len(lhs.exprs) - 1
 			lhsRoot := &lhs.exprs[lhsIndex]
 			lhsType := rtgInferParsedExprType(g, lhs, lhsIndex)
 			if lhsRoot.kind == rtgExprIndex {
-				baseEnd := lhsRoot.tok
-				if baseEnd <= stmt.startTok {
+				container := rtgResolveType(meta, rtgInferParsedExprType(g, lhs, lhsRoot.left))
+				rtgTrustNonNil(container)
+				elemType := rtgResolveType(meta, container.elem)
+				rtgTrustNonNil(elemType)
+				addrOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
+				if container.kind == rtgTypeMap {
+					if !rtgEmitMapEntryAddress(g, lhs, lhsRoot.left, lhsRoot.right, 1) {
+						return false
+					}
+					rtgAsmCopyPrimaryToSecondary(a)
+					rtgAsmAddSecondaryImm(a, 16)
+					rtgAsmStoreSecondaryStack(a, addrOffset)
+				} else if container.kind == rtgTypeArray || container.kind == rtgTypeSlice {
+					if !rtgEmitIndexAddressPrimary(g, lhs, lhsIndex) {
+						return false
+					}
+					rtgAsmStorePrimaryStack(a, addrOffset)
+				} else {
 					return false
-				}
-				baseEp := rtgNewExprParse()
-				baseIndex := rtgParseExpressionRoot(baseEp, p, stmt.startTok, baseEnd)
-				if baseIndex < 0 {
-					return false
-				}
-				leftType := rtgInferParsedExprType(g, baseEp, baseIndex)
-				sliceType := rtgResolveType(meta, leftType)
-				elemType := rtgResolveType(meta, sliceType.elem)
-				mapIndex := sliceType.kind == rtgTypeMap && (rtgTypeKindIsScalarInt(elemType.kind) || elemType.kind == rtgTypePointer || elemType.kind == rtgTypeInterface)
-				arrayIndex := sliceType.kind == rtgTypeArray && (rtgTypeKindIsScalarValue(elemType.kind) || elemType.kind == rtgTypePointer)
-				if mapIndex || arrayIndex {
-					if mapIndex {
-						if !rtgEmitMapEntryAddress(g, lhs, lhsRoot.left, lhsRoot.right, 1) {
-							return false
-						}
-					} else if !rtgEmitIndexAddressPrimary(g, lhs, lhsIndex) {
-						return false
-					}
-					addrOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
-					if mapIndex {
-						rtgAsmCopyPrimaryToSecondary(a)
-						rtgAsmAddSecondaryImm(a, 16)
-						rtgAsmStoreSecondaryStack(a, addrOffset)
-					} else {
-						rtgAsmStorePrimaryStack(a, addrOffset)
-					}
-					rhs := rtgNewExprParse()
-					if !rtgParseExpressionOK(rhs, p, assignTok+1, stmt.endTok) {
-						return false
-					}
-					rhsIndex := len(rhs.exprs) - 1
-					if mapIndex {
-						return rtgEmitTypedExprToSavedMem(g, rhs, rhsIndex, sliceType.elem, addrOffset)
-					}
-					if arrayIndex {
-						if !rtgEmitScalarExprForKind(g, rhs, rhsIndex, elemType.kind) {
-							return false
-						}
-					} else if !rtgEmitIntExpr(g, rhs, rhsIndex) {
-						return false
-					}
-					rtgAsmNormalizePrimaryForKind(a, elemType.kind)
-					rtgAsmLoadSecondaryStack(a, addrOffset)
-					rtgAsmStorePrimaryMemSecondaryDispSize(a, 0, rtgScalarKindSize(elemType.kind))
-					return true
-				}
-				if sliceType.kind != rtgTypeSlice {
-					return false
-				}
-				scalarElem := rtgTypeKindIsScalarValue(elemType.kind) || elemType.kind == rtgTypePointer
-				indexOffset := 0
-				if scalarElem {
-					indexOffset = rtgAddUnnamedLocal(g, rtgTypeInt)
-					if !rtgEmitIntExpr(g, lhs, lhsRoot.right) {
-						return false
-					}
-					rtgAsmStorePrimaryStack(a, indexOffset)
 				}
 				rhs := rtgNewExprParse()
+				rtgTrustNonNil(rhs)
 				rhsIndex := rtgParseExpressionRoot(rhs, p, assignTok+1, stmt.endTok)
 				if rhsIndex < 0 {
 					return false
 				}
-				if scalarElem {
-					if !rtgEmitScalarExprForKind(g, rhs, rhsIndex, elemType.kind) {
-						return false
-					}
-					rtgAsmNormalizePrimaryForKind(a, elemType.kind)
-					rtgAsmPushPrimary(a)
-					rtgAsmPushStack(a, indexOffset)
-					if !rtgEmitSliceBasePtrLenTokens(g, p, stmt.startTok, baseEnd, baseEp, baseIndex) {
-						return false
-					}
-					rtgAsmCopyPrimaryToSecondary(a)
-					rtgAsmPopTertiary(a)
-					rtgAsmPopPrimary(a)
-					elemSize := rtgScalarKindSize(elemType.kind)
-					rtgAsmStorePrimaryMemSecondaryTertiarySize(a, elemSize)
-					return true
-				}
 				if rtgTypeKindUsesMemory(elemType.kind) {
-					indexOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
-					ptrOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
-					destOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
-					if !rtgEmitIntExpr(g, lhs, lhsRoot.right) {
-						return false
-					}
-					rtgAsmStorePrimaryStack(a, indexOffset)
-					if !rtgEmitSliceBasePtrLenTokens(g, p, stmt.startTok, baseEnd, baseEp, baseIndex) {
-						return false
-					}
-					rtgAsmStorePrimaryStack(a, ptrOffset)
-					rtgAsmLoadSecondaryTertiaryStack(a, ptrOffset, indexOffset)
-					elemSize := rtgTypeSize(meta, sliceType.elem)
-					rtgAsmMulTertiaryImm(a, elemSize)
-					rtgAsmAddSecondaryTertiary(a)
-					rtgAsmStoreSecondaryStack(a, destOffset)
-					return rtgEmitTypedExprToSavedMem(g, rhs, rhsIndex, sliceType.elem, destOffset)
+					return rtgEmitTypedExprToSavedMem(g, rhs, rhsIndex, container.elem, addrOffset)
 				}
-				return false
+				if !rtgEmitScalarExprForKind(g, rhs, rhsIndex, elemType.kind) {
+					return false
+				}
+				rtgAsmNormalizePrimaryForKind(a, elemType.kind)
+				rtgAsmLoadSecondaryStack(a, addrOffset)
+				rtgAsmStorePrimaryMemSecondaryDispSize(a, 0, rtgScalarKindSize(elemType.kind))
+				return true
 			}
 			lhsResolved := rtgResolveType(meta, lhsType)
+			rtgTrustNonNil(lhsResolved)
 			if lhsRoot.kind == rtgExprSelector && rtgTypeKindUsesMemory(lhsResolved.kind) {
 				rhs := rtgNewExprParse()
+				rtgTrustNonNil(rhs)
 				rhsIndex := rtgParseExpressionRoot(rhs, p, assignTok+1, stmt.endTok)
 				if rhsIndex < 0 {
 					return false
@@ -8984,7 +9325,9 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 				}
 				rtgAsmPushSecondary(a)
 				lhsResolved := rtgResolveType(meta, lhsType)
+				rtgTrustNonNil(lhsResolved)
 				rhs := rtgNewExprParse()
+				rtgTrustNonNil(rhs)
 				rhsIndex := rtgParseExpressionRoot(rhs, p, assignTok+1, stmt.endTok)
 				if rhsIndex < 0 {
 					return false
@@ -9003,6 +9346,7 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 	if nameEnd <= nameStart {
 		if rtgTokCharIs(p, stmt.startTok, '*') && assignTok > stmt.startTok && compoundAssign {
 			left := rtgNewExprParse()
+			rtgTrustNonNil(left)
 			leftIndex := rtgParseExpressionRoot(left, p, stmt.startTok+1, assignTok)
 			if leftIndex < 0 {
 				return false
@@ -9012,11 +9356,13 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 			if !rtgEmitIntExpr(g, left, leftIndex) {
 				return false
 			}
+			rtgEmitRuntimeNonNilPrimary(g)
 			rtgAsmPushPrimary(a)
 			rtgAsmCopyPrimaryToSecondary(a)
 			rtgAsmLoadPrimaryMemSecondaryDispSize(a, 0, targetSize)
 			rtgAsmPushPrimary(a)
 			right := rtgNewExprParse()
+			rtgTrustNonNil(right)
 			rightIndex := rtgParseExpressionRoot(right, p, assignTok+1, stmt.endTok)
 			if rightIndex < 0 {
 				return false
@@ -9035,22 +9381,27 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 		}
 		if rtgTokCharIs(p, stmt.startTok, '*') && assignTok > stmt.startTok && rtgTokCharIs(p, assignTok, '=') {
 			left := rtgNewExprParse()
+			rtgTrustNonNil(left)
 			leftIndex := rtgParseExpressionRoot(left, p, stmt.startTok+1, assignTok)
 			if leftIndex < 0 {
 				return false
 			}
 			leftType := rtgInferParsedExprType(g, left, leftIndex)
 			leftResolved := rtgResolveType(meta, leftType)
+			rtgTrustNonNil(leftResolved)
 			if leftResolved.kind == rtgTypePointer {
 				targetType := leftResolved.elem
 				targetResolved := rtgResolveType(meta, targetType)
+				rtgTrustNonNil(targetResolved)
 				if rtgTypeKindUsesMemory(targetResolved.kind) {
 					if !rtgEmitIntExpr(g, left, leftIndex) {
 						return false
 					}
+					rtgEmitRuntimeNonNilPrimary(g)
 					addrOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
 					rtgAsmStorePrimaryStack(a, addrOffset)
 					right := rtgNewExprParse()
+					rtgTrustNonNil(right)
 					rightIndex := rtgParseExpressionRoot(right, p, assignTok+1, stmt.endTok)
 					if rightIndex < 0 {
 						return false
@@ -9063,8 +9414,10 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 			if !rtgEmitIntExpr(g, left, leftIndex) {
 				return false
 			}
+			rtgEmitRuntimeNonNilPrimary(g)
 			rtgAsmPushPrimary(a)
 			right := rtgNewExprParse()
+			rtgTrustNonNil(right)
 			rightIndex := rtgParseExpressionRoot(right, p, assignTok+1, stmt.endTok)
 			if rightIndex < 0 {
 				return false
@@ -9078,11 +9431,12 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 		}
 		return false
 	}
-	if nameEnd == nameStart+1 && p.src[nameStart] == '_' {
+	if nameEnd == nameStart+1 && rtg_runtime_UnsafeByteAt(p.src, nameStart) == '_' {
 		if assignTok <= stmt.startTok || !rtgTokCharIs(p, assignTok, '=') {
 			return true
 		}
 		ep := rtgNewExprParse()
+		rtgTrustNonNil(ep)
 		rootIndex := rtgParseExpressionRoot(ep, p, assignTok+1, stmt.endTok)
 		if rootIndex < 0 {
 			return false
@@ -9097,6 +9451,7 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 		return rtgEmitIntExpr(g, ep, rootIndex)
 	}
 	ep := rtgNewExprParse()
+	rtgTrustNonNil(ep)
 	if assignTok > stmt.startTok {
 		if !rtgParseExpressionOK(ep, p, assignTok+1, stmt.endTok) {
 			return false
@@ -9188,6 +9543,7 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 		targetType = rtgLocalTypeAtOffset(g, offset)
 	}
 	targetResolved := rtgResolveType(meta, targetType)
+	rtgTrustNonNil(targetResolved)
 	trackLocalConst := globalOffset < 0 && fieldStackOffset < 0 && declaresLocal && rtgLocalConstTrackable(g, targetType, nameStart, nameEnd, stmt.endTok)
 	localConst := rtgConstResult{}
 	if trackLocalConst {
@@ -9199,7 +9555,7 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 	if stmt.kind == rtgStmtShort {
 		root := &ep.exprs[rootIndex]
 		if root.kind == rtgExprCall && root.argCount >= 2 && rtgExprIdentCode(p, ep, root.left) == rtgIdentAppend {
-			if !rtgEmitSliceValueRegs(g, ep, ep.args[root.firstArg]) {
+			if !rtgEmitSliceValueRegs(g, ep, rtg_runtime_UnsafeIntAt(ep.args, root.firstArg)) {
 				return false
 			}
 			rtgAsmStoreSliceStack(a, offset)
@@ -9214,6 +9570,7 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 	if compoundAssign {
 		if targetResolved.kind == rtgTypeString && rtgTok2Is(p, assignTok, '+', '=') {
 			left := rtgNewExprParse()
+			rtgTrustNonNil(left)
 			leftIndex := rtgParseExpressionRoot(left, p, stmt.startTok, assignTok)
 			if leftIndex < 0 || !rtgEmitStringConcatPairValueRegs(g, left, leftIndex, ep, rootIndex) {
 				return false
@@ -9321,6 +9678,7 @@ func rtgEmitLinearAssign(g *rtgLinearGen, stmt *rtgStmt) bool {
 }
 
 func rtgEmitTypedExprToSavedMem(g *rtgLinearGen, ep *rtgExprParse, idx int, typ int, addrOffset int) bool {
+	rtgTrustNonNil(g, ep)
 	tempOffset := rtgAddUnnamedLocal(g, typ)
 	if !rtgEmitTypedAssign(g, ep, idx, tempOffset) {
 		return false
@@ -9335,6 +9693,7 @@ func rtgEmitTypedExprToSavedMem(g *rtgLinearGen, ep *rtgExprParse, idx int, typ 
 // statement is not such a declaration, one on success, and -1 on an emission
 // failure.
 func rtgEmitGroupedTypedVarDecl(g *rtgLinearGen, stmt *rtgStmt, assignTok int) int {
+	rtgTrustNonNil(g, stmt)
 	p := g.prog
 	if stmt.kind != rtgStmtVar || !rtgTokIsKind(p, stmt.startTok, rtgTokVar) {
 		return 0
@@ -9377,6 +9736,7 @@ func rtgEmitGroupedTypedVarDecl(g *rtgLinearGen, stmt *rtgStmt, assignTok int) i
 		// left-to-right multi-assignment semantics.
 		for i := 0; i < nameCount; i++ {
 			ep := rtgNewExprParse()
+			rtgTrustNonNil(ep)
 			rootIndex := rtgParseExpressionRoot(ep, p, rhs[i*2], rhs[i*2+1])
 			if rootIndex < 0 {
 				return -1
@@ -9394,7 +9754,7 @@ func rtgEmitGroupedTypedVarDecl(g *rtgLinearGen, stmt *rtgStmt, assignTok int) i
 		nameStart := int(rtgTokStart(p, tok))
 		nameEnd := int(rtgTokEnd(p, tok))
 		offset := 0
-		if nameEnd != nameStart+1 || p.src[nameStart] != '_' {
+		if nameEnd != nameStart+1 || rtg_runtime_UnsafeByteAt(p.src, nameStart) != '_' {
 			offset = rtgAddTypedLocal(g, nameStart, nameEnd, typeResult.typ)
 		}
 		offsets = append(offsets, offset)
@@ -9417,6 +9777,7 @@ func rtgEmitGroupedTypedVarDecl(g *rtgLinearGen, stmt *rtgStmt, assignTok int) i
 }
 
 func rtgEmitMultiAssign(g *rtgLinearGen, stmt *rtgStmt, assignTok int) bool {
+	rtgTrustNonNil(g, stmt)
 	p := g.prog
 	lhsStart := stmt.startTok
 	if stmt.kind == rtgStmtVar && rtgTokIsKind(p, lhsStart, rtgTokVar) {
@@ -9455,6 +9816,7 @@ func rtgEmitMultiAssign(g *rtgLinearGen, stmt *rtgStmt, assignTok int) bool {
 		rhsStart := rhs[i*2]
 		rhsEnd := rhs[i*2+1]
 		ep := rtgNewExprParse()
+		rtgTrustNonNil(ep)
 		rootIndex := rtgParseExpressionRoot(ep, p, rhsStart, rhsEnd)
 		if rootIndex < 0 {
 			return false
@@ -9481,10 +9843,12 @@ func rtgEmitMultiAssign(g *rtgLinearGen, stmt *rtgStmt, assignTok int) bool {
 }
 
 func rtgEmitCommaOKAssign(g *rtgLinearGen, kind int, lhs []int, rhsStart int, rhsEnd int) bool {
+	rtgTrustNonNil(g)
 	if len(lhs) != 4 {
 		return false
 	}
 	ep := rtgNewExprParse()
+	rtgTrustNonNil(ep)
 	root := rtgParseExpressionRoot(ep, g.prog, rhsStart, rhsEnd)
 	if root < 0 {
 		return false
@@ -9493,7 +9857,9 @@ func rtgEmitCommaOKAssign(g *rtgLinearGen, kind int, lhs []int, rhsStart int, rh
 	typ := rtgInferParsedExprType(g, ep, root)
 	if e.kind == rtgExprIndex {
 		mapType := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, e.left))
+		rtgTrustNonNil(mapType)
 		valueType := rtgResolveType(g.meta, mapType.elem)
+		rtgTrustNonNil(valueType)
 		if mapType.kind != rtgTypeMap || (!rtgTypeKindIsScalarInt(valueType.kind) && valueType.kind != rtgTypePointer && valueType.kind != rtgTypeInterface) {
 			return false
 		}
@@ -9531,8 +9897,10 @@ func rtgEmitCommaOKAssign(g *rtgLinearGen, kind int, lhs []int, rhsStart int, rh
 }
 
 func rtgClearLocalConstAssignTarget(g *rtgLinearGen, kind int, targetStart int, targetEnd int) {
+	rtgTrustNonNil(g)
 	p := g.prog
 	ep := rtgNewExprParse()
+	rtgTrustNonNil(ep)
 	if !rtgParseExpressionOK(ep, p, targetStart, targetEnd) {
 		return
 	}
@@ -9540,7 +9908,7 @@ func rtgClearLocalConstAssignTarget(g *rtgLinearGen, kind int, targetStart int, 
 	if root.kind != rtgExprIdent {
 		return
 	}
-	if root.nameEnd == root.nameStart+1 && p.src[root.nameStart] == '_' {
+	if root.nameEnd == root.nameStart+1 && rtg_runtime_UnsafeByteAt(p.src, root.nameStart) == '_' {
 		return
 	}
 	localIndex := rtgFindLocalIndex(g, root.nameStart, root.nameEnd)
@@ -9553,8 +9921,10 @@ func rtgClearLocalConstAssignTarget(g *rtgLinearGen, kind int, targetStart int, 
 }
 
 func rtgEmitTupleCallAssign(g *rtgLinearGen, kind int, lhs []int, lhsCount int, rhsStart int, rhsEnd int) bool {
+	rtgTrustNonNil(g)
 	p := g.prog
 	ep := rtgNewExprParse()
+	rtgTrustNonNil(ep)
 	rootIndex := rtgParseExpressionRoot(ep, p, rhsStart, rhsEnd)
 	if rootIndex < 0 {
 		return false
@@ -9574,6 +9944,7 @@ func rtgEmitTupleCallAssign(g *rtgLinearGen, kind int, lhs []int, lhsCount int, 
 		return false
 	}
 	tuple := rtgResolveType(g.meta, resultType)
+	rtgTrustNonNil(tuple)
 	if tuple.count != lhsCount {
 		return false
 	}
@@ -9592,6 +9963,7 @@ func rtgEmitTupleCallAssign(g *rtgLinearGen, kind int, lhs []int, lhsCount int, 
 	return true
 }
 func rtgEmitExprToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, offset int) bool {
+	rtgTrustNonNil(g, ep)
 	if rtgEmitTypedAssign(g, ep, idx, offset) {
 		return true
 	}
@@ -9602,8 +9974,10 @@ func rtgEmitExprToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, offset int) 
 	return true
 }
 func rtgEmitTempToTarget(g *rtgLinearGen, kind int, targetStart int, targetEnd int, tempOffset int, tempType int) bool {
+	rtgTrustNonNil(g)
 	p := g.prog
 	ep := rtgNewExprParse()
+	rtgTrustNonNil(ep)
 	rootIndex := rtgParseExpressionRoot(ep, p, targetStart, targetEnd)
 	if rootIndex < 0 {
 		return false
@@ -9611,7 +9985,7 @@ func rtgEmitTempToTarget(g *rtgLinearGen, kind int, targetStart int, targetEnd i
 	root := &ep.exprs[rootIndex]
 	size := rtgTypeCopySize(g.meta, tempType)
 	if root.kind == rtgExprIdent {
-		if root.nameEnd == root.nameStart+1 && p.src[root.nameStart] == '_' {
+		if root.nameEnd == root.nameStart+1 && rtg_runtime_UnsafeByteAt(p.src, root.nameStart) == '_' {
 			return true
 		}
 		localIndex := rtgFindLocalIndex(g, root.nameStart, root.nameEnd)
@@ -9654,12 +10028,14 @@ func rtgEmitTempToTarget(g *rtgLinearGen, kind int, targetStart int, targetEnd i
 	}
 	if root.kind == rtgExprIndex {
 		baseType := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, root.left))
+		rtgTrustNonNil(baseType)
 		if baseType.kind == rtgTypeMap {
 			if !rtgEmitMapEntryAddress(g, ep, root.left, root.right, 1) {
 				return false
 			}
 			rtgAsmCopyPrimaryToSecondary(&g.asm)
 			targetType := rtgResolveType(g.meta, baseType.elem)
+			rtgTrustNonNil(targetType)
 			rtgAsmLoadPrimaryStack(&g.asm, tempOffset)
 			rtgAsmStorePrimaryMemSecondaryDispSize(&g.asm, 16, rtgScalarKindSize(targetType.kind))
 			return true
@@ -9677,6 +10053,7 @@ func rtgEmitTempToTarget(g *rtgLinearGen, kind int, targetStart int, targetEnd i
 		if !rtgEmitIntExpr(g, ep, root.left) {
 			return false
 		}
+		rtgEmitRuntimeNonNilPrimary(g)
 		rtgAsmCopyPrimaryToSecondary(&g.asm)
 		targetType := rtgInferParsedExprType(g, ep, rootIndex)
 		targetSize := rtgTypeSize(g.meta, targetType)
@@ -9686,6 +10063,7 @@ func rtgEmitTempToTarget(g *rtgLinearGen, kind int, targetStart int, targetEnd i
 	return false
 }
 func rtgEmitCopyStackToBss(g *rtgLinearGen, srcOffset int, bssOffset int, size int) {
+	rtgTrustNonNil(g)
 	if size < rtgBackendValueSlotSize {
 		size = rtgBackendValueSlotSize
 	}
@@ -9695,6 +10073,7 @@ func rtgEmitCopyStackToBss(g *rtgLinearGen, srcOffset int, bssOffset int, size i
 	}
 }
 func rtgEmitCopyBssToStack(g *rtgLinearGen, bssOffset int, destOffset int, size int) {
+	rtgTrustNonNil(g)
 	if size < rtgBackendValueSlotSize {
 		size = rtgBackendValueSlotSize
 	}
@@ -9703,6 +10082,7 @@ func rtgEmitCopyBssToStack(g *rtgLinearGen, bssOffset int, destOffset int, size 
 	}
 }
 func rtgFindLocalIndexInCurrentScope(g *rtgLinearGen, nameStart int, nameEnd int) int {
+	rtgTrustNonNil(g)
 	start := g.scopeBase
 	if start < 0 {
 		start = 0
@@ -9715,6 +10095,7 @@ func rtgFindLocalIndexInCurrentScope(g *rtgLinearGen, nameStart int, nameEnd int
 }
 
 func rtgSetLocalConstAtOffset(g *rtgLinearGen, offset int, value int, kind int) {
+	rtgTrustNonNil(g)
 	value = rtgConvertConstInt(value, kind)
 	for i := g.localCount - 1; i >= 0; i-- {
 		if g.locals[i].offset == offset {
@@ -9726,6 +10107,7 @@ func rtgSetLocalConstAtOffset(g *rtgLinearGen, offset int, value int, kind int) 
 }
 
 func rtgClearLocalConstAtOffset(g *rtgLinearGen, offset int) {
+	rtgTrustNonNil(g)
 	for i := g.localCount - 1; i >= 0; i-- {
 		if g.locals[i].offset == offset {
 			g.locals[i].constValid = 0
@@ -9735,10 +10117,12 @@ func rtgClearLocalConstAtOffset(g *rtgLinearGen, offset int) {
 }
 
 func rtgLocalConstTrackable(g *rtgLinearGen, typ int, nameStart int, nameEnd int, afterTok int) bool {
+	rtgTrustNonNil(g)
 	if rtgCompilerFixedTarget != 0 {
 		return false
 	}
 	resolved := rtgResolveType(g.meta, typ)
+	rtgTrustNonNil(resolved)
 	if !rtgTypeKindIsScalarInt(resolved.kind) {
 		return false
 	}
@@ -9746,13 +10130,14 @@ func rtgLocalConstTrackable(g *rtgLinearGen, typ int, nameStart int, nameEnd int
 }
 
 func rtgLocalNameWrittenAfter(g *rtgLinearGen, nameStart int, nameEnd int, afterTok int) bool {
+	rtgTrustNonNil(g)
 	if nameEnd <= nameStart {
 		return true
 	}
 	p := g.prog
 	src := p.src
 	nameSize := nameEnd - nameStart
-	nameFirst := src[nameStart]
+	nameFirst := rtg_runtime_UnsafeByteAt(src, nameStart)
 	tokenData := p.toks.data
 	end := rtgTokCount(p)
 	if g.currentFunc >= 0 && g.currentFunc < len(g.meta.funcs) {
@@ -9766,7 +10151,7 @@ func rtgLocalNameWrittenAfter(g *rtgLinearGen, nameStart int, nameEnd int, after
 		base := i * rtgTokenStride
 		tokenStart := int(tokenData[base+1])
 		tokenEnd := int(tokenData[base+2])
-		if int(tokenData[base])&255 == rtgTokIdent && tokenEnd-tokenStart == nameSize && src[tokenStart] == nameFirst && rtgBytesEqualRange(src, tokenStart, tokenEnd, nameStart, nameEnd) {
+		if int(tokenData[base])&255 == rtgTokIdent && tokenEnd-tokenStart == nameSize && rtg_runtime_UnsafeByteAt(src, tokenStart) == nameFirst && rtgBytesEqualRange(src, tokenStart, tokenEnd, nameStart, nameEnd) {
 			if rtgTokCharIs(p, i-1, '&') {
 				return true
 			}
@@ -9785,6 +10170,7 @@ func rtgLocalNameWrittenAfter(g *rtgLinearGen, nameStart int, nameEnd int, after
 }
 
 func rtgSplitTopLevelComma(p *rtgProgram, start int, end int) ([]int, bool) {
+	rtgTrustNonNil(p)
 	var ranges []int
 	if rtgCompilerFixedTarget != 0 {
 		ranges = make([]int, 0, 16)
@@ -9819,6 +10205,7 @@ func rtgSplitTopLevelComma(p *rtgProgram, start int, end int) ([]int, bool) {
 }
 
 func rtgHasTopLevelComma(p *rtgProgram, start int, end int) bool {
+	rtgTrustNonNil(p)
 	depth := 0
 	data := p.toks.data
 	for i := start; i < end; i++ {
@@ -9841,8 +10228,10 @@ func rtgHasTopLevelComma(p *rtgProgram, start int, end int) bool {
 }
 
 func rtgEmitTupleReturn(g *rtgLinearGen, start int, end int) bool {
+	rtgTrustNonNil(g)
 	resultType := g.meta.funcs[g.currentFunc].resultType
 	tuple := rtgResolveType(g.meta, resultType)
+	rtgTrustNonNil(tuple)
 	parts, ok := rtgSplitTopLevelComma(g.prog, start, end)
 	if !ok {
 		return false
@@ -9861,6 +10250,7 @@ func rtgEmitTupleReturn(g *rtgLinearGen, start int, end int) bool {
 	}
 	if count == 1 {
 		ep := rtgNewExprParse()
+		rtgTrustNonNil(ep)
 		rootIndex := rtgParseExpressionRoot(ep, g.prog, start, end)
 		if rootIndex < 0 {
 			return false
@@ -9870,7 +10260,9 @@ func rtgEmitTupleReturn(g *rtgLinearGen, start int, end int) bool {
 	return false
 }
 func rtgEmitTupleReturnField(g *rtgLinearGen, start int, end int, typ int, fieldOffset int) bool {
+	rtgTrustNonNil(g)
 	ep := rtgNewExprParse()
+	rtgTrustNonNil(ep)
 	rootIndex := rtgParseExpressionRoot(ep, g.prog, start, end)
 	if rootIndex < 0 {
 		return false
@@ -9894,6 +10286,7 @@ func rtgEmitTupleReturnField(g *rtgLinearGen, start int, end int, typ int, field
 	return true
 }
 func rtgInferParsedExprType(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
+	rtgTrustNonNil(g, ep)
 	if idx < 0 || idx >= len(ep.exprs) {
 		return 0
 	}
@@ -9908,6 +10301,7 @@ func rtgInferParsedExprType(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 }
 
 func rtgInferParsedExprTypeUncached(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
+	rtgTrustNonNil(g, ep)
 	p := g.prog
 	meta := g.meta
 	e := ep.exprs[idx]
@@ -9964,7 +10358,7 @@ func rtgInferParsedExprTypeUncached(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 			return rtgBuiltinTypeInterface
 		}
 		if callee == rtgIdentAppend && e.argCount >= 2 {
-			return rtgInferParsedExprType(g, ep, ep.args[e.firstArg])
+			return rtgInferParsedExprType(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg))
 		}
 		if callee == rtgIdentByteSlice && e.argCount == 1 {
 			return rtgAddType(meta, rtgTypeSlice, rtgTypeByte, 0, 0, rtgBackendSliceValueSize, 0, 0)
@@ -9973,10 +10367,10 @@ func rtgInferParsedExprTypeUncached(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 			return rtgTypeString
 		}
 		if callee == rtgIdentMake && e.argCount >= 1 {
-			return rtgTypeFromExpr(g, ep, ep.args[e.firstArg])
+			return rtgTypeFromExpr(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg))
 		}
 		if callee == rtgIdentNew && e.argCount == 1 {
-			targetType := rtgTypeFromExpr(g, ep, ep.args[e.firstArg])
+			targetType := rtgTypeFromExpr(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg))
 			if targetType != 0 {
 				return rtgAddType(meta, rtgTypePointer, targetType, 0, 0, rtgBackendValueSlotSize, 0, 0)
 			}
@@ -10011,6 +10405,7 @@ func rtgInferParsedExprTypeUncached(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 	if e.kind == rtgExprIndex {
 		leftType := rtgInferParsedExprType(g, ep, e.left)
 		t := rtgResolveType(meta, leftType)
+		rtgTrustNonNil(t)
 		if t.kind == rtgTypeSlice || t.kind == rtgTypeArray || t.kind == rtgTypeMap {
 			return t.elem
 		}
@@ -10021,6 +10416,7 @@ func rtgInferParsedExprTypeUncached(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 	if e.kind == rtgExprSlice {
 		baseType := rtgInferParsedExprType(g, ep, e.left)
 		base := rtgResolveType(meta, baseType)
+		rtgTrustNonNil(base)
 		if base.kind == rtgTypePointer {
 			base = rtgResolveType(meta, base.elem)
 		}
@@ -10068,6 +10464,7 @@ func rtgInferParsedExprTypeUncached(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 		if rtgTokCharIs(p, e.tok, '*') {
 			innerType := rtgInferParsedExprType(g, ep, e.left)
 			inner := rtgResolveType(meta, innerType)
+			rtgTrustNonNil(inner)
 			if inner.kind == rtgTypePointer {
 				return inner.elem
 			}
@@ -10080,7 +10477,9 @@ func rtgInferParsedExprTypeUncached(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 		leftTypeIndex := rtgInferParsedExprType(g, ep, e.left)
 		rightTypeIndex := rtgInferParsedExprType(g, ep, e.right)
 		leftType := rtgResolveType(meta, leftTypeIndex)
+		rtgTrustNonNil(leftType)
 		rightType := rtgResolveType(meta, rightTypeIndex)
+		rtgTrustNonNil(rightType)
 		if rtgTokCharIs(p, e.tok, '+') && (leftType.kind == rtgTypeString || rightType.kind == rtgTypeString) {
 			return rtgTypeString
 		}
@@ -10107,15 +10506,17 @@ func rtgInferParsedExprTypeUncached(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 }
 
 func rtgExprTokenIsImaginary(p *rtgProgram, tok int) bool {
+	rtgTrustNonNil(p)
 	if tok < 0 || tok >= rtgTokCount(p) {
 		return false
 	}
 	start := int(rtgTokStart(p, tok))
 	end := int(rtgTokEnd(p, tok))
-	return end > start && p.src[end-1] == 'i'
+	return end > start && rtg_runtime_UnsafeByteAt(p.src, end-1) == 'i'
 }
 
 func rtgExprIsUntypedInteger(ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(ep)
 	e := &ep.exprs[idx]
 	if e.kind == rtgExprInt || e.kind == rtgExprChar {
 		return true
@@ -10129,6 +10530,7 @@ func rtgExprIsUntypedInteger(ep *rtgExprParse, idx int) bool {
 	return false
 }
 func rtgPointerTargetKind(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
+	rtgTrustNonNil(g, ep)
 	pointerType := rtgTypeInt
 	e := &ep.exprs[idx]
 	if e.kind == rtgExprIdent {
@@ -10146,14 +10548,20 @@ func rtgPointerTargetKind(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 		pointerType = rtgInferParsedExprType(g, ep, idx)
 	}
 	pointerResolved := rtgResolveType(g.meta, pointerType)
+	rtgTrustNonNil(pointerResolved)
 	if pointerResolved.kind == rtgTypePointer {
 		targetResolved := rtgResolveType(g.meta, pointerResolved.elem)
+		rtgTrustNonNil(targetResolved)
 		return targetResolved.kind
 	}
 	return pointerResolved.kind
 }
 func rtgTypeFromExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
+	rtgTrustNonNil(g, ep)
 	p := g.prog
+	meta := g.meta
+	rtgTrustNonNil(p)
+	rtgTrustNonNil(meta)
 	e := &ep.exprs[idx]
 	tokenCount := rtgTokCount(p)
 	if e.tok < 0 || e.tok >= tokenCount {
@@ -10163,8 +10571,8 @@ func rtgTypeFromExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 	for endTok < tokenCount && int(rtgTokEnd(p, endTok)) <= e.nameEnd {
 		endTok++
 	}
-	typeResult := rtgParseType(g.meta, p, e.tok, endTok)
-	if typeResult.typ > 0 && typeResult.typ < len(g.meta.types) && g.meta.types[typeResult.typ].kind == rtgTypeArray && g.meta.types[typeResult.typ].count < 0 && e.kind == rtgExprComposite {
+	typeResult := rtgParseType(meta, p, e.tok, endTok)
+	if typeResult.typ > 0 && typeResult.typ < len(meta.types) && meta.types[typeResult.typ].kind == rtgTypeArray && meta.types[typeResult.typ].count < 0 && e.kind == rtgExprComposite {
 		count := 0
 		next := 0
 		for i := 0; i < e.argCount; i++ {
@@ -10188,6 +10596,7 @@ func rtgTypeFromExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 	return typeResult.typ
 }
 func rtgFindTypeByRange(g *rtgLinearGen, nameStart int, nameEnd int) int {
+	rtgTrustNonNil(g)
 	typ := rtgFindNamedType(g.meta, nameStart, nameEnd)
 	if typ >= 0 {
 		return typ
@@ -10195,6 +10604,7 @@ func rtgFindTypeByRange(g *rtgLinearGen, nameStart int, nameEnd int) int {
 	return 0
 }
 func rtgConversionTypeFromExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
+	rtgTrustNonNil(g, ep)
 	callee := &ep.exprs[idx]
 	if callee.kind != rtgExprIdent {
 		return 0
@@ -10209,6 +10619,7 @@ func rtgConversionTypeFromExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 	return rtgFindTypeByRange(g, callee.nameStart, callee.nameEnd)
 }
 func rtgLocalTypeAtOffset(g *rtgLinearGen, offset int) int {
+	rtgTrustNonNil(g)
 	for i := 0; i < g.localCount; i++ {
 		if g.locals[i].offset == offset {
 			return g.locals[i].typ
@@ -10216,6 +10627,7 @@ func rtgLocalTypeAtOffset(g *rtgLinearGen, offset int) int {
 	}
 	for i := 0; i < g.localCount; i++ {
 		t := rtgResolveType(g.meta, g.locals[i].typ)
+		rtgTrustNonNil(t)
 		if t.kind == rtgTypeStruct {
 			for j := 0; j < t.count; j++ {
 				field := g.meta.fields[t.first+j]
@@ -10228,13 +10640,16 @@ func rtgLocalTypeAtOffset(g *rtgLinearGen, offset int) int {
 	return 0
 }
 func rtgEmitTypedAssign(g *rtgLinearGen, ep *rtgExprParse, idx int, offset int) bool {
+	rtgTrustNonNil(g, ep)
 	meta := g.meta
+	rtgTrustNonNil(meta)
 	destType := rtgLocalTypeAtOffset(g, offset)
 	e := &ep.exprs[idx]
 	if e.kind == rtgExprAssert {
 		return rtgEmitTypeAssertionToLocal(g, ep, idx, offset, 0, true)
 	}
 	destResolved := rtgResolveType(meta, destType)
+	rtgTrustNonNil(destResolved)
 	if destResolved.kind == rtgTypeComplex {
 		if !rtgEmitComplexValueRegs(g, ep, idx) {
 			return false
@@ -10297,6 +10712,7 @@ func rtgEmitTypedAssign(g *rtgLinearGen, ep *rtgExprParse, idx int, offset int) 
 			if !rtgEmitIntExpr(g, ep, e.left) {
 				return false
 			}
+			rtgEmitRuntimeNonNilPrimary(g)
 			rtgAsmCopyPrimaryToSecondary(&g.asm)
 			rtgEmitCopyMemSecondaryToStack(g, offset, rtgTypeSize(meta, destType))
 			return true
@@ -10334,6 +10750,7 @@ func rtgEmitTypedAssign(g *rtgLinearGen, ep *rtgExprParse, idx int, offset int) 
 			if !rtgEmitIntExpr(g, ep, e.left) {
 				return false
 			}
+			rtgEmitRuntimeNonNilPrimary(g)
 			rtgAsmCopyPrimaryToSecondary(&g.asm)
 			size := rtgTypeSize(meta, destType)
 			rtgEmitCopyMemSecondaryToStack(g, offset, size)
@@ -10385,6 +10802,7 @@ func rtgEmitTypedAssign(g *rtgLinearGen, ep *rtgExprParse, idx int, offset int) 
 }
 
 func rtgEmitInterfaceAssignToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, offset int) bool {
+	rtgTrustNonNil(g, ep)
 	if idx >= 0 && idx < len(ep.exprs) {
 		e := &ep.exprs[idx]
 		if e.kind == rtgExprIdent && rtgBytesEqualText(g.prog.src, e.nameStart, e.nameEnd, "nil") {
@@ -10401,6 +10819,7 @@ func rtgEmitInterfaceAssignToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, o
 	}
 	sourceType := rtgInferParsedExprType(g, ep, idx)
 	source := rtgResolveType(g.meta, sourceType)
+	rtgTrustNonNil(source)
 	if source.kind == rtgTypeInterface {
 		e := &ep.exprs[idx]
 		if e.kind == rtgExprCall {
@@ -10408,6 +10827,7 @@ func rtgEmitInterfaceAssignToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, o
 		}
 		if e.kind == rtgExprIndex {
 			baseType := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, e.left))
+			rtgTrustNonNil(baseType)
 			if baseType.kind == rtgTypeMap {
 				if !rtgEmitMapEntryAddress(g, ep, e.left, e.right, 0) {
 					return false
@@ -10461,18 +10881,22 @@ func rtgEmitInterfaceAssignToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, o
 }
 
 func rtgBinaryComparesInterface(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr) bool {
+	rtgTrustNonNil(g, ep, e)
 	if !rtgTok2Is(g.prog, e.tok, '=', '=') && !rtgTok2Is(g.prog, e.tok, '!', '=') {
 		return false
 	}
 	left := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, e.left))
+	rtgTrustNonNil(left)
 	if left.kind == rtgTypeInterface {
 		return true
 	}
 	right := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, e.right))
+	rtgTrustNonNil(right)
 	return right.kind == rtgTypeInterface
 }
 
 func rtgEmitInterfaceCompare(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr) bool {
+	rtgTrustNonNil(g, ep, e)
 	left := rtgAddUnnamedLocal(g, rtgBuiltinTypeInterface)
 	right := rtgAddUnnamedLocal(g, rtgBuiltinTypeInterface)
 	if !rtgEmitInterfaceAssignToLocal(g, ep, e.left, left) || !rtgEmitInterfaceAssignToLocal(g, ep, e.right, right) {
@@ -10529,7 +10953,9 @@ func rtgEmitInterfaceCompare(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr) bool
 }
 
 func rtgTypeComparable(meta *rtgMeta, typ int) bool {
+	rtgTrustNonNil(meta)
 	t := rtgResolveType(meta, typ)
+	rtgTrustNonNil(t)
 	if t.kind == rtgTypeSlice || t.kind == rtgTypeMap || t.kind == rtgTypeFunc {
 		return false
 	}
@@ -10550,6 +10976,7 @@ const rtgInterfaceIndirectTypeBase = 1048576
 const rtgPanicTypeAssertionTag = 1048575
 
 func rtgRuntimeTypeTag(meta *rtgMeta, typ int) int {
+	rtgTrustNonNil(meta)
 	if typ <= 0 || typ >= len(meta.types) {
 		return 0
 	}
@@ -10569,6 +10996,7 @@ func rtgRuntimeTypeTag(meta *rtgMeta, typ int) int {
 const rtgMapEntrySize = 32
 
 func rtgEmitMapValuePrimary(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	if idx < 0 || idx >= len(ep.exprs) {
 		return false
 	}
@@ -10593,6 +11021,7 @@ func rtgEmitMapValuePrimary(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgEmitNewMapHeaderPrimary(g *rtgLinearGen) {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	sizeOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
 	addrOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
@@ -10608,9 +11037,11 @@ func rtgEmitNewMapHeaderPrimary(g *rtgLinearGen) {
 }
 
 func rtgEmitMapAssignToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, mapType int, offset int) bool {
+	rtgTrustNonNil(g, ep)
 	a := &g.asm
 	e := &ep.exprs[idx]
 	resolved := rtgResolveType(g.meta, mapType)
+	rtgTrustNonNil(resolved)
 	if resolved.kind != rtgTypeMap || !rtgTypeIsString(g.meta, resolved.first) {
 		return false
 	}
@@ -10627,13 +11058,13 @@ func rtgEmitMapAssignToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, mapType
 		if rtgExprIdentCode(g.prog, ep, e.left) != rtgIdentMake || e.argCount < 1 || e.argCount > 2 {
 			return false
 		}
-		madeType := rtgTypeFromExpr(g, ep, ep.args[e.firstArg])
+		madeType := rtgTypeFromExpr(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg))
 		if rtgResolveType(g.meta, madeType).kind != rtgTypeMap {
 			return false
 		}
 		// A map capacity is a performance hint. Evaluate it for its side
 		// effects, but let the shared growable descriptor allocate storage.
-		if e.argCount == 2 && !rtgEmitIntExpr(g, ep, ep.args[e.firstArg+1]) {
+		if e.argCount == 2 && !rtgEmitIntExpr(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
 			return false
 		}
 	} else {
@@ -10643,6 +11074,7 @@ func rtgEmitMapAssignToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, mapType
 	rtgAsmStorePrimaryStack(a, offset)
 	if e.kind == rtgExprComposite {
 		valueResolved := rtgResolveType(g.meta, resolved.elem)
+		rtgTrustNonNil(valueResolved)
 		if !rtgTypeKindIsScalarInt(valueResolved.kind) && valueResolved.kind != rtgTypePointer && valueResolved.kind != rtgTypeInterface {
 			return false
 		}
@@ -10673,6 +11105,7 @@ func rtgEmitMapAssignToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, mapType
 }
 
 func rtgEmitSliceReturnValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int, resultType int) bool {
+	rtgTrustNonNil(g, ep)
 	if !rtgEmitSliceValueRegs(g, ep, idx) {
 		return false
 	}
@@ -10683,6 +11116,11 @@ func rtgEmitSliceReturnValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int, res
 }
 
 func rtgReturnedSliceCanReuseDescriptor(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
+	p := g.prog
+	meta := g.meta
+	rtgTrustNonNil(p)
+	rtgTrustNonNil(meta)
 	if idx < 0 {
 		return false
 	}
@@ -10691,14 +11129,14 @@ func rtgReturnedSliceCanReuseDescriptor(g *rtgLinearGen, ep *rtgExprParse, idx i
 	}
 	e := &ep.exprs[idx]
 	if e.kind == rtgExprCall {
-		callee := rtgExprIdentCode(g.prog, ep, e.left)
+		callee := rtgExprIdentCode(p, ep, e.left)
 		if callee == rtgIdentAppend && e.argCount >= 1 {
-			return rtgReturnedSliceCanReuseDescriptor(g, ep, ep.args[e.firstArg])
+			return rtgReturnedSliceCanReuseDescriptor(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg))
 		}
 		fnIndex := rtgFuncInfoFromCall(g, ep, e.left)
-		if fnIndex >= 0 && fnIndex < len(g.meta.funcs) {
-			fn := &g.meta.funcs[fnIndex]
-			if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistBytes") {
+		if fnIndex >= 0 && fnIndex < len(meta.funcs) {
+			fn := &meta.funcs[fnIndex]
+			if rtgBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistBytes") {
 				return true
 			}
 			return rtgCallSliceResultCanReuseDescriptor(g, ep, idx, fnIndex)
@@ -10707,7 +11145,7 @@ func rtgReturnedSliceCanReuseDescriptor(g *rtgLinearGen, ep *rtgExprParse, idx i
 	if e.kind != rtgExprIdent {
 		return false
 	}
-	if rtgBytesEqualText(g.prog.src, e.nameStart, e.nameEnd, "nil") {
+	if rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "nil") {
 		return true
 	}
 	localIndex := rtgFindLocalIndex(g, e.nameStart, e.nameEnd)
@@ -10718,6 +11156,7 @@ func rtgReturnedSliceCanReuseDescriptor(g *rtgLinearGen, ep *rtgExprParse, idx i
 }
 
 func rtgCallSliceResultCanReuseDescriptor(g *rtgLinearGen, ep *rtgExprParse, idx int, fnIndex int) bool {
+	rtgTrustNonNil(g, ep)
 	if idx < 0 || idx >= len(ep.exprs) {
 		return false
 	}
@@ -10737,7 +11176,7 @@ func rtgCallSliceResultCanReuseDescriptor(g *rtgLinearGen, ep *rtgExprParse, idx
 		}
 	}
 	for i := 0; i < e.argCount; i++ {
-		argIndex := ep.args[e.firstArg+i]
+		argIndex := rtg_runtime_UnsafeIntAt(ep.args, e.firstArg+i)
 		argType := rtgInferParsedExprType(g, ep, argIndex)
 		if rtgTypeIsSlice(g.meta, argType) && !rtgReturnedSliceCanReuseDescriptor(g, ep, argIndex) {
 			return false
@@ -10747,6 +11186,7 @@ func rtgCallSliceResultCanReuseDescriptor(g *rtgLinearGen, ep *rtgExprParse, idx
 }
 
 func rtgLocalIsCurrentFuncParam(g *rtgLinearGen, localIndex int) bool {
+	rtgTrustNonNil(g)
 	if localIndex < 0 || localIndex >= g.localCount {
 		return false
 	}
@@ -10765,8 +11205,10 @@ func rtgLocalIsCurrentFuncParam(g *rtgLinearGen, localIndex int) bool {
 }
 
 func rtgEmitCopySliceRegsToArena(g *rtgLinearGen, sliceType int) bool {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	t := rtgResolveType(g.meta, sliceType)
+	rtgTrustNonNil(t)
 	if t.kind != rtgTypeSlice {
 		return false
 	}
@@ -10846,6 +11288,7 @@ func rtgEmitCopySliceRegsToArena(g *rtgLinearGen, sliceType int) bool {
 }
 
 func rtgEmitSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	meta := g.meta
 	a := &g.asm
 	e := &ep.exprs[idx]
@@ -10862,6 +11305,7 @@ func rtgEmitSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	if e.kind == rtgExprSlice {
 		baseType := rtgInferParsedExprType(g, ep, e.left)
 		baseResolved := rtgResolveType(meta, baseType)
+		rtgTrustNonNil(baseResolved)
 		arrayType := baseResolved
 		if baseResolved.kind == rtgTypePointer {
 			arrayType = rtgResolveType(meta, baseResolved.elem)
@@ -10871,6 +11315,7 @@ func rtgEmitSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 				if !rtgEmitIntExpr(g, ep, e.left) {
 					return false
 				}
+				rtgEmitRuntimeNonNilPrimary(g)
 			} else if !rtgEmitAddressPrimary(g, ep, e.left) {
 				return false
 			}
@@ -10881,7 +11326,7 @@ func rtgEmitSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 				return false
 			}
 		}
-		if e.firstArg >= 0 || e.nameStart >= 0 || arrayType.kind == rtgTypeArray && e.right >= 0 {
+		if e.firstArg >= 0 || e.nameStart >= 0 || e.right >= 0 {
 			elemSize := rtgTypeSize(meta, arrayType.elem)
 			if elemSize < 1 {
 				elemSize = 8
@@ -10915,17 +11360,7 @@ func rtgEmitSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			} else {
 				rtgAsmCopyStackSlot(a, baseOff-16, maxOff)
 			}
-			if arrayType.kind == rtgTypeArray {
-				invalid := rtgAsmNewLabel(a)
-				done := rtgAsmNewLabel(a)
-				rtgEmitStackLessImmJump(g, lowOff, 0, invalid)
-				rtgAsmJltStackStack(a, highOff, lowOff, invalid)
-				rtgAsmJltStackStack(a, maxOff, highOff, invalid)
-				rtgAsmJltStackStack(a, baseOff-16, maxOff, invalid)
-				rtgAsmJmpMarkLabel(a, done, invalid)
-				rtgEmitRuntimeFault(g)
-				rtgAsmMarkLabel(a, done)
-			}
+			rtgEmitSliceBoundsChecks(g, lowOff, highOff, maxOff, baseOff-16)
 			rtgAsmLoadPrimaryTertiaryStack(a, maxOff, lowOff)
 			rtgAsmSubPrimaryTertiary(a)
 			rtgAsmPushPrimary(a)
@@ -10940,16 +11375,6 @@ func rtgEmitSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			rtgAsmPopSecondary(a)
 			rtgAsmPopTertiary(a)
 			return true
-		}
-		if e.right >= 0 {
-			rtgAsmPushPrimary(a)
-			rtgAsmPushTertiary(a)
-			if !rtgEmitIntExpr(g, ep, e.right) {
-				return false
-			}
-			rtgAsmCopyPrimaryToSecondary(a)
-			rtgAsmPopTertiary(a)
-			rtgAsmPopPrimary(a)
 		}
 		return true
 	}
@@ -11000,6 +11425,7 @@ func rtgEmitSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		if !rtgEmitIntExpr(g, ep, e.left) {
 			return false
 		}
+		rtgEmitRuntimeNonNilPrimary(g)
 		rtgAsmCopyPrimaryToSecondary(a)
 		rtgAsmLoadSliceMemSecondary(a)
 		return true
@@ -11031,7 +11457,7 @@ func rtgEmitSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			if !rtgEmitAppendAssignGeneral(g, &stmt, ep, 0) {
 				return false
 			}
-			return rtgEmitSliceValueRegs(g, ep, ep.args[e.firstArg])
+			return rtgEmitSliceValueRegs(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg))
 		}
 		if e.argCount == 2 || e.argCount == 3 {
 			if callee == rtgIdentMake {
@@ -11040,9 +11466,11 @@ func rtgEmitSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		}
 		if e.argCount == 1 {
 			conversion := rtgResolveType(meta, rtgConversionTypeFromExpr(g, ep, calleeLeft))
-			argIndex := ep.args[e.firstArg]
+			rtgTrustNonNil(conversion)
+			argIndex := rtg_runtime_UnsafeIntAt(ep.args, e.firstArg)
 			if conversion.kind == rtgTypeSlice && rtgTypeIsString(meta, rtgInferParsedExprType(g, ep, argIndex)) {
 				elem := rtgResolveType(meta, conversion.elem)
+				rtgTrustNonNil(elem)
 				if elem.kind == rtgTypeByte {
 					return rtgEmitByteSliceConversionRegs(g, ep, idx)
 				}
@@ -11064,6 +11492,7 @@ func rtgEmitSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgEmitStringSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	meta := g.meta
 	a := &g.asm
 	e := &ep.exprs[idx]
@@ -11077,15 +11506,22 @@ func rtgEmitStringSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) boo
 	if !rtgEmitStringValueRegs(g, ep, e.left) {
 		return false
 	}
-	if e.firstArg >= 0 {
+	if e.nameStart >= 0 {
+		return false
+	}
+	if e.firstArg >= 0 || e.right >= 0 {
 		baseOff := rtgAddUnnamedLocal(g, rtgTypeString)
 		lowOff := rtgAddUnnamedLocal(g, rtgTypeInt)
 		highOff := rtgAddUnnamedLocal(g, rtgTypeInt)
 		rtgAsmStorePrimaryStack(a, baseOff)
 		rtgAsmCopySecondaryToPrimary(a)
 		rtgAsmStorePrimaryStack(a, baseOff-8)
-		if !rtgEmitIntExpr(g, ep, e.firstArg) {
-			return false
+		if e.firstArg >= 0 {
+			if !rtgEmitIntExpr(g, ep, e.firstArg) {
+				return false
+			}
+		} else {
+			rtgAsmPrimaryImm(a, 0)
 		}
 		rtgAsmStorePrimaryStack(a, lowOff)
 		if e.right >= 0 {
@@ -11096,6 +11532,7 @@ func rtgEmitStringSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) boo
 		} else {
 			rtgAsmCopyStackSlot(a, baseOff-8, highOff)
 		}
+		rtgEmitSliceBoundsChecks(g, lowOff, highOff, highOff, baseOff-8)
 		rtgAsmLoadPrimaryTertiaryStack(a, highOff, lowOff)
 		rtgAsmSubPrimaryTertiary(a)
 		rtgAsmPushPrimary(a)
@@ -11104,20 +11541,14 @@ func rtgEmitStringSliceValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) boo
 		rtgAsmPopSecondary(a)
 		return true
 	}
-	if e.right >= 0 {
-		rtgAsmPushPrimary(a)
-		if !rtgEmitIntExpr(g, ep, e.right) {
-			return false
-		}
-		rtgAsmCopyPrimaryToSecondary(a)
-		rtgAsmPopPrimary(a)
-	}
 	return true
 }
 func rtgEmitSliceLiteralRegs(g *rtgLinearGen, ep *rtgExprParse, idx int, sliceType int) bool {
+	rtgTrustNonNil(g, ep)
 	a := &g.asm
 	e := &ep.exprs[idx]
 	t := rtgResolveType(g.meta, sliceType)
+	rtgTrustNonNil(t)
 	if t.kind != rtgTypeSlice {
 		return false
 	}
@@ -11140,14 +11571,17 @@ func rtgEmitSliceLiteralRegs(g *rtgLinearGen, ep *rtgExprParse, idx int, sliceTy
 	return true
 }
 func rtgEmitSliceLiteralBacking(g *rtgLinearGen, ep *rtgExprParse, idx int, sliceType int, backingOff int) bool {
+	rtgTrustNonNil(g, ep)
 	a := &g.asm
 	e := &ep.exprs[idx]
 	t := rtgResolveType(g.meta, sliceType)
+	rtgTrustNonNil(t)
 	if t.kind != rtgTypeSlice {
 		return false
 	}
 	elemType := t.elem
 	elemResolved := rtgResolveType(g.meta, elemType)
+	rtgTrustNonNil(elemResolved)
 	elemSize := rtgTypeSize(g.meta, elemType)
 	if elemSize < 1 {
 		elemSize = 8
@@ -11219,13 +11653,15 @@ func rtgEmitSliceLiteralBacking(g *rtgLinearGen, ep *rtgExprParse, idx int, slic
 	return true
 }
 func rtgEmitMakeSliceRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	a := &g.asm
 	e := &ep.exprs[idx]
 	if e.argCount != 2 && e.argCount != 3 {
 		return false
 	}
-	sliceType := rtgTypeFromExpr(g, ep, ep.args[e.firstArg])
+	sliceType := rtgTypeFromExpr(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg))
 	t := rtgResolveType(g.meta, sliceType)
+	rtgTrustNonNil(t)
 	if t.kind != rtgTypeSlice {
 		return false
 	}
@@ -11235,12 +11671,12 @@ func rtgEmitMakeSliceRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	}
 	lenOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
 	capOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
-	if !rtgEmitIntExpr(g, ep, ep.args[e.firstArg+1]) {
+	if !rtgEmitIntExpr(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
 		return false
 	}
 	rtgAsmStorePrimaryStack(a, lenOffset)
 	if e.argCount == 3 {
-		if !rtgEmitIntExpr(g, ep, ep.args[e.firstArg+2]) {
+		if !rtgEmitIntExpr(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg+2)) {
 			return false
 		}
 		rtgAsmStorePrimaryStack(a, capOffset)
@@ -11249,14 +11685,14 @@ func rtgEmitMakeSliceRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	}
 	backingSize := 32768
 	backingConst := false
-	lenConst := rtgEvalConstExpr(g, ep, ep.args[e.firstArg+1])
+	lenConst := rtgEvalConstExpr(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg+1))
 	if lenConst.ok && lenConst.value > 0 {
 		backingSize = rtgStaticSliceBackingSize(lenConst.value*elemSize, elemSize)
 		backingConst = true
 	}
 	if e.argCount == 3 {
 		backingConst = false
-		capConst := rtgEvalConstExpr(g, ep, ep.args[e.firstArg+2])
+		capConst := rtgEvalConstExpr(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg+2))
 		if capConst.ok && capConst.value > 0 {
 			backingSize = rtgStaticSliceBackingSize(capConst.value*elemSize, elemSize)
 			backingConst = true
@@ -11282,6 +11718,7 @@ func rtgEmitMakeSliceRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgEmitZeroDynamicMakeSlice(g *rtgLinearGen, lenOffset int, elemSize int) {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	rtgAsmLoadTertiaryStack(a, lenOffset)
 	rtgAsmMulTertiaryImm(a, elemSize)
@@ -11289,6 +11726,7 @@ func rtgEmitZeroDynamicMakeSlice(g *rtgLinearGen, lenOffset int, elemSize int) {
 }
 
 func rtgEnsureMakeZeroHelper(g *rtgLinearGen) int {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	if g.makeZeroEmitted {
 		return g.makeZeroLabel
@@ -11296,9 +11734,16 @@ func rtgEnsureMakeZeroHelper(g *rtgLinearGen) int {
 	g.makeZeroEmitted = true
 	g.makeZeroLabel = rtgAsmNewLabel(a)
 	afterLabel := rtgAsmNewLabel(a)
+	rtgAsmJmpMarkLabel(a, afterLabel, g.makeZeroLabel)
+	if rtgTargetArch == rtgArchAmd64 {
+		// Preserve the result pointer and ABI call register while REP STOSB
+		// clears RCX bytes beginning at RAX.
+		rtgAsmEmitText(a, "\x50\x57\x50\x5f\x31\xc0\xf3\xaa\x5f\x58\xc3")
+		rtgAsmMarkLabel(a, afterLabel)
+		return g.makeZeroLabel
+	}
 	loopLabel := rtgAsmNewLabel(a)
 	doneLabel := rtgAsmNewLabel(a)
-	rtgAsmJmpMarkLabel(a, afterLabel, g.makeZeroLabel)
 	rtgAsmCopyPrimaryToSecondary(a)
 	rtgAsmPushPrimary(a)
 	rtgAsmMarkLabel(a, loopLabel)
@@ -11330,6 +11775,7 @@ func rtgMakeStaticRingSlotCount(backingSize int) int {
 }
 
 func rtgEmitMakeStaticRingPrimary(g *rtgLinearGen, backingSize int, zeroSize int) {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	slotCount := rtgMakeStaticRingSlotCount(backingSize)
 	cursorOff := g.asm.bssSize
@@ -11337,13 +11783,14 @@ func rtgEmitMakeStaticRingPrimary(g *rtgLinearGen, backingSize int, zeroSize int
 	g.asm.bssSize += 8 + backingSize*slotCount
 	noWrapLabel := rtgAsmNewLabel(a)
 	rtgAsmLoadPrimaryBss(a, cursorOff)
-	rtgAsmCopyPrimaryToTertiary(a)
+	rtgAsmPushPrimary(a)
 	rtgAsmIncPrimary(a)
 	rtgAsmCmpPrimaryImm8(a, slotCount)
 	rtgAsmJnzLabel(a, noWrapLabel)
 	rtgAsmPrimaryImm(a, 0)
 	rtgAsmMarkLabel(a, noWrapLabel)
 	rtgAsmStorePrimaryBss(a, cursorOff)
+	rtgAsmPopTertiary(a)
 	rtgAsmMulTertiaryImm(a, backingSize)
 	rtgAsmPrimaryBssAddr(a, dataOff)
 	rtgAsmAddPrimaryTertiary(a)
@@ -11370,6 +11817,7 @@ func rtgEmitMakeStaticRingPrimary(g *rtgLinearGen, backingSize int, zeroSize int
 	}
 }
 func rtgEmitByteSliceConversionRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	a := &g.asm
 	e := &ep.exprs[idx]
 	if e.argCount != 1 {
@@ -11379,7 +11827,7 @@ func rtgEmitByteSliceConversionRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 	lenOff := rtgAddUnnamedLocal(g, rtgTypeInt)
 	destOff := rtgAddUnnamedLocal(g, rtgTypeInt)
 	idxOff := rtgAddUnnamedLocal(g, rtgTypeInt)
-	argIndex := ep.args[e.firstArg]
+	argIndex := rtg_runtime_UnsafeIntAt(ep.args, e.firstArg)
 	if !rtgEmitStringValueRegs(g, ep, argIndex) {
 		return false
 	}
@@ -11410,6 +11858,7 @@ func rtgEmitByteSliceConversionRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 }
 
 func rtgEmitRuneSliceConversionRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	a := &g.asm
 	e := &ep.exprs[idx]
 	if e.argCount != 1 {
@@ -11424,7 +11873,7 @@ func rtgEmitRuneSliceConversionRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 	destOff := rtgAddUnnamedLocal(g, sliceType)
 	rtgZeroLocalAtOffset(g, destOff)
 	loc := rtgSliceLocation{offset: destOff, typ: sliceType, ok: true}
-	if !rtgEmitStringValueRegs(g, ep, ep.args[e.firstArg]) {
+	if !rtgEmitStringValueRegs(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
 		return false
 	}
 	rtgAsmStorePrimarySecondaryStack(a, srcOff, lenOff)
@@ -11450,7 +11899,9 @@ func rtgEmitRuneSliceConversionRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 	return true
 }
 func rtgEmitCompositeFieldToStack(g *rtgLinearGen, ep *rtgExprParse, idx int, fieldType int, destOffset int) bool {
+	rtgTrustNonNil(g, ep)
 	fieldResolved := rtgResolveType(g.meta, fieldType)
+	rtgTrustNonNil(fieldResolved)
 	if fieldResolved.kind == rtgTypeMap {
 		return rtgEmitMapAssignToLocal(g, ep, idx, fieldType, destOffset)
 	}
@@ -11512,12 +11963,15 @@ func rtgEmitCompositeFieldToStack(g *rtgLinearGen, ep *rtgExprParse, idx int, fi
 	return true
 }
 func rtgEmitCopyStackToStack(g *rtgLinearGen, srcOffset int, destOffset int, size int) {
+	rtgTrustNonNil(g)
 	rtgEmitCopyNative(g, srcOffset, destOffset, size, rtgNativeCopyStackToStack)
 }
 func rtgEmitCopyStackToMemSecondary(g *rtgLinearGen, srcOffset int, destDisp int, size int) {
+	rtgTrustNonNil(g)
 	rtgEmitCopyNative(g, srcOffset, destDisp, size, rtgNativeCopyStackToMem)
 }
 func rtgEmitCopyMemSecondaryToStack(g *rtgLinearGen, destOffset int, size int) {
+	rtgTrustNonNil(g)
 	rtgEmitCopyNative(g, 0, destOffset, size, rtgNativeCopyMemToStack)
 }
 
@@ -11526,6 +11980,7 @@ const rtgNativeCopyStackToMem = 2
 const rtgNativeCopyMemToStack = 3
 
 func rtgEmitCopyNative(g *rtgLinearGen, srcOffset int, destOffset int, size int, mode int) {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	for at := 0; at < size; at += rtgNativeIntSize {
 		chunkSize := rtgNativeIntSize
@@ -11549,6 +12004,7 @@ const rtgPushStack = 1
 const rtgPushBss = 2
 
 func rtgEmitPushWords(g *rtgLinearGen, offset int, size int, wordSize int, mode int) {
+	rtgTrustNonNil(g)
 	size = rtgAlignValue(size, wordSize)
 	for at := size - wordSize; at >= 0; at -= wordSize {
 		if mode == rtgPushStack && wordSize == rtgNativeIntSize && (rtgTargetArch == rtgArchAmd64 || rtgTargetArch == rtgArch386) {
@@ -11566,16 +12022,20 @@ func rtgEmitPushWords(g *rtgLinearGen, offset int, size int, wordSize int, mode 
 	}
 }
 func rtgEmitIndexedStructToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, destType int, offset int) bool {
+	rtgTrustNonNil(g, ep)
 	meta := g.meta
 	a := &g.asm
 	e := &ep.exprs[idx]
 	leftType := rtgInferParsedExprType(g, ep, e.left)
 	sliceType := rtgResolveType(meta, leftType)
+	rtgTrustNonNil(sliceType)
 	if sliceType.kind != rtgTypeSlice {
 		return false
 	}
 	elemType := rtgResolveType(meta, sliceType.elem)
+	rtgTrustNonNil(elemType)
 	destResolved := rtgResolveType(meta, destType)
+	rtgTrustNonNil(destResolved)
 	if elemType.kind != rtgTypeStruct || destResolved.kind != rtgTypeStruct {
 		return false
 	}
@@ -11583,30 +12043,26 @@ func rtgEmitIndexedStructToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, des
 	if rtgTypeSize(meta, destType) != elemSize {
 		return false
 	}
-	if !rtgEmitIntExpr(g, ep, e.right) {
+	if !rtgEmitIndexAddressPrimary(g, ep, idx) {
 		return false
 	}
-	rtgAsmPushPrimary(a)
-	if !rtgEmitSlicePtrLen(g, ep, e.left) {
-		return false
-	}
-	rtgAsmPopTertiary(a)
-	rtgAsmMulTertiaryImm(a, elemSize)
 	rtgAsmCopyPrimaryToSecondary(a)
-	rtgAsmAddSecondaryTertiary(a)
 	rtgEmitCopyMemSecondaryToStack(g, offset, elemSize)
 	return true
 }
 func rtgPrepareStructCall(g *rtgLinearGen, ep *rtgExprParse, idx int, destType int) (int, int) {
+	rtgTrustNonNil(g, ep)
 	e := &ep.exprs[idx]
+	meta := g.meta
+	rtgTrustNonNil(meta)
 	fnIndex := rtgFuncInfoFromCall(g, ep, e.left)
-	if fnIndex < 0 || !rtgTypeUsesHiddenResult(g.meta, g.meta.funcs[fnIndex].resultType) {
+	if fnIndex < 0 || !rtgTypeUsesHiddenResult(meta, meta.funcs[fnIndex].resultType) {
 		return -1, 0
 	}
-	if rtgTypeSize(g.meta, destType) != rtgTypeSize(g.meta, g.meta.funcs[fnIndex].resultType) {
+	if rtgTypeSize(meta, destType) != rtgTypeSize(meta, meta.funcs[fnIndex].resultType) {
 		return -1, 0
 	}
-	fn := &g.meta.funcs[fnIndex]
+	fn := &meta.funcs[fnIndex]
 	receiverIndex := -1
 	receiverDotTok := 0
 	if fn.receiverType != 0 {
@@ -11623,9 +12079,9 @@ func rtgPrepareStructCall(g *rtgLinearGen, ep *rtgExprParse, idx int, destType i
 	}
 	wordCount++
 	if receiverIndex >= 0 {
-		words := rtgEmitMethodReceiverArgReverse(g, ep, receiverIndex, g.meta.params[fn.firstParam].typ)
+		words := rtgEmitMethodReceiverArgReverse(g, ep, receiverIndex, meta.params[fn.firstParam].typ)
 		if words < 0 {
-			words = rtgEmitMethodReceiverArgTokensReverse(g, receiverDotTok, g.meta.params[fn.firstParam].typ)
+			words = rtgEmitMethodReceiverArgTokensReverse(g, receiverDotTok, meta.params[fn.firstParam].typ)
 			if words < 0 {
 				return -1, 0
 			}
@@ -11636,6 +12092,7 @@ func rtgPrepareStructCall(g *rtgLinearGen, ep *rtgExprParse, idx int, destType i
 }
 
 func rtgEmitCallArgsReverse(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, fn *rtgFuncInfo, receiverIndex int) int {
+	rtgTrustNonNil(g, ep, e, fn)
 	fixed := fn.paramCount
 	if receiverIndex >= 0 {
 		fixed--
@@ -11655,7 +12112,7 @@ func rtgEmitCallArgsReverse(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, fn *r
 		if receiverIndex >= 0 {
 			paramIndex++
 		}
-		words := rtgEmitCallParamArgReverse(g, ep, ep.args[e.firstArg+i], fn.firstParam+paramIndex)
+		words := rtgEmitCallParamArgReverse(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg+i), fn.firstParam+paramIndex)
 		if words < 0 {
 			return -1
 		}
@@ -11664,6 +12121,7 @@ func rtgEmitCallArgsReverse(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, fn *r
 	return wordCount
 }
 func rtgEmitStructCallToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, destType int, offset int) bool {
+	rtgTrustNonNil(g, ep)
 	if rtgIsInterfaceMethodCall(g, ep, idx) {
 		return rtgEmitInterfaceMethodCall(g, ep, idx, offset, destType)
 	}
@@ -11677,6 +12135,7 @@ func rtgEmitStructCallToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, destTy
 	return true
 }
 func rtgEmitStructCallToBss(g *rtgLinearGen, ep *rtgExprParse, idx int, destType int, offset int) bool {
+	rtgTrustNonNil(g, ep)
 	fnIndex, wordCount := rtgPrepareStructCall(g, ep, idx, destType)
 	if fnIndex < 0 {
 		return false
@@ -11687,6 +12146,7 @@ func rtgEmitStructCallToBss(g *rtgLinearGen, ep *rtgExprParse, idx int, destType
 	return true
 }
 func rtgEmitUserCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	e := ep.exprs[idx]
 	if rtgIsInterfaceMethodCall(g, ep, idx) {
 		return rtgEmitInterfaceMethodCall(g, ep, idx, 0, rtgInterfaceMethodCallResultType(g, ep, idx))
@@ -11737,6 +12197,7 @@ func rtgEmitUserCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgFunctionValueCalleeType(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
+	rtgTrustNonNil(g, ep)
 	e := &ep.exprs[idx]
 	typ := 0
 	if e.kind == rtgExprSelector {
@@ -11766,6 +12227,7 @@ func rtgFunctionValueCalleeType(g *rtgLinearGen, ep *rtgExprParse, idx int) int 
 }
 
 func rtgMethodSelectorInfo(g *rtgLinearGen, ep *rtgExprParse, idx int) (int, bool) {
+	rtgTrustNonNil(g, ep)
 	e := &ep.exprs[idx]
 	if e.kind != rtgExprSelector {
 		return -1, false
@@ -11789,24 +12251,32 @@ func rtgMethodSelectorInfo(g *rtgLinearGen, ep *rtgExprParse, idx int) (int, boo
 }
 
 func rtgFindMethodByTypeAndName(g *rtgLinearGen, typ int, nameStart int, nameEnd int) int {
-	hash := rtgHashRange(g.prog.src, nameStart, nameEnd)
-	i := g.meta.funcBuckets[hash%len(g.meta.funcBuckets)]
+	rtgTrustNonNil(g)
+	p := g.prog
+	meta := g.meta
+	rtgTrustNonNil(p)
+	rtgTrustNonNil(meta)
+	hash := rtgHashRange(p.src, nameStart, nameEnd)
+	i := meta.funcBuckets[hash%len(meta.funcBuckets)]
 	for i >= 0 {
-		fn := &g.meta.funcs[i]
-		if fn.receiverType != 0 && rtgBytesEqualRange(g.prog.src, fn.nameStart, fn.nameEnd, nameStart, nameEnd) && rtgMethodReceiverTypeMatches(g.meta, typ, fn.receiverType) {
+		fn := &meta.funcs[i]
+		if fn.receiverType != 0 && rtgBytesEqualRange(p.src, fn.nameStart, fn.nameEnd, nameStart, nameEnd) && rtgMethodReceiverTypeMatches(meta, typ, fn.receiverType) {
 			return i
 		}
-		i = g.meta.funcNext[i]
+		i = meta.funcNext[i]
 	}
 	return -1
 }
 
 func rtgTypesEquivalent(meta *rtgMeta, left int, right int) bool {
+	rtgTrustNonNil(meta)
 	if left == right {
 		return true
 	}
 	l := rtgResolveType(meta, left)
+	rtgTrustNonNil(l)
 	r := rtgResolveType(meta, right)
+	rtgTrustNonNil(r)
 	if l.kind != r.kind {
 		return false
 	}
@@ -11838,11 +12308,13 @@ const rtgFunctionValueMethodExpression = 3
 const rtgFunctionValueBoundMethod = 4
 
 func rtgFunctionValueMode(meta *rtgMeta, fnIndex int, funcType int) int {
+	rtgTrustNonNil(meta)
 	if fnIndex < 0 || fnIndex >= len(meta.funcs) {
 		return 0
 	}
 	fn := &meta.funcs[fnIndex]
 	t := rtgResolveType(meta, funcType)
+	rtgTrustNonNil(t)
 	if t.kind != rtgTypeFunc || !rtgTypesEquivalent(meta, fn.resultType, t.elem) {
 		return 0
 	}
@@ -11868,6 +12340,7 @@ func rtgFunctionValueMode(meta *rtgMeta, fnIndex int, funcType int) int {
 }
 
 func rtgFunctionParamsMatchType(meta *rtgMeta, fn *rtgFuncInfo, t *rtgTypeInfo, first int) bool {
+	rtgTrustNonNil(meta, fn, t)
 	if fn.paramCount-first != t.count || t.count > 0 && meta.params[fn.firstParam+fn.paramCount-1].initStart != t.resolved {
 		return false
 	}
@@ -11880,9 +12353,11 @@ func rtgFunctionParamsMatchType(meta *rtgMeta, fn *rtgFuncInfo, t *rtgTypeInfo, 
 }
 
 func rtgEmitFunctionValueCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	e := &ep.exprs[idx]
 	funcType := rtgFunctionValueCalleeType(g, ep, e.left)
 	t := rtgResolveType(g.meta, funcType)
+	rtgTrustNonNil(t)
 	if t.kind != rtgTypeFunc || !rtgCallMatchesFuncType(t, e) {
 		return false
 	}
@@ -11898,6 +12373,7 @@ func rtgEmitFunctionValueCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgCallMatchesFuncType(t *rtgTypeInfo, e *rtgExpr) bool {
+	rtgTrustNonNil(t, e)
 	if t.resolved == 0 || e.nameStart != 0 {
 		return e.argCount == t.count
 	}
@@ -11905,6 +12381,7 @@ func rtgCallMatchesFuncType(t *rtgTypeInfo, e *rtgExpr) bool {
 }
 
 func rtgPrepareFunctionValueArgs(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, t *rtgTypeInfo, argOffsets []int) bool {
+	rtgTrustNonNil(g, ep, e, t)
 	fixed := t.count
 	if t.resolved != 0 && e.nameStart == 0 {
 		fixed--
@@ -11912,7 +12389,7 @@ func rtgPrepareFunctionValueArgs(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, 
 	for i := 0; i < fixed; i++ {
 		paramType := g.meta.fields[t.first+i].typ
 		argOffsets[i] = rtgAddUnnamedLocal(g, paramType)
-		if !rtgEmitExprToLocal(g, ep, ep.args[e.firstArg+i], argOffsets[i]) {
+		if !rtgEmitExprToLocal(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg+i), argOffsets[i]) {
 			return false
 		}
 	}
@@ -11927,7 +12404,9 @@ func rtgPrepareFunctionValueArgs(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, 
 }
 
 func rtgEmitVariadicArgsToLocal(g *rtgLinearGen, ep *rtgExprParse, first int, count int, sliceType int, offset int) bool {
+	rtgTrustNonNil(g, ep)
 	t := rtgResolveType(g.meta, sliceType)
+	rtgTrustNonNil(t)
 	if t.kind != rtgTypeSlice {
 		return false
 	}
@@ -11946,7 +12425,7 @@ func rtgEmitVariadicArgsToLocal(g *rtgLinearGen, ep *rtgExprParse, first int, co
 	}
 	for i := 0; i < count; i++ {
 		tempOffset := rtgAddUnnamedLocal(g, t.elem)
-		if !rtgEmitExprToLocal(g, ep, ep.args[first+i], tempOffset) {
+		if !rtgEmitExprToLocal(g, ep, rtg_runtime_UnsafeIntAt(ep.args, first+i), tempOffset) {
 			return false
 		}
 		rtgAsmLoadSecondaryStack(&g.asm, addrOffset)
@@ -11961,7 +12440,9 @@ func rtgEmitVariadicArgsToLocal(g *rtgLinearGen, ep *rtgExprParse, first int, co
 }
 
 func rtgEmitTypedLocalArgReverse(g *rtgLinearGen, offset int, typ int) int {
+	rtgTrustNonNil(g)
 	t := rtgResolveType(g.meta, typ)
+	rtgTrustNonNil(t)
 	size := rtgTypeSize(g.meta, typ)
 	if size < rtgBackendValueSlotSize {
 		size = rtgBackendValueSlotSize
@@ -11979,8 +12460,12 @@ func rtgCallWordSize(kind int) int {
 }
 
 func rtgEmitFunctionValueDispatch(g *rtgLinearGen, funcType int, handleOffset int, argOffsets []int) bool {
+	rtgTrustNonNil(g)
+	meta := g.meta
+	rtgTrustNonNil(meta)
 	doneLabel := rtgAsmNewLabel(&g.asm)
-	funcInfo := rtgResolveType(g.meta, funcType)
+	funcInfo := rtgResolveType(meta, funcType)
+	rtgTrustNonNil(funcInfo)
 	matched := false
 	closureTagOffset := -1
 	previousDeferPendingOffset := 0
@@ -11990,12 +12475,12 @@ func rtgEmitFunctionValueDispatch(g *rtgLinearGen, funcType int, handleOffset in
 	}
 	hiddenResultOffset := 0
 	resultType := funcInfo.elem
-	if rtgTypeUsesHiddenResult(g.meta, resultType) {
+	if rtgTypeUsesHiddenResult(meta, resultType) {
 		hiddenResultOffset = rtgAddUnnamedLocal(g, resultType)
 		rtgZeroLocalAtOffset(g, hiddenResultOffset)
 	}
-	for fnIndex := 0; fnIndex < len(g.meta.funcs); fnIndex++ {
-		mode := rtgFunctionValueMode(g.meta, fnIndex, funcType)
+	for fnIndex := 0; fnIndex < len(meta.funcs); fnIndex++ {
+		mode := rtgFunctionValueMode(meta, fnIndex, funcType)
 		direct := mode == rtgFunctionValueDirect || mode == rtgFunctionValueMethodExpression
 		closure := mode == rtgFunctionValueClosure || mode == rtgFunctionValueBoundMethod
 		if !direct && !closure {
@@ -12087,6 +12572,7 @@ func rtgEmitFunctionValueDispatch(g *rtgLinearGen, funcType int, handleOffset in
 }
 
 func rtgReloadClosureCaptures(g *rtgLinearGen, fnIndex int, _ int) bool {
+	rtgTrustNonNil(g)
 	closureIndex := rtgClosureIndexByFunction(g.meta, fnIndex)
 	if closureIndex < 0 {
 		return true
@@ -12111,42 +12597,47 @@ func rtgReloadClosureCaptures(g *rtgLinearGen, fnIndex int, _ int) bool {
 }
 
 func rtgEmitRuntimeArenaCall(g *rtgLinearGen, ep *rtgExprParse, idx int, fn *rtgFuncInfo) bool {
-	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_Exit") {
+	rtgTrustNonNil(g, ep, fn)
+	p := g.prog
+	rtgTrustNonNil(p)
+	if rtgBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "rtg_runtime_Exit") {
 		return rtgEmitRuntimeExit(g, ep, idx)
 	}
-	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaMark") {
+	if rtgBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaMark") {
 		return rtgEmitRuntimeArenaMark(g, ep, idx)
 	}
-	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaReset") {
+	if rtgBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaReset") {
 		return rtgEmitRuntimeArenaReset(g, ep, idx)
 	}
-	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistMark") {
+	if rtgBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistMark") {
 		return rtgEmitRuntimeArenaPersistMark(g, ep, idx)
 	}
-	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistReset") {
+	if rtgBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistReset") {
 		return rtgEmitRuntimeArenaPersistReset(g, ep, idx)
 	}
-	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistString") {
+	if rtgBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistString") {
 		return rtgEmitRuntimeArenaPersistString(g, ep, idx)
 	}
-	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistBytes") {
+	if rtgBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaPersistBytes") {
 		return rtgEmitRuntimeArenaPersistBytes(g, ep, idx)
 	}
-	if rtgBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaDiscard") {
+	if rtgBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "rtg_runtime_ArenaDiscard") {
 		return rtgEmitRuntimeArenaDiscard(g, ep, idx)
 	}
 	return false
 }
 
 func rtgEmitRuntimeExit(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	e := ep.exprs[idx]
-	if e.argCount != 1 || !rtgEmitIntExpr(g, ep, ep.args[e.firstArg]) {
+	if e.argCount != 1 || !rtgEmitIntExpr(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
 		return false
 	}
 	return rtgEmitExitStatus(g)
 }
 
 func rtgEmitExitStatus(g *rtgLinearGen) bool {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmExit(a)
@@ -12195,6 +12686,7 @@ func rtgEmitExitStatus(g *rtgLinearGen) bool {
 }
 
 func rtgEmitStaticWrite(g *rtgLinearGen, text string, fd int) bool {
+	rtgTrustNonNil(g)
 	var data []byte
 	for i := 0; i < len(text); i++ {
 		data = append(data, text[i])
@@ -12206,11 +12698,12 @@ func rtgEmitStaticWrite(g *rtgLinearGen, text string, fd int) bool {
 }
 
 func rtgEmitBuiltinPanic(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	e := ep.exprs[idx]
 	if e.argCount != 1 {
 		return false
 	}
-	argIndex := ep.args[e.firstArg]
+	argIndex := rtg_runtime_UnsafeIntAt(ep.args, e.firstArg)
 	if g.deferReturnLabel <= 0 {
 		return false
 	}
@@ -12222,6 +12715,7 @@ func rtgEmitBuiltinPanic(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgEmitPanicState(g *rtgLinearGen, valueOffset int) bool {
+	rtgTrustNonNil(g)
 	noPrevious := rtgAsmNewLabel(&g.asm)
 	rtgAsmLoadPrimaryBss(&g.asm, g.panicIDOff)
 	rtgAsmJzPrimary(&g.asm, noPrevious)
@@ -12252,17 +12746,182 @@ func rtgEmitPanicState(g *rtgLinearGen, valueOffset int) bool {
 }
 
 func rtgEmitRuntimeFault(g *rtgLinearGen) {
-	if g.meta.panicEnabled {
+	rtgTrustNonNil(g)
+	a := &g.asm
+	if g.meta.panicEnabled && g.deferReturnLabel > 0 {
 		valueOffset := rtgAddUnnamedLocal(g, rtgBuiltinTypeInterface)
-		rtgAsmStoreStackImm(&g.asm, valueOffset, 1)
-		rtgAsmStoreStackImm(&g.asm, valueOffset-rtgBackendValueSlotSize, rtgRuntimeTypeTag(g.meta, rtgTypeInt))
+		rtgAsmStoreStackImm(a, valueOffset, 1)
+		rtgAsmStoreStackImm(a, valueOffset-rtgBackendValueSlotSize, rtgRuntimeTypeTag(g.meta, rtgTypeInt))
 		rtgEmitPanicState(g, valueOffset)
 	} else {
-		rtgEmitExitStatus(g)
+		rtgAsmJmpLabel(a, rtgEnsureUncaughtRuntimeFaultHelper(g))
+	}
+}
+
+func rtgEnsureUncaughtRuntimeFaultHelper(g *rtgLinearGen) int {
+	rtgTrustNonNil(g)
+	if g.runtimeFaultLabel > 0 {
+		return g.runtimeFaultLabel - 1
+	}
+	a := &g.asm
+	label := rtgAsmNewLabel(a)
+	g.runtimeFaultLabel = label + 1
+	after := rtgAsmNewLabel(a)
+	rtgAsmJmpMarkLabel(a, after, label)
+	rtgEmitStaticWrite(g, "panic\n", 2)
+	rtgAsmPrimaryImm(a, 2)
+	rtgEmitExitStatus(g)
+	rtgAsmMarkLabel(a, after)
+	return label
+}
+
+func rtgEmitRuntimeNonNilPrimary(g *rtgLinearGen) {
+	rtgTrustNonNil(g)
+	a := &g.asm
+	if !g.meta.panicEnabled {
+		if rtgTargetArch == rtgArchAmd64 {
+			rtgAsmCallLabel(a, rtgAmd64EnsureRuntimeCheck(g, &g.runtimeNonNilLabel, 0, "\x48\x85\xc0\x74\x01\xc3\xe9\x00\x00\x00\x00"))
+		} else {
+			rtgAsmCallLabel(a, rtgEnsureNonNilCheckHelper(g))
+		}
+		return
+	}
+	ok := rtgAsmNewLabel(a)
+	rtgAsmJnzPrimary(a, ok)
+	rtgEmitRuntimeFault(g)
+	rtgAsmMarkLabel(a, ok)
+}
+
+func rtgEnsureNonNilCheckHelper(g *rtgLinearGen) int {
+	rtgTrustNonNil(g)
+	if rtgTargetArch == rtgArchAmd64 {
+		return rtgAmd64EnsureRuntimeCheck(g, &g.runtimeNonNilLabel, 0, "\x48\x85\xc0\x74\x01\xc3\xe9\x00\x00\x00\x00")
+	}
+	if g.runtimeNonNilLabel > 0 {
+		return g.runtimeNonNilLabel - 1
+	}
+	label := rtgAsmNewLabel(&g.asm)
+	g.runtimeNonNilLabel = label + 1
+	after := rtgAsmNewLabel(&g.asm)
+	ok := rtgAsmNewLabel(&g.asm)
+	rtgAsmJmpMarkLabel(&g.asm, after, label)
+	rtgAsmJnzPrimary(&g.asm, ok)
+	rtgAsmJmpLabel(&g.asm, rtgEnsureUncaughtRuntimeFaultHelper(g))
+	rtgAsmMarkLabel(&g.asm, ok)
+	rtgAsmRet(&g.asm)
+	rtgAsmMarkLabel(&g.asm, after)
+	return label
+}
+
+func rtgEmitRuntimeNonNilSecondary(g *rtgLinearGen) {
+	rtgTrustNonNil(g)
+	a := &g.asm
+	if !g.meta.panicEnabled {
+		if rtgTargetArch == rtgArchAmd64 {
+			rtgAsmEmit24(a, 0xd5ff41)
+			return
+		}
+		rtgAsmCallLabel(a, rtgEnsureNonNilSecondaryCheckHelper(g))
+		return
+	}
+	rtgAsmPushSecondary(a)
+	rtgAsmPopPrimary(a)
+	rtgEmitRuntimeNonNilPrimary(g)
+	rtgAsmCopyPrimaryToSecondary(a)
+}
+
+func rtgEnsureNonNilSecondaryCheckHelper(g *rtgLinearGen) int {
+	rtgTrustNonNil(g)
+	if rtgTargetArch == rtgArchAmd64 {
+		return rtgAmd64EnsureRuntimeCheck(g, &g.runtimeSecondaryLabel, 1, "\x48\x85\xd2\x74\x01\xc3\xe9\x00\x00\x00\x00")
+	}
+	if g.runtimeSecondaryLabel > 0 {
+		return g.runtimeSecondaryLabel - 1
+	}
+	label := rtgAsmNewLabel(&g.asm)
+	g.runtimeSecondaryLabel = label + 1
+	after := rtgAsmNewLabel(&g.asm)
+	ok := rtgAsmNewLabel(&g.asm)
+	rtgAsmJmpMarkLabel(&g.asm, after, label)
+	rtgAsmPushSecondary(&g.asm)
+	rtgAsmPopPrimary(&g.asm)
+	rtgAsmJnzPrimary(&g.asm, ok)
+	rtgAsmJmpLabel(&g.asm, rtgEnsureUncaughtRuntimeFaultHelper(g))
+	rtgAsmMarkLabel(&g.asm, ok)
+	rtgAsmRet(&g.asm)
+	rtgAsmMarkLabel(&g.asm, after)
+	return label
+}
+
+func rtgRuntimeNonNilLocalNeeded(g *rtgLinearGen, localIndex int) bool {
+	rtgTrustNonNil(g)
+	if localIndex < rtgNativeIntSize*8-1 {
+		bit := 1 << localIndex
+		if g.checkedPointerLocals&bit != 0 {
+			return false
+		}
+		g.checkedPointerLocals |= bit
+	}
+	return true
+}
+
+func rtgEmitRuntimeUnsafeIndex(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, size int) bool {
+	rtgTrustNonNil(g, ep, e)
+	if e.argCount != 2 || !rtgEmitSlicePtrLen(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+		return false
+	}
+	rtgAsmPushPrimary(&g.asm)
+	if !rtgEmitIntExpr(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
+		return false
+	}
+	rtgAsmCopyPrimaryToTertiary(&g.asm)
+	rtgAsmPopPrimary(&g.asm)
+	rtgAsmLoadPrimaryIndexTertiarySize(&g.asm, size)
+	if size == 4 {
+		rtgAsmNormalizePrimaryForKind(&g.asm, rtgTypeInt32)
+	}
+	return true
+}
+
+func rtgEmitRuntimeTruncateSlice(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr) bool {
+	rtgTrustNonNil(g)
+	rtgTrustNonNil(ep)
+	rtgTrustNonNil(e)
+	if e.argCount != 2 || !rtgEmitIntExpr(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+		return false
+	}
+	rtgAsmPushPrimary(&g.asm)
+	if !rtgEmitIntExpr(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
+		return false
+	}
+	rtgAsmPopSecondary(&g.asm)
+	rtgAsmStorePrimaryMemSecondaryDisp(&g.asm, rtgBackendValueSlotSize)
+	return true
+}
+
+func rtgEmitRuntimeTrustPointer(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr) bool {
+	rtgTrustNonNil(g, ep, e)
+	for i := 0; i < e.argCount; i++ {
+		arg := &ep.exprs[rtg_runtime_UnsafeIntAt(ep.args, e.firstArg+i)]
+		if arg.kind == rtgExprIdent {
+			local := rtgFindLocalIndex(g, arg.nameStart, arg.nameEnd)
+			if local >= 0 && local < rtgNativeIntSize*8-1 {
+				g.checkedPointerLocals |= 1 << local
+			}
+		}
+	}
+	return true
+}
+
+func rtgEmitRuntimeNonNilLocalSecondary(g *rtgLinearGen, localIndex int) {
+	rtgTrustNonNil(g)
+	if rtgRuntimeNonNilLocalNeeded(g, localIndex) {
+		rtgEmitRuntimeNonNilSecondary(g)
 	}
 }
 
 func rtgEmitBuiltinRecover(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	e := ep.exprs[idx]
 	if e.argCount != 0 {
 		return false
@@ -12276,6 +12935,7 @@ func rtgEmitBuiltinRecover(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgEmitProgramPanicCheck(g *rtgLinearGen) bool {
+	rtgTrustNonNil(g)
 	if !g.meta.panicEnabled {
 		return true
 	}
@@ -12323,6 +12983,7 @@ func rtgEmitProgramPanicCheck(g *rtgLinearGen) bool {
 }
 
 func rtgEmitRecoverToLocal(g *rtgLinearGen, offset int) bool {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	noneLabel := rtgAsmNewLabel(a)
 	clearLabel := rtgAsmNewLabel(a)
@@ -12355,6 +13016,7 @@ func rtgEmitRecoverToLocal(g *rtgLinearGen, offset int) bool {
 }
 
 func rtgEmitRuntimeArenaDiscard(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	e := ep.exprs[idx]
 	if e.argCount != 2 {
 		return false
@@ -12367,13 +13029,13 @@ func rtgEmitRuntimeArenaDiscard(g *rtgLinearGen, ep *rtgExprParse, idx int) bool
 	startOff := rtgAddUnnamedLocal(g, rtgTypeInt)
 	lenOff := rtgAddUnnamedLocal(g, rtgTypeInt)
 	doneLabel := rtgAsmNewLabel(a)
-	if !rtgEmitIntExpr(g, ep, ep.args[e.firstArg]) {
+	if !rtgEmitIntExpr(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
 		return false
 	}
 	rtgAmd64AsmAddRaxImm32(a, 4095)
 	rtgAmd64AsmAndRaxImm32(a, -4096)
 	rtgAsmStorePrimaryStack(a, startOff)
-	if !rtgEmitIntExpr(g, ep, ep.args[e.firstArg+1]) {
+	if !rtgEmitIntExpr(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
 		return false
 	}
 	rtgAmd64AsmAndRaxImm32(a, -4096)
@@ -12395,6 +13057,7 @@ func rtgEmitRuntimeArenaDiscard(g *rtgLinearGen, ep *rtgExprParse, idx int) bool
 }
 
 func rtgEmitRuntimeArenaMark(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	e := ep.exprs[idx]
 	if e.argCount != 0 {
 		return false
@@ -12412,11 +13075,12 @@ func rtgEmitRuntimeArenaMark(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgEmitRuntimeArenaReset(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	e := ep.exprs[idx]
 	if e.argCount != 1 {
 		return false
 	}
-	if !rtgEmitIntExpr(g, ep, ep.args[e.firstArg]) {
+	if !rtgEmitIntExpr(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
 		return false
 	}
 	rtgStringHeapOffsets(g)
@@ -12426,6 +13090,7 @@ func rtgEmitRuntimeArenaReset(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgEmitRuntimeArenaPersistMark(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	e := ep.exprs[idx]
 	if e.argCount != 0 {
 		return false
@@ -12436,11 +13101,12 @@ func rtgEmitRuntimeArenaPersistMark(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 }
 
 func rtgEmitRuntimeArenaPersistReset(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	e := ep.exprs[idx]
 	if e.argCount != 1 {
 		return false
 	}
-	if !rtgEmitIntExpr(g, ep, ep.args[e.firstArg]) {
+	if !rtgEmitIntExpr(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
 		return false
 	}
 	rtgStringHeapOffsets(g)
@@ -12454,6 +13120,7 @@ func rtgEmitRuntimeArenaPersistReset(g *rtgLinearGen, ep *rtgExprParse, idx int)
 }
 
 func rtgEmitRuntimeArenaPersistResetMadvise(g *rtgLinearGen) {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	markOff := rtgAddUnnamedLocal(g, rtgTypeInt)
 	oldOff := rtgAddUnnamedLocal(g, rtgTypeInt)
@@ -12486,21 +13153,24 @@ func rtgEmitRuntimeArenaPersistResetMadvise(g *rtgLinearGen) {
 }
 
 func rtgAmd64AsmAddRaxImm32(a *rtgAsm, imm int) {
+	rtgTrustNonNil(a)
 	rtgAsmEmit16(a, 0x0548)
 	rtgAsmEmit32(a, imm)
 }
 
 func rtgAmd64AsmAndRaxImm32(a *rtgAsm, imm int) {
+	rtgTrustNonNil(a)
 	rtgAsmEmit16(a, 0x2548)
 	rtgAsmEmit32(a, imm)
 }
 
 func rtgEmitRuntimeArenaPersistString(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	e := ep.exprs[idx]
 	if e.argCount != 1 {
 		return false
 	}
-	if !rtgEmitStringValueRegs(g, ep, ep.args[e.firstArg]) {
+	if !rtgEmitStringValueRegs(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
 		return false
 	}
 	a := &g.asm
@@ -12516,11 +13186,12 @@ func rtgEmitRuntimeArenaPersistString(g *rtgLinearGen, ep *rtgExprParse, idx int
 }
 
 func rtgEmitRuntimeArenaPersistBytes(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	e := ep.exprs[idx]
 	if e.argCount != 1 {
 		return false
 	}
-	if !rtgEmitSliceValueRegs(g, ep, ep.args[e.firstArg]) {
+	if !rtgEmitSliceValueRegs(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
 		return false
 	}
 	a := &g.asm
@@ -12537,6 +13208,7 @@ func rtgEmitRuntimeArenaPersistBytes(g *rtgLinearGen, ep *rtgExprParse, idx int)
 }
 
 func rtgEmitCopyBytesToPersistent(g *rtgLinearGen, srcOff int, lenOff int, destOff int) {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	if rtgTargetArch == rtgArchAmd64 {
 		rtgAsmEmit8(a, 0x57)
@@ -12571,6 +13243,7 @@ func rtgEmitCopyBytesToPersistent(g *rtgLinearGen, srcOff int, lenOff int, destO
 }
 
 func rtgEmitPersistentAllocToPrimary(g *rtgLinearGen, sizeOff int) {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	rtgAsmLoadPrimaryBss(a, g.stringHeapEndOff)
 	rtgAsmLoadTertiaryStack(a, sizeOff)
@@ -12579,11 +13252,12 @@ func rtgEmitPersistentAllocToPrimary(g *rtgLinearGen, sizeOff int) {
 }
 
 func rtgEmitBuiltinNew(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	e := &ep.exprs[idx]
 	if e.kind != rtgExprCall || e.argCount != 1 {
 		return false
 	}
-	targetType := rtgTypeFromExpr(g, ep, ep.args[e.firstArg])
+	targetType := rtgTypeFromExpr(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg))
 	if targetType == 0 {
 		return false
 	}
@@ -12596,6 +13270,7 @@ func rtgEmitBuiltinNew(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgEmitPersistentArenaReady(g *rtgLinearGen) {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	rtgStringHeapOffsets(g)
 	readyLabel := rtgAsmNewLabel(a)
@@ -12616,6 +13291,7 @@ func rtgEmitPersistentArenaReady(g *rtgLinearGen) {
 }
 
 func rtgEmitLinkStaticCall(g *rtgLinearGen, fn *rtgFuncInfo, wordCount int) bool {
+	rtgTrustNonNil(g, fn)
 	if rtgTargetIsDarwin() {
 		return rtgDarwinArm64EmitLinkStaticCall(g, fn, wordCount)
 	}
@@ -12639,6 +13315,7 @@ func rtgEmitLinkStaticCall(g *rtgLinearGen, fn *rtgFuncInfo, wordCount int) bool
 }
 
 func rtgWinAmd64CallStaticImport(a *rtgAsm, importID int, wordCount int) {
+	rtgTrustNonNil(a)
 	if wordCount > 0 {
 		rtgAsmPopTertiary(a)
 	}
@@ -12694,6 +13371,7 @@ func rtgWinAmd64CallStaticImport(a *rtgAsm, importID int, wordCount int) {
 }
 
 func rtgWinAmd64LoadRAXFromR10(a *rtgAsm, offset int) {
+	rtgTrustNonNil(a)
 	if offset <= 127 {
 		rtgAsmEmit4(a, 0x49, 0x8b, 0x42, offset)
 		return
@@ -12703,6 +13381,7 @@ func rtgWinAmd64LoadRAXFromR10(a *rtgAsm, offset int) {
 }
 
 func rtgWinAmd64LoadRAXFromRSP(a *rtgAsm, offset int) {
+	rtgTrustNonNil(a)
 	if offset <= 127 {
 		rtgAsmEmit5(a, 0x48, 0x8b, 0x44, 0x24, offset)
 		return
@@ -12712,6 +13391,7 @@ func rtgWinAmd64LoadRAXFromRSP(a *rtgAsm, offset int) {
 }
 
 func rtgWinAmd64StoreRAXToRSP(a *rtgAsm, offset int) {
+	rtgTrustNonNil(a)
 	if offset <= 127 {
 		rtgAsmEmit5(a, 0x48, 0x89, 0x44, 0x24, offset)
 		return
@@ -12721,6 +13401,7 @@ func rtgWinAmd64StoreRAXToRSP(a *rtgAsm, offset int) {
 }
 
 func rtgWinAmd64StoreR10ToRSP(a *rtgAsm, offset int) {
+	rtgTrustNonNil(a)
 	if offset <= 127 {
 		rtgAsmEmit5(a, 0x4c, 0x89, 0x54, 0x24, offset)
 		return
@@ -12730,6 +13411,7 @@ func rtgWinAmd64StoreR10ToRSP(a *rtgAsm, offset int) {
 }
 
 func rtgEmitArbitrarySyscall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	e := &ep.exprs[idx]
 	if e.argCount < 1 || e.argCount > 7 {
 		return false
@@ -12738,7 +13420,7 @@ func rtgEmitArbitrarySyscall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		if e.argCount != 4 {
 			return false
 		}
-		number := rtgEvalConstExpr(g, ep, ep.args[e.firstArg])
+		number := rtgEvalConstExpr(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg))
 		// The Darwin directory adapter uses one compiler-intrinsic selector,
 		// which is lowered to libc getdirentries rather than issued as a raw
 		// Darwin syscall number.
@@ -12747,7 +13429,7 @@ func rtgEmitArbitrarySyscall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		}
 	}
 	for i := e.argCount - 1; i >= 0; i-- {
-		argIndex := ep.args[e.firstArg+i]
+		argIndex := rtg_runtime_UnsafeIntAt(ep.args, e.firstArg+i)
 		if !rtgEmitSyscallArg(g, ep, argIndex) {
 			return false
 		}
@@ -12757,6 +13439,7 @@ func rtgEmitArbitrarySyscall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgEmitSyscallArg(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	typ := rtgInferParsedExprType(g, ep, idx)
 	if rtgTypeIsString(g.meta, typ) {
 		return rtgEmitStringPtrExpr(g, ep, idx)
@@ -12771,6 +13454,7 @@ func rtgEmitSyscallArg(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgEmitSyscallFromStack(g *rtgLinearGen, wordCount int) bool {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	if rtgTargetArch == rtgArchAmd64 {
 		rtgAsmPopPrimary(a)
@@ -12905,11 +13589,16 @@ func rtgEmitSyscallFromStack(g *rtgLinearGen, wordCount int) bool {
 	return false
 }
 func rtgEmitCallParamArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int, paramIndex int) int {
-	if paramIndex >= 0 && paramIndex < len(g.meta.params) {
-		param := &g.meta.params[paramIndex]
-		if rtgTypeIsSlice(g.meta, param.typ) {
+	rtgTrustNonNil(g, ep)
+	meta := g.meta
+	p := g.prog
+	rtgTrustNonNil(meta)
+	rtgTrustNonNil(p)
+	if paramIndex >= 0 && paramIndex < len(meta.params) {
+		param := &meta.params[paramIndex]
+		if rtgTypeIsSlice(meta, param.typ) {
 			e := &ep.exprs[idx]
-			if e.kind == rtgExprIdent && rtgBytesEqualText(g.prog.src, e.nameStart, e.nameEnd, "nil") {
+			if e.kind == rtgExprIdent && rtgBytesEqualText(p.src, e.nameStart, e.nameEnd, "nil") {
 				if !rtgEmitSliceValueRegs(g, ep, idx) {
 					return -1
 				}
@@ -12917,7 +13606,8 @@ func rtgEmitCallParamArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int, para
 				return 3
 			}
 		}
-		resolved := rtgResolveType(g.meta, param.typ)
+		resolved := rtgResolveType(meta, param.typ)
+		rtgTrustNonNil(resolved)
 		if resolved.kind == rtgTypeInterface {
 			tempOffset := rtgAddUnnamedLocal(g, param.typ)
 			if !rtgEmitInterfaceAssignToLocal(g, ep, idx, tempOffset) {
@@ -12928,6 +13618,7 @@ func rtgEmitCallParamArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int, para
 			return 2
 		}
 		source := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, idx))
+		rtgTrustNonNil(source)
 		if resolved.kind == rtgTypeFloat64 || source.kind == rtgTypeFloat64 {
 			if !rtgEmitScalarExprForKind(g, ep, idx, resolved.kind) {
 				return -1
@@ -12939,9 +13630,11 @@ func rtgEmitCallParamArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int, para
 	return rtgEmitCallArgReverse(g, ep, idx)
 }
 func rtgEmitMethodReceiverArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int, receiverType int) int {
+	rtgTrustNonNil(g, ep)
 	meta := g.meta
 	a := &g.asm
 	receiver := rtgResolveType(meta, receiverType)
+	rtgTrustNonNil(receiver)
 	exprType := rtgInferParsedExprType(g, ep, idx)
 	actualExprType := exprType
 	e := &ep.exprs[idx]
@@ -12952,6 +13645,7 @@ func rtgEmitMethodReceiverArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int,
 		}
 	}
 	actualExprResolved := rtgResolveType(meta, actualExprType)
+	rtgTrustNonNil(actualExprResolved)
 	if receiver.kind == rtgTypePointer {
 		if actualExprResolved.kind == rtgTypePointer {
 			if !rtgEmitIntExpr(g, ep, idx) {
@@ -12983,6 +13677,7 @@ func rtgEmitMethodReceiverArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int,
 	return rtgEmitCallArgReverse(g, ep, idx)
 }
 func rtgEmitMethodReceiverArgTokensReverse(g *rtgLinearGen, dotTok int, receiverType int) int {
+	rtgTrustNonNil(g)
 	if dotTok <= 0 {
 		return -1
 	}
@@ -12991,12 +13686,14 @@ func rtgEmitMethodReceiverArgTokensReverse(g *rtgLinearGen, dotTok int, receiver
 		return -1
 	}
 	receiverEp := rtgNewExprParse()
+	rtgTrustNonNil(receiverEp)
 	if !rtgParseExpressionOK(receiverEp, g.prog, start, dotTok) {
 		return -1
 	}
 	return rtgEmitMethodReceiverArgReverse(g, receiverEp, len(receiverEp.exprs)-1, receiverType)
 }
 func rtgEmitAddressPrimary(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	a := &g.asm
 	e := &ep.exprs[idx]
 	if e.kind == rtgExprIdent {
@@ -13025,19 +13722,28 @@ func rtgEmitAddressPrimary(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		return true
 	}
 	if e.kind == rtgExprUnary && rtgTokCharIs(g.prog, e.tok, '*') {
-		return rtgEmitIntExpr(g, ep, e.left)
+		if !rtgEmitIntExpr(g, ep, e.left) {
+			return false
+		}
+		rtgEmitRuntimeNonNilPrimary(g)
+		return true
 	}
 	return false
 }
 func rtgEmitVariadicArgSliceReverse(g *rtgLinearGen, ep *rtgExprParse, first int, count int, sliceType int) bool {
+	rtgTrustNonNil(g, ep)
 	offset := rtgAddUnnamedLocal(g, sliceType)
 	return rtgEmitVariadicArgsToLocal(g, ep, first, count, sliceType, offset) && rtgEmitTypedLocalArgReverse(g, offset, sliceType) == rtgBackendSliceWordCount
 }
 func rtgEmitCallArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
+	rtgTrustNonNil(g, ep)
 	p := g.prog
+	meta := g.meta
+	rtgTrustNonNil(p)
+	rtgTrustNonNil(meta)
 	a := &g.asm
 	typ := rtgInferParsedExprType(g, ep, idx)
-	if rtgResolveType(g.meta, typ).kind == rtgTypeInterface {
+	if rtgResolveType(meta, typ).kind == rtgTypeInterface {
 		e := &ep.exprs[idx]
 		if e.kind != rtgExprIdent {
 			return -1
@@ -13050,7 +13756,7 @@ func rtgEmitCallArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 		rtgAsmPushStackWord(a, g.locals[localIndex].offset)
 		return 2
 	}
-	if rtgTypeIsSlice(g.meta, typ) {
+	if rtgTypeIsSlice(meta, typ) {
 		e := &ep.exprs[idx]
 		if e.kind == rtgExprIdent {
 			localIndex := rtgFindLocalIndex(g, e.nameStart, e.nameEnd)
@@ -13089,6 +13795,7 @@ func rtgEmitCallArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 		return rtgEmitTupleArgReverse(g, ep, idx, typ)
 	}
 	resolved := rtgResolveType(g.meta, typ)
+	rtgTrustNonNil(resolved)
 	if resolved.kind == rtgTypeStruct || resolved.kind == rtgTypeArray {
 		return rtgEmitStructArgReverse(g, ep, idx, typ)
 	}
@@ -13134,6 +13841,7 @@ func rtgEmitCallArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 }
 
 func rtgLocalStructSelectorOffset(g *rtgLinearGen, ep *rtgExprParse, idx int) (int, bool) {
+	rtgTrustNonNil(g, ep)
 	if rtgTargetArch != rtgArchAmd64 {
 		return 0, false
 	}
@@ -13150,6 +13858,7 @@ func rtgLocalStructSelectorOffset(g *rtgLinearGen, ep *rtgExprParse, idx int) (i
 		return 0, false
 	}
 	baseType := rtgResolveType(g.meta, g.locals[localIndex].typ)
+	rtgTrustNonNil(baseType)
 	if baseType.kind != rtgTypeStruct {
 		return 0, false
 	}
@@ -13161,6 +13870,7 @@ func rtgLocalStructSelectorOffset(g *rtgLinearGen, ep *rtgExprParse, idx int) (i
 }
 
 func rtgEmitTupleArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int, typ int) int {
+	rtgTrustNonNil(g, ep)
 	e := &ep.exprs[idx]
 	if e.kind != rtgExprCall {
 		return -1
@@ -13170,6 +13880,7 @@ func rtgEmitTupleArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int, typ int)
 		return -1
 	}
 	tuple := rtgResolveType(g.meta, typ)
+	rtgTrustNonNil(tuple)
 	wordCount := 0
 	for i := tuple.count - 1; i >= 0; i-- {
 		field := g.meta.fields[tuple.first+i]
@@ -13180,6 +13891,7 @@ func rtgEmitTupleArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int, typ int)
 	return wordCount
 }
 func rtgEmitStructArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int, typ int) int {
+	rtgTrustNonNil(g, ep)
 	meta := g.meta
 	a := &g.asm
 	size := rtgTypeSize(meta, typ)
@@ -13209,7 +13921,9 @@ func rtgEmitStructArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int, typ int
 	if e.kind == rtgExprIndex {
 		leftType := rtgInferParsedExprType(g, ep, e.left)
 		sliceType := rtgResolveType(meta, leftType)
+		rtgTrustNonNil(sliceType)
 		elemType := rtgResolveType(meta, sliceType.elem)
+		rtgTrustNonNil(elemType)
 		if (sliceType.kind != rtgTypeSlice && sliceType.kind != rtgTypeArray) ||
 			(elemType.kind != rtgTypeStruct && elemType.kind != rtgTypeArray) || rtgTypeSize(meta, sliceType.elem) != size {
 			return -1
@@ -13240,6 +13954,7 @@ func rtgEmitStructArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int, typ int
 		if !rtgEmitIntExpr(g, ep, e.left) {
 			return -1
 		}
+		rtgEmitRuntimeNonNilPrimary(g)
 		rtgAsmCopyPrimaryToSecondary(a)
 		rtgEmitPushWords(g, 0, size, wordSize, 0)
 		return wordCount
@@ -13263,6 +13978,7 @@ func rtgEmitStructArgReverse(g *rtgLinearGen, ep *rtgExprParse, idx int, typ int
 	return -1
 }
 func rtgEmitAppendAssignGeneral(g *rtgLinearGen, stmt *rtgStmt, ep *rtgExprParse, assignTok int) bool {
+	rtgTrustNonNil(g, stmt, ep)
 	p := g.prog
 	if len(ep.exprs) == 0 {
 		return false
@@ -13278,6 +13994,7 @@ func rtgEmitAppendAssignGeneral(g *rtgLinearGen, stmt *rtgStmt, ep *rtgExprParse
 	locEp := ep
 	if assignTok > stmt.startTok {
 		lhs := rtgNewExprParse()
+		rtgTrustNonNil(lhs)
 		if rtgParseExpressionOK(lhs, p, stmt.startTok, assignTok) {
 			lhsIndex := len(lhs.exprs) - 1
 			rtgSetSliceLocationFromExpr(g, lhs, lhsIndex, &loc)
@@ -13285,7 +14002,7 @@ func rtgEmitAppendAssignGeneral(g *rtgLinearGen, stmt *rtgStmt, ep *rtgExprParse
 		}
 	}
 	if !loc.ok {
-		rtgSetSliceLocationFromExpr(g, ep, ep.args[root.firstArg], &loc)
+		rtgSetSliceLocationFromExpr(g, ep, rtg_runtime_UnsafeIntAt(ep.args, root.firstArg), &loc)
 		locEp = ep
 	}
 	if !loc.ok {
@@ -13295,8 +14012,10 @@ func rtgEmitAppendAssignGeneral(g *rtgLinearGen, stmt *rtgStmt, ep *rtgExprParse
 }
 
 func rtgEmitAppendAssignDifferentSource(g *rtgLinearGen, stmt *rtgStmt, ep *rtgExprParse, root *rtgExpr, assignTok int) bool {
+	rtgTrustNonNil(g, stmt, ep, root)
 	p := g.prog
 	lhs := rtgNewExprParse()
+	rtgTrustNonNil(lhs)
 	lhsIndex := rtgParseExpressionRoot(lhs, p, stmt.startTok, assignTok)
 	if lhsIndex < 0 {
 		return false
@@ -13306,12 +14025,12 @@ func rtgEmitAppendAssignDifferentSource(g *rtgLinearGen, stmt *rtgStmt, ep *rtgE
 	if !lhsLoc.ok {
 		return false
 	}
-	sourceType := rtgInferParsedExprType(g, ep, ep.args[root.firstArg])
+	sourceType := rtgInferParsedExprType(g, ep, rtg_runtime_UnsafeIntAt(ep.args, root.firstArg))
 	if !rtgTypeIsSlice(g.meta, sourceType) {
 		return false
 	}
 	tempOffset := rtgAddUnnamedLocal(g, sourceType)
-	if !rtgEmitSliceValueRegs(g, ep, ep.args[root.firstArg]) {
+	if !rtgEmitSliceValueRegs(g, ep, rtg_runtime_UnsafeIntAt(ep.args, root.firstArg)) {
 		return false
 	}
 	rtgAsmStoreSliceStack(&g.asm, tempOffset)
@@ -13325,6 +14044,7 @@ func rtgEmitAppendAssignDifferentSource(g *rtgLinearGen, stmt *rtgStmt, ep *rtgE
 }
 
 func rtgStoreSliceRegsToLocation(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSliceLocation) bool {
+	rtgTrustNonNil(g, locEp, loc)
 	if loc.global {
 		rtgAsmStoreSliceBss(&g.asm, loc.offset)
 		return true
@@ -13342,6 +14062,7 @@ func rtgStoreSliceRegsToLocation(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgS
 }
 
 func rtgEmitSliceLocationHeaderAddressSecondary(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSliceLocation) bool {
+	rtgTrustNonNil(g, locEp, loc)
 	if loc.indirect {
 		rtgAsmLoadSecondaryStack(&g.asm, loc.offset)
 		return true
@@ -13367,6 +14088,7 @@ func rtgEmitSliceLocationHeaderAddressSecondary(g *rtgLinearGen, locEp *rtgExprP
 }
 
 func rtgAppendAssignLhsMatchesSource(p *rtgProgram, stmt *rtgStmt, ep *rtgExprParse, root *rtgExpr, assignTok int) bool {
+	rtgTrustNonNil(p, stmt, ep, root)
 	firstStart := root.tok + 1
 	closeTok := rtgFindMatchingExprClose(p, root.tok+1, ep.end, '(', ')')
 	if closeTok <= firstStart {
@@ -13380,6 +14102,7 @@ func rtgAppendAssignLhsMatchesSource(p *rtgProgram, stmt *rtgStmt, ep *rtgExprPa
 }
 
 func rtgTokenRangesEqualSource(p *rtgProgram, aStartTok int, aEndTok int, bStartTok int, bEndTok int) bool {
+	rtgTrustNonNil(p)
 	for aStartTok < aEndTok && rtgTokIsSpaceLike(p, aStartTok) {
 		aStartTok++
 	}
@@ -13403,6 +14126,7 @@ func rtgTokenRangesEqualSource(p *rtgProgram, aStartTok int, aEndTok int, bStart
 }
 
 func rtgTokIsSpaceLike(p *rtgProgram, tok int) bool {
+	rtgTrustNonNil(p)
 	if tok < 0 || tok >= rtgTokCount(p) {
 		return false
 	}
@@ -13410,16 +14134,19 @@ func rtgTokIsSpaceLike(p *rtgProgram, tok int) bool {
 }
 
 func rtgEmitAppendToLocation(g *rtgLinearGen, stmt *rtgStmt, ep *rtgExprParse, locEp *rtgExprParse, loc *rtgSliceLocation, root *rtgExpr) bool {
+	rtgTrustNonNil(g, stmt, ep, locEp, loc, root)
 	t := rtgResolveType(g.meta, loc.typ)
+	rtgTrustNonNil(t)
 	if t.kind != rtgTypeSlice {
 		return false
 	}
 	elem := rtgResolveType(g.meta, t.elem)
+	rtgTrustNonNil(elem)
 	if root.nameStart == 1 {
 		if root.argCount != 2 {
 			return false
 		}
-		valueIndex := ep.args[root.firstArg+1]
+		valueIndex := rtg_runtime_UnsafeIntAt(ep.args, root.firstArg+1)
 		if elem.kind == rtgTypeByte && rtgTypeIsString(g.meta, rtgInferParsedExprType(g, ep, valueIndex)) {
 			return rtgEmitAppendStringBytesToLocation(g, ep, valueIndex, locEp, loc)
 		}
@@ -13428,7 +14155,7 @@ func rtgEmitAppendToLocation(g *rtgLinearGen, stmt *rtgStmt, ep *rtgExprParse, l
 	if root.argCount > 2 {
 		temps := rtgFixedIntScratch(root.argCount - 1)
 		for arg := 1; arg < root.argCount; arg++ {
-			valueIndex := ep.args[root.firstArg+arg]
+			valueIndex := rtg_runtime_UnsafeIntAt(ep.args, root.firstArg+arg)
 			temp := rtgAddUnnamedLocal(g, t.elem)
 			if !rtgEmitExprToLocal(g, ep, valueIndex, temp) {
 				return false
@@ -13443,7 +14170,7 @@ func rtgEmitAppendToLocation(g *rtgLinearGen, stmt *rtgStmt, ep *rtgExprParse, l
 		return true
 	}
 	for arg := 1; arg < root.argCount; arg++ {
-		valueIndex := ep.args[root.firstArg+arg]
+		valueIndex := rtg_runtime_UnsafeIntAt(ep.args, root.firstArg+arg)
 		if !rtgEmitAppendOneToLocation(g, stmt, ep, locEp, loc, root, elem, t.elem, valueIndex) {
 			return false
 		}
@@ -13452,6 +14179,7 @@ func rtgEmitAppendToLocation(g *rtgLinearGen, stmt *rtgStmt, ep *rtgExprParse, l
 }
 
 func rtgEmitAppendOneToLocation(g *rtgLinearGen, stmt *rtgStmt, ep *rtgExprParse, locEp *rtgExprParse, loc *rtgSliceLocation, root *rtgExpr, elem *rtgTypeInfo, elemType int, valueIndex int) bool {
+	rtgTrustNonNil(g, stmt, ep, locEp, loc, root, elem)
 	p := g.prog
 	if elem.kind == rtgTypeStruct {
 		value := &ep.exprs[valueIndex]
@@ -13511,6 +14239,7 @@ func rtgEmitAppendOneToLocation(g *rtgLinearGen, stmt *rtgStmt, ep *rtgExprParse
 }
 
 func rtgEmitAppendLocalToLocation(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSliceLocation, elem *rtgTypeInfo, elemType int, offset int) bool {
+	rtgTrustNonNil(g, locEp, loc, elem)
 	a := &g.asm
 	if rtgTypeKindIsScalarValue(elem.kind) || elem.kind == rtgTypePointer {
 		elemSize := rtgScalarKindSize(elem.kind)
@@ -13555,6 +14284,7 @@ func rtgEmitAppendLocalToLocation(g *rtgLinearGen, locEp *rtgExprParse, loc *rtg
 }
 
 func rtgBinaryUsesFloat(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr) bool {
+	rtgTrustNonNil(g, ep, e)
 	p := g.prog
 	if rtgTok2Is(p, e.tok, '&', '&') {
 		return false
@@ -13563,10 +14293,12 @@ func rtgBinaryUsesFloat(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr) bool {
 		return false
 	}
 	left := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, e.left))
+	rtgTrustNonNil(left)
 	if left.kind == rtgTypeFloat64 {
 		return true
 	}
 	right := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, e.right))
+	rtgTrustNonNil(right)
 	if right.kind == rtgTypeFloat64 {
 		return true
 	}
@@ -13579,6 +14311,7 @@ func rtgBinaryUsesFloat(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr) bool {
 	return rtgExprValueIsFloat(g, ep, e.right)
 }
 func rtgExprValueIsFloat(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	p := g.prog
 	e := &ep.exprs[idx]
 	if e.kind == rtgExprFloat {
@@ -13589,6 +14322,7 @@ func rtgExprValueIsFloat(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			return rtgExprValueIsFloat(g, ep, e.left)
 		}
 		typ := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, idx))
+		rtgTrustNonNil(typ)
 		return typ.kind == rtgTypeFloat64
 	}
 	if e.kind == rtgExprBinary {
@@ -13602,11 +14336,13 @@ func rtgExprValueIsFloat(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	}
 	if e.kind == rtgExprIdent || e.kind == rtgExprCall || e.kind == rtgExprIndex || e.kind == rtgExprSelector {
 		typ := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, idx))
+		rtgTrustNonNil(typ)
 		return typ.kind == rtgTypeFloat64
 	}
 	return false
 }
 func rtgExprCanFoldConst(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	if idx < 0 {
 		return false
 	}
@@ -13653,7 +14389,7 @@ func rtgExprCanFoldConst(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		if e.argCount != 1 {
 			return false
 		}
-		argIndex := ep.args[e.firstArg]
+		argIndex := rtg_runtime_UnsafeIntAt(ep.args, e.firstArg)
 		argFold := rtgExprCanFoldConst(g, ep, argIndex)
 		if !argFold {
 			return false
@@ -13670,6 +14406,7 @@ func rtgExprCanFoldConst(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	return false
 }
 func rtgEmitAppendExpansionToLocation(g *rtgLinearGen, ep *rtgExprParse, locEp *rtgExprParse, loc *rtgSliceLocation, elemType int, valueIndex int) bool {
+	rtgTrustNonNil(g, ep, locEp, loc)
 	a := &g.asm
 	elemSize := rtgTypeSize(g.meta, elemType)
 	if elemSize < 1 {
@@ -13677,6 +14414,7 @@ func rtgEmitAppendExpansionToLocation(g *rtgLinearGen, ep *rtgExprParse, locEp *
 	}
 	sourceType := rtgInferParsedExprType(g, ep, valueIndex)
 	source := rtgResolveType(g.meta, sourceType)
+	rtgTrustNonNil(source)
 	if source.kind != rtgTypeSlice {
 		return false
 	}
@@ -13758,6 +14496,7 @@ func rtgEmitAppendExpansionToLocation(g *rtgLinearGen, ep *rtgExprParse, locEp *
 	return true
 }
 func rtgEmitAppendExpansionCopyElement(g *rtgLinearGen, elemSize int, srcPtr int, srcIndex int, destPtr int, destLen int) {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	if elemSize == 1 || elemSize == 2 || elemSize == 4 || elemSize == 8 {
 		rtgAsmLoadPrimaryTertiaryStack(a, srcPtr, srcIndex)
@@ -13781,6 +14520,7 @@ func rtgEmitAppendExpansionCopyElement(g *rtgLinearGen, elemSize int, srcPtr int
 	}
 }
 func rtgFindAppendCompositeTypeToken(p *rtgProgram, openTok int, end int) int {
+	rtgTrustNonNil(p)
 	if openTok < 0 || openTok >= end || !rtgTokCharIs(p, openTok, '(') {
 		return -1
 	}
@@ -13817,6 +14557,7 @@ func rtgFindAppendCompositeTypeToken(p *rtgProgram, openTok int, end int) int {
 	return -1
 }
 func rtgEmitAppendScalarToLocation(g *rtgLinearGen, ep *rtgExprParse, locEp *rtgExprParse, loc *rtgSliceLocation, elemKind int, valueIndex int) bool {
+	rtgTrustNonNil(g, ep, locEp, loc)
 	a := &g.asm
 	elemSize := rtgScalarKindSize(elemKind)
 	if !rtgEmitScalarExprForKind(g, ep, valueIndex, elemKind) {
@@ -13841,6 +14582,7 @@ func rtgEmitAppendScalarToLocation(g *rtgLinearGen, ep *rtgExprParse, locEp *rtg
 	return true
 }
 func rtgEmitAppendDestPrimary(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSliceLocation, elemSize int) bool {
+	rtgTrustNonNil(g, locEp, loc)
 	label := rtgEnsureAppendAddrHelper(g)
 	if !rtgEmitSliceSlotAddrs(g, locEp, loc, elemSize) {
 		return false
@@ -13850,12 +14592,14 @@ func rtgEmitAppendDestPrimary(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSlic
 	return true
 }
 func rtgEnsureAppendScalarHelper(g *rtgLinearGen, elemKind int) int {
+	rtgTrustNonNil(g)
 	if rtgScalarKindSize(elemKind) == 1 {
 		return rtgEnsureAppend8Helper(g)
 	}
 	return rtgEnsureAppend64Helper(g)
 }
 func rtgEmitAppendStringToLocation(g *rtgLinearGen, ep *rtgExprParse, locEp *rtgExprParse, loc *rtgSliceLocation, valueIndex int) bool {
+	rtgTrustNonNil(g, ep, locEp, loc)
 	a := &g.asm
 	rtgEnsureAppendAddrHelper(g)
 	if !rtgEmitStringValueRegs(g, ep, valueIndex) {
@@ -13870,13 +14614,17 @@ func rtgEmitAppendStringToLocation(g *rtgLinearGen, ep *rtgExprParse, locEp *rtg
 	return true
 }
 func rtgSetSliceLocationFromExpr(g *rtgLinearGen, ep *rtgExprParse, idx int, loc *rtgSliceLocation) {
+	rtgTrustNonNil(g, ep, loc)
+	meta := g.meta
+	rtgTrustNonNil(meta)
 	e := &ep.exprs[idx]
 	if e.kind == rtgExprIdent {
 		localIndex := rtgFindLocalIndex(g, e.nameStart, e.nameEnd)
 		if localIndex < 0 {
 			globalOffset := rtgFindGlobalOffset(g, e.nameStart, e.nameEnd)
 			globalType := rtgFindGlobalType(g, e.nameStart, e.nameEnd)
-			kind := rtgResolveType(g.meta, globalType).kind
+			kind := rtgResolveType(meta, globalType).kind
+			rtgTrustNonNil(kind)
 			if globalOffset < 0 || kind != rtgTypeSlice {
 				return
 			}
@@ -13886,7 +14634,8 @@ func rtgSetSliceLocationFromExpr(g *rtgLinearGen, ep *rtgExprParse, idx int, loc
 			loc.ok = true
 			return
 		}
-		kind := rtgResolveType(g.meta, g.locals[localIndex].typ).kind
+		kind := rtgResolveType(meta, g.locals[localIndex].typ).kind
+		rtgTrustNonNil(kind)
 		if kind != rtgTypeSlice {
 			return
 		}
@@ -13899,6 +14648,7 @@ func rtgSetSliceLocationFromExpr(g *rtgLinearGen, ep *rtgExprParse, idx int, loc
 	if e.kind == rtgExprSelector {
 		fieldType := rtgInferParsedExprType(g, ep, idx)
 		kind := rtgResolveType(g.meta, fieldType).kind
+		rtgTrustNonNil(kind)
 		if kind != rtgTypeSlice {
 			return
 		}
@@ -13911,6 +14661,7 @@ func rtgSetSliceLocationFromExpr(g *rtgLinearGen, ep *rtgExprParse, idx int, loc
 	if e.kind == rtgExprIndex {
 		valueType := rtgInferParsedExprType(g, ep, idx)
 		kind := rtgResolveType(g.meta, valueType).kind
+		rtgTrustNonNil(kind)
 		if kind != rtgTypeSlice {
 			return
 		}
@@ -13934,6 +14685,7 @@ func rtgSetSliceLocationFromExpr(g *rtgLinearGen, ep *rtgExprParse, idx int, loc
 	}
 }
 func rtgEmitEnsureMemSlice(g *rtgLinearGen, elemSize int) {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	if elemSize < 1 {
 		elemSize = 8
@@ -13952,6 +14704,7 @@ func rtgEmitEnsureMemSlice(g *rtgLinearGen, elemSize int) {
 	rtgAsmMarkLabel(a, okLabel)
 }
 func rtgEmitAppendStructCompositeTokens(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSliceLocation, elemType int, typeTok int) bool {
+	rtgTrustNonNil(g, locEp, loc)
 	p := g.prog
 	openTok := typeTok + 1
 	closeTok := rtgSkipBalanced(p, openTok, '{', '}')
@@ -13973,6 +14726,7 @@ func rtgEmitAppendStructCompositeTokens(g *rtgLinearGen, locEp *rtgExprParse, lo
 		exprStart := i + 2
 		exprEnd := rtgFindExprBoundary(p, exprStart, closeTok-1)
 		ep := rtgNewExprParse()
+		rtgTrustNonNil(ep)
 		if !rtgParseExpressionOK(ep, p, exprStart, exprEnd) {
 			return false
 		}
@@ -13996,6 +14750,7 @@ func rtgEmitAppendStructCompositeTokens(g *rtgLinearGen, locEp *rtgExprParse, lo
 	return true
 }
 func rtgEmitAppendStructDeref(g *rtgLinearGen, ep *rtgExprParse, locEp *rtgExprParse, loc *rtgSliceLocation, elemType int, valueIndex int) bool {
+	rtgTrustNonNil(g, ep, locEp, loc)
 	a := &g.asm
 	value := &ep.exprs[valueIndex]
 	valueType := rtgInferParsedExprType(g, ep, valueIndex)
@@ -14017,6 +14772,7 @@ func rtgEmitAppendStructDeref(g *rtgLinearGen, ep *rtgExprParse, locEp *rtgExprP
 	return true
 }
 func rtgEmitAppendStructLocal(g *rtgLinearGen, ep *rtgExprParse, locEp *rtgExprParse, loc *rtgSliceLocation, elemType int, valueIndex int) bool {
+	rtgTrustNonNil(g, ep, locEp, loc)
 	value := &ep.exprs[valueIndex]
 	localIndex := rtgFindLocalIndex(g, value.nameStart, value.nameEnd)
 	if localIndex < 0 {
@@ -14034,6 +14790,7 @@ func rtgEmitAppendStructLocal(g *rtgLinearGen, ep *rtgExprParse, locEp *rtgExprP
 	return true
 }
 func rtgEmitAppendStructComposite(g *rtgLinearGen, ep *rtgExprParse, locEp *rtgExprParse, loc *rtgSliceLocation, elemType int, valueIndex int) bool {
+	rtgTrustNonNil(g, ep, locEp, loc)
 	elemSize := rtgTypeSize(g.meta, elemType)
 	tempOffset := rtgAddUnnamedLocal(g, elemType)
 	if !rtgEmitTypedAssign(g, ep, valueIndex, tempOffset) {
@@ -14047,6 +14804,7 @@ func rtgEmitAppendStructComposite(g *rtgLinearGen, ep *rtgExprParse, locEp *rtgE
 	return true
 }
 func rtgEmitStringCompare(g *rtgLinearGen, ep *rtgExprParse, left int, right int, notEqual bool) bool {
+	rtgTrustNonNil(g, ep)
 	a := &g.asm
 	label := rtgEnsureStringEqualHelper(g)
 	rightExpr := &ep.exprs[right]
@@ -14089,6 +14847,7 @@ func rtgEmitStringCompare(g *rtgLinearGen, ep *rtgExprParse, left int, right int
 	return true
 }
 func rtgEmitCompositeCompare(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, typ int) bool {
+	rtgTrustNonNil(g, ep, e)
 	left := rtgAddUnnamedLocal(g, typ)
 	right := rtgAddUnnamedLocal(g, typ)
 	if !rtgEmitTypedAssign(g, ep, e.left, left) || !rtgEmitTypedAssign(g, ep, e.right, right) {
@@ -14107,8 +14866,10 @@ func rtgEmitCompositeCompare(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, typ 
 	return true
 }
 func rtgEmitCompositeCompareAt(g *rtgLinearGen, typ int, left int, right int, fail int) {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	t := rtgResolveType(g.meta, typ)
+	rtgTrustNonNil(t)
 	if t.kind == rtgTypeStruct {
 		for i := 0; i < t.count; i++ {
 			field := g.meta.fields[t.first+i]
@@ -14152,17 +14913,20 @@ func rtgEmitCompositeCompareAt(g *rtgLinearGen, typ int, left int, right int, fa
 	rtgAsmJzPrimary(a, fail)
 }
 func rtgEmitBuiltinCopy(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	a := &g.asm
 	e := ep.exprs[idx]
 	if e.argCount != 2 {
 		return false
 	}
-	destIndex := ep.args[e.firstArg]
-	srcIndex := ep.args[e.firstArg+1]
+	destIndex := rtg_runtime_UnsafeIntAt(ep.args, e.firstArg)
+	srcIndex := rtg_runtime_UnsafeIntAt(ep.args, e.firstArg+1)
 	destType := rtgInferParsedExprType(g, ep, destIndex)
 	srcType := rtgInferParsedExprType(g, ep, srcIndex)
 	destSlice := rtgResolveType(g.meta, destType)
+	rtgTrustNonNil(destSlice)
 	srcSlice := rtgResolveType(g.meta, srcType)
+	rtgTrustNonNil(srcSlice)
 	if destSlice.kind != rtgTypeSlice || srcSlice.kind != rtgTypeSlice {
 		return false
 	}
@@ -14199,6 +14963,7 @@ func rtgEmitBuiltinCopy(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	return true
 }
 func rtgEmitSliceBasePtrLenTokens(g *rtgLinearGen, p *rtgProgram, start int, end int, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, p, ep)
 	meta := g.meta
 	a := &g.asm
 	if start+1 == end && rtgTokIsKind(p, start, rtgTokIdent) {
@@ -14236,6 +15001,7 @@ func rtgEmitSliceBasePtrLenTokens(g *rtgLinearGen, p *rtgProgram, start int, end
 			return false
 		}
 		t := rtgResolveType(meta, g.locals[localIndex].typ)
+		rtgTrustNonNil(t)
 		if t.kind == rtgTypePointer {
 			rtgAsmLoadSecondaryStack(a, g.locals[localIndex].offset)
 			if fieldOffset != 0 {
@@ -14258,6 +15024,7 @@ func rtgEmitSliceBasePtrLenTokens(g *rtgLinearGen, p *rtgProgram, start int, end
 	return rtgEmitSlicePtrLen(g, ep, idx)
 }
 func rtgEmitMapHeaderPtrLen(g *rtgLinearGen) {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	nilLabel := rtgAsmNewLabel(a)
 	doneLabel := rtgAsmNewLabel(a)
@@ -14276,6 +15043,7 @@ func rtgEmitMapHeaderPtrLen(g *rtgLinearGen) {
 }
 
 func rtgEmitMapPtrLen(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	if !rtgEmitMapValuePrimary(g, ep, idx) {
 		return false
 	}
@@ -14284,6 +15052,7 @@ func rtgEmitMapPtrLen(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgEmitDirectSelectorWords(g *rtgLinearGen, ep *rtgExprParse, idx int, primaryDisp int, tertiaryDisp int, size int) bool {
+	rtgTrustNonNil(g, ep)
 	if rtgTargetArch != rtgArchAmd64 {
 		return false
 	}
@@ -14305,14 +15074,24 @@ func rtgEmitDirectSelectorWords(g *rtgLinearGen, ep *rtgExprParse, idx int, prim
 		return false
 	}
 	rtgAsmLoadSecondaryStack(&g.asm, g.locals[localIndex].offset)
-	rtgAsmLoadPrimaryMemSecondaryDispSize(&g.asm, fieldOffset+primaryDisp, size)
+	needCheck := rtgRuntimeNonNilLocalNeeded(g, localIndex)
+	primaryOffset := fieldOffset + primaryDisp
+	tertiaryOffset := -1
 	if tertiaryDisp >= 0 {
-		rtgAsmMemDisp(&g.asm, fieldOffset+tertiaryDisp, 0x8b48, 0x4a, 0x8a)
+		tertiaryOffset = fieldOffset + tertiaryDisp
+	}
+	if needCheck {
+		rtgEmitRuntimeNonNilSecondary(g)
+	}
+	rtgAsmLoadPrimaryMemSecondaryDispSize(&g.asm, primaryOffset, size)
+	if tertiaryOffset >= 0 {
+		rtgAsmMemDisp(&g.asm, tertiaryOffset, 0x8b48, 0x4a, 0x8a)
 	}
 	return true
 }
 
 func rtgEmitSlicePtrLen(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	meta := g.meta
 	a := &g.asm
 	e := &ep.exprs[idx]
@@ -14332,6 +15111,7 @@ func rtgEmitSlicePtrLen(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			globalOffset := rtgFindGlobalOffset(g, e.nameStart, e.nameEnd)
 			globalType := rtgFindGlobalType(g, e.nameStart, e.nameEnd)
 			globalKind := rtgResolveType(meta, globalType).kind
+			rtgTrustNonNil(globalKind)
 			if globalOffset < 0 || (globalKind != rtgTypeSlice && globalKind != rtgTypeString) {
 				return false
 			}
@@ -14341,6 +15121,7 @@ func rtgEmitSlicePtrLen(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			return true
 		}
 		localKind := rtgResolveType(meta, g.locals[localIndex].typ).kind
+		rtgTrustNonNil(localKind)
 		if localKind != rtgTypeSlice && localKind != rtgTypeString {
 			return false
 		}
@@ -14361,6 +15142,7 @@ func rtgEmitSlicePtrLen(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	if e.kind == rtgExprSelector {
 		fieldType := rtgInferParsedExprType(g, ep, idx)
 		fieldKind := rtgResolveType(meta, fieldType).kind
+		rtgTrustNonNil(fieldKind)
 		if fieldKind != rtgTypeSlice && fieldKind != rtgTypeString {
 			return false
 		}
@@ -14399,9 +15181,17 @@ func rtgEmitSlicePtrLen(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		rtgAsmCopySecondaryToTertiary(a)
 		return true
 	}
+	if e.kind == rtgExprUnary && rtgTokCharIs(g.prog, e.tok, '*') {
+		if !rtgTypeIsSlice(meta, rtgInferParsedExprType(g, ep, idx)) || !rtgEmitSliceValueRegs(g, ep, idx) {
+			return false
+		}
+		rtgAsmCopySecondaryToTertiary(a)
+		return true
+	}
 	return false
 }
 func rtgEmitSlicePtrCap(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	meta := g.meta
 	a := &g.asm
 	e := &ep.exprs[idx]
@@ -14467,24 +15257,26 @@ func rtgEmitSlicePtrCap(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	return false
 }
 func rtgEmitIndexAddressPrimary(g *rtgLinearGen, ep *rtgExprParse, indexIdx int) bool {
+	rtgTrustNonNil(g, ep)
+	meta := g.meta
+	rtgTrustNonNil(meta)
 	a := &g.asm
 	indexExpr := &ep.exprs[indexIdx]
-	sliceType := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, indexExpr.left))
-	elemSize := rtgTypeSize(g.meta, sliceType.elem)
+	sliceType := rtgResolveType(meta, rtgInferParsedExprType(g, ep, indexExpr.left))
+	rtgTrustNonNil(sliceType)
+	elemSize := rtgTypeSize(meta, sliceType.elem)
 	if sliceType.kind != rtgTypeArray && sliceType.kind != rtgTypeSlice {
 		return false
 	}
-	if !rtgEmitIntExpr(g, ep, indexExpr.right) {
-		return false
-	}
-	rtgAsmPushPrimary(a)
+	baseExpr := &ep.exprs[indexExpr.left]
 	if sliceType.kind == rtgTypeArray {
-		base := &ep.exprs[indexExpr.left]
+		base := baseExpr
 		if base.kind == rtgExprIdent {
 			localIndex := rtgFindLocalIndex(g, base.nameStart, base.nameEnd)
 			if localIndex < 0 {
 				globalOffset := rtgFindGlobalOffset(g, base.nameStart, base.nameEnd)
 				globalType := rtgResolveType(g.meta, rtgFindGlobalType(g, base.nameStart, base.nameEnd))
+				rtgTrustNonNil(globalType)
 				if globalOffset < 0 || globalType.kind != rtgTypeArray {
 					return false
 				}
@@ -14501,6 +15293,10 @@ func rtgEmitIndexAddressPrimary(g *rtgLinearGen, ep *rtgExprParse, indexIdx int)
 				return false
 			}
 			rtgAsmCopySecondaryToPrimary(a)
+		} else if base.kind == rtgExprUnary && rtgTokCharIs(g.prog, base.tok, '*') {
+			if !rtgEmitAddressPrimary(g, ep, indexExpr.left) {
+				return false
+			}
 		} else if base.kind == rtgExprCall {
 			baseType := rtgInferParsedExprType(g, ep, indexExpr.left)
 			tempOffset := rtgAddUnnamedLocal(g, baseType)
@@ -14511,12 +15307,35 @@ func rtgEmitIndexAddressPrimary(g *rtgLinearGen, ep *rtgExprParse, indexIdx int)
 		} else {
 			return false
 		}
+		rtgAsmPushPrimary(a)
+		rtgAsmPrimaryImm(a, sliceType.count)
+		rtgAsmCopyPrimaryToTertiary(a)
+		rtgAsmPopPrimary(a)
 	} else {
 		if !rtgEmitSlicePtrLen(g, ep, indexExpr.left) {
 			return false
 		}
 	}
+	rtgAsmPushPrimary(a)
+	rtgAsmPushTertiary(a)
+	if !rtgEmitIntExpr(g, ep, indexExpr.right) {
+		return false
+	}
+	if !g.meta.panicEnabled && (elemSize == 1 || elemSize == 8 || elemSize == 72) {
+		rtgAsmCopyPrimaryToTertiary(a)
+		rtgAsmPopSecondary(a)
+		rtgAsmPopPrimary(a)
+		if rtgTargetArch == rtgArchAmd64 {
+			rtgAmd64CallIndexAddressHelper(a, elemSize)
+		} else {
+			rtgAsmCallLabel(a, rtgEnsureIndexAddressHelper(g, elemSize))
+		}
+		return true
+	}
 	rtgAsmPopTertiary(a)
+	rtgEmitRuntimeBoundsCheck(g)
+	rtgAsmCopySecondaryToTertiary(a)
+	rtgAsmPopPrimary(a)
 	if elemSize != 1 {
 		rtgAsmMulTertiaryImm(a, elemSize)
 	}
@@ -14524,16 +15343,174 @@ func rtgEmitIndexAddressPrimary(g *rtgLinearGen, ep *rtgExprParse, indexIdx int)
 	return true
 }
 
+func rtgEnsureIndexAddressHelper(g *rtgLinearGen, elemSize int) int {
+	rtgTrustNonNil(g)
+	if rtgTargetArch == rtgArchAmd64 {
+		if elemSize == 1 {
+			return rtgAmd64EnsureRuntimeCheck(g, &g.runtimeByteIndexLabel, 3, "\x48\x39\xd1\x73\x04\x48\x01\xc8\xc3\xe9\x00\x00\x00\x00")
+		}
+		if elemSize == 8 {
+			return rtgAmd64EnsureRuntimeCheck(g, &g.runtimeWordIndexLabel, 4, "\x48\x39\xd1\x73\x08\x48\xc1\xe1\x03\x48\x01\xc8\xc3\xe9\x00\x00\x00\x00")
+		}
+		return rtgAmd64EnsureRuntimeCheck(g, &g.runtimeWideIndexLabel, 5, "\x48\x39\xd1\x73\x08\x48\x6b\xc9\x48\x48\x01\xc8\xc3\xe9\x00\x00\x00\x00")
+	}
+	if elemSize == 1 && g.runtimeByteIndexLabel > 0 {
+		return g.runtimeByteIndexLabel - 1
+	}
+	if elemSize == 8 && g.runtimeWordIndexLabel > 0 {
+		return g.runtimeWordIndexLabel - 1
+	}
+	if elemSize == 72 && g.runtimeWideIndexLabel > 0 {
+		return g.runtimeWideIndexLabel - 1
+	}
+	label := rtgAsmNewLabel(&g.asm)
+	if elemSize == 1 {
+		g.runtimeByteIndexLabel = label + 1
+	} else if elemSize == 8 {
+		g.runtimeWordIndexLabel = label + 1
+	} else {
+		g.runtimeWideIndexLabel = label + 1
+	}
+	after := rtgAsmNewLabel(&g.asm)
+	negative := rtgAsmNewLabel(&g.asm)
+	invalid := rtgAsmNewLabel(&g.asm)
+	rtgAsmJmpMarkLabel(&g.asm, after, label)
+	rtgAsmPushPrimary(&g.asm)
+	rtgAsmPushSecondary(&g.asm)
+	rtgAsmCopyTertiaryToPrimary(&g.asm)
+	rtgAsmCopyPrimaryToSecondary(&g.asm)
+	rtgAsmPrimaryImm(&g.asm, 0)
+	rtgAsmCopySecondaryToTertiary(&g.asm)
+	rtgAsmCmpTertiaryPrimarySet(&g.asm, 0x9d)
+	rtgAsmJzPrimary(&g.asm, negative)
+	rtgAsmPopPrimary(&g.asm)
+	rtgAsmCopySecondaryToTertiary(&g.asm)
+	rtgAsmCmpTertiaryPrimarySet(&g.asm, 0x9c)
+	rtgAsmJzPrimary(&g.asm, invalid)
+	rtgAsmPopPrimary(&g.asm)
+	rtgAsmCopySecondaryToTertiary(&g.asm)
+	if elemSize != 1 {
+		rtgAsmMulTertiaryImm(&g.asm, elemSize)
+	}
+	rtgAsmAddPrimaryTertiary(&g.asm)
+	rtgAsmRet(&g.asm)
+	rtgAsmMarkLabel(&g.asm, negative)
+	rtgAsmPopTertiary(&g.asm)
+	rtgAsmMarkLabel(&g.asm, invalid)
+	rtgAsmPopTertiary(&g.asm)
+	rtgAsmJmpLabel(&g.asm, rtgEnsureUncaughtRuntimeFaultHelper(g))
+	rtgAsmMarkLabel(&g.asm, after)
+	return label
+}
+
+func rtgEmitRuntimeBoundsCheck(g *rtgLinearGen) {
+	rtgTrustNonNil(g)
+	a := &g.asm
+	if !g.meta.panicEnabled {
+		if rtgTargetArch == rtgArchAmd64 {
+			rtgAsmEmit24(a, 0xd4ff41)
+			return
+		}
+		rtgAsmCallLabel(a, rtgEnsureBoundsCheckHelper(g))
+		return
+	}
+	done := rtgAsmNewLabel(a)
+	if rtgTargetArch == rtgArchAmd64 {
+		rtgAsmCallLabel(a, rtgAmd64EnsureRuntimeCheck(g, &g.runtimeBoundsLabel, 2, "\x48\x89\xc2\x48\x39\xc8\x73\x01\xc3\xe9\x00\x00\x00\x00"))
+	} else {
+		rtgAsmCallLabel(a, rtgEnsureBoundsCheckHelper(g))
+	}
+	rtgAsmJnzPrimary(a, done)
+	rtgEmitRuntimeFault(g)
+	rtgAsmMarkLabel(a, done)
+}
+
+func rtgEmitSliceBoundsChecks(g *rtgLinearGen, lowOff int, highOff int, maxOff int, capOff int) {
+	rtgTrustNonNil(g)
+	a := &g.asm
+	if rtgTargetArch == rtgArchAmd64 {
+		rtgAsmLoadPrimaryStack(a, capOff)
+		rtgAsmCopyPrimaryToCallWord0(a)
+		rtgAsmLoadPrimaryStack(a, maxOff)
+		rtgAsmCopyPrimaryToTertiary(a)
+		rtgAsmLoadPrimaryStack(a, highOff)
+		rtgAsmCopyPrimaryToSecondary(a)
+		rtgAsmLoadPrimaryStack(a, lowOff)
+		rtgAsmCallLabel(a, rtgAmd64EnsureRuntimeCheck(g, &g.runtimeSliceBoundsLabel, 6, "\x48\x39\xc2\x72\x0b\x48\x39\xd1\x72\x06\x48\x39\xcf\x72\x01\xc3\xe9\x00\x00\x00\x00"))
+		if g.meta.panicEnabled {
+			done := rtgAsmNewLabel(a)
+			rtgAsmJnzPrimary(a, done)
+			rtgEmitRuntimeFault(g)
+			rtgAsmMarkLabel(a, done)
+		}
+		return
+	}
+	invalid := rtgAsmNewLabel(a)
+	done := rtgAsmNewLabel(a)
+	rtgEmitStackLessImmJump(g, lowOff, 0, invalid)
+	rtgAsmJltStackStack(a, highOff, lowOff, invalid)
+	rtgAsmJltStackStack(a, maxOff, highOff, invalid)
+	rtgAsmJltStackStack(a, capOff, maxOff, invalid)
+	rtgAsmJmpMarkLabel(a, done, invalid)
+	rtgEmitRuntimeFault(g)
+	rtgAsmMarkLabel(a, done)
+}
+
+func rtgEnsureBoundsCheckHelper(g *rtgLinearGen) int {
+	rtgTrustNonNil(g)
+	if rtgTargetArch == rtgArchAmd64 {
+		return rtgAmd64EnsureRuntimeCheck(g, &g.runtimeBoundsLabel, 2, "\x48\x89\xc2\x48\x39\xc8\x73\x01\xc3\xe9\x00\x00\x00\x00")
+	}
+	if g.runtimeBoundsLabel > 0 {
+		return g.runtimeBoundsLabel - 1
+	}
+	label := rtgAsmNewLabel(&g.asm)
+	g.runtimeBoundsLabel = label + 1
+	after := rtgAsmNewLabel(&g.asm)
+	invalid := rtgAsmNewLabel(&g.asm)
+	rtgAsmJmpMarkLabel(&g.asm, after, label)
+	rtgAsmCopyPrimaryToSecondary(&g.asm)
+	rtgAsmPushTertiary(&g.asm)
+	rtgAsmPrimaryImm(&g.asm, 0)
+	rtgAsmCopySecondaryToTertiary(&g.asm)
+	rtgAsmCmpTertiaryPrimarySet(&g.asm, 0x9d)
+	rtgAsmJzPrimary(&g.asm, invalid)
+	rtgAsmPopPrimary(&g.asm)
+	rtgAsmCopySecondaryToTertiary(&g.asm)
+	rtgAsmCmpTertiaryPrimarySet(&g.asm, 0x9c)
+	if !g.meta.panicEnabled {
+		valid := rtgAsmNewLabel(&g.asm)
+		rtgAsmJnzPrimary(&g.asm, valid)
+		rtgAsmJmpLabel(&g.asm, rtgEnsureUncaughtRuntimeFaultHelper(g))
+		rtgAsmMarkLabel(&g.asm, valid)
+		rtgAsmRet(&g.asm)
+		rtgAsmMarkLabel(&g.asm, invalid)
+		rtgAsmPopTertiary(&g.asm)
+		rtgAsmJmpLabel(&g.asm, rtgEnsureUncaughtRuntimeFaultHelper(g))
+		rtgAsmMarkLabel(&g.asm, after)
+		return label
+	}
+	rtgAsmRet(&g.asm)
+	rtgAsmMarkLabel(&g.asm, invalid)
+	rtgAsmPopTertiary(&g.asm)
+	rtgAsmPrimaryImm(&g.asm, 0)
+	rtgAsmRet(&g.asm)
+	rtgAsmMarkLabel(&g.asm, after)
+	return label
+}
+
 func rtgEmitBuiltinDelete(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	e := &ep.exprs[idx]
 	if e.argCount != 2 {
 		return false
 	}
-	mapIndex := ep.args[e.firstArg]
-	return rtgEmitMapEntryAddress(g, ep, mapIndex, ep.args[e.firstArg+1], 2)
+	mapIndex := rtg_runtime_UnsafeIntAt(ep.args, e.firstArg)
+	return rtgEmitMapEntryAddress(g, ep, mapIndex, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg+1), 2)
 }
 
 func rtgEmitMapEntryAddress(g *rtgLinearGen, ep *rtgExprParse, mapIndex int, keyIndex int, mode int) bool {
+	rtgTrustNonNil(g, ep)
 	a := &g.asm
 	mapType := rtgInferParsedExprType(g, ep, mapIndex)
 	if rtgResolveType(g.meta, mapType).kind != rtgTypeMap {
@@ -14636,24 +15613,12 @@ func rtgEmitMapEntryAddress(g *rtgLinearGen, ep *rtgExprParse, mapIndex int, key
 }
 
 func rtgEmitIndexExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	meta := g.meta
-	p := g.prog
 	a := &g.asm
 	e := &ep.exprs[idx]
-	left := &ep.exprs[e.left]
-	if left.kind == rtgExprString {
-		if !rtgEmitIntExpr(g, ep, e.right) {
-			return false
-		}
-		msg := rtgDecodeStringToken(g.prog, left.tok)
-		msgOff := rtgAddStringData(g, msg)
-		rtgAsmPushPrimary(a)
-		rtgAsmPrimaryDataAddr(a, msgOff)
-		rtgAsmPopTertiary(a)
-		rtgAsmLoadBytePrimaryIndexTertiary(a)
-		return true
-	}
 	baseResolved := rtgResolveType(meta, rtgInferParsedExprType(g, ep, e.left))
+	rtgTrustNonNil(baseResolved)
 	if baseResolved.kind == rtgTypeMap {
 		if !rtgEmitMapEntryAddress(g, ep, e.left, e.right, 0) {
 			return false
@@ -14663,178 +15628,46 @@ func rtgEmitIndexExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		rtgAsmJzPrimary(a, zeroLabel)
 		rtgAsmCopyPrimaryToSecondary(a)
 		valueType := rtgResolveType(meta, baseResolved.elem)
+		rtgTrustNonNil(valueType)
 		rtgAsmLoadPrimaryMemSecondaryDispSize(a, 16, rtgScalarKindSize(valueType.kind))
 		rtgAsmJmpMarkLabel(a, doneLabel, zeroLabel)
 		rtgAsmPrimaryImm(a, 0)
 		rtgAsmMarkLabel(a, doneLabel)
 		return true
 	}
-	if baseResolved.kind == rtgTypeArray {
-		elemSize := rtgTypeSize(meta, baseResolved.elem)
+	if baseResolved.kind == rtgTypeString {
+		if !rtgEmitStringValueRegs(g, ep, e.left) {
+			return false
+		}
+		rtgAsmPushPrimary(a)
+		rtgAsmPushSecondary(a)
+		if !rtgEmitIntExpr(g, ep, e.right) {
+			return false
+		}
+		rtgAsmPopTertiary(a)
+		rtgEmitRuntimeBoundsCheck(g)
+		rtgAsmCopySecondaryToTertiary(a)
+		rtgAsmPopPrimary(a)
+		rtgAsmLoadBytePrimaryIndexTertiary(a)
+		return true
+	}
+	if baseResolved.kind == rtgTypeArray || baseResolved.kind == rtgTypeSlice {
+		elem := rtgResolveType(meta, baseResolved.elem)
+		rtgTrustNonNil(elem)
+		if !rtgTypeKindIsScalarValue(elem.kind) && elem.kind != rtgTypePointer && elem.kind != rtgTypeMap {
+			return false
+		}
 		if !rtgEmitIndexAddressPrimary(g, ep, idx) {
 			return false
 		}
 		rtgAsmCopyPrimaryToSecondary(a)
-		rtgAsmLoadPrimaryMemSecondaryDispSize(a, 0, elemSize)
-		return true
-	}
-	if left.kind == rtgExprIdent {
-		localIndex := rtgFindLocalIndex(g, left.nameStart, left.nameEnd)
-		if localIndex < 0 {
-			globalOffset := rtgFindGlobalOffset(g, left.nameStart, left.nameEnd)
-			globalType := rtgFindGlobalType(g, left.nameStart, left.nameEnd)
-			if globalOffset >= 0 && rtgTypeIsString(meta, globalType) {
-				if !rtgEmitIntExpr(g, ep, e.right) {
-					return false
-				}
-				rtgAsmPushPrimary(a)
-				rtgAsmLoadPrimaryBss(a, globalOffset)
-				rtgAsmPopTertiary(a)
-				rtgAsmLoadBytePrimaryIndexTertiary(a)
-				return true
-			}
-			if globalOffset >= 0 && rtgTypeIsSlice(meta, globalType) {
-				t := rtgResolveType(meta, globalType)
-				elem := rtgResolveType(meta, t.elem)
-				if !rtgTypeKindIsScalarValue(elem.kind) && elem.kind != rtgTypePointer && elem.kind != rtgTypeMap {
-					return false
-				}
-				if !rtgEmitIntExpr(g, ep, e.right) {
-					return false
-				}
-				rtgAsmPushPrimary(a)
-				rtgAsmLoadPrimaryBss(a, globalOffset)
-				rtgAsmPopTertiary(a)
-				rtgAsmLoadPrimaryIndexTertiaryScalarOrPointer(a, elem.kind)
-				return true
-			}
-			constTok := rtgFindConstStringToken(g, left.nameStart, left.nameEnd)
-			if constTok >= 0 {
-				if !rtgEmitIntExpr(g, ep, e.right) {
-					return false
-				}
-				msg := rtgDecodeStringToken(g.prog, constTok)
-				msgOff := rtgAddStringData(g, msg)
-				rtgAsmPushPrimary(a)
-				rtgAsmPrimaryDataAddr(a, msgOff)
-				rtgAsmPopTertiary(a)
-				rtgAsmLoadBytePrimaryIndexTertiary(a)
-				return true
-			}
-			return false
-		}
-		t := rtgResolveType(meta, g.locals[localIndex].typ)
-		if t.kind == rtgTypeString {
-			if !rtgEmitIntExpr(g, ep, e.right) {
-				return false
-			}
-			rtgAsmPushPrimary(a)
-			rtgAsmLoadPrimaryStack(a, g.locals[localIndex].offset)
-			rtgAsmPopTertiary(a)
-			rtgAsmLoadBytePrimaryIndexTertiary(a)
-			return true
-		}
-		if t.kind == rtgTypeSlice {
-			elem := rtgResolveType(meta, t.elem)
-			if !rtgTypeKindIsScalarValue(elem.kind) && elem.kind != rtgTypePointer && elem.kind != rtgTypeMap {
-				return false
-			}
-			if !rtgEmitIntExpr(g, ep, e.right) {
-				return false
-			}
-			rtgAsmPushPrimary(a)
-			rtgAsmLoadPrimaryStack(a, g.locals[localIndex].offset)
-			rtgAsmPopTertiary(a)
-			rtgAsmLoadPrimaryIndexTertiaryScalarOrPointer(a, elem.kind)
-			return true
-		}
-	}
-	if left.kind == rtgExprSelector {
-		fieldType := rtgInferParsedExprType(g, ep, e.left)
-		t := rtgResolveType(meta, fieldType)
-		if t.kind == rtgTypeString {
-			if !rtgEmitIntExpr(g, ep, e.right) {
-				return false
-			}
-			rtgAsmPushPrimary(a)
-			if !rtgEmitSelectorAddressSecondary(g, ep, e.left) {
-				return false
-			}
-			rtgAsmLoadPrimaryMemSecondaryDisp(a, 0)
-			rtgAsmPopTertiary(a)
-			rtgAsmLoadBytePrimaryIndexTertiary(a)
-			return true
-		}
-		if t.kind == rtgTypeSlice {
-			elem := rtgResolveType(meta, t.elem)
-			if !rtgTypeKindIsScalarValue(elem.kind) && elem.kind != rtgTypePointer && elem.kind != rtgTypeMap {
-				return false
-			}
-			if !rtgEmitIntExpr(g, ep, e.right) {
-				return false
-			}
-			rtgAsmPushPrimary(a)
-			if !rtgEmitSelectorAddressSecondary(g, ep, e.left) {
-				return false
-			}
-			rtgAsmLoadPrimaryMemSecondaryDisp(a, 0)
-			rtgAsmPopTertiary(a)
-			rtgAsmLoadPrimaryIndexTertiaryScalarOrPointer(a, elem.kind)
-			return true
-		}
-	}
-	if left.kind == rtgExprUnary && rtgTokCharIs(p, left.tok, '*') {
-		valueType := rtgInferParsedExprType(g, ep, e.left)
-		t := rtgResolveType(meta, valueType)
-		if t.kind == rtgTypeSlice {
-			elem := rtgResolveType(meta, t.elem)
-			if !rtgTypeKindIsScalarValue(elem.kind) && elem.kind != rtgTypePointer && elem.kind != rtgTypeMap {
-				return false
-			}
-			if !rtgEmitIntExpr(g, ep, e.right) {
-				return false
-			}
-			rtgAsmPushPrimary(a)
-			if !rtgEmitIntExpr(g, ep, left.left) {
-				return false
-			}
-			rtgAsmCopyPrimaryToSecondary(a)
-			rtgAsmLoadPrimaryMemSecondaryDisp(a, 0)
-			rtgAsmPopTertiary(a)
-			rtgAsmLoadPrimaryIndexTertiaryScalarOrPointer(a, elem.kind)
-			return true
-		}
-		if t.kind != rtgTypeString {
-			return false
-		}
-		if !rtgEmitIntExpr(g, ep, e.right) {
-			return false
-		}
-		rtgAsmPushPrimary(a)
-		if !rtgEmitIntExpr(g, ep, left.left) {
-			return false
-		}
-		rtgAsmCopyPrimaryToSecondary(a)
-		rtgAsmLoadPrimaryMemSecondaryDisp(a, 0)
-		rtgAsmPopTertiary(a)
-		rtgAsmLoadBytePrimaryIndexTertiary(a)
-		return true
-	}
-	if left.kind == rtgExprIndex {
-		if !rtgEmitIntExpr(g, ep, e.right) {
-			return false
-		}
-		rtgAsmPushPrimary(a)
-		if !rtgEmitStringPtrExpr(g, ep, e.left) {
-			return false
-		}
-		rtgAsmPopTertiary(a)
-		rtgAsmLoadBytePrimaryIndexTertiary(a)
+		rtgAsmLoadPrimaryMemSecondaryDispSize(a, 0, rtgScalarKindSize(elem.kind))
 		return true
 	}
 	return false
 }
 func rtgFindLocalOffset(g *rtgLinearGen, nameStart int, nameEnd int) int {
+	rtgTrustNonNil(g)
 	localIndex := rtgFindLocalIndex(g, nameStart, nameEnd)
 	if localIndex < 0 {
 		return -1
@@ -14843,15 +15676,23 @@ func rtgFindLocalOffset(g *rtgLinearGen, nameStart int, nameEnd int) int {
 }
 
 func rtgFindLocalIndex(g *rtgLinearGen, nameStart int, nameEnd int) int {
+	rtgTrustNonNil(g)
+	if g.localCacheStart == nameStart && g.localCacheCount == g.localCount {
+		return g.localCacheIndex
+	}
 	nameHash := rtgHashRange(g.prog.src, nameStart, nameEnd)
 	for i := g.localCount - 1; i >= 0; i-- {
 		if g.locals[i].nameHash == nameHash && rtgBytesEqualRange(g.prog.src, g.locals[i].nameStart, g.locals[i].nameEnd, nameStart, nameEnd) {
+			g.localCacheStart = nameStart
+			g.localCacheCount = g.localCount
+			g.localCacheIndex = i
 			return i
 		}
 	}
 	return -1
 }
 func rtgStructFieldIndex(g *rtgLinearGen, typ int, nameStart int, nameEnd int) int {
+	rtgTrustNonNil(g)
 	if rtgLoadStructFieldPath(g, typ, nameStart, nameEnd) {
 		return g.fieldIndex
 	}
@@ -14859,17 +15700,20 @@ func rtgStructFieldIndex(g *rtgLinearGen, typ int, nameStart int, nameEnd int) i
 }
 
 func rtgLoadStructFieldPath(g *rtgLinearGen, typ int, nameStart int, nameEnd int) bool {
+	rtgTrustNonNil(g)
 	g.fieldIndex = -1
 	g.fieldPointerIndex = -1
 	return rtgFindStructFieldPath(g, typ, nameStart, nameEnd, 0, 0, -1, 0, 0) == 1
 }
 
 func rtgFindStructFieldPath(g *rtgLinearGen, typ int, nameStart int, nameEnd int, beforePointer int, afterPointer int, pointerIndex int, pointerOffset int, depth int) int {
+	rtgTrustNonNil(g)
 	meta := g.meta
 	if typ < 0 || typ >= len(meta.types) || depth > 16 {
 		return 0
 	}
 	t := rtgResolveType(meta, typ)
+	rtgTrustNonNil(t)
 	if t.kind == rtgTypePointer && t.elem > 0 && t.elem < len(meta.types) {
 		t = rtgResolveType(meta, t.elem)
 	}
@@ -14919,6 +15763,7 @@ func rtgFindStructFieldPath(g *rtgLinearGen, typ int, nameStart int, nameEnd int
 	return found
 }
 func rtgStructFieldOffset(g *rtgLinearGen, typ int, nameStart int, nameEnd int) int {
+	rtgTrustNonNil(g)
 	if !rtgLoadStructFieldPath(g, typ, nameStart, nameEnd) {
 		return -1
 	}
@@ -14928,6 +15773,7 @@ func rtgStructFieldOffset(g *rtgLinearGen, typ int, nameStart int, nameEnd int) 
 	return g.fieldOffset
 }
 func rtgStructFieldType(g *rtgLinearGen, typ int, nameStart int, nameEnd int) int {
+	rtgTrustNonNil(g)
 	if !rtgLoadStructFieldPath(g, typ, nameStart, nameEnd) {
 		return 0
 	}
@@ -14935,6 +15781,7 @@ func rtgStructFieldType(g *rtgLinearGen, typ int, nameStart int, nameEnd int) in
 }
 
 func rtgStructPromotedPointerField(g *rtgLinearGen, typ int, nameStart int, nameEnd int) int {
+	rtgTrustNonNil(g)
 	if rtgLoadStructFieldPath(g, typ, nameStart, nameEnd) {
 		return g.fieldPointerIndex
 	}
@@ -14942,6 +15789,7 @@ func rtgStructPromotedPointerField(g *rtgLinearGen, typ int, nameStart int, name
 }
 
 func rtgEmitPromotedPointerSelectorAddress(g *rtgLinearGen, ep *rtgExprParse, idx int, baseType int) bool {
+	rtgTrustNonNil(g, ep)
 	e := &ep.exprs[idx]
 	if !rtgLoadStructFieldPath(g, baseType, e.nameStart, e.nameEnd) || g.fieldPointerIndex < 0 {
 		return false
@@ -14954,7 +15802,10 @@ func rtgEmitPromotedPointerSelectorAddress(g *rtgLinearGen, ep *rtgExprParse, id
 		localIndex := rtgFindLocalIndex(g, base.nameStart, base.nameEnd)
 		if localIndex >= 0 {
 			if rtgResolveType(g.meta, g.locals[localIndex].typ).kind == rtgTypePointer {
-				rtgAsmLoadPrimaryStackMemory(a, g.locals[localIndex].offset, pointerOffset)
+				rtgAsmLoadPrimaryStack(a, g.locals[localIndex].offset)
+				rtgEmitRuntimeNonNilPrimary(g)
+				rtgAsmCopyPrimaryToSecondary(a)
+				rtgAsmLoadPrimaryMemSecondaryDisp(a, pointerOffset)
 			} else {
 				rtgAsmLoadPrimaryStack(a, g.locals[localIndex].offset-pointerOffset)
 			}
@@ -14963,7 +15814,14 @@ func rtgEmitPromotedPointerSelectorAddress(g *rtgLinearGen, ep *rtgExprParse, id
 			if globalOffset < 0 {
 				return false
 			}
-			rtgAsmLoadPrimaryBss(a, globalOffset+pointerOffset)
+			if rtgResolveType(g.meta, rtgFindGlobalType(g, base.nameStart, base.nameEnd)).kind == rtgTypePointer {
+				rtgAsmLoadPrimaryBss(a, globalOffset)
+				rtgEmitRuntimeNonNilPrimary(g)
+				rtgAsmCopyPrimaryToSecondary(a)
+				rtgAsmLoadPrimaryMemSecondaryDisp(a, pointerOffset)
+			} else {
+				rtgAsmLoadPrimaryBss(a, globalOffset+pointerOffset)
+			}
 		}
 		rtgAsmCopyPrimaryToSecondary(a)
 	} else if base.kind == rtgExprComposite {
@@ -14975,22 +15833,26 @@ func rtgEmitPromotedPointerSelectorAddress(g *rtgLinearGen, ep *rtgExprParse, id
 	} else {
 		return false
 	}
+	rtgEmitRuntimeNonNilSecondary(g)
 	if fieldOffset != 0 {
 		rtgAsmAddSecondaryImm(a, fieldOffset)
 	}
 	return true
 }
 func rtgCompositeStructFieldIndex(g *rtgLinearGen, typ int, field *rtgCompositeField, pos int) int {
+	rtgTrustNonNil(g, field)
 	if field.nameEnd > field.nameStart {
 		return rtgStructFieldIndex(g, typ, field.nameStart, field.nameEnd)
 	}
 	t := rtgResolveType(g.meta, typ)
+	rtgTrustNonNil(t)
 	if t.kind != rtgTypeStruct || pos < 0 || pos >= t.count {
 		return -1
 	}
 	return t.first + pos
 }
 func rtgFindGlobalOffset(g *rtgLinearGen, nameStart int, nameEnd int) int {
+	rtgTrustNonNil(g)
 	for i := 0; i < len(g.globals); i++ {
 		if rtgBytesEqualRange(g.prog.src, g.globals[i].nameStart, g.globals[i].nameEnd, nameStart, nameEnd) {
 			return g.globals[i].offset
@@ -14999,6 +15861,7 @@ func rtgFindGlobalOffset(g *rtgLinearGen, nameStart int, nameEnd int) int {
 	return -1
 }
 func rtgFindGlobalType(g *rtgLinearGen, nameStart int, nameEnd int) int {
+	rtgTrustNonNil(g)
 	symIndex := rtgFindMetaGlobalIndex(g.meta, nameStart, nameEnd, rtgTokVar)
 	if symIndex >= 0 {
 		return g.meta.globals[symIndex].typ
@@ -15006,6 +15869,7 @@ func rtgFindGlobalType(g *rtgLinearGen, nameStart int, nameEnd int) int {
 	return 0
 }
 func rtgFindConstStringToken(g *rtgLinearGen, nameStart int, nameEnd int) int {
+	rtgTrustNonNil(g)
 	symIndex := rtgFindMetaGlobalIndex(g.meta, nameStart, nameEnd, rtgTokConst)
 	if symIndex >= 0 {
 		s := &g.meta.globals[symIndex]
@@ -15016,6 +15880,7 @@ func rtgFindConstStringToken(g *rtgLinearGen, nameStart int, nameEnd int) int {
 	return -1
 }
 func rtgFindSmallConstByName(g *rtgLinearGen, nameStart int, nameEnd int) int {
+	rtgTrustNonNil(g)
 	if rtgFindLocalIndex(g, nameStart, nameEnd) >= 0 {
 		return -129
 	}
@@ -15046,18 +15911,23 @@ func rtgFindSmallConstByName(g *rtgLinearGen, nameStart int, nameEnd int) int {
 }
 
 func rtgLocalCapturedInCurrentFunction(g *rtgLinearGen, nameStart int, nameEnd int) bool {
+	rtgTrustNonNil(g)
+	meta := g.meta
+	p := g.prog
+	rtgTrustNonNil(meta)
+	rtgTrustNonNil(p)
 	if g.bindingClosureCaptures || nameEnd <= nameStart {
 		return false
 	}
-	outer := &g.meta.funcs[g.currentFunc]
-	for i := 0; i < len(g.meta.closures); i++ {
-		fnIndex := g.meta.closures[i].fnIndex
-		closure := &g.meta.funcs[fnIndex]
-		if closure.literalTok < outer.bodyStart || closure.literalTok >= outer.bodyEnd || rtgClosureNameDeclared(g.meta, closure, nameStart, nameEnd) {
+	outer := &meta.funcs[g.currentFunc]
+	for i := 0; i < len(meta.closures); i++ {
+		fnIndex := meta.closures[i].fnIndex
+		closure := &meta.funcs[fnIndex]
+		if closure.literalTok < outer.bodyStart || closure.literalTok >= outer.bodyEnd || rtgClosureNameDeclared(meta, closure, nameStart, nameEnd) {
 			continue
 		}
 		for tok := closure.bodyStart; tok < closure.bodyEnd; tok++ {
-			if rtgTokIsKind(g.prog, tok, rtgTokIdent) && rtgBytesEqualRange(g.prog.src, nameStart, nameEnd, int(rtgTokStart(g.prog, tok)), int(rtgTokEnd(g.prog, tok))) {
+			if rtgTokIsKind(p, tok, rtgTokIdent) && rtgBytesEqualRange(p.src, nameStart, nameEnd, int(rtgTokStart(p, tok)), int(rtgTokEnd(p, tok))) {
 				return true
 			}
 		}
@@ -15066,6 +15936,7 @@ func rtgLocalCapturedInCurrentFunction(g *rtgLinearGen, nameStart int, nameEnd i
 }
 
 func rtgAddTypedLocal(g *rtgLinearGen, nameStart int, nameEnd int, typ int) int {
+	rtgTrustNonNil(g)
 	size := rtgTypeSize(g.meta, typ)
 	if size < rtgBackendValueSlotSize {
 		size = rtgBackendValueSlotSize
@@ -15093,6 +15964,7 @@ func rtgAddTypedLocal(g *rtgLinearGen, nameStart int, nameEnd int, typ int) int 
 }
 
 func rtgRecordStackPeak(g *rtgLinearGen) {
+	rtgTrustNonNil(g)
 	// Retain scoped locals and expression temporaries after stackUsed is
 	// rewound. Balanced hardware push/pop operands live below the persistent
 	// frame and therefore do not contribute to its size.
@@ -15102,10 +15974,12 @@ func rtgRecordStackPeak(g *rtgLinearGen) {
 }
 
 func rtgAddUnnamedLocal(g *rtgLinearGen, typ int) int {
+	rtgTrustNonNil(g)
 	return rtgAddTypedLocal(g, 0, 0, typ)
 }
 
 func rtgGrowLocalTable(g *rtgLinearGen) {
+	rtgTrustNonNil(g)
 	newCap := len(g.locals) * 2
 	if newCap < 64 {
 		newCap = 64
@@ -15118,6 +15992,7 @@ func rtgGrowLocalTable(g *rtgLinearGen) {
 }
 
 func rtgMoveCapturedLocal(g *rtgLinearGen, localIndex int, toCell bool) {
+	rtgTrustNonNil(g)
 	if localIndex < 0 || localIndex >= g.localCount || g.locals[localIndex].captureOff <= 0 {
 		return
 	}
@@ -15135,12 +16010,14 @@ func rtgMoveCapturedLocal(g *rtgLinearGen, localIndex int, toCell bool) {
 }
 
 func rtgAllocateCapturedCell(g *rtgLinearGen, captureOff int, size int) {
+	rtgTrustNonNil(g)
 	rtgAsmStoreStackImm(&g.asm, captureOff, size)
 	rtgEmitPersistentAllocToPrimary(g, captureOff)
 	rtgAsmStorePrimaryStack(&g.asm, captureOff)
 }
 
 func rtgRebindCapturedLocal(g *rtgLinearGen, localIndex int) {
+	rtgTrustNonNil(g)
 	if localIndex < 0 || localIndex >= g.localCount || g.locals[localIndex].captureOff <= 0 {
 		return
 	}
@@ -15150,12 +16027,14 @@ func rtgRebindCapturedLocal(g *rtgLinearGen, localIndex int) {
 }
 
 func rtgMoveCapturedLocals(g *rtgLinearGen, toCell bool) {
+	rtgTrustNonNil(g)
 	for i := 0; i < g.localCount; i++ {
 		rtgMoveCapturedLocal(g, i, toCell)
 	}
 }
 
 func rtgZeroLocalAtOffset(g *rtgLinearGen, offset int) {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	size := 8
 	typ := rtgTypeInt
@@ -15166,6 +16045,7 @@ func rtgZeroLocalAtOffset(g *rtgLinearGen, offset int) {
 		}
 	}
 	t := rtgResolveType(g.meta, typ)
+	rtgTrustNonNil(t)
 	if t.kind == rtgTypeSlice {
 		rtgInitEmptySliceStack(g, offset)
 		return
@@ -15194,13 +16074,16 @@ func rtgZeroLocalAtOffset(g *rtgLinearGen, offset int) {
 	}
 }
 func rtgInitEmptySliceStack(g *rtgLinearGen, offset int) {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	rtgAsmStoreStackImm(a, offset, 0)
 	rtgAsmStorePrimaryStack(a, offset-8)
 	rtgAsmStorePrimaryStack(a, offset-16)
 }
 func rtgInitStructSliceFields(g *rtgLinearGen, typ int, offset int) {
+	rtgTrustNonNil(g)
 	t := rtgResolveType(g.meta, typ)
+	rtgTrustNonNil(t)
 	if t.kind != rtgTypeStruct {
 		return
 	}
@@ -15208,6 +16091,7 @@ func rtgInitStructSliceFields(g *rtgLinearGen, typ int, offset int) {
 		field := g.meta.fields[t.first+i]
 		fieldOffset := offset - field.offset
 		fieldType := rtgResolveType(g.meta, field.typ)
+		rtgTrustNonNil(fieldType)
 		if fieldType.kind == rtgTypeSlice {
 			rtgInitEmptySliceStack(g, fieldOffset)
 		} else if fieldType.kind == rtgTypeStruct {
@@ -15216,13 +16100,16 @@ func rtgInitStructSliceFields(g *rtgLinearGen, typ int, offset int) {
 	}
 }
 func rtgEmitCopyReturnedStructSliceFields(g *rtgLinearGen, typ int, srcOffset int, destOffset int) bool {
+	rtgTrustNonNil(g)
 	t := rtgResolveType(g.meta, typ)
+	rtgTrustNonNil(t)
 	if t.kind != rtgTypeStruct {
 		return true
 	}
 	for i := 0; i < t.count; i++ {
 		field := g.meta.fields[t.first+i]
 		fieldType := rtgResolveType(g.meta, field.typ)
+		rtgTrustNonNil(fieldType)
 		fieldSrcOffset := srcOffset - field.offset
 		fieldDestOffset := destOffset + field.offset
 		if fieldType.kind == rtgTypeSlice {
@@ -15243,6 +16130,11 @@ func rtgEmitCopyReturnedStructSliceFields(g *rtgLinearGen, typ int, srcOffset in
 	return true
 }
 func rtgFuncInfoFromCall(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
+	rtgTrustNonNil(g, ep)
+	meta := g.meta
+	p := g.prog
+	rtgTrustNonNil(meta)
+	rtgTrustNonNil(p)
 	e := &ep.exprs[idx]
 	if e.right > 0 {
 		return e.right - 1
@@ -15257,23 +16149,24 @@ func rtgFuncInfoFromCall(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
 	} else if e.kind != rtgExprIdent {
 		return -1
 	}
-	hash := rtgHashRange(g.prog.src, nameStart, nameEnd)
-	i := g.meta.funcBuckets[hash%len(g.meta.funcBuckets)]
+	hash := rtgHashRange(p.src, nameStart, nameEnd)
+	i := meta.funcBuckets[hash%len(meta.funcBuckets)]
 	for i >= 0 {
-		f := g.meta.funcs[i]
+		f := meta.funcs[i]
 		isMethod := f.receiverType != 0
-		if isMethod == wantMethod && rtgBytesEqualRange(g.prog.src, f.nameStart, f.nameEnd, nameStart, nameEnd) {
+		if isMethod == wantMethod && rtgBytesEqualRange(p.src, f.nameStart, f.nameEnd, nameStart, nameEnd) {
 			if !wantMethod || rtgMethodReceiverTypeMatches(g.meta, wantReceiverType, f.receiverType) {
 				e.right = i + 1
 				return i
 			}
 		}
-		i = g.meta.funcNext[i]
+		i = meta.funcNext[i]
 	}
 	return -1
 }
 
 func rtgIsInterfaceMethodCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	call := &ep.exprs[idx]
 	if call.kind != rtgExprCall {
 		return false
@@ -15283,6 +16176,7 @@ func rtgIsInterfaceMethodCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgInterfaceMethodCallResultType(g *rtgLinearGen, ep *rtgExprParse, idx int) int {
+	rtgTrustNonNil(g, ep)
 	if !rtgIsInterfaceMethodCall(g, ep, idx) {
 		return 0
 	}
@@ -15291,7 +16185,9 @@ func rtgInterfaceMethodCallResultType(g *rtgLinearGen, ep *rtgExprParse, idx int
 }
 
 func rtgInterfaceMethodResultType(g *rtgLinearGen, interfaceType int, selector *rtgExpr) int {
+	rtgTrustNonNil(g, selector)
 	iface := rtgResolveType(g.meta, interfaceType)
+	rtgTrustNonNil(iface)
 	for required := iface.first; required < iface.count; {
 		end := rtgStatementLineEnd(g.prog, required, iface.count)
 		if rtgTokCharIs(g.prog, required+1, '(') {
@@ -15317,6 +16213,7 @@ func rtgInterfaceMethodResultType(g *rtgLinearGen, interfaceType int, selector *
 }
 
 func rtgEmitInterfaceMethodCall(g *rtgLinearGen, ep *rtgExprParse, idx int, resultOffset int, resultType int) bool {
+	rtgTrustNonNil(g, ep)
 	call := &ep.exprs[idx]
 	selector := &ep.exprs[call.left]
 	receiverType := rtgInferParsedExprType(g, ep, selector.left)
@@ -15348,7 +16245,7 @@ func rtgEmitInterfaceMethodCall(g *rtgLinearGen, ep *rtgExprParse, idx int, resu
 
 		wordCount := 0
 		for i := call.argCount - 1; i >= 0; i-- {
-			words := rtgEmitCallParamArgReverse(g, ep, ep.args[call.firstArg+i], fn.firstParam+i+1)
+			words := rtgEmitCallParamArgReverse(g, ep, rtg_runtime_UnsafeIntAt(ep.args, call.firstArg+i), fn.firstParam+i+1)
 			if words < 0 {
 				return false
 			}
@@ -15381,10 +16278,12 @@ func rtgEmitInterfaceMethodCall(g *rtgLinearGen, ep *rtgExprParse, idx int, resu
 }
 
 func rtgInterfaceMethodNamed(g *rtgLinearGen, fn *rtgFuncInfo, selector *rtgExpr) bool {
+	rtgTrustNonNil(g, fn, selector)
 	return fn.receiverType != 0 && rtgBytesEqualRange(g.prog.src, fn.nameStart, fn.nameEnd, selector.nameStart, selector.nameEnd)
 }
 
 func rtgEmitInterfaceReceiverMatch(g *rtgLinearGen, receiverOffset int, receiverType int, nextLabel int) {
+	rtgTrustNonNil(g)
 	if rtgResolveType(g.meta, receiverType).kind == rtgTypePointer {
 		rtgAsmJcmpStackImm(&g.asm, receiverOffset-rtgBackendValueSlotSize, rtgRuntimeTypeTag(g.meta, receiverType), nextLabel, 0x95)
 		return
@@ -15402,6 +16301,7 @@ func rtgEmitInterfaceReceiverMatch(g *rtgLinearGen, receiverOffset int, receiver
 }
 
 func rtgMethodReceiverTypeMatches(meta *rtgMeta, actual int, declared int) bool {
+	rtgTrustNonNil(meta)
 	if actual == declared {
 		return true
 	}
@@ -15411,6 +16311,7 @@ func rtgMethodReceiverTypeMatches(meta *rtgMeta, actual int, declared int) bool 
 		return true
 	}
 	t := rtgResolveType(meta, actual)
+	rtgTrustNonNil(t)
 	if t.kind != rtgTypeStruct || t.count == 0 {
 		return false
 	}
@@ -15419,6 +16320,7 @@ func rtgMethodReceiverTypeMatches(meta *rtgMeta, actual int, declared int) bool 
 }
 
 func rtgCanonicalMethodReceiverType(meta *rtgMeta, typ int) int {
+	rtgTrustNonNil(meta)
 	for typ > 0 && typ < len(meta.types) {
 		t := meta.types[typ]
 		if t.kind == rtgTypePointer {
@@ -15443,6 +16345,7 @@ func rtgCanonicalMethodReceiverType(meta *rtgMeta, typ int) int {
 
 // Architecture target dispatch wrappers.
 func rtgEmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
+	rtgTrustNonNil(g)
 	if rtgTargetArch == rtgArchWasm32 {
 		return rtgWasm32EmitScalarFunction(g, fnInfoIndex)
 	}
@@ -15459,6 +16362,9 @@ func rtgEmitScalarFunction(g *rtgLinearGen, fnInfoIndex int) bool {
 }
 
 func rtgEmitScalarFunctionScratch(g *rtgLinearGen, fnInfoIndex int) bool {
+	rtgTrustNonNil(g)
+	g.checkedPointerLocals = 0
+	g.invalidatedPointerLocals = 0
 	persistentCapacity := rtgLinearPersistentCapacity(g)
 	typeCount := len(g.meta.types)
 	fieldCount := len(g.meta.fields)
@@ -15466,8 +16372,8 @@ func rtgEmitScalarFunctionScratch(g *rtgLinearGen, fnInfoIndex int) bool {
 	mark := rtg_runtime_ArenaMark()
 	ok := rtgEmitScalarFunction(g, fnInfoIndex)
 	if len(g.meta.captures) == captureCount {
-		g.meta.types = g.meta.types[:typeCount]
-		g.meta.fields = g.meta.fields[:fieldCount]
+		rtgTruncateTypes(&g.meta.types, typeCount)
+		rtgTruncateFields(&g.meta.fields, fieldCount)
 	}
 	if persistentCapacity == rtgLinearPersistentCapacity(g) {
 		rtg_runtime_ArenaReset(mark)
@@ -15476,6 +16382,7 @@ func rtgEmitScalarFunctionScratch(g *rtgLinearGen, fnInfoIndex int) bool {
 }
 
 func rtgLinearPersistentCapacity(g *rtgLinearGen) int {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	m := g.meta
 	// The remaining slices are either fixed-size or completely populated before
@@ -15485,6 +16392,7 @@ func rtgLinearPersistentCapacity(g *rtgLinearGen) int {
 }
 
 func rtgStoreIncomingCallWord(g *rtgLinearGen, word int, offset int) {
+	rtgTrustNonNil(g)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32StoreParamWord(g, word, offset)
 		return
@@ -15504,6 +16412,7 @@ func rtgStoreIncomingCallWord(g *rtgLinearGen, word int, offset int) {
 	rtgAmd64StoreParamWord(g, word, offset)
 }
 func rtgAsmPrimaryImm(a *rtgAsm, imm int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32EmitRegImm(a, rtgWasm32OpMovRegImm, rtgWasm32RegRax, imm)
 		return
@@ -15523,6 +16432,7 @@ func rtgAsmPrimaryImm(a *rtgAsm, imm int) {
 	rtgAmd64AsmMovRaxImm(a, imm)
 }
 func rtgAsmPrimaryImm64(a *rtgAsm, imm int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmMovRaxImm64(a, imm)
 		return
@@ -15543,6 +16453,7 @@ func rtgAsmPrimaryImm64(a *rtgAsm, imm int) {
 	rtgAsmEmit64(a, imm)
 }
 func rtgAsmSecondaryImm(a *rtgAsm, imm int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmMovRdxImm(a, imm)
 		return
@@ -15585,6 +16496,7 @@ func rtgAsmSecondaryImm(a *rtgAsm, imm int) {
 	rtgAsmEmit64(a, imm)
 }
 func rtgAsmPrimaryDataAddr(a *rtgAsm, dataOff int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmMovRaxDataAddr(a, dataOff)
 		return
@@ -15607,6 +16519,7 @@ func rtgAsmPrimaryDataAddr(a *rtgAsm, dataOff int) {
 	rtgAsmAddAbsReloc(a, at, dataOff, 0)
 }
 func rtgAsmPrimaryBssAddr(a *rtgAsm, bssOff int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmMovRaxBssAddr(a, bssOff)
 		return
@@ -15629,6 +16542,7 @@ func rtgAsmPrimaryBssAddr(a *rtgAsm, bssOff int) {
 	rtgAsmAddAbsReloc(a, at, bssOff, rtgAbsBssReloc)
 }
 func rtgAsmScratchBssAddr(a *rtgAsm, bssOff int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmMovR10BssAddr(a, bssOff)
 		return
@@ -15648,6 +16562,7 @@ func rtgAsmScratchBssAddr(a *rtgAsm, bssOff int) {
 	rtgAmd64AsmMovR10BssAddr(a, bssOff)
 }
 func rtgAsmLoadPrimaryBss(a *rtgAsm, bssOff int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmLoadRaxBss(a, bssOff)
 		return
@@ -15667,6 +16582,7 @@ func rtgAsmLoadPrimaryBss(a *rtgAsm, bssOff int) {
 	rtgAmd64AsmLoadRaxBss(a, bssOff)
 }
 func rtgAsmStorePrimaryBss(a *rtgAsm, bssOff int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmStoreRaxBss(a, bssOff)
 		return
@@ -15686,6 +16602,7 @@ func rtgAsmStorePrimaryBss(a *rtgAsm, bssOff int) {
 	rtgAmd64AsmStoreRaxBss(a, bssOff)
 }
 func rtgAsmCopyPrimaryToCallWord0(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmMovRdiRax(a)
 		return
@@ -15705,6 +16622,7 @@ func rtgAsmCopyPrimaryToCallWord0(a *rtgAsm) {
 	rtgAmd64AsmMovRdiRax(a)
 }
 func rtgAsmCopySecondaryToPrimary(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmMovRaxRdx(a)
 		return
@@ -15724,6 +16642,7 @@ func rtgAsmCopySecondaryToPrimary(a *rtgAsm) {
 	rtgAmd64AsmMovRaxRdx(a)
 }
 func rtgAsmCopyPrimaryToCallWord1(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmMovRsiRax(a)
 		return
@@ -15742,7 +16661,9 @@ func rtgAsmCopyPrimaryToCallWord1(a *rtgAsm) {
 	}
 	rtgAmd64AsmMovRsiRax(a)
 }
+
 func rtgAsmCopyPrimaryToCallWord4(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmMovR8Rax(a)
 		return
@@ -15762,6 +16683,7 @@ func rtgAsmCopyPrimaryToCallWord4(a *rtgAsm) {
 	rtgAmd64AsmMovR8Rax(a)
 }
 func rtgAsmCopyPrimaryToCallWord5(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmMovR9Rax(a)
 		return
@@ -15781,6 +16703,7 @@ func rtgAsmCopyPrimaryToCallWord5(a *rtgAsm) {
 	rtgAmd64AsmMovR9Rax(a)
 }
 func rtgAsmAddSecondaryTertiary(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmAddRdxRcx(a)
 		return
@@ -15800,6 +16723,7 @@ func rtgAsmAddSecondaryTertiary(a *rtgAsm) {
 	rtgAmd64AsmAddRdxRcx(a)
 }
 func rtgAsmSyscall(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmSyscall(a)
 		return
@@ -15819,6 +16743,7 @@ func rtgAsmSyscall(a *rtgAsm) {
 	rtgAmd64AsmSyscall(a)
 }
 func rtgAsmPopCallWord0(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmPopRdi(a)
 		return
@@ -15838,6 +16763,7 @@ func rtgAsmPopCallWord0(a *rtgAsm) {
 	rtgAmd64AsmPopRdi(a)
 }
 func rtgAsmStackMem(a *rtgAsm, offset int, base int, disp8 int, disp32 int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmStackMem(a, offset, base, disp8, disp32)
 		return
@@ -15857,6 +16783,7 @@ func rtgAsmStackMem(a *rtgAsm, offset int, base int, disp8 int, disp32 int) {
 	rtgAmd64AsmStackMem(a, offset, base, disp8, disp32)
 }
 func rtgAsmAddSecondaryImm(a *rtgAsm, imm int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmAddRdxImm(a, imm)
 		return
@@ -15876,6 +16803,7 @@ func rtgAsmAddSecondaryImm(a *rtgAsm, imm int) {
 	rtgAmd64AsmAddRdxImm(a, imm)
 }
 func rtgAsmMemDisp(a *rtgAsm, disp int, op int, disp8 int, disp32 int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchAarch64 {
 		rtgAarch64AsmMemDisp(a, disp, op, disp8, disp32)
 		return
@@ -15891,6 +16819,7 @@ func rtgAsmMemDisp(a *rtgAsm, disp int, op int, disp8 int, disp32 int) {
 	rtgAmd64AsmMemDisp(a, disp, op, disp8, disp32)
 }
 func rtgAsmLoadQwordPrimaryIndexTertiary8(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmLoadQwordRaxIndexRcx8(a)
 		return
@@ -15910,6 +16839,7 @@ func rtgAsmLoadQwordPrimaryIndexTertiary8(a *rtgAsm) {
 	rtgAmd64AsmLoadQwordRaxIndexRcx8(a)
 }
 func rtgAsmLoadQwordPrimaryIndexTertiaryDisp(a *rtgAsm, disp int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmLoadQwordRaxIndexRcxDisp(a, disp)
 		return
@@ -15929,6 +16859,7 @@ func rtgAsmLoadQwordPrimaryIndexTertiaryDisp(a *rtgAsm, disp int) {
 	rtgAmd64AsmLoadQwordRaxIndexRcxDisp(a, disp)
 }
 func rtgAsmLoadPrimaryMemSecondaryDisp(a *rtgAsm, disp int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmLoadRaxMemRdxDisp(a, disp)
 		return
@@ -15948,6 +16879,7 @@ func rtgAsmLoadPrimaryMemSecondaryDisp(a *rtgAsm, disp int) {
 	rtgAmd64AsmLoadRaxMemRdxDisp(a, disp)
 }
 func rtgAsmLoadPrimaryMemSecondaryDispSize(a *rtgAsm, disp int, size int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmLoadRaxMemRdxDispSize(a, disp, size)
 		return
@@ -15967,6 +16899,7 @@ func rtgAsmLoadPrimaryMemSecondaryDispSize(a *rtgAsm, disp int, size int) {
 	rtgAmd64AsmLoadRaxMemRdxDispSize(a, disp, size)
 }
 func rtgAsmLoadBytePrimaryIndexTertiary(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmLoadByteRaxIndexRcx(a)
 		return
@@ -15986,6 +16919,7 @@ func rtgAsmLoadBytePrimaryIndexTertiary(a *rtgAsm) {
 	rtgAmd64AsmLoadByteRaxIndexRcx(a)
 }
 func rtgAsmLoadPrimaryIndexTertiarySize(a *rtgAsm, size int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmLoadRaxIndexRcxSize(a, size)
 		return
@@ -16005,6 +16939,7 @@ func rtgAsmLoadPrimaryIndexTertiarySize(a *rtgAsm, size int) {
 	rtgAmd64AsmLoadRaxIndexRcxSize(a, size)
 }
 func rtgAsmStorePrimaryMemSecondaryTertiary8(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmStoreRaxMemRdxRcx8(a)
 		return
@@ -16024,6 +16959,7 @@ func rtgAsmStorePrimaryMemSecondaryTertiary8(a *rtgAsm) {
 	rtgAmd64AsmStoreRaxMemRdxRcx8(a)
 }
 func rtgAsmStorePrimaryMemSecondaryDisp(a *rtgAsm, disp int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmStoreRaxMemRdxDisp(a, disp)
 		return
@@ -16043,6 +16979,7 @@ func rtgAsmStorePrimaryMemSecondaryDisp(a *rtgAsm, disp int) {
 	rtgAmd64AsmStoreRaxMemRdxDisp(a, disp)
 }
 func rtgAsmStorePrimaryMemSecondaryDispSize(a *rtgAsm, disp int, size int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmStoreRaxMemRdxDispSize(a, disp, size)
 		return
@@ -16062,6 +16999,7 @@ func rtgAsmStorePrimaryMemSecondaryDispSize(a *rtgAsm, disp int, size int) {
 	rtgAmd64AsmStoreRaxMemRdxDispSize(a, disp, size)
 }
 func rtgAsmNormalizePrimaryForKind(a *rtgAsm, kind int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmNormalizeRaxForKind(a, kind)
 		return
@@ -16081,6 +17019,7 @@ func rtgAsmNormalizePrimaryForKind(a *rtgAsm, kind int) {
 	rtgAmd64AsmNormalizeRaxForKind(a, kind)
 }
 func rtgAsmIncMemSecondary(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmIncMemRdx(a)
 		return
@@ -16100,6 +17039,7 @@ func rtgAsmIncMemSecondary(a *rtgAsm) {
 	rtgAmd64AsmIncMemRdx(a)
 }
 func rtgAsmDecMemSecondary(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmDecMemRdx(a)
 		return
@@ -16119,6 +17059,7 @@ func rtgAsmDecMemSecondary(a *rtgAsm) {
 	rtgAmd64AsmDecMemRdx(a)
 }
 func rtgAsmBoolNotPrimary(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmBoolNotRax(a)
 		return
@@ -16138,6 +17079,7 @@ func rtgAsmBoolNotPrimary(a *rtgAsm) {
 	rtgAmd64AsmBoolNotRax(a)
 }
 func rtgAsmCmpPrimaryImm8(a *rtgAsm, imm int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmCmpRaxImm8(a, imm)
 		return
@@ -16157,6 +17099,7 @@ func rtgAsmCmpPrimaryImm8(a *rtgAsm, imm int) {
 	rtgAmd64AsmCmpRaxImm8(a, imm)
 }
 func rtgAsmAddPrimaryTertiary(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmAddRaxRcx(a)
 		return
@@ -16176,6 +17119,7 @@ func rtgAsmAddPrimaryTertiary(a *rtgAsm) {
 	rtgAmd64AsmAddRaxRcx(a)
 }
 func rtgAsmSubPrimaryTertiary(a *rtgAsm) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmSubRaxRcx(a)
 		return
@@ -16195,6 +17139,7 @@ func rtgAsmSubPrimaryTertiary(a *rtgAsm) {
 	rtgAmd64AsmSubRaxRcx(a)
 }
 func rtgAsmShlTertiaryImm(a *rtgAsm, imm int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmShlRcxImm(a, imm)
 		return
@@ -16214,6 +17159,7 @@ func rtgAsmShlTertiaryImm(a *rtgAsm, imm int) {
 	rtgAmd64AsmShlRcxImm(a, imm)
 }
 func rtgAsmShlPrimaryImm(a *rtgAsm, imm int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmShlRaxImm(a, imm)
 		return
@@ -16233,6 +17179,7 @@ func rtgAsmShlPrimaryImm(a *rtgAsm, imm int) {
 	rtgAmd64AsmShlRaxImm(a, imm)
 }
 func rtgAsmSarPrimaryImm(a *rtgAsm, imm int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmSarRaxImm(a, imm)
 		return
@@ -16252,6 +17199,7 @@ func rtgAsmSarPrimaryImm(a *rtgAsm, imm int) {
 	rtgAmd64AsmSarRaxImm(a, imm)
 }
 func rtgAsmDivLeftTertiaryRightPrimary(a *rtgAsm, mod bool) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmDivLeftRcxRightRax(a, mod)
 		return
@@ -16271,6 +17219,7 @@ func rtgAsmDivLeftTertiaryRightPrimary(a *rtgAsm, mod bool) {
 	rtgAmd64AsmDivLeftRcxRightRax(a, mod)
 }
 func rtgAsmCmpTertiaryPrimarySet(a *rtgAsm, setcc int) {
+	rtgTrustNonNil(a)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32AsmCmpRcxRaxSet(a, setcc)
 		return
@@ -16290,27 +17239,103 @@ func rtgAsmCmpTertiaryPrimarySet(a *rtgAsm, setcc int) {
 	rtgAmd64AsmCmpRcxRaxSet(a, setcc)
 }
 func rtgEmitSwitchStringCaseTest(g *rtgLinearGen, valueOffset int, lenOffset int, ep *rtgExprParse, idx int, matchLabel int) bool {
+	rtgTrustNonNil(g, ep)
 	if rtgTargetArch == rtgArch386 {
 		return rtg386EmitSwitchStringCaseTest(g, valueOffset, lenOffset, ep, idx, matchLabel)
 	}
 	return rtgAmd64EmitSwitchStringCaseTest(g, valueOffset, lenOffset, ep, idx, matchLabel)
 }
 func rtgEmitPrimaryTertiaryOp(g *rtgLinearGen, tok int) bool {
+	rtgTrustNonNil(g)
+	divide := rtgTokCharIs(g.prog, tok, '/')
+	mod := rtgTokCharIs(g.prog, tok, '%')
+	if (divide || mod) && !g.meta.panicEnabled {
+		rtgAsmCallLabel(&g.asm, rtgEnsureSignedDivisionHelper(g, mod))
+		return true
+	}
+	done := -1
+	if divide || mod {
+		rtgEmitRuntimeNonNilPrimary(g)
+		if rtgTargetArch != rtgArchAmd64 {
+			done = rtgEmitSignedDivisionOverflowGuard(g, mod)
+		}
+	}
+	ok := false
 	if rtgTargetArch == rtgArchWasm32 {
-		return rtgWasm32EmitRaxRcxOp(g, tok)
+		ok = rtgWasm32EmitRaxRcxOp(g, tok)
+	} else if rtgTargetArch == rtgArchAarch64 {
+		ok = rtgAarch64EmitRaxRcxOp(g, tok)
+	} else if rtgTargetArch == rtgArchArm {
+		ok = rtgArmEmitRaxRcxOp(g, tok)
+	} else if rtgTargetArch == rtgArch386 {
+		ok = rtg386EmitRaxRcxOp(g, tok)
+	} else {
+		ok = rtgAmd64EmitRaxRcxOp(g, tok)
 	}
-	if rtgTargetArch == rtgArchAarch64 {
-		return rtgAarch64EmitRaxRcxOp(g, tok)
+	if done >= 0 {
+		rtgAsmMarkLabel(&g.asm, done)
 	}
-	if rtgTargetArch == rtgArchArm {
-		return rtgArmEmitRaxRcxOp(g, tok)
+	return ok
+}
+
+func rtgEnsureSignedDivisionHelper(g *rtgLinearGen, mod bool) int {
+	rtgTrustNonNil(g)
+	a := &g.asm
+	slot := &g.divideCheckLabel
+	if mod {
+		slot = &g.remainderCheckLabel
 	}
-	if rtgTargetArch == rtgArch386 {
-		return rtg386EmitRaxRcxOp(g, tok)
+	rtgTrustNonNil(slot)
+	if *slot > 0 {
+		return *slot - 1
 	}
-	return rtgAmd64EmitRaxRcxOp(g, tok)
+	label := rtgAsmNewLabel(a)
+	*slot = label + 1
+	after := rtgAsmNewLabel(a)
+	rtgAsmJmpMarkLabel(a, after, label)
+	nonzero := rtgAsmNewLabel(a)
+	rtgAsmJnzPrimary(a, nonzero)
+	rtgAsmJmpLabel(a, rtgEnsureUncaughtRuntimeFaultHelper(g))
+	rtgAsmMarkLabel(a, nonzero)
+	done := -1
+	if rtgTargetArch != rtgArchAmd64 {
+		done = rtgEmitSignedDivisionOverflowGuard(g, mod)
+	}
+	rtgAsmDivLeftTertiaryRightPrimary(a, mod)
+	if done >= 0 {
+		rtgAsmMarkLabel(a, done)
+	}
+	rtgAsmRet(a)
+	rtgAsmMarkLabel(a, after)
+	return label
+}
+
+func rtgEmitSignedDivisionOverflowGuard(g *rtgLinearGen, mod bool) int {
+	rtgTrustNonNil(g)
+	a := &g.asm
+	normal := rtgAsmNewLabel(a)
+	restoreDivisor := rtgAsmNewLabel(a)
+	done := rtgAsmNewLabel(a)
+	rtgAsmCmpPrimaryImm8(a, -1)
+	rtgAsmJnzLabel(a, normal)
+	rtgAsmPushTertiary(a)
+	rtgAsmPrimaryImm(a, -1)
+	rtgAsmShlPrimaryImm(a, rtgNativeIntSize*8-1)
+	rtgAsmPopTertiary(a)
+	rtgAsmCmpTertiaryPrimarySet(a, 0x94)
+	rtgAsmJzPrimary(a, restoreDivisor)
+	if mod {
+		rtgAsmPrimaryImm(a, 0)
+	} else {
+		rtgAsmCopyTertiaryToPrimary(a)
+	}
+	rtgAsmJmpMarkLabel(a, done, restoreDivisor)
+	rtgAsmPrimaryImm(a, -1)
+	rtgAsmMarkLabel(a, normal)
+	return done
 }
 func rtgEmitCompareJump(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, label int, jumpIfTrue bool) bool {
+	rtgTrustNonNil(g, ep, e)
 	if rtgBinaryComparesInterface(g, ep, e) {
 		return false
 	}
@@ -16320,6 +17345,7 @@ func rtgEmitCompareJump(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr, label int
 	return rtgAmd64EmitCompareJump(g, ep, e, label, jumpIfTrue)
 }
 func rtgEmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	e := &ep.exprs[idx]
 	if e.kind == rtgExprIdent && rtgBytesEqualText(g.prog.src, e.nameStart, e.nameEnd, "nil") {
 		rtgAsmPrimaryImm(&g.asm, 0)
@@ -16340,14 +17366,16 @@ func rtgEmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		return rtgEmitStringValueRegs(g, ep, callee.left)
 	}
 	if e.kind == rtgExprCall && e.argCount == 1 && rtgTypeIsString(g.meta, rtgConversionTypeFromExpr(g, ep, e.left)) {
-		argIndex := ep.args[e.firstArg]
+		argIndex := rtg_runtime_UnsafeIntAt(ep.args, e.firstArg)
 		if rtgTypeIsString(g.meta, rtgInferParsedExprType(g, ep, argIndex)) {
 			return rtgEmitStringValueRegs(g, ep, argIndex)
 		}
 		argType := rtgInferParsedExprType(g, ep, argIndex)
 		argResolved := rtgResolveType(g.meta, argType)
+		rtgTrustNonNil(argResolved)
 		if argResolved.kind == rtgTypeSlice {
 			elem := rtgResolveType(g.meta, argResolved.elem)
+			rtgTrustNonNil(elem)
 			if elem.kind == rtgTypeByte {
 				return rtgEmitByteSliceStringCopyValueRegs(g, ep, argIndex)
 			}
@@ -16367,6 +17395,7 @@ func rtgEmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 		if !rtgEmitIntExpr(g, ep, e.left) {
 			return false
 		}
+		rtgEmitRuntimeNonNilPrimary(g)
 		rtgAsmCopyPrimaryToSecondary(&g.asm)
 		rtgAsmLoadPrimaryMemSecondaryDisp(&g.asm, 0)
 		rtgAsmPushPrimary(&g.asm)
@@ -16381,6 +17410,7 @@ func rtgEmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	return rtgGenericEmitStringValueRegs(g, ep, idx)
 }
 func rtgGenericEmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	meta := g.meta
 	a := &g.asm
 	e := &ep.exprs[idx]
@@ -16428,10 +17458,12 @@ func rtgGenericEmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) b
 	if e.kind == rtgExprIndex {
 		leftType := rtgInferParsedExprType(g, ep, e.left)
 		t := rtgResolveType(meta, leftType)
+		rtgTrustNonNil(t)
 		if t.kind != rtgTypeSlice {
 			return false
 		}
 		elem := rtgResolveType(meta, t.elem)
+		rtgTrustNonNil(elem)
 		if elem.kind != rtgTypeString {
 			return false
 		}
@@ -16473,13 +17505,15 @@ func rtgGenericEmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) b
 		return true
 	}
 	if e.kind == rtgExprCall && e.argCount == 1 && rtgExprIsIdentText(g.prog, ep, e.left, "string") {
-		argIndex := ep.args[e.firstArg]
+		argIndex := rtg_runtime_UnsafeIntAt(ep.args, e.firstArg)
 		argType := rtgInferParsedExprType(g, ep, argIndex)
 		argResolved := rtgResolveType(meta, argType)
+		rtgTrustNonNil(argResolved)
 		if argResolved.kind != rtgTypeSlice {
 			return false
 		}
 		elem := rtgResolveType(meta, argResolved.elem)
+		rtgTrustNonNil(elem)
 		if elem.kind != rtgTypeByte {
 			return false
 		}
@@ -16504,6 +17538,7 @@ func rtgGenericEmitStringValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) b
 }
 
 func rtgStringHeapOffsets(g *rtgLinearGen) {
+	rtgTrustNonNil(g)
 	if g.stringHeapReady != 0 {
 		return
 	}
@@ -16515,6 +17550,7 @@ func rtgStringHeapOffsets(g *rtgLinearGen) {
 }
 
 func rtgStringArenaSize(g *rtgLinearGen) int {
+	rtgTrustNonNil(g)
 	if g.arenaSize > 0 {
 		return g.arenaSize
 	}
@@ -16522,18 +17558,21 @@ func rtgStringArenaSize(g *rtgLinearGen) int {
 }
 
 func rtgEmitArenaAllocPrimary(g *rtgLinearGen, size int) {
+	rtgTrustNonNil(g)
 	label := rtgEnsureArenaAllocHelper(g)
 	rtgAsmPrimaryImm(&g.asm, size)
 	rtgAsmCallLabel(&g.asm, label)
 }
 
 func rtgEmitArenaAllocStackPrimary(g *rtgLinearGen, sizeOff int) {
+	rtgTrustNonNil(g)
 	label := rtgEnsureArenaAllocHelper(g)
 	rtgAsmLoadPrimaryStack(&g.asm, sizeOff)
 	rtgAsmCallLabel(&g.asm, label)
 }
 
 func rtgEnsureArenaAllocHelper(g *rtgLinearGen) int {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	if g.arenaAllocEmitted {
 		return g.arenaAllocLabel
@@ -16580,6 +17619,7 @@ func rtgEnsureArenaAllocHelper(g *rtgLinearGen) int {
 const rtgPrintIntBufferSize = 24
 
 func rtgEmitPrintIntBufferByte(g *rtgLinearGen) {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	lenOff := g.printIntBufferOff + rtgPrintIntBufferSize + 8
 	rtgAsmPushPrimary(a)
@@ -16599,6 +17639,7 @@ func rtgEmitPrintIntBufferByte(g *rtgLinearGen) {
 }
 
 func rtgEnsurePrintIntHelper(g *rtgLinearGen) int {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	if g.printIntEmitted {
 		return g.printIntLabel
@@ -16732,6 +17773,7 @@ func rtgStaticSliceBackingSize(needSize int, elemSize int) int {
 }
 
 func rtgEmitByteSliceStringCopyValueRegs(g *rtgLinearGen, ep *rtgExprParse, argIndex int) bool {
+	rtgTrustNonNil(g, ep)
 	a := &g.asm
 	if !rtgEmitSlicePtrLen(g, ep, argIndex) {
 		return false
@@ -16775,6 +17817,7 @@ func rtgEmitByteSliceStringCopyValueRegs(g *rtgLinearGen, ep *rtgExprParse, argI
 }
 
 func rtgEmitUTF8StoreByte(g *rtgLinearGen, ep *rtgExprParse, loc *rtgSliceLocation, valueOff int, divisor int, prefix int) bool {
+	rtgTrustNonNil(g, ep, loc)
 	a := &g.asm
 	rtgAsmLoadPrimaryStack(a, valueOff)
 	if divisor != 1 {
@@ -16804,6 +17847,7 @@ func rtgEmitUTF8StoreByte(g *rtgLinearGen, ep *rtgExprParse, loc *rtgSliceLocati
 }
 
 func rtgEmitUTF8Cases(g *rtgLinearGen, ep *rtgExprParse, loc *rtgSliceLocation, valueOff int) bool {
+	rtgTrustNonNil(g, ep, loc)
 	a := &g.asm
 	done := rtgAsmNewLabel(a)
 	for width := 1; width <= 4; width++ {
@@ -16833,6 +17877,7 @@ func rtgEmitUTF8Cases(g *rtgLinearGen, ep *rtgExprParse, loc *rtgSliceLocation, 
 }
 
 func rtgEmitRuneSliceStringCopyValueRegs(g *rtgLinearGen, ep *rtgExprParse, argIndex int) bool {
+	rtgTrustNonNil(g, ep)
 	a := &g.asm
 	srcOff := rtgAddUnnamedLocal(g, rtgTypeInt)
 	lenOff := rtgAddUnnamedLocal(g, rtgTypeInt)
@@ -16875,6 +17920,7 @@ func rtgEmitRuneSliceStringCopyValueRegs(g *rtgLinearGen, ep *rtgExprParse, argI
 }
 
 func rtgEmitStringConcatValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	byteSliceType := rtgAddType(g.meta, rtgTypeSlice, rtgTypeByte, 0, 0, rtgBackendSliceValueSize, 0, 0)
 	offset := rtgAddUnnamedLocal(g, byteSliceType)
 	rtgZeroLocalAtOffset(g, offset)
@@ -16886,6 +17932,7 @@ func rtgEmitStringConcatValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bo
 }
 
 func rtgEmitStringConcatPairValueRegs(g *rtgLinearGen, left *rtgExprParse, leftIndex int, right *rtgExprParse, rightIndex int) bool {
+	rtgTrustNonNil(g, left, right)
 	byteSliceType := rtgAddType(g.meta, rtgTypeSlice, rtgTypeByte, 0, 0, rtgBackendSliceValueSize, 0, 0)
 	offset := rtgAddUnnamedLocal(g, byteSliceType)
 	rtgZeroLocalAtOffset(g, offset)
@@ -16897,6 +17944,7 @@ func rtgEmitStringConcatPairValueRegs(g *rtgLinearGen, left *rtgExprParse, leftI
 }
 
 func rtgEmitStringConcatLocationValueRegs(g *rtgLinearGen, offset int) bool {
+	rtgTrustNonNil(g)
 	a := &g.asm
 	if rtgTargetArch == rtgArchAmd64 {
 		destOff := rtgAddUnnamedLocal(g, rtgTypeInt)
@@ -16918,6 +17966,7 @@ func rtgEmitStringConcatLocationValueRegs(g *rtgLinearGen, offset int) bool {
 }
 
 func rtgEmitStringConcatIntoLocation(g *rtgLinearGen, ep *rtgExprParse, idx int, loc *rtgSliceLocation) bool {
+	rtgTrustNonNil(g, ep, loc)
 	e := &ep.exprs[idx]
 	if e.kind == rtgExprBinary && rtgTokCharIs(g.prog, e.tok, '+') && rtgTypeIsString(g.meta, rtgInferParsedExprType(g, ep, idx)) {
 		if !rtgEmitStringConcatIntoLocation(g, ep, e.left, loc) {
@@ -16929,6 +17978,7 @@ func rtgEmitStringConcatIntoLocation(g *rtgLinearGen, ep *rtgExprParse, idx int,
 }
 
 func rtgEmitAppendStringBytesToLocation(g *rtgLinearGen, ep *rtgExprParse, idx int, locEp *rtgExprParse, loc *rtgSliceLocation) bool {
+	rtgTrustNonNil(g, ep, locEp, loc)
 	a := &g.asm
 	srcPtr := rtgAddUnnamedLocal(g, rtgTypeInt)
 	srcLen := rtgAddUnnamedLocal(g, rtgTypeInt)
@@ -16957,8 +18007,10 @@ func rtgEmitAppendStringBytesToLocation(g *rtgLinearGen, ep *rtgExprParse, idx i
 }
 
 func rtgEmitCompositeFieldToMem(g *rtgLinearGen, ep *rtgExprParse, idx int, fieldType int, addrOffset int, fieldOffset int) bool {
+	rtgTrustNonNil(g, ep)
 	a := &g.asm
 	fieldResolved := rtgResolveType(g.meta, fieldType)
+	rtgTrustNonNil(fieldResolved)
 	if fieldResolved.kind == rtgTypeMap {
 		return rtgEmitMapCompositeFieldToMem(g, ep, idx, fieldType, addrOffset, fieldOffset)
 	}
@@ -16998,6 +18050,7 @@ func rtgEmitCompositeFieldToMem(g *rtgLinearGen, ep *rtgExprParse, idx int, fiel
 }
 
 func rtgEmitMapCompositeFieldToMem(g *rtgLinearGen, ep *rtgExprParse, idx int, fieldType int, addrOffset int, fieldOffset int) bool {
+	rtgTrustNonNil(g, ep)
 	tempOffset := rtgAddTypedLocal(g, 0, 0, fieldType)
 	if !rtgEmitMapAssignToLocal(g, ep, idx, fieldType, tempOffset) {
 		return false
@@ -17008,8 +18061,10 @@ func rtgEmitMapCompositeFieldToMem(g *rtgLinearGen, ep *rtgExprParse, idx int, f
 }
 
 func rtgEmitStructReturnExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	resultType := g.meta.funcs[g.currentFunc].resultType
 	resultKind := rtgResolveType(g.meta, resultType).kind
+	rtgTrustNonNil(resultKind)
 	if resultKind != rtgTypeStruct || idx >= 0 && idx < len(ep.exprs) && (ep.exprs[idx].kind == rtgExprAssert || ep.exprs[idx].kind == rtgExprSelector || ep.exprs[idx].kind == rtgExprIdent && rtgFindLocalIndex(g, ep.exprs[idx].nameStart, ep.exprs[idx].nameEnd) < 0) {
 		if g.returnStruct <= 0 {
 			return false
@@ -17028,13 +18083,15 @@ func rtgEmitStructReturnExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	return rtgAmd64EmitStructReturnExpr(g, ep, idx)
 }
 func rtgEmitNamedConversionCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	e := &ep.exprs[idx]
 	if e.argCount == 1 {
 		conversionType := rtgConversionTypeFromExpr(g, ep, e.left)
 		if conversionType != 0 {
 			resolved := rtgResolveType(g.meta, conversionType)
+			rtgTrustNonNil(resolved)
 			if rtgTypeKindIsScalarValue(resolved.kind) {
-				return rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], resolved.kind)
+				return rtgEmitScalarExprForKind(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg), resolved.kind)
 			}
 		}
 	}
@@ -17044,6 +18101,7 @@ func rtgEmitNamedConversionCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool
 	return rtgAmd64EmitNamedConversionCall(g, ep, idx)
 }
 func rtgLinearMarkFunc(g *rtgLinearGen, fnIndex int) {
+	rtgTrustNonNil(g)
 	if fnIndex < 0 || fnIndex >= len(g.funcReachable) {
 		return
 	}
@@ -17062,6 +18120,7 @@ func rtgLinearMarkFunc(g *rtgLinearGen, fnIndex int) {
 }
 
 func rtgInitFuncQueue(g *rtgLinearGen, count int) {
+	rtgTrustNonNil(g)
 	g.funcReachable = make([]bool, count, count)
 	for i := 0; i < count; i++ {
 		g.funcReachable[i] = false
@@ -17070,6 +18129,7 @@ func rtgInitFuncQueue(g *rtgLinearGen, count int) {
 }
 
 func rtgEmitCallWithWordCount(g *rtgLinearGen, fnIndex int, wordCount int) {
+	rtgTrustNonNil(g)
 	rtgLinearMarkFunc(g, fnIndex)
 	if rtgTargetArch == rtgArchWasm32 {
 		rtgWasm32EmitCallWithWordCount(g, fnIndex, wordCount)
@@ -17085,6 +18145,7 @@ func rtgEmitCallWithWordCount(g *rtgLinearGen, fnIndex int, wordCount int) {
 	rtgEmitPostCallPanicCheck(g)
 }
 func rtgExprIsPointerCompositeLiteral(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	if idx < 0 || idx >= len(ep.exprs) {
 		return false
 	}
@@ -17095,11 +18156,13 @@ func rtgExprIsPointerCompositeLiteral(g *rtgLinearGen, ep *rtgExprParse, idx int
 	return ep.exprs[e.left].kind == rtgExprComposite
 }
 func rtgEmitPointerCompositeLiteral(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	e := &ep.exprs[idx]
 	innerIndex := e.left
 	inner := &ep.exprs[innerIndex]
 	elemType := rtgInferParsedExprType(g, ep, innerIndex)
 	resolved := rtgResolveType(g.meta, elemType)
+	rtgTrustNonNil(resolved)
 	if resolved.kind != rtgTypeStruct {
 		return false
 	}
@@ -17138,6 +18201,7 @@ func rtgEmitPointerCompositeLiteral(g *rtgLinearGen, ep *rtgExprParse, idx int) 
 	return true
 }
 func rtgEmitMachineIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	if rtgTargetArch == rtgArch386 {
 		return rtg386EmitIntExpr(g, ep, idx)
 	}
@@ -17145,6 +18209,7 @@ func rtgEmitMachineIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgEmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	if idx >= 0 && idx < len(ep.exprs) {
 		e := &ep.exprs[idx]
 		if e.kind == rtgExprBinary && rtgBinaryComparesInterface(g, ep, e) {
@@ -17200,8 +18265,9 @@ func rtgEmitIntExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgEmitComplexComponentPrimary(g *rtgLinearGen, ep *rtgExprParse, idx int, imaginary bool) bool {
+	rtgTrustNonNil(g, ep)
 	e := &ep.exprs[idx]
-	if e.argCount != 1 || !rtgEmitComplexValueRegs(g, ep, ep.args[e.firstArg]) {
+	if e.argCount != 1 || !rtgEmitComplexValueRegs(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
 		return false
 	}
 	if imaginary {
@@ -17212,6 +18278,7 @@ func rtgEmitComplexComponentPrimary(g *rtgLinearGen, ep *rtgExprParse, idx int, 
 }
 
 func rtgEmitComplexValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	if idx < 0 || idx >= len(ep.exprs) {
 		return false
 	}
@@ -17242,11 +18309,11 @@ func rtgEmitComplexValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 			return false
 		}
 		realOffset := rtgAddUnnamedLocal(g, rtgTypeFloat64)
-		if !rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg], rtgTypeFloat64) {
+		if !rtgEmitScalarExprForKind(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg), rtgTypeFloat64) {
 			return false
 		}
 		rtgAsmStorePrimaryStack(&g.asm, realOffset)
-		if !rtgEmitScalarExprForKind(g, ep, ep.args[e.firstArg+1], rtgTypeFloat64) {
+		if !rtgEmitScalarExprForKind(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg+1), rtgTypeFloat64) {
 			return false
 		}
 		rtgAsmPushPrimary(&g.asm)
@@ -17286,6 +18353,7 @@ func rtgEmitComplexValueRegs(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgEmitComplexBinaryComponent(g *rtgLinearGen, left int, right int, subtract bool) {
+	rtgTrustNonNil(g)
 	rtgAsmLoadPrimaryTertiaryStack(&g.asm, left, right)
 	if subtract {
 		rtgAsmSubPrimaryTertiary(&g.asm)
@@ -17295,6 +18363,7 @@ func rtgEmitComplexBinaryComponent(g *rtgLinearGen, left int, right int, subtrac
 }
 
 func rtgParseImaginaryTokenScaled(p *rtgProgram, tok int) int {
+	rtgTrustNonNil(p)
 	start := int(rtgTokStart(p, tok))
 	end := int(rtgTokEnd(p, tok))
 	whole := 0
@@ -17302,7 +18371,7 @@ func rtgParseImaginaryTokenScaled(p *rtgProgram, tok int) int {
 	divisor := 1
 	afterDot := false
 	for i := start; i < end; i++ {
-		c := p.src[i]
+		c := rtg_runtime_UnsafeByteAt(p.src, i)
 		if c == '.' {
 			afterDot = true
 			continue
@@ -17321,6 +18390,7 @@ func rtgParseImaginaryTokenScaled(p *rtgProgram, tok int) int {
 }
 
 func rtgEmitTypeAssertionToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, valueOffset int, okOffset int, panicMismatch bool) bool {
+	rtgTrustNonNil(g, ep)
 	e := &ep.exprs[idx]
 	asserted := rtgInferParsedExprType(g, ep, idx)
 	if asserted == 0 || rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, e.left)).kind != rtgTypeInterface {
@@ -17352,6 +18422,7 @@ func rtgEmitTypeAssertionToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, val
 }
 
 func rtgEmitMethodSelectorValuePrimary(g *rtgLinearGen, ep *rtgExprParse, idx int, fnIndex int, expression bool) bool {
+	rtgTrustNonNil(g, ep)
 	if expression {
 		rtgAsmPrimaryImm(&g.asm, fnIndex+1)
 		return true
@@ -17373,6 +18444,7 @@ func rtgEmitMethodSelectorValuePrimary(g *rtgLinearGen, ep *rtgExprParse, idx in
 }
 
 func rtgEmitBoundMethodHandle(g *rtgLinearGen, fnIndex int, receiverType int, receiverOffset int, indirect bool, offset int) {
+	rtgTrustNonNil(g)
 	receiverSize := rtgTypeCopySize(g.meta, receiverType)
 	sizeOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
 	addrOffset := rtgAddUnnamedLocal(g, rtgTypeInt)
@@ -17394,9 +18466,12 @@ func rtgEmitBoundMethodHandle(g *rtgLinearGen, fnIndex int, receiverType int, re
 }
 
 func rtgEmitMethodReceiverToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, receiverType int, offset int) bool {
+	rtgTrustNonNil(g, ep)
 	declared := rtgResolveType(g.meta, receiverType)
+	rtgTrustNonNil(declared)
 	actualType := rtgInferParsedExprType(g, ep, idx)
 	actual := rtgResolveType(g.meta, actualType)
+	rtgTrustNonNil(actual)
 	if declared.kind == rtgTypePointer {
 		if actual.kind == rtgTypePointer {
 			return rtgEmitExprToLocal(g, ep, idx, offset)
@@ -17419,6 +18494,7 @@ func rtgEmitMethodReceiverToLocal(g *rtgLinearGen, ep *rtgExprParse, idx int, re
 }
 
 func rtgEmitClosureValuePrimary(g *rtgLinearGen, literalTok int) bool {
+	rtgTrustNonNil(g)
 	closureIndex := rtgClosureIndexByToken(g.meta, literalTok)
 	if closureIndex < 0 || !rtgPrepareClosureCaptures(g, closureIndex) {
 		return false
@@ -17452,26 +18528,31 @@ func rtgEmitClosureValuePrimary(g *rtgLinearGen, literalTok int) bool {
 }
 
 func rtgPrepareClosureCaptures(g *rtgLinearGen, closureIndex int) bool {
-	if closureIndex < 0 || closureIndex >= len(g.meta.closures) {
+	rtgTrustNonNil(g)
+	meta := g.meta
+	p := g.prog
+	rtgTrustNonNil(meta)
+	rtgTrustNonNil(p)
+	if closureIndex < 0 || closureIndex >= len(meta.closures) {
 		return false
 	}
-	info := &g.meta.closures[closureIndex]
+	info := &meta.closures[closureIndex]
 	if info.ready {
 		return true
 	}
-	if info.fnIndex < 0 || info.fnIndex >= len(g.meta.funcs) {
+	if info.fnIndex < 0 || info.fnIndex >= len(meta.funcs) {
 		return false
 	}
-	fn := &g.meta.funcs[info.fnIndex]
-	info.firstCapture = len(g.meta.captures)
+	fn := &meta.funcs[info.fnIndex]
+	info.firstCapture = len(meta.captures)
 	for localIndex := 0; localIndex < g.localCount; localIndex++ {
 		local := &g.locals[localIndex]
-		if local.nameEnd <= local.nameStart || rtgClosureNameDeclared(g.meta, fn, local.nameStart, local.nameEnd) {
+		if local.nameEnd <= local.nameStart || rtgClosureNameDeclared(meta, fn, local.nameStart, local.nameEnd) {
 			continue
 		}
 		used := false
 		for tok := fn.bodyStart; tok < fn.bodyEnd; tok++ {
-			if rtgTokIsKind(g.prog, tok, rtgTokIdent) && rtgBytesEqualRange(g.prog.src, local.nameStart, local.nameEnd, int(rtgTokStart(g.prog, tok)), int(rtgTokEnd(g.prog, tok))) {
+			if rtgTokIsKind(p, tok, rtgTokIdent) && rtgBytesEqualRange(p.src, local.nameStart, local.nameEnd, int(rtgTokStart(p, tok)), int(rtgTokEnd(p, tok))) {
 				used = true
 				break
 			}
@@ -17487,6 +18568,7 @@ func rtgPrepareClosureCaptures(g *rtgLinearGen, closureIndex int) bool {
 }
 
 func rtgClosureNameDeclared(meta *rtgMeta, fn *rtgFuncInfo, nameStart int, nameEnd int) bool {
+	rtgTrustNonNil(meta, fn)
 	for i := 1; i < fn.paramCount; i++ {
 		param := &meta.params[fn.firstParam+i]
 		if param.nameEnd > param.nameStart && rtgBytesEqualRange(meta.prog.src, param.nameStart, param.nameEnd, nameStart, nameEnd) {
@@ -17505,7 +18587,9 @@ func rtgClosureNameDeclared(meta *rtgMeta, fn *rtgFuncInfo, nameStart int, nameE
 }
 
 func rtgEmitScalarExprForKind(g *rtgLinearGen, ep *rtgExprParse, idx int, destKind int) bool {
+	rtgTrustNonNil(g, ep)
 	source := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, idx))
+	rtgTrustNonNil(source)
 	if !rtgEmitIntExpr(g, ep, idx) {
 		return false
 	}
@@ -17522,7 +18606,9 @@ func rtgEmitScalarExprForKind(g *rtgLinearGen, ep *rtgExprParse, idx int, destKi
 }
 
 func rtgArrayBuiltinCount(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr) int {
-	t := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, ep.args[e.firstArg]))
+	rtgTrustNonNil(g, ep, e)
+	t := rtgResolveType(g.meta, rtgInferParsedExprType(g, ep, rtg_runtime_UnsafeIntAt(ep.args, e.firstArg)))
+	rtgTrustNonNil(t)
 	if t.kind == rtgTypeArray {
 		return t.count
 	}
@@ -17530,6 +18616,7 @@ func rtgArrayBuiltinCount(g *rtgLinearGen, ep *rtgExprParse, e *rtgExpr) int {
 }
 
 func rtgEmitFloatBinaryExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	if rtgTargetArch == rtgArchWasm32 {
 		return rtgWasm32EmitFloatBinaryExpr(g, ep, idx)
 	}
@@ -17545,6 +18632,7 @@ func rtgEmitFloatBinaryExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 	return rtgAmd64EmitFloatBinaryExpr(g, ep, idx)
 }
 func rtgEmitSliceSlotAddrs(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSliceLocation, elemSize int) bool {
+	rtgTrustNonNil(g, locEp, loc)
 	if rtgTargetArch == rtgArchArm {
 		return rtgArmEmitSliceSlotAddrs(g, locEp, loc, elemSize)
 	}
@@ -17554,6 +18642,7 @@ func rtgEmitSliceSlotAddrs(g *rtgLinearGen, locEp *rtgExprParse, loc *rtgSliceLo
 	return rtgAmd64EmitSliceSlotAddrs(g, locEp, loc, elemSize)
 }
 func rtgEnsureAppendAddrHelper(g *rtgLinearGen) int {
+	rtgTrustNonNil(g)
 	if rtgTargetArch == rtgArchWasm32 {
 		return rtgWasm32EnsureAppendAddrHelper(g)
 	}
@@ -17569,6 +18658,7 @@ func rtgEnsureAppendAddrHelper(g *rtgLinearGen) int {
 	return rtgAmd64EnsureAppendAddrHelper(g)
 }
 func rtgEnsureAppend8Helper(g *rtgLinearGen) int {
+	rtgTrustNonNil(g)
 	if rtgTargetArch == rtgArchWasm32 {
 		return rtgWasm32EnsureAppend8Helper(g)
 	}
@@ -17584,6 +18674,7 @@ func rtgEnsureAppend8Helper(g *rtgLinearGen) int {
 	return rtgAmd64EnsureAppend8Helper(g)
 }
 func rtgEnsureAppend64Helper(g *rtgLinearGen) int {
+	rtgTrustNonNil(g)
 	if rtgTargetArch == rtgArchWasm32 {
 		return rtgWasm32EnsureAppend64Helper(g)
 	}
@@ -17599,6 +18690,7 @@ func rtgEnsureAppend64Helper(g *rtgLinearGen) int {
 	return rtgAmd64EnsureAppend64Helper(g)
 }
 func rtgEnsureStringEqualHelper(g *rtgLinearGen) int {
+	rtgTrustNonNil(g)
 	if rtgTargetArch == rtgArchWasm32 {
 		return rtgWasm32EnsureStringEqualHelper(g)
 	}
@@ -17614,16 +18706,19 @@ func rtgEnsureStringEqualHelper(g *rtgLinearGen) int {
 	return rtgAmd64EnsureStringEqualHelper(g)
 }
 func rtgEmitIndexedStructField(g *rtgLinearGen, ep *rtgExprParse, indexIdx int, fieldStart int, fieldEnd int) bool {
+	rtgTrustNonNil(g, ep)
 	if rtgTargetArch == rtgArch386 {
 		return rtg386EmitIndexedStructField(g, ep, indexIdx, fieldStart, fieldEnd)
 	}
 	return rtgAmd64EmitIndexedStructField(g, ep, indexIdx, fieldStart, fieldEnd)
 }
 func rtgEmitStringPtrExpr(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	return rtgEmitStringValueRegs(g, ep, idx)
 }
 
 func rtgExprIsErrorStringCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	e := &ep.exprs[idx]
 	if e.kind != rtgExprCall || e.argCount != 0 {
 		return false
@@ -17633,6 +18728,7 @@ func rtgExprIsErrorStringCall(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
 }
 
 func rtgEmitSelectorAddressSecondary(g *rtgLinearGen, ep *rtgExprParse, idx int) bool {
+	rtgTrustNonNil(g, ep)
 	if rtgTargetArch == rtgArchAmd64 {
 		return rtgAmd64EmitSelectorAddressRdx(g, ep, idx)
 	}
@@ -17643,35 +18739,52 @@ func rtgEmitSelectorAddressSecondary(g *rtgLinearGen, ep *rtgExprParse, idx int)
 }
 
 func rtgEmitIndexedSelectorAddressSecondary(g *rtgLinearGen, ep *rtgExprParse, idx int, fieldOffset int) bool {
+	rtgTrustNonNil(g, ep)
 	meta := g.meta
 	a := &g.asm
 	indexExpr := &ep.exprs[idx]
 	leftType := rtgInferParsedExprType(g, ep, indexExpr.left)
 	sliceType := rtgResolveType(meta, leftType)
+	rtgTrustNonNil(sliceType)
 	if sliceType.kind != rtgTypeSlice {
 		return false
 	}
 	elemType := rtgResolveType(meta, sliceType.elem)
+	rtgTrustNonNil(elemType)
 	if elemType.kind != rtgTypeStruct && elemType.kind != rtgTypePointer {
 		return false
 	}
-	if !rtgEmitIntExpr(g, ep, indexExpr.right) {
+	if !rtgEmitIndexAddressPrimary(g, ep, idx) {
 		return false
 	}
-	rtgAsmPushPrimary(a)
-	if !rtgEmitSlicePtrLen(g, ep, indexExpr.left) {
-		return false
-	}
-	rtgAsmPopTertiary(a)
-	rtgAsmMulTertiaryImm(a, rtgTypeSize(meta, sliceType.elem))
 	rtgAsmCopyPrimaryToSecondary(a)
-	rtgAsmAddSecondaryTertiary(a)
 	if elemType.kind == rtgTypePointer {
 		rtgAsmLoadPrimaryMemSecondaryDisp(a, 0)
+		rtgEmitRuntimeNonNilPrimary(g)
 		rtgAsmCopyPrimaryToSecondary(a)
 	}
 	if fieldOffset != 0 {
 		rtgAsmAddSecondaryImm(a, fieldOffset)
 	}
 	return true
+}
+
+func rtgTruncateParams(data *[]rtgSymbolInfo, count int) {
+	rtgTrustNonNil(data)
+	*data = (*data)[:count]
+}
+
+func rtgTruncateTypes(data *[]rtgTypeInfo, count int) {
+	rtgTrustNonNil(data)
+	*data = (*data)[:count]
+}
+
+func rtgTruncateFields(data *[]rtgFieldInfo, count int) {
+	rtgTrustNonNil(data)
+	*data = (*data)[:count]
+}
+
+func rtgTruncateBytes(data *[]byte, count int) {
+	rtgTrustNonNil(data)
+	*data = (*data)[:count]
 }
