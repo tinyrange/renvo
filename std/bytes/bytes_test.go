@@ -1,6 +1,9 @@
 package bytes
 
-import "testing"
+import (
+	"io"
+	"testing"
+)
 
 func TestByteHelpers(t *testing.T) {
 	if !Equal([]byte("abc"), []byte("abc")) || Compare([]byte("abc"), []byte("abd")) >= 0 {
@@ -32,5 +35,9 @@ func TestBuffer(t *testing.T) {
 	b.Reset()
 	if b.Len() != 0 || b.String() != "" {
 		t.Fatalf("reset failed")
+	}
+	n, err = b.Read(buf)
+	if n != 0 || err != io.EOF || err.Error() != "EOF" {
+		t.Fatalf("empty read = %d, %v", n, err)
 	}
 }
