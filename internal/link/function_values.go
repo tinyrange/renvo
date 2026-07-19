@@ -1,6 +1,7 @@
 package link
 
 import (
+	"renvo.dev/internal/arena"
 	"renvo.dev/internal/syntax"
 	"renvo.dev/internal/unit"
 )
@@ -53,10 +54,12 @@ type functionValueEdit struct {
 	text  string
 }
 
-func lowerFunctionValuesCore(program *unit.Program) bool {
+func renvo_runtime_ArenaDiscardLinkTokens(tokens []unit.Token) {}
+
+func lowerFunctionValuesCore(program *unit.Program, transient bool) bool {
 	functions, deferred := functionValueProgramNeedsLowering(program)
 	if deferred {
-		if !lowerDeferredBuiltins(program) {
+		if !lowerDeferredBuiltins(program, transient) {
 			return false
 		}
 		functions = true
@@ -105,6 +108,9 @@ func lowerFunctionValuesCore(program *unit.Program) bool {
 		}
 	}
 	generated := functionValueGeneratedText(signatures, closures)
+	if transient {
+		renvo_runtime_ArenaDiscardLinkTokens(program.Tokens)
+	}
 	text, ok := applyFunctionValueEdits(program.Text, edits)
 	if !ok {
 		return false
@@ -113,10 +119,14 @@ func lowerFunctionValuesCore(program *unit.Program) bool {
 		text = append(text, '\n')
 	}
 	text = appendFunctionValueString(text, generated)
-	return reparseFunctionValueProgram(program, text)
+	if transient {
+		arena.DiscardBytes(program.Text)
+	}
+	ok = reparseFunctionValueProgram(program, text)
+	return ok
 }
 
-func lowerDeferredBuiltins(program *unit.Program) bool {
+func lowerDeferredBuiltins(program *unit.Program, transient bool) bool {
 	var edits []functionValueEdit
 	for i := 0; i+2 < len(program.Tokens); i++ {
 		if !functionValueTokenEquals(program, i, "defer") || !functionValueTokenEquals(program, i+2, "(") {
@@ -183,8 +193,18 @@ func lowerDeferredBuiltins(program *unit.Program) bool {
 	if len(edits) == 0 {
 		return true
 	}
+	if transient {
+		renvo_runtime_ArenaDiscardLinkTokens(program.Tokens)
+	}
 	text, ok := applyFunctionValueEdits(program.Text, edits)
-	return ok && reparseFunctionValueProgram(program, text)
+	if !ok {
+		return false
+	}
+	if transient {
+		arena.DiscardBytes(program.Text)
+	}
+	ok = reparseFunctionValueProgram(program, text)
+	return ok
 }
 
 func deferredBuiltinArgumentType(program *unit.Program, before int, start int, end int) string {

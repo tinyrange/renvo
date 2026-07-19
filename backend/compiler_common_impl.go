@@ -12678,7 +12678,9 @@ func renvoEmitRuntimeArenaCall(g *renvoLinearGen, ep *renvoExprParse, idx int, f
 		return renvoEmitRuntimeArenaDiscard(g, ep, idx)
 	}
 	if renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaDiscardBytes") ||
-		renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaDiscardUnitTokens") {
+		renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaDiscardUnitTokens") ||
+		renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaDiscardLinkTokens") ||
+		renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaDiscardLowerTokens") {
 		return renvoEmitRuntimeArenaDiscardSlice(g, ep, idx)
 	}
 	return false

@@ -169,7 +169,7 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 		Size:  0,
 		Line:  line,
 	})
-	if !lowerFunctionValuesCore(&program) {
+	if !lowerFunctionValuesCore(&program, transient) {
 		return empty, false
 	}
 	return program, true
@@ -890,7 +890,9 @@ func coreSymbolKeepsRuntimeName(name string) bool {
 		"renvo_runtime_ArenaPersistBytes",
 		"renvo_runtime_ArenaDiscard",
 		"renvo_runtime_ArenaDiscardBytes",
-		"renvo_runtime_ArenaDiscardUnitTokens":
+		"renvo_runtime_ArenaDiscardUnitTokens",
+		"renvo_runtime_ArenaDiscardLinkTokens",
+		"renvo_runtime_ArenaDiscardLowerTokens":
 		return true
 	}
 	return false

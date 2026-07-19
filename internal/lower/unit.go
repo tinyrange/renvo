@@ -8,6 +8,10 @@ import (
 	"renvo.dev/internal/unit"
 )
 
+const transientLowerChunk = 8192
+
+func renvo_runtime_ArenaDiscardLowerTokens(tokens []syntax.Token) {}
+
 // EmitCheckedPackageCore lowers the compact checked-package metadata used by
 // both host-built and self-hosted frontend pipelines.
 func EmitCheckedPackageCore(pkg load.Package, info check.PackageInfo, transient bool) Result {
@@ -46,7 +50,7 @@ func EmitCheckedPackageCore(pkg load.Package, info check.PackageInfo, transient 
 	}
 	for i := 0; i < len(pkg.Files); i++ {
 		file := pkg.Files[i].File
-		if _, ok := builder.addFileTokens(file, pkg.Files[i].Src, i, i+1 < len(pkg.Files)); !ok {
+		if _, ok := builder.addFileTokens(file, pkg.Files[i].Src, i, i+1 < len(pkg.Files), transient); !ok {
 			return emitFail(result, builder.err, builder.errFile, builder.errToken)
 		}
 	}
@@ -147,7 +151,7 @@ func (b *coreUnitBuilder) reserveCheckedPackage(pkg load.Package, info check.Pac
 	b.program.Selectors = make([]unit.Selector, 0, selectorCap)
 }
 
-func (b *coreUnitBuilder) addFileTokens(file syntax.File, src []byte, fileIndex int, hasNext bool) (coreTokenMap, bool) {
+func (b *coreUnitBuilder) addFileTokens(file syntax.File, src []byte, fileIndex int, hasNext bool, transient bool) (coreTokenMap, bool) {
 	base := len(b.program.Text)
 	tokenBase := len(b.program.Tokens)
 	lineOffset := b.lineOffset
@@ -168,7 +172,19 @@ func (b *coreUnitBuilder) addFileTokens(file syntax.File, src []byte, fileIndex 
 			Line:  lineOffset + tok.Line,
 		})
 	}
-	b.program.Text = appendCoreBytes(b.program.Text, src)
+	if transient {
+		renvo_runtime_ArenaDiscardLowerTokens(file.Tokens)
+		for start := 0; start < len(src); start += transientLowerChunk {
+			end := start + transientLowerChunk
+			if end > len(src) {
+				end = len(src)
+			}
+			b.program.Text = appendCoreBytes(b.program.Text, src[start:end])
+			arena.DiscardBytes(src[start:end])
+		}
+	} else {
+		b.program.Text = appendCoreBytes(b.program.Text, src)
+	}
 	b.lineOffset += countCoreNewlines(src)
 	if hasNext && (len(src) == 0 || src[len(src)-1] != '\n') {
 		b.program.Text = append(b.program.Text, '\n')
