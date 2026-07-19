@@ -54,13 +54,20 @@ func linkBuildCore(result build.Result, transient bool) Result {
 		out.Error = LinkErrUnit
 		return out
 	}
-	data, ok := unit.MarshalCore(unit.CoreProgramFrom(program))
+	var data []byte
+	if transient {
+		data, ok = unit.MarshalCoreTransient(unit.CoreProgramFrom(program))
+	} else {
+		data, ok = unit.MarshalCore(unit.CoreProgramFrom(program))
+	}
 	if !ok {
 		out.Ok = false
 		out.Error = LinkErrUnit
 		return out
 	}
-	out.Program = program
+	if !transient {
+		out.Program = program
+	}
 	out.Data = data
 	return out
 }
@@ -881,7 +888,9 @@ func coreSymbolKeepsRuntimeName(name string) bool {
 		"renvo_runtime_ArenaPersistReset",
 		"renvo_runtime_ArenaPersistString",
 		"renvo_runtime_ArenaPersistBytes",
-		"renvo_runtime_ArenaDiscard":
+		"renvo_runtime_ArenaDiscard",
+		"renvo_runtime_ArenaDiscardBytes",
+		"renvo_runtime_ArenaDiscardUnitTokens":
 		return true
 	}
 	return false

@@ -14,6 +14,8 @@ func renvo_runtime_ArenaPersistBytes(value []byte) []byte { return value }
 
 func renvo_runtime_ArenaDiscard(start int, end int) {}
 
+func renvo_runtime_ArenaDiscardBytes(value []byte) {}
+
 func Mark() int { return renvo_runtime_ArenaMark() }
 
 func Reset(mark int) {
@@ -33,3 +35,7 @@ func PersistBytes(value []byte) []byte { return renvo_runtime_ArenaPersistBytes(
 // Discard releases complete pages wholly contained in a dead arena range
 // without rewinding the allocator or invalidating later allocations.
 func Discard(start int, end int) { renvo_runtime_ArenaDiscard(start, end) }
+
+// DiscardBytes releases complete pages covered by a dead byte slice without
+// changing the arena allocation cursor. Callers must not read value again.
+func DiscardBytes(value []byte) { renvo_runtime_ArenaDiscardBytes(value) }

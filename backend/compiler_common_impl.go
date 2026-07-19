@@ -12677,6 +12677,10 @@ func renvoEmitRuntimeArenaCall(g *renvoLinearGen, ep *renvoExprParse, idx int, f
 	if renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaDiscard") {
 		return renvoEmitRuntimeArenaDiscard(g, ep, idx)
 	}
+	if renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaDiscardBytes") ||
+		renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaDiscardUnitTokens") {
+		return renvoEmitRuntimeArenaDiscardSlice(g, ep, idx)
+	}
 	return false
 }
 
@@ -13078,19 +13082,59 @@ func renvoEmitRuntimeArenaDiscard(g *renvoLinearGen, ep *renvoExprParse, idx int
 		renvoAsmPrimaryImm(&g.asm, 0)
 		return true
 	}
-	a := &g.asm
 	startOff := renvoAddUnnamedLocal(g, renvoTypeInt)
-	lenOff := renvoAddUnnamedLocal(g, renvoTypeInt)
-	doneLabel := renvoAsmNewLabel(a)
+	endOff := renvoAddUnnamedLocal(g, renvoTypeInt)
 	if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
 		return false
 	}
-	renvoAmd64AsmAddRaxImm32(a, 4095)
-	renvoAmd64AsmAndRaxImm32(a, -4096)
-	renvoAsmStorePrimaryStack(a, startOff)
+	renvoAsmStorePrimaryStack(&g.asm, startOff)
 	if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
 		return false
 	}
+	renvoAsmStorePrimaryStack(&g.asm, endOff)
+	return renvoEmitRuntimeArenaDiscardStackRange(g, startOff, endOff)
+}
+
+func renvoEmitRuntimeArenaDiscardSlice(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+	renvoNonNil(g, ep)
+	e := &ep.exprs[idx]
+	if e.argCount != 1 {
+		return false
+	}
+	if renvoTargetArch != renvoArchAmd64 || renvoTargetOS != renvoOSLinux {
+		renvoAsmPrimaryImm(&g.asm, 0)
+		return true
+	}
+	argIndex := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
+	sliceType := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, argIndex))
+	if sliceType.kind != renvoTypeSlice {
+		return false
+	}
+	elemSize := renvoTypeSize(g.meta, sliceType.elem)
+	if !renvoEmitSlicePtrLen(g, ep, argIndex) {
+		return false
+	}
+	startOff := renvoAddUnnamedLocal(g, renvoTypeInt)
+	endOff := renvoAddUnnamedLocal(g, renvoTypeInt)
+	renvoAsmStorePrimaryStack(&g.asm, startOff)
+	renvoAsmMulTertiaryImm(&g.asm, elemSize)
+	renvoAsmCopyTertiaryToPrimary(&g.asm)
+	renvoAsmLoadTertiaryStack(&g.asm, startOff)
+	renvoAsmAddPrimaryTertiary(&g.asm)
+	renvoAsmStorePrimaryStack(&g.asm, endOff)
+	return renvoEmitRuntimeArenaDiscardStackRange(g, startOff, endOff)
+}
+
+func renvoEmitRuntimeArenaDiscardStackRange(g *renvoLinearGen, startOff int, endOff int) bool {
+	renvoNonNil(g)
+	a := &g.asm
+	lenOff := renvoAddUnnamedLocal(g, renvoTypeInt)
+	doneLabel := renvoAsmNewLabel(a)
+	renvoAsmLoadPrimaryStack(a, startOff)
+	renvoAmd64AsmAddRaxImm32(a, 4095)
+	renvoAmd64AsmAndRaxImm32(a, -4096)
+	renvoAsmStorePrimaryStack(a, startOff)
+	renvoAsmLoadPrimaryStack(a, endOff)
 	renvoAmd64AsmAndRaxImm32(a, -4096)
 	renvoAsmLoadTertiaryStack(a, startOff)
 	renvoAsmSubPrimaryTertiary(a)

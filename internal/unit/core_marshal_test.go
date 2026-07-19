@@ -52,6 +52,26 @@ func TestCoreUnitDecodesWithPublicReader(t *testing.T) {
 	}
 }
 
+func TestTransientCoreMarshalPreservesCanonicalEncoding(t *testing.T) {
+	program := coreGoldenProgram()
+	program.Text = bytes.Repeat([]byte("package p\n"), transientMarshalChunk)
+	program.Tokens = make([]Token, transientMarshalChunk+17)
+	for i := 0; i < len(program.Tokens); i++ {
+		program.Tokens[i] = Token{Kind: TokenIdent, Start: i, Size: 1, Line: i/10 + 1}
+	}
+	want, ok := MarshalCore(CoreProgramFrom(program))
+	if !ok {
+		t.Fatal("MarshalCore failed")
+	}
+	got, ok := MarshalCoreTransient(CoreProgramFrom(program))
+	if !ok {
+		t.Fatal("MarshalCoreTransient failed")
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatal("transient marshal changed the canonical unit encoding")
+	}
+}
+
 func readGoldenHex(t *testing.T, path string) []byte {
 	t.Helper()
 	encoded, err := os.ReadFile(path)
