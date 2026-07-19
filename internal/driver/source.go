@@ -899,7 +899,7 @@ func sourceFilenameEnabled(name string, target string) bool {
 }
 
 func filenameKnownOS(tag string) bool {
-	return stringInBuildList(tag, "aix android darwin dragonfly freebsd hurd illumos ios js linux nacl netbsd openbsd plan9 solaris wasi wasip1 windows zos")
+	return stringInBuildList(tag, "aix android browser darwin dragonfly freebsd hurd illumos ios js linux nacl netbsd openbsd plan9 solaris wasi wasip1 windows zos")
 }
 
 func filenameKnownArch(tag string) bool {
@@ -1114,7 +1114,10 @@ func hasBuildTag(target string, tag string, tags []string) bool {
 		return stringHasPrefix(target, "windows/")
 	}
 	if tag == "wasi" || tag == "wasip1" {
-		return stringHasPrefix(target, "wasi/")
+		return stringHasPrefix(target, "wasi/") || stringHasPrefix(target, "browser/")
+	}
+	if tag == "browser" {
+		return stringHasPrefix(target, "browser/")
 	}
 	if tag == "amd64" {
 		return stringHasSuffix(target, "/amd64")

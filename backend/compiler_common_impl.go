@@ -10909,6 +10909,33 @@ func renvoBinaryComparesInterface(g *renvoLinearGen, ep *renvoExprParse, e *renv
 
 func renvoEmitInterfaceCompare(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr) bool {
 	renvoNonNil(g, ep, e)
+	leftExpr := &ep.exprs[e.left]
+	rightExpr := &ep.exprs[e.right]
+	leftNil := leftExpr.kind == renvoExprIdent && renvoBytesEqualText(g.prog.src, leftExpr.nameStart, leftExpr.nameEnd, "nil")
+	rightNil := rightExpr.kind == renvoExprIdent && renvoBytesEqualText(g.prog.src, rightExpr.nameStart, rightExpr.nameEnd, "nil")
+	if leftNil || rightNil {
+		// Nil equality only depends on the interface's dynamic type tag. The
+		// general comparison ladder includes every comparable runtime type and
+		// is both unnecessary and especially expensive in large programs.
+		valueIndex := e.left
+		if leftNil {
+			valueIndex = e.right
+		}
+		value := renvoAddUnnamedLocal(g, renvoBuiltinTypeInterface)
+		if !renvoEmitInterfaceAssignToLocal(g, ep, valueIndex, value) {
+			return false
+		}
+		a := &g.asm
+		renvoAsmPrimaryImm(a, 0)
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoAsmLoadPrimaryStack(a, value-renvoBackendValueSlotSize)
+		setcc := 0x94
+		if renvoTok2Is(g.prog, e.tok, '!', '=') {
+			setcc = 0x95
+		}
+		renvoAsmCmpTertiaryPrimarySet(a, setcc)
+		return true
+	}
 	left := renvoAddUnnamedLocal(g, renvoBuiltinTypeInterface)
 	right := renvoAddUnnamedLocal(g, renvoBuiltinTypeInterface)
 	if !renvoEmitInterfaceAssignToLocal(g, ep, e.left, left) || !renvoEmitInterfaceAssignToLocal(g, ep, e.right, right) {

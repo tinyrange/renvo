@@ -39,6 +39,20 @@ func TestCompileFromFSInvokesBackend(t *testing.T) {
 	}
 }
 
+func TestCompileBrowserTargetUsesWASIBackendAndPackagesHTML(t *testing.T) {
+	backend := &recordingBackend{binary: []byte{0, 'a', 's', 'm'}}
+	result := CompileUnit([]string{"-t", "browser/wasm32", "-o", "app.html", "./cmd/app"}, "/repo/case", "/std", driverTestFiles(), backend)
+	if !result.Ok {
+		t.Fatalf("browser compile failed: %#v", result)
+	}
+	if backend.target != "wasi/wasm32" {
+		t.Fatalf("backend target = %q", backend.target)
+	}
+	if !bytes.HasPrefix(result.Binary, []byte("<!doctype html>")) || !bytes.Contains(result.Binary, []byte("AGFzbQ==")) {
+		t.Fatalf("browser output was not a self-contained HTML file")
+	}
+}
+
 func TestCompileReportsBuildFailure(t *testing.T) {
 	backend := &recordingBackend{binary: []byte("binary")}
 	result := CompileUnit([]string{"-t", "invalid", "-o", "app", "./cmd/app"}, "/repo/case", "/std", driverTestFiles(), backend)

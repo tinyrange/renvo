@@ -49,7 +49,7 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 	if resetArena {
 		mark = arena.Mark()
 	}
-	built := buildFromFSCompactWithModuleCache(commandArgs, renvoWorkDir(env), renvoStdRoot(args, env), renvoEnvValue(env, "RENVO_MODCACHE"), RenvoFS{})
+	built := buildFromFSCompactWithModuleCache(commandArgs, renvoWorkDir(env), renvoStdRoot(args, env), renvoModuleCache(env), RenvoFS{})
 	if !built.Ok {
 		return finishRenvoCommandFailure(renvoCommandDiagnosticBuffer, built.Diagnostic, resetArena, mark)
 	}
@@ -83,7 +83,15 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 		}
 		arena.Reset(backendMark)
 	}
+	virtualTarget := target
+	target = backendTarget(target)
 	ok := backendbridge.CompileUnitToOutputStripEnv(unit, target, output, strip, windowsGUI, arenaSize, args, env)
+	if ok && virtualTarget == "browser/wasm32" {
+		wasm, readErr := os.ReadFile(output)
+		if readErr != nil || os.WriteFile(output, PackageBrowserHTML(wasm), 0644) != nil {
+			ok = false
+		}
+	}
 	if resetArena {
 		arena.PersistReset(persistMark)
 	}
@@ -132,6 +140,14 @@ func renvoStdRoot(args []string, env []string) string {
 		return bundled
 	}
 	return "/std"
+}
+
+func renvoModuleCache(env []string) string {
+	value := renvoEnvValue(env, "RENVO_MODCACHE")
+	if value == "" && renvoBundledStdEnabled {
+		return "/modules"
+	}
+	return value
 }
 
 func renvoEnvValue(env []string, key string) string {

@@ -1,4 +1,4 @@
-//go:build renvo && !darwin && !windows
+//go:build renvo && !darwin && !windows && !browser
 
 package process
 

@@ -125,6 +125,7 @@ func TestIsSupportedTarget(t *testing.T) {
 		"windows/386",
 		"windows/arm64",
 		"wasi/wasm32",
+		"browser/wasm32",
 	}
 	for i := 0; i < len(supported); i++ {
 		if !IsSupportedTarget(supported[i]) {

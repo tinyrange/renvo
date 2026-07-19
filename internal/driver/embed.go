@@ -749,7 +749,7 @@ func sourceEmbedInitializer(spec sourceEmbedSpec, files []sourceEmbedFile) ([]by
 }
 
 func quoteSourceEmbedExpression(data []byte) []byte {
-	const chunkSize = 8000
+	const chunkSize = 15000
 	if len(data) <= chunkSize {
 		return quoteSourceEmbedBytes(data)
 	}

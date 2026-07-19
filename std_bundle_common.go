@@ -8,7 +8,16 @@ type StdEntry struct {
 }
 
 func BundledStdReadFile(path string) ([]byte, bool) {
-	name := bundledStdName(path)
+	name, ok := bundledSourceName(path)
+	if !ok {
+		return nil, false
+	}
+	if name == "@module/go.mod" {
+		return []byte("module renvo.dev\n"), true
+	}
+	if bundledHasPrefix(name, "@module/") {
+		name = name[len("@module/"):]
+	}
 	if !bundledStdGoSourceName(name) {
 		return nil, false
 	}
@@ -20,7 +29,16 @@ func BundledStdReadFile(path string) ([]byte, bool) {
 }
 
 func BundledStdReadDir(path string) ([]StdEntry, bool) {
-	name := bundledStdName(path)
+	name, ok := bundledSourceName(path)
+	if !ok {
+		return nil, false
+	}
+	if name == "@module" {
+		return []StdEntry{{Name: "go.mod"}, {Name: "forms", IsDir: true}, {Name: "std", IsDir: true}}, true
+	}
+	if bundledHasPrefix(name, "@module/") {
+		name = name[len("@module/"):]
+	}
 	entries, ok := bundledStdRawReadDir(name)
 	if !ok {
 		return nil, false
@@ -69,11 +87,33 @@ func bundledStdDirHasSource(path string) bool {
 	return false
 }
 
-func bundledStdName(path string) string {
+func bundledSourceName(path string) (string, bool) {
 	for len(path) > 0 && path[0] == '/' {
 		path = path[1:]
 	}
-	return path
+	const module = "modules/renvo.dev@v0.0.0"
+	if path == module {
+		return "@module", true
+	}
+	if bundledHasPrefix(path, module+"/") {
+		return "@module/" + path[len(module)+1:], true
+	}
+	if path != "std" && !bundledHasPrefix(path, "std/") {
+		return "", false
+	}
+	return path, true
+}
+
+func bundledHasPrefix(value string, prefix string) bool {
+	if len(value) < len(prefix) {
+		return false
+	}
+	for i := 0; i < len(prefix); i++ {
+		if value[i] != prefix[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func bundledStdGoSourceName(path string) bool {

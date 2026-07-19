@@ -83,6 +83,40 @@ The ordinary Go (`!renvo`) window implementation is deliberately headless; it
 exists to test portable rendering with the Go toolchain. Native windowing is
 currently supported by RENVO Darwin/arm64 and Windows/amd64 builds.
 
+## Browser applications
+
+The frontend target `browser/wasm32` lowers through the WASI WebAssembly
+backend and writes one self-contained HTML file. Its host is a small desktop
+compositor. The first graphics window fills the browser viewport; applications
+launched by it open as draggable, resizable windows above that root. Console
+programs use compositor-hosted terminal windows. Graphics surfaces are
+presented through WebGL2, and the HTML has no scripts, stylesheets, fonts, or
+`.wasm` sidecar files.
+
+Forms applications give the system ownership of the event loop through
+`forms.App`. The same source runs with a blocking native loop and an exported,
+event-driven browser loop:
+
+```go
+window := graphics.NewWindow(graphics.WindowOptions{Title: "Hello", Width: 420, Height: 240})
+form := NewMainForm()
+forms.NewApp(window, &form.Form).Run()
+```
+
+Build the application with `renvo -t browser/wasm32 -o hello.html .` and open
+`hello.html` directly in a WebGL2-capable browser.
+
+The IDE uses the browser's persistent virtual filesystem and launches compiled
+`browser/wasm32` HTML outputs back into the compositor. A bundled compiler also
+provides the Forms sources through its read-only module cache, so the generated
+Hello World project builds without network access. The compiler itself needs a
+larger application arena than ordinary GUI programs:
+
+```sh
+renvo -tags renvo_bundle -t browser/wasm32 -s -arena-size 536870912 \
+  -o renvoide.html ./cmd/renvoide
+```
+
 ## Deliberate baseline exclusions
 
 Shaders, perspective transforms, multisampling, HDR, floating-point targets,

@@ -34,6 +34,36 @@ func TestBundledStandardLibraryFS(t *testing.T) {
 	}
 }
 
+func TestBundledFormsModuleCache(t *testing.T) {
+	data, ok := bundledStdReadFile("/modules/renvo.dev@v0.0.0/go.mod")
+	if !ok || string(data) != "module renvo.dev\n" {
+		t.Fatalf("bundled module file = %q/%v", string(data), ok)
+	}
+	data, ok = bundledStdReadFile("/modules/renvo.dev@v0.0.0/forms/forms.go")
+	if !ok || len(data) == 0 {
+		t.Fatal("bundled Forms source missing")
+	}
+	entries, ok := bundledStdReadDir("/modules/renvo.dev@v0.0.0")
+	if !ok || len(entries) != 3 || entries[0].Name != "go.mod" || entries[1].Name != "forms" || entries[2].Name != "std" {
+		t.Fatalf("bundled module root = %#v/%v", entries, ok)
+	}
+}
+
+func TestBundledFormsModuleCompilesOffline(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\nrequire renvo.dev v0.0.0\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	source := []byte("package main\nimport \"renvo.dev/forms\"\nfunc main() { _ = forms.NewButton() }\n")
+	if err := os.WriteFile(filepath.Join(root, "main.go"), source, 0644); err != nil {
+		t.Fatal(err)
+	}
+	result := BuildFromFSWithModuleCache([]string{"-t", "browser/wasm32", "-o", "app", "."}, root, "/std", "/modules", OSFS{})
+	if !result.Ok {
+		t.Fatalf("offline Forms build failed: %#v", result.Diagnostic)
+	}
+}
+
 func TestBundledStandardLibraryMatchesRepository(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {

@@ -522,7 +522,7 @@ func (f *MainForm) selectBuildTarget(target string) {
 }
 
 func workspaceTargets() []string {
-	return []string{"darwin/arm64", "windows/amd64", "windows/386", "windows/arm64"}
+	return []string{"darwin/arm64", "windows/amd64", "windows/386", "windows/arm64", "browser/wasm32"}
 }
 
 func workspaceProjectOutput(root, target string) string {
@@ -531,6 +531,8 @@ func workspaceProjectOutput(root, target string) string {
 		name += ".exe"
 	} else if target == "wasi/wasm32" {
 		name += ".wasm"
+	} else if target == "browser/wasm32" {
+		name += ".html"
 	}
 	return workspaceJoinPath(root, name)
 }

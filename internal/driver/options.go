@@ -18,7 +18,7 @@ const (
 
 const DefaultTarget = "linux/amd64"
 
-const HelpText = "Usage: renvo -o <file> [-t <target>] [-tags <list>] [-arena-size <bytes>] [-s] [-emit-unit] [-windows-gui] <package | file.go...>\nOptions:\n  -arena-size   set the generated program arena limit in bytes (256..1073741824)\n  -emit-unit    write the canonical linked Renvo unit without invoking a backend\n  -windows-gui  select the Windows GUI subsystem instead of the console subsystem\nSource files:\n  Explicit .go files must share one directory and package. Exactly the named files are used;\n  build constraints and OS/architecture suffixes are ignored, while _test.go files are skipped.\nTargets:\n  linux/amd64 linux/386 linux/aarch64 linux/arm\n  windows/amd64 windows/386 windows/arm64 darwin/arm64 wasi/wasm32\nUnsupported language/toolchain features:\n  generics, goroutines, channels, select, cgo\n"
+const HelpText = "Usage: renvo -o <file> [-t <target>] [-tags <list>] [-arena-size <bytes>] [-s] [-emit-unit] [-windows-gui] <package | file.go...>\nOptions:\n  -arena-size   set the generated program arena limit in bytes (256..1073741824)\n  -emit-unit    write the canonical linked Renvo unit without invoking a backend\n  -windows-gui  select the Windows GUI subsystem instead of the console subsystem\nSource files:\n  Explicit .go files must share one directory and package. Exactly the named files are used;\n  build constraints and OS/architecture suffixes are ignored, while _test.go files are skipped.\nTargets:\n  linux/amd64 linux/386 linux/aarch64 linux/arm\n  windows/amd64 windows/386 windows/arm64 darwin/arm64 wasi/wasm32 browser/wasm32\nUnsupported language/toolchain features:\n  generics, goroutines, channels, select, cgo\n"
 
 type Options struct {
 	Target     string
@@ -218,6 +218,9 @@ func IsSupportedTarget(target string) bool {
 		return true
 	}
 	if target == "wasi/wasm32" {
+		return true
+	}
+	if target == "browser/wasm32" {
 		return true
 	}
 	if target == "darwin/arm64" {

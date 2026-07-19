@@ -144,17 +144,33 @@ func renvoWasmAppendU32Fixed5(out []byte, v int) []byte {
 	return out
 }
 
-func renvoWasmPatchU32Fixed5(out []byte, at int, v int) {
-	for i := 0; i < 5; i++ {
+func renvoWasmCompactU32Fixed5(out []byte, at int, v int) []byte {
+	// Body lengths are reserved at their maximum width while emitting so the
+	// backing slice never has to grow in the middle of a body. Compact the
+	// reservation to canonical LEB128 once the final length is known.
+	var encoded [5]byte
+	width := 0
+	for {
 		b := byte(v & 0x7f)
 		v = v >> 7
-		if i < 4 {
+		if v != 0 {
 			b = b | 0x80
-		} else {
-			b = b & 0x0f
 		}
-		out[at+i] = b
+		encoded[width] = b
+		width++
+		if v == 0 {
+			break
+		}
 	}
+	shift := 5 - width
+	for i := at + 5; i < len(out); i++ {
+		out[i-shift] = out[i]
+	}
+	out = out[:len(out)-shift]
+	for i := 0; i < width; i++ {
+		out[at+i] = encoded[i]
+	}
+	return out
 }
 
 func renvoWasmAppendI32Store(out []byte) []byte {
@@ -1999,12 +2015,19 @@ func renvoWasm32ImportSectionFull() []byte {
 	return renvoWasmAppendEncoded(nil, "\x0d\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x08\x66\x64\x5f\x77\x72\x69\x74\x65\x00\x00\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x07\x66\x64\x5f\x72\x65\x61\x64\x00\x00\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x08\x66\x64\x5f\x70\x72\x65\x61\x64\x00\x01\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x09\x66\x64\x5f\x70\x77\x72\x69\x74\x65\x00\x01\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x09\x70\x61\x74\x68\x5f\x6f\x70\x65\x6e\x00\x02\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x08\x66\x64\x5f\x63\x6c\x6f\x73\x65\x00\x03\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x0d\x66\x64\x5f\x66\x64\x73\x74\x61\x74\x5f\x67\x65\x74\x00\x06\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x0a\x66\x64\x5f\x72\x65\x61\x64\x64\x69\x72\x00\x01\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x0e\x61\x72\x67\x73\x5f\x73\x69\x7a\x65\x73\x5f\x67\x65\x74\x00\x06\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x08\x61\x72\x67\x73\x5f\x67\x65\x74\x00\x06\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x11\x65\x6e\x76\x69\x72\x6f\x6e\x5f\x73\x69\x7a\x65\x73\x5f\x67\x65\x74\x00\x06\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x0b\x65\x6e\x76\x69\x72\x6f\x6e\x5f\x67\x65\x74\x00\x06\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x09\x70\x72\x6f\x63\x5f\x65\x78\x69\x74\x00\x04")
 }
 
-func renvoWasm32FunctionSectionDirect(routineCount int) []byte {
+func renvoWasm32FunctionSectionDirect(routineCount int, browserStep bool) []byte {
 	var out []byte
-	out = renvoWasmAppendU32(out, routineCount+1)
+	count := routineCount + 1
+	if browserStep {
+		count++
+	}
+	out = renvoWasmAppendU32(out, count)
 	out = renvoWasmAppendU32(out, 5)
 	for i := 0; i < routineCount; i++ {
 		out = renvoWasmAppendU32(out, renvoWasm32VmFuncType)
+	}
+	if browserStep {
+		out = renvoWasmAppendU32(out, 5)
 	}
 	return out
 }
@@ -2021,22 +2044,43 @@ func renvoWasm32MemorySectionFull(memSize int) []byte {
 	return out
 }
 
-func renvoWasm32ExportSectionFull() []byte {
-	return renvoWasmAppendEncoded(nil, "\x02\x06\x6d\x65\x6d\x6f\x72\x79\x02\x00\x06\x5f\x73\x74\x61\x72\x74\x00\x0d")
+func renvoWasm32ExportSectionFull(browserStepIndex int) []byte {
+	var out []byte
+	count := 2
+	if browserStepIndex >= 0 {
+		count++
+	}
+	out = renvoWasmAppendU32(out, count)
+	out = renvoWasmAppendName(out, "memory")
+	out = append(out, 0x02)
+	out = renvoWasmAppendU32(out, 0)
+	out = renvoWasmAppendName(out, "_start")
+	out = append(out, 0x00)
+	out = renvoWasmAppendU32(out, renvoWasm32VmFuncBase-1)
+	if browserStepIndex >= 0 {
+		out = renvoWasmAppendName(out, "renvo_browser_step")
+		out = append(out, 0x00)
+		out = renvoWasmAppendU32(out, browserStepIndex)
+	}
+	return out
 }
 
-func renvoWasm32AppendCodeSectionDirect(out []byte, a *renvoAsm, instrPcs []int, routinePcs []int, symbolPcs []int, codeLen int, callStackBase int, frameTop int, exprStackBase int) []byte {
+func renvoWasm32AppendCodeSectionDirect(out []byte, a *renvoAsm, instrPcs []int, routinePcs []int, symbolPcs []int, codeLen int, callStackBase int, frameTop int, exprStackBase int, browserStepRoutine int) []byte {
 	frameSize := 6144
 	out = append(out, 10)
 	lenAt := len(out)
 	out = renvoWasmAppendU32Fixed5(out, 0)
 	payloadStart := len(out)
-	out = renvoWasmAppendU32(out, len(routinePcs)+1)
+	count := len(routinePcs) + 1
+	if browserStepRoutine >= 0 {
+		count++
+	}
+	out = renvoWasmAppendU32(out, count)
 	startLenAt := len(out)
 	out = renvoWasmAppendU32Fixed5(out, 0)
 	startBody := len(out)
 	out = renvoWasm32AppendDirectStartBody(out, renvoWasm32VmFuncBase, exprStackBase, callStackBase, frameTop)
-	renvoWasmPatchU32Fixed5(out, startLenAt, len(out)-startBody)
+	out = renvoWasmCompactU32Fixed5(out, startLenAt, len(out)-startBody)
 	for i := 0; i < len(routinePcs); i++ {
 		startPc := routinePcs[i]
 		endPc := renvoWasm32RoutineEndPc(startPc, codeLen, symbolPcs, a.code, instrPcs)
@@ -2046,8 +2090,54 @@ func renvoWasm32AppendCodeSectionDirect(out []byte, a *renvoAsm, instrPcs []int,
 		hasFrame := startPc != 0 && renvoWasm32SortedPcContains(symbolPcs, startPc)
 		out = renvoWasm32AppendDirectRoutine(out, a.code, routineInstrPcs, codeLen, routinePcs, callStackBase, frameSize, hasFrame)
 	}
-	renvoWasmPatchU32Fixed5(out, lenAt, len(out)-payloadStart)
+	if browserStepRoutine >= 0 {
+		stepLenAt := len(out)
+		out = renvoWasmAppendU32Fixed5(out, 0)
+		stepBodyStart := len(out)
+		out = renvoWasm32AppendBrowserStepBody(out, renvoWasm32VmFuncBase+browserStepRoutine, exprStackBase, callStackBase, frameTop)
+		out = renvoWasmCompactU32Fixed5(out, stepLenAt, len(out)-stepBodyStart)
+	}
+	out = renvoWasmCompactU32Fixed5(out, lenAt, len(out)-payloadStart)
 	return out
+}
+
+func renvoWasm32AppendBrowserStepBody(body []byte, stepFunc int, exprStackBase int, callStackBase int, frameTop int) []byte {
+	body = renvoWasmAppendU32(body, 1)
+	body = renvoWasmAppendU32(body, 16)
+	body = append(body, 0x7f)
+	body = renvoWasmAppendI32Const(body, 0)
+	body = renvoWasmLocalSet(body, renvoWasm32LocalPc)
+	body = renvoWasmAppendI32Const(body, exprStackBase)
+	body = renvoWasmLocalSet(body, renvoWasm32LocalSp)
+	body = renvoWasmAppendI32Const(body, frameTop)
+	body = renvoWasmLocalSet(body, renvoWasm32LocalFp)
+	body = renvoWasmAppendI32Const(body, callStackBase)
+	body = renvoWasmLocalSet(body, renvoWasm32LocalCsp)
+	body = renvoWasm32AppendDirectArgs(body)
+	body = renvoWasmAppendCall(body, stepFunc)
+	body = append(body, 0x1a, 0x1a, 0x1a, 0x0b)
+	return body
+}
+
+func renvoWasm32NamedRoutine(a *renvoAsm, routinePcs []int, name string) int {
+	for i := 0; i < len(a.symbols); i++ {
+		symbol := &a.symbols[i]
+		if symbol.nameEnd-symbol.nameStart != len(name) {
+			continue
+		}
+		matched := true
+		for j := 0; j < len(name); j++ {
+			if a.symbolName[symbol.nameStart+j] != name[j] {
+				matched = false
+				break
+			}
+		}
+		if !matched || symbol.label < 0 || symbol.label >= len(a.labelPos) || !a.labelSet[symbol.label] {
+			continue
+		}
+		return renvoWasm32FindRoutineIndex(routinePcs, a.labelPos[symbol.label])
+	}
+	return -1
 }
 
 func renvoWasm32EnsureAdditionalCapacity(out []byte, additional int) []byte {
@@ -2073,7 +2163,7 @@ func renvoWasm32AppendDirectRoutine(out []byte, code []byte, instrPcs []int, cod
 	out = renvoWasmAppendU32Fixed5(out, 0)
 	bodyStart := len(out)
 	out = renvoWasm32AppendDirectRoutineBody(out, instrs, codeLen, routinePcs, callStackBase, frameSize, hasFrame)
-	renvoWasmPatchU32Fixed5(out, lenAt, len(out)-bodyStart)
+	out = renvoWasmCompactU32Fixed5(out, lenAt, len(out)-bodyStart)
 	if cap(out) == oldCap {
 		renvo_runtime_ArenaReset(mark)
 	}
@@ -2097,6 +2187,7 @@ func renvoWasm32Image(a *renvoAsm) []byte {
 	instrPcs := renvoWasm32InstructionPcs(a.code)
 	symbolPcs := renvoWasm32SymbolPcs(a)
 	routinePcs := renvoWasm32RoutinePcs(a, a.code, instrPcs)
+	browserStepRoutine := renvoWasm32NamedRoutine(a, routinePcs, "renvoBrowserStep")
 	exprStackBase := bssBase + a.bssSize + renvoWasm32StackGuardSize
 	callStackBase := exprStackBase + renvoWasm32ExprStackSize
 	frameTop := callStackBase + renvoWasm32CallStackSize + renvoWasm32FrameStackSize
@@ -2112,10 +2203,14 @@ func renvoWasm32Image(a *renvoAsm) []byte {
 	out = append(out, 0x00)
 	out = renvoWasmAppendSection(out, 1, renvoWasm32TypeSectionFull())
 	out = renvoWasmAppendSection(out, 2, renvoWasm32ImportSectionFull())
-	out = renvoWasmAppendSection(out, 3, renvoWasm32FunctionSectionDirect(len(routinePcs)))
+	out = renvoWasmAppendSection(out, 3, renvoWasm32FunctionSectionDirect(len(routinePcs), browserStepRoutine >= 0))
 	out = renvoWasmAppendSection(out, 5, renvoWasm32MemorySectionFull(memSize))
-	out = renvoWasmAppendSection(out, 7, renvoWasm32ExportSectionFull())
-	out = renvoWasm32AppendCodeSectionDirect(out, a, instrPcs, routinePcs, symbolPcs, len(a.code), callStackBase, frameTop, exprStackBase)
+	browserStepIndex := -1
+	if browserStepRoutine >= 0 {
+		browserStepIndex = renvoWasm32VmFuncBase + len(routinePcs)
+	}
+	out = renvoWasmAppendSection(out, 7, renvoWasm32ExportSectionFull(browserStepIndex))
+	out = renvoWasm32AppendCodeSectionDirect(out, a, instrPcs, routinePcs, symbolPcs, len(a.code), callStackBase, frameTop, exprStackBase, browserStepRoutine)
 	if len(a.data) > 0 {
 		out = renvoWasmAppendSection(out, 11, renvoWasm32DataSectionFull(dataBase, a.data))
 	}

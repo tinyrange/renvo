@@ -69,7 +69,7 @@ func CompileAndWriteWithEnv(args []string, env []string, backend Backend) HostRe
 		}
 		backend = commandBackend
 	}
-	return compileAndWrite(args, StdRootFromEnv(env), EnvValue(env, ModuleCacheEnv), backend)
+	return compileAndWrite(args, StdRootFromEnv(env), ModuleCacheFromEnv(env), backend)
 }
 
 func CommandBackendFromEnv(env []string) (CommandBackend, bool) {
@@ -84,6 +84,14 @@ func StdRootFromEnv(env []string) string {
 	root := EnvValue(env, StdRootEnv)
 	if root == "" {
 		return DefaultStdRoot
+	}
+	return root
+}
+
+func ModuleCacheFromEnv(env []string) string {
+	root := EnvValue(env, ModuleCacheEnv)
+	if root == "" && renvoBundledStdEnabled {
+		return "/modules"
 	}
 	return root
 }
@@ -126,7 +134,7 @@ func compileAndWrite(args []string, stdRoot string, moduleCache string, backend 
 	}
 	output := compiled.Build.Options.Output
 	mode := os.FileMode(0o755)
-	if compiled.Build.Options.EmitUnit {
+	if compiled.Build.Options.EmitUnit || compiled.Build.Options.Target == "browser/wasm32" {
 		mode = 0o644
 	}
 	if output == "-" {

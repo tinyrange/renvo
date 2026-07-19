@@ -69,11 +69,11 @@ func compileBuiltUnit(result CompileResult, built BuildResult, backend Backend) 
 	var backendResult BackendResult
 	arenaBackend, acceptsArena := backend.(ArenaBackend)
 	if acceptsArena {
-		backendResult = arenaBackend.CompileUnitWithArena(built.Unit, built.Options.Target, built.Options.Strip, built.Options.WindowsGUI, built.Options.ArenaSize)
+		backendResult = arenaBackend.CompileUnitWithArena(built.Unit, backendTarget(built.Options.Target), built.Options.Strip, built.Options.WindowsGUI, built.Options.ArenaSize)
 	} else if built.Options.ArenaSize != 0 {
 		backendResult.Diagnostic = Diagnostic{Phase: "backend", Code: "RENVO-BACKEND-005", Message: "backend does not accept an arena policy"}
 	} else {
-		backendResult = backend.CompileUnit(built.Unit, built.Options.Target, built.Options.Strip, built.Options.WindowsGUI)
+		backendResult = backend.CompileUnit(built.Unit, backendTarget(built.Options.Target), built.Options.Strip, built.Options.WindowsGUI)
 	}
 	if !backendResult.Ok || len(backendResult.Binary) == 0 {
 		result.Diagnostic = backendResult.Diagnostic
@@ -83,6 +83,9 @@ func compileBuiltUnit(result CompileResult, built BuildResult, backend Backend) 
 		return compileFail(result, CompileErrBackend)
 	}
 	result.Binary = backendResult.Binary
+	if built.Options.Target == "browser/wasm32" {
+		result.Binary = PackageBrowserHTML(result.Binary)
+	}
 	return result
 }
 

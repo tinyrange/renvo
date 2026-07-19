@@ -1,6 +1,9 @@
 package main
 
-import "renvo.dev/std/graphics"
+import (
+	"renvo.dev/forms"
+	"renvo.dev/std/graphics"
+)
 
 func run(args []string, env []string) int {
 	root := "."
@@ -13,26 +16,15 @@ func run(args []string, env []string) int {
 	}
 	form := NewMainFormWithEnv(root, env)
 	form.SetWindow(window)
-	for {
-		if form.Paint(window.Surface()) {
-			if !window.Present() {
-				window.Close()
-				return 1
-			}
-		}
-		event, ok := window.Wait()
-		if !ok {
-			window.Close()
-			return 0
-		}
-		if event.Type == graphics.EventWindowClose {
-			window.Close()
-			return 0
-		}
-		form.Dispatch(event)
-		if form.takeEditorAnalysisTimer() {
-			window.CancelTimer(editorAnalysisTimerID)
-			window.SetTimer(editorAnalysisTimerID, 0.06)
-		}
+	app := forms.NewApp(window, &form.Form)
+	app.DispatchEvent = form.Dispatch
+	app.AfterEvent = form.afterAppEvent
+	return app.Run()
+}
+
+func (f *MainForm) afterAppEvent(event graphics.Event) {
+	if f.takeEditorAnalysisTimer() {
+		f.window.CancelTimer(editorAnalysisTimerID)
+		f.window.SetTimer(editorAnalysisTimerID, 0.06)
 	}
 }

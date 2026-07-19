@@ -164,6 +164,9 @@ func TestSourceFilenameSelectionAcrossTargets(t *testing.T) {
 		{"main_windows_arm64.go", "windows/amd64", false},
 		{"main_wasip1_wasm.go", "wasi/wasm32", true},
 		{"main_wasi_wasm32.go", "wasi/wasm32", true},
+		{"main_browser_wasm32.go", "browser/wasm32", true},
+		{"main_wasi_wasm32.go", "browser/wasm32", true},
+		{"main_browser_wasm32.go", "wasi/wasm32", false},
 		{"main_plan9.go", "linux/amd64", false},
 		{"main_feature.go", "linux/amd64", true},
 	}
@@ -171,6 +174,19 @@ func TestSourceFilenameSelectionAcrossTargets(t *testing.T) {
 		if got := sourceFilenameEnabled(test.name, test.target); got != test.want {
 			t.Errorf("sourceFilenameEnabled(%q, %q) = %v, want %v", test.name, test.target, got, test.want)
 		}
+	}
+}
+
+func TestBrowserTargetProvidesBrowserAndWASITags(t *testing.T) {
+	for _, expression := range []string{"renvo && browser && wasm32", "renvo && wasi && wasm32", "renvo && wasip1 && wasm"} {
+		enabled, valid := evalBuildExprWithTags([]byte(expression), "browser/wasm32", nil)
+		if !valid || !enabled {
+			t.Fatalf("browser expression %q = %v, %v", expression, enabled, valid)
+		}
+	}
+	enabled, valid := evalBuildExprWithTags([]byte("!browser"), "browser/wasm32", nil)
+	if !valid || enabled {
+		t.Fatalf("!browser expression = %v, %v", enabled, valid)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 const projectMainFile = "main.go"
 const projectUserFormFile = "main_form.go"
 const projectGeneratedFormFile = "main_form_generated.go"
+const projectModuleFile = "go.mod"
 const projectOutputFile = "hello-app"
 
 type formDesign struct {
@@ -80,8 +81,8 @@ func ensureHelloWorldProject(root string) (bool, string) {
 		}
 	}
 	design := defaultFormDesign()
-	files := []string{projectMainFile, projectUserFormFile, projectGeneratedFormFile}
-	data := [][]byte{helloMainSource(), helloUserFormSource(), generatedFormSource(design)}
+	files := []string{projectModuleFile, projectMainFile, projectUserFormFile, projectGeneratedFormFile}
+	data := [][]byte{[]byte("module example.com/hello\n\nrequire renvo.dev v0.0.0\n"), helloMainSource(), helloUserFormSource(), generatedFormSource(design)}
 	for i := 0; i < len(files); i++ {
 		if renvoos.WriteFile(workspaceJoinPath(root, files[i]), data[i], 0644) != nil {
 			return false, "Could not create " + files[i] + "."
@@ -93,7 +94,10 @@ func ensureHelloWorldProject(root string) (bool, string) {
 func helloMainSource() []byte {
 	return []byte(`package main
 
-import "renvo.dev/std/graphics"
+import (
+	"renvo.dev/forms"
+	"renvo.dev/std/graphics"
+)
 
 func main() {
 	window := graphics.NewWindow(graphics.WindowOptions{Title: "Hello World", Width: 420, Height: 240})
@@ -101,18 +105,7 @@ func main() {
 		return
 	}
 	form := NewMainForm()
-	for {
-		if form.Paint(window.Surface()) && !window.Present() {
-			window.Close()
-			return
-		}
-		event, ok := window.Wait()
-		if !ok || event.Type == graphics.EventWindowClose {
-			window.Close()
-			return
-		}
-		form.Dispatch(event)
-	}
+	forms.NewApp(window, &form.Form).Run()
 }
 `)
 }

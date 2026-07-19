@@ -68,7 +68,7 @@ func TestEmptyDirectoryBecomesHelloWorldProjectWithoutOverwritingGoProjects(t *t
 	if !created || message == "" {
 		t.Fatalf("project creation = %v, %q", created, message)
 	}
-	for _, name := range []string{projectMainFile, projectUserFormFile, projectGeneratedFormFile} {
+	for _, name := range []string{projectModuleFile, projectMainFile, projectUserFormFile, projectGeneratedFormFile} {
 		if _, err := os.Stat(filepath.Join(root, name)); err != nil {
 			t.Fatalf("missing generated project file %s: %v", name, err)
 		}

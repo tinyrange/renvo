@@ -4,7 +4,11 @@ package main
 
 import "renvo.dev/internal/driver"
 
-func completionSourceFS() driver.SourceFS { return driver.RenvoFS{} }
+func completionReadDir(path string) ([]driver.DirEntry, bool) {
+	return (driver.RenvoFS{}).ReadDir(path)
+}
+
+func completionReadFile(path string) ([]byte, bool) { return (driver.RenvoFS{}).ReadFile(path) }
 
 func completionStdRoot(env []string) string {
 	if root := completionEnv(env, "RENVO_STDROOT"); root != "" {
