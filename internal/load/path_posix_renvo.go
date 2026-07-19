@@ -6,6 +6,9 @@ func CleanPath(path string) string {
 	if path == "" {
 		return "."
 	}
+	if renvoPathAlreadyClean(path) {
+		return path
+	}
 	absolute := path[0] == '/'
 	var out []byte
 	rootSize := 0
@@ -59,6 +62,26 @@ func CleanPath(path string) string {
 		return "."
 	}
 	return string(out)
+}
+
+func renvoPathAlreadyClean(path string) bool {
+	start := 0
+	if path[0] == '/' {
+		if len(path) == 1 {
+			return true
+		}
+		start = 1
+	}
+	for i := start; i <= len(path); i++ {
+		if i < len(path) && path[i] != '/' {
+			continue
+		}
+		if i == start || i-start == 1 && path[start] == '.' || i-start == 2 && path[start] == '.' && path[start+1] == '.' {
+			return false
+		}
+		start = i + 1
+	}
+	return true
 }
 
 func JoinPath(base string, elem string) string {

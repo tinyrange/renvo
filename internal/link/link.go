@@ -116,10 +116,11 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 			break
 		}
 		for j := 0; j < len(actions); j++ {
+			tok := programs[i].Tokens[j]
 			programs[i].Tokens[j].Line = actions[j]
-			if programs[i].Tokens[j].Kind != unit.TokenEOF && !tokenActionSkips(actions[j]) {
+			if tok.Kind != unit.TokenEOF && actions[j] >= 0 {
 				finalEOF++
-				if coreLinkedTokenIsEllipsis(programs[i].Tokens[j], programs[i].Text, programs[i].Tokens[j].Start, programs[i].Tokens[j].Start+programs[i].Tokens[j].Size) {
+				if tok.Kind == unit.TokenOp && tok.Size == 3 && tok.Start+2 < len(programs[i].Text) && programs[i].Text[tok.Start] == '.' && programs[i].Text[tok.Start+1] == '.' && programs[i].Text[tok.Start+2] == '.' {
 					finalEOF += 2
 				}
 			}
@@ -441,7 +442,7 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, line i
 		}
 		tokStart := tok.Start
 		tokEnd := tok.Start + tok.Size
-		if tokenActionSkips(action) {
+		if action < 0 {
 			if tokenActionRedirect(action) >= 0 && tok.Start > prevEnd {
 				part := src.Text[prevEnd:tok.Start]
 				dst.Text = appendCoreBytes(dst.Text, part)
@@ -470,7 +471,7 @@ func appendProgramCore(dst *unit.Program, src unit.Program, finalEOF int, line i
 			tok.Kind = coreLinkedReplacementTokenKind(tok.Kind, replacement)
 			tok.Size = len(replacement)
 			line += countCoreStringNewlines(replacement)
-		} else if coreLinkedTokenIsEllipsis(tok, src.Text, tokStart, tokEnd) {
+		} else if tok.Kind == unit.TokenOp && tok.Size == 3 && tokStart+2 < len(src.Text) && src.Text[tokStart] == '.' && src.Text[tokStart+1] == '.' && src.Text[tokStart+2] == '.' {
 			dst.Text = appendCoreStringBytes(dst.Text, "...")
 			for j := 0; j < 3; j++ {
 				dot := tok
@@ -782,15 +783,6 @@ func coreLinkedReplacementTokenKind(kind int, replacement string) int {
 		return unit.TokenString
 	}
 	return kind
-}
-
-func coreLinkedTokenIsEllipsis(tok unit.Token, text []byte, start int, end int) bool {
-	return tok.Kind == unit.TokenOp &&
-		end-start == 3 &&
-		end <= len(text) &&
-		text[start] == '.' &&
-		text[start+1] == '.' &&
-		text[start+2] == '.'
 }
 
 func coreReplacementTokenIsNumber(text string) bool {

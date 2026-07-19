@@ -50,17 +50,19 @@ func scanTokens(src []byte) ([]Token, bool) {
 		}
 		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' {
 			start := i
-			hash := int(c)
 			i++
 			for i < len(src) {
 				part := src[i]
 				if !((part >= 'a' && part <= 'z') || (part >= 'A' && part <= 'Z') || (part >= '0' && part <= '9') || part == '_') {
 					break
 				}
-				hash = hash*5 + int(part)
 				i++
 			}
-			tokens = append(tokens, Token{Kind: keywordKindHash(src, start, i, hash), Start: start, End: i, Line: line})
+			kind := TokenIdent
+			if i-start <= 11 {
+				kind = keywordKind(src, start, i)
+			}
+			tokens = append(tokens, Token{Kind: kind, Start: start, End: i, Line: line})
 			continue
 		}
 		if c >= '0' && c <= '9' {
@@ -131,10 +133,26 @@ func scanTokens(src []byte) ([]Token, bool) {
 		}
 		start := i
 		i++
-		if i < len(src) && isTwoByteOperator(c, src[i]) {
-			i++
-			if i < len(src) && isThreeByteOperator(c, src[start+1], src[i]) {
+		if i < len(src) {
+			b := src[i]
+			two := false
+			if b == '=' {
+				two = c == ':' || c == '=' || c == '!' || c == '<' || c == '>' || c == '+' || c == '-' || c == '*' || c == '/' || c == '%' || c == '&' || c == '|' || c == '^'
+			}
+			if c == '&' && (b == '&' || b == '^') {
+				two = true
+			}
+			if c == '|' && b == '|' || c == '<' && (b == '<' || b == '-') || c == '>' && b == '>' {
+				two = true
+			}
+			if c == '+' && b == '+' || c == '-' && b == '-' || c == '.' && b == '.' {
+				two = true
+			}
+			if two {
 				i++
+				if i < len(src) && isThreeByteOperator(c, b, src[i]) {
+					i++
+				}
 			}
 		}
 		tokens = append(tokens, Token{Kind: TokenOperator, Start: start, End: i, Line: line})
@@ -220,34 +238,6 @@ func isDigitOrUnderscore(c byte) bool {
 	return (c >= '0' && c <= '9') || c == '_'
 }
 
-func isTwoByteOperator(a byte, b byte) bool {
-	if b == '=' {
-		return a == ':' || a == '=' || a == '!' || a == '<' || a == '>' || a == '+' || a == '-' || a == '*' || a == '/' || a == '%' || a == '&' || a == '|' || a == '^'
-	}
-	if a == '&' && (b == '&' || b == '^') {
-		return true
-	}
-	if a == '|' && b == '|' {
-		return true
-	}
-	if a == '<' && (b == '<' || b == '-') {
-		return true
-	}
-	if a == '>' && b == '>' {
-		return true
-	}
-	if a == '+' && b == '+' {
-		return true
-	}
-	if a == '-' && b == '-' {
-		return true
-	}
-	if a == '.' && b == '.' {
-		return true
-	}
-	return false
-}
-
 func isThreeByteOperator(a byte, b byte, c byte) bool {
 	if a == '.' && b == '.' && c == '.' {
 		return true
@@ -267,101 +257,101 @@ func isThreeByteOperator(a byte, b byte, c byte) bool {
 	return false
 }
 
-func keywordKindHash(src []byte, start int, end int, h int) int {
+func keywordKind(src []byte, start int, end int) int {
 	n := end - start
 	if n > 11 {
 		return TokenIdent
 	}
 	if n == 2 {
-		if h == 627 && bytesEqualText(src, start, end, "if") {
+		if src[start] == 'i' && src[end-1] == 'f' && bytesEqualText(src, start, end, "if") {
 			return TokenIf
 		}
-		if h == 626 && bytesEqualText(src, start, end, "go") {
+		if src[start] == 'g' && src[end-1] == 'o' && bytesEqualText(src, start, end, "go") {
 			return TokenGo
 		}
 	}
 	if n == 3 {
-		if h == 3549 && bytesEqualText(src, start, end, "var") {
+		if src[start] == 'v' && src[end-1] == 'r' && bytesEqualText(src, start, end, "var") {
 			return TokenVar
 		}
-		if h == 3219 && bytesEqualText(src, start, end, "for") {
+		if src[start] == 'f' && src[end-1] == 'r' && bytesEqualText(src, start, end, "for") {
 			return TokenFor
 		}
-		if h == 3322 && bytesEqualText(src, start, end, "map") {
+		if src[start] == 'm' && src[end-1] == 'p' && bytesEqualText(src, start, end, "map") {
 			return TokenMap
 		}
 	}
 	if n == 4 {
-		if h == 18186 && bytesEqualText(src, start, end, "type") {
+		if src[start] == 't' && src[end-1] == 'e' && bytesEqualText(src, start, end, "type") {
 			return TokenType
 		}
-		if h == 16324 && bytesEqualText(src, start, end, "func") {
+		if src[start] == 'f' && src[end-1] == 'c' && bytesEqualText(src, start, end, "func") {
 			return TokenFunc
 		}
-		if h == 16001 && bytesEqualText(src, start, end, "else") {
+		if src[start] == 'e' && src[end-1] == 'e' && bytesEqualText(src, start, end, "else") {
 			return TokenElse
 		}
-		if h == 16341 && bytesEqualText(src, start, end, "goto") {
+		if src[start] == 'g' && src[end-1] == 'o' && bytesEqualText(src, start, end, "goto") {
 			return TokenGoto
 		}
-		if h == 15476 && bytesEqualText(src, start, end, "case") {
+		if src[start] == 'c' && src[end-1] == 'e' && bytesEqualText(src, start, end, "case") {
 			return TokenCase
 		}
-		if h == 15570 && bytesEqualText(src, start, end, "chan") {
+		if src[start] == 'c' && src[end-1] == 'n' && bytesEqualText(src, start, end, "chan") {
 			return TokenChan
 		}
 	}
 	if n == 5 {
-		if h == 79191 && bytesEqualText(src, start, end, "const") {
+		if src[start] == 'c' && src[end-1] == 't' && bytesEqualText(src, start, end, "const") {
 			return TokenConst
 		}
-		if h == 78617 && bytesEqualText(src, start, end, "break") {
+		if src[start] == 'b' && src[end-1] == 'k' && bytesEqualText(src, start, end, "break") {
 			return TokenBreak
 		}
-		if h == 86741 && bytesEqualText(src, start, end, "range") {
+		if src[start] == 'r' && src[end-1] == 'e' && bytesEqualText(src, start, end, "range") {
 			return TokenRange
 		}
-		if h == 78294 && bytesEqualText(src, start, end, "defer") {
+		if src[start] == 'd' && src[end-1] == 'r' && bytesEqualText(src, start, end, "defer") {
 			return TokenDefer
 		}
 	}
 	if n == 6 {
-		if h == 449661 && bytesEqualText(src, start, end, "struct") {
+		if src[start] == 's' && src[end-1] == 't' && bytesEqualText(src, start, end, "struct") {
 			return TokenStruct
 		}
-		if h == 437480 && bytesEqualText(src, start, end, "return") {
+		if src[start] == 'r' && src[end-1] == 'n' && bytesEqualText(src, start, end, "return") {
 			return TokenReturn
 		}
-		if h == 450374 && bytesEqualText(src, start, end, "switch") {
+		if src[start] == 's' && src[end-1] == 'h' && bytesEqualText(src, start, end, "switch") {
 			return TokenSwitch
 		}
-		if h == 413711 && bytesEqualText(src, start, end, "import") {
+		if src[start] == 'i' && src[end-1] == 't' && bytesEqualText(src, start, end, "import") {
 			return TokenImport
 		}
-		if h == 439136 && bytesEqualText(src, start, end, "select") {
+		if src[start] == 's' && src[end-1] == 't' && bytesEqualText(src, start, end, "select") {
 			return TokenSelect
 		}
 	}
 	if n == 7 {
-		if h == 2131416 && bytesEqualText(src, start, end, "package") {
+		if src[start] == 'p' && src[end-1] == 'e' && bytesEqualText(src, start, end, "package") {
 			return TokenPackage
 		}
-		if h == 1957581 && bytesEqualText(src, start, end, "default") {
+		if src[start] == 'd' && src[end-1] == 't' && bytesEqualText(src, start, end, "default") {
 			return TokenDefault
 		}
 	}
 	if n == 8 {
-		if h == 9901561 && bytesEqualText(src, start, end, "continue") {
+		if src[start] == 'c' && src[end-1] == 'e' && bytesEqualText(src, start, end, "continue") {
 			return TokenContinue
 		}
 	}
 	if n == 9 {
-		if bytesEqualText(src, start, end, "interface") {
+		if src[start] == 'i' && src[end-1] == 'e' && bytesEqualText(src, start, end, "interface") {
 			return TokenInterface
 		}
 	}
 	if n == 11 {
-		if bytesEqualText(src, start, end, "fallthrough") {
+		if src[start] == 'f' && src[end-1] == 'h' && bytesEqualText(src, start, end, "fallthrough") {
 			return TokenFallthrough
 		}
 	}
