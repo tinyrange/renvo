@@ -2100,7 +2100,7 @@ func rtgScan(src []byte, toks *rtgTokens) {
 		i++
 		if i < srcLen {
 			c1 := rtg_runtime_UnsafeByteAt(src, i)
-			two := c1 == '=' && ((0x200000003a005631>>(c-'!'))&1 != 0 || c == '|') || c == c1 && ((0x14000a1>>(c-'&'))&1 != 0 || c == '|') || c == '&' && c1 == '^'
+			two := c1 == '=' && (c == '^' || c == '|' || c >= '!' && c <= '>' && (0x3a005631>>(c-'!'))&1 != 0) || c == c1 && (c == '|' || c >= '&' && c <= '>' && (0x14000a1>>(c-'&'))&1 != 0) || c == '&' && c1 == '^'
 			if two {
 				i++
 				if i < srcLen && rtg_runtime_UnsafeByteAt(src, i) == '=' && (c == '<' || c == '>' || c1 == '^') {
