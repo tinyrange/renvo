@@ -2524,6 +2524,12 @@ func renvoWasm32EnsureAppendAddrHelper(g *renvoLinearGen) int {
 
 	renvoAsmLoadPrimaryBss(a, allocSizeOff)
 	renvoAsmCallLabel(a, arenaAllocLabel)
+	if g.meta.panicEnabled {
+		allocOKLabel := renvoAsmNewLabel(a)
+		renvoAsmJnzPrimary(a, allocOKLabel)
+		renvoAsmJmpLabel(a, returnLabel)
+		renvoAsmMarkLabel(a, allocOKLabel)
+	}
 	renvoAsmStorePrimaryBss(a, destOff)
 
 	renvoAsmLoadPrimaryBss(a, oldLenOff)

@@ -1399,6 +1399,14 @@ func renvo386EnsureAppendAddrHelper(g *renvoLinearGen) int {
 	renvoAsmPushTertiary(a)
 	renvoAsmPopPrimary(a)
 	renvoAsmCallLabel(a, arenaAllocLabel)
+	if g.meta.panicEnabled {
+		allocOKLabel := renvoAsmNewLabel(a)
+		renvoAsmEmit16(a, 0xc085)
+		renvo386AsmJccLabel(a, 0x85, allocOKLabel)
+		renvoAsmEmit3(a, 0x83, 0xc4, 20)
+		renvoAsmRet(a)
+		renvoAsmMarkLabel(a, allocOKLabel)
+	}
 	renvoAsmPushPrimary(a)
 	renvoAsmEmit3(a, 0x8b, 0x3c, 0x24)
 	renvoAsmEmit4(a, 0x8b, 0x74, 0x24, 20)

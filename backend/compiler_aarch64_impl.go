@@ -322,6 +322,13 @@ func renvoAarch64EnsureAppendAddrHelper(g *renvoLinearGen) int {
 	renvoAsmCallLabel(a, arenaAllocLabel)
 	renvoAarch64AsmPopReg(a, renvoAarch64RegLr)
 	renvoAsmPopTertiary(a)
+	if g.meta.panicEnabled {
+		allocOKLabel := renvoAsmNewLabel(a)
+		renvoAarch64AsmCmpRegImm(a, renvoAarch64RegRax, 0)
+		renvoAarch64AsmBCondLabel(a, allocOKLabel, 1)
+		renvoAsmRet(a)
+		renvoAsmMarkLabel(a, allocOKLabel)
+	}
 	renvoAarch64AsmMovRegReg(a, renvoAarch64RegRdx, renvoAarch64RegRax)
 	renvoAarch64AsmMovRegReg(a, renvoAarch64RegRdi, renvoAarch64RegRdx)
 	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegTmp2, renvoAarch64RegR10, 0, 8)

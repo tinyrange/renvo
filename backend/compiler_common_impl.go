@@ -7135,6 +7135,9 @@ type renvoLinearGen struct {
 	appendAddrEmitted        bool
 	arenaAllocLabel          int
 	arenaAllocEmitted        bool
+	persistentAllocLabel     int
+	persistentAllocEmitted   bool
+	arenaFaultLabel          int
 	makeZeroLabel            int
 	makeZeroEmitted          bool
 	stringHeapOff            int
@@ -12799,7 +12802,10 @@ func renvoEmitPanicState(g *renvoLinearGen, valueOffset int) bool {
 	sizeOffset := renvoAddUnnamedLocal(g, renvoTypeInt)
 	nodeOffset := renvoAddUnnamedLocal(g, renvoTypeInt)
 	renvoAsmStoreStackImm(&g.asm, sizeOffset, 4*renvoBackendValueSlotSize)
+	oldSuppressPanicCheck := g.suppressPanicCheck
+	g.suppressPanicCheck = true
 	renvoEmitPersistentAllocToPrimary(g, sizeOffset)
+	g.suppressPanicCheck = oldSuppressPanicCheck
 	renvoAsmStorePrimaryStack(&g.asm, nodeOffset)
 	renvoEmitStorePanicNodeField(g, nodeOffset, g.panicValueOff, 0)
 	renvoEmitStorePanicNodeField(g, nodeOffset, g.panicTypeOff, renvoBackendValueSlotSize)
@@ -13381,10 +13387,9 @@ func renvoEmitCopyBytesToPersistent(g *renvoLinearGen, srcOff int, lenOff int, d
 func renvoEmitPersistentAllocToPrimary(g *renvoLinearGen, sizeOff int) {
 	renvoNonNil(g)
 	a := &g.asm
-	renvoAsmLoadPrimaryBss(a, g.stringHeapEndOff)
-	renvoAsmLoadTertiaryStack(a, sizeOff)
-	renvoAsmSubPrimaryTertiary(a)
-	renvoAsmStorePrimaryBss(a, g.stringHeapEndOff)
+	renvoAsmLoadPrimaryStack(a, sizeOff)
+	renvoAsmCallLabel(a, renvoEnsurePersistentAllocHelper(g))
+	renvoEmitArenaAllocationCheck(g)
 }
 
 func renvoEmitBuiltinNew(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
@@ -14725,6 +14730,7 @@ func renvoEmitAppendDestPrimary(g *renvoLinearGen, locEp *renvoExprParse, loc *r
 	}
 	renvoAsmSecondaryImm(&g.asm, elemSize)
 	renvoAsmCallLabel(&g.asm, label)
+	renvoEmitArenaAllocationCheck(g)
 	return true
 }
 func renvoEnsureAppendScalarHelper(g *renvoLinearGen, elemKind int) int {
@@ -17718,6 +17724,7 @@ func renvoEmitArenaAllocPrimary(g *renvoLinearGen, size int) {
 	label := renvoEnsureArenaAllocHelper(g)
 	renvoAsmPrimaryImm(&g.asm, size)
 	renvoAsmCallLabel(&g.asm, label)
+	renvoEmitArenaAllocationCheck(g)
 }
 
 func renvoEmitArenaAllocStackPrimary(g *renvoLinearGen, sizeOff int) {
@@ -17725,6 +17732,22 @@ func renvoEmitArenaAllocStackPrimary(g *renvoLinearGen, sizeOff int) {
 	label := renvoEnsureArenaAllocHelper(g)
 	renvoAsmLoadPrimaryStack(&g.asm, sizeOff)
 	renvoAsmCallLabel(&g.asm, label)
+	renvoEmitArenaAllocationCheck(g)
+}
+
+func renvoEmitArenaAllocationCheck(g *renvoLinearGen) {
+	renvoNonNil(g)
+	if !g.meta.panicEnabled {
+		return
+	}
+	okLabel := renvoAsmNewLabel(&g.asm)
+	renvoAsmJnzPrimary(&g.asm, okLabel)
+	if g.suppressPanicCheck {
+		renvoAsmJmpLabel(&g.asm, renvoEnsureArenaFaultHelper(g))
+	} else {
+		renvoEmitRuntimeFault(g)
+	}
+	renvoAsmMarkLabel(&g.asm, okLabel)
 }
 
 func renvoEnsureArenaAllocHelper(g *renvoLinearGen) int {
@@ -17740,6 +17763,9 @@ func renvoEnsureArenaAllocHelper(g *renvoLinearGen) int {
 	oomLabel := renvoAsmNewLabel(a)
 	renvoAsmJmpMarkLabel(a, afterLabel, g.arenaAllocLabel)
 	renvoStringHeapOffsets(g)
+	renvoAsmPushPrimary(a)
+	renvoEmitPersistentArenaReady(g)
+	renvoAsmPopPrimary(a)
 	renvoAsmCopyPrimaryToTertiary(a)
 	renvoAsmLoadPrimaryBss(a, g.stringHeapOff)
 	renvoAsmJnzPrimary(a, readyLabel)
@@ -17756,7 +17782,7 @@ func renvoEnsureArenaAllocHelper(g *renvoLinearGen) int {
 	renvoAsmCmpTertiaryPrimarySet(a, 0x9d)
 	renvoAsmJzPrimary(a, oomLabel)
 	renvoAsmPushTertiary(a)
-	renvoAsmPrimaryBssAddr(a, g.stringHeapDataOff+renvoStringArenaSize(g))
+	renvoAsmLoadPrimaryBss(a, g.stringHeapEndOff)
 	renvoAsmPopTertiary(a)
 	renvoAsmCmpTertiaryPrimarySet(a, 0x9e)
 	renvoAsmJzPrimary(a, oomLabel)
@@ -17766,10 +17792,72 @@ func renvoEnsureArenaAllocHelper(g *renvoLinearGen) int {
 	renvoAsmRet(a)
 	renvoAsmMarkLabel(a, oomLabel)
 	renvoAsmPopPrimary(a)
+	if !g.meta.panicEnabled {
+		renvoAsmJmpLabel(a, renvoEnsureArenaFaultHelper(g))
+	}
 	renvoAsmPrimaryImm(a, 0)
 	renvoAsmRet(a)
 	renvoAsmMarkLabel(a, afterLabel)
 	return g.arenaAllocLabel
+}
+
+func renvoEnsurePersistentAllocHelper(g *renvoLinearGen) int {
+	renvoNonNil(g)
+	a := &g.asm
+	if g.persistentAllocEmitted {
+		return g.persistentAllocLabel
+	}
+	g.persistentAllocEmitted = true
+	g.persistentAllocLabel = renvoAsmNewLabel(a)
+	afterLabel := renvoAsmNewLabel(a)
+	oomLabel := renvoAsmNewLabel(a)
+	renvoAsmJmpMarkLabel(a, afterLabel, g.persistentAllocLabel)
+	renvoStringHeapOffsets(g)
+	renvoAsmPushPrimary(a)
+	renvoEmitPersistentArenaReady(g)
+	renvoAsmPopPrimary(a)
+	renvoAsmCopyPrimaryToTertiary(a)
+	renvoAsmLoadPrimaryBss(a, g.stringHeapEndOff)
+	renvoAsmPushPrimary(a)
+	renvoAsmSubPrimaryTertiary(a)
+	renvoAsmPushPrimary(a)
+	renvoAsmPopTertiary(a)
+	renvoAsmPopPrimary(a)
+	renvoAsmCmpTertiaryPrimarySet(a, 0x9e)
+	renvoAsmJzPrimary(a, oomLabel)
+	renvoAsmPushTertiary(a)
+	renvoAsmLoadPrimaryBss(a, g.stringHeapOff)
+	renvoAsmPopTertiary(a)
+	renvoAsmCmpTertiaryPrimarySet(a, 0x9d)
+	renvoAsmJzPrimary(a, oomLabel)
+	renvoAsmCopyTertiaryToPrimary(a)
+	renvoAsmStorePrimaryBss(a, g.stringHeapEndOff)
+	renvoAsmRet(a)
+	renvoAsmMarkLabel(a, oomLabel)
+	if !g.meta.panicEnabled {
+		renvoAsmJmpLabel(a, renvoEnsureArenaFaultHelper(g))
+	}
+	renvoAsmPrimaryImm(a, 0)
+	renvoAsmRet(a)
+	renvoAsmMarkLabel(a, afterLabel)
+	return g.persistentAllocLabel
+}
+
+func renvoEnsureArenaFaultHelper(g *renvoLinearGen) int {
+	renvoNonNil(g)
+	if g.arenaFaultLabel > 0 {
+		return g.arenaFaultLabel - 1
+	}
+	a := &g.asm
+	label := renvoAsmNewLabel(a)
+	g.arenaFaultLabel = label + 1
+	afterLabel := renvoAsmNewLabel(a)
+	renvoAsmJmpMarkLabel(a, afterLabel, label)
+	renvoEmitStaticWrite(g, "panic: out of memory\n", 2)
+	renvoAsmPrimaryImm(a, 2)
+	renvoEmitExitStatus(g)
+	renvoAsmMarkLabel(a, afterLabel)
+	return label
 }
 
 const renvoPrintIntBufferSize = 24
