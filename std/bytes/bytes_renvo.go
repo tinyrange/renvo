@@ -2,15 +2,7 @@
 
 package bytes
 
-type eofError struct {
-	marker int
-}
-
-func (value eofError) Error() string {
-	return "EOF"
-}
-
-var errEOFValue = eofError{marker: 1}
+import "io"
 
 func Equal(a []byte, b []byte) bool {
 	if len(a) != len(b) {
@@ -167,7 +159,7 @@ func (b *Buffer) WriteString(s string) (int, error) {
 
 func (b *Buffer) Read(p []byte) (int, error) {
 	if b.off >= len(b.buf) {
-		return 0, errEOFValue
+		return 0, io.EOF
 	}
 	n := copy(p, b.buf[b.off:])
 	b.off += n
