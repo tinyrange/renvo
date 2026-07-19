@@ -90,7 +90,9 @@ func prepareDefiniteCallTarget(pkg *load.Package, info *PackageInfo, symbolIndex
 	if !ok || !definiteSignatureHasPointer(file, fn) {
 		return
 	}
-	target.pointerParams = renvo_runtime_ArenaPersistCheckBools(definitePointerParams(pkg, info, symbol.File, file, fn))
+	pointerParams := definitePointerParams(pkg, info, symbol.File, file, fn)
+	target.pointerParams = renvo_runtime_ArenaPersistCheckBools(pointerParams)
+	renvo_runtime_ArenaDiscardCheckBools(pointerParams)
 }
 
 func nextDefiniteCallComma(file *syntax.File, start int, end int) int {

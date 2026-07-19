@@ -898,6 +898,11 @@ func coreSymbolKeepsRuntimeName(name string) bool {
 		"renvo_runtime_ArenaDiscardLinkTokens",
 		"renvo_runtime_ArenaDiscardLowerTokens":
 		return true
+	case "renvo_runtime_ArenaDiscardCheckNameRefs",
+		"renvo_runtime_ArenaDiscardCheckSelectorRefs",
+		"renvo_runtime_ArenaDiscardCheckTypeRefs",
+		"renvo_runtime_ArenaDiscardCheckBools":
+		return true
 	}
 	return false
 }

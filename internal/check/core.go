@@ -151,9 +151,15 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			}
 			locals := buildFuncLocalTypeSpansCore(file, fn)
 			out.CoreTypeRefs = buildFuncTypeRefsCore(file, fileIndex, info, checked, signature, locals, scope)
-			out.CoreRefs = renvo_runtime_ArenaPersistCheckNameRefs(out.CoreRefs)
-			out.CoreSelectors = renvo_runtime_ArenaPersistCheckSelectorRefs(out.CoreSelectors)
-			out.CoreTypeRefs = renvo_runtime_ArenaPersistCheckTypeRefs(out.CoreTypeRefs)
+			coreRefs := out.CoreRefs
+			coreSelectors := out.CoreSelectors
+			coreTypeRefs := out.CoreTypeRefs
+			out.CoreRefs = renvo_runtime_ArenaPersistCheckNameRefs(coreRefs)
+			out.CoreSelectors = renvo_runtime_ArenaPersistCheckSelectorRefs(coreSelectors)
+			out.CoreTypeRefs = renvo_runtime_ArenaPersistCheckTypeRefs(coreTypeRefs)
+			renvo_runtime_ArenaDiscardCheckNameRefs(coreRefs)
+			renvo_runtime_ArenaDiscardCheckSelectorRefs(coreSelectors)
+			renvo_runtime_ArenaDiscardCheckTypeRefs(coreTypeRefs)
 			arena.Reset(functionArenaStart)
 			info.CoreBodies = append(info.CoreBodies, out)
 		}
