@@ -1,8 +1,0 @@
-{
-  "phase": "checker",
-  "code": "RTG-CHECK-017",
-  "file": "cmd/app/main.go",
-  "line": 4,
-  "column": 15,
-  "message": "goroutines are not supported by RTG"
-}

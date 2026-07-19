@@ -1,8 +1,0 @@
-{
-  "phase": "checker",
-  "code": "RTG-CHECK-008",
-  "file": "cmd/app/main.go",
-  "line": 3,
-  "column": 38,
-  "message": "assignment value is not assignable to its destination"
-}

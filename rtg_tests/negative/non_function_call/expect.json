@@ -1,8 +1,0 @@
-{
-  "phase": "checker",
-  "code": "RTG-CHECK-011",
-  "file": "cmd/app/main.go",
-  "line": 3,
-  "column": 23,
-  "message": "called expression is not a function"
-}

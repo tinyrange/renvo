@@ -38,32 +38,32 @@ jobs:
       - name: Restore compiler test cache
         uses: actions/cache@v5
         with:
-          path: .rtg/test-cache
-          key: rtg-test-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'compiler*.go', 'rtg_main.go', 'tests/*.go', 'unit_frontend_test.go', 'test_cache_test.go') }}
+          path: backend/.renvo/test-cache
+          key: renvo-test-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'backend/compiler*.go', 'backend/renvo_main.go', 'backend/tests/*.go', 'backend/unit_frontend_test.go', 'backend/test_cache_test.go') }}
           restore-keys: |
-            rtg-test-v2-${{ runner.os }}-${{ runner.arch }}-
+            renvo-test-v2-${{ runner.os }}-${{ runner.arch }}-
 
-      - name: Build frontend backend
+      - name: Build backend
         run: |
-          go build -o "$RUNNER_TEMP/rtg-backend" .
-          echo "RTG_BACKEND=$RUNNER_TEMP/rtg-backend" >> "$GITHUB_ENV"
+          go build -o "$RUNNER_TEMP/renvo-backend" ./backend
+          echo "RENVO_BACKEND=$RUNNER_TEMP/renvo-backend" >> "$GITHUB_ENV"
 
       - name: Run compiler resource gates
         env:
-          RTG_COMPILER_RESOURCE_GATES: "1"
-        run: go test -count=1 -timeout 5m -run '^TestCompilerResourceGates$' .
+          RENVO_COMPILER_RESOURCE_GATES: "1"
+        run: go test -count=1 -timeout 5m -run '^TestCompilerResourceGates$' ./backend
 
       - name: Run frontend compiler performance gate
         env:
-          RTG_STDROOT: ${{ github.workspace }}/rtg/std
-        run: go test -count=1 -timeout 5m -run '^TestFrontendCompilerPerformance$' .
+          RENVO_STDROOT: ${{ github.workspace }}/std
+        run: go test -count=1 -timeout 5m -run '^TestFrontendCompilerPerformance$' ./backend
 
       - name: Run backend tests
         env:
-          RTG_CROSS_ARCH_TESTS: "1"
+          RENVO_CROSS_ARCH_TESTS: "1"
         run: |
-          tests="$(go test -list '^Test' . | grep '^Test' | grep -v '^TestCompilerPerformance$' | grep -v '^TestCompilerPerformanceWASI$' | grep -v '^TestCompilerResourceGates$' | grep -v '^TestFrontendCompilerPerformance$' | paste -sd'|' -)"
-          go test -count=1 -timeout 30m -run "^(${tests})$" .
+          tests="$(go test -list '^Test' ./backend | grep '^Test' | grep -v '^TestCompilerPerformance$' | grep -v '^TestCompilerPerformanceWASI$' | grep -v '^TestCompilerResourceGates$' | grep -v '^TestFrontendCompilerPerformance$' | paste -sd'|' -)"
+          go test -count=1 -timeout 30m -run "^(${tests})$" ./backend
 
   backend-arm64:
     name: Backend compiler tests (linux-arm64)
@@ -83,20 +83,20 @@ jobs:
       - name: Restore compiler test cache
         uses: actions/cache@v5
         with:
-          path: .rtg/test-cache
-          key: rtg-test-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'compiler*.go', 'rtg_main.go', 'tests/*.go', 'unit_frontend_test.go', 'test_cache_test.go') }}
+          path: backend/.renvo/test-cache
+          key: renvo-test-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'backend/compiler*.go', 'backend/renvo_main.go', 'backend/tests/*.go', 'backend/unit_frontend_test.go', 'backend/test_cache_test.go') }}
           restore-keys: |
-            rtg-test-v2-${{ runner.os }}-${{ runner.arch }}-
+            renvo-test-v2-${{ runner.os }}-${{ runner.arch }}-
 
-      - name: Build frontend backend
+      - name: Build backend
         run: |
-          go build -o "$RUNNER_TEMP/rtg-backend" .
-          echo "RTG_BACKEND=$RUNNER_TEMP/rtg-backend" >> "$GITHUB_ENV"
+          go build -o "$RUNNER_TEMP/renvo-backend" ./backend
+          echo "RENVO_BACKEND=$RUNNER_TEMP/renvo-backend" >> "$GITHUB_ENV"
 
       - name: Run backend tests
         run: |
-          tests="$(go test -list '^Test' . | grep '^Test' | grep -v '^TestCompilerPerformance$' | grep -v '^TestCompilerPerformanceWASI$' | grep -v '^TestCompilerResourceGates$' | grep -v '^TestFrontendCompilerPerformance$' | paste -sd'|' -)"
-          go test -count=1 -timeout 30m -run "^(${tests})$" .
+          tests="$(go test -list '^Test' ./backend | grep '^Test' | grep -v '^TestCompilerPerformance$' | grep -v '^TestCompilerPerformanceWASI$' | grep -v '^TestCompilerResourceGates$' | grep -v '^TestFrontendCompilerPerformance$' | paste -sd'|' -)"
+          go test -count=1 -timeout 30m -run "^(${tests})$" ./backend
 
   backend-darwin-arm64:
     name: Backend compiler tests (darwin-arm64)
@@ -116,26 +116,26 @@ jobs:
       - name: Restore compiler test cache
         uses: actions/cache@v5
         with:
-          path: .rtg/test-cache
-          key: rtg-test-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'compiler*.go', 'rtg_main.go', 'tests/*.go', 'unit_frontend_test.go', 'test_cache_test.go') }}
+          path: backend/.renvo/test-cache
+          key: renvo-test-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'backend/compiler*.go', 'backend/renvo_main.go', 'backend/tests/*.go', 'backend/unit_frontend_test.go', 'backend/test_cache_test.go') }}
           restore-keys: |
-            rtg-test-v2-${{ runner.os }}-${{ runner.arch }}-
+            renvo-test-v2-${{ runner.os }}-${{ runner.arch }}-
 
-      - name: Build frontend backend
+      - name: Build backend
         run: |
-          go build -o "$RUNNER_TEMP/rtg-backend" .
-          echo "RTG_BACKEND=$RUNNER_TEMP/rtg-backend" >> "$GITHUB_ENV"
+          go build -o "$RUNNER_TEMP/renvo-backend" ./backend
+          echo "RENVO_BACKEND=$RUNNER_TEMP/renvo-backend" >> "$GITHUB_ENV"
 
       - name: Run backend tests
         run: |
-          tests="$(go test -list '^Test' . | grep '^Test' | grep -v '^TestCompilerPerformance$' | grep -v '^TestCompilerPerformanceWASI$' | grep -v '^TestCompilerResourceGates$' | grep -v '^TestFrontendCompilerPerformance$' | paste -sd'|' -)"
-          go test -count=1 -timeout 30m -run "^(${tests})$" .
+          tests="$(go test -list '^Test' ./backend | grep '^Test' | grep -v '^TestCompilerPerformance$' | grep -v '^TestCompilerPerformanceWASI$' | grep -v '^TestCompilerResourceGates$' | grep -v '^TestFrontendCompilerPerformance$' | paste -sd'|' -)"
+          go test -count=1 -timeout 30m -run "^(${tests})$" ./backend
 
       - name: Run Darwin frontend corpus
         env:
-          RTG_FRONTEND_EXTENDED_TESTS: "1"
-          RTG_FRONTEND_SELFHOST_TESTS: "1"
-        run: go test -count=1 -timeout 30m ./rtg_tests
+          RENVO_FRONTEND_EXTENDED_TESTS: "1"
+          RENVO_FRONTEND_SELFHOST_TESTS: "1"
+        run: go test -count=1 -timeout 30m ./frontend_tests
 
   windows-e2e:
     name: Windows targets end to end (amd64 and 386)
@@ -154,8 +154,8 @@ jobs:
 
       - name: Build, validate, and execute Windows targets
         env:
-          RTG_WINDOWS_GDB: "1"
-        run: go test -count=1 -timeout 15m -run '^TestWindows(PEImages|TargetsEndToEnd|GraphicsEndToEnd)$' .
+          RENVO_WINDOWS_GDB: "1"
+        run: go test -count=1 -timeout 15m -run '^TestWindows(PEImages|TargetsEndToEnd|GraphicsEndToEnd)$' ./backend
 
   package-tests:
     name: Package tests (${{ matrix.runner }})
@@ -180,11 +180,11 @@ jobs:
 
       - name: Run tracked package suites
         run: |
-          # Do not replace these patterns with ./...: tests/ and the generated
-          # corpus contain independent programs with intentionally conflicting
-          # package-level declarations, while sandbox/ contains local scratch.
-          go test -count=1 ./rtg/internal/... ./rtg/std/... ./rtg/cmd/... ./rtgunit ./cmd/...
-          go test -count=1 -tags rtg_bundle ./rtg/internal/driver ./rtg/cmd/rtg
+          # Do not replace these patterns with ./...: backend/tests and the
+          # generated corpus contain independent programs with intentionally
+          # conflicting declarations, while sandbox/ contains local scratch.
+          go test -count=1 ./internal/... ./std/... ./cmd/... ./backend/unit ./backend/target ./backend/bringup ./backend/omnibus/... ./backend/cmd/...
+          go test -count=1 -tags renvo_bundle ./internal/driver ./cmd/renvo
 
   frontend-corpus:
     name: Frontend corpus tests
@@ -203,7 +203,7 @@ jobs:
 
       - name: Run frontend corpus tests
         env:
-          RTG_FRONTEND_EXTENDED_TESTS: "1"
-          RTG_FRONTEND_SELFHOST_TESTS: "1"
-          RTG_FRONTEND_BUNDLE_TESTS: "1"
-        run: go test -count=1 ./rtg_tests
+          RENVO_FRONTEND_EXTENDED_TESTS: "1"
+          RENVO_FRONTEND_SELFHOST_TESTS: "1"
+          RENVO_FRONTEND_BUNDLE_TESTS: "1"
+        run: go test -count=1 ./frontend_tests

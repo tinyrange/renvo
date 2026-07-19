@@ -1,8 +1,0 @@
-{
-  "phase": "checker",
-  "code": "RTG-CHECK-020",
-  "file": "cmd/app/main.go",
-  "line": 4,
-  "column": 2,
-  "message": "local variable is declared but not used"
-}

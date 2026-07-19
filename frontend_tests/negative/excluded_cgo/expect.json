@@ -1,0 +1,8 @@
+{
+  "phase": "loader",
+  "code": "RENVO-LOAD-019",
+  "file": "cmd/app/main.go",
+  "line": 3,
+  "column": 9,
+  "message": "cgo is not supported by RENVO"
+}

@@ -1,8 +1,0 @@
-{
-  "phase": "loader",
-  "code": "RTG-LOAD-014",
-  "file": "cmd/app/main.go",
-  "line": 3,
-  "column": 11,
-  "message": "dependency source is unavailable for example.com/missing@v1.0.0"
-}

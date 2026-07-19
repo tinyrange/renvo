@@ -1,0 +1,33 @@
+{
+  "name": "RENVO omnibus result ABI",
+  "version": 1,
+  "byte_order": "little",
+  "magic": "RNVR",
+  "size": 64,
+  "symbol": "renvores",
+  "section": ".renvo.result",
+  "fields": [
+    {"name": "magic", "offset": 0, "size": 4},
+    {"name": "version", "offset": 4, "size": 2},
+    {"name": "size", "offset": 6, "size": 2},
+    {"name": "profile", "offset": 8, "size": 4},
+    {"name": "state", "offset": 12, "size": 4},
+    {"name": "current_probe", "offset": 16, "size": 4},
+    {"name": "failure_probe", "offset": 20, "size": 4},
+    {"name": "completed_probes", "offset": 24, "size": 4},
+    {"name": "flags", "offset": 28, "size": 4},
+    {"name": "expected", "offset": 32, "size": 8},
+    {"name": "observed", "offset": 40, "size": 8},
+    {"name": "signature", "offset": 48, "size": 8},
+    {"name": "sequence", "offset": 56, "size": 4},
+    {"name": "reserved", "offset": 60, "size": 4}
+  ],
+  "states": [
+    {"name": "not_started", "value": 0},
+    {"name": "running", "value": 1},
+    {"name": "passed", "value": 2},
+    {"name": "failed_comparison", "value": 3},
+    {"name": "trap_reset", "value": 4},
+    {"name": "profile_mismatch", "value": 5}
+  ]
+}

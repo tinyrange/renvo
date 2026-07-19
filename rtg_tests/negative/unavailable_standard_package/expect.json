@@ -1,8 +1,0 @@
-{
-  "phase": "loader",
-  "code": "RTG-LOAD-020",
-  "file": "cmd/app/main.go",
-  "line": 3,
-  "column": 11,
-  "message": "standard library package time is not included in this RTG build"
-}

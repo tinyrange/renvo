@@ -1,0 +1,8 @@
+{
+  "phase": "checker",
+  "code": "RENVO-CHECK-014",
+  "file": "cmd/app/main.go",
+  "line": 3,
+  "column": 15,
+  "message": "break is not inside a loop or switch"
+}

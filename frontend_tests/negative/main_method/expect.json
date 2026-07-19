@@ -1,0 +1,8 @@
+{
+  "phase": "checker",
+  "code": "RENVO-CHECK-023",
+  "file": "cmd/app/main.go",
+  "line": 5,
+  "column": 20,
+  "message": "method main does not define the package entry point"
+}

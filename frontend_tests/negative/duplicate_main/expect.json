@@ -1,0 +1,8 @@
+{
+  "phase": "checker",
+  "code": "RENVO-CHECK-002",
+  "file": "cmd/app/b.go",
+  "line": 3,
+  "column": 6,
+  "message": "duplicate declaration"
+}

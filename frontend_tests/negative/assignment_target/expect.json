@@ -1,0 +1,8 @@
+{
+  "phase": "checker",
+  "code": "RENVO-CHECK-012",
+  "file": "cmd/app/main.go",
+  "line": 3,
+  "column": 15,
+  "message": "left side of assignment is not assignable"
+}

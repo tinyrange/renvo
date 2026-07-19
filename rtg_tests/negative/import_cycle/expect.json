@@ -1,8 +1,0 @@
-{
-  "phase": "loader",
-  "code": "RTG-LOAD-011",
-  "file": "lib/lib.go",
-  "line": 3,
-  "column": 10,
-  "message": "import cycle detected"
-}

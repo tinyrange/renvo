@@ -1,0 +1,8 @@
+{
+  "phase": "checker",
+  "code": "RENVO-CHECK-013",
+  "file": "cmd/app/main.go",
+  "line": 3,
+  "column": 20,
+  "message": "assignment count does not match"
+}

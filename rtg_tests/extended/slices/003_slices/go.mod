@@ -1,3 +1,0 @@
-module example.com/rtgtests/extended/slices/case003
-
-go 1.25

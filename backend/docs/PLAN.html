@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RENVO Frontend Pass Plan</title>
+  <style>
+    body {
+      margin: 2rem;
+      max-width: 900px;
+      color: #1f2328;
+      font: 16px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    h1 {
+      margin: 0 0 1rem;
+      font-size: 2rem;
+      line-height: 1.15;
+    }
+
+    h2 {
+      margin: 1.75rem 0 0.5rem;
+      font-size: 1.25rem;
+    }
+
+    p {
+      margin: 0 0 1rem;
+    }
+
+    ol,
+    ul {
+      margin: 0 0 1rem;
+      padding-left: 1.35rem;
+    }
+
+    li {
+      margin: 0.35rem 0;
+    }
+
+    code {
+      background: #f3f4f6;
+      border: 1px solid #d8dee4;
+      border-radius: 5px;
+      padding: 0.1rem 0.35rem;
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+    }
+  </style>
+</head>
+<body>
+  <h1>RENVO Frontend Pass Plan</h1>
+  <p>
+    This pass builds the replacement frontend in <code>renvo/</code>. The end
+    goal is concrete: every test in <code>frontend_tests</code> must compile and run
+    through the frontend, and <code>cmd/renvo</code> must self-host through
+    stage3 using the Renvo backend.
+  </p>
+
+  <h2>Definition Of Done</h2>
+  <ul>
+    <li><code>go test ./frontend_tests</code> passes with the host-built frontend.</li>
+    <li><code>RENVO_FRONTEND_EXTENDED_TESTS=1 go test ./frontend_tests</code> passes with the host-built frontend.</li>
+    <li>Stage0 host build compiles stage1, stage1 compiles stage2, and stage2 compiles stage3.</li>
+    <li>The stage3 frontend can compile <code>frontend_tests/quick</code> and <code>frontend_tests/extended</code>.</li>
+    <li><code>TestFrontendCompilerPerformance</code> passes: best of three stage2-to-stage3 builds within 500ms wall time, 32MB max RSS, and 1MB output size.</li>
+    <li>The backend tests and backend performance gates still pass.</li>
+  </ul>
+
+  <h2>Hard Constraints</h2>
+  <ul>
+    <li>The frontend source must be written so it can be compiled by RENVO. Do not depend on the host Go standard library in frontend runtime code.</li>
+    <li>Use local packages under <code>renvo/</code> and add <code>std</code> compatibility only when frontend source or an acceptance test directly benefits from it.</li>
+    <li>The frontend emits binary RENVO units. It must not emit Go source as its backend contract.</li>
+    <li>The current backend unit format is the initial contract: token text pool, token table, declaration table, and function table in TLV form.</li>
+    <li>Keep runtime intrinsics hidden behind frontend lowering. User code should not need to know backend helper names.</li>
+    <li>Excluded language features for this pass remain goroutines, channels, <code>select</code>, cgo, and generics. Everything else covered by <code>frontend_tests</code> is in scope.</li>
+    <li>When a backend miscompile is found, stop frontend work, add a minimal <code>backend/tests/</code> regression, root cause it, and fix it if it blocks the pass.</li>
+  </ul>
+
+  <h2>Architecture</h2>
+  <ol>
+    <li>Driver: implement <code>renvo ./cmd/app</code>, <code>-t os/arch</code>, <code>-s</code>, <code>-o output</code>, diagnostics, and deterministic exit codes.</li>
+    <li>Loader: resolve the nearest <code>go.mod</code>, package directories, import paths, files, and deterministic package order without invoking the host Go toolchain.</li>
+    <li>Parser: parse the in-scope Go syntax needed by <code>frontend_tests</code> and the frontend source itself.</li>
+    <li>Checker: resolve packages, names, constants, types, methods, selector rules, assignments, calls, conversions, builtins, and initialization order.</li>
+    <li>Lowerer: translate checked Go into the backend unit model, adding generated helpers for frontend-only semantics.</li>
+    <li>Linker: combine package units in memory, resolve generated symbols, order package initialization, and emit one final backend unit.</li>
+    <li>Backend bridge: call RENVO in memory when possible, with a CLI fallback only for debugging.</li>
+  </ol>
+
+  <h2>Implementation Order</h2>
+  <ol>
+    <li>Create the smallest <code>cmd/renvo</code> that accepts the final CLI and can compile a single-package hello world through the existing binary unit path.</li>
+    <li>Implement deterministic file and module loading for <code>renvo ./cmd/app</code>, including multiple files in one package.</li>
+    <li>Implement package graph loading and linking for local module imports before adding broad language features.</li>
+    <li>Bring up declarations, functions, variables, constants, scalar types, strings, slices, pointers, structs, methods, and package initialization.</li>
+    <li>Pass <code>frontend_tests/quick</code> by category, keeping every feature vertical: parser, checker, lowering, runtime support, and diagnostics land together.</li>
+    <li>Reach stage1 self-hosting as soon as the frontend can compile its own source shape, even if the extended corpus is not complete yet.</li>
+    <li>Reach stage2 and stage3 self-hosting, then keep stage3 in the loop for every following feature group.</li>
+    <li>Finish the extended corpus categories: arrays, maps, interfaces, function values, closures, dynamic dispatch, <code>defer</code>, <code>panic</code>, <code>recover</code>, unsafe, conversions, and multi-package interactions.</li>
+    <li>Run the full acceptance set with both host-built and self-hosted frontends.</li>
+    <li>Optimize only after correctness is stable; performance work must preserve the self-host and full corpus gates.</li>
+  </ol>
+
+  <h2>Feature Scope</h2>
+  <ul>
+    <li>Required: modules, packages, imports, package initialization, multiple files per package, and deterministic linking.</li>
+    <li>Required: constants, variables, functions, methods, structs, embedded fields, promoted selectors, arrays, slices, strings, pointers, maps, interfaces, function values, closures, and dynamic dispatch.</li>
+    <li>Required: <code>defer</code>, <code>panic</code>, <code>recover</code>, builtins used by the corpus, conversions, and unsafe forms used by the corpus.</li>
+    <li>Required: clear diagnostics for unsupported or malformed input, especially excluded features.</li>
+    <li>Excluded for now: goroutines, channels, <code>select</code>, cgo, and generics.</li>
+  </ul>
+
+  <h2>Testing Plan</h2>
+  <ol>
+    <li>Keep <code>go test ./frontend_tests</code> passing at all times. This runs host validation and, once <code>cmd/renvo</code> exists, frontend validation.</li>
+    <li>Run targeted category tests while implementing features, for example <code>go test ./frontend_tests -run TestFrontendQuickCorpus/functions</code>.</li>
+    <li>Run <code>RENVO_FRONTEND_EXTENDED_TESTS=1 go test ./frontend_tests</code> before considering any feature group complete.</li>
+    <li>Run stage tests explicitly: host stage0 to stage1, stage1 to stage2, stage2 to stage3, then stage3 against quick and extended corpus.</li>
+    <li>Run <code>go test -run '^TestFrontendCompilerPerformance$' .</code> once self-hosting exists.</li>
+    <li>Run top-level backend checks before merging frontend changes: <code>go test -run '^TestCompilerPerformance$' .</code> and <code>go test -timeout 30m -skip '^TestCompilerPerformance$' .</code>.</li>
+  </ol>
+
+  <h2>Self-Hosting Discipline</h2>
+  <ul>
+    <li>Do not postpone self-hosting until the end. Start compiling the frontend with itself as soon as a minimal subset is available.</li>
+    <li>Keep frontend source simple enough for the compiler being built: explicit loops, simple data structures, deterministic allocation, and minimal dependencies.</li>
+    <li>When stage1, stage2, or stage3 fails, reduce the failure to a small <code>frontend_tests</code> case or backend <code>tests</code> regression before continuing feature work.</li>
+    <li>Track stage output size, wall time, and max RSS after every major feature group.</li>
+  </ul>
+
+  <h2>Performance Budget</h2>
+  <p>
+    The hard gate for this pass is already encoded in <code>main_test.go</code>:
+    stage2 must build stripped stage3 within 500ms, 32MB max RSS, and 1MB binary
+    size, using the best of three attempts. Treat those as design constraints,
+    not cleanup targets.
+  </p>
+  <ul>
+    <li>Prefer compact typed data structures over reflection-like generic representations.</li>
+    <li>Avoid repeated whole-program scans after loading; cache package, symbol, and type indexes.</li>
+    <li>Keep unit emission deterministic and streaming-friendly.</li>
+    <li>Measure before optimizing; compare against current baselines for unit decode, backend parse, and full self-host time.</li>
+  </ul>
+
+  <h2>Non-Goals For This Pass</h2>
+  <ul>
+    <li>No goroutines, channels, <code>select</code>, cgo, or generics.</li>
+    <li>No speculative standard library expansion.</li>
+    <li>No broad rewrite of the backend unit format unless the current format blocks correctness or self-hosting.</li>
+    <li>No source-emission frontend fallback. The frontend must exercise the binary unit path.</li>
+  </ul>
+</body>
+</html>

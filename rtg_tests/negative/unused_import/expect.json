@@ -1,8 +1,0 @@
-{
-  "phase": "checker",
-  "code": "RTG-CHECK-010",
-  "file": "cmd/app/main.go",
-  "line": 3,
-  "column": 8,
-  "message": "import is not used"
-}

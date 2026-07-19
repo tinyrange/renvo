@@ -1,8 +1,0 @@
-{
-  "phase": "checker",
-  "code": "RTG-CHECK-024",
-  "file": "cmd/app/main.go",
-  "line": 4,
-  "column": 25,
-  "message": "cannot slice an unaddressable array value"
-}

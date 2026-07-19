@@ -29,84 +29,88 @@ jobs:
         run: |
           set -eux
           mkdir -p dist
-          mapfile -t compiler_files < compiler_sources.txt
-          go build -o dist/rtgx-stage0 \
-            rtg_main.go \
+          mapfile -t compiler_names < backend/compiler_sources.txt
+          compiler_files=()
+          for name in "${compiler_names[@]}"; do
+            compiler_files+=("backend/$name")
+          done
+          go build -o dist/renvo-backend-stage0 \
+            backend/renvo_main.go \
             "${compiler_files[@]}"
-          ./dist/rtgx-stage0 -t linux/amd64 -s -o dist/rtgx-stage1 \
+          ./dist/renvo-backend-stage0 -t linux/amd64 -s -o dist/renvo-backend-stage1 \
             "${compiler_files[@]}"
-          chmod +x dist/rtgx-stage1
-          ./dist/rtgx-stage1 -t linux/amd64 -s -o dist/rtgx-linux-amd64 \
+          chmod +x dist/renvo-backend-stage1
+          ./dist/renvo-backend-stage1 -t linux/amd64 -s -o dist/renvo-backend-linux-amd64 \
             "${compiler_files[@]}"
-          ./dist/rtgx-stage1 -t linux/aarch64 -s -o dist/rtgx-linux-arm64 \
+          ./dist/renvo-backend-stage1 -t linux/aarch64 -s -o dist/renvo-backend-linux-arm64 \
             "${compiler_files[@]}"
-          chmod +x dist/rtgx-linux-amd64 dist/rtgx-linux-arm64
+          chmod +x dist/renvo-backend-linux-amd64 dist/renvo-backend-linux-arm64
 
       - name: Build frontend compilers
         run: |
           set -eux
-          go build -tags rtg_bundle -o dist/rtg-stage0 ./rtg/cmd/rtg
-          RTG_BACKEND="$PWD/dist/rtgx-linux-amd64" \
-            ./dist/rtg-stage0 -tags rtg_bundle -t linux/amd64 -s -o dist/rtg-linux-amd64-stage1 ./rtg/cmd/rtg
-          ./dist/rtg-linux-amd64-stage1 -tags rtg_bundle -t linux/amd64 -s -o dist/rtg-linux-amd64 ./rtg/cmd/rtg
-          ./dist/rtg-linux-amd64-stage1 -tags rtg_bundle -t linux/386 -s -o dist/rtg-linux-386 ./rtg/cmd/rtg
-          ./dist/rtg-linux-amd64-stage1 -tags rtg_bundle -t linux/aarch64 -s -o dist/rtg-linux-arm64 ./rtg/cmd/rtg
-          ./dist/rtg-linux-amd64-stage1 -tags rtg_bundle -t linux/arm -s -o dist/rtg-linux-arm ./rtg/cmd/rtg
-          ./dist/rtg-linux-amd64-stage1 -tags rtg_bundle -t windows/amd64 -s -o dist/rtg-windows-amd64.exe ./rtg/cmd/rtg
-          ./dist/rtg-linux-amd64-stage1 -tags rtg_bundle -t windows/386 -s -o dist/rtg-windows-386.exe ./rtg/cmd/rtg
-          ./dist/rtg-linux-amd64-stage1 -tags rtg_bundle -t windows/arm64 -s -o dist/rtg-windows-arm64.exe ./rtg/cmd/rtg
-          ./dist/rtg-linux-amd64-stage1 -tags rtg_bundle -t darwin/arm64 -s -o dist/rtg-darwin-arm64 ./rtg/cmd/rtg
-          ./dist/rtg-linux-amd64-stage1 -tags rtg_bundle -t wasi/wasm32 -s -o dist/rtg-wasi-wasm32.wasm ./rtg/cmd/rtg
+          go build -tags renvo_bundle -o dist/renvo-stage0 ./cmd/renvo
+          RENVO_BACKEND="$PWD/dist/renvo-backend-linux-amd64" \
+            ./dist/renvo-stage0 -tags renvo_bundle -t linux/amd64 -s -o dist/renvo-linux-amd64-stage1 ./cmd/renvo
+          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t linux/amd64 -s -o dist/renvo-linux-amd64 ./cmd/renvo
+          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t linux/386 -s -o dist/renvo-linux-386 ./cmd/renvo
+          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t linux/aarch64 -s -o dist/renvo-linux-arm64 ./cmd/renvo
+          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t linux/arm -s -o dist/renvo-linux-arm ./cmd/renvo
+          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t windows/amd64 -s -o dist/renvo-windows-amd64.exe ./cmd/renvo
+          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t windows/386 -s -o dist/renvo-windows-386.exe ./cmd/renvo
+          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t windows/arm64 -s -o dist/renvo-windows-arm64.exe ./cmd/renvo
+          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t darwin/arm64 -s -o dist/renvo-darwin-arm64 ./cmd/renvo
+          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t wasi/wasm32 -s -o dist/renvo-wasi-wasm32.wasm ./cmd/renvo
           chmod +x \
-            dist/rtg-linux-amd64 \
-            dist/rtg-linux-386 \
-            dist/rtg-linux-arm64 \
-            dist/rtg-linux-arm \
-            dist/rtg-darwin-arm64
+            dist/renvo-linux-amd64 \
+            dist/renvo-linux-386 \
+            dist/renvo-linux-arm64 \
+            dist/renvo-linux-arm \
+            dist/renvo-darwin-arm64
 
       - name: Check release frontend help
         run: |
           set -eux
-          ./dist/rtg-linux-amd64 > dist/rtg-help.txt
-          grep -F "Usage: rtg" dist/rtg-help.txt
-          grep -F "windows/amd64" dist/rtg-help.txt
-          grep -F "windows/arm64" dist/rtg-help.txt
-          grep -F "darwin/arm64" dist/rtg-help.txt
-          grep -F "wasi/wasm32" dist/rtg-help.txt
+          ./dist/renvo-linux-amd64 > dist/renvo-help.txt
+          grep -F "Usage: renvo" dist/renvo-help.txt
+          grep -F "windows/amd64" dist/renvo-help.txt
+          grep -F "windows/arm64" dist/renvo-help.txt
+          grep -F "darwin/arm64" dist/renvo-help.txt
+          grep -F "wasi/wasm32" dist/renvo-help.txt
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v7
         with:
-          name: rtgx-release-binaries
+          name: renvo-release-binaries
           path: |
-            dist/rtgx-linux-amd64
-            dist/rtgx-linux-arm64
-            dist/rtg-linux-amd64
-            dist/rtg-linux-386
-            dist/rtg-linux-arm64
-            dist/rtg-linux-arm
-            dist/rtg-windows-amd64.exe
-            dist/rtg-windows-386.exe
-            dist/rtg-windows-arm64.exe
-            dist/rtg-darwin-arm64
-            dist/rtg-wasi-wasm32.wasm
+            dist/renvo-backend-linux-amd64
+            dist/renvo-backend-linux-arm64
+            dist/renvo-linux-amd64
+            dist/renvo-linux-386
+            dist/renvo-linux-arm64
+            dist/renvo-linux-arm
+            dist/renvo-windows-amd64.exe
+            dist/renvo-windows-386.exe
+            dist/renvo-windows-arm64.exe
+            dist/renvo-darwin-arm64
+            dist/renvo-wasi-wasm32.wasm
           if-no-files-found: error
 
-      - name: Upload release asset
+      - name: Upload release assets
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "$GITHUB_REF_NAME" \
-            dist/rtgx-linux-amd64 \
-            dist/rtgx-linux-arm64 \
-            dist/rtg-linux-amd64 \
-            dist/rtg-linux-386 \
-            dist/rtg-linux-arm64 \
-            dist/rtg-linux-arm \
-            dist/rtg-windows-amd64.exe \
-            dist/rtg-windows-386.exe \
-            dist/rtg-windows-arm64.exe \
-            dist/rtg-darwin-arm64 \
-            dist/rtg-wasi-wasm32.wasm \
+            dist/renvo-backend-linux-amd64 \
+            dist/renvo-backend-linux-arm64 \
+            dist/renvo-linux-amd64 \
+            dist/renvo-linux-386 \
+            dist/renvo-linux-arm64 \
+            dist/renvo-linux-arm \
+            dist/renvo-windows-amd64.exe \
+            dist/renvo-windows-386.exe \
+            dist/renvo-windows-arm64.exe \
+            dist/renvo-darwin-arm64 \
+            dist/renvo-wasi-wasm32.wasm \
             --clobber

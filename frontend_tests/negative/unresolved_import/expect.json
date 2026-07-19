@@ -1,0 +1,8 @@
+{
+  "phase": "loader",
+  "code": "RENVO-LOAD-008",
+  "file": "cmd/app/main.go",
+  "line": 3,
+  "column": 11,
+  "message": "unresolved import github.com/example/missing"
+}

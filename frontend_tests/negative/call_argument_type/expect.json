@@ -1,0 +1,8 @@
+{
+  "phase": "checker",
+  "code": "RENVO-CHECK-016",
+  "file": "cmd/app/main.go",
+  "line": 14,
+  "column": 18,
+  "message": "call argument is not assignable to its parameter"
+}

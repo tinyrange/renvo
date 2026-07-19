@@ -1,8 +1,0 @@
-{
-  "phase": "parser",
-  "code": "RTG-PARSE-002",
-  "file": "cmd/app/main.go",
-  "line": 3,
-  "column": 14,
-  "message": "generics are not supported by RTG"
-}

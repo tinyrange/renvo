@@ -1,0 +1,1641 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RENVO SUBSET.md Test Backlog</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f4;
+      --ink: #1f2328;
+      --muted: #5d6672;
+      --line: #d7d9dc;
+      --panel: #ffffff;
+      --accent: #0f6b63;
+      --accent-soft: #e4f2ef;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+      padding: 28px clamp(18px, 4vw, 48px);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(26px, 4vw, 42px);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    .summary {
+      max-width: 980px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      padding: 14px clamp(18px, 4vw, 48px);
+      border-bottom: 1px solid var(--line);
+      background: #fbfbf9;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+
+    input,
+    select {
+      height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--ink);
+      padding: 0 10px;
+      font: inherit;
+    }
+
+    input {
+      min-width: min(420px, 100%);
+      flex: 1 1 320px;
+    }
+
+    main {
+      padding: 22px clamp(18px, 4vw, 48px) 44px;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+
+    .stat {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 12px 14px;
+    }
+
+    .stat strong {
+      display: block;
+      font-size: 22px;
+      line-height: 1.1;
+    }
+
+    .stat span {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    section {
+      margin: 0 0 22px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      overflow: hidden;
+    }
+
+    section h2 {
+      margin: 0;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      background: var(--accent-soft);
+      color: #103d39;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      background: #fafafa;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .id {
+      width: 84px;
+      color: var(--accent);
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .file {
+      width: 210px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      color: #39414d;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    @media (max-width: 760px) {
+      table,
+      thead,
+      tbody,
+      tr,
+      th,
+      td {
+        display: block;
+      }
+
+      thead {
+        display: none;
+      }
+
+      tr {
+        border-bottom: 1px solid var(--line);
+        padding: 8px 0;
+      }
+
+      tr:last-child {
+        border-bottom: 0;
+      }
+
+      td {
+        border-bottom: 0;
+        padding: 4px 10px;
+      }
+
+      .id,
+      .file {
+        width: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>RENVO SUBSET.md Test Backlog</h1>
+    <p class="summary">
+      A list of 1000 distinct future tests for the Renvo Go subset. Each row is
+      intended to become one file in <code>backend/tests/</code> that prints exactly
+      <code>PASS\n</code> on success and a distinct diagnostic on failure.
+    </p>
+  </header>
+
+  <div class="toolbar">
+    <input id="filter" type="search" placeholder="Filter by capability, title, filename, or pass condition">
+    <select id="sectionFilter" aria-label="Section filter"></select>
+  </div>
+
+  <main>
+    <div class="stats" aria-live="polite">
+      <div class="stat"><strong id="totalCount">1000</strong><span>Total tests</span></div>
+      <div class="stat"><strong id="shownCount">1000</strong><span>Visible tests</span></div>
+      <div class="stat"><strong id="sectionCount">40</strong><span>Capabilities</span></div>
+      <div class="stat"><strong>25</strong><span>Tests per capability</span></div>
+    </div>
+    <div id="tests"></div>
+  </main>
+
+  <script>
+    const capabilities = [
+      {
+        name: "Program Shape and Top-Level Ordering",
+        slug: "program_shape",
+        focus: "package main, appMain signature, top-level declarations, and calls across declaration order",
+        cases: [
+          "single file with appMain only",
+          "helper function declared after appMain",
+          "helper function declared before appMain",
+          "const before appMain and var after appMain",
+          "type before const before function",
+          "multiple helper functions in reverse dependency order",
+          "appMain uses args length without importing os",
+          "top-level var initialized from literal",
+          "top-level const used by two functions",
+          "file with dense blank lines between declarations",
+          "declarations with line comments between them",
+          "appMain returns zero after nested helper validation",
+          "appMain returns nonzero only on diagnostic path",
+          "global named type used before its helper function",
+          "global slice variable appended inside appMain",
+          "global struct variable read inside helper",
+          "global pointer assigned inside appMain",
+          "helper call chain crosses three declaration blocks",
+          "const expression used in top-level var initializer",
+          "type alias used in function parameter",
+          "function with no parameters and no result",
+          "function with parameters and one result",
+          "two source-style regions represented in one file",
+          "main package with tabs around declarations",
+          "appMain ignores args and still validates runtime shape"
+        ]
+      },
+      {
+        name: "Integer Literals and Constant Arithmetic",
+        slug: "integer_literals",
+        focus: "decimal, hexadecimal, binary, constant folding, and signed integer values",
+        cases: [
+          "decimal zero and positive one",
+          "large decimal value within int range",
+          "negative decimal formed by unary minus",
+          "hex literal with lowercase digits",
+          "hex literal with uppercase digits",
+          "binary literal with alternating bits",
+          "binary literal used in arithmetic expression",
+          "hex literal compared to decimal equivalent",
+          "constant addition of three literals",
+          "constant subtraction crossing zero",
+          "constant multiplication by zero and one",
+          "constant division with truncation",
+          "constant modulo remainder",
+          "parenthesized integer constant expression",
+          "const identifier reused in later const",
+          "const used as loop bound",
+          "const used as slice index",
+          "const used as shift count",
+          "const used in return expression",
+          "const expression passed to function",
+          "int64 literal initialized from decimal",
+          "byte literal initialized from integer constant",
+          "integer equality between named constants",
+          "integer inequality between mixed literal bases",
+          "global integer constant used in appMain"
+        ]
+      },
+      {
+        name: "Floating Point Literals and Arithmetic",
+        slug: "float_literals",
+        focus: "floating literals and basic float expression behavior needed by tests and compiler source",
+        cases: [
+          "simple whole-number float literal",
+          "fractional float literal below one",
+          "fractional float literal above one",
+          "float addition with exact small values",
+          "float subtraction to zero",
+          "float multiplication by integer-like literal",
+          "float division by two",
+          "float comparison less than",
+          "float comparison greater than or equal",
+          "float equality on copied value",
+          "float inequality on changed value",
+          "parenthesized float expression",
+          "unary minus on float literal",
+          "unary plus on float variable",
+          "float local variable with explicit type",
+          "float short declaration",
+          "float parameter passed to helper",
+          "float return value from helper",
+          "float global var initialized by literal",
+          "float used in if condition through comparison",
+          "float reassignment after arithmetic",
+          "compound float addition assignment",
+          "compound float subtraction assignment",
+          "nested helper returns computed float",
+          "float expression mixed with parentheses and comparisons"
+        ]
+      },
+      {
+        name: "Character, Byte, and Escape Literals",
+        slug: "byte_literals",
+        focus: "character literals for byte-sized values and common escapes",
+        cases: [
+          "plain ascii character literal",
+          "newline escape character literal",
+          "tab escape character literal",
+          "single quote escape character literal",
+          "backslash escape character literal",
+          "byte variable from character literal",
+          "byte comparison to numeric literal",
+          "byte comparison to another character literal",
+          "byte passed to helper parameter",
+          "byte returned from helper",
+          "byte stored into []byte index",
+          "byte loaded from []byte index",
+          "byte converted to int",
+          "int converted to byte",
+          "byte arithmetic after int conversion",
+          "byte top-level var initialized from char",
+          "byte const used in expression",
+          "byte equality in if branch",
+          "byte inequality in loop condition",
+          "byte appended to []byte",
+          "byte field in struct literal",
+          "pointer to byte read through dereference",
+          "byte compound assignment after int conversion",
+          "byte value survives helper call chain",
+          "byte escape literal printed only through final PASS path"
+        ]
+      },
+      {
+        name: "String Literals and String Indexing",
+        slug: "strings",
+        focus: "interpreted string literals, escapes, length, indexing, and optional avoidance of concatenation",
+        cases: [
+          "empty string length",
+          "single character string length",
+          "string with newline escape",
+          "string with quote escape",
+          "string with backslash escape",
+          "string indexing first byte",
+          "string indexing middle byte",
+          "string indexing last byte",
+          "string index using variable",
+          "string index using const",
+          "string length in if condition",
+          "string length in for loop bound",
+          "string passed to helper",
+          "string returned from helper",
+          "global string var read in appMain",
+          "string const compared to literal",
+          "two strings compared for equality",
+          "two strings compared for inequality",
+          "string argument passed to print on diagnostic path",
+          "string in struct field",
+          "pointer to struct with string field",
+          "string copied through local assignment",
+          "string selected by if else",
+          "string selected by goto path",
+          "string converted to []byte for byte checks"
+        ]
+      },
+      {
+        name: "Boolean Values and Short-Circuiting",
+        slug: "booleans",
+        focus: "bool literals, boolean variables, !, &&, ||, and Go short-circuit behavior",
+        cases: [
+          "true literal in if",
+          "false literal in if else",
+          "bool local with explicit type",
+          "bool local with short declaration",
+          "bool function parameter",
+          "bool function return value",
+          "unary not on literal",
+          "unary not on variable",
+          "double negation",
+          "and expression both true",
+          "and expression left false",
+          "or expression left true",
+          "or expression both false",
+          "short-circuit and avoids mutating call",
+          "short-circuit or avoids mutating call",
+          "nested and inside or",
+          "nested or inside and",
+          "comparison result assigned to bool",
+          "bool struct field read",
+          "bool pointer dereference",
+          "bool global var changed in appMain",
+          "bool controls loop condition",
+          "bool controls break path",
+          "bool controls continue path",
+          "bool value survives recursive return"
+        ]
+      },
+      {
+        name: "Arithmetic Operators",
+        slug: "arithmetic",
+        focus: "+, -, *, /, %, unary signs, variables, constants, and runtime values",
+        cases: [
+          "addition of two locals",
+          "addition of local and constant",
+          "subtraction producing positive value",
+          "subtraction producing negative value",
+          "multiplication of two locals",
+          "division truncates toward zero for positive operands",
+          "modulo returns expected remainder",
+          "chained addition and subtraction",
+          "multiplication before addition precedence",
+          "parentheses override arithmetic precedence",
+          "unary minus applied to local",
+          "unary plus applied to expression",
+          "division result passed to helper",
+          "modulo result used as branch selector",
+          "arithmetic in loop post assignment",
+          "arithmetic in slice index calculation",
+          "arithmetic in struct field initializer",
+          "arithmetic return expression",
+          "arithmetic with top-level constants",
+          "arithmetic with top-level variables",
+          "negative dividend division",
+          "negative dividend modulo",
+          "multi-step checksum over ints",
+          "arithmetic reassignment across branches",
+          "arithmetic result compared after helper call"
+        ]
+      },
+      {
+        name: "Comparison Operators",
+        slug: "comparisons",
+        focus: "==, !=, <, <=, >, >= over supported comparable values",
+        cases: [
+          "integer equality true",
+          "integer equality false",
+          "integer inequality true",
+          "less than true",
+          "less than false on equal values",
+          "less than or equal true on less",
+          "less than or equal true on equal",
+          "greater than true",
+          "greater than false on equal values",
+          "greater than or equal true on equal",
+          "negative integer comparison",
+          "comparison between computed expressions",
+          "comparison result assigned to bool",
+          "comparison used in if condition",
+          "comparison used in for condition",
+          "comparison after compound assignment",
+          "byte comparison",
+          "string equality",
+          "string inequality",
+          "bool equality",
+          "bool inequality",
+          "pointer equality with same address",
+          "pointer inequality with different addresses",
+          "int64 comparison",
+          "comparison nested inside boolean expression"
+        ]
+      },
+      {
+        name: "Bitwise Operators",
+        slug: "bitwise",
+        focus: "&, |, ^, &^ and their interaction with constants and variables",
+        cases: [
+          "bitwise and masks low bits",
+          "bitwise or sets high bit",
+          "bitwise xor flips alternating bits",
+          "bit clear removes selected bits",
+          "bitwise expression with hex constants",
+          "bitwise expression with binary constants",
+          "bitwise result assigned to local",
+          "bitwise result returned from helper",
+          "bitwise result used in if comparison",
+          "bitwise expression with parentheses",
+          "bitwise precedence relative to addition",
+          "bitwise and with zero",
+          "bitwise or with zero",
+          "bitwise xor with zero",
+          "bit clear with zero mask",
+          "bitwise on variable modified in loop",
+          "bitwise checksum over []byte values",
+          "bitwise with named type alias",
+          "bitwise with int64 values",
+          "bitwise result converted to byte",
+          "compound style through explicit assignment",
+          "bitwise helper called before declaration",
+          "bitwise global constant",
+          "bitwise value stored in struct field",
+          "bitwise expression controls goto target"
+        ]
+      },
+      {
+        name: "Shift Operators",
+        slug: "shifts",
+        focus: "<< and >> with constant and variable shift counts",
+        cases: [
+          "left shift by zero",
+          "left shift by one",
+          "left shift by const",
+          "left shift by variable",
+          "right shift by zero",
+          "right shift by one",
+          "right shift by const",
+          "right shift by variable",
+          "shift count from helper return",
+          "shifted value compared to multiplication",
+          "right shift compared to division",
+          "shifted hex literal",
+          "shifted binary literal",
+          "shift after addition with parentheses",
+          "addition after shift precedence",
+          "shift result assigned to int64",
+          "shift result converted to byte",
+          "shift used in loop bound",
+          "shift used as slice index",
+          "shift stored in struct field",
+          "shift through named integer type",
+          "shift in top-level const expression",
+          "shift in global var initializer",
+          "shift expression passed to helper",
+          "shift expression controls branch path"
+        ]
+      },
+      {
+        name: "Expression Precedence and Parentheses",
+        slug: "precedence",
+        focus: "operator precedence across unary, arithmetic, comparison, boolean, bitwise, and shifts",
+        cases: [
+          "multiplication before addition",
+          "division before subtraction",
+          "modulo before addition",
+          "shift before comparison through parentheses",
+          "comparison before boolean and",
+          "comparison before boolean or",
+          "and before or",
+          "parentheses around boolean or",
+          "parentheses around arithmetic sum",
+          "unary minus before multiplication",
+          "unary not before boolean and",
+          "bitwise and precedence with equality",
+          "bitwise or grouped explicitly",
+          "bitwise xor grouped explicitly",
+          "bit clear grouped explicitly",
+          "nested parentheses with constants",
+          "nested parentheses with function calls",
+          "address and dereference inside expression",
+          "field selection inside arithmetic",
+          "index expression inside arithmetic",
+          "len call inside comparison",
+          "conversion inside arithmetic",
+          "function call result inside shift",
+          "three-level mixed expression",
+          "same operands with different parentheses produce different values"
+        ]
+      },
+      {
+        name: "Variable Declarations",
+        slug: "var_declarations",
+        focus: "var declarations with explicit type, initializer, or both",
+        cases: [
+          "var int without initializer",
+          "var int with initializer",
+          "var int inferred from initializer",
+          "var int64 explicit initializer",
+          "var byte explicit initializer",
+          "var bool explicit initializer",
+          "var string explicit initializer",
+          "var []byte zero value then append",
+          "var []int zero value then append",
+          "var struct zero value then fields assigned",
+          "var pointer zero value not dereferenced",
+          "var pointer assigned address before dereference",
+          "var inside appMain block",
+          "var inside if block",
+          "var inside else block",
+          "var inside for init block",
+          "var shadowing outer local",
+          "var uses previous local in initializer",
+          "var uses helper call in initializer",
+          "var initialized from conversion",
+          "var initialized from composite literal",
+          "multiple var statements in sequence",
+          "global var without initializer",
+          "global var with initializer",
+          "global var changed by helper"
+        ]
+      },
+      {
+        name: "Short Declarations and Scope",
+        slug: "short_declarations",
+        focus: ":= local binding, block scope, shadowing, and later assignment",
+        cases: [
+          "short int declaration",
+          "short int64 declaration",
+          "short byte declaration",
+          "short bool declaration",
+          "short string declaration",
+          "short slice declaration from append",
+          "short struct literal declaration",
+          "short pointer declaration from address",
+          "short declaration from function call",
+          "short declaration inside if block",
+          "short declaration inside else block",
+          "short declaration inside for init",
+          "short declaration inside loop body",
+          "inner short declaration shadows outer",
+          "outer value remains after shadow block",
+          "short declaration uses previous local",
+          "short declaration in nested block",
+          "short declaration then plain assignment",
+          "short declaration then compound assignment",
+          "short declaration from len call",
+          "short declaration from conversion",
+          "short declaration from indexing",
+          "short declaration from field selection",
+          "short declaration from dereference",
+          "short declaration before goto target is avoided by control flow"
+        ]
+      },
+      {
+        name: "Assignment and Compound Assignment",
+        slug: "assignment",
+        focus: "=, +=, -=, *=, /=, %= for locals, fields, pointers, and indices",
+        cases: [
+          "plain assignment to int local",
+          "plain assignment to bool local",
+          "plain assignment to string local",
+          "plain assignment to byte local",
+          "plain assignment to int64 local",
+          "addition compound assignment",
+          "subtraction compound assignment",
+          "multiplication compound assignment",
+          "division compound assignment",
+          "modulo compound assignment",
+          "assignment after if branch",
+          "assignment inside loop body",
+          "assignment in for post statement",
+          "assignment to struct field",
+          "compound assignment to struct field",
+          "assignment through pointer dereference",
+          "compound assignment through pointer dereference",
+          "assignment to slice index",
+          "compound assignment to slice index",
+          "assignment from helper return",
+          "assignment from conversion",
+          "assignment from len call",
+          "assignment from indexed byte",
+          "assignment to global var",
+          "assignment order across nested blocks"
+        ]
+      },
+      {
+        name: "If, Else If, and Else",
+        slug: "if_else",
+        focus: "branch selection, nested conditionals, else-if chains, and block scoping",
+        cases: [
+          "simple if true branch",
+          "simple if false skip",
+          "if else selects then",
+          "if else selects else",
+          "else if first condition true",
+          "else if second condition true",
+          "else if falls through to else",
+          "nested if in then branch",
+          "nested if in else branch",
+          "if condition from comparison",
+          "if condition from bool variable",
+          "if condition from helper call",
+          "if condition with short-circuit and",
+          "if condition with short-circuit or",
+          "if body declares shadow local",
+          "else body declares shadow local",
+          "if assigns outer variable",
+          "else assigns outer variable",
+          "if returns early on failure",
+          "else returns early on failure",
+          "if with empty then body represented by no-op call",
+          "if inside loop",
+          "if controls break",
+          "if controls continue",
+          "if chain computes final checksum"
+        ]
+      },
+      {
+        name: "For Condition Loops",
+        slug: "for_condition",
+        focus: "for condition { ... } loops with mutation, break, continue, and nested branches",
+        cases: [
+          "condition loop counts upward",
+          "condition loop counts downward",
+          "condition loop with bool flag",
+          "condition loop exits immediately",
+          "condition loop exits after one iteration",
+          "condition loop sums values",
+          "condition loop multiplies accumulator",
+          "condition loop writes slice indices",
+          "condition loop reads string indices",
+          "condition loop appends bytes",
+          "condition loop with break",
+          "condition loop with continue",
+          "condition loop with nested if",
+          "condition loop with helper condition",
+          "condition loop with compound assignment",
+          "condition loop mutates struct field",
+          "condition loop mutates pointer target",
+          "condition loop uses len in condition",
+          "condition loop uses comparison to const",
+          "condition loop updates two locals sequentially",
+          "condition loop with goto after exit",
+          "condition loop inside helper",
+          "nested condition loops",
+          "condition loop returns checksum",
+          "condition loop validates zero-value initialization"
+        ]
+      },
+      {
+        name: "For Init Condition Post Loops",
+        slug: "for_clause",
+        focus: "for init; condition; post { ... } loop semantics",
+        cases: [
+          "classic upward counter",
+          "classic downward counter",
+          "init short declaration",
+          "init assignment to existing local",
+          "post addition assignment",
+          "post subtraction assignment",
+          "post multiplication assignment",
+          "post helper call through assignment",
+          "condition uses len",
+          "condition uses helper result",
+          "body accumulates sum",
+          "body appends values",
+          "body assigns slice index",
+          "body uses continue before post",
+          "body uses break before post",
+          "nested for clause loops",
+          "for clause inside helper",
+          "for clause modifies struct field",
+          "for clause modifies pointer target",
+          "for clause with no body mutation except post",
+          "for clause skipped by false initial condition",
+          "for clause single iteration",
+          "for clause with if else in body",
+          "for clause with goto after loop",
+          "for clause validates post executes after continue"
+        ]
+      },
+      {
+        name: "Infinite For, Break, and Continue",
+        slug: "infinite_for",
+        focus: "for { ... }, explicit exits, and continue paths",
+        cases: [
+          "infinite loop exits by break",
+          "infinite loop exits by return",
+          "infinite loop increments before break",
+          "infinite loop decrements before break",
+          "continue skips later assignment",
+          "continue reaches next iteration",
+          "break exits only inner loop",
+          "nested infinite loops",
+          "infinite loop with if else selector",
+          "infinite loop with bool flag",
+          "infinite loop appends until len",
+          "infinite loop reads string until sentinel",
+          "infinite loop writes slice until count",
+          "infinite loop with helper break condition",
+          "infinite loop modifies pointer target",
+          "infinite loop modifies struct field",
+          "infinite loop uses goto after break",
+          "infinite loop uses goto to shared exit",
+          "continue inside nested if",
+          "break inside nested if",
+          "multiple continue paths",
+          "multiple break paths",
+          "infinite loop computes checksum",
+          "infinite loop validates post-break state",
+          "infinite loop inside recursive helper base path"
+        ]
+      },
+      {
+        name: "Labels and Goto",
+        slug: "goto",
+        focus: "labels, forward goto, backward goto, and interaction with variables and loops",
+        cases: [
+          "forward goto skips assignment",
+          "backward goto implements count loop",
+          "goto shared success exit",
+          "goto shared failure exit",
+          "goto over nested if block",
+          "goto out of loop",
+          "goto from inside nested loop",
+          "label immediately before return",
+          "label before if statement",
+          "label before for statement",
+          "multiple labels in one function",
+          "goto selected by bool condition",
+          "goto selected by integer comparison",
+          "goto after helper call",
+          "goto preserves assigned local",
+          "goto with struct field assignment before target",
+          "goto with pointer assignment before target",
+          "goto loop appends values",
+          "goto loop reads string indices",
+          "goto loop writes slice indices",
+          "goto path uses compound assignment",
+          "goto path avoids diagnostic print",
+          "goto target in appMain",
+          "goto target in helper",
+          "goto implements simple finite state parser"
+        ]
+      },
+      {
+        name: "Function Calls and Declaration Order",
+        slug: "functions",
+        focus: "top-level named functions, parameters, return values, and calls before declarations",
+        cases: [
+          "call zero-parameter void helper",
+          "call zero-parameter int helper",
+          "call one-parameter helper",
+          "call two-parameter helper",
+          "call helper declared later",
+          "call helper declared earlier",
+          "helper calls second helper declared later",
+          "helper chain with three functions",
+          "function returns bool",
+          "function returns string",
+          "function returns byte",
+          "function returns int64",
+          "function returns struct",
+          "function accepts pointer",
+          "function accepts slice",
+          "function mutates slice index",
+          "function mutates pointer target",
+          "function reads global const",
+          "function writes global var",
+          "function has local shadowing parameter",
+          "function early returns from if",
+          "function returns after loop",
+          "function called in expression",
+          "function called in condition",
+          "function result passed directly to another function"
+        ]
+      },
+      {
+        name: "Recursion",
+        slug: "recursion",
+        focus: "direct and mutual recursion with scalar, pointer, slice, and struct state",
+        cases: [
+          "factorial base case zero",
+          "factorial recursive case five",
+          "sum down to zero",
+          "fibonacci small value",
+          "recursive bool predicate",
+          "recursive string index scan",
+          "recursive slice sum",
+          "recursive pointer mutation",
+          "recursive struct field update",
+          "recursive helper declared after caller",
+          "mutual recursion even odd",
+          "mutual recursion with accumulator",
+          "recursion with early return failure path",
+          "recursion with int64 accumulator",
+          "recursion with byte comparison",
+          "recursion with global read",
+          "recursion with global write before unwind",
+          "recursion returns struct",
+          "recursion returns pointer value",
+          "recursion appends before recursive call",
+          "recursion appends after recursive call",
+          "recursion combines two recursive calls",
+          "recursion stops from boolean condition",
+          "recursion depth enough for stack confidence",
+          "recursive parser over expression-like bytes"
+        ]
+      },
+      {
+        name: "Return Statements",
+        slug: "returns",
+        focus: "zero-result and one-result returns from branches, loops, and helper functions",
+        cases: [
+          "void helper bare return",
+          "void helper falls through to end",
+          "int helper returns literal",
+          "int helper returns expression",
+          "bool helper returns comparison",
+          "byte helper returns indexed byte",
+          "string helper returns parameter",
+          "int64 helper returns converted value",
+          "struct helper returns composite literal",
+          "pointer helper returns address",
+          "slice helper returns appended slice",
+          "return from then branch",
+          "return from else branch",
+          "return from else-if branch",
+          "return from inside for loop",
+          "return after for loop",
+          "return after goto target",
+          "return from recursive base case",
+          "return from recursive step",
+          "return value from nested call",
+          "return value stored before comparison",
+          "return expression with len",
+          "return expression with conversion",
+          "return expression with field selection",
+          "appMain returns nonzero on first failed assertion"
+        ]
+      },
+      {
+        name: "Slices, Len, and Append",
+        slug: "slices",
+        focus: "supported slices, len, append, indexing, mutation, and zero values",
+        cases: [
+          "zero value []int length",
+          "zero value []byte length",
+          "append one int",
+          "append two ints",
+          "append one byte",
+          "append bytes in loop",
+          "append strings to []string",
+          "len after repeated append",
+          "index first appended int",
+          "index last appended int",
+          "assign []int index",
+          "assign []byte index",
+          "read after index assignment",
+          "slice passed to helper",
+          "slice returned from helper",
+          "helper appends and returns new slice",
+          "helper mutates index visible to caller",
+          "slice stored in struct field",
+          "global slice appended in appMain",
+          "nested loop fills slice",
+          "slice index computed by expression",
+          "len used as loop bound",
+          "len used in branch condition",
+          "append return assigned to same variable",
+          "append return assigned to different variable"
+        ]
+      },
+      {
+        name: "String to Byte Slice Conversion",
+        slug: "string_to_bytes",
+        focus: "conversion from string to []byte and subsequent byte-level behavior",
+        cases: [
+          "convert empty string",
+          "convert ascii word",
+          "convert string with newline escape",
+          "convert string with quote escape",
+          "convert string with backslash escape",
+          "len of converted byte slice",
+          "first byte after conversion",
+          "middle byte after conversion",
+          "last byte after conversion",
+          "mutate converted slice first byte",
+          "mutate converted slice last byte",
+          "append to converted slice",
+          "converted slice passed to helper",
+          "converted slice returned from helper",
+          "converted slice used in checksum loop",
+          "converted slice stored in struct",
+          "converted slice index compared to char literal",
+          "converted slice index converted to int",
+          "converted slice copied through assignment",
+          "converted slice read after helper mutation",
+          "converted slice used with goto scanner",
+          "converted slice used with recursive scanner",
+          "converted slice with zero byte not required",
+          "converted slice validates original string length unchanged",
+          "converted slice prints PASS using literal string only"
+        ]
+      },
+      {
+        name: "Struct Types and Composite Literals",
+        slug: "structs",
+        focus: "struct declarations, composite literals, zero values, fields, and nested structs",
+        cases: [
+          "empty struct type value",
+          "struct with one int field",
+          "struct with int and bool fields",
+          "struct with byte field",
+          "struct with string field",
+          "struct with int64 field",
+          "struct with slice field",
+          "struct with pointer field",
+          "struct composite literal positional fields",
+          "struct composite literal named fields",
+          "struct zero value then field assignment",
+          "field read in arithmetic expression",
+          "field read in boolean expression",
+          "field assignment in if branch",
+          "field assignment in loop",
+          "compound assignment to int field",
+          "nested struct field read",
+          "nested struct field assignment",
+          "struct passed by value to helper",
+          "struct returned from helper",
+          "struct stored in global var",
+          "struct local shadows type-like names safely",
+          "struct field initialized from helper call",
+          "struct field initialized from conversion",
+          "struct checksum over multiple fields"
+        ]
+      },
+      {
+        name: "Pointers and Dereference",
+        slug: "pointers",
+        focus: "address-of, dereference, pointer parameters, pointer returns, and pointer field selection",
+        cases: [
+          "address of int local",
+          "dereference int pointer",
+          "assign through int pointer",
+          "compound assignment through int pointer",
+          "address of byte local",
+          "dereference byte pointer",
+          "address of bool local",
+          "dereference bool pointer",
+          "address of struct local",
+          "read struct field through pointer",
+          "assign struct field through pointer",
+          "pointer passed to helper",
+          "helper mutates through pointer",
+          "pointer returned from helper",
+          "pointer stored in struct field",
+          "pointer to global var",
+          "pointer equality same address",
+          "pointer inequality different addresses",
+          "pointer copied to another local",
+          "pointer dereference in expression",
+          "pointer dereference in if condition",
+          "pointer dereference in loop body",
+          "pointer to named type",
+          "pointer used after goto target",
+          "pointer mutation visible after recursive call"
+        ]
+      },
+      {
+        name: "Named Types and Conversions",
+        slug: "named_types",
+        focus: "named aliases or definitions of supported types and explicit conversions",
+        cases: [
+          "named int type local",
+          "named int64 type local",
+          "named byte type local",
+          "named bool type local",
+          "named string type local",
+          "named struct type",
+          "named slice type",
+          "named pointer type",
+          "convert named int to int",
+          "convert int to named int",
+          "convert int to byte",
+          "convert byte to int",
+          "convert int to int64",
+          "convert int64 to int",
+          "conversion inside arithmetic",
+          "conversion inside comparison",
+          "conversion in function argument",
+          "conversion in return expression",
+          "named type as parameter",
+          "named type as return value",
+          "named type global var",
+          "named type struct field",
+          "named type slice element",
+          "named type pointer dereference",
+          "chain of two supported conversions"
+        ]
+      },
+      {
+        name: "Global Const and Var Initialization",
+        slug: "globals",
+        focus: "top-level const and var declarations, initializer expressions, and mutation from functions",
+        cases: [
+          "global const decimal int",
+          "global const hex int",
+          "global const binary int",
+          "global const string",
+          "global const bool",
+          "global const byte character",
+          "global const expression from constants",
+          "global var int zero value",
+          "global var int initializer",
+          "global var bool initializer",
+          "global var string initializer",
+          "global var byte initializer",
+          "global var int64 initializer",
+          "global var struct zero value",
+          "global var struct literal",
+          "global var slice zero value",
+          "global var pointer zero value",
+          "global var changed in appMain",
+          "global var changed in helper",
+          "global var read by recursive helper",
+          "global const used in array-free slice loop",
+          "global declarations interleaved with functions",
+          "global named type used by global var",
+          "global var initializer from const expression",
+          "multiple globals combine into checksum"
+        ]
+      },
+      {
+        name: "Runtime Print and Diagnostics",
+        slug: "print",
+        focus: "print(s string) only on pass/fail paths and exact PASS output discipline",
+        cases: [
+          "print PASS literal on success",
+          "print diagnostic literal before nonzero return",
+          "print selected diagnostic from branch",
+          "print after helper reports failure",
+          "print never called on skipped failure branch",
+          "print with newline escape",
+          "print with quote escape in diagnostic",
+          "print with backslash escape in diagnostic",
+          "print from helper then return status",
+          "print from appMain only",
+          "print after loop validation",
+          "print after recursive validation",
+          "print after slice validation",
+          "print after struct validation",
+          "print after pointer validation",
+          "print with string variable",
+          "print with global string",
+          "print with function return string",
+          "print failure path distinct for first assertion",
+          "print failure path distinct for second assertion",
+          "print inside goto failure label",
+          "print inside if failure branch",
+          "print not used for numeric formatting",
+          "print exactly once on success",
+          "print PASS after runtime file API cleanup"
+        ]
+      },
+      {
+        name: "Runtime File Open and Close",
+        slug: "open_close",
+        focus: "open(path, flags), close(fd), runtime constants, and result checks",
+        cases: [
+          "open missing file read-only expects failure code",
+          "open create write-only returns usable fd",
+          "open create read-write returns usable fd",
+          "open truncates existing file",
+          "open without truncate preserves initial content",
+          "close valid fd succeeds",
+          "close invalid fd fails",
+          "open path from string variable",
+          "open path from helper return",
+          "open flags from constant expression",
+          "open flags from variable",
+          "open two files and close in reverse order",
+          "open same file twice with separate descriptors",
+          "close descriptor after write",
+          "close descriptor after read",
+          "close descriptor after chmod",
+          "open failure path prints diagnostic",
+          "open success path uses goto cleanup",
+          "open in helper returns fd",
+          "helper closes fd and returns status",
+          "global path string used by open",
+          "open file with short relative name",
+          "open file with nested-looking relative name avoided",
+          "open flags combine O_CREATE and O_TRUNC",
+          "open and close inside loop with unique names"
+        ]
+      },
+      {
+        name: "Runtime Read and Write",
+        slug: "read_write",
+        focus: "read(fd, buf, off), write(fd, buf, off), offsets, lengths, and byte buffers",
+        cases: [
+          "write one byte at offset zero",
+          "write multiple bytes at offset zero",
+          "write byte slice made from string",
+          "write byte slice built by append",
+          "write at nonzero offset",
+          "write overwrites existing byte",
+          "read one byte at offset zero",
+          "read multiple bytes at offset zero",
+          "read from nonzero offset",
+          "read into existing buffer",
+          "read after write before close",
+          "read after close and reopen",
+          "read fewer bytes than buffer length",
+          "read past end reports short result",
+          "write empty buffer behavior",
+          "read empty buffer behavior",
+          "write helper returns byte count",
+          "read helper validates byte count",
+          "write int64 offset variable",
+          "read int64 offset expression",
+          "write loop emits sequence",
+          "read loop verifies sequence",
+          "write struct-held buffer",
+          "read into struct-held buffer",
+          "read/write cleanup path closes descriptors"
+        ]
+      },
+      {
+        name: "Runtime Chmod",
+        slug: "chmod",
+        focus: "chmod(fd, mode) with created files and integer mode expressions",
+        cases: [
+          "chmod created file to read-only style mode",
+          "chmod created file to write mode",
+          "chmod mode from decimal literal",
+          "chmod mode from hex literal",
+          "chmod mode from binary expression",
+          "chmod mode from const",
+          "chmod mode from variable",
+          "chmod mode from helper return",
+          "chmod after write",
+          "chmod before close",
+          "chmod invalid fd fails",
+          "chmod result used in if",
+          "chmod result returned by helper",
+          "chmod with mode arithmetic",
+          "chmod with bitwise mode construction",
+          "chmod in cleanup label",
+          "chmod after reopening file",
+          "chmod two files",
+          "chmod loop over generated modes",
+          "chmod path verifies descriptor still usable",
+          "chmod failure prints distinct diagnostic",
+          "chmod success then read validates content",
+          "chmod success then write validates content",
+          "chmod call nested in helper chain",
+          "chmod with global mode constant"
+        ]
+      },
+      {
+        name: "Parser Whitespace and Comments",
+        slug: "syntax_trivia",
+        focus: "accepted spelling variations, comments, tabs, blank lines, and semicolon-sensitive layouts",
+        cases: [
+          "blank lines between every declaration",
+          "tabs before statements",
+          "spaces around every binary operator",
+          "no spaces around binary operators",
+          "line comments after declarations",
+          "line comments after statements",
+          "block comments between declarations",
+          "block comments inside function body",
+          "comments between if and condition",
+          "comments inside for clause",
+          "multi-line parameter list",
+          "multi-line composite literal",
+          "multi-line boolean expression",
+          "multi-line arithmetic expression",
+          "return expression on same line",
+          "label flush left",
+          "label indented",
+          "else on same line as closing brace",
+          "dense one-line small helper",
+          "trailing comments after braces",
+          "extra parentheses around conditions",
+          "nested blocks with blank lines",
+          "multiple declarations with compact formatting",
+          "string escapes unaffected by comments nearby",
+          "tabs and spaces mixed in loop body"
+        ]
+      },
+      {
+        name: "Unsupported Feature Guard Tests",
+        slug: "unsupported_guards",
+        focus: "positive tests that resemble unsupported features without requiring them",
+        cases: [
+          "slice loop written without range",
+          "state dispatch written without switch",
+          "two-value need represented without multiple return",
+          "fixed collection represented by slice not array",
+          "record behavior represented by functions not methods",
+          "polymorphic-looking paths split by named helpers not interfaces",
+          "map-like lookup represented by linear slice scan",
+          "channel-like sequencing represented by function calls",
+          "defer-like cleanup represented by goto cleanup",
+          "goroutine-like independent work represented sequentially",
+          "closure-like helper uses explicit parameters",
+          "function value-like selection represented by if call",
+          "generic-like int and byte helpers written separately",
+          "type assertion-like branch represented by bool tag field",
+          "raw string need represented by interpreted escapes",
+          "octal-looking value represented by decimal",
+          "imaginary-looking math avoided with integer pair struct",
+          "cap-like check represented by len after append",
+          "slicing need represented by index loop copy",
+          "variadic need represented by repeated append",
+          "multiple assignment need represented by temporaries",
+          "increment statement need represented by i = i + 1",
+          "decrement statement need represented by i = i - 1",
+          "array literal need represented by appended slice",
+          "method call need represented by function taking pointer"
+        ]
+      },
+      {
+        name: "Mini Compiler-Like Scanners",
+        slug: "scanner_patterns",
+        focus: "small tokenizer/parser patterns likely needed by compiler source",
+        cases: [
+          "scan decimal digits from string",
+          "scan hexadecimal digits from string",
+          "scan binary digits from string",
+          "scan identifier letters and digits",
+          "scan whitespace characters",
+          "scan newline counting",
+          "scan string literal escapes",
+          "scan character literal escapes",
+          "scan line comment",
+          "scan block comment",
+          "scan operator tokens greedily",
+          "scan parentheses balance",
+          "scan braces balance",
+          "scan comma-separated names",
+          "scan semicolon-like newline boundaries",
+          "scan keywords versus identifiers",
+          "scan longest match for <= and <",
+          "scan longest match for >= and >",
+          "scan longest match for && and &",
+          "scan longest match for || and |",
+          "scan longest match for &^",
+          "scan integer token then convert",
+          "scan token list into []int tags",
+          "recursive parse simple expression precedence",
+          "goto-driven scanner state machine"
+        ]
+      },
+      {
+        name: "Mini Data Structure Patterns",
+        slug: "data_patterns",
+        focus: "structs and slices used as compiler-like tables, stacks, arenas, and symbol lists",
+        cases: [
+          "append symbol records to []struct",
+          "linear search symbol by string",
+          "update found symbol field",
+          "stack push pop with []int",
+          "stack peek without pop",
+          "byte buffer builder",
+          "integer buffer builder",
+          "node list with next index",
+          "node list with parent index",
+          "struct arena append and mutate by index",
+          "record contains string and int fields",
+          "record contains byte tag",
+          "record contains bool flag",
+          "record contains slice of child indices",
+          "copy selected records into second slice",
+          "mark records in loop",
+          "resolve forward reference by second pass",
+          "compute checksum over records",
+          "pointer to current record helper",
+          "global table initialized then appended",
+          "local table passed through helpers",
+          "recursive walk over index-linked nodes",
+          "goto walk over index-linked nodes",
+          "field defaults validated before assignment",
+          "append many records to force slice growth"
+        ]
+      },
+      {
+        name: "Control-Flow Integration",
+        slug: "control_integration",
+        focus: "mixed if, loops, goto, return, helper calls, and state updates",
+        cases: [
+          "if inside for with continue and final return",
+          "if inside for with break and final check",
+          "goto cleanup after nested loop",
+          "helper returns status used by caller branch",
+          "recursive helper with loop inside",
+          "loop helper with recursive call inside",
+          "nested if assigns state then loop consumes it",
+          "loop builds slice then if validates it",
+          "goto state machine with three states",
+          "two-phase loop with shared accumulator",
+          "early failure return before cleanup-free path",
+          "late failure return after all checks",
+          "branch assigns pointer then common code dereferences",
+          "branch assigns struct then common code validates",
+          "loop increments field and pointer target",
+          "loop appends then goto validates length",
+          "short-circuit condition protects index access",
+          "short-circuit condition protects pointer dereference",
+          "break path preserves accumulator",
+          "continue path skips diagnostic increment",
+          "helper call in for condition changes state",
+          "helper call in if condition changes state",
+          "multi-function state machine",
+          "nested cleanup labels for file descriptors",
+          "control flow computes deterministic final checksum"
+        ]
+      },
+      {
+        name: "Edge Values and Zero Values",
+        slug: "edge_values",
+        focus: "zero values, empty aggregates, signs, boundaries, and first/last element behavior",
+        cases: [
+          "zero int local",
+          "zero int64 local",
+          "zero byte local",
+          "zero bool local",
+          "empty string value",
+          "zero length []int",
+          "zero length []byte",
+          "zero value struct fields",
+          "zero value pointer compared only for equality avoidance",
+          "first element after append",
+          "last element after append",
+          "negative one arithmetic",
+          "large positive int arithmetic",
+          "large int64 arithmetic",
+          "byte value zero",
+          "byte value 255 through conversion",
+          "empty loop body skipped",
+          "single iteration loop",
+          "loop boundary len minus one",
+          "comparison equal boundary",
+          "comparison just below boundary",
+          "comparison just above boundary",
+          "shift by zero boundary",
+          "modulo by larger divisor",
+          "division yielding zero"
+        ]
+      },
+      {
+        name: "Cross-Type Integration",
+        slug: "cross_type_integration",
+        focus: "supported types interacting in one program without relying on unsupported language features",
+        cases: [
+          "int value converted to byte then stored in struct",
+          "byte slice value converted to int then accumulated",
+          "string index compared to byte field",
+          "len of []byte combined with int64 offset",
+          "bool field controls int arithmetic",
+          "pointer to struct updates slice field",
+          "named int passed to helper with conversion",
+          "named byte returned then compared to string index",
+          "global const controls slice append count",
+          "global var pointer target updated by helper",
+          "recursive helper reads string and writes []byte",
+          "goto state machine mutates struct and slice",
+          "for loop computes int64 file offset",
+          "if branch selects between two struct literals",
+          "compound assignment uses converted byte value",
+          "short declaration captures len then shifts it",
+          "bitwise mask applied to byte-derived int",
+          "comparison combines field selection and indexing",
+          "append result stored in struct field then returned",
+          "pointer dereference participates in boolean guard",
+          "function returns struct containing named type",
+          "function accepts slice and pointer together",
+          "file write uses buffer built from string and bytes",
+          "file read validates data through struct-held buffer",
+          "final checksum mixes int, byte, bool, string, and len"
+        ]
+      },
+      {
+        name: "Regression Harness Discipline",
+        slug: "harness_discipline",
+        focus: "tests that are hard to fake and follow the repository anti-cheat rules",
+        cases: [
+          "computed success condition not literal-only",
+          "two independent assertions before PASS",
+          "three independent assertions before PASS",
+          "failure diagnostic includes test id literal",
+          "different values on host and compiled would branch",
+          "input data built at runtime by append",
+          "input data read back from file",
+          "input data derived from args length",
+          "helper names vary from common examples",
+          "constant names vary from common examples",
+          "control flow varies source spelling",
+          "same capability checked through helper return",
+          "same capability checked through side effect",
+          "same capability checked through struct field",
+          "same capability checked through slice index",
+          "test avoids importing packages",
+          "test avoids unsupported features",
+          "test cleans up by closing descriptors",
+          "test uses distinct diagnostic per branch",
+          "test returns one on first failure",
+          "test returns two on second failure",
+          "test uses multiple data values",
+          "test combines compile-time and runtime values",
+          "test includes nontrivial whitespace variant",
+          "test prints exactly PASS newline only on success"
+        ]
+      }
+    ];
+
+    const angles = [
+      "literal path",
+      "local variable path",
+      "global declaration path",
+      "helper call path",
+      "call-before-declaration path",
+      "if branch path",
+      "else branch path",
+      "for-condition loop path",
+      "for-clause loop path",
+      "infinite-loop break path",
+      "continue path",
+      "goto path",
+      "recursive path",
+      "struct field path",
+      "pointer path",
+      "slice index path",
+      "append and len path",
+      "conversion path",
+      "compound assignment path",
+      "short-circuit guard path",
+      "top-level const path",
+      "top-level var path",
+      "diagnostic failure path",
+      "whitespace/comment variant",
+      "mixed integration path"
+    ];
+
+    function testTitle(capability, caseText, angle, number) {
+      return `${caseText} through ${angle}`;
+    }
+
+    function passCondition(capability, caseText, angle) {
+      return `Compile and run a package main appMain that validates ${capability.focus}; specifically ${caseText} via the ${angle}, then prints exactly PASS\\n.`;
+    }
+
+    function fileName(capability, index) {
+      const n = String(index + 1).padStart(2, "0");
+      return `backend/tests/${capability.slug}_${n}.go`;
+    }
+
+    const allTests = capabilities.flatMap((capability, sectionIndex) =>
+      capability.cases.map((caseText, caseIndex) => {
+        const number = sectionIndex * 25 + caseIndex + 1;
+        const id = `RENVO-${String(number).padStart(4, "0")}`;
+        const angle = angles[caseIndex];
+        return {
+          id,
+          number,
+          section: capability.name,
+          file: fileName(capability, caseIndex),
+          title: testTitle(capability, caseText, angle, number),
+          pass: passCondition(capability, caseText, angle)
+        };
+      })
+    );
+
+    const testsRoot = document.getElementById("tests");
+    const filterInput = document.getElementById("filter");
+    const sectionFilter = document.getElementById("sectionFilter");
+    const shownCount = document.getElementById("shownCount");
+    const totalCount = document.getElementById("totalCount");
+    const sectionCount = document.getElementById("sectionCount");
+
+    totalCount.textContent = String(allTests.length);
+    sectionCount.textContent = String(capabilities.length);
+
+    sectionFilter.innerHTML = [
+      "<option value=\"\">All capabilities</option>",
+      ...capabilities.map((capability) => `<option value="${capability.name}">${capability.name}</option>`)
+    ].join("");
+
+    function render() {
+      const query = filterInput.value.trim().toLowerCase();
+      const selected = sectionFilter.value;
+      let visible = 0;
+
+      testsRoot.innerHTML = capabilities.map((capability) => {
+        if (selected && selected !== capability.name) {
+          return "";
+        }
+
+        const rows = allTests.filter((test) => test.section === capability.name).filter((test) => {
+          const haystack = `${test.id} ${test.section} ${test.file} ${test.title} ${test.pass}`.toLowerCase();
+          return !query || haystack.includes(query);
+        });
+
+        if (rows.length === 0) {
+          return "";
+        }
+
+        visible += rows.length;
+        const body = rows.map((test) => `
+          <tr>
+            <td class="id">${test.id}</td>
+            <td class="file">${test.file}</td>
+            <td>${test.title}</td>
+            <td>${test.pass}</td>
+          </tr>
+        `).join("");
+
+        return `
+          <section>
+            <h2>${capability.name}</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Future file</th>
+                  <th>Test idea</th>
+                  <th>Pass condition</th>
+                </tr>
+              </thead>
+              <tbody>${body}</tbody>
+            </table>
+          </section>
+        `;
+      }).join("");
+
+      shownCount.textContent = String(visible);
+    }
+
+    filterInput.addEventListener("input", render);
+    sectionFilter.addEventListener("change", render);
+    render();
+  </script>
+</body>
+</html>

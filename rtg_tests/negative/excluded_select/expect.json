@@ -1,8 +1,0 @@
-{
-  "phase": "checker",
-  "code": "RTG-CHECK-019",
-  "file": "cmd/app/main.go",
-  "line": 3,
-  "column": 15,
-  "message": "select statements are not supported by RTG"
-}

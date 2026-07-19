@@ -1,51 +1,56 @@
-# Retargetable Go (RTG)
+# Renvo
 
-rtg is a minimal Golang compiler that compiles a small subset of the Golang language.
-
-The compiler will eventually target many operating systems and architectures. The guiding principle for the compiler is a minimal platform independent core that other more advanced compilers can use as a code generator backend for.
+Renvo is a minimal, retargetable compiler for a practical subset of Go. The
+frontend lives at the repository root and the native code generators live in
+`backend/`.
 
 ## Restrictions
 
-- Backend compiler edits are limited to `./compiler_*_impl.go` and `./compiler_main.go`.
-- The old frontend tree `./rtg/` has been removed. Frontend acceptance tests
-  live under `./rtg_tests/` until a replacement frontend exists.
-- You can add new regression programs in `./tests` but you should avoid modifying existing ones unless they are broken.
-- Do not modify `./main_test.go`.
+- Backend compiler edits are limited to `backend/compiler_*_impl.go` and
+  `backend/compiler_main.go`.
+- Frontend acceptance tests live under `frontend_tests/`.
+- New backend regression programs may be added to `backend/tests/`; avoid
+  modifying existing programs unless they are broken.
+- Do not modify `backend/main_test.go`.
 - The only syscalls are `open`, `close`, `read`, `write`, `chmod`, and `print`.
-- Performance requirements are strictly defined in `./main_test.go` and cannot be violated.
-- Do not hardcode test cases, emit prebuilt/self-copying binaries, copy the compiler executable or source as the compiled output, or patch the test harness/runtime instead of implementing the compiler from parsed source semantics.
-- You are allowed to write one-off custom tests in `./sandbox`, but this folder is not part of the repo and should only be used for local compiler experiments. Do not use it to modify or replace the test harness.
+- Performance requirements are strictly defined in `backend/main_test.go` and
+  cannot be violated.
+- Do not hardcode test cases, emit prebuilt or self-copying binaries, copy the
+  compiler executable or source as compiled output, or patch the harness/runtime
+  instead of implementing parsed source semantics.
+- One-off experiments may be written under the ignored `sandbox/` directory.
 
 ## Workflow
 
-Every time you find a miscompilation bug you should write a test in `./tests` to confirm it. All tests should only output `PASS\n` if they pass and anything else is considered a failure.
+Every miscompilation bug needs a minimal reproducer in `backend/tests/`. A
+passing regression prints only `PASS\n`.
 
-## Frontend Scope
+When debugging a backend bug:
 
-The frontend exclusion list is closed: goroutines, channels, `select`, cgo, and generics are out of scope for now. Every other ordinary Go feature is frontend work unless the project explicitly changes this policy. In particular, `defer`, `panic`, `recover`, maps, interfaces, arrays, function values, dynamic dispatch, complex numbers, ordinary builtins, and unsafe intrinsics are required frontend features, even when they currently have diagnostics or partial lowerings.
+1. Reduce the failure to a minimal source program.
+2. Build a stage0 compiler and reproduce the generated-output failure there.
+3. Use GDB and temporary diagnostics as needed.
+4. Fix the compiler from parsed source semantics.
+5. Add the reproducer to `backend/tests/` and run the relevant compiler tests.
 
-There are no restrictions on the specific `go test` command you run.
-Do not run `go test` in module mode inside `./tests`; those files intentionally contain conflicting package-level symbols and are meant to be compiled individually by the compiler test harness.
-Do not treat `go test ./...` as a valid whole-repo check. It descends into `./tests` and `./sandbox`, which intentionally contain standalone programs with conflicting symbols and scratch experiments. Prefer explicit package sets such as `go test ./rtg_tests` plus the top-level compiler harness tests you intend to exercise.
+Do not use `go test` in module mode inside `backend/tests/`; those standalone
+programs intentionally contain conflicting package-level symbols. Do not use
+`go test ./...` as a whole-repository check because it descends into independent
+corpus modules and local scratch programs. Prefer explicit package sets and
+`go test ./frontend_tests` plus the intended `./backend` harness tests.
 
-## Bugfixing Workflow
+## Frontend scope
 
-Whenever a compiler bug is encountered:
+The exclusion list is closed: generics, goroutines, channels, `select`, and cgo
+are out of scope for now. Every other ordinary Go feature is frontend work
+unless the project explicitly changes that policy. This includes defer,
+panic/recover, maps, interfaces, arrays, function values, dynamic dispatch,
+complex numbers, ordinary builtins, and unsafe intrinsics.
 
-- Make a minimal reproducer for the bug.
-- Compile a stage0 compiler and debug the reproducer with that stage0 compiler until the generated output works there.
-- Use GDB freely to inspect compiler and output-binary failures.
-- Add compiler features that make debugging easier when useful, such as symbols or better diagnostics.
-- Once the minimal reproducer is understood and fixed, add it to `./tests` as a regression program.
-- Run the compiler tests again and repeat the loop until the compiler works end to end.
+## Backend structure
 
-Debug prints and debug helpers are allowed in the main repo while bugfixing. Keep or remove them later based on what is useful.
-
-## Structure
-
-The compiler is going to be adding more architectures in the future. It's important to keep this in mind and split content between files.
-
-- `compiler_main.go` the compiler entrypoint. avoid putting any code not part of a user interface here.
-- `compiler_common.go` any platform independent code.
-- `compiler_<arch>_impl.go` any architecture specific code.
-- `compiler_<os>_<arch>_impl.go` any operating system specific code.
+- `backend/compiler_main.go`: compiler entrypoint and command interface.
+- `backend/compiler_common_impl.go`: platform-independent compiler code.
+- `backend/compiler_<arch>_impl.go`: architecture-specific code.
+- `backend/compiler_<os>_<arch>_impl.go`: operating-system and architecture
+  integration.

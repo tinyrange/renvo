@@ -1,0 +1,8 @@
+{
+  "phase": "checker",
+  "code": "RENVO-CHECK-022",
+  "file": "cmd/app/main.go",
+  "line": 3,
+  "column": 6,
+  "message": "func main must have no parameters or results"
+}
