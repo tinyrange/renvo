@@ -308,29 +308,53 @@ func ordinaryUntypedExpression(program *unit.Program, start int, end int) bool {
 
 func ordinaryConstantMinMax(program *unit.Program, name string, starts []int, ends []int) string {
 	best := 0
-	kind, intValue, stringValue, ok := ordinaryConstantValue(program, starts[0], ends[0])
-	if !ok {
+	values := make([]ordinaryBuiltinConstant, len(starts))
+	for i := 0; i < len(starts); i++ {
+		values[i] = ordinaryConstantValue(program, starts[i], ends[i], 0)
+		if !values[i].ok || i > 0 && values[i].kind != values[0].kind {
+			return ""
+		}
+	}
+	commonType := ""
+	floating := false
+	for i := 0; i < len(values); i++ {
+		if values[i].typ != "" {
+			if commonType != "" && commonType != values[i].typ {
+				return ""
+			}
+			commonType = values[i].typ
+		}
+		floating = floating || values[i].floating
+	}
+	if len(values) == 0 {
 		return ""
 	}
 	for i := 1; i < len(starts); i++ {
-		nextKind, nextInt, nextString, nextOK := ordinaryConstantValue(program, starts[i], ends[i])
-		if !nextOK || nextKind != kind {
-			return ""
+		comparison := ordinaryConstantNumberCompare(values[i].number, values[best].number)
+		if values[0].kind == 2 {
+			comparison = 0
+			if ordinaryStringLess(values[i].text, values[best].text) {
+				comparison = -1
+			} else if values[i].text != values[best].text {
+				comparison = 1
+			}
 		}
-		selectNext := nextInt < intValue
-		if kind == 2 {
-			selectNext = ordinaryStringLess(nextString, stringValue)
-		}
+		selectNext := comparison < 0
 		if name == "max" {
-			selectNext = !selectNext && (nextInt != intValue || kind == 2 && nextString != stringValue)
+			selectNext = comparison > 0
 		}
 		if selectNext {
 			best = i
-			intValue = nextInt
-			stringValue = nextString
 		}
 	}
-	return functionValueTokensText(program, starts[best], ends[best])
+	result := functionValueTokensText(program, starts[best], ends[best])
+	if commonType != "" && values[best].typ != commonType {
+		return commonType + "(" + result + ")"
+	}
+	if commonType == "" && floating && !values[best].floating {
+		return "(" + result + " + 0.0)"
+	}
+	return result
 }
 
 func ordinaryStringLess(left string, right string) bool {
@@ -349,63 +373,452 @@ func ordinaryStringLess(left string, right string) bool {
 	return len(left) < len(right)
 }
 
-func ordinaryConstantValue(program *unit.Program, start int, end int) (int, int, string, bool) {
+type ordinaryBuiltinConstant struct {
+	kind     int
+	number   ordinaryConstantNumber
+	text     string
+	typ      string
+	floating bool
+	ok       bool
+}
+
+type ordinaryConstantNumber struct {
+	negative bool
+	digits   string
+	scale    int
+}
+
+func ordinaryConstantValue(program *unit.Program, start int, end int, depth int) ordinaryBuiltinConstant {
+	if depth > len(program.Decls)+8 {
+		return ordinaryBuiltinConstant{}
+	}
 	for end-start >= 2 && functionValueTokenEquals(program, start, "(") && functionValueFindMatchingParen(program, start) == end-1 {
 		start++
 		end--
 	}
-	if program.Tokens[start].Kind == unit.TokenIdent && start+2 < end && functionValueTokenEquals(program, start+1, "(") && functionValueFindMatchingParen(program, start+1) == end-1 && ordinaryBuiltinTypeName(functionValueTokenText(program, start)) {
-		return ordinaryConstantValue(program, start+2, end-1)
+	if start < 0 || end <= start || end > len(program.Tokens) {
+		return ordinaryBuiltinConstant{}
+	}
+	if program.Tokens[start].Kind == unit.TokenIdent && start+2 < end && functionValueTokenEquals(program, start+1, "(") && functionValueFindMatchingParen(program, start+1) == end-1 {
+		typ := functionValueTokenText(program, start)
+		if ordinaryBuiltinTypeName(typ) || functionValueDeclaredType(program, typ) {
+			value := ordinaryConstantValue(program, start+2, end-1, depth+1)
+			value.typ = typ
+			return value
+		}
 	}
 	if end-start == 1 && program.Tokens[start].Kind == unit.TokenString {
 		tok := program.Tokens[start]
 		value, ok := syntax.StringLiteralValue(program.Text, syntax.Token{Kind: syntax.TokenString, Start: tok.Start, End: tok.Start + tok.Size, Line: tok.Line})
-		return 2, 0, value, ok
+		return ordinaryBuiltinConstant{kind: 2, text: value, ok: ok}
 	}
-	sign := 1
-	if end-start == 2 && functionValueTokenEquals(program, start, "-") {
-		sign = -1
-		start++
+	if end-start == 1 && (program.Tokens[start].Kind == unit.TokenNumber || program.Tokens[start].Kind == unit.TokenFloat) {
+		number, floating, ok := ordinaryConstantParseNumber(functionValueTokenText(program, start))
+		return ordinaryBuiltinConstant{kind: 1, number: number, floating: floating, ok: ok}
 	}
-	if end-start != 1 || program.Tokens[start].Kind != unit.TokenNumber {
-		return 0, 0, "", false
+	if end-start == 1 && program.Tokens[start].Kind == unit.TokenIdent {
+		return ordinaryConstantNamedValue(program, functionValueTokenText(program, start), depth+1)
 	}
-	value, ok := ordinaryParseInt(functionValueTokenText(program, start))
-	return 1, sign * value, "", ok
+	if (functionValueTokenEquals(program, start, "+") || functionValueTokenEquals(program, start, "-")) && start+1 < end {
+		value := ordinaryConstantValue(program, start+1, end, depth+1)
+		if value.ok && value.kind == 1 && functionValueTokenEquals(program, start, "-") && value.number.digits != "0" {
+			value.number.negative = !value.number.negative
+		}
+		return value
+	}
+	paren, bracket, brace := 0, 0, 0
+	for i := end - 1; i >= start; i-- {
+		text := functionValueTokenText(program, i)
+		if text == ")" {
+			paren++
+		} else if text == "(" {
+			paren--
+		} else if text == "]" {
+			bracket++
+		} else if text == "[" {
+			bracket--
+		} else if text == "}" {
+			brace++
+		} else if text == "{" {
+			brace--
+		} else if paren == 0 && bracket == 0 && brace == 0 && (text == "<<" || text == ">>") {
+			left := ordinaryConstantValue(program, start, i, depth+1)
+			right := ordinaryConstantValue(program, i+1, end, depth+1)
+			shift, ok := ordinaryConstantSmallNonnegative(right)
+			if !left.ok || left.kind != 1 || !ok {
+				return ordinaryBuiltinConstant{}
+			}
+			left.number = ordinaryConstantShift(left.number, shift, text == ">>")
+			left.floating = false
+			return left
+		}
+	}
+	return ordinaryBuiltinConstant{}
 }
 
-func ordinaryParseInt(text string) (int, bool) {
+func ordinaryConstantNamedValue(program *unit.Program, name string, depth int) ordinaryBuiltinConstant {
+	for i := 0; i < len(program.Decls); i++ {
+		decl := program.Decls[i]
+		if decl.Kind != unit.TokenConst {
+			continue
+		}
+		nameTok := functionValueTokenAtSpan(program, decl.NameStart, decl.NameEnd)
+		if nameTok < 0 || functionValueTokenText(program, nameTok) != name {
+			continue
+		}
+		assign := -1
+		for tok := nameTok + 1; tok < decl.EndTok; tok++ {
+			if functionValueTokenEquals(program, tok, "=") {
+				assign = tok
+				break
+			}
+		}
+		if assign < 0 || assign+1 >= decl.EndTok {
+			return ordinaryBuiltinConstant{}
+		}
+		value := ordinaryConstantValue(program, assign+1, decl.EndTok, depth+1)
+		if assign > nameTok+1 {
+			value.typ = functionValueTokensText(program, nameTok+1, assign)
+		}
+		return value
+	}
+	return ordinaryBuiltinConstant{}
+}
+
+func ordinaryConstantParseNumber(text string) (ordinaryConstantNumber, bool, bool) {
+	clean := ordinaryConstantRemoveUnderscores(text)
+	floating := false
+	for i := 0; i < len(clean); i++ {
+		if clean[i] == '.' || clean[i] == 'e' || clean[i] == 'E' || clean[i] == 'p' || clean[i] == 'P' {
+			floating = true
+			break
+		}
+	}
+	if len(clean) > 2 && clean[0] == '0' && (clean[1] == 'x' || clean[1] == 'X') {
+		return ordinaryConstantParseHex(clean, floating)
+	}
+	if floating {
+		return ordinaryConstantParseDecimalFloat(clean)
+	}
 	base := 10
 	start := 0
-	if len(text) > 2 && text[0] == '0' {
-		if text[1] == 'x' || text[1] == 'X' {
-			base, start = 16, 2
-		} else if text[1] == 'b' || text[1] == 'B' {
+	if len(clean) > 2 && clean[0] == '0' {
+		if clean[1] == 'b' || clean[1] == 'B' {
 			base, start = 2, 2
-		} else if text[1] == 'o' || text[1] == 'O' {
+		} else if clean[1] == 'o' || clean[1] == 'O' {
 			base, start = 8, 2
 		}
 	}
-	value := 0
-	for i := start; i < len(text); i++ {
-		c := text[i]
-		if c == '_' {
+	if base == 10 && len(clean)-start > 1 && clean[start] == '0' {
+		base, start = 8, start+1
+	}
+	digits, ok := ordinaryConstantDigitsInBase(clean, start, len(clean), base)
+	return ordinaryConstantNormalize(ordinaryConstantNumber{digits: digits}), false, ok
+}
+
+func ordinaryConstantParseDecimalFloat(text string) (ordinaryConstantNumber, bool, bool) {
+	exponent := 0
+	exponentAt := len(text)
+	for i := 0; i < len(text); i++ {
+		if text[i] == 'e' || text[i] == 'E' {
+			exponentAt = i
+			var ok bool
+			exponent, ok = ordinaryConstantSignedSmall(text, i+1, len(text))
+			if !ok {
+				return ordinaryConstantNumber{}, true, false
+			}
+			break
+		}
+	}
+	digits := ""
+	fraction := 0
+	dot := false
+	for i := 0; i < exponentAt; i++ {
+		if text[i] == '.' {
+			if dot {
+				return ordinaryConstantNumber{}, true, false
+			}
+			dot = true
 			continue
 		}
-		digit := -1
-		if c >= '0' && c <= '9' {
-			digit = int(c - '0')
-		} else if c >= 'a' && c <= 'f' {
-			digit = int(c-'a') + 10
-		} else if c >= 'A' && c <= 'F' {
-			digit = int(c-'A') + 10
+		if text[i] < '0' || text[i] > '9' {
+			return ordinaryConstantNumber{}, true, false
 		}
+		digits += text[i : i+1]
+		if dot {
+			fraction++
+		}
+	}
+	if digits == "" {
+		return ordinaryConstantNumber{}, true, false
+	}
+	return ordinaryConstantNormalize(ordinaryConstantNumber{digits: digits, scale: exponent - fraction}), true, true
+}
+
+func ordinaryConstantParseHex(text string, floating bool) (ordinaryConstantNumber, bool, bool) {
+	end := len(text)
+	binaryExponent := 0
+	for i := 2; i < len(text); i++ {
+		if text[i] == 'p' || text[i] == 'P' {
+			end = i
+			var ok bool
+			binaryExponent, ok = ordinaryConstantSignedSmall(text, i+1, len(text))
+			if !ok {
+				return ordinaryConstantNumber{}, floating, false
+			}
+			break
+		}
+	}
+	hex := ""
+	fraction := 0
+	dot := false
+	for i := 2; i < end; i++ {
+		if text[i] == '.' {
+			if dot {
+				return ordinaryConstantNumber{}, floating, false
+			}
+			dot = true
+			continue
+		}
+		hex += text[i : i+1]
+		if dot {
+			fraction++
+		}
+	}
+	digits, ok := ordinaryConstantDigitsInBase(hex, 0, len(hex), 16)
+	if !ok {
+		return ordinaryConstantNumber{}, floating, false
+	}
+	number := ordinaryConstantNumber{digits: digits}
+	binaryExponent -= fraction * 4
+	if binaryExponent >= 0 {
+		for i := 0; i < binaryExponent; i++ {
+			number.digits = ordinaryConstantMultiplySmall(number.digits, 2)
+		}
+	} else {
+		for i := 0; i < -binaryExponent; i++ {
+			number.digits = ordinaryConstantMultiplySmall(number.digits, 5)
+			number.scale--
+		}
+	}
+	return ordinaryConstantNormalize(number), floating, true
+}
+
+func ordinaryConstantDigitsInBase(text string, start int, end int, base int) (string, bool) {
+	if start >= end {
+		return "", false
+	}
+	digits := "0"
+	for i := start; i < end; i++ {
+		digit := ordinaryConstantDigit(text[i])
 		if digit < 0 || digit >= base {
+			return "", false
+		}
+		digits = ordinaryConstantMultiplySmall(digits, base)
+		digits = ordinaryConstantAddSmall(digits, digit)
+	}
+	return digits, true
+}
+
+func ordinaryConstantDigit(c byte) int {
+	if c >= '0' && c <= '9' {
+		return int(c - '0')
+	}
+	if c >= 'a' && c <= 'f' {
+		return int(c-'a') + 10
+	}
+	if c >= 'A' && c <= 'F' {
+		return int(c-'A') + 10
+	}
+	return -1
+}
+
+func ordinaryConstantMultiplySmall(digits string, multiplier int) string {
+	if digits == "0" || multiplier == 0 {
+		return "0"
+	}
+	out := make([]byte, len(digits)+2)
+	write := len(out)
+	carry := 0
+	for i := len(digits) - 1; i >= 0; i-- {
+		value := int(digits[i]-'0')*multiplier + carry
+		write--
+		out[write] = byte(value%10) + '0'
+		carry = value / 10
+	}
+	for carry > 0 {
+		write--
+		out[write] = byte(carry%10) + '0'
+		carry /= 10
+	}
+	return string(out[write:])
+}
+
+func ordinaryConstantAddSmall(digits string, add int) string {
+	out := []byte(digits)
+	for i := len(out) - 1; i >= 0 && add > 0; i-- {
+		value := int(out[i]-'0') + add
+		out[i] = byte(value%10) + '0'
+		add = value / 10
+	}
+	for add > 0 {
+		out = append([]byte{byte(add%10) + '0'}, out...)
+		add /= 10
+	}
+	return string(out)
+}
+
+func ordinaryConstantNormalize(number ordinaryConstantNumber) ordinaryConstantNumber {
+	start := 0
+	for start+1 < len(number.digits) && number.digits[start] == '0' {
+		start++
+	}
+	number.digits = number.digits[start:]
+	for len(number.digits) > 1 && number.digits[len(number.digits)-1] == '0' {
+		number.digits = number.digits[:len(number.digits)-1]
+		number.scale++
+	}
+	if number.digits == "" || number.digits == "0" {
+		number.digits = "0"
+		number.scale = 0
+		number.negative = false
+	}
+	return number
+}
+
+func ordinaryConstantNumberCompare(left ordinaryConstantNumber, right ordinaryConstantNumber) int {
+	if left.negative != right.negative {
+		if left.negative {
+			return -1
+		}
+		return 1
+	}
+	comparison := ordinaryConstantMagnitudeCompare(left, right)
+	if left.negative {
+		return -comparison
+	}
+	return comparison
+}
+
+func ordinaryConstantMagnitudeCompare(left ordinaryConstantNumber, right ordinaryConstantNumber) int {
+	leftExponent := len(left.digits) + left.scale
+	rightExponent := len(right.digits) + right.scale
+	if leftExponent < rightExponent {
+		return -1
+	}
+	if leftExponent > rightExponent {
+		return 1
+	}
+	limit := len(left.digits)
+	if len(right.digits) > limit {
+		limit = len(right.digits)
+	}
+	for i := 0; i < limit; i++ {
+		leftDigit, rightDigit := byte('0'), byte('0')
+		if i < len(left.digits) {
+			leftDigit = left.digits[i]
+		}
+		if i < len(right.digits) {
+			rightDigit = right.digits[i]
+		}
+		if leftDigit < rightDigit {
+			return -1
+		}
+		if leftDigit > rightDigit {
+			return 1
+		}
+	}
+	return 0
+}
+
+func ordinaryConstantSmallNonnegative(value ordinaryBuiltinConstant) (int, bool) {
+	if !value.ok || value.kind != 1 || value.number.negative || value.number.scale < 0 {
+		return 0, false
+	}
+	result := 0
+	for i := 0; i < len(value.number.digits); i++ {
+		if result > 65536 {
 			return 0, false
 		}
-		value = value*base + digit
+		result = result*10 + int(value.number.digits[i]-'0')
+	}
+	for i := 0; i < value.number.scale; i++ {
+		if result > 65536 {
+			return 0, false
+		}
+		result *= 10
+	}
+	return result, true
+}
+
+func ordinaryConstantShift(number ordinaryConstantNumber, shift int, right bool) ordinaryConstantNumber {
+	digits := number.digits
+	for number.scale > 0 {
+		digits += "0"
+		number.scale--
+	}
+	if right {
+		for i := 0; i < shift; i++ {
+			digits = ordinaryConstantDivideSmall(digits, 2)
+		}
+	} else {
+		for i := 0; i < shift; i++ {
+			digits = ordinaryConstantMultiplySmall(digits, 2)
+		}
+	}
+	number.digits = digits
+	return ordinaryConstantNormalize(number)
+}
+
+func ordinaryConstantDivideSmall(digits string, divisor int) string {
+	out := make([]byte, len(digits))
+	carry := 0
+	write := 0
+	for i := 0; i < len(digits); i++ {
+		value := carry*10 + int(digits[i]-'0')
+		quotient := value / divisor
+		carry = value % divisor
+		if quotient != 0 || write > 0 {
+			out[write] = byte(quotient) + '0'
+			write++
+		}
+	}
+	if write == 0 {
+		return "0"
+	}
+	return string(out[:write])
+}
+
+func ordinaryConstantSignedSmall(text string, start int, end int) (int, bool) {
+	negative := false
+	if start < end && (text[start] == '+' || text[start] == '-') {
+		negative = text[start] == '-'
+		start++
+	}
+	if start >= end {
+		return 0, false
+	}
+	value := 0
+	for i := start; i < end; i++ {
+		if text[i] < '0' || text[i] > '9' || value > 65536 {
+			return 0, false
+		}
+		value = value*10 + int(text[i]-'0')
+	}
+	if negative {
+		value = -value
 	}
 	return value, true
+}
+
+func ordinaryConstantRemoveUnderscores(text string) string {
+	out := make([]byte, 0, len(text))
+	for i := 0; i < len(text); i++ {
+		if text[i] != '_' {
+			out = append(out, text[i])
+		}
+	}
+	return string(out)
 }
 
 func ordinaryBuiltinGeneratedName(program *unit.Program, base string) string {

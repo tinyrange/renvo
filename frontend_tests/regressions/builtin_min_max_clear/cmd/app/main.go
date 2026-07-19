@@ -28,6 +28,12 @@ func localMinIsVisible() bool {
 
 const smallest = min(9, 3, 7)
 const earliest = min("z", "alpha", "middle")
+const constantBase = 4
+const mixedConstant = max(1, 2.0, 10)
+const shiftedConstant = max(1<<40, 7)
+const hexadecimalConstant = min(0x1.8p+1, 4.0)
+const typedConstant namedInt = 9
+const namedConstant = min(typedConstant, 4)
 
 func main() {
 	selector := selectorValue{}
@@ -39,7 +45,7 @@ func main() {
 		print("FAIL")
 		return
 	}
-	if smallest != 3 || earliest != "alpha" || min("zoo", "apple", "middle") != "apple" || max("zoo", "apple", "middle") != "zoo" {
+	if smallest != 3 || earliest != "alpha" || mixedConstant != 10.0 || shiftedConstant != 1<<40 || hexadecimalConstant != 3.0 || namedConstant != namedInt(4) || min(constantBase, 8) != 4 || min("zoo", "apple", "middle") != "apple" || max("zoo", "apple", "middle") != "zoo" {
 		print("FAIL")
 		return
 	}

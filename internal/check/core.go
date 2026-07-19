@@ -128,9 +128,6 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			if !ok {
 				return info, false, CheckErrScope, fileIndex, scopeTok
 			}
-			if builtinErr, builtinTok := invalidBuiltinCalls(&pkg, &info, fileIndex, fn, &signature, scope); builtinErr != CheckOK {
-				return info, false, builtinErr, fileIndex, builtinTok
-			}
 			bodyStart := fn.BodyStart + 1
 			bodyEnd := fn.BodyEnd - 1
 			var out CoreFuncBody
@@ -141,7 +138,11 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			refCount, selectorCount := resolutionCapacitiesCore(bodyEnd - bodyStart)
 			out.CoreRefs = make([]CoreNameRef, 0, refCount)
 			out.CoreSelectors = make([]CoreSelectorRef, 0, selectorCount)
-			out.CoreRefs, out.CoreSelectors = appendResolutionRefsCore(out.CoreRefs, out.CoreSelectors, &file, fileIndex, &info, checked, scope, bodyStart, bodyEnd)
+			var builtinCalls []int
+			out.CoreRefs, out.CoreSelectors = appendResolutionRefsCore(out.CoreRefs, out.CoreSelectors, &file, fileIndex, &info, checked, scope, bodyStart, bodyEnd, &builtinCalls)
+			if builtinErr, builtinTok := invalidBuiltinCalls(&pkg, &info, fileIndex, fn, &signature, builtinCalls); builtinErr != CheckOK {
+				return info, false, builtinErr, fileIndex, builtinTok
+			}
 			prepareDefiniteCallTargets(&pkg, &info, out.CoreRefs, callTargets)
 			callCheckArenaStart := arena.Mark()
 			callTypeTok := invalidDefiniteCallArgumentType(&pkg, &info, fileIndex, fn, &signature, out.CoreRefs, callTargets)
@@ -227,7 +228,7 @@ func buildDeclInfoCore(file syntax.File, fileIndex int, info PackageInfo, checke
 		refCount, selectorCount := resolutionCapacitiesCore(out.ValueEnd - out.ValueStart)
 		out.CoreRefs = make([]CoreNameRef, 0, refCount)
 		out.CoreSelectors = make([]CoreSelectorRef, 0, selectorCount)
-		out.CoreRefs, out.CoreSelectors = appendResolutionRefsCore(out.CoreRefs, out.CoreSelectors, &file, fileIndex, &info, checked, CoreScope{}, out.ValueStart, out.ValueEnd)
+		out.CoreRefs, out.CoreSelectors = appendResolutionRefsCore(out.CoreRefs, out.CoreSelectors, &file, fileIndex, &info, checked, CoreScope{}, out.ValueStart, out.ValueEnd, nil)
 	} else {
 		out.TypeStart, out.TypeEnd = trimDeclSpan(file, typeStart, decl.EndTok)
 	}
@@ -254,7 +255,7 @@ func resolutionCapacitiesCore(tokens int) (int, int) {
 	return tokens/14 + 4, 0
 }
 
-func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, file *syntax.File, fileIndex int, info *PackageInfo, checked []PackageInfo, scope CoreScope, start int, end int) ([]CoreNameRef, []CoreSelectorRef) {
+func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, file *syntax.File, fileIndex int, info *PackageInfo, checked []PackageInfo, scope CoreScope, start int, end int, builtinCalls *[]int) ([]CoreNameRef, []CoreSelectorRef) {
 	for i := start; i < end && i < len(file.Tokens); i++ {
 		token := file.Tokens[i]
 		blank := token.Kind == syntax.TokenIdent && token.End == token.Start+1 && file.Src[token.Start] == '_'
@@ -275,6 +276,8 @@ func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, f
 			symbolIndex := lookupPackageSymbolTokenCore(info, file, fileIndex, i)
 			if symbolIndex >= 0 {
 				refs = append(refs, CoreNameRef{Token: i, Index: symbolIndex})
+			} else if builtinCalls != nil && i+1 < end && tokCharIs(file, i+1, '(') && coreOrdinaryBuiltinToken(file, i) {
+				*builtinCalls = append(*builtinCalls, i)
 			}
 		}
 		dot := token.Kind == syntax.TokenOperator && token.End == token.Start+1 && file.Src[token.Start] == '.'
@@ -289,6 +292,10 @@ func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, f
 		}
 	}
 	return refs, selectors
+}
+
+func coreOrdinaryBuiltinToken(file *syntax.File, tok int) bool {
+	return tokenTextIs(file, tok, "min") || tokenTextIs(file, tok, "max") || tokenTextIs(file, tok, "clear")
 }
 
 func coreLocalWriteOnly(file *syntax.File, tok int, end int) bool {
