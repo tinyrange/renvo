@@ -2630,7 +2630,11 @@ func rtgEvalConstByNameInto(g *rtgLinearGen, nameStart int, nameEnd int, out *rt
 	if symIndex >= 0 {
 		s := &g.meta.globals[symIndex]
 		if s.constValueOK != 0 {
-			rtgSetConstResult(out, s.constValue, true)
+			value := s.constValue
+			if rtgTokIsKind(g.prog, s.initStart, rtgTokNumber) && rtgResolveType(g.meta, s.typ).kind == rtgTypeFloat64 {
+				value = value << 2
+			}
+			rtgSetConstResult(out, value, true)
 			return
 		}
 		ep := rtgNewExprParse()
