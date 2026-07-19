@@ -68,7 +68,7 @@ func compileBuiltUnit(result CompileResult, built BuildResult, backend Backend) 
 	}
 	var backendResult BackendResult
 	arenaBackend, acceptsArena := backend.(ArenaBackend)
-	arenaSize := backendArenaSize(built.Options.Target, built.Options.ArenaSize)
+	arenaSize := backendArenaSize(built.Options.Target, built.Options.Tags, built.Options.ArenaSize)
 	if acceptsArena {
 		backendResult = arenaBackend.CompileUnitWithArena(built.Unit, backendTarget(built.Options.Target), built.Options.Strip, built.Options.WindowsGUI, arenaSize)
 	} else if built.Options.ArenaSize != 0 {

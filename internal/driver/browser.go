@@ -1,6 +1,7 @@
 package driver
 
 const browserDefaultArenaSize = 134217728
+const bundledCompilerDefaultArenaSize = 536870912
 
 func backendTarget(target string) string {
 	if target == "browser/wasm32" {
@@ -9,11 +10,17 @@ func backendTarget(target string) string {
 	return target
 }
 
-func backendArenaSize(target string, requested int) int {
-	if target == "browser/wasm32" && requested == 0 {
+func backendArenaSize(target string, tags []string, requested int) int {
+	if requested != 0 {
+		return requested
+	}
+	if findString(tags, "renvo_bundle") >= 0 {
+		return bundledCompilerDefaultArenaSize
+	}
+	if target == "browser/wasm32" {
 		return browserDefaultArenaSize
 	}
-	return requested
+	return 0
 }
 
 // PackageBrowserHTML embeds a WASI module and its complete browser host in one
