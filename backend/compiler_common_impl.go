@@ -2985,7 +2985,7 @@ func renvoEvalConstBinaryInto(g *renvoLinearGen, tok int, left int, right int, o
 
 func renvoExprIsIdentText(p *renvoProgram, ep *renvoExprParse, idx int, text string) bool {
 	renvoNonNil(p, ep)
-	e := ep.exprs[idx]
+	e := &ep.exprs[idx]
 	if e.kind != renvoExprIdent {
 		return false
 	}
@@ -8514,7 +8514,7 @@ func renvoEmitSwitchCaseTests(g *renvoLinearGen, stmt *renvoStmt, clause int, va
 			}
 		}
 		if typeSwitch {
-			if renvoBytesEqualText(p.src, int(renvoTokStart(p, i)), int(renvoTokEnd(p, i)), "nil") {
+			if renvoNameIsNil(p, int(renvoTokStart(p, i)), int(renvoTokEnd(p, i))) {
 				renvoAsmJcmpStackImm(a, valueOffset, 0, matchLabel, 0x94)
 			} else {
 				caseType := renvoParseType(g.meta, p, i, valueEnd)
@@ -10813,11 +10813,22 @@ func renvoEmitTypedAssign(g *renvoLinearGen, ep *renvoExprParse, idx int, offset
 	return true
 }
 
+func renvoNameIsNil(p *renvoProgram, start int, end int) bool {
+	return renvoBytesEqualText(p.src, start, end, "nil")
+}
+
+func renvoExprIsNil(p *renvoProgram, e *renvoExpr) bool {
+	if e.kind != renvoExprIdent {
+		return false
+	}
+	return renvoNameIsNil(p, e.nameStart, e.nameEnd)
+}
+
 func renvoEmitInterfaceAssignToLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int) bool {
 	renvoNonNil(g, ep)
 	if idx >= 0 && idx < len(ep.exprs) {
 		e := &ep.exprs[idx]
-		if e.kind == renvoExprIdent && renvoBytesEqualText(g.prog.src, e.nameStart, e.nameEnd, "nil") {
+		if renvoExprIsNil(g.prog, e) {
 			renvoAsmStoreStackImm(&g.asm, offset, 0)
 			renvoAsmStorePrimaryStack(&g.asm, offset-renvoBackendValueSlotSize)
 			return true
@@ -10909,10 +10920,8 @@ func renvoBinaryComparesInterface(g *renvoLinearGen, ep *renvoExprParse, e *renv
 
 func renvoEmitInterfaceCompare(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr) bool {
 	renvoNonNil(g, ep, e)
-	leftExpr := &ep.exprs[e.left]
-	rightExpr := &ep.exprs[e.right]
-	leftNil := leftExpr.kind == renvoExprIdent && renvoBytesEqualText(g.prog.src, leftExpr.nameStart, leftExpr.nameEnd, "nil")
-	rightNil := rightExpr.kind == renvoExprIdent && renvoBytesEqualText(g.prog.src, rightExpr.nameStart, rightExpr.nameEnd, "nil")
+	leftNil := renvoExprIsNil(g.prog, &ep.exprs[e.left])
+	rightNil := renvoExprIsNil(g.prog, &ep.exprs[e.right])
 	if leftNil || rightNil {
 		// Nil equality only depends on the interface's dynamic type tag. The
 		// general comparison ladder includes every comparable runtime type and
@@ -11040,7 +11049,7 @@ func renvoEmitMapValuePrimary(g *renvoLinearGen, ep *renvoExprParse, idx int) bo
 		return false
 	}
 	e := &ep.exprs[idx]
-	if e.kind == renvoExprIdent && renvoBytesEqualText(g.prog.src, e.nameStart, e.nameEnd, "nil") {
+	if renvoExprIsNil(g.prog, e) {
 		renvoAsmPrimaryImm(&g.asm, 0)
 		return true
 	}
@@ -11184,7 +11193,7 @@ func renvoReturnedSliceCanReuseDescriptor(g *renvoLinearGen, ep *renvoExprParse,
 	if e.kind != renvoExprIdent {
 		return false
 	}
-	if renvoBytesEqualText(p.src, e.nameStart, e.nameEnd, "nil") {
+	if renvoExprIsNil(p, e) {
 		return true
 	}
 	localIndex := renvoFindLocalIndex(g, e.nameStart, e.nameEnd)
@@ -11418,7 +11427,7 @@ func renvoEmitSliceValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) boo
 		return true
 	}
 	if e.kind == renvoExprIdent {
-		if renvoBytesEqualText(g.prog.src, e.nameStart, e.nameEnd, "nil") {
+		if renvoExprIsNil(g.prog, e) {
 			renvoAsmPrimaryImm(a, 0)
 			renvoAsmSecondaryImm(a, 0)
 			renvoAsmCopySecondaryToTertiary(a)
@@ -13637,7 +13646,7 @@ func renvoEmitCallParamArgReverse(g *renvoLinearGen, ep *renvoExprParse, idx int
 		param := &meta.params[paramIndex]
 		if renvoTypeIsSlice(meta, param.typ) {
 			e := &ep.exprs[idx]
-			if e.kind == renvoExprIdent && renvoBytesEqualText(p.src, e.nameStart, e.nameEnd, "nil") {
+			if renvoExprIsNil(p, e) {
 				if !renvoEmitSliceValueRegs(g, ep, idx) {
 					return -1
 				}
@@ -15923,7 +15932,7 @@ func renvoFindSmallConstByName(g *renvoLinearGen, nameStart int, nameEnd int) in
 	if renvoFindLocalIndex(g, nameStart, nameEnd) >= 0 {
 		return -129
 	}
-	if renvoBytesEqualText(g.prog.src, nameStart, nameEnd, "nil") {
+	if renvoNameIsNil(g.prog, nameStart, nameEnd) {
 		return 0
 	}
 	symIndex := renvoFindMetaGlobalIndex(g.meta, nameStart, nameEnd, renvoTokConst)
@@ -17386,7 +17395,7 @@ func renvoEmitCompareJump(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, l
 func renvoEmitStringValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
 	e := &ep.exprs[idx]
-	if e.kind == renvoExprIdent && renvoBytesEqualText(g.prog.src, e.nameStart, e.nameEnd, "nil") {
+	if renvoExprIsNil(g.prog, e) {
 		renvoAsmPrimaryImm(&g.asm, 0)
 		renvoAsmSecondaryImm(&g.asm, 0)
 		return true
