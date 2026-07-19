@@ -3,8 +3,8 @@ package bringup
 import (
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -13,7 +13,8 @@ import (
 )
 
 func TestRunPipelineBuildsValidatesLinksAndComparesResults(t *testing.T) {
-	compiler := cCompilerForPipelineTest(t)
+	requireHostELFLinker(t)
+	compiler, compilerArgs := cCompilerForPipelineTest(t)
 	dir := t.TempDir()
 	source := filepath.Join(dir, "omnibus.c")
 	writePipelineCSource(t, source, "renvo_stage0")
@@ -21,7 +22,7 @@ func TestRunPipelineBuildsValidatesLinksAndComparesResults(t *testing.T) {
 	signature := writePassingPipelineResult(t, filepath.Join(dir, "reference.bin"), profile)
 	writePassingPipelineResult(t, filepath.Join(dir, "candidate.bin"), profile)
 
-	plan := testPipelinePlan(compiler, dir, source, signature, profile)
+	plan := testPipelinePlan(compiler, compilerArgs, dir, source, signature, profile)
 	result, err := RunPipeline(plan, ExecCommandRunner{})
 	if err != nil {
 		t.Fatal(err)
@@ -35,7 +36,7 @@ func TestRunPipelineBuildsValidatesLinksAndComparesResults(t *testing.T) {
 }
 
 func TestRunPipelineStopsAtCandidateObjectContract(t *testing.T) {
-	compiler := cCompilerForPipelineTest(t)
+	compiler, compilerArgs := cCompilerForPipelineTest(t)
 	dir := t.TempDir()
 	referenceSource := filepath.Join(dir, "reference.c")
 	writePipelineCSource(t, referenceSource, "renvo_stage0")
@@ -43,8 +44,9 @@ func TestRunPipelineStopsAtCandidateObjectContract(t *testing.T) {
 	signature := writePassingPipelineResult(t, filepath.Join(dir, "reference.bin"), profile)
 	writePassingPipelineResult(t, filepath.Join(dir, "candidate.bin"), profile)
 
-	plan := testPipelinePlan(compiler, dir, referenceSource, signature, profile)
-	plan.CandidateBuild.Args = []string{"-std=c89", "-Drenvo_stage0=wrong_export", referenceSource, "-c", "-o", plan.Candidate.Object}
+	plan := testPipelinePlan(compiler, compilerArgs, dir, referenceSource, signature, profile)
+	plan.CandidateBuild.Args = append([]string(nil), compilerArgs...)
+	plan.CandidateBuild.Args = append(plan.CandidateBuild.Args, "-std=c89", "-Drenvo_stage0=wrong_export", referenceSource, "-c", "-o", plan.Candidate.Object)
 	_, err := RunPipeline(plan, ExecCommandRunner{})
 	if err == nil {
 		t.Fatal("pipeline accepted candidate without milestone export")
@@ -59,7 +61,7 @@ func TestRunPipelineStopsAtCandidateObjectContract(t *testing.T) {
 }
 
 func TestPipelineRejectsDifferentOrChangedCanonicalUnits(t *testing.T) {
-	compiler := cCompilerForPipelineTest(t)
+	compiler, compilerArgs := cCompilerForPipelineTest(t)
 	dir := t.TempDir()
 	source := filepath.Join(dir, "omnibus.c")
 	writePipelineCSource(t, source, "renvo_stage0")
@@ -71,13 +73,13 @@ func TestPipelineRejectsDifferentOrChangedCanonicalUnits(t *testing.T) {
 	signature := writePassingPipelineResult(t, filepath.Join(dir, "reference.bin"), profile)
 	writePassingPipelineResult(t, filepath.Join(dir, "candidate.bin"), profile)
 
-	plan := testPipelinePlan(compiler, dir, source, signature, profile)
+	plan := testPipelinePlan(compiler, compilerArgs, dir, source, signature, profile)
 	plan.CandidateBuild.CanonicalInput = filepath.Join(dir, "different.unit")
 	if _, err := RunPipeline(plan, ExecCommandRunner{}); err == nil || !strings.Contains(err.Error(), "candidate build") {
 		t.Fatalf("different candidate input error = %v", err)
 	}
 
-	plan = testPipelinePlan(compiler, dir, source, signature, profile)
+	plan = testPipelinePlan(compiler, compilerArgs, dir, source, signature, profile)
 	if err := os.WriteFile(source, []byte("changed after planning\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +89,8 @@ func TestPipelineRejectsDifferentOrChangedCanonicalUnits(t *testing.T) {
 }
 
 func TestPipelineRejectsBoardImageBeforeRunningTarget(t *testing.T) {
-	compiler := cCompilerForPipelineTest(t)
+	requireHostELFLinker(t)
+	compiler, compilerArgs := cCompilerForPipelineTest(t)
 	dir := t.TempDir()
 	source := filepath.Join(dir, "omnibus.c")
 	writePipelineCSource(t, source, "renvo_stage0")
@@ -95,7 +98,7 @@ func TestPipelineRejectsBoardImageBeforeRunningTarget(t *testing.T) {
 	signature := writePassingPipelineResult(t, filepath.Join(dir, "reference.bin"), profile)
 	writePassingPipelineResult(t, filepath.Join(dir, "candidate.bin"), profile)
 
-	plan := testPipelinePlan(compiler, dir, source, signature, profile)
+	plan := testPipelinePlan(compiler, compilerArgs, dir, source, signature, profile)
 	plan.Composition = target.CH32V003()
 	plan.Toolchain.ObjectFormat = plan.Composition.Object.Format.Name
 	plan.Toolchain.ABI = plan.Composition.Object.ABI
@@ -119,7 +122,7 @@ func TestPipelineRejectsBoardImageBeforeRunningTarget(t *testing.T) {
 }
 
 func TestPipelineRejectsToolchainCompositionDrift(t *testing.T) {
-	compiler := cCompilerForPipelineTest(t)
+	compiler, compilerArgs := cCompilerForPipelineTest(t)
 	dir := t.TempDir()
 	source := filepath.Join(dir, "omnibus.c")
 	writePipelineCSource(t, source, "renvo_stage0")
@@ -127,7 +130,7 @@ func TestPipelineRejectsToolchainCompositionDrift(t *testing.T) {
 	signature := writePassingPipelineResult(t, filepath.Join(dir, "reference.bin"), profile)
 	writePassingPipelineResult(t, filepath.Join(dir, "candidate.bin"), profile)
 
-	plan := testPipelinePlan(compiler, dir, source, signature, profile)
+	plan := testPipelinePlan(compiler, compilerArgs, dir, source, signature, profile)
 	plan.Composition = target.CH32V003()
 	plan.BoardELF = target.ELFArtifactOptions{VectorSymbol: "renvo_vectors"}
 	if _, err := RunPipeline(plan, nil); err == nil || !strings.Contains(err.Error(), "does not match composition") {
@@ -157,7 +160,7 @@ func (r *recordingRunner) Run(command Command) ([]byte, error) {
 	return (ExecCommandRunner{}).Run(command)
 }
 
-func testPipelinePlan(compiler string, dir string, source string, signature uint64, profile uint32) PipelinePlan {
+func testPipelinePlan(compiler string, compilerArgs []string, dir string, source string, signature uint64, profile uint32) PipelinePlan {
 	referenceObject := filepath.Join(dir, "reference.o")
 	candidateObject := filepath.Join(dir, "candidate.o")
 	referenceImage := filepath.Join(dir, "reference")
@@ -166,13 +169,17 @@ func testPipelinePlan(compiler string, dir string, source string, signature uint
 	if err != nil {
 		panic(err)
 	}
+	referenceBuildArgs := append([]string(nil), compilerArgs...)
+	referenceBuildArgs = append(referenceBuildArgs, "-std=c89", source, "-c", "-o", referenceObject)
+	candidateBuildArgs := append([]string(nil), compilerArgs...)
+	candidateBuildArgs = append(candidateBuildArgs, "-std=c89", source, "-c", "-o", candidateObject)
 	return PipelinePlan{
 		Toolchain:         Toolchain{CCompiler: compiler, Linker: compiler, ObjectFormat: "elf", ABI: "host-test", TargetShell: "host-test"},
 		Stage:             StandardStages("renvo")[0],
 		CanonicalInput:    source,
 		CanonicalSHA256:   digest,
-		ReferenceBuild:    Command{Path: compiler, Args: []string{"-std=c89", source, "-c", "-o", referenceObject}, CanonicalInput: source, CanonicalSHA256: digest},
-		CandidateBuild:    Command{Path: compiler, Args: []string{"-std=c89", source, "-c", "-o", candidateObject}, CanonicalInput: source, CanonicalSHA256: digest},
+		ReferenceBuild:    Command{Path: compiler, Args: referenceBuildArgs, CanonicalInput: source, CanonicalSHA256: digest},
+		CandidateBuild:    Command{Path: compiler, Args: candidateBuildArgs, CanonicalInput: source, CanonicalSHA256: digest},
 		ReferenceLink:     Command{Path: compiler, Args: []string{referenceObject, "-o", referenceImage}},
 		CandidateLink:     Command{Path: compiler, Args: []string{candidateObject, "-o", candidateImage}},
 		Reference:         PipelineArtifact{Object: referenceObject, Image: referenceImage, MemoryDump: filepath.Join(dir, "reference.bin"), MemoryAtResultSymbol: true},
@@ -182,16 +189,16 @@ func testPipelinePlan(compiler string, dir string, source string, signature uint
 	}
 }
 
-func cCompilerForPipelineTest(t *testing.T) string {
+func cCompilerForPipelineTest(t *testing.T) (string, []string) {
 	t.Helper()
-	for _, name := range []string{"cc", "gcc", "clang"} {
-		path, err := exec.LookPath(name)
-		if err == nil {
-			return path
-		}
+	return elfObjectCompiler(t)
+}
+
+func requireHostELFLinker(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skip("host ELF linker integration is Linux-specific")
 	}
-	t.Skip("C compiler not installed")
-	return ""
 }
 
 func writePipelineCSource(t *testing.T, path string, export string) {
