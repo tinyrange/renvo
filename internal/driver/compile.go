@@ -68,8 +68,9 @@ func compileBuiltUnit(result CompileResult, built BuildResult, backend Backend) 
 	}
 	var backendResult BackendResult
 	arenaBackend, acceptsArena := backend.(ArenaBackend)
+	arenaSize := backendArenaSize(built.Options.Target, built.Options.Tags, built.Options.ArenaSize)
 	if acceptsArena {
-		backendResult = arenaBackend.CompileUnitWithArena(built.Unit, backendTarget(built.Options.Target), built.Options.Strip, built.Options.WindowsGUI, built.Options.ArenaSize)
+		backendResult = arenaBackend.CompileUnitWithArena(built.Unit, backendTarget(built.Options.Target), built.Options.Strip, built.Options.WindowsGUI, arenaSize)
 	} else if built.Options.ArenaSize != 0 {
 		backendResult.Diagnostic = Diagnostic{Phase: "backend", Code: "RENVO-BACKEND-005", Message: "backend does not accept an arena policy"}
 	} else {

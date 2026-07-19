@@ -56,6 +56,28 @@ func TestCompilePassesArenaPolicyToEmbeddedBackend(t *testing.T) {
 	}
 }
 
+func TestCompileUsesBrowserDefaultArenaPolicy(t *testing.T) {
+	backend := &recordingArenaBackend{}
+	result := CompileUnit([]string{"-t", "browser/wasm32", "-o", "app.html", "./cmd/app"}, "/repo/case", "/std", driverTestFiles(), backend)
+	if !result.Ok {
+		t.Fatalf("CompileUnit failed: %#v", result)
+	}
+	if backend.arenaSize != browserDefaultArenaSize {
+		t.Fatalf("backend arena = %d, want browser default %d", backend.arenaSize, browserDefaultArenaSize)
+	}
+}
+
+func TestCompileUsesBundledCompilerDefaultArenaPolicy(t *testing.T) {
+	backend := &recordingArenaBackend{}
+	result := CompileUnit([]string{"-tags", "renvo_bundle", "-o", "renvo", "./cmd/app"}, "/repo/case", "/std", driverTestFiles(), backend)
+	if !result.Ok {
+		t.Fatalf("CompileUnit failed: %#v", result)
+	}
+	if backend.arenaSize != bundledCompilerDefaultArenaSize {
+		t.Fatalf("backend arena = %d, want bundled compiler default %d", backend.arenaSize, bundledCompilerDefaultArenaSize)
+	}
+}
+
 func TestCompileRejectsArenaPolicyForLegacyBackend(t *testing.T) {
 	backend := &recordingBackend{binary: []byte("binary")}
 	result := CompileUnit([]string{"-arena-size", "131072", "-o", "app", "./cmd/app"}, "/repo/case", "/std", driverTestFiles(), backend)

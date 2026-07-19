@@ -1,10 +1,26 @@
 package driver
 
+const browserDefaultArenaSize = 134217728
+const bundledCompilerDefaultArenaSize = 536870912
+
 func backendTarget(target string) string {
 	if target == "browser/wasm32" {
 		return "wasi/wasm32"
 	}
 	return target
+}
+
+func backendArenaSize(target string, tags []string, requested int) int {
+	if requested != 0 {
+		return requested
+	}
+	if findString(tags, "renvo_bundle") >= 0 {
+		return bundledCompilerDefaultArenaSize
+	}
+	if target == "browser/wasm32" {
+		return browserDefaultArenaSize
+	}
+	return 0
 }
 
 // PackageBrowserHTML embeds a WASI module and its complete browser host in one
@@ -92,7 +108,7 @@ function cancelWindowTimer(ctx,id,timerID){const key=timerKey(id,timerID),timer=
 function setWindowTimer(ctx,id,timerID,milliseconds){cancelWindowTimer(ctx,id,timerID);const key=timerKey(id,timerID),timer=setTimeout(()=>{ctx.timers.delete(key);enqueue(ctx,14,0,0,0,0,timerID)},milliseconds);ctx.timers.set(key,timer)}
 function setWindowTitle(ctx,id,title){const view=ctx.windows.get(id);if(view&&view.shell.caption)view.shell.caption.textContent=title}
 function initGL(view){const gl=view.canvas.getContext("webgl2",{alpha:false,antialias:false,preserveDrawingBuffer:true});if(!gl)throw Error("WebGL2 is required");const shader=(type,source)=>{const item=gl.createShader(type);gl.shaderSource(item,source);gl.compileShader(item);if(!gl.getShaderParameter(item,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(item));return item},nl=String.fromCharCode(10),vs="#version 300 es"+nl+"in vec2 p;out vec2 uv;void main(){uv=vec2((p.x+1.)*.5,(1.-p.y)*.5);gl_Position=vec4(p,0,1);}",fs="#version 300 es"+nl+"precision mediump float;in vec2 uv;uniform sampler2D t;out vec4 c;void main(){c=texture(t,uv);}",program=gl.createProgram();gl.attachShader(program,shader(gl.VERTEX_SHADER,vs));gl.attachShader(program,shader(gl.FRAGMENT_SHADER,fs));gl.linkProgram(program);gl.useProgram(program);const buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);const p=gl.getAttribLocation(program,"p");gl.enableVertexAttribArray(p);gl.vertexAttribPointer(p,2,gl.FLOAT,false,0,0);view.texture=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,view.texture);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);view.gl=gl}
-function presentWindow(ctx,id,width,height,pixels){const view=ctx.windows.get(id);if(!view)return;if(!view.gl)initGL(view);const gl=view.gl;view.canvas.width=width;view.canvas.height=height;view.width=width;view.height=height;gl.viewport(0,0,width,height);gl.bindTexture(gl.TEXTURE_2D,view.texture);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,width,height,0,gl.RGBA,gl.UNSIGNED_BYTE,pixels);gl.drawArrays(gl.TRIANGLES,0,6);view.canvas.focus()}
+function presentWindow(ctx,id,width,height,pixels){const view=ctx.windows.get(id);if(!view)return;if(!view.gl)initGL(view);const gl=view.gl,scale=Math.max(1,window.devicePixelRatio||1),pixelWidth=Math.round(width*scale),pixelHeight=Math.round(height*scale);view.canvas.width=pixelWidth;view.canvas.height=pixelHeight;view.width=width;view.height=height;gl.viewport(0,0,pixelWidth,pixelHeight);gl.bindTexture(gl.TEXTURE_2D,view.texture);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,width,height,0,gl.RGBA,gl.UNSIGNED_BYTE,pixels);gl.drawArrays(gl.TRIANGLES,0,6);view.canvas.focus()}
 function resizeView(view){const width=Math.max(1,Math.round(view.canvas.clientWidth)),height=Math.max(1,Math.round(view.canvas.clientHeight));if(width!==view.width||height!==view.height)enqueue(view.ctx,2,width,height)}
 function modifiers(e){return(e.shiftKey?1:0)|(e.ctrlKey?2:0)|(e.altKey?4:0)|(e.metaKey?8:0)}
 const keys={Backspace:1,Delete:2,Enter:3,Tab:4,Escape:5," ":6,ArrowLeft:7,ArrowRight:8,ArrowUp:9,ArrowDown:10,Home:11,End:12,PageUp:13,PageDown:14,a:15,b:16,c:17,i:18,n:19,o:20,q:21,s:22,v:23,x:24,y:25,z:26};

@@ -2,6 +2,7 @@ package ide
 
 import (
 	"renvo.dev/std/graphics"
+	"renvo.dev/std/graphics/gofont"
 	renvoos "renvo.dev/std/os"
 )
 
@@ -28,6 +29,9 @@ func NewUIFont() *graphics.Font {
 			return font
 		}
 	}
+	if font := gofont.NewMono(16); font != nil {
+		return font
+	}
 	return graphics.NewBuiltinFont(2)
 }
 
@@ -53,6 +57,9 @@ func NewInterfaceFont() *graphics.Font {
 		if fontError == nil {
 			return font
 		}
+	}
+	if font := gofont.New(14); font != nil {
+		return font
 	}
 	return graphics.NewBuiltinFont(2)
 }

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"renvo.dev/std/graphics"
+	"renvo.dev/std/graphics/gofont"
 )
 
 func TestUIFontHasReadableEditorMetrics(t *testing.T) {
@@ -14,8 +15,11 @@ func TestUIFontHasReadableEditorMetrics(t *testing.T) {
 	}
 }
 
-func TestUIFontUsesOneStableEditorCellWidth(t *testing.T) {
-	font := NewUIFont()
+func TestEmbeddedUIFontUsesOneStableEditorCellWidth(t *testing.T) {
+	font := gofont.NewMono(16)
+	if font == nil {
+		t.Fatal("embedded editor font failed to load")
+	}
 	want := graphics.MeasureText(font, "M").Width
 	for _, text := range []string{"i", "W", "0", " "} {
 		got := graphics.MeasureText(font, text).Width

@@ -58,7 +58,7 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 	output := built.Options.Output
 	strip := built.Options.Strip
 	windowsGUI := built.Options.WindowsGUI
-	arenaSize := built.Options.ArenaSize
+	arenaSize := backendArenaSize(target, built.Options.Tags, built.Options.ArenaSize)
 	if built.Options.EmitUnit {
 		if output == "-" {
 			print(string(unit))
