@@ -172,7 +172,7 @@ func lookupScopeNameKind(scope FuncScope, name string, kind int) int {
 }
 
 func isBuiltinName(name string) bool {
-	if name == "append" || name == "bool" || name == "byte" || name == "cap" {
+	if name == "append" || name == "bool" || name == "byte" || name == "cap" || name == "clear" {
 		return true
 	}
 	if name == "close" || name == "complex" || name == "complex64" || name == "complex128" {
@@ -187,7 +187,7 @@ func isBuiltinName(name string) bool {
 	if name == "int8" || name == "int16" || name == "int32" || name == "int64" {
 		return true
 	}
-	if name == "iota" || name == "len" || name == "make" || name == "new" {
+	if name == "iota" || name == "len" || name == "make" || name == "max" || name == "min" || name == "new" {
 		return true
 	}
 	if name == "nil" || name == "panic" || name == "print" || name == "println" {

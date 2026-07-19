@@ -1,0 +1,8 @@
+{
+  "phase": "checker",
+  "code": "RENVO-CHECK-027",
+  "file": "cmd/app/main.go",
+  "line": 4,
+  "column": 6,
+  "message": "invalid number of arguments to builtin"
+}

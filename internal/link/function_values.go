@@ -57,9 +57,15 @@ type functionValueEdit struct {
 func renvo_runtime_ArenaDiscardLinkTokens(tokens []unit.Token) {}
 
 func lowerFunctionValuesCore(program *unit.Program, transient bool) bool {
-	functions, deferred := functionValueProgramNeedsLowering(program)
+	functions, deferred, builtins := functionValueProgramNeedsLowering(program)
 	if deferred {
 		if !lowerDeferredBuiltins(program, transient) {
+			return false
+		}
+		functions = true
+	}
+	if builtins {
+		if !lowerOrdinaryBuiltins(program) {
 			return false
 		}
 		functions = true
@@ -208,39 +214,7 @@ func lowerDeferredBuiltins(program *unit.Program, transient bool) bool {
 }
 
 func deferredBuiltinArgumentType(program *unit.Program, before int, start int, end int) string {
-	for end-start >= 2 && functionValueTokenEquals(program, start, "(") && functionValueFindMatchingParen(program, start) == end-1 {
-		start++
-		end--
-	}
-	if end <= start {
-		return ""
-	}
-	if end-start == 1 {
-		if program.Tokens[start].Kind == unit.TokenString {
-			return "string"
-		}
-		if program.Tokens[start].Kind == unit.TokenNumber || program.Tokens[start].Kind == unit.TokenChar {
-			return "int"
-		}
-		name := functionValueTokenText(program, start)
-		if name == "true" || name == "false" {
-			return "bool"
-		}
-		return functionValueEnclosingLocalType(program, before, name)
-	}
-	if program.Tokens[start].Kind == unit.TokenIdent && functionValueTokenEquals(program, start+1, "(") && functionValueFindMatchingParen(program, start+1) == end-1 {
-		name := functionValueTokenText(program, start)
-		if name == "string" || name == "int" || name == "int8" || name == "int16" || name == "int32" || name == "int64" || name == "uint" || name == "uint8" || name == "uint16" || name == "uint32" || name == "uint64" || name == "byte" || name == "rune" {
-			return name
-		}
-		return functionValueDeclaredFunctionResultType(program, name)
-	}
-	for i := start; i < end; i++ {
-		if functionValueTokenEquals(program, i, "+") || functionValueTokenEquals(program, i, "-") || functionValueTokenEquals(program, i, "*") || functionValueTokenEquals(program, i, "/") || functionValueTokenEquals(program, i, "%") {
-			return deferredBuiltinArgumentType(program, before, start, i)
-		}
-	}
-	return ""
+	return ordinaryBuiltinExprType(program, before, start, end)
 }
 
 func functionValueDeclaredFunction(program *unit.Program, name string) bool {
@@ -252,21 +226,40 @@ func functionValueDeclaredFunction(program *unit.Program, name string) bool {
 	return false
 }
 
-func functionValueProgramNeedsLowering(program *unit.Program) (bool, bool) {
+func functionValueProgramNeedsLowering(program *unit.Program) (bool, bool, bool) {
 	functions := false
 	deferred := false
+	builtins := false
 	for i := 0; i+1 < len(program.Tokens); i++ {
-		if functionValueTokenEquals(program, i, "func") && functionValueTokenEquals(program, i+1, "(") && !functionValueIsDeclaredFunction(program, i) {
+		token := program.Tokens[i]
+		start := token.Start
+		valid := start >= 0 && start+token.Size <= len(program.Text)
+		if token.Kind == unit.TokenFunc && functionValueTokenEquals(program, i+1, "(") && !functionValueIsDeclaredFunction(program, i) {
 			functions = true
 		}
-		if i+2 < len(program.Tokens) && functionValueTokenEquals(program, i, "defer") && functionValueTokenEquals(program, i+2, "(") {
+		if i+2 < len(program.Tokens) && valid && token.Size == 5 && program.Text[start] == 'd' && program.Text[start+1] == 'e' && program.Text[start+2] == 'f' && program.Text[start+3] == 'e' && program.Text[start+4] == 'r' && functionValueTokenEquals(program, i+2, "(") {
 			name := functionValueTokenText(program, i+1)
 			if (name == "copy" || name == "delete" || name == "panic" || name == "print" || name == "println" || name == "recover") && functionValueEnclosingLocalType(program, i, name) == "" && !functionValueDeclaredFunction(program, name) {
 				deferred = true
 			}
 		}
+		name := ""
+		if valid && token.Kind == unit.TokenIdent {
+			if token.Size == 3 && program.Text[start] == 'm' && program.Text[start+2] == 'n' {
+				if program.Text[start+1] == 'i' {
+					name = "min"
+				} else if program.Text[start+1] == 'a' {
+					name = "max"
+				}
+			} else if token.Size == 5 && program.Text[start] == 'c' && program.Text[start+1] == 'l' && program.Text[start+2] == 'e' && program.Text[start+3] == 'a' && program.Text[start+4] == 'r' {
+				name = "clear"
+			}
+		}
+		if name != "" && functionValueTokenEquals(program, i+1, "(") && !ordinaryBuiltinShadowed(program, i, name) {
+			builtins = true
+		}
 	}
-	return functions, deferred
+	return functions, deferred, builtins
 }
 
 func discoverFunctionValueTypes(program *unit.Program) ([]functionValueSignature, []functionValueField, []functionValueEdit, bool) {
@@ -844,6 +837,9 @@ func functionValueEnclosingLocalType(program *unit.Program, before int, name str
 					if typ := functionValueDeclaredFunctionResultType(program, callName); typ != "" {
 						return typ
 					}
+					if functionValueDeclaredType(program, callName) {
+						return callName
+					}
 				}
 				if typ := functionValueFunctionParamType(program, fn, functionValueTokenText(program, rhs)); typ != "" {
 					return typ
@@ -855,6 +851,16 @@ func functionValueEnclosingLocalType(program *unit.Program, before int, name str
 		}
 	}
 	return functionValueFunctionParamType(program, fn, name)
+}
+
+func functionValueDeclaredType(program *unit.Program, name string) bool {
+	for i := 0; i < len(program.Decls); i++ {
+		decl := program.Decls[i]
+		if decl.Kind == unit.TokenType && functionValueTokenText(program, functionValueTokenAtSpan(program, decl.NameStart, decl.NameEnd)) == name {
+			return true
+		}
+	}
+	return false
 }
 
 func functionValueDeclaredFunctionResultType(program *unit.Program, name string) string {

@@ -33,6 +33,8 @@ const (
 	CheckErrSliceOperand
 	CheckErrArrayIndex
 	CheckErrDeferBuiltin
+	CheckErrBuiltinArity
+	CheckErrBuiltinOperand
 )
 
 const (

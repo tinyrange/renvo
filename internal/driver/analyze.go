@@ -103,6 +103,10 @@ func analysisCheckDiagnostic(graph load.Graph, program check.Program) Diagnostic
 		code, message = "RENVO-CHECK-025", "constant array index is out of bounds"
 	case check.CheckErrDeferBuiltin:
 		code, message = "RENVO-CHECK-026", "deferred builtin call discards a result"
+	case check.CheckErrBuiltinArity:
+		code, message = "RENVO-CHECK-027", "invalid number of arguments to builtin"
+	case check.CheckErrBuiltinOperand:
+		code, message = "RENVO-CHECK-028", "invalid operand type for builtin"
 	}
 	diagnostic := Diagnostic{Phase: "checker", Code: code, Message: message}
 	if program.ErrorPackage < 0 || program.ErrorPackage >= len(graph.Packages) {

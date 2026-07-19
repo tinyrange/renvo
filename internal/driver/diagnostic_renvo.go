@@ -218,6 +218,10 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			d.Code, d.Message = "RENVO-CHECK-025", "constant array index is out of bounds"
 		} else if built.Build.ErrorDetail == check.CheckErrDeferBuiltin {
 			d.Code, d.Message = "RENVO-CHECK-026", "deferred builtin call discards a result"
+		} else if built.Build.ErrorDetail == check.CheckErrBuiltinArity {
+			d.Code, d.Message = "RENVO-CHECK-027", "invalid number of arguments to builtin"
+		} else if built.Build.ErrorDetail == check.CheckErrBuiltinOperand {
+			d.Code, d.Message = "RENVO-CHECK-028", "invalid operand type for builtin"
 		}
 	} else {
 		d.Phase, d.Code, d.Message = "linker", "RENVO-LINK-001", "package linking failed"

@@ -148,7 +148,7 @@ func completionScopeItems(items []CompletionItem, graph load.Graph, prog Program
 			items = completionAdd(items, symbol.Name, detail, kind, prefix)
 		}
 	}
-	builtins := []string{"append", "cap", "close", "complex", "copy", "delete", "imag", "len", "make", "new", "panic", "print", "println", "real", "recover"}
+	builtins := []string{"append", "cap", "clear", "close", "complex", "copy", "delete", "imag", "len", "make", "max", "min", "new", "panic", "print", "println", "real", "recover"}
 	for i := 0; i < len(builtins); i++ {
 		items = completionAdd(items, builtins[i], "builtin", CompletionFunction, prefix)
 	}

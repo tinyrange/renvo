@@ -288,6 +288,10 @@ func buildPhaseDiagnostic(result BuildResult, built pipeline.Result) Diagnostic 
 			code, message = "RENVO-CHECK-025", "constant array index is out of bounds"
 		case check.CheckErrDeferBuiltin:
 			code, message = "RENVO-CHECK-026", "deferred builtin call discards a result"
+		case check.CheckErrBuiltinArity:
+			code, message = "RENVO-CHECK-027", "invalid number of arguments to builtin"
+		case check.CheckErrBuiltinOperand:
+			code, message = "RENVO-CHECK-028", "invalid operand type for builtin"
 		}
 	} else if built.Build.Error == build.BuildErrLower {
 		phase, code, message = "lowerer", "RENVO-LOWER-001", "checked program could not be lowered"
