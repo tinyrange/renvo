@@ -135,6 +135,7 @@ func renvoTryCompileScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) renvoCo
 			return result
 		}
 	}
+	renvo_runtime_ArenaDiscard(meta.scratchStart, meta.scratchEnd)
 	var data []byte
 	if targetIsWindows() {
 		data = renvoAsmImageWindowsAmd64(a)

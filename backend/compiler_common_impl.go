@@ -228,6 +228,8 @@ func renvo_runtime_ArenaMark() int { return 0 }
 
 func renvo_runtime_ArenaReset(mark int) {}
 
+func renvo_runtime_ArenaDiscard(start int, end int) {}
+
 func renvo_runtime_ArenaDiscardBytes(value []byte) {}
 
 // These internal intrinsics are only used after compiler code has established
@@ -1704,6 +1706,8 @@ type renvoMeta struct {
 	captures      []renvoSymbolInfo
 	panicEnabled  bool
 	arenaSize     int
+	scratchStart  int
+	scratchEnd    int
 	ok            bool
 }
 
@@ -4031,6 +4035,7 @@ func renvoBuildMeta(pp *renvoProgram) renvoMeta {
 
 func renvoBuildMetaInto(pp *renvoProgram, m *renvoMeta) {
 	renvoNonNil(pp, m)
+	m.scratchStart = renvo_runtime_ArenaMark()
 	p := pp
 	m.prog = p
 	typeCap := len(p.decls)*4 + 256
@@ -4121,6 +4126,7 @@ func renvoBuildMetaInto(pp *renvoProgram, m *renvoMeta) {
 	renvoFinalizeTypeLayouts(m)
 	renvoBuildFuncLookup(m)
 	renvoResolveGlobalCallTypes(m)
+	m.scratchEnd = renvo_runtime_ArenaMark()
 }
 
 func renvoFindContainingTopDeclGroup(p *renvoProgram, kind int, start int, end int) (int, int, bool) {
