@@ -66,14 +66,24 @@ func buildProgramsCore(graph load.Graph, transient bool) Result {
 		return buildFail(result, BuildErrCheck, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
 	}
 	for i := 0; i < len(graph.Packages); i++ {
+		persistMark := 0
+		if transient {
+			persistMark = arena.PersistMark()
+		}
 		prog = check.CheckGraphPackageCore(graph, prog, i)
 		if !prog.Ok {
+			if transient {
+				arena.PersistReset(persistMark)
+			}
 			result.ErrorDetail = prog.Error
 			return buildFail(result, BuildErrCheck, prog.ErrorPackage, prog.ErrorFile, prog.ErrorToken)
 		}
 		pkg := graph.Packages[i]
 		if pkg.Ref.ImportPath == graph.Root && pkg.Name == "main" {
 			if mainErr, mainFile, mainTok := check.CheckRootMain(pkg); mainErr != check.CheckOK {
+				if transient {
+					arena.PersistReset(persistMark)
+				}
 				result.ErrorDetail = mainErr
 				return buildFail(result, BuildErrCheck, i, mainFile, mainTok)
 			}
@@ -82,6 +92,9 @@ func buildProgramsCore(graph load.Graph, transient bool) Result {
 		emit := lower.EmitCheckedPackageCore(pkg, prog.Packages[i], transient)
 		unitEnd := arena.Mark()
 		if !emit.Ok {
+			if transient {
+				arena.PersistReset(persistMark)
+			}
 			result.ErrorDetail = emit.Error
 			return buildFail(result, BuildErrLower, i, emit.ErrorFile, emit.ErrorToken)
 		}
@@ -100,6 +113,7 @@ func buildProgramsCore(graph load.Graph, transient bool) Result {
 				arena.Discard(pkg.Files[j].ArenaStart, pkg.Files[j].ArenaEnd)
 			}
 			arena.Discard(pkg.CoreArenaStart, pkg.CoreArenaEnd)
+			arena.PersistReset(persistMark)
 		}
 	}
 	if result.Root < 0 {

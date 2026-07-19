@@ -11189,7 +11189,11 @@ func renvoReturnedSliceCanReuseDescriptor(g *renvoLinearGen, ep *renvoExprParse,
 		fnIndex := renvoFuncInfoFromCall(g, ep, e.left)
 		if fnIndex >= 0 && fnIndex < len(meta.funcs) {
 			fn := &meta.funcs[fnIndex]
-			if renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaPersistBytes") {
+			if renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaPersistBytes") ||
+				renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaPersistCheckNameRefs") ||
+				renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaPersistCheckSelectorRefs") ||
+				renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaPersistCheckTypeRefs") ||
+				renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaPersistCheckBools") {
 				return true
 			}
 			return renvoCallSliceResultCanReuseDescriptor(g, ep, idx, fnIndex)
@@ -12674,6 +12678,12 @@ func renvoEmitRuntimeArenaCall(g *renvoLinearGen, ep *renvoExprParse, idx int, f
 	if renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaPersistBytes") {
 		return renvoEmitRuntimeArenaPersistBytes(g, ep, idx)
 	}
+	if renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaPersistCheckNameRefs") ||
+		renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaPersistCheckSelectorRefs") ||
+		renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaPersistCheckTypeRefs") ||
+		renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaPersistCheckBools") {
+		return renvoEmitRuntimeArenaPersistSlice(g, ep, idx)
+	}
 	if renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaDiscard") {
 		return renvoEmitRuntimeArenaDiscard(g, ep, idx)
 	}
@@ -13285,22 +13295,34 @@ func renvoEmitRuntimeArenaPersistString(g *renvoLinearGen, ep *renvoExprParse, i
 }
 
 func renvoEmitRuntimeArenaPersistBytes(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+	return renvoEmitRuntimeArenaPersistSlice(g, ep, idx)
+}
+
+func renvoEmitRuntimeArenaPersistSlice(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
 	e := &ep.exprs[idx]
 	if e.argCount != 1 {
 		return false
 	}
-	if !renvoEmitSliceValueRegs(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+	argIndex := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
+	sliceType := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, argIndex))
+	if sliceType.kind != renvoTypeSlice || !renvoEmitSliceValueRegs(g, ep, argIndex) {
 		return false
 	}
 	a := &g.asm
 	srcOff := renvoAddUnnamedLocal(g, renvoTypeInt)
 	lenOff := renvoAddUnnamedLocal(g, renvoTypeInt)
+	byteLenOff := renvoAddUnnamedLocal(g, renvoTypeInt)
 	destOff := renvoAddUnnamedLocal(g, renvoTypeInt)
 	renvoAsmStorePrimarySecondaryStack(a, srcOff, lenOff)
-	renvoEmitPersistentAllocToPrimary(g, lenOff)
+	renvoAsmLoadPrimaryStack(a, lenOff)
+	renvoAsmCopyPrimaryToTertiary(a)
+	renvoAsmMulTertiaryImm(a, renvoTypeSize(g.meta, sliceType.elem))
+	renvoAsmCopyTertiaryToPrimary(a)
+	renvoAsmStorePrimaryStack(a, byteLenOff)
+	renvoEmitPersistentAllocToPrimary(g, byteLenOff)
 	renvoAsmStorePrimaryStack(a, destOff)
-	renvoEmitCopyBytesToPersistent(g, srcOff, lenOff, destOff)
+	renvoEmitCopyBytesToPersistent(g, srcOff, byteLenOff, destOff)
 	renvoAsmLoadPrimarySecondaryStack(a, destOff, lenOff)
 	renvoAsmLoadTertiaryStack(a, lenOff)
 	return true
