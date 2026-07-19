@@ -2325,7 +2325,7 @@ func renvoIdentEntry(src []byte, start int, end int) int {
 
 func renvoExprIdentCode(p *renvoProgram, ep *renvoExprParse, idx int) int {
 	renvoNonNil(p, ep)
-	e := ep.exprs[idx]
+	e := &ep.exprs[idx]
 	if e.kind != renvoExprIdent {
 		return 0
 	}
@@ -2735,7 +2735,7 @@ func renvoEvalConstExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) renvoCon
 func renvoEvalConstExprInto(g *renvoLinearGen, ep *renvoExprParse, idx int, out *renvoConstResult) {
 	renvoNonNil(g, ep, out)
 	p := g.prog
-	e := ep.exprs[idx]
+	e := &ep.exprs[idx]
 	if e.kind == renvoExprInt {
 		value := renvoParseIntToken(p, e.tok)
 		renvoSetConstResult(out, value, true)
@@ -4412,7 +4412,7 @@ func renvoEvalMetaParsedConstExpr(m *renvoMeta, p *renvoProgram, ep *renvoExprPa
 
 func renvoEvalMetaParsedConstExprInto(m *renvoMeta, p *renvoProgram, ep *renvoExprParse, idx int, iotaValue int, out *renvoConstResult) {
 	renvoNonNil(m, p, ep, out)
-	e := ep.exprs[idx]
+	e := &ep.exprs[idx]
 	if e.kind == renvoExprInt {
 		renvoSetConstResult(out, renvoParseIntToken(p, e.tok), true)
 		return
@@ -7665,7 +7665,7 @@ func renvoEvalFixedTargetInt(g *renvoLinearGen, ep *renvoExprParse, idx int, fix
 	if idx < 0 || idx >= len(ep.exprs) {
 		return renvoFixedTargetUnknown
 	}
-	e := ep.exprs[idx]
+	e := &ep.exprs[idx]
 	if e.kind == renvoExprInt {
 		return renvoParseIntToken(p, e.tok)
 	}
@@ -7702,7 +7702,7 @@ func renvoEvalFixedTargetBool(g *renvoLinearGen, ep *renvoExprParse, idx int, fi
 	if !fixedTargetKnown && fixedTarget == 0 || idx < 0 || idx >= len(ep.exprs) {
 		return -1
 	}
-	e := ep.exprs[idx]
+	e := &ep.exprs[idx]
 	if e.kind == renvoExprBool {
 		return renvoBoolTokenValue(g.prog, e.tok)
 	}
@@ -8514,7 +8514,7 @@ func renvoEmitSwitchCaseTests(g *renvoLinearGen, stmt *renvoStmt, clause int, va
 			}
 		}
 		if typeSwitch {
-			if renvoNameIsNil(p, int(renvoTokStart(p, i)), int(renvoTokEnd(p, i))) {
+			if renvoBytesEqualText(p.src, int(renvoTokStart(p, i)), int(renvoTokEnd(p, i)), "nil") {
 				renvoAsmJcmpStackImm(a, valueOffset, 0, matchLabel, 0x94)
 			} else {
 				caseType := renvoParseType(g.meta, p, i, valueEnd)
@@ -10316,7 +10316,7 @@ func renvoInferParsedExprTypeUncached(g *renvoLinearGen, ep *renvoExprParse, idx
 	renvoNonNil(g, ep)
 	p := g.prog
 	meta := g.meta
-	e := ep.exprs[idx]
+	e := &ep.exprs[idx]
 	if (e.kind == renvoExprInt || e.kind == renvoExprFloat) && renvoExprTokenIsImaginary(p, e.tok) {
 		return renvoBuiltinTypeComplex
 	}
@@ -10813,15 +10813,11 @@ func renvoEmitTypedAssign(g *renvoLinearGen, ep *renvoExprParse, idx int, offset
 	return true
 }
 
-func renvoNameIsNil(p *renvoProgram, start int, end int) bool {
-	return renvoBytesEqualText(p.src, start, end, "nil")
-}
-
 func renvoExprIsNil(p *renvoProgram, e *renvoExpr) bool {
 	if e.kind != renvoExprIdent {
 		return false
 	}
-	return renvoNameIsNil(p, e.nameStart, e.nameEnd)
+	return renvoBytesEqualText(p.src, e.nameStart, e.nameEnd, "nil")
 }
 
 func renvoEmitInterfaceAssignToLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int) bool {
@@ -11049,7 +11045,7 @@ func renvoEmitMapValuePrimary(g *renvoLinearGen, ep *renvoExprParse, idx int) bo
 		return false
 	}
 	e := &ep.exprs[idx]
-	if renvoExprIsNil(g.prog, e) {
+	if e.kind == renvoExprIdent && renvoBytesEqualText(g.prog.src, e.nameStart, e.nameEnd, "nil") {
 		renvoAsmPrimaryImm(&g.asm, 0)
 		return true
 	}
@@ -11193,7 +11189,7 @@ func renvoReturnedSliceCanReuseDescriptor(g *renvoLinearGen, ep *renvoExprParse,
 	if e.kind != renvoExprIdent {
 		return false
 	}
-	if renvoExprIsNil(p, e) {
+	if renvoBytesEqualText(p.src, e.nameStart, e.nameEnd, "nil") {
 		return true
 	}
 	localIndex := renvoFindLocalIndex(g, e.nameStart, e.nameEnd)
@@ -11427,7 +11423,7 @@ func renvoEmitSliceValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) boo
 		return true
 	}
 	if e.kind == renvoExprIdent {
-		if renvoExprIsNil(g.prog, e) {
+		if renvoBytesEqualText(g.prog.src, e.nameStart, e.nameEnd, "nil") {
 			renvoAsmPrimaryImm(a, 0)
 			renvoAsmSecondaryImm(a, 0)
 			renvoAsmCopySecondaryToTertiary(a)
@@ -12195,7 +12191,7 @@ func renvoEmitStructCallToBss(g *renvoLinearGen, ep *renvoExprParse, idx int, de
 }
 func renvoEmitUserCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
-	e := ep.exprs[idx]
+	e := &ep.exprs[idx]
 	if renvoIsInterfaceMethodCall(g, ep, idx) {
 		return renvoEmitInterfaceMethodCall(g, ep, idx, 0, renvoInterfaceMethodCallResultType(g, ep, idx))
 	}
@@ -12223,7 +12219,7 @@ func renvoEmitUserCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		receiverIndex = callee.left
 		receiverDotTok = callee.tok
 	}
-	wordCount := renvoEmitCallArgsReverse(g, ep, &e, fn, receiverIndex)
+	wordCount := renvoEmitCallArgsReverse(g, ep, e, fn, receiverIndex)
 	if wordCount < 0 {
 		return false
 	}
@@ -12677,7 +12673,7 @@ func renvoEmitRuntimeArenaCall(g *renvoLinearGen, ep *renvoExprParse, idx int, f
 
 func renvoEmitRuntimeExit(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
-	e := ep.exprs[idx]
+	e := &ep.exprs[idx]
 	if e.argCount != 1 || !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
 		return false
 	}
@@ -12747,7 +12743,7 @@ func renvoEmitStaticWrite(g *renvoLinearGen, text string, fd int) bool {
 
 func renvoEmitBuiltinPanic(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
-	e := ep.exprs[idx]
+	e := &ep.exprs[idx]
 	if e.argCount != 1 {
 		return false
 	}
@@ -12970,7 +12966,7 @@ func renvoEmitRuntimeNonNilLocalSecondary(g *renvoLinearGen, localIndex int) {
 
 func renvoEmitBuiltinRecover(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
-	e := ep.exprs[idx]
+	e := &ep.exprs[idx]
 	if e.argCount != 0 {
 		return false
 	}
@@ -13065,7 +13061,7 @@ func renvoEmitRecoverToLocal(g *renvoLinearGen, offset int) bool {
 
 func renvoEmitRuntimeArenaDiscard(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
-	e := ep.exprs[idx]
+	e := &ep.exprs[idx]
 	if e.argCount != 2 {
 		return false
 	}
@@ -13106,7 +13102,7 @@ func renvoEmitRuntimeArenaDiscard(g *renvoLinearGen, ep *renvoExprParse, idx int
 
 func renvoEmitRuntimeArenaMark(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
-	e := ep.exprs[idx]
+	e := &ep.exprs[idx]
 	if e.argCount != 0 {
 		return false
 	}
@@ -13124,7 +13120,7 @@ func renvoEmitRuntimeArenaMark(g *renvoLinearGen, ep *renvoExprParse, idx int) b
 
 func renvoEmitRuntimeArenaReset(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
-	e := ep.exprs[idx]
+	e := &ep.exprs[idx]
 	if e.argCount != 1 {
 		return false
 	}
@@ -13139,7 +13135,7 @@ func renvoEmitRuntimeArenaReset(g *renvoLinearGen, ep *renvoExprParse, idx int) 
 
 func renvoEmitRuntimeArenaPersistMark(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
-	e := ep.exprs[idx]
+	e := &ep.exprs[idx]
 	if e.argCount != 0 {
 		return false
 	}
@@ -13150,7 +13146,7 @@ func renvoEmitRuntimeArenaPersistMark(g *renvoLinearGen, ep *renvoExprParse, idx
 
 func renvoEmitRuntimeArenaPersistReset(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
-	e := ep.exprs[idx]
+	e := &ep.exprs[idx]
 	if e.argCount != 1 {
 		return false
 	}
@@ -13214,7 +13210,7 @@ func renvoAmd64AsmAndRaxImm32(a *renvoAsm, imm int) {
 
 func renvoEmitRuntimeArenaPersistString(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
-	e := ep.exprs[idx]
+	e := &ep.exprs[idx]
 	if e.argCount != 1 {
 		return false
 	}
@@ -13235,7 +13231,7 @@ func renvoEmitRuntimeArenaPersistString(g *renvoLinearGen, ep *renvoExprParse, i
 
 func renvoEmitRuntimeArenaPersistBytes(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
-	e := ep.exprs[idx]
+	e := &ep.exprs[idx]
 	if e.argCount != 1 {
 		return false
 	}
@@ -13646,7 +13642,7 @@ func renvoEmitCallParamArgReverse(g *renvoLinearGen, ep *renvoExprParse, idx int
 		param := &meta.params[paramIndex]
 		if renvoTypeIsSlice(meta, param.typ) {
 			e := &ep.exprs[idx]
-			if renvoExprIsNil(p, e) {
+			if e.kind == renvoExprIdent && renvoBytesEqualText(p.src, e.nameStart, e.nameEnd, "nil") {
 				if !renvoEmitSliceValueRegs(g, ep, idx) {
 					return -1
 				}
@@ -14397,7 +14393,7 @@ func renvoExprCanFoldConst(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 	if idx >= len(ep.exprs) {
 		return false
 	}
-	e := ep.exprs[idx]
+	e := &ep.exprs[idx]
 	if e.kind == renvoExprInt {
 		return true
 	}
@@ -14446,7 +14442,7 @@ func renvoExprCanFoldConst(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 		if renvoConversionTypeFromExpr(g, ep, calleeLeft) != 0 {
 			return true
 		}
-		calleeExpr := ep.exprs[calleeLeft]
+		calleeExpr := &ep.exprs[calleeLeft]
 		if calleeExpr.kind == renvoExprIdent {
 			return renvoFindTypeByRange(g, calleeExpr.nameStart, calleeExpr.nameEnd) > 0
 		}
@@ -14963,7 +14959,7 @@ func renvoEmitCompositeCompareAt(g *renvoLinearGen, typ int, left int, right int
 func renvoEmitBuiltinCopy(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
 	a := &g.asm
-	e := ep.exprs[idx]
+	e := &ep.exprs[idx]
 	if e.argCount != 2 {
 		return false
 	}
@@ -15932,7 +15928,7 @@ func renvoFindSmallConstByName(g *renvoLinearGen, nameStart int, nameEnd int) in
 	if renvoFindLocalIndex(g, nameStart, nameEnd) >= 0 {
 		return -129
 	}
-	if renvoNameIsNil(g.prog, nameStart, nameEnd) {
+	if renvoBytesEqualText(g.prog.src, nameStart, nameEnd, "nil") {
 		return 0
 	}
 	symIndex := renvoFindMetaGlobalIndex(g.meta, nameStart, nameEnd, renvoTokConst)
@@ -17395,7 +17391,7 @@ func renvoEmitCompareJump(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, l
 func renvoEmitStringValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
 	e := &ep.exprs[idx]
-	if renvoExprIsNil(g.prog, e) {
+	if e.kind == renvoExprIdent && renvoBytesEqualText(g.prog.src, e.nameStart, e.nameEnd, "nil") {
 		renvoAsmPrimaryImm(&g.asm, 0)
 		renvoAsmSecondaryImm(&g.asm, 0)
 		return true
