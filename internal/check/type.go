@@ -210,6 +210,23 @@ func parseStructFields(file syntax.File, start int, end int) []Field {
 	return fields
 }
 
+func duplicateStructFieldToken(typ TypeInfo) int {
+	if typ.Kind != TypeStruct {
+		return -1
+	}
+	for i := 0; i < len(typ.Fields); i++ {
+		if typ.Fields[i].Name == "" || typ.Fields[i].Name == "_" {
+			continue
+		}
+		for j := 0; j < i; j++ {
+			if typ.Fields[j].Name == typ.Fields[i].Name {
+				return typ.Fields[i].NameTok
+			}
+		}
+	}
+	return -1
+}
+
 func nextStructFieldEnd(file syntax.File, start int, end int) int {
 	parenDepth := 0
 	bracketDepth := 0

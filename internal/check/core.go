@@ -85,7 +85,11 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 		decl := info.Decls[i]
 		if decl.Kind == SymbolType {
 			file := pkg.Files[decl.File].File
-			info.Types = append(info.Types, buildTypeInfo(file, decl, i))
+			typ := buildTypeInfo(file, decl, i)
+			if duplicateTok := duplicateStructFieldToken(typ); duplicateTok >= 0 {
+				return info, false, CheckErrDuplicate, decl.File, duplicateTok
+			}
+			info.Types = append(info.Types, typ)
 		}
 	}
 	sortTypes(info.Types)

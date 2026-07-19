@@ -5274,8 +5274,11 @@ func renvoParseTypeInto(m *renvoMeta, p *renvoProgram, start int, end int, resul
 		i := start + 2
 		count := 0
 		for i < closeTok {
-			if renvoTokIsKind(p, i, renvoTokIdent) || renvoTokCharIs(p, i, '*') && renvoTokIsKind(p, i+1, renvoTokIdent) {
+			if renvoTokIsKind(p, i, renvoTokIdent) {
 				count++
+				for nameEnd := i + 1; renvoTokCharIs(p, nameEnd, ','); nameEnd += 2 {
+					count++
+				}
 				i = renvoStatementLineEnd(p, i, closeTok)
 			} else {
 				i++
@@ -5287,17 +5290,19 @@ func renvoParseTypeInto(m *renvoMeta, p *renvoProgram, start int, end int, resul
 		offset := 0
 		i = start + 2
 		for i < closeTok {
-			if renvoTokIsKind(p, i, renvoTokIdent) || renvoTokCharIs(p, i, '*') && renvoTokIsKind(p, i+1, renvoTokIdent) {
-				nameTok := i
-				if renvoTokCharIs(p, i, '*') {
-					nameTok++
-				}
-				fieldNameTok := renvoTokAt(p, nameTok)
-				nameStart := int(fieldNameTok.start)
-				nameEnd := int(fieldNameTok.end)
+			if renvoTokIsKind(p, i, renvoTokIdent) || renvoTokCharIs(p, i, '*') {
 				lineEnd := renvoStatementLineEnd(p, i, closeTok)
 				typeStart := i + 1
-				embedded := typeStart >= lineEnd || renvoTokCharIs(p, i, '*') || renvoTokIsKind(p, i+1, renvoTokString)
+				for renvoTokCharIs(p, typeStart, ',') {
+					typeStart += 2
+				}
+				nameTok := i
+				namesEnd := typeStart
+				if renvoTokCharIs(p, i, '*') {
+					nameTok++
+					namesEnd++
+				}
+				embedded := typeStart >= lineEnd || nameTok != i || renvoTokIsKind(p, typeStart, renvoTokString)
 				if embedded {
 					typeStart = i
 				}
@@ -5306,16 +5311,20 @@ func renvoParseTypeInto(m *renvoMeta, p *renvoProgram, start int, end int, resul
 					renvoSetTypeResult(result, 0, start)
 					return
 				}
-				offset = renvoAlignTo8(offset)
 				var fieldInfo renvoFieldInfo
-				fieldInfo.nameStart = nameStart
-				fieldInfo.nameEnd = nameEnd
 				fieldInfo.typ = fieldType.typ
-				fieldInfo.offset = offset
 				fieldInfo.embedded = embedded
-				m.fields[firstField+fieldIndex] = fieldInfo
-				offset += renvoTypeSize(m, fieldType.typ)
-				fieldIndex++
+				for nameTok < namesEnd {
+					fieldNameTok := renvoTokAt(p, nameTok)
+					offset = renvoAlignTo8(offset)
+					fieldInfo.nameStart = int(fieldNameTok.start)
+					fieldInfo.nameEnd = int(fieldNameTok.end)
+					fieldInfo.offset = offset
+					m.fields[firstField+fieldIndex] = fieldInfo
+					offset += renvoTypeSize(m, fieldType.typ)
+					fieldIndex++
+					nameTok += 2
+				}
 				i = lineEnd
 			} else {
 				i++
@@ -5341,7 +5350,6 @@ func renvoParseTypeInto(m *renvoMeta, p *renvoProgram, start int, end int, resul
 	}
 	renvoSetTypeResult(result, 0, start)
 }
-
 func renvoFindOrAddFuncTypeFromParams(m *renvoMeta, first int, count int, resultType int) int {
 	renvoNonNil(m)
 	variadic := 0
