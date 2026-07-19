@@ -219,7 +219,16 @@ func scanNumberEnd(src []byte, start int) int {
 }
 
 func scanTokenCapacity(src []byte) int {
-	capacity := len(src) / 4
+	capacity := 0
+	// Large linked programs are less token-dense than individual source files.
+	// Keep the wider estimate for small and hand-minified inputs, but avoid
+	// permanently touching an oversized token arena in no-GC self-hosted runs.
+	if len(src) >= 262144 {
+		capacity = len(src) / 5
+		capacity += capacity / 10
+	} else {
+		capacity = len(src) / 4
+	}
 	if capacity < 16 {
 		return 16
 	}

@@ -231,16 +231,31 @@ func functionValueProgramNeedsLowering(program *unit.Program) (bool, bool, bool)
 	deferred := false
 	builtins := false
 	for i := 0; i+1 < len(program.Tokens); i++ {
-		if functionValueTokenEquals(program, i, "func") && functionValueTokenEquals(program, i+1, "(") && !functionValueIsDeclaredFunction(program, i) {
+		token := program.Tokens[i]
+		start := token.Start
+		valid := start >= 0 && start+token.Size <= len(program.Text)
+		if token.Kind == unit.TokenFunc && functionValueTokenEquals(program, i+1, "(") && !functionValueIsDeclaredFunction(program, i) {
 			functions = true
 		}
-		if i+2 < len(program.Tokens) && functionValueTokenEquals(program, i, "defer") && functionValueTokenEquals(program, i+2, "(") {
+		if i+2 < len(program.Tokens) && valid && token.Size == 5 && program.Text[start] == 'd' && program.Text[start+1] == 'e' && program.Text[start+2] == 'f' && program.Text[start+3] == 'e' && program.Text[start+4] == 'r' && functionValueTokenEquals(program, i+2, "(") {
 			name := functionValueTokenText(program, i+1)
 			if (name == "copy" || name == "delete" || name == "panic" || name == "print" || name == "println" || name == "recover") && functionValueEnclosingLocalType(program, i, name) == "" && !functionValueDeclaredFunction(program, name) {
 				deferred = true
 			}
 		}
-		if i+1 < len(program.Tokens) && (functionValueTokenEquals(program, i, "min") || functionValueTokenEquals(program, i, "max") || functionValueTokenEquals(program, i, "clear")) && functionValueTokenEquals(program, i+1, "(") && !ordinaryBuiltinShadowed(program, i, functionValueTokenText(program, i)) {
+		name := ""
+		if valid && token.Kind == unit.TokenIdent {
+			if token.Size == 3 && program.Text[start] == 'm' && program.Text[start+2] == 'n' {
+				if program.Text[start+1] == 'i' {
+					name = "min"
+				} else if program.Text[start+1] == 'a' {
+					name = "max"
+				}
+			} else if token.Size == 5 && program.Text[start] == 'c' && program.Text[start+1] == 'l' && program.Text[start+2] == 'e' && program.Text[start+3] == 'a' && program.Text[start+4] == 'r' {
+				name = "clear"
+			}
+		}
+		if name != "" && functionValueTokenEquals(program, i+1, "(") && !ordinaryBuiltinShadowed(program, i, name) {
 			builtins = true
 		}
 	}
