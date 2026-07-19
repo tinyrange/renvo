@@ -32,6 +32,10 @@ func TestBundledStandardLibraryFS(t *testing.T) {
 	if _, ok := fs.ReadFile("/std/bytes/bytes_renvo.go"); !ok {
 		t.Fatal("RENVO standard library source was not embedded")
 	}
+	font, ok := fs.ReadFile("/std/graphics/gofont/Go-Mono.ttf")
+	if !ok || len(font) < 4 || !bytes.Equal(font[:4], []byte{0, 1, 0, 0}) {
+		t.Fatal("standard library embed asset was not embedded")
+	}
 }
 
 func TestBundledFormsModuleCache(t *testing.T) {
