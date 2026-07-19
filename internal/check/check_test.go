@@ -111,6 +111,16 @@ func TestCheckGraphCoreDiagnostics(t *testing.T) {
 			err:   CheckErrCallArgument,
 		},
 		{
+			name:  "invalid grouped call argument",
+			files: []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc consume(first, second int) {}\nfunc main() { consume(1, \"bad\") }\n")}},
+			err:   CheckErrCallArgument,
+		},
+		{
+			name:  "invalid unnamed call argument",
+			files: []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc consume(int, string) {}\nfunc main() { consume(1, true) }\n")}},
+			err:   CheckErrCallArgument,
+		},
+		{
 			name:  "invalid return type",
 			files: []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc value() int { return \"bad\" }\nfunc main() { _ = value() }\n")}},
 			err:   CheckErrReturnType,

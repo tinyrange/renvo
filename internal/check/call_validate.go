@@ -19,8 +19,11 @@ type definiteLocalTypeSpan struct {
 }
 
 type definiteCallTarget struct {
-	ready         bool
-	pointerParams []bool
+	ready               bool
+	primitiveReady      bool
+	pointerParams       []bool
+	primitiveParamCount int
+	primitiveParamCodes int
 }
 
 func prepareDefiniteCallTargets(pkg *load.Package, info *PackageInfo, refs []CoreNameRef, targets []definiteCallTarget) {
@@ -79,7 +82,8 @@ func invalidDefiniteCallArgumentType(pkg *load.Package, info *PackageInfo, fileI
 			return invalidTok
 		}
 		if hasLiteral {
-			invalidTok = invalidDefinitePrimitiveCallAt(pkg, info, fileIndex, calleeTok, close)
+			prepareDefinitePrimitiveCallTarget(pkg, info, ref.Index, target)
+			invalidTok = invalidDefinitePrimitiveCallAt(file, open, close, target)
 			if invalidTok >= 0 {
 				return invalidTok
 			}
