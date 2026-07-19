@@ -8841,7 +8841,7 @@ func renvoEmitJump(g *renvoLinearGen, ep *renvoExprParse, idx int, label int, ju
 	if !renvoEmitIntExpr(g, ep, idx) {
 		return false
 	}
-	renvoAsmCmpPrimaryImm8(a, 0)
+	renvoAsmCmpPrimaryImm8Discard(a, 0)
 	if jumpIfTrue {
 		renvoAsmJnzLabel(a, label)
 	} else {
@@ -17150,6 +17150,15 @@ func renvoAsmCmpPrimaryImm8(a *renvoAsm, imm int) {
 		return
 	}
 	renvoAmd64AsmCmpRaxImm8(a, imm)
+}
+
+func renvoAsmCmpPrimaryImm8Discard(a *renvoAsm, imm int) {
+	renvoNonNil(a)
+	if renvoTargetArch == renvoArchAmd64 {
+		renvoAmd64AsmCmpRaxImm8Discard(a, imm)
+		return
+	}
+	renvoAsmCmpPrimaryImm8(a, imm)
 }
 func renvoAsmAddPrimaryTertiary(a *renvoAsm) {
 	renvoNonNil(a)

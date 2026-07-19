@@ -153,6 +153,33 @@ func renvoAmd64RewritePrimaryLoad(a *renvoAsm, reg int, pushed bool) bool {
 	return true
 }
 
+func renvoAmd64RewritePrimaryLoadCompare(a *renvoAsm, imm int) bool {
+	renvoNonNil(a)
+	load := a.lastPrimaryLoad
+	if load <= 0 || load/8 != len(a.code) {
+		return false
+	}
+	at := load/8 - load%8
+	if at < 2 || a.code[at-2] != 0x48 || a.code[at-1] != 0x8b {
+		return false
+	}
+	// A RIP-relative load has a relocation whose displacement is based on the
+	// end of the original instruction. The comparison adds an immediate byte,
+	// so rewriting that form would move the RIP base without updating the
+	// relocation. Stack and register-relative loads have no such relocation.
+	if a.code[at]&0xc7 == 0x05 {
+		return false
+	}
+	// Turn `movq memory, %rax; cmpq immediate, %rax` into the shorter direct
+	// memory comparison. Callers use this only when the loaded value is dead
+	// after the flags are consumed.
+	a.code[at-1] = 0x83
+	a.code[at] += 0x38
+	a.code = append(a.code, byte(imm))
+	a.lastPrimaryLoad = 0
+	return true
+}
+
 func renvoAmd64AsmMovR8Rax(a *renvoAsm) {
 	renvoNonNil(a)
 	renvoAsmEmit24(a, 0xc08949)
@@ -366,10 +393,22 @@ func renvoAmd64AsmBoolNotRax(a *renvoAsm) {
 func renvoAmd64AsmCmpRaxImm8(a *renvoAsm, imm int) {
 	renvoNonNil(a)
 	if imm == 0 {
-		renvoAsmEmit16(a, 0xc085)
+		// Integer values occupy the full native register on amd64. Testing only
+		// EAX makes values whose low word is zero (for example 1 << 40) compare
+		// equal to zero and can send both user control flow and the compiler's
+		// own immediate-selection logic down the wrong path.
+		renvoAsmEmit24(a, 0xc08548)
 		return
 	}
 	renvoAsmEmit4(a, 0x48, 0x83, 0xf8, imm)
+}
+
+func renvoAmd64AsmCmpRaxImm8Discard(a *renvoAsm, imm int) {
+	renvoNonNil(a)
+	if renvoAmd64RewritePrimaryLoadCompare(a, imm) {
+		return
+	}
+	renvoAmd64AsmCmpRaxImm8(a, imm)
 }
 func renvoAmd64AsmAddRaxRcx(a *renvoAsm) {
 	renvoNonNil(a)
@@ -553,7 +592,7 @@ func renvoAmd64EmitCompareJump(g *renvoLinearGen, ep *renvoExprParse, e *renvoEx
 		if !renvoEmitIntExpr(g, ep, leftIndex) {
 			return false
 		}
-		renvoAsmCmpPrimaryImm8(&g.asm, rightConst.value)
+		renvoAsmCmpPrimaryImm8Discard(&g.asm, rightConst.value)
 		renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue)
 		return true
 	}
