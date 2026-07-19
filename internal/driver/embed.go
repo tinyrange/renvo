@@ -123,10 +123,29 @@ func expandSourceEmbeds(fs SourceFS, path string, moduleRoot string, src []byte)
 func embedSourceContainsDirective(src []byte) bool {
 	i := 0
 	for i+10 <= len(src) {
-		if src[i] == '/' && src[i+1] == '/' && src[i+2] == 'g' && src[i+3] == 'o' && src[i+4] == ':' && src[i+5] == 'e' && src[i+6] == 'm' && src[i+7] == 'b' && src[i+8] == 'e' && src[i+9] == 'd' {
-			return true
+		last := src[i+9]
+		if last == 'd' {
+			if src[i] == '/' && src[i+1] == '/' && src[i+2] == 'g' && src[i+3] == 'o' && src[i+4] == ':' && src[i+5] == 'e' && src[i+6] == 'm' && src[i+7] == 'b' && src[i+8] == 'e' {
+				return true
+			}
+			i += 10
+		} else if last == 'e' {
+			i++
+		} else if last == 'b' {
+			i += 2
+		} else if last == 'm' {
+			i += 3
+		} else if last == ':' {
+			i += 5
+		} else if last == 'o' {
+			i += 6
+		} else if last == 'g' {
+			i += 7
+		} else if last == '/' {
+			i += 8
+		} else {
+			i += 10
 		}
-		i++
 	}
 	return false
 }
