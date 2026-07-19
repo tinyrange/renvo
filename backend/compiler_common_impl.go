@@ -12858,6 +12858,11 @@ func renvoEmitRuntimeNonNilPrimary(g *renvoLinearGen) {
 	if !g.meta.panicEnabled {
 		if renvoTargetArch == renvoArchAmd64 {
 			renvoAsmCallLabel(a, renvoAmd64EnsureRuntimeCheck(g, &g.runtimeNonNilLabel, 0, "\x48\x85\xc0\x74\x01\xc3\xe9\x00\x00\x00\x00"))
+		} else if renvoTargetArch == renvoArchWasm32 {
+			ok := renvoAsmNewLabel(a)
+			renvoAsmJnzPrimary(a, ok)
+			renvoAsmJmpLabel(a, renvoEnsureUncaughtRuntimeFaultHelper(g))
+			renvoAsmMarkLabel(a, ok)
 		} else {
 			renvoAsmCallLabel(a, renvoEnsureNonNilCheckHelper(g))
 		}
@@ -12898,8 +12903,10 @@ func renvoEmitRuntimeNonNilSecondary(g *renvoLinearGen) {
 			renvoAsmEmit24(a, 0xd5ff41)
 			return
 		}
-		renvoAsmCallLabel(a, renvoEnsureNonNilSecondaryCheckHelper(g))
-		return
+		if renvoTargetArch != renvoArchWasm32 {
+			renvoAsmCallLabel(a, renvoEnsureNonNilSecondaryCheckHelper(g))
+			return
+		}
 	}
 	renvoAsmPushSecondary(a)
 	renvoAsmPopPrimary(a)
@@ -17388,7 +17395,18 @@ func renvoEmitPrimaryTertiaryOp(g *renvoLinearGen, tok int) bool {
 	divide := renvoTokCharIs(g.prog, tok, '/')
 	mod := renvoTokCharIs(g.prog, tok, '%')
 	if (divide || mod) && !g.meta.panicEnabled {
-		renvoAsmCallLabel(&g.asm, renvoEnsureSignedDivisionHelper(g, mod))
+		if renvoTargetArch == renvoArchWasm32 {
+			a := &g.asm
+			nonzero := renvoAsmNewLabel(a)
+			renvoAsmJnzPrimary(a, nonzero)
+			renvoAsmJmpLabel(a, renvoEnsureUncaughtRuntimeFaultHelper(g))
+			renvoAsmMarkLabel(a, nonzero)
+			done := renvoEmitSignedDivisionOverflowGuard(g, mod)
+			renvoAsmDivLeftTertiaryRightPrimary(a, mod)
+			renvoAsmMarkLabel(a, done)
+		} else {
+			renvoAsmCallLabel(&g.asm, renvoEnsureSignedDivisionHelper(g, mod))
+		}
 		return true
 	}
 	done := -1
