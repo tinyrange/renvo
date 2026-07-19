@@ -124,7 +124,7 @@ func parseBlockInto(body Body, file File, openTok int, closeTok int) Body {
 }
 
 func parseStmt(body Body, file File, start int, limit int) (int, Body) {
-	kind := file.Tokens[start].Kind
+	kind := file.Tokens[start].KindLine & 255
 	if kind == TokenReturn {
 		end := findStmtEnd(file, start+1, limit)
 		stmt := newStmt(StmtReturn, start, end)
@@ -206,7 +206,7 @@ func parseStmt(body Body, file File, start int, limit int) (int, Body) {
 		body = parseBlockInto(body, file, start, closeTok)
 		return closeTok + 1, body
 	}
-	if file.Tokens[start].Kind == TokenIdent && tokCharIs(file.Src, file.Tokens, start+1, ':') {
+	if file.Tokens[start].KindLine&255 == TokenIdent && tokCharIs(file.Src, file.Tokens, start+1, ':') {
 		stmt := newStmt(StmtLabel, start, start+2)
 		body.Stmts = append(body.Stmts, stmt)
 		return start + 2, body
@@ -245,9 +245,9 @@ func parseBlockStmt(body Body, file File, start int, limit int, stmtKind int) (i
 	elseBlockEnd := -1
 	if stmtKind == StmtIf {
 		next := skipStmtSeparators(file, bodyEnd)
-		if next < limit && file.Tokens[next].Kind == TokenElse {
+		if next < limit && file.Tokens[next].KindLine&255 == TokenElse {
 			stmt.ElseStart = next
-			if next+1 < limit && file.Tokens[next+1].Kind == TokenIf {
+			if next+1 < limit && file.Tokens[next+1].KindLine&255 == TokenIf {
 				elseEnd := findIfEnd(file, next+1, limit)
 				if elseEnd <= next+1 {
 					return start, bodyFail(body, BodyErrStmt, next)
@@ -293,8 +293,8 @@ func findIfEnd(file File, start int, limit int) int {
 		return -1
 	}
 	next := skipStmtSeparators(file, bodyEnd)
-	if next < limit && file.Tokens[next].Kind == TokenElse {
-		if next+1 < limit && file.Tokens[next+1].Kind == TokenIf {
+	if next < limit && file.Tokens[next].KindLine&255 == TokenElse {
+		if next+1 < limit && file.Tokens[next+1].KindLine&255 == TokenIf {
 			return findIfEnd(file, next+1, limit)
 		}
 		if tokCharIs(file.Src, file.Tokens, next+1, '{') {
@@ -342,7 +342,7 @@ func findStmtBlockStart(file File, start int, limit int) int {
 	for i < limit {
 		tok := file.Tokens[i]
 		c := byte(0)
-		if tok.Kind == TokenOperator && tok.End == tok.Start+1 {
+		if tok.KindLine&255 == TokenOperator && tok.End == tok.Start+1 {
 			c = file.Src[tok.Start]
 		}
 		if c == '(' {
@@ -366,7 +366,7 @@ func findStmtBlockStart(file File, start int, limit int) int {
 }
 
 func findStmtEnd(file File, start int, limit int) int {
-	if start < limit && start > 0 && file.Tokens[start].Line != file.Tokens[start-1].Line {
+	if start < limit && start > 0 && file.Tokens[start].KindLine>>8 != file.Tokens[start-1].KindLine>>8 {
 		return start
 	}
 	i := start
@@ -377,14 +377,14 @@ func findStmtEnd(file File, start int, limit int) int {
 	for i < limit {
 		tok := file.Tokens[i]
 		c := byte(0)
-		if tok.Kind == TokenOperator && tok.End == tok.Start+1 {
+		if tok.KindLine&255 == TokenOperator && tok.End == tok.Start+1 {
 			c = file.Src[tok.Start]
 		}
 		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 {
 			if c == ';' {
 				return i + 1
 			}
-			if i > start && file.Tokens[i].Line != file.Tokens[prev].Line && !lineContinues(file, prev, i) {
+			if i > start && file.Tokens[i].KindLine>>8 != file.Tokens[prev].KindLine>>8 && !lineContinues(file, prev, i) {
 				return i
 			}
 		}
@@ -433,7 +433,7 @@ func findTopLevelChar(file File, start int, limit int, c byte) int {
 	for i < limit {
 		tok := file.Tokens[i]
 		tokChar := byte(0)
-		if tok.Kind == TokenOperator && tok.End == tok.Start+1 {
+		if tok.KindLine&255 == TokenOperator && tok.End == tok.Start+1 {
 			tokChar = file.Src[tok.Start]
 		}
 		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && tokChar == c {
@@ -477,7 +477,7 @@ func findAssign(file File, start int, end int) int {
 }
 
 func tokenIsAssign(file File, token Token) bool {
-	if token.Kind != TokenOperator || token.Start < 0 || token.End > len(file.Src) {
+	if token.KindLine&255 != TokenOperator || token.Start < 0 || token.End > len(file.Src) {
 		return false
 	}
 	size := token.End - token.Start
@@ -502,7 +502,7 @@ func classifyExpr(file File, start int, end int) int {
 		return ExprOther
 	}
 	if end-start == 1 {
-		kind := file.Tokens[start].Kind
+		kind := file.Tokens[start].KindLine & 255
 		if kind == TokenIdent {
 			return ExprIdent
 		}
@@ -538,7 +538,7 @@ func hasTopLevelBinary(file File, start int, end int) bool {
 	for i := start; i < end; i++ {
 		tok := file.Tokens[i]
 		c := byte(0)
-		if tok.Kind == TokenOperator && tok.End == tok.Start+1 {
+		if tok.KindLine&255 == TokenOperator && tok.End == tok.Start+1 {
 			c = file.Src[tok.Start]
 		}
 		if c == '(' {

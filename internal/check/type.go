@@ -92,16 +92,16 @@ func classifyType(file syntax.File, start int, end int) int {
 	if start < 0 || start >= end || start >= len(file.Tokens) {
 		return TypeOther
 	}
-	if file.Tokens[start].Kind == syntax.TokenStruct {
+	if file.Tokens[start].KindLine&255 == syntax.TokenStruct {
 		return TypeStruct
 	}
-	if file.Tokens[start].Kind == syntax.TokenInterface {
+	if file.Tokens[start].KindLine&255 == syntax.TokenInterface {
 		return TypeInterface
 	}
-	if file.Tokens[start].Kind == syntax.TokenMap {
+	if file.Tokens[start].KindLine&255 == syntax.TokenMap {
 		return TypeMap
 	}
-	if file.Tokens[start].Kind == syntax.TokenFunc {
+	if file.Tokens[start].KindLine&255 == syntax.TokenFunc {
 		return TypeFunc
 	}
 	if tokCharIs(&file, start, '*') {
@@ -113,7 +113,7 @@ func classifyType(file syntax.File, start int, end int) int {
 		}
 		return TypeArray
 	}
-	if file.Tokens[start].Kind == syntax.TokenIdent {
+	if file.Tokens[start].KindLine&255 == syntax.TokenIdent {
 		return TypeNamed
 	}
 	return TypeOther
@@ -193,7 +193,7 @@ func parseStructFields(file syntax.File, start int, end int) []Field {
 		fieldEnd := nextStructFieldEnd(file, i, end)
 		first, last := trimFieldSpan(file, i, fieldEnd)
 		if first < last {
-			if file.Tokens[last-1].Kind == syntax.TokenString {
+			if file.Tokens[last-1].KindLine&255 == syntax.TokenString {
 				last--
 			}
 			parsed := parseFieldList(file, first, last)
@@ -233,7 +233,7 @@ func nextStructFieldEnd(file syntax.File, start int, end int) int {
 	braceDepth := 0
 	i := start
 	for i < end {
-		if i > start && parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && file.Tokens[i].Line != file.Tokens[i-1].Line {
+		if i > start && parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && file.Tokens[i].KindLine>>8 != file.Tokens[i-1].KindLine>>8 {
 			return i
 		}
 		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && tokCharIs(&file, i, ';') {

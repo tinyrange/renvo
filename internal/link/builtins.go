@@ -409,7 +409,7 @@ func ordinaryConstantValue(program *unit.Program, start int, end int, depth int)
 	}
 	if end-start == 1 && program.Tokens[start].Kind == unit.TokenString {
 		tok := program.Tokens[start]
-		value, ok := syntax.StringLiteralValue(program.Text, syntax.Token{Kind: syntax.TokenString, Start: tok.Start, End: tok.Start + tok.Size, Line: tok.Line})
+		value, ok := syntax.StringLiteralValue(program.Text, syntax.MakeToken(syntax.TokenString, tok.Start, tok.Start+tok.Size, tok.Line))
 		return ordinaryBuiltinConstant{kind: 2, text: value, ok: ok}
 	}
 	if end-start == 1 && (program.Tokens[start].Kind == unit.TokenNumber || program.Tokens[start].Kind == unit.TokenFloat) {

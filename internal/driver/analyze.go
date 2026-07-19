@@ -130,7 +130,7 @@ func analysisDiagnosticAtToken(diagnostic Diagnostic, file load.ParsedFile, toke
 	start, end, line := len(file.Src), len(file.Src), 1
 	if tokenIndex >= 0 && tokenIndex < len(file.File.Tokens) {
 		token := file.File.Tokens[tokenIndex]
-		start, end, line = token.Start, token.End, token.Line
+		start, end, line = token.Start, token.End, token.KindLine>>8
 	}
 	diagnostic.Start, diagnostic.End, diagnostic.Line = start, end, line
 	diagnostic.Column = 1

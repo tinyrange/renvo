@@ -1,6 +1,10 @@
 package syntax
 
-import "renvo.dev/internal/arena"
+import (
+	"unsafe"
+
+	"renvo.dev/internal/arena"
+)
 
 const (
 	ParseOK = iota
@@ -64,11 +68,10 @@ func ParseFile(src []byte) File {
 		Error:       ParseOK,
 		ErrorTok:    -1,
 	}
-	// RENVO represents these four integer fields in four eight-byte arena slots.
 	// Scanning performs no other allocation, so the final backing array ends at
 	// tokenArenaEnd even when append replaced one or more smaller arrays. Drop
 	// those superseded arrays now so they do not contribute to peak RSS.
-	const tokenArenaElementSize = 32
+	tokenArenaElementSize := int(unsafe.Sizeof(Token{}))
 	finalTokenStart := tokenArenaEnd - cap(tokens)*tokenArenaElementSize
 	if tokenArenaEnd > tokenArenaStart {
 		arena.Discard(tokenArenaStart, finalTokenStart)
@@ -80,17 +83,17 @@ func ParseFile(src []byte) File {
 }
 
 func parseTokens(file File) File {
-	if len(file.Tokens) < 3 || file.Tokens[0].Kind != TokenPackage || file.Tokens[1].Kind != TokenIdent {
+	if len(file.Tokens) < 3 || file.Tokens[0].KindLine&255 != TokenPackage || file.Tokens[1].KindLine&255 != TokenIdent {
 		return parseFail(file, ParseErrPackage, 0)
 	}
 	file.PackageName = 1
 	i := 2
-	for i < len(file.Tokens) && file.Tokens[i].Kind != TokenEOF {
+	for i < len(file.Tokens) && file.Tokens[i].KindLine&255 != TokenEOF {
 		i = skipTopSeparators(file, i)
-		if i >= len(file.Tokens) || file.Tokens[i].Kind == TokenEOF {
+		if i >= len(file.Tokens) || file.Tokens[i].KindLine&255 == TokenEOF {
 			break
 		}
-		kind := file.Tokens[i].Kind
+		kind := file.Tokens[i].KindLine & 255
 		if kind == TokenImport {
 			next, ok := parseImportDecl(&file, i)
 			if !ok {
@@ -132,7 +135,7 @@ func parseImportDecl(file *File, start int) (int, bool) {
 	i := start + 1
 	if tokCharIs(file.Src, file.Tokens, i, '(') {
 		i++
-		for i < len(file.Tokens) && file.Tokens[i].Kind != TokenEOF {
+		for i < len(file.Tokens) && file.Tokens[i].KindLine&255 != TokenEOF {
 			i = skipImportSeparators(*file, i)
 			if tokCharIs(file.Src, file.Tokens, i, ')') {
 				return i + 1, true
@@ -158,18 +161,18 @@ func parseImportSpec(file *File, start int, grouped bool) (int, bool) {
 	if pathTok >= len(file.Tokens) {
 		return start, false
 	}
-	if file.Tokens[pathTok].Kind != TokenString {
+	if file.Tokens[pathTok].KindLine&255 != TokenString {
 		if isImportName(file.Src, file.Tokens, pathTok) {
 			nameTok = pathTok
 			pathTok++
 		}
 	}
-	if pathTok >= len(file.Tokens) || file.Tokens[pathTok].Kind != TokenString {
+	if pathTok >= len(file.Tokens) || file.Tokens[pathTok].KindLine&255 != TokenString {
 		return start, false
 	}
 	end := pathTok + 1
 	next := end
-	for next < len(file.Tokens) && file.Tokens[next].Kind != TokenEOF {
+	for next < len(file.Tokens) && file.Tokens[next].KindLine&255 != TokenEOF {
 		if tokCharIs(file.Src, file.Tokens, next, ';') {
 			next++
 			break
@@ -177,7 +180,7 @@ func parseImportSpec(file *File, start int, grouped bool) (int, bool) {
 		if grouped && tokCharIs(file.Src, file.Tokens, next, ')') {
 			break
 		}
-		if file.Tokens[next].Line != file.Tokens[pathTok].Line {
+		if file.Tokens[next].KindLine>>8 != file.Tokens[pathTok].KindLine>>8 {
 			break
 		}
 		return start, false
@@ -192,11 +195,11 @@ func parseImportSpec(file *File, start int, grouped bool) (int, bool) {
 }
 
 func parseTopDecl(file *File, start int) (int, bool) {
-	kind := file.Tokens[start].Kind
+	kind := file.Tokens[start].KindLine & 255
 	i := start + 1
 	if tokCharIs(file.Src, file.Tokens, i, '(') {
 		i++
-		for i < len(file.Tokens) && file.Tokens[i].Kind != TokenEOF {
+		for i < len(file.Tokens) && file.Tokens[i].KindLine&255 != TokenEOF {
 			i = skipDeclSeparators(*file, i)
 			if tokCharIs(file.Src, file.Tokens, i, ')') {
 				return i + 1, true
@@ -217,7 +220,7 @@ func parseTopDecl(file *File, start int) (int, bool) {
 }
 
 func parseDeclSpec(file *File, kind int, start int, grouped bool) (int, bool) {
-	if start >= len(file.Tokens) || file.Tokens[start].Kind != TokenIdent {
+	if start >= len(file.Tokens) || file.Tokens[start].KindLine&255 != TokenIdent {
 		return start, false
 	}
 	end, next, ok := skipDeclSpec(*file, start, grouped)
@@ -232,7 +235,7 @@ func parseDeclSpec(file *File, kind int, start int, grouped bool) (int, bool) {
 	i := start + 1
 	for tokCharIs(file.Src, file.Tokens, i, ',') {
 		i++
-		if i >= len(file.Tokens) || file.Tokens[i].Kind != TokenIdent || i >= end {
+		if i >= len(file.Tokens) || file.Tokens[i].KindLine&255 != TokenIdent || i >= end {
 			return start, false
 		}
 		file.Decls = append(file.Decls, TopDecl{Kind: kind, NameTok: i, StartTok: start, EndTok: end})
@@ -265,7 +268,7 @@ func parseFuncDecl(file File, start int) (FuncDecl, bool) {
 		fn.ReceiverEnd = receiverEnd - 1
 		i = receiverEnd
 	}
-	if i >= len(file.Tokens) || file.Tokens[i].Kind != TokenIdent {
+	if i >= len(file.Tokens) || file.Tokens[i].KindLine&255 != TokenIdent {
 		return fn, false
 	}
 	fn.NameTok = i
@@ -298,7 +301,7 @@ func parseFuncDecl(file File, start int) (FuncDecl, bool) {
 
 func findFuncBody(file File, start int) int {
 	i := start
-	for i < len(file.Tokens) && file.Tokens[i].Kind != TokenEOF {
+	for i < len(file.Tokens) && file.Tokens[i].KindLine&255 != TokenEOF {
 		if tokCharIs(file.Src, file.Tokens, i, '(') {
 			next := skipBalanced(file, i, '(', ')')
 			if next <= i {
@@ -316,7 +319,7 @@ func findFuncBody(file File, start int) int {
 			continue
 		}
 		if tokCharIs(file.Src, file.Tokens, i, '{') {
-			if i > 0 && (file.Tokens[i-1].Kind == TokenStruct || file.Tokens[i-1].Kind == TokenInterface) {
+			if i > 0 && (file.Tokens[i-1].KindLine&255 == TokenStruct || file.Tokens[i-1].KindLine&255 == TokenInterface) {
 				next := skipBalanced(file, i, '{', '}')
 				if next <= i {
 					return -1
@@ -332,12 +335,12 @@ func findFuncBody(file File, start int) int {
 }
 
 func skipDeclSpec(file File, start int, grouped bool) (int, int, bool) {
-	line := file.Tokens[start].Line
+	line := file.Tokens[start].KindLine >> 8
 	i := start
 	parenDepth := 0
 	bracketDepth := 0
 	braceDepth := 0
-	for i < len(file.Tokens) && file.Tokens[i].Kind != TokenEOF {
+	for i < len(file.Tokens) && file.Tokens[i].KindLine&255 != TokenEOF {
 		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 {
 			if grouped && tokCharIs(file.Src, file.Tokens, i, ')') {
 				return i, i, true
@@ -345,7 +348,7 @@ func skipDeclSpec(file File, start int, grouped bool) (int, int, bool) {
 			if tokCharIs(file.Src, file.Tokens, i, ';') {
 				return i, i + 1, true
 			}
-			if i > start && file.Tokens[i].Line != line {
+			if i > start && file.Tokens[i].KindLine>>8 != line {
 				return i, i, true
 			}
 		}
@@ -388,10 +391,10 @@ func skipBalanced(file File, start int, open byte, close byte) int {
 	}
 	depth := 1
 	i := start + 1
-	for i < len(file.Tokens) && file.Tokens[i].Kind != TokenEOF {
+	for i < len(file.Tokens) && file.Tokens[i].KindLine&255 != TokenEOF {
 		tok := file.Tokens[i]
 		c := byte(0)
-		if tok.Kind == TokenOperator && tok.End == tok.Start+1 {
+		if tok.KindLine&255 == TokenOperator && tok.End == tok.Start+1 {
 			c = file.Src[tok.Start]
 		}
 		if c == open {
@@ -432,7 +435,7 @@ func isImportName(src []byte, toks []Token, i int) bool {
 	if i < 0 || i >= len(toks) {
 		return false
 	}
-	if toks[i].Kind == TokenIdent {
+	if toks[i].KindLine&255 == TokenIdent {
 		return true
 	}
 	return tokCharIs(src, toks, i, '.')
@@ -442,7 +445,7 @@ func tokCharIs(src []byte, toks []Token, i int, c byte) bool {
 	if i < 0 || i >= len(toks) {
 		return false
 	}
-	if toks[i].Kind != TokenOperator {
+	if toks[i].KindLine&255 != TokenOperator {
 		return false
 	}
 	if toks[i].End-toks[i].Start != 1 {

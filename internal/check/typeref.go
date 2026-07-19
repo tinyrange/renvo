@@ -125,7 +125,7 @@ func markTypeRefOwnerDecl(refs []TypeRef, start int, ownerDecl int) {
 
 func appendTypeSpanRefs(refs []TypeRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, start int, end int) []TypeRef {
 	for i := start; i < end && i < len(file.Tokens); i++ {
-		if file.Tokens[i].Kind != syntax.TokenIdent {
+		if file.Tokens[i].KindLine&255 != syntax.TokenIdent {
 			continue
 		}
 		if i > start && tokenTextIs(&file, i-1, ".") {
@@ -135,7 +135,7 @@ func appendTypeSpanRefs(refs []TypeRef, file syntax.File, fileIndex int, info Pa
 		if name == "_" {
 			continue
 		}
-		if i+2 < end && tokenTextIs(&file, i+1, ".") && file.Tokens[i+2].Kind == syntax.TokenIdent {
+		if i+2 < end && tokenTextIs(&file, i+1, ".") && file.Tokens[i+2].KindLine&255 == syntax.TokenIdent {
 			refs = append(refs, resolveSelectorTypeRef(fileIndex, info, checked, scope, name, tokenString(&file, i+2), i, i+1, i+2))
 			i += 2
 			continue

@@ -96,7 +96,7 @@ func definitePrimitiveParamSpan(file syntax.File, fn syntax.FuncDecl, wanted int
 			start = segmentEnd + 1
 			continue
 		}
-		if file.Tokens[first].Kind == syntax.TokenIdent && first+1 < last && !tokCharIs(&file, first+1, '.') {
+		if file.Tokens[first].KindLine&255 == syntax.TokenIdent && first+1 < last && !tokCharIs(&file, first+1, '.') {
 			if wanted < pending+1 {
 				return first + 1, last, true
 			}
@@ -124,7 +124,7 @@ func definitePrimitiveParamSpan(file syntax.File, fn syntax.FuncDecl, wanted int
 
 func definitePendingParamSpan(file syntax.File, start int, end int, wanted int) (int, int, bool) {
 	for i := start; i < end; i++ {
-		if file.Tokens[i].Kind == syntax.TokenIdent {
+		if file.Tokens[i].KindLine&255 == syntax.TokenIdent {
 			if wanted == 0 {
 				return i, i + 1, true
 			}

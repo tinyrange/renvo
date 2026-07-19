@@ -4,15 +4,15 @@ import "renvo.dev/internal/syntax"
 
 func invalidDefiniteAssignmentType(file syntax.File, fn syntax.FuncDecl) (int, int) {
 	for i := fn.BodyStart + 2; i+1 < fn.BodyEnd; i++ {
-		if file.Tokens[i].Kind != syntax.TokenOperator {
+		if file.Tokens[i].KindLine&255 != syntax.TokenOperator {
 			continue
 		}
 		operator := file.Src[file.Tokens[i].Start]
 		if operator == '+' || operator == '-' || operator == '*' || operator == '/' || operator == '%' || operator == '&' || operator == '|' || operator == '^' || operator == '<' || operator == '>' || operator == '!' || operator == '=' {
 			leftToken := file.Tokens[i-1]
 			rightToken := file.Tokens[i+1]
-			leftPossible := leftToken.Kind == syntax.TokenNumber || leftToken.Kind == syntax.TokenString || leftToken.Kind == syntax.TokenIdent && (leftToken.End-leftToken.Start == 4 || leftToken.End-leftToken.Start == 5)
-			rightPossible := rightToken.Kind == syntax.TokenNumber || rightToken.Kind == syntax.TokenString || rightToken.Kind == syntax.TokenIdent && (rightToken.End-rightToken.Start == 4 || rightToken.End-rightToken.Start == 5)
+			leftPossible := leftToken.KindLine&255 == syntax.TokenNumber || leftToken.KindLine&255 == syntax.TokenString || leftToken.KindLine&255 == syntax.TokenIdent && (leftToken.End-leftToken.Start == 4 || leftToken.End-leftToken.Start == 5)
+			rightPossible := rightToken.KindLine&255 == syntax.TokenNumber || rightToken.KindLine&255 == syntax.TokenString || rightToken.KindLine&255 == syntax.TokenIdent && (rightToken.End-rightToken.Start == 4 || rightToken.End-rightToken.Start == 5)
 			if leftPossible && rightPossible {
 				leftKind := definiteLiteralKind(file, i-1)
 				rightKind := definiteLiteralKind(file, i+1)
@@ -29,11 +29,11 @@ func invalidDefiniteAssignmentType(file syntax.File, fn syntax.FuncDecl) (int, i
 				}
 			}
 		}
-		if !tokenTextIs(&file, i, "=") || file.Tokens[i-1].Kind != syntax.TokenIdent {
+		if !tokenTextIs(&file, i, "=") || file.Tokens[i-1].KindLine&255 != syntax.TokenIdent {
 			continue
 		}
 		valueKind := definiteLiteralKind(file, i+1)
-		if valueKind == "" && file.Tokens[i+1].Kind == syntax.TokenIdent {
+		if valueKind == "" && file.Tokens[i+1].KindLine&255 == syntax.TokenIdent {
 			valueKind = definiteShortValueKind(file, fn, i+1, i)
 		}
 		if valueKind == "" {
@@ -41,7 +41,7 @@ func invalidDefiniteAssignmentType(file syntax.File, fn syntax.FuncDecl) (int, i
 		}
 		name := tokenString(&file, i-1)
 		for j := i - 2; j >= fn.BodyStart+1; j-- {
-			if file.Tokens[j].Kind != syntax.TokenVar || j+2 >= i || file.Tokens[j+1].Kind != syntax.TokenIdent || tokenString(&file, j+1) != name {
+			if file.Tokens[j].KindLine&255 != syntax.TokenVar || j+2 >= i || file.Tokens[j+1].KindLine&255 != syntax.TokenIdent || tokenString(&file, j+1) != name {
 				continue
 			}
 			declared := tokenString(&file, j+2)
@@ -69,12 +69,12 @@ func definiteShortValueKind(file syntax.File, fn syntax.FuncDecl, nameTok int, b
 
 func excludedFileFeature(file syntax.File) (int, int) {
 	for i := 0; i < len(file.Tokens); i++ {
-		if file.Tokens[i].Kind == syntax.TokenSelect {
+		if file.Tokens[i].KindLine&255 == syntax.TokenSelect {
 			return CheckErrSelect, i
 		}
 	}
 	for i := 0; i < len(file.Tokens); i++ {
-		kind := file.Tokens[i].Kind
+		kind := file.Tokens[i].KindLine & 255
 		if kind == syntax.TokenGo {
 			return CheckErrGoroutine, i
 		}
@@ -89,10 +89,10 @@ func definiteLiteralKind(file syntax.File, tok int) string {
 	if tok < 0 || tok >= len(file.Tokens) {
 		return ""
 	}
-	if file.Tokens[tok].Kind == syntax.TokenString {
+	if file.Tokens[tok].KindLine&255 == syntax.TokenString {
 		return "string"
 	}
-	if file.Tokens[tok].Kind == syntax.TokenNumber {
+	if file.Tokens[tok].KindLine&255 == syntax.TokenNumber {
 		return "int"
 	}
 	if tokenTextIs(&file, tok, "true") || tokenTextIs(&file, tok, "false") {

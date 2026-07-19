@@ -90,7 +90,7 @@ func appendSpecInitializerRefs(refs []NameRef, file syntax.File, fileIndex int, 
 
 func appendBranchLabelRef(refs []NameRef, file syntax.File, scope FuncScope, stmt syntax.Stmt) []NameRef {
 	tok := stmt.StartTok + 1
-	if tok >= stmt.EndTok || tok >= len(file.Tokens) || file.Tokens[tok].Kind != syntax.TokenIdent {
+	if tok >= stmt.EndTok || tok >= len(file.Tokens) || file.Tokens[tok].KindLine&255 != syntax.TokenIdent {
 		return refs
 	}
 	name := tokenString(&file, tok)
@@ -104,7 +104,7 @@ func appendBranchLabelRef(refs []NameRef, file syntax.File, scope FuncScope, stm
 
 func appendExprRefs(refs []NameRef, file syntax.File, fileIndex int, info PackageInfo, scope FuncScope, start int, end int) []NameRef {
 	for i := start; i < end && i < len(file.Tokens); i++ {
-		if file.Tokens[i].Kind != syntax.TokenIdent || shouldSkipIdentRef(&file, i, end) {
+		if file.Tokens[i].KindLine&255 != syntax.TokenIdent || shouldSkipIdentRef(&file, i, end) {
 			continue
 		}
 		name := tokenString(&file, i)
@@ -119,13 +119,13 @@ func appendExprRefs(refs []NameRef, file syntax.File, fileIndex int, info Packag
 func shouldSkipIdentRef(file *syntax.File, tok int, end int) bool {
 	if tok > 0 {
 		prev := file.Tokens[tok-1]
-		if prev.Kind == syntax.TokenOperator && prev.End == prev.Start+1 && file.Src[prev.Start] == '.' {
+		if prev.KindLine&255 == syntax.TokenOperator && prev.End == prev.Start+1 && file.Src[prev.Start] == '.' {
 			return true
 		}
 	}
 	if tok+1 < end {
 		next := file.Tokens[tok+1]
-		if next.Kind == syntax.TokenOperator && next.End == next.Start+1 && file.Src[next.Start] == ':' {
+		if next.KindLine&255 == syntax.TokenOperator && next.End == next.Start+1 && file.Src[next.Start] == ':' {
 			return true
 		}
 	}

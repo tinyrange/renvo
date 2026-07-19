@@ -48,7 +48,7 @@ func constantIndexInt(context constantIndexContext, start int, end int, before i
 	if start < 0 || end <= start {
 		return 0, false
 	}
-	if file.Tokens[start].Kind == syntax.TokenIdent && start+1 < end && tokCharIs(&file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && constantIndexType(context, start, 0) {
+	if file.Tokens[start].KindLine&255 == syntax.TokenIdent && start+1 < end && tokCharIs(&file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && constantIndexType(context, start, 0) {
 		return constantIndexInt(context, start+2, end-1, before, depth+1)
 	}
 	for precedence := 1; precedence <= 2; precedence++ {
@@ -79,14 +79,14 @@ func constantIndexInt(context constantIndexContext, start int, end int, before i
 	if end != start+1 {
 		return 0, false
 	}
-	if file.Tokens[start].Kind == syntax.TokenNumber {
+	if file.Tokens[start].KindLine&255 == syntax.TokenNumber {
 		return parseConstInt(file, start)
 	}
-	if file.Tokens[start].Kind != syntax.TokenIdent {
+	if file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return 0, false
 	}
 	for i := context.fn.BodyStart + 1; i+3 < before; i++ {
-		if file.Tokens[i].Kind == syntax.TokenConst && statementTokensEqual(&file, i+1, start) && tokenTextIs(&file, i+2, "=") {
+		if file.Tokens[i].KindLine&255 == syntax.TokenConst && statementTokensEqual(&file, i+1, start) && tokenTextIs(&file, i+2, "=") {
 			return constantIndexInt(context, i+3, statementSpecEnd(file, i+1, before), before, depth+1)
 		}
 	}
@@ -205,7 +205,7 @@ func constantIndexArrayLength(context constantIndexContext, signature FuncSignat
 	if start < end && tokCharIs(&file, end-1, '}') {
 		return constantIndexTypeLength(context, start, findTypeTopLevelChar(file, start, end, '{'), before, depth+1)
 	}
-	if end != start+1 || file.Tokens[start].Kind != syntax.TokenIdent {
+	if end != start+1 || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return 0, false
 	}
 	name := tokenString(&file, start)
@@ -228,7 +228,7 @@ func constantIndexArrayLength(context constantIndexContext, signature FuncSignat
 		return constantIndexTypeLength(context, typeStart, typeEnd, before, depth+1)
 	}
 	for i := before - 1; i > context.fn.BodyStart; i-- {
-		if file.Tokens[i].Kind == syntax.TokenIdent && statementTokensEqual(&file, i, start) && i+2 < before && tokenTextIs(&file, i+1, ":=") {
+		if file.Tokens[i].KindLine&255 == syntax.TokenIdent && statementTokensEqual(&file, i, start) && i+2 < before && tokenTextIs(&file, i+1, ":=") {
 			valueStart, valueEnd := trimExprSpan(file, i+2, statementSpecEnd(file, i+2, before))
 			return constantIndexArrayLength(context, signature, locals, valueStart, valueEnd, i, depth+1)
 		}
@@ -257,7 +257,7 @@ func constantIndexTypeLength(context constantIndexContext, start int, end int, b
 		length, ok := constantIndexInt(context, lengthStart, lengthEnd, before, depth+1)
 		return length, ok && length >= 0
 	}
-	if end != start+1 || file.Tokens[start].Kind != syntax.TokenIdent {
+	if end != start+1 || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return 0, false
 	}
 	typeIndex := LookupType(*context.info, tokenString(&file, start))

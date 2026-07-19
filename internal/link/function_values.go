@@ -962,10 +962,10 @@ func reparseFunctionValueProgram(original *unit.Program, text []byte) bool {
 		kind := functionValueUnitTokenKind(text, tok)
 		if functionValueTokenIsEllipsis(text, tok) {
 			for dot := 0; dot < 3; dot++ {
-				out.Tokens = append(out.Tokens, unit.Token{Kind: kind, Start: tok.Start + dot, Size: 1, Line: tok.Line})
+				out.Tokens = append(out.Tokens, unit.Token{Kind: kind, Start: tok.Start + dot, Size: 1, Line: tok.KindLine >> 8})
 			}
 		} else {
-			out.Tokens = append(out.Tokens, unit.Token{Kind: kind, Start: tok.Start, Size: tok.End - tok.Start, Line: tok.Line})
+			out.Tokens = append(out.Tokens, unit.Token{Kind: kind, Start: tok.Start, Size: tok.End - tok.Start, Line: tok.KindLine >> 8})
 		}
 	}
 	tokenMap[len(file.Tokens)] = len(out.Tokens)
@@ -994,77 +994,77 @@ func reparseFunctionValueProgram(original *unit.Program, text []byte) bool {
 }
 
 func functionValueTokenIsEllipsis(src []byte, tok syntax.Token) bool {
-	return tok.Kind == syntax.TokenOperator && tok.End-tok.Start == 3 && tok.Start >= 0 && tok.End <= len(src) && src[tok.Start] == '.' && src[tok.Start+1] == '.' && src[tok.Start+2] == '.'
+	return tok.KindLine&255 == syntax.TokenOperator && tok.End-tok.Start == 3 && tok.Start >= 0 && tok.End <= len(src) && src[tok.Start] == '.' && src[tok.Start+1] == '.' && src[tok.Start+2] == '.'
 }
 
 func functionValueUnitTokenKind(src []byte, tok syntax.Token) int {
-	if tok.Kind == syntax.TokenEOF {
+	if tok.KindLine&255 == syntax.TokenEOF {
 		return unit.TokenEOF
 	}
-	if tok.Kind == syntax.TokenIdent {
+	if tok.KindLine&255 == syntax.TokenIdent {
 		return unit.TokenIdent
 	}
-	if tok.Kind == syntax.TokenNumber {
+	if tok.KindLine&255 == syntax.TokenNumber {
 		if syntax.NumberTokenIsFloat(src, tok) {
 			return unit.TokenFloat
 		}
 		return unit.TokenNumber
 	}
-	if tok.Kind == syntax.TokenString {
+	if tok.KindLine&255 == syntax.TokenString {
 		return unit.TokenString
 	}
-	if tok.Kind == syntax.TokenChar {
+	if tok.KindLine&255 == syntax.TokenChar {
 		return unit.TokenChar
 	}
-	if tok.Kind == syntax.TokenOperator {
+	if tok.KindLine&255 == syntax.TokenOperator {
 		return unit.TokenOp
 	}
-	if tok.Kind == syntax.TokenPackage {
+	if tok.KindLine&255 == syntax.TokenPackage {
 		return unit.TokenPackage
 	}
-	if tok.Kind == syntax.TokenConst {
+	if tok.KindLine&255 == syntax.TokenConst {
 		return unit.TokenConst
 	}
-	if tok.Kind == syntax.TokenVar {
+	if tok.KindLine&255 == syntax.TokenVar {
 		return unit.TokenVar
 	}
-	if tok.Kind == syntax.TokenType {
+	if tok.KindLine&255 == syntax.TokenType {
 		return unit.TokenType
 	}
-	if tok.Kind == syntax.TokenFunc {
+	if tok.KindLine&255 == syntax.TokenFunc {
 		return unit.TokenFunc
 	}
-	if tok.Kind == syntax.TokenStruct {
+	if tok.KindLine&255 == syntax.TokenStruct {
 		return unit.TokenStruct
 	}
-	if tok.Kind == syntax.TokenReturn {
+	if tok.KindLine&255 == syntax.TokenReturn {
 		return unit.TokenReturn
 	}
-	if tok.Kind == syntax.TokenIf {
+	if tok.KindLine&255 == syntax.TokenIf {
 		return unit.TokenIf
 	}
-	if tok.Kind == syntax.TokenElse {
+	if tok.KindLine&255 == syntax.TokenElse {
 		return unit.TokenElse
 	}
-	if tok.Kind == syntax.TokenFor {
+	if tok.KindLine&255 == syntax.TokenFor {
 		return unit.TokenFor
 	}
-	if tok.Kind == syntax.TokenBreak {
+	if tok.KindLine&255 == syntax.TokenBreak {
 		return unit.TokenBreak
 	}
-	if tok.Kind == syntax.TokenContinue {
+	if tok.KindLine&255 == syntax.TokenContinue {
 		return unit.TokenContinue
 	}
-	if tok.Kind == syntax.TokenGoto {
+	if tok.KindLine&255 == syntax.TokenGoto {
 		return unit.TokenGoto
 	}
-	if tok.Kind == syntax.TokenSwitch {
+	if tok.KindLine&255 == syntax.TokenSwitch {
 		return unit.TokenSwitch
 	}
-	if tok.Kind == syntax.TokenCase {
+	if tok.KindLine&255 == syntax.TokenCase {
 		return unit.TokenCase
 	}
-	if tok.Kind == syntax.TokenDefault {
+	if tok.KindLine&255 == syntax.TokenDefault {
 		return unit.TokenDefault
 	}
 	return unit.TokenIdent

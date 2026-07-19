@@ -104,10 +104,10 @@ func appendExprCalls(calls []CallRef, file syntax.File, fileIndex int, info Pack
 			continue
 		}
 		callee := i - 1
-		if callee < start || file.Tokens[callee].Kind != syntax.TokenIdent {
+		if callee < start || file.Tokens[callee].KindLine&255 != syntax.TokenIdent {
 			continue
 		}
-		if callee-1 >= start && tokenTextIs(&file, callee-1, ".") && callee-2 >= start && file.Tokens[callee-2].Kind == syntax.TokenIdent {
+		if callee-1 >= start && tokenTextIs(&file, callee-1, ".") && callee-2 >= start && file.Tokens[callee-2].KindLine&255 == syntax.TokenIdent {
 			calls = append(calls, resolveSelectorCall(file, fileIndex, info, checked, scope, tokenString(&file, callee-2), tokenString(&file, callee), callee-2, callee-1, callee, i, closeTok-1))
 		} else {
 			calls = append(calls, resolveDirectCall(file, fileIndex, info, scope, tokenString(&file, callee), callee, i, closeTok-1))

@@ -35,10 +35,14 @@ const (
 )
 
 type Token struct {
-	Kind  int
-	Start int
-	End   int
-	Line  int
+	// KindLine packs the token kind into the low byte and its source line above it.
+	KindLine int
+	Start    int
+	End      int
+}
+
+func MakeToken(kind int, start int, end int, line int) Token {
+	return Token{KindLine: kind | line<<8, Start: start, End: end}
 }
 
 func TokenText(src []byte, tok Token) []byte {
@@ -51,7 +55,7 @@ func TokenText(src []byte, tok Token) []byte {
 func NumberTokenIsFloat(src []byte, tok Token) bool {
 	start := tok.Start
 	end := tok.End
-	if tok.Kind != TokenNumber || start < 0 || end < start || end > len(src) {
+	if tok.KindLine&255 != TokenNumber || start < 0 || end < start || end > len(src) {
 		return false
 	}
 	if end-start > 2 && src[start] == '0' {

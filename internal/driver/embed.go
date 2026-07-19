@@ -264,7 +264,7 @@ func parseSourceEmbedPatterns(src []byte, start int, end int) ([]string, bool) {
 				return patterns, false
 			}
 			start++
-			value, ok := syntax.StringLiteralValue(src, syntax.Token{Kind: syntax.TokenString, Start: patternStart, End: start})
+			value, ok := syntax.StringLiteralValue(src, syntax.MakeToken(syntax.TokenString, patternStart, start, 0))
 			if !ok {
 				return patterns, false
 			}
@@ -316,7 +316,7 @@ func sourceEmbedDirectiveDecl(file syntax.File, directive sourceEmbedDirective) 
 			continue
 		}
 		start := file.Tokens[decl.StartTok].Start
-		if decl.StartTok > 0 && file.Tokens[decl.StartTok-1].Kind == syntax.TokenVar {
+		if decl.StartTok > 0 && file.Tokens[decl.StartTok-1].KindLine&255 == syntax.TokenVar {
 			start = file.Tokens[decl.StartTok-1].Start
 		}
 		if start < directive.end || start >= bestStart || !sourceEmbedGapAllowed(file.Src, directive.end, start) {
@@ -370,7 +370,7 @@ func sourceEmbedDeclKind(file syntax.File, decl syntax.TopDecl, embedImport stri
 	if end-start == 3 && sourceEmbedTokenChar(file, start, '[') && sourceEmbedTokenChar(file, start+1, ']') && sourceEmbedTokenText(file, start+2) == "byte" {
 		return embedVarBytes, "", insertAt, true
 	}
-	if end-start == 3 && file.Tokens[start].Kind == syntax.TokenIdent && sourceEmbedTokenChar(file, start+1, '.') && sourceEmbedTokenText(file, start+2) == "FS" {
+	if end-start == 3 && file.Tokens[start].KindLine&255 == syntax.TokenIdent && sourceEmbedTokenChar(file, start+1, '.') && sourceEmbedTokenText(file, start+2) == "FS" {
 		qualifier := sourceEmbedTokenText(file, start)
 		if qualifier == embedImport && qualifier != "_" && qualifier != "." {
 			return embedVarFS, qualifier, insertAt, true
@@ -391,7 +391,7 @@ func sourceEmbedTokenChar(file syntax.File, tok int, want byte) bool {
 		return false
 	}
 	token := file.Tokens[tok]
-	return token.Kind == syntax.TokenOperator && token.End == token.Start+1 && file.Src[token.Start] == want
+	return token.KindLine&255 == syntax.TokenOperator && token.End == token.Start+1 && file.Src[token.Start] == want
 }
 
 func resolveSourceEmbedPatterns(fs SourceFS, packageDir string, moduleRoot string, patterns []string) ([]sourceEmbedFile, bool, string) {

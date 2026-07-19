@@ -53,8 +53,8 @@ func invalidDefiniteCallArgumentType(pkg *load.Package, info *PackageInfo, fileI
 			continue
 		}
 		firstArg := file.Tokens[open+1]
-		hasLiteral := firstArg.Kind == syntax.TokenNumber || firstArg.Kind == syntax.TokenString
-		if !hasLiteral && firstArg.Kind == syntax.TokenIdent {
+		hasLiteral := firstArg.KindLine&255 == syntax.TokenNumber || firstArg.KindLine&255 == syntax.TokenString
+		if !hasLiteral && firstArg.KindLine&255 == syntax.TokenIdent {
 			size := firstArg.End - firstArg.Start
 			hasLiteral = size == 4 && tokenTextIs(file, open+1, "true") || size == 5 && tokenTextIs(file, open+1, "false")
 		}
@@ -116,7 +116,7 @@ func nextDefiniteCallComma(file *syntax.File, start int, end int) int {
 	for i := start; i < end; i++ {
 		tok := file.Tokens[i]
 		c := byte(0)
-		if tok.Kind == syntax.TokenOperator && tok.End == tok.Start+1 {
+		if tok.KindLine&255 == syntax.TokenOperator && tok.End == tok.Start+1 {
 			c = file.Src[tok.Start]
 		}
 		if c == '(' {
@@ -170,7 +170,7 @@ func definitePointerParams(pkg *load.Package, info *PackageInfo, fileIndex int, 
 			start = segmentEnd + 1
 			continue
 		}
-		if file.Tokens[first].Kind == syntax.TokenIdent && first+1 < last && !tokCharIs(file, first+1, '.') {
+		if file.Tokens[first].KindLine&255 == syntax.TokenIdent && first+1 < last && !tokCharIs(file, first+1, '.') {
 			pointer := definiteTypeKind(pkg, info, fileIndex, first+1, last, 0) == definiteTypePointer
 			for i := 0; i <= pending; i++ {
 				params = append(params, pointer)
@@ -239,7 +239,7 @@ func definiteArgumentTypeKind(pkg *load.Package, info *PackageInfo, fileIndex in
 	if tokCharIs(file, start, '&') {
 		return definiteTypePointer
 	}
-	if end-start != 1 || file.Tokens[start].Kind != syntax.TokenIdent {
+	if end-start != 1 || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return definiteTypeUnknown
 	}
 	name := tokenString(file, start)
@@ -301,7 +301,7 @@ func findDefiniteLocalType(file *syntax.File, locals []definiteLocalTypeSpan, na
 func collectDefiniteLocalTypes(file syntax.File, caller syntax.FuncDecl) []definiteLocalTypeSpan {
 	var locals []definiteLocalTypeSpan
 	for i := caller.BodyStart + 1; i < caller.BodyEnd; i++ {
-		if file.Tokens[i].Kind != syntax.TokenVar {
+		if file.Tokens[i].KindLine&255 != syntax.TokenVar {
 			continue
 		}
 		specStart := i + 1
@@ -365,7 +365,7 @@ func definiteTypeKind(pkg *load.Package, info *PackageInfo, fileIndex int, start
 	if tokCharIs(&file, start, '*') {
 		return definiteTypePointer
 	}
-	if file.Tokens[start].Kind != syntax.TokenIdent {
+	if file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return definiteTypeNonPointer
 	}
 	if start+1 < end && tokCharIs(&file, start+1, '.') {

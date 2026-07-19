@@ -1,7 +1,7 @@
 package syntax
 
 func StringLiteralValue(src []byte, tok Token) (string, bool) {
-	if tok.Kind != TokenString || tok.Start < 0 || tok.End-tok.Start < 2 || tok.End > len(src) {
+	if tok.KindLine&255 != TokenString || tok.Start < 0 || tok.End-tok.Start < 2 || tok.End > len(src) {
 		return "", false
 	}
 	quote := src[tok.Start]

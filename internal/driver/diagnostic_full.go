@@ -330,7 +330,7 @@ func diagnosticAtToken(diagnostic Diagnostic, source load.SourceFile, tokens []s
 	line := 1
 	if tokenIndex >= 0 && tokenIndex < len(tokens) {
 		token := tokens[tokenIndex]
-		start, end, line = token.Start, token.End, token.Line
+		start, end, line = token.Start, token.End, token.KindLine>>8
 	} else if len(source.Src) > 0 {
 		start, end = len(source.Src), len(source.Src)
 		line = lineAtOffset(source.Src, start)

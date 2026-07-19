@@ -1,6 +1,19 @@
 package syntax
 
-import "testing"
+import (
+	"testing"
+	"unsafe"
+)
+
+func TestTokenCompactLayout(t *testing.T) {
+	tok := MakeToken(TokenIdent, 12, 18, 345)
+	if tok.KindLine&255 != TokenIdent || tok.KindLine>>8 != 345 || tok.Start != 12 || tok.End != 18 {
+		t.Fatalf("token fields were not preserved: %#v", tok)
+	}
+	if got, want := unsafe.Sizeof(tok), 3*unsafe.Sizeof(int(0)); got != want {
+		t.Fatalf("token size = %d, want %d", got, want)
+	}
+}
 
 func TestScanBasicFunction(t *testing.T) {
 	src := []byte("package main\n\nfunc add(a int, b int) int { return a + b }\n")
@@ -19,8 +32,8 @@ func TestScanBasicFunction(t *testing.T) {
 		t.Fatalf("token count = %d, want %d: %#v", len(scanner.Tokens), len(kinds), scanner.Tokens)
 	}
 	for i, kind := range kinds {
-		if scanner.Tokens[i].Kind != kind {
-			t.Fatalf("token %d kind = %d, want %d", i, scanner.Tokens[i].Kind, kind)
+		if scanner.Tokens[i].KindLine&255 != kind {
+			t.Fatalf("token %d kind = %d, want %d", i, scanner.Tokens[i].KindLine&255, kind)
 		}
 	}
 	if string(TokenText(src, scanner.Tokens[3])) != "add" {
@@ -39,13 +52,13 @@ func TestScanCommentsAndLiterals(t *testing.T) {
 	foundChar := 0
 	rawLine := 0
 	for i := 0; i < len(scanner.Tokens); i++ {
-		if scanner.Tokens[i].Kind == TokenString {
+		if scanner.Tokens[i].KindLine&255 == TokenString {
 			foundString++
 			if string(TokenText(src, scanner.Tokens[i])) == "`x\ny`" {
-				rawLine = scanner.Tokens[i].Line
+				rawLine = scanner.Tokens[i].KindLine >> 8
 			}
 		}
-		if scanner.Tokens[i].Kind == TokenChar {
+		if scanner.Tokens[i].KindLine&255 == TokenChar {
 			foundChar++
 		}
 	}
@@ -68,8 +81,8 @@ func TestScanFrontendKeywords(t *testing.T) {
 		t.Fatalf("token count = %d, want %d", len(toks), len(want))
 	}
 	for i := 0; i < len(want); i++ {
-		if toks[i].Kind != want[i] {
-			t.Fatalf("token %d kind = %d, want %d", i, toks[i].Kind, want[i])
+		if toks[i].KindLine&255 != want[i] {
+			t.Fatalf("token %d kind = %d, want %d", i, toks[i].KindLine&255, want[i])
 		}
 	}
 }
@@ -85,8 +98,8 @@ func TestScanNumericLiteralParity(t *testing.T) {
 	for i := 0; i < len(core); i++ {
 		coreText := string(TokenText(src, core[i]))
 		hostText := string(TokenText(src, scanner.Tokens[i]))
-		if core[i].Kind != scanner.Tokens[i].Kind || coreText != hostText {
-			t.Fatalf("numeric token %d = core %d %q host %d %q", i, core[i].Kind, coreText, scanner.Tokens[i].Kind, hostText)
+		if core[i].KindLine&255 != scanner.Tokens[i].KindLine&255 || coreText != hostText {
+			t.Fatalf("numeric token %d = core %d %q host %d %q", i, core[i].KindLine&255, coreText, scanner.Tokens[i].KindLine&255, hostText)
 		}
 	}
 }
@@ -97,11 +110,11 @@ func TestKeywordHashCollisionRemainsIdentifier(t *testing.T) {
 	if len(toks) != 3 {
 		t.Fatalf("token count = %d, want 3", len(toks))
 	}
-	if toks[0].Kind != TokenIdent {
-		t.Fatalf("bits token kind = %d, want identifier", toks[0].Kind)
+	if toks[0].KindLine&255 != TokenIdent {
+		t.Fatalf("bits token kind = %d, want identifier", toks[0].KindLine&255)
 	}
-	if toks[1].Kind != TokenChan {
-		t.Fatalf("chan token kind = %d, want chan", toks[1].Kind)
+	if toks[1].KindLine&255 != TokenChan {
+		t.Fatalf("chan token kind = %d, want chan", toks[1].KindLine&255)
 	}
 }
 
@@ -118,7 +131,7 @@ func TestStringLiteralValue(t *testing.T) {
 	toks := Scan(src)
 	found := 0
 	for i := 0; i < len(toks); i++ {
-		if toks[i].Kind != TokenString {
+		if toks[i].KindLine&255 != TokenString {
 			continue
 		}
 		value, ok := StringLiteralValue(src, toks[i])

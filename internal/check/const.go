@@ -24,7 +24,7 @@ func evalConstSpan(file syntax.File, span ExprSpan) ConstValue {
 		return ConstValue{}
 	}
 	tok := file.Tokens[start]
-	if tok.Kind == syntax.TokenNumber {
+	if tok.KindLine&255 == syntax.TokenNumber {
 		value, ok := parseConstInt(file, start)
 		if !ok {
 			return ConstValue{}
@@ -34,17 +34,17 @@ func evalConstSpan(file syntax.File, span ExprSpan) ConstValue {
 	if sign != 1 {
 		return ConstValue{}
 	}
-	if tok.Kind == syntax.TokenString {
+	if tok.KindLine&255 == syntax.TokenString {
 		value, ok := syntax.StringLiteralValue(file.Src, tok)
 		if !ok {
 			return ConstValue{}
 		}
 		return ConstValue{Kind: ConstString, String: value, Ok: true}
 	}
-	if tok.Kind == syntax.TokenIdent && tokenString(&file, start) == "true" {
+	if tok.KindLine&255 == syntax.TokenIdent && tokenString(&file, start) == "true" {
 		return ConstValue{Kind: ConstBool, Bool: true, Ok: true}
 	}
-	if tok.Kind == syntax.TokenIdent && tokenString(&file, start) == "false" {
+	if tok.KindLine&255 == syntax.TokenIdent && tokenString(&file, start) == "false" {
 		return ConstValue{Kind: ConstBool, Bool: false, Ok: true}
 	}
 	return ConstValue{}
@@ -55,7 +55,7 @@ func parseConstInt(file syntax.File, tok int) (int, bool) {
 		return 0, false
 	}
 	token := file.Tokens[tok]
-	if token.Kind != syntax.TokenNumber || token.Start < 0 || token.End > len(file.Src) || token.Start >= token.End {
+	if token.KindLine&255 != syntax.TokenNumber || token.Start < 0 || token.End > len(file.Src) || token.Start >= token.End {
 		return 0, false
 	}
 	start := token.Start

@@ -11,7 +11,7 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body) (int, int) {
 	var literalLocals []int
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
-		if stmt.Kind == syntax.StmtDefer && stmt.ExprStart+1 < stmt.ExprEnd && file.Tokens[stmt.ExprStart].Kind == syntax.TokenIdent && tokCharIs(&file, stmt.ExprStart+1, '(') {
+		if stmt.Kind == syntax.StmtDefer && stmt.ExprStart+1 < stmt.ExprEnd && file.Tokens[stmt.ExprStart].KindLine&255 == syntax.TokenIdent && tokCharIs(&file, stmt.ExprStart+1, '(') {
 			name := tokenString(&file, stmt.ExprStart)
 			if name == "append" || name == "cap" || name == "complex" || name == "imag" || name == "len" || name == "make" || name == "max" || name == "min" || name == "new" || name == "real" {
 				return CheckErrDeferBuiltin, stmt.ExprStart
@@ -32,7 +32,7 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body) (int, int) {
 			callEnd = stmt.ExprEnd
 		}
 		for tok := callStart; tok >= 0 && tok+1 < callEnd; tok++ {
-			if file.Tokens[tok].Kind == syntax.TokenIdent && file.Tokens[tok].Line == file.Tokens[tok+1].Line && tokCharIs(&file, tok+1, '(') && (tok == 0 || !tokCharIs(&file, tok-1, '.')) && definiteLiteralLocal(literalLocals, file, tok) {
+			if file.Tokens[tok].KindLine&255 == syntax.TokenIdent && file.Tokens[tok].KindLine>>8 == file.Tokens[tok+1].KindLine>>8 && tokCharIs(&file, tok+1, '(') && (tok == 0 || !tokCharIs(&file, tok-1, '.')) && definiteLiteralLocal(literalLocals, file, tok) {
 				return CheckErrCall, tok
 			}
 		}
@@ -51,7 +51,7 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body) (int, int) {
 		if leftCount != rightCount && !(rightCount == 1 && expressionMayBeMultiValued(file, rightFirst)) {
 			return CheckErrAssignCount, op
 		}
-		if leftCount == 1 && rightCount == 1 && leftFirst.EndTok-leftFirst.StartTok == 1 && file.Tokens[leftFirst.StartTok].Kind == syntax.TokenIdent {
+		if leftCount == 1 && rightCount == 1 && leftFirst.EndTok-leftFirst.StartTok == 1 && file.Tokens[leftFirst.StartTok].KindLine&255 == syntax.TokenIdent {
 			literal := expressionIsDefiniteLiteral(file, rightFirst)
 			updated := false
 			if !tokenTextIs(&file, op, ":=") {
@@ -149,7 +149,7 @@ func definitelyInvalidAssignTarget(file syntax.File, span ExprSpan) bool {
 	if end-start != 1 {
 		return false
 	}
-	kind := file.Tokens[start].Kind
+	kind := file.Tokens[start].KindLine & 255
 	if kind == syntax.TokenNumber || kind == syntax.TokenString || kind == syntax.TokenChar {
 		return true
 	}
@@ -198,6 +198,6 @@ func expressionIsDefiniteLiteral(file syntax.File, span ExprSpan) bool {
 	if end-start != 1 {
 		return false
 	}
-	kind := file.Tokens[start].Kind
+	kind := file.Tokens[start].KindLine & 255
 	return kind == syntax.TokenNumber || kind == syntax.TokenString || kind == syntax.TokenChar || tokenTextIs(&file, start, "true") || tokenTextIs(&file, start, "false") || tokenTextIs(&file, start, "nil")
 }
