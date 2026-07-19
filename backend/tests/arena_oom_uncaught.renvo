@@ -1,0 +1,13 @@
+package main
+
+func arenaUncaughtAllocation(n int) {
+	data := make([]byte, n)
+	data[n-1] = 1
+}
+
+func appMain() int {
+	defer func() {}()
+	arenaUncaughtAllocation(4097)
+	print("FAIL\n")
+	return 0
+}

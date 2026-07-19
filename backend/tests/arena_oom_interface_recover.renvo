@@ -1,0 +1,33 @@
+package main
+
+type arenaOOMBox struct {
+	a int
+	b int
+	c int
+	d int
+}
+
+func arenaBoxInterfaces() {
+	var value interface{}
+	i := 0
+	for i < 64 {
+		value = arenaOOMBox{a: i, b: i + 1, c: i + 2, d: i + 3}
+		i++
+	}
+	if value == nil {
+		print("FAIL\n")
+	}
+	print("FAIL\n")
+}
+
+func appMain() (status int) {
+	status = 1
+	defer func() {
+		if recover() != nil {
+			print("PASS\n")
+			status = 0
+		}
+	}()
+	arenaBoxInterfaces()
+	return
+}

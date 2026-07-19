@@ -7134,9 +7134,7 @@ type renvoLinearGen struct {
 	appendAddrLabel          int
 	appendAddrEmitted        bool
 	arenaAllocLabel          int
-	arenaAllocEmitted        bool
 	persistentAllocLabel     int
-	persistentAllocEmitted   bool
 	arenaFaultLabel          int
 	makeZeroLabel            int
 	makeZeroEmitted          bool
@@ -11038,6 +11036,7 @@ func renvoTypeComparable(meta *renvoMeta, typ int) bool {
 
 const renvoInterfaceIndirectTypeBase = 1048576
 const renvoPanicTypeAssertionTag = 1048575
+const renvoPanicOutOfMemoryTag = 1048574
 
 func renvoRuntimeTypeTag(meta *renvoMeta, typ int) int {
 	renvoNonNil(meta)
@@ -12668,43 +12667,101 @@ func renvoEmitRuntimeArenaCall(g *renvoLinearGen, ep *renvoExprParse, idx int, f
 	renvoNonNil(g, ep, fn)
 	p := g.prog
 	renvoNonNil(p)
-	if renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_Exit") {
+	intrinsic := renvoRuntimeIntrinsicID(p.src, fn.nameStart, fn.nameEnd)
+	if intrinsic == 1 {
 		return renvoEmitRuntimeExit(g, ep, idx)
 	}
-	if renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaMark") {
+	if intrinsic == 2 {
 		return renvoEmitRuntimeArenaMark(g, ep, idx)
 	}
-	if renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaReset") {
+	if intrinsic == 3 {
 		return renvoEmitRuntimeArenaReset(g, ep, idx)
 	}
-	if renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaPersistMark") {
+	if intrinsic == 4 {
 		return renvoEmitRuntimeArenaPersistMark(g, ep, idx)
 	}
-	if renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaPersistReset") {
+	if intrinsic == 5 {
 		return renvoEmitRuntimeArenaPersistReset(g, ep, idx)
 	}
-	if renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaPersistString") {
+	if intrinsic == 6 {
 		return renvoEmitRuntimeArenaPersistString(g, ep, idx)
 	}
-	if renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaPersistBytes") {
+	if intrinsic == 7 {
 		return renvoEmitRuntimeArenaPersistBytes(g, ep, idx)
 	}
-	if renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaPersistCheckNameRefs") ||
-		renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaPersistCheckSelectorRefs") ||
-		renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaPersistCheckTypeRefs") ||
-		renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaPersistCheckBools") {
+	if intrinsic == 8 {
 		return renvoEmitRuntimeArenaPersistSlice(g, ep, idx)
 	}
-	if renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaDiscard") {
+	if intrinsic == 12 {
 		return renvoEmitRuntimeArenaDiscard(g, ep, idx)
 	}
-	if renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaDiscardBytes") ||
-		renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaDiscardUnitTokens") ||
-		renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaDiscardLinkTokens") ||
-		renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaDiscardLowerTokens") {
+	if intrinsic == 13 {
 		return renvoEmitRuntimeArenaDiscardSlice(g, ep, idx)
 	}
 	return false
+}
+
+// Compiler-private intrinsics live in the reserved renvo_runtime namespace.
+// A bounded hash and independent byte checksum keep their dispatch table
+// compact in every standalone backend while making accidental aliases
+// infeasible across ordinary source identifiers.
+func renvoRuntimeIntrinsicID(src []byte, start int, end int) int {
+	hash1 := 5381
+	hash2 := 0
+	for i := start; i < end; i++ {
+		ch := int(renvo_runtime_UnsafeByteAt(src, i))
+		hash1 = (((hash1 << 5) + hash1) ^ ch) & 2147483647
+		hash2 += ch
+	}
+	if hash1 == 1723302425 && hash2 == 1926 {
+		return 1
+	}
+	if hash1 == 655512725 && hash2 == 2398 {
+		return 2
+	}
+	if hash1 == 161028053 && hash2 == 2518 {
+		return 3
+	}
+	if hash1 == 1649965359 && hash2 == 3144 {
+		return 4
+	}
+	if hash1 == 741790831 && hash2 == 3264 {
+		return 5
+	}
+	if hash1 == 839119663 && hash2 == 3380 {
+		return 6
+	}
+	if hash1 == 759764515 && hash2 == 3268 {
+		return 7
+	}
+	if hash1 == 1080911033 && hash2 == 4012 {
+		return 8
+	}
+	if hash1 == 484698219 && hash2 == 4460 {
+		return 8
+	}
+	if hash1 == 814549062 && hash2 == 4045 {
+		return 8
+	}
+	if hash1 == 1090017185 && hash2 == 3738 {
+		return 8
+	}
+	if hash1 == 1430801866 && hash2 == 2701 {
+		return 12
+	}
+	if hash1 == 1527189203 && hash2 == 3220 {
+		return 13
+	}
+	if hash1 == 1567033700 && hash2 == 3745 {
+		return 13
+	}
+	if hash1 == 434696738 && hash2 == 3727 {
+		return 13
+	}
+	if hash1 == 1767715841 && hash2 == 3850 {
+		return 13
+	}
+	return 0
 }
 
 func renvoEmitRuntimeExit(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
@@ -12829,29 +12886,49 @@ func renvoEmitPanicState(g *renvoLinearGen, valueOffset int) bool {
 }
 
 func renvoEmitRuntimeFault(g *renvoLinearGen) {
+	renvoEmitRuntimeFaultKind(g, renvoRuntimeTypeTag(g.meta, renvoTypeInt), false)
+}
+
+func renvoEmitRuntimeFaultKind(g *renvoLinearGen, panicTag int, outOfMemory bool) {
 	renvoNonNil(g)
 	a := &g.asm
 	if g.meta.panicEnabled && g.deferReturnLabel > 0 {
 		valueOffset := renvoAddUnnamedLocal(g, renvoBuiltinTypeInterface)
 		renvoAsmStoreStackImm(a, valueOffset, 1)
-		renvoAsmStoreStackImm(a, valueOffset-renvoBackendValueSlotSize, renvoRuntimeTypeTag(g.meta, renvoTypeInt))
+		renvoAsmStoreStackImm(a, valueOffset-renvoBackendValueSlotSize, panicTag)
 		renvoEmitPanicState(g, valueOffset)
 	} else {
-		renvoAsmJmpLabel(a, renvoEnsureUncaughtRuntimeFaultHelper(g))
+		renvoAsmJmpLabel(a, renvoEnsureUncaughtFaultHelper(g, outOfMemory))
 	}
 }
 
 func renvoEnsureUncaughtRuntimeFaultHelper(g *renvoLinearGen) int {
+	return renvoEnsureUncaughtFaultHelper(g, false)
+}
+
+func renvoEnsureUncaughtFaultHelper(g *renvoLinearGen, outOfMemory bool) int {
 	renvoNonNil(g)
-	if g.runtimeFaultLabel > 0 {
-		return g.runtimeFaultLabel - 1
+	labelState := g.runtimeFaultLabel
+	if outOfMemory {
+		labelState = g.arenaFaultLabel
+	}
+	if labelState > 0 {
+		return labelState - 1
 	}
 	a := &g.asm
 	label := renvoAsmNewLabel(a)
-	g.runtimeFaultLabel = label + 1
+	if outOfMemory {
+		g.arenaFaultLabel = label + 1
+	} else {
+		g.runtimeFaultLabel = label + 1
+	}
 	after := renvoAsmNewLabel(a)
 	renvoAsmJmpMarkLabel(a, after, label)
-	renvoEmitStaticWrite(g, "panic\n", 2)
+	message := "panic\n"
+	if outOfMemory {
+		message = "out of memory\n"
+	}
+	renvoEmitStaticWrite(g, message, 2)
 	renvoAsmPrimaryImm(a, 2)
 	renvoEmitExitStatus(g)
 	renvoAsmMarkLabel(a, after)
@@ -13034,6 +13111,7 @@ func renvoEmitProgramPanicCheck(g *renvoLinearGen) bool {
 	normalLabel := renvoAsmNewLabel(a)
 	stringLabel := renvoAsmNewLabel(a)
 	assertionLabel := renvoAsmNewLabel(a)
+	outOfMemoryLabel := renvoAsmNewLabel(a)
 	exitLabel := renvoAsmNewLabel(a)
 	renvoAsmPushPrimary(a)
 	renvoAsmLoadPrimaryBss(a, g.panicIDOff)
@@ -13041,6 +13119,10 @@ func renvoEmitProgramPanicCheck(g *renvoLinearGen) bool {
 	renvoEmitStaticWrite(g, "panic: ", 2)
 	renvoAsmLoadPrimaryBss(a, g.panicTypeOff)
 	renvoAsmCopyPrimaryToTertiary(a)
+	renvoAsmPrimaryImm(a, renvoPanicOutOfMemoryTag)
+	renvoAsmCmpTertiaryPrimarySet(a, 0x94)
+	renvoAsmJnzPrimary(a, outOfMemoryLabel)
+	renvoAsmCopyTertiaryToPrimary(a)
 	renvoAsmPrimaryImm(a, renvoPanicTypeAssertionTag)
 	renvoAsmCmpTertiaryPrimarySet(a, 0x94)
 	renvoAsmJnzPrimary(a, assertionLabel)
@@ -13061,6 +13143,8 @@ func renvoEmitProgramPanicCheck(g *renvoLinearGen) bool {
 	renvoEmitWriteValueRegs(g, 2)
 	renvoAsmJmpMarkLabel(a, exitLabel, assertionLabel)
 	renvoEmitStaticWrite(g, "interface conversion failed", 2)
+	renvoAsmJmpMarkLabel(a, exitLabel, outOfMemoryLabel)
+	renvoEmitStaticWrite(g, "out of memory", 2)
 	renvoAsmMarkLabel(a, exitLabel)
 	renvoEmitStaticWrite(g, "\n", 2)
 	renvoAsmPrimaryImm(a, 2)
@@ -17743,119 +17827,87 @@ func renvoEmitArenaAllocationCheck(g *renvoLinearGen) {
 	okLabel := renvoAsmNewLabel(&g.asm)
 	renvoAsmJnzPrimary(&g.asm, okLabel)
 	if g.suppressPanicCheck {
-		renvoAsmJmpLabel(&g.asm, renvoEnsureArenaFaultHelper(g))
+		renvoAsmJmpLabel(&g.asm, renvoEnsureUncaughtFaultHelper(g, true))
 	} else {
-		renvoEmitRuntimeFault(g)
+		renvoEmitRuntimeFaultKind(g, renvoPanicOutOfMemoryTag, true)
 	}
 	renvoAsmMarkLabel(&g.asm, okLabel)
 }
 
 func renvoEnsureArenaAllocHelper(g *renvoLinearGen) int {
-	renvoNonNil(g)
-	a := &g.asm
-	if g.arenaAllocEmitted {
-		return g.arenaAllocLabel
-	}
-	g.arenaAllocEmitted = true
-	g.arenaAllocLabel = renvoAsmNewLabel(a)
-	afterLabel := renvoAsmNewLabel(a)
-	readyLabel := renvoAsmNewLabel(a)
-	oomLabel := renvoAsmNewLabel(a)
-	renvoAsmJmpMarkLabel(a, afterLabel, g.arenaAllocLabel)
-	renvoStringHeapOffsets(g)
-	renvoAsmPushPrimary(a)
-	renvoEmitPersistentArenaReady(g)
-	renvoAsmPopPrimary(a)
-	renvoAsmCopyPrimaryToTertiary(a)
-	renvoAsmLoadPrimaryBss(a, g.stringHeapOff)
-	renvoAsmJnzPrimary(a, readyLabel)
-	renvoAsmPrimaryBssAddr(a, g.stringHeapDataOff)
-	renvoAsmStorePrimaryBss(a, g.stringHeapOff)
-	renvoAsmMarkLabel(a, readyLabel)
-	renvoAsmLoadPrimaryBss(a, g.stringHeapOff)
-	renvoAsmPushPrimary(a)
-	renvoAsmPushPrimary(a)
-	renvoAsmAddPrimaryTertiary(a)
-	renvoAsmPushPrimary(a)
-	renvoAsmPopTertiary(a)
-	renvoAsmPopPrimary(a)
-	renvoAsmCmpTertiaryPrimarySet(a, 0x9d)
-	renvoAsmJzPrimary(a, oomLabel)
-	renvoAsmPushTertiary(a)
-	renvoAsmLoadPrimaryBss(a, g.stringHeapEndOff)
-	renvoAsmPopTertiary(a)
-	renvoAsmCmpTertiaryPrimarySet(a, 0x9e)
-	renvoAsmJzPrimary(a, oomLabel)
-	renvoAsmCopyTertiaryToPrimary(a)
-	renvoAsmStorePrimaryBss(a, g.stringHeapOff)
-	renvoAsmPopPrimary(a)
-	renvoAsmRet(a)
-	renvoAsmMarkLabel(a, oomLabel)
-	renvoAsmPopPrimary(a)
-	if !g.meta.panicEnabled {
-		renvoAsmJmpLabel(a, renvoEnsureArenaFaultHelper(g))
-	}
-	renvoAsmPrimaryImm(a, 0)
-	renvoAsmRet(a)
-	renvoAsmMarkLabel(a, afterLabel)
-	return g.arenaAllocLabel
+	return renvoEnsureDirectionalArenaAllocHelper(g, false)
 }
 
 func renvoEnsurePersistentAllocHelper(g *renvoLinearGen) int {
+	return renvoEnsureDirectionalArenaAllocHelper(g, true)
+}
+
+func renvoEnsureDirectionalArenaAllocHelper(g *renvoLinearGen, persistent bool) int {
 	renvoNonNil(g)
 	a := &g.asm
-	if g.persistentAllocEmitted {
-		return g.persistentAllocLabel
+	label := g.arenaAllocLabel
+	if persistent {
+		label = g.persistentAllocLabel
 	}
-	g.persistentAllocEmitted = true
-	g.persistentAllocLabel = renvoAsmNewLabel(a)
+	if label > 0 {
+		return label - 1
+	}
+	label = renvoAsmNewLabel(a)
+	if persistent {
+		g.persistentAllocLabel = label + 1
+	} else {
+		g.arenaAllocLabel = label + 1
+	}
 	afterLabel := renvoAsmNewLabel(a)
 	oomLabel := renvoAsmNewLabel(a)
-	renvoAsmJmpMarkLabel(a, afterLabel, g.persistentAllocLabel)
+	renvoAsmJmpMarkLabel(a, afterLabel, label)
 	renvoStringHeapOffsets(g)
-	renvoAsmPushPrimary(a)
-	renvoEmitPersistentArenaReady(g)
-	renvoAsmPopPrimary(a)
 	renvoAsmCopyPrimaryToTertiary(a)
-	renvoAsmLoadPrimaryBss(a, g.stringHeapEndOff)
-	renvoAsmPushPrimary(a)
-	renvoAsmSubPrimaryTertiary(a)
-	renvoAsmPushPrimary(a)
-	renvoAsmPopTertiary(a)
-	renvoAsmPopPrimary(a)
-	renvoAsmCmpTertiaryPrimarySet(a, 0x9e)
-	renvoAsmJzPrimary(a, oomLabel)
-	renvoAsmPushTertiary(a)
-	renvoAsmLoadPrimaryBss(a, g.stringHeapOff)
-	renvoAsmPopTertiary(a)
-	renvoAsmCmpTertiaryPrimarySet(a, 0x9d)
-	renvoAsmJzPrimary(a, oomLabel)
-	renvoAsmCopyTertiaryToPrimary(a)
-	renvoAsmStorePrimaryBss(a, g.stringHeapEndOff)
+	if persistent {
+		renvoAsmLoadPrimaryBss(a, g.stringHeapEndOff)
+		renvoAsmPushPrimary(a)
+		renvoAsmSubPrimaryTertiary(a)
+		renvoAsmPushPrimary(a)
+		renvoAsmPopTertiary(a)
+		renvoAsmPopPrimary(a)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x9e)
+		renvoAsmJzPrimary(a, oomLabel)
+		renvoAsmPushTertiary(a)
+		renvoAsmLoadPrimaryBss(a, g.stringHeapOff)
+		renvoAsmPopTertiary(a)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x9d)
+		renvoAsmJzPrimary(a, oomLabel)
+		renvoAsmCopyTertiaryToPrimary(a)
+		renvoAsmStorePrimaryBss(a, g.stringHeapEndOff)
+	} else {
+		renvoAsmLoadPrimaryBss(a, g.stringHeapOff)
+		renvoAsmPushPrimary(a)
+		renvoAsmPushPrimary(a)
+		renvoAsmAddPrimaryTertiary(a)
+		renvoAsmPushPrimary(a)
+		renvoAsmPopTertiary(a)
+		renvoAsmPopPrimary(a)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x9d)
+		renvoAsmJzPrimary(a, oomLabel)
+		renvoAsmPushTertiary(a)
+		renvoAsmLoadPrimaryBss(a, g.stringHeapEndOff)
+		renvoAsmPopTertiary(a)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x9e)
+		renvoAsmJzPrimary(a, oomLabel)
+		renvoAsmCopyTertiaryToPrimary(a)
+		renvoAsmStorePrimaryBss(a, g.stringHeapOff)
+		renvoAsmPopPrimary(a)
+	}
 	renvoAsmRet(a)
 	renvoAsmMarkLabel(a, oomLabel)
+	if !persistent {
+		renvoAsmPopPrimary(a)
+	}
 	if !g.meta.panicEnabled {
-		renvoAsmJmpLabel(a, renvoEnsureArenaFaultHelper(g))
+		renvoAsmJmpLabel(a, renvoEnsureUncaughtFaultHelper(g, true))
 	}
 	renvoAsmPrimaryImm(a, 0)
 	renvoAsmRet(a)
-	renvoAsmMarkLabel(a, afterLabel)
-	return g.persistentAllocLabel
-}
-
-func renvoEnsureArenaFaultHelper(g *renvoLinearGen) int {
-	renvoNonNil(g)
-	if g.arenaFaultLabel > 0 {
-		return g.arenaFaultLabel - 1
-	}
-	a := &g.asm
-	label := renvoAsmNewLabel(a)
-	g.arenaFaultLabel = label + 1
-	afterLabel := renvoAsmNewLabel(a)
-	renvoAsmJmpMarkLabel(a, afterLabel, label)
-	renvoEmitStaticWrite(g, "panic: out of memory\n", 2)
-	renvoAsmPrimaryImm(a, 2)
-	renvoEmitExitStatus(g)
 	renvoAsmMarkLabel(a, afterLabel)
 	return label
 }

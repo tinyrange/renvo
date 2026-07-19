@@ -1,0 +1,14 @@
+package main
+
+func appMain() int {
+	n := 4096
+	data := make([]byte, n)
+	data[0] = 1
+	data[n-1] = 2
+	if data[0] != 1 || data[n-1] != 2 {
+		print("FAIL\n")
+		return 1
+	}
+	print("PASS\n")
+	return 0
+}

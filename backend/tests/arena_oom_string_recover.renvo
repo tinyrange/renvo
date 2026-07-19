@@ -1,0 +1,24 @@
+package main
+
+func arenaBuildString() {
+	value := ""
+	i := 0
+	for i < 64 {
+		value = value + "0123456789abcdef"
+		i++
+	}
+	print(value)
+	print("FAIL\n")
+}
+
+func appMain() (status int) {
+	status = 1
+	defer func() {
+		if recover() != nil {
+			print("PASS\n")
+			status = 0
+		}
+	}()
+	arenaBuildString()
+	return
+}

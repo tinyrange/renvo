@@ -1,0 +1,28 @@
+package main
+
+func arenaDeferredValue(value int) {
+	if value < 0 {
+		print("FAIL\n")
+	}
+}
+
+func arenaRegisterDefers() {
+	i := 0
+	for i < 64 {
+		defer arenaDeferredValue(i)
+		i++
+	}
+	print("FAIL\n")
+}
+
+func appMain() (status int) {
+	status = 1
+	defer func() {
+		if recover() != nil {
+			print("PASS\n")
+			status = 0
+		}
+	}()
+	arenaRegisterDefers()
+	return
+}

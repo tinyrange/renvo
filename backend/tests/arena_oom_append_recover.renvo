@@ -1,0 +1,23 @@
+package main
+
+func arenaAppendUntilFull() {
+	var data []byte
+	i := 0
+	for i < 1024 {
+		data = append(data, byte(i))
+		i++
+	}
+	print("FAIL\n")
+}
+
+func appMain() (status int) {
+	status = 1
+	defer func() {
+		if recover() != nil {
+			print("PASS\n")
+			status = 0
+		}
+	}()
+	arenaAppendUntilFull()
+	return
+}
