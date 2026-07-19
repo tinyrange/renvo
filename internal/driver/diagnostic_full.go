@@ -284,6 +284,8 @@ func buildPhaseDiagnostic(result BuildResult, built pipeline.Result) Diagnostic 
 			code, message = "RENVO-CHECK-023", "method main does not define the package entry point"
 		case check.CheckErrSliceOperand:
 			code, message = "RENVO-CHECK-024", "cannot slice an unaddressable array value"
+		case check.CheckErrArrayIndex:
+			code, message = "RENVO-CHECK-025", "constant array index is out of bounds"
 		}
 	} else if built.Build.Error == build.BuildErrLower {
 		phase, code, message = "lowerer", "RENVO-LOWER-001", "checked program could not be lowered"

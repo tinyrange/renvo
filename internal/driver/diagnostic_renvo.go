@@ -214,6 +214,8 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			d.Code, d.Message = "RENVO-CHECK-023", "method main does not define the package entry point"
 		} else if built.Build.ErrorDetail == check.CheckErrSliceOperand {
 			d.Code, d.Message = "RENVO-CHECK-024", "cannot slice an unaddressable array value"
+		} else if built.Build.ErrorDetail == check.CheckErrArrayIndex {
+			d.Code, d.Message = "RENVO-CHECK-025", "constant array index is out of bounds"
 		}
 	} else {
 		d.Phase, d.Code, d.Message = "linker", "RENVO-LINK-001", "package linking failed"

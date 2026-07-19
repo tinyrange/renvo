@@ -1,0 +1,8 @@
+{
+  "phase": "checker",
+  "code": "RENVO-CHECK-025",
+  "file": "cmd/app/main.go",
+  "line": 9,
+  "column": 13,
+  "message": "constant array index is out of bounds"
+}

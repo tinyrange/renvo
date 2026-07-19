@@ -31,6 +31,7 @@ const (
 	CheckErrMainSignature
 	CheckErrMainMethod
 	CheckErrSliceOperand
+	CheckErrArrayIndex
 )
 
 const (
