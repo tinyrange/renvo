@@ -561,7 +561,11 @@ func lowerFunctionValueLiterals(program *unit.Program, signatures []functionValu
 		if fieldTok < 0 || !functionValueTokenEquals(program, funcTok-1, ":") {
 			continue
 		}
-		fieldIndex := functionValueFieldByName(fields, functionValueTokenText(program, fieldTok))
+		fieldName := functionValueTokenText(program, fieldTok)
+		fieldIndex := functionValueFieldByOwnerAndName(fields, functionValueCompositeOwner(program, fieldTok), fieldName)
+		if fieldIndex < 0 {
+			fieldIndex = functionValueUniqueFieldByName(fields, fieldName)
+		}
 		if fieldIndex < 0 {
 			continue
 		}
@@ -668,6 +672,10 @@ func functionValueEnclosingLocalType(program *unit.Program, before int, name str
 			if functionValueTokenEquals(program, rhs, "&") && rhs+1 < before && program.Tokens[rhs+1].Kind == unit.TokenIdent {
 				return "*" + functionValueTokenText(program, rhs+1)
 			}
+			typeEnd := functionValueTypeEnd(program, rhs)
+			if typeEnd > rhs && functionValueTokenEquals(program, typeEnd, "{") {
+				return functionValueTokensText(program, rhs, typeEnd)
+			}
 			if program.Tokens[rhs].Kind == unit.TokenNumber {
 				return "int"
 			}
@@ -692,7 +700,7 @@ func functionValueEnclosingLocalType(program *unit.Program, before int, name str
 			}
 		}
 		if i > 0 && functionValueTokenEquals(program, i-1, "var") && i+1 < before {
-			return functionValueTokenText(program, i+1)
+			return functionValueTokensText(program, i+1, functionValueTypeEnd(program, i+1))
 		}
 	}
 	return functionValueFunctionParamType(program, fn, name)
@@ -985,13 +993,40 @@ func functionValueSelectorStart(program *unit.Program, end int) int {
 	return start
 }
 
-func functionValueFieldByName(fields []functionValueField, name string) int {
+func functionValueUniqueFieldByName(fields []functionValueField, name string) int {
+	match := -1
 	for i := 0; i < len(fields); i++ {
-		if fields[i].name == name {
-			return i
+		if fields[i].name != name {
+			continue
 		}
+		if match >= 0 {
+			return -1
+		}
+		match = i
 	}
-	return -1
+	return match
+}
+
+func functionValueCompositeOwner(program *unit.Program, before int) string {
+	depth := 0
+	for i := before - 1; i >= 1; i-- {
+		if functionValueTokenEquals(program, i, "}") {
+			depth++
+			continue
+		}
+		if !functionValueTokenEquals(program, i, "{") {
+			continue
+		}
+		if depth > 0 {
+			depth--
+			continue
+		}
+		if program.Tokens[i-1].Kind == unit.TokenIdent {
+			return functionValueTokenText(program, i-1)
+		}
+		return ""
+	}
+	return ""
 }
 
 func functionValueFieldByOwnerAndName(fields []functionValueField, owner string, name string) int {
@@ -1014,17 +1049,7 @@ func functionValueFieldForSelector(program *unit.Program, fieldTok int, fields [
 	baseType := functionValueEnclosingLocalType(program, fieldTok, functionValueTokenText(program, selectorStart))
 	baseType = functionValueBareType(baseType)
 	if baseType == "" {
-		match := -1
-		name := functionValueTokenText(program, fieldTok)
-		for i := 0; i < len(fields); i++ {
-			if fields[i].name == name {
-				if match >= 0 {
-					return -1
-				}
-				match = i
-			}
-		}
-		return match
+		return functionValueUniqueFieldByName(fields, functionValueTokenText(program, fieldTok))
 	}
 	for i := selectorStart + 2; i < fieldTok; i += 2 {
 		if !functionValueTokenEquals(program, i-1, ".") {
