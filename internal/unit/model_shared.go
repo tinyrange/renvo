@@ -27,10 +27,14 @@ const (
 )
 
 type Token struct {
-	Kind  int
-	Start int
-	Size  int
-	Line  int
+	// KindLine packs the token kind into the low byte and its source line above it.
+	KindLine int
+	Start    int
+	Size     int
+}
+
+func MakeToken(kind int, start int, size int, line int) Token {
+	return Token{KindLine: kind | line<<8, Start: start, Size: size}
 }
 
 type Decl struct {

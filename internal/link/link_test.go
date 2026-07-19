@@ -128,11 +128,11 @@ func appMain() int { return lib.Value() }
 	if program.Tokens[second.NameTok].Start != second.NameStart {
 		t.Fatalf("second func name token start = %d, want %d", program.Tokens[second.NameTok].Start, second.NameStart)
 	}
-	if program.Tokens[second.NameTok].Line <= program.Tokens[first.NameTok].Line {
-		t.Fatalf("line offsets were not adjusted: first=%d second=%d", program.Tokens[first.NameTok].Line, program.Tokens[second.NameTok].Line)
+	if program.Tokens[second.NameTok].KindLine>>8 <= program.Tokens[first.NameTok].KindLine>>8 {
+		t.Fatalf("line offsets were not adjusted: first=%d second=%d", program.Tokens[first.NameTok].KindLine>>8, program.Tokens[second.NameTok].KindLine>>8)
 	}
-	if program.Tokens[len(program.Tokens)-1].Kind != unit.TokenEOF {
-		t.Fatalf("last token kind = %d, want EOF", program.Tokens[len(program.Tokens)-1].Kind)
+	if program.Tokens[len(program.Tokens)-1].KindLine&255 != unit.TokenEOF {
+		t.Fatalf("last token kind = %d, want EOF", program.Tokens[len(program.Tokens)-1].KindLine&255)
 	}
 }
 
@@ -821,7 +821,7 @@ func appMain() int {
 		if !ok {
 			continue
 		}
-		if got := linked.Program.Tokens[i].Kind; got != want {
+		if got := linked.Program.Tokens[i].KindLine & 255; got != want {
 			t.Fatalf("token %q kind = %d, want %d", text, got, want)
 		}
 		found[text] = true
@@ -1157,7 +1157,7 @@ func linkedTokenText(program unit.Program, tok int) string {
 		return ""
 	}
 	token := program.Tokens[tok]
-	if token.Kind == unit.TokenEOF || token.Size == 0 {
+	if token.KindLine&255 == unit.TokenEOF || token.Size == 0 {
 		return ""
 	}
 	if token.Start < 0 || token.Start+token.Size > len(program.Text) {

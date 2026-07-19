@@ -234,7 +234,7 @@ func functionValueProgramNeedsLowering(program *unit.Program) (bool, bool, bool)
 		token := program.Tokens[i]
 		start := token.Start
 		valid := start >= 0 && start+token.Size <= len(program.Text)
-		if token.Kind == unit.TokenFunc && functionValueTokenEquals(program, i+1, "(") && !functionValueIsDeclaredFunction(program, i) {
+		if token.KindLine&255 == unit.TokenFunc && functionValueTokenEquals(program, i+1, "(") && !functionValueIsDeclaredFunction(program, i) {
 			functions = true
 		}
 		if i+2 < len(program.Tokens) && valid && token.Size == 5 && program.Text[start] == 'd' && program.Text[start+1] == 'e' && program.Text[start+2] == 'f' && program.Text[start+3] == 'e' && program.Text[start+4] == 'r' && functionValueTokenEquals(program, i+2, "(") {
@@ -244,7 +244,7 @@ func functionValueProgramNeedsLowering(program *unit.Program) (bool, bool, bool)
 			}
 		}
 		name := ""
-		if valid && token.Kind == unit.TokenIdent {
+		if valid && token.KindLine&255 == unit.TokenIdent {
 			if token.Size == 3 && program.Text[start] == 'm' && program.Text[start+2] == 'n' {
 				if program.Text[start+1] == 'i' {
 					name = "min"
@@ -299,7 +299,7 @@ func discoverFunctionValueTypes(program *unit.Program) ([]functionValueSignature
 		}
 		j := start + 2
 		for j < close {
-			if program.Tokens[j].Kind != unit.TokenIdent {
+			if program.Tokens[j].KindLine&255 != unit.TokenIdent {
 				j++
 				continue
 			}
@@ -343,7 +343,7 @@ func discoverFunctionValueTypes(program *unit.Program) ([]functionValueSignature
 		}
 		close := functionValueFindMatchingBrace(program, start+1)
 		for j := start + 2; j+1 < close; j++ {
-			if program.Tokens[j].Kind != unit.TokenIdent {
+			if program.Tokens[j].KindLine&255 != unit.TokenIdent {
 				continue
 			}
 			sigIndex := functionValueSignatureByName(signatures, functionValueTokenText(program, j+1))
@@ -384,7 +384,7 @@ func parseFunctionValueSignature(program *unit.Program, funcTok int, name string
 			sig.zeroType = zeroType
 		}
 		end = resultClose + 1
-	} else if functionValueTokenCanStartType(program, end) && program.Tokens[end].Line == program.Tokens[close].Line {
+	} else if functionValueTokenCanStartType(program, end) && program.Tokens[end].KindLine>>8 == program.Tokens[close].KindLine>>8 {
 		resultEnd := functionValueTypeEnd(program, end)
 		if resultEnd <= end {
 			return sig, funcTok, false
@@ -462,9 +462,9 @@ func functionValueTypeEnd(program *unit.Program, start int) int {
 		}
 		return close + 1
 	}
-	if program.Tokens[start].Kind == unit.TokenIdent {
+	if program.Tokens[start].KindLine&255 == unit.TokenIdent {
 		end := start + 1
-		if functionValueTokenEquals(program, end, ".") && end+1 < len(program.Tokens) && program.Tokens[end+1].Kind == unit.TokenIdent {
+		if functionValueTokenEquals(program, end, ".") && end+1 < len(program.Tokens) && program.Tokens[end+1].KindLine&255 == unit.TokenIdent {
 			end += 2
 		}
 		return end
@@ -488,7 +488,7 @@ func functionValueSingleResultType(program *unit.Program, start int, end int) st
 		}
 	}
 	typeStart := start
-	if start+1 < end && program.Tokens[start].Kind == unit.TokenIdent && functionValueTypeEnd(program, start+1) == end {
+	if start+1 < end && program.Tokens[start].KindLine&255 == unit.TokenIdent && functionValueTypeEnd(program, start+1) == end {
 		typeStart++
 	}
 	if functionValueTypeEnd(program, typeStart) != end {
@@ -529,7 +529,7 @@ func normalizedFunctionValueParams(program *unit.Program, start int, end int) (s
 		partLen := partEnds[i] - partStarts[i]
 		name := "arg" + functionValueDecimal(i)
 		typ := functionValueTokensText(program, partStarts[i], partEnds[i])
-		if partLen >= 2 && program.Tokens[partStarts[i]].Kind == unit.TokenIdent {
+		if partLen >= 2 && program.Tokens[partStarts[i]].KindLine&255 == unit.TokenIdent {
 			name = functionValueTokenText(program, partStarts[i])
 			typ = functionValueTokensText(program, partStarts[i]+1, partEnds[i])
 		} else if partLen == 1 && i+1 < len(partStarts) && partEnds[i+1]-partStarts[i+1] >= 2 {
@@ -554,7 +554,7 @@ func lowerFunctionValueAssignment(program *unit.Program, op int, signatures []fu
 		edits = append(edits, functionValueTokenEdit(program, rhs, signatures[sigIndex].name+"{}"))
 		return edits, true
 	}
-	if rhs+2 >= len(program.Tokens) || !functionValueTokenEquals(program, rhs+1, ".") || program.Tokens[rhs].Kind != unit.TokenIdent || program.Tokens[rhs+2].Kind != unit.TokenIdent {
+	if rhs+2 >= len(program.Tokens) || !functionValueTokenEquals(program, rhs+1, ".") || program.Tokens[rhs].KindLine&255 != unit.TokenIdent || program.Tokens[rhs+2].KindLine&255 != unit.TokenIdent {
 		return edits, true
 	}
 	method := functionValueTokenText(program, rhs+2)
@@ -764,7 +764,7 @@ func functionValueCaptures(program *unit.Program, literalStart int, bodyOpen int
 	var names []string
 	var types []string
 	for i := bodyOpen + 1; i < bodyClose; i++ {
-		if program.Tokens[i].Kind != unit.TokenIdent {
+		if program.Tokens[i].KindLine&255 != unit.TokenIdent {
 			continue
 		}
 		name := functionValueTokenText(program, i)
@@ -813,20 +813,20 @@ func functionValueEnclosingLocalType(program *unit.Program, before int, name str
 		}
 		if functionValueTokenEquals(program, i+1, ":=") {
 			rhs := i + 2
-			if functionValueTokenEquals(program, rhs, "&") && rhs+1 < before && program.Tokens[rhs+1].Kind == unit.TokenIdent {
+			if functionValueTokenEquals(program, rhs, "&") && rhs+1 < before && program.Tokens[rhs+1].KindLine&255 == unit.TokenIdent {
 				return "*" + functionValueTokenText(program, rhs+1)
 			}
 			typeEnd := functionValueTypeEnd(program, rhs)
 			if typeEnd > rhs && functionValueTokenEquals(program, typeEnd, "{") {
 				return functionValueTokensText(program, rhs, typeEnd)
 			}
-			if program.Tokens[rhs].Kind == unit.TokenNumber {
+			if program.Tokens[rhs].KindLine&255 == unit.TokenNumber {
 				return "int"
 			}
-			if program.Tokens[rhs].Kind == unit.TokenString {
+			if program.Tokens[rhs].KindLine&255 == unit.TokenString {
 				return "string"
 			}
-			if program.Tokens[rhs].Kind == unit.TokenIdent {
+			if program.Tokens[rhs].KindLine&255 == unit.TokenIdent {
 				callName := ""
 				if functionValueTokenEquals(program, rhs+1, "(") {
 					callName = functionValueTokenText(program, rhs)
@@ -962,10 +962,10 @@ func reparseFunctionValueProgram(original *unit.Program, text []byte) bool {
 		kind := functionValueUnitTokenKind(text, tok)
 		if functionValueTokenIsEllipsis(text, tok) {
 			for dot := 0; dot < 3; dot++ {
-				out.Tokens = append(out.Tokens, unit.Token{Kind: kind, Start: tok.Start + dot, Size: 1, Line: tok.KindLine >> 8})
+				out.Tokens = append(out.Tokens, unit.MakeToken(kind, tok.Start+dot, 1, tok.KindLine>>8))
 			}
 		} else {
-			out.Tokens = append(out.Tokens, unit.Token{Kind: kind, Start: tok.Start, Size: tok.End - tok.Start, Line: tok.KindLine >> 8})
+			out.Tokens = append(out.Tokens, unit.MakeToken(kind, tok.Start, tok.End-tok.Start, tok.KindLine>>8))
 		}
 	}
 	tokenMap[len(file.Tokens)] = len(out.Tokens)
@@ -1094,7 +1094,7 @@ func functionValueMethodReceiverType(program *unit.Program, method string) strin
 		if functionValueTokenEquals(program, end-1, ")") {
 			end--
 		}
-		if end-start >= 2 && program.Tokens[start].Kind == unit.TokenIdent {
+		if end-start >= 2 && program.Tokens[start].KindLine&255 == unit.TokenIdent {
 			start++
 		}
 		return functionValueTokensText(program, start, end)
@@ -1129,7 +1129,7 @@ func functionValueReceiverType(program *unit.Program, fn unit.Func) string {
 	if functionValueTokenEquals(program, end-1, ")") {
 		end--
 	}
-	if end-start >= 2 && program.Tokens[start].Kind == unit.TokenIdent {
+	if end-start >= 2 && program.Tokens[start].KindLine&255 == unit.TokenIdent {
 		start++
 	}
 	return functionValueTokensText(program, start, end)
@@ -1144,7 +1144,7 @@ func functionValueSelectorFieldBefore(program *unit.Program, before int) int {
 
 func functionValueSelectorStart(program *unit.Program, end int) int {
 	start := end
-	for start >= 2 && functionValueTokenEquals(program, start-1, ".") && program.Tokens[start-2].Kind == unit.TokenIdent {
+	for start >= 2 && functionValueTokenEquals(program, start-1, ".") && program.Tokens[start-2].KindLine&255 == unit.TokenIdent {
 		start -= 2
 	}
 	return start
@@ -1178,7 +1178,7 @@ func functionValueCompositeOwner(program *unit.Program, before int) string {
 			depth--
 			continue
 		}
-		if program.Tokens[i-1].Kind == unit.TokenIdent {
+		if program.Tokens[i-1].KindLine&255 == unit.TokenIdent {
 			return functionValueTokenText(program, i-1)
 		}
 		return ""
@@ -1251,7 +1251,7 @@ func functionValueStructFieldType(program *unit.Program, owner string, fieldName
 				break
 			}
 			lineEnd := j + 1
-			for lineEnd < close && !functionValueTokenEquals(program, lineEnd, ";") && program.Tokens[lineEnd].Line == program.Tokens[j].Line {
+			for lineEnd < close && !functionValueTokenEquals(program, lineEnd, ";") && program.Tokens[lineEnd].KindLine>>8 == program.Tokens[j].KindLine>>8 {
 				lineEnd++
 			}
 			if functionValueTokenEquals(program, j, fieldName) && j+1 < lineEnd {
@@ -1304,21 +1304,21 @@ func functionValueTypeEmbeds(program *unit.Program, actual string, wanted string
 		}
 		close := functionValueFindMatchingBrace(program, start+1)
 		for j := start + 2; j < close; j++ {
-			if j > start+2 && !functionValueTokenEquals(program, j-1, ";") && program.Tokens[j-1].Line == program.Tokens[j].Line {
+			if j > start+2 && !functionValueTokenEquals(program, j-1, ";") && program.Tokens[j-1].KindLine>>8 == program.Tokens[j].KindLine>>8 {
 				continue
 			}
 			embeddedStart := j
 			if functionValueTokenEquals(program, j, "*") {
 				embeddedStart++
 			}
-			if program.Tokens[embeddedStart].Kind != unit.TokenIdent {
+			if program.Tokens[embeddedStart].KindLine&255 != unit.TokenIdent {
 				continue
 			}
 			embeddedEnd := embeddedStart + 1
-			if functionValueTokenEquals(program, embeddedEnd, ".") && embeddedEnd+1 < close && program.Tokens[embeddedEnd+1].Kind == unit.TokenIdent {
+			if functionValueTokenEquals(program, embeddedEnd, ".") && embeddedEnd+1 < close && program.Tokens[embeddedEnd+1].KindLine&255 == unit.TokenIdent {
 				embeddedEnd += 2
 			}
-			if embeddedEnd < close && !functionValueTokenEquals(program, embeddedEnd, ";") && program.Tokens[embeddedEnd].Line == program.Tokens[embeddedStart].Line {
+			if embeddedEnd < close && !functionValueTokenEquals(program, embeddedEnd, ";") && program.Tokens[embeddedEnd].KindLine>>8 == program.Tokens[embeddedStart].KindLine>>8 {
 				continue
 			}
 			embeddedType := functionValueBareType(functionValueTokensText(program, j, embeddedEnd))
@@ -1355,7 +1355,7 @@ func functionValueTokenCanStartType(program *unit.Program, tok int) bool {
 		return false
 	}
 	text := functionValueTokenText(program, tok)
-	return program.Tokens[tok].Kind == unit.TokenIdent || text == "*" || text == "[" || text == "struct" || text == "interface" || text == "map" || text == "func"
+	return program.Tokens[tok].KindLine&255 == unit.TokenIdent || text == "*" || text == "[" || text == "struct" || text == "interface" || text == "map" || text == "func"
 }
 
 func functionValueTokenAtSpan(program *unit.Program, start int, end int) int {

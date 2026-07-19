@@ -185,7 +185,7 @@ func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end i
 		return ""
 	}
 	if end-start == 1 {
-		kind := program.Tokens[start].Kind
+		kind := program.Tokens[start].KindLine & 255
 		if kind == unit.TokenString {
 			return "string"
 		}
@@ -207,7 +207,7 @@ func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end i
 	if (functionValueTokenEquals(program, start, "+") || functionValueTokenEquals(program, start, "-") || functionValueTokenEquals(program, start, "^")) && start+1 < end {
 		return ordinaryBuiltinExprType(program, before, start+1, end)
 	}
-	if program.Tokens[start].Kind == unit.TokenIdent && functionValueTokenEquals(program, start+1, "(") && functionValueFindMatchingParen(program, start+1) == end-1 {
+	if program.Tokens[start].KindLine&255 == unit.TokenIdent && functionValueTokenEquals(program, start+1, "(") && functionValueFindMatchingParen(program, start+1) == end-1 {
 		name := functionValueTokenText(program, start)
 		if name == "make" {
 			starts, ends := ordinaryBuiltinArguments(program, start+2, end-1)
@@ -300,7 +300,7 @@ func ordinaryUntypedExpression(program *unit.Program, start int, end int) bool {
 		end--
 	}
 	if end-start == 1 {
-		kind := program.Tokens[start].Kind
+		kind := program.Tokens[start].KindLine & 255
 		return kind == unit.TokenNumber || kind == unit.TokenFloat || kind == unit.TokenString || kind == unit.TokenChar
 	}
 	return false
@@ -399,7 +399,7 @@ func ordinaryConstantValue(program *unit.Program, start int, end int, depth int)
 	if start < 0 || end <= start || end > len(program.Tokens) {
 		return ordinaryBuiltinConstant{}
 	}
-	if program.Tokens[start].Kind == unit.TokenIdent && start+2 < end && functionValueTokenEquals(program, start+1, "(") && functionValueFindMatchingParen(program, start+1) == end-1 {
+	if program.Tokens[start].KindLine&255 == unit.TokenIdent && start+2 < end && functionValueTokenEquals(program, start+1, "(") && functionValueFindMatchingParen(program, start+1) == end-1 {
 		typ := functionValueTokenText(program, start)
 		if ordinaryBuiltinTypeName(typ) || functionValueDeclaredType(program, typ) {
 			value := ordinaryConstantValue(program, start+2, end-1, depth+1)
@@ -407,16 +407,16 @@ func ordinaryConstantValue(program *unit.Program, start int, end int, depth int)
 			return value
 		}
 	}
-	if end-start == 1 && program.Tokens[start].Kind == unit.TokenString {
+	if end-start == 1 && program.Tokens[start].KindLine&255 == unit.TokenString {
 		tok := program.Tokens[start]
-		value, ok := syntax.StringLiteralValue(program.Text, syntax.MakeToken(syntax.TokenString, tok.Start, tok.Start+tok.Size, tok.Line))
+		value, ok := syntax.StringLiteralValue(program.Text, syntax.MakeToken(syntax.TokenString, tok.Start, tok.Start+tok.Size, tok.KindLine>>8))
 		return ordinaryBuiltinConstant{kind: 2, text: value, ok: ok}
 	}
-	if end-start == 1 && (program.Tokens[start].Kind == unit.TokenNumber || program.Tokens[start].Kind == unit.TokenFloat) {
+	if end-start == 1 && (program.Tokens[start].KindLine&255 == unit.TokenNumber || program.Tokens[start].KindLine&255 == unit.TokenFloat) {
 		number, floating, ok := ordinaryConstantParseNumber(functionValueTokenText(program, start))
 		return ordinaryBuiltinConstant{kind: 1, number: number, floating: floating, ok: ok}
 	}
-	if end-start == 1 && program.Tokens[start].Kind == unit.TokenIdent {
+	if end-start == 1 && program.Tokens[start].KindLine&255 == unit.TokenIdent {
 		return ordinaryConstantNamedValue(program, functionValueTokenText(program, start), depth+1)
 	}
 	if (functionValueTokenEquals(program, start, "+") || functionValueTokenEquals(program, start, "-")) && start+1 < end {
