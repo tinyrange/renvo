@@ -90,6 +90,7 @@ func lowerFunctionValuesCore(program *unit.Program, transient bool) bool {
 			}
 		}
 	}
+	edits = lowerFunctionValueCallArguments(program, signatures, edits)
 	var closures []functionValueClosure
 	signatures, closures, edits, ok = lowerFunctionValueLiterals(program, signatures, fields, closures, edits)
 	if !ok {
@@ -554,13 +555,17 @@ func lowerFunctionValueAssignment(program *unit.Program, op int, signatures []fu
 		edits = append(edits, functionValueTokenEdit(program, rhs, signatures[sigIndex].name+"{}"))
 		return edits, true
 	}
+	return lowerFunctionValueBoundMethod(program, op, rhs, sigIndex, signatures, edits), true
+}
+
+func lowerFunctionValueBoundMethod(program *unit.Program, at int, rhs int, sigIndex int, signatures []functionValueSignature, edits []functionValueEdit) []functionValueEdit {
 	if rhs+2 >= len(program.Tokens) || !functionValueTokenEquals(program, rhs+1, ".") || program.Tokens[rhs].KindLine&255 != unit.TokenIdent || program.Tokens[rhs+2].KindLine&255 != unit.TokenIdent {
-		return edits, true
+		return edits
 	}
 	method := functionValueTokenText(program, rhs+2)
-	receiverType := functionValueMethodReceiverTypeForBase(program, op, functionValueTokenText(program, rhs), method)
+	receiverType := functionValueMethodReceiverTypeForBase(program, at, functionValueTokenText(program, rhs), method)
 	if receiverType == "" {
-		return edits, true
+		return edits
 	}
 	implIndex := functionValueImplIndex(signatures[sigIndex], receiverType, method, "")
 	if implIndex < 0 {
@@ -571,9 +576,143 @@ func lowerFunctionValueAssignment(program *unit.Program, op int, signatures []fu
 		signatures[sigIndex].fieldTypes = append(signatures[sigIndex].fieldTypes, receiverType)
 	}
 	impl := signatures[sigIndex].impls[implIndex]
-	replacement := signatures[sigIndex].name + "{kind: " + functionValueDecimal(implIndex+1) + ", " + impl.receiverField + ": " + functionValueTokenText(program, rhs) + "}"
+	receiver := functionValueTokenText(program, rhs)
+	baseType := functionValueEnclosingLocalType(program, at, receiver)
+	if len(receiverType) > 0 && receiverType[0] == '*' && len(baseType) > 0 && baseType[0] != '*' {
+		receiver = "&" + receiver
+	}
+	replacement := signatures[sigIndex].name + "{kind: " + functionValueDecimal(implIndex+1) + ", " + impl.receiverField + ": " + receiver + "}"
 	edits = append(edits, functionValueTokenRangeEdit(program, rhs, rhs+3, replacement))
-	return edits, true
+	return edits
+}
+
+func lowerFunctionValueCallArguments(program *unit.Program, signatures []functionValueSignature, edits []functionValueEdit) []functionValueEdit {
+	for open := 0; open < len(program.Tokens); open++ {
+		if !functionValueTokenEquals(program, open, "(") || functionValueCallIsDeclaration(program, open) {
+			continue
+		}
+		fn, ok := functionValueCalledFunction(program, open)
+		if !ok {
+			continue
+		}
+		close := functionValueFindMatchingParen(program, open)
+		if close <= open {
+			continue
+		}
+		paramTypes := functionValueFunctionParamTypes(program, fn)
+		argStarts, argEnds := functionValueCommaParts(program, open+1, close)
+		if len(argStarts) != len(paramTypes) {
+			continue
+		}
+		for i := 0; i < len(argStarts); i++ {
+			if argEnds[i]-argStarts[i] != 3 {
+				continue
+			}
+			sigIndex := functionValueSignatureByName(signatures, functionValueBareType(paramTypes[i]))
+			if sigIndex < 0 {
+				continue
+			}
+			edits = lowerFunctionValueBoundMethod(program, open, argStarts[i], sigIndex, signatures, edits)
+		}
+	}
+	return edits
+}
+
+func functionValueCallIsDeclaration(program *unit.Program, open int) bool {
+	for i := 0; i < len(program.Funcs); i++ {
+		if program.Funcs[i].NameTok+1 == open {
+			return true
+		}
+	}
+	return false
+}
+
+func functionValueCalledFunction(program *unit.Program, open int) (unit.Func, bool) {
+	var fallback unit.Func
+	fallbackOK := false
+	if open < 1 || program.Tokens[open-1].KindLine&255 != unit.TokenIdent {
+		return fallback, false
+	}
+	name := functionValueTokenText(program, open-1)
+	selector := open >= 3 && functionValueTokenEquals(program, open-2, ".")
+	baseType := ""
+	fallbackCount := 0
+	if selector {
+		selectorStart := functionValueSelectorStart(program, open-1)
+		if selectorStart >= 0 {
+			baseType = functionValueEnclosingLocalType(program, open, functionValueTokenText(program, selectorStart))
+		}
+	}
+	for i := 0; i < len(program.Funcs); i++ {
+		fn := program.Funcs[i]
+		if functionValueTokenText(program, fn.NameTok) != name {
+			continue
+		}
+		method := fn.ReceiverStart < fn.ReceiverEnd
+		if method != selector {
+			continue
+		}
+		if !fallbackOK {
+			fallback = fn
+			fallbackOK = true
+		}
+		fallbackCount++
+		if !method || baseType != "" && functionValueTypeEmbeds(program, baseType, functionValueReceiverType(program, fn), 0) {
+			return fn, true
+		}
+	}
+	return fallback, fallbackOK && fallbackCount == 1
+}
+
+func functionValueCommaParts(program *unit.Program, start int, end int) ([]int, []int) {
+	var starts []int
+	var ends []int
+	partStart := start
+	depth := 0
+	for i := start; i <= end; i++ {
+		text := functionValueTokenText(program, i)
+		if i < end {
+			if text == "(" || text == "[" || text == "{" {
+				depth++
+			} else if text == ")" || text == "]" || text == "}" {
+				depth--
+			}
+		}
+		if i != end && !(depth == 0 && text == ",") {
+			continue
+		}
+		if partStart < i {
+			starts = append(starts, partStart)
+			ends = append(ends, i)
+		}
+		partStart = i + 1
+	}
+	return starts, ends
+}
+
+func functionValueFunctionParamTypes(program *unit.Program, fn unit.Func) []string {
+	open := fn.NameTok + 1
+	if !functionValueTokenEquals(program, open, "(") {
+		return nil
+	}
+	close := functionValueFindMatchingParen(program, open)
+	starts, ends := functionValueCommaParts(program, open+1, close)
+	types := make([]string, len(starts))
+	carried := ""
+	for i := len(starts) - 1; i >= 0; i-- {
+		start := starts[i]
+		end := ends[i]
+		if start+1 < end && program.Tokens[start].KindLine&255 == unit.TokenIdent && functionValueTypeEnd(program, start+1) == end {
+			carried = functionValueTokensText(program, start+1, end)
+			types[i] = carried
+		} else if end == start+1 && carried != "" {
+			types[i] = carried
+		} else {
+			carried = ""
+			types[i] = functionValueTokensText(program, start, end)
+		}
+	}
+	return types
 }
 
 func lowerFunctionValueNilComparison(program *unit.Program, op int, fields []functionValueField, edits []functionValueEdit) []functionValueEdit {
