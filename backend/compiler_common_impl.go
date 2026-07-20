@@ -4584,30 +4584,18 @@ func renvoParseVarDeclEntry(m *renvoMeta, p *renvoProgram, start int, end int) {
 
 func renvoInferTopLiteralType(m *renvoMeta, p *renvoProgram, start int, end int) int {
 	renvoNonNil(m, p)
+	if renvoTokIdentIs(p, start, "make") {
+		return renvoParseType(m, p, start+2, end).typ
+	}
 	if start+1 == end && renvoTokIsKind(p, start, renvoTokString) {
 		return renvoTypeString
 	}
 	if start+1 == end && renvoTokIsKind(p, start, renvoTokFloat) {
 		return renvoTypeFloat64
 	}
-	open := start
-	depth := 0
-	for open < end {
-		if depth == 0 && renvoTokCharIs(p, open, '{') {
-			typeResult := renvoParseType(m, p, start, open)
-			if typeResult.typ != 0 {
-				return typeResult.typ
-			}
-			return 0
-		}
-		if renvoTokCharIs(p, open, '(') || renvoTokCharIs(p, open, '[') {
-			depth++
-		} else if renvoTokCharIs(p, open, ')') || renvoTokCharIs(p, open, ']') {
-			if depth > 0 {
-				depth--
-			}
-		}
-		open++
+	open := renvoFindNextTokenText(p, start, end, '{')
+	if open > start {
+		return renvoParseType(m, p, start, open).typ
 	}
 	return 0
 }
