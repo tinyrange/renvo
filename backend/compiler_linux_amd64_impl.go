@@ -255,7 +255,7 @@ func renvoAsmImageAmd64(a *renvoAsm) []byte {
 		return out
 	}
 	var sec renvoElfSymbolSections
-	renvoBuildElfSymbolSections(a, 0x400000, a.codeOffset, loadFileSize, &sec)
+	renvoBuildElfSymbolSections(a, 0, a.codeOffset, loadFileSize, &sec)
 	finalSize := sec.shoff + 448
 	out := make([]byte, finalSize)
 	renvoTruncBytes(&out, 0)
@@ -279,17 +279,22 @@ func renvoAsmImageAmd64(a *renvoAsm) []byte {
 		out = append(out, sec.shstrtab[i])
 	}
 	out = renvoAppendUntil(out, sec.shoff)
-	out = renvoAppendElfSectionHeaders(out, &sec, a, 0x400000)
+	out = renvoAppendElfSectionHeaders(out, &sec, a, 0)
 	return out
 }
 
 func renvoAppendElfHeaderAmd64(out []byte, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int) []byte {
 	start := len(out)
-	base := 0x400000
+	base := 0
 	header := "\x7f\x45\x4c\x46\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x3e\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x38\x00\x02\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x05\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00"
 	out = append(out, header...)
+	// All Linux/amd64 references are RIP-relative. ET_DYN lets the kernel
+	// randomize this self-contained image without a dynamic loader.
+	out[start+16] = 3
 	renvoPut32At(out, start+24, base+entryOff)
 	renvoPut32At(out, start+40, shoff)
+	renvoPut32At(out, start+80, base)
+	renvoPut32At(out, start+88, base)
 	if shoff != 0 {
 		out[start+58] = 64
 		out[start+60] = 7

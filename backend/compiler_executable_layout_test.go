@@ -5,7 +5,13 @@ import (
 	"debug/elf"
 	"debug/macho"
 	"debug/pe"
+	"os"
+	"os/exec"
+	"runtime"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 )
 
 var executableLayoutSmokeSource = []byte(`package main
@@ -26,8 +32,12 @@ func TestLinuxImagesSeparateExecutableAndWritableLoads(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parse %s: %v", target, err)
 		}
-		if file.Type != elf.ET_EXEC {
-			t.Errorf("%s ELF type = %s, want fixed-address ET_EXEC", target, file.Type)
+		wantType := elf.ET_EXEC
+		if target == "linux/amd64" {
+			wantType = elf.ET_DYN
+		}
+		if file.Type != wantType {
+			t.Errorf("%s ELF type = %s, want %s", target, file.Type, wantType)
 		}
 		rxLoads := 0
 		rwLoads := 0
@@ -63,6 +73,63 @@ func TestLinuxImagesSeparateExecutableAndWritableLoads(t *testing.T) {
 			t.Errorf("%s .bss flags = %#v, want writable non-executable storage", target, bss)
 		}
 		file.Close()
+	}
+}
+
+func TestLinuxAmd64PIELoadsAtRandomizedAddresses(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skip("requires a Linux amd64 host")
+	}
+	policy, err := os.ReadFile("/proc/sys/kernel/randomize_va_space")
+	if err != nil || strings.TrimSpace(string(policy)) == "0" {
+		t.Skip("kernel address randomization is disabled")
+	}
+	source := []byte("package main\nfunc appMain() int { for {} }\n")
+	image, ok := RenvoCompileSourceToBytesStrip(source, "linux/amd64", true)
+	if !ok {
+		t.Fatal("compile Linux amd64 PIE")
+	}
+	path := t.TempDir() + "/pie-loop"
+	if err := os.WriteFile(path, image, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bases := make(map[string]bool)
+	for attempt := 0; attempt < 4; attempt++ {
+		cmd := exec.Command(path)
+		if err := cmd.Start(); err != nil {
+			t.Fatalf("start PIE: %v", err)
+		}
+		base := ""
+		var readErr error
+		for poll := 0; poll < 20 && base == ""; poll++ {
+			var maps []byte
+			maps, readErr = os.ReadFile("/proc/" + strconv.Itoa(cmd.Process.Pid) + "/maps")
+			if readErr != nil {
+				break
+			}
+			for _, line := range strings.Split(string(maps), "\n") {
+				fields := strings.Fields(line)
+				if len(fields) >= 6 && fields[1] == "r-xp" && fields[len(fields)-1] == path {
+					base = strings.Split(fields[0], "-")[0]
+					break
+				}
+			}
+			if base == "" {
+				time.Sleep(time.Millisecond)
+			}
+		}
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		if readErr != nil {
+			t.Fatalf("read process mappings: %v", readErr)
+		}
+		if base == "" {
+			t.Fatal("PIE executable mapping was not found")
+		}
+		bases[base] = true
+	}
+	if len(bases) < 2 {
+		t.Fatalf("PIE used one load address across four runs: %v", bases)
 	}
 }
 
