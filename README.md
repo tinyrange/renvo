@@ -37,10 +37,10 @@ explicitly.
 
 | Target | Output |
 | --- | --- |
-| `linux/amd64` | ELF executable |
-| `linux/386` | ELF executable |
-| `linux/aarch64` | ELF executable |
-| `linux/arm` | ELF executable |
+| `linux/amd64` | Static position-independent ELF executable (ASLR) |
+| `linux/386` | Static fixed-address ELF executable |
+| `linux/aarch64` | Static fixed-address ELF executable |
+| `linux/arm` | Static fixed-address ELF executable |
 | `windows/amd64` | PE executable |
 | `windows/386` | PE executable |
 | `windows/arm64` | PE executable |
