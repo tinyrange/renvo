@@ -31,6 +31,36 @@ func TestButtonPropertiesPaintAndDispatchClick(t *testing.T) {
 	}
 }
 
+func TestChoiceAndButtonKeyboardActivation(t *testing.T) {
+	var form Form
+	form.Initialize(320, 180)
+	button := NewButton()
+	check := NewCheckBox()
+	radio := NewRadioButton()
+	form.Add(&button.Control)
+	form.Add(&check.Control)
+	form.Add(&radio.Control)
+
+	clicks := 0
+	button.Click = func() { clicks++ }
+	button.Focus()
+	form.Dispatch(graphics.Event{Type: graphics.EventKeyDown, Key: graphics.KeySpace})
+	form.Dispatch(graphics.Event{Type: graphics.EventKeyDown, Key: graphics.KeyEnter})
+	if clicks != 2 {
+		t.Fatalf("button keyboard clicks = %d, want 2", clicks)
+	}
+	check.Focus()
+	form.Dispatch(graphics.Event{Type: graphics.EventKeyDown, Key: graphics.KeySpace})
+	if !check.Checked() {
+		t.Fatal("Space did not toggle checkbox")
+	}
+	radio.Focus()
+	form.Dispatch(graphics.Event{Type: graphics.EventKeyDown, Key: graphics.KeySpace})
+	if !radio.Checked() {
+		t.Fatal("Space did not select radio button")
+	}
+}
+
 func TestLabelTextChangeInvalidatesOwningForm(t *testing.T) {
 	var form Form
 	form.Initialize(180, 80)

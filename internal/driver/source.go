@@ -34,6 +34,7 @@ type DirEntry struct {
 type SourceFS interface {
 	ReadDir(path string) ([]DirEntry, bool)
 	ReadFile(path string) ([]byte, bool)
+	PathExists(path string) bool
 }
 
 type SourceResult struct {

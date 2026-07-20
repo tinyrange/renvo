@@ -394,6 +394,7 @@ type Program struct {
 	ImportPath string
 	Text       []byte
 	Tokens     []byte
+	TokenLines []int
 	Imports    []Import
 	Symbols    []Symbol
 	Decls      []Decl
@@ -417,6 +418,24 @@ type Program struct {
 	Calls      []Call
 	Refs       []NameRef
 	Selectors  []Selector
+	Packages   []PackageInfo
+}
+
+type PackageInfo struct {
+	Name       string
+	ImportPath string
+	GraphKeyA  int
+	GraphKeyB  int
+	SourceKeyA int
+	SourceKeyB int
+	TextStart  int
+	TextEnd    int
+	TokenStart int
+	TokenEnd   int
+	DeclStart  int
+	DeclEnd    int
+	FuncStart  int
+	FuncEnd    int
 }
 
 type sourceToken struct {
@@ -463,7 +482,7 @@ func Marshal(program Program) ([]byte, error) {
 	if err := validateCoreUnitRanges(program); err != nil {
 		return nil, err
 	}
-	tokens, err := encodeTokens(program.Text, program.Tokens)
+	tokens, err := encodeTokens(program.Text, program.Tokens, program.TokenLines)
 	if err != nil {
 		return nil, err
 	}
@@ -495,6 +514,7 @@ func Marshal(program Program) ([]byte, error) {
 		NewNode(TagCalls, encodeCalls(program.Calls)),
 		NewNode(TagRefs, encodeRefs(program.Refs)),
 		NewNode(TagSels, encodeSelectors(program.Selectors)),
+		NewNode(TagPackages, encodePackages(program.Packages)),
 	)
 
 	var out bytes.Buffer
@@ -556,6 +576,7 @@ func Unmarshal(data []byte) (Program, error) {
 	var callData []byte
 	var refData []byte
 	var selectorData []byte
+	var packageData []byte
 	seenPackage := false
 	seenImportPath := false
 	seenText := false
@@ -583,6 +604,7 @@ func Unmarshal(data []byte) (Program, error) {
 	seenCalls := false
 	seenRefs := false
 	seenSelectors := false
+	seenPackages := false
 	seenTagMaskLow := 0
 	seenTagMaskHigh := 0
 	pos := rootStart
@@ -788,6 +810,12 @@ func Unmarshal(data []byte) (Program, error) {
 			}
 			seenSelectors = true
 			selectorData = payload
+		case TagPackages:
+			if seenPackages {
+				return program, fmt.Errorf("duplicate package ownership table")
+			}
+			seenPackages = true
+			packageData = payload
 		default:
 			// Version 1 is length-delimited so older readers can safely skip
 			// optional tables introduced by newer version-1 writers.
@@ -804,11 +832,12 @@ func Unmarshal(data []byte) (Program, error) {
 	if len(program.Text) == 0 {
 		return program, fmt.Errorf("unit missing text pool")
 	}
-	tokens, err := decodeTokens(program.Text, tokenData)
+	tokens, tokenLines, err := decodeTokens(program.Text, tokenData)
 	if err != nil {
 		return program, err
 	}
 	program.Tokens = tokens
+	program.TokenLines = tokenLines
 	if seenImports {
 		imports, err := decodeImports(importData)
 		if err != nil {
@@ -956,6 +985,13 @@ func Unmarshal(data []byte) (Program, error) {
 		}
 		program.Selectors = selectors
 	}
+	if seenPackages {
+		packages, err := decodePackages(packageData)
+		if err != nil {
+			return program, err
+		}
+		program.Packages = packages
+	}
 	if len(program.Tokens) == 0 {
 		return program, fmt.Errorf("unit missing token table")
 	}
@@ -976,6 +1012,9 @@ func validateCoreUnitRanges(program Program) error {
 		return fmt.Errorf("token data length %d is not a positive multiple of %d", len(program.Tokens), tokenStride)
 	}
 	tokenCount := len(program.Tokens) / tokenStride
+	if len(program.TokenLines) != 0 && len(program.TokenLines) != tokenCount {
+		return fmt.Errorf("token line table has %d entries, want %d", len(program.TokenLines), tokenCount)
+	}
 	if int(program.Tokens[(tokenCount-1)*tokenStride]) != renvoTokEOF {
 		return fmt.Errorf("token table does not end with EOF")
 	}
@@ -991,6 +1030,11 @@ func validateCoreUnitRanges(program Program) error {
 			!unitRangeValid(tokenCount, fn.BodyStart, fn.BodyEnd) ||
 			fn.NameTok < fn.StartTok || fn.NameTok >= fn.EndTok {
 			return fmt.Errorf("function %d has an invalid range", i)
+		}
+	}
+	for i, pkg := range program.Packages {
+		if pkg.Name == "" || pkg.ImportPath == "" || !unitRangeValid(len(program.Text), pkg.TextStart, pkg.TextEnd) || !unitRangeValid(tokenCount, pkg.TokenStart, pkg.TokenEnd) || !unitRangeValid(len(program.Decls), pkg.DeclStart, pkg.DeclEnd) || !unitRangeValid(len(program.Funcs), pkg.FuncStart, pkg.FuncEnd) {
+			return fmt.Errorf("package ownership %d has an invalid range", i)
 		}
 	}
 	return nil
@@ -1043,6 +1087,7 @@ type programBuilder struct {
 	pkg           string
 	text          []byte
 	tokens        []byte
+	tokenLines    []int
 	decls         []Decl
 	funcs         []Func
 	lineOffset    int
@@ -1123,7 +1168,7 @@ func (b *programBuilder) finish() Program {
 	}
 	start := len(b.text)
 	b.appendTokenData(renvoTokEOF, start, 0, line)
-	return Program{Package: b.pkg, Text: b.text, Tokens: b.tokens, Decls: b.decls, Funcs: b.funcs}
+	return Program{Package: b.pkg, Text: b.text, Tokens: b.tokens, TokenLines: b.tokenLines, Decls: b.decls, Funcs: b.funcs}
 }
 
 func (b *programBuilder) appendToken(tok sourceToken) (int, int) {
@@ -1211,6 +1256,17 @@ func isSpaceSensitiveOpPair(a byte, b byte) bool {
 }
 
 func (b *programBuilder) appendTokenData(kind int, start int, size int, line int) {
+	if line > 65535 && len(b.tokenLines) == 0 {
+		count := len(b.tokens) / tokenStride
+		b.tokenLines = make([]int, 0, count+1)
+		for i := 0; i < count; i++ {
+			pos := i * tokenStride
+			b.tokenLines = append(b.tokenLines, int(b.tokens[pos+6])|int(b.tokens[pos+7])<<8)
+		}
+	}
+	if len(b.tokenLines) > 0 {
+		b.tokenLines = append(b.tokenLines, line)
+	}
 	var rec [tokenStride]byte
 	rec[0] = byte(kind)
 	rec[1] = byte(start)
@@ -1746,7 +1802,7 @@ func tokCharIs(toks []sourceToken, i int, c byte) bool {
 	return toks[i].kind == renvoTokOp && len(toks[i].text) == 1 && toks[i].text[0] == c
 }
 
-func encodeTokens(text []byte, tokens []byte) ([]byte, error) {
+func encodeTokens(text []byte, tokens []byte, tokenLines []int) ([]byte, error) {
 	var out []byte
 	out = appendVarint(out, len(tokens)/tokenStride)
 	prevStart := 0
@@ -1759,6 +1815,9 @@ func encodeTokens(text []byte, tokens []byte) ([]byte, error) {
 			size = size | int(tokens[pos+5])<<8
 		}
 		line := int(tokens[pos+6]) | int(tokens[pos+7])<<8
+		if len(tokenLines) == len(tokens)/tokenStride {
+			line = tokenLines[pos/tokenStride]
+		}
 		if start < prevStart {
 			return nil, fmt.Errorf("token start moved backwards at token %d", pos/tokenStride)
 		}
@@ -1778,50 +1837,61 @@ func encodeTokens(text []byte, tokens []byte) ([]byte, error) {
 	return out, nil
 }
 
-func decodeTokens(text []byte, data []byte) ([]byte, error) {
+func decodeTokens(text []byte, data []byte) ([]byte, []int, error) {
 	pos := 0
 	count, next, ok := readVarint(data, pos)
 	if !ok {
-		return nil, fmt.Errorf("invalid token count")
+		return nil, nil, fmt.Errorf("invalid token count")
 	}
 	pos = next
 	if count < 0 {
-		return nil, fmt.Errorf("invalid token count %d", count)
+		return nil, nil, fmt.Errorf("invalid token count %d", count)
 	}
 	out := make([]byte, 0, count*tokenStride)
+	var largeLines []int
 	start := 0
 	line := 0
 	for i := 0; i < count; i++ {
 		kind, n, ok := readVarint(data, pos)
 		if !ok {
-			return nil, fmt.Errorf("invalid token %d kind", i)
+			return nil, nil, fmt.Errorf("invalid token %d kind", i)
 		}
 		pos = n
 		startDelta, n, ok := readVarint(data, pos)
 		if !ok {
-			return nil, fmt.Errorf("invalid token %d start", i)
+			return nil, nil, fmt.Errorf("invalid token %d start", i)
 		}
 		pos = n
 		size, n, ok := readVarint(data, pos)
 		if !ok {
-			return nil, fmt.Errorf("invalid token %d size", i)
+			return nil, nil, fmt.Errorf("invalid token %d size", i)
 		}
 		pos = n
 		lineDelta, n, ok := readVarint(data, pos)
 		if !ok {
-			return nil, fmt.Errorf("invalid token %d line", i)
+			return nil, nil, fmt.Errorf("invalid token %d line", i)
 		}
 		pos = n
 		start += startDelta
 		line += lineDelta
-		if kind < 0 || kind > 255 || start < 0 || start > 0xffffff || size < 0 || line < 0 || line > 0xffff || start+size > len(text) {
-			return nil, fmt.Errorf("invalid token %d", i)
+		if kind < 0 || kind > 255 || start < 0 || start > 0xffffff || size < 0 || line < 0 || start+size > len(text) {
+			return nil, nil, fmt.Errorf("invalid token %d", i)
+		}
+		if line > 65535 && len(largeLines) == 0 {
+			largeLines = make([]int, 0, count)
+			for j := 0; j < i; j++ {
+				at := j * tokenStride
+				largeLines = append(largeLines, int(out[at+6])|int(out[at+7])<<8)
+			}
+		}
+		if len(largeLines) > 0 {
+			largeLines = append(largeLines, line)
 		}
 		if kind == renvoTokOp && size > 255 {
-			return nil, fmt.Errorf("operator token %d too large", i)
+			return nil, nil, fmt.Errorf("operator token %d too large", i)
 		}
 		if kind != renvoTokOp && size > 0xffff {
-			return nil, fmt.Errorf("token %d too large", i)
+			return nil, nil, fmt.Errorf("token %d too large", i)
 		}
 		var rec [tokenStride]byte
 		rec[0] = byte(kind)
@@ -1841,9 +1911,9 @@ func decodeTokens(text []byte, data []byte) ([]byte, error) {
 		out = append(out, rec[:]...)
 	}
 	if pos != len(data) {
-		return nil, fmt.Errorf("trailing token data")
+		return nil, nil, fmt.Errorf("trailing token data")
 	}
-	return out, nil
+	return out, largeLines, nil
 }
 
 func readTokenStart(tokens []byte, pos int) int {
@@ -2228,6 +2298,94 @@ func encodeSelectors(selectors []Selector) []byte {
 		out = appendNullable(out, selector.Symbol)
 	}
 	return out
+}
+
+func encodePackages(packages []PackageInfo) []byte {
+	var out []byte
+	out = appendVarint(out, len(packages))
+	for _, item := range packages {
+		out = appendString(out, item.Name)
+		out = appendString(out, item.ImportPath)
+		out = appendFixed32(out, item.GraphKeyA)
+		out = appendFixed32(out, item.GraphKeyB)
+		out = appendFixed32(out, item.SourceKeyA)
+		out = appendFixed32(out, item.SourceKeyB)
+		out = appendVarint(out, item.TextStart)
+		out = appendVarint(out, item.TextEnd-item.TextStart)
+		out = appendVarint(out, item.TokenStart)
+		out = appendVarint(out, item.TokenEnd-item.TokenStart)
+		out = appendVarint(out, item.DeclStart)
+		out = appendVarint(out, item.DeclEnd-item.DeclStart)
+		out = appendVarint(out, item.FuncStart)
+		out = appendVarint(out, item.FuncEnd-item.FuncStart)
+	}
+	return out
+}
+
+func decodePackages(data []byte) ([]PackageInfo, error) {
+	count, pos, ok := readVarint(data, 0)
+	if !ok {
+		return nil, fmt.Errorf("invalid package ownership count")
+	}
+	out := make([]PackageInfo, 0, count)
+	for i := 0; i < count; i++ {
+		name, next, valid := readString(data, pos)
+		if !valid {
+			return nil, fmt.Errorf("invalid package ownership name")
+		}
+		path, nextPath, valid := readString(data, next)
+		if !valid || nextPath+16 > len(data) {
+			return nil, fmt.Errorf("invalid package ownership path")
+		}
+		item := PackageInfo{Name: name, ImportPath: path}
+		item.GraphKeyA = int(binary.LittleEndian.Uint32(data[nextPath : nextPath+4]))
+		item.GraphKeyB = int(binary.LittleEndian.Uint32(data[nextPath+4 : nextPath+8]))
+		item.SourceKeyA = int(binary.LittleEndian.Uint32(data[nextPath+8 : nextPath+12]))
+		item.SourceKeyB = int(binary.LittleEndian.Uint32(data[nextPath+12 : nextPath+16]))
+		pos = nextPath + 16
+		textLength := 0
+		tokenLength := 0
+		declLength := 0
+		funcLength := 0
+		item.TextStart, pos, valid = readVarint(data, pos)
+		if valid {
+			textLength, pos, valid = readVarint(data, pos)
+		}
+		if valid {
+			item.TokenStart, pos, valid = readVarint(data, pos)
+		}
+		if valid {
+			tokenLength, pos, valid = readVarint(data, pos)
+		}
+		if valid {
+			item.DeclStart, pos, valid = readVarint(data, pos)
+		}
+		if valid {
+			declLength, pos, valid = readVarint(data, pos)
+		}
+		if valid {
+			item.FuncStart, pos, valid = readVarint(data, pos)
+		}
+		if valid {
+			funcLength, pos, valid = readVarint(data, pos)
+		}
+		if !valid {
+			return nil, fmt.Errorf("invalid package ownership range")
+		}
+		item.TextEnd = item.TextStart + textLength
+		item.TokenEnd = item.TokenStart + tokenLength
+		item.DeclEnd = item.DeclStart + declLength
+		item.FuncEnd = item.FuncStart + funcLength
+		out = append(out, item)
+	}
+	if pos != len(data) {
+		return nil, fmt.Errorf("trailing package ownership data")
+	}
+	return out, nil
+}
+
+func appendFixed32(out []byte, value int) []byte {
+	return append(out, byte(value), byte(value>>8), byte(value>>16), byte(value>>24))
 }
 
 func appendSpanList(out []byte, spans []ExprSpan) []byte {

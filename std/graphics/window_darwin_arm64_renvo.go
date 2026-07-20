@@ -217,6 +217,7 @@ func NewWindow(options WindowOptions) *Window {
 	if w.backingScale < 1 {
 		w.backingScale = 1
 	}
+	w.resetBackingSurface()
 	objcMsg1(w.native, selector("setReleasedWhenClosed:"), 0)
 	objcMsg1(w.native, selector("setAcceptsMouseMovedEvents:"), 1)
 	w.view = objcMsg0(w.native, selector("contentView"))
@@ -281,28 +282,38 @@ func (w *Window) SetSize(width, height int) bool {
 }
 
 func (w *Window) resizeSurface(width, height int) {
-	if width <= 0 || height <= 0 || (width == w.width && height == w.height) {
+	scaleChanged := w.refreshBackingScale()
+	if width <= 0 || height <= 0 || (width == w.width && height == w.height && !scaleChanged) {
 		return
 	}
 	w.width, w.height = width, height
-	w.surface.Resize(width, height)
-	w.bottomUp = make([]byte, len(w.surface.Pixels))
+	w.resetBackingSurface()
 	if w.context != 0 {
 		objcMsg0(w.context, selector("update"))
 	}
-	w.refreshBackingScale()
 	w.queue(Event{Type: EventWindowResize, Dirty: R(0, 0, Scalar(width), Scalar(height))})
 	w.queue(Event{Type: EventWindowExpose, Dirty: R(0, 0, Scalar(width), Scalar(height))})
 }
 
-func (w *Window) refreshBackingScale() {
+func (w *Window) refreshBackingScale() bool {
 	if w == nil || w.native == 0 {
-		return
+		return false
 	}
 	scale := int(objcMsgFloat0(w.native, selector("backingScaleFactor")))
-	if scale >= 1 {
+	if scale >= 1 && scale != w.backingScale {
 		w.backingScale = scale
+		return true
 	}
+	return false
+}
+
+func (w *Window) resetBackingSurface() {
+	if w.backingScale < 1 {
+		w.backingScale = 1
+	}
+	w.surface.Resize(w.width*w.backingScale, w.height*w.backingScale)
+	w.surface.setDeviceScale(Scalar(w.backingScale))
+	w.bottomUp = make([]byte, len(w.surface.Pixels))
 }
 
 func (w *Window) RequestRepaint(rect Rect) {
@@ -575,6 +586,10 @@ func (w *Window) Wait() (Event, bool) {
 				}
 			}
 		}
+		accessibilityDelay := darwinAccessibilityPollDelay(w)
+		if accessibilityDelay >= 0.0 && (delay < 0.0 || accessibilityDelay < delay) {
+			delay = accessibilityDelay
+		}
 		if delay >= 0.0 {
 			date = objcMsgFloat1(objcGetClass("NSDate"), selector("dateWithTimeIntervalSinceNow:"), delay)
 		}
@@ -612,36 +627,35 @@ func (w *Window) Present() bool {
 	if !w.surface.dirtyValid {
 		return true
 	}
-	w.refreshBackingScale()
 	row := w.surface.Stride
 	for regionIndex := 0; regionIndex < len(w.surface.dirtyRects); regionIndex++ {
-		dirty := intersectPixelRect(pixelRect{maxX: w.width, maxY: w.height}, w.surface.dirtyRects[regionIndex])
+		dirty := intersectPixelRect(pixelRect{maxX: w.surface.Width, maxY: w.surface.Height}, w.surface.dirtyRects[regionIndex])
 		for y := dirty.minY; y < dirty.maxY; y++ {
 			src := y * row
-			dst := (w.height - y - 1) * row
-			for x := dirty.minX * 4; x < dirty.maxX*4; x++ {
-				w.bottomUp[dst+x] = w.surface.Pixels[src+x]
-			}
+			dst := (w.surface.Height - y - 1) * row
+			start := dirty.minX * 4
+			end := dirty.maxX * 4
+			copy(w.bottomUp[dst+start:dst+end], w.surface.Pixels[src+start:src+end])
 		}
 	}
 	objcMsg0(w.context, selector("makeCurrentContext"))
 	glViewport(0, 0, w.width*w.backingScale, w.height*w.backingScale)
 	glMatrixMode(glProjection)
 	glLoadIdentity()
-	glOrtho(0, w.width, 0, w.height, -1, 1)
+	glOrtho(0, w.surface.Width, 0, w.surface.Height, -1, 1)
 	glMatrixMode(glModelView)
 	glLoadIdentity()
 	glDrawBuffer(glFrontAndBack)
-	glPixelZoom(w.backingScale, w.backingScale)
+	glPixelZoom(1, 1)
 	glPixelStorei(glUnpackAlignment, 1)
-	glPixelStorei(glUnpackRowLength, w.width)
+	glPixelStorei(glUnpackRowLength, w.surface.Width)
 	for regionIndex := 0; regionIndex < len(w.surface.dirtyRects); regionIndex++ {
-		dirty := intersectPixelRect(pixelRect{maxX: w.width, maxY: w.height}, w.surface.dirtyRects[regionIndex])
+		dirty := intersectPixelRect(pixelRect{maxX: w.surface.Width, maxY: w.surface.Height}, w.surface.dirtyRects[regionIndex])
 		if dirty.maxX <= dirty.minX || dirty.maxY <= dirty.minY {
 			continue
 		}
-		glRasterPos2i(dirty.minX, w.height-dirty.maxY)
-		start := (w.height-dirty.maxY)*row + dirty.minX*4
+		glRasterPos2i(dirty.minX, w.surface.Height-dirty.maxY)
+		start := (w.surface.Height-dirty.maxY)*row + dirty.minX*4
 		glDrawPixels(dirty.maxX-dirty.minX, dirty.maxY-dirty.minY, glRGBA, glUnsignedByte, w.bottomUp[start:])
 	}
 	glPixelStorei(glUnpackRowLength, 0)
@@ -658,7 +672,6 @@ func (w *Window) ReadPixels() *Image {
 	if w == nil || w.closed || w.context == 0 {
 		return nil
 	}
-	w.refreshBackingScale()
 	width := w.width * w.backingScale
 	height := w.height * w.backingScale
 	if width <= 0 || height <= 0 {
@@ -686,6 +699,7 @@ func (w *Window) Close() {
 	}
 	w.closed = true
 	w.shown = false
+	darwinAccessibilityForget(w)
 	if w.context != 0 {
 		objcMsg0(w.context, selector("clearDrawable"))
 		objcMsg0(w.context, selector("release"))

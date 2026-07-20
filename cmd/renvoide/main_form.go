@@ -13,6 +13,9 @@ type MainForm struct {
 	forms.Form
 	window         *graphics.Window
 	menuBar        *forms.MenuBar
+	lightThemeItem *forms.MenuItem
+	darkThemeItem  *forms.MenuItem
+	statusBar      *forms.StatusBar
 	appBar         *workspaceAppBar
 	targetMenu     *workspaceTargetMenu
 	explorerFrame  *workspaceExplorerFrame
@@ -27,11 +30,38 @@ type MainForm struct {
 	env            []string
 	design         formDesign
 	designerView   bool
+	darkTheme      bool
 	lastBuildOK    bool
 	projectOutput  string
 	selectedTarget string
 	analysis       editorAnalysisSession
 	analysisTimer  bool
+	buildSession   *ideBuildSession
+	buildRunAfter  bool
+}
+
+const projectBuildTimerID = 74
+
+func (f *MainForm) useLightTheme() { f.setDarkTheme(false) }
+func (f *MainForm) useDarkTheme()  { f.setDarkTheme(true) }
+
+func (f *MainForm) setDarkTheme(dark bool) {
+	if f == nil {
+		return
+	}
+	f.darkTheme = dark
+	theme := forms.LightTheme()
+	if dark {
+		theme = forms.DarkTheme()
+	}
+	applyWorkspaceTheme(theme)
+	f.Form.ApplyTheme(theme)
+	if f.lightThemeItem != nil {
+		f.lightThemeItem.SetChecked(!dark)
+	}
+	if f.darkThemeItem != nil {
+		f.darkThemeItem.SetChecked(dark)
+	}
 }
 
 func NewMainForm(root string) *MainForm {
@@ -210,24 +240,33 @@ func (f *MainForm) updateWindowTitle() {
 		name = f.root
 	}
 	if name == "" || name == "." {
-		f.window.SetTitle("MiniIDE")
+		f.window.SetTitle("RENVO")
 	} else {
-		f.window.SetTitle("MiniIDE — " + name)
+		f.window.SetTitle("RENVO — " + name)
 	}
 }
 
 func (f *MainForm) formResize() {
-	width, height := f.Size()
-	layout := calculateWorkspaceLayout(width, height)
+	width, _ := f.Size()
+	content := f.DockClientBounds()
+	contentY := int(content.MinY)
+	contentHeight := int(content.Height())
+	layout := calculateWorkspaceLayout(width, contentHeight)
+	layout.explorerFrame = workspaceOffsetY(layout.explorerFrame, contentY)
+	layout.editorFrame = workspaceOffsetY(layout.editorFrame, contentY)
+	layout.designer = workspaceOffsetY(layout.designer, contentY)
+	layout.inspector = workspaceOffsetY(layout.inspector, contentY)
+	layout.output = workspaceOffsetY(layout.output, contentY)
+	layout.explorer = workspaceOffsetY(layout.explorer, contentY)
+	layout.editor = workspaceOffsetY(layout.editor, contentY)
 	if !f.designerView {
 		documentX := int(layout.editorFrame.MinX)
-		layout.editorFrame = rect(documentX, workspaceAppBarHeight, width-documentX, int(layout.editorFrame.Height()))
+		layout.editorFrame = rect(documentX, contentY+workspaceAppBarHeight, width-documentX, int(layout.editorFrame.Height()))
 		layout.output = rect(documentX, int(layout.output.MinY), width-documentX, int(layout.output.Height()))
 		layout.editor = rect(documentX, int(layout.editor.MinY), width-documentX, int(layout.editor.Height()))
 	}
-	f.appBar.SetBounds(rect(0, 0, width, workspaceAppBarHeight))
-	f.menuBar.SetBounds(rect(110, 7, 168, 32))
-	f.targetMenu.SetBounds(rect(290, 39, 184, len(workspaceTargets())*27+10))
+	f.appBar.SetBounds(rect(0, contentY, width, workspaceAppBarHeight))
+	f.targetMenu.SetBounds(rect(workspaceTargetX, contentY+workspaceAppBarHeight-1, workspaceTargetWidth, len(workspaceTargets())*workspaceTargetMenuRowHeight+workspaceTargetMenuPadding*2))
 	f.explorerFrame.SetBounds(layout.explorerFrame)
 	f.editorFrame.SetBounds(layout.editorFrame)
 	f.designer.SetBounds(layout.designer)
@@ -236,6 +275,12 @@ func (f *MainForm) formResize() {
 	f.explorer.SetBounds(layout.explorer)
 	f.editor.SetBounds(layout.editor)
 	f.syncEditorFrame()
+}
+
+func workspaceOffsetY(bounds graphics.Rect, offset int) graphics.Rect {
+	bounds.MinY += graphics.Scalar(offset)
+	bounds.MaxY += graphics.Scalar(offset)
+	return bounds
 }
 
 func (f *MainForm) showCode() {
@@ -317,6 +362,32 @@ func (f *MainForm) addDesignerControl(kind string) {
 		text = ""
 		width = 240
 		height = 140
+	} else if kind == designerComboBox {
+		base, text, width, height = "comboBox", "Combo box", 180, 32
+	} else if kind == designerListBox {
+		base, text, width, height = "listBox", "List item", 180, 110
+	} else if kind == designerListView {
+		base, text, width, height = "listView", "List view", 260, 140
+	} else if kind == designerTreeView {
+		base, text, width, height = "treeView", "Tree item", 200, 160
+	} else if kind == designerTabControl {
+		base, text, width, height = "tabControl", "Tab page", 300, 44
+	} else if kind == designerProgressBar {
+		base, text, width, height = "progressBar", "", 220, 24
+	} else if kind == designerNumericUpDown {
+		base, text, width, height = "numericUpDown", "", 120, 32
+	} else if kind == designerSlider {
+		base, text, width, height = "slider", "", 220, 32
+	} else if kind == designerGroupBox {
+		base, text, width, height = "groupBox", "Group", 260, 150
+	} else if kind == designerSplitContainer {
+		base, text, width, height = "splitContainer", "", 320, 180
+	} else if kind == designerToolBar {
+		base, text, width, height = "toolBar", "Toolbar", 320, 36
+	} else if kind == designerStatusBar {
+		base, text, width, height = "statusBar", "Ready", 320, 28
+	} else if kind == designerMenuBar {
+		base, text, width, height = "menuBar", "", 320, 34
 	}
 	name := f.nextDesignerName(base)
 	offset := len(f.design.controls) * designerGridSize
@@ -328,9 +399,27 @@ func (f *MainForm) addDesignerControl(kind string) {
 	if y+height > f.design.height {
 		y = 20
 	}
-	control := designerControl{kind: kind, name: name, text: text, x: x, y: y, width: width, height: height}
+	value := 0
+	if kind == designerProgressBar || kind == designerSlider {
+		value = 50
+	} else if kind == designerSplitContainer {
+		value = width / 2
+	}
+	dock := ""
+	if kind == designerMenuBar {
+		dock = designerDockTop
+		x = 0
+		y = 0
+		width = f.design.width
+	} else if kind == designerStatusBar {
+		dock = designerDockBottom
+		x = 0
+		y = f.design.height - height
+		width = f.design.width
+	}
+	control := designerControl{kind: kind, name: name, text: text, dock: dock, x: x, y: y, width: width, height: height, value: value}
 	index := len(f.design.controls)
-	if kind == designerPanel {
+	if kind == designerPanel || kind == designerGroupBox || kind == designerSplitContainer {
 		f.design.controls = append(f.design.controls, designerControl{})
 		copy(f.design.controls[1:], f.design.controls[:len(f.design.controls)-1])
 		f.design.controls[0] = control
@@ -382,6 +471,7 @@ func (f *MainForm) nextDesignerName(base string) string {
 
 func (f *MainForm) designerChanged() {
 	f.designer.InvalidatePreview()
+	f.designer.AccessibilityChildrenStateChanged()
 	f.inspector.InvalidateProperties()
 	f.persistDesigner()
 }
@@ -394,6 +484,11 @@ func (f *MainForm) persistDesigner() {
 		return
 	}
 	f.lastBuildOK = false
+	// The generated file participates in semantic completion for user code.
+	// Drop the whole snapshot so newly added controls and handlers are visible
+	// immediately instead of retaining the previous generated source.
+	f.analysis = editorAnalysisSession{}
+	f.requestEditorAnalysis()
 	f.output.SetMessage("Designer changes saved to "+projectGeneratedFormFile+".", true)
 	if f.explorer != nil && f.explorer.Model != nil {
 		f.explorer.Model.Refresh()
@@ -477,27 +572,57 @@ func workspaceContains(value, fragment string) bool {
 }
 
 func (f *MainForm) buildProject() {
+	f.beginProjectBuild(false)
+}
+
+func (f *MainForm) beginProjectBuild(runAfter bool) {
+	if f.buildSession != nil {
+		f.output.SetMessage("A build is already in progress.", true)
+		return
+	}
 	f.saveCurrentFile()
 	f.output.SetMessage("Building the project…", true)
-	result := compileIDEProject(f.root, f.projectOutput, f.selectedTarget, f.env)
-	f.lastBuildOK = result.ok
-	f.output.SetMessage(result.message, result.ok)
+	f.lastBuildOK = false
+	f.buildRunAfter = runAfter
+	f.buildSession = beginCompileIDEProject(f.root, f.projectOutput, f.selectedTarget, f.env)
+	if f.window != nil {
+		f.window.SetTimer(projectBuildTimerID, 0)
+		return
+	}
+	for f.buildSession != nil {
+		f.stepProjectBuild()
+	}
 }
 
 func (f *MainForm) runProject() {
-	// Always rebuild before Run. Files can be edited by another process, and a
-	// cached successful result does not prove that the executable still matches
-	// the project currently on disk.
-	f.buildProject()
-	if !f.lastBuildOK {
+	f.beginProjectBuild(true)
+}
+
+func (f *MainForm) stepProjectBuild() {
+	if f == nil || f.buildSession == nil {
+		return
+	}
+	done, result := f.buildSession.Step()
+	if !done {
+		if f.window != nil {
+			f.window.SetTimer(projectBuildTimerID, 0)
+		}
+		return
+	}
+	runAfter := f.buildRunAfter
+	f.buildSession = nil
+	f.buildRunAfter = false
+	f.lastBuildOK = result.ok
+	f.output.SetMessage(result.message, result.ok)
+	if !runAfter || !result.ok {
 		return
 	}
 	if f.selectedTarget != defaultIDETarget() {
 		f.output.SetMessage("Build succeeded for "+f.selectedTarget+". Run is available only for "+defaultIDETarget()+" on this host.", true)
 		return
 	}
-	result := launchIDEProject(f.projectOutput, f.root)
-	f.output.SetMessage(result.message, result.ok)
+	launched := launchIDEProject(f.projectOutput, f.root)
+	f.output.SetMessage(launched.message, launched.ok)
 }
 
 func (f *MainForm) toggleTargetMenu() {
@@ -540,6 +665,9 @@ func workspaceProjectOutput(root, target string) string {
 // Dispatch keeps the working editor model and the surrounding status chrome
 // synchronized without coupling editor commands to this particular shell.
 func (f *MainForm) Dispatch(event graphics.Event) {
+	if event.Type == graphics.EventTimer && event.TimerID == projectBuildTimerID {
+		f.stepProjectBuild()
+	}
 	if event.Type == graphics.EventTimer && event.TimerID == editorAnalysisTimerID {
 		f.runEditorAnalysis()
 	}

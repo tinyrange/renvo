@@ -601,6 +601,11 @@ func (fs memorySourceFS) ReadDir(path string) ([]DirEntry, bool) {
 	return entries, true
 }
 
+func (fs memorySourceFS) PathExists(path string) bool {
+	_, ok := fs.ReadFile(path)
+	return ok
+}
+
 func assertSourcePaths(t *testing.T, files []load.SourceFile, want []string) {
 	t.Helper()
 	if len(files) != len(want) {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"renvo.dev/ide"
+	"renvo.dev/internal/arena"
 	"renvo.dev/internal/check"
 	"renvo.dev/internal/driver"
 	"renvo.dev/internal/load"
@@ -23,43 +24,180 @@ func (fs completionOverlayFS) ReadFile(path string) ([]byte, bool) {
 	return completionReadFile(path)
 }
 
+func (fs completionOverlayFS) PathExists(path string) bool {
+	_, ok := fs.ReadFile(path)
+	return ok
+}
+
 func (f *MainForm) completeEditor(source []byte, caret int) []ide.Completion {
-	if !f.ensureEditorAnalysis(source) || !f.analysis.result.Workspace.Ok {
+	mark := arena.Mark()
+	result, ok := f.analyzeEditorSource(source)
+	if !ok || !result.Workspace.Ok {
+		arena.Reset(mark)
 		return nil
 	}
 	path := load.CleanPath(f.currentPath)
+	queryAt := completionQueryStart(source, caret)
 	var semantic []check.CompletionItem
-	if f.analysis.result.Program.Ok {
-		semantic = check.CompleteProgram(f.analysis.result.Workspace.Graph, f.analysis.result.Program, path, caret)
+	if result.Program.Ok {
+		semantic = check.CompleteProgram(result.Workspace.Graph, result.Program, path, queryAt)
 	} else {
-		semantic = check.CompleteGraph(f.analysis.result.Workspace.Graph, path, caret)
+		semantic = check.CompleteGraph(result.Workspace.Graph, path, queryAt)
 	}
-	items := make([]ide.Completion, 0, len(semantic))
-	for i := 0; i < len(semantic); i++ {
-		parameters := make([]ide.SignatureParameter, 0, len(semantic[i].Parameters))
-		for j := 0; j < len(semantic[i].Parameters); j++ {
-			parameters = append(parameters, ide.SignatureParameter{Name: semantic[i].Parameters[j].Name, Type: semantic[i].Parameters[j].Type})
+	staged := arena.PersistBytes(stageCompletionItems(semantic))
+	arena.Reset(mark)
+	return restoreCompletionItems(staged)
+}
+
+func completionQueryStart(source []byte, caret int) int {
+	if caret > len(source) {
+		caret = len(source)
+	}
+	if caret < 0 {
+		caret = 0
+	}
+	for caret > 0 {
+		value := source[caret-1]
+		if value != '_' && (value < 'a' || value > 'z') && (value < 'A' || value > 'Z') && (value < '0' || value > '9') {
+			break
 		}
-		items = append(items, ide.Completion{Text: semantic[i].Name, Detail: semantic[i].Detail, Kind: semantic[i].Kind, Signature: semantic[i].Signature, Parameters: parameters})
+		caret--
+	}
+	return caret
+}
+
+func (f *MainForm) signatureEditor(source []byte, caret int, out *ide.SignatureHelp) {
+	mark := arena.Mark()
+	result, ok := f.analyzeEditorSource(source)
+	if !ok || !result.Workspace.Ok {
+		arena.Reset(mark)
+		return
+	}
+	var help check.SignatureHelp
+	if result.Program.Ok {
+		help = check.SignatureHelpProgram(result.Workspace.Graph, result.Program, load.CleanPath(f.currentPath), caret)
+	} else {
+		help = check.SignatureHelpGraph(result.Workspace.Graph, load.CleanPath(f.currentPath), caret)
+	}
+	staged := arena.PersistBytes(stageSignatureHelp(help))
+	arena.Reset(mark)
+	*out = restoreSignatureHelp(staged)
+}
+
+func stageCompletionItems(items []check.CompletionItem) []byte {
+	data := appendCompletionStageInt(nil, len(items))
+	for i := 0; i < len(items); i++ {
+		data = appendCompletionStageText(data, items[i].Name)
+		data = appendCompletionStageText(data, items[i].Detail)
+		data = appendCompletionStageInt(data, items[i].Kind)
+		data = appendCompletionStageText(data, items[i].Signature)
+		data = appendCompletionStageInt(data, len(items[i].Parameters))
+		for j := 0; j < len(items[i].Parameters); j++ {
+			data = appendCompletionStageText(data, items[i].Parameters[j].Name)
+			data = appendCompletionStageText(data, items[i].Parameters[j].Type)
+		}
+	}
+	return data
+}
+
+func restoreCompletionItems(data []byte) []ide.Completion {
+	at := 0
+	count, ok := readCompletionStageInt(data, &at)
+	if !ok || count < 0 || count > len(data) {
+		return nil
+	}
+	items := make([]ide.Completion, 0, count)
+	for i := 0; i < count; i++ {
+		name, nameOK := readCompletionStageText(data, &at)
+		detail, detailOK := readCompletionStageText(data, &at)
+		kind, kindOK := readCompletionStageInt(data, &at)
+		signature, signatureOK := readCompletionStageText(data, &at)
+		parameterCount, parametersOK := readCompletionStageInt(data, &at)
+		if !nameOK || !detailOK || !kindOK || !signatureOK || !parametersOK || parameterCount < 0 || parameterCount > len(data) {
+			return nil
+		}
+		parameters := make([]ide.SignatureParameter, 0, parameterCount)
+		for j := 0; j < parameterCount; j++ {
+			name, firstOK := readCompletionStageText(data, &at)
+			typ, secondOK := readCompletionStageText(data, &at)
+			if !firstOK || !secondOK {
+				return nil
+			}
+			parameters = append(parameters, ide.SignatureParameter{Name: name, Type: typ})
+		}
+		items = append(items, ide.Completion{Text: name, Detail: detail, Kind: kind, Signature: signature, Parameters: parameters})
 	}
 	return items
 }
 
-func (f *MainForm) signatureEditor(source []byte, caret int, out *ide.SignatureHelp) {
-	if !f.ensureEditorAnalysis(source) || !f.analysis.result.Workspace.Ok {
-		return
-	}
-	var help check.SignatureHelp
-	if f.analysis.result.Program.Ok {
-		help = check.SignatureHelpProgram(f.analysis.result.Workspace.Graph, f.analysis.result.Program, load.CleanPath(f.currentPath), caret)
-	} else {
-		help = check.SignatureHelpGraph(f.analysis.result.Workspace.Graph, load.CleanPath(f.currentPath), caret)
-	}
-	parameters := make([]ide.SignatureParameter, 0, len(help.Parameters))
+func stageSignatureHelp(help check.SignatureHelp) []byte {
+	data := appendCompletionStageInt(nil, help.ActiveParameter)
+	data = appendCompletionStageText(data, help.Label)
+	data = appendCompletionStageInt(data, len(help.Parameters))
 	for i := 0; i < len(help.Parameters); i++ {
-		parameters = append(parameters, ide.SignatureParameter{Name: help.Parameters[i].Name, Type: help.Parameters[i].Type})
+		data = appendCompletionStageText(data, help.Parameters[i].Name)
+		data = appendCompletionStageText(data, help.Parameters[i].Type)
 	}
-	*out = ide.SignatureHelp{Ok: help.Ok, Label: help.Label, Parameters: parameters, ActiveParameter: help.ActiveParameter}
+	if help.Ok {
+		data = append(data, 1)
+	} else {
+		data = append(data, 0)
+	}
+	return data
+}
+
+func restoreSignatureHelp(data []byte) ide.SignatureHelp {
+	at := 0
+	active, activeOK := readCompletionStageInt(data, &at)
+	label, labelOK := readCompletionStageText(data, &at)
+	count, countOK := readCompletionStageInt(data, &at)
+	if !activeOK || !labelOK || !countOK || count < 0 || count > len(data) {
+		return ide.SignatureHelp{}
+	}
+	parameters := make([]ide.SignatureParameter, 0, count)
+	for i := 0; i < count; i++ {
+		name, nameOK := readCompletionStageText(data, &at)
+		typ, typeOK := readCompletionStageText(data, &at)
+		if !nameOK || !typeOK {
+			return ide.SignatureHelp{}
+		}
+		parameters = append(parameters, ide.SignatureParameter{Name: name, Type: typ})
+	}
+	if at >= len(data) {
+		return ide.SignatureHelp{}
+	}
+	return ide.SignatureHelp{Ok: data[at] != 0, Label: label, Parameters: parameters, ActiveParameter: active}
+}
+
+func appendCompletionStageInt(data []byte, value int) []byte {
+	return append(data, byte(value), byte(value>>8), byte(value>>16), byte(value>>24))
+}
+
+func appendCompletionStageText(data []byte, value string) []byte {
+	data = appendCompletionStageInt(data, len(value))
+	return append(data, value...)
+}
+
+func readCompletionStageInt(data []byte, at *int) (int, bool) {
+	if *at < 0 || *at+4 > len(data) {
+		return 0, false
+	}
+	value := int(data[*at]) | int(data[*at+1])<<8 | int(data[*at+2])<<16 | int(data[*at+3])<<24
+	if value >= 1<<31 {
+		value -= 1 << 32
+	}
+	*at += 4
+	return value, true
+}
+
+func readCompletionStageText(data []byte, at *int) (string, bool) {
+	length, ok := readCompletionStageInt(data, at)
+	if !ok || length < 0 || *at+length > len(data) {
+		return "", false
+	}
+	value := string(data[*at : *at+length])
+	*at += length
+	return value, true
 }
 
 func completionEnv(env []string, key string) string {

@@ -9,6 +9,45 @@ import (
 	"renvo.dev/std/graphics"
 )
 
+func TestIDEControlsAndSyntaxPaletteFollowDarkTheme(t *testing.T) {
+	explorer := NewExplorerControl(OpenExplorer(t.TempDir()))
+	explorer.SetBounds(graphics.R(0, 0, 160, 220))
+	editor := NewEditorControl(NewDocument([]byte("func main() { println(\"dark\", 42) // comment\n}")))
+	editor.SetBounds(graphics.R(160, 0, 340, 220))
+	var form forms.Form
+	form.Initialize(500, 220)
+	form.Add(&explorer.Control)
+	form.Add(&editor.Control)
+	dark := forms.DarkTheme()
+	form.ApplyTheme(dark)
+	if explorer.Background() != dark.Surface || explorer.Foreground() != dark.Text || editor.Background() != dark.Field || editor.Foreground() != dark.Text {
+		t.Fatalf("dark IDE controls = explorer %#v/%#v editor %#v/%#v", explorer.Background(), explorer.Foreground(), editor.Background(), editor.Foreground())
+	}
+	palette := editorPalette(dark)
+	light := editorPalette(forms.LightTheme())
+	if palette.background != dark.Field || palette.gutter != dark.Surface || palette.popup != dark.SurfaceRaised || palette.text != dark.Text || palette.border != dark.Border {
+		t.Fatalf("dark editor surfaces = %#v", palette)
+	}
+	for kind := syntaxKeyword; kind <= syntaxNumber; kind++ {
+		if syntaxColor(kind, palette) == syntaxColor(kind, light) || syntaxColor(kind, palette) == dark.Field {
+			t.Fatalf("syntax kind %d did not receive a readable dark color", kind)
+		}
+	}
+	surface := graphics.NewSurface(500, 220)
+	form.Paint(surface)
+	if got := widgetTestPixel(surface, 300, 200); got != dark.Field {
+		t.Fatalf("painted dark editor background = %#v, want %#v", got, dark.Field)
+	}
+	if got := widgetTestPixel(surface, 80, 200); got != dark.Surface {
+		t.Fatalf("painted dark explorer background = %#v, want %#v", got, dark.Surface)
+	}
+}
+
+func widgetTestPixel(surface *graphics.Surface, x, y int) graphics.Color {
+	offset := y*surface.Stride + x*4
+	return graphics.Color{R: surface.Pixels[offset], G: surface.Pixels[offset+1], B: surface.Pixels[offset+2], A: surface.Pixels[offset+3]}
+}
+
 func TestExplorerControlSelectionInvalidatesOnlyChangedRows(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "a.go"), []byte("package a\n"), 0644); err != nil {
@@ -194,7 +233,9 @@ func TestEditorCompletionRefiltersWhileTyping(t *testing.T) {
 	document.MoveDocumentEnd(false)
 	control := NewEditorControl(document)
 	control.SetBounds(graphics.R(0, 0, 500, 200))
+	queries := 0
 	control.Complete = func(source []byte, caret int) []Completion {
+		queries++
 		prefix := string(source[completionWordStart(source, caret):caret])
 		if prefix == "SetT" {
 			return []Completion{{Text: "SetText", Detail: "(text string)"}, {Text: "SetTitle", Detail: "(title string)"}}
@@ -213,6 +254,9 @@ func TestEditorCompletionRefiltersWhileTyping(t *testing.T) {
 	form.Dispatch(graphics.Event{Type: graphics.EventTextInput, Text: "T"})
 	if document.Text() != "f.SetT" || len(control.completions) != 2 {
 		t.Fatalf("filtered completion: text=%q items=%#v", document.Text(), control.completions)
+	}
+	if queries != 1 {
+		t.Fatalf("typing re-ran semantic completion %d times", queries)
 	}
 	form.Dispatch(graphics.Event{Type: graphics.EventKeyDown, Key: graphics.KeyTab})
 	if document.Text() != "f.SetText" {

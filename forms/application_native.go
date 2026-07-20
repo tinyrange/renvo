@@ -9,6 +9,7 @@ func runApp(app *App) int {
 		return 1
 	}
 	for {
+		syncNativeAccessibility(app)
 		if !app.paint() {
 			app.Window.Close()
 			return 1

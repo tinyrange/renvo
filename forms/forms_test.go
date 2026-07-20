@@ -148,6 +148,73 @@ func TestShortcutTextDoesNotLeakIntoFocusedControl(t *testing.T) {
 	}
 }
 
+func TestTabAndShiftTabTraverseVisibleEnabledControls(t *testing.T) {
+	var form Form
+	form.Initialize(320, 180)
+	first := NewButton()
+	hidden := NewButton()
+	hidden.SetVisible(false)
+	disabled := NewButton()
+	disabled.SetEnabled(false)
+	last := NewTextBox()
+	form.Add(&first.Control)
+	form.Add(&hidden.Control)
+	form.Add(&disabled.Control)
+	form.Add(&last.Control)
+
+	form.Dispatch(graphics.Event{Type: graphics.EventKeyDown, Key: graphics.KeyTab})
+	if !first.Focused() {
+		t.Fatal("Tab did not focus the first eligible control")
+	}
+	form.Dispatch(graphics.Event{Type: graphics.EventKeyDown, Key: graphics.KeyTab})
+	if !last.Focused() {
+		t.Fatal("Tab did not skip hidden and disabled controls")
+	}
+	form.Dispatch(graphics.Event{Type: graphics.EventKeyDown, Key: graphics.KeyTab, Modifiers: graphics.ModifierShift})
+	if !first.Focused() {
+		t.Fatal("Shift+Tab did not traverse backwards")
+	}
+}
+
+func TestDockLayoutConsumesEdgesAndRefillsAfterResizeAndVisibility(t *testing.T) {
+	var form Form
+	form.Initialize(400, 300)
+	top := NewControl()
+	top.SetBounds(graphics.R(20, 20, 80, 30))
+	top.SetDock(DockTop)
+	bottom := NewControl()
+	bottom.SetBounds(graphics.R(0, 0, 100, 24))
+	bottom.SetDock(DockBottom)
+	left := NewControl()
+	left.SetBounds(graphics.R(0, 0, 72, 100))
+	left.SetDock(DockLeft)
+	fill := NewControl()
+	fill.SetDock(DockFill)
+	form.Add(top)
+	form.Add(bottom)
+	form.Add(left)
+	form.Add(fill)
+
+	if top.Bounds() != graphics.R(0, 0, 400, 30) || bottom.Bounds() != graphics.R(0, 276, 400, 24) {
+		t.Fatalf("horizontal docks = top %#v, bottom %#v", top.Bounds(), bottom.Bounds())
+	}
+	if left.Bounds() != graphics.R(0, 30, 72, 246) || fill.Bounds() != graphics.R(72, 30, 328, 246) {
+		t.Fatalf("content docks = left %#v, fill %#v", left.Bounds(), fill.Bounds())
+	}
+	if form.DockClientBounds() != fill.Bounds() {
+		t.Fatalf("dock client = %#v, want %#v", form.DockClientBounds(), fill.Bounds())
+	}
+
+	form.SetClientSize(500, 320)
+	if fill.Bounds() != graphics.R(72, 30, 428, 266) {
+		t.Fatalf("resized fill = %#v", fill.Bounds())
+	}
+	top.SetVisible(false)
+	if left.Bounds() != graphics.R(0, 0, 72, 296) || fill.Bounds() != graphics.R(72, 0, 428, 296) {
+		t.Fatalf("hidden top did not release dock space: left %#v, fill %#v", left.Bounds(), fill.Bounds())
+	}
+}
+
 func assertRects(t *testing.T, got, want []graphics.Rect) {
 	t.Helper()
 	if len(got) != len(want) {

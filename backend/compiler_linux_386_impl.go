@@ -121,6 +121,9 @@ func renvoTryCompileScalarProgram386(p *renvoProgram, meta *renvoMeta) renvoComp
 		var result renvoCompileResult
 		return result
 	}
+	g.objectContextA, g.objectContextB = renvoObjectContextHash(&g)
+	renvoObjectInitializeFunctionIdentities(&g)
+	g.objectDataBase = len(a.data)
 	if !renvoEmitProgramEntryArgs386(&g, appIndex) {
 		var result renvoCompileResult
 		return result
@@ -141,7 +144,7 @@ func renvoTryCompileScalarProgram386(p *renvoProgram, meta *renvoMeta) renvoComp
 	}
 	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
 		i := g.funcQueue[queueIndex]
-		if !renvoEmitScalarFunctionScratch(&g, i) {
+		if !renvoEmitScalarFunctionObjectCached(&g, i) {
 			var result renvoCompileResult
 			return result
 		}

@@ -314,6 +314,7 @@ func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, f
 		dot := token.KindLine&255 == syntax.TokenOperator && token.End == token.Start+1 && file.Src[token.Start] == '.'
 		if i > start && i+1 < end && i+1 < len(file.Tokens) && dot &&
 			file.Tokens[i-1].KindLine&255 == syntax.TokenIdent && file.Tokens[i+1].KindLine&255 == syntax.TokenIdent &&
+			!(i >= start+2 && tokenTextIs(file, i-2, ".")) &&
 			!(file.Tokens[i-1].End == file.Tokens[i-1].Start+1 && file.Src[file.Tokens[i-1].Start] == '_') &&
 			!(file.Tokens[i+1].End == file.Tokens[i+1].Start+1 && file.Src[file.Tokens[i+1].Start] == '_') {
 			selector := resolveImportSelectorCore(fileIndex, info, checked, scope, file, i-1, i, i+1)

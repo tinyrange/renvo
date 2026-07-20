@@ -1,5 +1,8 @@
 package main
 
+// renvo:linkstatic /usr/lib/system/libcommonCrypto.dylib,CC_SHA256
+func renvoDarwinCCSHA256(data []byte, length int, digest []byte) int { return 0 }
+
 func renvo_runtime_ArenaPersistString(value string) string { return value }
 
 const renvoDarwinArm64CodeOffset = 0x1000
@@ -858,11 +861,6 @@ func renvoDarwinCodeSignature(code []byte, ident string, execLimit int) []byte {
 	return out
 }
 
-func renvoDarwinROR32(value int, shift int) int {
-	value = value & 0xffffffff
-	return ((value >> shift) | ((value << (32 - shift)) & 0xffffffff)) & 0xffffffff
-}
-
 func renvoDarwinSHA256Constants() []int {
 	return []int{
 		0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -882,40 +880,49 @@ func renvoDarwinSHA256Schedule(msg []byte, chunk int, w []int) {
 		w[i] = (int(msg[at])<<24 | int(msg[at+1])<<16 | int(msg[at+2])<<8 | int(msg[at+3])) & 0xffffffff
 	}
 	for i := 16; i < 64; i++ {
-		s0 := renvoDarwinROR32(w[i-15], 7) ^ renvoDarwinROR32(w[i-15], 18) ^ (w[i-15] >> 3)
-		s1 := renvoDarwinROR32(w[i-2], 17) ^ renvoDarwinROR32(w[i-2], 19) ^ (w[i-2] >> 10)
+		x := w[i-15] & 0xffffffff
+		y := w[i-2] & 0xffffffff
+		s0 := ((x >> 7) | ((x << 25) & 0xffffffff)) ^ ((x >> 18) | ((x << 14) & 0xffffffff)) ^ (x >> 3)
+		s1 := ((y >> 17) | ((y << 15) & 0xffffffff)) ^ ((y >> 19) | ((y << 13) & 0xffffffff)) ^ (y >> 10)
 		w[i] = (w[i-16] + s0 + w[i-7] + s1) & 0xffffffff
 	}
 }
 
-func renvoDarwinSHA256Round(state []int, word int, constant int) {
-	s1 := renvoDarwinROR32(state[4], 6) ^ renvoDarwinROR32(state[4], 11) ^ renvoDarwinROR32(state[4], 25)
-	ch := (state[4] & state[5]) ^ ((state[4] ^ 0xffffffff) & state[6])
-	t1 := (state[7] + s1 + ch + constant + word) & 0xffffffff
-	s0 := renvoDarwinROR32(state[0], 2) ^ renvoDarwinROR32(state[0], 13) ^ renvoDarwinROR32(state[0], 22)
-	maj := (state[0] & state[1]) ^ (state[0] & state[2]) ^ (state[1] & state[2])
-	t2 := (s0 + maj) & 0xffffffff
-	state[7] = state[6]
-	state[6] = state[5]
-	state[5] = state[4]
-	state[4] = (state[3] + t1) & 0xffffffff
-	state[3] = state[2]
-	state[2] = state[1]
-	state[1] = state[0]
-	state[0] = (t1 + t2) & 0xffffffff
-}
-
 func renvoDarwinSHA256Rounds(w []int, k []int, hvals []int) {
-	state := make([]int, 8)
-	for i := 0; i < 8; i++ {
-		state[i] = hvals[i]
-	}
+	a := hvals[0]
+	b := hvals[1]
+	c := hvals[2]
+	d := hvals[3]
+	e := hvals[4]
+	f := hvals[5]
+	g := hvals[6]
+	h := hvals[7]
 	for i := 0; i < 64; i++ {
-		renvoDarwinSHA256Round(state, w[i], k[i])
+		e32 := e & 0xffffffff
+		a32 := a & 0xffffffff
+		s1 := ((e32 >> 6) | ((e32 << 26) & 0xffffffff)) ^ ((e32 >> 11) | ((e32 << 21) & 0xffffffff)) ^ ((e32 >> 25) | ((e32 << 7) & 0xffffffff))
+		choose := (e & f) ^ ((e ^ 0xffffffff) & g)
+		t1 := (h + s1 + choose + k[i] + w[i]) & 0xffffffff
+		s0 := ((a32 >> 2) | ((a32 << 30) & 0xffffffff)) ^ ((a32 >> 13) | ((a32 << 19) & 0xffffffff)) ^ ((a32 >> 22) | ((a32 << 10) & 0xffffffff))
+		majority := (a & b) ^ (a & c) ^ (b & c)
+		t2 := (s0 + majority) & 0xffffffff
+		h = g
+		g = f
+		f = e
+		e = (d + t1) & 0xffffffff
+		d = c
+		c = b
+		b = a
+		a = (t1 + t2) & 0xffffffff
 	}
-	for i := 0; i < 8; i++ {
-		hvals[i] = (hvals[i] + state[i]) & 0xffffffff
-	}
+	hvals[0] = (hvals[0] + a) & 0xffffffff
+	hvals[1] = (hvals[1] + b) & 0xffffffff
+	hvals[2] = (hvals[2] + c) & 0xffffffff
+	hvals[3] = (hvals[3] + d) & 0xffffffff
+	hvals[4] = (hvals[4] + e) & 0xffffffff
+	hvals[5] = (hvals[5] + f) & 0xffffffff
+	hvals[6] = (hvals[6] + g) & 0xffffffff
+	hvals[7] = (hvals[7] + h) & 0xffffffff
 }
 
 func renvoDarwinSHA256Compress(msg []byte, hvals []int) {
@@ -928,6 +935,10 @@ func renvoDarwinSHA256Compress(msg []byte, hvals []int) {
 }
 
 func renvoDarwinSHA256(data []byte) []byte {
+	hardware := make([]byte, 32)
+	if renvoDarwinCCSHA256(data, len(data), hardware) != 0 {
+		return hardware
+	}
 	msgLen := len(data) + 1 + 8
 	msgLen = renvoAlignValue(msgLen, 64)
 	msg := make([]byte, msgLen)

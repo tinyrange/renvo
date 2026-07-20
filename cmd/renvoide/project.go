@@ -18,16 +18,19 @@ type formDesign struct {
 }
 
 type designerControl struct {
-	kind         string
-	name         string
-	text         string
-	x            int
-	y            int
-	width        int
-	height       int
-	checked      bool
-	clickHandler string
-	paintHandler string
+	kind          string
+	name          string
+	text          string
+	dock          string
+	x             int
+	y             int
+	width         int
+	height        int
+	checked       bool
+	value         int
+	clickHandler  string
+	changeHandler string
+	paintHandler  string
 }
 
 const designerLabel = "label"
@@ -38,6 +41,43 @@ const designerCheckBox = "checkBox"
 const designerRadioButton = "radioButton"
 const designerPictureBox = "pictureBox"
 const designerPanel = "panel"
+const designerComboBox = "comboBox"
+const designerListBox = "listBox"
+const designerListView = "listView"
+const designerTreeView = "treeView"
+const designerTabControl = "tabControl"
+const designerProgressBar = "progressBar"
+const designerNumericUpDown = "numericUpDown"
+const designerSlider = "slider"
+const designerGroupBox = "groupBox"
+const designerSplitContainer = "splitContainer"
+const designerToolBar = "toolBar"
+const designerStatusBar = "statusBar"
+const designerMenuBar = "menuBar"
+
+const designerDockNone = "None"
+const designerDockTop = "Top"
+const designerDockBottom = "Bottom"
+const designerDockLeft = "Left"
+const designerDockRight = "Right"
+const designerDockFill = "Fill"
+
+var designerDockValues = []string{designerDockNone, designerDockTop, designerDockBottom, designerDockLeft, designerDockRight, designerDockFill}
+
+var designerControlKinds = []string{
+	designerLabel, designerButton, designerTextBox, designerTextArea,
+	designerCheckBox, designerRadioButton, designerPictureBox, designerPanel,
+	designerComboBox, designerListBox, designerListView, designerTreeView,
+	designerTabControl, designerProgressBar, designerNumericUpDown, designerSlider,
+	designerGroupBox, designerSplitContainer, designerToolBar, designerStatusBar,
+	designerMenuBar,
+}
+
+var designerControlNames = []string{
+	"Label", "Button", "Text box", "Text area", "Check box", "Radio button", "Picture box", "Panel",
+	"Combo box", "List box", "List view", "Tree view", "Tab control", "Progress bar", "Numeric up/down", "Slider",
+	"Group box", "Split container", "Tool bar", "Status bar", "Menu bar",
+}
 
 type projectActionResult struct {
 	message string
@@ -172,6 +212,13 @@ func generatedFormSource(design formDesign) []byte {
 		out = append(out, ", "...)
 		out = append(out, workspaceDecimal(control.height)...)
 		out = append(out, "))\n"...)
+		if designerDockValue(control.dock) != designerDockNone {
+			out = append(out, "\tf."...)
+			out = append(out, control.name...)
+			out = append(out, ".SetDock(forms.Dock"...)
+			out = append(out, designerDockValue(control.dock)...)
+			out = append(out, ")\n"...)
+		}
 		if designerControlHasFont(control.kind) {
 			out = append(out, "\tf."...)
 			out = append(out, control.name...)
@@ -198,11 +245,34 @@ func generatedFormSource(design formDesign) []byte {
 				out = append(out, ".SetChecked(false)\n"...)
 			}
 		}
+		if designerControlHasValue(control.kind) {
+			out = append(out, "\tf."...)
+			out = append(out, control.name...)
+			if control.kind == designerSplitContainer {
+				out = append(out, ".SetSplitterDistance("...)
+			} else {
+				out = append(out, ".SetValue("...)
+			}
+			out = append(out, workspaceDecimal(control.value)...)
+			out = append(out, ")\n"...)
+		}
+		if control.kind == designerMenuBar {
+			out = append(out, "\tf."...)
+			out = append(out, control.name...)
+			out = append(out, ".Add(forms.NewMenu(\"File\"))\n"...)
+		}
 		if control.kind == designerButton && control.clickHandler != "" {
 			out = append(out, "\tf."...)
 			out = append(out, control.name...)
 			out = append(out, ".Click = f."...)
 			out = append(out, control.clickHandler...)
+			out = append(out, '\n')
+		}
+		if designerControlHasChanged(control.kind) && control.changeHandler != "" {
+			out = append(out, "\tf."...)
+			out = append(out, control.name...)
+			out = append(out, ".Changed = f."...)
+			out = append(out, control.changeHandler...)
 			out = append(out, '\n')
 		}
 		if control.paintHandler != "" {
@@ -218,6 +288,13 @@ func generatedFormSource(design formDesign) []byte {
 		out = append(out, "\tf.Form.Add(&f."...)
 		out = append(out, design.controls[i].name...)
 		out = append(out, ".Control)\n"...)
+	}
+	for i := 0; i < len(design.controls); i++ {
+		if design.controls[i].kind == designerMenuBar {
+			out = append(out, "\tf.Form.SetMenuBar(f."...)
+			out = append(out, design.controls[i].name...)
+			out = append(out, ")\n"...)
+		}
 	}
 	out = append(out, "}\n"...)
 	return out
@@ -262,6 +339,12 @@ func parseFormDesign(source []byte) (formDesign, string) {
 				control.y = values[1]
 				control.width = values[2]
 				control.height = values[3]
+			} else if designerHasPrefix(line, prefix+".SetDock(forms.Dock") {
+				value := line[len(prefix+".SetDock(forms.Dock") : len(line)-1]
+				if designerDockValue(value) != value {
+					return design, "The generated dock value for " + control.name + " could not be read."
+				}
+				control.dock = value
 			} else if designerHasPrefix(line, prefix+".SetText(") {
 				value, ok := designerQuotedArgument(line, prefix+".SetText(")
 				if !ok {
@@ -270,12 +353,24 @@ func parseFormDesign(source []byte) (formDesign, string) {
 				control.text = value
 			} else if designerHasPrefix(line, prefix+".Click = f.") {
 				control.clickHandler = line[len(prefix+".Click = f."):]
+			} else if designerHasPrefix(line, prefix+".Changed = f.") {
+				control.changeHandler = line[len(prefix+".Changed = f."):]
 			} else if designerHasPrefix(line, prefix+".Paint = f.") {
 				control.paintHandler = line[len(prefix+".Paint = f."):]
 			} else if line == prefix+".SetChecked(true)" {
 				control.checked = true
 			} else if line == prefix+".SetChecked(false)" {
 				control.checked = false
+			} else if designerHasPrefix(line, prefix+".SetValue(") {
+				values, ok := designerCallInts(line, prefix+".SetValue(", 1)
+				if ok {
+					control.value = values[0]
+				}
+			} else if designerHasPrefix(line, prefix+".SetSplitterDistance(") {
+				values, ok := designerCallInts(line, prefix+".SetSplitterDistance(", 1)
+				if ok {
+					control.value = values[0]
+				}
 			}
 		}
 	}
@@ -283,6 +378,25 @@ func parseFormDesign(source []byte) (formDesign, string) {
 		return design, "No designer controls were found in " + projectGeneratedFormFile + "."
 	}
 	return design, ""
+}
+
+func designerDockValue(value string) string {
+	for i := 0; i < len(designerDockValues); i++ {
+		if value == designerDockValues[i] {
+			return value
+		}
+	}
+	return designerDockNone
+}
+
+func designerNextDockValue(value string) string {
+	value = designerDockValue(value)
+	for i := 0; i < len(designerDockValues); i++ {
+		if designerDockValues[i] == value {
+			return designerDockValues[(i+1)%len(designerDockValues)]
+		}
+	}
+	return designerDockNone
 }
 
 func designerFormsType(kind string) string {
@@ -307,27 +421,73 @@ func designerFormsType(kind string) string {
 	if kind == designerPanel {
 		return "Panel"
 	}
+	if kind == designerComboBox {
+		return "ComboBox"
+	}
+	if kind == designerListBox {
+		return "ListBox"
+	}
+	if kind == designerListView {
+		return "ListView"
+	}
+	if kind == designerTreeView {
+		return "TreeView"
+	}
+	if kind == designerTabControl {
+		return "TabControl"
+	}
+	if kind == designerProgressBar {
+		return "ProgressBar"
+	}
+	if kind == designerNumericUpDown {
+		return "NumericUpDown"
+	}
+	if kind == designerSlider {
+		return "Slider"
+	}
+	if kind == designerGroupBox {
+		return "GroupBox"
+	}
+	if kind == designerSplitContainer {
+		return "SplitContainer"
+	}
+	if kind == designerToolBar {
+		return "ToolBar"
+	}
+	if kind == designerStatusBar {
+		return "StatusBar"
+	}
+	if kind == designerMenuBar {
+		return "MenuBar"
+	}
 	return "Label"
 }
 
 func designerControlHasFont(kind string) bool {
-	return kind != designerPictureBox && kind != designerPanel
+	return kind != designerPictureBox && kind != designerPanel && kind != designerProgressBar && kind != designerSlider && kind != designerSplitContainer
 }
 
 func designerControlHasText(kind string) bool {
-	return kind != designerPictureBox && kind != designerPanel
+	return kind != designerPictureBox && kind != designerPanel && kind != designerProgressBar && kind != designerNumericUpDown && kind != designerSlider && kind != designerSplitContainer && kind != designerMenuBar
 }
 
 func designerControlHasChecked(kind string) bool {
 	return kind == designerCheckBox || kind == designerRadioButton
 }
 
+func designerControlHasValue(kind string) bool {
+	return kind == designerProgressBar || kind == designerNumericUpDown || kind == designerSlider || kind == designerSplitContainer
+}
+
+func designerControlHasChanged(kind string) bool {
+	return kind == designerComboBox || kind == designerListBox || kind == designerListView || kind == designerTreeView || kind == designerTabControl || kind == designerNumericUpDown || kind == designerSlider || kind == designerSplitContainer
+}
+
 func designerConstructor(line string) (string, string) {
-	kinds := []string{designerLabel, designerButton, designerTextBox, designerTextArea, designerCheckBox, designerRadioButton, designerPictureBox, designerPanel}
-	for i := 0; i < len(kinds); i++ {
-		suffix := " = forms.New" + designerFormsType(kinds[i]) + "()"
+	for i := 0; i < len(designerControlKinds); i++ {
+		suffix := " = forms.New" + designerFormsType(designerControlKinds[i]) + "()"
 		if name := designerConstructorName(line, suffix); name != "" {
-			return name, kinds[i]
+			return name, designerControlKinds[i]
 		}
 	}
 	return "", ""

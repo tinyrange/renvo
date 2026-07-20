@@ -53,6 +53,14 @@ func (OSFS) ReadFile(path string) ([]byte, bool) {
 	return data, err == nil
 }
 
+func (OSFS) PathExists(path string) bool {
+	if _, ok := bundledStdReadFile(path); ok {
+		return true
+	}
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 func RunCommand(args []string, env []string, backend Backend) HostResult {
 	if len(args) > 0 {
 		args = args[1:]

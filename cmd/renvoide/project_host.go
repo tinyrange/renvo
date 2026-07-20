@@ -10,7 +10,38 @@ import (
 	"renvo.dev/internal/driver"
 )
 
+type ideBuildSession struct {
+	root   string
+	output string
+	target string
+	env    []string
+	done   bool
+	result projectActionResult
+}
+
+func beginCompileIDEProject(root, output, target string, env []string) *ideBuildSession {
+	return &ideBuildSession{root: root, output: output, target: target, env: env}
+}
+
+func (s *ideBuildSession) Step() (bool, projectActionResult) {
+	if s == nil {
+		return true, projectActionResult{message: "Build failed: compiler session is unavailable.", ok: false}
+	}
+	if s.done {
+		return true, s.result
+	}
+	s.result = compileIDEProjectNow(s.root, s.output, s.target, s.env)
+	s.done = true
+	return true, s.result
+}
+
 func compileIDEProject(root, output, target string, env []string) projectActionResult {
+	session := beginCompileIDEProject(root, output, target, env)
+	_, result := session.Step()
+	return result
+}
+
+func compileIDEProjectNow(root, output, target string, env []string) projectActionResult {
 	backend, ok := driver.CommandBackendFromEnv(env)
 	if !ok {
 		return projectActionResult{message: "Build failed: set RENVO_BACKEND to a compiler backend.", ok: false}

@@ -47,6 +47,11 @@ func TestCoreGoldenVector(t *testing.T) {
 
 func TestCoreUnitDecodesWithPublicReader(t *testing.T) {
 	program := coreGoldenProgram()
+	program.Packages = []PackageInfo{{
+		Name: "p", ImportPath: "example/p", GraphKeyA: 11, GraphKeyB: 13,
+		SourceKeyA: 17, SourceKeyB: 19, TextStart: 0, TextEnd: len(program.Text),
+		TokenStart: 0, TokenEnd: len(program.Tokens),
+	}}
 	data, ok := MarshalCore(CoreProgramFrom(program))
 	if !ok {
 		t.Fatal("MarshalCore failed")
@@ -60,6 +65,27 @@ func TestCoreUnitDecodesWithPublicReader(t *testing.T) {
 	}
 	if len(decoded.Decls) != len(program.Decls) || len(decoded.Funcs) != len(program.Funcs) {
 		t.Fatalf("decoded declarations/functions = %d/%d", len(decoded.Decls), len(decoded.Funcs))
+	}
+	if len(decoded.Packages) != 1 || decoded.Packages[0].ImportPath != "example/p" || decoded.Packages[0].GraphKeyA != 11 || decoded.Packages[0].TokenEnd != len(program.Tokens) {
+		t.Fatalf("decoded package ownership = %#v", decoded.Packages)
+	}
+}
+
+func TestCoreUnitPublicReaderPreservesLargeTokenLines(t *testing.T) {
+	program := coreGoldenProgram()
+	for i := 0; i < len(program.Tokens); i++ {
+		program.Tokens[i].KindLine = program.Tokens[i].KindLine&255 | (65536+i)<<8
+	}
+	data, ok := Marshal(program)
+	if !ok {
+		t.Fatal("Marshal failed")
+	}
+	decoded, err := wireunit.Unmarshal(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.TokenLines) != len(program.Tokens) || decoded.TokenLines[len(decoded.TokenLines)-1] != 65536+len(program.Tokens)-1 {
+		t.Fatalf("decoded large token lines = %#v", decoded.TokenLines)
 	}
 }
 

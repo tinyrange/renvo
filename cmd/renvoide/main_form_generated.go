@@ -37,6 +37,8 @@ func (f *MainForm) initializeComponent(root string) {
 	f.menuBar = forms.NewMenuBar()
 	f.menuBar.SetAccessibilityID("main-menu")
 	f.menuBar.SetFont(uiFont)
+	f.menuBar.SetBounds(rect(0, 0, 168, 28))
+	f.menuBar.SetDock(forms.DockTop)
 	fileMenu := forms.NewMenu("File")
 	newProjectItem := forms.NewMenuItem("New Project...")
 	newProjectItem.SetShortcut(forms.Shortcut{Key: graphics.KeyN, Modifiers: graphics.ModifierShift, Primary: true, Text: "Ctrl/Cmd+Shift+N"})
@@ -69,7 +71,23 @@ func (f *MainForm) initializeComponent(root string) {
 	runItem.Activate = f.runProject
 	buildMenu.Add(runItem)
 	f.menuBar.Add(buildMenu)
+	viewMenu := forms.NewMenu("View")
+	f.lightThemeItem = forms.NewMenuItem("Light Theme")
+	f.lightThemeItem.SetChecked(true)
+	f.lightThemeItem.Activate = f.useLightTheme
+	viewMenu.Add(f.lightThemeItem)
+	f.darkThemeItem = forms.NewMenuItem("Dark Theme")
+	f.darkThemeItem.SetChecked(false)
+	f.darkThemeItem.Activate = f.useDarkTheme
+	viewMenu.Add(f.darkThemeItem)
+	f.menuBar.Add(viewMenu)
 	f.Form.SetMenuBar(f.menuBar)
+	f.statusBar = forms.NewStatusBar()
+	f.statusBar.SetAccessibilityID("main-status")
+	f.statusBar.SetFont(uiFont)
+	f.statusBar.SetText("Ready")
+	f.statusBar.SetBounds(rect(0, 0, 320, 24))
+	f.statusBar.SetDock(forms.DockBottom)
 	f.editorFrame.ShowDesigner = f.showDesigner
 	f.designer.ShowCode = f.showCode
 	f.designer.SetDesign(&f.design)
@@ -105,9 +123,11 @@ func (f *MainForm) initializeComponent(root string) {
 	f.Add(&f.editor.Control)
 	f.Add(&f.targetMenu.Control)
 	f.Add(&f.menuBar.Control)
+	f.Add(&f.statusBar.Control)
 	f.designer.SetVisible(false)
 	f.inspector.SetVisible(false)
 	f.targetMenu.SetVisible(false)
+	f.setDarkTheme(false)
 	f.formResize()
 }
 

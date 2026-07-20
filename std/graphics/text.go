@@ -29,12 +29,13 @@ type Glyph struct {
 }
 
 type fontGlyph struct {
-	codepoint int
-	index     int
-	mask      *Image
-	xOffset   Scalar
-	yOffset   Scalar
-	advance   Scalar
+	codepoint   int
+	rasterScale int
+	index       int
+	mask        *Image
+	xOffset     Scalar
+	yOffset     Scalar
+	advance     Scalar
 }
 
 func NewBuiltinFont(scale int) *Font {
@@ -93,13 +94,20 @@ func (font *Font) trueTypeScale() Scalar {
 }
 
 func (font *Font) cachedGlyph(codepoint int) *fontGlyph {
+	return font.cachedGlyphAtScale(codepoint, 1)
+}
+
+func (font *Font) cachedGlyphAtScale(codepoint, rasterScale int) *fontGlyph {
+	if rasterScale < 1 {
+		rasterScale = 1
+	}
 	for i := 0; i < len(font.glyphs); i++ {
-		if font.glyphs[i].codepoint == codepoint {
+		if font.glyphs[i].codepoint == codepoint && font.glyphs[i].rasterScale == rasterScale {
 			return &font.glyphs[i]
 		}
 	}
 	info := font.trueType
-	scale := font.trueTypeScale()
+	scale := font.trueTypeScale() * Scalar(rasterScale)
 	index := info.FindGlyphIndex(codepoint)
 	advance, _ := info.GetGlyphHMetrics(index)
 	x0, y0, x1, y1 := info.GetGlyphBitmapBox(index, scale, scale)
@@ -111,12 +119,13 @@ func (font *Font) cachedGlyph(codepoint int) *fontGlyph {
 		mask = NewMask(width, height, pixels)
 	}
 	font.glyphs = append(font.glyphs, fontGlyph{
-		codepoint: codepoint,
-		index:     index,
-		mask:      mask,
-		xOffset:   Scalar(x0),
-		yOffset:   Scalar(y0),
-		advance:   Scalar(advance) * scale / ttScaleUnit,
+		codepoint:   codepoint,
+		rasterScale: rasterScale,
+		index:       index,
+		mask:        mask,
+		xOffset:     Scalar(x0),
+		yOffset:     Scalar(y0),
+		advance:     Scalar(advance) * font.trueTypeScale() / ttScaleUnit,
 	})
 	return &font.glyphs[len(font.glyphs)-1]
 }
@@ -393,6 +402,11 @@ func (s *Surface) DrawText(font *Font, baseline Point, text string, color Color)
 	originX := baseline.X
 	x, y := baseline.X, baseline.Y
 	previous := -1
+	rasterScale := 1
+	textScale := s.transformA * s.deviceScale
+	if s.transformB == 0.0 && s.transformC == 0.0 && s.transformA == s.transformD && textScale >= 1.0 && textScale <= 4.0 && Scalar(int(textScale)) == textScale {
+		rasterScale = int(textScale)
+	}
 	for at := 0; at < len(text); {
 		r, size := nextUTF8(text, at)
 		at += size
@@ -413,14 +427,15 @@ func (s *Surface) DrawText(font *Font, baseline Point, text string, color Color)
 			continue
 		}
 		if font.trueType != nil {
-			glyph := font.cachedGlyph(r)
+			glyph := font.cachedGlyphAtScale(r, rasterScale)
 			x += font.kern(previous, glyph.index)
 			if glyph.mask != nil {
 				// Glyph bitmaps are rasterized without a subpixel shift, so place
 				// them on the corresponding nearest pixel and composite the A8 mask
 				// directly. A 1:1 glyph upload does not require affine resampling.
-				drawX := scalarFloor(x + glyph.xOffset + 0.5)
-				drawY := scalarFloor(y + glyph.yOffset + 0.5)
+				origin := s.transformPoint(Point{X: x, Y: y})
+				drawX := scalarFloor(origin.X + glyph.xOffset + 0.5)
+				drawY := scalarFloor(origin.Y + glyph.yOffset + 0.5)
 				s.drawGlyphMask(glyph.mask, drawX, drawY, color)
 			}
 			x += glyph.advance

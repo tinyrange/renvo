@@ -70,6 +70,11 @@ func (fs embedMemorySourceFS) ReadDir(path string) ([]DirEntry, bool) {
 	return entries, len(entries) > 0
 }
 
+func (fs embedMemorySourceFS) PathExists(path string) bool {
+	_, ok := fs.ReadFile(path)
+	return ok
+}
+
 func sourceEmbedTestFS() embedMemorySourceFS {
 	return embedMemorySourceFS{files: []load.SourceFile{
 		{Path: "/repo/app/go.mod", Src: []byte("module example.com/app\n")},

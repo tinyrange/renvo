@@ -10,7 +10,7 @@ func run(args []string, env []string) int {
 	if len(args) > 1 && args[1] != "" {
 		root = args[1]
 	}
-	window := graphics.NewWindow(graphics.WindowOptions{Title: "MiniIDE", Width: 1440, Height: 520})
+	window := graphics.NewWindow(graphics.WindowOptions{Title: "RENVO", Width: 1440, Height: 520})
 	if window == nil {
 		return 1
 	}

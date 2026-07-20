@@ -370,6 +370,57 @@ func TestTrueTypeFontAntialiasingMetricsAndCache(t *testing.T) {
 	if len(font.glyphs) != 2 {
 		t.Fatalf("glyph cache grew after reuse: %d", len(font.glyphs))
 	}
+	scaled := NewSurface(96, 56)
+	scaled.setDeviceScale(2)
+	scaled.ResetTransform()
+	scaled.DrawText(font, Point{X: 4, Y: 20}, "AB", White)
+	if len(font.glyphs) != 4 {
+		t.Fatalf("scaled glyph cache size = %d, want 4", len(font.glyphs))
+	}
+	placedAtDeviceScale := false
+	for y := 0; y < scaled.Height; y++ {
+		for x := 36; x < scaled.Width; x++ {
+			if pixel(scaled, x, y).A != 0 {
+				placedAtDeviceScale = true
+			}
+		}
+	}
+	if !placedAtDeviceScale {
+		t.Fatal("scaled TrueType text was not placed in device coordinates")
+	}
+}
+
+func TestScaledDamageAndClipUseDeviceCoordinates(t *testing.T) {
+	surface := NewSurface(32, 32)
+	surface.ResetDirty()
+	surface.setDeviceScale(2)
+	surface.ResetTransform()
+	surface.BeginDamage(R(2, 3, 4, 5))
+	surface.EndDamage()
+	dirty, ok := surface.DirtyRect()
+	if !ok || dirty != R(4, 6, 8, 10) {
+		t.Fatalf("scaled dirty rect = %#v, %v", dirty, ok)
+	}
+	surface.PushClipRect(R(2, 2, 2, 2))
+	surface.FillRect(R(0, 0, 10, 10), White)
+	surface.PopClip()
+	if pixel(surface, 3, 4).A != 0 || pixel(surface, 4, 4).A != 255 || pixel(surface, 7, 7).A != 255 || pixel(surface, 8, 7).A != 0 {
+		t.Fatal("scaled clip did not cover exactly the transformed rectangle")
+	}
+}
+
+func TestDeviceScaledImageUsesAxisAlignedSampling(t *testing.T) {
+	surface := NewSurface(8, 6)
+	surface.setDeviceScale(2)
+	mask := NewMask(2, 1, []byte{255, 0})
+	source := R(0, 0, 2, 1)
+	destination := R(1, 1, 2, 1)
+	if !surface.drawImageAxisAligned(mask, source, destination, SamplingNearest, White) {
+		t.Fatal("device-scaled image missed the axis-aligned path")
+	}
+	if pixel(surface, 1, 2).A != 0 || pixel(surface, 2, 2).A != 255 || pixel(surface, 3, 3).A != 255 || pixel(surface, 4, 2).A != 0 {
+		t.Fatal("device-scaled mask sampled outside its transformed destination")
+	}
 }
 
 func TestWindowReadPixelsReturnsIndependentTopDownImage(t *testing.T) {

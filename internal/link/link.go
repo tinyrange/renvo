@@ -146,6 +146,11 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 	line := 1
 	appendOK := true
 	for i := 0; i < len(programs); i++ {
+		pkg := build.PackageUnit{ImportPath: programs[i].ImportPath, Name: programs[i].Package}
+		if len(units) == len(programs) {
+			pkg = units[i]
+		}
+		info := beginLinkedPackageInfo(&program, pkg)
 		var ok bool
 		ok, line = appendProgramCore(&program, programs[i], finalEOF, line, aliases, i+1 < len(programs))
 		if !ok {
@@ -155,6 +160,7 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 		if transient {
 			arena.Discard(units[i].ArenaStart, units[i].ArenaEnd)
 		}
+		finishLinkedPackageInfo(&program, info)
 	}
 	if !transient {
 		for i := 0; i < len(programs); i++ {
@@ -168,7 +174,27 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 	if !lowerFunctionValuesCore(&program, transient) {
 		return empty, false
 	}
+	compactCoreLinkedTokenLines(program.Tokens)
 	return program, true
+}
+
+// Linked programs no longer need gaps for comments, blank lines, or removed
+// declarations. Keeping only the ordering and grouping of token lines avoids
+// overflowing the version-1 unit format's 16-bit line field in large apps.
+func compactCoreLinkedTokenLines(tokens []unit.Token) {
+	if len(tokens) == 0 {
+		return
+	}
+	sourceLine := tokens[0].KindLine >> 8
+	denseLine := 1
+	for i := 0; i < len(tokens); i++ {
+		line := tokens[i].KindLine >> 8
+		if line != sourceLine {
+			sourceLine = line
+			denseLine++
+		}
+		tokens[i].KindLine = tokens[i].KindLine&255 | denseLine<<8
+	}
 }
 
 func cloneCoreLinkString(value string) string {
@@ -190,6 +216,31 @@ func replaceFunctionValueProgram(dst *unit.Program, src *unit.Program) {
 	dst.Calls = src.Calls
 	dst.Refs = src.Refs
 	dst.Selectors = src.Selectors
+	dst.Packages = src.Packages
+}
+
+func beginLinkedPackageInfo(program *unit.Program, pkg build.PackageUnit) int {
+	info := unit.PackageInfo{
+		Name:       cloneCoreLinkString(pkg.Name),
+		ImportPath: cloneCoreLinkString(pkg.ImportPath),
+		GraphKeyA:  pkg.GraphKeyA,
+		GraphKeyB:  pkg.GraphKeyB,
+		SourceKeyA: pkg.SourceKeyA,
+		SourceKeyB: pkg.SourceKeyB,
+		TextStart:  len(program.Text),
+		TokenStart: len(program.Tokens),
+		DeclStart:  len(program.Decls),
+		FuncStart:  len(program.Funcs),
+	}
+	program.Packages = append(program.Packages, info)
+	return len(program.Packages) - 1
+}
+
+func finishLinkedPackageInfo(program *unit.Program, index int) {
+	program.Packages[index].TextEnd = len(program.Text)
+	program.Packages[index].TokenEnd = len(program.Tokens)
+	program.Packages[index].DeclEnd = len(program.Decls)
+	program.Packages[index].FuncEnd = len(program.Funcs)
 }
 
 func restoreCoreTokenLines(text []byte, tokens []unit.Token) {

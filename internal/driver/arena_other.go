@@ -1,4 +1,4 @@
-//go:build renvo && !(linux && amd64)
+//go:build renvo && !(linux && amd64) && !(darwin && arm64)
 
 package driver
 

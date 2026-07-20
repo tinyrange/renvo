@@ -163,13 +163,14 @@ func renvoUnitReadVar(r *renvoUnitReader) int {
 	return 0
 }
 
-func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, bool) {
+func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, []int32, bool) {
 	r := renvoUnitReader{src: data, end: len(data), ok: true}
 	count := renvoUnitReadVar(&r)
 	if !r.ok {
-		return nil, false
+		return nil, nil, false
 	}
 	out := make([]int32, 0, count*renvoTokenStride)
+	var largeLines []int32
 	start := 0
 	line := 0
 	discardStart := 0
@@ -180,19 +181,28 @@ func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, bool) {
 		size := renvoUnitReadVar(&r)
 		lineDelta := renvoUnitReadVar(&r)
 		if !r.ok {
-			return nil, false
+			return nil, nil, false
 		}
 		start = start + delta
 		line = line + lineDelta
-		if kind < 0 || kind > 255 || start < 0 || start > 0xffffff || size < 0 || line < 0 || line > 0xffff || start+size > len(text) {
-			return nil, false
+		if kind < 0 || kind > 255 || start < 0 || start > 0xffffff || size < 0 || line < 0 || start+size > len(text) {
+			return nil, nil, false
 		}
 		if kind == renvoTokOp {
 			if size > 255 {
-				return nil, false
+				return nil, nil, false
 			}
 		} else if size > 0xffff {
-			return nil, false
+			return nil, nil, false
+		}
+		if line > 65535 && len(largeLines) == 0 {
+			largeLines = make([]int32, 0, count)
+			for j := 0; j < i; j++ {
+				largeLines = append(largeLines, int32(int(out[j*renvoTokenStride])>>8&65535))
+			}
+		}
+		if len(largeLines) > 0 {
+			largeLines = append(largeLines, int32(line))
 		}
 		base := len(out)
 		out = out[:base+renvoTokenStride]
@@ -200,7 +210,7 @@ func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, bool) {
 		if kind == renvoTokOp && size == 1 {
 			charBits = int(text[start]) << 24
 		}
-		out[base] = int32(kind | line<<8 | charBits)
+		out[base] = int32(kind | (line&65535)<<8 | charBits)
 		out[base+1] = int32(start)
 		out[base+2] = int32(start + size)
 		if r.pos >= nextDiscard {
@@ -213,10 +223,10 @@ func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, bool) {
 		}
 	}
 	if r.pos != r.end {
-		return nil, false
+		return nil, nil, false
 	}
 	renvo_runtime_ArenaDiscardBytes(data[discardStart:r.pos])
-	return out, true
+	return out, largeLines, true
 }
 
 func renvoUnitUsesPanic(p *renvoProgram) bool {
@@ -285,7 +295,9 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 	var tokenData []byte
 	var declData []byte
 	var funcData []byte
-	seen := 0
+	var packageData []byte
+	seenLow := 0
+	seenHigh := 0
 	pos := rootStart
 	for pos < rootEnd {
 		if pos+6 > rootEnd {
@@ -304,13 +316,21 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 		if tag == renvoUnitTagUnit {
 			return false
 		}
-		knownTag := tag == renvoUnitTagPackage || tag == renvoUnitTagImportPath || tag >= renvoUnitTagText && tag <= renvoUnitTagStmts
-		if knownTag {
-			bit := 1 << tag
-			if seen&bit != 0 {
-				return false
+		tagIndex := renvoUnitChildTagIndex(tag)
+		if tagIndex >= 0 {
+			if tagIndex < 16 {
+				bit := 1 << tagIndex
+				if seenLow&bit != 0 {
+					return false
+				}
+				seenLow = seenLow | bit
+			} else {
+				bit := 1 << (tagIndex - 16)
+				if seenHigh&bit != 0 {
+					return false
+				}
+				seenHigh = seenHigh | bit
 			}
-			seen = seen | bit
 		}
 		if tag == renvoUnitTagPackage {
 			if length == 0 {
@@ -331,16 +351,18 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 		if tag == renvoUnitTagFuncs {
 			funcData = src[pos:next]
 		}
+		if tag == renvoUnitTagPackages {
+			packageData = src[pos:next]
+		}
 		pos = next
 	}
-	required := 1<<renvoUnitTagPackage | 1<<renvoUnitTagImportPath | 1<<renvoUnitTagText | 1<<renvoUnitTagTokens | 1<<renvoUnitTagDecls | 1<<renvoUnitTagFuncs
-	if seen&required != required {
+	if seenLow&renvoUnitRequiredChildMaskLow != renvoUnitRequiredChildMaskLow || seenHigh&renvoUnitRequiredChildMaskHigh != renvoUnitRequiredChildMaskHigh {
 		return false
 	}
 	if len(text) == 0 || len(tokenData) == 0 {
 		return false
 	}
-	tokens, tokensOK := renvoDecodeUnitTokens(text, tokenData)
+	tokens, tokenLines, tokensOK := renvoDecodeUnitTokens(text, tokenData)
 	if !tokensOK {
 		return false
 	}
@@ -353,6 +375,7 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 	}
 	prog.src = text
 	prog.toks.data = tokens
+	prog.toks.largeLines = tokenLines
 	prog.toks.count = tokenCount
 	prog.toks.panicEnabled = renvoUnitUsesPanic(prog)
 	declReader := renvoUnitReader{src: declData, end: len(declData), ok: true}
@@ -423,6 +446,58 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 	}
 	if funcReader.pos != funcReader.end {
 		return false
+	}
+	if len(packageData) > 0 {
+		packageReader := renvoUnitReader{src: packageData, end: len(packageData), ok: true}
+		packageCount := renvoUnitReadVar(&packageReader)
+		if !packageReader.ok {
+			return false
+		}
+		prog.packages = make([]renvoPackageInfo, 0, packageCount)
+		for i := 0; i < packageCount; i++ {
+			nameLength := renvoUnitReadVar(&packageReader)
+			if !packageReader.ok || nameLength <= 0 || packageReader.pos+nameLength > packageReader.end {
+				return false
+			}
+			packageReader.pos += nameLength
+			pathLength := renvoUnitReadVar(&packageReader)
+			if !packageReader.ok || pathLength <= 0 || packageReader.pos+pathLength > packageReader.end {
+				return false
+			}
+			packageReader.pos += pathLength
+			if packageReader.pos+16 > packageReader.end {
+				return false
+			}
+			var item renvoPackageInfo
+			item.graphKeyA = renvoUnitRead32(packageReader.src, packageReader.pos)
+			item.graphKeyB = renvoUnitRead32(packageReader.src, packageReader.pos+4)
+			item.sourceKeyA = renvoUnitRead32(packageReader.src, packageReader.pos+8)
+			item.sourceKeyB = renvoUnitRead32(packageReader.src, packageReader.pos+12)
+			packageReader.pos += 16
+			textLength := 0
+			tokenLength := 0
+			declLength := 0
+			funcLength := 0
+			item.textStart = renvoUnitReadVar(&packageReader)
+			textLength = renvoUnitReadVar(&packageReader)
+			item.tokenStart = renvoUnitReadVar(&packageReader)
+			tokenLength = renvoUnitReadVar(&packageReader)
+			item.declStart = renvoUnitReadVar(&packageReader)
+			declLength = renvoUnitReadVar(&packageReader)
+			item.funcStart = renvoUnitReadVar(&packageReader)
+			funcLength = renvoUnitReadVar(&packageReader)
+			item.textEnd = item.textStart + textLength
+			item.tokenEnd = item.tokenStart + tokenLength
+			item.declEnd = item.declStart + declLength
+			item.funcEnd = item.funcStart + funcLength
+			if !packageReader.ok || !renvoUnitValidRange(len(text), item.textStart, item.textEnd) || !renvoUnitValidRange(tokenCount, item.tokenStart, item.tokenEnd) || !renvoUnitValidRange(len(prog.decls), item.declStart, item.declEnd) || !renvoUnitValidRange(len(prog.funcs), item.funcStart, item.funcEnd) {
+				return false
+			}
+			prog.packages = append(prog.packages, item)
+		}
+		if packageReader.pos != packageReader.end {
+			return false
+		}
 	}
 	renvo_runtime_ArenaDiscardBytes(src[:textStart])
 	renvo_runtime_ArenaDiscardBytes(src[textEnd:])

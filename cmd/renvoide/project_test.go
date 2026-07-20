@@ -64,6 +64,49 @@ func TestGeneratedFormIsTheRoundTrippableDesignerDocument(t *testing.T) {
 	}
 }
 
+func TestGeneratedFormRoundTripsEveryDesignerControl(t *testing.T) {
+	design := formDesign{width: 900, height: 700}
+	for i := 0; i < len(designerControlKinds); i++ {
+		value := 0
+		if designerControlHasValue(designerControlKinds[i]) {
+			value = 40
+		}
+		label := ""
+		if designerControlHasText(designerControlKinds[i]) {
+			label = designerControlNames[i]
+		}
+		dock := ""
+		if designerControlKinds[i] == designerMenuBar {
+			dock = designerDockTop
+		} else if designerControlKinds[i] == designerStatusBar {
+			dock = designerDockBottom
+		}
+		design.controls = append(design.controls, designerControl{
+			kind: designerControlKinds[i], name: designerControlKinds[i] + "1", text: label,
+			dock: dock, x: 10 + i*3, y: 10 + i*4, width: 180, height: 36, value: value,
+		})
+	}
+	source := generatedFormSource(design)
+	if _, err := parser.ParseFile(token.NewFileSet(), projectGeneratedFormFile, source, parser.AllErrors); err != nil {
+		t.Fatalf("full-palette source is invalid: %v\n%s", err, source)
+	}
+	parsed, message := parseFormDesign(source)
+	if message != "" {
+		t.Fatal(message)
+	}
+	if !strings.Contains(string(source), ".SetDock(forms.DockTop)") || !strings.Contains(string(source), ".SetDock(forms.DockBottom)") {
+		t.Fatal("generated menu and status controls did not retain docking")
+	}
+	if len(parsed.controls) != len(designerControlKinds) {
+		t.Fatalf("round trip controls = %d, want %d", len(parsed.controls), len(designerControlKinds))
+	}
+	for i := 0; i < len(design.controls); i++ {
+		if parsed.controls[i] != design.controls[i] {
+			t.Fatalf("control %d = %#v, want %#v", i, parsed.controls[i], design.controls[i])
+		}
+	}
+}
+
 func TestEmptyDirectoryBecomesHelloWorldProjectWithoutOverwritingGoProjects(t *testing.T) {
 	root := t.TempDir()
 	created, message := ensureHelloWorldProject(root)

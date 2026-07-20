@@ -39,4 +39,9 @@ func (a *App) dispatch(event graphics.Event) {
 	if a.AfterEvent != nil {
 		a.AfterEvent(event)
 	}
+	if a.Window != nil && (event.Type == graphics.EventPointerMove || event.Type == graphics.EventPointerDown || event.Type == graphics.EventPointerUp) {
+		a.Window.SetCursor(a.Form.CursorAt(event.X, event.Y))
+	} else if a.Window != nil && event.Type == graphics.EventPointerLeave {
+		a.Window.SetCursor(graphics.CursorArrow)
+	}
 }

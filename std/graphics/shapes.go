@@ -48,6 +48,8 @@ func (s *Surface) ellipseBounds(rect Rect) (Scalar, Scalar, Scalar, Scalar) {
 }
 
 func (s *Surface) inversePoint(x, y Scalar) (Point, bool) {
+	x /= s.deviceScale
+	y /= s.deviceScale
 	if !s.transformComplex {
 		return Point{X: x - s.transformTX, Y: y - s.transformTY}, true
 	}

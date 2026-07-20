@@ -15,10 +15,14 @@ func BundledStdReadFile(path string) ([]byte, bool) {
 	if name == "@module/go.mod" {
 		return []byte("module renvo.dev\n"), true
 	}
-	if bundledHasPrefix(name, "@module/") {
+	moduleFile := bundledHasPrefix(name, "@module/")
+	if moduleFile {
 		name = name[len("@module/"):]
 	}
-	if bundledStdHasSuffix(name, "_test.go") {
+	if !moduleFile && !bundledStdGoSourceName(name) {
+		return nil, false
+	}
+	if moduleFile && bundledStdHasSuffix(name, "_test.go") {
 		return nil, false
 	}
 	data, ok := bundledStdRawReadFile(name)
@@ -36,7 +40,8 @@ func BundledStdReadDir(path string) ([]StdEntry, bool) {
 	if name == "@module" {
 		return []StdEntry{{Name: "go.mod"}, {Name: "forms", IsDir: true}, {Name: "std", IsDir: true}}, true
 	}
-	if bundledHasPrefix(name, "@module/") {
+	moduleDir := bundledHasPrefix(name, "@module/")
+	if moduleDir {
 		name = name[len("@module/"):]
 	}
 	entries, ok := bundledStdRawReadDir(name)
@@ -47,23 +52,51 @@ func BundledStdReadDir(path string) ([]StdEntry, bool) {
 	for i := 0; i < len(entries); i++ {
 		entryPath := name + "/" + entries[i].Name
 		if entries[i].IsDir {
-			out = append(out, entries[i])
-			continue
-		}
-		if bundledStdHasSuffix(entryPath, "_test.go") {
-			continue
-		}
-		if bundledStdGoSourceName(entryPath) {
-			data, readable := bundledStdRawReadFile(entryPath)
-			if !readable || bundledStdHostOnly(data) {
-				continue
+			if bundledStdDirHasFile(entryPath, moduleDir) {
+				out = append(out, entries[i])
 			}
+			continue
 		}
-		out = append(out, entries[i])
+		if !moduleDir && !bundledStdGoSourceName(entryPath) {
+			continue
+		}
+		if moduleDir && bundledStdHasSuffix(entryPath, "_test.go") {
+			continue
+		}
+		data, readable := bundledStdRawReadFile(entryPath)
+		if readable && (!bundledStdGoSourceName(entryPath) || !bundledStdHostOnly(data)) {
+			out = append(out, entries[i])
+		}
 	}
 	return out, true
 }
 
+func bundledStdDirHasFile(path string, includeAssets bool) bool {
+	entries, ok := bundledStdRawReadDir(path)
+	if !ok {
+		return false
+	}
+	for i := 0; i < len(entries); i++ {
+		entryPath := path + "/" + entries[i].Name
+		if entries[i].IsDir {
+			if bundledStdDirHasFile(entryPath, includeAssets) {
+				return true
+			}
+			continue
+		}
+		if !includeAssets && !bundledStdGoSourceName(entryPath) {
+			continue
+		}
+		if includeAssets && bundledStdHasSuffix(entryPath, "_test.go") {
+			continue
+		}
+		data, readable := bundledStdRawReadFile(entryPath)
+		if readable && (!bundledStdGoSourceName(entryPath) || !bundledStdHostOnly(data)) {
+			return true
+		}
+	}
+	return false
+}
 func bundledSourceName(path string) (string, bool) {
 	for len(path) > 0 && path[0] == '/' {
 		path = path[1:]

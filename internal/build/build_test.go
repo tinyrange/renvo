@@ -82,6 +82,65 @@ func appMain() int { return answer }
 	}
 }
 
+func TestTransientPackageCacheReusesDependenciesAndRebuildsRoot(t *testing.T) {
+	packageProgramCacheUsed = nil
+	packageProgramCacheData = nil
+	InitializePackageProgramCache()
+	packageProgramCacheNext = 0
+	packageProgramCacheHits = 0
+	packageProgramCacheMisses = 0
+	files := []load.SourceFile{
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\n\nimport \"example.com/case/pkg/lib\"\n\nfunc appMain() int { return lib.Value() }\n")},
+		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte("package lib\n\ntype Box struct { Value int }\n\nfunc Value() int { return 42 }\n")},
+	}
+	first := BuildProgramsTransientCached(buildTestGraph(t, files))
+	if !first.Ok || packageProgramCacheHits != 0 || packageProgramCacheMisses != 1 {
+		t.Fatalf("cold cache result = %#v, hits/misses = %d/%d", first, packageProgramCacheHits, packageProgramCacheMisses)
+	}
+	files[0].Src = []byte("package main\n\nimport \"example.com/case/pkg/lib\"\n\nfunc appMain() int { var box lib.Box; return box.Value + 1 }\n")
+	second := BuildProgramsTransientCached(buildTestGraph(t, files))
+	if !second.Ok || packageProgramCacheHits != 1 || packageProgramCacheMisses != 1 {
+		t.Fatalf("warm cache result = %#v, hits/misses = %d/%d", second, packageProgramCacheHits, packageProgramCacheMisses)
+	}
+	if !bytes.Contains(second.Units[second.Root].Program.Text, []byte("+ 1")) {
+		t.Fatal("cached build did not rebuild changed root package")
+	}
+	files[1].Src = []byte("package lib\n\ntype Box struct { Value int }\n\nfunc Value() int { return 43 }\n")
+	third := BuildProgramsTransientCached(buildTestGraph(t, files))
+	if !third.Ok || packageProgramCacheHits != 1 || packageProgramCacheMisses != 2 {
+		t.Fatalf("invalidated cache result = %#v, hits/misses = %d/%d", third, packageProgramCacheHits, packageProgramCacheMisses)
+	}
+	if !bytes.Contains(third.Units[0].Program.Text, []byte("43")) {
+		t.Fatal("cached build reused a changed dependency package")
+	}
+}
+
+func TestTransientPackageCacheInvalidatesImportersWhenDependencyChanges(t *testing.T) {
+	packageProgramCacheUsed = nil
+	packageProgramCacheData = nil
+	InitializePackageProgramCache()
+	packageProgramCacheNext = 0
+	packageProgramCacheHits = 0
+	packageProgramCacheMisses = 0
+	files := []load.SourceFile{
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\n\nimport \"example.com/case/pkg/mid\"\n\nfunc appMain() int { return mid.Use() }\n")},
+		{Path: "/repo/case/pkg/mid/mid.go", Src: []byte("package mid\n\nimport \"example.com/case/pkg/lib\"\n\nfunc Use() int { return lib.Value() }\n")},
+		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte("package lib\n\nfunc Value() int { return 42 }\n")},
+	}
+	first := BuildProgramsTransientCached(buildTestGraph(t, files))
+	if !first.Ok || packageProgramCacheHits != 0 || packageProgramCacheMisses != 2 {
+		t.Fatalf("cold cache result = %#v, hits/misses = %d/%d", first, packageProgramCacheHits, packageProgramCacheMisses)
+	}
+	files[2].Src = []byte("package lib\n\nfunc Other() int { return 42 }\n")
+	changed := BuildProgramsTransientCached(buildTestGraph(t, files))
+	if !changed.Ok {
+		t.Fatalf("dependency rebuild failed: %#v", changed)
+	}
+	if packageProgramCacheHits != 0 || packageProgramCacheMisses != 4 {
+		t.Fatalf("dependency change hits/misses = %d/%d, want 0/4", packageProgramCacheHits, packageProgramCacheMisses)
+	}
+}
+
 func TestBuildUnitsCheckError(t *testing.T) {
 	graph := buildTestGraph(t, []load.SourceFile{
 		{Path: "/repo/case/cmd/app/a.go", Src: []byte("package main\nvar value int\n")},

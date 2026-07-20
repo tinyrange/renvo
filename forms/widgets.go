@@ -14,10 +14,13 @@ func NewLabel() *Label {
 	label.Control = *NewControl()
 	label.SetTabStop(false)
 	label.SetAccessibilityRole(AccessibilityRoleLabel)
-	label.SetBackground(graphics.RGBA(255, 255, 255, 0))
+	label.Control.applyTheme = label.applyTheme
+	label.applyTheme(LightTheme())
 	label.Paint = label.paint
 	return label
 }
+
+func (l *Label) applyTheme(theme Theme) { applyTransparentTheme(&l.Control, theme) }
 
 func (l *Label) Font() *graphics.Font { return l.font }
 
@@ -35,7 +38,7 @@ func (l *Label) paint(surface *graphics.Surface) {
 	}
 	bounds := l.Bounds()
 	baseline := bounds.MinY + (bounds.Height()-labelLineHeight(l.font))/2 + l.font.Metrics.Ascent
-	surface.DrawText(l.font, graphics.Point{X: bounds.MinX, Y: baseline}, l.Text(), l.Foreground())
+	surface.DrawText(l.font, graphics.Point{X: bounds.MinX, Y: baseline}, l.Text(), controlForeground(&l.Control))
 }
 
 // Button is the Forms push-button control. Click remains an ordinary event
@@ -49,13 +52,29 @@ type Button struct {
 func NewButton() *Button {
 	button := &Button{}
 	button.Control = *NewControl()
-	button.SetBackground(graphics.RGBA(25, 118, 210, 255))
-	button.SetForeground(graphics.White)
 	button.SetAccessibilityRole(AccessibilityRoleButton)
+	button.SetCursor(graphics.CursorPointingHand)
+	button.Control.applyTheme = button.applyTheme
+	button.applyTheme(LightTheme())
 	button.Paint = button.paint
 	button.PointerDown = button.pointerDown
 	button.PointerUp = button.pointerUp
+	button.KeyDown = button.keyDown
 	return button
+}
+
+func (b *Button) keyDown(event graphics.Event) {
+	if b == nil || event.Repeat {
+		return
+	}
+	if (event.Key == graphics.KeyEnter || event.Key == graphics.KeySpace) && b.Click != nil {
+		b.Click()
+	}
+}
+
+func (b *Button) applyTheme(theme Theme) {
+	b.SetBackground(theme.Accent)
+	b.SetForeground(theme.AccentText)
 }
 
 func (b *Button) Font() *graphics.Font { return b.font }
@@ -87,18 +106,25 @@ func (b *Button) pointerUp(x, y graphics.Scalar) {
 func (b *Button) paint(surface *graphics.Surface) {
 	bounds := b.Bounds()
 	background := b.Background()
-	if b.pressed {
+	foreground := controlForeground(&b.Control)
+	theme := controlTheme(&b.Control)
+	if !b.Enabled() {
+		background = theme.SurfaceRaised
+	} else if b.Hovered() && !b.pressed {
+		background = theme.Selection
+		foreground = theme.Accent
+	} else if b.pressed {
 		background = shadeButtonColor(background)
 	}
 	surface.FillRect(bounds, background)
-	surface.StrokeRect(bounds, 1, shadeButtonColor(background))
+	surface.StrokeRect(bounds, 1, controlAccent(&b.Control))
 	if b.font == nil || b.Text() == "" {
 		return
 	}
 	metrics := graphics.MeasureText(b.font, b.Text())
 	x := bounds.MinX + (bounds.Width()-metrics.Width)/2
 	baseline := bounds.MinY + (bounds.Height()-metrics.Height)/2 + b.font.Metrics.Ascent
-	surface.DrawText(b.font, graphics.Point{X: x, Y: baseline}, b.Text(), b.Foreground())
+	surface.DrawText(b.font, graphics.Point{X: x, Y: baseline}, b.Text(), foreground)
 }
 
 func labelLineHeight(font *graphics.Font) graphics.Scalar {
@@ -125,14 +151,17 @@ type TextBox struct {
 func NewTextBox() *TextBox {
 	box := &TextBox{}
 	box.Control = *NewControl()
-	box.SetBackground(graphics.White)
-	box.SetForeground(graphics.RGBA(32, 36, 42, 255))
 	box.SetAccessibilityRole(AccessibilityRoleTextBox)
+	box.SetCursor(graphics.CursorIBeam)
+	box.Control.applyTheme = box.applyTheme
+	box.applyTheme(LightTheme())
 	box.Paint = box.paint
 	box.TextInput = box.textInput
 	box.KeyDown = box.keyDown
 	return box
 }
+
+func (b *TextBox) applyTheme(theme Theme) { applyFieldTheme(&b.Control, theme) }
 
 func (b *TextBox) Font() *graphics.Font { return b.font }
 
@@ -172,15 +201,18 @@ type TextArea struct {
 func NewTextArea() *TextArea {
 	area := &TextArea{}
 	area.Control = *NewControl()
-	area.SetBackground(graphics.White)
-	area.SetForeground(graphics.RGBA(32, 36, 42, 255))
 	area.SetAccessibilityRole(AccessibilityRoleTextBox)
 	area.SetAccessibilityMultiline(true)
+	area.SetCursor(graphics.CursorIBeam)
+	area.Control.applyTheme = area.applyTheme
+	area.applyTheme(LightTheme())
 	area.Paint = area.paint
 	area.TextInput = area.textInput
 	area.KeyDown = area.keyDown
 	return area
 }
+
+func (a *TextArea) applyTheme(theme Theme) { applyFieldTheme(&a.Control, theme) }
 
 func (a *TextArea) Font() *graphics.Font { return a.font }
 
@@ -209,9 +241,13 @@ func (a *TextArea) keyDown(event graphics.Event) {
 func paintTextEntry(surface *graphics.Surface, control *Control, font *graphics.Font, multiline bool) {
 	bounds := control.Bounds()
 	surface.FillRect(bounds, control.Background())
-	border := graphics.RGBA(170, 177, 187, 255)
+	theme := controlTheme(control)
+	border := theme.Border
+	if control.Hovered() {
+		border = theme.MutedText
+	}
 	if control.Focused() {
-		border = graphics.RGBA(25, 118, 210, 255)
+		border = theme.Accent
 	}
 	surface.StrokeRect(bounds, 1, border)
 	if font == nil {
@@ -231,7 +267,7 @@ func paintTextEntry(surface *graphics.Surface, control *Control, font *graphics.
 		if !multiline {
 			baseline = bounds.MinY + (bounds.Height()-lineHeight)/2 + font.Metrics.Ascent
 		}
-		surface.DrawText(font, graphics.Point{X: bounds.MinX + 6, Y: baseline}, text[lineStart:i], control.Foreground())
+		surface.DrawText(font, graphics.Point{X: bounds.MinX + 6, Y: baseline}, text[lineStart:i], controlForeground(control))
 		line++
 		lineStart = i + 1
 		if !multiline {
@@ -259,15 +295,26 @@ type CheckBox struct {
 func NewCheckBox() *CheckBox {
 	box := &CheckBox{}
 	box.Control = *NewControl()
-	box.SetBackground(graphics.RGBA(255, 255, 255, 0))
 	box.SetAccessibilityRole(AccessibilityRoleCheckBox)
+	box.SetCursor(graphics.CursorPointingHand)
 	box.AccessibilityCheckable = true
 	box.AccessibilityChecked = box.accessibilityChecked
 	box.AccessibilityInvoke = box.accessibilityInvoke
+	box.Control.applyTheme = box.applyTheme
+	box.applyTheme(LightTheme())
 	box.Paint = box.paint
 	box.PointerUp = box.pointerUp
+	box.KeyDown = box.keyDown
 	return box
 }
+
+func (b *CheckBox) keyDown(event graphics.Event) {
+	if b != nil && event.Key == graphics.KeySpace && !event.Repeat {
+		b.accessibilityInvoke()
+	}
+}
+
+func (b *CheckBox) applyTheme(theme Theme) { applyTransparentTheme(&b.Control, theme) }
 
 func (b *CheckBox) Font() *graphics.Font { return b.font }
 func (b *CheckBox) Checked() bool        { return b.checked }
@@ -305,14 +352,23 @@ func (b *CheckBox) pointerUp(x, y graphics.Scalar) {
 
 func (b *CheckBox) paint(surface *graphics.Surface) {
 	bounds := b.Bounds()
-	box := graphics.R(bounds.MinX, bounds.MinY+(bounds.Height()-16)/2, 16, 16)
-	surface.FillRect(box, graphics.White)
-	surface.StrokeRect(box, 1, graphics.RGBA(126, 133, 143, 255))
-	if b.checked {
-		surface.DrawLine(graphics.Point{X: box.MinX + 3, Y: box.MinY + 8}, graphics.Point{X: box.MinX + 7, Y: box.MinY + 12}, 2, graphics.RGBA(25, 118, 210, 255))
-		surface.DrawLine(graphics.Point{X: box.MinX + 7, Y: box.MinY + 12}, graphics.Point{X: box.MinX + 14, Y: box.MinY + 3}, 2, graphics.RGBA(25, 118, 210, 255))
+	theme := controlTheme(&b.Control)
+	if b.Hovered() {
+		surface.FillRect(bounds, theme.Hover)
 	}
-	paintChoiceText(surface, bounds, b.font, b.Text(), b.Foreground())
+	box := graphics.R(bounds.MinX+1, bounds.MinY+(bounds.Height()-18)/2, 18, 18)
+	fill := theme.Field
+	border := theme.MutedText
+	if b.checked {
+		fill = controlAccent(&b.Control)
+		border = controlAccent(&b.Control)
+	}
+	surface.FillRect(box, fill)
+	surface.StrokeRect(box, 1, border)
+	if b.checked {
+		drawIcon(surface, IconCheck, box.MinX+1, box.MinY+1, theme.AccentText)
+	}
+	paintChoiceText(surface, bounds, b.font, b.Text(), controlForeground(&b.Control))
 }
 
 // RadioButton is an individually checkable radio choice. Group exclusivity
@@ -326,15 +382,26 @@ type RadioButton struct {
 func NewRadioButton() *RadioButton {
 	button := &RadioButton{}
 	button.Control = *NewControl()
-	button.SetBackground(graphics.RGBA(255, 255, 255, 0))
 	button.SetAccessibilityRole(AccessibilityRoleRadioButton)
+	button.SetCursor(graphics.CursorPointingHand)
 	button.AccessibilityCheckable = true
 	button.AccessibilityChecked = button.accessibilityChecked
 	button.AccessibilityInvoke = button.accessibilityInvoke
+	button.Control.applyTheme = button.applyTheme
+	button.applyTheme(LightTheme())
 	button.Paint = button.paint
 	button.PointerUp = button.pointerUp
+	button.KeyDown = button.keyDown
 	return button
 }
+
+func (b *RadioButton) keyDown(event graphics.Event) {
+	if b != nil && event.Key == graphics.KeySpace && !event.Repeat {
+		b.accessibilityInvoke()
+	}
+}
+
+func (b *RadioButton) applyTheme(theme Theme) { applyTransparentTheme(&b.Control, theme) }
 
 func (b *RadioButton) Font() *graphics.Font { return b.font }
 func (b *RadioButton) Checked() bool        { return b.checked }
@@ -372,13 +439,17 @@ func (b *RadioButton) pointerUp(x, y graphics.Scalar) {
 
 func (b *RadioButton) paint(surface *graphics.Surface) {
 	bounds := b.Bounds()
-	circle := graphics.R(bounds.MinX, bounds.MinY+(bounds.Height()-16)/2, 16, 16)
-	surface.FillEllipse(circle, graphics.White)
-	surface.StrokeEllipse(circle, 1, graphics.RGBA(126, 133, 143, 255))
-	if b.checked {
-		surface.FillEllipse(graphics.R(circle.MinX+4, circle.MinY+4, 8, 8), graphics.RGBA(25, 118, 210, 255))
+	theme := controlTheme(&b.Control)
+	if b.Hovered() {
+		surface.FillRect(bounds, theme.Hover)
 	}
-	paintChoiceText(surface, bounds, b.font, b.Text(), b.Foreground())
+	circle := graphics.R(bounds.MinX, bounds.MinY+(bounds.Height()-16)/2, 16, 16)
+	surface.FillEllipse(circle, theme.Field)
+	surface.StrokeEllipse(circle, 1, theme.MutedText)
+	if b.checked {
+		surface.FillEllipse(graphics.R(circle.MinX+4, circle.MinY+4, 8, 8), controlAccent(&b.Control))
+	}
+	paintChoiceText(surface, bounds, b.font, b.Text(), controlForeground(&b.Control))
 }
 
 func paintChoiceText(surface *graphics.Surface, bounds graphics.Rect, font *graphics.Font, text string, color graphics.Color) {
@@ -398,17 +469,25 @@ func NewPictureBox() *PictureBox {
 	box.Control = *NewControl()
 	box.SetTabStop(false)
 	box.SetAccessibilityRole(AccessibilityRoleImage)
-	box.SetBackground(graphics.RGBA(241, 243, 246, 255))
+	box.Control.applyTheme = box.applyTheme
+	box.applyTheme(LightTheme())
 	box.Paint = box.paint
 	return box
 }
 
+func (b *PictureBox) applyTheme(theme Theme) { applyRaisedTheme(&b.Control, theme) }
+
 func (b *PictureBox) paint(surface *graphics.Surface) {
 	bounds := b.Bounds()
 	surface.FillRect(bounds, b.Background())
-	surface.StrokeRect(bounds, 1, graphics.RGBA(180, 186, 195, 255))
-	surface.DrawLine(graphics.Point{X: bounds.MinX + 5, Y: bounds.MaxY - 6}, graphics.Point{X: bounds.MinX + bounds.Width()/2, Y: bounds.MinY + bounds.Height()/2}, 1, graphics.RGBA(145, 152, 162, 255))
-	surface.DrawLine(graphics.Point{X: bounds.MinX + bounds.Width()/2, Y: bounds.MinY + bounds.Height()/2}, graphics.Point{X: bounds.MaxX - 5, Y: bounds.MaxY - 6}, 1, graphics.RGBA(145, 152, 162, 255))
+	theme := controlTheme(&b.Control)
+	surface.StrokeRect(bounds, 1, theme.Border)
+	color := theme.MutedText
+	if !b.Enabled() {
+		color = theme.Disabled
+	}
+	surface.DrawLine(graphics.Point{X: bounds.MinX + 5, Y: bounds.MaxY - 6}, graphics.Point{X: bounds.MinX + bounds.Width()/2, Y: bounds.MinY + bounds.Height()/2}, 1, color)
+	surface.DrawLine(graphics.Point{X: bounds.MinX + bounds.Width()/2, Y: bounds.MinY + bounds.Height()/2}, graphics.Point{X: bounds.MaxX - 5, Y: bounds.MaxY - 6}, 1, color)
 }
 
 // Panel is a visual container boundary. Child control ownership remains with
@@ -419,12 +498,15 @@ func NewPanel() *Panel {
 	panel := &Panel{}
 	panel.Control = *NewControl()
 	panel.SetTabStop(false)
-	panel.SetBackground(graphics.RGBA(247, 248, 250, 255))
+	panel.Control.applyTheme = panel.applyTheme
+	panel.applyTheme(LightTheme())
 	panel.Paint = panel.paint
 	return panel
 }
 
+func (p *Panel) applyTheme(theme Theme) { applyRaisedTheme(&p.Control, theme) }
+
 func (p *Panel) paint(surface *graphics.Surface) {
 	surface.FillRect(p.Bounds(), p.Background())
-	surface.StrokeRect(p.Bounds(), 1, graphics.RGBA(205, 210, 218, 255))
+	surface.StrokeRect(p.Bounds(), 1, controlTheme(&p.Control).Border)
 }

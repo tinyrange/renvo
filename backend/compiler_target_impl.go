@@ -89,6 +89,16 @@ type RenvoCompileOptions struct {
 	WindowsGUI   bool
 }
 
+// RenvoInitializeObjectCache reserves the bounded in-process object store when
+// the requested target has object reuse enabled. Embedded callers invoke it
+// before taking their transient frontend arena mark.
+func RenvoInitializeObjectCache(targetName string) {
+	target := renvoParseTargetArg(targetName)
+	if target != 0 && target != renvoTargetWasiWasm32 {
+		renvoInitializeObjectCache()
+	}
+}
+
 func RenvoDefaultArenaSize(targetName string) (int, bool) {
 	target := renvoParseTargetArg(targetName)
 	if target == 0 {
@@ -184,6 +194,10 @@ func RenvoCompileUnitToOutputWithOptions(unit []byte, targetName string, outputP
 		return false
 	}
 	result := renvoCompileParsedProgramArena(&prog, target, options.ArenaSize)
+	return renvoWriteCompileResult(result, outputPath)
+}
+
+func renvoWriteCompileResult(result renvoCompileResult, outputPath string) bool {
 	if !result.ok {
 		return false
 	}
@@ -202,6 +216,95 @@ func RenvoCompileUnitToOutputWithOptions(unit []byte, targetName string, outputP
 	return true
 }
 
+// RenvoCompileSession advances an embedded compilation in bounded phases. The
+// Darwin/arm64 backend emits a small batch of relocatable function objects per
+// step so GUI callers can return to their event loop between batches.
+type RenvoCompileSession struct {
+	unit       []byte
+	targetName string
+	outputPath string
+	options    RenvoCompileOptions
+	target     int
+	stage      int
+	done       bool
+	ok         bool
+	prog       *renvoProgram
+	meta       *renvoMeta
+	aarch64    *renvoAarch64ProgramSession
+	result     renvoCompileResult
+}
+
+func RenvoBeginCompileSession(unit []byte, targetName string, outputPath string, options RenvoCompileOptions) *RenvoCompileSession {
+	return &RenvoCompileSession{unit: unit, targetName: targetName, outputPath: outputPath, options: options}
+}
+
+func (s *RenvoCompileSession) Step() bool {
+	if s == nil || s.done {
+		return true
+	}
+	if s.stage == 0 {
+		s.target = renvoParseTargetArg(s.targetName)
+		if s.target == 0 || !renvoCompileOptionsValid(s.target, s.options) {
+			s.done = true
+			return true
+		}
+		renvoSetStripSymbols(s.options.StripSymbols)
+		renvoCompilerWindowsSubsystem = 3
+		if s.options.WindowsGUI {
+			renvoCompilerWindowsSubsystem = 2
+		}
+		renvoSetTarget(s.target)
+		prog, isUnit, decoded := renvoDecodeUnitProgram(s.unit)
+		if !isUnit || !decoded {
+			s.done = true
+			return true
+		}
+		s.prog = &prog
+		s.stage = 1
+		return false
+	}
+	if s.stage == 1 {
+		s.meta = new(renvoMeta)
+		renvoBuildMetaInto(s.prog, s.meta)
+		if !s.meta.ok {
+			s.done = true
+			return true
+		}
+		s.meta.arenaSize = renvoResolveArenaSize(s.target, s.options.ArenaSize)
+		s.stage = 2
+		return false
+	}
+	if s.stage == 2 {
+		if s.target == renvoTargetDarwinArm64 {
+			s.aarch64 = renvoBeginScalarProgramAarch64(s.prog, s.meta)
+			if s.aarch64 == nil {
+				s.done = true
+				return true
+			}
+			s.stage = 3
+			return false
+		}
+		s.result = renvoCompileProgramWithMeta(s.prog, s.meta, s.target)
+		s.stage = 4
+		return false
+	}
+	if s.stage == 3 {
+		if !s.aarch64.step(8) {
+			return false
+		}
+		s.result = s.aarch64.result
+		s.stage = 4
+		return false
+	}
+	s.ok = renvoWriteCompileResult(s.result, s.outputPath)
+	s.done = true
+	return true
+}
+
+func (s *RenvoCompileSession) Result() bool {
+	return s != nil && s.done && s.ok
+}
+
 func renvoCompileParsedProgram(prog *renvoProgram, target int) renvoCompileResult {
 	return renvoCompileParsedProgramArena(prog, target, 0)
 }
@@ -217,19 +320,23 @@ func renvoCompileParsedProgramArena(prog *renvoProgram, target int, arenaSize in
 		return result
 	}
 	meta.arenaSize = renvoResolveArenaSize(target, arenaSize)
+	return renvoCompileProgramWithMeta(prog, &meta, target)
+}
+
+func renvoCompileProgramWithMeta(prog *renvoProgram, meta *renvoMeta, target int) renvoCompileResult {
 	if target == renvoTargetLinux386 || target == renvoTargetWindows386 {
-		return renvoTryCompileScalarProgram386(prog, &meta)
+		return renvoTryCompileScalarProgram386(prog, meta)
 	}
 	if target == renvoTargetLinuxAarch64 || target == renvoTargetDarwinArm64 || target == renvoTargetWindowsArm64 {
-		return renvoTryCompileScalarProgramAarch64(prog, &meta)
+		return renvoTryCompileScalarProgramAarch64(prog, meta)
 	}
 	if target == renvoTargetLinuxArm {
-		return renvoTryCompileScalarProgramArm(prog, &meta)
+		return renvoTryCompileScalarProgramArm(prog, meta)
 	}
 	if target == renvoTargetWasiWasm32 {
-		return renvoTryCompileScalarProgramWasm32(prog, &meta)
+		return renvoTryCompileScalarProgramWasm32(prog, meta)
 	}
-	return renvoTryCompileScalarProgramAmd64(prog, &meta)
+	return renvoTryCompileScalarProgramAmd64(prog, meta)
 }
 
 func renvoSetStripSymbols(stripSymbols bool) {

@@ -53,12 +53,12 @@ func NewInterfaceFont() *graphics.Font {
 		if readError != nil {
 			continue
 		}
-		font, fontError := graphics.NewTrueTypeFont(data, 14)
+		font, fontError := graphics.NewTrueTypeFont(data, 15)
 		if fontError == nil {
 			return font
 		}
 	}
-	if font := gofont.New(14); font != nil {
+	if font := gofont.New(15); font != nil {
 		return font
 	}
 	return graphics.NewBuiltinFont(2)

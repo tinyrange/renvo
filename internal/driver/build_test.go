@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"renvo.dev/backend/unit"
+	frontendbuild "renvo.dev/internal/build"
 	"renvo.dev/internal/load"
 	"renvo.dev/internal/pipeline"
 )
@@ -134,6 +135,32 @@ func TestBuildUnitReportsStructuredParserDiagnostic(t *testing.T) {
 	})
 	if result.Ok || result.Diagnostic.Code != "RENVO-PARSE-001" || result.Diagnostic.Path != "/repo/case/cmd/app/main.go" || result.Diagnostic.Line < 1 || result.Diagnostic.Column < 1 {
 		t.Fatalf("parser diagnostic = %#v", result.Diagnostic)
+	}
+}
+
+func TestEmbeddedBuildCacheValidatesSelectedSourceContent(t *testing.T) {
+	embeddedBuildCacheValid = false
+	frontendbuild.InitializePackageProgramCache()
+	files := driverTestFiles()
+	files = append(files, load.SourceFile{Path: "/repo/case/app", Src: []byte("executable")})
+	args := []string{"-t", "darwin/arm64", "-s", "-o", "/repo/case/app", "./cmd/app"}
+	first := buildFromFSCompact(args, "/repo/case", "/std", memorySourceFS{files: files})
+	if !first.Ok || first.CacheHit {
+		t.Fatalf("cold compact build = %#v", first)
+	}
+	rememberEmbeddedBuild(first)
+	second := buildFromFSCompact(args, "/repo/case", "/std", memorySourceFS{files: files})
+	if !second.Ok || !second.CacheHit {
+		t.Fatalf("unchanged compact build = %#v", second)
+	}
+	for i := 0; i < len(files); i++ {
+		if files[i].Path == "/repo/case/cmd/app/main.go" {
+			files[i].Src = []byte("package main\nfunc appMain() int { return 1 }\n")
+		}
+	}
+	changed := buildFromFSCompact(args, "/repo/case", "/std", memorySourceFS{files: files})
+	if !changed.Ok || changed.CacheHit {
+		t.Fatalf("changed compact build = %#v", changed)
 	}
 }
 

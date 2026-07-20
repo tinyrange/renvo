@@ -26,16 +26,28 @@ type Result struct {
 }
 
 func BuildUnit(workDir string, stdRoot string, arg string, files []load.SourceFile) Result {
-	return buildUnit(workDir, stdRoot, arg, files, 0, 0, false)
+	return buildUnit(workDir, stdRoot, arg, files, 0, 0, false, false)
 }
 
 // BuildUnitWithTransientFiles allows the command driver to release source
 // collection storage once lowering has copied every package into link units.
 func BuildUnitWithTransientFiles(workDir string, stdRoot string, arg string, files []load.SourceFile, filesStart int, filesEnd int) Result {
-	return buildUnit(workDir, stdRoot, arg, files, filesStart, filesEnd, true)
+	return buildUnit(workDir, stdRoot, arg, files, filesStart, filesEnd, true, false)
 }
 
-func buildUnit(workDir string, stdRoot string, arg string, files []load.SourceFile, filesStart int, filesEnd int, transient bool) Result {
+// BuildUnitWithTransientFilesCached reuses unchanged lowered dependencies for
+// repeated embedded builds while always rebuilding the root package.
+func BuildUnitWithTransientFilesCached(workDir string, stdRoot string, arg string, files []load.SourceFile, filesStart int, filesEnd int) Result {
+	return buildUnit(workDir, stdRoot, arg, files, filesStart, filesEnd, true, true)
+}
+
+func buildUnit(workDir string, stdRoot string, arg string, files []load.SourceFile, filesStart int, filesEnd int, transient bool, cached bool) Result {
+	if cached {
+		session := BeginSession(workDir, stdRoot, arg, files, filesStart, filesEnd, transient, true)
+		for !session.Step() {
+		}
+		return session.Result()
+	}
 	result := Result{
 		Ok:           true,
 		Error:        PipelineOK,

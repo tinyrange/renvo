@@ -40,6 +40,23 @@ func TestBackendRenvoUnitVersionOneCompatibility(t *testing.T) {
 	}
 }
 
+func TestBackendRenvoUnitKeepsLinesBeyondSixteenBits(t *testing.T) {
+	program := unitProgramFromSource(t, []byte("package main\nfunc appMain() int { return 0 }\n"))
+	count := len(program.Tokens) / 8
+	program.TokenLines = make([]int, count)
+	for i := 0; i < count; i++ {
+		program.TokenLines[i] = 65536 + i
+	}
+	data, err := unit.Marshal(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, isUnit, ok := renvoDecodeUnitProgram(data)
+	if !isUnit || !ok || renvoTokLine(&decoded, count-1) != 65536+count-1 {
+		t.Fatalf("large token line was truncated: isUnit=%v ok=%v line=%d", isUnit, ok, renvoTokLine(&decoded, count-1))
+	}
+}
+
 func TestBackendRenvoUnitRejectsMissingDuplicateAndMalformedData(t *testing.T) {
 	core := readBackendGolden(t, "unit/testdata/v1-core.hex")
 	for _, item := range unit.WireSchemaTags {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,53 @@ import (
 	"renvo.dev/std/graphics"
 	"renvo.dev/std/graphics/gofont"
 )
+
+func TestDesignerPaletteHasDistinctIconsHitTargetsAndDockedCanvas(t *testing.T) {
+	bounds := graphics.R(0, 0, 620, 420)
+	if canvas := designerCanvasBounds(bounds); canvas.MinX != designerPaletteWidth || canvas.MinY != workspacePaneHeaderHeight {
+		t.Fatalf("docked designer canvas = %#v", canvas)
+	}
+	images := make([][]byte, 0, len(designerControlKinds))
+	for i := 0; i < len(designerControlKinds); i++ {
+		item := designerPaletteItemBounds(bounds, i)
+		if got := designerPaletteIndexAt(bounds, item.MinX+item.Width()/2, item.MinY+item.Height()/2); got != i {
+			t.Fatalf("palette hit %d = %d", i, got)
+		}
+		surface := graphics.NewSurface(28, 28)
+		drawPaletteIcon(surface, 0, 0, i, graphics.White)
+		pixels := append([]byte(nil), surface.Pixels...)
+		for previous := 0; previous < len(images); previous++ {
+			if bytes.Equal(pixels, images[previous]) {
+				t.Fatalf("palette icons %d (%s) and %d (%s) are identical", previous, designerControlNames[previous], i, designerControlNames[i])
+			}
+		}
+		images = append(images, pixels)
+		tooltip := designerPaletteTooltipBounds(gofont.New(15), bounds, i)
+		if tooltip.Empty() || tooltip.MinX <= designerPaletteWidth {
+			t.Fatalf("palette tooltip %d = %#v", i, tooltip)
+		}
+	}
+}
+
+func TestThemeMenuSwitchesFormsAndWorkspaceChromeTogether(t *testing.T) {
+	form := NewMainForm(t.TempDir())
+	driver := forms.NewAutomationDriver(&form.Form)
+	if !driver.Invoke("main-menu-menu-3") || !driver.Invoke("main-menu-menu-3-item-2") {
+		t.Fatal("could not select Dark Theme through the View menu")
+	}
+	if !form.darkTheme || form.Form.Theme() != forms.DarkTheme() || !form.darkThemeItem.Checked() || form.lightThemeItem.Checked() {
+		t.Fatalf("dark theme state = dark %v form %#v menu light %v dark %v", form.darkTheme, form.Form.Theme(), form.lightThemeItem.Checked(), form.darkThemeItem.Checked())
+	}
+	if workspaceWhite != forms.DarkTheme().Surface || workspaceText != forms.DarkTheme().Text || workspaceBlue != forms.DarkTheme().Accent {
+		t.Fatalf("dark workspace colors = surface %#v text %#v accent %#v", workspaceWhite, workspaceText, workspaceBlue)
+	}
+	if !driver.Invoke("main-menu-menu-3") || !driver.Invoke("main-menu-menu-3-item-1") {
+		t.Fatal("could not select Light Theme through the View menu")
+	}
+	if form.darkTheme || form.Form.Theme() != forms.LightTheme() || !form.lightThemeItem.Checked() || form.darkThemeItem.Checked() {
+		t.Fatalf("light theme state = dark %v form %#v menu light %v dark %v", form.darkTheme, form.Form.Theme(), form.lightThemeItem.Checked(), form.darkThemeItem.Checked())
+	}
+}
 
 func TestMainFormSemanticAutomationExposesPrimaryIDEActions(t *testing.T) {
 	form := NewMainForm(t.TempDir())
@@ -28,13 +76,57 @@ func TestMainFormSemanticAutomationExposesPrimaryIDEActions(t *testing.T) {
 	if !driver.Invoke(build[0].ID) || !driver.Invoke(run[0].ID) || built != 1 || ran != 1 {
 		t.Fatalf("semantic toolbar actions = build %d run %d", built, ran)
 	}
-	form.showDesigner()
+	designerView := driver.Find(forms.AccessibilityRoleButton, "Designer view")
+	if len(designerView) != 1 || !driver.Invoke(designerView[0].ID) || !form.designerView {
+		t.Fatalf("designer tab semantics = %#v active %v", designerView, form.designerView)
+	}
 	form.designer.SetSelection(0)
 	form.inspector.SetSelection(0)
 	palette := driver.Find(forms.AccessibilityRoleButton, "Add Button")
 	properties := driver.Find(forms.AccessibilityRoleTextBox, "Name")
 	if len(palette) != 1 || len(properties) != 1 || palette[0].Hidden || properties[0].Hidden {
 		t.Fatalf("designer semantics = palette %#v properties %#v", palette, properties)
+	}
+	form.TakeAccessibilityUpdate()
+	form.inspector.active = "Text"
+	form.inspector.editBuffer = "Updated label"
+	form.inspector.commitEdit()
+	update, ok := form.TakeAccessibilityUpdate()
+	updated := false
+	for i := 0; i < len(update.Nodes); i++ {
+		if update.Nodes[i].ID == "form-designer-control-1" && update.Nodes[i].Name == "Updated label" {
+			updated = true
+		}
+	}
+	if !ok || !updated {
+		t.Fatalf("designer property semantic update = %#v, %v", update, ok)
+	}
+}
+
+func TestDesignerSemanticPaletteAddsEverySupportedControl(t *testing.T) {
+	root := t.TempDir()
+	form := NewMainForm(root)
+	form.showDesigner()
+	driver := forms.NewAutomationDriver(&form.Form)
+	initial := len(form.design.controls)
+	for i := 0; i < len(designerControlKinds); i++ {
+		items := driver.Find(forms.AccessibilityRoleButton, "Add "+designerControlNames[i])
+		if len(items) != 1 || !driver.Invoke(items[0].ID) {
+			t.Fatalf("palette item %q = %#v", designerControlNames[i], items)
+		}
+	}
+	if len(form.design.controls) != initial+len(designerControlKinds) {
+		t.Fatalf("designer controls = %d, want %d", len(form.design.controls), initial+len(designerControlKinds))
+	}
+	generated, err := os.ReadFile(filepath.Join(root, projectGeneratedFormFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < len(designerControlKinds); i++ {
+		constructor := "forms.New" + designerFormsType(designerControlKinds[i]) + "()"
+		if !strings.Contains(string(generated), constructor) {
+			t.Fatalf("generated full palette missing %q", constructor)
+		}
 	}
 }
 
@@ -46,8 +138,11 @@ func TestMainFormGeneratedLayoutAndOpenSaveCallbacks(t *testing.T) {
 	}
 	form := NewMainForm(root)
 	controls := form.Controls()
-	if len(controls) != 10 || controls[0] != &form.appBar.Control || controls[1] != &form.explorerFrame.Control || controls[2] != &form.editorFrame.Control || controls[3] != &form.designer.Control || controls[4] != &form.inspector.Control || controls[5] != &form.output.Control || controls[6] != &form.explorer.Control || controls[7] != &form.editor.Control || controls[8] != &form.targetMenu.Control || controls[9] != &form.menuBar.Control {
+	if len(controls) != 11 || controls[0] != &form.appBar.Control || controls[1] != &form.explorerFrame.Control || controls[2] != &form.editorFrame.Control || controls[3] != &form.designer.Control || controls[4] != &form.inspector.Control || controls[5] != &form.output.Control || controls[6] != &form.explorer.Control || controls[7] != &form.editor.Control || controls[8] != &form.targetMenu.Control || controls[9] != &form.menuBar.Control || controls[10] != &form.statusBar.Control {
 		t.Fatalf("generated controls = %#v", controls)
+	}
+	if form.menuBar.Bounds() != graphics.R(0, 0, 1440, 28) || form.statusBar.Bounds() != graphics.R(0, 496, 1440, 24) {
+		t.Fatalf("docked IDE chrome = menu %#v status %#v", form.menuBar.Bounds(), form.statusBar.Bounds())
 	}
 	if form.explorer.Font == nil || form.editor.Font == nil || form.explorer.Font == form.editor.Font {
 		t.Fatal("generated form did not separate interface and code fonts")
@@ -145,7 +240,11 @@ func TestMainFormRendersAndResizesOnlyItsPanes(t *testing.T) {
 		t.Fatal("initial form paint produced no pixels")
 	}
 	form.Dispatch(graphics.Event{Type: graphics.EventWindowResize, Dirty: graphics.R(0, 0, 720, 480)})
-	layout := calculateWorkspaceLayout(720, 480)
+	layout := calculateWorkspaceLayout(720, 428)
+	layout.explorer = workspaceOffsetY(layout.explorer, 28)
+	layout.editor = workspaceOffsetY(layout.editor, 28)
+	layout.designer = workspaceOffsetY(layout.designer, 28)
+	layout.inspector = workspaceOffsetY(layout.inspector, 28)
 	if form.explorer.Bounds() != layout.explorer {
 		t.Fatalf("explorer bounds = %#v", form.explorer.Bounds())
 	}
@@ -160,22 +259,22 @@ func TestMainFormRendersAndResizesOnlyItsPanes(t *testing.T) {
 
 func TestWorkspaceReferenceGeometry(t *testing.T) {
 	layout := calculateWorkspaceLayout(1440, 520)
-	if layout.explorerFrame != graphics.R(0, 46, 263, 474) {
+	if layout.explorerFrame != graphics.R(0, 38, 263, 482) {
 		t.Fatalf("explorer frame = %#v", layout.explorerFrame)
 	}
-	if layout.editorFrame != graphics.R(263, 46, 825, 362) {
+	if layout.editorFrame != graphics.R(263, 38, 825, 394) {
 		t.Fatalf("editor frame = %#v", layout.editorFrame)
 	}
-	if layout.designer != graphics.R(263, 46, 825, 362) {
+	if layout.designer != graphics.R(263, 38, 825, 394) {
 		t.Fatalf("designer frame = %#v", layout.designer)
 	}
-	if layout.inspector != graphics.R(1088, 46, 352, 474) {
+	if layout.inspector != graphics.R(1088, 38, 352, 482) {
 		t.Fatalf("inspector frame = %#v", layout.inspector)
 	}
-	if layout.output != graphics.R(263, 408, 825, 112) {
+	if layout.output != graphics.R(263, 432, 825, 88) {
 		t.Fatalf("output frame = %#v", layout.output)
 	}
-	if layout.explorer != graphics.R(0, 82, 263, 404) || layout.editor != graphics.R(263, 82, 825, 292) {
+	if layout.explorer != graphics.R(0, 68, 263, 452) || layout.editor != graphics.R(263, 68, 825, 340) {
 		t.Fatalf("live pane geometry = explorer %#v editor %#v", layout.explorer, layout.editor)
 	}
 }
@@ -226,8 +325,9 @@ func TestDesignerAddsMovesEditsAndWiresAControlThroughGoSource(t *testing.T) {
 
 	// Pick Button from the live palette. It is inserted and selected.
 	designer := form.designer.Bounds()
-	paletteX := designer.MinX + 48 + 88 + 20
-	buttonY := designer.MinY + workspacePaneHeaderHeight + 20
+	buttonPalette := designerPaletteItemBounds(designer, 1)
+	paletteX := buttonPalette.MinX + buttonPalette.Width()/2
+	buttonY := buttonPalette.MinY + buttonPalette.Height()/2
 	form.Dispatch(graphics.Event{Type: graphics.EventPointerDown, X: paletteX, Y: buttonY, Button: 1})
 	form.Dispatch(graphics.Event{Type: graphics.EventPointerUp, X: paletteX, Y: buttonY, Button: 1})
 	selected := len(form.design.controls) - 1
@@ -237,9 +337,9 @@ func TestDesignerAddsMovesEditsAndWiresAControlThroughGoSource(t *testing.T) {
 
 	// Drag the selected control through normal form dispatch. Pointer capture
 	// keeps the operation attached to the designer until pointer-up.
-	canvas := graphics.R(designer.MinX, designer.MinY+workspacePaneHeaderHeight+workspaceDesignerToolbarHeight, designer.Width(), designer.Height()-workspacePaneHeaderHeight-workspaceDesignerToolbarHeight-workspaceStatusHeight)
+	canvas := designerCanvasBounds(designer)
 	layout := calculateDesignerPreview(canvas, &form.design)
-	controlBounds := designerControlBounds(layout, form.design.controls[selected])
+	controlBounds := designerControlBoundsAt(layout, &form.design, selected)
 	startX := controlBounds.MinX + controlBounds.Width()/2
 	startY := controlBounds.MinY + controlBounds.Height()/2
 	oldX := form.design.controls[selected].x
@@ -253,7 +353,7 @@ func TestDesignerAddsMovesEditsAndWiresAControlThroughGoSource(t *testing.T) {
 		t.Fatalf("drag did not snap to grid: %#v", form.design.controls[selected])
 	}
 	layout = calculateDesignerPreview(canvas, &form.design)
-	controlBounds = designerControlBounds(layout, form.design.controls[selected])
+	controlBounds = designerControlBoundsAt(layout, &form.design, selected)
 	resizeX := controlBounds.MaxX
 	resizeY := controlBounds.MaxY
 	oldWidth := form.design.controls[selected].width
@@ -270,11 +370,11 @@ func TestDesignerAddsMovesEditsAndWiresAControlThroughGoSource(t *testing.T) {
 	// Replace Text in the property grid, then create the empty Click event.
 	inspector := form.inspector.Bounds()
 	propertyX := inspector.MinX + 100
-	textY := inspector.MinY + workspacePaneHeaderHeight + 48 + 40 + 10
+	textY := inspector.MinY + workspacePaneHeaderHeight + workspacePropertyTitleHeight + workspacePropertyRowHeight + 10
 	form.Dispatch(graphics.Event{Type: graphics.EventPointerDown, X: propertyX, Y: textY, Button: 1})
 	form.Dispatch(graphics.Event{Type: graphics.EventTextInput, Text: "Launch"})
 	form.Dispatch(graphics.Event{Type: graphics.EventKeyDown, Key: graphics.KeyEnter})
-	clickY := inspector.MinY + workspacePaneHeaderHeight + 48 + 6*40 + 10
+	clickY := inspector.MinY + workspacePaneHeaderHeight + workspacePropertyTitleHeight + 7*workspacePropertyRowHeight + 10
 	form.Dispatch(graphics.Event{Type: graphics.EventPointerDown, X: propertyX, Y: clickY, Button: 1})
 
 	generated, err := os.ReadFile(filepath.Join(root, projectGeneratedFormFile))
@@ -294,12 +394,13 @@ func TestDesignerAddsMovesEditsAndWiresAControlThroughGoSource(t *testing.T) {
 	}
 
 	for paletteIndex := 2; paletteIndex < 8; paletteIndex++ {
-		x := designer.MinX + 48 + graphics.Scalar(paletteIndex*88+20)
-		y := designer.MinY + workspacePaneHeaderHeight + 20
+		paletteBounds := designerPaletteItemBounds(designer, paletteIndex)
+		x := paletteBounds.MinX + paletteBounds.Width()/2
+		y := paletteBounds.MinY + paletteBounds.Height()/2
 		form.Dispatch(graphics.Event{Type: graphics.EventPointerDown, X: x, Y: y, Button: 1})
 		form.Dispatch(graphics.Event{Type: graphics.EventPointerUp, X: x, Y: y, Button: 1})
 		if paletteIndex == 4 {
-			checkedY := inspector.MinY + workspacePaneHeaderHeight + 48 + 6*40 + 10
+			checkedY := inspector.MinY + workspacePaneHeaderHeight + workspacePropertyTitleHeight + 7*workspacePropertyRowHeight + 10
 			form.Dispatch(graphics.Event{Type: graphics.EventPointerDown, X: propertyX, Y: checkedY, Button: 1})
 			form.Dispatch(graphics.Event{Type: graphics.EventPointerUp, X: propertyX, Y: checkedY, Button: 1})
 		}

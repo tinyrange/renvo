@@ -6,6 +6,31 @@ import "renvo.dev/std/graphics"
 
 const maxInvalidRects = 64
 
+// DockStyle controls how a control consumes space from its form. Edge-docked
+// controls are laid out in control order; fill controls receive the remaining
+// client rectangle after every visible edge-docked control.
+type DockStyle int
+
+const (
+	DockNone DockStyle = iota
+	DockTop
+	DockBottom
+	DockLeft
+	DockRight
+	DockFill
+)
+
+// ThemeRole selects the standard surface treatment used by a base Control.
+// Specialized widgets may still provide their own theme handler.
+type ThemeRole int
+
+const (
+	ThemeSurface ThemeRole = iota
+	ThemeField
+	ThemeRaised
+	ThemeTransparent
+)
+
 type PaintHandler func(surface *graphics.Surface)
 type EventHandler func()
 type PointerHandler func(x, y graphics.Scalar)
@@ -19,27 +44,42 @@ type KeyHandler func(event graphics.Event)
 type Control struct {
 	form                     *Form
 	bounds                   graphics.Rect
+	dock                     DockStyle
+	dockWidth                graphics.Scalar
+	dockHeight               graphics.Scalar
+	layoutBounds             func(bounds graphics.Rect)
 	visible                  bool
 	enabled                  bool
 	tabStop                  bool
+	acceptsTab               bool
 	background               graphics.Color
 	foreground               graphics.Color
+	cursor                   graphics.Cursor
+	theme                    Theme
+	themeRole                ThemeRole
+	hasTheme                 bool
 	text                     string
 	accessibilityID          string
 	accessibilityRole        AccessibilityRole
 	accessibilityName        string
 	accessibilityDescription string
 	accessibilityMultiline   bool
+	popup                    bool
+	dismiss                  EventHandler
+	applyTheme               func(theme Theme)
 
-	Paint        PaintHandler
-	Click        EventHandler
-	PointerDown  PointerHandler
-	PointerUp    PointerHandler
-	PointerMove  PointerHandler
-	PointerWheel WheelHandler
-	TextInput    TextInputHandler
-	KeyDown      KeyHandler
-	KeyUp        KeyHandler
+	Paint         PaintHandler
+	Click         EventHandler
+	PointerDown   PointerHandler
+	PointerUp     PointerHandler
+	PointerMove   PointerHandler
+	PointerWheel  WheelHandler
+	PointerEnter  EventHandler
+	PointerLeave  EventHandler
+	PointerCursor func(x, y graphics.Scalar) graphics.Cursor
+	TextInput     TextInputHandler
+	KeyDown       KeyHandler
+	KeyUp         KeyHandler
 
 	AccessibilityValue          func() string
 	AccessibilityCheckable      bool
@@ -56,28 +96,59 @@ type Control struct {
 }
 
 func NewControl() *Control {
-	return &Control{
-		visible:    true,
-		enabled:    true,
-		tabStop:    true,
-		background: graphics.White,
-		foreground: graphics.Black,
+	control := &Control{
+		visible: true,
+		enabled: true,
+		tabStop: true,
+	}
+	control.applyBaseTheme(LightTheme())
+	return control
+}
+
+func (c *Control) applyBaseTheme(theme Theme) {
+	if c.themeRole == ThemeField {
+		applyFieldTheme(c, theme)
+	} else if c.themeRole == ThemeRaised {
+		applyRaisedTheme(c, theme)
+	} else if c.themeRole == ThemeTransparent {
+		applyTransparentTheme(c, theme)
+	} else {
+		applySurfaceTheme(c, theme)
 	}
 }
 
 func (c *Control) Bounds() graphics.Rect { return c.bounds }
+func (c *Control) Dock() DockStyle       { return c.dock }
 func (c *Control) Visible() bool         { return c.visible }
 func (c *Control) Enabled() bool         { return c.enabled }
 func (c *Control) TabStop() bool         { return c.tabStop }
+func (c *Control) AcceptsTab() bool      { return c.acceptsTab }
 func (c *Control) Background() graphics.Color {
 	return c.background
 }
 func (c *Control) Foreground() graphics.Color { return c.foreground }
+func (c *Control) Cursor() graphics.Cursor    { return c.cursor }
+func (c *Control) Theme() Theme               { return controlTheme(c) }
+func (c *Control) ThemeRole() ThemeRole       { return c.themeRole }
 func (c *Control) Text() string               { return c.text }
 func (c *Control) Form() *Form                { return c.form }
 func (c *Control) Focused() bool              { return c.form != nil && c.form.focused == c }
+func (c *Control) Hovered() bool              { return c.form != nil && c.form.hovered == c }
 
 func (c *Control) SetBounds(bounds graphics.Rect) {
+	if c == nil {
+		return
+	}
+	c.dockWidth = bounds.Width()
+	c.dockHeight = bounds.Height()
+	if c.form != nil && c.dock != DockNone {
+		c.form.performLayout()
+		return
+	}
+	c.setBoundsCore(bounds)
+}
+
+func (c *Control) setBoundsCore(bounds graphics.Rect) {
 	if c == nil || rectEqual(c.bounds, bounds) {
 		return
 	}
@@ -91,9 +162,41 @@ func (c *Control) SetBounds(bounds graphics.Rect) {
 	}
 }
 
+func (c *Control) setLayoutBounds(bounds graphics.Rect) {
+	if c.layoutBounds != nil {
+		c.layoutBounds(bounds)
+	} else {
+		c.setBoundsCore(bounds)
+	}
+}
+
+func (c *Control) setPreferredBounds(bounds graphics.Rect) {
+	if c == nil {
+		return
+	}
+	c.dockWidth = bounds.Width()
+	c.dockHeight = bounds.Height()
+}
+
+// SetDock changes the control's automatic form layout. SetBounds continues to
+// define the thickness of an edge-docked control; its other coordinates are
+// supplied by the form.
+func (c *Control) SetDock(dock DockStyle) {
+	if c == nil || dock < DockNone || dock > DockFill || c.dock == dock {
+		return
+	}
+	c.dock = dock
+	if c.form != nil {
+		c.form.performLayout()
+	}
+}
+
 func (c *Control) SetVisible(visible bool) {
 	if c == nil || c.visible == visible {
 		return
+	}
+	if !visible && c.popup && c.dismiss != nil {
+		c.dismiss()
 	}
 	if c.form != nil && c.visible {
 		c.form.Invalidate(c.bounds)
@@ -104,8 +207,14 @@ func (c *Control) SetVisible(visible bool) {
 	if !visible && c.form != nil && c.form.focused == c {
 		c.form.focused = nil
 	}
+	if !visible && c.form != nil && c.form.hovered == c {
+		c.form.setHovered(nil)
+	}
 	if c.form != nil && c.visible {
 		c.form.Invalidate(c.bounds)
+	}
+	if c.form != nil && c.dock != DockNone {
+		c.form.performLayout()
 	}
 }
 
@@ -113,7 +222,21 @@ func (c *Control) SetEnabled(enabled bool) {
 	if c == nil || c.enabled == enabled {
 		return
 	}
+	if !enabled && c.popup && c.dismiss != nil {
+		c.dismiss()
+	}
 	c.enabled = enabled
+	if !enabled && c.form != nil {
+		if c.form.focused == c {
+			c.form.focused = nil
+		}
+		if c.form.pressed == c {
+			c.form.pressed = nil
+		}
+		if c.form.hovered == c {
+			c.form.setHovered(nil)
+		}
+	}
 	c.AccessibilityChanged()
 	c.AccessibilityChildrenChanged()
 	c.Invalidate()
@@ -125,6 +248,24 @@ func (c *Control) SetTabStop(tabStop bool) {
 	}
 	c.tabStop = tabStop
 	c.AccessibilityChanged()
+}
+
+// SetAcceptsTab lets an editing control consume an unmodified Tab key. Other
+// controls leave Tab to the form's normal focus traversal.
+func (c *Control) SetAcceptsTab(accepts bool) {
+	if c == nil || c.acceptsTab == accepts {
+		return
+	}
+	c.acceptsTab = accepts
+	c.AccessibilityChanged()
+}
+
+func (c *Control) SetThemeRole(role ThemeRole) {
+	if c == nil || role < ThemeSurface || role > ThemeTransparent || c.themeRole == role {
+		return
+	}
+	c.themeRole = role
+	c.ApplyTheme(c.Theme())
 }
 
 func (c *Control) SetBackground(color graphics.Color) {
@@ -141,6 +282,40 @@ func (c *Control) SetForeground(color graphics.Color) {
 	}
 	c.foreground = color
 	c.Invalidate()
+}
+
+func (c *Control) SetCursor(cursor graphics.Cursor) {
+	if c != nil {
+		c.cursor = cursor
+	}
+}
+
+// SetThemeHandler lets an application-defined control map Theme fields onto
+// its own properties. The current standalone or form theme is applied
+// immediately, then reapplied on every form-level theme change.
+func (c *Control) SetThemeHandler(handler func(theme Theme)) {
+	if c == nil {
+		return
+	}
+	if handler == nil {
+		c.applyTheme = nil
+	} else {
+		c.applyTheme = handler
+	}
+	c.ApplyTheme(c.Theme())
+}
+
+func (c *Control) ApplyTheme(theme Theme) {
+	if c == nil {
+		return
+	}
+	c.theme = theme
+	c.hasTheme = true
+	if c.applyTheme == nil {
+		c.applyBaseTheme(theme)
+	} else {
+		c.applyTheme(theme)
+	}
 }
 
 func (c *Control) SetText(text string) {
@@ -175,7 +350,12 @@ type Form struct {
 	invalid                         []graphics.Rect
 	focused                         *Control
 	pressed                         *Control
+	hovered                         *Control
 	menuBar                         *MenuBar
+	dockClient                      graphics.Rect
+	layingOut                       bool
+	theme                           Theme
+	themeApplied                    bool
 	accessibilityRevision           int
 	accessibilityNextID             int
 	accessibilityReset              bool
@@ -198,12 +378,17 @@ func (f *Form) Initialize(width, height int) {
 	}
 	f.width = width
 	f.height = height
-	f.background = graphics.RGBA(248, 249, 251, 255)
+	f.theme = LightTheme()
+	f.background = f.theme.Window
 	f.controls = nil
 	f.invalid = nil
 	f.focused = nil
 	f.pressed = nil
+	f.hovered = nil
 	f.menuBar = nil
+	f.dockClient = f.clientRect()
+	f.layingOut = false
+	f.themeApplied = false
 	f.accessibilityRevision = 0
 	f.accessibilityNextID = 1
 	f.accessibilityReset = true
@@ -235,6 +420,7 @@ func (f *Form) SetClientSize(width, height int) {
 	old := f.clientRect()
 	f.width = width
 	f.height = height
+	f.performLayout()
 	f.Invalidate(old)
 	f.Invalidate(f.clientRect())
 }
@@ -246,10 +432,14 @@ func (f *Form) Add(control *Control) {
 	if control.form != nil {
 		control.form.Remove(control)
 	}
+	if f.themeApplied {
+		control.ApplyTheme(f.theme)
+	}
 	control.form = f
 	control.accessibilityID = f.uniqueAccessibilityID(control, control.accessibilityID)
 	f.controls = append(f.controls, control)
 	f.markAccessibilityChanged(control)
+	f.performLayout()
 	if control.visible {
 		f.Invalidate(control.bounds)
 	}
@@ -278,11 +468,80 @@ func (f *Form) Remove(control *Control) {
 		if f.pressed == control {
 			f.pressed = nil
 		}
+		if f.hovered == control {
+			f.setHovered(nil)
+		}
 		if f.menuBar != nil && control == &f.menuBar.Control {
 			f.menuBar = nil
 		}
+		f.performLayout()
 		return
 	}
+}
+
+// DockClientBounds returns the client-space rectangle left after laying out
+// visible edge-docked controls. It is useful when a form combines docking with
+// bespoke pane layout.
+func (f *Form) DockClientBounds() graphics.Rect {
+	if f == nil {
+		return graphics.Rect{}
+	}
+	return f.dockClient
+}
+
+func (f *Form) performLayout() {
+	if f == nil || f.layingOut {
+		return
+	}
+	f.layingOut = true
+	remaining := f.clientRect()
+	for i := 0; i < len(f.controls); i++ {
+		control := f.controls[i]
+		if control == nil || !control.visible || control.dock == DockNone || control.dock == DockFill {
+			continue
+		}
+		bounds := remaining
+		if control.dock == DockTop || control.dock == DockBottom {
+			height := control.dockHeight
+			if height < 0 {
+				height = 0
+			}
+			if height > remaining.Height() {
+				height = remaining.Height()
+			}
+			if control.dock == DockTop {
+				bounds.MaxY = bounds.MinY + height
+				remaining.MinY += height
+			} else {
+				bounds.MinY = bounds.MaxY - height
+				remaining.MaxY -= height
+			}
+		} else {
+			width := control.dockWidth
+			if width < 0 {
+				width = 0
+			}
+			if width > remaining.Width() {
+				width = remaining.Width()
+			}
+			if control.dock == DockLeft {
+				bounds.MaxX = bounds.MinX + width
+				remaining.MinX += width
+			} else {
+				bounds.MinX = bounds.MaxX - width
+				remaining.MaxX -= width
+			}
+		}
+		control.setLayoutBounds(bounds)
+	}
+	for i := 0; i < len(f.controls); i++ {
+		control := f.controls[i]
+		if control != nil && control.visible && control.dock == DockFill {
+			control.setLayoutBounds(remaining)
+		}
+	}
+	f.dockClient = remaining
+	f.layingOut = false
 }
 
 func (f *Form) Controls() []*Control {
@@ -292,6 +551,20 @@ func (f *Form) Controls() []*Control {
 	controls := make([]*Control, len(f.controls))
 	copy(controls, f.controls)
 	return controls
+}
+
+func (f *Form) CursorAt(x, y graphics.Scalar) graphics.Cursor {
+	if f == nil {
+		return graphics.CursorArrow
+	}
+	control := f.hitTest(x, y)
+	if control == nil {
+		return graphics.CursorArrow
+	}
+	if control.PointerCursor != nil {
+		return control.PointerCursor(x-control.bounds.MinX, y-control.bounds.MinY)
+	}
+	return control.cursor
 }
 
 // SetMenuBar registers the form's application menu for global shortcut and
@@ -364,7 +637,13 @@ func (f *Form) Paint(surface *graphics.Surface) bool {
 		}
 		for j := 0; j < len(f.controls); j++ {
 			control := f.controls[j]
-			if control.visible && control.Paint != nil && rectIntersects(control.bounds, dirty) {
+			if !control.popup && control.visible && control.Paint != nil && rectIntersects(control.bounds, dirty) {
+				control.Paint(surface)
+			}
+		}
+		for j := 0; j < len(f.controls); j++ {
+			control := f.controls[j]
+			if control.popup && control.visible && control.Paint != nil && rectIntersects(control.bounds, dirty) {
 				control.Paint(surface)
 			}
 		}
@@ -385,6 +664,12 @@ func (f *Form) Dispatch(event graphics.Event) {
 		f.performAccessibilityAction(id, AccessibilityAction(event.Key), value)
 		return
 	}
+	if event.Type == graphics.EventWindowFocusLost {
+		f.DismissTransientUI()
+		f.pressed = nil
+		f.setHovered(nil)
+		return
+	}
 	if event.Type == graphics.EventWindowResize {
 		f.SetClientSize(int(event.Dirty.Width()), int(event.Dirty.Height()))
 		if f.Resize != nil {
@@ -398,6 +683,8 @@ func (f *Form) Dispatch(event graphics.Event) {
 	}
 	if event.Type == graphics.EventPointerDown {
 		control := f.hitTest(event.X, event.Y)
+		f.setHovered(control)
+		f.dismissPopupsExcept(control)
 		if f.menuBar != nil && control != &f.menuBar.Control {
 			f.menuBar.dismiss()
 		}
@@ -412,6 +699,7 @@ func (f *Form) Dispatch(event graphics.Event) {
 	}
 	if event.Type == graphics.EventPointerUp {
 		hit := f.hitTest(event.X, event.Y)
+		f.setHovered(hit)
 		control := f.pressed
 		if control == nil {
 			control = hit
@@ -426,13 +714,20 @@ func (f *Form) Dispatch(event graphics.Event) {
 		return
 	}
 	if event.Type == graphics.EventPointerMove {
+		hit := f.hitTest(event.X, event.Y)
+		f.setHovered(hit)
 		control := f.pressed
 		if control == nil {
-			control = f.hitTest(event.X, event.Y)
+			control = hit
 		}
 		if control != nil && control.PointerMove != nil {
 			control.PointerMove(event.X-control.bounds.MinX, event.Y-control.bounds.MinY)
 		}
+		return
+	}
+	if event.Type == graphics.EventPointerLeave {
+		f.setHovered(nil)
+		f.DismissTransientUI()
 		return
 	}
 	if event.Type == graphics.EventPointerWheel {
@@ -446,6 +741,14 @@ func (f *Form) Dispatch(event graphics.Event) {
 		if f.menuBar != nil && f.menuBar.Visible() && f.menuBar.Enabled() && f.menuBar.commandKey(event) {
 			return
 		}
+		if event.Key == graphics.KeyTab && event.Modifiers&(graphics.ModifierControl|graphics.ModifierAlt|graphics.ModifierCommand) == 0 && (f.focused == nil || !f.focused.acceptsTab) {
+			f.DismissTransientUI()
+			f.moveFocus(event.Modifiers&graphics.ModifierShift == 0)
+			return
+		}
+	}
+	if event.Type == graphics.EventTextInput && f.menuBar != nil && f.menuBar.Visible() && f.menuBar.Enabled() && f.menuBar.commandText(event.Text) {
+		return
 	}
 	if f.focused == nil {
 		return
@@ -461,6 +764,48 @@ func (f *Form) Dispatch(event graphics.Event) {
 	}
 	if event.Type == graphics.EventKeyUp && f.focused.KeyUp != nil {
 		f.focused.KeyUp(event)
+	}
+}
+
+// DismissTransientUI closes menus and drop-downs without disturbing the
+// control that owns keyboard focus. Hosts call it when the application loses
+// activation, and applications may use it before presenting modal UI.
+func (f *Form) DismissTransientUI() {
+	if f == nil {
+		return
+	}
+	f.dismissPopupsExcept(nil)
+	if f.menuBar != nil {
+		f.menuBar.dismiss()
+	}
+}
+
+func (f *Form) moveFocus(forward bool) {
+	if f == nil || len(f.controls) == 0 {
+		return
+	}
+	start := -1
+	for i := 0; i < len(f.controls); i++ {
+		if f.controls[i] == f.focused {
+			start = i
+			break
+		}
+	}
+	direction := -1
+	if forward {
+		direction = 1
+	}
+	index := start
+	if start < 0 && !forward {
+		index = 0
+	}
+	for count := 0; count < len(f.controls); count++ {
+		index = (index + direction + len(f.controls)) % len(f.controls)
+		control := f.controls[index]
+		if control.visible && control.enabled && control.tabStop {
+			f.setFocused(control)
+			return
+		}
 	}
 }
 
@@ -484,14 +829,49 @@ func (f *Form) setFocused(control *Control) {
 	}
 }
 
+func (f *Form) setHovered(control *Control) {
+	if f == nil || f.hovered == control {
+		return
+	}
+	old := f.hovered
+	f.hovered = control
+	if old != nil {
+		if old.PointerLeave != nil {
+			old.PointerLeave()
+		}
+		old.Invalidate()
+	}
+	if control != nil {
+		if control.PointerEnter != nil {
+			control.PointerEnter()
+		}
+		control.Invalidate()
+	}
+}
+
 func (f *Form) hitTest(x, y graphics.Scalar) *Control {
 	for i := len(f.controls) - 1; i >= 0; i-- {
 		control := f.controls[i]
-		if control.visible && control.enabled && pointInRect(x, y, control.bounds) {
+		if control.popup && control.visible && control.enabled && pointInRect(x, y, control.bounds) {
+			return control
+		}
+	}
+	for i := len(f.controls) - 1; i >= 0; i-- {
+		control := f.controls[i]
+		if !control.popup && control.visible && control.enabled && pointInRect(x, y, control.bounds) {
 			return control
 		}
 	}
 	return nil
+}
+
+func (f *Form) dismissPopupsExcept(keep *Control) {
+	for i := 0; i < len(f.controls); i++ {
+		control := f.controls[i]
+		if control != keep && control.popup && control.dismiss != nil {
+			control.dismiss()
+		}
+	}
 }
 
 func (f *Form) clientRect() graphics.Rect {

@@ -115,6 +115,7 @@ func lowerFunctionValuesCore(program *unit.Program, transient bool) bool {
 		}
 	}
 	generated := functionValueGeneratedText(signatures, closures)
+	originalLength := len(program.Text)
 	if transient {
 		renvo_runtime_ArenaDiscardLinkTokens(program.Tokens)
 	}
@@ -125,12 +126,12 @@ func lowerFunctionValuesCore(program *unit.Program, transient bool) bool {
 	if len(text) > 0 && text[len(text)-1] != '\n' {
 		text = append(text, '\n')
 	}
+	generatedStart := len(text)
 	text = appendFunctionValueString(text, generated)
 	if transient {
 		arena.DiscardBytes(program.Text)
 	}
-	ok = reparseFunctionValueProgram(program, text)
-	return ok
+	return reparseFunctionValueProgram(program, text, edits, originalLength, generatedStart)
 }
 
 func lowerDeferredBuiltins(program *unit.Program, transient bool) bool {
@@ -200,6 +201,7 @@ func lowerDeferredBuiltins(program *unit.Program, transient bool) bool {
 	if len(edits) == 0 {
 		return true
 	}
+	originalLength := len(program.Text)
 	if transient {
 		renvo_runtime_ArenaDiscardLinkTokens(program.Tokens)
 	}
@@ -210,8 +212,7 @@ func lowerDeferredBuiltins(program *unit.Program, transient bool) bool {
 	if transient {
 		arena.DiscardBytes(program.Text)
 	}
-	ok = reparseFunctionValueProgram(program, text)
-	return ok
+	return ok && reparseFunctionValueProgram(program, text, edits, originalLength, -1)
 }
 
 func deferredBuiltinArgumentType(program *unit.Program, before int, start int, end int) string {
@@ -921,14 +922,7 @@ func functionValueCaptures(program *unit.Program, literalStart int, bodyOpen int
 }
 
 func functionValueEnclosingLocalType(program *unit.Program, before int, name string) string {
-	fnIndex := -1
-	for i := 0; i < len(program.Funcs); i++ {
-		fn := program.Funcs[i]
-		if fn.BodyStart < before && before < fn.BodyEnd {
-			fnIndex = i
-			break
-		}
-	}
+	fnIndex := functionValueEnclosingFunc(program, before)
 	if fnIndex < 0 {
 		return ""
 	}
@@ -1000,6 +994,26 @@ func functionValueDeclaredType(program *unit.Program, name string) bool {
 		}
 	}
 	return false
+}
+
+func functionValueEnclosingFunc(program *unit.Program, token int) int {
+	low := 0
+	high := len(program.Funcs)
+	for low < high {
+		middle := low + (high-low)/2
+		if program.Funcs[middle].BodyStart < token {
+			low = middle + 1
+		} else {
+			high = middle
+		}
+	}
+	if low > 0 {
+		candidate := low - 1
+		if token < program.Funcs[candidate].BodyEnd {
+			return candidate
+		}
+	}
+	return -1
 }
 
 func functionValueDeclaredFunctionResultType(program *unit.Program, name string) string {
@@ -1088,7 +1102,7 @@ func appendFunctionValuePackageEdits(program *unit.Program, edits []functionValu
 	return edits
 }
 
-func reparseFunctionValueProgram(original *unit.Program, text []byte) bool {
+func reparseFunctionValueProgram(original *unit.Program, text []byte, edits []functionValueEdit, originalLength int, generatedStart int) bool {
 	file := syntax.ParseFile(text)
 	if !file.Ok {
 		return false
@@ -1128,8 +1142,109 @@ func reparseFunctionValueProgram(original *unit.Program, text []byte) bool {
 		}
 		out.Funcs = append(out.Funcs, unit.Func{NameStart: name.Start, NameEnd: name.End, StartTok: tokenMap[fn.StartTok], NameTok: tokenMap[fn.NameTok], ReceiverStart: receiverStart, ReceiverEnd: receiverEnd, BodyStart: tokenMap[fn.BodyStart], BodyEnd: tokenMap[fn.BodyEnd], EndTok: tokenMap[fn.EndTok]})
 	}
+	out.Packages = remapFunctionValuePackages(original, &out, edits, originalLength, generatedStart)
 	replaceFunctionValueProgram(original, &out)
 	return true
+}
+
+func remapFunctionValuePackages(original *unit.Program, reparsed *unit.Program, edits []functionValueEdit, originalLength int, generatedStart int) []unit.PackageInfo {
+	if len(original.Packages) == 0 {
+		return nil
+	}
+	packages := make([]unit.PackageInfo, 0, len(original.Packages)+1)
+	root := -1
+	for i := 0; i < len(original.Packages); i++ {
+		item := original.Packages[i]
+		item.TextStart = mapFunctionValueOffset(item.TextStart, edits, originalLength)
+		item.TextEnd = mapFunctionValueOffset(item.TextEnd, edits, originalLength)
+		setFunctionValuePackageTableRanges(&item, reparsed)
+		if item.ImportPath == original.ImportPath {
+			root = len(packages)
+		}
+		packages = append(packages, item)
+	}
+	if generatedStart >= 0 && generatedStart < len(reparsed.Text) && root >= 0 {
+		if packages[root].TextEnd == generatedStart {
+			packages[root].TextEnd = len(reparsed.Text)
+			setFunctionValuePackageTableRanges(&packages[root], reparsed)
+		} else {
+			generated := packages[root]
+			generated.TextStart = generatedStart
+			generated.TextEnd = len(reparsed.Text)
+			setFunctionValuePackageTableRanges(&generated, reparsed)
+			packages = append(packages, generated)
+		}
+	}
+	return packages
+}
+
+func mapFunctionValueOffset(position int, edits []functionValueEdit, sourceLength int) int {
+	if position < 0 {
+		return 0
+	}
+	if position > sourceLength {
+		position = sourceLength
+	}
+	delta := 0
+	for i := 0; i < len(edits); i++ {
+		edit := edits[i]
+		if position < edit.start {
+			break
+		}
+		if position < edit.end {
+			return edit.start + delta
+		}
+		delta += len(edit.text) - (edit.end - edit.start)
+	}
+	return position + delta
+}
+
+func setFunctionValuePackageTableRanges(item *unit.PackageInfo, program *unit.Program) {
+	item.TokenStart, item.TokenEnd = functionValueTokenRangeForText(program.Tokens, item.TextStart, item.TextEnd)
+	item.DeclStart, item.DeclEnd = functionValueDeclRangeForText(program.Decls, item.TextStart, item.TextEnd)
+	item.FuncStart, item.FuncEnd = functionValueFuncRangeForText(program.Funcs, item.TextStart, item.TextEnd)
+}
+
+func functionValueTokenRangeForText(items []unit.Token, start int, end int) (int, int) {
+	first := len(items)
+	last := len(items)
+	for i := 0; i < len(items); i++ {
+		if items[i].Start >= start && items[i].Start < end {
+			if first == len(items) {
+				first = i
+			}
+			last = i + 1
+		}
+	}
+	return first, last
+}
+
+func functionValueDeclRangeForText(items []unit.Decl, start int, end int) (int, int) {
+	first := len(items)
+	last := len(items)
+	for i := 0; i < len(items); i++ {
+		if items[i].NameStart >= start && items[i].NameStart < end {
+			if first == len(items) {
+				first = i
+			}
+			last = i + 1
+		}
+	}
+	return first, last
+}
+
+func functionValueFuncRangeForText(items []unit.Func, start int, end int) (int, int) {
+	first := len(items)
+	last := len(items)
+	for i := 0; i < len(items); i++ {
+		if items[i].NameStart >= start && items[i].NameStart < end {
+			if first == len(items) {
+				first = i
+			}
+			last = i + 1
+		}
+	}
+	return first, last
 }
 
 func functionValueTokenIsEllipsis(src []byte, tok syntax.Token) bool {
@@ -1283,10 +1398,58 @@ func functionValueSelectorFieldBefore(program *unit.Program, before int) int {
 
 func functionValueSelectorStart(program *unit.Program, end int) int {
 	start := end
-	for start >= 2 && functionValueTokenEquals(program, start-1, ".") && program.Tokens[start-2].KindLine&255 == unit.TokenIdent {
-		start -= 2
+	for start >= 2 && functionValueTokenEquals(program, start-1, ".") {
+		start = functionValuePrimaryStart(program, start-2)
+		if start < 0 {
+			return -1
+		}
 	}
 	return start
+}
+
+func functionValuePrimaryStart(program *unit.Program, end int) int {
+	if end < 0 || end >= len(program.Tokens) {
+		return -1
+	}
+	start := end
+	if functionValueTokenEquals(program, end, "]") {
+		open := functionValueFindMatchingBackward(program, end, "[", "]")
+		if open <= 0 {
+			return -1
+		}
+		start = functionValuePrimaryStart(program, open-1)
+	} else if functionValueTokenEquals(program, end, ")") {
+		open := functionValueFindMatchingBackward(program, end, "(", ")")
+		if open < 0 {
+			return -1
+		}
+		start = open
+		if open > 0 && (program.Tokens[open-1].KindLine&255 == unit.TokenIdent || functionValueTokenEquals(program, open-1, "]") || functionValueTokenEquals(program, open-1, ")")) {
+			start = functionValuePrimaryStart(program, open-1)
+		}
+	}
+	for start >= 2 && functionValueTokenEquals(program, start-1, ".") {
+		start = functionValuePrimaryStart(program, start-2)
+		if start < 0 {
+			return -1
+		}
+	}
+	return start
+}
+
+func functionValueFindMatchingBackward(program *unit.Program, close int, openText string, closeText string) int {
+	depth := 0
+	for i := close; i >= 0; i-- {
+		if functionValueTokenEquals(program, i, closeText) {
+			depth++
+		} else if functionValueTokenEquals(program, i, openText) {
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 func functionValueUniqueFieldByName(fields []functionValueField, name string) int {
@@ -1338,6 +1501,17 @@ func functionValueFieldForSelector(program *unit.Program, fieldTok int, fields [
 	if fieldTok < 2 {
 		return -1
 	}
+	name := functionValueTokenText(program, fieldTok)
+	possible := false
+	for i := 0; i < len(fields); i++ {
+		if fields[i].name == name {
+			possible = true
+			break
+		}
+	}
+	if !possible {
+		return -1
+	}
 	selectorStart := functionValueSelectorStart(program, fieldTok)
 	if selectorStart < 0 || selectorStart >= fieldTok {
 		return -1
@@ -1345,24 +1519,72 @@ func functionValueFieldForSelector(program *unit.Program, fieldTok int, fields [
 	baseType := functionValueEnclosingLocalType(program, fieldTok, functionValueTokenText(program, selectorStart))
 	baseType = functionValueBareType(baseType)
 	if baseType == "" {
-		return functionValueUniqueFieldByName(fields, functionValueTokenText(program, fieldTok))
+		return functionValueUniqueFieldByName(fields, name)
 	}
-	for i := selectorStart + 2; i < fieldTok; i += 2 {
-		if !functionValueTokenEquals(program, i-1, ".") {
-			return -1
+	for i := selectorStart + 1; i < fieldTok-1; {
+		if functionValueTokenEquals(program, i, "[") {
+			close := functionValueFindMatching(program, i, "[", "]")
+			if close < 0 || close >= fieldTok {
+				return -1
+			}
+			baseType = functionValueElementType(baseType)
+			i = close + 1
+			continue
 		}
-		baseType = functionValueBareType(functionValueStructFieldType(program, baseType, functionValueTokenText(program, i)))
-		if baseType == "" {
-			return -1
+		if functionValueTokenEquals(program, i, ".") && i+1 < fieldTok {
+			baseType = functionValueBareType(functionValueStructFieldType(program, baseType, functionValueTokenText(program, i+1)))
+			if baseType == "" {
+				return -1
+			}
+			i += 2
+			continue
 		}
+		return -1
 	}
-	name := functionValueTokenText(program, fieldTok)
+	// A method declared on the selected type wins over a field promoted from
+	// an embedded struct at a greater selector depth. Treating the promoted
+	// callback as the selected member rewrites an ordinary method call into a
+	// call through the embedded function field.
+	if functionValueTypeHasDirectMethod(program, baseType, name) {
+		return -1
+	}
 	for i := 0; i < len(fields); i++ {
 		if fields[i].name == name && functionValueTypeEmbeds(program, baseType, fields[i].owner, 0) {
 			return i
 		}
 	}
 	return -1
+}
+
+func functionValueTypeHasDirectMethod(program *unit.Program, typ string, name string) bool {
+	typ = functionValueBareType(typ)
+	for i := 0; i < len(program.Funcs); i++ {
+		fn := program.Funcs[i]
+		if fn.ReceiverStart >= fn.ReceiverEnd || functionValueTokenText(program, fn.NameTok) != name {
+			continue
+		}
+		if functionValueBareType(functionValueReceiverType(program, fn)) == typ {
+			return true
+		}
+	}
+	return false
+}
+
+func functionValueElementType(typ string) string {
+	for len(typ) > 0 && typ[0] == '*' {
+		typ = typ[1:]
+	}
+	if len(typ) >= 2 && typ[0] == '[' && typ[1] == ']' {
+		return functionValueBareType(typ[2:])
+	}
+	if len(typ) > 1 && typ[0] == '[' {
+		for i := 1; i < len(typ); i++ {
+			if typ[i] == ']' {
+				return functionValueBareType(typ[i+1:])
+			}
+		}
+	}
+	return ""
 }
 
 func functionValueStructFieldType(program *unit.Program, owner string, fieldName string) string {
@@ -1395,6 +1617,19 @@ func functionValueStructFieldType(program *unit.Program, owner string, fieldName
 			}
 			if functionValueTokenEquals(program, j, fieldName) && j+1 < lineEnd {
 				return functionValueTokensText(program, j+1, lineEnd)
+			}
+			typeEnd := functionValueTypeEnd(program, j)
+			if typeEnd == lineEnd {
+				nameTok := j
+				if functionValueTokenEquals(program, nameTok, "*") {
+					nameTok++
+				}
+				if functionValueTokenEquals(program, nameTok+1, ".") && nameTok+2 < lineEnd {
+					nameTok += 2
+				}
+				if functionValueTokenEquals(program, nameTok, fieldName) {
+					return functionValueTokensText(program, j, lineEnd)
+				}
 			}
 			j = lineEnd
 		}
@@ -1498,11 +1733,21 @@ func functionValueTokenCanStartType(program *unit.Program, tok int) bool {
 }
 
 func functionValueTokenAtSpan(program *unit.Program, start int, end int) int {
-	for i := 0; i < len(program.Tokens); i++ {
-		tok := program.Tokens[i]
-		if tok.Start == start && tok.Start+tok.Size == end {
-			return i
+	low := 0
+	high := len(program.Tokens)
+	for low < high {
+		middle := low + (high-low)/2
+		if program.Tokens[middle].Start < start {
+			low = middle + 1
+		} else {
+			high = middle
 		}
+	}
+	for low < len(program.Tokens) && program.Tokens[low].Start == start {
+		if program.Tokens[low].Start+program.Tokens[low].Size == end {
+			return low
+		}
+		low++
 	}
 	return -1
 }

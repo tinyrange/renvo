@@ -8,25 +8,63 @@ import (
 	"renvo.dev/std/process"
 )
 
-func compileIDEProject(root, output, target string, env []string) projectActionResult {
+type ideBuildSession struct {
+	compiler *driver.RenvoCommandSession
+	output   string
+	done     bool
+	result   projectActionResult
+}
+
+func beginCompileIDEProject(root, output, target string, env []string) *ideBuildSession {
+	session := &ideBuildSession{output: output}
 	if target == "" {
-		return projectActionResult{message: "Build failed: select a Renvo target.", ok: false}
+		session.done = true
+		session.result = projectActionResult{message: "Build failed: select a Renvo target.", ok: false}
+		return session
 	}
 	args := []string{"renvo", "-t", target, "-s", "-o", output, "."}
-	buildEnv := projectEnvironment(env, root)
-	status, diagnostic := driver.RunRenvoCommandCapture(args, buildEnv)
+	session.compiler = driver.BeginRenvoCommand(args, projectEnvironment(env, root))
+	return session
+}
+
+func (s *ideBuildSession) Step() (bool, projectActionResult) {
+	if s == nil {
+		return true, projectActionResult{message: "Build failed: compiler session is unavailable.", ok: false}
+	}
+	if s.done {
+		return true, s.result
+	}
+	if !s.compiler.Step() {
+		return false, projectActionResult{}
+	}
+	status, diagnostic := s.compiler.Result()
 	if status != 0 {
 		if diagnostic == "" {
 			diagnostic = "Build failed."
 		}
-		return projectActionResult{message: diagnostic, ok: false}
+		s.result = projectActionResult{message: diagnostic, ok: false}
+		s.done = true
+		return true, s.result
 	}
-	file, err := renvoos.Open(output)
+	file, err := renvoos.Open(s.output)
 	if err != nil {
-		return projectActionResult{message: "Build failed: the compiler did not create " + output + ".", ok: false}
+		s.result = projectActionResult{message: "Build failed: the compiler did not create " + s.output + ".", ok: false}
+	} else {
+		file.Close()
+		s.result = projectActionResult{message: "Build succeeded: " + s.output, ok: true}
 	}
-	file.Close()
-	return projectActionResult{message: "Build succeeded: " + output, ok: true}
+	s.done = true
+	return true, s.result
+}
+
+func compileIDEProject(root, output, target string, env []string) projectActionResult {
+	session := beginCompileIDEProject(root, output, target, env)
+	for {
+		done, result := session.Step()
+		if done {
+			return result
+		}
+	}
 }
 
 func defaultIDETarget() string { return currentIDETarget() }

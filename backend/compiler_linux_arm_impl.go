@@ -83,6 +83,9 @@ func renvoTryCompileScalarProgramArm(p *renvoProgram, meta *renvoMeta) renvoComp
 		var result renvoCompileResult
 		return result
 	}
+	g.objectContextA, g.objectContextB = renvoObjectContextHash(&g)
+	renvoObjectInitializeFunctionIdentities(&g)
+	g.objectDataBase = len(a.data)
 	if !renvoEmitProgramEntryArgsArm(&g, appIndex) {
 		var result renvoCompileResult
 		return result
@@ -97,7 +100,7 @@ func renvoTryCompileScalarProgramArm(p *renvoProgram, meta *renvoMeta) renvoComp
 	renvoAsmSyscall(a)
 	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
 		i := g.funcQueue[queueIndex]
-		if !renvoEmitScalarFunctionScratch(&g, i) {
+		if !renvoEmitScalarFunctionObjectCached(&g, i) {
 			var result renvoCompileResult
 			return result
 		}

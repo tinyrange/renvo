@@ -46,7 +46,8 @@
     {"name":"TypeIfaces","number":28,"role":"child","required":false,"payload":"counted","record":"TypeIface"},
     {"name":"Methods","number":29,"role":"child","required":false,"payload":"counted","record":"MethodInfo"},
     {"name":"TypeFuncs","number":30,"role":"child","required":false,"payload":"counted","record":"TypeFuncSig"},
-    {"name":"Stmts","number":31,"role":"child","required":false,"payload":"counted","record":"Statement"}
+    {"name":"Stmts","number":31,"role":"child","required":false,"payload":"counted","record":"Statement"},
+    {"name":"Packages","number":32,"role":"child","required":false,"payload":"counted","record":"PackageInfo"}
   ],
   "records": [
     {"name":"Token","fields":[{"name":"kind","encoding":"uvarint"},{"name":"start","encoding":"uvarint delta from previous start"},{"name":"size","encoding":"uvarint"},{"name":"line","encoding":"uvarint delta from previous line"}]},
@@ -74,6 +75,7 @@
     {"name":"Return","fields":[{"name":"func_index","encoding":"uvarint"},{"name":"tokens","encoding":"token span"},{"name":"values","encoding":"counted ExprSpan"}]},
     {"name":"Call","fields":[{"name":"owner_kind","encoding":"uvarint"},{"name":"owner_index","encoding":"uvarint"},{"name":"kind","encoding":"uvarint"},{"name":"callee_tok","encoding":"uvarint"},{"name":"base_tok","encoding":"uvarint"},{"name":"dot_tok","encoding":"uvarint"},{"name":"arguments","encoding":"token span"},{"name":"args","encoding":"counted ExprSpan"}]},
     {"name":"NameRef","fields":[{"name":"owner_kind","encoding":"uvarint"},{"name":"owner_index","encoding":"uvarint"},{"name":"kind","encoding":"uvarint"},{"name":"token","encoding":"uvarint"},{"name":"index","encoding":"nullable uvarint"},{"name":"package","encoding":"nullable uvarint"}]},
-    {"name":"Selector","fields":[{"name":"owner_kind","encoding":"uvarint"},{"name":"owner_index","encoding":"uvarint"},{"name":"kind","encoding":"uvarint"},{"name":"base_tok","encoding":"uvarint"},{"name":"dot_tok","encoding":"uvarint"},{"name":"name_tok","encoding":"uvarint"},{"name":"base_kind","encoding":"uvarint"},{"name":"base_index","encoding":"nullable uvarint"},{"name":"base_package","encoding":"nullable uvarint"},{"name":"package","encoding":"nullable uvarint"},{"name":"symbol","encoding":"nullable uvarint"}]}
+    {"name":"Selector","fields":[{"name":"owner_kind","encoding":"uvarint"},{"name":"owner_index","encoding":"uvarint"},{"name":"kind","encoding":"uvarint"},{"name":"base_tok","encoding":"uvarint"},{"name":"dot_tok","encoding":"uvarint"},{"name":"name_tok","encoding":"uvarint"},{"name":"base_kind","encoding":"uvarint"},{"name":"base_index","encoding":"nullable uvarint"},{"name":"base_package","encoding":"nullable uvarint"},{"name":"package","encoding":"nullable uvarint"},{"name":"symbol","encoding":"nullable uvarint"}]},
+    {"name":"PackageInfo","fields":[{"name":"name","encoding":"length-prefixed bytes"},{"name":"import_path","encoding":"length-prefixed bytes"},{"name":"graph_key_a","encoding":"u32"},{"name":"graph_key_b","encoding":"u32"},{"name":"source_key_a","encoding":"u32"},{"name":"source_key_b","encoding":"u32"},{"name":"text","encoding":"byte span: start, length"},{"name":"tokens","encoding":"token span: start, length"},{"name":"decls","encoding":"table span: start, length"},{"name":"funcs","encoding":"table span: start, length"}]}
   ]
 }

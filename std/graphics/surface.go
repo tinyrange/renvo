@@ -28,6 +28,7 @@ type Surface struct {
 	transformD         Scalar
 	transformTX        Scalar
 	transformTY        Scalar
+	deviceScale        Scalar
 	transforms         []Mat2x3
 	transformComplex   bool
 	transformComplexes []bool
@@ -150,6 +151,7 @@ func (s *Surface) reset(width, height int) {
 		s.dirtyRects = append(s.dirtyRects, s.dirty)
 	}
 	s.damageDepth = 0
+	s.deviceScale = 1.0
 	s.ResetTransform()
 	s.clips = nil
 	s.transforms = nil
@@ -190,7 +192,7 @@ func (s *Surface) BeginDamage(rect Rect) {
 	if s == nil {
 		return
 	}
-	region := pixelRect{minX: scalarFloor(rect.MinX), minY: scalarFloor(rect.MinY), maxX: scalarCeil(rect.MaxX), maxY: scalarCeil(rect.MaxY)}
+	region := s.transformedPixelRect(rect)
 	region = intersectPixelRect(pixelRect{maxX: s.Width, maxY: s.Height}, region)
 	if region.maxX > region.minX && region.maxY > region.minY {
 		s.markDirtyRect(region)
@@ -355,7 +357,7 @@ func (s *Surface) SetTranslation(x, y Scalar) {
 }
 
 func (s *Surface) transformIsIdentity() bool {
-	return s.transformA == 1.0 && s.transformB == 0.0 && s.transformC == 0.0 && s.transformD == 1.0 && s.transformTX == 0.0 && s.transformTY == 0.0
+	return s.deviceScale == 1.0 && s.transformA == 1.0 && s.transformB == 0.0 && s.transformC == 0.0 && s.transformD == 1.0 && s.transformTX == 0.0 && s.transformTY == 0.0
 }
 
 func (s *Surface) transformPoint(p Point) Point {
@@ -367,8 +369,15 @@ func (s *Surface) TransformPoint(point Point) Point { return s.transformPoint(po
 
 func (s *Surface) transformPointInPlace(p *Point) {
 	x, y := p.X, p.Y
-	p.X = s.transformA*x + s.transformC*y + s.transformTX
-	p.Y = s.transformB*x + s.transformD*y + s.transformTY
+	p.X = (s.transformA*x + s.transformC*y + s.transformTX) * s.deviceScale
+	p.Y = (s.transformB*x + s.transformD*y + s.transformTY) * s.deviceScale
+}
+
+func (s *Surface) setDeviceScale(scale Scalar) {
+	if scale < 1.0 {
+		scale = 1.0
+	}
+	s.deviceScale = scale
 }
 
 func (s *Surface) PushTransform() {
@@ -432,8 +441,33 @@ func intersectPixelRect(a, b pixelRect) pixelRect {
 
 func (s *Surface) PushClipRect(r Rect) {
 	s.clips = append(s.clips, s.clip)
-	next := pixelRect{minX: scalarFloor(r.MinX), minY: scalarFloor(r.MinY), maxX: scalarCeil(r.MaxX), maxY: scalarCeil(r.MaxY)}
+	next := s.transformedPixelRect(r)
 	s.clip = intersectPixelRect(s.clip, next)
+}
+
+func (s *Surface) transformedPixelRect(r Rect) pixelRect {
+	a := s.transformPoint(Point{X: r.MinX, Y: r.MinY})
+	b := s.transformPoint(Point{X: r.MaxX, Y: r.MinY})
+	c := s.transformPoint(Point{X: r.MaxX, Y: r.MaxY})
+	d := s.transformPoint(Point{X: r.MinX, Y: r.MaxY})
+	minX, maxX := a.X, a.X
+	minY, maxY := a.Y, a.Y
+	points := []Point{b, c, d}
+	for i := 0; i < len(points); i++ {
+		if points[i].X < minX {
+			minX = points[i].X
+		}
+		if points[i].X > maxX {
+			maxX = points[i].X
+		}
+		if points[i].Y < minY {
+			minY = points[i].Y
+		}
+		if points[i].Y > maxY {
+			maxY = points[i].Y
+		}
+	}
+	return pixelRect{minX: scalarFloor(minX), minY: scalarFloor(minY), maxX: scalarCeil(maxX), maxY: scalarCeil(maxY)}
 }
 
 func (s *Surface) PopClip() {
@@ -464,11 +498,7 @@ func (s *Surface) putPixel(x, y int, c Color) {
 func (s *Surface) Clear(c Color) {
 	old := s.blend
 	s.blend = BlendCopy
-	for y := s.clip.minY; y < s.clip.maxY; y++ {
-		for x := s.clip.minX; x < s.clip.maxX; x++ {
-			s.putPixel(x, y, c)
-		}
-	}
+	s.fillPixelRect(s.clip, c)
 	s.blend = old
 }
 
@@ -560,6 +590,10 @@ func (s *Surface) FillRect(r Rect, color Color) {
 			maxY = point.Y
 		}
 	}
+	if s.transformB == 0.0 && s.transformC == 0.0 {
+		s.fillPixelRect(pixelRect{minX: scalarFloor(minX), minY: scalarFloor(minY), maxX: scalarCeil(maxX), maxY: scalarCeil(maxY)}, color)
+		return
+	}
 	for y := scalarFloor(minY); y < scalarCeil(maxY); y++ {
 		for x := scalarFloor(minX); x < scalarCeil(maxX); x++ {
 			point := Point{X: Scalar(x) + 0.5, Y: Scalar(y) + 0.5}
@@ -576,6 +610,38 @@ func (s *Surface) FillRect(r Rect, color Color) {
 	}
 }
 
+func (s *Surface) fillPixelRect(region pixelRect, color Color) {
+	region = intersectPixelRect(s.clip, region)
+	if region.maxX <= region.minX || region.maxY <= region.minY {
+		return
+	}
+	if s.blend == BlendSourceOver && color.A == 0 {
+		return
+	}
+	if s.Format != PixelRGBA8 || s.blend != BlendCopy && color.A != 255 {
+		for y := region.minY; y < region.maxY; y++ {
+			for x := region.minX; x < region.maxX; x++ {
+				s.putPixel(x, y, color)
+			}
+		}
+		return
+	}
+	s.markDirtyRect(region)
+	rowStart := region.minY*s.Stride + region.minX*4
+	rowEnd := region.minY*s.Stride + region.maxX*4
+	for offset := rowStart; offset < rowEnd; offset += 4 {
+		s.Pixels[offset] = color.R
+		s.Pixels[offset+1] = color.G
+		s.Pixels[offset+2] = color.B
+		s.Pixels[offset+3] = color.A
+	}
+	rowBytes := (region.maxX - region.minX) * 4
+	for y := region.minY + 1; y < region.maxY; y++ {
+		offset := y*s.Stride + region.minX*4
+		copy(s.Pixels[offset:offset+rowBytes], s.Pixels[rowStart:rowEnd])
+	}
+}
+
 func (s *Surface) StrokeRect(r Rect, width Scalar, color Color) {
 	s.DrawLine(Point{r.MinX, r.MinY}, Point{r.MaxX, r.MinY}, width, color)
 	s.DrawLine(Point{r.MaxX, r.MinY}, Point{r.MaxX, r.MaxY}, width, color)
@@ -589,7 +655,7 @@ func (s *Surface) DrawLine(a, b Point, width Scalar, color Color) {
 	if width <= 0.0 {
 		return
 	}
-	half := width / 2.0
+	half := width * s.deviceScale / 2.0
 	minX, maxX := a.X, b.X
 	minY, maxY := a.Y, b.Y
 	if minX > maxX {
@@ -704,15 +770,21 @@ func (image *Surface) sampleImage(x, y Scalar, sampling Sampling) Color {
 func scalarIsInteger(value Scalar) bool { return Scalar(int(value)) == value }
 
 func (s *Surface) drawImageAxisAligned(image *Surface, src, dst Rect, sampling Sampling, tint Color) bool {
-	if !s.transformIsIdentity() || !scalarIsInteger(src.MinX) || !scalarIsInteger(src.MinY) ||
-		!scalarIsInteger(src.MaxX) || !scalarIsInteger(src.MaxY) || !scalarIsInteger(dst.MinX) ||
-		!scalarIsInteger(dst.MinY) || !scalarIsInteger(dst.MaxX) || !scalarIsInteger(dst.MaxY) {
+	if s.transformB != 0.0 || s.transformC != 0.0 || s.transformA <= 0.0 || s.transformD <= 0.0 ||
+		!scalarIsInteger(src.MinX) || !scalarIsInteger(src.MinY) || !scalarIsInteger(src.MaxX) || !scalarIsInteger(src.MaxY) {
+		return false
+	}
+	dstMinXValue := (s.transformA*dst.MinX + s.transformTX) * s.deviceScale
+	dstMinYValue := (s.transformD*dst.MinY + s.transformTY) * s.deviceScale
+	dstMaxXValue := (s.transformA*dst.MaxX + s.transformTX) * s.deviceScale
+	dstMaxYValue := (s.transformD*dst.MaxY + s.transformTY) * s.deviceScale
+	if !scalarIsInteger(dstMinXValue) || !scalarIsInteger(dstMinYValue) || !scalarIsInteger(dstMaxXValue) || !scalarIsInteger(dstMaxYValue) {
 		return false
 	}
 	srcMinX, srcMinY := int(src.MinX), int(src.MinY)
 	srcWidth, srcHeight := int(src.Width()), int(src.Height())
-	dstMinX, dstMinY := int(dst.MinX), int(dst.MinY)
-	dstWidth, dstHeight := int(dst.Width()), int(dst.Height())
+	dstMinX, dstMinY := int(dstMinXValue), int(dstMinYValue)
+	dstWidth, dstHeight := int(dstMaxXValue)-dstMinX, int(dstMaxYValue)-dstMinY
 	if srcWidth <= 0 || srcHeight <= 0 || dstWidth <= 0 || dstHeight <= 0 {
 		return true
 	}
@@ -765,7 +837,8 @@ func (s *Surface) DrawImage(image *Surface, src, dst Rect, sampling Sampling, ti
 	}
 	for y := scalarFloor(minY); y < scalarCeil(maxY); y++ {
 		for x := scalarFloor(minX); x < scalarCeil(maxX); x++ {
-			sx, sy := Scalar(x)+0.5-s.transformTX, Scalar(y)+0.5-s.transformTY
+			sx := (Scalar(x)+0.5)/s.deviceScale - s.transformTX
+			sy := (Scalar(y)+0.5)/s.deviceScale - s.transformTY
 			localX := (s.transformD*sx - s.transformC*sy) / determinant
 			localY := (-s.transformB*sx + s.transformA*sy) / determinant
 			u := (localX - dst.MinX) / dst.Width()
