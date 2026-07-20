@@ -848,6 +848,8 @@ func corePackageSymbolAliases(programs []unit.Program, root int, symbolOffsets [
 			if name == "init" {
 				out[index] = coreInitFunctionAliasName(i, initOrdinal)
 				initOrdinal++
+			} else if alias := coreCompilerIntrinsicAlias(programs[i].ImportPath, name); alias != "" {
+				out[index] = alias
 			}
 			bucket := coreSymbolAliasHash(name) % len(buckets)
 			next[index] = buckets[bucket]
@@ -866,12 +868,24 @@ func corePackageSymbolAliases(programs []unit.Program, root int, symbolOffsets [
 		}
 		for j := 0; j < len(programs[i].Symbols); j++ {
 			index := symbolOffsets[i] + j
-			if duplicate[index] && programs[i].Symbols[j].Name != "init" && !coreSymbolKeepsRuntimeName(programs[i].Symbols[j].Name) {
+			if out[index] == "" && duplicate[index] && programs[i].Symbols[j].Name != "init" && !coreSymbolKeepsRuntimeName(programs[i].Symbols[j].Name) {
 				out[index] = coreSymbolAliasName(i, programs[i].Symbols[j].Name)
 			}
 		}
 	}
 	return out
+}
+
+// Compiler intrinsics are selected by both package identity and declaration
+// name while the linker still has semantic package information. The compact
+// backend unit intentionally omits that frontend-only metadata, so a reserved
+// alias carries only the identity needed for safe call-site specialization.
+// Calls through function values still reach the ordinary function body.
+func coreCompilerIntrinsicAlias(importPath string, name string) string {
+	if importPath == "fmt" && name == "Println" {
+		return "renvo_runtime_FmtPrintln"
+	}
+	return ""
 }
 
 func coreSymbolKeepsRuntimeName(name string) bool {

@@ -181,11 +181,27 @@ func renvoEmitLinearPrintStmt(g *renvoLinearGen, stmt *renvoStmt) bool {
 	}
 	builtinPrintln := renvoExprIdentCode(p, ep, root.left) == renvoIdentPrintln
 	println := builtinPrintln || renvoExprIsIdentText(p, ep, root.left, "Println")
+	fmtPrintln := false
 	if !println && !renvoExprIsIdentText(p, ep, root.left, "print") {
+		candidate := &ep.exprs[root.left]
+		if candidate.kind != renvoExprIdent || candidate.nameEnd-candidate.nameStart != 24 || !renvoBytesEqualText(p.src, candidate.nameStart, candidate.nameEnd, "renvo_runtime_FmtPrintln") {
+			return false
+		}
+		fmtPrintln = true
+		println = true
+	}
+	fnIndex := renvoFuncInfoFromCall(g, ep, root.left)
+	if fmtPrintln && fnIndex < 0 {
 		return false
 	}
 	callee := &ep.exprs[root.left]
-	if renvoFuncInfoFromCall(g, ep, root.left) >= 0 || renvoFindLocalIndex(g, callee.nameStart, callee.nameEnd) >= 0 {
+	if !fmtPrintln && (fnIndex >= 0 || renvoFindLocalIndex(g, callee.nameStart, callee.nameEnd) >= 0) {
+		return false
+	}
+	// More than one argument must be evaluated completely before Println starts
+	// writing. Keep those calls on the generic path until the backend has a
+	// compact multi-value staging representation.
+	if fmtPrintln && root.argCount > 1 {
 		return false
 	}
 	fd := 1
@@ -199,6 +215,9 @@ func renvoEmitLinearPrintStmt(g *renvoLinearGen, stmt *renvoStmt) bool {
 		argIndex := ep.args[root.firstArg+i]
 		argType := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, argIndex))
 		renvoNonNil(argType)
+		if fmtPrintln && argType.kind != renvoTypeString {
+			return false
+		}
 		if argType.kind == renvoTypeString {
 			if !renvoEmitStringValueRegs(g, ep, argIndex) {
 				return false

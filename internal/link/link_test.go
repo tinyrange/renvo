@@ -172,6 +172,44 @@ func Value() int { return 2 }
 	}
 }
 
+func TestLinkUnitsMarksFmtPrintlnAsCompilerIntrinsic(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import "fmt"
+
+func Println(value string) {}
+
+func appMain() int {
+	fmt.Println("fmt")
+	Println("user")
+	return 0
+}
+`)},
+		{Path: "/std/fmt/fmt.go", Src: []byte(`package fmt
+
+func Println(values ...interface{}) (int, error) { return 0, nil }
+`)},
+	})
+	program, ok := LinkUnitsCore(result.Units, result.Root)
+	if !ok {
+		t.Fatal("LinkUnits failed")
+	}
+	if findLinkedFunc(program, "renvo_runtime_FmtPrintln") < 0 {
+		t.Fatalf("fmt.Println intrinsic alias missing:\n%s", program.Text)
+	}
+	if findLinkedFunc(program, "Println") < 0 {
+		t.Fatalf("user Println declaration was renamed:\n%s", program.Text)
+	}
+	if !bytes.Contains(program.Text, []byte("renvo_runtime_FmtPrintln(\"fmt\")")) {
+		t.Fatalf("fmt.Println call was not marked:\n%s", program.Text)
+	}
+	if !bytes.Contains(program.Text, []byte("Println(\"user\")")) {
+		t.Fatalf("user Println call was marked as an intrinsic:\n%s", program.Text)
+	}
+}
+
 func TestLinkUnitsPreservesWhitespaceBeforeImportedTypeSelector(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
