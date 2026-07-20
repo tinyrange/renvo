@@ -4021,7 +4021,7 @@ func renvoBuildMetaInto(pp *renvoProgram, m *renvoMeta) {
 	m.panicEnabled = p.toks.panicEnabled
 	renvoFinalizeTypeLayouts(m)
 	renvoBuildFuncLookup(m)
-	renvoResolveGlobalCallTypes(m)
+	renvoResolveGlobalInitTypes(m)
 	m.scratchEnd = renvo_runtime_ArenaMark()
 }
 
@@ -4137,37 +4137,47 @@ func renvoFindMetaFunction(m *renvoMeta, nameStart int, nameEnd int) int {
 	return -1
 }
 
-func renvoResolveGlobalCallTypes(m *renvoMeta) {
+func renvoResolveGlobalInitTypes(m *renvoMeta) {
 	renvoNonNil(m)
-	for i := 0; i < len(m.globals); i++ {
-		global := &m.globals[i]
-		if global.typ != 0 || global.initStart >= global.initEnd {
-			continue
-		}
-		ep := renvoNewExprParse()
-		renvoNonNil(ep)
-		rootIndex := renvoParseExpressionRoot(ep, m.prog, global.initStart, global.initEnd)
-		if rootIndex < 0 {
-			continue
-		}
-		root := &ep.exprs[rootIndex]
-		if root.kind == renvoExprIdent {
-			fnIndex := renvoFindMetaFunction(m, root.nameStart, root.nameEnd)
-			if fnIndex >= 0 {
-				global.typ = renvoFunctionTypeFromInfo(m, fnIndex)
+	changed := true
+	for changed {
+		changed = false
+		for i := 0; i < len(m.globals); i++ {
+			global := &m.globals[i]
+			if global.typ != 0 || global.initStart >= global.initEnd {
+				continue
 			}
-			continue
-		}
-		if root.kind != renvoExprCall || root.left < 0 || root.left >= len(ep.exprs) {
-			continue
-		}
-		callee := &ep.exprs[root.left]
-		if callee.kind != renvoExprIdent {
-			continue
-		}
-		fnIndex := renvoFindMetaFunction(m, callee.nameStart, callee.nameEnd)
-		if fnIndex >= 0 {
-			global.typ = m.funcs[fnIndex].resultType
+			ep := renvoNewExprParse()
+			renvoNonNil(ep)
+			rootIndex := renvoParseExpressionRoot(ep, m.prog, global.initStart, global.initEnd)
+			if rootIndex < 0 {
+				continue
+			}
+			root := &ep.exprs[rootIndex]
+			typ := 0
+			if root.kind == renvoExprIdent {
+				dependency := renvoFindMetaGlobalIndex(m, root.nameStart, root.nameEnd, renvoTokVar)
+				if dependency >= 0 {
+					typ = m.globals[dependency].typ
+				} else {
+					fnIndex := renvoFindMetaFunction(m, root.nameStart, root.nameEnd)
+					if fnIndex >= 0 {
+						typ = renvoFunctionTypeFromInfo(m, fnIndex)
+					}
+				}
+			} else if root.kind == renvoExprCall {
+				callee := &ep.exprs[root.left]
+				if callee.kind == renvoExprIdent {
+					fnIndex := renvoFindMetaFunction(m, callee.nameStart, callee.nameEnd)
+					if fnIndex >= 0 {
+						typ = m.funcs[fnIndex].resultType
+					}
+				}
+			}
+			if typ != 0 {
+				global.typ = typ
+				changed = true
+			}
 		}
 	}
 }
