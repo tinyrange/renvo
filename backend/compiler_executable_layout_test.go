@@ -33,7 +33,7 @@ func TestLinuxImagesSeparateExecutableAndWritableLoads(t *testing.T) {
 			t.Fatalf("parse %s: %v", target, err)
 		}
 		wantType := elf.ET_EXEC
-		if target == "linux/amd64" {
+		if target == "linux/amd64" || target == "linux/aarch64" {
 			wantType = elf.ET_DYN
 		}
 		if file.Type != wantType {
@@ -76,18 +76,22 @@ func TestLinuxImagesSeparateExecutableAndWritableLoads(t *testing.T) {
 	}
 }
 
-func TestLinuxAmd64PIELoadsAtRandomizedAddresses(t *testing.T) {
-	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
-		t.Skip("requires a Linux amd64 host")
+func TestLinuxNativePIELoadsAtRandomizedAddresses(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
+		t.Skip("requires a Linux amd64 or arm64 host")
 	}
 	policy, err := os.ReadFile("/proc/sys/kernel/randomize_va_space")
 	if err != nil || strings.TrimSpace(string(policy)) == "0" {
 		t.Skip("kernel address randomization is disabled")
 	}
 	source := []byte("package main\nfunc appMain() int { for {} }\n")
-	image, ok := RenvoCompileSourceToBytesStrip(source, "linux/amd64", true)
+	target := "linux/amd64"
+	if runtime.GOARCH == "arm64" {
+		target = "linux/aarch64"
+	}
+	image, ok := RenvoCompileSourceToBytesStrip(source, target, true)
 	if !ok {
-		t.Fatal("compile Linux amd64 PIE")
+		t.Fatalf("compile %s PIE", target)
 	}
 	path := t.TempDir() + "/pie-loop"
 	if err := os.WriteFile(path, image, 0o755); err != nil {

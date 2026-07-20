@@ -1,7 +1,6 @@
 package main
 
 const renvoLinuxAarch64CodeOffset = 0xb0
-const renvoLinuxAarch64LoadAddress = 0x400000
 
 const renvoLinuxAarch64SysReadSeq = 63
 const renvoLinuxAarch64SysWriteSeq = 64
@@ -273,7 +272,7 @@ func renvoAsmImageAarch64(a *renvoAsm) []byte {
 		return out
 	}
 	var sec renvoElfSymbolSections
-	renvoBuildElfSymbolSections(a, renvoLinuxAarch64LoadAddress, a.codeOffset, loadFileSize, &sec)
+	renvoBuildElfSymbolSections(a, 0, a.codeOffset, loadFileSize, &sec)
 	out := make([]byte, 0, 1048576)
 	out = renvoAppendElfHeaderAarch64(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff)
 	for i := 0; i < len(a.code); i++ {
@@ -295,7 +294,7 @@ func renvoAsmImageAarch64(a *renvoAsm) []byte {
 		out = append(out, sec.shstrtab[i])
 	}
 	out = renvoAppendUntil(out, sec.shoff)
-	out = renvoAppendElfSectionHeaders(out, &sec, a, renvoLinuxAarch64LoadAddress)
+	out = renvoAppendElfSectionHeaders(out, &sec, a, 0)
 	return out
 }
 
@@ -310,12 +309,20 @@ func renvoAsmPatchAarch64Abs(a *renvoAsm) {
 		}
 		insn := renvoGet32At(a.code, at)
 		reg := insn & 31
-		renvoAarch64AsmPatchMovRegImmAt(a, at, reg, renvoLinuxAarch64LoadAddress+target)
+		pcPage := (a.codeOffset + at) & -4096
+		targetPage := target & -4096
+		pageDelta := (targetPage - pcPage) >> 12
+		immlo := pageDelta & 3
+		immhi := pageDelta >> 2 & 524287
+		renvoPut32At(a.code, at, 0x90000000|(immlo<<29)|(immhi<<5)|reg)
+		renvoPut32At(a.code, at+4, 0x91000000|((target&4095)<<10)|(reg<<5)|reg)
+		renvoPut32At(a.code, at+8, 0xd503201f)
+		renvoPut32At(a.code, at+12, 0xd503201f)
 	}
 }
 
 func renvoAppendElfHeaderAarch64(out []byte, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int) []byte {
-	base := renvoLinuxAarch64LoadAddress
+	base := 0
 
 	out = append(out, 0x7f)
 	out = append(out, 'E')
@@ -328,7 +335,7 @@ func renvoAppendElfHeaderAarch64(out []byte, entryOff int, fileSize int, bssOffs
 	for i := 0; i < 8; i++ {
 		out = append(out, 0)
 	}
-	out = renvoAppend16(out, 2)
+	out = renvoAppend16(out, 3)
 	out = renvoAppend16(out, 183)
 	out = renvoAppend32(out, 1)
 	out = renvoAppend64U32(out, base+entryOff)
