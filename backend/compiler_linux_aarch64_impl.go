@@ -300,15 +300,17 @@ func renvoAsmImageAarch64(a *renvoAsm) []byte {
 }
 
 func renvoAsmPatchAarch64Abs(a *renvoAsm) {
-	for i := 0; i < len(a.absRelocs); i++ {
-		r := a.absRelocs[i]
-		target := a.dataOffset + r.off
-		if r.kind == renvoAbsBssReloc {
-			target = renvoAsmBssOffset(a) + r.off
+	for i := 0; i+2 < len(a.absRelocs); i += 3 {
+		at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i))
+		off := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1))
+		kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2))
+		target := a.dataOffset + off
+		if kind == renvoAbsBssReloc {
+			target = renvoAsmBssOffset(a) + off
 		}
-		insn := renvoGet32At(a.code, r.at)
+		insn := renvoGet32At(a.code, at)
 		reg := insn & 31
-		renvoAarch64AsmPatchMovRegImmAt(a, r.at, reg, renvoLinuxAarch64LoadAddress+target)
+		renvoAarch64AsmPatchMovRegImmAt(a, at, reg, renvoLinuxAarch64LoadAddress+target)
 	}
 }
 

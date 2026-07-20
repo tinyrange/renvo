@@ -394,23 +394,25 @@ func renvoWinArm64EmitKernelReadWriteCall(a *renvoAsm, importID int, countOff in
 }
 
 func renvoAsmPatchWindowsArm64(a *renvoAsm, layout renvoWinImportLayout) {
-	for i := 0; i < len(a.absRelocs); i++ {
-		r := a.absRelocs[i]
-		target := a.dataOffset + r.off
-		if r.kind == renvoAbsWinImportReloc {
-			target = renvoWinImportIATRVA(layout, r.off)
-		} else if r.kind == renvoAbsBssReloc {
-			target = renvoAsmBssOffset(a) + r.off
+	for i := 0; i+2 < len(a.absRelocs); i += 3 {
+		at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i))
+		off := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1))
+		kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2))
+		target := a.dataOffset + off
+		if kind == renvoAbsWinImportReloc {
+			target = renvoWinImportIATRVA(layout, off)
+		} else if kind == renvoAbsBssReloc {
+			target = renvoAsmBssOffset(a) + off
 		}
-		insn := renvoGet32At(a.code, r.at)
+		insn := renvoGet32At(a.code, at)
 		reg := insn & 31
-		pc := a.codeOffset + r.at
+		pc := a.codeOffset + at
 		delta := (target >> 12) - (pc >> 12)
 		imm := delta & 0x1fffff
-		renvoPut32At(a.code, r.at, 0x90000000|((imm&3)<<29)|(((imm>>2)&0x7ffff)<<5)|reg)
-		renvoPut32At(a.code, r.at+4, 0x91000000|((target&0xfff)<<10)|(reg<<5)|reg)
-		renvoPut32At(a.code, r.at+8, 0xd503201f)
-		renvoPut32At(a.code, r.at+12, 0xd503201f)
+		renvoPut32At(a.code, at, 0x90000000|((imm&3)<<29)|(((imm>>2)&0x7ffff)<<5)|reg)
+		renvoPut32At(a.code, at+4, 0x91000000|((target&0xfff)<<10)|(reg<<5)|reg)
+		renvoPut32At(a.code, at+8, 0xd503201f)
+		renvoPut32At(a.code, at+12, 0xd503201f)
 	}
 }
 

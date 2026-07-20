@@ -304,10 +304,9 @@ type renvoDarwinStaticImport struct {
 
 type renvoAsm struct {
 	code                []byte
-	labelPos            []int
-	labelSet            []bool
+	labelPos            []int32
 	relocs              []int32
-	absRelocs           []renvoAbsRef
+	absRelocs           []int32
 	symbols             []renvoAsmSymbol
 	symbolName          []byte
 	winImports          []renvoWinStaticImport
@@ -329,10 +328,9 @@ const renvoWasm32FallbackSliceBackingSize = 4096
 func renvoAsmInit(a *renvoAsm) {
 	renvoNonNil(a)
 	var code []byte
-	var labelPos []int
-	var labelSet []bool
+	var labelPos []int32
 	var relocs []int32
-	var absRelocs []renvoAbsRef
+	var absRelocs []int32
 	var symbols []renvoAsmSymbol
 	var symbolName []byte
 	var winImports []renvoWinStaticImport
@@ -340,30 +338,27 @@ func renvoAsmInit(a *renvoAsm) {
 	var data []byte
 	if renvoFixedTarget != 0 {
 		code = make([]byte, 0, 2097152)
-		labelPos = make([]int, 0, 16384)
-		labelSet = make([]bool, 0, 16384)
+		labelPos = make([]int32, 0, 16384)
 		relocs = make([]int32, 0, 65536)
-		absRelocs = make([]renvoAbsRef, 0, 16384)
+		absRelocs = make([]int32, 0, 49152)
 		symbols = make([]renvoAsmSymbol, 0, 1024)
 		if renvoCompilerStripSymbols && renvoTargetArch != renvoArchWasm32 {
 			symbols = make([]renvoAsmSymbol, 0, 0)
 		}
 	} else if renvoTargetArch == renvoArchWasm32 {
 		code = make([]byte, 0, 655360)
-		labelPos = make([]int, 0, 32768)
-		labelSet = make([]bool, 0, 32768)
+		labelPos = make([]int32, 0, 32768)
 		relocs = make([]int32, 0, 131072)
-		absRelocs = make([]renvoAbsRef, 0, 32768)
+		absRelocs = make([]int32, 0, 98304)
 		symbols = make([]renvoAsmSymbol, 0, 2048)
 	} else {
 		code = make([]byte, 0, 2097152)
-		labelPos = make([]int, 0, 32768)
-		labelSet = make([]bool, 0, 32768)
+		labelPos = make([]int32, 0, 32768)
 		relocs = make([]int32, 0, 131072)
 		// Absolute relocations are much less frequent than label references. A
 		// self-host build uses fewer than 2,800 on every native target, so avoid
 		// touching a 32,768-entry arena allocation for each compilation.
-		absRelocs = make([]renvoAbsRef, 0, 4096)
+		absRelocs = make([]int32, 0, 12288)
 		if renvoCompilerStripSymbols && renvoTargetArch != renvoArchWasm32 {
 			symbols = make([]renvoAsmSymbol, 0, 0)
 		} else {
@@ -378,7 +373,6 @@ func renvoAsmInit(a *renvoAsm) {
 	}
 	a.code = code
 	a.labelPos = labelPos
-	a.labelSet = labelSet
 	a.relocs = relocs
 	a.absRelocs = absRelocs
 	a.symbols = symbols
@@ -398,8 +392,7 @@ func renvoAsmInit(a *renvoAsm) {
 func renvoAsmNewLabel(a *renvoAsm) int {
 	renvoNonNil(a)
 	label := len(a.labelPos)
-	a.labelPos = append(a.labelPos, 0)
-	a.labelSet = append(a.labelSet, false)
+	a.labelPos = append(a.labelPos, -1)
 	return label
 }
 
@@ -408,14 +401,21 @@ func renvoAsmMarkLabel(a *renvoAsm, label int) {
 	if label < 0 {
 		return
 	}
-	if label >= len(a.labelPos) || label >= len(a.labelSet) {
+	if label >= len(a.labelPos) {
 		return
 	}
 	codeLen := len(a.code)
-	a.labelPos[label] = codeLen
-	a.labelSet[label] = true
+	a.labelPos[label] = int32(codeLen)
 	a.lastPrimaryStoreEnd = -1
 	a.lastPrimaryLoad = 0
+}
+
+func renvoAsmLabelPosition(a *renvoAsm, label int) int {
+	renvoNonNil(a)
+	if label < 0 || label >= len(a.labelPos) {
+		return -1
+	}
+	return int(renvo_runtime_UnsafeInt32At(a.labelPos, label))
 }
 
 func renvoAsmEmit8(a *renvoAsm, v int) {
@@ -453,7 +453,7 @@ func renvoAsmEmit5(a *renvoAsm, v0 int, v1 int, v2 int, v3 int, v4 int) {
 
 func renvoAsmAddAbsReloc(a *renvoAsm, at int, off int, kind int) {
 	renvoNonNil(a)
-	a.absRelocs = append(a.absRelocs, renvoAbsRef{at: at & 2147483647, off: off & 2147483647, kind: kind & 2147483647})
+	a.absRelocs = append(a.absRelocs, int32(at&2147483647), int32(off&2147483647), int32(kind&2147483647))
 }
 
 func renvoAsmAddReloc(a *renvoAsm, at int, label int) {
@@ -545,10 +545,10 @@ func renvoAmd64RelaxBranches(a *renvoAsm) {
 	for i := 0; i+1 < len(a.relocs); i += 2 {
 		at := int(renvo_runtime_UnsafeInt32At(a.relocs, i)) & 2147483647
 		label := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1)) & 2147483647
-		if label < 0 || label >= len(a.labelPos) || label >= len(a.labelSet) || !a.labelSet[label] {
+		target := renvoAsmLabelPosition(a, label)
+		if target < 0 {
 			continue
 		}
-		target := a.labelPos[label]
 		disp := target - (at + 4)
 		if disp < -128 || disp > 127 {
 			continue
@@ -606,8 +606,9 @@ func renvoAmd64RelaxBranches(a *renvoAsm) {
 	}
 	renvoTruncBytes(&a.code, write)
 	for i := 0; i < len(a.labelPos); i++ {
-		if a.labelSet[i] {
-			a.labelPos[i] = renvoAmd64RelaxedPosition(branches, savings, a.labelPos[i])
+		position := renvoAsmLabelPosition(a, i)
+		if position >= 0 {
+			a.labelPos[i] = int32(renvoAmd64RelaxedPosition(branches, savings, position))
 		}
 	}
 	relocCount := 0
@@ -616,13 +617,13 @@ func renvoAmd64RelaxBranches(a *renvoAsm) {
 		rawLabel := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1))
 		at := rawAt & 2147483647
 		label := rawLabel & 2147483647
-		if rawLabel < 0 && label >= 0 && label < len(a.labelPos) && label < len(a.labelSet) && a.labelSet[label] {
+		target := renvoAsmLabelPosition(a, label)
+		if rawLabel < 0 && target >= 0 {
 			start := at - 1
 			if rawAt < 0 {
 				start = at - 2
 			}
 			newAt := renvoAmd64RelaxedPosition(branches, savings, start) + 1
-			target := a.labelPos[label]
 			disp := target - (newAt + 1)
 			if disp >= -128 && disp <= 127 {
 				a.code[newAt] = byte(disp)
@@ -634,9 +635,9 @@ func renvoAmd64RelaxBranches(a *renvoAsm) {
 		relocCount += 2
 	}
 	a.relocs = a.relocs[:relocCount]
-	for i := 0; i < len(a.absRelocs); i++ {
-		at := a.absRelocs[i].at & 2147483647
-		a.absRelocs[i].at = renvoAmd64RelaxedPosition(branches, savings, at)
+	for i := 0; i+2 < len(a.absRelocs); i += 3 {
+		at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i)) & 2147483647
+		a.absRelocs[i] = int32(renvoAmd64RelaxedPosition(branches, savings, at))
 	}
 }
 
@@ -666,13 +667,10 @@ func renvoAsmPatch(a *renvoAsm) {
 			if label < 0 {
 				continue
 			}
-			if label >= len(a.labelPos) || label >= len(a.labelSet) {
+			target := renvoAsmLabelPosition(a, label)
+			if target < 0 {
 				continue
 			}
-			if !a.labelSet[label] {
-				continue
-			}
-			target := a.labelPos[label]
 			disp := target - (at + 8)
 			insn := renvoGet32At(a.code, at)
 			if (insn & 0x0e000000) == 0x0a000000 {
@@ -689,13 +687,10 @@ func renvoAsmPatch(a *renvoAsm) {
 			if label < 0 {
 				continue
 			}
-			if label >= len(a.labelPos) || label >= len(a.labelSet) {
+			target := renvoAsmLabelPosition(a, label)
+			if target < 0 {
 				continue
 			}
-			if !a.labelSet[label] {
-				continue
-			}
-			target := a.labelPos[label]
 			disp := target - at
 			insn := renvoGet32At(a.code, at)
 			if (insn & 0xfc000000) == 0x94000000 {
@@ -718,21 +713,18 @@ func renvoAsmPatch(a *renvoAsm) {
 		if label < 0 {
 			continue
 		}
-		if label >= len(a.labelPos) || label >= len(a.labelSet) {
+		target := renvoAsmLabelPosition(a, label)
+		if target < 0 {
 			continue
 		}
-		if !a.labelSet[label] {
-			continue
-		}
-		target := a.labelPos[label]
 		disp := target - (at + 4)
 		renvoPut32At(a.code, at, disp)
 	}
 	renvoAsmSetDataOffsets(a)
-	for i := 0; i < len(a.absRelocs); i++ {
-		at := a.absRelocs[i].at & 2147483647
-		off := a.absRelocs[i].off & 2147483647
-		kind := a.absRelocs[i].kind & 2147483647
+	for i := 0; i+2 < len(a.absRelocs); i += 3 {
+		at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i)) & 2147483647
+		off := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1)) & 2147483647
+		kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2)) & 2147483647
 		target := a.dataOffset + off
 		if kind == renvoAbsBssReloc {
 			target = renvoAsmBssOffset(a) + off
@@ -940,12 +932,13 @@ func renvoBuildElfSymbolSections(a *renvoAsm, base int, entryOff int, loadFileSi
 	for i := 0; i < len(a.symbols); i++ {
 		s := a.symbols[i]
 		label := s.label
-		if label < 0 || label >= len(a.labelPos) || label >= len(a.labelSet) || !a.labelSet[label] {
+		position := renvoAsmLabelPosition(a, label)
+		if position < 0 {
 			continue
 		}
 		nameOff := len(sec.strtab)
 		sec.strtab = renvoAppendBytesRangeZ(sec.strtab, a.symbolName, s.nameStart, s.nameEnd)
-		value := base + a.codeOffset + a.labelPos[label]
+		value := base + a.codeOffset + position
 		sec.symtab = renvoAppendElfSym(sec.symtab, nameOff, 18, 1, value, 0)
 	}
 
@@ -1067,8 +1060,8 @@ func renvoStringFromBytes(src []byte, start int, end int) string {
 
 func renvoAsmHasWinImportRelocs(a *renvoAsm) bool {
 	renvoNonNil(a)
-	for i := 0; i < len(a.absRelocs); i++ {
-		if a.absRelocs[i].kind == renvoAbsWinImportReloc {
+	for i := 2; i < len(a.absRelocs); i += 3 {
+		if int(renvo_runtime_UnsafeInt32At(a.absRelocs, i)) == renvoAbsWinImportReloc {
 			return true
 		}
 	}
@@ -1151,40 +1144,39 @@ func renvoAsmPatchWindows(a *renvoAsm, layout renvoWinImportLayout) {
 		if label < 0 {
 			continue
 		}
-		if label >= len(a.labelPos) || label >= len(a.labelSet) {
+		target := renvoAsmLabelPosition(a, label)
+		if target < 0 {
 			continue
 		}
-		if !a.labelSet[label] {
-			continue
-		}
-		target := a.labelPos[label]
 		disp := target - (at + 4)
 		renvoPut32At(a.code, at, disp)
 	}
 	if a.dataOffset == 0 {
 		a.dataOffset = a.codeOffset + len(a.code)
 	}
-	for i := 0; i < len(a.absRelocs); i++ {
-		r := a.absRelocs[i]
-		if r.kind == renvoAbsWinImportReloc {
-			target := renvoWinImportIATRVA(layout, r.off)
+	for i := 0; i+2 < len(a.absRelocs); i += 3 {
+		at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i))
+		off := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1))
+		kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2))
+		if kind == renvoAbsWinImportReloc {
+			target := renvoWinImportIATRVA(layout, off)
 			if renvoTargetArch != renvoArch386 {
-				next := a.codeOffset + r.at + 4
-				renvoPut32At(a.code, r.at, target-next)
+				next := a.codeOffset + at + 4
+				renvoPut32At(a.code, at, target-next)
 			} else {
-				renvoPut32At(a.code, r.at, renvoWinImageBase+target)
+				renvoPut32At(a.code, at, renvoWinImageBase+target)
 			}
 			continue
 		}
-		target := a.dataOffset + r.off
-		if r.kind == renvoAbsBssReloc {
-			target = renvoAsmBssOffset(a) + r.off
+		target := a.dataOffset + off
+		if kind == renvoAbsBssReloc {
+			target = renvoAsmBssOffset(a) + off
 		}
 		if renvoTargetArch != renvoArch386 {
-			next := a.codeOffset + r.at + 4
-			renvoPut32At(a.code, r.at, target-next)
+			next := a.codeOffset + at + 4
+			renvoPut32At(a.code, at, target-next)
 		} else {
-			renvoPut32At(a.code, r.at, renvoWinImageBase+target)
+			renvoPut32At(a.code, at, renvoWinImageBase+target)
 		}
 	}
 }
@@ -1574,11 +1566,11 @@ type renvoMeta struct {
 	globals       []renvoSymbolInfo
 	params        []renvoSymbolInfo
 	funcs         []renvoFuncInfo
-	globalBuckets []int
-	globalNext    []int
-	funcBuckets   []int
-	funcNext      []int
-	typeBuckets   []int
+	globalBuckets []int32
+	globalNext    []int32
+	funcBuckets   []int32
+	funcNext      []int32
+	typeBuckets   []int32
 	closures      []renvoClosureInfo
 	captures      []renvoSymbolInfo
 	panicEnabled  bool
@@ -3951,14 +3943,14 @@ func renvoBuildMetaInto(pp *renvoProgram, m *renvoMeta) {
 	m.globals = make([]renvoSymbolInfo, 0, globalCap)
 	m.params = make([]renvoSymbolInfo, 0, paramCap)
 	m.funcs = make([]renvoFuncInfo, 0, len(p.funcs)+128)
-	m.typeBuckets = make([]int, typeCap*2)
+	m.typeBuckets = make([]int32, typeCap*2)
 	m.closures = make([]renvoClosureInfo, 0, 16)
 	m.captures = make([]renvoSymbolInfo, 0, 32)
-	m.globalBuckets = make([]int, globalCap*2)
+	m.globalBuckets = make([]int32, globalCap*2)
 	for i := 0; i < len(m.globalBuckets); i++ {
 		m.globalBuckets[i] = -1
 	}
-	m.funcBuckets = make([]int, (len(p.funcs)+128)*2)
+	m.funcBuckets = make([]int32, (len(p.funcs)+128)*2)
 	for i := 0; i < len(m.funcBuckets); i++ {
 		m.funcBuckets[i] = -1
 	}
@@ -4098,27 +4090,27 @@ func renvoMetaAppendGlobal(m *renvoMeta, sym renvoSymbolInfo) {
 	m.globalNext = append(m.globalNext, -1)
 	hash := renvoHashRange(m.prog.src, sym.nameStart, sym.nameEnd)
 	bucket := hash % len(m.globalBuckets)
-	m.globalNext[index] = m.globalBuckets[bucket]
-	m.globalBuckets[bucket] = index
+	m.globalNext[index] = renvo_runtime_UnsafeInt32At(m.globalBuckets, bucket)
+	m.globalBuckets[bucket] = int32(index)
 }
 
 func renvoFindMetaGlobalIndex(m *renvoMeta, nameStart int, nameEnd int, kind int) int {
 	renvoNonNil(m)
 	hash := renvoHashRange(m.prog.src, nameStart, nameEnd)
-	i := m.globalBuckets[hash%len(m.globalBuckets)]
+	i := int(renvo_runtime_UnsafeInt32At(m.globalBuckets, hash%len(m.globalBuckets)))
 	for i >= 0 {
 		s := m.globals[i]
 		if s.kind == kind && renvoBytesEqualRange(m.prog.src, s.nameStart, s.nameEnd, nameStart, nameEnd) {
 			return i
 		}
-		i = m.globalNext[i]
+		i = int(renvo_runtime_UnsafeInt32At(m.globalNext, i))
 	}
 	return -1
 }
 
 func renvoBuildFuncLookup(m *renvoMeta) {
 	renvoNonNil(m)
-	m.funcNext = make([]int, len(m.funcs))
+	m.funcNext = make([]int32, len(m.funcs))
 	for i := 0; i < len(m.funcNext); i++ {
 		m.funcNext[i] = -1
 	}
@@ -4126,21 +4118,21 @@ func renvoBuildFuncLookup(m *renvoMeta) {
 		f := &m.funcs[i]
 		hash := renvoHashRange(m.prog.src, f.nameStart, f.nameEnd)
 		bucket := hash % len(m.funcBuckets)
-		m.funcNext[i] = m.funcBuckets[bucket]
-		m.funcBuckets[bucket] = i
+		m.funcNext[i] = renvo_runtime_UnsafeInt32At(m.funcBuckets, bucket)
+		m.funcBuckets[bucket] = int32(i)
 	}
 }
 
 func renvoFindMetaFunction(m *renvoMeta, nameStart int, nameEnd int) int {
 	renvoNonNil(m)
 	hash := renvoHashRange(m.prog.src, nameStart, nameEnd)
-	i := m.funcBuckets[hash%len(m.funcBuckets)]
+	i := int(renvo_runtime_UnsafeInt32At(m.funcBuckets, hash%len(m.funcBuckets)))
 	for i >= 0 {
 		fn := &m.funcs[i]
 		if fn.receiverType == 0 && renvoBytesEqualRange(m.prog.src, fn.nameStart, fn.nameEnd, nameStart, nameEnd) {
 			return i
 		}
-		i = m.funcNext[i]
+		i = int(renvo_runtime_UnsafeInt32At(m.funcNext, i))
 	}
 	return -1
 }
@@ -5379,7 +5371,7 @@ func renvoIndexNamedType(m *renvoMeta, index int) {
 	bucket := renvoHashRange(m.prog.src, t.nameStart, t.nameEnd) % len(buckets)
 	for probes := 0; probes < len(buckets); probes++ {
 		if buckets[bucket] == 0 {
-			buckets[bucket] = index + 1
+			buckets[bucket] = int32(index + 1)
 			return
 		}
 		bucket++
@@ -5404,7 +5396,7 @@ func renvoFindNamedType(m *renvoMeta, nameStart int, nameEnd int) int {
 	buckets := m.typeBuckets
 	bucket := renvoHashRange(m.prog.src, nameStart, nameEnd) % len(buckets)
 	for probes := 0; probes < len(buckets); probes++ {
-		entry := buckets[bucket]
+		entry := int(renvo_runtime_UnsafeInt32At(buckets, bucket))
 		if entry == 0 {
 			return -1
 		}
@@ -12265,13 +12257,13 @@ func renvoFindMethodByTypeAndName(g *renvoLinearGen, typ int, nameStart int, nam
 	renvoNonNil(p)
 	renvoNonNil(meta)
 	hash := renvoHashRange(p.src, nameStart, nameEnd)
-	i := meta.funcBuckets[hash%len(meta.funcBuckets)]
+	i := int(renvo_runtime_UnsafeInt32At(meta.funcBuckets, hash%len(meta.funcBuckets)))
 	for i >= 0 {
 		fn := &meta.funcs[i]
 		if fn.receiverType != 0 && renvoBytesEqualRange(p.src, fn.nameStart, fn.nameEnd, nameStart, nameEnd) && renvoMethodReceiverTypeMatches(meta, typ, fn.receiverType) {
 			return i
 		}
-		i = meta.funcNext[i]
+		i = int(renvo_runtime_UnsafeInt32At(meta.funcNext, i))
 	}
 	return -1
 }
@@ -16312,7 +16304,7 @@ func renvoFuncInfoFromCall(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
 		return -1
 	}
 	hash := renvoHashRange(p.src, nameStart, nameEnd)
-	i := meta.funcBuckets[hash%len(meta.funcBuckets)]
+	i := int(renvo_runtime_UnsafeInt32At(meta.funcBuckets, hash%len(meta.funcBuckets)))
 	for i >= 0 {
 		f := meta.funcs[i]
 		isMethod := f.receiverType != 0
@@ -16322,7 +16314,7 @@ func renvoFuncInfoFromCall(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
 				return i
 			}
 		}
-		i = meta.funcNext[i]
+		i = int(renvo_runtime_UnsafeInt32At(meta.funcNext, i))
 	}
 	return -1
 }
@@ -16550,7 +16542,7 @@ func renvoLinearPersistentCapacity(g *renvoLinearGen) int {
 	// The remaining slices are either fixed-size or completely populated before
 	// function emission begins. Only slices which can grow while a function is
 	// emitted need to prevent the scratch arena from being rewound.
-	return cap(a.code) + cap(a.labelPos) + cap(a.labelSet) + cap(a.relocs) + cap(a.absRelocs) + cap(a.symbols) + cap(a.symbolName) + cap(a.winImports) + cap(a.darwinImports) + cap(a.darwinImportLabels) + cap(a.darwinImportUsed) + cap(a.data) + cap(g.breakLabels) + cap(g.continueLabels) + cap(m.types) + cap(m.fields) + cap(m.captures)
+	return cap(a.code) + cap(a.labelPos) + cap(a.relocs) + cap(a.absRelocs) + cap(a.symbols) + cap(a.symbolName) + cap(a.winImports) + cap(a.darwinImports) + cap(a.darwinImportLabels) + cap(a.darwinImportUsed) + cap(a.data) + cap(g.breakLabels) + cap(g.continueLabels) + cap(m.types) + cap(m.fields) + cap(m.captures)
 }
 
 func renvoStoreIncomingCallWord(g *renvoLinearGen, word int, offset int) {

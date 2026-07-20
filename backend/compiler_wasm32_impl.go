@@ -1332,17 +1332,20 @@ func renvoWasm32Patch(a *renvoAsm, dataBase int, bssBase int) {
 	for i := 0; i+1 < len(a.relocs); i += 2 {
 		at := int(renvo_runtime_UnsafeInt32At(a.relocs, i))
 		label := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1))
-		if label >= 0 && label < len(a.labelPos) && a.labelSet[label] {
-			renvoPut32At(a.code, at, a.labelPos[label])
+		target := renvoAsmLabelPosition(a, label)
+		if target >= 0 {
+			renvoPut32At(a.code, at, target)
 		}
 	}
-	for i := 0; i < len(a.absRelocs); i++ {
-		r := a.absRelocs[i]
-		target := dataBase + r.off
-		if r.kind == renvoAbsBssReloc {
-			target = bssBase + r.off
+	for i := 0; i+2 < len(a.absRelocs); i += 3 {
+		at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i))
+		off := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1))
+		kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2))
+		target := dataBase + off
+		if kind == renvoAbsBssReloc {
+			target = bssBase + off
 		}
-		renvoPut32At(a.code, r.at, target)
+		renvoPut32At(a.code, at, target)
 	}
 }
 
@@ -1879,8 +1882,8 @@ func renvoWasm32SymbolPcs(a *renvoAsm) []int {
 	pcs := make([]int, 0, 2048)
 	for i := 0; i < len(a.symbols); i++ {
 		label := a.symbols[i].label
-		if label >= 0 && label < len(a.labelPos) && a.labelSet[label] {
-			pc := a.labelPos[label]
+		pc := renvoAsmLabelPosition(a, label)
+		if pc >= 0 {
 			if !renvoWasm32PcInList(pcs, pc) {
 				pcs = append(pcs, pc)
 			}
@@ -1897,8 +1900,8 @@ func renvoWasm32RoutinePcs(a *renvoAsm, code []byte, instrPcs []int) []int {
 	marks[0] = 1
 	for i := 0; i < len(a.symbols); i++ {
 		label := a.symbols[i].label
-		if label >= 0 && label < len(a.labelPos) && a.labelSet[label] {
-			pc := a.labelPos[label]
+		pc := renvoAsmLabelPosition(a, label)
+		if pc >= 0 {
 			if pc >= 0 && pc < len(marks) && marks[pc] == 0 {
 				pcs = append(pcs, pc)
 				marks[pc] = 1
@@ -2211,10 +2214,13 @@ func renvoWasm32NamedRoutine(a *renvoAsm, routinePcs []int, name string) int {
 				break
 			}
 		}
-		if !matched || symbol.label < 0 || symbol.label >= len(a.labelPos) || !a.labelSet[symbol.label] {
+		if !matched {
 			continue
 		}
-		return renvoWasm32FindRoutineIndex(routinePcs, a.labelPos[symbol.label])
+		pc := renvoAsmLabelPosition(a, symbol.label)
+		if pc >= 0 {
+			return renvoWasm32FindRoutineIndex(routinePcs, pc)
+		}
 	}
 	return -1
 }

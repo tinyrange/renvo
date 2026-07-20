@@ -330,13 +330,15 @@ func renvoAsmImage386(a *renvoAsm) []byte {
 
 func renvoAsmPatch386(a *renvoAsm) {
 	renvoAsmPatch(a)
-	for i := 0; i < len(a.absRelocs); i++ {
-		r := a.absRelocs[i]
-		target := a.dataOffset + r.off
-		if r.kind == renvoAbsBssReloc {
-			target = renvoAsmBssOffset(a) + r.off
+	for i := 0; i+2 < len(a.absRelocs); i += 3 {
+		at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i))
+		off := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1))
+		kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2))
+		target := a.dataOffset + off
+		if kind == renvoAbsBssReloc {
+			target = renvoAsmBssOffset(a) + off
 		}
-		renvoPut32At(a.code, r.at, renvoLinux386LoadAddress+target)
+		renvoPut32At(a.code, at, renvoLinux386LoadAddress+target)
 	}
 }
 
