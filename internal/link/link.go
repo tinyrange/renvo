@@ -889,6 +889,8 @@ func coreSymbolKeepsRuntimeName(name string) bool {
 		"renvo_runtime_ArenaPersistCheckBools",
 		"renvo_runtime_ArenaDiscard",
 		"renvo_runtime_ArenaDiscardBytes",
+		"renvo_runtime_ArenaDiscardDecls",
+		"renvo_runtime_ArenaDiscardFuncs",
 		"renvo_runtime_ArenaDiscardUnitTokens",
 		"renvo_runtime_ArenaDiscardLinkTokens",
 		"renvo_runtime_ArenaDiscardLowerTokens":

@@ -1329,10 +1329,11 @@ func renvoWasm32AppendCond(out []byte, cond int) []byte {
 }
 
 func renvoWasm32Patch(a *renvoAsm, dataBase int, bssBase int) {
-	for i := 0; i < len(a.relocs); i++ {
-		r := a.relocs[i]
-		if r.label >= 0 && r.label < len(a.labelPos) && a.labelSet[r.label] {
-			renvoPut32At(a.code, r.at, a.labelPos[r.label])
+	for i := 0; i+1 < len(a.relocs); i += 2 {
+		at := int(renvo_runtime_UnsafeInt32At(a.relocs, i))
+		label := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1))
+		if label >= 0 && label < len(a.labelPos) && a.labelSet[label] {
+			renvoPut32At(a.code, at, a.labelPos[label])
 		}
 	}
 	for i := 0; i < len(a.absRelocs); i++ {

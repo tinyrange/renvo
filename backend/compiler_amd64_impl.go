@@ -6,8 +6,12 @@ func renvoAmd64EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
 	renvoNonNil(g)
 	a := &g.asm
 	metaFn := &g.meta.funcs[fnInfoIndex]
-	fn := &g.prog.funcs[metaFn.declIndex]
-	g.locals = make([]renvoLocalInfo, renvoFunctionLocalCap(fn))
+	localCapacity := 16
+	// bodyStart points after the opening brace, unlike renvoFuncDecl.bodyStart.
+	if metaFn.bodyEnd-metaFn.bodyStart >= 512 {
+		localCapacity = 32
+	}
+	g.locals = make([]renvoLocalInfo, localCapacity)
 	g.localCount = 0
 	g.gotoLabels = nil
 	g.pendingControl = 0
@@ -31,7 +35,7 @@ func renvoAmd64EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
 	if !renvoPrepareFunctionControl(g) {
 		return false
 	}
-	if !renvoEmitLinearRange(g, fn.bodyStart+1, fn.bodyEnd) {
+	if !renvoEmitLinearRange(g, metaFn.bodyStart, metaFn.bodyEnd) {
 		return false
 	}
 	if g.deferReturnLabel > 0 {

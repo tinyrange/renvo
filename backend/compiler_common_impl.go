@@ -232,6 +232,10 @@ func renvo_runtime_ArenaDiscard(start int, end int) {}
 
 func renvo_runtime_ArenaDiscardBytes(value []byte) {}
 
+func renvo_runtime_ArenaDiscardDecls(value []renvoDecl) {}
+
+func renvo_runtime_ArenaDiscardFuncs(value []renvoFuncDecl) {}
+
 // These internal intrinsics are only used after compiler code has established
 // the corresponding index invariant. Host builds retain Go's checked access;
 // self-hosted builds lower the calls to an explicitly unsafe load.
@@ -302,7 +306,7 @@ type renvoAsm struct {
 	code                []byte
 	labelPos            []int
 	labelSet            []bool
-	relocs              []renvoLabelRef
+	relocs              []int32
 	absRelocs           []renvoAbsRef
 	symbols             []renvoAsmSymbol
 	symbolName          []byte
@@ -327,7 +331,7 @@ func renvoAsmInit(a *renvoAsm) {
 	var code []byte
 	var labelPos []int
 	var labelSet []bool
-	var relocs []renvoLabelRef
+	var relocs []int32
 	var absRelocs []renvoAbsRef
 	var symbols []renvoAsmSymbol
 	var symbolName []byte
@@ -338,7 +342,7 @@ func renvoAsmInit(a *renvoAsm) {
 		code = make([]byte, 0, 2097152)
 		labelPos = make([]int, 0, 16384)
 		labelSet = make([]bool, 0, 16384)
-		relocs = make([]renvoLabelRef, 0, 32768)
+		relocs = make([]int32, 0, 65536)
 		absRelocs = make([]renvoAbsRef, 0, 16384)
 		symbols = make([]renvoAsmSymbol, 0, 1024)
 		if renvoCompilerStripSymbols && renvoTargetArch != renvoArchWasm32 {
@@ -348,16 +352,23 @@ func renvoAsmInit(a *renvoAsm) {
 		code = make([]byte, 0, 655360)
 		labelPos = make([]int, 0, 32768)
 		labelSet = make([]bool, 0, 32768)
-		relocs = make([]renvoLabelRef, 0, 65536)
+		relocs = make([]int32, 0, 131072)
 		absRelocs = make([]renvoAbsRef, 0, 32768)
 		symbols = make([]renvoAsmSymbol, 0, 2048)
 	} else {
 		code = make([]byte, 0, 2097152)
 		labelPos = make([]int, 0, 32768)
 		labelSet = make([]bool, 0, 32768)
-		relocs = make([]renvoLabelRef, 0, 65536)
-		absRelocs = make([]renvoAbsRef, 0, 32768)
-		symbols = make([]renvoAsmSymbol, 0, 4096)
+		relocs = make([]int32, 0, 131072)
+		// Absolute relocations are much less frequent than label references. A
+		// self-host build uses fewer than 2,800 on every native target, so avoid
+		// touching a 32,768-entry arena allocation for each compilation.
+		absRelocs = make([]renvoAbsRef, 0, 4096)
+		if renvoCompilerStripSymbols && renvoTargetArch != renvoArchWasm32 {
+			symbols = make([]renvoAsmSymbol, 0, 0)
+		} else {
+			symbols = make([]renvoAsmSymbol, 0, 4096)
+		}
 	}
 	data = make([]byte, 0, 16384)
 	if renvoCompilerStripSymbols && renvoTargetArch != renvoArchWasm32 {
@@ -447,7 +458,7 @@ func renvoAsmAddAbsReloc(a *renvoAsm, at int, off int, kind int) {
 
 func renvoAsmAddReloc(a *renvoAsm, at int, label int) {
 	renvoNonNil(a)
-	a.relocs = append(a.relocs, renvoLabelRef{at: at & 2147483647, label: label & 2147483647})
+	a.relocs = append(a.relocs, int32(at&2147483647), int32(label&2147483647))
 }
 
 func renvoAsmAddFuncSymbol(a *renvoAsm, src []byte, nameStart int, nameEnd int, label int) {
@@ -528,12 +539,12 @@ func renvoAmd64RelaxBranches(a *renvoAsm) {
 	// representation used one byte plus one int32 for every byte of generated
 	// code, then allocated a second full code buffer. Large self-hosted builds
 	// therefore retained several megabytes of scratch until process exit.
-	branches := make([]int32, 0, len(a.relocs))
-	savings := make([]int32, 0, len(a.relocs))
+	branches := make([]int32, 0, len(a.relocs)/2)
+	savings := make([]int32, 0, len(a.relocs)/2)
 	totalSaving := 0
-	for i := 0; i < len(a.relocs); i++ {
-		at := a.relocs[i].at & 2147483647
-		label := a.relocs[i].label & 2147483647
+	for i := 0; i+1 < len(a.relocs); i += 2 {
+		at := int(renvo_runtime_UnsafeInt32At(a.relocs, i)) & 2147483647
+		label := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1)) & 2147483647
 		if label < 0 || label >= len(a.labelPos) || label >= len(a.labelSet) || !a.labelSet[label] {
 			continue
 		}
@@ -561,9 +572,9 @@ func renvoAmd64RelaxBranches(a *renvoAsm) {
 			// instruction bytes are still available. The high bits are unused
 			// after renvoAsmAddReloc masks its inputs; using them avoids looking
 			// the branch up again after code compaction.
-			a.relocs[i].label = label | -2147483648
+			a.relocs[i+1] = int32(label | -2147483648)
 			if kind != 0 {
-				a.relocs[i].at = at | -2147483648
+				a.relocs[i] = int32(at | -2147483648)
 			}
 			totalSaving += saving
 			branches = append(branches, int32(start*2+kind))
@@ -600,13 +611,14 @@ func renvoAmd64RelaxBranches(a *renvoAsm) {
 		}
 	}
 	relocCount := 0
-	for i := 0; i < len(a.relocs); i++ {
-		r := a.relocs[i]
-		at := r.at & 2147483647
-		label := r.label & 2147483647
-		if r.label < 0 && label >= 0 && label < len(a.labelPos) && label < len(a.labelSet) && a.labelSet[label] {
+	for i := 0; i+1 < len(a.relocs); i += 2 {
+		rawAt := int(renvo_runtime_UnsafeInt32At(a.relocs, i))
+		rawLabel := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1))
+		at := rawAt & 2147483647
+		label := rawLabel & 2147483647
+		if rawLabel < 0 && label >= 0 && label < len(a.labelPos) && label < len(a.labelSet) && a.labelSet[label] {
 			start := at - 1
-			if r.at < 0 {
+			if rawAt < 0 {
 				start = at - 2
 			}
 			newAt := renvoAmd64RelaxedPosition(branches, savings, start) + 1
@@ -617,10 +629,9 @@ func renvoAmd64RelaxBranches(a *renvoAsm) {
 				continue
 			}
 		}
-		r.at = renvoAmd64RelaxedPosition(branches, savings, at)
-		r.label = label
-		a.relocs[relocCount] = r
-		relocCount++
+		a.relocs[relocCount] = int32(renvoAmd64RelaxedPosition(branches, savings, at))
+		a.relocs[relocCount+1] = int32(label)
+		relocCount += 2
 	}
 	a.relocs = a.relocs[:relocCount]
 	for i := 0; i < len(a.absRelocs); i++ {
@@ -649,9 +660,9 @@ func renvoAmd64RelaxedPosition(branches []int32, savings []int32, position int) 
 func renvoAsmPatch(a *renvoAsm) {
 	renvoNonNil(a)
 	if renvoTargetArch == renvoArchArm {
-		for i := 0; i < len(a.relocs); i++ {
-			at := a.relocs[i].at & 2147483647
-			label := a.relocs[i].label & 2147483647
+		for i := 0; i+1 < len(a.relocs); i += 2 {
+			at := int(renvo_runtime_UnsafeInt32At(a.relocs, i)) & 2147483647
+			label := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1)) & 2147483647
 			if label < 0 {
 				continue
 			}
@@ -672,9 +683,9 @@ func renvoAsmPatch(a *renvoAsm) {
 		return
 	}
 	if renvoTargetArch == renvoArchAarch64 {
-		for i := 0; i < len(a.relocs); i++ {
-			at := a.relocs[i].at & 2147483647
-			label := a.relocs[i].label & 2147483647
+		for i := 0; i+1 < len(a.relocs); i += 2 {
+			at := int(renvo_runtime_UnsafeInt32At(a.relocs, i)) & 2147483647
+			label := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1)) & 2147483647
 			if label < 0 {
 				continue
 			}
@@ -701,9 +712,9 @@ func renvoAsmPatch(a *renvoAsm) {
 	if renvoTargetArch == renvoArchAmd64 {
 		renvoAmd64RelaxBranches(a)
 	}
-	for i := 0; i < len(a.relocs); i++ {
-		at := a.relocs[i].at & 2147483647
-		label := a.relocs[i].label & 2147483647
+	for i := 0; i+1 < len(a.relocs); i += 2 {
+		at := int(renvo_runtime_UnsafeInt32At(a.relocs, i)) & 2147483647
+		label := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1)) & 2147483647
 		if label < 0 {
 			continue
 		}
@@ -1134,9 +1145,9 @@ func renvoAppendWinImportEntry(a *renvoAsm, layout *renvoWinImportLayout, iltOff
 
 func renvoAsmPatchWindows(a *renvoAsm, layout renvoWinImportLayout) {
 	renvoNonNil(a)
-	for i := 0; i < len(a.relocs); i++ {
-		r := a.relocs[i]
-		label := r.label
+	for i := 0; i+1 < len(a.relocs); i += 2 {
+		at := int(renvo_runtime_UnsafeInt32At(a.relocs, i))
+		label := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1))
 		if label < 0 {
 			continue
 		}
@@ -1147,8 +1158,8 @@ func renvoAsmPatchWindows(a *renvoAsm, layout renvoWinImportLayout) {
 			continue
 		}
 		target := a.labelPos[label]
-		disp := target - (r.at + 4)
-		renvoPut32At(a.code, r.at, disp)
+		disp := target - (at + 4)
+		renvoPut32At(a.code, at, disp)
 	}
 	if a.dataOffset == 0 {
 		a.dataOffset = a.codeOffset + len(a.code)
@@ -12689,6 +12700,12 @@ func renvoRuntimeIntrinsicID(src []byte, start int, end int) int {
 		return 13
 	}
 	if hash1 == 1767715841 && hash2 == 3850 {
+		return 13
+	}
+	if hash1 == 1538485303 && hash2 == 3192 {
+		return 13
+	}
+	if hash1 == 1532091655 && hash2 == 3212 {
 		return 13
 	}
 	return 0

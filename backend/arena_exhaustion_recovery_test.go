@@ -23,6 +23,8 @@ func TestRuntimeIntrinsicFingerprintTable(t *testing.T) {
 		{name: "renvo_runtime_ArenaPersistCheckTypeRefs", id: 8},
 		{name: "renvo_runtime_ArenaDiscard", id: 12},
 		{name: "renvo_runtime_ArenaDiscardBytes", id: 13},
+		{name: "renvo_runtime_ArenaDiscardDecls", id: 13},
+		{name: "renvo_runtime_ArenaDiscardFuncs", id: 13},
 		{name: "renvo_runtime_ArenaDiscardLinkTokens", id: 13},
 		{name: "renvo_runtime_ArenaDiscardLowerTokens", id: 13},
 		{name: "renvo_runtime_ArenaDiscardUnitTokens", id: 13},

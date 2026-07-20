@@ -1513,12 +1513,7 @@ func renvo386EnsureAppend8Helper(g *renvoLinearGen) int {
 	g.append8Label = renvoAsmNewLabel(a)
 	afterLabel := renvoAsmNewLabel(a)
 	renvoAsmJmpMarkLabel(a, afterLabel, g.append8Label)
-	renvoAsmEmit16(a, 0x0e8b)
-	renvoAsmEmit16(a, 0x078b)
-	renvoAsmEmit24(a, 0x081488)
-	renvoAsmIncTertiary(a)
-	renvoAsmEmit16(a, 0x0e89)
-	renvoAsmRet(a)
+	renvoAsmEmitText(a, "\x8b\x0e\x8b\x07\x88\x14\x08\x41\x89\x0e\xc3")
 	renvoAsmMarkLabel(a, afterLabel)
 	return g.append8Label
 }
@@ -1532,12 +1527,7 @@ func renvo386EnsureAppend64Helper(g *renvoLinearGen) int {
 	g.append64Label = renvoAsmNewLabel(a)
 	afterLabel := renvoAsmNewLabel(a)
 	renvoAsmJmpMarkLabel(a, afterLabel, g.append64Label)
-	renvoAsmEmit16(a, 0x0e8b)
-	renvoAsmEmit16(a, 0x078b)
-	renvoAsmEmit24(a, 0xc81489)
-	renvoAsmIncTertiary(a)
-	renvoAsmEmit16(a, 0x0e89)
-	renvoAsmRet(a)
+	renvoAsmEmitText(a, "\x8b\x0e\x8b\x07\x89\x14\xc8\x41\x89\x0e\xc3")
 	renvoAsmMarkLabel(a, afterLabel)
 	return g.append64Label
 }

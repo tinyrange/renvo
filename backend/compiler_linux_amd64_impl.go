@@ -78,6 +78,10 @@ func renvoTryCompileScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) renvoCo
 		var result renvoCompileResult
 		return result
 	}
+	// Metadata building consumes the decoded declaration records completely;
+	// amd64 emission uses the canonical body ranges in renvoFuncInfo.
+	renvo_runtime_ArenaDiscardDecls(p.decls)
+	renvo_runtime_ArenaDiscardFuncs(p.funcs)
 	var g renvoLinearGen
 	g.prog = p
 	g.meta = meta
