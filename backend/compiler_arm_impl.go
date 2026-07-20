@@ -504,8 +504,9 @@ func renvoArmAsmPatchMovRegImmAt(a *renvoAsm, at int, reg int, imm int) {
 
 func renvoArmAsmMovRegAbs(a *renvoAsm, reg int, off int, kind int) {
 	at := len(a.code)
-	renvoArmAsmMovRegImm(a, reg, 0)
-	renvoArmAsmEmit(a, 0xe3400000|(reg<<12))
+	renvoAsmEmit32(a, 0xe3000000|(reg<<12))
+	renvoAsmEmit32(a, 0xe3400000|(reg<<12))
+	renvoAsmEmit32(a, 0xe08f0000|(reg<<12)|reg)
 	renvoAsmAddAbsReloc(a, at, off, kind)
 }
 

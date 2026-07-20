@@ -33,7 +33,7 @@ func TestLinuxImagesSeparateExecutableAndWritableLoads(t *testing.T) {
 			t.Fatalf("parse %s: %v", target, err)
 		}
 		wantType := elf.ET_EXEC
-		if target == "linux/amd64" || target == "linux/aarch64" {
+		if target == "linux/amd64" || target == "linux/aarch64" || target == "linux/arm" {
 			wantType = elf.ET_DYN
 		}
 		if file.Type != wantType {
@@ -134,6 +134,33 @@ func TestLinuxNativePIELoadsAtRandomizedAddresses(t *testing.T) {
 	}
 	if len(bases) < 2 {
 		t.Fatalf("PIE used one load address across four runs: %v", bases)
+	}
+}
+
+func TestLinuxArmPIERunsAtAlternateBases(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("requires Linux qemu-user")
+	}
+	qemu, err := exec.LookPath("qemu-arm")
+	if err != nil {
+		t.Skip("qemu-arm is not installed")
+	}
+	image, ok := RenvoCompileSourceToBytesStrip(executableLayoutSmokeSource, "linux/arm", true)
+	if !ok {
+		t.Fatal("compile Linux ARM PIE")
+	}
+	path := t.TempDir() + "/arm-pie"
+	if err := os.WriteFile(path, image, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, base := range []string{"0x10000000", "0x20000000", "0x30000000"} {
+		output, err := exec.Command(qemu, "-B", base, path).CombinedOutput()
+		if err != nil {
+			t.Fatalf("run ARM PIE at guest base %s: %v: %s", base, err, output)
+		}
+		if string(output) != "PASS\n" {
+			t.Fatalf("ARM PIE at guest base %s output = %q", base, output)
+		}
 	}
 }
 
