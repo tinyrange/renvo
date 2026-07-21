@@ -66,8 +66,9 @@ func scanTokens(src []byte) ([]Token, bool) {
 				i++
 			}
 			kind := TokenIdent
-			if i-start <= 11 {
-				kind = keywordKind(src, start, i)
+			size := i - start
+			if size >= 2 && size <= 9 || size == 11 {
+				kind = keywordKind(src, start, i, c)
 			}
 			tokens = append(tokens, MakeToken(kind, start, i, line))
 			continue
@@ -294,101 +295,110 @@ func isThreeByteOperator(a byte, b byte, c byte) bool {
 	return false
 }
 
-func keywordKind(src []byte, start int, end int) int {
+func keywordKind(src []byte, start int, end int, first byte) int {
 	n := end - start
 	if n > 11 {
 		return TokenIdent
 	}
+	last := src[end-1]
 	if n == 2 {
-		if src[start] == 'i' && src[end-1] == 'f' && bytesEqualText(src, start, end, "if") {
+		if first == 'i' && last == 'f' && bytesEqualText(src, start, end, "if") {
 			return TokenIf
 		}
-		if src[start] == 'g' && src[end-1] == 'o' && bytesEqualText(src, start, end, "go") {
+		if first == 'g' && last == 'o' && bytesEqualText(src, start, end, "go") {
 			return TokenGo
 		}
+		return TokenIdent
 	}
 	if n == 3 {
-		if src[start] == 'v' && src[end-1] == 'r' && bytesEqualText(src, start, end, "var") {
+		if first == 'v' && last == 'r' && bytesEqualText(src, start, end, "var") {
 			return TokenVar
 		}
-		if src[start] == 'f' && src[end-1] == 'r' && bytesEqualText(src, start, end, "for") {
+		if first == 'f' && last == 'r' && bytesEqualText(src, start, end, "for") {
 			return TokenFor
 		}
-		if src[start] == 'm' && src[end-1] == 'p' && bytesEqualText(src, start, end, "map") {
+		if first == 'm' && last == 'p' && bytesEqualText(src, start, end, "map") {
 			return TokenMap
 		}
+		return TokenIdent
 	}
 	if n == 4 {
-		if src[start] == 't' && src[end-1] == 'e' && bytesEqualText(src, start, end, "type") {
+		if first == 't' && last == 'e' && bytesEqualText(src, start, end, "type") {
 			return TokenType
 		}
-		if src[start] == 'f' && src[end-1] == 'c' && bytesEqualText(src, start, end, "func") {
+		if first == 'f' && last == 'c' && bytesEqualText(src, start, end, "func") {
 			return TokenFunc
 		}
-		if src[start] == 'e' && src[end-1] == 'e' && bytesEqualText(src, start, end, "else") {
+		if first == 'e' && last == 'e' && bytesEqualText(src, start, end, "else") {
 			return TokenElse
 		}
-		if src[start] == 'g' && src[end-1] == 'o' && bytesEqualText(src, start, end, "goto") {
+		if first == 'g' && last == 'o' && bytesEqualText(src, start, end, "goto") {
 			return TokenGoto
 		}
-		if src[start] == 'c' && src[end-1] == 'e' && bytesEqualText(src, start, end, "case") {
+		if first == 'c' && last == 'e' && bytesEqualText(src, start, end, "case") {
 			return TokenCase
 		}
-		if src[start] == 'c' && src[end-1] == 'n' && bytesEqualText(src, start, end, "chan") {
+		if first == 'c' && last == 'n' && bytesEqualText(src, start, end, "chan") {
 			return TokenChan
 		}
+		return TokenIdent
 	}
 	if n == 5 {
-		if src[start] == 'c' && src[end-1] == 't' && bytesEqualText(src, start, end, "const") {
+		if first == 'c' && last == 't' && bytesEqualText(src, start, end, "const") {
 			return TokenConst
 		}
-		if src[start] == 'b' && src[end-1] == 'k' && bytesEqualText(src, start, end, "break") {
+		if first == 'b' && last == 'k' && bytesEqualText(src, start, end, "break") {
 			return TokenBreak
 		}
-		if src[start] == 'r' && src[end-1] == 'e' && bytesEqualText(src, start, end, "range") {
+		if first == 'r' && last == 'e' && bytesEqualText(src, start, end, "range") {
 			return TokenRange
 		}
-		if src[start] == 'd' && src[end-1] == 'r' && bytesEqualText(src, start, end, "defer") {
+		if first == 'd' && last == 'r' && bytesEqualText(src, start, end, "defer") {
 			return TokenDefer
 		}
+		return TokenIdent
 	}
 	if n == 6 {
-		if src[start] == 's' && src[end-1] == 't' && bytesEqualText(src, start, end, "struct") {
+		if first == 's' && last == 't' && bytesEqualText(src, start, end, "struct") {
 			return TokenStruct
 		}
-		if src[start] == 'r' && src[end-1] == 'n' && bytesEqualText(src, start, end, "return") {
+		if first == 'r' && last == 'n' && bytesEqualText(src, start, end, "return") {
 			return TokenReturn
 		}
-		if src[start] == 's' && src[end-1] == 'h' && bytesEqualText(src, start, end, "switch") {
+		if first == 's' && last == 'h' && bytesEqualText(src, start, end, "switch") {
 			return TokenSwitch
 		}
-		if src[start] == 'i' && src[end-1] == 't' && bytesEqualText(src, start, end, "import") {
+		if first == 'i' && last == 't' && bytesEqualText(src, start, end, "import") {
 			return TokenImport
 		}
-		if src[start] == 's' && src[end-1] == 't' && bytesEqualText(src, start, end, "select") {
+		if first == 's' && last == 't' && bytesEqualText(src, start, end, "select") {
 			return TokenSelect
 		}
+		return TokenIdent
 	}
 	if n == 7 {
-		if src[start] == 'p' && src[end-1] == 'e' && bytesEqualText(src, start, end, "package") {
+		if first == 'p' && last == 'e' && bytesEqualText(src, start, end, "package") {
 			return TokenPackage
 		}
-		if src[start] == 'd' && src[end-1] == 't' && bytesEqualText(src, start, end, "default") {
+		if first == 'd' && last == 't' && bytesEqualText(src, start, end, "default") {
 			return TokenDefault
 		}
+		return TokenIdent
 	}
 	if n == 8 {
-		if src[start] == 'c' && src[end-1] == 'e' && bytesEqualText(src, start, end, "continue") {
+		if first == 'c' && last == 'e' && bytesEqualText(src, start, end, "continue") {
 			return TokenContinue
 		}
+		return TokenIdent
 	}
 	if n == 9 {
-		if src[start] == 'i' && src[end-1] == 'e' && bytesEqualText(src, start, end, "interface") {
+		if first == 'i' && last == 'e' && bytesEqualText(src, start, end, "interface") {
 			return TokenInterface
 		}
+		return TokenIdent
 	}
 	if n == 11 {
-		if src[start] == 'f' && src[end-1] == 'h' && bytesEqualText(src, start, end, "fallthrough") {
+		if first == 'f' && last == 'h' && bytesEqualText(src, start, end, "fallthrough") {
 			return TokenFallthrough
 		}
 	}

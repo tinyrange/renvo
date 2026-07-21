@@ -112,15 +112,34 @@ func TestScanCommentsAndLiterals(t *testing.T) {
 }
 
 func TestScanFrontendKeywords(t *testing.T) {
-	src := []byte("interface map defer go select chan fallthrough")
+	src := []byte("break case chan const continue default defer else fallthrough for func go goto if import interface map package range return select struct switch type var")
 	toks := Scan(src)
-	want := []int{TokenInterface, TokenMap, TokenDefer, TokenGo, TokenSelect, TokenChan, TokenFallthrough, TokenEOF}
+	want := []int{
+		TokenBreak, TokenCase, TokenChan, TokenConst, TokenContinue,
+		TokenDefault, TokenDefer, TokenElse, TokenFallthrough, TokenFor,
+		TokenFunc, TokenGo, TokenGoto, TokenIf, TokenImport, TokenInterface,
+		TokenMap, TokenPackage, TokenRange, TokenReturn, TokenSelect, TokenStruct,
+		TokenSwitch, TokenType, TokenVar, TokenEOF,
+	}
 	if len(toks) != len(want) {
 		t.Fatalf("token count = %d, want %d", len(toks), len(want))
 	}
 	for i := 0; i < len(want); i++ {
 		if toks[i].KindLine&255 != want[i] {
 			t.Fatalf("token %d kind = %d, want %d", i, toks[i].KindLine&255, want[i])
+		}
+	}
+}
+
+func TestScanKeywordLengthFastPathsRemainIdentifiers(t *testing.T) {
+	src := []byte("i identifier tenletters fallthrougi")
+	toks := Scan(src)
+	if len(toks) != 5 {
+		t.Fatalf("token count = %d, want 5", len(toks))
+	}
+	for i := 0; i < len(toks)-1; i++ {
+		if toks[i].KindLine&255 != TokenIdent {
+			t.Fatalf("token %d kind = %d, want identifier", i, toks[i].KindLine&255)
 		}
 	}
 }

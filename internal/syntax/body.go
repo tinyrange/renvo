@@ -69,7 +69,7 @@ type Expr struct {
 
 func ParseFuncBody(file File, fn FuncDecl) Body {
 	body := Body{Ok: true, Error: BodyOK, ErrorTok: -1}
-	return parseFuncBody(body, file, fn)
+	return parseFuncBody(body, &file, fn)
 }
 
 // ParseFuncBodyStatements validates and records the statement tree without
@@ -78,10 +78,10 @@ func ParseFuncBody(file File, fn FuncDecl) Body {
 // to the source token count.
 func ParseFuncBodyStatements(file File, fn FuncDecl) Body {
 	body := Body{Ok: true, Error: BodyOK, ErrorTok: -1, stmtsOnly: true}
-	return parseFuncBody(body, file, fn)
+	return parseFuncBody(body, &file, fn)
 }
 
-func parseFuncBody(body Body, file File, fn FuncDecl) Body {
+func parseFuncBody(body Body, file *File, fn FuncDecl) Body {
 	closeTok := fn.BodyEnd - 1
 	if fn.BodyStart < 0 || closeTok <= fn.BodyStart || !tokCharIs(file.Src, file.Tokens, fn.BodyStart, '{') || !tokCharIs(file.Src, file.Tokens, closeTok, '}') {
 		return bodyFail(body, BodyErrFunc, fn.BodyStart)
@@ -89,7 +89,7 @@ func parseFuncBody(body Body, file File, fn FuncDecl) Body {
 	return parseBlockInto(body, file, fn.BodyStart, closeTok)
 }
 
-func parseBlockInto(body Body, file File, openTok int, closeTok int) Body {
+func parseBlockInto(body Body, file *File, openTok int, closeTok int) Body {
 	if !tokCharIs(file.Src, file.Tokens, openTok, '{') || !tokCharIs(file.Src, file.Tokens, closeTok, '}') {
 		return bodyFail(body, BodyErrBlock, openTok)
 	}
@@ -123,7 +123,7 @@ func parseBlockInto(body Body, file File, openTok int, closeTok int) Body {
 	return body
 }
 
-func parseStmt(body Body, file File, start int, limit int) (int, Body) {
+func parseStmt(body Body, file *File, start int, limit int) (int, Body) {
 	kind := file.Tokens[start].KindLine & 255
 	if kind == TokenReturn {
 		end := findStmtEnd(file, start+1, limit)
@@ -227,7 +227,7 @@ func parseStmt(body Body, file File, start int, limit int) (int, Body) {
 	return end, body
 }
 
-func parseBlockStmt(body Body, file File, start int, limit int, stmtKind int) (int, Body) {
+func parseBlockStmt(body Body, file *File, start int, limit int, stmtKind int) (int, Body) {
 	bodyStart := findStmtBlockStart(file, start+1, limit)
 	if bodyStart < 0 {
 		return start, bodyFail(body, BodyErrBlock, start)
@@ -283,7 +283,7 @@ func parseBlockStmt(body Body, file File, start int, limit int, stmtKind int) (i
 	return stmt.EndTok, body
 }
 
-func findIfEnd(file File, start int, limit int) int {
+func findIfEnd(file *File, start int, limit int) int {
 	bodyStart := findStmtBlockStart(file, start+1, limit)
 	if bodyStart < 0 {
 		return -1
@@ -309,7 +309,7 @@ func findIfEnd(file File, start int, limit int) int {
 	return bodyEnd
 }
 
-func appendStmtExpr(body Body, file File, stmt Stmt) Body {
+func appendStmtExpr(body Body, file *File, stmt Stmt) Body {
 	body.Stmts = append(body.Stmts, stmt)
 	if !body.stmtsOnly && stmt.ExprStart >= 0 && stmt.ExprEnd > stmt.ExprStart {
 		body.Exprs = append(body.Exprs, Expr{
@@ -335,7 +335,7 @@ func newStmt(kind int, start int, end int) Stmt {
 	}
 }
 
-func findStmtBlockStart(file File, start int, limit int) int {
+func findStmtBlockStart(file *File, start int, limit int) int {
 	i := start
 	parenDepth := 0
 	bracketDepth := 0
@@ -365,7 +365,7 @@ func findStmtBlockStart(file File, start int, limit int) int {
 	return -1
 }
 
-func findStmtEnd(file File, start int, limit int) int {
+func findStmtEnd(file *File, start int, limit int) int {
 	if start < limit && start > 0 && TokenLine(file.Tokens[start]) != TokenLine(file.Tokens[start-1]) {
 		return start
 	}
@@ -414,7 +414,7 @@ func findStmtEnd(file File, start int, limit int) int {
 	return limit
 }
 
-func findCaseHeaderEnd(file File, start int, limit int) int {
+func findCaseHeaderEnd(file *File, start int, limit int) int {
 	i := start
 	for i < limit {
 		if tokCharIs(file.Src, file.Tokens, i, ':') {
@@ -425,7 +425,7 @@ func findCaseHeaderEnd(file File, start int, limit int) int {
 	return limit
 }
 
-func findTopLevelChar(file File, start int, limit int, c byte) int {
+func findTopLevelChar(file *File, start int, limit int, c byte) int {
 	i := start
 	parenDepth := 0
 	bracketDepth := 0
@@ -463,11 +463,11 @@ func findTopLevelChar(file File, start int, limit int, c byte) int {
 	return -1
 }
 
-func spanHasAssign(file File, start int, end int) bool {
+func spanHasAssign(file *File, start int, end int) bool {
 	return findAssign(file, start, end) >= 0
 }
 
-func findAssign(file File, start int, end int) int {
+func findAssign(file *File, start int, end int) int {
 	for i := start; i < end; i++ {
 		if tokenIsAssign(file, file.Tokens[i]) {
 			return i
@@ -476,7 +476,7 @@ func findAssign(file File, start int, end int) int {
 	return -1
 }
 
-func tokenIsAssign(file File, token Token) bool {
+func tokenIsAssign(file *File, token Token) bool {
 	if token.KindLine&255 != TokenOperator || token.Start < 0 || token.End > len(file.Src) {
 		return false
 	}
@@ -496,7 +496,7 @@ func tokenIsAssign(file File, token Token) bool {
 	return false
 }
 
-func classifyExpr(file File, start int, end int) int {
+func classifyExpr(file *File, start int, end int) int {
 	start, end = trimSpan(file, start, end)
 	if start >= end {
 		return ExprOther
@@ -531,7 +531,7 @@ func classifyExpr(file File, start int, end int) int {
 	return ExprOther
 }
 
-func hasTopLevelBinary(file File, start int, end int) bool {
+func hasTopLevelBinary(file *File, start int, end int) bool {
 	parenDepth := 0
 	bracketDepth := 0
 	braceDepth := 0
@@ -566,7 +566,7 @@ func hasTopLevelBinary(file File, start int, end int) bool {
 	return false
 }
 
-func isBinaryOp(file File, i int) bool {
+func isBinaryOp(file *File, i int) bool {
 	if tokenTextIs(file.Src, file.Tokens[i], "||") || tokenTextIs(file.Src, file.Tokens[i], "&&") {
 		return true
 	}
@@ -597,7 +597,7 @@ func isBinaryOp(file File, i int) bool {
 	return tokenTextIs(file.Src, file.Tokens[i], "&^")
 }
 
-func isUnaryExpr(file File, start int) bool {
+func isUnaryExpr(file *File, start int) bool {
 	if tokenTextIs(file.Src, file.Tokens[start], "+") || tokenTextIs(file.Src, file.Tokens[start], "-") {
 		return true
 	}
@@ -610,7 +610,7 @@ func isUnaryExpr(file File, start int) bool {
 	return tokenTextIs(file.Src, file.Tokens[start], "<-")
 }
 
-func spanHasCall(file File, start int, end int) bool {
+func spanHasCall(file *File, start int, end int) bool {
 	for i := start + 1; i < end; i++ {
 		if tokCharIs(file.Src, file.Tokens, i, '(') {
 			return true
@@ -619,7 +619,7 @@ func spanHasCall(file File, start int, end int) bool {
 	return false
 }
 
-func spanHasChar(file File, start int, end int, c byte) bool {
+func spanHasChar(file *File, start int, end int, c byte) bool {
 	for i := start; i < end; i++ {
 		if tokCharIs(file.Src, file.Tokens, i, c) {
 			return true
@@ -628,7 +628,7 @@ func spanHasChar(file File, start int, end int, c byte) bool {
 	return false
 }
 
-func trimSpan(file File, start int, end int) (int, int) {
+func trimSpan(file *File, start int, end int) (int, int) {
 	for start < end && tokCharIs(file.Src, file.Tokens, start, ';') {
 		start++
 	}
@@ -638,14 +638,14 @@ func trimSpan(file File, start int, end int) (int, int) {
 	return start, end
 }
 
-func skipStmtSeparators(file File, start int) int {
+func skipStmtSeparators(file *File, start int) int {
 	for start < len(file.Tokens) && tokCharIs(file.Src, file.Tokens, start, ';') {
 		start++
 	}
 	return start
 }
 
-func lineContinues(file File, prev int, next int) bool {
+func lineContinues(file *File, prev int, next int) bool {
 	if prev < 0 || next < 0 || prev >= len(file.Tokens) || next >= len(file.Tokens) {
 		return false
 	}
