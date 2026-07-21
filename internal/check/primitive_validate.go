@@ -18,13 +18,14 @@ const (
 const definitePrimitiveParamLimit = 10
 
 func invalidDefiniteLiteralBinary(file syntax.File, op int, left string, right string) bool {
-	if tokenTextIs(&file, op, "&&") || tokenTextIs(&file, op, "||") {
+	kind := exprBinaryOperatorKind(file, op)
+	if kind == exprBinaryLogical {
 		return left != "bool" || right != "bool"
 	}
-	if tokenTextIs(&file, op, "==") || tokenTextIs(&file, op, "!=") || tokenTextIs(&file, op, "<") || tokenTextIs(&file, op, "<=") || tokenTextIs(&file, op, ">") || tokenTextIs(&file, op, ">=") {
+	if kind == exprBinaryCompare {
 		return left != right
 	}
-	if tokenTextIs(&file, op, "+") && left == "string" && right == "string" {
+	if kind == exprBinaryAdd && left == "string" && right == "string" {
 		return false
 	}
 	return left != "int" || right != "int"

@@ -77,6 +77,51 @@ func buildFromFSCompactWithModuleCache(args []string, workDir string, stdRoot st
 	return buildFromFS(args, workDir, stdRoot, moduleCache, fs, true)
 }
 
+// buildFromFSOneShotCompactWithModuleCache keeps transient arena reclamation
+// without initializing persistent incremental-build state. A command-line
+// compiler process performs one build, so populating editor caches only adds
+// cold serialization work and memory that cannot be reused.
+func buildFromFSOneShotCompactWithModuleCache(args []string, workDir string, stdRoot string, moduleCache string, fs SourceFS) BuildResult {
+	result := newBuildResult()
+	options := ParseOptions(args)
+	result.Options = options
+	if !options.Ok {
+		return buildFail(result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
+	}
+	sourcesStart := arena.Mark()
+	var sources SourceResult
+	if len(options.Files) > 0 {
+		sources = CollectSourceFilesForTargetTagsWithModuleCache(workDir, stdRoot, options.Files, options.Target, options.Tags, moduleCache, fs)
+	} else {
+		sources = CollectSourcesForTargetTagsWithModuleCache(workDir, stdRoot, options.Package, options.Target, options.Tags, moduleCache, fs)
+	}
+	sourcesEnd := arena.Mark()
+	result.Sources = sources
+	if !sources.Ok {
+		return buildFail(result, BuildErrSource, "", sources.ErrorPath, -1, -1, -1, -1)
+	}
+	rootArg := options.Package
+	if len(options.Files) > 0 {
+		rootArg = sources.Root.Dir
+	}
+	var built pipeline.Result
+	if options.EmitUnit {
+		// An emitted unit is a persistent interchange artifact. Preserve package
+		// ownership and cache-key metadata so host and self-hosted frontends emit
+		// the same canonical bytes.
+		built = pipeline.BuildUnit(workDir, stdRoot, rootArg, sources.Files)
+	} else {
+		built = pipeline.BuildUnitWithTransientFiles(workDir, stdRoot, rootArg, sources.Files, sourcesStart, sourcesEnd)
+	}
+	result.Pipeline = built
+	if !built.Ok {
+		return buildFail(result, BuildErrPipeline, "", "", -1, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
+	}
+	result.Unit = built.Link.Data
+	result.Sources = SourceResult{}
+	return result
+}
+
 func buildFromFS(args []string, workDir string, stdRoot string, moduleCache string, fs SourceFS, compact bool) BuildResult {
 	if compact {
 		session := BeginFSBuildSession(args, workDir, stdRoot, moduleCache, fs, true)

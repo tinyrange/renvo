@@ -320,23 +320,39 @@ func renvoCompileParsedProgramArena(prog *renvoProgram, target int, arenaSize in
 		return result
 	}
 	meta.arenaSize = renvoResolveArenaSize(target, arenaSize)
-	return renvoCompileProgramWithMeta(prog, &meta, target)
+	return renvoCompileProgramWithMetaScratch(prog, &meta, target)
 }
 
-func renvoCompileProgramWithMeta(prog *renvoProgram, meta *renvoMeta, target int) renvoCompileResult {
+func renvoCompileProgramWithMetaScratch(prog *renvoProgram, meta *renvoMeta, target int) renvoCompileResult {
 	if target == renvoTargetLinux386 || target == renvoTargetWindows386 {
-		return renvoTryCompileScalarProgram386(prog, meta)
+		return renvoTryCompileScalarProgram386Scratch(prog, meta)
 	}
 	if target == renvoTargetLinuxAarch64 || target == renvoTargetDarwinArm64 || target == renvoTargetWindowsArm64 {
-		return renvoTryCompileScalarProgramAarch64(prog, meta)
+		return renvoTryCompileScalarProgramAarch64Scratch(prog, meta)
 	}
 	if target == renvoTargetLinuxArm {
-		return renvoTryCompileScalarProgramArm(prog, meta)
+		return renvoTryCompileScalarProgramArmScratch(prog, meta)
 	}
 	if target == renvoTargetWasiWasm32 {
 		return renvoTryCompileScalarProgramWasm32(prog, meta)
 	}
-	return renvoTryCompileScalarProgramAmd64(prog, meta)
+	return renvoTryCompileScalarProgramAmd64Scratch(prog, meta)
+}
+
+func renvoCompileProgramWithMeta(prog *renvoProgram, meta *renvoMeta, target int) renvoCompileResult {
+	if target == renvoTargetLinux386 || target == renvoTargetWindows386 {
+		return renvoTryCompileScalarProgram386Cached(prog, meta)
+	}
+	if target == renvoTargetLinuxAarch64 || target == renvoTargetDarwinArm64 || target == renvoTargetWindowsArm64 {
+		return renvoTryCompileScalarProgramAarch64Cached(prog, meta)
+	}
+	if target == renvoTargetLinuxArm {
+		return renvoTryCompileScalarProgramArmCached(prog, meta)
+	}
+	if target == renvoTargetWasiWasm32 {
+		return renvoTryCompileScalarProgramWasm32(prog, meta)
+	}
+	return renvoTryCompileScalarProgramAmd64Cached(prog, meta)
 }
 
 func renvoSetStripSymbols(stripSymbols bool) {

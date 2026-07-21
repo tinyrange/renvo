@@ -85,6 +85,11 @@ func renvoAmd64AsmMovRaxImm(a *renvoAsm, imm int) {
 		renvoAsmPopPrimary(a)
 		return
 	}
+	if imm>>32 == 0 {
+		renvoAsmEmit8(a, 0xb8)
+		renvoAsmEmit32(a, imm)
+		return
+	}
 	if imm >= -2147483647 && imm <= 2147483647 {
 		renvoAsmEmit8(a, 0x68)
 		renvoAsmEmit32(a, imm)
@@ -93,6 +98,20 @@ func renvoAmd64AsmMovRaxImm(a *renvoAsm, imm int) {
 	}
 	renvoAsmEmit16(a, 0xb848)
 	renvoAsmEmit64(a, imm)
+}
+
+func renvoAmd64EmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
+	a := &g.asm
+	renvoAsmLoadPrimaryStack(a, srcPtr)
+	renvoAsmCopyPrimaryToCallWord1(a)
+	renvoAsmLoadPrimaryStack(a, destPtr)
+	renvoAsmCopyPrimaryToCallWord0(a)
+	renvoAsmLoadTertiaryStack(a, byteCount)
+	// A destination above the source only needs a backward copy when the
+	// ranges actually overlap. Forward REP MOVSB is substantially faster for
+	// the overwhelmingly common disjoint case. The two forward branches and
+	// final short jump are entirely internal to this fixed instruction block.
+	renvoAsmEmitText(a, "\x48\x39\xf7\x0f\x86\x1d\x00\x00\x00\x48\x8d\x04\x0e\x48\x39\xc7\x0f\x83\x10\x00\x00\x00\x48\x8d\x74\x0e\xff\x48\x8d\x7c\x0f\xff\xfd\xf3\xa4\xfc\xeb\x03\xfc\xf3\xa4")
 }
 func renvoAmd64AsmMovR10BssAddr(a *renvoAsm, bssOff int) {
 	renvoNonNil(a)
@@ -164,13 +183,8 @@ func renvoAmd64RewritePrimaryLoadCompare(a *renvoAsm, imm int) bool {
 		return false
 	}
 	at := load/8 - load%8
-	if at < 2 || a.code[at-2] != 0x48 || a.code[at-1] != 0x8b {
-		return false
-	}
-	// A RIP-relative load has a relocation whose displacement is based on the
-	// end of the original instruction. The comparison adds an immediate byte,
-	// so rewriting that form would move the RIP base without updating the
-	// relocation. Stack and register-relative loads have no such relocation.
+	// RIP-relative displacements use the original instruction end as their
+	// base, so only stack and register-relative loads can grow by one byte.
 	if a.code[at]&0xc7 == 0x05 {
 		return false
 	}
@@ -1825,12 +1839,29 @@ func renvoAmd64EnsureAppend64Helper(g *renvoLinearGen) int {
 	return g.append64Label
 }
 
-// Kept as empty compatibility hooks for the performance source slicer. The
-// legacy helpers have no callers in the compiler.
 func renvoAmd64EnsureAppendBytesHelper(g *renvoLinearGen) int {
-	renvoNonNil(g)
-	return 0
+	a := &g.asm
+	if g.appendBytesEmitted {
+		return g.appendBytesLabel
+	}
+	arenaAllocLabel := renvoEnsureArenaAllocHelper(g)
+	g.appendBytesEmitted = true
+	g.appendBytesLabel = renvoAsmNewLabel(a)
+	afterLabel := renvoAsmNewLabel(a)
+	renvoAsmJmpMarkLabel(a, afterLabel, g.appendBytesLabel)
+	// rdi, rsi, and r9 point at the destination data, length, and capacity
+	// slots. rdx and rcx hold the source data and length. The compact helper
+	// grows geometrically, uses overlap-safe memmove direction, and returns zero
+	// only when growth fails. Its sole external relocation is the arena call at
+	// byte 77; internal branches have fixed displacements within this bytecode.
+	renvoAsmEmitText(a, "\x48\x85\xc9\x0f\x84\xc8\x00\x00\x00\x4c\x8b\x06\x4d\x89\xc2\x49\x01\xca\x0f\x82\xbd\x00\x00\x00\x4d\x39\x11\x0f\x83\x83\x00\x00\x00\x4d\x8b\x19\x4d\x85\xdb\x75\x06\x41\xbb\x10\x00\x00\x00\x4d\x01\xdb\x0f\x82\x9d\x00\x00\x00\x4d\x39\xd3\x72\xf2\x57\x56\x41\x51\x52\x51\x41\x50\x41\x52\x41\x53\x4c\x89\xd8\xe8\x00\x00\x00\x00\x48\x85\xc0\x75\x05\x48\x83\xc4\x40\xc3\x50\x48\x8b\x4c\x24\x18\x48\x89\xc7\x48\x8b\x74\x24\x40\x48\x8b\x36\xf3\xa4\x48\x8b\x7c\x24\x40\x48\x8b\x04\x24\x48\x89\x07\x4c\x8b\x4c\x24\x30\x4c\x8b\x5c\x24\x08\x4d\x89\x19\x48\x8b\x4c\x24\x20\x48\x8b\x54\x24\x28\x4c\x8b\x44\x24\x18\x4c\x8b\x54\x24\x10\x48\x8b\x74\x24\x38\x48\x83\xc4\x48\x4c\x89\x16\x48\x8b\x07\x4a\x8d\x3c\x00\x48\x89\xd6\x48\x39\xf7\x76\x19\x48\x8d\x04\x0e\x48\x39\xc7\x73\x10\x48\x8d\x74\x0e\xff\x48\x8d\x7c\x0f\xff\xfd\xf3\xa4\xfc\xeb\x02\xf3\xa4\x6a\x01\x58\xc3\x31\xc0\xc3")
+	renvoAsmAddReloc(a, len(a.code)-139, arenaAllocLabel)
+	renvoAsmMarkLabel(a, afterLabel)
+	return g.appendBytesLabel
 }
+
+// Kept as an empty compatibility hook for the performance source slicer. The
+// legacy helper has no callers in the compiler.
 func renvoAmd64EnsureCopyWordsHelper(g *renvoLinearGen) int {
 	renvoNonNil(g)
 	return 0

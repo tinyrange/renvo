@@ -79,6 +79,22 @@ func (s *Session) Step() bool {
 			s.stage = 4
 			return true
 		}
+		if !s.cached {
+			var linked link.Result
+			if s.transient {
+				linked = link.LinkBuildCoreTransient(built)
+			} else {
+				linked = link.LinkBuildCore(built)
+			}
+			s.result.Link = linked
+			if !linked.Ok {
+				s.result = pipelineFail(s.result, PipelineErrLink, linked.ErrorPackage, -1, -1)
+				s.stage = 4
+				return true
+			}
+			s.stage = 3
+			return false
+		}
 		s.linker = link.BeginPackageSession(built, s.transient)
 		s.stage = 2
 		return false

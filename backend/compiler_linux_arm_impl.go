@@ -42,7 +42,7 @@ func compileLinuxArmArena(input []int, output int, arenaSize int) int {
 	}
 	meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
 	var result renvoCompileResult
-	result = renvoTryCompileScalarProgramArm(&prog, &meta)
+	result = renvoTryCompileScalarProgramArmScratch(&prog, &meta)
 	if result.ok {
 		write(output, result.data, -1)
 		return 0
@@ -52,6 +52,25 @@ func compileLinuxArmArena(input []int, output int, arenaSize int) int {
 }
 
 func renvoTryCompileScalarProgramArm(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+	return renvoTryCompileScalarProgramArmScratch(p, meta)
+}
+
+func renvoTryCompileScalarProgramArmScratch(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+	g := renvoBeginScalarProgramArm(p, meta)
+	if g == nil || !renvoEmitAllQueuedFunctionsScratch(g) {
+		return renvoCompileResult{}
+	}
+	return renvoFinishScalarProgramArm(g)
+}
+
+func renvoTryCompileScalarProgramArmCached(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+	g := renvoBeginScalarProgramArm(p, meta)
+	if g == nil || !renvoEmitAllQueuedFunctionsCached(g) {
+		return renvoCompileResult{}
+	}
+	return renvoFinishScalarProgramArm(g)
+}
+func renvoBeginScalarProgramArm(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
 	appIndex := -1
 	for i := 0; i < len(meta.funcs); i++ {
 		if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
@@ -59,10 +78,9 @@ func renvoTryCompileScalarProgramArm(p *renvoProgram, meta *renvoMeta) renvoComp
 		}
 	}
 	if appIndex < 0 {
-		var result renvoCompileResult
-		return result
+		return nil
 	}
-	var g renvoLinearGen
+	g := new(renvoLinearGen)
 	g.prog = p
 	g.meta = meta
 	g.arenaSize = meta.arenaSize
@@ -76,35 +94,28 @@ func renvoTryCompileScalarProgramArm(p *renvoProgram, meta *renvoMeta) renvoComp
 		label := renvoAsmNewLabel(a)
 		g.funcLabels = append(g.funcLabels, label)
 	}
-	renvoInitFuncQueue(&g, len(meta.funcs))
-	renvoLinearMarkFunc(&g, appIndex)
-	renvoEmitPersistentArenaReady(&g)
-	if !renvoLinearInitGlobals(&g) {
-		var result renvoCompileResult
-		return result
+	renvoInitFuncQueue(g, len(meta.funcs))
+	renvoLinearMarkFunc(g, appIndex)
+	renvoEmitPersistentArenaReady(g)
+	if !renvoLinearInitGlobals(g) {
+		return nil
 	}
-	g.objectContextA, g.objectContextB = renvoObjectContextHash(&g)
-	renvoObjectInitializeFunctionIdentities(&g)
-	g.objectDataBase = len(a.data)
-	if !renvoEmitProgramEntryArgsArm(&g, appIndex) {
-		var result renvoCompileResult
-		return result
+	if !renvoEmitProgramEntryArgsArm(g, appIndex) {
+		return nil
 	}
 	renvoAsmCallLabel(a, g.funcLabels[appIndex])
-	if !renvoEmitProgramPanicCheck(&g) {
-		var result renvoCompileResult
-		return result
+	if !renvoEmitProgramPanicCheck(g) {
+		return nil
 	}
 	renvoAsmCopyPrimaryToCallWord0(a)
 	renvoAsmPrimaryImm(a, 1)
 	renvoAsmSyscall(a)
-	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
-		i := g.funcQueue[queueIndex]
-		if !renvoEmitScalarFunctionObjectCached(&g, i) {
-			var result renvoCompileResult
-			return result
-		}
-	}
+	return g
+}
+
+func renvoFinishScalarProgramArm(g *renvoLinearGen) renvoCompileResult {
+	renvoNonNil(g)
+	a := &g.asm
 	data := renvoAsmImageArm(a)
 	var result renvoCompileResult
 	result.data = data
@@ -218,7 +229,10 @@ func renvoAppendElfHeaderArm(out []byte, entryOff int, fileSize int, bssOffset i
 	base := 0
 	// The ELF and program-header layouts are fixed. Keep their invariant bytes
 	// together and patch the seven fields that vary per output image.
-	out = append(out, "\x7f\x45\x4c\x46\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x03\x00\x28\x00\x01\x00\x00\x00\x00\x00\x01\x00\x34\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x05\x34\x00\x20\x00\x02\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x05\x00\x00\x00\x00\x10\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x06\x00\x00\x00\x00\x10\x00\x00"...)
+	header := "\x7f\x45\x4c\x46\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x03\x00\x28\x00\x01\x00\x00\x00\x00\x00\x01\x00\x34\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x05\x34\x00\x20\x00\x02\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x05\x00\x00\x00\x00\x10\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x06\x00\x00\x00\x00\x10\x00\x00"
+	for i := 0; i < len(header); i++ {
+		out = append(out, header[i])
+	}
 	renvoPut32At(out, start+24, base+entryOff)
 	renvoPut32At(out, start+32, shoff)
 	if shoff != 0 {

@@ -46,7 +46,7 @@ func renvoCompileAarch64(input []int, output int, arenaSize int) int {
 	}
 	meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
 	var result renvoCompileResult
-	result = renvoTryCompileScalarProgramAarch64(&prog, &meta)
+	result = renvoTryCompileScalarProgramAarch64Scratch(&prog, &meta)
 	if result.ok {
 		write(output, result.data, -1)
 		return 0
@@ -56,11 +56,25 @@ func renvoCompileAarch64(input []int, output int, arenaSize int) int {
 }
 
 func renvoTryCompileScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+	return renvoTryCompileScalarProgramAarch64Scratch(p, meta)
+}
+
+func renvoTryCompileScalarProgramAarch64Scratch(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 	session := renvoBeginScalarProgramAarch64(p, meta)
 	if session == nil {
 		return renvoCompileResult{}
 	}
-	for !session.step(64) {
+	for !session.stepScratch(64) {
+	}
+	return session.result
+}
+
+func renvoTryCompileScalarProgramAarch64Cached(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+	session := renvoBeginScalarProgramAarch64(p, meta)
+	if session == nil {
+		return renvoCompileResult{}
+	}
+	for !session.stepCached(64) {
 	}
 	return session.result
 }
@@ -83,7 +97,8 @@ func renvoBeginScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) *renvoAarc
 	if appIndex < 0 {
 		return nil
 	}
-	var g renvoLinearGen
+	session := &renvoAarch64ProgramSession{prog: p}
+	g := &session.gen
 	g.prog = p
 	g.meta = meta
 	g.arenaSize = meta.arenaSize
@@ -109,28 +124,25 @@ func renvoBeginScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) *renvoAarc
 		label := renvoAsmNewLabel(a)
 		g.funcLabels = append(g.funcLabels, label)
 	}
-	renvoInitFuncQueue(&g, len(meta.funcs))
-	renvoLinearMarkFunc(&g, appIndex)
-	renvoEmitPersistentArenaReady(&g)
-	if !renvoLinearInitGlobals(&g) {
+	renvoInitFuncQueue(g, len(meta.funcs))
+	renvoLinearMarkFunc(g, appIndex)
+	renvoEmitPersistentArenaReady(g)
+	if !renvoLinearInitGlobals(g) {
 		return nil
 	}
 	entryOK := false
 	if targetIsWindows() {
-		entryOK = renvoEmitProgramEntryArgsWindowsArm64(&g, appIndex)
+		entryOK = renvoEmitProgramEntryArgsWindowsArm64(g, appIndex)
 	} else if targetIsDarwin() {
-		entryOK = renvoEmitProgramEntryArgsDarwinArm64(&g, appIndex)
+		entryOK = renvoEmitProgramEntryArgsDarwinArm64(g, appIndex)
 	} else {
-		entryOK = renvoEmitProgramEntryArgsAarch64(&g, appIndex)
+		entryOK = renvoEmitProgramEntryArgsAarch64(g, appIndex)
 	}
 	if !entryOK {
 		return nil
 	}
-	g.objectContextA, g.objectContextB = renvoObjectContextHash(&g)
-	renvoObjectInitializeFunctionIdentities(&g)
-	g.objectDataBase = len(a.data)
 	renvoAsmCallLabel(a, g.funcLabels[appIndex])
-	if !renvoEmitProgramPanicCheck(&g) {
+	if !renvoEmitProgramPanicCheck(g) {
 		return nil
 	}
 	if targetIsWindows() {
@@ -146,10 +158,33 @@ func renvoBeginScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) *renvoAarc
 		renvoAsmPrimaryImm(a, 93)
 		renvoAsmSyscall(a)
 	}
-	return &renvoAarch64ProgramSession{prog: p, gen: g}
+	return session
 }
 
 func (s *renvoAarch64ProgramSession) step(functionLimit int) bool {
+	return s.stepCached(functionLimit)
+}
+
+func (s *renvoAarch64ProgramSession) stepScratch(functionLimit int) bool {
+	if s == nil || s.done {
+		return true
+	}
+	if functionLimit < 1 {
+		functionLimit = 1
+	}
+	emitted := 0
+	for s.queueIndex < len(s.gen.funcQueue) && emitted < functionLimit {
+		i := s.gen.funcQueue[s.queueIndex]
+		s.queueIndex++
+		emitted++
+		if !renvoEmitScalarFunctionScratch(&s.gen, i) {
+			return s.failFunction(i)
+		}
+	}
+	return s.finishStep()
+}
+
+func (s *renvoAarch64ProgramSession) stepCached(functionLimit int) bool {
 	if s == nil || s.done {
 		return true
 	}
@@ -162,15 +197,23 @@ func (s *renvoAarch64ProgramSession) step(functionLimit int) bool {
 		s.queueIndex++
 		emitted++
 		if !renvoEmitScalarFunctionObjectCached(&s.gen, i) {
-			if targetIsDarwin() {
-				renvoPrintErr("renvo: failed to emit function ")
-				write(2, s.prog.src[s.gen.meta.funcs[i].nameStart:s.gen.meta.funcs[i].nameEnd], -1)
-				renvoPrintErr("\n")
-			}
-			s.done = true
-			return true
+			return s.failFunction(i)
 		}
 	}
+	return s.finishStep()
+}
+
+func (s *renvoAarch64ProgramSession) failFunction(i int) bool {
+	if targetIsDarwin() {
+		renvoPrintErr("renvo: failed to emit function ")
+		write(2, s.prog.src[s.gen.meta.funcs[i].nameStart:s.gen.meta.funcs[i].nameEnd], -1)
+		renvoPrintErr("\n")
+	}
+	s.done = true
+	return true
+}
+
+func (s *renvoAarch64ProgramSession) finishStep() bool {
 	if s.queueIndex < len(s.gen.funcQueue) {
 		return false
 	}

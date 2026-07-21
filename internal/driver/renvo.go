@@ -4,6 +4,7 @@ package driver
 
 import (
 	"renvo.dev/internal/arena"
+	"renvo.dev/internal/backendbridge"
 	"renvo.dev/internal/load"
 	"renvo.dev/std/os"
 )
@@ -35,10 +36,69 @@ func RunRenvoCommandCapture(args []string, env []string) (int, string) {
 }
 
 func runRenvoCommand(args []string, env []string) (int, string) {
-	session := BeginRenvoCommand(args, env)
-	for !session.Step() {
+	if CommandHelpRequested(args) {
+		return 0, HelpText
 	}
-	return session.Result()
+	if len(renvoCommandDiagnosticBuffer) == 0 {
+		renvoCommandDiagnosticBuffer = make([]byte, renvoCommandDiagnosticCapacity)
+	}
+	commandArgs := args
+	if len(commandArgs) > 0 {
+		commandArgs = commandArgs[1:]
+	}
+	resetArena := renvoFrontendCanResetArena()
+	mark := 0
+	if resetArena {
+		mark = arena.Mark()
+	}
+	built := buildFromFSOneShotCompactWithModuleCache(commandArgs, renvoWorkDir(env), renvoStdRoot(args, env), renvoModuleCache(env), RenvoFS{})
+	if !built.Ok {
+		return finishRenvoCommandFailure(renvoCommandDiagnosticBuffer, built.Diagnostic, resetArena, mark)
+	}
+	unit := built.Unit
+	target := built.Options.Target
+	output := built.Options.Output
+	arenaSize := backendArenaSize(target, built.Options.Tags, built.Options.ArenaSize)
+	if built.Options.EmitUnit {
+		if output == "-" {
+			print(string(unit))
+		} else if os.WriteFile(output, unit, 0644) != nil {
+			return finishRenvoCommandFailure(renvoCommandDiagnosticBuffer, Diagnostic{Phase: "unit", Code: "RENVO-UNIT-002", Message: "failed to write linked unit"}, resetArena, mark)
+		}
+		if resetArena {
+			arena.Reset(mark)
+		}
+		return 0, ""
+	}
+	persistMark := 0
+	if resetArena {
+		persistMark = arena.PersistMark()
+		unit = arena.PersistBytes(unit)
+		target = arena.PersistString(target)
+		output = arena.PersistString(output)
+		backendMark := mark
+		remainder := backendMark % 4096
+		if remainder != 0 {
+			backendMark += 4096 - remainder
+		}
+		arena.Reset(backendMark)
+	}
+	virtualTarget := target
+	target = backendTarget(target)
+	ok := backendbridge.CompileUnitToOutputStripEnv(unit, target, output, built.Options.Strip, built.Options.WindowsGUI, arenaSize, args, env)
+	if ok && virtualTarget == "browser/wasm32" {
+		wasm, readErr := os.ReadFile(output)
+		if readErr != nil || os.WriteFile(output, PackageBrowserHTML(wasm), 0644) != nil {
+			ok = false
+		}
+	}
+	if resetArena {
+		arena.PersistReset(persistMark)
+	}
+	if !ok {
+		return finishRenvoCommandFailure(renvoCommandDiagnosticBuffer, Diagnostic{Phase: "backend", Code: "RENVO-BACKEND-001", Message: "backend compilation failed"}, false, 0)
+	}
+	return 0, ""
 }
 
 func finishRenvoCommandFailure(buffer []byte, diagnostic Diagnostic, resetArena bool, mark int) (int, string) {
@@ -155,50 +215,10 @@ func (fs RenvoFS) ReadFile(path string) ([]byte, bool) {
 	if fd < 0 {
 		return nil, false
 	}
-	if !renvoFrontendCanResetArena() {
-		out := make([]byte, 4096)
-		used := 0
-		for {
-			if used == len(out) {
-				next := make([]byte, len(out)*2)
-				copy(next, out)
-				out = next
-			}
-			n := read(fd, out[used:], -1)
-			if n < 0 {
-				close(fd)
-				return nil, false
-			}
-			if n == 0 {
-				break
-			}
-			used += n
-		}
-		close(fd)
-		return out[:used], true
-	}
-	arenaStart := arena.Mark()
-	probe := make([]byte, 4096)
-	size := 0
-	for {
-		n := read(fd, probe, -1)
-		if n < 0 {
-			close(fd)
-			arena.Reset(arenaStart)
-			return nil, false
-		}
-		if n == 0 {
-			break
-		}
-		size += n
-	}
-	close(fd)
-	arena.Reset(arenaStart)
-	fd = open(renvoPathCString(path), 0)
-	if fd < 0 {
-		return nil, false
-	}
-	out := make([]byte, size+1)
+	// Most compiler source files fit in 32 KiB. Starting there avoids repeated
+	// arena copies while loading a package, and the transient build releases the
+	// modest unused tail after lowering.
+	out := make([]byte, 32768)
 	used := 0
 	for {
 		if used == len(out) {
@@ -209,7 +229,6 @@ func (fs RenvoFS) ReadFile(path string) ([]byte, bool) {
 		n := read(fd, out[used:], -1)
 		if n < 0 {
 			close(fd)
-			arena.Reset(arenaStart)
 			return nil, false
 		}
 		if n == 0 {

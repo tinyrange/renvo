@@ -132,6 +132,20 @@ func TestBundledFrontendStandaloneAllTargets(t *testing.T) {
 		t.Fatalf("standalone bundled output = %q", string(out))
 	}
 
+	fontOutput := filepath.Join(project, "font-embed-app")
+	cmd = exec.Command(standalone, "-s", "-o", fontOutput, "./fontprobe")
+	cmd.Dir = project
+	cmd.Env = []string{"PWD=" + project}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("standalone bundled font compile failed: %v\n%s", err, string(out))
+	}
+	cmd = exec.Command(fontOutput)
+	cmd.Dir = project
+	cmd.Env = []string{"PWD=" + project}
+	if out, err := cmd.CombinedOutput(); err != nil || string(out) != "PASS\n" {
+		t.Fatalf("standalone bundled font output failed: err=%v output=%q", err, string(out))
+	}
+
 	fileOutput := filepath.Join(project, "file-mode-app")
 	cmd = exec.Command(standalone, "-s", "-o", fileOutput, "./probe/main_linux_arm64.go")
 	cmd.Dir = project
@@ -176,7 +190,7 @@ func buildGoTool(t *testing.T, root string, output string, tags []string, pkg st
 func writeBundleProject(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/renvobundle\n\ngo 1.25\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/renvobundle\n\ngo 1.25\n\nrequire renvo.dev v0.0.0\n"), 0o644); err != nil {
 		t.Fatalf("write go.mod failed: %v", err)
 	}
 	appDir := filepath.Join(dir, "cmd", "app")
@@ -198,6 +212,25 @@ func main() {
 `
 	if err := os.WriteFile(filepath.Join(appDir, "main.go"), []byte(source), 0o644); err != nil {
 		t.Fatalf("write app source failed: %v", err)
+	}
+	fontDir := filepath.Join(dir, "fontprobe")
+	if err := os.MkdirAll(fontDir, 0o755); err != nil {
+		t.Fatalf("create font probe directory failed: %v", err)
+	}
+	fontSource := `package main
+
+import "renvo.dev/std/graphics/gofont"
+
+func main() {
+	if gofont.New(15) != nil && gofont.NewMono(15) != nil {
+		print("PASS\n")
+		return
+	}
+	print("FAIL\n")
+}
+`
+	if err := os.WriteFile(filepath.Join(fontDir, "main.go"), []byte(fontSource), 0o644); err != nil {
+		t.Fatalf("write font probe source failed: %v", err)
 	}
 	probeDir := filepath.Join(dir, "probe")
 	if err := os.MkdirAll(probeDir, 0o755); err != nil {

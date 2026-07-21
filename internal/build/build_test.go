@@ -131,13 +131,35 @@ func TestTransientPackageCacheInvalidatesImportersWhenDependencyChanges(t *testi
 	if !first.Ok || packageProgramCacheHits != 0 || packageProgramCacheMisses != 2 {
 		t.Fatalf("cold cache result = %#v, hits/misses = %d/%d", first, packageProgramCacheHits, packageProgramCacheMisses)
 	}
-	files[2].Src = []byte("package lib\n\nfunc Other() int { return 42 }\n")
+	files[2].Src = []byte("package lib\n\nfunc Value() int { return 43 }\n")
 	changed := BuildProgramsTransientCached(buildTestGraph(t, files))
 	if !changed.Ok {
 		t.Fatalf("dependency rebuild failed: %#v", changed)
 	}
 	if packageProgramCacheHits != 0 || packageProgramCacheMisses != 4 {
 		t.Fatalf("dependency change hits/misses = %d/%d, want 0/4", packageProgramCacheHits, packageProgramCacheMisses)
+	}
+}
+
+func TestPackageSourceHashIsIndependentOfPackageRoot(t *testing.T) {
+	source := []byte("package lib\nfunc Value() int { return 42 }\n")
+	left := load.Package{
+		Ref:   load.PackageRef{Dir: "/first/module/pkg/lib"},
+		Files: []load.ParsedFile{{Path: "/first/module/pkg/lib/lib.go", Src: source}},
+	}
+	right := load.Package{
+		Ref:   load.PackageRef{Dir: "/second/module/pkg/lib"},
+		Files: []load.ParsedFile{{Path: "/second/module/pkg/lib/lib.go", Src: source}},
+	}
+	leftA, leftB := packageSourceHash(left)
+	rightA, rightB := packageSourceHash(right)
+	if leftA != rightA || leftB != rightB {
+		t.Fatalf("relocated package hashes = %d/%d and %d/%d", leftA, leftB, rightA, rightB)
+	}
+	right.Files[0].Path = "/second/module/pkg/lib/other.go"
+	rightA, rightB = packageSourceHash(right)
+	if leftA == rightA && leftB == rightB {
+		t.Fatal("package hash ignored the relative source filename")
 	}
 }
 

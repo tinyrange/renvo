@@ -21,16 +21,29 @@ type ProgramSession struct {
 	graphKeyB   int
 	contextA    []int
 	contextB    []int
+	sourceA     []int
+	sourceB     []int
 	checked     check.Program
 	result      Result
 }
 
 func BeginProgramsSession(graph load.Graph, transient bool, cached bool) *ProgramSession {
+	return beginProgramsSession(graph, transient, cached, cached)
+}
+
+func beginProgramsSession(graph load.Graph, transient bool, cached bool, identities bool) *ProgramSession {
+	graphKeyA, graphKeyB := 0, 0
+	var contextA []int
+	var contextB []int
+	var sourceA []int
+	var sourceB []int
+	if identities {
+		graphKeyA, graphKeyB = packageGraphHash(graph)
+		contextA, contextB, sourceA, sourceB = packageContextHashes(graph)
+	}
 	if cached {
 		InitializePackageProgramCache()
 	}
-	graphKeyA, graphKeyB := packageGraphHash(graph)
-	contextA, contextB := packageContextHashes(graph)
 	return &ProgramSession{
 		graph:     graph,
 		transient: transient,
@@ -39,6 +52,8 @@ func BeginProgramsSession(graph load.Graph, transient bool, cached bool) *Progra
 		graphKeyB: graphKeyB,
 		contextA:  contextA,
 		contextB:  contextB,
+		sourceA:   sourceA,
+		sourceB:   sourceB,
 		result: Result{
 			Root:         -1,
 			Ok:           true,
@@ -85,7 +100,11 @@ func (s *ProgramSession) Step() bool {
 	if s.transient {
 		persistMark = arena.PersistMark()
 	}
-	sourceKeyA, sourceKeyB := packageSourceHash(pkg)
+	sourceKeyA, sourceKeyB := 0, 0
+	if len(s.sourceA) == len(s.graph.Packages) && len(s.sourceB) == len(s.graph.Packages) {
+		sourceKeyA = s.sourceA[i]
+		sourceKeyB = s.sourceB[i]
+	}
 	isRoot := pkg.Ref.ImportPath == s.graph.Root
 	contextA := s.graphKeyA
 	contextB := s.graphKeyB
@@ -116,7 +135,7 @@ func (s *ProgramSession) Step() bool {
 	}
 	unitStart := arena.Mark()
 	if s.cached && !isRoot {
-		cachedProgram, hit := loadCachedPackageProgram(s.graph, i, contextA, contextB)
+		cachedProgram, hit := loadCachedPackageProgram(s.graph, i, contextA, contextB, sourceKeyA, sourceKeyB)
 		if hit {
 			unitEnd := arena.Mark()
 			s.result.Units = append(s.result.Units, PackageUnit{
@@ -152,7 +171,7 @@ func (s *ProgramSession) Step() bool {
 		s.result.Root = len(s.result.Units)
 	}
 	if s.cached && !isRoot {
-		storeCachedPackageProgram(s.graph, i, contextA, contextB, emit.Program)
+		storeCachedPackageProgram(s.graph, i, contextA, contextB, sourceKeyA, sourceKeyB, emit.Program)
 	}
 	s.result.Units = append(s.result.Units, PackageUnit{
 		ImportPath: emit.Program.ImportPath,

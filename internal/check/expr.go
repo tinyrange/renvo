@@ -208,34 +208,56 @@ func isExprLeftBoundary(file syntax.File, tok int) bool {
 }
 
 func isExprBinaryOp(file syntax.File, tok int) bool {
-	if tokenTextIs(&file, tok, "||") || tokenTextIs(&file, tok, "&&") {
-		return true
+	return exprBinaryOperatorKind(file, tok) != exprBinaryNone
+}
+
+const (
+	exprBinaryNone = iota
+	exprBinaryLogical
+	exprBinaryCompare
+	exprBinaryAdd
+	exprBinaryNumeric
+)
+
+func exprBinaryOperatorKind(file syntax.File, tok int) int {
+	if tok < 0 || tok >= len(file.Tokens) {
+		return exprBinaryNone
 	}
-	if tokenTextIs(&file, tok, "==") || tokenTextIs(&file, tok, "!=") {
-		return true
+	token := file.Tokens[tok]
+	if token.KindLine&255 != syntax.TokenOperator || token.Start < 0 || token.End > len(file.Src) {
+		return exprBinaryNone
 	}
-	if tokenTextIs(&file, tok, "<") || tokenTextIs(&file, tok, "<=") {
-		return true
+	size := token.End - token.Start
+	if size < 1 {
+		return exprBinaryNone
 	}
-	if tokenTextIs(&file, tok, ">") || tokenTextIs(&file, tok, ">=") {
-		return true
+	first := file.Src[token.Start]
+	if size == 1 {
+		if first == '<' || first == '>' {
+			return exprBinaryCompare
+		}
+		if first == '+' {
+			return exprBinaryAdd
+		}
+		if first == '-' || first == '*' || first == '/' || first == '%' || first == '&' || first == '|' || first == '^' {
+			return exprBinaryNumeric
+		}
+		return exprBinaryNone
 	}
-	if tokenTextIs(&file, tok, "+") || tokenTextIs(&file, tok, "-") {
-		return true
+	if size != 2 {
+		return exprBinaryNone
 	}
-	if tokenTextIs(&file, tok, "*") || tokenTextIs(&file, tok, "/") {
-		return true
+	second := file.Src[token.Start+1]
+	if first == '&' && second == '&' || first == '|' && second == '|' {
+		return exprBinaryLogical
 	}
-	if tokenTextIs(&file, tok, "%") || tokenTextIs(&file, tok, "&") {
-		return true
+	if second == '=' && (first == '=' || first == '!' || first == '<' || first == '>') {
+		return exprBinaryCompare
 	}
-	if tokenTextIs(&file, tok, "|") || tokenTextIs(&file, tok, "^") {
-		return true
+	if first == '<' && second == '<' || first == '>' && second == '>' || first == '&' && second == '^' {
+		return exprBinaryNumeric
 	}
-	if tokenTextIs(&file, tok, "<<") || tokenTextIs(&file, tok, ">>") {
-		return true
-	}
-	return tokenTextIs(&file, tok, "&^")
+	return exprBinaryNone
 }
 
 func isIndexTypePrefix(file syntax.File, start int) bool {

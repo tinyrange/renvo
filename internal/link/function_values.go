@@ -65,7 +65,7 @@ func lowerFunctionValuesCore(program *unit.Program, transient bool) bool {
 		functions = true
 	}
 	if builtins {
-		if !lowerOrdinaryBuiltins(program) {
+		if !lowerOrdinaryBuiltins(program, transient) {
 			return false
 		}
 		functions = true

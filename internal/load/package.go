@@ -258,14 +258,29 @@ func selectPackageFiles(dir string, files []SourceFile) []SourceFile {
 }
 
 func sortSourceFiles(files []SourceFile) {
-	for i := 1; i < len(files); i++ {
-		item := files[i]
-		j := i - 1
-		for j >= 0 && stringAfter(files[j].Path, item.Path) {
-			files[j+1] = files[j]
-			j--
+	for root := len(files)/2 - 1; root >= 0; root-- {
+		siftSourceFiles(files, root, len(files))
+	}
+	for end := len(files) - 1; end > 0; end-- {
+		files[0], files[end] = files[end], files[0]
+		siftSourceFiles(files, 0, end)
+	}
+}
+
+func siftSourceFiles(files []SourceFile, root int, end int) {
+	for {
+		child := root*2 + 1
+		if child >= end {
+			return
 		}
-		files[j+1] = item
+		if child+1 < end && stringBefore(files[child].Path, files[child+1].Path) {
+			child++
+		}
+		if !stringBefore(files[root].Path, files[child].Path) {
+			return
+		}
+		files[root], files[child] = files[child], files[root]
+		root = child
 	}
 }
 

@@ -75,6 +75,14 @@ const renvoArmRegAddr = 12
 const renvoArmRegSp = 13
 const renvoArmRegLr = 14
 
+func renvoArmEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
+	a := &g.asm
+	renvoAsmLoadPrimaryStack(a, srcPtr)
+	renvoAsmLoadSecondaryStack(a, destPtr)
+	renvoAsmLoadTertiaryStack(a, byteCount)
+	renvoAsmEmitText(a, "\x00\x00\x51\xe1\x03\x00\x00\x9a\x02\x00\x80\xe0\x02\x10\x81\xe0\x00\x30\xe0\xe3\x02\x00\x00\xea\x01\x00\x40\xe2\x01\x10\x41\xe2\x01\x30\xa0\xe3\x00\x00\x52\xe3\x05\x00\x00\x0a\x03\x00\x80\xe0\x03\x10\x81\xe0\x00\x90\xd0\xe5\x00\x90\xc1\xe5\x01\x20\x42\xe2\xf7\xff\xff\xea")
+}
+
 func renvoArmEmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
 	a := &g.asm
 	metaFn := &g.meta.funcs[fnInfoIndex]

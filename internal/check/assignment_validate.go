@@ -16,7 +16,7 @@ func invalidDefiniteAssignmentType(file syntax.File, fn syntax.FuncDecl) (int, i
 			if leftPossible && rightPossible {
 				leftKind := definiteLiteralKind(file, i-1)
 				rightKind := definiteLiteralKind(file, i+1)
-				if tokenTextIs(&file, i, "&&") || tokenTextIs(&file, i, "||") {
+				if exprBinaryOperatorKind(file, i) == exprBinaryLogical {
 					if leftKind != "bool" && i >= 2 && isExprBinaryOp(file, i-2) {
 						continue
 					}
@@ -29,7 +29,7 @@ func invalidDefiniteAssignmentType(file syntax.File, fn syntax.FuncDecl) (int, i
 				}
 			}
 		}
-		if !tokenTextIs(&file, i, "=") || file.Tokens[i-1].KindLine&255 != syntax.TokenIdent {
+		if operator != '=' || file.Tokens[i].End-file.Tokens[i].Start != 1 || file.Tokens[i-1].KindLine&255 != syntax.TokenIdent {
 			continue
 		}
 		valueKind := definiteLiteralKind(file, i+1)

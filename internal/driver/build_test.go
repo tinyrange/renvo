@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
@@ -27,6 +28,19 @@ func TestBuildUnitFromDriverOptions(t *testing.T) {
 	}
 	if decoded.Package != "main" || len(decoded.Funcs) != 2 {
 		t.Fatalf("decoded unit = package %q funcs %d", decoded.Package, len(decoded.Funcs))
+	}
+}
+
+func TestOneShotEmitUnitPreservesCanonicalPackageMetadata(t *testing.T) {
+	args := []string{"-emit-unit", "-t", "linux/amd64", "-o", "program.unit", "./cmd/app"}
+	files := driverTestFiles()
+	want := BuildUnit(args, "/repo/case", "/std", files)
+	got := buildFromFSOneShotCompactWithModuleCache(args, "/repo/case", "/std", "", memorySourceFS{files: files})
+	if !want.Ok || !got.Ok {
+		t.Fatalf("persistent ok=%v, one-shot ok=%v", want.Ok, got.Ok)
+	}
+	if !bytes.Equal(got.Unit, want.Unit) {
+		t.Fatal("one-shot -emit-unit output differs from canonical persistent unit")
 	}
 }
 

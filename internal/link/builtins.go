@@ -1,11 +1,12 @@
 package link
 
 import (
+	"renvo.dev/internal/arena"
 	"renvo.dev/internal/syntax"
 	"renvo.dev/internal/unit"
 )
 
-func lowerOrdinaryBuiltins(program *unit.Program) bool {
+func lowerOrdinaryBuiltins(program *unit.Program, transient bool) bool {
 	stringLess := ""
 	generated := ""
 	generatedCount := 0
@@ -63,8 +64,16 @@ func lowerOrdinaryBuiltins(program *unit.Program) bool {
 			if replacement == "" {
 				return false
 			}
-			text, ok := applyFunctionValueEdits(program.Text, []functionValueEdit{functionValueTokenRangeEdit(program, i, close+1, replacement)})
-			if !ok || !reparseFunctionValueProgram(program, text) {
+			originalLength := len(program.Text)
+			edits := []functionValueEdit{functionValueTokenRangeEdit(program, i, close+1, replacement)}
+			if transient {
+				renvo_runtime_ArenaDiscardLinkTokens(program.Tokens)
+			}
+			text, ok := applyFunctionValueEdits(program.Text, edits)
+			if transient {
+				arena.DiscardBytes(program.Text)
+			}
+			if !ok || !reparseFunctionValueProgram(program, text, edits, originalLength, -1) {
 				return false
 			}
 			changed = true
@@ -77,16 +86,22 @@ func lowerOrdinaryBuiltins(program *unit.Program) bool {
 	if stringLess == "" && generated == "" {
 		return true
 	}
+	originalLength := len(program.Text)
 	text := program.Text
 	if len(text) > 0 && text[len(text)-1] != '\n' {
 		text = append(text, '\n')
 	}
+	generatedStart := len(text)
 	text = appendFunctionValueString(text, generated)
 	if stringLess != "" {
 		help := "func " + stringLess + "(left string, right string) bool { limit := len(left); if len(right) < limit { limit = len(right) }; for index := 0; index < limit; index++ { if left[index] < right[index] { return true }; if left[index] > right[index] { return false } }; return len(left) < len(right) }\n"
 		text = appendFunctionValueString(text, help)
 	}
-	return reparseFunctionValueProgram(program, text)
+	if transient {
+		renvo_runtime_ArenaDiscardLinkTokens(program.Tokens)
+		arena.DiscardBytes(program.Text)
+	}
+	return reparseFunctionValueProgram(program, text, nil, originalLength, generatedStart)
 }
 
 func ordinaryBuiltinArguments(program *unit.Program, start int, close int) ([]int, []int) {

@@ -39,12 +39,11 @@ func InitializePackageProgramCache() {
 	packageProgramCacheData = make([][]byte, packageProgramCacheCapacity)
 }
 
-func loadCachedPackageProgram(graph load.Graph, packageIndex int, contextA int, contextB int) (unit.Program, bool) {
+func loadCachedPackageProgram(graph load.Graph, packageIndex int, contextA int, contextB int, sourceA int, sourceB int) (unit.Program, bool) {
 	var empty unit.Program
 	if packageIndex < 0 || packageIndex >= len(graph.Packages) {
 		return empty, false
 	}
-	sourceA, sourceB := packageSourceHash(graph.Packages[packageIndex])
 	pathA, pathB := packageCacheHashString(graph.Packages[packageIndex].Ref.ImportPath)
 	for i := 0; i < packageProgramCacheCapacity; i++ {
 		match := false
@@ -81,7 +80,7 @@ func loadCachedPackageProgram(graph load.Graph, packageIndex int, contextA int, 
 	return empty, false
 }
 
-func storeCachedPackageProgram(graph load.Graph, packageIndex int, contextA int, contextB int, program unit.Program) {
+func storeCachedPackageProgram(graph load.Graph, packageIndex int, contextA int, contextB int, sourceA int, sourceB int, program unit.Program) {
 	if packageIndex < 0 || packageIndex >= len(graph.Packages) {
 		return
 	}
@@ -89,7 +88,6 @@ func storeCachedPackageProgram(graph load.Graph, packageIndex int, contextA int,
 	if !ok {
 		return
 	}
-	sourceA, sourceB := packageSourceHash(graph.Packages[packageIndex])
 	pathA, pathB := packageCacheHashString(graph.Packages[packageIndex].Ref.ImportPath)
 	slot := -1
 	for i := 0; i < packageProgramCacheCapacity; i++ {
@@ -152,12 +150,16 @@ func packageGraphHash(graph load.Graph) (int, int) {
 	return a, b
 }
 
-func packageContextHashes(graph load.Graph) ([]int, []int) {
+func packageContextHashes(graph load.Graph) ([]int, []int, []int, []int) {
 	keysA := make([]int, len(graph.Packages))
 	keysB := make([]int, len(graph.Packages))
+	sourcesA := make([]int, len(graph.Packages))
+	sourcesB := make([]int, len(graph.Packages))
 	for i := 0; i < len(graph.Packages); i++ {
 		pkg := graph.Packages[i]
 		a, b := packageSourceHash(pkg)
+		sourcesA[i] = a
+		sourcesB[i] = b
 		a, b = packageCacheHashMix(a, b, pkg.Ref.ImportPath)
 		a, b = packageCacheHashMix(a, b, pkg.Name)
 		for j := 0; j < len(pkg.Imports); j++ {
@@ -178,13 +180,20 @@ func packageContextHashes(graph load.Graph) ([]int, []int) {
 		keysA[i] = packageCacheHashInt(a, len(pkg.Imports))
 		keysB[i] = packageCacheHashIntB(b, len(pkg.Imports))
 	}
-	return keysA, keysB
+	return keysA, keysB, sourcesA, sourcesB
 }
 
 func packageSourceHash(pkg load.Package) (int, int) {
 	a, b := 37, 53
 	for i := 0; i < len(pkg.Files); i++ {
-		a, b = packageCacheHashMix(a, b, pkg.Files[i].Path)
+		// Package identities must survive relocating a module or standard-library
+		// tree. The directory is already represented by the import graph, so hash
+		// the package-relative filename rather than its machine-specific root.
+		path := pkg.Files[i].Path
+		if len(path) > len(pkg.Ref.Dir) && path[len(pkg.Ref.Dir)] == '/' && path[:len(pkg.Ref.Dir)] == pkg.Ref.Dir {
+			path = path[len(pkg.Ref.Dir)+1:]
+		}
+		a, b = packageCacheHashMix(a, b, path)
 		for j := 0; j < len(pkg.Files[i].Src); j++ {
 			a = packageCacheHashInt(a, int(pkg.Files[i].Src[j]))
 			b = packageCacheHashIntB(b, int(pkg.Files[i].Src[j]))

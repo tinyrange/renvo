@@ -20,9 +20,11 @@ func renvoReadAll(fd int, out []byte) []byte {
 		if n <= 0 {
 			return out
 		}
-		chunk := buf
-		renvoTruncBytes(&chunk, n)
-		out = append(out, chunk...)
+		// buf has independent fixed backing, so a scalar append loop avoids the
+		// overlap machinery required by the general append(dst, src...) lowering.
+		for i := 0; i < n; i++ {
+			out = append(out, buf[i])
+		}
 	}
 }
 

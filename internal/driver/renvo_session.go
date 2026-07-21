@@ -28,10 +28,15 @@ type RenvoCommandSession struct {
 	backendOutput string
 	status        int
 	diagnostic    string
+	cached        bool
 }
 
 func BeginRenvoCommand(args []string, env []string) *RenvoCommandSession {
-	return &RenvoCommandSession{args: args, env: env}
+	return beginRenvoCommand(args, env, true)
+}
+
+func beginRenvoCommand(args []string, env []string, cached bool) *RenvoCommandSession {
+	return &RenvoCommandSession{args: args, env: env, cached: cached}
 }
 
 func (s *RenvoCommandSession) Step() bool {
@@ -47,8 +52,10 @@ func (s *RenvoCommandSession) Step() bool {
 		if len(renvoCommandDiagnosticBuffer) == 0 {
 			renvoCommandDiagnosticBuffer = make([]byte, renvoCommandDiagnosticCapacity)
 		}
-		build.InitializePackageProgramCache()
-		link.InitializePackageArtifactCache()
+		if s.cached {
+			build.InitializePackageProgramCache()
+			link.InitializePackageArtifactCache()
+		}
 		commandArgs := s.args
 		if len(commandArgs) > 0 {
 			commandArgs = commandArgs[1:]
@@ -60,12 +67,14 @@ func (s *RenvoCommandSession) Step() bool {
 				break
 			}
 		}
-		backendbridge.InitializeObjectCache(objectTarget)
+		if s.cached {
+			backendbridge.InitializeObjectCache(objectTarget)
+		}
 		s.resetArena = renvoFrontendCanResetArena()
 		if s.resetArena {
 			s.mark = arena.Mark()
 		}
-		s.build = BeginFSBuildSession(commandArgs, renvoWorkDir(s.env), renvoStdRoot(s.args, s.env), renvoModuleCache(s.env), RenvoFS{}, true)
+		s.build = beginFSBuildSession(commandArgs, renvoWorkDir(s.env), renvoStdRoot(s.args, s.env), renvoModuleCache(s.env), RenvoFS{}, true, s.cached)
 		s.stage = 1
 		return false
 	}
@@ -146,7 +155,7 @@ func (s *RenvoCommandSession) Step() bool {
 		s.fail(Diagnostic{Phase: "backend", Code: "RENVO-BACKEND-001", Message: "backend compilation failed"}, false, 0)
 		return true
 	}
-	if s.resetArena {
+	if s.resetArena && s.cached {
 		rememberEmbeddedBuild(s.built)
 	}
 	s.done = true

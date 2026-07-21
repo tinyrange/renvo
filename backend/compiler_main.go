@@ -163,14 +163,13 @@ func renvoUnitReadVar(r *renvoUnitReader) int {
 	return 0
 }
 
-func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, []int32, bool) {
+func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, bool) {
 	r := renvoUnitReader{src: data, end: len(data), ok: true}
 	count := renvoUnitReadVar(&r)
 	if !r.ok {
-		return nil, nil, false
+		return nil, false
 	}
 	out := make([]int32, 0, count*renvoTokenStride)
-	var largeLines []int32
 	start := 0
 	line := 0
 	discardStart := 0
@@ -181,28 +180,19 @@ func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, []int32, bool) {
 		size := renvoUnitReadVar(&r)
 		lineDelta := renvoUnitReadVar(&r)
 		if !r.ok {
-			return nil, nil, false
+			return nil, false
 		}
 		start = start + delta
 		line = line + lineDelta
 		if kind < 0 || kind > 255 || start < 0 || start > 0xffffff || size < 0 || line < 0 || start+size > len(text) {
-			return nil, nil, false
+			return nil, false
 		}
 		if kind == renvoTokOp {
 			if size > 255 {
-				return nil, nil, false
+				return nil, false
 			}
 		} else if size > 0xffff {
-			return nil, nil, false
-		}
-		if line > 65535 && len(largeLines) == 0 {
-			largeLines = make([]int32, 0, count)
-			for j := 0; j < i; j++ {
-				largeLines = append(largeLines, int32(int(out[j*renvoTokenStride])>>8&65535))
-			}
-		}
-		if len(largeLines) > 0 {
-			largeLines = append(largeLines, int32(line))
+			return nil, false
 		}
 		base := len(out)
 		out = out[:base+renvoTokenStride]
@@ -211,7 +201,7 @@ func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, []int32, bool) {
 			charBits = int(text[start]) << 24
 		}
 		out[base] = int32(kind | (line&65535)<<8 | charBits)
-		out[base+1] = int32(start)
+		out[base+1] = int32(start | line<<8&0xff000000)
 		out[base+2] = int32(start + size)
 		if r.pos >= nextDiscard {
 			// Token records are decoded in order and never revisited. Retire
@@ -223,10 +213,10 @@ func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, []int32, bool) {
 		}
 	}
 	if r.pos != r.end {
-		return nil, nil, false
+		return nil, false
 	}
 	renvo_runtime_ArenaDiscardBytes(data[discardStart:r.pos])
-	return out, largeLines, true
+	return out, true
 }
 
 func renvoUnitUsesPanic(p *renvoProgram) bool {
@@ -236,7 +226,7 @@ func renvoUnitUsesPanic(p *renvoProgram) bool {
 	for base := 0; base+2 < len(data); base += renvoTokenStride {
 		packed := int(renvo_runtime_UnsafeInt32At(data, base))
 		if packed&255 == renvoTokIdent {
-			start := int(renvo_runtime_UnsafeInt32At(data, base+1))
+			start := int(renvo_runtime_UnsafeInt32At(data, base+1)) & 0xffffff
 			size := int(renvo_runtime_UnsafeInt32At(data, base+2)) - start
 			if size == 5 {
 				first := renvo_runtime_UnsafeByteAt(src, start)
@@ -362,7 +352,7 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 	if len(text) == 0 || len(tokenData) == 0 {
 		return false
 	}
-	tokens, tokenLines, tokensOK := renvoDecodeUnitTokens(text, tokenData)
+	tokens, tokensOK := renvoDecodeUnitTokens(text, tokenData)
 	if !tokensOK {
 		return false
 	}
@@ -375,7 +365,6 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 	}
 	prog.src = text
 	prog.toks.data = tokens
-	prog.toks.largeLines = tokenLines
 	prog.toks.count = tokenCount
 	prog.toks.panicEnabled = renvoUnitUsesPanic(prog)
 	declReader := renvoUnitReader{src: declData, end: len(declData), ok: true}
@@ -453,7 +442,7 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 		if !packageReader.ok {
 			return false
 		}
-		prog.packages = make([]renvoPackageInfo, 0, packageCount)
+		prog.packageTable = &renvoPackageTable{items: make([]renvoPackageInfo, 0, packageCount)}
 		for i := 0; i < packageCount; i++ {
 			nameLength := renvoUnitReadVar(&packageReader)
 			if !packageReader.ok || nameLength <= 0 || packageReader.pos+nameLength > packageReader.end {
@@ -493,7 +482,7 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 			if !packageReader.ok || !renvoUnitValidRange(len(text), item.textStart, item.textEnd) || !renvoUnitValidRange(tokenCount, item.tokenStart, item.tokenEnd) || !renvoUnitValidRange(len(prog.decls), item.declStart, item.declEnd) || !renvoUnitValidRange(len(prog.funcs), item.funcStart, item.funcEnd) {
 				return false
 			}
-			prog.packages = append(prog.packages, item)
+			prog.packageTable.items = append(prog.packageTable.items, item)
 		}
 		if packageReader.pos != packageReader.end {
 			return false
@@ -536,25 +525,25 @@ func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, are
 	meta.arenaSize = renvoResolveArenaSize(target, arenaSize)
 	var result renvoCompileResult
 	if renvoFixedTarget == renvoTargetLinux386 || renvoFixedTarget == renvoTargetWindows386 {
-		result = renvoTryCompileScalarProgram386(prog, &meta)
+		result = renvoTryCompileScalarProgram386Cached(prog, &meta)
 	} else if renvoFixedTarget == renvoTargetLinuxAarch64 || renvoFixedTarget == renvoTargetDarwinArm64 || renvoFixedTarget == renvoTargetWindowsArm64 {
-		result = renvoTryCompileScalarProgramAarch64(prog, &meta)
+		result = renvoTryCompileScalarProgramAarch64Cached(prog, &meta)
 	} else if renvoFixedTarget == renvoTargetLinuxArm {
-		result = renvoTryCompileScalarProgramArm(prog, &meta)
+		result = renvoTryCompileScalarProgramArmCached(prog, &meta)
 	} else if renvoFixedTarget == renvoTargetWasiWasm32 {
 		result = renvoTryCompileScalarProgramWasm32(prog, &meta)
 	} else if renvoFixedTarget != 0 {
-		result = renvoTryCompileScalarProgramAmd64(prog, &meta)
+		result = renvoTryCompileScalarProgramAmd64Cached(prog, &meta)
 	} else if target == renvoTargetLinux386 || target == renvoTargetWindows386 {
-		result = renvoTryCompileScalarProgram386(prog, &meta)
+		result = renvoTryCompileScalarProgram386Cached(prog, &meta)
 	} else if target == renvoTargetLinuxAarch64 || target == renvoTargetDarwinArm64 || target == renvoTargetWindowsArm64 {
-		result = renvoTryCompileScalarProgramAarch64(prog, &meta)
+		result = renvoTryCompileScalarProgramAarch64Cached(prog, &meta)
 	} else if target == renvoTargetLinuxArm {
-		result = renvoTryCompileScalarProgramArm(prog, &meta)
+		result = renvoTryCompileScalarProgramArmCached(prog, &meta)
 	} else if target == renvoTargetWasiWasm32 {
 		result = renvoTryCompileScalarProgramWasm32(prog, &meta)
 	} else {
-		result = renvoTryCompileScalarProgramAmd64(prog, &meta)
+		result = renvoTryCompileScalarProgramAmd64Cached(prog, &meta)
 	}
 	if result.ok {
 		write(output, result.data, -1)

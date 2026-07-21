@@ -21,13 +21,16 @@ func scanTokens(src []byte) ([]Token, bool) {
 			break
 		}
 		c := src[i]
-		if c == ' ' || c == '\t' || c == '\r' {
-			i++
-			continue
-		}
-		if c == '\n' {
-			line++
-			i++
+		if c == ' ' || c == '\t' || c == '\r' || c == '\n' {
+			for i < len(src) {
+				c = src[i]
+				if c == '\n' {
+					line++
+				} else if c != ' ' && c != '\t' && c != '\r' {
+					break
+				}
+				i++
+			}
 			continue
 		}
 		if c == '/' && i+1 < len(src) && src[i+1] == '/' {

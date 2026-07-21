@@ -116,7 +116,7 @@ func compileAmd64ObjectCacheSource(t *testing.T, source []byte) renvoCompileResu
 		t.Fatal("amd64 cache metadata failed")
 	}
 	meta.arenaSize = renvoDefaultArenaSize(renvoTargetLinuxAmd64)
-	return renvoTryCompileScalarProgramAmd64(&program, &meta)
+	return renvoTryCompileScalarProgramAmd64Cached(&program, &meta)
 }
 
 func compileDarwinObjectCacheSource(t *testing.T, source []byte) renvoCompileResult {
@@ -131,7 +131,7 @@ func compileDarwinObjectCacheSource(t *testing.T, source []byte) renvoCompileRes
 		t.Fatal("test source metadata failed")
 	}
 	meta.arenaSize = renvoDefaultArenaSize(renvoTargetDarwinArm64)
-	return renvoTryCompileScalarProgramAarch64(&program, &meta)
+	return renvoTryCompileScalarProgramAarch64Cached(&program, &meta)
 }
 
 func TestDarwinCompileSessionYieldsAndMatchesSynchronousOutput(t *testing.T) {
@@ -248,5 +248,5 @@ func compileDarwinPackageObjectUnit(t *testing.T, source []byte, rootFuncStart i
 		t.Fatal("package ownership metadata failed")
 	}
 	meta.arenaSize = renvoDefaultArenaSize(renvoTargetDarwinArm64)
-	return renvoTryCompileScalarProgramAarch64(&decoded, &meta)
+	return renvoTryCompileScalarProgramAarch64Cached(&decoded, &meta)
 }

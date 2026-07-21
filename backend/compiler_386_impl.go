@@ -1,5 +1,15 @@
 package main
 
+func renvo386EmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
+	a := &g.asm
+	renvoAsmLoadPrimaryStack(a, srcPtr)
+	renvoAsmEmit16(a, 0xc689)
+	renvoAsmLoadPrimaryStack(a, destPtr)
+	renvoAsmEmit16(a, 0xc789)
+	renvoAsmLoadTertiaryStack(a, byteCount)
+	renvoAsmEmitText(a, "\x39\xf7\x76\x0e\x8d\x74\x0e\xff\x8d\x7c\x0f\xff\xfd\xf3\xa4\xfc\xeb\x03\xfc\xf3\xa4")
+}
+
 func renvo386EnsureWideBinaryHelper(g *renvoLinearGen) int {
 	renvoNonNil(g)
 	if g.wideBinaryLabel > 0 {

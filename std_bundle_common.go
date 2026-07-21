@@ -19,10 +19,7 @@ func BundledStdReadFile(path string) ([]byte, bool) {
 	if moduleFile {
 		name = name[len("@module/"):]
 	}
-	if !moduleFile && !bundledStdGoSourceName(name) {
-		return nil, false
-	}
-	if moduleFile && bundledStdHasSuffix(name, "_test.go") {
+	if bundledStdHasSuffix(name, "_test.go") {
 		return nil, false
 	}
 	data, ok := bundledStdRawReadFile(name)
@@ -57,10 +54,7 @@ func BundledStdReadDir(path string) ([]StdEntry, bool) {
 			}
 			continue
 		}
-		if !moduleDir && !bundledStdGoSourceName(entryPath) {
-			continue
-		}
-		if moduleDir && bundledStdHasSuffix(entryPath, "_test.go") {
+		if bundledStdHasSuffix(entryPath, "_test.go") {
 			continue
 		}
 		data, readable := bundledStdRawReadFile(entryPath)
@@ -84,10 +78,7 @@ func bundledStdDirHasFile(path string, includeAssets bool) bool {
 			}
 			continue
 		}
-		if !includeAssets && !bundledStdGoSourceName(entryPath) {
-			continue
-		}
-		if includeAssets && bundledStdHasSuffix(entryPath, "_test.go") {
+		if bundledStdHasSuffix(entryPath, "_test.go") {
 			continue
 		}
 		data, readable := bundledStdRawReadFile(entryPath)

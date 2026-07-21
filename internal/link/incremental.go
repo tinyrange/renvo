@@ -12,7 +12,7 @@ import (
 // whose semantics genuinely span package boundaries.
 func LinkBuildCoreIncremental(result build.Result) Result {
 	InitializePackageArtifactCache()
-	session := BeginPackageSession(result, true)
+	session := BeginPackageSession(result, false)
 	for !session.Step() {
 	}
 	return session.Result()
@@ -119,17 +119,24 @@ func (s *PackageSession) Step() bool {
 	for i := 0; i < len(s.artifacts); i++ {
 		arena.Discard(s.artifactStarts[i], s.artifactEnds[i])
 	}
-	if !lowerFunctionValuesCore(&program) {
+	if !lowerFunctionValuesCore(&program, s.transient) {
 		s.failUnit()
 		return true
 	}
 	compactCoreLinkedTokenLines(program.Tokens)
-	data, ok := unit.MarshalCore(unit.CoreProgramFrom(program))
+	var data []byte
+	if s.transient {
+		data, ok = unit.MarshalCoreTransient(unit.CoreProgramFrom(program))
+	} else {
+		data, ok = unit.MarshalCore(unit.CoreProgramFrom(program))
+	}
 	if !ok {
 		s.failUnit()
 		return true
 	}
-	s.result.Program = program
+	if !s.transient {
+		s.result.Program = program
+	}
 	s.result.Data = data
 	s.stage = 3
 	return true
@@ -153,20 +160,17 @@ func linkOnePackageArtifactCore(src unit.Program, aliases []string, symbolOffset
 	if src.Package == "" || len(src.Text) == 0 || len(src.Tokens) == 0 {
 		return empty, false
 	}
-	// Token lines temporarily carry package-local link actions. Package programs
-	// are transient decoded/lowered values; the reusable cache owns an encoded
-	// copy, so mutating this build's token table avoids duplicating its largest
-	// allocation without changing the cached unit.
+	// Keep actions separate from token source lines. The linker uses those lines
+	// directly when laying out the artifact, avoiding another scan of its text.
 	actions := make([]int, len(src.Tokens))
 	if !linkedTokenActions(&src, &aliases, symbolOffsets, actions, plusReplacement) {
 		return empty, false
 	}
 	finalEOF := 0
 	for i := 0; i < len(actions); i++ {
-		src.Tokens[i].KindLine = src.Tokens[i].KindLine&255 | actions[i]<<8
 		if src.Tokens[i].KindLine&255 != unit.TokenEOF && !tokenActionSkips(actions[i]) {
 			finalEOF++
-			if coreLinkedTokenIsEllipsis(src.Tokens[i], src.Text, src.Tokens[i].Start, src.Tokens[i].Start+src.Tokens[i].Size) {
+			if incrementalTokenIsEllipsis(src.Tokens[i], src.Text) {
 				finalEOF += 2
 			}
 		}
@@ -176,12 +180,16 @@ func linkOnePackageArtifactCore(src unit.Program, aliases []string, symbolOffset
 	artifact.Tokens = make([]unit.Token, 0, finalEOF+1)
 	artifact.Decls = make([]unit.Decl, 0, len(src.Decls))
 	artifact.Funcs = make([]unit.Func, 0, len(src.Funcs))
-	ok, line := appendProgramCore(&artifact, src, finalEOF, 1, aliases, false)
+	ok, line := appendProgramCore(&artifact, src, actions, finalEOF, 1, aliases, false)
 	if !ok {
 		return empty, false
 	}
 	artifact.Tokens = append(artifact.Tokens, unit.MakeToken(unit.TokenEOF, len(artifact.Text), 0, line))
 	return artifact, true
+}
+
+func incrementalTokenIsEllipsis(token unit.Token, text []byte) bool {
+	return token.KindLine&255 == unit.TokenOp && token.Size == 3 && token.Start >= 0 && token.Start+2 < len(text) && text[token.Start] == '.' && text[token.Start+1] == '.' && text[token.Start+2] == '.'
 }
 
 func mergePackageArtifactsCore(artifacts []unit.Program, units []build.PackageUnit, root int, rootName string) (unit.Program, bool) {

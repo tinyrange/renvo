@@ -14,6 +14,7 @@ type FSBuildSession struct {
 	moduleCache  string
 	fs           SourceFS
 	compact      bool
+	cached       bool
 	stage        int
 	sourcesStart int
 	sourcesEnd   int
@@ -23,6 +24,10 @@ type FSBuildSession struct {
 }
 
 func BeginFSBuildSession(args []string, workDir string, stdRoot string, moduleCache string, fs SourceFS, compact bool) *FSBuildSession {
+	return beginFSBuildSession(args, workDir, stdRoot, moduleCache, fs, compact, compact)
+}
+
+func beginFSBuildSession(args []string, workDir string, stdRoot string, moduleCache string, fs SourceFS, compact bool, cached bool) *FSBuildSession {
 	return &FSBuildSession{
 		args:        args,
 		workDir:     workDir,
@@ -30,6 +35,7 @@ func BeginFSBuildSession(args []string, workDir string, stdRoot string, moduleCa
 		moduleCache: moduleCache,
 		fs:          fs,
 		compact:     compact,
+		cached:      cached,
 		result:      newBuildResult(),
 	}
 }
@@ -65,7 +71,7 @@ func (s *FSBuildSession) Step() bool {
 			s.stage = 4
 			return true
 		}
-		if s.compact && !options.EmitUnit {
+		if s.cached && !options.EmitUnit {
 			s.result.CacheKeyA, s.result.CacheKeyB = embeddedBuildFingerprint(s.workDir, options, sources.Files)
 			if embeddedBuildCacheValid && s.result.CacheKeyA == embeddedBuildCacheKeyA && s.result.CacheKeyB == embeddedBuildCacheKeyB && s.fs.PathExists(options.Output) {
 				s.result.CacheHit = true
@@ -79,7 +85,7 @@ func (s *FSBuildSession) Step() bool {
 		if len(options.Files) > 0 {
 			s.rootArg = sources.Root.Dir
 		}
-		s.pipeline = pipeline.BeginSession(s.workDir, s.stdRoot, s.rootArg, sources.Files, s.sourcesStart, s.sourcesEnd, s.compact, s.compact)
+		s.pipeline = pipeline.BeginSession(s.workDir, s.stdRoot, s.rootArg, sources.Files, s.sourcesStart, s.sourcesEnd, s.compact, s.cached)
 		s.stage = 2
 		return false
 	}

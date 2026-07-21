@@ -66,6 +66,35 @@ func Value() int { return answer }
 	}
 }
 
+func TestLinkBuildTransientOmitsIncrementalPackageMetadata(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+func main() {}
+`)},
+	})
+	linked := LinkBuildCoreTransient(result)
+	if !linked.Ok {
+		t.Fatalf("transient LinkBuild failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	decoded, err := wireunit.Unmarshal(linked.Data)
+	if err != nil {
+		t.Fatalf("transient linked unit did not decode: %v", err)
+	}
+	if len(decoded.Packages) != 0 {
+		t.Fatalf("transient package metadata = %#v, want none", decoded.Packages)
+	}
+
+	retained := LinkBuildCore(result)
+	if !retained.Ok {
+		t.Fatalf("persistent LinkBuild failed: err=%d pkg=%d", retained.Error, retained.ErrorPackage)
+	}
+	if len(retained.Program.Packages) != len(result.Units) {
+		t.Fatalf("persistent package metadata count = %d, want %d", len(retained.Program.Packages), len(result.Units))
+	}
+}
+
 func TestLinkCanonicalizesInterpretedStringEscapes(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
@@ -160,7 +189,9 @@ func appMain() int { return lib.Value() }
 }
 
 func TestLinkBuildCompactsLargeSourceLineGapsForUnitEncoding(t *testing.T) {
-	source := append([]byte("package main\n"), bytes.Repeat([]byte{'\n'}, 70000)...)
+	// Stay below the scanner's explicit 65,535-line source limit. The gap is
+	// still large enough to verify that linking compacts source line numbers.
+	source := append([]byte("package main\n"), bytes.Repeat([]byte{'\n'}, 60000)...)
 	source = append(source, []byte("func appMain() int { return 0 }\n")...)
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
