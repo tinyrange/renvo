@@ -604,7 +604,10 @@ func lookupScopeTokenNameCore(scope CoreScope, file *syntax.File, tok int) int {
 		return -1
 	}
 	hash := hashCoreToken(file.Src, token.Start, size)
-	for i := 0; i < len(scope.Names); i++ {
+	// References overwhelmingly resolve to parameters and locals declared near
+	// the point of use. Search newest declarations first so large compiler
+	// functions do not rescan their full scope for every identifier.
+	for i := len(scope.Names) - 1; i >= 0; i-- {
 		if scope.Names[i].Hash != hash {
 			continue
 		}

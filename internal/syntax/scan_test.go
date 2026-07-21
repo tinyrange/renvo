@@ -13,6 +13,10 @@ func TestTokenCompactLayout(t *testing.T) {
 	if got, want := unsafe.Sizeof(tok), 3*unsafe.Sizeof(int(0)); got != want {
 		t.Fatalf("token size = %d, want %d", got, want)
 	}
+	nonOperator := MakeToken(TokenIdent, 0, 1, int('+'))
+	if tokCharIs(nil, []Token{nonOperator}, 0, '+') {
+		t.Fatal("non-operator source line leaked into the packed operator field")
+	}
 }
 
 func TestOperatorTokenPacking(t *testing.T) {

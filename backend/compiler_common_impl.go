@@ -6026,7 +6026,7 @@ func renvoFindOrAddFuncTypeFromParams(m *renvoMeta, first int, count int, result
 	if count > 0 && m.params[first+count-1].initStart == 1 {
 		variadic = 1
 	}
-	for i := 0; i < len(m.types); i++ {
+	for i := len(m.types) - 1; i >= 0; i-- {
 		t := &m.types[i]
 		if t.kind != renvoTypeFunc || t.elem != resultType || t.count != count || t.resolved != variadic {
 			continue
@@ -6184,7 +6184,9 @@ func renvoAddPointerType(m *renvoMeta, elem int, addressSpace int) int {
 	if addressSpace < renvoPointerSpaceData || addressSpace > renvoPointerSpaceGeneric {
 		addressSpace = renvoPointerSpaceData
 	}
-	for i := 1; i < len(m.types); i++ {
+	// Pointer types are most often requested repeatedly while lowering nearby
+	// expressions. Recently-created types therefore provide the best hit rate.
+	for i := len(m.types) - 1; i >= 1; i-- {
 		typ := &m.types[i]
 		if typ.kind == renvoTypePointer && typ.elem == elem && typ.first == addressSpace {
 			return i
@@ -6195,7 +6197,7 @@ func renvoAddPointerType(m *renvoMeta, elem int, addressSpace int) int {
 
 func renvoAddSequenceType(m *renvoMeta, kind int, elem int, count int, size int) int {
 	renvoNonNil(m)
-	for i := 1; i < len(m.types); i++ {
+	for i := len(m.types) - 1; i >= 1; i-- {
 		t := &m.types[i]
 		if t.kind == kind && t.elem == elem && t.count == count && t.nameStart == 0 {
 			return i

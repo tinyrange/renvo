@@ -446,5 +446,5 @@ func tokCharIs(_ []byte, toks []Token, i int, c byte) bool {
 		return false
 	}
 	packed := toks[i].KindLine
-	return packed&255 == TokenOperator && packed>>TokenOperatorCharShift&TokenOperatorCharMask == int(c)
+	return packed>>TokenOperatorCharShift&TokenOperatorCharMask == int(c)
 }

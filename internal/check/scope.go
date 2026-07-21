@@ -288,7 +288,7 @@ func tokCharIs(file *syntax.File, tok int, c byte) bool {
 		return false
 	}
 	packed := file.Tokens[tok].KindLine
-	return packed&255 == syntax.TokenOperator && packed>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask == int(c)
+	return packed>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask == int(c)
 }
 
 func tokenTextIs(file *syntax.File, tok int, text string) bool {
