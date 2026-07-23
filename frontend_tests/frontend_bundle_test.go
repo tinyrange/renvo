@@ -408,22 +408,41 @@ func logNativeFrontendCrash(t *testing.T, failed *exec.Cmd, executable string) {
 	if runtime.GOOS != "windows" || os.Getenv("RENVO_WINDOWS_GDB") == "" {
 		return
 	}
+	commandFile, err := os.CreateTemp("", "renvo-gdb-commands-*.txt")
+	if err != nil {
+		t.Logf("create native frontend GDB command file: %v", err)
+		return
+	}
+	commandPath := commandFile.Name()
+	defer os.Remove(commandPath)
+	commands := `set pagination off
+set breakpoint pending on
+break CreateFileA
+commands
+silent
+printf "CreateFileA path: "
+x/s $rcx
+printf "CreateFileA rsp: %#lx\n", $rsp
+continue
+end
+run
+info registers
+bt
+x/16gx $rsp
+x/24i $pc-32
+`
+	if _, err := commandFile.WriteString(commands); err != nil {
+		commandFile.Close()
+		t.Logf("write native frontend GDB command file: %v", err)
+		return
+	}
+	if err := commandFile.Close(); err != nil {
+		t.Logf("close native frontend GDB command file: %v", err)
+		return
+	}
 	args := []string{
 		"--batch",
-		"-ex", "set pagination off",
-		"-ex", "set breakpoint pending on",
-		"-ex", "break CreateFileA",
-		"-ex", "commands",
-		"-ex", "silent",
-		"-ex", `printf "CreateFileA path: "`,
-		"-ex", "x/s $rcx",
-		"-ex", "continue",
-		"-ex", "end",
-		"-ex", "run",
-		"-ex", "info registers",
-		"-ex", "bt",
-		"-ex", "x/16gx $rsp",
-		"-ex", "x/24i $pc-32",
+		"-x", commandPath,
 		"--args",
 		executable,
 	}
