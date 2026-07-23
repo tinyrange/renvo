@@ -1106,12 +1106,11 @@ func renvoAsmInit(a *renvoAsm) {
 	var data []byte
 	if renvoFixedTarget != 0 {
 		code = make([]byte, 0, 2097152)
-		labelPos = make([]int32, 0, 16384)
+		labelPos = make([]int32, 0, 32768)
 		relocs = make([]int32, 0, 65536)
 		absRelocs = make([]int32, 0, 49152)
-		symbols = make([]renvoAsmSymbol, 0, 1024)
-		if renvoCompilerStripSymbols && renvoTargetArch != renvoArchWasm32 {
-			symbols = make([]renvoAsmSymbol, 0, 0)
+		if !renvoCompilerStripSymbols || renvoTargetArch == renvoArchWasm32 {
+			symbols = make([]renvoAsmSymbol, 0, 1024)
 		}
 	} else if renvoTargetArch == renvoArchWasm32 {
 		code = make([]byte, 0, 655360)
@@ -1127,16 +1126,12 @@ func renvoAsmInit(a *renvoAsm) {
 		// self-host build uses fewer than 2,800 on every native target, so avoid
 		// touching a 32,768-entry arena allocation for each compilation.
 		absRelocs = make([]int32, 0, 12288)
-		if renvoCompilerStripSymbols && renvoTargetArch != renvoArchWasm32 {
-			symbols = make([]renvoAsmSymbol, 0, 0)
-		} else {
+		if !renvoCompilerStripSymbols || renvoTargetArch == renvoArchWasm32 {
 			symbols = make([]renvoAsmSymbol, 0, 4096)
 		}
 	}
-	data = make([]byte, 0, 16384)
-	if renvoCompilerStripSymbols && renvoTargetArch != renvoArchWasm32 {
-		symbolName = make([]byte, 0, 0)
-	} else {
+	data = make([]byte, 0, 65536)
+	if !renvoCompilerStripSymbols || renvoTargetArch == renvoArchWasm32 {
 		symbolName = make([]byte, 0, 16384)
 	}
 	a.code = code
@@ -19651,6 +19646,10 @@ func renvoInitFuncQueue(g *renvoLinearGen, count int) {
 		g.funcReachable[i] = false
 	}
 	g.funcQueue = make([]int, 0, count)
+	// Allocate reusable control-flow stacks before per-function scratch marks;
+	// their first growth must not pin an entire function's parser scratch.
+	g.breakLabels = make([]int, 0, 32)
+	g.continueLabels = make([]int, 0, 32)
 }
 
 func renvoEmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
