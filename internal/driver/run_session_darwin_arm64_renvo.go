@@ -208,6 +208,13 @@ func (s *LinkedImageSession) Run(native []byte, script string, args []string, en
 		if segment.MemorySize == 0 {
 			continue
 		}
+		// MAP_JIT pages keep their VM protection RWX; Apple silicon enforces
+		// write-vs-execute access for those pages with the per-thread
+		// pthread_jit_write_protect_np switch. Applying mprotect to a MAP_JIT
+		// mapping is rejected on native macOS even when narrowing it to RX.
+		if segment.Permissions&1 != 0 {
+			continue
+		}
 		protection := 0
 		if segment.Permissions&4 != 0 {
 			protection |= renvoRunDarwinProtRead

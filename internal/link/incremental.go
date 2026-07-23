@@ -162,7 +162,7 @@ func linkOnePackageArtifactCore(src unit.Program, aliases []string, symbolOffset
 	}
 	// Keep actions separate from token source lines. The linker uses those lines
 	// directly when laying out the artifact, avoiding another scan of its text.
-	actions := make([]int, len(src.Tokens))
+	actions := make([]tokenAction, len(src.Tokens))
 	if !linkedTokenActions(&src, &aliases, symbolOffsets, actions, plusReplacement) {
 		return empty, false
 	}

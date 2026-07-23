@@ -5,6 +5,7 @@ package driver
 import (
 	"renvo.dev/internal/arena"
 	"renvo.dev/internal/backendbridge"
+	"renvo.dev/internal/fronttrace"
 	"renvo.dev/internal/load"
 	"renvo.dev/std/os"
 )
@@ -50,11 +51,14 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 		commandArgs = commandArgs[1:]
 	}
 	resetArena := renvoFrontendCanResetArena()
+	fronttrace.SetEnabled(renvoEnvValue(env, "RENVO_FRONTEND_TRACE") == "1")
+	fronttrace.Event("source")
 	mark := 0
 	if resetArena {
 		mark = arena.Mark()
 	}
 	built := buildFromFSOneShotCompactWithModuleCache(commandArgs, renvoWorkDir(env), renvoStdRoot(args, env), renvoModuleCache(env), RenvoFS{})
+	fronttrace.Event("frontend complete")
 	if !built.Ok {
 		return finishRenvoCommandFailure(renvoCommandDiagnosticBuffer, built.Diagnostic, resetArena, mark)
 	}
