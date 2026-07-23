@@ -1962,12 +1962,11 @@ func renvoAsmPatchWindows(a *renvoAsm, layout renvoWinImportLayout) {
 func renvoAppendPEHeader64(out []byte, textRawSize int, textVirtualSize int, dataRVA int, dataRawSize int, dataVirtualSize int, importRVA int, importSize int, iatRVA int, iatSize int) []byte {
 	machine := 0x8664
 	imageBase := renvoWinImageBase
-	stackReserve := 0x100000
+	stackReserve := 0x800000
 	stackCommit := 0x100000
 	if renvoTargetArch == renvoArchAarch64 {
 		machine = 0xaa64
 		imageBase = 0x140000000
-		stackReserve = 0x800000
 		stackCommit = 0x1000
 	}
 	sizeOfImage := renvoAlignValue(dataRVA+dataVirtualSize, renvoWinSectionAlign)

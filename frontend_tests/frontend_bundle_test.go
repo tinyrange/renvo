@@ -362,7 +362,7 @@ func TestBundledFrontendNativeREPLSession(t *testing.T) {
 	replBinary := filepath.Join(toolDir, "renvorepl"+executableSuffix)
 	cmd = exec.Command(stage1, "-tags", "renvo_bundle", "-t", target, "-s", "-o", replBinary, "./cmd/renvorepl")
 	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "PWD="+root, "RENVO_FRONTEND_TRACE=1")
+	cmd.Env = append(os.Environ(), "PWD="+root)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("native pure Renvo REPL build failed: %v\n%s", err, out)
 	}

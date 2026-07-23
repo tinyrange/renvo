@@ -3,7 +3,6 @@ package pipeline
 import (
 	"renvo.dev/internal/arena"
 	"renvo.dev/internal/build"
-	"renvo.dev/internal/fronttrace"
 	"renvo.dev/internal/link"
 	"renvo.dev/internal/load"
 )
@@ -55,20 +54,17 @@ func buildUnitTransientDirect(workDir string, stdRoot string, arg string, files 
 	}
 	loadStart := arena.Mark()
 	workspace := load.LoadWorkspace(workDir, stdRoot, arg, files)
-	fronttrace.Event("workspace loaded")
 	loadEnd := arena.Mark()
 	result.Workspace = workspace
 	if !workspace.Ok {
 		return pipelineFail(result, PipelineErrLoad, -1, workspace.ErrorFile, -1)
 	}
 	built := build.BuildProgramsTransient(workspace.Graph)
-	fronttrace.Event("packages lowered")
 	result.Build = built
 	if !built.Ok {
 		return pipelineFail(result, PipelineErrBuild, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
 	linked := link.LinkBuildCoreTransient(built)
-	fronttrace.Event("program linked")
 	result.Link = linked
 	if !linked.Ok {
 		return pipelineFail(result, PipelineErrLink, linked.ErrorPackage, -1, -1)

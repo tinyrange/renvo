@@ -2,7 +2,6 @@ package driver
 
 import (
 	"renvo.dev/internal/arena"
-	"renvo.dev/internal/fronttrace"
 	"renvo.dev/internal/load"
 )
 
@@ -213,7 +212,6 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 		}
 	}
 	explicit := ref.ImportPath == c.explicitRoot && len(c.explicitFiles) > 0
-	fronttrace.Event(ref.ImportPath)
 	var paths []string
 	if explicit {
 		paths = c.explicitFiles
@@ -237,7 +235,6 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 			continue
 		}
 		arenaStart := arena.Mark()
-		fronttrace.Event(path)
 		src, ok := c.fs.ReadFile(path)
 		arenaEnd := arena.Mark()
 		if !ok {

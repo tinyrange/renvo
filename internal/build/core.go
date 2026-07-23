@@ -3,7 +3,6 @@ package build
 import (
 	"renvo.dev/internal/arena"
 	"renvo.dev/internal/check"
-	"renvo.dev/internal/fronttrace"
 	"renvo.dev/internal/load"
 	"renvo.dev/internal/lower"
 	"renvo.dev/internal/unit"
@@ -77,7 +76,6 @@ func buildProgramsCore(graph load.Graph, transient bool, cached bool, identities
 func buildProgramsDirect(graph load.Graph, transient bool) Result {
 	headerStart := arena.Mark()
 	checked := check.CheckGraphHeadersCore(graph)
-	fronttrace.Event("headers checked")
 	headerEnd := arena.Mark()
 	result := Result{
 		Root:         -1,
@@ -92,7 +90,6 @@ func buildProgramsDirect(graph load.Graph, transient bool) Result {
 		return buildFail(result, BuildErrCheck, checked.ErrorPackage, checked.ErrorFile, checked.ErrorToken)
 	}
 	for i := 0; i < len(graph.Packages); i++ {
-		fronttrace.Event(graph.Packages[i].Ref.ImportPath)
 		persistMark := 0
 		if transient {
 			persistMark = arena.PersistMark()
