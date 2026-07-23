@@ -387,14 +387,14 @@ func renvoAsmJlLabel(a *renvoAsm, label int) {
 	renvoAsmAddReloc(a, at, label)
 }
 
-func renvoWinAmd64CallImport(a *renvoAsm, importID int, shadow int) {
+func renvoWinAmd64CallImport(a *renvoAsm, importID int) {
 	renvoNonNil(a)
-	renvoAsmEmit4(a, 0x48, 0x83, 0xec, shadow)
-	renvoAsmEmit16(a, 0x15ff)
-	at := len(a.code)
-	renvoAsmEmit32(a, 0)
-	renvoAsmAddWinImportReloc(a, at, importID)
-	renvoAsmEmit4(a, 0x48, 0x83, 0xc4, shadow)
+	// Expression evaluation can reach this boundary at either stack parity.
+	// Preserve r12 on the original stack, use it to recover the exact rsp, and
+	// construct a fresh, aligned Win64 shadow area for the imported call.
+	base := len(a.code)
+	renvoAsmEmitText(a, "\x41\x54\x49\x89\xe4\x48\x83\xe4\xf0\x48\x83\xec\x20\xff\x15\x00\x00\x00\x00\x49\x89\xc3\x4c\x89\xe4\x41\x5c\x4c\x89\xd8")
+	renvoAsmAddWinImportReloc(a, base+15, importID)
 }
 
 func renvoWin386CallImport(a *renvoAsm, importID int) {
@@ -724,17 +724,12 @@ func renvoEmitWindowsOpen(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoAsmPopTertiary(a)
 	renvoAsmPopPrimary(a)
 	renvoWinAmd64TranslateCreateFileFlags(a)
-	renvoAsmEmit4(a, 0x48, 0x83, 0xec, 56)
-	renvoAsmEmit5(a, 0x44, 0x89, 0x54, 0x24, 32)
-	renvoAsmEmit4(a, 0xc7, 0x44, 0x24, 40)
-	renvoAsmEmit32(a, 0x80)
-	renvoAsmEmit5(a, 0x48, 0xc7, 0x44, 0x24, 48)
-	renvoAsmEmit32(a, 0)
-	renvoAsmEmit16(a, 0x15ff)
-	at := len(a.code)
-	renvoAsmEmit32(a, 0)
-	renvoAsmAddWinImportReloc(a, at, createFileImport)
-	renvoAsmEmit4(a, 0x48, 0x83, 0xc4, 56)
+	// CreateFileA adds three stack arguments after its shadow space. As with
+	// the simpler import helper, dynamically align a fresh call area and
+	// restore the exact expression stack afterwards.
+	base := len(a.code)
+	renvoAsmEmitText(a, "\x41\x54\x49\x89\xe4\x48\x83\xe4\xf0\x48\x83\xec\x40\x44\x89\x54\x24\x20\xc7\x44\x24\x28\x80\x00\x00\x00\x48\xc7\x44\x24\x30\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x49\x89\xc3\x4c\x89\xe4\x41\x5c\x4c\x89\xd8")
+	renvoAsmAddWinImportReloc(a, base+37, createFileImport)
 	return true
 }
 
@@ -856,7 +851,7 @@ func renvoEmitWindowsClose(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 		return true
 	}
 	renvoAsmCopyPrimaryToTertiary(a)
-	renvoWinAmd64CallImport(a, renvoWinImportCloseHandle, 40)
+	renvoWinAmd64CallImport(a, renvoWinImportCloseHandle)
 	renvoAsmEmit3(a, 0x83, 0xf8, 0)
 	renvoAsmJzLabel(a, failLabel)
 	renvoAsmPrimaryImm(a, 0)
@@ -919,7 +914,7 @@ func renvoEmitWindowsChmod(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 	renvoAsmEmit8(a, 0xb9)
 	renvoAsmEmit32(a, 1)
 	renvoAsmEmit24(a, 0xc03145)
-	renvoWinAmd64CallImport(a, renvoWinImportSetFilePointer, 40)
+	renvoWinAmd64CallImport(a, renvoWinImportSetFilePointer)
 	renvoAsmEmit3(a, 0x83, 0xf8, -1)
 	failLabel := renvoAsmNewLabel(a)
 	doneLabel := renvoAsmNewLabel(a)

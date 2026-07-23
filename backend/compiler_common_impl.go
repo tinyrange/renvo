@@ -13856,7 +13856,7 @@ func renvoEmitExitStatus(g *renvoLinearGen) bool {
 	}
 	if targetIsWindows() {
 		renvoAsmCopyPrimaryToTertiary(a)
-		renvoWinAmd64CallImport(a, renvoWinImportExitProcess, 40)
+		renvoWinAmd64CallImport(a, renvoWinImportExitProcess)
 	} else {
 		renvoAsmCopyPrimaryToCallWord0(a)
 		renvoAsmPrimaryImm(a, 60)

@@ -167,7 +167,7 @@ func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinear
 		renvoAsmRet(a)
 	} else if targetIsWindows() {
 		renvoAsmCopyPrimaryToTertiary(a)
-		renvoWinAmd64CallImport(a, renvoWinImportExitProcess, 40)
+		renvoWinAmd64CallImport(a, renvoWinImportExitProcess)
 		renvoAsmRet(a)
 	} else {
 		renvoAsmCopyPrimaryToCallWord0(a)

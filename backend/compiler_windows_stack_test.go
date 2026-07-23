@@ -21,3 +21,25 @@ func TestWindowsPE64ReservesGrowableStack(t *testing.T) {
 		}
 	}
 }
+
+func TestWindowsAmd64ImportCallAlignsDynamicExpressionStack(t *testing.T) {
+	renvoSetTarget(renvoTargetWindowsAmd64)
+	var asm renvoAsm
+	renvoAsmInit(&asm)
+	renvoWinAmd64CallImport(&asm, renvoWinImportCloseHandle)
+	// push r12; save rsp; align rsp; reserve the 32-byte shadow area.
+	want := []byte{
+		0x41, 0x54,
+		0x49, 0x89, 0xe4,
+		0x48, 0x83, 0xe4, 0xf0,
+		0x48, 0x83, 0xec, 0x20,
+	}
+	if len(asm.code) < len(want) {
+		t.Fatalf("import call length = %d, want at least %d", len(asm.code), len(want))
+	}
+	for i := 0; i < len(want); i++ {
+		if asm.code[i] != want[i] {
+			t.Fatalf("import call prefix = % x, want % x", asm.code[:len(want)], want)
+		}
+	}
+}
