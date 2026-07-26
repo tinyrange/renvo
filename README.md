@@ -90,6 +90,18 @@ isolated native stack. It does not write an executable or launch a child
 process. Windows and macOS use their native process APIs for the current
 implementation.
 
+The host-built frontend can also compile and run ordinary Go test functions
+with Renvo's `testing` package:
+
+```sh
+RENVO_BACKEND="$PWD/renvo-backend" ./renvo test ./path/to/package
+```
+
+Test files remain ordinary `_test.go` sources with `func TestXxx(t *testing.T)`
+entry points. The command builds a temporary Renvo test main beside the source
+package, runs it for the native host target, propagates failure through its
+exit status, and removes the generated files afterward.
+
 An experimental REPL is implemented as a pure Renvo application on top of that
 linked-image entry point:
 

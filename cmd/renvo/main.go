@@ -14,6 +14,31 @@ func main() {
 }
 
 func run(args []string, env []string) int {
+	if driver.TestCommandRequested(args) {
+		if len(args) == 3 && (args[2] == "--help" || args[2] == "-h") {
+			fmt.Fprint(os.Stdout, driver.TestHelpText)
+			return 0
+		}
+		result := driver.RunTestCommand(args, env, nil, os.Stdin, os.Stdout, os.Stderr)
+		if result.Ok {
+			return result.ExitCode
+		}
+		switch result.Error {
+		case driver.TestErrCompile:
+			printCompileError(result.Compile)
+		case driver.TestErrBackend:
+			fmt.Fprintf(os.Stderr, "renvo test: backend unavailable; set %s\n", driver.BackendEnv)
+		case driver.TestErrArguments:
+			fmt.Fprintf(os.Stderr, "renvo test: invalid arguments: %s\n%s", result.ErrorArg, driver.TestHelpText)
+		case driver.TestErrGenerate:
+			fmt.Fprintf(os.Stderr, "renvo test: %s\n", result.ErrorArg)
+		case driver.TestErrExecute:
+			fmt.Fprintf(os.Stderr, "renvo test: execution failed: %s\n", result.ErrorArg)
+		default:
+			fmt.Fprintln(os.Stderr, "renvo test: failed")
+		}
+		return result.ExitCode
+	}
 	if driver.ScriptCommandRequested(args) {
 		if len(args) == 3 && (args[2] == "--help" || args[2] == "-h") {
 			fmt.Fprint(os.Stdout, driver.RunHelpText)
