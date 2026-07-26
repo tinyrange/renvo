@@ -69,6 +69,9 @@ func renvoParseTargetArg(target string) int {
 	if len(target) == 11 && target[0] == 'w' && target[1] == 'a' && target[2] == 's' && target[3] == 'i' && target[4] == '/' && target[5] == 'w' && target[6] == 'a' && target[7] == 's' && target[8] == 'm' && target[9] == '3' && target[10] == '2' {
 		return renvoTargetWasiWasm32
 	}
+	if target == "vm/vm32" {
+		return renvoTargetVM32
+	}
 	if len(target) == 12 && target[0] == 'd' && target[1] == 'a' && target[2] == 'r' && target[3] == 'w' && target[4] == 'i' && target[5] == 'n' && target[6] == '/' && target[7] == 'a' && target[8] == 'r' && target[9] == 'm' && target[10] == '6' && target[11] == '4' {
 		return renvoTargetDarwinArm64
 	}
@@ -128,7 +131,7 @@ func renvoPrintUnsupportedTarget(target string) {
 	renvoPrintErr("renvo: unsupported target: ")
 	renvoPrintErr(target)
 	renvoPrintErr("\n")
-	renvoPrintErr("renvo: supported targets: linux/amd64, linux/386, linux/aarch64, linux/arm, windows/amd64, windows/386, windows/arm64, wasi/wasm32, darwin/arm64\n")
+	renvoPrintErr("renvo: supported targets: linux/amd64, linux/386, linux/aarch64, linux/arm, windows/amd64, windows/386, windows/arm64, wasi/wasm32, vm/vm32, darwin/arm64\n")
 }
 
 func renvoUnitRead32(src []byte, pos int) int {
@@ -176,13 +179,14 @@ func renvoUnitReadVar(r *renvoUnitReader) int {
 	return 0
 }
 
-func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, bool) {
+func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, []int32, bool) {
 	r := renvoUnitReader{src: data, end: len(data), ok: true}
 	count := renvoUnitReadVar(&r)
 	if !r.ok {
-		return nil, false
+		return nil, nil, false
 	}
 	out := make([]int32, 0, count*renvoTokenStride)
+	var lineBases []int32
 	start := 0
 	line := 0
 	discardStart := 0
@@ -217,29 +221,32 @@ func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, bool) {
 			lineDelta = renvoUnitReadVar(&r)
 		}
 		if !r.ok {
-			return nil, false
+			return nil, nil, false
 		}
 		start = start + delta
 		line = line + lineDelta
 		if kind < 0 || kind > 255 || start < 0 || start > 0xffffff || size < 0 || line < 0 || start+size > len(text) {
-			return nil, false
+			return nil, nil, false
 		}
 		if kind == renvoTokOp {
 			if size > 255 {
-				return nil, false
+				return nil, nil, false
 			}
 		} else if size > 0xffff {
-			return nil, false
+			return nil, nil, false
 		}
 		base := len(out)
 		out = out[:base+renvoTokenStride]
-		charBits := 0
+		highBits := size >> 8 << 24
 		if kind == renvoTokOp && size == 1 {
-			charBits = int(text[start]) << 24
+			highBits = int(text[start]) << 24
 		}
-		out[base] = int32(kind | (line&65535)<<8 | charBits)
-		out[base+1] = int32(start | line<<8&0xff000000)
-		out[base+2] = int32(start + size)
+		lineHigh := line >> 16
+		if lineHigh != 0 && (len(lineBases) == 0 || lineHigh != int(lineBases[len(lineBases)-1])>>24&255) {
+			lineBases = append(lineBases, int32(i&0xffffff|lineHigh<<24))
+		}
+		out[base] = int32(kind | (line&65535)<<8 | highBits)
+		out[base+1] = int32(start&0xffffff | (size&255)<<24)
 		if r.pos >= nextDiscard {
 			// Token records are decoded in order and never revisited. Retire
 			// consumed pages while the decoded table grows so both forms do not
@@ -250,21 +257,22 @@ func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, bool) {
 		}
 	}
 	if r.pos != r.end {
-		return nil, false
+		return nil, nil, false
 	}
 	renvo_runtime_ArenaDiscardBytes(data[discardStart:r.pos])
-	return out, true
+	return out, lineBases, true
 }
 
 func renvoUnitUsesPanic(p *renvoProgram) bool {
 	renvoNonNil(p)
 	data := p.toks.data
 	src := p.src
-	for base := 0; base+2 < len(data); base += renvoTokenStride {
-		packed := int(renvo_runtime_UnsafeInt32At(data, base))
-		if packed&255 == renvoTokIdent {
-			start := int(renvo_runtime_UnsafeInt32At(data, base+1)) & 0xffffff
-			size := int(renvo_runtime_UnsafeInt32At(data, base+2)) - start
+	for base := 0; base+1 < len(data); base += renvoTokenStride {
+		first := int(renvo_runtime_UnsafeInt32At(data, base))
+		if first&255 == renvoTokIdent {
+			packed := int(renvo_runtime_UnsafeInt32At(data, base+1))
+			start := packed & 0xffffff
+			size := packed>>24&255 | first>>16&0xff00
 			if size == 5 {
 				first := renvo_runtime_UnsafeByteAt(src, start)
 				if first == 'd' && renvo_runtime_UnsafeByteAt(src, start+1) == 'e' && renvo_runtime_UnsafeByteAt(src, start+2) == 'f' && renvo_runtime_UnsafeByteAt(src, start+3) == 'e' && renvo_runtime_UnsafeByteAt(src, start+4) == 'r' {
@@ -277,7 +285,7 @@ func renvoUnitUsesPanic(p *renvoProgram) bool {
 				return true
 			}
 		}
-		if packed>>24&255 == '.' && base+renvoTokenStride < len(data) && int(renvo_runtime_UnsafeInt32At(data, base+renvoTokenStride))>>24&255 == '(' {
+		if first>>24&255 == '.' && base+renvoTokenStride < len(data) && int(renvo_runtime_UnsafeInt32At(data, base+renvoTokenStride))>>24&255 == '(' {
 			return true
 		}
 	}
@@ -389,7 +397,7 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 	if len(text) == 0 || len(tokenData) == 0 {
 		return false
 	}
-	tokens, tokensOK := renvoDecodeUnitTokens(text, tokenData)
+	tokens, lineBases, tokensOK := renvoDecodeUnitTokens(text, tokenData)
 	if !tokensOK {
 		return false
 	}
@@ -402,6 +410,7 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 	}
 	prog.src = text
 	prog.toks.data = tokens
+	prog.toks.lineBases = lineBases
 	prog.toks.count = tokenCount
 	prog.toks.panicEnabled = renvoUnitUsesPanic(prog)
 	declReader := renvoUnitReader{src: declData, end: len(declData), ok: true}
@@ -574,7 +583,7 @@ func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, are
 		result = renvoTryCompileScalarProgramAarch64Cached(prog, &meta)
 	} else if renvoFixedTarget == renvoTargetLinuxArm {
 		result = renvoTryCompileScalarProgramArmCached(prog, &meta)
-	} else if renvoFixedTarget == renvoTargetWasiWasm32 {
+	} else if renvoFixedTarget == renvoTargetWasiWasm32 || renvoFixedTarget == renvoTargetVM32 {
 		result = renvoTryCompileScalarProgramWasm32(prog, &meta)
 	} else if renvoFixedTarget != 0 {
 		result = renvoTryCompileScalarProgramAmd64Cached(prog, &meta)
@@ -584,7 +593,7 @@ func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, are
 		result = renvoTryCompileScalarProgramAarch64Cached(prog, &meta)
 	} else if target == renvoTargetLinuxArm {
 		result = renvoTryCompileScalarProgramArmCached(prog, &meta)
-	} else if target == renvoTargetWasiWasm32 {
+	} else if target == renvoTargetWasiWasm32 || target == renvoTargetVM32 {
 		result = renvoTryCompileScalarProgramWasm32(prog, &meta)
 	} else {
 		result = renvoTryCompileScalarProgramAmd64Cached(prog, &meta)

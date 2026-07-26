@@ -910,11 +910,11 @@ func sourceFilenameEnabled(name string, target string) bool {
 }
 
 func filenameKnownOS(tag string) bool {
-	return stringInBuildList(tag, "aix android browser darwin dragonfly freebsd hurd illumos ios js linux nacl netbsd openbsd plan9 solaris wasi wasip1 windows zos")
+	return stringInBuildList(tag, "aix android browser darwin dragonfly freebsd hurd illumos ios js linux nacl netbsd openbsd plan9 solaris vm wasi wasip1 windows zos")
 }
 
 func filenameKnownArch(tag string) bool {
-	return stringInBuildList(tag, "386 amd64 amd64p32 arm armbe arm64 aarch64 arm64be loong64 mips mipsle mips64 mips64le mips64p32 mips64p32le ppc ppc64 ppc64le riscv riscv64 s390 s390x sparc sparc64 wasm wasm32")
+	return stringInBuildList(tag, "386 amd64 amd64p32 arm armbe arm64 aarch64 arm64be loong64 mips mipsle mips64 mips64le mips64p32 mips64p32le ppc ppc64 ppc64le riscv riscv64 s390 s390x sparc sparc64 vm32 wasm wasm32")
 }
 
 func stringInBuildList(item string, list string) bool {
@@ -1130,6 +1130,9 @@ func hasBuildTag(target string, tag string, tags []string) bool {
 	if tag == "browser" {
 		return stringHasPrefix(target, "browser/")
 	}
+	if tag == "vm" {
+		return stringHasPrefix(target, "vm/")
+	}
 	if tag == "amd64" {
 		return stringHasSuffix(target, "/amd64")
 	}
@@ -1144,6 +1147,9 @@ func hasBuildTag(target string, tag string, tags []string) bool {
 	}
 	if tag == "wasm32" || tag == "wasm" {
 		return stringHasSuffix(target, "/wasm32")
+	}
+	if tag == "vm32" {
+		return stringHasSuffix(target, "/vm32")
 	}
 	return false
 }

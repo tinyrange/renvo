@@ -40,7 +40,10 @@ targets are:
 - `linux/arm`
 - `windows/amd64`
 - `windows/386`
+- `windows/arm64`
+- `darwin/arm64`
 - `wasi/wasm32`
+- `vm/vm32` (32-bit words and pointers; `vm/vm64` is future work)
 
 The full test harness runs the targets supported by the current host and
 available emulators/runtimes.

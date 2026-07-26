@@ -67,6 +67,8 @@ func Decode(src []byte) (Image, error) {
 		ok = parseMachO(&image)
 	case FormatWasm:
 		ok = parseWasm(&image)
+	case FormatBytecode:
+		ok = parseBytecode(&image)
 	}
 	if !ok || image.Target == "" {
 		return Image{}, ErrPayload
@@ -96,9 +98,41 @@ func targetName(target int) string {
 		return "linux-kernel/amd64"
 	case 10:
 		return "windows/arm64"
+	case 11:
+		return "vm/vm32"
 	default:
 		return ""
 	}
+}
+
+func parseBytecode(image *Image) bool {
+	data := image.Native
+	if len(data) < 40 || string(data[:4]) != "RNVB" ||
+		binary.LittleEndian.Uint16(data[4:6]) != 1 ||
+		binary.LittleEndian.Uint16(data[6:8]) != 40 {
+		return false
+	}
+	codeSize := int(binary.LittleEndian.Uint32(data[8:12]))
+	dataSize := int(binary.LittleEndian.Uint32(data[12:16]))
+	routineCount := int(binary.LittleEndian.Uint32(data[28:32]))
+	tableSize := routineCount * 12
+	payloadSize := 40 + tableSize + codeSize + dataSize
+	if codeSize <= 0 || routineCount <= 0 || tableSize < 0 || payloadSize < 40 || payloadSize != len(data) {
+		return false
+	}
+	a, b := imageAdler(data[40:])
+	checksum := uint32(a) | uint32(b)<<16
+	if binary.LittleEndian.Uint32(data[32:36]) != checksum {
+		return false
+	}
+	image.Segments = append(image.Segments, Segment{
+		Name:        ".bytecode",
+		MemorySize:  uint64(len(data)),
+		Alignment:   1,
+		Permissions: Read | Execute,
+		Data:        data,
+	})
+	return true
 }
 
 func parseELF(image *Image) bool {

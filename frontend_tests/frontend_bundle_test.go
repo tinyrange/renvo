@@ -49,6 +49,7 @@ func TestBundledFrontendStandaloneAllTargets(t *testing.T) {
 		{name: "windows/arm64", artifact: "renvo-windows-arm64.exe", prefix: []byte{'M', 'Z'}},
 		{name: "darwin/arm64", artifact: "renvo-darwin-arm64", prefix: []byte{0xcf, 0xfa, 0xed, 0xfe}},
 		{name: "wasi/wasm32", artifact: "renvo-wasi-wasm32.wasm", prefix: []byte{0, 'a', 's', 'm'}},
+		{name: "vm/vm32", artifact: "renvo-vm32.rnvb", prefix: []byte{'R', 'N', 'V', 'B'}},
 	}
 	var releaseFrontend string
 	for _, target := range targets {
@@ -95,7 +96,7 @@ func TestBundledFrontendStandaloneAllTargets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("standalone frontend help failed: %v\n%s", err, string(help))
 	}
-	for _, want := range []string{"Usage: renvo", "file.go...", "Exactly the named files", "Targets:", "windows/amd64", "darwin/arm64", "wasi/wasm32"} {
+	for _, want := range []string{"Usage: renvo", "file.go...", "Exactly the named files", "Targets:", "windows/amd64", "darwin/arm64", "wasi/wasm32", "vm/vm32"} {
 		if !strings.Contains(string(help), want) {
 			t.Fatalf("standalone frontend help missing %q:\n%s", want, string(help))
 		}

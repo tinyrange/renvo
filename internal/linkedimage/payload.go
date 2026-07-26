@@ -6,6 +6,7 @@ const (
 	FormatPE
 	FormatMachO
 	FormatWasm
+	FormatBytecode
 )
 
 const (

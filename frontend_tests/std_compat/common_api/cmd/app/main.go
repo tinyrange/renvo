@@ -8,6 +8,8 @@ import (
 	"path"
 	"sort"
 	"strconv"
+
+	"renvo.dev/std/vm"
 )
 
 type sink struct {
@@ -20,6 +22,11 @@ func (s *sink) Write(data []byte) (int, error) {
 }
 
 func main() {
+	vmResult := vm.Run(nil, vm.Limits{})
+	if vmResult.Trap != vm.TrapInvalidLimits {
+		print("FAIL\n")
+		return
+	}
 	parts := bytes.Split([]byte("a,b,c"), []byte(","))
 	if len(parts) != 3 || string(bytes.Join(parts, []byte("|"))) != "a|b|c" || !bytes.Equal(bytes.Repeat([]byte("x"), 3), []byte("xxx")) {
 		print("FAIL\n")

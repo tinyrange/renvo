@@ -6,6 +6,19 @@ func compileWasiWasm32(input []int, output int) int {
 
 func compileWasiWasm32Arena(input []int, output int, arenaSize int) int {
 	renvoSetTarget(renvoTargetWasiWasm32)
+	return compileWasm32Arena(input, output, arenaSize)
+}
+
+func compileVM32(input []int, output int) int {
+	return compileVM32Arena(input, output, 0)
+}
+
+func compileVM32Arena(input []int, output int, arenaSize int) int {
+	renvoSetTarget(renvoTargetVM32)
+	return compileWasm32Arena(input, output, arenaSize)
+}
+
+func compileWasm32Arena(input []int, output int, arenaSize int) int {
 	src := make([]byte, 0, 655360)
 	for i := 0; i < len(input); i++ {
 		src = renvoReadAll(input[i], src)
@@ -52,7 +65,13 @@ func renvoTryCompileScalarProgramWasm32(p *renvoProgram, meta *renvoMeta) renvoC
 	g.meta = meta
 	g.arenaSize = meta.arenaSize
 	g.fixedTargetState = 1
-	g.fixedTargetValue = renvoTargetWasiWasm32
+	g.fixedTargetValue = renvoTarget
+	if renvoTarget == renvoTargetVM32 {
+		// VM bytecode is an execution format, not a restriction on the targets
+		// exposed by a compiler running inside the VM. Preserve dynamic target
+		// selection so a runtime -t value remains authoritative.
+		g.fixedTargetValue = 0
+	}
 	a := &g.asm
 	renvoAsmInit(a)
 	for i := 0; i < len(meta.funcs); i++ {
@@ -86,7 +105,12 @@ func renvoTryCompileScalarProgramWasm32(p *renvoProgram, meta *renvoMeta) renvoC
 			return result
 		}
 	}
-	data := renvoWasm32Image(a)
+	var data []byte
+	if renvoTarget == renvoTargetVM32 {
+		data = renvoVMImage(a)
+	} else {
+		data = renvoWasm32Image(a)
+	}
 	var result renvoCompileResult
 	result.data = data
 	result.ok = true
@@ -98,11 +122,15 @@ func renvoEmitProgramEntryArgsWasm32(g *renvoLinearGen, appIndex int) bool {
 		return false
 	}
 	argsOff := g.asm.bssSize
-	g.asm.bssSize += 32768
-	envDataOff := g.asm.bssSize
-	g.asm.bssSize += 32768
-	envLenOff := g.asm.bssSize
-	g.asm.bssSize += 8
+	envDataOff := argsOff
+	envLenOff := argsOff
+	if renvoTarget != renvoTargetVM32 {
+		g.asm.bssSize += 32768
+		envDataOff = g.asm.bssSize
+		g.asm.bssSize += 32768
+		envLenOff = g.asm.bssSize
+		g.asm.bssSize += 8
+	}
 	renvoWasm32AsmBuildArgvEnvSlices(&g.asm, argsOff, envDataOff, envLenOff)
 	if app.paramCount == 0 {
 		return true

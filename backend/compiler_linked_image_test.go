@@ -34,6 +34,7 @@ func TestBackendLinkedImageAcrossExecutableTargets(t *testing.T) {
 		"windows/arm64",
 		"darwin/arm64",
 		"wasi/wasm32",
+		"vm/vm32",
 	}
 	for _, target := range targets {
 		t.Run(target, func(t *testing.T) {
