@@ -12,12 +12,7 @@ import (
 	"renvo.dev/internal/linkedimage"
 )
 
-const frontendBundleTestsEnv = "RENVO_FRONTEND_BUNDLE_TESTS"
-
 func TestBundledFrontendStandaloneAllTargets(t *testing.T) {
-	if os.Getenv(frontendBundleTestsEnv) != "1" {
-		t.Skipf("set %s=1 to run bundled frontend tests", frontendBundleTestsEnv)
-	}
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
 		t.Skipf("bundled frontend execution requires linux/amd64, got %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
@@ -358,9 +353,6 @@ func TestBundledFrontendStandaloneAllTargets(t *testing.T) {
 }
 
 func TestBundledFrontendNativeREPLSession(t *testing.T) {
-	if os.Getenv(frontendBundleTestsEnv) != "1" {
-		t.Skipf("set %s=1 to run bundled frontend tests", frontendBundleTestsEnv)
-	}
 	target := ""
 	switch runtime.GOOS + "/" + runtime.GOARCH {
 	case "windows/amd64":

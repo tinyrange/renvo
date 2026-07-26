@@ -59,7 +59,7 @@
   <h2>Definition Of Done</h2>
   <ul>
     <li><code>go test ./frontend_tests</code> passes with the host-built frontend.</li>
-    <li><code>RENVO_FRONTEND_EXTENDED_TESTS=1 go test ./frontend_tests</code> passes with the host-built frontend.</li>
+    <li><code>go test ./frontend_tests</code> passes with the host-built and self-hosted frontends.</li>
     <li>Stage0 host build compiles stage1, stage1 compiles stage2, and stage2 compiles stage3.</li>
     <li>The stage3 frontend can compile <code>frontend_tests/quick</code> and <code>frontend_tests/extended</code>.</li>
     <li><code>TestFrontendCompilerPerformance</code> passes: best of three stage2-to-stage3 builds within 500ms wall time, 32MB max RSS, and 1MB output size.</li>
@@ -115,7 +115,7 @@
   <ol>
     <li>Keep <code>go test ./frontend_tests</code> passing at all times. This runs host validation and, once <code>cmd/renvo</code> exists, frontend validation.</li>
     <li>Run targeted category tests while implementing features, for example <code>go test ./frontend_tests -run TestFrontendQuickCorpus/functions</code>.</li>
-    <li>Run <code>RENVO_FRONTEND_EXTENDED_TESTS=1 go test ./frontend_tests</code> before considering any feature group complete.</li>
+    <li>Run <code>go test ./frontend_tests</code> before considering any feature group complete.</li>
     <li>Run stage tests explicitly: host stage0 to stage1, stage1 to stage2, stage2 to stage3, then stage3 against quick and extended corpus.</li>
     <li>Run <code>go test -run '^TestFrontendCompilerPerformance$' .</code> once self-hosting exists.</li>
     <li>Run top-level backend checks before merging frontend changes: <code>go test -run '^TestCompilerPerformance$' .</code> and <code>go test -timeout 30m -skip '^TestCompilerPerformance$' .</code>.</li>

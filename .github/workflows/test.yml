@@ -135,10 +135,6 @@ jobs:
           go test -count=1 -timeout 30m -run "^(${tests})$" ./backend
 
       - name: Run Darwin frontend corpus
-        env:
-          RENVO_FRONTEND_EXTENDED_TESTS: "1"
-          RENVO_FRONTEND_SELFHOST_TESTS: "1"
-          RENVO_FRONTEND_BUNDLE_TESTS: "1"
         run: go test -count=1 -timeout 30m ./frontend_tests
 
   windows-e2e:
@@ -163,7 +159,6 @@ jobs:
 
       - name: Run native linked-image REPL session
         env:
-          RENVO_FRONTEND_BUNDLE_TESTS: "1"
           RENVO_WINDOWS_GDB: "1"
         run: go test -count=1 -timeout 15m -run '^TestBundledFrontendNativeREPLSession$' ./frontend_tests
 
@@ -213,8 +208,4 @@ jobs:
           cache: false
 
       - name: Run frontend corpus tests
-        env:
-          RENVO_FRONTEND_EXTENDED_TESTS: "1"
-          RENVO_FRONTEND_SELFHOST_TESTS: "1"
-          RENVO_FRONTEND_BUNDLE_TESTS: "1"
         run: go test -count=1 ./frontend_tests

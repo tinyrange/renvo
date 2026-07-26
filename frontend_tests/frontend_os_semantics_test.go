@@ -15,9 +15,6 @@ func TestFrontendOSProcessSemantics(t *testing.T) {
 }
 
 func TestFrontendStage3OSProcessSemantics(t *testing.T) {
-	if os.Getenv(selfHostTestsEnv) != "1" {
-		t.Skipf("set %s=1 to run self-hosted frontend process semantics", selfHostTestsEnv)
-	}
 	root := repoRoot(t)
 	runFrontendOSProcessSemantics(t, selfHostedFrontendCompiler(t, root))
 }

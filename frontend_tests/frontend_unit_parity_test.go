@@ -11,9 +11,6 @@ import (
 )
 
 func TestFrontendCanonicalUnitCoreParity(t *testing.T) {
-	if os.Getenv(selfHostTestsEnv) != "1" {
-		t.Skipf("set %s=1 to compare host and self-hosted linked units", selfHostTestsEnv)
-	}
 	root := repoRoot(t)
 	host := frontendCompiler(t, root)
 	stage3 := selfHostedFrontendCompiler(t, root)

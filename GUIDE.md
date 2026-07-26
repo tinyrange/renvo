@@ -776,13 +776,11 @@ The frontend corpus has several layers:
 - `negative/`: exact rejection diagnostics;
 - `std_compat/`: standard-library compatibility checks.
 
-Enable the heavier paths with:
+The frontend package runs the complete corpus, bundled frontend, and
+self-hosting paths by default:
 
 ```sh
-RENVO_FRONTEND_EXTENDED_TESTS=1 \
-RENVO_FRONTEND_SELFHOST_TESTS=1 \
-RENVO_FRONTEND_BUNDLE_TESTS=1 \
-  go test -count=1 ./frontend_tests
+go test -count=1 ./frontend_tests
 ```
 
 To test a particular self-hosted frontend:
