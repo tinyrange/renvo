@@ -179,13 +179,14 @@ func renvoUnitReadVar(r *renvoUnitReader) int {
 	return 0
 }
 
-func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, bool) {
+func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, []int32, bool) {
 	r := renvoUnitReader{src: data, end: len(data), ok: true}
 	count := renvoUnitReadVar(&r)
 	if !r.ok {
-		return nil, false
+		return nil, nil, false
 	}
 	out := make([]int32, 0, count*renvoTokenStride)
+	var lineBases []int32
 	start := 0
 	line := 0
 	discardStart := 0
@@ -220,29 +221,32 @@ func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, bool) {
 			lineDelta = renvoUnitReadVar(&r)
 		}
 		if !r.ok {
-			return nil, false
+			return nil, nil, false
 		}
 		start = start + delta
 		line = line + lineDelta
 		if kind < 0 || kind > 255 || start < 0 || start > 0xffffff || size < 0 || line < 0 || start+size > len(text) {
-			return nil, false
+			return nil, nil, false
 		}
 		if kind == renvoTokOp {
 			if size > 255 {
-				return nil, false
+				return nil, nil, false
 			}
 		} else if size > 0xffff {
-			return nil, false
+			return nil, nil, false
 		}
 		base := len(out)
 		out = out[:base+renvoTokenStride]
-		charBits := 0
+		highBits := size >> 8 << 24
 		if kind == renvoTokOp && size == 1 {
-			charBits = int(text[start]) << 24
+			highBits = int(text[start]) << 24
 		}
-		out[base] = int32(kind | (line&65535)<<8 | charBits)
-		out[base+1] = int32(start | line<<8&0xff000000)
-		out[base+2] = int32(start + size)
+		lineHigh := line >> 16
+		if lineHigh != 0 && (len(lineBases) == 0 || lineHigh != int(lineBases[len(lineBases)-1])>>24&255) {
+			lineBases = append(lineBases, int32(i&0xffffff|lineHigh<<24))
+		}
+		out[base] = int32(kind | (line&65535)<<8 | highBits)
+		out[base+1] = int32(start&0xffffff | (size&255)<<24)
 		if r.pos >= nextDiscard {
 			// Token records are decoded in order and never revisited. Retire
 			// consumed pages while the decoded table grows so both forms do not
@@ -253,21 +257,22 @@ func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, bool) {
 		}
 	}
 	if r.pos != r.end {
-		return nil, false
+		return nil, nil, false
 	}
 	renvo_runtime_ArenaDiscardBytes(data[discardStart:r.pos])
-	return out, true
+	return out, lineBases, true
 }
 
 func renvoUnitUsesPanic(p *renvoProgram) bool {
 	renvoNonNil(p)
 	data := p.toks.data
 	src := p.src
-	for base := 0; base+2 < len(data); base += renvoTokenStride {
-		packed := int(renvo_runtime_UnsafeInt32At(data, base))
-		if packed&255 == renvoTokIdent {
-			start := int(renvo_runtime_UnsafeInt32At(data, base+1)) & 0xffffff
-			size := int(renvo_runtime_UnsafeInt32At(data, base+2)) - start
+	for base := 0; base+1 < len(data); base += renvoTokenStride {
+		first := int(renvo_runtime_UnsafeInt32At(data, base))
+		if first&255 == renvoTokIdent {
+			packed := int(renvo_runtime_UnsafeInt32At(data, base+1))
+			start := packed & 0xffffff
+			size := packed>>24&255 | first>>16&0xff00
 			if size == 5 {
 				first := renvo_runtime_UnsafeByteAt(src, start)
 				if first == 'd' && renvo_runtime_UnsafeByteAt(src, start+1) == 'e' && renvo_runtime_UnsafeByteAt(src, start+2) == 'f' && renvo_runtime_UnsafeByteAt(src, start+3) == 'e' && renvo_runtime_UnsafeByteAt(src, start+4) == 'r' {
@@ -280,7 +285,7 @@ func renvoUnitUsesPanic(p *renvoProgram) bool {
 				return true
 			}
 		}
-		if packed>>24&255 == '.' && base+renvoTokenStride < len(data) && int(renvo_runtime_UnsafeInt32At(data, base+renvoTokenStride))>>24&255 == '(' {
+		if first>>24&255 == '.' && base+renvoTokenStride < len(data) && int(renvo_runtime_UnsafeInt32At(data, base+renvoTokenStride))>>24&255 == '(' {
 			return true
 		}
 	}
@@ -392,7 +397,7 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 	if len(text) == 0 || len(tokenData) == 0 {
 		return false
 	}
-	tokens, tokensOK := renvoDecodeUnitTokens(text, tokenData)
+	tokens, lineBases, tokensOK := renvoDecodeUnitTokens(text, tokenData)
 	if !tokensOK {
 		return false
 	}
@@ -405,6 +410,7 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 	}
 	prog.src = text
 	prog.toks.data = tokens
+	prog.toks.lineBases = lineBases
 	prog.toks.count = tokenCount
 	prog.toks.panicEnabled = renvoUnitUsesPanic(prog)
 	declReader := renvoUnitReader{src: declData, end: len(declData), ok: true}
@@ -626,10 +632,7 @@ func renvoCompileUnitInput(input []int, output int, target int, arenaSize int) i
 	if n != 4 || header[0] != 'R' || header[1] != 'N' || header[2] != 'V' || header[3] != 'O' {
 		return -1
 	}
-	// Linked frontend units are substantially larger than standalone backend
-	// sources. Give the reader one backing allocation so arena append growth
-	// does not retain several superseded copies through backend emission.
-	unit := make([]byte, 0, 4194304)
+	var unit []byte
 	unit = renvoReadAll(input[0], unit)
 	prog, isUnit, ok := renvoDecodeUnitProgram(unit)
 	if !isUnit {

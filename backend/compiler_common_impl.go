@@ -2069,6 +2069,7 @@ const renvoTokOp = 22
 
 type renvoTokens struct {
 	data         []int32
+	lineBases    []int32
 	count        int
 	panicEnabled bool
 }
@@ -2078,7 +2079,7 @@ type renvoToken struct {
 	end   int
 }
 
-const renvoTokenStride = 3
+const renvoTokenStride = 2
 
 func renvoTokCount(p *renvoProgram) int {
 	renvoNonNil(p)
@@ -2097,23 +2098,37 @@ func renvoTokStart(p *renvoProgram, i int) int {
 
 func renvoTokEnd(p *renvoProgram, i int) int {
 	renvoNonNil(p)
-	return int(renvo_runtime_UnsafeInt32At(p.toks.data, i*renvoTokenStride+2))
+	base := i * renvoTokenStride
+	first := int(renvo_runtime_UnsafeInt32At(p.toks.data, base))
+	packed := int(renvo_runtime_UnsafeInt32At(p.toks.data, base+1))
+	start := packed & 0xffffff
+	size := packed >> 24 & 255
+	if first&255 != renvoTokOp {
+		size |= first >> 16 & 0xff00
+	}
+	return start + size
 }
 
 func renvoTokLine(p *renvoProgram, i int) int {
 	renvoNonNil(p)
 	data := p.toks.data
 	base := i * renvoTokenStride
-	return int(renvo_runtime_UnsafeInt32At(data, base))>>8&65535 | int(renvo_runtime_UnsafeInt32At(data, base+1))>>8&0xff0000
+	line := int(renvo_runtime_UnsafeInt32At(data, base)) >> 8 & 65535
+	for at := len(p.toks.lineBases) - 1; at >= 0; at-- {
+		packed := int(renvo_runtime_UnsafeInt32At(p.toks.lineBases, at))
+		if i >= packed&0xffffff {
+			line += packed >> 8 & 0xff0000
+			break
+		}
+	}
+	return line
 }
 
 func renvoTokAt(p *renvoProgram, i int) renvoToken {
 	renvoNonNil(p)
 	var tok renvoToken
-	base := i * renvoTokenStride
-	data := p.toks.data
-	tok.start = int(renvo_runtime_UnsafeInt32At(data, base+1)) & 0xffffff
-	tok.end = int(renvo_runtime_UnsafeInt32At(data, base+2))
+	tok.start = renvoTokStart(p, i)
+	tok.end = renvoTokEnd(p, i)
 	return tok
 }
 
@@ -2861,7 +2876,15 @@ func renvoScan(src []byte, toks *renvoTokens) {
 
 func renvoScanAppendToken(toks *renvoTokens, kind int, start int, size int, line int) {
 	renvoNonNil(toks)
-	toks.data = append(toks.data, int32(kind|(line&65535)<<8), int32(start|line<<8&0xff000000), int32(start+size))
+	sizeHigh := 0
+	if kind&255 != renvoTokOp {
+		sizeHigh = size >> 8 << 24
+	}
+	lineHigh := line >> 16
+	if lineHigh != 0 && (len(toks.lineBases) == 0 || lineHigh != int(toks.lineBases[len(toks.lineBases)-1])>>24&255) {
+		toks.lineBases = append(toks.lineBases, int32(toks.count&0xffffff|lineHigh<<24))
+	}
+	toks.data = append(toks.data, int32(kind|(line&65535)<<8|sizeHigh), int32(start&0xffffff|(size&255)<<24))
 	toks.count++
 }
 
@@ -2962,8 +2985,10 @@ func renvoTokIdentIs(p *renvoProgram, i int, text string) bool {
 	if i < 0 || base >= len(data) || int(renvo_runtime_UnsafeInt32At(data, base))&255 != renvoTokIdent {
 		return false
 	}
-	start := int(renvo_runtime_UnsafeInt32At(data, base+1)) & 0xffffff
-	return renvoBytesEqualText(p.src, start, int(renvo_runtime_UnsafeInt32At(data, base+2)), text)
+	packed := int(renvo_runtime_UnsafeInt32At(data, base+1))
+	start := packed & 0xffffff
+	size := packed>>24&255 | int(renvo_runtime_UnsafeInt32At(data, base))>>16&0xff00
+	return renvoBytesEqualText(p.src, start, start+size, text)
 }
 
 func renvoTokSingleChar(p *renvoProgram, i int) byte {
@@ -2997,8 +3022,9 @@ func renvoTok2Is(p *renvoProgram, i int, a byte, b byte) bool {
 	if int(renvo_runtime_UnsafeInt32At(data, base))&255 != renvoTokOp {
 		return false
 	}
-	start := int(renvo_runtime_UnsafeInt32At(data, base+1)) & 0xffffff
-	size := int(renvo_runtime_UnsafeInt32At(data, base+2)) - start
+	packed := int(renvo_runtime_UnsafeInt32At(data, base+1))
+	start := packed & 0xffffff
+	size := packed >> 24 & 255
 	if size != 2 {
 		return false
 	}
@@ -4571,8 +4597,8 @@ func renvoStatementLineEnd(p *renvoProgram, start int, end int) int {
 		base := i * renvoTokenStride
 		packed := int(renvo_runtime_UnsafeInt32At(data, base))
 		kind := packed & 255
-		c := byte(packed >> 24)
-		tokLine := packed>>8&65535 | int(renvo_runtime_UnsafeInt32At(data, base+1))>>8&0xff0000
+		c := renvoTokSingleChar(p, i)
+		tokLine := renvoTokLine(p, i)
 		if i > start && paren == 0 && brack == 0 && brace == 0 {
 			if kind == renvoTokEOF {
 				return i
@@ -4744,12 +4770,11 @@ func renvoFindMatchingBrace(p *renvoProgram, openTok int, end int) int {
 
 func renvoFindAssignmentToken(p *renvoProgram, start int, end int) int {
 	renvoNonNil(p)
-	data := p.toks.data
 	i := start
 	paren := 0
 	brack := 0
 	for i < end {
-		c := byte(int(renvo_runtime_UnsafeInt32At(data, i*renvoTokenStride)) >> 24)
+		c := renvoTokSingleChar(p, i)
 		if c == '(' {
 			paren++
 		} else if c == ')' {
@@ -4799,7 +4824,10 @@ func renvoBuildMetaInto(pp *renvoProgram, m *renvoMeta) {
 	m.scratchStart = renvo_runtime_ArenaMark()
 	p := pp
 	m.prog = p
-	typeCap := len(p.decls)*4 + 256
+	// Most derived types are shared, so reserving four entries per declaration
+	// leaves a large unused table for linked frontend units. The slice still
+	// grows normally for type-heavy inputs.
+	typeCap := len(p.decls) + 512
 	fieldCap := len(p.decls)*2 + 256
 	globalCap := len(p.decls) + 128
 	paramCap := len(p.funcs)*3 + 256
@@ -10218,11 +10246,11 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 	nameEnd := stmt.nameEnd
 	nextBase := startBase + renvoTokenStride
 	if (stmt.kind == renvoStmtVar || startKind == renvoTokVar) && int(tokenData[nextBase])&255 == renvoTokIdent {
-		nameStart = int(tokenData[nextBase+1]) & 0xffffff
-		nameEnd = int(tokenData[nextBase+2])
+		nameStart = renvoTokStart(p, stmt.startTok+1)
+		nameEnd = renvoTokEnd(p, stmt.startTok+1)
 	} else if startKind == renvoTokIdent {
-		nameStart = int(tokenData[startBase+1]) & 0xffffff
-		nameEnd = int(tokenData[startBase+2])
+		nameStart = renvoTokStart(p, stmt.startTok)
+		nameEnd = renvoTokEnd(p, stmt.startTok)
 	}
 	assignTok := renvoFindAssignmentToken(p, stmt.startTok, stmt.endTok)
 	compoundAssign := assignTok >= 0 && assignTok < renvoTokCount(p) && renvoTokIsCompoundAssignment(p, assignTok)
@@ -10469,13 +10497,12 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 	fieldStackOffset := -1
 	fieldType := 0
 	if startKind == renvoTokIdent && renvoTokSingleChar(p, stmt.startTok+1) == '.' && renvoTokIsKind(p, stmt.startTok+2, renvoTokIdent) {
-		localIndex := renvoFindLocalIndex(g, int(tokenData[startBase+1])&0xffffff, int(tokenData[startBase+2]))
+		localIndex := renvoFindLocalIndex(g, renvoTokStart(p, stmt.startTok), renvoTokEnd(p, stmt.startTok))
 		if localIndex < 0 {
 			return false
 		}
-		fieldBase := startBase + renvoTokenStride*2
-		fieldNameStart := int(tokenData[fieldBase+1]) & 0xffffff
-		fieldNameEnd := int(tokenData[fieldBase+2])
+		fieldNameStart := renvoTokStart(p, stmt.startTok+2)
+		fieldNameEnd := renvoTokEnd(p, stmt.startTok+2)
 		fieldOffset := renvoStructFieldOffset(g, g.locals[localIndex].typ, fieldNameStart, fieldNameEnd)
 		if fieldOffset < 0 {
 			return false
@@ -11136,7 +11163,6 @@ func renvoLocalNameWrittenAfter(g *renvoLinearGen, nameStart int, nameEnd int, a
 	src := p.src
 	nameSize := nameEnd - nameStart
 	nameFirst := renvo_runtime_UnsafeByteAt(src, nameStart)
-	tokenData := p.toks.data
 	end := renvoTokCount(p)
 	if g.currentFunc >= 0 && g.currentFunc < len(g.meta.funcs) {
 		end = g.meta.funcs[g.currentFunc].bodyEnd
@@ -11147,9 +11173,11 @@ func renvoLocalNameWrittenAfter(g *renvoLinearGen, nameStart int, nameEnd int, a
 	}
 	for i < end {
 		base := i * renvoTokenStride
-		tokenStart := int(tokenData[base+1]) & 0xffffff
-		tokenEnd := int(tokenData[base+2])
-		if int(tokenData[base])&255 == renvoTokIdent && tokenEnd-tokenStart == nameSize && renvo_runtime_UnsafeByteAt(src, tokenStart) == nameFirst && renvoBytesEqualRange(src, tokenStart, tokenEnd, nameStart, nameEnd) {
+		first := int(renvo_runtime_UnsafeInt32At(p.toks.data, base))
+		packed := int(renvo_runtime_UnsafeInt32At(p.toks.data, base+1))
+		tokenStart := packed & 0xffffff
+		tokenEnd := tokenStart + (packed>>24&255 | first>>16&0xff00)
+		if first&255 == renvoTokIdent && tokenEnd-tokenStart == nameSize && renvo_runtime_UnsafeByteAt(src, tokenStart) == nameFirst && renvoBytesEqualRange(src, tokenStart, tokenEnd, nameStart, nameEnd) {
 			if renvoTokCharIs(p, i-1, '&') {
 				return true
 			}
@@ -11176,11 +11204,9 @@ func renvoSplitTopLevelComma(p *renvoProgram, start int, end int) ([]int, bool) 
 	partStart := start
 	depth := 0
 	i := start
-	data := p.toks.data
 	for i < end {
-		base := i * renvoTokenStride
-		if base+2 < len(data) {
-			c := byte(int(data[base]) >> 24)
+		if i < renvoTokCount(p) {
+			c := renvoTokSingleChar(p, i)
 			if c == '(' || c == '[' || c == '{' {
 				depth++
 			} else if c == ')' || c == ']' || c == '}' {
@@ -11205,13 +11231,11 @@ func renvoSplitTopLevelComma(p *renvoProgram, start int, end int) ([]int, bool) 
 func renvoHasTopLevelComma(p *renvoProgram, start int, end int) bool {
 	renvoNonNil(p)
 	depth := 0
-	data := p.toks.data
 	for i := start; i < end; i++ {
-		base := i * renvoTokenStride
-		if base >= len(data) {
+		if i >= renvoTokCount(p) {
 			return false
 		}
-		c := byte(int(data[base]) >> 24)
+		c := renvoTokSingleChar(p, i)
 		if c == '(' || c == '[' || c == '{' {
 			depth++
 		} else if c == ')' || c == ']' || c == '}' {
