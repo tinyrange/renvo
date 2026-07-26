@@ -69,6 +69,9 @@ func renvoParseTargetArg(target string) int {
 	if len(target) == 11 && target[0] == 'w' && target[1] == 'a' && target[2] == 's' && target[3] == 'i' && target[4] == '/' && target[5] == 'w' && target[6] == 'a' && target[7] == 's' && target[8] == 'm' && target[9] == '3' && target[10] == '2' {
 		return renvoTargetWasiWasm32
 	}
+	if target == "vm/bytecode" {
+		return renvoTargetVMBytecode
+	}
 	if len(target) == 12 && target[0] == 'd' && target[1] == 'a' && target[2] == 'r' && target[3] == 'w' && target[4] == 'i' && target[5] == 'n' && target[6] == '/' && target[7] == 'a' && target[8] == 'r' && target[9] == 'm' && target[10] == '6' && target[11] == '4' {
 		return renvoTargetDarwinArm64
 	}
@@ -128,7 +131,7 @@ func renvoPrintUnsupportedTarget(target string) {
 	renvoPrintErr("renvo: unsupported target: ")
 	renvoPrintErr(target)
 	renvoPrintErr("\n")
-	renvoPrintErr("renvo: supported targets: linux/amd64, linux/386, linux/aarch64, linux/arm, windows/amd64, windows/386, windows/arm64, wasi/wasm32, darwin/arm64\n")
+	renvoPrintErr("renvo: supported targets: linux/amd64, linux/386, linux/aarch64, linux/arm, windows/amd64, windows/386, windows/arm64, wasi/wasm32, vm/bytecode, darwin/arm64\n")
 }
 
 func renvoUnitRead32(src []byte, pos int) int {
@@ -574,7 +577,7 @@ func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, are
 		result = renvoTryCompileScalarProgramAarch64Cached(prog, &meta)
 	} else if renvoFixedTarget == renvoTargetLinuxArm {
 		result = renvoTryCompileScalarProgramArmCached(prog, &meta)
-	} else if renvoFixedTarget == renvoTargetWasiWasm32 {
+	} else if renvoFixedTarget == renvoTargetWasiWasm32 || renvoFixedTarget == renvoTargetVMBytecode {
 		result = renvoTryCompileScalarProgramWasm32(prog, &meta)
 	} else if renvoFixedTarget != 0 {
 		result = renvoTryCompileScalarProgramAmd64Cached(prog, &meta)
@@ -584,7 +587,7 @@ func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, are
 		result = renvoTryCompileScalarProgramAarch64Cached(prog, &meta)
 	} else if target == renvoTargetLinuxArm {
 		result = renvoTryCompileScalarProgramArmCached(prog, &meta)
-	} else if target == renvoTargetWasiWasm32 {
+	} else if target == renvoTargetWasiWasm32 || target == renvoTargetVMBytecode {
 		result = renvoTryCompileScalarProgramWasm32(prog, &meta)
 	} else {
 		result = renvoTryCompileScalarProgramAmd64Cached(prog, &meta)

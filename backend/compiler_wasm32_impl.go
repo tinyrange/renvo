@@ -2271,6 +2271,67 @@ func renvoWasm32DataSectionFull(dataBase int, data []byte) []byte {
 	return out
 }
 
+// RNVB v1 is a fixed header, a table of (PC, frame size, flags) records, the
+// compact instruction stream, and initialized data. All integers are little
+// endian and the checksum covers everything after the header.
+const renvoVMHeaderSize = 40
+const renvoVMDataBase = 256
+const renvoVMRoutineSize = 12
+const renvoVMRoutineFramed = 1
+
+func renvoVMChecksum(data []byte) int {
+	checkA := 1
+	checkB := 0
+	for i := 0; i < len(data); i++ {
+		checkA = (checkA + int(data[i])) % 65521
+		checkB = (checkB + checkA) % 65521
+	}
+	return checkA | checkB<<16
+}
+
+// renvoVMImage preserves the compact instruction stream used as the input to
+// the WebAssembly formatter. This keeps VM execution on the same fully lowered
+// backend path while avoiding the size and nondeterminism of a host runtime.
+func renvoVMImage(a *renvoAsm) []byte {
+	dataBase := renvoVMDataBase
+	bssBase := renvoAlignTo8(dataBase + len(a.data))
+	renvoWasm32Patch(a, dataBase, bssBase)
+	instrPcs := renvoWasm32InstructionPcs(a.code)
+	symbolPcs := renvoWasm32SymbolPcs(a)
+	routinePcs := renvoWasm32RoutinePcs(a, a.code, instrPcs)
+	out := make([]byte, renvoVMHeaderSize, renvoVMHeaderSize+len(routinePcs)*renvoVMRoutineSize+len(a.code)+len(a.data))
+	out[0] = 'R'
+	out[1] = 'N'
+	out[2] = 'V'
+	out[3] = 'B'
+	out[4] = 1
+	out[6] = renvoVMHeaderSize
+	renvoPut32At(out, 8, len(a.code))
+	renvoPut32At(out, 12, len(a.data))
+	renvoPut32At(out, 16, dataBase)
+	renvoPut32At(out, 20, bssBase)
+	renvoPut32At(out, 24, a.bssSize)
+	renvoPut32At(out, 28, len(routinePcs))
+	for i := 0; i < len(routinePcs); i++ {
+		startPc := routinePcs[i]
+		endPc := renvoWasm32RoutineEndPc(startPc, len(a.code), symbolPcs, a.code, instrPcs)
+		startIndex := renvoWasm32PcLowerBound(instrPcs, startPc)
+		endIndex := renvoWasm32PcLowerBound(instrPcs, endPc)
+		instrs := renvoWasm32DecodePcRange(a.code, instrPcs[startIndex:endIndex])
+		flags := 0
+		if startPc != 0 && renvoWasm32SortedPcContains(symbolPcs, startPc) {
+			flags = renvoVMRoutineFramed
+		}
+		out = renvoAppend32(out, startPc)
+		out = renvoAppend32(out, renvoWasm32RoutineFrameSize(instrs))
+		out = renvoAppend32(out, flags)
+	}
+	out = append(out, a.code...)
+	out = append(out, a.data...)
+	renvoPut32At(out, 32, renvoVMChecksum(out[renvoVMHeaderSize:]))
+	return out
+}
+
 func renvoWasm32Image(a *renvoAsm) []byte {
 	dataBase := renvoWasm32ProgramBase
 	bssBase := renvoAlignTo8(dataBase + len(a.data))

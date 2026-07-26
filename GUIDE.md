@@ -204,6 +204,7 @@ The frontend currently recognizes:
 | `darwin/arm64` | PIE Mach-O |
 | `wasi/wasm32` | WASI WebAssembly |
 | `browser/wasm32` | browser HTML containing WebAssembly |
+| `vm/bytecode` | deterministic Renvo bytecode |
 
 Hosted native images separate executable and writable storage:
 
@@ -213,6 +214,7 @@ Hosted native images separate executable and writable storage:
 - Darwin has `__TEXT`, `__DATA`, and `__LINKEDIT`, and uses ARM64
   position-relative references suitable for dyld sliding.
 - Wasm keeps mutable state in linear memory and code in the engine.
+- VM bytecode runs with caller-supplied instruction and linear-memory limits.
 
 Avoid relying only on an old architecture document for these details. The
 format tests in `backend/compiler_executable_layout_test.go` are the executable

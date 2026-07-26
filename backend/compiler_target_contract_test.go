@@ -23,6 +23,7 @@ var renvoAdvertisedTargetContracts = []renvoAdvertisedTargetContract{
 	{"windows/386", renvoTargetWindows386, "MZ"},
 	{"windows/arm64", renvoTargetWindowsArm64, "MZ"},
 	{"wasi/wasm32", renvoTargetWasiWasm32, "\x00asm"},
+	{"vm/bytecode", renvoTargetVMBytecode, "RNVB"},
 	{"darwin/arm64", renvoTargetDarwinArm64, "\xcf\xfa\xed\xfe"},
 }
 

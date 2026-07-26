@@ -28,6 +28,7 @@ func TestTargetProfilesSeparateMachineWidthsFromBackendSlots(t *testing.T) {
 		{renvoTargetWindows386, renvoArch386, renvoOSWindows, 32, 32},
 		{renvoTargetWindowsArm64, renvoArchAarch64, renvoOSWindows, 64, 64},
 		{renvoTargetWasiWasm32, renvoArchWasm32, renvoOSWasi, 32, 32},
+		{renvoTargetVMBytecode, renvoArchWasm32, renvoOSVM, 32, 32},
 		{renvoTargetDarwinArm64, renvoArchAarch64, renvoOSDarwin, 64, 64},
 	}
 	for _, test := range tests {

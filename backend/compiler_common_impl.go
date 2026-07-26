@@ -15,6 +15,7 @@ const renvoTargetWasiWasm32 = 7
 const renvoTargetDarwinArm64 = 8
 const renvoTargetLinuxKernelAmd64 = 9
 const renvoTargetWindowsArm64 = 10
+const renvoTargetVMBytecode = 11
 
 const renvoArchAmd64 = 1
 const renvoArch386 = 2
@@ -26,6 +27,7 @@ const renvoOSLinux = 1
 const renvoOSWindows = 2
 const renvoOSDarwin = 3
 const renvoOSWasi = 4
+const renvoOSVM = 5
 
 const renvoEndianLittle = 1
 const renvoEndianBig = 2
@@ -107,13 +109,13 @@ type renvoTargetProfile struct {
 // The target IDs are dense. Keep the core identity fields in compact tables so
 // profile construction and active compiler state consume the same source of
 // truth without pulling the full machine-profile builder into every compiler.
-const targetOSTable = "\x00\x01\x01\x01\x01\x02\x02\x04\x03\x01\x02"
-const targetArchTable = "\x00\x01\x02\x03\x04\x01\x02\x05\x03\x01\x03"
-const renvoTargetIntBitsTable = "\x00\x40\x20\x40\x20\x40\x20\x20\x40\x40\x40"
+const targetOSTable = "\x00\x01\x01\x01\x01\x02\x02\x04\x03\x01\x02\x05"
+const targetArchTable = "\x00\x01\x02\x03\x04\x01\x02\x05\x03\x01\x03\x05"
+const renvoTargetIntBitsTable = "\x00\x40\x20\x40\x20\x40\x20\x20\x40\x40\x40\x20"
 
 func renvoProfileForTarget(target int) (renvoTargetProfile, bool) {
 	var p renvoTargetProfile
-	if target < renvoTargetLinuxAmd64 || target > renvoTargetWindowsArm64 {
+	if target < renvoTargetLinuxAmd64 || target > renvoTargetVMBytecode {
 		return p, false
 	}
 	p.target = target
@@ -122,7 +124,7 @@ func renvoProfileForTarget(target int) (renvoTargetProfile, bool) {
 	p.intBits = int(renvoTargetIntBitsTable[target])
 	p.pointerBits = p.intBits
 	p.maxAlign = p.intBits / 8
-	if target == renvoTargetWasiWasm32 {
+	if target == renvoTargetWasiWasm32 || target == renvoTargetVMBytecode {
 		p.maxAlign = 8
 	}
 	p.charBits = 8
@@ -253,7 +255,7 @@ func renvoSetTarget(target int) {
 		target = renvoFixedTarget
 	}
 	renvoTarget = target
-	if target >= renvoTargetLinuxAmd64 && target <= renvoTargetWindowsArm64 {
+	if target >= renvoTargetLinuxAmd64 && target <= renvoTargetVMBytecode {
 		renvoTargetOS = int(targetOSTable[target])
 		renvoTargetArch = int(targetArchTable[target])
 		renvoNativeIntSize = int(renvoTargetIntBitsTable[target]) / 8
@@ -2403,6 +2405,8 @@ func renvoCompileOutputData(data []byte, target int) []byte {
 			format = 3
 		} else if data[0] == 0 && data[1] == 'a' && data[2] == 's' && data[3] == 'm' {
 			format = 4
+		} else if data[0] == 'R' && data[1] == 'N' && data[2] == 'V' && data[3] == 'B' {
+			format = 5
 		}
 	}
 	out := make([]byte, 0, renvoImageHeaderSize+len(data))
@@ -8543,7 +8547,7 @@ func renvoEvalFixedTargetInt(g *renvoLinearGen, ep *renvoExprParse, idx int, fix
 		return renvoBoolTokenValue(p, e.tok)
 	}
 	if e.kind == renvoExprIdent {
-		if fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetWindowsArm64 {
+		if fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetVMBytecode {
 			if renvoBytesEqualText(p.src, e.nameStart, e.nameEnd, "renvoTargetArch") {
 				return int(targetArchTable[fixedTarget])
 			}
@@ -8586,7 +8590,7 @@ func renvoEvalFixedTargetBool(g *renvoLinearGen, ep *renvoExprParse, idx int, fi
 		}
 		return -1
 	}
-	if e.kind == renvoExprCall && e.argCount == 0 && fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetWindowsArm64 {
+	if e.kind == renvoExprCall && e.argCount == 0 && fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetVMBytecode {
 		wantOS := 0
 		if renvoExprIsIdentText(g.prog, ep, e.left, "targetIsWindows") {
 			wantOS = renvoOSWindows
@@ -8600,7 +8604,7 @@ func renvoEvalFixedTargetBool(g *renvoLinearGen, ep *renvoExprParse, idx int, fi
 			return 0
 		}
 	}
-	if e.kind == renvoExprCall && e.argCount == 1 && fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetWindowsArm64 && int(renvoTargetIntBitsTable[fixedTarget]) == 64 && renvoExprIsIdentText(g.prog, ep, e.left, "renvoTypeKindNeedsWideLowering") {
+	if e.kind == renvoExprCall && e.argCount == 1 && fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetVMBytecode && int(renvoTargetIntBitsTable[fixedTarget]) == 64 && renvoExprIsIdentText(g.prog, ep, e.left, "renvoTypeKindNeedsWideLowering") {
 		return 0
 	}
 	if e.kind == renvoExprBinary {

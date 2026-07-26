@@ -1,4 +1,4 @@
-//go:build renvo && (wasi || wasip1 || browser)
+//go:build renvo && (wasi || wasip1 || browser || vm)
 
 package driver
 
