@@ -118,6 +118,31 @@ func TestAdd() {}
 	}
 }
 
+func TestWriteTemporaryPackageCleansGeneratedFiles(t *testing.T) {
+	dir := t.TempDir()
+	paths, cleanup, err := WriteTemporaryPackage(dir, Result{Files: []GeneratedFile{
+		{Name: "one.go", Data: []byte("package main\n")},
+		{Name: "two.go", Data: []byte("package main\n")},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 2 {
+		t.Fatalf("paths = %#v", paths)
+	}
+	for _, path := range paths {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("generated file missing: %v", err)
+		}
+	}
+	cleanup()
+	for _, path := range paths {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("generated file remains after cleanup: %s", path)
+		}
+	}
+}
+
 func generatedFileContains(files []GeneratedFile, name string, text []byte) bool {
 	for _, file := range files {
 		if file.Name == name && bytes.Contains(file.Data, text) {

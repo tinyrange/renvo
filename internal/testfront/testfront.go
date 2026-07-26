@@ -75,6 +75,15 @@ func GeneratePackage(dir string) (Result, error) {
 	return out, nil
 }
 
+func GenerateRenvoPackage(dir string) (Result, error) {
+	out, err := GeneratePackage(dir)
+	if err != nil {
+		return Result{}, err
+	}
+	out.Files[len(out.Files)-1].Data = renvoTestMainSource(out.Tests)
+	return out, nil
+}
+
 func generatedFileName(name string) string {
 	if strings.HasSuffix(name, "_test.go") {
 		base := strings.TrimSuffix(name, "_test.go")
@@ -94,6 +103,37 @@ func WritePackage(dir string, result Result) error {
 		}
 	}
 	return nil
+}
+
+// WriteTemporaryPackage writes generated files beside the source package so
+// module discovery and go:embed paths retain their ordinary meaning. Callers
+// compile the returned explicit file list and must invoke cleanup.
+func WriteTemporaryPackage(dir string, result Result) ([]string, func(), error) {
+	var paths []string
+	cleanup := func() {
+		for _, path := range paths {
+			_ = os.Remove(path)
+		}
+	}
+	for _, file := range result.Files {
+		temporary, err := os.CreateTemp(dir, "zz_renvotest_*.go")
+		if err != nil {
+			cleanup()
+			return nil, func() {}, err
+		}
+		path := temporary.Name()
+		paths = append(paths, path)
+		if _, err := temporary.Write(file.Data); err != nil {
+			_ = temporary.Close()
+			cleanup()
+			return nil, func() {}, err
+		}
+		if err := temporary.Close(); err != nil {
+			cleanup()
+			return nil, func() {}, err
+		}
+	}
+	return paths, cleanup, nil
 }
 
 func rewriteFile(name string, src []byte) ([]byte, []string, error) {
@@ -215,6 +255,20 @@ func testMainSource(tests []string) []byte {
 		fmt.Fprintf(&out, "\t\t{Name: %q, F: %s},\n", test, test)
 	}
 	out.WriteString("\t}, nil, nil)\n")
+	out.WriteString("}\n")
+	return out.Bytes()
+}
+
+func renvoTestMainSource(tests []string) []byte {
+	var out bytes.Buffer
+	out.WriteString("package main\n\n")
+	out.WriteString("import \"testing\"\n\n")
+	out.WriteString("func main() {\n")
+	out.WriteString("\tfailed := false\n")
+	for _, test := range tests {
+		fmt.Fprintf(&out, "\tif !testing.RunTest(%q, %s) { failed = true }\n", test, test)
+	}
+	out.WriteString("\ttesting.Finish(failed)\n")
 	out.WriteString("}\n")
 	return out.Bytes()
 }
