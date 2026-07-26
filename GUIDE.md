@@ -126,11 +126,49 @@ Useful options include:
 - `-s`: strip optional symbols and metadata;
 - `-tags a,b`: add build tags;
 - `-arena-size <bytes>`: set the generated program's arena limit;
+- `-system <file.rtg>`: load a hosted target and hard binary/arena limits;
 - `-windows-gui`: choose the Windows GUI subsystem;
 - `-emit-unit`: stop after frontend linking and write the canonical unit;
 - `-emit-image`: write the `RNVI` linked-image transport;
 - `-mode=kernel-module`: build a Linux/amd64 kernel module;
 - `-script`: treat one explicit file as a script.
+
+### Hosted system profiles
+
+A hosted system profile keeps the constraints used for a compiler or
+application build beside the project:
+
+```text
+system "small-linux-amd64" {
+    target = "linux/amd64"
+    binary = 2MiB
+    arena = 32MiB
+}
+```
+
+Use it instead of separate `-t` and `-arena-size` options:
+
+```sh
+renvo -system systems/small-linux-amd64.rtg -o app ./cmd/app
+```
+
+`binary` limits the final executable bytes, including browser HTML packaging
+when applicable. The frontend rejects an oversized result before writing the
+output. `arena` is passed to the backend as the generated program's hard
+managed-allocation limit. It is not a claim about total process RSS, which also
+includes stacks, code pages, loader mappings, and operating-system overhead.
+
+Profiles accept byte counts with `B`, `KiB`, `MiB`, or `GiB` suffixes. Both
+limits and the target are required. `-system` cannot be combined with `-t` or
+`-arena-size`.
+
+The checked-in `systems/frontend-linux-amd64.rtg` profile keeps a stripped,
+bundled frontend below 2 MiB and gives the running compiler a 128 MiB arena:
+
+```sh
+renvo -system systems/frontend-linux-amd64.rtg -tags renvo_bundle -s \
+  -o renvo ./cmd/renvo
+```
 
 `-emit-unit` and `-emit-image` are intentionally different:
 

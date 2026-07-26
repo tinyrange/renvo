@@ -60,7 +60,10 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 	}
 	unit := built.Unit
 	target := built.Options.Target
+	backendTarget := backendTargetForOptions(target, built.Options.Mode)
 	output := built.Options.Output
+	systemName := built.Options.SystemName
+	moduleLicense := built.Options.ModuleLicense
 	arenaSize := backendArenaSize(target, built.Options.Tags, built.Options.ArenaSize)
 	if built.Options.EmitUnit {
 		if output == "-" {
@@ -78,7 +81,10 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 		persistMark = arena.PersistMark()
 		unit = arena.PersistBytes(unit)
 		target = arena.PersistString(target)
+		backendTarget = arena.PersistString(backendTarget)
 		output = arena.PersistString(output)
+		systemName = arena.PersistString(systemName)
+		moduleLicense = arena.PersistString(moduleLicense)
 		backendMark := mark
 		remainder := backendMark % 4096
 		if remainder != 0 {
@@ -87,19 +93,33 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 		arena.Reset(backendMark)
 	}
 	virtualTarget := target
-	target = backendTargetForOptions(target, built.Options.Mode)
-	ok := backendbridge.CompileUnitToOutputStripEnv(unit, target, output, built.Options.Strip, built.Options.WindowsGUI, built.Options.EmitImage, arenaSize, built.Options.ModuleLicense, args, env)
-	if ok && virtualTarget == "browser/wasm32" && !built.Options.EmitImage {
+	target = backendTarget
+	ok := false
+	var compileDiagnostic Diagnostic
+	if built.Options.BinaryLimit > 0 {
+		ok, compileDiagnostic = compileSystemOutput(unit, target, virtualTarget, output, built.Options.Strip, built.Options.WindowsGUI, built.Options.EmitImage, arenaSize, moduleLicense, systemName, built.Options.BinaryLimit)
+	} else {
+		ok = backendbridge.CompileUnitToOutputStripEnv(unit, target, output, built.Options.Strip, built.Options.WindowsGUI, built.Options.EmitImage, arenaSize, moduleLicense, args, env)
+	}
+	if ok && built.Options.BinaryLimit == 0 && virtualTarget == "browser/wasm32" && !built.Options.EmitImage {
 		wasm, readErr := os.ReadFile(output)
 		if readErr != nil || os.WriteFile(output, PackageBrowserHTML(wasm), 0644) != nil {
 			ok = false
 		}
 	}
+	if !ok {
+		diagnostic := Diagnostic{Phase: "backend", Code: "RENVO-BACKEND-001", Message: "backend compilation failed"}
+		if compileDiagnostic.Valid() {
+			diagnostic = compileDiagnostic
+		}
+		status, message := finishRenvoCommandFailure(renvoCommandDiagnosticBuffer, diagnostic, false, 0)
+		if resetArena {
+			arena.PersistReset(persistMark)
+		}
+		return status, message
+	}
 	if resetArena {
 		arena.PersistReset(persistMark)
-	}
-	if !ok {
-		return finishRenvoCommandFailure(renvoCommandDiagnosticBuffer, Diagnostic{Phase: "backend", Code: "RENVO-BACKEND-001", Message: "backend compilation failed"}, false, 0)
 	}
 	return 0, ""
 }

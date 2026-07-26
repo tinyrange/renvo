@@ -225,12 +225,8 @@ func renvoAsmImageArm(a *renvoAsm) []byte {
 	if renvoCompilerStripSymbols {
 		out := make([]byte, 0, loadFileSize)
 		out = renvoAppendElfHeaderArm(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, 0)
-		for i := 0; i < len(a.code); i++ {
-			out = append(out, a.code[i])
-		}
-		for i := 0; i < len(a.data); i++ {
-			out = append(out, a.data[i])
-		}
+		out = append(out, a.code...)
+		out = append(out, a.data...)
 		if renvoFixedTarget == 0 {
 			return renvoAppendReplLinkTable(out, a)
 		}
@@ -240,12 +236,8 @@ func renvoAsmImageArm(a *renvoAsm) []byte {
 	renvoBuildElfSymbolSections(a, 0, a.codeOffset, loadFileSize, &sec)
 	out := make([]byte, 0, sec.shoff+280)
 	out = renvoAppendElfHeaderArm(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff)
-	for i := 0; i < len(a.code); i++ {
-		out = append(out, a.code[i])
-	}
-	for i := 0; i < len(a.data); i++ {
-		out = append(out, a.data[i])
-	}
+	out = append(out, a.code...)
+	out = append(out, a.data...)
 	out = renvoAppendUntil(out, sec.symtabOff)
 	for i := 0; i < len(sec.symtab); i++ {
 		out = append(out, sec.symtab[i])

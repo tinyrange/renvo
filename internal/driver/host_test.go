@@ -86,6 +86,34 @@ func TestCompileAndWrite(t *testing.T) {
 	}
 }
 
+func TestCompileAndWriteRejectsOversizedSystemOutputBeforeWrite(t *testing.T) {
+	dir := writeHostCase(t)
+	if err := os.WriteFile(filepath.Join(dir, "tiny.rtg"), []byte("system \"tiny\" {\n    target = \"linux/amd64\"\n    binary = 1B\n    arena = 64KiB\n}\n"), 0o644); err != nil {
+		t.Fatalf("write system profile failed: %v", err)
+	}
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd failed: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir failed: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(oldwd); err != nil {
+			t.Fatalf("restore Chdir failed: %v", err)
+		}
+	}()
+
+	backend := &systemProfileBackend{binary: []byte("too large")}
+	result := CompileAndWrite([]string{"-system", "tiny.rtg", "-o", "app", "./cmd/app"}, "/std", backend)
+	if result.Ok || result.Error != HostErrCompile || result.Compile.Diagnostic.Code != "RENVO-SYSTEM-002" {
+		t.Fatalf("oversized system result = %#v", result)
+	}
+	if _, err := os.Stat("app"); !os.IsNotExist(err) {
+		t.Fatalf("oversized output was written: %v", err)
+	}
+}
+
 func TestCompileAndWriteEmitsUnitWithoutBackend(t *testing.T) {
 	dir := writeHostCase(t)
 	oldwd, err := os.Getwd()

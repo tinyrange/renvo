@@ -14,21 +14,22 @@ import (
 // phases advance package by package, and supported backends emit bounded
 // batches of reusable machine-code objects between event-loop yields.
 type RenvoCommandSession struct {
-	args          []string
-	env           []string
-	stage         int
-	done          bool
-	resetArena    bool
-	mark          int
-	build         *FSBuildSession
-	built         BuildResult
-	backend       *backendbridge.CompileSession
-	persistMark   int
-	virtualTarget string
-	backendOutput string
-	status        int
-	diagnostic    string
-	cached        bool
+	args             []string
+	env              []string
+	stage            int
+	done             bool
+	resetArena       bool
+	mark             int
+	build            *FSBuildSession
+	built            BuildResult
+	backend          *backendbridge.CompileSession
+	persistMark      int
+	virtualTarget    string
+	backendOutput    string
+	status           int
+	diagnostic       string
+	cached           bool
+	objectCacheReady bool
 }
 
 func BeginRenvoCommand(args []string, env []string) *RenvoCommandSession {
@@ -67,8 +68,16 @@ func (s *RenvoCommandSession) Step() bool {
 				break
 			}
 		}
-		if s.cached {
+		systemProfile := false
+		for i := 0; i < len(commandArgs); i++ {
+			if commandArgs[i] == "-system" {
+				systemProfile = true
+				break
+			}
+		}
+		if s.cached && !systemProfile {
 			backendbridge.InitializeObjectCache(objectTarget)
+			s.objectCacheReady = true
 		}
 		s.resetArena = renvoFrontendCanResetArena()
 		if s.resetArena {
@@ -86,6 +95,10 @@ func (s *RenvoCommandSession) Step() bool {
 		if !s.built.Ok {
 			s.fail(s.built.Diagnostic, s.resetArena, s.mark)
 			return true
+		}
+		if s.cached && !s.objectCacheReady {
+			backendbridge.InitializeObjectCache(s.built.Options.Target)
+			s.objectCacheReady = true
 		}
 		if s.built.CacheHit {
 			if s.resetArena {
@@ -117,12 +130,19 @@ func (s *RenvoCommandSession) Step() bool {
 	if s.backend == nil {
 		unit := s.built.Unit
 		target := s.built.Options.Target
+		backendTarget := backendTargetForOptions(target, s.built.Options.Mode)
 		output := s.built.Options.Output
+		systemName := s.built.Options.SystemName
+		moduleLicense := s.built.Options.ModuleLicense
+		arenaSize := backendArenaSize(target, s.built.Options.Tags, s.built.Options.ArenaSize)
 		if s.resetArena {
 			s.persistMark = arena.PersistMark()
 			unit = arena.PersistBytes(unit)
 			target = arena.PersistString(target)
+			backendTarget = arena.PersistString(backendTarget)
 			output = arena.PersistString(output)
+			systemName = arena.PersistString(systemName)
+			moduleLicense = arena.PersistString(moduleLicense)
 			backendMark := s.mark
 			remainder := backendMark % 4096
 			if remainder != 0 {
@@ -132,9 +152,26 @@ func (s *RenvoCommandSession) Step() bool {
 		}
 		s.virtualTarget = target
 		s.backendOutput = output
-		target = backendTargetForOptions(target, s.built.Options.Mode)
-		arenaSize := backendArenaSize(target, s.built.Options.Tags, s.built.Options.ArenaSize)
-		s.backend = backendbridge.BeginCompileSession(unit, target, output, s.built.Options.Strip, s.built.Options.WindowsGUI, arenaSize, s.built.Options.ModuleLicense)
+		target = backendTarget
+		if s.built.Options.BinaryLimit > 0 {
+			ok, diagnostic := compileSystemOutput(unit, target, s.virtualTarget, output, s.built.Options.Strip, s.built.Options.WindowsGUI, s.built.Options.EmitImage, arenaSize, moduleLicense, systemName, s.built.Options.BinaryLimit)
+			if !ok {
+				s.fail(diagnostic, false, 0)
+			}
+			if s.resetArena {
+				arena.PersistReset(s.persistMark)
+				arena.Reset(s.mark)
+			}
+			if !ok {
+				return true
+			}
+			if s.resetArena && s.cached {
+				rememberEmbeddedBuild(s.built)
+			}
+			s.done = true
+			return true
+		}
+		s.backend = backendbridge.BeginCompileSession(unit, target, output, s.built.Options.Strip, s.built.Options.WindowsGUI, arenaSize, moduleLicense)
 		return false
 	}
 	if !s.backend.Step() {

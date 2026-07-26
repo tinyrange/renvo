@@ -8,6 +8,7 @@ const (
 	CompileOK = iota
 	CompileErrBuild
 	CompileErrBackend
+	CompileErrSystem
 )
 
 type Backend interface {
@@ -116,6 +117,11 @@ func compileBuiltUnit(result CompileResult, built BuildResult, backend Backend) 
 	result.Binary = backendResult.Binary
 	if built.Options.Target == "browser/wasm32" && !built.Options.EmitImage {
 		result.Binary = PackageBrowserHTML(result.Binary)
+	}
+	if built.Options.BinaryLimit > 0 && len(result.Binary) > built.Options.BinaryLimit {
+		result.Diagnostic = systemBinaryLimitDiagnostic(built.Options.SystemName, len(result.Binary), built.Options.BinaryLimit)
+		result.Binary = nil
+		return compileFail(result, CompileErrSystem)
 	}
 	return result
 }
