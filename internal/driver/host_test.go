@@ -219,17 +219,8 @@ func TestCompileAndWriteWithEnvReportsMissingBackend(t *testing.T) {
 func TestHostEnvHelpers(t *testing.T) {
 	env := []string{
 		"OTHER=value",
-		BackendEnv + "=/tmp/backend",
 		StdRootEnv + "=/tmp/std",
 		ModuleCacheEnv + "=/tmp/modcache",
-		BackendEnv + "_EXTRA=ignored",
-	}
-	backend, ok := CommandBackendFromEnv(env)
-	if !ok {
-		t.Fatal("CommandBackendFromEnv failed")
-	}
-	if backend.Path != "/tmp/backend" {
-		t.Fatalf("backend path = %q", backend.Path)
 	}
 	if got := StdRootFromEnv(env); got != "/tmp/std" {
 		t.Fatalf("std root = %q", got)
@@ -239,9 +230,6 @@ func TestHostEnvHelpers(t *testing.T) {
 	}
 	if got := EnvValue(env, ModuleCacheEnv); got != "/tmp/modcache" {
 		t.Fatalf("module cache = %q", got)
-	}
-	if got := EnvValue(env, BackendEnv+"_EXTRA"); got != "ignored" {
-		t.Fatalf("extra env = %q", got)
 	}
 }
 
@@ -337,8 +325,8 @@ func runHostMainCase(t *testing.T, src []byte) {
 
 	result := RunCommand(
 		[]string{"renvo", "-t", target, "-s", "-o", "app", "./cmd/app"},
-		[]string{BackendEnv + "=" + backend},
 		nil,
+		CommandBackend{Path: backend},
 	)
 	if !result.Ok {
 		t.Fatalf("RunCommand failed: err=%d path=%q compile=%#v", result.Error, result.ErrorPath, result.Compile)

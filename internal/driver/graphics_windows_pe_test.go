@@ -85,8 +85,8 @@ func main() {
 			outputName := "app-" + target.arch + ".exe"
 			result := RunCommand(
 				[]string{"renvo", "-t", target.name, "-windows-gui", "-o", outputName, "./cmd/app"},
-				[]string{BackendEnv + "=" + backend, StdRootEnv + "=" + filepath.Join(repoRoot, "std")},
-				nil,
+				[]string{StdRootEnv + "=" + filepath.Join(repoRoot, "std")},
+				CommandBackend{Path: backend},
 			)
 			if !result.Ok {
 				t.Fatalf("Windows graphics compilation failed: err=%d path=%q buildErr=%d arg=%q errorPath=%q at=%d", result.Error, result.ErrorPath, result.Compile.Build.Error, result.Compile.Build.ErrorArg, result.Compile.Build.ErrorPath, result.Compile.Build.ErrorAt)

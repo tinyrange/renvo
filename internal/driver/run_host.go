@@ -53,11 +53,7 @@ func RunScriptCommand(args []string, env []string, backend Backend, stdin io.Rea
 	}
 	compileArgs = append(compileArgs, "-t", target, "-o", "-")
 	if backend == nil {
-		commandBackend, ok := CommandBackendFromEnv(env)
-		if !ok {
-			return runFail(result, RunErrBackend, "")
-		}
-		backend = commandBackend
+		return runFail(result, RunErrBackend, "")
 	}
 	workDir, err := os.Getwd()
 	if err != nil {

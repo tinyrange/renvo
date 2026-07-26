@@ -46,7 +46,6 @@ jobs:
       - name: Build backend
         run: |
           go build -o "$RUNNER_TEMP/renvo-backend" ./backend
-          echo "RENVO_BACKEND=$RUNNER_TEMP/renvo-backend" >> "$GITHUB_ENV"
 
       - name: Run deterministic VM backend gates
         run: go test -count=1 -timeout 5m -run '^(TestVM32FullBackendSuite|TestVM32SelfHostedBackend)$' ./backend
@@ -94,7 +93,6 @@ jobs:
       - name: Build backend
         run: |
           go build -o "$RUNNER_TEMP/renvo-backend" ./backend
-          echo "RENVO_BACKEND=$RUNNER_TEMP/renvo-backend" >> "$GITHUB_ENV"
 
       - name: Run backend tests
         run: |
@@ -127,7 +125,6 @@ jobs:
       - name: Build backend
         run: |
           go build -o "$RUNNER_TEMP/renvo-backend" ./backend
-          echo "RENVO_BACKEND=$RUNNER_TEMP/renvo-backend" >> "$GITHUB_ENV"
 
       - name: Run backend tests
         run: |
@@ -189,7 +186,7 @@ jobs:
           # generated corpus contain independent programs with intentionally
           # conflicting declarations, while sandbox/ contains local scratch.
           go test -count=1 ./internal/... ./std/... ./cmd/... ./backend/unit ./backend/target ./backend/bringup ./backend/omnibus/... ./backend/cmd/...
-          go test -count=1 -tags renvo_bundle ./internal/driver ./cmd/renvo
+          go test -count=1 -tags renvo_bundle ./internal/driver ./cmd/renvobootstrap
 
   frontend-corpus:
     name: Frontend corpus tests

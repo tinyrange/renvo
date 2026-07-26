@@ -42,26 +42,31 @@ The most important working rules are:
 
 ## Build a development toolchain
 
-A development frontend built by Go normally invokes a separate backend:
+A Go-built bootstrap invokes a sibling backend. Actual `renvo` frontends are
+Renvo-built artifacts and always link the backend in-process:
 
 ```sh
 mkdir -p sandbox/bin
 go build -o sandbox/bin/renvo-backend ./backend
-go build -tags renvo_bundle -o sandbox/bin/renvo ./cmd/renvo
+go build -tags renvo_bundle -o sandbox/bin/renvo-bootstrap ./cmd/renvobootstrap
 
-RENVO_BACKEND="$PWD/sandbox/bin/renvo-backend" \
-  sandbox/bin/renvo -t linux/amd64 -s -o sandbox/bin/hello ./path/to/hello
+sandbox/bin/renvo-bootstrap \
+  -t linux/amd64 -s -o sandbox/bin/hello ./path/to/hello
 ```
+
+The bootstrap resolves `renvo-backend` beside itself. Pass
+`-bootstrap-backend <path>` immediately after the executable name only when a
+test or packaging workflow deliberately stores the backend elsewhere.
 
 `renvo_bundle` embeds the supported standard-library sources. It does not
 change compiler semantics. Without bundling, set `RENVO_STDROOT` or arrange an
 adjacent standard-library tree.
 
-Running `renvo` without arguments is intentionally useful:
+Running the bootstrap without arguments is intentionally useful:
 
 ```sh
-sandbox/bin/renvo
-sandbox/bin/renvo --help
+sandbox/bin/renvo-bootstrap
+sandbox/bin/renvo-bootstrap --help
 ```
 
 The command requires `-o` for compilation. The default target is
@@ -70,12 +75,10 @@ so host defaults cannot hide a target mistake.
 
 ### Build a genuinely standalone compiler
 
-The host-built executable above still uses `RENVO_BACKEND`. To produce the
-one-file self-hosted toolchain:
+To produce the one-file self-hosted toolchain:
 
 ```sh
-RENVO_BACKEND="$PWD/sandbox/bin/renvo-backend" \
-  sandbox/bin/renvo \
+sandbox/bin/renvo-bootstrap \
   -tags renvo_bundle \
   -t linux/amd64 \
   -s \
@@ -838,12 +841,9 @@ The CPU metric is process user plus system CPU, normalized on the same runner.
 It is deliberately not raw wall-clock time. Do not replace it with a
 machine-specific absolute duration.
 
-Run the frontend gate with a built backend and standard-library root:
+Run the frontend gate with the checkout's standard-library root:
 
 ```sh
-go build -o sandbox/bin/renvo-backend ./backend
-
-RENVO_BACKEND="$PWD/sandbox/bin/renvo-backend" \
 RENVO_STDROOT="$PWD/std" \
   go test -count=1 -run '^TestFrontendCompilerPerformance$' ./backend
 ```

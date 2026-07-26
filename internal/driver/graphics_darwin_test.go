@@ -326,8 +326,8 @@ func main() {
 	defer os.Chdir(oldDir)
 	result := RunCommand(
 		[]string{"renvo", "-t", "darwin/arm64", "-o", "app", "./cmd/app"},
-		[]string{BackendEnv + "=" + backend, StdRootEnv + "=" + filepath.Join(repoRoot, "std")},
-		nil,
+		[]string{StdRootEnv + "=" + filepath.Join(repoRoot, "std")},
+		CommandBackend{Path: backend},
 	)
 	if !result.Ok {
 		if len(result.Compile.Build.Unit) > 0 {

@@ -40,13 +40,12 @@ if len(os.Args) == 2 { os.WriteFile(os.Args[1], []byte("PASS\n"), 0644) }
 	}
 	defer func() { _ = os.Chdir(oldDir) }()
 	env := []string{
-		BackendEnv + "=" + backend,
 		StdRootEnv + "=" + filepath.Join(repoRoot, "std"),
 	}
 	marker := filepath.Join(dir, "result.txt")
 	result := RunScriptCommand(
 		[]string{"renvo", "run", "hello.go", "--", marker},
-		env, nil, os.Stdin, os.Stdout, os.Stderr,
+		env, CommandBackend{Path: backend}, os.Stdin, os.Stdout, os.Stderr,
 	)
 	if !result.Ok || result.ExitCode != 0 {
 		t.Fatalf("run failed: %#v", result)

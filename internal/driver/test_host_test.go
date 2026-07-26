@@ -34,10 +34,10 @@ func TestRunTestCommandCompilesAndRunsGoTests(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := []string{
-		BackendEnv + "=" + backend,
 		StdRootEnv + "=" + filepath.Join(repoRoot, "std"),
 	}
-	result := RunTestCommand([]string{"renvo", "test", dir}, env, nil, os.Stdin, os.Stdout, os.Stderr)
+	commandBackend := CommandBackend{Path: backend}
+	result := RunTestCommand([]string{"renvo", "test", dir}, env, commandBackend, os.Stdin, os.Stdout, os.Stderr)
 	if !result.Ok || result.ExitCode != 0 {
 		t.Fatalf("passing test result = %#v", result)
 	}
@@ -46,7 +46,7 @@ func TestRunTestCommandCompilesAndRunsGoTests(t *testing.T) {
 	if err := os.WriteFile(testPath, []byte("package value\nimport \"testing\"\nfunc TestAdd(t *testing.T) { t.Fatal(\"broken\") }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	result = RunTestCommand([]string{"renvo", "test", dir}, env, nil, os.Stdin, os.Stdout, os.Stderr)
+	result = RunTestCommand([]string{"renvo", "test", dir}, env, commandBackend, os.Stdin, os.Stdout, os.Stderr)
 	if !result.Ok || result.ExitCode == 0 {
 		t.Fatalf("failing test result = %#v", result)
 	}

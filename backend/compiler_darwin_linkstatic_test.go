@@ -64,15 +64,15 @@ func TestDarwinArm64SelfHostedLinkStaticNamesSurvivePackageUnits(t *testing.T) {
 	backend := buildStage2Compiler(t, target, outDir)
 	caseDir := filepath.Join(root, "frontend_tests", "regressions", "darwin_linkstatic_selfhost")
 	frontend := filepath.Join(outDir, "frontend")
-	buildFrontend := exec.Command("go", "build", "-o", frontend, "./cmd/renvo")
+	buildFrontend := exec.Command("go", "build", "-o", frontend, "./cmd/renvobootstrap")
 	buildFrontend.Dir = root
 	if got, err := buildFrontend.CombinedOutput(); err != nil {
 		t.Fatalf("frontend build failed: %v\n%s", err, got)
 	}
 	output := filepath.Join(outDir, "app")
-	compile := exec.Command(frontend, "-t", target.name, "-s", "-o", output, "./cmd/app")
+	compile := exec.Command(frontend, "-bootstrap-backend", backend, "-t", target.name, "-s", "-o", output, "./cmd/app")
 	compile.Dir = caseDir
-	compile.Env = append(os.Environ(), "RENVO_BACKEND="+backend, "RENVO_STDROOT="+filepath.Join(root, "std"))
+	compile.Env = append(os.Environ(), "RENVO_STDROOT="+filepath.Join(root, "std"))
 	if got, err := compile.CombinedOutput(); err != nil {
 		t.Fatalf("self-hosted graphics compile failed: %v\n%s", err, got)
 	}

@@ -32,7 +32,7 @@ func runFrontendOSProcessSemantics(t *testing.T, frontend frontendConfig) {
 		t.Fatalf("host process fixture build failed: %v\n%s", err, string(out))
 	}
 	compiled := filepath.Join(t.TempDir(), "renvo-app")
-	cmd = exec.Command(frontend.compiler, "-t", frontend.target, "-s", "-o", compiled, ".")
+	cmd = frontendCommand(frontend, "-t", frontend.target, "-s", "-o", compiled, ".")
 	cmd.Dir = project
 	cmd.Env = frontendCommandEnv(frontend.env, project)
 	if out, err := cmd.CombinedOutput(); err != nil {

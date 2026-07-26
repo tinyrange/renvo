@@ -5,6 +5,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 
 	"renvo.dev/internal/driver"
@@ -42,10 +43,15 @@ func compileIDEProject(root, output, target string, env []string) projectActionR
 }
 
 func compileIDEProjectNow(root, output, target string, env []string) projectActionResult {
-	backend, ok := driver.CommandBackendFromEnv(env)
-	if !ok {
-		return projectActionResult{message: "Build failed: set RENVO_BACKEND to a compiler backend.", ok: false}
+	executable, err := os.Executable()
+	if err != nil {
+		return projectActionResult{message: "Build failed: locate the IDE bootstrap backend.", ok: false}
 	}
+	backendName := "renvo-backend"
+	if filepath.Ext(executable) == ".exe" {
+		backendName += ".exe"
+	}
+	backend := driver.CommandBackend{Path: filepath.Join(filepath.Dir(executable), backendName)}
 	if target == "" {
 		return projectActionResult{message: "Build failed: select a Renvo target.", ok: false}
 	}

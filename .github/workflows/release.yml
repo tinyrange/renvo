@@ -49,9 +49,9 @@ jobs:
       - name: Build frontend compilers
         run: |
           set -eux
-          go build -tags renvo_bundle -o dist/renvo-stage0 ./cmd/renvo
-          RENVO_BACKEND="$PWD/dist/renvo-backend-linux-amd64" \
-            ./dist/renvo-stage0 -tags renvo_bundle -t linux/amd64 -s -o dist/renvo-linux-amd64-stage1 ./cmd/renvo
+          go build -tags renvo_bundle -o dist/renvo-bootstrap ./cmd/renvobootstrap
+          ./dist/renvo-bootstrap -bootstrap-backend "$PWD/dist/renvo-backend-linux-amd64" \
+            -tags renvo_bundle -t linux/amd64 -s -o dist/renvo-linux-amd64-stage1 ./cmd/renvo
           ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t linux/amd64 -s -o dist/renvo-linux-amd64 ./cmd/renvo
           ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t linux/386 -s -o dist/renvo-linux-386 ./cmd/renvo
           ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t linux/aarch64 -s -o dist/renvo-linux-arm64 ./cmd/renvo

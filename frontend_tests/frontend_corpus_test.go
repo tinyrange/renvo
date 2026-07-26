@@ -31,8 +31,16 @@ type corpusCase struct {
 
 type frontendConfig struct {
 	compiler string
+	backend  string
 	target   string
 	env      []string
+}
+
+func frontendCommand(frontend frontendConfig, args ...string) *exec.Cmd {
+	if frontend.backend != "" {
+		args = append([]string{"-bootstrap-backend", frontend.backend}, args...)
+	}
+	return exec.Command(frontend.compiler, args...)
 }
 
 func TestFrontendQuickCorpus(t *testing.T) {
@@ -160,8 +168,8 @@ func selfHostedFrontendCompiler(t *testing.T, root string) frontendConfig {
 			selfHostErr = fmt.Errorf("backend build failed: %v\n%s", err, string(out))
 			return
 		}
-		stage0 := filepath.Join(dir, "renvo-stage0")
-		cmd = exec.Command("go", "build", "-o", stage0, "./cmd/renvo")
+		stage0 := filepath.Join(dir, "renvo-bootstrap")
+		cmd = exec.Command("go", "build", "-o", stage0, "./cmd/renvobootstrap")
 		cmd.Dir = root
 		out, err = cmd.CombinedOutput()
 		if err != nil {
@@ -171,7 +179,7 @@ func selfHostedFrontendCompiler(t *testing.T, root string) frontendConfig {
 		stage1 := filepath.Join(dir, "renvo-stage1")
 		stage2 := filepath.Join(dir, "renvo-stage2")
 		selfHostPath = filepath.Join(dir, "renvo-stage3")
-		stage0Env := []string{"RENVO_BACKEND=" + selfHostBackendPath, "RENVO_STDROOT=" + filepath.Join(root, "std")}
+		stage0Env := []string{"RENVO_STDROOT=" + filepath.Join(root, "std")}
 		if err := compileFrontendSource(root, stage0, target, stage1, stage0Env); err != nil {
 			selfHostErr = fmt.Errorf("frontend stage1 build failed: %w", err)
 			return
@@ -237,7 +245,7 @@ func runFrontendCorpusCase(t *testing.T, frontend frontendConfig, dir string) {
 	}
 
 	out := filepath.Join(t.TempDir(), "app")
-	cmd := exec.Command(frontend.compiler, "-t", frontend.target, "-s", "-o", out, "./cmd/app")
+	cmd := frontendCommand(frontend, "-t", frontend.target, "-s", "-o", out, "./cmd/app")
 	cmd.Dir = dir
 	cmd.Env = frontendCommandEnv(frontend.env, dir)
 	compileOut, err := cmd.CombinedOutput()
@@ -294,8 +302,8 @@ func frontendCompiler(t *testing.T, root string) frontendConfig {
 			frontendErr = err
 			return
 		}
-		frontendPath = filepath.Join(dir, "renvo")
-		cmd := exec.Command("go", "build", "-o", frontendPath, "./cmd/renvo")
+		frontendPath = filepath.Join(dir, "renvo-bootstrap")
+		cmd := exec.Command("go", "build", "-o", frontendPath, "./cmd/renvobootstrap")
 		cmd.Dir = root
 		out, err := cmd.CombinedOutput()
 		if err != nil {
@@ -315,8 +323,9 @@ func frontendCompiler(t *testing.T, root string) frontendConfig {
 	}
 	return frontendConfig{
 		compiler: frontendPath,
+		backend:  frontendBackendPath,
 		target:   frontendTarget(t),
-		env:      []string{"RENVO_BACKEND=" + frontendBackendPath, "RENVO_STDROOT=" + filepath.Join(root, "std")},
+		env:      []string{"RENVO_STDROOT=" + filepath.Join(root, "std")},
 	}
 }
 
