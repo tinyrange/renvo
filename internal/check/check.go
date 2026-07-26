@@ -38,6 +38,7 @@ const (
 	CheckErrUndefined
 	CheckErrOperand
 	CheckErrReturnType
+	CheckErrCallArity
 )
 
 const (

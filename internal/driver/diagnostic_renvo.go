@@ -233,6 +233,8 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			d.Code, d.Message = "RENVO-CHECK-030", "invalid operation for operand types"
 		} else if built.Build.ErrorDetail == check.CheckErrReturnType {
 			d.Code, d.Message = "RENVO-CHECK-031", "return value is not assignable to the function result"
+		} else if built.Build.ErrorDetail == check.CheckErrCallArity {
+			d.Code, d.Message = "RENVO-CHECK-032", "function call argument count does not match parameters"
 		}
 	} else {
 		d.Phase, d.Code, d.Message = "linker", "RENVO-LINK-001", "package linking failed"
