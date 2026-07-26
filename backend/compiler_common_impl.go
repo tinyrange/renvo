@@ -216,13 +216,6 @@ func renvoDefaultArenaSize(target int) int {
 	return renvoArenaSize64BitHosted
 }
 
-func renvoArenaSizeValid(target int, size int) bool {
-	if target <= 0 || target >= len(renvoTargetIntBitsTable) {
-		return false
-	}
-	return size >= renvoArenaSizeMinimum && size <= renvoArenaSizeMaximum
-}
-
 func renvoResolveArenaSize(target int, requested int) int {
 	if requested == 0 {
 		return renvoDefaultArenaSize(target)
@@ -2286,6 +2279,8 @@ const renvoTypeFunc = 19
 const renvoTypeInterface = 20
 const renvoTypeComplex = 21
 const renvoNamedTypeAlias = 1
+const renvoStructLayoutMarker = -1
+const renvoStructLayoutHost = -2
 
 const renvoBuiltinTypeUint16 = 10
 const renvoBuiltinTypeUint32 = 11
@@ -2392,7 +2387,18 @@ func renvoCompileOutputData(data []byte, target int) []byte {
 	if !renvoCompilerEmitImage {
 		return data
 	}
-	format := renvoLinkedImageFormat(data)
+	format := 0
+	if len(data) >= 2 && data[0] == 'M' && data[1] == 'Z' {
+		format = 2
+	} else if len(data) >= 4 {
+		if data[0] == 0x7f && data[1] == 'E' && data[2] == 'L' && data[3] == 'F' {
+			format = 1
+		} else if data[0] == 0xcf && data[1] == 0xfa && data[2] == 0xed && data[3] == 0xfe {
+			format = 3
+		} else if data[0] == 0 && data[1] == 'a' && data[2] == 's' && data[3] == 'm' {
+			format = 4
+		}
+	}
 	out := make([]byte, 0, renvoImageHeaderSize+len(data))
 	out = append(out, 'R', 'N', 'V', 'I')
 	out = renvoAppend16(out, 1)
@@ -2400,37 +2406,16 @@ func renvoCompileOutputData(data []byte, target int) []byte {
 	out = renvoAppend16(out, target)
 	out = append(out, byte(format), 0)
 	out = renvoAppend32(out, len(data))
-	checkA, checkB := renvoLinkedImageChecksum(data)
+	checkA := 1
+	checkB := 0
+	for i := 0; i < len(data); i++ {
+		checkA = (checkA + int(data[i])) % 65521
+		checkB = (checkB + checkA) % 65521
+	}
 	out = renvoAppend16(out, checkA)
 	out = renvoAppend16(out, checkB)
 	out = append(out, data...)
 	return out
-}
-
-func renvoLinkedImageFormat(data []byte) int {
-	if len(data) >= 4 && data[0] == 0x7f && data[1] == 'E' && data[2] == 'L' && data[3] == 'F' {
-		return 1
-	}
-	if len(data) >= 2 && data[0] == 'M' && data[1] == 'Z' {
-		return 2
-	}
-	if len(data) >= 4 && data[0] == 0xcf && data[1] == 0xfa && data[2] == 0xed && data[3] == 0xfe {
-		return 3
-	}
-	if len(data) >= 4 && data[0] == 0 && data[1] == 'a' && data[2] == 's' && data[3] == 'm' {
-		return 4
-	}
-	return 0
-}
-
-func renvoLinkedImageChecksum(data []byte) (int, int) {
-	a := 1
-	b := 0
-	for i := 0; i < len(data); i++ {
-		a = (a + int(data[i])) % 65521
-		b = (b + a) % 65521
-	}
-	return a, b
 }
 
 type renvoConstResult struct {
@@ -6041,6 +6026,7 @@ func renvoParseTypeInto(m *renvoMeta, p *renvoProgram, start int, end int, resul
 		renvoTruncFields(&m.fields, firstField+count)
 		fieldIndex := 0
 		offset := 0
+		hostLayoutMarker := false
 		i = start + 2
 		for i < closeTok {
 			if renvoTokIsKind(p, i, renvoTokIdent) || renvoTokCharIs(p, i, '*') {
@@ -6067,6 +6053,10 @@ func renvoParseTypeInto(m *renvoMeta, p *renvoProgram, start int, end int, resul
 				var fieldInfo renvoFieldInfo
 				fieldInfo.typ = fieldType.typ
 				fieldInfo.embedded = embedded
+				if fieldType.next < lineEnd && !hostLayoutMarker {
+					tag := renvoTokAt(p, fieldType.next)
+					hostLayoutMarker = renvoBytesEqualText(p.src, int(tag.start), int(tag.end), "`r:\"h\"`")
+				}
 				for nameTok < namesEnd {
 					fieldNameTok := renvoTokAt(p, nameTok)
 					offset = renvoAlignTo8(offset)
@@ -6085,6 +6075,9 @@ func renvoParseTypeInto(m *renvoMeta, p *renvoProgram, start int, end int, resul
 		}
 		size := renvoAlignTo8(offset)
 		typ := renvoAddType(m, renvoTypeStruct, 0, firstField, count, size, 0, 0)
+		if hostLayoutMarker {
+			m.types[typ].resolved = renvoStructLayoutMarker
+		}
 		renvoSetTypeResult(result, typ, closeTok+1)
 		return
 	}
@@ -6303,7 +6296,6 @@ func renvoPointerAddressSpace(m *renvoMeta, typ int) int {
 }
 
 func renvoFinalizeTypeLayouts(m *renvoMeta) {
-	renvoNonNil(m)
 	for i := 0; i < len(m.funcs); i++ {
 		fn := &m.funcs[i]
 		if fn.linkStatic == 0 {
@@ -6315,13 +6307,23 @@ func renvoFinalizeTypeLayouts(m *renvoMeta) {
 		renvoNativeTypeLayout(m, fn.resultType)
 	}
 	for i := 0; i < len(m.types); i++ {
-		t := m.types[i]
-		if t.kind != renvoTypeStruct || t.nativeAlign > 0 {
+		t := &m.types[i]
+		if t.kind == renvoTypeStruct {
+			for j := 0; j < t.count; j++ {
+				if renvoResolveType(m, m.fields[t.first+j].typ).resolved == renvoStructLayoutMarker {
+					t.resolved = renvoStructLayoutHost
+					renvoNativeTypeLayout(m, i)
+					break
+				}
+			}
+		}
+		current := m.types[i]
+		if current.kind != renvoTypeStruct || current.nativeAlign > 0 {
 			continue
 		}
 		offset := 0
-		for j := 0; j < t.count; j++ {
-			fieldIndex := t.first + j
+		for j := 0; j < current.count; j++ {
+			fieldIndex := current.first + j
 			if fieldIndex < 0 || fieldIndex >= len(m.fields) {
 				continue
 			}
@@ -6371,8 +6373,17 @@ func renvoNativeTypeLayout(m *renvoMeta, typ int) int {
 				continue
 			}
 			fieldType := m.fields[fieldIndex].typ
-			fieldSize := renvoNativeTypeLayout(m, fieldType)
-			fieldAlign := m.types[fieldType].nativeAlign
+			fieldResolved := renvoResolveType(m, fieldType)
+			fieldSize := 0
+			fieldAlign := 0
+			if t.resolved == renvoStructLayoutHost && fieldResolved.kind == renvoTypeStruct &&
+				fieldResolved.resolved != renvoStructLayoutMarker && fieldResolved.resolved != renvoStructLayoutHost {
+				fieldSize = renvoTypeSize(m, fieldType)
+				fieldAlign = renvoBackendValueSlotSize
+			} else {
+				fieldSize = renvoNativeTypeLayout(m, fieldType)
+				fieldAlign = m.types[fieldType].nativeAlign
+			}
 			if fieldAlign < 1 {
 				fieldAlign = 1
 			}
@@ -6550,10 +6561,6 @@ func renvoTypeKindIsScalarInt(kind int) bool {
 
 func renvoTypeKindIsWideInt(kind int) bool {
 	return kind == renvoTypeInt64 || kind == renvoTypeUint64
-}
-
-func renvoTypeKindIsSignedInt(kind int) bool {
-	return kind == renvoTypeInt || kind == renvoTypeInt8 || kind == renvoTypeInt16 || kind == renvoTypeInt32 || kind == renvoTypeInt64
 }
 
 func renvoTypeKindNeedsWideLowering(kind int) bool {
@@ -7073,39 +7080,30 @@ func renvoAsmLoadPrimaryIntToken(a *renvoAsm, p *renvoProgram, tokIndex int) {
 		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRax, value)
 		return
 	}
-	needsMovabs := renvoIntTokenNeedsMovabs(p, tokIndex)
+	needsMovabs := false
+	tok := renvoTokAt(p, tokIndex)
+	start := int(tok.start)
+	end := int(tok.end)
+	if end-start <= 2 || renvo_runtime_UnsafeByteAt(p.src, start) != '0' {
+		digits := end - start
+		if digits > 10 {
+			needsMovabs = true
+		} else if digits == 10 {
+			limit := "2147483647"
+			for i := 0; i < 10; i++ {
+				c := renvo_runtime_UnsafeByteAt(p.src, start+i)
+				if c != limit[i] {
+					needsMovabs = c > limit[i]
+					break
+				}
+			}
+		}
+	}
 	if needsMovabs {
 		renvoAsmPrimaryImm64(a, value)
 		return
 	}
 	renvoAsmPrimaryImm(a, value)
-}
-func renvoIntTokenNeedsMovabs(p *renvoProgram, tokIndex int) bool {
-	renvoNonNil(p)
-	tok := renvoTokAt(p, tokIndex)
-	start := int(tok.start)
-	end := int(tok.end)
-	if end-start > 2 && renvo_runtime_UnsafeByteAt(p.src, start) == '0' {
-		return false
-	}
-	digits := end - start
-	if digits > 10 {
-		return true
-	}
-	if digits < 10 {
-		return false
-	}
-	limit := "2147483647"
-	for i := 0; i < 10; i++ {
-		c := renvo_runtime_UnsafeByteAt(p.src, start+i)
-		if c > limit[i] {
-			return true
-		}
-		if c < limit[i] {
-			return false
-		}
-	}
-	return false
 }
 func renvoAsmCopyPrimaryToSecondary(a *renvoAsm) {
 	renvoNonNil(a)
@@ -8724,7 +8722,13 @@ func renvoEmitLinearFor(g *renvoLinearGen, stmt *renvoStmt) bool {
 	if semi1 >= stmt.exprStart {
 		return renvoEmitLinearScopedControl(g, stmt, semi1)
 	}
-	rangeTok := renvoFindRangeToken(p, stmt.exprStart, stmt.exprEnd)
+	rangeTok := stmt.exprStart - 1
+	for i := stmt.exprStart; i < stmt.exprEnd; i++ {
+		if renvoTokIdentIs(p, i, "range") {
+			rangeTok = i
+			break
+		}
+	}
 	if rangeTok >= stmt.exprStart {
 		return renvoEmitLinearScopedControl(g, stmt, rangeTok)
 	}
@@ -8772,16 +8776,6 @@ func renvoPopLoopLabels(g *renvoLinearGen) {
 	renvoNonNil(g)
 	g.breakDepth--
 	g.continueDepth--
-}
-
-func renvoFindRangeToken(p *renvoProgram, start int, end int) int {
-	renvoNonNil(p)
-	for i := start; i < end; i++ {
-		if renvoTokIdentIs(p, i, "range") {
-			return i
-		}
-	}
-	return start - 1
 }
 
 func renvoEmitLinearScopedControl(g *renvoLinearGen, stmt *renvoStmt, split int) bool {
@@ -11053,15 +11047,6 @@ func renvoEmitCopyStackToBss(g *renvoLinearGen, srcOffset int, bssOffset int, si
 		renvoAsmStorePrimaryBss(&g.asm, bssOffset+at)
 	}
 }
-func renvoEmitCopyBssToStack(g *renvoLinearGen, bssOffset int, destOffset int, size int) {
-	renvoNonNil(g)
-	if size < renvoBackendValueSlotSize {
-		size = renvoBackendValueSlotSize
-	}
-	for at := 0; at < size; at += renvoNativeIntSize {
-		renvoAsmCopyBssToStackSlot(&g.asm, bssOffset+at, destOffset-at)
-	}
-}
 func renvoFindLocalIndexInCurrentScope(g *renvoLinearGen, nameStart int, nameEnd int) int {
 	renvoNonNil(g)
 	start := g.scopeBase
@@ -11751,7 +11736,12 @@ func renvoEmitNamedValueToLocal(g *renvoLinearGen, e *renvoExpr, offset int, siz
 	if globalOffset < 0 || renvoTypeSize(g.meta, renvoFindGlobalType(g, e.nameStart, e.nameEnd)) != size {
 		return false
 	}
-	renvoEmitCopyBssToStack(g, globalOffset, offset, size)
+	if size < renvoBackendValueSlotSize {
+		size = renvoBackendValueSlotSize
+	}
+	for at := 0; at < size; at += renvoNativeIntSize {
+		renvoAsmCopyBssToStackSlot(&g.asm, globalOffset+at, offset-at)
+	}
 	return true
 }
 
@@ -12747,20 +12737,15 @@ func renvoEnsureMakeZeroHelper(g *renvoLinearGen) int {
 	return g.makeZeroLabel
 }
 
-func renvoMakeStaticRingSlotCount(backingSize int) int {
-	if backingSize <= 4096 {
-		return 3
-	}
-	if backingSize <= 65536 {
-		return 2
-	}
-	return 1
-}
-
 func renvoEmitMakeStaticRingPrimary(g *renvoLinearGen, backingSize int, zeroSize int) {
 	renvoNonNil(g)
 	a := &g.asm
-	slotCount := renvoMakeStaticRingSlotCount(backingSize)
+	slotCount := 1
+	if backingSize <= 4096 {
+		slotCount = 3
+	} else if backingSize <= 65536 {
+		slotCount = 2
+	}
 	cursorOff := g.asm.bssSize
 	dataOff := cursorOff + 8
 	g.asm.bssSize += 8 + backingSize*slotCount
@@ -18085,7 +18070,7 @@ func renvoAsmCopySecondaryToPrimary(a *renvoAsm) {
 		renvo386AsmMovRaxRdx(a)
 		return
 	}
-	renvoAmd64AsmMovRaxRdx(a)
+	renvoAsmEmit24(a, 0xd08948)
 }
 func renvoAsmCopyPrimaryToCallWord1(a *renvoAsm) {
 	renvoNonNil(a)
@@ -18166,7 +18151,7 @@ func renvoAsmAddSecondaryTertiary(a *renvoAsm) {
 		renvo386AsmAddRdxRcx(a)
 		return
 	}
-	renvoAmd64AsmAddRdxRcx(a)
+	renvoAsmEmit24(a, 0xca0148)
 }
 func renvoAsmSyscall(a *renvoAsm) {
 	renvoNonNil(a)
@@ -18186,7 +18171,7 @@ func renvoAsmSyscall(a *renvoAsm) {
 		renvo386AsmSyscall(a)
 		return
 	}
-	renvoAmd64AsmSyscall(a)
+	renvoAsmEmit16(a, 0x050f)
 }
 func renvoAsmPopCallWord0(a *renvoAsm) {
 	renvoNonNil(a)
@@ -18206,7 +18191,9 @@ func renvoAsmPopCallWord0(a *renvoAsm) {
 		renvo386AsmPopRdi(a)
 		return
 	}
-	renvoAmd64AsmPopRdi(a)
+	if !renvoAmd64RewritePrimaryLoad(a, 7, true) {
+		renvoAsmEmit8(a, 0x5f)
+	}
 }
 func renvoAsmStackMem(a *renvoAsm, offset int, base int, disp8 int, disp32 int) {
 	renvoNonNil(a)
@@ -18226,7 +18213,14 @@ func renvoAsmStackMem(a *renvoAsm, offset int, base int, disp8 int, disp32 int) 
 		renvo386AsmStackMem(a, offset, base, disp8, disp32)
 		return
 	}
-	renvoAmd64AsmStackMem(a, offset, base, disp8, disp32)
+	renvoAsmEmit16(a, base)
+	if offset >= 0 && offset <= 128 {
+		renvoAsmEmit8(a, disp8)
+		renvoAsmEmit8(a, -offset)
+		return
+	}
+	renvoAsmEmit8(a, disp32)
+	renvoAsmEmit32(a, -offset)
 }
 func renvoAsmAddSecondaryImm(a *renvoAsm, imm int) {
 	renvoNonNil(a)
@@ -18246,7 +18240,12 @@ func renvoAsmAddSecondaryImm(a *renvoAsm, imm int) {
 		renvo386AsmAddRdxImm(a, imm)
 		return
 	}
-	renvoAmd64AsmAddRdxImm(a, imm)
+	if renvoAsmImmFits8Signed(imm) {
+		renvoAsmEmit4(a, 0x48, 0x83, 0xc2, imm)
+		return
+	}
+	renvoAsmEmit24(a, 0xc28148)
+	renvoAsmEmit32(a, imm)
 }
 func renvoAsmMemDisp(a *renvoAsm, disp int, op int, disp8 int, disp32 int) {
 	renvoNonNil(a)
@@ -18522,7 +18521,7 @@ func renvoAsmBoolNotPrimary(a *renvoAsm) {
 		renvo386AsmBoolNotRax(a)
 		return
 	}
-	renvoAmd64AsmBoolNotRax(a)
+	renvoAsmEmit3(a, 0x83, 0xf0, 1)
 }
 func renvoAsmCmpPrimaryImm8(a *renvoAsm, imm int) {
 	renvoNonNil(a)
@@ -18571,7 +18570,7 @@ func renvoAsmAddPrimaryTertiary(a *renvoAsm) {
 		renvo386AsmAddRaxRcx(a)
 		return
 	}
-	renvoAmd64AsmAddRaxRcx(a)
+	renvoAsmEmit24(a, 0xc80148)
 }
 func renvoAsmSubPrimaryTertiary(a *renvoAsm) {
 	renvoNonNil(a)
@@ -18591,7 +18590,7 @@ func renvoAsmSubPrimaryTertiary(a *renvoAsm) {
 		renvo386AsmSubRaxRcx(a)
 		return
 	}
-	renvoAmd64AsmSubRaxRcx(a)
+	renvoAsmEmit24(a, 0xc82948)
 }
 func renvoAsmShlTertiaryImm(a *renvoAsm, imm int) {
 	renvoNonNil(a)
@@ -18611,7 +18610,7 @@ func renvoAsmShlTertiaryImm(a *renvoAsm, imm int) {
 		renvo386AsmShlRcxImm(a, imm)
 		return
 	}
-	renvoAmd64AsmShlRcxImm(a, imm)
+	renvoAsmEmit4(a, 0x48, 0xc1, 0xe1, imm)
 }
 func renvoAsmShlPrimaryImm(a *renvoAsm, imm int) {
 	renvoNonNil(a)
@@ -18631,7 +18630,7 @@ func renvoAsmShlPrimaryImm(a *renvoAsm, imm int) {
 		renvo386AsmShlRaxImm(a, imm)
 		return
 	}
-	renvoAmd64AsmShlRaxImm(a, imm)
+	renvoAsmEmit4(a, 0x48, 0xc1, 0xe0, imm)
 }
 func renvoAsmSarPrimaryImm(a *renvoAsm, imm int) {
 	renvoNonNil(a)
@@ -18651,7 +18650,7 @@ func renvoAsmSarPrimaryImm(a *renvoAsm, imm int) {
 		renvo386AsmSarRaxImm(a, imm)
 		return
 	}
-	renvoAmd64AsmSarRaxImm(a, imm)
+	renvoAsmEmit4(a, 0x48, 0xc1, 0xf8, imm)
 }
 func renvoAsmShrPrimaryImm(a *renvoAsm, imm int) {
 	if renvoFixedTarget != 0 && renvoTargetArch != renvoArch386 && renvoTargetArch != renvoArchArm && renvoTargetArch != renvoArchWasm32 {
@@ -19828,7 +19827,7 @@ func renvoEmitWideScalarToLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, 
 		return false
 	}
 	renvoAsmStorePrimaryStack(&g.asm, offset)
-	if renvoTypeKindIsSignedInt(sourceKind) {
+	if sourceKind == renvoTypeInt || sourceKind == renvoTypeInt8 || sourceKind == renvoTypeInt16 || sourceKind == renvoTypeInt32 || sourceKind == renvoTypeInt64 {
 		renvoAsmSarPrimaryImm(&g.asm, 31)
 	} else {
 		renvoAsmPrimaryImm(&g.asm, 0)

@@ -142,10 +142,6 @@ func renvoAmd64AsmMovRdiRax(a *renvoAsm) {
 	}
 	renvoAsmEmit16(a, 0x5f50)
 }
-func renvoAmd64AsmMovRaxRdx(a *renvoAsm) {
-	renvoNonNil(a)
-	renvoAsmEmit24(a, 0xd08948)
-}
 func renvoAmd64AsmMovRsiRax(a *renvoAsm) {
 	renvoNonNil(a)
 	if renvoAmd64RewritePrimaryLoad(a, 6, false) {
@@ -205,41 +201,6 @@ func renvoAmd64AsmMovR8Rax(a *renvoAsm) {
 func renvoAmd64AsmMovR9Rax(a *renvoAsm) {
 	renvoNonNil(a)
 	renvoAsmEmit24(a, 0xc18949)
-}
-func renvoAmd64AsmAddRdxRcx(a *renvoAsm) {
-	renvoNonNil(a)
-	renvoAsmEmit24(a, 0xca0148)
-}
-func renvoAmd64AsmSyscall(a *renvoAsm) {
-	renvoNonNil(a)
-	renvoAsmEmit16(a, 0x050f)
-}
-func renvoAmd64AsmPopRdi(a *renvoAsm) {
-	renvoNonNil(a)
-	if renvoAmd64RewritePrimaryLoad(a, 7, true) {
-		return
-	}
-	renvoAsmEmit8(a, 0x5f)
-}
-func renvoAmd64AsmStackMem(a *renvoAsm, offset int, base int, disp8 int, disp32 int) {
-	renvoNonNil(a)
-	renvoAsmEmit16(a, base)
-	if offset >= 0 && offset <= 128 {
-		renvoAsmEmit8(a, disp8)
-		renvoAsmEmit8(a, -offset)
-		return
-	}
-	renvoAsmEmit8(a, disp32)
-	renvoAsmEmit32(a, -offset)
-}
-func renvoAmd64AsmAddRdxImm(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	if renvoAsmImmFits8Signed(imm) {
-		renvoAsmEmit4(a, 0x48, 0x83, 0xc2, imm)
-		return
-	}
-	renvoAsmEmit24(a, 0xc28148)
-	renvoAsmEmit32(a, imm)
 }
 func renvoAmd64AsmMemDisp(a *renvoAsm, disp int, op int, disp8 int, disp32 int) {
 	renvoNonNil(a)
@@ -404,10 +365,6 @@ func renvoAmd64AsmDecMemRdx(a *renvoAsm) {
 	renvoNonNil(a)
 	renvoAsmEmit24(a, 0x0aff48)
 }
-func renvoAmd64AsmBoolNotRax(a *renvoAsm) {
-	renvoNonNil(a)
-	renvoAsmEmit3(a, 0x83, 0xf0, 1)
-}
 func renvoAmd64AsmCmpRaxImm8(a *renvoAsm, imm int) {
 	renvoNonNil(a)
 	if imm == 0 {
@@ -427,26 +384,6 @@ func renvoAmd64AsmCmpRaxImm8Discard(a *renvoAsm, imm int) {
 		return
 	}
 	renvoAmd64AsmCmpRaxImm8(a, imm)
-}
-func renvoAmd64AsmAddRaxRcx(a *renvoAsm) {
-	renvoNonNil(a)
-	renvoAsmEmit24(a, 0xc80148)
-}
-func renvoAmd64AsmSubRaxRcx(a *renvoAsm) {
-	renvoNonNil(a)
-	renvoAsmEmit24(a, 0xc82948)
-}
-func renvoAmd64AsmShlRcxImm(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	renvoAsmEmit4(a, 0x48, 0xc1, 0xe1, imm)
-}
-func renvoAmd64AsmShlRaxImm(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	renvoAsmEmit4(a, 0x48, 0xc1, 0xe0, imm)
-}
-func renvoAmd64AsmSarRaxImm(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	renvoAsmEmit4(a, 0x48, 0xc1, 0xf8, imm)
 }
 func renvoAmd64AsmDivLeftRcxRightRax(a *renvoAsm, mod bool) {
 	renvoNonNil(a)
@@ -1914,10 +1851,11 @@ func renvoAmd64EmitIndexedStructField(g *renvoLinearGen, ep *renvoExprParse, ind
 	if fieldOffset < 0 {
 		return false
 	}
+	fieldType := renvoStructFieldType(g, sliceType.elem, fieldStart, fieldEnd)
 	if !renvoEmitIndexedSelectorAddressSecondary(g, ep, indexIdx, fieldOffset) {
 		return false
 	}
-	renvoAsmLoadPrimaryMemSecondaryDisp(a, 0)
+	renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, renvoScalarKindSize(renvoResolveType(g.meta, fieldType).kind))
 	return true
 }
 func renvoAmd64EmitStringPtrExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {

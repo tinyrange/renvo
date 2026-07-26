@@ -155,6 +155,8 @@ func (b *coreUnitBuilder) addFileTokens(file syntax.File, src []byte, fileIndex 
 	base := len(b.program.Text)
 	tokenBase := len(b.program.Tokens)
 	lineOffset := b.lineOffset
+	newlines := countCoreNewlines(src)
+	needsSeparator := hasNext && (len(src) == 0 || src[len(src)-1] != '\n')
 	for i := 0; i < len(file.Tokens); i++ {
 		tok := file.Tokens[i]
 		if tok.KindLine&255 == syntax.TokenEOF {
@@ -180,8 +182,8 @@ func (b *coreUnitBuilder) addFileTokens(file syntax.File, src []byte, fileIndex 
 	} else {
 		b.program.Text = appendCoreBytes(b.program.Text, src)
 	}
-	b.lineOffset += countCoreNewlines(src)
-	if hasNext && (len(src) == 0 || src[len(src)-1] != '\n') {
+	b.lineOffset += newlines
+	if needsSeparator {
 		b.program.Text = append(b.program.Text, '\n')
 		b.lineOffset++
 	}
