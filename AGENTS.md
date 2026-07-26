@@ -4,6 +4,13 @@ Renvo is a minimal, retargetable compiler for a practical subset of Go. The
 frontend lives at the repository root and the native code generators live in
 `backend/`.
 
+## Reference Guide
+
+Refer to `GUIDE.md` for practical background, workflows, debugging techniques,
+and architectural context gathered from working on the project. It is a
+non-binding reference: `AGENTS.md`, current tests, and current implementation
+take precedence whenever they disagree with the guide.
+
 ## Restrictions
 
 - Backend compiler edits are limited to `backend/compiler_*_impl.go` and
