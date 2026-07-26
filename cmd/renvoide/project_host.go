@@ -50,7 +50,10 @@ func compileIDEProjectNow(root, output, target string, env []string) projectActi
 		return projectActionResult{message: "Build failed: select a Renvo target.", ok: false}
 	}
 	args := []string{"-t", target, "-s", "-o", output, "."}
-	compiled := driver.CompileFromFSWithModuleCache(args, root, driver.StdRootFromEnv(env), driver.EnvValue(env, driver.ModuleCacheEnv), driver.OSFS{}, backend)
+	build := driver.BeginFSBuildSession(args, root, driver.StdRootFromEnv(env), driver.EnvValue(env, driver.ModuleCacheEnv), driver.OSFS{}, true)
+	for !build.Step() {
+	}
+	compiled := driver.CompileBuildResult(build.Result(), backend)
 	if !compiled.Ok {
 		message := "Build failed."
 		if compiled.Diagnostic.Valid() {
@@ -58,9 +61,13 @@ func compileIDEProjectNow(root, output, target string, env []string) projectActi
 		}
 		return projectActionResult{message: message, ok: false}
 	}
+	if compiled.Build.CacheHit {
+		return projectActionResult{message: "Build is up to date: " + output, ok: true}
+	}
 	if err := os.WriteFile(output, compiled.Binary, 0755); err != nil {
 		return projectActionResult{message: "Build failed while writing " + output + ".", ok: false}
 	}
+	driver.RememberBuildOutput(compiled.Build)
 	return projectActionResult{message: "Build succeeded: " + output, ok: true}
 }
 

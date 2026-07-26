@@ -180,6 +180,13 @@ go test ./frontend_tests
 go test -run '^(TestCompileTests|TestUnitFrontendCompileTests)$' ./backend
 ```
 
+GUI frontend compile time and Go heap allocations have dedicated cold,
+unchanged, and edited-project benchmarks:
+
+```sh
+go test ./cmd/renvoide -run '^$' -bench '^BenchmarkGUIFrontend' -benchmem
+```
+
 The GitHub Actions workflow runs the complete backend matrix, resource and
 performance gates, self-hosted frontend corpus, bundled standalone compiler
 checks, and native Windows coverage. Compiler regressions belong in

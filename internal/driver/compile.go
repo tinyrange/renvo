@@ -63,12 +63,22 @@ func CompileFromFS(args []string, workDir string, stdRoot string, fs SourceFS, b
 }
 
 func CompileFromFSWithModuleCache(args []string, workDir string, stdRoot string, moduleCache string, fs SourceFS, backend Backend) CompileResult {
-	result := CompileResult{Ok: true, Error: CompileOK}
 	built := BuildFromFSWithModuleCache(args, workDir, stdRoot, moduleCache, fs)
+	return CompileBuildResult(built, backend)
+}
+
+// CompileBuildResult runs the backend for a completed frontend build. GUI
+// clients use it with BeginFSBuildSession so the frontend can advance in
+// bounded steps and retain its incremental package caches between builds.
+func CompileBuildResult(built BuildResult, backend Backend) CompileResult {
+	result := CompileResult{Ok: true, Error: CompileOK}
 	result.Build = built
 	if !built.Ok {
 		result.Diagnostic = built.Diagnostic
 		return compileFail(result, CompileErrBuild)
+	}
+	if built.CacheHit {
+		return result
 	}
 	return compileBuiltUnit(result, built, backend)
 }
