@@ -21,7 +21,7 @@ func appMain() int {
 		"windows/386",
 		"windows/arm64",
 		"wasi/wasm32",
-		"vm/bytecode",
+		"vm/vm32",
 		"darwin/arm64",
 	} {
 		if _, ok := RenvoCompileSourceToBytes(source, target); !ok {

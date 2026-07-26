@@ -49,7 +49,7 @@ jobs:
           echo "RENVO_BACKEND=$RUNNER_TEMP/renvo-backend" >> "$GITHUB_ENV"
 
       - name: Run deterministic VM backend gates
-        run: go test -count=1 -timeout 5m -run '^(TestVMFullBackendSuite|TestVMSelfHostedBackend)$' ./backend
+        run: go test -count=1 -timeout 5m -run '^(TestVM32FullBackendSuite|TestVM32SelfHostedBackend)$' ./backend
 
       - name: Run compiler resource gates
         env:
@@ -65,7 +65,7 @@ jobs:
         env:
           RENVO_CROSS_ARCH_TESTS: "1"
         run: |
-          tests="$(go test -list '^Test' ./backend | grep '^Test' | grep -v '^TestCompilerPerformance$' | grep -v '^TestCompilerPerformanceWASI$' | grep -v '^TestCompilerResourceGates$' | grep -v '^TestFrontendCompilerPerformance$' | grep -v '^TestVMFullBackendSuite$' | grep -v '^TestVMSelfHostedBackend$' | paste -sd'|' -)"
+          tests="$(go test -list '^Test' ./backend | grep '^Test' | grep -v '^TestCompilerPerformance$' | grep -v '^TestCompilerPerformanceWASI$' | grep -v '^TestCompilerResourceGates$' | grep -v '^TestFrontendCompilerPerformance$' | grep -v '^TestVM32FullBackendSuite$' | grep -v '^TestVM32SelfHostedBackend$' | paste -sd'|' -)"
           go test -count=1 -timeout 30m -run "^(${tests})$" ./backend
 
   backend-arm64:

@@ -15,7 +15,7 @@ const renvoTargetWasiWasm32 = 7
 const renvoTargetDarwinArm64 = 8
 const renvoTargetLinuxKernelAmd64 = 9
 const renvoTargetWindowsArm64 = 10
-const renvoTargetVMBytecode = 11
+const renvoTargetVM32 = 11
 
 const renvoArchAmd64 = 1
 const renvoArch386 = 2
@@ -115,7 +115,7 @@ const renvoTargetIntBitsTable = "\x00\x40\x20\x40\x20\x40\x20\x20\x40\x40\x40\x2
 
 func renvoProfileForTarget(target int) (renvoTargetProfile, bool) {
 	var p renvoTargetProfile
-	if target < renvoTargetLinuxAmd64 || target > renvoTargetVMBytecode {
+	if target < renvoTargetLinuxAmd64 || target > renvoTargetVM32 {
 		return p, false
 	}
 	p.target = target
@@ -124,7 +124,7 @@ func renvoProfileForTarget(target int) (renvoTargetProfile, bool) {
 	p.intBits = int(renvoTargetIntBitsTable[target])
 	p.pointerBits = p.intBits
 	p.maxAlign = p.intBits / 8
-	if target == renvoTargetWasiWasm32 || target == renvoTargetVMBytecode {
+	if target == renvoTargetWasiWasm32 || target == renvoTargetVM32 {
 		p.maxAlign = 8
 	}
 	p.charBits = 8
@@ -255,7 +255,7 @@ func renvoSetTarget(target int) {
 		target = renvoFixedTarget
 	}
 	renvoTarget = target
-	if target >= renvoTargetLinuxAmd64 && target <= renvoTargetVMBytecode {
+	if target >= renvoTargetLinuxAmd64 && target <= renvoTargetVM32 {
 		renvoTargetOS = int(targetOSTable[target])
 		renvoTargetArch = int(targetArchTable[target])
 		renvoNativeIntSize = int(renvoTargetIntBitsTable[target]) / 8
@@ -1115,8 +1115,11 @@ func renvoAsmInit(a *renvoAsm) {
 		symbols = make([]renvoAsmSymbol, 0, 2048)
 	} else {
 		code = make([]byte, 0, 2097152)
-		labelPos = make([]int32, 0, 32768)
-		relocs = make([]int32, 0, 131072)
+		// The full frontend self-host remains below 17,000 labels and 65,000
+		// relative relocations. Keep practical growth room without eagerly
+		// committing memory that pushes the frontend RSS gate.
+		labelPos = make([]int32, 0, 24576)
+		relocs = make([]int32, 0, 81920)
 		// Absolute relocations are much less frequent than label references. A
 		// self-host build uses fewer than 2,800 on every native target, so avoid
 		// touching a 32,768-entry arena allocation for each compilation.
@@ -8547,7 +8550,7 @@ func renvoEvalFixedTargetInt(g *renvoLinearGen, ep *renvoExprParse, idx int, fix
 		return renvoBoolTokenValue(p, e.tok)
 	}
 	if e.kind == renvoExprIdent {
-		if fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetVMBytecode {
+		if fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetVM32 {
 			if renvoBytesEqualText(p.src, e.nameStart, e.nameEnd, "renvoTargetArch") {
 				return int(targetArchTable[fixedTarget])
 			}
@@ -8590,7 +8593,7 @@ func renvoEvalFixedTargetBool(g *renvoLinearGen, ep *renvoExprParse, idx int, fi
 		}
 		return -1
 	}
-	if e.kind == renvoExprCall && e.argCount == 0 && fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetVMBytecode {
+	if e.kind == renvoExprCall && e.argCount == 0 && fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetVM32 {
 		wantOS := 0
 		if renvoExprIsIdentText(g.prog, ep, e.left, "targetIsWindows") {
 			wantOS = renvoOSWindows
@@ -8604,7 +8607,7 @@ func renvoEvalFixedTargetBool(g *renvoLinearGen, ep *renvoExprParse, idx int, fi
 			return 0
 		}
 	}
-	if e.kind == renvoExprCall && e.argCount == 1 && fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetVMBytecode && int(renvoTargetIntBitsTable[fixedTarget]) == 64 && renvoExprIsIdentText(g.prog, ep, e.left, "renvoTypeKindNeedsWideLowering") {
+	if e.kind == renvoExprCall && e.argCount == 1 && fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetVM32 && int(renvoTargetIntBitsTable[fixedTarget]) == 64 && renvoExprIsIdentText(g.prog, ep, e.left, "renvoTypeKindNeedsWideLowering") {
 		return 0
 	}
 	if e.kind == renvoExprBinary {

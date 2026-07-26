@@ -9,12 +9,12 @@ func compileWasiWasm32Arena(input []int, output int, arenaSize int) int {
 	return compileWasm32Arena(input, output, arenaSize)
 }
 
-func compileVMBytecode(input []int, output int) int {
-	return compileVMBytecodeArena(input, output, 0)
+func compileVM32(input []int, output int) int {
+	return compileVM32Arena(input, output, 0)
 }
 
-func compileVMBytecodeArena(input []int, output int, arenaSize int) int {
-	renvoSetTarget(renvoTargetVMBytecode)
+func compileVM32Arena(input []int, output int, arenaSize int) int {
+	renvoSetTarget(renvoTargetVM32)
 	return compileWasm32Arena(input, output, arenaSize)
 }
 
@@ -66,7 +66,7 @@ func renvoTryCompileScalarProgramWasm32(p *renvoProgram, meta *renvoMeta) renvoC
 	g.arenaSize = meta.arenaSize
 	g.fixedTargetState = 1
 	g.fixedTargetValue = renvoTarget
-	if renvoTarget == renvoTargetVMBytecode {
+	if renvoTarget == renvoTargetVM32 {
 		// VM bytecode is an execution format, not a restriction on the targets
 		// exposed by a compiler running inside the VM. Preserve dynamic target
 		// selection so a runtime -t value remains authoritative.
@@ -106,7 +106,7 @@ func renvoTryCompileScalarProgramWasm32(p *renvoProgram, meta *renvoMeta) renvoC
 		}
 	}
 	var data []byte
-	if renvoTarget == renvoTargetVMBytecode {
+	if renvoTarget == renvoTargetVM32 {
 		data = renvoVMImage(a)
 	} else {
 		data = renvoWasm32Image(a)
@@ -124,7 +124,7 @@ func renvoEmitProgramEntryArgsWasm32(g *renvoLinearGen, appIndex int) bool {
 	argsOff := g.asm.bssSize
 	envDataOff := argsOff
 	envLenOff := argsOff
-	if renvoTarget != renvoTargetVMBytecode {
+	if renvoTarget != renvoTargetVM32 {
 		g.asm.bssSize += 32768
 		envDataOff = g.asm.bssSize
 		g.asm.bssSize += 32768

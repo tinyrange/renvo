@@ -1,4 +1,4 @@
-//go:build renvo && vm && bytecode
+//go:build renvo && vm && vm32
 
 package os
 

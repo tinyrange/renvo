@@ -10,7 +10,7 @@ import (
 	"renvo.dev/std/vm"
 )
 
-func TestVMReadDir(t *testing.T) {
+func TestVM32ReadDir(t *testing.T) {
 	root := repoRoot(t)
 	frontend := frontendCompiler(t, root)
 	if frontend.compiler == "" {
@@ -41,7 +41,7 @@ func main() {
 		t.Fatal(err)
 	}
 	imagePath := filepath.Join(project, "readdir.rnvb")
-	cmd := exec.Command(frontend.compiler, "-t", "vm/bytecode", "-arena-size", "262144", "-s", "-o", imagePath, "input.go")
+	cmd := exec.Command(frontend.compiler, "-t", "vm/vm32", "-arena-size", "262144", "-s", "-o", imagePath, "input.go")
 	cmd.Dir = project
 	cmd.Env = frontendCommandEnv(frontend.env, project)
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -65,7 +65,7 @@ func main() {
 	}
 }
 
-func TestVMFrontendPerformanceGate(t *testing.T) {
+func TestVM32FrontendPerformanceGate(t *testing.T) {
 	root := repoRoot(t)
 	frontend := frontendCompiler(t, root)
 	if frontend.compiler == "" {
@@ -74,7 +74,7 @@ func TestVMFrontendPerformanceGate(t *testing.T) {
 	imagePath := filepath.Join(t.TempDir(), "renvo-frontend.rnvb")
 	cmd := exec.Command(frontend.compiler,
 		"-tags", "renvo_bundle",
-		"-t", "vm/bytecode",
+		"-t", "vm/vm32",
 		"-arena-size", "134217728",
 		"-s", "-o", imagePath,
 		"./cmd/renvo",

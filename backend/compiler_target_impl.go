@@ -29,9 +29,9 @@ func compileTarget(input []int, output int, target int, arenaSize int) int {
 			renvoFixedTarget = renvoTargetWasiWasm32
 			return compileWasiWasm32Arena(input, output, arenaSize)
 		}
-		if renvoFixedTarget == renvoTargetVMBytecode {
-			renvoFixedTarget = renvoTargetVMBytecode
-			return compileVMBytecodeArena(input, output, arenaSize)
+		if renvoFixedTarget == renvoTargetVM32 {
+			renvoFixedTarget = renvoTargetVM32
+			return compileVM32Arena(input, output, arenaSize)
 		}
 		if renvoFixedTarget == renvoTargetDarwinArm64 {
 			renvoFixedTarget = renvoTargetDarwinArm64
@@ -67,8 +67,8 @@ func compileTarget(input []int, output int, target int, arenaSize int) int {
 	if target == renvoTargetWasiWasm32 {
 		return compileWasiWasm32Arena(input, output, arenaSize)
 	}
-	if target == renvoTargetVMBytecode {
-		return compileVMBytecodeArena(input, output, arenaSize)
+	if target == renvoTargetVM32 {
+		return compileVM32Arena(input, output, arenaSize)
 	}
 	if target == renvoTargetDarwinArm64 {
 		return compileDarwinArm64Arena(input, output, arenaSize)
@@ -110,7 +110,7 @@ type RenvoCompileOptions struct {
 func RenvoInitializeObjectCache(targetName string) {
 	renvoConfigureTargetMode(targetName, "renvo")
 	target := renvoParseTargetArg(targetName)
-	if target != 0 && target != renvoTargetWasiWasm32 && target != renvoTargetVMBytecode && target != renvoTargetLinuxKernelAmd64 {
+	if target != 0 && target != renvoTargetWasiWasm32 && target != renvoTargetVM32 && target != renvoTargetLinuxKernelAmd64 {
 		renvoInitializeObjectCache()
 	}
 }
@@ -398,7 +398,7 @@ func renvoCompileProgramWithMetaScratch(prog *renvoProgram, meta *renvoMeta, tar
 	if target == renvoTargetLinuxArm {
 		return renvoTryCompileScalarProgramArmScratch(prog, meta)
 	}
-	if target == renvoTargetWasiWasm32 || target == renvoTargetVMBytecode {
+	if target == renvoTargetWasiWasm32 || target == renvoTargetVM32 {
 		return renvoTryCompileScalarProgramWasm32(prog, meta)
 	}
 	return renvoTryCompileScalarProgramAmd64Scratch(prog, meta)
@@ -417,7 +417,7 @@ func renvoCompileProgramWithMeta(prog *renvoProgram, meta *renvoMeta, target int
 	if target == renvoTargetLinuxArm {
 		return renvoTryCompileScalarProgramArmCached(prog, meta)
 	}
-	if target == renvoTargetWasiWasm32 || target == renvoTargetVMBytecode {
+	if target == renvoTargetWasiWasm32 || target == renvoTargetVM32 {
 		return renvoTryCompileScalarProgramWasm32(prog, meta)
 	}
 	return renvoTryCompileScalarProgramAmd64Cached(prog, meta)

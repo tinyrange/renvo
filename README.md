@@ -46,7 +46,7 @@ explicitly.
 | `windows/arm64` | PE executable |
 | `darwin/arm64` | Mach-O executable |
 | `wasi/wasm32` | WebAssembly module |
-| `vm/bytecode` | Deterministic Renvo bytecode (`RNVB`) |
+| `vm/vm32` | Deterministic Renvo bytecode (`RNVB`) |
 
 The frontend supports packages and modules, local replacements, build tags and
 target-specific files, `//go:embed`, and an offline module cache. Language
@@ -70,9 +70,10 @@ RENVO_BACKEND="$PWD/renvo-backend" ./renvo \
 Running `renvo` with no arguments or with `--help` prints the complete command
 reference and target list.
 
-The `vm/bytecode` target is executed by `renvo.dev/std/vm`. Callers provide
-hard instruction and linear-memory limits and receive deterministic step,
-peak-memory, output, file, exit, and trap diagnostics:
+The `vm/vm32` target uses 32-bit words and pointers and is executed by
+`renvo.dev/std/vm`. Callers provide hard instruction and linear-memory limits
+and receive deterministic step, peak-memory, output, file, exit, and trap
+diagnostics. A 64-bit `vm/vm64` target is planned as later work.
 
 ```go
 result := vm.Run(program, vm.Limits{

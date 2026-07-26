@@ -914,7 +914,7 @@ func filenameKnownOS(tag string) bool {
 }
 
 func filenameKnownArch(tag string) bool {
-	return stringInBuildList(tag, "386 amd64 amd64p32 arm armbe arm64 aarch64 arm64be bytecode loong64 mips mipsle mips64 mips64le mips64p32 mips64p32le ppc ppc64 ppc64le riscv riscv64 s390 s390x sparc sparc64 wasm wasm32")
+	return stringInBuildList(tag, "386 amd64 amd64p32 arm armbe arm64 aarch64 arm64be loong64 mips mipsle mips64 mips64le mips64p32 mips64p32le ppc ppc64 ppc64le riscv riscv64 s390 s390x sparc sparc64 vm32 wasm wasm32")
 }
 
 func stringInBuildList(item string, list string) bool {
@@ -1148,8 +1148,8 @@ func hasBuildTag(target string, tag string, tags []string) bool {
 	if tag == "wasm32" || tag == "wasm" {
 		return stringHasSuffix(target, "/wasm32")
 	}
-	if tag == "bytecode" {
-		return stringHasSuffix(target, "/bytecode")
+	if tag == "vm32" {
+		return stringHasSuffix(target, "/vm32")
 	}
 	return false
 }

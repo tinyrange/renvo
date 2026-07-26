@@ -35,7 +35,7 @@ func TestArenaDefaultsAreTargetAware(t *testing.T) {
 		{target: "windows/arm64", want: renvoArenaSize64BitHosted},
 		{target: "darwin/arm64", want: renvoArenaSize64BitHosted},
 		{target: "wasi/wasm32", want: renvoArenaSizeWasi},
-		{target: "vm/bytecode", want: renvoArenaSize32BitHosted},
+		{target: "vm/vm32", want: renvoArenaSize32BitHosted},
 	}
 	for _, test := range tests {
 		got, ok := RenvoDefaultArenaSize(test.target)

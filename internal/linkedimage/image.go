@@ -99,7 +99,7 @@ func targetName(target int) string {
 	case 10:
 		return "windows/arm64"
 	case 11:
-		return "vm/bytecode"
+		return "vm/vm32"
 	default:
 		return ""
 	}

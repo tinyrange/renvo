@@ -69,8 +69,8 @@ func renvoParseTargetArg(target string) int {
 	if len(target) == 11 && target[0] == 'w' && target[1] == 'a' && target[2] == 's' && target[3] == 'i' && target[4] == '/' && target[5] == 'w' && target[6] == 'a' && target[7] == 's' && target[8] == 'm' && target[9] == '3' && target[10] == '2' {
 		return renvoTargetWasiWasm32
 	}
-	if target == "vm/bytecode" {
-		return renvoTargetVMBytecode
+	if target == "vm/vm32" {
+		return renvoTargetVM32
 	}
 	if len(target) == 12 && target[0] == 'd' && target[1] == 'a' && target[2] == 'r' && target[3] == 'w' && target[4] == 'i' && target[5] == 'n' && target[6] == '/' && target[7] == 'a' && target[8] == 'r' && target[9] == 'm' && target[10] == '6' && target[11] == '4' {
 		return renvoTargetDarwinArm64
@@ -131,7 +131,7 @@ func renvoPrintUnsupportedTarget(target string) {
 	renvoPrintErr("renvo: unsupported target: ")
 	renvoPrintErr(target)
 	renvoPrintErr("\n")
-	renvoPrintErr("renvo: supported targets: linux/amd64, linux/386, linux/aarch64, linux/arm, windows/amd64, windows/386, windows/arm64, wasi/wasm32, vm/bytecode, darwin/arm64\n")
+	renvoPrintErr("renvo: supported targets: linux/amd64, linux/386, linux/aarch64, linux/arm, windows/amd64, windows/386, windows/arm64, wasi/wasm32, vm/vm32, darwin/arm64\n")
 }
 
 func renvoUnitRead32(src []byte, pos int) int {
@@ -577,7 +577,7 @@ func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, are
 		result = renvoTryCompileScalarProgramAarch64Cached(prog, &meta)
 	} else if renvoFixedTarget == renvoTargetLinuxArm {
 		result = renvoTryCompileScalarProgramArmCached(prog, &meta)
-	} else if renvoFixedTarget == renvoTargetWasiWasm32 || renvoFixedTarget == renvoTargetVMBytecode {
+	} else if renvoFixedTarget == renvoTargetWasiWasm32 || renvoFixedTarget == renvoTargetVM32 {
 		result = renvoTryCompileScalarProgramWasm32(prog, &meta)
 	} else if renvoFixedTarget != 0 {
 		result = renvoTryCompileScalarProgramAmd64Cached(prog, &meta)
@@ -587,7 +587,7 @@ func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, are
 		result = renvoTryCompileScalarProgramAarch64Cached(prog, &meta)
 	} else if target == renvoTargetLinuxArm {
 		result = renvoTryCompileScalarProgramArmCached(prog, &meta)
-	} else if target == renvoTargetWasiWasm32 || target == renvoTargetVMBytecode {
+	} else if target == renvoTargetWasiWasm32 || target == renvoTargetVM32 {
 		result = renvoTryCompileScalarProgramWasm32(prog, &meta)
 	} else {
 		result = renvoTryCompileScalarProgramAmd64Cached(prog, &meta)
@@ -626,7 +626,10 @@ func renvoCompileUnitInput(input []int, output int, target int, arenaSize int) i
 	if n != 4 || header[0] != 'R' || header[1] != 'N' || header[2] != 'V' || header[3] != 'O' {
 		return -1
 	}
-	var unit []byte
+	// Linked frontend units are substantially larger than standalone backend
+	// sources. Give the reader one backing allocation so arena append growth
+	// does not retain several superseded copies through backend emission.
+	unit := make([]byte, 0, 4194304)
 	unit = renvoReadAll(input[0], unit)
 	prog, isUnit, ok := renvoDecodeUnitProgram(unit)
 	if !isUnit {

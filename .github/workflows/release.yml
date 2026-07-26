@@ -61,7 +61,7 @@ jobs:
           ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t windows/arm64 -s -o dist/renvo-windows-arm64.exe ./cmd/renvo
           ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t darwin/arm64 -s -o dist/renvo-darwin-arm64 ./cmd/renvo
           ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t wasi/wasm32 -s -o dist/renvo-wasi-wasm32.wasm ./cmd/renvo
-          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t vm/bytecode -s -o dist/renvo-vm-bytecode.rnvb ./cmd/renvo
+          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t vm/vm32 -s -o dist/renvo-vm32.rnvb ./cmd/renvo
           chmod +x \
             dist/renvo-linux-amd64 \
             dist/renvo-linux-386 \
@@ -78,7 +78,7 @@ jobs:
           grep -F "windows/arm64" dist/renvo-help.txt
           grep -F "darwin/arm64" dist/renvo-help.txt
           grep -F "wasi/wasm32" dist/renvo-help.txt
-          grep -F "vm/bytecode" dist/renvo-help.txt
+          grep -F "vm/vm32" dist/renvo-help.txt
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v7
@@ -96,7 +96,7 @@ jobs:
             dist/renvo-windows-arm64.exe
             dist/renvo-darwin-arm64
             dist/renvo-wasi-wasm32.wasm
-            dist/renvo-vm-bytecode.rnvb
+            dist/renvo-vm32.rnvb
           if-no-files-found: error
 
       - name: Upload release assets
@@ -116,5 +116,5 @@ jobs:
             dist/renvo-windows-arm64.exe \
             dist/renvo-darwin-arm64 \
             dist/renvo-wasi-wasm32.wasm \
-            dist/renvo-vm-bytecode.rnvb \
+            dist/renvo-vm32.rnvb \
             --clobber

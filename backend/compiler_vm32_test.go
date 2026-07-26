@@ -10,11 +10,11 @@ import (
 	"renvo.dev/std/vm"
 )
 
-func TestVMBytecodeExecutesCompiledProgram(t *testing.T) {
+func TestVM32ExecutesCompiledProgram(t *testing.T) {
 	source := []byte("package main\nfunc appMain() int { print(\"PASS\\n\"); return 7 }\n")
-	image, ok := RenvoCompileSourceToBytesWithOptions(source, "vm/bytecode", RenvoCompileOptions{ArenaSize: 8192, StripSymbols: true})
+	image, ok := RenvoCompileSourceToBytesWithOptions(source, "vm/vm32", RenvoCompileOptions{ArenaSize: 8192, StripSymbols: true})
 	if !ok {
-		t.Fatal("compile vm/bytecode")
+		t.Fatal("compile vm/vm32")
 	}
 	result := vm.Run(image, vm.Limits{Steps: 100000, Memory: 32768})
 	if result.Trap != vm.TrapNone {
@@ -25,7 +25,7 @@ func TestVMBytecodeExecutesCompiledProgram(t *testing.T) {
 	}
 }
 
-func TestVMBytecodeSupportsArgumentsAndFileIO(t *testing.T) {
+func TestVM32SupportsArgumentsAndFileIO(t *testing.T) {
 	tests := []struct {
 		path string
 		args []string
@@ -40,7 +40,7 @@ func TestVMBytecodeSupportsArgumentsAndFileIO(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		image, ok := RenvoCompileSourceToBytesWithOptions(source, "vm/bytecode", RenvoCompileOptions{ArenaSize: 262144, StripSymbols: true})
+		image, ok := RenvoCompileSourceToBytesWithOptions(source, "vm/vm32", RenvoCompileOptions{ArenaSize: 262144, StripSymbols: true})
 		if !ok {
 			t.Fatalf("compile %s", test.path)
 		}
@@ -56,11 +56,11 @@ func TestVMBytecodeSupportsArgumentsAndFileIO(t *testing.T) {
 	}
 }
 
-func TestVMBytecodeEnforcesLimitsDeterministically(t *testing.T) {
+func TestVM32EnforcesLimitsDeterministically(t *testing.T) {
 	source := []byte("package main\nfunc appMain() int { for {} }\n")
-	image, ok := RenvoCompileSourceToBytesWithOptions(source, "vm/bytecode", RenvoCompileOptions{ArenaSize: 8192, StripSymbols: true})
+	image, ok := RenvoCompileSourceToBytesWithOptions(source, "vm/vm32", RenvoCompileOptions{ArenaSize: 8192, StripSymbols: true})
 	if !ok {
-		t.Fatal("compile vm/bytecode")
+		t.Fatal("compile vm/vm32")
 	}
 	first := vm.Run(image, vm.Limits{Steps: 1000, Memory: 32768})
 	second := vm.Run(image, vm.Limits{Steps: 1000, Memory: 32768})
@@ -72,7 +72,7 @@ func TestVMBytecodeEnforcesLimitsDeterministically(t *testing.T) {
 	}
 }
 
-func TestVMFullBackendSuite(t *testing.T) {
+func TestVM32FullBackendSuite(t *testing.T) {
 	paths, err := filepath.Glob("tests/*.go")
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +86,7 @@ func TestVMFullBackendSuite(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		image, ok := RenvoCompileSourceToBytesWithOptions(source, "vm/bytecode", RenvoCompileOptions{
+		image, ok := RenvoCompileSourceToBytesWithOptions(source, "vm/vm32", RenvoCompileOptions{
 			ArenaSize:    8 * 1024 * 1024,
 			StripSymbols: true,
 		})
@@ -107,7 +107,7 @@ func TestVMFullBackendSuite(t *testing.T) {
 	}
 }
 
-func TestVMSelfHostedBackend(t *testing.T) {
+func TestVM32SelfHostedBackend(t *testing.T) {
 	manifest, err := os.ReadFile("compiler_sources.txt")
 	if err != nil {
 		t.Fatal(err)
@@ -121,7 +121,7 @@ func TestVMSelfHostedBackend(t *testing.T) {
 		compilerSource = append(compilerSource, source...)
 		compilerSource = append(compilerSource, '\n')
 	}
-	compilerImage, ok := RenvoCompileSourceToBytesWithOptions(compilerSource, "vm/bytecode", RenvoCompileOptions{
+	compilerImage, ok := RenvoCompileSourceToBytesWithOptions(compilerSource, "vm/vm32", RenvoCompileOptions{
 		ArenaSize:    64 * 1024 * 1024,
 		StripSymbols: true,
 	})
@@ -132,7 +132,7 @@ func TestVMSelfHostedBackend(t *testing.T) {
 	compileResult := vm.RunConfig(compilerImage, vm.Config{
 		Limits: vm.Limits{Steps: 2 * 1000 * 1000 * 1000, Memory: 96 * 1024 * 1024},
 		Args: []string{
-			"renvo-backend", "-t", "vm/bytecode", "-arena-size", "8192",
+			"renvo-backend", "-t", "vm/vm32", "-arena-size", "8192",
 			"-s", "-o", "output.rnvb", "input.go",
 		},
 		Env:   []string{"PATH=/vm", "PWD=/"},

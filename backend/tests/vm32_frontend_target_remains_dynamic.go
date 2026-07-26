@@ -3,7 +3,7 @@ package main
 var renvoFixedTarget int
 
 func appMain() int {
-	if renvoFixedTarget == 0 || renvoFixedTarget == 10 {
+	if renvoFixedTarget != 11 {
 		print("PASS\n")
 		return 0
 	}

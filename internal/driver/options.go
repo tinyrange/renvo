@@ -34,7 +34,7 @@ const ModeExecutable = "executable"
 const ModeKernelModule = "kernel-module"
 const DefaultModuleLicense = "Proprietary"
 
-const HelpText = "Usage: renvo -o <file> [-t <target> | -system <file.rtg>] [-mode=<mode>] [-tags <list>] [-arena-size <bytes>] [-s] [-emit-unit] [-emit-image] [-windows-gui] <package | file.go...>\n       renvo run [build options] <script.go> [-- script arguments...]\n       renvo test [build options] [package]\nOptions:\n  -arena-size  set the generated program arena limit in bytes (256..1073741824)\n  -system      load target, binary-size, and arena limits from a hosted system profile\n  -emit-unit   write the canonical linked Renvo unit without invoking a backend\n  -emit-image  write a format-neutral linked image instead of an executable\n  -mode        select executable (default) or kernel-module output\n  -script      compile one file whose top-level statements form func main\n  -windows-gui select the Windows GUI subsystem instead of the console subsystem\nSource files:\n  Explicit .go files must share one directory and package. Exactly the named files are used;\n  build constraints and OS/architecture suffixes are ignored, while _test.go files are skipped.\nTargets:\n  linux/amd64 linux/386 linux/aarch64 linux/arm\n  windows/amd64 windows/386 windows/arm64 darwin/arm64 wasi/wasm32 browser/wasm32 vm/bytecode\nUnsupported language/toolchain features:\n  generics, goroutines, channels, select, cgo\n"
+const HelpText = "Usage: renvo -o <file> [-t <target> | -system <file.rtg>] [-mode=<mode>] [-tags <list>] [-arena-size <bytes>] [-s] [-emit-unit] [-emit-image] [-windows-gui] <package | file.go...>\n       renvo run [build options] <script.go> [-- script arguments...]\n       renvo test [build options] [package]\nOptions:\n  -arena-size  set the generated program arena limit in bytes (256..1073741824)\n  -system      load target, binary-size, and arena limits from a hosted system profile\n  -emit-unit   write the canonical linked Renvo unit without invoking a backend\n  -emit-image  write a format-neutral linked image instead of an executable\n  -mode        select executable (default) or kernel-module output\n  -script      compile one file whose top-level statements form func main\n  -windows-gui select the Windows GUI subsystem instead of the console subsystem\nSource files:\n  Explicit .go files must share one directory and package. Exactly the named files are used;\n  build constraints and OS/architecture suffixes are ignored, while _test.go files are skipped.\nTargets:\n  linux/amd64 linux/386 linux/aarch64 linux/arm\n  windows/amd64 windows/386 windows/arm64 darwin/arm64 wasi/wasm32 browser/wasm32 vm/vm32\nUnsupported language/toolchain features:\n  generics, goroutines, channels, select, cgo\n"
 
 const RunHelpText = "Usage: renvo run [-s] [-tags <list>] [-arena-size <bytes>] <script.go> [-- arguments...]\nTop-level statements form func main. The script is compiled for and executed on the host target.\n"
 
@@ -314,7 +314,7 @@ func IsSupportedTarget(target string) bool {
 	if target == "browser/wasm32" {
 		return true
 	}
-	if target == "vm/bytecode" {
+	if target == "vm/vm32" {
 		return true
 	}
 	if target == "darwin/arm64" {

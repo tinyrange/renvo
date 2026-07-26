@@ -33,7 +33,7 @@ func TestFmtPrintlnHelloBinarySize(t *testing.T) {
 		"windows/arm64",
 		"darwin/arm64",
 		"wasi/wasm32",
-		"vm/bytecode",
+		"vm/vm32",
 	}
 	for _, target := range targets {
 		image := compileFmtHelloUnit(t, target, true, files)
