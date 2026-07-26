@@ -39,6 +39,17 @@ func TestCompileFromFSInvokesBackend(t *testing.T) {
 	}
 }
 
+func TestCompileBuildResultSkipsBackendForCurrentOutput(t *testing.T) {
+	backend := &recordingBackend{binary: []byte("unexpected")}
+	result := CompileBuildResult(BuildResult{Ok: true, CacheHit: true}, backend)
+	if !result.Ok || !result.Build.CacheHit {
+		t.Fatalf("cached compile result = %#v", result)
+	}
+	if backend.called || len(result.Binary) != 0 {
+		t.Fatal("backend ran for an unchanged build output")
+	}
+}
+
 func TestCompileBrowserTargetUsesWASIBackendAndPackagesHTML(t *testing.T) {
 	backend := &recordingBackend{binary: []byte{0, 'a', 's', 'm'}}
 	result := CompileUnit([]string{"-t", "browser/wasm32", "-o", "app.html", "./cmd/app"}, "/repo/case", "/std", driverTestFiles(), backend)

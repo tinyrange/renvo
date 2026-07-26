@@ -206,6 +206,13 @@ func rememberEmbeddedBuild(result BuildResult) {
 	embeddedBuildCacheValid = true
 }
 
+// RememberBuildOutput marks a successfully written build output as current.
+// A later cached FSBuildSession can then skip both frontend and backend work
+// when its source fingerprint and output path are unchanged.
+func RememberBuildOutput(result BuildResult) {
+	rememberEmbeddedBuild(result)
+}
+
 func embeddedBuildFingerprint(workDir string, options Options, files []load.SourceFile) (int, int) {
 	a, b := 97, 193
 	a, b = embeddedBuildHashString(a, b, workDir)
