@@ -12,10 +12,8 @@ import (
 	"testing"
 )
 
-const extendedTestsEnv = "RENVO_FRONTEND_EXTENDED_TESTS"
 const frontendEnv = "RENVO_FRONTEND"
 const targetEnv = "RENVO_FRONTEND_TARGET"
-const selfHostTestsEnv = "RENVO_FRONTEND_SELFHOST_TESTS"
 
 var frontendOnce sync.Once
 var frontendPath string
@@ -47,35 +45,20 @@ func TestFrontendRegressionCorpus(t *testing.T) {
 }
 
 func TestFrontendExtendedCorpus(t *testing.T) {
-	if os.Getenv(extendedTestsEnv) != "1" {
-		t.Skipf("set %s=1 to run extended frontend corpus", extendedTestsEnv)
-	}
 	runFrontendCorpus(t, "extended", false)
 }
 
 func TestFrontendStage3QuickCorpus(t *testing.T) {
-	if os.Getenv(selfHostTestsEnv) != "1" {
-		t.Skipf("set %s=1 to run self-hosted frontend corpus", selfHostTestsEnv)
-	}
 	root := repoRoot(t)
 	runFrontendCorpusWithConfig(t, root, "quick", false, selfHostedFrontendCompiler(t, root))
 }
 
 func TestFrontendStage3RegressionCorpus(t *testing.T) {
-	if os.Getenv(selfHostTestsEnv) != "1" {
-		t.Skipf("set %s=1 to run self-hosted frontend regressions", selfHostTestsEnv)
-	}
 	root := repoRoot(t)
 	runFrontendCorpusDirectory(t, filepath.Join(root, "frontend_tests", "regressions"), false, selfHostedFrontendCompiler(t, root))
 }
 
 func TestFrontendStage3ExtendedCorpus(t *testing.T) {
-	if os.Getenv(selfHostTestsEnv) != "1" {
-		t.Skipf("set %s=1 to run self-hosted frontend corpus", selfHostTestsEnv)
-	}
-	if os.Getenv(extendedTestsEnv) != "1" {
-		t.Skipf("set %s=1 to run extended frontend corpus", extendedTestsEnv)
-	}
 	root := repoRoot(t)
 	runFrontendCorpusWithConfig(t, root, "extended", false, selfHostedFrontendCompiler(t, root))
 }

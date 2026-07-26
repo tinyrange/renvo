@@ -22,12 +22,9 @@ func TestFrontendStructuredDiagnostics(t *testing.T) {
 	frontends := []struct {
 		name   string
 		config frontendConfig
-	}{{name: "host", config: frontendCompiler(t, root)}}
-	if os.Getenv(selfHostTestsEnv) == "1" {
-		frontends = append(frontends, struct {
-			name   string
-			config frontendConfig
-		}{name: "stage3", config: selfHostedFrontendCompiler(t, root)})
+	}{
+		{name: "host", config: frontendCompiler(t, root)},
+		{name: "stage3", config: selfHostedFrontendCompiler(t, root)},
 	}
 
 	cases := []frontendDiagnosticCase{

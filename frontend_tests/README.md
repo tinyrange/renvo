@@ -4,10 +4,13 @@
 it can survive a frontend rewrite. Each case is its own Go module directory and
 must print only `PASS\n` on success.
 
-- `quick/` contains 300 tests intended to run on every frontend check.
-- `extended/` contains 2250 broader interaction tests gated by `RENVO_FRONTEND_EXTENDED_TESTS=1`.
+- `quick/` contains 300 focused tests.
+- `extended/` contains 2250 broader interaction tests.
 - `regressions/` contains hand-maintained cases that are never replaced by the generator.
 - `negative/` contains checked rejection cases with exact phase, code, source location, and message expectations.
+
+The normal `go test ./frontend_tests` command runs both corpus tiers, the
+bundled frontend checks, and the full self-hosted frontend coverage.
 
 `corpus_manifest.json` records case, declared-variant, and normalized AST-shape counts. Tests recompute those fingerprints from the checked tree, so clone count cannot stand in for structural coverage.
 
