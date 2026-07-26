@@ -1,6 +1,7 @@
 package check
 
 import (
+	"renvo.dev/internal/arena"
 	"renvo.dev/internal/load"
 	"renvo.dev/internal/syntax"
 )
@@ -90,6 +91,7 @@ type Symbol struct {
 	Package int
 	File    int
 	Token   int
+	Arity   int
 }
 
 type Import struct {
@@ -272,6 +274,13 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 			fn := file.Funcs[i]
 			name := tokenString(&file, fn.NameTok)
 			kind := SymbolFunc
+			signatureStart := arena.Mark()
+			signature := buildFuncSignature(file, fn)
+			arity := len(signature.Params)
+			if arity > 0 && signature.Params[arity-1].Variadic {
+				arity = -arity - 1
+			}
+			arena.Reset(signatureStart)
 			if fn.ReceiverStart >= 0 {
 				receiver := receiverTypeName(file, fn)
 				if receiver == "" {
@@ -284,7 +293,7 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 			if duplicate >= 0 && (name != "init" || info.Symbols[duplicate].Kind != SymbolFunc) {
 				return info, false, CheckErrDuplicate, fileIndex, fn.NameTok
 			}
-			info.Symbols = append(info.Symbols, Symbol{Name: name, Kind: kind, Package: pkgIndex, File: fileIndex, Token: fn.NameTok})
+			info.Symbols = append(info.Symbols, Symbol{Name: name, Kind: kind, Package: pkgIndex, File: fileIndex, Token: fn.NameTok, Arity: arity})
 			insertSymbolHash(info.Symbols, symbolHash, len(info.Symbols)-1)
 		}
 	}

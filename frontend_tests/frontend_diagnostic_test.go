@@ -164,6 +164,13 @@ func TestFrontendStructuredDiagnostics(t *testing.T) {
 			wantDetail: "function call argument count does not match parameters",
 		},
 		{
+			name:       "invalid_local_call_arity",
+			files:      map[string]string{"cmd/app/main.go": "package main\n\nfunc needs(value string) int { return len(value) }\nfunc main() { needs() }\n"},
+			wantCode:   "RENVO-CHECK-032",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "function call argument count does not match parameters",
+		},
+		{
 			name:       "invalid_return_type",
 			files:      map[string]string{"cmd/app/main.go": "package main\n\nfunc value() int { return \"bad\" }\nfunc main() { _ = value() }\n"},
 			wantCode:   "RENVO-CHECK-031",

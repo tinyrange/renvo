@@ -39,7 +39,7 @@ func invalidDefiniteCallArity(graph load.Graph, packageIndex int, info *PackageI
 		if ref.Index < 0 || ref.Index >= len(info.Symbols) {
 			continue
 		}
-		if tok := invalidResolvedCallArity(graph, checked, file, fn, ref.Token, packageIndex, ref.Index); tok >= 0 {
+		if tok := invalidResolvedCallArity(file, fn, ref.Token, info.Symbols[ref.Index]); tok >= 0 {
 			return tok
 		}
 	}
@@ -48,39 +48,34 @@ func invalidDefiniteCallArity(graph load.Graph, packageIndex int, info *PackageI
 		if selector.BasePackage < 0 || selector.Symbol < 0 {
 			continue
 		}
-		if tok := invalidResolvedCallArity(graph, checked, file, fn, selector.NameTok, selector.BasePackage, selector.Symbol); tok >= 0 {
+		if selector.BasePackage >= len(checked) || selector.Symbol >= len(checked[selector.BasePackage].Symbols) {
+			continue
+		}
+		if tok := invalidResolvedCallArity(file, fn, selector.NameTok, checked[selector.BasePackage].Symbols[selector.Symbol]); tok >= 0 {
 			return tok
 		}
 	}
 	return -1
 }
 
-func invalidResolvedCallArity(graph load.Graph, checked []PackageInfo, caller *syntax.File, callerFn syntax.FuncDecl, calleeTok int, packageIndex int, symbolIndex int) int {
+func invalidResolvedCallArity(caller *syntax.File, callerFn syntax.FuncDecl, calleeTok int, symbol Symbol) int {
 	open := calleeTok + 1
 	if open >= callerFn.BodyEnd || !tokCharIs(caller, open, '(') {
 		return -1
 	}
-	if packageIndex < 0 || packageIndex >= len(graph.Packages) || packageIndex >= len(checked) ||
-		symbolIndex < 0 || symbolIndex >= len(checked[packageIndex].Symbols) {
-		return -1
-	}
-	symbol := checked[packageIndex].Symbols[symbolIndex]
-	if symbol.Kind != SymbolFunc || symbol.File < 0 || symbol.File >= len(graph.Packages[packageIndex].Files) {
-		return -1
-	}
-	calleeFile := graph.Packages[packageIndex].Files[symbol.File].File
-	callee, ok := findDefinitePackageFuncDecl(calleeFile, symbol.Token)
-	if !ok {
+	if symbol.Kind != SymbolFunc {
 		return -1
 	}
 	close := findTypeMatching(*caller, open, '(', ')')
 	if close <= open || close > callerFn.BodyEnd {
 		return -1
 	}
-	signature := buildFuncSignature(calleeFile, callee)
 	got := countExprListItems(*caller, open+1, close-1)
-	want := len(signature.Params)
-	variadic := want > 0 && signature.Params[want-1].Variadic
+	want := symbol.Arity
+	variadic := want < 0
+	if variadic {
+		want = -want - 1
+	}
 	valid := got == want
 	if variadic {
 		valid = got >= want-1
