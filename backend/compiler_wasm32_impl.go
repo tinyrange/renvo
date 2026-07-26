@@ -211,30 +211,13 @@ func renvoWasmAppendU32Fixed5(out []byte, v int) []byte {
 }
 
 func renvoWasmCompactU32Fixed5(out []byte, at int, v int) []byte {
-	// Body lengths are reserved at their maximum width while emitting so the
-	// backing slice never has to grow in the middle of a body. Compact the
-	// reservation to canonical LEB128 once the final length is known.
-	var encoded [5]byte
-	width := 0
-	for {
+	for i := 0; i < 5; i++ {
 		b := byte(v & 0x7f)
 		v = v >> 7
-		if v != 0 {
+		if i < 4 {
 			b = b | 0x80
 		}
-		encoded[width] = b
-		width++
-		if v == 0 {
-			break
-		}
-	}
-	shift := 5 - width
-	for i := at + 5; i < len(out); i++ {
-		out[i-shift] = out[i]
-	}
-	out = out[:len(out)-shift]
-	for i := 0; i < width; i++ {
-		out[at+i] = encoded[i]
+		out[at+i] = b
 	}
 	return out
 }
@@ -329,6 +312,13 @@ const renvoWasm32OpRet = 41
 const renvoWasm32OpSyscall = 42
 const renvoWasm32OpNop = 43
 const renvoWasm32OpShrUnsignedRegReg = 44
+
+const renvoWasm32InstructionSizes = "\x01\x01\x0d\x06\x03\x02\x05\x02\x06\x06\x06\x08\x08\x0a\x0a\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x06\x06\x02\x02\x02\x02\x02\x06\x03\x02\x05\x05\x05\x06\x09\x01\x01\x01"
+const renvoWasm32RegLocals = "\x02\x03\x04\x05\x06\x07\x08\x0b"
+const renvoWasm32CondOpcodes = "\x46\x47\x48\x4c\x4a\x4e"
+const renvoWasm32BinaryOpcodes = "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x6a\x6b\x6c\x6d\x6f\x71\x72\x73\x00\x74\x75\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x76"
+const renvoWasm32SimpleRecipeOffsets = "\x00\x00\x00\x01\x08\x0f\x1f\x2f\x3d\x47\x51\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x58\x63\x6e\x78\x88\x98\xa0\xaa\xb4\xbe\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+const renvoWasm32SimpleRecipes = "\x00\x06\xff\x00\x01\xff\x05\x00\x06\xff\x04\x01\xff\x05\x00\x0f\x20\x00\xff\x04\x00\x36\x02\x00\x20\x00\x41\x04\x6a\x21\x00\x0f\x20\x00\xff\x00\x00\x36\x02\x00\x20\x00\x41\x04\x6a\x21\x00\x0d\x20\x00\x41\x04\x6b\x22\x00\x28\x02\x00\xff\x05\x00\x09\xff\x06\x01\x28\x02\x00\xff\x05\x00\x09\xff\x06\x01\xff\x04\x00\x36\x02\x00\x06\xff\x06\x01\xff\x05\x00\x0a\xff\x04\x00\xff\x00\x01\x6a\xff\x05\x00\x0a\xff\x04\x00\xff\x00\x01\x6c\xff\x05\x00\x09\xff\x04\x00\x41\x01\x6a\xff\x05\x00\x0f\xff\x04\x00\xff\x04\x00\x28\x02\x00\x41\x01\x6a\x36\x02\x00\x0f\xff\x04\x00\xff\x04\x00\x28\x02\x00\x41\x01\x6b\x36\x02\x00\x07\xff\x04\x00\x45\xff\x05\x00\x09\x41\x00\xff\x04\x00\x6b\xff\x05\x00\x09\xff\x04\x00\xff\x00\x01\x6b\x21\x0c\x09\xff\x04\x00\xff\x04\x01\x6b\x21\x0c\x05\xff\x09\x00\x21\x02"
 
 const renvoWasm32CondEq = 0
 const renvoWasm32CondNe = 1
@@ -799,18 +789,6 @@ func renvoWasm32AsmExit(a *renvoAsm) {
 	renvoAsmEmit8(a, renvoWasm32OpExit)
 }
 
-type renvoWasm32Instr struct {
-	pc   int
-	next int
-	op   int
-	a    int
-	b    int
-	c    int
-	d    int
-	e    int
-	f    int
-}
-
 const renvoWasm32ProgramBase = 262144
 const renvoWasm32StackGuardSize = 16384
 const renvoWasm32ExprStackSize = 1048576
@@ -866,28 +844,7 @@ const renvoWasm32LocalTmp2 = 14
 const renvoWasm32LocalTmp3 = 15
 
 func renvoWasm32RegLocal(reg int) int {
-	if reg == renvoWasm32RegRdx {
-		return renvoWasm32LocalRdx
-	}
-	if reg == renvoWasm32RegRcx {
-		return renvoWasm32LocalRcx
-	}
-	if reg == renvoWasm32RegRdi {
-		return renvoWasm32LocalRdi
-	}
-	if reg == renvoWasm32RegRsi {
-		return renvoWasm32LocalRsi
-	}
-	if reg == renvoWasm32RegR8 {
-		return renvoWasm32LocalR8
-	}
-	if reg == renvoWasm32RegR9 {
-		return renvoWasm32LocalR9
-	}
-	if reg == renvoWasm32RegR10 {
-		return renvoWasm32LocalR10
-	}
-	return renvoWasm32LocalRax
+	return int(renvoWasm32RegLocals[reg])
 }
 
 func renvoWasm32Sign32(v int) int {
@@ -905,99 +862,7 @@ func renvoWasm32GetS32(in []byte, at int) int {
 
 func renvoWasm32NextInstructionPc(code []byte, pc int) int {
 	op := int(code[pc])
-	if op == renvoWasm32OpMovRegImm || op == renvoWasm32OpLoadStack || op == renvoWasm32OpStoreStack || op == renvoWasm32OpLeaStack || op == renvoWasm32OpAddRegImm || op == renvoWasm32OpMulRegImm || op == renvoWasm32OpCmpRegImm || op == renvoWasm32OpJCond {
-		return pc + 6
-	}
-	if op == renvoWasm32OpMovRegReg || op == renvoWasm32OpAddRegReg || op == renvoWasm32OpSubRegReg || op == renvoWasm32OpMulRegReg || op == renvoWasm32OpDivRegReg || op == renvoWasm32OpModRegReg || op == renvoWasm32OpAndRegReg || op == renvoWasm32OpOrRegReg || op == renvoWasm32OpXorRegReg || op == renvoWasm32OpAndNotRegReg || op == renvoWasm32OpShlRegReg || op == renvoWasm32OpShrRegReg || op == renvoWasm32OpShrUnsignedRegReg || op == renvoWasm32OpCmpRegReg {
-		return pc + 3
-	}
-	if op == renvoWasm32OpPushReg || op == renvoWasm32OpPopReg || op == renvoWasm32OpIncReg || op == renvoWasm32OpIncMem || op == renvoWasm32OpDecMem || op == renvoWasm32OpBoolNot || op == renvoWasm32OpNegReg || op == renvoWasm32OpSetCond {
-		return pc + 2
-	}
-	if op == renvoWasm32OpPushImm || op == renvoWasm32OpJmp || op == renvoWasm32OpJz || op == renvoWasm32OpJnz {
-		return pc + 5
-	}
-	if op == renvoWasm32OpLoadMem || op == renvoWasm32OpStoreMem {
-		return pc + 8
-	}
-	if op == renvoWasm32OpLoadIndex || op == renvoWasm32OpStoreIndex {
-		return pc + 10
-	}
-	if op == renvoWasm32OpCall {
-		return pc + 9
-	}
-	if op == renvoWasm32OpBuildArgsEnv {
-		return pc + 13
-	}
-	return pc + 1
-}
-
-func renvoWasm32DecodeOne(code []byte, pc int, next int) renvoWasm32Instr {
-	var ins renvoWasm32Instr
-	op := int(code[pc])
-	ins.pc = pc
-	ins.op = op
-	ins.next = next
-	if op == renvoWasm32OpMovRegImm {
-		ins.a = int(code[pc+1])
-		ins.b = renvoWasm32GetS32(code, pc+2)
-		return ins
-	}
-	if op == renvoWasm32OpMovRegReg || op == renvoWasm32OpAddRegReg || op == renvoWasm32OpSubRegReg || op == renvoWasm32OpMulRegReg || op == renvoWasm32OpDivRegReg || op == renvoWasm32OpModRegReg || op == renvoWasm32OpAndRegReg || op == renvoWasm32OpOrRegReg || op == renvoWasm32OpXorRegReg || op == renvoWasm32OpAndNotRegReg || op == renvoWasm32OpShlRegReg || op == renvoWasm32OpShrRegReg || op == renvoWasm32OpShrUnsignedRegReg || op == renvoWasm32OpCmpRegReg {
-		ins.a = int(code[pc+1])
-		ins.b = int(code[pc+2])
-		return ins
-	}
-	if op == renvoWasm32OpPushReg || op == renvoWasm32OpPopReg || op == renvoWasm32OpIncReg || op == renvoWasm32OpIncMem || op == renvoWasm32OpDecMem || op == renvoWasm32OpBoolNot || op == renvoWasm32OpNegReg || op == renvoWasm32OpSetCond {
-		ins.a = int(code[pc+1])
-		return ins
-	}
-	if op == renvoWasm32OpPushImm {
-		ins.a = renvoWasm32GetS32(code, pc+1)
-		return ins
-	}
-	if op == renvoWasm32OpLoadStack || op == renvoWasm32OpStoreStack || op == renvoWasm32OpLeaStack || op == renvoWasm32OpAddRegImm || op == renvoWasm32OpMulRegImm || op == renvoWasm32OpCmpRegImm {
-		ins.a = int(code[pc+1])
-		ins.b = renvoWasm32GetS32(code, pc+2)
-		return ins
-	}
-	if op == renvoWasm32OpLoadMem || op == renvoWasm32OpStoreMem {
-		ins.a = int(code[pc+1])
-		ins.b = int(code[pc+2])
-		ins.c = renvoWasm32GetS32(code, pc+3)
-		ins.d = int(code[pc+7])
-		return ins
-	}
-	if op == renvoWasm32OpLoadIndex || op == renvoWasm32OpStoreIndex {
-		ins.a = int(code[pc+1])
-		ins.b = int(code[pc+2])
-		ins.c = int(code[pc+3])
-		ins.d = int(code[pc+4])
-		ins.e = renvoWasm32GetS32(code, pc+5)
-		ins.f = int(code[pc+9])
-		return ins
-	}
-	if op == renvoWasm32OpJmp || op == renvoWasm32OpJz || op == renvoWasm32OpJnz {
-		ins.a = renvoGet32At(code, pc+1)
-		return ins
-	}
-	if op == renvoWasm32OpCall {
-		ins.a = renvoGet32At(code, pc+1)
-		ins.b = renvoGet32At(code, pc+5)
-		return ins
-	}
-	if op == renvoWasm32OpJCond {
-		ins.a = int(code[pc+1])
-		ins.b = renvoGet32At(code, pc+2)
-		return ins
-	}
-	if op == renvoWasm32OpBuildArgsEnv {
-		ins.a = renvoGet32At(code, pc+1)
-		ins.b = renvoGet32At(code, pc+5)
-		ins.c = renvoGet32At(code, pc+9)
-		return ins
-	}
-	return ins
+	return pc + int(renvoWasm32InstructionSizes[op])
 }
 
 func renvoWasm32InstructionPcs(code []byte) []int {
@@ -1006,18 +871,6 @@ func renvoWasm32InstructionPcs(code []byte) []int {
 	for pc < len(code) {
 		out = append(out, pc)
 		pc = renvoWasm32NextInstructionPc(code, pc)
-	}
-	return out
-}
-
-func renvoWasm32DecodePcRange(code []byte, pcs []int) []renvoWasm32Instr {
-	out := make([]renvoWasm32Instr, 0, len(pcs))
-	for i := 0; i < len(pcs); i++ {
-		next := renvoWasm32NextInstructionPc(code, pcs[i])
-		if i+1 < len(pcs) {
-			next = pcs[i+1]
-		}
-		out = append(out, renvoWasm32DecodeOne(code, pcs[i], next))
 	}
 	return out
 }
@@ -1034,30 +887,6 @@ func renvoWasm32PcLowerBound(pcs []int, pc int) int {
 		}
 	}
 	return lo
-}
-
-func renvoWasm32InstrLowerBound(instrs []renvoWasm32Instr, pc int) int {
-	lo := 0
-	hi := len(instrs)
-	for lo < hi {
-		mid := (lo + hi) / 2
-		if int(instrs[mid].pc) < pc {
-			lo = mid + 1
-		} else {
-			hi = mid
-		}
-	}
-	return lo
-}
-
-func renvoWasm32InstrIndexForPcLocal(instrs []renvoWasm32Instr, instrCount int, pc int) int {
-	idx := renvoWasm32InstrLowerBound(instrs, pc)
-	if idx < instrCount {
-		if int(instrs[idx].pc) == pc {
-			return idx
-		}
-	}
-	return instrCount
 }
 
 func renvoWasm32IsControlOp(op int) bool {
@@ -1092,9 +921,9 @@ func renvoWasm32OpHasTarget(op int) bool {
 	return false
 }
 
-func renvoWasm32BuildBlockStartsLocal(instrs []renvoWasm32Instr) []int {
+func renvoWasm32BuildBlockStartsLocal(code []byte, pcs []int) []int {
 	starts := make([]int, 0, 512)
-	instrCount := len(instrs)
+	instrCount := len(pcs)
 	marks := make([]int, instrCount+1, instrCount+1)
 	for i := 0; i < len(marks); i++ {
 		marks[i] = 0
@@ -1103,21 +932,21 @@ func renvoWasm32BuildBlockStartsLocal(instrs []renvoWasm32Instr) []int {
 		marks[0] = 1
 	}
 	for i := 0; i < instrCount; i++ {
-		ins := &instrs[i]
-		op := int(ins.op)
+		pc := pcs[i]
+		op := int(code[pc])
 		if renvoWasm32IsControlOp(op) {
 			if i+1 < instrCount {
 				marks[i+1] = 1
 			}
 		}
 		if renvoWasm32OpHasTarget(op) {
-			targetIndex := renvoWasm32InstrIndexForPcLocal(instrs, instrCount, int(ins.a))
+			targetIndex := renvoWasm32PcLowerBound(pcs, renvoGet32At(code, pc+1))
 			if targetIndex < instrCount {
 				marks[targetIndex] = 1
 			}
 		}
 		if op == renvoWasm32OpJCond {
-			targetIndex := renvoWasm32InstrIndexForPcLocal(instrs, instrCount, int(ins.b))
+			targetIndex := renvoWasm32PcLowerBound(pcs, renvoGet32At(code, pc+2))
 			if targetIndex < instrCount {
 				marks[targetIndex] = 1
 			}
@@ -1312,19 +1141,7 @@ func renvoWasm32StoreSized(out []byte, size int) []byte {
 func renvoWasm32AppendCond(out []byte, cond int) []byte {
 	out = renvoWasmLocalGet(out, renvoWasm32LocalFlag)
 	out = renvoWasmAppendI32Const(out, 0)
-	if cond == renvoWasm32CondNe {
-		out = append(out, 0x47)
-	} else if cond == renvoWasm32CondLt {
-		out = append(out, 0x48)
-	} else if cond == renvoWasm32CondLe {
-		out = append(out, 0x4c)
-	} else if cond == renvoWasm32CondGt {
-		out = append(out, 0x4a)
-	} else if cond == renvoWasm32CondGe {
-		out = append(out, 0x4e)
-	} else {
-		out = append(out, 0x46)
-	}
+	out = append(out, renvoWasm32CondOpcodes[cond])
 	return out
 }
 
@@ -1508,90 +1325,55 @@ func renvoWasm32AppendBuildArgsEnv(out []byte, argsAddr int, envAddr int, envLen
 }
 
 func renvoWasm32AppendBinaryOp(out []byte, op int) []byte {
-	if op == renvoWasm32OpAddRegReg {
-		return append(out, 0x6a)
-	}
-	if op == renvoWasm32OpSubRegReg {
-		return append(out, 0x6b)
-	}
-	if op == renvoWasm32OpMulRegReg {
-		return append(out, 0x6c)
-	}
-	if op == renvoWasm32OpDivRegReg {
-		return append(out, 0x6d)
-	}
-	if op == renvoWasm32OpModRegReg {
-		return append(out, 0x6f)
-	}
-	if op == renvoWasm32OpAndRegReg {
-		return append(out, 0x71)
-	}
-	if op == renvoWasm32OpOrRegReg {
-		return append(out, 0x72)
-	}
-	if op == renvoWasm32OpXorRegReg {
-		return append(out, 0x73)
-	}
-	if op == renvoWasm32OpShlRegReg {
-		return append(out, 0x74)
-	}
-	if op == renvoWasm32OpShrRegReg {
-		return append(out, 0x75)
-	}
-	if op == renvoWasm32OpShrUnsignedRegReg {
-		return append(out, 0x76)
-	}
-	return out
+	return append(out, renvoWasm32BinaryOpcodes[op])
 }
 
-func renvoWasm32AppendInstr(out []byte, ins *renvoWasm32Instr, nextIndex int, targetIndex int, loopDepth int, exitDepth int, callStackBase int, frameSize int) []byte {
-	op := int(ins.op)
-	argA := int(ins.a)
-	argB := int(ins.b)
+func renvoWasm32AppendInstr(out []byte, code []byte, pc int, nextIndex int, targetIndex int, loopDepth int, exitDepth int, callStackBase int, frameSize int) []byte {
+	op := int(code[pc])
 	if op == renvoWasm32OpExit {
 		out = renvoWasmLocalGet(out, renvoWasm32LocalRax)
 		out = renvoWasmAppendCall(out, renvoWasm32ImportProcExit)
 		return out
 	}
 	if op == renvoWasm32OpBuildArgsEnv {
-		out = renvoWasm32AppendBuildArgsEnv(out, argA, argB, int(ins.c))
+		out = renvoWasm32AppendBuildArgsEnv(out, renvoGet32At(code, pc+1), renvoGet32At(code, pc+5), renvoGet32At(code, pc+9))
 		out = renvoWasm32SetPc(out, nextIndex)
 		out = renvoWasmBr(out, loopDepth)
 		return out
 	}
-	if op == renvoWasm32OpMovRegImm {
-		out = renvoWasmAppendRecipe(out, "\xff\x00\x01\xff\x05\x00", argA, argB, 0, 0)
-	} else if op == renvoWasm32OpMovRegReg {
-		out = renvoWasmAppendRecipe(out, "\xff\x04\x01\xff\x05\x00", argA, argB, 0, 0)
-	} else if op == renvoWasm32OpPushReg {
-		out = renvoWasmAppendRecipe(out, "\x20\x00\xff\x04\x00\x36\x02\x00\x20\x00\x41\x04\x6a\x21\x00", argA, 0, 0, 0)
-	} else if op == renvoWasm32OpPushImm {
-		out = renvoWasmAppendRecipe(out, "\x20\x00\xff\x00\x00\x36\x02\x00\x20\x00\x41\x04\x6a\x21\x00", argA, 0, 0, 0)
-	} else if op == renvoWasm32OpPopReg {
-		out = renvoWasmAppendRecipe(out, "\x20\x00\x41\x04\x6b\x22\x00\x28\x02\x00\xff\x05\x00", argA, 0, 0, 0)
-	} else if op == renvoWasm32OpLoadStack {
-		out = renvoWasmAppendRecipe(out, "\xff\x06\x01\x28\x02\x00\xff\x05\x00", argA, argB, 0, 0)
-	} else if op == renvoWasm32OpStoreStack {
-		out = renvoWasmAppendRecipe(out, "\xff\x06\x01\xff\x04\x00\x36\x02\x00", argA, argB, 0, 0)
-	} else if op == renvoWasm32OpLeaStack {
-		out = renvoWasmAppendRecipe(out, "\xff\x06\x01\xff\x05\x00", argA, argB, 0, 0)
+	recipeAt := int(renvoWasm32SimpleRecipeOffsets[op])
+	if recipeAt != 0 {
+		argA := int(code[pc+1])
+		if op == renvoWasm32OpPushImm {
+			argA = renvoWasm32GetS32(code, pc+1)
+		}
+		argB := 0
+		if op == renvoWasm32OpMovRegImm || op == renvoWasm32OpLoadStack || op == renvoWasm32OpStoreStack || op == renvoWasm32OpLeaStack || op == renvoWasm32OpAddRegImm || op == renvoWasm32OpMulRegImm || op == renvoWasm32OpCmpRegImm {
+			argB = renvoWasm32GetS32(code, pc+2)
+		} else if op == renvoWasm32OpMovRegReg || op == renvoWasm32OpCmpRegReg {
+			argB = int(code[pc+2])
+		}
+		recipeLen := int(renvoWasm32SimpleRecipes[recipeAt])
+		out = renvoWasmAppendRecipe(out, renvoWasm32SimpleRecipes[recipeAt+1:recipeAt+1+recipeLen], argA, argB, 0, 0)
 	} else if op == renvoWasm32OpLoadMem {
-		out = renvoWasm32MemAddr(out, argB, int(ins.c))
-		out = renvoWasm32LoadSized(out, int(ins.d))
-		out = renvoWasm32RegSet(out, argA)
+		out = renvoWasm32MemAddr(out, int(code[pc+2]), renvoWasm32GetS32(code, pc+3))
+		out = renvoWasm32LoadSized(out, int(code[pc+7]))
+		out = renvoWasm32RegSet(out, int(code[pc+1]))
 	} else if op == renvoWasm32OpStoreMem {
-		out = renvoWasm32MemAddr(out, argB, int(ins.c))
-		out = renvoWasm32RegGet(out, argA)
-		out = renvoWasm32StoreSized(out, int(ins.d))
+		out = renvoWasm32MemAddr(out, int(code[pc+2]), renvoWasm32GetS32(code, pc+3))
+		out = renvoWasm32RegGet(out, int(code[pc+1]))
+		out = renvoWasm32StoreSized(out, int(code[pc+7]))
 	} else if op == renvoWasm32OpLoadIndex {
-		out = renvoWasm32IndexAddr(out, argB, int(ins.c), int(ins.d), int(ins.e))
-		out = renvoWasm32LoadSized(out, int(ins.f))
-		out = renvoWasm32RegSet(out, argA)
+		out = renvoWasm32IndexAddr(out, int(code[pc+2]), int(code[pc+3]), int(code[pc+4]), renvoWasm32GetS32(code, pc+5))
+		out = renvoWasm32LoadSized(out, int(code[pc+9]))
+		out = renvoWasm32RegSet(out, int(code[pc+1]))
 	} else if op == renvoWasm32OpStoreIndex {
-		out = renvoWasm32IndexAddr(out, argB, int(ins.c), int(ins.d), int(ins.e))
-		out = renvoWasm32RegGet(out, argA)
-		out = renvoWasm32StoreSized(out, int(ins.f))
+		out = renvoWasm32IndexAddr(out, int(code[pc+2]), int(code[pc+3]), int(code[pc+4]), renvoWasm32GetS32(code, pc+5))
+		out = renvoWasm32RegGet(out, int(code[pc+1]))
+		out = renvoWasm32StoreSized(out, int(code[pc+9]))
 	} else if op >= renvoWasm32OpAddRegReg && op <= renvoWasm32OpShrRegReg || op == renvoWasm32OpShrUnsignedRegReg {
+		argA := int(code[pc+1])
+		argB := int(code[pc+2])
 		if op == renvoWasm32OpAndNotRegReg {
 			out = renvoWasm32RegGet(out, argA)
 			out = renvoWasm32RegGet(out, argB)
@@ -1600,30 +1382,6 @@ func renvoWasm32AppendInstr(out []byte, ins *renvoWasm32Instr, nextIndex int, ta
 			out = renvoWasmAppendRecipe(out, "\xff\x04\x00\xff\x04\x01\xff\x0a\x02", argA, argB, op, 0)
 		}
 		out = renvoWasm32RegSet(out, argA)
-	} else if op == renvoWasm32OpAddRegImm || op == renvoWasm32OpMulRegImm {
-		if op == renvoWasm32OpAddRegImm {
-			out = renvoWasmAppendRecipe(out, "\xff\x04\x00\xff\x00\x01\x6a\xff\x05\x00", argA, argB, 0, 0)
-		} else {
-			out = renvoWasmAppendRecipe(out, "\xff\x04\x00\xff\x00\x01\x6c\xff\x05\x00", argA, argB, 0, 0)
-		}
-	} else if op == renvoWasm32OpIncReg {
-		out = renvoWasmAppendRecipe(out, "\xff\x04\x00\x41\x01\x6a\xff\x05\x00", argA, 0, 0, 0)
-	} else if op == renvoWasm32OpIncMem || op == renvoWasm32OpDecMem {
-		if op == renvoWasm32OpIncMem {
-			out = renvoWasmAppendRecipe(out, "\xff\x04\x00\xff\x04\x00\x28\x02\x00\x41\x01\x6a\x36\x02\x00", argA, 0, 0, 0)
-		} else {
-			out = renvoWasmAppendRecipe(out, "\xff\x04\x00\xff\x04\x00\x28\x02\x00\x41\x01\x6b\x36\x02\x00", argA, 0, 0, 0)
-		}
-	} else if op == renvoWasm32OpBoolNot {
-		out = renvoWasmAppendRecipe(out, "\xff\x04\x00\x45\xff\x05\x00", argA, 0, 0, 0)
-	} else if op == renvoWasm32OpNegReg {
-		out = renvoWasmAppendRecipe(out, "\x41\x00\xff\x04\x00\x6b\xff\x05\x00", argA, 0, 0, 0)
-	} else if op == renvoWasm32OpCmpRegImm {
-		out = renvoWasmAppendRecipe(out, "\xff\x04\x00\xff\x00\x01\x6b\x21\x0c", argA, argB, 0, 0)
-	} else if op == renvoWasm32OpCmpRegReg {
-		out = renvoWasmAppendRecipe(out, "\xff\x04\x00\xff\x04\x01\x6b\x21\x0c", argA, argB, 0, 0)
-	} else if op == renvoWasm32OpSetCond {
-		out = renvoWasmAppendRecipe(out, "\xff\x09\x00\x21\x02", argA, 0, 0, 0)
 	} else if op == renvoWasm32OpJmp {
 		out = renvoWasm32SetPc(out, targetIndex)
 		return renvoWasmBr(out, loopDepth)
@@ -1635,7 +1393,7 @@ func renvoWasm32AppendInstr(out []byte, ins *renvoWasm32Instr, nextIndex int, ta
 			out = renvoWasmLocalGet(out, renvoWasm32LocalFlag)
 			out = renvoWasmAppend2(out, 0x45, 0x45)
 		} else {
-			out = renvoWasm32AppendCond(out, argA)
+			out = renvoWasm32AppendCond(out, int(code[pc+1]))
 		}
 		out = renvoWasmAppend2(out, 0x04, 0x40)
 		out = renvoWasm32SetPc(out, targetIndex)
@@ -1761,10 +1519,8 @@ func renvoWasm32AppendDirectCall(out []byte, funcIndex int, frameSize int) []byt
 	return out
 }
 
-func renvoWasm32AppendInstrDirect(out []byte, ins *renvoWasm32Instr, nextIndex int, targetIndex int, loopDepth int, callStackBase int, frameSize int, routinePcs []int, symbolPcs []int) []byte {
-	op := int(ins.op)
-	argA := int(ins.a)
-	argB := int(ins.b)
+func renvoWasm32AppendInstrDirect(out []byte, code []byte, pc int, nextIndex int, targetIndex int, loopDepth int, callStackBase int, frameSize int, routinePcs []int, symbolPcs []int) []byte {
+	op := int(code[pc])
 	if op == renvoWasm32OpExit {
 		out = renvoWasmLocalGet(out, renvoWasm32LocalRax)
 		out = renvoWasmAppendCall(out, renvoWasm32ImportProcExit)
@@ -1772,9 +1528,11 @@ func renvoWasm32AppendInstrDirect(out []byte, ins *renvoWasm32Instr, nextIndex i
 		return out
 	}
 	if op == renvoWasm32OpCall {
+		argA := renvoGet32At(code, pc+1)
+		argB := renvoGet32At(code, pc+5)
 		routineIndex := renvoWasm32FindRoutineIndex(routinePcs, argA)
 		if routineIndex < 0 {
-			out = renvoWasm32AppendInstr(out, ins, nextIndex, targetIndex, loopDepth, loopDepth+1, callStackBase, frameSize)
+			out = renvoWasm32AppendInstr(out, code, pc, nextIndex, targetIndex, loopDepth, loopDepth+1, callStackBase, frameSize)
 			return out
 		}
 		callFrameSize := 0
@@ -1817,45 +1575,50 @@ func renvoWasm32AppendInstrDirect(out []byte, ins *renvoWasm32Instr, nextIndex i
 		}
 		return out
 	}
-	out = renvoWasm32AppendInstr(out, ins, nextIndex, targetIndex, loopDepth, loopDepth+1, callStackBase, frameSize)
+	out = renvoWasm32AppendInstr(out, code, pc, nextIndex, targetIndex, loopDepth, loopDepth+1, callStackBase, frameSize)
 	return out
 }
 
-func renvoWasm32CanFusePair(first *renvoWasm32Instr, second *renvoWasm32Instr) bool {
-	if second.op == renvoWasm32OpPopReg {
-		if first.op == renvoWasm32OpPushReg {
+func renvoWasm32CanFusePair(code []byte, firstPc int, secondPc int) bool {
+	firstOp := int(code[firstPc])
+	secondOp := int(code[secondPc])
+	if secondOp == renvoWasm32OpPopReg {
+		if firstOp == renvoWasm32OpPushReg {
 			return true
 		}
-		if first.op == renvoWasm32OpPushImm {
+		if firstOp == renvoWasm32OpPushImm {
 			return true
 		}
 	}
-	if first.op == renvoWasm32OpStoreStack && second.op == renvoWasm32OpLoadStack && first.b == second.b {
+	if firstOp == renvoWasm32OpStoreStack && secondOp == renvoWasm32OpLoadStack && renvoWasm32GetS32(code, firstPc+2) == renvoWasm32GetS32(code, secondPc+2) {
 		return true
 	}
 	return false
 }
 
-func renvoWasm32AppendFusedPair(out []byte, first *renvoWasm32Instr, second *renvoWasm32Instr) []byte {
-	if second.op == renvoWasm32OpPopReg {
-		if first.op == renvoWasm32OpPushReg {
-			if first.a == second.a {
+func renvoWasm32AppendFusedPair(out []byte, code []byte, firstPc int, secondPc int) []byte {
+	firstOp := int(code[firstPc])
+	firstA := int(code[firstPc+1])
+	secondA := int(code[secondPc+1])
+	if int(code[secondPc]) == renvoWasm32OpPopReg {
+		if firstOp == renvoWasm32OpPushReg {
+			if firstA == secondA {
 				return out
 			}
-			out = renvoWasm32RegGet(out, int(first.a))
-			return renvoWasm32RegSet(out, int(second.a))
+			out = renvoWasm32RegGet(out, firstA)
+			return renvoWasm32RegSet(out, secondA)
 		}
-		out = renvoWasmAppendI32Const(out, int(first.a))
-		return renvoWasm32RegSet(out, int(second.a))
+		out = renvoWasmAppendI32Const(out, renvoWasm32GetS32(code, firstPc+1))
+		return renvoWasm32RegSet(out, secondA)
 	}
-	out = renvoWasm32StackAddr(out, int(first.b))
-	out = renvoWasm32RegGet(out, int(first.a))
+	out = renvoWasm32StackAddr(out, renvoWasm32GetS32(code, firstPc+2))
+	out = renvoWasm32RegGet(out, firstA)
 	out = renvoWasmI32Store(out, 2, 0)
-	if first.a == second.a {
+	if firstA == secondA {
 		return out
 	}
-	out = renvoWasm32RegGet(out, int(first.a))
-	return renvoWasm32RegSet(out, int(second.a))
+	out = renvoWasm32RegGet(out, firstA)
+	return renvoWasm32RegSet(out, secondA)
 }
 
 func renvoWasm32PcInList(pcs []int, pc int) bool {
@@ -1927,23 +1690,6 @@ func renvoWasm32RoutinePcs(a *renvoAsm, code []byte, instrPcs []int) []int {
 	return pcs
 }
 
-func renvoWasm32NextPcAfter(pcs []int, pc int, limit int) int {
-	lo := 0
-	hi := len(pcs)
-	for lo < hi {
-		mid := (lo + hi) / 2
-		if pcs[mid] <= pc {
-			lo = mid + 1
-		} else {
-			hi = mid
-		}
-	}
-	if lo < len(pcs) && pcs[lo] < limit {
-		return pcs[lo]
-	}
-	return limit
-}
-
 func renvoWasm32SortedPcContains(pcs []int, pc int) bool {
 	lo := 0
 	hi := len(pcs)
@@ -1958,43 +1704,60 @@ func renvoWasm32SortedPcContains(pcs []int, pc int) bool {
 	return lo < len(pcs) && pcs[lo] == pc
 }
 
-func renvoWasm32FirstRetAfter(code []byte, instrPcs []int, startPc int, limit int) int {
-	i := renvoWasm32PcLowerBound(instrPcs, startPc)
-	for i < len(instrPcs) {
-		pc := instrPcs[i]
-		if pc >= limit {
-			break
+func renvoWasm32RoutineEnds(routinePcs []int, symbolPcs []int, code []byte, instrPcs []int) []int {
+	ends := make([]int, len(routinePcs))
+	symbolIndex := 0
+	instrIndex := 0
+	cachedRet := -1
+	for i := 0; i < len(routinePcs); i++ {
+		start := routinePcs[i]
+		for symbolIndex < len(symbolPcs) && symbolPcs[symbolIndex] <= start {
+			symbolIndex++
 		}
-		if int(code[pc]) == renvoWasm32OpRet {
-			return pc + 1
+		nextSymbol := len(code)
+		if symbolIndex < len(symbolPcs) {
+			nextSymbol = symbolPcs[symbolIndex]
 		}
-		i++
+		if start == 0 || renvoWasm32SortedPcContains(symbolPcs, start) {
+			ends[i] = nextSymbol
+			continue
+		}
+		if cachedRet < start || cachedRet >= nextSymbol {
+			for instrIndex < len(instrPcs) && instrPcs[instrIndex] < start {
+				instrIndex++
+			}
+			cachedRet = nextSymbol
+			for j := instrIndex; j < len(instrPcs) && instrPcs[j] < nextSymbol; j++ {
+				pc := instrPcs[j]
+				if int(code[pc]) == renvoWasm32OpRet {
+					cachedRet = pc + 1
+					break
+				}
+			}
+		}
+		ends[i] = cachedRet
 	}
-	return limit
+	return ends
 }
 
-func renvoWasm32RoutineEndPc(startPc int, codeLen int, symbolPcs []int, code []byte, instrPcs []int) int {
-	nextSymbol := renvoWasm32NextPcAfter(symbolPcs, startPc, codeLen)
-	if startPc == 0 || renvoWasm32SortedPcContains(symbolPcs, startPc) {
-		return nextSymbol
-	}
-	return renvoWasm32FirstRetAfter(code, instrPcs, startPc, nextSymbol)
-}
-
-func renvoWasm32RoutineFrameSize(instrs []renvoWasm32Instr) int {
+func renvoWasm32RoutineFrameSize(code []byte, pcs []int) int {
 	frameSize := 0
-	for i := 0; i < len(instrs); i++ {
-		ins := &instrs[i]
-		if (ins.op == renvoWasm32OpLoadStack || ins.op == renvoWasm32OpStoreStack || ins.op == renvoWasm32OpLeaStack) && ins.b > frameSize {
-			frameSize = ins.b
+	for i := 0; i < len(pcs); i++ {
+		pc := pcs[i]
+		op := int(code[pc])
+		if op == renvoWasm32OpLoadStack || op == renvoWasm32OpStoreStack || op == renvoWasm32OpLeaStack {
+			offset := renvoWasm32GetS32(code, pc+2)
+			if offset > frameSize {
+				frameSize = offset
+			}
 		}
 	}
 	return renvoAlignValue(frameSize, 16)
 }
 
-func renvoWasm32AppendDirectRoutineBody(body []byte, instrs []renvoWasm32Instr, codeLen int, routinePcs []int, symbolPcs []int, callStackBase int, frameSize int) []byte {
-	blockStarts := renvoWasm32BuildBlockStartsLocal(instrs)
-	instrBlockIndex := renvoWasm32BuildInstrBlockIndex(blockStarts, len(instrs))
+func renvoWasm32AppendDirectRoutineBody(body []byte, code []byte, pcs []int, codeLen int, routinePcs []int, symbolPcs []int, callStackBase int, frameSize int) []byte {
+	blockStarts := renvoWasm32BuildBlockStartsLocal(code, pcs)
+	instrBlockIndex := renvoWasm32BuildInstrBlockIndex(blockStarts, len(pcs))
 	body = renvoWasmAppendU32(body, 1)
 	body = renvoWasmAppendU32(body, 7)
 	body = append(body, 0x7f)
@@ -2023,14 +1786,20 @@ func renvoWasm32AppendDirectRoutineBody(body []byte, instrs []renvoWasm32Instr, 
 	for blockIndex := len(blockStarts) - 1; blockIndex >= 0; blockIndex-- {
 		body = append(body, 0x0b)
 		start := blockStarts[blockIndex]
-		end := renvoWasm32BlockEnd(blockStarts, blockIndex, len(instrs))
+		end := renvoWasm32BlockEnd(blockStarts, blockIndex, len(pcs))
 		i := start
 		for i < end {
-			ins := &instrs[i]
-			if i+1 < end && renvoWasm32CanFusePair(ins, &instrs[i+1]) {
-				body = renvoWasm32AppendFusedPair(body, ins, &instrs[i+1])
+			pc := pcs[i]
+			op := int(code[pc])
+			mayFuse := op == renvoWasm32OpPushReg || op == renvoWasm32OpPushImm || op == renvoWasm32OpStoreStack
+			if mayFuse && i+1 < end && renvoWasm32CanFusePair(code, pc, pcs[i+1]) {
+				body = renvoWasm32AppendFusedPair(body, code, pc, pcs[i+1])
 				if i+2 >= end {
-					nextIndex := renvoWasm32InstrIndexForPcLocal(instrs, len(instrs), int(instrs[i+1].next))
+					nextPc := renvoWasm32NextInstructionPc(code, pcs[i+1])
+					if i+2 < len(pcs) {
+						nextPc = pcs[i+2]
+					}
+					nextIndex := renvoWasm32PcLowerBound(pcs, nextPc)
 					nextBlock := renvoWasm32BlockForInstrFast(instrBlockIndex, nextIndex)
 					body = renvoWasm32SetPc(body, nextBlock)
 					body = renvoWasmBr(body, blockIndex)
@@ -2039,21 +1808,24 @@ func renvoWasm32AppendDirectRoutineBody(body []byte, instrs []renvoWasm32Instr, 
 				continue
 			}
 			if i+1 < end {
-				body = renvoWasm32AppendInstrDirect(body, ins, 0, 0, -1, callStackBase, frameSize, routinePcs, symbolPcs)
+				body = renvoWasm32AppendInstrDirect(body, code, pc, 0, 0, -1, callStackBase, frameSize, routinePcs, symbolPcs)
 			} else {
-				nextIndex := renvoWasm32InstrIndexForPcLocal(instrs, len(instrs), int(ins.next))
+				nextPc := renvoWasm32NextInstructionPc(code, pc)
+				if i+1 < len(pcs) {
+					nextPc = pcs[i+1]
+				}
+				nextIndex := renvoWasm32PcLowerBound(pcs, nextPc)
 				nextBlock := renvoWasm32BlockForInstrFast(instrBlockIndex, nextIndex)
 				targetBlock := 0
-				op := int(ins.op)
 				if renvoWasm32OpHasTarget(op) || op == renvoWasm32OpJCond {
-					targetPc := int(ins.a)
-					if ins.op == renvoWasm32OpJCond {
-						targetPc = int(ins.b)
+					targetPc := renvoGet32At(code, pc+1)
+					if op == renvoWasm32OpJCond {
+						targetPc = renvoGet32At(code, pc+2)
 					}
-					targetIndex := renvoWasm32InstrIndexForPcLocal(instrs, len(instrs), targetPc)
+					targetIndex := renvoWasm32PcLowerBound(pcs, targetPc)
 					targetBlock = renvoWasm32BlockForInstrFast(instrBlockIndex, targetIndex)
 				}
-				body = renvoWasm32AppendInstrDirect(body, ins, nextBlock, targetBlock, blockIndex, callStackBase, frameSize, routinePcs, symbolPcs)
+				body = renvoWasm32AppendInstrDirect(body, code, pc, nextBlock, targetBlock, blockIndex, callStackBase, frameSize, routinePcs, symbolPcs)
 			}
 			i++
 		}
@@ -2154,7 +1926,7 @@ func renvoWasm32ExportSectionFull(browserStepIndex int) []byte {
 	return out
 }
 
-func renvoWasm32AppendCodeSectionDirect(out []byte, a *renvoAsm, instrPcs []int, routinePcs []int, symbolPcs []int, codeLen int, callStackBase int, frameTop int, exprStackBase int, browserStepRoutine int) []byte {
+func renvoWasm32AppendCodeSectionDirect(out []byte, a *renvoAsm, instrPcs []int, routinePcs []int, routineEnds []int, symbolPcs []int, codeLen int, callStackBase int, frameTop int, exprStackBase int, browserStepRoutine int) []byte {
 	out = append(out, 10)
 	lenAt := len(out)
 	out = renvoWasmAppendU32Fixed5(out, 0)
@@ -2171,7 +1943,7 @@ func renvoWasm32AppendCodeSectionDirect(out []byte, a *renvoAsm, instrPcs []int,
 	out = renvoWasmCompactU32Fixed5(out, startLenAt, len(out)-startBody)
 	for i := 0; i < len(routinePcs); i++ {
 		startPc := routinePcs[i]
-		endPc := renvoWasm32RoutineEndPc(startPc, codeLen, symbolPcs, a.code, instrPcs)
+		endPc := routineEnds[i]
 		startIndex := renvoWasm32PcLowerBound(instrPcs, startPc)
 		endIndex := renvoWasm32PcLowerBound(instrPcs, endPc)
 		routineInstrPcs := instrPcs[startIndex:endIndex]
@@ -2247,13 +2019,12 @@ func renvoWasm32EnsureAdditionalCapacity(out []byte, additional int) []byte {
 func renvoWasm32AppendDirectRoutine(out []byte, code []byte, instrPcs []int, codeLen int, routinePcs []int, symbolPcs []int, callStackBase int) []byte {
 	out = renvoWasm32EnsureAdditionalCapacity(out, len(instrPcs)*16+renvoWasm32RoutineBodyCapacity)
 	mark := renvo_runtime_ArenaMark()
-	instrs := renvoWasm32DecodePcRange(code, instrPcs)
-	frameSize := renvoWasm32RoutineFrameSize(instrs)
+	frameSize := renvoWasm32RoutineFrameSize(code, instrPcs)
 	oldCap := cap(out)
 	lenAt := len(out)
 	out = renvoWasmAppendU32Fixed5(out, 0)
 	bodyStart := len(out)
-	out = renvoWasm32AppendDirectRoutineBody(out, instrs, codeLen, routinePcs, symbolPcs, callStackBase, frameSize)
+	out = renvoWasm32AppendDirectRoutineBody(out, code, instrPcs, codeLen, routinePcs, symbolPcs, callStackBase, frameSize)
 	out = renvoWasmCompactU32Fixed5(out, lenAt, len(out)-bodyStart)
 	if cap(out) == oldCap {
 		renvo_runtime_ArenaReset(mark)
@@ -2299,6 +2070,7 @@ func renvoVMImage(a *renvoAsm) []byte {
 	instrPcs := renvoWasm32InstructionPcs(a.code)
 	symbolPcs := renvoWasm32SymbolPcs(a)
 	routinePcs := renvoWasm32RoutinePcs(a, a.code, instrPcs)
+	routineEnds := renvoWasm32RoutineEnds(routinePcs, symbolPcs, a.code, instrPcs)
 	out := make([]byte, renvoVMHeaderSize, renvoVMHeaderSize+len(routinePcs)*renvoVMRoutineSize+len(a.code)+len(a.data))
 	out[0] = 'R'
 	out[1] = 'N'
@@ -2314,16 +2086,15 @@ func renvoVMImage(a *renvoAsm) []byte {
 	renvoPut32At(out, 28, len(routinePcs))
 	for i := 0; i < len(routinePcs); i++ {
 		startPc := routinePcs[i]
-		endPc := renvoWasm32RoutineEndPc(startPc, len(a.code), symbolPcs, a.code, instrPcs)
+		endPc := routineEnds[i]
 		startIndex := renvoWasm32PcLowerBound(instrPcs, startPc)
 		endIndex := renvoWasm32PcLowerBound(instrPcs, endPc)
-		instrs := renvoWasm32DecodePcRange(a.code, instrPcs[startIndex:endIndex])
 		flags := 0
 		if startPc != 0 && renvoWasm32SortedPcContains(symbolPcs, startPc) {
 			flags = renvoVMRoutineFramed
 		}
 		out = renvoAppend32(out, startPc)
-		out = renvoAppend32(out, renvoWasm32RoutineFrameSize(instrs))
+		out = renvoAppend32(out, renvoWasm32RoutineFrameSize(a.code, instrPcs[startIndex:endIndex]))
 		out = renvoAppend32(out, flags)
 	}
 	out = append(out, a.code...)
@@ -2339,6 +2110,7 @@ func renvoWasm32Image(a *renvoAsm) []byte {
 	instrPcs := renvoWasm32InstructionPcs(a.code)
 	symbolPcs := renvoWasm32SymbolPcs(a)
 	routinePcs := renvoWasm32RoutinePcs(a, a.code, instrPcs)
+	routineEnds := renvoWasm32RoutineEnds(routinePcs, symbolPcs, a.code, instrPcs)
 	browserStepRoutine := renvoWasm32NamedRoutine(a, routinePcs, "renvoBrowserStep")
 	exprStackBase := bssBase + a.bssSize + renvoWasm32StackGuardSize
 	callStackBase := exprStackBase + renvoWasm32ExprStackSize
@@ -2362,7 +2134,7 @@ func renvoWasm32Image(a *renvoAsm) []byte {
 		browserStepIndex = renvoWasm32VmFuncBase + len(routinePcs)
 	}
 	out = renvoWasmAppendSection(out, 7, renvoWasm32ExportSectionFull(browserStepIndex))
-	out = renvoWasm32AppendCodeSectionDirect(out, a, instrPcs, routinePcs, symbolPcs, len(a.code), callStackBase, frameTop, exprStackBase, browserStepRoutine)
+	out = renvoWasm32AppendCodeSectionDirect(out, a, instrPcs, routinePcs, routineEnds, symbolPcs, len(a.code), callStackBase, frameTop, exprStackBase, browserStepRoutine)
 	if len(a.data) > 0 {
 		out = renvoWasmAppendSection(out, 11, renvoWasm32DataSectionFull(dataBase, a.data))
 	}
