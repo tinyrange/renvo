@@ -317,7 +317,7 @@ func (b *coreUnitBuilder) addCheckedDecls(info check.PackageInfo, files []coreFi
 		if !b.addDeclCalls(declInfo, files[declInfo.File].tokens, ownerIndex) {
 			return false
 		}
-		if !b.addDeclResolution(declInfo, files[declInfo.File].tokens, ownerIndex, info.Symbols) {
+		if !b.addDeclResolution(declInfo, files[declInfo.File].tokens, ownerIndex, info.Package, info.Symbols) {
 			return false
 		}
 	}
@@ -377,7 +377,7 @@ func (b *coreUnitBuilder) addCheckedFuncs(info check.PackageInfo, files []coreFi
 		if !b.addBodyCalls(body, files[body.File].tokens, ownerIndex) {
 			return false
 		}
-		if !b.addBodyResolution(body, files[body.File].tokens, ownerIndex, info.Symbols) {
+		if !b.addBodyResolution(body, files[body.File].tokens, ownerIndex, info.Package, info.Symbols) {
 			return false
 		}
 		if !b.addBodyTypeRefs(body, files[body.File].tokens, ownerIndex) {
@@ -403,7 +403,7 @@ func (b *coreUnitBuilder) addCheckedSymbols(info check.PackageInfo, files []core
 		}
 		var out unit.Symbol
 		out.Name = cloneCoreString(symbols[i].Name)
-		out.Package = symbols[i].Package
+		out.Package = info.Package
 		out.Token = token
 		b.program.Symbols = append(b.program.Symbols, out)
 	}
@@ -420,9 +420,9 @@ func (b *coreUnitBuilder) addDeclCalls(decl check.DeclInfo, mapping coreTokenMap
 	return true
 }
 
-func (b *coreUnitBuilder) addDeclResolution(decl check.DeclInfo, mapping coreTokenMap, ownerIndex int, symbols []check.Symbol) bool {
+func (b *coreUnitBuilder) addDeclResolution(decl check.DeclInfo, mapping coreTokenMap, ownerIndex int, pkg int, symbols []check.Symbol) bool {
 	for i := 0; i < len(decl.CoreRefs); i++ {
-		ref, ok := mapCoreNameRef(decl.CoreRefs[i], mapping, b.finalEOF, ownerIndex, symbols)
+		ref, ok := mapCoreNameRef(decl.CoreRefs[i], mapping, b.finalEOF, ownerIndex, pkg, symbols)
 		if !ok {
 			b.setErr(EmitErrCheck, decl.File, decl.Token)
 			return false
@@ -440,9 +440,9 @@ func (b *coreUnitBuilder) addDeclResolution(decl check.DeclInfo, mapping coreTok
 	return true
 }
 
-func (b *coreUnitBuilder) addBodyResolution(body check.CoreFuncBody, mapping coreTokenMap, ownerIndex int, symbols []check.Symbol) bool {
+func (b *coreUnitBuilder) addBodyResolution(body check.CoreFuncBody, mapping coreTokenMap, ownerIndex int, pkg int, symbols []check.Symbol) bool {
 	for i := 0; i < len(body.CoreRefs); i++ {
-		ref, ok := mapCoreNameRef(body.CoreRefs[i], mapping, b.finalEOF, ownerIndex, symbols)
+		ref, ok := mapCoreNameRef(body.CoreRefs[i], mapping, b.finalEOF, ownerIndex, pkg, symbols)
 		if !ok {
 			b.setErr(EmitErrCheck, body.File, body.ErrorToken)
 			return false
@@ -531,7 +531,7 @@ func mapCoreCallRef(call check.CallRef, mapping coreTokenMap, eof int) (unit.Cal
 	return out, true
 }
 
-func mapCoreNameRef(ref check.CoreNameRef, mapping coreTokenMap, eof int, ownerIndex int, symbols []check.Symbol) (unit.NameRef, bool) {
+func mapCoreNameRef(ref check.CoreNameRef, mapping coreTokenMap, eof int, ownerIndex int, pkg int, symbols []check.Symbol) (unit.NameRef, bool) {
 	if ref.Index < 0 || ref.Index >= len(symbols) {
 		return unit.NameRef{}, false
 	}
@@ -539,7 +539,7 @@ func mapCoreNameRef(ref check.CoreNameRef, mapping coreTokenMap, eof int, ownerI
 		Kind:    unit.RefPackage,
 		Token:   mapCoreToken(mapping, ref.Token, eof),
 		Index:   ref.Index,
-		Package: symbols[ref.Index].Package,
+		Package: pkg,
 	}
 	if ownerIndex < 0 || out.Token < 0 || out.Index < -1 || out.Package < -1 {
 		return out, false

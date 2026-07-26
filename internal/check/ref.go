@@ -152,7 +152,7 @@ func resolveNameRef(fileIndex int, info PackageInfo, scope FuncScope, name strin
 	if symbolIndex >= 0 {
 		ref.Kind = RefPackage
 		ref.Index = symbolIndex
-		ref.Package = info.Symbols[symbolIndex].Package
+		ref.Package = info.Package
 		return ref
 	}
 	if isBuiltinName(name) {

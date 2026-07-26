@@ -69,6 +69,7 @@ type Program struct {
 
 type PackageInfo struct {
 	Name           string
+	Package        int
 	Symbols        []Symbol
 	CoreSymbolHash []int
 	Imports        []Import
@@ -86,12 +87,11 @@ type PackageInfo struct {
 }
 
 type Symbol struct {
-	Name    string
-	Kind    int
-	Package int
-	File    int
-	Token   int
-	Arity   int
+	Name  string
+	Kind  int
+	File  int
+	Token int
+	Arity int
 }
 
 type Import struct {
@@ -248,6 +248,7 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 	}
 	info := PackageInfo{
 		Name:    cloneCheckString(pkg.Name),
+		Package: pkgIndex,
 		Symbols: make([]Symbol, 0, symbolCapacity),
 		Imports: make([]Import, 0, importCapacity),
 	}
@@ -267,7 +268,7 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 			if findSymbolHashed(info.Symbols, symbolHash, name, kind) >= 0 {
 				return info, false, CheckErrDuplicate, fileIndex, decl.NameTok
 			}
-			info.Symbols = append(info.Symbols, Symbol{Name: name, Kind: kind, Package: pkgIndex, File: fileIndex, Token: decl.NameTok})
+			info.Symbols = append(info.Symbols, Symbol{Name: name, Kind: kind, File: fileIndex, Token: decl.NameTok})
 			insertSymbolHash(info.Symbols, symbolHash, len(info.Symbols)-1)
 		}
 		for i := 0; i < len(file.Funcs); i++ {
@@ -293,7 +294,7 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 			if duplicate >= 0 && (name != "init" || info.Symbols[duplicate].Kind != SymbolFunc) {
 				return info, false, CheckErrDuplicate, fileIndex, fn.NameTok
 			}
-			info.Symbols = append(info.Symbols, Symbol{Name: name, Kind: kind, Package: pkgIndex, File: fileIndex, Token: fn.NameTok, Arity: arity})
+			info.Symbols = append(info.Symbols, Symbol{Name: name, Kind: kind, File: fileIndex, Token: fn.NameTok, Arity: arity})
 			insertSymbolHash(info.Symbols, symbolHash, len(info.Symbols)-1)
 		}
 	}
