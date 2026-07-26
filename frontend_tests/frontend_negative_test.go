@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -64,19 +63,19 @@ func runNegativeCorpusCase(t *testing.T, frontend frontendConfig, dir string) {
 	}
 
 	output := filepath.Join(t.TempDir(), "app")
-	cmd := exec.Command(frontend.compiler, "-t", frontend.target, "-s", "-o", output, "./cmd/app")
-	cmd.Dir = dir
 	env := append([]string(nil), frontend.env...)
 	sentinel := ""
-	if runtime.GOOS != "windows" && len(frontend.env) > 0 {
+	if runtime.GOOS != "windows" && frontend.backend != "" {
 		sentinel = filepath.Join(t.TempDir(), "backend-invoked")
 		backend := filepath.Join(t.TempDir(), "reject-backend")
 		script := "#!/bin/sh\n: > '" + sentinel + "'\nexit 99\n"
 		if err := os.WriteFile(backend, []byte(script), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		env = setFrontendEnv(env, "RENVO_BACKEND="+backend)
+		frontend.backend = backend
 	}
+	cmd := frontendCommand(frontend, "-t", frontend.target, "-s", "-o", output, "./cmd/app")
+	cmd.Dir = dir
 	cmd.Env = frontendCommandEnv(env, dir)
 	out, err := cmd.CombinedOutput()
 	if err == nil {

@@ -3,7 +3,6 @@ package frontend_tests
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -48,7 +47,7 @@ type emittedFrontendUnit struct {
 
 func emitFrontendUnit(t *testing.T, frontend frontendConfig, dir string, output string) emittedFrontendUnit {
 	t.Helper()
-	cmd := exec.Command(frontend.compiler, "-emit-unit", "-t", frontend.target, "-o", output, "./cmd/app")
+	cmd := frontendCommand(frontend, "-emit-unit", "-t", frontend.target, "-o", output, "./cmd/app")
 	cmd.Dir = dir
 	cmd.Env = frontendCommandEnv(frontend.env, dir)
 	if combined, err := cmd.CombinedOutput(); err != nil {

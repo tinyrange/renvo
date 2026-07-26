@@ -65,11 +65,7 @@ func RunTestCommand(args []string, env []string, backend Backend, stdin io.Reade
 	}
 	compileArgs = append(compileArgs, "-t", target, "-o", "-")
 	if backend == nil {
-		commandBackend, ok := CommandBackendFromEnv(env)
-		if !ok {
-			return testFail(result, TestErrBackend, "")
-		}
-		backend = commandBackend
+		return testFail(result, TestErrBackend, "")
 	}
 	compiled := CompileFromFSWithModuleCache(
 		compileArgs, load.CleanPath(absoluteDir), StdRootFromEnv(env),

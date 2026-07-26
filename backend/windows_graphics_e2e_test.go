@@ -90,7 +90,7 @@ func main() {
 	}
 	backend := buildWindowsHostCompiler(t, t.TempDir())
 	frontend := filepath.Join(t.TempDir(), "renvo-frontend.exe")
-	buildFrontend, err := runCommandInDir(t, repoRoot, "go", "build", "-o", frontend, "./cmd/renvo")
+	buildFrontend, err := runCommandInDir(t, repoRoot, "go", "build", "-o", frontend, "./cmd/renvobootstrap")
 	if err != nil {
 		t.Fatalf("build frontend: %v", err)
 	}
@@ -99,9 +99,9 @@ func main() {
 		target := target
 		t.Run(target.name, func(t *testing.T) {
 			outputName := "graphics-" + target.name[len("windows/"):] + ".exe"
-			compile := exec.Command(frontend, "-t", target.name, "-s", "-o", outputName, "./cmd/app")
+			compile := exec.Command(frontend, "-bootstrap-backend", backend, "-t", target.name, "-s", "-o", outputName, "./cmd/app")
 			compile.Dir = workDir
-			compile.Env = append(os.Environ(), "RENVO_BACKEND="+backend, "RENVO_STDROOT="+filepath.Join(repoRoot, "std"))
+			compile.Env = append(os.Environ(), "RENVO_STDROOT="+filepath.Join(repoRoot, "std"))
 			if output, err := compile.CombinedOutput(); err != nil {
 				t.Fatalf("compile Windows graphics test: %v\n%s", err, output)
 			}

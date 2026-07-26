@@ -2,7 +2,6 @@ package frontend_tests
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -41,7 +40,7 @@ func main() {
 		t.Fatal(err)
 	}
 	imagePath := filepath.Join(project, "readdir.rnvb")
-	cmd := exec.Command(frontend.compiler, "-t", "vm/vm32", "-arena-size", "262144", "-s", "-o", imagePath, "input.go")
+	cmd := frontendCommand(frontend, "-t", "vm/vm32", "-arena-size", "262144", "-s", "-o", imagePath, "input.go")
 	cmd.Dir = project
 	cmd.Env = frontendCommandEnv(frontend.env, project)
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -72,7 +71,7 @@ func TestVM32FrontendPerformanceGate(t *testing.T) {
 		t.Fatal("frontend compiler unavailable")
 	}
 	imagePath := filepath.Join(t.TempDir(), "renvo-frontend.rnvb")
-	cmd := exec.Command(frontend.compiler,
+	cmd := frontendCommand(frontend,
 		"-tags", "renvo_bundle",
 		"-t", "vm/vm32",
 		"-arena-size", "134217728",

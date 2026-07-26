@@ -57,15 +57,21 @@ out of scope.
 
 ## Build and try it
 
-A host-built frontend uses the standalone backend during development:
+A Go-built bootstrap uses a sibling standalone backend during development.
+The `renvo` artifacts themselves are built by Renvo and always contain the
+backend in-process:
 
 ```sh
 go build -o renvo-backend ./backend
-go build -tags renvo_bundle -o renvo ./cmd/renvo
+go build -tags renvo_bundle -o renvo-bootstrap ./cmd/renvobootstrap
 
-RENVO_BACKEND="$PWD/renvo-backend" ./renvo \
+./renvo-bootstrap \
   -t linux/amd64 -o hello ./path/to/hello-package
 ```
+
+The bootstrap looks for `renvo-backend` beside its own executable. Tooling that
+keeps the backend elsewhere can pass `-bootstrap-backend <path>` immediately
+after the bootstrap executable name.
 
 Running `renvo` with no arguments or with `--help` prints the complete command
 reference and target list.
@@ -106,11 +112,11 @@ isolated native stack. It does not write an executable or launch a child
 process. Windows and macOS use their native process APIs for the current
 implementation.
 
-The host-built frontend can also compile and run ordinary Go test functions
+The bootstrap can also compile and run ordinary Go test functions
 with Renvo's `testing` package:
 
 ```sh
-RENVO_BACKEND="$PWD/renvo-backend" ./renvo test ./path/to/package
+./renvo-bootstrap test ./path/to/package
 ```
 
 Test files remain ordinary `_test.go` sources with `func TestXxx(t *testing.T)`
@@ -142,7 +148,7 @@ loaders.
 To turn that bootstrap build into a fully standalone Renvo executable:
 
 ```sh
-RENVO_BACKEND="$PWD/renvo-backend" ./renvo \
+./renvo-bootstrap \
   -tags renvo_bundle -t linux/amd64 -s \
   -o renvo-standalone ./cmd/renvo
 ```
@@ -153,7 +159,6 @@ repository checkout, adjacent data files, or backend process.
 
 Useful development overrides are:
 
-- `RENVO_BACKEND`: backend executable used by a host-built frontend.
 - `RENVO_STDROOT`: standard-library source tree; defaults to the embedded copy
   in bundled builds.
 - `RENVO_MODCACHE`: read-only, pre-populated module cache for offline

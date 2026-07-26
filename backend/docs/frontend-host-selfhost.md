@@ -1,8 +1,10 @@
-# Host and self-hosted frontend boundary
+# Bootstrap and self-hosted frontend boundary
 
-The host-built frontend and the self-hosted frontend use the same compiler
-algorithms and the same backend-facing model. Source parsing, checking, package
-building, lowering, linking, and RenvoUnit encoding live in untagged files under:
+The Go-built bootstrap and the self-hosted frontend use the same frontend
+algorithms and backend-facing model. The bootstrap invokes its sibling backend
+process; every actual frontend links that backend in-process. Source parsing,
+checking, package building, lowering, linking, and RenvoUnit encoding live in
+untagged files under:
 
 - `internal/syntax`
 - `internal/check`
@@ -32,10 +34,10 @@ Build-specific code is limited to environment boundaries:
 - Packages under `std` may use host-library shims or target runtime calls.
   Their common public API is checked by `std/api_compat_test.go`; graphics,
   filesystem, process, and unsafe implementations remain platform boundaries.
-- `renvo_bundle` controls whether standard-library source is embedded in a host
-  executable. It changes packaging, not compiler semantics.
+- `renvo_bundle` controls whether standard-library source is embedded in the
+  bootstrap or frontend. It changes packaging, not compiler semantics.
 
 The frontend ownership test rejects new build tags in the compiler-core
 directories. Structured diagnostic tests and canonical-unit parity tests run
-the same workspaces through stage0 and stage3, while the corpus executes the
-resulting programs end to end.
+the same workspaces through the Go bootstrap and stage3, while the corpus
+executes the resulting programs end to end.

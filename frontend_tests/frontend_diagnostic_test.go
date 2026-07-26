@@ -2,7 +2,6 @@ package frontend_tests
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -277,7 +276,8 @@ func TestFrontendBackendDiagnosticPreservesDetail(t *testing.T) {
 		wantCode:   "RENVO-BACKEND-003",
 		wantDetail: "intentional backend failure",
 	}
-	runFrontendDiagnosticCase(t, frontend, tc, []string{"RENVO_BACKEND=" + backend})
+	frontend.backend = backend
+	runFrontendDiagnosticCase(t, frontend, tc, nil)
 }
 
 func runFrontendDiagnosticCase(t *testing.T, frontend frontendConfig, tc frontendDiagnosticCase, envOverride []string) {
@@ -300,7 +300,7 @@ func runFrontendDiagnosticCase(t *testing.T, frontend frontendConfig, tc fronten
 	}
 
 	output := filepath.Join(dir, "app")
-	cmd := exec.Command(frontend.compiler, "-t", frontend.target, "-s", "-o", output, "./cmd/app")
+	cmd := frontendCommand(frontend, "-t", frontend.target, "-s", "-o", output, "./cmd/app")
 	cmd.Dir = dir
 	env := append([]string(nil), frontend.env...)
 	for _, override := range envOverride {

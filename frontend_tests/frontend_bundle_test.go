@@ -21,12 +21,12 @@ func TestBundledFrontendStandaloneAllTargets(t *testing.T) {
 	toolDir := t.TempDir()
 	backend := filepath.Join(toolDir, "renvo-backend")
 	buildGoTool(t, root, backend, nil, "./backend")
-	stage0 := filepath.Join(toolDir, "renvo-stage0")
-	buildGoTool(t, root, stage0, []string{"renvo_bundle"}, "./cmd/renvo")
+	stage0 := filepath.Join(toolDir, "renvo-bootstrap")
+	buildGoTool(t, root, stage0, []string{"renvo_bundle"}, "./cmd/renvobootstrap")
 	stage1 := filepath.Join(toolDir, "renvo-stage1")
 	cmd := exec.Command(stage0, "-tags", "renvo_bundle", "-system", filepath.Join(root, "systems", "frontend-linux-amd64.rtg"), "-s", "-o", stage1, "./cmd/renvo")
 	cmd.Dir = root
-	cmd.Env = []string{"PWD=" + root, "RENVO_BACKEND=" + backend}
+	cmd.Env = []string{"PWD=" + root}
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bundled frontend self-host build failed: %v\n%s", err, string(out))
 	}
@@ -375,12 +375,12 @@ func TestBundledFrontendNativeREPLSession(t *testing.T) {
 	}
 	backend := filepath.Join(toolDir, "renvo-backend"+executableSuffix)
 	buildGoTool(t, root, backend, nil, "./backend")
-	stage0 := filepath.Join(toolDir, "renvo-stage0"+executableSuffix)
-	buildGoTool(t, root, stage0, []string{"renvo_bundle"}, "./cmd/renvo")
+	stage0 := filepath.Join(toolDir, "renvo-bootstrap"+executableSuffix)
+	buildGoTool(t, root, stage0, []string{"renvo_bundle"}, "./cmd/renvobootstrap")
 	stage1 := filepath.Join(toolDir, "renvo-stage1"+executableSuffix)
 	cmd := exec.Command(stage0, "-tags", "renvo_bundle", "-t", target, "-s", "-o", stage1, "./cmd/renvo")
 	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "PWD="+root, "RENVO_BACKEND="+backend)
+	cmd.Env = append(os.Environ(), "PWD="+root)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("native bundled frontend self-host build failed: %v\n%s", err, out)
 	}

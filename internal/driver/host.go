@@ -16,7 +16,6 @@ const (
 	HostErrWrite
 )
 
-const BackendEnv = "RENVO_BACKEND"
 const StdRootEnv = "RENVO_STDROOT"
 const ModuleCacheEnv = "RENVO_MODCACHE"
 const DefaultStdRoot = "/std"
@@ -71,21 +70,9 @@ func RunCommand(args []string, env []string, backend Backend) HostResult {
 func CompileAndWriteWithEnv(args []string, env []string, backend Backend) HostResult {
 	options := ParseOptions(args)
 	if backend == nil && options.Ok && !options.EmitUnit {
-		commandBackend, ok := CommandBackendFromEnv(env)
-		if !ok {
-			return hostFail(HostResult{}, HostErrBackend, "")
-		}
-		backend = commandBackend
+		return hostFail(HostResult{}, HostErrBackend, "")
 	}
 	return compileAndWrite(args, StdRootFromEnv(env), ModuleCacheFromEnv(env), backend)
-}
-
-func CommandBackendFromEnv(env []string) (CommandBackend, bool) {
-	path := EnvValue(env, BackendEnv)
-	if path == "" {
-		return CommandBackend{}, false
-	}
-	return CommandBackend{Path: path}, true
 }
 
 func StdRootFromEnv(env []string) string {
