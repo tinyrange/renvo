@@ -121,7 +121,8 @@ func renvoCompileOptionsValid(target int, options RenvoCompileOptions) bool {
 	if options.WindowsGUI && target != renvoTargetWindowsAmd64 && target != renvoTargetWindows386 && target != renvoTargetWindowsArm64 {
 		return false
 	}
-	return options.ArenaSize == 0 || renvoArenaSizeValid(target, options.ArenaSize)
+	return options.ArenaSize == 0 || target > 0 && target < len(renvoTargetIntBitsTable) &&
+		options.ArenaSize >= renvoArenaSizeMinimum && options.ArenaSize <= renvoArenaSizeMaximum
 }
 
 func RenvoCompileSourceToBytesWithOptions(source []byte, targetName string, options RenvoCompileOptions) ([]byte, bool) {
