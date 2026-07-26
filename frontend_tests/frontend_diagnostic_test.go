@@ -154,6 +154,23 @@ func TestFrontendStructuredDiagnostics(t *testing.T) {
 			wantDetail: "call argument is not assignable to its parameter",
 		},
 		{
+			name: "invalid_imported_call_arity",
+			files: map[string]string{
+				"cmd/app/main.go":  "package main\n\nimport \"example.com/diagnostic/helper\"\n\nfunc main() { helper.Needs() }\n",
+				"helper/helper.go": "package helper\n\nfunc Needs(value string) int { return len(value) }\n",
+			},
+			wantCode:   "RENVO-CHECK-032",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "function call argument count does not match parameters",
+		},
+		{
+			name:       "invalid_local_call_arity",
+			files:      map[string]string{"cmd/app/main.go": "package main\n\nfunc needs(value string) int { return len(value) }\nfunc main() { needs() }\n"},
+			wantCode:   "RENVO-CHECK-032",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "function call argument count does not match parameters",
+		},
+		{
 			name:       "invalid_return_type",
 			files:      map[string]string{"cmd/app/main.go": "package main\n\nfunc value() int { return \"bad\" }\nfunc main() { _ = value() }\n"},
 			wantCode:   "RENVO-CHECK-031",

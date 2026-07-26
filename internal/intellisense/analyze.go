@@ -117,6 +117,8 @@ func analysisCheckDiagnostic(graph load.Graph, program check.Program) Diagnostic
 		code, message = "RENVO-CHECK-030", "invalid operation for operand types"
 	case check.CheckErrReturnType:
 		code, message = "RENVO-CHECK-031", "return value is not assignable to the function result"
+	case check.CheckErrCallArity:
+		code, message = "RENVO-CHECK-032", "function call argument count does not match parameters"
 	}
 	diagnostic := Diagnostic{Phase: "checker", Code: code, Message: message}
 	if program.ErrorPackage < 0 || program.ErrorPackage >= len(graph.Packages) {

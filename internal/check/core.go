@@ -154,8 +154,14 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			if builtinErr, builtinTok := invalidBuiltinCalls(&pkg, &info, fileIndex, fn, &signature, builtinCalls); builtinErr != CheckOK {
 				return info, false, builtinErr, fileIndex, builtinTok
 			}
-			prepareDefiniteCallTargets(&pkg, &info, out.CoreRefs, callTargets)
 			callCheckArenaStart := arena.Mark()
+			callTok := invalidDefiniteCallArity(graph, pkgIndex, &info, checked, fileIndex, fn, out.CoreRefs, out.CoreSelectors)
+			arena.Reset(callCheckArenaStart)
+			if callTok >= 0 {
+				return info, false, CheckErrCallArity, fileIndex, callTok
+			}
+			prepareDefiniteCallTargets(&pkg, &info, out.CoreRefs, callTargets)
+			callCheckArenaStart = arena.Mark()
 			callTypeTok := invalidDefiniteCallArgumentType(&pkg, &info, fileIndex, fn, &signature, out.CoreRefs, callTargets)
 			arena.Reset(callCheckArenaStart)
 			if callTypeTok >= 0 {
@@ -529,7 +535,7 @@ func appendTypeSpanRefsCore(refs []CoreTypeRef, file syntax.File, fileIndex int,
 		if lookupScopeTokenNameCore(scope, &file, i) < 0 {
 			symbol := lookupPackageSymbolTokenCore(&info, &file, fileIndex, i)
 			if symbol >= 0 {
-				refs = append(refs, CoreTypeRef{Kind: TypeRefPackage, File: fileIndex, Token: i, BaseTok: i, DotTok: i, Package: info.Symbols[symbol].Package, Symbol: symbol})
+				refs = append(refs, CoreTypeRef{Kind: TypeRefPackage, File: fileIndex, Token: i, BaseTok: i, DotTok: i, Package: info.Package, Symbol: symbol})
 			}
 		}
 	}

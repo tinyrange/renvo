@@ -121,6 +121,27 @@ func TestCheckGraphCoreDiagnostics(t *testing.T) {
 			err:   CheckErrCallArgument,
 		},
 		{
+			name:  "too few local call arguments",
+			files: []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc consume(value string) {}\nfunc main() { consume() }\n")}},
+			err:   CheckErrCallArity,
+		},
+		{
+			name: "too few imported call arguments",
+			files: []load.SourceFile{
+				{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nimport \"example.com/case/lib\"\nfunc main() { lib.Consume() }\n")},
+				{Path: "/repo/case/lib/lib.go", Src: []byte("package lib\nfunc Consume(value string) {}\n")},
+			},
+			err: CheckErrCallArity,
+		},
+		{
+			name: "too many imported call arguments",
+			files: []load.SourceFile{
+				{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nimport \"example.com/case/lib\"\nfunc main() { lib.Consume(\"one\", \"two\") }\n")},
+				{Path: "/repo/case/lib/lib.go", Src: []byte("package lib\nfunc Consume(value string) {}\n")},
+			},
+			err: CheckErrCallArity,
+		},
+		{
 			name:  "invalid return type",
 			files: []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc value() int { return \"bad\" }\nfunc main() { _ = value() }\n")}},
 			err:   CheckErrReturnType,
@@ -152,6 +173,16 @@ func TestCheckGraphCoreDiagnostics(t *testing.T) {
 				t.Fatalf("diagnostic has no source location: %#v", program)
 			}
 		})
+	}
+}
+
+func TestCheckGraphCoreAllowsVariadicCallArguments(t *testing.T) {
+	graph := checkTestGraph(t, []load.SourceFile{{
+		Path: "/repo/case/cmd/app/main.go",
+		Src:  []byte("package main\nfunc consume(prefix string, values ...int) {}\nfunc main() { consume(\"ok\"); consume(\"ok\", 1, 2) }\n"),
+	}})
+	if program := CheckGraphCore(graph); !program.Ok {
+		t.Fatalf("variadic calls failed checking: %#v", program)
 	}
 }
 

@@ -308,6 +308,8 @@ func buildPhaseDiagnostic(result BuildResult, built pipeline.Result) Diagnostic 
 			code, message = "RENVO-CHECK-030", "invalid operation for operand types"
 		case check.CheckErrReturnType:
 			code, message = "RENVO-CHECK-031", "return value is not assignable to the function result"
+		case check.CheckErrCallArity:
+			code, message = "RENVO-CHECK-032", "function call argument count does not match parameters"
 		}
 	} else if built.Build.Error == build.BuildErrLower {
 		phase, code, message = "lowerer", "RENVO-LOWER-001", "checked program could not be lowered"
