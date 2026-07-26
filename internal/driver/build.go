@@ -39,6 +39,10 @@ var embeddedBuildCacheKeyB int
 func BuildUnit(args []string, workDir string, stdRoot string, files []load.SourceFile) BuildResult {
 	result := newBuildResult()
 	options := ParseOptions(args)
+	if options.Ok && options.System != "" {
+		options.SystemError = "-system requires a filesystem-backed build"
+		options = parseFail(options, ParseErrSystemRead, options.System, options.SystemAt)
+	}
 	result.Options = options
 	if !options.Ok {
 		return buildFail(result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
@@ -89,7 +93,7 @@ func buildFromFSCompactWithModuleCache(args []string, workDir string, stdRoot st
 // cold serialization work and memory that cannot be reused.
 func buildFromFSOneShotCompactWithModuleCache(args []string, workDir string, stdRoot string, moduleCache string, fs SourceFS) BuildResult {
 	result := newBuildResult()
-	options := ParseOptions(args)
+	options := parseFSOptions(args, workDir, fs)
 	result.Options = options
 	if !options.Ok {
 		return buildFail(result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
@@ -142,7 +146,7 @@ func buildFromFS(args []string, workDir string, stdRoot string, moduleCache stri
 		return session.Result()
 	}
 	result := newBuildResult()
-	options := ParseOptions(args)
+	options := parseFSOptions(args, workDir, fs)
 	result.Options = options
 	if !options.Ok {
 		return buildFail(result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
@@ -219,8 +223,11 @@ func embeddedBuildFingerprint(workDir string, options Options, files []load.Sour
 	a, b = embeddedBuildHashString(a, b, options.Target)
 	a, b = embeddedBuildHashString(a, b, options.Output)
 	a, b = embeddedBuildHashString(a, b, options.ModuleLicense)
+	a, b = embeddedBuildHashString(a, b, options.SystemName)
 	a = embeddedBuildHashInt(a, options.ArenaSize)
 	b = embeddedBuildHashIntB(b, options.ArenaSize)
+	a = embeddedBuildHashInt(a, options.BinaryLimit)
+	b = embeddedBuildHashIntB(b, options.BinaryLimit)
 	if options.Strip {
 		a = embeddedBuildHashInt(a, 1)
 		b = embeddedBuildHashIntB(b, 1)

@@ -324,18 +324,29 @@ func renvoAsmImageAmd64(a *renvoAsm) []byte {
 		var out []byte
 		out = a.code
 		renvoTruncBytes(&out, loadFileSize)
-		for i := 0; i < oldCodeLen; i++ {
-			src := oldCodeLen - 1 - i
-			out[a.codeOffset+src] = out[src]
+		if renvoFixedTarget == 0 {
+			copy(out[a.codeOffset:a.codeOffset+oldCodeLen], out[:oldCodeLen])
+		} else {
+			for i := oldCodeLen; i > 0; i-- {
+				out[a.codeOffset+i-1] = out[i-1]
+			}
 		}
 		var header []byte
 		header = renvoAppendElfHeaderAmd64(header, a.codeOffset, loadFileSize, bssOffset, a.bssSize, 0)
-		for i := 0; i < len(header); i++ {
-			out[i] = header[i]
+		if renvoFixedTarget == 0 {
+			copy(out, header)
+		} else {
+			for i := 0; i < len(header); i++ {
+				out[i] = header[i]
+			}
 		}
 		pos := a.codeOffset + oldCodeLen
-		for i := 0; i < len(a.data); i++ {
-			out[pos+i] = a.data[i]
+		if renvoFixedTarget == 0 {
+			copy(out[pos:], a.data)
+		} else {
+			for i := 0; i < len(a.data); i++ {
+				out[pos+i] = a.data[i]
+			}
 		}
 		if renvoFixedTarget == 0 {
 			return renvoAppendReplLinkTable(out, a)

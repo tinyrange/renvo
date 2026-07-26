@@ -22,6 +22,11 @@ const (
 	ParseErrScriptRequiresFile
 	ParseErrScriptFileCount
 	ParseErrConflictingEmit
+	ParseErrMissingSystem
+	ParseErrSystemRead
+	ParseErrInvalidSystem
+	ParseErrSystemTargetConflict
+	ParseErrSystemArenaConflict
 )
 
 const DefaultTarget = "linux/amd64"
@@ -29,7 +34,7 @@ const ModeExecutable = "executable"
 const ModeKernelModule = "kernel-module"
 const DefaultModuleLicense = "Proprietary"
 
-const HelpText = "Usage: renvo -o <file> [-t <target>] [-mode=<mode>] [-tags <list>] [-arena-size <bytes>] [-s] [-emit-unit] [-emit-image] [-windows-gui] <package | file.go...>\n       renvo run [build options] <script.go> [-- script arguments...]\n       renvo test [build options] [package]\nOptions:\n  -arena-size  set the generated program arena limit in bytes (256..1073741824)\n  -emit-unit   write the canonical linked Renvo unit without invoking a backend\n  -emit-image  write a format-neutral linked image instead of an executable\n  -mode        select executable (default) or kernel-module output\n  -script      compile one file whose top-level statements form func main\n  -windows-gui select the Windows GUI subsystem instead of the console subsystem\nSource files:\n  Explicit .go files must share one directory and package. Exactly the named files are used;\n  build constraints and OS/architecture suffixes are ignored, while _test.go files are skipped.\nTargets:\n  linux/amd64 linux/386 linux/aarch64 linux/arm\n  windows/amd64 windows/386 windows/arm64 darwin/arm64 wasi/wasm32 browser/wasm32\nUnsupported language/toolchain features:\n  generics, goroutines, channels, select, cgo\n"
+const HelpText = "Usage: renvo -o <file> [-t <target> | -system <file.rtg>] [-mode=<mode>] [-tags <list>] [-arena-size <bytes>] [-s] [-emit-unit] [-emit-image] [-windows-gui] <package | file.go...>\n       renvo run [build options] <script.go> [-- script arguments...]\n       renvo test [build options] [package]\nOptions:\n  -arena-size  set the generated program arena limit in bytes (256..1073741824)\n  -system      load target, binary-size, and arena limits from a hosted system profile\n  -emit-unit   write the canonical linked Renvo unit without invoking a backend\n  -emit-image  write a format-neutral linked image instead of an executable\n  -mode        select executable (default) or kernel-module output\n  -script      compile one file whose top-level statements form func main\n  -windows-gui select the Windows GUI subsystem instead of the console subsystem\nSource files:\n  Explicit .go files must share one directory and package. Exactly the named files are used;\n  build constraints and OS/architecture suffixes are ignored, while _test.go files are skipped.\nTargets:\n  linux/amd64 linux/386 linux/aarch64 linux/arm\n  windows/amd64 windows/386 windows/arm64 darwin/arm64 wasi/wasm32 browser/wasm32\nUnsupported language/toolchain features:\n  generics, goroutines, channels, select, cgo\n"
 
 const RunHelpText = "Usage: renvo run [-s] [-tags <list>] [-arena-size <bytes>] <script.go> [-- arguments...]\nTop-level statements form func main. The script is compiled for and executed on the host target.\n"
 
@@ -46,6 +51,11 @@ type Options struct {
 	Mode          string
 	ModuleLicense string
 	ArenaSize     int
+	BinaryLimit   int
+	System        string
+	SystemName    string
+	SystemError   string
+	SystemAt      int
 	Tags          []string
 	Ok            bool
 	Error         int
@@ -65,10 +75,13 @@ func ParseOptions(args []string) Options {
 		Ok:            true,
 		Error:         ParseOK,
 		ErrorAt:       -1,
+		SystemAt:      -1,
 	}
 	i := 0
 	windowsGUIAt := -1
 	modeAt := -1
+	targetAt := -1
+	arenaAt := -1
 	for i < len(args) {
 		arg := args[i]
 		if arg == "-s" {
@@ -119,6 +132,20 @@ func ParseOptions(args []string) Options {
 				return parseFail(options, ParseErrInvalidArenaSize, args[i+1], i+1)
 			}
 			options.ArenaSize = size
+			arenaAt = i
+			i += 2
+			continue
+		}
+		if arg == "-system" {
+			if i+1 >= len(args) {
+				return parseFail(options, ParseErrMissingSystem, arg, i)
+			}
+			if options.System != "" {
+				options.SystemError = "system profile may only be specified once"
+				return parseFail(options, ParseErrInvalidSystem, args[i+1], i)
+			}
+			options.System = args[i+1]
+			options.SystemAt = i
 			i += 2
 			continue
 		}
@@ -139,6 +166,7 @@ func ParseOptions(args []string) Options {
 				return parseFail(options, ParseErrUnsupportedTarget, target, i+1)
 			}
 			options.Target = target
+			targetAt = i
 			i += 2
 			continue
 		}
@@ -184,6 +212,12 @@ func ParseOptions(args []string) Options {
 	if options.Package == "" {
 		return parseFail(options, ParseErrMissingPackage, "", len(args))
 	}
+	if options.System != "" && targetAt >= 0 {
+		return parseFail(options, ParseErrSystemTargetConflict, options.System, targetAt)
+	}
+	if options.System != "" && arenaAt >= 0 {
+		return parseFail(options, ParseErrSystemArenaConflict, options.System, arenaAt)
+	}
 	if options.EmitUnit && options.EmitImage {
 		return parseFail(options, ParseErrConflictingEmit, "-emit-unit", len(args))
 	}
@@ -193,11 +227,13 @@ func ParseOptions(args []string) Options {
 	if options.Script && len(options.Files) != 1 {
 		return parseFail(options, ParseErrScriptFileCount, options.Package, len(args))
 	}
-	if options.WindowsGUI && options.Target != "windows/amd64" && options.Target != "windows/386" && options.Target != "windows/arm64" {
-		return parseFail(options, ParseErrWindowsGUIRequiresWindows, options.Target, windowsGUIAt)
-	}
-	if options.Mode == ModeKernelModule && options.Target != "linux/amd64" {
-		return parseFail(options, ParseErrModeRequiresLinuxAmd64, options.Target, modeAt)
+	if options.System == "" {
+		if options.WindowsGUI && options.Target != "windows/amd64" && options.Target != "windows/386" && options.Target != "windows/arm64" {
+			return parseFail(options, ParseErrWindowsGUIRequiresWindows, options.Target, windowsGUIAt)
+		}
+		if options.Mode == ModeKernelModule && options.Target != "linux/amd64" {
+			return parseFail(options, ParseErrModeRequiresLinuxAmd64, options.Target, modeAt)
+		}
 	}
 	return options
 }

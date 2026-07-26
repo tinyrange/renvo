@@ -54,6 +54,16 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			d.Code, d.Message = "RENVO-OPTION-017", "invalid renvo:module-license directive"
 		} else if result.Options.Error == ParseErrConflictingModuleLicense {
 			d.Code, d.Message = "RENVO-OPTION-018", "conflicting renvo:module-license directives"
+		} else if result.Options.Error == ParseErrMissingSystem {
+			d.Code, d.Message = "RENVO-OPTION-019", "missing system profile after -system"
+		} else if result.Options.Error == ParseErrSystemRead {
+			d.Code, d.Message = "RENVO-OPTION-020", result.Options.SystemError
+		} else if result.Options.Error == ParseErrInvalidSystem {
+			d.Code, d.Message = "RENVO-OPTION-021", "invalid system profile "+result.Options.ErrorArg+": "+result.Options.SystemError
+		} else if result.Options.Error == ParseErrSystemTargetConflict {
+			d.Code, d.Message = "RENVO-OPTION-022", "-system cannot be combined with -t"
+		} else if result.Options.Error == ParseErrSystemArenaConflict {
+			d.Code, d.Message = "RENVO-OPTION-023", "-system cannot be combined with -arena-size"
 		}
 		return d
 	}

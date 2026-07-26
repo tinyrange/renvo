@@ -29,7 +29,7 @@ func TestBundledFrontendStandaloneAllTargets(t *testing.T) {
 	stage0 := filepath.Join(toolDir, "renvo-stage0")
 	buildGoTool(t, root, stage0, []string{"renvo_bundle"}, "./cmd/renvo")
 	stage1 := filepath.Join(toolDir, "renvo-stage1")
-	cmd := exec.Command(stage0, "-tags", "renvo_bundle", "-t", "linux/amd64", "-s", "-o", stage1, "./cmd/renvo")
+	cmd := exec.Command(stage0, "-tags", "renvo_bundle", "-system", filepath.Join(root, "systems", "frontend-linux-amd64.rtg"), "-s", "-o", stage1, "./cmd/renvo")
 	cmd.Dir = root
 	cmd.Env = []string{"PWD=" + root, "RENVO_BACKEND=" + backend}
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -109,6 +109,38 @@ func TestBundledFrontendStandaloneAllTargets(t *testing.T) {
 	}
 
 	project := writeBundleProject(t)
+	systemProfile := filepath.Join(project, "small-linux.rtg")
+	if err := os.WriteFile(systemProfile, []byte("system \"small-linux\" {\n    target = \"linux/amd64\"\n    binary = 1MiB\n    arena = 32MiB\n}\n"), 0o644); err != nil {
+		t.Fatalf("write hosted system profile failed: %v", err)
+	}
+	systemOutput := filepath.Join(project, "app-system")
+	cmd = exec.Command(standalone, "-system", systemProfile, "-s", "-o", systemOutput, "./cmd/app")
+	cmd.Dir = project
+	cmd.Env = []string{"PWD=" + project}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("standalone system-profile compile failed: %v\n%s", err, string(out))
+	}
+	cmd = exec.Command(systemOutput)
+	cmd.Dir = project
+	cmd.Env = []string{"PWD=" + project}
+	if out, err := cmd.CombinedOutput(); err != nil || string(out) != "PASS\n" {
+		t.Fatalf("system-profile output failed: err=%v output=%q", err, string(out))
+	}
+	tinyProfile := filepath.Join(project, "tiny-linux.rtg")
+	if err := os.WriteFile(tinyProfile, []byte("system \"tiny-linux\" {\n    target = \"linux/amd64\"\n    binary = 1B\n    arena = 32MiB\n}\n"), 0o644); err != nil {
+		t.Fatalf("write tiny hosted system profile failed: %v", err)
+	}
+	rejectedOutput := filepath.Join(project, "app-too-large")
+	cmd = exec.Command(standalone, "-system", tinyProfile, "-o", rejectedOutput, "./cmd/app")
+	cmd.Dir = project
+	cmd.Env = []string{"PWD=" + project}
+	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "RENVO-SYSTEM-002") {
+		t.Fatalf("standalone system-profile limit diagnostic: err=%v output=%q", err, string(out))
+	}
+	if _, err := os.Stat(rejectedOutput); !os.IsNotExist(err) {
+		t.Fatalf("oversized system-profile output was written: %v", err)
+	}
+
 	cmd = exec.Command(standalone, "run", "script.go", "--", "argument")
 	cmd.Dir = project
 	cmd.Env = []string{"PWD=" + project}

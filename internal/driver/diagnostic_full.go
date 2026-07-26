@@ -79,6 +79,16 @@ func optionDiagnostic(options Options) Diagnostic {
 		code, message = "RENVO-OPTION-017", "invalid renvo:module-license directive"
 	case ParseErrConflictingModuleLicense:
 		code, message = "RENVO-OPTION-018", "conflicting renvo:module-license directives"
+	case ParseErrMissingSystem:
+		code, message = "RENVO-OPTION-019", "missing system profile after -system"
+	case ParseErrSystemRead:
+		code, message = "RENVO-OPTION-020", options.SystemError
+	case ParseErrInvalidSystem:
+		code, message = "RENVO-OPTION-021", "invalid system profile "+options.ErrorArg+": "+options.SystemError
+	case ParseErrSystemTargetConflict:
+		code, message = "RENVO-OPTION-022", "-system cannot be combined with -t"
+	case ParseErrSystemArenaConflict:
+		code, message = "RENVO-OPTION-023", "-system cannot be combined with -arena-size"
 	}
 	return Diagnostic{Phase: "options", Code: code, Message: message}
 }

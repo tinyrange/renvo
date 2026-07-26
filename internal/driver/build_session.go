@@ -45,7 +45,7 @@ func (s *FSBuildSession) Step() bool {
 		return true
 	}
 	if s.stage == 0 {
-		options := ParseOptions(s.args)
+		options := parseFSOptions(s.args, s.workDir, s.fs)
 		s.result.Options = options
 		if !options.Ok {
 			s.result = buildFail(s.result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)

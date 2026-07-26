@@ -155,6 +155,14 @@ func printOptionError(options driver.Options) {
 		fmt.Fprintln(os.Stderr, "renvo: -script accepts exactly one .go file")
 	case driver.ParseErrConflictingEmit:
 		fmt.Fprintln(os.Stderr, "renvo: -emit-unit and -emit-image cannot be used together")
+	case driver.ParseErrMissingSystem:
+		fmt.Fprintln(os.Stderr, "renvo: missing system profile after -system")
+	case driver.ParseErrSystemRead, driver.ParseErrInvalidSystem:
+		fmt.Fprintf(os.Stderr, "renvo: %s\n", options.SystemError)
+	case driver.ParseErrSystemTargetConflict:
+		fmt.Fprintln(os.Stderr, "renvo: -system cannot be combined with -t")
+	case driver.ParseErrSystemArenaConflict:
+		fmt.Fprintln(os.Stderr, "renvo: -system cannot be combined with -arena-size")
 	default:
 		fmt.Fprintf(os.Stderr, "renvo: option parse failed with error %d\n", options.Error)
 	}

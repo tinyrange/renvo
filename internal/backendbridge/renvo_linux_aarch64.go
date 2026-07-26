@@ -24,5 +24,9 @@ func CompileUnitToOutputStripEnv(unit []byte, targetName string, outputPath stri
 }
 
 func CompileUnitToImage(unit []byte, targetName string, stripSymbols bool, arenaSize int, moduleLicense string) ([]byte, bool) {
-	return renvo.RenvoCompileUnitToBytesWithOptions(unit, targetName, renvo.RenvoCompileOptions{ArenaSize: arenaSize, StripSymbols: stripSymbols, EmitImage: true, ModuleLicense: moduleLicense})
+	return CompileUnitToBytes(unit, targetName, stripSymbols, false, true, arenaSize, moduleLicense)
+}
+
+func CompileUnitToBytes(unit []byte, targetName string, stripSymbols bool, windowsGUI bool, emitImage bool, arenaSize int, moduleLicense string) ([]byte, bool) {
+	return renvo.RenvoCompileUnitToBytesWithOptions(unit, targetName, renvo.RenvoCompileOptions{ArenaSize: arenaSize, StripSymbols: stripSymbols, WindowsGUI: windowsGUI, EmitImage: emitImage, ModuleLicense: moduleLicense})
 }
