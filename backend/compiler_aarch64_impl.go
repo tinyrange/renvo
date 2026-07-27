@@ -522,55 +522,6 @@ func renvoAarch64AsmAddRegImm(a *renvoAsm, dst int, src int, imm int) {
 	}
 }
 
-func renvoAarch64AsmFrameStart(a *renvoAsm) int {
-	at := len(a.code)
-	count := 2
-	if renvoTargetOS == renvoOSWindows {
-		// Windows requires every intervening page to be touched when a frame
-		// crosses a guard page. The compact loop patched below handles an
-		// arbitrary calculated frame without reserving one probe per page.
-		count = 8
-	}
-	for i := 0; i < count; i++ {
-		renvoAarch64AsmEmit(a, 0xd503201f) // nop
-	}
-	return at
-}
-
-func renvoAarch64AsmPatchFrame(a *renvoAsm, at int, stackUsed int) {
-	frame := renvoAlignValue(stackUsed, 16)
-	if renvoTargetOS == renvoOSWindows {
-		pages := frame / 4096
-		tail := frame % 4096
-		if frame == 0 {
-			return
-		}
-		// movz x9, #pages
-		renvoPut32At(a.code, at, 0xd2800009|(pages<<5))
-		// cbz x9, tail (five instructions forward)
-		renvoPut32At(a.code, at+4, 0xb40000a9)
-		// loop: sub sp, sp, #1, lsl #12; touch the new page.
-		renvoPut32At(a.code, at+8, 0xd14007ff)
-		renvoPut32At(a.code, at+12, 0xf90003ff)
-		// subs x9, x9, #1; b.ne loop (three instructions back).
-		renvoPut32At(a.code, at+16, 0xf1000529)
-		renvoPut32At(a.code, at+20, 0x54ffffa1)
-		if tail > 0 {
-			renvoPut32At(a.code, at+24, 0xd10003ff|(tail<<10))
-			renvoPut32At(a.code, at+28, 0xf90003ff)
-		}
-		return
-	}
-	high := frame / 4096
-	low := frame % 4096
-	if high > 0 {
-		renvoPut32At(a.code, at, 0xd14003ff|(high<<10))
-	}
-	if low > 0 {
-		renvoPut32At(a.code, at+4, 0xd10003ff|(low<<10))
-	}
-}
-
 func renvoAarch64AsmAddRegReg(a *renvoAsm, dst int, left int, right int) {
 	renvoAarch64AsmEmit(a, 0x8b000000|(right<<16)|(left<<5)|dst)
 }

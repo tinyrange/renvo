@@ -251,65 +251,6 @@ func renvo386AsmMovRdxImm(a *renvoAsm, imm int) {
 	renvoAsmEmit32(a, imm)
 }
 
-func renvo386AsmMovRaxDataAddr(a *renvoAsm, dataOff int) {
-	if renvoTargetOS == renvoOSLinux {
-		renvo386AsmMovRegPCRel(a, 0, dataOff, 0)
-		return
-	}
-	renvoAsmEmit8(a, 0xb8)
-	at := len(a.code)
-	renvoAsmEmit32(a, 0)
-	renvoAsmAddAbsReloc(a, at, dataOff, 0)
-}
-
-func renvo386AsmMovRaxBssAddr(a *renvoAsm, bssOff int) {
-	if renvoTargetOS == renvoOSLinux {
-		renvo386AsmMovRegPCRel(a, 0, bssOff, renvoAbsBssReloc)
-		return
-	}
-	renvoAsmEmit8(a, 0xb8)
-	at := len(a.code)
-	renvoAsmEmit32(a, 0)
-	renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
-}
-
-func renvo386AsmMovR10BssAddr(a *renvoAsm, bssOff int) {
-	if renvoTargetOS == renvoOSLinux {
-		renvo386AsmMovRegPCRel(a, 3, bssOff, renvoAbsBssReloc)
-		return
-	}
-	renvoAsmEmit8(a, 0xbb)
-	at := len(a.code)
-	renvoAsmEmit32(a, 0)
-	renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
-}
-
-func renvo386AsmLoadRaxBss(a *renvoAsm, bssOff int) {
-	if renvoTargetOS == renvoOSLinux {
-		renvo386AsmMovRegPCRel(a, 0, bssOff, renvoAbsBssReloc)
-		renvoAsmEmit16(a, 0x008b)
-		return
-	}
-	renvoAsmEmit8(a, 0xa1)
-	at := len(a.code)
-	renvoAsmEmit32(a, 0)
-	renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
-}
-
-func renvo386AsmStoreRaxBss(a *renvoAsm, bssOff int) {
-	if renvoTargetOS == renvoOSLinux {
-		renvoAsmEmit8(a, 0x53)
-		renvo386AsmMovRegPCRel(a, 3, bssOff, renvoAbsBssReloc)
-		renvoAsmEmit16(a, 0x0389)
-		renvoAsmEmit8(a, 0x5b)
-		return
-	}
-	renvoAsmEmit8(a, 0xa3)
-	at := len(a.code)
-	renvoAsmEmit32(a, 0)
-	renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
-}
-
 func renvo386AsmMovRdiRax(a *renvoAsm) {
 	renvoAsmEmit16(a, 0xc389)
 }
@@ -1131,73 +1072,8 @@ func renvo386EmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 			renvoAsmEmit16(a, 0x5851)
 			return true
 		}
-		if callee == renvoIdentOpen {
-			if targetIsWindows() {
-				return renvoEmitWindowsOpen(g, ep, idx)
-			}
-			if e.argCount != 2 {
-				return false
-			}
-			if !renvoEmitIntExpr(g, ep, ep.args[e.firstArg+1]) {
-				return false
-			}
-			renvoAsmPushPrimary(a)
-			if !renvoEmitStringPtrExpr(g, ep, ep.args[e.firstArg]) {
-				return false
-			}
-			renvoAsmCopyPrimaryToCallWord0(a)
-			renvoAsmPopTertiary(a)
-			renvoAsmSecondaryImm(a, 493)
-			renvoAsmPrimaryImm(a, renvoLinuxSysOpen())
-			renvoAsmSyscall(a)
-			return true
-		}
-		if callee == renvoIdentClose {
-			if targetIsWindows() {
-				return renvoEmitWindowsClose(g, ep, idx)
-			}
-			if e.argCount != 1 {
-				return false
-			}
-			if !renvoEmitIntExpr(g, ep, ep.args[e.firstArg]) {
-				return false
-			}
-			renvoAsmCopyPrimaryToCallWord0(a)
-			renvoAsmPrimaryImm(a, renvoLinuxSysClose())
-			renvoAsmSyscall(a)
-			return true
-		}
-		if callee == renvoIdentChmod {
-			if targetIsWindows() {
-				return renvoEmitWindowsChmod(g, ep, idx)
-			}
-			if e.argCount != 2 {
-				return false
-			}
-			if !renvoEmitIntExpr(g, ep, ep.args[e.firstArg]) {
-				return false
-			}
-			renvoAsmPushPrimary(a)
-			if !renvoEmitIntExpr(g, ep, ep.args[e.firstArg+1]) {
-				return false
-			}
-			renvoAsmCopyPrimaryToCallWord1(a)
-			renvoAsmPopCallWord0(a)
-			renvoAsmPrimaryImm(a, renvoLinuxSysFchmod())
-			renvoAsmSyscall(a)
-			return true
-		}
-		if callee == renvoIdentRead {
-			if targetIsWindows() {
-				return renvoEmitWindowsReadWrite(g, ep, idx, false)
-			}
-			return renvoEmitBuiltinReadWrite(g, ep, idx, renvoLinuxSysReadSeq(), renvoLinuxSysReadAt())
-		}
-		if callee == renvoIdentWrite {
-			if targetIsWindows() {
-				return renvoEmitWindowsReadWrite(g, ep, idx, true)
-			}
-			return renvoEmitBuiltinReadWrite(g, ep, idx, renvoLinuxSysWriteSeq(), renvoLinuxSysWriteAt())
+		if callee >= renvoIdentOpen && callee <= renvoIdentChmod {
+			return renvoEmitTargetRuntime(g, ep, idx, callee)
 		}
 		if callee == renvoIdentCopy {
 			return renvoEmitBuiltinCopy(g, ep, idx)
@@ -1419,38 +1295,6 @@ func renvo386EmitFloatBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int)
 	}
 	renvoAsmPopTertiary(a)
 	return renvoEmitPrimaryTertiaryOp(g, e.tok)
-}
-
-func renvo386EmitSliceSlotAddrs(g *renvoLinearGen, locEp *renvoExprParse, loc *renvoSliceLocation, elemSize int) bool {
-	a := &g.asm
-	if loc.mem {
-		if !renvoEmitSliceLocationHeaderAddressSecondary(g, locEp, loc) {
-			return false
-		}
-		renvoAsmEmit16(a, 0x5f52)
-		renvoAsmEmit16(a, 0x728d)
-		renvoAsmEmit8(a, 8)
-		return true
-	}
-	if loc.global {
-		if renvoTargetOS == renvoOSLinux {
-			renvo386AsmMovRegPCRel(a, 7, loc.offset, renvoAbsBssReloc)
-			renvo386AsmMovRegPCRel(a, 6, loc.offset+8, renvoAbsBssReloc)
-			return true
-		}
-		renvoAsmEmit16(a, 0x3d8d)
-		at := len(a.code)
-		renvoAsmEmit32(a, 0)
-		renvoAsmAddAbsReloc(a, at, loc.offset, renvoAbsBssReloc)
-		renvoAsmEmit16(a, 0x358d)
-		at = len(a.code)
-		renvoAsmEmit32(a, 0)
-		renvoAsmAddAbsReloc(a, at, loc.offset+8, renvoAbsBssReloc)
-		return true
-	}
-	renvoAsmAddressCallWord0Stack(a, loc.offset)
-	renvoAsmAddressCallWord1Stack(a, loc.offset-8)
-	return true
 }
 
 func renvo386EmitEnsureMemSlice(g *renvoLinearGen, elemSize int) {

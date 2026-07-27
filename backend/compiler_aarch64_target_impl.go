@@ -1,0 +1,304 @@
+package main
+
+const renvoAarch64ELFCodeOffset = 0xb0
+
+func renvoCompileAarch64(input []int, output int, arenaSize int) int {
+	src := make([]byte, 0, 589824)
+	for i := 0; i < len(input); i++ {
+		src = renvoReadAll(input[i], src)
+		src = append(src, '\n')
+	}
+	var prog renvoProgram
+	prog = renvoParseProgram(src)
+	if !prog.ok {
+		return 1
+	}
+	var meta renvoMeta
+	renvoBuildMetaInto(&prog, &meta)
+	if !meta.ok {
+		return 1
+	}
+	meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
+	var result renvoCompileResult
+	result = renvoTryCompileScalarProgramAarch64Scratch(&prog, &meta)
+	if result.ok {
+		data := result.data
+		if renvoFixedTarget == 0 {
+			data = renvoCompileOutputData(data, renvoTarget)
+		}
+		write(output, data, -1)
+		return 0
+	}
+	renvoPrintErr("renvo: compilation failed\n")
+	return 1
+}
+
+func renvoTryCompileScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+	return renvoTryCompileScalarProgramAarch64Scratch(p, meta)
+}
+
+func renvoTryCompileScalarProgramAarch64Scratch(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+	session := renvoBeginScalarProgramAarch64(p, meta)
+	if session == nil {
+		return renvoCompileResult{}
+	}
+	for !session.stepScratch(64) {
+	}
+	return session.result
+}
+
+func renvoTryCompileScalarProgramAarch64Cached(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+	session := renvoBeginScalarProgramAarch64(p, meta)
+	if session == nil {
+		return renvoCompileResult{}
+	}
+	for !session.stepCached(64) {
+	}
+	return session.result
+}
+
+type renvoAarch64ProgramSession struct {
+	prog       *renvoProgram
+	gen        renvoLinearGen
+	queueIndex int
+	done       bool
+	result     renvoCompileResult
+}
+
+func renvoBeginScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) *renvoAarch64ProgramSession {
+	appIndex := -1
+	for i := 0; i < len(meta.funcs); i++ {
+		if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
+			appIndex = i
+		}
+	}
+	if appIndex < 0 {
+		return nil
+	}
+	session := &renvoAarch64ProgramSession{prog: p}
+	g := &session.gen
+	g.prog = p
+	g.meta = meta
+	g.arenaSize = meta.arenaSize
+	a := &g.asm
+	renvoAsmInit(a)
+	a.codeOffset = renvoAarch64ELFCodeOffset
+	if targetIsWindows() {
+		a.codeOffset = renvoWinSectionRVA
+	}
+	if targetIsDarwin() {
+		a.codeOffset = renvoDarwinArm64CodeOffset
+		if !(renvoFixedTarget == 0 && renvoCompilerEmitImage) {
+			g.darwinEntryOff = a.bssSize
+			a.bssSize += 24
+			renvoAarch64AsmMovRegAbs(a, 9, g.darwinEntryOff, renvoAbsBssReloc)
+			renvoAarch64AsmStoreRegMem(a, 0, 9, 0, 8)
+			renvoAarch64AsmStoreRegMem(a, 1, 9, 8, 8)
+			renvoAarch64AsmStoreRegMem(a, 2, 9, 16, 8)
+		}
+	}
+	if renvoFixedTarget != 0 {
+		g.funcLabels = make([]int, 0, len(meta.funcs))
+	}
+	for i := 0; i < len(meta.funcs); i++ {
+		label := renvoAsmNewLabel(a)
+		g.funcLabels = append(g.funcLabels, label)
+	}
+	renvoInitFuncQueue(g, len(meta.funcs))
+	renvoLinearMarkFunc(g, appIndex)
+	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+		// Give the callable image entry a normal frame and preserve its four
+		// ABI words across runtime/global initialization.
+		renvoAarch64AsmEmit(a, 0xa9bf7bfd)
+		renvoAarch64AsmEmit(a, 0x910003fd)
+		renvoAarch64AsmAddRegImm(a, 31, 31, -32)
+		renvoAarch64AsmStoreRegMem(a, 0, 31, 0, 8)
+		renvoAarch64AsmStoreRegMem(a, 1, 31, 8, 8)
+		renvoAarch64AsmStoreRegMem(a, 2, 31, 16, 8)
+		renvoAarch64AsmStoreRegMem(a, 3, 31, 24, 8)
+	}
+	renvoEmitPersistentArenaReady(g)
+	if !renvoLinearInitGlobals(g) {
+		return nil
+	}
+	entryOK := false
+	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+		entryOK = renvoEmitImageEntryArgsAarch64(g, appIndex)
+	} else if targetIsWindows() {
+		entryOK = renvoEmitProgramEntryArgsWindowsArm64(g, appIndex)
+	} else if targetIsDarwin() {
+		entryOK = renvoEmitProgramEntryArgsDarwinArm64(g, appIndex)
+	} else {
+		entryOK = renvoEmitProgramEntryArgsAarch64(g, appIndex)
+	}
+	if !entryOK {
+		return nil
+	}
+	renvoAsmCallLabel(a, g.funcLabels[appIndex])
+	if !renvoEmitProgramPanicCheck(g) {
+		return nil
+	}
+	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+		renvoAsmLeave(a)
+		renvoAsmRet(a)
+	} else if targetIsWindows() {
+		renvoAarch64AsmMovRegReg(a, 0, renvoAarch64RegRax)
+		renvoWinArm64CallImport(a, renvoWinImportExitProcess)
+		renvoAsmRet(a)
+	} else if targetIsDarwin() {
+		renvoAarch64AsmMovRegReg(a, 0, renvoAarch64RegRax)
+		renvoDarwinArm64CallImport(a, renvoDarwinImportExit)
+		renvoAsmRet(a)
+	} else {
+		renvoAsmCopyPrimaryToCallWord0(a)
+		renvoAsmPrimaryImm(a, 93)
+		renvoAsmSyscall(a)
+	}
+	return session
+}
+
+func renvoEmitImageEntryArgsAarch64(g *renvoLinearGen, appIndex int) bool {
+	app := &g.meta.funcs[appIndex]
+	if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
+		return false
+	}
+	renvoAarch64AsmLoadRegMem(&g.asm, 0, 31, 0, 8)
+	renvoAarch64AsmLoadRegMem(&g.asm, 1, 31, 8, 8)
+	renvoAarch64AsmLoadRegMem(&g.asm, 2, 31, 16, 8)
+	renvoAarch64AsmLoadRegMem(&g.asm, 3, 31, 24, 8)
+	if app.paramCount == 0 {
+		return true
+	}
+	if app.paramCount > 2 || !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam].typ) {
+		return false
+	}
+	// Native entry ABI: X0=argsData, X1=argsLen, X2=envData,
+	// X3=envLen. Renvo slice words use X3/X4/X1 and X2/X5/X6.
+	if app.paramCount == 2 {
+		if !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+1].typ) {
+			return false
+		}
+		renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegR8, 3)
+		renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegR9, 3)
+	}
+	renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegRdi, 0)
+	renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegRsi, 1)
+	return true
+}
+
+func (s *renvoAarch64ProgramSession) step(functionLimit int) bool {
+	return s.stepCached(functionLimit)
+}
+
+func (s *renvoAarch64ProgramSession) stepScratch(functionLimit int) bool {
+	if s == nil || s.done {
+		return true
+	}
+	if functionLimit < 1 {
+		functionLimit = 1
+	}
+	emitted := 0
+	for s.queueIndex < len(s.gen.funcQueue) && emitted < functionLimit {
+		i := s.gen.funcQueue[s.queueIndex]
+		s.queueIndex++
+		emitted++
+		if !renvoEmitScalarFunctionScratch(&s.gen, i) {
+			return s.failFunction(i)
+		}
+	}
+	return s.finishStep()
+}
+
+func (s *renvoAarch64ProgramSession) stepCached(functionLimit int) bool {
+	if s == nil || s.done {
+		return true
+	}
+	if functionLimit < 1 {
+		functionLimit = 1
+	}
+	emitted := 0
+	for s.queueIndex < len(s.gen.funcQueue) && emitted < functionLimit {
+		i := s.gen.funcQueue[s.queueIndex]
+		s.queueIndex++
+		emitted++
+		if !renvoEmitScalarFunctionObjectCached(&s.gen, i) {
+			return s.failFunction(i)
+		}
+	}
+	return s.finishStep()
+}
+
+func (s *renvoAarch64ProgramSession) failFunction(i int) bool {
+	if targetIsDarwin() {
+		renvoPrintErr("renvo: failed to emit function ")
+		write(2, s.prog.src[s.gen.meta.funcs[i].nameStart:s.gen.meta.funcs[i].nameEnd], -1)
+		renvoPrintErr("\n")
+	}
+	s.done = true
+	return true
+}
+
+func (s *renvoAarch64ProgramSession) finishStep() bool {
+	if s.queueIndex < len(s.gen.funcQueue) {
+		return false
+	}
+	a := &s.gen.asm
+	data := renvoAsmImageAarch64(a)
+	if targetIsWindows() {
+		data = renvoAsmImageWindowsArm64(a)
+	} else if targetIsDarwin() {
+		data = renvoAsmImageDarwinArm64(a)
+	}
+	s.result.data = data
+	s.result.ok = true
+	s.done = true
+	return true
+}
+func renvoAarch64AsmFrameStart(a *renvoAsm) int {
+	at := len(a.code)
+	count := 2
+	if renvoTargetOS == renvoOSWindows {
+		// Windows requires every intervening page to be touched when a frame
+		// crosses a guard page. The compact loop patched below handles an
+		// arbitrary calculated frame without reserving one probe per page.
+		count = 8
+	}
+	for i := 0; i < count; i++ {
+		renvoAarch64AsmEmit(a, 0xd503201f) // nop
+	}
+	return at
+}
+
+func renvoAarch64AsmPatchFrame(a *renvoAsm, at int, stackUsed int) {
+	frame := renvoAlignValue(stackUsed, 16)
+	if renvoTargetOS == renvoOSWindows {
+		pages := frame / 4096
+		tail := frame % 4096
+		if frame == 0 {
+			return
+		}
+		// movz x9, #pages
+		renvoPut32At(a.code, at, 0xd2800009|(pages<<5))
+		// cbz x9, tail (five instructions forward)
+		renvoPut32At(a.code, at+4, 0xb40000a9)
+		// loop: sub sp, sp, #1, lsl #12; touch the new page.
+		renvoPut32At(a.code, at+8, 0xd14007ff)
+		renvoPut32At(a.code, at+12, 0xf90003ff)
+		// subs x9, x9, #1; b.ne loop (three instructions back).
+		renvoPut32At(a.code, at+16, 0xf1000529)
+		renvoPut32At(a.code, at+20, 0x54ffffa1)
+		if tail > 0 {
+			renvoPut32At(a.code, at+24, 0xd10003ff|(tail<<10))
+			renvoPut32At(a.code, at+28, 0xf90003ff)
+		}
+		return
+	}
+	high := frame / 4096
+	low := frame % 4096
+	if high > 0 {
+		renvoPut32At(a.code, at, 0xd14003ff|(high<<10))
+	}
+	if low > 0 {
+		renvoPut32At(a.code, at+4, 0xd10003ff|(low<<10))
+	}
+}
