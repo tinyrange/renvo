@@ -15,9 +15,6 @@ func main() {
 	target := flag.String("t", "", "canonical target for fixed generation")
 	output := flag.String("o", "", "generated Go output")
 	check := flag.Bool("check", false, "fail if the output is stale")
-	builtin := flag.Bool("builtin", false, "emit a checked-in built-in backend block without symbol rewriting")
-	packageName := flag.String("package", "backend", "generated Go package name")
-	goBlock := flag.Int("go-block", 0, "zero-based go backend block for -builtin")
 	flag.Parse()
 	if flag.NArg() == 0 || *output == "" {
 		fmt.Fprintln(os.Stderr, "usage: rtggen -t target/name -o output.go definition.rtg")
@@ -36,12 +33,7 @@ func main() {
 		definitions = append(definitions, resolved)
 	}
 	var generated rtg.GenerateResult
-	if *builtin {
-		if *target == "" || len(definitions) != 1 {
-			fail("built-in generation requires one definition and -t")
-		}
-		generated = rtg.GenerateBuiltinBackend(definitions[0], *target, *packageName, *goBlock)
-	} else if *target == "" {
+	if *target == "" {
 		generated = rtg.GenerateUniversalBackend(definitions)
 	} else {
 		if len(definitions) != 1 {

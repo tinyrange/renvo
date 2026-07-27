@@ -27,73 +27,12 @@ func TestAArch64DefinitionVerticalSlice(t *testing.T) {
 			t.Errorf("fixed %s output retained universal dispatch", target)
 		}
 		if target == "linux/aarch64" {
-			again := GenerateFixedBackend(resolved, target)
-			if !again.Ok || !bytes.Equal(generated.Source, again.Source) {
-				t.Fatal("linux/aarch64 generation is not deterministic")
-			}
-		}
-	}
-}
-
-func TestCheckedInBackendsAreCurrent(t *testing.T) {
-	type output struct {
-		path   string
-		target string
-		block  int
-	}
-	families := []struct {
-		definition string
-		outputs    []output
-	}{
-		{"aarch64.rtg", []output{
-			{"compiler_aarch64_impl.go", "linux/aarch64", 1},
-			{"compiler_aarch64_target_impl.go", "linux/aarch64", 2},
-			{"compiler_linux_aarch64_impl.go", "linux/aarch64", 3},
-			{"compiler_darwin_arm64_impl.go", "darwin/arm64", 4},
-			{"compiler_windows_arm64_impl.go", "windows/arm64", 5},
-		}},
-		{"amd64.rtg", []output{
-			{"compiler_amd64_impl.go", "linux/amd64", 0},
-			{"compiler_amd64_target_impl.go", "linux/amd64", 1},
-			{"compiler_linux_amd64_impl.go", "linux/amd64", 2},
-			{"compiler_windows_amd64_impl.go", "windows/amd64", 3},
-			{"compiler_linux_kernel_amd64_impl.go", "linux-kernel/amd64", 4},
-		}},
-		{"386.rtg", []output{
-			{"compiler_386_impl.go", "linux/386", 0},
-			{"compiler_386_target_impl.go", "linux/386", 1},
-			{"compiler_linux_386_impl.go", "linux/386", 2},
-			{"compiler_windows_386_impl.go", "windows/386", 3},
-		}},
-		{"arm.rtg", []output{
-			{"compiler_arm_impl.go", "linux/arm", 0},
-			{"compiler_linux_arm_impl.go", "linux/arm", 1},
-		}},
-		{"wasm32.rtg", []output{
-			{"compiler_wasm32_impl.go", "wasi/wasm32", 0},
-			{"compiler_wasi_wasm32_impl.go", "wasi/wasm32", 1},
-		}},
-	}
-	for _, family := range families {
-		source, err := os.ReadFile("../../backend/definitions/" + family.definition)
-		if err != nil {
-			t.Fatal(err)
-		}
-		resolved := Resolve(Parse(source, family.definition))
-		if !resolved.Ok {
-			t.Fatalf("%s failed: %#v", family.definition, resolved.Diagnostics)
-		}
-		for _, output := range family.outputs {
-			generated := GenerateBuiltinBackend(resolved, output.target, "main", output.block)
-			if !generated.Ok {
-				t.Fatalf("generate %s: %#v", output.path, generated.Diagnostics)
-			}
-			checkedIn, err := os.ReadFile("../../backend/" + output.path)
+			golden, err := os.ReadFile("testdata/aarch64_linux.golden")
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !bytes.Equal(generated.Source, checkedIn) {
-				t.Errorf("%s is stale; run go generate ./backend/definitions", output.path)
+			if !bytes.Equal(generated.Source, golden) {
+				t.Fatal("linux/aarch64 generated backend is stale; run rtggen")
 			}
 		}
 	}

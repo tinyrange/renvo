@@ -13,7 +13,25 @@ type GenerateResult struct {
 }
 
 func GenerateFixedBackend(resolved ResolveResult, targetName string) GenerateResult {
-	return generateFixedBackend(resolved, targetName, "backend")
+	if !resolved.Ok {
+		diagnostics := make([]Diagnostic, len(resolved.Diagnostics))
+		copy(diagnostics, resolved.Diagnostics)
+		return GenerateResult{Diagnostics: diagnostics}
+	}
+	target, ok := lookupResolvedTarget(resolved, targetName)
+	if !ok {
+		return GenerateResult{Diagnostics: []Diagnostic{{
+			Filename: resolved.Document.Filename,
+			Span:     sourceSpan(resolved.Document.Source, 0, 0),
+			Code:     "RTG-GENERATE-001",
+			Message:  "definition does not export target " + targetName,
+		}}}
+	}
+	manifest := []string{resolved.Document.Unit + " " + HashText(resolved.Document.Hash)}
+	source := generateHeader(manifest, target.Descriptor.Name)
+	source = appendDescriptorSource(source, target.Descriptor)
+	source = appendEmbeddedGo(source, resolved.Document)
+	return GenerateResult{Source: source, Descriptor: target.Descriptor, Manifest: manifest, Ok: true}
 }
 
 // GeneratePreparedBackend emits a closed definition as one package-main source
@@ -48,89 +66,6 @@ func GeneratePreparedBackend(resolved ResolveResult, targetName string) Generate
 		source = append(source, '\n')
 	}
 	return GenerateResult{Source: source, Descriptor: target.Descriptor, Manifest: manifest, Ok: true}
-}
-
-func generateFixedBackend(resolved ResolveResult, targetName string, packageName string) GenerateResult {
-	if !resolved.Ok {
-		diagnostics := make([]Diagnostic, len(resolved.Diagnostics))
-		copy(diagnostics, resolved.Diagnostics)
-		return GenerateResult{Diagnostics: diagnostics}
-	}
-	target, ok := lookupResolvedTarget(resolved, targetName)
-	if !ok {
-		return GenerateResult{Diagnostics: []Diagnostic{{
-			Filename: resolved.Document.Filename,
-			Span:     sourceSpan(resolved.Document.Source, 0, 0),
-			Code:     "RTG-GENERATE-001",
-			Message:  "definition does not export target " + targetName,
-		}}}
-	}
-	manifest := []string{resolved.Document.Unit + " " + HashText(resolved.Document.Hash)}
-	source := generateHeaderPackage(manifest, target.Descriptor.Name, packageName)
-	source = appendDescriptorSource(source, target.Descriptor)
-	source = appendEmbeddedGo(source, resolved.Document)
-	return GenerateResult{Source: source, Descriptor: target.Descriptor, Manifest: manifest, Ok: true}
-}
-
-// GenerateBuiltinBackend emits one authored Go block without symbol rewriting.
-// Built-in definitions use it to regenerate the existing compiler source-file
-// boundaries in place. Those checked-in files already own globally unique
-// compiler symbols; external fixed/universal outputs continue to use unit
-// mangling so independently distributed definitions cannot collide.
-func GenerateBuiltinBackend(resolved ResolveResult, targetName string, packageName string, goBlock int) GenerateResult {
-	if !resolved.Ok {
-		diagnostics := make([]Diagnostic, len(resolved.Diagnostics))
-		copy(diagnostics, resolved.Diagnostics)
-		return GenerateResult{Diagnostics: diagnostics}
-	}
-	target, ok := lookupResolvedTarget(resolved, targetName)
-	if !ok {
-		return GenerateResult{Diagnostics: []Diagnostic{{
-			Filename: resolved.Document.Filename,
-			Span:     sourceSpan(resolved.Document.Source, 0, 0),
-			Code:     "RTG-GENERATE-001",
-			Message:  "definition does not export target " + targetName,
-		}}}
-	}
-	manifest := []string{resolved.Document.Unit + " " + HashText(resolved.Document.Hash)}
-	source := generateHeaderPackage(manifest, target.Descriptor.Name, packageName)
-	blockAt := 0
-	found := false
-	for i := 0; i < len(resolved.Document.Declarations); i++ {
-		declaration := resolved.Document.Declarations[i]
-		if declaration.Kind != DeclGo {
-			continue
-		}
-		if blockAt == goBlock {
-			source = append(source, '\n')
-			source = append(source, trimBlockNewlines(declaration.GoSource)...)
-			source = append(source, '\n')
-			found = true
-			break
-		}
-		blockAt++
-	}
-	if !found {
-		return GenerateResult{Diagnostics: []Diagnostic{{
-			Filename: resolved.Document.Filename,
-			Span:     sourceSpan(resolved.Document.Source, 0, 0),
-			Code:     "RTG-GENERATE-003",
-			Message:  "definition has no go backend block at requested index",
-		}}}
-	}
-	return GenerateResult{Source: source, Descriptor: target.Descriptor, Manifest: manifest, Ok: true}
-}
-
-func trimBlockNewlines(source []byte) []byte {
-	start := 0
-	for start < len(source) && (source[start] == '\n' || source[start] == '\r') {
-		start++
-	}
-	end := len(source)
-	for end > start && (source[end-1] == '\n' || source[end-1] == '\r') {
-		end--
-	}
-	return source[start:end]
 }
 
 func GenerateUniversalBackend(definitions []ResolveResult) GenerateResult {
@@ -204,6 +139,18 @@ func generateHeaderPackage(manifest []string, target string, packageName string)
 	source = append(source, packageName...)
 	source = append(source, "\n\n"...)
 	return source
+}
+
+func trimBlockNewlines(source []byte) []byte {
+	start := 0
+	for start < len(source) && (source[start] == '\n' || source[start] == '\r') {
+		start++
+	}
+	end := len(source)
+	for end > start && (source[end-1] == '\n' || source[end-1] == '\r') {
+		end--
+	}
+	return source[start:end]
 }
 
 func appendDescriptorSource(source []byte, descriptor TargetDescriptor) []byte {
