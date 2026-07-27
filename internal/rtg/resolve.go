@@ -1,0 +1,294 @@
+package rtg
+
+const DescriptorVersion = 1
+
+type TargetDescriptor struct {
+	Name         string
+	Aliases      []string
+	OS           string
+	ISA          string
+	WordBits     int
+	PointerBits  int
+	Endian       string
+	ABI          string
+	Runtime      string
+	Executable   string
+	Object       string
+	BuildTags    []string
+	Capabilities []string
+	Definition   [32]byte
+	Version      int
+}
+
+type ResolvedTarget struct {
+	Declaration Declaration
+	Descriptor  TargetDescriptor
+	Arch        Declaration
+	ABI         Declaration
+	Runtime     Declaration
+	Executable  Declaration
+	Object      Declaration
+}
+
+type ResolveResult struct {
+	Document    Document
+	Targets     []ResolvedTarget
+	Diagnostics []Diagnostic
+	Ok          bool
+}
+
+func Resolve(document Document) ResolveResult {
+	result := ResolveResult{Document: document, Ok: document.Ok}
+	if !document.Ok {
+		result.Diagnostics = append(result.Diagnostics, document.Diagnostics...)
+		return result
+	}
+	for i := 0; i < len(document.Declarations); i++ {
+		if document.Declarations[i].Kind != DeclTarget {
+			continue
+		}
+		target, diagnostic, ok := resolveTarget(document, document.Declarations[i])
+		if !ok {
+			result.Diagnostics = append(result.Diagnostics, diagnostic)
+			result.Ok = false
+			continue
+		}
+		for j := 0; j < len(result.Targets); j++ {
+			if targetNameCollides(target.Descriptor, result.Targets[j].Descriptor) {
+				result.Diagnostics = append(result.Diagnostics, resolveDiagnostic(document, document.Declarations[i], "RTG-RESOLVE-001", "canonical target or alias collision for "+target.Descriptor.Name))
+				result.Ok = false
+			}
+		}
+		result.Targets = append(result.Targets, target)
+	}
+	if len(result.Targets) == 0 && hasMachineDeclaration(document) {
+		result.Diagnostics = append(result.Diagnostics, Diagnostic{
+			Filename: document.Filename,
+			Span:     sourceSpan(document.Source, 0, 0),
+			Code:     "RTG-RESOLVE-002",
+			Message:  "machine definition exports no targets",
+		})
+		result.Ok = false
+	}
+	return result
+}
+
+func ResolveDefinitions(parsed Document) ResolveResult {
+	return Resolve(parsed)
+}
+
+func resolveTarget(document Document, declaration Declaration) (ResolvedTarget, Diagnostic, bool) {
+	target := ResolvedTarget{Declaration: declaration}
+	target.Descriptor.Name = declaration.Name
+	target.Descriptor.OS = targetOS(declaration.Name)
+	target.Descriptor.Version = DescriptorVersion
+	target.Descriptor.Definition = document.Hash
+
+	archName, ok := requiredNameField(document, declaration, "arch")
+	if !ok {
+		return target, resolveDiagnostic(document, declaration, "RTG-RESOLVE-003", "target "+declaration.Name+" is missing arch"), false
+	}
+	abiName, ok := requiredNameField(document, declaration, "abi")
+	if !ok {
+		return target, resolveDiagnostic(document, declaration, "RTG-RESOLVE-004", "target "+declaration.Name+" is missing abi"), false
+	}
+	runtimeName, ok := requiredNameField(document, declaration, "runtime")
+	if !ok {
+		return target, resolveDiagnostic(document, declaration, "RTG-RESOLVE-005", "target "+declaration.Name+" is missing runtime"), false
+	}
+	var diagnostic Diagnostic
+	target.Arch, diagnostic, ok = requireDeclaration(document, DeclArch, archName, declaration)
+	if !ok {
+		return target, diagnostic, false
+	}
+	target.ABI, diagnostic, ok = requireDeclaration(document, DeclABI, abiName, declaration)
+	if !ok {
+		return target, diagnostic, false
+	}
+	target.Runtime, diagnostic, ok = requireDeclaration(document, DeclRuntime, runtimeName, declaration)
+	if !ok {
+		return target, diagnostic, false
+	}
+	target.Descriptor.ABI = abiName
+	target.Descriptor.Runtime = runtimeName
+	target.Descriptor.ISA = archName
+	if alias, found := fieldValue(document, target.Arch, "alias"); found {
+		target.Descriptor.ISA = valueName(alias)
+	}
+	target.Descriptor.WordBits, ok = integerField(document, target.Arch, "word_bits")
+	if !ok || target.Descriptor.WordBits != 8 && target.Descriptor.WordBits != 16 &&
+		target.Descriptor.WordBits != 32 && target.Descriptor.WordBits != 64 {
+		return target, resolveDiagnostic(document, target.Arch, "RTG-RESOLVE-006", "architecture "+archName+" has invalid word_bits"), false
+	}
+	target.Descriptor.PointerBits, ok = integerField(document, target.Arch, "pointer_bits")
+	if !ok {
+		target.Descriptor.PointerBits = target.Descriptor.WordBits
+	}
+	if target.Descriptor.PointerBits != 8 && target.Descriptor.PointerBits != 16 &&
+		target.Descriptor.PointerBits != 32 && target.Descriptor.PointerBits != 64 {
+		return target, resolveDiagnostic(document, target.Arch, "RTG-RESOLVE-007", "architecture "+archName+" has invalid pointer_bits"), false
+	}
+	endian, found := fieldValue(document, target.Arch, "endian")
+	if !found || valueName(endian) != "little" && valueName(endian) != "big" {
+		return target, resolveDiagnostic(document, target.Arch, "RTG-RESOLVE-008", "architecture "+archName+" has invalid endian"), false
+	}
+	target.Descriptor.Endian = valueName(endian)
+
+	if value, found := fieldValue(document, declaration, "executable"); found {
+		name := valueName(value)
+		target.Executable, diagnostic, ok = requireDeclaration(document, DeclFormat, name, declaration)
+		if !ok {
+			return target, diagnostic, false
+		}
+		target.Descriptor.Executable = name
+	}
+	if value, found := fieldValue(document, declaration, "object"); found {
+		name := valueName(value)
+		target.Object, diagnostic, ok = requireDeclaration(document, DeclFormat, name, declaration)
+		if !ok {
+			return target, diagnostic, false
+		}
+		target.Descriptor.Object = name
+	}
+	if target.Descriptor.Executable == "" && target.Descriptor.Object == "" {
+		return target, resolveDiagnostic(document, declaration, "RTG-RESOLVE-009", "target "+declaration.Name+" has no output format"), false
+	}
+	target.Descriptor.Aliases = listField(document, declaration, "aliases")
+	target.Descriptor.BuildTags = listField(document, declaration, "build_tags")
+	target.Descriptor.Capabilities = listField(document, declaration, "capabilities")
+	sortStrings(target.Descriptor.Aliases)
+	sortStrings(target.Descriptor.BuildTags)
+	sortStrings(target.Descriptor.Capabilities)
+	return target, Diagnostic{}, true
+}
+
+func requireDeclaration(document Document, kind string, name string, owner Declaration) (Declaration, Diagnostic, bool) {
+	declaration, ok := document.Declaration(kind, name)
+	if ok {
+		return declaration, Diagnostic{}, true
+	}
+	return Declaration{}, resolveDiagnostic(document, owner, "RTG-RESOLVE-010", owner.Kind+" "+owner.Name+" references unknown "+kind+" "+name), false
+}
+
+func fieldValue(document Document, declaration Declaration, name string) (string, bool) {
+	for i := 0; i < len(declaration.Fields); i++ {
+		if declaration.Fields[i].Name == name {
+			field := declaration.Fields[i]
+			return compactSource(document.Source[field.ValueStart:field.ValueEnd]), true
+		}
+	}
+	return "", false
+}
+
+func requiredNameField(document Document, declaration Declaration, name string) (string, bool) {
+	value, ok := fieldValue(document, declaration, name)
+	if !ok {
+		return "", false
+	}
+	value = valueName(value)
+	return value, value != ""
+}
+
+func integerField(document Document, declaration Declaration, name string) (int, bool) {
+	value, ok := fieldValue(document, declaration, name)
+	if !ok {
+		return 0, false
+	}
+	return parseInteger(value)
+}
+
+func listField(document Document, declaration Declaration, name string) []string {
+	value, ok := fieldValue(document, declaration, name)
+	if !ok || len(value) < 2 || value[0] != '[' || value[len(value)-1] != ']' {
+		return nil
+	}
+	var result []string
+	start := 1
+	for i := 1; i <= len(value)-1; i++ {
+		if i == len(value)-1 || value[i] == ',' {
+			item := valueName(value[start:i])
+			if item != "" {
+				result = append(result, item)
+			}
+			start = i + 1
+		}
+	}
+	return result
+}
+
+func valueName(value string) string {
+	if len(value) >= 2 && (value[0] == '"' || value[0] == '\'' || value[0] == '`') {
+		return unquoteSimple(value)
+	}
+	return value
+}
+
+func compactSource(source []byte) string {
+	tokens, diagnostics := scan(source, "")
+	if len(diagnostics) != 0 {
+		return ""
+	}
+	return compactTokens(source, tokens)
+}
+
+func parseInteger(text string) (int, bool) {
+	base := 10
+	at := 0
+	if len(text) > 2 && text[0] == '0' && text[1] == 'x' {
+		base = 16
+		at = 2
+	}
+	if at == len(text) {
+		return 0, false
+	}
+	value := 0
+	for at < len(text) {
+		digit := int(text[at] - '0')
+		if text[at] >= 'a' && text[at] <= 'f' {
+			digit = int(text[at]-'a') + 10
+		} else if text[at] >= 'A' && text[at] <= 'F' {
+			digit = int(text[at]-'A') + 10
+		}
+		if digit < 0 || digit >= base || value > (1073741824-digit)/base {
+			return 0, false
+		}
+		value = value*base + digit
+		at++
+	}
+	return value, true
+}
+
+func targetNameCollides(left TargetDescriptor, right TargetDescriptor) bool {
+	leftNames := append([]string{left.Name}, left.Aliases...)
+	rightNames := append([]string{right.Name}, right.Aliases...)
+	for i := 0; i < len(leftNames); i++ {
+		for j := 0; j < len(rightNames); j++ {
+			if leftNames[i] == rightNames[j] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func targetOS(name string) string {
+	for i := 0; i < len(name); i++ {
+		if name[i] == '/' {
+			return name[:i]
+		}
+	}
+	return ""
+}
+
+func hasMachineDeclaration(document Document) bool {
+	for i := 0; i < len(document.Declarations); i++ {
+		if document.Declarations[i].Kind != DeclSystem && document.Declarations[i].Kind != DeclGo {
+			return true
+		}
+	}
+	return false
+}
+
+func resolveDiagnostic(document Document, declaration Declaration, code string, message string) Diagnostic {
+	return Diagnostic{Filename: document.Filename, Span: declaration.Span, Code: code, Message: message}
+}

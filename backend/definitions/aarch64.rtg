@@ -1,0 +1,119 @@
+definition 1
+unit aarch64
+implements direct_emitter_v1
+
+# The first generated vertical slice deliberately contains complete target
+# composition plus a small executable encoder boundary. Later migrations add
+# operation bindings without changing this file's public target identities.
+go backend {
+	func encodeRET(register uint32) uint32 {
+		return 0xd65f0000 | (register & 31) << 5
+	}
+
+	func encodeADDImmediate(destination uint32, source uint32, value uint32) uint32 {
+		return 0x91000000 | (value & 0xfff) << 10 |
+			(source & 31) << 5 | destination & 31
+	}
+
+	func encodeMOVZ(destination uint32, value uint32, shift uint32) uint32 {
+		return 0xd2800000 | ((shift / 16) & 3) << 21 |
+			(value & 0xffff) << 5 | destination & 31
+	}
+
+	func encodeB(displacement int32) uint32 {
+		return 0x14000000 | uint32(displacement >> 2) & 0x03ffffff
+	}
+}
+
+arch aarch64 {
+	alias = "aarch64"
+	endian = little
+	word_bits = 64
+	pointer_bits = 64
+	instruction_alignment = 4
+
+	registers gpr64 = [
+		x0, x1, x2, x3, x4, x5, x6, x7,
+		x8, x9, x10, x11, x12, x13, x14, x15,
+		x16, x17, x18, x19, x20, x21, x22, x23,
+		x24, x25, x26, x27, x28, x29, x30, sp
+	]
+
+	instructions {
+		ret = go encodeRET
+		add_immediate = go encodeADDImmediate
+		move_wide_zero = go encodeMOVZ
+		branch = go encodeB
+	}
+}
+
+abi aapcs64 {
+	arch = aarch64
+	arguments = [x0, x1, x2, x3, x4, x5, x6, x7]
+	result = [x0, x1]
+	stack_alignment = 16
+}
+
+abi windows_arm64 {
+	arch = aarch64
+	arguments = [x0, x1, x2, x3, x4, x5, x6, x7]
+	result = [x0, x1]
+	stack_alignment = 16
+}
+
+runtime linux_aarch64 {
+	operations = [print, open, close, read, write, chmod]
+}
+
+runtime darwin_arm64 {
+	operations = [print, open, close, read, write, chmod]
+}
+
+runtime windows_arm64 {
+	operations = [print, open, close, read, write, chmod]
+}
+
+format elf64_aarch64 {
+	byte_order = little
+	address_bits = 64
+	machine = 183
+}
+
+format macho64_arm64 {
+	byte_order = little
+	address_bits = 64
+	cpu = 0x0100000c
+}
+
+format pe64_arm64 {
+	byte_order = little
+	address_bits = 64
+	machine = 0xaa64
+}
+
+target linux/aarch64 {
+	arch = aarch64
+	abi = aapcs64
+	runtime = linux_aarch64
+	executable = elf64_aarch64
+	build_tags = [linux, unix, aarch64, arm64]
+	capabilities = [hosted, executable, filesystem, heap, argv, environment]
+}
+
+target darwin/arm64 {
+	arch = aarch64
+	abi = aapcs64
+	runtime = darwin_arm64
+	executable = macho64_arm64
+	build_tags = [darwin, unix, aarch64, arm64]
+	capabilities = [hosted, executable, filesystem, heap, argv, environment]
+}
+
+target windows/arm64 {
+	arch = aarch64
+	abi = windows_arm64
+	runtime = windows_arm64
+	executable = pe64_arm64
+	build_tags = [windows, aarch64, arm64]
+	capabilities = [hosted, executable, filesystem, heap, argv, environment, windows_gui]
+}
