@@ -27,6 +27,8 @@ func validateArch(document Document, declaration Declaration, goNames []string) 
 	seenRegisters := []string{}
 	seenForms := []string{}
 	seenInstructions := []string{}
+	seenExports := []string{}
+	seenExportedAlgorithms := []string{}
 	for i := 0; i < len(declaration.Statements); i++ {
 		statement := declaration.Statements[i]
 		if statementHead(statement, "registers") {
@@ -62,6 +64,30 @@ func validateArch(document Document, declaration Declaration, goNames []string) 
 					diagnostics = append(diagnostics, statementDiagnostic(document, statement.Children[j],
 						"RTG-VALIDATE-011", "unknown embedded Go algorithm "+value[1]))
 				}
+			}
+		}
+		if statementBlockName(statement) == "exports" {
+			for j := 0; j < len(statement.Children); j++ {
+				left, right, assignment := statementAssignment(statement.Children[j])
+				if !assignment || len(left) != 1 || len(right) != 2 || right[0] != "go" {
+					diagnostics = append(diagnostics, statementDiagnostic(document, statement.Children[j],
+						"RTG-VALIDATE-016", "backend export must be name = go algorithm"))
+					continue
+				}
+				if stringIndex(seenExports, left[0]) >= 0 {
+					diagnostics = append(diagnostics, statementDiagnostic(document, statement.Children[j],
+						"RTG-VALIDATE-017", "duplicate backend export "+left[0]))
+				}
+				if stringIndex(seenExportedAlgorithms, right[1]) >= 0 {
+					diagnostics = append(diagnostics, statementDiagnostic(document, statement.Children[j],
+						"RTG-VALIDATE-018", "embedded Go algorithm exported more than once "+right[1]))
+				}
+				if stringIndex(goNames, right[1]) < 0 {
+					diagnostics = append(diagnostics, statementDiagnostic(document, statement.Children[j],
+						"RTG-VALIDATE-011", "unknown embedded Go algorithm "+right[1]))
+				}
+				seenExports = append(seenExports, left[0])
+				seenExportedAlgorithms = append(seenExportedAlgorithms, right[1])
 			}
 		}
 	}

@@ -138,6 +138,9 @@ arch tiny64 {
 	endian = little
 	word_bits = 64
 	pointer_bits = 64
+	exports {
+		renvoTinyAddTwo = go addTwo
+	}
 }
 abi tiny_abi { arch = tiny64 }
 runtime tiny_runtime { operation print { builtin = true } }
@@ -175,7 +178,7 @@ func TestResolveAndGenerateFixedBackend(t *testing.T) {
 	if _, err := goparser.ParseFile(token.NewFileSet(), "generated.go", generated.Source, goparser.AllErrors); err != nil {
 		t.Fatalf("generated source does not parse: %v\n%s", err, generated.Source)
 	}
-	for _, want := range []string{"// target: test/tiny64", "func rtgTinyAddOne", "rtgTinyAddOne(rtgTinyAddOne(value))"} {
+	for _, want := range []string{"// target: test/tiny64", "func rtgTinyAddOne", "func renvoTinyAddTwo", "rtgTinyAddOne(rtgTinyAddOne(value))"} {
 		if !containsText(string(generated.Source), want) {
 			t.Errorf("generated source missing %q:\n%s", want, generated.Source)
 		}

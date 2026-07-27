@@ -551,7 +551,7 @@ func appendMangledEmbeddedGo(source []byte, document Document, nativeEmitter boo
 // architecture-only projection or prevent fixed-target pruning.
 func appendArchitectureEmbeddedGo(source []byte, document Document, arch Declaration, nativeEmitter bool) []byte {
 	roots := architectureGoRoots(arch)
-	return appendReachableEmbeddedGo(source, document, roots, nativeEmitter)
+	return appendReachableEmbeddedGo(source, document, roots, nativeEmitter, architectureExports(arch))
 }
 
 func appendTargetEmbeddedGo(source []byte, document Document, target ResolvedTarget, mangle bool, nativeEmitter bool) []byte {
@@ -576,10 +576,10 @@ func appendTargetEmbeddedGo(source []byte, document Document, target ResolvedTar
 		}
 		return source
 	}
-	return appendReachableEmbeddedGo(source, document, roots, nativeEmitter)
+	return appendReachableEmbeddedGo(source, document, roots, nativeEmitter, architectureExports(target.Arch))
 }
 
-func appendReachableEmbeddedGo(source []byte, document Document, roots []string, nativeEmitter bool) []byte {
+func appendReachableEmbeddedGo(source []byte, document Document, roots []string, nativeEmitter bool, exports []embeddedExport) []byte {
 	body := reachableEmbeddedGo(document, roots)
 	if len(body) == 0 {
 		return source
@@ -587,7 +587,7 @@ func appendReachableEmbeddedGo(source []byte, document Document, roots []string,
 	names := embeddedGoNames(document)
 	prefix := "rtg" + exportedName(document.Unit)
 	source = append(source, '\n')
-	source = appendRewrittenGoMode(source, body, names, prefix, nativeEmitter, &document)
+	source = appendRewrittenGoModeExports(source, body, names, prefix, nativeEmitter, &document, exports)
 	source = append(source, '\n')
 	return source
 }
@@ -597,6 +597,36 @@ func architectureGoRoots(arch Declaration) []string {
 	roots = appendDeclarationGoRoots(roots, arch)
 	sortStrings(roots)
 	return roots
+}
+
+type embeddedExport struct {
+	External string
+	Local    string
+}
+
+func architectureExports(arch Declaration) []embeddedExport {
+	block, ok := declarationBlock(arch, "exports")
+	if !ok {
+		return nil
+	}
+	var exports []embeddedExport
+	for i := 0; i < len(block.Children); i++ {
+		left, right, assignment := statementAssignment(block.Children[i])
+		if !assignment || len(left) != 1 || len(right) != 2 || right[0] != "go" {
+			continue
+		}
+		exports = append(exports, embeddedExport{External: left[0], Local: right[1]})
+	}
+	return exports
+}
+
+func embeddedExternalName(exports []embeddedExport, local string) (string, bool) {
+	for i := 0; i < len(exports); i++ {
+		if exports[i].Local == local {
+			return exports[i].External, true
+		}
+	}
+	return "", false
 }
 
 func appendDeclarationGoRoots(roots []string, declaration Declaration) []string {
@@ -791,6 +821,10 @@ func appendRewrittenGo(out []byte, source []byte, names []string, prefix string)
 }
 
 func appendRewrittenGoMode(out []byte, source []byte, names []string, prefix string, nativeEmitter bool, document *Document) []byte {
+	return appendRewrittenGoModeExports(out, source, names, prefix, nativeEmitter, document, nil)
+}
+
+func appendRewrittenGoModeExports(out []byte, source []byte, names []string, prefix string, nativeEmitter bool, document *Document, exports []embeddedExport) []byte {
 	tokens, diagnostics := scan(source, "")
 	if len(diagnostics) != 0 {
 		return out
@@ -811,6 +845,8 @@ func appendRewrittenGoMode(out []byte, source []byte, names []string, prefix str
 			out = append(out, "renvoRTGAddress"...)
 		} else if nativeEmitter && token.Kind == TokenIdent && nativeEmitterFunction(text) != "" {
 			out = append(out, nativeEmitterFunction(text)...)
+		} else if external, found := embeddedExternalName(exports, text); found && token.Kind == TokenIdent {
+			out = append(out, external...)
 		} else if document != nil && token.Kind == TokenIdent {
 			replacement, found := generatedArchitectureOutput(*document, text)
 			if found {
