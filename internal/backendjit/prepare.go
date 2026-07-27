@@ -9,8 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 
+	"renvo.dev/internal/backendcompiled"
 	"renvo.dev/internal/driver"
 	"renvo.dev/internal/load"
 	"renvo.dev/internal/rtg"
@@ -109,24 +109,17 @@ func Load(source []byte) Prepared {
 }
 
 func preparationSources(backendRoot string, generated rtg.GenerateResult) ([]load.SourceFile, []string, error) {
-	manifest, err := os.ReadFile(filepath.Join(backendRoot, "compiler_sources.txt"))
-	if err != nil {
-		return nil, nil, fmt.Errorf("read backend kernel manifest: %w", err)
-	}
+	_ = backendRoot
 	excluded := excludedFamily(generated.Descriptor)
 	sources := []load.SourceFile{{Path: "/backend/go.mod", Src: []byte("module renvo.dev/prepared-backend\n")}}
 	var names []string
-	for _, line := range strings.Split(string(manifest), "\n") {
-		name := strings.TrimSpace(line)
+	for _, embedded := range backendcompiled.CompilerSources {
+		name := embedded.Name
 		if name == "" || excluded[name] {
 			continue
 		}
-		source, err := os.ReadFile(filepath.Join(backendRoot, name))
-		if err != nil {
-			return nil, nil, fmt.Errorf("read backend kernel source %s: %w", name, err)
-		}
 		path := load.JoinPath("/backend", name)
-		sources = append(sources, load.SourceFile{Path: path, Src: source})
+		sources = append(sources, load.SourceFile{Path: path, Src: []byte(embedded.Source)})
 		names = append(names, path)
 	}
 	generatedPath := "/backend/compiler_rtg_prepared_impl.go"

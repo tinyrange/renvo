@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"renvo.dev/internal/backendcompiled"
 	"renvo.dev/internal/backendjit"
 	"renvo.dev/internal/bootstrap"
 	"renvo.dev/internal/driver"
@@ -32,7 +33,7 @@ func main() {
 }
 
 func checkoutBackend() driver.Backend {
-	return driver.CommandBackend{Path: "go", Args: []string{"run", checkoutBackendRoot()}}
+	return backendcompiled.Backend{}
 }
 
 func checkoutBackendRoot() string {
