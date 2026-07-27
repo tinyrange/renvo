@@ -117,3 +117,3077 @@ target windows/arm64 {
 	build_tags = [windows, aarch64, arm64]
 	capabilities = [hosted, executable, filesystem, heap, argv, environment, windows_gui]
 }
+
+# BEGIN CHECKED-IN BACKEND SOURCE AUTHORITY
+
+# backend/compiler_aarch64_impl.go
+go backend {
+
+const renvoAarch64RegRax = 0
+const renvoAarch64RegRdx = 1
+const renvoAarch64RegRcx = 2
+const renvoAarch64RegRdi = 3
+const renvoAarch64RegRsi = 4
+const renvoAarch64RegR8 = 5
+const renvoAarch64RegR9 = 6
+const renvoAarch64RegR10 = 7
+const renvoAarch64RegSys = 8
+const renvoAarch64RegTmp = 9
+const renvoAarch64RegTmp2 = 10
+const renvoAarch64RegAddr = 12
+const renvoAarch64RegFp = 29
+const renvoAarch64RegLr = 30
+const renvoAarch64RegZr = 31
+
+func renvoAarch64EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
+	a := &g.asm
+	metaFn := &g.meta.funcs[fnInfoIndex]
+	fn := &g.prog.funcs[metaFn.declIndex]
+	oldLocals := g.locals
+	oldLocalCount := g.localCount
+	oldBreak := g.breakDepth
+	oldContinue := g.continueDepth
+	oldCurrent := g.currentFunc
+	oldReturnStruct := g.returnStruct
+	oldClosureEnvOffset := g.closureEnvOffset
+	oldDeferHeadOffset := g.deferHeadOffset
+	oldDeferReturnLabel := g.deferReturnLabel
+	oldDeferResultOffset := g.deferResultOffset
+	oldDeferSites := g.deferSites
+	oldEmittingDefers := g.emittingDefers
+	oldSuppressPanicCheck := g.suppressPanicCheck
+	oldStackUsed := g.stackUsed
+	oldStackPeak := g.stackPeak
+	oldGotoLabels := g.gotoLabels
+	oldLastRangeReturns := g.lastRangeReturns
+	var locals []renvoLocalInfo
+	var gotoLabels []renvoGlobalInfo
+	locals = make([]renvoLocalInfo, renvoFunctionLocalCap(fn))
+	gotoLabels = make([]renvoGlobalInfo, 0, 0)
+	g.locals = locals
+	g.localCount = 0
+	g.gotoLabels = gotoLabels
+	g.breakDepth = 0
+	g.continueDepth = 0
+	g.pendingControl = 0
+	g.currentFunc = fnInfoIndex
+	g.returnStruct = 0
+	g.closureEnvOffset = 0
+	g.stackUsed = 0
+	g.stackPeak = 0
+	renvoAarch64AsmAlign(a)
+	renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
+	renvoAarch64AsmEmit(a, 0xa9bf7bfd)
+	renvoAarch64AsmEmit(a, 0x910003fd)
+	framePatch := renvoAarch64AsmFrameStart(a)
+	if renvoTypeUsesHiddenResult(g.meta, metaFn.resultType) {
+		g.returnStruct = renvoAddTypedLocal(g, 0, 0, renvoTypeInt)
+		renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRdi, g.returnStruct)
+	}
+	renvoBindFunctionParams(g, fnInfoIndex)
+	if !renvoBindClosureCaptures(g, fnInfoIndex) {
+		return false
+	}
+	if !renvoBindNamedResults(g, fnInfoIndex) {
+		return false
+	}
+	if !renvoPrepareFunctionControl(g) {
+		return false
+	}
+	if !renvoEmitLinearRange(g, fn.bodyStart+1, fn.bodyEnd) {
+		return false
+	}
+	if g.deferReturnLabel > 0 {
+		if !g.lastRangeReturns {
+			renvoAsmJmpLabel(a, g.deferReturnLabel)
+		}
+		if !renvoEmitFunctionControlEpilogue(g) {
+			return false
+		}
+	} else if !g.lastRangeReturns {
+		renvoMoveCapturedLocals(g, true)
+		renvoAsmPrimaryImm(a, 0)
+		renvoAsmLeave(a)
+		renvoAsmRet(a)
+	}
+	renvoAarch64AsmPatchFrame(a, framePatch, g.stackPeak)
+	g.locals = oldLocals
+	g.localCount = oldLocalCount
+	g.breakDepth = oldBreak
+	g.continueDepth = oldContinue
+	g.currentFunc = oldCurrent
+	g.returnStruct = oldReturnStruct
+	g.closureEnvOffset = oldClosureEnvOffset
+	g.deferHeadOffset = oldDeferHeadOffset
+	g.deferReturnLabel = oldDeferReturnLabel
+	g.deferResultOffset = oldDeferResultOffset
+	g.deferSites = oldDeferSites
+	g.emittingDefers = oldEmittingDefers
+	g.suppressPanicCheck = oldSuppressPanicCheck
+	g.stackUsed = oldStackUsed
+	g.stackPeak = oldStackPeak
+	g.gotoLabels = oldGotoLabels
+	g.lastRangeReturns = oldLastRangeReturns
+	return true
+}
+
+func renvoAarch64StoreParamWord(g *renvoLinearGen, reg int, offset int) {
+	a := &g.asm
+	if reg == 0 {
+		renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRdi, offset)
+		return
+	}
+	if reg == 1 {
+		renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRsi, offset)
+		return
+	}
+	if reg == 2 {
+		renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRdx, offset)
+		return
+	}
+	if reg == 3 {
+		renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRcx, offset)
+		return
+	}
+	if reg == 4 {
+		renvoAarch64AsmStoreRegStack(a, renvoAarch64RegR8, offset)
+		return
+	}
+	if reg == 5 {
+		renvoAarch64AsmStoreRegStack(a, renvoAarch64RegR9, offset)
+		return
+	}
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRax, renvoAarch64RegFp, 16+(reg-6)*16, 8)
+	renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRax, offset)
+}
+
+func renvoAarch64EmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
+	a := &g.asm
+	if wordCount > 0 {
+		renvoAarch64AsmPopReg(a, renvoAarch64RegRdi)
+	}
+	if wordCount > 1 {
+		renvoAarch64AsmPopReg(a, renvoAarch64RegRsi)
+	}
+	if wordCount > 2 {
+		renvoAarch64AsmPopReg(a, renvoAarch64RegRdx)
+	}
+	if wordCount > 3 {
+		renvoAarch64AsmPopReg(a, renvoAarch64RegRcx)
+	}
+	if wordCount > 4 {
+		renvoAarch64AsmPopReg(a, renvoAarch64RegR8)
+	}
+	if wordCount > 5 {
+		renvoAarch64AsmPopReg(a, renvoAarch64RegR9)
+	}
+	renvoAsmCallLabel(a, g.funcLabels[fnIndex])
+	if wordCount > 6 {
+		renvoAarch64AsmAddRegImm(a, 31, 31, (wordCount-6)*16)
+	}
+}
+
+func renvoAarch64EmitRaxRcxOp(g *renvoLinearGen, tok int) bool {
+	a := &g.asm
+	p := g.prog
+	if tok < 0 || tok >= renvoTokCount(p) {
+		return false
+	}
+	start := renvoTokStart(p, tok)
+	end := renvoTokEnd(p, tok)
+	if start >= end {
+		return false
+	}
+	c0 := p.src[start]
+	c1 := byte(0)
+	if start+1 < end {
+		c1 = p.src[start+1]
+	}
+	if c0 == '+' {
+		renvoAarch64AsmAddRegReg(a, renvoAarch64RegRax, renvoAarch64RegRcx, renvoAarch64RegRax)
+		return true
+	}
+	if c0 == '-' {
+		renvoAarch64AsmSubRegReg(a, renvoAarch64RegRax, renvoAarch64RegRcx, renvoAarch64RegRax)
+		return true
+	}
+	if c0 == '*' {
+		renvoAarch64AsmEmit(a, 0x9b007c40)
+		return true
+	}
+	if c0 == '/' {
+		renvoAarch64AsmDivLeftRcxRightRax(a, false)
+		return true
+	}
+	if c0 == '%' {
+		renvoAarch64AsmDivLeftRcxRightRax(a, true)
+		return true
+	}
+	if c0 == '&' {
+		if c1 == '^' {
+			renvoAarch64AsmEmit(a, 0x8a200040)
+		} else {
+			renvoAarch64AsmEmit(a, 0x8a000040)
+		}
+		return true
+	}
+	if c0 == '|' {
+		renvoAarch64AsmEmit(a, 0xaa000040)
+		return true
+	}
+	if c0 == '^' {
+		renvoAarch64AsmEmit(a, 0xca000040)
+		return true
+	}
+	if c0 == '<' {
+		if c1 == '<' {
+			renvoAarch64AsmEmit(a, 0x9ac02040)
+		} else if c1 == '=' {
+			renvoAarch64AsmCmpRcxRaxSet(a, 0x9e)
+		} else {
+			renvoAarch64AsmCmpRcxRaxSet(a, 0x9c)
+		}
+		return true
+	}
+	if c0 == '>' {
+		if c1 == '>' {
+			renvoAarch64AsmEmit(a, 0x9ac02840)
+		} else if c1 == '=' {
+			renvoAarch64AsmCmpRcxRaxSet(a, 0x9d)
+		} else {
+			renvoAarch64AsmCmpRcxRaxSet(a, 0x9f)
+		}
+		return true
+	}
+	if c0 == '=' && c1 == '=' {
+		renvoAarch64AsmCmpRcxRaxSet(a, 0x94)
+		return true
+	}
+	if c0 == '!' && c1 == '=' {
+		renvoAarch64AsmCmpRcxRaxSet(a, 0x95)
+		return true
+	}
+	return false
+}
+
+func renvoAarch64EmitFloatBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+	p := g.prog
+	a := &g.asm
+	e := &ep.exprs[idx]
+	if renvoTokCharIs(p, e.tok, '*') {
+		if !renvoEmitScalarExprForKind(g, ep, e.left, renvoTypeFloat64) {
+			return false
+		}
+		renvoAsmPushPrimary(a)
+		if !renvoEmitScalarExprForKind(g, ep, e.right, renvoTypeFloat64) {
+			return false
+		}
+		renvoAsmPopTertiary(a)
+		renvoAarch64AsmEmit(a, 0x9b007c40)
+		renvoAsmSarPrimaryImm(a, 2)
+		return true
+	}
+	if renvoTokCharIs(p, e.tok, '/') {
+		if !renvoEmitScalarExprForKind(g, ep, e.left, renvoTypeFloat64) {
+			return false
+		}
+		renvoAsmShlPrimaryImm(a, 2)
+		renvoAsmPushPrimary(a)
+		if !renvoEmitScalarExprForKind(g, ep, e.right, renvoTypeFloat64) {
+			return false
+		}
+		renvoAsmPopTertiary(a)
+		renvoAsmDivLeftTertiaryRightPrimary(a, false)
+		return true
+	}
+	if !renvoEmitScalarExprForKind(g, ep, e.left, renvoTypeFloat64) {
+		return false
+	}
+	renvoAsmPushPrimary(a)
+	if !renvoEmitScalarExprForKind(g, ep, e.right, renvoTypeFloat64) {
+		return false
+	}
+	renvoAsmPopTertiary(a)
+	return renvoEmitPrimaryTertiaryOp(g, e.tok)
+}
+
+func renvoAarch64EnsureAppendAddrHelper(g *renvoLinearGen) int {
+	a := &g.asm
+	if g.appendAddrEmitted {
+		return g.appendAddrLabel
+	}
+	arenaAllocLabel := renvoEnsureArenaAllocHelper(g)
+	g.appendAddrEmitted = true
+	g.appendAddrLabel = renvoAsmNewLabel(a)
+	afterLabel := renvoAsmNewLabel(a)
+	renvoAsmJmpMarkLabel(a, afterLabel, g.appendAddrLabel)
+	noGrowLabel := renvoAsmNewLabel(a)
+	capNonZeroLabel := renvoAsmNewLabel(a)
+	capReadyLabel := renvoAsmNewLabel(a)
+	copyLoopLabel := renvoAsmNewLabel(a)
+	copyDoneLabel := renvoAsmNewLabel(a)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegR8, renvoAarch64RegRsi, 0, 8)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRcx, renvoAarch64RegRsi, 8, 8)
+	renvoAarch64AsmCmpRegReg(a, renvoAarch64RegR8, renvoAarch64RegRcx)
+	renvoAarch64AsmBCondLabel(a, noGrowLabel, 11)
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegR9, renvoAarch64RegRdx)
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegR10, renvoAarch64RegRdi)
+	renvoAarch64AsmCmpRegImm(a, renvoAarch64RegRcx, 0)
+	renvoAarch64AsmBCondLabel(a, capNonZeroLabel, 1)
+	renvoAarch64AsmMovRegImm(a, renvoAarch64RegRcx, 16)
+	renvoAsmJmpMarkLabel(a, capReadyLabel, capNonZeroLabel)
+	renvoAarch64AsmAddRegReg(a, renvoAarch64RegRcx, renvoAarch64RegRcx, renvoAarch64RegR8)
+	renvoAsmMarkLabel(a, capReadyLabel)
+	renvoAarch64AsmMulRegReg(a, renvoAarch64RegTmp, renvoAarch64RegRcx, renvoAarch64RegR9)
+	renvoAsmPushTertiary(a)
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegRax, renvoAarch64RegTmp)
+	renvoAarch64AsmPushReg(a, renvoAarch64RegLr)
+	renvoAsmCallLabel(a, arenaAllocLabel)
+	renvoAarch64AsmPopReg(a, renvoAarch64RegLr)
+	renvoAsmPopTertiary(a)
+	if g.meta.panicEnabled {
+		allocOKLabel := renvoAsmNewLabel(a)
+		renvoAarch64AsmCmpRegImm(a, renvoAarch64RegRax, 0)
+		renvoAarch64AsmBCondLabel(a, allocOKLabel, 1)
+		renvoAsmRet(a)
+		renvoAsmMarkLabel(a, allocOKLabel)
+	}
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegRdx, renvoAarch64RegRax)
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegRdi, renvoAarch64RegRdx)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegTmp2, renvoAarch64RegR10, 0, 8)
+	renvoAarch64AsmMulRegReg(a, renvoAarch64RegTmp, renvoAarch64RegR8, renvoAarch64RegR9)
+	renvoAsmMarkLabel(a, copyLoopLabel)
+	renvoAarch64AsmCmpRegImm(a, renvoAarch64RegTmp, 0)
+	renvoAarch64AsmBCondLabel(a, copyDoneLabel, 0)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRax, renvoAarch64RegTmp2, 0, 1)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRax, renvoAarch64RegRdi, 0, 1)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegTmp2, renvoAarch64RegTmp2, 1)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegRdi, renvoAarch64RegRdi, 1)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegTmp, renvoAarch64RegTmp, -1)
+	renvoAsmJmpMarkLabel(a, copyLoopLabel, copyDoneLabel)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRdx, renvoAarch64RegR10, 0, 8)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRcx, renvoAarch64RegRsi, 8, 8)
+	renvoAarch64AsmMulRegReg(a, renvoAarch64RegTmp, renvoAarch64RegR8, renvoAarch64RegR9)
+	renvoAarch64AsmAddRegReg(a, renvoAarch64RegRax, renvoAarch64RegRdx, renvoAarch64RegTmp)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegR8, renvoAarch64RegR8, 1)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegR8, renvoAarch64RegRsi, 0, 8)
+	renvoAsmRet(a)
+	renvoAsmMarkLabel(a, noGrowLabel)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRax, renvoAarch64RegRdi, 0, 8)
+	renvoAarch64AsmMulRegReg(a, renvoAarch64RegTmp, renvoAarch64RegR8, renvoAarch64RegRdx)
+	renvoAarch64AsmAddRegReg(a, renvoAarch64RegRax, renvoAarch64RegRax, renvoAarch64RegTmp)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegR8, renvoAarch64RegR8, 1)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegR8, renvoAarch64RegRsi, 0, 8)
+	renvoAsmRet(a)
+	renvoAsmMarkLabel(a, afterLabel)
+	return g.appendAddrLabel
+}
+
+func renvoAarch64EnsureAppend8Helper(g *renvoLinearGen) int {
+	a := &g.asm
+	if g.append8Emitted {
+		return g.append8Label
+	}
+	g.append8Emitted = true
+	g.append8Label = renvoAsmNewLabel(a)
+	afterLabel := renvoAsmNewLabel(a)
+	renvoAsmJmpMarkLabel(a, afterLabel, g.append8Label)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRcx, renvoAarch64RegRsi, 0, 8)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegTmp, renvoAarch64RegRdi, 0, 8)
+	renvoAarch64AsmAddRegReg(a, renvoAarch64RegTmp, renvoAarch64RegTmp, renvoAarch64RegRcx)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRdx, renvoAarch64RegTmp, 0, 1)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegRcx, renvoAarch64RegRcx, 1)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRcx, renvoAarch64RegRsi, 0, 8)
+	renvoAsmRet(a)
+	renvoAsmMarkLabel(a, afterLabel)
+	return g.append8Label
+}
+
+func renvoAarch64EnsureAppend64Helper(g *renvoLinearGen) int {
+	a := &g.asm
+	if g.append64Emitted {
+		return g.append64Label
+	}
+	g.append64Emitted = true
+	g.append64Label = renvoAsmNewLabel(a)
+	afterLabel := renvoAsmNewLabel(a)
+	renvoAsmJmpMarkLabel(a, afterLabel, g.append64Label)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRcx, renvoAarch64RegRsi, 0, 8)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegTmp, renvoAarch64RegRdi, 0, 8)
+	renvoAarch64AsmAddRegRegShift(a, renvoAarch64RegTmp, renvoAarch64RegTmp, renvoAarch64RegRcx, 3)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRdx, renvoAarch64RegTmp, 0, 8)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegRcx, renvoAarch64RegRcx, 1)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRcx, renvoAarch64RegRsi, 0, 8)
+	renvoAsmRet(a)
+	renvoAsmMarkLabel(a, afterLabel)
+	return g.append64Label
+}
+
+func renvoAarch64EnsureStringEqualHelper(g *renvoLinearGen) int {
+	a := &g.asm
+	if g.streqEmitted {
+		return g.streqLabel
+	}
+	g.streqEmitted = true
+	g.streqLabel = renvoAsmNewLabel(a)
+	afterLabel := renvoAsmNewLabel(a)
+	notEqualLabel := renvoAsmNewLabel(a)
+	equalLabel := renvoAsmNewLabel(a)
+	loopLabel := renvoAsmNewLabel(a)
+	renvoAsmJmpMarkLabel(a, afterLabel, g.streqLabel)
+	renvoAsmPrimaryImm(a, 0)
+	renvoAarch64AsmCmpRegReg(a, renvoAarch64RegRsi, renvoAarch64RegRcx)
+	renvoAarch64AsmBCondLabel(a, notEqualLabel, 1)
+	renvoAarch64AsmCmpRegImm(a, renvoAarch64RegRsi, 0)
+	renvoAarch64AsmBCondLabel(a, equalLabel, 0)
+	renvoAsmMarkLabel(a, loopLabel)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegTmp, renvoAarch64RegRdi, 0, 1)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegTmp2, renvoAarch64RegRdx, 0, 1)
+	renvoAarch64AsmCmpRegReg(a, renvoAarch64RegTmp, renvoAarch64RegTmp2)
+	renvoAarch64AsmBCondLabel(a, notEqualLabel, 1)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegRdi, renvoAarch64RegRdi, 1)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegRdx, renvoAarch64RegRdx, 1)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegRsi, renvoAarch64RegRsi, -1)
+	renvoAarch64AsmCmpRegImm(a, renvoAarch64RegRsi, 0)
+	renvoAarch64AsmBCondLabel(a, loopLabel, 1)
+	renvoAsmMarkLabel(a, equalLabel)
+	renvoAsmPrimaryImm(a, 1)
+	renvoAsmMarkLabel(a, notEqualLabel)
+	renvoAsmRet(a)
+	renvoAsmMarkLabel(a, afterLabel)
+	return g.streqLabel
+}
+
+func renvoAarch64AsmEmit(a *renvoAsm, insn int) {
+	renvoAsmEmit32(a, insn)
+}
+
+func renvoAarch64AsmAlign(a *renvoAsm) {
+	for len(a.code)%4 != 0 {
+		renvoAsmEmit8(a, 0)
+	}
+}
+
+func renvoAarch64AsmMovRegReg(a *renvoAsm, dst int, src int) {
+	if dst == src {
+		return
+	}
+	renvoAarch64AsmEmit(a, 0xaa0003e0|(src<<16)|dst)
+}
+
+func renvoAarch64AsmMovRegImm(a *renvoAsm, reg int, imm int) {
+	if imm < 0 {
+		inv := -imm - 1
+		part := inv & 65535
+		renvoAarch64AsmEmit(a, 0x92800000|(part<<5)|reg)
+		for i := 1; i < 4; i++ {
+			targetPart := (imm >> (i * 16)) & 65535
+			if targetPart != 65535 {
+				renvoAarch64AsmEmit(a, 0xf2800000|(i<<21)|(targetPart<<5)|reg)
+			}
+		}
+		return
+	}
+	part := imm & 65535
+	renvoAarch64AsmEmit(a, 0xd2800000|(part<<5)|reg)
+	for i := 1; i < 4; i++ {
+		part = (imm >> (i * 16)) & 65535
+		if part != 0 {
+			renvoAarch64AsmEmit(a, 0xf2800000|(i<<21)|(part<<5)|reg)
+		}
+	}
+}
+
+func renvoAarch64AsmPatchMovRegImmAt(a *renvoAsm, at int, reg int, imm int) {
+	part := imm & 65535
+	renvoPut32At(a.code, at, 0xd2800000|(part<<5)|reg)
+	for i := 1; i < 4; i++ {
+		part = (imm >> (i * 16)) & 65535
+		renvoPut32At(a.code, at+i*4, 0xf2800000|(i<<21)|(part<<5)|reg)
+	}
+}
+
+func renvoAarch64AsmMovRegAbs(a *renvoAsm, reg int, off int, kind int) {
+	at := len(a.code)
+	renvoAarch64AsmMovRegImm(a, reg, 0)
+	renvoAarch64AsmEmit(a, 0xf2800000|(1<<21)|reg)
+	renvoAarch64AsmEmit(a, 0xf2800000|(2<<21)|reg)
+	renvoAarch64AsmEmit(a, 0xf2800000|(3<<21)|reg)
+	renvoAsmAddAbsReloc(a, at, off, kind)
+}
+
+func renvoAarch64AsmAddRegImm(a *renvoAsm, dst int, src int, imm int) {
+	if imm == 0 {
+		renvoAarch64AsmMovRegReg(a, dst, src)
+		return
+	}
+	op := 0x91000000
+	if imm < 0 {
+		op = 0xd1000000
+		imm = -imm
+	}
+	cur := src
+	for imm > 0 {
+		shift := 0
+		chunk := imm
+		if chunk > 4095 {
+			chunk = imm / 4096
+			if chunk > 4095 {
+				chunk = 4095
+			}
+			shift = 1
+			imm = imm - chunk*4096
+		} else {
+			imm = 0
+		}
+		renvoAarch64AsmEmit(a, op|(shift<<22)|(chunk<<10)|(cur<<5)|dst)
+		cur = dst
+	}
+}
+
+func renvoAarch64AsmAddRegReg(a *renvoAsm, dst int, left int, right int) {
+	renvoAarch64AsmEmit(a, 0x8b000000|(right<<16)|(left<<5)|dst)
+}
+
+func renvoAarch64AsmSubRegReg(a *renvoAsm, dst int, left int, right int) {
+	renvoAarch64AsmEmit(a, 0xcb000000|(right<<16)|(left<<5)|dst)
+}
+
+func renvoAarch64AsmAddRegRegShift(a *renvoAsm, dst int, left int, right int, shift int) {
+	renvoAarch64AsmEmit(a, 0x8b000000|(right<<16)|(shift<<10)|(left<<5)|dst)
+}
+
+func renvoAarch64AsmMulRegReg(a *renvoAsm, dst int, left int, right int) {
+	renvoAarch64AsmEmit(a, 0x9b007c00|(right<<16)|(left<<5)|dst)
+}
+
+func renvoAarch64AsmAddr(a *renvoAsm, base int, disp int) int {
+	if disp == 0 {
+		return base
+	}
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegAddr, base, disp)
+	return renvoAarch64RegAddr
+}
+
+func renvoAarch64AsmLoadRegMem(a *renvoAsm, dst int, base int, disp int, size int) {
+	if disp != 0 && disp >= -256 && disp <= 255 {
+		imm := (disp & 511) << 12
+		if size == 1 {
+			renvoAarch64AsmEmit(a, 0x38400000|imm|(base<<5)|dst)
+			return
+		}
+		if size == 2 {
+			renvoAarch64AsmEmit(a, 0x78400000|imm|(base<<5)|dst)
+			return
+		}
+		if size == 4 {
+			renvoAarch64AsmEmit(a, 0xb8400000|imm|(base<<5)|dst)
+			return
+		}
+		renvoAarch64AsmEmit(a, 0xf8400000|imm|(base<<5)|dst)
+		return
+	}
+	addr := renvoAarch64AsmAddr(a, base, disp)
+	if size == 1 {
+		renvoAarch64AsmEmit(a, 0x39400000|(addr<<5)|dst)
+		return
+	}
+	if size == 2 {
+		renvoAarch64AsmEmit(a, 0x79800000|(addr<<5)|dst)
+		return
+	}
+	if size == 4 {
+		renvoAarch64AsmEmit(a, 0xb9800000|(addr<<5)|dst)
+		return
+	}
+	renvoAarch64AsmEmit(a, 0xf9400000|(addr<<5)|dst)
+}
+
+func renvoAarch64AsmStoreRegMem(a *renvoAsm, src int, base int, disp int, size int) {
+	if disp != 0 && disp >= -256 && disp <= 255 {
+		imm := (disp & 511) << 12
+		if size == 1 {
+			renvoAarch64AsmEmit(a, 0x38000000|imm|(base<<5)|src)
+			return
+		}
+		if size == 2 {
+			renvoAarch64AsmEmit(a, 0x78000000|imm|(base<<5)|src)
+			return
+		}
+		if size == 4 {
+			renvoAarch64AsmEmit(a, 0xb8000000|imm|(base<<5)|src)
+			return
+		}
+		renvoAarch64AsmEmit(a, 0xf8000000|imm|(base<<5)|src)
+		return
+	}
+	addr := renvoAarch64AsmAddr(a, base, disp)
+	if size == 1 {
+		renvoAarch64AsmEmit(a, 0x39000000|(addr<<5)|src)
+		return
+	}
+	if size == 2 {
+		renvoAarch64AsmEmit(a, 0x79000000|(addr<<5)|src)
+		return
+	}
+	if size == 4 {
+		renvoAarch64AsmEmit(a, 0xb9000000|(addr<<5)|src)
+		return
+	}
+	renvoAarch64AsmEmit(a, 0xf9000000|(addr<<5)|src)
+}
+
+func renvoAarch64AsmLoadRegStack(a *renvoAsm, dst int, offset int) {
+	renvoAarch64AsmLoadRegMem(a, dst, renvoAarch64RegFp, -offset, 8)
+}
+
+func renvoAarch64AsmStoreRegStack(a *renvoAsm, src int, offset int) {
+	renvoAarch64AsmStoreRegMem(a, src, renvoAarch64RegFp, -offset, 8)
+}
+
+func renvoAarch64AsmLeaRegStack(a *renvoAsm, dst int, offset int) {
+	renvoAarch64AsmAddRegImm(a, dst, renvoAarch64RegFp, -offset)
+}
+
+func renvoAarch64AsmPushReg(a *renvoAsm, reg int) {
+	renvoAarch64AsmEmit(a, 0xf81f0fe0|reg)
+}
+
+func renvoAarch64AsmPopReg(a *renvoAsm, reg int) {
+	renvoAarch64AsmEmit(a, 0xf84107e0|reg)
+}
+
+func renvoAarch64AsmMovRaxImm(a *renvoAsm, imm int) {
+	renvoAarch64AsmMovRegImm(a, renvoAarch64RegRax, imm)
+}
+
+func renvoAarch64AsmMovRaxImm64(a *renvoAsm, imm int) {
+	renvoAarch64AsmMovRaxImm(a, imm)
+}
+
+func renvoAarch64AsmMovRdxImm(a *renvoAsm, imm int) {
+	renvoAarch64AsmMovRegImm(a, renvoAarch64RegRdx, imm)
+}
+
+func renvoAarch64AsmMovRaxDataAddr(a *renvoAsm, dataOff int) {
+	renvoAarch64AsmMovRegAbs(a, renvoAarch64RegRax, dataOff, 0)
+}
+
+func renvoAarch64AsmMovRaxBssAddr(a *renvoAsm, bssOff int) {
+	renvoAarch64AsmMovRegAbs(a, renvoAarch64RegRax, bssOff, renvoAbsBssReloc)
+}
+
+func renvoAarch64AsmMovR10BssAddr(a *renvoAsm, bssOff int) {
+	renvoAarch64AsmMovRegAbs(a, renvoAarch64RegR10, bssOff, renvoAbsBssReloc)
+}
+
+func renvoAarch64AsmLoadRaxBss(a *renvoAsm, bssOff int) {
+	renvoAarch64AsmMovRegAbs(a, renvoAarch64RegAddr, bssOff, renvoAbsBssReloc)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRax, renvoAarch64RegAddr, 0, 8)
+}
+
+func renvoAarch64AsmStoreRaxBss(a *renvoAsm, bssOff int) {
+	renvoAarch64AsmMovRegAbs(a, renvoAarch64RegAddr, bssOff, renvoAbsBssReloc)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRax, renvoAarch64RegAddr, 0, 8)
+}
+
+func renvoAarch64AsmMovRdiRax(a *renvoAsm) {
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegRdi, renvoAarch64RegRax)
+}
+
+func renvoAarch64AsmMovRaxRdx(a *renvoAsm) {
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegRax, renvoAarch64RegRdx)
+}
+
+func renvoAarch64AsmMovRdxRax(a *renvoAsm) {
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegRdx, renvoAarch64RegRax)
+}
+
+func renvoAarch64AsmMovRcxRax(a *renvoAsm) {
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegRcx, renvoAarch64RegRax)
+}
+
+func renvoAarch64AsmMovRcxRdx(a *renvoAsm) {
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegRcx, renvoAarch64RegRdx)
+}
+
+func renvoAarch64AsmMovRsiRax(a *renvoAsm) {
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegRsi, renvoAarch64RegRax)
+}
+
+func renvoAarch64AsmMovR8Rax(a *renvoAsm) {
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegR8, renvoAarch64RegRax)
+}
+
+func renvoAarch64AsmMovR9Rax(a *renvoAsm) {
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegR9, renvoAarch64RegRax)
+}
+
+func renvoAarch64AsmAddRdxRcx(a *renvoAsm) {
+	renvoAarch64AsmAddRegReg(a, renvoAarch64RegRdx, renvoAarch64RegRdx, renvoAarch64RegRcx)
+}
+
+func renvoAarch64AsmSyscall(a *renvoAsm) {
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegSys, renvoAarch64RegRax)
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegTmp, renvoAarch64RegRdx)
+	renvoAarch64AsmMovRegReg(a, 0, renvoAarch64RegRdi)
+	renvoAarch64AsmMovRegReg(a, 1, renvoAarch64RegRsi)
+	renvoAarch64AsmMovRegReg(a, 2, renvoAarch64RegTmp)
+	renvoAarch64AsmMovRegReg(a, 3, renvoAarch64RegR10)
+	renvoAarch64AsmEmit(a, 0xd4000001)
+}
+
+func renvoAarch64AsmPopRdi(a *renvoAsm) {
+	renvoAarch64AsmPopReg(a, renvoAarch64RegRdi)
+}
+
+func renvoAarch64AsmPopRsi(a *renvoAsm) {
+	renvoAarch64AsmPopReg(a, renvoAarch64RegRsi)
+}
+
+func renvoAarch64AsmStackMem(a *renvoAsm, offset int, base int, disp8 int, disp32 int) {
+	if base == 0x8948 && disp8 == 0x45 {
+		renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRax, offset)
+		return
+	}
+	if base == 0x8948 && disp8 == 0x55 {
+		renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRdx, offset)
+		return
+	}
+	if base == 0x8948 && disp8 == 0x4d {
+		renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRcx, offset)
+		return
+	}
+	if base == 0x8b48 && disp8 == 0x45 {
+		renvoAarch64AsmLoadRegStack(a, renvoAarch64RegRax, offset)
+		return
+	}
+	if base == 0x8b48 && disp8 == 0x55 {
+		renvoAarch64AsmLoadRegStack(a, renvoAarch64RegRdx, offset)
+		return
+	}
+	if base == 0x8b48 && disp8 == 0x4d {
+		renvoAarch64AsmLoadRegStack(a, renvoAarch64RegRcx, offset)
+		return
+	}
+	if base == 0x8d48 && disp8 == 0x45 {
+		renvoAarch64AsmLeaRegStack(a, renvoAarch64RegRax, offset)
+		return
+	}
+	if base == 0x8d48 && disp8 == 0x55 {
+		renvoAarch64AsmLeaRegStack(a, renvoAarch64RegRdx, offset)
+		return
+	}
+	if base == 0x8d48 && disp8 == 0x7d {
+		renvoAarch64AsmLeaRegStack(a, renvoAarch64RegRdi, offset)
+		return
+	}
+	if base == 0x8d48 && disp8 == 0x75 {
+		renvoAarch64AsmLeaRegStack(a, renvoAarch64RegRsi, offset)
+		return
+	}
+}
+
+func renvoAarch64AsmAddRdxImm(a *renvoAsm, imm int) {
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegRdx, renvoAarch64RegRdx, imm)
+}
+
+func renvoAarch64AsmMemDisp(a *renvoAsm, disp int, op int, disp8 int, disp32 int) {
+	if op == 0x8b48 && disp8 == 0x4a {
+		renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRcx, renvoAarch64RegRdx, disp, 8)
+		return
+	}
+	if op == 0x8b48 && disp8 == 0x52 {
+		renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRdx, renvoAarch64RegRdx, disp, 8)
+		return
+	}
+}
+
+func renvoAarch64AsmLoadQwordRaxIndexRcx8(a *renvoAsm) {
+	renvoAarch64AsmAddRegRegShift(a, renvoAarch64RegAddr, renvoAarch64RegRax, renvoAarch64RegRcx, 3)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRax, renvoAarch64RegAddr, 0, 8)
+}
+
+func renvoAarch64AsmLoadQwordRaxIndexRcxDisp(a *renvoAsm, disp int) {
+	renvoAarch64AsmAddRegReg(a, renvoAarch64RegAddr, renvoAarch64RegRax, renvoAarch64RegRcx)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRax, renvoAarch64RegAddr, disp, 8)
+}
+
+func renvoAarch64AsmLoadRaxMemRdxDisp(a *renvoAsm, disp int) {
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRax, renvoAarch64RegRdx, disp, 8)
+}
+
+func renvoAarch64AsmLoadRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRax, renvoAarch64RegRdx, disp, size)
+}
+
+func renvoAarch64AsmLoadByteRaxIndexRcx(a *renvoAsm) {
+	renvoAarch64AsmAddRegRegShift(a, renvoAarch64RegAddr, renvoAarch64RegRax, renvoAarch64RegRcx, 0)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRax, renvoAarch64RegAddr, 0, 1)
+}
+
+func renvoAarch64AsmLoadRaxIndexRcxSize(a *renvoAsm, size int) {
+	shift := 3
+	if size == 1 {
+		shift = 0
+	}
+	if size == 2 {
+		shift = 1
+	}
+	if size == 4 {
+		shift = 2
+	}
+	renvoAarch64AsmAddRegRegShift(a, renvoAarch64RegAddr, renvoAarch64RegRax, renvoAarch64RegRcx, shift)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRax, renvoAarch64RegAddr, 0, size)
+}
+
+func renvoAarch64AsmStoreRaxMemRdxRcx8(a *renvoAsm) {
+	renvoAarch64AsmAddRegRegShift(a, renvoAarch64RegAddr, renvoAarch64RegRdx, renvoAarch64RegRcx, 3)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRax, renvoAarch64RegAddr, 0, 8)
+}
+
+func renvoAarch64AsmStoreRaxMemRdxDisp(a *renvoAsm, disp int) {
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRax, renvoAarch64RegRdx, disp, 8)
+}
+
+func renvoAarch64AsmStoreRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRax, renvoAarch64RegRdx, disp, size)
+}
+
+func renvoAarch64AsmNormalizeRaxForKind(a *renvoAsm, kind int) {
+	if kind == renvoTypeByte {
+		renvoAarch64AsmEmit(a, 0x92401c00)
+		return
+	}
+	if kind == renvoTypeInt8 {
+		renvoAarch64AsmEmit(a, 0x93401c00)
+		return
+	}
+	if kind == renvoTypeInt16 {
+		renvoAarch64AsmEmit(a, 0x93403c00)
+		return
+	}
+	if kind == renvoTypeUint16 {
+		renvoAarch64AsmEmit(a, 0x92403c00)
+		return
+	}
+	if kind == renvoTypeInt32 {
+		renvoAarch64AsmEmit(a, 0x93407c00)
+		return
+	}
+	if kind == renvoTypeUint32 {
+		renvoAarch64AsmEmit(a, 0x92407c00)
+	}
+}
+
+func renvoAarch64AsmIncMemRdx(a *renvoAsm) {
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegTmp, renvoAarch64RegRdx, 0, 8)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegTmp, renvoAarch64RegTmp, 1)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegTmp, renvoAarch64RegRdx, 0, 8)
+}
+
+func renvoAarch64AsmDecMemRdx(a *renvoAsm) {
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegTmp, renvoAarch64RegRdx, 0, 8)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegTmp, renvoAarch64RegTmp, -1)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegTmp, renvoAarch64RegRdx, 0, 8)
+}
+
+func renvoAarch64AsmBoolNotRax(a *renvoAsm) {
+	renvoAarch64AsmCmpRaxImm8(a, 0)
+	renvoAarch64AsmCsetRax(a, 0)
+}
+
+func renvoAarch64AsmNegRax(a *renvoAsm) {
+	renvoAarch64AsmSubRegReg(a, renvoAarch64RegRax, renvoAarch64RegZr, renvoAarch64RegRax)
+}
+
+func renvoAarch64AsmCmpRaxImm8(a *renvoAsm, imm int) {
+	renvoAarch64AsmCmpRegImm(a, renvoAarch64RegRax, imm)
+}
+
+func renvoAarch64AsmCmpRegImm(a *renvoAsm, reg int, imm int) {
+	if imm >= 0 && imm <= 4095 {
+		renvoAarch64AsmEmit(a, 0xf100001f|(imm<<10)|(reg<<5))
+		return
+	}
+	renvoAarch64AsmMovRegImm(a, renvoAarch64RegTmp, imm)
+	renvoAarch64AsmCmpRegReg(a, reg, renvoAarch64RegTmp)
+}
+
+func renvoAarch64AsmCmpRegReg(a *renvoAsm, left int, right int) {
+	renvoAarch64AsmEmit(a, 0xeb00001f|(right<<16)|(left<<5))
+}
+
+func renvoAarch64AsmCsetRax(a *renvoAsm, cond int) {
+	renvoAarch64AsmEmit(a, 0x9a9f07e0|((cond^1)<<12))
+}
+
+func renvoAarch64AsmAddRaxRcx(a *renvoAsm) {
+	renvoAarch64AsmAddRegReg(a, renvoAarch64RegRax, renvoAarch64RegRax, renvoAarch64RegRcx)
+}
+
+func renvoAarch64AsmSubRaxRcx(a *renvoAsm) {
+	renvoAarch64AsmSubRegReg(a, renvoAarch64RegRax, renvoAarch64RegRax, renvoAarch64RegRcx)
+}
+
+func renvoAarch64AsmShlRcxImm(a *renvoAsm, imm int) {
+	renvoAarch64AsmEmit(a, 0xd3400000|((64-imm)<<16)|((63-imm)<<10)|(renvoAarch64RegRcx<<5)|renvoAarch64RegRcx)
+}
+
+func renvoAarch64AsmShlRaxImm(a *renvoAsm, imm int) {
+	renvoAarch64AsmEmit(a, 0xd3400000|((64-imm)<<16)|((63-imm)<<10))
+}
+
+func renvoAarch64AsmSarRaxImm(a *renvoAsm, imm int) {
+	renvoAarch64AsmEmit(a, 0x9340fc00|(imm<<16))
+}
+
+func renvoAarch64AsmDivLeftRcxRightRax(a *renvoAsm, mod bool) {
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegTmp, renvoAarch64RegRax)
+	renvoAarch64AsmEmit(a, 0x9ac00c40)
+	if mod {
+		renvoAarch64AsmEmit(a, 0x9b098800)
+	}
+}
+
+func renvoAarch64CondFromSetcc(setcc int) int {
+	if setcc == 0x94 {
+		return 0
+	}
+	if setcc == 0x95 {
+		return 1
+	}
+	if setcc == 0x92 {
+		return 3
+	}
+	if setcc == 0x93 {
+		return 2
+	}
+	if setcc == 0x96 {
+		return 9
+	}
+	if setcc == 0x97 {
+		return 8
+	}
+	if setcc == 0x9c {
+		return 11
+	}
+	if setcc == 0x9e {
+		return 13
+	}
+	if setcc == 0x9f {
+		return 12
+	}
+	return 10
+}
+
+func renvoAarch64AsmCmpRcxRaxSet(a *renvoAsm, setcc int) {
+	renvoAarch64AsmCmpRegReg(a, renvoAarch64RegRcx, renvoAarch64RegRax)
+	cond := renvoAarch64CondFromSetcc(setcc)
+	renvoAarch64AsmCsetRax(a, cond)
+}
+
+func renvoAarch64AsmPushRax(a *renvoAsm) {
+	renvoAarch64AsmPushReg(a, renvoAarch64RegRax)
+}
+
+func renvoAarch64AsmPushRcx(a *renvoAsm) {
+	renvoAarch64AsmPushReg(a, renvoAarch64RegRcx)
+}
+
+func renvoAarch64AsmPushRdx(a *renvoAsm) {
+	renvoAarch64AsmPushReg(a, renvoAarch64RegRdx)
+}
+
+func renvoAarch64AsmPopRax(a *renvoAsm) {
+	renvoAarch64AsmPopReg(a, renvoAarch64RegRax)
+}
+
+func renvoAarch64AsmPopRcx(a *renvoAsm) {
+	renvoAarch64AsmPopReg(a, renvoAarch64RegRcx)
+}
+
+func renvoAarch64AsmPopRdx(a *renvoAsm) {
+	renvoAarch64AsmPopReg(a, renvoAarch64RegRdx)
+}
+
+func renvoAarch64AsmPushImm(a *renvoAsm, imm int) {
+	renvoAarch64AsmMovRegImm(a, renvoAarch64RegTmp, imm)
+	renvoAarch64AsmPushReg(a, renvoAarch64RegTmp)
+}
+
+func renvoAarch64AsmStoreSliceStack(a *renvoAsm, offset int) {
+	renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRax, offset)
+	renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRdx, offset-8)
+	renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRcx, offset-16)
+}
+
+func renvoAarch64AsmStoreAlMemRdxRcx1(a *renvoAsm) {
+	renvoAarch64AsmAddRegRegShift(a, renvoAarch64RegAddr, renvoAarch64RegRdx, renvoAarch64RegRcx, 0)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRax, renvoAarch64RegAddr, 0, 1)
+}
+
+func renvoAarch64AsmStoreRaxMemRdxRcxSize(a *renvoAsm, size int) {
+	shift := 3
+	if size == 1 {
+		shift = 0
+	}
+	if size == 2 {
+		shift = 1
+	}
+	if size == 4 {
+		shift = 2
+	}
+	renvoAarch64AsmAddRegRegShift(a, renvoAarch64RegAddr, renvoAarch64RegRdx, renvoAarch64RegRcx, shift)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRax, renvoAarch64RegAddr, 0, size)
+}
+
+func renvoAarch64AsmIncRcx(a *renvoAsm) {
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegRcx, renvoAarch64RegRcx, 1)
+}
+
+func renvoAarch64AsmIncRax(a *renvoAsm) {
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegRax, renvoAarch64RegRax, 1)
+}
+
+func renvoAarch64AsmImulRcxImm(a *renvoAsm, imm int) {
+	renvoAarch64AsmMovRegImm(a, renvoAarch64RegTmp, imm)
+	renvoAarch64AsmEmit(a, 0x9b007c00|(renvoAarch64RegTmp<<16)|(renvoAarch64RegRcx<<5)|renvoAarch64RegRcx)
+}
+
+func renvoAarch64AsmLeave(a *renvoAsm) {
+	renvoAarch64AsmEmit(a, 0x910003bf)
+	renvoAarch64AsmEmit(a, 0xa8c17bfd)
+}
+
+func renvoAarch64AsmRet(a *renvoAsm) {
+	renvoAarch64AsmEmit(a, 0xd65f03c0)
+}
+
+func renvoAarch64AsmCallLabel(a *renvoAsm, label int) {
+	at := len(a.code)
+	renvoAarch64AsmEmit(a, 0x94000000)
+	renvoAsmAddReloc(a, at, label)
+}
+
+func renvoAarch64AsmJmpLabel(a *renvoAsm, label int) {
+	at := len(a.code)
+	renvoAarch64AsmEmit(a, 0x14000000)
+	renvoAsmAddReloc(a, at, label)
+}
+
+func renvoAarch64AsmBCondLabel(a *renvoAsm, label int, cond int) {
+	at := len(a.code)
+	renvoAarch64AsmEmit(a, 0x54000000|cond)
+	renvoAsmAddReloc(a, at, label)
+}
+
+func renvoAarch64AsmJzLabel(a *renvoAsm, label int) {
+	renvoAarch64AsmBCondLabel(a, label, 0)
+}
+
+func renvoAarch64AsmJnzLabel(a *renvoAsm, label int) {
+	renvoAarch64AsmBCondLabel(a, label, 1)
+}
+
+}
+
+# backend/compiler_aarch64_target_impl.go
+go backend {
+
+const renvoAarch64ELFCodeOffset = 0xb0
+
+func renvoCompileAarch64(input []int, output int, arenaSize int) int {
+	sourceCapacity := 589824
+	src := make([]byte, 0, sourceCapacity)
+	for i := 0; i < len(input); i++ {
+		src = renvoReadAll(input[i], src)
+		src = append(src, '\n')
+	}
+	var prog renvoProgram
+	prog = renvoParseProgram(src)
+	if !prog.ok {
+		return 1
+	}
+	var meta renvoMeta
+	renvoBuildMetaInto(&prog, &meta)
+	if !meta.ok {
+		return 1
+	}
+	meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
+	var result renvoCompileResult
+	result = renvoTryCompileScalarProgramAarch64Scratch(&prog, &meta)
+	if result.ok {
+		data := result.data
+		if renvoFixedTarget == 0 {
+			data = renvoCompileOutputData(data, renvoTarget)
+		}
+		write(output, data, -1)
+		return 0
+	}
+	renvoPrintErr("renvo: compilation failed\n")
+	return 1
+}
+
+func renvoTryCompileScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+	return renvoTryCompileScalarProgramAarch64Scratch(p, meta)
+}
+
+func renvoTryCompileScalarProgramAarch64Scratch(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+	session := renvoBeginScalarProgramAarch64(p, meta)
+	if session == nil {
+		return renvoCompileResult{}
+	}
+	for !session.stepScratch(64) {
+	}
+	return session.result
+}
+
+func renvoTryCompileScalarProgramAarch64Cached(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+	session := renvoBeginScalarProgramAarch64(p, meta)
+	if session == nil {
+		return renvoCompileResult{}
+	}
+	for !session.stepCached(64) {
+	}
+	return session.result
+}
+
+type renvoAarch64ProgramSession struct {
+	prog       *renvoProgram
+	gen        renvoLinearGen
+	queueIndex int
+	done       bool
+	result     renvoCompileResult
+}
+
+func renvoBeginScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) *renvoAarch64ProgramSession {
+	appIndex := -1
+	for i := 0; i < len(meta.funcs); i++ {
+		if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
+			appIndex = i
+		}
+	}
+	if appIndex < 0 {
+		return nil
+	}
+	session := &renvoAarch64ProgramSession{prog: p}
+	g := &session.gen
+	g.c = meta.c
+	g.prog = p
+	g.meta = meta
+	g.arenaSize = meta.arenaSize
+	a := &g.asm
+	renvoAsmInitWithContext(a, g.c)
+	a.codeOffset = renvoAarch64ELFCodeOffset
+	if targetIsWindows(meta.c.renvoTargetOS) {
+		a.codeOffset = renvoWinSectionRVA
+	}
+	if targetIsDarwin(meta.c.renvoTargetOS) {
+		a.codeOffset = renvoDarwinArm64CodeOffset
+		if !(renvoFixedTarget == 0 && meta.c.emitImage) {
+			g.darwinEntryOff = a.bssSize
+			a.bssSize += 24
+			renvoAarch64AsmMovRegAbs(a, 9, g.darwinEntryOff, renvoAbsBssReloc)
+			renvoAarch64AsmStoreRegMem(a, 0, 9, 0, 8)
+			renvoAarch64AsmStoreRegMem(a, 1, 9, 8, 8)
+			renvoAarch64AsmStoreRegMem(a, 2, 9, 16, 8)
+		}
+	}
+	if renvoFixedTarget != 0 {
+		g.funcLabels = make([]int, 0, len(meta.funcs))
+	}
+	for i := 0; i < len(meta.funcs); i++ {
+		label := renvoAsmNewLabel(a)
+		g.funcLabels = append(g.funcLabels, label)
+	}
+	renvoInitFuncQueue(g, len(meta.funcs))
+	renvoLinearMarkFunc(g, appIndex)
+	if renvoFixedTarget == 0 && meta.c.emitImage {
+		// Give the callable image entry a normal frame and preserve its four
+		// ABI words across runtime/global initialization.
+		renvoAarch64AsmEmit(a, 0xa9bf7bfd)
+		renvoAarch64AsmEmit(a, 0x910003fd)
+		renvoAarch64AsmAddRegImm(a, 31, 31, -32)
+		renvoAarch64AsmStoreRegMem(a, 0, 31, 0, 8)
+		renvoAarch64AsmStoreRegMem(a, 1, 31, 8, 8)
+		renvoAarch64AsmStoreRegMem(a, 2, 31, 16, 8)
+		renvoAarch64AsmStoreRegMem(a, 3, 31, 24, 8)
+	}
+	renvoEmitPersistentArenaReady(g)
+	if !renvoLinearInitGlobals(g) {
+		return nil
+	}
+	entryOK := false
+	if renvoFixedTarget == 0 && meta.c.emitImage {
+		entryOK = renvoEmitImageEntryArgsAarch64(g, appIndex)
+	} else if targetIsWindows(meta.c.renvoTargetOS) {
+		entryOK = renvoEmitProgramEntryArgsWindowsArm64(g, appIndex)
+	} else if targetIsDarwin(meta.c.renvoTargetOS) {
+		entryOK = renvoEmitProgramEntryArgsDarwinArm64(g, appIndex)
+	} else {
+		entryOK = renvoEmitProgramEntryArgsAarch64(g, appIndex)
+	}
+	if !entryOK {
+		return nil
+	}
+	renvoAsmCallLabel(a, g.funcLabels[appIndex])
+	if !renvoEmitProgramPanicCheck(g) {
+		return nil
+	}
+	if renvoFixedTarget == 0 && meta.c.emitImage {
+		renvoAsmLeave(a)
+		renvoAsmRet(a)
+	} else if targetIsWindows(meta.c.renvoTargetOS) {
+		renvoAarch64AsmMovRegReg(a, 0, renvoAarch64RegRax)
+		renvoWinArm64CallImport(a, renvoWinImportExitProcess)
+		renvoAsmRet(a)
+	} else if targetIsDarwin(meta.c.renvoTargetOS) {
+		renvoAarch64AsmMovRegReg(a, 0, renvoAarch64RegRax)
+		renvoDarwinArm64CallImport(a, renvoDarwinImportExit)
+		renvoAsmRet(a)
+	} else {
+		renvoAsmCopyPrimaryToCallWord0(a)
+		renvoAsmPrimaryImm(a, 93)
+		renvoAsmSyscall(a)
+	}
+	return session
+}
+
+func renvoEmitImageEntryArgsAarch64(g *renvoLinearGen, appIndex int) bool {
+	app := &g.meta.funcs[appIndex]
+	if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
+		return false
+	}
+	renvoAarch64AsmLoadRegMem(&g.asm, 0, 31, 0, 8)
+	renvoAarch64AsmLoadRegMem(&g.asm, 1, 31, 8, 8)
+	renvoAarch64AsmLoadRegMem(&g.asm, 2, 31, 16, 8)
+	renvoAarch64AsmLoadRegMem(&g.asm, 3, 31, 24, 8)
+	if app.paramCount == 0 {
+		return true
+	}
+	if app.paramCount > 2 || !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam].typ) {
+		return false
+	}
+	// Native entry ABI: X0=argsData, X1=argsLen, X2=envData,
+	// X3=envLen. Renvo slice words use X3/X4/X1 and X2/X5/X6.
+	if app.paramCount == 2 {
+		if !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+1].typ) {
+			return false
+		}
+		renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegR8, 3)
+		renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegR9, 3)
+	}
+	renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegRdi, 0)
+	renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegRsi, 1)
+	return true
+}
+
+func (s *renvoAarch64ProgramSession) step(functionLimit int) bool {
+	return s.stepCached(functionLimit)
+}
+
+func (s *renvoAarch64ProgramSession) stepScratch(functionLimit int) bool {
+	if s == nil || s.done {
+		return true
+	}
+	if functionLimit < 1 {
+		functionLimit = 1
+	}
+	emitted := 0
+	for s.queueIndex < len(s.gen.funcQueue) && emitted < functionLimit {
+		i := s.gen.funcQueue[s.queueIndex]
+		s.queueIndex++
+		emitted++
+		if !renvoEmitScalarFunctionScratch(&s.gen, i) {
+			return s.failFunction(i)
+		}
+	}
+	return s.finishStep()
+}
+
+func (s *renvoAarch64ProgramSession) stepCached(functionLimit int) bool {
+	if s == nil || s.done {
+		return true
+	}
+	if functionLimit < 1 {
+		functionLimit = 1
+	}
+	emitted := 0
+	for s.queueIndex < len(s.gen.funcQueue) && emitted < functionLimit {
+		i := s.gen.funcQueue[s.queueIndex]
+		s.queueIndex++
+		emitted++
+		if !renvoEmitScalarFunctionObjectCached(&s.gen, i) {
+			return s.failFunction(i)
+		}
+	}
+	return s.finishStep()
+}
+
+func (s *renvoAarch64ProgramSession) failFunction(i int) bool {
+	if targetIsDarwin(s.gen.c.renvoTargetOS) {
+		renvoPrintErr("renvo: failed to emit function ")
+		write(2, s.prog.src[s.gen.meta.funcs[i].nameStart:s.gen.meta.funcs[i].nameEnd], -1)
+		renvoPrintErr("\n")
+	}
+	s.done = true
+	return true
+}
+
+func (s *renvoAarch64ProgramSession) finishStep() bool {
+	if s.queueIndex < len(s.gen.funcQueue) {
+		return false
+	}
+	a := &s.gen.asm
+	data := renvoAsmImageAarch64(a)
+	if targetIsWindows(s.gen.c.renvoTargetOS) {
+		data = renvoAsmImageWindowsArm64(a)
+	} else if targetIsDarwin(s.gen.c.renvoTargetOS) {
+		data = renvoAsmImageDarwinArm64(a)
+	}
+	s.result.data = data
+	s.result.ok = true
+	s.done = true
+	return true
+}
+func renvoAarch64AsmFrameStart(a *renvoAsm) int {
+	at := len(a.code)
+	count := 2
+	if a.c.renvoTargetOS == renvoOSWindows {
+		// Windows requires every intervening page to be touched when a frame
+		// crosses a guard page. The compact loop patched below handles an
+		// arbitrary calculated frame without reserving one probe per page.
+		count = 8
+	}
+	for i := 0; i < count; i++ {
+		renvoAarch64AsmEmit(a, 0xd503201f) // nop
+	}
+	return at
+}
+
+func renvoAarch64AsmPatchFrame(a *renvoAsm, at int, stackUsed int) {
+	frame := renvoAlignValue(stackUsed, 16)
+	if a.c.renvoTargetOS == renvoOSWindows {
+		pages := frame / 4096
+		tail := frame % 4096
+		if frame == 0 {
+			return
+		}
+		// movz x9, #pages
+		renvoPut32At(a.code, at, 0xd2800009|(pages<<5))
+		// cbz x9, tail (five instructions forward)
+		renvoPut32At(a.code, at+4, 0xb40000a9)
+		// loop: sub sp, sp, #1, lsl #12; touch the new page.
+		renvoPut32At(a.code, at+8, 0xd14007ff)
+		renvoPut32At(a.code, at+12, 0xf90003ff)
+		// subs x9, x9, #1; b.ne loop (three instructions back).
+		renvoPut32At(a.code, at+16, 0xf1000529)
+		renvoPut32At(a.code, at+20, 0x54ffffa1)
+		if tail > 0 {
+			renvoPut32At(a.code, at+24, 0xd10003ff|(tail<<10))
+			renvoPut32At(a.code, at+28, 0xf90003ff)
+		}
+		return
+	}
+	high := frame / 4096
+	low := frame % 4096
+	if high > 0 {
+		renvoPut32At(a.code, at, 0xd14003ff|(high<<10))
+	}
+	if low > 0 {
+		renvoPut32At(a.code, at+4, 0xd10003ff|(low<<10))
+	}
+}
+
+}
+
+# backend/compiler_linux_aarch64_impl.go
+go backend {
+
+const renvoLinuxAarch64SysReadSeq = 63
+const renvoLinuxAarch64SysWriteSeq = 64
+const renvoLinuxAarch64SysOpen = 56
+const renvoLinuxAarch64SysClose = 57
+const renvoLinuxAarch64SysFchmod = 52
+const renvoLinuxAarch64SysReadAt = 67
+const renvoLinuxAarch64SysWriteAt = 68
+
+func renvoAarch64AsmPrepareReadWriteBuf(a *renvoAsm) {
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegRsi, renvoAarch64RegRax)
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegRdx, renvoAarch64RegRcx)
+}
+
+func renvoAarch64AsmMoveOffsetArg(a *renvoAsm) {
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegR10, renvoAarch64RegRax)
+}
+
+func compileLinuxAarch64(input []int, output int) int {
+	return compileLinuxAarch64Arena(input, output, 0)
+}
+
+func compileLinuxAarch64Arena(input []int, output int, arenaSize int) int {
+	renvoSetTarget(renvoTargetLinuxAarch64)
+	return renvoCompileAarch64(input, output, arenaSize)
+}
+
+func renvoEmitProgramEntryArgsAarch64(g *renvoLinearGen, appIndex int) bool {
+	app := &g.meta.funcs[appIndex]
+	if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
+		return false
+	}
+	argsOff := g.asm.bssSize
+	g.asm.bssSize += 32768
+	envDataOff := g.asm.bssSize
+	g.asm.bssSize += 32768
+	envLenOff := g.asm.bssSize
+	g.asm.bssSize += 8
+	renvoAsmBuildArgvEnvSlicesAarch64(&g.asm, argsOff, envDataOff, envLenOff)
+	if app.paramCount == 0 {
+		return true
+	}
+	if app.paramCount > 2 {
+		return false
+	}
+	first := &g.meta.params[app.firstParam]
+	if !renvoTypeIsStringSlice(g.meta, first.typ) {
+		return false
+	}
+	if app.paramCount == 1 {
+		return true
+	}
+	second := &g.meta.params[app.firstParam+1]
+	if !renvoTypeIsStringSlice(g.meta, second.typ) {
+		return false
+	}
+	return true
+}
+
+func renvoAsmBuildArgvEnvSlicesAarch64(a *renvoAsm, bssOff int, envOff int, envLenOff int) {
+	loopLabel := renvoAsmNewLabel(a)
+	strlenLabel := renvoAsmNewLabel(a)
+	afterLenLabel := renvoAsmNewLabel(a)
+	doneLabel := renvoAsmNewLabel(a)
+	envLoopLabel := renvoAsmNewLabel(a)
+	envStrlenLabel := renvoAsmNewLabel(a)
+	envAfterLenLabel := renvoAsmNewLabel(a)
+	envDoneLabel := renvoAsmNewLabel(a)
+
+	renvoAarch64AsmLoadRegMem(a, 13, 31, 0, 8)
+	renvoAarch64AsmAddRegImm(a, 10, 31, 8)
+	renvoAarch64AsmMovRegAbs(a, renvoAarch64RegR10, bssOff, renvoAbsBssReloc)
+	renvoAarch64AsmMovRegImm(a, 11, 0)
+	renvoAsmMarkLabel(a, loopLabel)
+	renvoAarch64AsmCmpRegReg(a, 11, 13)
+	renvoAarch64AsmBCondLabel(a, doneLabel, 0)
+	renvoAarch64AsmAddRegRegShift(a, 12, 10, 11, 3)
+	renvoAarch64AsmLoadRegMem(a, 12, 12, 0, 8)
+	renvoAarch64AsmStoreRegMem(a, 12, renvoAarch64RegR10, 0, 8)
+	renvoAarch64AsmMovRegImm(a, renvoAarch64RegRax, 0)
+	renvoAsmMarkLabel(a, strlenLabel)
+	renvoAarch64AsmAddRegReg(a, 9, 12, renvoAarch64RegRax)
+	renvoAarch64AsmLoadRegMem(a, 9, 9, 0, 1)
+	renvoAarch64AsmCmpRegImm(a, 9, 0)
+	renvoAarch64AsmBCondLabel(a, afterLenLabel, 0)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegRax, renvoAarch64RegRax, 1)
+	renvoAarch64AsmJmpLabel(a, strlenLabel)
+	renvoAsmMarkLabel(a, afterLenLabel)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRax, renvoAarch64RegR10, 8, 8)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegR10, renvoAarch64RegR10, 16)
+	renvoAarch64AsmAddRegImm(a, 11, 11, 1)
+	renvoAarch64AsmJmpLabel(a, loopLabel)
+	renvoAsmMarkLabel(a, doneLabel)
+
+	renvoAarch64AsmAddRegRegShift(a, 10, 10, 13, 3)
+	renvoAarch64AsmAddRegImm(a, 10, 10, 8)
+	renvoAarch64AsmMovRegAbs(a, renvoAarch64RegR10, envOff, renvoAbsBssReloc)
+	renvoAarch64AsmMovRegImm(a, 11, 0)
+	renvoAsmMarkLabel(a, envLoopLabel)
+	renvoAarch64AsmLoadRegMem(a, 12, 10, 0, 8)
+	renvoAarch64AsmCmpRegImm(a, 12, 0)
+	renvoAarch64AsmBCondLabel(a, envDoneLabel, 0)
+	renvoAarch64AsmStoreRegMem(a, 12, renvoAarch64RegR10, 0, 8)
+	renvoAarch64AsmMovRegImm(a, renvoAarch64RegRax, 0)
+	renvoAsmMarkLabel(a, envStrlenLabel)
+	renvoAarch64AsmAddRegReg(a, 9, 12, renvoAarch64RegRax)
+	renvoAarch64AsmLoadRegMem(a, 9, 9, 0, 1)
+	renvoAarch64AsmCmpRegImm(a, 9, 0)
+	renvoAarch64AsmBCondLabel(a, envAfterLenLabel, 0)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegRax, renvoAarch64RegRax, 1)
+	renvoAarch64AsmJmpLabel(a, envStrlenLabel)
+	renvoAsmMarkLabel(a, envAfterLenLabel)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRax, renvoAarch64RegR10, 8, 8)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegR10, renvoAarch64RegR10, 16)
+	renvoAarch64AsmAddRegImm(a, 10, 10, 8)
+	renvoAarch64AsmAddRegImm(a, 11, 11, 1)
+	renvoAarch64AsmJmpLabel(a, envLoopLabel)
+	renvoAsmMarkLabel(a, envDoneLabel)
+	renvoAarch64AsmMovRegAbs(a, 12, envLenOff, renvoAbsBssReloc)
+	renvoAarch64AsmStoreRegMem(a, 11, 12, 0, 8)
+
+	renvoAarch64AsmMovRegAbs(a, renvoAarch64RegRdi, bssOff, renvoAbsBssReloc)
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegRsi, 13)
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegRdx, 13)
+	renvoAarch64AsmMovRegAbs(a, renvoAarch64RegRcx, envOff, renvoAbsBssReloc)
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegR8, 11)
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegR9, 11)
+}
+
+func renvoAsmImageAarch64(a *renvoAsm) []byte {
+	renvoAsmPatch(a)
+	renvoAsmPatchAarch64Abs(a)
+	loadFileSize := a.codeOffset + len(a.code) + len(a.data)
+	bssOffset := renvoAsmBssOffset(a)
+	if a.c.stripSymbols {
+		out := make([]byte, 0, loadFileSize)
+		out = renvoAppendElfHeaderAarch64(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, 0)
+		for i := 0; i < len(a.code); i++ {
+			out = append(out, a.code[i])
+		}
+		for i := 0; i < len(a.data); i++ {
+			out = append(out, a.data[i])
+		}
+		if renvoFixedTarget == 0 {
+			return renvoAppendReplLinkTable(out, a)
+		}
+		return out
+	}
+	var sec renvoElfSymbolSections
+	renvoBuildElfSymbolSections(a, 0, a.codeOffset, loadFileSize, &sec)
+	outputCapacity := 1048576
+	out := make([]byte, 0, outputCapacity)
+	out = renvoAppendElfHeaderAarch64(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff)
+	for i := 0; i < len(a.code); i++ {
+		out = append(out, a.code[i])
+	}
+	for i := 0; i < len(a.data); i++ {
+		out = append(out, a.data[i])
+	}
+	out = renvoAppendUntil(out, sec.symtabOff)
+	for i := 0; i < len(sec.symtab); i++ {
+		out = append(out, sec.symtab[i])
+	}
+	out = renvoAppendUntil(out, sec.strtabOff)
+	for i := 0; i < len(sec.strtab); i++ {
+		out = append(out, sec.strtab[i])
+	}
+	out = renvoAppendUntil(out, sec.shstrOff)
+	for i := 0; i < len(sec.shstrtab); i++ {
+		out = append(out, sec.shstrtab[i])
+	}
+	out = renvoAppendUntil(out, sec.shoff)
+	out = renvoAppendElfSectionHeaders(out, &sec, a, 0)
+	if renvoFixedTarget == 0 {
+		return renvoAppendReplLinkTable(out, a)
+	}
+	return out
+}
+
+func renvoAsmPatchAarch64Abs(a *renvoAsm) {
+	for i := 0; i+2 < len(a.absRelocs); i += 3 {
+		at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i))
+		off := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1))
+		kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2))
+		target := a.dataOffset + off
+		if kind == renvoAbsBssReloc {
+			target = renvoAsmBssOffset(a) + off
+		}
+		insn := renvoGet32At(a.code, at)
+		reg := insn & 31
+		pcPage := (a.codeOffset + at) & -4096
+		targetPage := target & -4096
+		pageDelta := (targetPage - pcPage) >> 12
+		immlo := pageDelta & 3
+		immhi := pageDelta >> 2 & 524287
+		renvoPut32At(a.code, at, 0x90000000|(immlo<<29)|(immhi<<5)|reg)
+		renvoPut32At(a.code, at+4, 0x91000000|((target&4095)<<10)|(reg<<5)|reg)
+		renvoPut32At(a.code, at+8, 0xd503201f)
+		renvoPut32At(a.code, at+12, 0xd503201f)
+	}
+}
+
+func renvoAppendElfHeaderAarch64(out []byte, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int) []byte {
+	base := 0
+
+	out = append(out, 0x7f)
+	out = append(out, 'E')
+	out = append(out, 'L')
+	out = append(out, 'F')
+	out = append(out, 2)
+	out = append(out, 1)
+	out = append(out, 1)
+	out = append(out, 0)
+	for i := 0; i < 8; i++ {
+		out = append(out, 0)
+	}
+	out = renvoAppend16(out, 3)
+	out = renvoAppend16(out, 183)
+	out = renvoAppend32(out, 1)
+	out = renvoAppend64U32(out, base+entryOff)
+	out = renvoAppend64U32(out, 64)
+	out = renvoAppend64U32(out, shoff)
+	out = renvoAppend32(out, 0)
+	out = renvoAppend16(out, 64)
+	out = renvoAppend16(out, 56)
+	out = renvoAppend16(out, 2)
+	if shoff == 0 {
+		out = renvoAppend16(out, 0)
+		out = renvoAppend16(out, 0)
+		out = renvoAppend16(out, 0)
+	} else {
+		out = renvoAppend16(out, 64)
+		out = renvoAppend16(out, 7)
+		out = renvoAppend16(out, 6)
+	}
+
+	out = renvoAppend32(out, 1)
+	out = renvoAppend32(out, 5)
+	out = renvoAppend64U32(out, 0)
+	out = renvoAppend64U32(out, base)
+	out = renvoAppend64U32(out, base)
+	out = renvoAppend64U32(out, fileSize)
+	out = renvoAppend64U32(out, fileSize)
+	out = renvoAppend64U32(out, 0x1000)
+	out = renvoAppendElf64LoadProgram(out, 6, bssOffset, base+bssOffset, 0, bssSize)
+	return out
+}
+
+}
+
+# backend/compiler_darwin_arm64_impl.go
+go backend {
+
+// renvo:linkstatic /usr/lib/system/libcommonCrypto.dylib,CC_SHA256
+func renvoDarwinCCSHA256(data []byte, length int, digest []byte) int { return 0 }
+
+func renvo_runtime_ArenaPersistString(value string) string { return value }
+
+const renvoDarwinArm64CodeOffset = 0x1000
+const renvoDarwinArm64ImageBase = 0x100000000
+const renvoDarwinArm64PageSize = 0x4000
+const renvoDarwinArgEnvDescriptorSize = 32768
+const renvoDarwinArgEnvDescriptorCount = renvoDarwinArgEnvDescriptorSize / 16
+
+const renvoDarwinImportExit = 1
+const renvoDarwinImportOpen = 2
+const renvoDarwinImportClose = 3
+const renvoDarwinImportRead = 4
+const renvoDarwinImportWrite = 5
+const renvoDarwinImportPread = 6
+const renvoDarwinImportPwrite = 7
+const renvoDarwinImportFchmod = 8
+const renvoDarwinImportGetdirentries = 9
+const renvoDarwinImportCount = 9
+
+func compileDarwinArm64(input []int, output int) int {
+	return compileDarwinArm64Arena(input, output, 0)
+}
+
+func compileDarwinArm64Arena(input []int, output int, arenaSize int) int {
+	renvoSetTarget(renvoTargetDarwinArm64)
+	return renvoCompileAarch64(input, output, arenaSize)
+}
+
+func renvoDarwinImportName(id int) string {
+	if id == renvoDarwinImportExit {
+		return "_exit"
+	}
+	if id == renvoDarwinImportOpen {
+		return "_open"
+	}
+	if id == renvoDarwinImportClose {
+		return "_close"
+	}
+	if id == renvoDarwinImportRead {
+		return "_read"
+	}
+	if id == renvoDarwinImportWrite {
+		return "_write"
+	}
+	if id == renvoDarwinImportPread {
+		return "_pread"
+	}
+	if id == renvoDarwinImportPwrite {
+		return "_pwrite"
+	}
+	if id == renvoDarwinImportFchmod {
+		return "_fchmod"
+	}
+	if id == renvoDarwinImportGetdirentries {
+		return "_getdirentries"
+	}
+	return ""
+}
+
+func renvoDarwinArm64ImportLabel(a *renvoAsm, id int) int {
+	if len(a.darwinImportLabels) == 0 {
+		a.darwinImportLabels = make([]int, renvoDarwinImportCount+1)
+		a.darwinImportUsed = make([]bool, renvoDarwinImportCount+1)
+		for i := 0; i <= renvoDarwinImportCount; i++ {
+			a.darwinImportLabels[i] = -1
+		}
+	}
+	if id <= 0 || id > renvoDarwinImportCount {
+		return -1
+	}
+	if a.darwinImportLabels[id] < 0 {
+		a.darwinImportLabels[id] = renvoAsmNewLabel(a)
+	}
+	a.darwinImportUsed[id] = true
+	return a.darwinImportLabels[id]
+}
+
+func renvoDarwinArm64CallImport(a *renvoAsm, id int) {
+	label := renvoDarwinArm64ImportLabel(a, id)
+	renvoAarch64AsmCallLabel(a, label)
+}
+
+func renvoDarwinArm64CallVirtualArgs(a *renvoAsm, id int, argCount int) {
+	if argCount > 2 {
+		renvoAarch64AsmMovRegReg(a, renvoAarch64RegTmp, renvoAarch64RegRdx)
+	}
+	if argCount > 0 {
+		renvoAarch64AsmMovRegReg(a, 0, renvoAarch64RegRdi)
+	}
+	if argCount > 1 {
+		renvoAarch64AsmMovRegReg(a, 1, renvoAarch64RegRsi)
+	}
+	if argCount > 2 {
+		renvoAarch64AsmMovRegReg(a, 2, renvoAarch64RegTmp)
+	}
+	if argCount > 3 {
+		renvoAarch64AsmMovRegReg(a, 3, renvoAarch64RegR10)
+	}
+	renvoDarwinArm64CallImport(a, id)
+}
+
+func renvoAsmAddDarwinStaticImport(a *renvoAsm, dylib string, name string) int {
+	if len(name) == 0 || name[0] != '_' {
+		name = renvo_runtime_ArenaPersistString("_" + name)
+	}
+	for i := 0; i < len(a.darwinImports); i++ {
+		if a.darwinImports[i].dylib == dylib && a.darwinImports[i].name == name {
+			a.darwinImports[i].used = true
+			return i
+		}
+	}
+	label := renvoAsmNewLabel(a)
+	a.darwinImports = append(a.darwinImports, renvoDarwinStaticImport{dylib: dylib, name: name, label: label, used: true})
+	return len(a.darwinImports) - 1
+}
+
+func renvoDarwinArm64EmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
+	if g.c.renvoTargetArch != renvoArchAarch64 {
+		return false
+	}
+	dylib := renvoStringFromBytes(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd)
+	name := renvoStringFromBytes(g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
+	importIndex := renvoAsmAddDarwinStaticImport(&g.asm, dylib, name)
+	a := &g.asm
+	intReg := 0
+	floatReg := 0
+	consumed := 0
+	objcRectCall := renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "objcMsgRect")
+	objcSizeCall := renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "objcMsgSize")
+	glOrthoCall := name == "glOrtho" || name == "_glOrtho"
+	glPixelZoomCall := name == "glPixelZoom" || name == "_glPixelZoom"
+	for i := 0; i < fn.paramCount; i++ {
+		typ := renvoResolveType(g.meta, g.meta.params[fn.firstParam+i].typ)
+		integerDouble := glOrthoCall || (objcRectCall && i >= 2 && i < 6) || (objcSizeCall && i >= 2 && i < 4)
+		integerSingle := glPixelZoomCall
+		if typ.kind == renvoTypeFloat64 || integerDouble || integerSingle {
+			if floatReg >= 8 {
+				return false
+			}
+			renvoAarch64AsmPopReg(a, 16)
+			if integerSingle {
+				renvoAarch64AsmEmit(a, 0x9e220000|(16<<5)|floatReg)
+			} else {
+				renvoAarch64AsmEmit(a, 0x9e620000|(16<<5)|floatReg)
+			}
+			if typ.kind == renvoTypeFloat64 && !integerDouble {
+				// RENVO represents float64 values as integers scaled by four. Convert
+				// them to an ABI double only at the foreign-call boundary.
+				renvoAarch64AsmMovRegImm(a, 16, 4)
+				renvoAarch64AsmEmit(a, 0x9e620000|(16<<5)|31)
+				renvoAarch64AsmEmit(a, 0x1e601800|(31<<16)|(floatReg<<5)|floatReg)
+			}
+			floatReg++
+			consumed++
+			continue
+		}
+		if intReg >= 8 {
+			return false
+		}
+		if typ.kind == renvoTypeString {
+			renvoAarch64AsmPopReg(a, intReg)
+			renvoAarch64AsmPopReg(a, 16)
+			consumed += 2
+			intReg++
+			continue
+		}
+		if typ.kind == renvoTypeSlice {
+			renvoAarch64AsmPopReg(a, intReg)
+			renvoAarch64AsmPopReg(a, 16)
+			renvoAarch64AsmPopReg(a, 16)
+			consumed += 3
+			intReg++
+			continue
+		}
+		if typ.kind == renvoTypeStruct || typ.kind == renvoTypeArray {
+			return false
+		}
+		renvoAarch64AsmPopReg(a, intReg)
+		consumed++
+		intReg++
+	}
+	if consumed != wordCount {
+		renvoPrintErr("renvo: Darwin foreign-call argument layout mismatch\n")
+		return false
+	}
+	for intReg < 8 {
+		renvoAarch64AsmMovRegImm(a, intReg, 0)
+		intReg++
+	}
+	renvoAsmCallLabel(a, a.darwinImports[importIndex].label)
+	if renvoResolveType(g.meta, fn.resultType).kind == renvoTypeFloat64 {
+		resultFloatReg := 0
+		if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "objcMsgPointY") {
+			resultFloatReg = 1
+		}
+		if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "objcMsgRectY") {
+			resultFloatReg = 1
+		}
+		if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "objcMsgRectWidth") {
+			resultFloatReg = 2
+		}
+		if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "objcMsgRectHeight") {
+			resultFloatReg = 3
+		}
+		// Convert an ABI double result back to RENVO's scaled representation.
+		renvoAarch64AsmMovRegImm(a, 16, 4)
+		renvoAarch64AsmEmit(a, 0x9e620000|(16<<5)|31)
+		renvoAarch64AsmEmit(a, 0x1e600800|(31<<16)|(resultFloatReg<<5)|resultFloatReg)
+		renvoAarch64AsmEmit(a, 0x9e780000|(resultFloatReg<<5))
+	}
+	return true
+}
+
+func renvoEmitProgramEntryArgsDarwinArm64(g *renvoLinearGen, appIndex int) bool {
+	app := &g.meta.funcs[appIndex]
+	if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
+		return false
+	}
+	if app.paramCount == 0 {
+		return true
+	}
+	if app.paramCount > 2 {
+		return false
+	}
+	first := &g.meta.params[app.firstParam]
+	if !renvoTypeIsStringSlice(g.meta, first.typ) {
+		return false
+	}
+	if app.paramCount == 2 {
+		second := &g.meta.params[app.firstParam+1]
+		if !renvoTypeIsStringSlice(g.meta, second.typ) {
+			return false
+		}
+	}
+	argsOff := g.asm.bssSize
+	g.asm.bssSize += renvoDarwinArgEnvDescriptorSize
+	envOff := g.asm.bssSize
+	g.asm.bssSize += renvoDarwinArgEnvDescriptorSize
+	renvoAsmBuildDarwinArgvEnvSlicesArm64(&g.asm, g.darwinEntryOff, argsOff, envOff)
+	return true
+}
+
+func renvoAsmBuildDarwinArgvEnvSlicesArm64(a *renvoAsm, entryOff int, argsOff int, envOff int) {
+	argLoop := renvoAsmNewLabel(a)
+	argLenLoop := renvoAsmNewLabel(a)
+	argLenDone := renvoAsmNewLabel(a)
+	argsDone := renvoAsmNewLabel(a)
+	envLoop := renvoAsmNewLabel(a)
+	envLenLoop := renvoAsmNewLabel(a)
+	envLenDone := renvoAsmNewLabel(a)
+	envDone := renvoAsmNewLabel(a)
+
+	// dyld calls LC_MAIN with argc, argv, envp in x0, x1, x2. Global
+	// initialization runs first, so reload the entry values saved at startup.
+	renvoAarch64AsmMovRegAbs(a, 9, entryOff, renvoAbsBssReloc)
+	renvoAarch64AsmLoadRegMem(a, 13, 9, 0, 8)
+	renvoAarch64AsmLoadRegMem(a, 14, 9, 8, 8)
+	renvoAarch64AsmLoadRegMem(a, 15, 9, 16, 8)
+	renvoAarch64AsmMovRegAbs(a, 10, argsOff, renvoAbsBssReloc)
+	renvoAarch64AsmMovRegImm(a, 11, 0)
+	renvoAsmMarkLabel(a, argLoop)
+	renvoAarch64AsmCmpRegImm(a, 11, renvoDarwinArgEnvDescriptorCount)
+	renvoAarch64AsmBCondLabel(a, argsDone, 10)
+	renvoAarch64AsmCmpRegReg(a, 11, 13)
+	renvoAarch64AsmBCondLabel(a, argsDone, 0)
+	renvoAarch64AsmAddRegRegShift(a, 12, 14, 11, 3)
+	renvoAarch64AsmLoadRegMem(a, 12, 12, 0, 8)
+	renvoAarch64AsmStoreRegMem(a, 12, 10, 0, 8)
+	renvoAarch64AsmMovRegImm(a, 0, 0)
+	renvoAsmMarkLabel(a, argLenLoop)
+	renvoAarch64AsmAddRegReg(a, 9, 12, 0)
+	renvoAarch64AsmLoadRegMem(a, 9, 9, 0, 1)
+	renvoAarch64AsmCmpRegImm(a, 9, 0)
+	renvoAarch64AsmBCondLabel(a, argLenDone, 0)
+	renvoAarch64AsmAddRegImm(a, 0, 0, 1)
+	renvoAarch64AsmJmpLabel(a, argLenLoop)
+	renvoAsmMarkLabel(a, argLenDone)
+	renvoAarch64AsmStoreRegMem(a, 0, 10, 8, 8)
+	renvoAarch64AsmAddRegImm(a, 10, 10, 16)
+	renvoAarch64AsmAddRegImm(a, 11, 11, 1)
+	renvoAarch64AsmJmpLabel(a, argLoop)
+	renvoAsmMarkLabel(a, argsDone)
+	renvoAarch64AsmMovRegReg(a, 13, 11)
+
+	renvoAarch64AsmMovRegAbs(a, 10, envOff, renvoAbsBssReloc)
+	renvoAarch64AsmMovRegImm(a, 11, 0)
+	renvoAsmMarkLabel(a, envLoop)
+	renvoAarch64AsmCmpRegImm(a, 11, renvoDarwinArgEnvDescriptorCount)
+	renvoAarch64AsmBCondLabel(a, envDone, 10)
+	renvoAarch64AsmLoadRegMem(a, 12, 15, 0, 8)
+	renvoAarch64AsmCmpRegImm(a, 12, 0)
+	renvoAarch64AsmBCondLabel(a, envDone, 0)
+	renvoAarch64AsmStoreRegMem(a, 12, 10, 0, 8)
+	renvoAarch64AsmMovRegImm(a, 0, 0)
+	renvoAsmMarkLabel(a, envLenLoop)
+	renvoAarch64AsmAddRegReg(a, 9, 12, 0)
+	renvoAarch64AsmLoadRegMem(a, 9, 9, 0, 1)
+	renvoAarch64AsmCmpRegImm(a, 9, 0)
+	renvoAarch64AsmBCondLabel(a, envLenDone, 0)
+	renvoAarch64AsmAddRegImm(a, 0, 0, 1)
+	renvoAarch64AsmJmpLabel(a, envLenLoop)
+	renvoAsmMarkLabel(a, envLenDone)
+	renvoAarch64AsmStoreRegMem(a, 0, 10, 8, 8)
+	renvoAarch64AsmAddRegImm(a, 10, 10, 16)
+	renvoAarch64AsmAddRegImm(a, 15, 15, 8)
+	renvoAarch64AsmAddRegImm(a, 11, 11, 1)
+	renvoAarch64AsmJmpLabel(a, envLoop)
+	renvoAsmMarkLabel(a, envDone)
+
+	renvoAarch64AsmMovRegAbs(a, renvoAarch64RegRdi, argsOff, renvoAbsBssReloc)
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegRsi, 13)
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegRdx, 13)
+	renvoAarch64AsmMovRegAbs(a, renvoAarch64RegRcx, envOff, renvoAbsBssReloc)
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegR8, 11)
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegR9, 11)
+}
+
+func renvoDarwinAppendULEB(out []byte, value int) []byte {
+	for {
+		b := byte(value & 127)
+		value = value >> 7
+		if value != 0 {
+			b = b | 128
+		}
+		out = append(out, b)
+		if value == 0 {
+			return out
+		}
+	}
+}
+
+func renvoDarwinAppendName16(out []byte, name string) []byte {
+	for i := 0; i < 16; i++ {
+		if i < len(name) {
+			out = append(out, name[i])
+		} else {
+			out = append(out, 0)
+		}
+	}
+	return out
+}
+
+func renvoDarwinAppendSegment64(out []byte, name string, vmaddr int, vmsize int, fileoff int, filesize int, maxprot int, initprot int) []byte {
+	out = renvoAppend32(out, 0x19)
+	out = renvoAppend32(out, 72)
+	out = renvoDarwinAppendName16(out, name)
+	out = renvoAppend64(out, vmaddr)
+	out = renvoAppend64(out, vmsize)
+	out = renvoAppend64(out, fileoff)
+	out = renvoAppend64(out, filesize)
+	out = renvoAppend32(out, maxprot)
+	out = renvoAppend32(out, initprot)
+	out = renvoAppend32(out, 0)
+	out = renvoAppend32(out, 0)
+	return out
+}
+
+func renvoDarwinAppendSection64(out []byte, section string, segment string, addr int, size int, offset int, align int, flags int) []byte {
+	out = renvoDarwinAppendName16(out, section)
+	out = renvoDarwinAppendName16(out, segment)
+	out = renvoAppend64(out, addr)
+	out = renvoAppend64(out, size)
+	out = renvoAppend32(out, offset)
+	out = renvoAppend32(out, align)
+	out = renvoAppend32(out, 0)
+	out = renvoAppend32(out, 0)
+	out = renvoAppend32(out, flags)
+	out = renvoAppend32(out, 0)
+	out = renvoAppend32(out, 0)
+	out = renvoAppend32(out, 0)
+	return out
+}
+
+func renvoDarwinAppendTextSegment64(out []byte, codeSize int, fileSize int) []byte {
+	out = renvoAppend32(out, 0x19)
+	out = renvoAppend32(out, 152)
+	out = renvoDarwinAppendName16(out, "__TEXT")
+	out = renvoAppend64(out, renvoDarwinArm64ImageBase)
+	out = renvoAppend64(out, fileSize)
+	out = renvoAppend64(out, 0)
+	out = renvoAppend64(out, fileSize)
+	out = renvoAppend32(out, 5)
+	out = renvoAppend32(out, 5)
+	out = renvoAppend32(out, 1)
+	out = renvoAppend32(out, 0)
+	out = renvoDarwinAppendSection64(out, "__text", "__TEXT", renvoDarwinArm64ImageBase+renvoDarwinArm64CodeOffset, codeSize, renvoDarwinArm64CodeOffset, 2, 0x80000400)
+	return out
+}
+
+func renvoDarwinAppendDataSegment64(out []byte, dataFileOff int, dataFileSize int, bssSize int) []byte {
+	vmSize := renvoAlignValue(dataFileSize+bssSize, renvoDarwinArm64PageSize)
+	out = renvoAppend32(out, 0x19)
+	out = renvoAppend32(out, 232)
+	out = renvoDarwinAppendName16(out, "__DATA")
+	out = renvoAppend64(out, renvoDarwinArm64ImageBase+dataFileOff)
+	out = renvoAppend64(out, vmSize)
+	out = renvoAppend64(out, dataFileOff)
+	out = renvoAppend64(out, dataFileSize)
+	out = renvoAppend32(out, 3)
+	out = renvoAppend32(out, 3)
+	out = renvoAppend32(out, 2)
+	out = renvoAppend32(out, 0)
+	out = renvoDarwinAppendSection64(out, "__data", "__DATA", renvoDarwinArm64ImageBase+dataFileOff, dataFileSize, dataFileOff, 3, 0)
+	out = renvoDarwinAppendSection64(out, "__bss", "__DATA", renvoDarwinArm64ImageBase+dataFileOff+dataFileSize, bssSize, 0, 3, 1)
+	return out
+}
+
+func renvoDarwinPatchArm64Adrp(code []byte, at int, pc int, target int) {
+	delta := (target >> 12) - (pc >> 12)
+	imm := delta & 0x1fffff
+	insn := 0x90000010 | ((imm & 3) << 29) | (((imm >> 2) & 0x7ffff) << 5)
+	renvoPut32At(code, at, insn)
+}
+
+func renvoDarwinStaticDylibs(a *renvoAsm) []string {
+	var out []string
+	for i := 0; i < len(a.darwinImports); i++ {
+		imp := a.darwinImports[i]
+		if !imp.used || imp.dylib == "/usr/lib/libSystem.B.dylib" {
+			continue
+		}
+		found := false
+		for j := 0; j < len(out); j++ {
+			if out[j] == imp.dylib {
+				found = true
+			}
+		}
+		if !found {
+			out = append(out, imp.dylib)
+		}
+	}
+	return out
+}
+
+func renvoDarwinDylibOrdinal(a *renvoAsm, dylib string) int {
+	if dylib == "/usr/lib/libSystem.B.dylib" {
+		return 1
+	}
+	dylibs := renvoDarwinStaticDylibs(a)
+	for i := 0; i < len(dylibs); i++ {
+		if dylibs[i] == dylib {
+			return i + 2
+		}
+	}
+	return 0
+}
+
+func renvoDarwinDylibCommandSize(path string) int {
+	return renvoAlignValue(24+len(path)+1, 8)
+}
+
+func renvoDarwinAppendDylibCommand(out []byte, path string) []byte {
+	start := len(out)
+	size := renvoDarwinDylibCommandSize(path)
+	out = renvoAppend32(out, 0x0c)
+	out = renvoAppend32(out, size)
+	out = renvoAppend32(out, 24)
+	out = renvoAppend32(out, 2)
+	out = renvoAppend32(out, 0x00010000)
+	out = renvoAppend32(out, 0x00010000)
+	out = renvoAppendStringZ(out, path)
+	return renvoAppendUntil(out, start+size)
+}
+
+func renvoDarwinMachHeader(a *renvoAsm, textFileSize int, dataFileOff int, dataFileSize int, dataVMSize int, linkeditOff int, linkeditSize int, bindOff int, bindSize int, symOff int, symbolCount int, strOff int, strSize int, undefinedCount int, sigOff int, sigSize int) []byte {
+	dylibs := renvoDarwinStaticDylibs(a)
+	commandSize := 856
+	for i := 0; i < len(dylibs); i++ {
+		commandSize += renvoDarwinDylibCommandSize(dylibs[i])
+	}
+	out := make([]byte, 0, a.codeOffset)
+	out = renvoAppend32(out, 0xfeedfacf)
+	out = renvoAppend32(out, 0x0100000c)
+	out = renvoAppend32(out, 0)
+	out = renvoAppend32(out, 2)
+	out = renvoAppend32(out, 13+len(dylibs))
+	out = renvoAppend32(out, commandSize)
+	out = renvoAppend32(out, 0x200085)
+	out = renvoAppend32(out, 0)
+	out = renvoDarwinAppendSegment64(out, "__PAGEZERO", 0, renvoDarwinArm64ImageBase, 0, 0, 0, 0)
+	out = renvoDarwinAppendTextSegment64(out, len(a.code), textFileSize)
+	out = renvoDarwinAppendDataSegment64(out, dataFileOff, dataFileSize, a.bssSize)
+	out = renvoDarwinAppendSegment64(out, "__LINKEDIT", renvoDarwinArm64ImageBase+dataFileOff+dataVMSize, renvoAlignValue(linkeditSize, renvoDarwinArm64PageSize), linkeditOff, linkeditSize, 1, 1)
+	out = renvoAppend32(out, 0x80000022)
+	out = renvoAppend32(out, 48)
+	out = renvoAppend32(out, 0)
+	out = renvoAppend32(out, 0)
+	out = renvoAppend32(out, bindOff)
+	out = renvoAppend32(out, bindSize)
+	for i := 0; i < 6; i++ {
+		out = renvoAppend32(out, 0)
+	}
+	out = renvoAppend32(out, 0x02)
+	out = renvoAppend32(out, 24)
+	out = renvoAppend32(out, symOff)
+	out = renvoAppend32(out, symbolCount)
+	out = renvoAppend32(out, strOff)
+	out = renvoAppend32(out, strSize)
+	out = renvoAppend32(out, 0x0b)
+	out = renvoAppend32(out, 80)
+	out = renvoAppend32(out, 0)
+	out = renvoAppend32(out, 0)
+	out = renvoAppend32(out, 0)
+	out = renvoAppend32(out, 1)
+	out = renvoAppend32(out, 1)
+	out = renvoAppend32(out, undefinedCount)
+	for i := 0; i < 12; i++ {
+		out = renvoAppend32(out, 0)
+	}
+	cmdStart := len(out)
+	out = renvoAppend32(out, 0x0e)
+	out = renvoAppend32(out, 32)
+	out = renvoAppend32(out, 12)
+	out = renvoAppendStringZ(out, "/usr/lib/dyld")
+	out = renvoAppendUntil(out, cmdStart+32)
+	out = renvoDarwinAppendDylibCommand(out, "/usr/lib/libSystem.B.dylib")
+	for i := 0; i < len(dylibs); i++ {
+		out = renvoDarwinAppendDylibCommand(out, dylibs[i])
+	}
+	out = renvoAppend32(out, 0x1b)
+	out = renvoAppend32(out, 24)
+	out = renvoAppend32(out, 0x52544758)
+	out = renvoAppend32(out, 0x44415257)
+	out = renvoAppend32(out, 0x494e4152)
+	out = renvoAppend32(out, 0x4d363400)
+	out = renvoAppend32(out, 0x32)
+	out = renvoAppend32(out, 24)
+	out = renvoAppend32(out, 1)
+	out = renvoAppend32(out, 0x000b0000)
+	out = renvoAppend32(out, 0x000b0000)
+	out = renvoAppend32(out, 0)
+	out = renvoAppend32(out, 0x80000028)
+	out = renvoAppend32(out, 24)
+	out = renvoAppend64U32(out, a.codeOffset)
+	out = renvoAppend64U32(out, 0)
+	out = renvoAppend32(out, 0x1d)
+	out = renvoAppend32(out, 16)
+	out = renvoAppend32(out, sigOff)
+	out = renvoAppend32(out, sigSize)
+	return renvoAppendUntil(out, a.codeOffset)
+}
+
+type renvoDarwinImportLayout struct {
+	gotOffs       []int
+	staticGotOffs []int
+}
+
+func renvoDarwinPrepareImports(a *renvoAsm) renvoDarwinImportLayout {
+	var layout renvoDarwinImportLayout
+	layout.gotOffs = make([]int, renvoDarwinImportCount+1)
+	layout.staticGotOffs = make([]int, len(a.darwinImports))
+	stubAts := make([]int, renvoDarwinImportCount+1)
+	staticStubAts := make([]int, len(a.darwinImports))
+	for id := 1; id <= renvoDarwinImportCount; id++ {
+		if len(a.darwinImportUsed) <= id || !a.darwinImportUsed[id] {
+			continue
+		}
+		label := a.darwinImportLabels[id]
+		renvoAarch64AsmAlign(a)
+		renvoAsmMarkLabel(a, label)
+		stubAts[id] = len(a.code)
+		renvoAarch64AsmEmit(a, 0x90000010)
+		renvoAarch64AsmEmit(a, 0xf9400210)
+		renvoAarch64AsmEmit(a, 0xd61f0200)
+	}
+	for i := 0; i < len(a.darwinImports); i++ {
+		if !a.darwinImports[i].used {
+			continue
+		}
+		renvoAarch64AsmAlign(a)
+		renvoAsmMarkLabel(a, a.darwinImports[i].label)
+		staticStubAts[i] = len(a.code)
+		renvoAarch64AsmEmit(a, 0x90000010)
+		renvoAarch64AsmEmit(a, 0xf9400210)
+		renvoAarch64AsmEmit(a, 0xd61f0200)
+	}
+	renvoAsmPatch(a)
+	dataFileOff := renvoAlignValue(a.codeOffset+len(a.code), renvoDarwinArm64PageSize)
+	a.dataOffset = dataFileOff
+	a.data = renvoAppendUntil(a.data, renvoAlignValue(len(a.data), 8))
+	for id := 1; id <= renvoDarwinImportCount; id++ {
+		if len(a.darwinImportUsed) <= id || !a.darwinImportUsed[id] {
+			continue
+		}
+		layout.gotOffs[id] = len(a.data)
+		a.data = renvoAppend64U32(a.data, 0)
+	}
+	for i := 0; i < len(a.darwinImports); i++ {
+		if !a.darwinImports[i].used {
+			continue
+		}
+		layout.staticGotOffs[i] = len(a.data)
+		a.data = renvoAppend64U32(a.data, 0)
+	}
+	a.data = renvoAppendUntil(a.data, renvoAlignValue(len(a.data), renvoDarwinArm64PageSize))
+	renvoAsmPatchAarch64AbsDarwin(a)
+	for id := 1; id <= renvoDarwinImportCount; id++ {
+		if len(a.darwinImportUsed) <= id || !a.darwinImportUsed[id] {
+			continue
+		}
+		stubAt := stubAts[id]
+		target := renvoDarwinArm64ImageBase + dataFileOff + layout.gotOffs[id]
+		pc := renvoDarwinArm64ImageBase + a.codeOffset + stubAt
+		renvoDarwinPatchArm64Adrp(a.code, stubAt, pc, target)
+		pageOff := target & 0xfff
+		renvoPut32At(a.code, stubAt+4, 0xf9400210|((pageOff/8)<<10))
+	}
+	for i := 0; i < len(a.darwinImports); i++ {
+		if !a.darwinImports[i].used {
+			continue
+		}
+		stubAt := staticStubAts[i]
+		target := renvoDarwinArm64ImageBase + dataFileOff + layout.staticGotOffs[i]
+		pc := renvoDarwinArm64ImageBase + a.codeOffset + stubAt
+		renvoDarwinPatchArm64Adrp(a.code, stubAt, pc, target)
+		pageOff := target & 0xfff
+		renvoPut32At(a.code, stubAt+4, 0xf9400210|((pageOff/8)<<10))
+	}
+	return layout
+}
+
+func renvoDarwinBuildBindData(a *renvoAsm, gotOffs []int, staticGotOffs []int) []byte {
+	bind := make([]byte, 0, 256)
+	bind = append(bind, 0x11)
+	bind = append(bind, 0x51)
+	for id := 1; id <= renvoDarwinImportCount; id++ {
+		if len(a.darwinImportUsed) <= id || !a.darwinImportUsed[id] {
+			continue
+		}
+		bind = append(bind, 0x40)
+		bind = renvoAppendStringZ(bind, renvoDarwinImportName(id))
+		bind = append(bind, 0x72)
+		bind = renvoDarwinAppendULEB(bind, gotOffs[id])
+		bind = append(bind, 0x90)
+	}
+	for i := 0; i < len(a.darwinImports); i++ {
+		if !a.darwinImports[i].used {
+			continue
+		}
+		ordinal := renvoDarwinDylibOrdinal(a, a.darwinImports[i].dylib)
+		if ordinal <= 0 || ordinal >= 16 {
+			continue
+		}
+		bind = append(bind, byte(0x10|ordinal))
+		bind = append(bind, 0x40)
+		bind = renvoAppendStringZ(bind, a.darwinImports[i].name)
+		bind = append(bind, 0x72)
+		bind = renvoDarwinAppendULEB(bind, staticGotOffs[i])
+		bind = append(bind, 0x90)
+	}
+	return append(bind, 0)
+}
+
+func renvoDarwinBuildStringTable(a *renvoAsm) []byte {
+	strtab := make([]byte, 0, 128)
+	strtab = append(strtab, 0)
+	strtab = renvoAppendStringZ(strtab, "_main")
+	for id := 1; id <= renvoDarwinImportCount; id++ {
+		if len(a.darwinImportUsed) <= id || !a.darwinImportUsed[id] {
+			continue
+		}
+		strtab = renvoAppendStringZ(strtab, renvoDarwinImportName(id))
+	}
+	for i := 0; i < len(a.darwinImports); i++ {
+		if a.darwinImports[i].used {
+			strtab = renvoAppendStringZ(strtab, a.darwinImports[i].name)
+		}
+	}
+	return strtab
+}
+
+func renvoDarwinBuildSymbolTable(a *renvoAsm) []byte {
+	symtab := make([]byte, 0, 16*(renvoDarwinImportCount+1))
+	symtab = renvoAppend32(symtab, 1)
+	symtab = append(symtab, 0x0f)
+	symtab = append(symtab, 1)
+	symtab = renvoAppend16(symtab, 0)
+	symtab = renvoAppend64(symtab, renvoDarwinArm64ImageBase+a.codeOffset)
+	nameOff := 7
+	for id := 1; id <= renvoDarwinImportCount; id++ {
+		if len(a.darwinImportUsed) <= id || !a.darwinImportUsed[id] {
+			continue
+		}
+		symtab = renvoAppend32(symtab, nameOff)
+		symtab = append(symtab, 1)
+		symtab = append(symtab, 0)
+		symtab = renvoAppend16(symtab, 0x100)
+		symtab = renvoAppend64(symtab, 0)
+		nameOff += len(renvoDarwinImportName(id)) + 1
+	}
+	for i := 0; i < len(a.darwinImports); i++ {
+		if !a.darwinImports[i].used {
+			continue
+		}
+		symtab = renvoAppend32(symtab, nameOff)
+		symtab = append(symtab, 1)
+		symtab = append(symtab, 0)
+		symtab = renvoAppend16(symtab, 0x100)
+		symtab = renvoAppend64(symtab, 0)
+		nameOff += len(a.darwinImports[i].name) + 1
+	}
+	return symtab
+}
+
+func renvoDarwinUsedImportCount(a *renvoAsm) int {
+	count := 0
+	for id := 1; id <= renvoDarwinImportCount; id++ {
+		if len(a.darwinImportUsed) > id && a.darwinImportUsed[id] {
+			count++
+		}
+	}
+	for i := 0; i < len(a.darwinImports); i++ {
+		if a.darwinImports[i].used {
+			count++
+		}
+	}
+	return count
+}
+
+func renvoAsmImageDarwinArm64(a *renvoAsm) []byte {
+	imports := renvoDarwinPrepareImports(a)
+	dataFileOff := renvoAlignValue(a.codeOffset+len(a.code), renvoDarwinArm64PageSize)
+	bind := renvoDarwinBuildBindData(a, imports.gotOffs, imports.staticGotOffs)
+	symtab := renvoDarwinBuildSymbolTable(a)
+	strtab := renvoDarwinBuildStringTable(a)
+	undefinedCount := renvoDarwinUsedImportCount(a)
+
+	textFileSize := dataFileOff
+	dataFileSize := len(a.data)
+	dataVMSize := renvoAlignValue(len(a.data)+a.bssSize, renvoDarwinArm64PageSize)
+	linkeditOff := dataFileOff + dataFileSize
+	bindOff := linkeditOff
+	symOff := renvoAlignValue(bindOff+len(bind), 8)
+	strOff := symOff + len(symtab)
+	sigOff := renvoAlignValue(strOff+len(strtab), 16)
+	sigSize := renvoDarwinCodeSignatureSize(sigOff, "renvo")
+	linkeditSize := sigOff + sigSize - linkeditOff
+
+	out := renvoDarwinMachHeader(a, textFileSize, dataFileOff, dataFileSize, dataVMSize, linkeditOff, linkeditSize, bindOff, len(bind), symOff, 1+undefinedCount, strOff, len(strtab), undefinedCount, sigOff, sigSize)
+	for i := 0; i < len(a.code); i++ {
+		out = append(out, a.code[i])
+	}
+	out = renvoAppendUntil(out, dataFileOff)
+	for i := 0; i < len(a.data); i++ {
+		out = append(out, a.data[i])
+	}
+	out = renvoAppendUntil(out, bindOff)
+	for i := 0; i < len(bind); i++ {
+		out = append(out, bind[i])
+	}
+	out = renvoAppendUntil(out, symOff)
+	for i := 0; i < len(symtab); i++ {
+		out = append(out, symtab[i])
+	}
+	for i := 0; i < len(strtab); i++ {
+		out = append(out, strtab[i])
+	}
+	out = renvoAppendUntil(out, sigOff)
+	sig := renvoDarwinCodeSignature(out, "renvo", textFileSize)
+	for i := 0; i < len(sig); i++ {
+		out = append(out, sig[i])
+	}
+	if renvoFixedTarget == 0 && a.c.emitImage {
+		return renvoAppendReplLinkTable(out, a)
+	}
+	return out
+}
+
+func renvoAsmPatchAarch64AbsDarwin(a *renvoAsm) {
+	for i := 0; i+2 < len(a.absRelocs); i += 3 {
+		at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i))
+		off := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1))
+		kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2))
+		target := a.dataOffset + off
+		if kind == renvoAbsBssReloc {
+			target = renvoAsmBssOffset(a) + off
+		}
+		insn := renvoGet32At(a.code, at)
+		reg := insn & 31
+		address := renvoDarwinArm64ImageBase + target
+		pc := renvoDarwinArm64ImageBase + a.codeOffset + at
+		delta := (address >> 12) - (pc >> 12)
+		imm := delta & 0x1fffff
+		renvoPut32At(a.code, at, 0x90000000|((imm&3)<<29)|(((imm>>2)&0x7ffff)<<5)|reg)
+		renvoPut32At(a.code, at+4, 0x91000000|((address&0xfff)<<10)|(reg<<5)|reg)
+		renvoPut32At(a.code, at+8, 0xd503201f)
+		renvoPut32At(a.code, at+12, 0xd503201f)
+	}
+}
+
+func renvoDarwinAppendBE32(out []byte, value int) []byte {
+	out = append(out, byte(value>>24))
+	out = append(out, byte(value>>16))
+	out = append(out, byte(value>>8))
+	out = append(out, byte(value))
+	return out
+}
+
+func renvoDarwinAppendBE64(out []byte, value int) []byte {
+	out = renvoDarwinAppendBE32(out, 0)
+	out = renvoDarwinAppendBE32(out, value)
+	return out
+}
+
+func renvoDarwinCodeSignatureSize(codeLimit int, ident string) int {
+	slots := (codeLimit + 16383) / 16384
+	cdSize := 88 + len(ident) + 1 + slots*32
+	return 20 + cdSize
+}
+
+func renvoDarwinCodeSignature(code []byte, ident string, execLimit int) []byte {
+	slots := (len(code) + 16383) / 16384
+	identOff := 88
+	hashOff := identOff + len(ident) + 1
+	cdSize := hashOff + slots*32
+	totalSize := 20 + cdSize
+	out := make([]byte, 0, totalSize)
+	out = renvoDarwinAppendBE32(out, 0xfade0cc0)
+	out = renvoDarwinAppendBE32(out, totalSize)
+	out = renvoDarwinAppendBE32(out, 1)
+	out = renvoDarwinAppendBE32(out, 0)
+	out = renvoDarwinAppendBE32(out, 20)
+	out = renvoDarwinAppendBE32(out, 0xfade0c02)
+	out = renvoDarwinAppendBE32(out, cdSize)
+	out = renvoDarwinAppendBE32(out, 0x20400)
+	out = renvoDarwinAppendBE32(out, 0x2)
+	out = renvoDarwinAppendBE32(out, hashOff)
+	out = renvoDarwinAppendBE32(out, identOff)
+	out = renvoDarwinAppendBE32(out, 0)
+	out = renvoDarwinAppendBE32(out, slots)
+	out = renvoDarwinAppendBE32(out, len(code))
+	out = append(out, 32)
+	out = append(out, 2)
+	out = append(out, 0)
+	out = append(out, 14)
+	out = renvoDarwinAppendBE32(out, 0)
+	out = renvoDarwinAppendBE32(out, 0)
+	out = renvoDarwinAppendBE32(out, 0)
+	out = renvoDarwinAppendBE32(out, 0)
+	out = renvoDarwinAppendBE64(out, 0)
+	out = renvoDarwinAppendBE64(out, 0)
+	out = renvoDarwinAppendBE64(out, execLimit)
+	out = renvoDarwinAppendBE64(out, 1)
+	for i := 0; i < len(ident); i++ {
+		out = append(out, ident[i])
+	}
+	out = append(out, 0)
+	for slot := 0; slot < slots; slot++ {
+		start := slot * 16384
+		end := start + 16384
+		if end > len(code) {
+			end = len(code)
+		}
+		hash := renvoDarwinSHA256(code[start:end])
+		for i := 0; i < len(hash); i++ {
+			out = append(out, hash[i])
+		}
+	}
+	return out
+}
+
+func renvoDarwinSHA256Constants() []int {
+	return []int{
+		0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+		0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+		0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+		0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+		0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+		0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+		0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+		0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+	}
+}
+
+func renvoDarwinSHA256Schedule(msg []byte, chunk int, w []int) {
+	for i := 0; i < 16; i++ {
+		at := chunk + i*4
+		w[i] = (int(msg[at])<<24 | int(msg[at+1])<<16 | int(msg[at+2])<<8 | int(msg[at+3])) & 0xffffffff
+	}
+	for i := 16; i < 64; i++ {
+		x := w[i-15] & 0xffffffff
+		y := w[i-2] & 0xffffffff
+		s0 := ((x >> 7) | ((x << 25) & 0xffffffff)) ^ ((x >> 18) | ((x << 14) & 0xffffffff)) ^ (x >> 3)
+		s1 := ((y >> 17) | ((y << 15) & 0xffffffff)) ^ ((y >> 19) | ((y << 13) & 0xffffffff)) ^ (y >> 10)
+		w[i] = (w[i-16] + s0 + w[i-7] + s1) & 0xffffffff
+	}
+}
+
+func renvoDarwinSHA256Rounds(w []int, k []int, hvals []int) {
+	a := hvals[0]
+	b := hvals[1]
+	c := hvals[2]
+	d := hvals[3]
+	e := hvals[4]
+	f := hvals[5]
+	g := hvals[6]
+	h := hvals[7]
+	for i := 0; i < 64; i++ {
+		e32 := e & 0xffffffff
+		a32 := a & 0xffffffff
+		s1 := ((e32 >> 6) | ((e32 << 26) & 0xffffffff)) ^ ((e32 >> 11) | ((e32 << 21) & 0xffffffff)) ^ ((e32 >> 25) | ((e32 << 7) & 0xffffffff))
+		choose := (e & f) ^ ((e ^ 0xffffffff) & g)
+		t1 := (h + s1 + choose + k[i] + w[i]) & 0xffffffff
+		s0 := ((a32 >> 2) | ((a32 << 30) & 0xffffffff)) ^ ((a32 >> 13) | ((a32 << 19) & 0xffffffff)) ^ ((a32 >> 22) | ((a32 << 10) & 0xffffffff))
+		majority := (a & b) ^ (a & c) ^ (b & c)
+		t2 := (s0 + majority) & 0xffffffff
+		h = g
+		g = f
+		f = e
+		e = (d + t1) & 0xffffffff
+		d = c
+		c = b
+		b = a
+		a = (t1 + t2) & 0xffffffff
+	}
+	hvals[0] = (hvals[0] + a) & 0xffffffff
+	hvals[1] = (hvals[1] + b) & 0xffffffff
+	hvals[2] = (hvals[2] + c) & 0xffffffff
+	hvals[3] = (hvals[3] + d) & 0xffffffff
+	hvals[4] = (hvals[4] + e) & 0xffffffff
+	hvals[5] = (hvals[5] + f) & 0xffffffff
+	hvals[6] = (hvals[6] + g) & 0xffffffff
+	hvals[7] = (hvals[7] + h) & 0xffffffff
+}
+
+func renvoDarwinSHA256Compress(msg []byte, hvals []int) {
+	k := renvoDarwinSHA256Constants()
+	w := make([]int, 64)
+	for chunk := 0; chunk < len(msg); chunk += 64 {
+		renvoDarwinSHA256Schedule(msg, chunk, w)
+		renvoDarwinSHA256Rounds(w, k, hvals)
+	}
+}
+
+func renvoDarwinSHA256(data []byte) []byte {
+	hardware := make([]byte, 32)
+	if renvoDarwinCCSHA256(data, len(data), hardware) != 0 {
+		return hardware
+	}
+	msgLen := len(data) + 1 + 8
+	msgLen = renvoAlignValue(msgLen, 64)
+	msg := make([]byte, msgLen)
+	for i := 0; i < len(data); i++ {
+		msg[i] = data[i]
+	}
+	msg[len(data)] = 0x80
+	bits := len(data) * 8
+	for i := 0; i < 8; i++ {
+		msg[msgLen-1-i] = byte(bits >> (i * 8))
+	}
+	vals := []int{0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19}
+	renvoDarwinSHA256Compress(msg, vals)
+	out := make([]byte, 0, 32)
+	for i := 0; i < len(vals); i++ {
+		out = append(out, byte(vals[i]>>24))
+		out = append(out, byte(vals[i]>>16))
+		out = append(out, byte(vals[i]>>8))
+		out = append(out, byte(vals[i]))
+	}
+	return out
+}
+
+}
+
+# backend/compiler_windows_arm64_impl.go
+go backend {
+
+const renvoWinArm64Machine = 0xaa64
+const renvoWinArm64ImageBase = 0x140000000
+
+func compileWindowsArm64(input []int, output int) int {
+	return compileWindowsArm64Arena(input, output, 0)
+}
+
+func compileWindowsArm64Arena(input []int, output int, arenaSize int) int {
+	renvoSetTarget(renvoTargetWindowsArm64)
+	return renvoCompileAarch64(input, output, arenaSize)
+}
+
+func renvoEmitProgramEntryArgsWindowsArm64(g *renvoLinearGen, appIndex int) bool {
+	app := &g.meta.funcs[appIndex]
+	if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
+		return false
+	}
+	if app.paramCount == 0 {
+		return true
+	}
+	if app.paramCount > 2 {
+		return false
+	}
+	first := &g.meta.params[app.firstParam]
+	if !renvoTypeIsStringSlice(g.meta, first.typ) {
+		return false
+	}
+	argsOff := g.asm.bssSize
+	g.asm.bssSize += 32768
+	argsTextOff := g.asm.bssSize
+	g.asm.bssSize += 32768
+	argsLenOff := g.asm.bssSize
+	g.asm.bssSize += 8
+	envOff := g.asm.bssSize
+	g.asm.bssSize += 32768
+	envLenOff := g.asm.bssSize
+	g.asm.bssSize += 8
+	renvoAsmBuildWindowsArgvEnvSlicesArm64(&g.asm, argsOff, argsTextOff, argsLenOff, envOff, envLenOff)
+	if app.paramCount == 1 {
+		return true
+	}
+	second := &g.meta.params[app.firstParam+1]
+	return renvoTypeIsStringSlice(g.meta, second.typ)
+}
+
+func renvoAsmBuildWindowsArgvEnvSlicesArm64(a *renvoAsm, argsOff int, argsTextOff int, argsLenOff int, envOff int, envLenOff int) {
+	skipLabel := renvoAsmNewLabel(a)
+	startLabel := renvoAsmNewLabel(a)
+	copyLabel := renvoAsmNewLabel(a)
+	quoteLabel := renvoAsmNewLabel(a)
+	setQuoteLabel := renvoAsmNewLabel(a)
+	copyCharLabel := renvoAsmNewLabel(a)
+	argDoneLabel := renvoAsmNewLabel(a)
+	argsDoneLabel := renvoAsmNewLabel(a)
+
+	renvoWinArm64CallImport(a, renvoWinImportGetCommandLineA)
+	renvoAarch64AsmMovRegReg(a, 9, 0) // source
+	renvoAarch64AsmMovRegAbs(a, 10, argsOff, renvoAbsBssReloc)
+	renvoAarch64AsmMovRegAbs(a, 11, argsTextOff, renvoAbsBssReloc)
+	renvoAarch64AsmMovRegImm(a, 12, 0) // argument count
+	renvoAsmMarkLabel(a, skipLabel)
+	renvoAarch64AsmLoadRegMem(a, 13, 9, 0, 1)
+	renvoAarch64AsmCmpRegImm(a, 13, 0)
+	renvoAarch64AsmBCondLabel(a, argsDoneLabel, 0)
+	renvoAarch64AsmCmpRegImm(a, 13, ' ')
+	renvoAarch64AsmBCondLabel(a, startLabel, 1)
+	renvoAarch64AsmAddRegImm(a, 9, 9, 1)
+	renvoAarch64AsmJmpLabel(a, skipLabel)
+	renvoAsmMarkLabel(a, startLabel)
+	renvoAarch64AsmCmpRegImm(a, 13, 9)
+	renvoAarch64AsmBCondLabel(a, copyLabel, 1)
+	renvoAarch64AsmAddRegImm(a, 9, 9, 1)
+	renvoAarch64AsmJmpLabel(a, skipLabel)
+
+	renvoAsmMarkLabel(a, copyLabel)
+	renvoAarch64AsmMovRegReg(a, 14, 11) // copied argument start
+	renvoAarch64AsmMovRegImm(a, 15, 0)  // copied length
+	renvoAarch64AsmMovRegImm(a, 17, 0)  // quote state
+	copyLoopLabel := renvoAsmNewLabel(a)
+	renvoAsmMarkLabel(a, copyLoopLabel)
+	renvoAarch64AsmLoadRegMem(a, 13, 9, 0, 1)
+	renvoAarch64AsmCmpRegImm(a, 13, 0)
+	renvoAarch64AsmBCondLabel(a, argDoneLabel, 0)
+	renvoAarch64AsmCmpRegImm(a, 13, '"')
+	renvoAarch64AsmBCondLabel(a, quoteLabel, 0)
+	renvoAarch64AsmCmpRegImm(a, 17, 0)
+	renvoAarch64AsmBCondLabel(a, copyCharLabel, 1)
+	renvoAarch64AsmCmpRegImm(a, 13, ' ')
+	renvoAarch64AsmBCondLabel(a, argDoneLabel, 0)
+	renvoAarch64AsmCmpRegImm(a, 13, 9)
+	renvoAarch64AsmBCondLabel(a, argDoneLabel, 0)
+	renvoAsmMarkLabel(a, copyCharLabel)
+	renvoAarch64AsmStoreRegMem(a, 13, 11, 0, 1)
+	renvoAarch64AsmAddRegImm(a, 9, 9, 1)
+	renvoAarch64AsmAddRegImm(a, 11, 11, 1)
+	renvoAarch64AsmAddRegImm(a, 15, 15, 1)
+	renvoAarch64AsmJmpLabel(a, copyLoopLabel)
+	renvoAsmMarkLabel(a, quoteLabel)
+	renvoAarch64AsmCmpRegImm(a, 17, 0)
+	renvoAarch64AsmBCondLabel(a, setQuoteLabel, 0)
+	renvoAarch64AsmMovRegImm(a, 17, 0)
+	renvoAarch64AsmAddRegImm(a, 9, 9, 1)
+	renvoAarch64AsmJmpLabel(a, copyLoopLabel)
+	renvoAsmMarkLabel(a, setQuoteLabel)
+	renvoAarch64AsmMovRegImm(a, 17, 1)
+	renvoAarch64AsmAddRegImm(a, 9, 9, 1)
+	renvoAarch64AsmJmpLabel(a, copyLoopLabel)
+
+	renvoAsmMarkLabel(a, argDoneLabel)
+	renvoAarch64AsmStoreRegMem(a, 31, 11, 0, 1)
+	renvoAarch64AsmStoreRegMem(a, 14, 10, 0, 8)
+	renvoAarch64AsmStoreRegMem(a, 15, 10, 8, 8)
+	renvoAarch64AsmAddRegImm(a, 10, 10, 16)
+	renvoAarch64AsmAddRegImm(a, 11, 11, 1)
+	renvoAarch64AsmAddRegImm(a, 12, 12, 1)
+	renvoAarch64AsmCmpRegImm(a, 13, 0)
+	renvoAarch64AsmBCondLabel(a, argsDoneLabel, 0)
+	renvoAarch64AsmAddRegImm(a, 9, 9, 1)
+	renvoAarch64AsmJmpLabel(a, skipLabel)
+
+	renvoAsmMarkLabel(a, argsDoneLabel)
+	renvoAarch64AsmMovRegAbs(a, 9, argsLenOff, renvoAbsBssReloc)
+	renvoAarch64AsmStoreRegMem(a, 12, 9, 0, 8)
+
+	envLoopLabel := renvoAsmNewLabel(a)
+	envLengthLabel := renvoAsmNewLabel(a)
+	envStringDoneLabel := renvoAsmNewLabel(a)
+	envDoneLabel := renvoAsmNewLabel(a)
+	renvoWinArm64CallImport(a, renvoWinImportGetEnvironmentStringsA)
+	renvoAarch64AsmMovRegReg(a, 9, 0)
+	renvoAarch64AsmMovRegAbs(a, 10, envOff, renvoAbsBssReloc)
+	renvoAarch64AsmMovRegImm(a, 11, 0)
+	renvoAsmMarkLabel(a, envLoopLabel)
+	renvoAarch64AsmLoadRegMem(a, 12, 9, 0, 1)
+	renvoAarch64AsmCmpRegImm(a, 12, 0)
+	renvoAarch64AsmBCondLabel(a, envDoneLabel, 0)
+	renvoAarch64AsmStoreRegMem(a, 9, 10, 0, 8)
+	renvoAarch64AsmMovRegImm(a, 13, 0)
+	renvoAsmMarkLabel(a, envLengthLabel)
+	renvoAarch64AsmAddRegReg(a, 14, 9, 13)
+	renvoAarch64AsmLoadRegMem(a, 12, 14, 0, 1)
+	renvoAarch64AsmCmpRegImm(a, 12, 0)
+	renvoAarch64AsmBCondLabel(a, envStringDoneLabel, 0)
+	renvoAarch64AsmAddRegImm(a, 13, 13, 1)
+	renvoAarch64AsmJmpLabel(a, envLengthLabel)
+	renvoAsmMarkLabel(a, envStringDoneLabel)
+	renvoAarch64AsmStoreRegMem(a, 13, 10, 8, 8)
+	renvoAarch64AsmAddRegImm(a, 10, 10, 16)
+	renvoAarch64AsmAddRegImm(a, 13, 13, 1)
+	renvoAarch64AsmAddRegReg(a, 9, 9, 13)
+	renvoAarch64AsmAddRegImm(a, 11, 11, 1)
+	renvoAarch64AsmJmpLabel(a, envLoopLabel)
+	renvoAsmMarkLabel(a, envDoneLabel)
+	renvoAarch64AsmMovRegAbs(a, 9, envLenOff, renvoAbsBssReloc)
+	renvoAarch64AsmStoreRegMem(a, 11, 9, 0, 8)
+
+	renvoAarch64AsmMovRegAbs(a, renvoAarch64RegRdi, argsOff, renvoAbsBssReloc)
+	renvoAarch64AsmMovRegAbs(a, 9, argsLenOff, renvoAbsBssReloc)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRsi, 9, 0, 8)
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegRdx, renvoAarch64RegRsi)
+	renvoAarch64AsmMovRegAbs(a, renvoAarch64RegRcx, envOff, renvoAbsBssReloc)
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegR8, 11)
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegR9, 11)
+}
+
+func renvoWinArm64CallImport(a *renvoAsm, importID int) {
+	renvoAarch64AsmMovRegAbs(a, 16, importID, renvoAbsWinImportReloc)
+	renvoAarch64AsmLoadRegMem(a, 16, 16, 0, 8)
+	renvoAarch64AsmEmit(a, 0xd63f0200) // blr x16
+}
+
+func renvoWinArm64CallStaticImport(a *renvoAsm, importID int, wordCount int) {
+	registerWords := wordCount
+	if registerWords > 8 {
+		registerWords = 8
+	}
+	for i := 0; i < registerWords; i++ {
+		renvoAarch64AsmPopReg(a, i)
+	}
+	stackWords := wordCount - registerWords
+
+	// RENVO's expression stack uses a 16-byte slot for every word. Windows ARM64
+	// stack arguments are packed into 8-byte slots, so construct a temporary
+	// ABI call area while retaining the exact pending-argument stack pointer.
+	renvoAarch64AsmEmit(a, 0x910003e9) // add x9, sp, #0
+	savedSPOff := stackWords * 8
+	allocation := renvoAlignValue(savedSPOff+8, 16)
+	renvoAarch64AsmAddRegImm(a, 31, 31, -allocation)
+	for i := 0; i < stackWords; i++ {
+		renvoAarch64AsmLoadRegMem(a, 10, 9, i*16, 8)
+		renvoAarch64AsmStoreRegMem(a, 10, 31, i*8, 8)
+	}
+	renvoAarch64AsmStoreRegMem(a, 9, 31, savedSPOff, 8)
+	renvoWinArm64CallImport(a, importID)
+	renvoAarch64AsmMovRegReg(a, 10, 0)
+	renvoAarch64AsmLoadRegMem(a, 9, 31, savedSPOff, 8)
+	// ADD (immediate), unlike ORR-based MOV, can address SP as both operands.
+	renvoAarch64AsmEmit(a, 0x9100013f)
+	renvoAarch64AsmAddRegImm(a, 31, 31, stackWords*16)
+	renvoAarch64AsmMovRegReg(a, 0, 10)
+}
+
+func renvoWinArm64TestRegImm(a *renvoAsm, reg int, imm int) {
+	renvoAarch64AsmMovRegImm(a, 15, imm)
+	renvoAarch64AsmEmit(a, 0xea00001f|(15<<16)|(reg<<5))
+}
+
+func renvoWinArm64TranslateCreateFileFlags(a *renvoAsm) {
+	notReadWriteLabel := renvoAsmNewLabel(a)
+	accessDoneLabel := renvoAsmNewLabel(a)
+	noCreateLabel := renvoAsmNewLabel(a)
+	createDoneLabel := renvoAsmNewLabel(a)
+
+	renvoAarch64AsmMovRegImm(a, 1, -2147483648)
+	renvoWinArm64TestRegImm(a, 0, 2)
+	renvoAarch64AsmBCondLabel(a, notReadWriteLabel, 0)
+	renvoAarch64AsmMovRegImm(a, 1, -1073741824)
+	renvoAarch64AsmJmpLabel(a, accessDoneLabel)
+	renvoAsmMarkLabel(a, notReadWriteLabel)
+	renvoWinArm64TestRegImm(a, 0, 1)
+	renvoAarch64AsmBCondLabel(a, accessDoneLabel, 0)
+	renvoAarch64AsmMovRegImm(a, 1, 0x40000000)
+	renvoAsmMarkLabel(a, accessDoneLabel)
+
+	renvoAarch64AsmMovRegImm(a, 4, 3)
+	renvoWinArm64TestRegImm(a, 0, 64)
+	renvoAarch64AsmBCondLabel(a, noCreateLabel, 0)
+	renvoAarch64AsmMovRegImm(a, 4, 4)
+	renvoWinArm64TestRegImm(a, 0, 512)
+	renvoAarch64AsmBCondLabel(a, createDoneLabel, 0)
+	renvoAarch64AsmMovRegImm(a, 4, 2)
+	renvoAarch64AsmJmpLabel(a, createDoneLabel)
+	renvoAsmMarkLabel(a, noCreateLabel)
+	renvoWinArm64TestRegImm(a, 0, 512)
+	renvoAarch64AsmBCondLabel(a, createDoneLabel, 0)
+	renvoAarch64AsmMovRegImm(a, 4, 5)
+	renvoAsmMarkLabel(a, createDoneLabel)
+	renvoAarch64AsmMovRegImm(a, 2, 3)
+	renvoAarch64AsmMovRegImm(a, 3, 0)
+	renvoAarch64AsmMovRegImm(a, 5, 0x80)
+	renvoAarch64AsmMovRegImm(a, 6, 0)
+}
+
+func renvoWinArm64EmitReadWriteHelper(g *renvoLinearGen, isWrite bool) int {
+	a := &g.asm
+	if isWrite {
+		if g.winWriteEmitted {
+			return g.winWriteLabel
+		}
+		g.winWriteEmitted = true
+		g.winWriteLabel = renvoAsmNewLabel(a)
+	} else {
+		if g.winReadEmitted {
+			return g.winReadLabel
+		}
+		g.winReadEmitted = true
+		g.winReadLabel = renvoAsmNewLabel(a)
+	}
+	label := g.winReadLabel
+	importID := renvoWinImportReadFile
+	if isWrite {
+		label = g.winWriteLabel
+		importID = renvoWinImportWriteFile
+	}
+	countOff := a.bssSize
+	a.bssSize += 8
+	posOff := a.bssSize
+	a.bssSize += 8
+	resultOff := a.bssSize
+	a.bssSize += 8
+	afterLabel := renvoAsmNewLabel(a)
+	standardLabel := renvoAsmNewLabel(a)
+	standardErrorLabel := renvoAsmNewLabel(a)
+	handleReadyLabel := renvoAsmNewLabel(a)
+	sequentialLabel := renvoAsmNewLabel(a)
+	positionFailedLabel := renvoAsmNewLabel(a)
+	ioFailedLabel := renvoAsmNewLabel(a)
+	restoreLabel := renvoAsmNewLabel(a)
+	failLabel := renvoAsmNewLabel(a)
+	doneLabel := renvoAsmNewLabel(a)
+	renvoAsmJmpMarkLabel(a, afterLabel, label)
+	// Preserve the helper return address and its internal-convention arguments:
+	// x3=fd, x4=buffer, x1=count, x2=offset.
+	renvoAarch64AsmPushReg(a, renvoAarch64RegLr)
+	renvoAarch64AsmPushReg(a, renvoAarch64RegRdi)
+	renvoAarch64AsmPushReg(a, renvoAarch64RegRsi)
+	renvoAarch64AsmPushReg(a, renvoAarch64RegRdx)
+	renvoAarch64AsmPushReg(a, renvoAarch64RegRcx)
+	renvoAarch64AsmLoadRegMem(a, 9, 31, 48, 8)
+	if isWrite {
+		renvoAarch64AsmCmpRegImm(a, 9, 1)
+		renvoAarch64AsmBCondLabel(a, standardLabel, 0)
+		renvoAarch64AsmCmpRegImm(a, 9, 2)
+		renvoAarch64AsmBCondLabel(a, standardErrorLabel, 0)
+	} else {
+		renvoAarch64AsmCmpRegImm(a, 9, 0)
+		renvoAarch64AsmBCondLabel(a, standardLabel, 0)
+	}
+	renvoAarch64AsmStoreRegMem(a, 9, 31, 48, 8)
+	renvoAarch64AsmJmpLabel(a, handleReadyLabel)
+	renvoAsmMarkLabel(a, standardLabel)
+	standardHandle := -10
+	if isWrite {
+		standardHandle = -11
+	}
+	renvoAarch64AsmMovRegImm(a, 0, standardHandle)
+	renvoWinArm64CallImport(a, renvoWinImportGetStdHandle)
+	renvoAarch64AsmStoreRegMem(a, 0, 31, 48, 8)
+	renvoAarch64AsmJmpLabel(a, handleReadyLabel)
+	renvoAsmMarkLabel(a, standardErrorLabel)
+	renvoAarch64AsmMovRegImm(a, 0, -12)
+	renvoWinArm64CallImport(a, renvoWinImportGetStdHandle)
+	renvoAarch64AsmStoreRegMem(a, 0, 31, 48, 8)
+	renvoAsmMarkLabel(a, handleReadyLabel)
+	// Negative offsets use and advance the current file position. Non-negative
+	// offsets are positional: preserve the handle's position around the I/O.
+	renvoAarch64AsmLoadRegMem(a, 9, 31, 0, 8)
+	renvoAarch64AsmCmpRegImm(a, 9, 0)
+	renvoAarch64AsmBCondLabel(a, sequentialLabel, 11)
+
+	// Save the current position.
+	renvoAarch64AsmLoadRegMem(a, 0, 31, 48, 8)
+	renvoAarch64AsmMovRegImm(a, 1, 0)
+	renvoAarch64AsmMovRegImm(a, 2, 0)
+	renvoAarch64AsmMovRegImm(a, 3, 1)
+	renvoWinArm64CallImport(a, renvoWinImportSetFilePointer)
+	renvoAarch64AsmMovRegImm(a, 9, 0xffffffff)
+	renvoAarch64AsmCmpRegReg(a, 0, 9)
+	renvoAarch64AsmBCondLabel(a, positionFailedLabel, 0)
+	renvoAarch64AsmMovRegAbs(a, 9, posOff, renvoAbsBssReloc)
+	renvoAarch64AsmStoreRegMem(a, 0, 9, 0, 8)
+
+	// Seek to the requested offset.
+	renvoAarch64AsmLoadRegMem(a, 0, 31, 48, 8)
+	renvoAarch64AsmLoadRegMem(a, 1, 31, 0, 8)
+	renvoAarch64AsmMovRegImm(a, 2, 0)
+	renvoAarch64AsmMovRegImm(a, 3, 0)
+	renvoWinArm64CallImport(a, renvoWinImportSetFilePointer)
+	renvoAarch64AsmMovRegImm(a, 9, 0xffffffff)
+	renvoAarch64AsmCmpRegReg(a, 0, 9)
+	renvoAarch64AsmBCondLabel(a, ioFailedLabel, 0)
+
+	renvoWinArm64EmitKernelReadWriteCall(a, importID, countOff)
+	renvoAarch64AsmCmpRegImm(a, 0, 0)
+	renvoAarch64AsmBCondLabel(a, ioFailedLabel, 0)
+	renvoAarch64AsmMovRegAbs(a, 9, countOff, renvoAbsBssReloc)
+	renvoAarch64AsmLoadRegMem(a, 9, 9, 0, 8)
+	renvoAarch64AsmJmpLabel(a, restoreLabel)
+	renvoAsmMarkLabel(a, ioFailedLabel)
+	renvoAarch64AsmMovRegImm(a, 9, -1)
+	renvoAsmMarkLabel(a, restoreLabel)
+	renvoAarch64AsmMovRegAbs(a, 10, resultOff, renvoAbsBssReloc)
+	renvoAarch64AsmStoreRegMem(a, 9, 10, 0, 8)
+	renvoAarch64AsmLoadRegMem(a, 0, 31, 48, 8)
+	renvoAarch64AsmMovRegAbs(a, 9, posOff, renvoAbsBssReloc)
+	renvoAarch64AsmLoadRegMem(a, 1, 9, 0, 8)
+	renvoAarch64AsmMovRegImm(a, 2, 0)
+	renvoAarch64AsmMovRegImm(a, 3, 0)
+	renvoWinArm64CallImport(a, renvoWinImportSetFilePointer)
+	renvoAarch64AsmMovRegAbs(a, 9, resultOff, renvoAbsBssReloc)
+	renvoAarch64AsmLoadRegMem(a, 0, 9, 0, 8)
+	renvoAarch64AsmJmpLabel(a, doneLabel)
+
+	renvoAsmMarkLabel(a, positionFailedLabel)
+	renvoAarch64AsmMovRegImm(a, 0, -1)
+	renvoAarch64AsmJmpLabel(a, doneLabel)
+
+	renvoAsmMarkLabel(a, sequentialLabel)
+	renvoWinArm64EmitKernelReadWriteCall(a, importID, countOff)
+	renvoAarch64AsmCmpRegImm(a, 0, 0)
+	renvoAarch64AsmBCondLabel(a, failLabel, 0)
+	renvoAarch64AsmMovRegAbs(a, 9, countOff, renvoAbsBssReloc)
+	renvoAarch64AsmLoadRegMem(a, 0, 9, 0, 8)
+	renvoAarch64AsmJmpLabel(a, doneLabel)
+	renvoAsmMarkLabel(a, failLabel)
+	renvoAarch64AsmMovRegImm(a, 0, -1)
+	renvoAsmMarkLabel(a, doneLabel)
+	renvoAarch64AsmAddRegImm(a, 31, 31, 64)
+	renvoAarch64AsmPopReg(a, renvoAarch64RegLr)
+	renvoAsmRet(a)
+	renvoAsmMarkLabel(a, afterLabel)
+	return label
+}
+
+func renvoWinArm64EmitKernelReadWriteCall(a *renvoAsm, importID int, countOff int) {
+	renvoAarch64AsmLoadRegMem(a, 0, 31, 48, 8)
+	renvoAarch64AsmLoadRegMem(a, 1, 31, 32, 8)
+	renvoAarch64AsmLoadRegMem(a, 2, 31, 16, 8)
+	renvoAarch64AsmMovRegAbs(a, 3, countOff, renvoAbsBssReloc)
+	renvoAarch64AsmMovRegImm(a, 4, 0)
+	renvoWinArm64CallImport(a, importID)
+}
+
+func renvoAsmPatchWindowsArm64(a *renvoAsm, layout renvoWinImportLayout) {
+	for i := 0; i+2 < len(a.absRelocs); i += 3 {
+		at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i))
+		off := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1))
+		kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2))
+		target := a.dataOffset + off
+		if kind == renvoAbsWinImportReloc {
+			target = renvoWinImportIATRVA(layout, off)
+		} else if kind == renvoAbsBssReloc {
+			target = renvoAsmBssOffset(a) + off
+		}
+		insn := renvoGet32At(a.code, at)
+		reg := insn & 31
+		pc := a.codeOffset + at
+		delta := (target >> 12) - (pc >> 12)
+		imm := delta & 0x1fffff
+		renvoPut32At(a.code, at, 0x90000000|((imm&3)<<29)|(((imm>>2)&0x7ffff)<<5)|reg)
+		renvoPut32At(a.code, at+4, 0x91000000|((target&0xfff)<<10)|(reg<<5)|reg)
+		renvoPut32At(a.code, at+8, 0xd503201f)
+		renvoPut32At(a.code, at+12, 0xd503201f)
+	}
+}
+
+func renvoAsmImageWindowsArm64(a *renvoAsm) []byte {
+	renvoAsmPatch(a)
+	for (a.codeOffset+len(a.code))%8 != 0 {
+		a.code = append(a.code, 0)
+	}
+	textVirtualSize := len(a.code)
+	textRawSize := renvoAlignValue(textVirtualSize, renvoWinFileAlign)
+	dataRVA := renvoAlignValue(a.codeOffset+textVirtualSize, renvoWinSectionAlign)
+	a.dataOffset = dataRVA
+	var imports renvoWinImportLayout
+	if renvoAsmHasWinImportRelocs(a) {
+		renvoAppendWinImports(a, &imports)
+	}
+	renvoAsmPatchWindowsArm64(a, imports)
+	dataRawSize := renvoAlignValue(len(a.data), renvoWinFileAlign)
+	dataVirtualSize := len(a.data) + a.bssSize
+	iatSize := 0
+	if imports.kernelIATRVA != 0 {
+		iatSize = (renvoWinImportFixedCount + 1) * imports.thunkSize
+	}
+	var out []byte
+	out = renvoAppendPEHeader64WithContext(a.c, out, textRawSize, textVirtualSize, dataRVA, dataRawSize, dataVirtualSize, imports.importRVA, imports.importSize, imports.kernelIATRVA, iatSize)
+	// Windows on ARM64 requires the modern PE subsystem contract; unlike the
+	// x86 targets, there is no legacy Windows 4.x loader to preserve.
+	out[0xc0] = 6
+	out[0xc2] = 1
+	out[0xc4] = 1
+	out[0xc8] = 6
+	out[0xca] = 1
+	out[0x9a] = 3
+	out[0x96] = 0x22
+	out[0xde] = 0x00
+	out[0xdf] = 0x81
+	for i := 0; i < len(a.code); i++ {
+		out = append(out, a.code[i])
+	}
+	out = renvoAppendUntil(out, renvoWinHeadersSize+textRawSize)
+	for i := 0; i < len(a.data); i++ {
+		out = append(out, a.data[i])
+	}
+	out = renvoAppendUntil(out, renvoWinHeadersSize+textRawSize+dataRawSize)
+	if renvoFixedTarget == 0 && a.c.emitImage {
+		return renvoAppendReplLinkTable(out, a)
+	}
+	return out
+}
+
+}
