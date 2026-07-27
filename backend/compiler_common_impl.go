@@ -128,8 +128,8 @@ type renvoObjectStrings struct {
 	refs []int
 }
 
-const renvoObjectCacheCapacity = 4096
-const renvoObjectCacheStorageSize = 8388608
+const renvoObjectCacheCapacity = 1024
+const renvoObjectCacheStorageSize = 2097152
 const renvoObjectMagic = 0x524f424a
 const renvoObjectStringReloc = 3
 const renvoObjectRelocLocal = 0
@@ -148,6 +148,18 @@ func renvoInitializeObjectCache() {
 	}
 	renvoObjectCacheEntries = make([]renvoObjectCacheEntry, renvoObjectCacheCapacity)
 	renvoObjectCacheStorage = make([]byte, renvoObjectCacheStorageSize)
+}
+
+func renvoMakeByteScratch(capacity int) []byte {
+	return make([]byte, 0, capacity)
+}
+
+func renvoMakeByteBuffer(length int) []byte {
+	return make([]byte, length)
+}
+
+func renvoMakeIntScratch(capacity int) []int {
+	return make([]int, 0, capacity)
 }
 
 func renvoObjectHashInt(a int, b int, value int) (int, int) {
@@ -788,37 +800,54 @@ func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 	var darwinImports []renvoDarwinStaticImport
 	var data []byte
 	if renvoFixedTarget != 0 {
-		code = make([]byte, 0, 2097152)
-		labelPos = make([]int32, 0, 32768)
-		relocs = make([]int32, 0, 65536)
-		absRelocs = make([]int32, 0, 49152)
+		codeCapacity := 2097152
+		labelCapacity := 32768
+		relocCapacity := 65536
+		absRelocCapacity := 49152
+		code = make([]byte, 0, codeCapacity)
+		labelPos = make([]int32, 0, labelCapacity)
+		relocs = make([]int32, 0, relocCapacity)
+		absRelocs = make([]int32, 0, absRelocCapacity)
 		if !a.c.stripSymbols || a.c.renvoTargetArch == renvoArchWasm32 {
-			symbols = make([]renvoAsmSymbol, 0, 1024)
+			symbolCapacity := 1024
+			symbols = make([]renvoAsmSymbol, 0, symbolCapacity)
 		}
 	} else if a.c.renvoTargetArch == renvoArchWasm32 {
-		code = make([]byte, 0, 655360)
-		labelPos = make([]int32, 0, 32768)
-		relocs = make([]int32, 0, 131072)
-		absRelocs = make([]int32, 0, 98304)
-		symbols = make([]renvoAsmSymbol, 0, 2048)
+		codeCapacity := 655360
+		labelCapacity := 32768
+		relocCapacity := 131072
+		absRelocCapacity := 98304
+		symbolCapacity := 2048
+		code = make([]byte, 0, codeCapacity)
+		labelPos = make([]int32, 0, labelCapacity)
+		relocs = make([]int32, 0, relocCapacity)
+		absRelocs = make([]int32, 0, absRelocCapacity)
+		symbols = make([]renvoAsmSymbol, 0, symbolCapacity)
 	} else {
-		code = make([]byte, 0, 2097152)
+		codeCapacity := 2097152
+		code = make([]byte, 0, codeCapacity)
 		// The full frontend self-host remains below 17,000 labels and 65,000
 		// relative relocations. Keep practical growth room without eagerly
 		// committing memory that pushes the frontend RSS gate.
-		labelPos = make([]int32, 0, 24576)
-		relocs = make([]int32, 0, 81920)
+		labelCapacity := 24576
+		relocCapacity := 81920
+		labelPos = make([]int32, 0, labelCapacity)
+		relocs = make([]int32, 0, relocCapacity)
 		// Absolute relocations are much less frequent than label references. A
 		// self-host build uses fewer than 2,800 on every native target, so avoid
 		// touching a 32,768-entry arena allocation for each compilation.
-		absRelocs = make([]int32, 0, 12288)
+		absRelocCapacity := 12288
+		absRelocs = make([]int32, 0, absRelocCapacity)
 		if !a.c.stripSymbols || a.c.renvoTargetArch == renvoArchWasm32 {
-			symbols = make([]renvoAsmSymbol, 0, 4096)
+			symbolCapacity := 4096
+			symbols = make([]renvoAsmSymbol, 0, symbolCapacity)
 		}
 	}
-	data = make([]byte, 0, 65536)
+	dataCapacity := 65536
+	data = make([]byte, 0, dataCapacity)
 	if !a.c.stripSymbols || a.c.renvoTargetArch == renvoArchWasm32 {
-		symbolName = make([]byte, 0, 16384)
+		symbolNameCapacity := 16384
+		symbolName = make([]byte, 0, symbolNameCapacity)
 	}
 	a.code = code
 	a.labelPos = labelPos
