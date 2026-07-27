@@ -58,16 +58,28 @@ type Field struct {
 	Span       Span
 }
 
+// Statement is a syntax-preserving declaration-body statement. Tokens contains
+// the statement header without a trailing nested block. Children is non-empty
+// for constructs such as "instructions { ... }" and "relocation rel32 { ... }".
+// Keeping the token spelling here lets semantic decoders stay small and typed
+// without turning the definition language into a second general-purpose AST.
+type Statement struct {
+	Tokens   []string
+	Children []Statement
+	Span     Span
+}
+
 type Declaration struct {
-	Kind      string
-	Name      string
-	Start     int
-	End       int
-	BodyStart int
-	BodyEnd   int
-	Fields    []Field
-	GoSource  []byte
-	Span      Span
+	Kind       string
+	Name       string
+	Start      int
+	End        int
+	BodyStart  int
+	BodyEnd    int
+	Fields     []Field
+	Statements []Statement
+	GoSource   []byte
+	Span       Span
 }
 
 type Document struct {

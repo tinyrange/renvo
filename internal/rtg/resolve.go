@@ -43,6 +43,11 @@ func Resolve(document Document) ResolveResult {
 		result.Diagnostics = append(result.Diagnostics, document.Diagnostics...)
 		return result
 	}
+	result.Diagnostics = append(result.Diagnostics, validateMachineDeclarations(document)...)
+	if len(result.Diagnostics) != 0 {
+		result.Ok = false
+		return result
+	}
 	for i := 0; i < len(document.Declarations); i++ {
 		if document.Declarations[i].Kind != DeclTarget {
 			continue
@@ -60,6 +65,11 @@ func Resolve(document Document) ResolveResult {
 			}
 		}
 		result.Targets = append(result.Targets, target)
+		compositionDiagnostics := validateTargetComposition(document, target)
+		if len(compositionDiagnostics) != 0 {
+			result.Diagnostics = append(result.Diagnostics, compositionDiagnostics...)
+			result.Ok = false
+		}
 	}
 	if len(result.Targets) == 0 && hasMachineDeclaration(document) {
 		result.Diagnostics = append(result.Diagnostics, Diagnostic{

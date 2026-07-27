@@ -176,6 +176,7 @@ func (p *documentParser) parseDeclaration(kind string) {
 		Span:      sourceSpan(p.document.Source, p.document.Tokens[startToken].Start, p.document.Tokens[close].End),
 	}
 	declaration.Fields = p.parseFields(open+1, close)
+	declaration.Statements = p.parseStatements(open+1, close)
 	p.document.Declarations = append(p.document.Declarations, declaration)
 	p.at = close + 1
 }
@@ -315,6 +316,69 @@ func (p *documentParser) parseFields(start int, end int) []Field {
 		})
 	}
 	return fields
+}
+
+func (p *documentParser) parseStatements(start int, end int) []Statement {
+	var statements []Statement
+	at := start
+	for at < end {
+		statementStart := at
+		line := p.document.Tokens[at].Line
+		roundDepth := 0
+		squareDepth := 0
+		for at < end {
+			if roundDepth == 0 && squareDepth == 0 && p.operator(at, "{") {
+				close, ok := p.matchBlock(at)
+				if !ok || close > end {
+					return statements
+				}
+				statement := Statement{
+					Tokens:   p.statementTokens(statementStart, at),
+					Children: p.parseStatements(at+1, close),
+					Span: sourceSpan(p.document.Source,
+						p.document.Tokens[statementStart].Start,
+						p.document.Tokens[close].End),
+				}
+				if len(statement.Tokens) != 0 {
+					statements = append(statements, statement)
+				}
+				at = close + 1
+				break
+			}
+			if p.operator(at, "(") {
+				roundDepth++
+			} else if p.operator(at, ")") && roundDepth > 0 {
+				roundDepth--
+			} else if p.operator(at, "[") {
+				squareDepth++
+			} else if p.operator(at, "]") && squareDepth > 0 {
+				squareDepth--
+			}
+			at++
+			if at == end || roundDepth == 0 && squareDepth == 0 &&
+				p.document.Tokens[at].Line > line {
+				statement := Statement{
+					Tokens: p.statementTokens(statementStart, at),
+					Span: sourceSpan(p.document.Source,
+						p.document.Tokens[statementStart].Start,
+						p.document.Tokens[at-1].End),
+				}
+				if len(statement.Tokens) != 0 {
+					statements = append(statements, statement)
+				}
+				break
+			}
+		}
+	}
+	return statements
+}
+
+func (p *documentParser) statementTokens(start int, end int) []string {
+	tokens := make([]string, 0, end-start)
+	for i := start; i < end; i++ {
+		tokens = append(tokens, p.text(i))
+	}
+	return tokens
 }
 
 func (p *documentParser) matchBlock(open int) (int, bool) {

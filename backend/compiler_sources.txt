@@ -11,6 +11,7 @@ compiler_amd64_impl.go
 compiler_amd64_target_impl.go
 compiler_386_impl.go
 compiler_386_target_impl.go
+compiler_aarch64_generated_impl.go
 compiler_aarch64_impl.go
 compiler_aarch64_target_impl.go
 compiler_arm_impl.go

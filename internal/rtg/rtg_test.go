@@ -213,6 +213,62 @@ func TestResolveRejectsUnknownCompositionReference(t *testing.T) {
 	}
 }
 
+func TestResolveRejectsUnknownInstructionAlgorithm(t *testing.T) {
+	source := replaceOnce(testMachineDefinition,
+		"arch tiny64 {",
+		"arch tiny64 {\n\tinstructions { add = go missingAlgorithm }")
+	resolved := Resolve(Parse([]byte(source), "bad.rtg"))
+	if resolved.Ok || len(resolved.Diagnostics) == 0 ||
+		resolved.Diagnostics[0].Code != "RTG-VALIDATE-011" {
+		t.Fatalf("Resolve = ok %v diagnostics %#v", resolved.Ok, resolved.Diagnostics)
+	}
+}
+
+func TestResolveRejectsDuplicateRegisters(t *testing.T) {
+	source := replaceOnce(testMachineDefinition,
+		"arch tiny64 {",
+		"arch tiny64 {\n\tregisters gpr = [r0, r1, r0]")
+	resolved := Resolve(Parse([]byte(source), "bad.rtg"))
+	if resolved.Ok || len(resolved.Diagnostics) == 0 ||
+		resolved.Diagnostics[0].Code != "RTG-VALIDATE-010" {
+		t.Fatalf("Resolve = ok %v diagnostics %#v", resolved.Ok, resolved.Diagnostics)
+	}
+}
+
+func TestResolveRejectsMismatchedABIArchitecture(t *testing.T) {
+	source := replaceOnce(testMachineDefinition,
+		"abi tiny_abi { arch = tiny64 }",
+		"arch other {\n\tendian = little\n\tword_bits = 64\n}\nabi tiny_abi { arch = other }")
+	resolved := Resolve(Parse([]byte(source), "bad.rtg"))
+	if resolved.Ok || len(resolved.Diagnostics) == 0 ||
+		resolved.Diagnostics[0].Code != "RTG-VALIDATE-050" {
+		t.Fatalf("Resolve = ok %v diagnostics %#v", resolved.Ok, resolved.Diagnostics)
+	}
+}
+
+func TestDeclarativeInstructionGeneratesDirectWrapper(t *testing.T) {
+	source := replaceOnce(testMachineDefinition,
+		"arch tiny64 {",
+		"arch tiny64 {\n\tinstructions { increment = go addOne }")
+	resolved := Resolve(Parse([]byte(source), "tiny.rtg"))
+	if !resolved.Ok {
+		t.Fatalf("Resolve failed: %#v", resolved.Diagnostics)
+	}
+	generated := GenerateFixedBackend(resolved, "test/tiny64")
+	if !generated.Ok {
+		t.Fatalf("Generate failed: %#v", generated.Diagnostics)
+	}
+	text := string(generated.Source)
+	for _, want := range []string{
+		"func rtgTinyIncrement(value int) int",
+		"return rtgTinyAddOne(value)",
+	} {
+		if !containsText(text, want) {
+			t.Errorf("generated source missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func replaceOnce(text string, old string, replacement string) string {
 	for i := 0; i+len(old) <= len(text); i++ {
 		if text[i:i+len(old)] == old {

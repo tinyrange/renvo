@@ -13,6 +13,8 @@ import (
 
 func main() {
 	target := flag.String("t", "", "canonical target for fixed generation")
+	arch := flag.String("arch", "", "architecture for checked-in architecture generation")
+	packageName := flag.String("package", "backend", "generated Go package")
 	output := flag.String("o", "", "generated Go output")
 	check := flag.Bool("check", false, "fail if the output is stale")
 	flag.Parse()
@@ -33,7 +35,12 @@ func main() {
 		definitions = append(definitions, resolved)
 	}
 	var generated rtg.GenerateResult
-	if *target == "" {
+	if *arch != "" {
+		if *target != "" || len(definitions) != 1 {
+			fail("architecture generation requires one definition and no -t")
+		}
+		generated = rtg.GenerateArchitectureBackend(definitions[0], *arch, *packageName)
+	} else if *target == "" {
 		generated = rtg.GenerateUniversalBackend(definitions)
 	} else {
 		if len(definitions) != 1 {

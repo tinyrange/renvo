@@ -53,6 +53,35 @@ func TestAArch64EncodingSlice(t *testing.T) {
 	}
 }
 
+func TestAArch64CheckedInArchitectureOutput(t *testing.T) {
+	source, err := os.ReadFile("../../backend/definitions/aarch64.rtg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := Resolve(Parse(source, "aarch64.rtg"))
+	generated := GenerateArchitectureBackend(resolved, "aarch64", "main")
+	if !generated.Ok {
+		t.Fatalf("generate architecture: %#v", generated.Diagnostics)
+	}
+	checkedIn, err := os.ReadFile("../../backend/compiler_aarch64_generated_impl.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(generated.Source, checkedIn) {
+		t.Fatal("checked-in AArch64 architecture output is stale; run go generate ./backend/definitions")
+	}
+	for _, binding := range []string{
+		"func rtgAarch64Ret(",
+		"func rtgAarch64AddImmediate(",
+		"func rtgAarch64MoveWideZero(",
+		"func rtgAarch64Branch(",
+	} {
+		if !containsText(string(checkedIn), binding) {
+			t.Errorf("generated AArch64 output is missing direct binding %s", binding)
+		}
+	}
+}
+
 // These mirrors make the expected instruction words reviewable independently
 // from generated-source spelling. The generated functions use the same direct
 // expressions and are syntax-checked by TestAArch64DefinitionVerticalSlice.

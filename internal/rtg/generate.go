@@ -31,7 +31,34 @@ func GenerateFixedBackend(resolved ResolveResult, targetName string) GenerateRes
 	source := generateHeader(manifest, target.Descriptor.Name)
 	source = appendDescriptorSource(source, target.Descriptor)
 	source = appendEmbeddedGo(source, resolved.Document)
+	source = appendArchitectureBindings(source, resolved.Document, target.Arch, true)
 	return GenerateResult{Source: source, Descriptor: target.Descriptor, Manifest: manifest, Ok: true}
+}
+
+// GenerateArchitectureBackend emits the architecture-owned algorithms and
+// declarative instruction bindings without a target descriptor. Built-in
+// compilers use this form for checked-in architecture source shared by several
+// ABI/runtime/format compositions.
+func GenerateArchitectureBackend(resolved ResolveResult, archName string, packageName string) GenerateResult {
+	if !resolved.Ok {
+		diagnostics := make([]Diagnostic, len(resolved.Diagnostics))
+		copy(diagnostics, resolved.Diagnostics)
+		return GenerateResult{Diagnostics: diagnostics}
+	}
+	arch, ok := resolved.Document.Declaration(DeclArch, archName)
+	if !ok {
+		return GenerateResult{Diagnostics: []Diagnostic{{
+			Filename: resolved.Document.Filename,
+			Span:     sourceSpan(resolved.Document.Source, 0, 0),
+			Code:     "RTG-GENERATE-004",
+			Message:  "definition does not declare architecture " + archName,
+		}}}
+	}
+	manifest := []string{resolved.Document.Unit + " " + HashText(resolved.Document.Hash)}
+	source := generateHeaderPackage(manifest, "arch/"+archName, packageName)
+	source = appendEmbeddedGo(source, resolved.Document)
+	source = appendArchitectureBindings(source, resolved.Document, arch, true)
+	return GenerateResult{Source: source, Manifest: manifest, Ok: true}
 }
 
 // GeneratePreparedBackend emits a closed definition as one package-main source
@@ -62,9 +89,10 @@ func GeneratePreparedBackend(resolved ResolveResult, targetName string) Generate
 			continue
 		}
 		source = append(source, '\n')
-		source = append(source, trimBlockNewlines(declaration.GoSource)...)
+		source = append(source, dedentGoSource(declaration.GoSource)...)
 		source = append(source, '\n')
 	}
+	source = appendArchitectureBindings(source, resolved.Document, target.Arch, false)
 	return GenerateResult{Source: source, Descriptor: target.Descriptor, Manifest: manifest, Ok: true}
 }
 
@@ -115,6 +143,12 @@ func GenerateUniversalBackend(definitions []ResolveResult) GenerateResult {
 	source = append(source, "}\nreturn RTGTargetDescriptor{}, false\n}\n"...)
 	for i := 0; i < len(definitions); i++ {
 		source = appendEmbeddedGo(source, definitions[i].Document)
+		for j := 0; j < len(definitions[i].Document.Declarations); j++ {
+			declaration := definitions[i].Document.Declarations[j]
+			if declaration.Kind == DeclArch {
+				source = appendArchitectureBindings(source, definitions[i].Document, declaration, true)
+			}
+		}
 	}
 	return GenerateResult{Source: source, Manifest: manifest, Ok: true}
 }
@@ -193,10 +227,53 @@ func appendEmbeddedGo(source []byte, document Document) []byte {
 			continue
 		}
 		source = append(source, '\n')
-		source = appendRewrittenGo(source, declaration.GoSource, names, prefix)
+		source = appendRewrittenGo(source, dedentGoSource(declaration.GoSource), names, prefix)
 		source = append(source, '\n')
 	}
 	return source
+}
+
+func dedentGoSource(source []byte) []byte {
+	source = trimBlockNewlines(source)
+	indent := -1
+	lineStart := 0
+	for lineStart < len(source) {
+		lineEnd := lineStart
+		for lineEnd < len(source) && source[lineEnd] != '\n' {
+			lineEnd++
+		}
+		at := lineStart
+		for at < lineEnd && (source[at] == ' ' || source[at] == '\t') {
+			at++
+		}
+		if at < lineEnd && (indent < 0 || at-lineStart < indent) {
+			indent = at - lineStart
+		}
+		lineStart = lineEnd + 1
+	}
+	if indent <= 0 {
+		return source
+	}
+	out := make([]byte, 0, len(source))
+	lineStart = 0
+	for lineStart < len(source) {
+		lineEnd := lineStart
+		for lineEnd < len(source) && source[lineEnd] != '\n' {
+			lineEnd++
+		}
+		remove := indent
+		for remove > 0 && lineStart < lineEnd &&
+			(source[lineStart] == ' ' || source[lineStart] == '\t') {
+			lineStart++
+			remove--
+		}
+		out = append(out, source[lineStart:lineEnd]...)
+		if lineEnd < len(source) {
+			out = append(out, '\n')
+		}
+		lineStart = lineEnd + 1
+	}
+	return out
 }
 
 func embeddedGoNames(document Document) []string {
@@ -263,6 +340,10 @@ func exportedName(name string) string {
 	upper := true
 	for i := 0; i < len(name); i++ {
 		ch := name[i]
+		if ch == '_' || ch == '-' || ch == '/' || ch == '.' {
+			upper = true
+			continue
+		}
 		if ch >= 'a' && ch <= 'z' && upper {
 			ch -= 'a' - 'A'
 		}
