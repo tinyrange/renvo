@@ -4,7 +4,10 @@
 // definition compiler through the driver package.
 package backenddef
 
-import "renvo.dev/internal/rtg"
+import (
+	"renvo.dev/internal/rtg"
+	"renvo.dev/internal/rtgb"
+)
 
 type Result struct {
 	Descriptor rtg.TargetDescriptor
@@ -13,6 +16,17 @@ type Result struct {
 }
 
 func Resolve(source []byte, filename string, targetName string) Result {
+	if rtgb.IsArtifact(source) {
+		artifact, ok := rtgb.Decode(source)
+		if !ok {
+			return Result{Message: "invalid prepared backend artifact"}
+		}
+		descriptor := artifact.Descriptor
+		if descriptor.Name == targetName || contains(descriptor.Aliases, targetName) {
+			return Result{Descriptor: descriptor, Ok: true}
+		}
+		return Result{Message: "backend definition does not export target " + targetName}
+	}
 	resolved := rtg.ResolveDefinitions(rtg.Parse(source, filename))
 	if !resolved.Ok {
 		return Result{Message: resolved.Diagnostics[0].Message}

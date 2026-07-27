@@ -206,6 +206,23 @@ func TestGenerateBuiltinPreservesCompilerSymbols(t *testing.T) {
 	}
 }
 
+func TestGeneratePreparedPreservesCompilerSymbols(t *testing.T) {
+	resolved := Resolve(Parse([]byte(testMachineDefinition), "tiny.rtg"))
+	generated := GeneratePreparedBackend(resolved, "test/tiny64")
+	if !generated.Ok {
+		t.Fatalf("GeneratePreparedBackend failed: %#v", generated.Diagnostics)
+	}
+	text := string(generated.Source)
+	for _, want := range []string{"package main", "var RTGTarget", "func addOne", "addOne(addOne(value))"} {
+		if !containsText(text, want) {
+			t.Errorf("prepared source missing %q:\n%s", want, text)
+		}
+	}
+	if containsText(text, "rtgTinyAddOne") {
+		t.Fatalf("prepared generation unexpectedly rewrote isolated symbol:\n%s", text)
+	}
+}
+
 func TestResolveRejectsUnknownCompositionReference(t *testing.T) {
 	source := replaceOnce(testMachineDefinition, "abi = tiny_abi", "abi = missing")
 	resolved := Resolve(Parse([]byte(source), "bad.rtg"))

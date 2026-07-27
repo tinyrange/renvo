@@ -16,6 +16,40 @@ func GenerateFixedBackend(resolved ResolveResult, targetName string) GenerateRes
 	return generateFixedBackend(resolved, targetName, "backend")
 }
 
+// GeneratePreparedBackend emits a closed definition as one package-main source
+// file for the host-bootstrap preparation pipeline. Unlike distributable Go
+// output it preserves authored names: the prepared backend is isolated in its
+// own linked image, so names cannot collide with another definition.
+func GeneratePreparedBackend(resolved ResolveResult, targetName string) GenerateResult {
+	if !resolved.Ok {
+		diagnostics := make([]Diagnostic, len(resolved.Diagnostics))
+		copy(diagnostics, resolved.Diagnostics)
+		return GenerateResult{Diagnostics: diagnostics}
+	}
+	target, ok := lookupResolvedTarget(resolved, targetName)
+	if !ok {
+		return GenerateResult{Diagnostics: []Diagnostic{{
+			Filename: resolved.Document.Filename,
+			Span:     sourceSpan(resolved.Document.Source, 0, 0),
+			Code:     "RTG-GENERATE-001",
+			Message:  "definition does not export target " + targetName,
+		}}}
+	}
+	manifest := []string{resolved.Document.Unit + " " + HashText(resolved.Document.Hash)}
+	source := generateHeaderPackage(manifest, target.Descriptor.Name, "main")
+	source = appendDescriptorSource(source, target.Descriptor)
+	for i := 0; i < len(resolved.Document.Declarations); i++ {
+		declaration := resolved.Document.Declarations[i]
+		if declaration.Kind != DeclGo {
+			continue
+		}
+		source = append(source, '\n')
+		source = append(source, trimBlockNewlines(declaration.GoSource)...)
+		source = append(source, '\n')
+	}
+	return GenerateResult{Source: source, Descriptor: target.Descriptor, Manifest: manifest, Ok: true}
+}
+
 func generateFixedBackend(resolved ResolveResult, targetName string, packageName string) GenerateResult {
 	if !resolved.Ok {
 		diagnostics := make([]Diagnostic, len(resolved.Diagnostics))
