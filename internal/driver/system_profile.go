@@ -1,8 +1,9 @@
 package driver
 
 import (
+	"strings"
+
 	"renvo.dev/internal/load"
-	"renvo.dev/internal/rtg"
 )
 
 // SystemProfile is the deliberately small hosted resource contract loaded by
@@ -17,6 +18,10 @@ type SystemProfile struct {
 
 func parseFSOptions(args []string, workDir string, fs SourceFS) Options {
 	return resolveSystemOptions(ParseOptions(args), workDir, fs)
+}
+
+func ResolveFSOptions(args []string, workDir string, fs SourceFS) Options {
+	return parseFSOptions(args, workDir, fs)
 }
 
 func resolveSystemOptions(options Options, workDir string, fs SourceFS) Options {
@@ -38,7 +43,9 @@ func resolveSystemOptions(options Options, workDir string, fs SourceFS) Options 
 		return parseFail(options, ParseErrInvalidSystem, options.System, options.SystemAt)
 	}
 	options.SystemName = profile.Name
-	options.Target = profile.Target
+	if !options.TargetExplicit {
+		options.Target = profile.Target
+	}
 	options.BinaryLimit = profile.BinaryLimit
 	options.ArenaSize = profile.ArenaSize
 	if options.WindowsGUI && options.Target != "windows/amd64" && options.Target != "windows/386" && options.Target != "windows/arm64" {
@@ -51,16 +58,110 @@ func resolveSystemOptions(options Options, workDir string, fs SourceFS) Options 
 }
 
 func parseSystemProfile(src []byte) (SystemProfile, string, bool) {
-	parsed, diagnostic, ok := rtg.ParseSystem(src, "<system>")
-	if !ok {
-		return SystemProfile{}, diagnostic.Message, false
+	var profile SystemProfile
+	fields := strings.Fields(string(src))
+	if len(fields) < 3 || fields[0] != "system" {
+		return profile, "expected system declaration", false
 	}
-	return SystemProfile{
-		Name:        parsed.Name,
-		Target:      parsed.Target,
-		BinaryLimit: parsed.BinaryLimit,
-		ArenaSize:   parsed.ArenaSize,
-	}, "", true
+	name, ok := systemQuoted(fields[1])
+	if !ok || name == "" {
+		return profile, "expected non-empty quoted system name", false
+	}
+	if fields[2] != "{" || len(fields) < 4 || fields[len(fields)-1] != "}" {
+		return profile, "expected { and } around system fields", false
+	}
+	profile.Name = name
+	haveTarget, haveBinary, haveArena := false, false, false
+	for at := 3; at < len(fields)-1; at += 3 {
+		if at+2 >= len(fields)-1 || fields[at+1] != "=" {
+			return profile, "expected field = value entries", false
+		}
+		field, value := fields[at], fields[at+2]
+		if field == "target" {
+			if haveTarget {
+				return profile, "duplicate target field", false
+			}
+			profile.Target, ok = systemQuoted(value)
+			if !ok || profile.Target == "" {
+				return profile, "target must be a non-empty quoted string", false
+			}
+			haveTarget = true
+		} else if field == "binary" {
+			if haveBinary {
+				return profile, "duplicate binary field", false
+			}
+			profile.BinaryLimit, ok = parseSystemSize(value)
+			if !ok || profile.BinaryLimit <= 0 {
+				return profile, "binary must be a positive byte size", false
+			}
+			haveBinary = true
+		} else if field == "arena" {
+			if haveArena {
+				return profile, "duplicate arena field", false
+			}
+			profile.ArenaSize, ok = parseSystemSize(value)
+			if !ok || profile.ArenaSize < 256 || profile.ArenaSize > 1073741824 {
+				return profile, "arena must be between 256B and 1GiB", false
+			}
+			haveArena = true
+		} else {
+			return profile, "unknown system field " + field, false
+		}
+	}
+	if !haveTarget {
+		return profile, "missing target field", false
+	}
+	if !haveBinary {
+		return profile, "missing binary field", false
+	}
+	if !haveArena {
+		return profile, "missing arena field", false
+	}
+	return profile, "", true
+}
+
+func systemQuoted(text string) (string, bool) {
+	if len(text) < 2 || text[0] != '"' || text[len(text)-1] != '"' {
+		return "", false
+	}
+	for i := 1; i < len(text)-1; i++ {
+		if text[i] == '"' || text[i] == '\\' {
+			return "", false
+		}
+	}
+	return text[1 : len(text)-1], true
+}
+
+func parseSystemSize(text string) (int, bool) {
+	multiplier := 1
+	digits := len(text)
+	if strings.HasSuffix(text, "KiB") {
+		multiplier, digits = 1024, digits-3
+	} else if strings.HasSuffix(text, "MiB") {
+		multiplier, digits = 1024*1024, digits-3
+	} else if strings.HasSuffix(text, "GiB") {
+		multiplier, digits = 1024*1024*1024, digits-3
+	} else if strings.HasSuffix(text, "B") {
+		digits--
+	}
+	if digits <= 0 {
+		return 0, false
+	}
+	value := 0
+	for i := 0; i < digits; i++ {
+		if text[i] < '0' || text[i] > '9' {
+			return 0, false
+		}
+		digit := int(text[i] - '0')
+		if value > (1073741824-digit)/10 {
+			return 0, false
+		}
+		value = value*10 + digit
+	}
+	if value > 1073741824/multiplier {
+		return 0, false
+	}
+	return value * multiplier, true
 }
 
 func systemBinaryLimitDiagnostic(name string, actual int, limit int) Diagnostic {

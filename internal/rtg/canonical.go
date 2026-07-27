@@ -16,7 +16,8 @@ func Canonical(document Document) []byte {
 	out = appendDecimalFrame(out, document.Version)
 	out = appendFramed(out, document.Unit)
 
-	implements := append([]string(nil), document.Implements...)
+	implements := make([]string, len(document.Implements))
+	copy(implements, document.Implements)
 	sortStrings(implements)
 	for i := 0; i < len(implements); i++ {
 		out = appendFramed(out, "implements")
@@ -88,10 +89,10 @@ func normalizeNumber(text string) string {
 
 func canonicalDeclarationLess(left canonicalDeclaration, right canonicalDeclaration) bool {
 	if left.kind != right.kind {
-		return left.kind < right.kind
+		return stringLess(left.kind, right.kind)
 	}
 	if left.name != right.name {
-		return left.name < right.name
+		return stringLess(left.name, right.name)
 	}
 	return bytesLess(left.body, right.body)
 }
@@ -138,10 +139,23 @@ func sortStrings(values []string) {
 	for i := 1; i < len(values); i++ {
 		value := values[i]
 		at := i
-		for at > 0 && value < values[at-1] {
+		for at > 0 && stringLess(value, values[at-1]) {
 			values[at] = values[at-1]
 			at--
 		}
 		values[at] = value
 	}
+}
+
+func stringLess(left string, right string) bool {
+	limit := len(left)
+	if len(right) < limit {
+		limit = len(right)
+	}
+	for i := 0; i < limit; i++ {
+		if left[i] != right[i] {
+			return left[i] < right[i]
+		}
+	}
+	return len(left) < len(right)
 }

@@ -50,11 +50,12 @@ func main() {
 }
 
 func driverHelpSource(descriptors []sourceDescriptor) []byte {
-	const prefix = "Usage: renvo -o <file> [-t <target> | -system <file.rtg>] [-mode=<mode>] [-tags <list>] [-arena-size <bytes>] [-s] [-emit-unit] [-emit-image] [-windows-gui] <package | file.go...>\n" +
+	const prefix = "Usage: renvo -o <file> [-t <target>] [-backend <file.rtg|file.rtgb>] [-system <file.rtg>] [-mode=<mode>] [-tags <list>] [-arena-size <bytes>] [-s] [-emit-unit] [-emit-image] [-windows-gui] <package | file.go...>\n" +
 		"       renvo run [build options] <script.go> [-- script arguments...]\n" +
 		"       renvo test [build options] [package]\n" +
 		"Options:\n" +
 		"  -arena-size  set the generated program arena limit in bytes (256..1073741824)\n" +
+		"  -backend     select and prepare a backend definition or prepared artifact\n" +
 		"  -system      load target, binary-size, and arena limits from a hosted system profile\n" +
 		"  -emit-unit   write the canonical linked Renvo unit without invoking a backend\n" +
 		"  -emit-image  write a format-neutral linked image instead of an executable\n" +

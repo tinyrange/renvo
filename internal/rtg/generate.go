@@ -14,7 +14,9 @@ type GenerateResult struct {
 
 func GenerateFixedBackend(resolved ResolveResult, targetName string) GenerateResult {
 	if !resolved.Ok {
-		return GenerateResult{Diagnostics: append([]Diagnostic(nil), resolved.Diagnostics...)}
+		diagnostics := make([]Diagnostic, len(resolved.Diagnostics))
+		copy(diagnostics, resolved.Diagnostics)
+		return GenerateResult{Diagnostics: diagnostics}
 	}
 	target, ok := lookupResolvedTarget(resolved, targetName)
 	if !ok {
@@ -238,7 +240,7 @@ func sortResolvedTargets(targets []ResolvedTarget) {
 	for i := 1; i < len(targets); i++ {
 		value := targets[i]
 		at := i
-		for at > 0 && value.Descriptor.Name < targets[at-1].Descriptor.Name {
+		for at > 0 && stringLess(value.Descriptor.Name, targets[at-1].Descriptor.Name) {
 			targets[at] = targets[at-1]
 			at--
 		}

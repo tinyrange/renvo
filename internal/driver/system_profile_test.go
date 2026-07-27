@@ -68,7 +68,7 @@ func TestBuildFromFSRejectsInvalidSystemOptions(t *testing.T) {
 	}{
 		{args: []string{"-system", "missing.rtg", "-o", "app", "./cmd/app"}, code: "RENVO-OPTION-020"},
 		{args: []string{"-system", "bad.rtg", "-o", "app", "./cmd/app"}, code: "RENVO-OPTION-021"},
-		{args: []string{"-system", "bad.rtg", "-t", "linux/amd64", "-o", "app", "./cmd/app"}, code: "RENVO-OPTION-022"},
+		{args: []string{"-system", "bad.rtg", "-t", "linux/amd64", "-o", "app", "./cmd/app"}, code: "RENVO-OPTION-021"},
 		{args: []string{"-system", "bad.rtg", "-arena-size", "65536", "-o", "app", "./cmd/app"}, code: "RENVO-OPTION-023"},
 	}
 	for i := 0; i < len(tests); i++ {
@@ -76,6 +76,18 @@ func TestBuildFromFSRejectsInvalidSystemOptions(t *testing.T) {
 		if result.Ok || result.Diagnostic.Code != tests[i].code {
 			t.Errorf("BuildFromFS(%q) = %#v, want %s", tests[i].args, result, tests[i].code)
 		}
+	}
+}
+
+func TestExplicitTargetOverridesSystemDefault(t *testing.T) {
+	files := append(driverTestFiles(), load.SourceFile{Path: "/repo/case/windows.rtg", Src: []byte(`system "portable" { target = "windows/amd64" binary = 1MiB arena = 1MiB }`)})
+	result := BuildFromFS([]string{"-system", "windows.rtg", "-t", "linux/amd64", "-o", "app", "./cmd/app"}, "/repo/case", "/std", memorySourceFS{files: files})
+	if !result.Ok {
+		t.Fatalf("BuildFromFS failed: %#v", result.Diagnostic)
+	}
+	if result.Options.Target != "linux/amd64" || result.Options.SystemName != "portable" ||
+		result.Options.BinaryLimit != 1024*1024 || result.Options.ArenaSize != 1024*1024 {
+		t.Fatalf("resolved options = %#v", result.Options)
 	}
 }
 

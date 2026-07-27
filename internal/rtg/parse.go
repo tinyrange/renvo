@@ -200,7 +200,8 @@ func (p *documentParser) parseGo() {
 	}
 	bodyStart := p.document.Tokens[open].End
 	bodyEnd := p.document.Tokens[close].Start
-	body := append([]byte(nil), p.document.Source[bodyStart:bodyEnd]...)
+	body := make([]byte, bodyEnd-bodyStart)
+	copy(body, p.document.Source[bodyStart:bodyEnd])
 	declaration := Declaration{
 		Kind:      DeclGo,
 		Name:      "backend",

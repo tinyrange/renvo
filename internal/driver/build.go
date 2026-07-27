@@ -145,8 +145,12 @@ func buildFromFS(args []string, workDir string, stdRoot string, moduleCache stri
 		}
 		return session.Result()
 	}
-	result := newBuildResult()
 	options := parseFSOptions(args, workDir, fs)
+	return buildFromFSOptions(options, workDir, stdRoot, moduleCache, fs, compact)
+}
+
+func buildFromFSOptions(options Options, workDir string, stdRoot string, moduleCache string, fs SourceFS, compact bool) BuildResult {
+	result := newBuildResult()
 	result.Options = options
 	if !options.Ok {
 		return buildFail(result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)

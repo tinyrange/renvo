@@ -56,34 +56,49 @@ func sha256Block(state *[8]uint32, block []byte) {
 	var words [64]uint32
 	for i := 0; i < 16; i++ {
 		at := i * 4
-		words[i] = uint32(block[at])<<24 | uint32(block[at+1])<<16 |
-			uint32(block[at+2])<<8 | uint32(block[at+3])
+		word := uint32(block[at]) << 24
+		word |= uint32(block[at+1]) << 16
+		word |= uint32(block[at+2]) << 8
+		word |= uint32(block[at+3])
+		words[i] = word
 	}
 	for i := 16; i < 64; i++ {
 		s0 := rotateRight(words[i-15], 7) ^ rotateRight(words[i-15], 18) ^ words[i-15]>>3
 		s1 := rotateRight(words[i-2], 17) ^ rotateRight(words[i-2], 19) ^ words[i-2]>>10
 		words[i] = words[i-16] + s0 + words[i-7] + s1
 	}
-	a, b, c, d := state[0], state[1], state[2], state[3]
-	e, f, g, h := state[4], state[5], state[6], state[7]
+	a := (*state)[0]
+	b := (*state)[1]
+	c := (*state)[2]
+	d := (*state)[3]
+	e := (*state)[4]
+	f := (*state)[5]
+	g := (*state)[6]
+	h := (*state)[7]
 	for i := 0; i < 64; i++ {
 		s1 := rotateRight(e, 6) ^ rotateRight(e, 11) ^ rotateRight(e, 25)
-		choice := e&f ^ (^e)&g
+		choice := (e & f) ^ ((e ^ 0xffffffff) & g)
 		temp1 := h + s1 + choice + k[i] + words[i]
 		s0 := rotateRight(a, 2) ^ rotateRight(a, 13) ^ rotateRight(a, 22)
-		majority := a&b ^ a&c ^ b&c
+		majority := (a & b) ^ (a & c) ^ (b & c)
 		temp2 := s0 + majority
-		h, g, f, e = g, f, e, d+temp1
-		d, c, b, a = c, b, a, temp1+temp2
+		h = g
+		g = f
+		f = e
+		e = d + temp1
+		d = c
+		c = b
+		b = a
+		a = temp1 + temp2
 	}
-	state[0] += a
-	state[1] += b
-	state[2] += c
-	state[3] += d
-	state[4] += e
-	state[5] += f
-	state[6] += g
-	state[7] += h
+	(*state)[0] += a
+	(*state)[1] += b
+	(*state)[2] += c
+	(*state)[3] += d
+	(*state)[4] += e
+	(*state)[5] += f
+	(*state)[6] += g
+	(*state)[7] += h
 }
 
 func rotateRight(value uint32, count uint) uint32 {

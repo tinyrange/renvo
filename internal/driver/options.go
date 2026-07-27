@@ -29,6 +29,10 @@ const (
 	ParseErrInvalidSystem
 	ParseErrSystemTargetConflict
 	ParseErrSystemArenaConflict
+	ParseErrMissingBackend
+	ParseErrBackendRead
+	ParseErrInvalidBackend
+	ParseErrBackendTarget
 )
 
 const ModeExecutable = "executable"
@@ -38,28 +42,29 @@ const DefaultModuleLicense = "Proprietary"
 const RunHelpText = "Usage: renvo run [-s] [-tags <list>] [-arena-size <bytes>] <script.go> [-- arguments...]\nTop-level statements form func main. The script is compiled for and executed on the host target.\n"
 
 type Options struct {
-	Target        string
-	Output        string
-	Package       string
-	Files         []string
-	Strip         bool
-	EmitUnit      bool
-	EmitImage     bool
-	Script        bool
-	WindowsGUI    bool
-	Mode          string
-	ModuleLicense string
-	ArenaSize     int
-	BinaryLimit   int
-	System        string
-	SystemName    string
-	SystemError   string
-	SystemAt      int
-	Tags          []string
-	Ok            bool
-	Error         int
-	ErrorArg      string
-	ErrorAt       int
+	Target         string
+	TargetExplicit bool
+	Output         string
+	Package        string
+	Files          []string
+	Strip          bool
+	EmitUnit       bool
+	EmitImage      bool
+	Script         bool
+	WindowsGUI     bool
+	Mode           string
+	ModuleLicense  string
+	ArenaSize      int
+	BinaryLimit    int
+	System         string
+	SystemName     string
+	SystemError    string
+	SystemAt       int
+	Tags           []string
+	Ok             bool
+	Error          int
+	ErrorArg       string
+	ErrorAt        int
 }
 
 func CommandHelpRequested(args []string) bool {
@@ -161,11 +166,9 @@ func ParseOptions(args []string) Options {
 				return parseFail(options, ParseErrMissingTarget, arg, i)
 			}
 			target := args[i+1]
-			if !IsSupportedTarget(target) {
-				return parseFail(options, ParseErrUnsupportedTarget, target, i+1)
-			}
 			options.Target = target
-			targetAt = i
+			options.TargetExplicit = true
+			targetAt = i + 1
 			i += 2
 			continue
 		}
@@ -211,14 +214,14 @@ func ParseOptions(args []string) Options {
 	if options.Package == "" {
 		return parseFail(options, ParseErrMissingPackage, "", len(args))
 	}
-	if options.System != "" && targetAt >= 0 {
-		return parseFail(options, ParseErrSystemTargetConflict, options.System, targetAt)
-	}
 	if options.System != "" && arenaAt >= 0 {
 		return parseFail(options, ParseErrSystemArenaConflict, options.System, arenaAt)
 	}
 	if options.EmitUnit && options.EmitImage {
 		return parseFail(options, ParseErrConflictingEmit, "-emit-unit", len(args))
+	}
+	if !IsSupportedTarget(options.Target) {
+		return parseFail(options, ParseErrUnsupportedTarget, options.Target, targetAt)
 	}
 	if options.Script && len(options.Files) == 0 {
 		return parseFail(options, ParseErrScriptRequiresFile, options.Package, len(args))
