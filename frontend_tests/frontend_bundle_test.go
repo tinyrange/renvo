@@ -2,6 +2,7 @@ package frontend_tests
 
 import (
 	"bytes"
+	"debug/elf"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,6 +31,7 @@ func TestBundledFrontendStandaloneAllTargets(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bundled frontend self-host build failed: %v\n%s", err, string(out))
 	}
+	assertBundledFrontendWritableMemory(t, stage1)
 	targets := []struct {
 		name     string
 		artifact string
@@ -477,6 +479,28 @@ x/24i $pc-32
 	debugger.Env = failed.Env
 	out, err := debugger.CombinedOutput()
 	t.Logf("native frontend crash diagnostics: %v\n%s", err, out)
+}
+
+func assertBundledFrontendWritableMemory(t *testing.T, path string) {
+	t.Helper()
+	const limit = 134 * 1024 * 1024
+	file, err := elf.Open(path)
+	if err != nil {
+		t.Fatalf("open bundled frontend ELF failed: %v", err)
+	}
+	defer file.Close()
+	var writable uint64
+	for _, program := range file.Progs {
+		if program.Type == elf.PT_LOAD && program.Flags&elf.PF_W != 0 && program.Memsz > writable {
+			writable = program.Memsz
+		}
+	}
+	if writable == 0 {
+		t.Fatal("bundled frontend has no writable load segment")
+	}
+	if writable > limit {
+		t.Fatalf("bundled frontend writable memory = %d bytes, limit %d", writable, limit)
+	}
 }
 
 func bundleHasNativeImport(imports []linkedimage.NativeImport, name string) bool {

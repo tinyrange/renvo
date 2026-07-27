@@ -68,13 +68,17 @@ func TestCompileUsesBrowserDefaultArenaPolicy(t *testing.T) {
 }
 
 func TestCompileUsesBundledCompilerDefaultArenaPolicy(t *testing.T) {
+	const want = 256 * 1024 * 1024
+	if bundledCompilerDefaultArenaSize != want {
+		t.Fatalf("bundled compiler default arena = %d, want %d", bundledCompilerDefaultArenaSize, want)
+	}
 	backend := &recordingArenaBackend{}
 	result := CompileUnit([]string{"-tags", "renvo_bundle", "-o", "renvo", "./cmd/app"}, "/repo/case", "/std", driverTestFiles(), backend)
 	if !result.Ok {
 		t.Fatalf("CompileUnit failed: %#v", result)
 	}
-	if backend.arenaSize != bundledCompilerDefaultArenaSize {
-		t.Fatalf("backend arena = %d, want bundled compiler default %d", backend.arenaSize, bundledCompilerDefaultArenaSize)
+	if backend.arenaSize != want {
+		t.Fatalf("backend arena = %d, want bundled compiler default %d", backend.arenaSize, want)
 	}
 }
 

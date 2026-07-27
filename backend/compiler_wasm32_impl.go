@@ -1020,7 +1020,7 @@ func renvoWasm32NextInstructionPc(code []byte, pc int) int {
 }
 
 func renvoWasm32InstructionPcs(code []byte) []int {
-	out := make([]int, 0, 131072)
+	out := renvoMakeIntScratch(131072)
 	pc := 0
 	for pc < len(code) {
 		out = append(out, pc)
@@ -2290,7 +2290,7 @@ func renvoWasm32Image(a *renvoAsm) []byte {
 	frameTop := callStackBase + renvoWasm32CallStackSize + renvoWasm32FrameStackSize
 	memSize := bssBase + a.bssSize + renvoWasm32StackGuardSize + renvoWasm32ExprStackSize + renvoWasm32CallStackSize + renvoWasm32FrameStackSize + renvoWasm32StackGuardSize
 	var out renvoWasmBuffer
-	out.data = make([]byte, renvoWasm32ImageOutputCapacity)
+	out.data = renvoMakeByteBuffer(renvoWasm32ImageOutputCapacity)
 	renvoWasmAppendEncoded(&out, "\x00\x61\x73\x6d\x01\x00\x00\x00")
 	renvoWasmAppendSection(&out, 1, renvoWasm32TypeSectionFull())
 	renvoWasmAppendSection(&out, 2, renvoWasm32ImportSectionFull())

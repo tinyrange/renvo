@@ -602,7 +602,7 @@ backend defaults are:
 | 32-bit hosted program | 64 MiB |
 | WASI program | 32 MiB |
 | Linux kernel module | 64 KiB |
-| compiler built with `renvo_bundle` | 512 MiB |
+| compiler built with `renvo_bundle` | 256 MiB |
 
 `-arena-size` accepts 256 bytes through 1 GiB. A reservation is virtual address
 space, not necessarily resident memory, but it still matters under address

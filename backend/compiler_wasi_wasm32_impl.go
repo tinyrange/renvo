@@ -19,7 +19,7 @@ func compileVM32Arena(input []int, output int, arenaSize int) int {
 }
 
 func compileWasm32Arena(input []int, output int, arenaSize int) int {
-	src := make([]byte, 0, 655360)
+	src := renvoMakeByteScratch(655360)
 	for i := 0; i < len(input); i++ {
 		src = renvoReadAll(input[i], src)
 		src = append(src, '\n')
