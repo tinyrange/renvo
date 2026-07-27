@@ -16,7 +16,7 @@ import (
 
 func TestExcludedFamily(t *testing.T) {
 	excluded := excludedFamily(rtg.TargetDescriptor{ISA: "amd64"})
-	for _, name := range []string{"compiler_amd64_impl.go", "compiler_linux_amd64_impl.go", "compiler_windows_amd64_impl.go"} {
+	for _, name := range []string{"compiler_rtg_generated_impl.go", "compiler_amd64_generated_impl.go"} {
 		if !excluded[name] {
 			t.Errorf("%s was not excluded", name)
 		}

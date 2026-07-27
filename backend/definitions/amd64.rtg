@@ -51,9 +51,9 @@ go backend {
     }
 
     func x86Memory(out *RTGEmitter, reg byte, address RTGAddress) {
-        if address.Target.Valid {
+        if RTGAddressValid(address) {
             x86ModRM(out, 0, reg, 5)
-            out.Rel32Addend(address.Target, address.Addend)
+            RTGAddressRel32Addend(out, address)
             return
         }
 

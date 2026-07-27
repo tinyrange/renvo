@@ -118,6 +118,14 @@ func RTGReloc(out *RTGEmitter, label RTGLabel) {
 	out.Reloc(label)
 }
 
+func RTGAddressValid(address RTGAddress) bool {
+	return address.Target.Valid
+}
+
+func RTGAddressRel32Addend(out *RTGEmitter, address RTGAddress) {
+	out.Rel32Addend(address.Target, address.Addend)
+}
+
 func (out *RTGEmitter) Patch() {
 	for i := 0; i+2 < len(out.relocs); i += 3 {
 		at := out.relocs[i]

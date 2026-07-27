@@ -10,11 +10,10 @@ func excludedFamily(descriptor rtg.TargetDescriptor) map[string]bool {
 	}
 	switch descriptor.ISA {
 	case "amd64", "x86_64":
-		names = append(names,
-			"compiler_amd64_impl.go", "compiler_amd64_target_impl.go",
-			"compiler_linux_amd64_impl.go", "compiler_windows_amd64_impl.go",
-			"compiler_linux_kernel_amd64_impl.go",
-		)
+		// The shared backend kernel still owns target-neutral lowering and the
+		// stable amd64 adapter surface while the generated definition owns the
+		// encoder. Keep those kernel files until their adapters have all moved
+		// onto the generated operation contract.
 	case "386", "x86":
 		names = append(names,
 			"compiler_386_impl.go", "compiler_386_target_impl.go",

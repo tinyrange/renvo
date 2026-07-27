@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "8e9299fe341e551b942e46b6d94b3fef0bdceda573b03e56a26fabb3160985bc"
+const CompilerSourceDigest = "deec22ef4da713dcda08c52401f22abf72dab37ab0ec21c6f34198c960ffa978"
 
 // source: backend/compiler_common_impl.go
 
@@ -1211,7 +1211,7 @@ func renvoAsmPatch(a *renvoAsm) {
 		if target < 0 {
 			continue
 		}
-		disp := target - (at + 4)
+		disp := target + renvoGet32At(a.code, at) - (at + 4)
 		renvoPut32At(a.code, at, disp)
 	}
 	renvoAsmSetDataOffsets(a)
@@ -24795,6 +24795,14 @@ func RTGReloc(out *RTGEmitter, label RTGLabel) {
 	out.Reloc(label)
 }
 
+func RTGAddressValid(address RTGAddress) bool {
+	return address.Target.Valid
+}
+
+func RTGAddressRel32Addend(out *RTGEmitter, address RTGAddress) {
+	out.Rel32Addend(address.Target, address.Addend)
+}
+
 func (out *RTGEmitter) Patch() {
 	for i := 0; i+2 < len(out.relocs); i += 3 {
 		at := out.relocs[i]
@@ -24836,6 +24844,73 @@ func RTGLog2(value int) int {
 		result++
 	}
 	return result
+}
+
+type renvoRTGAddress struct {
+	Target       int
+	TargetValid  bool
+	Addend       int
+	Base         RTGRegister
+	Index        RTGRegister
+	Displacement int
+	Scale        int
+}
+
+func (out *renvoAsm) Byte(value byte) {
+	renvoAsmEmit8(out, int(value))
+}
+
+func (out *renvoAsm) Uint32(value uint32) {
+	renvoAsmEmit32(out, int(value))
+}
+
+func (out *renvoAsm) Uint64(value uint64) {
+	renvoAsmEmit32(out, int(value))
+	renvoAsmEmit32(out, int(value >> 32))
+}
+
+func (out *renvoAsm) PatchUint32(at int, value int) {
+	renvoPut32At(out.code, at, value)
+}
+
+func (out *renvoAsm) NewLabel() int {
+	return renvoAsmNewLabel(out)
+}
+
+func (out *renvoAsm) Mark(label int) {
+	if label >= 0 {
+		renvoAsmMarkLabel(out, label)
+	}
+}
+
+func (out *renvoAsm) Rel32(label int) {
+	out.Rel32Addend(label, 0)
+}
+
+func (out *renvoAsm) Rel32Addend(label int, addend int) {
+	at := len(out.code)
+	renvoAsmEmit32(out, addend)
+	if label >= 0 {
+		renvoAsmAddReloc(out, at, label)
+	}
+}
+
+func (out *renvoAsm) Reloc(label int) {
+	if label >= 0 && len(out.code) >= 4 {
+		renvoAsmAddReloc(out, len(out.code)-4, label)
+	}
+}
+
+func (out *renvoAsm) Patch() {
+	renvoAsmPatch(out)
+}
+
+func renvoRTGAddressValid(address renvoRTGAddress) bool {
+	return address.TargetValid
+}
+
+func renvoRTGAddressRel32Addend(out *renvoAsm, address renvoRTGAddress) {
+	out.Rel32Addend(address.Target, address.Addend)
 }
 
 func renvoRTGByte(out *renvoAsm, value byte) {
@@ -25029,14 +25104,14 @@ func renvoAmd64RewritePrimaryLoad(a *renvoAsm, reg int, pushed bool) bool {
 	if pushed {
 		load = -load
 	}
-	end := load / 8
+	end := load >> 3
+	at := end - (load & 7)
 	if pushed {
 		end++
 	}
 	if load <= 0 || end != len(a.code) {
 		return false
 	}
-	at := load/8 - load%8
 	a.code[at] += byte(reg * 8)
 	if pushed {
 		renvoTruncBytes(&a.code, len(a.code)-1)
@@ -25048,10 +25123,11 @@ func renvoAmd64RewritePrimaryLoad(a *renvoAsm, reg int, pushed bool) bool {
 func renvoAmd64RewritePrimaryLoadCompare(a *renvoAsm, imm int) bool {
 	renvoNonNil(a)
 	load := a.lastPrimaryLoad
-	if load <= 0 || load/8 != len(a.code) {
+	end := load >> 3
+	if load <= 0 || end != len(a.code) {
 		return false
 	}
-	at := load/8 - load%8
+	at := end - (load & 7)
 	// RIP-relative displacements use the original instruction end as their
 	// base, so only stack and register-relative loads can grow by one byte.
 	if a.code[at]&0xc7 == 0x05 {
@@ -25372,150 +25448,8 @@ func renvoAmd64EmitRaxRcxOp(g *renvoLinearGen, tok int) bool {
 	return false
 }
 
-func renvoAmd64EmitCompareJump(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, label int, jumpIfTrue bool) bool {
-	return renvoEmitNativeCompareJump(g, ep, e, label, jumpIfTrue)
-}
 func renvoAmd64EmitStringValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-	renvoNonNil(g, ep)
-	meta := g.meta
-	a := &g.asm
-	e := &ep.exprs[idx]
-	if e.kind == renvoExprString {
-		msg := renvoDecodeStringToken(g.prog, e.tok)
-		msgOff := renvoAddStringData(g, msg)
-		msgLen := len(msg)
-		renvoAsmPrimaryDataAddr(a, msgOff)
-		renvoAsmSecondaryImm(a, msgLen)
-		return true
-	}
-	if e.kind == renvoExprSlice {
-		return renvoEmitStringSliceValueRegs(g, ep, idx)
-	}
-	if e.kind == renvoExprIdent {
-		localIndex := renvoFindLocalIndex(g, e.nameStart, e.nameEnd)
-		if localIndex >= 0 {
-			if !renvoTypeIsString(meta, g.locals[localIndex].typ) {
-				return false
-			}
-			renvoAsmLoadPrimarySecondaryStack(a, g.locals[localIndex].offset, g.locals[localIndex].offset-8)
-			return true
-		}
-		globalOffset := renvoFindGlobalOffset(g, e.nameStart, e.nameEnd)
-		globalType := renvoFindGlobalType(g, e.nameStart, e.nameEnd)
-		if globalOffset >= 0 && renvoTypeIsString(meta, globalType) {
-			renvoAsmLoadPrimaryBss(a, globalOffset)
-			renvoAsmPushPrimary(a)
-			renvoAsmLoadPrimaryBss(a, globalOffset+8)
-			renvoAsmCopyPrimaryToSecondary(a)
-			renvoAsmPopPrimary(a)
-			return true
-		}
-		constTok := renvoFindConstStringToken(g, e.nameStart, e.nameEnd)
-		if constTok >= 0 {
-			msg := renvoDecodeStringToken(g.prog, constTok)
-			msgOff := renvoAddStringData(g, msg)
-			msgLen := len(msg)
-			renvoAsmPrimaryDataAddr(a, msgOff)
-			renvoAsmSecondaryImm(a, msgLen)
-			return true
-		}
-		return false
-	}
-	if e.kind == renvoExprIndex {
-		left := &ep.exprs[e.left]
-		if left.kind != renvoExprIdent {
-			return false
-		}
-		localIndex := renvoFindLocalIndex(g, left.nameStart, left.nameEnd)
-		if localIndex < 0 {
-			return false
-		}
-		t := renvoResolveType(meta, g.locals[localIndex].typ)
-		renvoNonNil(t)
-		if t.kind != renvoTypeSlice {
-			return false
-		}
-		elem := renvoResolveType(meta, t.elem)
-		renvoNonNil(elem)
-		if elem.kind != renvoTypeString {
-			return false
-		}
-		if !renvoEmitIntExpr(g, ep, e.right) {
-			return false
-		}
-		renvoAsmPushPrimary(a)
-		renvoAsmLoadPrimaryStack(a, g.locals[localIndex].offset)
-		renvoAsmPopTertiary(a)
-		renvoAsmShlTertiaryImm(a, 4)
-		renvoAsmCopyPrimaryToSecondary(a)
-		renvoAsmLoadQwordPrimaryIndexTertiaryDisp(a, 0)
-		renvoAsmAddSecondaryTertiary(a)
-		if g.c.renvoTargetArch == renvoArchAarch64 || g.c.renvoTargetArch == renvoArchWasm32 {
-			renvoAsmPushPrimary(a)
-			renvoAsmLoadPrimaryMemSecondaryDisp(a, 8)
-			renvoAsmCopyPrimaryToSecondary(a)
-			renvoAsmPopPrimary(a)
-		} else {
-			renvoAsmMemDisp(a, 8, 0x8b48, 0x52, 0x92)
-		}
-		return true
-	}
-	if e.kind == renvoExprSelector {
-		valueType := renvoInferParsedExprType(g, ep, idx)
-		if !renvoTypeIsString(meta, valueType) {
-			return false
-		}
-		if offset, ok := renvoLocalStructSelectorOffset(g, ep, idx); ok {
-			renvoAsmLoadPrimarySecondaryStack(a, offset, offset-8)
-			return true
-		}
-		if !renvoEmitSelectorAddressSecondary(g, ep, idx) {
-			return false
-		}
-		renvoAsmLoadPrimaryMemSecondaryDisp(a, 0)
-		renvoAsmPushPrimary(a)
-		renvoAsmLoadPrimaryMemSecondaryDisp(a, 8)
-		renvoAsmCopyPrimaryToSecondary(a)
-		renvoAsmPopPrimary(a)
-		return true
-	}
-	if e.kind == renvoExprCall && e.argCount == 1 && renvoExprIsIdentText(g.prog, ep, e.left, "string") {
-		argIndex := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
-		argType := renvoInferParsedExprType(g, ep, argIndex)
-		argResolved := renvoResolveType(meta, argType)
-		renvoNonNil(argResolved)
-		if argResolved.kind != renvoTypeSlice {
-			return false
-		}
-		elem := renvoResolveType(meta, argResolved.elem)
-		renvoNonNil(elem)
-		if elem.kind != renvoTypeByte {
-			return false
-		}
-		if !renvoEmitSlicePtrLen(g, ep, argIndex) {
-			return false
-		}
-		renvoAsmPushTertiary(a)
-		renvoAsmPopSecondary(a)
-		return true
-	}
-	if e.kind == renvoExprCall {
-		callType := renvoInferParsedExprType(g, ep, idx)
-		if !renvoTypeIsString(meta, callType) {
-			return false
-		}
-		if !renvoEmitUserCall(g, ep, idx) {
-			return false
-		}
-		return true
-	}
-	return false
-}
-func renvoAmd64EmitStructReturnExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-	return renvoEmitNativeStructReturnExpr(g, ep, idx)
-}
-func renvoAmd64EmitNamedConversionCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-	return renvoEmitNativeNamedConversionCall(g, ep, idx)
+	return renvoGenericEmitStringValueRegs(g, ep, idx)
 }
 func renvoAmd64EmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
 	renvoNonNil(g)
@@ -25550,12 +25484,6 @@ func renvoAmd64EmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount i
 	}
 }
 
-func renvoAmd64EmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-	return renvoEmitNativeIntExpr(g, ep, idx)
-}
-func renvoAmd64NormalizeExprPrimary(g *renvoLinearGen, ep *renvoExprParse, idx int) {
-	renvoNormalizeNativeExprPrimary(g, ep, idx)
-}
 func renvoAmd64EmitFloatBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
 	p := g.prog
@@ -25584,9 +25512,6 @@ func renvoAmd64EmitFloatBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx in
 		return true
 	}
 	return renvoEmitPrimaryTertiaryOp(g, e.tok)
-}
-func renvoAmd64EmitSliceSlotAddrs(g *renvoLinearGen, locEp *renvoExprParse, loc *renvoSliceLocation, elemSize int) bool {
-	return renvoEmitNativeSliceSlotAddrs(g, locEp, loc, elemSize)
 }
 func renvoAmd64AsmJccLabel(a *renvoAsm, op int, label int) {
 	renvoNonNil(a)
@@ -25767,124 +25692,12 @@ func renvoAmd64EnsureStringEqualHelper(g *renvoLinearGen) int {
 	renvoAsmMarkLabel(a, afterLabel)
 	return g.streqLabel
 }
-func renvoAmd64EmitIndexedStructField(g *renvoLinearGen, ep *renvoExprParse, indexIdx int, fieldStart int, fieldEnd int) bool {
-	return renvoEmitNativeIndexedStructField(g, ep, indexIdx, fieldStart, fieldEnd)
-}
-func renvoAmd64EmitStringPtrExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-	renvoNonNil(g, ep)
-	p := g.prog
-	meta := g.meta
-	a := &g.asm
-	e := &ep.exprs[idx]
-	if e.kind == renvoExprString {
-		msg := renvoDecodeStringToken(p, e.tok)
-		msgOff := renvoAddStringData(g, msg)
-		renvoAsmPrimaryDataAddr(a, msgOff)
-		return true
-	}
-	if e.kind == renvoExprCall && e.argCount == 1 && renvoExprIsIdentText(p, ep, e.left, "string") {
-		argIndex := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
-		arg := &ep.exprs[argIndex]
-		if arg.kind != renvoExprIdent {
-			return false
-		}
-		localIndex := renvoFindLocalIndex(g, arg.nameStart, arg.nameEnd)
-		if localIndex < 0 {
-			return false
-		}
-		t := renvoResolveType(meta, g.locals[localIndex].typ)
-		renvoNonNil(t)
-		if t.kind != renvoTypeSlice {
-			return false
-		}
-		elem := renvoResolveType(meta, t.elem)
-		renvoNonNil(elem)
-		if elem.kind != renvoTypeByte {
-			return false
-		}
-		renvoAsmLoadPrimaryStack(a, g.locals[localIndex].offset)
-		return true
-	}
-	if e.kind == renvoExprCall {
-		callType := renvoInferParsedExprType(g, ep, idx)
-		if !renvoTypeIsString(meta, callType) {
-			return false
-		}
-		return renvoEmitStringValueRegs(g, ep, idx)
-	}
-	if e.kind == renvoExprIdent {
-		localIndex := renvoFindLocalIndex(g, e.nameStart, e.nameEnd)
-		if localIndex >= 0 {
-			if !renvoTypeIsString(meta, g.locals[localIndex].typ) {
-				return false
-			}
-			renvoAsmLoadPrimaryStack(a, g.locals[localIndex].offset)
-			return true
-		}
-		globalOffset := renvoFindGlobalOffset(g, e.nameStart, e.nameEnd)
-		globalType := renvoFindGlobalType(g, e.nameStart, e.nameEnd)
-		if globalOffset >= 0 && renvoTypeIsString(meta, globalType) {
-			renvoAsmLoadPrimaryBss(a, globalOffset)
-			return true
-		}
-		constTok := renvoFindConstStringToken(g, e.nameStart, e.nameEnd)
-		if constTok >= 0 {
-			msg := renvoDecodeStringToken(p, constTok)
-			msgOff := renvoAddStringData(g, msg)
-			renvoAsmPrimaryDataAddr(a, msgOff)
-			return true
-		}
-		return false
-	}
-	if e.kind == renvoExprIndex {
-		left := &ep.exprs[e.left]
-		if left.kind != renvoExprIdent {
-			return false
-		}
-		localIndex := renvoFindLocalIndex(g, left.nameStart, left.nameEnd)
-		if localIndex < 0 {
-			return false
-		}
-		t := renvoResolveType(meta, g.locals[localIndex].typ)
-		renvoNonNil(t)
-		if t.kind != renvoTypeSlice {
-			return false
-		}
-		elem := renvoResolveType(meta, t.elem)
-		renvoNonNil(elem)
-		if elem.kind != renvoTypeString {
-			return false
-		}
-		if !renvoEmitIntExpr(g, ep, e.right) {
-			return false
-		}
-		renvoAsmPushPrimary(a)
-		renvoAsmLoadPrimaryStack(a, g.locals[localIndex].offset)
-		renvoAsmPopTertiary(a)
-		renvoAsmShlTertiaryImm(a, 4)
-		renvoAsmLoadQwordPrimaryIndexTertiaryDisp(a, 0)
-		return true
-	}
-	return false
-}
-func renvoAmd64EmitSelectorAddressRdx(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-	return renvoEmitNativeSelectorAddressSecondary(g, ep, idx)
-}
-func renvoAmd64AddSecondaryFieldOffset(a *renvoAsm, fieldOffset int) {
-	renvoAddNativeSecondaryFieldOffset(a, fieldOffset)
-}
-func renvoAmd64CheckSecondaryFieldBase(g *renvoLinearGen, localIndex int) {
-	renvoCheckNativeSecondaryFieldBase(g, localIndex)
-}
-func renvoAmd64AddCheckedSecondaryFieldOffset(g *renvoLinearGen, fieldOffset int) {
-	renvoAddCheckedNativeSecondaryFieldOffset(g, fieldOffset)
-}
 
 // source: backend/compiler_amd64_generated_impl.go
 // Code generated by Renvo RTG; DO NOT EDIT.
 // generator: 1
 // target: arch/x86_64
-// unit: x86_64 3f94149aff879baa570804c3403e28a5f70ada9592141b1300e63f1dcc4d94e5
+// unit: x86_64 5a16464725d923831e271d7dc587234310b6aba3f96a7a82a85896770cd32da4
 
 
 var rtgX8664RAX = RTGRegister{Code:0, Valid:true}
@@ -25955,14 +25768,14 @@ func rtgX8664X86Low3(reg RTGRegister) byte {
 func rtgX8664X86High(reg RTGRegister) byte {
     return byte(reg.Code>>3) & 1
 }
-func rtgX8664X86Opcode(out *RTGEmitter, opcode uint32) {
+func rtgX8664X86Opcode(out *renvoAsm, opcode uint32) {
     if opcode > 0xff {
         out.Byte(byte(opcode >> 8))
     }
     out.Byte(byte(opcode))
 }
 func rtgX8664X86REX(
-    out *RTGEmitter,
+    out *renvoAsm,
     wide bool,
     reg RTGRegister,
     index RTGRegister,
@@ -25987,13 +25800,13 @@ func rtgX8664X86REX(
         out.Byte(0x40 | w<<3 | r<<2 | x<<1 | b)
     }
 }
-func rtgX8664X86ModRM(out *RTGEmitter, mode byte, reg byte, rm byte) {
+func rtgX8664X86ModRM(out *renvoAsm, mode byte, reg byte, rm byte) {
     out.Byte(mode<<6 | (reg&7)<<3 | rm&7)
 }
-func rtgX8664X86Memory(out *RTGEmitter, reg byte, address RTGAddress) {
-    if address.Target.Valid {
+func rtgX8664X86Memory(out *renvoAsm, reg byte, address renvoRTGAddress) {
+    if renvoRTGAddressValid(address) {
         rtgX8664X86ModRM(out, 0, reg, 5)
-        out.Rel32Addend(address.Target, address.Addend)
+        renvoRTGAddressRel32Addend(out, address)
         return
     }
 
@@ -26028,7 +25841,7 @@ func rtgX8664X86Memory(out *RTGEmitter, reg byte, address RTGAddress) {
     }
 }
 func rtgX8664X86RRRM(
-    out *RTGEmitter,
+    out *renvoAsm,
     opcode uint32,
     destination RTGRegister,
     source RTGRegister,
@@ -26046,7 +25859,7 @@ func rtgX8664X86RRRM(
     rtgX8664X86ModRM(out, 3, rtgX8664X86Low3(source), rtgX8664X86Low3(destination))
 }
 func rtgX8664X86RR(
-    out *RTGEmitter,
+    out *renvoAsm,
     opcode uint32,
     destination RTGRegister,
     source RTGRegister,
@@ -26057,10 +25870,10 @@ func rtgX8664X86RR(
     rtgX8664X86ModRM(out, 3, rtgX8664X86Low3(destination), rtgX8664X86Low3(source))
 }
 func rtgX8664X86RMR(
-    out *RTGEmitter,
+    out *renvoAsm,
     opcode uint32,
     destination RTGRegister,
-    address RTGAddress,
+    address renvoRTGAddress,
     width int,
 ) {
     if width == 16 {
@@ -26071,9 +25884,9 @@ func rtgX8664X86RMR(
     rtgX8664X86Memory(out, rtgX8664X86Low3(destination), address)
 }
 func rtgX8664X86RRM(
-    out *RTGEmitter,
+    out *renvoAsm,
     opcode uint32,
-    address RTGAddress,
+    address renvoRTGAddress,
     source RTGRegister,
     width int,
 ) {
@@ -26089,7 +25902,7 @@ func rtgX8664X86RRM(
     rtgX8664X86Memory(out, rtgX8664X86Low3(source), address)
 }
 func rtgX8664X86Group(
-    out *RTGEmitter,
+    out *renvoAsm,
     opcode uint32,
     selector byte,
     operand RTGRegister,
@@ -26100,7 +25913,7 @@ func rtgX8664X86Group(
     rtgX8664X86ModRM(out, 3, selector, rtgX8664X86Low3(operand))
 }
 func rtgX8664X86GroupImmediate(
-    out *RTGEmitter,
+    out *renvoAsm,
     opcode uint32,
     selector byte,
     operand RTGRegister,
@@ -26119,7 +25932,7 @@ func rtgX8664X86GroupImmediate(
     out.Uint32(uint32(value))
 }
 func rtgX8664X86GroupImmediate8(
-    out *RTGEmitter,
+    out *renvoAsm,
     opcode uint32,
     selector byte,
     operand RTGRegister,
@@ -26130,10 +25943,10 @@ func rtgX8664X86GroupImmediate8(
     out.Byte(value)
 }
 func rtgX8664X86GroupMemoryImmediate(
-    out *RTGEmitter,
+    out *renvoAsm,
     opcode uint32,
     selector byte,
-    address RTGAddress,
+    address renvoRTGAddress,
     value int64,
     width int,
 ) {
@@ -26151,7 +25964,7 @@ func rtgX8664X86GroupMemoryImmediate(
     }
 }
 func rtgX8664X86MultiplyImmediate(
-    out *RTGEmitter,
+    out *renvoAsm,
     opcode uint32,
     destination RTGRegister,
     source RTGRegister,
@@ -26171,13 +25984,13 @@ func rtgX8664X86MultiplyImmediate(
         out.Uint32(uint32(value))
     }
 }
-func rtgX8664X86OpcodeRegister(out *RTGEmitter, opcode byte, operand RTGRegister) {
+func rtgX8664X86OpcodeRegister(out *renvoAsm, opcode byte, operand RTGRegister) {
     if rtgX8664X86High(operand) != 0 {
         out.Byte(0x41)
     }
     out.Byte(opcode + rtgX8664X86Low3(operand))
 }
-func rtgX8664X86Immediate(out *RTGEmitter, opcode byte, value uint64, width int) {
+func rtgX8664X86Immediate(out *renvoAsm, opcode byte, value uint64, width int) {
     out.Byte(opcode)
     if width == 8 {
         out.Byte(byte(value))
@@ -26187,12 +26000,12 @@ func rtgX8664X86Immediate(out *RTGEmitter, opcode byte, value uint64, width int)
         out.Uint64(value)
     }
 }
-func rtgX8664X86Relative(out *RTGEmitter, opcode uint32, label RTGLabel) {
+func rtgX8664X86Relative(out *renvoAsm, opcode uint32, label int) {
     rtgX8664X86Opcode(out, opcode)
     out.Rel32(label)
 }
 func rtgX8664X86SetCondition(
-    out *RTGEmitter,
+    out *renvoAsm,
     condition RTGCondition,
     destination RTGRegister,
 ) {
@@ -26202,15 +26015,15 @@ func rtgX8664X86SetCondition(
     rtgX8664X86ModRM(out, 3, 0, rtgX8664X86Low3(destination))
 }
 func rtgX8664X86JumpCondition(
-    out *RTGEmitter,
+    out *renvoAsm,
     condition RTGCondition,
-    label RTGLabel,
+    label int,
 ) {
     out.Byte(0x0f)
     out.Byte(condition.JumpOpcode)
     out.Rel32(label)
 }
-func rtgX8664X86MoveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
+func rtgX8664X86MoveImmediate(out *renvoAsm, destination RTGRegister, value int64) {
     if destination == rtgX8664RAX && value == 0 {
         out.Byte(0x31)
         out.Byte(0xc0)
@@ -26236,7 +26049,7 @@ func rtgX8664X86RelaxCondition(condition RTGCondition, displacement int64) (byte
     return condition.JumpOpcode - 0x10, RTGSignedFits(displacement, 8)
 }
 func rtgX8664X86VariableShift(
-    out *RTGEmitter,
+    out *renvoAsm,
     direction RTGShiftDirection,
     signed bool,
 ) {
@@ -26249,7 +26062,7 @@ func rtgX8664X86VariableShift(
         rtgX8664ShrCL64(out, rtgX8664Primary)
     }
 }
-func rtgX8664X86SignedDivide(out *RTGEmitter, remainder bool) {
+func rtgX8664X86SignedDivide(out *renvoAsm, remainder bool) {
     ordinary := out.NewLabel()
     done := out.NewLabel()
     rtgX8664CmpImmediate64(out, rtgX8664Primary, -1)
@@ -26277,7 +26090,7 @@ func rtgX8664X86SignedDivide(out *RTGEmitter, remainder bool) {
     rtgX8664PopRegister(out, rtgX8664DivisionScratch)
     out.Mark(done)
 }
-func rtgX8664X86CopyBytes(out *RTGEmitter) {
+func rtgX8664X86CopyBytes(out *renvoAsm) {
     destination := rtgX8664CopyDestination
     source := rtgX8664CopySource
     count := rtgX8664CopyCount
@@ -26285,13 +26098,13 @@ func rtgX8664X86CopyBytes(out *RTGEmitter) {
     done := out.NewLabel()
     rtgX8664Cmp64(out, destination, source)
     rtgX8664X86JumpCondition(out, rtgX8664ULE, forward)
-    rtgX8664Lea64(out, rtgX8664Scratch, RTGAddress{Base: source, Index: count, Scale: 1})
+    rtgX8664Lea64(out, rtgX8664Scratch, renvoRTGAddress{Base: source, Index: count, Scale: 1})
     rtgX8664Cmp64(out, destination, rtgX8664Scratch)
     rtgX8664X86JumpCondition(out, rtgX8664UGE, forward)
-    rtgX8664Lea64(out, source, RTGAddress{
+    rtgX8664Lea64(out, source, renvoRTGAddress{
         Base: source, Index: count, Scale: 1, Displacement: -1,
     })
-    rtgX8664Lea64(out, destination, RTGAddress{
+    rtgX8664Lea64(out, destination, renvoRTGAddress{
         Base: destination, Index: count, Scale: 1, Displacement: -1,
     })
     out.Byte(0xfd)
@@ -26308,281 +26121,281 @@ func rtgX8664X86CopyBytes(out *RTGEmitter) {
 
 
 // Generated from instruction mov64.
-func rtgX8664Mov64(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+func rtgX8664Mov64(out *renvoAsm, destination RTGRegister, source RTGRegister) {
 	rtgX8664X86RRRM(out, 0x89, destination, source, 64)
 }
 
 // Generated from instruction load64.
-func rtgX8664Load64(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+func rtgX8664Load64(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
 	rtgX8664X86RMR(out, 0x8b, destination, address, 64)
 }
 
 // Generated from instruction lea64.
-func rtgX8664Lea64(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+func rtgX8664Lea64(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
 	rtgX8664X86RMR(out, 0x8d, destination, address, 64)
 }
 
 // Generated from instruction load_i32.
-func rtgX8664LoadI32(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+func rtgX8664LoadI32(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
 	rtgX8664X86RMR(out, 0x63, destination, address, 32)
 }
 
 // Generated from instruction load_u32.
-func rtgX8664LoadU32(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+func rtgX8664LoadU32(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
 	rtgX8664X86RMR(out, 0x8b, destination, address, 32)
 }
 
 // Generated from instruction load_i16.
-func rtgX8664LoadI16(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+func rtgX8664LoadI16(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
 	rtgX8664X86RMR(out, 0x0fbf, destination, address, 16)
 }
 
 // Generated from instruction load_u16.
-func rtgX8664LoadU16(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+func rtgX8664LoadU16(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
 	rtgX8664X86RMR(out, 0x0fb7, destination, address, 16)
 }
 
 // Generated from instruction load_i8.
-func rtgX8664LoadI8(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+func rtgX8664LoadI8(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
 	rtgX8664X86RMR(out, 0x0fbe, destination, address, 8)
 }
 
 // Generated from instruction load_u8.
-func rtgX8664LoadU8(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+func rtgX8664LoadU8(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
 	rtgX8664X86RMR(out, 0x0fb6, destination, address, 8)
 }
 
 // Generated from instruction store64.
-func rtgX8664Store64(out *RTGEmitter, address RTGAddress, source RTGRegister) {
+func rtgX8664Store64(out *renvoAsm, address renvoRTGAddress, source RTGRegister) {
 	rtgX8664X86RRM(out, 0x89, address, source, 64)
 }
 
 // Generated from instruction store32.
-func rtgX8664Store32(out *RTGEmitter, address RTGAddress, source RTGRegister) {
+func rtgX8664Store32(out *renvoAsm, address renvoRTGAddress, source RTGRegister) {
 	rtgX8664X86RRM(out, 0x89, address, source, 32)
 }
 
 // Generated from instruction store16.
-func rtgX8664Store16(out *RTGEmitter, address RTGAddress, source RTGRegister) {
+func rtgX8664Store16(out *renvoAsm, address renvoRTGAddress, source RTGRegister) {
 	rtgX8664X86RRM(out, 0x89, address, source, 16)
 }
 
 // Generated from instruction store8.
-func rtgX8664Store8(out *RTGEmitter, address RTGAddress, source RTGRegister) {
+func rtgX8664Store8(out *renvoAsm, address renvoRTGAddress, source RTGRegister) {
 	rtgX8664X86RRM(out, 0x88, address, source, 8)
 }
 
 // Generated from instruction add64.
-func rtgX8664Add64(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+func rtgX8664Add64(out *renvoAsm, destination RTGRegister, source RTGRegister) {
 	rtgX8664X86RRRM(out, 0x01, destination, source, 64)
 }
 
 // Generated from instruction sub64.
-func rtgX8664Sub64(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+func rtgX8664Sub64(out *renvoAsm, destination RTGRegister, source RTGRegister) {
 	rtgX8664X86RRRM(out, 0x29, destination, source, 64)
 }
 
 // Generated from instruction and64.
-func rtgX8664And64(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+func rtgX8664And64(out *renvoAsm, destination RTGRegister, source RTGRegister) {
 	rtgX8664X86RRRM(out, 0x21, destination, source, 64)
 }
 
 // Generated from instruction or64.
-func rtgX8664Or64(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+func rtgX8664Or64(out *renvoAsm, destination RTGRegister, source RTGRegister) {
 	rtgX8664X86RRRM(out, 0x09, destination, source, 64)
 }
 
 // Generated from instruction xor64.
-func rtgX8664Xor64(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+func rtgX8664Xor64(out *renvoAsm, destination RTGRegister, source RTGRegister) {
 	rtgX8664X86RRRM(out, 0x31, destination, source, 64)
 }
 
 // Generated from instruction cmp64.
-func rtgX8664Cmp64(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+func rtgX8664Cmp64(out *renvoAsm, destination RTGRegister, source RTGRegister) {
 	rtgX8664X86RRRM(out, 0x39, destination, source, 64)
 }
 
 // Generated from instruction test64.
-func rtgX8664Test64(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+func rtgX8664Test64(out *renvoAsm, destination RTGRegister, source RTGRegister) {
 	rtgX8664X86RRRM(out, 0x85, destination, source, 64)
 }
 
 // Generated from instruction imul64.
-func rtgX8664Imul64(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+func rtgX8664Imul64(out *renvoAsm, destination RTGRegister, source RTGRegister) {
 	rtgX8664X86RR(out, 0x0faf, destination, source, 64)
 }
 
 // Generated from instruction xchg64.
-func rtgX8664Xchg64(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+func rtgX8664Xchg64(out *renvoAsm, destination RTGRegister, source RTGRegister) {
 	rtgX8664X86RRRM(out, 0x87, destination, source, 64)
 }
 
 // Generated from instruction add_imm64.
-func rtgX8664AddImmediate64(out *RTGEmitter, operand RTGRegister, value int64) {
+func rtgX8664AddImmediate64(out *renvoAsm, operand RTGRegister, value int64) {
 	rtgX8664X86GroupImmediate(out, 0x81, 0, operand, value, 64)
 }
 
 // Generated from instruction or_imm64.
-func rtgX8664OrImmediate64(out *RTGEmitter, operand RTGRegister, value int64) {
+func rtgX8664OrImmediate64(out *renvoAsm, operand RTGRegister, value int64) {
 	rtgX8664X86GroupImmediate(out, 0x81, 1, operand, value, 64)
 }
 
 // Generated from instruction and_imm64.
-func rtgX8664AndImmediate64(out *RTGEmitter, operand RTGRegister, value int64) {
+func rtgX8664AndImmediate64(out *renvoAsm, operand RTGRegister, value int64) {
 	rtgX8664X86GroupImmediate(out, 0x81, 4, operand, value, 64)
 }
 
 // Generated from instruction sub_imm64.
-func rtgX8664SubImmediate64(out *RTGEmitter, operand RTGRegister, value int64) {
+func rtgX8664SubImmediate64(out *renvoAsm, operand RTGRegister, value int64) {
 	rtgX8664X86GroupImmediate(out, 0x81, 5, operand, value, 64)
 }
 
 // Generated from instruction xor_imm64.
-func rtgX8664XorImmediate64(out *RTGEmitter, operand RTGRegister, value int64) {
+func rtgX8664XorImmediate64(out *renvoAsm, operand RTGRegister, value int64) {
 	rtgX8664X86GroupImmediate(out, 0x81, 6, operand, value, 64)
 }
 
 // Generated from instruction cmp_imm64.
-func rtgX8664CmpImmediate64(out *RTGEmitter, operand RTGRegister, value int64) {
+func rtgX8664CmpImmediate64(out *renvoAsm, operand RTGRegister, value int64) {
 	rtgX8664X86GroupImmediate(out, 0x81, 7, operand, value, 64)
 }
 
 // Generated from instruction cmp_mem_imm64.
-func rtgX8664CmpMemoryImmediate64(out *RTGEmitter, address RTGAddress, value int64) {
+func rtgX8664CmpMemoryImmediate64(out *renvoAsm, address renvoRTGAddress, value int64) {
 	rtgX8664X86GroupMemoryImmediate(out, 0x81, 7, address, value, 64)
 }
 
 // Generated from instruction imul_imm64.
-func rtgX8664ImulImmediate64(out *RTGEmitter, destination RTGRegister, source RTGRegister, value int64) {
+func rtgX8664ImulImmediate64(out *renvoAsm, destination RTGRegister, source RTGRegister, value int64) {
 	rtgX8664X86MultiplyImmediate(out, 0x69, destination, source, value, 64)
 }
 
 // Generated from instruction inc64.
-func rtgX8664Inc64(out *RTGEmitter, operand RTGRegister) {
+func rtgX8664Inc64(out *renvoAsm, operand RTGRegister) {
 	rtgX8664X86Group(out, 0xff, 0, operand, 64)
 }
 
 // Generated from instruction dec64.
-func rtgX8664Dec64(out *RTGEmitter, operand RTGRegister) {
+func rtgX8664Dec64(out *renvoAsm, operand RTGRegister) {
 	rtgX8664X86Group(out, 0xff, 1, operand, 64)
 }
 
 // Generated from instruction shl_imm64.
-func rtgX8664ShlImmediate64(out *RTGEmitter, operand RTGRegister, value byte) {
+func rtgX8664ShlImmediate64(out *renvoAsm, operand RTGRegister, value byte) {
 	rtgX8664X86GroupImmediate8(out, 0xc1, 4, operand, value, 64)
 }
 
 // Generated from instruction shr_imm64.
-func rtgX8664ShrImmediate64(out *RTGEmitter, operand RTGRegister, value byte) {
+func rtgX8664ShrImmediate64(out *renvoAsm, operand RTGRegister, value byte) {
 	rtgX8664X86GroupImmediate8(out, 0xc1, 5, operand, value, 64)
 }
 
 // Generated from instruction sar_imm64.
-func rtgX8664SarImmediate64(out *RTGEmitter, operand RTGRegister, value byte) {
+func rtgX8664SarImmediate64(out *renvoAsm, operand RTGRegister, value byte) {
 	rtgX8664X86GroupImmediate8(out, 0xc1, 7, operand, value, 64)
 }
 
 // Generated from instruction shl_cl64.
-func rtgX8664ShlCL64(out *RTGEmitter, operand RTGRegister) {
+func rtgX8664ShlCL64(out *renvoAsm, operand RTGRegister) {
 	rtgX8664X86Group(out, 0xd3, 4, operand, 64)
 }
 
 // Generated from instruction shr_cl64.
-func rtgX8664ShrCL64(out *RTGEmitter, operand RTGRegister) {
+func rtgX8664ShrCL64(out *renvoAsm, operand RTGRegister) {
 	rtgX8664X86Group(out, 0xd3, 5, operand, 64)
 }
 
 // Generated from instruction sar_cl64.
-func rtgX8664SarCL64(out *RTGEmitter, operand RTGRegister) {
+func rtgX8664SarCL64(out *renvoAsm, operand RTGRegister) {
 	rtgX8664X86Group(out, 0xd3, 7, operand, 64)
 }
 
 // Generated from instruction call_reg.
-func rtgX8664CallRegister(out *RTGEmitter, operand RTGRegister, width int) {
+func rtgX8664CallRegister(out *renvoAsm, operand RTGRegister, width int) {
 	rtgX8664X86Group(out, 0xff, 2, operand, width)
 }
 
 // Generated from instruction idiv64.
-func rtgX8664Idiv64(out *RTGEmitter, operand RTGRegister) {
+func rtgX8664Idiv64(out *renvoAsm, operand RTGRegister) {
 	rtgX8664X86Group(out, 0xf7, 7, operand, 64)
 }
 
 // Generated from instruction push_reg.
-func rtgX8664PushRegister(out *RTGEmitter, operand RTGRegister) {
+func rtgX8664PushRegister(out *renvoAsm, operand RTGRegister) {
 	rtgX8664X86OpcodeRegister(out, 0x50, operand)
 }
 
 // Generated from instruction pop_reg.
-func rtgX8664PopRegister(out *RTGEmitter, operand RTGRegister) {
+func rtgX8664PopRegister(out *renvoAsm, operand RTGRegister) {
 	rtgX8664X86OpcodeRegister(out, 0x58, operand)
 }
 
 // Generated from instruction push_imm8.
-func rtgX8664PushImmediate8(out *RTGEmitter, value uint64) {
+func rtgX8664PushImmediate8(out *renvoAsm, value uint64) {
 	rtgX8664X86Immediate(out, 0x6a, value, 8)
 }
 
 // Generated from instruction push_imm32.
-func rtgX8664PushImmediate32(out *RTGEmitter, value uint64) {
+func rtgX8664PushImmediate32(out *renvoAsm, value uint64) {
 	rtgX8664X86Immediate(out, 0x68, value, 32)
 }
 
 // Generated from instruction setcc.
-func rtgX8664Setcc(out *RTGEmitter, condition RTGCondition, destination RTGRegister) {
+func rtgX8664Setcc(out *renvoAsm, condition RTGCondition, destination RTGRegister) {
 	rtgX8664X86SetCondition(out, condition, destination)
 }
 
 // Generated from instruction jcc_rel32.
-func rtgX8664JccRel32(out *RTGEmitter, condition RTGCondition, label RTGLabel) {
+func rtgX8664JccRel32(out *renvoAsm, condition RTGCondition, label int) {
 	rtgX8664X86JumpCondition(out, condition, label)
 }
 
 // Generated from instruction call_rel32.
-func rtgX8664CallRel32(out *RTGEmitter, label RTGLabel) {
+func rtgX8664CallRel32(out *renvoAsm, label int) {
 	rtgX8664X86Relative(out, 0xe8, label)
 }
 
 // Generated from instruction jump_rel32.
-func rtgX8664JumpRel32(out *RTGEmitter, label RTGLabel) {
+func rtgX8664JumpRel32(out *renvoAsm, label int) {
 	rtgX8664X86Relative(out, 0xe9, label)
 }
 
 // Generated from instruction ret.
-func rtgX8664Ret(out *RTGEmitter) {
-	RTGByte(out, 0xc3)
+func rtgX8664Ret(out *renvoAsm) {
+	renvoRTGByte(out, 0xc3)
 }
 
 // Generated from instruction leave.
-func rtgX8664Leave(out *RTGEmitter) {
-	RTGByte(out, 0xc9)
+func rtgX8664Leave(out *renvoAsm) {
+	renvoRTGByte(out, 0xc9)
 }
 
 // Generated from instruction syscall.
-func rtgX8664Syscall(out *RTGEmitter) {
-	RTGByte(out, 0x0f)
-	RTGByte(out, 0x05)
+func rtgX8664Syscall(out *renvoAsm) {
+	renvoRTGByte(out, 0x0f)
+	renvoRTGByte(out, 0x05)
 }
 
 // Generated from instruction cqo.
-func rtgX8664Cqo(out *RTGEmitter) {
-	RTGByte(out, 0x48)
-	RTGByte(out, 0x99)
+func rtgX8664Cqo(out *renvoAsm) {
+	renvoRTGByte(out, 0x48)
+	renvoRTGByte(out, 0x99)
 }
 
 // Generated from instruction cld.
-func rtgX8664Cld(out *RTGEmitter) {
-	RTGByte(out, 0xfc)
+func rtgX8664Cld(out *renvoAsm) {
+	renvoRTGByte(out, 0xfc)
 }
 
 // Generated from instruction std.
-func rtgX8664Std(out *RTGEmitter) {
-	RTGByte(out, 0xfd)
+func rtgX8664Std(out *renvoAsm) {
+	renvoRTGByte(out, 0xfd)
 }
 
 // Generated from instruction rep_movsb.
-func rtgX8664RepMovsb(out *RTGEmitter) {
-	RTGByte(out, 0xf3)
-	RTGByte(out, 0xa4)
+func rtgX8664RepMovsb(out *renvoAsm) {
+	renvoRTGByte(out, 0xf3)
+	renvoRTGByte(out, 0xa4)
 }
 
 // source: backend/compiler_amd64_target_impl.go

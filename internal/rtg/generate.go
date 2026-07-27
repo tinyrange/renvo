@@ -100,10 +100,10 @@ func GeneratePreparedBackend(resolved ResolveResult, targetName string) Generate
 	manifest := []string{resolved.Document.Unit + " " + HashText(resolved.Document.Hash)}
 	source := generateHeaderPackage(manifest, target.Descriptor.Name, "main")
 	source = appendDescriptorSource(source, target.Descriptor)
-	source = appendBackendAPI(source)
+	source = appendArchitectureBackendAPI(source)
 	source = appendArchitectureFacts(source, resolved.Document, target.Arch, true)
-	source = appendTargetEmbeddedGo(source, resolved.Document, target, true, false)
-	source = appendArchitectureBindings(source, resolved.Document, target.Arch, true, false)
+	source = appendTargetEmbeddedGo(source, resolved.Document, target, true, true)
+	source = appendArchitectureBindings(source, resolved.Document, target.Arch, true, true)
 	return GenerateResult{Source: source, Descriptor: target.Descriptor, Manifest: manifest, Ok: true}
 }
 
@@ -178,6 +178,73 @@ func GenerateUniversalBackend(definitions []ResolveResult) GenerateResult {
 func appendArchitectureBackendAPI(source []byte) []byte {
 	source = appendBackendAPI(source)
 	return append(source, `
+type renvoRTGAddress struct {
+	Target       int
+	TargetValid  bool
+	Addend       int
+	Base         RTGRegister
+	Index        RTGRegister
+	Displacement int
+	Scale        int
+}
+
+func (out *renvoAsm) Byte(value byte) {
+	renvoAsmEmit8(out, int(value))
+}
+
+func (out *renvoAsm) Uint32(value uint32) {
+	renvoAsmEmit32(out, int(value))
+}
+
+func (out *renvoAsm) Uint64(value uint64) {
+	renvoAsmEmit32(out, int(value))
+	renvoAsmEmit32(out, int(value >> 32))
+}
+
+func (out *renvoAsm) PatchUint32(at int, value int) {
+	renvoPut32At(out.code, at, value)
+}
+
+func (out *renvoAsm) NewLabel() int {
+	return renvoAsmNewLabel(out)
+}
+
+func (out *renvoAsm) Mark(label int) {
+	if label >= 0 {
+		renvoAsmMarkLabel(out, label)
+	}
+}
+
+func (out *renvoAsm) Rel32(label int) {
+	out.Rel32Addend(label, 0)
+}
+
+func (out *renvoAsm) Rel32Addend(label int, addend int) {
+	at := len(out.code)
+	renvoAsmEmit32(out, addend)
+	if label >= 0 {
+		renvoAsmAddReloc(out, at, label)
+	}
+}
+
+func (out *renvoAsm) Reloc(label int) {
+	if label >= 0 && len(out.code) >= 4 {
+		renvoAsmAddReloc(out, len(out.code)-4, label)
+	}
+}
+
+func (out *renvoAsm) Patch() {
+	renvoAsmPatch(out)
+}
+
+func renvoRTGAddressValid(address renvoRTGAddress) bool {
+	return address.TargetValid
+}
+
+func renvoRTGAddressRel32Addend(out *renvoAsm, address renvoRTGAddress) {
+	out.Rel32Addend(address.Target, address.Addend)
+}
+
 func renvoRTGByte(out *renvoAsm, value byte) {
 	renvoAsmEmit8(out, int(value))
 }
@@ -328,6 +395,14 @@ func (out *RTGEmitter) Reloc(label RTGLabel) {
 
 func RTGReloc(out *RTGEmitter, label RTGLabel) {
 	out.Reloc(label)
+}
+
+func RTGAddressValid(address RTGAddress) bool {
+	return address.Target.Valid
+}
+
+func RTGAddressRel32Addend(out *RTGEmitter, address RTGAddress) {
+	out.Rel32Addend(address.Target, address.Addend)
 }
 
 func (out *RTGEmitter) Patch() {
@@ -732,6 +807,8 @@ func appendRewrittenGoMode(out []byte, source []byte, names []string, prefix str
 			out = append(out, "renvoAsm"...)
 		} else if nativeEmitter && token.Kind == TokenIdent && text == "RTGLabel" {
 			out = append(out, "int"...)
+		} else if nativeEmitter && token.Kind == TokenIdent && text == "RTGAddress" {
+			out = append(out, "renvoRTGAddress"...)
 		} else if nativeEmitter && token.Kind == TokenIdent && nativeEmitterFunction(text) != "" {
 			out = append(out, nativeEmitterFunction(text)...)
 		} else if document != nil && token.Kind == TokenIdent {
@@ -771,6 +848,12 @@ func nativeEmitterFunction(name string) string {
 	}
 	if name == "RTGReloc" {
 		return "renvoRTGReloc"
+	}
+	if name == "RTGAddressValid" {
+		return "renvoRTGAddressValid"
+	}
+	if name == "RTGAddressRel32Addend" {
+		return "renvoRTGAddressRel32Addend"
 	}
 	if name == "RTGNewLabel" {
 		return "renvoRTGNewLabel"

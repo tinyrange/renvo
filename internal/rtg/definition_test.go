@@ -94,7 +94,7 @@ func TestAmd64DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 	if len(resolved.Targets) != 3 {
 		t.Fatalf("target count = %d, want 3", len(resolved.Targets))
 	}
-	generated := GenerateStatefulArchitectureBackend(resolved, "x86_64", "main")
+	generated := GenerateArchitectureBackend(resolved, "x86_64", "main")
 	if !generated.Ok {
 		t.Fatalf("generate architecture: %#v", generated.Diagnostics)
 	}

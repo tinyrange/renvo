@@ -55,6 +55,8 @@ func RTGUint32(out *RTGEmitter, value int) {}
 func RTGUint64(out *RTGEmitter, value uint64) {}
 func RTGPatchUint32(out *RTGEmitter, at int, value int) {}
 func RTGReloc(out *RTGEmitter, label RTGLabel) {}
+func RTGAddressValid(address RTGAddress) bool { return false }
+func RTGAddressRel32Addend(out *RTGEmitter, address RTGAddress) {}
 
 func RTGSignedFits(value int64, bits int) bool { return false }
 func RTGUnsignedFits(value uint64, bits int) bool { return false }

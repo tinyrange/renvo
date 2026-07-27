@@ -1204,7 +1204,7 @@ func renvoAsmPatch(a *renvoAsm) {
 		if target < 0 {
 			continue
 		}
-		disp := target - (at + 4)
+		disp := target + renvoGet32At(a.code, at) - (at + 4)
 		renvoPut32At(a.code, at, disp)
 	}
 	renvoAsmSetDataOffsets(a)
