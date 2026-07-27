@@ -117,6 +117,74 @@ func TestAmd64DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 	}
 }
 
+func TestArmDefinitionAndCheckedInArchitectureOutput(t *testing.T) {
+	source, err := os.ReadFile("../../backend/definitions/arm.rtg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := Resolve(Parse(source, "arm.rtg"))
+	if !resolved.Ok {
+		t.Fatalf("definition failed: %#v", resolved.Diagnostics)
+	}
+	if len(resolved.Targets) != 1 || resolved.Targets[0].Descriptor.Name != "linux/arm" {
+		t.Fatalf("targets = %#v, want linux/arm", resolved.Targets)
+	}
+	generated := GenerateProductionArchitectureBackend(resolved, "arm", "main")
+	if !generated.Ok {
+		t.Fatalf("generate architecture: %#v", generated.Diagnostics)
+	}
+	checkedIn, err := os.ReadFile("../../backend/compiler_arm_impl.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(generated.Source, checkedIn) {
+		t.Fatal("checked-in ARM output is stale; run go generate ./backend/definitions")
+	}
+	for _, binding := range []string{
+		"func renvoArmAsmMovRegImm(",
+		"func renvoArmAsmLoadRegMem(",
+		"func renvoArmAsmCallLabel(",
+	} {
+		if !containsText(string(checkedIn), binding) {
+			t.Errorf("generated ARM output is missing production binding %s", binding)
+		}
+	}
+}
+
+func Test386DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
+	source, err := os.ReadFile("../../backend/definitions/386.rtg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := Resolve(Parse(source, "386.rtg"))
+	if !resolved.Ok {
+		t.Fatalf("definition failed: %#v", resolved.Diagnostics)
+	}
+	if len(resolved.Targets) != 2 {
+		t.Fatalf("target count = %d, want 2", len(resolved.Targets))
+	}
+	generated := GenerateProductionArchitectureBackend(resolved, "x86_32", "main")
+	if !generated.Ok {
+		t.Fatalf("generate architecture: %#v", generated.Diagnostics)
+	}
+	checkedIn, err := os.ReadFile("../../backend/compiler_386_target_impl.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(generated.Source, checkedIn) {
+		t.Fatal("checked-in 386 output is stale; run go generate ./backend/definitions")
+	}
+	for _, binding := range []string{
+		"func renvo386AsmMovRaxImm(",
+		"func renvo386AsmLoadRaxMemRdxDisp(",
+		"func renvoAsmMovArg1Rax(",
+	} {
+		if !containsText(string(checkedIn), binding) {
+			t.Errorf("generated 386 output is missing production binding %s", binding)
+		}
+	}
+}
+
 func TestCheckedInArchitectureKernelOutput(t *testing.T) {
 	generated := GenerateArchitectureKernel("main")
 	checkedIn, err := os.ReadFile("../../backend/compiler_rtg_generated_impl.go")

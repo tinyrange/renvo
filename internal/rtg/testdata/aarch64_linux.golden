@@ -79,12 +79,29 @@ func (out *RTGEmitter) Byte(value byte) {
 	out.asm.code = append(out.asm.code, value)
 }
 
+func (out *RTGEmitter) Int8(value int) {
+	out.Byte(byte(value))
+}
+
+func (out *RTGEmitter) Uint16(value int) {
+	out.asm.code = append(out.asm.code, byte(value), byte(value >> 8))
+}
+
+func (out *RTGEmitter) Uint24(value int) {
+	out.Uint16(value)
+	out.Byte(byte(value >> 16))
+}
+
 func RTGByte(out *RTGEmitter, value byte) {
 	out.Byte(value)
 }
 
 func (out *RTGEmitter) Uint32(value uint32) {
 	out.asm.code = append(out.asm.code, byte(value), byte(value >> 8), byte(value >> 16), byte(value >> 24))
+}
+
+func (out *RTGEmitter) Int32(value int) {
+	out.Uint32(uint32(value))
 }
 
 func RTGUint32(out *RTGEmitter, value int) {
@@ -94,6 +111,31 @@ func RTGUint32(out *RTGEmitter, value int) {
 func (out *RTGEmitter) Uint64(value uint64) {
 	out.Uint32(uint32(value))
 	out.Uint32(uint32(value >> 32))
+}
+
+func (out *RTGEmitter) Int64(value int) {
+	out.Uint64(uint64(value))
+}
+
+func (out *RTGEmitter) Bytes2(v0 int, v1 int) {
+	out.Byte(byte(v0))
+	out.Byte(byte(v1))
+}
+
+func (out *RTGEmitter) Bytes3(v0 int, v1 int, v2 int) {
+	out.Bytes2(v0, v1)
+	out.Byte(byte(v2))
+}
+
+func (out *RTGEmitter) Bytes4(v0 int, v1 int, v2 int, v3 int) {
+	out.Bytes3(v0, v1, v2)
+	out.Byte(byte(v3))
+}
+
+func (out *RTGEmitter) Text(value string) {
+	for i := 0; i < len(value); i++ {
+		out.Byte(value[i])
+	}
 }
 
 func RTGUint64(out *RTGEmitter, value uint64) {
@@ -112,6 +154,34 @@ func (out *RTGEmitter) RelocAt(at int, label int) {
 	if label >= 0 {
 		renvoAsmAddReloc(out.asm, at, label)
 	}
+}
+
+func (out *RTGEmitter) PrimaryLoad() int {
+	return out.asm.lastPrimaryLoad
+}
+
+func (out *RTGEmitter) SetPrimaryLoad(value int) {
+	out.asm.lastPrimaryLoad = value
+}
+
+func (out *RTGEmitter) ByteAt(at int) byte {
+	return out.asm.code[at]
+}
+
+func (out *RTGEmitter) SetByteAt(at int, value byte) {
+	out.asm.code[at] = value
+}
+
+func (out *RTGEmitter) AddByteAt(at int, value byte) {
+	out.asm.code[at] += value
+}
+
+func (out *RTGEmitter) AppendByte(value int) {
+	out.asm.code = append(out.asm.code, byte(value))
+}
+
+func (out *RTGEmitter) Truncate(size int) {
+	out.asm.code = out.asm.code[:size]
 }
 
 func RTGPatchUint32(out *RTGEmitter, at int, value int) {
@@ -156,6 +226,14 @@ func RTGAddressValid(address RTGAddress) bool {
 
 func RTGAddressRel32Addend(out *RTGEmitter, address RTGAddress) {
 	out.Rel32Addend(address.Target, address.Addend)
+}
+
+func RTGInt8Fits(value int) bool {
+	return value >= -128 && value <= 127
+}
+
+func RTGPopPrimary(out *RTGEmitter) {
+	out.Byte(0x58)
 }
 
 func (out *RTGEmitter) Patch() {

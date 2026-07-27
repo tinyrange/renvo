@@ -16,13 +16,16 @@ import (
 
 func TestExcludedFamily(t *testing.T) {
 	excluded := excludedFamily(rtg.TargetDescriptor{ISA: "amd64"})
-	for _, name := range []string{"compiler_rtg_generated_impl.go", "compiler_amd64_generated_impl.go"} {
+	for _, name := range []string{"compiler_rtg_generated_impl.go", "compiler_amd64_target_impl.go"} {
 		if !excluded[name] {
 			t.Errorf("%s was not excluded", name)
 		}
 	}
 	if excluded["compiler_aarch64_impl.go"] {
 		t.Fatal("unrelated backend was excluded")
+	}
+	if excluded["compiler_amd64_impl.go"] {
+		t.Fatal("amd64 semantic lowering was excluded with its generated encoder")
 	}
 }
 

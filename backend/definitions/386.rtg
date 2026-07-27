@@ -1,0 +1,438 @@
+definition 1
+unit x86_32
+implements direct_emitter_v1
+
+# This closed definition owns the complete 32-bit x86 production encoder and
+# its Linux and Windows target compositions.
+go backend {
+	func renvo386AsmSecondaryDisp(a *RTGEmitter, disp int) {
+		if disp == 0 {
+			a.Int8(0x02)
+			return
+		}
+		if RTGInt8Fits(disp) {
+			a.Bytes2(0x42, disp)
+			return
+		}
+		a.Int8(0x82)
+		a.Int32(disp)
+	}
+
+	func renvo386AsmMovRaxImm(a *RTGEmitter, imm int) {
+		if imm == 0 {
+			a.Uint16( 0xc031)
+			return
+		}
+		if RTGInt8Fits(imm) {
+			a.Bytes2( 0x6a, imm)
+			a.Int8(0x58)
+			return
+		}
+		if imm >= -2147483647 && imm <= 2147483647 {
+			a.Int8( 0xb8)
+			a.Int32( imm)
+			return
+		}
+		a.Int8( 0xb8)
+		a.Int32( imm)
+	}
+
+	func renvo386AsmMovRaxImm64(a *RTGEmitter, imm int) {
+		renvo386AsmMovRaxImm(a, imm)
+	}
+
+	func renvo386AsmMovRegPCRel(a *RTGEmitter, reg int, off int, kind int) {
+		a.Int8( 0xe8)
+		a.Int32( 0)
+		a.Int8( 0x58|reg)
+		a.Bytes2( 0x81, 0xc0|reg)
+		at := a.Len()
+		a.Int32( 0)
+		a.AbsoluteReloc( at, off, kind)
+	}
+
+	func renvo386AsmMovRdxImm(a *RTGEmitter, imm int) {
+		if imm == 0 {
+			a.Uint16( 0xd231)
+			return
+		}
+		if RTGInt8Fits(imm) {
+			a.Bytes2( 0x6a, imm)
+			a.Int8(0x5a)
+			return
+		}
+		if imm >= 0 {
+			if imm <= 2147483647 {
+				a.Int8( 0xba)
+				a.Int32( imm)
+				return
+			}
+		} else {
+			if imm >= -2147483647 {
+				a.Int8( 0xba)
+				a.Int32( imm)
+				return
+			}
+		}
+		a.Int8( 0xba)
+		a.Int32( imm)
+	}
+
+	func renvo386AsmMovRdiRax(a *RTGEmitter) {
+		a.Uint16( 0xc389)
+	}
+
+	func renvo386AsmMovRaxRdx(a *RTGEmitter) {
+		a.Uint16( 0xd089)
+	}
+
+	func renvo386AsmMovRsiRax(a *RTGEmitter) {
+		a.Uint16( 0xc189)
+	}
+
+	func renvo386AsmMovR8Rax(a *RTGEmitter) {
+		a.Uint16( 0xc389)
+	}
+
+	func renvo386AsmMovR9Rax(a *RTGEmitter) {
+		a.Uint16( 0xc389)
+	}
+
+	func renvo386AsmAddRdxRcx(a *RTGEmitter) {
+		a.Uint16( 0xca01)
+	}
+
+	func renvo386AsmSyscall(a *RTGEmitter) {
+		a.Uint16( 0x80cd)
+	}
+
+	func renvo386AsmPopRdi(a *RTGEmitter) {
+		a.Int8( 0x5b)
+	}
+
+	func renvo386AsmStackMem(a *RTGEmitter, offset int, base int, disp8 int, disp32 int) {
+		if base > 0xff {
+			a.Int8( base>>8)
+		} else {
+			a.Int8( base)
+		}
+		if offset >= 0 && offset <= 128 {
+			a.Int8( disp8)
+			a.Int8( -offset)
+			return
+		}
+		a.Int8( disp32)
+		a.Int32( -offset)
+	}
+
+	func renvo386AsmAddRdxImm(a *RTGEmitter, imm int) {
+		if RTGInt8Fits(imm) {
+			a.Bytes3( 0x83, 0xc2, imm)
+			return
+		}
+		a.Uint16( 0xc281)
+		a.Int32( imm)
+	}
+
+	func renvo386AsmMemDisp(a *RTGEmitter, disp int, op int, disp8 int, disp32 int) {
+		if op > 0xff {
+			a.Int8( op>>8)
+		} else {
+			a.Int8( op)
+		}
+		if RTGInt8Fits(disp) {
+			a.Bytes2( disp8, disp)
+			return
+		}
+		a.Int8( disp32)
+		a.Int32( disp)
+	}
+
+	func renvo386AsmJccLabel(a *RTGEmitter, op int, label int) {
+		a.Bytes2( 0x0f, op)
+		at := a.Len()
+		a.Int32( 0)
+		a.RelocAt(at, label)
+	}
+
+	func renvo386AsmLoadQwordRaxIndexRcx8(a *RTGEmitter) {
+		a.Uint24( 0xc8048b)
+	}
+
+	func renvo386AsmLoadQwordRaxIndexRcxDisp(a *RTGEmitter, disp int) {
+		a.Int8( 0x8b)
+		if RTGInt8Fits(disp) {
+			a.Bytes3( 0x44, 0x8, disp)
+			return
+		}
+		a.Uint16( 0x0884)
+		a.Int32( disp)
+	}
+
+	func renvo386AsmLoadRaxMemRdxDisp(a *RTGEmitter, disp int) {
+		if disp == 0 {
+			a.Uint16( 0x028b)
+			return
+		}
+		renvo386AsmMemDisp(a, disp, 0x8b48, 0x42, 0x82)
+	}
+
+	func renvo386AsmLoadRaxMemRdxDispSize(a *RTGEmitter, disp int, size int) {
+		if size == 1 {
+			a.Uint16( 0xb60f)
+			renvo386AsmSecondaryDisp(a, disp)
+			return
+		}
+		if size == 2 {
+			a.Uint16( 0xbf0f)
+			renvo386AsmSecondaryDisp(a, disp)
+			return
+		}
+		renvo386AsmLoadRaxMemRdxDisp(a, disp)
+	}
+
+	func renvo386AsmLoadByteRaxIndexRcx(a *RTGEmitter) {
+		a.Int32( 0x0804b60f)
+	}
+
+	func renvo386AsmLoadRaxIndexRcxSize(a *RTGEmitter, size int) {
+		if size == 1 {
+			renvo386AsmLoadByteRaxIndexRcx(a)
+			return
+		}
+		if size == 2 {
+			a.Int32( 0x4804bf0f)
+			return
+		}
+		if size == 4 {
+			a.Uint24( 0x88048b)
+			return
+		}
+		renvo386AsmLoadQwordRaxIndexRcx8(a)
+	}
+
+	func renvo386AsmStoreRaxMemRdxRcx8(a *RTGEmitter) {
+		a.Uint24( 0xca0489)
+	}
+
+	func renvo386AsmStoreRaxMemRdxDisp(a *RTGEmitter, disp int) {
+		if disp == 0 {
+			a.Uint16( 0x0289)
+			return
+		}
+		renvo386AsmMemDisp(a, disp, 0x8948, 0x42, 0x82)
+	}
+
+	func renvo386AsmStoreRaxMemRdxDispSize(a *RTGEmitter, disp int, size int) {
+		if size == 1 {
+			a.Int8( 0x88)
+			renvo386AsmSecondaryDisp(a, disp)
+			return
+		}
+		if size == 2 {
+			a.Uint16( 0x8966)
+			renvo386AsmSecondaryDisp(a, disp)
+			return
+		}
+		renvo386AsmStoreRaxMemRdxDisp(a, disp)
+	}
+
+	func renvo386AsmNormalizeRaxForKind(a *RTGEmitter, kind int) {
+		if kind == RTGScalarByte {
+			a.Uint24( 0xc0b60f)
+			return
+		}
+		if kind == RTGScalarInt8 {
+			a.Uint24( 0xc0be0f)
+			return
+		}
+		if kind == RTGScalarInt16 {
+			a.Int8( 0x98)
+			return
+		}
+		if kind == RTGScalarUint16 {
+			a.Uint24( 0xc0b70f)
+		}
+	}
+
+	func renvo386AsmIncMemRdx(a *RTGEmitter) {
+		a.Uint16( 0x02ff)
+	}
+
+	func renvo386AsmDecMemRdx(a *RTGEmitter) {
+		a.Uint16( 0x0aff)
+	}
+
+	func renvo386AsmBoolNotRax(a *RTGEmitter) {
+		a.Bytes3( 0x83, 0xf0, 1)
+	}
+
+	func renvo386AsmCmpRaxImm8(a *RTGEmitter, imm int) {
+		if imm == 0 {
+			a.Uint16( 0xc085)
+			return
+		}
+		a.Bytes3( 0x83, 0xf8, imm)
+	}
+
+	func renvo386AsmAddRaxRcx(a *RTGEmitter) {
+		a.Uint16( 0xc801)
+	}
+
+	func renvo386AsmSubRaxRcx(a *RTGEmitter) {
+		a.Uint16( 0xc829)
+	}
+
+	func renvo386AsmShlRcxImm(a *RTGEmitter, imm int) {
+		a.Bytes3( 0xc1, 0xe1, imm)
+	}
+
+	func renvo386AsmShlRaxImm(a *RTGEmitter, imm int) {
+		a.Bytes3( 0xc1, 0xe0, imm)
+	}
+
+	func renvo386AsmSarRaxImm(a *RTGEmitter, imm int) {
+		a.Bytes3( 0xc1, 0xf8, imm)
+	}
+
+	func renvo386AsmShrRaxImm(a *RTGEmitter, imm int) {
+		a.Bytes3( 0xc1, 0xe8, imm)
+	}
+
+	func renvo386AsmDivLeftRcxRightRax(a *RTGEmitter, mod bool) {
+		a.Uint16( 0xc389)
+		a.Uint16( 0xc889)
+		a.Int8( 0x99)
+		a.Uint16( 0xfbf7)
+		if mod {
+			a.Uint16( 0xd089)
+		}
+	}
+
+	func renvo386AsmCmpRcxRaxSet(a *RTGEmitter, setcc int) {
+		a.Uint24( 0x0fc139)
+		a.Bytes3( setcc, 0xc0, 0xf)
+		a.Uint16( 0xc0b6)
+	}
+
+	func renvoAsmMovArg1Rax(a *RTGEmitter) {
+		a.Uint16( 0xc689)
+	}
+}
+
+arch x86_32 {
+	alias = "386"
+	endian = little
+	word_bits = 32
+	pointer_bits = 32
+	instruction_alignment = 1
+	registers gpr32 = [eax, ecx, edx, ebx, esp, ebp, esi, edi]
+	locations {
+		primary = eax
+		secondary = edx
+		tertiary = ecx
+		stack = esp
+		frame = ebp
+	}
+	exports {
+		renvo386AsmSecondaryDisp = go renvo386AsmSecondaryDisp
+		renvo386AsmMovRaxImm = go renvo386AsmMovRaxImm
+		renvo386AsmMovRaxImm64 = go renvo386AsmMovRaxImm64
+		renvo386AsmMovRegPCRel = go renvo386AsmMovRegPCRel
+		renvo386AsmMovRdxImm = go renvo386AsmMovRdxImm
+		renvo386AsmMovRdiRax = go renvo386AsmMovRdiRax
+		renvo386AsmMovRaxRdx = go renvo386AsmMovRaxRdx
+		renvo386AsmMovRsiRax = go renvo386AsmMovRsiRax
+		renvo386AsmMovR8Rax = go renvo386AsmMovR8Rax
+		renvo386AsmMovR9Rax = go renvo386AsmMovR9Rax
+		renvo386AsmAddRdxRcx = go renvo386AsmAddRdxRcx
+		renvo386AsmSyscall = go renvo386AsmSyscall
+		renvo386AsmPopRdi = go renvo386AsmPopRdi
+		renvo386AsmStackMem = go renvo386AsmStackMem
+		renvo386AsmAddRdxImm = go renvo386AsmAddRdxImm
+		renvo386AsmMemDisp = go renvo386AsmMemDisp
+		renvo386AsmJccLabel = go renvo386AsmJccLabel
+		renvo386AsmLoadQwordRaxIndexRcx8 = go renvo386AsmLoadQwordRaxIndexRcx8
+		renvo386AsmLoadQwordRaxIndexRcxDisp = go renvo386AsmLoadQwordRaxIndexRcxDisp
+		renvo386AsmLoadRaxMemRdxDisp = go renvo386AsmLoadRaxMemRdxDisp
+		renvo386AsmLoadRaxMemRdxDispSize = go renvo386AsmLoadRaxMemRdxDispSize
+		renvo386AsmLoadByteRaxIndexRcx = go renvo386AsmLoadByteRaxIndexRcx
+		renvo386AsmLoadRaxIndexRcxSize = go renvo386AsmLoadRaxIndexRcxSize
+		renvo386AsmStoreRaxMemRdxRcx8 = go renvo386AsmStoreRaxMemRdxRcx8
+		renvo386AsmStoreRaxMemRdxDisp = go renvo386AsmStoreRaxMemRdxDisp
+		renvo386AsmStoreRaxMemRdxDispSize = go renvo386AsmStoreRaxMemRdxDispSize
+		renvo386AsmNormalizeRaxForKind = go renvo386AsmNormalizeRaxForKind
+		renvo386AsmIncMemRdx = go renvo386AsmIncMemRdx
+		renvo386AsmDecMemRdx = go renvo386AsmDecMemRdx
+		renvo386AsmBoolNotRax = go renvo386AsmBoolNotRax
+		renvo386AsmCmpRaxImm8 = go renvo386AsmCmpRaxImm8
+		renvo386AsmAddRaxRcx = go renvo386AsmAddRaxRcx
+		renvo386AsmSubRaxRcx = go renvo386AsmSubRaxRcx
+		renvo386AsmShlRcxImm = go renvo386AsmShlRcxImm
+		renvo386AsmShlRaxImm = go renvo386AsmShlRaxImm
+		renvo386AsmSarRaxImm = go renvo386AsmSarRaxImm
+		renvo386AsmShrRaxImm = go renvo386AsmShrRaxImm
+		renvo386AsmDivLeftRcxRightRax = go renvo386AsmDivLeftRcxRightRax
+		renvo386AsmCmpRcxRaxSet = go renvo386AsmCmpRcxRaxSet
+		renvoAsmMovArg1Rax = go renvoAsmMovArg1Rax
+	}
+	relocation rel32 {
+		width = 4
+		signed = true
+		scale = 1
+		bits = 32
+		relative_to = instruction_end
+	}
+}
+
+abi cdecl32 {
+	arch = x86_32
+	arguments = [stack]
+	result = [eax, edx]
+	stack_alignment = 4
+}
+
+abi win32 {
+	arch = x86_32
+	arguments = [stack]
+	result = [eax, edx]
+	stack_alignment = 4
+}
+
+runtime linux_386 {
+	operations = [print, open, close, read, write, chmod]
+}
+
+runtime windows_386 {
+	operations = [print, open, close, read, write, chmod]
+}
+
+format elf32_386 {
+	byte_order = little
+	address_bits = 32
+	machine = 3
+}
+
+format pe32_386 {
+	byte_order = little
+	address_bits = 32
+	machine = 0x014c
+}
+
+target linux/386 {
+	arch = x86_32
+	abi = cdecl32
+	runtime = linux_386
+	executable = elf32_386
+	build_tags = [linux, unix, 386]
+	capabilities = [hosted, executable, filesystem, heap, argv, environment]
+}
+
+target windows/386 {
+	arch = x86_32
+	abi = win32
+	runtime = windows_386
+	executable = pe32_386
+	build_tags = [windows, 386]
+	capabilities = [hosted, executable, filesystem, heap, argv, environment]
+}
