@@ -3,7 +3,8 @@ package main
 const renvoAarch64ELFCodeOffset = 0xb0
 
 func renvoCompileAarch64(input []int, output int, arenaSize int) int {
-	src := renvoMakeByteScratch(589824)
+	sourceCapacity := 589824
+	src := make([]byte, 0, sourceCapacity)
 	for i := 0; i < len(input); i++ {
 		src = renvoReadAll(input[i], src)
 		src = append(src, '\n')

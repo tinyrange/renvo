@@ -149,7 +149,8 @@ func renvoAsmImageAarch64(a *renvoAsm) []byte {
 	}
 	var sec renvoElfSymbolSections
 	renvoBuildElfSymbolSections(a, 0, a.codeOffset, loadFileSize, &sec)
-	out := renvoMakeByteScratch(1048576)
+	outputCapacity := 1048576
+	out := make([]byte, 0, outputCapacity)
 	out = renvoAppendElfHeaderAarch64(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff)
 	for i := 0; i < len(a.code); i++ {
 		out = append(out, a.code[i])
