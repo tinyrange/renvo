@@ -4,7 +4,7 @@ func compileLinuxTarget(input []int, output int, target int) int {
 	return compileTarget(input, output, target, 0)
 }
 
-func renvoLinuxSysWriteSeq() int {
+func renvoLinuxSysWriteSeq(renvoTargetArch int) int {
 	if renvoTargetArch == renvoArchAarch64 {
 		return 64
 	}
@@ -17,7 +17,7 @@ func renvoLinuxSysWriteSeq() int {
 	return 1
 }
 
-func renvoLinuxSysReadSeq() int {
+func renvoLinuxSysReadSeq(renvoTargetArch int) int {
 	if renvoTargetArch == renvoArchAarch64 {
 		return 63
 	}
@@ -30,7 +30,7 @@ func renvoLinuxSysReadSeq() int {
 	return 0
 }
 
-func renvoLinuxSysReadAt() int {
+func renvoLinuxSysReadAt(renvoTargetArch int) int {
 	if renvoTargetArch == renvoArchAarch64 {
 		return 67
 	}
@@ -43,7 +43,7 @@ func renvoLinuxSysReadAt() int {
 	return 17
 }
 
-func renvoLinuxSysWriteAt() int {
+func renvoLinuxSysWriteAt(renvoTargetArch int) int {
 	if renvoTargetArch == renvoArchAarch64 {
 		return 68
 	}
@@ -56,7 +56,7 @@ func renvoLinuxSysWriteAt() int {
 	return 18
 }
 
-func renvoLinuxSysOpen() int {
+func renvoLinuxSysOpen(renvoTargetArch int) int {
 	if renvoTargetArch == renvoArchAarch64 {
 		return 56
 	}
@@ -69,7 +69,7 @@ func renvoLinuxSysOpen() int {
 	return 2
 }
 
-func renvoLinuxSysClose() int {
+func renvoLinuxSysClose(renvoTargetArch int) int {
 	if renvoTargetArch == renvoArchAarch64 {
 		return 57
 	}
@@ -82,7 +82,7 @@ func renvoLinuxSysClose() int {
 	return 3
 }
 
-func renvoLinuxSysFchmod() int {
+func renvoLinuxSysFchmod(renvoTargetArch int) int {
 	if renvoTargetArch == renvoArchAarch64 {
 		return 52
 	}
@@ -97,20 +97,20 @@ func renvoLinuxSysFchmod() int {
 
 func renvoAsmPrepareReadWriteBuf(a *renvoAsm) {
 	renvoNonNil(a)
-	if renvoTargetArch == renvoArchWasm32 {
+	if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32AsmMovRsiRax(a)
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRcx)
 		return
 	}
-	if renvoTargetArch == renvoArchAarch64 {
+	if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmPrepareReadWriteBuf(a)
 		return
 	}
-	if renvoTargetArch == renvoArchArm {
+	if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmPrepareReadWriteBuf(a)
 		return
 	}
-	if renvoTargetArch == renvoArch386 {
+	if a.c.renvoTargetArch == renvoArch386 {
 		renvo386AsmPrepareReadWriteBuf(a)
 		return
 	}
@@ -119,19 +119,19 @@ func renvoAsmPrepareReadWriteBuf(a *renvoAsm) {
 
 func renvoAsmMoveOffsetArg(a *renvoAsm) {
 	renvoNonNil(a)
-	if renvoTargetArch == renvoArchWasm32 {
+	if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegR10, renvoWasm32RegRax)
 		return
 	}
-	if renvoTargetArch == renvoArchAarch64 {
+	if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmMoveOffsetArg(a)
 		return
 	}
-	if renvoTargetArch == renvoArchArm {
+	if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmMoveOffsetArg(a)
 		return
 	}
-	if renvoTargetArch == renvoArch386 {
+	if a.c.renvoTargetArch == renvoArch386 {
 		renvo386AsmMoveOffsetArg(a)
 		return
 	}

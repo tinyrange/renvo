@@ -114,7 +114,7 @@ func renvoAsmImage386(a *renvoAsm) []byte {
 	renvoAsmPatch386(a)
 	loadFileSize := a.codeOffset + len(a.code) + len(a.data)
 	bssOffset := renvoAsmBssOffset(a)
-	if renvoCompilerStripSymbols {
+	if a.c.stripSymbols {
 		out := make([]byte, 0, loadFileSize)
 		out = renvoAppendElfHeader386(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, 0)
 		for i := 0; i < len(a.code); i++ {

@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"renvo.dev/internal/targetinfo"
 	"sort"
 	"strings"
 	"testing"
@@ -12,25 +13,54 @@ type renvoAdvertisedTargetContract struct {
 	name  string
 	id    int
 	magic string
+	os    string
+	isa   string
+	word  int
 }
 
-var renvoAdvertisedTargetContracts = []renvoAdvertisedTargetContract{
-	{"linux/amd64", renvoTargetLinuxAmd64, "\x7fELF"},
-	{"linux/386", renvoTargetLinux386, "\x7fELF"},
-	{"linux/aarch64", renvoTargetLinuxAarch64, "\x7fELF"},
-	{"linux/arm", renvoTargetLinuxArm, "\x7fELF"},
-	{"windows/amd64", renvoTargetWindowsAmd64, "MZ"},
-	{"windows/386", renvoTargetWindows386, "MZ"},
-	{"windows/arm64", renvoTargetWindowsArm64, "MZ"},
-	{"wasi/wasm32", renvoTargetWasiWasm32, "\x00asm"},
-	{"vm/vm32", renvoTargetVM32, "RNVB"},
-	{"darwin/arm64", renvoTargetDarwinArm64, "\xcf\xfa\xed\xfe"},
+func renvoAdvertisedTargetContracts(t *testing.T) []renvoAdvertisedTargetContract {
+	t.Helper()
+	var contracts []renvoAdvertisedTargetContract
+	for _, descriptor := range targetinfo.All() {
+		if !descriptor.Advertised || descriptor.Virtual {
+			continue
+		}
+		magic := ""
+		switch descriptor.Image {
+		case "elf":
+			magic = "\x7fELF"
+		case "pe":
+			magic = "MZ"
+		case "wasm":
+			magic = "\x00asm"
+		case "rnvm":
+			magic = "RNVB"
+		case "mach-o":
+			magic = "\xcf\xfa\xed\xfe"
+		default:
+			t.Fatalf("advertised target %s has unknown image format %s", descriptor.Name, descriptor.Image)
+		}
+		contracts = append(contracts, renvoAdvertisedTargetContract{
+			name:  descriptor.Name,
+			id:    renvoParseTargetArg(descriptor.Backend),
+			magic: magic,
+			os:    descriptor.OS,
+			isa:   descriptor.ISA,
+			word:  descriptor.WordBits,
+		})
+	}
+	return contracts
 }
 
 func TestAdvertisedTargetsHaveProfilesAndRecognizableImages(t *testing.T) {
 	source := []byte("package main\nfunc appMain() int { print(\"PASS\\n\"); return 0 }\n")
-	for _, contract := range renvoAdvertisedTargetContracts {
+	seen := make(map[int]bool)
+	for _, contract := range renvoAdvertisedTargetContracts(t) {
 		contract := contract
+		if contract.id == 0 || seen[contract.id] {
+			t.Fatalf("target %s has invalid or duplicate backend ID %d", contract.name, contract.id)
+		}
+		seen[contract.id] = true
 		t.Run(strings.ReplaceAll(contract.name, "/", "-"), func(t *testing.T) {
 			if got := renvoParseTargetArg(contract.name); got != contract.id {
 				t.Fatalf("target parser returned %d, want %d", got, contract.id)
@@ -38,6 +68,18 @@ func TestAdvertisedTargetsHaveProfilesAndRecognizableImages(t *testing.T) {
 			profile, ok := renvoProfileForTarget(contract.id)
 			if !ok || !renvoProfileIsValid(profile) {
 				t.Fatalf("target profile invalid: %#v", profile)
+			}
+			wantOS := map[string]int{
+				"linux": renvoOSLinux, "windows": renvoOSWindows, "darwin": renvoOSDarwin,
+				"wasi": renvoOSWasi, "vm": renvoOSVM,
+			}[contract.os]
+			wantArch := map[string]int{
+				"amd64": renvoArchAmd64, "386": renvoArch386, "aarch64": renvoArchAarch64,
+				"arm": renvoArchArm, "wasm32": renvoArchWasm32, "vm32": renvoArchWasm32,
+			}[contract.isa]
+			if profile.os != wantOS || profile.arch != wantArch || profile.intBits != contract.word {
+				t.Fatalf("generated backend projection = os:%d arch:%d word:%d, registry wants os:%d arch:%d word:%d",
+					profile.os, profile.arch, profile.intBits, wantOS, wantArch, contract.word)
 			}
 			image, ok := RenvoCompileSourceToBytesStrip(source, contract.name, true)
 			if !ok {

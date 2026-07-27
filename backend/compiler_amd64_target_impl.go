@@ -14,6 +14,9 @@ func renvoCompileAmd64(input []int, output int, arenaSize int) int {
 	}
 	var prog renvoProgram
 	prog = renvoParseProgram(src)
+	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+		renvoCaptureKernelCompileContext(&prog.c)
+	}
 	if !prog.ok {
 		return 1
 	}
@@ -72,13 +75,14 @@ func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinear
 	renvo_runtime_ArenaDiscardDecls(p.decls)
 	renvo_runtime_ArenaDiscardFuncs(p.funcs)
 	g := new(renvoLinearGen)
+	g.c = meta.c
 	g.prog = p
 	g.meta = meta
 	g.arenaSize = meta.arenaSize
 	a := &g.asm
-	renvoAsmInit(a)
+	renvoAsmInitWithContext(a, g.c)
 	a.codeOffset = renvoAmd64ELFCodeOffset
-	if targetIsWindows() {
+	if targetIsWindows(meta.c.renvoTargetOS) {
 		a.codeOffset = renvoWinSectionRVA
 	}
 	if renvoFixedTarget != 0 {
@@ -96,7 +100,7 @@ func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinear
 		return g
 	}
 	renvoLinearMarkFunc(g, appIndex)
-	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+	if renvoFixedTarget == 0 && meta.c.emitImage {
 		// Preserve the four linked-image ABI words while global
 		// initialization freely uses the ordinary call registers.
 		renvoAsmEmitText(a, "\x57\x56\x52\x51")
@@ -108,7 +112,7 @@ func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinear
 	if !renvoLinearInitGlobals(g) {
 		return nil
 	}
-	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+	if renvoFixedTarget == 0 && meta.c.emitImage {
 		if !renvoEmitImageEntryArgsAmd64(g, appIndex) {
 			return nil
 		}
@@ -126,9 +130,9 @@ func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinear
 	if !renvoEmitProgramPanicCheck(g) {
 		return nil
 	}
-	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+	if renvoFixedTarget == 0 && meta.c.emitImage {
 		renvoAsmRet(a)
-	} else if targetIsWindows() {
+	} else if targetIsWindows(meta.c.renvoTargetOS) {
 		renvoAsmCopyPrimaryToTertiary(a)
 		renvoWinAmd64CallImport(a, renvoWinImportExitProcess)
 		renvoAsmRet(a)
@@ -184,7 +188,7 @@ func renvoFinishScalarProgramAmd64(g *renvoLinearGen) renvoCompileResult {
 	renvo_runtime_ArenaDiscard(g.meta.scratchStart, g.meta.scratchEnd)
 	a := &g.asm
 	var data []byte
-	if targetIsWindows() {
+	if targetIsWindows(g.c.renvoTargetOS) {
 		data = renvoAsmImageWindowsAmd64(a)
 	} else if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
 		data = renvoAsmImageKernelModuleAmd64(a, g.kernelInitLabel, g.kernelExitLabel)
@@ -218,7 +222,7 @@ func renvoEmitProgramEntryArgsAmd64(g *renvoLinearGen, appIndex int) bool {
 	}
 	argsOff := g.asm.bssSize
 	g.asm.bssSize += 32768
-	if targetIsWindows() {
+	if targetIsWindows(g.c.renvoTargetOS) {
 		argsTextOff := g.asm.bssSize
 		g.asm.bssSize += 32768
 		argsLenOff := g.asm.bssSize

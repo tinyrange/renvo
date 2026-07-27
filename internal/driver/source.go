@@ -3,6 +3,7 @@ package driver
 import (
 	"renvo.dev/internal/arena"
 	"renvo.dev/internal/load"
+	"renvo.dev/internal/targetinfo"
 )
 
 const (
@@ -1112,46 +1113,7 @@ func hasBuildTag(target string, tag string, tags []string) bool {
 	if tag == "renvo" {
 		return true
 	}
-	if tag == "linux" {
-		return stringHasPrefix(target, "linux/")
-	}
-	if tag == "darwin" {
-		return stringHasPrefix(target, "darwin/")
-	}
-	if tag == "unix" {
-		return stringHasPrefix(target, "linux/") || stringHasPrefix(target, "darwin/")
-	}
-	if tag == "windows" {
-		return stringHasPrefix(target, "windows/")
-	}
-	if tag == "wasi" || tag == "wasip1" {
-		return stringHasPrefix(target, "wasi/") || stringHasPrefix(target, "browser/")
-	}
-	if tag == "browser" {
-		return stringHasPrefix(target, "browser/")
-	}
-	if tag == "vm" {
-		return stringHasPrefix(target, "vm/")
-	}
-	if tag == "amd64" {
-		return stringHasSuffix(target, "/amd64")
-	}
-	if tag == "386" {
-		return stringHasSuffix(target, "/386")
-	}
-	if tag == "arm" {
-		return stringHasSuffix(target, "/arm")
-	}
-	if tag == "aarch64" || tag == "arm64" {
-		return stringHasSuffix(target, "/aarch64") || stringHasSuffix(target, "/arm64")
-	}
-	if tag == "wasm32" || tag == "wasm" {
-		return stringHasSuffix(target, "/wasm32")
-	}
-	if tag == "vm32" {
-		return stringHasSuffix(target, "/vm32")
-	}
-	return false
+	return targetinfo.HasBuildTag(target, tag)
 }
 
 func trimBuildLine(line []byte) []byte {

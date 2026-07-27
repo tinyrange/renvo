@@ -41,7 +41,7 @@ func renvoArmEmitWideBinaryStack(g *renvoLinearGen, dest int, left int, right in
 	renvoNonNil(g)
 	if mode >= 3 && mode <= 6 {
 		nonzero := renvoAsmNewLabel(&g.asm)
-		renvoAsmLoadPrimaryStack(&g.asm, right-renvoNativeIntSize)
+		renvoAsmLoadPrimaryStack(&g.asm, right-g.c.renvoNativeIntSize)
 		renvoAsmJnzPrimary(&g.asm, nonzero)
 		renvoAsmLoadPrimaryStack(&g.asm, right)
 		renvoEmitRuntimeNonNilPrimary(g)

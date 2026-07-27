@@ -1,5 +1,6 @@
 package main
 
+// BEGIN GENERATED TARGET REGISTRY
 const renvoTargetLinuxAmd64 = 1
 const renvoTargetLinux386 = 2
 const renvoTargetLinuxAarch64 = 3
@@ -11,6 +12,12 @@ const renvoTargetDarwinArm64 = 8
 const renvoTargetLinuxKernelAmd64 = 9
 const renvoTargetWindowsArm64 = 10
 const renvoTargetVM32 = 11
+
+const targetOSTable = "\x00\x01\x01\x01\x01\x02\x02\x04\x03\x01\x02\x05"
+const targetArchTable = "\x00\x01\x02\x03\x04\x01\x02\x05\x03\x01\x03\x05"
+const renvoTargetIntBitsTable = "\x00@ @ @  @@@ "
+
+// END GENERATED TARGET REGISTRY
 
 const renvoArchAmd64 = 1
 const renvoArch386 = 2
@@ -101,13 +108,6 @@ type renvoTargetProfile struct {
 	floatModel      int
 }
 
-// The target IDs are dense. Keep the core identity fields in compact tables so
-// profile construction and active compiler state consume the same source of
-// truth without pulling the full machine-profile builder into every compiler.
-const targetOSTable = "\x00\x01\x01\x01\x01\x02\x02\x04\x03\x01\x02\x05"
-const targetArchTable = "\x00\x01\x02\x03\x04\x01\x02\x05\x03\x01\x03\x05"
-const renvoTargetIntBitsTable = "\x00\x40\x20\x40\x20\x40\x20\x20\x40\x40\x40\x20"
-
 func renvoProfileForTarget(target int) (renvoTargetProfile, bool) {
 	var p renvoTargetProfile
 	if target < renvoTargetLinuxAmd64 || target > renvoTargetVM32 {
@@ -193,6 +193,69 @@ var renvoTarget int = renvoTargetLinuxAmd64
 var renvoCompilerWindowsSubsystem int = 3
 var renvoCompilerEmitImage bool
 
+// renvoCompileContext is owned by one compilation. The target identity and
+// output policy are fixed when the context is created, so independent host
+// goroutines never communicate through the legacy command-line globals.
+//
+// renvoFixedTarget remains a build-time specialization input for stage
+// compilers. It is captured here but is never mutated by a compilation.
+type renvoKernelCompileContext struct {
+	kernelModuleName string
+	kernelModuleSize int
+	kernelNameOff    int
+	kernelInitOff    int
+	kernelExitOff    int
+	kernelLicense    string
+}
+
+type renvoCompileContext struct {
+	renvoTarget        int
+	renvoTargetOS      int
+	renvoTargetArch    int
+	renvoNativeIntSize int
+	stripSymbols       bool
+	windowsSubsystem   int
+	emitImage          bool
+	kernel             *renvoKernelCompileContext
+}
+
+func renvoNewCompileContext(target int, stripSymbols bool, windowsGUI bool, emitImage bool) *renvoCompileContext {
+	if renvoFixedTarget != 0 {
+		target = renvoFixedTarget
+	}
+	context := new(renvoCompileContext)
+	context.renvoTarget = target
+	context.stripSymbols = stripSymbols
+	context.windowsSubsystem = 3
+	context.emitImage = emitImage
+	if windowsGUI {
+		context.windowsSubsystem = 2
+	}
+	if target >= renvoTargetLinuxAmd64 && target <= renvoTargetVM32 {
+		context.renvoTargetOS = int(targetOSTable[target])
+		context.renvoTargetArch = int(targetArchTable[target])
+		context.renvoNativeIntSize = int(renvoTargetIntBitsTable[target]) / 8
+		return context
+	}
+	context.renvoTarget = renvoTargetLinuxAmd64
+	context.renvoTargetOS = renvoOSLinux
+	context.renvoTargetArch = renvoArchAmd64
+	context.renvoNativeIntSize = 8
+	return context
+}
+
+func renvoLegacyCompileContext() *renvoCompileContext {
+	context := new(renvoCompileContext)
+	context.stripSymbols = renvoCompilerStripSymbols
+	context.windowsSubsystem = renvoCompilerWindowsSubsystem
+	context.emitImage = renvoCompilerEmitImage
+	context.renvoTarget = renvoTarget
+	context.renvoTargetOS = renvoTargetOS
+	context.renvoTargetArch = renvoTargetArch
+	context.renvoNativeIntSize = renvoNativeIntSize
+	return context
+}
+
 const renvoArenaSize64BitHosted = 134217728
 const renvoArenaSize32BitHosted = 67108864
 const renvoArenaSizeWasi = 33554432
@@ -238,11 +301,11 @@ func renvoSetTarget(target int) {
 	renvoNativeIntSize = 8
 }
 
-func targetIsWindows() bool {
+func targetIsWindows(renvoTargetOS int) bool {
 	return renvoTargetOS == renvoOSWindows
 }
 
-func targetIsDarwin() bool {
+func targetIsDarwin(renvoTargetOS int) bool {
 	return renvoTargetOS == renvoOSDarwin
 }
 
@@ -265,21 +328,23 @@ func renvoEvalFixedTargetInt(g *renvoLinearGen, ep *renvoExprParse, idx int, fix
 	if e.kind == renvoExprBool {
 		return renvoBoolTokenValue(p, e.tok)
 	}
-	if e.kind == renvoExprIdent {
-		if fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetVM32 {
-			if renvoBytesEqualText(p.src, e.nameStart, e.nameEnd, "renvoTargetArch") {
-				return int(targetArchTable[fixedTarget])
-			}
-			if renvoBytesEqualText(p.src, e.nameStart, e.nameEnd, "renvoTargetOS") {
-				return int(targetOSTable[fixedTarget])
-			}
-			if renvoBytesEqualText(p.src, e.nameStart, e.nameEnd, "renvoTarget") {
-				return fixedTarget
-			}
-			if renvoBytesEqualText(p.src, e.nameStart, e.nameEnd, "renvoNativeIntSize") {
-				return int(renvoTargetIntBitsTable[fixedTarget]) / 8
-			}
+	if (e.kind == renvoExprIdent || e.kind == renvoExprSelector) &&
+		fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetVM32 {
+		nameSize := e.nameEnd - e.nameStart
+		if nameSize == 15 && renvoBytesEqualText(p.src, e.nameStart, e.nameEnd, "renvoTargetArch") {
+			return int(targetArchTable[fixedTarget])
 		}
+		if nameSize == 13 && renvoBytesEqualText(p.src, e.nameStart, e.nameEnd, "renvoTargetOS") {
+			return int(targetOSTable[fixedTarget])
+		}
+		if nameSize == 11 && renvoBytesEqualText(p.src, e.nameStart, e.nameEnd, "renvoTarget") {
+			return fixedTarget
+		}
+		if nameSize == 18 && renvoBytesEqualText(p.src, e.nameStart, e.nameEnd, "renvoNativeIntSize") {
+			return int(renvoTargetIntBitsTable[fixedTarget]) / 8
+		}
+	}
+	if e.kind == renvoExprIdent {
 		if fixedTargetKnown && renvoBytesEqualText(g.prog.src, e.nameStart, e.nameEnd, "renvoFixedTarget") {
 			return fixedTarget
 		}
@@ -309,7 +374,7 @@ func renvoEvalFixedTargetBool(g *renvoLinearGen, ep *renvoExprParse, idx int, fi
 		}
 		return -1
 	}
-	if e.kind == renvoExprCall && e.argCount == 0 && fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetVM32 {
+	if e.kind == renvoExprCall && fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetVM32 {
 		wantOS := 0
 		if renvoExprIsIdentText(g.prog, ep, e.left, "targetIsWindows") {
 			wantOS = renvoOSWindows
@@ -322,9 +387,6 @@ func renvoEvalFixedTargetBool(g *renvoLinearGen, ep *renvoExprParse, idx int, fi
 			}
 			return 0
 		}
-	}
-	if e.kind == renvoExprCall && e.argCount == 1 && fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetVM32 && int(renvoTargetIntBitsTable[fixedTarget]) == 64 && renvoExprIsIdentText(g.prog, ep, e.left, "renvoTypeKindNeedsWideLowering") {
-		return 0
 	}
 	if e.kind == renvoExprBinary {
 		if renvoTok2Is(g.prog, e.tok, '&', '&') {
@@ -393,8 +455,8 @@ func renvoObjectContextHash(g *renvoLinearGen) (int, int) {
 		}
 		a, b = renvoObjectHashRange(a, b, p.src, position, len(p.src))
 	}
-	a, b = renvoObjectHashInt(a, b, renvoTarget)
-	a, b = renvoObjectHashInt(a, b, renvoCompilerWindowsSubsystem)
+	a, b = renvoObjectHashInt(a, b, g.c.renvoTarget)
+	a, b = renvoObjectHashInt(a, b, g.c.windowsSubsystem)
 	a, b = renvoObjectHashInt(a, b, m.arenaSize)
 	for i := 0; i < len(m.types); i++ {
 		t := m.types[i]
@@ -447,7 +509,7 @@ func renvoObjectContextHash(g *renvoLinearGen) (int, int) {
 func renvoAsmSetDataOffsets(a *renvoAsm) {
 	renvoNonNil(a)
 	a.dataOffset = a.codeOffset + len(a.code)
-	if renvoTargetOS == renvoOSLinux {
+	if a.c.renvoTargetOS == renvoOSLinux {
 		a.bssOffset = renvoAlignValue(a.dataOffset+len(a.data), 0x1000)
 	}
 }

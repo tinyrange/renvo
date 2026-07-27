@@ -32,13 +32,14 @@ func renvoBeginScalarProgram386(p *renvoProgram, meta *renvoMeta) *renvoLinearGe
 		return nil
 	}
 	g := new(renvoLinearGen)
+	g.c = meta.c
 	g.prog = p
 	g.meta = meta
 	g.arenaSize = meta.arenaSize
 	a := &g.asm
-	renvoAsmInit(a)
+	renvoAsmInitWithContext(a, g.c)
 	a.codeOffset = renvo386ELFCodeOffset
-	if targetIsWindows() {
+	if targetIsWindows(meta.c.renvoTargetOS) {
 		a.codeOffset = renvoWinSectionRVA
 	}
 	if renvoFixedTarget != 0 {
@@ -55,7 +56,7 @@ func renvoBeginScalarProgram386(p *renvoProgram, meta *renvoMeta) *renvoLinearGe
 		return nil
 	}
 	entryOK := false
-	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+	if renvoFixedTarget == 0 && meta.c.emitImage {
 		entryOK = renvoEmitImageEntryArgs386(g, appIndex)
 	} else {
 		entryOK = renvoEmitProgramEntryArgs386(g, appIndex)
@@ -67,9 +68,9 @@ func renvoBeginScalarProgram386(p *renvoProgram, meta *renvoMeta) *renvoLinearGe
 	if !renvoEmitProgramPanicCheck(g) {
 		return nil
 	}
-	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+	if renvoFixedTarget == 0 && meta.c.emitImage {
 		renvoAsmRet(a)
-	} else if targetIsWindows() {
+	} else if targetIsWindows(meta.c.renvoTargetOS) {
 		renvoAsmPushPrimary(a)
 		renvoWin386CallImport(a, renvoWinImportExitProcess)
 		renvoAsmRet(a)
@@ -109,7 +110,7 @@ func renvoFinishScalarProgram386(g *renvoLinearGen) renvoCompileResult {
 	renvoNonNil(g)
 	a := &g.asm
 	var data []byte
-	if targetIsWindows() {
+	if targetIsWindows(g.c.renvoTargetOS) {
 		data = renvoAsmImageWindows386(a)
 	} else {
 		data = renvoAsmImage386(a)
@@ -137,7 +138,7 @@ func renvoEmitProgramEntryArgs386(g *renvoLinearGen, appIndex int) bool {
 	}
 	argsOff := g.asm.bssSize
 	g.asm.bssSize += 32768
-	if targetIsWindows() {
+	if targetIsWindows(g.c.renvoTargetOS) {
 		argsTextOff := g.asm.bssSize
 		g.asm.bssSize += 32768
 		argsLenOff := g.asm.bssSize
@@ -164,7 +165,7 @@ func renvoEmitProgramEntryArgs386(g *renvoLinearGen, appIndex int) bool {
 	return true
 }
 func renvo386AsmMovRaxDataAddr(a *renvoAsm, dataOff int) {
-	if renvoTargetOS == renvoOSLinux {
+	if a.c.renvoTargetOS == renvoOSLinux {
 		renvo386AsmMovRegPCRel(a, 0, dataOff, 0)
 		return
 	}
@@ -175,7 +176,7 @@ func renvo386AsmMovRaxDataAddr(a *renvoAsm, dataOff int) {
 }
 
 func renvo386AsmMovRaxBssAddr(a *renvoAsm, bssOff int) {
-	if renvoTargetOS == renvoOSLinux {
+	if a.c.renvoTargetOS == renvoOSLinux {
 		renvo386AsmMovRegPCRel(a, 0, bssOff, renvoAbsBssReloc)
 		return
 	}
@@ -186,7 +187,7 @@ func renvo386AsmMovRaxBssAddr(a *renvoAsm, bssOff int) {
 }
 
 func renvo386AsmMovR10BssAddr(a *renvoAsm, bssOff int) {
-	if renvoTargetOS == renvoOSLinux {
+	if a.c.renvoTargetOS == renvoOSLinux {
 		renvo386AsmMovRegPCRel(a, 3, bssOff, renvoAbsBssReloc)
 		return
 	}
@@ -197,7 +198,7 @@ func renvo386AsmMovR10BssAddr(a *renvoAsm, bssOff int) {
 }
 
 func renvo386AsmLoadRaxBss(a *renvoAsm, bssOff int) {
-	if renvoTargetOS == renvoOSLinux {
+	if a.c.renvoTargetOS == renvoOSLinux {
 		renvo386AsmMovRegPCRel(a, 0, bssOff, renvoAbsBssReloc)
 		renvoAsmEmit16(a, 0x008b)
 		return
@@ -209,7 +210,7 @@ func renvo386AsmLoadRaxBss(a *renvoAsm, bssOff int) {
 }
 
 func renvo386AsmStoreRaxBss(a *renvoAsm, bssOff int) {
-	if renvoTargetOS == renvoOSLinux {
+	if a.c.renvoTargetOS == renvoOSLinux {
 		renvoAsmEmit8(a, 0x53)
 		renvo386AsmMovRegPCRel(a, 3, bssOff, renvoAbsBssReloc)
 		renvoAsmEmit16(a, 0x0389)
@@ -234,7 +235,7 @@ func renvo386EmitSliceSlotAddrs(g *renvoLinearGen, locEp *renvoExprParse, loc *r
 		return true
 	}
 	if loc.global {
-		if renvoTargetOS == renvoOSLinux {
+		if g.c.renvoTargetOS == renvoOSLinux {
 			renvo386AsmMovRegPCRel(a, 7, loc.offset, renvoAbsBssReloc)
 			renvo386AsmMovRegPCRel(a, 6, loc.offset+8, renvoAbsBssReloc)
 			return true

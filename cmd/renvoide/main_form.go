@@ -3,6 +3,7 @@ package main
 import (
 	"renvo.dev/forms"
 	"renvo.dev/ide"
+	"renvo.dev/internal/targetinfo"
 	"renvo.dev/std/graphics"
 	renvoos "renvo.dev/std/os"
 )
@@ -647,7 +648,7 @@ func (f *MainForm) selectBuildTarget(target string) {
 }
 
 func workspaceTargets() []string {
-	return []string{"darwin/arm64", "windows/amd64", "windows/386", "windows/arm64", "browser/wasm32"}
+	return targetinfo.IDETargets()
 }
 
 func workspaceProjectOutput(root, target string) string {

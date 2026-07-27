@@ -1,13 +1,12 @@
 package driver
 
+import "renvo.dev/internal/targetinfo"
+
 const browserDefaultArenaSize = 134217728
 const bundledCompilerDefaultArenaSize = 536870912
 
 func backendTarget(target string) string {
-	if target == "browser/wasm32" {
-		return "wasi/wasm32"
-	}
-	return target
+	return targetinfo.Backend(target)
 }
 
 func backendTargetForOptions(target string, mode string) string {
@@ -24,8 +23,8 @@ func backendArenaSize(target string, tags []string, requested int) int {
 	if findString(tags, "renvo_bundle") >= 0 {
 		return bundledCompilerDefaultArenaSize
 	}
-	if target == "browser/wasm32" {
-		return browserDefaultArenaSize
+	if defaultArena := targetinfo.DefaultArena(target); defaultArena != 0 {
+		return defaultArena
 	}
 	return 0
 }

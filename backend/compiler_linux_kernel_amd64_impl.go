@@ -559,7 +559,7 @@ func renvoAsmImageKernelModuleAmd64(a *renvoAsm, initLabel int, exitLabel int) [
 	renvoAsmPatch(a)
 	initPos := renvoAsmLabelPosition(a, initLabel)
 	exitPos := renvoAsmLabelPosition(a, exitLabel)
-	if initPos < 0 || renvoKernelModuleSize <= 0 {
+	if initPos < 0 || a.c.kernel.kernelModuleSize <= 0 {
 		return nil
 	}
 	hasPrint := false
@@ -598,7 +598,7 @@ func renvoAsmImageKernelModuleAmd64(a *renvoAsm, initLabel int, exitLabel int) [
 		exitSym = len(symtab) / 24
 		symtab = renvoKernelAppendSym64(symtab, exitName, 18, 1, exitPos, 0)
 	}
-	symtab = renvoKernelAppendSym64(symtab, thisName, 17, 7, 0, renvoKernelModuleSize)
+	symtab = renvoKernelAppendSym64(symtab, thisName, 17, 7, 0, a.c.kernel.kernelModuleSize)
 	printSym := 0
 	if hasPrint {
 		printSym = len(symtab) / 24
@@ -630,17 +630,17 @@ func renvoAsmImageKernelModuleAmd64(a *renvoAsm, initLabel int, exitLabel int) [
 		}
 	}
 
-	thisModule := make([]byte, renvoKernelModuleSize)
-	if renvoKernelModuleNameOff+len(renvoKernelModuleName) >= len(thisModule) {
+	thisModule := make([]byte, a.c.kernel.kernelModuleSize)
+	if a.c.kernel.kernelNameOff+len(a.c.kernel.kernelModuleName) >= len(thisModule) {
 		return nil
 	}
-	for i := 0; i < len(renvoKernelModuleName); i++ {
-		thisModule[renvoKernelModuleNameOff+i] = renvoKernelModuleName[i]
+	for i := 0; i < len(a.c.kernel.kernelModuleName); i++ {
+		thisModule[a.c.kernel.kernelNameOff+i] = a.c.kernel.kernelModuleName[i]
 	}
 	var relaThis []byte
-	relaThis = renvoKernelAppendRela(relaThis, renvoKernelModuleInitOff, initSym, 1, 0)
-	if exitSym != 0 && renvoKernelModuleExitOff >= 0 {
-		relaThis = renvoKernelAppendRela(relaThis, renvoKernelModuleExitOff, exitSym, 1, 0)
+	relaThis = renvoKernelAppendRela(relaThis, a.c.kernel.kernelInitOff, initSym, 1, 0)
+	if exitSym != 0 && a.c.kernel.kernelExitOff >= 0 {
+		relaThis = renvoKernelAppendRela(relaThis, a.c.kernel.kernelExitOff, exitSym, 1, 0)
 	}
 
 	var versions []byte
@@ -672,9 +672,9 @@ func renvoAsmImageKernelModuleAmd64(a *renvoAsm, initLabel int, exitLabel int) [
 	}
 
 	var modinfo []byte
-	modinfo = renvoKernelAppendString(modinfo, "license="+renvoKernelLicense)
+	modinfo = renvoKernelAppendString(modinfo, "license="+a.c.kernel.kernelLicense)
 	modinfo = renvoKernelAppendString(modinfo, "depends=")
-	modinfo = renvoKernelAppendString(modinfo, "name="+renvoKernelModuleName)
+	modinfo = renvoKernelAppendString(modinfo, "name="+a.c.kernel.kernelModuleName)
 	modinfo = renvoKernelAppendString(modinfo, "vermagic="+renvoKernelVermagic())
 
 	var shstr []byte

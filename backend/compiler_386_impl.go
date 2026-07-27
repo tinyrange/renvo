@@ -51,7 +51,7 @@ func renvo386EmitWideBinaryStack(g *renvoLinearGen, dest int, left int, right in
 	renvoNonNil(g)
 	if mode >= 3 && mode <= 6 {
 		nonzero := renvoAsmNewLabel(&g.asm)
-		renvoAsmLoadPrimaryStack(&g.asm, right-renvoNativeIntSize)
+		renvoAsmLoadPrimaryStack(&g.asm, right-g.c.renvoNativeIntSize)
 		renvoAsmJnzPrimary(&g.asm, nonzero)
 		renvoAsmLoadPrimaryStack(&g.asm, right)
 		renvoEmitRuntimeNonNilPrimary(g)
@@ -978,7 +978,7 @@ func renvo386EmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 			return renvoEmitRuntimeUnsafeIndex(g, ep, e, 4)
 		}
 		if renvoExprIsIdentText(p, ep, e.left, "renvo_runtime_UnsafeIntAt") {
-			return renvoEmitRuntimeUnsafeIndex(g, ep, e, renvoNativeIntSize)
+			return renvoEmitRuntimeUnsafeIndex(g, ep, e, g.c.renvoNativeIntSize)
 		}
 		if renvoExprIsIdentText(p, ep, e.left, "renvoTruncBytes") || renvoExprIsIdentText(p, ep, e.left, "renvoTruncParams") || renvoExprIsIdentText(p, ep, e.left, "renvoTruncTypes") || renvoExprIsIdentText(p, ep, e.left, "renvoTruncFields") {
 			return renvoEmitRuntimeTruncateSlice(g, ep, e)
@@ -1087,7 +1087,7 @@ func renvo386EmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		baseType := renvoInferParsedExprType(g, ep, e.left)
 		nativeABI := renvoTypeUsesNativeABI(g.meta, baseType)
 		fieldType := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx))
-		fieldSize := renvoNativeScalarStorageSize(fieldType.kind)
+		fieldSize := renvoNativeScalarStorageSize(g.c.renvoNativeIntSize, fieldType.kind)
 		base := &ep.exprs[e.left]
 		if base.kind == renvoExprCall {
 			baseResolved := renvoResolveType(g.meta, baseType)
@@ -1167,7 +1167,7 @@ func renvo386EmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 			renvoEmitRuntimeNonNilPrimary(g)
 			renvoAsmCopyPrimaryToSecondary(a)
 			targetKind := renvoPointerTargetKind(g, ep, e.left)
-			size := renvoScalarKindSize(targetKind)
+			size := renvoScalarKindSize(g.c.renvoNativeIntSize, targetKind)
 			renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, size)
 			return true
 		}
@@ -1479,7 +1479,7 @@ func renvo386EmitIndexedStructField(g *renvoLinearGen, ep *renvoExprParse, index
 		return false
 	}
 	fieldResolved := renvoResolveType(g.meta, fieldType)
-	fieldSize := renvoScalarKindSize(fieldResolved.kind)
+	fieldSize := renvoScalarKindSize(g.c.renvoNativeIntSize, fieldResolved.kind)
 	renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, fieldSize)
 	return true
 }
