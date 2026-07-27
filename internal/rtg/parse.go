@@ -21,6 +21,11 @@ func Parse(source []byte, filename string) Document {
 	parser := documentParser{document: &document}
 	parser.parse()
 	if len(document.Diagnostics) == 0 {
+		if diagnostic, ok := validateEmbeddedGoTypes(document); !ok {
+			document.Diagnostics = append(document.Diagnostics, diagnostic)
+		}
+	}
+	if len(document.Diagnostics) == 0 {
 		canonical := Canonical(document)
 		document.Hash = sha256Bytes(canonical)
 		document.Ok = true

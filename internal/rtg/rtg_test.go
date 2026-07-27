@@ -102,6 +102,21 @@ func TestEmbeddedGoRestrictions(t *testing.T) {
 	}
 }
 
+func TestEmbeddedGoIsTypeCheckedAgainstBackendAPI(t *testing.T) {
+	tests := []string{
+		`go backend { func emit() { missingAlgorithm() } }`,
+		`go backend { func helper(value int) {} func emit() { helper() } }`,
+	}
+	prefix := "definition 1\nunit demo\nimplements direct_emitter_v1\narch a {}\n"
+	for i := 0; i < len(tests); i++ {
+		document := Parse([]byte(prefix+tests[i]), "bad.rtg")
+		if document.Ok || len(document.Diagnostics) == 0 ||
+			document.Diagnostics[0].Code != "RTG-GO-009" {
+			t.Errorf("Parse case %d = ok %v diagnostics %#v", i, document.Ok, document.Diagnostics)
+		}
+	}
+}
+
 func TestTruncatedBlocksFail(t *testing.T) {
 	document := Parse([]byte("definition 1\nunit demo\nimplements direct_emitter_v1\narch a { width = 64"), "truncated.rtg")
 	if document.Ok || len(document.Diagnostics) == 0 || document.Diagnostics[0].Code != "RTG-PARSE-014" {
@@ -213,6 +228,20 @@ func TestResolveRejectsUnknownCompositionReference(t *testing.T) {
 	}
 }
 
+func TestResolveRejectsUnknownAndDuplicateFields(t *testing.T) {
+	source := replaceOnce(testMachineDefinition,
+		"pointer_bits = 64",
+		"pointer_bits = 64\n\tpointer_bits = 64\n\tmystery = true")
+	resolved := Resolve(Parse([]byte(source), "bad.rtg"))
+	if resolved.Ok || len(resolved.Diagnostics) < 2 {
+		t.Fatalf("Resolve = ok %v diagnostics %#v", resolved.Ok, resolved.Diagnostics)
+	}
+	if resolved.Diagnostics[0].Code != "RTG-VALIDATE-060" ||
+		resolved.Diagnostics[1].Code != "RTG-VALIDATE-061" {
+		t.Fatalf("diagnostics = %#v", resolved.Diagnostics)
+	}
+}
+
 func TestResolveRejectsUnknownInstructionAlgorithm(t *testing.T) {
 	source := replaceOnce(testMachineDefinition,
 		"arch tiny64 {",
@@ -262,6 +291,70 @@ func TestDeclarativeInstructionGeneratesDirectWrapper(t *testing.T) {
 	for _, want := range []string{
 		"func rtgTinyIncrement(value int) int",
 		"return rtgTinyAddOne(value)",
+	} {
+		if !containsText(text, want) {
+			t.Errorf("generated source missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestInstructionFormSpecializesConstantsIntoDirectWrapper(t *testing.T) {
+	source := replaceOnce(testMachineDefinition,
+		"func addOne(value int) int { return value + 1 }",
+		`func addOne(value int) int { return value + 1 }
+	func registerForm(opcode uint32, destination uint32, source uint32, width int) uint32 {
+		return opcode | destination | source | uint32(width)
+	}`)
+	source = replaceOnce(source,
+		"arch tiny64 {",
+		`arch tiny64 {
+	forms { rr = go registerForm }
+	instructions { add64 rr 0x8b }`)
+	resolved := Resolve(Parse([]byte(source), "tiny.rtg"))
+	if !resolved.Ok {
+		t.Fatalf("Resolve failed: %#v", resolved.Diagnostics)
+	}
+	generated := GenerateFixedBackend(resolved, "test/tiny64")
+	if !generated.Ok {
+		t.Fatalf("Generate failed: %#v", generated.Diagnostics)
+	}
+	text := string(generated.Source)
+	for _, want := range []string{
+		"func rtgTinyAdd64(destination uint32, source uint32) uint32",
+		"return rtgTinyRegisterForm(0x8b, destination, source, 64)",
+	} {
+		if !containsText(text, want) {
+			t.Errorf("generated source missing %q:\n%s", want, text)
+		}
+	}
+	if _, err := goparser.ParseFile(token.NewFileSet(), "generated.go", generated.Source, goparser.AllErrors); err != nil {
+		t.Fatalf("specialized source does not parse: %v\n%s", err, generated.Source)
+	}
+}
+
+func TestFixedInstructionFormUsesWideEmitterWrites(t *testing.T) {
+	source := replaceOnce(testMachineDefinition,
+		"arch tiny64 {",
+		`arch tiny64 {
+	forms { fixed = bytes }
+	instructions {
+		trap fixed [0x01, 0x02, 0x03, 0x04]
+		stop fixed [0xff]
+	}`)
+	resolved := Resolve(Parse([]byte(source), "tiny.rtg"))
+	if !resolved.Ok {
+		t.Fatalf("Resolve failed: %#v", resolved.Diagnostics)
+	}
+	generated := GenerateFixedBackend(resolved, "test/tiny64")
+	if !generated.Ok {
+		t.Fatalf("Generate failed: %#v", generated.Diagnostics)
+	}
+	text := string(generated.Source)
+	for _, want := range []string{
+		"func rtgTinyTrap(out *RTGEmitter)",
+		"out.Uint32(0x04<<8|0x03<<8|0x02<<8|0x01)",
+		"func rtgTinyStop(out *RTGEmitter)",
+		"out.Byte(0xff)",
 	} {
 		if !containsText(text, want) {
 			t.Errorf("generated source missing %q:\n%s", want, text)

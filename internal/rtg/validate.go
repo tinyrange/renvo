@@ -8,6 +8,7 @@ func validateMachineDeclarations(document Document) []Diagnostic {
 	goNames := embeddedGoNames(document)
 	for i := 0; i < len(document.Declarations); i++ {
 		declaration := document.Declarations[i]
+		diagnostics = append(diagnostics, validateDeclarationFields(document, declaration)...)
 		if declaration.Kind == DeclArch {
 			diagnostics = append(diagnostics, validateArch(document, declaration, goNames)...)
 		} else if declaration.Kind == DeclABI {
@@ -24,6 +25,8 @@ func validateMachineDeclarations(document Document) []Diagnostic {
 func validateArch(document Document, declaration Declaration, goNames []string) []Diagnostic {
 	var diagnostics []Diagnostic
 	seenRegisters := []string{}
+	seenForms := []string{}
+	seenInstructions := []string{}
 	for i := 0; i < len(declaration.Statements); i++ {
 		statement := declaration.Statements[i]
 		if statementHead(statement, "registers") {
@@ -36,10 +39,23 @@ func validateArch(document Document, declaration Declaration, goNames []string) 
 				seenRegisters = append(seenRegisters, values[j])
 			}
 		}
-		if statementBlockName(statement) == "forms" || statementBlockName(statement) == "instructions" {
+		if statementBlockName(statement) == "forms" {
 			for j := 0; j < len(statement.Children); j++ {
-				_, value, ok := statementAssignment(statement.Children[j])
-				if !ok || len(value) < 2 || value[0] != "go" {
+				name, value, ok := statementAssignment(statement.Children[j])
+				if !ok || len(name) != 1 {
+					continue
+				}
+				if stringIndex(seenForms, name[0]) >= 0 {
+					diagnostics = append(diagnostics, statementDiagnostic(document, statement.Children[j],
+						"RTG-VALIDATE-012", "duplicate instruction form "+name[0]))
+				}
+				seenForms = append(seenForms, name[0])
+				if len(value) == 1 && value[0] == "bytes" {
+					continue
+				}
+				if len(value) != 2 || value[0] != "go" {
+					diagnostics = append(diagnostics, statementDiagnostic(document, statement.Children[j],
+						"RTG-VALIDATE-015", "instruction form "+name[0]+" must bind go algorithm or bytes"))
 					continue
 				}
 				if stringIndex(goNames, value[1]) < 0 {
@@ -49,7 +65,115 @@ func validateArch(document Document, declaration Declaration, goNames []string) 
 			}
 		}
 	}
+	for i := 0; i < len(declaration.Statements); i++ {
+		statement := declaration.Statements[i]
+		if statementBlockName(statement) != "instructions" {
+			continue
+		}
+		for j := 0; j < len(statement.Children); j++ {
+			child := statement.Children[j]
+			left, value, assignment := statementAssignment(child)
+			name := ""
+			if assignment && len(left) == 1 {
+				name = left[0]
+				if len(value) == 2 && value[0] == "go" && stringIndex(goNames, value[1]) < 0 {
+					diagnostics = append(diagnostics, statementDiagnostic(document, child,
+						"RTG-VALIDATE-011", "unknown embedded Go algorithm "+value[1]))
+				}
+			} else if len(child.Tokens) >= 2 {
+				name = child.Tokens[0]
+				if stringIndex(seenForms, child.Tokens[1]) < 0 && child.Tokens[1] != "fixed" {
+					diagnostics = append(diagnostics, statementDiagnostic(document, child,
+						"RTG-VALIDATE-013", "instruction "+name+" references unknown form "+child.Tokens[1]))
+				}
+			}
+			if name == "" {
+				continue
+			}
+			if stringIndex(seenInstructions, name) >= 0 {
+				diagnostics = append(diagnostics, statementDiagnostic(document, child,
+					"RTG-VALIDATE-014", "duplicate instruction "+name))
+			}
+			seenInstructions = append(seenInstructions, name)
+		}
+	}
 	return diagnostics
+}
+
+func validateDeclarationFields(document Document, declaration Declaration) []Diagnostic {
+	allowed := declarationAllowedFields(declaration.Kind)
+	if len(allowed) == 0 {
+		return nil
+	}
+	var diagnostics []Diagnostic
+	var seen []string
+	for i := 0; i < len(declaration.Fields); i++ {
+		field := declaration.Fields[i]
+		if stringIndex(seen, field.Name) >= 0 {
+			diagnostics = append(diagnostics, Diagnostic{
+				Filename: document.Filename,
+				Span:     field.Span,
+				Code:     "RTG-VALIDATE-060",
+				Message:  "duplicate field " + field.Name + " in " + declaration.Kind + " " + declaration.Name,
+			})
+		}
+		seen = append(seen, field.Name)
+		if stringIndex(allowed, field.Name) < 0 && !declarationOwnsNamedAssignment(declaration, field.Name) {
+			diagnostics = append(diagnostics, Diagnostic{
+				Filename: document.Filename,
+				Span:     field.Span,
+				Code:     "RTG-VALIDATE-061",
+				Message:  "unknown field " + field.Name + " in " + declaration.Kind + " " + declaration.Name,
+			})
+		}
+	}
+	return diagnostics
+}
+
+func declarationOwnsNamedAssignment(declaration Declaration, name string) bool {
+	for i := 0; i < len(declaration.Statements); i++ {
+		tokens := declaration.Statements[i].Tokens
+		if len(tokens) >= 3 && tokens[0] == "registers" && tokens[1] == name && tokens[2] == "=" {
+			return true
+		}
+	}
+	return false
+}
+
+func declarationAllowedFields(kind string) []string {
+	if kind == DeclArch {
+		return []string{
+			"alias", "endian", "word_bits", "pointer_bits", "instruction_alignment",
+			"stack_word_bytes", "stack_alignment", "unaligned_memory",
+		}
+	}
+	if kind == DeclABI {
+		return []string{
+			"arch", "arguments", "result", "stack_alignment", "shadow_space",
+			"saved", "clobbered", "call_words", "overflow_arguments", "aggregate_result",
+			"entry_arguments", "foreign_call", "return_address", "frame_pointer",
+		}
+	}
+	if kind == DeclRuntime {
+		return []string{"operations", "os", "entry", "exit", "allocator", "environment", "arguments"}
+	}
+	if kind == DeclFormat {
+		return []string{
+			"byte_order", "address_bits", "file_alignment", "section_alignment", "page_size",
+			"image_base", "machine", "kind", "cpu", "subsystem", "entry", "strip",
+		}
+	}
+	if kind == DeclTarget {
+		return []string{
+			"arch", "abi", "runtime", "executable", "object", "aliases", "build_tags",
+			"capabilities", "code_pointer_bits", "function_pointer_bits", "max_align",
+			"arena_default",
+		}
+	}
+	if kind == DeclIR {
+		return []string{"version", "operations", "capabilities"}
+	}
+	return nil
 }
 
 func validateABI(document Document, declaration Declaration) []Diagnostic {

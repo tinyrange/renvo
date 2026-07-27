@@ -30,6 +30,7 @@ func GenerateFixedBackend(resolved ResolveResult, targetName string) GenerateRes
 	manifest := []string{resolved.Document.Unit + " " + HashText(resolved.Document.Hash)}
 	source := generateHeader(manifest, target.Descriptor.Name)
 	source = appendDescriptorSource(source, target.Descriptor)
+	source = appendBackendAPI(source)
 	source = appendEmbeddedGo(source, resolved.Document)
 	source = appendArchitectureBindings(source, resolved.Document, target.Arch, true)
 	return GenerateResult{Source: source, Descriptor: target.Descriptor, Manifest: manifest, Ok: true}
@@ -56,6 +57,7 @@ func GenerateArchitectureBackend(resolved ResolveResult, archName string, packag
 	}
 	manifest := []string{resolved.Document.Unit + " " + HashText(resolved.Document.Hash)}
 	source := generateHeaderPackage(manifest, "arch/"+archName, packageName)
+	source = appendBackendAPI(source)
 	source = appendEmbeddedGo(source, resolved.Document)
 	source = appendArchitectureBindings(source, resolved.Document, arch, true)
 	return GenerateResult{Source: source, Manifest: manifest, Ok: true}
@@ -83,6 +85,7 @@ func GeneratePreparedBackend(resolved ResolveResult, targetName string) Generate
 	manifest := []string{resolved.Document.Unit + " " + HashText(resolved.Document.Hash)}
 	source := generateHeaderPackage(manifest, target.Descriptor.Name, "main")
 	source = appendDescriptorSource(source, target.Descriptor)
+	source = appendBackendAPI(source)
 	for i := 0; i < len(resolved.Document.Declarations); i++ {
 		declaration := resolved.Document.Declarations[i]
 		if declaration.Kind != DeclGo {
@@ -141,6 +144,7 @@ func GenerateUniversalBackend(definitions []ResolveResult) GenerateResult {
 		source = append(source, ", true\n"...)
 	}
 	source = append(source, "}\nreturn RTGTargetDescriptor{}, false\n}\n"...)
+	source = appendBackendAPI(source)
 	for i := 0; i < len(definitions); i++ {
 		source = appendEmbeddedGo(source, definitions[i].Document)
 		for j := 0; j < len(definitions[i].Document.Declarations); j++ {
@@ -151,6 +155,130 @@ func GenerateUniversalBackend(definitions []ResolveResult) GenerateResult {
 		}
 	}
 	return GenerateResult{Source: source, Manifest: manifest, Ok: true}
+}
+
+// appendBackendAPI emits the small target-neutral surface used by generated
+// encoding algorithms. Keeping it in generated source makes a checked-in
+// backend an ordinary, self-contained Go source file without increasing the
+// size of legacy fixed-target compilers which do not use RTG definitions.
+func appendBackendAPI(source []byte) []byte {
+	return append(source, `
+type RTGRegister struct {
+	Code int
+	Valid bool
+}
+
+type RTGLabel struct {
+	Code int
+	Valid bool
+}
+
+type RTGAddress struct {
+	Target       RTGLabel
+	Addend       int
+	Base         RTGRegister
+	Index        RTGRegister
+	Displacement int
+	Scale        int
+}
+
+type RTGCondition int
+type RTGShiftDirection int
+
+const (
+	RTGShiftLeft RTGShiftDirection = 1
+	RTGShiftRight RTGShiftDirection = 2
+)
+
+var RTGNoRegister = RTGRegister{}
+
+type RTGEmitter struct {
+	asm    *renvoAsm
+	relocs []int
+}
+
+func renvoRTGEmitter(asm *renvoAsm) RTGEmitter {
+	return RTGEmitter{asm: asm}
+}
+
+func (out *RTGEmitter) Byte(value byte) {
+	out.asm.code = append(out.asm.code, value)
+}
+
+func (out *RTGEmitter) Uint32(value uint32) {
+	out.asm.code = append(out.asm.code, byte(value), byte(value >> 8), byte(value >> 16), byte(value >> 24))
+}
+
+func (out *RTGEmitter) Uint64(value uint64) {
+	out.Uint32(uint32(value))
+	out.Uint32(uint32(value >> 32))
+}
+
+func (out *RTGEmitter) NewLabel() RTGLabel {
+	return RTGLabel{Code: renvoAsmNewLabel(out.asm), Valid: true}
+}
+
+func (out *RTGEmitter) Mark(label RTGLabel) {
+	if label.Valid {
+		renvoAsmMarkLabel(out.asm, label.Code)
+	}
+}
+
+func (out *RTGEmitter) Rel32(label RTGLabel) {
+	out.Rel32Addend(label, 0)
+}
+
+func (out *RTGEmitter) Rel32Addend(label RTGLabel, addend int) {
+	at := len(out.asm.code)
+	out.Uint32(0)
+	if label.Valid {
+		out.relocs = append(out.relocs, at, label.Code, addend)
+	}
+}
+
+func (out *RTGEmitter) Patch() {
+	for i := 0; i+2 < len(out.relocs); i += 3 {
+		at := out.relocs[i]
+		label := out.relocs[i+1]
+		addend := out.relocs[i+2]
+		target := renvoAsmLabelPosition(out.asm, label)
+		if at < 0 || at+4 > len(out.asm.code) || target < 0 {
+			continue
+		}
+		renvoPut32At(out.asm.code, at, target+addend-(at+4))
+	}
+}
+
+func RTGSignedFits(value int64, bits int) bool {
+	if bits <= 0 {
+		return false
+	}
+	if bits >= 63 {
+		return true
+	}
+	limit := int64(1) << (bits - 1)
+	return value >= -limit && value < limit
+}
+
+func RTGUnsignedFits(value uint64, bits int) bool {
+	if bits <= 0 {
+		return false
+	}
+	if bits >= 63 {
+		return true
+	}
+	return value < uint64(1) << bits
+}
+
+func RTGLog2(value int) int {
+	result := 0
+	for value > 1 {
+		value >>= 1
+		result++
+	}
+	return result
+}
+`...)
 }
 
 func generateHeader(manifest []string, target string) []byte {

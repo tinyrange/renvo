@@ -23,6 +23,174 @@ go backend {
 	func encodeB(displacement int32) uint32 {
 		return 0x14000000 | uint32(displacement >> 2) & 0x03ffffff
 	}
+
+	func encodeMoveRegister(destination uint32, source uint32) uint32 {
+		return 0xaa0003e0 | (source & 31) << 16 | destination & 31
+	}
+
+	func encodeMOVN(destination uint32, value uint32, shift uint32) uint32 {
+		return 0x92800000 | ((shift / 16) & 3) << 21 |
+			(value & 0xffff) << 5 | destination & 31
+	}
+
+	func encodeMOVK(destination uint32, value uint32, shift uint32) uint32 {
+		return 0xf2800000 | ((shift / 16) & 3) << 21 |
+			(value & 0xffff) << 5 | destination & 31
+	}
+
+	func encodeAddSubImmediate(
+		destination uint32,
+		source uint32,
+		value uint32,
+		shift uint32,
+		subtract bool,
+	) uint32 {
+		opcode := uint32(0x91000000)
+		if subtract {
+			opcode = 0xd1000000
+		}
+		return opcode | (shift & 1) << 22 | (value & 0xfff) << 10 |
+			(source & 31) << 5 | destination & 31
+	}
+
+	func encodeAddRegister(destination uint32, left uint32, right uint32) uint32 {
+		return 0x8b000000 | (right & 31) << 16 |
+			(left & 31) << 5 | destination & 31
+	}
+
+	func encodeSubRegister(destination uint32, left uint32, right uint32) uint32 {
+		return 0xcb000000 | (right & 31) << 16 |
+			(left & 31) << 5 | destination & 31
+	}
+
+	func encodeAddShiftedRegister(
+		destination uint32,
+		left uint32,
+		right uint32,
+		shift uint32,
+	) uint32 {
+		return 0x8b000000 | (right & 31) << 16 | (shift & 63) << 10 |
+			(left & 31) << 5 | destination & 31
+	}
+
+	func encodeMultiply(destination uint32, left uint32, right uint32) uint32 {
+		return 0x9b007c00 | (right & 31) << 16 |
+			(left & 31) << 5 | destination & 31
+	}
+
+	func encodeLoadUnscaled(
+		destination uint32,
+		base uint32,
+		displacement int32,
+		size uint32,
+	) uint32 {
+		opcode := uint32(0xf8400000)
+		if size == 1 {
+			opcode = 0x38400000
+		} else if size == 2 {
+			opcode = 0x78400000
+		} else if size == 4 {
+			opcode = 0xb8400000
+		}
+		return opcode | (uint32(displacement) & 511) << 12 |
+			(base & 31) << 5 | destination & 31
+	}
+
+	func encodeLoadZeroOffset(destination uint32, base uint32, size uint32) uint32 {
+		opcode := uint32(0xf9400000)
+		if size == 1 {
+			opcode = 0x39400000
+		} else if size == 2 {
+			opcode = 0x79800000
+		} else if size == 4 {
+			opcode = 0xb9800000
+		}
+		return opcode | (base & 31) << 5 | destination & 31
+	}
+
+	func encodeStoreUnscaled(
+		source uint32,
+		base uint32,
+		displacement int32,
+		size uint32,
+	) uint32 {
+		opcode := uint32(0xf8000000)
+		if size == 1 {
+			opcode = 0x38000000
+		} else if size == 2 {
+			opcode = 0x78000000
+		} else if size == 4 {
+			opcode = 0xb8000000
+		}
+		return opcode | (uint32(displacement) & 511) << 12 |
+			(base & 31) << 5 | source & 31
+	}
+
+	func encodeStoreZeroOffset(source uint32, base uint32, size uint32) uint32 {
+		opcode := uint32(0xf9000000)
+		if size == 1 {
+			opcode = 0x39000000
+		} else if size == 2 {
+			opcode = 0x79000000
+		} else if size == 4 {
+			opcode = 0xb9000000
+		}
+		return opcode | (base & 31) << 5 | source & 31
+	}
+
+	func encodePush(register uint32) uint32 {
+		return 0xf81f0fe0 | register & 31
+	}
+
+	func encodePop(register uint32) uint32 {
+		return 0xf84107e0 | register & 31
+	}
+
+	func encodeCompareImmediate(register uint32, value uint32) uint32 {
+		return 0xf100001f | (value & 0xfff) << 10 | (register & 31) << 5
+	}
+
+	func encodeCompareRegister(left uint32, right uint32) uint32 {
+		return 0xeb00001f | (right & 31) << 16 | (left & 31) << 5
+	}
+
+	func encodeSetCondition(destination uint32, condition uint32) uint32 {
+		return 0x9a9f07e0 | ((condition ^ 1) & 15) << 12 | destination & 31
+	}
+
+	func encodeShiftLeftImmediate(register uint32, value uint32) uint32 {
+		return 0xd3400000 | ((64 - value) & 63) << 16 |
+			((63 - value) & 63) << 10 | (register & 31) << 5 | register & 31
+	}
+
+	func encodeShiftRightSignedImmediate(register uint32, value uint32) uint32 {
+		return 0x9340fc00 | (value & 63) << 16 |
+			(register & 31) << 5 | register & 31
+	}
+
+	func encodeSignedDivide(destination uint32, left uint32, right uint32) uint32 {
+		return 0x9ac00c00 | (right & 31) << 16 |
+			(left & 31) << 5 | destination & 31
+	}
+
+	func encodeMultiplySubtract(
+		destination uint32,
+		left uint32,
+		right uint32,
+		addend uint32,
+	) uint32 {
+		return 0x9b008000 | (right & 31) << 16 | (addend & 31) << 10 |
+			(left & 31) << 5 | destination & 31
+	}
+
+	func encodeCall(displacement int32) uint32 {
+		return 0x94000000 | uint32(displacement >> 2) & 0x03ffffff
+	}
+
+	func encodeConditionalBranch(displacement int32, condition uint32) uint32 {
+		return 0x54000000 | (uint32(displacement >> 2) & 0x7ffff) << 5 |
+			condition & 15
+	}
 }
 
 arch aarch64 {
@@ -39,11 +207,87 @@ arch aarch64 {
 		x24, x25, x26, x27, x28, x29, x30, sp
 	]
 
+	locations {
+		primary = x0
+		secondary = x1
+		tertiary = x2
+		call_words = [x3, x4, x1, x2, x5, x6]
+		system = x8
+		scratch = x9
+		scratch2 = x10
+		address = x12
+		frame = x29
+		link = x30
+		stack = sp
+		zero = xzr
+	}
+
+	conditions {
+		eq = 0
+		ne = 1
+		uge = 2
+		ult = 3
+		ugt = 8
+		ule = 9
+		sge = 10
+		slt = 11
+		sgt = 12
+		sle = 13
+	}
+
+	forms {
+		fixed = bytes
+	}
+
 	instructions {
 		ret = go encodeRET
 		add_immediate = go encodeADDImmediate
 		move_wide_zero = go encodeMOVZ
 		branch = go encodeB
+		move_register = go encodeMoveRegister
+		move_wide_not = go encodeMOVN
+		move_wide_keep = go encodeMOVK
+		add_sub_immediate = go encodeAddSubImmediate
+		add_register = go encodeAddRegister
+		subtract_register = go encodeSubRegister
+		add_shifted_register = go encodeAddShiftedRegister
+		multiply = go encodeMultiply
+		load_unscaled = go encodeLoadUnscaled
+		load_zero_offset = go encodeLoadZeroOffset
+		store_unscaled = go encodeStoreUnscaled
+		store_zero_offset = go encodeStoreZeroOffset
+		push = go encodePush
+		pop = go encodePop
+		compare_immediate = go encodeCompareImmediate
+		compare_register = go encodeCompareRegister
+		set_condition = go encodeSetCondition
+		shift_left_immediate = go encodeShiftLeftImmediate
+		shift_right_signed_immediate = go encodeShiftRightSignedImmediate
+		signed_divide = go encodeSignedDivide
+		multiply_subtract = go encodeMultiplySubtract
+		call = go encodeCall
+		conditional_branch = go encodeConditionalBranch
+		host_call fixed [0x01, 0x00, 0x00, 0xd4]
+		leave fixed [
+			0xbf, 0x03, 0x00, 0x91,
+			0xfd, 0x7b, 0xc1, 0xa8
+		]
+	}
+
+	relocation branch26 {
+		width = 4
+		signed = true
+		scale = 4
+		bits = 26
+		relative_to = instruction
+	}
+
+	relocation branch19 {
+		width = 4
+		signed = true
+		scale = 4
+		bits = 19
+		relative_to = instruction
 	}
 }
 
