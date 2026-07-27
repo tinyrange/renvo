@@ -46,7 +46,7 @@ func renvoAsmImageAmd64(a *renvoAsm) []byte {
 	renvoAsmPatch(a)
 	loadFileSize := a.codeOffset + len(a.code) + len(a.data)
 	bssOffset := renvoAsmBssOffset(a)
-	if renvoCompilerStripSymbols {
+	if a.c.stripSymbols {
 		oldCodeLen := len(a.code)
 		var out []byte
 		out = a.code

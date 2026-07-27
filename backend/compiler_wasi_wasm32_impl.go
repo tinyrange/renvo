@@ -60,19 +60,20 @@ func renvoTryCompileScalarProgramWasm32(p *renvoProgram, meta *renvoMeta) renvoC
 		return renvoCompileResult{}
 	}
 	var g renvoLinearGen
+	g.c = meta.c
 	g.prog = p
 	g.meta = meta
 	g.arenaSize = meta.arenaSize
 	g.fixedTargetState = 1
-	g.fixedTargetValue = renvoTarget
-	if renvoTarget == renvoTargetVM32 {
+	g.fixedTargetValue = meta.c.renvoTarget
+	if meta.c.renvoTarget == renvoTargetVM32 {
 		// VM bytecode is an execution format, not a restriction on the targets
 		// exposed by a compiler running inside the VM. Preserve dynamic target
 		// selection so a runtime -t value remains authoritative.
 		g.fixedTargetValue = 0
 	}
 	a := &g.asm
-	renvoAsmInit(a)
+	renvoAsmInitWithContext(a, g.c)
 	for i := 0; i < len(meta.funcs); i++ {
 		label := renvoAsmNewLabel(a)
 		g.funcLabels = append(g.funcLabels, label)
@@ -98,7 +99,7 @@ func renvoTryCompileScalarProgramWasm32(p *renvoProgram, meta *renvoMeta) renvoC
 		}
 	}
 	var result renvoCompileResult
-	if renvoTarget == renvoTargetVM32 {
+	if meta.c.renvoTarget == renvoTargetVM32 {
 		result.data = renvoVMImage(a)
 	} else {
 		result.data = renvoWasm32Image(a)
@@ -173,8 +174,7 @@ func renvoTryCompileWasiWasm32(p *renvoProgram, meta *renvoMeta) renvoCompileRes
 	}
 	fn := &p.funcs[app.declIndex]
 	var body renvoBodyParse
-	stmtData := make([]int, 1024*renvoStmtWordCount)
-	renvoBodyStmtData = stmtData
+	body.stmtData = make([]int, 1024*renvoStmtWordCount)
 	body.prog = p
 	body.stmtCount = 0
 	body.ok = true
@@ -187,7 +187,6 @@ func renvoTryCompileWasiWasm32(p *renvoProgram, meta *renvoMeta) renvoCompileRes
 		if renvoTokCharIs(p, i, '}') || renvoTokIsKind(p, i, renvoTokEOF) {
 			break
 		}
-		renvoBodyStmtData = stmtData
 		before := body.stmtCount
 		next := renvoParseOneStatement(&body, i, fn.bodyEnd)
 		if !body.ok || next <= i || body.stmtCount <= before {

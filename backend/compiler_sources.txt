@@ -5,6 +5,7 @@ compiler_runtime_impl.go
 compiler_linux_impl.go
 compiler_windows_impl.go
 compiler_target_policy_impl.go
+compiler_target_registry_impl.go
 compiler_target_impl.go
 compiler_amd64_impl.go
 compiler_amd64_target_impl.go

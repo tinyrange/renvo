@@ -128,12 +128,13 @@ func TestArenaSizeConfigurationIsBounded(t *testing.T) {
 		renvoTargetOS = oldOS
 		renvoTarget = oldTarget
 	})
-	g := renvoLinearGen{arenaSize: 2048}
+	g := renvoLinearGen{arenaSize: 2048, c: renvoLegacyCompileContext()}
 	if got := renvoStringArenaSize(&g); got != 2048 {
 		t.Fatalf("configured arena size = %d, want 2048", got)
 	}
 	g.arenaSize = 0
 	renvoSetTarget(renvoTargetWindows386)
+	g.c = renvoLegacyCompileContext()
 	if got := renvoStringArenaSize(&g); got != renvoArenaSize32BitHosted {
 		t.Fatalf("Windows/386 arena size = %d, want %d", got, renvoArenaSize32BitHosted)
 	}
@@ -154,7 +155,8 @@ func TestLargeStaticSliceZeroingHasBoundedCodeSize(t *testing.T) {
 	var g renvoLinearGen
 	var meta renvoMeta
 	g.meta = &meta
-	renvoAsmInit(&g.asm)
+	g.c = renvoLegacyCompileContext()
+	renvoAsmInitWithContext(&g.asm, g.c)
 	renvoEmitMakeStaticRingPrimary(&g, 65536*8, 65536*8)
 
 	if got := len(g.asm.code); got > 512 {

@@ -41,43 +41,6 @@ func renvoOpenArg(path string, env []string) int {
 	return -1
 }
 
-func renvoParseTargetArg(target string) int {
-	if target == "linux-kernel/amd64" {
-		return renvoTargetLinuxKernelAmd64
-	}
-	if len(target) == 11 && target[0] == 'l' && target[1] == 'i' && target[2] == 'n' && target[3] == 'u' && target[4] == 'x' && target[5] == '/' && target[6] == 'a' && target[7] == 'm' && target[8] == 'd' && target[9] == '6' && target[10] == '4' {
-		return renvoTargetLinuxAmd64
-	}
-	if len(target) == 9 && target[0] == 'l' && target[1] == 'i' && target[2] == 'n' && target[3] == 'u' && target[4] == 'x' && target[5] == '/' && target[6] == '3' && target[7] == '8' && target[8] == '6' {
-		return renvoTargetLinux386
-	}
-	if len(target) == 13 && target[0] == 'l' && target[1] == 'i' && target[2] == 'n' && target[3] == 'u' && target[4] == 'x' && target[5] == '/' && target[6] == 'a' && target[7] == 'a' && target[8] == 'r' && target[9] == 'c' && target[10] == 'h' && target[11] == '6' && target[12] == '4' {
-		return renvoTargetLinuxAarch64
-	}
-	if len(target) == 9 && target[0] == 'l' && target[1] == 'i' && target[2] == 'n' && target[3] == 'u' && target[4] == 'x' && target[5] == '/' && target[6] == 'a' && target[7] == 'r' && target[8] == 'm' {
-		return renvoTargetLinuxArm
-	}
-	if len(target) == 13 && target[0] == 'w' && target[1] == 'i' && target[2] == 'n' && target[3] == 'd' && target[4] == 'o' && target[5] == 'w' && target[6] == 's' && target[7] == '/' && target[8] == 'a' && target[9] == 'm' && target[10] == 'd' && target[11] == '6' && target[12] == '4' {
-		return renvoTargetWindowsAmd64
-	}
-	if len(target) == 11 && target[0] == 'w' && target[1] == 'i' && target[2] == 'n' && target[3] == 'd' && target[4] == 'o' && target[5] == 'w' && target[6] == 's' && target[7] == '/' && target[8] == '3' && target[9] == '8' && target[10] == '6' {
-		return renvoTargetWindows386
-	}
-	if len(target) == 13 && target[0] == 'w' && target[1] == 'i' && target[2] == 'n' && target[3] == 'd' && target[4] == 'o' && target[5] == 'w' && target[6] == 's' && target[7] == '/' && target[8] == 'a' && target[9] == 'r' && target[10] == 'm' && target[11] == '6' && target[12] == '4' {
-		return renvoTargetWindowsArm64
-	}
-	if len(target) == 11 && target[0] == 'w' && target[1] == 'a' && target[2] == 's' && target[3] == 'i' && target[4] == '/' && target[5] == 'w' && target[6] == 'a' && target[7] == 's' && target[8] == 'm' && target[9] == '3' && target[10] == '2' {
-		return renvoTargetWasiWasm32
-	}
-	if target == "vm/vm32" {
-		return renvoTargetVM32
-	}
-	if len(target) == 12 && target[0] == 'd' && target[1] == 'a' && target[2] == 'r' && target[3] == 'w' && target[4] == 'i' && target[5] == 'n' && target[6] == '/' && target[7] == 'a' && target[8] == 'r' && target[9] == 'm' && target[10] == '6' && target[11] == '4' {
-		return renvoTargetDarwinArm64
-	}
-	return 0
-}
-
 func renvoPrintErr(s string) {
 	write(2, []byte(s), -1)
 }
@@ -131,7 +94,9 @@ func renvoPrintUnsupportedTarget(target string) {
 	renvoPrintErr("renvo: unsupported target: ")
 	renvoPrintErr(target)
 	renvoPrintErr("\n")
-	renvoPrintErr("renvo: supported targets: linux/amd64, linux/386, linux/aarch64, linux/arm, windows/amd64, windows/386, windows/arm64, wasi/wasm32, vm/vm32, darwin/arm64\n")
+	renvoPrintErr("renvo: supported targets: ")
+	renvoPrintErr(renvoSupportedTargets)
+	renvoPrintErr("\n")
 }
 
 func renvoUnitRead32(src []byte, pos int) int {
@@ -561,13 +526,19 @@ func renvoUnitValidTokenRange(limit int, start int, end int) bool {
 func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, arenaSize int) int {
 	renvoNonNil(prog)
 	renvoSetTarget(target)
+	context := renvoNewCompileContext(target, renvoCompilerStripSymbols, renvoCompilerWindowsSubsystem == 2, renvoCompilerEmitImage)
+	prog.c = *context
 	if !prog.ok {
 		renvoPrintErr("renvo: parse failed\n")
 		return 1
 	}
-	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 && !renvoPrepareKernelMetadata() {
-		renvoPrintErr("renvo: kernel metadata unavailable\n")
-		return 1
+	if target == renvoTargetLinuxKernelAmd64 {
+		if !renvoPrepareKernelMetadata() {
+			renvoPrintErr("renvo: kernel metadata unavailable\n")
+			return 1
+		}
+		renvoCaptureKernelCompileContext(context)
+		prog.c = *context
 	}
 	var meta renvoMeta
 	renvoBuildMetaInto(prog, &meta)
@@ -599,7 +570,7 @@ func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, are
 		result = renvoTryCompileScalarProgramAmd64Cached(prog, &meta)
 	}
 	if result.ok {
-		write(output, renvoCompileOutputData(result.data, target), -1)
+		write(output, renvoCompileOutputDataWithContext(context, result.data, target), -1)
 		return 0
 	}
 	renvoPrintErr("renvo: compilation failed\n")

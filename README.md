@@ -46,6 +46,7 @@ explicitly.
 | `windows/arm64` | PE executable |
 | `darwin/arm64` | Mach-O executable |
 | `wasi/wasm32` | WebAssembly module |
+| `browser/wasm32` | Browser HTML containing WebAssembly |
 | `vm/vm32` | Deterministic Renvo bytecode (`RNVB`) |
 
 The frontend supports packages and modules, local replacements, build tags and

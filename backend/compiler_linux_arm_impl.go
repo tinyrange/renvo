@@ -85,11 +85,12 @@ func renvoBeginScalarProgramArm(p *renvoProgram, meta *renvoMeta) *renvoLinearGe
 		return nil
 	}
 	g := new(renvoLinearGen)
+	g.c = meta.c
 	g.prog = p
 	g.meta = meta
 	g.arenaSize = meta.arenaSize
 	a := &g.asm
-	renvoAsmInit(a)
+	renvoAsmInitWithContext(a, g.c)
 	a.codeOffset = renvoLinuxArmCodeOffset
 	if renvoFixedTarget != 0 {
 		g.funcLabels = make([]int, 0, len(meta.funcs))
@@ -100,7 +101,7 @@ func renvoBeginScalarProgramArm(p *renvoProgram, meta *renvoMeta) *renvoLinearGe
 	}
 	renvoInitFuncQueue(g, len(meta.funcs))
 	renvoLinearMarkFunc(g, appIndex)
-	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+	if renvoFixedTarget == 0 && meta.c.emitImage {
 		renvoArmAsmEmit(a, 0xe92d4800)
 		renvoArmAsmMovRegReg(a, renvoArmRegFp, renvoArmRegSp)
 		renvoArmAsmAddRegImm(a, renvoArmRegSp, renvoArmRegSp, -16)
@@ -114,7 +115,7 @@ func renvoBeginScalarProgramArm(p *renvoProgram, meta *renvoMeta) *renvoLinearGe
 		return nil
 	}
 	entryOK := false
-	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+	if renvoFixedTarget == 0 && meta.c.emitImage {
 		entryOK = renvoEmitImageEntryArgsArm(g, appIndex)
 	} else {
 		entryOK = renvoEmitProgramEntryArgsArm(g, appIndex)
@@ -126,7 +127,7 @@ func renvoBeginScalarProgramArm(p *renvoProgram, meta *renvoMeta) *renvoLinearGe
 	if !renvoEmitProgramPanicCheck(g) {
 		return nil
 	}
-	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+	if renvoFixedTarget == 0 && meta.c.emitImage {
 		renvoAsmLeave(a)
 		renvoAsmRet(a)
 	} else {
@@ -222,7 +223,7 @@ func renvoAsmImageArm(a *renvoAsm) []byte {
 	renvoAsmPatchArm(a)
 	loadFileSize := a.codeOffset + len(a.code) + len(a.data)
 	bssOffset := renvoAsmBssOffset(a)
-	if renvoCompilerStripSymbols {
+	if a.c.stripSymbols {
 		out := make([]byte, 0, loadFileSize)
 		out = renvoAppendElfHeaderArm(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, 0)
 		out = append(out, a.code...)

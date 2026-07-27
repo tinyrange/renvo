@@ -77,18 +77,19 @@ func renvoBeginScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) *renvoAarc
 	}
 	session := &renvoAarch64ProgramSession{prog: p}
 	g := &session.gen
+	g.c = meta.c
 	g.prog = p
 	g.meta = meta
 	g.arenaSize = meta.arenaSize
 	a := &g.asm
-	renvoAsmInit(a)
+	renvoAsmInitWithContext(a, g.c)
 	a.codeOffset = renvoAarch64ELFCodeOffset
-	if targetIsWindows() {
+	if targetIsWindows(meta.c.renvoTargetOS) {
 		a.codeOffset = renvoWinSectionRVA
 	}
-	if targetIsDarwin() {
+	if targetIsDarwin(meta.c.renvoTargetOS) {
 		a.codeOffset = renvoDarwinArm64CodeOffset
-		if !(renvoFixedTarget == 0 && renvoCompilerEmitImage) {
+		if !(renvoFixedTarget == 0 && meta.c.emitImage) {
 			g.darwinEntryOff = a.bssSize
 			a.bssSize += 24
 			renvoAarch64AsmMovRegAbs(a, 9, g.darwinEntryOff, renvoAbsBssReloc)
@@ -106,7 +107,7 @@ func renvoBeginScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) *renvoAarc
 	}
 	renvoInitFuncQueue(g, len(meta.funcs))
 	renvoLinearMarkFunc(g, appIndex)
-	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+	if renvoFixedTarget == 0 && meta.c.emitImage {
 		// Give the callable image entry a normal frame and preserve its four
 		// ABI words across runtime/global initialization.
 		renvoAarch64AsmEmit(a, 0xa9bf7bfd)
@@ -122,11 +123,11 @@ func renvoBeginScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) *renvoAarc
 		return nil
 	}
 	entryOK := false
-	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+	if renvoFixedTarget == 0 && meta.c.emitImage {
 		entryOK = renvoEmitImageEntryArgsAarch64(g, appIndex)
-	} else if targetIsWindows() {
+	} else if targetIsWindows(meta.c.renvoTargetOS) {
 		entryOK = renvoEmitProgramEntryArgsWindowsArm64(g, appIndex)
-	} else if targetIsDarwin() {
+	} else if targetIsDarwin(meta.c.renvoTargetOS) {
 		entryOK = renvoEmitProgramEntryArgsDarwinArm64(g, appIndex)
 	} else {
 		entryOK = renvoEmitProgramEntryArgsAarch64(g, appIndex)
@@ -138,14 +139,14 @@ func renvoBeginScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) *renvoAarc
 	if !renvoEmitProgramPanicCheck(g) {
 		return nil
 	}
-	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+	if renvoFixedTarget == 0 && meta.c.emitImage {
 		renvoAsmLeave(a)
 		renvoAsmRet(a)
-	} else if targetIsWindows() {
+	} else if targetIsWindows(meta.c.renvoTargetOS) {
 		renvoAarch64AsmMovRegReg(a, 0, renvoAarch64RegRax)
 		renvoWinArm64CallImport(a, renvoWinImportExitProcess)
 		renvoAsmRet(a)
-	} else if targetIsDarwin() {
+	} else if targetIsDarwin(meta.c.renvoTargetOS) {
 		renvoAarch64AsmMovRegReg(a, 0, renvoAarch64RegRax)
 		renvoDarwinArm64CallImport(a, renvoDarwinImportExit)
 		renvoAsmRet(a)
@@ -229,7 +230,7 @@ func (s *renvoAarch64ProgramSession) stepCached(functionLimit int) bool {
 }
 
 func (s *renvoAarch64ProgramSession) failFunction(i int) bool {
-	if targetIsDarwin() {
+	if targetIsDarwin(s.gen.c.renvoTargetOS) {
 		renvoPrintErr("renvo: failed to emit function ")
 		write(2, s.prog.src[s.gen.meta.funcs[i].nameStart:s.gen.meta.funcs[i].nameEnd], -1)
 		renvoPrintErr("\n")
@@ -244,9 +245,9 @@ func (s *renvoAarch64ProgramSession) finishStep() bool {
 	}
 	a := &s.gen.asm
 	data := renvoAsmImageAarch64(a)
-	if targetIsWindows() {
+	if targetIsWindows(s.gen.c.renvoTargetOS) {
 		data = renvoAsmImageWindowsArm64(a)
-	} else if targetIsDarwin() {
+	} else if targetIsDarwin(s.gen.c.renvoTargetOS) {
 		data = renvoAsmImageDarwinArm64(a)
 	}
 	s.result.data = data
@@ -257,7 +258,7 @@ func (s *renvoAarch64ProgramSession) finishStep() bool {
 func renvoAarch64AsmFrameStart(a *renvoAsm) int {
 	at := len(a.code)
 	count := 2
-	if renvoTargetOS == renvoOSWindows {
+	if a.c.renvoTargetOS == renvoOSWindows {
 		// Windows requires every intervening page to be touched when a frame
 		// crosses a guard page. The compact loop patched below handles an
 		// arbitrary calculated frame without reserving one probe per page.
@@ -271,7 +272,7 @@ func renvoAarch64AsmFrameStart(a *renvoAsm) int {
 
 func renvoAarch64AsmPatchFrame(a *renvoAsm, at int, stackUsed int) {
 	frame := renvoAlignValue(stackUsed, 16)
-	if renvoTargetOS == renvoOSWindows {
+	if a.c.renvoTargetOS == renvoOSWindows {
 		pages := frame / 4096
 		tail := frame % 4096
 		if frame == 0 {

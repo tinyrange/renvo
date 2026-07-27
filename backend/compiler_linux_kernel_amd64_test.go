@@ -104,6 +104,7 @@ func TestKernelModuleELF(t *testing.T) {
 	renvoKernelModuleExitOff = 64
 
 	prog := renvoParseProgram([]byte("package main\nvar count int\nvar stamp uint64\n// renvo:linkstatic kernel,ktime_get_ns\nfunc kernelKtimeGetNS() uint64 { return 0 }\n// renvo:linkstatic kernel,for_each_kernel_tracepoint\nfunc kernelForEach(callback func(uintptr, uintptr), data uintptr) {}\nfunc callback(tp uintptr, data uintptr) {}\nfunc bump() { count++ }\nfunc appMain() { kernelForEach(callback, 0); stamp = kernelKtimeGetNS(); for i := 0; i < 3; i++ { bump() }; if count == 3 && stamp >= 0 { print(\"100% PASS\\n\") } }\nfunc moduleExit() { kernelForEach(callback, 0); print(\"EXIT\\n\") }\n"))
+	renvoCaptureKernelCompileContext(&prog.c)
 	if !prog.ok {
 		t.Fatal("test program did not parse")
 	}
@@ -256,6 +257,7 @@ func TestKernelModuleWithoutExitOmitsCleanup(t *testing.T) {
 	renvoKernelModuleExitOff = 64
 
 	prog := renvoParseProgram([]byte("package main\nfunc appMain() { print(\"INIT\\n\") }\n"))
+	renvoCaptureKernelCompileContext(&prog.c)
 	var meta renvoMeta
 	renvoBuildMetaInto(&prog, &meta)
 	meta.arenaSize = 4096

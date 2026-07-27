@@ -120,7 +120,7 @@ func renvoAsmAddDarwinStaticImport(a *renvoAsm, dylib string, name string) int {
 }
 
 func renvoDarwinArm64EmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
-	if renvoTargetArch != renvoArchAarch64 {
+	if g.c.renvoTargetArch != renvoArchAarch64 {
 		return false
 	}
 	dylib := renvoStringFromBytes(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd)
@@ -765,7 +765,7 @@ func renvoAsmImageDarwinArm64(a *renvoAsm) []byte {
 	for i := 0; i < len(sig); i++ {
 		out = append(out, sig[i])
 	}
-	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+	if renvoFixedTarget == 0 && a.c.emitImage {
 		return renvoAppendReplLinkTable(out, a)
 	}
 	return out

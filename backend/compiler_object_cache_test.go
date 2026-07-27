@@ -242,6 +242,7 @@ func compileDarwinPackageObjectUnit(t *testing.T, source []byte, rootFuncStart i
 	if !isUnit || !ok {
 		t.Fatal("package ownership unit did not decode")
 	}
+	decoded.c = *renvoLegacyCompileContext()
 	var meta renvoMeta
 	renvoBuildMetaInto(&decoded, &meta)
 	if !meta.ok {

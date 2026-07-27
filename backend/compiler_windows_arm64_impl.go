@@ -437,7 +437,7 @@ func renvoAsmImageWindowsArm64(a *renvoAsm) []byte {
 		iatSize = (renvoWinImportFixedCount + 1) * imports.thunkSize
 	}
 	var out []byte
-	out = renvoAppendPEHeader64(out, textRawSize, textVirtualSize, dataRVA, dataRawSize, dataVirtualSize, imports.importRVA, imports.importSize, imports.kernelIATRVA, iatSize)
+	out = renvoAppendPEHeader64WithContext(a.c, out, textRawSize, textVirtualSize, dataRVA, dataRawSize, dataVirtualSize, imports.importRVA, imports.importSize, imports.kernelIATRVA, iatSize)
 	// Windows on ARM64 requires the modern PE subsystem contract; unlike the
 	// x86 targets, there is no legacy Windows 4.x loader to preserve.
 	out[0xc0] = 6
@@ -457,7 +457,7 @@ func renvoAsmImageWindowsArm64(a *renvoAsm) []byte {
 		out = append(out, a.data[i])
 	}
 	out = renvoAppendUntil(out, renvoWinHeadersSize+textRawSize+dataRawSize)
-	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+	if renvoFixedTarget == 0 && a.c.emitImage {
 		return renvoAppendReplLinkTable(out, a)
 	}
 	return out

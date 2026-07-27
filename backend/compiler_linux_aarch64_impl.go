@@ -133,7 +133,7 @@ func renvoAsmImageAarch64(a *renvoAsm) []byte {
 	renvoAsmPatchAarch64Abs(a)
 	loadFileSize := a.codeOffset + len(a.code) + len(a.data)
 	bssOffset := renvoAsmBssOffset(a)
-	if renvoCompilerStripSymbols {
+	if a.c.stripSymbols {
 		out := make([]byte, 0, loadFileSize)
 		out = renvoAppendElfHeaderAarch64(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, 0)
 		for i := 0; i < len(a.code); i++ {

@@ -21,7 +21,7 @@ func renvoWasmPut(out *renvoWasmBuffer, value byte) {
 
 func renvoWasm32EmitWideBinaryStack(g *renvoLinearGen, dest int, left int, right int, tok int, signed bool) bool {
 	renvoNonNil(g)
-	if renvoTarget == renvoTargetVM32 {
+	if g.c.renvoTarget == renvoTargetVM32 {
 		return renvoWasm32EmitWideBinaryPortable(g, dest, left, right, tok, signed)
 	}
 	op := 0
@@ -62,7 +62,7 @@ func renvoWasm32EmitWideBinaryStack(g *renvoLinearGen, dest int, left int, right
 		// Keep division by zero on Renvo's panic path rather than allowing a
 		// WebAssembly trap, so recover continues to work.
 		nonzero := renvoAsmNewLabel(&g.asm)
-		renvoAsmLoadPrimaryStack(&g.asm, right-renvoNativeIntSize)
+		renvoAsmLoadPrimaryStack(&g.asm, right-g.c.renvoNativeIntSize)
 		renvoAsmJnzPrimary(&g.asm, nonzero)
 		renvoAsmLoadPrimaryStack(&g.asm, right)
 		renvoEmitRuntimeNonNilPrimary(g)
@@ -94,7 +94,7 @@ func renvoWasm32EmitWideBinaryPortable(g *renvoLinearGen, dest int, left int, ri
 		return true
 	}
 	if renvoTokCharIs(g.prog, tok, '&') || renvoTokCharIs(g.prog, tok, '|') || renvoTokCharIs(g.prog, tok, '^') {
-		for at := 0; at < renvoBackendValueSlotSize; at += renvoNativeIntSize {
+		for at := 0; at < renvoBackendValueSlotSize; at += g.c.renvoNativeIntSize {
 			renvoAsmLoadPrimaryStack(&g.asm, right-at)
 			renvoAsmLoadTertiaryStack(&g.asm, left-at)
 			if !renvoEmitPrimaryTertiaryOp(g, tok) {
@@ -109,7 +109,7 @@ func renvoWasm32EmitWideBinaryPortable(g *renvoLinearGen, dest int, left int, ri
 
 func renvoWasm32EmitWideCompareStack(g *renvoLinearGen, left int, right int, tok int, signed bool) bool {
 	renvoNonNil(g)
-	if renvoTarget == renvoTargetVM32 {
+	if g.c.renvoTarget == renvoTargetVM32 {
 		return renvoWasm32EmitWideComparePortable(g, left, right, tok, signed)
 	}
 	p := g.prog
@@ -152,7 +152,7 @@ func renvoWasm32EmitWideComparePortable(g *renvoLinearGen, left int, right int, 
 	if equal {
 		notEqual := renvoAsmNewLabel(&g.asm)
 		done := renvoAsmNewLabel(&g.asm)
-		renvoEmitNativeCompareStack(g, left-renvoNativeIntSize, right-renvoNativeIntSize, 0x94)
+		renvoEmitNativeCompareStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, 0x94)
 		renvoAsmJzPrimary(&g.asm, notEqual)
 		renvoEmitNativeCompareStack(g, left, right, 0x94)
 		renvoAsmJmpMarkLabel(&g.asm, done, notEqual)

@@ -115,14 +115,14 @@ func renvoEmitWriteValueRegs(g *renvoLinearGen, fd int) bool {
 	renvoNonNil(g)
 	a := &g.asm
 	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
-		if renvoTargetArch != renvoArchAmd64 {
+		if g.c.renvoTargetArch != renvoArchAmd64 {
 			return false
 		}
 		renvoAmd64EmitKernelPrintValue(a)
 		return true
 	}
-	if targetIsWindows() {
-		if renvoTargetArch == renvoArch386 {
+	if targetIsWindows(g.c.renvoTargetOS) {
+		if g.c.renvoTargetArch == renvoArch386 {
 			label := renvoWin386EmitReadWriteHelper(g, true)
 			renvoAsmEmit16(a, 0xc689)
 			renvoAsmPrimaryImm(a, -1)
@@ -132,7 +132,7 @@ func renvoEmitWriteValueRegs(g *renvoLinearGen, fd int) bool {
 			renvoAsmCallLabel(a, label)
 			return true
 		}
-		if renvoTargetArch == renvoArchAarch64 {
+		if g.c.renvoTargetArch == renvoArchAarch64 {
 			label := renvoWinArm64EmitReadWriteHelper(g, true)
 			renvoAsmCopyPrimaryToCallWord1(a)
 			renvoAsmPrimaryImm(a, fd)
@@ -151,7 +151,7 @@ func renvoEmitWriteValueRegs(g *renvoLinearGen, fd int) bool {
 		renvoAsmCallLabel(a, label)
 		return true
 	}
-	if targetIsDarwin() {
+	if targetIsDarwin(g.c.renvoTargetOS) {
 		renvoAarch64AsmMovRegReg(a, 2, renvoAarch64RegRdx)
 		renvoAarch64AsmMovRegReg(a, 1, renvoAarch64RegRax)
 		renvoAarch64AsmMovRegImm(a, 0, fd)
@@ -161,7 +161,7 @@ func renvoEmitWriteValueRegs(g *renvoLinearGen, fd int) bool {
 	renvoAsmPushImm(a, fd)
 	renvoAsmPopCallWord0(a)
 	renvoAsmCopyPrimaryToCallWord1(a)
-	renvoAsmPrimaryImm(a, renvoLinuxSysWriteSeq())
+	renvoAsmPrimaryImm(a, renvoLinuxSysWriteSeq(g.c.renvoTargetArch))
 	renvoAsmSyscall(a)
 	return true
 }
@@ -217,7 +217,7 @@ func renvoEmitBuiltinReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, s
 	} else {
 		renvoAsmPrimaryImm(a, seqSyscall)
 	}
-	if targetIsDarwin() {
+	if targetIsDarwin(g.c.renvoTargetOS) {
 		importID := seqSyscall
 		if offsetRead {
 			importID = offSyscall
@@ -270,13 +270,13 @@ func renvoEvalBuiltinConst(g *renvoLinearGen, nameStart int, nameEnd int) renvoC
 		return renvoConstResultOk(2)
 	}
 	if renvoBytesEqualText(p.src, nameStart, nameEnd, "O_CREATE") {
-		if targetIsDarwin() {
+		if targetIsDarwin(g.c.renvoTargetOS) {
 			return renvoConstResultOk(512)
 		}
 		return renvoConstResultOk(64)
 	}
 	if renvoBytesEqualText(p.src, nameStart, nameEnd, "O_TRUNC") {
-		if targetIsDarwin() {
+		if targetIsDarwin(g.c.renvoTargetOS) {
 			return renvoConstResultOk(1024)
 		}
 		return renvoConstResultOk(512)
@@ -287,7 +287,7 @@ func renvoEvalBuiltinConst(g *renvoLinearGen, nameStart int, nameEnd int) renvoC
 
 func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, callee int) bool {
 	renvoNonNil(g, ep)
-	if targetIsWindows() {
+	if targetIsWindows(g.c.renvoTargetOS) {
 		if callee == renvoIdentRead || callee == renvoIdentWrite {
 			return renvoEmitWindowsReadWrite(g, ep, idx, callee == renvoIdentWrite)
 		}
@@ -301,16 +301,16 @@ func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, call
 	}
 	if callee == renvoIdentRead || callee == renvoIdentWrite {
 		isWrite := callee == renvoIdentWrite
-		if targetIsDarwin() {
+		if targetIsDarwin(g.c.renvoTargetOS) {
 			if isWrite {
 				return renvoEmitBuiltinReadWrite(g, ep, idx, renvoDarwinImportWrite, renvoDarwinImportPwrite)
 			}
 			return renvoEmitBuiltinReadWrite(g, ep, idx, renvoDarwinImportRead, renvoDarwinImportPread)
 		}
 		if isWrite {
-			return renvoEmitBuiltinReadWrite(g, ep, idx, renvoLinuxSysWriteSeq(), renvoLinuxSysWriteAt())
+			return renvoEmitBuiltinReadWrite(g, ep, idx, renvoLinuxSysWriteSeq(g.c.renvoTargetArch), renvoLinuxSysWriteAt(g.c.renvoTargetArch))
 		}
-		return renvoEmitBuiltinReadWrite(g, ep, idx, renvoLinuxSysReadSeq(), renvoLinuxSysReadAt())
+		return renvoEmitBuiltinReadWrite(g, ep, idx, renvoLinuxSysReadSeq(g.c.renvoTargetArch), renvoLinuxSysReadAt(g.c.renvoTargetArch))
 	}
 	e := &ep.exprs[idx]
 	a := &g.asm
@@ -322,7 +322,7 @@ func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, call
 		if e.argCount != 2 {
 			return false
 		}
-		if targetIsDarwin() {
+		if targetIsDarwin(g.c.renvoTargetOS) {
 			if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
 				return false
 			}
@@ -340,7 +340,7 @@ func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, call
 			renvoAarch64AsmAddRegImm(a, 31, 31, 16)
 			return true
 		}
-		if renvoTargetArch == renvoArchAarch64 {
+		if g.c.renvoTargetArch == renvoArchAarch64 {
 			if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
 				return false
 			}
@@ -352,11 +352,11 @@ func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, call
 			renvoAsmPopSecondary(a)
 			renvoAarch64AsmMovRegImm(a, renvoAarch64RegRdi, -100)
 			renvoAarch64AsmMovRegImm(a, renvoAarch64RegR10, 493)
-			renvoAsmPrimaryImm(a, renvoLinuxSysOpen())
+			renvoAsmPrimaryImm(a, renvoLinuxSysOpen(g.c.renvoTargetArch))
 			renvoAsmSyscall(a)
 			return true
 		}
-		if renvoTargetArch == renvoArchWasm32 {
+		if g.c.renvoTargetArch == renvoArchWasm32 {
 			if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
 				return false
 			}
@@ -366,7 +366,7 @@ func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, call
 			}
 			renvoAsmCopyPrimaryToCallWord0(a)
 			renvoAsmPopCallWord1(a)
-			renvoAsmPrimaryImm(a, renvoLinuxSysOpen())
+			renvoAsmPrimaryImm(a, renvoLinuxSysOpen(g.c.renvoTargetArch))
 			renvoAsmSyscall(a)
 			return true
 		}
@@ -378,13 +378,13 @@ func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, call
 			return false
 		}
 		renvoAsmCopyPrimaryToCallWord0(a)
-		if renvoTargetArch == renvoArch386 {
+		if g.c.renvoTargetArch == renvoArch386 {
 			renvoAsmPopTertiary(a)
 		} else {
 			renvoAsmPopCallWord1(a)
 		}
 		renvoAsmSecondaryImm(a, 493)
-		renvoAsmPrimaryImm(a, renvoLinuxSysOpen())
+		renvoAsmPrimaryImm(a, renvoLinuxSysOpen(g.c.renvoTargetArch))
 		renvoAsmSyscall(a)
 		return true
 	}
@@ -396,11 +396,11 @@ func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, call
 			return false
 		}
 		renvoAsmCopyPrimaryToCallWord0(a)
-		if targetIsDarwin() {
+		if targetIsDarwin(g.c.renvoTargetOS) {
 			renvoDarwinArm64CallVirtualArgs(a, renvoDarwinImportClose, 1)
 			return true
 		}
-		renvoAsmPrimaryImm(a, renvoLinuxSysClose())
+		renvoAsmPrimaryImm(a, renvoLinuxSysClose(g.c.renvoTargetArch))
 		renvoAsmSyscall(a)
 		return true
 	}
@@ -416,23 +416,23 @@ func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, call
 	}
 	renvoAsmCopyPrimaryToCallWord1(a)
 	renvoAsmPopCallWord0(a)
-	if targetIsDarwin() {
+	if targetIsDarwin(g.c.renvoTargetOS) {
 		renvoDarwinArm64CallVirtualArgs(a, renvoDarwinImportFchmod, 2)
 		return true
 	}
-	renvoAsmPrimaryImm(a, renvoLinuxSysFchmod())
+	renvoAsmPrimaryImm(a, renvoLinuxSysFchmod(g.c.renvoTargetArch))
 	renvoAsmSyscall(a)
 	return true
 }
 func renvoEmitExitStatus(g *renvoLinearGen) bool {
 	renvoNonNil(g)
 	a := &g.asm
-	if renvoTargetArch == renvoArchWasm32 {
+	if g.c.renvoTargetArch == renvoArchWasm32 {
 		renvoAsmEmit8(a, renvoWasm32OpExit)
 		return true
 	}
-	if renvoTargetArch == renvoArchAarch64 {
-		if targetIsDarwin() {
+	if g.c.renvoTargetArch == renvoArchAarch64 {
+		if targetIsDarwin(g.c.renvoTargetOS) {
 			renvoAarch64AsmMovRegReg(a, 0, renvoAarch64RegRax)
 			renvoDarwinArm64CallImport(a, renvoDarwinImportExit)
 		} else {
@@ -442,14 +442,14 @@ func renvoEmitExitStatus(g *renvoLinearGen) bool {
 		}
 		return true
 	}
-	if renvoTargetArch == renvoArchArm {
+	if g.c.renvoTargetArch == renvoArchArm {
 		renvoAsmCopyPrimaryToCallWord0(a)
 		renvoAsmPrimaryImm(a, 1)
 		renvoAsmSyscall(a)
 		return true
 	}
-	if renvoTargetArch == renvoArch386 {
-		if targetIsWindows() {
+	if g.c.renvoTargetArch == renvoArch386 {
+		if targetIsWindows(g.c.renvoTargetOS) {
 			renvoAsmPushPrimary(a)
 			renvoWin386CallImport(a, renvoWinImportExitProcess)
 		} else {
@@ -459,10 +459,10 @@ func renvoEmitExitStatus(g *renvoLinearGen) bool {
 		}
 		return true
 	}
-	if renvoTargetArch != renvoArchAmd64 {
+	if g.c.renvoTargetArch != renvoArchAmd64 {
 		return false
 	}
-	if targetIsWindows() {
+	if targetIsWindows(g.c.renvoTargetOS) {
 		renvoAsmCopyPrimaryToTertiary(a)
 		renvoWinAmd64CallImport(a, renvoWinImportExitProcess)
 	} else {
@@ -478,22 +478,22 @@ func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int
 	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
 		return renvoAmd64EmitKernelLinkStaticCall(g, fn, wordCount)
 	}
-	if targetIsDarwin() {
+	if targetIsDarwin(g.c.renvoTargetOS) {
 		return renvoDarwinArm64EmitLinkStaticCall(g, fn, wordCount)
 	}
-	if renvoTargetOS != renvoOSWindows {
+	if g.c.renvoTargetOS != renvoOSWindows {
 		return false
 	}
 	importID := renvoAsmAddWinStaticImport(&g.asm, fn.linkDLLStart, fn.linkDLLEnd, fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
-	if renvoTargetArch == renvoArch386 {
+	if g.c.renvoTargetArch == renvoArch386 {
 		renvoWin386CallImport(&g.asm, importID)
 		return true
 	}
-	if renvoTargetArch == renvoArchAarch64 {
+	if g.c.renvoTargetArch == renvoArchAarch64 {
 		renvoWinArm64CallStaticImport(&g.asm, importID, wordCount)
 		return true
 	}
-	if renvoTargetArch != renvoArchAmd64 {
+	if g.c.renvoTargetArch != renvoArchAmd64 {
 		return false
 	}
 	renvoWinAmd64CallStaticImport(&g.asm, importID, wordCount)
@@ -514,7 +514,7 @@ func renvoEmitTargetStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount i
 		}
 		return 0
 	}
-	if targetIsDarwin() {
+	if targetIsDarwin(g.c.renvoTargetOS) {
 		if renvo_runtime_UnsafeByteAt(g.prog.src, fn.linkDLLStart) != '/' {
 			return -1
 		}
@@ -523,7 +523,7 @@ func renvoEmitTargetStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount i
 		}
 		return 0
 	}
-	if targetIsWindows() {
+	if targetIsWindows(g.c.renvoTargetOS) {
 		if renvo_runtime_UnsafeByteAt(g.prog.src, fn.linkDLLStart) == '/' {
 			return -1
 		}
@@ -540,7 +540,7 @@ func renvoEmitRuntimeArenaDiscard(g *renvoLinearGen, ep *renvoExprParse, idx int
 	if e.argCount != 2 {
 		return false
 	}
-	if renvoTargetArch != renvoArchAmd64 || renvoTargetOS != renvoOSLinux {
+	if g.c.renvoTargetArch != renvoArchAmd64 || g.c.renvoTargetOS != renvoOSLinux {
 		renvoAsmPrimaryImm(&g.asm, 0)
 		return true
 	}
@@ -563,7 +563,7 @@ func renvoEmitRuntimeArenaDiscardSlice(g *renvoLinearGen, ep *renvoExprParse, id
 	if e.argCount != 1 {
 		return false
 	}
-	if renvoTargetArch != renvoArchAmd64 || renvoTargetOS != renvoOSLinux {
+	if g.c.renvoTargetArch != renvoArchAmd64 || g.c.renvoTargetOS != renvoOSLinux {
 		renvoAsmPrimaryImm(&g.asm, 0)
 		return true
 	}
@@ -670,7 +670,7 @@ func renvoEmitRuntimeArenaPersistReset(g *renvoLinearGen, ep *renvoExprParse, id
 	}
 	renvoStringHeapOffsets(g)
 	a := &g.asm
-	if renvoTargetArch == renvoArchAmd64 && renvoTargetOS == renvoOSLinux {
+	if g.c.renvoTargetArch == renvoArchAmd64 && g.c.renvoTargetOS == renvoOSLinux {
 		renvoEmitRuntimeArenaPersistResetMadvise(g)
 		return true
 	}
@@ -836,7 +836,7 @@ func renvoEmitArbitrarySyscall(g *renvoLinearGen, ep *renvoExprParse, idx int) b
 	if e.argCount < 1 || e.argCount > 7 {
 		return false
 	}
-	if targetIsDarwin() {
+	if targetIsDarwin(g.c.renvoTargetOS) {
 		if e.argCount != 4 {
 			return false
 		}
@@ -865,7 +865,7 @@ func renvoEmitArbitrarySyscall(g *renvoLinearGen, ep *renvoExprParse, idx int) b
 func renvoEmitJITCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
 	e := &ep.exprs[idx]
-	if e.argCount != 6 || renvoTargetArch == renvoArchWasm32 {
+	if e.argCount != 6 || g.c.renvoTargetArch == renvoArchWasm32 {
 		return false
 	}
 	for i := e.argCount - 1; i >= 0; i-- {
@@ -875,7 +875,7 @@ func renvoEmitJITCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		renvoAsmPushPrimary(&g.asm)
 	}
 	a := &g.asm
-	if renvoTargetArch == renvoArchAmd64 {
+	if g.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmPopCallWord0(a)
 		renvoAsmEmit8(a, 0x5e)
 		renvoAsmPopSecondary(a)
@@ -889,13 +889,13 @@ func renvoEmitJITCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		renvoAsmEmitText(a, "\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5d\x5b\x4c\x89\xd0")
 		return true
 	}
-	if renvoTargetArch == renvoArch386 {
+	if g.c.renvoTargetArch == renvoArch386 {
 		renvoAsmEmitText(a, "\x5b\x5e\x5a\x59\x58\x5f")
 		renvoAsmEmitText(a, "\x89\x66\xfc\x89\xf4\x83\xec\x08\x57\x50\x51\x52\xff\xd3")
 		renvoAsmEmitText(a, "\x83\xc4\x10\x8b\x54\x24\x04\x89\xd4")
 		return true
 	}
-	if renvoTargetArch == renvoArchAarch64 {
+	if g.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmPopReg(a, renvoAarch64RegRdi)
 		renvoAarch64AsmPopReg(a, renvoAarch64RegRsi)
 		renvoAarch64AsmPopReg(a, renvoAarch64RegRdx)
@@ -917,7 +917,7 @@ func renvoEmitJITCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		renvoAarch64AsmEmit(a, 0x9100017f) // ADD SP, X11, #0
 		return true
 	}
-	if renvoTargetArch == renvoArchArm {
+	if g.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmPopReg(a, renvoArmRegRdi)
 		renvoArmAsmPopReg(a, renvoArmRegRsi)
 		renvoArmAsmPopReg(a, renvoArmRegRdx)
@@ -960,7 +960,7 @@ func renvoEmitSyscallArg(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 func renvoEmitSyscallFromStack(g *renvoLinearGen, wordCount int) bool {
 	renvoNonNil(g)
 	a := &g.asm
-	if renvoTargetArch == renvoArchAmd64 {
+	if g.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmPopPrimary(a)
 		if wordCount > 1 {
 			renvoAsmPopCallWord0(a)
@@ -984,7 +984,7 @@ func renvoEmitSyscallFromStack(g *renvoLinearGen, wordCount int) bool {
 		renvoAsmSyscall(a)
 		return true
 	}
-	if renvoTargetArch == renvoArch386 {
+	if g.c.renvoTargetArch == renvoArch386 {
 		if wordCount > 7 {
 			return false
 		}
@@ -1016,8 +1016,8 @@ func renvoEmitSyscallFromStack(g *renvoLinearGen, wordCount int) bool {
 		renvoAsmSyscall(a)
 		return true
 	}
-	if renvoTargetArch == renvoArchAarch64 {
-		if targetIsDarwin() {
+	if g.c.renvoTargetArch == renvoArchAarch64 {
+		if targetIsDarwin(g.c.renvoTargetOS) {
 			if wordCount != 4 {
 				return false
 			}
@@ -1053,7 +1053,7 @@ func renvoEmitSyscallFromStack(g *renvoLinearGen, wordCount int) bool {
 		renvoAarch64AsmEmit(a, 0xd4000001)
 		return true
 	}
-	if renvoTargetArch == renvoArchArm {
+	if g.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmPopReg(a, renvoArmRegSys)
 		if wordCount > 1 {
 			renvoArmAsmPopReg(a, 0)
@@ -1076,7 +1076,7 @@ func renvoEmitSyscallFromStack(g *renvoLinearGen, wordCount int) bool {
 		renvoArmAsmEmit(a, 0xef000000)
 		return true
 	}
-	if renvoTargetArch == renvoArchWasm32 {
+	if g.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRax)
 		if wordCount > 1 {
 			renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRdi)

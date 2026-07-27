@@ -445,7 +445,7 @@ func renvoEmitWindowsReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, i
 	if !renvoEmitSlicePtrLen(g, ep, ep.args[firstArg+1]) {
 		return false
 	}
-	if renvoTargetArch == renvoArch386 {
+	if g.c.renvoTargetArch == renvoArch386 {
 		label := renvoWin386EmitReadWriteHelper(g, isWrite)
 		renvoAsmEmit16(a, 0xc689)
 		renvoAsmEmit16(a, 0xca89)
@@ -454,7 +454,7 @@ func renvoEmitWindowsReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, i
 		renvoAsmCallLabel(a, label)
 		return true
 	}
-	if renvoTargetArch == renvoArchAarch64 {
+	if g.c.renvoTargetArch == renvoArchAarch64 {
 		label := renvoWinArm64EmitReadWriteHelper(g, isWrite)
 		renvoAsmCopyPrimaryToCallWord1(a)
 		renvoAarch64AsmMovRegReg(a, renvoAarch64RegRdx, renvoAarch64RegRcx)
@@ -486,7 +486,7 @@ func renvoEmitWindowsOpen(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	if !renvoEmitStringPtrExpr(g, ep, ep.args[e.firstArg]) {
 		return false
 	}
-	if renvoTargetArch == renvoArch386 {
+	if g.c.renvoTargetArch == renvoArch386 {
 		renvoAsmEmit16(a, 0xc689)
 		renvoAsmPopPrimary(a)
 		renvoWin386TranslateCreateFileFlags(a)
@@ -500,7 +500,7 @@ func renvoEmitWindowsOpen(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		renvoWin386CallImport(a, renvoWinImportCreateFileA)
 		return true
 	}
-	if renvoTargetArch == renvoArchAarch64 {
+	if g.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmMovRegReg(a, 9, 0)
 		renvoAsmPopPrimary(a)
 		renvoWinArm64TranslateCreateFileFlags(a)
@@ -534,7 +534,7 @@ func renvoEmitWindowsClose(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 	}
 	failLabel := renvoAsmNewLabel(a)
 	doneLabel := renvoAsmNewLabel(a)
-	if renvoTargetArch == renvoArch386 {
+	if g.c.renvoTargetArch == renvoArch386 {
 		renvoAsmPushPrimary(a)
 		renvoWin386CallImport(a, renvoWinImportCloseHandle)
 		renvoAsmEmit3(a, 0x83, 0xf8, 0)
@@ -545,7 +545,7 @@ func renvoEmitWindowsClose(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 		renvoAsmMarkLabel(a, doneLabel)
 		return true
 	}
-	if renvoTargetArch == renvoArchAarch64 {
+	if g.c.renvoTargetArch == renvoArchAarch64 {
 		renvoWinArm64CallImport(a, renvoWinImportCloseHandle)
 		renvoAsmCmpPrimaryImm8(a, 0)
 		renvoAsmJzLabel(a, failLabel)
@@ -582,7 +582,7 @@ func renvoEmitWindowsChmod(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 	}
 	failLabel := renvoAsmNewLabel(a)
 	doneLabel := renvoAsmNewLabel(a)
-	if renvoTargetArch == renvoArch386 {
+	if g.c.renvoTargetArch == renvoArch386 {
 		renvoAsmPopPrimary(a)
 		renvoAsmPushImm(a, 1)
 		renvoAsmPushImm(a, 0)
@@ -597,7 +597,7 @@ func renvoEmitWindowsChmod(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 		renvoAsmMarkLabel(a, doneLabel)
 		return true
 	}
-	if renvoTargetArch == renvoArchAarch64 {
+	if g.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAsmPopPrimary(a)
 		renvoAarch64AsmMovRegImm(a, 1, 0)
 		renvoAarch64AsmMovRegImm(a, 2, 0)

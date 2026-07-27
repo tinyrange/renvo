@@ -24,6 +24,7 @@ func TestAarch64FrameUsesCalculatedStorage(t *testing.T) {
 	renvoTargetOS = renvoOSLinux
 
 	var asm renvoAsm
+	asm.c = renvoLegacyCompileContext()
 	at := renvoAarch64AsmFrameStart(&asm)
 	renvoAarch64AsmPatchFrame(&asm, at, 24)
 
@@ -41,6 +42,7 @@ func TestWindowsAarch64FrameProbesCalculatedPages(t *testing.T) {
 	renvoTargetOS = renvoOSWindows
 
 	var asm renvoAsm
+	asm.c = renvoLegacyCompileContext()
 	at := renvoAarch64AsmFrameStart(&asm)
 	renvoAarch64AsmPatchFrame(&asm, at, 8193)
 

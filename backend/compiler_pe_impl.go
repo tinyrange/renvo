@@ -112,7 +112,7 @@ func renvoAsmHasWinImportRelocs(a *renvoAsm) bool {
 func renvoAppendWinImports(a *renvoAsm, layout *renvoWinImportLayout) {
 	renvoNonNil(a, layout)
 	thunkSize := 4
-	if renvoTargetArch != renvoArch386 {
+	if a.c.renvoTargetArch != renvoArch386 {
 		thunkSize = 8
 	}
 	layout.thunkSize = thunkSize
@@ -201,7 +201,7 @@ func renvoAsmPatchWindows(a *renvoAsm, layout renvoWinImportLayout) {
 		kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2))
 		if kind == renvoAbsWinImportReloc {
 			target := renvoWinImportIATRVA(layout, off)
-			if renvoTargetArch != renvoArch386 {
+			if a.c.renvoTargetArch != renvoArch386 {
 				next := a.codeOffset + at + 4
 				renvoPut32At(a.code, at, target-next)
 			} else {
@@ -213,7 +213,7 @@ func renvoAsmPatchWindows(a *renvoAsm, layout renvoWinImportLayout) {
 		if kind == renvoAbsBssReloc {
 			target = renvoAsmBssOffset(a) + off
 		}
-		if renvoTargetArch != renvoArch386 {
+		if a.c.renvoTargetArch != renvoArch386 {
 			next := a.codeOffset + at + 4
 			renvoPut32At(a.code, at, target-next)
 		} else {
@@ -223,11 +223,15 @@ func renvoAsmPatchWindows(a *renvoAsm, layout renvoWinImportLayout) {
 }
 
 func renvoAppendPEHeader64(out []byte, textRawSize int, textVirtualSize int, dataRVA int, dataRawSize int, dataVirtualSize int, importRVA int, importSize int, iatRVA int, iatSize int) []byte {
+	return renvoAppendPEHeader64WithContext(renvoLegacyCompileContext(), out, textRawSize, textVirtualSize, dataRVA, dataRawSize, dataVirtualSize, importRVA, importSize, iatRVA, iatSize)
+}
+
+func renvoAppendPEHeader64WithContext(context *renvoCompileContext, out []byte, textRawSize int, textVirtualSize int, dataRVA int, dataRawSize int, dataVirtualSize int, importRVA int, importSize int, iatRVA int, iatSize int) []byte {
 	machine := 0x8664
 	imageBase := renvoWinImageBase
 	stackReserve := 0x800000
 	stackCommit := 0x100000
-	if renvoTargetArch == renvoArchAarch64 {
+	if context.renvoTargetArch == renvoArchAarch64 {
 		machine = 0xaa64
 		imageBase = 0x140000000
 		stackCommit = 0x1000
@@ -252,7 +256,7 @@ func renvoAppendPEHeader64(out []byte, textRawSize int, textVirtualSize int, dat
 	renvoPut32At(out, opt+24, imageBase)
 	renvoPut32At(out, opt+28, imageBase>>32)
 	renvoPut32At(out, opt+56, sizeOfImage)
-	renvoPut32At(out, opt+68, 0x01000000|renvoCompilerWindowsSubsystem)
+	renvoPut32At(out, opt+68, 0x01000000|context.windowsSubsystem)
 	renvoPut32At(out, opt+72, stackReserve)
 	renvoPut32At(out, opt+80, stackCommit)
 	renvoPut32At(out, opt+120, importRVA)
@@ -266,6 +270,10 @@ func renvoAppendPEHeader64(out []byte, textRawSize int, textVirtualSize int, dat
 }
 
 func renvoAppendPEHeader32(out []byte, entryRVA int, textRawSize int, textVirtualSize int, dataRVA int, dataRawSize int, dataVirtualSize int, importRVA int, importSize int, iatRVA int, iatSize int) []byte {
+	return renvoAppendPEHeader32WithContext(renvoLegacyCompileContext(), out, entryRVA, textRawSize, textVirtualSize, dataRVA, dataRawSize, dataVirtualSize, importRVA, importSize, iatRVA, iatSize)
+}
+
+func renvoAppendPEHeader32WithContext(context *renvoCompileContext, out []byte, entryRVA int, textRawSize int, textVirtualSize int, dataRVA int, dataRawSize int, dataVirtualSize int, importRVA int, importSize int, iatRVA int, iatSize int) []byte {
 	sizeOfImage := renvoAlignValue(dataRVA+dataVirtualSize, renvoWinSectionAlign)
 	out = renvoAppend32(out, 0x5a4d)
 	out = renvoAppendUntil(out, 0x3c)
@@ -282,7 +290,7 @@ func renvoAppendPEHeader32(out []byte, entryRVA int, textRawSize int, textVirtua
 	renvoPut32At(out, opt+16, entryRVA)
 	renvoPut32At(out, opt+24, dataRVA)
 	renvoPut32At(out, opt+56, sizeOfImage)
-	renvoPut32At(out, opt+68, 0x01000000|renvoCompilerWindowsSubsystem)
+	renvoPut32At(out, opt+68, 0x01000000|context.windowsSubsystem)
 	renvoPut32At(out, opt+104, importRVA)
 	renvoPut32At(out, opt+108, importSize)
 	renvoPut32At(out, opt+192, iatRVA)

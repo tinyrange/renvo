@@ -72,7 +72,7 @@ func renvoAsmImageWindows386(a *renvoAsm) []byte {
 		iatSize = (renvoWinImportFixedCount + 1) * imports.thunkSize
 	}
 	var out []byte
-	out = renvoAppendPEHeader32(out, a.codeOffset, textRawSize, textVirtualSize, dataRVA, dataRawSize, dataVirtualSize, imports.importRVA, imports.importSize, imports.kernelIATRVA, iatSize)
+	out = renvoAppendPEHeader32WithContext(a.c, out, a.codeOffset, textRawSize, textVirtualSize, dataRVA, dataRawSize, dataVirtualSize, imports.importRVA, imports.importSize, imports.kernelIATRVA, iatSize)
 	for i := 0; i < len(a.code); i++ {
 		out = append(out, a.code[i])
 	}
@@ -81,7 +81,7 @@ func renvoAsmImageWindows386(a *renvoAsm) []byte {
 		out = append(out, a.data[i])
 	}
 	out = renvoAppendUntil(out, renvoWinHeadersSize+textRawSize+dataRawSize)
-	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+	if renvoFixedTarget == 0 && a.c.emitImage {
 		for i := 0; i+2 < len(a.absRelocs); i += 3 {
 			at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i)) & 2147483647
 			out = renvoAppend32(out, a.codeOffset+at)
