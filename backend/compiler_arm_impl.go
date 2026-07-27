@@ -315,67 +315,6 @@ func renvoArmEmitRaxRcxOp(g *renvoLinearGen, tok int) bool {
 	return false
 }
 
-func renvoArmEmitFloatBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-	p := g.prog
-	a := &g.asm
-	e := &ep.exprs[idx]
-	if renvoTokCharIs(p, e.tok, '*') {
-		if !renvoEmitScalarExprForKind(g, ep, e.left, renvoTypeFloat64) {
-			return false
-		}
-		renvoAsmPushPrimary(a)
-		if !renvoEmitScalarExprForKind(g, ep, e.right, renvoTypeFloat64) {
-			return false
-		}
-		renvoAsmPopTertiary(a)
-		renvoArmAsmMulRegReg(a, renvoArmRegRax, renvoArmRegRcx, renvoArmRegRax)
-		renvoAsmSarPrimaryImm(a, 2)
-		return true
-	}
-	if renvoTokCharIs(p, e.tok, '/') {
-		if !renvoEmitScalarExprForKind(g, ep, e.left, renvoTypeFloat64) {
-			return false
-		}
-		renvoAsmShlPrimaryImm(a, 2)
-		renvoAsmPushPrimary(a)
-		if !renvoEmitScalarExprForKind(g, ep, e.right, renvoTypeFloat64) {
-			return false
-		}
-		renvoAsmPopTertiary(a)
-		renvoAsmDivLeftTertiaryRightPrimary(a, false)
-		return true
-	}
-	if !renvoEmitScalarExprForKind(g, ep, e.left, renvoTypeFloat64) {
-		return false
-	}
-	renvoAsmPushPrimary(a)
-	if !renvoEmitScalarExprForKind(g, ep, e.right, renvoTypeFloat64) {
-		return false
-	}
-	renvoAsmPopTertiary(a)
-	return renvoEmitPrimaryTertiaryOp(g, e.tok)
-}
-
-func renvoArmEmitSliceSlotAddrs(g *renvoLinearGen, locEp *renvoExprParse, loc *renvoSliceLocation, elemSize int) bool {
-	a := &g.asm
-	if loc.mem {
-		if !renvoEmitSliceLocationHeaderAddressSecondary(g, locEp, loc) {
-			return false
-		}
-		renvoArmAsmMovRegReg(a, renvoArmRegRdi, renvoArmRegRdx)
-		renvoArmAsmAddRegImm(a, renvoArmRegRsi, renvoArmRegRdx, 8)
-		return true
-	}
-	if loc.global {
-		renvoArmAsmMovRegAbs(a, renvoArmRegRdi, loc.offset, renvoAbsBssReloc)
-		renvoArmAsmMovRegAbs(a, renvoArmRegRsi, loc.offset+8, renvoAbsBssReloc)
-		return true
-	}
-	renvoArmAsmLeaRegStack(a, renvoArmRegRdi, loc.offset)
-	renvoArmAsmLeaRegStack(a, renvoArmRegRsi, loc.offset-8)
-	return true
-}
-
 func renvoArmEnsureAppendAddrHelper(g *renvoLinearGen) int {
 	a := &g.asm
 	if g.appendAddrEmitted {

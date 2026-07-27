@@ -537,33 +537,7 @@ func renvoAmd64EmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount i
 }
 
 func renvoAmd64EmitFloatBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-	renvoNonNil(g, ep)
-	p := g.prog
-	a := &g.asm
-	e := &ep.exprs[idx]
-	multiply := renvoTokCharIs(p, e.tok, '*')
-	divide := renvoTokCharIs(p, e.tok, '/')
-	if !renvoEmitScalarExprForKind(g, ep, e.left, renvoTypeFloat64) {
-		return false
-	}
-	if divide {
-		renvoAsmShlPrimaryImm(a, 2)
-	}
-	renvoAsmPushPrimary(a)
-	if !renvoEmitScalarExprForKind(g, ep, e.right, renvoTypeFloat64) {
-		return false
-	}
-	renvoAsmPopTertiary(a)
-	if multiply {
-		renvoAsmEmit32(a, 0xc1af0f48)
-		renvoAsmSarPrimaryImm(a, 2)
-		return true
-	}
-	if divide {
-		renvoAsmDivLeftTertiaryRightPrimary(a, false)
-		return true
-	}
-	return renvoEmitPrimaryTertiaryOp(g, e.tok)
+	return renvoEmitAmd64FloatBinaryExpr(g, ep, idx)
 }
 func renvoAmd64AsmJccLabel(a *renvoAsm, op int, label int) {
 	renvoNonNil(a)
