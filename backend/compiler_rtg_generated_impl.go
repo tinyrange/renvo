@@ -28,6 +28,11 @@ type RTGCondition struct {
 	SetOpcode  byte
 	JumpOpcode byte
 }
+type RTGSymbol struct {
+	nameStart int
+	nameEnd   int
+	label     int
+}
 type RTGShiftDirection int
 
 const (
@@ -181,6 +186,120 @@ func (out *RTGEmitter) Truncate(size int) {
 	out.asm.code = out.asm.code[:size]
 }
 
+func (out *RTGEmitter) Code() []byte {
+	return out.asm.code
+}
+
+func (out *RTGEmitter) SetCode(value []byte) {
+	out.asm.code = value
+}
+
+func (out *RTGEmitter) Data() []byte {
+	return out.asm.data
+}
+
+func (out *RTGEmitter) BSSSize() int {
+	return out.asm.bssSize
+}
+
+func (out *RTGEmitter) RelocationCount() int {
+	return len(out.asm.relocs) / 2
+}
+
+func (out *RTGEmitter) RelocationAt(index int) (int, int) {
+	at := index * 2
+	return int(out.asm.relocs[at]), int(out.asm.relocs[at+1])
+}
+
+func (out *RTGEmitter) RelocationOffset(index int) int {
+	return int(out.asm.relocs[index*2])
+}
+
+func (out *RTGEmitter) RelocationLabel(index int) int {
+	return int(out.asm.relocs[index*2+1])
+}
+
+func (out *RTGEmitter) RelocationWordCount() int {
+	return len(out.asm.relocs)
+}
+
+func (out *RTGEmitter) RelocationWord(index int) int {
+	return int(renvo_runtime_UnsafeInt32At(out.asm.relocs, index))
+}
+
+func (out *RTGEmitter) AbsoluteRelocationCount() int {
+	return len(out.asm.absRelocs) / 3
+}
+
+func (out *RTGEmitter) AbsoluteRelocationAt(index int) (int, int, int) {
+	at := index * 3
+	return int(out.asm.absRelocs[at]), int(out.asm.absRelocs[at+1]), int(out.asm.absRelocs[at+2])
+}
+
+func (out *RTGEmitter) AbsoluteRelocationOffset(index int) int {
+	return int(out.asm.absRelocs[index*3])
+}
+
+func (out *RTGEmitter) AbsoluteRelocationAddend(index int) int {
+	return int(out.asm.absRelocs[index*3+1])
+}
+
+func (out *RTGEmitter) AbsoluteRelocationKind(index int) int {
+	return int(out.asm.absRelocs[index*3+2])
+}
+
+func (out *RTGEmitter) AbsoluteRelocationWordCount() int {
+	return len(out.asm.absRelocs)
+}
+
+func (out *RTGEmitter) AbsoluteRelocationWord(index int) int {
+	return int(renvo_runtime_UnsafeInt32At(out.asm.absRelocs, index))
+}
+
+func (out *RTGEmitter) LabelPosition(label int) int {
+	return renvoAsmLabelPosition(out.asm, label)
+}
+
+func (out *RTGEmitter) SymbolCount() int {
+	return len(out.asm.symbols)
+}
+
+func (out *RTGEmitter) SymbolPC(index int) int {
+	return renvoAsmLabelPosition(out.asm, out.asm.symbols[index].label)
+}
+
+func (out *RTGEmitter) SymbolNameEquals(index int, name string) bool {
+	symbol := &out.asm.symbols[index]
+	if symbol.nameEnd-symbol.nameStart != len(name) {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		if out.asm.symbolName[symbol.nameStart+i] != name[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (out *RTGEmitter) SymbolNameLength(index int) int {
+	symbol := &out.asm.symbols[index]
+	return symbol.nameEnd - symbol.nameStart
+}
+
+func (out *RTGEmitter) SymbolNameByte(index int, offset int) byte {
+	symbol := &out.asm.symbols[index]
+	return out.asm.symbolName[symbol.nameStart+offset]
+}
+
+func (out *RTGEmitter) Symbol(index int) *RTGSymbol {
+	symbol := &out.asm.symbols[index]
+	return &RTGSymbol{nameStart: symbol.nameStart, nameEnd: symbol.nameEnd, label: symbol.label}
+}
+
+func (out *RTGEmitter) SymbolNameByteAt(index int) byte {
+	return out.asm.symbolName[index]
+}
+
 func RTGPatchUint32(out *RTGEmitter, at int, value int) {
 	out.PatchUint32(at, value)
 }
@@ -231,6 +350,53 @@ func RTGInt8Fits(value int) bool {
 
 func RTGPopPrimary(out *RTGEmitter) {
 	out.Byte(0x58)
+}
+
+func RTGArenaMark() int {
+	return renvo_runtime_ArenaMark()
+}
+
+func RTGArenaReset(mark int) {
+	renvo_runtime_ArenaReset(mark)
+}
+
+func RTGByteAt(in []byte, at int) byte {
+	return in[at]
+}
+
+func RTGGet32At(in []byte, at int) int {
+	return int(in[at]) | int(in[at+1])<<8 | int(in[at+2])<<16 | int(in[at+3])<<24
+}
+
+func RTGPut32At(out []byte, at int, value int) {
+	out[at] = byte(value)
+	out[at+1] = byte(value >> 8)
+	out[at+2] = byte(value >> 16)
+	out[at+3] = byte(value >> 24)
+}
+
+func RTGAppend32(out []byte, value int) []byte {
+	out = append(out, byte(value))
+	out = append(out, byte(value>>8))
+	out = append(out, byte(value>>16))
+	out = append(out, byte(value>>24))
+	return out
+}
+
+func RTGAlignValue(value int, alignment int) int {
+	return (value + alignment - 1) & -alignment
+}
+
+func RTGAlign8(value int) int {
+	return (value + 7) & -8
+}
+
+func RTGMakeIntScratch(capacity int) []int {
+	return make([]int, 0, capacity)
+}
+
+func RTGMakeByteBuffer(length int) []byte {
+	return make([]byte, length)
 }
 
 func (out *RTGEmitter) Patch() {
@@ -333,6 +499,147 @@ func (out *renvoAsm) Reloc(label int) {
 
 func (out *renvoAsm) Patch() {
 	renvoAsmPatch(out)
+}
+
+func (out *renvoAsm) Code() []byte {
+	return out.code
+}
+
+func (out *renvoAsm) SetCode(value []byte) {
+	out.code = value
+}
+
+func (out *renvoAsm) Data() []byte {
+	return out.data
+}
+
+func (out *renvoAsm) BSSSize() int {
+	return out.bssSize
+}
+
+func (out *renvoAsm) RelocationCount() int {
+	return len(out.relocs) / 2
+}
+
+func (out *renvoAsm) RelocationAt(index int) (int, int) {
+	at := index * 2
+	return int(out.relocs[at]), int(out.relocs[at+1])
+}
+
+func (out *renvoAsm) RelocationOffset(index int) int {
+	return int(out.relocs[index*2])
+}
+
+func (out *renvoAsm) RelocationLabel(index int) int {
+	return int(out.relocs[index*2+1])
+}
+
+func (out *renvoAsm) RelocationWordCount() int {
+	return len(out.relocs)
+}
+
+func (out *renvoAsm) RelocationWord(index int) int {
+	return int(renvo_runtime_UnsafeInt32At(out.relocs, index))
+}
+
+func (out *renvoAsm) AbsoluteRelocationCount() int {
+	return len(out.absRelocs) / 3
+}
+
+func (out *renvoAsm) AbsoluteRelocationAt(index int) (int, int, int) {
+	at := index * 3
+	return int(out.absRelocs[at]), int(out.absRelocs[at+1]), int(out.absRelocs[at+2])
+}
+
+func (out *renvoAsm) AbsoluteRelocationOffset(index int) int {
+	return int(out.absRelocs[index*3])
+}
+
+func (out *renvoAsm) AbsoluteRelocationAddend(index int) int {
+	return int(out.absRelocs[index*3+1])
+}
+
+func (out *renvoAsm) AbsoluteRelocationKind(index int) int {
+	return int(out.absRelocs[index*3+2])
+}
+
+func (out *renvoAsm) AbsoluteRelocationWordCount() int {
+	return len(out.absRelocs)
+}
+
+func (out *renvoAsm) AbsoluteRelocationWord(index int) int {
+	return int(renvo_runtime_UnsafeInt32At(out.absRelocs, index))
+}
+
+func (out *renvoAsm) LabelPosition(label int) int {
+	return renvoAsmLabelPosition(out, label)
+}
+
+func (out *renvoAsm) SymbolCount() int {
+	return len(out.symbols)
+}
+
+func (out *renvoAsm) SymbolPC(index int) int {
+	return renvoAsmLabelPosition(out, out.symbols[index].label)
+}
+
+func (out *renvoAsm) SymbolNameEquals(index int, name string) bool {
+	symbol := &out.symbols[index]
+	if symbol.nameEnd-symbol.nameStart != len(name) {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		if out.symbolName[symbol.nameStart+i] != name[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (out *renvoAsm) SymbolNameLength(index int) int {
+	symbol := &out.symbols[index]
+	return symbol.nameEnd - symbol.nameStart
+}
+
+func (out *renvoAsm) SymbolNameByte(index int, offset int) byte {
+	symbol := &out.symbols[index]
+	return out.symbolName[symbol.nameStart+offset]
+}
+
+func (out *renvoAsm) Symbol(index int) *RTGSymbol {
+	symbol := &out.symbols[index]
+	return &RTGSymbol{nameStart: symbol.nameStart, nameEnd: symbol.nameEnd, label: symbol.label}
+}
+
+func (out *renvoAsm) SymbolNameByteAt(index int) byte {
+	return out.symbolName[index]
+}
+
+func renvoRTGRelocationAt(out *renvoAsm, index int) (int, int) {
+	at := index * 2
+	return int(out.relocs[at]), int(out.relocs[at+1])
+}
+
+func renvoRTGAbsoluteRelocationAt(out *renvoAsm, index int) (int, int, int) {
+	at := index * 3
+	return int(out.absRelocs[at]), int(out.absRelocs[at+1]), int(out.absRelocs[at+2])
+}
+
+func renvoRTGSymbolPC(out *renvoAsm, index int) int {
+	return renvoAsmLabelPosition(out, out.symbols[index].label)
+}
+
+func renvoRTGSymbolNameEquals(out *renvoAsm, index int, name string) bool {
+	symbol := &out.symbols[index]
+	if symbol.nameEnd-symbol.nameStart != len(name) {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		if out.symbolName[symbol.nameStart+i] != name[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func renvoRTGAddressValid(address renvoRTGAddress) bool {

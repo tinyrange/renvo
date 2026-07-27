@@ -32,6 +32,11 @@ type RTGCondition struct {
 	SetOpcode  byte
 	JumpOpcode byte
 }
+type RTGSymbol struct {
+	nameStart int
+	nameEnd   int
+	label     int
+}
 type RTGShiftDirection int
 
 const RTGShiftLeft RTGShiftDirection = 1
@@ -71,6 +76,31 @@ func (out *RTGEmitter) SetByteAt(at int, value byte) {}
 func (out *RTGEmitter) AddByteAt(at int, value byte) {}
 func (out *RTGEmitter) AppendByte(value int) {}
 func (out *RTGEmitter) Truncate(size int) {}
+func (out *RTGEmitter) Code() []byte { return nil }
+func (out *RTGEmitter) SetCode(value []byte) {}
+func (out *RTGEmitter) Data() []byte { return nil }
+func (out *RTGEmitter) BSSSize() int { return 0 }
+func (out *RTGEmitter) RelocationCount() int { return 0 }
+func (out *RTGEmitter) RelocationAt(index int) (int, int) { return 0, 0 }
+func (out *RTGEmitter) RelocationOffset(index int) int { return 0 }
+func (out *RTGEmitter) RelocationLabel(index int) int { return 0 }
+func (out *RTGEmitter) RelocationWordCount() int { return 0 }
+func (out *RTGEmitter) RelocationWord(index int) int { return 0 }
+func (out *RTGEmitter) AbsoluteRelocationCount() int { return 0 }
+func (out *RTGEmitter) AbsoluteRelocationAt(index int) (int, int, int) { return 0, 0, 0 }
+func (out *RTGEmitter) AbsoluteRelocationOffset(index int) int { return 0 }
+func (out *RTGEmitter) AbsoluteRelocationAddend(index int) int { return 0 }
+func (out *RTGEmitter) AbsoluteRelocationKind(index int) int { return 0 }
+func (out *RTGEmitter) AbsoluteRelocationWordCount() int { return 0 }
+func (out *RTGEmitter) AbsoluteRelocationWord(index int) int { return 0 }
+func (out *RTGEmitter) LabelPosition(label int) int { return -1 }
+func (out *RTGEmitter) SymbolCount() int { return 0 }
+func (out *RTGEmitter) SymbolPC(index int) int { return -1 }
+func (out *RTGEmitter) SymbolNameEquals(index int, name string) bool { return false }
+func (out *RTGEmitter) SymbolNameLength(index int) int { return 0 }
+func (out *RTGEmitter) SymbolNameByte(index int, offset int) byte { return 0 }
+func (out *RTGEmitter) Symbol(index int) *RTGSymbol { return nil }
+func (out *RTGEmitter) SymbolNameByteAt(index int) byte { return 0 }
 func (out *RTGEmitter) Rel32(label RTGLabel) {}
 func (out *RTGEmitter) Rel32Addend(label RTGLabel, addend int) {}
 func (out *RTGEmitter) Reloc(label RTGLabel) {}
@@ -86,6 +116,16 @@ func RTGAddressValid(address RTGAddress) bool { return false }
 func RTGAddressRel32Addend(out *RTGEmitter, address RTGAddress) {}
 func RTGInt8Fits(value int) bool { return false }
 func RTGPopPrimary(out *RTGEmitter) {}
+func RTGArenaMark() int { return 0 }
+func RTGArenaReset(mark int) {}
+func RTGByteAt(in []byte, at int) byte { return 0 }
+func RTGGet32At(in []byte, at int) int { return 0 }
+func RTGPut32At(out []byte, at int, value int) {}
+func RTGAppend32(out []byte, value int) []byte { return out }
+func RTGAlignValue(value int, alignment int) int { return 0 }
+func RTGAlign8(value int) int { return 0 }
+func RTGMakeIntScratch(capacity int) []int { return nil }
+func RTGMakeByteBuffer(length int) []byte { return nil }
 
 func RTGSignedFits(value int64, bits int) bool { return false }
 func RTGUnsignedFits(value uint64, bits int) bool { return false }

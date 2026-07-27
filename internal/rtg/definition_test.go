@@ -185,6 +185,41 @@ func Test386DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 	}
 }
 
+func TestWasm32DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
+	source, err := os.ReadFile("../../backend/definitions/wasm32.rtg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := Resolve(Parse(source, "wasm32.rtg"))
+	if !resolved.Ok {
+		t.Fatalf("definition failed: %#v", resolved.Diagnostics)
+	}
+	if len(resolved.Targets) != 2 {
+		t.Fatalf("target count = %d, want wasi/wasm32 and vm/vm32", len(resolved.Targets))
+	}
+	generated := GenerateProductionArchitectureBackend(resolved, "wasm32", "main")
+	if !generated.Ok {
+		t.Fatalf("generate architecture: %#v", generated.Diagnostics)
+	}
+	checkedIn, err := os.ReadFile("../../backend/compiler_wasm32_impl.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(generated.Source, checkedIn) {
+		t.Fatal("checked-in wasm32 output is stale; run go generate ./backend/definitions")
+	}
+	for _, binding := range []string{
+		"func renvoWasm32AsmMovRaxImm(",
+		"func renvoWasm32Image(",
+		"func renvoVMImage(",
+		"func renvoWasiWasm32ImportSection(",
+	} {
+		if !containsText(string(checkedIn), binding) {
+			t.Errorf("generated wasm32 output is missing production binding %s", binding)
+		}
+	}
+}
+
 func TestCheckedInArchitectureKernelOutput(t *testing.T) {
 	generated := GenerateArchitectureKernel("main")
 	checkedIn, err := os.ReadFile("../../backend/compiler_rtg_generated_impl.go")

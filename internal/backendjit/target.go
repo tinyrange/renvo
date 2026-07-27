@@ -16,7 +16,7 @@ func excludedFamily(descriptor rtg.TargetDescriptor) map[string]bool {
 	case "arm":
 		names = append(names, "compiler_arm_impl.go")
 	case "wasm32", "vm32":
-		names = append(names, "compiler_wasm32_impl.go", "compiler_wasi_wasm32_impl.go")
+		names = append(names, "compiler_wasm32_impl.go")
 	}
 	excluded := make(map[string]bool, len(names))
 	for _, name := range names {

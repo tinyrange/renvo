@@ -7,3 +7,4 @@ package definitions
 //go:generate go run ../../internal/rtg/cmd/rtggen -production -arch x86_64 -package main -o ../compiler_amd64_target_impl.go amd64.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -production -arch x86_32 -package main -o ../compiler_386_target_impl.go 386.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -production -arch arm -package main -o ../compiler_arm_impl.go arm.rtg
+//go:generate go run ../../internal/rtg/cmd/rtggen -production -arch wasm32 -package main -o ../compiler_wasm32_impl.go wasm32.rtg

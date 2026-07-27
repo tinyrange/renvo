@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "8b29045177060a781fe18038569ab87c9e3fd7ec65fa306a64622451f7e83b74"
+const CompilerSourceDigest = "3d47c1bdfe67c6732fe74639de006a69cfee2836e05a30629e25461c548603fe"
 
 // source: backend/compiler_common_impl.go
 
@@ -25743,6 +25743,11 @@ type RTGCondition struct {
 	SetOpcode  byte
 	JumpOpcode byte
 }
+type RTGSymbol struct {
+	nameStart int
+	nameEnd   int
+	label     int
+}
 type RTGShiftDirection int
 
 const (
@@ -25896,6 +25901,120 @@ func (out *RTGEmitter) Truncate(size int) {
 	out.asm.code = out.asm.code[:size]
 }
 
+func (out *RTGEmitter) Code() []byte {
+	return out.asm.code
+}
+
+func (out *RTGEmitter) SetCode(value []byte) {
+	out.asm.code = value
+}
+
+func (out *RTGEmitter) Data() []byte {
+	return out.asm.data
+}
+
+func (out *RTGEmitter) BSSSize() int {
+	return out.asm.bssSize
+}
+
+func (out *RTGEmitter) RelocationCount() int {
+	return len(out.asm.relocs) / 2
+}
+
+func (out *RTGEmitter) RelocationAt(index int) (int, int) {
+	at := index * 2
+	return int(out.asm.relocs[at]), int(out.asm.relocs[at+1])
+}
+
+func (out *RTGEmitter) RelocationOffset(index int) int {
+	return int(out.asm.relocs[index*2])
+}
+
+func (out *RTGEmitter) RelocationLabel(index int) int {
+	return int(out.asm.relocs[index*2+1])
+}
+
+func (out *RTGEmitter) RelocationWordCount() int {
+	return len(out.asm.relocs)
+}
+
+func (out *RTGEmitter) RelocationWord(index int) int {
+	return int(renvo_runtime_UnsafeInt32At(out.asm.relocs, index))
+}
+
+func (out *RTGEmitter) AbsoluteRelocationCount() int {
+	return len(out.asm.absRelocs) / 3
+}
+
+func (out *RTGEmitter) AbsoluteRelocationAt(index int) (int, int, int) {
+	at := index * 3
+	return int(out.asm.absRelocs[at]), int(out.asm.absRelocs[at+1]), int(out.asm.absRelocs[at+2])
+}
+
+func (out *RTGEmitter) AbsoluteRelocationOffset(index int) int {
+	return int(out.asm.absRelocs[index*3])
+}
+
+func (out *RTGEmitter) AbsoluteRelocationAddend(index int) int {
+	return int(out.asm.absRelocs[index*3+1])
+}
+
+func (out *RTGEmitter) AbsoluteRelocationKind(index int) int {
+	return int(out.asm.absRelocs[index*3+2])
+}
+
+func (out *RTGEmitter) AbsoluteRelocationWordCount() int {
+	return len(out.asm.absRelocs)
+}
+
+func (out *RTGEmitter) AbsoluteRelocationWord(index int) int {
+	return int(renvo_runtime_UnsafeInt32At(out.asm.absRelocs, index))
+}
+
+func (out *RTGEmitter) LabelPosition(label int) int {
+	return renvoAsmLabelPosition(out.asm, label)
+}
+
+func (out *RTGEmitter) SymbolCount() int {
+	return len(out.asm.symbols)
+}
+
+func (out *RTGEmitter) SymbolPC(index int) int {
+	return renvoAsmLabelPosition(out.asm, out.asm.symbols[index].label)
+}
+
+func (out *RTGEmitter) SymbolNameEquals(index int, name string) bool {
+	symbol := &out.asm.symbols[index]
+	if symbol.nameEnd-symbol.nameStart != len(name) {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		if out.asm.symbolName[symbol.nameStart+i] != name[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (out *RTGEmitter) SymbolNameLength(index int) int {
+	symbol := &out.asm.symbols[index]
+	return symbol.nameEnd - symbol.nameStart
+}
+
+func (out *RTGEmitter) SymbolNameByte(index int, offset int) byte {
+	symbol := &out.asm.symbols[index]
+	return out.asm.symbolName[symbol.nameStart+offset]
+}
+
+func (out *RTGEmitter) Symbol(index int) *RTGSymbol {
+	symbol := &out.asm.symbols[index]
+	return &RTGSymbol{nameStart: symbol.nameStart, nameEnd: symbol.nameEnd, label: symbol.label}
+}
+
+func (out *RTGEmitter) SymbolNameByteAt(index int) byte {
+	return out.asm.symbolName[index]
+}
+
 func RTGPatchUint32(out *RTGEmitter, at int, value int) {
 	out.PatchUint32(at, value)
 }
@@ -25946,6 +26065,53 @@ func RTGInt8Fits(value int) bool {
 
 func RTGPopPrimary(out *RTGEmitter) {
 	out.Byte(0x58)
+}
+
+func RTGArenaMark() int {
+	return renvo_runtime_ArenaMark()
+}
+
+func RTGArenaReset(mark int) {
+	renvo_runtime_ArenaReset(mark)
+}
+
+func RTGByteAt(in []byte, at int) byte {
+	return in[at]
+}
+
+func RTGGet32At(in []byte, at int) int {
+	return int(in[at]) | int(in[at+1])<<8 | int(in[at+2])<<16 | int(in[at+3])<<24
+}
+
+func RTGPut32At(out []byte, at int, value int) {
+	out[at] = byte(value)
+	out[at+1] = byte(value >> 8)
+	out[at+2] = byte(value >> 16)
+	out[at+3] = byte(value >> 24)
+}
+
+func RTGAppend32(out []byte, value int) []byte {
+	out = append(out, byte(value))
+	out = append(out, byte(value>>8))
+	out = append(out, byte(value>>16))
+	out = append(out, byte(value>>24))
+	return out
+}
+
+func RTGAlignValue(value int, alignment int) int {
+	return (value + alignment - 1) & -alignment
+}
+
+func RTGAlign8(value int) int {
+	return (value + 7) & -8
+}
+
+func RTGMakeIntScratch(capacity int) []int {
+	return make([]int, 0, capacity)
+}
+
+func RTGMakeByteBuffer(length int) []byte {
+	return make([]byte, length)
 }
 
 func (out *RTGEmitter) Patch() {
@@ -26048,6 +26214,147 @@ func (out *renvoAsm) Reloc(label int) {
 
 func (out *renvoAsm) Patch() {
 	renvoAsmPatch(out)
+}
+
+func (out *renvoAsm) Code() []byte {
+	return out.code
+}
+
+func (out *renvoAsm) SetCode(value []byte) {
+	out.code = value
+}
+
+func (out *renvoAsm) Data() []byte {
+	return out.data
+}
+
+func (out *renvoAsm) BSSSize() int {
+	return out.bssSize
+}
+
+func (out *renvoAsm) RelocationCount() int {
+	return len(out.relocs) / 2
+}
+
+func (out *renvoAsm) RelocationAt(index int) (int, int) {
+	at := index * 2
+	return int(out.relocs[at]), int(out.relocs[at+1])
+}
+
+func (out *renvoAsm) RelocationOffset(index int) int {
+	return int(out.relocs[index*2])
+}
+
+func (out *renvoAsm) RelocationLabel(index int) int {
+	return int(out.relocs[index*2+1])
+}
+
+func (out *renvoAsm) RelocationWordCount() int {
+	return len(out.relocs)
+}
+
+func (out *renvoAsm) RelocationWord(index int) int {
+	return int(renvo_runtime_UnsafeInt32At(out.relocs, index))
+}
+
+func (out *renvoAsm) AbsoluteRelocationCount() int {
+	return len(out.absRelocs) / 3
+}
+
+func (out *renvoAsm) AbsoluteRelocationAt(index int) (int, int, int) {
+	at := index * 3
+	return int(out.absRelocs[at]), int(out.absRelocs[at+1]), int(out.absRelocs[at+2])
+}
+
+func (out *renvoAsm) AbsoluteRelocationOffset(index int) int {
+	return int(out.absRelocs[index*3])
+}
+
+func (out *renvoAsm) AbsoluteRelocationAddend(index int) int {
+	return int(out.absRelocs[index*3+1])
+}
+
+func (out *renvoAsm) AbsoluteRelocationKind(index int) int {
+	return int(out.absRelocs[index*3+2])
+}
+
+func (out *renvoAsm) AbsoluteRelocationWordCount() int {
+	return len(out.absRelocs)
+}
+
+func (out *renvoAsm) AbsoluteRelocationWord(index int) int {
+	return int(renvo_runtime_UnsafeInt32At(out.absRelocs, index))
+}
+
+func (out *renvoAsm) LabelPosition(label int) int {
+	return renvoAsmLabelPosition(out, label)
+}
+
+func (out *renvoAsm) SymbolCount() int {
+	return len(out.symbols)
+}
+
+func (out *renvoAsm) SymbolPC(index int) int {
+	return renvoAsmLabelPosition(out, out.symbols[index].label)
+}
+
+func (out *renvoAsm) SymbolNameEquals(index int, name string) bool {
+	symbol := &out.symbols[index]
+	if symbol.nameEnd-symbol.nameStart != len(name) {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		if out.symbolName[symbol.nameStart+i] != name[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (out *renvoAsm) SymbolNameLength(index int) int {
+	symbol := &out.symbols[index]
+	return symbol.nameEnd - symbol.nameStart
+}
+
+func (out *renvoAsm) SymbolNameByte(index int, offset int) byte {
+	symbol := &out.symbols[index]
+	return out.symbolName[symbol.nameStart+offset]
+}
+
+func (out *renvoAsm) Symbol(index int) *RTGSymbol {
+	symbol := &out.symbols[index]
+	return &RTGSymbol{nameStart: symbol.nameStart, nameEnd: symbol.nameEnd, label: symbol.label}
+}
+
+func (out *renvoAsm) SymbolNameByteAt(index int) byte {
+	return out.symbolName[index]
+}
+
+func renvoRTGRelocationAt(out *renvoAsm, index int) (int, int) {
+	at := index * 2
+	return int(out.relocs[at]), int(out.relocs[at+1])
+}
+
+func renvoRTGAbsoluteRelocationAt(out *renvoAsm, index int) (int, int, int) {
+	at := index * 3
+	return int(out.absRelocs[at]), int(out.absRelocs[at+1]), int(out.absRelocs[at+2])
+}
+
+func renvoRTGSymbolPC(out *renvoAsm, index int) int {
+	return renvoAsmLabelPosition(out, out.symbols[index].label)
+}
+
+func renvoRTGSymbolNameEquals(out *renvoAsm, index int, name string) bool {
+	symbol := &out.symbols[index]
+	if symbol.nameEnd-symbol.nameStart != len(name) {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		if out.symbolName[symbol.nameStart+i] != name[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func renvoRTGAddressValid(address renvoRTGAddress) bool {
@@ -29837,12 +30144,137 @@ func renvoArmAsmJnzLabel(a *renvoAsm, label int) {
 }
 
 // source: backend/compiler_wasm32_impl.go
+// Code generated by Renvo RTG; DO NOT EDIT.
+// generator: 1
+// target: arch/wasm32
+// unit: wasm32 ad1467083200c369d443ba61711651ddaef327e0d02c0493be436b77a02f9b10
+
 
 type renvoWasmBuffer struct {
 	data   []byte
 	length int
 }
-
+const renvoWasm32RegRax = 0
+const renvoWasm32RegRdx = 1
+const renvoWasm32RegRcx = 2
+const renvoWasm32RegRdi = 3
+const renvoWasm32RegRsi = 4
+const renvoWasm32RegR8 = 5
+const renvoWasm32RegR9 = 6
+const renvoWasm32RegR10 = 7
+const renvoWasm32OpExit = 1
+const renvoWasm32OpBuildArgsEnv = 2
+const renvoWasm32OpMovRegImm = 3
+const renvoWasm32OpMovRegReg = 4
+const renvoWasm32OpPushReg = 5
+const renvoWasm32OpPushImm = 6
+const renvoWasm32OpPopReg = 7
+const renvoWasm32OpLoadStack = 8
+const renvoWasm32OpStoreStack = 9
+const renvoWasm32OpLeaStack = 10
+const renvoWasm32OpLoadMem = 11
+const renvoWasm32OpStoreMem = 12
+const renvoWasm32OpLoadIndex = 13
+const renvoWasm32OpStoreIndex = 14
+const renvoWasm32OpAddRegReg = 15
+const renvoWasm32OpSubRegReg = 16
+const renvoWasm32OpMulRegReg = 17
+const renvoWasm32OpDivRegReg = 18
+const renvoWasm32OpModRegReg = 19
+const renvoWasm32OpAndRegReg = 20
+const renvoWasm32OpOrRegReg = 21
+const renvoWasm32OpXorRegReg = 22
+const renvoWasm32OpAndNotRegReg = 23
+const renvoWasm32OpShlRegReg = 24
+const renvoWasm32OpShrRegReg = 25
+const renvoWasm32OpAddRegImm = 26
+const renvoWasm32OpMulRegImm = 27
+const renvoWasm32OpIncReg = 28
+const renvoWasm32OpIncMem = 29
+const renvoWasm32OpDecMem = 30
+const renvoWasm32OpBoolNot = 31
+const renvoWasm32OpNegReg = 32
+const renvoWasm32OpCmpRegImm = 33
+const renvoWasm32OpCmpRegReg = 34
+const renvoWasm32OpSetCond = 35
+const renvoWasm32OpJmp = 36
+const renvoWasm32OpJz = 37
+const renvoWasm32OpJnz = 38
+const renvoWasm32OpJCond = 39
+const renvoWasm32OpCall = 40
+const renvoWasm32OpRet = 41
+const renvoWasm32OpSyscall = 42
+const renvoWasm32OpNop = 43
+const renvoWasm32OpShrUnsignedRegReg = 44
+const renvoWasm32OpWideBinary = 45
+const renvoWasm32OpWideCompare = 46
+const renvoWasm32InstructionSizes = "\x01\x01\x0d\x06\x03\x02\x05\x02\x06\x06\x06\x08\x08\x0a\x0a\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x06\x06\x02\x02\x02\x02\x02\x06\x03\x02\x05\x05\x05\x06\x09\x01\x01\x01\x03\x0e\x0a"
+const renvoWasm32RegLocals = "\x02\x03\x04\x05\x06\x07\x08\x0b"
+const renvoWasm32CondOpcodes = "\x46\x47\x48\x4c\x4a\x4e"
+const renvoWasm32BinaryOpcodes = "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x6a\x6b\x6c\x6d\x6f\x71\x72\x73\x00\x74\x75\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x76"
+const renvoWasm32SimpleRecipeOffsets = "\x00\x00\x00\x01\x08\x0f\x1f\x2f\x3d\x47\x51\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x58\x63\x6e\x78\x88\x98\xa0\xaa\xb4\xbe\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+const renvoWasm32SimpleRecipes = "\x00\x06\xff\x00\x01\xff\x05\x00\x06\xff\x04\x01\xff\x05\x00\x0f\x20\x00\xff\x04\x00\x36\x02\x00\x20\x00\x41\x04\x6a\x21\x00\x0f\x20\x00\xff\x00\x00\x36\x02\x00\x20\x00\x41\x04\x6a\x21\x00\x0d\x20\x00\x41\x04\x6b\x22\x00\x28\x02\x00\xff\x05\x00\x09\xff\x06\x01\x28\x02\x00\xff\x05\x00\x09\xff\x06\x01\xff\x04\x00\x36\x02\x00\x06\xff\x06\x01\xff\x05\x00\x0a\xff\x04\x00\xff\x00\x01\x6a\xff\x05\x00\x0a\xff\x04\x00\xff\x00\x01\x6c\xff\x05\x00\x09\xff\x04\x00\x41\x01\x6a\xff\x05\x00\x0f\xff\x04\x00\xff\x04\x00\x28\x02\x00\x41\x01\x6a\x36\x02\x00\x0f\xff\x04\x00\xff\x04\x00\x28\x02\x00\x41\x01\x6b\x36\x02\x00\x07\xff\x04\x00\x45\xff\x05\x00\x09\x41\x00\xff\x04\x00\x6b\xff\x05\x00\x09\xff\x04\x00\xff\x00\x01\x6b\x21\x0c\x09\xff\x04\x00\xff\x04\x01\x6b\x21\x0c\x05\xff\x09\x00\x21\x02"
+const renvoWasm32CondEq = 0
+const renvoWasm32CondNe = 1
+const renvoWasm32CondLt = 2
+const renvoWasm32CondLe = 3
+const renvoWasm32CondGt = 4
+const renvoWasm32CondGe = 5
+const renvoWasm32ProgramBase = 262144
+const renvoWasm32StackGuardSize = 16384
+const renvoWasm32ExprStackSize = 1048576
+const renvoWasm32CallStackSize = 65536
+const renvoWasm32FrameStackSize = 8388608
+const renvoWasm32ImageOutputCapacity = 2097152
+const renvoWasm32RoutineBodyCapacity = 8192
+const renvoWasm32ScratchIov = 0
+const renvoWasm32ScratchN = 8
+const renvoWasm32ScratchFd = 12
+const renvoWasm32ArgsCountPtr = 16
+const renvoWasm32ArgsSizePtr = 20
+const renvoWasm32EnvCountPtr = 24
+const renvoWasm32EnvSizePtr = 28
+const renvoWasm32FdstatScratch = 64
+const renvoWasm32ArgsPtrArea = 4096
+const renvoWasm32ArgsDataArea = 8192
+const renvoWasm32EnvPtrArea = 65536
+const renvoWasm32EnvDataArea = 131072
+const renvoWasm32ImportFdWrite = 0
+const renvoWasm32ImportFdRead = 1
+const renvoWasm32ImportFdPread = 2
+const renvoWasm32ImportFdPwrite = 3
+const renvoWasm32ImportPathOpen = 4
+const renvoWasm32ImportFdClose = 5
+const renvoWasm32ImportFdstatGet = 6
+const renvoWasm32ImportFdReaddir = 7
+const renvoWasm32ImportArgsSizesGet = 8
+const renvoWasm32ImportArgsGet = 9
+const renvoWasm32ImportEnvironSizesGet = 10
+const renvoWasm32ImportEnvironGet = 11
+const renvoWasm32ImportProcExit = 12
+const renvoWasm32StartFuncIndex = 13
+const renvoWasm32VmFuncType = 7
+const renvoWasm32VmFuncBase = 14
+const renvoWasm32LocalSp = 0
+const renvoWasm32LocalFp = 1
+const renvoWasm32LocalRax = 2
+const renvoWasm32LocalRdx = 3
+const renvoWasm32LocalRcx = 4
+const renvoWasm32LocalRdi = 5
+const renvoWasm32LocalRsi = 6
+const renvoWasm32LocalR8 = 7
+const renvoWasm32LocalR9 = 8
+const renvoWasm32LocalPc = 9
+const renvoWasm32LocalCsp = 10
+const renvoWasm32LocalR10 = 11
+const renvoWasm32LocalFlag = 12
+const renvoWasm32LocalTmp = 13
+const renvoWasm32LocalTmp2 = 14
+const renvoWasm32LocalTmp3 = 15
+const renvoVMHeaderSize = 40
+const renvoVMDataBase = 256
+const renvoVMRoutineSize = 12
+const renvoVMRoutineFramed = 1
 func renvoWasmPut(out *renvoWasmBuffer, value byte) {
 	if out.length >= len(out.data) {
 		nextLen := len(out.data) * 2
@@ -29856,163 +30288,6 @@ func renvoWasmPut(out *renvoWasmBuffer, value byte) {
 	out.data[out.length] = value
 	out.length++
 }
-
-func renvoWasm32EmitWideBinaryStack(g *renvoLinearGen, dest int, left int, right int, tok int, signed bool) bool {
-	renvoNonNil(g)
-	if g.c.renvoTarget == renvoTargetVM32 {
-		return renvoWasm32EmitWideBinaryPortable(g, dest, left, right, tok, signed)
-	}
-	op := 0
-	if renvoTokCharIs(g.prog, tok, '+') {
-		op = 0x7c
-	} else if renvoTokCharIs(g.prog, tok, '-') {
-		op = 0x7d
-	} else if renvoTokCharIs(g.prog, tok, '*') {
-		op = 0x7e
-	} else if renvoTokCharIs(g.prog, tok, '/') {
-		op = 0x80
-		if signed {
-			op = 0x7f
-		}
-	} else if renvoTokCharIs(g.prog, tok, '%') {
-		op = 0x82
-		if signed {
-			op = 0x81
-		}
-	} else if renvoTokCharIs(g.prog, tok, '&') {
-		op = 0x83
-	} else if renvoTokCharIs(g.prog, tok, '|') {
-		op = 0x84
-	} else if renvoTokCharIs(g.prog, tok, '^') {
-		op = 0x85
-	} else if renvoTok2Is(g.prog, tok, '<', '<') {
-		op = 0x86
-	} else if renvoTok2Is(g.prog, tok, '>', '>') {
-		op = 0x88
-		if signed {
-			op = 0x87
-		}
-	}
-	if op == 0 {
-		return false
-	}
-	if op >= 0x7f && op <= 0x82 {
-		// Keep division by zero on Renvo's panic path rather than allowing a
-		// WebAssembly trap, so recover continues to work.
-		nonzero := renvoAsmNewLabel(&g.asm)
-		renvoAsmLoadPrimaryStack(&g.asm, right-g.c.renvoNativeIntSize)
-		renvoAsmJnzPrimary(&g.asm, nonzero)
-		renvoAsmLoadPrimaryStack(&g.asm, right)
-		renvoEmitRuntimeNonNilPrimary(g)
-		renvoAsmMarkLabel(&g.asm, nonzero)
-	}
-	renvoWasm32EmitWideOp(&g.asm, renvoWasm32OpWideBinary, dest, left, right, op)
-	return true
-}
-
-func renvoWasm32EmitWideBinaryPortable(g *renvoLinearGen, dest int, left int, right int, tok int, signed bool) bool {
-	if renvoTokCharIs(g.prog, tok, '+') {
-		renvoEmitWideAddStack(g, dest, left, right)
-		return true
-	}
-	if renvoTokCharIs(g.prog, tok, '-') {
-		renvoEmitWideSubStack(g, dest, left, right)
-		return true
-	}
-	if renvoTokCharIs(g.prog, tok, '*') {
-		renvoEmitWideMulStack(g, dest, left, right)
-		return true
-	}
-	if renvoTokCharIs(g.prog, tok, '/') || renvoTokCharIs(g.prog, tok, '%') {
-		renvoEmitWideDivStack(g, dest, left, right, signed, renvoTokCharIs(g.prog, tok, '%'))
-		return true
-	}
-	if renvoTok2Is(g.prog, tok, '<', '<') || renvoTok2Is(g.prog, tok, '>', '>') {
-		renvoEmitWideShiftStack(g, dest, left, right, renvoTok2Is(g.prog, tok, '>', '>'), signed)
-		return true
-	}
-	if renvoTokCharIs(g.prog, tok, '&') || renvoTokCharIs(g.prog, tok, '|') || renvoTokCharIs(g.prog, tok, '^') {
-		for at := 0; at < renvoBackendValueSlotSize; at += g.c.renvoNativeIntSize {
-			renvoAsmLoadPrimaryStack(&g.asm, right-at)
-			renvoAsmLoadTertiaryStack(&g.asm, left-at)
-			if !renvoEmitPrimaryTertiaryOp(g, tok) {
-				return false
-			}
-			renvoAsmStorePrimaryStack(&g.asm, dest-at)
-		}
-		return true
-	}
-	return false
-}
-
-func renvoWasm32EmitWideCompareStack(g *renvoLinearGen, left int, right int, tok int, signed bool) bool {
-	renvoNonNil(g)
-	if g.c.renvoTarget == renvoTargetVM32 {
-		return renvoWasm32EmitWideComparePortable(g, left, right, tok, signed)
-	}
-	p := g.prog
-	op := 0
-	if renvoTok2Is(p, tok, '=', '=') {
-		op = 0x51
-	} else if renvoTok2Is(p, tok, '!', '=') {
-		op = 0x52
-	} else if renvoTokCharIs(p, tok, '<') {
-		op = 0x54
-		if signed {
-			op = 0x53
-		}
-	} else if renvoTokCharIs(p, tok, '>') {
-		op = 0x56
-		if signed {
-			op = 0x55
-		}
-	} else if renvoTok2Is(p, tok, '<', '=') {
-		op = 0x58
-		if signed {
-			op = 0x57
-		}
-	} else if renvoTok2Is(p, tok, '>', '=') {
-		op = 0x5a
-		if signed {
-			op = 0x59
-		}
-	}
-	if op == 0 {
-		return false
-	}
-	renvoWasm32EmitWideOp(&g.asm, renvoWasm32OpWideCompare, 0, left, right, op)
-	return true
-}
-
-func renvoWasm32EmitWideComparePortable(g *renvoLinearGen, left int, right int, tok int, signed bool) bool {
-	p := g.prog
-	equal := renvoTok2Is(p, tok, '=', '=') || renvoTok2Is(p, tok, '!', '=')
-	if equal {
-		notEqual := renvoAsmNewLabel(&g.asm)
-		done := renvoAsmNewLabel(&g.asm)
-		renvoEmitNativeCompareStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, 0x94)
-		renvoAsmJzPrimary(&g.asm, notEqual)
-		renvoEmitNativeCompareStack(g, left, right, 0x94)
-		renvoAsmJmpMarkLabel(&g.asm, done, notEqual)
-		renvoAsmPrimaryImm(&g.asm, 0)
-		renvoAsmMarkLabel(&g.asm, done)
-		if renvoTok2Is(p, tok, '!', '=') {
-			renvoAsmBoolNotPrimary(&g.asm)
-		}
-		return true
-	}
-	greater := renvoTokCharIs(p, tok, '>') || renvoTok2Is(p, tok, '>', '=')
-	inclusive := renvoTok2Is(p, tok, '<', '=') || renvoTok2Is(p, tok, '>', '=')
-	if greater != inclusive {
-		left, right = right, left
-	}
-	renvoEmitWideLessStack(g, left, right, signed)
-	if inclusive {
-		renvoAsmBoolNotPrimary(&g.asm)
-	}
-	return true
-}
-
 func renvoWasmAppendU32(out *renvoWasmBuffer, v int) {
 	for i := 0; i < 5; i++ {
 		b := byte(v & 0x7f)
@@ -30031,7 +30306,6 @@ func renvoWasmAppendU32(out *renvoWasmBuffer, v int) {
 	}
 	return
 }
-
 func renvoWasmAppendS32(out *renvoWasmBuffer, v int) {
 	for {
 		b := byte(v & 0x7f)
@@ -30053,7 +30327,6 @@ func renvoWasmAppendS32(out *renvoWasmBuffer, v int) {
 		}
 	}
 }
-
 func renvoWasmAppendName(out *renvoWasmBuffer, name string) {
 	renvoWasmAppendU32(out, len(name))
 	renvoWasm32EnsureAdditionalCapacity(out, len(name))
@@ -30063,7 +30336,6 @@ func renvoWasmAppendName(out *renvoWasmBuffer, name string) {
 	}
 	return
 }
-
 func renvoWasmAppendByteVec(out *renvoWasmBuffer, data []byte) {
 	renvoWasmAppendU32(out, len(data))
 	renvoWasm32EnsureAdditionalCapacity(out, len(data))
@@ -30073,7 +30345,6 @@ func renvoWasmAppendByteVec(out *renvoWasmBuffer, data []byte) {
 	}
 	return
 }
-
 func renvoWasmAppendEncoded(out *renvoWasmBuffer, encoded string) {
 	renvoWasm32EnsureAdditionalCapacity(out, len(encoded))
 	for i := 0; i < len(encoded); i++ {
@@ -30082,7 +30353,6 @@ func renvoWasmAppendEncoded(out *renvoWasmBuffer, encoded string) {
 	}
 	return
 }
-
 func renvoWasmAppendRecipe(out *renvoWasmBuffer, recipe string, p0 int, p1 int, p2 int, p3 int) {
 	renvoWasm32EnsureAdditionalCapacity(out, len(recipe)*5)
 	for i := 0; i < len(recipe); i++ {
@@ -30136,7 +30406,6 @@ func renvoWasmAppendRecipe(out *renvoWasmBuffer, recipe string, p0 int, p1 int, 
 	}
 	return
 }
-
 func renvoWasmAppendSection(out *renvoWasmBuffer, id int, payload []byte) {
 	renvoWasm32EnsureAdditionalCapacity(out, len(payload)+6)
 	renvoWasmPut(out, byte(id))
@@ -30146,20 +30415,17 @@ func renvoWasmAppendSection(out *renvoWasmBuffer, id int, payload []byte) {
 	}
 	return
 }
-
 func renvoWasmAppendI32Const(out *renvoWasmBuffer, value int) {
 	renvoWasmPut(out, 0x41)
 	value = renvoWasm32Sign32(value)
 	renvoWasmAppendS32(out, value)
 	return
 }
-
 func renvoWasmAppendCall(out *renvoWasmBuffer, index int) {
 	renvoWasmPut(out, 0x10)
 	renvoWasmAppendU32(out, index)
 	return
 }
-
 func renvoWasmAppendU32Fixed5(out *renvoWasmBuffer, v int) {
 	for i := 0; i < 5; i++ {
 		b := byte(v & 0x7f)
@@ -30173,7 +30439,6 @@ func renvoWasmAppendU32Fixed5(out *renvoWasmBuffer, v int) {
 	}
 	return
 }
-
 func renvoWasmCompactU32Fixed5(out *renvoWasmBuffer, at int, v int) {
 	for i := 0; i < 5; i++ {
 		b := byte(v & 0x7f)
@@ -30185,43 +30450,36 @@ func renvoWasmCompactU32Fixed5(out *renvoWasmBuffer, at int, v int) {
 	}
 	return
 }
-
 func renvoWasmAppendI32Store(out *renvoWasmBuffer) {
 	renvoWasmPut(out, 0x36)
 	renvoWasmAppendU32(out, 2)
 	renvoWasmAppendU32(out, 0)
 	return
 }
-
 func renvoWasmAppendI64Load(out *renvoWasmBuffer) {
 	renvoWasmAppend3(out, 0x29, 3, 0)
 	return
 }
-
 func renvoWasmAppendI64Store(out *renvoWasmBuffer) {
 	renvoWasmAppend3(out, 0x37, 3, 0)
 	return
 }
-
 func renvoWasmAppendI64Const(out *renvoWasmBuffer, value int) {
 	renvoWasmPut(out, 0x42)
 	renvoWasmAppendS32(out, value)
 	return
 }
-
 func renvoWasmAppend2(out *renvoWasmBuffer, a int, b int) {
 	renvoWasmPut(out, byte(a))
 	renvoWasmPut(out, byte(b))
 	return
 }
-
 func renvoWasmAppend3(out *renvoWasmBuffer, a int, b int, c int) {
 	renvoWasmPut(out, byte(a))
 	renvoWasmPut(out, byte(b))
 	renvoWasmPut(out, byte(c))
 	return
 }
-
 func renvoWasmAppend4(out *renvoWasmBuffer, a int, b int, c int, d int) {
 	renvoWasmPut(out, byte(a))
 	renvoWasmPut(out, byte(b))
@@ -30229,7 +30487,6 @@ func renvoWasmAppend4(out *renvoWasmBuffer, a int, b int, c int, d int) {
 	renvoWasmPut(out, byte(d))
 	return
 }
-
 func renvoWasmAppend5(out *renvoWasmBuffer, a int, b int, c int, d int, e int) {
 	renvoWasmPut(out, byte(a))
 	renvoWasmPut(out, byte(b))
@@ -30238,100 +30495,25 @@ func renvoWasmAppend5(out *renvoWasmBuffer, a int, b int, c int, d int, e int) {
 	renvoWasmPut(out, byte(e))
 	return
 }
-
-const renvoWasm32RegRax = 0
-const renvoWasm32RegRdx = 1
-const renvoWasm32RegRcx = 2
-const renvoWasm32RegRdi = 3
-const renvoWasm32RegRsi = 4
-const renvoWasm32RegR8 = 5
-const renvoWasm32RegR9 = 6
-const renvoWasm32RegR10 = 7
-
-const renvoWasm32OpExit = 1
-const renvoWasm32OpBuildArgsEnv = 2
-const renvoWasm32OpMovRegImm = 3
-const renvoWasm32OpMovRegReg = 4
-const renvoWasm32OpPushReg = 5
-const renvoWasm32OpPushImm = 6
-const renvoWasm32OpPopReg = 7
-const renvoWasm32OpLoadStack = 8
-const renvoWasm32OpStoreStack = 9
-const renvoWasm32OpLeaStack = 10
-const renvoWasm32OpLoadMem = 11
-const renvoWasm32OpStoreMem = 12
-const renvoWasm32OpLoadIndex = 13
-const renvoWasm32OpStoreIndex = 14
-const renvoWasm32OpAddRegReg = 15
-const renvoWasm32OpSubRegReg = 16
-const renvoWasm32OpMulRegReg = 17
-const renvoWasm32OpDivRegReg = 18
-const renvoWasm32OpModRegReg = 19
-const renvoWasm32OpAndRegReg = 20
-const renvoWasm32OpOrRegReg = 21
-const renvoWasm32OpXorRegReg = 22
-const renvoWasm32OpAndNotRegReg = 23
-const renvoWasm32OpShlRegReg = 24
-const renvoWasm32OpShrRegReg = 25
-const renvoWasm32OpAddRegImm = 26
-const renvoWasm32OpMulRegImm = 27
-const renvoWasm32OpIncReg = 28
-const renvoWasm32OpIncMem = 29
-const renvoWasm32OpDecMem = 30
-const renvoWasm32OpBoolNot = 31
-const renvoWasm32OpNegReg = 32
-const renvoWasm32OpCmpRegImm = 33
-const renvoWasm32OpCmpRegReg = 34
-const renvoWasm32OpSetCond = 35
-const renvoWasm32OpJmp = 36
-const renvoWasm32OpJz = 37
-const renvoWasm32OpJnz = 38
-const renvoWasm32OpJCond = 39
-const renvoWasm32OpCall = 40
-const renvoWasm32OpRet = 41
-const renvoWasm32OpSyscall = 42
-const renvoWasm32OpNop = 43
-const renvoWasm32OpShrUnsignedRegReg = 44
-const renvoWasm32OpWideBinary = 45
-const renvoWasm32OpWideCompare = 46
-
-const renvoWasm32InstructionSizes = "\x01\x01\x0d\x06\x03\x02\x05\x02\x06\x06\x06\x08\x08\x0a\x0a\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x06\x06\x02\x02\x02\x02\x02\x06\x03\x02\x05\x05\x05\x06\x09\x01\x01\x01\x03\x0e\x0a"
-const renvoWasm32RegLocals = "\x02\x03\x04\x05\x06\x07\x08\x0b"
-const renvoWasm32CondOpcodes = "\x46\x47\x48\x4c\x4a\x4e"
-const renvoWasm32BinaryOpcodes = "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x6a\x6b\x6c\x6d\x6f\x71\x72\x73\x00\x74\x75\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x76"
-const renvoWasm32SimpleRecipeOffsets = "\x00\x00\x00\x01\x08\x0f\x1f\x2f\x3d\x47\x51\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x58\x63\x6e\x78\x88\x98\xa0\xaa\xb4\xbe\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
-const renvoWasm32SimpleRecipes = "\x00\x06\xff\x00\x01\xff\x05\x00\x06\xff\x04\x01\xff\x05\x00\x0f\x20\x00\xff\x04\x00\x36\x02\x00\x20\x00\x41\x04\x6a\x21\x00\x0f\x20\x00\xff\x00\x00\x36\x02\x00\x20\x00\x41\x04\x6a\x21\x00\x0d\x20\x00\x41\x04\x6b\x22\x00\x28\x02\x00\xff\x05\x00\x09\xff\x06\x01\x28\x02\x00\xff\x05\x00\x09\xff\x06\x01\xff\x04\x00\x36\x02\x00\x06\xff\x06\x01\xff\x05\x00\x0a\xff\x04\x00\xff\x00\x01\x6a\xff\x05\x00\x0a\xff\x04\x00\xff\x00\x01\x6c\xff\x05\x00\x09\xff\x04\x00\x41\x01\x6a\xff\x05\x00\x0f\xff\x04\x00\xff\x04\x00\x28\x02\x00\x41\x01\x6a\x36\x02\x00\x0f\xff\x04\x00\xff\x04\x00\x28\x02\x00\x41\x01\x6b\x36\x02\x00\x07\xff\x04\x00\x45\xff\x05\x00\x09\x41\x00\xff\x04\x00\x6b\xff\x05\x00\x09\xff\x04\x00\xff\x00\x01\x6b\x21\x0c\x09\xff\x04\x00\xff\x04\x01\x6b\x21\x0c\x05\xff\x09\x00\x21\x02"
-
-const renvoWasm32CondEq = 0
-const renvoWasm32CondNe = 1
-const renvoWasm32CondLt = 2
-const renvoWasm32CondLe = 3
-const renvoWasm32CondGt = 4
-const renvoWasm32CondGe = 5
-
 func renvoWasm32EmitRegImm(a *renvoAsm, op int, reg int, imm int) {
 	a.code = append(a.code, byte(op))
 	a.code = append(a.code, byte(reg))
 	a.code = renvoAppend32(a.code, imm)
 }
-
 func renvoWasm32EmitRegReg(a *renvoAsm, op int, dst int, src int) {
 	a.code = append(a.code, byte(op))
 	a.code = append(a.code, byte(dst))
 	a.code = append(a.code, byte(src))
 }
-
 func renvoWasm32EmitReg(a *renvoAsm, op int, reg int) {
 	a.code = append(a.code, byte(op))
 	a.code = append(a.code, byte(reg))
 }
-
 func renvoWasm32EmitStack(a *renvoAsm, op int, reg int, offset int) {
 	a.code = append(a.code, byte(op))
 	a.code = append(a.code, byte(reg))
 	a.code = renvoAppend32(a.code, offset)
 }
-
 func renvoWasm32EmitWideOp(a *renvoAsm, op int, dest int, left int, right int, wasmOp int) {
 	a.code = append(a.code, byte(op))
 	if op == renvoWasm32OpWideBinary {
@@ -30341,7 +30523,6 @@ func renvoWasm32EmitWideOp(a *renvoAsm, op int, dest int, left int, right int, w
 	a.code = renvoAppend32(a.code, right)
 	a.code = append(a.code, byte(wasmOp))
 }
-
 func renvoWasm32EmitMem(a *renvoAsm, op int, reg int, base int, disp int, size int) {
 	a.code = append(a.code, byte(op))
 	a.code = append(a.code, byte(reg))
@@ -30349,7 +30530,6 @@ func renvoWasm32EmitMem(a *renvoAsm, op int, reg int, base int, disp int, size i
 	a.code = renvoAppend32(a.code, disp)
 	a.code = append(a.code, byte(size))
 }
-
 func renvoWasm32EmitIndex(a *renvoAsm, op int, reg int, base int, index int, scale int, disp int, size int) {
 	a.code = append(a.code, byte(op))
 	a.code = append(a.code, byte(reg))
@@ -30359,176 +30539,115 @@ func renvoWasm32EmitIndex(a *renvoAsm, op int, reg int, base int, index int, sca
 	a.code = renvoAppend32(a.code, disp)
 	a.code = append(a.code, byte(size))
 }
-
 func renvoWasm32EmitBranch(a *renvoAsm, op int, label int) {
 	a.code = append(a.code, byte(op))
 	at := len(a.code)
 	a.code = renvoAppend32(a.code, 0)
-	renvoAsmAddReloc(a, at, label)
+	renvoAsmAddReloc(a,at, label)
 }
-
 func renvoWasm32EmitCondBranch(a *renvoAsm, cond int, label int) {
 	a.code = append(a.code, byte(renvoWasm32OpJCond))
 	a.code = append(a.code, byte(cond))
 	at := len(a.code)
 	a.code = renvoAppend32(a.code, 0)
-	renvoAsmAddReloc(a, at, label)
+	renvoAsmAddReloc(a,at, label)
 }
-
 func renvoWasm32EmitCallLabel(a *renvoAsm, label int, wordCount int) {
 	a.code = append(a.code, byte(renvoWasm32OpCall))
 	at := len(a.code)
 	a.code = renvoAppend32(a.code, 0)
-	renvoAsmAddReloc(a, at, label)
+	renvoAsmAddReloc(a,at, label)
 	a.code = renvoAppend32(a.code, wordCount)
 }
-
-func renvoWasm32StoreParamWord(g *renvoLinearGen, reg int, offset int) {
-	a := &g.asm
-	if reg == 0 {
-		renvoWasm32EmitStack(a, renvoWasm32OpStoreStack, renvoWasm32RegRdi, offset)
-		return
-	}
-	if reg == 1 {
-		renvoWasm32EmitStack(a, renvoWasm32OpStoreStack, renvoWasm32RegRsi, offset)
-		return
-	}
-	if reg == 2 {
-		renvoWasm32EmitStack(a, renvoWasm32OpStoreStack, renvoWasm32RegRdx, offset)
-		return
-	}
-	if reg == 3 {
-		renvoWasm32EmitStack(a, renvoWasm32OpStoreStack, renvoWasm32RegRcx, offset)
-		return
-	}
-	if reg == 4 {
-		renvoWasm32EmitStack(a, renvoWasm32OpStoreStack, renvoWasm32RegR8, offset)
-		return
-	}
-	if reg == 5 {
-		renvoWasm32EmitStack(a, renvoWasm32OpStoreStack, renvoWasm32RegR9, offset)
-		return
-	}
-	renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRax)
-	renvoWasm32EmitStack(a, renvoWasm32OpStoreStack, renvoWasm32RegRax, offset)
-}
-
 func renvoWasm32AsmMovRaxImm(a *renvoAsm, imm int) {
 	renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRax, imm)
 }
-
 func renvoWasm32AsmMovRaxImm64(a *renvoAsm, imm int) {
 	renvoWasm32AsmMovRaxImm(a, imm)
 }
-
 func renvoWasm32AsmMovRdxImm(a *renvoAsm, imm int) {
 	renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, imm)
 }
-
 func renvoWasm32AsmMovRaxDataAddr(a *renvoAsm, dataOff int) {
 	renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRax, 0)
-	renvoAsmAddAbsReloc(a, len(a.code)-4, dataOff, 0)
+	renvoAsmAddAbsReloc(a,len(a.code)-4, dataOff, 0)
 }
-
 func renvoWasm32AsmMovRaxBssAddr(a *renvoAsm, bssOff int) {
 	renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRax, 0)
-	renvoAsmAddAbsReloc(a, len(a.code)-4, bssOff, renvoAbsBssReloc)
+	renvoAsmAddAbsReloc(a,len(a.code)-4, bssOff, 1)
 }
-
 func renvoWasm32AsmMovR10BssAddr(a *renvoAsm, bssOff int) {
 	renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegR10, 0)
-	renvoAsmAddAbsReloc(a, len(a.code)-4, bssOff, renvoAbsBssReloc)
+	renvoAsmAddAbsReloc(a,len(a.code)-4, bssOff, 1)
 }
-
 func renvoWasm32AsmLoadRaxBss(a *renvoAsm, bssOff int) {
 	renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegR10, 0)
-	renvoAsmAddAbsReloc(a, len(a.code)-4, bssOff, renvoAbsBssReloc)
+	renvoAsmAddAbsReloc(a,len(a.code)-4, bssOff, 1)
 	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRax, renvoWasm32RegR10, 0, 4)
 }
-
 func renvoWasm32AsmStoreRaxBss(a *renvoAsm, bssOff int) {
 	renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegR10, 0)
-	renvoAsmAddAbsReloc(a, len(a.code)-4, bssOff, renvoAbsBssReloc)
+	renvoAsmAddAbsReloc(a,len(a.code)-4, bssOff, 1)
 	renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRax, renvoWasm32RegR10, 0, 4)
 }
-
 func renvoWasm32AsmMovRdiRax(a *renvoAsm) {
 	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdi, renvoWasm32RegRax)
 }
-
 func renvoWasm32AsmMovRaxRdx(a *renvoAsm) {
 	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
 }
-
 func renvoWasm32AsmMovRdxRax(a *renvoAsm) {
 	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRax)
 }
-
 func renvoWasm32AsmMovRcxRax(a *renvoAsm) {
 	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
 }
-
 func renvoWasm32AsmMovRcxRdx(a *renvoAsm) {
 	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
 }
-
 func renvoWasm32AsmMovRsiRax(a *renvoAsm) {
 	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRsi, renvoWasm32RegRax)
 }
-
 func renvoWasm32AsmMovR8Rax(a *renvoAsm) {
 	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegR8, renvoWasm32RegRax)
 }
-
 func renvoWasm32AsmMovR9Rax(a *renvoAsm) {
 	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegR9, renvoWasm32RegRax)
 }
-
 func renvoWasm32AsmAddRdxRcx(a *renvoAsm) {
 	renvoWasm32EmitRegReg(a, renvoWasm32OpAddRegReg, renvoWasm32RegRdx, renvoWasm32RegRcx)
 }
-
 func renvoWasm32AsmSyscall(a *renvoAsm) {
-	renvoAsmEmit8(a, renvoWasm32OpSyscall)
+	renvoAsmEmit8(a,renvoWasm32OpSyscall)
 }
-
 func renvoWasm32AsmPushRax(a *renvoAsm) {
 	renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRax)
 }
-
 func renvoWasm32AsmPushRcx(a *renvoAsm) {
 	renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRcx)
 }
-
 func renvoWasm32AsmPushRdx(a *renvoAsm) {
 	renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRdx)
 }
-
 func renvoWasm32AsmPushImm(a *renvoAsm, imm int) {
-	renvoAsmEmit8(a, renvoWasm32OpPushImm)
-	renvoAsmEmit32(a, imm)
+	renvoAsmEmit8(a,renvoWasm32OpPushImm)
+	renvoAsmEmit32(a,imm)
 }
-
 func renvoWasm32AsmPopRax(a *renvoAsm) {
 	renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRax)
 }
-
 func renvoWasm32AsmPopRcx(a *renvoAsm) {
 	renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRcx)
 }
-
 func renvoWasm32AsmPopRdx(a *renvoAsm) {
 	renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRdx)
 }
-
 func renvoWasm32AsmPopRdi(a *renvoAsm) {
 	renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRdi)
 }
-
 func renvoWasm32AsmPopRsi(a *renvoAsm) {
 	renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRsi)
 }
-
 func renvoWasm32AsmStackMem(a *renvoAsm, offset int, base int, disp8 int, disp32 int) {
 	op := base & 0xff00
 	regCode := disp8
@@ -30558,26 +30677,21 @@ func renvoWasm32AsmStackMem(a *renvoAsm, offset int, base int, disp8 int, disp32
 	}
 	renvoWasm32EmitStack(a, renvoWasm32OpLeaStack, reg, offset)
 }
-
 func renvoWasm32AsmAddRdxImm(a *renvoAsm, imm int) {
 	renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRdx, imm)
 }
-
 func renvoWasm32AsmLoadRaxMemRdxDisp(a *renvoAsm, disp int) {
 	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRax, renvoWasm32RegRdx, disp, 4)
 }
-
 func renvoWasm32AsmLoadRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
 	if size > 4 {
 		size = 4
 	}
 	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRax, renvoWasm32RegRdx, disp, size)
 }
-
 func renvoWasm32AsmLoadByteRaxIndexRcx(a *renvoAsm) {
 	renvoWasm32EmitIndex(a, renvoWasm32OpLoadIndex, renvoWasm32RegRax, renvoWasm32RegRax, renvoWasm32RegRcx, 1, 0, 1)
 }
-
 func renvoWasm32AsmLoadRaxIndexRcxSize(a *renvoAsm, size int) {
 	scale := size
 	if size > 4 {
@@ -30585,30 +30699,24 @@ func renvoWasm32AsmLoadRaxIndexRcxSize(a *renvoAsm, size int) {
 	}
 	renvoWasm32EmitIndex(a, renvoWasm32OpLoadIndex, renvoWasm32RegRax, renvoWasm32RegRax, renvoWasm32RegRcx, scale, 0, size)
 }
-
 func renvoWasm32AsmLoadQwordRaxIndexRcx8(a *renvoAsm) {
 	renvoWasm32EmitIndex(a, renvoWasm32OpLoadIndex, renvoWasm32RegRax, renvoWasm32RegRax, renvoWasm32RegRcx, 8, 0, 4)
 }
-
 func renvoWasm32AsmLoadQwordRaxIndexRcxDisp(a *renvoAsm, disp int) {
 	renvoWasm32EmitIndex(a, renvoWasm32OpLoadIndex, renvoWasm32RegRax, renvoWasm32RegRax, renvoWasm32RegRcx, 1, disp, 4)
 }
-
 func renvoWasm32AsmStoreRaxMemRdxRcx8(a *renvoAsm) {
 	renvoWasm32EmitIndex(a, renvoWasm32OpStoreIndex, renvoWasm32RegRax, renvoWasm32RegRdx, renvoWasm32RegRcx, 8, 0, 4)
 }
-
 func renvoWasm32AsmStoreRaxMemRdxDisp(a *renvoAsm, disp int) {
 	renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRax, renvoWasm32RegRdx, disp, 4)
 }
-
 func renvoWasm32AsmStoreRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
 	if size > 4 {
 		size = 4
 	}
 	renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRax, renvoWasm32RegRdx, disp, size)
 }
-
 func renvoWasm32AsmStoreRaxMemRdxRcxSize(a *renvoAsm, size int) {
 	scale := size
 	if size > 4 {
@@ -30616,80 +30724,68 @@ func renvoWasm32AsmStoreRaxMemRdxRcxSize(a *renvoAsm, size int) {
 	}
 	renvoWasm32EmitIndex(a, renvoWasm32OpStoreIndex, renvoWasm32RegRax, renvoWasm32RegRdx, renvoWasm32RegRcx, scale, 0, size)
 }
-
 func renvoWasm32AsmStoreSliceStack(a *renvoAsm, offset int) {
 	renvoWasm32EmitStack(a, renvoWasm32OpStoreStack, renvoWasm32RegRax, offset)
 	renvoWasm32EmitStack(a, renvoWasm32OpStoreStack, renvoWasm32RegRdx, offset-8)
 	renvoWasm32EmitStack(a, renvoWasm32OpStoreStack, renvoWasm32RegRcx, offset-16)
 }
-
 func renvoWasm32AsmNormalizeRaxForKind(a *renvoAsm, kind int) {
-	if kind == renvoTypeByte {
+	if kind == 3 {
 		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, 255)
 		renvoWasm32EmitRegReg(a, renvoWasm32OpAndRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
 		return
 	}
-	if kind == renvoTypeInt8 {
+	if kind == 7 {
 		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, 24)
 		renvoWasm32EmitRegReg(a, renvoWasm32OpShlRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
 		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, 24)
 		renvoWasm32EmitRegReg(a, renvoWasm32OpShrRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
 		return
 	}
-	if kind == renvoTypeInt16 {
+	if kind == 8 {
 		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, 16)
 		renvoWasm32EmitRegReg(a, renvoWasm32OpShlRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
 		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, 16)
 		renvoWasm32EmitRegReg(a, renvoWasm32OpShrRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
 		return
 	}
-	if kind == renvoTypeUint16 {
+	if kind == 16 {
 		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, 65535)
 		renvoWasm32EmitRegReg(a, renvoWasm32OpAndRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
 	}
 }
-
 func renvoWasm32AsmIncMemRdx(a *renvoAsm) {
-	renvoAsmEmit8(a, renvoWasm32OpIncMem)
-	renvoAsmEmit8(a, renvoWasm32RegRdx)
+	renvoAsmEmit8(a,renvoWasm32OpIncMem)
+	renvoAsmEmit8(a,renvoWasm32RegRdx)
 }
-
 func renvoWasm32AsmDecMemRdx(a *renvoAsm) {
-	renvoAsmEmit8(a, renvoWasm32OpDecMem)
-	renvoAsmEmit8(a, renvoWasm32RegRdx)
+	renvoAsmEmit8(a,renvoWasm32OpDecMem)
+	renvoAsmEmit8(a,renvoWasm32RegRdx)
 }
-
 func renvoWasm32AsmBoolNotRax(a *renvoAsm) {
 	renvoWasm32EmitReg(a, renvoWasm32OpBoolNot, renvoWasm32RegRax)
 }
-
 func renvoWasm32AsmCmpRaxImm8(a *renvoAsm, imm int) {
 	renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRax, imm)
 }
-
 func renvoWasm32AsmAddRaxRcx(a *renvoAsm) {
 	renvoWasm32EmitRegReg(a, renvoWasm32OpAddRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
 }
-
 func renvoWasm32AsmSubRaxRcx(a *renvoAsm) {
 	renvoWasm32EmitRegReg(a, renvoWasm32OpSubRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
 }
-
 func renvoWasm32AsmShlRcxImm(a *renvoAsm, imm int) {
 	renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, imm)
 	renvoWasm32EmitRegReg(a, renvoWasm32OpShlRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
 }
-
 func renvoWasm32AsmShlRaxImm(a *renvoAsm, imm int) {
 	renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, imm)
 	renvoWasm32EmitRegReg(a, renvoWasm32OpShlRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
 }
-
 func renvoWasm32AsmSarRaxImm(a *renvoAsm, imm int) {
 	renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, imm)
 	renvoWasm32EmitRegReg(a, renvoWasm32OpShrRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
 }
-
 func renvoWasm32AsmShrRaxImm(a *renvoAsm, imm int) {
 	renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, imm)
 	// The ordinary shift op is signed because Go's machine-int path uses it
@@ -30697,7 +30793,6 @@ func renvoWasm32AsmShrRaxImm(a *renvoAsm, imm int) {
 	// two-word uint64 lowering.
 	renvoWasm32EmitRegReg(a, renvoWasm32OpShrUnsignedRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
 }
-
 func renvoWasm32AsmDivLeftRcxRightRax(a *renvoAsm, mod bool) {
 	if mod {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpModRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
@@ -30706,7 +30801,6 @@ func renvoWasm32AsmDivLeftRcxRightRax(a *renvoAsm, mod bool) {
 	}
 	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
 }
-
 func renvoWasm32AsmCmpRcxRaxSet(a *renvoAsm, setcc int) {
 	cond := renvoWasm32CondEq
 	if setcc == 0x95 {
@@ -30721,124 +30815,56 @@ func renvoWasm32AsmCmpRcxRaxSet(a *renvoAsm, setcc int) {
 		cond = renvoWasm32CondGe
 	}
 	renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
-	renvoAsmEmit8(a, renvoWasm32OpSetCond)
-	renvoAsmEmit8(a, cond)
+	renvoAsmEmit8(a,renvoWasm32OpSetCond)
+	renvoAsmEmit8(a,cond)
 }
-
 func renvoWasm32AsmIncRcx(a *renvoAsm) {
 	renvoWasm32EmitReg(a, renvoWasm32OpIncReg, renvoWasm32RegRcx)
 }
-
 func renvoWasm32AsmIncRax(a *renvoAsm) {
 	renvoWasm32EmitReg(a, renvoWasm32OpIncReg, renvoWasm32RegRax)
 }
-
 func renvoWasm32AsmImulRcxImm(a *renvoAsm, imm int) {
 	renvoWasm32EmitRegImm(a, renvoWasm32OpMulRegImm, renvoWasm32RegRcx, imm)
 }
-
 func renvoWasm32AsmLeave(a *renvoAsm) {
 }
-
 func renvoWasm32AsmRet(a *renvoAsm) {
-	renvoAsmEmit8(a, renvoWasm32OpRet)
+	renvoAsmEmit8(a,renvoWasm32OpRet)
 }
-
 func renvoWasm32AsmCallLabel(a *renvoAsm, label int) {
 	renvoWasm32EmitCallLabel(a, label, 0)
 }
-
 func renvoWasm32AsmJmpLabel(a *renvoAsm, label int) {
 	renvoWasm32EmitBranch(a, renvoWasm32OpJmp, label)
 }
-
 func renvoWasm32AsmJzLabel(a *renvoAsm, label int) {
 	renvoWasm32EmitBranch(a, renvoWasm32OpJz, label)
 }
-
 func renvoWasm32AsmJnzLabel(a *renvoAsm, label int) {
 	renvoWasm32EmitBranch(a, renvoWasm32OpJnz, label)
 }
-
 func renvoWasm32AsmNegRax(a *renvoAsm) {
 	renvoWasm32EmitReg(a, renvoWasm32OpNegReg, renvoWasm32RegRax)
 }
-
 func renvoWasm32AsmBuildArgvEnvSlices(a *renvoAsm, bssOff int, envOff int, envLenOff int) {
-	renvoAsmEmit8(a, renvoWasm32OpBuildArgsEnv)
+	renvoAsmEmit8(a,renvoWasm32OpBuildArgsEnv)
 	at := len(a.code)
-	renvoAsmEmit32(a, bssOff)
-	renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
+	renvoAsmEmit32(a,bssOff)
+	renvoAsmAddAbsReloc(a,at, bssOff, 1)
 	at = len(a.code)
-	renvoAsmEmit32(a, envOff)
-	renvoAsmAddAbsReloc(a, at, envOff, renvoAbsBssReloc)
+	renvoAsmEmit32(a,envOff)
+	renvoAsmAddAbsReloc(a,at, envOff, 1)
 	at = len(a.code)
-	renvoAsmEmit32(a, envLenOff)
-	renvoAsmAddAbsReloc(a, at, envLenOff, renvoAbsBssReloc)
+	renvoAsmEmit32(a,envLenOff)
+	renvoAsmAddAbsReloc(a,at, envLenOff, 1)
 }
-
 func renvoWasm32AsmExit(a *renvoAsm) {
-	renvoAsmEmit8(a, renvoWasm32OpExit)
+	renvoAsmEmit8(a,renvoWasm32OpExit)
 }
-
-const renvoWasm32ProgramBase = 262144
-const renvoWasm32StackGuardSize = 16384
-const renvoWasm32ExprStackSize = 1048576
-const renvoWasm32CallStackSize = 65536
-const renvoWasm32FrameStackSize = 8388608
-const renvoWasm32ImageOutputCapacity = 2097152
-const renvoWasm32RoutineBodyCapacity = 8192
-const renvoWasm32ScratchIov = 0
-const renvoWasm32ScratchN = 8
-const renvoWasm32ScratchFd = 12
-const renvoWasm32ArgsCountPtr = 16
-const renvoWasm32ArgsSizePtr = 20
-const renvoWasm32EnvCountPtr = 24
-const renvoWasm32EnvSizePtr = 28
-const renvoWasm32FdstatScratch = 64
-const renvoWasm32ArgsPtrArea = 4096
-const renvoWasm32ArgsDataArea = 8192
-const renvoWasm32EnvPtrArea = 65536
-const renvoWasm32EnvDataArea = 131072
-
-const renvoWasm32ImportFdWrite = 0
-const renvoWasm32ImportFdRead = 1
-const renvoWasm32ImportFdPread = 2
-const renvoWasm32ImportFdPwrite = 3
-const renvoWasm32ImportPathOpen = 4
-const renvoWasm32ImportFdClose = 5
-const renvoWasm32ImportFdstatGet = 6
-const renvoWasm32ImportFdReaddir = 7
-const renvoWasm32ImportArgsSizesGet = 8
-const renvoWasm32ImportArgsGet = 9
-const renvoWasm32ImportEnvironSizesGet = 10
-const renvoWasm32ImportEnvironGet = 11
-const renvoWasm32ImportProcExit = 12
-const renvoWasm32StartFuncIndex = 13
-const renvoWasm32VmFuncType = 7
-const renvoWasm32VmFuncBase = 14
-
-const renvoWasm32LocalSp = 0
-const renvoWasm32LocalFp = 1
-const renvoWasm32LocalRax = 2
-const renvoWasm32LocalRdx = 3
-const renvoWasm32LocalRcx = 4
-const renvoWasm32LocalRdi = 5
-const renvoWasm32LocalRsi = 6
-const renvoWasm32LocalR8 = 7
-const renvoWasm32LocalR9 = 8
-const renvoWasm32LocalPc = 9
-const renvoWasm32LocalCsp = 10
-const renvoWasm32LocalR10 = 11
-const renvoWasm32LocalFlag = 12
-const renvoWasm32LocalTmp = 13
-const renvoWasm32LocalTmp2 = 14
-const renvoWasm32LocalTmp3 = 15
-
 func renvoWasm32RegLocal(reg int) int {
 	return int(renvoWasm32RegLocals[reg])
 }
-
 func renvoWasm32Sign32(v int) int {
 	if v > 2147483647 {
 		v -= 2147483647
@@ -30847,16 +30873,13 @@ func renvoWasm32Sign32(v int) int {
 	}
 	return v
 }
-
 func renvoWasm32GetS32(in []byte, at int) int {
 	return renvoWasm32Sign32(renvoGet32At(in, at))
 }
-
 func renvoWasm32NextInstructionPc(code []byte, pc int) int {
 	op := int(renvo_runtime_UnsafeByteAt(code, pc))
 	return pc + int(renvoWasm32InstructionSizes[op])
 }
-
 func renvoWasm32InstructionPcs(code []byte) []int {
 	out := renvoMakeIntScratch(131072)
 	pc := 0
@@ -30866,7 +30889,6 @@ func renvoWasm32InstructionPcs(code []byte) []int {
 	}
 	return out
 }
-
 func renvoWasm32PcLowerBound(pcs []int, pc int) int {
 	lo := 0
 	hi := len(pcs)
@@ -30880,7 +30902,6 @@ func renvoWasm32PcLowerBound(pcs []int, pc int) int {
 	}
 	return lo
 }
-
 func renvoWasm32IsControlOp(op int) bool {
 	if op == renvoWasm32OpExit || op == renvoWasm32OpBuildArgsEnv {
 		return true
@@ -30896,7 +30917,6 @@ func renvoWasm32IsControlOp(op int) bool {
 	}
 	return false
 }
-
 func renvoWasm32OpHasTarget(op int) bool {
 	if op == renvoWasm32OpJmp {
 		return true
@@ -30912,7 +30932,6 @@ func renvoWasm32OpHasTarget(op int) bool {
 	}
 	return false
 }
-
 func renvoWasm32BuildBlockStartsLocal(code []byte, pcs []int) []int {
 	starts := make([]int, 0, 512)
 	instrCount := len(pcs)
@@ -30951,14 +30970,12 @@ func renvoWasm32BuildBlockStartsLocal(code []byte, pcs []int) []int {
 	}
 	return starts
 }
-
 func renvoWasm32BlockEnd(starts []int, blockIndex int, instrCount int) int {
 	if blockIndex+1 < len(starts) {
 		return starts[blockIndex+1]
 	}
 	return instrCount
 }
-
 func renvoWasm32BuildInstrBlockIndex(starts []int, instrCount int) []int {
 	blockIndex := make([]int, instrCount+1, instrCount+1)
 	block := 0
@@ -30971,121 +30988,102 @@ func renvoWasm32BuildInstrBlockIndex(starts []int, instrCount int) []int {
 	blockIndex[instrCount] = len(starts)
 	return blockIndex
 }
-
 func renvoWasm32BlockForInstrFast(blockIndex []int, idx int) int {
 	if idx >= 0 && idx < len(blockIndex) {
 		return blockIndex[idx]
 	}
 	return len(blockIndex) - 1
 }
-
 func renvoWasmLocalGet(out *renvoWasmBuffer, local int) {
 	renvoWasmPut(out, 0x20)
 	renvoWasmAppendU32(out, local)
 	return
 }
-
 func renvoWasmLocalSet(out *renvoWasmBuffer, local int) {
 	renvoWasmPut(out, 0x21)
 	renvoWasmAppendU32(out, local)
 	return
 }
-
 func renvoWasmLocalTee(out *renvoWasmBuffer, local int) {
 	renvoWasmPut(out, 0x22)
 	renvoWasmAppendU32(out, local)
 	return
 }
-
 func renvoWasmI32Load(out *renvoWasmBuffer, align int, off int) {
 	renvoWasmPut(out, 0x28)
 	renvoWasmAppendU32(out, align)
 	renvoWasmAppendU32(out, off)
 	return
 }
-
 func renvoWasmI32Load8U(out *renvoWasmBuffer) {
 	renvoWasmPut(out, 0x2d)
 	renvoWasmAppendU32(out, 0)
 	renvoWasmAppendU32(out, 0)
 	return
 }
-
 func renvoWasmI32Load16S(out *renvoWasmBuffer) {
 	renvoWasmPut(out, 0x2e)
 	renvoWasmAppendU32(out, 1)
 	renvoWasmAppendU32(out, 0)
 	return
 }
-
 func renvoWasmI32Store(out *renvoWasmBuffer, align int, off int) {
 	renvoWasmPut(out, 0x36)
 	renvoWasmAppendU32(out, align)
 	renvoWasmAppendU32(out, off)
 	return
 }
-
 func renvoWasmI32Store8(out *renvoWasmBuffer) {
 	renvoWasmPut(out, 0x3a)
 	renvoWasmAppendU32(out, 0)
 	renvoWasmAppendU32(out, 0)
 	return
 }
-
 func renvoWasmI32Store16(out *renvoWasmBuffer) {
 	renvoWasmPut(out, 0x3b)
 	renvoWasmAppendU32(out, 1)
 	renvoWasmAppendU32(out, 0)
 	return
 }
-
 func renvoWasmI64Const(out *renvoWasmBuffer, value int) {
 	renvoWasmPut(out, 0x42)
 	renvoWasmAppendS32(out, value)
 	return
 }
-
 func renvoWasmBr(out *renvoWasmBuffer, depth int) {
 	renvoWasmPut(out, 0x0c)
 	renvoWasmAppendU32(out, depth)
 	return
 }
-
 func renvoWasmBrIf(out *renvoWasmBuffer, depth int) {
 	renvoWasmPut(out, 0x0d)
 	renvoWasmAppendU32(out, depth)
 	return
 }
-
 func renvoWasm32SetPc(out *renvoWasmBuffer, pc int) {
 	renvoWasmAppendI32Const(out, pc)
 	renvoWasmLocalSet(out, renvoWasm32LocalPc)
 	return
 }
-
 func renvoWasm32RegGet(out *renvoWasmBuffer, reg int) {
 	renvoWasmLocalGet(out, renvoWasm32RegLocal(reg))
 	return
 }
-
 func renvoWasm32RegSet(out *renvoWasmBuffer, reg int) {
 	renvoWasmLocalSet(out, renvoWasm32RegLocal(reg))
 	return
 }
-
 func renvoWasm32StackAddr(out *renvoWasmBuffer, offset int) {
 	renvoWasmLocalGet(out, renvoWasm32LocalFp)
 	renvoWasmAppendI32Const(out, offset)
 	renvoWasmPut(out, 0x6b)
 	return
 }
-
 func renvoWasm32StackI64(out *renvoWasmBuffer, offset int) {
 	renvoWasm32StackAddr(out, offset)
 	renvoWasmAppendI64Load(out)
 	return
 }
-
 func renvoWasm32MemAddr(out *renvoWasmBuffer, base int, disp int) {
 	renvoWasm32RegGet(out, base)
 	if disp != 0 {
@@ -31094,7 +31092,6 @@ func renvoWasm32MemAddr(out *renvoWasmBuffer, base int, disp int) {
 	}
 	return
 }
-
 func renvoWasm32IndexAddr(out *renvoWasmBuffer, base int, index int, scale int, disp int) {
 	renvoWasm32RegGet(out, base)
 	renvoWasm32RegGet(out, index)
@@ -31109,7 +31106,6 @@ func renvoWasm32IndexAddr(out *renvoWasmBuffer, base int, index int, scale int, 
 	}
 	return
 }
-
 func renvoWasm32LoadSized(out *renvoWasmBuffer, size int) {
 	if size == 1 {
 		renvoWasmI32Load8U(out)
@@ -31122,7 +31118,6 @@ func renvoWasm32LoadSized(out *renvoWasmBuffer, size int) {
 	renvoWasmI32Load(out, 2, 0)
 	return
 }
-
 func renvoWasm32StoreSized(out *renvoWasmBuffer, size int) {
 	if size == 1 {
 		renvoWasmI32Store8(out)
@@ -31135,42 +31130,38 @@ func renvoWasm32StoreSized(out *renvoWasmBuffer, size int) {
 	renvoWasmI32Store(out, 2, 0)
 	return
 }
-
 func renvoWasm32AppendCond(out *renvoWasmBuffer, cond int) {
 	renvoWasmLocalGet(out, renvoWasm32LocalFlag)
 	renvoWasmAppendI32Const(out, 0)
 	renvoWasmPut(out, renvoWasm32CondOpcodes[cond])
 	return
 }
-
 func renvoWasm32Patch(a *renvoAsm, dataBase int, bssBase int) {
 	for i := 0; i+1 < len(a.relocs); i += 2 {
-		at := int(renvo_runtime_UnsafeInt32At(a.relocs, i))
-		label := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1))
-		target := renvoAsmLabelPosition(a, label)
+		at := int(renvo_runtime_UnsafeInt32At(a.relocs,i))
+		label := int(renvo_runtime_UnsafeInt32At(a.relocs,i+1))
+		target := renvoAsmLabelPosition(a,label)
 		if target >= 0 {
 			renvoPut32At(a.code, at, target)
 		}
 	}
 	for i := 0; i+2 < len(a.absRelocs); i += 3 {
-		at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i))
-		off := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1))
-		kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2))
+		at := int(renvo_runtime_UnsafeInt32At(a.absRelocs,i))
+		off := int(renvo_runtime_UnsafeInt32At(a.absRelocs,i+1))
+		kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs,i+2))
 		target := dataBase + off
-		if kind == renvoAbsBssReloc {
+		if kind == 1 {
 			target = bssBase + off
 		}
 		renvoPut32At(a.code, at, target)
 	}
 }
-
 func renvoWasm32AppendStoreConst(out *renvoWasmBuffer, addr int, value int) {
 	renvoWasmAppendI32Const(out, addr)
 	renvoWasmAppendI32Const(out, value)
 	renvoWasmI32Store(out, 2, 0)
 	return
 }
-
 func renvoWasm32AppendIov(out *renvoWasmBuffer, ptrLocal int, lenLocal int) {
 	renvoWasmAppendI32Const(out, renvoWasm32ScratchIov)
 	renvoWasmLocalGet(out, ptrLocal)
@@ -31180,7 +31171,6 @@ func renvoWasm32AppendIov(out *renvoWasmBuffer, ptrLocal int, lenLocal int) {
 	renvoWasmI32Store(out, 2, 0)
 	return
 }
-
 func renvoWasm32AppendErrnoResult(out *renvoWasmBuffer, resultPtr int) {
 	renvoWasmLocalTee(out, renvoWasm32LocalTmp)
 	renvoWasmPut(out, 0x45)
@@ -31194,7 +31184,6 @@ func renvoWasm32AppendErrnoResult(out *renvoWasmBuffer, resultPtr int) {
 	renvoWasmPut(out, 0x0b)
 	return
 }
-
 func renvoWasm32AppendErrnoOnlyResult(out *renvoWasmBuffer) {
 	renvoWasmLocalTee(out, renvoWasm32LocalTmp)
 	renvoWasmPut(out, 0x45)
@@ -31207,12 +31196,10 @@ func renvoWasm32AppendErrnoOnlyResult(out *renvoWasmBuffer) {
 	renvoWasmPut(out, 0x0b)
 	return
 }
-
 func renvoWasm32AppendSyscall(out *renvoWasmBuffer) {
 	renvoWasmAppendEncoded(out, "\x20\x02\x41\x01\x46\x04\x40\x41\x00\x20\x06\x36\x02\x00\x41\x04\x20\x03\x36\x02\x00\x20\x05\x41\x00\x41\x01\x41\x08\x10\x00\x22\x0d\x45\x04\x40\x41\x08\x28\x02\x00\x21\x02\x05\x41\x7f\x21\x02\x0b\x05\x20\x02\x41\x00\x46\x04\x40\x41\x00\x20\x06\x36\x02\x00\x41\x04\x20\x03\x36\x02\x00\x20\x05\x41\x00\x41\x01\x41\x08\x10\x01\x22\x0d\x45\x04\x40\x41\x08\x28\x02\x00\x21\x02\x05\x41\x7f\x21\x02\x0b\x05\x20\x02\x41\x12\x46\x04\x40\x41\x00\x20\x06\x36\x02\x00\x41\x04\x20\x03\x36\x02\x00\x20\x05\x41\x00\x41\x01\x20\x0b\xac\x41\x08\x10\x03\x22\x0d\x45\x04\x40\x41\x08\x28\x02\x00\x21\x02\x05\x41\x7f\x21\x02\x0b\x05\x20\x02\x41\x11\x46\x04\x40\x41\x00\x20\x06\x36\x02\x00\x41\x04\x20\x03\x36\x02\x00\x20\x05\x41\x00\x41\x01\x20\x0b\xac\x41\x08\x10\x02\x22\x0d\x45\x04\x40\x41\x08\x28\x02\x00\x21\x02\x05\x41\x7f\x21\x02\x0b\x05\x20\x02\x41\x03\x46\x04\x40\x20\x05\x10\x05\x22\x0d\x45\x04\x40\x41\x00\x21\x02\x05\x41\x7f\x21\x02\x0b\x05\x20\x02\x41\xdb\x00\x46\x04\x40\x20\x05\x41\xc0\x00\x10\x06\x22\x0d\x45\x04\x40\x41\x00\x21\x02\x05\x41\x7f\x21\x02\x0b\x05\x20\x02\x41\xd9\x01\x46\x04\x40\x20\x05\x20\x06\x20\x03\x42\x00\x41\x08\x10\x07\x22\x0d\x45\x04\x40\x41\x08\x28\x02\x00\x21\x02\x05\x41\x7f\x21\x02\x0b\x05\x20\x03\x41\x00\x4b\x04\x40\x20\x05\x20\x03\x41\x01\x6b\x6a\x2d\x00\x00\x45\x04\x40\x20\x03\x41\x01\x6b\x21\x03\x0b\x0b\x41\x00\x21\x0d\x20\x06\x41\xc0\x00\x71\x45\x45\x04\x40\x20\x0d\x41\x01\x72\x21\x0d\x0b\x20\x06\x41\x80\x04\x71\x45\x45\x04\x40\x20\x0d\x41\x08\x72\x21\x0d\x0b\x20\x05\x2d\x00\x00\x41\x2f\x46\x04\x40\x20\x05\x41\x01\x6a\x21\x05\x20\x03\x41\x01\x6b\x21\x03\x0b\x41\x03\x21\x0e\x02\x40\x03\x40\x20\x0e\x41\x00\x20\x05\x20\x03\x20\x0d\x20\x06\x41\x02\x71\x45\x04\x7e\x42\x82\x80\x01\x05\x42\xe6\x80\x80\x01\x0b\x42\x00\x41\x00\x41\x0c\x10\x04\x22\x0f\x45\x04\x40\x41\x0c\x28\x02\x00\x21\x02\x0c\x02\x0b\x20\x0e\x41\x01\x6a\x22\x0e\x41\x08\x4c\x0d\x00\x0b\x41\x7f\x21\x02\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b")
 	return
 }
-
 func renvoWasm32AppendOpen(out *renvoWasmBuffer) {
 	renvoWasmLocalGet(out, renvoWasm32LocalRdx)
 	renvoWasmAppendI32Const(out, 0)
@@ -31310,12 +31297,10 @@ func renvoWasm32AppendOpen(out *renvoWasmBuffer) {
 	renvoWasmPut(out, 0x0b)
 	return
 }
-
 func renvoWasm32AppendStringSliceBuild(out *renvoWasmBuffer, ptrArea int, countLocal int, destAddr int) {
 	renvoWasmAppendRecipe(out, "\x41\x00\x21\x0d\x02\x40\x03\x40\x20\x0d\xff\x01\x01\x4f\x0d\x01\xff\x00\x00\x20\x0d\x41\x04\x6c\x6a\x28\x02\x00\x21\x0e\x41\x00\x21\x0f\x02\x40\x03\x40\x20\x0e\x20\x0f\x6a\x2d\x00\x00\x45\x0d\x01\x20\x0f\x41\x01\x6a\x21\x0f\x0c\x00\x0b\x0b\xff\x00\x02\x20\x0d\x41\x10\x6c\x6a\x20\x0e\x36\x02\x00\xff\x00\x03\x20\x0d\x41\x10\x6c\x6a\x20\x0f\x36\x02\x00\x20\x0d\x41\x01\x6a\x21\x0d\x0c\x00\x0b\x0b", ptrArea, countLocal, destAddr, destAddr+8)
 	return
 }
-
 func renvoWasm32AppendBuildArgsEnv(out *renvoWasmBuffer, argsAddr int, envAddr int, envLenAddr int) {
 	renvoWasmAppendRecipe(out, "\x41\x10\x41\x14\x10\x08\x1a\x41\x80\x20\x41\x80\xc0\x00\x10\x09\x1a\x41\x10\x28\x02\x00\x21\x06\x20\x06\x21\x03\xff\x00\x00\x21\x05", argsAddr, 0, 0, 0)
 	renvoWasm32AppendStringSliceBuild(out, renvoWasm32ArgsPtrArea, renvoWasm32LocalRsi, argsAddr)
@@ -31323,11 +31308,9 @@ func renvoWasm32AppendBuildArgsEnv(out *renvoWasmBuffer, argsAddr int, envAddr i
 	renvoWasm32AppendStringSliceBuild(out, renvoWasm32EnvPtrArea, renvoWasm32LocalR8, envAddr)
 	return
 }
-
 func renvoWasm32AppendBinaryOp(out *renvoWasmBuffer, op int) {
 	renvoWasmPut(out, renvoWasm32BinaryOpcodes[op])
 }
-
 func renvoWasm32AppendInstr(out *renvoWasmBuffer, code []byte, pc int, nextIndex int, targetIndex int, loopDepth int) {
 	op := int(renvo_runtime_UnsafeByteAt(code, pc))
 	if op == renvoWasm32OpExit {
@@ -31442,7 +31425,6 @@ func renvoWasm32AppendInstr(out *renvoWasmBuffer, code []byte, pc int, nextIndex
 	renvoWasmBr(out, loopDepth)
 	return
 }
-
 func renvoWasm32AppendDirectArgs(out *renvoWasmBuffer, frameSize int) {
 	renvoWasmLocalGet(out, renvoWasm32LocalSp)
 	renvoWasmLocalGet(out, renvoWasm32LocalFp)
@@ -31459,20 +31441,17 @@ func renvoWasm32AppendDirectArgs(out *renvoWasmBuffer, frameSize int) {
 	renvoWasmLocalGet(out, renvoWasm32LocalR9)
 	return
 }
-
 func renvoWasm32AppendStateResults(out *renvoWasmBuffer) {
 	renvoWasmLocalGet(out, renvoWasm32LocalRax)
 	renvoWasmLocalGet(out, renvoWasm32LocalRdx)
 	renvoWasmLocalGet(out, renvoWasm32LocalRcx)
 	return
 }
-
 func renvoWasm32AppendStateReturn(out *renvoWasmBuffer) {
 	renvoWasm32AppendStateResults(out)
 	renvoWasmPut(out, 0x0f)
 	return
 }
-
 func renvoWasm32FindRoutineIndex(routinePcs []int, pc int) int {
 	lo := 0
 	hi := len(routinePcs)
@@ -31490,22 +31469,6 @@ func renvoWasm32FindRoutineIndex(routinePcs []int, pc int) int {
 	}
 	return -1
 }
-
-func renvoWasm32MarkFunc(g *renvoLinearGen, fnIndex int) {
-	if fnIndex < 0 || fnIndex >= len(g.funcReachable) {
-		return
-	}
-	if g.funcReachable[fnIndex] {
-		return
-	}
-	g.funcReachable[fnIndex] = true
-	g.funcQueue = append(g.funcQueue, fnIndex)
-	src := g.meta.prog.src
-	nameStart := g.meta.funcs[fnIndex].nameStart
-	nameEnd := g.meta.funcs[fnIndex].nameEnd
-	renvoAsmAddFuncSymbol(&g.asm, src, nameStart, nameEnd, g.funcLabels[fnIndex])
-}
-
 func renvoWasm32AppendDirectCall(out *renvoWasmBuffer, funcIndex int, frameSize int) {
 	renvoWasm32AppendDirectArgs(out, frameSize)
 	renvoWasmAppendCall(out, funcIndex)
@@ -31514,7 +31477,6 @@ func renvoWasm32AppendDirectCall(out *renvoWasmBuffer, funcIndex int, frameSize 
 	renvoWasmLocalSet(out, renvoWasm32LocalRax)
 	return
 }
-
 func renvoWasm32AppendInstrDirect(out *renvoWasmBuffer, code []byte, pc int, nextIndex int, targetIndex int, loopDepth int, callStackBase int, frameSize int, routinePcs []int, symbolPcs []int) {
 	op := int(renvo_runtime_UnsafeByteAt(code, pc))
 	if op == renvoWasm32OpExit {
@@ -31574,7 +31536,6 @@ func renvoWasm32AppendInstrDirect(out *renvoWasmBuffer, code []byte, pc int, nex
 	renvoWasm32AppendInstr(out, code, pc, nextIndex, targetIndex, loopDepth)
 	return
 }
-
 func renvoWasm32CanFusePair(code []byte, firstPc int, secondPc int) bool {
 	firstOp := int(renvo_runtime_UnsafeByteAt(code, firstPc))
 	secondOp := int(renvo_runtime_UnsafeByteAt(code, secondPc))
@@ -31591,7 +31552,6 @@ func renvoWasm32CanFusePair(code []byte, firstPc int, secondPc int) bool {
 	}
 	return false
 }
-
 func renvoWasm32AppendFusedPair(out *renvoWasmBuffer, code []byte, firstPc int, secondPc int) {
 	firstOp := int(renvo_runtime_UnsafeByteAt(code, firstPc))
 	firstA := int(renvo_runtime_UnsafeByteAt(code, firstPc+1))
@@ -31619,7 +31579,6 @@ func renvoWasm32AppendFusedPair(out *renvoWasmBuffer, code []byte, firstPc int, 
 	renvoWasm32RegSet(out, secondA)
 	return
 }
-
 func renvoWasm32PcInList(pcs []int, pc int) bool {
 	for i := 0; i < len(pcs); i++ {
 		if pcs[i] == pc {
@@ -31628,7 +31587,6 @@ func renvoWasm32PcInList(pcs []int, pc int) bool {
 	}
 	return false
 }
-
 func renvoWasm32SortPcs(pcs []int) []int {
 	for i := 1; i < len(pcs); i++ {
 		value := pcs[i]
@@ -31641,12 +31599,11 @@ func renvoWasm32SortPcs(pcs []int) []int {
 	}
 	return pcs
 }
-
 func renvoWasm32SymbolPcs(a *renvoAsm) []int {
 	pcs := make([]int, 0, 2048)
 	for i := 0; i < len(a.symbols); i++ {
-		label := a.symbols[i].label
-		pc := renvoAsmLabelPosition(a, label)
+		symbol := &a.symbols[i]
+		pc := renvoAsmLabelPosition(a,symbol.label)
 		if pc >= 0 {
 			if !renvoWasm32PcInList(pcs, pc) {
 				pcs = append(pcs, pc)
@@ -31656,15 +31613,14 @@ func renvoWasm32SymbolPcs(a *renvoAsm) []int {
 	pcs = renvoWasm32SortPcs(pcs)
 	return pcs
 }
-
 func renvoWasm32RoutinePcs(a *renvoAsm, code []byte, instrPcs []int) []int {
 	pcs := make([]int, 0, 1024)
 	marks := make([]byte, len(code)+1)
 	pcs = append(pcs, 0)
 	marks[0] = 1
 	for i := 0; i < len(a.symbols); i++ {
-		label := a.symbols[i].label
-		pc := renvoAsmLabelPosition(a, label)
+		symbol := &a.symbols[i]
+		pc := renvoAsmLabelPosition(a,symbol.label)
 		if pc >= 0 {
 			if pc >= 0 && pc < len(marks) && marks[pc] == 0 {
 				pcs = append(pcs, pc)
@@ -31688,7 +31644,6 @@ func renvoWasm32RoutinePcs(a *renvoAsm, code []byte, instrPcs []int) []int {
 	pcs = renvoWasm32SortPcs(pcs)
 	return pcs
 }
-
 func renvoWasm32SortedPcContains(pcs []int, pc int) bool {
 	lo := 0
 	hi := len(pcs)
@@ -31702,7 +31657,6 @@ func renvoWasm32SortedPcContains(pcs []int, pc int) bool {
 	}
 	return lo < len(pcs) && pcs[lo] == pc
 }
-
 func renvoWasm32RoutineEnds(routinePcs []int, symbolPcs []int, code []byte, instrPcs []int) []int {
 	ends := make([]int, len(routinePcs))
 	symbolIndex := 0
@@ -31738,7 +31692,6 @@ func renvoWasm32RoutineEnds(routinePcs []int, symbolPcs []int, code []byte, inst
 	}
 	return ends
 }
-
 func renvoWasm32RoutineFrameSize(code []byte, pcs []int) int {
 	frameSize := 0
 	for i := 0; i < len(pcs); i++ {
@@ -31767,7 +31720,6 @@ func renvoWasm32RoutineFrameSize(code []byte, pcs []int) int {
 	}
 	return renvoAlignValue(frameSize, 16)
 }
-
 func renvoWasm32AppendDirectRoutineBody(body *renvoWasmBuffer, code []byte, pcs []int, routinePcs []int, symbolPcs []int, callStackBase int, frameSize int) {
 	blockStarts := renvoWasm32BuildBlockStartsLocal(code, pcs)
 	instrBlockIndex := renvoWasm32BuildInstrBlockIndex(blockStarts, len(pcs))
@@ -31842,7 +31794,6 @@ func renvoWasm32AppendDirectRoutineBody(body *renvoWasmBuffer, code []byte, pcs 
 	renvoWasmPut(body, 0x0b)
 	return
 }
-
 func renvoWasm32AppendDirectStartBody(body *renvoWasmBuffer, topFunc int, exprStackBase int, callStackBase int, frameTop int) {
 	renvoWasmAppendU32(body, 1)
 	renvoWasmAppendU32(body, 16)
@@ -31865,13 +31816,11 @@ func renvoWasm32AppendDirectStartBody(body *renvoWasmBuffer, topFunc int, exprSt
 	renvoWasmPut(body, 0x0b)
 	return
 }
-
 func renvoWasm32TypeSectionFull() []byte {
 	var out renvoWasmBuffer
 	renvoWasmAppendEncoded(&out, "\x08\x60\x04\x7f\x7f\x7f\x7f\x01\x7f\x60\x05\x7f\x7f\x7f\x7e\x7f\x01\x7f\x60\x09\x7f\x7f\x7f\x7f\x7f\x7e\x7e\x7f\x7f\x01\x7f\x60\x01\x7f\x01\x7f\x60\x01\x7f\x00\x60\x00\x00\x60\x02\x7f\x7f\x01\x7f\x60\x09\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x03\x7f\x7f\x7f")
 	return out.data[:out.length]
 }
-
 func renvoWasm32AppendImport(out *renvoWasmBuffer, name string, typ int) {
 	renvoWasmAppendName(out, "wasi_snapshot_preview1")
 	renvoWasmAppendName(out, name)
@@ -31879,13 +31828,11 @@ func renvoWasm32AppendImport(out *renvoWasmBuffer, name string, typ int) {
 	renvoWasmAppendU32(out, typ)
 	return
 }
-
 func renvoWasm32ImportSectionFull() []byte {
 	var out renvoWasmBuffer
 	renvoWasmAppendEncoded(&out, "\x0d\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x08\x66\x64\x5f\x77\x72\x69\x74\x65\x00\x00\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x07\x66\x64\x5f\x72\x65\x61\x64\x00\x00\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x08\x66\x64\x5f\x70\x72\x65\x61\x64\x00\x01\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x09\x66\x64\x5f\x70\x77\x72\x69\x74\x65\x00\x01\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x09\x70\x61\x74\x68\x5f\x6f\x70\x65\x6e\x00\x02\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x08\x66\x64\x5f\x63\x6c\x6f\x73\x65\x00\x03\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x0d\x66\x64\x5f\x66\x64\x73\x74\x61\x74\x5f\x67\x65\x74\x00\x06\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x0a\x66\x64\x5f\x72\x65\x61\x64\x64\x69\x72\x00\x01\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x0e\x61\x72\x67\x73\x5f\x73\x69\x7a\x65\x73\x5f\x67\x65\x74\x00\x06\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x08\x61\x72\x67\x73\x5f\x67\x65\x74\x00\x06\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x11\x65\x6e\x76\x69\x72\x6f\x6e\x5f\x73\x69\x7a\x65\x73\x5f\x67\x65\x74\x00\x06\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x0b\x65\x6e\x76\x69\x72\x6f\x6e\x5f\x67\x65\x74\x00\x06\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x09\x70\x72\x6f\x63\x5f\x65\x78\x69\x74\x00\x04")
 	return out.data[:out.length]
 }
-
 func renvoWasm32FunctionSectionDirect(routineCount int, browserStep bool) []byte {
 	var out renvoWasmBuffer
 	count := routineCount + 1
@@ -31902,7 +31849,6 @@ func renvoWasm32FunctionSectionDirect(routineCount int, browserStep bool) []byte
 	}
 	return out.data[:out.length]
 }
-
 func renvoWasm32MemorySectionFull(memSize int) []byte {
 	pages := (memSize + 65535) / 65536
 	if pages < 16 {
@@ -31914,7 +31860,6 @@ func renvoWasm32MemorySectionFull(memSize int) []byte {
 	renvoWasmAppendU32(&out, pages)
 	return out.data[:out.length]
 }
-
 func renvoWasm32ExportSectionFull(browserStepIndex int) []byte {
 	var out renvoWasmBuffer
 	count := 2
@@ -31935,7 +31880,6 @@ func renvoWasm32ExportSectionFull(browserStepIndex int) []byte {
 	}
 	return out.data[:out.length]
 }
-
 func renvoWasm32AppendCodeSectionDirect(out *renvoWasmBuffer, a *renvoAsm, instrPcs []int, routinePcs []int, routineEnds []int, symbolPcs []int, callStackBase int, frameTop int, exprStackBase int, browserStepRoutine int) {
 	renvoWasmPut(out, 10)
 	lenAt := out.length
@@ -31969,7 +31913,6 @@ func renvoWasm32AppendCodeSectionDirect(out *renvoWasmBuffer, a *renvoAsm, instr
 	renvoWasmCompactU32Fixed5(out, lenAt, out.length-payloadStart)
 	return
 }
-
 func renvoWasm32AppendBrowserStepBody(body *renvoWasmBuffer, stepFunc int, exprStackBase int, callStackBase int, frameTop int) {
 	renvoWasmAppendU32(body, 1)
 	renvoWasmAppendU32(body, 16)
@@ -31987,7 +31930,6 @@ func renvoWasm32AppendBrowserStepBody(body *renvoWasmBuffer, stepFunc int, exprS
 	renvoWasmAppend4(body, 0x1a, 0x1a, 0x1a, 0x0b)
 	return
 }
-
 func renvoWasm32NamedRoutine(a *renvoAsm, routinePcs []int, name string) int {
 	for i := 0; i < len(a.symbols); i++ {
 		symbol := &a.symbols[i]
@@ -32004,14 +31946,13 @@ func renvoWasm32NamedRoutine(a *renvoAsm, routinePcs []int, name string) int {
 		if !matched {
 			continue
 		}
-		pc := renvoAsmLabelPosition(a, symbol.label)
+		pc := renvoAsmLabelPosition(a,symbol.label)
 		if pc >= 0 {
 			return renvoWasm32FindRoutineIndex(routinePcs, pc)
 		}
 	}
 	return -1
 }
-
 func renvoWasm32EnsureAdditionalCapacity(out *renvoWasmBuffer, additional int) {
 	need := out.length + additional
 	if need <= len(out.data) {
@@ -32026,7 +31967,6 @@ func renvoWasm32EnsureAdditionalCapacity(out *renvoWasmBuffer, additional int) {
 	out.data = next
 	return
 }
-
 func renvoWasm32AppendDirectRoutine(out *renvoWasmBuffer, code []byte, instrPcs []int, routinePcs []int, symbolPcs []int, callStackBase int) {
 	renvoWasm32EnsureAdditionalCapacity(out, len(instrPcs)*16+renvoWasm32RoutineBodyCapacity)
 	mark := renvo_runtime_ArenaMark()
@@ -32042,7 +31982,6 @@ func renvoWasm32AppendDirectRoutine(out *renvoWasmBuffer, code []byte, instrPcs 
 	}
 	return
 }
-
 func renvoWasm32DataSectionFull(dataBase int, data []byte) []byte {
 	var out renvoWasmBuffer
 	renvoWasmAppendU32(&out, 1)
@@ -32052,15 +31991,6 @@ func renvoWasm32DataSectionFull(dataBase int, data []byte) []byte {
 	renvoWasmAppendByteVec(&out, data)
 	return out.data[:out.length]
 }
-
-// RNVB v1 is a fixed header, a table of (PC, frame size, flags) records, the
-// compact instruction stream, and initialized data. All integers are little
-// endian and the checksum covers everything after the header.
-const renvoVMHeaderSize = 40
-const renvoVMDataBase = 256
-const renvoVMRoutineSize = 12
-const renvoVMRoutineFramed = 1
-
 func renvoVMChecksum(data []byte) int {
 	checkA := 1
 	checkB := 0
@@ -32070,10 +32000,6 @@ func renvoVMChecksum(data []byte) int {
 	}
 	return checkA | checkB<<16
 }
-
-// renvoVMImage preserves the compact instruction stream used as the input to
-// the WebAssembly formatter. This keeps VM execution on the same fully lowered
-// backend path while avoiding the size and nondeterminism of a host runtime.
 func renvoVMImage(a *renvoAsm) []byte {
 	dataBase := renvoVMDataBase
 	bssBase := renvoAlignTo8(dataBase + len(a.data))
@@ -32113,7 +32039,6 @@ func renvoVMImage(a *renvoAsm) []byte {
 	renvoPut32At(out, 32, renvoVMChecksum(out[renvoVMHeaderSize:]))
 	return out
 }
-
 func renvoWasm32Image(a *renvoAsm) []byte {
 	dataBase := renvoWasm32ProgramBase
 	bssBase := renvoAlignTo8(dataBase + len(a.data))
@@ -32145,433 +32070,93 @@ func renvoWasm32Image(a *renvoAsm) []byte {
 	}
 	return out.data[:out.length]
 }
-
-func renvoWasm32EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-	a := &g.asm
-	metaFn := &g.meta.funcs[fnInfoIndex]
-	fn := &g.prog.funcs[metaFn.declIndex]
-	g.locals = make([]renvoLocalInfo, renvoFunctionLocalCap(fn))
-	g.localCount = 0
-	g.gotoLabels = nil
-	g.breakDepth = 0
-	g.continueDepth = 0
-	g.pendingControl = 0
-	g.currentFunc = fnInfoIndex
-	g.returnStruct = 0
-	g.closureEnvOffset = 0
-	g.deferHeadOffset = 0
-	g.deferReturnLabel = 0
-	g.deferResultOffset = 0
-	g.deferSites = nil
-	g.emittingDefers = false
-	g.suppressPanicCheck = false
-	g.stackUsed = 0
-	g.stackPeak = 0
-	g.lastRangeReturns = false
-	renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-	if renvoTypeUsesHiddenResult(g.meta, metaFn.resultType) {
-		g.returnStruct = renvoAddTypedLocal(g, 0, 0, renvoTypeInt)
-		renvoWasm32EmitStack(a, renvoWasm32OpStoreStack, renvoWasm32RegRdi, g.returnStruct)
-	}
-	renvoBindFunctionParams(g, fnInfoIndex)
-	if !renvoBindClosureCaptures(g, fnInfoIndex) {
-		return false
-	}
-	if !renvoBindNamedResults(g, fnInfoIndex) {
-		return false
-	}
-	if !renvoPrepareFunctionControl(g) {
-		return false
-	}
-	if !renvoEmitLinearRange(g, fn.bodyStart+1, fn.bodyEnd) {
-		return false
-	}
-	if g.deferReturnLabel > 0 {
-		if !g.lastRangeReturns {
-			renvoAsmJmpLabel(a, g.deferReturnLabel)
-		}
-		if !renvoEmitFunctionControlEpilogue(g) {
-			return false
-		}
-	} else if !g.lastRangeReturns {
-		renvoMoveCapturedLocals(g, true)
-		renvoAsmPrimaryImm(a, 0)
-		renvoAsmLeave(a)
-		renvoAsmRet(a)
-	}
-	return true
+func renvoWasiWasm32AppendPrint(out *renvoWasmBuffer, ptr int, length int) {
+	renvoWasmAppendI32Const(out, 0)
+	renvoWasmAppendI32Const(out, ptr)
+	renvoWasmAppendI32Store(out)
+	renvoWasmAppendI32Const(out, 4)
+	renvoWasmAppendI32Const(out, length)
+	renvoWasmAppendI32Store(out)
+	renvoWasmAppendI32Const(out, 1)
+	renvoWasmAppendI32Const(out, 0)
+	renvoWasmAppendI32Const(out, 1)
+	renvoWasmAppendI32Const(out, 8)
+	renvoWasmAppendCall(out, 0)
+	renvoWasmPut(out, 0x1a)
 }
-
-func renvoWasm32EmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
-	a := &g.asm
-	renvoWasm32MarkFunc(g, fnIndex)
-	if wordCount > 0 {
-		renvoWasm32AsmPopRdi(a)
-	}
-	if wordCount > 1 {
-		renvoWasm32AsmPopRsi(a)
-	}
-	if wordCount > 2 {
-		renvoWasm32AsmPopRdx(a)
-	}
-	if wordCount > 3 {
-		renvoWasm32AsmPopRcx(a)
-	}
-	if wordCount > 4 {
-		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegR8)
-	}
-	if wordCount > 5 {
-		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegR9)
-	}
-	renvoWasm32EmitCallLabel(a, g.funcLabels[fnIndex], wordCount)
+func renvoWasiWasm32TypeSection() []byte {
+	var out renvoWasmBuffer
+	renvoWasmAppendU32(&out, 3)
+	renvoWasmPut(&out, 0x60)
+	renvoWasmAppendU32(&out, 4)
+	renvoWasmAppend4(&out, 0x7f, 0x7f, 0x7f, 0x7f)
+	renvoWasmAppendU32(&out, 1)
+	renvoWasmAppend2(&out, 0x7f, 0x60)
+	renvoWasmAppendU32(&out, 1)
+	renvoWasmPut(&out, 0x7f)
+	renvoWasmAppendU32(&out, 0)
+	renvoWasmPut(&out, 0x60)
+	renvoWasmAppendU32(&out, 0)
+	renvoWasmAppendU32(&out, 0)
+	return out.data[:out.length]
 }
-
-func renvoWasm32EmitRaxRcxOp(g *renvoLinearGen, tok int) bool {
-	a := &g.asm
-	p := g.prog
-	if tok < 0 || tok >= renvoTokCount(p) {
-		return false
-	}
-	start := renvoTokStart(p, tok)
-	end := renvoTokEnd(p, tok)
-	if start >= end {
-		return false
-	}
-	c0 := p.src[start]
-	c1 := byte(0)
-	if start+1 < end {
-		c1 = p.src[start+1]
-	}
-	if c0 == '+' {
-		renvoWasm32AsmAddRaxRcx(a)
-		return true
-	}
-	if c0 == '-' {
-		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRcx)
-		renvoWasm32EmitRegReg(a, renvoWasm32OpSubRegReg, renvoWasm32RegRdx, renvoWasm32RegRax)
-		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
-		return true
-	}
-	if c0 == '*' {
-		renvoWasm32EmitRegReg(a, renvoWasm32OpMulRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
-		return true
-	}
-	if c0 == '/' {
-		renvoWasm32AsmDivLeftRcxRightRax(a, false)
-		return true
-	}
-	if c0 == '%' {
-		renvoWasm32AsmDivLeftRcxRightRax(a, true)
-		return true
-	}
-	if c0 == '&' {
-		if c1 == '^' {
-			renvoWasm32EmitRegReg(a, renvoWasm32OpAndNotRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
-			renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
-		} else {
-			renvoWasm32EmitRegReg(a, renvoWasm32OpAndRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
-		}
-		return true
-	}
-	if c0 == '|' {
-		renvoWasm32EmitRegReg(a, renvoWasm32OpOrRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
-		return true
-	}
-	if c0 == '^' {
-		renvoWasm32EmitRegReg(a, renvoWasm32OpXorRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
-		return true
-	}
-	if c0 == '<' {
-		if c1 == '<' {
-			renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRax)
-			renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
-			renvoWasm32EmitRegReg(a, renvoWasm32OpShlRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
-		} else if c1 == '=' {
-			renvoWasm32AsmCmpRcxRaxSet(a, 0x9e)
-		} else {
-			renvoWasm32AsmCmpRcxRaxSet(a, 0x9c)
-		}
-		return true
-	}
-	if c0 == '>' {
-		if c1 == '>' {
-			renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRax)
-			renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
-			renvoWasm32EmitRegReg(a, renvoWasm32OpShrRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
-		} else if c1 == '=' {
-			renvoWasm32AsmCmpRcxRaxSet(a, 0x9d)
-		} else {
-			renvoWasm32AsmCmpRcxRaxSet(a, 0x9f)
-		}
-		return true
-	}
-	if c0 == '=' && c1 == '=' {
-		renvoWasm32AsmCmpRcxRaxSet(a, 0x94)
-		return true
-	}
-	if c0 == '!' && c1 == '=' {
-		renvoWasm32AsmCmpRcxRaxSet(a, 0x95)
-		return true
-	}
-	return false
+func renvoWasiWasm32ImportSection() []byte {
+	var out renvoWasmBuffer
+	renvoWasmAppendU32(&out, 2)
+	renvoWasmAppendName(&out, "wasi_snapshot_preview1")
+	renvoWasmAppendName(&out, "fd_write")
+	renvoWasmPut(&out, 0x00)
+	renvoWasmAppendU32(&out, 0)
+	renvoWasmAppendName(&out, "wasi_snapshot_preview1")
+	renvoWasmAppendName(&out, "proc_exit")
+	renvoWasmPut(&out, 0x00)
+	renvoWasmAppendU32(&out, 1)
+	return out.data[:out.length]
 }
-
-func renvoWasm32EmitFloatBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-	p := g.prog
-	a := &g.asm
-	e := &ep.exprs[idx]
-	if renvoTokCharIs(p, e.tok, '*') {
-		if !renvoEmitScalarExprForKind(g, ep, e.left, renvoTypeFloat64) {
-			return false
-		}
-		renvoAsmPushPrimary(a)
-		if !renvoEmitScalarExprForKind(g, ep, e.right, renvoTypeFloat64) {
-			return false
-		}
-		renvoAsmPopTertiary(a)
-		renvoWasm32EmitRegReg(a, renvoWasm32OpMulRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
-		renvoAsmSarPrimaryImm(a, 2)
-		return true
-	}
-	if renvoTokCharIs(p, e.tok, '/') {
-		if !renvoEmitScalarExprForKind(g, ep, e.left, renvoTypeFloat64) {
-			return false
-		}
-		renvoAsmShlPrimaryImm(a, 2)
-		renvoAsmPushPrimary(a)
-		if !renvoEmitScalarExprForKind(g, ep, e.right, renvoTypeFloat64) {
-			return false
-		}
-		renvoAsmPopTertiary(a)
-		renvoAsmDivLeftTertiaryRightPrimary(a, false)
-		return true
-	}
-	if !renvoEmitScalarExprForKind(g, ep, e.left, renvoTypeFloat64) {
-		return false
-	}
-	renvoAsmPushPrimary(a)
-	if !renvoEmitScalarExprForKind(g, ep, e.right, renvoTypeFloat64) {
-		return false
-	}
-	renvoAsmPopTertiary(a)
-	return renvoEmitPrimaryTertiaryOp(g, e.tok)
+func renvoWasiWasm32FunctionSection() []byte {
+	var out renvoWasmBuffer
+	renvoWasmAppendU32(&out, 1)
+	renvoWasmAppendU32(&out, 2)
+	return out.data[:out.length]
 }
-
-func renvoWasm32EnsureAppendAddrHelper(g *renvoLinearGen) int {
-	a := &g.asm
-	if g.appendAddrEmitted {
-		return g.appendAddrLabel
-	}
-	arenaAllocLabel := renvoEnsureArenaAllocHelper(g)
-	g.appendAddrEmitted = true
-	g.appendAddrLabel = renvoAsmNewLabel(a)
-	afterLabel := renvoAsmNewLabel(a)
-	renvoAsmJmpMarkLabel(a, afterLabel, g.appendAddrLabel)
-	noGrowLabel := renvoAsmNewLabel(a)
-	capNonZeroLabel := renvoAsmNewLabel(a)
-	capReadyLabel := renvoAsmNewLabel(a)
-	copyLoopLabel := renvoAsmNewLabel(a)
-	copyDoneLabel := renvoAsmNewLabel(a)
-	returnLabel := renvoAsmNewLabel(a)
-	ptrSlotOff := g.asm.bssSize
-	lenSlotOff := ptrSlotOff + 4
-	capSlotOff := lenSlotOff + 4
-	elemSizeOff := capSlotOff + 4
-	oldLenOff := elemSizeOff + 4
-	oldPtrOff := oldLenOff + 4
-	newCapOff := oldPtrOff + 4
-	allocSizeOff := newCapOff + 4
-	copySizeOff := allocSizeOff + 4
-	destOff := copySizeOff + 4
-	copyIndexOff := destOff + 4
-	g.asm.bssSize += 44
-
-	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegR8, renvoWasm32RegRsi, 0, 4)
-	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRcx, renvoWasm32RegR9, 0, 4)
-	renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegR8, renvoWasm32RegRcx)
-	renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, noGrowLabel)
-
-	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
-	renvoAsmStorePrimaryBss(a, elemSizeOff)
-	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRdi)
-	renvoAsmStorePrimaryBss(a, ptrSlotOff)
-	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRsi)
-	renvoAsmStorePrimaryBss(a, lenSlotOff)
-	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegR9)
-	renvoAsmStorePrimaryBss(a, capSlotOff)
-	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegR8)
-	renvoAsmStorePrimaryBss(a, oldLenOff)
-	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRax, renvoWasm32RegRdi, 0, 4)
-	renvoAsmStorePrimaryBss(a, oldPtrOff)
-
-	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
-	renvoAsmCmpPrimaryImm8(a, 0)
-	renvoAsmJnzLabel(a, capNonZeroLabel)
-	renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRcx, 16)
-	renvoAsmJmpMarkLabel(a, capReadyLabel, capNonZeroLabel)
-	renvoWasm32EmitRegReg(a, renvoWasm32OpAddRegReg, renvoWasm32RegRcx, renvoWasm32RegR8)
-	renvoAsmMarkLabel(a, capReadyLabel)
-	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
-	renvoAsmStorePrimaryBss(a, newCapOff)
-	renvoAsmLoadPrimaryBss(a, elemSizeOff)
-	renvoAsmPushPrimary(a)
-	renvoAsmLoadPrimaryBss(a, newCapOff)
-	renvoAsmPopTertiary(a)
-	renvoWasm32EmitRegReg(a, renvoWasm32OpMulRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
-	renvoAsmStorePrimaryBss(a, allocSizeOff)
-
-	renvoAsmLoadPrimaryBss(a, allocSizeOff)
-	renvoAsmCallLabel(a, arenaAllocLabel)
-	if g.meta.panicEnabled {
-		allocOKLabel := renvoAsmNewLabel(a)
-		renvoAsmJnzPrimary(a, allocOKLabel)
-		renvoAsmJmpLabel(a, returnLabel)
-		renvoAsmMarkLabel(a, allocOKLabel)
-	}
-	renvoAsmStorePrimaryBss(a, destOff)
-
-	renvoAsmLoadPrimaryBss(a, oldLenOff)
-	renvoAsmPushPrimary(a)
-	renvoAsmLoadPrimaryBss(a, elemSizeOff)
-	renvoAsmCopyPrimaryToSecondary(a)
-	renvoAsmPopPrimary(a)
-	renvoWasm32EmitRegReg(a, renvoWasm32OpMulRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
-	renvoAsmStorePrimaryBss(a, copySizeOff)
-	renvoAsmPrimaryImm(a, 0)
-	renvoAsmStorePrimaryBss(a, copyIndexOff)
-	renvoAsmMarkLabel(a, copyLoopLabel)
-	renvoAsmLoadPrimaryBss(a, copyIndexOff)
-	renvoAsmPushPrimary(a)
-	renvoAsmLoadPrimaryBss(a, copySizeOff)
-	renvoAsmPopTertiary(a)
-	renvoAsmCmpTertiaryPrimarySet(a, 0x9d)
-	renvoAsmCmpPrimaryImm8(a, 0)
-	renvoAsmJnzLabel(a, copyDoneLabel)
-	renvoAsmLoadPrimaryBss(a, copyIndexOff)
-	renvoAsmPushPrimary(a)
-	renvoAsmLoadPrimaryBss(a, oldPtrOff)
-	renvoAsmPopTertiary(a)
-	renvoAsmLoadBytePrimaryIndexTertiary(a)
-	renvoAsmPushPrimary(a)
-	renvoAsmLoadPrimaryBss(a, copyIndexOff)
-	renvoAsmPushPrimary(a)
-	renvoAsmLoadPrimaryBss(a, destOff)
-	renvoAsmCopyPrimaryToSecondary(a)
-	renvoAsmPopTertiary(a)
-	renvoAsmPopPrimary(a)
-	renvoAsmStorePrimaryMemSecondaryTertiarySize(a, 1)
-	renvoAsmLoadPrimaryBss(a, copyIndexOff)
-	renvoAsmIncPrimary(a)
-	renvoAsmStorePrimaryBss(a, copyIndexOff)
-	renvoAsmJmpMarkLabel(a, copyLoopLabel, copyDoneLabel)
-
-	renvoAsmLoadPrimaryBss(a, ptrSlotOff)
-	renvoAsmPushPrimary(a)
-	renvoAsmLoadPrimaryBss(a, destOff)
-	renvoAsmPopSecondary(a)
-	renvoAsmStorePrimaryMemSecondaryDisp(a, 0)
-	renvoAsmLoadPrimaryBss(a, capSlotOff)
-	renvoAsmPushPrimary(a)
-	renvoAsmLoadPrimaryBss(a, newCapOff)
-	renvoAsmPopSecondary(a)
-	renvoAsmStorePrimaryMemSecondaryDisp(a, 0)
-	renvoAsmLoadPrimaryBss(a, lenSlotOff)
-	renvoAsmPushPrimary(a)
-	renvoAsmLoadPrimaryBss(a, oldLenOff)
-	renvoAsmIncPrimary(a)
-	renvoAsmPopSecondary(a)
-	renvoAsmStorePrimaryMemSecondaryDisp(a, 0)
-	renvoAsmLoadPrimaryBss(a, copySizeOff)
-	renvoAsmCopyPrimaryToTertiary(a)
-	renvoAsmLoadPrimaryBss(a, destOff)
-	renvoAsmAddPrimaryTertiary(a)
-	renvoAsmJmpLabel(a, returnLabel)
-
-	renvoAsmMarkLabel(a, noGrowLabel)
-	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRcx, renvoWasm32RegRsi, 0, 4)
-	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRax, renvoWasm32RegRdi, 0, 4)
-	renvoWasm32EmitRegReg(a, renvoWasm32OpMulRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
-	renvoWasm32AsmAddRaxRcx(a)
-	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRcx, renvoWasm32RegRsi, 0, 4)
-	renvoWasm32AsmIncRcx(a)
-	renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRcx, renvoWasm32RegRsi, 0, 4)
-	renvoAsmMarkLabel(a, returnLabel)
-	renvoAsmRet(a)
-	renvoAsmMarkLabel(a, afterLabel)
-	return g.appendAddrLabel
+func renvoWasiWasm32MemorySection() []byte {
+	var out renvoWasmBuffer
+	renvoWasmAppendU32(&out, 1)
+	renvoWasmPut(&out, 0x00)
+	renvoWasmAppendU32(&out, 1)
+	return out.data[:out.length]
 }
-
-func renvoWasm32EnsureAppend8Helper(g *renvoLinearGen) int {
-	a := &g.asm
-	if g.append8Emitted {
-		return g.append8Label
-	}
-	g.append8Emitted = true
-	g.append8Label = renvoAsmNewLabel(a)
-	afterLabel := renvoAsmNewLabel(a)
-	renvoAsmJmpMarkLabel(a, afterLabel, g.append8Label)
-	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRcx, renvoWasm32RegRsi, 0, 4)
-	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRax, renvoWasm32RegRdi, 0, 4)
-	renvoWasm32EmitIndex(a, renvoWasm32OpStoreIndex, renvoWasm32RegRdx, renvoWasm32RegRax, renvoWasm32RegRcx, 1, 0, 1)
-	renvoWasm32AsmIncRcx(a)
-	renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRcx, renvoWasm32RegRsi, 0, 4)
-	renvoAsmRet(a)
-	renvoAsmMarkLabel(a, afterLabel)
-	return g.append8Label
+func renvoWasiWasm32ExportSection() []byte {
+	var out renvoWasmBuffer
+	renvoWasmAppendU32(&out, 2)
+	renvoWasmAppendName(&out, "memory")
+	renvoWasmPut(&out, 0x02)
+	renvoWasmAppendU32(&out, 0)
+	renvoWasmAppendName(&out, "_start")
+	renvoWasmPut(&out, 0x00)
+	renvoWasmAppendU32(&out, 2)
+	return out.data[:out.length]
 }
-
-func renvoWasm32EnsureAppend64Helper(g *renvoLinearGen) int {
-	a := &g.asm
-	if g.append64Emitted {
-		return g.append64Label
+func renvoWasiWasm32CodeSection(code []byte) []byte {
+	var body renvoWasmBuffer
+	renvoWasmAppendU32(&body, 0)
+	for i := 0; i < len(code); i++ {
+		renvoWasmPut(&body, code[i])
 	}
-	g.append64Emitted = true
-	g.append64Label = renvoAsmNewLabel(a)
-	afterLabel := renvoAsmNewLabel(a)
-	renvoAsmJmpMarkLabel(a, afterLabel, g.append64Label)
-	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRcx, renvoWasm32RegRsi, 0, 4)
-	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRax, renvoWasm32RegRdi, 0, 4)
-	renvoWasm32EmitIndex(a, renvoWasm32OpStoreIndex, renvoWasm32RegRdx, renvoWasm32RegRax, renvoWasm32RegRcx, 8, 0, 4)
-	renvoWasm32AsmIncRcx(a)
-	renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRcx, renvoWasm32RegRsi, 0, 4)
-	renvoAsmRet(a)
-	renvoAsmMarkLabel(a, afterLabel)
-	return g.append64Label
+	renvoWasmPut(&body, 0x0b)
+	var out renvoWasmBuffer
+	renvoWasmAppendU32(&out, 1)
+	renvoWasmAppendByteVec(&out, body.data)
+	return out.data[:out.length]
 }
-
-func renvoWasm32EnsureStringEqualHelper(g *renvoLinearGen) int {
-	a := &g.asm
-	if g.streqEmitted {
-		return g.streqLabel
-	}
-	g.streqEmitted = true
-	g.streqLabel = renvoAsmNewLabel(a)
-	afterLabel := renvoAsmNewLabel(a)
-	notEqualLabel := renvoAsmNewLabel(a)
-	equalLabel := renvoAsmNewLabel(a)
-	loopLabel := renvoAsmNewLabel(a)
-	renvoAsmJmpMarkLabel(a, afterLabel, g.streqLabel)
-	renvoAsmPrimaryImm(a, 0)
-	renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRsi, renvoWasm32RegRcx)
-	renvoAsmJnzLabel(a, notEqualLabel)
-	renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRsi, 0)
-	renvoAsmJzLabel(a, equalLabel)
-	renvoAsmMarkLabel(a, loopLabel)
-	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegR8, renvoWasm32RegRdi, 0, 1)
-	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegR9, renvoWasm32RegRdx, 0, 1)
-	renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegR8, renvoWasm32RegR9)
-	renvoAsmJnzLabel(a, notEqualLabel)
-	renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRdi, 1)
-	renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRdx, 1)
-	renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRsi, -1)
-	renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRsi, 0)
-	renvoAsmJnzLabel(a, loopLabel)
-	renvoAsmMarkLabel(a, equalLabel)
-	renvoAsmPrimaryImm(a, 1)
-	renvoAsmMarkLabel(a, notEqualLabel)
-	renvoAsmRet(a)
-	renvoAsmMarkLabel(a, afterLabel)
-	return g.streqLabel
+func renvoWasiWasm32DataSection(dataOff int, data []byte) []byte {
+	var out renvoWasmBuffer
+	renvoWasmAppendU32(&out, 1)
+	renvoWasmPut(&out, 0x00)
+	renvoWasmAppendI32Const(&out, dataOff)
+	renvoWasmPut(&out, 0x0b)
+	renvoWasmAppendByteVec(&out, data)
+	return out.data[:out.length]
 }
 
 // source: backend/compiler_linux_amd64_impl.go
@@ -35568,100 +35153,633 @@ func renvoWasiWasm32EmitBinary(p *renvoProgram, meta *renvoMeta, body *renvoBody
 	return out.data[:out.length]
 }
 
-func renvoWasiWasm32AppendPrint(out *renvoWasmBuffer, ptr int, length int) {
-	renvoWasmAppendI32Const(out, 0)
-	renvoWasmAppendI32Const(out, ptr)
-	renvoWasmAppendI32Store(out)
-	renvoWasmAppendI32Const(out, 4)
-	renvoWasmAppendI32Const(out, length)
-	renvoWasmAppendI32Store(out)
-	renvoWasmAppendI32Const(out, 1)
-	renvoWasmAppendI32Const(out, 0)
-	renvoWasmAppendI32Const(out, 1)
-	renvoWasmAppendI32Const(out, 8)
-	renvoWasmAppendCall(out, 0)
-	renvoWasmPut(out, 0x1a)
-}
-
-func renvoWasiWasm32TypeSection() []byte {
-	var out renvoWasmBuffer
-	renvoWasmAppendU32(&out, 3)
-	renvoWasmPut(&out, 0x60)
-	renvoWasmAppendU32(&out, 4)
-	renvoWasmAppend4(&out, 0x7f, 0x7f, 0x7f, 0x7f)
-	renvoWasmAppendU32(&out, 1)
-	renvoWasmAppend2(&out, 0x7f, 0x60)
-	renvoWasmAppendU32(&out, 1)
-	renvoWasmPut(&out, 0x7f)
-	renvoWasmAppendU32(&out, 0)
-	renvoWasmPut(&out, 0x60)
-	renvoWasmAppendU32(&out, 0)
-	renvoWasmAppendU32(&out, 0)
-	return out.data[:out.length]
-}
-
-func renvoWasiWasm32ImportSection() []byte {
-	var out renvoWasmBuffer
-	renvoWasmAppendU32(&out, 2)
-	renvoWasmAppendName(&out, "wasi_snapshot_preview1")
-	renvoWasmAppendName(&out, "fd_write")
-	renvoWasmPut(&out, 0x00)
-	renvoWasmAppendU32(&out, 0)
-	renvoWasmAppendName(&out, "wasi_snapshot_preview1")
-	renvoWasmAppendName(&out, "proc_exit")
-	renvoWasmPut(&out, 0x00)
-	renvoWasmAppendU32(&out, 1)
-	return out.data[:out.length]
-}
-
-func renvoWasiWasm32FunctionSection() []byte {
-	var out renvoWasmBuffer
-	renvoWasmAppendU32(&out, 1)
-	renvoWasmAppendU32(&out, 2)
-	return out.data[:out.length]
-}
-
-func renvoWasiWasm32MemorySection() []byte {
-	var out renvoWasmBuffer
-	renvoWasmAppendU32(&out, 1)
-	renvoWasmPut(&out, 0x00)
-	renvoWasmAppendU32(&out, 1)
-	return out.data[:out.length]
-}
-
-func renvoWasiWasm32ExportSection() []byte {
-	var out renvoWasmBuffer
-	renvoWasmAppendU32(&out, 2)
-	renvoWasmAppendName(&out, "memory")
-	renvoWasmPut(&out, 0x02)
-	renvoWasmAppendU32(&out, 0)
-	renvoWasmAppendName(&out, "_start")
-	renvoWasmPut(&out, 0x00)
-	renvoWasmAppendU32(&out, 2)
-	return out.data[:out.length]
-}
-
-func renvoWasiWasm32CodeSection(code []byte) []byte {
-	var body renvoWasmBuffer
-	renvoWasmAppendU32(&body, 0)
-	for i := 0; i < len(code); i++ {
-		renvoWasmPut(&body, code[i])
+func renvoWasm32EmitWideBinaryStack(g *renvoLinearGen, dest int, left int, right int, tok int, signed bool) bool {
+	renvoNonNil(g)
+	if g.c.renvoTarget == renvoTargetVM32 {
+		return renvoWasm32EmitWideBinaryPortable(g, dest, left, right, tok, signed)
 	}
-	renvoWasmPut(&body, 0x0b)
-	var out renvoWasmBuffer
-	renvoWasmAppendU32(&out, 1)
-	renvoWasmAppendByteVec(&out, body.data)
-	return out.data[:out.length]
+	op := 0
+	if renvoTokCharIs(g.prog, tok, '+') {
+		op = 0x7c
+	} else if renvoTokCharIs(g.prog, tok, '-') {
+		op = 0x7d
+	} else if renvoTokCharIs(g.prog, tok, '*') {
+		op = 0x7e
+	} else if renvoTokCharIs(g.prog, tok, '/') {
+		op = 0x80
+		if signed {
+			op = 0x7f
+		}
+	} else if renvoTokCharIs(g.prog, tok, '%') {
+		op = 0x82
+		if signed {
+			op = 0x81
+		}
+	} else if renvoTokCharIs(g.prog, tok, '&') {
+		op = 0x83
+	} else if renvoTokCharIs(g.prog, tok, '|') {
+		op = 0x84
+	} else if renvoTokCharIs(g.prog, tok, '^') {
+		op = 0x85
+	} else if renvoTok2Is(g.prog, tok, '<', '<') {
+		op = 0x86
+	} else if renvoTok2Is(g.prog, tok, '>', '>') {
+		op = 0x88
+		if signed {
+			op = 0x87
+		}
+	}
+	if op == 0 {
+		return false
+	}
+	if op >= 0x7f && op <= 0x82 {
+		// Keep division by zero on Renvo's panic path rather than allowing a
+		// WebAssembly trap, so recover continues to work.
+		nonzero := renvoAsmNewLabel(&g.asm)
+		renvoAsmLoadPrimaryStack(&g.asm, right-g.c.renvoNativeIntSize)
+		renvoAsmJnzPrimary(&g.asm, nonzero)
+		renvoAsmLoadPrimaryStack(&g.asm, right)
+		renvoEmitRuntimeNonNilPrimary(g)
+		renvoAsmMarkLabel(&g.asm, nonzero)
+	}
+	renvoWasm32EmitWideOp(&g.asm, renvoWasm32OpWideBinary, dest, left, right, op)
+	return true
 }
 
-func renvoWasiWasm32DataSection(dataOff int, data []byte) []byte {
-	var out renvoWasmBuffer
-	renvoWasmAppendU32(&out, 1)
-	renvoWasmPut(&out, 0x00)
-	renvoWasmAppendI32Const(&out, dataOff)
-	renvoWasmPut(&out, 0x0b)
-	renvoWasmAppendByteVec(&out, data)
-	return out.data[:out.length]
+func renvoWasm32EmitWideBinaryPortable(g *renvoLinearGen, dest int, left int, right int, tok int, signed bool) bool {
+	if renvoTokCharIs(g.prog, tok, '+') {
+		renvoEmitWideAddStack(g, dest, left, right)
+		return true
+	}
+	if renvoTokCharIs(g.prog, tok, '-') {
+		renvoEmitWideSubStack(g, dest, left, right)
+		return true
+	}
+	if renvoTokCharIs(g.prog, tok, '*') {
+		renvoEmitWideMulStack(g, dest, left, right)
+		return true
+	}
+	if renvoTokCharIs(g.prog, tok, '/') || renvoTokCharIs(g.prog, tok, '%') {
+		renvoEmitWideDivStack(g, dest, left, right, signed, renvoTokCharIs(g.prog, tok, '%'))
+		return true
+	}
+	if renvoTok2Is(g.prog, tok, '<', '<') || renvoTok2Is(g.prog, tok, '>', '>') {
+		renvoEmitWideShiftStack(g, dest, left, right, renvoTok2Is(g.prog, tok, '>', '>'), signed)
+		return true
+	}
+	if renvoTokCharIs(g.prog, tok, '&') || renvoTokCharIs(g.prog, tok, '|') || renvoTokCharIs(g.prog, tok, '^') {
+		for at := 0; at < renvoBackendValueSlotSize; at += g.c.renvoNativeIntSize {
+			renvoAsmLoadPrimaryStack(&g.asm, right-at)
+			renvoAsmLoadTertiaryStack(&g.asm, left-at)
+			if !renvoEmitPrimaryTertiaryOp(g, tok) {
+				return false
+			}
+			renvoAsmStorePrimaryStack(&g.asm, dest-at)
+		}
+		return true
+	}
+	return false
+}
+
+func renvoWasm32EmitWideCompareStack(g *renvoLinearGen, left int, right int, tok int, signed bool) bool {
+	renvoNonNil(g)
+	if g.c.renvoTarget == renvoTargetVM32 {
+		return renvoWasm32EmitWideComparePortable(g, left, right, tok, signed)
+	}
+	p := g.prog
+	op := 0
+	if renvoTok2Is(p, tok, '=', '=') {
+		op = 0x51
+	} else if renvoTok2Is(p, tok, '!', '=') {
+		op = 0x52
+	} else if renvoTokCharIs(p, tok, '<') {
+		op = 0x54
+		if signed {
+			op = 0x53
+		}
+	} else if renvoTokCharIs(p, tok, '>') {
+		op = 0x56
+		if signed {
+			op = 0x55
+		}
+	} else if renvoTok2Is(p, tok, '<', '=') {
+		op = 0x58
+		if signed {
+			op = 0x57
+		}
+	} else if renvoTok2Is(p, tok, '>', '=') {
+		op = 0x5a
+		if signed {
+			op = 0x59
+		}
+	}
+	if op == 0 {
+		return false
+	}
+	renvoWasm32EmitWideOp(&g.asm, renvoWasm32OpWideCompare, 0, left, right, op)
+	return true
+}
+
+func renvoWasm32EmitWideComparePortable(g *renvoLinearGen, left int, right int, tok int, signed bool) bool {
+	p := g.prog
+	equal := renvoTok2Is(p, tok, '=', '=') || renvoTok2Is(p, tok, '!', '=')
+	if equal {
+		notEqual := renvoAsmNewLabel(&g.asm)
+		done := renvoAsmNewLabel(&g.asm)
+		renvoEmitNativeCompareStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, 0x94)
+		renvoAsmJzPrimary(&g.asm, notEqual)
+		renvoEmitNativeCompareStack(g, left, right, 0x94)
+		renvoAsmJmpMarkLabel(&g.asm, done, notEqual)
+		renvoAsmPrimaryImm(&g.asm, 0)
+		renvoAsmMarkLabel(&g.asm, done)
+		if renvoTok2Is(p, tok, '!', '=') {
+			renvoAsmBoolNotPrimary(&g.asm)
+		}
+		return true
+	}
+	greater := renvoTokCharIs(p, tok, '>') || renvoTok2Is(p, tok, '>', '=')
+	inclusive := renvoTok2Is(p, tok, '<', '=') || renvoTok2Is(p, tok, '>', '=')
+	if greater != inclusive {
+		left, right = right, left
+	}
+	renvoEmitWideLessStack(g, left, right, signed)
+	if inclusive {
+		renvoAsmBoolNotPrimary(&g.asm)
+	}
+	return true
+}
+
+func renvoWasm32StoreParamWord(g *renvoLinearGen, reg int, offset int) {
+	a := &g.asm
+	if reg == 0 {
+		renvoWasm32EmitStack(a, renvoWasm32OpStoreStack, renvoWasm32RegRdi, offset)
+		return
+	}
+	if reg == 1 {
+		renvoWasm32EmitStack(a, renvoWasm32OpStoreStack, renvoWasm32RegRsi, offset)
+		return
+	}
+	if reg == 2 {
+		renvoWasm32EmitStack(a, renvoWasm32OpStoreStack, renvoWasm32RegRdx, offset)
+		return
+	}
+	if reg == 3 {
+		renvoWasm32EmitStack(a, renvoWasm32OpStoreStack, renvoWasm32RegRcx, offset)
+		return
+	}
+	if reg == 4 {
+		renvoWasm32EmitStack(a, renvoWasm32OpStoreStack, renvoWasm32RegR8, offset)
+		return
+	}
+	if reg == 5 {
+		renvoWasm32EmitStack(a, renvoWasm32OpStoreStack, renvoWasm32RegR9, offset)
+		return
+	}
+	renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRax)
+	renvoWasm32EmitStack(a, renvoWasm32OpStoreStack, renvoWasm32RegRax, offset)
+}
+
+func renvoWasm32MarkFunc(g *renvoLinearGen, fnIndex int) {
+	if fnIndex < 0 || fnIndex >= len(g.funcReachable) {
+		return
+	}
+	if g.funcReachable[fnIndex] {
+		return
+	}
+	g.funcReachable[fnIndex] = true
+	g.funcQueue = append(g.funcQueue, fnIndex)
+	src := g.meta.prog.src
+	nameStart := g.meta.funcs[fnIndex].nameStart
+	nameEnd := g.meta.funcs[fnIndex].nameEnd
+	renvoAsmAddFuncSymbol(&g.asm, src, nameStart, nameEnd, g.funcLabels[fnIndex])
+}
+
+func renvoWasm32EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
+	a := &g.asm
+	metaFn := &g.meta.funcs[fnInfoIndex]
+	fn := &g.prog.funcs[metaFn.declIndex]
+	g.locals = make([]renvoLocalInfo, renvoFunctionLocalCap(fn))
+	g.localCount = 0
+	g.gotoLabels = nil
+	g.breakDepth = 0
+	g.continueDepth = 0
+	g.pendingControl = 0
+	g.currentFunc = fnInfoIndex
+	g.returnStruct = 0
+	g.closureEnvOffset = 0
+	g.deferHeadOffset = 0
+	g.deferReturnLabel = 0
+	g.deferResultOffset = 0
+	g.deferSites = nil
+	g.emittingDefers = false
+	g.suppressPanicCheck = false
+	g.stackUsed = 0
+	g.stackPeak = 0
+	g.lastRangeReturns = false
+	renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
+	if renvoTypeUsesHiddenResult(g.meta, metaFn.resultType) {
+		g.returnStruct = renvoAddTypedLocal(g, 0, 0, renvoTypeInt)
+		renvoWasm32EmitStack(a, renvoWasm32OpStoreStack, renvoWasm32RegRdi, g.returnStruct)
+	}
+	renvoBindFunctionParams(g, fnInfoIndex)
+	if !renvoBindClosureCaptures(g, fnInfoIndex) {
+		return false
+	}
+	if !renvoBindNamedResults(g, fnInfoIndex) {
+		return false
+	}
+	if !renvoPrepareFunctionControl(g) {
+		return false
+	}
+	if !renvoEmitLinearRange(g, fn.bodyStart+1, fn.bodyEnd) {
+		return false
+	}
+	if g.deferReturnLabel > 0 {
+		if !g.lastRangeReturns {
+			renvoAsmJmpLabel(a, g.deferReturnLabel)
+		}
+		if !renvoEmitFunctionControlEpilogue(g) {
+			return false
+		}
+	} else if !g.lastRangeReturns {
+		renvoMoveCapturedLocals(g, true)
+		renvoAsmPrimaryImm(a, 0)
+		renvoAsmLeave(a)
+		renvoAsmRet(a)
+	}
+	return true
+}
+
+func renvoWasm32EmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
+	a := &g.asm
+	renvoWasm32MarkFunc(g, fnIndex)
+	if wordCount > 0 {
+		renvoWasm32AsmPopRdi(a)
+	}
+	if wordCount > 1 {
+		renvoWasm32AsmPopRsi(a)
+	}
+	if wordCount > 2 {
+		renvoWasm32AsmPopRdx(a)
+	}
+	if wordCount > 3 {
+		renvoWasm32AsmPopRcx(a)
+	}
+	if wordCount > 4 {
+		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegR8)
+	}
+	if wordCount > 5 {
+		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegR9)
+	}
+	renvoWasm32EmitCallLabel(a, g.funcLabels[fnIndex], wordCount)
+}
+
+func renvoWasm32EmitRaxRcxOp(g *renvoLinearGen, tok int) bool {
+	a := &g.asm
+	p := g.prog
+	if tok < 0 || tok >= renvoTokCount(p) {
+		return false
+	}
+	start := renvoTokStart(p, tok)
+	end := renvoTokEnd(p, tok)
+	if start >= end {
+		return false
+	}
+	c0 := p.src[start]
+	c1 := byte(0)
+	if start+1 < end {
+		c1 = p.src[start+1]
+	}
+	if c0 == '+' {
+		renvoWasm32AsmAddRaxRcx(a)
+		return true
+	}
+	if c0 == '-' {
+		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRcx)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpSubRegReg, renvoWasm32RegRdx, renvoWasm32RegRax)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
+		return true
+	}
+	if c0 == '*' {
+		renvoWasm32EmitRegReg(a, renvoWasm32OpMulRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+		return true
+	}
+	if c0 == '/' {
+		renvoWasm32AsmDivLeftRcxRightRax(a, false)
+		return true
+	}
+	if c0 == '%' {
+		renvoWasm32AsmDivLeftRcxRightRax(a, true)
+		return true
+	}
+	if c0 == '&' {
+		if c1 == '^' {
+			renvoWasm32EmitRegReg(a, renvoWasm32OpAndNotRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
+			renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+		} else {
+			renvoWasm32EmitRegReg(a, renvoWasm32OpAndRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+		}
+		return true
+	}
+	if c0 == '|' {
+		renvoWasm32EmitRegReg(a, renvoWasm32OpOrRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+		return true
+	}
+	if c0 == '^' {
+		renvoWasm32EmitRegReg(a, renvoWasm32OpXorRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+		return true
+	}
+	if c0 == '<' {
+		if c1 == '<' {
+			renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRax)
+			renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+			renvoWasm32EmitRegReg(a, renvoWasm32OpShlRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
+		} else if c1 == '=' {
+			renvoWasm32AsmCmpRcxRaxSet(a, 0x9e)
+		} else {
+			renvoWasm32AsmCmpRcxRaxSet(a, 0x9c)
+		}
+		return true
+	}
+	if c0 == '>' {
+		if c1 == '>' {
+			renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRax)
+			renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+			renvoWasm32EmitRegReg(a, renvoWasm32OpShrRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
+		} else if c1 == '=' {
+			renvoWasm32AsmCmpRcxRaxSet(a, 0x9d)
+		} else {
+			renvoWasm32AsmCmpRcxRaxSet(a, 0x9f)
+		}
+		return true
+	}
+	if c0 == '=' && c1 == '=' {
+		renvoWasm32AsmCmpRcxRaxSet(a, 0x94)
+		return true
+	}
+	if c0 == '!' && c1 == '=' {
+		renvoWasm32AsmCmpRcxRaxSet(a, 0x95)
+		return true
+	}
+	return false
+}
+
+func renvoWasm32EmitFloatBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+	p := g.prog
+	a := &g.asm
+	e := &ep.exprs[idx]
+	if renvoTokCharIs(p, e.tok, '*') {
+		if !renvoEmitScalarExprForKind(g, ep, e.left, renvoTypeFloat64) {
+			return false
+		}
+		renvoAsmPushPrimary(a)
+		if !renvoEmitScalarExprForKind(g, ep, e.right, renvoTypeFloat64) {
+			return false
+		}
+		renvoAsmPopTertiary(a)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpMulRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+		renvoAsmSarPrimaryImm(a, 2)
+		return true
+	}
+	if renvoTokCharIs(p, e.tok, '/') {
+		if !renvoEmitScalarExprForKind(g, ep, e.left, renvoTypeFloat64) {
+			return false
+		}
+		renvoAsmShlPrimaryImm(a, 2)
+		renvoAsmPushPrimary(a)
+		if !renvoEmitScalarExprForKind(g, ep, e.right, renvoTypeFloat64) {
+			return false
+		}
+		renvoAsmPopTertiary(a)
+		renvoAsmDivLeftTertiaryRightPrimary(a, false)
+		return true
+	}
+	if !renvoEmitScalarExprForKind(g, ep, e.left, renvoTypeFloat64) {
+		return false
+	}
+	renvoAsmPushPrimary(a)
+	if !renvoEmitScalarExprForKind(g, ep, e.right, renvoTypeFloat64) {
+		return false
+	}
+	renvoAsmPopTertiary(a)
+	return renvoEmitPrimaryTertiaryOp(g, e.tok)
+}
+
+func renvoWasm32EnsureAppendAddrHelper(g *renvoLinearGen) int {
+	a := &g.asm
+	if g.appendAddrEmitted {
+		return g.appendAddrLabel
+	}
+	arenaAllocLabel := renvoEnsureArenaAllocHelper(g)
+	g.appendAddrEmitted = true
+	g.appendAddrLabel = renvoAsmNewLabel(a)
+	afterLabel := renvoAsmNewLabel(a)
+	renvoAsmJmpMarkLabel(a, afterLabel, g.appendAddrLabel)
+	noGrowLabel := renvoAsmNewLabel(a)
+	capNonZeroLabel := renvoAsmNewLabel(a)
+	capReadyLabel := renvoAsmNewLabel(a)
+	copyLoopLabel := renvoAsmNewLabel(a)
+	copyDoneLabel := renvoAsmNewLabel(a)
+	returnLabel := renvoAsmNewLabel(a)
+	ptrSlotOff := g.asm.bssSize
+	lenSlotOff := ptrSlotOff + 4
+	capSlotOff := lenSlotOff + 4
+	elemSizeOff := capSlotOff + 4
+	oldLenOff := elemSizeOff + 4
+	oldPtrOff := oldLenOff + 4
+	newCapOff := oldPtrOff + 4
+	allocSizeOff := newCapOff + 4
+	copySizeOff := allocSizeOff + 4
+	destOff := copySizeOff + 4
+	copyIndexOff := destOff + 4
+	g.asm.bssSize += 44
+
+	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegR8, renvoWasm32RegRsi, 0, 4)
+	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRcx, renvoWasm32RegR9, 0, 4)
+	renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegR8, renvoWasm32RegRcx)
+	renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, noGrowLabel)
+
+	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
+	renvoAsmStorePrimaryBss(a, elemSizeOff)
+	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRdi)
+	renvoAsmStorePrimaryBss(a, ptrSlotOff)
+	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRsi)
+	renvoAsmStorePrimaryBss(a, lenSlotOff)
+	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegR9)
+	renvoAsmStorePrimaryBss(a, capSlotOff)
+	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegR8)
+	renvoAsmStorePrimaryBss(a, oldLenOff)
+	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRax, renvoWasm32RegRdi, 0, 4)
+	renvoAsmStorePrimaryBss(a, oldPtrOff)
+
+	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+	renvoAsmCmpPrimaryImm8(a, 0)
+	renvoAsmJnzLabel(a, capNonZeroLabel)
+	renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRcx, 16)
+	renvoAsmJmpMarkLabel(a, capReadyLabel, capNonZeroLabel)
+	renvoWasm32EmitRegReg(a, renvoWasm32OpAddRegReg, renvoWasm32RegRcx, renvoWasm32RegR8)
+	renvoAsmMarkLabel(a, capReadyLabel)
+	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+	renvoAsmStorePrimaryBss(a, newCapOff)
+	renvoAsmLoadPrimaryBss(a, elemSizeOff)
+	renvoAsmPushPrimary(a)
+	renvoAsmLoadPrimaryBss(a, newCapOff)
+	renvoAsmPopTertiary(a)
+	renvoWasm32EmitRegReg(a, renvoWasm32OpMulRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+	renvoAsmStorePrimaryBss(a, allocSizeOff)
+
+	renvoAsmLoadPrimaryBss(a, allocSizeOff)
+	renvoAsmCallLabel(a, arenaAllocLabel)
+	if g.meta.panicEnabled {
+		allocOKLabel := renvoAsmNewLabel(a)
+		renvoAsmJnzPrimary(a, allocOKLabel)
+		renvoAsmJmpLabel(a, returnLabel)
+		renvoAsmMarkLabel(a, allocOKLabel)
+	}
+	renvoAsmStorePrimaryBss(a, destOff)
+
+	renvoAsmLoadPrimaryBss(a, oldLenOff)
+	renvoAsmPushPrimary(a)
+	renvoAsmLoadPrimaryBss(a, elemSizeOff)
+	renvoAsmCopyPrimaryToSecondary(a)
+	renvoAsmPopPrimary(a)
+	renvoWasm32EmitRegReg(a, renvoWasm32OpMulRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
+	renvoAsmStorePrimaryBss(a, copySizeOff)
+	renvoAsmPrimaryImm(a, 0)
+	renvoAsmStorePrimaryBss(a, copyIndexOff)
+	renvoAsmMarkLabel(a, copyLoopLabel)
+	renvoAsmLoadPrimaryBss(a, copyIndexOff)
+	renvoAsmPushPrimary(a)
+	renvoAsmLoadPrimaryBss(a, copySizeOff)
+	renvoAsmPopTertiary(a)
+	renvoAsmCmpTertiaryPrimarySet(a, 0x9d)
+	renvoAsmCmpPrimaryImm8(a, 0)
+	renvoAsmJnzLabel(a, copyDoneLabel)
+	renvoAsmLoadPrimaryBss(a, copyIndexOff)
+	renvoAsmPushPrimary(a)
+	renvoAsmLoadPrimaryBss(a, oldPtrOff)
+	renvoAsmPopTertiary(a)
+	renvoAsmLoadBytePrimaryIndexTertiary(a)
+	renvoAsmPushPrimary(a)
+	renvoAsmLoadPrimaryBss(a, copyIndexOff)
+	renvoAsmPushPrimary(a)
+	renvoAsmLoadPrimaryBss(a, destOff)
+	renvoAsmCopyPrimaryToSecondary(a)
+	renvoAsmPopTertiary(a)
+	renvoAsmPopPrimary(a)
+	renvoAsmStorePrimaryMemSecondaryTertiarySize(a, 1)
+	renvoAsmLoadPrimaryBss(a, copyIndexOff)
+	renvoAsmIncPrimary(a)
+	renvoAsmStorePrimaryBss(a, copyIndexOff)
+	renvoAsmJmpMarkLabel(a, copyLoopLabel, copyDoneLabel)
+
+	renvoAsmLoadPrimaryBss(a, ptrSlotOff)
+	renvoAsmPushPrimary(a)
+	renvoAsmLoadPrimaryBss(a, destOff)
+	renvoAsmPopSecondary(a)
+	renvoAsmStorePrimaryMemSecondaryDisp(a, 0)
+	renvoAsmLoadPrimaryBss(a, capSlotOff)
+	renvoAsmPushPrimary(a)
+	renvoAsmLoadPrimaryBss(a, newCapOff)
+	renvoAsmPopSecondary(a)
+	renvoAsmStorePrimaryMemSecondaryDisp(a, 0)
+	renvoAsmLoadPrimaryBss(a, lenSlotOff)
+	renvoAsmPushPrimary(a)
+	renvoAsmLoadPrimaryBss(a, oldLenOff)
+	renvoAsmIncPrimary(a)
+	renvoAsmPopSecondary(a)
+	renvoAsmStorePrimaryMemSecondaryDisp(a, 0)
+	renvoAsmLoadPrimaryBss(a, copySizeOff)
+	renvoAsmCopyPrimaryToTertiary(a)
+	renvoAsmLoadPrimaryBss(a, destOff)
+	renvoAsmAddPrimaryTertiary(a)
+	renvoAsmJmpLabel(a, returnLabel)
+
+	renvoAsmMarkLabel(a, noGrowLabel)
+	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRcx, renvoWasm32RegRsi, 0, 4)
+	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRax, renvoWasm32RegRdi, 0, 4)
+	renvoWasm32EmitRegReg(a, renvoWasm32OpMulRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
+	renvoWasm32AsmAddRaxRcx(a)
+	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRcx, renvoWasm32RegRsi, 0, 4)
+	renvoWasm32AsmIncRcx(a)
+	renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRcx, renvoWasm32RegRsi, 0, 4)
+	renvoAsmMarkLabel(a, returnLabel)
+	renvoAsmRet(a)
+	renvoAsmMarkLabel(a, afterLabel)
+	return g.appendAddrLabel
+}
+
+func renvoWasm32EnsureAppend8Helper(g *renvoLinearGen) int {
+	a := &g.asm
+	if g.append8Emitted {
+		return g.append8Label
+	}
+	g.append8Emitted = true
+	g.append8Label = renvoAsmNewLabel(a)
+	afterLabel := renvoAsmNewLabel(a)
+	renvoAsmJmpMarkLabel(a, afterLabel, g.append8Label)
+	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRcx, renvoWasm32RegRsi, 0, 4)
+	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRax, renvoWasm32RegRdi, 0, 4)
+	renvoWasm32EmitIndex(a, renvoWasm32OpStoreIndex, renvoWasm32RegRdx, renvoWasm32RegRax, renvoWasm32RegRcx, 1, 0, 1)
+	renvoWasm32AsmIncRcx(a)
+	renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRcx, renvoWasm32RegRsi, 0, 4)
+	renvoAsmRet(a)
+	renvoAsmMarkLabel(a, afterLabel)
+	return g.append8Label
+}
+
+func renvoWasm32EnsureAppend64Helper(g *renvoLinearGen) int {
+	a := &g.asm
+	if g.append64Emitted {
+		return g.append64Label
+	}
+	g.append64Emitted = true
+	g.append64Label = renvoAsmNewLabel(a)
+	afterLabel := renvoAsmNewLabel(a)
+	renvoAsmJmpMarkLabel(a, afterLabel, g.append64Label)
+	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRcx, renvoWasm32RegRsi, 0, 4)
+	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRax, renvoWasm32RegRdi, 0, 4)
+	renvoWasm32EmitIndex(a, renvoWasm32OpStoreIndex, renvoWasm32RegRdx, renvoWasm32RegRax, renvoWasm32RegRcx, 8, 0, 4)
+	renvoWasm32AsmIncRcx(a)
+	renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRcx, renvoWasm32RegRsi, 0, 4)
+	renvoAsmRet(a)
+	renvoAsmMarkLabel(a, afterLabel)
+	return g.append64Label
+}
+
+func renvoWasm32EnsureStringEqualHelper(g *renvoLinearGen) int {
+	a := &g.asm
+	if g.streqEmitted {
+		return g.streqLabel
+	}
+	g.streqEmitted = true
+	g.streqLabel = renvoAsmNewLabel(a)
+	afterLabel := renvoAsmNewLabel(a)
+	notEqualLabel := renvoAsmNewLabel(a)
+	equalLabel := renvoAsmNewLabel(a)
+	loopLabel := renvoAsmNewLabel(a)
+	renvoAsmJmpMarkLabel(a, afterLabel, g.streqLabel)
+	renvoAsmPrimaryImm(a, 0)
+	renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRsi, renvoWasm32RegRcx)
+	renvoAsmJnzLabel(a, notEqualLabel)
+	renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRsi, 0)
+	renvoAsmJzLabel(a, equalLabel)
+	renvoAsmMarkLabel(a, loopLabel)
+	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegR8, renvoWasm32RegRdi, 0, 1)
+	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegR9, renvoWasm32RegRdx, 0, 1)
+	renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegR8, renvoWasm32RegR9)
+	renvoAsmJnzLabel(a, notEqualLabel)
+	renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRdi, 1)
+	renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRdx, 1)
+	renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRsi, -1)
+	renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRsi, 0)
+	renvoAsmJnzLabel(a, loopLabel)
+	renvoAsmMarkLabel(a, equalLabel)
+	renvoAsmPrimaryImm(a, 1)
+	renvoAsmMarkLabel(a, notEqualLabel)
+	renvoAsmRet(a)
+	renvoAsmMarkLabel(a, afterLabel)
+	return g.streqLabel
 }
 
 // source: backend/compiler_darwin_arm64_impl.go

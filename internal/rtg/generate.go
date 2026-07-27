@@ -237,6 +237,147 @@ func (out *renvoAsm) Patch() {
 	renvoAsmPatch(out)
 }
 
+func (out *renvoAsm) Code() []byte {
+	return out.code
+}
+
+func (out *renvoAsm) SetCode(value []byte) {
+	out.code = value
+}
+
+func (out *renvoAsm) Data() []byte {
+	return out.data
+}
+
+func (out *renvoAsm) BSSSize() int {
+	return out.bssSize
+}
+
+func (out *renvoAsm) RelocationCount() int {
+	return len(out.relocs) / 2
+}
+
+func (out *renvoAsm) RelocationAt(index int) (int, int) {
+	at := index * 2
+	return int(out.relocs[at]), int(out.relocs[at+1])
+}
+
+func (out *renvoAsm) RelocationOffset(index int) int {
+	return int(out.relocs[index*2])
+}
+
+func (out *renvoAsm) RelocationLabel(index int) int {
+	return int(out.relocs[index*2+1])
+}
+
+func (out *renvoAsm) RelocationWordCount() int {
+	return len(out.relocs)
+}
+
+func (out *renvoAsm) RelocationWord(index int) int {
+	return int(renvo_runtime_UnsafeInt32At(out.relocs, index))
+}
+
+func (out *renvoAsm) AbsoluteRelocationCount() int {
+	return len(out.absRelocs) / 3
+}
+
+func (out *renvoAsm) AbsoluteRelocationAt(index int) (int, int, int) {
+	at := index * 3
+	return int(out.absRelocs[at]), int(out.absRelocs[at+1]), int(out.absRelocs[at+2])
+}
+
+func (out *renvoAsm) AbsoluteRelocationOffset(index int) int {
+	return int(out.absRelocs[index*3])
+}
+
+func (out *renvoAsm) AbsoluteRelocationAddend(index int) int {
+	return int(out.absRelocs[index*3+1])
+}
+
+func (out *renvoAsm) AbsoluteRelocationKind(index int) int {
+	return int(out.absRelocs[index*3+2])
+}
+
+func (out *renvoAsm) AbsoluteRelocationWordCount() int {
+	return len(out.absRelocs)
+}
+
+func (out *renvoAsm) AbsoluteRelocationWord(index int) int {
+	return int(renvo_runtime_UnsafeInt32At(out.absRelocs, index))
+}
+
+func (out *renvoAsm) LabelPosition(label int) int {
+	return renvoAsmLabelPosition(out, label)
+}
+
+func (out *renvoAsm) SymbolCount() int {
+	return len(out.symbols)
+}
+
+func (out *renvoAsm) SymbolPC(index int) int {
+	return renvoAsmLabelPosition(out, out.symbols[index].label)
+}
+
+func (out *renvoAsm) SymbolNameEquals(index int, name string) bool {
+	symbol := &out.symbols[index]
+	if symbol.nameEnd-symbol.nameStart != len(name) {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		if out.symbolName[symbol.nameStart+i] != name[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (out *renvoAsm) SymbolNameLength(index int) int {
+	symbol := &out.symbols[index]
+	return symbol.nameEnd - symbol.nameStart
+}
+
+func (out *renvoAsm) SymbolNameByte(index int, offset int) byte {
+	symbol := &out.symbols[index]
+	return out.symbolName[symbol.nameStart+offset]
+}
+
+func (out *renvoAsm) Symbol(index int) *RTGSymbol {
+	symbol := &out.symbols[index]
+	return &RTGSymbol{nameStart: symbol.nameStart, nameEnd: symbol.nameEnd, label: symbol.label}
+}
+
+func (out *renvoAsm) SymbolNameByteAt(index int) byte {
+	return out.symbolName[index]
+}
+
+func renvoRTGRelocationAt(out *renvoAsm, index int) (int, int) {
+	at := index * 2
+	return int(out.relocs[at]), int(out.relocs[at+1])
+}
+
+func renvoRTGAbsoluteRelocationAt(out *renvoAsm, index int) (int, int, int) {
+	at := index * 3
+	return int(out.absRelocs[at]), int(out.absRelocs[at+1]), int(out.absRelocs[at+2])
+}
+
+func renvoRTGSymbolPC(out *renvoAsm, index int) int {
+	return renvoAsmLabelPosition(out, out.symbols[index].label)
+}
+
+func renvoRTGSymbolNameEquals(out *renvoAsm, index int, name string) bool {
+	symbol := &out.symbols[index]
+	if symbol.nameEnd-symbol.nameStart != len(name) {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		if out.symbolName[symbol.nameStart+i] != name[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func renvoRTGAddressValid(address renvoRTGAddress) bool {
 	return address.TargetValid
 }
@@ -309,6 +450,11 @@ type RTGCondition struct {
 	Code       int
 	SetOpcode  byte
 	JumpOpcode byte
+}
+type RTGSymbol struct {
+	nameStart int
+	nameEnd   int
+	label     int
 }
 type RTGShiftDirection int
 
@@ -463,6 +609,120 @@ func (out *RTGEmitter) Truncate(size int) {
 	out.asm.code = out.asm.code[:size]
 }
 
+func (out *RTGEmitter) Code() []byte {
+	return out.asm.code
+}
+
+func (out *RTGEmitter) SetCode(value []byte) {
+	out.asm.code = value
+}
+
+func (out *RTGEmitter) Data() []byte {
+	return out.asm.data
+}
+
+func (out *RTGEmitter) BSSSize() int {
+	return out.asm.bssSize
+}
+
+func (out *RTGEmitter) RelocationCount() int {
+	return len(out.asm.relocs) / 2
+}
+
+func (out *RTGEmitter) RelocationAt(index int) (int, int) {
+	at := index * 2
+	return int(out.asm.relocs[at]), int(out.asm.relocs[at+1])
+}
+
+func (out *RTGEmitter) RelocationOffset(index int) int {
+	return int(out.asm.relocs[index*2])
+}
+
+func (out *RTGEmitter) RelocationLabel(index int) int {
+	return int(out.asm.relocs[index*2+1])
+}
+
+func (out *RTGEmitter) RelocationWordCount() int {
+	return len(out.asm.relocs)
+}
+
+func (out *RTGEmitter) RelocationWord(index int) int {
+	return int(renvo_runtime_UnsafeInt32At(out.asm.relocs, index))
+}
+
+func (out *RTGEmitter) AbsoluteRelocationCount() int {
+	return len(out.asm.absRelocs) / 3
+}
+
+func (out *RTGEmitter) AbsoluteRelocationAt(index int) (int, int, int) {
+	at := index * 3
+	return int(out.asm.absRelocs[at]), int(out.asm.absRelocs[at+1]), int(out.asm.absRelocs[at+2])
+}
+
+func (out *RTGEmitter) AbsoluteRelocationOffset(index int) int {
+	return int(out.asm.absRelocs[index*3])
+}
+
+func (out *RTGEmitter) AbsoluteRelocationAddend(index int) int {
+	return int(out.asm.absRelocs[index*3+1])
+}
+
+func (out *RTGEmitter) AbsoluteRelocationKind(index int) int {
+	return int(out.asm.absRelocs[index*3+2])
+}
+
+func (out *RTGEmitter) AbsoluteRelocationWordCount() int {
+	return len(out.asm.absRelocs)
+}
+
+func (out *RTGEmitter) AbsoluteRelocationWord(index int) int {
+	return int(renvo_runtime_UnsafeInt32At(out.asm.absRelocs, index))
+}
+
+func (out *RTGEmitter) LabelPosition(label int) int {
+	return renvoAsmLabelPosition(out.asm, label)
+}
+
+func (out *RTGEmitter) SymbolCount() int {
+	return len(out.asm.symbols)
+}
+
+func (out *RTGEmitter) SymbolPC(index int) int {
+	return renvoAsmLabelPosition(out.asm, out.asm.symbols[index].label)
+}
+
+func (out *RTGEmitter) SymbolNameEquals(index int, name string) bool {
+	symbol := &out.asm.symbols[index]
+	if symbol.nameEnd-symbol.nameStart != len(name) {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		if out.asm.symbolName[symbol.nameStart+i] != name[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (out *RTGEmitter) SymbolNameLength(index int) int {
+	symbol := &out.asm.symbols[index]
+	return symbol.nameEnd - symbol.nameStart
+}
+
+func (out *RTGEmitter) SymbolNameByte(index int, offset int) byte {
+	symbol := &out.asm.symbols[index]
+	return out.asm.symbolName[symbol.nameStart+offset]
+}
+
+func (out *RTGEmitter) Symbol(index int) *RTGSymbol {
+	symbol := &out.asm.symbols[index]
+	return &RTGSymbol{nameStart: symbol.nameStart, nameEnd: symbol.nameEnd, label: symbol.label}
+}
+
+func (out *RTGEmitter) SymbolNameByteAt(index int) byte {
+	return out.asm.symbolName[index]
+}
+
 func RTGPatchUint32(out *RTGEmitter, at int, value int) {
 	out.PatchUint32(at, value)
 }
@@ -513,6 +773,53 @@ func RTGInt8Fits(value int) bool {
 
 func RTGPopPrimary(out *RTGEmitter) {
 	out.Byte(0x58)
+}
+
+func RTGArenaMark() int {
+	return renvo_runtime_ArenaMark()
+}
+
+func RTGArenaReset(mark int) {
+	renvo_runtime_ArenaReset(mark)
+}
+
+func RTGByteAt(in []byte, at int) byte {
+	return in[at]
+}
+
+func RTGGet32At(in []byte, at int) int {
+	return int(in[at]) | int(in[at+1])<<8 | int(in[at+2])<<16 | int(in[at+3])<<24
+}
+
+func RTGPut32At(out []byte, at int, value int) {
+	out[at] = byte(value)
+	out[at+1] = byte(value >> 8)
+	out[at+2] = byte(value >> 16)
+	out[at+3] = byte(value >> 24)
+}
+
+func RTGAppend32(out []byte, value int) []byte {
+	out = append(out, byte(value))
+	out = append(out, byte(value>>8))
+	out = append(out, byte(value>>16))
+	out = append(out, byte(value>>24))
+	return out
+}
+
+func RTGAlignValue(value int, alignment int) int {
+	return (value + alignment - 1) & -alignment
+}
+
+func RTGAlign8(value int) int {
+	return (value + 7) & -8
+}
+
+func RTGMakeIntScratch(capacity int) []int {
+	return make([]int, 0, capacity)
+}
+
+func RTGMakeByteBuffer(length int) []byte {
+	return make([]byte, length)
 }
 
 func (out *RTGEmitter) Patch() {
@@ -786,11 +1093,28 @@ func reachableEmbeddedGo(document Document, roots []string) []byte {
 		return nil
 	}
 	var parts []embeddedGoPart
+	lastDeclarationStart := -1
+	lastDeclarationEnd := -1
 	for i := 0; i < len(file.Decls); i++ {
 		declaration := file.Decls[i]
+		if declaration.StartTok == lastDeclarationStart && declaration.EndTok == lastDeclarationEnd {
+			continue
+		}
+		lastDeclarationStart = declaration.StartTok
+		lastDeclarationEnd = declaration.EndTok
+		var declarationSource []byte
+		if declaration.Kind == syntax.TokenType {
+			declarationSource = append(declarationSource, "type "...)
+		} else if declaration.Kind == syntax.TokenConst {
+			declarationSource = append(declarationSource, "const "...)
+		} else if declaration.Kind == syntax.TokenVar {
+			declarationSource = append(declarationSource, "var "...)
+		}
+		declarationSource = append(declarationSource,
+			embeddedSourceRange(wrapped, file.Tokens, declaration.StartTok, declaration.EndTok)...)
 		parts = append(parts, embeddedGoPart{
 			name:   string(syntax.TokenText(wrapped, file.Tokens[declaration.NameTok])),
-			source: embeddedSourceRange(wrapped, file.Tokens, declaration.StartTok, declaration.EndTok),
+			source: declarationSource,
 		})
 	}
 	for i := 0; i < len(file.Funcs); i++ {
@@ -951,7 +1275,8 @@ func appendRewrittenGoModeExports(out []byte, source []byte, names []string, pre
 		if nativeEmitter && token.Kind == TokenIdent && i+3 < len(tokens) &&
 			tokenText(source, tokens[i+1]) == "." && tokenText(source, tokens[i+3]) == "(" {
 			method := tokenText(source, tokens[i+2])
-			if replacement, end, found := nativeEmitterStateMethod(source, tokens, i, text, method); found {
+			if replacement, end, found := nativeEmitterStateMethod(source, tokens, i, text, method,
+				names, prefix, document, exports); found {
 				out = append(out, replacement...)
 				last = tokens[end].End
 				i = end
@@ -1025,6 +1350,8 @@ func appendRewrittenGoModeExports(out []byte, source []byte, names []string, pre
 			out = append(out, "int"...)
 		} else if nativeEmitter && token.Kind == TokenIdent && text == "RTGAddress" {
 			out = append(out, "renvoRTGAddress"...)
+		} else if nativeEmitter && token.Kind == TokenIdent && text == "RTGSymbol" {
+			out = append(out, "renvoAsmSymbol"...)
 		} else if nativeEmitter && token.Kind == TokenIdent && nativeEmitterFunction(text) != "" {
 			out = append(out, nativeEmitterFunction(text)...)
 		} else if external, found := embeddedExternalName(exports, text); found && token.Kind == TokenIdent {
@@ -1051,10 +1378,22 @@ func appendRewrittenGoModeExports(out []byte, source []byte, names []string, pre
 	return out
 }
 
-func nativeEmitterStateMethod(source []byte, tokens []Token, start int, receiver string, method string) ([]byte, int, bool) {
+func nativeEmitterStateMethod(source []byte, tokens []Token, start int, receiver string, method string,
+	names []string, prefix string, document *Document, exports []embeddedExport) ([]byte, int, bool) {
 	if method != "PrimaryLoad" && method != "SetPrimaryLoad" && method != "ByteAt" &&
 		method != "SetByteAt" && method != "AddByteAt" && method != "AppendByte" &&
-		method != "Truncate" {
+		method != "Truncate" && method != "Code" && method != "SetCode" &&
+		method != "Data" && method != "BSSSize" && method != "RelocationCount" &&
+		method != "RelocationAt" && method != "RelocationOffset" &&
+		method != "RelocationLabel" && method != "RelocationWordCount" &&
+		method != "RelocationWord" && method != "AbsoluteRelocationCount" &&
+		method != "AbsoluteRelocationAt" && method != "AbsoluteRelocationOffset" &&
+		method != "AbsoluteRelocationAddend" && method != "AbsoluteRelocationKind" &&
+		method != "AbsoluteRelocationWordCount" && method != "AbsoluteRelocationWord" &&
+		method != "LabelPosition" &&
+		method != "SymbolCount" && method != "SymbolPC" && method != "SymbolNameEquals" &&
+		method != "SymbolNameLength" && method != "SymbolNameByte" &&
+		method != "Symbol" && method != "SymbolNameByteAt" {
 		return nil, start, false
 	}
 	end := start + 3
@@ -1092,12 +1431,164 @@ func nativeEmitterStateMethod(source []byte, tokens []Token, start int, receiver
 		arguments = append(arguments, source[tokens[argStart].Start:tokens[end].Start])
 	}
 	for i := 0; i < len(arguments); i++ {
-		arguments[i] = rewriteNativeStateArgument(arguments[i], receiver)
+		arguments[i] = appendRewrittenGoModeExports(nil, arguments[i], names, prefix, true, document, exports)
 	}
 	var replacement []byte
 	if method == "PrimaryLoad" && len(arguments) == 0 {
 		replacement = append(replacement, receiver...)
 		return append(replacement, ".lastPrimaryLoad"...), end, true
+	}
+	if method == "Code" && len(arguments) == 0 {
+		replacement = append(replacement, receiver...)
+		return append(replacement, ".code"...), end, true
+	}
+	if method == "SetCode" && len(arguments) == 1 {
+		replacement = append(replacement, receiver...)
+		replacement = append(replacement, ".code = "...)
+		return append(replacement, arguments[0]...), end, true
+	}
+	if method == "Data" && len(arguments) == 0 {
+		replacement = append(replacement, receiver...)
+		return append(replacement, ".data"...), end, true
+	}
+	if method == "BSSSize" && len(arguments) == 0 {
+		replacement = append(replacement, receiver...)
+		return append(replacement, ".bssSize"...), end, true
+	}
+	if method == "RelocationCount" && len(arguments) == 0 {
+		replacement = append(replacement, "len("...)
+		replacement = append(replacement, receiver...)
+		return append(replacement, ".relocs) / 2"...), end, true
+	}
+	if method == "AbsoluteRelocationCount" && len(arguments) == 0 {
+		replacement = append(replacement, "len("...)
+		replacement = append(replacement, receiver...)
+		return append(replacement, ".absRelocs) / 3"...), end, true
+	}
+	if method == "RelocationWordCount" && len(arguments) == 0 {
+		replacement = append(replacement, "len("...)
+		replacement = append(replacement, receiver...)
+		return append(replacement, ".relocs)"...), end, true
+	}
+	if method == "AbsoluteRelocationWordCount" && len(arguments) == 0 {
+		replacement = append(replacement, "len("...)
+		replacement = append(replacement, receiver...)
+		return append(replacement, ".absRelocs)"...), end, true
+	}
+	if method == "SymbolCount" && len(arguments) == 0 {
+		replacement = append(replacement, "len("...)
+		replacement = append(replacement, receiver...)
+		return append(replacement, ".symbols)"...), end, true
+	}
+	field := ""
+	scale := 0
+	addend := 0
+	if method == "RelocationOffset" && len(arguments) == 1 {
+		field = "relocs"
+		scale = 2
+	} else if method == "RelocationLabel" && len(arguments) == 1 {
+		field = "relocs"
+		scale = 2
+		addend = 1
+	} else if method == "AbsoluteRelocationOffset" && len(arguments) == 1 {
+		field = "absRelocs"
+		scale = 3
+	} else if method == "AbsoluteRelocationAddend" && len(arguments) == 1 {
+		field = "absRelocs"
+		scale = 3
+		addend = 1
+	} else if method == "AbsoluteRelocationKind" && len(arguments) == 1 {
+		field = "absRelocs"
+		scale = 3
+		addend = 2
+	}
+	if field != "" {
+		replacement = append(replacement, "int("...)
+		replacement = append(replacement, receiver...)
+		replacement = append(replacement, '.')
+		replacement = append(replacement, field...)
+		replacement = append(replacement, '[')
+		replacement = append(replacement, arguments[0]...)
+		replacement = append(replacement, '*')
+		replacement = appendDecimalFrame(replacement, scale)
+		if addend != 0 {
+			replacement = append(replacement, '+')
+			replacement = appendDecimalFrame(replacement, addend)
+		}
+		return append(replacement, ']', ')'), end, true
+	}
+	if (method == "RelocationWord" || method == "AbsoluteRelocationWord") && len(arguments) == 1 {
+		replacement = append(replacement, "int(renvo_runtime_UnsafeInt32At("...)
+		replacement = append(replacement, receiver...)
+		if method == "RelocationWord" {
+			replacement = append(replacement, ".relocs,"...)
+		} else {
+			replacement = append(replacement, ".absRelocs,"...)
+		}
+		replacement = append(replacement, arguments[0]...)
+		return append(replacement, ')', ')'), end, true
+	}
+	if method == "Symbol" && len(arguments) == 1 {
+		replacement = append(replacement, '&')
+		replacement = append(replacement, receiver...)
+		replacement = append(replacement, ".symbols["...)
+		replacement = append(replacement, arguments[0]...)
+		return append(replacement, ']'), end, true
+	}
+	if method == "SymbolNameByteAt" && len(arguments) == 1 {
+		replacement = append(replacement, receiver...)
+		replacement = append(replacement, ".symbolName["...)
+		replacement = append(replacement, arguments[0]...)
+		return append(replacement, ']'), end, true
+	}
+	if method == "SymbolPC" && len(arguments) == 1 {
+		replacement = append(replacement, "renvoAsmLabelPosition("...)
+		replacement = append(replacement, receiver...)
+		replacement = append(replacement, ',')
+		replacement = append(replacement, receiver...)
+		replacement = append(replacement, ".symbols["...)
+		replacement = append(replacement, arguments[0]...)
+		return append(replacement, "].label)"...), end, true
+	}
+	if method == "SymbolNameLength" && len(arguments) == 1 {
+		replacement = append(replacement, receiver...)
+		replacement = append(replacement, ".symbols["...)
+		replacement = append(replacement, arguments[0]...)
+		replacement = append(replacement, "].nameEnd - "...)
+		replacement = append(replacement, receiver...)
+		replacement = append(replacement, ".symbols["...)
+		replacement = append(replacement, arguments[0]...)
+		return append(replacement, "].nameStart"...), end, true
+	}
+	if method == "SymbolNameByte" && len(arguments) == 2 {
+		replacement = append(replacement, receiver...)
+		replacement = append(replacement, ".symbolName["...)
+		replacement = append(replacement, receiver...)
+		replacement = append(replacement, ".symbols["...)
+		replacement = append(replacement, arguments[0]...)
+		replacement = append(replacement, "].nameStart+"...)
+		replacement = append(replacement, arguments[1]...)
+		return append(replacement, ']'), end, true
+	}
+	nativeCall := ""
+	if method == "RelocationAt" && len(arguments) == 1 {
+		nativeCall = "renvoRTGRelocationAt"
+	} else if method == "AbsoluteRelocationAt" && len(arguments) == 1 {
+		nativeCall = "renvoRTGAbsoluteRelocationAt"
+	} else if method == "LabelPosition" && len(arguments) == 1 {
+		nativeCall = "renvoAsmLabelPosition"
+	} else if method == "SymbolNameEquals" && len(arguments) == 2 {
+		nativeCall = "renvoRTGSymbolNameEquals"
+	}
+	if nativeCall != "" {
+		replacement = append(replacement, nativeCall...)
+		replacement = append(replacement, '(')
+		replacement = append(replacement, receiver...)
+		for i := 0; i < len(arguments); i++ {
+			replacement = append(replacement, ',')
+			replacement = append(replacement, arguments[i]...)
+		}
+		return append(replacement, ')'), end, true
 	}
 	if method == "SetPrimaryLoad" && len(arguments) == 1 {
 		replacement = append(replacement, receiver...)
@@ -1137,29 +1628,6 @@ func nativeEmitterStateMethod(source []byte, tokens []Token, start int, receiver
 		return append(replacement, ')'), end, true
 	}
 	return nil, start, false
-}
-
-func rewriteNativeStateArgument(argument []byte, receiver string) []byte {
-	pattern := receiver + ".Len()"
-	var out []byte
-	for at := 0; at < len(argument); {
-		match := at+len(pattern) <= len(argument)
-		for i := 0; match && i < len(pattern); i++ {
-			if argument[at+i] != pattern[i] {
-				match = false
-			}
-		}
-		if !match {
-			out = append(out, argument[at])
-			at++
-			continue
-		}
-		out = append(out, "len("...)
-		out = append(out, receiver...)
-		out = append(out, ".code)"...)
-		at += len(pattern)
-	}
-	return out
 }
 
 func nativeBuiltinLiteral(name string) string {
@@ -1217,6 +1685,36 @@ func nativeEmitterFunction(name string) string {
 	}
 	if name == "RTGPopPrimary" {
 		return "renvoAsmPopPrimary"
+	}
+	if name == "RTGArenaMark" {
+		return "renvo_runtime_ArenaMark"
+	}
+	if name == "RTGArenaReset" {
+		return "renvo_runtime_ArenaReset"
+	}
+	if name == "RTGByteAt" {
+		return "renvo_runtime_UnsafeByteAt"
+	}
+	if name == "RTGGet32At" {
+		return "renvoGet32At"
+	}
+	if name == "RTGPut32At" {
+		return "renvoPut32At"
+	}
+	if name == "RTGAppend32" {
+		return "renvoAppend32"
+	}
+	if name == "RTGAlignValue" {
+		return "renvoAlignValue"
+	}
+	if name == "RTGAlign8" {
+		return "renvoAlignTo8"
+	}
+	if name == "RTGMakeIntScratch" {
+		return "renvoMakeIntScratch"
+	}
+	if name == "RTGMakeByteBuffer" {
+		return "renvoMakeByteBuffer"
 	}
 	if name == "RTGNewLabel" {
 		return "renvoRTGNewLabel"
