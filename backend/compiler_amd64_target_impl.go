@@ -1,0 +1,246 @@
+package main
+
+const renvoAmd64ELFCodeOffset = 0xb0
+
+func renvoCompileAmd64(input []int, output int, arenaSize int) int {
+	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 && !renvoPrepareKernelMetadata() {
+		renvoPrintErr("renvo: kernel metadata unavailable\n")
+		return 1
+	}
+	src := make([]byte, 0, 589824)
+	for i := 0; i < len(input); i++ {
+		src = renvoReadAll(input[i], src)
+		src = append(src, '\n')
+	}
+	var prog renvoProgram
+	prog = renvoParseProgram(src)
+	if !prog.ok {
+		return 1
+	}
+	var meta renvoMeta
+	renvoBuildMetaInto(&prog, &meta)
+	if !meta.ok {
+		return 1
+	}
+	meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
+	var result renvoCompileResult
+	result = renvoTryCompileScalarProgramAmd64Scratch(&prog, &meta)
+	if result.ok {
+		data := result.data
+		if renvoFixedTarget == 0 {
+			data = renvoCompileOutputData(data, renvoTarget)
+		}
+		write(output, data, -1)
+		return 0
+	}
+	renvoPrintErr("renvo: compilation failed\n")
+	return 1
+}
+
+func renvoTryCompileScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+	return renvoTryCompileScalarProgramAmd64Scratch(p, meta)
+}
+
+func renvoTryCompileScalarProgramAmd64Scratch(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+	g := renvoBeginScalarProgramAmd64(p, meta)
+	if g == nil || !renvoEmitAllQueuedFunctionsScratch(g) {
+		return renvoCompileResult{}
+	}
+	return renvoFinishScalarProgramAmd64(g)
+}
+
+func renvoTryCompileScalarProgramAmd64Cached(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+	g := renvoBeginScalarProgramAmd64(p, meta)
+	if g == nil || !renvoEmitAllQueuedFunctionsCached(g) {
+		return renvoCompileResult{}
+	}
+	return renvoFinishScalarProgramAmd64(g)
+}
+func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
+	renvoNonNil(p, meta)
+	appIndex := -1
+	for i := 0; i < len(meta.funcs); i++ {
+		if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
+			appIndex = i
+		}
+	}
+	if appIndex < 0 {
+		return nil
+	}
+	// Metadata building consumes the decoded declaration records completely;
+	// amd64 emission uses the canonical body ranges in renvoFuncInfo.
+	renvo_runtime_ArenaDiscardDecls(p.decls)
+	renvo_runtime_ArenaDiscardFuncs(p.funcs)
+	g := new(renvoLinearGen)
+	g.prog = p
+	g.meta = meta
+	g.arenaSize = meta.arenaSize
+	a := &g.asm
+	renvoAsmInit(a)
+	a.codeOffset = renvoAmd64ELFCodeOffset
+	if targetIsWindows() {
+		a.codeOffset = renvoWinSectionRVA
+	}
+	if renvoFixedTarget != 0 {
+		g.funcLabels = make([]int, 0, len(meta.funcs))
+	}
+	for i := 0; i < len(meta.funcs); i++ {
+		label := renvoAsmNewLabel(a)
+		g.funcLabels = append(g.funcLabels, label)
+	}
+	renvoInitFuncQueue(g, len(meta.funcs))
+	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+		if !renvoBeginKernelModuleAmd64(g, appIndex) {
+			return nil
+		}
+		return g
+	}
+	renvoLinearMarkFunc(g, appIndex)
+	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+		// Preserve the four linked-image ABI words while global
+		// initialization freely uses the ordinary call registers.
+		renvoAsmEmitText(a, "\x57\x56\x52\x51")
+	}
+	if !meta.panicEnabled {
+		renvoAmd64InitRuntimeCheckRegs(g)
+	}
+	renvoEmitPersistentArenaReady(g)
+	if !renvoLinearInitGlobals(g) {
+		return nil
+	}
+	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+		if !renvoEmitImageEntryArgsAmd64(g, appIndex) {
+			return nil
+		}
+	} else {
+		if !renvoEmitProgramEntryArgsAmd64(g, appIndex) {
+			return nil
+		}
+		// Entry argument setup uses R12 as scratch, so restore all reserved
+		// runtime check registers after it has consumed the process stack.
+		if !meta.panicEnabled {
+			renvoAmd64InitRuntimeCheckRegs(g)
+		}
+	}
+	renvoAsmCallLabel(a, g.funcLabels[appIndex])
+	if !renvoEmitProgramPanicCheck(g) {
+		return nil
+	}
+	if renvoFixedTarget == 0 && renvoCompilerEmitImage {
+		renvoAsmRet(a)
+	} else if targetIsWindows() {
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoWinAmd64CallImport(a, renvoWinImportExitProcess)
+		renvoAsmRet(a)
+	} else {
+		renvoAsmCopyPrimaryToCallWord0(a)
+		renvoAsmPrimaryImm(a, 60)
+		renvoAsmSyscall(a)
+	}
+	return g
+}
+
+// A Linux linked image is entered as
+//
+//	entry(argsData, argsLen, envData, envLen) int
+//
+// where argsData and envData address Renvo []string backing arrays. The SysV
+// register order already matches the compiler calling convention for the first
+// two slice words; only the capacities and second slice need reshuffling.
+func renvoEmitImageEntryArgsAmd64(g *renvoLinearGen, appIndex int) bool {
+	renvoNonNil(g)
+	app := &g.meta.funcs[appIndex]
+	if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
+		return false
+	}
+	// Restore argsData, argsLen, envData, envLen.
+	renvoAsmEmitText(&g.asm, "\x59\x5a\x5e\x5f")
+	if app.paramCount == 0 {
+		return true
+	}
+	if app.paramCount > 2 {
+		return false
+	}
+	first := &g.meta.params[app.firstParam]
+	if !renvoTypeIsStringSlice(g.meta, first.typ) {
+		return false
+	}
+	if app.paramCount == 1 {
+		// RDX = args capacity = args length.
+		renvoAsmEmitText(&g.asm, "\x48\x89\xf2")
+		return true
+	}
+	second := &g.meta.params[app.firstParam+1]
+	if !renvoTypeIsStringSlice(g.meta, second.typ) {
+		return false
+	}
+	// R9=envLen, RCX=envData, RDX=argsLen, R8=envLen.
+	renvoAsmEmitText(&g.asm, "\x4c\x89\xc9\x48\x89\xd1\x48\x89\xf2\x4d\x89\xc8")
+	return true
+}
+
+func renvoFinishScalarProgramAmd64(g *renvoLinearGen) renvoCompileResult {
+	renvoNonNil(g)
+	renvo_runtime_ArenaDiscard(g.meta.scratchStart, g.meta.scratchEnd)
+	a := &g.asm
+	var data []byte
+	if targetIsWindows() {
+		data = renvoAsmImageWindowsAmd64(a)
+	} else if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+		data = renvoAsmImageKernelModuleAmd64(a, g.kernelInitLabel, g.kernelExitLabel)
+	} else {
+		data = renvoAsmImageAmd64(a)
+	}
+	var result renvoCompileResult
+	if len(data) == 0 {
+		return result
+	}
+	result.data = data
+	result.ok = true
+	return result
+}
+
+func renvoEmitProgramEntryArgsAmd64(g *renvoLinearGen, appIndex int) bool {
+	renvoNonNil(g)
+	app := &g.meta.funcs[appIndex]
+	if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
+		return false
+	}
+	if app.paramCount == 0 {
+		return true
+	}
+	if app.paramCount > 2 {
+		return false
+	}
+	first := &g.meta.params[app.firstParam]
+	if !renvoTypeIsStringSlice(g.meta, first.typ) {
+		return false
+	}
+	argsOff := g.asm.bssSize
+	g.asm.bssSize += 32768
+	if targetIsWindows() {
+		argsTextOff := g.asm.bssSize
+		g.asm.bssSize += 32768
+		argsLenOff := g.asm.bssSize
+		g.asm.bssSize += 8
+		envDataOff := g.asm.bssSize
+		g.asm.bssSize += 32768
+		envLenOff := g.asm.bssSize
+		g.asm.bssSize += 8
+		renvoAsmBuildWindowsArgvEnvSlicesAmd64(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
+	} else {
+		envDataOff := g.asm.bssSize
+		g.asm.bssSize += 32768
+		envLenOff := g.asm.bssSize
+		g.asm.bssSize += 8
+		renvoAsmBuildArgvEnvSlicesAmd64(&g.asm, argsOff, envDataOff, envLenOff)
+	}
+	if app.paramCount == 1 {
+		return true
+	}
+	second := &g.meta.params[app.firstParam+1]
+	if !renvoTypeIsStringSlice(g.meta, second.typ) {
+		return false
+	}
+	return true
+}

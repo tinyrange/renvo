@@ -18,7 +18,10 @@ take precedence whenever they disagree with the guide.
 - Frontend acceptance tests live under `frontend_tests/`.
 - New backend regression programs may be added to `backend/tests/`; avoid
   modifying existing programs unless they are broken.
-- Do not modify `backend/main_test.go`.
+- Do not modify `backend/main_test.go` or any
+  `backend/*performance*_test.go` file except for explicitly authorized
+  harness refactoring. Never loosen performance or resource constraints without
+  explicit user instruction.
 - The only syscalls are `open`, `close`, `read`, `write`, `chmod`, and `print`.
 - Performance requirements are strictly defined in `backend/main_test.go` and
   cannot be violated.

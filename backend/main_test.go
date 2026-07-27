@@ -244,18 +244,29 @@ func appMain(args []string, env []string) int {
 	if err := os.WriteFile(wrapper, []byte(content), 0o644); err != nil {
 		t.Fatalf("failed to write performance compiler wrapper: %v", err)
 	}
-	linuxHelper := filepath.Join(outDir, "performance_linux_impl.go")
-	linuxContent := getPerformanceLinuxImpl(t, target)
-	if err := os.WriteFile(linuxHelper, []byte(linuxContent), 0o644); err != nil {
-		t.Fatalf("failed to write performance Linux helper: %v", err)
-	}
 	amd64CommonHelper := filepath.Join(outDir, "performance_amd64_common_impl.go")
+	linuxHelper := filepath.Join(outDir, "performance_linux_impl.go")
+	if err := os.WriteFile(linuxHelper, []byte(getPerformanceLinuxRuntime(t)), 0o644); err != nil {
+		t.Fatalf("failed to write performance Linux runtime helper: %v", err)
+	}
 
 	files := []string{
+		performanceAbsPath(t, "compiler_target_policy_impl.go"),
 		performanceAbsPath(t, "compiler_common_impl.go"),
 		wrapper,
-		linuxHelper,
 	}
+	if target.name == "windows/amd64" || target.name == "windows/386" {
+		files = append(files, performanceAbsPath(t, "compiler_pe_impl.go"))
+	}
+	files = append(files, linuxHelper)
+	if target.name == "windows/amd64" || target.name == "windows/386" {
+		windowsHelper := filepath.Join(outDir, "performance_windows_impl.go")
+		if err := os.WriteFile(windowsHelper, []byte(getPerformanceWindowsRuntime(t, target.name)), 0o644); err != nil {
+			t.Fatalf("failed to write performance Windows runtime helper: %v", err)
+		}
+		files = append(files, windowsHelper)
+	}
+	files = append(files, performanceAbsPath(t, "compiler_runtime_impl.go"))
 	for _, path := range backendFiles {
 		if path == "@amd64-common" {
 			if err := os.WriteFile(amd64CommonHelper, []byte(getPerformanceAmd64CommonImpl(t)), 0o644); err != nil {
@@ -269,56 +280,31 @@ func appMain(args []string, env []string) int {
 	return files
 }
 
-func performanceAbsPath(t *testing.T, path string) string {
+func getPerformanceLinuxRuntime(t *testing.T) string {
 	t.Helper()
-	if filepath.IsAbs(path) {
-		return path
-	}
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		t.Fatalf("failed to resolve %s: %v", path, err)
-	}
-	return abs
-}
-
-func getPerformanceLinuxImpl(t *testing.T, target compilerTarget) string {
-	t.Helper()
-
 	data, err := os.ReadFile("compiler_linux_impl.go")
 	if err != nil {
 		t.Fatalf("failed to read compiler_linux_impl.go: %v", err)
 	}
 	src := string(data)
-	readAllEnd := strings.Index(src, "\nfunc compileLinuxTarget")
 	sysStart := strings.Index(src, "func renvoLinuxSysWriteSeq")
-	winStart := strings.Index(src, "func renvoWinAmd64CallImport")
-	constStart := strings.Index(src, "func renvoEvalBuiltinConst")
-	if readAllEnd < 0 || sysStart < 0 || winStart < 0 || constStart < 0 || sysStart >= winStart {
-		t.Fatalf("failed to slice compiler_linux_impl.go for performance helper")
+	if sysStart < 0 {
+		t.Fatal("failed to locate Linux runtime lowering")
 	}
-	if target.name == "windows/amd64" || target.name == "windows/386" {
-		helper := src[sysStart:constStart]
-		if target.name == "windows/amd64" {
-			helper = removePerformanceFuncsWithPrefix(helper, "renvoWin386")
-		} else {
-			helper = removePerformanceFuncsWithPrefix(helper, "renvoWinAmd64")
-		}
-		return src[:readAllEnd] + "\n\n" + helper + "\n\n" + src[constStart:]
-	}
-	if target.name == "wasi/wasm32" {
-		return src[:readAllEnd] + `
+	return "package main\n\n" + src[sysStart:]
+}
 
-const renvoLinuxAmd64SysReadSeq = 0
-const renvoLinuxAmd64SysWriteSeq = 1
-const renvoLinuxAmd64SysOpen = 2
-const renvoLinuxAmd64SysClose = 3
-const renvoLinuxAmd64SysReadAt = 17
-const renvoLinuxAmd64SysWriteAt = 18
-const renvoLinuxAmd64SysFchmod = 91
-
-` + src[sysStart:winStart] + "\n\n" + src[constStart:]
+func getPerformanceWindowsRuntime(t *testing.T, targetName string) string {
+	t.Helper()
+	data, err := os.ReadFile("compiler_windows_impl.go")
+	if err != nil {
+		t.Fatalf("failed to read compiler_windows_impl.go: %v", err)
 	}
-	return src[:readAllEnd] + "\n\n" + src[sysStart:winStart] + "\n\n" + src[constStart:]
+	src := string(data)
+	if targetName == "windows/amd64" {
+		return removePerformanceFuncsWithPrefix(src, "renvoWin386")
+	}
+	return removePerformanceFuncsWithPrefix(src, "renvoWinAmd64")
 }
 
 func removePerformanceFuncsWithPrefix(src string, prefix string) string {
@@ -334,6 +320,18 @@ func removePerformanceFuncsWithPrefix(src string, prefix string) string {
 		end := start + 1 + next + 1
 		src = src[:start] + src[end:]
 	}
+}
+
+func performanceAbsPath(t *testing.T, path string) string {
+	t.Helper()
+	if filepath.IsAbs(path) {
+		return path
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		t.Fatalf("failed to resolve %s: %v", path, err)
+	}
+	return abs
 }
 
 func getPerformanceAmd64CommonImpl(t *testing.T) string {
@@ -388,19 +386,19 @@ func performanceTargetEntry(t *testing.T, targetName string) (string, string, []
 
 	switch targetName {
 	case "linux/amd64":
-		return "renvoTargetLinuxAmd64", "renvoTryCompileScalarProgramAmd64", []string{"compiler_amd64_impl.go", "compiler_linux_amd64_impl.go"}
+		return "renvoTargetLinuxAmd64", "renvoTryCompileScalarProgramAmd64", []string{"compiler_amd64_impl.go", "compiler_amd64_target_impl.go", "compiler_linux_amd64_impl.go"}
 	case "linux/386":
-		return "renvoTargetLinux386", "renvoTryCompileScalarProgram386", []string{"compiler_386_impl.go", "compiler_linux_386_impl.go"}
+		return "renvoTargetLinux386", "renvoTryCompileScalarProgram386", []string{"compiler_386_impl.go", "compiler_386_target_impl.go", "compiler_linux_386_impl.go"}
 	case "linux/aarch64":
-		return "renvoTargetLinuxAarch64", "renvoTryCompileScalarProgramAarch64", []string{"@amd64-common", "compiler_aarch64_impl.go", "compiler_linux_aarch64_impl.go"}
+		return "renvoTargetLinuxAarch64", "renvoTryCompileScalarProgramAarch64", []string{"@amd64-common", "compiler_aarch64_impl.go", "compiler_aarch64_target_impl.go", "compiler_linux_aarch64_impl.go"}
 	case "linux/arm":
 		return "renvoTargetLinuxArm", "renvoTryCompileScalarProgramArm", []string{"@amd64-common", "compiler_arm_impl.go", "compiler_linux_arm_impl.go"}
 	case "windows/amd64":
-		return "renvoTargetWindowsAmd64", "renvoTryCompileScalarProgramAmd64", []string{"compiler_amd64_impl.go", "compiler_linux_amd64_impl.go"}
+		return "renvoTargetWindowsAmd64", "renvoTryCompileScalarProgramAmd64", []string{"compiler_amd64_impl.go", "compiler_amd64_target_impl.go", "compiler_windows_amd64_impl.go"}
 	case "windows/386":
-		return "renvoTargetWindows386", "renvoTryCompileScalarProgram386", []string{"compiler_386_impl.go", "compiler_linux_386_impl.go"}
+		return "renvoTargetWindows386", "renvoTryCompileScalarProgram386", []string{"compiler_386_impl.go", "compiler_386_target_impl.go", "compiler_windows_386_impl.go"}
 	case "wasi/wasm32":
-		return "renvoTargetWasiWasm32", "renvoTryCompileScalarProgramWasm32", []string{"@amd64-common", "compiler_wasm32_impl.go", "compiler_linux_amd64_impl.go", "compiler_wasi_wasm32_impl.go"}
+		return "renvoTargetWasiWasm32", "renvoTryCompileScalarProgramWasm32", []string{"@amd64-common", "compiler_wasm32_impl.go", "compiler_wasi_wasm32_impl.go"}
 	default:
 		t.Fatalf("unsupported performance target %s", targetName)
 		return "", "", nil
