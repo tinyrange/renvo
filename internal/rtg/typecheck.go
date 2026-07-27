@@ -50,11 +50,27 @@ type RTGEmitter struct{}
 
 func (out *RTGEmitter) Len() int { return 0 }
 func (out *RTGEmitter) Byte(value byte) {}
+func (out *RTGEmitter) Int8(value int) {}
+func (out *RTGEmitter) Uint16(value int) {}
+func (out *RTGEmitter) Uint24(value int) {}
 func (out *RTGEmitter) Uint32(value uint32) {}
+func (out *RTGEmitter) Int32(value int) {}
 func (out *RTGEmitter) Uint64(value uint64) {}
+func (out *RTGEmitter) Int64(value int) {}
+func (out *RTGEmitter) Bytes2(v0 int, v1 int) {}
+func (out *RTGEmitter) Bytes3(v0 int, v1 int, v2 int) {}
+func (out *RTGEmitter) Bytes4(v0 int, v1 int, v2 int, v3 int) {}
+func (out *RTGEmitter) Text(value string) {}
 func (out *RTGEmitter) PatchUint32(at int, value int) {}
 func (out *RTGEmitter) AbsoluteReloc(at int, offset int, kind int) {}
 func (out *RTGEmitter) RelocAt(at int, label int) {}
+func (out *RTGEmitter) PrimaryLoad() int { return 0 }
+func (out *RTGEmitter) SetPrimaryLoad(value int) {}
+func (out *RTGEmitter) ByteAt(at int) byte { return 0 }
+func (out *RTGEmitter) SetByteAt(at int, value byte) {}
+func (out *RTGEmitter) AddByteAt(at int, value byte) {}
+func (out *RTGEmitter) AppendByte(value int) {}
+func (out *RTGEmitter) Truncate(size int) {}
 func (out *RTGEmitter) Rel32(label RTGLabel) {}
 func (out *RTGEmitter) Rel32Addend(label RTGLabel, addend int) {}
 func (out *RTGEmitter) Reloc(label RTGLabel) {}
@@ -68,6 +84,8 @@ func RTGPatchUint32(out *RTGEmitter, at int, value int) {}
 func RTGReloc(out *RTGEmitter, label RTGLabel) {}
 func RTGAddressValid(address RTGAddress) bool { return false }
 func RTGAddressRel32Addend(out *RTGEmitter, address RTGAddress) {}
+func RTGInt8Fits(value int) bool { return false }
+func RTGPopPrimary(out *RTGEmitter) {}
 
 func RTGSignedFits(value int64, bits int) bool { return false }
 func RTGUnsignedFits(value uint64, bits int) bool { return false }

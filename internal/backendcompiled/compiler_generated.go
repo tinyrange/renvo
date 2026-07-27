@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "0a66b64c3a7d138bfe50aa6eaf15c46bee7cbe8f0b9f28a7c1653d81a05b0633"
+const CompilerSourceDigest = "f68c99223b853b62cba12954ec747a53f250355583ab56751c0a2bafcaec87a7"
 
 // source: backend/compiler_common_impl.go
 
@@ -25791,12 +25791,29 @@ func (out *RTGEmitter) Byte(value byte) {
 	out.asm.code = append(out.asm.code, value)
 }
 
+func (out *RTGEmitter) Int8(value int) {
+	out.Byte(byte(value))
+}
+
+func (out *RTGEmitter) Uint16(value int) {
+	out.asm.code = append(out.asm.code, byte(value), byte(value >> 8))
+}
+
+func (out *RTGEmitter) Uint24(value int) {
+	out.Uint16(value)
+	out.Byte(byte(value >> 16))
+}
+
 func RTGByte(out *RTGEmitter, value byte) {
 	out.Byte(value)
 }
 
 func (out *RTGEmitter) Uint32(value uint32) {
 	out.asm.code = append(out.asm.code, byte(value), byte(value >> 8), byte(value >> 16), byte(value >> 24))
+}
+
+func (out *RTGEmitter) Int32(value int) {
+	out.Uint32(uint32(value))
 }
 
 func RTGUint32(out *RTGEmitter, value int) {
@@ -25806,6 +25823,31 @@ func RTGUint32(out *RTGEmitter, value int) {
 func (out *RTGEmitter) Uint64(value uint64) {
 	out.Uint32(uint32(value))
 	out.Uint32(uint32(value >> 32))
+}
+
+func (out *RTGEmitter) Int64(value int) {
+	out.Uint64(uint64(value))
+}
+
+func (out *RTGEmitter) Bytes2(v0 int, v1 int) {
+	out.Byte(byte(v0))
+	out.Byte(byte(v1))
+}
+
+func (out *RTGEmitter) Bytes3(v0 int, v1 int, v2 int) {
+	out.Bytes2(v0, v1)
+	out.Byte(byte(v2))
+}
+
+func (out *RTGEmitter) Bytes4(v0 int, v1 int, v2 int, v3 int) {
+	out.Bytes3(v0, v1, v2)
+	out.Byte(byte(v3))
+}
+
+func (out *RTGEmitter) Text(value string) {
+	for i := 0; i < len(value); i++ {
+		out.Byte(value[i])
+	}
 }
 
 func RTGUint64(out *RTGEmitter, value uint64) {
@@ -25824,6 +25866,34 @@ func (out *RTGEmitter) RelocAt(at int, label int) {
 	if label >= 0 {
 		renvoAsmAddReloc(out.asm, at, label)
 	}
+}
+
+func (out *RTGEmitter) PrimaryLoad() int {
+	return out.asm.lastPrimaryLoad
+}
+
+func (out *RTGEmitter) SetPrimaryLoad(value int) {
+	out.asm.lastPrimaryLoad = value
+}
+
+func (out *RTGEmitter) ByteAt(at int) byte {
+	return out.asm.code[at]
+}
+
+func (out *RTGEmitter) SetByteAt(at int, value byte) {
+	out.asm.code[at] = value
+}
+
+func (out *RTGEmitter) AddByteAt(at int, value byte) {
+	out.asm.code[at] += value
+}
+
+func (out *RTGEmitter) AppendByte(value int) {
+	out.asm.code = append(out.asm.code, byte(value))
+}
+
+func (out *RTGEmitter) Truncate(size int) {
+	out.asm.code = out.asm.code[:size]
 }
 
 func RTGPatchUint32(out *RTGEmitter, at int, value int) {
@@ -25868,6 +25938,14 @@ func RTGAddressValid(address RTGAddress) bool {
 
 func RTGAddressRel32Addend(out *RTGEmitter, address RTGAddress) {
 	out.Rel32Addend(address.Target, address.Addend)
+}
+
+func RTGInt8Fits(value int) bool {
+	return value >= -128 && value <= 127
+}
+
+func RTGPopPrimary(out *RTGEmitter) {
+	out.Byte(0x58)
 }
 
 func (out *RTGEmitter) Patch() {
@@ -26015,6 +26093,255 @@ func renvoRTGReloc(out *renvoAsm, label int) {
 
 // source: backend/compiler_amd64_impl.go
 
+const renvoAmd64ELFCodeOffset = 0xb0
+
+func renvoCompileAmd64(input []int, output int, arenaSize int) int {
+	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 && !renvoPrepareKernelMetadata() {
+		renvoPrintErr("renvo: kernel metadata unavailable\n")
+		return 1
+	}
+	src := renvoMakeByteScratch(589824)
+	for i := 0; i < len(input); i++ {
+		src = renvoReadAll(input[i], src)
+		src = append(src, '\n')
+	}
+	var prog renvoProgram
+	prog = renvoParseProgram(src)
+	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+		renvoCaptureKernelCompileContext(&prog.c)
+	}
+	if !prog.ok {
+		return 1
+	}
+	var meta renvoMeta
+	renvoBuildMetaInto(&prog, &meta)
+	if !meta.ok {
+		return 1
+	}
+	meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
+	var result renvoCompileResult
+	result = renvoTryCompileScalarProgramAmd64Scratch(&prog, &meta)
+	if result.ok {
+		data := result.data
+		if renvoFixedTarget == 0 {
+			data = renvoCompileOutputData(data, renvoTarget)
+		}
+		write(output, data, -1)
+		return 0
+	}
+	renvoPrintErr("renvo: compilation failed\n")
+	return 1
+}
+
+func renvoTryCompileScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+	return renvoTryCompileScalarProgramAmd64Scratch(p, meta)
+}
+
+func renvoTryCompileScalarProgramAmd64Scratch(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+	g := renvoBeginScalarProgramAmd64(p, meta)
+	if g == nil || !renvoEmitAllQueuedFunctionsScratch(g) {
+		return renvoCompileResult{}
+	}
+	return renvoFinishScalarProgramAmd64(g)
+}
+
+func renvoTryCompileScalarProgramAmd64Cached(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+	g := renvoBeginScalarProgramAmd64(p, meta)
+	if g == nil || !renvoEmitAllQueuedFunctionsCached(g) {
+		return renvoCompileResult{}
+	}
+	return renvoFinishScalarProgramAmd64(g)
+}
+func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
+	renvoNonNil(p, meta)
+	appIndex := -1
+	for i := 0; i < len(meta.funcs); i++ {
+		if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
+			appIndex = i
+		}
+	}
+	if appIndex < 0 {
+		return nil
+	}
+	// Metadata building consumes the decoded declaration records completely;
+	// amd64 emission uses the canonical body ranges in renvoFuncInfo.
+	renvo_runtime_ArenaDiscardDecls(p.decls)
+	renvo_runtime_ArenaDiscardFuncs(p.funcs)
+	g := new(renvoLinearGen)
+	g.c = meta.c
+	g.prog = p
+	g.meta = meta
+	g.arenaSize = meta.arenaSize
+	a := &g.asm
+	renvoAsmInitWithContext(a, g.c)
+	a.codeOffset = renvoAmd64ELFCodeOffset
+	if targetIsWindows(meta.c.renvoTargetOS) {
+		a.codeOffset = renvoWinSectionRVA
+	}
+	if renvoFixedTarget != 0 {
+		g.funcLabels = make([]int, 0, len(meta.funcs))
+	}
+	for i := 0; i < len(meta.funcs); i++ {
+		label := renvoAsmNewLabel(a)
+		g.funcLabels = append(g.funcLabels, label)
+	}
+	renvoInitFuncQueue(g, len(meta.funcs))
+	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+		if !renvoBeginKernelModuleAmd64(g, appIndex) {
+			return nil
+		}
+		return g
+	}
+	renvoLinearMarkFunc(g, appIndex)
+	if renvoFixedTarget == 0 && meta.c.emitImage {
+		// Preserve the four linked-image ABI words while global
+		// initialization freely uses the ordinary call registers.
+		renvoAsmEmitText(a, "\x57\x56\x52\x51")
+	}
+	if !meta.panicEnabled {
+		renvoAmd64InitRuntimeCheckRegs(g)
+	}
+	renvoEmitPersistentArenaReady(g)
+	if !renvoLinearInitGlobals(g) {
+		return nil
+	}
+	if renvoFixedTarget == 0 && meta.c.emitImage {
+		if !renvoEmitImageEntryArgsAmd64(g, appIndex) {
+			return nil
+		}
+	} else {
+		if !renvoEmitProgramEntryArgsAmd64(g, appIndex) {
+			return nil
+		}
+		// Entry argument setup uses R12 as scratch, so restore all reserved
+		// runtime check registers after it has consumed the process stack.
+		if !meta.panicEnabled {
+			renvoAmd64InitRuntimeCheckRegs(g)
+		}
+	}
+	renvoAsmCallLabel(a, g.funcLabels[appIndex])
+	if !renvoEmitProgramPanicCheck(g) {
+		return nil
+	}
+	if renvoFixedTarget == 0 && meta.c.emitImage {
+		renvoAsmRet(a)
+	} else if targetIsWindows(meta.c.renvoTargetOS) {
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoWinAmd64CallImport(a, renvoWinImportExitProcess)
+		renvoAsmRet(a)
+	} else {
+		renvoAsmCopyPrimaryToCallWord0(a)
+		renvoAsmPrimaryImm(a, 60)
+		renvoAsmSyscall(a)
+	}
+	return g
+}
+
+// A Linux linked image is entered as
+//
+//	entry(argsData, argsLen, envData, envLen) int
+//
+// where argsData and envData address Renvo []string backing arrays. The SysV
+// register order already matches the compiler calling convention for the first
+// two slice words; only the capacities and second slice need reshuffling.
+func renvoEmitImageEntryArgsAmd64(g *renvoLinearGen, appIndex int) bool {
+	renvoNonNil(g)
+	app := &g.meta.funcs[appIndex]
+	if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
+		return false
+	}
+	// Restore argsData, argsLen, envData, envLen.
+	renvoAsmEmitText(&g.asm, "\x59\x5a\x5e\x5f")
+	if app.paramCount == 0 {
+		return true
+	}
+	if app.paramCount > 2 {
+		return false
+	}
+	first := &g.meta.params[app.firstParam]
+	if !renvoTypeIsStringSlice(g.meta, first.typ) {
+		return false
+	}
+	if app.paramCount == 1 {
+		// RDX = args capacity = args length.
+		renvoAsmEmitText(&g.asm, "\x48\x89\xf2")
+		return true
+	}
+	second := &g.meta.params[app.firstParam+1]
+	if !renvoTypeIsStringSlice(g.meta, second.typ) {
+		return false
+	}
+	// R9=envLen, RCX=envData, RDX=argsLen, R8=envLen.
+	renvoAsmEmitText(&g.asm, "\x4c\x89\xc9\x48\x89\xd1\x48\x89\xf2\x4d\x89\xc8")
+	return true
+}
+
+func renvoFinishScalarProgramAmd64(g *renvoLinearGen) renvoCompileResult {
+	renvoNonNil(g)
+	renvo_runtime_ArenaDiscard(g.meta.scratchStart, g.meta.scratchEnd)
+	a := &g.asm
+	var data []byte
+	if targetIsWindows(g.c.renvoTargetOS) {
+		data = renvoAsmImageWindowsAmd64(a)
+	} else if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+		data = renvoAsmImageKernelModuleAmd64(a, g.kernelInitLabel, g.kernelExitLabel)
+	} else {
+		data = renvoAsmImageAmd64(a)
+	}
+	var result renvoCompileResult
+	if len(data) == 0 {
+		return result
+	}
+	result.data = data
+	result.ok = true
+	return result
+}
+
+func renvoEmitProgramEntryArgsAmd64(g *renvoLinearGen, appIndex int) bool {
+	renvoNonNil(g)
+	app := &g.meta.funcs[appIndex]
+	if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
+		return false
+	}
+	if app.paramCount == 0 {
+		return true
+	}
+	if app.paramCount > 2 {
+		return false
+	}
+	first := &g.meta.params[app.firstParam]
+	if !renvoTypeIsStringSlice(g.meta, first.typ) {
+		return false
+	}
+	argsOff := g.asm.bssSize
+	g.asm.bssSize += 32768
+	if targetIsWindows(g.c.renvoTargetOS) {
+		argsTextOff := g.asm.bssSize
+		g.asm.bssSize += 32768
+		argsLenOff := g.asm.bssSize
+		g.asm.bssSize += 8
+		envDataOff := g.asm.bssSize
+		g.asm.bssSize += 32768
+		envLenOff := g.asm.bssSize
+		g.asm.bssSize += 8
+		renvoAsmBuildWindowsArgvEnvSlicesAmd64(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
+	} else {
+		envDataOff := g.asm.bssSize
+		g.asm.bssSize += 32768
+		envLenOff := g.asm.bssSize
+		g.asm.bssSize += 8
+		renvoAsmBuildArgvEnvSlicesAmd64(&g.asm, argsOff, envDataOff, envLenOff)
+	}
+	if app.paramCount == 1 {
+		return true
+	}
+	second := &g.meta.params[app.firstParam+1]
+	if !renvoTypeIsStringSlice(g.meta, second.typ) {
+		return false
+	}
+	return true
+}
+
 const renvoAmd64ParamStoreRecipes = "\x48\x89\x7d\xbd\x48\x89\x75\xb5\x48\x89\x55\x95\x48\x89\x4d\x8d\x4c\x89\x45\x85\x4c\x89\x4d\x8d"
 
 func renvoAmd64EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
@@ -26089,32 +26416,6 @@ func renvoAmd64StoreParamWord(g *renvoLinearGen, reg int, offset int) {
 	renvoAsmEmit32(a, 0x10+(reg-6)*8)
 	renvoAsmStorePrimaryStack(a, offset)
 }
-func renvoAmd64AsmMovRaxImm(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	if imm == 0 {
-		renvoAsmEmit16(a, 0xc031)
-		return
-	}
-	if renvoAsmImmFits8Signed(imm) {
-		renvoAsmEmit2(a, 0x6a, imm)
-		renvoAsmPopPrimary(a)
-		return
-	}
-	if imm>>32 == 0 {
-		renvoAsmEmit8(a, 0xb8)
-		renvoAsmEmit32(a, imm)
-		return
-	}
-	if imm >= -2147483647 && imm <= 2147483647 {
-		renvoAsmEmit8(a, 0x68)
-		renvoAsmEmit32(a, imm)
-		renvoAsmPopPrimary(a)
-		return
-	}
-	renvoAsmEmit16(a, 0xb848)
-	renvoAsmEmit64(a, imm)
-}
-
 func renvoAmd64EmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
 	a := &g.asm
 	renvoAsmLoadPrimaryStack(a, srcPtr)
@@ -26127,294 +26428,6 @@ func renvoAmd64EmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCou
 	// the overwhelmingly common disjoint case. The two forward branches and
 	// final short jump are entirely internal to this fixed instruction block.
 	renvoAsmEmitText(a, "\x48\x39\xf7\x0f\x86\x1d\x00\x00\x00\x48\x8d\x04\x0e\x48\x39\xc7\x0f\x83\x10\x00\x00\x00\x48\x8d\x74\x0e\xff\x48\x8d\x7c\x0f\xff\xfd\xf3\xa4\xfc\xeb\x03\xfc\xf3\xa4")
-}
-func renvoAmd64AsmMovR10BssAddr(a *renvoAsm, bssOff int) {
-	renvoNonNil(a)
-	renvoAsmEmit24(a, 0x158d4c)
-	at := len(a.code)
-	renvoAsmEmit32(a, 0)
-	renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
-}
-func renvoAmd64AsmLoadRaxBss(a *renvoAsm, bssOff int) {
-	renvoNonNil(a)
-	renvoAsmEmit24(a, 0x058b48)
-	at := len(a.code)
-	renvoAsmEmit32(a, 0)
-	renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
-	a.lastPrimaryLoad = len(a.code)*8 + 5
-}
-func renvoAmd64AsmStoreRaxBss(a *renvoAsm, bssOff int) {
-	renvoNonNil(a)
-	renvoAsmEmit24(a, 0x058948)
-	at := len(a.code)
-	renvoAsmEmit32(a, 0)
-	renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
-}
-func renvoAmd64AsmMovRdiRax(a *renvoAsm) {
-	renvoNonNil(a)
-	if renvoAmd64RewritePrimaryLoad(a, 7, false) {
-		return
-	}
-	renvoAsmEmit16(a, 0x5f50)
-}
-func renvoAmd64AsmMovRsiRax(a *renvoAsm) {
-	renvoNonNil(a)
-	if renvoAmd64RewritePrimaryLoad(a, 6, false) {
-		return
-	}
-	renvoAsmEmit16(a, 0x5e50)
-}
-
-func renvoAmd64RewritePrimaryLoad(a *renvoAsm, reg int, pushed bool) bool {
-	renvoNonNil(a)
-	load := a.lastPrimaryLoad
-	if pushed {
-		load = -load
-	}
-	end := load >> 3
-	at := end - (load & 7)
-	if pushed {
-		end++
-	}
-	if load <= 0 || end != len(a.code) {
-		return false
-	}
-	a.code[at] += byte(reg * 8)
-	if pushed {
-		renvoTruncBytes(&a.code, len(a.code)-1)
-	}
-	a.lastPrimaryLoad = 0
-	return true
-}
-
-func renvoAmd64RewritePrimaryLoadCompare(a *renvoAsm, imm int) bool {
-	renvoNonNil(a)
-	load := a.lastPrimaryLoad
-	end := load >> 3
-	if load <= 0 || end != len(a.code) {
-		return false
-	}
-	at := end - (load & 7)
-	// RIP-relative displacements use the original instruction end as their
-	// base, so only stack and register-relative loads can grow by one byte.
-	if a.code[at]&0xc7 == 0x05 {
-		return false
-	}
-	// Turn `movq memory, %rax; cmpq immediate, %rax` into the shorter direct
-	// memory comparison. Callers use this only when the loaded value is dead
-	// after the flags are consumed.
-	a.code[at-1] = 0x83
-	a.code[at] += 0x38
-	a.code = append(a.code, byte(imm))
-	a.lastPrimaryLoad = 0
-	return true
-}
-
-func renvoAmd64AsmMovR8Rax(a *renvoAsm) {
-	renvoNonNil(a)
-	renvoAsmEmit24(a, 0xc08949)
-}
-func renvoAmd64AsmMovR9Rax(a *renvoAsm) {
-	renvoNonNil(a)
-	renvoAsmEmit24(a, 0xc18949)
-}
-func renvoAmd64AsmMemDisp(a *renvoAsm, disp int, op int, disp8 int, disp32 int) {
-	renvoNonNil(a)
-	renvoAsmEmit16(a, op)
-	if renvoAsmImmFits8Signed(disp) {
-		renvoAsmEmit2(a, disp8, disp)
-		return
-	}
-	renvoAsmEmit8(a, disp32)
-	renvoAsmEmit32(a, disp)
-}
-func renvoAmd64AsmLoadQwordRaxIndexRcx8(a *renvoAsm) {
-	renvoNonNil(a)
-	renvoAsmEmit32(a, 0xc8048b48)
-}
-func renvoAmd64AsmLoadQwordRaxIndexRcxDisp(a *renvoAsm, disp int) {
-	renvoNonNil(a)
-	renvoAsmEmit16(a, 0x8b48)
-	if renvoAsmImmFits8Signed(disp) {
-		renvoAsmEmit3(a, 0x44, 0x8, disp)
-		return
-	}
-	renvoAsmEmit16(a, 0x0884)
-	renvoAsmEmit32(a, disp)
-}
-
-func renvoAmd64AsmLoadRaxMemRdxDisp(a *renvoAsm, disp int) {
-	renvoNonNil(a)
-	if disp == 0 {
-		renvoAsmEmit24(a, 0x028b48)
-		a.lastPrimaryLoad = len(a.code)*8 + 1
-		return
-	}
-	renvoAsmMemDisp(a, disp, 0x8b48, 0x42, 0x82)
-	distance := 2
-	if !renvoAsmImmFits8Signed(disp) {
-		distance = 5
-	}
-	a.lastPrimaryLoad = len(a.code)*8 + distance
-}
-func renvoAmd64AsmLoadRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
-	renvoNonNil(a)
-	if size == 1 {
-		renvoAsmEmit24(a, 0xb60f48)
-		renvoAsmSecondaryDisp(a, disp)
-		return
-	}
-	if size == 2 {
-		renvoAsmEmit24(a, 0xbf0f48)
-		renvoAsmSecondaryDisp(a, disp)
-		return
-	}
-	if size == 4 {
-		renvoAsmMemDisp(a, disp, 0x6348, 0x42, 0x82)
-		return
-	}
-	renvoAsmLoadPrimaryMemSecondaryDisp(a, disp)
-}
-func renvoAmd64AsmLoadByteRaxIndexRcx(a *renvoAsm) {
-	renvoNonNil(a)
-	renvoAsmEmit32(a, 0x04b60f48)
-	renvoAsmEmit8(a, 0x8)
-}
-func renvoAmd64AsmLoadRaxIndexRcxSize(a *renvoAsm, size int) {
-	renvoNonNil(a)
-	if size == 1 {
-		renvoAsmLoadBytePrimaryIndexTertiary(a)
-		return
-	}
-	if size == 2 {
-		renvoAsmEmit32(a, 0x04bf0f48)
-		renvoAsmEmit8(a, 0x48)
-		return
-	}
-	if size == 4 {
-		renvoAsmEmit32(a, 0x88046348)
-		return
-	}
-	renvoAsmLoadQwordPrimaryIndexTertiary8(a)
-}
-func renvoAmd64AsmStoreRaxMemRdxRcx8(a *renvoAsm) {
-	renvoNonNil(a)
-	renvoAsmEmit32(a, 0xca048948)
-}
-func renvoAmd64AsmStoreRaxMemRdxDisp(a *renvoAsm, disp int) {
-	renvoNonNil(a)
-	if disp == 0 {
-		renvoAsmEmit24(a, 0x028948)
-		return
-	}
-	renvoAsmMemDisp(a, disp, 0x8948, 0x42, 0x82)
-}
-func renvoAmd64AsmStoreRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
-	renvoNonNil(a)
-	if size == 1 {
-		renvoAsmEmit8(a, 0x88)
-		renvoAsmSecondaryDisp(a, disp)
-		return
-	}
-	if size == 2 {
-		renvoAsmEmit16(a, 0x8966)
-		renvoAsmSecondaryDisp(a, disp)
-		return
-	}
-	if size == 4 {
-		renvoAsmEmit8(a, 0x89)
-		renvoAsmSecondaryDisp(a, disp)
-		return
-	}
-	renvoAsmStorePrimaryMemSecondaryDisp(a, disp)
-}
-func renvoAmd64CodeEnds(a *renvoAsm, suffix string) bool {
-	renvoNonNil(a)
-	start := len(a.code) - len(suffix)
-	if start < 0 {
-		return false
-	}
-	for i := 0; i < len(suffix); i++ {
-		if a.code[start+i] != suffix[i] {
-			return false
-		}
-	}
-	return true
-}
-func renvoAmd64AsmNormalizeRaxForKind(a *renvoAsm, kind int) {
-	renvoNonNil(a)
-	if kind == renvoTypeByte {
-		if renvoAmd64CodeEnds(a, "\x0f\xb6\xc0") || renvoAmd64CodeEnds(a, "\x48\x0f\xb6\x02") || renvoAmd64CodeEnds(a, "\x48\x0f\xb6\x04\x08") {
-			return
-		}
-		renvoAsmEmit24(a, 0xc0b60f)
-		return
-	}
-	if kind == renvoTypeInt8 {
-		renvoAsmEmit32(a, 0xc0be0f48)
-		return
-	}
-	if kind == renvoTypeInt16 {
-		renvoAsmEmit32(a, 0xc0bf0f48)
-		return
-	}
-	if kind == renvoTypeUint16 {
-		renvoAsmEmit32(a, 0xc0b70f48)
-		return
-	}
-	if kind == renvoTypeInt32 {
-		if renvoAmd64CodeEnds(a, "\x48\x63\xc0") || renvoAmd64CodeEnds(a, "\x48\x63\x04\x88") {
-			return
-		}
-		renvoAsmEmit24(a, 0xc06348)
-		return
-	}
-	if kind == renvoTypeUint32 {
-		renvoAsmEmit16(a, 0xc089)
-	}
-}
-func renvoAmd64AsmIncMemRdx(a *renvoAsm) {
-	renvoNonNil(a)
-	renvoAsmEmit24(a, 0x02ff48)
-}
-func renvoAmd64AsmDecMemRdx(a *renvoAsm) {
-	renvoNonNil(a)
-	renvoAsmEmit24(a, 0x0aff48)
-}
-func renvoAmd64AsmCmpRaxImm8(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	if imm == 0 {
-		// Integer values occupy the full native register on amd64. Testing only
-		// EAX makes values whose low word is zero (for example 1 << 40) compare
-		// equal to zero and can send both user control flow and the compiler's
-		// own immediate-selection logic down the wrong path.
-		renvoAsmEmit24(a, 0xc08548)
-		return
-	}
-	renvoAsmEmit4(a, 0x48, 0x83, 0xf8, imm)
-}
-
-func renvoAmd64AsmCmpRaxImm8Discard(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	if renvoAmd64RewritePrimaryLoadCompare(a, imm) {
-		return
-	}
-	renvoAmd64AsmCmpRaxImm8(a, imm)
-}
-func renvoAmd64AsmDivLeftRcxRightRax(a *renvoAsm, mod bool) {
-	renvoNonNil(a)
-	if mod {
-		renvoAsmEmitText(a, "\x48\x83\xf8\xff\x75\x10\x6a\x01\x5a\x48\xc1\xe2\x3f\x48\x39\xd1\x75\x04\x31\xc0\xeb\x10\x53\x48\x89\xc3\x48\x89\xc8\x48\x99\x48\xf7\xfb\x48\x89\xd0\x5b")
-		return
-	}
-	renvoAsmEmitText(a, "\x48\x83\xf8\xff\x75\x11\x6a\x01\x5a\x48\xc1\xe2\x3f\x48\x39\xd1\x75\x05\x48\x89\xc8\xeb\x0d\x53\x48\x89\xc3\x48\x89\xc8\x48\x99\x48\xf7\xfb\x5b")
-}
-
-func renvoAmd64AsmCmpRcxRaxSet(a *renvoAsm, setcc int) {
-	renvoNonNil(a)
-	renvoAsmEmit32(a, 0x0fc13948)
-	renvoAsmEmit3(a, setcc, 0xc0, 0xf)
-	renvoAsmEmit16(a, 0xc0b6)
 }
 func renvoAmd64EmitSwitchStringCaseTest(g *renvoLinearGen, valueOffset int, lenOffset int, ep *renvoExprParse, idx int, matchLabel int) bool {
 	return renvoEmitNativeSwitchStringCaseTest(g, valueOffset, lenOffset, ep, idx, matchLabel)
@@ -26734,959 +26747,301 @@ func renvoAmd64EnsureStringEqualHelper(g *renvoLinearGen) int {
 	return g.streqLabel
 }
 
-// source: backend/compiler_amd64_generated_impl.go
+// source: backend/compiler_amd64_target_impl.go
 // Code generated by Renvo RTG; DO NOT EDIT.
 // generator: 1
 // target: arch/x86_64
-// unit: x86_64 5a16464725d923831e271d7dc587234310b6aba3f96a7a82a85896770cd32da4
+// unit: x86_64 9591e033e6d6f7a16bdf4b7c00187500f06e55101c692b251413aeed85af38f4
 
 
-var rtgX8664RAX = RTGRegister{Code:0, Valid:true}
-
-var rtgX8664RCX = RTGRegister{Code:1, Valid:true}
-
-var rtgX8664RDX = RTGRegister{Code:2, Valid:true}
-
-var rtgX8664RBX = RTGRegister{Code:3, Valid:true}
-
-var rtgX8664RSP = RTGRegister{Code:4, Valid:true}
-
-var rtgX8664RBP = RTGRegister{Code:5, Valid:true}
-
-var rtgX8664RSI = RTGRegister{Code:6, Valid:true}
-
-var rtgX8664RDI = RTGRegister{Code:7, Valid:true}
-
-var rtgX8664R8 = RTGRegister{Code:8, Valid:true}
-
-var rtgX8664R9 = RTGRegister{Code:9, Valid:true}
-
-var rtgX8664R10 = RTGRegister{Code:10, Valid:true}
-
-var rtgX8664R11 = RTGRegister{Code:11, Valid:true}
-
-var rtgX8664R12 = RTGRegister{Code:12, Valid:true}
-
-var rtgX8664R13 = RTGRegister{Code:13, Valid:true}
-
-var rtgX8664R14 = RTGRegister{Code:14, Valid:true}
-
-var rtgX8664R15 = RTGRegister{Code:15, Valid:true}
-var rtgX8664Primary = rtgX8664RAX
-var rtgX8664Secondary = rtgX8664RDX
-var rtgX8664Tertiary = rtgX8664RCX
-var rtgX8664Scratch = rtgX8664R10
-var rtgX8664DivisionScratch = rtgX8664RBX
-var rtgX8664CopyDestination = rtgX8664RDI
-var rtgX8664CopySource = rtgX8664RSI
-var rtgX8664CopyCount = rtgX8664RCX
-var rtgX8664Stack = rtgX8664RSP
-var rtgX8664Frame = rtgX8664RBP
-
-var rtgX8664EQ = RTGCondition{Code:0x94, SetOpcode:0x94, JumpOpcode:0x84}
-
-var rtgX8664NE = RTGCondition{Code:0x95, SetOpcode:0x95, JumpOpcode:0x85}
-
-var rtgX8664SLT = RTGCondition{Code:0x9c, SetOpcode:0x9c, JumpOpcode:0x8c}
-
-var rtgX8664SGE = RTGCondition{Code:0x9d, SetOpcode:0x9d, JumpOpcode:0x8d}
-
-var rtgX8664SLE = RTGCondition{Code:0x9e, SetOpcode:0x9e, JumpOpcode:0x8e}
-
-var rtgX8664SGT = RTGCondition{Code:0x9f, SetOpcode:0x9f, JumpOpcode:0x8f}
-
-var rtgX8664ULT = RTGCondition{Code:0x92, SetOpcode:0x92, JumpOpcode:0x82}
-
-var rtgX8664UGE = RTGCondition{Code:0x93, SetOpcode:0x93, JumpOpcode:0x83}
-
-var rtgX8664ULE = RTGCondition{Code:0x96, SetOpcode:0x96, JumpOpcode:0x86}
-
-var rtgX8664UGT = RTGCondition{Code:0x97, SetOpcode:0x97, JumpOpcode:0x87}
-
-func rtgX8664X86Low3(reg RTGRegister) byte {
-    return byte(reg.Code & 7)
-}
-func rtgX8664X86High(reg RTGRegister) byte {
-    return byte(reg.Code>>3) & 1
-}
-func rtgX8664X86Opcode(out *renvoAsm, opcode uint32) {
-    if opcode > 0xff {
-        out.Byte(byte(opcode >> 8))
-    }
-    out.Byte(byte(opcode))
-}
-func rtgX8664X86REX(
-    out *renvoAsm,
-    wide bool,
-    reg RTGRegister,
-    index RTGRegister,
-    base RTGRegister,
-    byteRegister RTGRegister,
-) {
-    w := byte(0)
-    if wide {
-        w = 1
-    }
-    r := rtgX8664X86High(reg)
-    x := byte(0)
-    if index.Valid {
-        x = rtgX8664X86High(index)
-    }
-    b := byte(0)
-    if base.Valid {
-        b = rtgX8664X86High(base)
-    }
-    needsByteREX := byteRegister.Valid && byteRegister.Code >= 4
-    if w != 0 || r != 0 || x != 0 || b != 0 || needsByteREX {
-        out.Byte(0x40 | w<<3 | r<<2 | x<<1 | b)
-    }
-}
-func rtgX8664X86ModRM(out *renvoAsm, mode byte, reg byte, rm byte) {
-    out.Byte(mode<<6 | (reg&7)<<3 | rm&7)
-}
-func rtgX8664X86Memory(out *renvoAsm, reg byte, address renvoRTGAddress) {
-    if renvoRTGAddressValid(address) {
-        rtgX8664X86ModRM(out, 0, reg, 5)
-        renvoRTGAddressRel32Addend(out, address)
-        return
-    }
-
-    base := address.Base
-    index := address.Index
-    displacement := address.Displacement
-    needsSIB := index.Valid || rtgX8664X86Low3(base) == 4
-    mode := byte(0)
-    if displacement != 0 || rtgX8664X86Low3(base) == 5 {
-        mode = 2
-        if RTGSignedFits(int64(displacement), 8) {
-            mode = 1
-        }
-    }
-
-    if needsSIB {
-        rtgX8664X86ModRM(out, mode, reg, 4)
-        indexCode := byte(4)
-        if index.Valid {
-            indexCode = rtgX8664X86Low3(index)
-        }
-        out.Byte(byte(RTGLog2(address.Scale))<<6 |
-            indexCode<<3 | rtgX8664X86Low3(base))
-    } else {
-        rtgX8664X86ModRM(out, mode, reg, rtgX8664X86Low3(base))
-    }
-
-    if mode == 1 {
-        out.Byte(byte(displacement))
-    } else if mode == 2 {
-        out.Uint32(uint32(displacement))
-    }
-}
-func rtgX8664X86RRRM(
-    out *renvoAsm,
-    opcode uint32,
-    destination RTGRegister,
-    source RTGRegister,
-    width int,
-) {
-    if width == 16 {
-        out.Byte(0x66)
-    }
-    byteRegister := RTGNoRegister
-    if width == 8 {
-        byteRegister = source
-    }
-    rtgX8664X86REX(out, width == 64, source, RTGNoRegister, destination, byteRegister)
-    rtgX8664X86Opcode(out, opcode)
-    rtgX8664X86ModRM(out, 3, rtgX8664X86Low3(source), rtgX8664X86Low3(destination))
-}
-func rtgX8664X86RR(
-    out *renvoAsm,
-    opcode uint32,
-    destination RTGRegister,
-    source RTGRegister,
-    width int,
-) {
-    rtgX8664X86REX(out, width == 64, destination, RTGNoRegister, source, RTGNoRegister)
-    rtgX8664X86Opcode(out, opcode)
-    rtgX8664X86ModRM(out, 3, rtgX8664X86Low3(destination), rtgX8664X86Low3(source))
-}
-func rtgX8664X86RMR(
-    out *renvoAsm,
-    opcode uint32,
-    destination RTGRegister,
-    address renvoRTGAddress,
-    width int,
-) {
-    if width == 16 {
-        out.Byte(0x66)
-    }
-    rtgX8664X86REX(out, width == 64, destination, address.Index, address.Base, RTGNoRegister)
-    rtgX8664X86Opcode(out, opcode)
-    rtgX8664X86Memory(out, rtgX8664X86Low3(destination), address)
-}
-func rtgX8664X86RRM(
-    out *renvoAsm,
-    opcode uint32,
-    address renvoRTGAddress,
-    source RTGRegister,
-    width int,
-) {
-    if width == 16 {
-        out.Byte(0x66)
-    }
-    byteRegister := RTGNoRegister
-    if width == 8 {
-        byteRegister = source
-    }
-    rtgX8664X86REX(out, width == 64, source, address.Index, address.Base, byteRegister)
-    rtgX8664X86Opcode(out, opcode)
-    rtgX8664X86Memory(out, rtgX8664X86Low3(source), address)
-}
-func rtgX8664X86Group(
-    out *renvoAsm,
-    opcode uint32,
-    selector byte,
-    operand RTGRegister,
-    width int,
-) {
-    rtgX8664X86REX(out, width == 64, RTGNoRegister, RTGNoRegister, operand, RTGNoRegister)
-    rtgX8664X86Opcode(out, opcode)
-    rtgX8664X86ModRM(out, 3, selector, rtgX8664X86Low3(operand))
-}
-func rtgX8664X86GroupImmediate(
-    out *renvoAsm,
-    opcode uint32,
-    selector byte,
-    operand RTGRegister,
-    value int64,
-    width int,
-) {
-    rtgX8664X86REX(out, width == 64, RTGNoRegister, RTGNoRegister, operand, RTGNoRegister)
-    if RTGSignedFits(value, 8) {
-        out.Byte(0x83)
-        rtgX8664X86ModRM(out, 3, selector, rtgX8664X86Low3(operand))
-        out.Byte(byte(value))
-        return
-    }
-    rtgX8664X86Opcode(out, opcode)
-    rtgX8664X86ModRM(out, 3, selector, rtgX8664X86Low3(operand))
-    out.Uint32(uint32(value))
-}
-func rtgX8664X86GroupImmediate8(
-    out *renvoAsm,
-    opcode uint32,
-    selector byte,
-    operand RTGRegister,
-    value byte,
-    width int,
-) {
-    rtgX8664X86Group(out, opcode, selector, operand, width)
-    out.Byte(value)
-}
-func rtgX8664X86GroupMemoryImmediate(
-    out *renvoAsm,
-    opcode uint32,
-    selector byte,
-    address renvoRTGAddress,
-    value int64,
-    width int,
-) {
-    rtgX8664X86REX(out, width == 64, RTGNoRegister, address.Index, address.Base, RTGNoRegister)
-    if RTGSignedFits(value, 8) {
-        out.Byte(0x83)
-    } else {
-        rtgX8664X86Opcode(out, opcode)
-    }
-    rtgX8664X86Memory(out, selector, address)
-    if RTGSignedFits(value, 8) {
-        out.Byte(byte(value))
-    } else {
-        out.Uint32(uint32(value))
-    }
-}
-func rtgX8664X86MultiplyImmediate(
-    out *renvoAsm,
-    opcode uint32,
-    destination RTGRegister,
-    source RTGRegister,
-    value int64,
-    width int,
-) {
-    rtgX8664X86REX(out, width == 64, destination, RTGNoRegister, source, RTGNoRegister)
-    if RTGSignedFits(value, 8) {
-        out.Byte(0x6b)
-    } else {
-        rtgX8664X86Opcode(out, opcode)
-    }
-    rtgX8664X86ModRM(out, 3, rtgX8664X86Low3(destination), rtgX8664X86Low3(source))
-    if RTGSignedFits(value, 8) {
-        out.Byte(byte(value))
-    } else {
-        out.Uint32(uint32(value))
-    }
-}
-func rtgX8664X86OpcodeRegister(out *renvoAsm, opcode byte, operand RTGRegister) {
-    if rtgX8664X86High(operand) != 0 {
-        out.Byte(0x41)
-    }
-    out.Byte(opcode + rtgX8664X86Low3(operand))
-}
-func rtgX8664X86Immediate(out *renvoAsm, opcode byte, value uint64, width int) {
-    out.Byte(opcode)
-    if width == 8 {
-        out.Byte(byte(value))
-    } else if width == 32 {
-        out.Uint32(uint32(value))
-    } else {
-        out.Uint64(value)
-    }
-}
-func rtgX8664X86Relative(out *renvoAsm, opcode uint32, label int) {
-    rtgX8664X86Opcode(out, opcode)
-    out.Rel32(label)
-}
-func rtgX8664X86SetCondition(
-    out *renvoAsm,
-    condition RTGCondition,
-    destination RTGRegister,
-) {
-    rtgX8664X86REX(out, false, RTGNoRegister, RTGNoRegister, destination, destination)
-    out.Byte(0x0f)
-    out.Byte(condition.SetOpcode)
-    rtgX8664X86ModRM(out, 3, 0, rtgX8664X86Low3(destination))
-}
-func rtgX8664X86JumpCondition(
-    out *renvoAsm,
-    condition RTGCondition,
-    label int,
-) {
-    out.Byte(0x0f)
-    out.Byte(condition.JumpOpcode)
-    out.Rel32(label)
-}
-func rtgX8664X86MoveImmediate(out *renvoAsm, destination RTGRegister, value int64) {
-    if destination == rtgX8664RAX && value == 0 {
-        out.Byte(0x31)
-        out.Byte(0xc0)
-    } else if destination != rtgX8664RSP && RTGSignedFits(value, 8) {
-        rtgX8664X86Immediate(out, 0x6a, uint64(value), 8)
-        rtgX8664X86OpcodeRegister(out, 0x58, destination)
-    } else if RTGUnsignedFits(uint64(value), 32) {
-        rtgX8664X86OpcodeRegister(out, 0xb8, destination)
-        out.Uint32(uint32(value))
-    } else if RTGSignedFits(value, 32) {
-        rtgX8664X86Immediate(out, 0x68, uint64(value), 32)
-        rtgX8664X86OpcodeRegister(out, 0x58, destination)
-    } else {
-        rtgX8664X86REX(out, true, RTGNoRegister, RTGNoRegister, destination, RTGNoRegister)
-        out.Byte(0xb8 + rtgX8664X86Low3(destination))
-        out.Uint64(uint64(value))
-    }
-}
-func rtgX8664X86RelaxJump(displacement int64) (byte, bool) {
-    return 0xeb, RTGSignedFits(displacement, 8)
-}
-func rtgX8664X86RelaxCondition(condition RTGCondition, displacement int64) (byte, bool) {
-    return condition.JumpOpcode - 0x10, RTGSignedFits(displacement, 8)
-}
-func rtgX8664X86VariableShift(
-    out *renvoAsm,
-    direction RTGShiftDirection,
-    signed bool,
-) {
-    rtgX8664Xchg64(out, rtgX8664Primary, rtgX8664Tertiary)
-    if direction == RTGShiftLeft {
-        rtgX8664ShlCL64(out, rtgX8664Primary)
-    } else if signed {
-        rtgX8664SarCL64(out, rtgX8664Primary)
-    } else {
-        rtgX8664ShrCL64(out, rtgX8664Primary)
-    }
-}
-func rtgX8664X86SignedDivide(out *renvoAsm, remainder bool) {
-    ordinary := out.NewLabel()
-    done := out.NewLabel()
-    rtgX8664CmpImmediate64(out, rtgX8664Primary, -1)
-    rtgX8664X86JumpCondition(out, rtgX8664NE, ordinary)
-    rtgX8664X86MoveImmediate(out, rtgX8664Secondary, 1)
-    rtgX8664ShlImmediate64(out, rtgX8664Secondary, 63)
-    rtgX8664Cmp64(out, rtgX8664Tertiary, rtgX8664Secondary)
-    rtgX8664X86JumpCondition(out, rtgX8664NE, ordinary)
-    if remainder {
-        rtgX8664X86MoveImmediate(out, rtgX8664Primary, 0)
-    } else {
-        rtgX8664Mov64(out, rtgX8664Primary, rtgX8664Tertiary)
-    }
-    rtgX8664X86Relative(out, 0xe9, done)
-    out.Mark(ordinary)
-    rtgX8664PushRegister(out, rtgX8664DivisionScratch)
-    rtgX8664Mov64(out, rtgX8664DivisionScratch, rtgX8664Primary)
-    rtgX8664Mov64(out, rtgX8664Primary, rtgX8664Tertiary)
-    out.Byte(0x48)
-    out.Byte(0x99)
-    rtgX8664X86Group(out, 0xf7, 7, rtgX8664DivisionScratch, 64)
-    if remainder {
-        rtgX8664Mov64(out, rtgX8664Primary, rtgX8664Secondary)
-    }
-    rtgX8664PopRegister(out, rtgX8664DivisionScratch)
-    out.Mark(done)
-}
-func rtgX8664X86CopyBytes(out *renvoAsm) {
-    destination := rtgX8664CopyDestination
-    source := rtgX8664CopySource
-    count := rtgX8664CopyCount
-    forward := out.NewLabel()
-    done := out.NewLabel()
-    rtgX8664Cmp64(out, destination, source)
-    rtgX8664X86JumpCondition(out, rtgX8664ULE, forward)
-    rtgX8664Lea64(out, rtgX8664Scratch, renvoRTGAddress{Base: source, Index: count, Scale: 1})
-    rtgX8664Cmp64(out, destination, rtgX8664Scratch)
-    rtgX8664X86JumpCondition(out, rtgX8664UGE, forward)
-    rtgX8664Lea64(out, source, renvoRTGAddress{
-        Base: source, Index: count, Scale: 1, Displacement: -1,
-    })
-    rtgX8664Lea64(out, destination, renvoRTGAddress{
-        Base: destination, Index: count, Scale: 1, Displacement: -1,
-    })
-    out.Byte(0xfd)
-    out.Byte(0xf3)
-    out.Byte(0xa4)
-    out.Byte(0xfc)
-    rtgX8664X86Relative(out, 0xe9, done)
-    out.Mark(forward)
-    out.Byte(0xfc)
-    out.Byte(0xf3)
-    out.Byte(0xa4)
-    out.Mark(done)
-}
-
-// Generated from instruction mov64.
-func rtgX8664Mov64(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-	rtgX8664X86RRRM(out, 0x89, destination, source, 64)
-}
-
-// Generated from instruction load64.
-func rtgX8664Load64(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
-	rtgX8664X86RMR(out, 0x8b, destination, address, 64)
-}
-
-// Generated from instruction lea64.
-func rtgX8664Lea64(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
-	rtgX8664X86RMR(out, 0x8d, destination, address, 64)
-}
-
-// Generated from instruction load_i32.
-func rtgX8664LoadI32(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
-	rtgX8664X86RMR(out, 0x63, destination, address, 32)
-}
-
-// Generated from instruction load_u32.
-func rtgX8664LoadU32(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
-	rtgX8664X86RMR(out, 0x8b, destination, address, 32)
-}
-
-// Generated from instruction load_i16.
-func rtgX8664LoadI16(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
-	rtgX8664X86RMR(out, 0x0fbf, destination, address, 16)
-}
-
-// Generated from instruction load_u16.
-func rtgX8664LoadU16(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
-	rtgX8664X86RMR(out, 0x0fb7, destination, address, 16)
-}
-
-// Generated from instruction load_i8.
-func rtgX8664LoadI8(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
-	rtgX8664X86RMR(out, 0x0fbe, destination, address, 8)
-}
-
-// Generated from instruction load_u8.
-func rtgX8664LoadU8(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
-	rtgX8664X86RMR(out, 0x0fb6, destination, address, 8)
-}
-
-// Generated from instruction store64.
-func rtgX8664Store64(out *renvoAsm, address renvoRTGAddress, source RTGRegister) {
-	rtgX8664X86RRM(out, 0x89, address, source, 64)
-}
-
-// Generated from instruction store32.
-func rtgX8664Store32(out *renvoAsm, address renvoRTGAddress, source RTGRegister) {
-	rtgX8664X86RRM(out, 0x89, address, source, 32)
-}
-
-// Generated from instruction store16.
-func rtgX8664Store16(out *renvoAsm, address renvoRTGAddress, source RTGRegister) {
-	rtgX8664X86RRM(out, 0x89, address, source, 16)
-}
-
-// Generated from instruction store8.
-func rtgX8664Store8(out *renvoAsm, address renvoRTGAddress, source RTGRegister) {
-	rtgX8664X86RRM(out, 0x88, address, source, 8)
-}
-
-// Generated from instruction add64.
-func rtgX8664Add64(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-	rtgX8664X86RRRM(out, 0x01, destination, source, 64)
-}
-
-// Generated from instruction sub64.
-func rtgX8664Sub64(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-	rtgX8664X86RRRM(out, 0x29, destination, source, 64)
-}
-
-// Generated from instruction and64.
-func rtgX8664And64(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-	rtgX8664X86RRRM(out, 0x21, destination, source, 64)
-}
-
-// Generated from instruction or64.
-func rtgX8664Or64(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-	rtgX8664X86RRRM(out, 0x09, destination, source, 64)
-}
-
-// Generated from instruction xor64.
-func rtgX8664Xor64(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-	rtgX8664X86RRRM(out, 0x31, destination, source, 64)
-}
-
-// Generated from instruction cmp64.
-func rtgX8664Cmp64(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-	rtgX8664X86RRRM(out, 0x39, destination, source, 64)
-}
-
-// Generated from instruction test64.
-func rtgX8664Test64(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-	rtgX8664X86RRRM(out, 0x85, destination, source, 64)
-}
-
-// Generated from instruction imul64.
-func rtgX8664Imul64(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-	rtgX8664X86RR(out, 0x0faf, destination, source, 64)
-}
-
-// Generated from instruction xchg64.
-func rtgX8664Xchg64(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-	rtgX8664X86RRRM(out, 0x87, destination, source, 64)
-}
-
-// Generated from instruction add_imm64.
-func rtgX8664AddImmediate64(out *renvoAsm, operand RTGRegister, value int64) {
-	rtgX8664X86GroupImmediate(out, 0x81, 0, operand, value, 64)
-}
-
-// Generated from instruction or_imm64.
-func rtgX8664OrImmediate64(out *renvoAsm, operand RTGRegister, value int64) {
-	rtgX8664X86GroupImmediate(out, 0x81, 1, operand, value, 64)
-}
-
-// Generated from instruction and_imm64.
-func rtgX8664AndImmediate64(out *renvoAsm, operand RTGRegister, value int64) {
-	rtgX8664X86GroupImmediate(out, 0x81, 4, operand, value, 64)
-}
-
-// Generated from instruction sub_imm64.
-func rtgX8664SubImmediate64(out *renvoAsm, operand RTGRegister, value int64) {
-	rtgX8664X86GroupImmediate(out, 0x81, 5, operand, value, 64)
-}
-
-// Generated from instruction xor_imm64.
-func rtgX8664XorImmediate64(out *renvoAsm, operand RTGRegister, value int64) {
-	rtgX8664X86GroupImmediate(out, 0x81, 6, operand, value, 64)
-}
-
-// Generated from instruction cmp_imm64.
-func rtgX8664CmpImmediate64(out *renvoAsm, operand RTGRegister, value int64) {
-	rtgX8664X86GroupImmediate(out, 0x81, 7, operand, value, 64)
-}
-
-// Generated from instruction cmp_mem_imm64.
-func rtgX8664CmpMemoryImmediate64(out *renvoAsm, address renvoRTGAddress, value int64) {
-	rtgX8664X86GroupMemoryImmediate(out, 0x81, 7, address, value, 64)
-}
-
-// Generated from instruction imul_imm64.
-func rtgX8664ImulImmediate64(out *renvoAsm, destination RTGRegister, source RTGRegister, value int64) {
-	rtgX8664X86MultiplyImmediate(out, 0x69, destination, source, value, 64)
-}
-
-// Generated from instruction inc64.
-func rtgX8664Inc64(out *renvoAsm, operand RTGRegister) {
-	rtgX8664X86Group(out, 0xff, 0, operand, 64)
-}
-
-// Generated from instruction dec64.
-func rtgX8664Dec64(out *renvoAsm, operand RTGRegister) {
-	rtgX8664X86Group(out, 0xff, 1, operand, 64)
-}
-
-// Generated from instruction shl_imm64.
-func rtgX8664ShlImmediate64(out *renvoAsm, operand RTGRegister, value byte) {
-	rtgX8664X86GroupImmediate8(out, 0xc1, 4, operand, value, 64)
-}
-
-// Generated from instruction shr_imm64.
-func rtgX8664ShrImmediate64(out *renvoAsm, operand RTGRegister, value byte) {
-	rtgX8664X86GroupImmediate8(out, 0xc1, 5, operand, value, 64)
-}
-
-// Generated from instruction sar_imm64.
-func rtgX8664SarImmediate64(out *renvoAsm, operand RTGRegister, value byte) {
-	rtgX8664X86GroupImmediate8(out, 0xc1, 7, operand, value, 64)
-}
-
-// Generated from instruction shl_cl64.
-func rtgX8664ShlCL64(out *renvoAsm, operand RTGRegister) {
-	rtgX8664X86Group(out, 0xd3, 4, operand, 64)
-}
-
-// Generated from instruction shr_cl64.
-func rtgX8664ShrCL64(out *renvoAsm, operand RTGRegister) {
-	rtgX8664X86Group(out, 0xd3, 5, operand, 64)
-}
-
-// Generated from instruction sar_cl64.
-func rtgX8664SarCL64(out *renvoAsm, operand RTGRegister) {
-	rtgX8664X86Group(out, 0xd3, 7, operand, 64)
-}
-
-// Generated from instruction call_reg.
-func rtgX8664CallRegister(out *renvoAsm, operand RTGRegister, width int) {
-	rtgX8664X86Group(out, 0xff, 2, operand, width)
-}
-
-// Generated from instruction idiv64.
-func rtgX8664Idiv64(out *renvoAsm, operand RTGRegister) {
-	rtgX8664X86Group(out, 0xf7, 7, operand, 64)
-}
-
-// Generated from instruction push_reg.
-func rtgX8664PushRegister(out *renvoAsm, operand RTGRegister) {
-	rtgX8664X86OpcodeRegister(out, 0x50, operand)
-}
-
-// Generated from instruction pop_reg.
-func rtgX8664PopRegister(out *renvoAsm, operand RTGRegister) {
-	rtgX8664X86OpcodeRegister(out, 0x58, operand)
-}
-
-// Generated from instruction push_imm8.
-func rtgX8664PushImmediate8(out *renvoAsm, value uint64) {
-	rtgX8664X86Immediate(out, 0x6a, value, 8)
-}
-
-// Generated from instruction push_imm32.
-func rtgX8664PushImmediate32(out *renvoAsm, value uint64) {
-	rtgX8664X86Immediate(out, 0x68, value, 32)
-}
-
-// Generated from instruction setcc.
-func rtgX8664Setcc(out *renvoAsm, condition RTGCondition, destination RTGRegister) {
-	rtgX8664X86SetCondition(out, condition, destination)
-}
-
-// Generated from instruction jcc_rel32.
-func rtgX8664JccRel32(out *renvoAsm, condition RTGCondition, label int) {
-	rtgX8664X86JumpCondition(out, condition, label)
-}
-
-// Generated from instruction call_rel32.
-func rtgX8664CallRel32(out *renvoAsm, label int) {
-	rtgX8664X86Relative(out, 0xe8, label)
-}
-
-// Generated from instruction jump_rel32.
-func rtgX8664JumpRel32(out *renvoAsm, label int) {
-	rtgX8664X86Relative(out, 0xe9, label)
-}
-
-// Generated from instruction ret.
-func rtgX8664Ret(out *renvoAsm) {
-	renvoRTGByte(out, 0xc3)
-}
-
-// Generated from instruction leave.
-func rtgX8664Leave(out *renvoAsm) {
-	renvoRTGByte(out, 0xc9)
-}
-
-// Generated from instruction syscall.
-func rtgX8664Syscall(out *renvoAsm) {
-	renvoRTGByte(out, 0x0f)
-	renvoRTGByte(out, 0x05)
-}
-
-// Generated from instruction cqo.
-func rtgX8664Cqo(out *renvoAsm) {
-	renvoRTGByte(out, 0x48)
-	renvoRTGByte(out, 0x99)
-}
-
-// Generated from instruction cld.
-func rtgX8664Cld(out *renvoAsm) {
-	renvoRTGByte(out, 0xfc)
-}
-
-// Generated from instruction std.
-func rtgX8664Std(out *renvoAsm) {
-	renvoRTGByte(out, 0xfd)
-}
-
-// Generated from instruction rep_movsb.
-func rtgX8664RepMovsb(out *renvoAsm) {
-	renvoRTGByte(out, 0xf3)
-	renvoRTGByte(out, 0xa4)
-}
-
-// source: backend/compiler_amd64_target_impl.go
-
-const renvoAmd64ELFCodeOffset = 0xb0
-
-func renvoCompileAmd64(input []int, output int, arenaSize int) int {
-	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 && !renvoPrepareKernelMetadata() {
-		renvoPrintErr("renvo: kernel metadata unavailable\n")
-		return 1
-	}
-	src := renvoMakeByteScratch(589824)
-	for i := 0; i < len(input); i++ {
-		src = renvoReadAll(input[i], src)
-		src = append(src, '\n')
-	}
-	var prog renvoProgram
-	prog = renvoParseProgram(src)
-	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
-		renvoCaptureKernelCompileContext(&prog.c)
-	}
-	if !prog.ok {
-		return 1
-	}
-	var meta renvoMeta
-	renvoBuildMetaInto(&prog, &meta)
-	if !meta.ok {
-		return 1
-	}
-	meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
-	var result renvoCompileResult
-	result = renvoTryCompileScalarProgramAmd64Scratch(&prog, &meta)
-	if result.ok {
-		data := result.data
-		if renvoFixedTarget == 0 {
-			data = renvoCompileOutputData(data, renvoTarget)
-		}
-		write(output, data, -1)
-		return 0
-	}
-	renvoPrintErr("renvo: compilation failed\n")
-	return 1
-}
-
-func renvoTryCompileScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-	return renvoTryCompileScalarProgramAmd64Scratch(p, meta)
-}
-
-func renvoTryCompileScalarProgramAmd64Scratch(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-	g := renvoBeginScalarProgramAmd64(p, meta)
-	if g == nil || !renvoEmitAllQueuedFunctionsScratch(g) {
-		return renvoCompileResult{}
-	}
-	return renvoFinishScalarProgramAmd64(g)
-}
-
-func renvoTryCompileScalarProgramAmd64Cached(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-	g := renvoBeginScalarProgramAmd64(p, meta)
-	if g == nil || !renvoEmitAllQueuedFunctionsCached(g) {
-		return renvoCompileResult{}
-	}
-	return renvoFinishScalarProgramAmd64(g)
-}
-func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
-	renvoNonNil(p, meta)
-	appIndex := -1
-	for i := 0; i < len(meta.funcs); i++ {
-		if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
-			appIndex = i
-		}
-	}
-	if appIndex < 0 {
-		return nil
-	}
-	// Metadata building consumes the decoded declaration records completely;
-	// amd64 emission uses the canonical body ranges in renvoFuncInfo.
-	renvo_runtime_ArenaDiscardDecls(p.decls)
-	renvo_runtime_ArenaDiscardFuncs(p.funcs)
-	g := new(renvoLinearGen)
-	g.c = meta.c
-	g.prog = p
-	g.meta = meta
-	g.arenaSize = meta.arenaSize
-	a := &g.asm
-	renvoAsmInitWithContext(a, g.c)
-	a.codeOffset = renvoAmd64ELFCodeOffset
-	if targetIsWindows(meta.c.renvoTargetOS) {
-		a.codeOffset = renvoWinSectionRVA
-	}
-	if renvoFixedTarget != 0 {
-		g.funcLabels = make([]int, 0, len(meta.funcs))
-	}
-	for i := 0; i < len(meta.funcs); i++ {
-		label := renvoAsmNewLabel(a)
-		g.funcLabels = append(g.funcLabels, label)
-	}
-	renvoInitFuncQueue(g, len(meta.funcs))
-	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
-		if !renvoBeginKernelModuleAmd64(g, appIndex) {
-			return nil
-		}
-		return g
-	}
-	renvoLinearMarkFunc(g, appIndex)
-	if renvoFixedTarget == 0 && meta.c.emitImage {
-		// Preserve the four linked-image ABI words while global
-		// initialization freely uses the ordinary call registers.
-		renvoAsmEmitText(a, "\x57\x56\x52\x51")
-	}
-	if !meta.panicEnabled {
-		renvoAmd64InitRuntimeCheckRegs(g)
-	}
-	renvoEmitPersistentArenaReady(g)
-	if !renvoLinearInitGlobals(g) {
-		return nil
-	}
-	if renvoFixedTarget == 0 && meta.c.emitImage {
-		if !renvoEmitImageEntryArgsAmd64(g, appIndex) {
-			return nil
-		}
+func renvoAmd64AsmSecondaryDisp(a *renvoAsm, disp int) {
+	if disp == 0 {
+		renvoAsmEmit8(a,0x02)
+	} else if renvoAsmImmFits8Signed(disp) {
+		renvoAsmEmit2(a,0x42, disp)
 	} else {
-		if !renvoEmitProgramEntryArgsAmd64(g, appIndex) {
-			return nil
-		}
-		// Entry argument setup uses R12 as scratch, so restore all reserved
-		// runtime check registers after it has consumed the process stack.
-		if !meta.panicEnabled {
-			renvoAmd64InitRuntimeCheckRegs(g)
-		}
+		renvoAsmEmit8(a,0x82)
+		renvoAsmEmit32(a,disp)
 	}
-	renvoAsmCallLabel(a, g.funcLabels[appIndex])
-	if !renvoEmitProgramPanicCheck(g) {
-		return nil
-	}
-	if renvoFixedTarget == 0 && meta.c.emitImage {
-		renvoAsmRet(a)
-	} else if targetIsWindows(meta.c.renvoTargetOS) {
-		renvoAsmCopyPrimaryToTertiary(a)
-		renvoWinAmd64CallImport(a, renvoWinImportExitProcess)
-		renvoAsmRet(a)
-	} else {
-		renvoAsmCopyPrimaryToCallWord0(a)
-		renvoAsmPrimaryImm(a, 60)
-		renvoAsmSyscall(a)
-	}
-	return g
 }
-
-// A Linux linked image is entered as
-//
-//	entry(argsData, argsLen, envData, envLen) int
-//
-// where argsData and envData address Renvo []string backing arrays. The SysV
-// register order already matches the compiler calling convention for the first
-// two slice words; only the capacities and second slice need reshuffling.
-func renvoEmitImageEntryArgsAmd64(g *renvoLinearGen, appIndex int) bool {
-	renvoNonNil(g)
-	app := &g.meta.funcs[appIndex]
-	if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
+func renvoAmd64AsmMovRaxImm(a *renvoAsm, imm int) {
+	if imm == 0 {
+		renvoAsmEmit16(a,0xc031)
+		return
+	}
+	if renvoAsmImmFits8Signed(imm) {
+		renvoAsmEmit2(a,0x6a, imm)
+		renvoAsmPopPrimary(a)
+		return
+	}
+	if imm>>32 == 0 {
+		renvoAsmEmit8(a,0xb8)
+		renvoAsmEmit32(a,imm)
+		return
+	}
+	if imm >= -2147483647 && imm <= 2147483647 {
+		renvoAsmEmit8(a,0x68)
+		renvoAsmEmit32(a,imm)
+		renvoAsmPopPrimary(a)
+		return
+	}
+	renvoAsmEmit16(a,0xb848)
+	renvoAsmEmit64(a,imm)
+}
+func renvoAmd64AsmMovR10BssAddr(a *renvoAsm, bssOff int) {
+	renvoAsmEmit24(a,0x158d4c)
+	at := len(a.code)
+	renvoAsmEmit32(a,0)
+	renvoAsmAddAbsReloc(a,at, bssOff, 1)
+}
+func renvoAmd64AsmLoadRaxBss(a *renvoAsm, bssOff int) {
+	renvoAsmEmit24(a,0x058b48)
+	at := len(a.code)
+	renvoAsmEmit32(a,0)
+	renvoAsmAddAbsReloc(a,at, bssOff, 1)
+	a.lastPrimaryLoad = len(a.code)*8 + 5
+}
+func renvoAmd64AsmStoreRaxBss(a *renvoAsm, bssOff int) {
+	renvoAsmEmit24(a,0x058948)
+	at := len(a.code)
+	renvoAsmEmit32(a,0)
+	renvoAsmAddAbsReloc(a,at, bssOff, 1)
+}
+func renvoAmd64AsmMovRdiRax(a *renvoAsm) {
+	if renvoAmd64RewritePrimaryLoad(a, 7, false) {
+		return
+	}
+	renvoAsmEmit16(a,0x5f50)
+}
+func renvoAmd64AsmMovRsiRax(a *renvoAsm) {
+	if renvoAmd64RewritePrimaryLoad(a, 6, false) {
+		return
+	}
+	renvoAsmEmit16(a,0x5e50)
+}
+func renvoAmd64RewritePrimaryLoad(a *renvoAsm, reg int, pushed bool) bool {
+	load := a.lastPrimaryLoad
+	if pushed {
+		load = -load
+	}
+	end := load >> 3
+	at := end - (load & 7)
+	if pushed {
+		end++
+	}
+	if load <= 0 || end != len(a.code) {
 		return false
 	}
-	// Restore argsData, argsLen, envData, envLen.
-	renvoAsmEmitText(&g.asm, "\x59\x5a\x5e\x5f")
-	if app.paramCount == 0 {
-		return true
+	a.code[at] += byte(reg*8)
+	if pushed {
+		renvoTruncBytes(&a.code, len(a.code) - 1)
 	}
-	if app.paramCount > 2 {
-		return false
-	}
-	first := &g.meta.params[app.firstParam]
-	if !renvoTypeIsStringSlice(g.meta, first.typ) {
-		return false
-	}
-	if app.paramCount == 1 {
-		// RDX = args capacity = args length.
-		renvoAsmEmitText(&g.asm, "\x48\x89\xf2")
-		return true
-	}
-	second := &g.meta.params[app.firstParam+1]
-	if !renvoTypeIsStringSlice(g.meta, second.typ) {
-		return false
-	}
-	// R9=envLen, RCX=envData, RDX=argsLen, R8=envLen.
-	renvoAsmEmitText(&g.asm, "\x4c\x89\xc9\x48\x89\xd1\x48\x89\xf2\x4d\x89\xc8")
+	a.lastPrimaryLoad = 0
 	return true
 }
-
-func renvoFinishScalarProgramAmd64(g *renvoLinearGen) renvoCompileResult {
-	renvoNonNil(g)
-	renvo_runtime_ArenaDiscard(g.meta.scratchStart, g.meta.scratchEnd)
-	a := &g.asm
-	var data []byte
-	if targetIsWindows(g.c.renvoTargetOS) {
-		data = renvoAsmImageWindowsAmd64(a)
-	} else if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
-		data = renvoAsmImageKernelModuleAmd64(a, g.kernelInitLabel, g.kernelExitLabel)
-	} else {
-		data = renvoAsmImageAmd64(a)
+func renvoAmd64RewritePrimaryLoadCompare(a *renvoAsm, imm int) bool {
+	load := a.lastPrimaryLoad
+	end := load >> 3
+	if load <= 0 || end != len(a.code) {
+		return false
 	}
-	var result renvoCompileResult
-	if len(data) == 0 {
-		return result
+	at := end - (load & 7)
+	// RIP-relative displacements use the original instruction end as their
+	// base, so only stack and register-relative loads can grow by one byte.
+	if a.code[at]&0xc7 == 0x05 {
+		return false
 	}
-	result.data = data
-	result.ok = true
-	return result
+	// Turn `movq memory, %rax; cmpq immediate, %rax` into the shorter direct
+	// memory comparison. Callers use this only when the loaded value is dead
+	// after the flags are consumed.
+	a.code[at-1] = 0x83
+	a.code[at] += 0x38
+	a.code = append(a.code, byte(imm))
+	a.lastPrimaryLoad = 0
+	return true
 }
-
-func renvoEmitProgramEntryArgsAmd64(g *renvoLinearGen, appIndex int) bool {
-	renvoNonNil(g)
-	app := &g.meta.funcs[appIndex]
-	if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
+func renvoAmd64AsmMovR8Rax(a *renvoAsm) {
+	renvoAsmEmit24(a,0xc08949)
+}
+func renvoAmd64AsmMovR9Rax(a *renvoAsm) {
+	renvoAsmEmit24(a,0xc18949)
+}
+func renvoAmd64AsmMemDisp(a *renvoAsm, disp int, op int, disp8 int, disp32 int) {
+	renvoAsmEmit16(a,op)
+	if renvoAsmImmFits8Signed(disp) {
+		renvoAsmEmit2(a,disp8, disp)
+		return
+	}
+	renvoAsmEmit8(a,disp32)
+	renvoAsmEmit32(a,disp)
+}
+func renvoAmd64AsmLoadQwordRaxIndexRcx8(a *renvoAsm) {
+	renvoAsmEmit32(a,0xc8048b48)
+}
+func renvoAmd64AsmLoadQwordRaxIndexRcxDisp(a *renvoAsm, disp int) {
+	renvoAsmEmit16(a,0x8b48)
+	if renvoAsmImmFits8Signed(disp) {
+		renvoAsmEmit3(a,0x44, 0x8, disp)
+		return
+	}
+	renvoAsmEmit16(a,0x0884)
+	renvoAsmEmit32(a,disp)
+}
+func renvoAmd64AsmLoadRaxMemRdxDisp(a *renvoAsm, disp int) {
+	if disp == 0 {
+		renvoAsmEmit24(a,0x028b48)
+		a.lastPrimaryLoad = len(a.code)*8 + 1
+		return
+	}
+	renvoAmd64AsmMemDisp(a, disp, 0x8b48, 0x42, 0x82)
+	distance := 2
+	if !renvoAsmImmFits8Signed(disp) {
+		distance = 5
+	}
+	a.lastPrimaryLoad = len(a.code)*8 + distance
+}
+func renvoAmd64AsmLoadRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
+	if size == 1 {
+		renvoAsmEmit24(a,0xb60f48)
+		renvoAmd64AsmSecondaryDisp(a, disp)
+		return
+	}
+	if size == 2 {
+		renvoAsmEmit24(a,0xbf0f48)
+		renvoAmd64AsmSecondaryDisp(a, disp)
+		return
+	}
+	if size == 4 {
+		renvoAmd64AsmMemDisp(a, disp, 0x6348, 0x42, 0x82)
+		return
+	}
+	renvoAmd64AsmLoadRaxMemRdxDisp(a, disp)
+}
+func renvoAmd64AsmLoadByteRaxIndexRcx(a *renvoAsm) {
+	renvoAsmEmit32(a,0x04b60f48)
+	renvoAsmEmit8(a,0x8)
+}
+func renvoAmd64AsmLoadRaxIndexRcxSize(a *renvoAsm, size int) {
+	if size == 1 {
+		renvoAmd64AsmLoadByteRaxIndexRcx(a)
+		return
+	}
+	if size == 2 {
+		renvoAsmEmit32(a,0x04bf0f48)
+		renvoAsmEmit8(a,0x48)
+		return
+	}
+	if size == 4 {
+		renvoAsmEmit32(a,0x88046348)
+		return
+	}
+	renvoAmd64AsmLoadQwordRaxIndexRcx8(a)
+}
+func renvoAmd64AsmStoreRaxMemRdxRcx8(a *renvoAsm) {
+	renvoAsmEmit32(a,0xca048948)
+}
+func renvoAmd64AsmStoreRaxMemRdxDisp(a *renvoAsm, disp int) {
+	if disp == 0 {
+		renvoAsmEmit24(a,0x028948)
+		return
+	}
+	renvoAmd64AsmMemDisp(a, disp, 0x8948, 0x42, 0x82)
+}
+func renvoAmd64AsmStoreRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
+	if size == 1 {
+		renvoAsmEmit8(a,0x88)
+		renvoAmd64AsmSecondaryDisp(a, disp)
+		return
+	}
+	if size == 2 {
+		renvoAsmEmit16(a,0x8966)
+		renvoAmd64AsmSecondaryDisp(a, disp)
+		return
+	}
+	if size == 4 {
+		renvoAsmEmit8(a,0x89)
+		renvoAmd64AsmSecondaryDisp(a, disp)
+		return
+	}
+	renvoAmd64AsmStoreRaxMemRdxDisp(a, disp)
+}
+func renvoAmd64CodeEnds(a *renvoAsm, suffix string) bool {
+	start := len(a.code) - len(suffix)
+	if start < 0 {
 		return false
 	}
-	if app.paramCount == 0 {
-		return true
-	}
-	if app.paramCount > 2 {
-		return false
-	}
-	first := &g.meta.params[app.firstParam]
-	if !renvoTypeIsStringSlice(g.meta, first.typ) {
-		return false
-	}
-	argsOff := g.asm.bssSize
-	g.asm.bssSize += 32768
-	if targetIsWindows(g.c.renvoTargetOS) {
-		argsTextOff := g.asm.bssSize
-		g.asm.bssSize += 32768
-		argsLenOff := g.asm.bssSize
-		g.asm.bssSize += 8
-		envDataOff := g.asm.bssSize
-		g.asm.bssSize += 32768
-		envLenOff := g.asm.bssSize
-		g.asm.bssSize += 8
-		renvoAsmBuildWindowsArgvEnvSlicesAmd64(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
-	} else {
-		envDataOff := g.asm.bssSize
-		g.asm.bssSize += 32768
-		envLenOff := g.asm.bssSize
-		g.asm.bssSize += 8
-		renvoAsmBuildArgvEnvSlicesAmd64(&g.asm, argsOff, envDataOff, envLenOff)
-	}
-	if app.paramCount == 1 {
-		return true
-	}
-	second := &g.meta.params[app.firstParam+1]
-	if !renvoTypeIsStringSlice(g.meta, second.typ) {
-		return false
+	for i := 0; i < len(suffix); i++ {
+		if a.code[start+i] != suffix[i] {
+			return false
+		}
 	}
 	return true
+}
+func renvoAmd64AsmNormalizeRaxForKind(a *renvoAsm, kind int) {
+	if kind == 3 {
+		if renvoAmd64CodeEnds(a, "\x0f\xb6\xc0") || renvoAmd64CodeEnds(a, "\x48\x0f\xb6\x02") || renvoAmd64CodeEnds(a, "\x48\x0f\xb6\x04\x08") {
+			return
+		}
+		renvoAsmEmit24(a,0xc0b60f)
+		return
+	}
+	if kind == 7 {
+		renvoAsmEmit32(a,0xc0be0f48)
+		return
+	}
+	if kind == 8 {
+		renvoAsmEmit32(a,0xc0bf0f48)
+		return
+	}
+	if kind == 16 {
+		renvoAsmEmit32(a,0xc0b70f48)
+		return
+	}
+	if kind == 9 {
+		if renvoAmd64CodeEnds(a, "\x48\x63\xc0") || renvoAmd64CodeEnds(a, "\x48\x63\x04\x88") {
+			return
+		}
+		renvoAsmEmit24(a,0xc06348)
+		return
+	}
+	if kind == 17 {
+		renvoAsmEmit16(a,0xc089)
+	}
+}
+func renvoAmd64AsmIncMemRdx(a *renvoAsm) {
+	renvoAsmEmit24(a,0x02ff48)
+}
+func renvoAmd64AsmDecMemRdx(a *renvoAsm) {
+	renvoAsmEmit24(a,0x0aff48)
+}
+func renvoAmd64AsmCmpRaxImm8(a *renvoAsm, imm int) {
+	if imm == 0 {
+		// Integer values occupy the full native register on amd64. Testing only
+		// EAX makes values whose low word is zero (for example 1 << 40) compare
+		// equal to zero and can send both user control flow and the compiler's
+		// own immediate-selection logic down the wrong path.
+		renvoAsmEmit24(a,0xc08548)
+		return
+	}
+	renvoAsmEmit4(a,0x48, 0x83, 0xf8, imm)
+}
+func renvoAmd64AsmCmpRaxImm8Discard(a *renvoAsm, imm int) {
+	if renvoAmd64RewritePrimaryLoadCompare(a, imm) {
+		return
+	}
+	renvoAmd64AsmCmpRaxImm8(a, imm)
+}
+func renvoAmd64AsmDivLeftRcxRightRax(a *renvoAsm, mod bool) {
+	if mod {
+		renvoAsmEmitText(a,"\x48\x83\xf8\xff\x75\x10\x6a\x01\x5a\x48\xc1\xe2\x3f\x48\x39\xd1\x75\x04\x31\xc0\xeb\x10\x53\x48\x89\xc3\x48\x89\xc8\x48\x99\x48\xf7\xfb\x48\x89\xd0\x5b")
+		return
+	}
+	renvoAsmEmitText(a,"\x48\x83\xf8\xff\x75\x11\x6a\x01\x5a\x48\xc1\xe2\x3f\x48\x39\xd1\x75\x05\x48\x89\xc8\xeb\x0d\x53\x48\x89\xc3\x48\x89\xc8\x48\x99\x48\xf7\xfb\x5b")
+}
+func renvoAmd64AsmCmpRcxRaxSet(a *renvoAsm, setcc int) {
+	renvoAsmEmit32(a,0x0fc13948)
+	renvoAsmEmit3(a,setcc, 0xc0, 0xf)
+	renvoAsmEmit16(a,0xc0b6)
 }
 
 // source: backend/compiler_386_impl.go

@@ -9,7 +9,6 @@ compiler_target_registry_impl.go
 compiler_target_impl.go
 compiler_rtg_generated_impl.go
 compiler_amd64_impl.go
-compiler_amd64_generated_impl.go
 compiler_amd64_target_impl.go
 compiler_386_impl.go
 compiler_386_target_impl.go

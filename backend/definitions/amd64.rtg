@@ -3,450 +3,307 @@ unit x86_64
 implements direct_emitter_v1
 
 # X86 algorithms are ordinary Go emitted into the generated backend package.
+# The checked-in x86-64 production encoder is projected directly from these
+# typed algorithms. Target composition remains declarative below.
 go backend {
-    func x86Low3(reg RTGRegister) byte {
-        return byte(reg.Code & 7)
-    }
+	func renvoAmd64AsmSecondaryDisp(a *RTGEmitter, disp int) {
+		if disp == 0 {
+			a.Int8(0x02)
+		} else if RTGInt8Fits(disp) {
+			a.Bytes2(0x42, disp)
+		} else {
+			a.Int8(0x82)
+			a.Int32(disp)
+		}
+	}
 
-    func x86High(reg RTGRegister) byte {
-        return byte(reg.Code>>3) & 1
-    }
+	func renvoAmd64AsmMovRaxImm(a *RTGEmitter, imm int) {
+		if imm == 0 {
+			a.Uint16(0xc031)
+			return
+		}
+		if RTGInt8Fits(imm) {
+			a.Bytes2(0x6a, imm)
+			RTGPopPrimary(a)
+			return
+		}
+		if imm>>32 == 0 {
+			a.Int8(0xb8)
+			a.Int32(imm)
+			return
+		}
+		if imm >= -2147483647 && imm <= 2147483647 {
+			a.Int8(0x68)
+			a.Int32(imm)
+			RTGPopPrimary(a)
+			return
+		}
+		a.Uint16(0xb848)
+		a.Int64(imm)
+	}
 
-    func x86Opcode(out *RTGEmitter, opcode uint32) {
-        if opcode > 0xff {
-            out.Byte(byte(opcode >> 8))
-        }
-        out.Byte(byte(opcode))
-    }
+	func renvoAmd64AsmMovR10BssAddr(a *RTGEmitter, bssOff int) {
+		a.Uint24(0x158d4c)
+		at := a.Len()
+		a.Int32(0)
+		a.AbsoluteReloc(at, bssOff, RTGRelocationAbsoluteBSS)
+	}
+	func renvoAmd64AsmLoadRaxBss(a *RTGEmitter, bssOff int) {
+		a.Uint24(0x058b48)
+		at := a.Len()
+		a.Int32(0)
+		a.AbsoluteReloc(at, bssOff, RTGRelocationAbsoluteBSS)
+		a.SetPrimaryLoad(a.Len()*8 + 5)
+	}
+	func renvoAmd64AsmStoreRaxBss(a *RTGEmitter, bssOff int) {
+		a.Uint24(0x058948)
+		at := a.Len()
+		a.Int32(0)
+		a.AbsoluteReloc(at, bssOff, RTGRelocationAbsoluteBSS)
+	}
+	func renvoAmd64AsmMovRdiRax(a *RTGEmitter) {
+		if renvoAmd64RewritePrimaryLoad(a, 7, false) {
+			return
+		}
+		a.Uint16(0x5f50)
+	}
+	func renvoAmd64AsmMovRsiRax(a *RTGEmitter) {
+		if renvoAmd64RewritePrimaryLoad(a, 6, false) {
+			return
+		}
+		a.Uint16(0x5e50)
+	}
 
-    func x86REX(
-        out *RTGEmitter,
-        wide bool,
-        reg RTGRegister,
-        index RTGRegister,
-        base RTGRegister,
-        byteRegister RTGRegister,
-    ) {
-        w := byte(0)
-        if wide {
-            w = 1
-        }
-        r := x86High(reg)
-        x := byte(0)
-        if index.Valid {
-            x = x86High(index)
-        }
-        b := byte(0)
-        if base.Valid {
-            b = x86High(base)
-        }
-        needsByteREX := byteRegister.Valid && byteRegister.Code >= 4
-        if w != 0 || r != 0 || x != 0 || b != 0 || needsByteREX {
-            out.Byte(0x40 | w<<3 | r<<2 | x<<1 | b)
-        }
-    }
+	func renvoAmd64RewritePrimaryLoad(a *RTGEmitter, reg int, pushed bool) bool {
+		load := a.PrimaryLoad()
+		if pushed {
+			load = -load
+		}
+		end := load >> 3
+		at := end - (load & 7)
+		if pushed {
+			end++
+		}
+		if load <= 0 || end != a.Len() {
+			return false
+		}
+		a.AddByteAt(at, byte(reg*8))
+		if pushed {
+			a.Truncate(a.Len() - 1)
+		}
+		a.SetPrimaryLoad(0)
+		return true
+	}
 
-    func x86ModRM(out *RTGEmitter, mode byte, reg byte, rm byte) {
-        out.Byte(mode<<6 | (reg&7)<<3 | rm&7)
-    }
+	func renvoAmd64RewritePrimaryLoadCompare(a *RTGEmitter, imm int) bool {
+		load := a.PrimaryLoad()
+		end := load >> 3
+		if load <= 0 || end != a.Len() {
+			return false
+		}
+		at := end - (load & 7)
+		// RIP-relative displacements use the original instruction end as their
+		// base, so only stack and register-relative loads can grow by one byte.
+		if a.ByteAt(at)&0xc7 == 0x05 {
+			return false
+		}
+		// Turn `movq memory, %rax; cmpq immediate, %rax` into the shorter direct
+		// memory comparison. Callers use this only when the loaded value is dead
+		// after the flags are consumed.
+		a.SetByteAt(at-1, 0x83)
+		a.AddByteAt(at, 0x38)
+		a.AppendByte(imm)
+		a.SetPrimaryLoad(0)
+		return true
+	}
 
-    func x86Memory(out *RTGEmitter, reg byte, address RTGAddress) {
-        if RTGAddressValid(address) {
-            x86ModRM(out, 0, reg, 5)
-            RTGAddressRel32Addend(out, address)
-            return
-        }
+	func renvoAmd64AsmMovR8Rax(a *RTGEmitter) {
+		a.Uint24(0xc08949)
+	}
+	func renvoAmd64AsmMovR9Rax(a *RTGEmitter) {
+		a.Uint24(0xc18949)
+	}
+	func renvoAmd64AsmMemDisp(a *RTGEmitter, disp int, op int, disp8 int, disp32 int) {
+		a.Uint16(op)
+		if RTGInt8Fits(disp) {
+			a.Bytes2(disp8, disp)
+			return
+		}
+		a.Int8(disp32)
+		a.Int32(disp)
+	}
+	func renvoAmd64AsmLoadQwordRaxIndexRcx8(a *RTGEmitter) {
+		a.Int32(0xc8048b48)
+	}
+	func renvoAmd64AsmLoadQwordRaxIndexRcxDisp(a *RTGEmitter, disp int) {
+		a.Uint16(0x8b48)
+		if RTGInt8Fits(disp) {
+			a.Bytes3(0x44, 0x8, disp)
+			return
+		}
+		a.Uint16(0x0884)
+		a.Int32(disp)
+	}
 
-        base := address.Base
-        index := address.Index
-        displacement := address.Displacement
-        needsSIB := index.Valid || x86Low3(base) == 4
-        mode := byte(0)
-        if displacement != 0 || x86Low3(base) == 5 {
-            mode = 2
-            if RTGSignedFits(int64(displacement), 8) {
-                mode = 1
-            }
-        }
+	func renvoAmd64AsmLoadRaxMemRdxDisp(a *RTGEmitter, disp int) {
+		if disp == 0 {
+			a.Uint24(0x028b48)
+			a.SetPrimaryLoad(a.Len()*8 + 1)
+			return
+		}
+		renvoAmd64AsmMemDisp(a, disp, 0x8b48, 0x42, 0x82)
+		distance := 2
+		if !RTGInt8Fits(disp) {
+			distance = 5
+		}
+		a.SetPrimaryLoad(a.Len()*8 + distance)
+	}
+	func renvoAmd64AsmLoadRaxMemRdxDispSize(a *RTGEmitter, disp int, size int) {
+		if size == 1 {
+			a.Uint24(0xb60f48)
+			renvoAmd64AsmSecondaryDisp(a, disp)
+			return
+		}
+		if size == 2 {
+			a.Uint24(0xbf0f48)
+			renvoAmd64AsmSecondaryDisp(a, disp)
+			return
+		}
+		if size == 4 {
+			renvoAmd64AsmMemDisp(a, disp, 0x6348, 0x42, 0x82)
+			return
+		}
+		renvoAmd64AsmLoadRaxMemRdxDisp(a, disp)
+	}
+	func renvoAmd64AsmLoadByteRaxIndexRcx(a *RTGEmitter) {
+		a.Int32(0x04b60f48)
+		a.Int8(0x8)
+	}
+	func renvoAmd64AsmLoadRaxIndexRcxSize(a *RTGEmitter, size int) {
+		if size == 1 {
+			renvoAmd64AsmLoadByteRaxIndexRcx(a)
+			return
+		}
+		if size == 2 {
+			a.Int32(0x04bf0f48)
+			a.Int8(0x48)
+			return
+		}
+		if size == 4 {
+			a.Int32(0x88046348)
+			return
+		}
+		renvoAmd64AsmLoadQwordRaxIndexRcx8(a)
+	}
+	func renvoAmd64AsmStoreRaxMemRdxRcx8(a *RTGEmitter) {
+		a.Int32(0xca048948)
+	}
+	func renvoAmd64AsmStoreRaxMemRdxDisp(a *RTGEmitter, disp int) {
+		if disp == 0 {
+			a.Uint24(0x028948)
+			return
+		}
+		renvoAmd64AsmMemDisp(a, disp, 0x8948, 0x42, 0x82)
+	}
+	func renvoAmd64AsmStoreRaxMemRdxDispSize(a *RTGEmitter, disp int, size int) {
+		if size == 1 {
+			a.Int8(0x88)
+			renvoAmd64AsmSecondaryDisp(a, disp)
+			return
+		}
+		if size == 2 {
+			a.Uint16(0x8966)
+			renvoAmd64AsmSecondaryDisp(a, disp)
+			return
+		}
+		if size == 4 {
+			a.Int8(0x89)
+			renvoAmd64AsmSecondaryDisp(a, disp)
+			return
+		}
+		renvoAmd64AsmStoreRaxMemRdxDisp(a, disp)
+	}
+	func renvoAmd64CodeEnds(a *RTGEmitter, suffix string) bool {
+		start := a.Len() - len(suffix)
+		if start < 0 {
+			return false
+		}
+		for i := 0; i < len(suffix); i++ {
+			if a.ByteAt(start+i) != suffix[i] {
+				return false
+			}
+		}
+		return true
+	}
+	func renvoAmd64AsmNormalizeRaxForKind(a *RTGEmitter, kind int) {
+		if kind == RTGScalarByte {
+			if renvoAmd64CodeEnds(a, "\x0f\xb6\xc0") || renvoAmd64CodeEnds(a, "\x48\x0f\xb6\x02") || renvoAmd64CodeEnds(a, "\x48\x0f\xb6\x04\x08") {
+				return
+			}
+			a.Uint24(0xc0b60f)
+			return
+		}
+		if kind == RTGScalarInt8 {
+			a.Int32(0xc0be0f48)
+			return
+		}
+		if kind == RTGScalarInt16 {
+			a.Int32(0xc0bf0f48)
+			return
+		}
+		if kind == RTGScalarUint16 {
+			a.Int32(0xc0b70f48)
+			return
+		}
+		if kind == RTGScalarInt32 {
+			if renvoAmd64CodeEnds(a, "\x48\x63\xc0") || renvoAmd64CodeEnds(a, "\x48\x63\x04\x88") {
+				return
+			}
+			a.Uint24(0xc06348)
+			return
+		}
+		if kind == RTGScalarUint32 {
+			a.Uint16(0xc089)
+		}
+	}
+	func renvoAmd64AsmIncMemRdx(a *RTGEmitter) {
+		a.Uint24(0x02ff48)
+	}
+	func renvoAmd64AsmDecMemRdx(a *RTGEmitter) {
+		a.Uint24(0x0aff48)
+	}
+	func renvoAmd64AsmCmpRaxImm8(a *RTGEmitter, imm int) {
+		if imm == 0 {
+			// Integer values occupy the full native register on amd64. Testing only
+			// EAX makes values whose low word is zero (for example 1 << 40) compare
+			// equal to zero and can send both user control flow and the compiler's
+			// own immediate-selection logic down the wrong path.
+			a.Uint24(0xc08548)
+			return
+		}
+		a.Bytes4(0x48, 0x83, 0xf8, imm)
+	}
 
-        if needsSIB {
-            x86ModRM(out, mode, reg, 4)
-            indexCode := byte(4)
-            if index.Valid {
-                indexCode = x86Low3(index)
-            }
-            out.Byte(byte(RTGLog2(address.Scale))<<6 |
-                indexCode<<3 | x86Low3(base))
-        } else {
-            x86ModRM(out, mode, reg, x86Low3(base))
-        }
+	func renvoAmd64AsmCmpRaxImm8Discard(a *RTGEmitter, imm int) {
+		if renvoAmd64RewritePrimaryLoadCompare(a, imm) {
+			return
+		}
+		renvoAmd64AsmCmpRaxImm8(a, imm)
+	}
+	func renvoAmd64AsmDivLeftRcxRightRax(a *RTGEmitter, mod bool) {
+		if mod {
+			a.Text("\x48\x83\xf8\xff\x75\x10\x6a\x01\x5a\x48\xc1\xe2\x3f\x48\x39\xd1\x75\x04\x31\xc0\xeb\x10\x53\x48\x89\xc3\x48\x89\xc8\x48\x99\x48\xf7\xfb\x48\x89\xd0\x5b")
+			return
+		}
+		a.Text("\x48\x83\xf8\xff\x75\x11\x6a\x01\x5a\x48\xc1\xe2\x3f\x48\x39\xd1\x75\x05\x48\x89\xc8\xeb\x0d\x53\x48\x89\xc3\x48\x89\xc8\x48\x99\x48\xf7\xfb\x5b")
+	}
 
-        if mode == 1 {
-            out.Byte(byte(displacement))
-        } else if mode == 2 {
-            out.Uint32(uint32(displacement))
-        }
-    }
-
-    func x86RRRM(
-        out *RTGEmitter,
-        opcode uint32,
-        destination RTGRegister,
-        source RTGRegister,
-        width int,
-    ) {
-        if width == 16 {
-            out.Byte(0x66)
-        }
-        byteRegister := RTGNoRegister
-        if width == 8 {
-            byteRegister = source
-        }
-        x86REX(out, width == 64, source, RTGNoRegister, destination, byteRegister)
-        x86Opcode(out, opcode)
-        x86ModRM(out, 3, x86Low3(source), x86Low3(destination))
-    }
-
-    func x86RR(
-        out *RTGEmitter,
-        opcode uint32,
-        destination RTGRegister,
-        source RTGRegister,
-        width int,
-    ) {
-        x86REX(out, width == 64, destination, RTGNoRegister, source, RTGNoRegister)
-        x86Opcode(out, opcode)
-        x86ModRM(out, 3, x86Low3(destination), x86Low3(source))
-    }
-
-    func x86RMR(
-        out *RTGEmitter,
-        opcode uint32,
-        destination RTGRegister,
-        address RTGAddress,
-        width int,
-    ) {
-        if width == 16 {
-            out.Byte(0x66)
-        }
-        x86REX(out, width == 64, destination, address.Index, address.Base, RTGNoRegister)
-        x86Opcode(out, opcode)
-        x86Memory(out, x86Low3(destination), address)
-    }
-
-    func x86RRM(
-        out *RTGEmitter,
-        opcode uint32,
-        address RTGAddress,
-        source RTGRegister,
-        width int,
-    ) {
-        if width == 16 {
-            out.Byte(0x66)
-        }
-        byteRegister := RTGNoRegister
-        if width == 8 {
-            byteRegister = source
-        }
-        x86REX(out, width == 64, source, address.Index, address.Base, byteRegister)
-        x86Opcode(out, opcode)
-        x86Memory(out, x86Low3(source), address)
-    }
-
-    func x86Group(
-        out *RTGEmitter,
-        opcode uint32,
-        selector byte,
-        operand RTGRegister,
-        width int,
-    ) {
-        x86REX(out, width == 64, RTGNoRegister, RTGNoRegister, operand, RTGNoRegister)
-        x86Opcode(out, opcode)
-        x86ModRM(out, 3, selector, x86Low3(operand))
-    }
-
-    func x86GroupImmediate(
-        out *RTGEmitter,
-        opcode uint32,
-        selector byte,
-        operand RTGRegister,
-        value int64,
-        width int,
-    ) {
-        x86REX(out, width == 64, RTGNoRegister, RTGNoRegister, operand, RTGNoRegister)
-        if RTGSignedFits(value, 8) {
-            out.Byte(0x83)
-            x86ModRM(out, 3, selector, x86Low3(operand))
-            out.Byte(byte(value))
-            return
-        }
-        x86Opcode(out, opcode)
-        x86ModRM(out, 3, selector, x86Low3(operand))
-        out.Uint32(uint32(value))
-    }
-
-    func x86GroupImmediate8(
-        out *RTGEmitter,
-        opcode uint32,
-        selector byte,
-        operand RTGRegister,
-        value byte,
-        width int,
-    ) {
-        x86Group(out, opcode, selector, operand, width)
-        out.Byte(value)
-    }
-
-    func x86GroupMemoryImmediate(
-        out *RTGEmitter,
-        opcode uint32,
-        selector byte,
-        address RTGAddress,
-        value int64,
-        width int,
-    ) {
-        x86REX(out, width == 64, RTGNoRegister, address.Index, address.Base, RTGNoRegister)
-        if RTGSignedFits(value, 8) {
-            out.Byte(0x83)
-        } else {
-            x86Opcode(out, opcode)
-        }
-        x86Memory(out, selector, address)
-        if RTGSignedFits(value, 8) {
-            out.Byte(byte(value))
-        } else {
-            out.Uint32(uint32(value))
-        }
-    }
-
-    func x86MultiplyImmediate(
-        out *RTGEmitter,
-        opcode uint32,
-        destination RTGRegister,
-        source RTGRegister,
-        value int64,
-        width int,
-    ) {
-        x86REX(out, width == 64, destination, RTGNoRegister, source, RTGNoRegister)
-        if RTGSignedFits(value, 8) {
-            out.Byte(0x6b)
-        } else {
-            x86Opcode(out, opcode)
-        }
-        x86ModRM(out, 3, x86Low3(destination), x86Low3(source))
-        if RTGSignedFits(value, 8) {
-            out.Byte(byte(value))
-        } else {
-            out.Uint32(uint32(value))
-        }
-    }
-
-    func x86OpcodeRegister(out *RTGEmitter, opcode byte, operand RTGRegister) {
-        if x86High(operand) != 0 {
-            out.Byte(0x41)
-        }
-        out.Byte(opcode + x86Low3(operand))
-    }
-
-    func x86Immediate(out *RTGEmitter, opcode byte, value uint64, width int) {
-        out.Byte(opcode)
-        if width == 8 {
-            out.Byte(byte(value))
-        } else if width == 32 {
-            out.Uint32(uint32(value))
-        } else {
-            out.Uint64(value)
-        }
-    }
-
-    func x86Relative(out *RTGEmitter, opcode uint32, label RTGLabel) {
-        x86Opcode(out, opcode)
-        out.Rel32(label)
-    }
-
-    func x86SetCondition(
-        out *RTGEmitter,
-        condition RTGCondition,
-        destination RTGRegister,
-    ) {
-        x86REX(out, false, RTGNoRegister, RTGNoRegister, destination, destination)
-        out.Byte(0x0f)
-        out.Byte(condition.SetOpcode)
-        x86ModRM(out, 3, 0, x86Low3(destination))
-    }
-
-    func x86JumpCondition(
-        out *RTGEmitter,
-        condition RTGCondition,
-        label RTGLabel,
-    ) {
-        out.Byte(0x0f)
-        out.Byte(condition.JumpOpcode)
-        out.Rel32(label)
-    }
-
-    func x86MoveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
-        if destination == x86RAX && value == 0 {
-            out.Byte(0x31)
-            out.Byte(0xc0)
-        } else if destination != x86RSP && RTGSignedFits(value, 8) {
-            x86Immediate(out, 0x6a, uint64(value), 8)
-            x86OpcodeRegister(out, 0x58, destination)
-        } else if RTGUnsignedFits(uint64(value), 32) {
-            x86OpcodeRegister(out, 0xb8, destination)
-            out.Uint32(uint32(value))
-        } else if RTGSignedFits(value, 32) {
-            x86Immediate(out, 0x68, uint64(value), 32)
-            x86OpcodeRegister(out, 0x58, destination)
-        } else {
-            x86REX(out, true, RTGNoRegister, RTGNoRegister, destination, RTGNoRegister)
-            out.Byte(0xb8 + x86Low3(destination))
-            out.Uint64(uint64(value))
-        }
-    }
-
-    func x86RelaxJump(displacement int64) (byte, bool) {
-        return 0xeb, RTGSignedFits(displacement, 8)
-    }
-
-    func x86RelaxCondition(condition RTGCondition, displacement int64) (byte, bool) {
-        return condition.JumpOpcode - 0x10, RTGSignedFits(displacement, 8)
-    }
-
-    func x86VariableShift(
-        out *RTGEmitter,
-        direction RTGShiftDirection,
-        signed bool,
-    ) {
-        x86Xchg64(out, x86Primary, x86Tertiary)
-        if direction == RTGShiftLeft {
-            x86ShlCL64(out, x86Primary)
-        } else if signed {
-            x86SarCL64(out, x86Primary)
-        } else {
-            x86ShrCL64(out, x86Primary)
-        }
-    }
-
-    func x86SignedDivide(out *RTGEmitter, remainder bool) {
-        ordinary := out.NewLabel()
-        done := out.NewLabel()
-        x86CmpImmediate64(out, x86Primary, -1)
-        x86JumpCondition(out, x86NE, ordinary)
-        x86MoveImmediate(out, x86Secondary, 1)
-        x86ShlImmediate64(out, x86Secondary, 63)
-        x86Cmp64(out, x86Tertiary, x86Secondary)
-        x86JumpCondition(out, x86NE, ordinary)
-        if remainder {
-            x86MoveImmediate(out, x86Primary, 0)
-        } else {
-            x86Mov64(out, x86Primary, x86Tertiary)
-        }
-        x86Relative(out, 0xe9, done)
-        out.Mark(ordinary)
-        x86PushRegister(out, x86DivisionScratch)
-        x86Mov64(out, x86DivisionScratch, x86Primary)
-        x86Mov64(out, x86Primary, x86Tertiary)
-        out.Byte(0x48)
-        out.Byte(0x99)
-        x86Group(out, 0xf7, 7, x86DivisionScratch, 64)
-        if remainder {
-            x86Mov64(out, x86Primary, x86Secondary)
-        }
-        x86PopRegister(out, x86DivisionScratch)
-        out.Mark(done)
-    }
-
-    func x86CopyBytes(out *RTGEmitter) {
-        destination := x86CopyDestination
-        source := x86CopySource
-        count := x86CopyCount
-        forward := out.NewLabel()
-        done := out.NewLabel()
-        x86Cmp64(out, destination, source)
-        x86JumpCondition(out, x86ULE, forward)
-        x86Lea64(out, x86Scratch, RTGAddress{Base: source, Index: count, Scale: 1})
-        x86Cmp64(out, destination, x86Scratch)
-        x86JumpCondition(out, x86UGE, forward)
-        x86Lea64(out, source, RTGAddress{
-            Base: source, Index: count, Scale: 1, Displacement: -1,
-        })
-        x86Lea64(out, destination, RTGAddress{
-            Base: destination, Index: count, Scale: 1, Displacement: -1,
-        })
-        out.Byte(0xfd)
-        out.Byte(0xf3)
-        out.Byte(0xa4)
-        out.Byte(0xfc)
-        x86Relative(out, 0xe9, done)
-        out.Mark(forward)
-        out.Byte(0xfc)
-        out.Byte(0xf3)
-        out.Byte(0xa4)
-        out.Mark(done)
-    }
-
-    func windowsCommandLine(command []byte) [][]byte {
-        arguments := make([][]byte, 0, 8)
-        offset := 0
-        for offset < len(command) {
-            for offset < len(command) &&
-                (command[offset] == ' ' || command[offset] == '\t') {
-                offset++
-            }
-            if offset == len(command) {
-                break
-            }
-
-            argument := make([]byte, 0, 32)
-            quoted := false
-            for offset < len(command) {
-                if !quoted &&
-                    (command[offset] == ' ' || command[offset] == '\t') {
-                    break
-                }
-                if command[offset] == '"' {
-                    quoted = !quoted
-                    offset++
-                    continue
-                }
-                if command[offset] != '\\' {
-                    argument = append(argument, command[offset])
-                    offset++
-                    continue
-                }
-
-                slashStart := offset
-                for offset < len(command) && command[offset] == '\\' {
-                    offset++
-                }
-                slashCount := offset - slashStart
-                if offset == len(command) || command[offset] != '"' {
-                    for slashCount > 0 {
-                        argument = append(argument, '\\')
-                        slashCount--
-                    }
-                    continue
-                }
-
-                for slashCount >= 2 {
-                    argument = append(argument, '\\')
-                    slashCount -= 2
-                }
-                if slashCount == 1 {
-                    argument = append(argument, '"')
-                    offset++
-                } else {
-                    quoted = !quoted
-                    offset++
-                }
-            }
-            arguments = append(arguments, argument)
-        }
-        return arguments
-    }
+	func renvoAmd64AsmCmpRcxRaxSet(a *RTGEmitter, setcc int) {
+		a.Int32(0x0fc13948)
+		a.Bytes3(setcc, 0xc0, 0xf)
+		a.Uint16(0xc0b6)
+	}
 }
-
 arch x86_64 {
     alias = "amd64"
     endian = little
@@ -503,138 +360,36 @@ arch x86_64 {
     # Form names are declarative aliases for ordinary Go functions above.
     # A row is specialized into a direct call with its opcode, width, and
     # selector constants; there is no function registry in the result.
-    forms {
-        rr_rm         = go x86RRRM
-        rr            = go x86RR
-        rm_r          = go x86RMR
-        r_rm          = go x86RRM
-        group         = go x86Group
-        group_imm     = go x86GroupImmediate
-        group_imm8    = go x86GroupImmediate8
-        group_mem_imm = go x86GroupMemoryImmediate
-        imul_imm      = go x86MultiplyImmediate
-        opcode_reg    = go x86OpcodeRegister
-        immediate     = go x86Immediate
-        relative      = go x86Relative
-        set_condition = go x86SetCondition
-        jump_condition = go x86JumpCondition
-        fixed         = bytes
-    }
-
-    # Every row is: generated name, form, opcode, and optional group selector.
-    instructions {
-        mov64       rr_rm       0x89
-        load64      rm_r        0x8b
-        lea64       rm_r        0x8d
-        load_i32    rm_r        0x63
-        load_u32    rm_r        0x8b width=32
-        load_i16    rm_r        0x0fbf
-        load_u16    rm_r        0x0fb7
-        load_i8     rm_r        0x0fbe
-        load_u8     rm_r        0x0fb6
-        store64     r_rm        0x89
-        store32     r_rm        0x89 width=32
-        store16     r_rm        0x89 width=16
-        store8      r_rm        0x88 width=8
-
-        add64       rr_rm       0x01
-        sub64       rr_rm       0x29
-        and64       rr_rm       0x21
-        or64        rr_rm       0x09
-        xor64       rr_rm       0x31
-        cmp64       rr_rm       0x39
-        test64      rr_rm       0x85
-        imul64      rr          0x0faf
-        xchg64      rr_rm       0x87
-
-        add_imm64   group_imm   0x81 /0
-        or_imm64    group_imm   0x81 /1
-        and_imm64   group_imm   0x81 /4
-        sub_imm64   group_imm   0x81 /5
-        xor_imm64   group_imm   0x81 /6
-        cmp_imm64   group_imm   0x81 /7
-        cmp_mem_imm64 group_mem_imm 0x81 /7
-        imul_imm64  imul_imm    0x69
-
-        inc64       group       0xff /0
-        dec64       group       0xff /1
-        shl_imm64   group_imm8  0xc1 /4
-        shr_imm64   group_imm8  0xc1 /5
-        sar_imm64   group_imm8  0xc1 /7
-        shl_cl64    group       0xd3 /4
-        shr_cl64    group       0xd3 /5
-        sar_cl64    group       0xd3 /7
-        call_reg    group       0xff /2
-        idiv64      group       0xf7 /7
-
-        push_reg    opcode_reg  0x50
-        pop_reg     opcode_reg  0x58
-        push_imm8   immediate   0x6a width=8
-        push_imm32  immediate   0x68 width=32
-        setcc       set_condition
-        jcc_rel32   jump_condition relocation=rel32
-        call_rel32  relative    0xe8 relocation=rel32
-        jump_rel32  relative    0xe9 relocation=rel32
-
-        ret         fixed       [0xc3]
-        leave       fixed       [0xc9]
-        syscall     fixed       [0x0f, 0x05]
-        cqo         fixed       [0x48, 0x99]
-        cld         fixed       [0xfc]
-        std         fixed       [0xfd]
-        rep_movsb   fixed       [0xf3, 0xa4]
-    }
-
-    # The shared IR uses parameterized operations such as move(dst, src),
-    # load(dst, address, kind), and compare(left, right, condition). These
-    # bindings select x86 instruction families once; role-specific wrappers
-    # are generated after primary/secondary/tertiary are known.
-    bind {
-        move = mov64
-        address = lea64
-        load.native = load64
-        load.i32 = load_i32
-        load.u32 = load_u32
-        load.i16 = load_i16
-        load.u16 = load_u16
-        load.i8 = load_i8
-        load.u8 = load_u8
-        store.native = store64
-        store.u32 = store32
-        store.u16 = store16
-        store.u8 = store8
-
-        add = add64
-        subtract = sub64
-        multiply = imul64
-        bit_and = and64
-        bit_or = or64
-        bit_xor = xor64
-        compare = cmp64
-        test = test64
-        increment = inc64
-        decrement = dec64
-        shift_left_immediate = shl_imm64
-        shift_right_unsigned_immediate = shr_imm64
-        shift_right_signed_immediate = sar_imm64
-
-        call = call_rel32
-        call_indirect = call_reg
-        jump = jump_rel32
-        jump_condition = jcc_rel32
-        set_condition = setcc
-        return = ret
-        leave = leave
-        host_syscall = syscall
-        move_immediate = go x86MoveImmediate
-        variable_shift = go x86VariableShift
-        signed_divide = go x86SignedDivide
-        copy_bytes = go x86CopyBytes
-    }
-
-    relax {
-        jump_rel32 to jump_rel8 = go x86RelaxJump
-        jcc_rel32 to jcc_rel8 = go x86RelaxCondition
+    exports {
+		renvoAmd64AsmSecondaryDisp = go renvoAmd64AsmSecondaryDisp
+        renvoAmd64AsmMovRaxImm = go renvoAmd64AsmMovRaxImm
+        renvoAmd64AsmMovR10BssAddr = go renvoAmd64AsmMovR10BssAddr
+        renvoAmd64AsmLoadRaxBss = go renvoAmd64AsmLoadRaxBss
+        renvoAmd64AsmStoreRaxBss = go renvoAmd64AsmStoreRaxBss
+        renvoAmd64AsmMovRdiRax = go renvoAmd64AsmMovRdiRax
+        renvoAmd64AsmMovRsiRax = go renvoAmd64AsmMovRsiRax
+        renvoAmd64RewritePrimaryLoad = go renvoAmd64RewritePrimaryLoad
+        renvoAmd64RewritePrimaryLoadCompare = go renvoAmd64RewritePrimaryLoadCompare
+        renvoAmd64AsmMovR8Rax = go renvoAmd64AsmMovR8Rax
+        renvoAmd64AsmMovR9Rax = go renvoAmd64AsmMovR9Rax
+        renvoAmd64AsmMemDisp = go renvoAmd64AsmMemDisp
+        renvoAmd64AsmLoadQwordRaxIndexRcx8 = go renvoAmd64AsmLoadQwordRaxIndexRcx8
+        renvoAmd64AsmLoadQwordRaxIndexRcxDisp = go renvoAmd64AsmLoadQwordRaxIndexRcxDisp
+        renvoAmd64AsmLoadRaxMemRdxDisp = go renvoAmd64AsmLoadRaxMemRdxDisp
+        renvoAmd64AsmLoadRaxMemRdxDispSize = go renvoAmd64AsmLoadRaxMemRdxDispSize
+        renvoAmd64AsmLoadByteRaxIndexRcx = go renvoAmd64AsmLoadByteRaxIndexRcx
+        renvoAmd64AsmLoadRaxIndexRcxSize = go renvoAmd64AsmLoadRaxIndexRcxSize
+        renvoAmd64AsmStoreRaxMemRdxRcx8 = go renvoAmd64AsmStoreRaxMemRdxRcx8
+        renvoAmd64AsmStoreRaxMemRdxDisp = go renvoAmd64AsmStoreRaxMemRdxDisp
+        renvoAmd64AsmStoreRaxMemRdxDispSize = go renvoAmd64AsmStoreRaxMemRdxDispSize
+        renvoAmd64CodeEnds = go renvoAmd64CodeEnds
+        renvoAmd64AsmNormalizeRaxForKind = go renvoAmd64AsmNormalizeRaxForKind
+        renvoAmd64AsmIncMemRdx = go renvoAmd64AsmIncMemRdx
+        renvoAmd64AsmDecMemRdx = go renvoAmd64AsmDecMemRdx
+        renvoAmd64AsmCmpRaxImm8 = go renvoAmd64AsmCmpRaxImm8
+        renvoAmd64AsmCmpRaxImm8Discard = go renvoAmd64AsmCmpRaxImm8Discard
+        renvoAmd64AsmDivLeftRcxRightRax = go renvoAmd64AsmDivLeftRcxRightRax
+        renvoAmd64AsmCmpRcxRaxSet = go renvoAmd64AsmCmpRcxRaxSet
     }
 
     relocation rel32 {

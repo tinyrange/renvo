@@ -94,11 +94,11 @@ func TestAmd64DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 	if len(resolved.Targets) != 3 {
 		t.Fatalf("target count = %d, want 3", len(resolved.Targets))
 	}
-	generated := GenerateArchitectureBackend(resolved, "x86_64", "main")
+	generated := GenerateProductionArchitectureBackend(resolved, "x86_64", "main")
 	if !generated.Ok {
 		t.Fatalf("generate architecture: %#v", generated.Diagnostics)
 	}
-	checkedIn, err := os.ReadFile("../../backend/compiler_amd64_generated_impl.go")
+	checkedIn, err := os.ReadFile("../../backend/compiler_amd64_target_impl.go")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,10 +106,10 @@ func TestAmd64DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 		t.Fatal("checked-in amd64 architecture output is stale; run go generate ./backend/definitions")
 	}
 	for _, binding := range []string{
-		"func rtgX8664Mov64(",
-		"func rtgX8664Load64(",
-		"func rtgX8664CallRel32(",
-		"func rtgX8664PushRegister(",
+		"func renvoAmd64AsmMovRaxImm(",
+		"func renvoAmd64AsmLoadRaxMemRdxDisp(",
+		"func renvoAmd64AsmCmpRaxImm8(",
+		"func renvoAmd64AsmDivLeftRcxRightRax(",
 	} {
 		if !containsText(string(checkedIn), binding) {
 			t.Errorf("generated amd64 output is missing direct binding %s", binding)

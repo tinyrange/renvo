@@ -358,12 +358,29 @@ func (out *RTGEmitter) Byte(value byte) {
 	out.asm.code = append(out.asm.code, value)
 }
 
+func (out *RTGEmitter) Int8(value int) {
+	out.Byte(byte(value))
+}
+
+func (out *RTGEmitter) Uint16(value int) {
+	out.asm.code = append(out.asm.code, byte(value), byte(value >> 8))
+}
+
+func (out *RTGEmitter) Uint24(value int) {
+	out.Uint16(value)
+	out.Byte(byte(value >> 16))
+}
+
 func RTGByte(out *RTGEmitter, value byte) {
 	out.Byte(value)
 }
 
 func (out *RTGEmitter) Uint32(value uint32) {
 	out.asm.code = append(out.asm.code, byte(value), byte(value >> 8), byte(value >> 16), byte(value >> 24))
+}
+
+func (out *RTGEmitter) Int32(value int) {
+	out.Uint32(uint32(value))
 }
 
 func RTGUint32(out *RTGEmitter, value int) {
@@ -373,6 +390,31 @@ func RTGUint32(out *RTGEmitter, value int) {
 func (out *RTGEmitter) Uint64(value uint64) {
 	out.Uint32(uint32(value))
 	out.Uint32(uint32(value >> 32))
+}
+
+func (out *RTGEmitter) Int64(value int) {
+	out.Uint64(uint64(value))
+}
+
+func (out *RTGEmitter) Bytes2(v0 int, v1 int) {
+	out.Byte(byte(v0))
+	out.Byte(byte(v1))
+}
+
+func (out *RTGEmitter) Bytes3(v0 int, v1 int, v2 int) {
+	out.Bytes2(v0, v1)
+	out.Byte(byte(v2))
+}
+
+func (out *RTGEmitter) Bytes4(v0 int, v1 int, v2 int, v3 int) {
+	out.Bytes3(v0, v1, v2)
+	out.Byte(byte(v3))
+}
+
+func (out *RTGEmitter) Text(value string) {
+	for i := 0; i < len(value); i++ {
+		out.Byte(value[i])
+	}
 }
 
 func RTGUint64(out *RTGEmitter, value uint64) {
@@ -391,6 +433,34 @@ func (out *RTGEmitter) RelocAt(at int, label int) {
 	if label >= 0 {
 		renvoAsmAddReloc(out.asm, at, label)
 	}
+}
+
+func (out *RTGEmitter) PrimaryLoad() int {
+	return out.asm.lastPrimaryLoad
+}
+
+func (out *RTGEmitter) SetPrimaryLoad(value int) {
+	out.asm.lastPrimaryLoad = value
+}
+
+func (out *RTGEmitter) ByteAt(at int) byte {
+	return out.asm.code[at]
+}
+
+func (out *RTGEmitter) SetByteAt(at int, value byte) {
+	out.asm.code[at] = value
+}
+
+func (out *RTGEmitter) AddByteAt(at int, value byte) {
+	out.asm.code[at] += value
+}
+
+func (out *RTGEmitter) AppendByte(value int) {
+	out.asm.code = append(out.asm.code, byte(value))
+}
+
+func (out *RTGEmitter) Truncate(size int) {
+	out.asm.code = out.asm.code[:size]
 }
 
 func RTGPatchUint32(out *RTGEmitter, at int, value int) {
@@ -435,6 +505,14 @@ func RTGAddressValid(address RTGAddress) bool {
 
 func RTGAddressRel32Addend(out *RTGEmitter, address RTGAddress) {
 	out.Rel32Addend(address.Target, address.Addend)
+}
+
+func RTGInt8Fits(value int) bool {
+	return value >= -128 && value <= 127
+}
+
+func RTGPopPrimary(out *RTGEmitter) {
+	out.Byte(0x58)
 }
 
 func (out *RTGEmitter) Patch() {
@@ -873,6 +951,12 @@ func appendRewrittenGoModeExports(out []byte, source []byte, names []string, pre
 		if nativeEmitter && token.Kind == TokenIdent && i+3 < len(tokens) &&
 			tokenText(source, tokens[i+1]) == "." && tokenText(source, tokens[i+3]) == "(" {
 			method := tokenText(source, tokens[i+2])
+			if replacement, end, found := nativeEmitterStateMethod(source, tokens, i, text, method); found {
+				out = append(out, replacement...)
+				last = tokens[end].End
+				i = end
+				continue
+			}
 			if method == "Len" && i+4 < len(tokens) && tokenText(source, tokens[i+4]) == ")" {
 				out = append(out, "len("...)
 				out = append(out, text...)
@@ -888,6 +972,28 @@ func appendRewrittenGoModeExports(out []byte, source []byte, names []string, pre
 				replacement = "renvoAsmAddAbsReloc"
 			} else if method == "RelocAt" {
 				replacement = "renvoAsmAddReloc"
+			} else if method == "Byte" {
+				replacement = "renvoAsmEmit8"
+			} else if method == "Int8" {
+				replacement = "renvoAsmEmit8"
+			} else if method == "Uint16" {
+				replacement = "renvoAsmEmit16"
+			} else if method == "Uint24" {
+				replacement = "renvoAsmEmit24"
+			} else if method == "Uint32" {
+				replacement = "renvoAsmEmit32"
+			} else if method == "Int32" {
+				replacement = "renvoAsmEmit32"
+			} else if method == "Int64" {
+				replacement = "renvoAsmEmit64"
+			} else if method == "Bytes2" {
+				replacement = "renvoAsmEmit2"
+			} else if method == "Bytes3" {
+				replacement = "renvoAsmEmit3"
+			} else if method == "Bytes4" {
+				replacement = "renvoAsmEmit4"
+			} else if method == "Text" {
+				replacement = "renvoAsmEmitText"
 			}
 			if replacement != "" {
 				out = append(out, replacement...)
@@ -945,6 +1051,117 @@ func appendRewrittenGoModeExports(out []byte, source []byte, names []string, pre
 	return out
 }
 
+func nativeEmitterStateMethod(source []byte, tokens []Token, start int, receiver string, method string) ([]byte, int, bool) {
+	if method != "PrimaryLoad" && method != "SetPrimaryLoad" && method != "ByteAt" &&
+		method != "SetByteAt" && method != "AddByteAt" && method != "AppendByte" &&
+		method != "Truncate" {
+		return nil, start, false
+	}
+	end := start + 3
+	depth := 0
+	for end < len(tokens) {
+		text := tokenText(source, tokens[end])
+		if text == "(" {
+			depth++
+		} else if text == ")" {
+			depth--
+			if depth == 0 {
+				break
+			}
+		}
+		end++
+	}
+	if end >= len(tokens) {
+		return nil, start, false
+	}
+	var arguments [][]byte
+	argStart := start + 4
+	nesting := 0
+	for i := argStart; i < end; i++ {
+		text := tokenText(source, tokens[i])
+		if text == "(" || text == "[" || text == "{" {
+			nesting++
+		} else if text == ")" || text == "]" || text == "}" {
+			nesting--
+		} else if text == "," && nesting == 0 {
+			arguments = append(arguments, source[tokens[argStart].Start:tokens[i].Start])
+			argStart = i + 1
+		}
+	}
+	if argStart < end {
+		arguments = append(arguments, source[tokens[argStart].Start:tokens[end].Start])
+	}
+	for i := 0; i < len(arguments); i++ {
+		arguments[i] = rewriteNativeStateArgument(arguments[i], receiver)
+	}
+	var replacement []byte
+	if method == "PrimaryLoad" && len(arguments) == 0 {
+		replacement = append(replacement, receiver...)
+		return append(replacement, ".lastPrimaryLoad"...), end, true
+	}
+	if method == "SetPrimaryLoad" && len(arguments) == 1 {
+		replacement = append(replacement, receiver...)
+		replacement = append(replacement, ".lastPrimaryLoad = "...)
+		return append(replacement, arguments[0]...), end, true
+	}
+	if method == "ByteAt" && len(arguments) == 1 {
+		replacement = append(replacement, receiver...)
+		replacement = append(replacement, ".code["...)
+		replacement = append(replacement, arguments[0]...)
+		return append(replacement, ']'), end, true
+	}
+	if (method == "SetByteAt" || method == "AddByteAt") && len(arguments) == 2 {
+		replacement = append(replacement, receiver...)
+		replacement = append(replacement, ".code["...)
+		replacement = append(replacement, arguments[0]...)
+		if method == "SetByteAt" {
+			replacement = append(replacement, "] = "...)
+		} else {
+			replacement = append(replacement, "] += "...)
+		}
+		return append(replacement, arguments[1]...), end, true
+	}
+	if method == "AppendByte" && len(arguments) == 1 {
+		replacement = append(replacement, receiver...)
+		replacement = append(replacement, ".code = append("...)
+		replacement = append(replacement, receiver...)
+		replacement = append(replacement, ".code, byte("...)
+		replacement = append(replacement, arguments[0]...)
+		return append(replacement, ')', ')'), end, true
+	}
+	if method == "Truncate" && len(arguments) == 1 {
+		replacement = append(replacement, "renvoTruncBytes(&"...)
+		replacement = append(replacement, receiver...)
+		replacement = append(replacement, ".code, "...)
+		replacement = append(replacement, arguments[0]...)
+		return append(replacement, ')'), end, true
+	}
+	return nil, start, false
+}
+
+func rewriteNativeStateArgument(argument []byte, receiver string) []byte {
+	pattern := receiver + ".Len()"
+	var out []byte
+	for at := 0; at < len(argument); {
+		match := at+len(pattern) <= len(argument)
+		for i := 0; match && i < len(pattern); i++ {
+			if argument[at+i] != pattern[i] {
+				match = false
+			}
+		}
+		if !match {
+			out = append(out, argument[at])
+			at++
+			continue
+		}
+		out = append(out, "len("...)
+		out = append(out, receiver...)
+		out = append(out, ".code)"...)
+		at += len(pattern)
+	}
+	return out
+}
+
 func nativeBuiltinLiteral(name string) string {
 	if name == "RTGRelocationAbsoluteData" {
 		return "0"
@@ -994,6 +1211,12 @@ func nativeEmitterFunction(name string) string {
 	}
 	if name == "RTGAddressRel32Addend" {
 		return "renvoRTGAddressRel32Addend"
+	}
+	if name == "RTGInt8Fits" {
+		return "renvoAsmImmFits8Signed"
+	}
+	if name == "RTGPopPrimary" {
+		return "renvoAsmPopPrimary"
 	}
 	if name == "RTGNewLabel" {
 		return "renvoRTGNewLabel"
