@@ -14,13 +14,23 @@ import (
 func main() {
 	target := flag.String("t", "", "canonical target for fixed generation")
 	arch := flag.String("arch", "", "architecture for checked-in architecture generation")
+	statefulEmitter := flag.Bool("stateful-emitter", false, "keep the stateful RTG emitter in architecture output")
+	kernel := flag.Bool("kernel", false, "generate the shared checked-in architecture kernel")
 	packageName := flag.String("package", "backend", "generated Go package")
 	output := flag.String("o", "", "generated Go output")
 	check := flag.Bool("check", false, "fail if the output is stale")
 	flag.Parse()
-	if flag.NArg() == 0 || *output == "" {
+	if *output == "" || flag.NArg() == 0 && !*kernel {
 		fmt.Fprintln(os.Stderr, "usage: rtggen -t target/name -o output.go definition.rtg")
 		os.Exit(2)
+	}
+	if *kernel {
+		if *target != "" || *arch != "" || *statefulEmitter || flag.NArg() != 0 {
+			fail("kernel generation does not accept definitions, -t, or -arch")
+		}
+		generated := rtg.GenerateArchitectureKernel(*packageName)
+		writeGenerated(*output, *check, generated)
+		return
 	}
 	var definitions []rtg.ResolveResult
 	for _, path := range flag.Args() {
@@ -39,8 +49,15 @@ func main() {
 		if *target != "" || len(definitions) != 1 {
 			fail("architecture generation requires one definition and no -t")
 		}
-		generated = rtg.GenerateArchitectureBackend(definitions[0], *arch, *packageName)
+		if *statefulEmitter {
+			generated = rtg.GenerateStatefulArchitectureBackend(definitions[0], *arch, *packageName)
+		} else {
+			generated = rtg.GenerateArchitectureBackend(definitions[0], *arch, *packageName)
+		}
 	} else if *target == "" {
+		if *statefulEmitter {
+			fail("-stateful-emitter requires -arch")
+		}
 		generated = rtg.GenerateUniversalBackend(definitions)
 	} else {
 		if len(definitions) != 1 {
@@ -51,14 +68,18 @@ func main() {
 	if !generated.Ok {
 		failDiagnostics(generated.Diagnostics)
 	}
-	if *check {
-		existing, err := os.ReadFile(*output)
+	writeGenerated(*output, *check, generated)
+}
+
+func writeGenerated(output string, check bool, generated rtg.GenerateResult) {
+	if check {
+		existing, err := os.ReadFile(output)
 		if err != nil || !bytes.Equal(existing, generated.Source) {
-			fail(*output + " is stale; regenerate it with rtggen")
+			fail(output + " is stale; regenerate it with rtggen")
 		}
 		return
 	}
-	if err := os.WriteFile(*output, generated.Source, 0o644); err != nil {
+	if err := os.WriteFile(output, generated.Source, 0o644); err != nil {
 		fail(err.Error())
 	}
 }

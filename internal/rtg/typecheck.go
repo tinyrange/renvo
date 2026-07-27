@@ -3,6 +3,7 @@ package rtg
 import (
 	"renvo.dev/internal/check"
 	"renvo.dev/internal/load"
+	"renvo.dev/internal/syntax"
 )
 
 const embeddedGoPrelude = `package main
@@ -26,7 +27,11 @@ type RTGAddress struct {
 	Scale int
 }
 
-type RTGCondition int
+type RTGCondition struct {
+	Code       int
+	SetOpcode  byte
+	JumpOpcode byte
+}
 type RTGShiftDirection int
 
 const RTGShiftLeft RTGShiftDirection = 1
@@ -38,11 +43,18 @@ type RTGEmitter struct{}
 func (out *RTGEmitter) Byte(value byte) {}
 func (out *RTGEmitter) Uint32(value uint32) {}
 func (out *RTGEmitter) Uint64(value uint64) {}
+func (out *RTGEmitter) PatchUint32(at int, value int) {}
 func (out *RTGEmitter) Rel32(label RTGLabel) {}
 func (out *RTGEmitter) Rel32Addend(label RTGLabel, addend int) {}
+func (out *RTGEmitter) Reloc(label RTGLabel) {}
 func (out *RTGEmitter) Patch() {}
 func (out *RTGEmitter) NewLabel() RTGLabel { return RTGLabel{} }
 func (out *RTGEmitter) Mark(label RTGLabel) {}
+func RTGByte(out *RTGEmitter, value byte) {}
+func RTGUint32(out *RTGEmitter, value int) {}
+func RTGUint64(out *RTGEmitter, value uint64) {}
+func RTGPatchUint32(out *RTGEmitter, at int, value int) {}
+func RTGReloc(out *RTGEmitter, label RTGLabel) {}
 
 func RTGSignedFits(value int64, bits int) bool { return false }
 func RTGUnsignedFits(value uint64, bits int) bool { return false }
@@ -52,6 +64,7 @@ func RTGLog2(value int) int { return 0 }
 func validateEmbeddedGoTypes(document Document) (Diagnostic, bool) {
 	var source []byte
 	source = append(source, embeddedGoPrelude...)
+	source = appendGeneratedSymbolPrelude(source, document)
 	for i := 0; i < len(document.Declarations); i++ {
 		declaration := document.Declarations[i]
 		if declaration.Kind != DeclGo {
@@ -86,6 +99,18 @@ func validateEmbeddedGoTypes(document Document) (Diagnostic, bool) {
 		message = "embedded Go call does not match its declared signature"
 	} else if program.Error == check.CheckErrReturnType || program.Error == check.CheckErrReturnCount {
 		message = "embedded Go return does not match its declared signature"
+	}
+	if program.ErrorPackage >= 0 && program.ErrorPackage < len(program.Graph.Packages) {
+		pkg := program.Graph.Packages[program.ErrorPackage]
+		if program.ErrorFile >= 0 && program.ErrorFile < len(pkg.Files) {
+			file := pkg.Files[program.ErrorFile]
+			if program.ErrorToken >= 0 && program.ErrorToken < len(file.File.Tokens) {
+				name := string(syntax.TokenText(file.Src, file.File.Tokens[program.ErrorToken]))
+				if name != "" {
+					message += ": " + name
+				}
+			}
+		}
 	}
 	return Diagnostic{
 		Filename: document.Filename,

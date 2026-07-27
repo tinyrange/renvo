@@ -5,8 +5,8 @@ import "testing"
 func TestGeneratedAArch64InstructionBindings(t *testing.T) {
 	tests := []struct {
 		name string
-		got  uint32
-		want uint32
+		got  int
+		want int
 	}{
 		{"ret", rtgAarch64Ret(30), 0xd65f03c0},
 		{"add immediate", rtgAarch64AddImmediate(0, 1, 7), 0x91001c20},
@@ -46,21 +46,15 @@ func TestGeneratedAArch64InstructionBindings(t *testing.T) {
 	}
 }
 
-func TestRTGEmitterWritesAndPatchesRelativeAddends(t *testing.T) {
+func TestGeneratedAArch64BranchRecordsAssemblerRelocation(t *testing.T) {
 	var assembly renvoAsm
-	emitter := renvoRTGEmitter(&assembly)
-	label := emitter.NewLabel()
-	emitter.Rel32Addend(label, 3)
-	emitter.Byte(0xaa)
-	emitter.Mark(label)
-	emitter.Patch()
-	if len(assembly.code) != 5 {
-		t.Fatalf("code length = %d, want 5", len(assembly.code))
+	label := renvoAsmNewLabel(&assembly)
+	rtgAarch64BranchLabel(&assembly, label)
+	if len(assembly.code) != 4 || renvoGet32At(assembly.code, 0) != 0x14000000 {
+		t.Fatalf("branch bytes = %x", assembly.code)
 	}
-	if got := renvoGet32At(assembly.code, 0); got != 4 {
-		t.Fatalf("relative addend = %d, want 4", got)
-	}
-	if assembly.code[4] != 0xaa {
-		t.Fatalf("trailing byte = %#x", assembly.code[4])
+	if len(assembly.relocs) != 2 || assembly.relocs[0] != 0 ||
+		assembly.relocs[1] != int32(label) {
+		t.Fatalf("branch relocations = %#v", assembly.relocs)
 	}
 }

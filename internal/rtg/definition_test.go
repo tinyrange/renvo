@@ -82,6 +82,52 @@ func TestAArch64CheckedInArchitectureOutput(t *testing.T) {
 	}
 }
 
+func TestAmd64DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
+	source, err := os.ReadFile("../../backend/definitions/amd64.rtg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := Resolve(Parse(source, "amd64.rtg"))
+	if !resolved.Ok {
+		t.Fatalf("definition failed: %#v", resolved.Diagnostics)
+	}
+	if len(resolved.Targets) != 3 {
+		t.Fatalf("target count = %d, want 3", len(resolved.Targets))
+	}
+	generated := GenerateStatefulArchitectureBackend(resolved, "x86_64", "main")
+	if !generated.Ok {
+		t.Fatalf("generate architecture: %#v", generated.Diagnostics)
+	}
+	checkedIn, err := os.ReadFile("../../backend/compiler_amd64_generated_impl.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(generated.Source, checkedIn) {
+		t.Fatal("checked-in amd64 architecture output is stale; run go generate ./backend/definitions")
+	}
+	for _, binding := range []string{
+		"func rtgX8664Mov64(",
+		"func rtgX8664Load64(",
+		"func rtgX8664CallRel32(",
+		"func rtgX8664PushRegister(",
+	} {
+		if !containsText(string(checkedIn), binding) {
+			t.Errorf("generated amd64 output is missing direct binding %s", binding)
+		}
+	}
+}
+
+func TestCheckedInArchitectureKernelOutput(t *testing.T) {
+	generated := GenerateArchitectureKernel("main")
+	checkedIn, err := os.ReadFile("../../backend/compiler_rtg_generated_impl.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(generated.Source, checkedIn) {
+		t.Fatal("checked-in RTG architecture kernel is stale; run go generate ./backend/definitions")
+	}
+}
+
 // These mirrors make the expected instruction words reviewable independently
 // from generated-source spelling. The generated functions use the same direct
 // expressions and are syntax-checked by TestAArch64DefinitionVerticalSlice.

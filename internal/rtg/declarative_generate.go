@@ -24,13 +24,16 @@ type architectureForm struct {
 // appendArchitectureBindings specializes declarative instruction rows into
 // ordinary direct Go wrappers. Neither the table nor an algorithm registry is
 // retained in generated code.
-func appendArchitectureBindings(out []byte, document Document, arch Declaration, rewriteAlgorithms bool) []byte {
+func appendArchitectureBindings(out []byte, document Document, arch Declaration, rewriteAlgorithms bool, nativeEmitter bool) []byte {
 	instructions, ok := declarationBlock(arch, "instructions")
 	if !ok {
 		return out
 	}
 	names := embeddedGoNames(document)
 	prefix := "rtg" + exportedName(document.Unit)
+	if !rewriteAlgorithms {
+		prefix = architectureLocalPrefix(arch.Name)
+	}
 	forms := architectureForms(arch)
 	for i := 0; i < len(instructions.Children); i++ {
 		left, right, assignment := statementAssignment(instructions.Children[i])
@@ -39,7 +42,7 @@ func appendArchitectureBindings(out []byte, document Document, arch Declaration,
 			if !found {
 				continue
 			}
-			out = appendDirectInstructionWrapper(out, left[0], function, names, prefix, rewriteAlgorithms)
+			out = appendDirectInstructionWrapper(out, left[0], function, names, prefix, rewriteAlgorithms, nativeEmitter)
 			continue
 		}
 		row := instructions.Children[i].Tokens
@@ -51,19 +54,19 @@ func appendArchitectureBindings(out []byte, document Document, arch Declaration,
 			continue
 		}
 		if form.Kind == "bytes" {
-			out = appendFixedInstructionWrapper(out, row, prefix)
+			out = appendFixedInstructionWrapper(out, row, prefix, nativeEmitter)
 			continue
 		}
 		function, found := findEmbeddedFunction(document, form.Algorithm)
 		if !found {
 			continue
 		}
-		out = appendFormInstructionWrapper(out, row, function, names, prefix, rewriteAlgorithms)
+		out = appendFormInstructionWrapper(out, row, function, names, prefix, rewriteAlgorithms, nativeEmitter)
 	}
 	return out
 }
 
-func appendFixedInstructionWrapper(out []byte, row []string, prefix string) []byte {
+func appendFixedInstructionWrapper(out []byte, row []string, prefix string, nativeEmitter bool) []byte {
 	values := instructionByteValues(row)
 	if len(values) == 0 {
 		return out
@@ -72,19 +75,35 @@ func appendFixedInstructionWrapper(out []byte, row []string, prefix string) []by
 	out = append(out, row[0]...)
 	out = append(out, ".\nfunc "...)
 	out = append(out, prefix...)
-	out = append(out, exportedName(row[0])...)
-	out = append(out, "(out *RTGEmitter) {\n"...)
+	out = append(out, instructionGoSuffix(row[0])...)
+	if nativeEmitter {
+		out = append(out, "(out *renvoAsm) {\n"...)
+	} else {
+		out = append(out, "(out *RTGEmitter) {\n"...)
+	}
 	if len(values) == 4 {
-		out = append(out, "\tout.Uint32("...)
+		if nativeEmitter {
+			out = append(out, "\trenvoRTGUint32(out, "...)
+		} else {
+			out = append(out, "\tRTGUint32(out, "...)
+		}
 		out = appendPackedBytes(out, values)
 		out = append(out, ")\n"...)
 	} else if len(values) == 8 {
-		out = append(out, "\tout.Uint64("...)
+		if nativeEmitter {
+			out = append(out, "\trenvoRTGUint64(out, "...)
+		} else {
+			out = append(out, "\tRTGUint64(out, "...)
+		}
 		out = appendPackedBytes(out, values)
 		out = append(out, ")\n"...)
 	} else {
 		for i := 0; i < len(values); i++ {
-			out = append(out, "\tout.Byte("...)
+			if nativeEmitter {
+				out = append(out, "\trenvoRTGByte(out, "...)
+			} else {
+				out = append(out, "\tRTGByte(out, "...)
+			}
 			out = append(out, values[i]...)
 			out = append(out, ")\n"...)
 		}
@@ -127,14 +146,15 @@ func appendDirectInstructionWrapper(
 	names []string,
 	prefix string,
 	rewriteAlgorithms bool,
+	nativeEmitter bool,
 ) []byte {
 	out = append(out, "\n// Generated from instruction "...)
 	out = append(out, instruction...)
 	out = append(out, ".\nfunc "...)
 	out = append(out, prefix...)
-	out = append(out, exportedName(instruction)...)
+	out = append(out, instructionGoSuffix(instruction)...)
 	if rewriteAlgorithms {
-		out = appendRewrittenGo(out, function.Signature, names, prefix)
+		out = appendRewrittenGoMode(out, function.Signature, names, prefix, nativeEmitter, nil)
 	} else {
 		out = append(out, function.Signature...)
 	}
@@ -150,13 +170,14 @@ func appendFormInstructionWrapper(
 	names []string,
 	prefix string,
 	rewriteAlgorithms bool,
+	nativeEmitter bool,
 ) []byte {
 	constants := instructionConstants(row)
 	out = append(out, "\n// Generated from instruction "...)
 	out = append(out, row[0]...)
 	out = append(out, ".\nfunc "...)
 	out = append(out, prefix...)
-	out = append(out, exportedName(row[0])...)
+	out = append(out, instructionGoSuffix(row[0])...)
 	out = append(out, '(')
 	first := true
 	for i := 0; i < len(function.Parameters); i++ {
@@ -168,7 +189,7 @@ func appendFormInstructionWrapper(
 		}
 		first = false
 		if rewriteAlgorithms {
-			out = appendRewrittenGo(out, function.Parameters[i].Source, names, prefix)
+			out = appendRewrittenGoMode(out, function.Parameters[i].Source, names, prefix, nativeEmitter, nil)
 		} else {
 			out = append(out, function.Parameters[i].Source...)
 		}
@@ -177,7 +198,7 @@ func appendFormInstructionWrapper(
 	if len(function.Result) != 0 {
 		out = append(out, ' ')
 		if rewriteAlgorithms {
-			out = appendRewrittenGo(out, function.Result, names, prefix)
+			out = appendRewrittenGoMode(out, function.Result, names, prefix, nativeEmitter, nil)
 		} else {
 			out = append(out, function.Result...)
 		}
@@ -195,7 +216,7 @@ func appendWrapperCall(
 	rewriteAlgorithms bool,
 ) []byte {
 	if function.HasResult {
-		out = append(out, "\treturn "...)
+		out = append(out, "\tresult := "...)
 	} else {
 		out = append(out, '\t')
 	}
@@ -217,6 +238,9 @@ func appendWrapperCall(
 		out = append(out, value...)
 	}
 	out = append(out, ")\n"...)
+	if function.HasResult {
+		out = append(out, "\treturn result\n"...)
+	}
 	return out
 }
 

@@ -136,6 +136,11 @@ func declarationOwnsNamedAssignment(declaration Declaration, name string) bool {
 		if len(tokens) >= 3 && tokens[0] == "registers" && tokens[1] == name && tokens[2] == "=" {
 			return true
 		}
+		for j := 1; j+1 < len(tokens); j++ {
+			if tokens[j] == name && tokens[j+1] == "=" {
+				return true
+			}
+		}
 	}
 	return false
 }
@@ -152,6 +157,8 @@ func declarationAllowedFields(kind string) []string {
 			"arch", "arguments", "result", "stack_alignment", "shadow_space",
 			"saved", "clobbered", "call_words", "overflow_arguments", "aggregate_result",
 			"entry_arguments", "foreign_call", "return_address", "frame_pointer",
+			"overflow_stride", "scalar_result", "string_result", "slice_result",
+			"hidden_result_word", "internal", "caller_saved", "callee_saved", "red_zone",
 		}
 	}
 	if kind == DeclRuntime {
@@ -161,13 +168,14 @@ func declarationAllowedFields(kind string) []string {
 		return []string{
 			"byte_order", "address_bits", "file_alignment", "section_alignment", "page_size",
 			"image_base", "machine", "kind", "cpu", "subsystem", "entry", "strip",
+			"type", "headers_size", "text_rva", "sections",
 		}
 	}
 	if kind == DeclTarget {
 		return []string{
 			"arch", "abi", "runtime", "executable", "object", "aliases", "build_tags",
 			"capabilities", "code_pointer_bits", "function_pointer_bits", "max_align",
-			"arena_default",
+			"arena_default", "subsystem",
 		}
 	}
 	if kind == DeclIR {
@@ -180,8 +188,21 @@ func validateABI(document Document, declaration Declaration) []Diagnostic {
 	var diagnostics []Diagnostic
 	arch, ok := requiredNameField(document, declaration, "arch")
 	if !ok {
-		return append(diagnostics, resolveDiagnostic(document, declaration,
-			"RTG-VALIDATE-020", "ABI "+declaration.Name+" is missing arch"))
+		internal, hasInternal := requiredNameField(document, declaration, "internal")
+		if !hasInternal {
+			return append(diagnostics, resolveDiagnostic(document, declaration,
+				"RTG-VALIDATE-020", "ABI "+declaration.Name+" is missing arch or internal ABI"))
+		}
+		base, found := document.Declaration(DeclABI, internal)
+		if !found {
+			return append(diagnostics, resolveDiagnostic(document, declaration,
+				"RTG-VALIDATE-023", "ABI "+declaration.Name+" references unknown internal ABI "+internal))
+		}
+		arch, ok = requiredNameField(document, base, "arch")
+		if !ok {
+			return append(diagnostics, resolveDiagnostic(document, declaration,
+				"RTG-VALIDATE-024", "ABI "+declaration.Name+" has no architecture through "+internal))
+		}
 	}
 	if _, found := document.Declaration(DeclArch, arch); !found {
 		diagnostics = append(diagnostics, resolveDiagnostic(document, declaration,
@@ -230,7 +251,7 @@ func validateFormat(document Document, declaration Declaration) []Diagnostic {
 
 func validateTargetComposition(document Document, target ResolvedTarget) []Diagnostic {
 	var diagnostics []Diagnostic
-	if abiArch, ok := requiredNameField(document, target.ABI, "arch"); ok &&
+	if abiArch, ok := abiArchitecture(document, target.ABI); ok &&
 		abiArch != target.Arch.Name {
 		diagnostics = append(diagnostics, resolveDiagnostic(document, target.Declaration,
 			"RTG-VALIDATE-050", "target "+target.Descriptor.Name+" composes ABI "+target.ABI.Name+
@@ -249,6 +270,28 @@ func validateTargetComposition(document Document, target ResolvedTarget) []Diagn
 		}
 	}
 	return diagnostics
+}
+
+func abiArchitecture(document Document, declaration Declaration) (string, bool) {
+	seen := []string{}
+	for declaration.Name != "" {
+		if stringIndex(seen, declaration.Name) >= 0 {
+			return "", false
+		}
+		seen = append(seen, declaration.Name)
+		if arch, ok := requiredNameField(document, declaration, "arch"); ok {
+			return arch, true
+		}
+		internal, ok := requiredNameField(document, declaration, "internal")
+		if !ok {
+			return "", false
+		}
+		declaration, ok = document.Declaration(DeclABI, internal)
+		if !ok {
+			return "", false
+		}
+	}
+	return "", false
 }
 
 func statementHead(statement Statement, name string) bool {

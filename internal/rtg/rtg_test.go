@@ -290,7 +290,7 @@ func TestDeclarativeInstructionGeneratesDirectWrapper(t *testing.T) {
 	text := string(generated.Source)
 	for _, want := range []string{
 		"func rtgTinyIncrement(value int) int",
-		"return rtgTinyAddOne(value)",
+		"result := rtgTinyAddOne(value)",
 	} {
 		if !containsText(text, want) {
 			t.Errorf("generated source missing %q:\n%s", want, text)
@@ -321,7 +321,7 @@ func TestInstructionFormSpecializesConstantsIntoDirectWrapper(t *testing.T) {
 	text := string(generated.Source)
 	for _, want := range []string{
 		"func rtgTinyAdd64(destination uint32, source uint32) uint32",
-		"return rtgTinyRegisterForm(0x8b, destination, source, 64)",
+		"result := rtgTinyRegisterForm(0x8b, destination, source, 64)",
 	} {
 		if !containsText(text, want) {
 			t.Errorf("generated source missing %q:\n%s", want, text)
@@ -352,9 +352,9 @@ func TestFixedInstructionFormUsesWideEmitterWrites(t *testing.T) {
 	text := string(generated.Source)
 	for _, want := range []string{
 		"func rtgTinyTrap(out *RTGEmitter)",
-		"out.Uint32(0x04<<8|0x03<<8|0x02<<8|0x01)",
+		"RTGUint32(out, 0x04<<8|0x03<<8|0x02<<8|0x01)",
 		"func rtgTinyStop(out *RTGEmitter)",
-		"out.Byte(0xff)",
+		"RTGByte(out, 0xff)",
 	} {
 		if !containsText(text, want) {
 			t.Errorf("generated source missing %q:\n%s", want, text)

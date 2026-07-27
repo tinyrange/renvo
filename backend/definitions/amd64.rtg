@@ -1,0 +1,1058 @@
+definition 1
+unit x86_64
+implements direct_emitter_v1
+
+# X86 algorithms are ordinary Go emitted into the generated backend package.
+go backend {
+    func x86Low3(reg RTGRegister) byte {
+        return byte(reg.Code & 7)
+    }
+
+    func x86High(reg RTGRegister) byte {
+        return byte(reg.Code>>3) & 1
+    }
+
+    func x86Opcode(out *RTGEmitter, opcode uint32) {
+        if opcode > 0xff {
+            out.Byte(byte(opcode >> 8))
+        }
+        out.Byte(byte(opcode))
+    }
+
+    func x86REX(
+        out *RTGEmitter,
+        wide bool,
+        reg RTGRegister,
+        index RTGRegister,
+        base RTGRegister,
+        byteRegister RTGRegister,
+    ) {
+        w := byte(0)
+        if wide {
+            w = 1
+        }
+        r := x86High(reg)
+        x := byte(0)
+        if index.Valid {
+            x = x86High(index)
+        }
+        b := byte(0)
+        if base.Valid {
+            b = x86High(base)
+        }
+        needsByteREX := byteRegister.Valid && byteRegister.Code >= 4
+        if w != 0 || r != 0 || x != 0 || b != 0 || needsByteREX {
+            out.Byte(0x40 | w<<3 | r<<2 | x<<1 | b)
+        }
+    }
+
+    func x86ModRM(out *RTGEmitter, mode byte, reg byte, rm byte) {
+        out.Byte(mode<<6 | (reg&7)<<3 | rm&7)
+    }
+
+    func x86Memory(out *RTGEmitter, reg byte, address RTGAddress) {
+        if address.Target.Valid {
+            x86ModRM(out, 0, reg, 5)
+            out.Rel32Addend(address.Target, address.Addend)
+            return
+        }
+
+        base := address.Base
+        index := address.Index
+        displacement := address.Displacement
+        needsSIB := index.Valid || x86Low3(base) == 4
+        mode := byte(0)
+        if displacement != 0 || x86Low3(base) == 5 {
+            mode = 2
+            if RTGSignedFits(int64(displacement), 8) {
+                mode = 1
+            }
+        }
+
+        if needsSIB {
+            x86ModRM(out, mode, reg, 4)
+            indexCode := byte(4)
+            if index.Valid {
+                indexCode = x86Low3(index)
+            }
+            out.Byte(byte(RTGLog2(address.Scale))<<6 |
+                indexCode<<3 | x86Low3(base))
+        } else {
+            x86ModRM(out, mode, reg, x86Low3(base))
+        }
+
+        if mode == 1 {
+            out.Byte(byte(displacement))
+        } else if mode == 2 {
+            out.Uint32(uint32(displacement))
+        }
+    }
+
+    func x86RRRM(
+        out *RTGEmitter,
+        opcode uint32,
+        destination RTGRegister,
+        source RTGRegister,
+        width int,
+    ) {
+        if width == 16 {
+            out.Byte(0x66)
+        }
+        byteRegister := RTGNoRegister
+        if width == 8 {
+            byteRegister = source
+        }
+        x86REX(out, width == 64, source, RTGNoRegister, destination, byteRegister)
+        x86Opcode(out, opcode)
+        x86ModRM(out, 3, x86Low3(source), x86Low3(destination))
+    }
+
+    func x86RR(
+        out *RTGEmitter,
+        opcode uint32,
+        destination RTGRegister,
+        source RTGRegister,
+        width int,
+    ) {
+        x86REX(out, width == 64, destination, RTGNoRegister, source, RTGNoRegister)
+        x86Opcode(out, opcode)
+        x86ModRM(out, 3, x86Low3(destination), x86Low3(source))
+    }
+
+    func x86RMR(
+        out *RTGEmitter,
+        opcode uint32,
+        destination RTGRegister,
+        address RTGAddress,
+        width int,
+    ) {
+        if width == 16 {
+            out.Byte(0x66)
+        }
+        x86REX(out, width == 64, destination, address.Index, address.Base, RTGNoRegister)
+        x86Opcode(out, opcode)
+        x86Memory(out, x86Low3(destination), address)
+    }
+
+    func x86RRM(
+        out *RTGEmitter,
+        opcode uint32,
+        address RTGAddress,
+        source RTGRegister,
+        width int,
+    ) {
+        if width == 16 {
+            out.Byte(0x66)
+        }
+        byteRegister := RTGNoRegister
+        if width == 8 {
+            byteRegister = source
+        }
+        x86REX(out, width == 64, source, address.Index, address.Base, byteRegister)
+        x86Opcode(out, opcode)
+        x86Memory(out, x86Low3(source), address)
+    }
+
+    func x86Group(
+        out *RTGEmitter,
+        opcode uint32,
+        selector byte,
+        operand RTGRegister,
+        width int,
+    ) {
+        x86REX(out, width == 64, RTGNoRegister, RTGNoRegister, operand, RTGNoRegister)
+        x86Opcode(out, opcode)
+        x86ModRM(out, 3, selector, x86Low3(operand))
+    }
+
+    func x86GroupImmediate(
+        out *RTGEmitter,
+        opcode uint32,
+        selector byte,
+        operand RTGRegister,
+        value int64,
+        width int,
+    ) {
+        x86REX(out, width == 64, RTGNoRegister, RTGNoRegister, operand, RTGNoRegister)
+        if RTGSignedFits(value, 8) {
+            out.Byte(0x83)
+            x86ModRM(out, 3, selector, x86Low3(operand))
+            out.Byte(byte(value))
+            return
+        }
+        x86Opcode(out, opcode)
+        x86ModRM(out, 3, selector, x86Low3(operand))
+        out.Uint32(uint32(value))
+    }
+
+    func x86GroupImmediate8(
+        out *RTGEmitter,
+        opcode uint32,
+        selector byte,
+        operand RTGRegister,
+        value byte,
+        width int,
+    ) {
+        x86Group(out, opcode, selector, operand, width)
+        out.Byte(value)
+    }
+
+    func x86GroupMemoryImmediate(
+        out *RTGEmitter,
+        opcode uint32,
+        selector byte,
+        address RTGAddress,
+        value int64,
+        width int,
+    ) {
+        x86REX(out, width == 64, RTGNoRegister, address.Index, address.Base, RTGNoRegister)
+        if RTGSignedFits(value, 8) {
+            out.Byte(0x83)
+        } else {
+            x86Opcode(out, opcode)
+        }
+        x86Memory(out, selector, address)
+        if RTGSignedFits(value, 8) {
+            out.Byte(byte(value))
+        } else {
+            out.Uint32(uint32(value))
+        }
+    }
+
+    func x86MultiplyImmediate(
+        out *RTGEmitter,
+        opcode uint32,
+        destination RTGRegister,
+        source RTGRegister,
+        value int64,
+        width int,
+    ) {
+        x86REX(out, width == 64, destination, RTGNoRegister, source, RTGNoRegister)
+        if RTGSignedFits(value, 8) {
+            out.Byte(0x6b)
+        } else {
+            x86Opcode(out, opcode)
+        }
+        x86ModRM(out, 3, x86Low3(destination), x86Low3(source))
+        if RTGSignedFits(value, 8) {
+            out.Byte(byte(value))
+        } else {
+            out.Uint32(uint32(value))
+        }
+    }
+
+    func x86OpcodeRegister(out *RTGEmitter, opcode byte, operand RTGRegister) {
+        if x86High(operand) != 0 {
+            out.Byte(0x41)
+        }
+        out.Byte(opcode + x86Low3(operand))
+    }
+
+    func x86Immediate(out *RTGEmitter, opcode byte, value uint64, width int) {
+        out.Byte(opcode)
+        if width == 8 {
+            out.Byte(byte(value))
+        } else if width == 32 {
+            out.Uint32(uint32(value))
+        } else {
+            out.Uint64(value)
+        }
+    }
+
+    func x86Relative(out *RTGEmitter, opcode uint32, label RTGLabel) {
+        x86Opcode(out, opcode)
+        out.Rel32(label)
+    }
+
+    func x86SetCondition(
+        out *RTGEmitter,
+        condition RTGCondition,
+        destination RTGRegister,
+    ) {
+        x86REX(out, false, RTGNoRegister, RTGNoRegister, destination, destination)
+        out.Byte(0x0f)
+        out.Byte(condition.SetOpcode)
+        x86ModRM(out, 3, 0, x86Low3(destination))
+    }
+
+    func x86JumpCondition(
+        out *RTGEmitter,
+        condition RTGCondition,
+        label RTGLabel,
+    ) {
+        out.Byte(0x0f)
+        out.Byte(condition.JumpOpcode)
+        out.Rel32(label)
+    }
+
+    func x86MoveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
+        if destination == x86RAX && value == 0 {
+            out.Byte(0x31)
+            out.Byte(0xc0)
+        } else if destination != x86RSP && RTGSignedFits(value, 8) {
+            x86Immediate(out, 0x6a, uint64(value), 8)
+            x86OpcodeRegister(out, 0x58, destination)
+        } else if RTGUnsignedFits(uint64(value), 32) {
+            x86OpcodeRegister(out, 0xb8, destination)
+            out.Uint32(uint32(value))
+        } else if RTGSignedFits(value, 32) {
+            x86Immediate(out, 0x68, uint64(value), 32)
+            x86OpcodeRegister(out, 0x58, destination)
+        } else {
+            x86REX(out, true, RTGNoRegister, RTGNoRegister, destination, RTGNoRegister)
+            out.Byte(0xb8 + x86Low3(destination))
+            out.Uint64(uint64(value))
+        }
+    }
+
+    func x86RelaxJump(displacement int64) (byte, bool) {
+        return 0xeb, RTGSignedFits(displacement, 8)
+    }
+
+    func x86RelaxCondition(condition RTGCondition, displacement int64) (byte, bool) {
+        return condition.JumpOpcode - 0x10, RTGSignedFits(displacement, 8)
+    }
+
+    func x86VariableShift(
+        out *RTGEmitter,
+        direction RTGShiftDirection,
+        signed bool,
+    ) {
+        x86Xchg64(out, x86Primary, x86Tertiary)
+        if direction == RTGShiftLeft {
+            x86ShlCL64(out, x86Primary)
+        } else if signed {
+            x86SarCL64(out, x86Primary)
+        } else {
+            x86ShrCL64(out, x86Primary)
+        }
+    }
+
+    func x86SignedDivide(out *RTGEmitter, remainder bool) {
+        ordinary := out.NewLabel()
+        done := out.NewLabel()
+        x86CmpImmediate64(out, x86Primary, -1)
+        x86JumpCondition(out, x86NE, ordinary)
+        x86MoveImmediate(out, x86Secondary, 1)
+        x86ShlImmediate64(out, x86Secondary, 63)
+        x86Cmp64(out, x86Tertiary, x86Secondary)
+        x86JumpCondition(out, x86NE, ordinary)
+        if remainder {
+            x86MoveImmediate(out, x86Primary, 0)
+        } else {
+            x86Mov64(out, x86Primary, x86Tertiary)
+        }
+        x86Relative(out, 0xe9, done)
+        out.Mark(ordinary)
+        x86PushRegister(out, x86DivisionScratch)
+        x86Mov64(out, x86DivisionScratch, x86Primary)
+        x86Mov64(out, x86Primary, x86Tertiary)
+        out.Byte(0x48)
+        out.Byte(0x99)
+        x86Group(out, 0xf7, 7, x86DivisionScratch, 64)
+        if remainder {
+            x86Mov64(out, x86Primary, x86Secondary)
+        }
+        x86PopRegister(out, x86DivisionScratch)
+        out.Mark(done)
+    }
+
+    func x86CopyBytes(out *RTGEmitter) {
+        destination := x86CopyDestination
+        source := x86CopySource
+        count := x86CopyCount
+        forward := out.NewLabel()
+        done := out.NewLabel()
+        x86Cmp64(out, destination, source)
+        x86JumpCondition(out, x86ULE, forward)
+        x86Lea64(out, x86Scratch, RTGAddress{Base: source, Index: count, Scale: 1})
+        x86Cmp64(out, destination, x86Scratch)
+        x86JumpCondition(out, x86UGE, forward)
+        x86Lea64(out, source, RTGAddress{
+            Base: source, Index: count, Scale: 1, Displacement: -1,
+        })
+        x86Lea64(out, destination, RTGAddress{
+            Base: destination, Index: count, Scale: 1, Displacement: -1,
+        })
+        out.Byte(0xfd)
+        out.Byte(0xf3)
+        out.Byte(0xa4)
+        out.Byte(0xfc)
+        x86Relative(out, 0xe9, done)
+        out.Mark(forward)
+        out.Byte(0xfc)
+        out.Byte(0xf3)
+        out.Byte(0xa4)
+        out.Mark(done)
+    }
+
+    func windowsCommandLine(command []byte) [][]byte {
+        arguments := make([][]byte, 0, 8)
+        offset := 0
+        for offset < len(command) {
+            for offset < len(command) &&
+                (command[offset] == ' ' || command[offset] == '\t') {
+                offset++
+            }
+            if offset == len(command) {
+                break
+            }
+
+            argument := make([]byte, 0, 32)
+            quoted := false
+            for offset < len(command) {
+                if !quoted &&
+                    (command[offset] == ' ' || command[offset] == '\t') {
+                    break
+                }
+                if command[offset] == '"' {
+                    quoted = !quoted
+                    offset++
+                    continue
+                }
+                if command[offset] != '\\' {
+                    argument = append(argument, command[offset])
+                    offset++
+                    continue
+                }
+
+                slashStart := offset
+                for offset < len(command) && command[offset] == '\\' {
+                    offset++
+                }
+                slashCount := offset - slashStart
+                if offset == len(command) || command[offset] != '"' {
+                    for slashCount > 0 {
+                        argument = append(argument, '\\')
+                        slashCount--
+                    }
+                    continue
+                }
+
+                for slashCount >= 2 {
+                    argument = append(argument, '\\')
+                    slashCount -= 2
+                }
+                if slashCount == 1 {
+                    argument = append(argument, '"')
+                    offset++
+                } else {
+                    quoted = !quoted
+                    offset++
+                }
+            }
+            arguments = append(arguments, argument)
+        }
+        return arguments
+    }
+}
+
+arch x86_64 {
+    alias = "amd64"
+    endian = little
+    word_bits = 64
+    pointer_bits = 64
+    instruction_alignment = 1
+    stack_word_bytes = 8
+    stack_alignment = 16
+    unaligned_memory = true
+
+    # List position is the architectural register number. The x86 encoder
+    # derives low3, REX bits, byte-register names, RSP/R12 SIB rules, and
+    # RBP/R13 displacement rules from this single list.
+    registers gpr64 = [
+        rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi,
+        r8, r9, r10, r11, r12, r13, r14, r15
+    ]
+
+    locations {
+        primary = rax
+        secondary = rdx
+        tertiary = rcx
+        scratch = r10
+        division_scratch = rbx
+        copy_destination = rdi
+        copy_source = rsi
+        copy_count = rcx
+        stack = rsp
+        frame = rbp
+    }
+
+    # One row supplies both SETcc and near Jcc. Unsigned conditions no longer
+    # need separate hand-written lowering functions.
+    conditions {
+        eq  0x94 0x84
+        ne  0x95 0x85
+        slt 0x9c 0x8c
+        sge 0x9d 0x8d
+        sle 0x9e 0x8e
+        sgt 0x9f 0x8f
+        ult 0x92 0x82
+        uge 0x93 0x83
+        ule 0x96 0x86
+        ugt 0x97 0x87
+    }
+
+    # Width and extension policy is stated once per source-language scalar.
+    scalars {
+        zero_extend { bool:1 byte:1 uint16:2 uint32:4 }
+        sign_extend { int8:1 int16:2 int32:4 }
+        native { int:8 int64:8 uint64:8 pointer:8 }
+    }
+
+    # Form names are declarative aliases for ordinary Go functions above.
+    # A row is specialized into a direct call with its opcode, width, and
+    # selector constants; there is no function registry in the result.
+    forms {
+        rr_rm         = go x86RRRM
+        rr            = go x86RR
+        rm_r          = go x86RMR
+        r_rm          = go x86RRM
+        group         = go x86Group
+        group_imm     = go x86GroupImmediate
+        group_imm8    = go x86GroupImmediate8
+        group_mem_imm = go x86GroupMemoryImmediate
+        imul_imm      = go x86MultiplyImmediate
+        opcode_reg    = go x86OpcodeRegister
+        immediate     = go x86Immediate
+        relative      = go x86Relative
+        set_condition = go x86SetCondition
+        jump_condition = go x86JumpCondition
+        fixed         = bytes
+    }
+
+    # Every row is: generated name, form, opcode, and optional group selector.
+    instructions {
+        mov64       rr_rm       0x89
+        load64      rm_r        0x8b
+        lea64       rm_r        0x8d
+        load_i32    rm_r        0x63
+        load_u32    rm_r        0x8b width=32
+        load_i16    rm_r        0x0fbf
+        load_u16    rm_r        0x0fb7
+        load_i8     rm_r        0x0fbe
+        load_u8     rm_r        0x0fb6
+        store64     r_rm        0x89
+        store32     r_rm        0x89 width=32
+        store16     r_rm        0x89 width=16
+        store8      r_rm        0x88 width=8
+
+        add64       rr_rm       0x01
+        sub64       rr_rm       0x29
+        and64       rr_rm       0x21
+        or64        rr_rm       0x09
+        xor64       rr_rm       0x31
+        cmp64       rr_rm       0x39
+        test64      rr_rm       0x85
+        imul64      rr          0x0faf
+        xchg64      rr_rm       0x87
+
+        add_imm64   group_imm   0x81 /0
+        or_imm64    group_imm   0x81 /1
+        and_imm64   group_imm   0x81 /4
+        sub_imm64   group_imm   0x81 /5
+        xor_imm64   group_imm   0x81 /6
+        cmp_imm64   group_imm   0x81 /7
+        cmp_mem_imm64 group_mem_imm 0x81 /7
+        imul_imm64  imul_imm    0x69
+
+        inc64       group       0xff /0
+        dec64       group       0xff /1
+        shl_imm64   group_imm8  0xc1 /4
+        shr_imm64   group_imm8  0xc1 /5
+        sar_imm64   group_imm8  0xc1 /7
+        shl_cl64    group       0xd3 /4
+        shr_cl64    group       0xd3 /5
+        sar_cl64    group       0xd3 /7
+        call_reg    group       0xff /2
+        idiv64      group       0xf7 /7
+
+        push_reg    opcode_reg  0x50
+        pop_reg     opcode_reg  0x58
+        push_imm8   immediate   0x6a width=8
+        push_imm32  immediate   0x68 width=32
+        setcc       set_condition
+        jcc_rel32   jump_condition relocation=rel32
+        call_rel32  relative    0xe8 relocation=rel32
+        jump_rel32  relative    0xe9 relocation=rel32
+
+        ret         fixed       [0xc3]
+        leave       fixed       [0xc9]
+        syscall     fixed       [0x0f, 0x05]
+        cqo         fixed       [0x48, 0x99]
+        cld         fixed       [0xfc]
+        std         fixed       [0xfd]
+        rep_movsb   fixed       [0xf3, 0xa4]
+    }
+
+    # The shared IR uses parameterized operations such as move(dst, src),
+    # load(dst, address, kind), and compare(left, right, condition). These
+    # bindings select x86 instruction families once; role-specific wrappers
+    # are generated after primary/secondary/tertiary are known.
+    bind {
+        move = mov64
+        address = lea64
+        load.native = load64
+        load.i32 = load_i32
+        load.u32 = load_u32
+        load.i16 = load_i16
+        load.u16 = load_u16
+        load.i8 = load_i8
+        load.u8 = load_u8
+        store.native = store64
+        store.u32 = store32
+        store.u16 = store16
+        store.u8 = store8
+
+        add = add64
+        subtract = sub64
+        multiply = imul64
+        bit_and = and64
+        bit_or = or64
+        bit_xor = xor64
+        compare = cmp64
+        test = test64
+        increment = inc64
+        decrement = dec64
+        shift_left_immediate = shl_imm64
+        shift_right_unsigned_immediate = shr_imm64
+        shift_right_signed_immediate = sar_imm64
+
+        call = call_rel32
+        call_indirect = call_reg
+        jump = jump_rel32
+        jump_condition = jcc_rel32
+        set_condition = setcc
+        return = ret
+        leave = leave
+        host_syscall = syscall
+        move_immediate = go x86MoveImmediate
+        variable_shift = go x86VariableShift
+        signed_divide = go x86SignedDivide
+        copy_bytes = go x86CopyBytes
+    }
+
+    relax {
+        jump_rel32 to jump_rel8 = go x86RelaxJump
+        jcc_rel32 to jcc_rel8 = go x86RelaxCondition
+    }
+
+    relocation rel32 {
+        width = 4
+        signed = true
+        relative_to = field_end
+        kinds = [label, data, bss, import]
+    }
+
+    frame {
+        base = rbp
+        stack = rsp
+        alignment = 16
+        maximum = 65520
+        prologue = [0xc8, frame_size:u16le, 0x00]
+        epilogue = [leave, ret]
+        overflow_arguments = rbp + 16
+    }
+
+}
+
+# Image fields are declared here. Header/section/relocation are generic
+# definition-language constructs, not precompiled ELF or PE backends.
+format elf64_x86_64 {
+    byte_order = little
+    address_bits = 64
+    file_alignment = 0x1000
+    machine = 62
+
+    header elf {
+        magic = [0x7f, 0x45, 0x4c, 0x46]
+        class = 2
+        data = 1
+        version = 1
+        osabi = 0
+        type = 3
+        machine = 62
+        entry = address(text.start)
+        program_header_offset = sizeof(elf_header)
+        section_header_offset = stripped ? 0 : sections.offset
+        flags = 0
+        elf_header_size = 64
+        program_header_size = 56
+        program_header_count = 2
+        section_header_size = stripped ? 0 : 64
+        section_header_count = stripped ? 0 : sections.count
+        section_name_index = stripped ? 0 : sections.names
+    }
+
+    segment text {
+        type = load
+        flags = read | execute
+        file = [headers.start, data.file_start)
+        memory = [headers.start, data.memory_start)
+        alignment = 0x1000
+    }
+
+    segment data {
+        type = load
+        flags = read | write
+        file = [data.file_start, data.file_end)
+        memory = [data.memory_start, bss.end)
+        alignment = 0x1000
+    }
+
+    sections when !stripped {
+        text progbits alloc|execute align=16
+        data progbits alloc|write align=8
+        bss nobits alloc|write align=8
+        symtab symtab entry_size=24 link=strtab
+        strtab strtab
+        shstrtab strtab
+    }
+
+    relocation {
+        label = rel32
+        data = rel32
+        bss = rel32
+    }
+}
+
+format elf64_object_x86_64 {
+    byte_order = little
+    address_bits = 64
+    machine = 62
+    type = relocatable
+
+    sections {
+        text progbits alloc|execute align=16
+        rela_text rela entry_size=24 link=symtab info=text
+        data progbits alloc|write align=8
+        bss nobits alloc|write align=8
+        symtab symtab entry_size=24 link=strtab
+        strtab strtab
+        shstrtab strtab
+    }
+
+    relocation label { number = 2 kind = pc_relative width = 32 addend = -4 }
+    relocation data  { number = 2 kind = pc_relative width = 32 addend = -4 }
+    relocation bss   { number = 2 kind = pc_relative width = 32 addend = -4 }
+    relocation abs64 { number = 1 kind = absolute width = 64 addend = 0 }
+}
+
+format pe64_x86_64 {
+    byte_order = little
+    address_bits = 64
+    machine = 0x8664
+    image_base = 0x400000
+    headers_size = 0x200
+    file_alignment = 0x200
+    section_alignment = 0x1000
+    text_rva = 0x1000
+
+    dos_header {
+        magic = [0x4d, 0x5a]
+        pe_offset = 0x80
+    }
+
+    coff_header {
+        machine = 0x8664
+        sections = 2
+        optional_header_size = 0xf0
+        characteristics = executable | large_address_aware
+    }
+
+    optional_header {
+        magic = 0x20b
+        entry = rva(text.start)
+        code_base = rva(text.start)
+        image_base = 0x400000
+        section_alignment = 0x1000
+        file_alignment = 0x200
+        subsystem = target.subsystem
+        stack_reserve = 8MiB
+        stack_commit = 4KiB
+        heap_reserve = 1MiB
+        directories = [imports.directory, imports.iat]
+    }
+
+    section text {
+        name = ".text"
+        flags = code | execute | read
+        virtual = text
+        raw_alignment = 0x200
+    }
+
+    section data {
+        name = ".data"
+        flags = initialized_data | read | write
+        virtual = data + bss
+        raw = data
+        raw_alignment = 0x200
+    }
+
+    imports {
+        thunk_bytes = 8
+        library = "KERNEL32.dll"
+        names = target.runtime.imports
+
+        descriptor size=20 {
+            u32 original_first_thunk = rva(import_lookup_table)
+            u32 timestamp = 0
+            u32 forwarder_chain = 0
+            u32 name = rva(library_name)
+            u32 first_thunk = rva(import_address_table)
+        }
+
+        import_lookup_table {
+            entries names as u64 rva(hint_name(entry))
+            terminator = u64 0
+        }
+
+        import_address_table {
+            entries names as u64 rva(hint_name(entry))
+            terminator = u64 0
+        }
+
+        hint_name(entry) {
+            u16 0
+            ascii entry
+            u8 0
+            align 2
+        }
+
+        library_name {
+            ascii library
+            u8 0
+        }
+
+        directory.rva = rva(descriptor)
+        directory.size = sizeof(descriptor)
+        iat.rva = rva(import_address_table)
+        iat.size = sizeof(import_address_table)
+    }
+
+    relocation import = rel32 from instruction_end to imports.iat_entry
+    relocation data = rel32 from instruction_end to data
+    relocation bss = rel32 from instruction_end to bss
+}
+
+format coff64_object_x86_64 {
+    byte_order = little
+    address_bits = 64
+    machine = 0x8664
+    sections = [text, data, bss]
+    symbol_table entry_size=18 {
+        name = inline_8_or_string_offset
+        value = section_offset
+        section = section_index
+        type = symbol_type
+        storage_class = symbol_visibility
+        auxiliaries = 0
+    }
+
+    string_table {
+        u32 size
+        entries long_symbol_names {
+            ascii long_symbol_name
+            u8 0
+        }
+    }
+
+    relocation label { number = 0x0004 kind = rel32 addend = -4 }
+    relocation data  { number = 0x0004 kind = rel32 addend = -4 }
+    relocation bss   { number = 0x0004 kind = rel32 addend = -4 }
+    relocation abs64 { number = 0x0001 kind = absolute width = 64 }
+}
+
+# Runtime declarations define only the supported boundary. Missing operations
+# are rejected during definition validation rather than silently emulated.
+runtime linux_x86_64 {
+    entry process_stack {
+        argc = word(rsp, 0)
+        argv = words(rsp + 8, argc)
+        envp = words(rsp + 16 + argc * 8, until_null)
+        string = nul_terminated_bytes
+        result = [slice(argv), slice(envp)]
+    }
+
+    syscall {
+        number = rax
+        arguments = [rdi, rsi, rdx, r10, r8, r9]
+        result = rax
+        error = negative
+        instruction = syscall
+    }
+
+    operation read     { number = 0  args = [fd, buffer, count] }
+    operation write    { number = 1  args = [fd, buffer, count] }
+    operation open     { number = 2  args = [path, flags, mode] }
+    operation close    { number = 3  args = [fd] }
+    operation read_at  { number = 17 args = [fd, buffer, count, offset] }
+    operation write_at { number = 18 args = [fd, buffer, count, offset] }
+    operation chmod    { number = 91 args = [fd, mode] }
+    operation print    { use = write args = [stderr, buffer, count] }
+    operation exit     { number = 60 args = [status] noreturn = true }
+}
+
+runtime win32_x86_64 {
+    imports "KERNEL32.dll" = [
+        CreateFileA,
+        CloseHandle,
+        ReadFile,
+        WriteFile,
+        SetFilePointer,
+        GetStdHandle,
+        GetCommandLineA,
+        ExitProcess,
+        GetEnvironmentStringsA
+    ]
+
+    entry {
+        arguments.source = call GetCommandLineA
+        arguments.parse = go windowsCommandLine
+        environment.source = call GetEnvironmentStringsA
+        environment.parse = nul_terminated_pairs
+        result = [slice(arguments), slice(environment)]
+    }
+
+    operation open {
+        call = CreateFileA
+        arguments = [
+            path,
+            access(flags),
+            share_read | share_write,
+            null,
+            disposition(flags),
+            normal_attributes,
+            null
+        ]
+        result = handle_or_error
+    }
+
+    operation close {
+        call = CloseHandle
+        arguments = [fd]
+        result = bool_or_error
+    }
+
+    operation read {
+        call = ReadFile
+        arguments = [fd, buffer, count, address(transferred), null]
+        result = transferred_or_error
+    }
+
+    operation write {
+        call = WriteFile
+        arguments = [fd, buffer, count, address(transferred), null]
+        result = transferred_or_error
+    }
+
+    operation read_at {
+        sequence = [seek(fd, offset), read(fd, buffer, count)]
+    }
+
+    operation write_at {
+        sequence = [seek(fd, offset), write(fd, buffer, count)]
+    }
+
+    operation seek {
+        call = SetFilePointer
+        arguments = [fd, low32(offset), address(high32(offset)), begin]
+        result = position_or_error
+    }
+
+    operation print {
+        sequence = [GetStdHandle(stderr), write(result, buffer, count)]
+    }
+
+    operation chmod {
+        unsupported = "Win32 target does not expose chmod"
+    }
+
+    operation exit {
+        call = ExitProcess
+        arguments = [status]
+        noreturn = true
+    }
+}
+
+runtime linux_kernel_x86_64 {
+    entry = kernel_module_init
+    exit = kernel_module_exit
+    operation print { import = printk }
+    operation open { unsupported = "kernel module runtime has no file API" }
+    operation close { unsupported = "kernel module runtime has no file API" }
+    operation read { unsupported = "kernel module runtime has no file API" }
+    operation write { unsupported = "kernel module runtime has no file API" }
+    operation chmod { unsupported = "kernel module runtime has no file API" }
+}
+
+abi renvo_x86_64 {
+    arch = x86_64
+    call_words = [rdi, rsi, rdx, rcx, r8, r9]
+    overflow_stride = 8
+    scalar_result = rax
+    string_result = [rax, rdx]
+    slice_result = [rax, rdx, rcx]
+    hidden_result_word = 0
+}
+
+abi sysv_x86_64 {
+    internal = renvo_x86_64
+    arguments = [rdi, rsi, rdx, rcx, r8, r9]
+    result = [rax, rdx]
+    caller_saved = [rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11]
+    callee_saved = [rbx, rbp, r12, r13, r14, r15]
+    stack_alignment = 16
+    red_zone = unused
+}
+
+abi windows_x86_64 {
+    internal = renvo_x86_64
+    arguments = [rcx, rdx, r8, r9]
+    result = [rax, rdx]
+    caller_saved = [rax, rcx, rdx, r8, r9, r10, r11]
+    callee_saved = [rbx, rbp, rdi, rsi, r12, r13, r14, r15]
+    stack_alignment = 16
+    shadow_space = 32
+    stack_probe {
+        page_bytes = 4096
+        direction = down
+        touch_each_page = true
+    }
+}
+
+target linux/amd64 {
+    arch = x86_64
+    abi = sysv_x86_64
+    runtime = linux_x86_64
+    executable = elf64_x86_64
+    object = elf64_object_x86_64
+    build_tags = ["linux", "amd64"]
+    capabilities = [
+        hosted, executable, object, filesystem, heap,
+        argv, environment, linkstatic
+    ]
+}
+
+target windows/amd64 {
+    arch = x86_64
+    abi = windows_x86_64
+    runtime = win32_x86_64
+    executable = pe64_x86_64
+    object = coff64_object_x86_64
+    subsystem = console
+    build_tags = ["windows", "amd64"]
+    capabilities = [
+        hosted, executable, object, filesystem, heap,
+        argv, environment, imports, linkstatic, windows_gui
+    ]
+}
+
+target linux-kernel/amd64 {
+    arch = x86_64
+    abi = sysv_x86_64
+    runtime = linux_kernel_x86_64
+    object = elf64_object_x86_64
+    build_tags = ["linux", "amd64", "renvo_kernel"]
+    capabilities = [freestanding, kernel_module, object, imports, linkstatic]
+}

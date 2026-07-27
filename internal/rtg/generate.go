@@ -31,8 +31,9 @@ func GenerateFixedBackend(resolved ResolveResult, targetName string) GenerateRes
 	source := generateHeader(manifest, target.Descriptor.Name)
 	source = appendDescriptorSource(source, target.Descriptor)
 	source = appendBackendAPI(source)
-	source = appendEmbeddedGo(source, resolved.Document)
-	source = appendArchitectureBindings(source, resolved.Document, target.Arch, true)
+	source = appendArchitectureFacts(source, resolved.Document, target.Arch, true)
+	source = appendMangledEmbeddedGo(source, resolved.Document, false)
+	source = appendArchitectureBindings(source, resolved.Document, target.Arch, true, false)
 	return GenerateResult{Source: source, Descriptor: target.Descriptor, Manifest: manifest, Ok: true}
 }
 
@@ -41,6 +42,14 @@ func GenerateFixedBackend(resolved ResolveResult, targetName string) GenerateRes
 // compilers use this form for checked-in architecture source shared by several
 // ABI/runtime/format compositions.
 func GenerateArchitectureBackend(resolved ResolveResult, archName string, packageName string) GenerateResult {
+	return generateArchitectureBackend(resolved, archName, packageName, true)
+}
+
+func GenerateStatefulArchitectureBackend(resolved ResolveResult, archName string, packageName string) GenerateResult {
+	return generateArchitectureBackend(resolved, archName, packageName, false)
+}
+
+func generateArchitectureBackend(resolved ResolveResult, archName string, packageName string, nativeEmitter bool) GenerateResult {
 	if !resolved.Ok {
 		diagnostics := make([]Diagnostic, len(resolved.Diagnostics))
 		copy(diagnostics, resolved.Diagnostics)
@@ -57,10 +66,16 @@ func GenerateArchitectureBackend(resolved ResolveResult, archName string, packag
 	}
 	manifest := []string{resolved.Document.Unit + " " + HashText(resolved.Document.Hash)}
 	source := generateHeaderPackage(manifest, "arch/"+archName, packageName)
-	source = appendBackendAPI(source)
-	source = appendEmbeddedGo(source, resolved.Document)
-	source = appendArchitectureBindings(source, resolved.Document, arch, true)
+	source = appendArchitectureFacts(source, resolved.Document, arch, true)
+	source = appendMangledEmbeddedGo(source, resolved.Document, nativeEmitter)
+	source = appendArchitectureBindings(source, resolved.Document, arch, true, nativeEmitter)
 	return GenerateResult{Source: source, Manifest: manifest, Ok: true}
+}
+
+func GenerateArchitectureKernel(packageName string) GenerateResult {
+	source := generateHeaderPackage(nil, "architecture-kernel", packageName)
+	source = appendArchitectureBackendAPI(source)
+	return GenerateResult{Source: source, Ok: true}
 }
 
 // GeneratePreparedBackend emits a closed definition as one package-main source
@@ -86,6 +101,7 @@ func GeneratePreparedBackend(resolved ResolveResult, targetName string) Generate
 	source := generateHeaderPackage(manifest, target.Descriptor.Name, "main")
 	source = appendDescriptorSource(source, target.Descriptor)
 	source = appendBackendAPI(source)
+	source = appendArchitectureFacts(source, resolved.Document, target.Arch, false)
 	for i := 0; i < len(resolved.Document.Declarations); i++ {
 		declaration := resolved.Document.Declarations[i]
 		if declaration.Kind != DeclGo {
@@ -95,7 +111,7 @@ func GeneratePreparedBackend(resolved ResolveResult, targetName string) Generate
 		source = append(source, dedentGoSource(declaration.GoSource)...)
 		source = append(source, '\n')
 	}
-	source = appendArchitectureBindings(source, resolved.Document, target.Arch, false)
+	source = appendArchitectureBindings(source, resolved.Document, target.Arch, false, false)
 	return GenerateResult{Source: source, Descriptor: target.Descriptor, Manifest: manifest, Ok: true}
 }
 
@@ -146,15 +162,63 @@ func GenerateUniversalBackend(definitions []ResolveResult) GenerateResult {
 	source = append(source, "}\nreturn RTGTargetDescriptor{}, false\n}\n"...)
 	source = appendBackendAPI(source)
 	for i := 0; i < len(definitions); i++ {
-		source = appendEmbeddedGo(source, definitions[i].Document)
 		for j := 0; j < len(definitions[i].Document.Declarations); j++ {
 			declaration := definitions[i].Document.Declarations[j]
 			if declaration.Kind == DeclArch {
-				source = appendArchitectureBindings(source, definitions[i].Document, declaration, true)
+				source = appendArchitectureFacts(source, definitions[i].Document, declaration, true)
+			}
+		}
+		source = appendMangledEmbeddedGo(source, definitions[i].Document, false)
+		for j := 0; j < len(definitions[i].Document.Declarations); j++ {
+			declaration := definitions[i].Document.Declarations[j]
+			if declaration.Kind == DeclArch {
+				source = appendArchitectureBindings(source, definitions[i].Document, declaration, true, false)
 			}
 		}
 	}
 	return GenerateResult{Source: source, Manifest: manifest, Ok: true}
+}
+
+// appendArchitectureBackendAPI specializes the emitter onto the assembler
+// already owned by a checked-in built-in backend. Embedded algorithms retain
+// their authored *RTGEmitter signatures, while Go sees the receiver as the
+// existing *renvoAsm and introduces no temporary emitter state in hot paths.
+func appendArchitectureBackendAPI(source []byte) []byte {
+	source = appendBackendAPI(source)
+	return append(source, `
+func renvoRTGByte(out *renvoAsm, value byte) {
+	renvoAsmEmit8(out, int(value))
+}
+
+func renvoRTGUint32(out *renvoAsm, value int) {
+	renvoAsmEmit32(out, value)
+}
+
+func renvoRTGUint64(out *renvoAsm, value uint64) {
+	renvoAsmEmit32(out, int(value))
+	renvoAsmEmit32(out, int(value >> 32))
+}
+
+func renvoRTGPatchUint32(out *renvoAsm, at int, value int) {
+	renvoPut32At(out.code, at, value)
+}
+
+func renvoRTGNewLabel(out *renvoAsm) int {
+	return renvoAsmNewLabel(out)
+}
+
+func renvoRTGMark(out *renvoAsm, label int) {
+	if label >= 0 {
+		renvoAsmMarkLabel(out, label)
+	}
+}
+
+func renvoRTGReloc(out *renvoAsm, label int) {
+	if label >= 0 && len(out.code) >= 4 {
+		renvoAsmAddReloc(out, len(out.code)-4, label)
+	}
+}
+`...)
 }
 
 // appendBackendAPI emits the small target-neutral surface used by generated
@@ -182,7 +246,11 @@ type RTGAddress struct {
 	Scale        int
 }
 
-type RTGCondition int
+type RTGCondition struct {
+	Code       int
+	SetOpcode  byte
+	JumpOpcode byte
+}
 type RTGShiftDirection int
 
 const (
@@ -201,17 +269,41 @@ func renvoRTGEmitter(asm *renvoAsm) RTGEmitter {
 	return RTGEmitter{asm: asm}
 }
 
+func renvoRTGLabel(code int) RTGLabel {
+	return RTGLabel{Code: code, Valid: code >= 0}
+}
+
 func (out *RTGEmitter) Byte(value byte) {
 	out.asm.code = append(out.asm.code, value)
+}
+
+func RTGByte(out *RTGEmitter, value byte) {
+	out.Byte(value)
 }
 
 func (out *RTGEmitter) Uint32(value uint32) {
 	out.asm.code = append(out.asm.code, byte(value), byte(value >> 8), byte(value >> 16), byte(value >> 24))
 }
 
+func RTGUint32(out *RTGEmitter, value int) {
+	out.Uint32(uint32(value))
+}
+
 func (out *RTGEmitter) Uint64(value uint64) {
 	out.Uint32(uint32(value))
 	out.Uint32(uint32(value >> 32))
+}
+
+func RTGUint64(out *RTGEmitter, value uint64) {
+	out.Uint64(value)
+}
+
+func (out *RTGEmitter) PatchUint32(at int, value int) {
+	renvoPut32At(out.asm.code, at, value)
+}
+
+func RTGPatchUint32(out *RTGEmitter, at int, value int) {
+	out.PatchUint32(at, value)
 }
 
 func (out *RTGEmitter) NewLabel() RTGLabel {
@@ -230,10 +322,20 @@ func (out *RTGEmitter) Rel32(label RTGLabel) {
 
 func (out *RTGEmitter) Rel32Addend(label RTGLabel, addend int) {
 	at := len(out.asm.code)
-	out.Uint32(0)
+	out.Uint32(uint32(0))
 	if label.Valid {
 		out.relocs = append(out.relocs, at, label.Code, addend)
 	}
+}
+
+func (out *RTGEmitter) Reloc(label RTGLabel) {
+	if label.Valid && len(out.asm.code) >= 4 {
+		renvoAsmAddReloc(out.asm, len(out.asm.code)-4, label.Code)
+	}
+}
+
+func RTGReloc(out *RTGEmitter, label RTGLabel) {
+	out.Reloc(label)
 }
 
 func (out *RTGEmitter) Patch() {
@@ -361,6 +463,21 @@ func appendEmbeddedGo(source []byte, document Document) []byte {
 	return source
 }
 
+func appendMangledEmbeddedGo(source []byte, document Document, nativeEmitter bool) []byte {
+	names := embeddedGoNames(document)
+	prefix := "rtg" + exportedName(document.Unit)
+	for i := 0; i < len(document.Declarations); i++ {
+		declaration := document.Declarations[i]
+		if declaration.Kind != DeclGo {
+			continue
+		}
+		source = append(source, '\n')
+		source = appendRewrittenGoMode(source, dedentGoSource(declaration.GoSource), names, prefix, nativeEmitter, &document)
+		source = append(source, '\n')
+	}
+	return source
+}
+
 func dedentGoSource(source []byte) []byte {
 	source = trimBlockNewlines(source)
 	indent := -1
@@ -428,6 +545,10 @@ func embeddedGoNames(document Document) []string {
 }
 
 func appendRewrittenGo(out []byte, source []byte, names []string, prefix string) []byte {
+	return appendRewrittenGoMode(out, source, names, prefix, false, nil)
+}
+
+func appendRewrittenGoMode(out []byte, source []byte, names []string, prefix string, nativeEmitter bool, document *Document) []byte {
 	tokens, diagnostics := scan(source, "")
 	if len(diagnostics) != 0 {
 		return out
@@ -440,7 +561,23 @@ func appendRewrittenGo(out []byte, source []byte, names []string, prefix string)
 		}
 		out = append(out, source[last:token.Start]...)
 		text := tokenText(source, token)
-		if token.Kind == TokenIdent && stringIndex(names, text) >= 0 {
+		if nativeEmitter && token.Kind == TokenIdent && text == "RTGEmitter" {
+			out = append(out, "renvoAsm"...)
+		} else if nativeEmitter && token.Kind == TokenIdent && text == "RTGLabel" {
+			out = append(out, "int"...)
+		} else if nativeEmitter && token.Kind == TokenIdent && nativeEmitterFunction(text) != "" {
+			out = append(out, nativeEmitterFunction(text)...)
+		} else if document != nil && token.Kind == TokenIdent {
+			replacement, found := generatedArchitectureOutput(*document, text)
+			if found {
+				out = append(out, replacement...)
+			} else if stringIndex(names, text) >= 0 {
+				out = append(out, prefix...)
+				out = append(out, exportedName(text)...)
+			} else {
+				out = append(out, source[token.Start:token.End]...)
+			}
+		} else if token.Kind == TokenIdent && stringIndex(names, text) >= 0 {
 			out = append(out, prefix...)
 			out = append(out, exportedName(text)...)
 		} else {
@@ -450,6 +587,31 @@ func appendRewrittenGo(out []byte, source []byte, names []string, prefix string)
 	}
 	out = append(out, source[last:]...)
 	return out
+}
+
+func nativeEmitterFunction(name string) string {
+	if name == "RTGByte" {
+		return "renvoRTGByte"
+	}
+	if name == "RTGUint32" {
+		return "renvoRTGUint32"
+	}
+	if name == "RTGUint64" {
+		return "renvoRTGUint64"
+	}
+	if name == "RTGPatchUint32" {
+		return "renvoRTGPatchUint32"
+	}
+	if name == "RTGReloc" {
+		return "renvoRTGReloc"
+	}
+	if name == "RTGNewLabel" {
+		return "renvoRTGNewLabel"
+	}
+	if name == "RTGMark" {
+		return "renvoRTGMark"
+	}
+	return ""
 }
 
 func appendQuoted(out []byte, value string) []byte {
