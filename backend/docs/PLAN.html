@@ -513,8 +513,9 @@ BuildPreparedBackend(generated GenerateResult, host HostTarget) PrepareResult</c
 
   <h3>Phase 9: Release topology and cleanup</h3>
   <ol>
-    <li>Build a release compiler containing the frontend, definition compiler, backend kernel, and only the bootstrap backend required for its host.</li>
-    <li>Supply at least one former built-in output target exclusively as a dynamically prepared backend.</li>
+    <li>Generate every included backend ahead of time, check the generated Go into the repository, and compile it into ordinary Go-module and release builds.</li>
+    <li>Keep <code>.rtg</code> parsing, source generation, and JIT preparation out of the normal built-in backend path; only the command that accepts <code>-backend</code> needs that machinery.</li>
+    <li>Use the compiled-in host backend as the non-recursive bootstrap for custom definitions, while retaining every included output target without a preparation or cache prerequisite.</li>
     <li>Verify cold preparation and warm cache-hit behavior on Linux, Darwin, and Windows process-capable hosts.</li>
     <li>Document the two-step workflow for environments such as WASI that cannot directly spawn native prepared backends.</li>
     <li>Add a persistent worker protocol only if measured process startup or RTGU transfer materially violates the warm gate.</li>
@@ -1901,7 +1902,7 @@ func rtgX8664X86Add64(
     <li>Use a prepared backend for a target unknown to the invoking compiler and produce a valid target image.</li>
     <li>Reject mismatched RTGU, definition, schema, protocol, host, and corrupt artifact cases.</li>
     <li>Measure and record backend-core, cold, warm, size, and peak-memory results.</li>
-    <li>Verify a release compiler can operate with one host bootstrap backend while another target is supplied only through a prepared artifact.</li>
+    <li>Verify an ordinary Go-module build carries every included backend and can also compile and run a custom target supplied through a prepared artifact.</li>
   </ol>
 </body>
 </html>

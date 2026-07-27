@@ -162,7 +162,7 @@ func renvoStdRoot(args []string, env []string) string {
 	if bundled != "" {
 		return bundled
 	}
-	return "/std"
+	return "../std"
 }
 
 func renvoModuleCache(env []string) string {

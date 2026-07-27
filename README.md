@@ -77,6 +77,40 @@ after the bootstrap executable name.
 Running `renvo` with no arguments or with `--help` prints the complete command
 reference and target list.
 
+## Generated and custom backends
+
+The included backends are generated from the closed definitions in
+`backend/definitions/`, checked in, and compiled into ordinary Go builds. A
+normal `go build ./cmd/renvo` therefore needs neither the definitions nor a
+checkout-local backend at runtime. After changing an included definition,
+refresh both checked-in layers:
+
+```sh
+go generate ./backend/definitions
+go generate ./internal/backendcompiled
+```
+
+A custom definition is prepared with the compiled-in host backend and executed
+by the host command. Passing source prepares it on first use and reuses a
+content-addressed cache entry afterward:
+
+```sh
+renvo -backend machines.rtg -t acme/amd64 -o app ./cmd/app
+```
+
+Preparation can instead produce a host-specific, single-target artifact that
+does not require the original definition:
+
+```sh
+renvo backend build machines.rtg -t acme/amd64 -o acme-amd64.rtgb
+renvo -backend acme-amd64.rtgb -t acme/amd64 -o app ./cmd/app
+```
+
+An explicit `-t` remains authoritative when a definition exports several
+targets, and must match a prepared artifact. Environments that cannot prepare
+or execute a host-native backend, including WASI, use a process-capable Renvo
+host for these two commands; that host may still emit `wasi/wasm32` output.
+
 The `vm/vm32` target uses 32-bit words and pointers and is executed by
 `renvo.dev/std/vm`. Callers provide hard instruction and linear-memory limits
 and receive deterministic step, peak-memory, output, file, exit, and trap

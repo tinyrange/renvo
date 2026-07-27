@@ -8,7 +8,6 @@ import (
 
 	"renvo.dev/internal/driver"
 	"renvo.dev/internal/linkedimage"
-	"renvo.dev/internal/rtg"
 	"renvo.dev/internal/rtgb"
 	"renvo.dev/internal/runimage"
 	"renvo.dev/internal/unit"
@@ -131,37 +130,6 @@ func execute(artifact rtgb.Artifact, source []byte, options driver.BackendCompil
 		return backendIOError("read protocol output")
 	}
 	return driver.BackendResult{Binary: output, Ok: true}
-}
-
-func representativeTarget(descriptor rtg.TargetDescriptor) string {
-	if descriptor.OS == "windows" {
-		if descriptor.ISA == "aarch64" || descriptor.ISA == "arm64" {
-			return "windows/arm64"
-		}
-		if descriptor.WordBits == 32 {
-			return "windows/386"
-		}
-		return "windows/amd64"
-	}
-	if descriptor.OS == "darwin" {
-		return "darwin/arm64"
-	}
-	if descriptor.OS == "wasi" || descriptor.OS == "browser" {
-		return "wasi/wasm32"
-	}
-	if descriptor.OS == "vm" {
-		return "vm/vm32"
-	}
-	if descriptor.ISA == "aarch64" || descriptor.ISA == "arm64" {
-		return "linux/aarch64"
-	}
-	if descriptor.ISA == "arm" {
-		return "linux/arm"
-	}
-	if descriptor.WordBits == 32 {
-		return "linux/386"
-	}
-	return "linux/amd64"
 }
 
 func backendIOError(action string) driver.BackendResult {

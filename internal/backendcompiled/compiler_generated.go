@@ -1,4 +1,6 @@
 // Code generated from checked-in RTG backend outputs; DO NOT EDIT.
+//go:build !renvo
+
 package backendcompiled
 
 const CompilerSourceDigest = "08ba24613cb344f1bb77b60f31109331a85b93e72d4f35be5c3b3a0dfef7a0a6"

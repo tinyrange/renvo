@@ -22,10 +22,14 @@ func TestBuiltInTargetRegistryIsCompiled(t *testing.T) {
 
 func TestCompiledBundleMatchesEmbeddedSources(t *testing.T) {
 	hash := sha256.New()
-	for _, source := range CompilerSources {
-		_, _ = hash.Write([]byte(source.Name))
+	for i := 0; i < CompilerSourceCount; i++ {
+		name, text, ok := CompilerSource(i)
+		if !ok {
+			t.Fatalf("could not decompress source %d", i)
+		}
+		_, _ = hash.Write([]byte(name))
 		_, _ = hash.Write([]byte{0})
-		_, _ = hash.Write([]byte(source.Source))
+		_, _ = hash.Write([]byte(text))
 	}
 	if got := fmt.Sprintf("%x", hash.Sum(nil)); got != CompilerSourceDigest {
 		t.Fatalf("compiled backend source digest = %s, embedded source digest = %s; run go generate ./internal/backendcompiled", CompilerSourceDigest, got)
