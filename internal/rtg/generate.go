@@ -32,7 +32,7 @@ func GenerateFixedBackend(resolved ResolveResult, targetName string) GenerateRes
 	source = appendDescriptorSource(source, target.Descriptor)
 	source = appendBackendAPI(source)
 	source = appendArchitectureFacts(source, resolved.Document, target.Arch, true)
-	source = appendMangledEmbeddedGo(source, resolved.Document, false)
+	source = appendTargetEmbeddedGo(source, resolved.Document, target, true, false)
 	source = appendArchitectureBindings(source, resolved.Document, target.Arch, true, false)
 	return GenerateResult{Source: source, Descriptor: target.Descriptor, Manifest: manifest, Ok: true}
 }
@@ -67,7 +67,7 @@ func generateArchitectureBackend(resolved ResolveResult, archName string, packag
 	manifest := []string{resolved.Document.Unit + " " + HashText(resolved.Document.Hash)}
 	source := generateHeaderPackage(manifest, "arch/"+archName, packageName)
 	source = appendArchitectureFacts(source, resolved.Document, arch, true)
-	source = appendMangledEmbeddedGo(source, resolved.Document, nativeEmitter)
+	source = appendArchitectureEmbeddedGo(source, resolved.Document, arch, nativeEmitter)
 	source = appendArchitectureBindings(source, resolved.Document, arch, true, nativeEmitter)
 	return GenerateResult{Source: source, Manifest: manifest, Ok: true}
 }
@@ -79,9 +79,9 @@ func GenerateArchitectureKernel(packageName string) GenerateResult {
 }
 
 // GeneratePreparedBackend emits a closed definition as one package-main source
-// file for the host-bootstrap preparation pipeline. Unlike distributable Go
-// output it preserves authored names: the prepared backend is isolated in its
-// own linked image, so names cannot collide with another definition.
+// file for the host-bootstrap preparation pipeline. Prepared and checked-in
+// projections deliberately use identical unit mangling, so the same generated
+// backend contract is exercised in both release topologies.
 func GeneratePreparedBackend(resolved ResolveResult, targetName string) GenerateResult {
 	if !resolved.Ok {
 		diagnostics := make([]Diagnostic, len(resolved.Diagnostics))
@@ -101,17 +101,9 @@ func GeneratePreparedBackend(resolved ResolveResult, targetName string) Generate
 	source := generateHeaderPackage(manifest, target.Descriptor.Name, "main")
 	source = appendDescriptorSource(source, target.Descriptor)
 	source = appendBackendAPI(source)
-	source = appendArchitectureFacts(source, resolved.Document, target.Arch, false)
-	for i := 0; i < len(resolved.Document.Declarations); i++ {
-		declaration := resolved.Document.Declarations[i]
-		if declaration.Kind != DeclGo {
-			continue
-		}
-		source = append(source, '\n')
-		source = append(source, dedentGoSource(declaration.GoSource)...)
-		source = append(source, '\n')
-	}
-	source = appendArchitectureBindings(source, resolved.Document, target.Arch, false, false)
+	source = appendArchitectureFacts(source, resolved.Document, target.Arch, true)
+	source = appendTargetEmbeddedGo(source, resolved.Document, target, true, false)
+	source = appendArchitectureBindings(source, resolved.Document, target.Arch, true, false)
 	return GenerateResult{Source: source, Descriptor: target.Descriptor, Manifest: manifest, Ok: true}
 }
 
@@ -476,6 +468,181 @@ func appendMangledEmbeddedGo(source []byte, document Document, nativeEmitter boo
 		source = append(source, '\n')
 	}
 	return source
+}
+
+// appendArchitectureEmbeddedGo emits only the embedded declarations reachable
+// from an architecture's declarative hooks. A closed definition can also own
+// ABI, runtime, and format algorithms; those must not leak into a checked-in
+// architecture-only projection or prevent fixed-target pruning.
+func appendArchitectureEmbeddedGo(source []byte, document Document, arch Declaration, nativeEmitter bool) []byte {
+	roots := architectureGoRoots(arch)
+	return appendReachableEmbeddedGo(source, document, roots, nativeEmitter)
+}
+
+func appendTargetEmbeddedGo(source []byte, document Document, target ResolvedTarget, mangle bool, nativeEmitter bool) []byte {
+	roots := architectureGoRoots(target.Arch)
+	roots = appendDeclarationGoRoots(roots, target.ABI)
+	roots = appendDeclarationGoRoots(roots, target.Runtime)
+	roots = appendDeclarationGoRoots(roots, target.Executable)
+	roots = appendDeclarationGoRoots(roots, target.Object)
+	roots = appendDeclarationGoRoots(roots, target.Declaration)
+	if len(roots) == 0 {
+		// Definitions predating declarative hook references treated every
+		// embedded declaration as an exported target algorithm.
+		roots = embeddedGoNames(document)
+	}
+	sortStrings(roots)
+	if !mangle {
+		body := reachableEmbeddedGo(document, roots)
+		if len(body) != 0 {
+			source = append(source, '\n')
+			source = append(source, body...)
+			source = append(source, '\n')
+		}
+		return source
+	}
+	return appendReachableEmbeddedGo(source, document, roots, nativeEmitter)
+}
+
+func appendReachableEmbeddedGo(source []byte, document Document, roots []string, nativeEmitter bool) []byte {
+	body := reachableEmbeddedGo(document, roots)
+	if len(body) == 0 {
+		return source
+	}
+	names := embeddedGoNames(document)
+	prefix := "rtg" + exportedName(document.Unit)
+	source = append(source, '\n')
+	source = appendRewrittenGoMode(source, body, names, prefix, nativeEmitter, &document)
+	source = append(source, '\n')
+	return source
+}
+
+func architectureGoRoots(arch Declaration) []string {
+	var roots []string
+	roots = appendDeclarationGoRoots(roots, arch)
+	sortStrings(roots)
+	return roots
+}
+
+func appendDeclarationGoRoots(roots []string, declaration Declaration) []string {
+	var visit func([]Statement)
+	visit = func(statements []Statement) {
+		for i := 0; i < len(statements); i++ {
+			tokens := statements[i].Tokens
+			for j := 0; j+1 < len(tokens); j++ {
+				if tokens[j] == "go" && stringIndex(roots, tokens[j+1]) < 0 {
+					roots = append(roots, tokens[j+1])
+				}
+			}
+			visit(statements[i].Children)
+		}
+	}
+	visit(declaration.Statements)
+	return roots
+}
+
+type embeddedGoPart struct {
+	name   string
+	source []byte
+	refs   []string
+	isFunc bool
+}
+
+func reachableEmbeddedGo(document Document, roots []string) []byte {
+	var combined []byte
+	for i := 0; i < len(document.Declarations); i++ {
+		declaration := document.Declarations[i]
+		if declaration.Kind != DeclGo {
+			continue
+		}
+		combined = append(combined, '\n')
+		combined = append(combined, dedentGoSource(declaration.GoSource)...)
+		combined = append(combined, '\n')
+	}
+	if len(combined) == 0 {
+		return nil
+	}
+	wrapped := make([]byte, 0, len(combined)+16)
+	wrapped = append(wrapped, "package backend\n"...)
+	wrapped = append(wrapped, combined...)
+	file := syntax.ParseFile(wrapped)
+	if !file.Ok {
+		return nil
+	}
+	var parts []embeddedGoPart
+	for i := 0; i < len(file.Decls); i++ {
+		declaration := file.Decls[i]
+		parts = append(parts, embeddedGoPart{
+			name:   string(syntax.TokenText(wrapped, file.Tokens[declaration.NameTok])),
+			source: embeddedSourceRange(wrapped, file.Tokens, declaration.StartTok, declaration.EndTok),
+		})
+	}
+	for i := 0; i < len(file.Funcs); i++ {
+		function := file.Funcs[i]
+		parts = append(parts, embeddedGoPart{
+			name:   string(syntax.TokenText(wrapped, file.Tokens[function.NameTok])),
+			source: embeddedSourceRange(wrapped, file.Tokens, function.StartTok, function.EndTok),
+			isFunc: true,
+		})
+	}
+	names := make([]string, len(parts))
+	for i := 0; i < len(parts); i++ {
+		names[i] = parts[i].name
+	}
+	for i := 0; i < len(parts); i++ {
+		tokens, diagnostics := scan(parts[i].source, "")
+		if len(diagnostics) != 0 {
+			continue
+		}
+		for j := 0; j < len(tokens); j++ {
+			if tokens[j].Kind != TokenIdent {
+				continue
+			}
+			name := tokenText(parts[i].source, tokens[j])
+			if name != parts[i].name && stringIndex(names, name) >= 0 &&
+				stringIndex(parts[i].refs, name) < 0 {
+				parts[i].refs = append(parts[i].refs, name)
+			}
+		}
+	}
+	reachable := make([]string, len(roots))
+	copy(reachable, roots)
+	for changed := true; changed; {
+		changed = false
+		for i := 0; i < len(parts); i++ {
+			if stringIndex(reachable, parts[i].name) < 0 {
+				continue
+			}
+			for j := 0; j < len(parts[i].refs); j++ {
+				if stringIndex(reachable, parts[i].refs[j]) < 0 {
+					reachable = append(reachable, parts[i].refs[j])
+					changed = true
+				}
+			}
+		}
+	}
+	var out []byte
+	for i := 0; i < len(parts); i++ {
+		if !parts[i].isFunc || stringIndex(reachable, parts[i].name) >= 0 {
+			out = append(out, parts[i].source...)
+			out = append(out, '\n')
+		}
+	}
+	return out
+}
+
+func embeddedSourceRange(source []byte, tokens []syntax.Token, start int, end int) []byte {
+	if start < 0 || end <= start || end > len(tokens) {
+		return nil
+	}
+	sourceStart := tokens[start].Start
+	sourceEnd := tokens[end-1].End
+	if sourceStart < 0 || sourceEnd < sourceStart || sourceEnd > len(source) {
+		return nil
+	}
+	out := make([]byte, sourceEnd-sourceStart)
+	copy(out, source[sourceStart:sourceEnd])
+	return out
 }
 
 func dedentGoSource(source []byte) []byte {

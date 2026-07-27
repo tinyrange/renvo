@@ -106,46 +106,39 @@ func rtgAarch64EncodeRET(register int) int {
 	result := 0xd65f0000
 	return result | (register & 31) << 5
 }
-
 func rtgAarch64EncodeADDImmediate(destination int, source int, value int) int {
 	result := 0x91000000
 	result = result | (value & 0xfff) << 10
 	result = result | (source & 31) << 5
 	return result | destination & 31
 }
-
 func rtgAarch64EncodeMOVZ(destination int, value int, shift int) int {
 	result := 0xd2800000
 	result = result | ((shift / 16) & 3) << 21
 	result = result | (value & 0xffff) << 5
 	return result | destination & 31
 }
-
 func rtgAarch64EncodeB(displacement int) int {
 	result := 0x14000000
 	return result | (displacement >> 2) & 0x03ffffff
 }
-
 func rtgAarch64EncodeMoveRegister(destination int, source int) int {
 	result := 0xaa0003e0
 	result = result | (source & 31) << 16
 	return result | destination & 31
 }
-
 func rtgAarch64EncodeMOVN(destination int, value int, shift int) int {
 	result := 0x92800000
 	result = result | ((shift / 16) & 3) << 21
 	result = result | (value & 0xffff) << 5
 	return result | destination & 31
 }
-
 func rtgAarch64EncodeMOVK(destination int, value int, shift int) int {
 	result := 0xf2800000
 	result = result | ((shift / 16) & 3) << 21
 	result = result | (value & 0xffff) << 5
 	return result | destination & 31
 }
-
 func rtgAarch64EncodeAddSubImmediate(
 	destination int,
 	source int,
@@ -163,21 +156,18 @@ func rtgAarch64EncodeAddSubImmediate(
 	result = result | (source & 31) << 5
 	return result | destination & 31
 }
-
 func rtgAarch64EncodeAddRegister(destination int, left int, right int) int {
 	result := 0x8b000000
 	result = result | (right & 31) << 16
 	result = result | (left & 31) << 5
 	return result | destination & 31
 }
-
 func rtgAarch64EncodeSubRegister(destination int, left int, right int) int {
 	result := 0xcb000000
 	result = result | (right & 31) << 16
 	result = result | (left & 31) << 5
 	return result | destination & 31
 }
-
 func rtgAarch64EncodeAddShiftedRegister(
 	destination int,
 	left int,
@@ -190,14 +180,12 @@ func rtgAarch64EncodeAddShiftedRegister(
 	result = result | (left & 31) << 5
 	return result | destination & 31
 }
-
 func rtgAarch64EncodeMultiply(destination int, left int, right int) int {
 	result := 0x9b007c00
 	result = result | (right & 31) << 16
 	result = result | (left & 31) << 5
 	return result | destination & 31
 }
-
 func rtgAarch64EncodeLoadUnscaled(
 	destination int,
 	base int,
@@ -217,7 +205,6 @@ func rtgAarch64EncodeLoadUnscaled(
 	result = result | (base & 31) << 5
 	return result | destination & 31
 }
-
 func rtgAarch64EncodeLoadZeroOffset(destination int, base int, size int) int {
 	opcode := (0xf9400000)
 	if size == 1 {
@@ -231,7 +218,6 @@ func rtgAarch64EncodeLoadZeroOffset(destination int, base int, size int) int {
 	result = result | (base & 31) << 5
 	return result | destination & 31
 }
-
 func rtgAarch64EncodeStoreUnscaled(
 	source int,
 	base int,
@@ -251,7 +237,6 @@ func rtgAarch64EncodeStoreUnscaled(
 	result = result | (base & 31) << 5
 	return result | source & 31
 }
-
 func rtgAarch64EncodeStoreZeroOffset(source int, base int, size int) int {
 	opcode := (0xf9000000)
 	if size == 1 {
@@ -265,35 +250,29 @@ func rtgAarch64EncodeStoreZeroOffset(source int, base int, size int) int {
 	result = result | (base & 31) << 5
 	return result | source & 31
 }
-
 func rtgAarch64EncodePush(register int) int {
 	result := 0xf81f0fe0
 	return result | register & 31
 }
-
 func rtgAarch64EncodePop(register int) int {
 	result := 0xf84107e0
 	return result | register & 31
 }
-
 func rtgAarch64EncodeCompareImmediate(register int, value int) int {
 	result := 0xf100001f
 	result = result | (value & 0xfff) << 10
 	return result | (register & 31) << 5
 }
-
 func rtgAarch64EncodeCompareRegister(left int, right int) int {
 	result := 0xeb00001f
 	result = result | (right & 31) << 16
 	return result | (left & 31) << 5
 }
-
 func rtgAarch64EncodeSetCondition(destination int, condition int) int {
 	result := 0x9a9f07e0
 	result = result | ((condition ^ 1) & 15) << 12
 	return result | destination & 31
 }
-
 func rtgAarch64EncodeShiftLeftImmediate(register int, value int) int {
 	result := 0xd3400000
 	result = result | ((64 - value) & 63) << 16
@@ -301,21 +280,18 @@ func rtgAarch64EncodeShiftLeftImmediate(register int, value int) int {
 	result = result | (register & 31) << 5
 	return result | register & 31
 }
-
 func rtgAarch64EncodeShiftRightSignedImmediate(register int, value int) int {
 	result := 0x9340fc00
 	result = result | (value & 63) << 16
 	result = result | (register & 31) << 5
 	return result | register & 31
 }
-
 func rtgAarch64EncodeSignedDivide(destination int, left int, right int) int {
 	result := 0x9ac00c00
 	result = result | (right & 31) << 16
 	result = result | (left & 31) << 5
 	return result | destination & 31
 }
-
 func rtgAarch64EncodeMultiplySubtract(
 	destination int,
 	left int,
@@ -328,18 +304,15 @@ func rtgAarch64EncodeMultiplySubtract(
 	result = result | (left & 31) << 5
 	return result | destination & 31
 }
-
 func rtgAarch64EncodeCall(displacement int) int {
 	result := 0x94000000
 	return result | (displacement >> 2) & 0x03ffffff
 }
-
 func rtgAarch64EncodeConditionalBranch(displacement int, condition int) int {
 	result := 0x54000000
 	result = result | ((displacement >> 2) & 0x7ffff) << 5
 	return result | condition & 15
 }
-
 func rtgAarch64EmitMoveImmediate(out *renvoAsm, register int, value int) {
 	if value < 0 {
 		inverse := -value - 1
@@ -364,7 +337,6 @@ func rtgAarch64EmitMoveImmediate(out *renvoAsm, register int, value int) {
 		}
 	}
 }
-
 func rtgAarch64EmitPatchMoveImmediate(out *renvoAsm, at int, register int, value int) {
 	for shift := (0); shift < 64; shift += 16 {
 		part := (value >> shift) & 0xffff
@@ -377,7 +349,6 @@ func rtgAarch64EmitPatchMoveImmediate(out *renvoAsm, at int, register int, value
 		}
 	}
 }
-
 func rtgAarch64EmitAddImmediate(
 	out *renvoAsm,
 	destination int,
@@ -416,19 +387,16 @@ func rtgAarch64EmitAddImmediate(
 		current = destination
 	}
 }
-
 func rtgAarch64EmitCallLabel(out *renvoAsm, label int) {
 	instruction := rtgAarch64EncodeCall(0)
 	renvoRTGUint32(out, instruction)
 	renvoRTGReloc(out, label)
 }
-
 func rtgAarch64EmitBranchLabel(out *renvoAsm, label int) {
 	instruction := rtgAarch64EncodeB(0)
 	renvoRTGUint32(out, instruction)
 	renvoRTGReloc(out, label)
 }
-
 func rtgAarch64EmitConditionalBranchLabel(
 	out *renvoAsm,
 	label int,
@@ -438,6 +406,7 @@ func rtgAarch64EmitConditionalBranchLabel(
 	renvoRTGUint32(out, instruction)
 	renvoRTGReloc(out, label)
 }
+
 
 // Generated from instruction ret.
 func rtgAarch64Ret(register int) int {

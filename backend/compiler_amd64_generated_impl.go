@@ -70,18 +70,15 @@ var rtgX8664UGT = RTGCondition{Code:0x97, SetOpcode:0x97, JumpOpcode:0x87}
 func rtgX8664X86Low3(reg RTGRegister) byte {
     return byte(reg.Code & 7)
 }
-
 func rtgX8664X86High(reg RTGRegister) byte {
     return byte(reg.Code>>3) & 1
 }
-
 func rtgX8664X86Opcode(out *RTGEmitter, opcode uint32) {
     if opcode > 0xff {
         out.Byte(byte(opcode >> 8))
     }
     out.Byte(byte(opcode))
 }
-
 func rtgX8664X86REX(
     out *RTGEmitter,
     wide bool,
@@ -108,11 +105,9 @@ func rtgX8664X86REX(
         out.Byte(0x40 | w<<3 | r<<2 | x<<1 | b)
     }
 }
-
 func rtgX8664X86ModRM(out *RTGEmitter, mode byte, reg byte, rm byte) {
     out.Byte(mode<<6 | (reg&7)<<3 | rm&7)
 }
-
 func rtgX8664X86Memory(out *RTGEmitter, reg byte, address RTGAddress) {
     if address.Target.Valid {
         rtgX8664X86ModRM(out, 0, reg, 5)
@@ -150,7 +145,6 @@ func rtgX8664X86Memory(out *RTGEmitter, reg byte, address RTGAddress) {
         out.Uint32(uint32(displacement))
     }
 }
-
 func rtgX8664X86RRRM(
     out *RTGEmitter,
     opcode uint32,
@@ -169,7 +163,6 @@ func rtgX8664X86RRRM(
     rtgX8664X86Opcode(out, opcode)
     rtgX8664X86ModRM(out, 3, rtgX8664X86Low3(source), rtgX8664X86Low3(destination))
 }
-
 func rtgX8664X86RR(
     out *RTGEmitter,
     opcode uint32,
@@ -181,7 +174,6 @@ func rtgX8664X86RR(
     rtgX8664X86Opcode(out, opcode)
     rtgX8664X86ModRM(out, 3, rtgX8664X86Low3(destination), rtgX8664X86Low3(source))
 }
-
 func rtgX8664X86RMR(
     out *RTGEmitter,
     opcode uint32,
@@ -196,7 +188,6 @@ func rtgX8664X86RMR(
     rtgX8664X86Opcode(out, opcode)
     rtgX8664X86Memory(out, rtgX8664X86Low3(destination), address)
 }
-
 func rtgX8664X86RRM(
     out *RTGEmitter,
     opcode uint32,
@@ -215,7 +206,6 @@ func rtgX8664X86RRM(
     rtgX8664X86Opcode(out, opcode)
     rtgX8664X86Memory(out, rtgX8664X86Low3(source), address)
 }
-
 func rtgX8664X86Group(
     out *RTGEmitter,
     opcode uint32,
@@ -227,7 +217,6 @@ func rtgX8664X86Group(
     rtgX8664X86Opcode(out, opcode)
     rtgX8664X86ModRM(out, 3, selector, rtgX8664X86Low3(operand))
 }
-
 func rtgX8664X86GroupImmediate(
     out *RTGEmitter,
     opcode uint32,
@@ -247,7 +236,6 @@ func rtgX8664X86GroupImmediate(
     rtgX8664X86ModRM(out, 3, selector, rtgX8664X86Low3(operand))
     out.Uint32(uint32(value))
 }
-
 func rtgX8664X86GroupImmediate8(
     out *RTGEmitter,
     opcode uint32,
@@ -259,7 +247,6 @@ func rtgX8664X86GroupImmediate8(
     rtgX8664X86Group(out, opcode, selector, operand, width)
     out.Byte(value)
 }
-
 func rtgX8664X86GroupMemoryImmediate(
     out *RTGEmitter,
     opcode uint32,
@@ -281,7 +268,6 @@ func rtgX8664X86GroupMemoryImmediate(
         out.Uint32(uint32(value))
     }
 }
-
 func rtgX8664X86MultiplyImmediate(
     out *RTGEmitter,
     opcode uint32,
@@ -303,14 +289,12 @@ func rtgX8664X86MultiplyImmediate(
         out.Uint32(uint32(value))
     }
 }
-
 func rtgX8664X86OpcodeRegister(out *RTGEmitter, opcode byte, operand RTGRegister) {
     if rtgX8664X86High(operand) != 0 {
         out.Byte(0x41)
     }
     out.Byte(opcode + rtgX8664X86Low3(operand))
 }
-
 func rtgX8664X86Immediate(out *RTGEmitter, opcode byte, value uint64, width int) {
     out.Byte(opcode)
     if width == 8 {
@@ -321,12 +305,10 @@ func rtgX8664X86Immediate(out *RTGEmitter, opcode byte, value uint64, width int)
         out.Uint64(value)
     }
 }
-
 func rtgX8664X86Relative(out *RTGEmitter, opcode uint32, label RTGLabel) {
     rtgX8664X86Opcode(out, opcode)
     out.Rel32(label)
 }
-
 func rtgX8664X86SetCondition(
     out *RTGEmitter,
     condition RTGCondition,
@@ -337,7 +319,6 @@ func rtgX8664X86SetCondition(
     out.Byte(condition.SetOpcode)
     rtgX8664X86ModRM(out, 3, 0, rtgX8664X86Low3(destination))
 }
-
 func rtgX8664X86JumpCondition(
     out *RTGEmitter,
     condition RTGCondition,
@@ -347,7 +328,6 @@ func rtgX8664X86JumpCondition(
     out.Byte(condition.JumpOpcode)
     out.Rel32(label)
 }
-
 func rtgX8664X86MoveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
     if destination == rtgX8664RAX && value == 0 {
         out.Byte(0x31)
@@ -367,15 +347,12 @@ func rtgX8664X86MoveImmediate(out *RTGEmitter, destination RTGRegister, value in
         out.Uint64(uint64(value))
     }
 }
-
 func rtgX8664X86RelaxJump(displacement int64) (byte, bool) {
     return 0xeb, RTGSignedFits(displacement, 8)
 }
-
 func rtgX8664X86RelaxCondition(condition RTGCondition, displacement int64) (byte, bool) {
     return condition.JumpOpcode - 0x10, RTGSignedFits(displacement, 8)
 }
-
 func rtgX8664X86VariableShift(
     out *RTGEmitter,
     direction RTGShiftDirection,
@@ -390,7 +367,6 @@ func rtgX8664X86VariableShift(
         rtgX8664ShrCL64(out, rtgX8664Primary)
     }
 }
-
 func rtgX8664X86SignedDivide(out *RTGEmitter, remainder bool) {
     ordinary := out.NewLabel()
     done := out.NewLabel()
@@ -419,7 +395,6 @@ func rtgX8664X86SignedDivide(out *RTGEmitter, remainder bool) {
     rtgX8664PopRegister(out, rtgX8664DivisionScratch)
     out.Mark(done)
 }
-
 func rtgX8664X86CopyBytes(out *RTGEmitter) {
     destination := rtgX8664CopyDestination
     source := rtgX8664CopySource
@@ -449,65 +424,6 @@ func rtgX8664X86CopyBytes(out *RTGEmitter) {
     out.Mark(done)
 }
 
-func rtgX8664WindowsCommandLine(command []byte) [][]byte {
-    arguments := make([][]byte, 0, 8)
-    offset := 0
-    for offset < len(command) {
-        for offset < len(command) &&
-            (command[offset] == ' ' || command[offset] == '\t') {
-            offset++
-        }
-        if offset == len(command) {
-            break
-        }
-
-        argument := make([]byte, 0, 32)
-        quoted := false
-        for offset < len(command) {
-            if !quoted &&
-                (command[offset] == ' ' || command[offset] == '\t') {
-                break
-            }
-            if command[offset] == '"' {
-                quoted = !quoted
-                offset++
-                continue
-            }
-            if command[offset] != '\\' {
-                argument = append(argument, command[offset])
-                offset++
-                continue
-            }
-
-            slashStart := offset
-            for offset < len(command) && command[offset] == '\\' {
-                offset++
-            }
-            slashCount := offset - slashStart
-            if offset == len(command) || command[offset] != '"' {
-                for slashCount > 0 {
-                    argument = append(argument, '\\')
-                    slashCount--
-                }
-                continue
-            }
-
-            for slashCount >= 2 {
-                argument = append(argument, '\\')
-                slashCount -= 2
-            }
-            if slashCount == 1 {
-                argument = append(argument, '"')
-                offset++
-            } else {
-                quoted = !quoted
-                offset++
-            }
-        }
-        arguments = append(arguments, argument)
-    }
-    return arguments
-}
 
 // Generated from instruction mov64.
 func rtgX8664Mov64(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
