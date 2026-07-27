@@ -184,6 +184,39 @@ func generatedArchitectureOutput(document Document, local string) (string, bool)
 	return "", false
 }
 
+func generatedArchitectureCode(document Document, local string) (int, bool) {
+	for i := 0; i < len(document.Declarations); i++ {
+		if document.Declarations[i].Kind != DeclArch {
+			continue
+		}
+		symbols := architectureSymbols(document, document.Declarations[i])
+		name := local
+		for depth := 0; depth <= len(symbols); depth++ {
+			found := false
+			for j := 0; j < len(symbols); j++ {
+				if symbols[j].Local != name {
+					continue
+				}
+				if symbols[j].Kind == "register" {
+					return symbols[j].Code, true
+				}
+				if symbols[j].Kind == "location" {
+					name = symbols[j].Value
+					if len(name) >= 3 && name[len(name)-3:] == "XZR" {
+						return 31, true
+					}
+					found = true
+				}
+				break
+			}
+			if !found {
+				break
+			}
+		}
+	}
+	return 0, false
+}
+
 func appendArchitectureFacts(out []byte, document Document, arch Declaration, mangle bool) []byte {
 	symbols := architectureSymbols(document, arch)
 	var declared []string

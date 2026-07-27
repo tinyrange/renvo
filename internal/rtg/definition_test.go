@@ -59,11 +59,11 @@ func TestAArch64CheckedInArchitectureOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	resolved := Resolve(Parse(source, "aarch64.rtg"))
-	generated := GenerateArchitectureBackend(resolved, "aarch64", "main")
+	generated := GenerateProductionArchitectureBackend(resolved, "aarch64", "main")
 	if !generated.Ok {
 		t.Fatalf("generate architecture: %#v", generated.Diagnostics)
 	}
-	checkedIn, err := os.ReadFile("../../backend/compiler_aarch64_generated_impl.go")
+	checkedIn, err := os.ReadFile("../../backend/compiler_aarch64_impl.go")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,10 +71,10 @@ func TestAArch64CheckedInArchitectureOutput(t *testing.T) {
 		t.Fatal("checked-in AArch64 architecture output is stale; run go generate ./backend/definitions")
 	}
 	for _, binding := range []string{
-		"func rtgAarch64Ret(",
-		"func rtgAarch64AddImmediate(",
-		"func rtgAarch64MoveWideZero(",
-		"func rtgAarch64Branch(",
+		"func renvoAarch64AsmRet(",
+		"func renvoAarch64AsmAddRegImm(",
+		"func renvoAarch64AsmMovRegImm(",
+		"func renvoAarch64AsmJmpLabel(",
 	} {
 		if !containsText(string(checkedIn), binding) {
 			t.Errorf("generated AArch64 output is missing direct binding %s", binding)

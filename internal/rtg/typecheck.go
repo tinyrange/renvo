@@ -36,14 +36,25 @@ type RTGShiftDirection int
 
 const RTGShiftLeft RTGShiftDirection = 1
 const RTGShiftRight RTGShiftDirection = 2
+const RTGRelocationAbsoluteData = 0
+const RTGRelocationAbsoluteBSS = 1
+const RTGScalarByte = 3
+const RTGScalarInt8 = 7
+const RTGScalarInt16 = 8
+const RTGScalarInt32 = 9
+const RTGScalarUint16 = 16
+const RTGScalarUint32 = 17
 var RTGNoRegister RTGRegister
 
 type RTGEmitter struct{}
 
+func (out *RTGEmitter) Len() int { return 0 }
 func (out *RTGEmitter) Byte(value byte) {}
 func (out *RTGEmitter) Uint32(value uint32) {}
 func (out *RTGEmitter) Uint64(value uint64) {}
 func (out *RTGEmitter) PatchUint32(at int, value int) {}
+func (out *RTGEmitter) AbsoluteReloc(at int, offset int, kind int) {}
+func (out *RTGEmitter) RelocAt(at int, label int) {}
 func (out *RTGEmitter) Rel32(label RTGLabel) {}
 func (out *RTGEmitter) Rel32Addend(label RTGLabel, addend int) {}
 func (out *RTGEmitter) Reloc(label RTGLabel) {}

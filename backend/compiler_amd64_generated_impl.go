@@ -424,7 +424,6 @@ func rtgX8664X86CopyBytes(out *renvoAsm) {
     out.Mark(done)
 }
 
-
 // Generated from instruction mov64.
 func rtgX8664Mov64(out *renvoAsm, destination RTGRegister, source RTGRegister) {
 	rtgX8664X86RRRM(out, 0x89, destination, source, 64)

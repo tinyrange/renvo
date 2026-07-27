@@ -1,5 +1,399 @@
 package main
 
+const renvoAarch64RegRax = 0
+const renvoAarch64RegRdx = 1
+const renvoAarch64RegRcx = 2
+const renvoAarch64RegRdi = 3
+const renvoAarch64RegRsi = 4
+const renvoAarch64RegR8 = 5
+const renvoAarch64RegR9 = 6
+const renvoAarch64RegR10 = 7
+const renvoAarch64RegSys = 8
+const renvoAarch64RegTmp = 9
+const renvoAarch64RegTmp2 = 10
+const renvoAarch64RegAddr = 12
+const renvoAarch64RegFp = 29
+const renvoAarch64RegLr = 30
+const renvoAarch64RegZr = 31
+
+func renvoAarch64EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
+	a := &g.asm
+	metaFn := &g.meta.funcs[fnInfoIndex]
+	fn := &g.prog.funcs[metaFn.declIndex]
+	oldLocals := g.locals
+	oldLocalCount := g.localCount
+	oldBreak := g.breakDepth
+	oldContinue := g.continueDepth
+	oldCurrent := g.currentFunc
+	oldReturnStruct := g.returnStruct
+	oldClosureEnvOffset := g.closureEnvOffset
+	oldDeferHeadOffset := g.deferHeadOffset
+	oldDeferReturnLabel := g.deferReturnLabel
+	oldDeferResultOffset := g.deferResultOffset
+	oldDeferSites := g.deferSites
+	oldEmittingDefers := g.emittingDefers
+	oldSuppressPanicCheck := g.suppressPanicCheck
+	oldStackUsed := g.stackUsed
+	oldStackPeak := g.stackPeak
+	oldGotoLabels := g.gotoLabels
+	oldLastRangeReturns := g.lastRangeReturns
+	var locals []renvoLocalInfo
+	var gotoLabels []renvoGlobalInfo
+	locals = make([]renvoLocalInfo, renvoFunctionLocalCap(fn))
+	gotoLabels = make([]renvoGlobalInfo, 0, 0)
+	g.locals = locals
+	g.localCount = 0
+	g.gotoLabels = gotoLabels
+	g.breakDepth = 0
+	g.continueDepth = 0
+	g.pendingControl = 0
+	g.currentFunc = fnInfoIndex
+	g.returnStruct = 0
+	g.closureEnvOffset = 0
+	g.stackUsed = 0
+	g.stackPeak = 0
+	renvoAarch64AsmAlign(a)
+	renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
+	renvoAarch64AsmEmit(a, 0xa9bf7bfd)
+	renvoAarch64AsmEmit(a, 0x910003fd)
+	framePatch := renvoAarch64AsmFrameStart(a)
+	if renvoTypeUsesHiddenResult(g.meta, metaFn.resultType) {
+		g.returnStruct = renvoAddTypedLocal(g, 0, 0, renvoTypeInt)
+		renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRdi, g.returnStruct)
+	}
+	renvoBindFunctionParams(g, fnInfoIndex)
+	if !renvoBindClosureCaptures(g, fnInfoIndex) {
+		return false
+	}
+	if !renvoBindNamedResults(g, fnInfoIndex) {
+		return false
+	}
+	if !renvoPrepareFunctionControl(g) {
+		return false
+	}
+	if !renvoEmitLinearRange(g, fn.bodyStart+1, fn.bodyEnd) {
+		return false
+	}
+	if g.deferReturnLabel > 0 {
+		if !g.lastRangeReturns {
+			renvoAsmJmpLabel(a, g.deferReturnLabel)
+		}
+		if !renvoEmitFunctionControlEpilogue(g) {
+			return false
+		}
+	} else if !g.lastRangeReturns {
+		renvoMoveCapturedLocals(g, true)
+		renvoAsmPrimaryImm(a, 0)
+		renvoAsmLeave(a)
+		renvoAsmRet(a)
+	}
+	renvoAarch64AsmPatchFrame(a, framePatch, g.stackPeak)
+	g.locals = oldLocals
+	g.localCount = oldLocalCount
+	g.breakDepth = oldBreak
+	g.continueDepth = oldContinue
+	g.currentFunc = oldCurrent
+	g.returnStruct = oldReturnStruct
+	g.closureEnvOffset = oldClosureEnvOffset
+	g.deferHeadOffset = oldDeferHeadOffset
+	g.deferReturnLabel = oldDeferReturnLabel
+	g.deferResultOffset = oldDeferResultOffset
+	g.deferSites = oldDeferSites
+	g.emittingDefers = oldEmittingDefers
+	g.suppressPanicCheck = oldSuppressPanicCheck
+	g.stackUsed = oldStackUsed
+	g.stackPeak = oldStackPeak
+	g.gotoLabels = oldGotoLabels
+	g.lastRangeReturns = oldLastRangeReturns
+	return true
+}
+
+func renvoAarch64StoreParamWord(g *renvoLinearGen, reg int, offset int) {
+	a := &g.asm
+	if reg == 0 {
+		renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRdi, offset)
+		return
+	}
+	if reg == 1 {
+		renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRsi, offset)
+		return
+	}
+	if reg == 2 {
+		renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRdx, offset)
+		return
+	}
+	if reg == 3 {
+		renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRcx, offset)
+		return
+	}
+	if reg == 4 {
+		renvoAarch64AsmStoreRegStack(a, renvoAarch64RegR8, offset)
+		return
+	}
+	if reg == 5 {
+		renvoAarch64AsmStoreRegStack(a, renvoAarch64RegR9, offset)
+		return
+	}
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRax, renvoAarch64RegFp, 16+(reg-6)*16, 8)
+	renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRax, offset)
+}
+
+func renvoAarch64EmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
+	a := &g.asm
+	if wordCount > 0 {
+		renvoAarch64AsmPopReg(a, renvoAarch64RegRdi)
+	}
+	if wordCount > 1 {
+		renvoAarch64AsmPopReg(a, renvoAarch64RegRsi)
+	}
+	if wordCount > 2 {
+		renvoAarch64AsmPopReg(a, renvoAarch64RegRdx)
+	}
+	if wordCount > 3 {
+		renvoAarch64AsmPopReg(a, renvoAarch64RegRcx)
+	}
+	if wordCount > 4 {
+		renvoAarch64AsmPopReg(a, renvoAarch64RegR8)
+	}
+	if wordCount > 5 {
+		renvoAarch64AsmPopReg(a, renvoAarch64RegR9)
+	}
+	renvoAsmCallLabel(a, g.funcLabels[fnIndex])
+	if wordCount > 6 {
+		renvoAarch64AsmAddRegImm(a, 31, 31, (wordCount-6)*16)
+	}
+}
+
+func renvoAarch64EmitRaxRcxOp(g *renvoLinearGen, tok int) bool {
+	a := &g.asm
+	p := g.prog
+	if tok < 0 || tok >= renvoTokCount(p) {
+		return false
+	}
+	start := renvoTokStart(p, tok)
+	end := renvoTokEnd(p, tok)
+	if start >= end {
+		return false
+	}
+	c0 := p.src[start]
+	c1 := byte(0)
+	if start+1 < end {
+		c1 = p.src[start+1]
+	}
+	if c0 == '+' {
+		renvoAarch64AsmAddRegReg(a, renvoAarch64RegRax, renvoAarch64RegRcx, renvoAarch64RegRax)
+		return true
+	}
+	if c0 == '-' {
+		renvoAarch64AsmSubRegReg(a, renvoAarch64RegRax, renvoAarch64RegRcx, renvoAarch64RegRax)
+		return true
+	}
+	if c0 == '*' {
+		renvoAarch64AsmEmit(a, 0x9b007c40)
+		return true
+	}
+	if c0 == '/' {
+		renvoAarch64AsmDivLeftRcxRightRax(a, false)
+		return true
+	}
+	if c0 == '%' {
+		renvoAarch64AsmDivLeftRcxRightRax(a, true)
+		return true
+	}
+	if c0 == '&' {
+		if c1 == '^' {
+			renvoAarch64AsmEmit(a, 0x8a200040)
+		} else {
+			renvoAarch64AsmEmit(a, 0x8a000040)
+		}
+		return true
+	}
+	if c0 == '|' {
+		renvoAarch64AsmEmit(a, 0xaa000040)
+		return true
+	}
+	if c0 == '^' {
+		renvoAarch64AsmEmit(a, 0xca000040)
+		return true
+	}
+	if c0 == '<' {
+		if c1 == '<' {
+			renvoAarch64AsmEmit(a, 0x9ac02040)
+		} else if c1 == '=' {
+			renvoAarch64AsmCmpRcxRaxSet(a, 0x9e)
+		} else {
+			renvoAarch64AsmCmpRcxRaxSet(a, 0x9c)
+		}
+		return true
+	}
+	if c0 == '>' {
+		if c1 == '>' {
+			renvoAarch64AsmEmit(a, 0x9ac02840)
+		} else if c1 == '=' {
+			renvoAarch64AsmCmpRcxRaxSet(a, 0x9d)
+		} else {
+			renvoAarch64AsmCmpRcxRaxSet(a, 0x9f)
+		}
+		return true
+	}
+	if c0 == '=' && c1 == '=' {
+		renvoAarch64AsmCmpRcxRaxSet(a, 0x94)
+		return true
+	}
+	if c0 == '!' && c1 == '=' {
+		renvoAarch64AsmCmpRcxRaxSet(a, 0x95)
+		return true
+	}
+	return false
+}
+
+func renvoAarch64EnsureAppendAddrHelper(g *renvoLinearGen) int {
+	a := &g.asm
+	if g.appendAddrEmitted {
+		return g.appendAddrLabel
+	}
+	arenaAllocLabel := renvoEnsureArenaAllocHelper(g)
+	g.appendAddrEmitted = true
+	g.appendAddrLabel = renvoAsmNewLabel(a)
+	afterLabel := renvoAsmNewLabel(a)
+	renvoAsmJmpMarkLabel(a, afterLabel, g.appendAddrLabel)
+	noGrowLabel := renvoAsmNewLabel(a)
+	capNonZeroLabel := renvoAsmNewLabel(a)
+	capReadyLabel := renvoAsmNewLabel(a)
+	copyLoopLabel := renvoAsmNewLabel(a)
+	copyDoneLabel := renvoAsmNewLabel(a)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegR8, renvoAarch64RegRsi, 0, 8)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRcx, renvoAarch64RegRsi, 8, 8)
+	renvoAarch64AsmCmpRegReg(a, renvoAarch64RegR8, renvoAarch64RegRcx)
+	renvoAarch64AsmBCondLabel(a, noGrowLabel, 11)
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegR9, renvoAarch64RegRdx)
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegR10, renvoAarch64RegRdi)
+	renvoAarch64AsmCmpRegImm(a, renvoAarch64RegRcx, 0)
+	renvoAarch64AsmBCondLabel(a, capNonZeroLabel, 1)
+	renvoAarch64AsmMovRegImm(a, renvoAarch64RegRcx, 16)
+	renvoAsmJmpMarkLabel(a, capReadyLabel, capNonZeroLabel)
+	renvoAarch64AsmAddRegReg(a, renvoAarch64RegRcx, renvoAarch64RegRcx, renvoAarch64RegR8)
+	renvoAsmMarkLabel(a, capReadyLabel)
+	renvoAarch64AsmMulRegReg(a, renvoAarch64RegTmp, renvoAarch64RegRcx, renvoAarch64RegR9)
+	renvoAsmPushTertiary(a)
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegRax, renvoAarch64RegTmp)
+	renvoAarch64AsmPushReg(a, renvoAarch64RegLr)
+	renvoAsmCallLabel(a, arenaAllocLabel)
+	renvoAarch64AsmPopReg(a, renvoAarch64RegLr)
+	renvoAsmPopTertiary(a)
+	if g.meta.panicEnabled {
+		allocOKLabel := renvoAsmNewLabel(a)
+		renvoAarch64AsmCmpRegImm(a, renvoAarch64RegRax, 0)
+		renvoAarch64AsmBCondLabel(a, allocOKLabel, 1)
+		renvoAsmRet(a)
+		renvoAsmMarkLabel(a, allocOKLabel)
+	}
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegRdx, renvoAarch64RegRax)
+	renvoAarch64AsmMovRegReg(a, renvoAarch64RegRdi, renvoAarch64RegRdx)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegTmp2, renvoAarch64RegR10, 0, 8)
+	renvoAarch64AsmMulRegReg(a, renvoAarch64RegTmp, renvoAarch64RegR8, renvoAarch64RegR9)
+	renvoAsmMarkLabel(a, copyLoopLabel)
+	renvoAarch64AsmCmpRegImm(a, renvoAarch64RegTmp, 0)
+	renvoAarch64AsmBCondLabel(a, copyDoneLabel, 0)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRax, renvoAarch64RegTmp2, 0, 1)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRax, renvoAarch64RegRdi, 0, 1)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegTmp2, renvoAarch64RegTmp2, 1)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegRdi, renvoAarch64RegRdi, 1)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegTmp, renvoAarch64RegTmp, -1)
+	renvoAsmJmpMarkLabel(a, copyLoopLabel, copyDoneLabel)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRdx, renvoAarch64RegR10, 0, 8)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRcx, renvoAarch64RegRsi, 8, 8)
+	renvoAarch64AsmMulRegReg(a, renvoAarch64RegTmp, renvoAarch64RegR8, renvoAarch64RegR9)
+	renvoAarch64AsmAddRegReg(a, renvoAarch64RegRax, renvoAarch64RegRdx, renvoAarch64RegTmp)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegR8, renvoAarch64RegR8, 1)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegR8, renvoAarch64RegRsi, 0, 8)
+	renvoAsmRet(a)
+	renvoAsmMarkLabel(a, noGrowLabel)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRax, renvoAarch64RegRdi, 0, 8)
+	renvoAarch64AsmMulRegReg(a, renvoAarch64RegTmp, renvoAarch64RegR8, renvoAarch64RegRdx)
+	renvoAarch64AsmAddRegReg(a, renvoAarch64RegRax, renvoAarch64RegRax, renvoAarch64RegTmp)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegR8, renvoAarch64RegR8, 1)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegR8, renvoAarch64RegRsi, 0, 8)
+	renvoAsmRet(a)
+	renvoAsmMarkLabel(a, afterLabel)
+	return g.appendAddrLabel
+}
+
+func renvoAarch64EnsureAppend8Helper(g *renvoLinearGen) int {
+	a := &g.asm
+	if g.append8Emitted {
+		return g.append8Label
+	}
+	g.append8Emitted = true
+	g.append8Label = renvoAsmNewLabel(a)
+	afterLabel := renvoAsmNewLabel(a)
+	renvoAsmJmpMarkLabel(a, afterLabel, g.append8Label)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRcx, renvoAarch64RegRsi, 0, 8)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegTmp, renvoAarch64RegRdi, 0, 8)
+	renvoAarch64AsmAddRegReg(a, renvoAarch64RegTmp, renvoAarch64RegTmp, renvoAarch64RegRcx)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRdx, renvoAarch64RegTmp, 0, 1)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegRcx, renvoAarch64RegRcx, 1)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRcx, renvoAarch64RegRsi, 0, 8)
+	renvoAsmRet(a)
+	renvoAsmMarkLabel(a, afterLabel)
+	return g.append8Label
+}
+
+func renvoAarch64EnsureAppend64Helper(g *renvoLinearGen) int {
+	a := &g.asm
+	if g.append64Emitted {
+		return g.append64Label
+	}
+	g.append64Emitted = true
+	g.append64Label = renvoAsmNewLabel(a)
+	afterLabel := renvoAsmNewLabel(a)
+	renvoAsmJmpMarkLabel(a, afterLabel, g.append64Label)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRcx, renvoAarch64RegRsi, 0, 8)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegTmp, renvoAarch64RegRdi, 0, 8)
+	renvoAarch64AsmAddRegRegShift(a, renvoAarch64RegTmp, renvoAarch64RegTmp, renvoAarch64RegRcx, 3)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRdx, renvoAarch64RegTmp, 0, 8)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegRcx, renvoAarch64RegRcx, 1)
+	renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRcx, renvoAarch64RegRsi, 0, 8)
+	renvoAsmRet(a)
+	renvoAsmMarkLabel(a, afterLabel)
+	return g.append64Label
+}
+
+func renvoAarch64EnsureStringEqualHelper(g *renvoLinearGen) int {
+	a := &g.asm
+	if g.streqEmitted {
+		return g.streqLabel
+	}
+	g.streqEmitted = true
+	g.streqLabel = renvoAsmNewLabel(a)
+	afterLabel := renvoAsmNewLabel(a)
+	notEqualLabel := renvoAsmNewLabel(a)
+	equalLabel := renvoAsmNewLabel(a)
+	loopLabel := renvoAsmNewLabel(a)
+	renvoAsmJmpMarkLabel(a, afterLabel, g.streqLabel)
+	renvoAsmPrimaryImm(a, 0)
+	renvoAarch64AsmCmpRegReg(a, renvoAarch64RegRsi, renvoAarch64RegRcx)
+	renvoAarch64AsmBCondLabel(a, notEqualLabel, 1)
+	renvoAarch64AsmCmpRegImm(a, renvoAarch64RegRsi, 0)
+	renvoAarch64AsmBCondLabel(a, equalLabel, 0)
+	renvoAsmMarkLabel(a, loopLabel)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegTmp, renvoAarch64RegRdi, 0, 1)
+	renvoAarch64AsmLoadRegMem(a, renvoAarch64RegTmp2, renvoAarch64RegRdx, 0, 1)
+	renvoAarch64AsmCmpRegReg(a, renvoAarch64RegTmp, renvoAarch64RegTmp2)
+	renvoAarch64AsmBCondLabel(a, notEqualLabel, 1)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegRdi, renvoAarch64RegRdi, 1)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegRdx, renvoAarch64RegRdx, 1)
+	renvoAarch64AsmAddRegImm(a, renvoAarch64RegRsi, renvoAarch64RegRsi, -1)
+	renvoAarch64AsmCmpRegImm(a, renvoAarch64RegRsi, 0)
+	renvoAarch64AsmBCondLabel(a, loopLabel, 1)
+	renvoAsmMarkLabel(a, equalLabel)
+	renvoAsmPrimaryImm(a, 1)
+	renvoAsmMarkLabel(a, notEqualLabel)
+	renvoAsmRet(a)
+	renvoAsmMarkLabel(a, afterLabel)
+	return g.streqLabel
+}
+
 const renvoAarch64ELFCodeOffset = 0xb0
 
 func renvoCompileAarch64(input []int, output int, arenaSize int) int {

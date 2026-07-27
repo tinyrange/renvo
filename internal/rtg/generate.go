@@ -317,6 +317,16 @@ const (
 	RTGShiftRight RTGShiftDirection = 2
 )
 
+const RTGRelocationAbsoluteData = 0
+const RTGRelocationAbsoluteBSS = 1
+
+const RTGScalarByte = 3
+const RTGScalarInt8 = 7
+const RTGScalarInt16 = 8
+const RTGScalarInt32 = 9
+const RTGScalarUint16 = 16
+const RTGScalarUint32 = 17
+
 var RTGNoRegister = RTGRegister{}
 
 type RTGEmitter struct {
@@ -330,6 +340,18 @@ func renvoRTGEmitter(asm *renvoAsm) RTGEmitter {
 
 func renvoRTGLabel(code int) RTGLabel {
 	return RTGLabel{Code: code, Valid: code >= 0}
+}
+
+func renvoRTGLabelCode(code int) int {
+	return code
+}
+
+func RTGLabelFromCode(code int) RTGLabel {
+	return renvoRTGLabel(code)
+}
+
+func (out *RTGEmitter) Len() int {
+	return len(out.asm.code)
 }
 
 func (out *RTGEmitter) Byte(value byte) {
@@ -359,6 +381,16 @@ func RTGUint64(out *RTGEmitter, value uint64) {
 
 func (out *RTGEmitter) PatchUint32(at int, value int) {
 	renvoPut32At(out.asm.code, at, value)
+}
+
+func (out *RTGEmitter) AbsoluteReloc(at int, offset int, kind int) {
+	renvoAsmAddAbsReloc(out.asm, at, offset, kind)
+}
+
+func (out *RTGEmitter) RelocAt(at int, label int) {
+	if label >= 0 {
+		renvoAsmAddReloc(out.asm, at, label)
+	}
 }
 
 func RTGPatchUint32(out *RTGEmitter, at int, value int) {
@@ -584,6 +616,7 @@ func appendReachableEmbeddedGo(source []byte, document Document, roots []string,
 	if len(body) == 0 {
 		return source
 	}
+	body = trimBlockNewlines(body)
 	names := embeddedGoNames(document)
 	prefix := "rtg" + exportedName(document.Unit)
 	source = append(source, '\n')
@@ -837,7 +870,50 @@ func appendRewrittenGoModeExports(out []byte, source []byte, names []string, pre
 		}
 		out = append(out, source[last:token.Start]...)
 		text := tokenText(source, token)
-		if nativeEmitter && token.Kind == TokenIdent && text == "RTGEmitter" {
+		if nativeEmitter && token.Kind == TokenIdent && i+3 < len(tokens) &&
+			tokenText(source, tokens[i+1]) == "." && tokenText(source, tokens[i+3]) == "(" {
+			method := tokenText(source, tokens[i+2])
+			if method == "Len" && i+4 < len(tokens) && tokenText(source, tokens[i+4]) == ")" {
+				out = append(out, "len("...)
+				out = append(out, text...)
+				out = append(out, ".code)"...)
+				last = tokens[i+4].End
+				i += 4
+				continue
+			}
+			replacement := ""
+			if method == "PatchUint32" {
+				replacement = "renvoPut32At"
+			} else if method == "AbsoluteReloc" {
+				replacement = "renvoAsmAddAbsReloc"
+			} else if method == "RelocAt" {
+				replacement = "renvoAsmAddReloc"
+			}
+			if replacement != "" {
+				out = append(out, replacement...)
+				out = append(out, '(')
+				out = append(out, text...)
+				if method == "PatchUint32" {
+					out = append(out, ".code"...)
+				}
+				out = append(out, ',')
+				last = tokens[i+3].End
+				i += 3
+				continue
+			}
+		}
+		if nativeEmitter && document != nil && token.Kind == TokenIdent && i+2 < len(tokens) &&
+			tokenText(source, tokens[i+1]) == "." && tokenText(source, tokens[i+2]) == "Code" {
+			if code, found := generatedArchitectureCode(*document, text); found {
+				out = appendDecimalFrame(out, code)
+				last = tokens[i+2].End
+				i += 2
+				continue
+			}
+		}
+		if nativeEmitter && token.Kind == TokenIdent && nativeBuiltinLiteral(text) != "" {
+			out = append(out, nativeBuiltinLiteral(text)...)
+		} else if nativeEmitter && token.Kind == TokenIdent && text == "RTGEmitter" {
 			out = append(out, "renvoAsm"...)
 		} else if nativeEmitter && token.Kind == TokenIdent && text == "RTGLabel" {
 			out = append(out, "int"...)
@@ -869,12 +945,40 @@ func appendRewrittenGoModeExports(out []byte, source []byte, names []string, pre
 	return out
 }
 
+func nativeBuiltinLiteral(name string) string {
+	if name == "RTGRelocationAbsoluteData" {
+		return "0"
+	}
+	if name == "RTGRelocationAbsoluteBSS" {
+		return "1"
+	}
+	if name == "RTGScalarByte" {
+		return "3"
+	}
+	if name == "RTGScalarInt8" {
+		return "7"
+	}
+	if name == "RTGScalarInt16" {
+		return "8"
+	}
+	if name == "RTGScalarInt32" {
+		return "9"
+	}
+	if name == "RTGScalarUint16" {
+		return "16"
+	}
+	if name == "RTGScalarUint32" {
+		return "17"
+	}
+	return ""
+}
+
 func nativeEmitterFunction(name string) string {
 	if name == "RTGByte" {
-		return "renvoRTGByte"
+		return "renvoAsmEmit8"
 	}
 	if name == "RTGUint32" {
-		return "renvoRTGUint32"
+		return "renvoAsmEmit32"
 	}
 	if name == "RTGUint64" {
 		return "renvoRTGUint64"
@@ -896,6 +1000,9 @@ func nativeEmitterFunction(name string) string {
 	}
 	if name == "RTGMark" {
 		return "renvoRTGMark"
+	}
+	if name == "RTGLabelFromCode" {
+		return "renvoRTGLabelCode"
 	}
 	return ""
 }

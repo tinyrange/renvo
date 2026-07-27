@@ -15,6 +15,7 @@ func main() {
 	target := flag.String("t", "", "canonical target for fixed generation")
 	arch := flag.String("arch", "", "architecture for checked-in architecture generation")
 	statefulEmitter := flag.Bool("stateful-emitter", false, "keep the stateful RTG emitter in architecture output")
+	production := flag.Bool("production", false, "emit the pruned checked-in production architecture")
 	kernel := flag.Bool("kernel", false, "generate the shared checked-in architecture kernel")
 	packageName := flag.String("package", "backend", "generated Go package")
 	output := flag.String("o", "", "generated Go output")
@@ -49,7 +50,12 @@ func main() {
 		if *target != "" || len(definitions) != 1 {
 			fail("architecture generation requires one definition and no -t")
 		}
-		if *statefulEmitter {
+		if *production {
+			if *statefulEmitter {
+				fail("-production and -stateful-emitter are mutually exclusive")
+			}
+			generated = rtg.GenerateProductionArchitectureBackend(definitions[0], *arch, *packageName)
+		} else if *statefulEmitter {
 			generated = rtg.GenerateStatefulArchitectureBackend(definitions[0], *arch, *packageName)
 		} else {
 			generated = rtg.GenerateArchitectureBackend(definitions[0], *arch, *packageName)

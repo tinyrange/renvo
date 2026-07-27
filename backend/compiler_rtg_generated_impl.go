@@ -35,6 +35,16 @@ const (
 	RTGShiftRight RTGShiftDirection = 2
 )
 
+const RTGRelocationAbsoluteData = 0
+const RTGRelocationAbsoluteBSS = 1
+
+const RTGScalarByte = 3
+const RTGScalarInt8 = 7
+const RTGScalarInt16 = 8
+const RTGScalarInt32 = 9
+const RTGScalarUint16 = 16
+const RTGScalarUint32 = 17
+
 var RTGNoRegister = RTGRegister{}
 
 type RTGEmitter struct {
@@ -48,6 +58,18 @@ func renvoRTGEmitter(asm *renvoAsm) RTGEmitter {
 
 func renvoRTGLabel(code int) RTGLabel {
 	return RTGLabel{Code: code, Valid: code >= 0}
+}
+
+func renvoRTGLabelCode(code int) int {
+	return code
+}
+
+func RTGLabelFromCode(code int) RTGLabel {
+	return renvoRTGLabel(code)
+}
+
+func (out *RTGEmitter) Len() int {
+	return len(out.asm.code)
 }
 
 func (out *RTGEmitter) Byte(value byte) {
@@ -77,6 +99,16 @@ func RTGUint64(out *RTGEmitter, value uint64) {
 
 func (out *RTGEmitter) PatchUint32(at int, value int) {
 	renvoPut32At(out.asm.code, at, value)
+}
+
+func (out *RTGEmitter) AbsoluteReloc(at int, offset int, kind int) {
+	renvoAsmAddAbsReloc(out.asm, at, offset, kind)
+}
+
+func (out *RTGEmitter) RelocAt(at int, label int) {
+	if label >= 0 {
+		renvoAsmAddReloc(out.asm, at, label)
+	}
 }
 
 func RTGPatchUint32(out *RTGEmitter, at int, value int) {
