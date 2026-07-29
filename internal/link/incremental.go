@@ -243,21 +243,12 @@ func appendPackageArtifactCore(dst *unit.Program, src unit.Program, line int, ha
 		tok.KindLine = tok.KindLine&255 | ((tok.KindLine>>8)+line-1)<<8
 		dst.Tokens = append(dst.Tokens, tok)
 	}
-	mapToken := func(token int) int {
-		if token == localEOF {
-			return tokenBase + localEOF
-		}
-		if token < 0 || token > localEOF {
-			return -1
-		}
-		return tokenBase + token
-	}
 	for i := 0; i < len(src.Decls); i++ {
 		decl := src.Decls[i]
 		decl.NameStart += textBase
 		decl.NameEnd += textBase
-		decl.StartTok = mapToken(decl.StartTok)
-		decl.EndTok = mapToken(decl.EndTok)
+		decl.StartTok = mapArtifactToken(decl.StartTok, localEOF, tokenBase)
+		decl.EndTok = mapArtifactToken(decl.EndTok, localEOF, tokenBase)
 		if decl.StartTok < 0 || decl.EndTok < 0 {
 			return line, false
 		}
@@ -267,15 +258,15 @@ func appendPackageArtifactCore(dst *unit.Program, src unit.Program, line int, ha
 		fn := src.Funcs[i]
 		fn.NameStart += textBase
 		fn.NameEnd += textBase
-		fn.StartTok = mapToken(fn.StartTok)
-		fn.NameTok = mapToken(fn.NameTok)
+		fn.StartTok = mapArtifactToken(fn.StartTok, localEOF, tokenBase)
+		fn.NameTok = mapArtifactToken(fn.NameTok, localEOF, tokenBase)
 		if fn.ReceiverStart != 0 || fn.ReceiverEnd != 0 {
-			fn.ReceiverStart = mapToken(fn.ReceiverStart)
-			fn.ReceiverEnd = mapToken(fn.ReceiverEnd)
+			fn.ReceiverStart = mapArtifactToken(fn.ReceiverStart, localEOF, tokenBase)
+			fn.ReceiverEnd = mapArtifactToken(fn.ReceiverEnd, localEOF, tokenBase)
 		}
-		fn.BodyStart = mapToken(fn.BodyStart)
-		fn.BodyEnd = mapToken(fn.BodyEnd)
-		fn.EndTok = mapToken(fn.EndTok)
+		fn.BodyStart = mapArtifactToken(fn.BodyStart, localEOF, tokenBase)
+		fn.BodyEnd = mapArtifactToken(fn.BodyEnd, localEOF, tokenBase)
+		fn.EndTok = mapArtifactToken(fn.EndTok, localEOF, tokenBase)
 		if fn.StartTok < 0 || fn.NameTok < 0 || fn.ReceiverStart < 0 || fn.ReceiverEnd < 0 || fn.BodyStart < 0 || fn.BodyEnd < 0 || fn.EndTok < 0 {
 			return line, false
 		}
@@ -287,6 +278,16 @@ func appendPackageArtifactCore(dst *unit.Program, src unit.Program, line int, ha
 		line++
 	}
 	return line, true
+}
+
+func mapArtifactToken(token int, localEOF int, tokenBase int) int {
+	if token == localEOF {
+		return tokenBase + localEOF
+	}
+	if token < 0 || token > localEOF {
+		return -1
+	}
+	return tokenBase + token
 }
 
 func incrementalArtifactContextHash(programs []unit.Program, aliases []string, root int) (int, int) {

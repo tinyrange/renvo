@@ -6,6 +6,9 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"testing"
+
+	"renvo.dev/internal/targetinfo"
+	"renvo.dev/internal/unit"
 )
 
 func TestBuiltInTargetRegistryIsCompiled(t *testing.T) {
@@ -17,6 +20,29 @@ func TestBuiltInTargetRegistryIsCompiled(t *testing.T) {
 		if renvoParseTargetArg(target) == 0 {
 			t.Errorf("compiled bundle is missing %s", target)
 		}
+	}
+}
+
+func TestBuiltInBackendRejectsMismatchedUnitBinding(t *testing.T) {
+	base := make([]byte, 14)
+	copy(base, unit.Magic)
+	base[4] = byte(unit.Version)
+	base[8] = byte(unit.TagUnit)
+	descriptor, ok := targetinfo.Lookup("linux/amd64")
+	if !ok {
+		t.Fatal("linux/amd64 descriptor missing")
+	}
+	bound, ok := unit.BindTarget(base, unit.TargetBinding{
+		Target:            descriptor.Name,
+		Definition:        string(descriptor.Definition[:]),
+		DescriptorVersion: descriptor.DescriptorVersion,
+	})
+	if !ok || !unitBindingMatches(bound, descriptor.Name) {
+		t.Fatal("matching unit binding was rejected")
+	}
+	bound[len(bound)-1] ^= 1
+	if unitBindingMatches(bound, descriptor.Name) {
+		t.Fatal("descriptor-version mismatch was accepted")
 	}
 }
 

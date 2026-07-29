@@ -7,8 +7,8 @@ package rtgb
 import "renvo.dev/internal/rtg"
 
 const (
-	Version    = 1
-	HeaderSize = 64
+	Version    = 2
+	HeaderSize = 80
 	MaxPayload = 64 << 20
 	MaxMeta    = 1 << 20
 )
@@ -16,11 +16,14 @@ const (
 const Magic = "RTGB"
 
 type Artifact struct {
-	Descriptor rtg.TargetDescriptor
-	Host       string
-	Generator  int
-	Kernel     int
-	Payload    []byte
+	Descriptor   rtg.TargetDescriptor
+	Host         string
+	Generator    int
+	Kernel       int
+	Protocol     int
+	Unit         int
+	Optimization int
+	Payload      []byte
 }
 
 func Encode(artifact Artifact) ([]byte, bool) {
@@ -34,12 +37,14 @@ func Encode(artifact Artifact) ([]byte, bool) {
 	metadata = appendString(metadata, artifact.Descriptor.Endian)
 	metadata = appendString(metadata, artifact.Descriptor.ABI)
 	metadata = appendString(metadata, artifact.Descriptor.Runtime)
+	metadata = appendString(metadata, artifact.Descriptor.OutputKind)
 	metadata = appendString(metadata, artifact.Descriptor.Executable)
 	metadata = appendString(metadata, artifact.Descriptor.Object)
 	metadata = appendString(metadata, artifact.Host)
 	metadata = appendStrings(metadata, artifact.Descriptor.Aliases)
 	metadata = appendStrings(metadata, artifact.Descriptor.BuildTags)
 	metadata = appendStrings(metadata, artifact.Descriptor.Capabilities)
+	metadata = appendStrings(metadata, artifact.Descriptor.RuntimeOps)
 	if len(metadata) > MaxMeta {
 		return nil, false
 	}
@@ -52,14 +57,21 @@ func Encode(artifact Artifact) ([]byte, bool) {
 	put16(out, 12, artifact.Kernel)
 	put16(out, 14, artifact.Descriptor.WordBits)
 	put16(out, 16, artifact.Descriptor.PointerBits)
-	put32(out, 20, len(metadata))
-	put32(out, 24, len(artifact.Payload))
-	copy(out[32:64], artifact.Descriptor.Definition[:])
+	put16(out, 18, artifact.Protocol)
+	put16(out, 20, artifact.Unit)
+	put16(out, 22, artifact.Optimization)
+	put32(out, 24, len(metadata))
+	put32(out, 28, len(artifact.Payload))
+	copy(out[36:68], artifact.Descriptor.Definition[:])
+	put16(out, 68, artifact.Descriptor.CodePointerBits)
+	put16(out, 70, artifact.Descriptor.FunctionPointerBits)
+	put16(out, 72, artifact.Descriptor.MaxAlign)
+	put32(out, 76, artifact.Descriptor.ArenaDefault)
 	out = append(out, metadata...)
 	out = append(out, artifact.Payload...)
 	a, b := checksum(out[HeaderSize:])
-	put16(out, 28, a)
-	put16(out, 30, b)
+	put16(out, 32, a)
+	put16(out, 34, b)
 	return out, true
 }
 
@@ -69,15 +81,15 @@ func Decode(source []byte) (Artifact, bool) {
 		read16(source, 4) != Version || read16(source, 6) != HeaderSize {
 		return artifact, false
 	}
-	metadataSize := read32(source, 20)
-	payloadSize := read32(source, 24)
+	metadataSize := read32(source, 24)
+	payloadSize := read32(source, 28)
 	if metadataSize < 0 || metadataSize > MaxMeta || payloadSize <= 0 || payloadSize > MaxPayload ||
 		HeaderSize+metadataSize < HeaderSize ||
 		HeaderSize+metadataSize+payloadSize != len(source) {
 		return artifact, false
 	}
 	a, b := checksum(source[HeaderSize:])
-	if read16(source, 28) != a || read16(source, 30) != b {
+	if read16(source, 32) != a || read16(source, 34) != b {
 		return artifact, false
 	}
 	artifact.Descriptor.Version = read16(source, 8)
@@ -85,7 +97,14 @@ func Decode(source []byte) (Artifact, bool) {
 	artifact.Kernel = read16(source, 12)
 	artifact.Descriptor.WordBits = read16(source, 14)
 	artifact.Descriptor.PointerBits = read16(source, 16)
-	copy(artifact.Descriptor.Definition[:], source[32:64])
+	artifact.Protocol = read16(source, 18)
+	artifact.Unit = read16(source, 20)
+	artifact.Optimization = read16(source, 22)
+	copy(artifact.Descriptor.Definition[:], source[36:68])
+	artifact.Descriptor.CodePointerBits = read16(source, 68)
+	artifact.Descriptor.FunctionPointerBits = read16(source, 70)
+	artifact.Descriptor.MaxAlign = read16(source, 72)
+	artifact.Descriptor.ArenaDefault = read32(source, 76)
 	reader := metadataReader{source: source[HeaderSize : HeaderSize+metadataSize], ok: true}
 	artifact.Descriptor.Name = reader.string()
 	artifact.Descriptor.OS = reader.string()
@@ -93,12 +112,14 @@ func Decode(source []byte) (Artifact, bool) {
 	artifact.Descriptor.Endian = reader.string()
 	artifact.Descriptor.ABI = reader.string()
 	artifact.Descriptor.Runtime = reader.string()
+	artifact.Descriptor.OutputKind = reader.string()
 	artifact.Descriptor.Executable = reader.string()
 	artifact.Descriptor.Object = reader.string()
 	artifact.Host = reader.string()
 	artifact.Descriptor.Aliases = reader.strings()
 	artifact.Descriptor.BuildTags = reader.strings()
 	artifact.Descriptor.Capabilities = reader.strings()
+	artifact.Descriptor.RuntimeOps = reader.strings()
 	if !reader.ok || reader.at != len(reader.source) || !validArtifactMetadata(artifact) {
 		return Artifact{}, false
 	}
@@ -113,6 +134,9 @@ func IsArtifact(source []byte) bool {
 func validArtifact(artifact Artifact) bool {
 	return artifact.Generator > 0 && artifact.Generator <= 65535 &&
 		artifact.Kernel > 0 && artifact.Kernel <= 65535 &&
+		artifact.Protocol > 0 && artifact.Protocol <= 65535 &&
+		artifact.Unit > 0 && artifact.Unit <= 65535 &&
+		artifact.Optimization > 0 && artifact.Optimization <= 65535 &&
 		len(artifact.Payload) > 0 && len(artifact.Payload) <= MaxPayload &&
 		validArtifactMetadata(artifact)
 }
@@ -123,8 +147,13 @@ func validArtifactMetadata(artifact Artifact) bool {
 		descriptor.Version > 0 && descriptor.Version <= 65535 &&
 		descriptor.WordBits > 0 && descriptor.WordBits <= 65535 &&
 		descriptor.PointerBits > 0 && descriptor.PointerBits <= 65535 &&
+		descriptor.CodePointerBits > 0 && descriptor.CodePointerBits <= 65535 &&
+		descriptor.FunctionPointerBits > 0 && descriptor.FunctionPointerBits <= 65535 &&
+		descriptor.MaxAlign > 0 && descriptor.MaxAlign <= 65535 &&
+		descriptor.ArenaDefault >= 0 &&
 		(descriptor.Endian == "little" || descriptor.Endian == "big") &&
 		descriptor.ABI != "" && descriptor.Runtime != "" &&
+		descriptor.OutputKind != "" &&
 		(descriptor.Executable != "" || descriptor.Object != "") &&
 		artifact.Host != ""
 }

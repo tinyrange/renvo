@@ -2,6 +2,7 @@ package rtgb
 
 import (
 	"bytes"
+	"reflect"
 	"testing"
 
 	"renvo.dev/internal/rtg"
@@ -13,12 +14,15 @@ func TestArtifactRoundTrip(t *testing.T) {
 	want := Artifact{
 		Descriptor: rtg.TargetDescriptor{
 			Name: "test/tiny64", OS: "test", ISA: "tiny64",
-			WordBits: 64, PointerBits: 64, Endian: "little",
-			ABI: "tiny", Runtime: "tiny", Executable: "tiny",
+			WordBits: 64, PointerBits: 64, CodePointerBits: 64,
+			FunctionPointerBits: 64, MaxAlign: 8, Endian: "little",
+			ABI: "tiny", Runtime: "tiny", OutputKind: "tiny", Executable: "tiny",
 			Aliases: []string{"tiny"}, BuildTags: []string{"tiny64"},
-			Capabilities: []string{"executable"}, Definition: definition, Version: 1,
+			Capabilities: []string{"executable"}, RuntimeOps: []string{},
+			Definition: definition, Version: 1,
 		},
-		Host: "linux/amd64", Generator: 1, Kernel: 1, Payload: []byte("payload"),
+		Host: "linux/amd64", Generator: 1, Kernel: 1, Protocol: 1,
+		Unit: 1, Optimization: 1, Payload: []byte("payload"),
 	}
 	encoded, ok := Encode(want)
 	if !ok {
@@ -28,8 +32,10 @@ func TestArtifactRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatal("Decode failed")
 	}
-	if got.Descriptor.Name != want.Descriptor.Name || got.Host != want.Host ||
-		got.Descriptor.Definition != want.Descriptor.Definition ||
+	if !reflect.DeepEqual(got.Descriptor, want.Descriptor) ||
+		got.Host != want.Host || got.Generator != want.Generator ||
+		got.Kernel != want.Kernel || got.Protocol != want.Protocol ||
+		got.Unit != want.Unit || got.Optimization != want.Optimization ||
 		!bytes.Equal(got.Payload, want.Payload) {
 		t.Fatalf("round trip = %#v, want %#v", got, want)
 	}
@@ -39,10 +45,12 @@ func TestArtifactRejectsCorruptionAndTruncation(t *testing.T) {
 	artifact := Artifact{
 		Descriptor: rtg.TargetDescriptor{
 			Name: "test/tiny", OS: "test", ISA: "tiny",
-			WordBits: 32, PointerBits: 32, Endian: "little",
-			ABI: "tiny", Runtime: "tiny", Executable: "tiny", Version: 1,
+			WordBits: 32, PointerBits: 32, CodePointerBits: 32,
+			FunctionPointerBits: 32, MaxAlign: 4, Endian: "little",
+			ABI: "tiny", Runtime: "tiny", OutputKind: "tiny", Executable: "tiny", Version: 1,
 		},
-		Host: "linux/amd64", Generator: 1, Kernel: 1, Payload: []byte("payload"),
+		Host: "linux/amd64", Generator: 1, Kernel: 1, Protocol: 1,
+		Unit: 1, Optimization: 1, Payload: []byte("payload"),
 	}
 	encoded, _ := Encode(artifact)
 	for i := 0; i < len(encoded); i++ {

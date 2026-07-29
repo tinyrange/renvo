@@ -7,28 +7,21 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"renvo.dev/internal/rtg"
 )
 
 type registrySourceDescriptor struct {
-	Name            string   `json:"name"`
-	Backend         string   `json:"backend"`
-	Aliases         []string `json:"aliases"`
-	OS              string   `json:"os"`
-	ISA             string   `json:"isa"`
-	WordBits        int      `json:"word_bits"`
-	Endian          string   `json:"endian"`
-	ABI             string   `json:"abi"`
-	Image           string   `json:"image"`
-	Runtime         []string `json:"runtime"`
-	Tags            []string `json:"tags"`
-	Advertised      bool     `json:"advertised"`
-	Virtual         bool     `json:"virtual"`
-	DefaultArena    int      `json:"default_arena"`
-	ReleaseArtifact string   `json:"release_artifact"`
-	IDE             bool     `json:"ide"`
+	Name            string `json:"name"`
+	Backend         string `json:"backend"`
+	Advertised      bool   `json:"advertised"`
+	Virtual         bool   `json:"virtual"`
+	DefaultArena    int    `json:"default_arena"`
+	ReleaseArtifact string `json:"release_artifact"`
+	IDE             bool   `json:"ide"`
 }
 
-func TestGeneratedRegistryMatchesSource(t *testing.T) {
+func TestGeneratedRegistryMatchesPolicy(t *testing.T) {
 	data, err := os.ReadFile("targets.json")
 	if err != nil {
 		t.Fatal(err)
@@ -42,44 +35,94 @@ func TestGeneratedRegistryMatchesSource(t *testing.T) {
 		t.Fatalf("generated descriptor count = %d, source count = %d", len(actual), len(source))
 	}
 	for i := 0; i < len(source); i++ {
-		want := Descriptor{
-			Name:            source[i].Name,
-			Backend:         source[i].Backend,
-			Aliases:         source[i].Aliases,
-			OS:              source[i].OS,
-			ISA:             source[i].ISA,
-			WordBits:        source[i].WordBits,
-			Endian:          source[i].Endian,
-			ABI:             source[i].ABI,
-			Image:           source[i].Image,
-			Runtime:         source[i].Runtime,
-			Tags:            source[i].Tags,
-			Advertised:      source[i].Advertised,
-			Virtual:         source[i].Virtual,
-			DefaultArena:    source[i].DefaultArena,
-			ReleaseArtifact: source[i].ReleaseArtifact,
-			IDE:             source[i].IDE,
-		}
-		if !reflect.DeepEqual(actual[i], want) {
-			t.Fatalf("descriptor %d drifted\ngot:  %#v\nwant: %#v", i, actual[i], want)
+		got := actual[i]
+		want := source[i]
+		if got.Name != want.Name || got.Backend != want.Backend ||
+			got.Advertised != want.Advertised || got.Virtual != want.Virtual ||
+			got.ReleaseArtifact != want.ReleaseArtifact || got.IDE != want.IDE {
+			t.Fatalf("descriptor %d policy drifted\ngot:  %#v\nwant: %#v", i, got, want)
 		}
 	}
 }
 
+func TestGeneratedRegistryMatchesMachineDefinitions(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join("..", "..", "backend", "definitions", "*.rtg"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	machines := make(map[string]rtg.TargetDescriptor)
+	for _, path := range paths {
+		source, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resolved := rtg.ResolveDefinitions(rtg.Parse(source, filepath.Base(path)))
+		if !resolved.Ok {
+			t.Fatalf("%s: %#v", path, resolved.Diagnostics)
+		}
+		for _, target := range resolved.Targets {
+			machines[target.Descriptor.Name] = target.Descriptor
+		}
+	}
+	for _, got := range All() {
+		machine, ok := machines[got.Name]
+		if !ok {
+			t.Errorf("%s has no machine definition", got.Name)
+			continue
+		}
+		delete(machines, got.Name)
+		runtime := append([]string(nil), machine.RuntimeOps...)
+		if stringSliceContains(machine.Capabilities, "hosted") {
+			runtime = append(runtime, "hosted")
+		}
+		if !reflect.DeepEqual(got.Aliases, machine.Aliases) ||
+			got.OS != machine.OS || got.ISA != machine.ISA ||
+			got.WordBits != machine.WordBits || got.PointerBits != machine.PointerBits ||
+			got.CodePointerBits != machine.CodePointerBits ||
+			got.FunctionPointerBits != machine.FunctionPointerBits ||
+			got.MaxAlign != machine.MaxAlign ||
+			got.Endian != machine.Endian || got.ABI != machine.ABI ||
+			got.Image != machine.OutputKind ||
+			!reflect.DeepEqual(got.Runtime, runtime) ||
+			!reflect.DeepEqual(got.Tags, machine.BuildTags) ||
+			!reflect.DeepEqual(got.Capabilities, machine.Capabilities) ||
+			got.Definition != machine.Definition ||
+			got.DescriptorVersion != machine.Version ||
+			got.DefaultArena != machine.ArenaDefault {
+			t.Errorf("%s machine projection drifted\ngot:  %#v\nwant: %#v", got.Name, got, machine)
+		}
+	}
+	for name := range machines {
+		t.Errorf("%s has no target registry entry", name)
+	}
+}
+
+func stringSliceContains(values []string, value string) bool {
+	for _, item := range values {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRegistryResultsAreImmutableCopies(t *testing.T) {
-	all := All()
-	all[0].Name = "changed"
-	all[0].Tags[0] = "changed"
-	descriptor, ok := Lookup(DefaultName)
+	before, ok := Lookup(DefaultName)
 	if !ok {
 		t.Fatal("default target disappeared")
 	}
-	if descriptor.Name != DefaultName || descriptor.Tags[0] != "linux" {
+	all := All()
+	all[0].Name = "changed"
+	all[0].Tags[0] = "changed"
+	all[0].Capabilities[0] = "changed"
+	all[0].Definition[0] ^= 0xff
+	descriptor, _ := Lookup(DefaultName)
+	if !reflect.DeepEqual(descriptor, before) {
 		t.Fatalf("registry was mutated through All: %#v", descriptor)
 	}
 	descriptor.Tags[0] = "changed-again"
 	descriptor, _ = Lookup(DefaultName)
-	if descriptor.Tags[0] != "linux" {
+	if !reflect.DeepEqual(descriptor, before) {
 		t.Fatalf("registry was mutated through Lookup: %#v", descriptor)
 	}
 }
@@ -117,6 +160,23 @@ func TestTargetDocumentationContainsAdvertisedRegistry(t *testing.T) {
 			if descriptor.Advertised && !strings.Contains(document, "`"+descriptor.Name+"`") {
 				t.Errorf("%s does not document advertised target %s", path, descriptor.Name)
 			}
+		}
+	}
+}
+
+func TestGeneratedMachineDefinitionDocumentationIsComplete(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "backend", "docs", "machine-definitions.generated.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := string(data)
+	for _, descriptor := range All() {
+		if !strings.Contains(document, "`"+descriptor.Name+"`") {
+			t.Errorf("generated documentation is missing target %s", descriptor.Name)
+		}
+		hash := rtg.HashText(descriptor.Definition)
+		if !strings.Contains(document, "`"+hash+"`") {
+			t.Errorf("generated documentation is missing definition hash for %s", descriptor.Name)
 		}
 	}
 }

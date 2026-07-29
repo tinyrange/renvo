@@ -410,16 +410,19 @@ runtime windows_386 {
 format elf32_386 {
 	byte_order = little
 	address_bits = 32
+	kind = elf
 	machine = 3
 }
 
 format pe32_386 {
 	byte_order = little
 	address_bits = 32
+	kind = pe
 	machine = 0x014c
 }
 
 target linux/386 {
+	os = linux
 	arch = x86_32
 	abi = cdecl32
 	runtime = linux_386
@@ -429,6 +432,7 @@ target linux/386 {
 }
 
 target windows/386 {
+	os = windows
 	arch = x86_32
 	abi = win32
 	runtime = windows_386

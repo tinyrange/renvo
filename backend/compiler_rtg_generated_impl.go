@@ -682,3 +682,7 @@ func renvoRTGReloc(out *renvoAsm, label int) {
 		renvoAsmAddReloc(out, len(out.code)-4, label)
 	}
 }
+
+func renvoRTGTargetBinding(target int) (string, string, int, bool) {
+return renvoBuiltInTargetBinding(target)
+}

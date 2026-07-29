@@ -5,6 +5,7 @@ import (
 
 	backendunit "renvo.dev/backend/unit"
 	"renvo.dev/internal/load"
+	"renvo.dev/internal/rtg"
 	internalunit "renvo.dev/internal/unit"
 )
 
@@ -53,7 +54,7 @@ func TestBackendDefinitionResolvesBeforeSourceSelection(t *testing.T) {
 	}
 	binding, ok := internalunit.ReadTargetBinding(result.Unit)
 	if !ok || binding.Target != "acme/aarch64" ||
-		binding.DescriptorVersion != 1 {
+		binding.DescriptorVersion != rtg.DescriptorVersion {
 		t.Fatalf("binding = %#v, ok %v", binding, ok)
 	}
 	if _, err := backendunit.Unmarshal(result.Unit); err != nil {

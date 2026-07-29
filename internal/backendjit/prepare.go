@@ -15,9 +15,14 @@ import (
 	"renvo.dev/internal/load"
 	"renvo.dev/internal/rtg"
 	"renvo.dev/internal/rtgb"
+	"renvo.dev/internal/unit"
 )
 
-const KernelVersion = 1
+const (
+	KernelVersion       = 1
+	ProtocolVersion     = 1
+	OptimizationVersion = 1
+)
 
 type PrepareConfig struct {
 	Definition  []byte
@@ -27,7 +32,15 @@ type PrepareConfig struct {
 	WorkDir     string
 	StdRoot     string
 	CacheDir    string
+	Cache       ArtifactCache
 	Bootstrap   driver.Backend
+}
+
+// ArtifactCache lets embedders keep prepared artifacts outside the host
+// filesystem. Keys are content and compiler compatibility identities.
+type ArtifactCache interface {
+	Load(key string) ([]byte, bool)
+	Store(key string, source []byte) error
 }
 
 type Prepared struct {
@@ -52,10 +65,15 @@ func Prepare(config PrepareConfig) Prepared {
 	if host == "" {
 		return prepareFailure("RENVO-RTG-003", "this host cannot prepare native backends")
 	}
+	key := cacheKey(generated.Descriptor, host)
 	cachePath := ""
-	if config.CacheDir != "" {
-		cachePath = filepath.Join(config.CacheDir, cacheKey(generated.Descriptor, host)+".rtgb")
-		if source, err := os.ReadFile(cachePath); err == nil {
+	cache := config.Cache
+	if cache == nil && config.CacheDir != "" {
+		cachePath = filepath.Join(config.CacheDir, key+".rtgb")
+		cache = FileCache{Directory: config.CacheDir}
+	}
+	if cache != nil {
+		if source, found := cache.Load(key); found {
 			if artifact, ok := rtgb.Decode(source); ok && compatible(artifact, generated.Descriptor, host) {
 				return Prepared{Artifact: artifact, Encoded: source, CachePath: cachePath, CacheHit: true, Ok: true}
 			}
@@ -77,22 +95,45 @@ func Prepare(config PrepareConfig) Prepared {
 		return Prepared{Diagnostic: diagnostic}
 	}
 	artifact := rtgb.Artifact{
-		Descriptor: generated.Descriptor,
-		Host:       host,
-		Generator:  rtg.GeneratorVersion,
-		Kernel:     KernelVersion,
-		Payload:    compiled.Binary,
+		Descriptor:   generated.Descriptor,
+		Host:         host,
+		Generator:    rtg.GeneratorVersion,
+		Kernel:       KernelVersion,
+		Protocol:     ProtocolVersion,
+		Unit:         unit.Version,
+		Optimization: OptimizationVersion,
+		Payload:      compiled.Binary,
 	}
 	encoded, ok := rtgb.Encode(artifact)
 	if !ok {
 		return prepareFailure("RENVO-RTG-006", "prepared backend artifact is invalid")
 	}
-	if cachePath != "" {
-		if err := publish(cachePath, encoded); err != nil {
+	if cache != nil {
+		if err := cache.Store(key, encoded); err != nil {
 			return prepareFailure("RENVO-RTG-007", err.Error())
 		}
 	}
 	return Prepared{Artifact: artifact, Encoded: encoded, CachePath: cachePath, Ok: true}
+}
+
+// FileCache is the process-host adapter for content-addressed artifacts.
+type FileCache struct {
+	Directory string
+}
+
+func (cache FileCache) Load(key string) ([]byte, bool) {
+	if cache.Directory == "" {
+		return nil, false
+	}
+	source, err := os.ReadFile(filepath.Join(cache.Directory, key+".rtgb"))
+	return source, err == nil
+}
+
+func (cache FileCache) Store(key string, source []byte) error {
+	if cache.Directory == "" {
+		return fmt.Errorf("backend cache directory is empty")
+	}
+	return publish(filepath.Join(cache.Directory, key+".rtgb"), source)
 }
 
 func Load(source []byte) Prepared {
@@ -102,7 +143,8 @@ func Load(source []byte) Prepared {
 	}
 	host := hostTarget()
 	if artifact.Host != host || artifact.Generator != rtg.GeneratorVersion ||
-		artifact.Kernel != KernelVersion {
+		artifact.Kernel != KernelVersion || artifact.Protocol != ProtocolVersion ||
+		artifact.Unit != unit.Version || artifact.Optimization != OptimizationVersion {
 		return prepareFailure("RENVO-RTG-009", "prepared backend is incompatible with this compiler or host")
 	}
 	return Prepared{Artifact: artifact, Encoded: source, Ok: true}
@@ -137,13 +179,17 @@ func compatible(artifact rtgb.Artifact, descriptor rtg.TargetDescriptor, host st
 		artifact.Descriptor.Version == descriptor.Version &&
 		artifact.Host == host &&
 		artifact.Generator == rtg.GeneratorVersion &&
-		artifact.Kernel == KernelVersion
+		artifact.Kernel == KernelVersion &&
+		artifact.Protocol == ProtocolVersion &&
+		artifact.Unit == unit.Version &&
+		artifact.Optimization == OptimizationVersion
 }
 
 func cacheKey(descriptor rtg.TargetDescriptor, host string) string {
 	return rtg.HashText(descriptor.Definition) + "-" + safeName(descriptor.Name) +
 		"-" + safeName(host) + "-g" + decimal(rtg.GeneratorVersion) +
-		"-k" + decimal(KernelVersion)
+		"-k" + decimal(KernelVersion) + "-u" + decimal(unit.Version) +
+		"-p" + decimal(ProtocolVersion) + "-o" + decimal(OptimizationVersion)
 }
 
 func safeName(value string) string {

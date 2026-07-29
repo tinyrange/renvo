@@ -759,10 +759,12 @@ runtime linux_arm {
 format elf32_arm {
 	byte_order = little
 	address_bits = 32
+	kind = elf
 	machine = 40
 }
 
 target linux/arm {
+	os = linux
 	arch = arm
 	abi = aapcs32
 	runtime = linux_arm

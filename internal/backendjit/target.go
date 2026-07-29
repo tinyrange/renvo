@@ -1,6 +1,9 @@
 package backendjit
 
-import "renvo.dev/internal/rtg"
+import (
+	"renvo.dev/internal/rtg"
+	"renvo.dev/internal/targetinfo"
+)
 
 func excludedFamily(descriptor rtg.TargetDescriptor) map[string]bool {
 	names := []string{
@@ -26,44 +29,5 @@ func excludedFamily(descriptor rtg.TargetDescriptor) map[string]bool {
 }
 
 func representativeTarget(descriptor rtg.TargetDescriptor) string {
-	if descriptor.OS == "windows" {
-		if descriptor.ISA == "aarch64" || descriptor.ISA == "arm64" {
-			return "windows/arm64"
-		}
-		if descriptor.WordBits == 32 {
-			return "windows/386"
-		}
-		return "windows/amd64"
-	}
-	if descriptor.OS == "darwin" {
-		return "darwin/arm64"
-	}
-	if descriptor.OS == "wasi" || descriptor.OS == "browser" {
-		return "wasi/wasm32"
-	}
-	if descriptor.OS == "vm" {
-		return "vm/vm32"
-	}
-	if hasValue(descriptor.Capabilities, "kernel_module") {
-		return "linux-kernel/amd64"
-	}
-	if descriptor.ISA == "aarch64" || descriptor.ISA == "arm64" {
-		return "linux/aarch64"
-	}
-	if descriptor.ISA == "arm" {
-		return "linux/arm"
-	}
-	if descriptor.WordBits == 32 {
-		return "linux/386"
-	}
-	return "linux/amd64"
-}
-
-func hasValue(values []string, value string) bool {
-	for _, item := range values {
-		if item == value {
-			return true
-		}
-	}
-	return false
+	return targetinfo.Representative(descriptor.OS, descriptor.ISA, descriptor.WordBits, descriptor.Capabilities)
 }

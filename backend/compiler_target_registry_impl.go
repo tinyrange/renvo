@@ -40,3 +40,40 @@ func renvoParseTargetArg(target string) int {
 	}
 	return 0
 }
+
+func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
+	if target == renvoTargetLinuxAmd64 {
+		return "linux/amd64", "\xa1QCIKg]\xa8\x81\x8fl\x06ܓ\xbfmcWᲢ\xa3)\x8c\x03`\xf7\r\x19\xdf\v\x17", 2, true
+	}
+	if target == renvoTargetLinux386 {
+		return "linux/386", "/\xd8Mo _\xbe\x1d\xeeW\xa1\xc5\x01哬\x14\xd3\xc1\xbcK\x97\xda-\xec\xfd\xba\xec\xcb\x1a\x8e\x9b", 2, true
+	}
+	if target == renvoTargetLinuxAarch64 {
+		return "linux/aarch64", "\nx\x99\xb5t\xfa\xf0\xf4\x17\xa9P\x16\x8ar\xce`\x04\xf5v\x04\x8e\xd7\xeav\"#\xbe\xdeऋ\xcc", 2, true
+	}
+	if target == renvoTargetLinuxArm {
+		return "linux/arm", "\xdbYވ\x14`*\xc2'\xf6\x19\xf0\x8a8\xf9l_\xafN\x13\xf9\x18\xbb\xdc\xcb\xc0N\xe3@=\tT", 2, true
+	}
+	if target == renvoTargetWindowsAmd64 {
+		return "windows/amd64", "\xa1QCIKg]\xa8\x81\x8fl\x06ܓ\xbfmcWᲢ\xa3)\x8c\x03`\xf7\r\x19\xdf\v\x17", 2, true
+	}
+	if target == renvoTargetWindows386 {
+		return "windows/386", "/\xd8Mo _\xbe\x1d\xeeW\xa1\xc5\x01哬\x14\xd3\xc1\xbcK\x97\xda-\xec\xfd\xba\xec\xcb\x1a\x8e\x9b", 2, true
+	}
+	if target == renvoTargetWasiWasm32 {
+		return "wasi/wasm32", "2ɢ\xfc\xd6p\t\xa88\xf9\x85h\x9c-\x00\x82\x177!&aAHQ4\f:\x9a@>\xb5$", 2, true
+	}
+	if target == renvoTargetDarwinArm64 {
+		return "darwin/arm64", "\nx\x99\xb5t\xfa\xf0\xf4\x17\xa9P\x16\x8ar\xce`\x04\xf5v\x04\x8e\xd7\xeav\"#\xbe\xdeऋ\xcc", 2, true
+	}
+	if target == renvoTargetLinuxKernelAmd64 {
+		return "linux-kernel/amd64", "\xa1QCIKg]\xa8\x81\x8fl\x06ܓ\xbfmcWᲢ\xa3)\x8c\x03`\xf7\r\x19\xdf\v\x17", 2, true
+	}
+	if target == renvoTargetWindowsArm64 {
+		return "windows/arm64", "\nx\x99\xb5t\xfa\xf0\xf4\x17\xa9P\x16\x8ar\xce`\x04\xf5v\x04\x8e\xd7\xeav\"#\xbe\xdeऋ\xcc", 2, true
+	}
+	if target == renvoTargetVM32 {
+		return "vm/vm32", "2ɢ\xfc\xd6p\t\xa88\xf9\x85h\x9c-\x00\x82\x177!&aAHQ4\f:\x9a@>\xb5$", 2, true
+	}
+	return "", "", 0, false
+}

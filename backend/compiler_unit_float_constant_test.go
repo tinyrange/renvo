@@ -7,7 +7,9 @@ import (
 	"runtime"
 	"testing"
 
-	"renvo.dev/backend/unit"
+	backendunit "renvo.dev/backend/unit"
+	"renvo.dev/internal/targetinfo"
+	internalunit "renvo.dev/internal/unit"
 )
 
 func TestLinkedUnitUntypedFloatConstantKeepsScaledValue(t *testing.T) {
@@ -32,7 +34,7 @@ func appMain() int {
 			program.Decls[i].StartTok++
 		}
 	}
-	data, err := unit.Marshal(program)
+	data, err := backendunit.Marshal(program)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,6 +52,24 @@ func appMain() int {
 		suffix = ".exe"
 	default:
 		t.Skipf("no executable target for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	bindingTarget, definition, version, found := targetinfo.Binding(target)
+	if !found {
+		t.Fatalf("target binding for %s is unavailable", target)
+	}
+	bound, ok := internalunit.BindTarget(data, internalunit.TargetBinding{
+		Target:            bindingTarget,
+		Definition:        definition,
+		DescriptorVersion: version,
+	})
+	if !ok {
+		t.Fatal("could not bind linked unit")
+	}
+	data = bound
+	mismatched := append([]byte(nil), data...)
+	mismatched[len(mismatched)-1] ^= 1
+	if _, accepted := RenvoCompileUnitToBytesWithOptions(mismatched, target, RenvoCompileOptions{StripSymbols: true}); accepted {
+		t.Fatal("backend accepted a mismatched unit target binding")
 	}
 	binary, ok := RenvoCompileUnitToBytesWithOptions(data, target, RenvoCompileOptions{StripSymbols: true})
 	if !ok {

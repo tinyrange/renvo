@@ -7,6 +7,7 @@ import (
 	"renvo.dev/internal/load"
 	"renvo.dev/internal/rtg"
 	"renvo.dev/internal/rtgprofile"
+	"renvo.dev/internal/targetinfo"
 	"renvo.dev/internal/unit"
 )
 
@@ -125,6 +126,9 @@ func resolveBackendBuildOptions(args []string, workDir string, fs SourceFS) back
 	options.Target = resolved.Descriptor.Name
 	options.TargetExplicit = targetExplicit
 	options.System = systemPath
+	if options.ArenaSize == 0 {
+		options.ArenaSize = resolved.Descriptor.ArenaDefault
+	}
 	if systemPath != "" {
 		options.SystemName = profile.Name
 		options.BinaryLimit = profile.BinaryLimit
@@ -157,7 +161,7 @@ func BuildFromFSWithBackendModuleCache(args []string, workDir string, stdRoot st
 	}
 	var binding unit.TargetBinding
 	binding.Target = resolved.descriptor.Name
-	binding.Definition = resolved.descriptor.Definition
+	binding.Definition = string(resolved.descriptor.Definition[:])
 	binding.DescriptorVersion = resolved.descriptor.Version
 	bound, ok := unit.BindTarget(result.Unit, binding)
 	if ok {
@@ -167,37 +171,7 @@ func BuildFromFSWithBackendModuleCache(args []string, workDir string, stdRoot st
 }
 
 func representativeBuiltinTarget(descriptor rtg.TargetDescriptor) string {
-	if descriptor.OS == "windows" {
-		if descriptor.ISA == "aarch64" {
-			return "windows/arm64"
-		}
-		if descriptor.WordBits == 32 {
-			return "windows/386"
-		}
-		return "windows/amd64"
-	}
-	if descriptor.OS == "darwin" {
-		return "darwin/arm64"
-	}
-	if descriptor.OS == "wasi" {
-		return "wasi/wasm32"
-	}
-	if descriptor.OS == "browser" {
-		return "browser/wasm32"
-	}
-	if descriptor.OS == "vm" {
-		return "vm/vm32"
-	}
-	if descriptor.ISA == "aarch64" {
-		return "linux/aarch64"
-	}
-	if descriptor.ISA == "arm" {
-		return "linux/arm"
-	}
-	if descriptor.WordBits == 32 {
-		return "linux/386"
-	}
-	return "linux/amd64"
+	return targetinfo.Representative(descriptor.OS, descriptor.ISA, descriptor.WordBits, descriptor.Capabilities)
 }
 
 func hostContains(values []string, value string) bool {

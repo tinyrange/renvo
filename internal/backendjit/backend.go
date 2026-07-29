@@ -19,12 +19,34 @@ type Backend struct {
 	stdRoot     string
 	cacheDir    string
 	bootstrap   driver.Backend
+	runner      Runner
 	prepared    Prepared
 }
 
 func New(path string, backendRoot string, stdRoot string, cacheDir string, bootstrap driver.Backend) *Backend {
-	return &Backend{path: path, backendRoot: backendRoot, stdRoot: stdRoot, cacheDir: cacheDir, bootstrap: bootstrap}
+	return NewWithRunner(path, backendRoot, stdRoot, cacheDir, bootstrap, ProcessRunner{})
 }
+
+// NewWithRunner separates backend preparation from execution for embedders
+// that cannot or do not want to spawn the prepared native image themselves.
+func NewWithRunner(path string, backendRoot string, stdRoot string, cacheDir string, bootstrap driver.Backend, runner Runner) *Backend {
+	return &Backend{
+		path: path, backendRoot: backendRoot, stdRoot: stdRoot,
+		cacheDir: cacheDir, bootstrap: bootstrap, runner: runner,
+	}
+}
+
+type Request struct {
+	Protocol int
+	Unit     []byte
+	Options  driver.BackendCompileOptions
+}
+
+type Runner interface {
+	Run(artifact rtgb.Artifact, request Request) driver.BackendResult
+}
+
+type ProcessRunner struct{}
 
 func (b *Backend) CompileUnit(source []byte, target string, strip bool, windowsGUI bool) driver.BackendResult {
 	return b.CompileUnitWithArena(source, target, strip, windowsGUI, 0)
@@ -47,14 +69,23 @@ func (b *Backend) compile(source []byte, options driver.BackendCompileOptions) d
 	}
 	binding, ok := unit.ReadTargetBinding(source)
 	if !ok || binding.Target != prepared.Artifact.Descriptor.Name ||
-		binding.Definition != prepared.Artifact.Descriptor.Definition ||
+		binding.Definition != string(prepared.Artifact.Descriptor.Definition[:]) ||
 		binding.DescriptorVersion != prepared.Artifact.Descriptor.Version {
 		return driver.BackendResult{Diagnostic: driver.Diagnostic{
 			Phase: "backend", Code: "RENVO-BACKEND-007",
 			Message: "unit target binding does not match the prepared backend",
 		}}
 	}
-	return execute(prepared.Artifact, source, options)
+	if b.runner == nil {
+		return driver.BackendResult{Diagnostic: driver.Diagnostic{
+			Phase: "backend", Code: "RENVO-BACKEND-009", Message: "prepared backend runner is unavailable",
+		}}
+	}
+	return b.runner.Run(prepared.Artifact, Request{
+		Protocol: ProtocolVersion,
+		Unit:     source,
+		Options:  options,
+	})
 }
 
 func (b *Backend) prepare(target string) Prepared {
@@ -81,7 +112,13 @@ func (b *Backend) prepare(target string) Prepared {
 	return b.prepared
 }
 
-func execute(artifact rtgb.Artifact, source []byte, options driver.BackendCompileOptions) driver.BackendResult {
+func (ProcessRunner) Run(artifact rtgb.Artifact, request Request) driver.BackendResult {
+	if request.Protocol != ProtocolVersion || artifact.Protocol != ProtocolVersion ||
+		artifact.Unit != unit.Version || artifact.Optimization != OptimizationVersion {
+		return driver.BackendResult{Diagnostic: driver.Diagnostic{
+			Phase: "backend", Code: "RENVO-BACKEND-008", Message: "prepared backend protocol is incompatible",
+		}}
+	}
 	image, err := linkedimage.Decode(artifact.Payload)
 	if err != nil || image.Target != artifact.Host {
 		return driver.BackendResult{Diagnostic: driver.Diagnostic{
@@ -95,11 +132,12 @@ func execute(artifact rtgb.Artifact, source []byte, options driver.BackendCompil
 	defer func() { _ = os.RemoveAll(tempDir) }()
 	inputPath := filepath.Join(tempDir, "input.rtgu")
 	outputPath := filepath.Join(tempDir, "output.bin")
-	if err = os.WriteFile(inputPath, source, 0o600); err != nil {
+	if err = os.WriteFile(inputPath, request.Unit, 0o600); err != nil {
 		return backendIOError("write protocol input")
 	}
 	representative := representativeTarget(artifact.Descriptor)
 	args := []string{"-t", representative}
+	options := request.Options
 	if options.Strip {
 		args = append(args, "-s")
 	}

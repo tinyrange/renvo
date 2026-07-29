@@ -194,8 +194,8 @@ func TestWasm32DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 	if !resolved.Ok {
 		t.Fatalf("definition failed: %#v", resolved.Diagnostics)
 	}
-	if len(resolved.Targets) != 2 {
-		t.Fatalf("target count = %d, want wasi/wasm32 and vm/vm32", len(resolved.Targets))
+	if len(resolved.Targets) != 3 {
+		t.Fatalf("target count = %d, want wasi/wasm32, browser/wasm32, and vm/vm32", len(resolved.Targets))
 	}
 	generated := GenerateProductionArchitectureBackend(resolved, "wasm32", "main")
 	if !generated.Ok {

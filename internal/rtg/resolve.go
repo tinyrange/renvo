@@ -1,23 +1,29 @@
 package rtg
 
-const DescriptorVersion = 1
+const DescriptorVersion = 2
 
 type TargetDescriptor struct {
-	Name         string
-	Aliases      []string
-	OS           string
-	ISA          string
-	WordBits     int
-	PointerBits  int
-	Endian       string
-	ABI          string
-	Runtime      string
-	Executable   string
-	Object       string
-	BuildTags    []string
-	Capabilities []string
-	Definition   [32]byte
-	Version      int
+	Name                string
+	Aliases             []string
+	OS                  string
+	ISA                 string
+	WordBits            int
+	PointerBits         int
+	CodePointerBits     int
+	FunctionPointerBits int
+	MaxAlign            int
+	ArenaDefault        int
+	Endian              string
+	ABI                 string
+	Runtime             string
+	RuntimeOps          []string
+	Executable          string
+	Object              string
+	OutputKind          string
+	BuildTags           []string
+	Capabilities        []string
+	Definition          [32]byte
+	Version             int
 }
 
 type ResolvedTarget struct {
@@ -91,6 +97,9 @@ func resolveTarget(document Document, declaration Declaration) (ResolvedTarget, 
 	target := ResolvedTarget{Declaration: declaration}
 	target.Descriptor.Name = declaration.Name
 	target.Descriptor.OS = targetOS(declaration.Name)
+	if osName, found := fieldValue(document, declaration, "os"); found {
+		target.Descriptor.OS = valueName(osName)
+	}
 	target.Descriptor.Version = DescriptorVersion
 	target.Descriptor.Definition = document.Hash
 
@@ -138,6 +147,33 @@ func resolveTarget(document Document, declaration Declaration) (ResolvedTarget, 
 		target.Descriptor.PointerBits != 32 && target.Descriptor.PointerBits != 64 {
 		return target, resolveDiagnostic(document, target.Arch, "RTG-RESOLVE-007", "architecture "+archName+" has invalid pointer_bits"), false
 	}
+	target.Descriptor.CodePointerBits = target.Descriptor.PointerBits
+	target.Descriptor.FunctionPointerBits = target.Descriptor.PointerBits
+	target.Descriptor.MaxAlign = target.Descriptor.PointerBits / 8
+	if bits, found := integerField(document, declaration, "code_pointer_bits"); found {
+		target.Descriptor.CodePointerBits = bits
+	}
+	if bits, found := integerField(document, declaration, "function_pointer_bits"); found {
+		target.Descriptor.FunctionPointerBits = bits
+	}
+	if align, found := integerField(document, declaration, "max_align"); found {
+		target.Descriptor.MaxAlign = align
+	}
+	if arena, found := integerField(document, declaration, "arena_default"); found {
+		target.Descriptor.ArenaDefault = arena
+	}
+	if !validDescriptorWidth(target.Descriptor.CodePointerBits) {
+		return target, resolveDiagnostic(document, declaration, "RTG-RESOLVE-011", "target "+declaration.Name+" has invalid code_pointer_bits"), false
+	}
+	if !validDescriptorWidth(target.Descriptor.FunctionPointerBits) {
+		return target, resolveDiagnostic(document, declaration, "RTG-RESOLVE-012", "target "+declaration.Name+" has invalid function_pointer_bits"), false
+	}
+	if target.Descriptor.MaxAlign <= 0 || target.Descriptor.MaxAlign&(target.Descriptor.MaxAlign-1) != 0 {
+		return target, resolveDiagnostic(document, declaration, "RTG-RESOLVE-013", "target "+declaration.Name+" has invalid max_align"), false
+	}
+	if target.Descriptor.ArenaDefault < 0 {
+		return target, resolveDiagnostic(document, declaration, "RTG-RESOLVE-014", "target "+declaration.Name+" has invalid arena_default"), false
+	}
 	endian, found := fieldValue(document, target.Arch, "endian")
 	if !found || valueName(endian) != "little" && valueName(endian) != "big" {
 		return target, resolveDiagnostic(document, target.Arch, "RTG-RESOLVE-008", "architecture "+archName+" has invalid endian"), false
@@ -166,10 +202,35 @@ func resolveTarget(document Document, declaration Declaration) (ResolvedTarget, 
 	target.Descriptor.Aliases = listField(document, declaration, "aliases")
 	target.Descriptor.BuildTags = listField(document, declaration, "build_tags")
 	target.Descriptor.Capabilities = listField(document, declaration, "capabilities")
+	target.Descriptor.RuntimeOps = runtimeOperations(document, target.Runtime)
+	output := target.Executable
+	if output.Name == "" {
+		output = target.Object
+	}
+	target.Descriptor.OutputKind = output.Name
+	if kind, found := fieldValue(document, output, "kind"); found {
+		target.Descriptor.OutputKind = valueName(kind)
+	}
 	sortStrings(target.Descriptor.Aliases)
 	sortStrings(target.Descriptor.BuildTags)
 	sortStrings(target.Descriptor.Capabilities)
 	return target, Diagnostic{}, true
+}
+
+func validDescriptorWidth(bits int) bool {
+	return bits == 8 || bits == 16 || bits == 32 || bits == 64
+}
+
+func runtimeOperations(document Document, declaration Declaration) []string {
+	operations := listField(document, declaration, "operations")
+	for i := 0; i < len(declaration.Statements); i++ {
+		tokens := declaration.Statements[i].Tokens
+		if len(tokens) >= 2 && tokens[0] == "operation" &&
+			stringIndex(operations, tokens[1]) < 0 {
+			operations = append(operations, tokens[1])
+		}
+	}
+	return operations
 }
 
 func requireDeclaration(document Document, kind string, name string, owner Declaration) (Declaration, Diagnostic, bool) {

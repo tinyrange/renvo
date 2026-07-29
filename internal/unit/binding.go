@@ -8,22 +8,63 @@ const (
 
 type TargetBinding struct {
 	Target            string
-	Definition        [32]byte
+	Definition        string
 	DescriptorVersion int
 }
 
-// BindTarget adds the optional target-definition identity to a canonical RTGU
-// root. Version-1 readers already skip unknown child tags, so ordinary built-in
-// units remain byte-for-byte unchanged while prepared backends can reject a
-// mismatch before decoding compiler input.
+// BindUnboundTarget appends a binding to a newly marshaled RTGU. MarshalCore
+// reserves the small tail capacity, so the ordinary frontend path does not
+// rescan or copy the complete unit.
+func BindUnboundTarget(data []byte, binding TargetBinding) ([]byte, bool) {
+	if !validUnitRoot(data) || binding.Target == "" || len(binding.Definition) != 32 || binding.DescriptorVersion <= 0 {
+		return nil, false
+	}
+	out := data
+	out = appendStringNodeCore(out, TagDefinitionTarget, binding.Target)
+	out = appendStringNodeCore(out, TagDefinitionHash, binding.Definition)
+	var version [2]byte
+	version[0] = byte(binding.DescriptorVersion)
+	version[1] = byte(binding.DescriptorVersion >> 8)
+	out = appendNode(out, TagDescriptorVersion, version[:])
+	patchUint32Core(out, 10, len(out)-14)
+	return out, true
+}
+
+// BindTarget sets the target-definition identity on a canonical RTGU root,
+// replacing an existing valid binding when a frontend resolves an external
+// definition after its bootstrap target. Version-1 readers skip these optional
+// child tags.
 func BindTarget(data []byte, binding TargetBinding) ([]byte, bool) {
-	if !validUnitRoot(data) || binding.Target == "" || binding.DescriptorVersion <= 0 {
+	if !validUnitRoot(data) || binding.Target == "" || len(binding.Definition) != 32 || binding.DescriptorVersion <= 0 {
 		return nil, false
 	}
 	out := make([]byte, 0, len(data)+len(binding.Target)+58)
-	out = append(out, data...)
+	out = append(out, data[:14]...)
+	hadBinding := false
+	for at := 14; at < len(data); {
+		if at+6 > len(data) {
+			return nil, false
+		}
+		tag := int(data[at]) | int(data[at+1])<<8
+		size := int(data[at+2]) | int(data[at+3])<<8 | int(data[at+4])<<16 | int(data[at+5])<<24
+		next := at + 6 + size
+		if size < 0 || next < at || next > len(data) {
+			return nil, false
+		}
+		if tag == TagDefinitionTarget || tag == TagDefinitionHash || tag == TagDescriptorVersion {
+			hadBinding = true
+		} else {
+			out = append(out, data[at:next]...)
+		}
+		at = next
+	}
+	if hadBinding {
+		if _, ok := ReadTargetBinding(data); !ok {
+			return nil, false
+		}
+	}
 	out = appendStringNodeCore(out, TagDefinitionTarget, binding.Target)
-	out = appendNode(out, TagDefinitionHash, binding.Definition[:])
+	out = appendStringNodeCore(out, TagDefinitionHash, binding.Definition)
 	var version [2]byte
 	version[0] = byte(binding.DescriptorVersion)
 	version[1] = byte(binding.DescriptorVersion >> 8)
@@ -59,7 +100,7 @@ func ReadTargetBinding(data []byte) (TargetBinding, bool) {
 			if haveHash || size != 32 {
 				return TargetBinding{}, false
 			}
-			copy(binding.Definition[:], data[at:at+size])
+			binding.Definition = string(data[at : at+size])
 			haveHash = true
 		} else if tag == TagDescriptorVersion {
 			if haveVersion || size != 2 {

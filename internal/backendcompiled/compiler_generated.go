@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "3d47c1bdfe67c6732fe74639de006a69cfee2836e05a30629e25461c548603fe"
+const CompilerSourceDigest = "0de105527e7f60371cd22eeeb2f4230d931aaba9ce3f1a89f32dfae210e15441"
 
 // source: backend/compiler_common_impl.go
 
@@ -22294,6 +22294,33 @@ func renvoDecodeUnitProgram(src []byte) (renvoProgram, bool, bool) {
 	return prog, true, ok
 }
 
+func renvoUnitBindingMatchesTarget(src []byte, target int) bool {
+	expectedTarget, expectedDefinition, expectedVersion, ok := renvoRTGTargetBinding(target)
+	bindingStart := len(src) - 52 - len(expectedTarget)
+	if !ok || len(expectedDefinition) != 32 || bindingStart < 14 ||
+		src[0] != renvoUnitMagic[0] || src[1] != renvoUnitMagic[1] ||
+		src[2] != renvoUnitMagic[2] || src[3] != renvoUnitMagic[3] {
+		return false
+	}
+	if renvoUnitRead32(src, 10) != len(src)-14 {
+		return false
+	}
+	targetData := bindingStart + 6
+	hashHeader := targetData + len(expectedTarget)
+	hashData := hashHeader + 6
+	versionHeader := hashData + 32
+	versionData := versionHeader + 6
+	return int(src[bindingStart])|int(src[bindingStart+1])<<8 == 4 &&
+		renvoUnitRead32(src, bindingStart+2) == len(expectedTarget) &&
+		string(src[targetData:hashHeader]) == expectedTarget &&
+		int(src[hashHeader])|int(src[hashHeader+1])<<8 == 5 &&
+		renvoUnitRead32(src, hashHeader+2) == 32 &&
+		string(src[hashData:versionHeader]) == expectedDefinition &&
+		int(src[versionHeader])|int(src[versionHeader+1])<<8 == 6 &&
+		renvoUnitRead32(src, versionHeader+2) == 2 &&
+		int(src[versionData])|int(src[versionData+1])<<8 == expectedVersion
+}
+
 func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 	renvoNonNil(prog)
 	if len(src) < 14 {
@@ -25243,6 +25270,43 @@ func renvoParseTargetArg(target string) int {
 	return 0
 }
 
+func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
+	if target == renvoTargetLinuxAmd64 {
+		return "linux/amd64", "\xa1QCIKg]\xa8\x81\x8fl\x06ܓ\xbfmcWᲢ\xa3)\x8c\x03`\xf7\r\x19\xdf\v\x17", 2, true
+	}
+	if target == renvoTargetLinux386 {
+		return "linux/386", "/\xd8Mo _\xbe\x1d\xeeW\xa1\xc5\x01哬\x14\xd3\xc1\xbcK\x97\xda-\xec\xfd\xba\xec\xcb\x1a\x8e\x9b", 2, true
+	}
+	if target == renvoTargetLinuxAarch64 {
+		return "linux/aarch64", "\nx\x99\xb5t\xfa\xf0\xf4\x17\xa9P\x16\x8ar\xce`\x04\xf5v\x04\x8e\xd7\xeav\"#\xbe\xdeऋ\xcc", 2, true
+	}
+	if target == renvoTargetLinuxArm {
+		return "linux/arm", "\xdbYވ\x14`*\xc2'\xf6\x19\xf0\x8a8\xf9l_\xafN\x13\xf9\x18\xbb\xdc\xcb\xc0N\xe3@=\tT", 2, true
+	}
+	if target == renvoTargetWindowsAmd64 {
+		return "windows/amd64", "\xa1QCIKg]\xa8\x81\x8fl\x06ܓ\xbfmcWᲢ\xa3)\x8c\x03`\xf7\r\x19\xdf\v\x17", 2, true
+	}
+	if target == renvoTargetWindows386 {
+		return "windows/386", "/\xd8Mo _\xbe\x1d\xeeW\xa1\xc5\x01哬\x14\xd3\xc1\xbcK\x97\xda-\xec\xfd\xba\xec\xcb\x1a\x8e\x9b", 2, true
+	}
+	if target == renvoTargetWasiWasm32 {
+		return "wasi/wasm32", "2ɢ\xfc\xd6p\t\xa88\xf9\x85h\x9c-\x00\x82\x177!&aAHQ4\f:\x9a@>\xb5$", 2, true
+	}
+	if target == renvoTargetDarwinArm64 {
+		return "darwin/arm64", "\nx\x99\xb5t\xfa\xf0\xf4\x17\xa9P\x16\x8ar\xce`\x04\xf5v\x04\x8e\xd7\xeav\"#\xbe\xdeऋ\xcc", 2, true
+	}
+	if target == renvoTargetLinuxKernelAmd64 {
+		return "linux-kernel/amd64", "\xa1QCIKg]\xa8\x81\x8fl\x06ܓ\xbfmcWᲢ\xa3)\x8c\x03`\xf7\r\x19\xdf\v\x17", 2, true
+	}
+	if target == renvoTargetWindowsArm64 {
+		return "windows/arm64", "\nx\x99\xb5t\xfa\xf0\xf4\x17\xa9P\x16\x8ar\xce`\x04\xf5v\x04\x8e\xd7\xeav\"#\xbe\xdeऋ\xcc", 2, true
+	}
+	if target == renvoTargetVM32 {
+		return "vm/vm32", "2ɢ\xfc\xd6p\t\xa88\xf9\x85h\x9c-\x00\x82\x177!&aAHQ4\f:\x9a@>\xb5$", 2, true
+	}
+	return "", "", 0, false
+}
+
 // source: backend/compiler_target_impl.go
 
 // compileTarget composes an OS/architecture implementation after target
@@ -25431,7 +25495,8 @@ func RenvoCompileUnitToOutputStripWindowsGUI(unit []byte, targetName string, out
 
 func RenvoCompileUnitToOutputWithOptions(unit []byte, targetName string, outputPath string, options RenvoCompileOptions) bool {
 	target := renvoParseTargetArg(targetName)
-	if target == 0 || !renvoCompileOptionsValid(target, options) {
+	if target == 0 || !renvoCompileOptionsValid(target, options) ||
+		!renvoUnitBindingMatchesTarget(unit, target) {
 		return false
 	}
 	context := renvoNewCompileContext(target, options.StripSymbols, options.WindowsGUI, options.EmitImage)
@@ -25450,7 +25515,8 @@ func RenvoCompileUnitToOutputWithOptions(unit []byte, targetName string, outputP
 // path for script execution so the RNVI transport can remain in memory.
 func RenvoCompileUnitToBytesWithOptions(unit []byte, targetName string, options RenvoCompileOptions) ([]byte, bool) {
 	target := renvoParseTargetArg(targetName)
-	if target == 0 || !renvoCompileOptionsValid(target, options) {
+	if target == 0 || !renvoCompileOptionsValid(target, options) ||
+		!renvoUnitBindingMatchesTarget(unit, target) {
 		return nil, false
 	}
 	context := renvoNewCompileContext(target, options.StripSymbols, options.WindowsGUI, options.EmitImage)
@@ -25515,7 +25581,8 @@ func (s *RenvoCompileSession) Step() bool {
 	}
 	if s.stage == 0 {
 		s.target = renvoParseTargetArg(s.targetName)
-		if s.target == 0 || !renvoCompileOptionsValid(s.target, s.options) {
+		if s.target == 0 || !renvoCompileOptionsValid(s.target, s.options) ||
+			!renvoUnitBindingMatchesTarget(s.unit, s.target) {
 			s.done = true
 			return true
 		}
@@ -26398,6 +26465,10 @@ func renvoRTGReloc(out *renvoAsm, label int) {
 	}
 }
 
+func renvoRTGTargetBinding(target int) (string, string, int, bool) {
+return renvoBuiltInTargetBinding(target)
+}
+
 // source: backend/compiler_amd64_impl.go
 
 const renvoAmd64ELFCodeOffset = 0xb0
@@ -27058,7 +27129,7 @@ func renvoAmd64EnsureStringEqualHelper(g *renvoLinearGen) int {
 // Code generated by Renvo RTG; DO NOT EDIT.
 // generator: 1
 // target: arch/x86_64
-// unit: x86_64 9591e033e6d6f7a16bdf4b7c00187500f06e55101c692b251413aeed85af38f4
+// unit: x86_64 a15143494b675da8818f6c06dc93bf6d6357e1b2a2a3298c0360f70d19df0b17
 
 
 func renvoAmd64AsmSecondaryDisp(a *renvoAsm, disp int) {
@@ -28086,7 +28157,7 @@ func renvo386EnsureStringEqualHelper(g *renvoLinearGen) int {
 // Code generated by Renvo RTG; DO NOT EDIT.
 // generator: 1
 // target: arch/x86_32
-// unit: x86_32 03622ef13039538435a82590658314dd772bef484ba70f3decd5b3f4571a1d1e
+// unit: x86_32 2fd84d6f205fbe1dee57a1c501e593ac14d3c1bc4b97da2decfdbaeccb1a8e9b
 
 
 func renvo386AsmSecondaryDisp(a *renvoAsm, disp int) {
@@ -28368,7 +28439,7 @@ func renvoAsmMovArg1Rax(a *renvoAsm) {
 // Code generated by Renvo RTG; DO NOT EDIT.
 // generator: 1
 // target: arch/aarch64
-// unit: aarch64 b8941443ae432058e66bbd9c33dd267d4e7b67ebbb8b713d239958b664009917
+// unit: aarch64 0a7899b574faf0f417a950168a72ce6004f576048ed7ea762223bedee0a48bcc
 
 
 func renvoAarch64AsmEmit(a *renvoAsm, insn int) {
@@ -29621,7 +29692,7 @@ func renvoAarch64AsmPatchFrame(a *renvoAsm, at int, stackUsed int) {
 // Code generated by Renvo RTG; DO NOT EDIT.
 // generator: 1
 // target: arch/arm
-// unit: arm 249f7bb1c9972709ab82dd367de15e713fc056aaea8140d36ae4ca1fca3f2e24
+// unit: arm db59de8814602ac227f619f08a38f96c5faf4e13f918bbdccbc04ee3403d0954
 
 
 func renvoArmAsmEmit(a *renvoAsm, insn int) {
@@ -30147,7 +30218,7 @@ func renvoArmAsmJnzLabel(a *renvoAsm, label int) {
 // Code generated by Renvo RTG; DO NOT EDIT.
 // generator: 1
 // target: arch/wasm32
-// unit: wasm32 ad1467083200c369d443ba61711651ddaef327e0d02c0493be436b77a02f9b10
+// unit: wasm32 32c9a2fcd67009a838f985689c2d00821737212661414851340c3a9a403eb524
 
 
 type renvoWasmBuffer struct {

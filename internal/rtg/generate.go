@@ -75,6 +75,7 @@ func generateArchitectureBackend(resolved ResolveResult, archName string, packag
 func GenerateArchitectureKernel(packageName string) GenerateResult {
 	source := generateHeaderPackage(nil, "architecture-kernel", packageName)
 	source = appendArchitectureBackendAPI(source)
+	source = appendPreparedTargetFacts(source, TargetDescriptor{}, false)
 	return GenerateResult{Source: source, Ok: true}
 }
 
@@ -101,10 +102,27 @@ func GeneratePreparedBackend(resolved ResolveResult, targetName string) Generate
 	source := generateHeaderPackage(manifest, target.Descriptor.Name, "main")
 	source = appendDescriptorSource(source, target.Descriptor)
 	source = appendArchitectureBackendAPI(source)
+	source = appendPreparedTargetFacts(source, target.Descriptor, true)
 	source = appendArchitectureFacts(source, resolved.Document, target.Arch, true)
 	source = appendTargetEmbeddedGo(source, resolved.Document, target, true, true)
 	source = appendArchitectureBindings(source, resolved.Document, target.Arch, true, true)
 	return GenerateResult{Source: source, Descriptor: target.Descriptor, Manifest: manifest, Ok: true}
+}
+
+func appendPreparedTargetFacts(source []byte, descriptor TargetDescriptor, active bool) []byte {
+	source = append(source, "\nfunc renvoRTGTargetBinding(target int) (string, string, int, bool) {\n"...)
+	if active {
+		source = append(source, "return "...)
+		source = appendQuoted(source, descriptor.Name)
+		source = append(source, ',')
+		source = appendQuoted(source, string(descriptor.Definition[:]))
+		source = append(source, ',')
+		source = appendDecimalFrame(source, descriptor.Version)
+		source = append(source, ",true\n}\n"...)
+	} else {
+		source = append(source, "return renvoBuiltInTargetBinding(target)\n}\n"...)
+	}
+	return source
 }
 
 func GenerateUniversalBackend(definitions []ResolveResult) GenerateResult {
@@ -137,7 +155,7 @@ func GenerateUniversalBackend(definitions []ResolveResult) GenerateResult {
 	sortStrings(manifest)
 	sortResolvedTargets(targets)
 	source := generateHeader(manifest, "universal")
-	source = append(source, "type RTGTargetDescriptor struct { Name string; OS string; ISA string; WordBits int; PointerBits int; Endian string; ABI string; Runtime string; Executable string; Object string; Definition string; Version int }\n"...)
+	source = append(source, "type RTGTargetDescriptor struct { Name string; OS string; ISA string; WordBits int; PointerBits int; CodePointerBits int; FunctionPointerBits int; MaxAlign int; ArenaDefault int; Endian string; ABI string; Runtime string; RuntimeOps []string; Executable string; Object string; OutputKind string; Definition string; Version int }\n"...)
 	source = append(source, "func RTGLookupTarget(name string) (RTGTargetDescriptor, bool) {\n"...)
 	source = append(source, "switch name {\n"...)
 	for i := 0; i < len(targets); i++ {
@@ -902,7 +920,7 @@ func trimBlockNewlines(source []byte) []byte {
 }
 
 func appendDescriptorSource(source []byte, descriptor TargetDescriptor) []byte {
-	source = append(source, "type RTGTargetDescriptor struct { Name string; OS string; ISA string; WordBits int; PointerBits int; Endian string; ABI string; Runtime string; Executable string; Object string; Definition string; Version int }\n"...)
+	source = append(source, "type RTGTargetDescriptor struct { Name string; OS string; ISA string; WordBits int; PointerBits int; CodePointerBits int; FunctionPointerBits int; MaxAlign int; ArenaDefault int; Endian string; ABI string; Runtime string; RuntimeOps []string; Executable string; Object string; OutputKind string; Definition string; Version int }\n"...)
 	source = append(source, "var RTGTarget = "...)
 	source = appendDescriptorLiteral(source, descriptor)
 	source = append(source, '\n')
@@ -913,10 +931,10 @@ func appendDescriptorLiteral(source []byte, descriptor TargetDescriptor) []byte 
 	source = append(source, "RTGTargetDescriptor{"...)
 	values := []string{
 		descriptor.Name, descriptor.OS, descriptor.ISA, descriptor.Endian,
-		descriptor.ABI, descriptor.Runtime, descriptor.Executable, descriptor.Object,
+		descriptor.ABI, descriptor.Runtime, descriptor.Executable, descriptor.Object, descriptor.OutputKind,
 		HashText(descriptor.Definition),
 	}
-	names := []string{"Name:", "OS:", "ISA:", "Endian:", "ABI:", "Runtime:", "Executable:", "Object:", "Definition:"}
+	names := []string{"Name:", "OS:", "ISA:", "Endian:", "ABI:", "Runtime:", "Executable:", "Object:", "OutputKind:", "Definition:"}
 	for i := 0; i < len(values); i++ {
 		source = append(source, names[i]...)
 		source = appendQuoted(source, values[i])
@@ -926,6 +944,22 @@ func appendDescriptorLiteral(source []byte, descriptor TargetDescriptor) []byte 
 	source = appendDecimalFrame(source, descriptor.WordBits)
 	source = append(source, ",PointerBits:"...)
 	source = appendDecimalFrame(source, descriptor.PointerBits)
+	source = append(source, ",CodePointerBits:"...)
+	source = appendDecimalFrame(source, descriptor.CodePointerBits)
+	source = append(source, ",FunctionPointerBits:"...)
+	source = appendDecimalFrame(source, descriptor.FunctionPointerBits)
+	source = append(source, ",MaxAlign:"...)
+	source = appendDecimalFrame(source, descriptor.MaxAlign)
+	source = append(source, ",ArenaDefault:"...)
+	source = appendDecimalFrame(source, descriptor.ArenaDefault)
+	source = append(source, ",RuntimeOps:[]string{"...)
+	for i := 0; i < len(descriptor.RuntimeOps); i++ {
+		if i != 0 {
+			source = append(source, ',')
+		}
+		source = appendQuoted(source, descriptor.RuntimeOps[i])
+	}
+	source = append(source, '}')
 	source = append(source, ",Version:"...)
 	source = appendDecimalFrame(source, descriptor.Version)
 	source = append(source, '}')

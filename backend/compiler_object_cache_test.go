@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"renvo.dev/backend/unit"
+	"renvo.dev/internal/targetinfo"
+	internalunit "renvo.dev/internal/unit"
 )
 
 func TestDarwinObjectCacheRelinksChangedFunctionWithStableObjects(t *testing.T) {
@@ -147,6 +149,18 @@ func appMain() int { return first() }
 	data, err := unit.Marshal(program)
 	if err != nil {
 		t.Fatal(err)
+	}
+	bindingTarget, definition, version, found := targetinfo.Binding("darwin/arm64")
+	if !found {
+		t.Fatal("darwin/arm64 binding unavailable")
+	}
+	data, ok := internalunit.BindTarget(data, internalunit.TargetBinding{
+		Target:            bindingTarget,
+		Definition:        definition,
+		DescriptorVersion: version,
+	})
+	if !ok {
+		t.Fatal("could not bind unit")
 	}
 	options := RenvoCompileOptions{StripSymbols: true}
 	session := RenvoBeginCompileSession(data, "darwin/arm64", "-", options)

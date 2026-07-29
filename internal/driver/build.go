@@ -4,6 +4,8 @@ import (
 	"renvo.dev/internal/arena"
 	"renvo.dev/internal/load"
 	"renvo.dev/internal/pipeline"
+	"renvo.dev/internal/targetinfo"
+	"renvo.dev/internal/unit"
 )
 
 const (
@@ -67,7 +69,7 @@ func BuildUnit(args []string, workDir string, stdRoot string, files []load.Sourc
 	if !built.Ok {
 		return buildFail(result, BuildErrPipeline, "", "", -1, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
-	result.Unit = built.Link.Data
+	result.Unit = bindBuiltInTarget(built.Link.Data, options)
 	return result
 }
 
@@ -133,7 +135,7 @@ func buildFromFSOneShotCompactWithModuleCache(args []string, workDir string, std
 	if !built.Ok {
 		return buildFail(result, BuildErrPipeline, "", "", -1, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
-	result.Unit = built.Link.Data
+	result.Unit = bindBuiltInTarget(built.Link.Data, options)
 	result.Sources = SourceResult{}
 	return result
 }
@@ -198,11 +200,28 @@ func buildFromFSOptions(options Options, workDir string, stdRoot string, moduleC
 	if !built.Ok {
 		return buildFail(result, BuildErrPipeline, "", "", -1, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
-	result.Unit = built.Link.Data
+	result.Unit = bindBuiltInTarget(built.Link.Data, options)
 	if compact {
 		result.Sources = SourceResult{}
 	}
 	return result
+}
+
+func bindBuiltInTarget(data []byte, options Options) []byte {
+	name := backendTargetForOptions(options.Target, options.Mode)
+	target, definition, version, ok := targetinfo.Binding(name)
+	if !ok {
+		return data
+	}
+	var targetBinding unit.TargetBinding
+	targetBinding.Target = target
+	targetBinding.Definition = definition
+	targetBinding.DescriptorVersion = version
+	bound, ok := unit.BindUnboundTarget(data, targetBinding)
+	if !ok {
+		return data
+	}
+	return bound
 }
 
 func rememberEmbeddedBuild(result BuildResult) {

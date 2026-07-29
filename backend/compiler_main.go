@@ -269,6 +269,33 @@ func renvoDecodeUnitProgram(src []byte) (renvoProgram, bool, bool) {
 	return prog, true, ok
 }
 
+func renvoUnitBindingMatchesTarget(src []byte, target int) bool {
+	expectedTarget, expectedDefinition, expectedVersion, ok := renvoRTGTargetBinding(target)
+	bindingStart := len(src) - 52 - len(expectedTarget)
+	if !ok || len(expectedDefinition) != 32 || bindingStart < 14 ||
+		src[0] != renvoUnitMagic[0] || src[1] != renvoUnitMagic[1] ||
+		src[2] != renvoUnitMagic[2] || src[3] != renvoUnitMagic[3] {
+		return false
+	}
+	if renvoUnitRead32(src, 10) != len(src)-14 {
+		return false
+	}
+	targetData := bindingStart + 6
+	hashHeader := targetData + len(expectedTarget)
+	hashData := hashHeader + 6
+	versionHeader := hashData + 32
+	versionData := versionHeader + 6
+	return int(src[bindingStart])|int(src[bindingStart+1])<<8 == 4 &&
+		renvoUnitRead32(src, bindingStart+2) == len(expectedTarget) &&
+		string(src[targetData:hashHeader]) == expectedTarget &&
+		int(src[hashHeader])|int(src[hashHeader+1])<<8 == 5 &&
+		renvoUnitRead32(src, hashHeader+2) == 32 &&
+		string(src[hashData:versionHeader]) == expectedDefinition &&
+		int(src[versionHeader])|int(src[versionHeader+1])<<8 == 6 &&
+		renvoUnitRead32(src, versionHeader+2) == 2 &&
+		int(src[versionData])|int(src[versionData+1])<<8 == expectedVersion
+}
+
 func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 	renvoNonNil(prog)
 	if len(src) < 14 {

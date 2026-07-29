@@ -414,6 +414,7 @@ arch x86_64 {
 # Image fields are declared here. Header/section/relocation are generic
 # definition-language constructs, not precompiled ELF or PE backends.
 format elf64_x86_64 {
+    kind = elf
     byte_order = little
     address_bits = 64
     file_alignment = 0x1000
@@ -472,6 +473,7 @@ format elf64_x86_64 {
 }
 
 format elf64_object_x86_64 {
+    kind = "elf-relocatable"
     byte_order = little
     address_bits = 64
     machine = 62
@@ -494,6 +496,7 @@ format elf64_object_x86_64 {
 }
 
 format pe64_x86_64 {
+    kind = pe
     byte_order = little
     address_bits = 64
     machine = 0x8664
@@ -591,6 +594,7 @@ format pe64_x86_64 {
 }
 
 format coff64_object_x86_64 {
+    kind = coff
     byte_order = little
     address_bits = 64
     machine = 0x8664
@@ -777,12 +781,13 @@ abi windows_x86_64 {
 }
 
 target linux/amd64 {
+    os = linux
     arch = x86_64
     abi = sysv_x86_64
     runtime = linux_x86_64
     executable = elf64_x86_64
     object = elf64_object_x86_64
-    build_tags = ["linux", "amd64"]
+    build_tags = ["linux", "unix", "amd64"]
     capabilities = [
         hosted, executable, object, filesystem, heap,
         argv, environment, linkstatic
@@ -790,6 +795,7 @@ target linux/amd64 {
 }
 
 target windows/amd64 {
+    os = windows
     arch = x86_64
     abi = windows_x86_64
     runtime = win32_x86_64
@@ -804,10 +810,11 @@ target windows/amd64 {
 }
 
 target linux-kernel/amd64 {
+    os = linux
     arch = x86_64
     abi = sysv_x86_64
     runtime = linux_kernel_x86_64
     object = elf64_object_x86_64
-    build_tags = ["linux", "amd64", "renvo_kernel"]
+    build_tags = ["linux", "unix", "amd64", "renvo_kernel"]
     capabilities = [freestanding, kernel_module, object, imports, linkstatic]
 }

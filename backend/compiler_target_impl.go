@@ -186,7 +186,8 @@ func RenvoCompileUnitToOutputStripWindowsGUI(unit []byte, targetName string, out
 
 func RenvoCompileUnitToOutputWithOptions(unit []byte, targetName string, outputPath string, options RenvoCompileOptions) bool {
 	target := renvoParseTargetArg(targetName)
-	if target == 0 || !renvoCompileOptionsValid(target, options) {
+	if target == 0 || !renvoCompileOptionsValid(target, options) ||
+		!renvoUnitBindingMatchesTarget(unit, target) {
 		return false
 	}
 	context := renvoNewCompileContext(target, options.StripSymbols, options.WindowsGUI, options.EmitImage)
@@ -205,7 +206,8 @@ func RenvoCompileUnitToOutputWithOptions(unit []byte, targetName string, outputP
 // path for script execution so the RNVI transport can remain in memory.
 func RenvoCompileUnitToBytesWithOptions(unit []byte, targetName string, options RenvoCompileOptions) ([]byte, bool) {
 	target := renvoParseTargetArg(targetName)
-	if target == 0 || !renvoCompileOptionsValid(target, options) {
+	if target == 0 || !renvoCompileOptionsValid(target, options) ||
+		!renvoUnitBindingMatchesTarget(unit, target) {
 		return nil, false
 	}
 	context := renvoNewCompileContext(target, options.StripSymbols, options.WindowsGUI, options.EmitImage)
@@ -270,7 +272,8 @@ func (s *RenvoCompileSession) Step() bool {
 	}
 	if s.stage == 0 {
 		s.target = renvoParseTargetArg(s.targetName)
-		if s.target == 0 || !renvoCompileOptionsValid(s.target, s.options) {
+		if s.target == 0 || !renvoCompileOptionsValid(s.target, s.options) ||
+			!renvoUnitBindingMatchesTarget(s.unit, s.target) {
 			s.done = true
 			return true
 		}

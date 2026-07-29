@@ -817,22 +817,26 @@ runtime windows_arm64 {
 format elf64_aarch64 {
 	byte_order = little
 	address_bits = 64
+	kind = elf
 	machine = 183
 }
 
 format macho64_arm64 {
 	byte_order = little
 	address_bits = 64
+	kind = "mach-o"
 	cpu = 0x0100000c
 }
 
 format pe64_arm64 {
 	byte_order = little
 	address_bits = 64
+	kind = pe
 	machine = 0xaa64
 }
 
 target linux/aarch64 {
+	os = linux
 	arch = aarch64
 	abi = aapcs64
 	runtime = linux_aarch64
@@ -842,6 +846,7 @@ target linux/aarch64 {
 }
 
 target darwin/arm64 {
+	os = darwin
 	arch = aarch64
 	abi = aapcs64
 	runtime = darwin_arm64
@@ -851,6 +856,7 @@ target darwin/arm64 {
 }
 
 target windows/arm64 {
+	os = windows
 	arch = aarch64
 	abi = windows_arm64
 	runtime = windows_arm64

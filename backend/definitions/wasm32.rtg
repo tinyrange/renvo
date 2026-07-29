@@ -2542,26 +2542,48 @@ runtime vm {
 format wasm_module {
 	byte_order = little
 	address_bits = 32
-	kind = module
+	kind = wasm
 }
 
 format rnvb_v1 {
 	byte_order = little
 	address_bits = 32
-	kind = bytecode
+	kind = rnvm
+}
+
+format browser_wasm {
+	byte_order = little
+	address_bits = 32
+	kind = "html-wasm"
 }
 
 target wasi/wasm32 {
+	os = wasi
 	arch = wasm32
+	max_align = 8
 	abi = wasm32_internal
 	runtime = wasi
 	executable = wasm_module
-	build_tags = [wasip1, wasi, wasm]
+	build_tags = [wasip1, wasi, wasm32, wasm]
+	capabilities = [hosted, executable, filesystem, heap, argv, environment]
+}
+
+target browser/wasm32 {
+	os = browser
+	arch = wasm32
+	max_align = 8
+	abi = wasm32_internal
+	runtime = wasi
+	executable = browser_wasm
+	arena_default = 134217728
+	build_tags = [browser, wasip1, wasi, wasm32, wasm]
 	capabilities = [hosted, executable, filesystem, heap, argv, environment]
 }
 
 target vm/vm32 {
+	os = vm
 	arch = wasm32
+	max_align = 8
 	abi = wasm32_internal
 	runtime = vm
 	executable = rnvb_v1
