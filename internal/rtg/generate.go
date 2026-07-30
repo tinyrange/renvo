@@ -371,7 +371,7 @@ func GenerateUniversalBackend(definitions []ResolveResult) GenerateResult {
 	sortStrings(manifest)
 	sortResolvedTargets(targets)
 	source := generateHeader(manifest, "universal")
-	source = append(source, "type RTGTargetDescriptor struct { Name string; OS string; ISA string; WordBits int; PointerBits int; CodePointerBits int; FunctionPointerBits int; MaxAlign int; ArenaDefault int; Endian string; ABI string; Runtime string; RuntimeOps []string; Executable string; Object string; OutputKind string; Definition string; Version int }\n"...)
+	source = append(source, "type RTGTargetDescriptor struct { Name string; Family string; OS string; ISA string; WordBits int; PointerBits int; CodePointerBits int; FunctionPointerBits int; MaxAlign int; ArenaDefault int; Endian string; ABI string; Runtime string; RuntimeOps []string; Executable string; Object string; OutputKind string; Definition string; Version int }\n"...)
 	source = append(source, "func RTGLookupTarget(name string) (RTGTargetDescriptor, bool) {\n"...)
 	source = append(source, "switch name {\n"...)
 	for i := 0; i < len(targets); i++ {
@@ -1510,7 +1510,7 @@ func trimBlockNewlines(source []byte) []byte {
 }
 
 func appendDescriptorSource(source []byte, descriptor TargetDescriptor) []byte {
-	source = append(source, "type RTGTargetDescriptor struct { Name string; OS string; ISA string; WordBits int; PointerBits int; CodePointerBits int; FunctionPointerBits int; MaxAlign int; ArenaDefault int; Endian string; ABI string; Runtime string; RuntimeOps []string; Executable string; Object string; OutputKind string; Definition string; Version int }\n"...)
+	source = append(source, "type RTGTargetDescriptor struct { Name string; Family string; OS string; ISA string; WordBits int; PointerBits int; CodePointerBits int; FunctionPointerBits int; MaxAlign int; ArenaDefault int; Endian string; ABI string; Runtime string; RuntimeOps []string; Executable string; Object string; OutputKind string; Definition string; Version int }\n"...)
 	source = append(source, "var RTGTarget = "...)
 	source = appendDescriptorLiteral(source, descriptor)
 	source = append(source, '\n')
@@ -1520,11 +1520,11 @@ func appendDescriptorSource(source []byte, descriptor TargetDescriptor) []byte {
 func appendDescriptorLiteral(source []byte, descriptor TargetDescriptor) []byte {
 	source = append(source, "RTGTargetDescriptor{"...)
 	values := []string{
-		descriptor.Name, descriptor.OS, descriptor.ISA, descriptor.Endian,
+		descriptor.Name, descriptor.Family, descriptor.OS, descriptor.ISA, descriptor.Endian,
 		descriptor.ABI, descriptor.Runtime, descriptor.Executable, descriptor.Object, descriptor.OutputKind,
 		HashText(descriptor.Definition),
 	}
-	names := []string{"Name:", "OS:", "ISA:", "Endian:", "ABI:", "Runtime:", "Executable:", "Object:", "OutputKind:", "Definition:"}
+	names := []string{"Name:", "Family:", "OS:", "ISA:", "Endian:", "ABI:", "Runtime:", "Executable:", "Object:", "OutputKind:", "Definition:"}
 	for i := 0; i < len(values); i++ {
 		source = append(source, names[i]...)
 		source = appendQuoted(source, values[i])
@@ -1596,31 +1596,7 @@ func appendArchitectureEmbeddedGo(source []byte, document Document, arch Declara
 }
 
 func appendTargetEmbeddedGo(source []byte, document Document, target ResolvedTarget, mangle bool, nativeEmitter bool, exposeExports bool) []byte {
-	roots := architectureGoRoots(target.Arch)
-	roots = appendDeclarationGoRoots(roots, target.ABI)
-	abi := target.ABI
-	for {
-		internal, ok := fieldValue(document, abi, "internal")
-		if !ok {
-			break
-		}
-		base, ok := document.Declaration(DeclABI, internal)
-		if !ok {
-			break
-		}
-		roots = appendDeclarationGoRoots(roots, base)
-		abi = base
-	}
-	roots = appendDeclarationGoRoots(roots, target.Runtime)
-	roots = appendDeclarationGoRoots(roots, target.Executable)
-	roots = appendDeclarationGoRoots(roots, target.Object)
-	roots = appendDeclarationGoRoots(roots, target.Declaration)
-	if len(roots) == 0 {
-		// Definitions predating declarative hook references treated every
-		// embedded declaration as an exported target algorithm.
-		roots = embeddedGoNames(document)
-	}
-	sortStrings(roots)
+	roots := targetGoRoots(document, target)
 	if !mangle {
 		body := reachableEmbeddedGo(document, roots)
 		if len(body) != 0 {
@@ -1750,6 +1726,16 @@ func reachableEmbeddedGo(document Document, roots []string) []byte {
 }
 
 func reachableEmbeddedGoExcluding(document Document, roots []string, excluded []string) []byte {
+	parts := reachableEmbeddedGoParts(document, roots, excluded)
+	var out []byte
+	for i := 0; i < len(parts); i++ {
+		out = append(out, parts[i].source...)
+		out = append(out, '\n')
+	}
+	return out
+}
+
+func reachableEmbeddedGoParts(document Document, roots []string, excluded []string) []embeddedGoPart {
 	var combined []byte
 	for i := 0; i < len(document.Declarations); i++ {
 		declaration := document.Declarations[i]
@@ -1842,12 +1828,11 @@ func reachableEmbeddedGoExcluding(document Document, roots []string, excluded []
 			}
 		}
 	}
-	var out []byte
+	var out []embeddedGoPart
 	for i := 0; i < len(parts); i++ {
 		if stringIndex(reachable, parts[i].name) >= 0 &&
 			stringIndex(excluded, parts[i].name) < 0 {
-			out = append(out, parts[i].source...)
-			out = append(out, '\n')
+			out = append(out, parts[i])
 		}
 	}
 	return out

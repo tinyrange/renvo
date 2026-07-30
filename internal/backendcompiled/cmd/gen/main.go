@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"flag"
 	"fmt"
+	"go/ast"
+	"go/parser"
 	"go/scanner"
 	"go/token"
 	"os"
@@ -60,9 +62,13 @@ func main() {
 		if packageAt < 0 {
 			fail(fmt.Errorf("%s has no package main declaration", name))
 		}
+		preparedSource, err := specializePreparationSource(name, source)
+		if err != nil {
+			fail(err)
+		}
 		digestSource.WriteString(name)
 		digestSource.WriteByte(0)
-		digestSource.Write(source)
+		digestSource.Write(preparedSource)
 		if !bytes.HasPrefix(source, []byte("//go:build renvo\n")) {
 			out.WriteString("// source: backend/")
 			out.WriteString(name)
@@ -79,9 +85,9 @@ func main() {
 		sourceSizes.WriteString("\tif index == ")
 		sourceSizes.WriteString(indexText)
 		sourceSizes.WriteString(" { return ")
-		sourceSizes.WriteString(strconv.Itoa(len(source)))
+		sourceSizes.WriteString(strconv.Itoa(len(preparedSource)))
 		sourceSizes.WriteString(" }\n")
-		chunks := compressedChunks(compress(source))
+		chunks := compressedChunks(compress(preparedSource))
 		sourceChunkCounts.WriteString("\tif index == ")
 		sourceChunkCounts.WriteString(indexText)
 		sourceChunkCounts.WriteString(" { return ")
@@ -144,6 +150,53 @@ func compilerSourceChunk(index int, chunk int) string {
 	if err := os.WriteFile(*sourcesOutput, sourceBundle.Bytes(), 0o644); err != nil {
 		fail(err)
 	}
+}
+
+func specializePreparationSource(name string, source []byte) ([]byte, error) {
+	if name != "compiler_target_policy_impl.go" {
+		return source, nil
+	}
+	const identifier = "renvoPreparedBackend"
+	files := token.NewFileSet()
+	file, err := parser.ParseFile(files, name, source, 0)
+	if err != nil {
+		return nil, fmt.Errorf("parse preparation setting in %s: %w", name, err)
+	}
+	start := -1
+	end := -1
+	for _, declaration := range file.Decls {
+		generic, ok := declaration.(*ast.GenDecl)
+		if !ok || generic.Tok != token.CONST {
+			continue
+		}
+		for _, item := range generic.Specs {
+			specification, ok := item.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for i, declared := range specification.Names {
+				if declared.Name != identifier {
+					continue
+				}
+				if start >= 0 {
+					return nil, fmt.Errorf("%s declares %s more than once", name, identifier)
+				}
+				if len(specification.Names) != 1 || len(specification.Values) != 1 || i != 0 {
+					return nil, fmt.Errorf("%s must declare %s as one const with one value", name, identifier)
+				}
+				start = files.Position(specification.Values[0].Pos()).Offset
+				end = files.Position(specification.Values[0].End()).Offset
+			}
+		}
+	}
+	if start < 0 || end <= start {
+		return nil, fmt.Errorf("%s does not declare the preparation const %s", name, identifier)
+	}
+	prepared := make([]byte, 0, len(source)-end+start+1)
+	prepared = append(prepared, source[:start]...)
+	prepared = append(prepared, '1')
+	prepared = append(prepared, source[end:]...)
+	return prepared, nil
 }
 
 func compactCompiledSource(source []byte) []byte {

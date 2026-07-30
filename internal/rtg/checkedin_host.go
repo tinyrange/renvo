@@ -24,8 +24,9 @@ func GenerateCheckedInArchitectureAlgorithms(resolved ResolveResult, archName st
 	}
 	manifest := []string{resolved.Document.Unit + " " + HashText(resolved.Document.Hash)}
 	source := generateHeaderPackage(manifest, "algorithms/"+archName, packageName)
+	projection := checkedInProjectionDocument(resolved.Document, arch)
 	roots := architectureExportGoRoots(arch)
-	source = appendReachableEmbeddedGo(source, resolved.Document, roots, true, architectureExports(arch))
+	source = appendReachableEmbeddedGo(source, projection, roots, true, architectureExports(arch))
 	return GenerateResult{Source: source, Manifest: manifest, Ok: true}
 }
 
@@ -60,7 +61,8 @@ func GenerateCheckedInArchitectureContract(resolved ResolveResult, archName stri
 	manifest := []string{resolved.Document.Unit + " " + HashText(resolved.Document.Hash)}
 	source := []byte("//go:build !renvo\n\n")
 	source = append(source, generateHeaderPackage(manifest, "contract/"+archName, packageName)...)
-	source = appendArchitectureFacts(source, resolved.Document, arch, true)
+	projection := checkedInProjectionDocument(resolved.Document, arch)
+	source = appendArchitectureFacts(source, projection, arch, true)
 	roots := architectureDirectGoRoots(arch)
 	exports := architectureExports(arch)
 	excluded := make([]string, 0, len(exports))
@@ -68,9 +70,22 @@ func GenerateCheckedInArchitectureContract(resolved ResolveResult, archName stri
 		excluded = append(excluded, exports[i].Local)
 	}
 	source = appendReachableEmbeddedGoExcluding(
-		source, resolved.Document, roots, true, exports, excluded)
-	source = appendArchitectureBindings(source, resolved.Document, arch, true, true)
-	source = appendDirectEmitterBindings(source, resolved.Document, arch, true, true)
-	source = appendArchitectureHooks(source, resolved.Document, arch, true)
+		source, projection, roots, true, exports, excluded)
+	source = appendArchitectureBindings(source, projection, arch, true, true)
+	source = appendDirectEmitterBindings(source, projection, arch, true, true)
+	source = appendArchitectureHooks(source, projection, arch, true)
 	return GenerateResult{Source: source, Manifest: manifest, Ok: true}
+}
+
+func checkedInProjectionDocument(document Document, arch Declaration) Document {
+	count := 0
+	for i := 0; i < len(document.Declarations); i++ {
+		if document.Declarations[i].Kind == DeclArch {
+			count++
+		}
+	}
+	if count > 1 {
+		document.Unit = arch.Name
+	}
+	return document
 }

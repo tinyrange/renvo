@@ -3,1910 +3,1519 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Renvo Machine Definitions and Dynamic Backends Plan</title>
+  <title>Renvo Native Backend Scalability Plan</title>
   <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f4f1e8;
+      --panel: #fffdf7;
+      --ink: #20251f;
+      --muted: #62695f;
+      --line: #d4d0c4;
+      --accent: #175c4b;
+      --accent-soft: #dcece5;
+      --warn: #8a4b0f;
+      --warn-soft: #f7e6cf;
+      --code: #17201c;
+      --code-ink: #e7f2eb;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111612;
+        --panel: #192019;
+        --ink: #e6ece5;
+        --muted: #adb8ad;
+        --line: #374138;
+        --accent: #82d2b4;
+        --accent-soft: #203d33;
+        --warn: #f2b46f;
+        --warn-soft: #432e1d;
+        --code: #0c110e;
+        --code-ink: #dce9e0;
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
     body {
-      margin: 2rem;
-      max-width: 1040px;
-      color: #1f2328;
-      font: 16px/1.55 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 17px/1.62 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
-
-    h1 {
-      margin: 0 0 0.5rem;
-      font-size: 2rem;
-      line-height: 1.15;
+    main {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 48px 0 96px;
     }
-
-    h2 {
-      margin: 2rem 0 0.6rem;
-      font-size: 1.35rem;
+    header, section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 30px 34px;
+      margin: 0 0 22px;
+      box-shadow: 0 8px 28px rgb(0 0 0 / 6%);
     }
-
-    h3 {
-      margin: 1.4rem 0 0.45rem;
-      font-size: 1.08rem;
+    header {
+      border-top: 7px solid var(--accent);
+      padding-top: 26px;
     }
-
-    p {
-      margin: 0 0 1rem;
+    h1, h2, h3, h4 {
+      line-height: 1.2;
+      letter-spacing: -0.02em;
+      scroll-margin-top: 18px;
     }
-
-    ol,
-    ul {
-      margin: 0 0 1rem;
-      padding-left: 1.45rem;
+    h1 { margin: 0 0 12px; font-size: clamp(2.2rem, 5vw, 4rem); }
+    h2 { margin: 0 0 18px; font-size: 2rem; }
+    h3 { margin: 30px 0 10px; font-size: 1.35rem; }
+    h4 { margin: 24px 0 8px; font-size: 1.08rem; }
+    p { margin: 10px 0 16px; }
+    a { color: var(--accent); }
+    nav {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 8px 18px;
+      margin-top: 22px;
     }
-
-    li {
-      margin: 0.4rem 0;
+    nav a {
+      text-decoration: none;
+      border-bottom: 1px dotted var(--line);
+      padding: 5px 0;
     }
-
+    ul, ol { padding-left: 1.4rem; }
+    li { margin: 7px 0; }
     code {
-      background: #f3f4f6;
-      border: 1px solid #d8dee4;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.91em;
+    }
+    :not(pre) > code {
+      color: var(--accent);
+      background: var(--accent-soft);
       border-radius: 5px;
-      padding: 0.08rem 0.32rem;
-      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-      font-size: 0.92em;
+      padding: 0.12em 0.35em;
     }
-
     pre {
-      overflow-x: auto;
-      margin: 0 0 1rem;
-      padding: 0.85rem 1rem;
-      background: #f6f8fa;
-      border: 1px solid #d8dee4;
-      border-radius: 6px;
-      line-height: 1.4;
+      overflow: auto;
+      padding: 20px;
+      border-radius: 10px;
+      background: var(--code);
+      color: var(--code-ink);
+      line-height: 1.48;
+      border: 1px solid var(--line);
     }
-
-    pre code {
-      padding: 0;
-      border: 0;
-      background: transparent;
-    }
-
     table {
       width: 100%;
-      margin: 0 0 1rem;
       border-collapse: collapse;
+      margin: 18px 0 24px;
+      font-size: 0.94rem;
     }
-
-    th,
-    td {
-      padding: 0.55rem 0.65rem;
-      border: 1px solid #d0d7de;
+    th, td {
+      border: 1px solid var(--line);
       text-align: left;
       vertical-align: top;
+      padding: 10px 12px;
     }
-
-    th {
-      background: #f6f8fa;
+    th { background: var(--accent-soft); }
+    .lead {
+      font-size: 1.2rem;
+      max-width: 900px;
     }
-
-    .summary {
-      color: #57606a;
-      font-size: 1.05rem;
+    .meta {
+      color: var(--muted);
+      font-size: 0.93rem;
     }
-
-    .note {
-      margin: 0 0 1rem;
-      padding: 0.8rem 1rem;
-      border-left: 4px solid #0969da;
-      background: #f6f8fa;
+    .decision, .warning, .exit {
+      border-left: 5px solid var(--accent);
+      background: var(--accent-soft);
+      padding: 16px 20px;
+      margin: 20px 0;
+      border-radius: 0 9px 9px 0;
     }
-
+    .warning {
+      border-left-color: var(--warn);
+      background: var(--warn-soft);
+    }
+    .exit {
+      background: transparent;
+      border-top: 1px solid var(--line);
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+    .label {
+      display: inline-block;
+      margin-right: 8px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 0.8rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .two {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 17px 19px;
+    }
+    .card h3, .card h4 { margin-top: 0; }
+    details {
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 12px 16px;
+      margin: 12px 0;
+    }
+    summary { cursor: pointer; font-weight: 700; }
+    @media (max-width: 760px) {
+      main { width: min(100% - 18px, 1120px); padding-top: 18px; }
+      header, section { padding: 22px 19px; }
+      .two { grid-template-columns: 1fr; }
+      table { display: block; overflow-x: auto; }
+    }
+    @media print {
+      body { background: white; color: black; font-size: 11pt; }
+      main { width: 100%; padding: 0; }
+      header, section { break-inside: avoid; box-shadow: none; border-color: #aaa; }
+      pre { white-space: pre-wrap; }
+    }
   </style>
 </head>
 <body>
-  <h1>Renvo Machine Definitions and Dynamic Backends Plan</h1>
-  <p class="summary">
-    Implementation plan for
-    <a href="https://github.com/tinyrange/renvo/issues/129">#129</a>,
-    the machine-definition backend rewrite, followed by
-    <a href="https://github.com/tinyrange/renvo/issues/131">#131</a>,
-    on-the-fly targets with staged native backend specialization.
-  </p>
-
-  <h2>Outcome</h2>
-  <p>
-    A Renvo compiler will be able to compile deterministic <code>.rtg</code>
-    machine definitions into ordinary, direct Go backend code. Generated
-    backends will implement the full backend contract without interpreting
-    recipes while compiling user programs. Once that generated path is proven,
-    an existing Renvo compiler will be able to accept a previously unknown
-    target definition, prepare a host-native specialized backend using Renvo
-    itself, cache it, and use it in the same invocation.
-  </p>
-  <p>
-    The work is one initiative with a strict dependency: #129 establishes the
-    definition language and generated backend contract, proves them on
-    AArch64 and amd64, then migrates every advertised backend; #131 adds
-    dynamic frontend discovery, preparation, execution, artifacts, and
-    caching. The two issues should not be implemented as one large branch.
-  </p>
-
-  <h2>Definition of Done</h2>
-
-  <h3>Issue #129</h3>
-  <ul>
-    <li>A documented, versioned <code>.rtg</code> language describes IR operations, architectures, ABIs, runtimes, image formats, relocations, and target composition.</li>
-    <li>The parser, resolver, validator, canonicalizer, and Go emitter expose byte-slice-based APIs and compile with Renvo.</li>
-    <li>Generated source is deterministic, self-hostable, and records a sorted unit/hash manifest, generator version, and either the selected canonical target or an explicit universal marker.</li>
-    <li>Generated production backends contain direct Go control flow and calls, with no recipe interpreter, definition AST, dynamic property lookup, or generic target dispatch in the user-program code-generation path.</li>
-    <li>Every advertised backend is migrated to the generated contract, including AArch64, ARM, 386, amd64, Wasm, and VM targets.</li>
-    <li>Each migrated architecture keeps genuinely algorithmic work as ordinary embedded Go in its owning definition; no advertised target remains on a parallel legacy backend.</li>
-    <li>Target-independent semantic lowering is shared and no architecture backend recursively lowers frontend expressions.</li>
-    <li>Fixed-target compilation prunes unrelated generated architectures, ABIs, runtimes, and formats.</li>
-    <li>Migration comparisons demonstrate byte equivalence with the replaced legacy outputs where deterministic and semantic equivalence everywhere else.</li>
-    <li>The complete backend suite, frontend suite, and full self-hosting suite pass without loosening any correctness, time, memory, or binary-size gate.</li>
-  </ul>
-
-  <h3>Issue #131</h3>
-  <ul>
-    <li><code>renvo -backend machines.rtg -t target/name</code> accepts a target unknown to the release compiler; <code>-t</code> remains authoritative when a file declares several targets.</li>
-    <li>The frontend obtains target-dependent source-selection and layout facts before collecting or checking source.</li>
-    <li>The generated target-specialized backend is compiled for the current host by Renvo without invoking the host Go toolchain.</li>
-    <li>The frontend invokes that backend through a stable, versioned protocol and produces the requested output in one command on process-capable hosts.</li>
-    <li>Prepared backends are cached by content and compiler compatibility, and reusable <code>.rtgb</code> artifacts can be distributed without source definitions.</li>
-    <li>RTGU units are bound to the definition and descriptor used by the frontend; mismatched units are rejected before machine-code generation.</li>
-    <li>Embedders can replace persistent storage and backend execution without changing the definition compiler.</li>
-    <li>Cold preparation, warm end-to-end compilation, backend-core execution, memory, and artifact size are measured separately and gated once stable baselines exist.</li>
-  </ul>
-
-  <h2>Non-Negotiable Design Rules</h2>
-  <ul>
-    <li><strong>Definitions compile ahead of time.</strong> No generic recipe VM or definition interpreter may remain in the generated backend hot path.</li>
-    <li><strong>Direct emission remains the initial model.</strong> Do not add an instruction tape, decode pass, instruction objects, or runtime function registry merely to support generation.</li>
-    <li><strong>Generated code stays in Renvo's backend subset.</strong> Use simple structs, slices, strings, integers, booleans, loops, conditionals, and direct calls. Avoid maps, interfaces, reflection, generics, closures, and function values.</li>
-    <li><strong>No hidden backend.</strong> A definition owns its ISA encoding, address forms, selection rules, ABI adapters, runtime boundary, relocations, image layout, and composition. A small generated-runtime library may provide target-neutral byte, label, relocation, section, hashing, and signing primitives, but not an x86 encoder or OS backend.</li>
-    <li><strong>Definitions are closed units.</strong> A distributable machine definition is one self-contained file. It may contain many reusable named declarations and target compositions, but it cannot depend on imported <code>.rtg</code> files or an ambient definition search path.</li>
-    <li><strong>Use Go for algorithms.</strong> A definition may contain embedded Go declarations written in Renvo's supported subset. Prefer declarative tables for facts and composition; use Go for encoding, selection, ABI shuffles, runtime adapters, and image algorithms where Go is simpler. Embedded Go is parsed and type-checked, then emitted as ordinary declarations in the generated backend package. It is part of the file and definition hash—not an external hook.</li>
-    <li><strong>Composition resolves during generation.</strong> Architecture, ABI, runtime, relocation, output format, pointer width, and endianness choices become constants and direct calls in generated source.</li>
-    <li><strong>Emitter and frontend architectures are distinct only when explicit.</strong> A target normally exposes its <code>arch</code> as the frontend architecture. A target such as Wasm that is constructed from the shared <code>vm32</code> emitter must state <code>frontend_arch = wasm32</code>; the VM target states <code>frontend_arch = vm32</code>. Width never implies either value.</li>
-    <li><strong>Target selection is explicit.</strong> A source definition supplies target choices but never chooses one from its filename, declaration order, or contents. Existing option resolution selects the canonical target, with an explicit <code>-t</code> authoritative over system defaults. A prepared artifact is already fixed to exactly one target.</li>
-    <li><strong>One production authority.</strong> Generated and legacy implementations may coexist behind test-only comparison during migration, but production compilation must select exactly one implementation.</li>
-    <li><strong>Existing gates remain authoritative.</strong> Do not modify <code>backend/main_test.go</code> or loosen target-specific performance limits to make the rewrite pass.</li>
-    <li><strong>No host Go dependency at use time.</strong> Host Go may build the initial development tool while bootstrapping, but the shared parser, validator, and emitter must converge immediately toward Renvo-compatible source.</li>
-  </ul>
-
-  <h2>One Coherent <code>.rtg</code> Language</h2>
-  <p>
-    Renvo already uses <code>.rtg</code> files for hosted system profiles. The
-    machine-definition work must extend that language rather than create a
-    second incompatible parser for the same extension. A document is a
-    deterministic sequence of named top-level declarations:
-  </p>
-  <ul>
-    <li><code>system</code>: an existing target plus binary and arena constraints;</li>
-    <li><code>unit</code>: the required stable namespace of a machine-definition file;</li>
-    <li><code>ir</code>: the canonical direct-emitter operation contract;</li>
-    <li><code>arch</code>: registers, locations, instruction facts, operation bindings, and references to local Go implementations;</li>
-    <li><code>abi</code>: call words, stack rules, clobbers, aggregate results, entry conventions, and external-call marshalling;</li>
-    <li><code>runtime</code>: startup and the supported runtime-operation surface;</li>
-    <li><code>format</code>: image sections, headers, relocations, symbols, and format constants;</li>
-    <li><code>target</code>: composition of one architecture, ABI, runtime, and format with target-specific parameters.</li>
-    <li><code>go backend</code>: parsed package-level Go declarations implementing algorithms named by the declarations above.</li>
-  </ul>
-  <p>
-    Existing system profiles remain valid. New declaration kinds use the same
-    lexer, source positions, literals, comments, numeric units, diagnostics,
-    canonicalization, and version rules.
-  </p>
-  <p>
-    A machine-definition document is a closed package. It can define an ISA
-    once and combine it with several ABIs, hosted runtimes, firmware
-    environments, and image formats in the same file. This follows the
-    separation in issue #24 without forcing one file per OS/architecture tuple:
-    Linux, Windows, UEFI, Darwin, and future BSD x86-64 targets reuse named
-    components inside the file. The only external contract is a versioned
-    built-in IR vocabulary such as <code>direct_emitter_v1</code>.
-  </p>
-  <p>
-    A machine-definition file declares exactly one stable <code>unit</code>
-    name. Canonical target names are exported for <code>-t</code>; all other
-    RTG declarations and embedded Go names are local to the unit. During
-    emission the generator rewrites declared Go identifiers and their resolved
-    references with a deterministic unit prefix. Authored Go stays readable,
-    fixed and universal builds use identical symbols, and combining several
-    closed files cannot create package-level name collisions.
-  </p>
-  <p>
-    A <code>go backend { ... }</code> block contains ordinary package-level Go
-    declarations. The outer <code>.rtg</code> parser finds the balanced block;
-    its body is handed intact to the existing Go parser and checker, restricted
-    to the self-hostable backend subset, and emitted as declarations in the
-    specialized backend package. This is source-to-source generation: calls to
-    a named embedded function become ordinary direct Go calls. The definition
-    compiler supplies a small typed API for byte emission, labels, relocations,
-    sections, diagnostics, and bound IR locations. The block has no
-    <code>package</code> clause or imports and cannot reach host services during
-    generation. The leading <code>definition 1</code> selects both the
-    declarative grammar and this RTG Go API; an incompatible API change requires
-    a new definition-language version.
-  </p>
-
-  <h3>Parsing and diagnostics</h3>
-  <ul>
-    <li>The core accepts source bytes and a logical filename and returns definitions plus structured diagnostics; filesystem traversal stays in a thin host wrapper.</li>
-    <li>Every token and declaration retains byte offsets for precise diagnostics without retaining unnecessary source copies.</li>
-    <li>Unknown fields, duplicate declarations, duplicate unit names, canonical target or alias collisions, invalid literals, reference cycles, and version mismatches fail explicitly.</li>
-    <li>The parser does not evaluate Go, accept raw generated-source fragments, or splice unchecked identifiers into output.</li>
-    <li>Embedded Go compiler directives, line directives, package clauses, and imports are rejected, so comments and source paths cannot change generated semantics.</li>
-    <li>The <code>RTG</code> identifier prefix is reserved for the versioned generated-backend API; embedded declarations cannot shadow it.</li>
-    <li>Malformed-input tests cover truncation at every token boundary, invalid UTF-8 where relevant, deep nesting limits, oversized tables, duplicate names, and cyclic composition.</li>
-  </ul>
-
-  <h3>Canonicalization and identity</h3>
-  <ul>
-    <li>Canonical form is independent of comments, whitespace, input path, and declaration ordering where order has no semantics.</li>
-    <li>Names and literal values are normalized before hashing.</li>
-    <li>Embedded Go is parsed first and contributes its normalized syntax tree to the definition hash; formatting and comments do not change identity, while any executable change does.</li>
-    <li>The whole closed definition file contributes to the canonical hash; machine definitions have no imported <code>.rtg</code> dependencies.</li>
-    <li>The definition hash identifies the complete file's semantics, while the canonical target name identifies the selected composition within that file.</li>
-    <li>Initially, changing any declaration conservatively invalidates prepared artifacts for every target in the file. A reachable per-target semantic hash is deferred until real cache behavior justifies its extra complexity.</li>
-    <li>The generator version, backend-kernel version, RTGU schema version, and host tuple remain separate compatibility fields rather than being hidden inside the definition hash.</li>
-  </ul>
-
-  <h2>Core APIs and Ownership</h2>
-  <p>
-    Package names may change during implementation, but ownership should remain
-    separated along these boundaries:
-  </p>
-  <table>
-    <thead>
-      <tr>
-        <th>Layer</th>
-        <th>Responsibility</th>
-        <th>Must not own</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td>Definition core</td>
-        <td>Lexing, parsing, resolving, validation, canonicalization, hashing, and structured diagnostics.</td>
-        <td>Filesystem policy, process execution, cache paths, or user-program compilation.</td>
-      </tr>
-      <tr>
-        <td>IR contract</td>
-        <td>Stable operation names, typed operands, locations, effects, clobbers, control flow, labels, symbols, and relocation effects.</td>
-        <td>Source-language expression trees or target-specific instruction selection.</td>
-      </tr>
-      <tr>
-        <td>Go generator</td>
-        <td>Deterministic Renvo-subset source, direct dispatch, specialized constants and wrappers, plus validated embedded Go declarations.</td>
-        <td>A runtime definition representation or host-Go-only formatting dependency.</td>
-      </tr>
-      <tr>
-        <td>Backend kernel</td>
-        <td>Shared semantic lowering plus target-neutral byte, label, relocation, section, hashing, signing, and image-buffer primitives.</td>
-        <td>Target-name fan-out that generation can resolve.</td>
-      </tr>
-      <tr>
-        <td>Frontend descriptor</td>
-        <td>Source selection, scalar and pointer widths, alignment, endianness, runtime/output capabilities, aliases, and definition identity.</td>
-        <td>Registers, encodings, relocations, or image-construction details.</td>
-      </tr>
-      <tr>
-        <td>Preparation service</td>
-        <td>Generate specialized source, invoke the explicit host-bootstrap backend, package artifacts, and report preparation diagnostics.</td>
-        <td>Normal frontend checking or recursive backend preparation.</td>
-      </tr>
-      <tr>
-        <td>Cache and runner</td>
-        <td>Artifact persistence and execution on process-capable hosts or through embedding callbacks.</td>
-        <td>Definition semantics or generated code selection.</td>
-      </tr>
-    </tbody>
-  </table>
-
-  <p>
-    Conceptual in-memory operations:
-  </p>
-  <pre><code>ParseDefinitions(source []byte, filename string) ParseResult
-ResolveDefinitions(parsed ParseResult) ResolveResult
-GenerateFixedBackend(resolved ResolveResult, target string) GenerateResult
-GenerateUniversalBackend(definitions []ResolveResult) GenerateResult
-BuildPreparedBackend(generated GenerateResult, host HostTarget) PrepareResult</code></pre>
-  <p>
-    Result values should carry output bytes, structured diagnostics, descriptor
-    data, and success state directly. They should not require interfaces or
-    callbacks in the self-hosted core. Dynamic preparation always uses the
-    fixed-target entrypoint. The universal entrypoint combines several closed
-    definition units for the bundled all-target compiler and equivalence tests,
-    rejects duplicate canonical targets, and generates explicit target
-    dispatch; each fixed output contains none.
-  </p>
-
-  <h2>Frontend Target Descriptor</h2>
-  <p>
-    The descriptor is the only definition projection visible to frontend
-    source collection and semantic checking. Its initial information must
-    include:
-  </p>
-  <ul>
-    <li>canonical target name and aliases;</li>
-    <li>OS/architecture and explicit build tags;</li>
-    <li><code>int</code>, data pointer, code pointer, and function pointer widths;</li>
-    <li>maximum alignment and byte order;</li>
-    <li>runtime capabilities and output capabilities;</li>
-    <li>definition hash and descriptor schema version;</li>
-    <li>default arena policy or other frontend-visible hosted constraints only where they affect program construction.</li>
-  </ul>
-  <p>
-    Registers, instruction alternatives, ABI lowering, relocations, imports,
-    and image-format details never enter the frontend descriptor. Built-in
-    targets and external definitions use the same descriptor path so behavior
-    cannot diverge.
-  </p>
-
-  <h2>IR and Generated Backend Contract</h2>
-
-  <h3>IR schema</h3>
-  <p>
-    Start from <code>backend/docs/backend-ir.md</code> and the existing direct
-    emitter boundary. Each operation declaration records:
-  </p>
-  <ul>
-    <li>a stable operation name and typed operands;</li>
-    <li>primary, secondary, tertiary, stack, frame, call-word, label, symbol, data, and BSS location reads and writes;</li>
-    <li>clobbers and preserved locations;</li>
-    <li>memory width, signedness, and alignment behavior;</li>
-    <li>control-flow, fallthrough, branch, call, and return behavior;</li>
-    <li>label, symbol, relocation, and fixup effects;</li>
-    <li>required target capabilities and any explicitly permitted rejection.</li>
-  </ul>
-  <p>
-    The schema generates completeness checks, neutral wrappers where useful,
-    effect contracts, documentation projections, and boundary tests. Semantic
-    lowering remains handwritten once in the shared backend kernel.
-  </p>
-
-  <h3>Architecture generation</h3>
-  <ul>
-    <li>Instruction tables declare names, fixed opcode facts, widths, and the local embedded Go function that emits them.</li>
-    <li>Instruction rows are validated for required fields, literal widths, referenced embedded-Go signatures, and compatibility with the bound IR operation.</li>
-    <li>The generator specializes table rows into direct Go wrappers; the actual encoding algorithm remains readable ordinary Go in the same definition.</li>
-    <li>Width and signedness variants are specialized when that removes runtime branches without materially inflating specialized binaries.</li>
-    <li>Fixed byte sequences use the widest existing append operation that preserves output and code size.</li>
-    <li>Generated names come only from the stable unit name and resolved local identifiers through one deterministic mangling rule.</li>
-  </ul>
-
-  <h3>ABI, runtime, and format generation</h3>
-  <ul>
-    <li>ABI definitions supply register/location mappings, stack alignment, saved and clobbered registers, overflow arguments, aggregate results, entry arguments, and foreign-call rules.</li>
-    <li>Runtime definitions map the small Renvo runtime-operation surface to declared syscalls, imports, host facilities, firmware entry points, or precise unsupported diagnostics.</li>
-    <li>Format definitions supply header constants, sections, alignments, machine identifiers, relocation mappings, and direct append/patch layout code.</li>
-    <li>Nontrivial target-format algorithms are embedded Go; only genuinely target-neutral buffer, hashing, and signing primitives are shared.</li>
-    <li>Target composition validates compatible word width, pointer width, endianness, ABI, runtime capabilities, relocations, and image format before source is emitted.</li>
-  </ul>
-
-  <h3>Embedded Go boundary</h3>
-  <p>
-    Algorithms live in explicit <code>go backend</code> blocks in the same
-    definition that names them. They are not string fragments: the existing Go
-    parser produces an AST, the definition checker resolves their RTG API and
-    generated-symbol references, and the Go emitter writes those declarations
-    into the specialized backend package. The only library boundary is a
-    closed, target-neutral API for bytes, labels, relocations, sections,
-    diagnostics, and image buffers. Every target-specific constant and choice
-    remains in the file.
-  </p>
-
-  <h2>Implementation Phases</h2>
-
-  <h3>Phase 0: Freeze baselines</h3>
-  <ol>
-    <li>Record deterministic output hashes for representative programs on every advertised target.</li>
-    <li>Record semantic omnibus results where images contain nondeterministic or platform-specific metadata.</li>
-    <li>Record current specialized and universal compiler size, runtime, peak RSS, writable reservation, and self-host measurements.</li>
-    <li>List the current IR operation surface and every architecture, ABI, runtime, format, relocation, and target-selection branch.</li>
-    <li>Add comparison helpers only where they expose production output without changing the compiler or harness behavior.</li>
-  </ol>
-  <p class="note">
-    Exit condition: the migration can identify a changed byte, semantic result,
-    resource measurement, or pruning result before any generated backend becomes
-    authoritative.
-  </p>
-
-  <h3>Phase 1: Shared language and generator core</h3>
-  <ol>
-    <li>Implement the Renvo-compatible lexer, parser, source positions, diagnostics, resolver, canonicalizer, and hash calculation.</li>
-    <li>Move the existing hosted <code>system</code> profile grammar onto the shared parser without changing accepted files or option behavior.</li>
-    <li>Define versioned top-level declaration and reference rules.</li>
-    <li>Implement deterministic source emission without depending on <code>go/format</code>.</li>
-    <li>Add a small but real AArch64 encoding slice that generates compilable direct Go.</li>
-    <li>Compile the generator and its generated source through both host Go and Renvo.</li>
-    <li>Add a stale-output check and generated-file header carrying a sorted unit/hash manifest, generator version, and either the selected canonical target or an explicit universal marker.</li>
-  </ol>
-  <p class="note">
-    Exit condition: one definition can be parsed and validated in memory,
-    generate byte-identical Go twice, compile through Renvo, and emit verified
-    AArch64 instruction bytes. Production backends are unchanged.
-  </p>
-
-  <h3>Phase 2: Complete AArch64 vertical slice</h3>
-  <ol>
-    <li>Describe every AArch64 primitive needed by the direct-emitter IR.</li>
-    <li>Express immediate synthesis, address materialization, and branch patching as embedded Go beside declarative opcode and relocation facts.</li>
-    <li>Define shared AArch64 locations plus the AAPCS64, Darwin, and Windows ARM64 ABI differences.</li>
-    <li>Define Linux, Darwin, and Win32 runtime composition and ELF64, Mach-O 64, and PE64 format parameters.</li>
-    <li>Generate test-only AArch64 handlers beside the legacy implementation.</li>
-    <li>Compare instruction streams, relocations, section layouts, executable images, runtime behavior, linkstatic calls, GUI subsystem output, and self-host results.</li>
-    <li>Measure generated specialized compiler size, runtime, RSS, and pruning before switching production dispatch.</li>
-  </ol>
-  <p class="note">
-    Exit condition: generated Linux, Darwin, and Windows ARM64 paths satisfy all
-    current tests and gates and differ from legacy output only where explicitly
-    reviewed and semantically equivalent.
-  </p>
-
-  <h3>Phase 3: Make generated AArch64 authoritative</h3>
-  <ol>
-    <li>Switch the production AArch64 path to generated handlers.</li>
-    <li>Remove superseded AArch64 encoding and target fan-out after the comparison suite is green.</li>
-    <li>Keep only target-neutral shared algorithms and document their complete declared inputs and effects.</li>
-    <li>Verify fixed-target pruning removes unrelated ABI, runtime, and format compositions.</li>
-    <li>Run all backend targets, the complete frontend suite, and full self-hosting.</li>
-  </ol>
-
-  <h3>Phase 4: Neutral lowering and a non-AArch64 proof</h3>
-  <ol>
-    <li>Move remaining target-independent semantic lowering out of architecture-prefixed code.</li>
-    <li>Migrate amd64 next because it exercises variable-length instructions, immediate alternatives, ModRM/SIB addressing, branch relaxation, and multiple hosted formats.</li>
-    <li>Define ModRM/SIB and relaxation once as ordinary embedded Go; do not invent a macro language or hide x86 in an external backend.</li>
-    <li>Run byte and semantic equivalence across Linux and Windows amd64, linkstatic behavior, PIE paths, stack behavior, and self-hosting.</li>
-    <li>Switch amd64 production dispatch only after resource gates and fixed-target size remain within their existing limits.</li>
-  </ol>
-  <p class="note">
-    Exit condition: one fixed-width RISC and one variable-width CISC backend use
-    the generated system in production, proving the model is not
-    architecture-specific.
-  </p>
-
-  <h3>Phase 5: Complete the built-in backend migration</h3>
-  <ol>
-    <li>Migrate 386 with its own closed definition while reusing the IR contract and target-neutral semantic lowering.</li>
-    <li>Migrate ARM while preserving its target-specific instruction and relocation constraints.</li>
-    <li>Migrate Wasm after the native IR contract is stable; keep structured-control and module construction algorithmic.</li>
-    <li>Migrate VM targets using the same canonical operation and composition contracts without pretending they are native ISAs.</li>
-    <li>Generate the target registry, completeness projections, documentation, and stale checks from definitions.</li>
-    <li>Remove the final obsolete dispatch fan-out and duplicated legacy emitters.</li>
-  </ol>
-  <p class="note">
-    Exit condition: every advertised target is generated from its owning closed
-    definition, and #129's full correctness, self-hosting, pruning, size,
-    memory, and runtime criteria pass.
-  </p>
-
-  <h3>Phase 6: Descriptor-first frontend and RTGU binding</h3>
-  <ol>
-    <li>Make built-in and external target selection produce the same versioned descriptor.</li>
-    <li>Change option handling so syntax is parsed before target resolution, but target-dependent validation occurs after descriptor resolution.</li>
-    <li>Resolve the descriptor before filename suffix filtering, build-tag selection, type sizing, alignment, checking, or lowering.</li>
-    <li>Stop reconstructing build tags and target facts from target-name prefixes and suffixes.</li>
-    <li>Add canonical target identity, definition hash, and descriptor version to the canonical RTGU binding.</li>
-    <li>Make every backend reject units bound to an incompatible definition before code generation.</li>
-    <li>Preserve existing <code>-t</code> and <code>-system</code> precedence through the descriptor path; a definition supplies choices and may never overwrite an explicitly selected target.</li>
-  </ol>
-
-  <h3>Phase 7: Host-native backend preparation</h3>
-  <ol>
-    <li>Add an explicit preparation pipeline: parse, validate, canonicalize, project descriptor, generate source, compile for the host, and package.</li>
-    <li>Compile generated source through a dedicated built-in host-bootstrap backend path that cannot recursively request another prepared backend.</li>
-    <li>Use existing frontend host integration to run prepared programs; do not add a generic backend syscall solely for process execution.</li>
-    <li>Define a one-shot versioned protocol using canonical RTGU input, target output, structured diagnostics, and explicit failure status.</li>
-    <li>Support process-free embedders by separating preparation from execution and allowing an application-supplied runner.</li>
-    <li>Keep all intermediate source and artifacts in memory when the embedding environment supplies suitable services.</li>
-  </ol>
-
-  <h3>Phase 8: Cache, artifacts, and one-command workflow</h3>
-  <ol>
-    <li>Define a content-addressed cache key from canonical definition hash, selected canonical target, generator version, backend-kernel version, RTGU schema, host tuple, and optimization mode.</li>
-    <li>Write cache entries atomically, validate metadata before reuse, and ignore corrupt or incompatible entries.</li>
-    <li>Define a versioned, single-target <code>.rtgb</code> container containing the public descriptor, compatibility metadata, definition identity, canonical target, host tuple, and native payload.</li>
-    <li>Add explicit <code>renvo backend build machines.rtg -t target/name -o target.rtgb</code> preparation.</li>
-    <li>Add implicit preparation and cache reuse through <code>renvo -backend machines.rtg -t target/name</code>.</li>
-    <li>Accept prepared <code>.rtgb</code> artifacts through the same option and validate them before frontend source collection; a supplied <code>-t</code> must match the artifact's fixed target.</li>
-    <li>Demonstrate a previously unknown target from definition to output without invoking host Go.</li>
-  </ol>
-
-  <h3>Phase 9: Release topology and cleanup</h3>
-  <ol>
-    <li>Generate every included backend ahead of time, check the generated Go into the repository, and compile it into ordinary Go-module and release builds.</li>
-    <li>Keep <code>.rtg</code> parsing, source generation, and JIT preparation out of the normal built-in backend path; only the command that accepts <code>-backend</code> needs that machinery.</li>
-    <li>Use the compiled-in host backend as the non-recursive bootstrap for custom definitions, while retaining every included output target without a preparation or cache prerequisite.</li>
-    <li>Verify cold preparation and warm cache-hit behavior on Linux, Darwin, and Windows process-capable hosts.</li>
-    <li>Document the two-step workflow for environments such as WASI that cannot directly spawn native prepared backends.</li>
-    <li>Add a persistent worker protocol only if measured process startup or RTGU transfer materially violates the warm gate.</li>
-    <li>Remove compatibility code that no longer protects a supported migration or artifact version.</li>
-  </ol>
-
-  <h2>Prepared Backend Protocol</h2>
-  <p>
-    The first protocol should be deliberately small and one-shot:
-  </p>
-  <ul>
-    <li>the prepared artifact exposes protocol, descriptor, definition, canonical target, kernel, RTGU, and host compatibility metadata;</li>
-    <li>the caller supplies one canonical, target-bound RTGU unit and backend options;</li>
-    <li>the backend returns one output image or structured diagnostic result;</li>
-    <li>transport maps cleanly to stdin/stdout/stderr and exit status for a process runner but is also representable as in-memory byte slices;</li>
-    <li>protocol version negotiation fails before the unit is decoded;</li>
-    <li>no cache paths, generated source paths, or host-specific filesystem assumptions appear in the core protocol.</li>
-  </ul>
-  <p>
-    A framed persistent worker may reuse the same request and result payloads
-    later. It is not part of the first implementation unless measurements show
-    that process startup prevents the required warm performance.
-  </p>
-
-  <h2>Prepared Artifact and Cache Rules</h2>
-  <p>
-    A machine definition is source code and has the same trust boundary as a Go
-    dependency. Parsing, validation, canonicalization, and descriptor reading
-    never execute its embedded Go. Preparation compiles that Go, and the
-    resulting backend executes only when the user explicitly selects the
-    definition or a prepared artifact derived from it.
-  </p>
-  <ul>
-    <li><code>.rtgb</code> uses an explicit magic, version, bounded section lengths, and deterministic metadata encoding.</li>
-    <li>The public descriptor is readable before loading or executing the native payload.</li>
-    <li>A single-host payload is sufficient initially; multi-host packaging is an extension, not a prerequisite.</li>
-    <li>Cache keys never depend on source paths, timestamps, comments, or whitespace.</li>
-    <li>Cache lookup validates all compatibility fields and payload integrity.</li>
-    <li>Preparation failures are not cached as successful artifacts.</li>
-    <li>Concurrent preparation of the same key must not expose partial files or corrupt entries.</li>
-    <li>Embedded declarations can only enter generated source through the parsed Go AST; package clauses, imports, unsafe facilities, unsupported language features, unresolved names, and undeclared RTG API access are rejected before emission.</li>
-  </ul>
-
-  <h2>Testing and Validation</h2>
-
-  <h3>Definition-language tests</h3>
-  <ul>
-    <li>Golden parsing and canonicalization for every declaration kind.</li>
-    <li>Embedded-Go tests for balanced-block extraction, existing-parser diagnostics, forbidden package/import/feature rejection, name resolution, normalized hashing, and deterministic AST emission.</li>
-    <li>Unit-namespace tests proving fixed and universal emission apply identical mangling and reject duplicate units, canonical targets, generated names, and reserved <code>RTG</code> declarations.</li>
-    <li>Deterministic generation across repeated runs and harmless source reordering.</li>
-    <li>Malformed definitions for missing operations, invalid literal widths, mismatched Go signatures, undeclared clobbers, cycles, unresolved algorithm references, relocation gaps, and incompatible composition.</li>
-    <li>Boundary tests for registers, signed and unsigned immediates, displacements, branches, alignment, relocation addends, and fallback selection.</li>
-    <li>Generated source compilation through both host Go and Renvo.</li>
-    <li>Stale checked-in output detection through the ordinary generation workflow.</li>
-  </ul>
-
-  <h3>Backend equivalence tests</h3>
-  <ul>
-    <li>Instruction-byte comparison at the primitive encoder boundary.</li>
-    <li>Whole text/data/BSS, relocation, symbol, import, and image comparison where deterministic.</li>
-    <li>Semantic execution comparison through the backend omnibus and target end-to-end suites.</li>
-    <li>Fixed-target reachability and binary inspection proving unrelated target implementations are absent.</li>
-    <li>Stage1, stage2, and stage3 self-hosting for each migrated host target.</li>
-    <li>Cross-target compilation through the bundled frontend.</li>
-  </ul>
-
-  <h3>Dynamic workflow tests</h3>
-  <ul>
-    <li>Unknown definition descriptor resolution before source selection.</li>
-    <li>Multi-target definitions require and honor the selected canonical target; source definitions never override <code>-t</code>, and mismatched fixed-target artifacts are rejected.</li>
-    <li>Build-tag and filename selection driven by descriptor data rather than target spelling.</li>
-    <li>Cold preparation followed by a cache hit with byte-identical artifact identity.</li>
-    <li>Corrupt, truncated, stale, wrong-host, wrong-schema, and wrong-definition <code>.rtgb</code> rejection.</li>
-    <li>RTGU definition mismatch rejection before backend work begins.</li>
-    <li>Concurrent preparation and cache publication.</li>
-    <li>Process runner and in-memory embedding runner parity.</li>
-    <li>Closed-definition workflow using a prepared artifact without retained generated source.</li>
-  </ul>
-
-  <h3>Required suite discipline</h3>
-  <ul>
-    <li>Run targeted package tests while a phase is under development.</li>
-    <li>Run the complete <code>./backend</code> harness with its unchanged resource gates before every production backend switch.</li>
-    <li>Run the complete <code>./frontend_tests</code> suite, including full bundled all-target and self-hosting coverage.</li>
-    <li>Run explicit package sets rather than <code>go test ./...</code>, which descends into independent corpus modules.</li>
-    <li>Use <code>systemd-run --user</code> memory limits for expensive self-host and concurrency validation so a regression cannot exhaust the development host.</li>
-    <li>Do not modify <code>backend/main_test.go</code> or performance-test constraints as part of this work.</li>
-  </ul>
-
-  <h2>Performance Plan</h2>
-  <p>
-    Existing backend runtime, RSS, and specialized binary-size limits remain
-    hard constraints throughout migration. Dynamic preparation introduces
-    additional measurements that must not be conflated:
-  </p>
-  <table>
-    <thead>
-      <tr>
-        <th>Measurement</th>
-        <th>Includes</th>
-        <th>Purpose</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td>Backend core</td>
-        <td>Prepared specialized backend processing one RTGU unit.</td>
-        <td>Detect generated-code or backend-kernel regressions.</td>
-      </tr>
-      <tr>
-        <td>Cold preparation</td>
-        <td>Parse, validate, generate, self-compile, and package.</td>
-        <td>Bound first-use cost independently of normal compilation.</td>
-      </tr>
-      <tr>
-        <td>Warm end to end</td>
-        <td>Frontend, cache lookup, process startup or runner call, RTGU transfer, backend, and output transfer.</td>
-        <td>Represent normal user-visible cached compilation.</td>
-      </tr>
-      <tr>
-        <td>Artifact size</td>
-        <td>Specialized backend executable and prepared container overhead.</td>
-        <td>Prove specialization removes unrelated targets.</td>
-      </tr>
-      <tr>
-        <td>Memory</td>
-        <td>Peak frontend, preparation, and prepared-backend RSS measured separately and together.</td>
-        <td>Prevent staging from hiding a larger total footprint.</td>
-      </tr>
-    </tbody>
-  </table>
-  <ul>
-    <li>Collect distributions before introducing new numeric gates; do not weaken existing gates during that collection.</li>
-    <li>Prefer direct generated conditionals and calls over data-driven dispatch in hot code.</li>
-    <li>Measure code-size effects before generating many width or immediate variants.</li>
-    <li>Use persistent workers only in response to measured startup cost.</li>
-    <li>After migration stabilizes, tighten gates only when CI distributions show safe cross-platform margin.</li>
-  </ul>
-
-  <h2>Pull Request Strategy</h2>
-  <p>
-    Each pull request should leave the production compiler fully usable and all
-    required checks green. A practical sequence is:
-  </p>
-  <ol>
-    <li>Baselines and comparison helpers.</li>
-    <li>Shared <code>.rtg</code> parser, canonicalization, and deterministic emitter with an AArch64 encoding proof.</li>
-    <li>Complete test-only generated AArch64 backend.</li>
-    <li>Production AArch64 switch and legacy cleanup.</li>
-    <li>Neutral semantic lowering and generated amd64 proof.</li>
-    <li>Production amd64 switch.</li>
-    <li>386, ARM, Wasm, and VM migrations in focused target PRs.</li>
-    <li>Generated registry, documentation, and final legacy dispatch removal.</li>
-    <li>Descriptor-first frontend and RTGU definition binding.</li>
-    <li>Host-bootstrap preparation and one-shot backend protocol.</li>
-    <li>Content-addressed cache and <code>.rtgb</code> artifact.</li>
-    <li>One-command external target flow and release-topology conversion.</li>
-  </ol>
-  <p>
-    A PR may be split further when reviewability or CI runtime demands it, but
-    it should not land a second parser, an unused general framework, a disabled
-    production path with no equivalence test, or a partially authoritative
-    backend.
-  </p>
-
-  <h2>Risks and Controls</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>Risk</th>
-        <th>Control</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td>The definition language grows into a general compiler framework.</td>
-        <td>Add declarative constructs only for recurring facts and composition; write algorithms as parsed Go against the small target-neutral RTG API.</td>
-      </tr>
-      <tr>
-        <td>Two incompatible meanings of <code>.rtg</code>.</td>
-        <td>Use one lexer, parser, diagnostic model, canonicalization scheme, and version policy for system and machine declarations.</td>
-      </tr>
-      <tr>
-        <td>Generated source is larger or slower than handwritten emitters.</td>
-        <td>Measure every production switch, choose inline versus helper generation deliberately, and preserve fixed-target pruning.</td>
-      </tr>
-      <tr>
-        <td>Legacy and generated implementations silently diverge.</td>
-        <td>Run byte-level and semantic dual-path comparisons before each switch, then remove the unused production path.</td>
-      </tr>
-      <tr>
-        <td>Host-bootstrap compilation recursively prepares itself.</td>
-        <td>Use an explicit bootstrap entrypoint bound to the built-in host backend, not normal target resolution.</td>
-      </tr>
-      <tr>
-        <td>Frontend source is selected before external target facts exist.</td>
-        <td>Resolve and validate the descriptor before file collection, build tags, layout, checking, or lowering.</td>
-      </tr>
-      <tr>
-        <td>Stale or incompatible prepared artifacts execute.</td>
-        <td>Validate definition, generator, kernel, RTGU, protocol, optimization, and host identity before reuse.</td>
-      </tr>
-      <tr>
-        <td>Concurrent cache writes corrupt artifacts.</td>
-        <td>Build privately, validate fully, and publish atomically under the final content key.</td>
-      </tr>
-      <tr>
-        <td>Wasm performance regresses under generic dispatch.</td>
-        <td>Keep structured Wasm algorithms as direct embedded Go in its definition; generated composition supplies constants and direct calls.</td>
-      </tr>
-      <tr>
-        <td>Full self-host or concurrency validation exhausts the host.</td>
-        <td>Run expensive tests under explicit <code>systemd-run --user</code> memory caps and preserve deterministic serialized variants where appropriate.</td>
-      </tr>
-    </tbody>
-  </table>
-
-  <h2>Deferred Work</h2>
-  <ul>
-    <li>An encyclopedic catalog of ISA instructions that no supported backend operation uses.</li>
-    <li>A general-purpose TableGen-like language.</li>
-    <li>Runtime plugins or dynamically loaded backend libraries.</li>
-    <li>A persistent worker before measurements justify it.</li>
-    <li>Multi-host payloads inside one <code>.rtgb</code> artifact.</li>
-    <li>Remote or shared-network backend caches.</li>
-    <li>Reachability-based per-target semantic hashes; the initial whole-file hash intentionally favors simple, safe invalidation.</li>
-    <li>Embedded-board composition beyond the existing separate freestanding and board contracts.</li>
-    <li>New source-language features unrelated to descriptor correctness.</li>
-  </ul>
-
-  <h2 id="worked-x86-64-definition">Worked x86-64 <code>.rtg</code> Definition</h2>
-  <p>
-    Backend authors write one closed file. This example defines the x86-64
-    encoder, architecture, internal and external ABIs, Linux and Windows
-    runtimes, ELF/PE/relocatable formats, and three complete target
-    compositions. Named declarations preserve the ISA/ABI/runtime/format
-    separation required by issue #24 without imports or one file per target
-    tuple. Additional x86-64 environments extend this same authority file.
-  </p>
-  <p>
-    The declarative layer has tables, named bindings, and bounded layout
-    expressions for constants, offsets, alignment, conditionals, and repeated
-    fields. It has no user-defined loops, macros, inheritance, or general
-    programming facilities. Algorithms are written once in embedded Go using
-    the parser Renvo already has. The generator emits that code as normal
-    declarations and specializes table rows into direct calls. Only
-    target-neutral byte, label, relocation, section, diagnostic, and
-    image-buffer primitives are supplied; x86 encoding and OS behavior remain
-    visible in this file.
-  </p>
-
-  <h3>Authored definition</h3>
-  <pre><code>definition 1
-unit x86_64
-implements direct_emitter_v1
-
-# X86 algorithms are ordinary Go emitted into the generated backend package.
-go backend {
-    func x86Low3(reg RTGRegister) byte {
-        return byte(reg.Code &amp; 7)
-    }
-
-    func x86High(reg RTGRegister) byte {
-        return byte(reg.Code&gt;&gt;3) &amp; 1
-    }
-
-    func x86Opcode(out *RTGEmitter, opcode uint32) {
-        if opcode &gt; 0xff {
-            out.Byte(byte(opcode &gt;&gt; 8))
-        }
-        out.Byte(byte(opcode))
-    }
-
-    func x86REX(
-        out *RTGEmitter,
-        wide bool,
-        reg RTGRegister,
-        index RTGRegister,
-        base RTGRegister,
-        byteRegister RTGRegister,
-    ) {
-        w := byte(0)
-        if wide {
-            w = 1
-        }
-        r := x86High(reg)
-        x := byte(0)
-        if index.Valid {
-            x = x86High(index)
-        }
-        b := byte(0)
-        if base.Valid {
-            b = x86High(base)
-        }
-        needsByteREX := byteRegister.Valid &amp;&amp; byteRegister.Code &gt;= 4
-        if w != 0 || r != 0 || x != 0 || b != 0 || needsByteREX {
-            out.Byte(0x40 | w&lt;&lt;3 | r&lt;&lt;2 | x&lt;&lt;1 | b)
-        }
-    }
-
-    func x86ModRM(out *RTGEmitter, mode byte, reg byte, rm byte) {
-        out.Byte(mode&lt;&lt;6 | (reg&amp;7)&lt;&lt;3 | rm&amp;7)
-    }
-
-    func x86Memory(out *RTGEmitter, reg byte, address RTGAddress) {
-        if address.Target.Valid {
-            x86ModRM(out, 0, reg, 5)
-            out.Rel32Addend(address.Target, address.Addend)
-            return
-        }
-
-        base := address.Base
-        index := address.Index
-        displacement := address.Displacement
-        needsSIB := index.Valid || x86Low3(base) == 4
-        mode := byte(0)
-        if displacement != 0 || x86Low3(base) == 5 {
-            mode = 2
-            if RTGSignedFits(displacement, 8) {
-                mode = 1
-            }
-        }
-
-        if needsSIB {
-            x86ModRM(out, mode, reg, 4)
-            indexCode := byte(4)
-            if index.Valid {
-                indexCode = x86Low3(index)
-            }
-            out.Byte(byte(RTGLog2(address.Scale))&lt;&lt;6 |
-                indexCode&lt;&lt;3 | x86Low3(base))
-        } else {
-            x86ModRM(out, mode, reg, x86Low3(base))
-        }
-
-        if mode == 1 {
-            out.Byte(byte(displacement))
-        } else if mode == 2 {
-            out.Uint32(uint32(displacement))
-        }
-    }
-
-    func x86RRRM(
-        out *RTGEmitter,
-        opcode uint32,
-        destination RTGRegister,
-        source RTGRegister,
-        width int,
-    ) {
-        if width == 16 {
-            out.Byte(0x66)
-        }
-        byteRegister := RTGNoRegister
-        if width == 8 {
-            byteRegister = source
-        }
-        x86REX(out, width == 64, source, RTGNoRegister, destination, byteRegister)
-        x86Opcode(out, opcode)
-        x86ModRM(out, 3, x86Low3(source), x86Low3(destination))
-    }
-
-    func x86RR(
-        out *RTGEmitter,
-        opcode uint32,
-        destination RTGRegister,
-        source RTGRegister,
-        width int,
-    ) {
-        x86REX(out, width == 64, destination, RTGNoRegister, source, RTGNoRegister)
-        x86Opcode(out, opcode)
-        x86ModRM(out, 3, x86Low3(destination), x86Low3(source))
-    }
-
-    func x86RMR(
-        out *RTGEmitter,
-        opcode uint32,
-        destination RTGRegister,
-        address RTGAddress,
-        width int,
-    ) {
-        if width == 16 {
-            out.Byte(0x66)
-        }
-        x86REX(out, width == 64, destination, address.Index, address.Base, RTGNoRegister)
-        x86Opcode(out, opcode)
-        x86Memory(out, x86Low3(destination), address)
-    }
-
-    func x86RRM(
-        out *RTGEmitter,
-        opcode uint32,
-        address RTGAddress,
-        source RTGRegister,
-        width int,
-    ) {
-        if width == 16 {
-            out.Byte(0x66)
-        }
-        byteRegister := RTGNoRegister
-        if width == 8 {
-            byteRegister = source
-        }
-        x86REX(out, width == 64, source, address.Index, address.Base, byteRegister)
-        x86Opcode(out, opcode)
-        x86Memory(out, x86Low3(source), address)
-    }
-
-    func x86Group(
-        out *RTGEmitter,
-        opcode uint32,
-        selector byte,
-        operand RTGRegister,
-        width int,
-    ) {
-        x86REX(out, width == 64, RTGNoRegister, RTGNoRegister, operand, RTGNoRegister)
-        x86Opcode(out, opcode)
-        x86ModRM(out, 3, selector, x86Low3(operand))
-    }
-
-    func x86GroupImmediate(
-        out *RTGEmitter,
-        opcode uint32,
-        selector byte,
-        operand RTGRegister,
-        value int64,
-        width int,
-    ) {
-        x86REX(out, width == 64, RTGNoRegister, RTGNoRegister, operand, RTGNoRegister)
-        if RTGSignedFits(value, 8) {
-            out.Byte(0x83)
-            x86ModRM(out, 3, selector, x86Low3(operand))
-            out.Byte(byte(value))
-            return
-        }
-        x86Opcode(out, opcode)
-        x86ModRM(out, 3, selector, x86Low3(operand))
-        out.Uint32(uint32(value))
-    }
-
-    func x86GroupImmediate8(
-        out *RTGEmitter,
-        opcode uint32,
-        selector byte,
-        operand RTGRegister,
-        value byte,
-        width int,
-    ) {
-        x86Group(out, opcode, selector, operand, width)
-        out.Byte(value)
-    }
-
-    func x86GroupMemoryImmediate(
-        out *RTGEmitter,
-        opcode uint32,
-        selector byte,
-        address RTGAddress,
-        value int64,
-        width int,
-    ) {
-        x86REX(out, width == 64, RTGNoRegister, address.Index, address.Base, RTGNoRegister)
-        if RTGSignedFits(value, 8) {
-            out.Byte(0x83)
-        } else {
-            x86Opcode(out, opcode)
-        }
-        x86Memory(out, selector, address)
-        if RTGSignedFits(value, 8) {
-            out.Byte(byte(value))
-        } else {
-            out.Uint32(uint32(value))
-        }
-    }
-
-    func x86MultiplyImmediate(
-        out *RTGEmitter,
-        opcode uint32,
-        destination RTGRegister,
-        source RTGRegister,
-        value int64,
-        width int,
-    ) {
-        x86REX(out, width == 64, destination, RTGNoRegister, source, RTGNoRegister)
-        if RTGSignedFits(value, 8) {
-            out.Byte(0x6b)
-        } else {
-            x86Opcode(out, opcode)
-        }
-        x86ModRM(out, 3, x86Low3(destination), x86Low3(source))
-        if RTGSignedFits(value, 8) {
-            out.Byte(byte(value))
-        } else {
-            out.Uint32(uint32(value))
-        }
-    }
-
-    func x86OpcodeRegister(out *RTGEmitter, opcode byte, operand RTGRegister) {
-        if x86High(operand) != 0 {
-            out.Byte(0x41)
-        }
-        out.Byte(opcode + x86Low3(operand))
-    }
-
-    func x86Immediate(out *RTGEmitter, opcode byte, value uint64, width int) {
-        out.Byte(opcode)
-        if width == 8 {
-            out.Byte(byte(value))
-        } else if width == 32 {
-            out.Uint32(uint32(value))
-        } else {
-            out.Uint64(value)
-        }
-    }
-
-    func x86Relative(out *RTGEmitter, opcode uint32, label RTGLabel) {
-        x86Opcode(out, opcode)
-        out.Rel32(label)
-    }
-
-    func x86SetCondition(
-        out *RTGEmitter,
-        condition RTGCondition,
-        destination RTGRegister,
-    ) {
-        x86REX(out, false, RTGNoRegister, RTGNoRegister, destination, destination)
-        out.Byte(0x0f)
-        out.Byte(condition.SetOpcode)
-        x86ModRM(out, 3, 0, x86Low3(destination))
-    }
-
-    func x86JumpCondition(
-        out *RTGEmitter,
-        condition RTGCondition,
-        label RTGLabel,
-    ) {
-        out.Byte(0x0f)
-        out.Byte(condition.JumpOpcode)
-        out.Rel32(label)
-    }
-
-    func x86MoveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
-        if destination == x86RAX &amp;&amp; value == 0 {
-            out.Byte(0x31)
-            out.Byte(0xc0)
-        } else if destination != x86RSP &amp;&amp; RTGSignedFits(value, 8) {
-            x86Immediate(out, 0x6a, uint64(value), 8)
-            x86OpcodeRegister(out, 0x58, destination)
-        } else if RTGUnsignedFits(value, 32) {
-            x86OpcodeRegister(out, 0xb8, destination)
-            out.Uint32(uint32(value))
-        } else if RTGSignedFits(value, 32) {
-            x86Immediate(out, 0x68, uint64(value), 32)
-            x86OpcodeRegister(out, 0x58, destination)
-        } else {
-            x86REX(out, true, RTGNoRegister, RTGNoRegister, destination, RTGNoRegister)
-            out.Byte(0xb8 + x86Low3(destination))
-            out.Uint64(uint64(value))
-        }
-    }
-
-    func x86RelaxJump(displacement int64) (byte, bool) {
-        return 0xeb, RTGSignedFits(displacement, 8)
-    }
-
-    func x86RelaxCondition(condition RTGCondition, displacement int64) (byte, bool) {
-        return condition.JumpOpcode - 0x10, RTGSignedFits(displacement, 8)
-    }
-
-    func x86VariableShift(
-        out *RTGEmitter,
-        direction RTGShiftDirection,
-        signed bool,
-    ) {
-        x86Xchg64(out, x86Primary, x86Tertiary)
-        if direction == RTGShiftLeft {
-            x86ShlCL64(out, x86Primary)
-        } else if signed {
-            x86SarCL64(out, x86Primary)
-        } else {
-            x86ShrCL64(out, x86Primary)
-        }
-    }
-
-    func x86SignedDivide(out *RTGEmitter, remainder bool) {
-        ordinary := out.NewLabel()
-        done := out.NewLabel()
-        x86CmpImmediate64(out, x86Primary, -1)
-        x86JumpCondition(out, x86NE, ordinary)
-        x86MoveImmediate(out, x86Secondary, 1)
-        x86ShlImmediate64(out, x86Secondary, 63)
-        x86Cmp64(out, x86Tertiary, x86Secondary)
-        x86JumpCondition(out, x86NE, ordinary)
-        if remainder {
-            x86MoveImmediate(out, x86Primary, 0)
-        } else {
-            x86Mov64(out, x86Primary, x86Tertiary)
-        }
-        x86Relative(out, 0xe9, done)
-        out.Mark(ordinary)
-        x86PushRegister(out, x86DivisionScratch)
-        x86Mov64(out, x86DivisionScratch, x86Primary)
-        x86Mov64(out, x86Primary, x86Tertiary)
-        out.Byte(0x48)
-        out.Byte(0x99)
-        x86Group(out, 0xf7, 7, x86DivisionScratch, 64)
-        if remainder {
-            x86Mov64(out, x86Primary, x86Secondary)
-        }
-        x86PopRegister(out, x86DivisionScratch)
-        out.Mark(done)
-    }
-
-    func x86CopyBytes(out *RTGEmitter) {
-        destination := x86CopyDestination
-        source := x86CopySource
-        count := x86CopyCount
-        forward := out.NewLabel()
-        done := out.NewLabel()
-        x86Cmp64(out, destination, source)
-        x86JumpCondition(out, x86ULE, forward)
-        x86Lea64(out, x86Scratch, RTGAddress{Base: source, Index: count, Scale: 1})
-        x86Cmp64(out, destination, x86Scratch)
-        x86JumpCondition(out, x86UGE, forward)
-        x86Lea64(out, source, RTGAddress{
-            Base: source, Index: count, Scale: 1, Displacement: -1,
-        })
-        x86Lea64(out, destination, RTGAddress{
-            Base: destination, Index: count, Scale: 1, Displacement: -1,
-        })
-        out.Byte(0xfd)
-        out.Byte(0xf3)
-        out.Byte(0xa4)
-        out.Byte(0xfc)
-        x86Relative(out, 0xe9, done)
-        out.Mark(forward)
-        out.Byte(0xfc)
-        out.Byte(0xf3)
-        out.Byte(0xa4)
-        out.Mark(done)
-    }
-
-    func windowsCommandLine(command []byte) [][]byte {
-        arguments := make([][]byte, 0, 8)
-        offset := 0
-        for offset &lt; len(command) {
-            for offset &lt; len(command) &amp;&amp;
-                (command[offset] == ' ' || command[offset] == '\t') {
-                offset++
-            }
-            if offset == len(command) {
-                break
-            }
-
-            argument := make([]byte, 0, 32)
-            quoted := false
-            for offset &lt; len(command) {
-                if !quoted &amp;&amp;
-                    (command[offset] == ' ' || command[offset] == '\t') {
-                    break
-                }
-                if command[offset] == '"' {
-                    quoted = !quoted
-                    offset++
-                    continue
-                }
-                if command[offset] != '\\' {
-                    argument = append(argument, command[offset])
-                    offset++
-                    continue
-                }
-
-                slashStart := offset
-                for offset &lt; len(command) &amp;&amp; command[offset] == '\\' {
-                    offset++
-                }
-                slashCount := offset - slashStart
-                if offset == len(command) || command[offset] != '"' {
-                    for slashCount &gt; 0 {
-                        argument = append(argument, '\\')
-                        slashCount--
-                    }
-                    continue
-                }
-
-                for slashCount &gt;= 2 {
-                    argument = append(argument, '\\')
-                    slashCount -= 2
-                }
-                if slashCount == 1 {
-                    argument = append(argument, '"')
-                    offset++
-                } else {
-                    quoted = !quoted
-                    offset++
-                }
-            }
-            arguments = append(arguments, argument)
-        }
-        return arguments
-    }
+<main>
+  <header>
+    <div class="label">Replacement plan</div>
+    <h1>Renvo Native Backend Scalability Plan</h1>
+    <p class="lead">
+      Replace large, independently maintained native backend implementations
+      with a compact, systematic description of their differences—without
+      forcing Wasm into a native-machine model, inventing a second programming
+      language, or weakening Renvo's compiler performance gates.
+    </p>
+    <p class="meta">
+      This document supersedes the earlier universal machine-definition plan.
+      It incorporates the architecture meeting conclusions and describes the
+      implementation sequence from the current branch to the intended system.
+    </p>
+    <nav aria-label="Document sections">
+      <a href="#problem">1. Corrected problem</a>
+      <a href="#outcome">2. Outcome and success</a>
+      <a href="#scope">3. Scope and boundaries</a>
+      <a href="#principles">4. Design principles</a>
+      <a href="#families">5. Backend families</a>
+      <a href="#native-model">6. Native model</a>
+      <a href="#hooks">7. Go hooks</a>
+      <a href="#generation">8. Generation topology</a>
+      <a href="#stress">9. 8086 and AVR stress tests</a>
+      <a href="#phases">10. Implementation phases</a>
+      <a href="#testing">11. Testing</a>
+      <a href="#performance">12. Performance gates</a>
+      <a href="#migration">13. Migration and deletion</a>
+      <a href="#risks">14. Risks</a>
+      <a href="#acceptance">15. Final acceptance</a>
+    </nav>
+  </header>
+
+  <section id="problem">
+    <h2>1. Corrected problem statement</h2>
+    <p>
+      The reason to introduce machine definitions is not primarily to remove
+      the word “Go” from the repository, nor to make built-in and custom
+      backends share a code path for its own sake. The problem is that the
+      current backend implementation strategy does not scale to the number of
+      architectures Renvo intends to support.
+    </p>
+    <p>
+      Today, each architecture tends to accumulate a large Go implementation
+      containing instruction emission, semantic lowering, ABI rules, runtime
+      behavior, relocations, and output-format construction. This is difficult
+      to maintain and difficult to refactor because the compiler operates under
+      unusually strict limits:
+    </p>
+    <ul>
+      <li>the compiler executable must remain small;</li>
+      <li>compiler peak memory and writable reservation are bounded;</li>
+      <li>compiler CPU time and deterministic VM steps are bounded;</li>
+      <li>generated application binaries have hard size limits;</li>
+      <li>fixed-target builds must not retain unrelated backends;</li>
+      <li>self-hosting must remain viable under the same constraints.</li>
+    </ul>
+    <p>
+      Four native architecture families are currently in production:
+      amd64, 386, ARM, and AArch64. Supporting another six, twenty, or thirty
+      architectures by copying the existing backend shape is not sustainable.
+      The system needs a compact way to describe only the differences that
+      matter while compiling those descriptions into the direct, efficient
+      code required by the existing gates.
+    </p>
+    <div class="decision">
+      <strong>Primary design question:</strong>
+      What is the minimum authored description needed to express the real
+      differences among native architectures and their ABI/OS combinations,
+      while compiling to code that is at least as small and fast as the current
+      specialized backends?
+    </div>
+
+    <h3>What the current experiment taught us</h3>
+    <ul>
+      <li>
+        Moving a large Go backend verbatim into a <code>go backend</code> block
+        changes source ownership but does not improve scalability.
+      </li>
+      <li>
+        A universal contract that treats native machines, Wasm, and VM bytecode
+        as equivalent creates adapters and special cases instead of reuse.
+      </li>
+      <li>
+        Generated Go is useful when it is the compact result of systematic
+        input; it is not useful when it is another full copy of hand-maintained
+        backend code.
+      </li>
+      <li>
+        Embedded Go remains a valuable escape hatch, but it must not be the
+        default place where the whole backend lives.
+      </li>
+      <li>
+        We do not need—and will not build—a static analyzer that judges whether
+        an embedded Go function is “too complicated.”
+      </li>
+    </ul>
+  </section>
+
+  <section id="outcome">
+    <h2>2. Desired outcome and definition of success</h2>
+    <p>
+      Renvo will have an explicit native-backend family whose definitions
+      describe machine facts, instruction families, operation selection, ABI
+      rules, runtime composition, relocations, and image-format parameters.
+      Generation will specialize those declarations into direct Go functions
+      and constants. Irregular algorithms may be supplied through named,
+      signature-checked Go hooks.
+    </p>
+    <p>
+      The built-in native catalog will describe amd64, 386, ARM, and AArch64
+      while writing shared native, ABI, runtime, and format behavior once. The
+      generator will emit independently prunable target implementations.
+      Wasm and VM32 will remain a separate backend family and will not be used
+      to distort the native schema.
+    </p>
+
+    <h3>Definition of done</h3>
+    <ol>
+      <li>
+        The production native backends for amd64, 386, ARM, and AArch64 are
+        generated from the new native schema.
+      </li>
+      <li>
+        Adding a native architecture requires describing its machine and ABI
+        differences, not copying Linux, Windows, ELF, PE, frame, and generic
+        semantic-lowering implementations.
+      </li>
+      <li>
+        Shared OS/runtime and output-format behavior is represented once in the
+        closed built-in native catalog and specialized with explicit machine
+        parameters.
+      </li>
+      <li>
+        Generated fixed-target compilers contain only the selected architecture,
+        ABI, runtime, relocation, and format composition.
+      </li>
+      <li>
+        The architecture-specific Go remaining in native definitions is limited
+        to named irregular algorithms reached from typed schema hooks. No
+        complexity analysis of those functions is performed.
+      </li>
+      <li>
+        A schema-only 8086 exercise and AVR exercise demonstrate that the model
+        does not silently assume 32/64-bit flat memory, symmetric registers, one
+        address space, or regular instruction encodings.
+      </li>
+      <li>
+        Wasm and VM32 continue to pass their full tests through their bespoke
+        backend family, without pretending to implement the native contract.
+      </li>
+      <li>
+        Built-in and custom native definitions use the same schema, resolver,
+        validator, hook checker, reachability rules, and direct-code generator.
+        Their packaging may remain different where checked-in specialization is
+        measurably smaller or faster than the preparation bridge.
+      </li>
+      <li>
+        Superseded per-architecture definition files, hand-maintained generated
+        projections, and duplicate format/runtime algorithms are deleted.
+        A bounded preparation adapter is not considered a second backend when
+        it contains no machine semantics.
+      </li>
+      <li>
+        No constraint in <code>backend/main_test.go</code> is loosened. The full
+        backend suite, full frontend suite, and full self-hosting suite pass.
+      </li>
+    </ol>
+
+    <h3>How scalability will be measured</h3>
+    <p>
+      The plan will report, but will not initially reject based on, these source
+      metrics:
+    </p>
+    <ul>
+      <li>declarative lines per architecture and per target composition;</li>
+      <li>embedded Go lines, functions, and hook sites per architecture;</li>
+      <li>copied runtime/format algorithms across definitions;</li>
+      <li>generated source and compiled text added by one architecture;</li>
+      <li>fixed-target pruning results;</li>
+      <li>compiler steps, wall time, peak RSS, and output size.</li>
+    </ul>
+    <p>
+      These are engineering feedback, not a Go complexity policy. The hard
+      acceptance criteria remain the existing executable tests and performance
+      gates.
+    </p>
+  </section>
+
+  <section id="scope">
+    <h2>3. Scope and explicit boundaries</h2>
+    <div class="two">
+      <div class="card">
+        <h3>In scope</h3>
+        <ul>
+          <li>amd64, 386, ARM, and AArch64 native backends;</li>
+          <li>Linux, Windows, Darwin, and Linux-kernel compositions currently supported;</li>
+          <li>ELF, PE/COFF, Mach-O, and relocatable native output already in production;</li>
+          <li>native ABI, runtime, relocation, and image reuse;</li>
+          <li>checked-in generated source for normal Go modules;</li>
+          <li>custom native definitions and prepared artifacts;</li>
+          <li>fixed-target pruning and self-hosting;</li>
+          <li>8086 and AVR schema stress fixtures.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Out of scope</h3>
+        <ul>
+          <li>shipping an 8086 or AVR product backend in this effort;</li>
+          <li>embedded-board runtime or board-description work;</li>
+          <li>forcing Wasm or VM32 through native instruction/ABI abstractions;</li>
+          <li>a macro system or general rewrite language;</li>
+          <li>interpreting instruction recipes while compiling user programs;</li>
+          <li>proving termination or complexity of embedded Go;</li>
+          <li>loosening compiler or generated-binary gates;</li>
+          <li>adding excluded frontend features such as goroutines or generics.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Existing requirements retained</h3>
+    <ul>
+      <li>
+        Built-in generated backends are checked into the repository and compile
+        in ordinary Go-module builds.
+      </li>
+      <li>
+        A distributable custom machine definition remains one closed file. It
+        does not depend on an ambient definition search path.
+      </li>
+      <li>
+        The built-in native catalog is also one closed file. Reuse occurs among
+        named declarations inside that file, and generation emits separate
+        prunable outputs.
+      </li>
+      <li>
+        Embedded Go is parsed and type-checked with Renvo's existing frontend,
+        contributes to the definition hash, and is emitted as ordinary source.
+      </li>
+      <li>
+        Custom backend preparation invokes Renvo, not the host Go toolchain.
+      </li>
+      <li>
+        The selected target and definition identity remain bound into RTGU.
+      </li>
+    </ul>
+    <div class="warning">
+      The built-in catalog being one file does not mean its generated compiler
+      is universal. The generator must slice the resolved catalog by target and
+      emit only reachable declarations for fixed-target builds.
+    </div>
+  </section>
+
+  <section id="principles">
+    <h2>4. Non-negotiable design principles</h2>
+    <ol>
+      <li>
+        <strong>Optimize marginal architecture cost.</strong>
+        The important number is the new authored and compiled code required by
+        the next native architecture, not whether the repository contains Go.
+      </li>
+      <li>
+        <strong>Describe recurring structure; program irregular behavior.</strong>
+        Tables and typed declarations own facts and bounded selection. Go owns
+        algorithms that are clearer as code.
+      </li>
+      <li>
+        <strong>Strong by construction, not clever analysis.</strong>
+        A hook is narrow because the schema gives it a narrow signature and
+        purpose. The compiler does not inspect its loops, branches, or size.
+      </li>
+      <li>
+        <strong>Compile composition away.</strong>
+        Target selection, widths, ABI, runtime, relocation, and format choices
+        become constants and direct calls. No definition AST or string property
+        lookup remains in the generated code path.
+      </li>
+      <li>
+        <strong>Keep backend families honest.</strong>
+        Native machines share a native contract. Wasm/VM use a structured
+        backend contract. A family can share the frontend unit without sharing
+        false machine abstractions.
+      </li>
+      <li>
+        <strong>One owner for each reusable behavior.</strong>
+        Linux process setup, PE layout, or ELF section construction is not
+        copied into every architecture. Machine-specific parameters and
+        relocations remain explicit.
+      </li>
+      <li>
+        <strong>No hidden architecture backend.</strong>
+        Shared native libraries may implement format-neutral and
+        format-specific reusable mechanics, but they may not contain an
+        undeclared x86, ARM, or vendor-specific encoder.
+      </li>
+      <li>
+        <strong>Performance gates are design inputs.</strong>
+        Generation is accepted only when compiler size, time, memory, and output
+        quality remain inside the existing limits.
+      </li>
+      <li>
+        <strong>Migration deletes code.</strong>
+        A generated native path is not complete while an equivalent
+        hand-authored machine implementation remains as a fallback. Packaging
+        adapters may remain when they preserve a hard gate and contain no
+        architecture policy.
+      </li>
+    </ol>
+  </section>
+
+  <section id="families">
+    <h2>5. Backend family boundary</h2>
+    <p>
+      The frontend produces one canonical linked unit, but code generation may
+      be implemented by different backend families.
+    </p>
+    <pre><code>                         canonical RTGU
+                               |
+                    target descriptor selects
+                               |
+              +----------------+----------------+
+              |                                 |
+              v                                 v
+        native_v1 family                 structured32 family
+   amd64 / 386 / ARM / AArch64           Wasm / browser / VM32
+              |                                 |
+       native executable,                 Wasm module, HTML,
+       object, or module                  or RNVM bytecode</code></pre>
+
+    <h3><code>native_v1</code></h3>
+    <p>
+      This effort defines and migrates <code>native_v1</code>. It assumes a
+      machine with named storage locations, explicit instruction emission,
+      relocatable code/data, an ABI, and an image/object composition. It must
+      support word widths below 32 and multiple address spaces at the schema
+      level, even though the first production migrations are 32/64-bit flat
+      machines.
+    </p>
+
+    <h3>Wasm and VM32</h3>
+    <p>
+      Wasm has structured control flow, module construction, index spaces, and
+      validation rules unlike a native ISA. VM32 is close enough to share some
+      of that lowering, but neither should force native concepts such as
+      physical registers, call-clobber sets, executable relocations, or native
+      image sections.
+    </p>
+    <ul>
+      <li>The current Wasm/VM implementation remains operational.</li>
+      <li>Native generator code does not import Wasm-specific decisions.</li>
+      <li>Shared frontend semantics stay above the family boundary.</li>
+      <li>
+        If the structured family receives its own declarative schema later, it
+        is designed from Wasm/VM requirements rather than copied from
+        <code>native_v1</code>.
+      </li>
+      <li>
+        Existing Wasm and VM size/runtime gate allowances remain exactly as
+        currently defined.
+      </li>
+    </ul>
+  </section>
+
+  <section id="native-model">
+    <h2>6. Minimum native description model</h2>
+    <p>
+      The native schema is split into layers because each layer varies at a
+      different rate. The generator resolves them once and emits a fixed
+      composition.
+    </p>
+
+    <h3>6.1 Machine model</h3>
+    <p>The machine declaration owns:</p>
+    <ul>
+      <li>integer and native word widths;</li>
+      <li>data, code, and function pointer widths;</li>
+      <li>endianness and alignment limits;</li>
+      <li>named address spaces and pointer representation;</li>
+      <li>registers and register classes;</li>
+      <li>special roles such as stack, frame, primary, scratch, and syscall number;</li>
+      <li>condition representation;</li>
+      <li>legal scale, displacement, and immediate classes;</li>
+      <li>instruction alignment and byte order.</li>
+    </ul>
+    <p>
+      Register roles are mappings, not hard-coded names. A role may be absent
+      when a target's declared lowering does not require it. The schema must not
+      assume that all registers are interchangeable or that all pointer values
+      inhabit one address space.
+    </p>
+
+    <h3>6.2 Operand and encoding forms</h3>
+    <p>
+      A form describes recurring instruction structure. It is intentionally
+      bounded: named operands, constraints, fixed fields, and one encoder
+      strategy. Examples include:
+    </p>
+    <ul>
+      <li>fixed byte or word sequences;</li>
+      <li>opcode plus register field;</li>
+      <li>register/register and register/immediate forms;</li>
+      <li>memory address encodings;</li>
+      <li>PC-relative branches with declared range and relocation;</li>
+      <li>multiword immediate construction;</li>
+      <li>conditional opcode families.</li>
+    </ul>
+    <p>
+      A common declarative form may be instantiated many times. An irregular
+      form names a typed Go encoder hook. The form still declares its operands,
+      output alignment, relocation behavior, and selection constraints so the
+      surrounding structure remains visible.
+    </p>
+
+    <h3>6.3 Instruction families</h3>
+    <p>
+      Instructions are data rows over forms. Repeated width or condition
+      variants are expressed as bounded tables, not copied functions.
+    </p>
+    <pre><code>form rr(opcode bits, width bits) {
+    operands = [destination: reg(gpr), source: reg(gpr)]
+    encode = go nativeX86RR
 }
 
-arch x86_64 {
-    alias = "amd64"
-    endian = little
-    word_bits = 64
-    pointer_bits = 64
-    instruction_alignment = 1
-    stack_word_bytes = 8
-    stack_alignment = 16
-    unaligned_memory = true
-
-    # List position is the architectural register number. The x86 encoder
-    # derives low3, REX bits, byte-register names, RSP/R12 SIB rules, and
-    # RBP/R13 displacement rules from this single list.
-    registers gpr64 = [
-        rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi,
-        r8, r9, r10, r11, r12, r13, r14, r15
-    ]
-
-    locations {
-        primary = rax
-        secondary = rdx
-        tertiary = rcx
-        scratch = r10
-        division_scratch = rbx
-        copy_destination = rdi
-        copy_source = rsi
-        copy_count = rcx
-        stack = rsp
-        frame = rbp
-    }
-
-    # One row supplies both SETcc and near Jcc. Unsigned conditions no longer
-    # need separate hand-written lowering functions.
-    conditions {
-        eq  0x94 0x84
-        ne  0x95 0x85
-        slt 0x9c 0x8c
-        sge 0x9d 0x8d
-        sle 0x9e 0x8e
-        sgt 0x9f 0x8f
-        ult 0x92 0x82
-        uge 0x93 0x83
-        ule 0x96 0x86
-        ugt 0x97 0x87
-    }
-
-    # Width and extension policy is stated once per source-language scalar.
-    scalars {
-        zero_extend { bool:1 byte:1 uint16:2 uint32:4 }
-        sign_extend { int8:1 int16:2 int32:4 }
-        native { int:8 int64:8 uint64:8 pointer:8 }
-    }
-
-    # Form names are declarative aliases for ordinary Go functions above.
-    # A row is specialized into a direct call with its opcode, width, and
-    # selector constants; there is no function registry in the result.
-    forms {
-        rr_rm         = go x86RRRM
-        rr            = go x86RR
-        rm_r          = go x86RMR
-        r_rm          = go x86RRM
-        group         = go x86Group
-        group_imm     = go x86GroupImmediate
-        group_imm8    = go x86GroupImmediate8
-        group_mem_imm = go x86GroupMemoryImmediate
-        imul_imm      = go x86MultiplyImmediate
-        opcode_reg    = go x86OpcodeRegister
-        immediate     = go x86Immediate
-        relative      = go x86Relative
-        set_condition = go x86SetCondition
-        jump_condition = go x86JumpCondition
-        fixed         = bytes
-    }
-
-    # Every row is: generated name, form, opcode, and optional group selector.
-    instructions {
-        mov64       rr_rm       0x89
-        load64      rm_r        0x8b
-        lea64       rm_r        0x8d
-        load_i32    rm_r        0x63
-        load_u32    rm_r        0x8b width=32
-        load_i16    rm_r        0x0fbf
-        load_u16    rm_r        0x0fb7
-        load_i8     rm_r        0x0fbe
-        load_u8     rm_r        0x0fb6
-        store64     r_rm        0x89
-        store32     r_rm        0x89 width=32
-        store16     r_rm        0x89 width=16
-        store8      r_rm        0x88 width=8
-
-        add64       rr_rm       0x01
-        sub64       rr_rm       0x29
-        and64       rr_rm       0x21
-        or64        rr_rm       0x09
-        xor64       rr_rm       0x31
-        cmp64       rr_rm       0x39
-        test64      rr_rm       0x85
-        imul64      rr          0x0faf
-        xchg64      rr_rm       0x87
-
-        add_imm64   group_imm   0x81 /0
-        or_imm64    group_imm   0x81 /1
-        and_imm64   group_imm   0x81 /4
-        sub_imm64   group_imm   0x81 /5
-        xor_imm64   group_imm   0x81 /6
-        cmp_imm64   group_imm   0x81 /7
-        cmp_mem_imm64 group_mem_imm 0x81 /7
-        imul_imm64  imul_imm    0x69
-
-        inc64       group       0xff /0
-        dec64       group       0xff /1
-        shl_imm64   group_imm8  0xc1 /4
-        shr_imm64   group_imm8  0xc1 /5
-        sar_imm64   group_imm8  0xc1 /7
-        shl_cl64    group       0xd3 /4
-        shr_cl64    group       0xd3 /5
-        sar_cl64    group       0xd3 /7
-        call_reg    group       0xff /2
-        idiv64      group       0xf7 /7
-
-        push_reg    opcode_reg  0x50
-        pop_reg     opcode_reg  0x58
-        push_imm8   immediate   0x6a width=8
-        push_imm32  immediate   0x68 width=32
-        setcc       set_condition
-        jcc_rel32   jump_condition relocation=rel32
-        call_rel32  relative    0xe8 relocation=rel32
-        jump_rel32  relative    0xe9 relocation=rel32
-
-        ret         fixed       [0xc3]
-        leave       fixed       [0xc9]
-        syscall     fixed       [0x0f, 0x05]
-        cqo         fixed       [0x48, 0x99]
-        cld         fixed       [0xfc]
-        std         fixed       [0xfd]
-        rep_movsb   fixed       [0xf3, 0xa4]
-    }
-
-    # The shared IR uses parameterized operations such as move(dst, src),
-    # load(dst, address, kind), and compare(left, right, condition). These
-    # bindings select x86 instruction families once; role-specific wrappers
-    # are generated after primary/secondary/tertiary are known.
-    bind {
-        move = mov64
-        address = lea64
-        load.native = load64
-        load.i32 = load_i32
-        load.u32 = load_u32
-        load.i16 = load_i16
-        load.u16 = load_u16
-        load.i8 = load_i8
-        load.u8 = load_u8
-        store.native = store64
-        store.u32 = store32
-        store.u16 = store16
-        store.u8 = store8
-
-        add = add64
-        subtract = sub64
-        multiply = imul64
-        bit_and = and64
-        bit_or = or64
-        bit_xor = xor64
-        compare = cmp64
-        test = test64
-        increment = inc64
-        decrement = dec64
-        shift_left_immediate = shl_imm64
-        shift_right_unsigned_immediate = shr_imm64
-        shift_right_signed_immediate = sar_imm64
-
-        call = call_rel32
-        call_indirect = call_reg
-        jump = jump_rel32
-        jump_condition = jcc_rel32
-        set_condition = setcc
-        return = ret
-        leave = leave
-        host_syscall = syscall
-        move_immediate = go x86MoveImmediate
-        variable_shift = go x86VariableShift
-        signed_divide = go x86SignedDivide
-        copy_bytes = go x86CopyBytes
-    }
-
-    relax {
-        jump_rel32 to jump_rel8 = go x86RelaxJump
-        jcc_rel32 to jcc_rel8 = go x86RelaxCondition
-    }
-
-    relocation rel32 {
-        width = 4
-        signed = true
-        relative_to = field_end
-        kinds = [label, data, bss, import]
-    }
-
-    frame {
-        base = rbp
-        stack = rsp
-        alignment = 16
-        maximum = 65520
-        prologue = [0xc8, frame_size:u16le, 0x00]
-        epilogue = [leave, ret]
-        overflow_arguments = rbp + 16
-    }
-
-}
-
-# Image fields are declared here. Header/section/relocation are generic
-# definition-language constructs, not precompiled ELF or PE backends.
-format elf64_x86_64 {
-    byte_order = little
-    address_bits = 64
-    file_alignment = 0x1000
-    machine = 62
-
-    header elf {
-        magic = [0x7f, 0x45, 0x4c, 0x46]
-        class = 2
-        data = 1
-        version = 1
-        osabi = 0
-        type = 3
-        machine = 62
-        entry = address(text.start)
-        program_header_offset = sizeof(elf_header)
-        section_header_offset = stripped ? 0 : sections.offset
-        flags = 0
-        elf_header_size = 64
-        program_header_size = 56
-        program_header_count = 2
-        section_header_size = stripped ? 0 : 64
-        section_header_count = stripped ? 0 : sections.count
-        section_name_index = stripped ? 0 : sections.names
-    }
-
-    segment text {
-        type = load
-        flags = read | execute
-        file = [headers.start, data.file_start)
-        memory = [headers.start, data.memory_start)
-        alignment = 0x1000
-    }
-
-    segment data {
-        type = load
-        flags = read | write
-        file = [data.file_start, data.file_end)
-        memory = [data.memory_start, bss.end)
-        alignment = 0x1000
-    }
-
-    sections when !stripped {
-        text progbits alloc|execute align=16
-        data progbits alloc|write align=8
-        bss nobits alloc|write align=8
-        symtab symtab entry_size=24 link=strtab
-        strtab strtab
-        shstrtab strtab
-    }
-
-    relocation {
-        label = rel32
-        data = rel32
-        bss = rel32
-    }
-}
-
-format elf64_object_x86_64 {
-    byte_order = little
-    address_bits = 64
-    machine = 62
-    type = relocatable
-
-    sections {
-        text progbits alloc|execute align=16
-        rela_text rela entry_size=24 link=symtab info=text
-        data progbits alloc|write align=8
-        bss nobits alloc|write align=8
-        symtab symtab entry_size=24 link=strtab
-        strtab strtab
-        shstrtab strtab
-    }
-
-    relocation label { number = 2 kind = pc_relative width = 32 addend = -4 }
-    relocation data  { number = 2 kind = pc_relative width = 32 addend = -4 }
-    relocation bss   { number = 2 kind = pc_relative width = 32 addend = -4 }
-    relocation abs64 { number = 1 kind = absolute width = 64 addend = 0 }
-}
-
-format pe64_x86_64 {
-    byte_order = little
-    address_bits = 64
-    machine = 0x8664
-    image_base = 0x400000
-    headers_size = 0x200
-    file_alignment = 0x200
-    section_alignment = 0x1000
-    text_rva = 0x1000
-
-    dos_header {
-        magic = [0x4d, 0x5a]
-        pe_offset = 0x80
-    }
-
-    coff_header {
-        machine = 0x8664
-        sections = 2
-        optional_header_size = 0xf0
-        characteristics = executable | large_address_aware
-    }
-
-    optional_header {
-        magic = 0x20b
-        entry = rva(text.start)
-        code_base = rva(text.start)
-        image_base = 0x400000
-        section_alignment = 0x1000
-        file_alignment = 0x200
-        subsystem = target.subsystem
-        stack_reserve = 8MiB
-        stack_commit = 4KiB
-        heap_reserve = 1MiB
-        directories = [imports.directory, imports.iat]
-    }
-
-    section text {
-        name = ".text"
-        flags = code | execute | read
-        virtual = text
-        raw_alignment = 0x200
-    }
-
-    section data {
-        name = ".data"
-        flags = initialized_data | read | write
-        virtual = data + bss
-        raw = data
-        raw_alignment = 0x200
-    }
-
-    imports {
-        thunk_bytes = 8
-        library = "KERNEL32.dll"
-        names = target.runtime.imports
-
-        descriptor size=20 {
-            u32 original_first_thunk = rva(import_lookup_table)
-            u32 timestamp = 0
-            u32 forwarder_chain = 0
-            u32 name = rva(library_name)
-            u32 first_thunk = rva(import_address_table)
-        }
-
-        import_lookup_table {
-            entries names as u64 rva(hint_name(entry))
-            terminator = u64 0
-        }
-
-        import_address_table {
-            entries names as u64 rva(hint_name(entry))
-            terminator = u64 0
-        }
-
-        hint_name(entry) {
-            u16 0
-            ascii entry
-            u8 0
-            align 2
-        }
-
-        library_name {
-            ascii library
-            u8 0
-        }
-
-        directory.rva = rva(descriptor)
-        directory.size = sizeof(descriptor)
-        iat.rva = rva(import_address_table)
-        iat.size = sizeof(import_address_table)
-    }
-
-    relocation import = rel32 from instruction_end to imports.iat_entry
-    relocation data = rel32 from instruction_end to data
-    relocation bss = rel32 from instruction_end to bss
-}
-
-format coff64_object_x86_64 {
-    byte_order = little
-    address_bits = 64
-    machine = 0x8664
-    sections = [text, data, bss]
-    symbol_table entry_size=18 {
-        name = inline_8_or_string_offset
-        value = section_offset
-        section = section_index
-        type = symbol_type
-        storage_class = symbol_visibility
-        auxiliaries = 0
-    }
-
-    string_table {
-        u32 size
-        entries long_symbol_names {
-            ascii long_symbol_name
-            u8 0
-        }
-    }
-
-    relocation label { number = 0x0004 kind = rel32 addend = -4 }
-    relocation data  { number = 0x0004 kind = rel32 addend = -4 }
-    relocation bss   { number = 0x0004 kind = rel32 addend = -4 }
-    relocation abs64 { number = 0x0001 kind = absolute width = 64 }
-}
-
-# Runtime declarations define only the supported boundary. Missing operations
-# are rejected during definition validation rather than silently emulated.
-runtime linux_x86_64 {
-    entry process_stack {
-        argc = word(rsp, 0)
-        argv = words(rsp + 8, argc)
-        envp = words(rsp + 16 + argc * 8, until_null)
-        string = nul_terminated_bytes
-        result = [slice(argv), slice(envp)]
-    }
-
-    syscall {
-        number = rax
-        arguments = [rdi, rsi, rdx, r10, r8, r9]
-        result = rax
-        error = negative
-        instruction = syscall
-    }
-
-    operation read     { number = 0  args = [fd, buffer, count] }
-    operation write    { number = 1  args = [fd, buffer, count] }
-    operation open     { number = 2  args = [path, flags, mode] }
-    operation close    { number = 3  args = [fd] }
-    operation read_at  { number = 17 args = [fd, buffer, count, offset] }
-    operation write_at { number = 18 args = [fd, buffer, count, offset] }
-    operation chmod    { number = 91 args = [fd, mode] }
-    operation print    { use = write args = [stderr, buffer, count] }
-    operation exit     { number = 60 args = [status] noreturn = true }
-}
-
-runtime win32_x86_64 {
-    imports "KERNEL32.dll" = [
-        CreateFileA,
-        CloseHandle,
-        ReadFile,
-        WriteFile,
-        SetFilePointer,
-        GetStdHandle,
-        GetCommandLineA,
-        ExitProcess,
-        GetEnvironmentStringsA
-    ]
-
-    entry {
-        arguments.source = call GetCommandLineA
-        arguments.parse = go windowsCommandLine
-        environment.source = call GetEnvironmentStringsA
-        environment.parse = nul_terminated_pairs
-        result = [slice(arguments), slice(environment)]
-    }
-
-    operation open {
-        call = CreateFileA
-        arguments = [
-            path,
-            access(flags),
-            share_read | share_write,
-            null,
-            disposition(flags),
-            normal_attributes,
-            null
-        ]
-        result = handle_or_error
-    }
-
-    operation close {
-        call = CloseHandle
-        arguments = [fd]
-        result = bool_or_error
-    }
-
-    operation read {
-        call = ReadFile
-        arguments = [fd, buffer, count, address(transferred), null]
-        result = transferred_or_error
-    }
-
-    operation write {
-        call = WriteFile
-        arguments = [fd, buffer, count, address(transferred), null]
-        result = transferred_or_error
-    }
-
-    operation read_at {
-        sequence = [seek(fd, offset), read(fd, buffer, count)]
-    }
-
-    operation write_at {
-        sequence = [seek(fd, offset), write(fd, buffer, count)]
-    }
-
-    operation seek {
-        call = SetFilePointer
-        arguments = [fd, low32(offset), address(high32(offset)), begin]
-        result = position_or_error
-    }
-
-    operation print {
-        sequence = [GetStdHandle(stderr), write(result, buffer, count)]
-    }
-
-    operation chmod {
-        unsupported = "Win32 target does not expose chmod"
-    }
-
-    operation exit {
-        call = ExitProcess
-        arguments = [status]
-        noreturn = true
-    }
-}
-
-runtime linux_kernel_x86_64 {
-    entry = kernel_module_init
-    exit = kernel_module_exit
-    operation print { import = printk }
-    operation open { unsupported = "kernel module runtime has no file API" }
-    operation close { unsupported = "kernel module runtime has no file API" }
-    operation read { unsupported = "kernel module runtime has no file API" }
-    operation write { unsupported = "kernel module runtime has no file API" }
-    operation chmod { unsupported = "kernel module runtime has no file API" }
-}
-
-abi renvo_x86_64 {
-    arch = x86_64
-    call_words = [rdi, rsi, rdx, rcx, r8, r9]
-    overflow_stride = 8
-    scalar_result = rax
-    string_result = [rax, rdx]
-    slice_result = [rax, rdx, rcx]
-    hidden_result_word = 0
-}
-
-abi sysv_x86_64 {
-    internal = renvo_x86_64
-    arguments = [rdi, rsi, rdx, rcx, r8, r9]
-    result = [rax, rdx]
-    caller_saved = [rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11]
-    callee_saved = [rbx, rbp, r12, r13, r14, r15]
-    stack_alignment = 16
-    red_zone = unused
-}
-
-abi windows_x86_64 {
-    internal = renvo_x86_64
-    arguments = [rcx, rdx, r8, r9]
-    result = [rax, rdx]
-    caller_saved = [rax, rcx, rdx, r8, r9, r10, r11]
-    callee_saved = [rbx, rbp, rdi, rsi, r12, r13, r14, r15]
-    stack_alignment = 16
-    shadow_space = 32
-    stack_probe {
-        page_bytes = 4096
-        direction = down
-        touch_each_page = true
-    }
-}
-
-target linux/amd64 {
-    os = linux
-    arch = x86_64
-    abi = sysv_x86_64
-    runtime = linux_x86_64
-    executable = elf64_x86_64
-    object = elf64_object_x86_64
-    build_tags = ["linux", "amd64"]
-    capabilities = [
-        hosted, executable, object, filesystem, heap,
-        argv, environment, linkstatic
-    ]
-}
-
-target windows/amd64 {
-    os = windows
-    arch = x86_64
-    abi = windows_x86_64
-    runtime = win32_x86_64
-    executable = pe64_x86_64
-    object = coff64_object_x86_64
-    subsystem = console
-    build_tags = ["windows", "amd64"]
-    capabilities = [
-        hosted, executable, object, filesystem, heap,
-        argv, environment, imports, linkstatic, windows_gui
-    ]
-}
-
-target linux-kernel/amd64 {
-    os = linux
-    arch = x86_64
-    abi = sysv_x86_64
-    runtime = linux_kernel_x86_64
-    object = elf64_object_x86_64
-    build_tags = ["linux", "amd64", "renvo_kernel"]
-    capabilities = [freestanding, kernel_module, object, imports, linkstatic]
+instructions {
+    move64     = rr(opcode = 0x89, width = 64)
+    add64      = rr(opcode = 0x01, width = 64)
+    subtract64 = rr(opcode = 0x29, width = 64)
+}</code></pre>
+    <p>
+      The example is illustrative. The final grammar must remain smaller than
+      the implementation it replaces and must not grow user-defined macros or
+      arbitrary compile-time evaluation.
+    </p>
+
+    <h3>6.4 Native operation selection</h3>
+    <p>
+      The stable native operation contract describes what shared semantic
+      lowering asks the machine to do. A binding selects:
+    </p>
+    <ul>
+      <li>one instruction row;</li>
+      <li>one bounded choice among rows based on declared operand classes;</li>
+      <li>one named Go lowering hook for an irregular multi-instruction algorithm;</li>
+      <li>an explicit unsupported result where the contract permits it.</li>
+    </ul>
+    <p>
+      Selection compiles to direct conditionals and calls. There is no general
+      expression rewrite engine and no runtime search through recipes.
+    </p>
+    <pre><code>bind native_v1 {
+    move            = instruction move_native
+    load.native     = choose load_by_address_class
+    move_immediate  = go synthesizeImmediate
+    signed_divide   = go lowerSignedDivide
 }</code></pre>
 
-  <h3>Why this stays KISS and DRY</h3>
-  <ul>
-    <li>Register numbers, scalar widths, conditions, opcodes, and operation bindings each have one source of truth.</li>
-    <li>The file does not repeat primary/secondary/tertiary combinations; the generator specializes the built-in versioned IR vocabulary after reading the location map.</li>
-    <li>Architecture-neutral string, slice, stack, comparison, and control-flow composites belong to the built-in IR contract, not to imported target files.</li>
-    <li>ModRM, SIB, REX, displacement, immediate, branch relaxation, division, copying, and Windows argument parsing are ordinary Go functions near the top of this closed file.</li>
-    <li>Tables and image layouts use bounded schema expressions, not a macro language. User-defined control flow belongs in embedded Go.</li>
-    <li>Exceptional x86 behavior is readable Go. There is no rewrite DSL, external encoder, or OS hook hiding the implementation.</li>
-    <li>Linux, Windows, and kernel-module targets reuse named ISA, ABI, runtime, and format declarations within the same file. Future UEFI, Darwin, BSD, illumos, and Plan 9 x86-64 work from issue #24 extends this authority instead of forking the ISA.</li>
-    <li>Instruction forms are tested at the encoder boundary with ordinary Go tests rather than another test syntax inside <code>.rtg</code>.</li>
-  </ul>
+    <h3>6.5 ABI model</h3>
+    <p>The ABI declaration owns:</p>
+    <ul>
+      <li>argument and result register sequences by value class;</li>
+      <li>stack argument order and slot size;</li>
+      <li>stack and call-site alignment;</li>
+      <li>callee-saved and caller-clobbered sets;</li>
+      <li>hidden-result and aggregate return policy;</li>
+      <li>frame record and return-address policy;</li>
+      <li>variadic and external-call differences where supported;</li>
+      <li>typed hooks for genuinely irregular entry, call, or return sequences.</li>
+    </ul>
+    <p>
+      The shared native lowering generates ordinary frame, parameter, call, and
+      return code from these facts. It does not contain an architecture name
+      switch.
+    </p>
 
-  <h3>What the generator produces</h3>
-  <ul>
-    <li>One direct Go function for every bound IR operation, with parameterized locations and composite lowerings specialized into ordinary calls and conditionals.</li>
-    <li>The embedded ModRM/SIB/REX, immediate-selection, branch-relaxation, division, copying, and argument-parsing functions as ordinary package declarations—not quoted source or callbacks.</li>
-    <li>No register-name lookup, definition AST, string property lookup, recipe dispatch, or target switch in the generated compiler.</li>
-    <li>A completeness table generated from <code>ir.direct_emitter_v1</code>, failing generation if any operation, width, relocation, or target capability is missing.</li>
-    <li>Separate fixed-target compositions so a Linux compiler does not retain PE/Win32 code and a Windows compiler does not retain ELF/Linux code.</li>
-  </ul>
-  <p>
-    For example, the <code>add64</code> row does not survive as data. After
-    names and constants are resolved, the emitted Go contains a normal wrapper
-    beside the parsed body of <code>x86RRRM</code>:
-  </p>
-  <pre><code>package backend
+    <h3>6.6 Runtime composition</h3>
+    <p>
+      Runtime declarations separate OS behavior from machine mechanics. A
+      hosted runtime describes:
+    </p>
+    <ul>
+      <li>supported operations;</li>
+      <li>syscall or import identity;</li>
+      <li>argument/result placement through ABI roles;</li>
+      <li>entry-state and process-argument layout;</li>
+      <li>exit behavior;</li>
+      <li>static and dynamic import requirements;</li>
+      <li>small typed hooks for OS-specific algorithms.</li>
+    </ul>
+    <p>
+      Linux runtime behavior is written once, with architecture-specific syscall
+      numbers and trap instruction supplied as data. Windows import and handle
+      behavior is written once, with ABI and PE-machine parameters selected by
+      composition. Darwin runtime behavior is similarly separated from the
+      AArch64 encoder.
+    </p>
 
-// Local x86RRRM is emitted with the unit prefix.
-func rtgX8664X86RRRM(
-    out *RTGEmitter,
-    opcode uint32,
-    destination RTGRegister,
-    source RTGRegister,
-    width int,
-) {
-    if width == 16 {
-        out.Byte(0x66)
-    }
-    byteRegister := RTGNoRegister
-    if width == 8 {
-        byteRegister = source
-    }
-    rtgX8664X86REX(out, width == 64, source, RTGNoRegister, destination, byteRegister)
-    rtgX8664X86Opcode(out, opcode)
-    rtgX8664X86ModRM(
-        out, 3, rtgX8664X86Low3(source), rtgX8664X86Low3(destination),
-    )
-}
+    <h3>6.7 Relocations and output formats</h3>
+    <p>
+      Format declarations own reusable ELF, PE/COFF, Mach-O, and relocatable
+      layout behavior within the closed native catalog. Architecture
+      declarations supply:
+    </p>
+    <ul>
+      <li>machine identifiers;</li>
+      <li>class, endianness, and address width;</li>
+      <li>relocation kind mappings;</li>
+      <li>instruction-specific patch functions;</li>
+      <li>entry alignment and section flags;</li>
+      <li>architecture-specific import thunk requirements.</li>
+    </ul>
+    <p>
+      The common format implementation is not copied into each architecture.
+      It operates on typed sections, symbols, and relocations and calls the
+      selected machine's declared patch hook where the file format cannot
+      resolve a relocation generically.
+    </p>
 
-// Generated from: add64 rr_rm 0x01
-func rtgX8664X86Add64(
-    out *RTGEmitter,
-    destination RTGRegister,
-    source RTGRegister,
-) {
-    rtgX8664X86RRRM(out, 0x01, destination, source, 64)
+    <h3>6.8 Target composition</h3>
+    <p>A target selects one compatible value for each axis:</p>
+    <pre><code>target linux/amd64 {
+    family       = native_v1
+    machine      = x86_64
+    abi          = sysv_x86_64
+    runtime      = linux_hosted
+    format       = elf_executable
+    relocations  = elf_x86_64
+    frontend     = go_amd64
 }</code></pre>
-  <p>
-    Fixed-target pruning starts from wrappers such as
-    <code>rtgX8664X86Add64</code>. Ordinary Go reachability then removes unused
-    embedded declarations and all unselected target compositions.
-  </p>
+    <p>
+      Resolution checks widths, address spaces, endianness, ABI register
+      classes, runtime requirements, relocation coverage, and output-format
+      compatibility. Generation specializes the target and discards unrelated
+      compositions.
+    </p>
+  </section>
 
-  <h2>Final Acceptance Run</h2>
-  <ol>
-    <li>Regenerate all checked-in backend outputs and confirm a clean worktree.</li>
-    <li>Run definition parser, validator, generator, malformed-input, determinism, and stale-output tests.</li>
-    <li>Run the full backend suite for every advertised native, Wasm, and VM target with unchanged gates.</li>
-    <li>Run the full frontend suite and full bundled self-hosting suite.</li>
-    <li>Build prepared backends from source definitions through Renvo on Linux, Darwin, and Windows hosts where available.</li>
-    <li>Compile with both cold preparation and warm cache hits and compare outputs.</li>
-    <li>Use a prepared backend for a target unknown to the invoking compiler and produce a valid target image.</li>
-    <li>Reject mismatched RTGU, definition, schema, protocol, host, and corrupt artifact cases.</li>
-    <li>Measure and record backend-core, cold, warm, size, and peak-memory results.</li>
-    <li>Verify an ordinary Go-module build carries every included backend and can also compile and run a custom target supplied through a prepared artifact.</li>
-  </ol>
+  <section id="hooks">
+    <h2>7. Embedded Go boundary</h2>
+    <p>
+      Embedded Go is an opaque implementation language behind typed extension
+      points. Renvo parses and type-checks it because generated code must
+      compile, but it does not attempt to determine whether the function is
+      simple, bounded, elegant, or terminating.
+    </p>
+
+    <h3>Allowed hook categories</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Category</th>
+          <th>Typical responsibility</th>
+          <th>What remains declarative</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Encoder</td>
+          <td>ModRM/SIB, ARM rotated immediate, AArch64 logical immediate</td>
+          <td>operands, constraints, instruction identity, effects</td>
+        </tr>
+        <tr>
+          <td>Lowering</td>
+          <td>division sequence, long immediate synthesis, branch relaxation</td>
+          <td>operation binding, required roles, clobbers, capability</td>
+        </tr>
+        <tr>
+          <td>Relocation</td>
+          <td>patch a machine-specific split or scaled field</td>
+          <td>relocation kind, width, range, addend policy</td>
+        </tr>
+        <tr>
+          <td>ABI edge</td>
+          <td>unusual aggregate return or platform thunk</td>
+          <td>register classes, stack policy, declared hook site</td>
+        </tr>
+        <tr>
+          <td>Runtime edge</td>
+          <td>Windows command-line parsing or kernel metadata</td>
+          <td>operation surface, imports, capabilities, selected target</td>
+        </tr>
+        <tr>
+          <td>Format edge</td>
+          <td>architecture-specific import veneer or metadata patch</td>
+          <td>sections, layout facts, format and relocation composition</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Structural restrictions</h3>
+    <ul>
+      <li>Hooks are package-level declarations in the Renvo-supported Go subset.</li>
+      <li>Imports, package clauses, directives, and unsafe host escape are rejected.</li>
+      <li>Each hook is referenced from a typed declaration with a fixed signature.</li>
+      <li>Generated names are resolved through the parsed Go AST, not string substitution.</li>
+      <li>Only declarations reachable from the selected target are emitted.</li>
+      <li>The complete hook syntax contributes to canonical definition identity.</li>
+    </ul>
+    <div class="warning">
+      There is no hook line limit, loop limit, cyclomatic-complexity check, or
+      termination proof. Human review and generated metrics provide pressure
+      toward small hooks; the type boundary provides the compiler-enforced
+      scope.
+    </div>
+
+    <h3>Hook review rule</h3>
+    <p>
+      A reviewer should be able to answer “why is this not a table or an
+      existing form?” A hook is justified when the algorithm has real control
+      flow or state that would make a declarative encoding less clear. This is
+      a review convention, not language semantics.
+    </p>
+  </section>
+
+  <section id="generation">
+    <h2>8. Source authority and generation topology</h2>
+    <p>
+      The built-in native source of truth becomes one closed catalog:
+      <code>backend/definitions/native.rtg</code>. It contains shared native
+      declarations plus the four production architecture descriptions. Wasm
+      and VM source remains outside it.
+    </p>
+    <pre><code>backend/definitions/native.rtg
+    |
+    +-- shared native operation contract
+    +-- reusable ABI templates and policies
+    +-- Linux / Windows / Darwin / kernel runtime declarations
+    +-- ELF / PE-COFF / Mach-O / relocatable format declarations
+    +-- amd64 / 386 / ARM / AArch64 machine differences
+    |
+    v
+target slicing and reachability
+    |
+    +-- generated native kernel
+    +-- generated architecture implementations
+    +-- generated target descriptors
+    +-- generated fixed-target source manifests
+    +-- generated ordinary-Go built-in package</code></pre>
+
+    <h3>One authoritative production projection</h3>
+    <p>
+      The current split between algorithm-only generated files and separate
+      contract-only generated files will be removed. Each generated
+      architecture production file contains the facts, algorithms, and direct
+      operation bindings actually compiled by the backend.
+    </p>
+    <ul>
+      <li>No checked-in generated contract exists solely for tests.</li>
+      <li>Tests may generate temporary projections for golden inspection.</li>
+      <li>Every checked-in generated Go file is part of a documented build topology.</li>
+      <li>Stale-output tests regenerate the exact production artifacts.</li>
+    </ul>
+
+    <h3>Catalog identity versus target identity</h3>
+    <p>
+      A scalable multi-architecture catalog needs two deterministic identities:
+    </p>
+    <ul>
+      <li>
+        <strong>Catalog identity</strong> hashes the complete closed source file
+        and records exactly which authored catalog produced the release.
+      </li>
+      <li>
+        <strong>Target semantic identity</strong> hashes the selected target and
+        the transitive declarations and embedded Go reachable from it, together
+        with the native contract and generator compatibility versions.
+      </li>
+    </ul>
+    <p>
+      RTGU bindings, target descriptors, and prepared-cache identity use the
+      target semantic identity. Generated manifests additionally record the
+      catalog identity for provenance. Adding an unrelated architecture to the
+      catalog therefore does not invalidate existing targets, while changing
+      shared runtime, format, ABI, or machine behavior changes every target that
+      actually reaches it.
+    </p>
+    <p>
+      Reachability and hashing use resolved typed declarations, not source-text
+      substring selection. Declaration order, comments, and formatting do not
+      affect either identity.
+    </p>
+
+    <h3>Built-in and custom native outputs</h3>
+    <p>
+      The same resolver and generator have two output modes:
+    </p>
+    <ul>
+      <li>
+        <strong>Built-in catalog mode:</strong> emit all production native
+        architectures as separately prunable checked-in Go.
+      </li>
+      <li>
+        <strong>Fixed custom mode:</strong> emit one selected custom native
+        target and compile it with the built-in host bootstrap.
+      </li>
+    </ul>
+    <p>
+      Both modes use the same typed declarations and generation primitives.
+      Built-ins project stable compiler-facing symbols so ordinary Go builds
+      and fixed-target pruning stay fast. Custom targets project the same
+      bindings through a target-neutral preparation adapter because their
+      symbols cannot be known by the release compiler. The adapter is transport:
+      it owns no instruction, ABI, runtime, relocation, or format semantics.
+    </p>
+
+    <h3>Compiler package duplication</h3>
+    <p>
+      The current ordinary-Go bundle copies the backend compiler into
+      <code>internal/backendcompiled/compiler_generated.go</code> and carries a
+      compressed source copy for preparation. This is not the first migration
+      target because package refactoring can disturb performance independently
+      of the schema.
+    </p>
+    <p>
+      After the native schema is authoritative, prototype one of:
+    </p>
+    <ol>
+      <li>an importable target-neutral compiler kernel with generated native components; or</li>
+      <li>a precompiled kernel plus generated component linking for prepared backends.</li>
+    </ol>
+    <p>
+      Adopt the prototype only if it reduces repository/runtime duplication
+      without violating fixed-target size, memory, or self-host constraints.
+    </p>
+  </section>
+
+  <section id="stress">
+    <h2>9. Schema stress tests: 8086 and AVR</h2>
+    <p>
+      8086 and AVR are design fixtures, not production deliverables. Their job
+      is to expose assumptions before the native schema becomes expensive to
+      change.
+    </p>
+
+    <h3>8086 fixture</h3>
+    <p>The 8086 exercise must represent:</p>
+    <ul>
+      <li>16-bit native words;</li>
+      <li>segmented code and data addressing;</li>
+      <li>non-uniform register roles and partial-register constraints;</li>
+      <li>small displacement and immediate forms;</li>
+      <li>near versus far control transfer;</li>
+      <li>stack and pointer representation that are not interchangeable;</li>
+      <li>a minimal ABI composition without claiming a shipping DOS runtime.</li>
+    </ul>
+
+    <h3>AVR fixture</h3>
+    <p>The AVR exercise must represent:</p>
+    <ul>
+      <li>8-bit registers and multi-register values;</li>
+      <li>Harvard code/data address spaces;</li>
+      <li>asymmetric register constraints;</li>
+      <li>instruction pairs and limited immediate destinations;</li>
+      <li>small branch ranges and relaxation needs;</li>
+      <li>pointer register pairs;</li>
+      <li>a minimal call ABI without adding board or firmware policy.</li>
+    </ul>
+
+    <h3>Required fixture depth</h3>
+    <p>
+      Each fixture must parse, resolve, validate, generate compilable direct Go,
+      and cover representative move, load/store, arithmetic, branch, call, and
+      relocation operations. It need not compile the frontend or produce a
+      bootable artifact.
+    </p>
+    <div class="exit">
+      <strong>Stress-test exit condition:</strong>
+      the fixtures require no architecture-name conditionals in the generator
+      and no generic macro/evaluation feature. If a required concept is absent,
+      add the smallest typed schema concept that also improves or clarifies a
+      production architecture.
+    </div>
+  </section>
+
+  <section id="phases">
+    <h2>10. Implementation phases</h2>
+
+    <h3>Phase 0: Freeze evidence and inventory differences</h3>
+    <ol>
+      <li>
+        Record current backend performance results without modifying
+        <code>backend/main_test.go</code>.
+      </li>
+      <li>
+        Record fixed and universal compiler sizes, frontend compile time,
+        deterministic VM steps, RSS, writable reservation, self-host time, and
+        output sizes.
+      </li>
+      <li>
+        Classify current native code by machine encoding, operation selection,
+        ABI, runtime, relocation, format, and target composition.
+      </li>
+      <li>
+        Identify byte-identical or structurally duplicated ELF, PE, runtime,
+        frame, call, and relocation behavior.
+      </li>
+      <li>
+        Preserve representative output goldens and minimal backend regression
+        programs for every migrated behavior.
+      </li>
+    </ol>
+    <div class="exit">
+      <strong>Exit:</strong> every proposed shared declaration is backed by
+      existing repeated code or an explicit future-architecture requirement.
+      No schema feature is added merely because it may be useful.
+    </div>
+
+    <h3>Phase 1: Establish backend families</h3>
+    <ol>
+      <li>Introduce an explicit family field in target descriptors.</li>
+      <li>Define <code>native_v1</code> independently of Wasm/VM lowering.</li>
+      <li>
+        Keep the current Wasm/VM implementation behind a structured-family
+        selection without changing its production algorithms.
+      </li>
+      <li>
+        Remove native validation assumptions from the generic target descriptor
+        layer.
+      </li>
+      <li>
+        Add tests proving each advertised target selects exactly one backend
+        family and carries compatible frontend facts.
+      </li>
+    </ol>
+    <div class="exit">
+      <strong>Exit:</strong> Wasm/VM behavior is unchanged, while native schema
+      work can proceed without accommodating structured-control or module-index
+      semantics.
+    </div>
+
+    <h3>Phase 2: Build the minimum native schema</h3>
+    <ol>
+      <li>Implement machine facts, register classes, roles, and address spaces.</li>
+      <li>Implement bounded operand, encoding-form, and instruction tables.</li>
+      <li>Implement typed operation bindings and explicit rejection.</li>
+      <li>Implement ABI sequences, stack policy, save sets, and typed ABI hooks.</li>
+      <li>Implement runtime composition and syscall/import fact tables.</li>
+      <li>Implement format parameters and machine relocation hooks.</li>
+      <li>Emit direct Go functions and constants with deterministic naming.</li>
+      <li>Emit a non-failing metrics report for declarative and Go source volume.</li>
+    </ol>
+    <div class="exit">
+      <strong>Exit:</strong> a small synthetic native machine can generate,
+      compile through host Go and Renvo, and emit direct calls with no runtime
+      definition interpreter.
+    </div>
+
+    <h3>Phase 3: Stress the schema before production migration</h3>
+    <ol>
+      <li>Add the 8086 schema fixture.</li>
+      <li>Add the AVR schema fixture.</li>
+      <li>
+        Review every schema addition requested by a fixture against the four
+        production native machines.
+      </li>
+      <li>
+        Reject fixture-driven generality that would require macros, arbitrary
+        evaluation, or a second IR.
+      </li>
+      <li>
+        Document concepts deliberately deferred to a future
+        <code>native_v2</code>.
+      </li>
+    </ol>
+    <div class="exit">
+      <strong>Exit:</strong> 8086 and AVR representative definitions generate
+      valid direct source, and the schema remains bounded and readable.
+    </div>
+
+    <h3>Phase 4: amd64 vertical slice</h3>
+    <p>
+      amd64 is the first production proof because it exercises the common host,
+      strict performance gates, two hosted OSes, object output, static imports,
+      and Linux kernel-module output.
+    </p>
+    <ol>
+      <li>Move x86-64 instruction families and constraints into declarative forms.</li>
+      <li>Keep ModRM/SIB, relaxation, and unusual immediate algorithms as typed Go hooks.</li>
+      <li>Generate SysV and Windows ABI mechanics from declarations.</li>
+      <li>Compose Linux, Windows, and kernel runtime behavior from shared components.</li>
+      <li>Compose ELF, PE/COFF, and relocatable ELF output from shared formats.</li>
+      <li>
+        Route one test-only amd64 compiler through the generated native contract
+        while the production path remains available for equivalence.
+      </li>
+      <li>
+        Compare code bytes, relocations, symbols, object files, executables,
+        kernel modules, runtime behavior, and all performance measurements.
+      </li>
+    </ol>
+    <div class="exit">
+      <strong>Exit:</strong> generated amd64 covers the full current amd64 scope,
+      passes all amd64 tests, and remains inside unchanged performance gates.
+    </div>
+
+    <h3>Phase 5: Make generated amd64 authoritative</h3>
+    <ol>
+      <li>Switch built-in amd64 targets to the generated native path.</li>
+      <li>Remove the old amd64 production dispatch and duplicated algorithms.</li>
+      <li>Generate one authoritative amd64 production file.</li>
+      <li>Verify fixed-target pruning for Linux, Windows, and kernel compositions.</li>
+      <li>Rerun the full backend suite after deletion, not only before it.</li>
+    </ol>
+    <div class="exit">
+      <strong>Exit:</strong> no amd64 fallback or parallel encoder can produce a
+      release artifact.
+    </div>
+
+    <h3>Phase 6: Add 386 and prove x86 sharing</h3>
+    <ol>
+      <li>Reuse x86 forms where the encoding structure is actually shared.</li>
+      <li>Describe 32-bit registers, operand defaults, addressing, and ABI differences.</li>
+      <li>Reuse Linux and Windows runtime behavior with 386 syscall/import facts.</li>
+      <li>Reuse ELF and PE format algorithms with 32-bit parameters and relocations.</li>
+      <li>Preserve 386-specific hooks only where encoding or ABI behavior differs.</li>
+      <li>Delete the legacy 386 production path after full equivalence.</li>
+    </ol>
+    <div class="exit">
+      <strong>Exit:</strong> adding 386 does not copy OS/runtime/format
+      implementations, and both Linux/386 and Windows/386 pass all gates.
+    </div>
+
+    <h3>Phase 7: Add AArch64 and ARM</h3>
+    <ol>
+      <li>Describe fixed-width instruction families and immediate constraints.</li>
+      <li>Keep AArch64 and ARM immediate synthesis as typed hooks where appropriate.</li>
+      <li>Generate AAPCS32, AAPCS64, and Windows ARM64 ABI mechanics.</li>
+      <li>
+        Reuse Linux runtime and ELF format behavior while supplying machine
+        identifiers, syscall facts, and relocations.
+      </li>
+      <li>
+        Reuse Windows runtime and PE behavior for ARM64 without copying Windows
+        process/import code.
+      </li>
+      <li>Reuse Mach-O behavior for Darwin/ARM64 with AArch64 relocations.</li>
+      <li>Delete legacy ARM and AArch64 production paths after equivalence.</li>
+    </ol>
+    <div class="exit">
+      <strong>Exit:</strong> all four current native architectures use the
+      generated native contract, and every existing native target passes.
+    </div>
+
+    <h3>Phase 8: Consolidate the built-in native catalog</h3>
+    <ol>
+      <li>
+        Merge shared native declarations and the four machine descriptions into
+        <code>backend/definitions/native.rtg</code>.
+      </li>
+      <li>
+        Remove superseded per-architecture definition files after generated
+        output is stable.
+      </li>
+      <li>
+        Generate separate production files and manifests by target reachability.
+      </li>
+      <li>
+        Generate completeness documentation showing which declarations each
+        target retains.
+      </li>
+      <li>
+        Ensure the closed catalog hash and target-specific semantic identities
+        remain deterministic.
+      </li>
+      <li>
+        Verify adding an unreachable fixture architecture leaves all existing
+        target semantic identities unchanged.
+      </li>
+    </ol>
+    <div class="exit">
+      <strong>Exit:</strong> shared behavior is authored once, while a fixed
+      target does not pay for unrelated catalog contents.
+    </div>
+
+    <h3>Phase 9: Converge custom native backends</h3>
+    <ol>
+      <li>Make custom native definitions declare <code>family = native_v1</code>.</li>
+      <li>Use the same resolver, validator, hook checker, and generator as built-ins.</li>
+      <li>Emit the same target-specialized native semantics as catalog mode.</li>
+      <li>
+        Replace exact source-spelling specialization with explicit typed
+        generation configuration.
+      </li>
+      <li>Preserve RTGU target/hash/version binding and RTGB compatibility checks.</li>
+      <li>Run a custom target unknown to the release compiler end to end.</li>
+    </ol>
+    <div class="exit">
+      <strong>Exit:</strong> a built-in native target and an equivalent external
+      definition resolve the same declarations and operation bindings; only
+      packaging, stable symbol projection, and selected identity differ.
+    </div>
+
+    <h3>Phase 10: Delete duplicate semantic topology</h3>
+    <ol>
+      <li>Remove separate contract-only generated files.</li>
+      <li>Remove old hand-authored architecture source after its generated projection is authoritative.</li>
+      <li>Remove preparation-time source-spelling rewrites in favor of typed generation settings.</li>
+      <li>Keep the preparation adapter target-neutral and free of machine semantics.</li>
+      <li>
+        Do not force built-ins through the preparation bridge merely to make
+        packaging look uniform; retain direct checked-in calls when the bridge
+        would consume compiler time, source, or binary-size budget.
+      </li>
+    </ol>
+    <div class="exit">
+      <strong>Exit:</strong> built-in and custom targets derive machine behavior
+      from generated compositions. Any remaining topology difference is a
+      measured transport boundary, not a parallel backend implementation.
+    </div>
+
+    <h3>Phase 11: Reduce compiler transport duplication</h3>
+    <ol>
+      <li>Measure the ordinary-Go copied compiler and compressed preparation source separately.</li>
+      <li>Prototype an importable kernel or precompiled component boundary.</li>
+      <li>Test fixed-target pruning and self-host output for the prototype.</li>
+      <li>Adopt it only if all existing size, time, and memory gates pass.</li>
+      <li>Delete generated copies made unnecessary by the accepted topology.</li>
+    </ol>
+    <div class="exit">
+      <strong>Exit:</strong> the chosen topology carries the minimum compiler
+      representation required for ordinary builds and custom preparation.
+    </div>
+
+    <h3>Phase 12: Final cleanup and documentation</h3>
+    <ol>
+      <li>Update backend author documentation around the native layers and hook boundary.</li>
+      <li>Document how to add one native architecture without editing shared generator switches.</li>
+      <li>Document Wasm/VM as a separate backend family.</li>
+      <li>Regenerate all checked-in outputs and require a clean worktree.</li>
+      <li>Run the final acceptance suite under an explicit memory cap.</li>
+    </ol>
+  </section>
+
+  <section id="testing">
+    <h2>11. Testing strategy</h2>
+
+    <h3>Language and schema tests</h3>
+    <ul>
+      <li>scanner/parser coverage for every native declaration;</li>
+      <li>duplicate, missing, and unknown-field diagnostics;</li>
+      <li>register-class and role compatibility;</li>
+      <li>address-space and pointer-width compatibility;</li>
+      <li>instruction operand and constraint validation;</li>
+      <li>complete native operation bindings or explicit rejection;</li>
+      <li>ABI register, stack, and save-set validation;</li>
+      <li>runtime operation and import/syscall validation;</li>
+      <li>relocation and format compatibility;</li>
+      <li>embedded Go signature and reachability tests;</li>
+      <li>canonicalization and deterministic generation;</li>
+      <li>resource-limit rejection for hostile or malformed definitions.</li>
+    </ul>
+
+    <h3>Generated-source tests</h3>
+    <ul>
+      <li>generate twice and require byte-identical output;</li>
+      <li>compile generated source through host Go and Renvo;</li>
+      <li>verify fixed-target output contains no unrelated target symbols;</li>
+      <li>verify one authoritative production projection per architecture;</li>
+      <li>verify checked-in generated output is current;</li>
+      <li>report declarative and embedded Go metrics without rejecting complexity.</li>
+    </ul>
+
+    <h3>Backend equivalence</h3>
+    <ul>
+      <li>instruction boundary tests for every form and constraint edge;</li>
+      <li>relocation range, addend, and patch tests;</li>
+      <li>ABI calls, returns, aggregates, stack arguments, and static calls;</li>
+      <li>runtime operation behavior and unsupported diagnostics;</li>
+      <li>executable and object layout comparisons;</li>
+      <li>Linux, Windows, Darwin, kernel-module, and cross-target execution tests;</li>
+      <li>self-host compiler output and self-hosted application compilation;</li>
+      <li>minimal regression programs under <code>backend/tests/</code> for every discovered miscompilation.</li>
+    </ul>
+
+    <h3>Family isolation</h3>
+    <ul>
+      <li>native schema changes run the full Wasm/VM regression suite;</li>
+      <li>Wasm/VM source contains no dependency on native register or relocation models;</li>
+      <li>frontend unit binding works identically across families;</li>
+      <li>family mismatch is rejected before code generation.</li>
+    </ul>
+
+    <h3>Custom workflow</h3>
+    <ul>
+      <li>unknown native target preparation;</li>
+      <li>explicit <code>-t</code> authority with multi-target definitions;</li>
+      <li>cache miss, cache hit, concurrent publication, and corrupt entry recovery;</li>
+      <li>RTGB round trip and compatibility rejection;</li>
+      <li>wrong definition, descriptor version, host, or target binding rejection;</li>
+      <li>process runner and injectable runner behavior;</li>
+      <li>closed definition preparation without a repository checkout or host Go.</li>
+    </ul>
+  </section>
+
+  <section id="performance">
+    <h2>12. Performance and resource plan</h2>
+    <p>
+      Existing limits in <code>backend/main_test.go</code> are immutable for
+      this effort. A generated path must fit the current gates; the gates are
+      not adjusted to accommodate the design.
+    </p>
+
+    <h3>Measurements at every production phase</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Measurement</th>
+          <th>Why it matters</th>
+          <th>Required comparison</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Fixed-target compiler size</td>
+          <td>Detect retained schema/catalog code and unrelated targets</td>
+          <td>baseline and hard gate</td>
+        </tr>
+        <tr>
+          <td>Universal compiler size</td>
+          <td>Measure marginal cost of each architecture</td>
+          <td>before/after each migration</td>
+        </tr>
+        <tr>
+          <td>Generated application size</td>
+          <td>Protect code quality and output constraints</td>
+          <td>goldens and hard gate</td>
+        </tr>
+        <tr>
+          <td>Compiler VM steps</td>
+          <td>Deterministic CPU-cost signal</td>
+          <td>baseline and hard gate</td>
+        </tr>
+        <tr>
+          <td>Wall time</td>
+          <td>Catch host-side generation or dispatch overhead</td>
+          <td>repeated median plus hard gate</td>
+        </tr>
+        <tr>
+          <td>Peak RSS / writable reservation</td>
+          <td>Protect constrained and self-hosted execution</td>
+          <td>baseline and hard gate</td>
+        </tr>
+        <tr>
+          <td>Self-hosting</td>
+          <td>Detect source and compiler topology inflation</td>
+          <td>full frontend and backend self-host</td>
+        </tr>
+        <tr>
+          <td>Prepared backend size/time</td>
+          <td>Measure custom architecture cost</td>
+          <td>cold prepare and warm cache</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Generation performance rules</h3>
+    <ul>
+      <li>generation occurs ahead of user-program code generation;</li>
+      <li>fixed generated code contains direct calls and constants;</li>
+      <li>no runtime schema traversal or instruction recipe interpreter;</li>
+      <li>reachability starts from one selected target for fixed output;</li>
+      <li>unused hooks and declarations are not emitted;</li>
+      <li>table specialization must not explode binary size through blind Cartesian expansion;</li>
+      <li>specialize only variants that remove meaningful runtime work or simplify generated code.</li>
+    </ul>
+
+    <h3>Safe local execution</h3>
+    <p>
+      Expensive tests should run with <code>systemd-run --user --scope</code>
+      and explicit memory limits to avoid taking down the working session.
+      CPU affinity may be used where existing calibrated performance tests
+      require a stable core class, without changing the test thresholds.
+    </p>
+    <pre><code>systemd-run --user --scope \
+  -p MemoryMax=4G \
+  -p MemorySwapMax=0 \
+  go test ./backend -count=1 -timeout=45m
+
+systemd-run --user --scope \
+  -p MemoryMax=4G \
+  -p MemorySwapMax=0 \
+  go test ./frontend_tests -count=1 -timeout=45m</code></pre>
+  </section>
+
+  <section id="migration">
+    <h2>13. Migration discipline and pull-request sequence</h2>
+    <p>
+      Each pull request must have one reviewable architectural claim and must
+      leave production behavior unambiguous.
+    </p>
+    <ol>
+      <li>Backend family boundary with no production algorithm changes.</li>
+      <li>Minimum native schema and synthetic generated compiler.</li>
+      <li>8086/AVR stress fixtures and schema corrections.</li>
+      <li>Complete test-only amd64 vertical slice.</li>
+      <li>Authoritative amd64 switch and legacy deletion.</li>
+      <li>386 migration and shared x86/runtime/format proof.</li>
+      <li>AArch64 and ARM migration.</li>
+      <li>Closed built-in native catalog and target slicing.</li>
+      <li>Custom native preparation convergence.</li>
+      <li>Dual-topology and inactive-stub deletion.</li>
+      <li>Optional compiler-kernel/package duplication reduction.</li>
+      <li>Final documentation, generation audit, and acceptance run.</li>
+    </ol>
+
+    <h3>Rules for every migration PR</h3>
+    <ul>
+      <li>Do not modify performance constraints.</li>
+      <li>Do not retain a production fallback after the generated path is authoritative.</li>
+      <li>Do not hardcode tests or prebuild output.</li>
+      <li>Add minimal regressions for discovered miscompilations.</li>
+      <li>Run relevant focused tests before the full suite.</li>
+      <li>Record generated source, compiler size, steps, memory, and output deltas.</li>
+      <li>Regenerate checked-in output and require <code>git diff --check</code>.</li>
+      <li>Keep unrelated user worktree changes untouched.</li>
+    </ul>
+
+    <h3>Deletion ledger</h3>
+    <p>
+      The implementation should maintain a small ledger showing which current
+      files or branches disappear at each phase. Expected deletion targets
+      include:
+    </p>
+    <ul>
+      <li>separate contract-only generated architecture files;</li>
+      <li>hand-maintained architecture algorithms superseded by generated projections;</li>
+      <li>source-spelling preparation rewrites;</li>
+      <li>duplicated per-architecture runtime and format algorithms;</li>
+      <li>superseded per-architecture built-in definition files;</li>
+      <li>copied compiler representations made unnecessary by an accepted kernel topology.</li>
+    </ul>
+  </section>
+
+  <section id="risks">
+    <h2>14. Risks and controls</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Risk</th>
+          <th>Control</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>The schema becomes another programming language.</td>
+          <td>Only bounded facts, tables, and choices; use typed Go for control flow.</td>
+        </tr>
+        <tr>
+          <td>Embedded Go again becomes the entire backend.</td>
+          <td>Require every hook to occupy a typed schema site; report hook/source metrics; review why a hook is necessary.</td>
+        </tr>
+        <tr>
+          <td>The compiler grows a Go complexity analyzer.</td>
+          <td>Explicitly prohibit complexity and termination analysis; type-check signatures only.</td>
+        </tr>
+        <tr>
+          <td>Wasm requirements distort native abstractions.</td>
+          <td>Separate backend families and regression-test family isolation.</td>
+        </tr>
+        <tr>
+          <td>Shared format/runtime code becomes a hidden architecture backend.</td>
+          <td>Keep machine identifiers, instruction patches, relocations, and irregular hooks in explicit machine declarations.</td>
+        </tr>
+        <tr>
+          <td>A universal native catalog bloats fixed compilers.</td>
+          <td>Target-rooted reachability, generated pruning tests, and existing size gates.</td>
+        </tr>
+        <tr>
+          <td>Table specialization explodes generated source.</td>
+          <td>Measure each family; specialize only useful variants; allow direct compact selection where smaller.</td>
+        </tr>
+        <tr>
+          <td>8086/AVR overgeneralize the first version.</td>
+          <td>Add only concepts that clarify a production architecture or are fundamental machine facts; defer the rest.</td>
+        </tr>
+        <tr>
+          <td>Built-in and custom behavior diverge.</td>
+          <td>Converge on the same resolver and generator after the native model is proven; run equivalent-definition tests.</td>
+        </tr>
+        <tr>
+          <td>Package refactoring destabilizes performance.</td>
+          <td>Keep compiler transport cleanup after semantic migration and adopt only after measured proof.</td>
+        </tr>
+        <tr>
+          <td>Generated code is technically correct but unreviewable.</td>
+          <td>Stable names, compact headers, source mapping, one production projection, and small generated diffs.</td>
+        </tr>
+        <tr>
+          <td>Legacy paths linger indefinitely.</td>
+          <td>Each architecture migration has a deletion exit condition and a full-suite run after deletion.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="acceptance">
+    <h2>15. Final acceptance run</h2>
+    <ol>
+      <li>Generate all checked-in native outputs twice and compare bytes.</li>
+      <li>Regenerate target registry and machine-definition documentation.</li>
+      <li>Require a clean generated-output diff.</li>
+      <li>Run definition parser, validator, canonicalization, and generator tests.</li>
+      <li>Run the 8086 and AVR schema stress fixtures.</li>
+      <li>Run all native instruction, ABI, runtime, relocation, object, and executable tests.</li>
+      <li>Run all custom definition, cache, RTGB, runner, and binding tests.</li>
+      <li>Run the complete Wasm and VM32 suites unchanged.</li>
+      <li>
+        Run the full backend suite under a memory cap and unchanged performance
+        requirements.
+      </li>
+      <li>
+        Run the full frontend suite, including full self-hosting, under a memory
+        cap.
+      </li>
+      <li>Build ordinary Go-module binaries for every supported host.</li>
+      <li>Verify fixed-target binaries contain no unrelated native architectures.</li>
+      <li>Verify remaining preparation adapters contain no machine semantics.</li>
+      <li>Compile and run one custom native target unknown to the release registry.</li>
+      <li>Record final source, generated size, compiler size, steps, RSS, and output deltas.</li>
+    </ol>
+
+    <div class="decision">
+      <strong>Final success statement:</strong>
+      A new native architecture can be added by describing its machine,
+      instruction, ABI, and relocation differences plus a small number of typed
+      algorithm hooks. Existing OS/runtime and format behavior is reused,
+      generated code is direct and prunable, Wasm/VM remain honest bespoke
+      backends, and every existing performance and self-hosting gate still
+      passes.
+    </div>
+  </section>
+</main>
 </body>
 </html>

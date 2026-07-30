@@ -32,6 +32,7 @@ abi acme_abi { arch = a64 }
 runtime acme_runtime { operations = [print] }
 format acme_image { address_bits = 64 }
 target acme/aarch64 {
+	family = native_v1
 	os = linux
 	arch = a64
 	abi = acme_abi

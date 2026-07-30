@@ -13,7 +13,7 @@ func TestArtifactRoundTrip(t *testing.T) {
 	definition[0] = 7
 	want := Artifact{
 		Descriptor: rtg.TargetDescriptor{
-			Name: "test/tiny64", OS: "test", ISA: "tiny64",
+			Name: "test/tiny64", Family: rtg.BackendFamilyNativeV1, OS: "test", ISA: "tiny64",
 			WordBits: 64, PointerBits: 64, CodePointerBits: 64,
 			FunctionPointerBits: 64, MaxAlign: 8, Endian: "little",
 			ABI: "tiny", Runtime: "tiny", OutputKind: "tiny", Executable: "tiny",
@@ -44,7 +44,7 @@ func TestArtifactRoundTrip(t *testing.T) {
 func TestArtifactRejectsCorruptionAndTruncation(t *testing.T) {
 	artifact := Artifact{
 		Descriptor: rtg.TargetDescriptor{
-			Name: "test/tiny", OS: "test", ISA: "tiny",
+			Name: "test/tiny", Family: rtg.BackendFamilyNativeV1, OS: "test", ISA: "tiny",
 			WordBits: 32, PointerBits: 32, CodePointerBits: 32,
 			FunctionPointerBits: 32, MaxAlign: 4, Endian: "little",
 			ABI: "tiny", Runtime: "tiny", OutputKind: "tiny", Executable: "tiny", Version: 1,

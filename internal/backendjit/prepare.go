@@ -5,7 +5,6 @@
 package backendjit
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -165,46 +164,14 @@ func preparationSources(backendRoot string, generated rtg.GenerateResult) ([]loa
 		if name == "" || excluded[name] {
 			continue
 		}
-		sourceBytes := []byte(source)
-		if name == "compiler_main.go" {
-			var specialized bool
-			sourceBytes, specialized = preparedCompilerMain(sourceBytes)
-			if !specialized {
-				return nil, nil, fmt.Errorf("prepared compiler fixed-target declaration is missing")
-			}
-		} else if name == "compiler_target_policy_impl.go" {
-			var specialized bool
-			sourceBytes, specialized = preparedTargetPolicy(sourceBytes)
-			if !specialized {
-				return nil, nil, fmt.Errorf("prepared compiler policy mode declaration is missing")
-			}
-		}
 		path := load.JoinPath("/backend", name)
-		sources = append(sources, load.SourceFile{Path: path, Src: sourceBytes})
+		sources = append(sources, load.SourceFile{Path: path, Src: []byte(source)})
 		names = append(names, path)
 	}
 	generatedPath := "/backend/compiler_rtg_prepared_impl.go"
 	sources = append(sources, load.SourceFile{Path: generatedPath, Src: generated.Source})
 	names = append(names, generatedPath)
 	return sources, names, nil
-}
-
-func preparedCompilerMain(source []byte) ([]byte, bool) {
-	dynamicTarget := []byte("var renvoFixedTarget int\n")
-	if bytes.Count(source, dynamicTarget) != 1 {
-		return nil, false
-	}
-	return bytes.Replace(source, dynamicTarget,
-		[]byte("var renvoFixedTarget int = 0\n"), 1), true
-}
-
-func preparedTargetPolicy(source []byte) ([]byte, bool) {
-	defaultMode := []byte("const renvoPreparedBackend = 0\n")
-	if bytes.Count(source, defaultMode) != 1 {
-		return nil, false
-	}
-	return bytes.Replace(source, defaultMode,
-		[]byte("const renvoPreparedBackend = 1\n"), 1), true
 }
 
 func compatible(artifact rtgb.Artifact, descriptor rtg.TargetDescriptor, host string) bool {

@@ -3212,6 +3212,7 @@ format browser_wasm {
 }
 
 target wasi/wasm32 {
+	family = structured32
 	os = wasi
 	arch = vm32
 	frontend_arch = wasm32
@@ -3224,6 +3225,7 @@ target wasi/wasm32 {
 }
 
 target browser/wasm32 {
+	family = structured32
 	os = browser
 	arch = vm32
 	frontend_arch = wasm32
@@ -3237,6 +3239,7 @@ target browser/wasm32 {
 }
 
 target vm/vm32 {
+	family = structured32
 	os = vm
 	arch = vm32
 	frontend_arch = vm32

@@ -25,7 +25,9 @@ func validateMachineDeclarations(document Document) []Diagnostic {
 
 func validateArch(document Document, declaration Declaration, goNames []string) []Diagnostic {
 	var diagnostics []Diagnostic
-	seenRegisters := []string{}
+	var physicalRegisters []string
+	var registerClasses []string
+	var addressSpaces []string
 	seenForms := []string{}
 	seenInstructions := []string{}
 	seenExports := []string{}
@@ -50,12 +52,16 @@ func validateArch(document Document, declaration Declaration, goNames []string) 
 		}
 		if statementHead(statement, "registers") {
 			values := statementListValues(statement)
+			seenRegisters := []string{}
 			for j := 0; j < len(values); j++ {
 				if stringIndex(seenRegisters, values[j]) >= 0 {
 					diagnostics = append(diagnostics, statementDiagnostic(document, statement,
 						"RTG-VALIDATE-010", "duplicate register "+values[j]+" in architecture "+declaration.Name))
 				}
 				seenRegisters = append(seenRegisters, values[j])
+				if stringIndex(physicalRegisters, values[j]) < 0 {
+					physicalRegisters = append(physicalRegisters, values[j])
+				}
 			}
 		}
 		if statementBlockName(statement) == "forms" {
@@ -110,6 +116,21 @@ func validateArch(document Document, declaration Declaration, goNames []string) 
 	}
 	for i := 0; i < len(declaration.Statements); i++ {
 		statement := declaration.Statements[i]
+		if statementHead(statement, "register_class") {
+			diagnostics = append(diagnostics, validateRegisterClass(
+				document, declaration, statement, physicalRegisters, &registerClasses)...)
+		}
+		if statementBlockName(statement) == "register_group" {
+			diagnostics = append(diagnostics, validateRegisterGroup(
+				document, declaration, statement, physicalRegisters, &registerClasses)...)
+		}
+		if statementBlockName(statement) == "address_space" {
+			diagnostics = append(diagnostics, validateAddressSpace(
+				document, declaration, statement, &addressSpaces)...)
+		}
+	}
+	for i := 0; i < len(declaration.Statements); i++ {
+		statement := declaration.Statements[i]
 		if statementBlockName(statement) != "instructions" {
 			continue
 		}
@@ -139,6 +160,142 @@ func validateArch(document Document, declaration Declaration, goNames []string) 
 			}
 			seenInstructions = append(seenInstructions, name)
 		}
+	}
+	return diagnostics
+}
+
+func validateRegisterClass(document Document, declaration Declaration, statement Statement,
+	physical []string, classes *[]string) []Diagnostic {
+	if len(statement.Tokens) < 4 || statement.Tokens[0] != "register_class" ||
+		statement.Tokens[2] != "=" {
+		return []Diagnostic{statementDiagnostic(document, statement, "RTG-VALIDATE-080",
+			"architecture register_class must be named and assigned a register list")}
+	}
+	name := statement.Tokens[1]
+	if stringIndex(*classes, name) >= 0 {
+		return []Diagnostic{statementDiagnostic(document, statement, "RTG-VALIDATE-081",
+			"duplicate register class "+name+" in architecture "+declaration.Name)}
+	}
+	*classes = append(*classes, name)
+	values := statementListValues(Statement{Tokens: statement.Tokens[1:]})
+	var diagnostics []Diagnostic
+	var seen []string
+	for i := 0; i < len(values); i++ {
+		if stringIndex(seen, values[i]) >= 0 {
+			diagnostics = append(diagnostics, statementDiagnostic(document, statement,
+				"RTG-VALIDATE-082", "duplicate register "+values[i]+" in register class "+name))
+		} else if stringIndex(physical, values[i]) < 0 {
+			diagnostics = append(diagnostics, statementDiagnostic(document, statement,
+				"RTG-VALIDATE-083", "register class "+name+" references unknown register "+values[i]))
+		}
+		seen = append(seen, values[i])
+	}
+	if len(values) == 0 {
+		diagnostics = append(diagnostics, statementDiagnostic(document, statement,
+			"RTG-VALIDATE-084", "register class "+name+" is empty"))
+	}
+	return diagnostics
+}
+
+func validateRegisterGroup(document Document, declaration Declaration, statement Statement,
+	physical []string, classes *[]string) []Diagnostic {
+	if len(statement.Tokens) != 2 {
+		return []Diagnostic{statementDiagnostic(document, statement, "RTG-VALIDATE-085",
+			"architecture register_group must have one class name")}
+	}
+	name := statement.Tokens[1]
+	if stringIndex(*classes, name) >= 0 {
+		return []Diagnostic{statementDiagnostic(document, statement, "RTG-VALIDATE-081",
+			"duplicate register class "+name+" in architecture "+declaration.Name)}
+	}
+	*classes = append(*classes, name)
+	var diagnostics []Diagnostic
+	var groups []string
+	for i := 0; i < len(statement.Children); i++ {
+		left, _, assignment := statementAssignment(statement.Children[i])
+		values := statementListValues(statement.Children[i])
+		if !assignment || len(left) != 1 || len(values) < 2 {
+			diagnostics = append(diagnostics, statementDiagnostic(document, statement.Children[i],
+				"RTG-VALIDATE-086", "register group member must name at least two registers"))
+			continue
+		}
+		if stringIndex(groups, left[0]) >= 0 {
+			diagnostics = append(diagnostics, statementDiagnostic(document, statement.Children[i],
+				"RTG-VALIDATE-087", "duplicate register group member "+left[0]))
+		}
+		groups = append(groups, left[0])
+		for j := 0; j < len(values); j++ {
+			if stringIndex(physical, values[j]) < 0 {
+				diagnostics = append(diagnostics, statementDiagnostic(document, statement.Children[i],
+					"RTG-VALIDATE-088", "register group "+left[0]+" references unknown register "+values[j]))
+			}
+		}
+	}
+	if len(statement.Children) == 0 {
+		diagnostics = append(diagnostics, statementDiagnostic(document, statement,
+			"RTG-VALIDATE-089", "register group class "+name+" is empty"))
+	}
+	return diagnostics
+}
+
+func validateAddressSpace(document Document, declaration Declaration, statement Statement,
+	spaces *[]string) []Diagnostic {
+	if len(statement.Tokens) != 2 {
+		return []Diagnostic{statementDiagnostic(document, statement, "RTG-VALIDATE-090",
+			"architecture address_space must have one name")}
+	}
+	name := statement.Tokens[1]
+	if stringIndex(*spaces, name) >= 0 {
+		return []Diagnostic{statementDiagnostic(document, statement, "RTG-VALIDATE-091",
+			"duplicate address space "+name+" in architecture "+declaration.Name)}
+	}
+	*spaces = append(*spaces, name)
+	allowed := []string{"address_bits", "pointer_bits", "unit_bits", "pointer_words"}
+	var diagnostics []Diagnostic
+	var seen []string
+	values := make([]int, len(allowed))
+	present := make([]bool, len(allowed))
+	for i := 0; i < len(statement.Children); i++ {
+		left, right, assignment := statementAssignment(statement.Children[i])
+		if !assignment || len(left) != 1 || len(right) != 1 {
+			diagnostics = append(diagnostics, statementDiagnostic(document, statement.Children[i],
+				"RTG-VALIDATE-092", "address-space fact must be a single integer assignment"))
+			continue
+		}
+		field := stringIndex(allowed, left[0])
+		if field < 0 {
+			diagnostics = append(diagnostics, statementDiagnostic(document, statement.Children[i],
+				"RTG-VALIDATE-093", "unknown address-space fact "+left[0]))
+			continue
+		}
+		if stringIndex(seen, left[0]) >= 0 {
+			diagnostics = append(diagnostics, statementDiagnostic(document, statement.Children[i],
+				"RTG-VALIDATE-094", "duplicate address-space fact "+left[0]))
+		}
+		seen = append(seen, left[0])
+		value, ok := parseInteger(right[0])
+		if !ok || value <= 0 {
+			diagnostics = append(diagnostics, statementDiagnostic(document, statement.Children[i],
+				"RTG-VALIDATE-095", "address-space fact "+left[0]+" must be a positive integer"))
+			continue
+		}
+		values[field] = value
+		present[field] = true
+	}
+	if !present[0] || values[0] > 64 {
+		diagnostics = append(diagnostics, statementDiagnostic(document, statement,
+			"RTG-VALIDATE-096", "address space "+name+" requires address_bits between 1 and 64"))
+	}
+	for i := 1; i < 3; i++ {
+		if !present[i] || !validDescriptorWidth(values[i]) {
+			diagnostics = append(diagnostics, statementDiagnostic(document, statement,
+				"RTG-VALIDATE-096", "address space "+name+" requires 8, 16, 32, or 64-bit "+
+					allowed[i]))
+		}
+	}
+	if !present[3] || values[3] > 4 {
+		diagnostics = append(diagnostics, statementDiagnostic(document, statement,
+			"RTG-VALIDATE-097", "address space "+name+" requires pointer_words between 1 and 4"))
 	}
 	return diagnostics
 }
@@ -226,7 +383,7 @@ func declarationAllowedFields(kind string) []string {
 	}
 	if kind == DeclTarget {
 		return []string{
-			"arch", "abi", "runtime", "executable", "object", "aliases", "build_tags",
+			"family", "arch", "abi", "runtime", "executable", "object", "aliases", "build_tags",
 			"capabilities", "code_pointer_bits", "function_pointer_bits", "max_align",
 			"arena_default", "subsystem", "os", "frontend_arch",
 		}

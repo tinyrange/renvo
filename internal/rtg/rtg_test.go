@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	goparser "go/parser"
 	"go/token"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -351,6 +352,7 @@ abi tiny_abi { arch = tiny64 }
 runtime tiny_runtime { operation print { builtin = true } }
 format tiny_image { address_bits = 64 }
 target test/tiny64 {
+	family = native_v1
 	os = test
 	arch = tiny64
 	abi = tiny_abi
@@ -392,6 +394,83 @@ func TestResolveAndGenerateFixedBackend(t *testing.T) {
 	second := GenerateFixedBackend(resolved, "test/tiny64")
 	if string(generated.Source) != string(second.Source) {
 		t.Fatal("fixed generation is not deterministic")
+	}
+}
+
+func TestTargetSemanticIdentityIgnoresUnreachableCatalogDeclarations(t *testing.T) {
+	base := Resolve(Parse([]byte(testMachineDefinition), "tiny.rtg"))
+	if !base.Ok {
+		t.Fatalf("base Resolve failed: %#v", base.Diagnostics)
+	}
+	extendedSource := testMachineDefinition + `
+go backend {
+	func unrelatedArchitectureHelper(value int) int { return value * 7 }
+}
+`
+	extended := Resolve(Parse([]byte(extendedSource), "tiny-extended.rtg"))
+	if !extended.Ok {
+		t.Fatalf("extended Resolve failed: %#v", extended.Diagnostics)
+	}
+	if base.Document.Hash == extended.Document.Hash {
+		t.Fatal("catalog identity did not include the unrelated declaration")
+	}
+	if base.Targets[0].Descriptor.Definition != extended.Targets[0].Descriptor.Definition {
+		t.Fatalf("unrelated declaration changed target identity: %s != %s",
+			HashText(base.Targets[0].Descriptor.Definition),
+			HashText(extended.Targets[0].Descriptor.Definition))
+	}
+}
+
+func TestTargetSemanticIdentityTracksReachableSemanticsNotFormatting(t *testing.T) {
+	base := Resolve(Parse([]byte(testMachineDefinition), "tiny.rtg"))
+	formattedSource := replaceOnce(testMachineDefinition,
+		"func addOne(value int) int { return value + 1 }",
+		"func addOne( value int ) int {\n\t\t// same operation\n\t\treturn value + 1\n\t}")
+	formatted := Resolve(Parse([]byte(formattedSource), "tiny-formatted.rtg"))
+	changedSource := replaceOnce(testMachineDefinition,
+		"return value + 1", "return value + 2")
+	changed := Resolve(Parse([]byte(changedSource), "tiny-changed.rtg"))
+	if !base.Ok || !formatted.Ok || !changed.Ok {
+		t.Fatalf("Resolve failed: base=%#v formatted=%#v changed=%#v",
+			base.Diagnostics, formatted.Diagnostics, changed.Diagnostics)
+	}
+	if base.Targets[0].Descriptor.Definition != formatted.Targets[0].Descriptor.Definition {
+		t.Fatal("Go formatting or comments changed target semantic identity")
+	}
+	if base.Targets[0].Descriptor.Definition == changed.Targets[0].Descriptor.Definition {
+		t.Fatal("reachable Go behavior did not change target semantic identity")
+	}
+
+	runtimeChanged := replaceOnce(testMachineDefinition,
+		"runtime tiny_runtime { operation print { builtin = true } }",
+		"runtime tiny_runtime { operations = [print] }")
+	runtime := Resolve(Parse([]byte(runtimeChanged), "tiny-runtime.rtg"))
+	if !runtime.Ok {
+		t.Fatalf("runtime Resolve failed: %#v", runtime.Diagnostics)
+	}
+	if base.Targets[0].Descriptor.Definition == runtime.Targets[0].Descriptor.Definition {
+		t.Fatal("reachable runtime declaration did not change target semantic identity")
+	}
+}
+
+func TestTargetMetricsSeparateReachableAndCatalogGo(t *testing.T) {
+	source := testMachineDefinition + `
+go backend {
+	func unrelatedMetricsHelper(value int) int { return value * 7 }
+}
+`
+	resolved := Resolve(Parse([]byte(source), "tiny-metrics.rtg"))
+	if !resolved.Ok {
+		t.Fatalf("Resolve failed: %#v", resolved.Diagnostics)
+	}
+	metrics := MeasureTarget(resolved.Document, resolved.Targets[0])
+	if metrics.DeclarativeBytes == 0 || metrics.ReachableGoBytes == 0 ||
+		metrics.ReachableGoDecls != 2 {
+		t.Fatalf("metrics = %#v", metrics)
+	}
+	if metrics.CatalogGoBytes <= metrics.ReachableGoBytes ||
+		metrics.CatalogGoDecls <= metrics.ReachableGoDecls {
+		t.Fatalf("unreachable Go was not separated: %#v", metrics)
 	}
 }
 
@@ -482,6 +561,7 @@ abi tiny_abi { arch = tiny64 }
 runtime tiny_runtime { operations = [print] }
 format tiny_image { kind = tiny address_bits = 64 byte_order = little }
 target tiny/tiny64 {
+	family = native_v1
 	os = tiny
 	arch = tiny64
 	abi = tiny_abi
@@ -510,6 +590,7 @@ abi tiny_abi { arch = tiny64 }
 runtime tiny_runtime { operations = [print] }
 format tiny_image { kind = tiny address_bits = 64 byte_order = little }
 target tiny/tiny64 {
+	family = native_v1
 	os = tiny
 	arch = tiny64
 	abi = tiny_abi
@@ -634,8 +715,34 @@ func completeDirectEmitterDefinition() string {
 	source += "runtime tiny_runtime { operations = [print] }\n"
 	source += "format tiny_image { kind = tiny address_bits = 64 byte_order = little }\n"
 	source += "target test/tiny64 {\n"
-	source += "\tos = test\n\tarch = tiny64\n\tabi = tiny_abi\n\truntime = tiny_runtime\n\texecutable = tiny_image\n}\n"
+	source += "\tfamily = native_v1\n\tos = test\n\tarch = tiny64\n\tabi = tiny_abi\n\truntime = tiny_runtime\n\texecutable = tiny_image\n}\n"
 	return source
+}
+
+func TestResolveRequiresKnownBackendFamily(t *testing.T) {
+	missing := replaceOnce(testMachineDefinition, "\tfamily = native_v1\n", "")
+	resolved := Resolve(Parse([]byte(missing), "missing-family.rtg"))
+	if resolved.Ok || !hasDiagnosticCode(resolved.Diagnostics, "RTG-RESOLVE-022") {
+		t.Fatalf("missing family diagnostics = %#v", resolved.Diagnostics)
+	}
+	unknown := replaceOnce(testMachineDefinition, "family = native_v1", "family = mysterious")
+	resolved = Resolve(Parse([]byte(unknown), "unknown-family.rtg"))
+	if resolved.Ok || !hasDiagnosticCode(resolved.Diagnostics, "RTG-RESOLVE-023") {
+		t.Fatalf("unknown family diagnostics = %#v", resolved.Diagnostics)
+	}
+}
+
+func TestResolveSeparatesNativeAndStructuredFamilies(t *testing.T) {
+	nativeStructured := replaceOnce(testMachineDefinition, "alias = \"tiny\"", "alias = \"wasm32\"")
+	resolved := Resolve(Parse([]byte(nativeStructured), "native-structured.rtg"))
+	if resolved.Ok || !hasDiagnosticCode(resolved.Diagnostics, "RTG-RESOLVE-024") {
+		t.Fatalf("native structured diagnostics = %#v", resolved.Diagnostics)
+	}
+	structuredNative := replaceOnce(testMachineDefinition, "family = native_v1", "family = structured32")
+	resolved = Resolve(Parse([]byte(structuredNative), "structured-native.rtg"))
+	if resolved.Ok || !hasDiagnosticCode(resolved.Diagnostics, "RTG-RESOLVE-025") {
+		t.Fatalf("structured native diagnostics = %#v", resolved.Diagnostics)
+	}
 }
 
 func testDecimal(value int) string {
@@ -669,6 +776,88 @@ func TestResolveRejectsDuplicateRegisters(t *testing.T) {
 	if resolved.Ok || len(resolved.Diagnostics) == 0 ||
 		resolved.Diagnostics[0].Code != "RTG-VALIDATE-010" {
 		t.Fatalf("Resolve = ok %v diagnostics %#v", resolved.Ok, resolved.Diagnostics)
+	}
+}
+
+func TestNativeMachineSchemaModelsAddressSpacesAndRegisterSubsets(t *testing.T) {
+	source := replaceOnce(testMachineDefinition, "registers gpr = [r0, r1, r0]",
+		"registers gpr = [r0, r1, r0]")
+	source = replaceOnce(source, "arch tiny64 {", `arch tiny64 {
+	registers gpr8 = [r0, r1, r2, r3]
+	register_class immediate = [r2, r3]
+	register_group pairs {
+		p0 = [r0, r1]
+		p1 = [r2, r3]
+	}
+	address_space data {
+		address_bits = 16
+		pointer_bits = 16
+		unit_bits = 8
+		pointer_words = 1
+	}
+	address_space code {
+		address_bits = 32
+		pointer_bits = 16
+		unit_bits = 8
+		pointer_words = 2
+	}`)
+	resolved := Resolve(Parse([]byte(source), "native-model.rtg"))
+	if !resolved.Ok {
+		t.Fatalf("Resolve failed: %#v", resolved.Diagnostics)
+	}
+}
+
+func TestNativeMachineSchemaRejectsUnknownRegisterAndIncompleteAddressSpace(t *testing.T) {
+	source := replaceOnce(testMachineDefinition, "arch tiny64 {", `arch tiny64 {
+	registers gpr8 = [r0, r1]
+	register_class immediate = [r1, missing]
+	address_space data {
+		address_bits = 16
+		pointer_bits = 16
+	}`)
+	resolved := Resolve(Parse([]byte(source), "bad-native-model.rtg"))
+	if resolved.Ok || !hasDiagnosticCode(resolved.Diagnostics, "RTG-VALIDATE-083") ||
+		!hasDiagnosticCode(resolved.Diagnostics, "RTG-VALIDATE-096") ||
+		!hasDiagnosticCode(resolved.Diagnostics, "RTG-VALIDATE-097") {
+		t.Fatalf("diagnostics = %#v", resolved.Diagnostics)
+	}
+}
+
+func TestNativeSchemaStressFixturesGenerateDirectGo(t *testing.T) {
+	fixtures := []struct {
+		file   string
+		target string
+	}{
+		{"testdata/native_8086.rtg", "fixture/8086"},
+		{"testdata/native_avr.rtg", "fixture/avr"},
+	}
+	for _, fixture := range fixtures {
+		t.Run(fixture.target, func(t *testing.T) {
+			source, err := os.ReadFile(fixture.file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resolved := Resolve(Parse(source, fixture.file))
+			if !resolved.Ok {
+				t.Fatalf("Resolve failed: %#v", resolved.Diagnostics)
+			}
+			generated := GenerateFixedBackend(resolved, fixture.target)
+			if !generated.Ok {
+				t.Fatalf("Generate failed: %#v", generated.Diagnostics)
+			}
+			if _, err := goparser.ParseFile(token.NewFileSet(), "generated.go",
+				generated.Source, goparser.AllErrors); err != nil {
+				t.Fatalf("generated source does not parse: %v\n%s", err, generated.Source)
+			}
+			for _, operation := range []string{
+				"DirectMove", "DirectLoadNative", "DirectStoreNative",
+				"DirectAdd", "DirectCall", "DirectJumpCondition",
+			} {
+				if !containsText(string(generated.Source), operation) {
+					t.Errorf("generated source is missing representative operation %s", operation)
+				}
+			}
+		})
 	}
 }
 

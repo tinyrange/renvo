@@ -76,6 +76,7 @@ func TestGeneratedRegistryMatchesMachineDefinitions(t *testing.T) {
 			runtime = append(runtime, "hosted")
 		}
 		if !reflect.DeepEqual(got.Aliases, machine.Aliases) ||
+			got.Family != machine.Family ||
 			got.OS != machine.OS || got.ISA != machine.ISA ||
 			got.WordBits != machine.WordBits || got.PointerBits != machine.PointerBits ||
 			got.CodePointerBits != machine.CodePointerBits ||

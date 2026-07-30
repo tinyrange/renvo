@@ -1,0 +1,142 @@
+definition 1
+unit schemaAVR
+implements direct_emitter_v1
+
+# Design fixture only: no board, firmware, or boot policy belongs here.
+go backend {
+	func fixtureAVRMove(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		out.Uint16(0x2c00 | destination.Code<<4 | source.Code)
+	}
+	func fixtureAVRLoad(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+		out.Uint16(0x8000 | destination.Code<<4 | address.Base.Code)
+	}
+	func fixtureAVRStore(out *RTGEmitter, address RTGAddress, source RTGRegister) {
+		out.Uint16(0x8200 | source.Code<<4 | address.Base.Code)
+	}
+	func fixtureAVRAdd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		out.Uint16(0x0c00 | destination.Code<<4 | source.Code)
+	}
+	func fixtureAVRCall(out *RTGEmitter, target RTGLabel) {
+		out.Uint16(0x940e)
+		out.Reloc(target)
+	}
+	func fixtureAVRJumpCondition(out *RTGEmitter, condition RTGCondition, target RTGLabel) {
+		out.Uint16(0xf000 | condition.Code)
+		out.Reloc(target)
+	}
+	func fixtureAVRPatchRelocations(out *RTGEmitter) {
+		out.Patch()
+	}
+}
+
+arch avr8 {
+	alias = "avr"
+	endian = little
+	word_bits = 8
+	pointer_bits = 16
+	instruction_alignment = 2
+	stack_word_bytes = 1
+	stack_alignment = 1
+	patch_relocations = go fixtureAVRPatchRelocations
+
+	registers gpr8 = [
+		r0, r1, r2, r3, r4, r5, r6, r7,
+		r8, r9, r10, r11, r12, r13, r14, r15,
+		r16, r17, r18, r19, r20, r21, r22, r23,
+		r24, r25, r26, r27, r28, r29, r30, r31
+	]
+	register_class immediate = [
+		r16, r17, r18, r19, r20, r21, r22, r23,
+		r24, r25, r26, r27, r28, r29, r30, r31
+	]
+	register_group word {
+		result = [r24, r25]
+		x = [r26, r27]
+		y = [r28, r29]
+		z = [r30, r31]
+	}
+	locations {
+		primary = r24
+		secondary = r25
+		tertiary = r22
+		stack = r28
+		frame = r29
+		scratch = r18
+	}
+	address_space data {
+		address_bits = 16
+		pointer_bits = 16
+		unit_bits = 8
+		pointer_words = 2
+	}
+	address_space code {
+		address_bits = 16
+		pointer_bits = 16
+		unit_bits = 16
+		pointer_words = 2
+	}
+	conditions {
+		eq 1
+		ne 0
+		lt 4
+		ge 5
+	}
+	forms {
+		rr8 = go fixtureAVRMove
+		load8 = go fixtureAVRLoad
+		store8 = go fixtureAVRStore
+		add8 = go fixtureAVRAdd
+		call_word = go fixtureAVRCall
+		branch7 = go fixtureAVRJumpCondition
+	}
+	instructions {
+		move8 rr8
+		load8 load8
+		store8 store8
+		add8 add8
+		call16 call_word relocation=code_word
+		branch7 branch7 range=7 relaxation=jump
+	}
+	bind {
+		move = move8
+		load.native = load8
+		store.native = store8
+		add = add8
+		call = call16
+		jump_condition = branch7
+	}
+	reject = [
+		address,
+		load.i32, load.u32, load.i16, load.u16, load.i8, load.u8,
+		store.u32, store.u16, store.u8,
+		subtract, multiply, bit_and, bit_or, bit_xor, compare, test,
+		increment, decrement,
+		shift_left_immediate, shift_right_unsigned_immediate, shift_right_signed_immediate,
+		call_indirect, jump, set_condition, return, leave, host_syscall,
+		move_immediate, variable_shift, signed_divide, copy_bytes
+	]
+}
+
+abi fixture_avr_c {
+	arch = avr8
+	arguments = [r24, r22, r20, r18]
+	result = r24
+	stack_alignment = 1
+	return_address = code_word
+}
+runtime fixture_avr_runtime { operations = [print] }
+format fixture_avr_image {
+	kind = fixture
+	address_bits = 16
+	byte_order = little
+}
+target fixture/avr {
+	family = native_v1
+	os = fixture
+	arch = avr8
+	abi = fixture_avr_c
+	runtime = fixture_avr_runtime
+	executable = fixture_avr_image
+	code_pointer_bits = 16
+	function_pointer_bits = 16
+}

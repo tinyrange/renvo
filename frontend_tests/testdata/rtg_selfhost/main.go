@@ -28,6 +28,7 @@ abi tiny_abi { arch = tiny64 }
 runtime tiny_runtime { operation print { builtin = true } }
 format tiny_image { address_bits = 64 }
 target example/tiny64 {
+	family = native_v1
 	os = example
 	arch = tiny64
 	abi = tiny_abi

@@ -82,11 +82,15 @@ reference and target list.
 The included backends are generated from the closed definitions in
 `backend/definitions/`, checked in, and compiled into ordinary Go builds. A
 normal `go build ./cmd/renvo` therefore needs neither the definitions nor a
-checkout-local backend at runtime. After changing an included definition,
-refresh both checked-in layers:
+checkout-local backend at runtime. Native targets share one `native_v1`
+catalog; Wasm and VM32 use the separate `structured32` family. See
+[`backend/definitions/README.md`](backend/definitions/README.md) for the schema
+and architecture workflow. After changing an included definition, refresh the
+checked-in layers:
 
 ```sh
 go generate ./backend/definitions
+go generate ./internal/targetinfo
 go generate ./internal/backendcompiled
 ```
 

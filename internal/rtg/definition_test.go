@@ -7,16 +7,16 @@ import (
 )
 
 func TestAArch64DefinitionVerticalSlice(t *testing.T) {
-	source, err := os.ReadFile("../../backend/definitions/aarch64.rtg")
+	source, err := os.ReadFile("../../backend/definitions/native.rtg")
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolved := Resolve(Parse(source, "aarch64.rtg"))
+	resolved := Resolve(Parse(source, "native.rtg"))
 	if !resolved.Ok {
 		t.Fatalf("definition failed: %#v", resolved.Diagnostics)
 	}
-	if len(resolved.Targets) != 3 {
-		t.Fatalf("target count = %d, want 3", len(resolved.Targets))
+	if len(resolved.Targets) != 9 {
+		t.Fatalf("native target count = %d, want 9", len(resolved.Targets))
 	}
 	for _, target := range []string{"linux/aarch64", "darwin/arm64", "windows/arm64"} {
 		generated := GenerateFixedBackend(resolved, target)
@@ -38,6 +38,40 @@ func TestAArch64DefinitionVerticalSlice(t *testing.T) {
 	}
 }
 
+func TestNativeCatalogTargetIdentityIgnoresUnreachableArchitecture(t *testing.T) {
+	source, err := os.ReadFile("../../backend/definitions/native.rtg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := Resolve(Parse(source, "native.rtg"))
+	if !base.Ok {
+		t.Fatalf("base definition failed: %#v", base.Diagnostics)
+	}
+	ensureDirectEmitterV1()
+	extra := "\narch unreachable_fixture {\n\tendian = little\n\tword_bits = 8\n\treject = [\n"
+	for i := 0; i < len(directEmitterV1); i++ {
+		extra += "\t\t" + directEmitterV1[i].Name + ",\n"
+	}
+	extra += "\t]\n}\n"
+	extendedSource := append(append([]byte(nil), source...), []byte(extra)...)
+	extended := Resolve(Parse(extendedSource, "native-extended.rtg"))
+	if !extended.Ok {
+		t.Fatalf("extended definition failed: %#v", extended.Diagnostics)
+	}
+	if base.Document.Hash == extended.Document.Hash {
+		t.Fatal("unreachable architecture did not change catalog identity")
+	}
+	for i := 0; i < len(base.Targets); i++ {
+		target, ok := lookupResolvedTarget(extended, base.Targets[i].Descriptor.Name)
+		if !ok {
+			t.Fatalf("extended catalog lost %s", base.Targets[i].Descriptor.Name)
+		}
+		if target.Descriptor.Definition != base.Targets[i].Descriptor.Definition {
+			t.Fatalf("unreachable architecture changed %s identity", target.Descriptor.Name)
+		}
+	}
+}
+
 func TestAArch64EncodingSlice(t *testing.T) {
 	if got := encodeAArch64RET(30); got != 0xd65f03c0 {
 		t.Fatalf("RET x30 = %#08x", got)
@@ -54,11 +88,11 @@ func TestAArch64EncodingSlice(t *testing.T) {
 }
 
 func TestAArch64CheckedInArchitectureOutput(t *testing.T) {
-	source, err := os.ReadFile("../../backend/definitions/aarch64.rtg")
+	source, err := os.ReadFile("../../backend/definitions/native.rtg")
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolved := Resolve(Parse(source, "aarch64.rtg"))
+	resolved := Resolve(Parse(source, "native.rtg"))
 	generated := GenerateCheckedInArchitectureAlgorithms(resolved, "aarch64", "main")
 	if !generated.Ok {
 		t.Fatalf("generate architecture: %#v", generated.Diagnostics)
@@ -80,42 +114,19 @@ func TestAArch64CheckedInArchitectureOutput(t *testing.T) {
 			t.Errorf("generated AArch64 output is missing algorithm binding %s", binding)
 		}
 	}
-	contract := GenerateCheckedInArchitectureContract(resolved, "aarch64", "main")
-	if !contract.Ok {
-		t.Fatalf("generate AArch64 contract: %#v", contract.Diagnostics)
-	}
-	checkedContract, err := os.ReadFile("../../backend/rtg_aarch64_contract_generated.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(contract.Source, checkedContract) {
-		t.Fatal("checked-in AArch64 contract output is stale; run go generate ./backend/definitions")
-	}
-	for _, binding := range []string{
-		"func rtgAarch64DirectMove(",
-		"func rtgAarch64DirectAddress(",
-		"func rtgAarch64DirectLoadI32(",
-		"func rtgAarch64DirectJumpCondition(",
-		"func rtgAarch64DirectCopyBytes(",
-		"func rtgAarch64PatchRelocations(",
-	} {
-		if !containsText(string(checkedContract), binding) {
-			t.Errorf("generated AArch64 contract is missing semantic binding %s", binding)
-		}
-	}
 }
 
 func TestAmd64DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
-	source, err := os.ReadFile("../../backend/definitions/amd64.rtg")
+	source, err := os.ReadFile("../../backend/definitions/native.rtg")
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolved := Resolve(Parse(source, "amd64.rtg"))
+	resolved := Resolve(Parse(source, "native.rtg"))
 	if !resolved.Ok {
 		t.Fatalf("definition failed: %#v", resolved.Diagnostics)
 	}
-	if len(resolved.Targets) != 3 {
-		t.Fatalf("target count = %d, want 3", len(resolved.Targets))
+	if len(resolved.Targets) != 9 {
+		t.Fatalf("native target count = %d, want 9", len(resolved.Targets))
 	}
 	generated := GenerateCheckedInArchitectureAlgorithms(resolved, "x86_64", "main")
 	if !generated.Ok {
@@ -138,33 +149,11 @@ func TestAmd64DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 			t.Errorf("generated amd64 output is missing algorithm binding %s", binding)
 		}
 	}
-	contract := GenerateCheckedInArchitectureContract(resolved, "x86_64", "main")
-	if !contract.Ok {
-		t.Fatalf("generate amd64 contract: %#v", contract.Diagnostics)
-	}
-	checkedContract, err := os.ReadFile("../../backend/rtg_amd64_contract_generated.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(contract.Source, checkedContract) {
-		t.Fatal("checked-in amd64 contract output is stale; run go generate ./backend/definitions")
-	}
-	for _, binding := range []string{
-		"func rtgX8664DirectMove(",
-		"func rtgX8664DirectLoadU8(",
-		"func rtgX8664DirectJumpCondition(",
-		"func rtgX8664DirectCopyBytes(",
-		"func rtgX8664PatchRelocations(",
-	} {
-		if !containsText(string(checkedContract), binding) {
-			t.Errorf("generated amd64 contract is missing semantic binding %s", binding)
-		}
-	}
 	prepared := GeneratePreparedBackend(resolved, "linux/amd64")
 	if !prepared.Ok {
 		t.Fatalf("generate prepared amd64 backend: %#v", prepared.Diagnostics)
 	}
-	if !containsText(string(prepared.Source), "func rtgX8664DirectMove(") {
+	if !containsText(string(prepared.Source), "func rtgNativeDirectMove(") {
 		t.Error("prepared amd64 backend omitted the direct emitter contract")
 	}
 	if containsText(string(prepared.Source), directEmitterV1Schema) {
@@ -173,15 +162,15 @@ func TestAmd64DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 }
 
 func TestArmDefinitionAndCheckedInArchitectureOutput(t *testing.T) {
-	source, err := os.ReadFile("../../backend/definitions/arm.rtg")
+	source, err := os.ReadFile("../../backend/definitions/native.rtg")
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolved := Resolve(Parse(source, "arm.rtg"))
+	resolved := Resolve(Parse(source, "native.rtg"))
 	if !resolved.Ok {
 		t.Fatalf("definition failed: %#v", resolved.Diagnostics)
 	}
-	if len(resolved.Targets) != 1 || resolved.Targets[0].Descriptor.Name != "linux/arm" {
+	if _, ok := lookupResolvedTarget(resolved, "linux/arm"); !ok {
 		t.Fatalf("targets = %#v, want linux/arm", resolved.Targets)
 	}
 	generated := GenerateCheckedInArchitectureAlgorithms(resolved, "arm", "main")
@@ -204,42 +193,19 @@ func TestArmDefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 			t.Errorf("generated ARM output is missing algorithm binding %s", binding)
 		}
 	}
-	contract := GenerateCheckedInArchitectureContract(resolved, "arm", "main")
-	if !contract.Ok {
-		t.Fatalf("generate ARM contract: %#v", contract.Diagnostics)
-	}
-	checkedContract, err := os.ReadFile("../../backend/rtg_arm_contract_generated.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(contract.Source, checkedContract) {
-		t.Fatal("checked-in ARM contract output is stale; run go generate ./backend/definitions")
-	}
-	for _, binding := range []string{
-		"func rtgArmDirectMove(",
-		"func rtgArmDirectAddress(",
-		"func rtgArmDirectLoadI8(",
-		"func rtgArmDirectJumpCondition(",
-		"func rtgArmDirectCopyBytes(",
-		"func rtgArmPatchRelocations(",
-	} {
-		if !containsText(string(checkedContract), binding) {
-			t.Errorf("generated ARM contract is missing semantic binding %s", binding)
-		}
-	}
 }
 
 func Test386DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
-	source, err := os.ReadFile("../../backend/definitions/386.rtg")
+	source, err := os.ReadFile("../../backend/definitions/native.rtg")
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolved := Resolve(Parse(source, "386.rtg"))
+	resolved := Resolve(Parse(source, "native.rtg"))
 	if !resolved.Ok {
 		t.Fatalf("definition failed: %#v", resolved.Diagnostics)
 	}
-	if len(resolved.Targets) != 2 {
-		t.Fatalf("target count = %d, want 2", len(resolved.Targets))
+	if len(resolved.Targets) != 9 {
+		t.Fatalf("native target count = %d, want 9", len(resolved.Targets))
 	}
 	generated := GenerateCheckedInArchitectureAlgorithms(resolved, "x86_32", "main")
 	if !generated.Ok {
@@ -259,29 +225,6 @@ func Test386DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 	} {
 		if !containsText(string(checkedIn), binding) {
 			t.Errorf("generated 386 output is missing algorithm binding %s", binding)
-		}
-	}
-	contract := GenerateCheckedInArchitectureContract(resolved, "x86_32", "main")
-	if !contract.Ok {
-		t.Fatalf("generate 386 contract: %#v", contract.Diagnostics)
-	}
-	checkedContract, err := os.ReadFile("../../backend/rtg_386_contract_generated.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(contract.Source, checkedContract) {
-		t.Fatal("checked-in 386 contract output is stale; run go generate ./backend/definitions")
-	}
-	for _, binding := range []string{
-		"func rtgX8632DirectMove(",
-		"func rtgX8632DirectAddress(",
-		"func rtgX8632DirectLoadI16(",
-		"func rtgX8632DirectJumpCondition(",
-		"func rtgX8632DirectCopyBytes(",
-		"func rtgX8632PatchRelocations(",
-	} {
-		if !containsText(string(checkedContract), binding) {
-			t.Errorf("generated 386 contract is missing semantic binding %s", binding)
 		}
 	}
 }

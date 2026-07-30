@@ -1,0 +1,134 @@
+definition 1
+unit schema8086
+implements direct_emitter_v1
+
+# Design fixture only: this describes the awkward parts of an 8086-shaped
+# machine without claiming a DOS runtime or a production backend.
+go backend {
+	func fixture8086Move(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		out.Bytes2(0x89, destination.Code<<3|source.Code)
+	}
+	func fixture8086Load(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+		out.Bytes2(0x8b, destination.Code<<3|address.Base.Code)
+	}
+	func fixture8086Store(out *RTGEmitter, address RTGAddress, source RTGRegister) {
+		out.Bytes2(0x89, source.Code<<3|address.Base.Code)
+	}
+	func fixture8086Add(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		out.Bytes2(0x01, destination.Code<<3|source.Code)
+	}
+	func fixture8086CallNear(out *RTGEmitter, target RTGLabel) {
+		out.Byte(0xe8)
+		out.Reloc(target)
+	}
+	func fixture8086JumpCondition(out *RTGEmitter, condition RTGCondition, target RTGLabel) {
+		out.Bytes2(0x70|condition.Code, 0)
+		out.Reloc(target)
+	}
+	func fixture8086PatchRelocations(out *RTGEmitter) {
+		out.Patch()
+	}
+}
+
+arch intel_8086 {
+	alias = "8086"
+	endian = little
+	word_bits = 16
+	pointer_bits = 16
+	instruction_alignment = 1
+	stack_word_bytes = 2
+	stack_alignment = 2
+	patch_relocations = go fixture8086PatchRelocations
+
+	registers gpr16 = [ax, cx, dx, bx, sp, bp, si, di]
+	register_class byte_low = [ax, cx, dx, bx]
+	register_class segment = [sp, bp, si, di]
+	register_group far_pointer {
+		code = [dx, ax]
+		data = [bx, si]
+	}
+	locations {
+		primary = ax
+		secondary = dx
+		tertiary = cx
+		stack = sp
+		frame = bp
+		scratch = bx
+	}
+	address_space data {
+		address_bits = 20
+		pointer_bits = 16
+		unit_bits = 8
+		pointer_words = 2
+	}
+	address_space code {
+		address_bits = 20
+		pointer_bits = 16
+		unit_bits = 8
+		pointer_words = 2
+	}
+	conditions {
+		eq 4
+		ne 5
+		lt 12
+		ge 13
+	}
+	forms {
+		rr16 = go fixture8086Move
+		load16 = go fixture8086Load
+		store16 = go fixture8086Store
+		add16 = go fixture8086Add
+		call_near = go fixture8086CallNear
+		branch_short = go fixture8086JumpCondition
+	}
+	instructions {
+		move16 rr16
+		load16 load16
+		store16 store16
+		add16 add16
+		call16 call_near relocation=near16
+		branch8 branch_short range=8 relocation=relative8
+	}
+	bind {
+		move = move16
+		load.native = load16
+		store.native = store16
+		add = add16
+		call = call16
+		jump_condition = branch8
+	}
+	reject = [
+		address,
+		load.i32, load.u32, load.i16, load.u16, load.i8, load.u8,
+		store.u32, store.u16, store.u8,
+		subtract, multiply, bit_and, bit_or, bit_xor, compare, test,
+		increment, decrement,
+		shift_left_immediate, shift_right_unsigned_immediate, shift_right_signed_immediate,
+		call_indirect, jump, set_condition, return, leave, host_syscall,
+		move_immediate, variable_shift, signed_divide, copy_bytes
+	]
+}
+
+abi fixture_8086_c {
+	arch = intel_8086
+	arguments = [ax, dx, cx]
+	result = ax
+	stack_alignment = 2
+	return_address = near16
+}
+runtime fixture_8086_runtime { operations = [print] }
+format fixture_8086_image {
+	kind = fixture
+	address_bits = 16
+	byte_order = little
+}
+target fixture/8086 {
+	family = native_v1
+	os = fixture
+	arch = intel_8086
+	abi = fixture_8086_c
+	runtime = fixture_8086_runtime
+	executable = fixture_8086_image
+	code_pointer_bits = 32
+	function_pointer_bits = 32
+}

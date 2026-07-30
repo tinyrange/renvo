@@ -10,15 +10,16 @@ type generatedSymbol struct {
 }
 
 func architectureLocalPrefix(name string) string {
-	end := 0
-	for end < len(name) && name[end] != '_' && name[end] != '-' &&
-		name[end] != '/' && name[end] != '.' {
-		end++
+	var out []byte
+	for i := 0; i < len(name); i++ {
+		if isIdentPart(name[i]) {
+			out = append(out, name[i])
+		}
 	}
-	if end == 0 {
+	if len(out) == 0 {
 		return "arch"
 	}
-	return name[:end]
+	return string(out)
 }
 
 func upperIdentifier(name string) string {

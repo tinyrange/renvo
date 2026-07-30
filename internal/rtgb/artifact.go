@@ -7,7 +7,7 @@ package rtgb
 import "renvo.dev/internal/rtg"
 
 const (
-	Version    = 2
+	Version    = 3
 	HeaderSize = 80
 	MaxPayload = 64 << 20
 	MaxMeta    = 1 << 20
@@ -32,6 +32,7 @@ func Encode(artifact Artifact) ([]byte, bool) {
 	}
 	var metadata []byte
 	metadata = appendString(metadata, artifact.Descriptor.Name)
+	metadata = appendString(metadata, artifact.Descriptor.Family)
 	metadata = appendString(metadata, artifact.Descriptor.OS)
 	metadata = appendString(metadata, artifact.Descriptor.ISA)
 	metadata = appendString(metadata, artifact.Descriptor.Endian)
@@ -107,6 +108,7 @@ func Decode(source []byte) (Artifact, bool) {
 	artifact.Descriptor.ArenaDefault = read32(source, 76)
 	reader := metadataReader{source: source[HeaderSize : HeaderSize+metadataSize], ok: true}
 	artifact.Descriptor.Name = reader.string()
+	artifact.Descriptor.Family = reader.string()
 	artifact.Descriptor.OS = reader.string()
 	artifact.Descriptor.ISA = reader.string()
 	artifact.Descriptor.Endian = reader.string()
@@ -143,7 +145,8 @@ func validArtifact(artifact Artifact) bool {
 
 func validArtifactMetadata(artifact Artifact) bool {
 	descriptor := artifact.Descriptor
-	return descriptor.Name != "" && descriptor.OS != "" && descriptor.ISA != "" &&
+	return descriptor.Name != "" && descriptor.Family != "" &&
+		descriptor.OS != "" && descriptor.ISA != "" &&
 		descriptor.Version > 0 && descriptor.Version <= 65535 &&
 		descriptor.WordBits > 0 && descriptor.WordBits <= 65535 &&
 		descriptor.PointerBits > 0 && descriptor.PointerBits <= 65535 &&

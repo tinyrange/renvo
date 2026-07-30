@@ -21,7 +21,7 @@ import (
 )
 
 func TestExcludedFamily(t *testing.T) {
-	excluded := excludedFamily(rtg.TargetDescriptor{ISA: "amd64"})
+	excluded := excludedFamily(rtg.TargetDescriptor{Family: rtg.BackendFamilyNativeV1, ISA: "amd64"})
 	for _, name := range []string{
 		"compiler_rtg_generated_impl.go", "compiler_rtg_inactive_impl.go",
 	} {
@@ -40,25 +40,32 @@ func TestExcludedFamily(t *testing.T) {
 	}
 }
 
-func TestPreparedTargetPolicySelectsPreparedMode(t *testing.T) {
-	source, ok := preparedTargetPolicy([]byte(
-		"package main\n\nconst renvoPreparedBackend = 0\n"))
-	if !ok || !bytes.Contains(source, []byte("const renvoPreparedBackend = 1\n")) {
-		t.Fatalf("prepared compiler policy = %q, ok %v", source, ok)
+func TestPreparationBundleCarriesTypedSettings(t *testing.T) {
+	foundMain := false
+	foundPreparedMode := false
+	for i := 0; i < backendcompiled.CompilerSourceCount; i++ {
+		name, source, ok := backendcompiled.CompilerSource(i)
+		if !ok {
+			t.Fatalf("read embedded compiler source %d", i)
+		}
+		if name == "compiler_main.go" {
+			foundMain = bytes.Contains([]byte(source), []byte("var renvoFixedTarget int = 0"))
+		}
+		if name == "compiler_target_policy_impl.go" {
+			foundPreparedMode =
+				bytes.Contains([]byte(source), []byte("const renvoPreparedBackend = 1"))
+		}
 	}
-	if _, ok := preparedTargetPolicy([]byte("package main\n")); ok {
-		t.Fatal("accepted compiler policy without its mode declaration")
+	if !foundMain || !foundPreparedMode {
+		t.Fatalf("typed preparation inputs: main=%v mode=%v", foundMain, foundPreparedMode)
 	}
-}
 
-func TestPreparedCompilerMainPinsUniversalTarget(t *testing.T) {
-	source, ok := preparedCompilerMain([]byte(
-		"package main\n\nvar renvoFixedTarget int\n"))
-	if !ok || !bytes.Contains(source, []byte("var renvoFixedTarget int = 0\n")) {
-		t.Fatalf("prepared compiler main = %q, ok %v", source, ok)
+	source, err := os.ReadFile("../../backend/compiler_target_policy_impl.go")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, ok := preparedCompilerMain([]byte("package main\n")); ok {
-		t.Fatal("accepted compiler main without its fixed-target declaration")
+	if !bytes.Contains(source, []byte("const renvoPreparedBackend = 0")) {
+		t.Fatal("checked-in compiler policy did not retain built-in mode")
 	}
 }
 
@@ -137,7 +144,8 @@ func TestInMemoryRunnerUsesVersionedProtocol(t *testing.T) {
 	var definition [32]byte
 	definition[0] = 42
 	descriptor := rtg.TargetDescriptor{
-		Name: "example/amd64", Definition: definition, Version: rtg.DescriptorVersion,
+		Name: "example/amd64", Family: rtg.BackendFamilyNativeV1,
+		Definition: definition, Version: rtg.DescriptorVersion,
 	}
 	base := make([]byte, 14)
 	copy(base, unit.Magic)
@@ -181,7 +189,7 @@ func TestCompiledInBootstrapPreparesAndCachesBackend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	builtInDefinition := filepath.Join(root, "backend", "definitions", "amd64.rtg")
+	builtInDefinition := filepath.Join(root, "backend", "definitions", "native.rtg")
 	definitionSource, err := os.ReadFile(builtInDefinition)
 	if err != nil {
 		t.Fatal(err)
@@ -312,7 +320,7 @@ func TestCompiledInBootstrapUsesAArch64Definition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	definitionSource, err := os.ReadFile(filepath.Join(root, "backend", "definitions", "aarch64.rtg"))
+	definitionSource, err := os.ReadFile(filepath.Join(root, "backend", "definitions", "native.rtg"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,9 +362,9 @@ func TestCompiledInBootstrapUsesDefinitionOwnedPEImages(t *testing.T) {
 		custom  string
 		machine []byte
 	}{
-		{"amd64.rtg", "windows/amd64", "example/windows-amd64", []byte{0x64, 0x86}},
-		{"386.rtg", "windows/386", "example/windows-386", []byte{0x4c, 0x01}},
-		{"aarch64.rtg", "windows/arm64", "example/windows-arm64", []byte{0x64, 0xaa}},
+		{"native.rtg", "windows/amd64", "example/windows-amd64", []byte{0x64, 0x86}},
+		{"native.rtg", "windows/386", "example/windows-386", []byte{0x4c, 0x01}},
+		{"native.rtg", "windows/arm64", "example/windows-arm64", []byte{0x64, 0xaa}},
 	}
 	for _, test := range cases {
 		t.Run(test.custom, func(t *testing.T) {
@@ -427,7 +435,7 @@ func TestCompiledInBootstrapUsesDefinitionOwnedKernelModuleImage(t *testing.T) {
 		t.Fatal(err)
 	}
 	definitionSource, err := os.ReadFile(filepath.Join(
-		root, "backend", "definitions", "amd64.rtg"))
+		root, "backend", "definitions", "native.rtg"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -499,7 +507,7 @@ func TestCompiledInBootstrapUsesDefinitionOwnedMachOImage(t *testing.T) {
 		t.Fatal(err)
 	}
 	definitionSource, err := os.ReadFile(filepath.Join(
-		root, "backend", "definitions", "aarch64.rtg"))
+		root, "backend", "definitions", "native.rtg"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -554,8 +562,8 @@ func TestCompiledInBootstrapUses32BitDefinitions(t *testing.T) {
 		custom  string
 		machine byte
 	}{
-		{"386.rtg", "linux/386", "example/386", 3},
-		{"arm.rtg", "linux/arm", "example/arm", 40},
+		{"native.rtg", "linux/386", "example/386", 3},
+		{"native.rtg", "linux/arm", "example/arm", 40},
 	}
 	for _, test := range cases {
 		t.Run(test.custom, func(t *testing.T) {

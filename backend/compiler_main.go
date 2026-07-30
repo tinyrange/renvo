@@ -1,7 +1,7 @@
 package main
 
 var renvoDefaultTarget int = renvoTargetLinuxAmd64
-var renvoFixedTarget int
+var renvoFixedTarget int = 0
 var renvoCompilerStripSymbols bool
 var renvoKernelRelease string
 var renvoKernelModuleName string

@@ -7,6 +7,7 @@ type Descriptor struct {
 	Name                string
 	Backend             string
 	Aliases             []string
+	Family              string
 	OS                  string
 	ISA                 string
 	WordBits            int

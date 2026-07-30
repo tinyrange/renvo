@@ -1,10 +1,16 @@
 package rtg
 
-const DescriptorVersion = 2
+const DescriptorVersion = 3
+
+const (
+	BackendFamilyNativeV1     = "native_v1"
+	BackendFamilyStructured32 = "structured32"
+)
 
 type TargetDescriptor struct {
 	Name                string
 	Aliases             []string
+	Family              string
 	OS                  string
 	ISA                 string
 	WordBits            int
@@ -96,13 +102,24 @@ func ResolveDefinitions(parsed Document) ResolveResult {
 func resolveTarget(document Document, declaration Declaration) (ResolvedTarget, Diagnostic, bool) {
 	target := ResolvedTarget{Declaration: declaration}
 	target.Descriptor.Name = declaration.Name
+	family, ok := requiredNameField(document, declaration, "family")
+	if !ok {
+		diagnostic := resolveDiagnostic(document, declaration, "RTG-RESOLVE-022",
+			"target "+declaration.Name+" is missing family")
+		return target, diagnostic, false
+	}
+	if family != BackendFamilyNativeV1 && family != BackendFamilyStructured32 {
+		diagnostic := resolveDiagnostic(document, declaration, "RTG-RESOLVE-023",
+			"target "+declaration.Name+" has unknown backend family "+family)
+		return target, diagnostic, false
+	}
+	target.Descriptor.Family = family
 	osName, ok := requiredNameField(document, declaration, "os")
 	if !ok {
 		return target, resolveDiagnostic(document, declaration, "RTG-RESOLVE-015", "target "+declaration.Name+" is missing os"), false
 	}
 	target.Descriptor.OS = osName
 	target.Descriptor.Version = DescriptorVersion
-	target.Descriptor.Definition = document.Hash
 
 	archName, ok := requiredNameField(document, declaration, "arch")
 	if !ok {
@@ -220,9 +237,24 @@ func resolveTarget(document Document, declaration Declaration) (ResolvedTarget, 
 	if kind, found := fieldValue(document, output, "kind"); found {
 		target.Descriptor.OutputKind = valueName(kind)
 	}
+	if target.Descriptor.Family == BackendFamilyNativeV1 &&
+		(target.Descriptor.ISA == "wasm32" || target.Descriptor.ISA == "vm32" ||
+			target.Descriptor.OutputKind == "wasm" || target.Descriptor.OutputKind == "html-wasm" ||
+			target.Descriptor.OutputKind == "rnvm") {
+		diagnostic := resolveDiagnostic(document, declaration, "RTG-RESOLVE-024",
+			"native_v1 target "+declaration.Name+" uses a structured backend machine or output")
+		return target, diagnostic, false
+	}
+	if target.Descriptor.Family == BackendFamilyStructured32 &&
+		target.Descriptor.ISA != "wasm32" && target.Descriptor.ISA != "vm32" {
+		diagnostic := resolveDiagnostic(document, declaration, "RTG-RESOLVE-025",
+			"structured32 target "+declaration.Name+" requires wasm32 or vm32 frontend architecture")
+		return target, diagnostic, false
+	}
 	sortStrings(target.Descriptor.Aliases)
 	sortStrings(target.Descriptor.BuildTags)
 	sortStrings(target.Descriptor.Capabilities)
+	target.Descriptor.Definition = targetSemanticIdentity(document, target)
 	return target, Diagnostic{}, true
 }
 
