@@ -108,7 +108,8 @@ func (s *FSBuildSession) Step() bool {
 			s.stage = 4
 			return true
 		}
-		s.result.Unit = bindBuiltInTarget(built.Link.Data, s.result.Options)
+		s.result.Unit = built.Link.Data
+		bindBuiltInTarget(&s.result.Unit, s.result.Options)
 		s.stage = 3
 		return false
 	}

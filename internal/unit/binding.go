@@ -13,21 +13,61 @@ type TargetBinding struct {
 }
 
 // BindUnboundTarget appends a binding to a newly marshaled RTGU. MarshalCore
-// reserves the small tail capacity, so the ordinary frontend path does not
-// rescan or copy the complete unit.
-func BindUnboundTarget(data []byte, binding TargetBinding) ([]byte, bool) {
-	if !validUnitRoot(data) || binding.Target == "" || len(binding.Definition) != 32 || binding.DescriptorVersion <= 0 {
-		return nil, false
+// reserves the small tail capacity, so the ordinary frontend path writes into
+// that storage directly instead of rescanning or copying the complete unit.
+// The pointer parameter avoids an escaping-slice copy in arena-backed
+// self-hosted callers.
+func BindUnboundTarget(data *[]byte, binding TargetBinding) bool {
+	if !validUnitRoot(*data) || binding.Target == "" || len(binding.Definition) != 32 || binding.DescriptorVersion <= 0 {
+		return false
 	}
-	out := data
-	out = appendStringNodeCore(out, TagDefinitionTarget, binding.Target)
-	out = appendStringNodeCore(out, TagDefinitionHash, binding.Definition)
-	var version [2]byte
-	version[0] = byte(binding.DescriptorVersion)
-	version[1] = byte(binding.DescriptorVersion >> 8)
-	out = appendNode(out, TagDescriptorVersion, version[:])
+	const fixedSize = 52
+	required := fixedSize + len(binding.Target)
+	if cap(*data)-len(*data) < required {
+		out := *data
+		out = appendStringNodeCore(out, TagDefinitionTarget, binding.Target)
+		out = appendStringNodeCore(out, TagDefinitionHash, binding.Definition)
+		var version [2]byte
+		version[0] = byte(binding.DescriptorVersion)
+		version[1] = byte(binding.DescriptorVersion >> 8)
+		out = appendNode(out, TagDescriptorVersion, version[:])
+		patchUint32Core(out, 10, len(out)-14)
+		*data = out
+		return true
+	}
+	start := len(*data)
+	out := (*data)[:start+required]
+	at := start
+	at = writeStringNodeCore(out, at, TagDefinitionTarget, binding.Target)
+	at = writeStringNodeCore(out, at, TagDefinitionHash, binding.Definition)
+	at = writeNodeHeaderCore(out, at, TagDescriptorVersion, 2)
+	out[at] = byte(binding.DescriptorVersion)
+	out[at+1] = byte(binding.DescriptorVersion >> 8)
+	at += 2
+	if at != len(out) {
+		return false
+	}
 	patchUint32Core(out, 10, len(out)-14)
-	return out, true
+	*data = out
+	return true
+}
+
+func writeStringNodeCore(out []byte, at int, tag int, payload string) int {
+	at = writeNodeHeaderCore(out, at, tag, len(payload))
+	for i := 0; i < len(payload); i++ {
+		out[at+i] = payload[i]
+	}
+	return at + len(payload)
+}
+
+func writeNodeHeaderCore(out []byte, at int, tag int, size int) int {
+	out[at] = byte(tag)
+	out[at+1] = byte(tag >> 8)
+	out[at+2] = byte(size)
+	out[at+3] = byte(size >> 8)
+	out[at+4] = byte(size >> 16)
+	out[at+5] = byte(size >> 24)
+	return at + 6
 }
 
 // BindTarget sets the target-definition identity on a canonical RTGU root,

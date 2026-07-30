@@ -78,7 +78,10 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 	persistMark := 0
 	if resetArena {
 		persistMark = arena.PersistMark()
-		unit = arena.PersistBytes(unit)
+		// The compact one-shot pipeline leaves the linked unit as its final
+		// low-arena allocation, so a large unit can transfer arena ownership
+		// when an ordinary persistent copy would exceed the fixed arena.
+		unit = arena.PersistLastBytes(unit, mark)
 		target = arena.PersistString(target)
 		backendTarget = arena.PersistString(backendTarget)
 		output = arena.PersistString(output)

@@ -60,6 +60,41 @@ func TestTargetBindingCanBeReplaced(t *testing.T) {
 	}
 }
 
+func TestUnboundTargetBindingUsesReservedTail(t *testing.T) {
+	base, ok := MarshalCore(CoreProgram{
+		Package: "main",
+		Text:    []byte("package main"),
+		Tokens:  []Token{MakeToken(TokenEOF, 12, 0, 1)},
+	})
+	if !ok {
+		t.Fatal("MarshalCore failed")
+	}
+	binding := TargetBinding{
+		Target:            "darwin/arm64",
+		Definition:        string(make([]byte, 32)),
+		DescriptorVersion: 1,
+	}
+	required := len(binding.Target) + 52
+	if cap(base)-len(base) < required {
+		t.Fatalf("MarshalCore reserved %d binding bytes, want at least %d", cap(base)-len(base), required)
+	}
+	bound := base
+	ok = BindUnboundTarget(&bound, binding)
+	if !ok {
+		t.Fatal("BindUnboundTarget failed")
+	}
+	if &bound[0] != &base[0] {
+		t.Fatal("BindUnboundTarget copied a unit with sufficient reserved tail")
+	}
+	if len(bound) != len(base)+required {
+		t.Fatalf("bound length = %d, want %d", len(bound), len(base)+required)
+	}
+	got, ok := ReadTargetBinding(bound)
+	if !ok || got != binding {
+		t.Fatalf("binding = %#v, ok %v", got, ok)
+	}
+}
+
 func TestTargetBindingRejectsTruncation(t *testing.T) {
 	base, _ := MarshalCore(CoreProgram{
 		Package: "main",
