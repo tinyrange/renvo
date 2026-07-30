@@ -17,7 +17,10 @@ func decompressCompilerSource(index int, size int) (string, bool) {
 	}
 	source := make([]byte, 0, size)
 	for chunkIndex := 0; chunkIndex < compilerSourceChunkCount(index); chunkIndex++ {
-		compressed := []byte(compilerSourceChunk(index, chunkIndex))
+		compressed, decoded := decodeCompilerSourceChunk(compilerSourceChunk(index, chunkIndex))
+		if !decoded {
+			return "", false
+		}
 		for at := 0; at < len(compressed); {
 			control := int(compressed[at])
 			at++
@@ -48,4 +51,42 @@ func decompressCompilerSource(index int, size int) (string, bool) {
 		return "", false
 	}
 	return string(source), true
+}
+
+func decodeCompilerSourceChunk(encoded string) ([]byte, bool) {
+	if len(encoded)%4 == 1 {
+		return nil, false
+	}
+	out := make([]byte, 0, len(encoded)*3/4)
+	value := 0
+	bits := 0
+	for i := 0; i < len(encoded); i++ {
+		ch := encoded[i]
+		digit := -1
+		if ch >= 'A' && ch <= 'Z' {
+			digit = int(ch - 'A')
+		} else if ch >= 'a' && ch <= 'z' {
+			digit = int(ch-'a') + 26
+		} else if ch >= '0' && ch <= '9' {
+			digit = int(ch-'0') + 52
+		} else if ch == '+' {
+			digit = 62
+		} else if ch == '/' {
+			digit = 63
+		} else {
+			return nil, false
+		}
+		value = value<<6 | digit
+		bits += 6
+		if bits >= 8 {
+			bits -= 8
+			out = append(out, byte(value>>bits))
+			if bits == 0 {
+				value = 0
+			} else {
+				value &= 1<<bits - 1
+			}
+		}
+	}
+	return out, value == 0
 }

@@ -15,21 +15,29 @@ func main() {
 	target := flag.String("t", "", "canonical target for fixed generation")
 	arch := flag.String("arch", "", "architecture for checked-in architecture generation")
 	statefulEmitter := flag.Bool("stateful-emitter", false, "keep the stateful RTG emitter in architecture output")
-	production := flag.Bool("production", false, "emit the pruned checked-in production architecture")
+	algorithms := flag.Bool("algorithms", false, "emit the pruned checked-in algorithm projection")
+	contract := flag.Bool("contract", false, "emit the checked-in semantic contract projection")
 	kernel := flag.Bool("kernel", false, "generate the shared checked-in architecture kernel")
+	inactiveKernel := flag.Bool("inactive-kernel", false, "generate the self-hosted inactive architecture kernel")
 	packageName := flag.String("package", "backend", "generated Go package")
 	output := flag.String("o", "", "generated Go output")
 	check := flag.Bool("check", false, "fail if the output is stale")
 	flag.Parse()
-	if *output == "" || flag.NArg() == 0 && !*kernel {
+	if *output == "" || flag.NArg() == 0 && !*kernel && !*inactiveKernel {
 		fmt.Fprintln(os.Stderr, "usage: rtggen -t target/name -o output.go definition.rtg")
 		os.Exit(2)
 	}
-	if *kernel {
+	if *kernel || *inactiveKernel {
 		if *target != "" || *arch != "" || *statefulEmitter || flag.NArg() != 0 {
 			fail("kernel generation does not accept definitions, -t, or -arch")
 		}
+		if *kernel && *inactiveKernel {
+			fail("-kernel and -inactive-kernel are mutually exclusive")
+		}
 		generated := rtg.GenerateArchitectureKernel(*packageName)
+		if *inactiveKernel {
+			generated = rtg.GenerateInactiveArchitectureKernel(*packageName)
+		}
 		writeGenerated(*output, *check, generated)
 		return
 	}
@@ -50,11 +58,14 @@ func main() {
 		if *target != "" || len(definitions) != 1 {
 			fail("architecture generation requires one definition and no -t")
 		}
-		if *production {
-			if *statefulEmitter {
-				fail("-production and -stateful-emitter are mutually exclusive")
-			}
-			generated = rtg.GenerateProductionArchitectureBackend(definitions[0], *arch, *packageName)
+		if *algorithms && *contract || *algorithms && *statefulEmitter ||
+			*contract && *statefulEmitter {
+			fail("-algorithms, -contract, and -stateful-emitter are mutually exclusive")
+		}
+		if *algorithms {
+			generated = rtg.GenerateCheckedInArchitectureAlgorithms(definitions[0], *arch, *packageName)
+		} else if *contract {
+			generated = rtg.GenerateCheckedInArchitectureContract(definitions[0], *arch, *packageName)
 		} else if *statefulEmitter {
 			generated = rtg.GenerateStatefulArchitectureBackend(definitions[0], *arch, *packageName)
 		} else {

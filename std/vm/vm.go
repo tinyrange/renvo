@@ -347,17 +347,25 @@ func validOperands(code []byte, pc int) bool {
 		return int(code[pc+1]) <= condGe
 	}
 	if op == opLoadMem || op == opStoreMem {
-		return int(code[pc+1]) < regCount && int(code[pc+2]) < regCount && validSize(int(code[pc+7]))
+		size := int(code[pc+7])
+		return int(code[pc+1]) < regCount && int(code[pc+2]) < regCount &&
+			(op == opLoadMem && validLoadSize(size) || op == opStoreMem && validSize(size))
 	}
 	if op == opLoadIndex || op == opStoreIndex {
+		size := int(code[pc+9])
 		return int(code[pc+1]) < regCount && int(code[pc+2]) < regCount &&
-			int(code[pc+3]) < regCount && validSize(int(code[pc+9]))
+			int(code[pc+3]) < regCount &&
+			(op == opLoadIndex && validLoadSize(size) || op == opStoreIndex && validSize(size))
 	}
 	return true
 }
 
 func validSize(size int) bool {
 	return size >= 1 && size <= 4
+}
+
+func validLoadSize(size int) bool {
+	return validSize(size) || size == 66 || size == 129
 }
 
 func nextInstruction(code []byte, pc int) int {
@@ -470,7 +478,7 @@ func (m *machine) step() bool {
 		addr := int(m.regs[base]) + int(int32(read32(code, pc+3)))
 		size := int(code[pc+7])
 		if op == opLoadMem {
-			value, ok := m.load(addr, size)
+			value, ok := m.loadSized(addr, size)
 			if ok {
 				m.regs[reg] = int32(value)
 			}
@@ -486,7 +494,7 @@ func (m *machine) step() bool {
 		addr := int(m.regs[base]) + int(m.regs[index])*scale + int(int32(read32(code, pc+5)))
 		size := int(code[pc+9])
 		if op == opLoadIndex {
-			value, ok := m.load(addr, size)
+			value, ok := m.loadSized(addr, size)
 			if ok {
 				m.regs[reg] = int32(value)
 			}
@@ -622,6 +630,21 @@ func (m *machine) step() bool {
 	}
 	m.trap = TrapInvalidInstruction
 	return false
+}
+
+func (m *machine) loadSized(addr int, size int) (uint32, bool) {
+	if size == 129 {
+		value, ok := m.load(addr, 1)
+		return uint32(int32(int8(value))), ok
+	}
+	if size == 66 {
+		return m.load(addr, 2)
+	}
+	if size == 2 {
+		value, ok := m.load(addr, 2)
+		return uint32(int32(int16(value))), ok
+	}
+	return m.load(addr, size)
 }
 
 func (m *machine) currentOpcode() int {

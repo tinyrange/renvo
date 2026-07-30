@@ -17,11 +17,22 @@ arch a64 {
 	endian = little
 	word_bits = 64
 	pointer_bits = 64
+	reject = [
+		move, address,
+		load.native, load.i32, load.u32, load.i16, load.u16, load.i8, load.u8,
+		store.native, store.u32, store.u16, store.u8,
+		add, subtract, multiply, bit_and, bit_or, bit_xor, compare, test,
+		increment, decrement,
+		shift_left_immediate, shift_right_unsigned_immediate, shift_right_signed_immediate,
+		call, call_indirect, jump, jump_condition, set_condition, return, leave,
+		host_syscall, move_immediate, variable_shift, signed_divide, copy_bytes
+	]
 }
 abi acme_abi { arch = a64 }
 runtime acme_runtime { operations = [print] }
 format acme_image { address_bits = 64 }
 target acme/aarch64 {
+	os = linux
 	arch = a64
 	abi = acme_abi
 	runtime = acme_runtime
@@ -75,6 +86,27 @@ func TestBackendDefinitionRejectsUnknownSelectedTarget(t *testing.T) {
 	}
 }
 
+func TestBackendDefinitionAcceptsUnknownArchitectureDescriptor(t *testing.T) {
+	definition := []byte(testBackendDefinition)
+	definition = []byte(replaceDriverText(string(definition),
+		`alias = "aarch64"`, `alias = "example64"`))
+	files := append(driverTestFiles(),
+		load.SourceFile{Path: "/repo/case/acme.rtg", Src: definition})
+	result := BuildFromFSWithBackend([]string{
+		"-backend", "acme.rtg",
+		"-t", "acme/aarch64",
+		"-emit-unit",
+		"-o", "app.unit",
+		"./cmd/app",
+	}, "/repo/case", "/std", memorySourceFS{files: files})
+	if !result.Ok {
+		t.Fatalf("unknown architecture BuildFromFS = %#v", result)
+	}
+	if result.Options.Target != "acme/aarch64" {
+		t.Fatalf("unknown architecture target = %q", result.Options.Target)
+	}
+}
+
 func TestBackendDefinitionAcceptsSystemTargetDefault(t *testing.T) {
 	files := append(driverTestFiles(),
 		load.SourceFile{Path: "/repo/case/acme.rtg", Src: []byte(testBackendDefinition)},
@@ -93,4 +125,13 @@ func TestBackendDefinitionAcceptsSystemTargetDefault(t *testing.T) {
 	if result.Options.Target != "acme/aarch64" || result.Options.SystemName != "acme-small" {
 		t.Fatalf("resolved options = %#v", result.Options)
 	}
+}
+
+func replaceDriverText(source string, old string, replacement string) string {
+	for i := 0; i+len(old) <= len(source); i++ {
+		if source[i:i+len(old)] == old {
+			return source[:i] + replacement + source[i+len(old):]
+		}
+	}
+	return source
 }

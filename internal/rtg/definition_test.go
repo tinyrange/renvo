@@ -59,7 +59,7 @@ func TestAArch64CheckedInArchitectureOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	resolved := Resolve(Parse(source, "aarch64.rtg"))
-	generated := GenerateProductionArchitectureBackend(resolved, "aarch64", "main")
+	generated := GenerateCheckedInArchitectureAlgorithms(resolved, "aarch64", "main")
 	if !generated.Ok {
 		t.Fatalf("generate architecture: %#v", generated.Diagnostics)
 	}
@@ -77,7 +77,30 @@ func TestAArch64CheckedInArchitectureOutput(t *testing.T) {
 		"func renvoAarch64AsmJmpLabel(",
 	} {
 		if !containsText(string(checkedIn), binding) {
-			t.Errorf("generated AArch64 output is missing direct binding %s", binding)
+			t.Errorf("generated AArch64 output is missing algorithm binding %s", binding)
+		}
+	}
+	contract := GenerateCheckedInArchitectureContract(resolved, "aarch64", "main")
+	if !contract.Ok {
+		t.Fatalf("generate AArch64 contract: %#v", contract.Diagnostics)
+	}
+	checkedContract, err := os.ReadFile("../../backend/rtg_aarch64_contract_generated.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(contract.Source, checkedContract) {
+		t.Fatal("checked-in AArch64 contract output is stale; run go generate ./backend/definitions")
+	}
+	for _, binding := range []string{
+		"func rtgAarch64DirectMove(",
+		"func rtgAarch64DirectAddress(",
+		"func rtgAarch64DirectLoadI32(",
+		"func rtgAarch64DirectJumpCondition(",
+		"func rtgAarch64DirectCopyBytes(",
+		"func rtgAarch64PatchRelocations(",
+	} {
+		if !containsText(string(checkedContract), binding) {
+			t.Errorf("generated AArch64 contract is missing semantic binding %s", binding)
 		}
 	}
 }
@@ -94,7 +117,7 @@ func TestAmd64DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 	if len(resolved.Targets) != 3 {
 		t.Fatalf("target count = %d, want 3", len(resolved.Targets))
 	}
-	generated := GenerateProductionArchitectureBackend(resolved, "x86_64", "main")
+	generated := GenerateCheckedInArchitectureAlgorithms(resolved, "x86_64", "main")
 	if !generated.Ok {
 		t.Fatalf("generate architecture: %#v", generated.Diagnostics)
 	}
@@ -112,8 +135,40 @@ func TestAmd64DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 		"func renvoAmd64AsmDivLeftRcxRightRax(",
 	} {
 		if !containsText(string(checkedIn), binding) {
-			t.Errorf("generated amd64 output is missing direct binding %s", binding)
+			t.Errorf("generated amd64 output is missing algorithm binding %s", binding)
 		}
+	}
+	contract := GenerateCheckedInArchitectureContract(resolved, "x86_64", "main")
+	if !contract.Ok {
+		t.Fatalf("generate amd64 contract: %#v", contract.Diagnostics)
+	}
+	checkedContract, err := os.ReadFile("../../backend/rtg_amd64_contract_generated.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(contract.Source, checkedContract) {
+		t.Fatal("checked-in amd64 contract output is stale; run go generate ./backend/definitions")
+	}
+	for _, binding := range []string{
+		"func rtgX8664DirectMove(",
+		"func rtgX8664DirectLoadU8(",
+		"func rtgX8664DirectJumpCondition(",
+		"func rtgX8664DirectCopyBytes(",
+		"func rtgX8664PatchRelocations(",
+	} {
+		if !containsText(string(checkedContract), binding) {
+			t.Errorf("generated amd64 contract is missing semantic binding %s", binding)
+		}
+	}
+	prepared := GeneratePreparedBackend(resolved, "linux/amd64")
+	if !prepared.Ok {
+		t.Fatalf("generate prepared amd64 backend: %#v", prepared.Diagnostics)
+	}
+	if !containsText(string(prepared.Source), "func rtgX8664DirectMove(") {
+		t.Error("prepared amd64 backend omitted the direct emitter contract")
+	}
+	if containsText(string(prepared.Source), directEmitterV1Schema) {
+		t.Error("prepared amd64 backend retained the direct emitter schema as runtime data")
 	}
 }
 
@@ -129,7 +184,7 @@ func TestArmDefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 	if len(resolved.Targets) != 1 || resolved.Targets[0].Descriptor.Name != "linux/arm" {
 		t.Fatalf("targets = %#v, want linux/arm", resolved.Targets)
 	}
-	generated := GenerateProductionArchitectureBackend(resolved, "arm", "main")
+	generated := GenerateCheckedInArchitectureAlgorithms(resolved, "arm", "main")
 	if !generated.Ok {
 		t.Fatalf("generate architecture: %#v", generated.Diagnostics)
 	}
@@ -146,7 +201,30 @@ func TestArmDefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 		"func renvoArmAsmCallLabel(",
 	} {
 		if !containsText(string(checkedIn), binding) {
-			t.Errorf("generated ARM output is missing production binding %s", binding)
+			t.Errorf("generated ARM output is missing algorithm binding %s", binding)
+		}
+	}
+	contract := GenerateCheckedInArchitectureContract(resolved, "arm", "main")
+	if !contract.Ok {
+		t.Fatalf("generate ARM contract: %#v", contract.Diagnostics)
+	}
+	checkedContract, err := os.ReadFile("../../backend/rtg_arm_contract_generated.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(contract.Source, checkedContract) {
+		t.Fatal("checked-in ARM contract output is stale; run go generate ./backend/definitions")
+	}
+	for _, binding := range []string{
+		"func rtgArmDirectMove(",
+		"func rtgArmDirectAddress(",
+		"func rtgArmDirectLoadI8(",
+		"func rtgArmDirectJumpCondition(",
+		"func rtgArmDirectCopyBytes(",
+		"func rtgArmPatchRelocations(",
+	} {
+		if !containsText(string(checkedContract), binding) {
+			t.Errorf("generated ARM contract is missing semantic binding %s", binding)
 		}
 	}
 }
@@ -163,7 +241,7 @@ func Test386DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 	if len(resolved.Targets) != 2 {
 		t.Fatalf("target count = %d, want 2", len(resolved.Targets))
 	}
-	generated := GenerateProductionArchitectureBackend(resolved, "x86_32", "main")
+	generated := GenerateCheckedInArchitectureAlgorithms(resolved, "x86_32", "main")
 	if !generated.Ok {
 		t.Fatalf("generate architecture: %#v", generated.Diagnostics)
 	}
@@ -180,7 +258,30 @@ func Test386DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 		"func renvoAsmMovArg1Rax(",
 	} {
 		if !containsText(string(checkedIn), binding) {
-			t.Errorf("generated 386 output is missing production binding %s", binding)
+			t.Errorf("generated 386 output is missing algorithm binding %s", binding)
+		}
+	}
+	contract := GenerateCheckedInArchitectureContract(resolved, "x86_32", "main")
+	if !contract.Ok {
+		t.Fatalf("generate 386 contract: %#v", contract.Diagnostics)
+	}
+	checkedContract, err := os.ReadFile("../../backend/rtg_386_contract_generated.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(contract.Source, checkedContract) {
+		t.Fatal("checked-in 386 contract output is stale; run go generate ./backend/definitions")
+	}
+	for _, binding := range []string{
+		"func rtgX8632DirectMove(",
+		"func rtgX8632DirectAddress(",
+		"func rtgX8632DirectLoadI16(",
+		"func rtgX8632DirectJumpCondition(",
+		"func rtgX8632DirectCopyBytes(",
+		"func rtgX8632PatchRelocations(",
+	} {
+		if !containsText(string(checkedContract), binding) {
+			t.Errorf("generated 386 contract is missing semantic binding %s", binding)
 		}
 	}
 }
@@ -197,7 +298,21 @@ func TestWasm32DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 	if len(resolved.Targets) != 3 {
 		t.Fatalf("target count = %d, want wasi/wasm32, browser/wasm32, and vm/vm32", len(resolved.Targets))
 	}
-	generated := GenerateProductionArchitectureBackend(resolved, "wasm32", "main")
+	for _, target := range resolved.Targets {
+		wantISA := "wasm32"
+		if target.Descriptor.Name == "vm/vm32" {
+			wantISA = "vm32"
+		}
+		if target.Descriptor.ISA != wantISA {
+			t.Errorf("%s frontend architecture = %q, want %q",
+				target.Descriptor.Name, target.Descriptor.ISA, wantISA)
+		}
+		if target.Arch.Name != "vm32" {
+			t.Errorf("%s emitter architecture = %q, want vm32",
+				target.Descriptor.Name, target.Arch.Name)
+		}
+	}
+	generated := GenerateCheckedInArchitectureAlgorithms(resolved, "vm32", "main")
 	if !generated.Ok {
 		t.Fatalf("generate architecture: %#v", generated.Diagnostics)
 	}
@@ -215,8 +330,34 @@ func TestWasm32DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 		"func renvoWasiWasm32ImportSection(",
 	} {
 		if !containsText(string(checkedIn), binding) {
-			t.Errorf("generated wasm32 output is missing production binding %s", binding)
+			t.Errorf("generated VM32 output is missing algorithm binding %s", binding)
 		}
+	}
+	contract := GenerateCheckedInArchitectureContract(resolved, "vm32", "main")
+	if !contract.Ok {
+		t.Fatalf("generate VM32 contract: %#v", contract.Diagnostics)
+	}
+	checkedContract, err := os.ReadFile("../../backend/rtg_vm32_contract_generated.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(contract.Source, checkedContract) {
+		t.Fatal("checked-in VM32 contract output is stale; run go generate ./backend/definitions")
+	}
+	for _, binding := range []string{
+		"func rtgWasm32DirectMove(",
+		"func rtgWasm32DirectAddress(",
+		"func rtgWasm32DirectLoadI8(",
+		"func rtgWasm32DirectJumpCondition(",
+		"func rtgWasm32DirectCopyBytes(",
+		"func rtgWasm32PatchRelocations(",
+	} {
+		if !containsText(string(checkedContract), binding) {
+			t.Errorf("generated VM32 contract is missing semantic binding %s", binding)
+		}
+	}
+	if containsText(string(checkedContract), "func rtgWasm32DirectCallIndirect(") {
+		t.Error("vm32 contract generated explicitly rejected call_indirect operation")
 	}
 }
 
@@ -228,6 +369,14 @@ func TestCheckedInArchitectureKernelOutput(t *testing.T) {
 	}
 	if !bytes.Equal(generated.Source, checkedIn) {
 		t.Fatal("checked-in RTG architecture kernel is stale; run go generate ./backend/definitions")
+	}
+	inactive := GenerateInactiveArchitectureKernel("main")
+	checkedInactive, err := os.ReadFile("../../backend/compiler_rtg_inactive_impl.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(inactive.Source, checkedInactive) {
+		t.Fatal("checked-in inactive RTG architecture kernel is stale; run go generate ./backend/definitions")
 	}
 }
 

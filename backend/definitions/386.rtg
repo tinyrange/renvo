@@ -5,6 +5,538 @@ implements direct_emitter_v1
 # This closed definition owns the complete 32-bit x86 production encoder and
 # its Linux and Windows target compositions.
 go backend {
+	func x86_32ELFAppend16(out []byte, value int) []byte {
+		return append(out, byte(value), byte(value>>8))
+	}
+
+	func x86_32ELFAppend32(out []byte, value int) []byte {
+		return append(out, byte(value), byte(value>>8), byte(value>>16), byte(value>>24))
+	}
+
+	func x86_32LinuxEntry(out *RTGEmitter, parameterCount int, stateOffset int) bool {
+		_ = stateOffset
+		if parameterCount == 0 {
+			return true
+		}
+		if parameterCount < 0 || parameterCount > 2 {
+			return false
+		}
+		argsOffset := out.ReserveBSS(32768, 16)
+		environmentOffset := out.ReserveBSS(32768, 16)
+		environmentLengthOffset := out.ReserveBSS(8, 8)
+		argumentLoop := out.NewLabel()
+		argumentLength := out.NewLabel()
+		argumentLengthDone := out.NewLabel()
+		argumentsDone := out.NewLabel()
+		environmentLoop := out.NewLabel()
+		environmentLength := out.NewLabel()
+		environmentLengthDone := out.NewLabel()
+		environmentDone := out.NewLabel()
+
+		out.Text("\x8b\x04\x24\x89\xe6\x83\xc6\x04")
+		renvo386AsmMovRegPCRel(out, 7, argsOffset, RTGRelocationAbsoluteBSS)
+		out.Text("\x31\xc9")
+		out.Mark(argumentLoop)
+		out.Text("\x39\xc1")
+		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x8d}, argumentsDone)
+		out.Text("\x8b\x14\x8e\x89\x17\x31\xdb")
+		out.Mark(argumentLength)
+		out.Text("\x80\x3c\x1a\x00")
+		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, argumentLengthDone)
+		out.Text("\x43")
+		x86_32Jump(out, argumentLength)
+		out.Mark(argumentLengthDone)
+		out.Text("\x89\x5f\x08\x83\xc7\x10\x41")
+		x86_32Jump(out, argumentLoop)
+		out.Mark(argumentsDone)
+
+		out.Text("\x8d\x74\x86\x08")
+		renvo386AsmMovRegPCRel(out, 7, environmentOffset, RTGRelocationAbsoluteBSS)
+		out.Text("\x31\xc9")
+		out.Mark(environmentLoop)
+		out.Text("\x8b\x14\x8e\x85\xd2")
+		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, environmentDone)
+		out.Text("\x89\x17\x31\xdb")
+		out.Mark(environmentLength)
+		out.Text("\x80\x3c\x1a\x00")
+		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, environmentLengthDone)
+		out.Text("\x43")
+		x86_32Jump(out, environmentLength)
+		out.Mark(environmentLengthDone)
+		out.Text("\x89\x5f\x08\x83\xc7\x10\x41")
+		x86_32Jump(out, environmentLoop)
+		out.Mark(environmentDone)
+		renvo386AsmMovRegPCRel(out, 6, environmentLengthOffset, RTGRelocationAbsoluteBSS)
+		out.Uint16(0x0e89)
+
+		renvo386AsmMovRegPCRel(out, 3, argsOffset, RTGRelocationAbsoluteBSS)
+		out.Text("\x89\xc6\x89\xc2")
+		renvo386AsmMovRegPCRel(out, 1, environmentOffset, RTGRelocationAbsoluteBSS)
+		renvo386AsmMovRegPCRel(out, 0, environmentLengthOffset, RTGRelocationAbsoluteBSS)
+		out.Uint16(0x008b)
+		out.Text("\x89\xc7")
+		return true
+	}
+
+	func x86_32WindowsEntry(out *RTGEmitter, parameterCount int, stateOffset int) bool {
+		_ = stateOffset
+		if parameterCount == 0 {
+			return true
+		}
+		if parameterCount < 0 || parameterCount > 2 {
+			return false
+		}
+		argsOffset := out.ReserveBSS(32768, 16)
+		argsTextOffset := out.ReserveBSS(32768, 16)
+		argsLengthOffset := out.ReserveBSS(8, 8)
+		environmentOffset := out.ReserveBSS(32768, 16)
+		environmentLengthOffset := out.ReserveBSS(8, 8)
+		base := out.Len()
+		out.Text("\xff\x15\x00\x00\x00\x00\x89\xc6\xbf\x00\x00\x00\x00\xb8\x00\x00\x00\x00\x89\xc2\x31\xdb\x80\x3e\x00\x0f\x84\x75\x00\x00\x00\x80\x3e\x20\x0f\x84\x09\x00\x00\x00\x80\x3e\x09\x0f\x85\x06\x00\x00\x00\x46\xe9\xdf\xff\xff\xff\x89\x17\x31\xc9\x31\xed\x8a\x06\x3c\x00\x0f\x84\x34\x00\x00\x00\x3c\x22\x0f\x85\x09\x00\x00\x00\x83\xf5\x01\x46\xe9\xe5\xff\xff\xff\x83\xfd\x00\x0f\x85\x10\x00\x00\x00\x3c\x20\x0f\x84\x12\x00\x00\x00\x3c\x09\x0f\x84\x0a\x00\x00\x00\x88\x02\x46\x42\x41\xe9\xc2\xff\xff\xff\xc6\x02\x00\x42\x89\x4f\x08\x83\xc7\x10\x43\x3c\x00\x0f\x84\x06\x00\x00\x00\x46\xe9\x82\xff\xff\xff\x89\xd8\xa3\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x89\xc6\xbf\x00\x00\x00\x00\x31\xdb\x80\x3e\x00\x0f\x84\x23\x00\x00\x00\x89\x37\x31\xc9\x80\x3c\x0e\x00\x0f\x84\x06\x00\x00\x00\x41\xe9\xf0\xff\xff\xff\x89\x4f\x08\x01\xce\x46\x83\xc7\x10\x43\xe9\xd4\xff\xff\xff\x89\xd8\xa3\x00\x00\x00\x00\xbb\x00\x00\x00\x00\x8b\x35\x00\x00\x00\x00\x89\xf2\xb9\x00\x00\x00\x00\xa1\x00\x00\x00\x00\x89\xc7")
+		out.AbsoluteReloc(base+2, 7, RTGRelocationImport)
+		out.AbsoluteReloc(base+9, argsOffset, RTGRelocationAbsoluteBSS)
+		out.AbsoluteReloc(base+14, argsTextOffset, RTGRelocationAbsoluteBSS)
+		out.AbsoluteReloc(base+151, argsLengthOffset, RTGRelocationAbsoluteBSS)
+		out.AbsoluteReloc(base+157, 9, RTGRelocationImport)
+		out.AbsoluteReloc(base+164, environmentOffset, RTGRelocationAbsoluteBSS)
+		out.AbsoluteReloc(base+217, environmentLengthOffset, RTGRelocationAbsoluteBSS)
+		out.AbsoluteReloc(base+222, argsOffset, RTGRelocationAbsoluteBSS)
+		out.AbsoluteReloc(base+228, argsLengthOffset, RTGRelocationAbsoluteBSS)
+		out.AbsoluteReloc(base+235, environmentOffset, RTGRelocationAbsoluteBSS)
+		out.AbsoluteReloc(base+240, environmentLengthOffset, RTGRelocationAbsoluteBSS)
+		return true
+	}
+
+	func x86_32ELFPatchAbsoluteRelocations(a *RTGEmitter, codeOffset int, dataOffset int, bssOffset int) {
+		for i := 0; i < a.AbsoluteRelocationCount(); i++ {
+			at := a.AbsoluteRelocationOffset(i)
+			addend := a.AbsoluteRelocationAddend(i)
+			kind := a.AbsoluteRelocationKind(i)
+			target := dataOffset + addend
+			if kind == RTGRelocationAbsoluteBSS {
+				target = bssOffset + addend
+			}
+			a.PatchUint32(at, target-(codeOffset+at-3))
+		}
+	}
+
+	func x86_32ELF32Image(a *RTGEmitter) []byte {
+		codeOffset := 116
+		code := a.Code()
+		data := a.Data()
+		dataOffset := codeOffset + len(code)
+		fileSize := dataOffset + len(data)
+		bssOffset := RTGAlignValue(fileSize, 4096)
+		x86_32ELFPatchAbsoluteRelocations(a, codeOffset, dataOffset, bssOffset)
+		code = a.Code()
+		var out []byte
+		out = append(out, 0x7f, 'E', 'L', 'F', 1, 1, 1, 0)
+		for len(out) < 16 { out = append(out, 0) }
+		out = x86_32ELFAppend16(out, 3)
+		out = x86_32ELFAppend16(out, 3)
+		out = x86_32ELFAppend32(out, 1)
+		out = x86_32ELFAppend32(out, codeOffset)
+		out = x86_32ELFAppend32(out, 52)
+		out = x86_32ELFAppend32(out, 0)
+		out = x86_32ELFAppend32(out, 0)
+		out = x86_32ELFAppend16(out, 52)
+		out = x86_32ELFAppend16(out, 32)
+		out = x86_32ELFAppend16(out, 2)
+		out = x86_32ELFAppend16(out, 0)
+		out = x86_32ELFAppend16(out, 0)
+		out = x86_32ELFAppend16(out, 0)
+		out = x86_32ELFAppend32(out, 1)
+		out = x86_32ELFAppend32(out, 0)
+		out = x86_32ELFAppend32(out, 0)
+		out = x86_32ELFAppend32(out, 0)
+		out = x86_32ELFAppend32(out, fileSize)
+		out = x86_32ELFAppend32(out, fileSize)
+		out = x86_32ELFAppend32(out, 5)
+		out = x86_32ELFAppend32(out, 4096)
+		out = x86_32ELFAppend32(out, 1)
+		out = x86_32ELFAppend32(out, bssOffset)
+		out = x86_32ELFAppend32(out, bssOffset)
+		out = x86_32ELFAppend32(out, bssOffset)
+		out = x86_32ELFAppend32(out, 0)
+		out = x86_32ELFAppend32(out, a.BSSSize())
+		out = x86_32ELFAppend32(out, 6)
+		out = x86_32ELFAppend32(out, 4096)
+		out = append(out, code...)
+		out = append(out, data...)
+		return out
+	}
+
+	type x86_32PELayout struct {
+		importRVA int
+		importSize int
+		iatRVA int
+		iatSize int
+		iat []int
+	}
+
+	func x86_32PEPut16(out []byte, at int, value int) {
+		out[at] = byte(value)
+		out[at+1] = byte(value >> 8)
+	}
+
+	func x86_32PEPut32(out []byte, at int, value int) {
+		out[at] = byte(value)
+		out[at+1] = byte(value >> 8)
+		out[at+2] = byte(value >> 16)
+		out[at+3] = byte(value >> 24)
+	}
+
+	func x86_32PEUntil(out []byte, size int) []byte {
+		for len(out) < size {
+			out = append(out, 0)
+		}
+		return out
+	}
+
+	func x86_32PEString(out []byte, value string) []byte {
+		for i := 0; i < len(value); i++ {
+			out = append(out, value[i])
+		}
+		return append(out, 0)
+	}
+
+	func x86_32PEImportName(id int) string {
+		if id == 1 { return "CreateFileA" }
+		if id == 2 { return "CloseHandle" }
+		if id == 3 { return "ReadFile" }
+		if id == 4 { return "WriteFile" }
+		if id == 5 { return "SetFilePointer" }
+		if id == 6 { return "GetStdHandle" }
+		if id == 7 { return "GetCommandLineA" }
+		if id == 9 { return "GetEnvironmentStringsA" }
+		return "ExitProcess"
+	}
+
+	func x86_32PEImportEntry(data []byte, layout *x86_32PELayout, dataRVA int, iltAt int, iatAt int, slot int, id int, name string) []byte {
+		nameAt := len(data)
+		data = append(data, 0, 0)
+		data = x86_32PEString(data, name)
+		if len(data)&1 != 0 {
+			data = append(data, 0)
+		}
+		nameRVA := dataRVA + nameAt
+		x86_32PEPut32(data, iltAt+slot*4, nameRVA)
+		x86_32PEPut32(data, iatAt+slot*4, nameRVA)
+		layout.iat[id] = dataRVA + iatAt + slot*4
+		return data
+	}
+
+	func x86_32PEBuildImports(out *RTGEmitter, data []byte, dataRVA int) ([]byte, x86_32PELayout) {
+		var layout x86_32PELayout
+		staticCount := out.StaticImportCount()
+		importAt := RTGAlignValue(len(data), 4)
+		data = x86_32PEUntil(data, importAt+(staticCount+2)*20)
+		iltAt := len(data)
+		data = x86_32PEUntil(data, iltAt+40)
+		iatAt := len(data)
+		data = x86_32PEUntil(data, iatAt+40)
+		customAt := len(data)
+		data = x86_32PEUntil(data, customAt+staticCount*16)
+		layout.iat = make([]int, 10+staticCount)
+		for id := 1; id <= 9; id++ {
+			data = x86_32PEImportEntry(data, &layout, dataRVA, iltAt, iatAt, id-1, id, x86_32PEImportName(id))
+		}
+		for i := 0; i < staticCount; i++ {
+			customILT := customAt + i*16
+			customIAT := customILT + 8
+			data = x86_32PEImportEntry(data, &layout, dataRVA, customILT, customIAT, 0, 10+i, out.StaticImportName(i))
+		}
+		dllAt := len(data)
+		data = x86_32PEString(data, "kernel32.dll")
+		x86_32PEPut32(data, importAt, dataRVA+iltAt)
+		x86_32PEPut32(data, importAt+12, dataRVA+dllAt)
+		x86_32PEPut32(data, importAt+16, dataRVA+iatAt)
+		for i := 0; i < staticCount; i++ {
+			customILT := customAt + i*16
+			customIAT := customILT + 8
+			dllAt = len(data)
+			data = x86_32PEString(data, out.StaticImportDLL(i))
+			descriptor := importAt + (i+1)*20
+			x86_32PEPut32(data, descriptor, dataRVA+customILT)
+			x86_32PEPut32(data, descriptor+12, dataRVA+dllAt)
+			x86_32PEPut32(data, descriptor+16, dataRVA+customIAT)
+		}
+		layout.importRVA = dataRVA + importAt
+		layout.importSize = len(data) - importAt
+		layout.iatRVA = dataRVA + iatAt
+		layout.iatSize = customAt + staticCount*16 - iatAt
+		return data, layout
+	}
+
+	func x86_32PEPatch(out *RTGEmitter, dataRVA int, dataSize int, layout x86_32PELayout) {
+		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
+			at := out.AbsoluteRelocationOffset(i)
+			addend := out.AbsoluteRelocationAddend(i)
+			kind := out.AbsoluteRelocationKind(i)
+			target := dataRVA + addend
+			if kind == RTGRelocationAbsoluteBSS {
+				target = dataRVA + dataSize + addend
+			} else if kind == RTGRelocationImport {
+				if addend > 0 && addend < len(layout.iat) {
+					target = layout.iat[addend]
+				}
+			}
+			out.PatchUint32(at, 0x400000+target)
+		}
+	}
+
+	func x86_32PESection(out []byte, name string, virtualSize int, rva int, rawSize int, rawAt int, flags int) []byte {
+		start := len(out)
+		out = x86_32PEUntil(out, start+40)
+		for i := 0; i < len(name); i++ {
+			out[start+i] = name[i]
+		}
+		x86_32PEPut32(out, start+8, virtualSize)
+		x86_32PEPut32(out, start+12, rva)
+		x86_32PEPut32(out, start+16, rawSize)
+		x86_32PEPut32(out, start+20, rawAt)
+		x86_32PEPut32(out, start+36, flags)
+		return out
+	}
+
+	func x86_32PEHeader(textRaw int, textSize int, dataRVA int, dataRaw int, dataSize int, layout x86_32PELayout, subsystem int) []byte {
+		out := make([]byte, 0, 512)
+		out = x86_32PEUntil(out, 512)
+		x86_32PEPut16(out, 0, 0x5a4d)
+		x86_32PEPut32(out, 0x3c, 0x80)
+		pe := 0x80
+		x86_32PEPut32(out, pe, 0x00004550)
+		x86_32PEPut16(out, pe+4, 0x014c)
+		x86_32PEPut16(out, pe+6, 2)
+		x86_32PEPut16(out, pe+20, 0xe0)
+		x86_32PEPut16(out, pe+22, 0x0102)
+		opt := pe + 24
+		x86_32PEPut16(out, opt, 0x10b)
+		x86_32PEPut32(out, opt+4, textRaw)
+		x86_32PEPut32(out, opt+8, dataRaw)
+		x86_32PEPut32(out, opt+16, 0x1000)
+		x86_32PEPut32(out, opt+20, 0x1000)
+		x86_32PEPut32(out, opt+24, dataRVA)
+		x86_32PEPut32(out, opt+28, 0x400000)
+		x86_32PEPut32(out, opt+32, 0x1000)
+		x86_32PEPut32(out, opt+36, 0x200)
+		x86_32PEPut16(out, opt+40, 4)
+		x86_32PEPut16(out, opt+48, 4)
+		x86_32PEPut32(out, opt+56, RTGAlignValue(dataRVA+dataSize, 0x1000))
+		x86_32PEPut32(out, opt+60, 0x200)
+		x86_32PEPut16(out, opt+68, subsystem)
+		x86_32PEPut16(out, opt+70, 0x100)
+		x86_32PEPut32(out, opt+72, 0x100000)
+		x86_32PEPut32(out, opt+76, 0x1000)
+		x86_32PEPut32(out, opt+80, 0x100000)
+		x86_32PEPut32(out, opt+84, 0x1000)
+		x86_32PEPut32(out, opt+92, 16)
+		x86_32PEPut32(out, opt+104, layout.importRVA)
+		x86_32PEPut32(out, opt+108, layout.importSize)
+		x86_32PEPut32(out, opt+192, layout.iatRVA)
+		x86_32PEPut32(out, opt+196, layout.iatSize)
+		out = out[:opt+224]
+		out = x86_32PESection(out, ".text", textSize, 0x1000, textRaw, 0x200, 0x60000020)
+		out = x86_32PESection(out, ".data", dataSize, dataRVA, dataRaw, 0x200+textRaw, 0xc0000040)
+		return x86_32PEUntil(out, 0x200)
+	}
+
+	func x86_32PE32Image(out *RTGEmitter) []byte {
+		code := out.Code()
+		for len(code)%4 != 0 {
+			code = append(code, 0)
+		}
+		out.SetCode(code)
+		textSize := len(code)
+		textRaw := RTGAlignValue(textSize, 0x200)
+		dataRVA := RTGAlignValue(0x1000+textSize, 0x1000)
+		data, layout := x86_32PEBuildImports(out, out.Data(), dataRVA)
+		out.SetData(data)
+		x86_32PEPatch(out, dataRVA, len(data), layout)
+		dataRaw := RTGAlignValue(len(data), 0x200)
+		dataSize := len(data) + out.BSSSize()
+		image := x86_32PEHeader(textRaw, textSize, dataRVA, dataRaw, dataSize, layout, out.WindowsSubsystem())
+		image = append(image, out.Code()...)
+		image = x86_32PEUntil(image, 0x200+textRaw)
+		image = append(image, data...)
+		return x86_32PEUntil(image, 0x200+textRaw+dataRaw)
+	}
+
+	func x86_32WindowsExit(out *RTGEmitter, status RTGRegister) {
+		out.AppendByte(0x50 + status.Code)
+		out.Bytes2(0xff, 0x15)
+		at := out.Len()
+		out.Int32(0)
+		out.AbsoluteReloc(at, 8, RTGRelocationImport)
+	}
+
+	func x86_32WindowsStaticCall(out *RTGEmitter, importID int, wordCount int) {
+		out.Bytes2(0xff, 0x15)
+		at := out.Len()
+		out.Int32(0)
+		out.AbsoluteReloc(at, importID, RTGRelocationImport)
+	}
+
+	func x86_32WindowsCallImport(out *RTGEmitter, importID int) {
+		out.Bytes2(0xff, 0x15)
+		at := out.Len()
+		out.Int32(0)
+		out.AbsoluteReloc(at, importID, RTGRelocationImport)
+	}
+
+	func x86_32WindowsRuntimeReadWrite(
+		out *RTGEmitter, write bool, positional bool,
+	) {
+		helper := out.NewLabel()
+		after := out.NewLabel()
+		countOffset := out.ReserveBSS(16, 4)
+		base := out.Len()
+		x86_32Relative(out, 0xe9, after)
+		out.Mark(helper)
+		template := "\x83\xfb\x00\x0f\x84\x05\x00\x00\x00\xe9\x0a\x00\x00\x00\x6a\xf6\xff\x15\x00\x00\x00\x00\x89\xc3\x83\xf9\x00\x0f\x8c\x49\x00\x00\x00\x51\x52\x6a\x01\x6a\x00\x6a\x00\x53\xff\x15\x00\x00\x00\x00\xa3\x00\x00\x00\x00\x5a\x59\x51\x52\x6a\x00\x6a\x00\x51\x53\xff\x15\x00\x00\x00\x00\x5a\x59\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x2d\x00\x00\x00\xa1\x00\x00\x00\x00\xe9\x26\x00\x00\x00\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x06\x00\x00\x00\xa1\x00\x00\x00\x00\xc3\x6a\xff\x58\xc3\x6a\xff\x58\xa3\x00\x00\x00\x00\x6a\x00\x6a\x00\xa1\x00\x00\x00\x00\x50\x53\xff\x15\x00\x00\x00\x00\xa1\x00\x00\x00\x00\xc3"
+		relocations := "\x17\x08\x31\x07\x36\x01\x46\x07\x4f\x00\x58\x05\x66\x00\x72\x00\x7b\x05\x89\x00\x96\x00\x9f\x01\xa7\x07\xac\x00"
+		if write {
+			template = "\x83\xfb\x01\x0f\x84\x0e\x00\x00\x00\x83\xfb\x02\x0f\x84\x14\x00\x00\x00\xe9\x19\x00\x00\x00\x6a\xf5\xff\x15\x00\x00\x00\x00\x89\xc3\xe9\x0a\x00\x00\x00\x6a\xf4\xff\x15\x00\x00\x00\x00\x89\xc3\x83\xf9\x00\x0f\x8c\x49\x00\x00\x00\x51\x52\x6a\x01\x6a\x00\x6a\x00\x53\xff\x15\x00\x00\x00\x00\xa3\x00\x00\x00\x00\x5a\x59\x51\x52\x6a\x00\x6a\x00\x51\x53\xff\x15\x00\x00\x00\x00\x5a\x59\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x2d\x00\x00\x00\xa1\x00\x00\x00\x00\xe9\x26\x00\x00\x00\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x06\x00\x00\x00\xa1\x00\x00\x00\x00\xc3\x6a\xff\x58\xc3\x6a\xff\x58\xa3\x00\x00\x00\x00\x6a\x00\x6a\x00\xa1\x00\x00\x00\x00\x50\x53\xff\x15\x00\x00\x00\x00\xa1\x00\x00\x00\x00\xc3"
+			relocations = "\x20\x08\x2f\x08\x49\x07\x4e\x01\x5e\x07\x67\x00\x70\x06\x7e\x00\x8a\x00\x93\x06\xa1\x00\xae\x00\xb7\x01\xbf\x07\xc4\x00"
+		}
+		out.Text(template)
+		for i := 0; i < len(relocations); i += 2 {
+			at := base + int(relocations[i])
+			kind := int(relocations[i+1])
+			if kind < 2 {
+				out.AbsoluteReloc(at, countOffset+kind*8, RTGRelocationAbsoluteBSS)
+			} else {
+				out.AbsoluteReloc(at, kind-2, RTGRelocationImport)
+			}
+		}
+		out.Mark(after)
+		if !positional {
+			x86_32MoveImmediate(out, RTGRegister{Code: 1, Valid: true}, -1)
+		}
+		x86_32Relative(out, 0xe8, helper)
+	}
+
+	func x86_32WindowsTranslateCreateFileFlags(out *RTGEmitter) {
+		edx := RTGRegister{Code: 2, Valid: true}
+		ecx := RTGRegister{Code: 1, Valid: true}
+		notReadWrite := out.NewLabel()
+		accessDone := out.NewLabel()
+		noCreate := out.NewLabel()
+		createDone := out.NewLabel()
+
+		x86_32MoveImmediate(out, edx, -2147483648)
+		out.Bytes2(0xa8, 2)
+		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, notReadWrite)
+		x86_32MoveImmediate(out, edx, -1073741824)
+		x86_32Relative(out, 0xe9, accessDone)
+		out.Mark(notReadWrite)
+		out.Bytes2(0xa8, 1)
+		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, accessDone)
+		x86_32MoveImmediate(out, edx, 0x40000000)
+		out.Mark(accessDone)
+
+		x86_32MoveImmediate(out, ecx, 3)
+		out.Bytes2(0xa8, 64)
+		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, noCreate)
+		x86_32MoveImmediate(out, ecx, 4)
+		out.AppendByte(0xa9)
+		out.Int32(512)
+		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, createDone)
+		x86_32MoveImmediate(out, ecx, 2)
+		x86_32Relative(out, 0xe9, createDone)
+		out.Mark(noCreate)
+		out.AppendByte(0xa9)
+		out.Int32(512)
+		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, createDone)
+		x86_32MoveImmediate(out, ecx, 5)
+		out.Mark(createDone)
+	}
+
+	func x86_32WindowsRuntimeOpen(out *RTGEmitter) {
+		eax := RTGRegister{Code: 0, Valid: true}
+		esi := RTGRegister{Code: 6, Valid: true}
+		x86_32Move(out, eax, esi)
+		x86_32WindowsTranslateCreateFileFlags(out)
+		out.Bytes2(0x6a, 0)
+		out.AppendByte(0x68)
+		out.Int32(0x80)
+		out.AppendByte(0x51)
+		out.Bytes2(0x6a, 0)
+		out.Bytes2(0x6a, 3)
+		out.AppendByte(0x52)
+		out.AppendByte(0x53)
+		x86_32WindowsCallImport(out, 1)
+	}
+
+	func x86_32WindowsRuntimeClose(out *RTGEmitter) {
+		eax := RTGRegister{Code: 0, Valid: true}
+		failed := out.NewLabel()
+		done := out.NewLabel()
+		out.AppendByte(0x53)
+		x86_32WindowsCallImport(out, 2)
+		x86_32Test(out, eax, eax)
+		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, failed)
+		x86_32MoveImmediate(out, eax, 0)
+		x86_32Relative(out, 0xe9, done)
+		out.Mark(failed)
+		x86_32MoveImmediate(out, eax, -1)
+		out.Mark(done)
+	}
+
+	func x86_32WindowsRuntimeChmod(out *RTGEmitter) {
+		eax := RTGRegister{Code: 0, Valid: true}
+		ecx := RTGRegister{Code: 1, Valid: true}
+		failed := out.NewLabel()
+		done := out.NewLabel()
+		out.Bytes2(0x6a, 1)
+		out.Bytes2(0x6a, 0)
+		out.Bytes2(0x6a, 0)
+		out.AppendByte(0x53)
+		x86_32WindowsCallImport(out, 5)
+		x86_32MoveImmediate(out, ecx, -1)
+		x86_32Binary(out, 0x39, eax, ecx)
+		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, failed)
+		x86_32MoveImmediate(out, eax, 0)
+		x86_32Relative(out, 0xe9, done)
+		out.Mark(failed)
+		x86_32MoveImmediate(out, eax, -1)
+		out.Mark(done)
+	}
+
+	func x86_32WindowsRuntimeOperation(
+		out *RTGEmitter, operation int,
+	) bool {
+		if operation == RTGRuntimeRead {
+			x86_32WindowsRuntimeReadWrite(out, false, false)
+			return true
+		}
+		if operation == RTGRuntimeWrite {
+			x86_32WindowsRuntimeReadWrite(out, true, false)
+			return true
+		}
+		if operation == RTGRuntimeReadAt {
+			x86_32WindowsRuntimeReadWrite(out, false, true)
+			return true
+		}
+		if operation == RTGRuntimeWriteAt {
+			x86_32WindowsRuntimeReadWrite(out, true, true)
+			return true
+		}
+		if operation == RTGRuntimeOpen {
+			x86_32WindowsRuntimeOpen(out)
+			return true
+		}
+		if operation == RTGRuntimeClose {
+			x86_32WindowsRuntimeClose(out)
+			return true
+		}
+		if operation == RTGRuntimeChmod {
+			x86_32WindowsRuntimeChmod(out)
+			return true
+		}
+		return false
+	}
+
 	func renvo386AsmSecondaryDisp(a *RTGEmitter, disp int) {
 		if disp == 0 {
 			a.Int8(0x02)
@@ -318,6 +850,431 @@ go backend {
 	func renvoAsmMovArg1Rax(a *RTGEmitter) {
 		a.Uint16( 0xc689)
 	}
+
+	func x86_32Low3(reg RTGRegister) byte {
+		return byte(reg.Code & 7)
+	}
+
+	func x86_32ModRM(out *RTGEmitter, mode byte, reg byte, rm byte) {
+		out.AppendByte(int(mode<<6 | (reg&7)<<3 | rm&7))
+	}
+
+	func x86_32Memory(out *RTGEmitter, reg byte, address RTGAddress) {
+		base := address.Base
+		index := address.Index
+		displacement := address.Displacement
+		mode := byte(0)
+		if !base.Valid {
+			mode = 0
+		} else if displacement != 0 || x86_32Low3(base) == 5 {
+			mode = 2
+			if RTGSignedFits(int64(displacement), 8) {
+				mode = 1
+			}
+		}
+		needsSIB := index.Valid || base.Valid && x86_32Low3(base) == 4
+		if needsSIB {
+			x86_32ModRM(out, mode, reg, 4)
+			indexCode := byte(4)
+			if index.Valid {
+				indexCode = x86_32Low3(index)
+			}
+			baseCode := byte(5)
+			if base.Valid {
+				baseCode = x86_32Low3(base)
+			}
+			shift := byte(0)
+			if address.Scale == 2 {
+				shift = 1
+			} else if address.Scale == 4 {
+				shift = 2
+			} else if address.Scale == 8 {
+				shift = 3
+			}
+			out.AppendByte(int(shift<<6 | indexCode<<3 | baseCode))
+		} else if base.Valid {
+			x86_32ModRM(out, mode, reg, x86_32Low3(base))
+		} else {
+			x86_32ModRM(out, 0, reg, 5)
+		}
+		if !base.Valid || mode == 2 {
+			out.Int32(displacement)
+		} else if mode == 1 {
+			out.Int8(displacement)
+		}
+	}
+
+	func x86_32Move(
+		out *RTGEmitter, destination RTGRegister, source RTGRegister,
+	) {
+		out.Byte(0x89)
+		x86_32ModRM(out, 3, x86_32Low3(source), x86_32Low3(destination))
+	}
+
+	func x86_32Address(
+		out *RTGEmitter, destination RTGRegister, address RTGAddress,
+	) {
+		if RTGAddressValid(address) {
+			// CALL pushes the address immediately after its displacement. The
+			// relocation bias converts the ordinary field-end relative fixup
+			// into target+addend minus that saved address.
+			out.Byte(0xe8)
+			out.Int32(0)
+			out.AppendByte(int(0x58 + x86_32Low3(destination)))
+			out.Byte(0x81)
+			x86_32ModRM(out, 3, 0, x86_32Low3(destination))
+			at := out.Len()
+			out.Int32(address.Addend + 7)
+			RTGAddressRelocAt(out, address, at)
+			return
+		}
+		out.Byte(0x8d)
+		x86_32Memory(out, x86_32Low3(destination), address)
+	}
+
+	func x86_32LoadOpcode(
+		out *RTGEmitter,
+		destination RTGRegister,
+		address RTGAddress,
+		opcode int,
+	) {
+		if RTGAddressValid(address) {
+			x86_32Address(out, destination, address)
+			address = RTGAddress{Base: destination}
+		}
+		if opcode > 0xff {
+			out.AppendByte(int(byte(opcode >> 8)))
+		}
+		out.AppendByte(int(byte(opcode)))
+		x86_32Memory(out, x86_32Low3(destination), address)
+	}
+
+	func x86_32LoadNative(
+		out *RTGEmitter, destination RTGRegister, address RTGAddress,
+	) {
+		x86_32LoadOpcode(out, destination, address, 0x8b)
+	}
+
+	func x86_32LoadI32(
+		out *RTGEmitter, destination RTGRegister, address RTGAddress,
+	) {
+		x86_32LoadOpcode(out, destination, address, 0x8b)
+	}
+
+	func x86_32LoadU32(
+		out *RTGEmitter, destination RTGRegister, address RTGAddress,
+	) {
+		x86_32LoadOpcode(out, destination, address, 0x8b)
+	}
+
+	func x86_32LoadI16(
+		out *RTGEmitter, destination RTGRegister, address RTGAddress,
+	) {
+		x86_32LoadOpcode(out, destination, address, 0x0fbf)
+	}
+
+	func x86_32LoadU16(
+		out *RTGEmitter, destination RTGRegister, address RTGAddress,
+	) {
+		x86_32LoadOpcode(out, destination, address, 0x0fb7)
+	}
+
+	func x86_32LoadI8(
+		out *RTGEmitter, destination RTGRegister, address RTGAddress,
+	) {
+		x86_32LoadOpcode(out, destination, address, 0x0fbe)
+	}
+
+	func x86_32LoadU8(
+		out *RTGEmitter, destination RTGRegister, address RTGAddress,
+	) {
+		x86_32LoadOpcode(out, destination, address, 0x0fb6)
+	}
+
+	func x86_32StoreWidth(
+		out *RTGEmitter,
+		address RTGAddress,
+		source RTGRegister,
+		size int,
+	) {
+		if RTGAddressValid(address) {
+			x86_32Address(out, x86Scratch, address)
+			address = RTGAddress{Base: x86Scratch}
+		}
+		if size == 2 {
+			out.Byte(0x66)
+		}
+		if size == 1 {
+			out.Byte(0x88)
+		} else {
+			out.Byte(0x89)
+		}
+		x86_32Memory(out, x86_32Low3(source), address)
+	}
+
+	func x86_32StoreNative(
+		out *RTGEmitter, address RTGAddress, source RTGRegister,
+	) {
+		x86_32StoreWidth(out, address, source, 4)
+	}
+
+	func x86_32StoreU32(
+		out *RTGEmitter, address RTGAddress, source RTGRegister,
+	) {
+		x86_32StoreWidth(out, address, source, 4)
+	}
+
+	func x86_32StoreU16(
+		out *RTGEmitter, address RTGAddress, source RTGRegister,
+	) {
+		x86_32StoreWidth(out, address, source, 2)
+	}
+
+	func x86_32StoreU8(
+		out *RTGEmitter, address RTGAddress, source RTGRegister,
+	) {
+		x86_32StoreWidth(out, address, source, 1)
+	}
+
+	func x86_32Binary(
+		out *RTGEmitter,
+		opcode byte,
+		destination RTGRegister,
+		source RTGRegister,
+	) {
+		out.AppendByte(int(opcode))
+		x86_32ModRM(out, 3, x86_32Low3(source), x86_32Low3(destination))
+	}
+
+	func x86_32Add(
+		out *RTGEmitter, destination RTGRegister, source RTGRegister,
+	) {
+		x86_32Binary(out, 0x01, destination, source)
+	}
+
+	func x86_32Subtract(
+		out *RTGEmitter, destination RTGRegister, source RTGRegister,
+	) {
+		x86_32Binary(out, 0x29, destination, source)
+	}
+
+	func x86_32Multiply(
+		out *RTGEmitter, destination RTGRegister, source RTGRegister,
+	) {
+		out.Bytes2(0x0f, 0xaf)
+		x86_32ModRM(out, 3, x86_32Low3(destination), x86_32Low3(source))
+	}
+
+	func x86_32BitAnd(
+		out *RTGEmitter, destination RTGRegister, source RTGRegister,
+	) {
+		x86_32Binary(out, 0x21, destination, source)
+	}
+
+	func x86_32BitOr(
+		out *RTGEmitter, destination RTGRegister, source RTGRegister,
+	) {
+		x86_32Binary(out, 0x09, destination, source)
+	}
+
+	func x86_32BitXor(
+		out *RTGEmitter, destination RTGRegister, source RTGRegister,
+	) {
+		x86_32Binary(out, 0x31, destination, source)
+	}
+
+	func x86_32Compare(
+		out *RTGEmitter, left RTGRegister, right RTGRegister,
+	) {
+		x86_32Binary(out, 0x39, left, right)
+	}
+
+	func x86_32Test(
+		out *RTGEmitter, left RTGRegister, right RTGRegister,
+	) {
+		x86_32Binary(out, 0x85, left, right)
+	}
+
+	func x86_32Group(
+		out *RTGEmitter, opcode byte, selector byte, operand RTGRegister,
+	) {
+		out.AppendByte(int(opcode))
+		x86_32ModRM(out, 3, selector, x86_32Low3(operand))
+	}
+
+	func x86_32Increment(out *RTGEmitter, operand RTGRegister) {
+		x86_32Group(out, 0xff, 0, operand)
+	}
+
+	func x86_32Decrement(out *RTGEmitter, operand RTGRegister) {
+		x86_32Group(out, 0xff, 1, operand)
+	}
+
+	func x86_32ShiftImmediate(
+		out *RTGEmitter,
+		operand RTGRegister,
+		value byte,
+		selector byte,
+	) {
+		x86_32Group(out, 0xc1, selector, operand)
+		out.AppendByte(int(value))
+	}
+
+	func x86_32ShiftLeftImmediate(
+		out *RTGEmitter, operand RTGRegister, value byte,
+	) {
+		x86_32ShiftImmediate(out, operand, value, 4)
+	}
+
+	func x86_32ShiftRightUnsignedImmediate(
+		out *RTGEmitter, operand RTGRegister, value byte,
+	) {
+		x86_32ShiftImmediate(out, operand, value, 5)
+	}
+
+	func x86_32ShiftRightSignedImmediate(
+		out *RTGEmitter, operand RTGRegister, value byte,
+	) {
+		x86_32ShiftImmediate(out, operand, value, 7)
+	}
+
+	func x86_32Relative(out *RTGEmitter, opcode byte, label RTGLabel) {
+		out.AppendByte(int(opcode))
+		out.Rel32(label)
+	}
+
+	func x86_32Call(out *RTGEmitter, label RTGLabel) {
+		x86_32Relative(out, 0xe8, label)
+	}
+
+	func x86_32CallIndirect(out *RTGEmitter, operand RTGRegister) {
+		x86_32Group(out, 0xff, 2, operand)
+	}
+
+	func x86_32Jump(out *RTGEmitter, label RTGLabel) {
+		x86_32Relative(out, 0xe9, label)
+	}
+
+	func x86_32JumpCondition(
+		out *RTGEmitter, condition RTGCondition, label RTGLabel,
+	) {
+		out.Byte(0x0f)
+		out.AppendByte(int(condition.JumpOpcode))
+		out.Rel32(label)
+	}
+
+	func x86_32SetCondition(
+		out *RTGEmitter,
+		condition RTGCondition,
+		destination RTGRegister,
+	) {
+		out.Byte(0x0f)
+		out.AppendByte(int(condition.SetOpcode))
+		x86_32ModRM(out, 3, 0, 0)
+		out.Bytes2(0x0f, 0xb6)
+		x86_32ModRM(out, 3, x86_32Low3(destination), 0)
+	}
+
+	func x86_32Return(out *RTGEmitter) {
+		out.Byte(0xc3)
+	}
+
+	func x86_32Leave(out *RTGEmitter) {
+		out.Byte(0xc9)
+	}
+
+	func x86_32HostSyscall(out *RTGEmitter) {
+		out.Bytes2(0xcd, 0x80)
+	}
+
+	func x86_32MoveImmediate(
+		out *RTGEmitter, destination RTGRegister, value int64,
+	) {
+		if value == 0 {
+			x86_32Binary(out, 0x31, destination, destination)
+			return
+		}
+		out.AppendByte(int(byte(0xb8 + x86_32Low3(destination))))
+		RTGUint32(out, int(value))
+	}
+
+	func x86_32VariableShift(
+		out *RTGEmitter, direction RTGShiftDirection, signed bool,
+	) {
+		x86_32Binary(out, 0x87, x86Primary, x86Tertiary)
+		selector := byte(5)
+		if direction == RTGShiftLeft {
+			selector = 4
+		} else if signed {
+			selector = 7
+		}
+		x86_32Group(out, 0xd3, selector, x86Primary)
+	}
+
+	func x86_32SignedDivide(out *RTGEmitter, remainder bool) {
+		x86_32Move(out, x86Scratch, x86Primary)
+		x86_32Move(out, x86Primary, x86Tertiary)
+		out.Byte(0x99)
+		x86_32Group(out, 0xf7, 7, x86Scratch)
+		if remainder {
+			x86_32Move(out, x86Primary, x86Secondary)
+		}
+	}
+
+	func x86_32CopyBytes(out *RTGEmitter) {
+		destination := x86CopyDestination
+		source := x86CopySource
+		count := x86CopyCount
+		scratch := x86Scratch
+		forward := out.NewLabel()
+		done := out.NewLabel()
+		x86_32Compare(out, destination, source)
+		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x86}, forward)
+		x86_32Address(out, scratch, RTGAddress{
+			Base: source, Index: count, Scale: 1,
+		})
+		x86_32Compare(out, destination, scratch)
+		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x83}, forward)
+		x86_32Address(out, source, RTGAddress{
+			Base: source, Index: count, Scale: 1, Displacement: -1,
+		})
+		x86_32Address(out, destination, RTGAddress{
+			Base: destination, Index: count, Scale: 1, Displacement: -1,
+		})
+		out.Bytes4(0xfd, 0xf3, 0xa4, 0xfc)
+		x86_32Jump(out, done)
+		out.Mark(forward)
+		out.Bytes3(0xfc, 0xf3, 0xa4)
+		out.Mark(done)
+	}
+
+	func x86_32PatchRelocations(out *RTGEmitter) {
+		for i := 0; i < out.RelocationCount(); i++ {
+			at := out.RelocationOffset(i)
+			label := out.RelocationLabel(i)
+			target := out.LabelPosition(label)
+			if at < 0 || at+4 > len(out.Code()) || target < 0 {
+				continue
+			}
+			addend := RTGGet32At(out.Code(), at)
+			out.PatchUint32(at, target+addend-(at+4))
+		}
+	}
+
+	func x86_32FrameStart(out *RTGEmitter) int {
+		at := out.Len()
+		out.Bytes4(0xc8, 0, 0, 0)
+		return at
+	}
+
+	func x86_32FrameFinish(out *RTGEmitter, at int, stackUsed int) {
+		frame := (stackUsed + 7) & -8
+		if frame > 65528 {
+			frame = 65528
+		}
+		out.SetByteAt(at+1, byte(frame))
+		out.SetByteAt(at+2, byte(frame>>8))
+	}
 }
 
 arch x86_32 {
@@ -326,13 +1283,70 @@ arch x86_32 {
 	word_bits = 32
 	pointer_bits = 32
 	instruction_alignment = 1
+	patch_relocations = go x86_32PatchRelocations
 	registers gpr32 = [eax, ecx, edx, ebx, esp, ebp, esi, edi]
 	locations {
 		primary = eax
 		secondary = edx
 		tertiary = ecx
+		scratch = ebx
+		copy_destination = edi
+		copy_source = esi
+		copy_count = ecx
 		stack = esp
 		frame = ebp
+	}
+	conditions {
+		eq  0x94 0x84
+		ne  0x95 0x85
+		slt 0x9c 0x8c
+		sge 0x9d 0x8d
+		sle 0x9e 0x8e
+		sgt 0x9f 0x8f
+		ult 0x92 0x82
+		uge 0x93 0x83
+		ule 0x96 0x86
+		ugt 0x97 0x87
+	}
+	bind {
+		move = go x86_32Move
+		address = go x86_32Address
+		load.native = go x86_32LoadNative
+		load.i32 = go x86_32LoadI32
+		load.u32 = go x86_32LoadU32
+		load.i16 = go x86_32LoadI16
+		load.u16 = go x86_32LoadU16
+		load.i8 = go x86_32LoadI8
+		load.u8 = go x86_32LoadU8
+		store.native = go x86_32StoreNative
+		store.u32 = go x86_32StoreU32
+		store.u16 = go x86_32StoreU16
+		store.u8 = go x86_32StoreU8
+		add = go x86_32Add
+		subtract = go x86_32Subtract
+		multiply = go x86_32Multiply
+		bit_and = go x86_32BitAnd
+		bit_or = go x86_32BitOr
+		bit_xor = go x86_32BitXor
+		compare = go x86_32Compare
+		test = go x86_32Test
+		increment = go x86_32Increment
+		decrement = go x86_32Decrement
+		shift_left_immediate = go x86_32ShiftLeftImmediate
+		shift_right_unsigned_immediate = go x86_32ShiftRightUnsignedImmediate
+		shift_right_signed_immediate = go x86_32ShiftRightSignedImmediate
+		call = go x86_32Call
+		call_indirect = go x86_32CallIndirect
+		jump = go x86_32Jump
+		jump_condition = go x86_32JumpCondition
+		set_condition = go x86_32SetCondition
+		return = go x86_32Return
+		leave = go x86_32Leave
+		host_syscall = go x86_32HostSyscall
+		move_immediate = go x86_32MoveImmediate
+		variable_shift = go x86_32VariableShift
+		signed_divide = go x86_32SignedDivide
+		copy_bytes = go x86_32CopyBytes
 	}
 	exports {
 		renvo386AsmSecondaryDisp = go renvo386AsmSecondaryDisp
@@ -385,26 +1399,55 @@ arch x86_32 {
 	}
 }
 
-abi cdecl32 {
+abi renvo_x86_32 {
 	arch = x86_32
+	frame_start = go x86_32FrameStart
+	frame_finish = go x86_32FrameFinish
+	call_words = [ebx, esi, edx, ecx, eax, edi]
+	overflow_stride = 4
+	scalar_result = eax
+}
+
+abi cdecl32 {
+	internal = renvo_x86_32
 	arguments = [stack]
 	result = [eax, edx]
 	stack_alignment = 4
 }
 
 abi win32 {
-	arch = x86_32
+	internal = renvo_x86_32
 	arguments = [stack]
 	result = [eax, edx]
 	stack_alignment = 4
 }
 
 runtime linux_386 {
-	operations = [print, open, close, read, write, chmod]
+	emit_entry = go x86_32LinuxEntry
+
+	syscall {
+		number = eax
+		arguments = [ebx, ecx, edx, esi, edi, ebp]
+		result = eax
+		instruction = int80
+	}
+	operation read { number = 3 args = [fd, buffer, count] }
+	operation write { number = 4 args = [fd, buffer, count] }
+	operation read_at { number = 180 args = [fd, buffer, count, offset] }
+	operation write_at { number = 181 args = [fd, buffer, count, offset] }
+	operation open { number = 5 args = [path, flags, mode] }
+	operation close { number = 6 args = [fd] }
+	operation chmod { number = 94 args = [fd, mode] }
+	operation print { use = write args = [stderr, buffer, count] }
+	operation exit { number = 1 args = [status] noreturn = true }
 }
 
 runtime windows_386 {
-	operations = [print, open, close, read, write, chmod]
+	emit_entry = go x86_32WindowsEntry
+	emit_exit = go x86_32WindowsExit
+	emit_static_call = go x86_32WindowsStaticCall
+	emit_operation = go x86_32WindowsRuntimeOperation
+	operations = [print, open, close, read, write, read_at, write_at, chmod]
 }
 
 format elf32_386 {
@@ -412,6 +1455,8 @@ format elf32_386 {
 	address_bits = 32
 	kind = elf
 	machine = 3
+	code_offset = 116
+	image = go x86_32ELF32Image
 }
 
 format pe32_386 {
@@ -419,6 +1464,8 @@ format pe32_386 {
 	address_bits = 32
 	kind = pe
 	machine = 0x014c
+	code_offset = 0x1000
+	image = go x86_32PE32Image
 }
 
 target linux/386 {

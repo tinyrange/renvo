@@ -3,8 +3,11 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"flag"
 	"fmt"
+	"go/scanner"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -60,12 +63,13 @@ func main() {
 		digestSource.WriteString(name)
 		digestSource.WriteByte(0)
 		digestSource.Write(source)
-		out.WriteString("// source: backend/")
-		out.WriteString(name)
-		out.WriteByte('\n')
-		out.Write(source[:packageAt])
-		out.Write(source[packageAt+len("package main\n"):])
-		out.WriteByte('\n')
+		if !bytes.HasPrefix(source, []byte("//go:build renvo\n")) {
+			out.WriteString("// source: backend/")
+			out.WriteString(name)
+			out.WriteByte('\n')
+			out.Write(compactCompiledSource(source[packageAt+len("package main\n"):]))
+			out.WriteByte('\n')
+		}
 		indexText := strconv.Itoa(sourceIndex)
 		sourceNames.WriteString("\tif index == ")
 		sourceNames.WriteString(indexText)
@@ -140,6 +144,85 @@ func compilerSourceChunk(index int, chunk int) string {
 	if err := os.WriteFile(*sourcesOutput, sourceBundle.Bytes(), 0o644); err != nil {
 		fail(err)
 	}
+}
+
+func compactCompiledSource(source []byte) []byte {
+	files := token.NewFileSet()
+	file := files.AddFile("backend.go", files.Base(), len(source))
+	var scan scanner.Scanner
+	scan.Init(file, source, nil, scanner.ScanComments)
+	out := make([]byte, 0, len(source))
+	last := 0
+	for {
+		position, kind, literal := scan.Scan()
+		if kind == token.EOF {
+			break
+		}
+		if kind != token.COMMENT {
+			continue
+		}
+		start := file.Offset(position)
+		out = append(out, source[last:start]...)
+		newlines := 0
+		for i := 0; i < len(literal); i++ {
+			if literal[i] == '\n' {
+				out = append(out, '\n')
+				newlines++
+			}
+		}
+		if newlines == 0 {
+			out = append(out, ' ')
+		}
+		last = start + len(literal)
+	}
+	out = append(out, source[last:]...)
+	return removeCompiledIndentation(out)
+}
+
+func removeCompiledIndentation(source []byte) []byte {
+	out := make([]byte, 0, len(source))
+	state := byte(0)
+	quote := byte(0)
+	escaped := false
+	lineStart := true
+	for i := 0; i < len(source); i++ {
+		ch := source[i]
+		if lineStart && state == 0 && (ch == ' ' || ch == '\t' || ch == '\r') {
+			continue
+		}
+		if ch == '\n' && state == 0 {
+			for len(out) != 0 && (out[len(out)-1] == ' ' || out[len(out)-1] == '\t' ||
+				out[len(out)-1] == '\r') {
+				out = out[:len(out)-1]
+			}
+		}
+		out = append(out, ch)
+		if state == 0 {
+			if ch == '`' {
+				state = 2
+			} else if ch == '"' || ch == '\'' {
+				state = 1
+				quote = ch
+				escaped = false
+			}
+		} else if state == 1 {
+			if escaped {
+				escaped = false
+			} else if ch == '\\' {
+				escaped = true
+			} else if ch == quote {
+				state = 0
+			}
+		} else if ch == '`' {
+			state = 0
+		}
+		if ch == '\n' {
+			lineStart = state == 0
+		} else if lineStart {
+			lineStart = false
+		}
+	}
+	return out
 }
 
 func compressedChunks(source []byte) [][]byte {
@@ -255,15 +338,16 @@ func writeQuotedChunks(out *bytes.Buffer, source []byte) {
 		out.WriteString(`""`)
 		return
 	}
-	for start := 0; start < len(source); start += chunkSize {
+	encoded := base64.RawStdEncoding.EncodeToString(source)
+	for start := 0; start < len(encoded); start += chunkSize {
 		if start != 0 {
 			out.WriteByte('+')
 		}
 		end := start + chunkSize
-		if end > len(source) {
-			end = len(source)
+		if end > len(encoded) {
+			end = len(encoded)
 		}
-		out.WriteString(strconv.Quote(string(source[start:end])))
+		out.WriteString(strconv.Quote(encoded[start:end]))
 	}
 }
 

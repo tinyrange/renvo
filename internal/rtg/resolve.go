@@ -96,10 +96,11 @@ func ResolveDefinitions(parsed Document) ResolveResult {
 func resolveTarget(document Document, declaration Declaration) (ResolvedTarget, Diagnostic, bool) {
 	target := ResolvedTarget{Declaration: declaration}
 	target.Descriptor.Name = declaration.Name
-	target.Descriptor.OS = targetOS(declaration.Name)
-	if osName, found := fieldValue(document, declaration, "os"); found {
-		target.Descriptor.OS = valueName(osName)
+	osName, ok := requiredNameField(document, declaration, "os")
+	if !ok {
+		return target, resolveDiagnostic(document, declaration, "RTG-RESOLVE-015", "target "+declaration.Name+" is missing os"), false
 	}
+	target.Descriptor.OS = osName
 	target.Descriptor.Version = DescriptorVersion
 	target.Descriptor.Definition = document.Hash
 
@@ -133,6 +134,14 @@ func resolveTarget(document Document, declaration Declaration) (ResolvedTarget, 
 	target.Descriptor.ISA = archName
 	if alias, found := fieldValue(document, target.Arch, "alias"); found {
 		target.Descriptor.ISA = valueName(alias)
+	}
+	if frontendArch, found := fieldValue(document, declaration, "frontend_arch"); found {
+		target.Descriptor.ISA = valueName(frontendArch)
+		if target.Descriptor.ISA == "" {
+			diagnostic := resolveDiagnostic(document, declaration, "RTG-RESOLVE-021",
+				"target "+declaration.Name+" has invalid frontend_arch")
+			return target, diagnostic, false
+		}
 	}
 	target.Descriptor.WordBits, ok = integerField(document, target.Arch, "word_bits")
 	if !ok || target.Descriptor.WordBits != 8 && target.Descriptor.WordBits != 16 &&
@@ -340,15 +349,6 @@ func targetNameCollides(left TargetDescriptor, right TargetDescriptor) bool {
 		}
 	}
 	return false
-}
-
-func targetOS(name string) string {
-	for i := 0; i < len(name); i++ {
-		if name[i] == '/' {
-			return name[:i]
-		}
-	}
-	return ""
 }
 
 func hasMachineDeclaration(document Document) bool {

@@ -150,7 +150,7 @@ func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, []int32, bool) {
 	if !r.ok {
 		return nil, nil, false
 	}
-	out := make([]int32, 0, count*renvoTokenStride)
+	out := make([]int32, count*renvoTokenStride)
 	var lineBases []int32
 	start := 0
 	line := 0
@@ -161,28 +161,17 @@ func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, []int32, bool) {
 		delta := 0
 		size := 0
 		lineDelta := 0
-		if r.ok && r.pos < r.end && r.src[r.pos] < 128 {
+		if r.ok && r.pos+4 <= r.end &&
+			r.src[r.pos]|r.src[r.pos+1]|r.src[r.pos+2]|r.src[r.pos+3] < 128 {
 			kind = int(r.src[r.pos])
-			r.pos++
+			delta = int(r.src[r.pos+1])
+			size = int(r.src[r.pos+2])
+			lineDelta = int(r.src[r.pos+3])
+			r.pos += 4
 		} else {
 			kind = renvoUnitReadVar(&r)
-		}
-		if r.ok && r.pos < r.end && r.src[r.pos] < 128 {
-			delta = int(r.src[r.pos])
-			r.pos++
-		} else {
 			delta = renvoUnitReadVar(&r)
-		}
-		if r.ok && r.pos < r.end && r.src[r.pos] < 128 {
-			size = int(r.src[r.pos])
-			r.pos++
-		} else {
 			size = renvoUnitReadVar(&r)
-		}
-		if r.ok && r.pos < r.end && r.src[r.pos] < 128 {
-			lineDelta = int(r.src[r.pos])
-			r.pos++
-		} else {
 			lineDelta = renvoUnitReadVar(&r)
 		}
 		if !r.ok {
@@ -190,7 +179,7 @@ func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, []int32, bool) {
 		}
 		start = start + delta
 		line = line + lineDelta
-		if kind < 0 || kind > 255 || start < 0 || start > 0xffffff || size < 0 || line < 0 || start+size > len(text) {
+		if kind > 255 || start > 0xffffff || start+size > len(text) {
 			return nil, nil, false
 		}
 		if kind == renvoTokOp {
@@ -200,8 +189,7 @@ func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, []int32, bool) {
 		} else if size > 0xffff {
 			return nil, nil, false
 		}
-		base := len(out)
-		out = out[:base+renvoTokenStride]
+		base := i * renvoTokenStride
 		highBits := size >> 8 << 24
 		if kind == renvoTokOp && size == 1 {
 			highBits = int(text[start]) << 24
@@ -559,12 +547,16 @@ func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, are
 		renvoPrintErr("renvo: parse failed\n")
 		return 1
 	}
-	if target == renvoTargetLinuxKernelAmd64 {
+	if targetIsKernelModule(context) {
 		if !renvoPrepareKernelMetadata() {
 			renvoPrintErr("renvo: kernel metadata unavailable\n")
 			return 1
 		}
-		renvoCaptureKernelCompileContext(context)
+		if target == renvoTargetLinuxKernelAmd64 {
+			renvoCaptureKernelCompileContext(context)
+		} else {
+			renvoPopulateKernelCompileContext(context)
+		}
 		prog.c = *context
 	}
 	var meta renvoMeta
@@ -575,7 +567,9 @@ func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, are
 	}
 	meta.arenaSize = renvoResolveArenaSize(target, arenaSize)
 	var result renvoCompileResult
-	if renvoFixedTarget == renvoTargetLinux386 || renvoFixedTarget == renvoTargetWindows386 {
+	if renvoPreparedBackend != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
+		result = renvoTryCompileScalarProgramRTG(prog, &meta)
+	} else if renvoFixedTarget == renvoTargetLinux386 || renvoFixedTarget == renvoTargetWindows386 {
 		result = renvoTryCompileScalarProgram386Cached(prog, &meta)
 	} else if renvoFixedTarget == renvoTargetLinuxAarch64 || renvoFixedTarget == renvoTargetDarwinArm64 || renvoFixedTarget == renvoTargetWindowsArm64 {
 		result = renvoTryCompileScalarProgramAarch64Cached(prog, &meta)

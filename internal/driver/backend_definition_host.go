@@ -7,7 +7,6 @@ import (
 	"renvo.dev/internal/load"
 	"renvo.dev/internal/rtg"
 	"renvo.dev/internal/rtgprofile"
-	"renvo.dev/internal/targetinfo"
 	"renvo.dev/internal/unit"
 )
 
@@ -103,23 +102,18 @@ func resolveBackendBuildOptions(args []string, workDir string, fs SourceFS) back
 		}
 		return backendBuildOptions{options: failed, hasBackend: true}
 	}
-	clean := make([]string, 0, len(args)+2)
+	clean := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		if args[i] == "-backend" || args[i] == "-system" {
-			i++
-			continue
-		}
-		if args[i] == "-t" {
-			clean = append(clean, "-t", representativeBuiltinTarget(resolved.Descriptor))
 			i++
 			continue
 		}
 		clean = append(clean, args[i])
 	}
 	if !targetExplicit {
-		clean = append(clean, "-t", representativeBuiltinTarget(resolved.Descriptor))
+		clean = append(clean, "-t", resolved.Descriptor.Name)
 	}
-	options := ParseOptions(clean)
+	options := parseOptions(clean, false)
 	if !options.Ok {
 		return backendBuildOptions{options: options, hasBackend: true}
 	}
@@ -168,10 +162,6 @@ func BuildFromFSWithBackendModuleCache(args []string, workDir string, stdRoot st
 		result.Unit = bound
 	}
 	return result
-}
-
-func representativeBuiltinTarget(descriptor rtg.TargetDescriptor) string {
-	return targetinfo.Representative(descriptor.OS, descriptor.ISA, descriptor.WordBits, descriptor.Capabilities)
 }
 
 func hostContains(values []string, value string) bool {

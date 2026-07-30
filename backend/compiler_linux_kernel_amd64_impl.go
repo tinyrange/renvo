@@ -123,28 +123,11 @@ func renvoAsmAddKernelImport(a *renvoAsm, src []byte, nameStart int, nameEnd int
 	if nameStart < 0 || nameEnd <= nameStart || nameEnd > len(src) {
 		return -1
 	}
-	for i := 0; i+1 < len(a.kernelImportOffsets); i += 2 {
-		start := a.kernelImportOffsets[i]
-		end := a.kernelImportOffsets[i+1]
-		if end-start != nameEnd-nameStart {
-			continue
-		}
-		match := true
-		for j := 0; j < end-start; j++ {
-			if a.kernelImportNames[start+j] != src[nameStart+j] {
-				match = false
-			}
-		}
-		if match {
-			return i / 2
-		}
-	}
-	start := len(a.kernelImportNames)
+	var name []byte
 	for i := nameStart; i < nameEnd; i++ {
-		a.kernelImportNames = append(a.kernelImportNames, src[i])
+		name = append(name, src[i])
 	}
-	a.kernelImportOffsets = append(a.kernelImportOffsets, start, len(a.kernelImportNames))
-	return len(a.kernelImportOffsets)/2 - 1
+	return renvoAsmAddExternalImportName(a, string(name))
 }
 
 func renvoAmd64EmitKernelLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
@@ -262,8 +245,11 @@ func renvoPrepareKernelMetadata() bool {
 		renvoKernelModuleInitOff = initOff
 		renvoKernelModuleExitOff = exitOff
 	}
-	_, moduleOK := renvoKernelSymbolCRC("module_layout")
-	return moduleOK
+	// CONFIG_MODVERSIONS=n kernels do not publish module_layout in
+	// Module.symvers. BTF plus vermagic still provide the required layout and
+	// compatibility inputs; individual external imports remain validated
+	// against Module.symvers while the image is assembled.
+	return true
 }
 
 func renvoKernelGet32(data []byte, at int) int {
@@ -645,10 +631,9 @@ func renvoAsmImageKernelModuleAmd64(a *renvoAsm, initLabel int, exitLabel int) [
 
 	var versions []byte
 	moduleCRC, moduleOK := renvoKernelSymbolCRC("module_layout")
-	if !moduleOK {
-		return nil
+	if moduleOK && moduleCRC != 0 {
+		versions = renvoKernelAppendVersion(versions, "module_layout", moduleCRC)
 	}
-	versions = renvoKernelAppendVersion(versions, "module_layout", moduleCRC)
 	if hasPrint {
 		printCRC, ok := renvoKernelSymbolCRC("_printk")
 		if !ok {
@@ -668,7 +653,9 @@ func renvoAsmImageKernelModuleAmd64(a *renvoAsm, initLabel int, exitLabel int) [
 		if !ok {
 			return nil
 		}
-		versions = renvoKernelAppendVersion(versions, name, crc)
+		if crc != 0 {
+			versions = renvoKernelAppendVersion(versions, name, crc)
+		}
 	}
 
 	var modinfo []byte

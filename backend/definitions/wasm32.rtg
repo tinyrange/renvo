@@ -308,7 +308,7 @@ go backend {
 	
 	const renvoWasm32InstructionSizes = "\x01\x01\x0d\x06\x03\x02\x05\x02\x06\x06\x06\x08\x08\x0a\x0a\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x06\x06\x02\x02\x02\x02\x02\x06\x03\x02\x05\x05\x05\x06\x09\x01\x01\x01\x03\x0e\x0a"
 	const renvoWasm32RegLocals = "\x02\x03\x04\x05\x06\x07\x08\x0b"
-	const renvoWasm32CondOpcodes = "\x46\x47\x48\x4c\x4a\x4e"
+	const renvoWasm32CondOpcodes = "\x46\x47\x48\x4c\x4a\x4e\x49\x4f\x4d\x4b"
 	const renvoWasm32BinaryOpcodes = "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x6a\x6b\x6c\x6d\x6f\x71\x72\x73\x00\x74\x75\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x76"
 	const renvoWasm32SimpleRecipeOffsets = "\x00\x00\x00\x01\x08\x0f\x1f\x2f\x3d\x47\x51\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x58\x63\x6e\x78\x88\x98\xa0\xaa\xb4\xbe\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
 	const renvoWasm32SimpleRecipes = "\x00\x06\xff\x00\x01\xff\x05\x00\x06\xff\x04\x01\xff\x05\x00\x0f\x20\x00\xff\x04\x00\x36\x02\x00\x20\x00\x41\x04\x6a\x21\x00\x0f\x20\x00\xff\x00\x00\x36\x02\x00\x20\x00\x41\x04\x6a\x21\x00\x0d\x20\x00\x41\x04\x6b\x22\x00\x28\x02\x00\xff\x05\x00\x09\xff\x06\x01\x28\x02\x00\xff\x05\x00\x09\xff\x06\x01\xff\x04\x00\x36\x02\x00\x06\xff\x06\x01\xff\x05\x00\x0a\xff\x04\x00\xff\x00\x01\x6a\xff\x05\x00\x0a\xff\x04\x00\xff\x00\x01\x6c\xff\x05\x00\x09\xff\x04\x00\x41\x01\x6a\xff\x05\x00\x0f\xff\x04\x00\xff\x04\x00\x28\x02\x00\x41\x01\x6a\x36\x02\x00\x0f\xff\x04\x00\xff\x04\x00\x28\x02\x00\x41\x01\x6b\x36\x02\x00\x07\xff\x04\x00\x45\xff\x05\x00\x09\x41\x00\xff\x04\x00\x6b\xff\x05\x00\x09\xff\x04\x00\xff\x00\x01\x6b\x21\x0c\x09\xff\x04\x00\xff\x04\x01\x6b\x21\x0c\x05\xff\x09\x00\x21\x02"
@@ -319,6 +319,10 @@ go backend {
 	const renvoWasm32CondLe = 3
 	const renvoWasm32CondGt = 4
 	const renvoWasm32CondGe = 5
+	const renvoWasm32CondUlt = 6
+	const renvoWasm32CondUge = 7
+	const renvoWasm32CondUle = 8
+	const renvoWasm32CondUgt = 9
 	
 	func renvoWasm32EmitRegImm(a *RTGEmitter, op int, reg int, imm int) {
 		a.SetCode(append(a.Code(), byte(op)))
@@ -757,9 +761,35 @@ go backend {
 		a.Int32(envLenOff)
 		a.AbsoluteReloc(at, envLenOff, RTGRelocationAbsoluteBSS)
 	}
+
+	func wasm32WASIEntry(a *RTGEmitter, parameterCount int, stateOffset int) bool {
+		_ = stateOffset
+		if parameterCount < 0 || parameterCount > 2 {
+			return false
+		}
+		argsOffset := a.ReserveBSS(32768, 16)
+		environmentOffset := a.ReserveBSS(32768, 16)
+		environmentLengthOffset := a.ReserveBSS(8, 8)
+		renvoWasm32AsmBuildArgvEnvSlices(
+			a, argsOffset, environmentOffset, environmentLengthOffset)
+		return true
+	}
+
+	func vm32Entry(a *RTGEmitter, parameterCount int, stateOffset int) bool {
+		_ = stateOffset
+		if parameterCount < 0 || parameterCount > 2 {
+			return false
+		}
+		renvoWasm32AsmBuildArgvEnvSlices(a, 0, 0, 0)
+		return true
+	}
 	
 	func renvoWasm32AsmExit(a *RTGEmitter) {
 		a.Int8(renvoWasm32OpExit)
+	}
+
+	func vm32RuntimeExit(a *RTGEmitter, status RTGRegister) {
+		renvoWasm32AsmExit(a)
 	}
 	
 	const renvoWasm32ProgramBase = 262144
@@ -991,9 +1021,23 @@ go backend {
 		renvoWasmAppendU32(out, 0)
 		return
 	}
+
+	func renvoWasmI32Load8S(out *renvoWasmBuffer) {
+		renvoWasmPut(out, 0x2c)
+		renvoWasmAppendU32(out, 0)
+		renvoWasmAppendU32(out, 0)
+		return
+	}
 	
 	func renvoWasmI32Load16S(out *renvoWasmBuffer) {
 		renvoWasmPut(out, 0x2e)
+		renvoWasmAppendU32(out, 1)
+		renvoWasmAppendU32(out, 0)
+		return
+	}
+
+	func renvoWasmI32Load16U(out *renvoWasmBuffer) {
+		renvoWasmPut(out, 0x2f)
 		renvoWasmAppendU32(out, 1)
 		renvoWasmAppendU32(out, 0)
 		return
@@ -1092,6 +1136,14 @@ go backend {
 	}
 	
 	func renvoWasm32LoadSized(out *renvoWasmBuffer, size int) {
+		if size == 129 {
+			renvoWasmI32Load8S(out)
+			return
+		}
+		if size == 66 {
+			renvoWasmI32Load16U(out)
+			return
+		}
 		if size == 1 {
 			renvoWasmI32Load8U(out)
 			return
@@ -2208,16 +2260,568 @@ go backend {
 		renvoWasmAppendByteVec(&out, data)
 		return out.data[:out.length]
 	}
+
+	func vm32Move(
+		out *RTGEmitter, destination RTGRegister, source RTGRegister,
+	) {
+		renvoWasm32EmitRegReg(
+			out, renvoWasm32OpMovRegReg, destination.Code, source.Code)
+	}
+
+	func vm32Address(
+		out *RTGEmitter, destination RTGRegister, address RTGAddress,
+	) {
+		if RTGAddressValid(address) {
+			renvoWasm32EmitRegImm(
+				out, renvoWasm32OpMovRegImm, destination.Code, address.Addend)
+			RTGAddressRelocAt(out, address, out.Len()-4)
+			return
+		}
+		if address.Base.Valid {
+			vm32Move(out, destination, address.Base)
+		} else {
+			renvoWasm32EmitRegImm(
+				out, renvoWasm32OpMovRegImm, destination.Code, 0)
+		}
+		if address.Index.Valid {
+			vm32Move(out, vm32Scratch, address.Index)
+			if address.Scale != 0 && address.Scale != 1 {
+				renvoWasm32EmitRegImm(
+					out, renvoWasm32OpMulRegImm,
+					vm32Scratch.Code, address.Scale)
+			}
+			renvoWasm32EmitRegReg(
+				out, renvoWasm32OpAddRegReg,
+				destination.Code, vm32Scratch.Code)
+		}
+		if address.Displacement != 0 {
+			renvoWasm32EmitRegImm(
+				out, renvoWasm32OpAddRegImm,
+				destination.Code, address.Displacement)
+		}
+	}
+
+	func vm32LoadWidth(
+		out *RTGEmitter,
+		destination RTGRegister,
+		address RTGAddress,
+		size int,
+	) {
+		if RTGAddressValid(address) {
+			vm32Address(out, vm32Scratch, address)
+			address = RTGAddress{Base: vm32Scratch}
+		}
+		if address.Index.Valid {
+			scale := address.Scale
+			if scale == 0 {
+				scale = 1
+			}
+			renvoWasm32EmitIndex(
+				out, renvoWasm32OpLoadIndex,
+				destination.Code, address.Base.Code, address.Index.Code,
+				scale, address.Displacement, size)
+			return
+		}
+		renvoWasm32EmitMem(
+			out, renvoWasm32OpLoadMem,
+			destination.Code, address.Base.Code, address.Displacement, size)
+	}
+
+	func vm32LoadNative(
+		out *RTGEmitter, destination RTGRegister, address RTGAddress,
+	) {
+		vm32LoadWidth(out, destination, address, 4)
+	}
+
+	func vm32LoadI32(
+		out *RTGEmitter, destination RTGRegister, address RTGAddress,
+	) {
+		vm32LoadWidth(out, destination, address, 4)
+	}
+
+	func vm32LoadU32(
+		out *RTGEmitter, destination RTGRegister, address RTGAddress,
+	) {
+		vm32LoadWidth(out, destination, address, 4)
+	}
+
+	func vm32LoadI16(
+		out *RTGEmitter, destination RTGRegister, address RTGAddress,
+	) {
+		// Plain size 2 remains signed for compatibility with the VM stream.
+		vm32LoadWidth(out, destination, address, 2)
+	}
+
+	func vm32LoadU16(
+		out *RTGEmitter, destination RTGRegister, address RTGAddress,
+	) {
+		// Bit 6 distinguishes the otherwise identical unsigned halfword load.
+		vm32LoadWidth(out, destination, address, 66)
+	}
+
+	func vm32LoadI8(
+		out *RTGEmitter, destination RTGRegister, address RTGAddress,
+	) {
+		// Bit 7 selects signed extension without adding another VM opcode.
+		vm32LoadWidth(out, destination, address, 129)
+	}
+
+	func vm32LoadU8(
+		out *RTGEmitter, destination RTGRegister, address RTGAddress,
+	) {
+		vm32LoadWidth(out, destination, address, 1)
+	}
+
+	func vm32StoreWidth(
+		out *RTGEmitter,
+		address RTGAddress,
+		source RTGRegister,
+		size int,
+	) {
+		if RTGAddressValid(address) {
+			vm32Address(out, vm32Scratch, address)
+			address = RTGAddress{Base: vm32Scratch}
+		}
+		if address.Index.Valid {
+			scale := address.Scale
+			if scale == 0 {
+				scale = 1
+			}
+			renvoWasm32EmitIndex(
+				out, renvoWasm32OpStoreIndex,
+				source.Code, address.Base.Code, address.Index.Code,
+				scale, address.Displacement, size)
+			return
+		}
+		renvoWasm32EmitMem(
+			out, renvoWasm32OpStoreMem,
+			source.Code, address.Base.Code, address.Displacement, size)
+	}
+
+	func vm32StoreNative(
+		out *RTGEmitter, address RTGAddress, source RTGRegister,
+	) {
+		vm32StoreWidth(out, address, source, 4)
+	}
+
+	func vm32StoreU32(
+		out *RTGEmitter, address RTGAddress, source RTGRegister,
+	) {
+		vm32StoreWidth(out, address, source, 4)
+	}
+
+	func vm32StoreU16(
+		out *RTGEmitter, address RTGAddress, source RTGRegister,
+	) {
+		vm32StoreWidth(out, address, source, 2)
+	}
+
+	func vm32StoreU8(
+		out *RTGEmitter, address RTGAddress, source RTGRegister,
+	) {
+		vm32StoreWidth(out, address, source, 1)
+	}
+
+	func vm32Binary(
+		out *RTGEmitter,
+		op int,
+		destination RTGRegister,
+		source RTGRegister,
+	) {
+		renvoWasm32EmitRegReg(out, op, destination.Code, source.Code)
+	}
+
+	func vm32Add(
+		out *RTGEmitter, destination RTGRegister, source RTGRegister,
+	) {
+		vm32Binary(out, renvoWasm32OpAddRegReg, destination, source)
+	}
+
+	func vm32Subtract(
+		out *RTGEmitter, destination RTGRegister, source RTGRegister,
+	) {
+		vm32Binary(out, renvoWasm32OpSubRegReg, destination, source)
+	}
+
+	func vm32Multiply(
+		out *RTGEmitter, destination RTGRegister, source RTGRegister,
+	) {
+		vm32Binary(out, renvoWasm32OpMulRegReg, destination, source)
+	}
+
+	func vm32BitAnd(
+		out *RTGEmitter, destination RTGRegister, source RTGRegister,
+	) {
+		vm32Binary(out, renvoWasm32OpAndRegReg, destination, source)
+	}
+
+	func vm32BitOr(
+		out *RTGEmitter, destination RTGRegister, source RTGRegister,
+	) {
+		vm32Binary(out, renvoWasm32OpOrRegReg, destination, source)
+	}
+
+	func vm32BitXor(
+		out *RTGEmitter, destination RTGRegister, source RTGRegister,
+	) {
+		vm32Binary(out, renvoWasm32OpXorRegReg, destination, source)
+	}
+
+	func vm32Compare(
+		out *RTGEmitter, left RTGRegister, right RTGRegister,
+	) {
+		vm32Binary(out, renvoWasm32OpCmpRegReg, left, right)
+	}
+
+	func vm32Test(
+		out *RTGEmitter, left RTGRegister, right RTGRegister,
+	) {
+		vm32Move(out, vm32Scratch, left)
+		vm32BitAnd(out, vm32Scratch, right)
+		renvoWasm32EmitRegImm(
+			out, renvoWasm32OpCmpRegImm, vm32Scratch.Code, 0)
+	}
+
+	func vm32Increment(out *RTGEmitter, operand RTGRegister) {
+		renvoWasm32EmitReg(out, renvoWasm32OpIncReg, operand.Code)
+	}
+
+	func vm32Decrement(out *RTGEmitter, operand RTGRegister) {
+		renvoWasm32EmitRegImm(
+			out, renvoWasm32OpAddRegImm, operand.Code, -1)
+	}
+
+	func vm32ShiftImmediate(
+		out *RTGEmitter, operand RTGRegister, value byte, op int,
+	) {
+		renvoWasm32EmitRegImm(
+			out, renvoWasm32OpMovRegImm, vm32Scratch.Code, int(value))
+		renvoWasm32EmitRegReg(
+			out, op, operand.Code, vm32Scratch.Code)
+	}
+
+	func vm32ShiftLeftImmediate(
+		out *RTGEmitter, operand RTGRegister, value byte,
+	) {
+		vm32ShiftImmediate(
+			out, operand, value, renvoWasm32OpShlRegReg)
+	}
+
+	func vm32ShiftRightUnsignedImmediate(
+		out *RTGEmitter, operand RTGRegister, value byte,
+	) {
+		vm32ShiftImmediate(
+			out, operand, value, renvoWasm32OpShrUnsignedRegReg)
+	}
+
+	func vm32ShiftRightSignedImmediate(
+		out *RTGEmitter, operand RTGRegister, value byte,
+	) {
+		vm32ShiftImmediate(
+			out, operand, value, renvoWasm32OpShrRegReg)
+	}
+
+	func vm32Branch(out *RTGEmitter, op int, label RTGLabel) {
+		out.AppendByte(op)
+		out.Int32(0)
+		RTGReloc(out, label)
+	}
+
+	func vm32Call(out *RTGEmitter, label RTGLabel) {
+		out.AppendByte(renvoWasm32OpCall)
+		out.Int32(0)
+		RTGReloc(out, label)
+		out.Int32(0)
+	}
+
+	func vm32Jump(out *RTGEmitter, label RTGLabel) {
+		vm32Branch(out, renvoWasm32OpJmp, label)
+	}
+
+	func vm32JumpCondition(
+		out *RTGEmitter, condition RTGCondition, label RTGLabel,
+	) {
+		out.AppendByte(renvoWasm32OpJCond)
+		out.AppendByte(condition.Code)
+		out.Int32(0)
+		RTGReloc(out, label)
+	}
+
+	func vm32SetCondition(
+		out *RTGEmitter, condition RTGCondition, destination RTGRegister,
+	) {
+		out.AppendByte(renvoWasm32OpSetCond)
+		out.AppendByte(condition.Code)
+		if destination.Code != vm32Primary.Code {
+			vm32Move(out, destination, vm32Primary)
+		}
+	}
+
+	func vm32Return(out *RTGEmitter) {
+		out.AppendByte(renvoWasm32OpRet)
+	}
+
+	func vm32Leave(out *RTGEmitter) {
+	}
+
+	func vm32HostSyscall(out *RTGEmitter) {
+		out.AppendByte(renvoWasm32OpSyscall)
+	}
+
+	func vm32MoveImmediate(
+		out *RTGEmitter, destination RTGRegister, value int64,
+	) {
+		renvoWasm32EmitRegImm(
+			out, renvoWasm32OpMovRegImm, destination.Code, int(value))
+	}
+
+	func vm32VariableShift(
+		out *RTGEmitter, direction RTGShiftDirection, signed bool,
+	) {
+		vm32Move(out, vm32Scratch, vm32Primary)
+		vm32Move(out, vm32Primary, vm32Tertiary)
+		op := renvoWasm32OpShrUnsignedRegReg
+		if direction == RTGShiftLeft {
+			op = renvoWasm32OpShlRegReg
+		} else if signed {
+			op = renvoWasm32OpShrRegReg
+		}
+		renvoWasm32EmitRegReg(
+			out, op, vm32Primary.Code, vm32Scratch.Code)
+	}
+
+	func vm32SignedDivide(out *RTGEmitter, remainder bool) {
+		op := renvoWasm32OpDivRegReg
+		if remainder {
+			op = renvoWasm32OpModRegReg
+		}
+		renvoWasm32EmitRegReg(
+			out, op, vm32Tertiary.Code, vm32Primary.Code)
+		vm32Move(out, vm32Primary, vm32Tertiary)
+	}
+
+	func vm32CopyBytes(out *RTGEmitter) {
+		destination := vm32CopyDestination
+		source := vm32CopySource
+		count := vm32CopyCount
+		forward := out.NewLabel()
+		forwardLoop := out.NewLabel()
+		backwardLoop := out.NewLabel()
+		done := out.NewLabel()
+
+		vm32Compare(out, destination, source)
+		vm32JumpCondition(out, RTGCondition{Code: renvoWasm32CondLe}, forward)
+		vm32Address(out, vm32Scratch, RTGAddress{
+			Base: source, Index: count, Scale: 1,
+		})
+		vm32Compare(out, destination, vm32Scratch)
+		vm32JumpCondition(out, RTGCondition{Code: renvoWasm32CondGe}, forward)
+		vm32Address(out, source, RTGAddress{
+			Base: source, Index: count, Scale: 1, Displacement: -1,
+		})
+		vm32Address(out, destination, RTGAddress{
+			Base: destination, Index: count, Scale: 1, Displacement: -1,
+		})
+		out.Mark(backwardLoop)
+		renvoWasm32EmitRegImm(
+			out, renvoWasm32OpCmpRegImm, count.Code, 0)
+		vm32JumpCondition(out, RTGCondition{Code: renvoWasm32CondEq}, done)
+		vm32LoadU8(out, vm32Scratch, RTGAddress{Base: source})
+		vm32StoreU8(out, RTGAddress{Base: destination}, vm32Scratch)
+		vm32Decrement(out, source)
+		vm32Decrement(out, destination)
+		vm32Decrement(out, count)
+		vm32Jump(out, backwardLoop)
+
+		out.Mark(forward)
+		out.Mark(forwardLoop)
+		renvoWasm32EmitRegImm(
+			out, renvoWasm32OpCmpRegImm, count.Code, 0)
+		vm32JumpCondition(out, RTGCondition{Code: renvoWasm32CondEq}, done)
+		vm32LoadU8(out, vm32Scratch, RTGAddress{Base: source})
+		vm32StoreU8(out, RTGAddress{Base: destination}, vm32Scratch)
+		vm32Increment(out, source)
+		vm32Increment(out, destination)
+		vm32Decrement(out, count)
+		vm32Jump(out, forwardLoop)
+		out.Mark(done)
+	}
+
+	func vm32PatchRelocations(out *RTGEmitter) {
+		for i := 0; i < out.RelocationCount(); i++ {
+			at := out.RelocationOffset(i)
+			target := out.LabelPosition(out.RelocationLabel(i))
+			if target < 0 {
+				continue
+			}
+			// A MOV immediate relocation denotes a code address and retains its
+			// authored addend. Branch and direct-call fields are plain PCs.
+			if at >= 2 &&
+				int(out.ByteAt(at-2)) == renvoWasm32OpMovRegImm {
+				target += RTGGet32At(out.Code(), at)
+			}
+			RTGPut32At(out.Code(), at, target)
+		}
+	}
+
+	func vm32FrameStart(out *RTGEmitter) int {
+		return out.Len()
+	}
+
+	func vm32FrameFinish(out *RTGEmitter, framePatch int, stackUsed int) {
+	}
+
+	func vm32PushRegister(out *RTGEmitter, source RTGRegister) {
+		renvoWasm32EmitReg(out, renvoWasm32OpPushReg, source.Code)
+	}
+
+	func vm32PushImmediate(out *RTGEmitter, value int) {
+		out.Int8(renvoWasm32OpPushImm)
+		out.Int32(value)
+	}
+
+	func vm32PopRegister(out *RTGEmitter, destination RTGRegister) {
+		renvoWasm32EmitReg(out, renvoWasm32OpPopReg, destination.Code)
+	}
+
+	func vm32LoadFrame(out *RTGEmitter, destination RTGRegister, offset int) {
+		renvoWasm32EmitStack(
+			out, renvoWasm32OpLoadStack, destination.Code, offset)
+	}
+
+	func vm32StoreFrame(out *RTGEmitter, offset int, source RTGRegister) {
+		renvoWasm32EmitStack(
+			out, renvoWasm32OpStoreStack, source.Code, offset)
+	}
+
+	func vm32AddressFrame(out *RTGEmitter, destination RTGRegister, offset int) {
+		renvoWasm32EmitStack(
+			out, renvoWasm32OpLeaStack, destination.Code, offset)
+	}
+
+	func vm32StoreParamWord(out *RTGEmitter, word int, offset int) {
+		register := vm32Primary
+		if word == 0 {
+			register = RTGRegister{Code: renvoWasm32RegRdi, Valid: true}
+		} else if word == 1 {
+			register = RTGRegister{Code: renvoWasm32RegRsi, Valid: true}
+		} else if word == 2 {
+			register = vm32Secondary
+		} else if word == 3 {
+			register = vm32Tertiary
+		} else if word == 4 {
+			register = RTGRegister{Code: renvoWasm32RegR8, Valid: true}
+		} else if word == 5 {
+			register = RTGRegister{Code: renvoWasm32RegR9, Valid: true}
+		} else {
+			vm32PopRegister(out, register)
+		}
+		vm32StoreFrame(out, offset, register)
+	}
+
+	func vm32CallWordCount(out *RTGEmitter, label RTGLabel, wordCount int) {
+		if wordCount > 0 {
+			vm32PopRegister(
+				out, RTGRegister{Code: renvoWasm32RegRdi, Valid: true})
+		}
+		if wordCount > 1 {
+			vm32PopRegister(
+				out, RTGRegister{Code: renvoWasm32RegRsi, Valid: true})
+		}
+		if wordCount > 2 {
+			vm32PopRegister(out, vm32Secondary)
+		}
+		if wordCount > 3 {
+			vm32PopRegister(out, vm32Tertiary)
+		}
+		if wordCount > 4 {
+			vm32PopRegister(
+				out, RTGRegister{Code: renvoWasm32RegR8, Valid: true})
+		}
+		if wordCount > 5 {
+			vm32PopRegister(
+				out, RTGRegister{Code: renvoWasm32RegR9, Valid: true})
+		}
+		out.Int8(renvoWasm32OpCall)
+		out.Int32(0)
+		RTGReloc(out, label)
+		out.Int32(wordCount)
+	}
 }
 
-arch wasm32 {
-	alias = wasm32
+# The compiler's direct emitter produces Renvo VM32 instructions. Wasm is a
+# target format built from that instruction stream, not the VM's native ISA.
+arch vm32 {
+	alias = vm32
 	endian = little
 	word_bits = 32
 	pointer_bits = 32
 	stack_word_bytes = 4
 	stack_alignment = 8
 	unaligned_memory = true
+	patch_relocations = go vm32PatchRelocations
+	registers virtual = [rax, rdx, rcx, rdi, rsi, r8, r9, r10]
+	locations {
+		primary = rax
+		secondary = rdx
+		tertiary = rcx
+		scratch = r10
+		copy_destination = rdi
+		copy_source = rsi
+		copy_count = rdx
+	}
+	conditions {
+		eq = 0
+		ne = 1
+		slt = 2
+		sle = 3
+		sgt = 4
+		sge = 5
+		ult = 6
+		uge = 7
+		ule = 8
+		ugt = 9
+	}
+	reject = [call_indirect]
+	bind {
+		move = go vm32Move
+		address = go vm32Address
+		load.native = go vm32LoadNative
+		load.i32 = go vm32LoadI32
+		load.u32 = go vm32LoadU32
+		load.i16 = go vm32LoadI16
+		load.u16 = go vm32LoadU16
+		load.i8 = go vm32LoadI8
+		load.u8 = go vm32LoadU8
+		store.native = go vm32StoreNative
+		store.u32 = go vm32StoreU32
+		store.u16 = go vm32StoreU16
+		store.u8 = go vm32StoreU8
+		add = go vm32Add
+		subtract = go vm32Subtract
+		multiply = go vm32Multiply
+		bit_and = go vm32BitAnd
+		bit_or = go vm32BitOr
+		bit_xor = go vm32BitXor
+		compare = go vm32Compare
+		test = go vm32Test
+		increment = go vm32Increment
+		decrement = go vm32Decrement
+		shift_left_immediate = go vm32ShiftLeftImmediate
+		shift_right_unsigned_immediate = go vm32ShiftRightUnsignedImmediate
+		shift_right_signed_immediate = go vm32ShiftRightSignedImmediate
+		call = go vm32Call
+		jump = go vm32Jump
+		jump_condition = go vm32JumpCondition
+		set_condition = go vm32SetCondition
+		return = go vm32Return
+		leave = go vm32Leave
+		host_syscall = go vm32HostSyscall
+		move_immediate = go vm32MoveImmediate
+		variable_shift = go vm32VariableShift
+		signed_divide = go vm32SignedDivide
+		copy_bytes = go vm32CopyBytes
+	}
 	exports {
 		renvoVMChecksum = go renvoVMChecksum
 		renvoVMDataBase = go renvoVMDataBase
@@ -2511,7 +3115,9 @@ arch wasm32 {
 		renvoWasmBuffer = go renvoWasmBuffer
 		renvoWasmCompactU32Fixed5 = go renvoWasmCompactU32Fixed5
 		renvoWasmI32Load = go renvoWasmI32Load
+		renvoWasmI32Load8S = go renvoWasmI32Load8S
 		renvoWasmI32Load16S = go renvoWasmI32Load16S
+		renvoWasmI32Load16U = go renvoWasmI32Load16U
 		renvoWasmI32Load8U = go renvoWasmI32Load8U
 		renvoWasmI32Store = go renvoWasmI32Store
 		renvoWasmI32Store16 = go renvoWasmI32Store16
@@ -2524,44 +3130,93 @@ arch wasm32 {
 	}
 }
 
-abi wasm32_internal {
-	arch = wasm32
-	arguments = [local0, local1, local2, local3, local4, local5]
+abi vm32_internal {
+	arch = vm32
+	frame_start = go vm32FrameStart
+	frame_finish = go vm32FrameFinish
+	push_register = go vm32PushRegister
+	push_immediate = go vm32PushImmediate
+	pop_register = go vm32PopRegister
+	frame_load = go vm32LoadFrame
+	frame_store = go vm32StoreFrame
+	frame_address = go vm32AddressFrame
+	store_param_word = go vm32StoreParamWord
+	call_word_count = go vm32CallWordCount
+	call_words = [rdi, rsi, rdx, rcx, r8, r9]
 	result = [primary, secondary, tertiary]
 	stack_alignment = 8
 }
 
 runtime wasi {
-	operations = [print, open, close, read, write, chmod]
+	emit_entry = go wasm32WASIEntry
+
+	syscall {
+		number = rax
+		arguments = [rdi, rsi, rdx, rcx, r8, r9]
+		result = rax
+		instruction = syscall
+	}
+	operation read { number = 0 args = [fd, buffer, count] }
+	operation write { number = 1 args = [fd, buffer, count] }
+	operation read_at { number = 17 args = [fd, buffer, count, offset] }
+	operation write_at { number = 18 args = [fd, buffer, count, offset] }
+	operation open { number = 2 args = [path, flags, mode] }
+	operation close { number = 3 args = [fd] }
+	operation chmod { number = 91 args = [fd, mode] }
+	operation print { use = write args = [stderr, buffer, count] }
+	emit_exit = go vm32RuntimeExit
 }
 
 runtime vm {
-	operations = [print, open, close, read, write, chmod]
+	emit_entry = go vm32Entry
+
+	syscall {
+		number = rax
+		arguments = [rdi, rsi, rdx, rcx, r8, r9]
+		result = rax
+		instruction = syscall
+	}
+	operation read { number = 0 args = [fd, buffer, count] }
+	operation write { number = 1 args = [fd, buffer, count] }
+	operation read_at { number = 17 args = [fd, buffer, count, offset] }
+	operation write_at { number = 18 args = [fd, buffer, count, offset] }
+	operation open { number = 2 args = [path, flags, mode] }
+	operation close { number = 3 args = [fd] }
+	operation chmod { number = 91 args = [fd, mode] }
+	operation print { use = write args = [stderr, buffer, count] }
+	emit_exit = go vm32RuntimeExit
 }
 
 format wasm_module {
 	byte_order = little
 	address_bits = 32
 	kind = wasm
+	code_offset = 0
+	image = go renvoWasm32Image
 }
 
 format rnvb_v1 {
 	byte_order = little
 	address_bits = 32
 	kind = rnvm
+	code_offset = 0
+	image = go renvoVMImage
 }
 
 format browser_wasm {
 	byte_order = little
 	address_bits = 32
 	kind = "html-wasm"
+	code_offset = 0
+	image = go renvoWasm32Image
 }
 
 target wasi/wasm32 {
 	os = wasi
-	arch = wasm32
+	arch = vm32
+	frontend_arch = wasm32
 	max_align = 8
-	abi = wasm32_internal
+	abi = vm32_internal
 	runtime = wasi
 	executable = wasm_module
 	build_tags = [wasip1, wasi, wasm32, wasm]
@@ -2570,9 +3225,10 @@ target wasi/wasm32 {
 
 target browser/wasm32 {
 	os = browser
-	arch = wasm32
+	arch = vm32
+	frontend_arch = wasm32
 	max_align = 8
-	abi = wasm32_internal
+	abi = vm32_internal
 	runtime = wasi
 	executable = browser_wasm
 	arena_default = 134217728
@@ -2582,9 +3238,10 @@ target browser/wasm32 {
 
 target vm/vm32 {
 	os = vm
-	arch = wasm32
+	arch = vm32
+	frontend_arch = vm32
 	max_align = 8
-	abi = wasm32_internal
+	abi = vm32_internal
 	runtime = vm
 	executable = rnvb_v1
 	build_tags = [vm, vm32]

@@ -38,6 +38,28 @@ func TestRunRejectsCorruptArtifact(t *testing.T) {
 	}
 }
 
+func TestLoadSizedExtensionMarkers(t *testing.T) {
+	m := machine{memory: make([]byte, minAddress+3)}
+	copy(m.memory[minAddress:], []byte{0x80, 0x00, 0x80})
+	tests := []struct {
+		size int
+		addr int
+		want uint32
+	}{
+		{size: 1, addr: minAddress, want: 0x80},
+		{size: 129, addr: minAddress, want: 0xffffff80},
+		{size: 2, addr: minAddress + 1, want: 0xffff8000},
+		{size: 66, addr: minAddress + 1, want: 0x8000},
+	}
+	for _, test := range tests {
+		got, ok := m.loadSized(test.addr, test.size)
+		if !ok || got != test.want {
+			t.Errorf("loadSized(%d, %d) = %#x, %v; want %#x, true",
+				test.addr, test.size, got, ok, test.want)
+		}
+	}
+}
+
 func TestDirectoryDataIsSortedAndMarksDirectories(t *testing.T) {
 	m := machine{files: []File{
 		{Name: "/workspace/z.go"},

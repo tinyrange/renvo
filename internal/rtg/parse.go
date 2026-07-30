@@ -6,7 +6,46 @@ import (
 	"renvo.dev/internal/syntax"
 )
 
+const (
+	maxDefinitionBytes   = 16 << 20
+	maxDefinitionTokens  = 1 << 18
+	maxDefinitionDecls   = 4096
+	maxFieldValueTokens  = 16384
+	maxStatementNesting  = 256
+	maxStatementsPerBody = 8192
+)
+
 func Parse(source []byte, filename string) Document {
+	if len(source) > maxDefinitionBytes {
+		return Document{
+			Filename: filename,
+			Source:   source,
+			Tokens: []Token{{
+				Kind: TokenEOF, Start: len(source), End: len(source), Line: 1, Column: 1,
+			}},
+			Diagnostics: []Diagnostic{{
+				Filename: filename,
+				Span:     sourceSpan(source, 0, 0),
+				Code:     "RTG-LIMIT-001",
+				Message:  "machine definition exceeds the 16 MiB source limit",
+			}},
+		}
+	}
+	if invalid := invalidUTF8Offset(source); invalid >= 0 {
+		return Document{
+			Filename: filename,
+			Source:   source,
+			Tokens: []Token{{
+				Kind: TokenEOF, Start: len(source), End: len(source), Line: 1, Column: 1,
+			}},
+			Diagnostics: []Diagnostic{{
+				Filename: filename,
+				Span:     sourceSpan(source, invalid, invalid+1),
+				Code:     "RTG-SCAN-003",
+				Message:  "machine definition is not valid UTF-8",
+			}},
+		}
+	}
 	tokens, diagnostics := scan(source, filename)
 	document := Document{
 		Filename:    filename,
@@ -140,6 +179,10 @@ func (p *documentParser) parseImplements() {
 }
 
 func (p *documentParser) parseDeclaration(kind string) {
+	if len(p.document.Declarations) >= maxDefinitionDecls {
+		p.failAt(p.at, "RTG-LIMIT-003", "machine definition exceeds the declaration limit")
+		return
+	}
 	startToken := p.at
 	p.at++
 	if p.kind() == TokenEOF {
@@ -187,6 +230,10 @@ func (p *documentParser) parseDeclaration(kind string) {
 }
 
 func (p *documentParser) parseGo() {
+	if len(p.document.Declarations) >= maxDefinitionDecls {
+		p.failAt(p.at, "RTG-LIMIT-003", "machine definition exceeds the declaration limit")
+		return
+	}
 	startToken := p.at
 	p.at++
 	if p.kind() != TokenIdent || p.text(p.at) != "backend" {
@@ -297,6 +344,9 @@ func (p *documentParser) parseFields(start int, end int) []Field {
 		at = valueStart
 		depth := 0
 		for at < end {
+			if depth == 0 && at > valueStart && p.fieldOrBlockStarts(at, end) {
+				break
+			}
 			if p.operator(at, "{") || p.operator(at, "[") || p.operator(at, "(") {
 				depth++
 			} else if p.operator(at, "}") || p.operator(at, "]") || p.operator(at, ")") {
@@ -305,13 +355,15 @@ func (p *documentParser) parseFields(start int, end int) []Field {
 				}
 				depth--
 			}
-			if depth == 0 && p.document.Tokens[at].Kind == TokenIdent && at+1 < end && p.operator(at+1, "=") {
-				break
-			}
 			at++
 		}
 		if valueStart == at {
 			continue
+		}
+		if at-valueStart > maxFieldValueTokens {
+			p.failAt(valueStart+maxFieldValueTokens, "RTG-LIMIT-005",
+				"declaration field exceeds the table-size limit")
+			return fields
 		}
 		fields = append(fields, Field{
 			Name:       name,
@@ -323,7 +375,23 @@ func (p *documentParser) parseFields(start int, end int) []Field {
 	return fields
 }
 
+func (p *documentParser) fieldOrBlockStarts(at int, end int) bool {
+	if at >= end || p.document.Tokens[at].Kind != TokenIdent {
+		return false
+	}
+	next := at + 1
+	for next+1 < end && p.operator(next, ".") &&
+		p.document.Tokens[next+1].Kind == TokenIdent {
+		next += 2
+	}
+	return next < end && (p.operator(next, "=") || p.operator(next, "{"))
+}
+
 func (p *documentParser) parseStatements(start int, end int) []Statement {
+	return p.parseStatementsDepth(start, end, 0)
+}
+
+func (p *documentParser) parseStatementsDepth(start int, end int, depth int) []Statement {
 	var statements []Statement
 	at := start
 	for at < end {
@@ -337,15 +405,24 @@ func (p *documentParser) parseStatements(start int, end int) []Statement {
 				if !ok || close > end {
 					return statements
 				}
+				if depth >= maxStatementNesting {
+					p.failAt(at, "RTG-LIMIT-004", "declaration body exceeds the statement nesting limit")
+					return statements
+				}
 				statement := Statement{
 					Tokens:   p.statementTokens(statementStart, at),
-					Children: p.parseStatements(at+1, close),
+					Children: p.parseStatementsDepth(at+1, close, depth+1),
 					Span: sourceSpan(p.document.Source,
 						p.document.Tokens[statementStart].Start,
 						p.document.Tokens[close].End),
 				}
 				if len(statement.Tokens) != 0 {
 					statements = append(statements, statement)
+					if len(statements) > maxStatementsPerBody {
+						p.failAt(statementStart, "RTG-LIMIT-006",
+							"declaration body exceeds the statement-count limit")
+						return statements
+					}
 				}
 				at = close + 1
 				break
@@ -370,6 +447,11 @@ func (p *documentParser) parseStatements(start int, end int) []Statement {
 				}
 				if len(statement.Tokens) != 0 {
 					statements = append(statements, statement)
+					if len(statements) > maxStatementsPerBody {
+						p.failAt(statementStart, "RTG-LIMIT-006",
+							"declaration body exceeds the statement-count limit")
+						return statements
+					}
 				}
 				break
 			}
@@ -446,6 +528,49 @@ func (p *documentParser) failOffset(offset int, code string, message string) {
 		Code:     code,
 		Message:  message,
 	})
+}
+
+func invalidUTF8Offset(source []byte) int {
+	for at := 0; at < len(source); {
+		first := source[at]
+		if first < 0x80 {
+			at++
+			continue
+		}
+		width := 0
+		secondMinimum := byte(0x80)
+		secondMaximum := byte(0xbf)
+		if first >= 0xc2 && first <= 0xdf {
+			width = 2
+		} else if first >= 0xe0 && first <= 0xef {
+			width = 3
+			if first == 0xe0 {
+				secondMinimum = 0xa0
+			} else if first == 0xed {
+				secondMaximum = 0x9f
+			}
+		} else if first >= 0xf0 && first <= 0xf4 {
+			width = 4
+			if first == 0xf0 {
+				secondMinimum = 0x90
+			} else if first == 0xf4 {
+				secondMaximum = 0x8f
+			}
+		} else {
+			return at
+		}
+		if at+width > len(source) ||
+			source[at+1] < secondMinimum || source[at+1] > secondMaximum {
+			return at
+		}
+		for i := 2; i < width; i++ {
+			if source[at+i] < 0x80 || source[at+i] > 0xbf {
+				return at
+			}
+		}
+		at += width
+	}
+	return -1
 }
 
 func declarationName(source []byte, tokens []Token) string {

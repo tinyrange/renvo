@@ -135,8 +135,7 @@ func (ProcessRunner) Run(artifact rtgb.Artifact, request Request) driver.Backend
 	if err = os.WriteFile(inputPath, request.Unit, 0o600); err != nil {
 		return backendIOError("write protocol input")
 	}
-	representative := representativeTarget(artifact.Descriptor)
-	args := []string{"-t", representative}
+	args := []string{"-t", artifact.Descriptor.Name}
 	options := request.Options
 	if options.Strip {
 		args = append(args, "-s")

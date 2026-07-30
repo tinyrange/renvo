@@ -5,6 +5,7 @@
 package backendjit
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -143,6 +144,7 @@ func Load(source []byte) Prepared {
 	}
 	host := hostTarget()
 	if artifact.Host != host || artifact.Generator != rtg.GeneratorVersion ||
+		artifact.Descriptor.Version != rtg.DescriptorVersion ||
 		artifact.Kernel != KernelVersion || artifact.Protocol != ProtocolVersion ||
 		artifact.Unit != unit.Version || artifact.Optimization != OptimizationVersion {
 		return prepareFailure("RENVO-RTG-009", "prepared backend is incompatible with this compiler or host")
@@ -163,14 +165,46 @@ func preparationSources(backendRoot string, generated rtg.GenerateResult) ([]loa
 		if name == "" || excluded[name] {
 			continue
 		}
+		sourceBytes := []byte(source)
+		if name == "compiler_main.go" {
+			var specialized bool
+			sourceBytes, specialized = preparedCompilerMain(sourceBytes)
+			if !specialized {
+				return nil, nil, fmt.Errorf("prepared compiler fixed-target declaration is missing")
+			}
+		} else if name == "compiler_target_policy_impl.go" {
+			var specialized bool
+			sourceBytes, specialized = preparedTargetPolicy(sourceBytes)
+			if !specialized {
+				return nil, nil, fmt.Errorf("prepared compiler policy mode declaration is missing")
+			}
+		}
 		path := load.JoinPath("/backend", name)
-		sources = append(sources, load.SourceFile{Path: path, Src: []byte(source)})
+		sources = append(sources, load.SourceFile{Path: path, Src: sourceBytes})
 		names = append(names, path)
 	}
 	generatedPath := "/backend/compiler_rtg_prepared_impl.go"
 	sources = append(sources, load.SourceFile{Path: generatedPath, Src: generated.Source})
 	names = append(names, generatedPath)
 	return sources, names, nil
+}
+
+func preparedCompilerMain(source []byte) ([]byte, bool) {
+	dynamicTarget := []byte("var renvoFixedTarget int\n")
+	if bytes.Count(source, dynamicTarget) != 1 {
+		return nil, false
+	}
+	return bytes.Replace(source, dynamicTarget,
+		[]byte("var renvoFixedTarget int = 0\n"), 1), true
+}
+
+func preparedTargetPolicy(source []byte) ([]byte, bool) {
+	defaultMode := []byte("const renvoPreparedBackend = 0\n")
+	if bytes.Count(source, defaultMode) != 1 {
+		return nil, false
+	}
+	return bytes.Replace(source, defaultMode,
+		[]byte("const renvoPreparedBackend = 1\n"), 1), true
 }
 
 func compatible(artifact rtgb.Artifact, descriptor rtg.TargetDescriptor, host string) bool {
@@ -186,22 +220,18 @@ func compatible(artifact rtgb.Artifact, descriptor rtg.TargetDescriptor, host st
 }
 
 func cacheKey(descriptor rtg.TargetDescriptor, host string) string {
-	return rtg.HashText(descriptor.Definition) + "-" + safeName(descriptor.Name) +
-		"-" + safeName(host) + "-g" + decimal(rtg.GeneratorVersion) +
+	return rtg.HashText(descriptor.Definition) + "-" + encodedName(descriptor.Name) +
+		"-" + encodedName(host) + "-g" + decimal(rtg.GeneratorVersion) +
 		"-k" + decimal(KernelVersion) + "-u" + decimal(unit.Version) +
 		"-p" + decimal(ProtocolVersion) + "-o" + decimal(OptimizationVersion)
 }
 
-func safeName(value string) string {
-	out := make([]byte, len(value))
+func encodedName(value string) string {
+	const digits = "0123456789abcdef"
+	out := make([]byte, len(value)*2)
 	for i := 0; i < len(value); i++ {
-		ch := value[i]
-		if ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' ||
-			ch >= '0' && ch <= '9' || ch == '-' || ch == '_' {
-			out[i] = ch
-		} else {
-			out[i] = '_'
-		}
+		out[i*2] = digits[value[i]>>4]
+		out[i*2+1] = digits[value[i]&15]
 	}
 	return string(out)
 }

@@ -373,7 +373,7 @@ func backendSource(descriptors []sourceDescriptor) []byte {
 			fmt.Fprintf(&out, "if target == %q { return %s }\n", alias, descriptor.Constant)
 		}
 	}
-	out.WriteString("return 0\n}\n")
+	out.WriteString("return renvoRTGParseTargetArg(target)\n}\n")
 	out.WriteString("\nfunc renvoBuiltInTargetBinding(target int) (string, string, int, bool) {\n")
 	for _, descriptor := range backend {
 		fmt.Fprintf(&out, "if target == %s { return %q, %q, %d, true }\n",

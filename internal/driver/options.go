@@ -72,6 +72,13 @@ func CommandHelpRequested(args []string) bool {
 }
 
 func ParseOptions(args []string) Options {
+	return parseOptions(args, true)
+}
+
+// parseOptions separates command-line syntax from release-target membership.
+// External backend definitions resolve their descriptor before this function
+// is called and therefore do not need to masquerade as an advertised target.
+func parseOptions(args []string, requireAdvertisedTarget bool) Options {
 	options := Options{
 		Target:        DefaultTarget,
 		Mode:          ModeExecutable,
@@ -220,7 +227,7 @@ func ParseOptions(args []string) Options {
 	if options.EmitUnit && options.EmitImage {
 		return parseFail(options, ParseErrConflictingEmit, "-emit-unit", len(args))
 	}
-	if !IsSupportedTarget(options.Target) {
+	if requireAdvertisedTarget && !IsSupportedTarget(options.Target) {
 		return parseFail(options, ParseErrUnsupportedTarget, options.Target, targetAt)
 	}
 	if options.Script && len(options.Files) == 0 {
@@ -229,7 +236,7 @@ func ParseOptions(args []string) Options {
 	if options.Script && len(options.Files) != 1 {
 		return parseFail(options, ParseErrScriptFileCount, options.Package, len(args))
 	}
-	if options.System == "" {
+	if requireAdvertisedTarget && options.System == "" {
 		if options.WindowsGUI && options.Target != "windows/amd64" && options.Target != "windows/386" && options.Target != "windows/arm64" {
 			return parseFail(options, ParseErrWindowsGUIRequiresWindows, options.Target, windowsGUIAt)
 		}

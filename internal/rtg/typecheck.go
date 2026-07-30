@@ -20,6 +20,7 @@ type RTGLabel struct {
 
 type RTGAddress struct {
 	Target RTGLabel
+	Kind int
 	Addend int
 	Base RTGRegister
 	Index RTGRegister
@@ -43,6 +44,14 @@ const RTGShiftLeft RTGShiftDirection = 1
 const RTGShiftRight RTGShiftDirection = 2
 const RTGRelocationAbsoluteData = 0
 const RTGRelocationAbsoluteBSS = 1
+const RTGRelocationImport = 2
+const RTGRuntimeRead = 1
+const RTGRuntimeWrite = 2
+const RTGRuntimeReadAt = 3
+const RTGRuntimeWriteAt = 4
+const RTGRuntimeOpen = 5
+const RTGRuntimeClose = 6
+const RTGRuntimeChmod = 7
 const RTGScalarByte = 3
 const RTGScalarInt8 = 7
 const RTGScalarInt16 = 8
@@ -79,7 +88,27 @@ func (out *RTGEmitter) Truncate(size int) {}
 func (out *RTGEmitter) Code() []byte { return nil }
 func (out *RTGEmitter) SetCode(value []byte) {}
 func (out *RTGEmitter) Data() []byte { return nil }
+func (out *RTGEmitter) SetData(value []byte) {}
 func (out *RTGEmitter) BSSSize() int { return 0 }
+func (out *RTGEmitter) ReserveBSS(size int, alignment int) int { return 0 }
+func (out *RTGEmitter) WindowsSubsystem() int { return 0 }
+func (out *RTGEmitter) StaticImportCount() int { return 0 }
+func (out *RTGEmitter) StaticImportDLL(index int) string { return "" }
+func (out *RTGEmitter) StaticImportName(index int) string { return "" }
+func (out *RTGEmitter) DynamicImport(library string, name string) int { return 0 }
+func (out *RTGEmitter) DynamicImportCount() int { return 0 }
+func (out *RTGEmitter) DynamicImportLibrary(index int) string { return "" }
+func (out *RTGEmitter) DynamicImportName(index int) string { return "" }
+func (out *RTGEmitter) DynamicImportLabel(index int) int { return -1 }
+func (out *RTGEmitter) ExternalImport(name string) int { return -1 }
+func (out *RTGEmitter) ExternalImportCount() int { return 0 }
+func (out *RTGEmitter) ExternalImportName(index int) string { return "" }
+func (out *RTGEmitter) KernelModuleName() string { return "" }
+func (out *RTGEmitter) KernelLicense() string { return "" }
+func (out *RTGEmitter) KernelRelease() string { return "" }
+func (out *RTGEmitter) KernelVersion() string { return "" }
+func (out *RTGEmitter) KernelBTF() []byte { return nil }
+func (out *RTGEmitter) KernelSymvers() []byte { return nil }
 func (out *RTGEmitter) RelocationCount() int { return 0 }
 func (out *RTGEmitter) RelocationAt(index int) (int, int) { return 0, 0 }
 func (out *RTGEmitter) RelocationOffset(index int) int { return 0 }
@@ -112,8 +141,12 @@ func RTGUint32(out *RTGEmitter, value int) {}
 func RTGUint64(out *RTGEmitter, value uint64) {}
 func RTGPatchUint32(out *RTGEmitter, at int, value int) {}
 func RTGReloc(out *RTGEmitter, label RTGLabel) {}
+func RTGLabelIndex(label RTGLabel) int { return label.Code }
 func RTGAddressValid(address RTGAddress) bool { return false }
 func RTGAddressRel32Addend(out *RTGEmitter, address RTGAddress) {}
+func RTGAddressRelocAt(out *RTGEmitter, address RTGAddress, at int) {}
+func RTGDataAddress(offset int) RTGAddress { return RTGAddress{} }
+func RTGBSSAddress(offset int) RTGAddress { return RTGAddress{} }
 func RTGInt8Fits(value int) bool { return false }
 func RTGPopPrimary(out *RTGEmitter) {}
 func RTGArenaMark() int { return 0 }
@@ -176,17 +209,43 @@ func validateEmbeddedGoTypes(document Document) (Diagnostic, bool) {
 		if program.ErrorFile >= 0 && program.ErrorFile < len(pkg.Files) {
 			file := pkg.Files[program.ErrorFile]
 			if program.ErrorToken >= 0 && program.ErrorToken < len(file.File.Tokens) {
-				name := string(syntax.TokenText(file.Src, file.File.Tokens[program.ErrorToken]))
+				token := file.File.Tokens[program.ErrorToken]
+				name := string(syntax.TokenText(file.Src, token))
 				if name != "" {
 					message += ": " + name
 				}
+				if program.ErrorToken > 0 {
+					previous := string(syntax.TokenText(
+						file.Src, file.File.Tokens[program.ErrorToken-1]))
+					if previous != "" {
+						message += " after " + previous
+					}
+				}
+				message += " at embedded line " + decimalString(syntax.TokenLine(token)+1)
 			}
 		}
 	}
+	message += " (check error " + decimalString(program.Error) + ")"
 	return Diagnostic{
 		Filename: document.Filename,
 		Span:     sourceSpan(document.Source, 0, 0),
 		Code:     "RTG-GO-009",
 		Message:  message,
 	}, false
+}
+
+func decimalString(value int) string {
+	if value == 0 {
+		return "0"
+	}
+	var reversed []byte
+	for value > 0 {
+		reversed = append(reversed, byte('0'+value%10))
+		value /= 10
+	}
+	var out []byte
+	for i := len(reversed) - 1; i >= 0; i-- {
+		out = append(out, reversed[i])
+	}
+	return string(out)
 }

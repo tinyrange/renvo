@@ -7,6 +7,13 @@ func scan(source []byte, filename string) ([]Token, []Diagnostic) {
 	line := 1
 	column := 1
 	for offset < len(source) {
+		if len(tokens) >= maxDefinitionTokens {
+			diagnostics = append(diagnostics, scanDiagnostic(
+				filename, source, offset, offset,
+				"RTG-LIMIT-002", "machine definition exceeds the token limit",
+			))
+			break
+		}
 		ch := source[offset]
 		if ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' {
 			if ch == '\n' {

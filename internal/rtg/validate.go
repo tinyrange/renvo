@@ -4,13 +4,14 @@ package rtg
 // required before target composition or source emission. More specialized
 // validators can grow beside these checks as each backend contract is migrated.
 func validateMachineDeclarations(document Document) []Diagnostic {
-	var diagnostics []Diagnostic
+	diagnostics := validateImplementsContract(document)
 	goNames := embeddedGoNames(document)
 	for i := 0; i < len(document.Declarations); i++ {
 		declaration := document.Declarations[i]
 		diagnostics = append(diagnostics, validateDeclarationFields(document, declaration)...)
 		if declaration.Kind == DeclArch {
 			diagnostics = append(diagnostics, validateArch(document, declaration, goNames)...)
+			diagnostics = append(diagnostics, validateDirectEmitterBindings(document, declaration, goNames)...)
 		} else if declaration.Kind == DeclABI {
 			diagnostics = append(diagnostics, validateABI(document, declaration)...)
 		} else if declaration.Kind == DeclRuntime {
@@ -31,6 +32,22 @@ func validateArch(document Document, declaration Declaration, goNames []string) 
 	seenExportedAlgorithms := []string{}
 	for i := 0; i < len(declaration.Statements); i++ {
 		statement := declaration.Statements[i]
+		left, right, assignment := statementAssignment(statement)
+		if assignment && len(left) == 1 && left[0] == "patch_relocations" {
+			if len(right) != 2 || right[0] != "go" ||
+				stringIndex(goNames, right[1]) < 0 {
+				diagnostics = append(diagnostics, statementDiagnostic(document, statement,
+					"RTG-VALIDATE-019",
+					"architecture patch_relocations must bind an embedded Go algorithm"))
+			} else if function, found := findEmbeddedFunction(document, right[1]); found &&
+				!directEmitterSignatureMatches(function, directEmitterOperation{
+					Name: "patch_relocations", Parameters: []string{"*RTGEmitter"},
+				}) {
+				diagnostics = append(diagnostics, statementDiagnostic(document, statement,
+					"RTG-VALIDATE-076",
+					"architecture patch_relocations has an incompatible Go signature"))
+			}
+		}
 		if statementHead(statement, "registers") {
 			values := statementListValues(statement)
 			for j := 0; j < len(values); j++ {
@@ -175,7 +192,8 @@ func declarationAllowedFields(kind string) []string {
 	if kind == DeclArch {
 		return []string{
 			"alias", "endian", "word_bits", "pointer_bits", "instruction_alignment",
-			"stack_word_bytes", "stack_alignment", "unaligned_memory",
+			"stack_word_bytes", "stack_alignment", "unaligned_memory", "patch_relocations",
+			"reject",
 		}
 	}
 	if kind == DeclABI {
@@ -185,23 +203,32 @@ func declarationAllowedFields(kind string) []string {
 			"entry_arguments", "foreign_call", "return_address", "frame_pointer",
 			"overflow_stride", "scalar_result", "string_result", "slice_result",
 			"hidden_result_word", "internal", "caller_saved", "callee_saved", "red_zone",
+			"frame_start", "frame_finish", "push_register", "push_immediate",
+			"pop_register", "frame_load", "frame_store", "frame_address",
+			"store_param_word", "call_word_count",
 		}
 	}
 	if kind == DeclRuntime {
-		return []string{"operations", "os", "entry", "exit", "allocator", "environment", "arguments"}
+		return []string{
+			"operations", "os", "entry", "exit", "allocator", "environment", "arguments",
+			"entry_state_bytes", "emit_entry_start", "emit_entry", "emit_exit",
+			"emit_static_call", "emit_operation", "entry_prologue", "entry_epilogue",
+			"emit_callback_address",
+		}
 	}
 	if kind == DeclFormat {
 		return []string{
 			"byte_order", "address_bits", "file_alignment", "section_alignment", "page_size",
 			"image_base", "machine", "kind", "cpu", "subsystem", "entry", "strip",
-			"type", "headers_size", "text_rva", "sections",
+			"type", "headers_size", "text_rva", "sections", "code_offset", "image",
+			"kernel_image",
 		}
 	}
 	if kind == DeclTarget {
 		return []string{
 			"arch", "abi", "runtime", "executable", "object", "aliases", "build_tags",
 			"capabilities", "code_pointer_bits", "function_pointer_bits", "max_align",
-			"arena_default", "subsystem", "os",
+			"arena_default", "subsystem", "os", "frontend_arch",
 		}
 	}
 	if kind == DeclIR {
@@ -212,23 +239,40 @@ func declarationAllowedFields(kind string) []string {
 
 func validateABI(document Document, declaration Declaration) []Diagnostic {
 	var diagnostics []Diagnostic
-	arch, ok := requiredNameField(document, declaration, "arch")
-	if !ok {
-		internal, hasInternal := requiredNameField(document, declaration, "internal")
-		if !hasInternal {
+	current := declaration
+	seen := []string{}
+	arch := ""
+	for {
+		if stringIndex(seen, current.Name) >= 0 {
 			return append(diagnostics, resolveDiagnostic(document, declaration,
-				"RTG-VALIDATE-020", "ABI "+declaration.Name+" is missing arch or internal ABI"))
+				"RTG-VALIDATE-028", "ABI "+declaration.Name+" has an internal ABI inheritance cycle through "+current.Name))
+		}
+		seen = append(seen, current.Name)
+		currentArch, hasArch := requiredNameField(document, current, "arch")
+		internal, hasInternal := requiredNameField(document, current, "internal")
+		if hasArch && hasInternal {
+			return append(diagnostics, resolveDiagnostic(document, current,
+				"RTG-VALIDATE-027", "ABI "+current.Name+" must declare exactly one of arch or internal ABI"))
+		}
+		if hasArch {
+			arch = currentArch
+			break
+		}
+		if !hasInternal {
+			code := "RTG-VALIDATE-024"
+			message := "ABI " + declaration.Name + " has no architecture through " + current.Name
+			if current.Name == declaration.Name {
+				code = "RTG-VALIDATE-020"
+				message = "ABI " + declaration.Name + " is missing arch or internal ABI"
+			}
+			return append(diagnostics, resolveDiagnostic(document, current, code, message))
 		}
 		base, found := document.Declaration(DeclABI, internal)
 		if !found {
-			return append(diagnostics, resolveDiagnostic(document, declaration,
-				"RTG-VALIDATE-023", "ABI "+declaration.Name+" references unknown internal ABI "+internal))
+			return append(diagnostics, resolveDiagnostic(document, current,
+				"RTG-VALIDATE-023", "ABI "+current.Name+" references unknown internal ABI "+internal))
 		}
-		arch, ok = requiredNameField(document, base, "arch")
-		if !ok {
-			return append(diagnostics, resolveDiagnostic(document, declaration,
-				"RTG-VALIDATE-024", "ABI "+declaration.Name+" has no architecture through "+internal))
-		}
+		current = base
 	}
 	if _, found := document.Declaration(DeclArch, arch); !found {
 		diagnostics = append(diagnostics, resolveDiagnostic(document, declaration,
@@ -239,27 +283,152 @@ func validateABI(document Document, declaration Declaration) []Diagnostic {
 		diagnostics = append(diagnostics, resolveDiagnostic(document, declaration,
 			"RTG-VALIDATE-022", "ABI "+declaration.Name+" has non-power-of-two stack_alignment"))
 	}
+	hookNames := []string{
+		"frame_start", "frame_finish", "push_register", "push_immediate",
+		"pop_register", "frame_load", "frame_store", "frame_address",
+		"store_param_word", "call_word_count",
+	}
+	hookParameters := make([][]string, 10)
+	hookParameters[0] = []string{"*RTGEmitter"}
+	hookParameters[1] = []string{"*RTGEmitter", "int", "int"}
+	hookParameters[2] = []string{"*RTGEmitter", "RTGRegister"}
+	hookParameters[3] = []string{"*RTGEmitter", "int"}
+	hookParameters[4] = []string{"*RTGEmitter", "RTGRegister"}
+	hookParameters[5] = []string{"*RTGEmitter", "RTGRegister", "int"}
+	hookParameters[6] = []string{"*RTGEmitter", "int", "RTGRegister"}
+	hookParameters[7] = []string{"*RTGEmitter", "RTGRegister", "int"}
+	hookParameters[8] = []string{"*RTGEmitter", "int", "int"}
+	hookParameters[9] = []string{"*RTGEmitter", "RTGLabel", "int"}
+	for i := 0; i < len(declaration.Statements); i++ {
+		left, right, assignment := statementAssignment(declaration.Statements[i])
+		if !assignment || len(left) != 1 {
+			continue
+		}
+		hook := stringIndex(hookNames, left[0])
+		if hook < 0 {
+			continue
+		}
+		if len(right) != 2 || right[0] != "go" {
+			diagnostics = append(diagnostics, statementDiagnostic(document, declaration.Statements[i],
+				"RTG-VALIDATE-025", "ABI "+left[0]+" must bind an embedded Go algorithm"))
+			continue
+		}
+		function, found := findEmbeddedFunction(document, right[1])
+		result := ""
+		if left[0] == "frame_start" {
+			result = "int"
+		}
+		if !found || !directEmitterSignatureMatches(function, directEmitterOperation{
+			Name: left[0], Parameters: hookParameters[hook], Result: result,
+		}) {
+			diagnostics = append(diagnostics, statementDiagnostic(document, declaration.Statements[i],
+				"RTG-VALIDATE-026", "ABI "+left[0]+" has an incompatible Go signature"))
+		}
+	}
 	return diagnostics
 }
 
 func validateRuntime(document Document, declaration Declaration) []Diagnostic {
-	operations := listField(document, declaration, "operations")
-	if len(operations) == 0 {
-		return nil
+	hookNames := []string{
+		"emit_entry_start", "emit_entry", "emit_exit", "emit_static_call",
+		"emit_operation", "entry_prologue", "entry_epilogue", "emit_callback_address",
 	}
-	allowed := []string{"print", "open", "close", "read", "write", "chmod"}
-	var diagnostics []Diagnostic
-	for i := 0; i < len(operations); i++ {
-		if stringIndex(allowed, operations[i]) < 0 {
-			diagnostics = append(diagnostics, resolveDiagnostic(document, declaration,
-				"RTG-VALIDATE-030", "runtime "+declaration.Name+" declares unknown operation "+operations[i]))
+	hookParameters := make([][]string, 8)
+	hookParameters[0] = []string{"*RTGEmitter", "int"}
+	hookParameters[1] = []string{"*RTGEmitter", "int", "int"}
+	hookParameters[2] = []string{"*RTGEmitter", "RTGRegister"}
+	hookParameters[3] = []string{"*RTGEmitter", "int", "int"}
+	hookParameters[4] = []string{"*RTGEmitter", "int"}
+	hookParameters[5] = []string{"*RTGEmitter"}
+	hookParameters[6] = []string{"*RTGEmitter"}
+	hookParameters[7] = []string{"*RTGEmitter", "RTGLabel"}
+	hookResults := []string{"bool", "bool", "", "", "bool", "", "", ""}
+	for i := 0; i < len(declaration.Statements); i++ {
+		left, right, assignment := statementAssignment(declaration.Statements[i])
+		if assignment && len(left) == 1 {
+			hook := stringIndex(hookNames, left[0])
+			if hook < 0 {
+				continue
+			}
+			if len(right) != 2 || right[0] != "go" {
+				return []Diagnostic{statementDiagnostic(document, declaration.Statements[i],
+					"RTG-VALIDATE-031", "runtime "+left[0]+" must bind an embedded Go algorithm")}
+			}
+			function, found := findEmbeddedFunction(document, right[1])
+			if !found || !directEmitterSignatureMatches(function, directEmitterOperation{
+				Name: left[0], Parameters: hookParameters[hook],
+				Result: hookResults[hook],
+			}) {
+				return []Diagnostic{statementDiagnostic(document, declaration.Statements[i],
+					"RTG-VALIDATE-032", "runtime "+left[0]+" has an incompatible Go signature")}
+			}
 		}
+	}
+	allowed := []string{
+		"print", "open", "close", "read", "write", "read_at", "write_at", "chmod",
+		"seek", "exit",
+	}
+	var diagnostics []Diagnostic
+	operations := listField(document, declaration, "operations")
+	operationStatements := make([]Statement, len(operations))
+	for i := 0; i < len(declaration.Statements); i++ {
+		statement := declaration.Statements[i]
+		if statementBlockName(statement) != "operation" || len(statement.Tokens) != 2 {
+			continue
+		}
+		operations = append(operations, statement.Tokens[1])
+		operationStatements = append(operationStatements, statement)
+	}
+	seen := []string{}
+	for i := 0; i < len(operations); i++ {
+		diagnostic := func(code string, message string) Diagnostic {
+			if i < len(operationStatements) && len(operationStatements[i].Tokens) != 0 {
+				return statementDiagnostic(document, operationStatements[i], code, message)
+			}
+			return resolveDiagnostic(document, declaration, code, message)
+		}
+		if stringIndex(allowed, operations[i]) < 0 {
+			diagnostics = append(diagnostics, diagnostic("RTG-VALIDATE-030",
+				"runtime "+declaration.Name+" declares unknown operation "+operations[i]))
+		}
+		if stringIndex(seen, operations[i]) >= 0 {
+			diagnostics = append(diagnostics, diagnostic("RTG-VALIDATE-033",
+				"runtime "+declaration.Name+" declares duplicate operation "+operations[i]))
+		}
+		seen = append(seen, operations[i])
 	}
 	return diagnostics
 }
 
 func validateFormat(document Document, declaration Declaration) []Diagnostic {
 	var diagnostics []Diagnostic
+	hookNames := []string{"image", "kernel_image"}
+	hookParameters := make([][]string, 2)
+	hookParameters[0] = []string{"*RTGEmitter"}
+	hookParameters[1] = []string{"*RTGEmitter", "RTGLabel", "RTGLabel"}
+	for i := 0; i < len(declaration.Statements); i++ {
+		statement := declaration.Statements[i]
+		left, right, assignment := statementAssignment(statement)
+		if !assignment || len(left) != 1 {
+			continue
+		}
+		hook := stringIndex(hookNames, left[0])
+		if hook < 0 {
+			continue
+		}
+		if len(right) != 2 || right[0] != "go" {
+			diagnostics = append(diagnostics, statementDiagnostic(document, statement,
+				"RTG-VALIDATE-042", "format "+left[0]+" must bind an embedded Go algorithm"))
+			continue
+		}
+		function, found := findEmbeddedFunction(document, right[1])
+		if !found || !directEmitterSignatureMatches(function, directEmitterOperation{
+			Name: left[0], Parameters: hookParameters[hook], Result: "[]byte",
+		}) {
+			diagnostics = append(diagnostics, statementDiagnostic(document, statement,
+				"RTG-VALIDATE-043", "format "+left[0]+" has an incompatible Go signature"))
+		}
+	}
 	if bits, found := integerField(document, declaration, "address_bits"); found &&
 		bits != 8 && bits != 16 && bits != 32 && bits != 64 {
 		diagnostics = append(diagnostics, resolveDiagnostic(document, declaration,
@@ -293,6 +462,12 @@ func validateTargetComposition(document Document, target ResolvedTarget) []Diagn
 			diagnostics = append(diagnostics, resolveDiagnostic(document, target.Declaration,
 				"RTG-VALIDATE-051", "target "+target.Descriptor.Name+" composes "+formats[i].Name+
 					" address width with a different architecture pointer width"))
+		}
+		if order, found := fieldValue(document, formats[i], "byte_order"); found &&
+			valueName(order) != target.Descriptor.Endian {
+			diagnostics = append(diagnostics, resolveDiagnostic(document, target.Declaration,
+				"RTG-VALIDATE-052", "target "+target.Descriptor.Name+" composes "+formats[i].Name+
+					" byte order with a different architecture byte order"))
 		}
 	}
 	return diagnostics

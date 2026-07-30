@@ -164,6 +164,7 @@
     <li><strong>Definitions are closed units.</strong> A distributable machine definition is one self-contained file. It may contain many reusable named declarations and target compositions, but it cannot depend on imported <code>.rtg</code> files or an ambient definition search path.</li>
     <li><strong>Use Go for algorithms.</strong> A definition may contain embedded Go declarations written in Renvo's supported subset. Prefer declarative tables for facts and composition; use Go for encoding, selection, ABI shuffles, runtime adapters, and image algorithms where Go is simpler. Embedded Go is parsed and type-checked, then emitted as ordinary declarations in the generated backend package. It is part of the file and definition hash—not an external hook.</li>
     <li><strong>Composition resolves during generation.</strong> Architecture, ABI, runtime, relocation, output format, pointer width, and endianness choices become constants and direct calls in generated source.</li>
+    <li><strong>Emitter and frontend architectures are distinct only when explicit.</strong> A target normally exposes its <code>arch</code> as the frontend architecture. A target such as Wasm that is constructed from the shared <code>vm32</code> emitter must state <code>frontend_arch = wasm32</code>; the VM target states <code>frontend_arch = vm32</code>. Width never implies either value.</li>
     <li><strong>Target selection is explicit.</strong> A source definition supplies target choices but never chooses one from its filename, declaration order, or contents. Existing option resolution selects the canonical target, with an explicit <code>-t</code> authoritative over system defaults. A prepared artifact is already fixed to exactly one target.</li>
     <li><strong>One production authority.</strong> Generated and legacy implementations may coexist behind test-only comparison during migration, but production compilation must select exactly one implementation.</li>
     <li><strong>Existing gates remain authoritative.</strong> Do not modify <code>backend/main_test.go</code> or loosen target-specific performance limits to make the rewrite pass.</li>
@@ -1793,6 +1794,7 @@ abi windows_x86_64 {
 }
 
 target linux/amd64 {
+    os = linux
     arch = x86_64
     abi = sysv_x86_64
     runtime = linux_x86_64
@@ -1806,6 +1808,7 @@ target linux/amd64 {
 }
 
 target windows/amd64 {
+    os = windows
     arch = x86_64
     abi = windows_x86_64
     runtime = win32_x86_64
@@ -1820,6 +1823,7 @@ target windows/amd64 {
 }
 
 target linux-kernel/amd64 {
+    os = linux
     arch = x86_64
     abi = sysv_x86_64
     runtime = linux_kernel_x86_64
