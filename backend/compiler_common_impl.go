@@ -447,64 +447,20 @@ func renvoAsmPatch(a *renvoAsm) {
 		return
 	}
 	if a.c.renvoTargetArch == renvoArchArm {
-		for i := 0; i+1 < len(a.relocs); i += 2 {
-			at := int(renvo_runtime_UnsafeInt32At(a.relocs, i)) & 2147483647
-			label := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1)) & 2147483647
-			if label < 0 {
-				continue
-			}
-			target := renvoAsmLabelPosition(a, label)
-			if target < 0 {
-				continue
-			}
-			disp := target - (at + 8)
-			insn := renvoGet32At(a.code, at)
-			if (insn & 0x0e000000) == 0x0a000000 {
-				renvoPut32At(a.code, at, (insn&0xff000000)|((disp/4)&0x00ffffff))
-			}
-		}
+		rtgArmPatchRelocations(a)
 		renvoAsmSetDataOffsets(a)
 		return
 	}
 	if a.c.renvoTargetArch == renvoArchAarch64 {
-		for i := 0; i+1 < len(a.relocs); i += 2 {
-			at := int(renvo_runtime_UnsafeInt32At(a.relocs, i)) & 2147483647
-			label := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1)) & 2147483647
-			if label < 0 {
-				continue
-			}
-			target := renvoAsmLabelPosition(a, label)
-			if target < 0 {
-				continue
-			}
-			disp := target - at
-			insn := renvoGet32At(a.code, at)
-			if (insn & 0xfc000000) == 0x94000000 {
-				renvoPut32At(a.code, at, 0x94000000|((disp/4)&0x03ffffff))
-			} else if (insn & 0xfc000000) == 0x14000000 {
-				renvoPut32At(a.code, at, 0x14000000|((disp/4)&0x03ffffff))
-			} else if (insn & 0xff000010) == 0x54000000 {
-				renvoPut32At(a.code, at, (insn&0xff00001f)|(((disp/4)&0x7ffff)<<5))
-			}
-		}
+		rtgAarch64PatchRelocations(a)
 		renvoAsmSetDataOffsets(a)
 		return
 	}
 	if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAmd64RelaxBranches(a)
-	}
-	for i := 0; i+1 < len(a.relocs); i += 2 {
-		at := int(renvo_runtime_UnsafeInt32At(a.relocs, i)) & 2147483647
-		label := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1)) & 2147483647
-		if label < 0 {
-			continue
-		}
-		target := renvoAsmLabelPosition(a, label)
-		if target < 0 {
-			continue
-		}
-		disp := target + renvoGet32At(a.code, at) - (at + 4)
-		renvoPut32At(a.code, at, disp)
+		rtgX8664PatchRelocations(a)
+	} else if a.c.renvoTargetArch == renvoArch386 {
+		rtgX8632PatchRelocations(a)
 	}
 	renvoAsmSetDataOffsets(a)
 	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||

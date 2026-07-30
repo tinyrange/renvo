@@ -30,6 +30,9 @@ func GenerateCheckedInArchitectureAlgorithms(resolved ResolveResult, archName st
 		roots, architectureSequenceRoots(arch, true, false))
 	source = appendReachableEmbeddedGo(source, projection, roots, true, architectureExports(arch))
 	source = appendArchitectureSequences(source, projection, arch, true, true, false, sequences)
+	if declarativeArchitectureRelocations(arch) != "" {
+		source = appendCheckedInArchitectureHooks(source, projection, arch)
+	}
 	return GenerateResult{Source: source, Manifest: manifest, Ok: true}
 }
 

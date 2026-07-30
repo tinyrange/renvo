@@ -155,9 +155,13 @@ func appendArchitectureSequences(out []byte, document Document, arch Declaration
 		if excludeExports && exported {
 			continue
 		}
-		out = append(out, "\n// Generated from bounded sequence "...)
-		out = append(out, sequence.Name...)
-		out = append(out, ".\nfunc "...)
+		out = append(out, '\n')
+		if !nativeEmitter || arch.Name == "vm32" {
+			out = append(out, "// Generated from bounded sequence "...)
+			out = append(out, sequence.Name...)
+			out = append(out, ".\n"...)
+		}
+		out = append(out, "func "...)
 		if exposeExports && exported {
 			out = append(out, external...)
 		} else {
@@ -292,8 +296,21 @@ func resolveArchitectureSequenceProjection(document Document, arch Declaration,
 	for i := 0; i < len(sequences); i++ {
 		sequenceNames = append(sequenceNames, sequences[i].Name)
 	}
-	selected := append([]string(nil), sequenceRoots...)
-	goSelected := append([]string(nil), goRoots...)
+	goNames := embeddedGoFunctionNames(document)
+	selected := make([]string, len(sequenceRoots))
+	for i := 0; i < len(sequenceRoots); i++ {
+		selected[i] = sequenceRoots[i]
+	}
+	var goSelected []string
+	for i := 0; i < len(goRoots); i++ {
+		if stringIndex(sequenceNames, goRoots[i]) >= 0 {
+			if stringIndex(selected, goRoots[i]) < 0 {
+				selected = append(selected, goRoots[i])
+			}
+		} else {
+			goSelected = append(goSelected, goRoots[i])
+		}
+	}
 	for {
 		changed := false
 		body := reachableEmbeddedGo(document, goSelected)
@@ -318,7 +335,7 @@ func resolveArchitectureSequenceProjection(document Document, arch Declaration,
 						selected = append(selected, name)
 						changed = true
 					}
-					if _, found := findEmbeddedFunction(document, name); found &&
+					if stringIndex(goNames, name) >= 0 &&
 						stringIndex(goSelected, name) < 0 {
 						goSelected = append(goSelected, name)
 						changed = true
@@ -368,7 +385,10 @@ func appendSequenceTokens(out []byte, tokens []string, document Document, names 
 }
 
 func translateSequenceRecordTokens(tokens []string) []string {
-	out := append([]string(nil), tokens...)
+	out := make([]string, len(tokens))
+	for i := 0; i < len(tokens); i++ {
+		out[i] = tokens[i]
+	}
 	var recordDepths []int
 	depth := 0
 	for i := 0; i < len(out); i++ {

@@ -21,98 +21,6 @@ go backend {
 		return out
 	}
 
-	func nativeELFExecutable64(a *RTGEmitter, machine int, flags int, codeOffset int) []byte {
-		code := a.Code()
-		data := a.Data()
-		fileSize := codeOffset + len(code) + len(data)
-		bssOffset := RTGAlignValue(fileSize, 4096)
-		var out []byte
-		out = append(out, 0x7f, 'E', 'L', 'F', 2, 1, 1, 0)
-		for len(out) < 16 {
-			out = append(out, 0)
-		}
-		out = nativeAppend16(out, 3)
-		out = nativeAppend16(out, machine)
-		out = nativeAppend32(out, 1)
-		out = nativeAppend64(out, codeOffset)
-		out = nativeAppend64(out, 64)
-		out = nativeAppend64(out, 0)
-		out = nativeAppend32(out, flags)
-		out = nativeAppend16(out, 64)
-		out = nativeAppend16(out, 56)
-		out = nativeAppend16(out, 2)
-		out = nativeAppend16(out, 0)
-		out = nativeAppend16(out, 0)
-		out = nativeAppend16(out, 0)
-		out = nativeAppend32(out, 1)
-		out = nativeAppend32(out, 5)
-		out = nativeAppend64(out, 0)
-		out = nativeAppend64(out, 0)
-		out = nativeAppend64(out, 0)
-		out = nativeAppend64(out, fileSize)
-		out = nativeAppend64(out, fileSize)
-		out = nativeAppend64(out, 4096)
-		out = nativeAppend32(out, 1)
-		out = nativeAppend32(out, 6)
-		out = nativeAppend64(out, bssOffset)
-		out = nativeAppend64(out, bssOffset)
-		out = nativeAppend64(out, bssOffset)
-		out = nativeAppend64(out, 0)
-		out = nativeAppend64(out, a.BSSSize())
-		out = nativeAppend64(out, 4096)
-		out = append(out, code...)
-		out = append(out, data...)
-		return out
-	}
-
-	func nativeELFExecutable32(a *RTGEmitter, machine int, flags int, codeOffset int) []byte {
-		code := a.Code()
-		data := a.Data()
-		fileSize := codeOffset + len(code) + len(data)
-		bssOffset := RTGAlignValue(fileSize, 4096)
-		var out []byte
-		out = append(out, 0x7f, 'E', 'L', 'F', 1, 1, 1, 0)
-		for len(out) < 16 {
-			out = append(out, 0)
-		}
-		out = nativeAppend16(out, 3)
-		out = nativeAppend16(out, machine)
-		out = nativeAppend32(out, 1)
-		out = nativeAppend32(out, codeOffset)
-		out = nativeAppend32(out, 52)
-		out = nativeAppend32(out, 0)
-		out = nativeAppend32(out, flags)
-		out = nativeAppend16(out, 52)
-		out = nativeAppend16(out, 32)
-		out = nativeAppend16(out, 2)
-		out = nativeAppend16(out, 0)
-		out = nativeAppend16(out, 0)
-		out = nativeAppend16(out, 0)
-		out = nativeAppend32(out, 1)
-		out = nativeAppend32(out, 0)
-		out = nativeAppend32(out, 0)
-		out = nativeAppend32(out, 0)
-		out = nativeAppend32(out, fileSize)
-		out = nativeAppend32(out, fileSize)
-		out = nativeAppend32(out, 5)
-		out = nativeAppend32(out, 4096)
-		out = nativeAppend32(out, 1)
-		out = nativeAppend32(out, bssOffset)
-		out = nativeAppend32(out, bssOffset)
-		out = nativeAppend32(out, bssOffset)
-		out = nativeAppend32(out, 0)
-		out = nativeAppend32(out, a.BSSSize())
-		out = nativeAppend32(out, 6)
-		out = nativeAppend32(out, 4096)
-		out = append(out, code...)
-		out = append(out, data...)
-		return out
-	}
-
-
-
-
-
 
 
 	func x86KernelStaticCall(out *RTGEmitter, importID int, wordCount int) {
@@ -160,811 +68,37 @@ go backend {
 		return true
 	}
 
-	func nativePut32(out []byte, at int, value int) {
-		out[at] = byte(value)
-		out[at+1] = byte(value >> 8)
-		out[at+2] = byte(value >> 16)
-		out[at+3] = byte(value >> 24)
-	}
-
-	func x86KernelGet32(data []byte, at int) int {
-		if at < 0 || at+4 > len(data) {
-			return 0
-		}
-		value := int(data[at])
-		value |= int(data[at+1]) << 8
-		value |= int(data[at+2]) << 16
-		value |= int(data[at+3]) << 24
-		return value
-	}
-
-	func x86KernelBTFString(data []byte, base int, offset int, value string) bool {
-		position := base + offset
-		if offset < 0 || position < 0 || position+len(value) >= len(data) {
-			return false
-		}
-		for i := 0; i < len(value); i++ {
-			if data[position+i] != value[i] {
-				return false
-			}
-		}
-		return data[position+len(value)] == 0
-	}
-
-	type x86KernelModuleLayout struct {
-		size int
-		nameOffset int
-		initOffset int
-		exitOffset int
-		ok bool
-	}
-
-	func x86KernelBTFModuleLayout(data []byte) x86KernelModuleLayout {
-		var result x86KernelModuleLayout
-		if len(data) < 24 || data[0] != 0x9f || data[1] != 0xeb {
-			return result
-		}
-		headerLength := x86KernelGet32(data, 4)
-		typeStart := headerLength + x86KernelGet32(data, 8)
-		typeEnd := typeStart + x86KernelGet32(data, 12)
-		stringStart := headerLength + x86KernelGet32(data, 16)
-		if headerLength < 24 || typeStart < headerLength ||
-			typeEnd > len(data) || stringStart < headerLength ||
-			stringStart >= len(data) {
-			return result
-		}
-		position := typeStart
-		for position+12 <= typeEnd {
-			name := x86KernelGet32(data, position)
-			info := x86KernelGet32(data, position+4)
-			size := x86KernelGet32(data, position+8)
-			kind := (info >> 24) & 31
-			count := info & 65535
-			extra := 0
-			if kind == 1 {
-				extra = 4
-			} else if kind == 3 {
-				extra = 12
-			} else if kind == 4 || kind == 5 {
-				extra = count * 12
-			} else if kind == 6 || kind == 13 {
-				extra = count * 8
-			} else if kind == 14 || kind == 17 {
-				extra = 4
-			} else if kind == 15 || kind == 19 {
-				extra = count * 12
-			}
-			next := position + 12 + extra
-			if next > typeEnd || next <= position {
-				return result
-			}
-			if kind == 4 &&
-				x86KernelBTFString(data, stringStart, name, "module") {
-				nameOffset := -1
-				initOffset := -1
-				exitOffset := -1
-				member := position + 12
-				for i := 0; i < count; i++ {
-					memberName := x86KernelGet32(data, member)
-					bitOffset := x86KernelGet32(data, member+8) & 0x00ffffff
-					if bitOffset%8 == 0 {
-						if x86KernelBTFString(
-							data, stringStart, memberName, "name",
-						) {
-							nameOffset = bitOffset / 8
-						} else if x86KernelBTFString(
-							data, stringStart, memberName, "init",
-						) {
-							initOffset = bitOffset / 8
-						} else if x86KernelBTFString(
-							data, stringStart, memberName, "exit",
-						) {
-							exitOffset = bitOffset / 8
-						}
-					}
-					member += 12
-				}
-				result.size = size
-				result.nameOffset = nameOffset
-				result.initOffset = initOffset
-				result.exitOffset = exitOffset
-				result.ok = nameOffset >= 0 && initOffset >= 0
-				return result
-			}
-			position = next
-		}
-		return result
-	}
-
-	func x86KernelHexDigit(ch byte) int {
-		if ch >= '0' && ch <= '9' {
-			return int(ch - '0')
-		}
-		if ch >= 'a' && ch <= 'f' {
-			return int(ch-'a') + 10
-		}
-		if ch >= 'A' && ch <= 'F' {
-			return int(ch-'A') + 10
-		}
-		return -1
-	}
-
-	func x86KernelSymbolCRC(data []byte, symbol string) (int, bool) {
-		line := 0
-		for line < len(data) {
-			end := line
-			for end < len(data) && data[end] != '\n' {
-				end++
-			}
-			firstTab := line
-			for firstTab < end && data[firstTab] != '\t' {
-				firstTab++
-			}
-			secondTab := firstTab + 1
-			for secondTab < end && data[secondTab] != '\t' {
-				secondTab++
-			}
-			if secondTab-firstTab-1 == len(symbol) {
-				match := true
-				for i := 0; i < len(symbol); i++ {
-					if data[firstTab+1+i] != symbol[i] {
-						match = false
-					}
-				}
-				if match {
-					value := 0
-					start := line
-					if start+2 <= firstTab &&
-						data[start] == '0' && data[start+1] == 'x' {
-						start += 2
-					}
-					for i := start; i < firstTab; i++ {
-						digit := x86KernelHexDigit(data[i])
-						if digit < 0 {
-							return 0, false
-						}
-						value = value<<4 | digit
-					}
-					return value, true
-				}
-			}
-			line = end + 1
-		}
-		return 0, false
-	}
-
-	func x86KernelSymbolGPLOnly(data []byte, symbol string) bool {
-		line := 0
-		for line < len(data) {
-			end := line
-			for end < len(data) && data[end] != '\n' {
-				end++
-			}
-			firstTab := line
-			for firstTab < end && data[firstTab] != '\t' {
-				firstTab++
-			}
-			secondTab := firstTab + 1
-			for secondTab < end && data[secondTab] != '\t' {
-				secondTab++
-			}
-			if secondTab-firstTab-1 == len(symbol) {
-				match := true
-				for i := 0; i < len(symbol); i++ {
-					if data[firstTab+1+i] != symbol[i] {
-						match = false
-					}
-				}
-				if match {
-					thirdTab := secondTab + 1
-					for thirdTab < end && data[thirdTab] != '\t' {
-						thirdTab++
-					}
-					exportStart := thirdTab + 1
-					exportEnd := exportStart
-					for exportEnd < end && data[exportEnd] != '\t' {
-						exportEnd++
-					}
-					if exportEnd-exportStart < 4 {
-						return false
-					}
-					if data[exportEnd-4] != '_' || data[exportEnd-3] != 'G' {
-						return false
-					}
-					return data[exportEnd-2] == 'P' && data[exportEnd-1] == 'L'
-				}
-			}
-			line = end + 1
-		}
-		return false
-	}
-
-	func x86KernelLicenseGPLCompatible(license string) bool {
-		if license == "GPL" || license == "GPL v2" {
-			return true
-		}
-		if license == "GPL and additional rights" ||
-			license == "Dual BSD/GPL" {
-			return true
-		}
-		return license == "Dual MIT/GPL" || license == "Dual MPL/GPL"
-	}
-
-	func x86KernelContains(text string, needle string) bool {
-		if len(needle) == 0 || len(needle) > len(text) {
-			return false
-		}
-		for i := 0; i+len(needle) <= len(text); i++ {
-			match := true
-			for j := 0; j < len(needle); j++ {
-				if text[i+j] != needle[j] {
-					match = false
-				}
-			}
-			if match {
-				return true
-			}
-		}
-		return false
-	}
-
-	func x86KernelVermagic(
-		release string, version string, exitOffset int, symvers []byte,
-	) string {
-		out := release
-		if x86KernelContains(version, " SMP ") ||
-			x86KernelContains(version, " SMP") {
-			out += " SMP"
-		}
-		if x86KernelContains(version, "PREEMPT") {
-			out += " preempt"
-		}
-		if exitOffset >= 0 {
-			out += " mod_unload"
-		}
-		crc, ok := x86KernelSymbolCRC(symvers, "module_layout")
-		if ok && crc != 0 {
-			out += " modversions"
-		}
-		return out + " "
-	}
-
-	func x86KernelAppendString(out []byte, value string) []byte {
-		for i := 0; i < len(value); i++ {
-			out = append(out, value[i])
-		}
-		return append(out, 0)
-	}
-
-
-
-	func x86KernelUntil(out []byte, size int) []byte {
-		for len(out) < size {
-			out = append(out, 0)
-		}
-		return out
-	}
 
 
 
 
 
-	func x86KernelAppendVersion(out []byte, symbol string, crc int) []byte {
-		start := len(out)
-		out = nativeAppend64(out, crc)
-		for i := 0; i < len(symbol) && i < 55; i++ {
-			out = append(out, symbol[i])
-		}
-		out = append(out, 0)
-		return x86KernelUntil(out, start+64)
-	}
 
 
 
 
 
-	func x86KernelModuleImage(
-		emitter *RTGEmitter, initLabel RTGLabel, exitLabel RTGLabel,
-	) []byte {
-		initPosition := emitter.LabelPosition(RTGLabelIndex(initLabel))
-		exitPosition := emitter.LabelPosition(RTGLabelIndex(exitLabel))
-		layout := x86KernelBTFModuleLayout(emitter.KernelBTF())
-		if initPosition < 0 || !layout.ok || layout.size <= 0 {
-			return nil
-		}
-		moduleName := emitter.KernelModuleName()
-		license := emitter.KernelLicense()
-		symvers := emitter.KernelSymvers()
-		if moduleName == "" || license == "" || len(symvers) == 0 {
-			return nil
-		}
-
-		var strings []byte
-		strings = append(strings, 0)
-		initName := len(strings)
-		strings = x86KernelAppendString(strings, "init_module")
-		exitName := len(strings)
-		strings = x86KernelAppendString(strings, "cleanup_module")
-		moduleSymbolName := len(strings)
-		strings = x86KernelAppendString(strings, "__this_module")
-		var importNames []int
-		for i := 0; i < emitter.ExternalImportCount(); i++ {
-			importNames = append(importNames, len(strings))
-			strings = x86KernelAppendString(
-				strings, emitter.ExternalImportName(i),
-			)
-		}
-
-		var symbols []byte
-		symbols = x86KernelAppendSymbol(symbols, 0, 0, 0, 0, 0)
-		symbols = x86KernelAppendSymbol(symbols, 0, 3, 1, 0, 0)
-		symbols = x86KernelAppendSymbol(symbols, 0, 3, 3, 0, 0)
-		symbols = x86KernelAppendSymbol(symbols, 0, 3, 4, 0, 0)
-		symbols = x86KernelAppendSymbol(symbols, 0, 3, 7, 0, 0)
-		initSymbol := 5
-		symbols = x86KernelAppendSymbol(
-			symbols, initName, 18, 1, initPosition, 0,
-		)
-		exitSymbol := 0
-		if exitPosition >= 0 {
-			exitSymbol = len(symbols) / 24
-			symbols = x86KernelAppendSymbol(
-				symbols, exitName, 18, 1, exitPosition, 0,
-			)
-		}
-		symbols = x86KernelAppendSymbol(
-			symbols, moduleSymbolName, 17, 7, 0, layout.size,
-		)
-		var importSymbols []int
-		for i := 0; i < len(importNames); i++ {
-			importSymbols = append(importSymbols, len(symbols)/24)
-			symbols = x86KernelAppendSymbol(
-				symbols, importNames[i], 16, 0, 0, 0,
-			)
-		}
-
-		var textRelocations []byte
-		for i := 0; i < emitter.AbsoluteRelocationCount(); i++ {
-			at := emitter.AbsoluteRelocationOffset(i)
-			addend := emitter.AbsoluteRelocationAddend(i)
-			kind := emitter.AbsoluteRelocationKind(i)
-			if kind == RTGRelocationAbsoluteBSS {
-				textRelocations = x86KernelAppendRelocation(
-					textRelocations, at, 3, 2, addend-4,
-				)
-			} else if kind == RTGRelocationImport {
-				if addend < 0 || addend >= len(importSymbols) {
-					return nil
-				}
-				textRelocations = x86KernelAppendRelocation(
-					textRelocations, at, importSymbols[addend], 4, -4,
-				)
-			} else {
-				textRelocations = x86KernelAppendRelocation(
-					textRelocations, at, 2, 2, addend-4,
-				)
-			}
-		}
-
-		thisModule := make([]byte, layout.size)
-		if layout.nameOffset+len(moduleName) >= len(thisModule) {
-			return nil
-		}
-		for i := 0; i < len(moduleName); i++ {
-			thisModule[layout.nameOffset+i] = moduleName[i]
-		}
-		var moduleRelocations []byte
-		moduleRelocations = x86KernelAppendRelocation(
-			moduleRelocations, layout.initOffset, initSymbol, 1, 0,
-		)
-		if exitSymbol != 0 && layout.exitOffset >= 0 {
-			moduleRelocations = x86KernelAppendRelocation(
-				moduleRelocations, layout.exitOffset, exitSymbol, 1, 0,
-			)
-		}
-
-		var versions []byte
-		moduleCRC, moduleOK := x86KernelSymbolCRC(
-			symvers, "module_layout",
-		)
-		if moduleOK && moduleCRC != 0 {
-			versions = x86KernelAppendVersion(
-				versions, "module_layout", moduleCRC,
-			)
-		}
-		for i := 0; i < len(importSymbols); i++ {
-			name := emitter.ExternalImportName(i)
-			if x86KernelSymbolGPLOnly(symvers, name) &&
-				!x86KernelLicenseGPLCompatible(license) {
-				return nil
-			}
-			crc, ok := x86KernelSymbolCRC(symvers, name)
-			if !ok {
-				return nil
-			}
-			if crc != 0 {
-				versions = x86KernelAppendVersion(versions, name, crc)
-			}
-		}
-
-		var moduleInfo []byte
-		moduleInfo = x86KernelAppendString(
-			moduleInfo, "license="+license,
-		)
-		moduleInfo = x86KernelAppendString(moduleInfo, "depends=")
-		moduleInfo = x86KernelAppendString(
-			moduleInfo, "name="+moduleName,
-		)
-		moduleInfo = x86KernelAppendString(
-			moduleInfo,
-			"vermagic="+x86KernelVermagic(
-				emitter.KernelRelease(), emitter.KernelVersion(),
-				layout.exitOffset, symvers,
-			),
-		)
-
-		var sectionNames []byte
-		sectionNames = append(sectionNames, 0)
-		textName := len(sectionNames)
-		sectionNames = x86KernelAppendString(sectionNames, ".text")
-		textRelocationName := len(sectionNames)
-		sectionNames = x86KernelAppendString(sectionNames, ".rela.text")
-		dataName := len(sectionNames)
-		sectionNames = x86KernelAppendString(sectionNames, ".rodata")
-		bssName := len(sectionNames)
-		sectionNames = x86KernelAppendString(sectionNames, ".bss")
-		infoName := len(sectionNames)
-		sectionNames = x86KernelAppendString(sectionNames, ".modinfo")
-		versionName := len(sectionNames)
-		sectionNames = x86KernelAppendString(sectionNames, "__versions")
-		moduleNameSection := len(sectionNames)
-		sectionNames = x86KernelAppendString(
-			sectionNames, ".gnu.linkonce.this_module",
-		)
-		moduleRelocationName := len(sectionNames)
-		sectionNames = x86KernelAppendString(
-			sectionNames, ".rela.gnu.linkonce.this_module",
-		)
-		symbolName := len(sectionNames)
-		sectionNames = x86KernelAppendString(sectionNames, ".symtab")
-		stringName := len(sectionNames)
-		sectionNames = x86KernelAppendString(sectionNames, ".strtab")
-		sectionStringName := len(sectionNames)
-		sectionNames = x86KernelAppendString(sectionNames, ".shstrtab")
-
-		code := emitter.Code()
-		data := emitter.Data()
-		var image []byte
-		image = x86KernelUntil(image, 64)
-		textOffset := RTGAlignValue(len(image), 16)
-		image = x86KernelUntil(image, textOffset)
-		image = append(image, code...)
-		textRelocationOffset := RTGAlignValue(len(image), 8)
-		image = x86KernelUntil(image, textRelocationOffset)
-		image = append(image, textRelocations...)
-		dataOffset := RTGAlignValue(len(image), 8)
-		image = x86KernelUntil(image, dataOffset)
-		image = append(image, data...)
-		bssOffset := len(image)
-		infoOffset := len(image)
-		image = append(image, moduleInfo...)
-		versionOffset := RTGAlignValue(len(image), 8)
-		image = x86KernelUntil(image, versionOffset)
-		image = append(image, versions...)
-		moduleOffset := RTGAlignValue(len(image), 64)
-		image = x86KernelUntil(image, moduleOffset)
-		image = append(image, thisModule...)
-		moduleRelocationOffset := RTGAlignValue(len(image), 8)
-		image = x86KernelUntil(image, moduleRelocationOffset)
-		image = append(image, moduleRelocations...)
-		symbolOffset := RTGAlignValue(len(image), 8)
-		image = x86KernelUntil(image, symbolOffset)
-		image = append(image, symbols...)
-		stringOffset := len(image)
-		image = append(image, strings...)
-		sectionStringOffset := len(image)
-		image = append(image, sectionNames...)
-		sectionOffset := RTGAlignValue(len(image), 8)
-		image = x86KernelUntil(image, sectionOffset)
-		image = x86KernelAppendSection(image, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-		image = x86KernelAppendSection(
-			image, textName, 1, 6, textOffset, len(code), 0, 0, 16, 0,
-		)
-		image = x86KernelAppendSection(
-			image, textRelocationName, 4, 64, textRelocationOffset,
-			len(textRelocations), 9, 1, 8, 24,
-		)
-		image = x86KernelAppendSection(
-			image, dataName, 1, 2, dataOffset, len(data), 0, 0, 8, 0,
-		)
-		image = x86KernelAppendSection(
-			image, bssName, 8, 3, bssOffset, emitter.BSSSize(),
-			0, 0, 8, 0,
-		)
-		image = x86KernelAppendSection(
-			image, infoName, 1, 2, infoOffset, len(moduleInfo),
-			0, 0, 1, 0,
-		)
-		image = x86KernelAppendSection(
-			image, versionName, 1, 2, versionOffset, len(versions),
-			0, 0, 8, 0,
-		)
-		image = x86KernelAppendSection(
-			image, moduleNameSection, 1, 3, moduleOffset,
-			len(thisModule), 0, 0, 64, 0,
-		)
-		image = x86KernelAppendSection(
-			image, moduleRelocationName, 4, 64, moduleRelocationOffset,
-			len(moduleRelocations), 9, 7, 8, 24,
-		)
-		image = x86KernelAppendSection(
-			image, symbolName, 2, 0, symbolOffset, len(symbols),
-			10, 5, 8, 24,
-		)
-		image = x86KernelAppendSection(
-			image, stringName, 3, 0, stringOffset, len(strings),
-			0, 0, 1, 0,
-		)
-		image = x86KernelAppendSection(
-			image, sectionStringName, 3, 0, sectionStringOffset,
-			len(sectionNames), 0, 0, 1, 0,
-		)
-		var header []byte
-		header = x86KernelAppendELFHeader(header, sectionOffset, 12, 11)
-		for i := 0; i < len(header); i++ {
-			image[i] = header[i]
-		}
-		return image
-	}
-
-	func x86LinuxEntry(out *RTGEmitter, parameterCount int, stateOffset int) bool {
-		_ = stateOffset
-		if parameterCount == 0 {
-			return true
-		}
-		if parameterCount < 0 || parameterCount > 2 {
-			return false
-		}
-		argsOffset := out.ReserveBSS(32768, 16)
-		environmentOffset := out.ReserveBSS(32768, 16)
-		environmentLengthOffset := out.ReserveBSS(8, 8)
-		base := out.Len()
-		out.Text("\x48\x8b\x04\x24\x49\x89\xc0\x4c\x8d\x4c\x24\x08\x4c\x8d\x15\x00\x00\x00\x00\x4d\x89\xd4\x4d\x31\xdb\x4d\x39\xc3\x7d\x22\x4b\x8b\x3c\xd9\x49\x89\x3a\x48\x31\xc0\x80\x3c\x07\x00\x74\x05\x48\xff\xc0\xeb\xf5\x49\x89\x42\x08\x49\x83\xc2\x10\x49\xff\xc3\xeb\xd9\x4c\x8d\x4c\x24\x08\x49\x83\x39\x00\x74\x06\x49\x83\xc1\x08\xeb\xf4\x49\x83\xc1\x08\x4c\x8d\x15\x00\x00\x00\x00\x4d\x31\xdb\x4b\x8b\x3c\xd9\x48\x83\xff\x00\x74\x1e\x49\x89\x3a\x48\x31\xc0\x80\x3c\x07\x00\x74\x05\x48\xff\xc0\xeb\xf5\x49\x89\x42\x08\x49\x83\xc2\x10\x49\xff\xc3\xeb\xd8\x4c\x89\xd8\x48\x89\x05\x00\x00\x00\x00\x4c\x89\xe7\x4c\x89\xc6\x4c\x89\xc2\x48\x8d\x05\x00\x00\x00\x00\x50\x59\x48\x8b\x05\x00\x00\x00\x00\x49\x89\xc0\x49\x89\xc1")
-		out.AbsoluteReloc(base+15, argsOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(base+88, environmentOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(base+141, environmentLengthOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(base+157, environmentOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(base+166, environmentLengthOffset, RTGRelocationAbsoluteBSS)
-		return true
-	}
-
-	func x86WindowsEntry(out *RTGEmitter, parameterCount int, stateOffset int) bool {
-		_ = stateOffset
-		if parameterCount == 0 {
-			return true
-		}
-		if parameterCount < 0 || parameterCount > 2 {
-			return false
-		}
-		argsOffset := out.ReserveBSS(32768, 16)
-		argsTextOffset := out.ReserveBSS(32768, 16)
-		argsLengthOffset := out.ReserveBSS(8, 8)
-		environmentOffset := out.ReserveBSS(32768, 16)
-		environmentLengthOffset := out.ReserveBSS(8, 8)
-		base := out.Len()
-		out.Text("\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\xc6\x4c\x8d\x15\x00\x00\x00\x00\x48\x8d\x05\x00\x00\x00\x00\x50\x5a\x4d\x31\xdb\x80\x3e\x00\x0f\x84\x62\x00\x00\x00\x80\x3e\x20\x74\x05\x80\x3e\x09\x75\x05\x48\xff\xc6\xeb\xe8\x49\x89\x12\x31\xc9\x45\x31\xc0\x8a\x06\x3c\x00\x74\x28\x3c\x22\x75\x09\x41\x83\xf0\x01\x48\xff\xc6\xeb\xed\x41\x83\xf8\x00\x75\x08\x3c\x20\x74\x11\x3c\x09\x74\x0d\x88\x02\x48\xff\xc6\x48\xff\xc2\x48\xff\xc1\xeb\xd2\xc6\x02\x00\x48\xff\xc2\x49\x89\x4a\x08\x49\x83\xc2\x10\x49\xff\xc3\x3c\x00\x74\x08\x48\xff\xc6\xe9\x95\xff\xff\xff\x4c\x89\xd8\x48\x89\x05\x00\x00\x00\x00\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\xc6\x4c\x8d\x15\x00\x00\x00\x00\x4d\x31\xdb\x80\x3e\x00\x74\x23\x49\x89\x32\x31\xc9\x80\x3c\x0e\x00\x74\x05\x48\xff\xc1\xeb\xf5\x49\x89\x4a\x08\x48\x01\xce\x48\xff\xc6\x49\x83\xc2\x10\x49\xff\xc3\xeb\xd8\x4c\x89\xd8\x48\x89\x05\x00\x00\x00\x00\x48\x8d\x05\x00\x00\x00\x00\x50\x5f\x48\x8b\x05\x00\x00\x00\x00\x50\x5e\x50\x5a\x48\x8d\x05\x00\x00\x00\x00\x50\x59\x48\x8b\x05\x00\x00\x00\x00\x49\x89\xc0\x49\x89\xc1")
-		out.AbsoluteReloc(base+6, 7, RTGRelocationImport)
-		out.AbsoluteReloc(base+20, argsOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(base+27, argsTextOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(base+149, argsLengthOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(base+159, 9, RTGRelocationImport)
-		out.AbsoluteReloc(base+173, environmentOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(base+226, environmentLengthOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(base+233, argsOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(base+242, argsLengthOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(base+253, environmentOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(base+262, environmentLengthOffset, RTGRelocationAbsoluteBSS)
-		return true
-	}
-
-	func x86ELFPatchAbsoluteRelocations(a *RTGEmitter, codeOffset int, dataOffset int, bssOffset int) {
-		for i := 0; i < a.AbsoluteRelocationCount(); i++ {
-			at := a.AbsoluteRelocationOffset(i)
-			addend := a.AbsoluteRelocationAddend(i)
-			kind := a.AbsoluteRelocationKind(i)
-			target := dataOffset + addend
-			if kind == RTGRelocationAbsoluteBSS {
-				target = bssOffset + addend
-			}
-			a.PatchUint32(at, target-(codeOffset+at+4))
-		}
-	}
 
 
 
-	type nativePELayout struct {
-		importRVA int
-		importSize int
-		iatRVA int
-		iatSize int
-		iat []int
-	}
 
-	func nativePut16(out []byte, at int, value int) {
-		out[at] = byte(value)
-		out[at+1] = byte(value >> 8)
-	}
 
-	func nativePut64(out []byte, at int, value int) {
-		nativePut32(out, at, value)
-		nativePut32(out, at+4, 0)
-	}
 
-	func nativeUntil(out []byte, size int) []byte {
-		for len(out) < size {
-			out = append(out, 0)
-		}
-		return out
-	}
 
-	func nativeStringZ(out []byte, value string) []byte {
-		for i := 0; i < len(value); i++ {
-			out = append(out, value[i])
-		}
-		return append(out, 0)
-	}
 
-	func nativePEImportName(id int) string {
-		if id == 1 { return "CreateFileA" }
-		if id == 2 { return "CloseHandle" }
-		if id == 3 { return "ReadFile" }
-		if id == 4 { return "WriteFile" }
-		if id == 5 { return "SetFilePointer" }
-		if id == 6 { return "GetStdHandle" }
-		if id == 7 { return "GetCommandLineA" }
-		if id == 9 { return "GetEnvironmentStringsA" }
-		return "ExitProcess"
-	}
 
-	func nativePEImportEntry(data []byte, layout *nativePELayout, dataRVA int, iltAt int, iatAt int, slot int, id int, name string, wordBytes int) []byte {
-		nameAt := len(data)
-		data = append(data, 0, 0)
-		data = nativeStringZ(data, name)
-		if len(data)&1 != 0 {
-			data = append(data, 0)
-		}
-		nameRVA := dataRVA + nameAt
-		if wordBytes == 4 {
-			nativePut32(data, iltAt+slot*wordBytes, nameRVA)
-			nativePut32(data, iatAt+slot*wordBytes, nameRVA)
-		} else {
-			nativePut64(data, iltAt+slot*wordBytes, nameRVA)
-			nativePut64(data, iatAt+slot*wordBytes, nameRVA)
-		}
-		layout.iat[id] = dataRVA + iatAt + slot*wordBytes
-		return data
-	}
 
-	func nativePEBuildImports(out *RTGEmitter, data []byte, dataRVA int, wordBytes int) ([]byte, nativePELayout) {
-		var layout nativePELayout
-		staticCount := out.StaticImportCount()
-		importAt := RTGAlignValue(len(data), wordBytes)
-		data = nativeUntil(data, importAt+(staticCount+2)*20)
-		iltAt := len(data)
-		data = nativeUntil(data, iltAt+10*wordBytes)
-		iatAt := len(data)
-		data = nativeUntil(data, iatAt+10*wordBytes)
-		customAt := len(data)
-		data = nativeUntil(data, customAt+staticCount*4*wordBytes)
-		layout.iat = make([]int, 10+staticCount)
-		for id := 1; id <= 9; id++ {
-			data = nativePEImportEntry(data, &layout, dataRVA, iltAt, iatAt, id-1, id, nativePEImportName(id), wordBytes)
-		}
-		for i := 0; i < staticCount; i++ {
-			customILT := customAt + i*4*wordBytes
-			customIAT := customILT + 2*wordBytes
-			data = nativePEImportEntry(data, &layout, dataRVA, customILT, customIAT, 0, 10+i, out.StaticImportName(i), wordBytes)
-		}
-		dllAt := len(data)
-		data = nativeStringZ(data, "kernel32.dll")
-		nativePut32(data, importAt, dataRVA+iltAt)
-		nativePut32(data, importAt+12, dataRVA+dllAt)
-		nativePut32(data, importAt+16, dataRVA+iatAt)
-		for i := 0; i < staticCount; i++ {
-			customILT := customAt + i*4*wordBytes
-			customIAT := customILT + 2*wordBytes
-			dllAt = len(data)
-			data = nativeStringZ(data, out.StaticImportDLL(i))
-			descriptor := importAt + (i+1)*20
-			nativePut32(data, descriptor, dataRVA+customILT)
-			nativePut32(data, descriptor+12, dataRVA+dllAt)
-			nativePut32(data, descriptor+16, dataRVA+customIAT)
-		}
-		layout.importRVA = dataRVA + importAt
-		layout.importSize = len(data) - importAt
-		layout.iatRVA = dataRVA + iatAt
-		layout.iatSize = customAt + staticCount*4*wordBytes - iatAt
-		return data, layout
-	}
 
-	func x86PEPatch(out *RTGEmitter, dataRVA int, dataSize int, layout nativePELayout) {
-		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
-			at := out.AbsoluteRelocationOffset(i)
-			addend := out.AbsoluteRelocationAddend(i)
-			kind := out.AbsoluteRelocationKind(i)
-			target := dataRVA + addend
-			if kind == RTGRelocationAbsoluteBSS {
-				target = dataRVA + dataSize + addend
-			} else if kind == RTGRelocationImport {
-				if addend > 0 && addend < len(layout.iat) {
-					target = layout.iat[addend]
-				}
-			}
-			out.PatchUint32(at, target-(0x1000+at+4))
-		}
-	}
 
-	func x86PEHeader(textRaw int, textSize int, dataRVA int, dataRaw int, dataSize int, layout nativePELayout, subsystem int) []byte {
-		out := make([]byte, 0, 512)
-		out = nativeUntil(out, 512)
-		nativePut16(out, 0, 0x5a4d)
-		nativePut32(out, 0x3c, 0x80)
-		pe := 0x80
-		nativePut32(out, pe, 0x00004550)
-		nativePut16(out, pe+4, 0x8664)
-		nativePut16(out, pe+6, 2)
-		nativePut16(out, pe+20, 0xf0)
-		nativePut16(out, pe+22, 0x22)
-		opt := pe + 24
-		nativePut16(out, opt, 0x20b)
-		nativePut32(out, opt+4, textRaw)
-		nativePut32(out, opt+8, dataRaw)
-		nativePut32(out, opt+16, 0x1000)
-		nativePut32(out, opt+20, 0x1000)
-		nativePut64(out, opt+24, 0x400000)
-		nativePut32(out, opt+32, 0x1000)
-		nativePut32(out, opt+36, 0x200)
-		nativePut16(out, opt+40, 4)
-		nativePut16(out, opt+48, 4)
-		nativePut32(out, opt+56, RTGAlignValue(dataRVA+dataSize, 0x1000))
-		nativePut32(out, opt+60, 0x200)
-		nativePut16(out, opt+68, subsystem)
-		nativePut16(out, opt+70, 0x100)
-		nativePut64(out, opt+72, 0x800000)
-		nativePut64(out, opt+80, 0x1000)
-		nativePut64(out, opt+88, 0x100000)
-		nativePut64(out, opt+96, 0x1000)
-		nativePut32(out, opt+108, 16)
-		nativePut32(out, opt+120, layout.importRVA)
-		nativePut32(out, opt+124, layout.importSize)
-		nativePut32(out, opt+208, layout.iatRVA)
-		nativePut32(out, opt+212, layout.iatSize)
-		out = out[:opt+240]
-		out = nativePESection(out, ".text", textSize, 0x1000, textRaw, 0x200, 0x60000020)
-		out = nativePESection(out, ".data", dataSize, dataRVA, dataRaw, 0x200+textRaw, 0xc0000040)
-		return nativeUntil(out, 0x200)
-	}
 
-	func x86PE64Image(out *RTGEmitter) []byte {
-		code := out.Code()
-		for len(code)%8 != 0 {
-			code = append(code, 0)
-		}
-		out.SetCode(code)
-		textSize := len(code)
-		textRaw := RTGAlignValue(textSize, 0x200)
-		dataRVA := RTGAlignValue(0x1000+textSize, 0x1000)
-		data, layout := nativePEBuildImports(out, out.Data(), dataRVA, 8)
-		out.SetData(data)
-		x86PEPatch(out, dataRVA, len(data), layout)
-		dataRaw := RTGAlignValue(len(data), 0x200)
-		dataSize := len(data) + out.BSSSize()
-		image := x86PEHeader(textRaw, textSize, dataRVA, dataRaw, dataSize, layout, out.WindowsSubsystem())
-		image = append(image, out.Code()...)
-		image = nativeUntil(image, 0x200+textRaw)
-		image = append(image, data...)
-		return nativeUntil(image, 0x200+textRaw+dataRaw)
-	}
+
+
+
+
+
+
+
+
 
 	func x86WindowsExit(out *RTGEmitter, status RTGRegister) {
 		if status.Code != 1 {
@@ -979,47 +113,6 @@ go backend {
 
 
 
-	func x86WindowsRuntimeReadWrite(
-		out *RTGEmitter, write bool, positional bool,
-	) {
-		helper := out.NewLabel()
-		after := out.NewLabel()
-		countOffset := out.ReserveBSS(8, 8)
-		positionOffset := out.ReserveBSS(8, 8)
-		base := out.Len()
-		x86Relative(out, 0xe9, after)
-		out.Mark(helper)
-		importID := 3
-		template := "\x57\x56\x52\x51\x48\x83\x7c\x24\x18\x00\x74\x02\xeb\x18\xb9\xf6\xff\xff\xff\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\x44\x24\x18\x48\x83\x3c\x24\x00\x0f\x8c\x80\x00\x00\x00\x48\x8b\x4c\x24\x18\x31\xd2\x45\x31\xc0\x41\xb9\x01\x00\x00\x00\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\x05\x00\x00\x00\x00\x48\x8b\x4c\x24\x18\x48\x8b\x14\x24\x45\x31\xc0\x45\x31\xc9\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x8b\x4c\x24\x18\x48\x8b\x54\x24\x10\x4c\x8b\x44\x24\x08\x48\x8d\x05\x00\x00\x00\x00\x49\x89\xc1\x48\x83\xec\x28\x48\xc7\x44\x24\x20\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x83\xf8\x00\x74\x52\x48\x8b\x05\x00\x00\x00\x00\xeb\x4c\x48\x8b\x4c\x24\x18\x48\x8b\x54\x24\x10\x4c\x8b\x44\x24\x08\x48\x8d\x05\x00\x00\x00\x00\x49\x89\xc1\x48\x83\xec\x28\x48\xc7\x44\x24\x20\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x83\xf8\x00\x74\x0c\x48\x8b\x05\x00\x00\x00\x00\x48\x83\xc4\x20\xc3\x6a\xff\x58\x48\x83\xc4\x20\xc3\x6a\xff\x58\x48\x89\x05\x00\x00\x00\x00\x48\x8b\x4c\x24\x18\x48\x8b\x05\x00\x00\x00\x00\x50\x5a\x45\x31\xc0\x45\x31\xc9\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x8b\x05\x00\x00\x00\x00\x48\x83\xc4\x20\xc3"
-		commonOffset := 24
-		if write {
-			importID = 4
-			template = "\x57\x56\x52\x51\x48\x83\x7c\x24\x18\x01\x74\x0a\x48\x83\x7c\x24\x18\x02\x74\x1c\xeb\x32\xb9\xf5\xff\xff\xff\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\x44\x24\x18\xeb\x18\xb9\xf4\xff\xff\xff\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\x44\x24\x18\x48\x83\x3c\x24\x00\x0f\x8c\x80\x00\x00\x00\x48\x8b\x4c\x24\x18\x31\xd2\x45\x31\xc0\x41\xb9\x01\x00\x00\x00\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\x05\x00\x00\x00\x00\x48\x8b\x4c\x24\x18\x48\x8b\x14\x24\x45\x31\xc0\x45\x31\xc9\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x8b\x4c\x24\x18\x48\x8b\x54\x24\x10\x4c\x8b\x44\x24\x08\x48\x8d\x05\x00\x00\x00\x00\x49\x89\xc1\x48\x83\xec\x28\x48\xc7\x44\x24\x20\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x83\xf8\x00\x74\x52\x48\x8b\x05\x00\x00\x00\x00\xeb\x4c\x48\x8b\x4c\x24\x18\x48\x8b\x54\x24\x10\x4c\x8b\x44\x24\x08\x48\x8d\x05\x00\x00\x00\x00\x49\x89\xc1\x48\x83\xec\x28\x48\xc7\x44\x24\x20\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x83\xf8\x00\x74\x0c\x48\x8b\x05\x00\x00\x00\x00\x48\x83\xc4\x20\xc3\x6a\xff\x58\x48\x83\xc4\x20\xc3\x6a\xff\x58\x48\x89\x05\x00\x00\x00\x00\x48\x8b\x4c\x24\x18\x48\x8b\x05\x00\x00\x00\x00\x50\x5a\x45\x31\xc0\x45\x31\xc9\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x8b\x05\x00\x00\x00\x00\x48\x83\xc4\x20\xc3"
-			out.AbsoluteReloc(base+38, 6, RTGRelocationImport)
-			commonOffset = 68
-		}
-		out.Text(template)
-		commonBase := base + commonOffset
-		out.AbsoluteReloc(commonBase+9, 6, RTGRelocationImport)
-		out.AbsoluteReloc(commonBase+55, 5, RTGRelocationImport)
-		out.AbsoluteReloc(commonBase+66, positionOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(commonBase+91, 5, RTGRelocationImport)
-		out.AbsoluteReloc(commonBase+117, countOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(commonBase+139, importID, RTGRelocationImport)
-		out.AbsoluteReloc(commonBase+155, countOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(commonBase+179, countOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(commonBase+201, importID, RTGRelocationImport)
-		out.AbsoluteReloc(commonBase+217, countOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(commonBase+240, countOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(commonBase+252, positionOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(commonBase+270, 5, RTGRelocationImport)
-		out.AbsoluteReloc(commonBase+281, countOffset, RTGRelocationAbsoluteBSS)
-		out.Mark(after)
-		if !positional {
-			x86MoveImmediate(out, RTGRegister{Code: 1, Valid: true}, -1)
-		}
-		x86Relative(out, 0xe8, helper)
-	}
 
 
 
@@ -1029,39 +122,6 @@ go backend {
 
 
 
-	func x86WindowsRuntimeOperation(
-		out *RTGEmitter, operation int,
-	) bool {
-		if operation == RTGRuntimeRead {
-			x86WindowsRuntimeReadWrite(out, false, false)
-			return true
-		}
-		if operation == RTGRuntimeWrite {
-			x86WindowsRuntimeReadWrite(out, true, false)
-			return true
-		}
-		if operation == RTGRuntimeReadAt {
-			x86WindowsRuntimeReadWrite(out, false, true)
-			return true
-		}
-		if operation == RTGRuntimeWriteAt {
-			x86WindowsRuntimeReadWrite(out, true, true)
-			return true
-		}
-		if operation == RTGRuntimeOpen {
-			x86WindowsRuntimeOpen(out)
-			return true
-		}
-		if operation == RTGRuntimeClose {
-			x86WindowsRuntimeClose(out)
-			return true
-		}
-		if operation == RTGRuntimeChmod {
-			x86WindowsRuntimeChmod(out)
-			return true
-		}
-		return false
-	}
 
 	func x86WindowsLoadRAXFromR10(out *RTGEmitter, offset int) {
 		if offset <= 127 {
@@ -1617,18 +677,6 @@ go backend {
 
 
 
-	func x86PatchRelocations(out *RTGEmitter) {
-		for i := 0; i < out.RelocationCount(); i++ {
-			at := out.RelocationOffset(i)
-			label := out.RelocationLabel(i)
-			target := out.LabelPosition(label)
-			if at < 0 || at+4 > len(out.Code()) || target < 0 {
-				continue
-			}
-			addend := RTGGet32At(out.Code(), at)
-			out.PatchUint32(at, target+addend-(at+4))
-		}
-	}
 
 
 
@@ -1650,7 +698,7 @@ arch x86_64 {
     stack_word_bytes = 8
     stack_alignment = 16
     unaligned_memory = true
-    patch_relocations = go x86PatchRelocations
+    patch_relocations = relative32_le
 
     # List position is the architectural register number. The x86 encoder
     # derives low3, REX bits, byte-register names, RSP/R12 SIB rules, and
@@ -1942,14 +990,6 @@ arch x86_64 {
 			call out.Bytes3(0xfc,0xf3,0xa4)
 			call out.Mark(done)
 		}
-		x86ELF64Image(a:emitter) -> bytes {
-			let codeOffset = 176
-			let dataOffset = codeOffset+len(a.Code())
-			let fileSize = dataOffset+len(a.Data())
-			let bssOffset = RTGAlignValue(fileSize,4096)
-			call x86ELFPatchAbsoluteRelocations(a,codeOffset,dataOffset,bssOffset)
-			return nativeELFExecutable64(a,62,0,codeOffset)
-		}
 		x86FrameStart(out:emitter) -> int {
 			let at = out.Len()
 			call out.Bytes4(0xc8,0,0,0)
@@ -1985,7 +1025,7 @@ arch x86_64 {
 		}
 		x86KernelAppendELFHeader(out:bytes, sectionOffset:int, sectionCount:int, namesIndex:int) -> bytes {
 			set out = append(out,0x7f,'E','L','F',2,1,1,0)
-			set out = x86KernelUntil(out,16)
+			set out = append(out,0,0,0,0,0,0,0,0)
 			set out = x86KernelAppend16(out,1)
 			set out = x86KernelAppend16(out,62)
 			set out = nativeAppend32(out,1)
@@ -2095,6 +1135,10 @@ arch x86_64 {
 			call out.Text("\x41\x54\x49\x89\xe4\x48\x83\xe4\xf0\x48\x83\xec\x40\x44\x89\x54\x24\x20\xc7\x44\x24\x28\x80\x00\x00\x00\x48\xc7\x44\x24\x30\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x49\x89\xc3\x4c\x89\xe4\x41\x5c\x4c\x89\xd8")
 			call out.AbsoluteReloc(base+37,1,RTGRelocationImport)
 		}
+
+
+
+
 		x86WindowsTranslateCreateFileFlags(out:emitter) {
 			let rdx = record_register(Code:2,Valid:true)
 			let r8 = record_register(Code:8,Valid:true)
@@ -2140,11 +1184,14 @@ arch x86_64 {
 format elf64_x86_64 {
     kind = elf
     code_offset = 176
-    image = sequence x86ELF64Image
+    image = elf_executable
+    patch_absolute = relative32_le
+    patch_pc_bias = 4
     byte_order = little
     address_bits = 64
     file_alignment = 0x1000
     machine = 62
+    flags = 0
 
     header elf {
         magic = [0x7f, 0x45, 0x4c, 0x46]
@@ -2200,11 +1247,16 @@ format elf64_x86_64 {
 
 format elf64_object_x86_64 {
     kind = "elf-relocatable"
-    kernel_image = go x86KernelModuleImage
+    kernel_image = linux_module_elf
     byte_order = little
     address_bits = 64
     machine = 62
     type = relocatable
+    append64 = sequence nativeAppend64
+    append_header = sequence x86KernelAppendELFHeader
+    append_relocation = sequence x86KernelAppendRelocation
+    append_section = sequence x86KernelAppendSection
+    append_symbol = sequence x86KernelAppendSymbol
 
     sections {
         text progbits alloc|execute align=16
@@ -2228,12 +1280,25 @@ format pe64_x86_64 {
     address_bits = 64
     machine = 0x8664
     code_offset = 0x1000
-    image = go x86PE64Image
+    image = pe_executable
+    patch_image = pe_relative32
     image_base = 0x400000
     headers_size = 0x200
     file_alignment = 0x200
     section_alignment = 0x1000
     text_rva = 0x1000
+    coff_characteristics = 0x22
+    dll_characteristics = 0x100
+    os_version_major = 4
+    os_version_minor = 0
+    image_version_major = 0
+    image_version_minor = 0
+    subsystem_version_major = 4
+    subsystem_version_minor = 0
+    stack_reserve = 0x800000
+    stack_commit = 0x1000
+    heap_reserve = 0x100000
+    heap_commit = 0x1000
 
     dos_header {
         magic = [0x4d, 0x5a]
@@ -2354,14 +1419,25 @@ format coff64_object_x86_64 {
 # Runtime declarations define only the supported boundary. Missing operations
 # are rejected during definition validation rather than silently emulated.
 runtime linux_x86_64 {
-    emit_entry = go x86LinuxEntry
-
     entry process_stack {
         argc = word(rsp, 0)
         argv = words(rsp + 8, argc)
         envp = words(rsp + 16 + argc * 8, until_null)
         string = nul_terminated_bytes
         result = [slice(argv), slice(envp)]
+    }
+
+    entry template {
+        max_parameters = 2
+        bss args 32768 16
+        bss environment 32768 16
+        bss environmentLength 8 8
+        code = "\x48\x8b\x04\x24\x49\x89\xc0\x4c\x8d\x4c\x24\x08\x4c\x8d\x15\x00\x00\x00\x00\x4d\x89\xd4\x4d\x31\xdb\x4d\x39\xc3\x7d\x22\x4b\x8b\x3c\xd9\x49\x89\x3a\x48\x31\xc0\x80\x3c\x07\x00\x74\x05\x48\xff\xc0\xeb\xf5\x49\x89\x42\x08\x49\x83\xc2\x10\x49\xff\xc3\xeb\xd9\x4c\x8d\x4c\x24\x08\x49\x83\x39\x00\x74\x06\x49\x83\xc1\x08\xeb\xf4\x49\x83\xc1\x08\x4c\x8d\x15\x00\x00\x00\x00\x4d\x31\xdb\x4b\x8b\x3c\xd9\x48\x83\xff\x00\x74\x1e\x49\x89\x3a\x48\x31\xc0\x80\x3c\x07\x00\x74\x05\x48\xff\xc0\xeb\xf5\x49\x89\x42\x08\x49\x83\xc2\x10\x49\xff\xc3\xeb\xd8\x4c\x89\xd8\x48\x89\x05\x00\x00\x00\x00\x4c\x89\xe7\x4c\x89\xc6\x4c\x89\xc2\x48\x8d\x05\x00\x00\x00\x00\x50\x59\x48\x8b\x05\x00\x00\x00\x00\x49\x89\xc0\x49\x89\xc1"
+        relocation 15 bss args
+        relocation 88 bss environment
+        relocation 141 bss environmentLength
+        relocation 157 bss environment
+        relocation 166 bss environmentLength
     }
 
     syscall {
@@ -2384,12 +1460,10 @@ runtime linux_x86_64 {
 }
 
 runtime win32_x86_64 {
-    emit_entry = go x86WindowsEntry
     emit_exit = go x86WindowsExit
     emit_static_call = go x86WindowsStaticCall
-    emit_operation = go x86WindowsRuntimeOperation
 
-    imports "KERNEL32.dll" = [
+    imports "kernel32.dll" = [
         CreateFileA,
         CloseHandle,
         ReadFile,
@@ -2401,6 +1475,63 @@ runtime win32_x86_64 {
         GetEnvironmentStringsA
     ]
 
+    io_template {
+        bss count 8 8
+        bss position 8 8
+        read_code = "\x57\x56\x52\x51\x48\x83\x7c\x24\x18\x00\x74\x02\xeb\x18\xb9\xf6\xff\xff\xff\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\x44\x24\x18\x48\x83\x3c\x24\x00\x0f\x8c\x80\x00\x00\x00\x48\x8b\x4c\x24\x18\x31\xd2\x45\x31\xc0\x41\xb9\x01\x00\x00\x00\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\x05\x00\x00\x00\x00\x48\x8b\x4c\x24\x18\x48\x8b\x14\x24\x45\x31\xc0\x45\x31\xc9\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x8b\x4c\x24\x18\x48\x8b\x54\x24\x10\x4c\x8b\x44\x24\x08\x48\x8d\x05\x00\x00\x00\x00\x49\x89\xc1\x48\x83\xec\x28\x48\xc7\x44\x24\x20\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x83\xf8\x00\x74\x52\x48\x8b\x05\x00\x00\x00\x00\xeb\x4c\x48\x8b\x4c\x24\x18\x48\x8b\x54\x24\x10\x4c\x8b\x44\x24\x08\x48\x8d\x05\x00\x00\x00\x00\x49\x89\xc1\x48\x83\xec\x28\x48\xc7\x44\x24\x20\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x83\xf8\x00\x74\x0c\x48\x8b\x05\x00\x00\x00\x00\x48\x83\xc4\x20\xc3\x6a\xff\x58\x48\x83\xc4\x20\xc3\x6a\xff\x58\x48\x89\x05\x00\x00\x00\x00\x48\x8b\x4c\x24\x18\x48\x8b\x05\x00\x00\x00\x00\x50\x5a\x45\x31\xc0\x45\x31\xc9\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x8b\x05\x00\x00\x00\x00\x48\x83\xc4\x20\xc3"
+        write_code = "\x57\x56\x52\x51\x48\x83\x7c\x24\x18\x01\x74\x0a\x48\x83\x7c\x24\x18\x02\x74\x1c\xeb\x32\xb9\xf5\xff\xff\xff\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\x44\x24\x18\xeb\x18\xb9\xf4\xff\xff\xff\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\x44\x24\x18\x48\x83\x3c\x24\x00\x0f\x8c\x80\x00\x00\x00\x48\x8b\x4c\x24\x18\x31\xd2\x45\x31\xc0\x41\xb9\x01\x00\x00\x00\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\x05\x00\x00\x00\x00\x48\x8b\x4c\x24\x18\x48\x8b\x14\x24\x45\x31\xc0\x45\x31\xc9\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x8b\x4c\x24\x18\x48\x8b\x54\x24\x10\x4c\x8b\x44\x24\x08\x48\x8d\x05\x00\x00\x00\x00\x49\x89\xc1\x48\x83\xec\x28\x48\xc7\x44\x24\x20\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x83\xf8\x00\x74\x52\x48\x8b\x05\x00\x00\x00\x00\xeb\x4c\x48\x8b\x4c\x24\x18\x48\x8b\x54\x24\x10\x4c\x8b\x44\x24\x08\x48\x8d\x05\x00\x00\x00\x00\x49\x89\xc1\x48\x83\xec\x28\x48\xc7\x44\x24\x20\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x83\xf8\x00\x74\x0c\x48\x8b\x05\x00\x00\x00\x00\x48\x83\xc4\x20\xc3\x6a\xff\x58\x48\x83\xc4\x20\xc3\x6a\xff\x58\x48\x89\x05\x00\x00\x00\x00\x48\x8b\x4c\x24\x18\x48\x8b\x05\x00\x00\x00\x00\x50\x5a\x45\x31\xc0\x45\x31\xc9\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x8b\x05\x00\x00\x00\x00\x48\x83\xc4\x20\xc3"
+        read_relocation 33 import 6
+        read_relocation 79 import 5
+        read_relocation 90 bss position
+        read_relocation 115 import 5
+        read_relocation 141 bss count
+        read_relocation 163 import 3
+        read_relocation 179 bss count
+        read_relocation 203 bss count
+        read_relocation 225 import 3
+        read_relocation 241 bss count
+        read_relocation 264 bss count
+        read_relocation 276 bss position
+        read_relocation 294 import 5
+        read_relocation 305 bss count
+        write_relocation 38 import 6
+        write_relocation 77 import 6
+        write_relocation 123 import 5
+        write_relocation 134 bss position
+        write_relocation 159 import 5
+        write_relocation 185 bss count
+        write_relocation 207 import 4
+        write_relocation 223 bss count
+        write_relocation 247 bss count
+        write_relocation 269 import 4
+        write_relocation 285 bss count
+        write_relocation 308 bss count
+        write_relocation 320 bss position
+        write_relocation 338 import 5
+        write_relocation 349 bss count
+    }
+
+    entry template {
+        max_parameters = 2
+        bss args 32768 16
+        bss argsText 32768 16
+        bss argsLength 8 8
+        bss environment 32768 16
+        bss environmentLength 8 8
+        code = "\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\xc6\x4c\x8d\x15\x00\x00\x00\x00\x48\x8d\x05\x00\x00\x00\x00\x50\x5a\x4d\x31\xdb\x80\x3e\x00\x0f\x84\x62\x00\x00\x00\x80\x3e\x20\x74\x05\x80\x3e\x09\x75\x05\x48\xff\xc6\xeb\xe8\x49\x89\x12\x31\xc9\x45\x31\xc0\x8a\x06\x3c\x00\x74\x28\x3c\x22\x75\x09\x41\x83\xf0\x01\x48\xff\xc6\xeb\xed\x41\x83\xf8\x00\x75\x08\x3c\x20\x74\x11\x3c\x09\x74\x0d\x88\x02\x48\xff\xc6\x48\xff\xc2\x48\xff\xc1\xeb\xd2\xc6\x02\x00\x48\xff\xc2\x49\x89\x4a\x08\x49\x83\xc2\x10\x49\xff\xc3\x3c\x00\x74\x08\x48\xff\xc6\xe9\x95\xff\xff\xff\x4c\x89\xd8\x48\x89\x05\x00\x00\x00\x00\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\xc6\x4c\x8d\x15\x00\x00\x00\x00\x4d\x31\xdb\x80\x3e\x00\x74\x23\x49\x89\x32\x31\xc9\x80\x3c\x0e\x00\x74\x05\x48\xff\xc1\xeb\xf5\x49\x89\x4a\x08\x48\x01\xce\x48\xff\xc6\x49\x83\xc2\x10\x49\xff\xc3\xeb\xd8\x4c\x89\xd8\x48\x89\x05\x00\x00\x00\x00\x48\x8d\x05\x00\x00\x00\x00\x50\x5f\x48\x8b\x05\x00\x00\x00\x00\x50\x5e\x50\x5a\x48\x8d\x05\x00\x00\x00\x00\x50\x59\x48\x8b\x05\x00\x00\x00\x00\x49\x89\xc0\x49\x89\xc1"
+        relocation 6 import 7
+        relocation 20 bss args
+        relocation 27 bss argsText
+        relocation 149 bss argsLength
+        relocation 159 import 9
+        relocation 173 bss environment
+        relocation 226 bss environmentLength
+        relocation 233 bss args
+        relocation 242 bss argsLength
+        relocation 253 bss environment
+        relocation 262 bss environmentLength
+    }
+
     entry {
         arguments.source = call GetCommandLineA
         arguments.parse = go windowsCommandLine
@@ -2410,6 +1541,7 @@ runtime win32_x86_64 {
     }
 
     operation open {
+        emit = sequence x86WindowsRuntimeOpen
         call = CreateFileA
         arguments = [
             path,
@@ -2424,6 +1556,7 @@ runtime win32_x86_64 {
     }
 
     operation close {
+        emit = sequence x86WindowsRuntimeClose
         call = CloseHandle
         arguments = [fd]
         result = bool_or_error
@@ -2460,6 +1593,7 @@ runtime win32_x86_64 {
     }
 
     operation chmod {
+        emit = sequence x86WindowsRuntimeChmod
         unsupported = "Win32 target does not expose chmod"
     }
 
@@ -2569,246 +1703,6 @@ target linux-kernel/amd64 {
 # This closed definition owns the complete 32-bit x86 production encoder and
 # its Linux and Windows target compositions.
 go backend {
-	func x86_32LinuxEntry(out *RTGEmitter, parameterCount int, stateOffset int) bool {
-		_ = stateOffset
-		if parameterCount == 0 {
-			return true
-		}
-		if parameterCount < 0 || parameterCount > 2 {
-			return false
-		}
-		argsOffset := out.ReserveBSS(32768, 16)
-		environmentOffset := out.ReserveBSS(32768, 16)
-		environmentLengthOffset := out.ReserveBSS(8, 8)
-		argumentLoop := out.NewLabel()
-		argumentLength := out.NewLabel()
-		argumentLengthDone := out.NewLabel()
-		argumentsDone := out.NewLabel()
-		environmentLoop := out.NewLabel()
-		environmentLength := out.NewLabel()
-		environmentLengthDone := out.NewLabel()
-		environmentDone := out.NewLabel()
-
-		out.Text("\x8b\x04\x24\x89\xe6\x83\xc6\x04")
-		renvo386AsmMovRegPCRel(out, 7, argsOffset, RTGRelocationAbsoluteBSS)
-		out.Text("\x31\xc9")
-		out.Mark(argumentLoop)
-		out.Text("\x39\xc1")
-		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x8d}, argumentsDone)
-		out.Text("\x8b\x14\x8e\x89\x17\x31\xdb")
-		out.Mark(argumentLength)
-		out.Text("\x80\x3c\x1a\x00")
-		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, argumentLengthDone)
-		out.Text("\x43")
-		x86_32Jump(out, argumentLength)
-		out.Mark(argumentLengthDone)
-		out.Text("\x89\x5f\x08\x83\xc7\x10\x41")
-		x86_32Jump(out, argumentLoop)
-		out.Mark(argumentsDone)
-
-		out.Text("\x8d\x74\x86\x08")
-		renvo386AsmMovRegPCRel(out, 7, environmentOffset, RTGRelocationAbsoluteBSS)
-		out.Text("\x31\xc9")
-		out.Mark(environmentLoop)
-		out.Text("\x8b\x14\x8e\x85\xd2")
-		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, environmentDone)
-		out.Text("\x89\x17\x31\xdb")
-		out.Mark(environmentLength)
-		out.Text("\x80\x3c\x1a\x00")
-		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, environmentLengthDone)
-		out.Text("\x43")
-		x86_32Jump(out, environmentLength)
-		out.Mark(environmentLengthDone)
-		out.Text("\x89\x5f\x08\x83\xc7\x10\x41")
-		x86_32Jump(out, environmentLoop)
-		out.Mark(environmentDone)
-		renvo386AsmMovRegPCRel(out, 6, environmentLengthOffset, RTGRelocationAbsoluteBSS)
-		out.Uint16(0x0e89)
-
-		renvo386AsmMovRegPCRel(out, 3, argsOffset, RTGRelocationAbsoluteBSS)
-		out.Text("\x89\xc6\x89\xc2")
-		renvo386AsmMovRegPCRel(out, 1, environmentOffset, RTGRelocationAbsoluteBSS)
-		renvo386AsmMovRegPCRel(out, 0, environmentLengthOffset, RTGRelocationAbsoluteBSS)
-		out.Uint16(0x008b)
-		out.Text("\x89\xc7")
-		return true
-	}
-
-	func x86_32WindowsEntry(out *RTGEmitter, parameterCount int, stateOffset int) bool {
-		_ = stateOffset
-		if parameterCount == 0 {
-			return true
-		}
-		if parameterCount < 0 || parameterCount > 2 {
-			return false
-		}
-		argsOffset := out.ReserveBSS(32768, 16)
-		argsTextOffset := out.ReserveBSS(32768, 16)
-		argsLengthOffset := out.ReserveBSS(8, 8)
-		environmentOffset := out.ReserveBSS(32768, 16)
-		environmentLengthOffset := out.ReserveBSS(8, 8)
-		base := out.Len()
-		out.Text("\xff\x15\x00\x00\x00\x00\x89\xc6\xbf\x00\x00\x00\x00\xb8\x00\x00\x00\x00\x89\xc2\x31\xdb\x80\x3e\x00\x0f\x84\x75\x00\x00\x00\x80\x3e\x20\x0f\x84\x09\x00\x00\x00\x80\x3e\x09\x0f\x85\x06\x00\x00\x00\x46\xe9\xdf\xff\xff\xff\x89\x17\x31\xc9\x31\xed\x8a\x06\x3c\x00\x0f\x84\x34\x00\x00\x00\x3c\x22\x0f\x85\x09\x00\x00\x00\x83\xf5\x01\x46\xe9\xe5\xff\xff\xff\x83\xfd\x00\x0f\x85\x10\x00\x00\x00\x3c\x20\x0f\x84\x12\x00\x00\x00\x3c\x09\x0f\x84\x0a\x00\x00\x00\x88\x02\x46\x42\x41\xe9\xc2\xff\xff\xff\xc6\x02\x00\x42\x89\x4f\x08\x83\xc7\x10\x43\x3c\x00\x0f\x84\x06\x00\x00\x00\x46\xe9\x82\xff\xff\xff\x89\xd8\xa3\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x89\xc6\xbf\x00\x00\x00\x00\x31\xdb\x80\x3e\x00\x0f\x84\x23\x00\x00\x00\x89\x37\x31\xc9\x80\x3c\x0e\x00\x0f\x84\x06\x00\x00\x00\x41\xe9\xf0\xff\xff\xff\x89\x4f\x08\x01\xce\x46\x83\xc7\x10\x43\xe9\xd4\xff\xff\xff\x89\xd8\xa3\x00\x00\x00\x00\xbb\x00\x00\x00\x00\x8b\x35\x00\x00\x00\x00\x89\xf2\xb9\x00\x00\x00\x00\xa1\x00\x00\x00\x00\x89\xc7")
-		out.AbsoluteReloc(base+2, 7, RTGRelocationImport)
-		out.AbsoluteReloc(base+9, argsOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(base+14, argsTextOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(base+151, argsLengthOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(base+157, 9, RTGRelocationImport)
-		out.AbsoluteReloc(base+164, environmentOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(base+217, environmentLengthOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(base+222, argsOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(base+228, argsLengthOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(base+235, environmentOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(base+240, environmentLengthOffset, RTGRelocationAbsoluteBSS)
-		return true
-	}
-
-	func x86_32ELFPatchAbsoluteRelocations(a *RTGEmitter, codeOffset int, dataOffset int, bssOffset int) {
-		for i := 0; i < a.AbsoluteRelocationCount(); i++ {
-			at := a.AbsoluteRelocationOffset(i)
-			addend := a.AbsoluteRelocationAddend(i)
-			kind := a.AbsoluteRelocationKind(i)
-			target := dataOffset + addend
-			if kind == RTGRelocationAbsoluteBSS {
-				target = bssOffset + addend
-			}
-			a.PatchUint32(at, target-(codeOffset+at-3))
-		}
-	}
-
-
-
-	func x86_32PEPatch(out *RTGEmitter, dataRVA int, dataSize int, layout nativePELayout) {
-		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
-			at := out.AbsoluteRelocationOffset(i)
-			addend := out.AbsoluteRelocationAddend(i)
-			kind := out.AbsoluteRelocationKind(i)
-			target := dataRVA + addend
-			if kind == RTGRelocationAbsoluteBSS {
-				target = dataRVA + dataSize + addend
-			} else if kind == RTGRelocationImport {
-				if addend > 0 && addend < len(layout.iat) {
-					target = layout.iat[addend]
-				}
-			}
-			out.PatchUint32(at, 0x400000+target)
-		}
-	}
-
-	func nativePESection(out []byte, name string, virtualSize int, rva int, rawSize int, rawAt int, flags int) []byte {
-		start := len(out)
-		out = nativeUntil(out, start+40)
-		for i := 0; i < len(name); i++ {
-			out[start+i] = name[i]
-		}
-		nativePut32(out, start+8, virtualSize)
-		nativePut32(out, start+12, rva)
-		nativePut32(out, start+16, rawSize)
-		nativePut32(out, start+20, rawAt)
-		nativePut32(out, start+36, flags)
-		return out
-	}
-
-	func x86_32PEHeader(textRaw int, textSize int, dataRVA int, dataRaw int, dataSize int, layout nativePELayout, subsystem int) []byte {
-		out := make([]byte, 0, 512)
-		out = nativeUntil(out, 512)
-		nativePut16(out, 0, 0x5a4d)
-		nativePut32(out, 0x3c, 0x80)
-		pe := 0x80
-		nativePut32(out, pe, 0x00004550)
-		nativePut16(out, pe+4, 0x014c)
-		nativePut16(out, pe+6, 2)
-		nativePut16(out, pe+20, 0xe0)
-		nativePut16(out, pe+22, 0x0102)
-		opt := pe + 24
-		nativePut16(out, opt, 0x10b)
-		nativePut32(out, opt+4, textRaw)
-		nativePut32(out, opt+8, dataRaw)
-		nativePut32(out, opt+16, 0x1000)
-		nativePut32(out, opt+20, 0x1000)
-		nativePut32(out, opt+24, dataRVA)
-		nativePut32(out, opt+28, 0x400000)
-		nativePut32(out, opt+32, 0x1000)
-		nativePut32(out, opt+36, 0x200)
-		nativePut16(out, opt+40, 4)
-		nativePut16(out, opt+48, 4)
-		nativePut32(out, opt+56, RTGAlignValue(dataRVA+dataSize, 0x1000))
-		nativePut32(out, opt+60, 0x200)
-		nativePut16(out, opt+68, subsystem)
-		nativePut16(out, opt+70, 0x100)
-		nativePut32(out, opt+72, 0x100000)
-		nativePut32(out, opt+76, 0x1000)
-		nativePut32(out, opt+80, 0x100000)
-		nativePut32(out, opt+84, 0x1000)
-		nativePut32(out, opt+92, 16)
-		nativePut32(out, opt+104, layout.importRVA)
-		nativePut32(out, opt+108, layout.importSize)
-		nativePut32(out, opt+192, layout.iatRVA)
-		nativePut32(out, opt+196, layout.iatSize)
-		out = out[:opt+224]
-		out = nativePESection(out, ".text", textSize, 0x1000, textRaw, 0x200, 0x60000020)
-		out = nativePESection(out, ".data", dataSize, dataRVA, dataRaw, 0x200+textRaw, 0xc0000040)
-		return nativeUntil(out, 0x200)
-	}
-
-	func x86_32PE32Image(out *RTGEmitter) []byte {
-		code := out.Code()
-		for len(code)%4 != 0 {
-			code = append(code, 0)
-		}
-		out.SetCode(code)
-		textSize := len(code)
-		textRaw := RTGAlignValue(textSize, 0x200)
-		dataRVA := RTGAlignValue(0x1000+textSize, 0x1000)
-		data, layout := nativePEBuildImports(out, out.Data(), dataRVA, 4)
-		out.SetData(data)
-		x86_32PEPatch(out, dataRVA, len(data), layout)
-		dataRaw := RTGAlignValue(len(data), 0x200)
-		dataSize := len(data) + out.BSSSize()
-		image := x86_32PEHeader(textRaw, textSize, dataRVA, dataRaw, dataSize, layout, out.WindowsSubsystem())
-		image = append(image, out.Code()...)
-		image = nativeUntil(image, 0x200+textRaw)
-		image = append(image, data...)
-		return nativeUntil(image, 0x200+textRaw+dataRaw)
-	}
-
-
-
-
-
-
-
-	func x86_32WindowsRuntimeReadWrite(
-		out *RTGEmitter, write bool, positional bool,
-	) {
-		helper := out.NewLabel()
-		after := out.NewLabel()
-		countOffset := out.ReserveBSS(16, 4)
-		base := out.Len()
-		x86_32Relative(out, 0xe9, after)
-		out.Mark(helper)
-		template := "\x83\xfb\x00\x0f\x84\x05\x00\x00\x00\xe9\x0a\x00\x00\x00\x6a\xf6\xff\x15\x00\x00\x00\x00\x89\xc3\x83\xf9\x00\x0f\x8c\x49\x00\x00\x00\x51\x52\x6a\x01\x6a\x00\x6a\x00\x53\xff\x15\x00\x00\x00\x00\xa3\x00\x00\x00\x00\x5a\x59\x51\x52\x6a\x00\x6a\x00\x51\x53\xff\x15\x00\x00\x00\x00\x5a\x59\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x2d\x00\x00\x00\xa1\x00\x00\x00\x00\xe9\x26\x00\x00\x00\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x06\x00\x00\x00\xa1\x00\x00\x00\x00\xc3\x6a\xff\x58\xc3\x6a\xff\x58\xa3\x00\x00\x00\x00\x6a\x00\x6a\x00\xa1\x00\x00\x00\x00\x50\x53\xff\x15\x00\x00\x00\x00\xa1\x00\x00\x00\x00\xc3"
-		relocations := "\x17\x08\x31\x07\x36\x01\x46\x07\x4f\x00\x58\x05\x66\x00\x72\x00\x7b\x05\x89\x00\x96\x00\x9f\x01\xa7\x07\xac\x00"
-		if write {
-			template = "\x83\xfb\x01\x0f\x84\x0e\x00\x00\x00\x83\xfb\x02\x0f\x84\x14\x00\x00\x00\xe9\x19\x00\x00\x00\x6a\xf5\xff\x15\x00\x00\x00\x00\x89\xc3\xe9\x0a\x00\x00\x00\x6a\xf4\xff\x15\x00\x00\x00\x00\x89\xc3\x83\xf9\x00\x0f\x8c\x49\x00\x00\x00\x51\x52\x6a\x01\x6a\x00\x6a\x00\x53\xff\x15\x00\x00\x00\x00\xa3\x00\x00\x00\x00\x5a\x59\x51\x52\x6a\x00\x6a\x00\x51\x53\xff\x15\x00\x00\x00\x00\x5a\x59\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x2d\x00\x00\x00\xa1\x00\x00\x00\x00\xe9\x26\x00\x00\x00\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x06\x00\x00\x00\xa1\x00\x00\x00\x00\xc3\x6a\xff\x58\xc3\x6a\xff\x58\xa3\x00\x00\x00\x00\x6a\x00\x6a\x00\xa1\x00\x00\x00\x00\x50\x53\xff\x15\x00\x00\x00\x00\xa1\x00\x00\x00\x00\xc3"
-			relocations = "\x20\x08\x2f\x08\x49\x07\x4e\x01\x5e\x07\x67\x00\x70\x06\x7e\x00\x8a\x00\x93\x06\xa1\x00\xae\x00\xb7\x01\xbf\x07\xc4\x00"
-		}
-		out.Text(template)
-		for i := 0; i < len(relocations); i += 2 {
-			at := base + int(relocations[i])
-			kind := int(relocations[i+1])
-			if kind < 2 {
-				out.AbsoluteReloc(at, countOffset+kind*8, RTGRelocationAbsoluteBSS)
-			} else {
-				out.AbsoluteReloc(at, kind-2, RTGRelocationImport)
-			}
-		}
-		out.Mark(after)
-		if !positional {
-			x86_32MoveImmediate(out, RTGRegister{Code: 1, Valid: true}, -1)
-		}
-		x86_32Relative(out, 0xe8, helper)
-	}
 
 
 
@@ -2818,39 +1712,22 @@ go backend {
 
 
 
-	func x86_32WindowsRuntimeOperation(
-		out *RTGEmitter, operation int,
-	) bool {
-		if operation == RTGRuntimeRead {
-			x86_32WindowsRuntimeReadWrite(out, false, false)
-			return true
-		}
-		if operation == RTGRuntimeWrite {
-			x86_32WindowsRuntimeReadWrite(out, true, false)
-			return true
-		}
-		if operation == RTGRuntimeReadAt {
-			x86_32WindowsRuntimeReadWrite(out, false, true)
-			return true
-		}
-		if operation == RTGRuntimeWriteAt {
-			x86_32WindowsRuntimeReadWrite(out, true, true)
-			return true
-		}
-		if operation == RTGRuntimeOpen {
-			x86_32WindowsRuntimeOpen(out)
-			return true
-		}
-		if operation == RTGRuntimeClose {
-			x86_32WindowsRuntimeClose(out)
-			return true
-		}
-		if operation == RTGRuntimeChmod {
-			x86_32WindowsRuntimeChmod(out)
-			return true
-		}
-		return false
-	}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 	func renvo386AsmSecondaryDisp(a *RTGEmitter, disp int) {
 		if disp == 0 {
@@ -3263,18 +2140,6 @@ go backend {
 
 
 
-	func x86_32PatchRelocations(out *RTGEmitter) {
-		for i := 0; i < out.RelocationCount(); i++ {
-			at := out.RelocationOffset(i)
-			label := out.RelocationLabel(i)
-			target := out.LabelPosition(label)
-			if at < 0 || at+4 > len(out.Code()) || target < 0 {
-				continue
-			}
-			addend := RTGGet32At(out.Code(), at)
-			out.PatchUint32(at, target+addend-(at+4))
-		}
-	}
 
 
 
@@ -3294,7 +2159,7 @@ arch x86_32 {
 	word_bits = 32
 	pointer_bits = 32
 	instruction_alignment = 1
-	patch_relocations = go x86_32PatchRelocations
+	patch_relocations = relative32_le
 	registers gpr32 = [eax, ecx, edx, ebx, esp, ebp, esi, edi]
 	locations {
 		primary = eax
@@ -3601,14 +2466,6 @@ arch x86_32 {
 			call out.Bytes3(0xfc,0xf3,0xa4)
 			call out.Mark(done)
 		}
-		x86_32ELF32Image(a:emitter) -> bytes {
-			let codeOffset = 116
-			let dataOffset = codeOffset+len(a.Code())
-			let fileSize = dataOffset+len(a.Data())
-			let bssOffset = RTGAlignValue(fileSize,4096)
-			call x86_32ELFPatchAbsoluteRelocations(a,codeOffset,dataOffset,bssOffset)
-			return nativeELFExecutable32(a,3,0,codeOffset)
-		}
 		x86_32FrameStart(out:emitter) -> int {
 			let at = out.Len()
 			call out.Bytes4(0xc8,0,0,0)
@@ -3668,6 +2525,10 @@ arch x86_32 {
 			call out.Int32(0)
 			call out.AbsoluteReloc(at,importID,RTGRelocationImport)
 		}
+
+
+
+
 		x86_32WindowsRuntimeChmod(out:emitter) {
 			let eax = record_register(Code:0,Valid:true)
 			let ecx = record_register(Code:1,Valid:true)
@@ -3749,6 +2610,57 @@ arch x86_32 {
 			call x86_32MoveImmediate(out,ecx,5)
 			call out.Mark(createDone)
 		}
+
+		x86_32LinuxEntry(out:emitter, argsOffset:int, environmentOffset:int, environmentLengthOffset:int) {
+			let argumentLoop = out.NewLabel()
+			let argumentLength = out.NewLabel()
+			let argumentLengthDone = out.NewLabel()
+			let argumentsDone = out.NewLabel()
+			let environmentLoop = out.NewLabel()
+			let environmentLength = out.NewLabel()
+			let environmentLengthDone = out.NewLabel()
+			let environmentDone = out.NewLabel()
+			call out.Text("\x8b\x04\x24\x89\xe6\x83\xc6\x04")
+			call renvo386AsmMovRegPCRel(out,7,argsOffset,RTGRelocationAbsoluteBSS)
+			call out.Text("\x31\xc9")
+			call out.Mark(argumentLoop)
+			call out.Text("\x39\xc1")
+			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x8d),argumentsDone)
+			call out.Text("\x8b\x14\x8e\x89\x17\x31\xdb")
+			call out.Mark(argumentLength)
+			call out.Text("\x80\x3c\x1a\x00")
+			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x84),argumentLengthDone)
+			call out.Text("\x43")
+			call x86_32Jump(out,argumentLength)
+			call out.Mark(argumentLengthDone)
+			call out.Text("\x89\x5f\x08\x83\xc7\x10\x41")
+			call x86_32Jump(out,argumentLoop)
+			call out.Mark(argumentsDone)
+			call out.Text("\x8d\x74\x86\x08")
+			call renvo386AsmMovRegPCRel(out,7,environmentOffset,RTGRelocationAbsoluteBSS)
+			call out.Text("\x31\xc9")
+			call out.Mark(environmentLoop)
+			call out.Text("\x8b\x14\x8e\x85\xd2")
+			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x84),environmentDone)
+			call out.Text("\x89\x17\x31\xdb")
+			call out.Mark(environmentLength)
+			call out.Text("\x80\x3c\x1a\x00")
+			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x84),environmentLengthDone)
+			call out.Text("\x43")
+			call x86_32Jump(out,environmentLength)
+			call out.Mark(environmentLengthDone)
+			call out.Text("\x89\x5f\x08\x83\xc7\x10\x41")
+			call x86_32Jump(out,environmentLoop)
+			call out.Mark(environmentDone)
+			call renvo386AsmMovRegPCRel(out,6,environmentLengthOffset,RTGRelocationAbsoluteBSS)
+			call out.Uint16(0x0e89)
+			call renvo386AsmMovRegPCRel(out,3,argsOffset,RTGRelocationAbsoluteBSS)
+			call out.Text("\x89\xc6\x89\xc2")
+			call renvo386AsmMovRegPCRel(out,1,environmentOffset,RTGRelocationAbsoluteBSS)
+			call renvo386AsmMovRegPCRel(out,0,environmentLengthOffset,RTGRelocationAbsoluteBSS)
+			call out.Uint16(0x008b)
+			call out.Text("\x89\xc7")
+		}
 }
 }
 
@@ -3776,7 +2688,12 @@ abi win32 {
 }
 
 runtime linux_386 {
-	emit_entry = go x86_32LinuxEntry
+		entry sequence x86_32LinuxEntry {
+		max_parameters = 2
+		bss args 32768 16
+		bss environment 32768 16
+		bss environmentLength 8 8
+	}
 
 	syscall {
 		number = eax
@@ -3796,11 +2713,74 @@ runtime linux_386 {
 }
 
 runtime windows_386 {
-	emit_entry = go x86_32WindowsEntry
 	emit_exit = sequence x86_32WindowsExit
 	emit_static_call = sequence x86_32WindowsStaticCall
-	emit_operation = go x86_32WindowsRuntimeOperation
-	operations = [print, open, close, read, write, read_at, write_at, chmod]
+	imports "kernel32.dll" = [
+		CreateFileA, CloseHandle, ReadFile, WriteFile, SetFilePointer,
+		GetStdHandle, GetCommandLineA, ExitProcess, GetEnvironmentStringsA
+	]
+	io_template {
+		bss count 16 4
+		read_code = "\x83\xfb\x00\x0f\x84\x05\x00\x00\x00\xe9\x0a\x00\x00\x00\x6a\xf6\xff\x15\x00\x00\x00\x00\x89\xc3\x83\xf9\x00\x0f\x8c\x49\x00\x00\x00\x51\x52\x6a\x01\x6a\x00\x6a\x00\x53\xff\x15\x00\x00\x00\x00\xa3\x00\x00\x00\x00\x5a\x59\x51\x52\x6a\x00\x6a\x00\x51\x53\xff\x15\x00\x00\x00\x00\x5a\x59\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x2d\x00\x00\x00\xa1\x00\x00\x00\x00\xe9\x26\x00\x00\x00\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x06\x00\x00\x00\xa1\x00\x00\x00\x00\xc3\x6a\xff\x58\xc3\x6a\xff\x58\xa3\x00\x00\x00\x00\x6a\x00\x6a\x00\xa1\x00\x00\x00\x00\x50\x53\xff\x15\x00\x00\x00\x00\xa1\x00\x00\x00\x00\xc3"
+		write_code = "\x83\xfb\x01\x0f\x84\x0e\x00\x00\x00\x83\xfb\x02\x0f\x84\x14\x00\x00\x00\xe9\x19\x00\x00\x00\x6a\xf5\xff\x15\x00\x00\x00\x00\x89\xc3\xe9\x0a\x00\x00\x00\x6a\xf4\xff\x15\x00\x00\x00\x00\x89\xc3\x83\xf9\x00\x0f\x8c\x49\x00\x00\x00\x51\x52\x6a\x01\x6a\x00\x6a\x00\x53\xff\x15\x00\x00\x00\x00\xa3\x00\x00\x00\x00\x5a\x59\x51\x52\x6a\x00\x6a\x00\x51\x53\xff\x15\x00\x00\x00\x00\x5a\x59\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x2d\x00\x00\x00\xa1\x00\x00\x00\x00\xe9\x26\x00\x00\x00\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x06\x00\x00\x00\xa1\x00\x00\x00\x00\xc3\x6a\xff\x58\xc3\x6a\xff\x58\xa3\x00\x00\x00\x00\x6a\x00\x6a\x00\xa1\x00\x00\x00\x00\x50\x53\xff\x15\x00\x00\x00\x00\xa1\x00\x00\x00\x00\xc3"
+		read_relocation 23 import 6
+		read_relocation 49 import 5
+		read_relocation 54 bss count 8
+		read_relocation 70 import 5
+		read_relocation 79 bss count
+		read_relocation 88 import 3
+		read_relocation 102 bss count
+		read_relocation 114 bss count
+		read_relocation 123 import 3
+		read_relocation 137 bss count
+		read_relocation 150 bss count
+		read_relocation 159 bss count 8
+		read_relocation 167 import 5
+		read_relocation 172 bss count
+		write_relocation 32 import 6
+		write_relocation 47 import 6
+		write_relocation 73 import 5
+		write_relocation 78 bss count 8
+		write_relocation 94 import 5
+		write_relocation 103 bss count
+		write_relocation 112 import 4
+		write_relocation 126 bss count
+		write_relocation 138 bss count
+		write_relocation 147 import 4
+		write_relocation 161 bss count
+		write_relocation 174 bss count
+		write_relocation 183 bss count 8
+		write_relocation 191 import 5
+		write_relocation 196 bss count
+	}
+	entry template {
+		max_parameters = 2
+		bss args 32768 16
+		bss argsText 32768 16
+		bss argsLength 8 8
+		bss environment 32768 16
+		bss environmentLength 8 8
+		code = "\xff\x15\x00\x00\x00\x00\x89\xc6\xbf\x00\x00\x00\x00\xb8\x00\x00\x00\x00\x89\xc2\x31\xdb\x80\x3e\x00\x0f\x84\x75\x00\x00\x00\x80\x3e\x20\x0f\x84\x09\x00\x00\x00\x80\x3e\x09\x0f\x85\x06\x00\x00\x00\x46\xe9\xdf\xff\xff\xff\x89\x17\x31\xc9\x31\xed\x8a\x06\x3c\x00\x0f\x84\x34\x00\x00\x00\x3c\x22\x0f\x85\x09\x00\x00\x00\x83\xf5\x01\x46\xe9\xe5\xff\xff\xff\x83\xfd\x00\x0f\x85\x10\x00\x00\x00\x3c\x20\x0f\x84\x12\x00\x00\x00\x3c\x09\x0f\x84\x0a\x00\x00\x00\x88\x02\x46\x42\x41\xe9\xc2\xff\xff\xff\xc6\x02\x00\x42\x89\x4f\x08\x83\xc7\x10\x43\x3c\x00\x0f\x84\x06\x00\x00\x00\x46\xe9\x82\xff\xff\xff\x89\xd8\xa3\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x89\xc6\xbf\x00\x00\x00\x00\x31\xdb\x80\x3e\x00\x0f\x84\x23\x00\x00\x00\x89\x37\x31\xc9\x80\x3c\x0e\x00\x0f\x84\x06\x00\x00\x00\x41\xe9\xf0\xff\xff\xff\x89\x4f\x08\x01\xce\x46\x83\xc7\x10\x43\xe9\xd4\xff\xff\xff\x89\xd8\xa3\x00\x00\x00\x00\xbb\x00\x00\x00\x00\x8b\x35\x00\x00\x00\x00\x89\xf2\xb9\x00\x00\x00\x00\xa1\x00\x00\x00\x00\x89\xc7"
+		relocation 2 import 7
+		relocation 9 bss args
+		relocation 14 bss argsText
+		relocation 151 bss argsLength
+		relocation 157 import 9
+		relocation 164 bss environment
+		relocation 217 bss environmentLength
+		relocation 222 bss args
+		relocation 228 bss argsLength
+		relocation 235 bss environment
+		relocation 240 bss environmentLength
+	}
+	operation read { template = io }
+	operation write { template = io }
+	operation read_at { template = io }
+	operation write_at { template = io }
+	operation open { emit = sequence x86_32WindowsRuntimeOpen }
+	operation close { emit = sequence x86_32WindowsRuntimeClose }
+	operation chmod { emit = sequence x86_32WindowsRuntimeChmod }
+	operation print { use = write }
 }
 
 format elf32_386 {
@@ -3809,7 +2789,11 @@ format elf32_386 {
 	kind = elf
 	machine = 3
 	code_offset = 116
-	image = sequence x86_32ELF32Image
+	file_alignment = 0x1000
+	flags = 0
+	image = elf_executable
+	patch_absolute = relative32_le
+	patch_pc_bias = -3
 }
 
 format pe32_386 {
@@ -3818,7 +2802,23 @@ format pe32_386 {
 	kind = pe
 	machine = 0x014c
 	code_offset = 0x1000
-	image = go x86_32PE32Image
+	image = pe_executable
+	patch_image = pe_absolute32
+	image_base = 0x400000
+	file_alignment = 0x200
+	section_alignment = 0x1000
+	coff_characteristics = 0x0102
+	dll_characteristics = 0x100
+	os_version_major = 4
+	os_version_minor = 0
+	image_version_major = 0
+	image_version_minor = 0
+	subsystem_version_major = 4
+	subsystem_version_minor = 0
+	stack_reserve = 0x100000
+	stack_commit = 0x1000
+	heap_reserve = 0x100000
+	heap_commit = 0x1000
 }
 
 target linux/386 {
@@ -3847,110 +2847,8 @@ target windows/386 {
 # every advertised AArch64 target composition. The explicit exports are the
 # stable production contract used by target-neutral lowering.
 go backend {
-	func aarch64LinuxEntry(out *RTGEmitter, parameterCount int, stateOffset int) bool {
-		_ = stateOffset
-		if parameterCount == 0 {
-			return true
-		}
-		if parameterCount < 0 || parameterCount > 2 {
-			return false
-		}
-		argsOffset := out.ReserveBSS(32768, 16)
-		environmentOffset := out.ReserveBSS(32768, 16)
-		environmentLengthOffset := out.ReserveBSS(8, 8)
-		argumentLoop := out.NewLabel()
-		argumentLength := out.NewLabel()
-		argumentLengthDone := out.NewLabel()
-		argumentsDone := out.NewLabel()
-		environmentLoop := out.NewLabel()
-		environmentLength := out.NewLabel()
-		environmentLengthDone := out.NewLabel()
-		environmentDone := out.NewLabel()
 
-		renvoAarch64AsmLoadRegMem(out, 13, 31, 0, 8)
-		renvoAarch64AsmAddRegImm(out, 10, 31, 8)
-		renvoAarch64AsmMovRegAbs(out, 7, argsOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmMovRegImm(out, 11, 0)
-		out.Mark(argumentLoop)
-		renvoAarch64AsmCmpRegReg(out, 11, 13)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, argumentsDone)
-		renvoAarch64AsmAddRegRegShift(out, 12, 10, 11, 3)
-		renvoAarch64AsmLoadRegMem(out, 12, 12, 0, 8)
-		renvoAarch64AsmStoreRegMem(out, 12, 7, 0, 8)
-		renvoAarch64AsmMovRegImm(out, 0, 0)
-		out.Mark(argumentLength)
-		renvoAarch64AsmAddRegReg(out, 9, 12, 0)
-		renvoAarch64AsmLoadRegMem(out, 9, 9, 0, 1)
-		renvoAarch64AsmCmpRegImm(out, 9, 0)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, argumentLengthDone)
-		renvoAarch64AsmAddRegImm(out, 0, 0, 1)
-		aarch64Jump(out, argumentLength)
-		out.Mark(argumentLengthDone)
-		renvoAarch64AsmStoreRegMem(out, 0, 7, 8, 8)
-		renvoAarch64AsmAddRegImm(out, 7, 7, 16)
-		renvoAarch64AsmAddRegImm(out, 11, 11, 1)
-		aarch64Jump(out, argumentLoop)
-		out.Mark(argumentsDone)
 
-		renvoAarch64AsmAddRegRegShift(out, 10, 10, 13, 3)
-		renvoAarch64AsmAddRegImm(out, 10, 10, 8)
-		renvoAarch64AsmMovRegAbs(out, 7, environmentOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmMovRegImm(out, 11, 0)
-		out.Mark(environmentLoop)
-		renvoAarch64AsmLoadRegMem(out, 12, 10, 0, 8)
-		renvoAarch64AsmCmpRegImm(out, 12, 0)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, environmentDone)
-		renvoAarch64AsmStoreRegMem(out, 12, 7, 0, 8)
-		renvoAarch64AsmMovRegImm(out, 0, 0)
-		out.Mark(environmentLength)
-		renvoAarch64AsmAddRegReg(out, 9, 12, 0)
-		renvoAarch64AsmLoadRegMem(out, 9, 9, 0, 1)
-		renvoAarch64AsmCmpRegImm(out, 9, 0)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, environmentLengthDone)
-		renvoAarch64AsmAddRegImm(out, 0, 0, 1)
-		aarch64Jump(out, environmentLength)
-		out.Mark(environmentLengthDone)
-		renvoAarch64AsmStoreRegMem(out, 0, 7, 8, 8)
-		renvoAarch64AsmAddRegImm(out, 7, 7, 16)
-		renvoAarch64AsmAddRegImm(out, 10, 10, 8)
-		renvoAarch64AsmAddRegImm(out, 11, 11, 1)
-		aarch64Jump(out, environmentLoop)
-		out.Mark(environmentDone)
-		renvoAarch64AsmMovRegAbs(out, 12, environmentLengthOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmStoreRegMem(out, 11, 12, 0, 8)
-
-		renvoAarch64AsmMovRegAbs(out, 3, argsOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmMovRegReg(out, 4, 13)
-		renvoAarch64AsmMovRegReg(out, 1, 13)
-		renvoAarch64AsmMovRegAbs(out, 2, environmentOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmMovRegReg(out, 5, 11)
-		renvoAarch64AsmMovRegReg(out, 6, 11)
-		return true
-	}
-
-	func aarch64ELFPatchAbsoluteRelocations(a *RTGEmitter, codeOffset int, dataOffset int, bssOffset int) {
-		code := a.Code()
-		for i := 0; i < a.AbsoluteRelocationCount(); i++ {
-			at := a.AbsoluteRelocationOffset(i)
-			addend := a.AbsoluteRelocationAddend(i)
-			kind := a.AbsoluteRelocationKind(i)
-			target := dataOffset + addend
-			if kind == RTGRelocationAbsoluteBSS {
-				target = bssOffset + addend
-			}
-			insn := int(code[at]) | int(code[at+1])<<8 | int(code[at+2])<<16 | int(code[at+3])<<24
-			reg := insn & 31
-			pcPage := (codeOffset + at) & -4096
-			targetPage := target & -4096
-			pageDelta := (targetPage - pcPage) >> 12
-			immlo := pageDelta & 3
-			immhi := pageDelta >> 2 & 524287
-			a.PatchUint32(at, 0x90000000|(immlo<<29)|(immhi<<5)|reg)
-			a.PatchUint32(at+4, 0x91000000|((target&4095)<<10)|(reg<<5)|reg)
-			a.PatchUint32(at+8, 0xd503201f)
-			a.PatchUint32(at+12, 0xd503201f)
-		}
-	}
 
 
 
@@ -3970,87 +2868,7 @@ go backend {
 		return true
 	}
 
-	func aarch64DarwinEntry(out *RTGEmitter, parameterCount int, stateOffset int) bool {
-		if parameterCount == 0 {
-			return true
-		}
-		if parameterCount < 0 || parameterCount > 2 || stateOffset < 0 {
-			return false
-		}
-		argsOffset := out.ReserveBSS(32768, 16)
-		environmentOffset := out.ReserveBSS(32768, 16)
-		argumentLoop := out.NewLabel()
-		argumentLength := out.NewLabel()
-		argumentLengthDone := out.NewLabel()
-		argumentsDone := out.NewLabel()
-		environmentLoop := out.NewLabel()
-		environmentLength := out.NewLabel()
-		environmentLengthDone := out.NewLabel()
-		environmentDone := out.NewLabel()
 
-		renvoAarch64AsmMovRegAbs(out, 9, stateOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmLoadRegMem(out, 13, 9, 0, 8)
-		renvoAarch64AsmLoadRegMem(out, 14, 9, 8, 8)
-		renvoAarch64AsmLoadRegMem(out, 15, 9, 16, 8)
-		renvoAarch64AsmMovRegAbs(out, 10, argsOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmMovRegImm(out, 11, 0)
-		out.Mark(argumentLoop)
-		renvoAarch64AsmCmpRegImm(out, 11, 2048)
-		aarch64JumpCondition(out, RTGCondition{Code: 10}, argumentsDone)
-		renvoAarch64AsmCmpRegReg(out, 11, 13)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, argumentsDone)
-		renvoAarch64AsmAddRegRegShift(out, 12, 14, 11, 3)
-		renvoAarch64AsmLoadRegMem(out, 12, 12, 0, 8)
-		renvoAarch64AsmStoreRegMem(out, 12, 10, 0, 8)
-		renvoAarch64AsmMovRegImm(out, 0, 0)
-		out.Mark(argumentLength)
-		renvoAarch64AsmAddRegReg(out, 9, 12, 0)
-		renvoAarch64AsmLoadRegMem(out, 9, 9, 0, 1)
-		renvoAarch64AsmCmpRegImm(out, 9, 0)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, argumentLengthDone)
-		renvoAarch64AsmAddRegImm(out, 0, 0, 1)
-		aarch64Jump(out, argumentLength)
-		out.Mark(argumentLengthDone)
-		renvoAarch64AsmStoreRegMem(out, 0, 10, 8, 8)
-		renvoAarch64AsmAddRegImm(out, 10, 10, 16)
-		renvoAarch64AsmAddRegImm(out, 11, 11, 1)
-		aarch64Jump(out, argumentLoop)
-		out.Mark(argumentsDone)
-		renvoAarch64AsmMovRegReg(out, 13, 11)
-
-		renvoAarch64AsmMovRegAbs(out, 10, environmentOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmMovRegImm(out, 11, 0)
-		out.Mark(environmentLoop)
-		renvoAarch64AsmCmpRegImm(out, 11, 2048)
-		aarch64JumpCondition(out, RTGCondition{Code: 10}, environmentDone)
-		renvoAarch64AsmLoadRegMem(out, 12, 15, 0, 8)
-		renvoAarch64AsmCmpRegImm(out, 12, 0)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, environmentDone)
-		renvoAarch64AsmStoreRegMem(out, 12, 10, 0, 8)
-		renvoAarch64AsmMovRegImm(out, 0, 0)
-		out.Mark(environmentLength)
-		renvoAarch64AsmAddRegReg(out, 9, 12, 0)
-		renvoAarch64AsmLoadRegMem(out, 9, 9, 0, 1)
-		renvoAarch64AsmCmpRegImm(out, 9, 0)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, environmentLengthDone)
-		renvoAarch64AsmAddRegImm(out, 0, 0, 1)
-		aarch64Jump(out, environmentLength)
-		out.Mark(environmentLengthDone)
-		renvoAarch64AsmStoreRegMem(out, 0, 10, 8, 8)
-		renvoAarch64AsmAddRegImm(out, 10, 10, 16)
-		renvoAarch64AsmAddRegImm(out, 15, 15, 8)
-		renvoAarch64AsmAddRegImm(out, 11, 11, 1)
-		aarch64Jump(out, environmentLoop)
-		out.Mark(environmentDone)
-
-		renvoAarch64AsmMovRegAbs(out, 3, argsOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmMovRegReg(out, 4, 13)
-		renvoAarch64AsmMovRegReg(out, 1, 13)
-		renvoAarch64AsmMovRegAbs(out, 2, environmentOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmMovRegReg(out, 5, 11)
-		renvoAarch64AsmMovRegReg(out, 6, 11)
-		return true
-	}
 
 
 
@@ -4549,61 +3367,8 @@ go backend {
 
 
 
-	func aarch64DarwinRuntimeOperation(
-		out *RTGEmitter, operation int,
-	) bool {
-		if operation == RTGRuntimeRead ||
-			operation == RTGRuntimeWrite {
-			renvoAarch64AsmMovRegReg(out, 9, 1)
-			renvoAarch64AsmMovRegReg(out, 0, 3)
-			renvoAarch64AsmMovRegReg(out, 1, 4)
-			renvoAarch64AsmMovRegReg(out, 2, 9)
-			name := "_read"
-			if operation == RTGRuntimeWrite {
-				name = "_write"
-			}
-			aarch64DarwinCallImport(out, name)
-			return true
-		}
-		if operation == RTGRuntimeReadAt ||
-			operation == RTGRuntimeWriteAt {
-			renvoAarch64AsmMovRegReg(out, 9, 1)
-			renvoAarch64AsmMovRegReg(out, 10, 2)
-			renvoAarch64AsmMovRegReg(out, 0, 3)
-			renvoAarch64AsmMovRegReg(out, 1, 4)
-			renvoAarch64AsmMovRegReg(out, 2, 9)
-			renvoAarch64AsmMovRegReg(out, 3, 10)
-			name := "_pread"
-			if operation == RTGRuntimeWriteAt {
-				name = "_pwrite"
-			}
-			aarch64DarwinCallImport(out, name)
-			return true
-		}
-		if operation == RTGRuntimeOpen {
-			renvoAarch64AsmMovRegReg(out, 9, 1)
-			renvoAarch64AsmMovRegReg(out, 0, 3)
-			renvoAarch64AsmMovRegReg(out, 1, 4)
-			renvoAarch64AsmPushReg(out, 9)
-			aarch64DarwinCallImport(out, "_open")
-			renvoAarch64AsmAddRegImm(out, 31, 31, 16)
-			return true
-		}
-		if operation == RTGRuntimeClose {
-			renvoAarch64AsmMovRegReg(out, 0, 3)
-			aarch64DarwinCallImport(out, "_close")
-			return true
-		}
-		if operation == RTGRuntimeChmod {
-			renvoAarch64AsmMovRegReg(out, 0, 3)
-			renvoAarch64AsmMovRegReg(out, 1, 4)
-			aarch64DarwinCallImport(out, "_fchmod")
-			return true
-		}
-		return false
-	}
 
-	func aarch64PEPatch(out *RTGEmitter, dataRVA int, dataSize int, layout nativePELayout) {
+	func aarch64PEPatch(out *RTGEmitter, dataRVA int, dataSize int, iat []int) {
 		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
 			at := out.AbsoluteRelocationOffset(i)
 			addend := out.AbsoluteRelocationAddend(i)
@@ -4612,8 +3377,8 @@ go backend {
 			if kind == RTGRelocationAbsoluteBSS {
 				target = dataRVA + dataSize + addend
 			} else if kind == RTGRelocationImport {
-				if addend > 0 && addend < len(layout.iat) {
-					target = layout.iat[addend]
+				if addend > 0 && addend < len(iat) {
+					target = iat[addend]
 				}
 			}
 			insn := RTGGet32At(out.Code(), at)
@@ -4628,341 +3393,6 @@ go backend {
 		}
 	}
 
-	func aarch64PEHeader(textRaw int, textSize int, dataRVA int, dataRaw int, dataSize int, layout nativePELayout, subsystem int) []byte {
-		out := make([]byte, 0, 512)
-		out = nativeUntil(out, 512)
-		nativePut16(out, 0, 0x5a4d)
-		nativePut32(out, 0x3c, 0x80)
-		pe := 0x80
-		nativePut32(out, pe, 0x00004550)
-		nativePut16(out, pe+4, 0xaa64)
-		nativePut16(out, pe+6, 2)
-		nativePut16(out, pe+20, 0xf0)
-		nativePut16(out, pe+22, 0x22)
-		opt := pe + 24
-		nativePut16(out, opt, 0x20b)
-		out[opt+2] = 3
-		nativePut32(out, opt+4, textRaw)
-		nativePut32(out, opt+8, dataRaw)
-		nativePut32(out, opt+16, 0x1000)
-		nativePut32(out, opt+20, 0x1000)
-		nativePut64(out, opt+24, 0x140000000)
-		nativePut32(out, opt+32, 0x1000)
-		nativePut32(out, opt+36, 0x200)
-		nativePut16(out, opt+40, 6)
-		nativePut16(out, opt+42, 1)
-		nativePut16(out, opt+44, 1)
-		nativePut16(out, opt+48, 6)
-		nativePut16(out, opt+50, 1)
-		nativePut32(out, opt+56, RTGAlignValue(dataRVA+dataSize, 0x1000))
-		nativePut32(out, opt+60, 0x200)
-		nativePut16(out, opt+68, subsystem)
-		nativePut16(out, opt+70, 0x8100)
-		nativePut64(out, opt+72, 0x800000)
-		nativePut64(out, opt+80, 0x1000)
-		nativePut64(out, opt+88, 0x100000)
-		nativePut64(out, opt+96, 0x1000)
-		nativePut32(out, opt+108, 16)
-		nativePut32(out, opt+120, layout.importRVA)
-		nativePut32(out, opt+124, layout.importSize)
-		nativePut32(out, opt+208, layout.iatRVA)
-		nativePut32(out, opt+212, layout.iatSize)
-		out = out[:opt+240]
-		out = nativePESection(out, ".text", textSize, 0x1000, textRaw, 0x200, 0x60000020)
-		out = nativePESection(out, ".data", dataSize, dataRVA, dataRaw, 0x200+textRaw, 0xc0000040)
-		return nativeUntil(out, 0x200)
-	}
-
-	func aarch64PE64Image(out *RTGEmitter) []byte {
-		code := out.Code()
-		for len(code)%8 != 0 {
-			code = append(code, 0)
-		}
-		out.SetCode(code)
-		textSize := len(code)
-		textRaw := RTGAlignValue(textSize, 0x200)
-		dataRVA := RTGAlignValue(0x1000+textSize, 0x1000)
-		data, layout := nativePEBuildImports(out, out.Data(), dataRVA, 8)
-		out.SetData(data)
-		aarch64PEPatch(out, dataRVA, len(data), layout)
-		dataRaw := RTGAlignValue(len(data), 0x200)
-		dataSize := len(data) + out.BSSSize()
-		image := aarch64PEHeader(textRaw, textSize, dataRVA, dataRaw, dataSize, layout, out.WindowsSubsystem())
-		image = append(image, out.Code()...)
-		image = nativeUntil(image, 0x200+textRaw)
-		image = append(image, data...)
-		return nativeUntil(image, 0x200+textRaw+dataRaw)
-	}
-
-
-
-	func aarch64WindowsEntry(out *RTGEmitter, parameterCount int, stateOffset int) bool {
-		_ = stateOffset
-		if parameterCount == 0 {
-			return true
-		}
-		if parameterCount < 0 || parameterCount > 2 {
-			return false
-		}
-		argsOffset := out.ReserveBSS(32768, 16)
-		argsTextOffset := out.ReserveBSS(32768, 16)
-		argsLengthOffset := out.ReserveBSS(8, 8)
-		environmentOffset := out.ReserveBSS(32768, 16)
-		environmentLengthOffset := out.ReserveBSS(8, 8)
-		skip := out.NewLabel()
-		start := out.NewLabel()
-		copyArgument := out.NewLabel()
-		quote := out.NewLabel()
-		setQuote := out.NewLabel()
-		copyCharacter := out.NewLabel()
-		argumentDone := out.NewLabel()
-		argumentsDone := out.NewLabel()
-
-		aarch64WindowsCallImport(out, 7)
-		renvoAarch64AsmMovRegReg(out, 9, 0)
-		renvoAarch64AsmMovRegAbs(out, 10, argsOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmMovRegAbs(out, 11, argsTextOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmMovRegImm(out, 12, 0)
-		out.Mark(skip)
-		renvoAarch64AsmLoadRegMem(out, 13, 9, 0, 1)
-		renvoAarch64AsmCmpRegImm(out, 13, 0)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, argumentsDone)
-		renvoAarch64AsmCmpRegImm(out, 13, ' ')
-		aarch64JumpCondition(out, RTGCondition{Code: 1}, start)
-		renvoAarch64AsmAddRegImm(out, 9, 9, 1)
-		aarch64Jump(out, skip)
-		out.Mark(start)
-		renvoAarch64AsmCmpRegImm(out, 13, 9)
-		aarch64JumpCondition(out, RTGCondition{Code: 1}, copyArgument)
-		renvoAarch64AsmAddRegImm(out, 9, 9, 1)
-		aarch64Jump(out, skip)
-
-		out.Mark(copyArgument)
-		renvoAarch64AsmMovRegReg(out, 14, 11)
-		renvoAarch64AsmMovRegImm(out, 15, 0)
-		renvoAarch64AsmMovRegImm(out, 17, 0)
-		copyLoop := out.NewLabel()
-		out.Mark(copyLoop)
-		renvoAarch64AsmLoadRegMem(out, 13, 9, 0, 1)
-		renvoAarch64AsmCmpRegImm(out, 13, 0)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, argumentDone)
-		renvoAarch64AsmCmpRegImm(out, 13, '"')
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, quote)
-		renvoAarch64AsmCmpRegImm(out, 17, 0)
-		aarch64JumpCondition(out, RTGCondition{Code: 1}, copyCharacter)
-		renvoAarch64AsmCmpRegImm(out, 13, ' ')
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, argumentDone)
-		renvoAarch64AsmCmpRegImm(out, 13, 9)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, argumentDone)
-		out.Mark(copyCharacter)
-		renvoAarch64AsmStoreRegMem(out, 13, 11, 0, 1)
-		renvoAarch64AsmAddRegImm(out, 9, 9, 1)
-		renvoAarch64AsmAddRegImm(out, 11, 11, 1)
-		renvoAarch64AsmAddRegImm(out, 15, 15, 1)
-		aarch64Jump(out, copyLoop)
-		out.Mark(quote)
-		renvoAarch64AsmCmpRegImm(out, 17, 0)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, setQuote)
-		renvoAarch64AsmMovRegImm(out, 17, 0)
-		renvoAarch64AsmAddRegImm(out, 9, 9, 1)
-		aarch64Jump(out, copyLoop)
-		out.Mark(setQuote)
-		renvoAarch64AsmMovRegImm(out, 17, 1)
-		renvoAarch64AsmAddRegImm(out, 9, 9, 1)
-		aarch64Jump(out, copyLoop)
-
-		out.Mark(argumentDone)
-		renvoAarch64AsmStoreRegMem(out, 31, 11, 0, 1)
-		renvoAarch64AsmStoreRegMem(out, 14, 10, 0, 8)
-		renvoAarch64AsmStoreRegMem(out, 15, 10, 8, 8)
-		renvoAarch64AsmAddRegImm(out, 10, 10, 16)
-		renvoAarch64AsmAddRegImm(out, 11, 11, 1)
-		renvoAarch64AsmAddRegImm(out, 12, 12, 1)
-		renvoAarch64AsmCmpRegImm(out, 13, 0)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, argumentsDone)
-		renvoAarch64AsmAddRegImm(out, 9, 9, 1)
-		aarch64Jump(out, skip)
-
-		out.Mark(argumentsDone)
-		renvoAarch64AsmMovRegAbs(out, 9, argsLengthOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmStoreRegMem(out, 12, 9, 0, 8)
-
-		environmentLoop := out.NewLabel()
-		environmentLength := out.NewLabel()
-		environmentStringDone := out.NewLabel()
-		environmentDone := out.NewLabel()
-		aarch64WindowsCallImport(out, 9)
-		renvoAarch64AsmMovRegReg(out, 9, 0)
-		renvoAarch64AsmMovRegAbs(out, 10, environmentOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmMovRegImm(out, 11, 0)
-		out.Mark(environmentLoop)
-		renvoAarch64AsmLoadRegMem(out, 12, 9, 0, 1)
-		renvoAarch64AsmCmpRegImm(out, 12, 0)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, environmentDone)
-		renvoAarch64AsmStoreRegMem(out, 9, 10, 0, 8)
-		renvoAarch64AsmMovRegImm(out, 13, 0)
-		out.Mark(environmentLength)
-		renvoAarch64AsmAddRegReg(out, 14, 9, 13)
-		renvoAarch64AsmLoadRegMem(out, 12, 14, 0, 1)
-		renvoAarch64AsmCmpRegImm(out, 12, 0)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, environmentStringDone)
-		renvoAarch64AsmAddRegImm(out, 13, 13, 1)
-		aarch64Jump(out, environmentLength)
-		out.Mark(environmentStringDone)
-		renvoAarch64AsmStoreRegMem(out, 13, 10, 8, 8)
-		renvoAarch64AsmAddRegImm(out, 10, 10, 16)
-		renvoAarch64AsmAddRegImm(out, 13, 13, 1)
-		renvoAarch64AsmAddRegReg(out, 9, 9, 13)
-		renvoAarch64AsmAddRegImm(out, 11, 11, 1)
-		aarch64Jump(out, environmentLoop)
-		out.Mark(environmentDone)
-		renvoAarch64AsmMovRegAbs(out, 9, environmentLengthOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmStoreRegMem(out, 11, 9, 0, 8)
-
-		renvoAarch64AsmMovRegAbs(out, 3, argsOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmMovRegAbs(out, 9, argsLengthOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmLoadRegMem(out, 4, 9, 0, 8)
-		renvoAarch64AsmMovRegReg(out, 1, 4)
-		renvoAarch64AsmMovRegAbs(out, 2, environmentOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmMovRegReg(out, 5, 11)
-		renvoAarch64AsmMovRegReg(out, 6, 11)
-		return true
-	}
-
-
-
-	func aarch64WindowsRuntimeReadWrite(
-		out *RTGEmitter, write bool, positional bool,
-	) {
-		helper := out.NewLabel()
-		after := out.NewLabel()
-		countOffset := out.ReserveBSS(8, 8)
-		positionOffset := out.ReserveBSS(8, 8)
-		resultOffset := out.ReserveBSS(8, 8)
-		standard := out.NewLabel()
-		standardError := out.NewLabel()
-		handleReady := out.NewLabel()
-		sequential := out.NewLabel()
-		positionFailed := out.NewLabel()
-		ioFailed := out.NewLabel()
-		restore := out.NewLabel()
-		failed := out.NewLabel()
-		done := out.NewLabel()
-		aarch64Jump(out, after)
-		out.Mark(helper)
-		renvoAarch64AsmPushReg(out, 30)
-		renvoAarch64AsmPushReg(out, 3)
-		renvoAarch64AsmPushReg(out, 4)
-		renvoAarch64AsmPushReg(out, 2)
-		renvoAarch64AsmPushReg(out, 1)
-		renvoAarch64AsmLoadRegMem(out, 9, 31, 48, 8)
-		if write {
-			renvoAarch64AsmCmpRegImm(out, 9, 1)
-			aarch64JumpCondition(out, RTGCondition{Code: 0}, standard)
-			renvoAarch64AsmCmpRegImm(out, 9, 2)
-			aarch64JumpCondition(out, RTGCondition{Code: 0}, standardError)
-		} else {
-			renvoAarch64AsmCmpRegImm(out, 9, 0)
-			aarch64JumpCondition(out, RTGCondition{Code: 0}, standard)
-		}
-		renvoAarch64AsmStoreRegMem(out, 9, 31, 48, 8)
-		aarch64Jump(out, handleReady)
-		out.Mark(standard)
-		standardHandle := -10
-		if write {
-			standardHandle = -11
-		}
-		renvoAarch64AsmMovRegImm(out, 0, standardHandle)
-		aarch64WindowsCallImport(out, 6)
-		renvoAarch64AsmStoreRegMem(out, 0, 31, 48, 8)
-		aarch64Jump(out, handleReady)
-		out.Mark(standardError)
-		renvoAarch64AsmMovRegImm(out, 0, -12)
-		aarch64WindowsCallImport(out, 6)
-		renvoAarch64AsmStoreRegMem(out, 0, 31, 48, 8)
-		out.Mark(handleReady)
-		renvoAarch64AsmLoadRegMem(out, 9, 31, 0, 8)
-		renvoAarch64AsmCmpRegImm(out, 9, 0)
-		aarch64JumpCondition(out, RTGCondition{Code: 11}, sequential)
-
-		renvoAarch64AsmLoadRegMem(out, 0, 31, 48, 8)
-		renvoAarch64AsmMovRegImm(out, 1, 0)
-		renvoAarch64AsmMovRegImm(out, 2, 0)
-		renvoAarch64AsmMovRegImm(out, 3, 1)
-		aarch64WindowsCallImport(out, 5)
-		renvoAarch64AsmMovRegImm(out, 9, 0xffffffff)
-		renvoAarch64AsmCmpRegReg(out, 0, 9)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, positionFailed)
-		renvoAarch64AsmMovRegAbs(out, 9, positionOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmStoreRegMem(out, 0, 9, 0, 8)
-
-		renvoAarch64AsmLoadRegMem(out, 0, 31, 48, 8)
-		renvoAarch64AsmLoadRegMem(out, 1, 31, 0, 8)
-		renvoAarch64AsmMovRegImm(out, 2, 0)
-		renvoAarch64AsmMovRegImm(out, 3, 0)
-		aarch64WindowsCallImport(out, 5)
-		renvoAarch64AsmMovRegImm(out, 9, 0xffffffff)
-		renvoAarch64AsmCmpRegReg(out, 0, 9)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, ioFailed)
-		aarch64WindowsReadWriteCall(out, write, countOffset)
-		renvoAarch64AsmCmpRegImm(out, 0, 0)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, ioFailed)
-		renvoAarch64AsmMovRegAbs(out, 9, countOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmLoadRegMem(out, 9, 9, 0, 8)
-		aarch64Jump(out, restore)
-		out.Mark(ioFailed)
-		renvoAarch64AsmMovRegImm(out, 9, -1)
-		out.Mark(restore)
-		renvoAarch64AsmMovRegAbs(out, 10, resultOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmStoreRegMem(out, 9, 10, 0, 8)
-		renvoAarch64AsmLoadRegMem(out, 0, 31, 48, 8)
-		renvoAarch64AsmMovRegAbs(out, 9, positionOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmLoadRegMem(out, 1, 9, 0, 8)
-		renvoAarch64AsmMovRegImm(out, 2, 0)
-		renvoAarch64AsmMovRegImm(out, 3, 0)
-		aarch64WindowsCallImport(out, 5)
-		renvoAarch64AsmMovRegAbs(out, 9, resultOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmLoadRegMem(out, 0, 9, 0, 8)
-		aarch64Jump(out, done)
-
-		out.Mark(positionFailed)
-		renvoAarch64AsmMovRegImm(out, 0, -1)
-		aarch64Jump(out, done)
-
-		out.Mark(sequential)
-		aarch64WindowsReadWriteCall(out, write, countOffset)
-		renvoAarch64AsmCmpRegImm(out, 0, 0)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, failed)
-		renvoAarch64AsmMovRegAbs(out, 9, countOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmLoadRegMem(out, 0, 9, 0, 8)
-		aarch64Jump(out, done)
-		out.Mark(failed)
-		renvoAarch64AsmMovRegImm(out, 0, -1)
-		out.Mark(done)
-		renvoAarch64AsmAddRegImm(out, 31, 31, 64)
-		renvoAarch64AsmPopReg(out, 30)
-		renvoAarch64AsmRet(out)
-		out.Mark(after)
-		if !positional {
-			renvoAarch64AsmMovRegImm(out, 2, -1)
-		}
-		aarch64Call(out, helper)
-	}
-
-	func aarch64WindowsReadWriteCall(
-		out *RTGEmitter, write bool, countOffset int,
-	) {
-		renvoAarch64AsmLoadRegMem(out, 0, 31, 48, 8)
-		renvoAarch64AsmLoadRegMem(out, 1, 31, 32, 8)
-		renvoAarch64AsmLoadRegMem(out, 2, 31, 16, 8)
-		renvoAarch64AsmMovRegAbs(out, 3, countOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmMovRegImm(out, 4, 0)
-		importID := 3
-		if write {
-			importID = 4
-		}
-		aarch64WindowsCallImport(out, importID)
-	}
 
 
 
@@ -4974,39 +3404,15 @@ go backend {
 
 
 
-	func aarch64WindowsRuntimeOperation(
-		out *RTGEmitter, operation int,
-	) bool {
-		if operation == RTGRuntimeRead {
-			aarch64WindowsRuntimeReadWrite(out, false, false)
-			return true
-		}
-		if operation == RTGRuntimeWrite {
-			aarch64WindowsRuntimeReadWrite(out, true, false)
-			return true
-		}
-		if operation == RTGRuntimeReadAt {
-			aarch64WindowsRuntimeReadWrite(out, false, true)
-			return true
-		}
-		if operation == RTGRuntimeWriteAt {
-			aarch64WindowsRuntimeReadWrite(out, true, true)
-			return true
-		}
-		if operation == RTGRuntimeOpen {
-			aarch64WindowsRuntimeOpen(out)
-			return true
-		}
-		if operation == RTGRuntimeClose {
-			aarch64WindowsRuntimeClose(out)
-			return true
-		}
-		if operation == RTGRuntimeChmod {
-			aarch64WindowsRuntimeChmod(out)
-			return true
-		}
-		return false
-	}
+
+
+
+
+
+
+
+
+
 
 	func aarch64WindowsStaticCall(out *RTGEmitter, importID int, wordCount int) {
 		registerWords := wordCount
@@ -5649,40 +4055,6 @@ go backend {
 
 
 
-	func aarch64PatchRelocations(out *RTGEmitter) {
-		for i := 0; i < out.RelocationCount(); i++ {
-			at := out.RelocationOffset(i)
-			label := out.RelocationLabel(i)
-			target := out.LabelPosition(label)
-			if at < 0 || at+4 > len(out.Code()) || target < 0 {
-				continue
-			}
-			insn := RTGGet32At(out.Code(), at)
-			displacement := target - at
-			if (insn & 0xfc000000) == 0x94000000 {
-				out.PatchUint32(
-					at, 0x94000000|((displacement/4)&0x03ffffff))
-			} else if (insn & 0xfc000000) == 0x14000000 {
-				out.PatchUint32(
-					at, 0x14000000|((displacement/4)&0x03ffffff))
-			} else if (insn & 0xff000010) == 0x54000000 {
-				out.PatchUint32(at,
-					(insn&0xff00001f)|
-						(((displacement/4)&0x7ffff)<<5))
-			} else if (insn & 0x9f000000) == 0x10000000 {
-				addend := (insn >> 29) & 3
-				addend = addend | (((insn >> 5) & 0x7ffff) << 2)
-				if (addend & 0x100000) != 0 {
-					addend = addend - 0x200000
-				}
-				displacement = displacement + addend
-				out.PatchUint32(at,
-					0x10000000|(insn&31)|
-						((displacement&3)<<29)|
-						(((displacement>>2)&0x7ffff)<<5))
-			}
-		}
-	}
 
 
 
@@ -5704,7 +4076,7 @@ arch aarch64 {
 	word_bits = 64
 	pointer_bits = 64
 	instruction_alignment = 4
-	patch_relocations = go aarch64PatchRelocations
+	patch_relocations = aarch64_labels
 
 	registers gpr64 = [
 		x0, x1, x2, x3, x4, x5, x6, x7,
@@ -6336,14 +4708,6 @@ arch aarch64 {
 			call renvoAarch64AsmMovRegReg(out,0,status.Code)
 			call aarch64DarwinCallImport(out,"_exit")
 		}
-		aarch64ELF64Image(a:emitter) -> bytes {
-			let codeOffset = 176
-			let dataOffset = codeOffset+len(a.Code())
-			let fileSize = dataOffset+len(a.Data())
-			let bssOffset = RTGAlignValue(fileSize,4096)
-			call aarch64ELFPatchAbsoluteRelocations(a,codeOffset,dataOffset,bssOffset)
-			return nativeELFExecutable64(a,183,0,codeOffset)
-		}
 		aarch64FrameStart(out:emitter) -> int {
 			call renvoAarch64AsmEmit(out,0xa9bf7bfd)
 			call renvoAarch64AsmEmit(out,0x910003fd)
@@ -6568,6 +4932,59 @@ arch aarch64 {
 			call renvoAarch64AsmLoadRegMem(out,16,16,0,8)
 			call renvoAarch64AsmEmit(out,0xd63f0200)
 		}
+
+		aarch64DarwinRead(out:emitter) {
+			call renvoAarch64AsmMovRegReg(out,9,1)
+			call renvoAarch64AsmMovRegReg(out,0,3)
+			call renvoAarch64AsmMovRegReg(out,1,4)
+			call renvoAarch64AsmMovRegReg(out,2,9)
+			call aarch64DarwinCallImport(out,"_read")
+		}
+		aarch64DarwinWrite(out:emitter) {
+			call renvoAarch64AsmMovRegReg(out,9,1)
+			call renvoAarch64AsmMovRegReg(out,0,3)
+			call renvoAarch64AsmMovRegReg(out,1,4)
+			call renvoAarch64AsmMovRegReg(out,2,9)
+			call aarch64DarwinCallImport(out,"_write")
+		}
+		aarch64DarwinReadAt(out:emitter) {
+			call renvoAarch64AsmMovRegReg(out,9,1)
+			call renvoAarch64AsmMovRegReg(out,10,2)
+			call renvoAarch64AsmMovRegReg(out,0,3)
+			call renvoAarch64AsmMovRegReg(out,1,4)
+			call renvoAarch64AsmMovRegReg(out,2,9)
+			call renvoAarch64AsmMovRegReg(out,3,10)
+			call aarch64DarwinCallImport(out,"_pread")
+		}
+		aarch64DarwinWriteAt(out:emitter) {
+			call renvoAarch64AsmMovRegReg(out,9,1)
+			call renvoAarch64AsmMovRegReg(out,10,2)
+			call renvoAarch64AsmMovRegReg(out,0,3)
+			call renvoAarch64AsmMovRegReg(out,1,4)
+			call renvoAarch64AsmMovRegReg(out,2,9)
+			call renvoAarch64AsmMovRegReg(out,3,10)
+			call aarch64DarwinCallImport(out,"_pwrite")
+		}
+		aarch64DarwinOpen(out:emitter) {
+			call renvoAarch64AsmMovRegReg(out,9,1)
+			call renvoAarch64AsmMovRegReg(out,0,3)
+			call renvoAarch64AsmMovRegReg(out,1,4)
+			call renvoAarch64AsmPushReg(out,9)
+			call aarch64DarwinCallImport(out,"_open")
+			call renvoAarch64AsmAddRegImm(out,31,31,16)
+		}
+		aarch64DarwinClose(out:emitter) {
+			call renvoAarch64AsmMovRegReg(out,0,3)
+			call aarch64DarwinCallImport(out,"_close")
+		}
+		aarch64DarwinChmod(out:emitter) {
+			call renvoAarch64AsmMovRegReg(out,0,3)
+			call renvoAarch64AsmMovRegReg(out,1,4)
+			call aarch64DarwinCallImport(out,"_fchmod")
+		}
+
+
+
 		aarch64WindowsRuntimeChmod(out:emitter) {
 			let failed = out.NewLabel()
 			let done = out.NewLabel()
@@ -6642,6 +5059,663 @@ arch aarch64 {
 			call renvoAarch64AsmMovRegImm(out,5,0x80)
 			call renvoAarch64AsmMovRegImm(out,6,0)
 		}
+
+		aarch64LinuxEntry(out:emitter, argsOffset:int, environmentOffset:int, environmentLengthOffset:int) {
+			let argumentLoop = out.NewLabel()
+			let argumentLength = out.NewLabel()
+			let argumentLengthDone = out.NewLabel()
+			let argumentsDone = out.NewLabel()
+			let environmentLoop = out.NewLabel()
+			let environmentLength = out.NewLabel()
+			let environmentLengthDone = out.NewLabel()
+			let environmentDone = out.NewLabel()
+			call renvoAarch64AsmLoadRegMem(out,13,31,0,8)
+			call renvoAarch64AsmAddRegImm(out,10,31,8)
+			call renvoAarch64AsmMovRegAbs(out,7,argsOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmMovRegImm(out,11,0)
+			call out.Mark(argumentLoop)
+			call renvoAarch64AsmCmpRegReg(out,11,13)
+			call aarch64JumpCondition(out,record_condition(Code:0),argumentsDone)
+			call renvoAarch64AsmAddRegRegShift(out,12,10,11,3)
+			call renvoAarch64AsmLoadRegMem(out,12,12,0,8)
+			call renvoAarch64AsmStoreRegMem(out,12,7,0,8)
+			call renvoAarch64AsmMovRegImm(out,0,0)
+			call out.Mark(argumentLength)
+			call renvoAarch64AsmAddRegReg(out,9,12,0)
+			call renvoAarch64AsmLoadRegMem(out,9,9,0,1)
+			call renvoAarch64AsmCmpRegImm(out,9,0)
+			call aarch64JumpCondition(out,record_condition(Code:0),argumentLengthDone)
+			call renvoAarch64AsmAddRegImm(out,0,0,1)
+			call aarch64Jump(out,argumentLength)
+			call out.Mark(argumentLengthDone)
+			call renvoAarch64AsmStoreRegMem(out,0,7,8,8)
+			call renvoAarch64AsmAddRegImm(out,7,7,16)
+			call renvoAarch64AsmAddRegImm(out,11,11,1)
+			call aarch64Jump(out,argumentLoop)
+			call out.Mark(argumentsDone)
+			call renvoAarch64AsmAddRegRegShift(out,10,10,13,3)
+			call renvoAarch64AsmAddRegImm(out,10,10,8)
+			call renvoAarch64AsmMovRegAbs(out,7,environmentOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmMovRegImm(out,11,0)
+			call out.Mark(environmentLoop)
+			call renvoAarch64AsmLoadRegMem(out,12,10,0,8)
+			call renvoAarch64AsmCmpRegImm(out,12,0)
+			call aarch64JumpCondition(out,record_condition(Code:0),environmentDone)
+			call renvoAarch64AsmStoreRegMem(out,12,7,0,8)
+			call renvoAarch64AsmMovRegImm(out,0,0)
+			call out.Mark(environmentLength)
+			call renvoAarch64AsmAddRegReg(out,9,12,0)
+			call renvoAarch64AsmLoadRegMem(out,9,9,0,1)
+			call renvoAarch64AsmCmpRegImm(out,9,0)
+			call aarch64JumpCondition(out,record_condition(Code:0),environmentLengthDone)
+			call renvoAarch64AsmAddRegImm(out,0,0,1)
+			call aarch64Jump(out,environmentLength)
+			call out.Mark(environmentLengthDone)
+			call renvoAarch64AsmStoreRegMem(out,0,7,8,8)
+			call renvoAarch64AsmAddRegImm(out,7,7,16)
+			call renvoAarch64AsmAddRegImm(out,10,10,8)
+			call renvoAarch64AsmAddRegImm(out,11,11,1)
+			call aarch64Jump(out,environmentLoop)
+			call out.Mark(environmentDone)
+			call renvoAarch64AsmMovRegAbs(out,12,environmentLengthOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmStoreRegMem(out,11,12,0,8)
+			call renvoAarch64AsmMovRegAbs(out,3,argsOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmMovRegReg(out,4,13)
+			call renvoAarch64AsmMovRegReg(out,1,13)
+			call renvoAarch64AsmMovRegAbs(out,2,environmentOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmMovRegReg(out,5,11)
+			call renvoAarch64AsmMovRegReg(out,6,11)
+		}
+		aarch64DarwinEntry(out:emitter, argsOffset:int, environmentOffset:int, stateOffset:int) {
+			let argumentLoop = out.NewLabel()
+			let argumentLength = out.NewLabel()
+			let argumentLengthDone = out.NewLabel()
+			let argumentsDone = out.NewLabel()
+			let environmentLoop = out.NewLabel()
+			let environmentLength = out.NewLabel()
+			let environmentLengthDone = out.NewLabel()
+			let environmentDone = out.NewLabel()
+			call renvoAarch64AsmMovRegAbs(out,9,stateOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmLoadRegMem(out,13,9,0,8)
+			call renvoAarch64AsmLoadRegMem(out,14,9,8,8)
+			call renvoAarch64AsmLoadRegMem(out,15,9,16,8)
+			call renvoAarch64AsmMovRegAbs(out,10,argsOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmMovRegImm(out,11,0)
+			call out.Mark(argumentLoop)
+			call renvoAarch64AsmCmpRegImm(out,11,2048)
+			call aarch64JumpCondition(out,record_condition(Code:10),argumentsDone)
+			call renvoAarch64AsmCmpRegReg(out,11,13)
+			call aarch64JumpCondition(out,record_condition(Code:0),argumentsDone)
+			call renvoAarch64AsmAddRegRegShift(out,12,14,11,3)
+			call renvoAarch64AsmLoadRegMem(out,12,12,0,8)
+			call renvoAarch64AsmStoreRegMem(out,12,10,0,8)
+			call renvoAarch64AsmMovRegImm(out,0,0)
+			call out.Mark(argumentLength)
+			call renvoAarch64AsmAddRegReg(out,9,12,0)
+			call renvoAarch64AsmLoadRegMem(out,9,9,0,1)
+			call renvoAarch64AsmCmpRegImm(out,9,0)
+			call aarch64JumpCondition(out,record_condition(Code:0),argumentLengthDone)
+			call renvoAarch64AsmAddRegImm(out,0,0,1)
+			call aarch64Jump(out,argumentLength)
+			call out.Mark(argumentLengthDone)
+			call renvoAarch64AsmStoreRegMem(out,0,10,8,8)
+			call renvoAarch64AsmAddRegImm(out,10,10,16)
+			call renvoAarch64AsmAddRegImm(out,11,11,1)
+			call aarch64Jump(out,argumentLoop)
+			call out.Mark(argumentsDone)
+			call renvoAarch64AsmMovRegReg(out,13,11)
+			call renvoAarch64AsmMovRegAbs(out,10,environmentOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmMovRegImm(out,11,0)
+			call out.Mark(environmentLoop)
+			call renvoAarch64AsmCmpRegImm(out,11,2048)
+			call aarch64JumpCondition(out,record_condition(Code:10),environmentDone)
+			call renvoAarch64AsmLoadRegMem(out,12,15,0,8)
+			call renvoAarch64AsmCmpRegImm(out,12,0)
+			call aarch64JumpCondition(out,record_condition(Code:0),environmentDone)
+			call renvoAarch64AsmStoreRegMem(out,12,10,0,8)
+			call renvoAarch64AsmMovRegImm(out,0,0)
+			call out.Mark(environmentLength)
+			call renvoAarch64AsmAddRegReg(out,9,12,0)
+			call renvoAarch64AsmLoadRegMem(out,9,9,0,1)
+			call renvoAarch64AsmCmpRegImm(out,9,0)
+			call aarch64JumpCondition(out,record_condition(Code:0),environmentLengthDone)
+			call renvoAarch64AsmAddRegImm(out,0,0,1)
+			call aarch64Jump(out,environmentLength)
+			call out.Mark(environmentLengthDone)
+			call renvoAarch64AsmStoreRegMem(out,0,10,8,8)
+			call renvoAarch64AsmAddRegImm(out,10,10,16)
+			call renvoAarch64AsmAddRegImm(out,15,15,8)
+			call renvoAarch64AsmAddRegImm(out,11,11,1)
+			call aarch64Jump(out,environmentLoop)
+			call out.Mark(environmentDone)
+			call renvoAarch64AsmMovRegAbs(out,3,argsOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmMovRegReg(out,4,13)
+			call renvoAarch64AsmMovRegReg(out,1,13)
+			call renvoAarch64AsmMovRegAbs(out,2,environmentOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmMovRegReg(out,5,11)
+			call renvoAarch64AsmMovRegReg(out,6,11)
+		}
+		aarch64WindowsEntry(out:emitter, argsOffset:int, argsTextOffset:int, argsLengthOffset:int, environmentOffset:int, environmentLengthOffset:int) {
+			let skip = out.NewLabel()
+			let start = out.NewLabel()
+			let copyArgument = out.NewLabel()
+			let quote = out.NewLabel()
+			let setQuote = out.NewLabel()
+			let copyCharacter = out.NewLabel()
+			let argumentDone = out.NewLabel()
+			let argumentsDone = out.NewLabel()
+			call aarch64WindowsCallImport(out,7)
+			call renvoAarch64AsmMovRegReg(out,9,0)
+			call renvoAarch64AsmMovRegAbs(out,10,argsOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmMovRegAbs(out,11,argsTextOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmMovRegImm(out,12,0)
+			call out.Mark(skip)
+			call renvoAarch64AsmLoadRegMem(out,13,9,0,1)
+			call renvoAarch64AsmCmpRegImm(out,13,0)
+			call aarch64JumpCondition(out,record_condition(Code:0),argumentsDone)
+			call renvoAarch64AsmCmpRegImm(out,13,92)
+			call aarch64JumpCondition(out,record_condition(Code:1),start)
+			call renvoAarch64AsmAddRegImm(out,9,9,1)
+			call aarch64Jump(out,skip)
+			call out.Mark(start)
+			call renvoAarch64AsmCmpRegImm(out,13,9)
+			call aarch64JumpCondition(out,record_condition(Code:1),copyArgument)
+			call renvoAarch64AsmAddRegImm(out,9,9,1)
+			call aarch64Jump(out,skip)
+			call out.Mark(copyArgument)
+			call renvoAarch64AsmMovRegReg(out,14,11)
+			call renvoAarch64AsmMovRegImm(out,15,0)
+			call renvoAarch64AsmMovRegImm(out,17,0)
+			let copyLoop = out.NewLabel()
+			call out.Mark(copyLoop)
+			call renvoAarch64AsmLoadRegMem(out,13,9,0,1)
+			call renvoAarch64AsmCmpRegImm(out,13,0)
+			call aarch64JumpCondition(out,record_condition(Code:0),argumentDone)
+			call renvoAarch64AsmCmpRegImm(out,13,'"')
+			call aarch64JumpCondition(out,record_condition(Code:0),quote)
+			call renvoAarch64AsmCmpRegImm(out,17,0)
+			call aarch64JumpCondition(out,record_condition(Code:1),copyCharacter)
+			call renvoAarch64AsmCmpRegImm(out,13,92)
+			call aarch64JumpCondition(out,record_condition(Code:0),argumentDone)
+			call renvoAarch64AsmCmpRegImm(out,13,9)
+			call aarch64JumpCondition(out,record_condition(Code:0),argumentDone)
+			call out.Mark(copyCharacter)
+			call renvoAarch64AsmStoreRegMem(out,13,11,0,1)
+			call renvoAarch64AsmAddRegImm(out,9,9,1)
+			call renvoAarch64AsmAddRegImm(out,11,11,1)
+			call renvoAarch64AsmAddRegImm(out,15,15,1)
+			call aarch64Jump(out,copyLoop)
+			call out.Mark(quote)
+			call renvoAarch64AsmCmpRegImm(out,17,0)
+			call aarch64JumpCondition(out,record_condition(Code:0),setQuote)
+			call renvoAarch64AsmMovRegImm(out,17,0)
+			call renvoAarch64AsmAddRegImm(out,9,9,1)
+			call aarch64Jump(out,copyLoop)
+			call out.Mark(setQuote)
+			call renvoAarch64AsmMovRegImm(out,17,1)
+			call renvoAarch64AsmAddRegImm(out,9,9,1)
+			call aarch64Jump(out,copyLoop)
+			call out.Mark(argumentDone)
+			call renvoAarch64AsmStoreRegMem(out,31,11,0,1)
+			call renvoAarch64AsmStoreRegMem(out,14,10,0,8)
+			call renvoAarch64AsmStoreRegMem(out,15,10,8,8)
+			call renvoAarch64AsmAddRegImm(out,10,10,16)
+			call renvoAarch64AsmAddRegImm(out,11,11,1)
+			call renvoAarch64AsmAddRegImm(out,12,12,1)
+			call renvoAarch64AsmCmpRegImm(out,13,0)
+			call aarch64JumpCondition(out,record_condition(Code:0),argumentsDone)
+			call renvoAarch64AsmAddRegImm(out,9,9,1)
+			call aarch64Jump(out,skip)
+			call out.Mark(argumentsDone)
+			call renvoAarch64AsmMovRegAbs(out,9,argsLengthOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmStoreRegMem(out,12,9,0,8)
+			let environmentLoop = out.NewLabel()
+			let environmentLength = out.NewLabel()
+			let environmentStringDone = out.NewLabel()
+			let environmentDone = out.NewLabel()
+			call aarch64WindowsCallImport(out,9)
+			call renvoAarch64AsmMovRegReg(out,9,0)
+			call renvoAarch64AsmMovRegAbs(out,10,environmentOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmMovRegImm(out,11,0)
+			call out.Mark(environmentLoop)
+			call renvoAarch64AsmLoadRegMem(out,12,9,0,1)
+			call renvoAarch64AsmCmpRegImm(out,12,0)
+			call aarch64JumpCondition(out,record_condition(Code:0),environmentDone)
+			call renvoAarch64AsmStoreRegMem(out,9,10,0,8)
+			call renvoAarch64AsmMovRegImm(out,13,0)
+			call out.Mark(environmentLength)
+			call renvoAarch64AsmAddRegReg(out,14,9,13)
+			call renvoAarch64AsmLoadRegMem(out,12,14,0,1)
+			call renvoAarch64AsmCmpRegImm(out,12,0)
+			call aarch64JumpCondition(out,record_condition(Code:0),environmentStringDone)
+			call renvoAarch64AsmAddRegImm(out,13,13,1)
+			call aarch64Jump(out,environmentLength)
+			call out.Mark(environmentStringDone)
+			call renvoAarch64AsmStoreRegMem(out,13,10,8,8)
+			call renvoAarch64AsmAddRegImm(out,10,10,16)
+			call renvoAarch64AsmAddRegImm(out,13,13,1)
+			call renvoAarch64AsmAddRegReg(out,9,9,13)
+			call renvoAarch64AsmAddRegImm(out,11,11,1)
+			call aarch64Jump(out,environmentLoop)
+			call out.Mark(environmentDone)
+			call renvoAarch64AsmMovRegAbs(out,9,environmentLengthOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmStoreRegMem(out,11,9,0,8)
+			call renvoAarch64AsmMovRegAbs(out,3,argsOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmMovRegAbs(out,9,argsLengthOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmLoadRegMem(out,4,9,0,8)
+			call renvoAarch64AsmMovRegReg(out,1,4)
+			call renvoAarch64AsmMovRegAbs(out,2,environmentOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmMovRegReg(out,5,11)
+			call renvoAarch64AsmMovRegReg(out,6,11)
+		}
+		aarch64WindowsReadWriteCall(out:emitter, importID:int, countOffset:int) {
+			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
+			call renvoAarch64AsmLoadRegMem(out,1,31,32,8)
+			call renvoAarch64AsmLoadRegMem(out,2,31,16,8)
+			call renvoAarch64AsmMovRegAbs(out,3,countOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmMovRegImm(out,4,0)
+			call aarch64WindowsCallImport(out,importID)
+		}
+		aarch64WindowsRead(out:emitter) {
+			let helper = out.NewLabel()
+			let after = out.NewLabel()
+			let countOffset = out.ReserveBSS(8,8)
+			let positionOffset = out.ReserveBSS(8,8)
+			let resultOffset = out.ReserveBSS(8,8)
+			let standard = out.NewLabel()
+			let standardError = out.NewLabel()
+			let handleReady = out.NewLabel()
+			let sequential = out.NewLabel()
+			let positionFailed = out.NewLabel()
+			let ioFailed = out.NewLabel()
+			let restore = out.NewLabel()
+			let failed = out.NewLabel()
+			let done = out.NewLabel()
+			call aarch64Jump(out,after)
+			call out.Mark(helper)
+			call renvoAarch64AsmPushReg(out,30)
+			call renvoAarch64AsmPushReg(out,3)
+			call renvoAarch64AsmPushReg(out,4)
+			call renvoAarch64AsmPushReg(out,2)
+			call renvoAarch64AsmPushReg(out,1)
+			call renvoAarch64AsmLoadRegMem(out,9,31,48,8)
+			call renvoAarch64AsmCmpRegImm(out,9,0)
+			call aarch64JumpCondition(out,record_condition(Code:0),standard)
+			call renvoAarch64AsmStoreRegMem(out,9,31,48,8)
+			call aarch64Jump(out,handleReady)
+			call out.Mark(standard)
+			let standardHandle = -10
+			call renvoAarch64AsmMovRegImm(out,0,standardHandle)
+			call aarch64WindowsCallImport(out,6)
+			call renvoAarch64AsmStoreRegMem(out,0,31,48,8)
+			call aarch64Jump(out,handleReady)
+			call out.Mark(standardError)
+			call renvoAarch64AsmMovRegImm(out,0,-12)
+			call aarch64WindowsCallImport(out,6)
+			call renvoAarch64AsmStoreRegMem(out,0,31,48,8)
+			call out.Mark(handleReady)
+			call renvoAarch64AsmLoadRegMem(out,9,31,0,8)
+			call renvoAarch64AsmCmpRegImm(out,9,0)
+			call aarch64JumpCondition(out,record_condition(Code:11),sequential)
+			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
+			call renvoAarch64AsmMovRegImm(out,1,0)
+			call renvoAarch64AsmMovRegImm(out,2,0)
+			call renvoAarch64AsmMovRegImm(out,3,1)
+			call aarch64WindowsCallImport(out,5)
+			call renvoAarch64AsmMovRegImm(out,9,0xffffffff)
+			call renvoAarch64AsmCmpRegReg(out,0,9)
+			call aarch64JumpCondition(out,record_condition(Code:0),positionFailed)
+			call renvoAarch64AsmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmStoreRegMem(out,0,9,0,8)
+			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
+			call renvoAarch64AsmLoadRegMem(out,1,31,0,8)
+			call renvoAarch64AsmMovRegImm(out,2,0)
+			call renvoAarch64AsmMovRegImm(out,3,0)
+			call aarch64WindowsCallImport(out,5)
+			call renvoAarch64AsmMovRegImm(out,9,0xffffffff)
+			call renvoAarch64AsmCmpRegReg(out,0,9)
+			call aarch64JumpCondition(out,record_condition(Code:0),ioFailed)
+			call aarch64WindowsReadWriteCall(out,3,countOffset)
+			call renvoAarch64AsmCmpRegImm(out,0,0)
+			call aarch64JumpCondition(out,record_condition(Code:0),ioFailed)
+			call renvoAarch64AsmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmLoadRegMem(out,9,9,0,8)
+			call aarch64Jump(out,restore)
+			call out.Mark(ioFailed)
+			call renvoAarch64AsmMovRegImm(out,9,-1)
+			call out.Mark(restore)
+			call renvoAarch64AsmMovRegAbs(out,10,resultOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmStoreRegMem(out,9,10,0,8)
+			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
+			call renvoAarch64AsmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmLoadRegMem(out,1,9,0,8)
+			call renvoAarch64AsmMovRegImm(out,2,0)
+			call renvoAarch64AsmMovRegImm(out,3,0)
+			call aarch64WindowsCallImport(out,5)
+			call renvoAarch64AsmMovRegAbs(out,9,resultOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmLoadRegMem(out,0,9,0,8)
+			call aarch64Jump(out,done)
+			call out.Mark(positionFailed)
+			call renvoAarch64AsmMovRegImm(out,0,-1)
+			call aarch64Jump(out,done)
+			call out.Mark(sequential)
+			call aarch64WindowsReadWriteCall(out,3,countOffset)
+			call renvoAarch64AsmCmpRegImm(out,0,0)
+			call aarch64JumpCondition(out,record_condition(Code:0),failed)
+			call renvoAarch64AsmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmLoadRegMem(out,0,9,0,8)
+			call aarch64Jump(out,done)
+			call out.Mark(failed)
+			call renvoAarch64AsmMovRegImm(out,0,-1)
+			call out.Mark(done)
+			call renvoAarch64AsmAddRegImm(out,31,31,64)
+			call renvoAarch64AsmPopReg(out,30)
+			call renvoAarch64AsmRet(out)
+			call out.Mark(after)
+			call renvoAarch64AsmMovRegImm(out,2,-1)
+			call aarch64Call(out,helper)
+		}
+		aarch64WindowsWrite(out:emitter) {
+			let helper = out.NewLabel()
+			let after = out.NewLabel()
+			let countOffset = out.ReserveBSS(8,8)
+			let positionOffset = out.ReserveBSS(8,8)
+			let resultOffset = out.ReserveBSS(8,8)
+			let standard = out.NewLabel()
+			let standardError = out.NewLabel()
+			let handleReady = out.NewLabel()
+			let sequential = out.NewLabel()
+			let positionFailed = out.NewLabel()
+			let ioFailed = out.NewLabel()
+			let restore = out.NewLabel()
+			let failed = out.NewLabel()
+			let done = out.NewLabel()
+			call aarch64Jump(out,after)
+			call out.Mark(helper)
+			call renvoAarch64AsmPushReg(out,30)
+			call renvoAarch64AsmPushReg(out,3)
+			call renvoAarch64AsmPushReg(out,4)
+			call renvoAarch64AsmPushReg(out,2)
+			call renvoAarch64AsmPushReg(out,1)
+			call renvoAarch64AsmLoadRegMem(out,9,31,48,8)
+			call renvoAarch64AsmCmpRegImm(out,9,1)
+			call aarch64JumpCondition(out,record_condition(Code:0),standard)
+			call renvoAarch64AsmCmpRegImm(out,9,2)
+			call aarch64JumpCondition(out,record_condition(Code:0),standardError)
+			call renvoAarch64AsmStoreRegMem(out,9,31,48,8)
+			call aarch64Jump(out,handleReady)
+			call out.Mark(standard)
+			let standardHandle = -10
+			set standardHandle = -11
+			call renvoAarch64AsmMovRegImm(out,0,standardHandle)
+			call aarch64WindowsCallImport(out,6)
+			call renvoAarch64AsmStoreRegMem(out,0,31,48,8)
+			call aarch64Jump(out,handleReady)
+			call out.Mark(standardError)
+			call renvoAarch64AsmMovRegImm(out,0,-12)
+			call aarch64WindowsCallImport(out,6)
+			call renvoAarch64AsmStoreRegMem(out,0,31,48,8)
+			call out.Mark(handleReady)
+			call renvoAarch64AsmLoadRegMem(out,9,31,0,8)
+			call renvoAarch64AsmCmpRegImm(out,9,0)
+			call aarch64JumpCondition(out,record_condition(Code:11),sequential)
+			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
+			call renvoAarch64AsmMovRegImm(out,1,0)
+			call renvoAarch64AsmMovRegImm(out,2,0)
+			call renvoAarch64AsmMovRegImm(out,3,1)
+			call aarch64WindowsCallImport(out,5)
+			call renvoAarch64AsmMovRegImm(out,9,0xffffffff)
+			call renvoAarch64AsmCmpRegReg(out,0,9)
+			call aarch64JumpCondition(out,record_condition(Code:0),positionFailed)
+			call renvoAarch64AsmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmStoreRegMem(out,0,9,0,8)
+			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
+			call renvoAarch64AsmLoadRegMem(out,1,31,0,8)
+			call renvoAarch64AsmMovRegImm(out,2,0)
+			call renvoAarch64AsmMovRegImm(out,3,0)
+			call aarch64WindowsCallImport(out,5)
+			call renvoAarch64AsmMovRegImm(out,9,0xffffffff)
+			call renvoAarch64AsmCmpRegReg(out,0,9)
+			call aarch64JumpCondition(out,record_condition(Code:0),ioFailed)
+			call aarch64WindowsReadWriteCall(out,4,countOffset)
+			call renvoAarch64AsmCmpRegImm(out,0,0)
+			call aarch64JumpCondition(out,record_condition(Code:0),ioFailed)
+			call renvoAarch64AsmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmLoadRegMem(out,9,9,0,8)
+			call aarch64Jump(out,restore)
+			call out.Mark(ioFailed)
+			call renvoAarch64AsmMovRegImm(out,9,-1)
+			call out.Mark(restore)
+			call renvoAarch64AsmMovRegAbs(out,10,resultOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmStoreRegMem(out,9,10,0,8)
+			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
+			call renvoAarch64AsmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmLoadRegMem(out,1,9,0,8)
+			call renvoAarch64AsmMovRegImm(out,2,0)
+			call renvoAarch64AsmMovRegImm(out,3,0)
+			call aarch64WindowsCallImport(out,5)
+			call renvoAarch64AsmMovRegAbs(out,9,resultOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmLoadRegMem(out,0,9,0,8)
+			call aarch64Jump(out,done)
+			call out.Mark(positionFailed)
+			call renvoAarch64AsmMovRegImm(out,0,-1)
+			call aarch64Jump(out,done)
+			call out.Mark(sequential)
+			call aarch64WindowsReadWriteCall(out,4,countOffset)
+			call renvoAarch64AsmCmpRegImm(out,0,0)
+			call aarch64JumpCondition(out,record_condition(Code:0),failed)
+			call renvoAarch64AsmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmLoadRegMem(out,0,9,0,8)
+			call aarch64Jump(out,done)
+			call out.Mark(failed)
+			call renvoAarch64AsmMovRegImm(out,0,-1)
+			call out.Mark(done)
+			call renvoAarch64AsmAddRegImm(out,31,31,64)
+			call renvoAarch64AsmPopReg(out,30)
+			call renvoAarch64AsmRet(out)
+			call out.Mark(after)
+			call renvoAarch64AsmMovRegImm(out,2,-1)
+			call aarch64Call(out,helper)
+		}
+		aarch64WindowsReadAt(out:emitter) {
+			let helper = out.NewLabel()
+			let after = out.NewLabel()
+			let countOffset = out.ReserveBSS(8,8)
+			let positionOffset = out.ReserveBSS(8,8)
+			let resultOffset = out.ReserveBSS(8,8)
+			let standard = out.NewLabel()
+			let standardError = out.NewLabel()
+			let handleReady = out.NewLabel()
+			let sequential = out.NewLabel()
+			let positionFailed = out.NewLabel()
+			let ioFailed = out.NewLabel()
+			let restore = out.NewLabel()
+			let failed = out.NewLabel()
+			let done = out.NewLabel()
+			call aarch64Jump(out,after)
+			call out.Mark(helper)
+			call renvoAarch64AsmPushReg(out,30)
+			call renvoAarch64AsmPushReg(out,3)
+			call renvoAarch64AsmPushReg(out,4)
+			call renvoAarch64AsmPushReg(out,2)
+			call renvoAarch64AsmPushReg(out,1)
+			call renvoAarch64AsmLoadRegMem(out,9,31,48,8)
+			call renvoAarch64AsmCmpRegImm(out,9,0)
+			call aarch64JumpCondition(out,record_condition(Code:0),standard)
+			call renvoAarch64AsmStoreRegMem(out,9,31,48,8)
+			call aarch64Jump(out,handleReady)
+			call out.Mark(standard)
+			let standardHandle = -10
+			call renvoAarch64AsmMovRegImm(out,0,standardHandle)
+			call aarch64WindowsCallImport(out,6)
+			call renvoAarch64AsmStoreRegMem(out,0,31,48,8)
+			call aarch64Jump(out,handleReady)
+			call out.Mark(standardError)
+			call renvoAarch64AsmMovRegImm(out,0,-12)
+			call aarch64WindowsCallImport(out,6)
+			call renvoAarch64AsmStoreRegMem(out,0,31,48,8)
+			call out.Mark(handleReady)
+			call renvoAarch64AsmLoadRegMem(out,9,31,0,8)
+			call renvoAarch64AsmCmpRegImm(out,9,0)
+			call aarch64JumpCondition(out,record_condition(Code:11),sequential)
+			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
+			call renvoAarch64AsmMovRegImm(out,1,0)
+			call renvoAarch64AsmMovRegImm(out,2,0)
+			call renvoAarch64AsmMovRegImm(out,3,1)
+			call aarch64WindowsCallImport(out,5)
+			call renvoAarch64AsmMovRegImm(out,9,0xffffffff)
+			call renvoAarch64AsmCmpRegReg(out,0,9)
+			call aarch64JumpCondition(out,record_condition(Code:0),positionFailed)
+			call renvoAarch64AsmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmStoreRegMem(out,0,9,0,8)
+			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
+			call renvoAarch64AsmLoadRegMem(out,1,31,0,8)
+			call renvoAarch64AsmMovRegImm(out,2,0)
+			call renvoAarch64AsmMovRegImm(out,3,0)
+			call aarch64WindowsCallImport(out,5)
+			call renvoAarch64AsmMovRegImm(out,9,0xffffffff)
+			call renvoAarch64AsmCmpRegReg(out,0,9)
+			call aarch64JumpCondition(out,record_condition(Code:0),ioFailed)
+			call aarch64WindowsReadWriteCall(out,3,countOffset)
+			call renvoAarch64AsmCmpRegImm(out,0,0)
+			call aarch64JumpCondition(out,record_condition(Code:0),ioFailed)
+			call renvoAarch64AsmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmLoadRegMem(out,9,9,0,8)
+			call aarch64Jump(out,restore)
+			call out.Mark(ioFailed)
+			call renvoAarch64AsmMovRegImm(out,9,-1)
+			call out.Mark(restore)
+			call renvoAarch64AsmMovRegAbs(out,10,resultOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmStoreRegMem(out,9,10,0,8)
+			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
+			call renvoAarch64AsmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmLoadRegMem(out,1,9,0,8)
+			call renvoAarch64AsmMovRegImm(out,2,0)
+			call renvoAarch64AsmMovRegImm(out,3,0)
+			call aarch64WindowsCallImport(out,5)
+			call renvoAarch64AsmMovRegAbs(out,9,resultOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmLoadRegMem(out,0,9,0,8)
+			call aarch64Jump(out,done)
+			call out.Mark(positionFailed)
+			call renvoAarch64AsmMovRegImm(out,0,-1)
+			call aarch64Jump(out,done)
+			call out.Mark(sequential)
+			call aarch64WindowsReadWriteCall(out,3,countOffset)
+			call renvoAarch64AsmCmpRegImm(out,0,0)
+			call aarch64JumpCondition(out,record_condition(Code:0),failed)
+			call renvoAarch64AsmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmLoadRegMem(out,0,9,0,8)
+			call aarch64Jump(out,done)
+			call out.Mark(failed)
+			call renvoAarch64AsmMovRegImm(out,0,-1)
+			call out.Mark(done)
+			call renvoAarch64AsmAddRegImm(out,31,31,64)
+			call renvoAarch64AsmPopReg(out,30)
+			call renvoAarch64AsmRet(out)
+			call out.Mark(after)
+			call aarch64Call(out,helper)
+		}
+		aarch64WindowsWriteAt(out:emitter) {
+			let helper = out.NewLabel()
+			let after = out.NewLabel()
+			let countOffset = out.ReserveBSS(8,8)
+			let positionOffset = out.ReserveBSS(8,8)
+			let resultOffset = out.ReserveBSS(8,8)
+			let standard = out.NewLabel()
+			let standardError = out.NewLabel()
+			let handleReady = out.NewLabel()
+			let sequential = out.NewLabel()
+			let positionFailed = out.NewLabel()
+			let ioFailed = out.NewLabel()
+			let restore = out.NewLabel()
+			let failed = out.NewLabel()
+			let done = out.NewLabel()
+			call aarch64Jump(out,after)
+			call out.Mark(helper)
+			call renvoAarch64AsmPushReg(out,30)
+			call renvoAarch64AsmPushReg(out,3)
+			call renvoAarch64AsmPushReg(out,4)
+			call renvoAarch64AsmPushReg(out,2)
+			call renvoAarch64AsmPushReg(out,1)
+			call renvoAarch64AsmLoadRegMem(out,9,31,48,8)
+			call renvoAarch64AsmCmpRegImm(out,9,1)
+			call aarch64JumpCondition(out,record_condition(Code:0),standard)
+			call renvoAarch64AsmCmpRegImm(out,9,2)
+			call aarch64JumpCondition(out,record_condition(Code:0),standardError)
+			call renvoAarch64AsmStoreRegMem(out,9,31,48,8)
+			call aarch64Jump(out,handleReady)
+			call out.Mark(standard)
+			let standardHandle = -10
+			set standardHandle = -11
+			call renvoAarch64AsmMovRegImm(out,0,standardHandle)
+			call aarch64WindowsCallImport(out,6)
+			call renvoAarch64AsmStoreRegMem(out,0,31,48,8)
+			call aarch64Jump(out,handleReady)
+			call out.Mark(standardError)
+			call renvoAarch64AsmMovRegImm(out,0,-12)
+			call aarch64WindowsCallImport(out,6)
+			call renvoAarch64AsmStoreRegMem(out,0,31,48,8)
+			call out.Mark(handleReady)
+			call renvoAarch64AsmLoadRegMem(out,9,31,0,8)
+			call renvoAarch64AsmCmpRegImm(out,9,0)
+			call aarch64JumpCondition(out,record_condition(Code:11),sequential)
+			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
+			call renvoAarch64AsmMovRegImm(out,1,0)
+			call renvoAarch64AsmMovRegImm(out,2,0)
+			call renvoAarch64AsmMovRegImm(out,3,1)
+			call aarch64WindowsCallImport(out,5)
+			call renvoAarch64AsmMovRegImm(out,9,0xffffffff)
+			call renvoAarch64AsmCmpRegReg(out,0,9)
+			call aarch64JumpCondition(out,record_condition(Code:0),positionFailed)
+			call renvoAarch64AsmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmStoreRegMem(out,0,9,0,8)
+			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
+			call renvoAarch64AsmLoadRegMem(out,1,31,0,8)
+			call renvoAarch64AsmMovRegImm(out,2,0)
+			call renvoAarch64AsmMovRegImm(out,3,0)
+			call aarch64WindowsCallImport(out,5)
+			call renvoAarch64AsmMovRegImm(out,9,0xffffffff)
+			call renvoAarch64AsmCmpRegReg(out,0,9)
+			call aarch64JumpCondition(out,record_condition(Code:0),ioFailed)
+			call aarch64WindowsReadWriteCall(out,4,countOffset)
+			call renvoAarch64AsmCmpRegImm(out,0,0)
+			call aarch64JumpCondition(out,record_condition(Code:0),ioFailed)
+			call renvoAarch64AsmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmLoadRegMem(out,9,9,0,8)
+			call aarch64Jump(out,restore)
+			call out.Mark(ioFailed)
+			call renvoAarch64AsmMovRegImm(out,9,-1)
+			call out.Mark(restore)
+			call renvoAarch64AsmMovRegAbs(out,10,resultOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmStoreRegMem(out,9,10,0,8)
+			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
+			call renvoAarch64AsmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmLoadRegMem(out,1,9,0,8)
+			call renvoAarch64AsmMovRegImm(out,2,0)
+			call renvoAarch64AsmMovRegImm(out,3,0)
+			call aarch64WindowsCallImport(out,5)
+			call renvoAarch64AsmMovRegAbs(out,9,resultOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmLoadRegMem(out,0,9,0,8)
+			call aarch64Jump(out,done)
+			call out.Mark(positionFailed)
+			call renvoAarch64AsmMovRegImm(out,0,-1)
+			call aarch64Jump(out,done)
+			call out.Mark(sequential)
+			call aarch64WindowsReadWriteCall(out,4,countOffset)
+			call renvoAarch64AsmCmpRegImm(out,0,0)
+			call aarch64JumpCondition(out,record_condition(Code:0),failed)
+			call renvoAarch64AsmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
+			call renvoAarch64AsmLoadRegMem(out,0,9,0,8)
+			call aarch64Jump(out,done)
+			call out.Mark(failed)
+			call renvoAarch64AsmMovRegImm(out,0,-1)
+			call out.Mark(done)
+			call renvoAarch64AsmAddRegImm(out,31,31,64)
+			call renvoAarch64AsmPopReg(out,30)
+			call renvoAarch64AsmRet(out)
+			call out.Mark(after)
+			call aarch64Call(out,helper)
+		}
 }
 }
 
@@ -6664,7 +5738,12 @@ abi windows_arm64 {
 }
 
 runtime linux_aarch64 {
-	emit_entry = go aarch64LinuxEntry
+		entry sequence aarch64LinuxEntry {
+		max_parameters = 2
+		bss args 32768 16
+		bss environment 32768 16
+		bss environmentLength 8 8
+	}
 
 	syscall {
 		number = x8
@@ -6684,20 +5763,47 @@ runtime linux_aarch64 {
 }
 
 runtime darwin_arm64 {
-		entry_state_bytes = 24
-		emit_entry_start = go aarch64DarwinEntryStart
-		emit_entry = go aarch64DarwinEntry
-		emit_exit = sequence aarch64DarwinExit
-	emit_operation = go aarch64DarwinRuntimeOperation
-	operations = [print, open, close, read, write, read_at, write_at, chmod]
+	entry sequence aarch64DarwinEntry {
+		max_parameters = 2
+		requires_state = true
+		bss args 32768 16
+		bss environment 32768 16
+	}
+	entry_state_bytes = 24
+	emit_exit = sequence aarch64DarwinExit
+	operation read { emit = sequence aarch64DarwinRead }
+	operation write { emit = sequence aarch64DarwinWrite }
+	operation read_at { emit = sequence aarch64DarwinReadAt }
+	operation write_at { emit = sequence aarch64DarwinWriteAt }
+	operation open { emit = sequence aarch64DarwinOpen }
+	operation close { emit = sequence aarch64DarwinClose }
+	operation chmod { emit = sequence aarch64DarwinChmod }
+	operation print { use = write }
 }
 
 runtime windows_arm64 {
-	emit_entry = go aarch64WindowsEntry
+		entry sequence aarch64WindowsEntry {
+		max_parameters = 2
+		bss args 32768 16
+		bss argsText 32768 16
+		bss argsLength 8 8
+		bss environment 32768 16
+		bss environmentLength 8 8
+	}
 	emit_exit = sequence aarch64WindowsExit
 	emit_static_call = go aarch64WindowsStaticCall
-	emit_operation = go aarch64WindowsRuntimeOperation
-	operations = [print, open, close, read, write, read_at, write_at, chmod]
+	imports "kernel32.dll" = [
+		CreateFileA, CloseHandle, ReadFile, WriteFile, SetFilePointer,
+		GetStdHandle, GetCommandLineA, ExitProcess, GetEnvironmentStringsA
+	]
+	operation read { emit = sequence aarch64WindowsRead }
+	operation write { emit = sequence aarch64WindowsWrite }
+	operation read_at { emit = sequence aarch64WindowsReadAt }
+	operation write_at { emit = sequence aarch64WindowsWriteAt }
+	operation open { emit = sequence aarch64WindowsRuntimeOpen }
+	operation close { emit = sequence aarch64WindowsRuntimeClose }
+	operation chmod { emit = sequence aarch64WindowsRuntimeChmod }
+	operation print { use = write }
 }
 
 format elf64_aarch64 {
@@ -6706,7 +5812,10 @@ format elf64_aarch64 {
 	kind = elf
 	machine = 183
 	code_offset = 176
-	image = sequence aarch64ELF64Image
+	file_alignment = 0x1000
+	flags = 0
+	image = elf_executable
+	patch_absolute = aarch64_page_address
 }
 
 format macho64_arm64 {
@@ -6724,7 +5833,24 @@ format pe64_arm64 {
 	kind = pe
 	machine = 0xaa64
 	code_offset = 0x1000
-	image = go aarch64PE64Image
+	image = pe_executable
+	patch_image = go aarch64PEPatch
+	image_base = 0x40000000
+	image_base_high = 1
+	file_alignment = 0x200
+	section_alignment = 0x1000
+	coff_characteristics = 0x22
+	dll_characteristics = 0x8100
+	os_version_major = 6
+	os_version_minor = 1
+	image_version_major = 1
+	image_version_minor = 0
+	subsystem_version_major = 6
+	subsystem_version_minor = 1
+	stack_reserve = 0x800000
+	stack_commit = 0x1000
+	heap_reserve = 0x100000
+	heap_commit = 0x1000
 }
 
 target linux/aarch64 {
@@ -6763,42 +5889,7 @@ target windows/arm64 {
 # This closed definition owns the complete 32-bit ARM production encoder and
 # the advertised Linux target composition.
 go backend {
-	func armLinuxEntry(out *RTGEmitter, parameterCount int, stateOffset int) bool {
-		_ = stateOffset
-		if parameterCount == 0 {
-			return true
-		}
-		if parameterCount < 0 || parameterCount > 2 {
-			return false
-		}
-		argsOffset := out.ReserveBSS(32768, 16)
-		environmentOffset := out.ReserveBSS(32768, 16)
-		environmentLengthOffset := out.ReserveBSS(8, 8)
-		base := out.Len()
-		out.Text("\x00\x50\x9d\xe5\x04\x90\x00\xe3\x09\x60\x8d\xe0\x00\x80\x00\xe3\x00\x80\x40\xe3\x08\x80\x8f\xe0\x00\xa0\x00\xe3\x05\x00\x5a\xe1\x10\x00\x00\x0a\x0a\xc1\x86\xe0\x00\xc0\x9c\xe5\x00\xc0\x88\xe5\x00\x00\x00\xe3\x00\x90\x8c\xe0\x00\x90\xd9\xe5\x00\x00\x59\xe3\x02\x00\x00\x0a\x01\x90\x00\xe3\x09\x00\x80\xe0\xf8\xff\xff\xea\x08\x00\x88\xe5\x10\x90\x00\xe3\x09\x80\x88\xe0\x01\x90\x00\xe3\x09\xa0\x8a\xe0\xec\xff\xff\xea\x05\x61\x86\xe0\x04\x90\x00\xe3\x09\x60\x86\xe0\x00\x80\x00\xe3\x00\x80\x40\xe3\x08\x80\x8f\xe0\x00\x60\x00\xe3\x00\xa0\x9d\xe5\x02\x90\x00\xe3\x09\xa0\x8a\xe0\x0a\xa1\x8d\xe0\x00\x60\x00\xe3\x00\xc0\x9a\xe5\x00\x00\x5c\xe3\x10\x00\x00\x0a\x00\xc0\x88\xe5\x00\x00\x00\xe3\x00\x90\x8c\xe0\x00\x90\xd9\xe5\x00\x00\x59\xe3\x02\x00\x00\x0a\x01\x90\x00\xe3\x09\x00\x80\xe0\xf8\xff\xff\xea\x08\x00\x88\xe5\x10\x90\x00\xe3\x09\x80\x88\xe0\x04\x90\x00\xe3\x09\xa0\x8a\xe0\x01\x90\x00\xe3\x09\x60\x86\xe0\xeb\xff\xff\xea\x00\xc0\x00\xe3\x00\xc0\x40\xe3\x0c\xc0\x8f\xe0\x00\x60\x8c\xe5\x00\x30\x00\xe3\x00\x30\x40\xe3\x03\x30\x8f\xe0\x05\x40\xa0\xe1\x05\x10\xa0\xe1\x00\x20\x00\xe3\x00\x20\x40\xe3\x02\x20\x8f\xe0\x06\x50\xa0\xe1")
-		out.AbsoluteReloc(base+12, argsOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(base+116, environmentOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(base+232, environmentLengthOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(base+248, argsOffset, RTGRelocationAbsoluteBSS)
-		out.AbsoluteReloc(base+268, environmentOffset, RTGRelocationAbsoluteBSS)
-		return true
-	}
 
-	func armELFPatchAbsoluteRelocations(a *RTGEmitter, codeOffset int, dataOffset int, bssOffset int) {
-		code := a.Code()
-		for i := 0; i < a.AbsoluteRelocationCount(); i++ {
-			at := a.AbsoluteRelocationOffset(i)
-			addend := a.AbsoluteRelocationAddend(i)
-			kind := a.AbsoluteRelocationKind(i)
-			target := dataOffset + addend
-			if kind == RTGRelocationAbsoluteBSS {
-				target = bssOffset + addend
-			}
-			insn := int(code[at]) | int(code[at+1])<<8 | int(code[at+2])<<16 | int(code[at+3])<<24
-			reg := (insn >> 12) & 15
-			renvoArmAsmPatchMovRegImmAt(a, at, reg, target-(codeOffset+at+16))
-		}
-	}
 
 
 
@@ -7361,41 +6452,6 @@ go backend {
 
 
 
-	func armPatchRelocations(out *RTGEmitter) {
-		for i := 0; i < out.RelocationCount(); i++ {
-			at := out.RelocationOffset(i)
-			label := out.RelocationLabel(i)
-			target := out.LabelPosition(label)
-			if at < 0 || at+4 > len(out.Code()) || target < 0 {
-				continue
-			}
-			insn := RTGGet32At(out.Code(), at)
-			if (insn & 0x0e000000) == 0x0a000000 {
-				displacement := target - (at + 8)
-				out.PatchUint32(at,
-					(insn&0xff000000)|
-						((displacement/4)&0x00ffffff))
-			} else if (insn & 0xfff00000) == 0xe3000000 {
-				highInsn := RTGGet32At(out.Code(), at+4)
-				addend := insn & 0x0fff
-				addend = addend | ((insn >> 4) & 0xf000)
-				addend = addend | ((highInsn & 0x0fff) << 16)
-				addend = addend | ((highInsn & 0x000f0000) << 12)
-				if (addend & 0x80000000) != 0 {
-					addend = addend - 4294967296
-				}
-				value := target + addend - (at + 16)
-				low := value & 65535
-				high := (value >> 16) & 65535
-				out.PatchUint32(at,
-					(insn&0xfff0f000)|
-						((low&0xf000)<<4)|(low&0x0fff))
-				out.PatchUint32(at+4,
-					(highInsn&0xfff0f000)|
-						((high&0xf000)<<4)|(high&0x0fff))
-			}
-		}
-	}
 
 
 
@@ -7414,7 +6470,7 @@ arch arm {
 	word_bits = 32
 	pointer_bits = 32
 	instruction_alignment = 4
-	patch_relocations = go armPatchRelocations
+	patch_relocations = arm32_labels
 	registers gpr32 = [
 		r0, r1, r2, r3, r4, r5, r6, r7,
 		r8, r9, r10, r11, r12, r13, r14, r15
@@ -8051,14 +7107,6 @@ arch arm {
 			call armJump(out,forwardLoop)
 			call out.Mark(done)
 		}
-		armELF32Image(a:emitter) -> bytes {
-			let codeOffset = 116
-			let dataOffset = codeOffset+len(a.Code())
-			let fileSize = dataOffset+len(a.Data())
-			let bssOffset = RTGAlignValue(fileSize,4096)
-			call armELFPatchAbsoluteRelocations(a,codeOffset,dataOffset,bssOffset)
-			return nativeELFExecutable32(a,40,0x05000000,codeOffset)
-		}
 		armFrameStart(out:emitter) -> int {
 			call out.Bytes4(0x00,0x48,0x2d,0xe9)
 			call renvoArmAsmMovRegReg(out,11,13)
@@ -8152,7 +7200,18 @@ abi aapcs32 {
 }
 
 runtime linux_arm {
-	emit_entry = go armLinuxEntry
+	entry template {
+		max_parameters = 2
+		bss args 32768 16
+		bss environment 32768 16
+		bss environmentLength 8 8
+		code = "\x00\x50\x9d\xe5\x04\x90\x00\xe3\x09\x60\x8d\xe0\x00\x80\x00\xe3\x00\x80\x40\xe3\x08\x80\x8f\xe0\x00\xa0\x00\xe3\x05\x00\x5a\xe1\x10\x00\x00\x0a\x0a\xc1\x86\xe0\x00\xc0\x9c\xe5\x00\xc0\x88\xe5\x00\x00\x00\xe3\x00\x90\x8c\xe0\x00\x90\xd9\xe5\x00\x00\x59\xe3\x02\x00\x00\x0a\x01\x90\x00\xe3\x09\x00\x80\xe0\xf8\xff\xff\xea\x08\x00\x88\xe5\x10\x90\x00\xe3\x09\x80\x88\xe0\x01\x90\x00\xe3\x09\xa0\x8a\xe0\xec\xff\xff\xea\x05\x61\x86\xe0\x04\x90\x00\xe3\x09\x60\x86\xe0\x00\x80\x00\xe3\x00\x80\x40\xe3\x08\x80\x8f\xe0\x00\x60\x00\xe3\x00\xa0\x9d\xe5\x02\x90\x00\xe3\x09\xa0\x8a\xe0\x0a\xa1\x8d\xe0\x00\x60\x00\xe3\x00\xc0\x9a\xe5\x00\x00\x5c\xe3\x10\x00\x00\x0a\x00\xc0\x88\xe5\x00\x00\x00\xe3\x00\x90\x8c\xe0\x00\x90\xd9\xe5\x00\x00\x59\xe3\x02\x00\x00\x0a\x01\x90\x00\xe3\x09\x00\x80\xe0\xf8\xff\xff\xea\x08\x00\x88\xe5\x10\x90\x00\xe3\x09\x80\x88\xe0\x04\x90\x00\xe3\x09\xa0\x8a\xe0\x01\x90\x00\xe3\x09\x60\x86\xe0\xeb\xff\xff\xea\x00\xc0\x00\xe3\x00\xc0\x40\xe3\x0c\xc0\x8f\xe0\x00\x60\x8c\xe5\x00\x30\x00\xe3\x00\x30\x40\xe3\x03\x30\x8f\xe0\x05\x40\xa0\xe1\x05\x10\xa0\xe1\x00\x20\x00\xe3\x00\x20\x40\xe3\x02\x20\x8f\xe0\x06\x50\xa0\xe1"
+		relocation 12 bss args
+		relocation 116 bss environment
+		relocation 232 bss environmentLength
+		relocation 248 bss args
+		relocation 268 bss environment
+	}
 
 	syscall {
 		number = r7
@@ -8177,7 +7236,11 @@ format elf32_arm {
 	kind = elf
 	machine = 40
 	code_offset = 116
-	image = sequence armELF32Image
+	file_alignment = 0x1000
+	flags = 0x05000000
+	image = elf_executable
+	patch_absolute = arm32_mov_address
+	patch_address = sequence renvoArmAsmPatchMovRegImmAt
 }
 
 target linux/arm {

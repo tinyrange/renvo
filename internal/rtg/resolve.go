@@ -346,9 +346,14 @@ func compactSource(source []byte) string {
 func parseInteger(text string) (int, bool) {
 	base := 10
 	at := 0
-	if len(text) > 2 && text[0] == '0' && text[1] == 'x' {
+	sign := 1
+	if len(text) != 0 && text[0] == '-' {
+		sign = -1
+		at = 1
+	}
+	if len(text) > at+2 && text[at] == '0' && text[at+1] == 'x' {
 		base = 16
-		at = 2
+		at += 2
 	}
 	if at == len(text) {
 		return 0, false
@@ -367,7 +372,7 @@ func parseInteger(text string) (int, bool) {
 		value = value*base + digit
 		at++
 	}
-	return value, true
+	return sign * value, true
 }
 
 func targetNameCollides(left TargetDescriptor, right TargetDescriptor) bool {

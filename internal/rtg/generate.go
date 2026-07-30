@@ -38,6 +38,8 @@ func GenerateFixedBackend(resolved ResolveResult, targetName string) GenerateRes
 		baseTargetGoRoots(resolved.Document, target), targetSequenceRoots(resolved.Document, target))
 	source = appendArchitectureSequences(source, resolved.Document, target.Arch,
 		false, true, false, sequences)
+	source = appendDeclarativeFormatImage(source, resolved.Document, target, false)
+	source = appendDeclarativeKernelImage(source, resolved.Document, target.Object, false)
 	source = appendArchitectureBindings(source, resolved.Document, target.Arch, true, false)
 	source = appendDirectEmitterBindings(source, resolved.Document, target.Arch, false, true)
 	source = appendArchitectureHooks(source, resolved.Document, target.Arch, false)
@@ -82,7 +84,8 @@ func generateArchitectureBackend(resolved ResolveResult, archName string, packag
 		nativeEmitter, true, false, sequences)
 	source = appendArchitectureBindings(source, resolved.Document, arch, true, nativeEmitter)
 	source = appendDirectEmitterBindings(source, resolved.Document, arch, nativeEmitter, true)
-	source = appendArchitectureHooks(source, resolved.Document, arch, nativeEmitter)
+	source = appendArchitectureHooksNamed(source, resolved.Document, arch, nativeEmitter,
+		"rtg"+exportedName(resolved.Document.Unit)+exportedName(arch.Name)+"PatchRelocations")
 	return GenerateResult{Source: source, Manifest: manifest, Ok: true}
 }
 
@@ -187,6 +190,8 @@ func GeneratePreparedBackend(resolved ResolveResult, targetName string) Generate
 		baseTargetGoRoots(resolved.Document, target), targetSequenceRoots(resolved.Document, target))
 	source = appendArchitectureSequences(source, resolved.Document, target.Arch,
 		true, false, false, sequences)
+	source = appendDeclarativeFormatImage(source, resolved.Document, target, true)
+	source = appendDeclarativeKernelImage(source, resolved.Document, target.Object, true)
 	source = appendArchitectureBindings(source, resolved.Document, target.Arch, true, true)
 	source = appendDirectEmitterBindings(source, resolved.Document, target.Arch, true, false)
 	source = appendPreparedDirectEmitterAdapters(source, resolved.Document, target)
@@ -417,7 +422,9 @@ func GenerateUniversalBackend(definitions []ResolveResult) GenerateResult {
 					declaration, false, false, false, sequences)
 				source = appendArchitectureBindings(source, definitions[i].Document, declaration, true, false)
 				source = appendDirectEmitterBindings(source, definitions[i].Document, declaration, false, false)
-				source = appendArchitectureHooks(source, definitions[i].Document, declaration, false)
+				source = appendArchitectureHooksNamed(source, definitions[i].Document, declaration, false,
+					"rtg"+exportedName(definitions[i].Document.Unit)+
+						exportedName(declaration.Name)+"PatchRelocations")
 			}
 		}
 	}
@@ -1919,6 +1926,14 @@ func dedentGoSource(source []byte) []byte {
 }
 
 func embeddedGoNames(document Document) []string {
+	return collectEmbeddedGoNames(document, false)
+}
+
+func embeddedGoFunctionNames(document Document) []string {
+	return collectEmbeddedGoNames(document, true)
+}
+
+func collectEmbeddedGoNames(document Document, functionsOnly bool) []string {
 	var names []string
 	for i := 0; i < len(document.Declarations); i++ {
 		declaration := document.Declarations[i]
@@ -1930,8 +1945,11 @@ func embeddedGoNames(document Document) []string {
 		if !file.Ok {
 			continue
 		}
-		for j := 0; j < len(file.Decls); j++ {
-			names = append(names, string(syntax.TokenText(wrapped, file.Tokens[file.Decls[j].NameTok])))
+		if !functionsOnly {
+			for j := 0; j < len(file.Decls); j++ {
+				names = append(names,
+					string(syntax.TokenText(wrapped, file.Tokens[file.Decls[j].NameTok])))
+			}
 		}
 		for j := 0; j < len(file.Funcs); j++ {
 			names = append(names, string(syntax.TokenText(wrapped, file.Tokens[file.Funcs[j].NameTok])))

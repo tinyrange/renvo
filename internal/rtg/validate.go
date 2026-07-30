@@ -37,6 +37,9 @@ func validateArch(document Document, declaration Declaration, goNames []string) 
 		statement := declaration.Statements[i]
 		left, right, assignment := statementAssignment(statement)
 		if assignment && len(left) == 1 && left[0] == "patch_relocations" {
+			if len(right) == 1 && declarativeArchitectureRelocations(declaration) != "" {
+				continue
+			}
 			_, found := embeddedFunction{}, false
 			if len(right) == 2 && (right[0] == "go" || right[0] == "sequence") {
 				_, found = findBackendFunction(document, right[1])
@@ -470,9 +473,15 @@ func declarationAllowedFields(kind string) []string {
 	if kind == DeclFormat {
 		return []string{
 			"byte_order", "address_bits", "file_alignment", "section_alignment", "page_size",
-			"image_base", "machine", "kind", "cpu", "subsystem", "entry", "strip",
+			"image_base", "image_base_high", "machine", "kind", "cpu", "subsystem", "entry", "strip",
 			"type", "headers_size", "text_rva", "sections", "code_offset", "image",
-			"kernel_image",
+			"kernel_image", "flags", "patch_absolute", "patch_image",
+			"coff_characteristics", "dll_characteristics",
+			"os_version_major", "os_version_minor", "image_version_major",
+			"image_version_minor", "subsystem_version_major", "subsystem_version_minor",
+			"stack_reserve", "stack_commit", "heap_reserve", "heap_commit",
+			"append64", "append_header", "append_relocation", "append_section",
+			"append_symbol", "patch_pc_bias", "patch_address",
 		}
 	}
 	if kind == DeclTarget {
@@ -580,6 +589,7 @@ func validateABI(document Document, declaration Declaration) []Diagnostic {
 }
 
 func validateRuntime(document Document, declaration Declaration) []Diagnostic {
+	var diagnostics []Diagnostic
 	hookNames := []string{
 		"emit_entry_start", "emit_entry", "emit_exit", "emit_static_call",
 		"emit_operation", "entry_prologue", "entry_epilogue", "emit_callback_address",
@@ -602,24 +612,32 @@ func validateRuntime(document Document, declaration Declaration) []Diagnostic {
 				continue
 			}
 			if len(right) != 2 || right[0] != "go" && right[0] != "sequence" {
-				return []Diagnostic{statementDiagnostic(document, declaration.Statements[i],
-					"RTG-VALIDATE-031", "runtime "+left[0]+" must bind a backend algorithm")}
+				return append(diagnostics, statementDiagnostic(document, declaration.Statements[i],
+					"RTG-VALIDATE-031", "runtime "+left[0]+" must bind a backend algorithm"))
 			}
 			function, found := findBackendFunction(document, right[1])
 			if !found || !directEmitterSignatureMatches(function, directEmitterOperation{
 				Name: left[0], Parameters: hookParameters[hook],
 				Result: hookResults[hook],
 			}) {
-				return []Diagnostic{statementDiagnostic(document, declaration.Statements[i],
-					"RTG-VALIDATE-032", "runtime "+left[0]+" has an incompatible backend signature")}
+				return append(diagnostics, statementDiagnostic(document, declaration.Statements[i],
+					"RTG-VALIDATE-032", "runtime "+left[0]+" has an incompatible backend signature"))
 			}
+		}
+	}
+	if entry, found := decodeRuntimeEntryTemplate(declaration); found && entry.requiresState {
+		stateBytes, valid := integerField(document, declaration, "entry_state_bytes")
+		if !valid || stateBytes <= 0 {
+			diagnostics = append(diagnostics, resolveDiagnostic(document, declaration,
+				"RTG-VALIDATE-098",
+				"runtime "+declaration.Name+
+					" has a stateful entry but no positive entry_state_bytes"))
 		}
 	}
 	allowed := []string{
 		"print", "open", "close", "read", "write", "read_at", "write_at", "chmod",
 		"seek", "exit",
 	}
-	var diagnostics []Diagnostic
 	operations := listField(document, declaration, "operations")
 	operationStatements := make([]Statement, len(operations))
 	for i := 0; i < len(declaration.Statements); i++ {
@@ -653,10 +671,23 @@ func validateRuntime(document Document, declaration Declaration) []Diagnostic {
 
 func validateFormat(document Document, declaration Declaration) []Diagnostic {
 	var diagnostics []Diagnostic
-	hookNames := []string{"image", "kernel_image"}
-	hookParameters := make([][]string, 2)
+	hookNames := []string{
+		"image", "kernel_image", "patch_absolute", "patch_image",
+		"append64", "append_header", "append_relocation", "append_section", "append_symbol",
+		"patch_address",
+	}
+	hookParameters := make([][]string, len(hookNames))
+	hookResults := []string{"[]byte", "[]byte", "", "", "[]byte", "[]byte", "[]byte", "[]byte", "[]byte", ""}
 	hookParameters[0] = []string{"*RTGEmitter"}
 	hookParameters[1] = []string{"*RTGEmitter", "RTGLabel", "RTGLabel"}
+	hookParameters[2] = []string{"*RTGEmitter", "int", "int", "int"}
+	hookParameters[3] = []string{"*RTGEmitter", "int", "int", "[]int"}
+	hookParameters[4] = []string{"[]byte", "int"}
+	hookParameters[5] = []string{"[]byte", "int", "int", "int"}
+	hookParameters[6] = []string{"[]byte", "int", "int", "int", "int"}
+	hookParameters[7] = []string{"[]byte", "int", "int", "int", "int", "int", "int", "int", "int", "int"}
+	hookParameters[8] = []string{"[]byte", "int", "int", "int", "int", "int"}
+	hookParameters[9] = []string{"*RTGEmitter", "int", "int", "int"}
 	for i := 0; i < len(declaration.Statements); i++ {
 		statement := declaration.Statements[i]
 		left, right, assignment := statementAssignment(statement)
@@ -667,6 +698,22 @@ func validateFormat(document Document, declaration Declaration) []Diagnostic {
 		if hook < 0 {
 			continue
 		}
+		if left[0] == "image" && len(right) == 1 &&
+			(right[0] == "elf_executable" || right[0] == "pe_executable") {
+			continue
+		}
+		if left[0] == "kernel_image" && len(right) == 1 &&
+			right[0] == "linux_module_elf" {
+			continue
+		}
+		if left[0] == "patch_absolute" && len(right) == 1 &&
+			declarativeFormatAbsoluteRelocations(declaration) != "" {
+			continue
+		}
+		if left[0] == "patch_image" && len(right) == 1 &&
+			declarativeFormatImageRelocations(declaration) != "" {
+			continue
+		}
 		if len(right) != 2 || right[0] != "go" && right[0] != "sequence" {
 			diagnostics = append(diagnostics, statementDiagnostic(document, statement,
 				"RTG-VALIDATE-042", "format "+left[0]+" must bind a backend algorithm"))
@@ -674,7 +721,7 @@ func validateFormat(document Document, declaration Declaration) []Diagnostic {
 		}
 		function, found := findBackendFunction(document, right[1])
 		if !found || !directEmitterSignatureMatches(function, directEmitterOperation{
-			Name: left[0], Parameters: hookParameters[hook], Result: "[]byte",
+			Name: left[0], Parameters: hookParameters[hook], Result: hookResults[hook],
 		}) {
 			diagnostics = append(diagnostics, statementDiagnostic(document, statement,
 				"RTG-VALIDATE-043", "format "+left[0]+" has an incompatible backend signature"))
@@ -690,6 +737,61 @@ func validateFormat(document Document, declaration Declaration) []Diagnostic {
 		if order != "little" && order != "big" {
 			diagnostics = append(diagnostics, resolveDiagnostic(document, declaration,
 				"RTG-VALIDATE-041", "format "+declaration.Name+" has invalid byte_order"))
+		}
+	}
+	if declarativeFormatImage(declaration) == "elf_executable" {
+		kind, hasKind := fieldValue(document, declaration, "kind")
+		order, hasOrder := fieldValue(document, declaration, "byte_order")
+		bits, hasBits := integerField(document, declaration, "address_bits")
+		_, hasMachine := integerField(document, declaration, "machine")
+		_, hasCodeOffset := integerField(document, declaration, "code_offset")
+		alignment, hasAlignment := integerField(document, declaration, "file_alignment")
+		_, hasPatch := architectureGoHook(declaration, "patch_absolute")
+		hasPatch = hasPatch || declarativeFormatAbsoluteRelocations(declaration) != ""
+		if !hasKind || valueName(kind) != "elf" || !hasOrder || valueName(order) != "little" ||
+			!hasBits || bits != 32 && bits != 64 || !hasMachine || !hasCodeOffset ||
+			!hasAlignment || alignment <= 0 || alignment&(alignment-1) != 0 || !hasPatch {
+			diagnostics = append(diagnostics, resolveDiagnostic(document, declaration,
+				"RTG-VALIDATE-044",
+				"elf_executable requires kind=elf, little endian, 32/64 address_bits, machine, "+
+					"code_offset, power-of-two file_alignment, and patch_absolute"))
+		}
+	}
+	if declarativeFormatImage(declaration) == "pe_executable" {
+		kind, hasKind := fieldValue(document, declaration, "kind")
+		order, hasOrder := fieldValue(document, declaration, "byte_order")
+		bits, hasBits := integerField(document, declaration, "address_bits")
+		_, hasMachine := integerField(document, declaration, "machine")
+		_, hasCodeOffset := integerField(document, declaration, "code_offset")
+		fileAlignment, hasFileAlignment := integerField(document, declaration, "file_alignment")
+		sectionAlignment, hasSectionAlignment := integerField(document, declaration, "section_alignment")
+		_, hasImageBase := integerField(document, declaration, "image_base")
+		_, hasPatch := architectureGoHook(declaration, "patch_image")
+		hasPatch = hasPatch || declarativeFormatImageRelocations(declaration) != ""
+		if !hasKind || valueName(kind) != "pe" || !hasOrder || valueName(order) != "little" ||
+			!hasBits || bits != 32 && bits != 64 || !hasMachine || !hasCodeOffset ||
+			!hasFileAlignment || fileAlignment <= 0 || fileAlignment&(fileAlignment-1) != 0 ||
+			!hasSectionAlignment || sectionAlignment <= 0 ||
+			sectionAlignment&(sectionAlignment-1) != 0 || !hasImageBase || !hasPatch {
+			diagnostics = append(diagnostics, resolveDiagnostic(document, declaration,
+				"RTG-VALIDATE-045",
+				"pe_executable requires kind=pe, little endian, 32/64 address_bits, machine, "+
+					"code_offset, image_base, power-of-two file/section alignments, and patch_image"))
+		}
+	}
+	if declarativeFormatKernelImage(declaration) == "linux_module_elf" {
+		required := []string{"append64", "append_header", "append_relocation", "append_section", "append_symbol"}
+		for i := 0; i < len(required); i++ {
+			if _, found := architectureGoHook(declaration, required[i]); !found {
+				diagnostics = append(diagnostics, resolveDiagnostic(document, declaration,
+					"RTG-VALIDATE-046", "linux_module_elf requires typed helper "+required[i]))
+			}
+		}
+	}
+	if declarativeFormatAbsoluteRelocations(declaration) == "arm32_mov_address" {
+		if _, found := architectureGoHook(declaration, "patch_address"); !found {
+			diagnostics = append(diagnostics, resolveDiagnostic(document, declaration,
+				"RTG-VALIDATE-047", "arm32_mov_address requires typed helper patch_address"))
 		}
 	}
 	return diagnostics
@@ -719,6 +821,14 @@ func validateTargetComposition(document Document, target ResolvedTarget) []Diagn
 			diagnostics = append(diagnostics, resolveDiagnostic(document, target.Declaration,
 				"RTG-VALIDATE-052", "target "+target.Descriptor.Name+" composes "+formats[i].Name+
 					" byte order with a different architecture byte order"))
+		}
+	}
+	if declarativeFormatImage(target.Executable) == "pe_executable" {
+		library, imports := runtimePEImports(target.Runtime)
+		if library == "" || len(imports) == 0 {
+			diagnostics = append(diagnostics, resolveDiagnostic(document, target.Declaration,
+				"RTG-VALIDATE-053", "PE target "+target.Descriptor.Name+
+					" requires a runtime imports declaration"))
 		}
 	}
 	return diagnostics

@@ -17,10 +17,13 @@ workflow is in [`../definitions/README.md`](../definitions/README.md).
   checker, reachability analysis, and direct-code generation primitives as the
   built-in catalog.
 
-The native catalog contains shared helpers once. Architecture instruction
-encoders and genuinely irregular ABI, runtime, relocation, and format
-algorithms remain typed embedded Go hooks. The compiler does not analyze hook
-complexity or termination.
+The native catalog contains shared helpers once. Repeated instruction rows,
+straight-line encoder/ABI/runtime sequences, operation dispatch, entry and I/O
+templates, architecture label relocations, ELF/PE executable relocation
+patching, ELF/PE image construction, and Linux-module ELF construction are
+bounded declarations. Genuinely irregular encoders, branch relaxation, ABI
+edges, and Mach-O algorithms remain typed embedded Go hooks. The compiler does
+not analyze hook complexity or termination.
 
 ## Backend families
 
@@ -46,9 +49,14 @@ The bounded native model includes:
   widths and code/data distinctions;
 - role mappings, conditions, forms, instruction rows, and typed operation
   bindings;
+- bounded straight-line sequences with calls, local values, assignments, and a
+  final return, but no general branches or loops;
 - ABI inheritance, register/stack policy, save sets, and typed ABI hooks;
-- runtime operation declarations and typed runtime hooks;
-- output-format parameters and relocation hooks;
+- runtime operation declarations, operation-to-sequence dispatch, entry byte
+  templates, named BSS records, and typed runtime hooks;
+- named label-relocation encodings for relative-32, AArch64, and ARM32 code;
+- ELF/PE executable constructors, executable relocation encodings, Linux-module
+  ELF construction, output-format parameters, and narrow typed format helpers;
 - one target composition across machine, ABI, runtime, and format.
 
 The language has no macros, general evaluator, recipe interpreter, or Go
@@ -62,9 +70,17 @@ signatures are rejected.
 
 Generation starts from one target or architecture and emits only transitively
 reachable declarations. An opaque hook is appropriate when an encoder or
-platform algorithm has real control flow that would be less clear as a table.
-Declarative forms remain authoritative for operation identity, operands,
-effects, constraints, composition, and hook placement.
+platform algorithm has target-specific control flow that would be less clear
+as a table or bounded sequence. Declarative forms remain authoritative for
+operation identity, operands, effects, constraints, composition, relocation
+selection, format selection, and hook placement.
+
+The closed production native catalog is hard-limited by
+`TestNativeDefinitionEmbeddedGoBudget` to 60,000 semantic Go bytes and 200 Go
+declarations. The test is deliberately a simple size/count guard, not a Go
+complexity analyzer. It also prevents the replaced opaque module-image,
+Windows-I/O, label-relocation, ELF-relocation, and x86 PE-relocation functions
+from being reintroduced.
 
 ## Identity
 
@@ -84,8 +100,9 @@ semantic changes do.
 ## Generated topology
 
 `go generate ./backend/definitions` emits the checked-in production
-architecture projections. The four native encoder bodies remain independently
-prunable even though their source authority is one catalog.
+architecture projections. The four native encoder bodies and their declarative
+label-relocation finalizers remain independently prunable even though their
+source authority is one catalog.
 
 Built-ins expose stable compiler-facing names so fixed-target compilers retain
 their direct fast calls. External definitions cannot have names known to a
@@ -98,8 +115,8 @@ definition.
 
 - frontend and backend target registries;
 - target help;
-- `machine-definitions.generated.md`, including non-enforcing declarative and
-  reachable/catalog Go-volume metrics.
+- `machine-definitions.generated.md`, including per-target review metrics for
+  declarative and reachable/catalog Go volume.
 
 `go generate ./internal/backendcompiled` emits:
 
@@ -148,33 +165,20 @@ operations while exercising:
 The generated production encoders, target registries, bundled compiler, custom
 preparation, RTGU/RTGB binding, Wasm/VM family, native target suites, and full
 self-hosting suite are exercised by the repository tests. Performance
-acceptance remains exclusively defined by `backend/main_test.go`; source-volume
-metrics never loosen a gate.
+acceptance remains exclusively defined by `backend/main_test.go`; the native
+catalog ceiling adds a maintainability constraint and never loosens a compiler
+or output gate.
 
 ## Acceptance record
 
-The final 2026-07-30 migration run recorded:
+The current closed native catalog is 217,610 authored bytes over 7,255 lines.
+The generated catalog report measures 57,334 semantic Go bytes and 139
+declarations; the stricter declaration-source audit measures 59,374 bytes and
+139 declarations. Both are below the enforced 60,000/200 ceiling. The four
+checked-in native algorithm projections total 44,824 bytes.
 
-- native authored source changed from four files totaling 255,840 bytes and
-  8,408 lines to one 246,064-byte, 8,092-line catalog;
-- checked-in native architecture projections changed from 148,330 bytes of
-  algorithm plus test-only contract output to 43,026 bytes of production
-  output, a reduction of 105,304 bytes;
-- the ordinary-Go compiled backend changed by -22 bytes and its compressed
-  preparation bundle by +723 bytes;
-- two complete generation passes were byte-identical;
-- the full backend suite passed in 10.283 seconds and the full frontend suite,
-  including self-hosting, passed in 200.097 seconds under a 4 GiB memory cap;
-- frontend self-host performance passed at 350 ms measured CPU, 1961/1000
-  normalized calibration units, 23,140 KiB peak RSS, and a 1,430,569-byte
-  stage3 compiler;
-- VM32 backend self-hosting passed with a 1,131,698-byte artifact, 273,766
-  execution steps, and 73,815,312 bytes peak memory;
-- full frontend compilation inside VM32 passed with a 3,011,055-byte artifact,
-  1,634,978-byte Linux output, 7,542,001,205 execution steps, and 140,001,892
-  bytes peak memory; and
-- ordinary Go builds passed for Linux amd64/arm64, Windows amd64/arm64, and
-  Darwin arm64.
-
-All fixed-target compiler runtime, RSS, and binary-size checks passed their
-unchanged limits. `backend/main_test.go` was not modified.
+Prepared production checks cover AArch64, Windows PE on amd64/386/arm64, Linux
+kernel-module ELF, and Linux 386/ARM outputs. Generation, complete backend,
+complete frontend/self-hosting, cross-build, and deterministic-output results
+are recorded from the final validation run for each change rather than kept as
+stale historical numbers here. `backend/main_test.go` remains unmodified.

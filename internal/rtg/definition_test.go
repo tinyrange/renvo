@@ -3,8 +3,44 @@ package rtg
 import (
 	"bytes"
 	"os"
+	"strings"
 	"testing"
 )
+
+func TestNativeDefinitionEmbeddedGoBudget(t *testing.T) {
+	source, err := os.ReadFile("../../backend/definitions/native.rtg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := ResolveDefinitions(Parse(source, "native.rtg"))
+	if !resolved.Ok {
+		t.Fatalf("ResolveDefinitions failed: %#v", resolved.Diagnostics)
+	}
+	if len(resolved.Targets) == 0 {
+		t.Fatal("native definition exports no targets")
+	}
+	metrics := MeasureTarget(resolved.Document, resolved.Targets[0])
+	const maxBytes = 60000
+	const maxDeclarations = 200
+	if metrics.CatalogGoBytes > maxBytes || metrics.CatalogGoDecls > maxDeclarations {
+		t.Fatalf("native embedded Go = %d bytes / %d declarations, limit %d / %d; "+
+			"move regular machine, ABI, runtime, relocation, and format structure into "+
+			"bounded declarations rather than hiding it in another hook",
+			metrics.CatalogGoBytes, metrics.CatalogGoDecls, maxBytes, maxDeclarations)
+	}
+	for _, legacy := range []string{
+		"x86KernelModuleImage", "aarch64WindowsRuntimeReadWrite",
+		"x86PatchRelocations", "x86_32PatchRelocations",
+		"aarch64PatchRelocations", "armPatchRelocations",
+		"x86ELFPatchAbsoluteRelocations", "x86_32ELFPatchAbsoluteRelocations",
+		"aarch64ELFPatchAbsoluteRelocations", "armELFPatchAbsoluteRelocations",
+		"x86PEPatch", "x86_32PEPatch",
+	} {
+		if strings.Contains(string(source), legacy) {
+			t.Errorf("legacy opaque backend algorithm remains: %s", legacy)
+		}
+	}
+}
 
 func TestAArch64DefinitionVerticalSlice(t *testing.T) {
 	source, err := os.ReadFile("../../backend/definitions/native.rtg")
@@ -17,6 +53,15 @@ func TestAArch64DefinitionVerticalSlice(t *testing.T) {
 	}
 	if len(resolved.Targets) != 9 {
 		t.Fatalf("native target count = %d, want 9", len(resolved.Targets))
+	}
+	darwin, found := lookupResolvedTarget(resolved, "darwin/arm64")
+	if !found {
+		t.Fatal("native definition lost darwin/arm64")
+	}
+	if stateBytes, ok := integerField(
+		resolved.Document, darwin.Runtime, "entry_state_bytes"); !ok || stateBytes != 24 {
+		t.Fatalf("darwin/arm64 entry state bytes = %d, %v; want 24, true",
+			stateBytes, ok)
 	}
 	for _, target := range []string{"linux/aarch64", "darwin/arm64", "windows/arm64"} {
 		generated := GenerateFixedBackend(resolved, target)

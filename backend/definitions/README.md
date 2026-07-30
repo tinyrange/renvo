@@ -38,19 +38,36 @@ parser or generator.
    roles, not required physical register spellings.
 6. Describe recurring encodings in `forms` and instruction variants as rows in
    `instructions`.
-7. Bind every `direct_emitter_v1` operation to an instruction or typed Go hook,
-   or explicitly reject an operation supported by a later contract.
-8. Add ABI, runtime, format, and target compositions.
-9. Export only the architecture algorithms used by the checked-in compiler.
-10. Add the architecture projection to `generate.go`, regenerate, and run the
+7. Use bounded `sequences` for straight-line encoder, ABI, entry, and runtime
+   composition. Sequences permit typed calls and local values but deliberately
+   have no general branch or loop construct.
+8. Bind every `direct_emitter_v1` operation to an instruction, bounded
+   sequence, or typed Go hook, or explicitly reject an operation supported by
+   a later contract.
+9. Select a named label-relocation encoding and describe executable/object
+   relocation facts in the format declaration.
+10. Add ABI, runtime, format, and target compositions.
+11. Export only the architecture algorithms used by the checked-in compiler.
+12. Add the architecture projection to `generate.go`, regenerate, and run the
     complete backend and frontend suites under the repository memory cap.
 
 Embedded Go is an opaque, typed escape hatch. It is appropriate for irregular
-encoders, immediate synthesis, relocation patching, ABI edges, and runtime or
-format algorithms with real control flow. Renvo checks hook signatures but
-does not attempt complexity or termination analysis. Before adding a hook,
-check whether a table row, an existing form, or a shared catalog helper states
-the difference more directly.
+encoders, immediate synthesis, branch relaxation, ABI edges, and runtime or
+format algorithms with genuinely target-specific control flow. Ordinary label
+relocations, ELF/PE image patching, Linux-module ELF construction, entry byte
+templates, runtime operation selection, and straight-line ABI emission are
+already bounded declarations and should not be reintroduced as hooks. Renvo
+checks hook signatures but does not attempt complexity or termination
+analysis. Before adding a hook, check whether a table row, an existing form, a
+bounded sequence, or a shared format constructor states the difference more
+directly.
+
+`TestNativeDefinitionEmbeddedGoBudget` enforces the closed native catalog at no
+more than 60,000 semantic Go bytes and 200 Go declarations. This is an
+architecture-maintainability guard, not permission to move target algorithms
+into an unmeasured file. Reusable generator code may implement a generic format
+constructor; machine and OS differences must remain visible as typed `.rtg`
+facts.
 
 ## Identity and pruning
 
@@ -101,5 +118,7 @@ systemd-run --user --scope \
   -- go test ./frontend_tests -count=1
 ```
 
-The metrics in `backend/docs/machine-definitions.generated.md` are review aids.
-Only the existing hard gates in `backend/main_test.go` decide acceptance.
+The per-target metrics in `backend/docs/machine-definitions.generated.md` are
+review aids. The closed native-catalog Go ceiling is separately enforced by
+the RTG tests. Compiler and output performance acceptance remains exclusively
+defined by the existing hard gates in `backend/main_test.go`.

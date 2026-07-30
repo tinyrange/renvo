@@ -1,5 +1,7 @@
 package rtg
 
+import "strings"
+
 type runtimeOperationTemplate struct {
 	name string
 	code int
@@ -35,10 +37,13 @@ func appendDirectEmitterBindings(out []byte, document Document, arch Declaration
 		if !found {
 			continue
 		}
-		out = append(out, "\n// Generated direct_emitter_v1 binding for "...)
-		out = append(out, binding.Name...)
-		out = append(out, ".\n"...)
-		out = appendDirectEmitterEffectComment(out, directEmitterV1[operation])
+		out = append(out, '\n')
+		if !nativeEmitter || arch.Name == "vm32" {
+			out = append(out, "// Generated direct_emitter_v1 binding for "...)
+			out = append(out, binding.Name...)
+			out = append(out, ".\n"...)
+			out = appendDirectEmitterEffectComment(out, directEmitterV1[operation])
+		}
 		out = append(out, "func "...)
 		out = append(out, prefix...)
 		out = append(out, "Direct"...)
@@ -156,20 +161,46 @@ func operationGoSuffix(name string) string {
 }
 
 func appendArchitectureHooks(out []byte, document Document, arch Declaration, nativeEmitter bool) []byte {
+	return appendArchitectureHooksNamed(out, document, arch, nativeEmitter,
+		"rtg"+exportedName(document.Unit)+"PatchRelocations")
+}
+
+func appendArchitectureHooksNamed(out []byte, document Document, arch Declaration,
+	nativeEmitter bool, functionName string) []byte {
+	return appendArchitectureHooksNamedMode(out, document, arch, nativeEmitter,
+		functionName, false)
+}
+
+func appendCheckedInArchitectureHooks(out []byte, document Document,
+	arch Declaration) []byte {
+	return appendArchitectureHooksNamedMode(out, document, arch, true,
+		"rtg"+exportedName(document.Unit)+"PatchRelocations", true)
+}
+
+func appendArchitectureHooksNamedMode(out []byte, document Document, arch Declaration,
+	nativeEmitter bool, functionName string, compactNativeLabels bool) []byte {
 	algorithm, found := architectureGoHook(arch, "patch_relocations")
-	if !found {
+	encoding := declarativeArchitectureRelocations(arch)
+	if !found && encoding == "" {
 		return out
 	}
 	prefix := "rtg" + exportedName(document.Unit)
 	out = append(out, "\n// Generated definition-owned relocation finalizer.\nfunc "...)
-	out = append(out, prefix...)
-	out = append(out, "PatchRelocations(out "...)
+	out = append(out, functionName...)
+	out = append(out, "(out "...)
 	if nativeEmitter {
 		out = append(out, "*renvoAsm"...)
 	} else {
 		out = append(out, "*RTGEmitter"...)
 	}
-	out = append(out, ") {\n\t"...)
+	out = append(out, ") {\n"...)
+	if encoding != "" {
+		out = appendDeclarativeArchitectureRelocationBody(
+			out, encoding, nativeEmitter, compactNativeLabels)
+		out = append(out, "}\n"...)
+		return out
+	}
+	out = append(out, '\t')
 	if external, found := embeddedExternalName(architectureExports(arch), algorithm); found {
 		out = append(out, external...)
 	} else {
@@ -179,6 +210,164 @@ func appendArchitectureHooks(out []byte, document Document, arch Declaration, na
 	out = append(out, "(out)\n}\n"...)
 	return out
 }
+
+func declarativeArchitectureRelocations(arch Declaration) string {
+	for i := 0; i < len(arch.Statements); i++ {
+		left, right, assignment := statementAssignment(arch.Statements[i])
+		if !assignment || len(left) != 1 || left[0] != "patch_relocations" || len(right) != 1 {
+			continue
+		}
+		if right[0] == "relative32_le" || right[0] == "aarch64_labels" ||
+			right[0] == "arm32_labels" {
+			return right[0]
+		}
+	}
+	return ""
+}
+
+func appendDeclarativeArchitectureRelocationBody(out []byte, encoding string,
+	nativeEmitter bool, compactNativeLabels bool) []byte {
+	get32 := "RTGGet32At"
+	code := "out.Code()"
+	patch32 := "out.PatchUint32("
+	if nativeEmitter {
+		get32 = "renvoGet32At"
+		code = "out.code"
+		patch32 = "renvoPut32At(out.code, "
+		out = append(out, "\tfor i := 0; i+1 < len(out.relocs); i += 2 {\n"...)
+		out = append(out, "\t\tat := int(renvo_runtime_UnsafeInt32At(out.relocs, i)) & 2147483647\n"...)
+		out = append(out, "\t\tlabel := int(renvo_runtime_UnsafeInt32At(out.relocs, i+1)) & 2147483647\n"...)
+		out = append(out, "\t\ttarget := renvoAsmLabelPosition(out, label)\n"...)
+		if compactNativeLabels {
+			out = append(out, "\t\tif target < 0 { continue }\n"...)
+		} else {
+			out = append(out, "\t\tif at+4 > len(out.code) || target < 0 { continue }\n"...)
+		}
+	} else {
+		out = append(out, "\tfor i := 0; i < out.RelocationCount(); i++ {\n"...)
+		out = append(out, "\t\tat := out.RelocationOffset(i)\n"...)
+		out = append(out, "\t\tlabel := out.RelocationLabel(i)\n"...)
+		out = append(out, "\t\ttarget := out.LabelPosition(label)\n"...)
+		out = append(out, "\t\tif at < 0 || at+4 > len(out.Code()) || target < 0 { continue }\n"...)
+	}
+	if encoding == "relative32_le" {
+		out = append(out, "\t\taddend := "...)
+		out = append(out, get32...)
+		out = append(out, '(')
+		out = append(out, code...)
+		out = append(out, ", at)\n\t\t"...)
+		out = append(out, patch32...)
+		out = append(out, "at, target+addend-(at+4))\n"...)
+	} else if encoding == "aarch64_labels" {
+		out = append(out, "\t\tinsn := "...)
+		out = append(out, get32...)
+		out = append(out, '(')
+		out = append(out, code...)
+		out = append(out, ", at)\n"...)
+		body := declarativeAArch64LabelRelocationBody
+		if compactNativeLabels {
+			// Checked-in lowering emits only branch labels. Data and BSS
+			// addresses use the separate absolute-relocation stream. Keep ADR
+			// label support in prepared backends, whose typed hooks may create
+			// label-backed RTGAddress values directly.
+			body = declarativeAArch64NativeLabelRelocationBody
+		}
+		body = strings.ReplaceAll(body, "PATCH32(", patch32)
+		out = append(out, body...)
+	} else if encoding == "arm32_labels" {
+		out = append(out, "\t\tinsn := "...)
+		out = append(out, get32...)
+		out = append(out, '(')
+		out = append(out, code...)
+		out = append(out, ", at)\n"...)
+		body := declarativeARM32LabelRelocationBody
+		if nativeEmitter {
+			body = declarativeARM32NativeLabelRelocationBody
+		}
+		if compactNativeLabels {
+			body = declarativeARM32CompactNativeLabelRelocationBody
+		}
+		body = strings.ReplaceAll(body, "RTGGET32", get32)
+		body = strings.ReplaceAll(body, "CODE", code)
+		body = strings.ReplaceAll(body, "PATCH32(", patch32)
+		out = append(out, body...)
+	}
+	return append(out, "\t}\n"...)
+}
+
+const declarativeAArch64LabelRelocationBody = `
+		displacement := target - at
+		if (insn & 0xfc000000) == 0x94000000 {
+			PATCH32(at, 0x94000000|((displacement/4)&0x03ffffff))
+		} else if (insn & 0xfc000000) == 0x14000000 {
+			PATCH32(at, 0x14000000|((displacement/4)&0x03ffffff))
+		} else if (insn & 0xff000010) == 0x54000000 {
+			PATCH32(at, (insn&0xff00001f)|(((displacement/4)&0x7ffff)<<5))
+		} else if (insn & 0x9f000000) == 0x10000000 {
+			addend := ((insn >> 29) & 3) | (((insn >> 5) & 0x7ffff) << 2)
+			if (addend & 0x100000) != 0 {
+				addend = addend - 0x200000
+			}
+			displacement = displacement + addend
+			PATCH32(at, 0x10000000|(insn&31)|
+				((displacement&3)<<29)|(((displacement>>2)&0x7ffff)<<5))
+	}
+`
+
+const declarativeAArch64NativeLabelRelocationBody = `
+		displacement := target - at
+		if (insn & 0x7c000000) == 0x14000000 {
+			PATCH32(at, (insn&0xfc000000)|((displacement/4)&0x03ffffff))
+		} else if (insn & 0xff000010) == 0x54000000 {
+			PATCH32(at, (insn&0xff00001f)|(((displacement/4)&0x7ffff)<<5))
+		}
+`
+
+const declarativeARM32LabelRelocationBody = `
+		if (insn & 0x0e000000) == 0x0a000000 {
+			displacement := target - (at + 8)
+			PATCH32(at, (insn&0xff000000)|((displacement/4)&0x00ffffff))
+		} else if (insn & 0xfff00000) == 0xe3000000 {
+			highInsn := RTGGET32(CODE, at+4)
+			addend := insn & 0x0fff
+			addend = addend | ((insn >> 4) & 0xf000)
+			addend = addend | ((highInsn & 0x0fff) << 16)
+			addend = addend | ((highInsn & 0x000f0000) << 12)
+			if (addend & 0x80000000) != 0 {
+				addend = addend - 4294967296
+			}
+			value := target + addend - (at + 16)
+			low := value & 65535
+			high := (value >> 16) & 65535
+			PATCH32(at, (insn&0xfff0f000)|((low&0xf000)<<4)|(low&0x0fff))
+			PATCH32(at+4,
+				(highInsn&0xfff0f000)|((high&0xf000)<<4)|(high&0x0fff))
+		}
+`
+
+const declarativeARM32NativeLabelRelocationBody = `
+		if (insn & 0x0e000000) == 0x0a000000 {
+			displacement := target - (at + 8)
+			PATCH32(at, (insn&0xff000000)|((displacement/4)&0x00ffffff))
+		} else if (insn & 0xfff00000) == 0xe3000000 {
+			highInsn := RTGGET32(CODE, at+4)
+			addend := (insn & 0x0fff) | ((insn >> 4) & 0xf000)
+			addend = addend | ((highInsn & 0x0fff) << 16)
+			addend = addend | ((highInsn & 0x000f0000) << 12)
+			if (addend & 0x80000000) != 0 {
+				addend = addend - 4294967296
+			}
+			reg := (insn >> 12) & 15
+			renvoArmAsmPatchMovRegImmAt(out, at, reg, target+addend-(at+16))
+		}
+`
+
+const declarativeARM32CompactNativeLabelRelocationBody = `
+		if (insn & 0x0e000000) == 0x0a000000 {
+			displacement := target - (at + 8)
+			PATCH32(at, (insn&0xff000000)|((displacement/4)&0x00ffffff))
+		}
+`
 
 // Prepared backends expose one stable, target-neutral adapter surface to the
 // shared lowering kernel. The adapter is generated once for the selected
@@ -200,7 +389,10 @@ func appendPreparedDirectEmitterAdapters(out []byte, document Document, target R
 	}
 	out = appendPreparedLocationAdapters(out, document, target)
 	out = append(out, "\nfunc renvoRTGPatchRelocations(out *renvoAsm) {\n"...)
-	if algorithm, found := architectureGoHook(target.Arch, "patch_relocations"); found {
+	if declarativeArchitectureRelocations(target.Arch) != "" {
+		out = append(out, prefix...)
+		out = append(out, "PatchRelocations(out)\n"...)
+	} else if algorithm, found := architectureGoHook(target.Arch, "patch_relocations"); found {
 		out = append(out, prefix...)
 		out = append(out, exportedName(algorithm)...)
 		out = append(out, "(out)\n"...)
@@ -345,8 +537,11 @@ func appendPreparedFormatAdapters(out []byte, document Document, target Resolved
 	out = append(out, "\nconst renvoRTGCodeOffset = "...)
 	out = appendDecimalFrame(out, codeOffset)
 	out = append(out, "\nfunc renvoRTGImage(out *renvoAsm) []byte {\n"...)
-	algorithm, hasImage := architectureGoHook(outputFormat, "image")
-	if hasImage {
+	if declarativeFormatImage(outputFormat) != "" {
+		out = append(out, "\treturn "...)
+		out = append(out, declarativeFormatImageName(document, outputFormat)...)
+		out = append(out, "(out)\n"...)
+	} else if algorithm, hasImage := architectureGoHook(outputFormat, "image"); hasImage {
 		out = append(out, "\treturn rtg"...)
 		out = append(out, exportedName(document.Unit)...)
 		out = append(out, exportedName(algorithm)...)
@@ -356,7 +551,11 @@ func appendPreparedFormatAdapters(out []byte, document Document, target Resolved
 	}
 	out = append(out, "}\n"...)
 	out = append(out, "func renvoRTGKernelImage(out *renvoAsm, initLabel int, exitLabel int) []byte {\n"...)
-	if algorithm, hasAlgorithm := architectureGoHook(outputFormat, "kernel_image"); hasAlgorithm {
+	if declarativeFormatKernelImage(outputFormat) != "" {
+		out = append(out, "\treturn "...)
+		out = append(out, declarativeFormatKernelImageName(document, outputFormat)...)
+		out = append(out, "(out, initLabel, exitLabel)\n"...)
+	} else if algorithm, hasAlgorithm := architectureGoHook(outputFormat, "kernel_image"); hasAlgorithm {
 		out = append(out, "\treturn rtg"...)
 		out = append(out, exportedName(document.Unit)...)
 		out = append(out, exportedName(algorithm)...)
@@ -387,6 +586,61 @@ func appendPreparedFormatAdapters(out []byte, document Document, target Resolved
 		out = append(out, exportedName(document.Unit)...)
 		out = append(out, exportedName(algorithm)...)
 		out = append(out, "(out, parameterCount, stateOffset)\n"...)
+	} else if template, found := decodeRuntimeEntryTemplate(target.Runtime); found {
+		out = append(out, "\t_ = stateOffset\n\tif parameterCount == 0 { return true }\n"...)
+		out = append(out, "\tif parameterCount < 0 || parameterCount > "...)
+		out = appendDecimalFrame(out, template.maxParameters)
+		if template.requiresState {
+			out = append(out, " || stateOffset < 0"...)
+		}
+		out = append(out, " { return false }\n"...)
+		for i := 0; i < len(template.bss); i++ {
+			out = append(out, "\t"...)
+			out = append(out, template.bss[i].name...)
+			out = append(out, "Offset := out.ReserveBSS("...)
+			out = appendDecimalFrame(out, template.bss[i].size)
+			out = append(out, ", "...)
+			out = appendDecimalFrame(out, template.bss[i].alignment)
+			out = append(out, ")\n"...)
+		}
+		if template.algorithm != "" {
+			out = append(out, "\trtg"...)
+			out = append(out, exportedName(document.Unit)...)
+			out = append(out, exportedName(template.algorithm)...)
+			out = append(out, "(out"...)
+			for i := 0; i < len(template.bss); i++ {
+				out = append(out, ", "...)
+				out = append(out, template.bss[i].name...)
+				out = append(out, "Offset"...)
+			}
+			if template.requiresState {
+				out = append(out, ", stateOffset"...)
+			}
+			out = append(out, ")\n"...)
+		} else {
+			out = append(out, "\tbase := len(out.code)\n\trenvoAsmEmitText(out, "...)
+			out = append(out, template.code...)
+			out = append(out, ")\n"...)
+			for i := 0; i < len(template.relocations); i++ {
+				relocation := template.relocations[i]
+				out = append(out, "\trenvoAsmAddAbsReloc(out, base+"...)
+				out = appendDecimalFrame(out, relocation.offset)
+				out = append(out, ", "...)
+				if relocation.kind == "bss" {
+					out = append(out, relocation.target...)
+					out = append(out, "Offset"...)
+					if relocation.addend != 0 {
+						out = append(out, '+')
+						out = appendDecimalFrame(out, relocation.addend)
+					}
+					out = append(out, ", RTGRelocationAbsoluteBSS)\n"...)
+				} else {
+					out = append(out, relocation.target...)
+					out = append(out, ", RTGRelocationImport)\n"...)
+				}
+			}
+		}
+		out = append(out, "\treturn true\n"...)
 	} else {
 		out = append(out, "\treturn parameterCount == 0\n"...)
 	}
@@ -434,6 +688,79 @@ func appendPreparedFormatAdapters(out []byte, document Document, target Resolved
 	return out
 }
 
+type runtimeEntryBSS struct {
+	name      string
+	size      int
+	alignment int
+}
+
+type runtimeEntryRelocation struct {
+	offset int
+	kind   string
+	target string
+	addend int
+}
+
+type runtimeEntryTemplate struct {
+	maxParameters int
+	code          string
+	algorithm     string
+	requiresState bool
+	bss           []runtimeEntryBSS
+	relocations   []runtimeEntryRelocation
+}
+
+func decodeRuntimeEntryTemplate(runtime Declaration) (runtimeEntryTemplate, bool) {
+	var result runtimeEntryTemplate
+	for i := 0; i < len(runtime.Statements); i++ {
+		statement := runtime.Statements[i]
+		if len(statement.Tokens) < 2 || len(statement.Tokens) > 3 ||
+			statement.Tokens[0] != "entry" ||
+			statement.Tokens[1] != "template" && statement.Tokens[1] != "sequence" {
+			continue
+		}
+		if statement.Tokens[1] == "sequence" {
+			if len(statement.Tokens) != 3 {
+				continue
+			}
+			result.algorithm = statement.Tokens[2]
+		}
+		for j := 0; j < len(statement.Children); j++ {
+			child := statement.Children[j]
+			left, right, assignment := statementAssignment(child)
+			if assignment && len(left) == 1 && left[0] == "max_parameters" &&
+				len(right) == 1 {
+				result.maxParameters, _ = parseInteger(right[0])
+			} else if assignment && len(left) == 1 && left[0] == "code" &&
+				len(right) == 1 {
+				result.code = right[0]
+			} else if assignment && len(left) == 1 && left[0] == "requires_state" &&
+				len(right) == 1 {
+				result.requiresState = right[0] == "true"
+			} else if len(child.Tokens) == 4 && child.Tokens[0] == "bss" {
+				size, sizeOK := parseInteger(child.Tokens[2])
+				alignment, alignmentOK := parseInteger(child.Tokens[3])
+				if sizeOK && alignmentOK {
+					result.bss = append(result.bss, runtimeEntryBSS{
+						name: child.Tokens[1], size: size, alignment: alignment,
+					})
+				}
+			} else if len(child.Tokens) == 4 && child.Tokens[0] == "relocation" &&
+				(child.Tokens[2] == "bss" || child.Tokens[2] == "import") {
+				offset, ok := parseInteger(child.Tokens[1])
+				if ok {
+					result.relocations = append(result.relocations, runtimeEntryRelocation{
+						offset: offset, kind: child.Tokens[2], target: child.Tokens[3],
+					})
+				}
+			}
+		}
+		return result, result.maxParameters > 0 &&
+			(result.code != "" || result.algorithm != "")
+	}
+	return result, false
+}
+
 func appendPreparedRuntimeVoidHook(
 	out []byte, document Document, runtime Declaration,
 	wrapper string, field string, parameters string, arguments string,
@@ -458,12 +785,81 @@ func appendPreparedRuntimeVoidHook(
 func appendPreparedRuntimeOperationAdapter(
 	out []byte, document Document, target ResolvedTarget,
 ) []byte {
+	ioTemplate, hasIOTemplate := decodeRuntimeIOTemplate(target.Runtime)
+	if hasIOTemplate {
+		positionRegister := ""
+		callWords := targetABICallWords(document, target.ABI)
+		if len(callWords) > 3 {
+			positionRegister, _ = architectureRegisterOutput(document, target.Arch, callWords[3])
+		}
+		out = append(out, "func renvoRTGEmitRuntimeIO(out *renvoAsm, write bool, positional bool) {\n"...)
+		for i := 0; i < len(ioTemplate.bss); i++ {
+			out = append(out, "\t"...)
+			out = append(out, ioTemplate.bss[i].name...)
+			out = append(out, "Offset := out.ReserveBSS("...)
+			out = appendDecimalFrame(out, ioTemplate.bss[i].size)
+			out = append(out, ", "...)
+			out = appendDecimalFrame(out, ioTemplate.bss[i].alignment)
+			out = append(out, ")\n"...)
+		}
+		out = append(out, "\thelper := out.NewLabel()\n\tafter := out.NewLabel()\n"...)
+		out = append(out, "\trenvoRTGDirectJump(out, after)\n\tout.Mark(helper)\n\tbase := len(out.code)\n"...)
+		out = append(out, "\tif write {\n\t\trenvoAsmEmitText(out, "...)
+		out = append(out, ioTemplate.writeCode...)
+		out = append(out, ")\n"...)
+		out = appendRuntimeTemplateRelocations(out, ioTemplate.writeRelocations)
+		out = append(out, "\t} else {\n\t\trenvoAsmEmitText(out, "...)
+		out = append(out, ioTemplate.readCode...)
+		out = append(out, ")\n"...)
+		out = appendRuntimeTemplateRelocations(out, ioTemplate.readRelocations)
+		out = append(out, "\t}\n\tout.Mark(after)\n"...)
+		if positionRegister != "" {
+			out = append(out, "\tif !positional { renvoRTGDirectMoveImmediate(out, "...)
+			out = append(out, positionRegister...)
+			out = append(out, ", -1) }\n"...)
+		}
+		out = append(out, "\trenvoRTGDirectCall(out, helper)\n}\n"...)
+	}
 	out = append(out, "func renvoRTGEmitRuntimeOperation(out *renvoAsm, operation int) bool {\n"...)
 	if algorithm, found := architectureGoHook(target.Runtime, "emit_operation"); found {
 		out = append(out, "\treturn rtg"...)
 		out = append(out, exportedName(document.Unit)...)
 		out = append(out, exportedName(algorithm)...)
 		out = append(out, "(out, operation)\n}\n"...)
+		return out
+	}
+	operationHooks := []runtimeOperationTemplate{
+		{"read", 1, nil},
+		{"write", 2, nil},
+		{"read_at", 3, nil},
+		{"write_at", 4, nil},
+		{"open", 5, nil},
+		{"close", 6, nil},
+		{"chmod", 7, nil},
+	}
+	hasOperationHooks := false
+	if hasIOTemplate {
+		out = append(out, "\tif operation == 1 { renvoRTGEmitRuntimeIO(out, false, false); return true }\n"...)
+		out = append(out, "\tif operation == 2 { renvoRTGEmitRuntimeIO(out, true, false); return true }\n"...)
+		out = append(out, "\tif operation == 3 { renvoRTGEmitRuntimeIO(out, false, true); return true }\n"...)
+		out = append(out, "\tif operation == 4 { renvoRTGEmitRuntimeIO(out, true, true); return true }\n"...)
+		hasOperationHooks = true
+	}
+	for i := 0; i < len(operationHooks); i++ {
+		algorithm, found := runtimeOperationHook(target.Runtime, operationHooks[i].name)
+		if !found {
+			continue
+		}
+		hasOperationHooks = true
+		out = append(out, "\tif operation == "...)
+		out = appendDecimalFrame(out, operationHooks[i].code)
+		out = append(out, " {\n\t\trtg"...)
+		out = append(out, exportedName(document.Unit)...)
+		out = append(out, exportedName(algorithm)...)
+		out = append(out, "(out)\n\t\treturn true\n\t}\n"...)
+	}
+	if hasOperationHooks {
+		out = append(out, "\treturn false\n}\n"...)
 		return out
 	}
 	numberRegisters := targetRuntimeRegisterList(target.Runtime, "number")
@@ -573,6 +969,99 @@ func appendPreparedRuntimeOperationAdapter(
 	}
 	out = append(out, "\treturn false\n}\n"...)
 	return out
+}
+
+type runtimeIOTemplate struct {
+	readCode         string
+	writeCode        string
+	bss              []runtimeEntryBSS
+	readRelocations  []runtimeEntryRelocation
+	writeRelocations []runtimeEntryRelocation
+}
+
+func decodeRuntimeIOTemplate(runtime Declaration) (runtimeIOTemplate, bool) {
+	var result runtimeIOTemplate
+	for i := 0; i < len(runtime.Statements); i++ {
+		statement := runtime.Statements[i]
+		if len(statement.Tokens) != 1 || statement.Tokens[0] != "io_template" {
+			continue
+		}
+		for j := 0; j < len(statement.Children); j++ {
+			child := statement.Children[j]
+			left, right, assignment := statementAssignment(child)
+			if assignment && len(left) == 1 && len(right) == 1 {
+				if left[0] == "read_code" {
+					result.readCode = right[0]
+				} else if left[0] == "write_code" {
+					result.writeCode = right[0]
+				}
+			} else if len(child.Tokens) == 4 && child.Tokens[0] == "bss" {
+				size, sizeOK := parseInteger(child.Tokens[2])
+				alignment, alignmentOK := parseInteger(child.Tokens[3])
+				if sizeOK && alignmentOK {
+					result.bss = append(result.bss, runtimeEntryBSS{
+						name: child.Tokens[1], size: size, alignment: alignment,
+					})
+				}
+			} else if len(child.Tokens) >= 4 && len(child.Tokens) <= 5 &&
+				(child.Tokens[0] == "read_relocation" ||
+					child.Tokens[0] == "write_relocation") {
+				offset, offsetOK := parseInteger(child.Tokens[1])
+				addend := 0
+				addendOK := true
+				if len(child.Tokens) == 5 {
+					addend, addendOK = parseInteger(child.Tokens[4])
+				}
+				if offsetOK && addendOK {
+					relocation := runtimeEntryRelocation{
+						offset: offset, kind: child.Tokens[2], target: child.Tokens[3],
+						addend: addend,
+					}
+					if child.Tokens[0] == "read_relocation" {
+						result.readRelocations = append(result.readRelocations, relocation)
+					} else {
+						result.writeRelocations = append(result.writeRelocations, relocation)
+					}
+				}
+			}
+		}
+		return result, result.readCode != "" && result.writeCode != ""
+	}
+	return result, false
+}
+
+func appendRuntimeTemplateRelocations(out []byte, relocations []runtimeEntryRelocation) []byte {
+	for i := 0; i < len(relocations); i++ {
+		relocation := relocations[i]
+		out = append(out, "\t\trenvoAsmAddAbsReloc(out, base+"...)
+		out = appendDecimalFrame(out, relocation.offset)
+		out = append(out, ", "...)
+		out = append(out, relocation.target...)
+		if relocation.kind == "bss" {
+			out = append(out, "Offset"...)
+			if relocation.addend != 0 {
+				out = append(out, '+')
+				out = appendDecimalFrame(out, relocation.addend)
+			}
+			out = append(out, ", RTGRelocationAbsoluteBSS)\n"...)
+		} else {
+			out = append(out, ", RTGRelocationImport)\n"...)
+		}
+	}
+	return out
+}
+
+func runtimeOperationHook(runtime Declaration, operation string) (string, bool) {
+	for i := 0; i < len(runtime.Statements); i++ {
+		statement := runtime.Statements[i]
+		if len(statement.Tokens) < 2 || statement.Tokens[0] != "operation" ||
+			statement.Tokens[1] != operation {
+			continue
+		}
+		declaration := Declaration{Statements: statement.Children}
+		return architectureGoHook(declaration, "emit")
+	}
+	return "", false
 }
 
 func runtimeOperationInteger(runtime Declaration, operation string, field string) (int, bool) {

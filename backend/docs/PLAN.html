@@ -338,6 +338,11 @@
         backend family, without pretending to implement the native contract.
       </li>
       <li>
+        The closed native catalog contains at most 60,000 semantic bytes and
+        200 declarations of embedded Go, enforced without weakening a compiler
+        performance gate or moving target logic into an unmeasured file.
+      </li>
+      <li>
         Built-in and custom native definitions use the same schema, resolver,
         validator, hook checker, reachability rules, and direct-code generator.
         Their packaging may remain different where checked-in specialization is
@@ -702,6 +707,16 @@ instructions {
       selected machine's declared patch hook where the file format cannot
       resolve a relocation generically.
     </p>
+    <p>
+      The implemented bounded encodings cover little-endian relative-32
+      labels, AArch64 and ARM32 label fields, relative-32 executable addresses,
+      AArch64 page-plus-offset addresses, ARM32 split move addresses, PE
+      relative addresses, and PE absolute addresses. ELF and PE executables and
+      Linux-module ELF objects are selected by format kind and specialized from
+      machine, width, alignment, image-base, section, relocation, and typed
+      record-helper facts. Only the ARM split-immediate writer remains a narrow
+      format hook.
+    </p>
 
     <h3>6.8 Target composition</h3>
     <p>A target selects one compatible value for each axis:</p>
@@ -782,12 +797,18 @@ instructions {
       <li>Generated names are resolved through the parsed Go AST, not string substitution.</li>
       <li>Only declarations reachable from the selected target are emitted.</li>
       <li>The complete hook syntax contributes to canonical definition identity.</li>
+      <li>
+        Straight-line calls and value plumbing use bounded
+        <code>sequence</code> declarations; sequences have no branch or loop
+        syntax and are not a second general-purpose IR.
+      </li>
     </ul>
     <div class="warning">
       There is no hook line limit, loop limit, cyclomatic-complexity check, or
-      termination proof. Human review and generated metrics provide pressure
-      toward small hooks; the type boundary provides the compiler-enforced
-      scope.
+      termination proof. The type boundary provides the compiler-enforced hook
+      scope. Separately, the closed native catalog has a deliberately simple
+      60,000-semantic-byte and 200-declaration ceiling; this measures growth
+      without attempting Go complexity analysis.
     </div>
 
     <h3>Hook review rule</h3>
@@ -961,6 +982,15 @@ target slicing and reachability
 
   <section id="phases">
     <h2>10. Implementation phases</h2>
+    <div class="decision">
+      <strong>Implementation status:</strong>
+      Phases 0 through 10 are implemented in the checked-in native catalog,
+      generator, prepared-backend path, and production projections. Phase 11
+      was treated as a measured packaging optimization; the existing compressed
+      source boundary remains because no replacement demonstrated a
+      size/time/memory win. The steps below remain the acceptance trail for
+      future architecture work.
+    </div>
 
     <h3>Phase 0: Freeze evidence and inventory differences</h3>
     <ol>
@@ -1024,7 +1054,11 @@ target slicing and reachability
       <li>Implement runtime composition and syscall/import fact tables.</li>
       <li>Implement format parameters and machine relocation hooks.</li>
       <li>Emit direct Go functions and constants with deterministic naming.</li>
-      <li>Emit a non-failing metrics report for declarative and Go source volume.</li>
+      <li>Emit per-target review metrics for declarative and Go source volume.</li>
+      <li>
+        Enforce the closed production native catalog at no more than 60,000
+        semantic Go bytes and 200 Go declarations.
+      </li>
     </ol>
     <div class="exit">
       <strong>Exit:</strong> a small synthetic native machine can generate,
@@ -1434,7 +1468,7 @@ systemd-run --user --scope \
         </tr>
         <tr>
           <td>Embedded Go again becomes the entire backend.</td>
-          <td>Require every hook to occupy a typed schema site; report hook/source metrics; review why a hook is necessary.</td>
+          <td>Require every hook to occupy a typed schema site; enforce the native catalog ceiling; report per-target metrics; review why a hook is necessary; reject moving target logic into an unmeasured file.</td>
         </tr>
         <tr>
           <td>The compiler grows a Go complexity analyzer.</td>
@@ -1503,6 +1537,7 @@ systemd-run --user --scope \
       <li>Verify fixed-target binaries contain no unrelated native architectures.</li>
       <li>Verify remaining preparation adapters contain no machine semantics.</li>
       <li>Compile and run one custom native target unknown to the release registry.</li>
+      <li>Verify the native catalog remains within 60,000 Go bytes and 200 declarations.</li>
       <li>Record final source, generated size, compiler size, steps, RSS, and output deltas.</li>
     </ol>
 
