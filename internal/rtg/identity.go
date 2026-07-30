@@ -94,6 +94,13 @@ func targetSemanticDeclarations(document Document, target ResolvedTarget) []cano
 }
 
 func targetGoRoots(document Document, target ResolvedTarget) []string {
+	roots := baseTargetGoRoots(document, target)
+	roots, _ = resolveArchitectureSequenceProjection(
+		document, target.Arch, roots, targetSequenceRoots(document, target))
+	return roots
+}
+
+func baseTargetGoRoots(document Document, target ResolvedTarget) []string {
 	roots := architectureGoRoots(target.Arch)
 	roots = appendDeclarationGoRoots(roots, target.ABI)
 	abi := target.ABI

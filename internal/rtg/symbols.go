@@ -167,6 +167,13 @@ func architectureSymbols(document Document, arch Declaration) []generatedSymbol 
 			})
 		}
 	}
+	sequences := architectureSequences(arch)
+	for i := 0; i < len(sequences); i++ {
+		symbols = append(symbols, generatedSymbol{
+			Local: sequences[i].Name, Output: outputPrefix + exportedName(sequences[i].Name),
+			Kind: "sequence", Value: sequences[i].Name,
+		})
+	}
 	return symbols
 }
 
@@ -350,15 +357,18 @@ func appendInstructionSymbolPrelude(out []byte, document Document, arch Declarat
 		var function embeddedFunction
 		found := false
 		var constants []string
-		if assignment && len(left) == 1 && len(right) == 2 && right[0] == "go" {
+		if assignment && len(left) == 1 && len(right) == 2 &&
+			(right[0] == "go" || right[0] == "sequence") {
 			name = left[0]
-			function, found = findEmbeddedFunction(document, right[1])
+			function, found = findBackendFunction(document, right[1])
 		} else if len(child.Tokens) >= 2 {
 			name = child.Tokens[0]
 			form, formFound := lookupArchitectureForm(forms, child.Tokens[1])
-			if formFound && form.Kind == "go" {
-				function, found = findEmbeddedFunction(document, form.Algorithm)
+			if formFound && (form.Kind == "go" || form.Kind == "sequence") {
+				function, found = findBackendFunction(document, form.Algorithm)
 				constants = instructionConstants(child.Tokens)
+			} else if formFound && form.Kind == "word32" {
+				function, found = architectureFormFunction(form, name)
 			} else if formFound && form.Kind == "bytes" {
 				out = append(out, "var "...)
 				out = append(out, localPrefix...)

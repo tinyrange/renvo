@@ -26,7 +26,10 @@ func GenerateCheckedInArchitectureAlgorithms(resolved ResolveResult, archName st
 	source := generateHeaderPackage(manifest, "algorithms/"+archName, packageName)
 	projection := checkedInProjectionDocument(resolved.Document, arch)
 	roots := architectureExportGoRoots(arch)
+	roots, sequences := resolveArchitectureSequenceProjection(resolved.Document, arch,
+		roots, architectureSequenceRoots(arch, true, false))
 	source = appendReachableEmbeddedGo(source, projection, roots, true, architectureExports(arch))
+	source = appendArchitectureSequences(source, projection, arch, true, true, false, sequences)
 	return GenerateResult{Source: source, Manifest: manifest, Ok: true}
 }
 
@@ -64,6 +67,8 @@ func GenerateCheckedInArchitectureContract(resolved ResolveResult, archName stri
 	projection := checkedInProjectionDocument(resolved.Document, arch)
 	source = appendArchitectureFacts(source, projection, arch, true)
 	roots := architectureDirectGoRoots(arch)
+	roots, sequences := resolveArchitectureSequenceProjection(resolved.Document, arch,
+		roots, architectureSequenceRoots(arch, false, true))
 	exports := architectureExports(arch)
 	excluded := make([]string, 0, len(exports))
 	for i := 0; i < len(exports); i++ {
@@ -71,6 +76,7 @@ func GenerateCheckedInArchitectureContract(resolved ResolveResult, archName stri
 	}
 	source = appendReachableEmbeddedGoExcluding(
 		source, projection, roots, true, exports, excluded)
+	source = appendArchitectureSequences(source, projection, arch, true, false, true, sequences)
 	source = appendArchitectureBindings(source, projection, arch, true, true)
 	source = appendDirectEmitterBindings(source, projection, arch, true, true)
 	source = appendArchitectureHooks(source, projection, arch, true)

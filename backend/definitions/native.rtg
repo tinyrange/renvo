@@ -109,18 +109,11 @@ go backend {
 		return out
 	}
 
-	func x86KernelEntryPrologue(out *RTGEmitter) {
-		out.Text("\xf3\x0f\x1e\xfa\x55\x48\x89\xe5\x53\x41\x54\x41\x55\x41\x56\x41\x57\x48\x83\xec\x08")
-	}
 
-	func x86KernelEntryEpilogue(out *RTGEmitter) {
-		out.Text("\x48\x83\xc4\x08\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5b\xc9\xc3")
-	}
 
-	func x86KernelCallbackAddress(out *RTGEmitter, label RTGLabel) {
-		out.Bytes3(0x48, 0x8d, 0x05)
-		out.Rel32(label)
-	}
+
+
+
 
 	func x86KernelStaticCall(out *RTGEmitter, importID int, wordCount int) {
 		registers := []RTGRegister{
@@ -443,9 +436,7 @@ go backend {
 		return append(out, 0)
 	}
 
-	func x86KernelAppend16(out []byte, value int) []byte {
-		return append(out, byte(value), byte(value>>8))
-	}
+
 
 	func x86KernelUntil(out []byte, size int) []byte {
 		for len(out) < size {
@@ -454,25 +445,9 @@ go backend {
 		return out
 	}
 
-	func x86KernelAppendSymbol(
-		out []byte, name int, info int, section int, value int, size int,
-	) []byte {
-		out = nativeAppend32(out, name)
-		out = append(out, byte(info), 0)
-		out = x86KernelAppend16(out, section)
-		out = nativeAppend64(out, value)
-		out = nativeAppend64(out, size)
-		return out
-	}
 
-	func x86KernelAppendRelocation(
-		out []byte, offset int, symbol int, kind int, addend int,
-	) []byte {
-		out = nativeAppend64(out, offset)
-		out = nativeAppend64(out, symbol<<32|kind)
-		out = nativeAppend64(out, addend)
-		return out
-	}
+
+
 
 	func x86KernelAppendVersion(out []byte, symbol string, crc int) []byte {
 		start := len(out)
@@ -484,43 +459,9 @@ go backend {
 		return x86KernelUntil(out, start+64)
 	}
 
-	func x86KernelAppendELFHeader(
-		out []byte, sectionOffset int, sectionCount int, namesIndex int,
-	) []byte {
-		out = append(out, 0x7f, 'E', 'L', 'F', 2, 1, 1, 0)
-		out = x86KernelUntil(out, 16)
-		out = x86KernelAppend16(out, 1)
-		out = x86KernelAppend16(out, 62)
-		out = nativeAppend32(out, 1)
-		out = nativeAppend64(out, 0)
-		out = nativeAppend64(out, 0)
-		out = nativeAppend64(out, sectionOffset)
-		out = nativeAppend32(out, 0)
-		out = x86KernelAppend16(out, 64)
-		out = x86KernelAppend16(out, 0)
-		out = x86KernelAppend16(out, 0)
-		out = x86KernelAppend16(out, 64)
-		out = x86KernelAppend16(out, sectionCount)
-		out = x86KernelAppend16(out, namesIndex)
-		return out
-	}
 
-	func x86KernelAppendSection(
-		out []byte, name int, kind int, flags int, offset int, size int,
-		link int, info int, alignment int, entrySize int,
-	) []byte {
-		out = nativeAppend32(out, name)
-		out = nativeAppend32(out, kind)
-		out = nativeAppend64(out, flags)
-		out = nativeAppend64(out, 0)
-		out = nativeAppend64(out, offset)
-		out = nativeAppend64(out, size)
-		out = nativeAppend32(out, link)
-		out = nativeAppend32(out, info)
-		out = nativeAppend64(out, alignment)
-		out = nativeAppend64(out, entrySize)
-		return out
-	}
+
+
 
 	func x86KernelModuleImage(
 		emitter *RTGEmitter, initLabel RTGLabel, exitLabel RTGLabel,
@@ -839,14 +780,7 @@ go backend {
 		}
 	}
 
-	func x86ELF64Image(a *RTGEmitter) []byte {
-		codeOffset := 176
-		dataOffset := codeOffset + len(a.Code())
-		fileSize := dataOffset + len(a.Data())
-		bssOffset := RTGAlignValue(fileSize, 4096)
-		x86ELFPatchAbsoluteRelocations(a, codeOffset, dataOffset, bssOffset)
-		return nativeELFExecutable64(a, 62, 0, codeOffset)
-	}
+
 
 	type nativePELayout struct {
 		importRVA int
@@ -1043,14 +977,7 @@ go backend {
 		out.AbsoluteReloc(at, 8, RTGRelocationImport)
 	}
 
-	func x86WindowsCallImport(out *RTGEmitter, importID int) {
-		out.Bytes4(0x48, 0x83, 0xec, 0x28)
-		out.Bytes2(0xff, 0x15)
-		at := out.Len()
-		out.Int32(0)
-		out.AbsoluteReloc(at, importID, RTGRelocationImport)
-		out.Bytes4(0x48, 0x83, 0xc4, 0x28)
-	}
+
 
 	func x86WindowsRuntimeReadWrite(
 		out *RTGEmitter, write bool, positional bool,
@@ -1094,101 +1021,13 @@ go backend {
 		x86Relative(out, 0xe8, helper)
 	}
 
-	func x86WindowsTranslateCreateFileFlags(out *RTGEmitter) {
-		rdx := RTGRegister{Code: 2, Valid: true}
-		r8 := RTGRegister{Code: 8, Valid: true}
-		r9 := RTGRegister{Code: 9, Valid: true}
-		r10 := RTGRegister{Code: 10, Valid: true}
-		notReadWrite := out.NewLabel()
-		accessDone := out.NewLabel()
-		noCreate := out.NewLabel()
-		createDone := out.NewLabel()
 
-		x86MoveImmediate(out, rdx, -2147483648)
-		out.Bytes2(0xa8, 2)
-		x86JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, notReadWrite)
-		x86MoveImmediate(out, rdx, -1073741824)
-		x86Relative(out, 0xe9, accessDone)
-		out.Mark(notReadWrite)
-		out.Bytes2(0xa8, 1)
-		x86JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, accessDone)
-		x86MoveImmediate(out, rdx, 0x40000000)
-		out.Mark(accessDone)
 
-		x86MoveImmediate(out, r10, 3)
-		out.Bytes2(0xa8, 64)
-		x86JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, noCreate)
-		x86MoveImmediate(out, r10, 4)
-		out.AppendByte(0xa9)
-		out.Int32(512)
-		x86JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, createDone)
-		x86MoveImmediate(out, r10, 2)
-		x86Relative(out, 0xe9, createDone)
-		out.Mark(noCreate)
-		out.AppendByte(0xa9)
-		out.Int32(512)
-		x86JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, createDone)
-		x86MoveImmediate(out, r10, 5)
-		out.Mark(createDone)
-		x86MoveImmediate(out, r8, 3)
-		x86MoveImmediate(out, r9, 0)
-	}
 
-	func x86WindowsRuntimeOpen(out *RTGEmitter) {
-		rax := RTGRegister{Code: 0, Valid: true}
-		rcx := RTGRegister{Code: 1, Valid: true}
-		rsi := RTGRegister{Code: 6, Valid: true}
-		rdi := RTGRegister{Code: 7, Valid: true}
-		r11 := RTGRegister{Code: 11, Valid: true}
-		x86RRRM(out, 0x89, r11, rdi, 64)
-		x86RRRM(out, 0x89, rax, rsi, 64)
-		x86WindowsTranslateCreateFileFlags(out)
-		x86RRRM(out, 0x89, rcx, r11, 64)
-		base := out.Len()
-		out.Text("\x41\x54\x49\x89\xe4\x48\x83\xe4\xf0\x48\x83\xec\x40\x44\x89\x54\x24\x20\xc7\x44\x24\x28\x80\x00\x00\x00\x48\xc7\x44\x24\x30\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x49\x89\xc3\x4c\x89\xe4\x41\x5c\x4c\x89\xd8")
-		out.AbsoluteReloc(base+37, 1, RTGRelocationImport)
-	}
 
-	func x86WindowsRuntimeClose(out *RTGEmitter) {
-		rax := RTGRegister{Code: 0, Valid: true}
-		rcx := RTGRegister{Code: 1, Valid: true}
-		rdi := RTGRegister{Code: 7, Valid: true}
-		failed := out.NewLabel()
-		done := out.NewLabel()
-		x86RRRM(out, 0x89, rcx, rdi, 64)
-		x86WindowsCallImport(out, 2)
-		x86RRRM(out, 0x85, rax, rax, 32)
-		x86JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, failed)
-		x86MoveImmediate(out, rax, 0)
-		x86Relative(out, 0xe9, done)
-		out.Mark(failed)
-		x86MoveImmediate(out, rax, -1)
-		out.Mark(done)
-	}
 
-	func x86WindowsRuntimeChmod(out *RTGEmitter) {
-		rax := RTGRegister{Code: 0, Valid: true}
-		rcx := RTGRegister{Code: 1, Valid: true}
-		rdx := RTGRegister{Code: 2, Valid: true}
-		rdi := RTGRegister{Code: 7, Valid: true}
-		r8 := RTGRegister{Code: 8, Valid: true}
-		r9 := RTGRegister{Code: 9, Valid: true}
-		failed := out.NewLabel()
-		done := out.NewLabel()
-		x86RRRM(out, 0x89, rcx, rdi, 64)
-		x86MoveImmediate(out, rdx, 0)
-		x86MoveImmediate(out, r8, 0)
-		x86MoveImmediate(out, r9, 1)
-		x86WindowsCallImport(out, 5)
-		x86MoveImmediate(out, rdx, -1)
-		x86RRRM(out, 0x39, rax, rdx, 32)
-		x86JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, failed)
-		x86MoveImmediate(out, rax, 0)
-		x86Relative(out, 0xe9, done)
-		out.Mark(failed)
-		x86MoveImmediate(out, rax, -1)
-		out.Mark(done)
-	}
+
+
 
 	func x86WindowsRuntimeOperation(
 		out *RTGEmitter, operation int,
@@ -1350,25 +1189,9 @@ go backend {
 		a.Int64(imm)
 	}
 
-	func renvoAmd64AsmMovR10BssAddr(a *RTGEmitter, bssOff int) {
-		a.Uint24(0x158d4c)
-		at := a.Len()
-		a.Int32(0)
-		a.AbsoluteReloc(at, bssOff, RTGRelocationAbsoluteBSS)
-	}
-	func renvoAmd64AsmLoadRaxBss(a *RTGEmitter, bssOff int) {
-		a.Uint24(0x058b48)
-		at := a.Len()
-		a.Int32(0)
-		a.AbsoluteReloc(at, bssOff, RTGRelocationAbsoluteBSS)
-		a.SetPrimaryLoad(a.Len()*8 + 5)
-	}
-	func renvoAmd64AsmStoreRaxBss(a *RTGEmitter, bssOff int) {
-		a.Uint24(0x058948)
-		at := a.Len()
-		a.Int32(0)
-		a.AbsoluteReloc(at, bssOff, RTGRelocationAbsoluteBSS)
-	}
+
+
+
 	func renvoAmd64AsmMovRdiRax(a *RTGEmitter) {
 		if renvoAmd64RewritePrimaryLoad(a, 7, false) {
 			return
@@ -1425,12 +1248,8 @@ go backend {
 		return true
 	}
 
-	func renvoAmd64AsmMovR8Rax(a *RTGEmitter) {
-		a.Uint24(0xc08949)
-	}
-	func renvoAmd64AsmMovR9Rax(a *RTGEmitter) {
-		a.Uint24(0xc18949)
-	}
+
+
 	func renvoAmd64AsmMemDisp(a *RTGEmitter, disp int, op int, disp8 int, disp32 int) {
 		a.Uint16(op)
 		if RTGInt8Fits(disp) {
@@ -1440,9 +1259,7 @@ go backend {
 		a.Int8(disp32)
 		a.Int32(disp)
 	}
-	func renvoAmd64AsmLoadQwordRaxIndexRcx8(a *RTGEmitter) {
-		a.Int32(0xc8048b48)
-	}
+
 	func renvoAmd64AsmLoadQwordRaxIndexRcxDisp(a *RTGEmitter, disp int) {
 		a.Uint16(0x8b48)
 		if RTGInt8Fits(disp) {
@@ -1483,10 +1300,7 @@ go backend {
 		}
 		renvoAmd64AsmLoadRaxMemRdxDisp(a, disp)
 	}
-	func renvoAmd64AsmLoadByteRaxIndexRcx(a *RTGEmitter) {
-		a.Int32(0x04b60f48)
-		a.Int8(0x8)
-	}
+
 	func renvoAmd64AsmLoadRaxIndexRcxSize(a *RTGEmitter, size int) {
 		if size == 1 {
 			renvoAmd64AsmLoadByteRaxIndexRcx(a)
@@ -1503,9 +1317,7 @@ go backend {
 		}
 		renvoAmd64AsmLoadQwordRaxIndexRcx8(a)
 	}
-	func renvoAmd64AsmStoreRaxMemRdxRcx8(a *RTGEmitter) {
-		a.Int32(0xca048948)
-	}
+
 	func renvoAmd64AsmStoreRaxMemRdxDisp(a *RTGEmitter, disp int) {
 		if disp == 0 {
 			a.Uint24(0x028948)
@@ -1574,12 +1386,8 @@ go backend {
 			a.Uint16(0xc089)
 		}
 	}
-	func renvoAmd64AsmIncMemRdx(a *RTGEmitter) {
-		a.Uint24(0x02ff48)
-	}
-	func renvoAmd64AsmDecMemRdx(a *RTGEmitter) {
-		a.Uint24(0x0aff48)
-	}
+
+
 	func renvoAmd64AsmCmpRaxImm8(a *RTGEmitter, imm int) {
 		if imm == 0 {
 			// Integer values occupy the full native register on amd64. Testing only
@@ -1606,19 +1414,11 @@ go backend {
 		a.Text("\x48\x83\xf8\xff\x75\x11\x6a\x01\x5a\x48\xc1\xe2\x3f\x48\x39\xd1\x75\x05\x48\x89\xc8\xeb\x0d\x53\x48\x89\xc3\x48\x89\xc8\x48\x99\x48\xf7\xfb\x5b")
 	}
 
-	func renvoAmd64AsmCmpRcxRaxSet(a *RTGEmitter, setcc int) {
-		a.Int32(0x0fc13948)
-		a.Bytes3(setcc, 0xc0, 0xf)
-		a.Uint16(0xc0b6)
-	}
 
-	func x86Low3(reg RTGRegister) byte {
-		return byte(reg.Code & 7)
-	}
 
-	func x86High(reg RTGRegister) byte {
-		return byte(reg.Code>>3) & 1
-	}
+
+
+
 
 	func x86Opcode(out *RTGEmitter, opcode uint32) {
 		if opcode > 0xff {
@@ -1647,9 +1447,7 @@ go backend {
 		}
 	}
 
-	func x86ModRM(out *RTGEmitter, mode byte, reg byte, rm byte) {
-		out.AppendByte(int(mode<<6 | (reg&7)<<3 | rm&7))
-	}
+
 
 	func x86Memory(out *RTGEmitter, reg byte, address RTGAddress) {
 		if RTGAddressValid(address) {
@@ -1742,18 +1540,9 @@ go backend {
 		out.Rel32(label)
 	}
 
-	func x86SetCondition(out *RTGEmitter, condition RTGCondition, destination RTGRegister) {
-		x86REX(out, false, RTGNoRegister, RTGNoRegister, destination, destination)
-		out.Byte(0x0f)
-		out.AppendByte(int(condition.SetOpcode))
-		x86ModRM(out, 3, 0, x86Low3(destination))
-	}
 
-	func x86JumpCondition(out *RTGEmitter, condition RTGCondition, label RTGLabel) {
-		out.Byte(0x0f)
-		out.AppendByte(int(condition.JumpOpcode))
-		out.Rel32(label)
-	}
+
+
 
 	func x86MoveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
 		if destination.Code == 0 && value == 0 {
@@ -1826,26 +1615,7 @@ go backend {
 		out.Mark(done)
 	}
 
-	func x86CopyBytes(out *RTGEmitter) {
-		destination := RTGRegister{Code: 7, Valid: true}
-		source := RTGRegister{Code: 6, Valid: true}
-		count := RTGRegister{Code: 1, Valid: true}
-		scratch := RTGRegister{Code: 10, Valid: true}
-		forward := out.NewLabel()
-		done := out.NewLabel()
-		x86RRRM(out, 0x39, destination, source, 64)
-		x86JumpCondition(out, RTGCondition{JumpOpcode: 0x86}, forward)
-		x86RMR(out, 0x8d, scratch, RTGAddress{Base: source, Index: count, Scale: 1}, 64)
-		x86RRRM(out, 0x39, destination, scratch, 64)
-		x86JumpCondition(out, RTGCondition{JumpOpcode: 0x83}, forward)
-		x86RMR(out, 0x8d, source, RTGAddress{Base: source, Index: count, Scale: 1, Displacement: -1}, 64)
-		x86RMR(out, 0x8d, destination, RTGAddress{Base: destination, Index: count, Scale: 1, Displacement: -1}, 64)
-		out.Bytes4(0xfd, 0xf3, 0xa4, 0xfc)
-		x86Relative(out, 0xe9, done)
-		out.Mark(forward)
-		out.Bytes3(0xfc, 0xf3, 0xa4)
-		out.Mark(done)
-	}
+
 
 	func x86PatchRelocations(out *RTGEmitter) {
 		for i := 0; i < out.RelocationCount(); i++ {
@@ -1860,11 +1630,7 @@ go backend {
 		}
 	}
 
-	func x86FrameStart(out *RTGEmitter) int {
-		at := out.Len()
-		out.Bytes4(0xc8, 0, 0, 0)
-		return at
-	}
+
 
 	func x86FrameFinish(out *RTGEmitter, at int, stackUsed int) {
 		frame := (stackUsed + 15) & -16
@@ -1938,8 +1704,8 @@ arch x86_64 {
         group_imm8 = go x86GroupImmediate8
         opcode_reg = go x86OpcodeRegister
         relative = go x86Relative
-        set_condition = go x86SetCondition
-        jump_condition = go x86JumpCondition
+        set_condition = sequence x86SetCondition
+        jump_condition = sequence x86JumpCondition
         fixed = bytes
     }
 
@@ -2028,7 +1794,7 @@ arch x86_64 {
         move_immediate = go x86MoveImmediate
         variable_shift = go x86VariableShift
         signed_divide = go x86SignedDivide
-        copy_bytes = go x86CopyBytes
+        copy_bytes = sequence x86CopyBytes
     }
 
     # Target-neutral lowering consumes these stable, generated exports; their
@@ -2036,33 +1802,33 @@ arch x86_64 {
     exports {
 		renvoAmd64AsmSecondaryDisp = go renvoAmd64AsmSecondaryDisp
         renvoAmd64AsmMovRaxImm = go renvoAmd64AsmMovRaxImm
-        renvoAmd64AsmMovR10BssAddr = go renvoAmd64AsmMovR10BssAddr
-        renvoAmd64AsmLoadRaxBss = go renvoAmd64AsmLoadRaxBss
-        renvoAmd64AsmStoreRaxBss = go renvoAmd64AsmStoreRaxBss
+        renvoAmd64AsmMovR10BssAddr = sequence renvoAmd64AsmMovR10BssAddr
+        renvoAmd64AsmLoadRaxBss = sequence renvoAmd64AsmLoadRaxBss
+        renvoAmd64AsmStoreRaxBss = sequence renvoAmd64AsmStoreRaxBss
         renvoAmd64AsmMovRdiRax = go renvoAmd64AsmMovRdiRax
         renvoAmd64AsmMovRsiRax = go renvoAmd64AsmMovRsiRax
         renvoAmd64RewritePrimaryLoad = go renvoAmd64RewritePrimaryLoad
         renvoAmd64RewritePrimaryLoadCompare = go renvoAmd64RewritePrimaryLoadCompare
-        renvoAmd64AsmMovR8Rax = go renvoAmd64AsmMovR8Rax
-        renvoAmd64AsmMovR9Rax = go renvoAmd64AsmMovR9Rax
+        renvoAmd64AsmMovR8Rax = sequence renvoAmd64AsmMovR8Rax
+        renvoAmd64AsmMovR9Rax = sequence renvoAmd64AsmMovR9Rax
         renvoAmd64AsmMemDisp = go renvoAmd64AsmMemDisp
-        renvoAmd64AsmLoadQwordRaxIndexRcx8 = go renvoAmd64AsmLoadQwordRaxIndexRcx8
+        renvoAmd64AsmLoadQwordRaxIndexRcx8 = sequence renvoAmd64AsmLoadQwordRaxIndexRcx8
         renvoAmd64AsmLoadQwordRaxIndexRcxDisp = go renvoAmd64AsmLoadQwordRaxIndexRcxDisp
         renvoAmd64AsmLoadRaxMemRdxDisp = go renvoAmd64AsmLoadRaxMemRdxDisp
         renvoAmd64AsmLoadRaxMemRdxDispSize = go renvoAmd64AsmLoadRaxMemRdxDispSize
-        renvoAmd64AsmLoadByteRaxIndexRcx = go renvoAmd64AsmLoadByteRaxIndexRcx
+        renvoAmd64AsmLoadByteRaxIndexRcx = sequence renvoAmd64AsmLoadByteRaxIndexRcx
         renvoAmd64AsmLoadRaxIndexRcxSize = go renvoAmd64AsmLoadRaxIndexRcxSize
-        renvoAmd64AsmStoreRaxMemRdxRcx8 = go renvoAmd64AsmStoreRaxMemRdxRcx8
+        renvoAmd64AsmStoreRaxMemRdxRcx8 = sequence renvoAmd64AsmStoreRaxMemRdxRcx8
         renvoAmd64AsmStoreRaxMemRdxDisp = go renvoAmd64AsmStoreRaxMemRdxDisp
         renvoAmd64AsmStoreRaxMemRdxDispSize = go renvoAmd64AsmStoreRaxMemRdxDispSize
         renvoAmd64CodeEnds = go renvoAmd64CodeEnds
         renvoAmd64AsmNormalizeRaxForKind = go renvoAmd64AsmNormalizeRaxForKind
-        renvoAmd64AsmIncMemRdx = go renvoAmd64AsmIncMemRdx
-        renvoAmd64AsmDecMemRdx = go renvoAmd64AsmDecMemRdx
+        renvoAmd64AsmIncMemRdx = sequence renvoAmd64AsmIncMemRdx
+        renvoAmd64AsmDecMemRdx = sequence renvoAmd64AsmDecMemRdx
         renvoAmd64AsmCmpRaxImm8 = go renvoAmd64AsmCmpRaxImm8
         renvoAmd64AsmCmpRaxImm8Discard = go renvoAmd64AsmCmpRaxImm8Discard
         renvoAmd64AsmDivLeftRcxRightRax = go renvoAmd64AsmDivLeftRcxRightRax
-        renvoAmd64AsmCmpRcxRaxSet = go renvoAmd64AsmCmpRcxRaxSet
+        renvoAmd64AsmCmpRcxRaxSet = sequence renvoAmd64AsmCmpRcxRaxSet
     }
 
     relocation rel32 {
@@ -2082,6 +1848,291 @@ arch x86_64 {
         overflow_arguments = rbp + 16
     }
 
+
+	sequences {
+		renvoAmd64AsmCmpRcxRaxSet(a:emitter, setcc:int) {
+			call a.Int32(0x0fc13948)
+
+			call a.Bytes3(setcc,0xc0,0xf)
+
+			call a.Uint16(0xc0b6)
+
+		}
+		renvoAmd64AsmDecMemRdx(a:emitter) {
+			call a.Uint24(0x0aff48)
+
+		}
+		renvoAmd64AsmIncMemRdx(a:emitter) {
+			call a.Uint24(0x02ff48)
+
+		}
+		renvoAmd64AsmLoadByteRaxIndexRcx(a:emitter) {
+			call a.Int32(0x04b60f48)
+
+			call a.Int8(0x8)
+
+		}
+		renvoAmd64AsmLoadQwordRaxIndexRcx8(a:emitter) {
+			call a.Int32(0xc8048b48)
+
+		}
+		renvoAmd64AsmMovR8Rax(a:emitter) {
+			call a.Uint24(0xc08949)
+
+		}
+		renvoAmd64AsmMovR9Rax(a:emitter) {
+			call a.Uint24(0xc18949)
+
+		}
+		renvoAmd64AsmStoreRaxMemRdxRcx8(a:emitter) {
+			call a.Int32(0xca048948)
+
+		}
+
+		renvoAmd64AsmLoadRaxBss(a:emitter, bssOff:int) {
+			call a.Uint24(0x058b48)
+
+			let at = a.Len()
+
+			call a.Int32(0)
+
+			call a.AbsoluteReloc(at,bssOff,RTGRelocationAbsoluteBSS)
+
+			call a.SetPrimaryLoad(a.Len()*8+5)
+
+		}
+		renvoAmd64AsmMovR10BssAddr(a:emitter, bssOff:int) {
+			call a.Uint24(0x158d4c)
+
+			let at = a.Len()
+
+			call a.Int32(0)
+
+			call a.AbsoluteReloc(at,bssOff,RTGRelocationAbsoluteBSS)
+
+		}
+		renvoAmd64AsmStoreRaxBss(a:emitter, bssOff:int) {
+			call a.Uint24(0x058948)
+
+			let at = a.Len()
+
+			call a.Int32(0)
+
+			call a.AbsoluteReloc(at,bssOff,RTGRelocationAbsoluteBSS)
+
+		}
+
+		x86CopyBytes(out:emitter) {
+			let destination = record_register(Code:7,Valid:true)
+			let source = record_register(Code:6,Valid:true)
+			let count = record_register(Code:1,Valid:true)
+			let scratch = record_register(Code:10,Valid:true)
+			let forward = out.NewLabel()
+			let done = out.NewLabel()
+			call x86RRRM(out,0x39,destination,source,64)
+			call x86JumpCondition(out,record_condition(JumpOpcode:0x86),forward)
+			call x86RMR(out,0x8d,scratch,record_address(Base:source,Index:count,Scale:1),64)
+			call x86RRRM(out,0x39,destination,scratch,64)
+			call x86JumpCondition(out,record_condition(JumpOpcode:0x83),forward)
+			call x86RMR(out,0x8d,source,record_address(Base:source,Index:count,Scale:1,Displacement:-1),64)
+			call x86RMR(out,0x8d,destination,record_address(Base:destination,Index:count,Scale:1,Displacement:-1),64)
+			call out.Bytes4(0xfd,0xf3,0xa4,0xfc)
+			call x86Relative(out,0xe9,done)
+			call out.Mark(forward)
+			call out.Bytes3(0xfc,0xf3,0xa4)
+			call out.Mark(done)
+		}
+		x86ELF64Image(a:emitter) -> bytes {
+			let codeOffset = 176
+			let dataOffset = codeOffset+len(a.Code())
+			let fileSize = dataOffset+len(a.Data())
+			let bssOffset = RTGAlignValue(fileSize,4096)
+			call x86ELFPatchAbsoluteRelocations(a,codeOffset,dataOffset,bssOffset)
+			return nativeELFExecutable64(a,62,0,codeOffset)
+		}
+		x86FrameStart(out:emitter) -> int {
+			let at = out.Len()
+			call out.Bytes4(0xc8,0,0,0)
+			return at
+		}
+		x86JumpCondition(out:emitter, condition:condition, label:label) {
+			call out.Byte(0x0f)
+			call out.AppendByte(int(condition.JumpOpcode))
+			call out.Rel32(label)
+		}
+		x86KernelCallbackAddress(out:emitter, label:label) {
+			call out.Bytes3(0x48,0x8d,0x05)
+			call out.Rel32(label)
+		}
+		x86KernelEntryEpilogue(out:emitter) {
+			call out.Text("\x48\x83\xc4\x08\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5b\xc9\xc3")
+		}
+		x86KernelEntryPrologue(out:emitter) {
+			call out.Text("\xf3\x0f\x1e\xfa\x55\x48\x89\xe5\x53\x41\x54\x41\x55\x41\x56\x41\x57\x48\x83\xec\x08")
+		}
+		x86SetCondition(out:emitter, condition:condition, destination:register) {
+			call x86REX(out,false,RTGNoRegister,RTGNoRegister,destination,destination)
+			call out.Byte(0x0f)
+			call out.AppendByte(int(condition.SetOpcode))
+			call x86ModRM(out,3,0,x86Low3(destination))
+		}
+
+		x86High(reg:register) -> byte {
+			return byte(reg.Code>>3)&1
+		}
+		x86KernelAppend16(out:bytes, value:int) -> bytes {
+			return append(out,byte(value),byte(value>>8))
+		}
+		x86KernelAppendELFHeader(out:bytes, sectionOffset:int, sectionCount:int, namesIndex:int) -> bytes {
+			set out = append(out,0x7f,'E','L','F',2,1,1,0)
+			set out = x86KernelUntil(out,16)
+			set out = x86KernelAppend16(out,1)
+			set out = x86KernelAppend16(out,62)
+			set out = nativeAppend32(out,1)
+			set out = nativeAppend64(out,0)
+			set out = nativeAppend64(out,0)
+			set out = nativeAppend64(out,sectionOffset)
+			set out = nativeAppend32(out,0)
+			set out = x86KernelAppend16(out,64)
+			set out = x86KernelAppend16(out,0)
+			set out = x86KernelAppend16(out,0)
+			set out = x86KernelAppend16(out,64)
+			set out = x86KernelAppend16(out,sectionCount)
+			set out = x86KernelAppend16(out,namesIndex)
+			return out
+		}
+		x86KernelAppendRelocation(out:bytes, offset:int, symbol:int, kind:int, addend:int) -> bytes {
+			set out = nativeAppend64(out,offset)
+			set out = nativeAppend64(out,symbol<<32|kind)
+			set out = nativeAppend64(out,addend)
+			return out
+		}
+		x86KernelAppendSection(out:bytes, name:int, kind:int, flags:int, offset:int, size:int, link:int, info:int, alignment:int, entrySize:int) -> bytes {
+			set out = nativeAppend32(out,name)
+			set out = nativeAppend32(out,kind)
+			set out = nativeAppend64(out,flags)
+			set out = nativeAppend64(out,0)
+			set out = nativeAppend64(out,offset)
+			set out = nativeAppend64(out,size)
+			set out = nativeAppend32(out,link)
+			set out = nativeAppend32(out,info)
+			set out = nativeAppend64(out,alignment)
+			set out = nativeAppend64(out,entrySize)
+			return out
+		}
+		x86KernelAppendSymbol(out:bytes, name:int, info:int, section:int, value:int, size:int) -> bytes {
+			set out = nativeAppend32(out,name)
+			set out = append(out,byte(info),0)
+			set out = x86KernelAppend16(out,section)
+			set out = nativeAppend64(out,value)
+			set out = nativeAppend64(out,size)
+			return out
+		}
+		x86Low3(reg:register) -> byte {
+			return byte(reg.Code&7)
+		}
+		x86ModRM(out:emitter, mode:byte, reg:byte, rm:byte) {
+			call out.AppendByte(int(mode<<6|(reg&7)<<3|rm&7))
+		}
+		x86WindowsCallImport(out:emitter, importID:int) {
+			call out.Bytes4(0x48,0x83,0xec,0x28)
+			call out.Bytes2(0xff,0x15)
+			let at = out.Len()
+			call out.Int32(0)
+			call out.AbsoluteReloc(at,importID,RTGRelocationImport)
+			call out.Bytes4(0x48,0x83,0xc4,0x28)
+		}
+		x86WindowsRuntimeChmod(out:emitter) {
+			let rax = record_register(Code:0,Valid:true)
+			let rcx = record_register(Code:1,Valid:true)
+			let rdx = record_register(Code:2,Valid:true)
+			let rdi = record_register(Code:7,Valid:true)
+			let r8 = record_register(Code:8,Valid:true)
+			let r9 = record_register(Code:9,Valid:true)
+			let failed = out.NewLabel()
+			let done = out.NewLabel()
+			call x86RRRM(out,0x89,rcx,rdi,64)
+			call x86MoveImmediate(out,rdx,0)
+			call x86MoveImmediate(out,r8,0)
+			call x86MoveImmediate(out,r9,1)
+			call x86WindowsCallImport(out,5)
+			call x86MoveImmediate(out,rdx,-1)
+			call x86RRRM(out,0x39,rax,rdx,32)
+			call x86JumpCondition(out,record_condition(JumpOpcode:0x84),failed)
+			call x86MoveImmediate(out,rax,0)
+			call x86Relative(out,0xe9,done)
+			call out.Mark(failed)
+			call x86MoveImmediate(out,rax,-1)
+			call out.Mark(done)
+		}
+		x86WindowsRuntimeClose(out:emitter) {
+			let rax = record_register(Code:0,Valid:true)
+			let rcx = record_register(Code:1,Valid:true)
+			let rdi = record_register(Code:7,Valid:true)
+			let failed = out.NewLabel()
+			let done = out.NewLabel()
+			call x86RRRM(out,0x89,rcx,rdi,64)
+			call x86WindowsCallImport(out,2)
+			call x86RRRM(out,0x85,rax,rax,32)
+			call x86JumpCondition(out,record_condition(JumpOpcode:0x84),failed)
+			call x86MoveImmediate(out,rax,0)
+			call x86Relative(out,0xe9,done)
+			call out.Mark(failed)
+			call x86MoveImmediate(out,rax,-1)
+			call out.Mark(done)
+		}
+		x86WindowsRuntimeOpen(out:emitter) {
+			let rax = record_register(Code:0,Valid:true)
+			let rcx = record_register(Code:1,Valid:true)
+			let rsi = record_register(Code:6,Valid:true)
+			let rdi = record_register(Code:7,Valid:true)
+			let r11 = record_register(Code:11,Valid:true)
+			call x86RRRM(out,0x89,r11,rdi,64)
+			call x86RRRM(out,0x89,rax,rsi,64)
+			call x86WindowsTranslateCreateFileFlags(out)
+			call x86RRRM(out,0x89,rcx,r11,64)
+			let base = out.Len()
+			call out.Text("\x41\x54\x49\x89\xe4\x48\x83\xe4\xf0\x48\x83\xec\x40\x44\x89\x54\x24\x20\xc7\x44\x24\x28\x80\x00\x00\x00\x48\xc7\x44\x24\x30\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x49\x89\xc3\x4c\x89\xe4\x41\x5c\x4c\x89\xd8")
+			call out.AbsoluteReloc(base+37,1,RTGRelocationImport)
+		}
+		x86WindowsTranslateCreateFileFlags(out:emitter) {
+			let rdx = record_register(Code:2,Valid:true)
+			let r8 = record_register(Code:8,Valid:true)
+			let r9 = record_register(Code:9,Valid:true)
+			let r10 = record_register(Code:10,Valid:true)
+			let notReadWrite = out.NewLabel()
+			let accessDone = out.NewLabel()
+			let noCreate = out.NewLabel()
+			let createDone = out.NewLabel()
+			call x86MoveImmediate(out,rdx,-2147483648)
+			call out.Bytes2(0xa8,2)
+			call x86JumpCondition(out,record_condition(JumpOpcode:0x84),notReadWrite)
+			call x86MoveImmediate(out,rdx,-1073741824)
+			call x86Relative(out,0xe9,accessDone)
+			call out.Mark(notReadWrite)
+			call out.Bytes2(0xa8,1)
+			call x86JumpCondition(out,record_condition(JumpOpcode:0x84),accessDone)
+			call x86MoveImmediate(out,rdx,0x40000000)
+			call out.Mark(accessDone)
+			call x86MoveImmediate(out,r10,3)
+			call out.Bytes2(0xa8,64)
+			call x86JumpCondition(out,record_condition(JumpOpcode:0x84),noCreate)
+			call x86MoveImmediate(out,r10,4)
+			call out.AppendByte(0xa9)
+			call out.Int32(512)
+			call x86JumpCondition(out,record_condition(JumpOpcode:0x84),createDone)
+			call x86MoveImmediate(out,r10,2)
+			call x86Relative(out,0xe9,createDone)
+			call out.Mark(noCreate)
+			call out.AppendByte(0xa9)
+			call out.Int32(512)
+			call x86JumpCondition(out,record_condition(JumpOpcode:0x84),createDone)
+			call x86MoveImmediate(out,r10,5)
+			call out.Mark(createDone)
+			call x86MoveImmediate(out,r8,3)
+			call x86MoveImmediate(out,r9,0)
+		}
+}
 }
 
 # Image fields are declared here. Header/section/relocation are generic
@@ -2089,7 +2140,7 @@ arch x86_64 {
 format elf64_x86_64 {
     kind = elf
     code_offset = 176
-    image = go x86ELF64Image
+    image = sequence x86ELF64Image
     byte_order = little
     address_bits = 64
     file_alignment = 0x1000
@@ -2420,9 +2471,9 @@ runtime win32_x86_64 {
 }
 
 runtime linux_kernel_x86_64 {
-    entry_prologue = go x86KernelEntryPrologue
-    entry_epilogue = go x86KernelEntryEpilogue
-    emit_callback_address = go x86KernelCallbackAddress
+    entry_prologue = sequence x86KernelEntryPrologue
+    entry_epilogue = sequence x86KernelEntryEpilogue
+    emit_callback_address = sequence x86KernelCallbackAddress
     emit_static_call = go x86KernelStaticCall
     emit_operation = go x86KernelRuntimeOperation
 
@@ -2438,7 +2489,7 @@ runtime linux_kernel_x86_64 {
 
 abi renvo_x86_64 {
     arch = x86_64
-    frame_start = go x86FrameStart
+    frame_start = sequence x86FrameStart
     frame_finish = go x86FrameFinish
     call_words = [rdi, rsi, rdx, rcx, r8, r9]
     overflow_stride = 8
@@ -2625,14 +2676,7 @@ go backend {
 		}
 	}
 
-	func x86_32ELF32Image(a *RTGEmitter) []byte {
-		codeOffset := 116
-		dataOffset := codeOffset + len(a.Code())
-		fileSize := dataOffset + len(a.Data())
-		bssOffset := RTGAlignValue(fileSize, 4096)
-		x86_32ELFPatchAbsoluteRelocations(a, codeOffset, dataOffset, bssOffset)
-		return nativeELFExecutable32(a, 3, 0, codeOffset)
-	}
+
 
 	func x86_32PEPatch(out *RTGEmitter, dataRVA int, dataSize int, layout nativePELayout) {
 		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
@@ -2728,27 +2772,11 @@ go backend {
 		return nativeUntil(image, 0x200+textRaw+dataRaw)
 	}
 
-	func x86_32WindowsExit(out *RTGEmitter, status RTGRegister) {
-		out.AppendByte(0x50 + status.Code)
-		out.Bytes2(0xff, 0x15)
-		at := out.Len()
-		out.Int32(0)
-		out.AbsoluteReloc(at, 8, RTGRelocationImport)
-	}
 
-	func x86_32WindowsStaticCall(out *RTGEmitter, importID int, wordCount int) {
-		out.Bytes2(0xff, 0x15)
-		at := out.Len()
-		out.Int32(0)
-		out.AbsoluteReloc(at, importID, RTGRelocationImport)
-	}
 
-	func x86_32WindowsCallImport(out *RTGEmitter, importID int) {
-		out.Bytes2(0xff, 0x15)
-		at := out.Len()
-		out.Int32(0)
-		out.AbsoluteReloc(at, importID, RTGRelocationImport)
-	}
+
+
+
 
 	func x86_32WindowsRuntimeReadWrite(
 		out *RTGEmitter, write bool, positional bool,
@@ -2782,92 +2810,13 @@ go backend {
 		x86_32Relative(out, 0xe8, helper)
 	}
 
-	func x86_32WindowsTranslateCreateFileFlags(out *RTGEmitter) {
-		edx := RTGRegister{Code: 2, Valid: true}
-		ecx := RTGRegister{Code: 1, Valid: true}
-		notReadWrite := out.NewLabel()
-		accessDone := out.NewLabel()
-		noCreate := out.NewLabel()
-		createDone := out.NewLabel()
 
-		x86_32MoveImmediate(out, edx, -2147483648)
-		out.Bytes2(0xa8, 2)
-		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, notReadWrite)
-		x86_32MoveImmediate(out, edx, -1073741824)
-		x86_32Relative(out, 0xe9, accessDone)
-		out.Mark(notReadWrite)
-		out.Bytes2(0xa8, 1)
-		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, accessDone)
-		x86_32MoveImmediate(out, edx, 0x40000000)
-		out.Mark(accessDone)
 
-		x86_32MoveImmediate(out, ecx, 3)
-		out.Bytes2(0xa8, 64)
-		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, noCreate)
-		x86_32MoveImmediate(out, ecx, 4)
-		out.AppendByte(0xa9)
-		out.Int32(512)
-		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, createDone)
-		x86_32MoveImmediate(out, ecx, 2)
-		x86_32Relative(out, 0xe9, createDone)
-		out.Mark(noCreate)
-		out.AppendByte(0xa9)
-		out.Int32(512)
-		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, createDone)
-		x86_32MoveImmediate(out, ecx, 5)
-		out.Mark(createDone)
-	}
 
-	func x86_32WindowsRuntimeOpen(out *RTGEmitter) {
-		eax := RTGRegister{Code: 0, Valid: true}
-		esi := RTGRegister{Code: 6, Valid: true}
-		x86_32Move(out, eax, esi)
-		x86_32WindowsTranslateCreateFileFlags(out)
-		out.Bytes2(0x6a, 0)
-		out.AppendByte(0x68)
-		out.Int32(0x80)
-		out.AppendByte(0x51)
-		out.Bytes2(0x6a, 0)
-		out.Bytes2(0x6a, 3)
-		out.AppendByte(0x52)
-		out.AppendByte(0x53)
-		x86_32WindowsCallImport(out, 1)
-	}
 
-	func x86_32WindowsRuntimeClose(out *RTGEmitter) {
-		eax := RTGRegister{Code: 0, Valid: true}
-		failed := out.NewLabel()
-		done := out.NewLabel()
-		out.AppendByte(0x53)
-		x86_32WindowsCallImport(out, 2)
-		x86_32Test(out, eax, eax)
-		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, failed)
-		x86_32MoveImmediate(out, eax, 0)
-		x86_32Relative(out, 0xe9, done)
-		out.Mark(failed)
-		x86_32MoveImmediate(out, eax, -1)
-		out.Mark(done)
-	}
 
-	func x86_32WindowsRuntimeChmod(out *RTGEmitter) {
-		eax := RTGRegister{Code: 0, Valid: true}
-		ecx := RTGRegister{Code: 1, Valid: true}
-		failed := out.NewLabel()
-		done := out.NewLabel()
-		out.Bytes2(0x6a, 1)
-		out.Bytes2(0x6a, 0)
-		out.Bytes2(0x6a, 0)
-		out.AppendByte(0x53)
-		x86_32WindowsCallImport(out, 5)
-		x86_32MoveImmediate(out, ecx, -1)
-		x86_32Binary(out, 0x39, eax, ecx)
-		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x84}, failed)
-		x86_32MoveImmediate(out, eax, 0)
-		x86_32Relative(out, 0xe9, done)
-		out.Mark(failed)
-		x86_32MoveImmediate(out, eax, -1)
-		out.Mark(done)
-	}
+
+
 
 	func x86_32WindowsRuntimeOperation(
 		out *RTGEmitter, operation int,
@@ -2935,19 +2884,9 @@ go backend {
 		a.Int32( imm)
 	}
 
-	func renvo386AsmMovRaxImm64(a *RTGEmitter, imm int) {
-		renvo386AsmMovRaxImm(a, imm)
-	}
 
-	func renvo386AsmMovRegPCRel(a *RTGEmitter, reg int, off int, kind int) {
-		a.Int8( 0xe8)
-		a.Int32( 0)
-		a.Int8( 0x58|reg)
-		a.Bytes2( 0x81, 0xc0|reg)
-		at := a.Len()
-		a.Int32( 0)
-		a.AbsoluteReloc( at, off, kind)
-	}
+
+
 
 	func renvo386AsmMovRdxImm(a *RTGEmitter, imm int) {
 		if imm == 0 {
@@ -2976,37 +2915,21 @@ go backend {
 		a.Int32( imm)
 	}
 
-	func renvo386AsmMovRdiRax(a *RTGEmitter) {
-		a.Uint16( 0xc389)
-	}
 
-	func renvo386AsmMovRaxRdx(a *RTGEmitter) {
-		a.Uint16( 0xd089)
-	}
 
-	func renvo386AsmMovRsiRax(a *RTGEmitter) {
-		a.Uint16( 0xc189)
-	}
 
-	func renvo386AsmMovR8Rax(a *RTGEmitter) {
-		a.Uint16( 0xc389)
-	}
 
-	func renvo386AsmMovR9Rax(a *RTGEmitter) {
-		a.Uint16( 0xc389)
-	}
 
-	func renvo386AsmAddRdxRcx(a *RTGEmitter) {
-		a.Uint16( 0xca01)
-	}
 
-	func renvo386AsmSyscall(a *RTGEmitter) {
-		a.Uint16( 0x80cd)
-	}
 
-	func renvo386AsmPopRdi(a *RTGEmitter) {
-		a.Int8( 0x5b)
-	}
+
+
+
+
+
+
+
+
 
 	func renvo386AsmStackMem(a *RTGEmitter, offset int, base int, disp8 int, disp32 int) {
 		if base > 0xff {
@@ -3046,16 +2969,9 @@ go backend {
 		a.Int32( disp)
 	}
 
-	func renvo386AsmJccLabel(a *RTGEmitter, op int, label int) {
-		a.Bytes2( 0x0f, op)
-		at := a.Len()
-		a.Int32( 0)
-		a.RelocAt(at, label)
-	}
 
-	func renvo386AsmLoadQwordRaxIndexRcx8(a *RTGEmitter) {
-		a.Uint24( 0xc8048b)
-	}
+
+
 
 	func renvo386AsmLoadQwordRaxIndexRcxDisp(a *RTGEmitter, disp int) {
 		a.Int8( 0x8b)
@@ -3089,9 +3005,7 @@ go backend {
 		renvo386AsmLoadRaxMemRdxDisp(a, disp)
 	}
 
-	func renvo386AsmLoadByteRaxIndexRcx(a *RTGEmitter) {
-		a.Int32( 0x0804b60f)
-	}
+
 
 	func renvo386AsmLoadRaxIndexRcxSize(a *RTGEmitter, size int) {
 		if size == 1 {
@@ -3109,9 +3023,7 @@ go backend {
 		renvo386AsmLoadQwordRaxIndexRcx8(a)
 	}
 
-	func renvo386AsmStoreRaxMemRdxRcx8(a *RTGEmitter) {
-		a.Uint24( 0xca0489)
-	}
+
 
 	func renvo386AsmStoreRaxMemRdxDisp(a *RTGEmitter, disp int) {
 		if disp == 0 {
@@ -3153,17 +3065,11 @@ go backend {
 		}
 	}
 
-	func renvo386AsmIncMemRdx(a *RTGEmitter) {
-		a.Uint16( 0x02ff)
-	}
 
-	func renvo386AsmDecMemRdx(a *RTGEmitter) {
-		a.Uint16( 0x0aff)
-	}
 
-	func renvo386AsmBoolNotRax(a *RTGEmitter) {
-		a.Bytes3( 0x83, 0xf0, 1)
-	}
+
+
+
 
 	func renvo386AsmCmpRaxImm8(a *RTGEmitter, imm int) {
 		if imm == 0 {
@@ -3173,29 +3079,17 @@ go backend {
 		a.Bytes3( 0x83, 0xf8, imm)
 	}
 
-	func renvo386AsmAddRaxRcx(a *RTGEmitter) {
-		a.Uint16( 0xc801)
-	}
 
-	func renvo386AsmSubRaxRcx(a *RTGEmitter) {
-		a.Uint16( 0xc829)
-	}
 
-	func renvo386AsmShlRcxImm(a *RTGEmitter, imm int) {
-		a.Bytes3( 0xc1, 0xe1, imm)
-	}
 
-	func renvo386AsmShlRaxImm(a *RTGEmitter, imm int) {
-		a.Bytes3( 0xc1, 0xe0, imm)
-	}
 
-	func renvo386AsmSarRaxImm(a *RTGEmitter, imm int) {
-		a.Bytes3( 0xc1, 0xf8, imm)
-	}
 
-	func renvo386AsmShrRaxImm(a *RTGEmitter, imm int) {
-		a.Bytes3( 0xc1, 0xe8, imm)
-	}
+
+
+
+
+
+
 
 	func renvo386AsmDivLeftRcxRightRax(a *RTGEmitter, mod bool) {
 		a.Uint16( 0xc389)
@@ -3207,23 +3101,13 @@ go backend {
 		}
 	}
 
-	func renvo386AsmCmpRcxRaxSet(a *RTGEmitter, setcc int) {
-		a.Uint24( 0x0fc139)
-		a.Bytes3( setcc, 0xc0, 0xf)
-		a.Uint16( 0xc0b6)
-	}
 
-	func renvoAsmMovArg1Rax(a *RTGEmitter) {
-		a.Uint16( 0xc689)
-	}
 
-	func x86_32Low3(reg RTGRegister) byte {
-		return byte(reg.Code & 7)
-	}
 
-	func x86_32ModRM(out *RTGEmitter, mode byte, reg byte, rm byte) {
-		out.AppendByte(int(mode<<6 | (reg&7)<<3 | rm&7))
-	}
+
+
+
+
 
 	func x86_32Memory(out *RTGEmitter, reg byte, address RTGAddress) {
 		base := address.Base
@@ -3270,13 +3154,6 @@ go backend {
 		}
 	}
 
-	func x86_32Move(
-		out *RTGEmitter, destination RTGRegister, source RTGRegister,
-	) {
-		out.Byte(0x89)
-		x86_32ModRM(out, 3, x86_32Low3(source), x86_32Low3(destination))
-	}
-
 	func x86_32Address(
 		out *RTGEmitter, destination RTGRegister, address RTGAddress,
 	) {
@@ -3315,48 +3192,6 @@ go backend {
 		x86_32Memory(out, x86_32Low3(destination), address)
 	}
 
-	func x86_32LoadNative(
-		out *RTGEmitter, destination RTGRegister, address RTGAddress,
-	) {
-		x86_32LoadOpcode(out, destination, address, 0x8b)
-	}
-
-	func x86_32LoadI32(
-		out *RTGEmitter, destination RTGRegister, address RTGAddress,
-	) {
-		x86_32LoadOpcode(out, destination, address, 0x8b)
-	}
-
-	func x86_32LoadU32(
-		out *RTGEmitter, destination RTGRegister, address RTGAddress,
-	) {
-		x86_32LoadOpcode(out, destination, address, 0x8b)
-	}
-
-	func x86_32LoadI16(
-		out *RTGEmitter, destination RTGRegister, address RTGAddress,
-	) {
-		x86_32LoadOpcode(out, destination, address, 0x0fbf)
-	}
-
-	func x86_32LoadU16(
-		out *RTGEmitter, destination RTGRegister, address RTGAddress,
-	) {
-		x86_32LoadOpcode(out, destination, address, 0x0fb7)
-	}
-
-	func x86_32LoadI8(
-		out *RTGEmitter, destination RTGRegister, address RTGAddress,
-	) {
-		x86_32LoadOpcode(out, destination, address, 0x0fbe)
-	}
-
-	func x86_32LoadU8(
-		out *RTGEmitter, destination RTGRegister, address RTGAddress,
-	) {
-		x86_32LoadOpcode(out, destination, address, 0x0fb6)
-	}
-
 	func x86_32StoreWidth(
 		out *RTGEmitter,
 		address RTGAddress,
@@ -3378,180 +3213,19 @@ go backend {
 		x86_32Memory(out, x86_32Low3(source), address)
 	}
 
-	func x86_32StoreNative(
-		out *RTGEmitter, address RTGAddress, source RTGRegister,
-	) {
-		x86_32StoreWidth(out, address, source, 4)
-	}
 
-	func x86_32StoreU32(
-		out *RTGEmitter, address RTGAddress, source RTGRegister,
-	) {
-		x86_32StoreWidth(out, address, source, 4)
-	}
 
-	func x86_32StoreU16(
-		out *RTGEmitter, address RTGAddress, source RTGRegister,
-	) {
-		x86_32StoreWidth(out, address, source, 2)
-	}
 
-	func x86_32StoreU8(
-		out *RTGEmitter, address RTGAddress, source RTGRegister,
-	) {
-		x86_32StoreWidth(out, address, source, 1)
-	}
 
-	func x86_32Binary(
-		out *RTGEmitter,
-		opcode byte,
-		destination RTGRegister,
-		source RTGRegister,
-	) {
-		out.AppendByte(int(opcode))
-		x86_32ModRM(out, 3, x86_32Low3(source), x86_32Low3(destination))
-	}
 
-	func x86_32Add(
-		out *RTGEmitter, destination RTGRegister, source RTGRegister,
-	) {
-		x86_32Binary(out, 0x01, destination, source)
-	}
 
-	func x86_32Subtract(
-		out *RTGEmitter, destination RTGRegister, source RTGRegister,
-	) {
-		x86_32Binary(out, 0x29, destination, source)
-	}
 
-	func x86_32Multiply(
-		out *RTGEmitter, destination RTGRegister, source RTGRegister,
-	) {
-		out.Bytes2(0x0f, 0xaf)
-		x86_32ModRM(out, 3, x86_32Low3(destination), x86_32Low3(source))
-	}
 
-	func x86_32BitAnd(
-		out *RTGEmitter, destination RTGRegister, source RTGRegister,
-	) {
-		x86_32Binary(out, 0x21, destination, source)
-	}
 
-	func x86_32BitOr(
-		out *RTGEmitter, destination RTGRegister, source RTGRegister,
-	) {
-		x86_32Binary(out, 0x09, destination, source)
-	}
 
-	func x86_32BitXor(
-		out *RTGEmitter, destination RTGRegister, source RTGRegister,
-	) {
-		x86_32Binary(out, 0x31, destination, source)
-	}
 
-	func x86_32Compare(
-		out *RTGEmitter, left RTGRegister, right RTGRegister,
-	) {
-		x86_32Binary(out, 0x39, left, right)
-	}
 
-	func x86_32Test(
-		out *RTGEmitter, left RTGRegister, right RTGRegister,
-	) {
-		x86_32Binary(out, 0x85, left, right)
-	}
 
-	func x86_32Group(
-		out *RTGEmitter, opcode byte, selector byte, operand RTGRegister,
-	) {
-		out.AppendByte(int(opcode))
-		x86_32ModRM(out, 3, selector, x86_32Low3(operand))
-	}
-
-	func x86_32Increment(out *RTGEmitter, operand RTGRegister) {
-		x86_32Group(out, 0xff, 0, operand)
-	}
-
-	func x86_32Decrement(out *RTGEmitter, operand RTGRegister) {
-		x86_32Group(out, 0xff, 1, operand)
-	}
-
-	func x86_32ShiftImmediate(
-		out *RTGEmitter,
-		operand RTGRegister,
-		value byte,
-		selector byte,
-	) {
-		x86_32Group(out, 0xc1, selector, operand)
-		out.AppendByte(int(value))
-	}
-
-	func x86_32ShiftLeftImmediate(
-		out *RTGEmitter, operand RTGRegister, value byte,
-	) {
-		x86_32ShiftImmediate(out, operand, value, 4)
-	}
-
-	func x86_32ShiftRightUnsignedImmediate(
-		out *RTGEmitter, operand RTGRegister, value byte,
-	) {
-		x86_32ShiftImmediate(out, operand, value, 5)
-	}
-
-	func x86_32ShiftRightSignedImmediate(
-		out *RTGEmitter, operand RTGRegister, value byte,
-	) {
-		x86_32ShiftImmediate(out, operand, value, 7)
-	}
-
-	func x86_32Relative(out *RTGEmitter, opcode byte, label RTGLabel) {
-		out.AppendByte(int(opcode))
-		out.Rel32(label)
-	}
-
-	func x86_32Call(out *RTGEmitter, label RTGLabel) {
-		x86_32Relative(out, 0xe8, label)
-	}
-
-	func x86_32CallIndirect(out *RTGEmitter, operand RTGRegister) {
-		x86_32Group(out, 0xff, 2, operand)
-	}
-
-	func x86_32Jump(out *RTGEmitter, label RTGLabel) {
-		x86_32Relative(out, 0xe9, label)
-	}
-
-	func x86_32JumpCondition(
-		out *RTGEmitter, condition RTGCondition, label RTGLabel,
-	) {
-		out.Byte(0x0f)
-		out.AppendByte(int(condition.JumpOpcode))
-		out.Rel32(label)
-	}
-
-	func x86_32SetCondition(
-		out *RTGEmitter,
-		condition RTGCondition,
-		destination RTGRegister,
-	) {
-		out.Byte(0x0f)
-		out.AppendByte(int(condition.SetOpcode))
-		x86_32ModRM(out, 3, 0, 0)
-		out.Bytes2(0x0f, 0xb6)
-		x86_32ModRM(out, 3, x86_32Low3(destination), 0)
-	}
-
-	func x86_32Return(out *RTGEmitter) {
-		out.Byte(0xc3)
-	}
-
-	func x86_32Leave(out *RTGEmitter) {
-		out.Byte(0xc9)
-	}
-
-	func x86_32HostSyscall(out *RTGEmitter) {
-		out.Bytes2(0xcd, 0x80)
-	}
 
 	func x86_32MoveImmediate(
 		out *RTGEmitter, destination RTGRegister, value int64,
@@ -3587,32 +3261,7 @@ go backend {
 		}
 	}
 
-	func x86_32CopyBytes(out *RTGEmitter) {
-		destination := x86_32CopyDestination
-		source := x86_32CopySource
-		count := x86_32CopyCount
-		scratch := x86_32Scratch
-		forward := out.NewLabel()
-		done := out.NewLabel()
-		x86_32Compare(out, destination, source)
-		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x86}, forward)
-		x86_32Address(out, scratch, RTGAddress{
-			Base: source, Index: count, Scale: 1,
-		})
-		x86_32Compare(out, destination, scratch)
-		x86_32JumpCondition(out, RTGCondition{JumpOpcode: 0x83}, forward)
-		x86_32Address(out, source, RTGAddress{
-			Base: source, Index: count, Scale: 1, Displacement: -1,
-		})
-		x86_32Address(out, destination, RTGAddress{
-			Base: destination, Index: count, Scale: 1, Displacement: -1,
-		})
-		out.Bytes4(0xfd, 0xf3, 0xa4, 0xfc)
-		x86_32Jump(out, done)
-		out.Mark(forward)
-		out.Bytes3(0xfc, 0xf3, 0xa4)
-		out.Mark(done)
-	}
+
 
 	func x86_32PatchRelocations(out *RTGEmitter) {
 		for i := 0; i < out.RelocationCount(); i++ {
@@ -3627,11 +3276,7 @@ go backend {
 		}
 	}
 
-	func x86_32FrameStart(out *RTGEmitter) int {
-		at := out.Len()
-		out.Bytes4(0xc8, 0, 0, 0)
-		return at
-	}
+
 
 	func x86_32FrameFinish(out *RTGEmitter, at int, stackUsed int) {
 		frame := (stackUsed + 7) & -8
@@ -3674,87 +3319,130 @@ arch x86_32 {
 		ule 0x96 0x86
 		ugt 0x97 0x87
 	}
+	forms {
+		binary = sequence x86_32Binary
+		load = go x86_32LoadOpcode
+		store = go x86_32StoreWidth
+		group = sequence x86_32Group
+		shift = sequence x86_32ShiftImmediate
+		relative = sequence x86_32Relative
+		jump_condition = sequence x86_32JumpCondition
+		fixed = bytes
+	}
+	instructions {
+		move binary 0x89
+		load_native load 0x8b
+		load_i32 load 0x8b
+		load_u32 load 0x8b
+		load_i16 load 0x0fbf
+		load_u16 load 0x0fb7
+		load_i8 load 0x0fbe
+		load_u8 load 0x0fb6
+		store_native store 0 size=4
+		store_u32 store 0 size=4
+		store_u16 store 0 size=2
+		store_u8 store 0 size=1
+		add binary 0x01
+		subtract binary 0x29
+		bit_and binary 0x21
+		bit_or binary 0x09
+		bit_xor binary 0x31
+		compare binary 0x39
+		test binary 0x85
+		increment group 0xff /0
+		decrement group 0xff /1
+		shift_left_immediate shift 0xc1 /4
+		shift_right_unsigned_immediate shift 0xc1 /5
+		shift_right_signed_immediate shift 0xc1 /7
+		call relative 0xe8
+		call_indirect group 0xff /2
+		jump relative 0xe9
+		jump_cond jump_condition 0
+		return fixed [0xc3]
+		leave fixed [0xc9]
+		host_syscall fixed [0xcd, 0x80]
+	}
 	bind {
-		move = go x86_32Move
+		move = move
 		address = go x86_32Address
-		load.native = go x86_32LoadNative
-		load.i32 = go x86_32LoadI32
-		load.u32 = go x86_32LoadU32
-		load.i16 = go x86_32LoadI16
-		load.u16 = go x86_32LoadU16
-		load.i8 = go x86_32LoadI8
-		load.u8 = go x86_32LoadU8
-		store.native = go x86_32StoreNative
-		store.u32 = go x86_32StoreU32
-		store.u16 = go x86_32StoreU16
-		store.u8 = go x86_32StoreU8
-		add = go x86_32Add
-		subtract = go x86_32Subtract
-		multiply = go x86_32Multiply
-		bit_and = go x86_32BitAnd
-		bit_or = go x86_32BitOr
-		bit_xor = go x86_32BitXor
-		compare = go x86_32Compare
-		test = go x86_32Test
-		increment = go x86_32Increment
-		decrement = go x86_32Decrement
-		shift_left_immediate = go x86_32ShiftLeftImmediate
-		shift_right_unsigned_immediate = go x86_32ShiftRightUnsignedImmediate
-		shift_right_signed_immediate = go x86_32ShiftRightSignedImmediate
-		call = go x86_32Call
-		call_indirect = go x86_32CallIndirect
-		jump = go x86_32Jump
-		jump_condition = go x86_32JumpCondition
-		set_condition = go x86_32SetCondition
-		return = go x86_32Return
-		leave = go x86_32Leave
-		host_syscall = go x86_32HostSyscall
+		load.native = load_native
+		load.i32 = load_i32
+		load.u32 = load_u32
+		load.i16 = load_i16
+		load.u16 = load_u16
+		load.i8 = load_i8
+		load.u8 = load_u8
+		store.native = store_native
+		store.u32 = store_u32
+		store.u16 = store_u16
+		store.u8 = store_u8
+		add = add
+		subtract = subtract
+		multiply = sequence x86_32Multiply
+		bit_and = bit_and
+		bit_or = bit_or
+		bit_xor = bit_xor
+		compare = compare
+		test = test
+		increment = increment
+		decrement = decrement
+		shift_left_immediate = shift_left_immediate
+		shift_right_unsigned_immediate = shift_right_unsigned_immediate
+		shift_right_signed_immediate = shift_right_signed_immediate
+		call = call
+		call_indirect = call_indirect
+		jump = jump
+		jump_condition = jump_cond
+		set_condition = sequence x86_32SetCondition
+		return = return
+		leave = leave
+		host_syscall = host_syscall
 		move_immediate = go x86_32MoveImmediate
 		variable_shift = go x86_32VariableShift
 		signed_divide = go x86_32SignedDivide
-		copy_bytes = go x86_32CopyBytes
+		copy_bytes = sequence x86_32CopyBytes
 	}
 	exports {
 		renvo386AsmSecondaryDisp = go renvo386AsmSecondaryDisp
 		renvo386AsmMovRaxImm = go renvo386AsmMovRaxImm
-		renvo386AsmMovRaxImm64 = go renvo386AsmMovRaxImm64
-		renvo386AsmMovRegPCRel = go renvo386AsmMovRegPCRel
+		renvo386AsmMovRaxImm64 = sequence renvo386AsmMovRaxImm64
+		renvo386AsmMovRegPCRel = sequence renvo386AsmMovRegPCRel
 		renvo386AsmMovRdxImm = go renvo386AsmMovRdxImm
-		renvo386AsmMovRdiRax = go renvo386AsmMovRdiRax
-		renvo386AsmMovRaxRdx = go renvo386AsmMovRaxRdx
-		renvo386AsmMovRsiRax = go renvo386AsmMovRsiRax
-		renvo386AsmMovR8Rax = go renvo386AsmMovR8Rax
-		renvo386AsmMovR9Rax = go renvo386AsmMovR9Rax
-		renvo386AsmAddRdxRcx = go renvo386AsmAddRdxRcx
-		renvo386AsmSyscall = go renvo386AsmSyscall
-		renvo386AsmPopRdi = go renvo386AsmPopRdi
+		renvo386AsmMovRdiRax = sequence renvo386AsmMovRdiRax
+		renvo386AsmMovRaxRdx = sequence renvo386AsmMovRaxRdx
+		renvo386AsmMovRsiRax = sequence renvo386AsmMovRsiRax
+		renvo386AsmMovR8Rax = sequence renvo386AsmMovR8Rax
+		renvo386AsmMovR9Rax = sequence renvo386AsmMovR9Rax
+		renvo386AsmAddRdxRcx = sequence renvo386AsmAddRdxRcx
+		renvo386AsmSyscall = sequence renvo386AsmSyscall
+		renvo386AsmPopRdi = sequence renvo386AsmPopRdi
 		renvo386AsmStackMem = go renvo386AsmStackMem
 		renvo386AsmAddRdxImm = go renvo386AsmAddRdxImm
 		renvo386AsmMemDisp = go renvo386AsmMemDisp
-		renvo386AsmJccLabel = go renvo386AsmJccLabel
-		renvo386AsmLoadQwordRaxIndexRcx8 = go renvo386AsmLoadQwordRaxIndexRcx8
+		renvo386AsmJccLabel = sequence renvo386AsmJccLabel
+		renvo386AsmLoadQwordRaxIndexRcx8 = sequence renvo386AsmLoadQwordRaxIndexRcx8
 		renvo386AsmLoadQwordRaxIndexRcxDisp = go renvo386AsmLoadQwordRaxIndexRcxDisp
 		renvo386AsmLoadRaxMemRdxDisp = go renvo386AsmLoadRaxMemRdxDisp
 		renvo386AsmLoadRaxMemRdxDispSize = go renvo386AsmLoadRaxMemRdxDispSize
-		renvo386AsmLoadByteRaxIndexRcx = go renvo386AsmLoadByteRaxIndexRcx
+		renvo386AsmLoadByteRaxIndexRcx = sequence renvo386AsmLoadByteRaxIndexRcx
 		renvo386AsmLoadRaxIndexRcxSize = go renvo386AsmLoadRaxIndexRcxSize
-		renvo386AsmStoreRaxMemRdxRcx8 = go renvo386AsmStoreRaxMemRdxRcx8
+		renvo386AsmStoreRaxMemRdxRcx8 = sequence renvo386AsmStoreRaxMemRdxRcx8
 		renvo386AsmStoreRaxMemRdxDisp = go renvo386AsmStoreRaxMemRdxDisp
 		renvo386AsmStoreRaxMemRdxDispSize = go renvo386AsmStoreRaxMemRdxDispSize
 		renvo386AsmNormalizeRaxForKind = go renvo386AsmNormalizeRaxForKind
-		renvo386AsmIncMemRdx = go renvo386AsmIncMemRdx
-		renvo386AsmDecMemRdx = go renvo386AsmDecMemRdx
-		renvo386AsmBoolNotRax = go renvo386AsmBoolNotRax
+		renvo386AsmIncMemRdx = sequence renvo386AsmIncMemRdx
+		renvo386AsmDecMemRdx = sequence renvo386AsmDecMemRdx
+		renvo386AsmBoolNotRax = sequence renvo386AsmBoolNotRax
 		renvo386AsmCmpRaxImm8 = go renvo386AsmCmpRaxImm8
-		renvo386AsmAddRaxRcx = go renvo386AsmAddRaxRcx
-		renvo386AsmSubRaxRcx = go renvo386AsmSubRaxRcx
-		renvo386AsmShlRcxImm = go renvo386AsmShlRcxImm
-		renvo386AsmShlRaxImm = go renvo386AsmShlRaxImm
-		renvo386AsmSarRaxImm = go renvo386AsmSarRaxImm
-		renvo386AsmShrRaxImm = go renvo386AsmShrRaxImm
+		renvo386AsmAddRaxRcx = sequence renvo386AsmAddRaxRcx
+		renvo386AsmSubRaxRcx = sequence renvo386AsmSubRaxRcx
+		renvo386AsmShlRcxImm = sequence renvo386AsmShlRcxImm
+		renvo386AsmShlRaxImm = sequence renvo386AsmShlRaxImm
+		renvo386AsmSarRaxImm = sequence renvo386AsmSarRaxImm
+		renvo386AsmShrRaxImm = sequence renvo386AsmShrRaxImm
 		renvo386AsmDivLeftRcxRightRax = go renvo386AsmDivLeftRcxRightRax
-		renvo386AsmCmpRcxRaxSet = go renvo386AsmCmpRcxRaxSet
-		renvoAsmMovArg1Rax = go renvoAsmMovArg1Rax
+		renvo386AsmCmpRcxRaxSet = sequence renvo386AsmCmpRcxRaxSet
+		renvoAsmMovArg1Rax = sequence renvoAsmMovArg1Rax
 	}
 	relocation rel32 {
 		width = 4
@@ -3763,11 +3451,310 @@ arch x86_32 {
 		bits = 32
 		relative_to = instruction_end
 	}
+
+	sequences {
+		renvo386AsmAddRaxRcx(a:emitter) {
+			call a.Uint16(0xc801)
+
+		}
+		renvo386AsmAddRdxRcx(a:emitter) {
+			call a.Uint16(0xca01)
+
+		}
+		renvo386AsmBoolNotRax(a:emitter) {
+			call a.Bytes3(0x83,0xf0,1)
+
+		}
+		renvo386AsmCmpRcxRaxSet(a:emitter, setcc:int) {
+			call a.Uint24(0x0fc139)
+
+			call a.Bytes3(setcc,0xc0,0xf)
+
+			call a.Uint16(0xc0b6)
+
+		}
+		renvo386AsmDecMemRdx(a:emitter) {
+			call a.Uint16(0x0aff)
+
+		}
+		renvo386AsmIncMemRdx(a:emitter) {
+			call a.Uint16(0x02ff)
+
+		}
+		renvo386AsmLoadByteRaxIndexRcx(a:emitter) {
+			call a.Int32(0x0804b60f)
+
+		}
+		renvo386AsmLoadQwordRaxIndexRcx8(a:emitter) {
+			call a.Uint24(0xc8048b)
+
+		}
+		renvo386AsmMovR8Rax(a:emitter) {
+			call a.Uint16(0xc389)
+
+		}
+		renvo386AsmMovR9Rax(a:emitter) {
+			call a.Uint16(0xc389)
+
+		}
+		renvo386AsmMovRaxImm64(a:emitter, imm:int) {
+			call renvo386AsmMovRaxImm(a,imm)
+
+		}
+		renvo386AsmMovRaxRdx(a:emitter) {
+			call a.Uint16(0xd089)
+
+		}
+		renvo386AsmMovRdiRax(a:emitter) {
+			call a.Uint16(0xc389)
+
+		}
+		renvo386AsmMovRsiRax(a:emitter) {
+			call a.Uint16(0xc189)
+
+		}
+		renvo386AsmPopRdi(a:emitter) {
+			call a.Int8(0x5b)
+
+		}
+		renvo386AsmSarRaxImm(a:emitter, imm:int) {
+			call a.Bytes3(0xc1,0xf8,imm)
+
+		}
+		renvo386AsmShlRaxImm(a:emitter, imm:int) {
+			call a.Bytes3(0xc1,0xe0,imm)
+
+		}
+		renvo386AsmShlRcxImm(a:emitter, imm:int) {
+			call a.Bytes3(0xc1,0xe1,imm)
+
+		}
+		renvo386AsmShrRaxImm(a:emitter, imm:int) {
+			call a.Bytes3(0xc1,0xe8,imm)
+
+		}
+		renvo386AsmStoreRaxMemRdxRcx8(a:emitter) {
+			call a.Uint24(0xca0489)
+
+		}
+		renvo386AsmSubRaxRcx(a:emitter) {
+			call a.Uint16(0xc829)
+
+		}
+		renvo386AsmSyscall(a:emitter) {
+			call a.Uint16(0x80cd)
+
+		}
+		renvoAsmMovArg1Rax(a:emitter) {
+			call a.Uint16(0xc689)
+
+		}
+
+		renvo386AsmJccLabel(a:emitter, op:int, label:int) {
+			call a.Bytes2(0x0f,op)
+
+			let at = a.Len()
+
+			call a.Int32(0)
+
+			call a.RelocAt(at,label)
+
+		}
+		renvo386AsmMovRegPCRel(a:emitter, reg:int, off:int, kind:int) {
+			call a.Int8(0xe8)
+
+			call a.Int32(0)
+
+			call a.Int8(0x58|reg)
+
+			call a.Bytes2(0x81,0xc0|reg)
+
+			let at = a.Len()
+
+			call a.Int32(0)
+
+			call a.AbsoluteReloc(at,off,kind)
+
+		}
+
+		x86_32Binary(out:emitter, opcode:byte, destination:register, source:register) {
+			call out.AppendByte(int(opcode))
+			call x86_32ModRM(out,3,x86_32Low3(source),x86_32Low3(destination))
+		}
+		x86_32CopyBytes(out:emitter) {
+			let destination = x86_32CopyDestination
+			let source = x86_32CopySource
+			let count = x86_32CopyCount
+			let scratch = x86_32Scratch
+			let forward = out.NewLabel()
+			let done = out.NewLabel()
+			call x86_32Compare(out,destination,source)
+			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x86),forward)
+			call x86_32Address(out,scratch,record_address(Base:source,Index:count,Scale:1,))
+			call x86_32Compare(out,destination,scratch)
+			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x83),forward)
+			call x86_32Address(out,source,record_address(Base:source,Index:count,Scale:1,Displacement:-1,))
+			call x86_32Address(out,destination,record_address(Base:destination,Index:count,Scale:1,Displacement:-1,))
+			call out.Bytes4(0xfd,0xf3,0xa4,0xfc)
+			call x86_32Jump(out,done)
+			call out.Mark(forward)
+			call out.Bytes3(0xfc,0xf3,0xa4)
+			call out.Mark(done)
+		}
+		x86_32ELF32Image(a:emitter) -> bytes {
+			let codeOffset = 116
+			let dataOffset = codeOffset+len(a.Code())
+			let fileSize = dataOffset+len(a.Data())
+			let bssOffset = RTGAlignValue(fileSize,4096)
+			call x86_32ELFPatchAbsoluteRelocations(a,codeOffset,dataOffset,bssOffset)
+			return nativeELFExecutable32(a,3,0,codeOffset)
+		}
+		x86_32FrameStart(out:emitter) -> int {
+			let at = out.Len()
+			call out.Bytes4(0xc8,0,0,0)
+			return at
+		}
+		x86_32Group(out:emitter, opcode:byte, selector:byte, operand:register) {
+			call out.AppendByte(int(opcode))
+			call x86_32ModRM(out,3,selector,x86_32Low3(operand))
+		}
+		x86_32JumpCondition(out:emitter, condition:condition, label:label) {
+			call out.Byte(0x0f)
+			call out.AppendByte(int(condition.JumpOpcode))
+			call out.Rel32(label)
+		}
+		x86_32Multiply(out:emitter, destination:register, source:register) {
+			call out.Bytes2(0x0f,0xaf)
+			call x86_32ModRM(out,3,x86_32Low3(destination),x86_32Low3(source))
+		}
+		x86_32Relative(out:emitter, opcode:byte, label:label) {
+			call out.AppendByte(int(opcode))
+			call out.Rel32(label)
+		}
+		x86_32SetCondition(out:emitter, condition:condition, destination:register) {
+			call out.Byte(0x0f)
+			call out.AppendByte(int(condition.SetOpcode))
+			call x86_32ModRM(out,3,0,0)
+			call out.Bytes2(0x0f,0xb6)
+			call x86_32ModRM(out,3,x86_32Low3(destination),0)
+		}
+		x86_32ShiftImmediate(out:emitter, operand:register, value:byte, selector:byte) {
+			call x86_32Group(out,0xc1,selector,operand)
+			call out.AppendByte(int(value))
+		}
+		x86_32WindowsExit(out:emitter, status:register) {
+			call out.AppendByte(0x50+status.Code)
+			call out.Bytes2(0xff,0x15)
+			let at = out.Len()
+			call out.Int32(0)
+			call out.AbsoluteReloc(at,8,RTGRelocationImport)
+		}
+		x86_32WindowsStaticCall(out:emitter, importID:int, wordCount:int) {
+			call out.Bytes2(0xff,0x15)
+			let at = out.Len()
+			call out.Int32(0)
+			call out.AbsoluteReloc(at,importID,RTGRelocationImport)
+		}
+
+		x86_32Low3(reg:register) -> byte {
+			return byte(reg.Code&7)
+		}
+		x86_32ModRM(out:emitter, mode:byte, reg:byte, rm:byte) {
+			call out.AppendByte(int(mode<<6|(reg&7)<<3|rm&7))
+		}
+		x86_32WindowsCallImport(out:emitter, importID:int) {
+			call out.Bytes2(0xff,0x15)
+			let at = out.Len()
+			call out.Int32(0)
+			call out.AbsoluteReloc(at,importID,RTGRelocationImport)
+		}
+		x86_32WindowsRuntimeChmod(out:emitter) {
+			let eax = record_register(Code:0,Valid:true)
+			let ecx = record_register(Code:1,Valid:true)
+			let failed = out.NewLabel()
+			let done = out.NewLabel()
+			call out.Bytes2(0x6a,1)
+			call out.Bytes2(0x6a,0)
+			call out.Bytes2(0x6a,0)
+			call out.AppendByte(0x53)
+			call x86_32WindowsCallImport(out,5)
+			call x86_32MoveImmediate(out,ecx,-1)
+			call x86_32Binary(out,0x39,eax,ecx)
+			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x84),failed)
+			call x86_32MoveImmediate(out,eax,0)
+			call x86_32Relative(out,0xe9,done)
+			call out.Mark(failed)
+			call x86_32MoveImmediate(out,eax,-1)
+			call out.Mark(done)
+		}
+		x86_32WindowsRuntimeClose(out:emitter) {
+			let eax = record_register(Code:0,Valid:true)
+			let failed = out.NewLabel()
+			let done = out.NewLabel()
+			call out.AppendByte(0x53)
+			call x86_32WindowsCallImport(out,2)
+			call x86_32Test(out,eax,eax)
+			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x84),failed)
+			call x86_32MoveImmediate(out,eax,0)
+			call x86_32Relative(out,0xe9,done)
+			call out.Mark(failed)
+			call x86_32MoveImmediate(out,eax,-1)
+			call out.Mark(done)
+		}
+		x86_32WindowsRuntimeOpen(out:emitter) {
+			let eax = record_register(Code:0,Valid:true)
+			let esi = record_register(Code:6,Valid:true)
+			call x86_32Move(out,eax,esi)
+			call x86_32WindowsTranslateCreateFileFlags(out)
+			call out.Bytes2(0x6a,0)
+			call out.AppendByte(0x68)
+			call out.Int32(0x80)
+			call out.AppendByte(0x51)
+			call out.Bytes2(0x6a,0)
+			call out.Bytes2(0x6a,3)
+			call out.AppendByte(0x52)
+			call out.AppendByte(0x53)
+			call x86_32WindowsCallImport(out,1)
+		}
+		x86_32WindowsTranslateCreateFileFlags(out:emitter) {
+			let edx = record_register(Code:2,Valid:true)
+			let ecx = record_register(Code:1,Valid:true)
+			let notReadWrite = out.NewLabel()
+			let accessDone = out.NewLabel()
+			let noCreate = out.NewLabel()
+			let createDone = out.NewLabel()
+			call x86_32MoveImmediate(out,edx,-2147483648)
+			call out.Bytes2(0xa8,2)
+			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x84),notReadWrite)
+			call x86_32MoveImmediate(out,edx,-1073741824)
+			call x86_32Relative(out,0xe9,accessDone)
+			call out.Mark(notReadWrite)
+			call out.Bytes2(0xa8,1)
+			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x84),accessDone)
+			call x86_32MoveImmediate(out,edx,0x40000000)
+			call out.Mark(accessDone)
+			call x86_32MoveImmediate(out,ecx,3)
+			call out.Bytes2(0xa8,64)
+			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x84),noCreate)
+			call x86_32MoveImmediate(out,ecx,4)
+			call out.AppendByte(0xa9)
+			call out.Int32(512)
+			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x84),createDone)
+			call x86_32MoveImmediate(out,ecx,2)
+			call x86_32Relative(out,0xe9,createDone)
+			call out.Mark(noCreate)
+			call out.AppendByte(0xa9)
+			call out.Int32(512)
+			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x84),createDone)
+			call x86_32MoveImmediate(out,ecx,5)
+			call out.Mark(createDone)
+		}
+}
 }
 
 abi renvo_x86_32 {
 	arch = x86_32
-	frame_start = go x86_32FrameStart
+	frame_start = sequence x86_32FrameStart
 	frame_finish = go x86_32FrameFinish
 	call_words = [ebx, esi, edx, ecx, eax, edi]
 	overflow_stride = 4
@@ -3810,8 +3797,8 @@ runtime linux_386 {
 
 runtime windows_386 {
 	emit_entry = go x86_32WindowsEntry
-	emit_exit = go x86_32WindowsExit
-	emit_static_call = go x86_32WindowsStaticCall
+	emit_exit = sequence x86_32WindowsExit
+	emit_static_call = sequence x86_32WindowsStaticCall
 	emit_operation = go x86_32WindowsRuntimeOperation
 	operations = [print, open, close, read, write, read_at, write_at, chmod]
 }
@@ -3822,7 +3809,7 @@ format elf32_386 {
 	kind = elf
 	machine = 3
 	code_offset = 116
-	image = go x86_32ELF32Image
+	image = sequence x86_32ELF32Image
 }
 
 format pe32_386 {
@@ -3965,14 +3952,7 @@ go backend {
 		}
 	}
 
-	func aarch64ELF64Image(a *RTGEmitter) []byte {
-		codeOffset := 176
-		dataOffset := codeOffset + len(a.Code())
-		fileSize := dataOffset + len(a.Data())
-		bssOffset := RTGAlignValue(fileSize, 4096)
-		aarch64ELFPatchAbsoluteRelocations(a, codeOffset, dataOffset, bssOffset)
-		return nativeELFExecutable64(a, 183, 0, codeOffset)
-	}
+
 
 	const aarch64MachCodeOffset = 0x1000
 	const aarch64MachImageBase = 0x100000000
@@ -4072,19 +4052,11 @@ go backend {
 		return true
 	}
 
-	func aarch64MachAppend16(out []byte, value int) []byte {
-		return append(out, byte(value), byte(value>>8))
-	}
 
-	func aarch64MachAppend32(out []byte, value int) []byte {
-		return append(out,
-			byte(value), byte(value>>8), byte(value>>16), byte(value>>24))
-	}
 
-	func aarch64MachAppend64(out []byte, value int) []byte {
-		out = aarch64MachAppend32(out, value)
-		return aarch64MachAppend32(out, value>>32)
-	}
+
+
+
 
 	func aarch64MachAppendStringZ(out []byte, value string) []byte {
 		for i := 0; i < len(value); i++ {
@@ -4125,117 +4097,13 @@ go backend {
 		return out
 	}
 
-	func aarch64MachAppendSegment64(
-		out []byte,
-		name string,
-		vmaddr int,
-		vmsize int,
-		fileoff int,
-		filesize int,
-		maxprot int,
-		initprot int,
-	) []byte {
-		out = aarch64MachAppend32(out, 0x19)
-		out = aarch64MachAppend32(out, 72)
-		out = aarch64MachAppendName16(out, name)
-		out = aarch64MachAppend64(out, vmaddr)
-		out = aarch64MachAppend64(out, vmsize)
-		out = aarch64MachAppend64(out, fileoff)
-		out = aarch64MachAppend64(out, filesize)
-		out = aarch64MachAppend32(out, maxprot)
-		out = aarch64MachAppend32(out, initprot)
-		out = aarch64MachAppend32(out, 0)
-		return aarch64MachAppend32(out, 0)
-	}
 
-	func aarch64MachAppendSection64(
-		out []byte,
-		section string,
-		segment string,
-		addr int,
-		size int,
-		offset int,
-		align int,
-		flags int,
-	) []byte {
-		out = aarch64MachAppendName16(out, section)
-		out = aarch64MachAppendName16(out, segment)
-		out = aarch64MachAppend64(out, addr)
-		out = aarch64MachAppend64(out, size)
-		out = aarch64MachAppend32(out, offset)
-		out = aarch64MachAppend32(out, align)
-		out = aarch64MachAppend32(out, 0)
-		out = aarch64MachAppend32(out, 0)
-		out = aarch64MachAppend32(out, flags)
-		out = aarch64MachAppend32(out, 0)
-		out = aarch64MachAppend32(out, 0)
-		return aarch64MachAppend32(out, 0)
-	}
 
-	func aarch64MachAppendTextSegment(
-		out []byte, codeSize int, fileSize int,
-	) []byte {
-		out = aarch64MachAppend32(out, 0x19)
-		out = aarch64MachAppend32(out, 152)
-		out = aarch64MachAppendName16(out, "__TEXT")
-		out = aarch64MachAppend64(out, aarch64MachImageBase)
-		out = aarch64MachAppend64(out, fileSize)
-		out = aarch64MachAppend64(out, 0)
-		out = aarch64MachAppend64(out, fileSize)
-		out = aarch64MachAppend32(out, 5)
-		out = aarch64MachAppend32(out, 5)
-		out = aarch64MachAppend32(out, 1)
-		out = aarch64MachAppend32(out, 0)
-		return aarch64MachAppendSection64(
-			out,
-			"__text",
-			"__TEXT",
-			aarch64MachImageBase+aarch64MachCodeOffset,
-			codeSize,
-			aarch64MachCodeOffset,
-			2,
-			0x80000400,
-		)
-	}
 
-	func aarch64MachAppendDataSegment(
-		out []byte, dataFileOff int, dataFileSize int, bssSize int,
-	) []byte {
-		vmSize := RTGAlignValue(
-			dataFileSize+bssSize, aarch64MachPageSize)
-		out = aarch64MachAppend32(out, 0x19)
-		out = aarch64MachAppend32(out, 232)
-		out = aarch64MachAppendName16(out, "__DATA")
-		out = aarch64MachAppend64(
-			out, aarch64MachImageBase+dataFileOff)
-		out = aarch64MachAppend64(out, vmSize)
-		out = aarch64MachAppend64(out, dataFileOff)
-		out = aarch64MachAppend64(out, dataFileSize)
-		out = aarch64MachAppend32(out, 3)
-		out = aarch64MachAppend32(out, 3)
-		out = aarch64MachAppend32(out, 2)
-		out = aarch64MachAppend32(out, 0)
-		out = aarch64MachAppendSection64(
-			out,
-			"__data",
-			"__DATA",
-			aarch64MachImageBase+dataFileOff,
-			dataFileSize,
-			dataFileOff,
-			3,
-			0,
-		)
-		return aarch64MachAppendSection64(
-			out,
-			"__bss",
-			"__DATA",
-			aarch64MachImageBase+dataFileOff+dataFileSize,
-			bssSize,
-			0,
-			3,
-			1,
-		)
-	}
+
+
+
+
 
 	func aarch64MachExtraDylibs(out *RTGEmitter) []string {
 		var dylibs []string
@@ -4270,35 +4138,11 @@ go backend {
 		return 0
 	}
 
-	func aarch64MachDylibCommandSize(path string) int {
-		return RTGAlignValue(24+len(path)+1, 8)
-	}
 
-	func aarch64MachAppendDylibCommand(
-		out []byte, path string,
-	) []byte {
-		start := len(out)
-		size := aarch64MachDylibCommandSize(path)
-		out = aarch64MachAppend32(out, 0x0c)
-		out = aarch64MachAppend32(out, size)
-		out = aarch64MachAppend32(out, 24)
-		out = aarch64MachAppend32(out, 2)
-		out = aarch64MachAppend32(out, 0x00010000)
-		out = aarch64MachAppend32(out, 0x00010000)
-		out = aarch64MachAppendStringZ(out, path)
-		return aarch64MachAppendUntil(out, start+size)
-	}
 
-	func aarch64MachPatchADRP(
-		out *RTGEmitter, at int, pc int, target int,
-	) {
-		delta := (target >> 12) - (pc >> 12)
-		imm := delta & 0x1fffff
-		insn := 0x90000010
-		insn = insn | ((imm & 3) << 29)
-		insn = insn | (((imm >> 2) & 0x7ffff) << 5)
-		out.PatchUint32(at, insn)
-	}
+
+
+
 
 	type aarch64MachImportLayout struct {
 		got []int
@@ -4538,38 +4382,11 @@ go backend {
 		return aarch64MachAppendUntil(header, aarch64MachCodeOffset)
 	}
 
-	func aarch64MachAppendBE32(out []byte, value int) []byte {
-		out = append(out, byte(value>>24))
-		out = append(out, byte(value>>16))
-		out = append(out, byte(value>>8))
-		return append(out, byte(value))
-	}
 
-	func aarch64MachAppendBE64(out []byte, value int) []byte {
-		out = aarch64MachAppendBE32(out, value>>32)
-		return aarch64MachAppendBE32(out, value)
-	}
 
-	func aarch64MachSHA256Constants() []int {
-		return []int{
-			0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
-			0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-			0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
-			0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-			0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
-			0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-			0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
-			0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-			0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
-			0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-			0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
-			0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-			0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
-			0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-			0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
-			0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
-		}
-	}
+
+
+
 
 	func aarch64MachSHA256Schedule(
 		message []byte, chunk int, words []int,
@@ -4673,13 +4490,7 @@ go backend {
 		return hash
 	}
 
-	func aarch64MachCodeSignatureSize(
-		codeLimit int, identifier string,
-	) int {
-		slots := (codeLimit + 16383) / 16384
-		codeDirectorySize := 88 + len(identifier) + 1 + slots*32
-		return 20 + codeDirectorySize
-	}
+
 
 	func aarch64MachCodeSignature(
 		code []byte, identifier string, executableLimit int,
@@ -4732,66 +4543,11 @@ go backend {
 		return signature
 	}
 
-	func aarch64MachImage(out *RTGEmitter) []byte {
-		imports := aarch64MachPrepareImports(out)
-		dataFileOff := RTGAlignValue(
-			aarch64MachCodeOffset+out.Len(), aarch64MachPageSize)
-		bind := aarch64MachBuildBindData(out, imports.got)
-		symtab := aarch64MachBuildSymbolTable(out)
-		strtab := aarch64MachBuildStringTable(out)
-		undefinedCount := out.DynamicImportCount()
-		textFileSize := dataFileOff
-		dataFileSize := len(out.Data())
-		dataVMSize := RTGAlignValue(
-			dataFileSize+out.BSSSize(), aarch64MachPageSize)
-		linkeditOff := dataFileOff + dataFileSize
-		bindOff := linkeditOff
-		symOff := RTGAlignValue(bindOff+len(bind), 8)
-		strOff := symOff + len(symtab)
-		sigOff := RTGAlignValue(strOff+len(strtab), 16)
-		sigSize := aarch64MachCodeSignatureSize(sigOff, "renvo")
-		linkeditSize := sigOff + sigSize - linkeditOff
-		image := aarch64MachHeader(
-			out,
-			textFileSize,
-			dataFileOff,
-			dataFileSize,
-			dataVMSize,
-			linkeditOff,
-			linkeditSize,
-			bindOff,
-			len(bind),
-			symOff,
-			1+undefinedCount,
-			strOff,
-			len(strtab),
-			undefinedCount,
-			sigOff,
-			sigSize,
-		)
-		image = append(image, out.Code()...)
-		image = aarch64MachAppendUntil(image, dataFileOff)
-		image = append(image, out.Data()...)
-		image = aarch64MachAppendUntil(image, bindOff)
-		image = append(image, bind...)
-		image = aarch64MachAppendUntil(image, symOff)
-		image = append(image, symtab...)
-		image = append(image, strtab...)
-		image = aarch64MachAppendUntil(image, sigOff)
-		signature := aarch64MachCodeSignature(
-			image, "renvo", textFileSize)
-		return append(image, signature...)
-	}
 
-	func aarch64DarwinCallImport(out *RTGEmitter, name string) {
-		index := out.DynamicImport(aarch64MachLibSystem, name)
-		renvoAarch64AsmCallLabel(out, out.DynamicImportLabel(index))
-	}
 
-	func aarch64DarwinExit(out *RTGEmitter, status RTGRegister) {
-		renvoAarch64AsmMovRegReg(out, 0, status.Code)
-		aarch64DarwinCallImport(out, "_exit")
-	}
+
+
+
 
 	func aarch64DarwinRuntimeOperation(
 		out *RTGEmitter, operation int,
@@ -4938,11 +4694,7 @@ go backend {
 		return nativeUntil(image, 0x200+textRaw+dataRaw)
 	}
 
-	func aarch64WindowsCallImport(out *RTGEmitter, importID int) {
-		renvoAarch64AsmMovRegAbs(out, 16, importID, RTGRelocationImport)
-		renvoAarch64AsmLoadRegMem(out, 16, 16, 0, 8)
-		renvoAarch64AsmEmit(out, 0xd63f0200)
-	}
+
 
 	func aarch64WindowsEntry(out *RTGEmitter, parameterCount int, stateOffset int) bool {
 		_ = stateOffset
@@ -5077,10 +4829,7 @@ go backend {
 		return true
 	}
 
-	func aarch64WindowsExit(out *RTGEmitter, status RTGRegister) {
-		renvoAarch64AsmMovRegReg(out, 0, status.Code)
-		aarch64WindowsCallImport(out, 8)
-	}
+
 
 	func aarch64WindowsRuntimeReadWrite(
 		out *RTGEmitter, write bool, positional bool,
@@ -5215,88 +4964,15 @@ go backend {
 		aarch64WindowsCallImport(out, importID)
 	}
 
-	func aarch64WindowsTestRegImmediate(
-		out *RTGEmitter, register int, immediate int,
-	) {
-		renvoAarch64AsmMovRegImm(out, 15, immediate)
-		renvoAarch64AsmEmit(out, 0xea00001f|(15<<16)|(register<<5))
-	}
 
-	func aarch64WindowsTranslateCreateFileFlags(out *RTGEmitter) {
-		notReadWrite := out.NewLabel()
-		accessDone := out.NewLabel()
-		noCreate := out.NewLabel()
-		createDone := out.NewLabel()
 
-		renvoAarch64AsmMovRegImm(out, 1, -2147483648)
-		aarch64WindowsTestRegImmediate(out, 0, 2)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, notReadWrite)
-		renvoAarch64AsmMovRegImm(out, 1, -1073741824)
-		aarch64Jump(out, accessDone)
-		out.Mark(notReadWrite)
-		aarch64WindowsTestRegImmediate(out, 0, 1)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, accessDone)
-		renvoAarch64AsmMovRegImm(out, 1, 0x40000000)
-		out.Mark(accessDone)
 
-		renvoAarch64AsmMovRegImm(out, 4, 3)
-		aarch64WindowsTestRegImmediate(out, 0, 64)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, noCreate)
-		renvoAarch64AsmMovRegImm(out, 4, 4)
-		aarch64WindowsTestRegImmediate(out, 0, 512)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, createDone)
-		renvoAarch64AsmMovRegImm(out, 4, 2)
-		aarch64Jump(out, createDone)
-		out.Mark(noCreate)
-		aarch64WindowsTestRegImmediate(out, 0, 512)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, createDone)
-		renvoAarch64AsmMovRegImm(out, 4, 5)
-		out.Mark(createDone)
-		renvoAarch64AsmMovRegImm(out, 2, 3)
-		renvoAarch64AsmMovRegImm(out, 3, 0)
-		renvoAarch64AsmMovRegImm(out, 5, 0x80)
-		renvoAarch64AsmMovRegImm(out, 6, 0)
-	}
 
-	func aarch64WindowsRuntimeOpen(out *RTGEmitter) {
-		renvoAarch64AsmMovRegReg(out, 9, 3)
-		renvoAarch64AsmMovRegReg(out, 0, 4)
-		aarch64WindowsTranslateCreateFileFlags(out)
-		renvoAarch64AsmMovRegReg(out, 0, 9)
-		aarch64WindowsCallImport(out, 1)
-	}
 
-	func aarch64WindowsRuntimeClose(out *RTGEmitter) {
-		failed := out.NewLabel()
-		done := out.NewLabel()
-		renvoAarch64AsmMovRegReg(out, 0, 3)
-		aarch64WindowsCallImport(out, 2)
-		renvoAarch64AsmCmpRegImm(out, 0, 0)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, failed)
-		renvoAarch64AsmMovRegImm(out, 0, 0)
-		aarch64Jump(out, done)
-		out.Mark(failed)
-		renvoAarch64AsmMovRegImm(out, 0, -1)
-		out.Mark(done)
-	}
 
-	func aarch64WindowsRuntimeChmod(out *RTGEmitter) {
-		failed := out.NewLabel()
-		done := out.NewLabel()
-		renvoAarch64AsmMovRegReg(out, 0, 3)
-		renvoAarch64AsmMovRegImm(out, 1, 0)
-		renvoAarch64AsmMovRegImm(out, 2, 0)
-		renvoAarch64AsmMovRegImm(out, 3, 1)
-		aarch64WindowsCallImport(out, 5)
-		renvoAarch64AsmMovRegImm(out, 9, -1)
-		renvoAarch64AsmCmpRegReg(out, 0, 9)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, failed)
-		renvoAarch64AsmMovRegImm(out, 0, 0)
-		aarch64Jump(out, done)
-		out.Mark(failed)
-		renvoAarch64AsmMovRegImm(out, 0, -1)
-		out.Mark(done)
-	}
+
+
+
 
 	func aarch64WindowsRuntimeOperation(
 		out *RTGEmitter, operation int,
@@ -5358,9 +5034,7 @@ go backend {
 		renvoAarch64AsmMovRegReg(out, 0, 10)
 	}
 
-	func renvoAarch64AsmEmit(a *RTGEmitter, insn int) {
-		RTGUint32(a, insn)
-	}
+
 
 	func renvoAarch64AsmAlign(a *RTGEmitter) {
 		for a.Len()%4 != 0 {
@@ -5407,14 +5081,7 @@ go backend {
 		}
 	}
 
-	func renvoAarch64AsmMovRegAbs(a *RTGEmitter, reg int, off int, kind int) {
-		at := a.Len()
-		renvoAarch64AsmMovRegImm(a, reg, 0)
-		renvoAarch64AsmEmit(a, 0xf2800000|(1<<21)|reg)
-		renvoAarch64AsmEmit(a, 0xf2800000|(2<<21)|reg)
-		renvoAarch64AsmEmit(a, 0xf2800000|(3<<21)|reg)
-		a.AbsoluteReloc( at, off, kind)
-	}
+
 
 	func renvoAarch64AsmAddRegImm(a *RTGEmitter, dst int, src int, imm int) {
 		if imm == 0 {
@@ -5445,21 +5112,13 @@ go backend {
 		}
 	}
 
-	func renvoAarch64AsmAddRegReg(a *RTGEmitter, dst int, left int, right int) {
-		renvoAarch64AsmEmit(a, 0x8b000000|(right<<16)|(left<<5)|dst)
-	}
 
-	func renvoAarch64AsmSubRegReg(a *RTGEmitter, dst int, left int, right int) {
-		renvoAarch64AsmEmit(a, 0xcb000000|(right<<16)|(left<<5)|dst)
-	}
 
-	func renvoAarch64AsmAddRegRegShift(a *RTGEmitter, dst int, left int, right int, shift int) {
-		renvoAarch64AsmEmit(a, 0x8b000000|(right<<16)|(shift<<10)|(left<<5)|dst)
-	}
 
-	func renvoAarch64AsmMulRegReg(a *RTGEmitter, dst int, left int, right int) {
-		renvoAarch64AsmEmit(a, 0x9b007c00|(right<<16)|(left<<5)|dst)
-	}
+
+
+
+
 
 	func renvoAarch64AsmAddr(a *RTGEmitter, base int, disp int) int {
 		if disp == 0 {
@@ -5537,113 +5196,55 @@ go backend {
 		renvoAarch64AsmEmit(a, 0xf9000000|(addr<<5)|src)
 	}
 
-	func renvoAarch64AsmLoadRegStack(a *RTGEmitter, dst int, offset int) {
-		renvoAarch64AsmLoadRegMem(a, dst, aarch64Frame.Code, -offset, 8)
-	}
 
-	func renvoAarch64AsmStoreRegStack(a *RTGEmitter, src int, offset int) {
-		renvoAarch64AsmStoreRegMem(a, src, aarch64Frame.Code, -offset, 8)
-	}
 
-	func renvoAarch64AsmLeaRegStack(a *RTGEmitter, dst int, offset int) {
-		renvoAarch64AsmAddRegImm(a, dst, aarch64Frame.Code, -offset)
-	}
 
-	func renvoAarch64AsmPushReg(a *RTGEmitter, reg int) {
-		renvoAarch64AsmEmit(a, 0xf81f0fe0|reg)
-	}
 
-	func renvoAarch64AsmPopReg(a *RTGEmitter, reg int) {
-		renvoAarch64AsmEmit(a, 0xf84107e0|reg)
-	}
 
-	func renvoAarch64AsmMovRaxImm(a *RTGEmitter, imm int) {
-		renvoAarch64AsmMovRegImm(a, aarch64Primary.Code, imm)
-	}
 
-	func renvoAarch64AsmMovRaxImm64(a *RTGEmitter, imm int) {
-		renvoAarch64AsmMovRaxImm(a, imm)
-	}
 
-	func renvoAarch64AsmMovRdxImm(a *RTGEmitter, imm int) {
-		renvoAarch64AsmMovRegImm(a, aarch64Secondary.Code, imm)
-	}
 
-	func renvoAarch64AsmMovRaxDataAddr(a *RTGEmitter, dataOff int) {
-		renvoAarch64AsmMovRegAbs(a, aarch64Primary.Code, dataOff, 0)
-	}
 
-	func renvoAarch64AsmMovRaxBssAddr(a *RTGEmitter, bssOff int) {
-		renvoAarch64AsmMovRegAbs(a, aarch64Primary.Code, bssOff, RTGRelocationAbsoluteBSS)
-	}
 
-	func renvoAarch64AsmMovR10BssAddr(a *RTGEmitter, bssOff int) {
-		renvoAarch64AsmMovRegAbs(a, aarch64X7.Code, bssOff, RTGRelocationAbsoluteBSS)
-	}
 
-	func renvoAarch64AsmLoadRaxBss(a *RTGEmitter, bssOff int) {
-		renvoAarch64AsmMovRegAbs(a, aarch64Address.Code, bssOff, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmLoadRegMem(a, aarch64Primary.Code, aarch64Address.Code, 0, 8)
-	}
 
-	func renvoAarch64AsmStoreRaxBss(a *RTGEmitter, bssOff int) {
-		renvoAarch64AsmMovRegAbs(a, aarch64Address.Code, bssOff, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmStoreRegMem(a, aarch64Primary.Code, aarch64Address.Code, 0, 8)
-	}
 
-	func renvoAarch64AsmMovRdiRax(a *RTGEmitter) {
-		renvoAarch64AsmMovRegReg(a, aarch64X3.Code, aarch64Primary.Code)
-	}
 
-	func renvoAarch64AsmMovRaxRdx(a *RTGEmitter) {
-		renvoAarch64AsmMovRegReg(a, aarch64Primary.Code, aarch64Secondary.Code)
-	}
 
-	func renvoAarch64AsmMovRdxRax(a *RTGEmitter) {
-		renvoAarch64AsmMovRegReg(a, aarch64Secondary.Code, aarch64Primary.Code)
-	}
 
-	func renvoAarch64AsmMovRcxRax(a *RTGEmitter) {
-		renvoAarch64AsmMovRegReg(a, aarch64Tertiary.Code, aarch64Primary.Code)
-	}
 
-	func renvoAarch64AsmMovRcxRdx(a *RTGEmitter) {
-		renvoAarch64AsmMovRegReg(a, aarch64Tertiary.Code, aarch64Secondary.Code)
-	}
 
-	func renvoAarch64AsmMovRsiRax(a *RTGEmitter) {
-		renvoAarch64AsmMovRegReg(a, aarch64X4.Code, aarch64Primary.Code)
-	}
 
-	func renvoAarch64AsmMovR8Rax(a *RTGEmitter) {
-		renvoAarch64AsmMovRegReg(a, aarch64X5.Code, aarch64Primary.Code)
-	}
 
-	func renvoAarch64AsmMovR9Rax(a *RTGEmitter) {
-		renvoAarch64AsmMovRegReg(a, aarch64X6.Code, aarch64Primary.Code)
-	}
 
-	func renvoAarch64AsmAddRdxRcx(a *RTGEmitter) {
-		renvoAarch64AsmAddRegReg(a, aarch64Secondary.Code, aarch64Secondary.Code, aarch64Tertiary.Code)
-	}
 
-	func renvoAarch64AsmSyscall(a *RTGEmitter) {
-		renvoAarch64AsmMovRegReg(a, aarch64System.Code, aarch64Primary.Code)
-		renvoAarch64AsmMovRegReg(a, aarch64Scratch.Code, aarch64Secondary.Code)
-		renvoAarch64AsmMovRegReg(a, 0, aarch64X3.Code)
-		renvoAarch64AsmMovRegReg(a, 1, aarch64X4.Code)
-		renvoAarch64AsmMovRegReg(a, 2, aarch64Scratch.Code)
-		renvoAarch64AsmMovRegReg(a, 3, aarch64X7.Code)
-		renvoAarch64AsmEmit(a, 0xd4000001)
-	}
 
-	func renvoAarch64AsmPopRdi(a *RTGEmitter) {
-		renvoAarch64AsmPopReg(a, aarch64X3.Code)
-	}
 
-	func renvoAarch64AsmPopRsi(a *RTGEmitter) {
-		renvoAarch64AsmPopReg(a, aarch64X4.Code)
-	}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 	func renvoAarch64AsmStackMem(a *RTGEmitter, offset int, base int, disp8 int, disp32 int) {
 		if base == 0x8948 && disp8 == 0x45 {
@@ -5688,9 +5289,7 @@ go backend {
 		}
 	}
 
-	func renvoAarch64AsmAddRdxImm(a *RTGEmitter, imm int) {
-		renvoAarch64AsmAddRegImm(a, aarch64Secondary.Code, aarch64Secondary.Code, imm)
-	}
+
 
 	func renvoAarch64AsmMemDisp(a *RTGEmitter, disp int, op int, disp8 int, disp32 int) {
 		if op == 0x8b48 && disp8 == 0x4a {
@@ -5703,28 +5302,15 @@ go backend {
 		}
 	}
 
-	func renvoAarch64AsmLoadQwordRaxIndexRcx8(a *RTGEmitter) {
-		renvoAarch64AsmAddRegRegShift(a, aarch64Address.Code, aarch64Primary.Code, aarch64Tertiary.Code, 3)
-		renvoAarch64AsmLoadRegMem(a, aarch64Primary.Code, aarch64Address.Code, 0, 8)
-	}
 
-	func renvoAarch64AsmLoadQwordRaxIndexRcxDisp(a *RTGEmitter, disp int) {
-		renvoAarch64AsmAddRegReg(a, aarch64Address.Code, aarch64Primary.Code, aarch64Tertiary.Code)
-		renvoAarch64AsmLoadRegMem(a, aarch64Primary.Code, aarch64Address.Code, disp, 8)
-	}
 
-	func renvoAarch64AsmLoadRaxMemRdxDisp(a *RTGEmitter, disp int) {
-		renvoAarch64AsmLoadRegMem(a, aarch64Primary.Code, aarch64Secondary.Code, disp, 8)
-	}
 
-	func renvoAarch64AsmLoadRaxMemRdxDispSize(a *RTGEmitter, disp int, size int) {
-		renvoAarch64AsmLoadRegMem(a, aarch64Primary.Code, aarch64Secondary.Code, disp, size)
-	}
 
-	func renvoAarch64AsmLoadByteRaxIndexRcx(a *RTGEmitter) {
-		renvoAarch64AsmAddRegRegShift(a, aarch64Address.Code, aarch64Primary.Code, aarch64Tertiary.Code, 0)
-		renvoAarch64AsmLoadRegMem(a, aarch64Primary.Code, aarch64Address.Code, 0, 1)
-	}
+
+
+
+
+
 
 	func renvoAarch64AsmLoadRaxIndexRcxSize(a *RTGEmitter, size int) {
 		shift := 3
@@ -5741,18 +5327,11 @@ go backend {
 		renvoAarch64AsmLoadRegMem(a, aarch64Primary.Code, aarch64Address.Code, 0, size)
 	}
 
-	func renvoAarch64AsmStoreRaxMemRdxRcx8(a *RTGEmitter) {
-		renvoAarch64AsmAddRegRegShift(a, aarch64Address.Code, aarch64Secondary.Code, aarch64Tertiary.Code, 3)
-		renvoAarch64AsmStoreRegMem(a, aarch64Primary.Code, aarch64Address.Code, 0, 8)
-	}
 
-	func renvoAarch64AsmStoreRaxMemRdxDisp(a *RTGEmitter, disp int) {
-		renvoAarch64AsmStoreRegMem(a, aarch64Primary.Code, aarch64Secondary.Code, disp, 8)
-	}
 
-	func renvoAarch64AsmStoreRaxMemRdxDispSize(a *RTGEmitter, disp int, size int) {
-		renvoAarch64AsmStoreRegMem(a, aarch64Primary.Code, aarch64Secondary.Code, disp, size)
-	}
+
+
+
 
 	func renvoAarch64AsmNormalizeRaxForKind(a *RTGEmitter, kind int) {
 		if kind == RTGScalarByte {
@@ -5780,30 +5359,15 @@ go backend {
 		}
 	}
 
-	func renvoAarch64AsmIncMemRdx(a *RTGEmitter) {
-		renvoAarch64AsmLoadRegMem(a, aarch64Scratch.Code, aarch64Secondary.Code, 0, 8)
-		renvoAarch64AsmAddRegImm(a, aarch64Scratch.Code, aarch64Scratch.Code, 1)
-		renvoAarch64AsmStoreRegMem(a, aarch64Scratch.Code, aarch64Secondary.Code, 0, 8)
-	}
 
-	func renvoAarch64AsmDecMemRdx(a *RTGEmitter) {
-		renvoAarch64AsmLoadRegMem(a, aarch64Scratch.Code, aarch64Secondary.Code, 0, 8)
-		renvoAarch64AsmAddRegImm(a, aarch64Scratch.Code, aarch64Scratch.Code, -1)
-		renvoAarch64AsmStoreRegMem(a, aarch64Scratch.Code, aarch64Secondary.Code, 0, 8)
-	}
 
-	func renvoAarch64AsmBoolNotRax(a *RTGEmitter) {
-		renvoAarch64AsmCmpRaxImm8(a, 0)
-		renvoAarch64AsmCsetRax(a, 0)
-	}
 
-	func renvoAarch64AsmNegRax(a *RTGEmitter) {
-		renvoAarch64AsmSubRegReg(a, aarch64Primary.Code, aarch64Zero.Code, aarch64Primary.Code)
-	}
 
-	func renvoAarch64AsmCmpRaxImm8(a *RTGEmitter, imm int) {
-		renvoAarch64AsmCmpRegImm(a, aarch64Primary.Code, imm)
-	}
+
+
+
+
+
 
 	func renvoAarch64AsmCmpRegImm(a *RTGEmitter, reg int, imm int) {
 		if imm >= 0 && imm <= 4095 {
@@ -5814,33 +5378,19 @@ go backend {
 		renvoAarch64AsmCmpRegReg(a, reg, aarch64Scratch.Code)
 	}
 
-	func renvoAarch64AsmCmpRegReg(a *RTGEmitter, left int, right int) {
-		renvoAarch64AsmEmit(a, 0xeb00001f|(right<<16)|(left<<5))
-	}
 
-	func renvoAarch64AsmCsetRax(a *RTGEmitter, cond int) {
-		renvoAarch64AsmEmit(a, 0x9a9f07e0|((cond^1)<<12))
-	}
 
-	func renvoAarch64AsmAddRaxRcx(a *RTGEmitter) {
-		renvoAarch64AsmAddRegReg(a, aarch64Primary.Code, aarch64Primary.Code, aarch64Tertiary.Code)
-	}
 
-	func renvoAarch64AsmSubRaxRcx(a *RTGEmitter) {
-		renvoAarch64AsmSubRegReg(a, aarch64Primary.Code, aarch64Primary.Code, aarch64Tertiary.Code)
-	}
 
-	func renvoAarch64AsmShlRcxImm(a *RTGEmitter, imm int) {
-		renvoAarch64AsmEmit(a, 0xd3400000|((64-imm)<<16)|((63-imm)<<10)|(aarch64Tertiary.Code<<5)|aarch64Tertiary.Code)
-	}
 
-	func renvoAarch64AsmShlRaxImm(a *RTGEmitter, imm int) {
-		renvoAarch64AsmEmit(a, 0xd3400000|((64-imm)<<16)|((63-imm)<<10))
-	}
 
-	func renvoAarch64AsmSarRaxImm(a *RTGEmitter, imm int) {
-		renvoAarch64AsmEmit(a, 0x9340fc00|(imm<<16))
-	}
+
+
+
+
+
+
+
 
 	func renvoAarch64AsmDivLeftRcxRightRax(a *RTGEmitter, mod bool) {
 		renvoAarch64AsmMovRegReg(a, aarch64Scratch.Code, aarch64Primary.Code)
@@ -5881,51 +5431,25 @@ go backend {
 		return 10
 	}
 
-	func renvoAarch64AsmCmpRcxRaxSet(a *RTGEmitter, setcc int) {
-		renvoAarch64AsmCmpRegReg(a, aarch64Tertiary.Code, aarch64Primary.Code)
-		cond := renvoAarch64CondFromSetcc(setcc)
-		renvoAarch64AsmCsetRax(a, cond)
-	}
 
-	func renvoAarch64AsmPushRax(a *RTGEmitter) {
-		renvoAarch64AsmPushReg(a, aarch64Primary.Code)
-	}
 
-	func renvoAarch64AsmPushRcx(a *RTGEmitter) {
-		renvoAarch64AsmPushReg(a, aarch64Tertiary.Code)
-	}
 
-	func renvoAarch64AsmPushRdx(a *RTGEmitter) {
-		renvoAarch64AsmPushReg(a, aarch64Secondary.Code)
-	}
 
-	func renvoAarch64AsmPopRax(a *RTGEmitter) {
-		renvoAarch64AsmPopReg(a, aarch64Primary.Code)
-	}
 
-	func renvoAarch64AsmPopRcx(a *RTGEmitter) {
-		renvoAarch64AsmPopReg(a, aarch64Tertiary.Code)
-	}
 
-	func renvoAarch64AsmPopRdx(a *RTGEmitter) {
-		renvoAarch64AsmPopReg(a, aarch64Secondary.Code)
-	}
 
-	func renvoAarch64AsmPushImm(a *RTGEmitter, imm int) {
-		renvoAarch64AsmMovRegImm(a, aarch64Scratch.Code, imm)
-		renvoAarch64AsmPushReg(a, aarch64Scratch.Code)
-	}
 
-	func renvoAarch64AsmStoreSliceStack(a *RTGEmitter, offset int) {
-		renvoAarch64AsmStoreRegStack(a, aarch64Primary.Code, offset)
-		renvoAarch64AsmStoreRegStack(a, aarch64Secondary.Code, offset-8)
-		renvoAarch64AsmStoreRegStack(a, aarch64Tertiary.Code, offset-16)
-	}
 
-	func renvoAarch64AsmStoreAlMemRdxRcx1(a *RTGEmitter) {
-		renvoAarch64AsmAddRegRegShift(a, aarch64Address.Code, aarch64Secondary.Code, aarch64Tertiary.Code, 0)
-		renvoAarch64AsmStoreRegMem(a, aarch64Primary.Code, aarch64Address.Code, 0, 1)
-	}
+
+
+
+
+
+
+
+
+
+
 
 	func renvoAarch64AsmStoreRaxMemRdxRcxSize(a *RTGEmitter, size int) {
 		shift := 3
@@ -5942,70 +5466,32 @@ go backend {
 		renvoAarch64AsmStoreRegMem(a, aarch64Primary.Code, aarch64Address.Code, 0, size)
 	}
 
-	func renvoAarch64AsmIncRcx(a *RTGEmitter) {
-		renvoAarch64AsmAddRegImm(a, aarch64Tertiary.Code, aarch64Tertiary.Code, 1)
-	}
 
-	func renvoAarch64AsmIncRax(a *RTGEmitter) {
-		renvoAarch64AsmAddRegImm(a, aarch64Primary.Code, aarch64Primary.Code, 1)
-	}
 
-	func renvoAarch64AsmImulRcxImm(a *RTGEmitter, imm int) {
-		renvoAarch64AsmMovRegImm(a, aarch64Scratch.Code, imm)
-		renvoAarch64AsmEmit(a, 0x9b007c00|(aarch64Scratch.Code<<16)|(aarch64Tertiary.Code<<5)|aarch64Tertiary.Code)
-	}
 
-	func renvoAarch64AsmLeave(a *RTGEmitter) {
-		renvoAarch64AsmEmit(a, 0x910003bf)
-		renvoAarch64AsmEmit(a, 0xa8c17bfd)
-	}
 
-	func renvoAarch64AsmRet(a *RTGEmitter) {
-		renvoAarch64AsmEmit(a, 0xd65f03c0)
-	}
 
-	func renvoAarch64AsmCallLabel(a *RTGEmitter, label int) {
-		at := a.Len()
-		renvoAarch64AsmEmit(a, 0x94000000)
-		a.RelocAt(at, label)
-	}
 
-	func renvoAarch64AsmJmpLabel(a *RTGEmitter, label int) {
-		at := a.Len()
-		renvoAarch64AsmEmit(a, 0x14000000)
-		a.RelocAt(at, label)
-	}
 
-	func renvoAarch64AsmBCondLabel(a *RTGEmitter, label int, cond int) {
-		at := a.Len()
-		renvoAarch64AsmEmit(a, 0x54000000|cond)
-		a.RelocAt(at, label)
-	}
 
-	func renvoAarch64AsmJzLabel(a *RTGEmitter, label int) {
-		renvoAarch64AsmBCondLabel(a, label, 0)
-	}
 
-	func renvoAarch64AsmJnzLabel(a *RTGEmitter, label int) {
-		renvoAarch64AsmBCondLabel(a, label, 1)
-	}
+
+
+
+
+
+
+
+
+
+
 
 	// direct_emitter_v1 uses registers and addresses rather than the historical
 	// x86-named value helpers above. These algorithms are the architecture
 	// boundary used by generated backends.
-	func aarch64Move(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
-		renvoAarch64AsmMovRegReg(out, destination.Code, source.Code)
-	}
 
-	func aarch64EmitADR(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
-		addend := address.Addend
-		insn := 0x10000000 | destination.Code
-		insn = insn | ((addend & 3) << 29)
-		insn = insn | (((addend >> 2) & 0x7ffff) << 5)
-		at := out.Len()
-		renvoAarch64AsmEmit(out, insn)
-		RTGAddressRelocAt(out, address, at)
-	}
+
+
 
 	func aarch64EmitAddress(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
 		if RTGAddressValid(address) {
@@ -6076,47 +5562,19 @@ go backend {
 			out, op|imm|(base<<5)|destination.Code)
 	}
 
-	func aarch64LoadNative(
-		out *RTGEmitter, destination RTGRegister, address RTGAddress,
-	) {
-		aarch64LoadWidth(out, destination, address, 8, false)
-	}
 
-	func aarch64LoadI32(
-		out *RTGEmitter, destination RTGRegister, address RTGAddress,
-	) {
-		aarch64LoadWidth(out, destination, address, 4, true)
-	}
 
-	func aarch64LoadU32(
-		out *RTGEmitter, destination RTGRegister, address RTGAddress,
-	) {
-		aarch64LoadWidth(out, destination, address, 4, false)
-	}
 
-	func aarch64LoadI16(
-		out *RTGEmitter, destination RTGRegister, address RTGAddress,
-	) {
-		aarch64LoadWidth(out, destination, address, 2, true)
-	}
 
-	func aarch64LoadU16(
-		out *RTGEmitter, destination RTGRegister, address RTGAddress,
-	) {
-		aarch64LoadWidth(out, destination, address, 2, false)
-	}
 
-	func aarch64LoadI8(
-		out *RTGEmitter, destination RTGRegister, address RTGAddress,
-	) {
-		aarch64LoadWidth(out, destination, address, 1, true)
-	}
 
-	func aarch64LoadU8(
-		out *RTGEmitter, destination RTGRegister, address RTGAddress,
-	) {
-		aarch64LoadWidth(out, destination, address, 1, false)
-	}
+
+
+
+
+
+
+
 
 	func aarch64StoreWidth(
 		out *RTGEmitter,
@@ -6141,171 +5599,25 @@ go backend {
 		renvoAarch64AsmEmit(out, op|imm|(base<<5)|source.Code)
 	}
 
-	func aarch64StoreNative(
-		out *RTGEmitter, address RTGAddress, source RTGRegister,
-	) {
-		aarch64StoreWidth(out, address, source, 8)
-	}
 
-	func aarch64StoreU32(
-		out *RTGEmitter, address RTGAddress, source RTGRegister,
-	) {
-		aarch64StoreWidth(out, address, source, 4)
-	}
 
-	func aarch64StoreU16(
-		out *RTGEmitter, address RTGAddress, source RTGRegister,
-	) {
-		aarch64StoreWidth(out, address, source, 2)
-	}
 
-	func aarch64StoreU8(
-		out *RTGEmitter, address RTGAddress, source RTGRegister,
-	) {
-		aarch64StoreWidth(out, address, source, 1)
-	}
 
-	func aarch64Add(
-		out *RTGEmitter, destination RTGRegister, source RTGRegister,
-	) {
-		renvoAarch64AsmAddRegReg(
-			out, destination.Code, destination.Code, source.Code)
-	}
 
-	func aarch64Subtract(
-		out *RTGEmitter, destination RTGRegister, source RTGRegister,
-	) {
-		renvoAarch64AsmSubRegReg(
-			out, destination.Code, destination.Code, source.Code)
-	}
 
-	func aarch64Multiply(
-		out *RTGEmitter, destination RTGRegister, source RTGRegister,
-	) {
-		renvoAarch64AsmMulRegReg(
-			out, destination.Code, destination.Code, source.Code)
-	}
 
-	func aarch64BitAnd(
-		out *RTGEmitter, destination RTGRegister, source RTGRegister,
-	) {
-		renvoAarch64AsmEmit(out,
-			0x8a000000|(source.Code<<16)|
-				(destination.Code<<5)|destination.Code)
-	}
 
-	func aarch64BitOr(
-		out *RTGEmitter, destination RTGRegister, source RTGRegister,
-	) {
-		renvoAarch64AsmEmit(out,
-			0xaa000000|(source.Code<<16)|
-				(destination.Code<<5)|destination.Code)
-	}
 
-	func aarch64BitXor(
-		out *RTGEmitter, destination RTGRegister, source RTGRegister,
-	) {
-		renvoAarch64AsmEmit(out,
-			0xca000000|(source.Code<<16)|
-				(destination.Code<<5)|destination.Code)
-	}
 
-	func aarch64Compare(
-		out *RTGEmitter, left RTGRegister, right RTGRegister,
-	) {
-		renvoAarch64AsmCmpRegReg(out, left.Code, right.Code)
-	}
 
-	func aarch64Test(
-		out *RTGEmitter, left RTGRegister, right RTGRegister,
-	) {
-		renvoAarch64AsmEmit(
-			out, 0xea00001f|(right.Code<<16)|(left.Code<<5))
-	}
 
-	func aarch64Increment(out *RTGEmitter, operand RTGRegister) {
-		renvoAarch64AsmAddRegImm(
-			out, operand.Code, operand.Code, 1)
-	}
 
-	func aarch64Decrement(out *RTGEmitter, operand RTGRegister) {
-		renvoAarch64AsmAddRegImm(
-			out, operand.Code, operand.Code, -1)
-	}
 
-	func aarch64ShiftLeftImmediate(
-		out *RTGEmitter, operand RTGRegister, value byte,
-	) {
-		shift := int(value) & 63
-		renvoAarch64AsmEmit(out,
-			0xd3400000|((64-shift)<<16)|((63-shift)<<10)|
-				(operand.Code<<5)|operand.Code)
-	}
 
-	func aarch64ShiftRightUnsignedImmediate(
-		out *RTGEmitter, operand RTGRegister, value byte,
-	) {
-		renvoAarch64AsmEmit(out,
-			0xd340fc00|((int(value)&63)<<16)|
-				(operand.Code<<5)|operand.Code)
-	}
 
-	func aarch64ShiftRightSignedImmediate(
-		out *RTGEmitter, operand RTGRegister, value byte,
-	) {
-		renvoAarch64AsmEmit(out,
-			0x9340fc00|((int(value)&63)<<16)|
-				(operand.Code<<5)|operand.Code)
-	}
 
-	func aarch64Call(out *RTGEmitter, label RTGLabel) {
-		renvoAarch64AsmEmit(out, 0x94000000)
-		RTGReloc(out, label)
-	}
 
-	func aarch64CallIndirect(out *RTGEmitter, operand RTGRegister) {
-		renvoAarch64AsmEmit(out, 0xd63f0000|(operand.Code<<5))
-	}
 
-	func aarch64Jump(out *RTGEmitter, label RTGLabel) {
-		renvoAarch64AsmEmit(out, 0x14000000)
-		RTGReloc(out, label)
-	}
-
-	func aarch64JumpCondition(
-		out *RTGEmitter, condition RTGCondition, label RTGLabel,
-	) {
-		renvoAarch64AsmEmit(out, 0x54000000|condition.Code)
-		RTGReloc(out, label)
-	}
-
-	func aarch64SetCondition(
-		out *RTGEmitter,
-		condition RTGCondition,
-		destination RTGRegister,
-	) {
-		renvoAarch64AsmEmit(out,
-			0x9a9f07e0|((condition.Code^1)<<12)|destination.Code)
-	}
-
-	func aarch64Return(out *RTGEmitter) {
-		renvoAarch64AsmRet(out)
-	}
-
-	func aarch64Leave(out *RTGEmitter) {
-		renvoAarch64AsmLeave(out)
-	}
-
-	func aarch64HostSyscall(out *RTGEmitter) {
-		renvoAarch64AsmSyscall(out)
-	}
-
-	func aarch64MoveImmediate(
-		out *RTGEmitter, destination RTGRegister, value int64,
-	) {
-		renvoAarch64AsmMovRegImm(
-			out, destination.Code, int(value))
-	}
 
 	func aarch64VariableShift(
 		out *RTGEmitter, direction RTGShiftDirection, signed bool,
@@ -6335,51 +5647,7 @@ go backend {
 		}
 	}
 
-	func aarch64CopyBytes(out *RTGEmitter) {
-		destination := aarch64X3
-		source := aarch64X4
-		count := aarch64Secondary
-		value := aarch64Scratch2
-		forward := out.NewLabel()
-		forwardLoop := out.NewLabel()
-		backwardLoop := out.NewLabel()
-		done := out.NewLabel()
 
-		aarch64Compare(out, destination, source)
-		aarch64JumpCondition(out, RTGCondition{Code: 9}, forward)
-		aarch64EmitAddress(out, aarch64Scratch, RTGAddress{
-			Base: source, Index: count, Scale: 1,
-		})
-		aarch64Compare(out, destination, aarch64Scratch)
-		aarch64JumpCondition(out, RTGCondition{Code: 2}, forward)
-		aarch64EmitAddress(out, source, RTGAddress{
-			Base: source, Index: count, Scale: 1, Displacement: -1,
-		})
-		aarch64EmitAddress(out, destination, RTGAddress{
-			Base: destination, Index: count, Scale: 1, Displacement: -1,
-		})
-		out.Mark(backwardLoop)
-		aarch64Compare(out, count, aarch64Zero)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, done)
-		aarch64LoadU8(out, value, RTGAddress{Base: source})
-		aarch64StoreU8(out, RTGAddress{Base: destination}, value)
-		aarch64Decrement(out, source)
-		aarch64Decrement(out, destination)
-		aarch64Decrement(out, count)
-		aarch64Jump(out, backwardLoop)
-
-		out.Mark(forward)
-		out.Mark(forwardLoop)
-		aarch64Compare(out, count, aarch64Zero)
-		aarch64JumpCondition(out, RTGCondition{Code: 0}, done)
-		aarch64LoadU8(out, value, RTGAddress{Base: source})
-		aarch64StoreU8(out, RTGAddress{Base: destination}, value)
-		aarch64Increment(out, source)
-		aarch64Increment(out, destination)
-		aarch64Decrement(out, count)
-		aarch64Jump(out, forwardLoop)
-		out.Mark(done)
-	}
 
 	func aarch64PatchRelocations(out *RTGEmitter) {
 		for i := 0; i < out.RelocationCount(); i++ {
@@ -6416,14 +5684,7 @@ go backend {
 		}
 	}
 
-	func aarch64FrameStart(out *RTGEmitter) int {
-		renvoAarch64AsmEmit(out, 0xa9bf7bfd)
-		renvoAarch64AsmEmit(out, 0x910003fd)
-		at := out.Len()
-		renvoAarch64AsmEmit(out, 0xd503201f)
-		renvoAarch64AsmEmit(out, 0xd503201f)
-		return at
-	}
+
 
 	func aarch64FrameFinish(out *RTGEmitter, at int, stackUsed int) {
 		frame := (stackUsed + 15) & -16
@@ -6483,8 +5744,40 @@ arch aarch64 {
 		sle = 13
 	}
 
+	# AArch64's regular register and branch instructions are bit-field rows.
+	# Immediate synthesis, addressing, and other stateful algorithms remain
+	# narrow Go hooks below.
+	forms {
+		binary = word32(destination:reg@0+5, source:reg@16)
+		compare = word32(left:reg@5, right:reg@16)
+		unary = word32(operand:reg@0+5)
+		register = word32(operand:reg@5)
+		branch = word32(label:label@reloc)
+		conditional_branch = word32(condition:condition@0, label:label@reloc)
+		fixed = bytes
+	}
+
+	instructions {
+		add binary 0x8b000000
+		subtract binary 0xcb000000
+		multiply binary 0x9b007c00
+		bit_and binary 0x8a000000
+		bit_or binary 0xaa000000
+		bit_xor binary 0xca000000
+		compare compare 0xeb00001f
+		test compare 0xea00001f
+		increment unary 0x91000400
+		decrement unary 0xd1000400
+		call_indirect register 0xd63f0000
+		call branch 0x94000000
+		jump branch 0x14000000
+		jump_condition conditional_branch 0x54000000
+		return fixed [0xc0, 0x03, 0x5f, 0xd6]
+		leave fixed [0xbf, 0x03, 0x00, 0x91, 0xfd, 0x7b, 0xc1, 0xa8]
+	}
+
 	bind {
-		move = go aarch64Move
+		move = sequence aarch64Move
 		address = go aarch64EmitAddress
 		load.native = go aarch64LoadNative
 		load.i32 = go aarch64LoadI32
@@ -6497,122 +5790,122 @@ arch aarch64 {
 		store.u32 = go aarch64StoreU32
 		store.u16 = go aarch64StoreU16
 		store.u8 = go aarch64StoreU8
-		add = go aarch64Add
-		subtract = go aarch64Subtract
-		multiply = go aarch64Multiply
-		bit_and = go aarch64BitAnd
-		bit_or = go aarch64BitOr
-		bit_xor = go aarch64BitXor
-		compare = go aarch64Compare
-		test = go aarch64Test
-		increment = go aarch64Increment
-		decrement = go aarch64Decrement
-		shift_left_immediate = go aarch64ShiftLeftImmediate
-		shift_right_unsigned_immediate = go aarch64ShiftRightUnsignedImmediate
-		shift_right_signed_immediate = go aarch64ShiftRightSignedImmediate
-		call = go aarch64Call
-		call_indirect = go aarch64CallIndirect
-		jump = go aarch64Jump
-		jump_condition = go aarch64JumpCondition
-		set_condition = go aarch64SetCondition
-		return = go aarch64Return
-		leave = go aarch64Leave
-		host_syscall = go aarch64HostSyscall
-		move_immediate = go aarch64MoveImmediate
+		add = add
+		subtract = subtract
+		multiply = multiply
+		bit_and = bit_and
+		bit_or = bit_or
+		bit_xor = bit_xor
+		compare = compare
+		test = test
+		increment = increment
+		decrement = decrement
+		shift_left_immediate = sequence aarch64ShiftLeftImmediate
+		shift_right_unsigned_immediate = sequence aarch64ShiftRightUnsignedImmediate
+		shift_right_signed_immediate = sequence aarch64ShiftRightSignedImmediate
+		call = call
+		call_indirect = call_indirect
+		jump = jump
+		jump_condition = jump_condition
+		set_condition = sequence aarch64SetCondition
+		return = return
+		leave = leave
+		host_syscall = sequence aarch64HostSyscall
+		move_immediate = sequence aarch64MoveImmediate
 		variable_shift = go aarch64VariableShift
 		signed_divide = go aarch64SignedDivide
-		copy_bytes = go aarch64CopyBytes
+		copy_bytes = sequence aarch64CopyBytes
 	}
 
 	exports {
-		renvoAarch64AsmEmit = go renvoAarch64AsmEmit
+		renvoAarch64AsmEmit = sequence renvoAarch64AsmEmit
 		renvoAarch64AsmAlign = go renvoAarch64AsmAlign
 		renvoAarch64AsmMovRegReg = go renvoAarch64AsmMovRegReg
 		renvoAarch64AsmMovRegImm = go renvoAarch64AsmMovRegImm
 		renvoAarch64AsmPatchMovRegImmAt = go renvoAarch64AsmPatchMovRegImmAt
-		renvoAarch64AsmMovRegAbs = go renvoAarch64AsmMovRegAbs
+		renvoAarch64AsmMovRegAbs = sequence renvoAarch64AsmMovRegAbs
 		renvoAarch64AsmAddRegImm = go renvoAarch64AsmAddRegImm
-		renvoAarch64AsmAddRegReg = go renvoAarch64AsmAddRegReg
-		renvoAarch64AsmSubRegReg = go renvoAarch64AsmSubRegReg
-		renvoAarch64AsmAddRegRegShift = go renvoAarch64AsmAddRegRegShift
-		renvoAarch64AsmMulRegReg = go renvoAarch64AsmMulRegReg
+		renvoAarch64AsmAddRegReg = sequence renvoAarch64AsmAddRegReg
+		renvoAarch64AsmSubRegReg = sequence renvoAarch64AsmSubRegReg
+		renvoAarch64AsmAddRegRegShift = sequence renvoAarch64AsmAddRegRegShift
+		renvoAarch64AsmMulRegReg = sequence renvoAarch64AsmMulRegReg
 		renvoAarch64AsmAddr = go renvoAarch64AsmAddr
 		renvoAarch64AsmLoadRegMem = go renvoAarch64AsmLoadRegMem
 		renvoAarch64AsmStoreRegMem = go renvoAarch64AsmStoreRegMem
-		renvoAarch64AsmLoadRegStack = go renvoAarch64AsmLoadRegStack
-		renvoAarch64AsmStoreRegStack = go renvoAarch64AsmStoreRegStack
-		renvoAarch64AsmLeaRegStack = go renvoAarch64AsmLeaRegStack
-		renvoAarch64AsmPushReg = go renvoAarch64AsmPushReg
-		renvoAarch64AsmPopReg = go renvoAarch64AsmPopReg
-		renvoAarch64AsmMovRaxImm = go renvoAarch64AsmMovRaxImm
-		renvoAarch64AsmMovRaxImm64 = go renvoAarch64AsmMovRaxImm64
-		renvoAarch64AsmMovRdxImm = go renvoAarch64AsmMovRdxImm
-		renvoAarch64AsmMovRaxDataAddr = go renvoAarch64AsmMovRaxDataAddr
-		renvoAarch64AsmMovRaxBssAddr = go renvoAarch64AsmMovRaxBssAddr
-		renvoAarch64AsmMovR10BssAddr = go renvoAarch64AsmMovR10BssAddr
-		renvoAarch64AsmLoadRaxBss = go renvoAarch64AsmLoadRaxBss
-		renvoAarch64AsmStoreRaxBss = go renvoAarch64AsmStoreRaxBss
-		renvoAarch64AsmMovRdiRax = go renvoAarch64AsmMovRdiRax
-		renvoAarch64AsmMovRaxRdx = go renvoAarch64AsmMovRaxRdx
-		renvoAarch64AsmMovRdxRax = go renvoAarch64AsmMovRdxRax
-		renvoAarch64AsmMovRcxRax = go renvoAarch64AsmMovRcxRax
-		renvoAarch64AsmMovRcxRdx = go renvoAarch64AsmMovRcxRdx
-		renvoAarch64AsmMovRsiRax = go renvoAarch64AsmMovRsiRax
-		renvoAarch64AsmMovR8Rax = go renvoAarch64AsmMovR8Rax
-		renvoAarch64AsmMovR9Rax = go renvoAarch64AsmMovR9Rax
-		renvoAarch64AsmAddRdxRcx = go renvoAarch64AsmAddRdxRcx
-		renvoAarch64AsmSyscall = go renvoAarch64AsmSyscall
-		renvoAarch64AsmPopRdi = go renvoAarch64AsmPopRdi
-		renvoAarch64AsmPopRsi = go renvoAarch64AsmPopRsi
+		renvoAarch64AsmLoadRegStack = sequence renvoAarch64AsmLoadRegStack
+		renvoAarch64AsmStoreRegStack = sequence renvoAarch64AsmStoreRegStack
+		renvoAarch64AsmLeaRegStack = sequence renvoAarch64AsmLeaRegStack
+		renvoAarch64AsmPushReg = sequence renvoAarch64AsmPushReg
+		renvoAarch64AsmPopReg = sequence renvoAarch64AsmPopReg
+		renvoAarch64AsmMovRaxImm = sequence renvoAarch64AsmMovRaxImm
+		renvoAarch64AsmMovRaxImm64 = sequence renvoAarch64AsmMovRaxImm64
+		renvoAarch64AsmMovRdxImm = sequence renvoAarch64AsmMovRdxImm
+		renvoAarch64AsmMovRaxDataAddr = sequence renvoAarch64AsmMovRaxDataAddr
+		renvoAarch64AsmMovRaxBssAddr = sequence renvoAarch64AsmMovRaxBssAddr
+		renvoAarch64AsmMovR10BssAddr = sequence renvoAarch64AsmMovR10BssAddr
+		renvoAarch64AsmLoadRaxBss = sequence renvoAarch64AsmLoadRaxBss
+		renvoAarch64AsmStoreRaxBss = sequence renvoAarch64AsmStoreRaxBss
+		renvoAarch64AsmMovRdiRax = sequence renvoAarch64AsmMovRdiRax
+		renvoAarch64AsmMovRaxRdx = sequence renvoAarch64AsmMovRaxRdx
+		renvoAarch64AsmMovRdxRax = sequence renvoAarch64AsmMovRdxRax
+		renvoAarch64AsmMovRcxRax = sequence renvoAarch64AsmMovRcxRax
+		renvoAarch64AsmMovRcxRdx = sequence renvoAarch64AsmMovRcxRdx
+		renvoAarch64AsmMovRsiRax = sequence renvoAarch64AsmMovRsiRax
+		renvoAarch64AsmMovR8Rax = sequence renvoAarch64AsmMovR8Rax
+		renvoAarch64AsmMovR9Rax = sequence renvoAarch64AsmMovR9Rax
+		renvoAarch64AsmAddRdxRcx = sequence renvoAarch64AsmAddRdxRcx
+		renvoAarch64AsmSyscall = sequence renvoAarch64AsmSyscall
+		renvoAarch64AsmPopRdi = sequence renvoAarch64AsmPopRdi
+		renvoAarch64AsmPopRsi = sequence renvoAarch64AsmPopRsi
 		renvoAarch64AsmStackMem = go renvoAarch64AsmStackMem
-		renvoAarch64AsmAddRdxImm = go renvoAarch64AsmAddRdxImm
+		renvoAarch64AsmAddRdxImm = sequence renvoAarch64AsmAddRdxImm
 		renvoAarch64AsmMemDisp = go renvoAarch64AsmMemDisp
-		renvoAarch64AsmLoadQwordRaxIndexRcx8 = go renvoAarch64AsmLoadQwordRaxIndexRcx8
-		renvoAarch64AsmLoadQwordRaxIndexRcxDisp = go renvoAarch64AsmLoadQwordRaxIndexRcxDisp
-		renvoAarch64AsmLoadRaxMemRdxDisp = go renvoAarch64AsmLoadRaxMemRdxDisp
-		renvoAarch64AsmLoadRaxMemRdxDispSize = go renvoAarch64AsmLoadRaxMemRdxDispSize
-		renvoAarch64AsmLoadByteRaxIndexRcx = go renvoAarch64AsmLoadByteRaxIndexRcx
+		renvoAarch64AsmLoadQwordRaxIndexRcx8 = sequence renvoAarch64AsmLoadQwordRaxIndexRcx8
+		renvoAarch64AsmLoadQwordRaxIndexRcxDisp = sequence renvoAarch64AsmLoadQwordRaxIndexRcxDisp
+		renvoAarch64AsmLoadRaxMemRdxDisp = sequence renvoAarch64AsmLoadRaxMemRdxDisp
+		renvoAarch64AsmLoadRaxMemRdxDispSize = sequence renvoAarch64AsmLoadRaxMemRdxDispSize
+		renvoAarch64AsmLoadByteRaxIndexRcx = sequence renvoAarch64AsmLoadByteRaxIndexRcx
 		renvoAarch64AsmLoadRaxIndexRcxSize = go renvoAarch64AsmLoadRaxIndexRcxSize
-		renvoAarch64AsmStoreRaxMemRdxRcx8 = go renvoAarch64AsmStoreRaxMemRdxRcx8
-		renvoAarch64AsmStoreRaxMemRdxDisp = go renvoAarch64AsmStoreRaxMemRdxDisp
-		renvoAarch64AsmStoreRaxMemRdxDispSize = go renvoAarch64AsmStoreRaxMemRdxDispSize
+		renvoAarch64AsmStoreRaxMemRdxRcx8 = sequence renvoAarch64AsmStoreRaxMemRdxRcx8
+		renvoAarch64AsmStoreRaxMemRdxDisp = sequence renvoAarch64AsmStoreRaxMemRdxDisp
+		renvoAarch64AsmStoreRaxMemRdxDispSize = sequence renvoAarch64AsmStoreRaxMemRdxDispSize
 		renvoAarch64AsmNormalizeRaxForKind = go renvoAarch64AsmNormalizeRaxForKind
-		renvoAarch64AsmIncMemRdx = go renvoAarch64AsmIncMemRdx
-		renvoAarch64AsmDecMemRdx = go renvoAarch64AsmDecMemRdx
-		renvoAarch64AsmBoolNotRax = go renvoAarch64AsmBoolNotRax
-		renvoAarch64AsmNegRax = go renvoAarch64AsmNegRax
-		renvoAarch64AsmCmpRaxImm8 = go renvoAarch64AsmCmpRaxImm8
+		renvoAarch64AsmIncMemRdx = sequence renvoAarch64AsmIncMemRdx
+		renvoAarch64AsmDecMemRdx = sequence renvoAarch64AsmDecMemRdx
+		renvoAarch64AsmBoolNotRax = sequence renvoAarch64AsmBoolNotRax
+		renvoAarch64AsmNegRax = sequence renvoAarch64AsmNegRax
+		renvoAarch64AsmCmpRaxImm8 = sequence renvoAarch64AsmCmpRaxImm8
 		renvoAarch64AsmCmpRegImm = go renvoAarch64AsmCmpRegImm
-		renvoAarch64AsmCmpRegReg = go renvoAarch64AsmCmpRegReg
-		renvoAarch64AsmCsetRax = go renvoAarch64AsmCsetRax
-		renvoAarch64AsmAddRaxRcx = go renvoAarch64AsmAddRaxRcx
-		renvoAarch64AsmSubRaxRcx = go renvoAarch64AsmSubRaxRcx
-		renvoAarch64AsmShlRcxImm = go renvoAarch64AsmShlRcxImm
-		renvoAarch64AsmShlRaxImm = go renvoAarch64AsmShlRaxImm
-		renvoAarch64AsmSarRaxImm = go renvoAarch64AsmSarRaxImm
+		renvoAarch64AsmCmpRegReg = sequence renvoAarch64AsmCmpRegReg
+		renvoAarch64AsmCsetRax = sequence renvoAarch64AsmCsetRax
+		renvoAarch64AsmAddRaxRcx = sequence renvoAarch64AsmAddRaxRcx
+		renvoAarch64AsmSubRaxRcx = sequence renvoAarch64AsmSubRaxRcx
+		renvoAarch64AsmShlRcxImm = sequence renvoAarch64AsmShlRcxImm
+		renvoAarch64AsmShlRaxImm = sequence renvoAarch64AsmShlRaxImm
+		renvoAarch64AsmSarRaxImm = sequence renvoAarch64AsmSarRaxImm
 		renvoAarch64AsmDivLeftRcxRightRax = go renvoAarch64AsmDivLeftRcxRightRax
 		renvoAarch64CondFromSetcc = go renvoAarch64CondFromSetcc
-		renvoAarch64AsmCmpRcxRaxSet = go renvoAarch64AsmCmpRcxRaxSet
-		renvoAarch64AsmPushRax = go renvoAarch64AsmPushRax
-		renvoAarch64AsmPushRcx = go renvoAarch64AsmPushRcx
-		renvoAarch64AsmPushRdx = go renvoAarch64AsmPushRdx
-		renvoAarch64AsmPopRax = go renvoAarch64AsmPopRax
-		renvoAarch64AsmPopRcx = go renvoAarch64AsmPopRcx
-		renvoAarch64AsmPopRdx = go renvoAarch64AsmPopRdx
-		renvoAarch64AsmPushImm = go renvoAarch64AsmPushImm
-		renvoAarch64AsmStoreSliceStack = go renvoAarch64AsmStoreSliceStack
-		renvoAarch64AsmStoreAlMemRdxRcx1 = go renvoAarch64AsmStoreAlMemRdxRcx1
+		renvoAarch64AsmCmpRcxRaxSet = sequence renvoAarch64AsmCmpRcxRaxSet
+		renvoAarch64AsmPushRax = sequence renvoAarch64AsmPushRax
+		renvoAarch64AsmPushRcx = sequence renvoAarch64AsmPushRcx
+		renvoAarch64AsmPushRdx = sequence renvoAarch64AsmPushRdx
+		renvoAarch64AsmPopRax = sequence renvoAarch64AsmPopRax
+		renvoAarch64AsmPopRcx = sequence renvoAarch64AsmPopRcx
+		renvoAarch64AsmPopRdx = sequence renvoAarch64AsmPopRdx
+		renvoAarch64AsmPushImm = sequence renvoAarch64AsmPushImm
+		renvoAarch64AsmStoreSliceStack = sequence renvoAarch64AsmStoreSliceStack
+		renvoAarch64AsmStoreAlMemRdxRcx1 = sequence renvoAarch64AsmStoreAlMemRdxRcx1
 		renvoAarch64AsmStoreRaxMemRdxRcxSize = go renvoAarch64AsmStoreRaxMemRdxRcxSize
-		renvoAarch64AsmIncRcx = go renvoAarch64AsmIncRcx
-		renvoAarch64AsmIncRax = go renvoAarch64AsmIncRax
-		renvoAarch64AsmImulRcxImm = go renvoAarch64AsmImulRcxImm
-		renvoAarch64AsmLeave = go renvoAarch64AsmLeave
-		renvoAarch64AsmRet = go renvoAarch64AsmRet
-		renvoAarch64AsmCallLabel = go renvoAarch64AsmCallLabel
-		renvoAarch64AsmJmpLabel = go renvoAarch64AsmJmpLabel
-		renvoAarch64AsmBCondLabel = go renvoAarch64AsmBCondLabel
-		renvoAarch64AsmJzLabel = go renvoAarch64AsmJzLabel
-		renvoAarch64AsmJnzLabel = go renvoAarch64AsmJnzLabel
+		renvoAarch64AsmIncRcx = sequence renvoAarch64AsmIncRcx
+		renvoAarch64AsmIncRax = sequence renvoAarch64AsmIncRax
+		renvoAarch64AsmImulRcxImm = sequence renvoAarch64AsmImulRcxImm
+		renvoAarch64AsmLeave = sequence renvoAarch64AsmLeave
+		renvoAarch64AsmRet = sequence renvoAarch64AsmRet
+		renvoAarch64AsmCallLabel = sequence renvoAarch64AsmCallLabel
+		renvoAarch64AsmJmpLabel = sequence renvoAarch64AsmJmpLabel
+		renvoAarch64AsmBCondLabel = sequence renvoAarch64AsmBCondLabel
+		renvoAarch64AsmJzLabel = sequence renvoAarch64AsmJzLabel
+		renvoAarch64AsmJnzLabel = sequence renvoAarch64AsmJnzLabel
 	}
 
 	relocation branch26 {
@@ -6638,11 +5931,723 @@ arch aarch64 {
 		bits = 21
 		relative_to = instruction
 	}
+
+	sequences {
+		renvoAarch64AsmAddRaxRcx(a:emitter) {
+			call renvoAarch64AsmAddRegReg(a,aarch64Primary.Code,aarch64Primary.Code,aarch64Tertiary.Code)
+
+		}
+		renvoAarch64AsmAddRdxImm(a:emitter, imm:int) {
+			call renvoAarch64AsmAddRegImm(a,aarch64Secondary.Code,aarch64Secondary.Code,imm)
+
+		}
+		renvoAarch64AsmAddRdxRcx(a:emitter) {
+			call renvoAarch64AsmAddRegReg(a,aarch64Secondary.Code,aarch64Secondary.Code,aarch64Tertiary.Code)
+
+		}
+		renvoAarch64AsmAddRegReg(a:emitter, dst:int, left:int, right:int) {
+			call renvoAarch64AsmEmit(a,0x8b000000|(right<<16)|(left<<5)|dst)
+
+		}
+		renvoAarch64AsmAddRegRegShift(a:emitter, dst:int, left:int, right:int, shift:int) {
+			call renvoAarch64AsmEmit(a,0x8b000000|(right<<16)|(shift<<10)|(left<<5)|dst)
+
+		}
+		renvoAarch64AsmBoolNotRax(a:emitter) {
+			call renvoAarch64AsmCmpRaxImm8(a,0)
+
+			call renvoAarch64AsmCsetRax(a,0)
+
+		}
+		renvoAarch64AsmCmpRaxImm8(a:emitter, imm:int) {
+			call renvoAarch64AsmCmpRegImm(a,aarch64Primary.Code,imm)
+
+		}
+		renvoAarch64AsmCmpRegReg(a:emitter, left:int, right:int) {
+			call renvoAarch64AsmEmit(a,0xeb00001f|(right<<16)|(left<<5))
+
+		}
+		renvoAarch64AsmCsetRax(a:emitter, cond:int) {
+			call renvoAarch64AsmEmit(a,0x9a9f07e0|((cond^1)<<12))
+
+		}
+		renvoAarch64AsmDecMemRdx(a:emitter) {
+			call renvoAarch64AsmLoadRegMem(a,aarch64Scratch.Code,aarch64Secondary.Code,0,8)
+
+			call renvoAarch64AsmAddRegImm(a,aarch64Scratch.Code,aarch64Scratch.Code,-1)
+
+			call renvoAarch64AsmStoreRegMem(a,aarch64Scratch.Code,aarch64Secondary.Code,0,8)
+
+		}
+		renvoAarch64AsmEmit(a:emitter, insn:int) {
+			call RTGUint32(a,insn)
+
+		}
+		renvoAarch64AsmImulRcxImm(a:emitter, imm:int) {
+			call renvoAarch64AsmMovRegImm(a,aarch64Scratch.Code,imm)
+
+			call renvoAarch64AsmEmit(a,0x9b007c00|(aarch64Scratch.Code<<16)|(aarch64Tertiary.Code<<5)|aarch64Tertiary.Code)
+
+		}
+		renvoAarch64AsmIncMemRdx(a:emitter) {
+			call renvoAarch64AsmLoadRegMem(a,aarch64Scratch.Code,aarch64Secondary.Code,0,8)
+
+			call renvoAarch64AsmAddRegImm(a,aarch64Scratch.Code,aarch64Scratch.Code,1)
+
+			call renvoAarch64AsmStoreRegMem(a,aarch64Scratch.Code,aarch64Secondary.Code,0,8)
+
+		}
+		renvoAarch64AsmIncRax(a:emitter) {
+			call renvoAarch64AsmAddRegImm(a,aarch64Primary.Code,aarch64Primary.Code,1)
+
+		}
+		renvoAarch64AsmIncRcx(a:emitter) {
+			call renvoAarch64AsmAddRegImm(a,aarch64Tertiary.Code,aarch64Tertiary.Code,1)
+
+		}
+		renvoAarch64AsmJnzLabel(a:emitter, label:int) {
+			call renvoAarch64AsmBCondLabel(a,label,1)
+
+		}
+		renvoAarch64AsmJzLabel(a:emitter, label:int) {
+			call renvoAarch64AsmBCondLabel(a,label,0)
+
+		}
+		renvoAarch64AsmLeaRegStack(a:emitter, dst:int, offset:int) {
+			call renvoAarch64AsmAddRegImm(a,dst,aarch64Frame.Code,-offset)
+
+		}
+		renvoAarch64AsmLeave(a:emitter) {
+			call renvoAarch64AsmEmit(a,0x910003bf)
+
+			call renvoAarch64AsmEmit(a,0xa8c17bfd)
+
+		}
+		renvoAarch64AsmLoadByteRaxIndexRcx(a:emitter) {
+			call renvoAarch64AsmAddRegRegShift(a,aarch64Address.Code,aarch64Primary.Code,aarch64Tertiary.Code,0)
+
+			call renvoAarch64AsmLoadRegMem(a,aarch64Primary.Code,aarch64Address.Code,0,1)
+
+		}
+		renvoAarch64AsmLoadQwordRaxIndexRcx8(a:emitter) {
+			call renvoAarch64AsmAddRegRegShift(a,aarch64Address.Code,aarch64Primary.Code,aarch64Tertiary.Code,3)
+
+			call renvoAarch64AsmLoadRegMem(a,aarch64Primary.Code,aarch64Address.Code,0,8)
+
+		}
+		renvoAarch64AsmLoadQwordRaxIndexRcxDisp(a:emitter, disp:int) {
+			call renvoAarch64AsmAddRegReg(a,aarch64Address.Code,aarch64Primary.Code,aarch64Tertiary.Code)
+
+			call renvoAarch64AsmLoadRegMem(a,aarch64Primary.Code,aarch64Address.Code,disp,8)
+
+		}
+		renvoAarch64AsmLoadRaxBss(a:emitter, bssOff:int) {
+			call renvoAarch64AsmMovRegAbs(a,aarch64Address.Code,bssOff,RTGRelocationAbsoluteBSS)
+
+			call renvoAarch64AsmLoadRegMem(a,aarch64Primary.Code,aarch64Address.Code,0,8)
+
+		}
+		renvoAarch64AsmLoadRaxMemRdxDisp(a:emitter, disp:int) {
+			call renvoAarch64AsmLoadRegMem(a,aarch64Primary.Code,aarch64Secondary.Code,disp,8)
+
+		}
+		renvoAarch64AsmLoadRaxMemRdxDispSize(a:emitter, disp:int, size:int) {
+			call renvoAarch64AsmLoadRegMem(a,aarch64Primary.Code,aarch64Secondary.Code,disp,size)
+
+		}
+		renvoAarch64AsmLoadRegStack(a:emitter, dst:int, offset:int) {
+			call renvoAarch64AsmLoadRegMem(a,dst,aarch64Frame.Code,-offset,8)
+
+		}
+		renvoAarch64AsmMovR10BssAddr(a:emitter, bssOff:int) {
+			call renvoAarch64AsmMovRegAbs(a,aarch64X7.Code,bssOff,RTGRelocationAbsoluteBSS)
+
+		}
+		renvoAarch64AsmMovR8Rax(a:emitter) {
+			call renvoAarch64AsmMovRegReg(a,aarch64X5.Code,aarch64Primary.Code)
+
+		}
+		renvoAarch64AsmMovR9Rax(a:emitter) {
+			call renvoAarch64AsmMovRegReg(a,aarch64X6.Code,aarch64Primary.Code)
+
+		}
+		renvoAarch64AsmMovRaxBssAddr(a:emitter, bssOff:int) {
+			call renvoAarch64AsmMovRegAbs(a,aarch64Primary.Code,bssOff,RTGRelocationAbsoluteBSS)
+
+		}
+		renvoAarch64AsmMovRaxDataAddr(a:emitter, dataOff:int) {
+			call renvoAarch64AsmMovRegAbs(a,aarch64Primary.Code,dataOff,0)
+
+		}
+		renvoAarch64AsmMovRaxImm(a:emitter, imm:int) {
+			call renvoAarch64AsmMovRegImm(a,aarch64Primary.Code,imm)
+
+		}
+		renvoAarch64AsmMovRaxImm64(a:emitter, imm:int) {
+			call renvoAarch64AsmMovRaxImm(a,imm)
+
+		}
+		renvoAarch64AsmMovRaxRdx(a:emitter) {
+			call renvoAarch64AsmMovRegReg(a,aarch64Primary.Code,aarch64Secondary.Code)
+
+		}
+		renvoAarch64AsmMovRcxRax(a:emitter) {
+			call renvoAarch64AsmMovRegReg(a,aarch64Tertiary.Code,aarch64Primary.Code)
+
+		}
+		renvoAarch64AsmMovRcxRdx(a:emitter) {
+			call renvoAarch64AsmMovRegReg(a,aarch64Tertiary.Code,aarch64Secondary.Code)
+
+		}
+		renvoAarch64AsmMovRdiRax(a:emitter) {
+			call renvoAarch64AsmMovRegReg(a,aarch64X3.Code,aarch64Primary.Code)
+
+		}
+		renvoAarch64AsmMovRdxImm(a:emitter, imm:int) {
+			call renvoAarch64AsmMovRegImm(a,aarch64Secondary.Code,imm)
+
+		}
+		renvoAarch64AsmMovRdxRax(a:emitter) {
+			call renvoAarch64AsmMovRegReg(a,aarch64Secondary.Code,aarch64Primary.Code)
+
+		}
+		renvoAarch64AsmMovRsiRax(a:emitter) {
+			call renvoAarch64AsmMovRegReg(a,aarch64X4.Code,aarch64Primary.Code)
+
+		}
+		renvoAarch64AsmMulRegReg(a:emitter, dst:int, left:int, right:int) {
+			call renvoAarch64AsmEmit(a,0x9b007c00|(right<<16)|(left<<5)|dst)
+
+		}
+		renvoAarch64AsmNegRax(a:emitter) {
+			call renvoAarch64AsmSubRegReg(a,aarch64Primary.Code,aarch64Zero.Code,aarch64Primary.Code)
+
+		}
+		renvoAarch64AsmPopRax(a:emitter) {
+			call renvoAarch64AsmPopReg(a,aarch64Primary.Code)
+
+		}
+		renvoAarch64AsmPopRcx(a:emitter) {
+			call renvoAarch64AsmPopReg(a,aarch64Tertiary.Code)
+
+		}
+		renvoAarch64AsmPopRdi(a:emitter) {
+			call renvoAarch64AsmPopReg(a,aarch64X3.Code)
+
+		}
+		renvoAarch64AsmPopRdx(a:emitter) {
+			call renvoAarch64AsmPopReg(a,aarch64Secondary.Code)
+
+		}
+		renvoAarch64AsmPopReg(a:emitter, reg:int) {
+			call renvoAarch64AsmEmit(a,0xf84107e0|reg)
+
+		}
+		renvoAarch64AsmPopRsi(a:emitter) {
+			call renvoAarch64AsmPopReg(a,aarch64X4.Code)
+
+		}
+		renvoAarch64AsmPushImm(a:emitter, imm:int) {
+			call renvoAarch64AsmMovRegImm(a,aarch64Scratch.Code,imm)
+
+			call renvoAarch64AsmPushReg(a,aarch64Scratch.Code)
+
+		}
+		renvoAarch64AsmPushRax(a:emitter) {
+			call renvoAarch64AsmPushReg(a,aarch64Primary.Code)
+
+		}
+		renvoAarch64AsmPushRcx(a:emitter) {
+			call renvoAarch64AsmPushReg(a,aarch64Tertiary.Code)
+
+		}
+		renvoAarch64AsmPushRdx(a:emitter) {
+			call renvoAarch64AsmPushReg(a,aarch64Secondary.Code)
+
+		}
+		renvoAarch64AsmPushReg(a:emitter, reg:int) {
+			call renvoAarch64AsmEmit(a,0xf81f0fe0|reg)
+
+		}
+		renvoAarch64AsmRet(a:emitter) {
+			call renvoAarch64AsmEmit(a,0xd65f03c0)
+
+		}
+		renvoAarch64AsmSarRaxImm(a:emitter, imm:int) {
+			call renvoAarch64AsmEmit(a,0x9340fc00|(imm<<16))
+
+		}
+		renvoAarch64AsmShlRaxImm(a:emitter, imm:int) {
+			call renvoAarch64AsmEmit(a,0xd3400000|((64-imm)<<16)|((63-imm)<<10))
+
+		}
+		renvoAarch64AsmShlRcxImm(a:emitter, imm:int) {
+			call renvoAarch64AsmEmit(a,0xd3400000|((64-imm)<<16)|((63-imm)<<10)|(aarch64Tertiary.Code<<5)|aarch64Tertiary.Code)
+
+		}
+		renvoAarch64AsmStoreAlMemRdxRcx1(a:emitter) {
+			call renvoAarch64AsmAddRegRegShift(a,aarch64Address.Code,aarch64Secondary.Code,aarch64Tertiary.Code,0)
+
+			call renvoAarch64AsmStoreRegMem(a,aarch64Primary.Code,aarch64Address.Code,0,1)
+
+		}
+		renvoAarch64AsmStoreRaxBss(a:emitter, bssOff:int) {
+			call renvoAarch64AsmMovRegAbs(a,aarch64Address.Code,bssOff,RTGRelocationAbsoluteBSS)
+
+			call renvoAarch64AsmStoreRegMem(a,aarch64Primary.Code,aarch64Address.Code,0,8)
+
+		}
+		renvoAarch64AsmStoreRaxMemRdxDisp(a:emitter, disp:int) {
+			call renvoAarch64AsmStoreRegMem(a,aarch64Primary.Code,aarch64Secondary.Code,disp,8)
+
+		}
+		renvoAarch64AsmStoreRaxMemRdxDispSize(a:emitter, disp:int, size:int) {
+			call renvoAarch64AsmStoreRegMem(a,aarch64Primary.Code,aarch64Secondary.Code,disp,size)
+
+		}
+		renvoAarch64AsmStoreRaxMemRdxRcx8(a:emitter) {
+			call renvoAarch64AsmAddRegRegShift(a,aarch64Address.Code,aarch64Secondary.Code,aarch64Tertiary.Code,3)
+
+			call renvoAarch64AsmStoreRegMem(a,aarch64Primary.Code,aarch64Address.Code,0,8)
+
+		}
+		renvoAarch64AsmStoreRegStack(a:emitter, src:int, offset:int) {
+			call renvoAarch64AsmStoreRegMem(a,src,aarch64Frame.Code,-offset,8)
+
+		}
+		renvoAarch64AsmStoreSliceStack(a:emitter, offset:int) {
+			call renvoAarch64AsmStoreRegStack(a,aarch64Primary.Code,offset)
+
+			call renvoAarch64AsmStoreRegStack(a,aarch64Secondary.Code,offset-8)
+
+			call renvoAarch64AsmStoreRegStack(a,aarch64Tertiary.Code,offset-16)
+
+		}
+		renvoAarch64AsmSubRaxRcx(a:emitter) {
+			call renvoAarch64AsmSubRegReg(a,aarch64Primary.Code,aarch64Primary.Code,aarch64Tertiary.Code)
+
+		}
+		renvoAarch64AsmSubRegReg(a:emitter, dst:int, left:int, right:int) {
+			call renvoAarch64AsmEmit(a,0xcb000000|(right<<16)|(left<<5)|dst)
+
+		}
+		renvoAarch64AsmSyscall(a:emitter) {
+			call renvoAarch64AsmMovRegReg(a,aarch64System.Code,aarch64Primary.Code)
+
+			call renvoAarch64AsmMovRegReg(a,aarch64Scratch.Code,aarch64Secondary.Code)
+
+			call renvoAarch64AsmMovRegReg(a,0,aarch64X3.Code)
+
+			call renvoAarch64AsmMovRegReg(a,1,aarch64X4.Code)
+
+			call renvoAarch64AsmMovRegReg(a,2,aarch64Scratch.Code)
+
+			call renvoAarch64AsmMovRegReg(a,3,aarch64X7.Code)
+
+			call renvoAarch64AsmEmit(a,0xd4000001)
+
+		}
+
+		renvoAarch64AsmBCondLabel(a:emitter, label:int, cond:int) {
+			let at = a.Len()
+
+			call renvoAarch64AsmEmit(a,0x54000000|cond)
+
+			call a.RelocAt(at,label)
+
+		}
+		renvoAarch64AsmCallLabel(a:emitter, label:int) {
+			let at = a.Len()
+
+			call renvoAarch64AsmEmit(a,0x94000000)
+
+			call a.RelocAt(at,label)
+
+		}
+		renvoAarch64AsmCmpRcxRaxSet(a:emitter, setcc:int) {
+			call renvoAarch64AsmCmpRegReg(a,aarch64Tertiary.Code,aarch64Primary.Code)
+
+			let cond = renvoAarch64CondFromSetcc(setcc)
+
+			call renvoAarch64AsmCsetRax(a,cond)
+
+		}
+		renvoAarch64AsmJmpLabel(a:emitter, label:int) {
+			let at = a.Len()
+
+			call renvoAarch64AsmEmit(a,0x14000000)
+
+			call a.RelocAt(at,label)
+
+		}
+		renvoAarch64AsmMovRegAbs(a:emitter, reg:int, off:int, kind:int) {
+			let at = a.Len()
+
+			call renvoAarch64AsmMovRegImm(a,reg,0)
+
+			call renvoAarch64AsmEmit(a,0xf2800000|(1<<21)|reg)
+
+			call renvoAarch64AsmEmit(a,0xf2800000|(2<<21)|reg)
+
+			call renvoAarch64AsmEmit(a,0xf2800000|(3<<21)|reg)
+
+			call a.AbsoluteReloc(at,off,kind)
+
+		}
+
+		aarch64CopyBytes(out:emitter) {
+			let destination = aarch64X3
+			let source = aarch64X4
+			let count = aarch64Secondary
+			let value = aarch64Scratch2
+			let forward = out.NewLabel()
+			let forwardLoop = out.NewLabel()
+			let backwardLoop = out.NewLabel()
+			let done = out.NewLabel()
+			call aarch64Compare(out,destination,source)
+			call aarch64JumpCondition(out,record_condition(Code:9),forward)
+			call aarch64EmitAddress(out,aarch64Scratch,record_address(Base:source,Index:count,Scale:1,))
+			call aarch64Compare(out,destination,aarch64Scratch)
+			call aarch64JumpCondition(out,record_condition(Code:2),forward)
+			call aarch64EmitAddress(out,source,record_address(Base:source,Index:count,Scale:1,Displacement:-1,))
+			call aarch64EmitAddress(out,destination,record_address(Base:destination,Index:count,Scale:1,Displacement:-1,))
+			call out.Mark(backwardLoop)
+			call aarch64Compare(out,count,aarch64Zero)
+			call aarch64JumpCondition(out,record_condition(Code:0),done)
+			call aarch64LoadU8(out,value,record_address(Base:source))
+			call aarch64StoreU8(out,record_address(Base:destination),value)
+			call aarch64Decrement(out,source)
+			call aarch64Decrement(out,destination)
+			call aarch64Decrement(out,count)
+			call aarch64Jump(out,backwardLoop)
+			call out.Mark(forward)
+			call out.Mark(forwardLoop)
+			call aarch64Compare(out,count,aarch64Zero)
+			call aarch64JumpCondition(out,record_condition(Code:0),done)
+			call aarch64LoadU8(out,value,record_address(Base:source))
+			call aarch64StoreU8(out,record_address(Base:destination),value)
+			call aarch64Increment(out,source)
+			call aarch64Increment(out,destination)
+			call aarch64Decrement(out,count)
+			call aarch64Jump(out,forwardLoop)
+			call out.Mark(done)
+		}
+		aarch64DarwinExit(out:emitter, status:register) {
+			call renvoAarch64AsmMovRegReg(out,0,status.Code)
+			call aarch64DarwinCallImport(out,"_exit")
+		}
+		aarch64ELF64Image(a:emitter) -> bytes {
+			let codeOffset = 176
+			let dataOffset = codeOffset+len(a.Code())
+			let fileSize = dataOffset+len(a.Data())
+			let bssOffset = RTGAlignValue(fileSize,4096)
+			call aarch64ELFPatchAbsoluteRelocations(a,codeOffset,dataOffset,bssOffset)
+			return nativeELFExecutable64(a,183,0,codeOffset)
+		}
+		aarch64FrameStart(out:emitter) -> int {
+			call renvoAarch64AsmEmit(out,0xa9bf7bfd)
+			call renvoAarch64AsmEmit(out,0x910003fd)
+			let at = out.Len()
+			call renvoAarch64AsmEmit(out,0xd503201f)
+			call renvoAarch64AsmEmit(out,0xd503201f)
+			return at
+		}
+		aarch64HostSyscall(out:emitter) {
+			call renvoAarch64AsmSyscall(out)
+		}
+		aarch64MachImage(out:emitter) -> bytes {
+			let imports = aarch64MachPrepareImports(out)
+			let dataFileOff = RTGAlignValue(aarch64MachCodeOffset+out.Len(),aarch64MachPageSize)
+			let bind = aarch64MachBuildBindData(out,imports.got)
+			let symtab = aarch64MachBuildSymbolTable(out)
+			let strtab = aarch64MachBuildStringTable(out)
+			let undefinedCount = out.DynamicImportCount()
+			let textFileSize = dataFileOff
+			let dataFileSize = len(out.Data())
+			let dataVMSize = RTGAlignValue(dataFileSize+out.BSSSize(),aarch64MachPageSize)
+			let linkeditOff = dataFileOff+dataFileSize
+			let bindOff = linkeditOff
+			let symOff = RTGAlignValue(bindOff+len(bind),8)
+			let strOff = symOff+len(symtab)
+			let sigOff = RTGAlignValue(strOff+len(strtab),16)
+			let sigSize = aarch64MachCodeSignatureSize(sigOff,"renvo")
+			let linkeditSize = sigOff+sigSize-linkeditOff
+			let image = aarch64MachHeader(out,textFileSize,dataFileOff,dataFileSize,dataVMSize,linkeditOff,linkeditSize,bindOff,len(bind),symOff,1+undefinedCount,strOff,len(strtab),undefinedCount,sigOff,sigSize,)
+			set image = append(image,out.Code()...)
+			set image = aarch64MachAppendUntil(image,dataFileOff)
+			set image = append(image,out.Data()...)
+			set image = aarch64MachAppendUntil(image,bindOff)
+			set image = append(image,bind...)
+			set image = aarch64MachAppendUntil(image,symOff)
+			set image = append(image,symtab...)
+			set image = append(image,strtab...)
+			set image = aarch64MachAppendUntil(image,sigOff)
+			let signature = aarch64MachCodeSignature(image,"renvo",textFileSize)
+			return append(image,signature...)
+		}
+		aarch64Move(out:emitter, destination:register, source:register) {
+			call renvoAarch64AsmMovRegReg(out,destination.Code,source.Code)
+		}
+		aarch64MoveImmediate(out:emitter, destination:register, value:int64) {
+			call renvoAarch64AsmMovRegImm(out,destination.Code,int(value))
+		}
+		aarch64SetCondition(out:emitter, condition:condition, destination:register) {
+			call renvoAarch64AsmEmit(out,0x9a9f07e0|((condition.Code^1)<<12)|destination.Code)
+		}
+		aarch64ShiftLeftImmediate(out:emitter, operand:register, value:byte) {
+			let shift = int(value)&63
+			call renvoAarch64AsmEmit(out,0xd3400000|((64-shift)<<16)|((63-shift)<<10)|(operand.Code<<5)|operand.Code)
+		}
+		aarch64ShiftRightSignedImmediate(out:emitter, operand:register, value:byte) {
+			call renvoAarch64AsmEmit(out,0x9340fc00|((int(value)&63)<<16)|(operand.Code<<5)|operand.Code)
+		}
+		aarch64ShiftRightUnsignedImmediate(out:emitter, operand:register, value:byte) {
+			call renvoAarch64AsmEmit(out,0xd340fc00|((int(value)&63)<<16)|(operand.Code<<5)|operand.Code)
+		}
+		aarch64WindowsExit(out:emitter, status:register) {
+			call renvoAarch64AsmMovRegReg(out,0,status.Code)
+			call aarch64WindowsCallImport(out,8)
+		}
+
+		aarch64DarwinCallImport(out:emitter, name:string) {
+			let index = out.DynamicImport(aarch64MachLibSystem,name)
+			call renvoAarch64AsmCallLabel(out,out.DynamicImportLabel(index))
+		}
+		aarch64EmitADR(out:emitter, destination:register, address:address) {
+			let addend = address.Addend
+			let insn = 0x10000000|destination.Code
+			set insn = insn|((addend&3)<<29)
+			set insn = insn|(((addend>>2)&0x7ffff)<<5)
+			let at = out.Len()
+			call renvoAarch64AsmEmit(out,insn)
+			call RTGAddressRelocAt(out,address,at)
+		}
+		aarch64LoadI16(out:emitter, destination:register, address:address) {
+			call aarch64LoadWidth(out,destination,address,2,true)
+		}
+		aarch64LoadI32(out:emitter, destination:register, address:address) {
+			call aarch64LoadWidth(out,destination,address,4,true)
+		}
+		aarch64LoadI8(out:emitter, destination:register, address:address) {
+			call aarch64LoadWidth(out,destination,address,1,true)
+		}
+		aarch64LoadNative(out:emitter, destination:register, address:address) {
+			call aarch64LoadWidth(out,destination,address,8,false)
+		}
+		aarch64LoadU16(out:emitter, destination:register, address:address) {
+			call aarch64LoadWidth(out,destination,address,2,false)
+		}
+		aarch64LoadU32(out:emitter, destination:register, address:address) {
+			call aarch64LoadWidth(out,destination,address,4,false)
+		}
+		aarch64LoadU8(out:emitter, destination:register, address:address) {
+			call aarch64LoadWidth(out,destination,address,1,false)
+		}
+		aarch64MachAppend16(out:bytes, value:int) -> bytes {
+			return append(out,byte(value),byte(value>>8))
+		}
+		aarch64MachAppend32(out:bytes, value:int) -> bytes {
+			return append(out,byte(value),byte(value>>8),byte(value>>16),byte(value>>24))
+		}
+		aarch64MachAppend64(out:bytes, value:int) -> bytes {
+			set out = aarch64MachAppend32(out,value)
+			return aarch64MachAppend32(out,value>>32)
+		}
+		aarch64MachAppendBE32(out:bytes, value:int) -> bytes {
+			set out = append(out,byte(value>>24))
+			set out = append(out,byte(value>>16))
+			set out = append(out,byte(value>>8))
+			return append(out,byte(value))
+		}
+		aarch64MachAppendBE64(out:bytes, value:int) -> bytes {
+			set out = aarch64MachAppendBE32(out,value>>32)
+			return aarch64MachAppendBE32(out,value)
+		}
+		aarch64MachAppendDataSegment(out:bytes, dataFileOff:int, dataFileSize:int, bssSize:int) -> bytes {
+			let vmSize = RTGAlignValue(dataFileSize+bssSize,aarch64MachPageSize)
+			set out = aarch64MachAppend32(out,0x19)
+			set out = aarch64MachAppend32(out,232)
+			set out = aarch64MachAppendName16(out,"__DATA")
+			set out = aarch64MachAppend64(out,aarch64MachImageBase+dataFileOff)
+			set out = aarch64MachAppend64(out,vmSize)
+			set out = aarch64MachAppend64(out,dataFileOff)
+			set out = aarch64MachAppend64(out,dataFileSize)
+			set out = aarch64MachAppend32(out,3)
+			set out = aarch64MachAppend32(out,3)
+			set out = aarch64MachAppend32(out,2)
+			set out = aarch64MachAppend32(out,0)
+			set out = aarch64MachAppendSection64(out,"__data","__DATA",aarch64MachImageBase+dataFileOff,dataFileSize,dataFileOff,3,0,)
+			return aarch64MachAppendSection64(out,"__bss","__DATA",aarch64MachImageBase+dataFileOff+dataFileSize,bssSize,0,3,1,)
+		}
+		aarch64MachAppendDylibCommand(out:bytes, path:string) -> bytes {
+			let start = len(out)
+			let size = aarch64MachDylibCommandSize(path)
+			set out = aarch64MachAppend32(out,0x0c)
+			set out = aarch64MachAppend32(out,size)
+			set out = aarch64MachAppend32(out,24)
+			set out = aarch64MachAppend32(out,2)
+			set out = aarch64MachAppend32(out,0x00010000)
+			set out = aarch64MachAppend32(out,0x00010000)
+			set out = aarch64MachAppendStringZ(out,path)
+			return aarch64MachAppendUntil(out,start+size)
+		}
+		aarch64MachAppendSection64(out:bytes, section:string, segment:string, addr:int, size:int, offset:int, align:int, flags:int) -> bytes {
+			set out = aarch64MachAppendName16(out,section)
+			set out = aarch64MachAppendName16(out,segment)
+			set out = aarch64MachAppend64(out,addr)
+			set out = aarch64MachAppend64(out,size)
+			set out = aarch64MachAppend32(out,offset)
+			set out = aarch64MachAppend32(out,align)
+			set out = aarch64MachAppend32(out,0)
+			set out = aarch64MachAppend32(out,0)
+			set out = aarch64MachAppend32(out,flags)
+			set out = aarch64MachAppend32(out,0)
+			set out = aarch64MachAppend32(out,0)
+			return aarch64MachAppend32(out,0)
+		}
+		aarch64MachAppendSegment64(out:bytes, name:string, vmaddr:int, vmsize:int, fileoff:int, filesize:int, maxprot:int, initprot:int) -> bytes {
+			set out = aarch64MachAppend32(out,0x19)
+			set out = aarch64MachAppend32(out,72)
+			set out = aarch64MachAppendName16(out,name)
+			set out = aarch64MachAppend64(out,vmaddr)
+			set out = aarch64MachAppend64(out,vmsize)
+			set out = aarch64MachAppend64(out,fileoff)
+			set out = aarch64MachAppend64(out,filesize)
+			set out = aarch64MachAppend32(out,maxprot)
+			set out = aarch64MachAppend32(out,initprot)
+			set out = aarch64MachAppend32(out,0)
+			return aarch64MachAppend32(out,0)
+		}
+		aarch64MachAppendTextSegment(out:bytes, codeSize:int, fileSize:int) -> bytes {
+			set out = aarch64MachAppend32(out,0x19)
+			set out = aarch64MachAppend32(out,152)
+			set out = aarch64MachAppendName16(out,"__TEXT")
+			set out = aarch64MachAppend64(out,aarch64MachImageBase)
+			set out = aarch64MachAppend64(out,fileSize)
+			set out = aarch64MachAppend64(out,0)
+			set out = aarch64MachAppend64(out,fileSize)
+			set out = aarch64MachAppend32(out,5)
+			set out = aarch64MachAppend32(out,5)
+			set out = aarch64MachAppend32(out,1)
+			set out = aarch64MachAppend32(out,0)
+			return aarch64MachAppendSection64(out,"__text","__TEXT",aarch64MachImageBase+aarch64MachCodeOffset,codeSize,aarch64MachCodeOffset,2,0x80000400,)
+		}
+		aarch64MachCodeSignatureSize(codeLimit:int, identifier:string) -> int {
+			let slots = (codeLimit+16383)/16384
+			let codeDirectorySize = 88+len(identifier)+1+slots*32
+			return 20+codeDirectorySize
+		}
+		aarch64MachDylibCommandSize(path:string) -> int {
+			return RTGAlignValue(24+len(path)+1,8)
+		}
+		aarch64MachPatchADRP(out:emitter, at:int, pc:int, target:int) {
+			let delta = (target>>12)-(pc>>12)
+			let imm = delta&0x1fffff
+			let insn = 0x90000010
+			set insn = insn|((imm&3)<<29)
+			set insn = insn|(((imm>>2)&0x7ffff)<<5)
+			call out.PatchUint32(at,insn)
+		}
+		aarch64MachSHA256Constants() -> ints {
+			return record_ints(0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2,)
+		}
+		aarch64StoreNative(out:emitter, address:address, source:register) {
+			call aarch64StoreWidth(out,address,source,8)
+		}
+		aarch64StoreU16(out:emitter, address:address, source:register) {
+			call aarch64StoreWidth(out,address,source,2)
+		}
+		aarch64StoreU32(out:emitter, address:address, source:register) {
+			call aarch64StoreWidth(out,address,source,4)
+		}
+		aarch64StoreU8(out:emitter, address:address, source:register) {
+			call aarch64StoreWidth(out,address,source,1)
+		}
+		aarch64WindowsCallImport(out:emitter, importID:int) {
+			call renvoAarch64AsmMovRegAbs(out,16,importID,RTGRelocationImport)
+			call renvoAarch64AsmLoadRegMem(out,16,16,0,8)
+			call renvoAarch64AsmEmit(out,0xd63f0200)
+		}
+		aarch64WindowsRuntimeChmod(out:emitter) {
+			let failed = out.NewLabel()
+			let done = out.NewLabel()
+			call renvoAarch64AsmMovRegReg(out,0,3)
+			call renvoAarch64AsmMovRegImm(out,1,0)
+			call renvoAarch64AsmMovRegImm(out,2,0)
+			call renvoAarch64AsmMovRegImm(out,3,1)
+			call aarch64WindowsCallImport(out,5)
+			call renvoAarch64AsmMovRegImm(out,9,-1)
+			call renvoAarch64AsmCmpRegReg(out,0,9)
+			call aarch64JumpCondition(out,record_condition(Code:0),failed)
+			call renvoAarch64AsmMovRegImm(out,0,0)
+			call aarch64Jump(out,done)
+			call out.Mark(failed)
+			call renvoAarch64AsmMovRegImm(out,0,-1)
+			call out.Mark(done)
+		}
+		aarch64WindowsRuntimeClose(out:emitter) {
+			let failed = out.NewLabel()
+			let done = out.NewLabel()
+			call renvoAarch64AsmMovRegReg(out,0,3)
+			call aarch64WindowsCallImport(out,2)
+			call renvoAarch64AsmCmpRegImm(out,0,0)
+			call aarch64JumpCondition(out,record_condition(Code:0),failed)
+			call renvoAarch64AsmMovRegImm(out,0,0)
+			call aarch64Jump(out,done)
+			call out.Mark(failed)
+			call renvoAarch64AsmMovRegImm(out,0,-1)
+			call out.Mark(done)
+		}
+		aarch64WindowsRuntimeOpen(out:emitter) {
+			call renvoAarch64AsmMovRegReg(out,9,3)
+			call renvoAarch64AsmMovRegReg(out,0,4)
+			call aarch64WindowsTranslateCreateFileFlags(out)
+			call renvoAarch64AsmMovRegReg(out,0,9)
+			call aarch64WindowsCallImport(out,1)
+		}
+		aarch64WindowsTestRegImmediate(out:emitter, register:int, immediate:int) {
+			call renvoAarch64AsmMovRegImm(out,15,immediate)
+			call renvoAarch64AsmEmit(out,0xea00001f|(15<<16)|(register<<5))
+		}
+		aarch64WindowsTranslateCreateFileFlags(out:emitter) {
+			let notReadWrite = out.NewLabel()
+			let accessDone = out.NewLabel()
+			let noCreate = out.NewLabel()
+			let createDone = out.NewLabel()
+			call renvoAarch64AsmMovRegImm(out,1,-2147483648)
+			call aarch64WindowsTestRegImmediate(out,0,2)
+			call aarch64JumpCondition(out,record_condition(Code:0),notReadWrite)
+			call renvoAarch64AsmMovRegImm(out,1,-1073741824)
+			call aarch64Jump(out,accessDone)
+			call out.Mark(notReadWrite)
+			call aarch64WindowsTestRegImmediate(out,0,1)
+			call aarch64JumpCondition(out,record_condition(Code:0),accessDone)
+			call renvoAarch64AsmMovRegImm(out,1,0x40000000)
+			call out.Mark(accessDone)
+			call renvoAarch64AsmMovRegImm(out,4,3)
+			call aarch64WindowsTestRegImmediate(out,0,64)
+			call aarch64JumpCondition(out,record_condition(Code:0),noCreate)
+			call renvoAarch64AsmMovRegImm(out,4,4)
+			call aarch64WindowsTestRegImmediate(out,0,512)
+			call aarch64JumpCondition(out,record_condition(Code:0),createDone)
+			call renvoAarch64AsmMovRegImm(out,4,2)
+			call aarch64Jump(out,createDone)
+			call out.Mark(noCreate)
+			call aarch64WindowsTestRegImmediate(out,0,512)
+			call aarch64JumpCondition(out,record_condition(Code:0),createDone)
+			call renvoAarch64AsmMovRegImm(out,4,5)
+			call out.Mark(createDone)
+			call renvoAarch64AsmMovRegImm(out,2,3)
+			call renvoAarch64AsmMovRegImm(out,3,0)
+			call renvoAarch64AsmMovRegImm(out,5,0x80)
+			call renvoAarch64AsmMovRegImm(out,6,0)
+		}
+}
 }
 
 abi aapcs64 {
 	arch = aarch64
-	frame_start = go aarch64FrameStart
+	frame_start = sequence aarch64FrameStart
 	frame_finish = go aarch64FrameFinish
 	arguments = [x0, x1, x2, x3, x4, x5, x6, x7]
 	result = [x0, x1]
@@ -6651,7 +6656,7 @@ abi aapcs64 {
 
 abi windows_arm64 {
 	arch = aarch64
-	frame_start = go aarch64FrameStart
+	frame_start = sequence aarch64FrameStart
 	frame_finish = go aarch64FrameFinish
 	arguments = [x0, x1, x2, x3, x4, x5, x6, x7]
 	result = [x0, x1]
@@ -6682,14 +6687,14 @@ runtime darwin_arm64 {
 		entry_state_bytes = 24
 		emit_entry_start = go aarch64DarwinEntryStart
 		emit_entry = go aarch64DarwinEntry
-		emit_exit = go aarch64DarwinExit
+		emit_exit = sequence aarch64DarwinExit
 	emit_operation = go aarch64DarwinRuntimeOperation
 	operations = [print, open, close, read, write, read_at, write_at, chmod]
 }
 
 runtime windows_arm64 {
 	emit_entry = go aarch64WindowsEntry
-	emit_exit = go aarch64WindowsExit
+	emit_exit = sequence aarch64WindowsExit
 	emit_static_call = go aarch64WindowsStaticCall
 	emit_operation = go aarch64WindowsRuntimeOperation
 	operations = [print, open, close, read, write, read_at, write_at, chmod]
@@ -6701,7 +6706,7 @@ format elf64_aarch64 {
 	kind = elf
 	machine = 183
 	code_offset = 176
-	image = go aarch64ELF64Image
+	image = sequence aarch64ELF64Image
 }
 
 format macho64_arm64 {
@@ -6710,7 +6715,7 @@ format macho64_arm64 {
 	kind = "mach-o"
 	cpu = 0x0100000c
 	code_offset = 0x1000
-	image = go aarch64MachImage
+	image = sequence aarch64MachImage
 }
 
 format pe64_arm64 {
@@ -6795,18 +6800,9 @@ go backend {
 		}
 	}
 
-	func armELF32Image(a *RTGEmitter) []byte {
-		codeOffset := 116
-		dataOffset := codeOffset + len(a.Code())
-		fileSize := dataOffset + len(a.Data())
-		bssOffset := RTGAlignValue(fileSize, 4096)
-		armELFPatchAbsoluteRelocations(a, codeOffset, dataOffset, bssOffset)
-		return nativeELFExecutable32(a, 40, 0x05000000, codeOffset)
-	}
 
-	func renvoArmAsmEmit(a *RTGEmitter, insn int) {
-		RTGUint32(a, insn)
-	}
+
+
 
 	func renvoArmAsmAlign(a *RTGEmitter) {
 		for a.Len()%4 != 0 {
@@ -6830,20 +6826,9 @@ go backend {
 		}
 	}
 
-	func renvoArmAsmPatchMovRegImmAt(a *RTGEmitter, at int, reg int, imm int) {
-		part := imm & 65535
-		a.PatchUint32( at, 0xe3000000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
-		part = (imm >> 16) & 65535
-		a.PatchUint32( at+4, 0xe3400000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
-	}
 
-	func renvoArmAsmMovRegAbs(a *RTGEmitter, reg int, off int, kind int) {
-		at := a.Len()
-		RTGUint32(a, 0xe3000000|(reg<<12))
-		RTGUint32(a, 0xe3400000|(reg<<12))
-		RTGUint32(a, 0xe08f0000|(reg<<12)|reg)
-		a.AbsoluteReloc( at, off, kind)
-	}
+
+
 
 	func renvoArmAsmAddRegImm(a *RTGEmitter, dst int, src int, imm int) {
 		if imm == 0 {
@@ -6886,21 +6871,13 @@ go backend {
 		renvoArmAsmEmit(a, 0xe2800000|(src<<16)|(dst<<12)|imm)
 	}
 
-	func renvoArmAsmAddRegReg(a *RTGEmitter, dst int, left int, right int) {
-		renvoArmAsmEmit(a, 0xe0800000|(left<<16)|(dst<<12)|right)
-	}
 
-	func renvoArmAsmSubRegReg(a *RTGEmitter, dst int, left int, right int) {
-		renvoArmAsmEmit(a, 0xe0400000|(left<<16)|(dst<<12)|right)
-	}
 
-	func renvoArmAsmAddRegRegShift(a *RTGEmitter, dst int, left int, right int, shift int) {
-		renvoArmAsmEmit(a, 0xe0800000|(left<<16)|(dst<<12)|(shift<<7)|right)
-	}
 
-	func renvoArmAsmMulRegReg(a *RTGEmitter, dst int, left int, right int) {
-		renvoArmAsmEmit(a, 0xe0000090|(dst<<16)|(right<<8)|left)
-	}
+
+
+
+
 
 	func renvoArmAsmAddr(a *RTGEmitter, base int, disp int) int {
 		if disp == 0 {
@@ -6962,121 +6939,57 @@ go backend {
 		renvoArmAsmEmit(a, 0xe5000000|up|(addr<<16)|(src<<12)|disp)
 	}
 
-	func renvoArmAsmLoadRegStack(a *RTGEmitter, dst int, offset int) {
-		renvoArmAsmLoadRegMem(a, dst, armFrame.Code, -offset, 4)
-	}
 
-	func renvoArmAsmStoreRegStack(a *RTGEmitter, src int, offset int) {
-		renvoArmAsmStoreRegMem(a, src, armFrame.Code, -offset, 4)
-	}
 
-	func renvoArmAsmLeaRegStack(a *RTGEmitter, dst int, offset int) {
-		renvoArmAsmAddRegImm(a, dst, armFrame.Code, -offset)
-	}
 
-	func renvoArmAsmPushReg(a *RTGEmitter, reg int) {
-		renvoArmAsmEmit(a, 0xe52d0004|(reg<<12))
-	}
 
-	func renvoArmAsmPopReg(a *RTGEmitter, reg int) {
-		renvoArmAsmEmit(a, 0xe49d0004|(reg<<12))
-	}
 
-	func renvoArmAsmMovRaxImm(a *RTGEmitter, imm int) {
-		renvoArmAsmMovRegImm(a, armPrimary.Code, imm)
-	}
 
-	func renvoArmAsmMovRaxImm64(a *RTGEmitter, imm int) {
-		renvoArmAsmMovRaxImm(a, imm)
-	}
 
-	func renvoArmAsmMovRdxImm(a *RTGEmitter, imm int) {
-		renvoArmAsmMovRegImm(a, armSecondary.Code, imm)
-	}
 
-	func renvoArmAsmMovRaxDataAddr(a *RTGEmitter, dataOff int) {
-		renvoArmAsmMovRegAbs(a, armPrimary.Code, dataOff, 0)
-	}
 
-	func renvoArmAsmMovRaxBssAddr(a *RTGEmitter, bssOff int) {
-		renvoArmAsmMovRegAbs(a, armPrimary.Code, bssOff, RTGRelocationAbsoluteBSS)
-	}
 
-	func renvoArmAsmMovR10BssAddr(a *RTGEmitter, bssOff int) {
-		renvoArmAsmMovRegAbs(a, armR8.Code, bssOff, RTGRelocationAbsoluteBSS)
-	}
 
-	func renvoArmAsmAccessRaxBss(a *RTGEmitter, bssOff int, insn int) {
-		at := a.Len()
-		RTGUint32(a, 0xe3000000|(armAddress.Code<<12))
-		RTGUint32(a, 0xe3400000|(armAddress.Code<<12))
-		RTGUint32(a, insn)
-		a.AbsoluteReloc( at, bssOff, RTGRelocationAbsoluteBSS)
-	}
 
-	func renvoArmAsmLoadRaxBss(a *RTGEmitter, bssOff int) {
-		renvoArmAsmAccessRaxBss(a, bssOff, 0xe79f0000|armAddress.Code)
-	}
 
-	func renvoArmAsmStoreRaxBss(a *RTGEmitter, bssOff int) {
-		renvoArmAsmAccessRaxBss(a, bssOff, 0xe78f0000|armAddress.Code)
-	}
 
-	func renvoArmAsmMovRdiRax(a *RTGEmitter) {
-		renvoArmAsmMovRegReg(a, armR3.Code, armPrimary.Code)
-	}
 
-	func renvoArmAsmMovRaxRdx(a *RTGEmitter) {
-		renvoArmAsmMovRegReg(a, armPrimary.Code, armSecondary.Code)
-	}
 
-	func renvoArmAsmMovRdxRax(a *RTGEmitter) {
-		renvoArmAsmMovRegReg(a, armSecondary.Code, armPrimary.Code)
-	}
 
-	func renvoArmAsmMovRcxRax(a *RTGEmitter) {
-		renvoArmAsmMovRegReg(a, armTertiary.Code, armPrimary.Code)
-	}
 
-	func renvoArmAsmMovRcxRdx(a *RTGEmitter) {
-		renvoArmAsmMovRegReg(a, armTertiary.Code, armSecondary.Code)
-	}
 
-	func renvoArmAsmMovRsiRax(a *RTGEmitter) {
-		renvoArmAsmMovRegReg(a, armR4.Code, armPrimary.Code)
-	}
 
-	func renvoArmAsmMovR8Rax(a *RTGEmitter) {
-		renvoArmAsmMovRegReg(a, armR5.Code, armPrimary.Code)
-	}
 
-	func renvoArmAsmMovR9Rax(a *RTGEmitter) {
-		renvoArmAsmMovRegReg(a, armR6.Code, armPrimary.Code)
-	}
 
-	func renvoArmAsmAddRdxRcx(a *RTGEmitter) {
-		renvoArmAsmAddRegReg(a, armSecondary.Code, armSecondary.Code, armTertiary.Code)
-	}
 
-	func renvoArmAsmSyscall(a *RTGEmitter) {
-		renvoArmAsmMovRegReg(a, armSystem.Code, armPrimary.Code)
-		renvoArmAsmMovRegReg(a, armScratch.Code, armSecondary.Code)
-		renvoArmAsmMovRegReg(a, 0, armR3.Code)
-		renvoArmAsmMovRegReg(a, 1, armR4.Code)
-		renvoArmAsmMovRegReg(a, 2, armScratch.Code)
-		renvoArmAsmMovRegReg(a, 3, armR8.Code)
-		renvoArmAsmMovRegReg(a, 4, armR8.Code)
-		renvoArmAsmMovRegImm(a, 5, 0)
-		renvoArmAsmEmit(a, 0xef000000)
-	}
 
-	func renvoArmAsmPopRdi(a *RTGEmitter) {
-		renvoArmAsmPopReg(a, armR3.Code)
-	}
 
-	func renvoArmAsmPopRsi(a *RTGEmitter) {
-		renvoArmAsmPopReg(a, armR4.Code)
-	}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 	func renvoArmAsmStackMem(a *RTGEmitter, offset int, base int, disp8 int, disp32 int) {
 		if base == 0x8948 && disp8 == 0x45 {
@@ -7121,9 +7034,7 @@ go backend {
 		}
 	}
 
-	func renvoArmAsmAddRdxImm(a *RTGEmitter, imm int) {
-		renvoArmAsmAddRegImm(a, armSecondary.Code, armSecondary.Code, imm)
-	}
+
 
 	func renvoArmAsmMemDisp(a *RTGEmitter, disp int, op int, disp8 int, disp32 int) {
 		if op == 0x8b48 && disp8 == 0x4a {
@@ -7140,28 +7051,15 @@ go backend {
 		}
 	}
 
-	func renvoArmAsmLoadQwordRaxIndexRcx8(a *RTGEmitter) {
-		renvoArmAsmAddRegRegShift(a, armAddress.Code, armPrimary.Code, armTertiary.Code, 3)
-		renvoArmAsmLoadRegMem(a, armPrimary.Code, armAddress.Code, 0, 4)
-	}
 
-	func renvoArmAsmLoadQwordRaxIndexRcxDisp(a *RTGEmitter, disp int) {
-		renvoArmAsmAddRegReg(a, armAddress.Code, armPrimary.Code, armTertiary.Code)
-		renvoArmAsmLoadRegMem(a, armPrimary.Code, armAddress.Code, disp, 4)
-	}
 
-	func renvoArmAsmLoadRaxMemRdxDisp(a *RTGEmitter, disp int) {
-		renvoArmAsmLoadRegMem(a, armPrimary.Code, armSecondary.Code, disp, 4)
-	}
 
-	func renvoArmAsmLoadRaxMemRdxDispSize(a *RTGEmitter, disp int, size int) {
-		renvoArmAsmLoadRegMem(a, armPrimary.Code, armSecondary.Code, disp, size)
-	}
 
-	func renvoArmAsmLoadByteRaxIndexRcx(a *RTGEmitter) {
-		renvoArmAsmAddRegReg(a, armAddress.Code, armPrimary.Code, armTertiary.Code)
-		renvoArmAsmLoadRegMem(a, armPrimary.Code, armAddress.Code, 0, 1)
-	}
+
+
+
+
+
 
 	func renvoArmAsmLoadRaxIndexRcxSize(a *RTGEmitter, size int) {
 		shift := 3
@@ -7178,18 +7076,11 @@ go backend {
 		renvoArmAsmLoadRegMem(a, armPrimary.Code, armAddress.Code, 0, size)
 	}
 
-	func renvoArmAsmStoreRaxMemRdxRcx8(a *RTGEmitter) {
-		renvoArmAsmAddRegRegShift(a, armAddress.Code, armSecondary.Code, armTertiary.Code, 3)
-		renvoArmAsmStoreRegMem(a, armPrimary.Code, armAddress.Code, 0, 4)
-	}
 
-	func renvoArmAsmStoreRaxMemRdxDisp(a *RTGEmitter, disp int) {
-		renvoArmAsmStoreRegMem(a, armPrimary.Code, armSecondary.Code, disp, 4)
-	}
 
-	func renvoArmAsmStoreRaxMemRdxDispSize(a *RTGEmitter, disp int, size int) {
-		renvoArmAsmStoreRegMem(a, armPrimary.Code, armSecondary.Code, disp, size)
-	}
+
+
+
 
 	func renvoArmAsmNormalizeRaxForKind(a *RTGEmitter, kind int) {
 		if kind == RTGScalarByte {
@@ -7209,30 +7100,15 @@ go backend {
 		}
 	}
 
-	func renvoArmAsmIncMemRdx(a *RTGEmitter) {
-		renvoArmAsmLoadRegMem(a, armScratch.Code, armSecondary.Code, 0, 4)
-		renvoArmAsmAddRegImm(a, armScratch.Code, armScratch.Code, 1)
-		renvoArmAsmStoreRegMem(a, armScratch.Code, armSecondary.Code, 0, 4)
-	}
 
-	func renvoArmAsmDecMemRdx(a *RTGEmitter) {
-		renvoArmAsmLoadRegMem(a, armScratch.Code, armSecondary.Code, 0, 4)
-		renvoArmAsmAddRegImm(a, armScratch.Code, armScratch.Code, -1)
-		renvoArmAsmStoreRegMem(a, armScratch.Code, armSecondary.Code, 0, 4)
-	}
 
-	func renvoArmAsmBoolNotRax(a *RTGEmitter) {
-		renvoArmAsmCmpRaxImm8(a, 0)
-		renvoArmAsmCsetRax(a, 0)
-	}
 
-	func renvoArmAsmNegRax(a *RTGEmitter) {
-		renvoArmAsmEmit(a, 0xe2600000)
-	}
 
-	func renvoArmAsmCmpRaxImm8(a *RTGEmitter, imm int) {
-		renvoArmAsmCmpRegImm(a, armPrimary.Code, imm)
-	}
+
+
+
+
+
 
 	func renvoArmAsmCmpRegImm(a *RTGEmitter, reg int, imm int) {
 		if imm >= 0 && imm <= 255 {
@@ -7247,14 +7123,9 @@ go backend {
 		renvoArmAsmCmpRegReg(a, reg, tmp)
 	}
 
-	func renvoArmAsmCmpRegReg(a *RTGEmitter, left int, right int) {
-		renvoArmAsmEmit(a, 0xe1500000|(left<<16)|right)
-	}
 
-	func renvoArmAsmCsetRax(a *RTGEmitter, cond int) {
-		renvoArmAsmEmit(a, 0xe3a00000)
-		renvoArmAsmEmit(a, (cond<<28)|0x03a00001)
-	}
+
+
 
 	func renvoArmCondFromSetcc(setcc int) int {
 		if setcc == 0x94 {
@@ -7275,35 +7146,19 @@ go backend {
 		return 10
 	}
 
-	func renvoArmAsmCmpRcxRaxSet(a *RTGEmitter, setcc int) {
-		renvoArmAsmCmpRegReg(a, armTertiary.Code, armPrimary.Code)
-		cond := renvoArmCondFromSetcc(setcc)
-		renvoArmAsmCsetRax(a, cond)
-	}
 
-	func renvoArmAsmAddRaxRcx(a *RTGEmitter) {
-		renvoArmAsmAddRegReg(a, armPrimary.Code, armPrimary.Code, armTertiary.Code)
-	}
 
-	func renvoArmAsmSubRaxRcx(a *RTGEmitter) {
-		renvoArmAsmSubRegReg(a, armPrimary.Code, armPrimary.Code, armTertiary.Code)
-	}
 
-	func renvoArmAsmShlRcxImm(a *RTGEmitter, imm int) {
-		renvoArmAsmEmit(a, 0xe1a00000|(armTertiary.Code<<12)|(imm<<7)|armTertiary.Code)
-	}
 
-	func renvoArmAsmShlRaxImm(a *RTGEmitter, imm int) {
-		renvoArmAsmEmit(a, 0xe1a00000|(armPrimary.Code<<12)|(imm<<7)|armPrimary.Code)
-	}
 
-	func renvoArmAsmSarRaxImm(a *RTGEmitter, imm int) {
-		renvoArmAsmEmit(a, 0xe1a00040|(armPrimary.Code<<12)|(imm<<7)|armPrimary.Code)
-	}
 
-	func renvoArmAsmShrRaxImm(a *RTGEmitter, imm int) {
-		renvoArmAsmEmit(a, 0xe1a00020|(armPrimary.Code<<12)|(imm<<7)|armPrimary.Code)
-	}
+
+
+
+
+
+
+
 
 	func renvoArmAsmDivLeftRcxRightRax(a *RTGEmitter, mod bool) {
 		renvoArmAsmMovRegReg(a, armScratch.Code, armPrimary.Code)
@@ -7313,45 +7168,23 @@ go backend {
 		}
 	}
 
-	func renvoArmAsmPushRax(a *RTGEmitter) {
-		renvoArmAsmPushReg(a, armPrimary.Code)
-	}
 
-	func renvoArmAsmPushRcx(a *RTGEmitter) {
-		renvoArmAsmPushReg(a, armTertiary.Code)
-	}
 
-	func renvoArmAsmPushRdx(a *RTGEmitter) {
-		renvoArmAsmPushReg(a, armSecondary.Code)
-	}
 
-	func renvoArmAsmPopRax(a *RTGEmitter) {
-		renvoArmAsmPopReg(a, armPrimary.Code)
-	}
 
-	func renvoArmAsmPopRcx(a *RTGEmitter) {
-		renvoArmAsmPopReg(a, armTertiary.Code)
-	}
 
-	func renvoArmAsmPopRdx(a *RTGEmitter) {
-		renvoArmAsmPopReg(a, armSecondary.Code)
-	}
 
-	func renvoArmAsmPushImm(a *RTGEmitter, imm int) {
-		renvoArmAsmMovRegImm(a, armScratch.Code, imm)
-		renvoArmAsmPushReg(a, armScratch.Code)
-	}
 
-	func renvoArmAsmStoreSliceStack(a *RTGEmitter, offset int) {
-		renvoArmAsmStoreRegStack(a, armPrimary.Code, offset)
-		renvoArmAsmStoreRegStack(a, armSecondary.Code, offset-8)
-		renvoArmAsmStoreRegStack(a, armTertiary.Code, offset-16)
-	}
 
-	func renvoArmAsmStoreAlMemRdxRcx1(a *RTGEmitter) {
-		renvoArmAsmAddRegReg(a, armAddress.Code, armSecondary.Code, armTertiary.Code)
-		renvoArmAsmStoreRegMem(a, armPrimary.Code, armAddress.Code, 0, 1)
-	}
+
+
+
+
+
+
+
+
+
 
 	func renvoArmAsmStoreRaxMemRdxRcxSize(a *RTGEmitter, size int) {
 		shift := 3
@@ -7368,59 +7201,27 @@ go backend {
 		renvoArmAsmStoreRegMem(a, armPrimary.Code, armAddress.Code, 0, size)
 	}
 
-	func renvoArmAsmIncRcx(a *RTGEmitter) {
-		renvoArmAsmAddRegImm(a, armTertiary.Code, armTertiary.Code, 1)
-	}
 
-	func renvoArmAsmIncRax(a *RTGEmitter) {
-		renvoArmAsmAddRegImm(a, armPrimary.Code, armPrimary.Code, 1)
-	}
 
-	func renvoArmAsmImulRcxImm(a *RTGEmitter, imm int) {
-		renvoArmAsmMovRegImm(a, armScratch.Code, imm)
-		renvoArmAsmMulRegReg(a, armTertiary.Code, armTertiary.Code, armScratch.Code)
-	}
 
-	func renvoArmAsmLeave(a *RTGEmitter) {
-		renvoArmAsmMovRegReg(a, armStack.Code, armFrame.Code)
-		renvoArmAsmEmit(a, 0xe8bd4800)
-	}
 
-	func renvoArmAsmRet(a *RTGEmitter) {
-		renvoArmAsmEmit(a, 0xe12fff1e)
-	}
 
-	func renvoArmAsmCallLabel(a *RTGEmitter, label int) {
-		at := a.Len()
-		renvoArmAsmEmit(a, 0xeb000000)
-		a.RelocAt(at, label)
-	}
 
-	func renvoArmAsmJmpLabel(a *RTGEmitter, label int) {
-		at := a.Len()
-		renvoArmAsmEmit(a, 0xea000000)
-		a.RelocAt(at, label)
-	}
 
-	func renvoArmAsmBCondLabel(a *RTGEmitter, label int, cond int) {
-		at := a.Len()
-		renvoArmAsmEmit(a, (cond<<28)|0x0a000000)
-		a.RelocAt(at, label)
-	}
 
-	func renvoArmAsmJzLabel(a *RTGEmitter, label int) {
-		renvoArmAsmBCondLabel(a, label, 0)
-	}
 
-	func renvoArmAsmJnzLabel(a *RTGEmitter, label int) {
-		renvoArmAsmBCondLabel(a, label, 1)
-	}
 
-	func armMove(
-		out *RTGEmitter, destination RTGRegister, source RTGRegister,
-	) {
-		renvoArmAsmMovRegReg(out, destination.Code, source.Code)
-	}
+
+
+
+
+
+
+
+
+
+
+
 
 	func armEmitAddress(
 		out *RTGEmitter, destination RTGRegister, address RTGAddress,
@@ -7493,232 +7294,43 @@ go backend {
 				((displacement&0xf0)<<4)|(displacement&0x0f))
 	}
 
-	func armLoadNative(
-		out *RTGEmitter, destination RTGRegister, address RTGAddress,
-	) {
-		address = armMemoryAddress(out, address, 4)
-		renvoArmAsmLoadRegMem(out, destination.Code,
-			address.Base.Code, address.Displacement, 4)
-	}
 
-	func armLoadI32(
-		out *RTGEmitter, destination RTGRegister, address RTGAddress,
-	) {
-		armLoadNative(out, destination, address)
-	}
 
-	func armLoadU32(
-		out *RTGEmitter, destination RTGRegister, address RTGAddress,
-	) {
-		armLoadNative(out, destination, address)
-	}
 
-	func armLoadI16(
-		out *RTGEmitter, destination RTGRegister, address RTGAddress,
-	) {
-		armLoadExtra(out, destination, address, 0xe15000f0)
-	}
 
-	func armLoadU16(
-		out *RTGEmitter, destination RTGRegister, address RTGAddress,
-	) {
-		armLoadExtra(out, destination, address, 0xe15000b0)
-	}
 
-	func armLoadI8(
-		out *RTGEmitter, destination RTGRegister, address RTGAddress,
-	) {
-		armLoadExtra(out, destination, address, 0xe15000d0)
-	}
 
-	func armLoadU8(
-		out *RTGEmitter, destination RTGRegister, address RTGAddress,
-	) {
-		address = armMemoryAddress(out, address, 1)
-		renvoArmAsmLoadRegMem(out, destination.Code,
-			address.Base.Code, address.Displacement, 1)
-	}
 
-	func armStoreWidth(
-		out *RTGEmitter,
-		address RTGAddress,
-		source RTGRegister,
-		size int,
-	) {
-		address = armMemoryAddress(out, address, size)
-		renvoArmAsmStoreRegMem(out, source.Code,
-			address.Base.Code, address.Displacement, size)
-	}
 
-	func armStoreNative(
-		out *RTGEmitter, address RTGAddress, source RTGRegister,
-	) {
-		armStoreWidth(out, address, source, 4)
-	}
 
-	func armStoreU32(
-		out *RTGEmitter, address RTGAddress, source RTGRegister,
-	) {
-		armStoreWidth(out, address, source, 4)
-	}
 
-	func armStoreU16(
-		out *RTGEmitter, address RTGAddress, source RTGRegister,
-	) {
-		armStoreWidth(out, address, source, 2)
-	}
 
-	func armStoreU8(
-		out *RTGEmitter, address RTGAddress, source RTGRegister,
-	) {
-		armStoreWidth(out, address, source, 1)
-	}
 
-	func armAdd(
-		out *RTGEmitter, destination RTGRegister, source RTGRegister,
-	) {
-		renvoArmAsmAddRegReg(
-			out, destination.Code, destination.Code, source.Code)
-	}
 
-	func armSubtract(
-		out *RTGEmitter, destination RTGRegister, source RTGRegister,
-	) {
-		renvoArmAsmSubRegReg(
-			out, destination.Code, destination.Code, source.Code)
-	}
 
-	func armMultiply(
-		out *RTGEmitter, destination RTGRegister, source RTGRegister,
-	) {
-		renvoArmAsmMulRegReg(
-			out, destination.Code, destination.Code, source.Code)
-	}
 
-	func armBitAnd(
-		out *RTGEmitter, destination RTGRegister, source RTGRegister,
-	) {
-		renvoArmAsmEmit(out,
-			0xe0000000|(destination.Code<<16)|
-				(destination.Code<<12)|source.Code)
-	}
 
-	func armBitOr(
-		out *RTGEmitter, destination RTGRegister, source RTGRegister,
-	) {
-		renvoArmAsmEmit(out,
-			0xe1800000|(destination.Code<<16)|
-				(destination.Code<<12)|source.Code)
-	}
 
-	func armBitXor(
-		out *RTGEmitter, destination RTGRegister, source RTGRegister,
-	) {
-		renvoArmAsmEmit(out,
-			0xe0200000|(destination.Code<<16)|
-				(destination.Code<<12)|source.Code)
-	}
 
-	func armCompare(
-		out *RTGEmitter, left RTGRegister, right RTGRegister,
-	) {
-		renvoArmAsmCmpRegReg(out, left.Code, right.Code)
-	}
 
-	func armTest(
-		out *RTGEmitter, left RTGRegister, right RTGRegister,
-	) {
-		renvoArmAsmEmit(
-			out, 0xe1100000|(left.Code<<16)|right.Code)
-	}
 
-	func armIncrement(out *RTGEmitter, operand RTGRegister) {
-		renvoArmAsmAddRegImm(out, operand.Code, operand.Code, 1)
-	}
 
-	func armDecrement(out *RTGEmitter, operand RTGRegister) {
-		renvoArmAsmAddRegImm(out, operand.Code, operand.Code, -1)
-	}
 
-	func armShiftImmediate(
-		out *RTGEmitter,
-		operand RTGRegister,
-		value byte,
-		kind int,
-	) {
-		renvoArmAsmEmit(out,
-			0xe1a00000|(operand.Code<<12)|
-				((int(value)&31)<<7)|kind|operand.Code)
-	}
 
-	func armShiftLeftImmediate(
-		out *RTGEmitter, operand RTGRegister, value byte,
-	) {
-		armShiftImmediate(out, operand, value, 0)
-	}
 
-	func armShiftRightUnsignedImmediate(
-		out *RTGEmitter, operand RTGRegister, value byte,
-	) {
-		armShiftImmediate(out, operand, value, 0x20)
-	}
 
-	func armShiftRightSignedImmediate(
-		out *RTGEmitter, operand RTGRegister, value byte,
-	) {
-		armShiftImmediate(out, operand, value, 0x40)
-	}
 
-	func armCall(out *RTGEmitter, label RTGLabel) {
-		renvoArmAsmEmit(out, 0xeb000000)
-		RTGReloc(out, label)
-	}
 
-	func armCallIndirect(out *RTGEmitter, operand RTGRegister) {
-		renvoArmAsmEmit(out, 0xe12fff30|operand.Code)
-	}
 
-	func armJump(out *RTGEmitter, label RTGLabel) {
-		renvoArmAsmEmit(out, 0xea000000)
-		RTGReloc(out, label)
-	}
 
-	func armJumpCondition(
-		out *RTGEmitter, condition RTGCondition, label RTGLabel,
-	) {
-		renvoArmAsmEmit(
-			out, (condition.Code<<28)|0x0a000000)
-		RTGReloc(out, label)
-	}
 
-	func armSetCondition(
-		out *RTGEmitter,
-		condition RTGCondition,
-		destination RTGRegister,
-	) {
-		renvoArmAsmEmit(out, 0xe3a00000|(destination.Code<<12))
-		renvoArmAsmEmit(out,
-			(condition.Code<<28)|0x03a00001|
-				(destination.Code<<12))
-	}
 
-	func armReturn(out *RTGEmitter) {
-		renvoArmAsmRet(out)
-	}
 
-	func armLeave(out *RTGEmitter) {
-		renvoArmAsmLeave(out)
-	}
 
-	func armHostSyscall(out *RTGEmitter) {
-		renvoArmAsmSyscall(out)
-	}
 
-	func armMoveImmediate(
-		out *RTGEmitter, destination RTGRegister, value int64,
-	) {
-		renvoArmAsmMovRegImm(out, destination.Code, int(value))
-	}
+
+
+
 
 	func armVariableShift(
 		out *RTGEmitter, direction RTGShiftDirection, signed bool,
@@ -7747,49 +7359,7 @@ go backend {
 		}
 	}
 
-	func armCopyBytes(out *RTGEmitter) {
-		destination := armR3
-		source := armR4
-		count := armSecondary
-		value := armScratch2
-		forward := out.NewLabel()
-		forwardLoop := out.NewLabel()
-		backwardLoop := out.NewLabel()
-		done := out.NewLabel()
-		armCompare(out, destination, source)
-		armJumpCondition(out, RTGCondition{Code: 9}, forward)
-		armEmitAddress(out, armScratch, RTGAddress{
-			Base: source, Index: count, Scale: 1,
-		})
-		armCompare(out, destination, armScratch)
-		armJumpCondition(out, RTGCondition{Code: 2}, forward)
-		armEmitAddress(out, source, RTGAddress{
-			Base: source, Index: count, Scale: 1, Displacement: -1,
-		})
-		armEmitAddress(out, destination, RTGAddress{
-			Base: destination, Index: count, Scale: 1, Displacement: -1,
-		})
-		out.Mark(backwardLoop)
-		renvoArmAsmCmpRegImm(out, count.Code, 0)
-		armJumpCondition(out, RTGCondition{Code: 0}, done)
-		armLoadU8(out, value, RTGAddress{Base: source})
-		armStoreU8(out, RTGAddress{Base: destination}, value)
-		armDecrement(out, source)
-		armDecrement(out, destination)
-		armDecrement(out, count)
-		armJump(out, backwardLoop)
-		out.Mark(forward)
-		out.Mark(forwardLoop)
-		renvoArmAsmCmpRegImm(out, count.Code, 0)
-		armJumpCondition(out, RTGCondition{Code: 0}, done)
-		armLoadU8(out, value, RTGAddress{Base: source})
-		armStoreU8(out, RTGAddress{Base: destination}, value)
-		armIncrement(out, source)
-		armIncrement(out, destination)
-		armDecrement(out, count)
-		armJump(out, forwardLoop)
-		out.Mark(done)
-	}
+
 
 	func armPatchRelocations(out *RTGEmitter) {
 		for i := 0; i < out.RelocationCount(); i++ {
@@ -7827,14 +7397,7 @@ go backend {
 		}
 	}
 
-	func armFrameStart(out *RTGEmitter) int {
-		out.Bytes4(0x00, 0x48, 0x2d, 0xe9)
-		renvoArmAsmMovRegReg(out, 11, 13)
-		at := out.Len()
-		renvoArmAsmEmit(out, 0xe3009000)
-		renvoArmAsmEmit(out, 0xe04dd009)
-		return at
-	}
+
 
 	func armFrameFinish(out *RTGEmitter, at int, stackUsed int) {
 		frame := (stackUsed + 7) & -8
@@ -7883,8 +7446,36 @@ arch arm {
 		sgt = 12
 		sle = 13
 	}
+	forms {
+		binary = word32(destination:reg@12+16, source:reg@0)
+		multiply = word32(destination:reg@0+16, source:reg@8)
+		compare = word32(left:reg@16, right:reg@0)
+		unary = word32(operand:reg@12+16)
+		register = word32(operand:reg@0)
+		branch = word32(label:label@reloc)
+		conditional_branch = word32(condition:condition@28, label:label@reloc)
+		fixed = bytes
+	}
+	instructions {
+		add binary 0xe0800000
+		subtract binary 0xe0400000
+		multiply multiply 0xe0000090
+		bit_and binary 0xe0000000
+		bit_or binary 0xe1800000
+		bit_xor binary 0xe0200000
+		compare compare 0xe1500000
+		test compare 0xe1100000
+		increment unary 0xe2800001
+		decrement unary 0xe2400001
+		call_indirect register 0xe12fff30
+		call branch 0xeb000000
+		jump branch 0xea000000
+		jump_condition conditional_branch 0x0a000000
+		return fixed [0x1e, 0xff, 0x2f, 0xe1]
+		leave fixed [0x0b, 0xd0, 0xa0, 0xe1, 0x00, 0x48, 0xbd, 0xe8]
+	}
 	bind {
-		move = go armMove
+		move = sequence armMove
 		address = go armEmitAddress
 		load.native = go armLoadNative
 		load.i32 = go armLoadI32
@@ -7897,127 +7488,127 @@ arch arm {
 		store.u32 = go armStoreU32
 		store.u16 = go armStoreU16
 		store.u8 = go armStoreU8
-		add = go armAdd
-		subtract = go armSubtract
-		multiply = go armMultiply
-		bit_and = go armBitAnd
-		bit_or = go armBitOr
-		bit_xor = go armBitXor
-		compare = go armCompare
-		test = go armTest
-		increment = go armIncrement
-		decrement = go armDecrement
-		shift_left_immediate = go armShiftLeftImmediate
-		shift_right_unsigned_immediate = go armShiftRightUnsignedImmediate
-		shift_right_signed_immediate = go armShiftRightSignedImmediate
-		call = go armCall
-		call_indirect = go armCallIndirect
-		jump = go armJump
-		jump_condition = go armJumpCondition
-		set_condition = go armSetCondition
-		return = go armReturn
-		leave = go armLeave
-		host_syscall = go armHostSyscall
-		move_immediate = go armMoveImmediate
+		add = add
+		subtract = subtract
+		multiply = multiply
+		bit_and = bit_and
+		bit_or = bit_or
+		bit_xor = bit_xor
+		compare = compare
+		test = test
+		increment = increment
+		decrement = decrement
+		shift_left_immediate = sequence armShiftLeftImmediate
+		shift_right_unsigned_immediate = sequence armShiftRightUnsignedImmediate
+		shift_right_signed_immediate = sequence armShiftRightSignedImmediate
+		call = call
+		call_indirect = call_indirect
+		jump = jump
+		jump_condition = jump_condition
+		set_condition = sequence armSetCondition
+		return = return
+		leave = leave
+		host_syscall = sequence armHostSyscall
+		move_immediate = sequence armMoveImmediate
 		variable_shift = go armVariableShift
 		signed_divide = go armSignedDivide
-		copy_bytes = go armCopyBytes
+		copy_bytes = sequence armCopyBytes
 	}
 	exports {
-		renvoArmAsmEmit = go renvoArmAsmEmit
+		renvoArmAsmEmit = sequence renvoArmAsmEmit
 		renvoArmAsmAlign = go renvoArmAsmAlign
 		renvoArmAsmMovRegReg = go renvoArmAsmMovRegReg
 		renvoArmAsmMovRegImm = go renvoArmAsmMovRegImm
-		renvoArmAsmPatchMovRegImmAt = go renvoArmAsmPatchMovRegImmAt
-		renvoArmAsmMovRegAbs = go renvoArmAsmMovRegAbs
+		renvoArmAsmPatchMovRegImmAt = sequence renvoArmAsmPatchMovRegImmAt
+		renvoArmAsmMovRegAbs = sequence renvoArmAsmMovRegAbs
 		renvoArmAsmAddRegImm = go renvoArmAsmAddRegImm
 		renvoArmAsmFrameStart = go renvoArmAsmFrameStart
 		renvoArmAsmPatchFrame = go renvoArmAsmPatchFrame
 		renvoArmAsmAddRegSmallImm = go renvoArmAsmAddRegSmallImm
-		renvoArmAsmAddRegReg = go renvoArmAsmAddRegReg
-		renvoArmAsmSubRegReg = go renvoArmAsmSubRegReg
-		renvoArmAsmAddRegRegShift = go renvoArmAsmAddRegRegShift
-		renvoArmAsmMulRegReg = go renvoArmAsmMulRegReg
+		renvoArmAsmAddRegReg = sequence renvoArmAsmAddRegReg
+		renvoArmAsmSubRegReg = sequence renvoArmAsmSubRegReg
+		renvoArmAsmAddRegRegShift = sequence renvoArmAsmAddRegRegShift
+		renvoArmAsmMulRegReg = sequence renvoArmAsmMulRegReg
 		renvoArmAsmAddr = go renvoArmAsmAddr
 		renvoArmAsmLoadStoreAddr = go renvoArmAsmLoadStoreAddr
 		renvoArmAsmLoadRegMem = go renvoArmAsmLoadRegMem
 		renvoArmAsmStoreRegMem = go renvoArmAsmStoreRegMem
-		renvoArmAsmLoadRegStack = go renvoArmAsmLoadRegStack
-		renvoArmAsmStoreRegStack = go renvoArmAsmStoreRegStack
-		renvoArmAsmLeaRegStack = go renvoArmAsmLeaRegStack
-		renvoArmAsmPushReg = go renvoArmAsmPushReg
-		renvoArmAsmPopReg = go renvoArmAsmPopReg
-		renvoArmAsmMovRaxImm = go renvoArmAsmMovRaxImm
-		renvoArmAsmMovRaxImm64 = go renvoArmAsmMovRaxImm64
-		renvoArmAsmMovRdxImm = go renvoArmAsmMovRdxImm
-		renvoArmAsmMovRaxDataAddr = go renvoArmAsmMovRaxDataAddr
-		renvoArmAsmMovRaxBssAddr = go renvoArmAsmMovRaxBssAddr
-		renvoArmAsmMovR10BssAddr = go renvoArmAsmMovR10BssAddr
-		renvoArmAsmAccessRaxBss = go renvoArmAsmAccessRaxBss
-		renvoArmAsmLoadRaxBss = go renvoArmAsmLoadRaxBss
-		renvoArmAsmStoreRaxBss = go renvoArmAsmStoreRaxBss
-		renvoArmAsmMovRdiRax = go renvoArmAsmMovRdiRax
-		renvoArmAsmMovRaxRdx = go renvoArmAsmMovRaxRdx
-		renvoArmAsmMovRdxRax = go renvoArmAsmMovRdxRax
-		renvoArmAsmMovRcxRax = go renvoArmAsmMovRcxRax
-		renvoArmAsmMovRcxRdx = go renvoArmAsmMovRcxRdx
-		renvoArmAsmMovRsiRax = go renvoArmAsmMovRsiRax
-		renvoArmAsmMovR8Rax = go renvoArmAsmMovR8Rax
-		renvoArmAsmMovR9Rax = go renvoArmAsmMovR9Rax
-		renvoArmAsmAddRdxRcx = go renvoArmAsmAddRdxRcx
-		renvoArmAsmSyscall = go renvoArmAsmSyscall
-		renvoArmAsmPopRdi = go renvoArmAsmPopRdi
-		renvoArmAsmPopRsi = go renvoArmAsmPopRsi
+		renvoArmAsmLoadRegStack = sequence renvoArmAsmLoadRegStack
+		renvoArmAsmStoreRegStack = sequence renvoArmAsmStoreRegStack
+		renvoArmAsmLeaRegStack = sequence renvoArmAsmLeaRegStack
+		renvoArmAsmPushReg = sequence renvoArmAsmPushReg
+		renvoArmAsmPopReg = sequence renvoArmAsmPopReg
+		renvoArmAsmMovRaxImm = sequence renvoArmAsmMovRaxImm
+		renvoArmAsmMovRaxImm64 = sequence renvoArmAsmMovRaxImm64
+		renvoArmAsmMovRdxImm = sequence renvoArmAsmMovRdxImm
+		renvoArmAsmMovRaxDataAddr = sequence renvoArmAsmMovRaxDataAddr
+		renvoArmAsmMovRaxBssAddr = sequence renvoArmAsmMovRaxBssAddr
+		renvoArmAsmMovR10BssAddr = sequence renvoArmAsmMovR10BssAddr
+		renvoArmAsmAccessRaxBss = sequence renvoArmAsmAccessRaxBss
+		renvoArmAsmLoadRaxBss = sequence renvoArmAsmLoadRaxBss
+		renvoArmAsmStoreRaxBss = sequence renvoArmAsmStoreRaxBss
+		renvoArmAsmMovRdiRax = sequence renvoArmAsmMovRdiRax
+		renvoArmAsmMovRaxRdx = sequence renvoArmAsmMovRaxRdx
+		renvoArmAsmMovRdxRax = sequence renvoArmAsmMovRdxRax
+		renvoArmAsmMovRcxRax = sequence renvoArmAsmMovRcxRax
+		renvoArmAsmMovRcxRdx = sequence renvoArmAsmMovRcxRdx
+		renvoArmAsmMovRsiRax = sequence renvoArmAsmMovRsiRax
+		renvoArmAsmMovR8Rax = sequence renvoArmAsmMovR8Rax
+		renvoArmAsmMovR9Rax = sequence renvoArmAsmMovR9Rax
+		renvoArmAsmAddRdxRcx = sequence renvoArmAsmAddRdxRcx
+		renvoArmAsmSyscall = sequence renvoArmAsmSyscall
+		renvoArmAsmPopRdi = sequence renvoArmAsmPopRdi
+		renvoArmAsmPopRsi = sequence renvoArmAsmPopRsi
 		renvoArmAsmStackMem = go renvoArmAsmStackMem
-		renvoArmAsmAddRdxImm = go renvoArmAsmAddRdxImm
+		renvoArmAsmAddRdxImm = sequence renvoArmAsmAddRdxImm
 		renvoArmAsmMemDisp = go renvoArmAsmMemDisp
-		renvoArmAsmLoadQwordRaxIndexRcx8 = go renvoArmAsmLoadQwordRaxIndexRcx8
-		renvoArmAsmLoadQwordRaxIndexRcxDisp = go renvoArmAsmLoadQwordRaxIndexRcxDisp
-		renvoArmAsmLoadRaxMemRdxDisp = go renvoArmAsmLoadRaxMemRdxDisp
-		renvoArmAsmLoadRaxMemRdxDispSize = go renvoArmAsmLoadRaxMemRdxDispSize
-		renvoArmAsmLoadByteRaxIndexRcx = go renvoArmAsmLoadByteRaxIndexRcx
+		renvoArmAsmLoadQwordRaxIndexRcx8 = sequence renvoArmAsmLoadQwordRaxIndexRcx8
+		renvoArmAsmLoadQwordRaxIndexRcxDisp = sequence renvoArmAsmLoadQwordRaxIndexRcxDisp
+		renvoArmAsmLoadRaxMemRdxDisp = sequence renvoArmAsmLoadRaxMemRdxDisp
+		renvoArmAsmLoadRaxMemRdxDispSize = sequence renvoArmAsmLoadRaxMemRdxDispSize
+		renvoArmAsmLoadByteRaxIndexRcx = sequence renvoArmAsmLoadByteRaxIndexRcx
 		renvoArmAsmLoadRaxIndexRcxSize = go renvoArmAsmLoadRaxIndexRcxSize
-		renvoArmAsmStoreRaxMemRdxRcx8 = go renvoArmAsmStoreRaxMemRdxRcx8
-		renvoArmAsmStoreRaxMemRdxDisp = go renvoArmAsmStoreRaxMemRdxDisp
-		renvoArmAsmStoreRaxMemRdxDispSize = go renvoArmAsmStoreRaxMemRdxDispSize
+		renvoArmAsmStoreRaxMemRdxRcx8 = sequence renvoArmAsmStoreRaxMemRdxRcx8
+		renvoArmAsmStoreRaxMemRdxDisp = sequence renvoArmAsmStoreRaxMemRdxDisp
+		renvoArmAsmStoreRaxMemRdxDispSize = sequence renvoArmAsmStoreRaxMemRdxDispSize
 		renvoArmAsmNormalizeRaxForKind = go renvoArmAsmNormalizeRaxForKind
-		renvoArmAsmIncMemRdx = go renvoArmAsmIncMemRdx
-		renvoArmAsmDecMemRdx = go renvoArmAsmDecMemRdx
-		renvoArmAsmBoolNotRax = go renvoArmAsmBoolNotRax
-		renvoArmAsmNegRax = go renvoArmAsmNegRax
-		renvoArmAsmCmpRaxImm8 = go renvoArmAsmCmpRaxImm8
+		renvoArmAsmIncMemRdx = sequence renvoArmAsmIncMemRdx
+		renvoArmAsmDecMemRdx = sequence renvoArmAsmDecMemRdx
+		renvoArmAsmBoolNotRax = sequence renvoArmAsmBoolNotRax
+		renvoArmAsmNegRax = sequence renvoArmAsmNegRax
+		renvoArmAsmCmpRaxImm8 = sequence renvoArmAsmCmpRaxImm8
 		renvoArmAsmCmpRegImm = go renvoArmAsmCmpRegImm
-		renvoArmAsmCmpRegReg = go renvoArmAsmCmpRegReg
-		renvoArmAsmCsetRax = go renvoArmAsmCsetRax
+		renvoArmAsmCmpRegReg = sequence renvoArmAsmCmpRegReg
+		renvoArmAsmCsetRax = sequence renvoArmAsmCsetRax
 		renvoArmCondFromSetcc = go renvoArmCondFromSetcc
-		renvoArmAsmCmpRcxRaxSet = go renvoArmAsmCmpRcxRaxSet
-		renvoArmAsmAddRaxRcx = go renvoArmAsmAddRaxRcx
-		renvoArmAsmSubRaxRcx = go renvoArmAsmSubRaxRcx
-		renvoArmAsmShlRcxImm = go renvoArmAsmShlRcxImm
-		renvoArmAsmShlRaxImm = go renvoArmAsmShlRaxImm
-		renvoArmAsmSarRaxImm = go renvoArmAsmSarRaxImm
-		renvoArmAsmShrRaxImm = go renvoArmAsmShrRaxImm
+		renvoArmAsmCmpRcxRaxSet = sequence renvoArmAsmCmpRcxRaxSet
+		renvoArmAsmAddRaxRcx = sequence renvoArmAsmAddRaxRcx
+		renvoArmAsmSubRaxRcx = sequence renvoArmAsmSubRaxRcx
+		renvoArmAsmShlRcxImm = sequence renvoArmAsmShlRcxImm
+		renvoArmAsmShlRaxImm = sequence renvoArmAsmShlRaxImm
+		renvoArmAsmSarRaxImm = sequence renvoArmAsmSarRaxImm
+		renvoArmAsmShrRaxImm = sequence renvoArmAsmShrRaxImm
 		renvoArmAsmDivLeftRcxRightRax = go renvoArmAsmDivLeftRcxRightRax
-		renvoArmAsmPushRax = go renvoArmAsmPushRax
-		renvoArmAsmPushRcx = go renvoArmAsmPushRcx
-		renvoArmAsmPushRdx = go renvoArmAsmPushRdx
-		renvoArmAsmPopRax = go renvoArmAsmPopRax
-		renvoArmAsmPopRcx = go renvoArmAsmPopRcx
-		renvoArmAsmPopRdx = go renvoArmAsmPopRdx
-		renvoArmAsmPushImm = go renvoArmAsmPushImm
-		renvoArmAsmStoreSliceStack = go renvoArmAsmStoreSliceStack
-		renvoArmAsmStoreAlMemRdxRcx1 = go renvoArmAsmStoreAlMemRdxRcx1
+		renvoArmAsmPushRax = sequence renvoArmAsmPushRax
+		renvoArmAsmPushRcx = sequence renvoArmAsmPushRcx
+		renvoArmAsmPushRdx = sequence renvoArmAsmPushRdx
+		renvoArmAsmPopRax = sequence renvoArmAsmPopRax
+		renvoArmAsmPopRcx = sequence renvoArmAsmPopRcx
+		renvoArmAsmPopRdx = sequence renvoArmAsmPopRdx
+		renvoArmAsmPushImm = sequence renvoArmAsmPushImm
+		renvoArmAsmStoreSliceStack = sequence renvoArmAsmStoreSliceStack
+		renvoArmAsmStoreAlMemRdxRcx1 = sequence renvoArmAsmStoreAlMemRdxRcx1
 		renvoArmAsmStoreRaxMemRdxRcxSize = go renvoArmAsmStoreRaxMemRdxRcxSize
-		renvoArmAsmIncRcx = go renvoArmAsmIncRcx
-		renvoArmAsmIncRax = go renvoArmAsmIncRax
-		renvoArmAsmImulRcxImm = go renvoArmAsmImulRcxImm
-		renvoArmAsmLeave = go renvoArmAsmLeave
-		renvoArmAsmRet = go renvoArmAsmRet
-		renvoArmAsmCallLabel = go renvoArmAsmCallLabel
-		renvoArmAsmJmpLabel = go renvoArmAsmJmpLabel
-		renvoArmAsmBCondLabel = go renvoArmAsmBCondLabel
-		renvoArmAsmJzLabel = go renvoArmAsmJzLabel
-		renvoArmAsmJnzLabel = go renvoArmAsmJnzLabel
+		renvoArmAsmIncRcx = sequence renvoArmAsmIncRcx
+		renvoArmAsmIncRax = sequence renvoArmAsmIncRax
+		renvoArmAsmImulRcxImm = sequence renvoArmAsmImulRcxImm
+		renvoArmAsmLeave = sequence renvoArmAsmLeave
+		renvoArmAsmRet = sequence renvoArmAsmRet
+		renvoArmAsmCallLabel = sequence renvoArmAsmCallLabel
+		renvoArmAsmJmpLabel = sequence renvoArmAsmJmpLabel
+		renvoArmAsmBCondLabel = sequence renvoArmAsmBCondLabel
+		renvoArmAsmJzLabel = sequence renvoArmAsmJzLabel
+		renvoArmAsmJnzLabel = sequence renvoArmAsmJnzLabel
 	}
 	relocation branch24 {
 		width = 4
@@ -8033,11 +7624,520 @@ arch arm {
 		bits = 32
 		relative_to = pc_at_add
 	}
+
+	sequences {
+		renvoArmAsmAddRaxRcx(a:emitter) {
+			call renvoArmAsmAddRegReg(a,armPrimary.Code,armPrimary.Code,armTertiary.Code)
+
+		}
+		renvoArmAsmAddRdxImm(a:emitter, imm:int) {
+			call renvoArmAsmAddRegImm(a,armSecondary.Code,armSecondary.Code,imm)
+
+		}
+		renvoArmAsmAddRdxRcx(a:emitter) {
+			call renvoArmAsmAddRegReg(a,armSecondary.Code,armSecondary.Code,armTertiary.Code)
+
+		}
+		renvoArmAsmAddRegReg(a:emitter, dst:int, left:int, right:int) {
+			call renvoArmAsmEmit(a,0xe0800000|(left<<16)|(dst<<12)|right)
+
+		}
+		renvoArmAsmAddRegRegShift(a:emitter, dst:int, left:int, right:int, shift:int) {
+			call renvoArmAsmEmit(a,0xe0800000|(left<<16)|(dst<<12)|(shift<<7)|right)
+
+		}
+		renvoArmAsmBoolNotRax(a:emitter) {
+			call renvoArmAsmCmpRaxImm8(a,0)
+
+			call renvoArmAsmCsetRax(a,0)
+
+		}
+		renvoArmAsmCmpRaxImm8(a:emitter, imm:int) {
+			call renvoArmAsmCmpRegImm(a,armPrimary.Code,imm)
+
+		}
+		renvoArmAsmCmpRegReg(a:emitter, left:int, right:int) {
+			call renvoArmAsmEmit(a,0xe1500000|(left<<16)|right)
+
+		}
+		renvoArmAsmCsetRax(a:emitter, cond:int) {
+			call renvoArmAsmEmit(a,0xe3a00000)
+
+			call renvoArmAsmEmit(a,(cond<<28)|0x03a00001)
+
+		}
+		renvoArmAsmDecMemRdx(a:emitter) {
+			call renvoArmAsmLoadRegMem(a,armScratch.Code,armSecondary.Code,0,4)
+
+			call renvoArmAsmAddRegImm(a,armScratch.Code,armScratch.Code,-1)
+
+			call renvoArmAsmStoreRegMem(a,armScratch.Code,armSecondary.Code,0,4)
+
+		}
+		renvoArmAsmEmit(a:emitter, insn:int) {
+			call RTGUint32(a,insn)
+
+		}
+		renvoArmAsmImulRcxImm(a:emitter, imm:int) {
+			call renvoArmAsmMovRegImm(a,armScratch.Code,imm)
+
+			call renvoArmAsmMulRegReg(a,armTertiary.Code,armTertiary.Code,armScratch.Code)
+
+		}
+		renvoArmAsmIncMemRdx(a:emitter) {
+			call renvoArmAsmLoadRegMem(a,armScratch.Code,armSecondary.Code,0,4)
+
+			call renvoArmAsmAddRegImm(a,armScratch.Code,armScratch.Code,1)
+
+			call renvoArmAsmStoreRegMem(a,armScratch.Code,armSecondary.Code,0,4)
+
+		}
+		renvoArmAsmIncRax(a:emitter) {
+			call renvoArmAsmAddRegImm(a,armPrimary.Code,armPrimary.Code,1)
+
+		}
+		renvoArmAsmIncRcx(a:emitter) {
+			call renvoArmAsmAddRegImm(a,armTertiary.Code,armTertiary.Code,1)
+
+		}
+		renvoArmAsmJnzLabel(a:emitter, label:int) {
+			call renvoArmAsmBCondLabel(a,label,1)
+
+		}
+		renvoArmAsmJzLabel(a:emitter, label:int) {
+			call renvoArmAsmBCondLabel(a,label,0)
+
+		}
+		renvoArmAsmLeaRegStack(a:emitter, dst:int, offset:int) {
+			call renvoArmAsmAddRegImm(a,dst,armFrame.Code,-offset)
+
+		}
+		renvoArmAsmLeave(a:emitter) {
+			call renvoArmAsmMovRegReg(a,armStack.Code,armFrame.Code)
+
+			call renvoArmAsmEmit(a,0xe8bd4800)
+
+		}
+		renvoArmAsmLoadByteRaxIndexRcx(a:emitter) {
+			call renvoArmAsmAddRegReg(a,armAddress.Code,armPrimary.Code,armTertiary.Code)
+
+			call renvoArmAsmLoadRegMem(a,armPrimary.Code,armAddress.Code,0,1)
+
+		}
+		renvoArmAsmLoadQwordRaxIndexRcx8(a:emitter) {
+			call renvoArmAsmAddRegRegShift(a,armAddress.Code,armPrimary.Code,armTertiary.Code,3)
+
+			call renvoArmAsmLoadRegMem(a,armPrimary.Code,armAddress.Code,0,4)
+
+		}
+		renvoArmAsmLoadQwordRaxIndexRcxDisp(a:emitter, disp:int) {
+			call renvoArmAsmAddRegReg(a,armAddress.Code,armPrimary.Code,armTertiary.Code)
+
+			call renvoArmAsmLoadRegMem(a,armPrimary.Code,armAddress.Code,disp,4)
+
+		}
+		renvoArmAsmLoadRaxBss(a:emitter, bssOff:int) {
+			call renvoArmAsmAccessRaxBss(a,bssOff,0xe79f0000|armAddress.Code)
+
+		}
+		renvoArmAsmLoadRaxMemRdxDisp(a:emitter, disp:int) {
+			call renvoArmAsmLoadRegMem(a,armPrimary.Code,armSecondary.Code,disp,4)
+
+		}
+		renvoArmAsmLoadRaxMemRdxDispSize(a:emitter, disp:int, size:int) {
+			call renvoArmAsmLoadRegMem(a,armPrimary.Code,armSecondary.Code,disp,size)
+
+		}
+		renvoArmAsmLoadRegStack(a:emitter, dst:int, offset:int) {
+			call renvoArmAsmLoadRegMem(a,dst,armFrame.Code,-offset,4)
+
+		}
+		renvoArmAsmMovR10BssAddr(a:emitter, bssOff:int) {
+			call renvoArmAsmMovRegAbs(a,armR8.Code,bssOff,RTGRelocationAbsoluteBSS)
+
+		}
+		renvoArmAsmMovR8Rax(a:emitter) {
+			call renvoArmAsmMovRegReg(a,armR5.Code,armPrimary.Code)
+
+		}
+		renvoArmAsmMovR9Rax(a:emitter) {
+			call renvoArmAsmMovRegReg(a,armR6.Code,armPrimary.Code)
+
+		}
+		renvoArmAsmMovRaxBssAddr(a:emitter, bssOff:int) {
+			call renvoArmAsmMovRegAbs(a,armPrimary.Code,bssOff,RTGRelocationAbsoluteBSS)
+
+		}
+		renvoArmAsmMovRaxDataAddr(a:emitter, dataOff:int) {
+			call renvoArmAsmMovRegAbs(a,armPrimary.Code,dataOff,0)
+
+		}
+		renvoArmAsmMovRaxImm(a:emitter, imm:int) {
+			call renvoArmAsmMovRegImm(a,armPrimary.Code,imm)
+
+		}
+		renvoArmAsmMovRaxImm64(a:emitter, imm:int) {
+			call renvoArmAsmMovRaxImm(a,imm)
+
+		}
+		renvoArmAsmMovRaxRdx(a:emitter) {
+			call renvoArmAsmMovRegReg(a,armPrimary.Code,armSecondary.Code)
+
+		}
+		renvoArmAsmMovRcxRax(a:emitter) {
+			call renvoArmAsmMovRegReg(a,armTertiary.Code,armPrimary.Code)
+
+		}
+		renvoArmAsmMovRcxRdx(a:emitter) {
+			call renvoArmAsmMovRegReg(a,armTertiary.Code,armSecondary.Code)
+
+		}
+		renvoArmAsmMovRdiRax(a:emitter) {
+			call renvoArmAsmMovRegReg(a,armR3.Code,armPrimary.Code)
+
+		}
+		renvoArmAsmMovRdxImm(a:emitter, imm:int) {
+			call renvoArmAsmMovRegImm(a,armSecondary.Code,imm)
+
+		}
+		renvoArmAsmMovRdxRax(a:emitter) {
+			call renvoArmAsmMovRegReg(a,armSecondary.Code,armPrimary.Code)
+
+		}
+		renvoArmAsmMovRsiRax(a:emitter) {
+			call renvoArmAsmMovRegReg(a,armR4.Code,armPrimary.Code)
+
+		}
+		renvoArmAsmMulRegReg(a:emitter, dst:int, left:int, right:int) {
+			call renvoArmAsmEmit(a,0xe0000090|(dst<<16)|(right<<8)|left)
+
+		}
+		renvoArmAsmNegRax(a:emitter) {
+			call renvoArmAsmEmit(a,0xe2600000)
+
+		}
+		renvoArmAsmPopRax(a:emitter) {
+			call renvoArmAsmPopReg(a,armPrimary.Code)
+
+		}
+		renvoArmAsmPopRcx(a:emitter) {
+			call renvoArmAsmPopReg(a,armTertiary.Code)
+
+		}
+		renvoArmAsmPopRdi(a:emitter) {
+			call renvoArmAsmPopReg(a,armR3.Code)
+
+		}
+		renvoArmAsmPopRdx(a:emitter) {
+			call renvoArmAsmPopReg(a,armSecondary.Code)
+
+		}
+		renvoArmAsmPopReg(a:emitter, reg:int) {
+			call renvoArmAsmEmit(a,0xe49d0004|(reg<<12))
+
+		}
+		renvoArmAsmPopRsi(a:emitter) {
+			call renvoArmAsmPopReg(a,armR4.Code)
+
+		}
+		renvoArmAsmPushImm(a:emitter, imm:int) {
+			call renvoArmAsmMovRegImm(a,armScratch.Code,imm)
+
+			call renvoArmAsmPushReg(a,armScratch.Code)
+
+		}
+		renvoArmAsmPushRax(a:emitter) {
+			call renvoArmAsmPushReg(a,armPrimary.Code)
+
+		}
+		renvoArmAsmPushRcx(a:emitter) {
+			call renvoArmAsmPushReg(a,armTertiary.Code)
+
+		}
+		renvoArmAsmPushRdx(a:emitter) {
+			call renvoArmAsmPushReg(a,armSecondary.Code)
+
+		}
+		renvoArmAsmPushReg(a:emitter, reg:int) {
+			call renvoArmAsmEmit(a,0xe52d0004|(reg<<12))
+
+		}
+		renvoArmAsmRet(a:emitter) {
+			call renvoArmAsmEmit(a,0xe12fff1e)
+
+		}
+		renvoArmAsmSarRaxImm(a:emitter, imm:int) {
+			call renvoArmAsmEmit(a,0xe1a00040|(armPrimary.Code<<12)|(imm<<7)|armPrimary.Code)
+
+		}
+		renvoArmAsmShlRaxImm(a:emitter, imm:int) {
+			call renvoArmAsmEmit(a,0xe1a00000|(armPrimary.Code<<12)|(imm<<7)|armPrimary.Code)
+
+		}
+		renvoArmAsmShlRcxImm(a:emitter, imm:int) {
+			call renvoArmAsmEmit(a,0xe1a00000|(armTertiary.Code<<12)|(imm<<7)|armTertiary.Code)
+
+		}
+		renvoArmAsmShrRaxImm(a:emitter, imm:int) {
+			call renvoArmAsmEmit(a,0xe1a00020|(armPrimary.Code<<12)|(imm<<7)|armPrimary.Code)
+
+		}
+		renvoArmAsmStoreAlMemRdxRcx1(a:emitter) {
+			call renvoArmAsmAddRegReg(a,armAddress.Code,armSecondary.Code,armTertiary.Code)
+
+			call renvoArmAsmStoreRegMem(a,armPrimary.Code,armAddress.Code,0,1)
+
+		}
+		renvoArmAsmStoreRaxBss(a:emitter, bssOff:int) {
+			call renvoArmAsmAccessRaxBss(a,bssOff,0xe78f0000|armAddress.Code)
+
+		}
+		renvoArmAsmStoreRaxMemRdxDisp(a:emitter, disp:int) {
+			call renvoArmAsmStoreRegMem(a,armPrimary.Code,armSecondary.Code,disp,4)
+
+		}
+		renvoArmAsmStoreRaxMemRdxDispSize(a:emitter, disp:int, size:int) {
+			call renvoArmAsmStoreRegMem(a,armPrimary.Code,armSecondary.Code,disp,size)
+
+		}
+		renvoArmAsmStoreRaxMemRdxRcx8(a:emitter) {
+			call renvoArmAsmAddRegRegShift(a,armAddress.Code,armSecondary.Code,armTertiary.Code,3)
+
+			call renvoArmAsmStoreRegMem(a,armPrimary.Code,armAddress.Code,0,4)
+
+		}
+		renvoArmAsmStoreRegStack(a:emitter, src:int, offset:int) {
+			call renvoArmAsmStoreRegMem(a,src,armFrame.Code,-offset,4)
+
+		}
+		renvoArmAsmStoreSliceStack(a:emitter, offset:int) {
+			call renvoArmAsmStoreRegStack(a,armPrimary.Code,offset)
+
+			call renvoArmAsmStoreRegStack(a,armSecondary.Code,offset-8)
+
+			call renvoArmAsmStoreRegStack(a,armTertiary.Code,offset-16)
+
+		}
+		renvoArmAsmSubRaxRcx(a:emitter) {
+			call renvoArmAsmSubRegReg(a,armPrimary.Code,armPrimary.Code,armTertiary.Code)
+
+		}
+		renvoArmAsmSubRegReg(a:emitter, dst:int, left:int, right:int) {
+			call renvoArmAsmEmit(a,0xe0400000|(left<<16)|(dst<<12)|right)
+
+		}
+		renvoArmAsmSyscall(a:emitter) {
+			call renvoArmAsmMovRegReg(a,armSystem.Code,armPrimary.Code)
+
+			call renvoArmAsmMovRegReg(a,armScratch.Code,armSecondary.Code)
+
+			call renvoArmAsmMovRegReg(a,0,armR3.Code)
+
+			call renvoArmAsmMovRegReg(a,1,armR4.Code)
+
+			call renvoArmAsmMovRegReg(a,2,armScratch.Code)
+
+			call renvoArmAsmMovRegReg(a,3,armR8.Code)
+
+			call renvoArmAsmMovRegReg(a,4,armR8.Code)
+
+			call renvoArmAsmMovRegImm(a,5,0)
+
+			call renvoArmAsmEmit(a,0xef000000)
+
+		}
+
+		renvoArmAsmAccessRaxBss(a:emitter, bssOff:int, insn:int) {
+			let at = a.Len()
+
+			call RTGUint32(a,0xe3000000|(armAddress.Code<<12))
+
+			call RTGUint32(a,0xe3400000|(armAddress.Code<<12))
+
+			call RTGUint32(a,insn)
+
+			call a.AbsoluteReloc(at,bssOff,RTGRelocationAbsoluteBSS)
+
+		}
+		renvoArmAsmBCondLabel(a:emitter, label:int, cond:int) {
+			let at = a.Len()
+
+			call renvoArmAsmEmit(a,(cond<<28)|0x0a000000)
+
+			call a.RelocAt(at,label)
+
+		}
+		renvoArmAsmCallLabel(a:emitter, label:int) {
+			let at = a.Len()
+
+			call renvoArmAsmEmit(a,0xeb000000)
+
+			call a.RelocAt(at,label)
+
+		}
+		renvoArmAsmCmpRcxRaxSet(a:emitter, setcc:int) {
+			call renvoArmAsmCmpRegReg(a,armTertiary.Code,armPrimary.Code)
+
+			let cond = renvoArmCondFromSetcc(setcc)
+
+			call renvoArmAsmCsetRax(a,cond)
+
+		}
+		renvoArmAsmJmpLabel(a:emitter, label:int) {
+			let at = a.Len()
+
+			call renvoArmAsmEmit(a,0xea000000)
+
+			call a.RelocAt(at,label)
+
+		}
+		renvoArmAsmMovRegAbs(a:emitter, reg:int, off:int, kind:int) {
+			let at = a.Len()
+
+			call RTGUint32(a,0xe3000000|(reg<<12))
+
+			call RTGUint32(a,0xe3400000|(reg<<12))
+
+			call RTGUint32(a,0xe08f0000|(reg<<12)|reg)
+
+			call a.AbsoluteReloc(at,off,kind)
+
+		}
+		renvoArmAsmPatchMovRegImmAt(a:emitter, at:int, reg:int, imm:int) {
+			let part = imm&65535
+
+			call a.PatchUint32(at,0xe3000000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
+
+			set part = (imm>>16)&65535
+
+			call a.PatchUint32(at+4,0xe3400000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
+
+		}
+
+		armCopyBytes(out:emitter) {
+			let destination = armR3
+			let source = armR4
+			let count = armSecondary
+			let value = armScratch2
+			let forward = out.NewLabel()
+			let forwardLoop = out.NewLabel()
+			let backwardLoop = out.NewLabel()
+			let done = out.NewLabel()
+			call armCompare(out,destination,source)
+			call armJumpCondition(out,record_condition(Code:9),forward)
+			call armEmitAddress(out,armScratch,record_address(Base:source,Index:count,Scale:1,))
+			call armCompare(out,destination,armScratch)
+			call armJumpCondition(out,record_condition(Code:2),forward)
+			call armEmitAddress(out,source,record_address(Base:source,Index:count,Scale:1,Displacement:-1,))
+			call armEmitAddress(out,destination,record_address(Base:destination,Index:count,Scale:1,Displacement:-1,))
+			call out.Mark(backwardLoop)
+			call renvoArmAsmCmpRegImm(out,count.Code,0)
+			call armJumpCondition(out,record_condition(Code:0),done)
+			call armLoadU8(out,value,record_address(Base:source))
+			call armStoreU8(out,record_address(Base:destination),value)
+			call armDecrement(out,source)
+			call armDecrement(out,destination)
+			call armDecrement(out,count)
+			call armJump(out,backwardLoop)
+			call out.Mark(forward)
+			call out.Mark(forwardLoop)
+			call renvoArmAsmCmpRegImm(out,count.Code,0)
+			call armJumpCondition(out,record_condition(Code:0),done)
+			call armLoadU8(out,value,record_address(Base:source))
+			call armStoreU8(out,record_address(Base:destination),value)
+			call armIncrement(out,source)
+			call armIncrement(out,destination)
+			call armDecrement(out,count)
+			call armJump(out,forwardLoop)
+			call out.Mark(done)
+		}
+		armELF32Image(a:emitter) -> bytes {
+			let codeOffset = 116
+			let dataOffset = codeOffset+len(a.Code())
+			let fileSize = dataOffset+len(a.Data())
+			let bssOffset = RTGAlignValue(fileSize,4096)
+			call armELFPatchAbsoluteRelocations(a,codeOffset,dataOffset,bssOffset)
+			return nativeELFExecutable32(a,40,0x05000000,codeOffset)
+		}
+		armFrameStart(out:emitter) -> int {
+			call out.Bytes4(0x00,0x48,0x2d,0xe9)
+			call renvoArmAsmMovRegReg(out,11,13)
+			let at = out.Len()
+			call renvoArmAsmEmit(out,0xe3009000)
+			call renvoArmAsmEmit(out,0xe04dd009)
+			return at
+		}
+		armHostSyscall(out:emitter) {
+			call renvoArmAsmSyscall(out)
+		}
+		armMove(out:emitter, destination:register, source:register) {
+			call renvoArmAsmMovRegReg(out,destination.Code,source.Code)
+		}
+		armMoveImmediate(out:emitter, destination:register, value:int64) {
+			call renvoArmAsmMovRegImm(out,destination.Code,int(value))
+		}
+		armSetCondition(out:emitter, condition:condition, destination:register) {
+			call renvoArmAsmEmit(out,0xe3a00000|(destination.Code<<12))
+			call renvoArmAsmEmit(out,(condition.Code<<28)|0x03a00001|(destination.Code<<12))
+		}
+		armShiftLeftImmediate(out:emitter, operand:register, value:byte) {
+			call armShiftImmediate(out,operand,value,0)
+		}
+		armShiftRightSignedImmediate(out:emitter, operand:register, value:byte) {
+			call armShiftImmediate(out,operand,value,0x40)
+		}
+		armShiftRightUnsignedImmediate(out:emitter, operand:register, value:byte) {
+			call armShiftImmediate(out,operand,value,0x20)
+		}
+
+		armLoadI16(out:emitter, destination:register, address:address) {
+			call armLoadExtra(out,destination,address,0xe15000f0)
+		}
+		armLoadI32(out:emitter, destination:register, address:address) {
+			call armLoadNative(out,destination,address)
+		}
+		armLoadI8(out:emitter, destination:register, address:address) {
+			call armLoadExtra(out,destination,address,0xe15000d0)
+		}
+		armLoadNative(out:emitter, destination:register, address:address) {
+			set address = armMemoryAddress(out,address,4)
+			call renvoArmAsmLoadRegMem(out,destination.Code,address.Base.Code,address.Displacement,4)
+		}
+		armLoadU16(out:emitter, destination:register, address:address) {
+			call armLoadExtra(out,destination,address,0xe15000b0)
+		}
+		armLoadU32(out:emitter, destination:register, address:address) {
+			call armLoadNative(out,destination,address)
+		}
+		armLoadU8(out:emitter, destination:register, address:address) {
+			set address = armMemoryAddress(out,address,1)
+			call renvoArmAsmLoadRegMem(out,destination.Code,address.Base.Code,address.Displacement,1)
+		}
+		armShiftImmediate(out:emitter, operand:register, value:byte, kind:int) {
+			call renvoArmAsmEmit(out,0xe1a00000|(operand.Code<<12)|((int(value)&31)<<7)|kind|operand.Code)
+		}
+		armStoreNative(out:emitter, address:address, source:register) {
+			call armStoreWidth(out,address,source,4)
+		}
+		armStoreU16(out:emitter, address:address, source:register) {
+			call armStoreWidth(out,address,source,2)
+		}
+		armStoreU32(out:emitter, address:address, source:register) {
+			call armStoreWidth(out,address,source,4)
+		}
+		armStoreU8(out:emitter, address:address, source:register) {
+			call armStoreWidth(out,address,source,1)
+		}
+		armStoreWidth(out:emitter, address:address, source:register, size:int) {
+			set address = armMemoryAddress(out,address,size)
+			call renvoArmAsmStoreRegMem(out,source.Code,address.Base.Code,address.Displacement,size)
+		}
+}
 }
 
 abi renvo_arm {
 	arch = arm
-	frame_start = go armFrameStart
+	frame_start = sequence armFrameStart
 	frame_finish = go armFrameFinish
 	call_words = [r0, r1, r2, r3, r4, r5]
 	overflow_stride = 4
@@ -8077,7 +8177,7 @@ format elf32_arm {
 	kind = elf
 	machine = 40
 	code_offset = 116
-	image = go armELF32Image
+	image = sequence armELF32Image
 }
 
 target linux/arm {

@@ -11,6 +11,7 @@ func validateMachineDeclarations(document Document) []Diagnostic {
 		diagnostics = append(diagnostics, validateDeclarationFields(document, declaration)...)
 		if declaration.Kind == DeclArch {
 			diagnostics = append(diagnostics, validateArch(document, declaration, goNames)...)
+			diagnostics = append(diagnostics, validateArchitectureSequences(document, declaration, goNames)...)
 			diagnostics = append(diagnostics, validateDirectEmitterBindings(document, declaration, goNames)...)
 		} else if declaration.Kind == DeclABI {
 			diagnostics = append(diagnostics, validateABI(document, declaration)...)
@@ -36,12 +37,15 @@ func validateArch(document Document, declaration Declaration, goNames []string) 
 		statement := declaration.Statements[i]
 		left, right, assignment := statementAssignment(statement)
 		if assignment && len(left) == 1 && left[0] == "patch_relocations" {
-			if len(right) != 2 || right[0] != "go" ||
-				stringIndex(goNames, right[1]) < 0 {
+			_, found := embeddedFunction{}, false
+			if len(right) == 2 && (right[0] == "go" || right[0] == "sequence") {
+				_, found = findBackendFunction(document, right[1])
+			}
+			if !found {
 				diagnostics = append(diagnostics, statementDiagnostic(document, statement,
 					"RTG-VALIDATE-019",
-					"architecture patch_relocations must bind an embedded Go algorithm"))
-			} else if function, found := findEmbeddedFunction(document, right[1]); found &&
+					"architecture patch_relocations must bind a backend algorithm"))
+			} else if function, found := findBackendFunction(document, right[1]); found &&
 				!directEmitterSignatureMatches(function, directEmitterOperation{
 					Name: "patch_relocations", Parameters: []string{"*RTGEmitter"},
 				}) {
@@ -78,23 +82,28 @@ func validateArch(document Document, declaration Declaration, goNames []string) 
 				if len(value) == 1 && value[0] == "bytes" {
 					continue
 				}
-				if len(value) != 2 || value[0] != "go" {
-					diagnostics = append(diagnostics, statementDiagnostic(document, statement.Children[j],
-						"RTG-VALIDATE-015", "instruction form "+name[0]+" must bind go algorithm or bytes"))
+				if validateWord32Form(value) {
 					continue
 				}
-				if stringIndex(goNames, value[1]) < 0 {
+				if len(value) != 2 || value[0] != "go" && value[0] != "sequence" {
 					diagnostics = append(diagnostics, statementDiagnostic(document, statement.Children[j],
-						"RTG-VALIDATE-011", "unknown embedded Go algorithm "+value[1]))
+						"RTG-VALIDATE-015", "instruction form "+name[0]+
+							" must bind a Go algorithm, bytes, or a typed word32 form"))
+					continue
+				}
+				if _, found := findBackendFunction(document, value[1]); !found {
+					diagnostics = append(diagnostics, statementDiagnostic(document, statement.Children[j],
+						"RTG-VALIDATE-011", "unknown backend algorithm "+value[1]))
 				}
 			}
 		}
 		if statementBlockName(statement) == "exports" {
 			for j := 0; j < len(statement.Children); j++ {
 				left, right, assignment := statementAssignment(statement.Children[j])
-				if !assignment || len(left) != 1 || len(right) != 2 || right[0] != "go" {
+				if !assignment || len(left) != 1 || len(right) != 2 ||
+					right[0] != "go" && right[0] != "sequence" {
 					diagnostics = append(diagnostics, statementDiagnostic(document, statement.Children[j],
-						"RTG-VALIDATE-016", "backend export must be name = go algorithm"))
+						"RTG-VALIDATE-016", "backend export must bind a Go algorithm or bounded sequence"))
 					continue
 				}
 				if stringIndex(seenExports, left[0]) >= 0 {
@@ -105,9 +114,14 @@ func validateArch(document Document, declaration Declaration, goNames []string) 
 					diagnostics = append(diagnostics, statementDiagnostic(document, statement.Children[j],
 						"RTG-VALIDATE-018", "embedded Go algorithm exported more than once "+right[1]))
 				}
-				if stringIndex(goNames, right[1]) < 0 {
+				if right[0] == "go" && stringIndex(goNames, right[1]) < 0 {
 					diagnostics = append(diagnostics, statementDiagnostic(document, statement.Children[j],
 						"RTG-VALIDATE-011", "unknown embedded Go algorithm "+right[1]))
+				} else if right[0] == "sequence" {
+					if _, found := findArchitectureSequence(declaration, right[1]); !found {
+						diagnostics = append(diagnostics, statementDiagnostic(document, statement.Children[j],
+							"RTG-VALIDATE-091", "unknown bounded sequence "+right[1]))
+					}
 				}
 				seenExports = append(seenExports, left[0])
 				seenExportedAlgorithms = append(seenExportedAlgorithms, right[1])
@@ -140,9 +154,11 @@ func validateArch(document Document, declaration Declaration, goNames []string) 
 			name := ""
 			if assignment && len(left) == 1 {
 				name = left[0]
-				if len(value) == 2 && value[0] == "go" && stringIndex(goNames, value[1]) < 0 {
-					diagnostics = append(diagnostics, statementDiagnostic(document, child,
-						"RTG-VALIDATE-011", "unknown embedded Go algorithm "+value[1]))
+				if len(value) == 2 && (value[0] == "go" || value[0] == "sequence") {
+					if _, found := findBackendFunction(document, value[1]); !found {
+						diagnostics = append(diagnostics, statementDiagnostic(document, child,
+							"RTG-VALIDATE-011", "unknown backend algorithm "+value[1]))
+					}
 				}
 			} else if len(child.Tokens) >= 2 {
 				name = child.Tokens[0]
@@ -162,6 +178,84 @@ func validateArch(document Document, declaration Declaration, goNames []string) 
 		}
 	}
 	return diagnostics
+}
+
+func validateArchitectureSequences(document Document, arch Declaration, goNames []string) []Diagnostic {
+	block, ok := declarationBlock(arch, "sequences")
+	if !ok {
+		return nil
+	}
+	var diagnostics []Diagnostic
+	var names []string
+	for i := 0; i < len(block.Children); i++ {
+		statement := block.Children[i]
+		sequence, decoded := decodeArchitectureSequence(statement)
+		if !decoded {
+			diagnostics = append(diagnostics, statementDiagnostic(document, statement,
+				"RTG-VALIDATE-090", "invalid bounded sequence signature"))
+			continue
+		}
+		if stringIndex(names, sequence.Name) >= 0 || stringIndex(goNames, sequence.Name) >= 0 {
+			diagnostics = append(diagnostics, statementDiagnostic(document, statement,
+				"RTG-VALIDATE-092", "duplicate backend algorithm "+sequence.Name))
+		}
+		names = append(names, sequence.Name)
+		hasReturn := false
+		for step := 0; step < len(sequence.Steps); step++ {
+			child := sequence.Steps[step]
+			if len(child.Children) != 0 || len(child.Tokens) == 0 ||
+				child.Tokens[0] != "call" && child.Tokens[0] != "let" &&
+					child.Tokens[0] != "set" && child.Tokens[0] != "var" &&
+					child.Tokens[0] != "increment" && child.Tokens[0] != "decrement" &&
+					child.Tokens[0] != "return" {
+				diagnostics = append(diagnostics, statementDiagnostic(document, child,
+					"RTG-VALIDATE-093",
+					"bounded sequence body contains an unsupported straight-line step"))
+				continue
+			}
+			if child.Tokens[0] != "return" && len(child.Tokens) < 2 {
+				diagnostics = append(diagnostics, statementDiagnostic(document, child,
+					"RTG-VALIDATE-093", "bounded sequence step is incomplete"))
+				continue
+			}
+			if child.Tokens[0] == "return" {
+				hasReturn = true
+				if step+1 != len(sequence.Steps) {
+					diagnostics = append(diagnostics, statementDiagnostic(document, child,
+						"RTG-VALIDATE-094", "bounded sequence return must be the final step"))
+				}
+			}
+		}
+		if sequence.HasResult != hasReturn {
+			diagnostics = append(diagnostics, statementDiagnostic(document, statement,
+				"RTG-VALIDATE-095", "bounded sequence result and return step disagree"))
+		}
+	}
+	return diagnostics
+}
+
+func validateWord32Form(value []string) bool {
+	if len(value) < 6 || value[0] != "word32" || value[1] != "(" ||
+		value[len(value)-1] != ")" {
+		return false
+	}
+	operands := decodeArchitectureFormOperands(value[1:])
+	if len(operands) == 0 {
+		return false
+	}
+	for i := 0; i < len(operands); i++ {
+		operand := operands[i]
+		if operand.Name == "" ||
+			operand.Kind != "reg" && operand.Kind != "condition" &&
+				operand.Kind != "label" && operand.Kind != "byte" &&
+				operand.Kind != "int" {
+			return false
+		}
+		if len(operand.Shifts) == 0 && !operand.Relocation {
+			return false
+		}
+	}
+	return true
 }
 
 func validateRegisterClass(document Document, declaration Declaration, statement Statement,
@@ -465,12 +559,12 @@ func validateABI(document Document, declaration Declaration) []Diagnostic {
 		if hook < 0 {
 			continue
 		}
-		if len(right) != 2 || right[0] != "go" {
+		if len(right) != 2 || right[0] != "go" && right[0] != "sequence" {
 			diagnostics = append(diagnostics, statementDiagnostic(document, declaration.Statements[i],
-				"RTG-VALIDATE-025", "ABI "+left[0]+" must bind an embedded Go algorithm"))
+				"RTG-VALIDATE-025", "ABI "+left[0]+" must bind a backend algorithm"))
 			continue
 		}
-		function, found := findEmbeddedFunction(document, right[1])
+		function, found := findBackendFunction(document, right[1])
 		result := ""
 		if left[0] == "frame_start" {
 			result = "int"
@@ -479,7 +573,7 @@ func validateABI(document Document, declaration Declaration) []Diagnostic {
 			Name: left[0], Parameters: hookParameters[hook], Result: result,
 		}) {
 			diagnostics = append(diagnostics, statementDiagnostic(document, declaration.Statements[i],
-				"RTG-VALIDATE-026", "ABI "+left[0]+" has an incompatible Go signature"))
+				"RTG-VALIDATE-026", "ABI "+left[0]+" has an incompatible backend signature"))
 		}
 	}
 	return diagnostics
@@ -507,17 +601,17 @@ func validateRuntime(document Document, declaration Declaration) []Diagnostic {
 			if hook < 0 {
 				continue
 			}
-			if len(right) != 2 || right[0] != "go" {
+			if len(right) != 2 || right[0] != "go" && right[0] != "sequence" {
 				return []Diagnostic{statementDiagnostic(document, declaration.Statements[i],
-					"RTG-VALIDATE-031", "runtime "+left[0]+" must bind an embedded Go algorithm")}
+					"RTG-VALIDATE-031", "runtime "+left[0]+" must bind a backend algorithm")}
 			}
-			function, found := findEmbeddedFunction(document, right[1])
+			function, found := findBackendFunction(document, right[1])
 			if !found || !directEmitterSignatureMatches(function, directEmitterOperation{
 				Name: left[0], Parameters: hookParameters[hook],
 				Result: hookResults[hook],
 			}) {
 				return []Diagnostic{statementDiagnostic(document, declaration.Statements[i],
-					"RTG-VALIDATE-032", "runtime "+left[0]+" has an incompatible Go signature")}
+					"RTG-VALIDATE-032", "runtime "+left[0]+" has an incompatible backend signature")}
 			}
 		}
 	}
@@ -573,17 +667,17 @@ func validateFormat(document Document, declaration Declaration) []Diagnostic {
 		if hook < 0 {
 			continue
 		}
-		if len(right) != 2 || right[0] != "go" {
+		if len(right) != 2 || right[0] != "go" && right[0] != "sequence" {
 			diagnostics = append(diagnostics, statementDiagnostic(document, statement,
-				"RTG-VALIDATE-042", "format "+left[0]+" must bind an embedded Go algorithm"))
+				"RTG-VALIDATE-042", "format "+left[0]+" must bind a backend algorithm"))
 			continue
 		}
-		function, found := findEmbeddedFunction(document, right[1])
+		function, found := findBackendFunction(document, right[1])
 		if !found || !directEmitterSignatureMatches(function, directEmitterOperation{
 			Name: left[0], Parameters: hookParameters[hook], Result: "[]byte",
 		}) {
 			diagnostics = append(diagnostics, statementDiagnostic(document, statement,
-				"RTG-VALIDATE-043", "format "+left[0]+" has an incompatible Go signature"))
+				"RTG-VALIDATE-043", "format "+left[0]+" has an incompatible backend signature"))
 		}
 	}
 	if bits, found := integerField(document, declaration, "address_bits"); found &&

@@ -223,7 +223,7 @@ func architectureGoHook(arch Declaration, name string) (string, bool) {
 	for i := 0; i < len(arch.Statements); i++ {
 		left, right, assignment := statementAssignment(arch.Statements[i])
 		if assignment && len(left) == 1 && left[0] == name &&
-			len(right) == 2 && right[0] == "go" {
+			len(right) == 2 && (right[0] == "go" || right[0] == "sequence") {
 			return right[1], true
 		}
 	}
@@ -248,7 +248,7 @@ func architectureBindings(arch Declaration) []architectureBinding {
 		}
 		name := joinStatementTokens(left)
 		binding := architectureBinding{Name: name, Statement: block.Children[i]}
-		if len(right) == 2 && right[0] == "go" {
+		if len(right) == 2 && (right[0] == "go" || right[0] == "sequence") {
 			binding.Algorithm = right[1]
 		} else if len(right) == 1 {
 			binding.Instruction = right[0]
@@ -384,9 +384,12 @@ func validateDirectEmitterBindings(document Document, arch Declaration, goNames 
 					" is both bound and rejected"))
 		}
 		seen = append(seen, binding.Name)
-		if binding.Algorithm != "" && stringIndex(goNames, binding.Algorithm) < 0 {
-			diagnostics = append(diagnostics, statementDiagnostic(document, binding.Statement,
-				"RTG-VALIDATE-011", "unknown embedded Go algorithm "+binding.Algorithm))
+		if binding.Algorithm != "" {
+			_, found := findBackendFunction(document, binding.Algorithm)
+			if !found {
+				diagnostics = append(diagnostics, statementDiagnostic(document, binding.Statement,
+					"RTG-VALIDATE-011", "unknown backend algorithm "+binding.Algorithm))
+			}
 		}
 		if binding.Instruction != "" && stringIndex(instructions, binding.Instruction) < 0 {
 			diagnostics = append(diagnostics, statementDiagnostic(document, binding.Statement,
@@ -415,7 +418,7 @@ func validateDirectEmitterBindings(document Document, arch Declaration, goNames 
 
 func directEmitterBindingFunction(document Document, arch Declaration, binding architectureBinding) (embeddedFunction, bool) {
 	if binding.Algorithm != "" {
-		return findEmbeddedFunction(document, binding.Algorithm)
+		return findBackendFunction(document, binding.Algorithm)
 	}
 	instructions, ok := declarationBlock(arch, "instructions")
 	if !ok {
@@ -428,8 +431,9 @@ func directEmitterBindingFunction(document Document, arch Declaration, binding a
 		name := ""
 		if assignment && len(left) == 1 {
 			name = left[0]
-			if name == binding.Instruction && len(right) == 2 && right[0] == "go" {
-				return findEmbeddedFunction(document, right[1])
+			if name == binding.Instruction && len(right) == 2 &&
+				(right[0] == "go" || right[0] == "sequence") {
+				return findBackendFunction(document, right[1])
 			}
 		} else if len(child.Tokens) >= 2 {
 			name = child.Tokens[0]
@@ -449,7 +453,10 @@ func directEmitterBindingFunction(document Document, arch Declaration, binding a
 				},
 			}, true
 		}
-		function, found := findEmbeddedFunction(document, form.Algorithm)
+		if form.Kind == "word32" {
+			return architectureFormFunction(form, binding.Instruction)
+		}
+		function, found := findBackendFunction(document, form.Algorithm)
 		if !found {
 			return embeddedFunction{}, false
 		}

@@ -34,6 +34,10 @@ func GenerateFixedBackend(resolved ResolveResult, targetName string) GenerateRes
 	source = appendBackendAPI(source)
 	source = appendArchitectureFacts(source, resolved.Document, target.Arch, true)
 	source = appendTargetEmbeddedGo(source, resolved.Document, target, true, false, true)
+	_, sequences := resolveArchitectureSequenceProjection(resolved.Document, target.Arch,
+		baseTargetGoRoots(resolved.Document, target), targetSequenceRoots(resolved.Document, target))
+	source = appendArchitectureSequences(source, resolved.Document, target.Arch,
+		false, true, false, sequences)
 	source = appendArchitectureBindings(source, resolved.Document, target.Arch, true, false)
 	source = appendDirectEmitterBindings(source, resolved.Document, target.Arch, false, true)
 	source = appendArchitectureHooks(source, resolved.Document, target.Arch, false)
@@ -72,6 +76,10 @@ func generateArchitectureBackend(resolved ResolveResult, archName string, packag
 	source := generateHeaderPackage(manifest, "arch/"+archName, packageName)
 	source = appendArchitectureFacts(source, resolved.Document, arch, true)
 	source = appendArchitectureEmbeddedGo(source, resolved.Document, arch, nativeEmitter)
+	_, sequences := resolveArchitectureSequenceProjection(resolved.Document, arch,
+		architectureGoRoots(arch), architectureSequenceRoots(arch, false, false))
+	source = appendArchitectureSequences(source, resolved.Document, arch,
+		nativeEmitter, true, false, sequences)
 	source = appendArchitectureBindings(source, resolved.Document, arch, true, nativeEmitter)
 	source = appendDirectEmitterBindings(source, resolved.Document, arch, nativeEmitter, true)
 	source = appendArchitectureHooks(source, resolved.Document, arch, nativeEmitter)
@@ -175,6 +183,10 @@ func GeneratePreparedBackend(resolved ResolveResult, targetName string) Generate
 	source = appendPreparedTargetFacts(source, target.Descriptor, true)
 	source = appendArchitectureFacts(source, resolved.Document, target.Arch, true)
 	source = appendTargetEmbeddedGo(source, resolved.Document, target, true, true, false)
+	_, sequences := resolveArchitectureSequenceProjection(resolved.Document, target.Arch,
+		baseTargetGoRoots(resolved.Document, target), targetSequenceRoots(resolved.Document, target))
+	source = appendArchitectureSequences(source, resolved.Document, target.Arch,
+		true, false, false, sequences)
 	source = appendArchitectureBindings(source, resolved.Document, target.Arch, true, true)
 	source = appendDirectEmitterBindings(source, resolved.Document, target.Arch, true, false)
 	source = appendPreparedDirectEmitterAdapters(source, resolved.Document, target)
@@ -398,6 +410,11 @@ func GenerateUniversalBackend(definitions []ResolveResult) GenerateResult {
 		for j := 0; j < len(definitions[i].Document.Declarations); j++ {
 			declaration := definitions[i].Document.Declarations[j]
 			if declaration.Kind == DeclArch {
+				_, sequences := resolveArchitectureSequenceProjection(definitions[i].Document,
+					declaration, architectureGoRoots(declaration),
+					architectureSequenceRoots(declaration, false, false))
+				source = appendArchitectureSequences(source, definitions[i].Document,
+					declaration, false, false, false, sequences)
 				source = appendArchitectureBindings(source, definitions[i].Document, declaration, true, false)
 				source = appendDirectEmitterBindings(source, definitions[i].Document, declaration, false, false)
 				source = appendArchitectureHooks(source, definitions[i].Document, declaration, false)
@@ -1592,6 +1609,8 @@ func appendMangledEmbeddedGo(source []byte, document Document, nativeEmitter boo
 // architecture-only projection or prevent fixed-target pruning.
 func appendArchitectureEmbeddedGo(source []byte, document Document, arch Declaration, nativeEmitter bool) []byte {
 	roots := architectureGoRoots(arch)
+	roots, _ = resolveArchitectureSequenceProjection(
+		document, arch, roots, architectureSequenceRoots(arch, false, false))
 	return appendReachableEmbeddedGo(source, document, roots, nativeEmitter, architectureExports(arch))
 }
 
@@ -1670,6 +1689,7 @@ func architectureExportGoRoots(arch Declaration) []string {
 type embeddedExport struct {
 	External string
 	Local    string
+	Kind     string
 }
 
 func architectureExports(arch Declaration) []embeddedExport {
@@ -1680,10 +1700,13 @@ func architectureExports(arch Declaration) []embeddedExport {
 	var exports []embeddedExport
 	for i := 0; i < len(block.Children); i++ {
 		left, right, assignment := statementAssignment(block.Children[i])
-		if !assignment || len(left) != 1 || len(right) != 2 || right[0] != "go" {
+		if !assignment || len(left) != 1 || len(right) != 2 ||
+			right[0] != "go" && right[0] != "sequence" {
 			continue
 		}
-		exports = append(exports, embeddedExport{External: left[0], Local: right[1]})
+		exports = append(exports, embeddedExport{
+			External: left[0], Local: right[1], Kind: right[0],
+		})
 	}
 	return exports
 }

@@ -170,6 +170,11 @@ func validateEmbeddedGoTypes(document Document) (Diagnostic, bool) {
 	source = append(source, embeddedGoPrelude...)
 	source = appendGeneratedSymbolPrelude(source, document)
 	for i := 0; i < len(document.Declarations); i++ {
+		if document.Declarations[i].Kind == DeclArch {
+			source = appendStatefulArchitectureSequences(source, document.Declarations[i])
+		}
+	}
+	for i := 0; i < len(document.Declarations); i++ {
 		declaration := document.Declarations[i]
 		if declaration.Kind != DeclGo {
 			continue

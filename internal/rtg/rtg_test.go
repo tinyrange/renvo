@@ -320,6 +320,82 @@ func TestDirectEmitterV1HasCompleteEffectContracts(t *testing.T) {
 	}
 }
 
+func TestDeclarativeWord32InstructionForm(t *testing.T) {
+	ensureDirectEmitterV1()
+	source := `definition 1
+unit word
+implements direct_emitter_v1
+
+arch fixed32 {
+	alias = "fixed"
+	endian = little
+	word_bits = 32
+	pointer_bits = 32
+	forms {
+		rr = word32(destination:reg@0+5, source:reg@16)
+		branch = word32(label:label@reloc)
+	}
+	instructions {
+		move_word rr 0x8b000000
+		jump_word branch 0x14000000
+	}
+	sequences {
+		emitPair(out:emitter, value:int) {
+			call RTGUint32(out, value)
+			call RTGUint32(out, value)
+		}
+	}
+	exports {
+		renvoEmitPair = sequence emitPair
+	}
+	bind {
+		move = move_word
+		jump = jump_word
+	}
+	reject = [`
+	for i := 0; i < len(directEmitterV1); i++ {
+		if directEmitterV1[i].Name != "move" && directEmitterV1[i].Name != "jump" {
+			source += directEmitterV1[i].Name + ","
+		}
+	}
+	source += `]
+}
+abi fixed_abi { arch = fixed32 }
+runtime fixed_runtime { operation print { builtin = true } }
+format fixed_image { address_bits = 32 }
+target test/fixed {
+	family = native_v1
+	os = test
+	arch = fixed32
+	abi = fixed_abi
+	runtime = fixed_runtime
+	executable = fixed_image
+}
+`
+	document := Parse([]byte(source), "word32.rtg")
+	resolved := ResolveDefinitions(document)
+	if !resolved.Ok {
+		t.Fatalf("Resolve failed: %#v", resolved.Diagnostics)
+	}
+	generated := GenerateArchitectureBackend(resolved, "fixed32", "backend")
+	if !generated.Ok {
+		t.Fatalf("GenerateArchitectureBackend failed: %#v", generated.Diagnostics)
+	}
+	text := string(generated.Source)
+	for _, want := range []string{
+		"func rtgWordMoveWord(out *renvoAsm, destination RTGRegister, source RTGRegister)",
+		"renvoRTGUint32(out, 0x8b000000|(destination.Code)|(destination.Code<<5)|(source.Code<<16))",
+		"func rtgWordJumpWord(out *renvoAsm, label int)",
+		"renvoRTGReloc(out, label)",
+		"func renvoEmitPair(out *renvoAsm, value int)",
+		"renvoAsmEmit32(out,value)",
+	} {
+		if !containsText(text, want) {
+			t.Errorf("generated source missing %q:\n%s", want, text)
+		}
+	}
+}
+
 const testMachineDefinition = `definition 1
 unit tiny
 implements direct_emitter_v1

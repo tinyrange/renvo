@@ -19,6 +19,14 @@ type architectureForm struct {
 	Name      string
 	Algorithm string
 	Kind      string
+	Operands  []architectureFormOperand
+}
+
+type architectureFormOperand struct {
+	Name       string
+	Kind       string
+	Shifts     []string
+	Relocation bool
 }
 
 // appendArchitectureBindings specializes declarative instruction rows into
@@ -37,8 +45,9 @@ func appendArchitectureBindings(out []byte, document Document, arch Declaration,
 	forms := architectureForms(arch)
 	for i := 0; i < len(instructions.Children); i++ {
 		left, right, assignment := statementAssignment(instructions.Children[i])
-		if assignment && len(left) == 1 && len(right) == 2 && right[0] == "go" {
-			function, found := findEmbeddedFunction(document, right[1])
+		if assignment && len(left) == 1 && len(right) == 2 &&
+			(right[0] == "go" || right[0] == "sequence") {
+			function, found := findBackendFunction(document, right[1])
 			if !found {
 				continue
 			}
@@ -57,13 +66,96 @@ func appendArchitectureBindings(out []byte, document Document, arch Declaration,
 			out = appendFixedInstructionWrapper(out, row, prefix, nativeEmitter)
 			continue
 		}
-		function, found := findEmbeddedFunction(document, form.Algorithm)
+		if form.Kind == "word32" {
+			out = appendWord32InstructionWrapper(out, row, form, prefix, nativeEmitter)
+			continue
+		}
+		function, found := findBackendFunction(document, form.Algorithm)
 		if !found {
 			continue
 		}
 		out = appendFormInstructionWrapper(out, row, function, names, prefix, rewriteAlgorithms, nativeEmitter)
 	}
 	return out
+}
+
+func appendWord32InstructionWrapper(out []byte, row []string, form architectureForm, prefix string, nativeEmitter bool) []byte {
+	if len(row) < 3 {
+		return out
+	}
+	out = append(out, "\n// Generated from declarative word32 instruction "...)
+	out = append(out, row[0]...)
+	out = append(out, ".\nfunc "...)
+	out = append(out, prefix...)
+	out = append(out, instructionGoSuffix(row[0])...)
+	out = append(out, "(out "...)
+	if nativeEmitter {
+		out = append(out, "*renvoAsm"...)
+	} else {
+		out = append(out, "*RTGEmitter"...)
+	}
+	for i := 0; i < len(form.Operands); i++ {
+		out = append(out, ", "...)
+		out = append(out, form.Operands[i].Name...)
+		out = append(out, ' ')
+		out = appendArchitectureFormOperandType(out, form.Operands[i].Kind, nativeEmitter)
+	}
+	out = append(out, ") {\n\t"...)
+	if nativeEmitter {
+		out = append(out, "renvoRTGUint32(out, "...)
+	} else {
+		out = append(out, "RTGUint32(out, "...)
+	}
+	out = append(out, row[2]...)
+	for i := 0; i < len(form.Operands); i++ {
+		operand := form.Operands[i]
+		for j := 0; j < len(operand.Shifts); j++ {
+			out = append(out, "|("...)
+			out = append(out, operand.Name...)
+			if operand.Kind == "reg" || operand.Kind == "condition" {
+				out = append(out, ".Code"...)
+			}
+			if operand.Shifts[j] != "0" {
+				out = append(out, "<<"...)
+				out = append(out, operand.Shifts[j]...)
+			}
+			out = append(out, ')')
+		}
+	}
+	out = append(out, ")\n"...)
+	for i := 0; i < len(form.Operands); i++ {
+		if !form.Operands[i].Relocation {
+			continue
+		}
+		out = append(out, '\t')
+		if nativeEmitter {
+			out = append(out, "renvoRTGReloc(out, "...)
+		} else {
+			out = append(out, "RTGReloc(out, "...)
+		}
+		out = append(out, form.Operands[i].Name...)
+		out = append(out, ")\n"...)
+	}
+	return append(out, "}\n"...)
+}
+
+func appendArchitectureFormOperandType(out []byte, kind string, nativeEmitter bool) []byte {
+	if kind == "reg" {
+		return append(out, "RTGRegister"...)
+	}
+	if kind == "condition" {
+		return append(out, "RTGCondition"...)
+	}
+	if kind == "label" {
+		if nativeEmitter {
+			return append(out, "int"...)
+		}
+		return append(out, "RTGLabel"...)
+	}
+	if kind == "byte" {
+		return append(out, "byte"...)
+	}
+	return append(out, "int"...)
 }
 
 func appendFixedInstructionWrapper(out []byte, row []string, prefix string, nativeEmitter bool) []byte {
@@ -252,13 +344,88 @@ func architectureForms(arch Declaration) []architectureForm {
 	var forms []architectureForm
 	for i := 0; i < len(block.Children); i++ {
 		left, right, assignment := statementAssignment(block.Children[i])
-		if assignment && len(left) == 1 && len(right) == 2 && right[0] == "go" {
-			forms = append(forms, architectureForm{Name: left[0], Algorithm: right[1], Kind: "go"})
+		if assignment && len(left) == 1 && len(right) == 2 &&
+			(right[0] == "go" || right[0] == "sequence") {
+			forms = append(forms, architectureForm{Name: left[0], Algorithm: right[1], Kind: right[0]})
 		} else if assignment && len(left) == 1 && len(right) == 1 && right[0] == "bytes" {
 			forms = append(forms, architectureForm{Name: left[0], Kind: "bytes"})
+		} else if assignment && len(left) == 1 && len(right) >= 3 && right[0] == "word32" {
+			form := architectureForm{Name: left[0], Kind: "word32"}
+			form.Operands = decodeArchitectureFormOperands(right[1:])
+			forms = append(forms, form)
 		}
 	}
 	return forms
+}
+
+func decodeArchitectureFormOperands(tokens []string) []architectureFormOperand {
+	var operands []architectureFormOperand
+	for at := 0; at < len(tokens); {
+		if tokens[at] == "(" || tokens[at] == ")" || tokens[at] == "," {
+			at++
+			continue
+		}
+		if at+3 >= len(tokens) || tokens[at+1] != ":" {
+			break
+		}
+		operand := architectureFormOperand{Name: tokens[at], Kind: tokens[at+2]}
+		at += 3
+		if at >= len(tokens) || tokens[at] != "@" {
+			break
+		}
+		at++
+		for at < len(tokens) {
+			if tokens[at] == "reloc" {
+				operand.Relocation = true
+				at++
+			} else {
+				operand.Shifts = append(operand.Shifts, tokens[at])
+				at++
+			}
+			if at >= len(tokens) || tokens[at] != "+" {
+				break
+			}
+			at++
+		}
+		operands = append(operands, operand)
+	}
+	return operands
+}
+
+func architectureFormFunction(form architectureForm, name string) (embeddedFunction, bool) {
+	if form.Kind != "word32" {
+		return embeddedFunction{}, false
+	}
+	function := embeddedFunction{
+		Name: name,
+		Parameters: []embeddedParameter{{
+			Name: "out", Source: []byte("out *RTGEmitter"),
+		}},
+	}
+	for i := 0; i < len(form.Operands); i++ {
+		operand := form.Operands[i]
+		source := append([]byte(operand.Name+" "), architectureFormOperandType(operand.Kind)...)
+		function.Parameters = append(function.Parameters, embeddedParameter{
+			Name: operand.Name, Source: source,
+		})
+	}
+	return function, true
+}
+
+func architectureFormOperandType(kind string) string {
+	if kind == "reg" {
+		return "RTGRegister"
+	}
+	if kind == "condition" {
+		return "RTGCondition"
+	}
+	if kind == "label" {
+		return "RTGLabel"
+	}
+	if kind == "byte" {
+		return "byte"
+	}
+	return "int"
 }
 
 func lookupArchitectureForm(forms []architectureForm, name string) (architectureForm, bool) {
@@ -359,6 +526,21 @@ func findEmbeddedFunction(document Document, name string) (embeddedFunction, boo
 				Result:     functionResult(file, fn),
 				HasResult:  fn.ResultStart != fn.ResultEnd,
 			}, true
+		}
+	}
+	return embeddedFunction{}, false
+}
+
+func findBackendFunction(document Document, name string) (embeddedFunction, bool) {
+	if function, found := findEmbeddedFunction(document, name); found {
+		return function, true
+	}
+	for i := 0; i < len(document.Declarations); i++ {
+		if document.Declarations[i].Kind != DeclArch {
+			continue
+		}
+		if sequence, found := findArchitectureSequence(document.Declarations[i], name); found {
+			return architectureSequenceFunction(sequence), true
 		}
 	}
 	return embeddedFunction{}, false
