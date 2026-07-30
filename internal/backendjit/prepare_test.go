@@ -254,7 +254,7 @@ func TestCompiledInBootstrapPreparesAndCachesBackend(t *testing.T) {
 		t.Fatal(err)
 	}
 	entryCommand := exec.Command(entryExecutable, "definition-owned-entry")
-	entryCommand.Env = append(os.Environ(), "PATH=/definition-owned-entry")
+	entryCommand.Env = []string{"PATH=/definition-owned-entry"}
 	entryExecution, err := entryCommand.CombinedOutput()
 	if err != nil {
 		t.Fatalf("custom backend entry output failed: %v\n%s", err, entryExecution)

@@ -22,9 +22,6 @@ func runRenvoScript(args []string, env []string) (int, string) {
 	if parseError != "" {
 		return 1, "renvo: error RENVO-RUN-001 (options): " + parseError + "\n" + RunHelpText
 	}
-	if len(renvoCommandDiagnosticBuffer) == 0 {
-		renvoCommandDiagnosticBuffer = make([]byte, renvoCommandDiagnosticCapacity)
-	}
 	target := renvoRunTarget()
 	if target == "" {
 		return 1, "renvo: error RENVO-RUN-002 (runtime): scripts cannot execute on this host target\n"
@@ -37,7 +34,7 @@ func runRenvoScript(args []string, env []string) (int, string) {
 	}
 	built := buildFromFSOneShotCompactWithModuleCache(compileArgs, renvoWorkDir(env), renvoStdRoot(args, env), renvoModuleCache(env), RenvoFS{})
 	if !built.Ok {
-		return finishRenvoCommandFailure(renvoCommandDiagnosticBuffer, built.Diagnostic, resetArena, mark)
+		return finishRenvoCommandFailure(renvoCommandDiagnosticBuffer[:], built.Diagnostic, resetArena, mark)
 	}
 	unit := built.Unit
 	arenaSize := backendArenaSize(target, built.Options.Tags, built.Options.ArenaSize)
@@ -60,7 +57,7 @@ func runRenvoScript(args []string, env []string) (int, string) {
 		if resetArena {
 			arena.PersistReset(persistMark)
 		}
-		return finishRenvoCommandFailure(renvoCommandDiagnosticBuffer, Diagnostic{Phase: "backend", Code: "RENVO-BACKEND-001", Message: "backend compilation failed"}, false, 0)
+		return finishRenvoCommandFailure(renvoCommandDiagnosticBuffer[:], Diagnostic{Phase: "backend", Code: "RENVO-BACKEND-001", Message: "backend compilation failed"}, false, 0)
 	}
 	imageTarget, _, native, imageOK := linkedimage.Payload(image)
 	if !imageOK || imageTarget != renvoRunTargetID() || len(native) == 0 {

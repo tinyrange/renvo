@@ -17,7 +17,9 @@ const renvoCommandDiagnosticCapacity = 8192
 
 // Keep one capture buffer outside per-build arena marks. A failed frontend can
 // copy its diagnostic here before resetting all of its transient allocations.
-var renvoCommandDiagnosticBuffer []byte
+// Static storage also avoids consuming 8 KiB of the compiler's managed arena
+// before the first build.
+var renvoCommandDiagnosticBuffer [renvoCommandDiagnosticCapacity]byte
 
 func RunRenvoCommand(args []string, env []string) int {
 	status, output := runRenvoCommand(args, env)
@@ -42,9 +44,6 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 	if CommandHelpRequested(args) {
 		return 0, HelpText
 	}
-	if len(renvoCommandDiagnosticBuffer) == 0 {
-		renvoCommandDiagnosticBuffer = make([]byte, renvoCommandDiagnosticCapacity)
-	}
 	commandArgs := args
 	if len(commandArgs) > 0 {
 		commandArgs = commandArgs[1:]
@@ -56,7 +55,7 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 	}
 	built := buildFromFSOneShotCompactWithModuleCache(commandArgs, renvoWorkDir(env), renvoStdRoot(args, env), renvoModuleCache(env), RenvoFS{})
 	if !built.Ok {
-		return finishRenvoCommandFailure(renvoCommandDiagnosticBuffer, built.Diagnostic, resetArena, mark)
+		return finishRenvoCommandFailure(renvoCommandDiagnosticBuffer[:], built.Diagnostic, resetArena, mark)
 	}
 	unit := built.Unit
 	target := built.Options.Target
@@ -69,7 +68,7 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 		if output == "-" {
 			print(string(unit))
 		} else if os.WriteFile(output, unit, 0644) != nil {
-			return finishRenvoCommandFailure(renvoCommandDiagnosticBuffer, Diagnostic{Phase: "unit", Code: "RENVO-UNIT-002", Message: "failed to write linked unit"}, resetArena, mark)
+			return finishRenvoCommandFailure(renvoCommandDiagnosticBuffer[:], Diagnostic{Phase: "unit", Code: "RENVO-UNIT-002", Message: "failed to write linked unit"}, resetArena, mark)
 		}
 		if resetArena {
 			arena.Reset(mark)
@@ -112,7 +111,7 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 		if compileDiagnostic.Valid() {
 			diagnostic = compileDiagnostic
 		}
-		status, message := finishRenvoCommandFailure(renvoCommandDiagnosticBuffer, diagnostic, false, 0)
+		status, message := finishRenvoCommandFailure(renvoCommandDiagnosticBuffer[:], diagnostic, false, 0)
 		if resetArena {
 			arena.PersistReset(persistMark)
 		}
