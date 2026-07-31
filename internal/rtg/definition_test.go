@@ -275,6 +275,36 @@ func Test386DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 	}
 }
 
+func TestWindows386RuntimeIOUsesBoundedSequences(t *testing.T) {
+	const filename = "../../backend/definitions/windows_386.rtg"
+	source, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, opaque := range []string{"io_template", "read_code", "write_code"} {
+		if strings.Contains(string(source), opaque) {
+			t.Fatalf("Windows/386 runtime I/O retained opaque %s", opaque)
+		}
+	}
+	resolved := resolveNativeTarget(t, "windows/386")
+	sequences := architectureSequences(resolved.Targets[0].Arch)
+	for _, sequence := range []string{
+		"WindowsRead", "WindowsWrite", "WindowsReadAt", "WindowsWriteAt",
+		"WindowsRuntimeIOBody",
+	} {
+		found := false
+		for i := 0; i < len(sequences); i++ {
+			if strings.HasSuffix(sequences[i].Name, sequence) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Windows/386 architecture omitted %s sequence", sequence)
+		}
+	}
+}
+
 func sortedNativeEntrypoints() []string {
 	filenames := make([]string, 0, len(nativeDefinitionEntrypoints))
 	for _, filename := range nativeDefinitionEntrypoints {

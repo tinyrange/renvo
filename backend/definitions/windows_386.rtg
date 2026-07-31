@@ -106,6 +106,163 @@ extend arch x86_32 {
 			moveImmediate(out, ecx, 5)
 			out.Mark(createDone)
 		}
+		windowsCompareImmediate(out:emitter, register:register, value:int) {
+			out.Byte(0x83)
+			emitModRM(out, 3, 7, registerLowBits(register))
+			out.AppendByte(int(value))
+		}
+		windowsPushRegister(out:emitter, register:register) {
+			out.AppendByte(0x50+register.Code)
+		}
+		windowsPopRegister(out:emitter, register:register) {
+			out.AppendByte(0x58+register.Code)
+		}
+		windowsPushImmediate(out:emitter, value:int) {
+			out.Byte(0x6a)
+			out.AppendByte(int(value))
+		}
+		windowsPushBSSAddress(out:emitter, offset:int) {
+			out.Byte(0x68)
+			let at = out.Len()
+			out.Int32(0)
+			out.AbsoluteReloc(at, offset, RTGRelocationAbsoluteBSS)
+		}
+		windowsStoreEAXBSS(out:emitter, offset:int) {
+			out.Byte(0xa3)
+			let at = out.Len()
+			out.Int32(0)
+			out.AbsoluteReloc(at, offset, RTGRelocationAbsoluteBSS)
+		}
+		windowsLoadEAXBSS(out:emitter, offset:int) {
+			out.Byte(0xa1)
+			let at = out.Len()
+			out.Int32(0)
+			out.AbsoluteReloc(at, offset, RTGRelocationAbsoluteBSS)
+		}
+		windowsGetStandardHandle(out:emitter, identifier:int) {
+			windowsPushImmediate(out, identifier)
+			windowsCallImport(out, 6)
+			move(out, ebx, eax)
+		}
+		windowsReadHandle(out:emitter) {
+			let ready = out.NewLabel()
+			windowsCompareImmediate(out, ebx, 0)
+			jumpCondition(out, record_condition(JumpOpcode:0x85), ready)
+			windowsGetStandardHandle(out, -10)
+			out.Mark(ready)
+		}
+		windowsWriteHandle(out:emitter) {
+			let standardError = out.NewLabel()
+			let ready = out.NewLabel()
+			windowsCompareImmediate(out, ebx, 1)
+			jumpCondition(out, record_condition(JumpOpcode:0x85), standardError)
+			windowsGetStandardHandle(out, -11)
+			jump(out, ready)
+			out.Mark(standardError)
+			windowsCompareImmediate(out, ebx, 2)
+			jumpCondition(out, record_condition(JumpOpcode:0x85), ready)
+			windowsGetStandardHandle(out, -12)
+			out.Mark(ready)
+		}
+		windowsReadWriteCall(out:emitter, importID:int, countOffset:int) {
+			windowsPushImmediate(out, 0)
+			windowsPushBSSAddress(out, countOffset)
+			windowsPushRegister(out, edx)
+			windowsPushRegister(out, esi)
+			windowsPushRegister(out, ebx)
+			windowsCallImport(out, importID)
+		}
+		windowsRestorePosition(out:emitter, countOffset:int) {
+			windowsPushImmediate(out, 0)
+			windowsPushImmediate(out, 0)
+			windowsLoadEAXBSS(out, countOffset+8)
+			windowsPushRegister(out, eax)
+			windowsPushRegister(out, ebx)
+			windowsCallImport(out, 5)
+		}
+		windowsRuntimeIOBody(out:emitter, importID:int, countOffset:int) {
+			let sequential = out.NewLabel()
+			let positionalFailed = out.NewLabel()
+			let restore = out.NewLabel()
+			let sequentialFailed = out.NewLabel()
+			windowsCompareImmediate(out, ecx, 0)
+			jumpCondition(out, record_condition(JumpOpcode:0x8c), sequential)
+
+			# Preserve the requested offset and byte count while querying and
+			# changing the process-owned Windows file pointer.
+			windowsPushRegister(out, ecx)
+			windowsPushRegister(out, edx)
+			windowsPushImmediate(out, 1)
+			windowsPushImmediate(out, 0)
+			windowsPushImmediate(out, 0)
+			windowsPushRegister(out, ebx)
+			windowsCallImport(out, 5)
+			windowsStoreEAXBSS(out, countOffset+8)
+			windowsPopRegister(out, edx)
+			windowsPopRegister(out, ecx)
+			windowsPushRegister(out, ecx)
+			windowsPushRegister(out, edx)
+			windowsPushImmediate(out, 0)
+			windowsPushImmediate(out, 0)
+			windowsPushRegister(out, ecx)
+			windowsPushRegister(out, ebx)
+			windowsCallImport(out, 5)
+			windowsPopRegister(out, edx)
+			windowsPopRegister(out, ecx)
+
+			windowsReadWriteCall(out, importID, countOffset)
+			windowsCompareImmediate(out, eax, 0)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), positionalFailed)
+			windowsLoadEAXBSS(out, countOffset)
+			jump(out, restore)
+			out.Mark(positionalFailed)
+			moveImmediate(out, eax, -1)
+			out.Mark(restore)
+			windowsStoreEAXBSS(out, countOffset)
+			windowsRestorePosition(out, countOffset)
+			windowsLoadEAXBSS(out, countOffset)
+			out.Byte(0xc3)
+
+			out.Mark(sequential)
+			windowsReadWriteCall(out, importID, countOffset)
+			windowsCompareImmediate(out, eax, 0)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), sequentialFailed)
+			windowsLoadEAXBSS(out, countOffset)
+			out.Byte(0xc3)
+			out.Mark(sequentialFailed)
+			moveImmediate(out, eax, -1)
+			out.Byte(0xc3)
+		}
+		windowsReadAt(out:emitter) {
+			let helper = out.NewLabel()
+			let after = out.NewLabel()
+			let countOffset = out.ReserveBSS(16, 4)
+			jump(out, after)
+			out.Mark(helper)
+			windowsReadHandle(out)
+			windowsRuntimeIOBody(out, 3, countOffset)
+			out.Mark(after)
+			call(out, helper)
+		}
+		windowsRead(out:emitter) {
+			moveImmediate(out, ecx, -1)
+			windowsReadAt(out)
+		}
+		windowsWriteAt(out:emitter) {
+			let helper = out.NewLabel()
+			let after = out.NewLabel()
+			let countOffset = out.ReserveBSS(16, 4)
+			jump(out, after)
+			out.Mark(helper)
+			windowsWriteHandle(out)
+			windowsRuntimeIOBody(out, 4, countOffset)
+			out.Mark(after)
+			call(out, helper)
+		}
+		windowsWrite(out:emitter) {
+			moveImmediate(out, ecx, -1)
+			windowsWriteAt(out)
+		}
 	}
 }
 
@@ -123,40 +280,6 @@ runtime windows_386 {
 		CreateFileA, CloseHandle, ReadFile, WriteFile, SetFilePointer,
 		GetStdHandle, GetCommandLineA, ExitProcess, GetEnvironmentStringsA
 	]
-	io_template {
-		bss count 16 4
-		read_code = "\x83\xfb\x00\x0f\x84\x05\x00\x00\x00\xe9\x0a\x00\x00\x00\x6a\xf6\xff\x15\x00\x00\x00\x00\x89\xc3\x83\xf9\x00\x0f\x8c\x49\x00\x00\x00\x51\x52\x6a\x01\x6a\x00\x6a\x00\x53\xff\x15\x00\x00\x00\x00\xa3\x00\x00\x00\x00\x5a\x59\x51\x52\x6a\x00\x6a\x00\x51\x53\xff\x15\x00\x00\x00\x00\x5a\x59\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x2d\x00\x00\x00\xa1\x00\x00\x00\x00\xe9\x26\x00\x00\x00\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x06\x00\x00\x00\xa1\x00\x00\x00\x00\xc3\x6a\xff\x58\xc3\x6a\xff\x58\xa3\x00\x00\x00\x00\x6a\x00\x6a\x00\xa1\x00\x00\x00\x00\x50\x53\xff\x15\x00\x00\x00\x00\xa1\x00\x00\x00\x00\xc3"
-		write_code = "\x83\xfb\x01\x0f\x84\x0e\x00\x00\x00\x83\xfb\x02\x0f\x84\x14\x00\x00\x00\xe9\x19\x00\x00\x00\x6a\xf5\xff\x15\x00\x00\x00\x00\x89\xc3\xe9\x0a\x00\x00\x00\x6a\xf4\xff\x15\x00\x00\x00\x00\x89\xc3\x83\xf9\x00\x0f\x8c\x49\x00\x00\x00\x51\x52\x6a\x01\x6a\x00\x6a\x00\x53\xff\x15\x00\x00\x00\x00\xa3\x00\x00\x00\x00\x5a\x59\x51\x52\x6a\x00\x6a\x00\x51\x53\xff\x15\x00\x00\x00\x00\x5a\x59\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x2d\x00\x00\x00\xa1\x00\x00\x00\x00\xe9\x26\x00\x00\x00\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x06\x00\x00\x00\xa1\x00\x00\x00\x00\xc3\x6a\xff\x58\xc3\x6a\xff\x58\xa3\x00\x00\x00\x00\x6a\x00\x6a\x00\xa1\x00\x00\x00\x00\x50\x53\xff\x15\x00\x00\x00\x00\xa1\x00\x00\x00\x00\xc3"
-		read_relocation 23 import 6
-		read_relocation 49 import 5
-		read_relocation 54 bss count 8
-		read_relocation 70 import 5
-		read_relocation 79 bss count
-		read_relocation 88 import 3
-		read_relocation 102 bss count
-		read_relocation 114 bss count
-		read_relocation 123 import 3
-		read_relocation 137 bss count
-		read_relocation 150 bss count
-		read_relocation 159 bss count 8
-		read_relocation 167 import 5
-		read_relocation 172 bss count
-		write_relocation 32 import 6
-		write_relocation 47 import 6
-		write_relocation 73 import 5
-		write_relocation 78 bss count 8
-		write_relocation 94 import 5
-		write_relocation 103 bss count
-		write_relocation 112 import 4
-		write_relocation 126 bss count
-		write_relocation 138 bss count
-		write_relocation 147 import 4
-		write_relocation 161 bss count
-		write_relocation 174 bss count
-		write_relocation 183 bss count 8
-		write_relocation 191 import 5
-		write_relocation 196 bss count
-	}
 	entry template {
 		max_parameters = 2
 		bss args 32768 16
@@ -177,10 +300,10 @@ runtime windows_386 {
 		relocation 235 bss environment
 		relocation 240 bss environmentLength
 	}
-	operation read { template = io }
-	operation write { template = io }
-	operation read_at { template = io }
-	operation write_at { template = io }
+	operation read { emit = sequence windowsRead }
+	operation write { emit = sequence windowsWrite }
+	operation read_at { emit = sequence windowsReadAt }
+	operation write_at { emit = sequence windowsWriteAt }
 	operation open { emit = sequence windowsRuntimeOpen }
 	operation close { emit = sequence windowsRuntimeClose }
 	operation chmod { emit = sequence windowsRuntimeChmod }

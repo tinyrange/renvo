@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "03cf124eecc6f68001b9571f3370f93aea5a9798b6b666ffdfc9b3f357a1c82d"
+const CompilerSourceDigest = "e984311e29b809f2f0787bd52d73b0f9a2107469bb157feb02114ef4068b1c03"
 
 // source: backend/compiler_common_impl.go
 
@@ -26163,7 +26163,7 @@ if target == renvoTargetWindowsAmd64 {
 return "windows/amd64", "m\xd3\xf5\x95\x1d\x04\xda\xc8#\xf1ʔ\x8b^a\xe9\xc4}\x92\xe3CF\uf630\x83\x89v\x9b\xb4\x14b", 3, true
 }
 if target == renvoTargetWindows386 {
-return "windows/386", "\xa0\x92\xef1%\x81\xf8\xfd\x8a<\"Ls\x14VJ\x06\f\xa8\xf4\xbc\x80\x84\xeb\x94K\x9cJ(d\x83\xf2", 3, true
+return "windows/386", "/p G 2\x9f/\x1c\x97\xe5M\xa9\xd5@Ҋ\xd7\x06hm\xe8\"\xf4S\x93\x1c#/B\x01\xee", 3, true
 }
 if target == renvoTargetWasiWasm32 {
 return "wasi/wasm32", "\x9e\xcdc\x862\xfb\x98\xe7\xfb\xf8\x16ܔ\xc4>\xf2\x04e\xf5\xb5\xad\x1c(\xe4r\x15t\xf7UHl)", 3, true
