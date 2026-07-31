@@ -283,6 +283,9 @@ func fieldValue(document Document, declaration Declaration, name string) (string
 	for i := 0; i < len(declaration.Fields); i++ {
 		if declaration.Fields[i].Name == name {
 			field := declaration.Fields[i]
+			if field.Value != "" {
+				return field.Value, true
+			}
 			return compactSource(document.Source[field.ValueStart:field.ValueEnd]), true
 		}
 	}

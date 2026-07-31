@@ -79,8 +79,8 @@ func TestAArch64DefinitionVerticalSlice(t *testing.T) {
 }
 
 func TestNativeCatalogTargetIdentityIgnoresUnreachableArchitecture(t *testing.T) {
-	document := parseDefinitionFile(t, "../../backend/definitions/native.rtg")
-	source := document.Source
+	const filename = "../../backend/definitions/native.rtg"
+	document := parseDefinitionFile(t, filename)
 	base := Resolve(document)
 	if !base.Ok {
 		t.Fatalf("base definition failed: %#v", base.Diagnostics)
@@ -91,8 +91,13 @@ func TestNativeCatalogTargetIdentityIgnoresUnreachableArchitecture(t *testing.T)
 		extra += "\t\t" + directEmitterV1[i].Name + ",\n"
 	}
 	extra += "\t]\n}\n"
-	extendedSource := append(append([]byte(nil), source...), []byte(extra)...)
-	extended := Resolve(Parse(extendedSource, "native-extended.rtg"))
+	root, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extendedSource := append(append([]byte(nil), root...), []byte(extra)...)
+	extended := Resolve(ParseImports(
+		extendedSource, filename, testFilesystemImportLoader{}))
 	if !extended.Ok {
 		t.Fatalf("extended definition failed: %#v", extended.Diagnostics)
 	}

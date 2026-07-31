@@ -73,6 +73,9 @@ func parseDocument(source []byte, filename string, sourceMap []sourceSegment) Do
 	parser := documentParser{document: &document}
 	parser.parse()
 	if len(document.Diagnostics) == 0 {
+		applyVirtualPackages(&document)
+	}
+	if len(document.Diagnostics) == 0 {
 		if diagnostic, ok := validateEmbeddedGoTypes(document); !ok {
 			document.Diagnostics = append(document.Diagnostics, diagnostic)
 		}
@@ -326,13 +329,19 @@ func (p *documentParser) validateGoName(wrapped []byte, token syntax.Token, body
 		p.failOffset(offset, "RTG-GO-007", "embedded declaration uses reserved RTG prefix: "+name)
 		return
 	}
+	scope := ""
+	if len(p.document.sourceMap) != 0 {
+		filename, _ := documentPosition(*p.document, offset)
+		scope = virtualPackageName(filename)
+	}
+	scopedName := scope + "\x00" + name
 	for i := 0; i < len(p.goNames); i++ {
-		if p.goNames[i] == name {
+		if p.goNames[i] == scopedName {
 			p.failOffset(offset, "RTG-GO-008", "duplicate embedded Go declaration "+name)
 			return
 		}
 	}
-	p.goNames = append(p.goNames, name)
+	p.goNames = append(p.goNames, scopedName)
 }
 
 func (p *documentParser) parseFields(start int, end int) []Field {

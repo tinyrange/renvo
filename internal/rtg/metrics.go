@@ -19,12 +19,12 @@ func MeasureTarget(document Document, target ResolvedTarget) TargetMetrics {
 	}
 	parts := reachableEmbeddedGoParts(document, targetGoRoots(document, target), nil)
 	for i := 0; i < len(parts); i++ {
-		metrics.ReachableGoBytes += len(parts[i].source)
+		metrics.ReachableGoBytes += len(authoredVirtualSource(document, parts[i].source))
 	}
 	metrics.ReachableGoDecls = len(parts)
 	all := reachableEmbeddedGoParts(document, embeddedGoNames(document), nil)
 	for i := 0; i < len(all); i++ {
-		metrics.CatalogGoBytes += len(all[i].source)
+		metrics.CatalogGoBytes += len(authoredVirtualSource(document, all[i].source))
 	}
 	metrics.CatalogGoDecls = len(all)
 	return metrics

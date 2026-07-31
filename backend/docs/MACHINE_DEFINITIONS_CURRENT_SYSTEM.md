@@ -29,8 +29,12 @@ not analyze hook complexity or termination.
 Top-level `@import "relative/path.rtg"` composes definition fragments before
 parsing and resolution. Imports are relative to the importing file, recursive,
 cycle-checked, included in the same source-size and semantic Go budgets, and
-source-mapped so diagnostics identify the owning fragment. File boundaries and
-import spelling do not affect catalog or target identity.
+source-mapped so diagnostics identify the owning fragment. Each file is a
+virtual package named after its basename. Private Go helpers and bounded
+sequences resolve locally and receive deterministic internal qualification;
+cross-file helper references use `package_name.helper`. Machine declarations
+and explicit exports remain global. Import directories and spelling are not
+semantic, while the package basename is.
 
 ## Backend families
 

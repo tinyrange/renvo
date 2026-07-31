@@ -3,6 +3,7 @@ package rtg
 type canonicalDeclaration struct {
 	kind string
 	name string
+	pkg  string
 	body []byte
 }
 
@@ -25,12 +26,14 @@ func Canonical(document Document) []byte {
 	}
 
 	declarations := make([]canonicalDeclaration, 0, len(document.Declarations))
+	hasPackages := hasSemanticVirtualPackages(document)
 	for i := 0; i < len(document.Declarations); i++ {
 		declaration := document.Declarations[i]
 		body := canonicalRange(document, declaration.BodyStart, declaration.BodyEnd)
 		declarations = append(declarations, canonicalDeclaration{
 			kind: declaration.Kind,
 			name: declaration.Name,
+			pkg:  semanticVirtualPackage(document, declaration),
 			body: body,
 		})
 	}
@@ -46,6 +49,9 @@ func Canonical(document Document) []byte {
 	for i := 0; i < len(declarations); i++ {
 		out = appendFramed(out, declarations[i].kind)
 		out = appendFramed(out, declarations[i].name)
+		if hasPackages {
+			out = appendFramed(out, declarations[i].pkg)
+		}
 		out = appendFramedBytes(out, declarations[i].body)
 	}
 	return out
@@ -93,6 +99,9 @@ func canonicalDeclarationLess(left canonicalDeclaration, right canonicalDeclarat
 	}
 	if left.name != right.name {
 		return stringLess(left.name, right.name)
+	}
+	if left.pkg != right.pkg {
+		return stringLess(left.pkg, right.pkg)
 	}
 	return bytesLess(left.body, right.body)
 }

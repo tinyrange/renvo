@@ -56,6 +56,7 @@ type Field struct {
 	Name       string
 	ValueStart int
 	ValueEnd   int
+	Value      string
 	Span       Span
 }
 
@@ -73,6 +74,7 @@ type Statement struct {
 type Declaration struct {
 	Kind       string
 	Name       string
+	Package    string
 	Start      int
 	End        int
 	BodyStart  int
@@ -95,6 +97,7 @@ type Document struct {
 	Hash         [32]byte
 	Ok           bool
 	sourceMap    []sourceSegment
+	packages     []virtualPackage
 }
 
 // ImportLoader resolves an import path relative to the importing source. The

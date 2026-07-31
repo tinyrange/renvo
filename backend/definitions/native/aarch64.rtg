@@ -3,37 +3,37 @@
 # target-neutral lowering.
 go backend {
 
-	const aarch64MachCodeOffset = 0x1000
-	const aarch64MachImageBase = 0x100000000
-	const aarch64MachPageSize = 0x4000
-	const aarch64MachLibSystem = "/usr/lib/libSystem.B.dylib"
+	const machCodeOffset = 0x1000
+	const machImageBase = 0x100000000
+	const machPageSize = 0x4000
+	const machLibSystem = "/usr/lib/libSystem.B.dylib"
 
-	func aarch64DarwinEntryStart(out *RTGEmitter, stateOffset int) bool {
+	func darwinEntryStart(out *RTGEmitter, stateOffset int) bool {
 		if stateOffset < 0 {
 			return false
 		}
-		renvoAarch64AsmMovRegAbs(out, 9, stateOffset, RTGRelocationAbsoluteBSS)
-		renvoAarch64AsmStoreRegMem(out, 0, 9, 0, 8)
-		renvoAarch64AsmStoreRegMem(out, 1, 9, 8, 8)
-		renvoAarch64AsmStoreRegMem(out, 2, 9, 16, 8)
+		asmMovRegAbs(out, 9, stateOffset, RTGRelocationAbsoluteBSS)
+		asmStoreRegMem(out, 0, 9, 0, 8)
+		asmStoreRegMem(out, 1, 9, 8, 8)
+		asmStoreRegMem(out, 2, 9, 16, 8)
 		return true
 	}
 
-	func aarch64MachAppendStringZ(out []byte, value string) []byte {
+	func machAppendStringZ(out []byte, value string) []byte {
 		for i := 0; i < len(value); i++ {
 			out = append(out, value[i])
 		}
 		return append(out, 0)
 	}
 
-	func aarch64MachAppendUntil(out []byte, size int) []byte {
+	func machAppendUntil(out []byte, size int) []byte {
 		for len(out) < size {
 			out = append(out, 0)
 		}
 		return out
 	}
 
-	func aarch64MachAppendULEB(out []byte, value int) []byte {
+	func machAppendULEB(out []byte, value int) []byte {
 		for {
 			b := byte(value & 127)
 			value = value >> 7
@@ -47,7 +47,7 @@ go backend {
 		}
 	}
 
-	func aarch64MachAppendName16(out []byte, name string) []byte {
+	func machAppendName16(out []byte, name string) []byte {
 		for i := 0; i < 16; i++ {
 			if i < len(name) {
 				out = append(out, name[i])
@@ -58,11 +58,11 @@ go backend {
 		return out
 	}
 
-	func aarch64MachExtraDylibs(out *RTGEmitter) []string {
+	func machExtraDylibs(out *RTGEmitter) []string {
 		var dylibs []string
 		for i := 0; i < out.DynamicImportCount(); i++ {
 			dylib := out.DynamicImportLibrary(i)
-			if dylib == aarch64MachLibSystem {
+			if dylib == machLibSystem {
 				continue
 			}
 			found := false
@@ -78,11 +78,11 @@ go backend {
 		return dylibs
 	}
 
-	func aarch64MachDylibOrdinal(out *RTGEmitter, dylib string) int {
-		if dylib == aarch64MachLibSystem {
+	func machDylibOrdinal(out *RTGEmitter, dylib string) int {
+		if dylib == machLibSystem {
 			return 1
 		}
-		dylibs := aarch64MachExtraDylibs(out)
+		dylibs := machExtraDylibs(out)
 		for i := 0; i < len(dylibs); i++ {
 			if dylibs[i] == dylib {
 				return i + 2
@@ -91,11 +91,11 @@ go backend {
 		return 0
 	}
 
-	type aarch64MachImportLayout struct {
+	type machImportLayout struct {
 		got []int
 	}
 
-	func aarch64MachPatchAbsoluteRelocations(
+	func machPatchAbsoluteRelocations(
 		out *RTGEmitter, dataFileOff int, dataSize int,
 	) {
 		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
@@ -108,8 +108,8 @@ go backend {
 			}
 			insn := RTGGet32At(out.Code(), at)
 			reg := insn & 31
-			address := aarch64MachImageBase + target
-			pc := aarch64MachImageBase + aarch64MachCodeOffset + at
+			address := machImageBase + target
+			pc := machImageBase + machCodeOffset + at
 			delta := (address >> 12) - (pc >> 12)
 			imm := delta & 0x1fffff
 			out.PatchUint32(at,
@@ -122,42 +122,42 @@ go backend {
 		}
 	}
 
-	func aarch64MachPrepareImports(
+	func machPrepareImports(
 		out *RTGEmitter,
-	) aarch64MachImportLayout {
-		var layout aarch64MachImportLayout
+	) machImportLayout {
+		var layout machImportLayout
 		count := out.DynamicImportCount()
 		layout.got = make([]int, count)
 		stubs := make([]int, count)
 		for i := 0; i < count; i++ {
-			renvoAarch64AsmAlign(out)
+			asmAlign(out)
 			out.Mark(out.DynamicImportLabel(i))
 			stubs[i] = out.Len()
-			renvoAarch64AsmEmit(out, 0x90000010)
-			renvoAarch64AsmEmit(out, 0xf9400210)
-			renvoAarch64AsmEmit(out, 0xd61f0200)
+			asmEmit(out, 0x90000010)
+			asmEmit(out, 0xf9400210)
+			asmEmit(out, 0xd61f0200)
 		}
 		out.Patch()
 		dataFileOff := RTGAlignValue(
-			aarch64MachCodeOffset+out.Len(), aarch64MachPageSize)
+			machCodeOffset+out.Len(), machPageSize)
 		data := out.Data()
-		data = aarch64MachAppendUntil(data, RTGAlignValue(len(data), 8))
+		data = machAppendUntil(data, RTGAlignValue(len(data), 8))
 		for i := 0; i < count; i++ {
 			layout.got[i] = len(data)
-			data = aarch64MachAppend64(data, 0)
+			data = machAppend64(data, 0)
 		}
-		data = aarch64MachAppendUntil(
-			data, RTGAlignValue(len(data), aarch64MachPageSize))
+		data = machAppendUntil(
+			data, RTGAlignValue(len(data), machPageSize))
 		out.SetData(data)
-		aarch64MachPatchAbsoluteRelocations(
+		machPatchAbsoluteRelocations(
 			out, dataFileOff, len(data))
 		for i := 0; i < count; i++ {
 			stubAt := stubs[i]
-			target := aarch64MachImageBase +
+			target := machImageBase +
 				dataFileOff + layout.got[i]
-			pc := aarch64MachImageBase +
-				aarch64MachCodeOffset + stubAt
-			aarch64MachPatchADRP(out, stubAt, pc, target)
+			pc := machImageBase +
+				machCodeOffset + stubAt
+			machPatchADRP(out, stubAt, pc, target)
 			pageOff := target & 0xfff
 			out.PatchUint32(
 				stubAt+4, 0xf9400210|((pageOff/8)<<10))
@@ -165,61 +165,61 @@ go backend {
 		return layout
 	}
 
-	func aarch64MachBuildBindData(
+	func machBuildBindData(
 		out *RTGEmitter, got []int,
 	) []byte {
 		bind := make([]byte, 0, 256)
 		bind = append(bind, 0x51)
 		for i := 0; i < out.DynamicImportCount(); i++ {
-			ordinal := aarch64MachDylibOrdinal(
+			ordinal := machDylibOrdinal(
 				out, out.DynamicImportLibrary(i))
 			if ordinal < 16 {
 				bind = append(bind, byte(0x10|ordinal))
 			} else {
 				bind = append(bind, 0x20)
-				bind = aarch64MachAppendULEB(bind, ordinal)
+				bind = machAppendULEB(bind, ordinal)
 			}
 			bind = append(bind, 0x40)
-			bind = aarch64MachAppendStringZ(
+			bind = machAppendStringZ(
 				bind, out.DynamicImportName(i))
 			bind = append(bind, 0x72)
-			bind = aarch64MachAppendULEB(bind, got[i])
+			bind = machAppendULEB(bind, got[i])
 			bind = append(bind, 0x90)
 		}
 		return append(bind, 0)
 	}
 
-	func aarch64MachBuildStringTable(out *RTGEmitter) []byte {
+	func machBuildStringTable(out *RTGEmitter) []byte {
 		strtab := make([]byte, 0, 128)
 		strtab = append(strtab, 0)
-		strtab = aarch64MachAppendStringZ(strtab, "_main")
+		strtab = machAppendStringZ(strtab, "_main")
 		for i := 0; i < out.DynamicImportCount(); i++ {
-			strtab = aarch64MachAppendStringZ(
+			strtab = machAppendStringZ(
 				strtab, out.DynamicImportName(i))
 		}
 		return strtab
 	}
 
-	func aarch64MachBuildSymbolTable(out *RTGEmitter) []byte {
+	func machBuildSymbolTable(out *RTGEmitter) []byte {
 		count := out.DynamicImportCount()
 		symtab := make([]byte, 0, 16*(count+1))
-		symtab = aarch64MachAppend32(symtab, 1)
+		symtab = machAppend32(symtab, 1)
 		symtab = append(symtab, 0x0f, 1)
-		symtab = aarch64MachAppend16(symtab, 0)
-		symtab = aarch64MachAppend64(
-			symtab, aarch64MachImageBase+aarch64MachCodeOffset)
+		symtab = machAppend16(symtab, 0)
+		symtab = machAppend64(
+			symtab, machImageBase+machCodeOffset)
 		nameOff := 7
 		for i := 0; i < count; i++ {
-			symtab = aarch64MachAppend32(symtab, nameOff)
+			symtab = machAppend32(symtab, nameOff)
 			symtab = append(symtab, 1, 0)
-			symtab = aarch64MachAppend16(symtab, 0x100)
-			symtab = aarch64MachAppend64(symtab, 0)
+			symtab = machAppend16(symtab, 0x100)
+			symtab = machAppend64(symtab, 0)
 			nameOff += len(out.DynamicImportName(i)) + 1
 		}
 		return symtab
 	}
 
-	func aarch64MachHeader(
+	func machHeader(
 		out *RTGEmitter,
 		textFileSize int,
 		dataFileOff int,
@@ -237,99 +237,99 @@ go backend {
 		sigOff int,
 		sigSize int,
 	) []byte {
-		dylibs := aarch64MachExtraDylibs(out)
+		dylibs := machExtraDylibs(out)
 		commandSize := 856
 		for i := 0; i < len(dylibs); i++ {
-			commandSize += aarch64MachDylibCommandSize(dylibs[i])
+			commandSize += machDylibCommandSize(dylibs[i])
 		}
-		header := make([]byte, 0, aarch64MachCodeOffset)
-		header = aarch64MachAppend32(header, 0xfeedfacf)
-		header = aarch64MachAppend32(header, 0x0100000c)
-		header = aarch64MachAppend32(header, 0)
-		header = aarch64MachAppend32(header, 2)
-		header = aarch64MachAppend32(header, 13+len(dylibs))
-		header = aarch64MachAppend32(header, commandSize)
-		header = aarch64MachAppend32(header, 0x200085)
-		header = aarch64MachAppend32(header, 0)
-		header = aarch64MachAppendSegment64(
-			header, "__PAGEZERO", 0, aarch64MachImageBase,
+		header := make([]byte, 0, machCodeOffset)
+		header = machAppend32(header, 0xfeedfacf)
+		header = machAppend32(header, 0x0100000c)
+		header = machAppend32(header, 0)
+		header = machAppend32(header, 2)
+		header = machAppend32(header, 13+len(dylibs))
+		header = machAppend32(header, commandSize)
+		header = machAppend32(header, 0x200085)
+		header = machAppend32(header, 0)
+		header = machAppendSegment64(
+			header, "__PAGEZERO", 0, machImageBase,
 			0, 0, 0, 0)
-		header = aarch64MachAppendTextSegment(
+		header = machAppendTextSegment(
 			header, len(out.Code()), textFileSize)
-		header = aarch64MachAppendDataSegment(
+		header = machAppendDataSegment(
 			header, dataFileOff, dataFileSize, out.BSSSize())
-		header = aarch64MachAppendSegment64(
+		header = machAppendSegment64(
 			header,
 			"__LINKEDIT",
-			aarch64MachImageBase+dataFileOff+dataVMSize,
-			RTGAlignValue(linkeditSize, aarch64MachPageSize),
+			machImageBase+dataFileOff+dataVMSize,
+			RTGAlignValue(linkeditSize, machPageSize),
 			linkeditOff,
 			linkeditSize,
 			1,
 			1,
 		)
-		header = aarch64MachAppend32(header, 0x80000022)
-		header = aarch64MachAppend32(header, 48)
-		header = aarch64MachAppend32(header, 0)
-		header = aarch64MachAppend32(header, 0)
-		header = aarch64MachAppend32(header, bindOff)
-		header = aarch64MachAppend32(header, bindSize)
+		header = machAppend32(header, 0x80000022)
+		header = machAppend32(header, 48)
+		header = machAppend32(header, 0)
+		header = machAppend32(header, 0)
+		header = machAppend32(header, bindOff)
+		header = machAppend32(header, bindSize)
 		for i := 0; i < 6; i++ {
-			header = aarch64MachAppend32(header, 0)
+			header = machAppend32(header, 0)
 		}
-		header = aarch64MachAppend32(header, 0x02)
-		header = aarch64MachAppend32(header, 24)
-		header = aarch64MachAppend32(header, symOff)
-		header = aarch64MachAppend32(header, symbolCount)
-		header = aarch64MachAppend32(header, strOff)
-		header = aarch64MachAppend32(header, strSize)
-		header = aarch64MachAppend32(header, 0x0b)
-		header = aarch64MachAppend32(header, 80)
-		header = aarch64MachAppend32(header, 0)
-		header = aarch64MachAppend32(header, 0)
-		header = aarch64MachAppend32(header, 0)
-		header = aarch64MachAppend32(header, 1)
-		header = aarch64MachAppend32(header, 1)
-		header = aarch64MachAppend32(header, undefinedCount)
+		header = machAppend32(header, 0x02)
+		header = machAppend32(header, 24)
+		header = machAppend32(header, symOff)
+		header = machAppend32(header, symbolCount)
+		header = machAppend32(header, strOff)
+		header = machAppend32(header, strSize)
+		header = machAppend32(header, 0x0b)
+		header = machAppend32(header, 80)
+		header = machAppend32(header, 0)
+		header = machAppend32(header, 0)
+		header = machAppend32(header, 0)
+		header = machAppend32(header, 1)
+		header = machAppend32(header, 1)
+		header = machAppend32(header, undefinedCount)
 		for i := 0; i < 12; i++ {
-			header = aarch64MachAppend32(header, 0)
+			header = machAppend32(header, 0)
 		}
 		cmdStart := len(header)
-		header = aarch64MachAppend32(header, 0x0e)
-		header = aarch64MachAppend32(header, 32)
-		header = aarch64MachAppend32(header, 12)
-		header = aarch64MachAppendStringZ(header, "/usr/lib/dyld")
-		header = aarch64MachAppendUntil(header, cmdStart+32)
-		header = aarch64MachAppendDylibCommand(
-			header, aarch64MachLibSystem)
+		header = machAppend32(header, 0x0e)
+		header = machAppend32(header, 32)
+		header = machAppend32(header, 12)
+		header = machAppendStringZ(header, "/usr/lib/dyld")
+		header = machAppendUntil(header, cmdStart+32)
+		header = machAppendDylibCommand(
+			header, machLibSystem)
 		for i := 0; i < len(dylibs); i++ {
-			header = aarch64MachAppendDylibCommand(
+			header = machAppendDylibCommand(
 				header, dylibs[i])
 		}
-		header = aarch64MachAppend32(header, 0x1b)
-		header = aarch64MachAppend32(header, 24)
-		header = aarch64MachAppend32(header, 0x52544758)
-		header = aarch64MachAppend32(header, 0x44415257)
-		header = aarch64MachAppend32(header, 0x494e4152)
-		header = aarch64MachAppend32(header, 0x4d363400)
-		header = aarch64MachAppend32(header, 0x32)
-		header = aarch64MachAppend32(header, 24)
-		header = aarch64MachAppend32(header, 1)
-		header = aarch64MachAppend32(header, 0x000b0000)
-		header = aarch64MachAppend32(header, 0x000b0000)
-		header = aarch64MachAppend32(header, 0)
-		header = aarch64MachAppend32(header, 0x80000028)
-		header = aarch64MachAppend32(header, 24)
-		header = aarch64MachAppend64(header, aarch64MachCodeOffset)
-		header = aarch64MachAppend64(header, 0)
-		header = aarch64MachAppend32(header, 0x1d)
-		header = aarch64MachAppend32(header, 16)
-		header = aarch64MachAppend32(header, sigOff)
-		header = aarch64MachAppend32(header, sigSize)
-		return aarch64MachAppendUntil(header, aarch64MachCodeOffset)
+		header = machAppend32(header, 0x1b)
+		header = machAppend32(header, 24)
+		header = machAppend32(header, 0x52544758)
+		header = machAppend32(header, 0x44415257)
+		header = machAppend32(header, 0x494e4152)
+		header = machAppend32(header, 0x4d363400)
+		header = machAppend32(header, 0x32)
+		header = machAppend32(header, 24)
+		header = machAppend32(header, 1)
+		header = machAppend32(header, 0x000b0000)
+		header = machAppend32(header, 0x000b0000)
+		header = machAppend32(header, 0)
+		header = machAppend32(header, 0x80000028)
+		header = machAppend32(header, 24)
+		header = machAppend64(header, machCodeOffset)
+		header = machAppend64(header, 0)
+		header = machAppend32(header, 0x1d)
+		header = machAppend32(header, 16)
+		header = machAppend32(header, sigOff)
+		header = machAppend32(header, sigSize)
+		return machAppendUntil(header, machCodeOffset)
 	}
 
-	func aarch64MachSHA256Schedule(
+	func machSHA256Schedule(
 		message []byte, chunk int, words []int,
 	) {
 		for i := 0; i < 16; i++ {
@@ -355,7 +355,7 @@ go backend {
 		}
 	}
 
-	func aarch64MachSHA256Rounds(
+	func machSHA256Rounds(
 		words []int, constants []int, values []int,
 	) {
 		a := values[0]
@@ -399,7 +399,7 @@ go backend {
 		values[7] = (values[7] + h) & 0xffffffff
 	}
 
-	func aarch64MachSHA256(data []byte) []byte {
+	func machSHA256(data []byte) []byte {
 		messageSize := len(data) + 1 + 8
 		messageSize = RTGAlignValue(messageSize, 64)
 		message := make([]byte, messageSize)
@@ -415,11 +415,11 @@ go backend {
 			0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
 			0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
 		}
-		constants := aarch64MachSHA256Constants()
+		constants := machSHA256Constants()
 		words := make([]int, 64)
 		for chunk := 0; chunk < len(message); chunk += 64 {
-			aarch64MachSHA256Schedule(message, chunk, words)
-			aarch64MachSHA256Rounds(words, constants, values)
+			machSHA256Schedule(message, chunk, words)
+			machSHA256Rounds(words, constants, values)
 		}
 		hash := make([]byte, 0, 32)
 		for i := 0; i < len(values); i++ {
@@ -431,7 +431,7 @@ go backend {
 		return hash
 	}
 
-	func aarch64MachCodeSignature(
+	func machCodeSignature(
 		code []byte, identifier string, executableLimit int,
 	) []byte {
 		slots := (len(code) + 16383) / 16384
@@ -440,32 +440,32 @@ go backend {
 		codeDirectorySize := hashOffset + slots*32
 		totalSize := 20 + codeDirectorySize
 		signature := make([]byte, 0, totalSize)
-		signature = aarch64MachAppendBE32(signature, 0xfade0cc0)
-		signature = aarch64MachAppendBE32(signature, totalSize)
-		signature = aarch64MachAppendBE32(signature, 1)
-		signature = aarch64MachAppendBE32(signature, 0)
-		signature = aarch64MachAppendBE32(signature, 20)
-		signature = aarch64MachAppendBE32(signature, 0xfade0c02)
-		signature = aarch64MachAppendBE32(
+		signature = machAppendBE32(signature, 0xfade0cc0)
+		signature = machAppendBE32(signature, totalSize)
+		signature = machAppendBE32(signature, 1)
+		signature = machAppendBE32(signature, 0)
+		signature = machAppendBE32(signature, 20)
+		signature = machAppendBE32(signature, 0xfade0c02)
+		signature = machAppendBE32(
 			signature, codeDirectorySize)
-		signature = aarch64MachAppendBE32(signature, 0x20400)
-		signature = aarch64MachAppendBE32(signature, 0x2)
-		signature = aarch64MachAppendBE32(signature, hashOffset)
-		signature = aarch64MachAppendBE32(
+		signature = machAppendBE32(signature, 0x20400)
+		signature = machAppendBE32(signature, 0x2)
+		signature = machAppendBE32(signature, hashOffset)
+		signature = machAppendBE32(
 			signature, identifierOffset)
-		signature = aarch64MachAppendBE32(signature, 0)
-		signature = aarch64MachAppendBE32(signature, slots)
-		signature = aarch64MachAppendBE32(signature, len(code))
+		signature = machAppendBE32(signature, 0)
+		signature = machAppendBE32(signature, slots)
+		signature = machAppendBE32(signature, len(code))
 		signature = append(signature, 32, 2, 0, 14)
-		signature = aarch64MachAppendBE32(signature, 0)
-		signature = aarch64MachAppendBE32(signature, 0)
-		signature = aarch64MachAppendBE32(signature, 0)
-		signature = aarch64MachAppendBE32(signature, 0)
-		signature = aarch64MachAppendBE64(signature, 0)
-		signature = aarch64MachAppendBE64(signature, 0)
-		signature = aarch64MachAppendBE64(
+		signature = machAppendBE32(signature, 0)
+		signature = machAppendBE32(signature, 0)
+		signature = machAppendBE32(signature, 0)
+		signature = machAppendBE32(signature, 0)
+		signature = machAppendBE64(signature, 0)
+		signature = machAppendBE64(signature, 0)
+		signature = machAppendBE64(
 			signature, executableLimit)
-		signature = aarch64MachAppendBE64(signature, 1)
+		signature = machAppendBE64(signature, 1)
 		for i := 0; i < len(identifier); i++ {
 			signature = append(signature, identifier[i])
 		}
@@ -476,13 +476,13 @@ go backend {
 			if end > len(code) {
 				end = len(code)
 			}
-			hash := aarch64MachSHA256(code[start:end])
+			hash := machSHA256(code[start:end])
 			signature = append(signature, hash...)
 		}
 		return signature
 	}
 
-	func aarch64PEPatch(out *RTGEmitter, dataRVA int, dataSize int, iat []int) {
+	func pEPatch(out *RTGEmitter, dataRVA int, dataSize int, iat []int) {
 		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
 			at := out.AbsoluteRelocationOffset(i)
 			addend := out.AbsoluteRelocationAddend(i)
@@ -507,69 +507,69 @@ go backend {
 		}
 	}
 
-	func aarch64WindowsStaticCall(out *RTGEmitter, importID int, wordCount int) {
+	func windowsStaticCall(out *RTGEmitter, importID int, wordCount int) {
 		registerWords := wordCount
 		if registerWords > 8 {
 			registerWords = 8
 		}
 		for i := 0; i < registerWords; i++ {
-			renvoAarch64AsmPopReg(out, i)
+			asmPopReg(out, i)
 		}
 		stackWords := wordCount - registerWords
-		renvoAarch64AsmEmit(out, 0x910003e9)
+		asmEmit(out, 0x910003e9)
 		savedSPOff := stackWords * 8
 		allocation := RTGAlignValue(savedSPOff+8, 16)
-		renvoAarch64AsmAddRegImm(out, 31, 31, -allocation)
+		asmAddRegImm(out, 31, 31, -allocation)
 		for i := 0; i < stackWords; i++ {
-			renvoAarch64AsmLoadRegMem(out, 10, 9, i*16, 8)
-			renvoAarch64AsmStoreRegMem(out, 10, 31, i*8, 8)
+			asmLoadRegMem(out, 10, 9, i*16, 8)
+			asmStoreRegMem(out, 10, 31, i*8, 8)
 		}
-		renvoAarch64AsmStoreRegMem(out, 9, 31, savedSPOff, 8)
-		aarch64WindowsCallImport(out, importID)
-		renvoAarch64AsmMovRegReg(out, 10, 0)
-		renvoAarch64AsmLoadRegMem(out, 9, 31, savedSPOff, 8)
-		renvoAarch64AsmEmit(out, 0x9100013f)
-		renvoAarch64AsmAddRegImm(out, 31, 31, stackWords*16)
-		renvoAarch64AsmMovRegReg(out, 0, 10)
+		asmStoreRegMem(out, 9, 31, savedSPOff, 8)
+		windowsCallImport(out, importID)
+		asmMovRegReg(out, 10, 0)
+		asmLoadRegMem(out, 9, 31, savedSPOff, 8)
+		asmEmit(out, 0x9100013f)
+		asmAddRegImm(out, 31, 31, stackWords*16)
+		asmMovRegReg(out, 0, 10)
 	}
 
-	func renvoAarch64AsmAlign(a *RTGEmitter) {
+	func asmAlign(a *RTGEmitter) {
 		for a.Len()%4 != 0 {
 			RTGByte(a, 0)
 		}
 	}
 
-	func renvoAarch64AsmMovRegReg(a *RTGEmitter, dst int, src int) {
+	func asmMovRegReg(a *RTGEmitter, dst int, src int) {
 		if dst == src {
 			return
 		}
-		renvoAarch64AsmEmit(a, 0xaa0003e0|(src<<16)|dst)
+		asmEmit(a, 0xaa0003e0|(src<<16)|dst)
 	}
 
-	func renvoAarch64AsmMovRegImm(a *RTGEmitter, reg int, imm int) {
+	func asmMovRegImm(a *RTGEmitter, reg int, imm int) {
 		if imm < 0 {
 			inv := -imm - 1
 			part := inv & 65535
-			renvoAarch64AsmEmit(a, 0x92800000|(part<<5)|reg)
+			asmEmit(a, 0x92800000|(part<<5)|reg)
 			for i := 1; i < 4; i++ {
 				targetPart := (imm >> (i * 16)) & 65535
 				if targetPart != 65535 {
-					renvoAarch64AsmEmit(a, 0xf2800000|(i<<21)|(targetPart<<5)|reg)
+					asmEmit(a, 0xf2800000|(i<<21)|(targetPart<<5)|reg)
 				}
 			}
 			return
 		}
 		part := imm & 65535
-		renvoAarch64AsmEmit(a, 0xd2800000|(part<<5)|reg)
+		asmEmit(a, 0xd2800000|(part<<5)|reg)
 		for i := 1; i < 4; i++ {
 			part = (imm >> (i * 16)) & 65535
 			if part != 0 {
-				renvoAarch64AsmEmit(a, 0xf2800000|(i<<21)|(part<<5)|reg)
+				asmEmit(a, 0xf2800000|(i<<21)|(part<<5)|reg)
 			}
 		}
 	}
 
-	func renvoAarch64AsmPatchMovRegImmAt(a *RTGEmitter, at int, reg int, imm int) {
+	func asmPatchMovRegImmAt(a *RTGEmitter, at int, reg int, imm int) {
 		part := imm & 65535
 		a.PatchUint32( at, 0xd2800000|(part<<5)|reg)
 		for i := 1; i < 4; i++ {
@@ -578,9 +578,9 @@ go backend {
 		}
 	}
 
-	func renvoAarch64AsmAddRegImm(a *RTGEmitter, dst int, src int, imm int) {
+	func asmAddRegImm(a *RTGEmitter, dst int, src int, imm int) {
 		if imm == 0 {
-			renvoAarch64AsmMovRegReg(a, dst, src)
+			asmMovRegReg(a, dst, src)
 			return
 		}
 		op := 0x91000000
@@ -602,142 +602,142 @@ go backend {
 			} else {
 				imm = 0
 			}
-			renvoAarch64AsmEmit(a, op|(shift<<22)|(chunk<<10)|(cur<<5)|dst)
+			asmEmit(a, op|(shift<<22)|(chunk<<10)|(cur<<5)|dst)
 			cur = dst
 		}
 	}
 
-	func renvoAarch64AsmAddr(a *RTGEmitter, base int, disp int) int {
+	func asmAddr(a *RTGEmitter, base int, disp int) int {
 		if disp == 0 {
 			return base
 		}
-		renvoAarch64AsmAddRegImm(a, aarch64Address.Code, base, disp)
+		asmAddRegImm(a, aarch64Address.Code, base, disp)
 		return aarch64Address.Code
 	}
 
-	func renvoAarch64AsmLoadRegMem(a *RTGEmitter, dst int, base int, disp int, size int) {
+	func asmLoadRegMem(a *RTGEmitter, dst int, base int, disp int, size int) {
 		if disp != 0 && disp >= -256 && disp <= 255 {
 			imm := (disp & 511) << 12
 			if size == 1 {
-				renvoAarch64AsmEmit(a, 0x38400000|imm|(base<<5)|dst)
+				asmEmit(a, 0x38400000|imm|(base<<5)|dst)
 				return
 			}
 			if size == 2 {
-				renvoAarch64AsmEmit(a, 0x78400000|imm|(base<<5)|dst)
+				asmEmit(a, 0x78400000|imm|(base<<5)|dst)
 				return
 			}
 			if size == 4 {
-				renvoAarch64AsmEmit(a, 0xb8400000|imm|(base<<5)|dst)
+				asmEmit(a, 0xb8400000|imm|(base<<5)|dst)
 				return
 			}
-			renvoAarch64AsmEmit(a, 0xf8400000|imm|(base<<5)|dst)
+			asmEmit(a, 0xf8400000|imm|(base<<5)|dst)
 			return
 		}
-		addr := renvoAarch64AsmAddr(a, base, disp)
+		addr := asmAddr(a, base, disp)
 		if size == 1 {
-			renvoAarch64AsmEmit(a, 0x39400000|(addr<<5)|dst)
+			asmEmit(a, 0x39400000|(addr<<5)|dst)
 			return
 		}
 		if size == 2 {
-			renvoAarch64AsmEmit(a, 0x79800000|(addr<<5)|dst)
+			asmEmit(a, 0x79800000|(addr<<5)|dst)
 			return
 		}
 		if size == 4 {
-			renvoAarch64AsmEmit(a, 0xb9800000|(addr<<5)|dst)
+			asmEmit(a, 0xb9800000|(addr<<5)|dst)
 			return
 		}
-		renvoAarch64AsmEmit(a, 0xf9400000|(addr<<5)|dst)
+		asmEmit(a, 0xf9400000|(addr<<5)|dst)
 	}
 
-	func renvoAarch64AsmStoreRegMem(a *RTGEmitter, src int, base int, disp int, size int) {
+	func asmStoreRegMem(a *RTGEmitter, src int, base int, disp int, size int) {
 		if disp != 0 && disp >= -256 && disp <= 255 {
 			imm := (disp & 511) << 12
 			if size == 1 {
-				renvoAarch64AsmEmit(a, 0x38000000|imm|(base<<5)|src)
+				asmEmit(a, 0x38000000|imm|(base<<5)|src)
 				return
 			}
 			if size == 2 {
-				renvoAarch64AsmEmit(a, 0x78000000|imm|(base<<5)|src)
+				asmEmit(a, 0x78000000|imm|(base<<5)|src)
 				return
 			}
 			if size == 4 {
-				renvoAarch64AsmEmit(a, 0xb8000000|imm|(base<<5)|src)
+				asmEmit(a, 0xb8000000|imm|(base<<5)|src)
 				return
 			}
-			renvoAarch64AsmEmit(a, 0xf8000000|imm|(base<<5)|src)
+			asmEmit(a, 0xf8000000|imm|(base<<5)|src)
 			return
 		}
-		addr := renvoAarch64AsmAddr(a, base, disp)
+		addr := asmAddr(a, base, disp)
 		if size == 1 {
-			renvoAarch64AsmEmit(a, 0x39000000|(addr<<5)|src)
+			asmEmit(a, 0x39000000|(addr<<5)|src)
 			return
 		}
 		if size == 2 {
-			renvoAarch64AsmEmit(a, 0x79000000|(addr<<5)|src)
+			asmEmit(a, 0x79000000|(addr<<5)|src)
 			return
 		}
 		if size == 4 {
-			renvoAarch64AsmEmit(a, 0xb9000000|(addr<<5)|src)
+			asmEmit(a, 0xb9000000|(addr<<5)|src)
 			return
 		}
-		renvoAarch64AsmEmit(a, 0xf9000000|(addr<<5)|src)
+		asmEmit(a, 0xf9000000|(addr<<5)|src)
 	}
 
-	func renvoAarch64AsmStackMem(a *RTGEmitter, offset int, base int, disp8 int, disp32 int) {
+	func asmStackMem(a *RTGEmitter, offset int, base int, disp8 int, disp32 int) {
 		if base == 0x8948 && disp8 == 0x45 {
-			renvoAarch64AsmStoreRegStack(a, aarch64Primary.Code, offset)
+			asmStoreRegStack(a, aarch64Primary.Code, offset)
 			return
 		}
 		if base == 0x8948 && disp8 == 0x55 {
-			renvoAarch64AsmStoreRegStack(a, aarch64Secondary.Code, offset)
+			asmStoreRegStack(a, aarch64Secondary.Code, offset)
 			return
 		}
 		if base == 0x8948 && disp8 == 0x4d {
-			renvoAarch64AsmStoreRegStack(a, aarch64Tertiary.Code, offset)
+			asmStoreRegStack(a, aarch64Tertiary.Code, offset)
 			return
 		}
 		if base == 0x8b48 && disp8 == 0x45 {
-			renvoAarch64AsmLoadRegStack(a, aarch64Primary.Code, offset)
+			asmLoadRegStack(a, aarch64Primary.Code, offset)
 			return
 		}
 		if base == 0x8b48 && disp8 == 0x55 {
-			renvoAarch64AsmLoadRegStack(a, aarch64Secondary.Code, offset)
+			asmLoadRegStack(a, aarch64Secondary.Code, offset)
 			return
 		}
 		if base == 0x8b48 && disp8 == 0x4d {
-			renvoAarch64AsmLoadRegStack(a, aarch64Tertiary.Code, offset)
+			asmLoadRegStack(a, aarch64Tertiary.Code, offset)
 			return
 		}
 		if base == 0x8d48 && disp8 == 0x45 {
-			renvoAarch64AsmLeaRegStack(a, aarch64Primary.Code, offset)
+			asmLeaRegStack(a, aarch64Primary.Code, offset)
 			return
 		}
 		if base == 0x8d48 && disp8 == 0x55 {
-			renvoAarch64AsmLeaRegStack(a, aarch64Secondary.Code, offset)
+			asmLeaRegStack(a, aarch64Secondary.Code, offset)
 			return
 		}
 		if base == 0x8d48 && disp8 == 0x7d {
-			renvoAarch64AsmLeaRegStack(a, aarch64X3.Code, offset)
+			asmLeaRegStack(a, aarch64X3.Code, offset)
 			return
 		}
 		if base == 0x8d48 && disp8 == 0x75 {
-			renvoAarch64AsmLeaRegStack(a, aarch64X4.Code, offset)
+			asmLeaRegStack(a, aarch64X4.Code, offset)
 			return
 		}
 	}
 
-	func renvoAarch64AsmMemDisp(a *RTGEmitter, disp int, op int, disp8 int, disp32 int) {
+	func asmMemDisp(a *RTGEmitter, disp int, op int, disp8 int, disp32 int) {
 		if op == 0x8b48 && disp8 == 0x4a {
-			renvoAarch64AsmLoadRegMem(a, aarch64Tertiary.Code, aarch64Secondary.Code, disp, 8)
+			asmLoadRegMem(a, aarch64Tertiary.Code, aarch64Secondary.Code, disp, 8)
 			return
 		}
 		if op == 0x8b48 && disp8 == 0x52 {
-			renvoAarch64AsmLoadRegMem(a, aarch64Secondary.Code, aarch64Secondary.Code, disp, 8)
+			asmLoadRegMem(a, aarch64Secondary.Code, aarch64Secondary.Code, disp, 8)
 			return
 		}
 	}
 
-	func renvoAarch64AsmLoadRaxIndexRcxSize(a *RTGEmitter, size int) {
+	func asmLoadRaxIndexRcxSize(a *RTGEmitter, size int) {
 		shift := 3
 		if size == 1 {
 			shift = 0
@@ -748,54 +748,54 @@ go backend {
 		if size == 4 {
 			shift = 2
 		}
-		renvoAarch64AsmAddRegRegShift(a, aarch64Address.Code, aarch64Primary.Code, aarch64Tertiary.Code, shift)
-		renvoAarch64AsmLoadRegMem(a, aarch64Primary.Code, aarch64Address.Code, 0, size)
+		asmAddRegRegShift(a, aarch64Address.Code, aarch64Primary.Code, aarch64Tertiary.Code, shift)
+		asmLoadRegMem(a, aarch64Primary.Code, aarch64Address.Code, 0, size)
 	}
 
-	func renvoAarch64AsmNormalizeRaxForKind(a *RTGEmitter, kind int) {
+	func asmNormalizeRaxForKind(a *RTGEmitter, kind int) {
 		if kind == RTGScalarByte {
-			renvoAarch64AsmEmit(a, 0x92401c00)
+			asmEmit(a, 0x92401c00)
 			return
 		}
 		if kind == RTGScalarInt8 {
-			renvoAarch64AsmEmit(a, 0x93401c00)
+			asmEmit(a, 0x93401c00)
 			return
 		}
 		if kind == RTGScalarInt16 {
-			renvoAarch64AsmEmit(a, 0x93403c00)
+			asmEmit(a, 0x93403c00)
 			return
 		}
 		if kind == RTGScalarUint16 {
-			renvoAarch64AsmEmit(a, 0x92403c00)
+			asmEmit(a, 0x92403c00)
 			return
 		}
 		if kind == RTGScalarInt32 {
-			renvoAarch64AsmEmit(a, 0x93407c00)
+			asmEmit(a, 0x93407c00)
 			return
 		}
 		if kind == RTGScalarUint32 {
-			renvoAarch64AsmEmit(a, 0x92407c00)
+			asmEmit(a, 0x92407c00)
 		}
 	}
 
-	func renvoAarch64AsmCmpRegImm(a *RTGEmitter, reg int, imm int) {
+	func asmCmpRegImm(a *RTGEmitter, reg int, imm int) {
 		if imm >= 0 && imm <= 4095 {
-			renvoAarch64AsmEmit(a, 0xf100001f|(imm<<10)|(reg<<5))
+			asmEmit(a, 0xf100001f|(imm<<10)|(reg<<5))
 			return
 		}
-		renvoAarch64AsmMovRegImm(a, aarch64Scratch.Code, imm)
-		renvoAarch64AsmCmpRegReg(a, reg, aarch64Scratch.Code)
+		asmMovRegImm(a, aarch64Scratch.Code, imm)
+		asmCmpRegReg(a, reg, aarch64Scratch.Code)
 	}
 
-	func renvoAarch64AsmDivLeftRcxRightRax(a *RTGEmitter, mod bool) {
-		renvoAarch64AsmMovRegReg(a, aarch64Scratch.Code, aarch64Primary.Code)
-		renvoAarch64AsmEmit(a, 0x9ac00c40)
+	func asmDivLeftRcxRightRax(a *RTGEmitter, mod bool) {
+		asmMovRegReg(a, aarch64Scratch.Code, aarch64Primary.Code)
+		asmEmit(a, 0x9ac00c40)
 		if mod {
-			renvoAarch64AsmEmit(a, 0x9b098800)
+			asmEmit(a, 0x9b098800)
 		}
 	}
 
-	func renvoAarch64CondFromSetcc(setcc int) int {
+	func condFromSetcc(setcc int) int {
 		if setcc == 0x94 {
 			return 0
 		}
@@ -826,7 +826,7 @@ go backend {
 		return 10
 	}
 
-	func renvoAarch64AsmStoreRaxMemRdxRcxSize(a *RTGEmitter, size int) {
+	func asmStoreRaxMemRdxRcxSize(a *RTGEmitter, size int) {
 		shift := 3
 		if size == 1 {
 			shift = 0
@@ -837,17 +837,17 @@ go backend {
 		if size == 4 {
 			shift = 2
 		}
-		renvoAarch64AsmAddRegRegShift(a, aarch64Address.Code, aarch64Secondary.Code, aarch64Tertiary.Code, shift)
-		renvoAarch64AsmStoreRegMem(a, aarch64Primary.Code, aarch64Address.Code, 0, size)
+		asmAddRegRegShift(a, aarch64Address.Code, aarch64Secondary.Code, aarch64Tertiary.Code, shift)
+		asmStoreRegMem(a, aarch64Primary.Code, aarch64Address.Code, 0, size)
 	}
 
 	// direct_emitter_v1 uses registers and addresses rather than the historical
 	// x86-named value helpers above. These algorithms are the architecture
 	// boundary used by generated backends.
 
-	func aarch64EmitAddress(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+	func emitAddress(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
 		if RTGAddressValid(address) {
-			aarch64EmitADR(out, destination, address)
+			emitADR(out, destination, address)
 			return
 		}
 		base := address.Base.Code
@@ -860,34 +860,34 @@ go backend {
 			} else if address.Scale == 8 {
 				shift = 3
 			}
-			renvoAarch64AsmAddRegRegShift(
+			asmAddRegRegShift(
 				out, destination.Code, base, address.Index.Code, shift)
 			base = destination.Code
 		}
-		renvoAarch64AsmAddRegImm(
+		asmAddRegImm(
 			out, destination.Code, base, address.Displacement)
 	}
 
-	func aarch64MemoryBase(out *RTGEmitter, address RTGAddress) int {
+	func memoryBase(out *RTGEmitter, address RTGAddress) int {
 		if RTGAddressValid(address) || address.Index.Valid {
-			aarch64EmitAddress(out, aarch64Address, address)
+			emitAddress(out, aarch64Address, address)
 			return aarch64Address.Code
 		}
 		if address.Displacement < -256 || address.Displacement > 255 {
-			aarch64EmitAddress(out, aarch64Address, address)
+			emitAddress(out, aarch64Address, address)
 			return aarch64Address.Code
 		}
 		return address.Base.Code
 	}
 
-	func aarch64LoadWidth(
+	func loadWidth(
 		out *RTGEmitter,
 		destination RTGRegister,
 		address RTGAddress,
 		size int,
 		signed bool,
 	) {
-		base := aarch64MemoryBase(out, address)
+		base := memoryBase(out, address)
 		displacement := address.Displacement
 		if base == aarch64Address.Code {
 			displacement = 0
@@ -910,17 +910,17 @@ go backend {
 				op = 0xb8800000
 			}
 		}
-		renvoAarch64AsmEmit(
+		asmEmit(
 			out, op|imm|(base<<5)|destination.Code)
 	}
 
-	func aarch64StoreWidth(
+	func storeWidth(
 		out *RTGEmitter,
 		address RTGAddress,
 		source RTGRegister,
 		size int,
 	) {
-		base := aarch64MemoryBase(out, address)
+		base := memoryBase(out, address)
 		displacement := address.Displacement
 		if base == aarch64Address.Code {
 			displacement = 0
@@ -934,10 +934,10 @@ go backend {
 		} else if size == 4 {
 			op = 0xb8000000
 		}
-		renvoAarch64AsmEmit(out, op|imm|(base<<5)|source.Code)
+		asmEmit(out, op|imm|(base<<5)|source.Code)
 	}
 
-	func aarch64VariableShift(
+	func variableShift(
 		out *RTGEmitter, direction RTGShiftDirection, signed bool,
 	) {
 		op := 0x9ac02400
@@ -946,26 +946,26 @@ go backend {
 		} else if signed {
 			op = 0x9ac02800
 		}
-		renvoAarch64AsmEmit(out,
+		asmEmit(out,
 			op|(aarch64Primary.Code<<16)|
 				(aarch64Tertiary.Code<<5)|aarch64Primary.Code)
 	}
 
-	func aarch64SignedDivide(out *RTGEmitter, remainder bool) {
-		renvoAarch64AsmMovRegReg(
+	func signedDivide(out *RTGEmitter, remainder bool) {
+		asmMovRegReg(
 			out, aarch64Scratch.Code, aarch64Primary.Code)
-		renvoAarch64AsmEmit(out,
+		asmEmit(out,
 			0x9ac00c00|(aarch64Primary.Code<<16)|
 				(aarch64Tertiary.Code<<5)|aarch64Primary.Code)
 		if remainder {
-			renvoAarch64AsmEmit(out,
+			asmEmit(out,
 				0x9b008000|(aarch64Scratch.Code<<16)|
 					(aarch64Primary.Code<<10)|
 					(aarch64Tertiary.Code<<5)|aarch64Primary.Code)
 		}
 	}
 
-	func aarch64FrameFinish(out *RTGEmitter, at int, stackUsed int) {
+	func frameFinish(out *RTGEmitter, at int, stackUsed int) {
 		frame := (stackUsed + 15) & -16
 		high := frame / 4096
 		low := frame % 4096
@@ -1056,19 +1056,19 @@ arch aarch64 {
 	}
 
 	bind {
-		move = sequence aarch64Move
-		address = go aarch64EmitAddress
-		load.native = go aarch64LoadNative
-		load.i32 = go aarch64LoadI32
-		load.u32 = go aarch64LoadU32
-		load.i16 = go aarch64LoadI16
-		load.u16 = go aarch64LoadU16
-		load.i8 = go aarch64LoadI8
-		load.u8 = go aarch64LoadU8
-		store.native = go aarch64StoreNative
-		store.u32 = go aarch64StoreU32
-		store.u16 = go aarch64StoreU16
-		store.u8 = go aarch64StoreU8
+		move = sequence move
+		address = go emitAddress
+		load.native = go loadNative
+		load.i32 = go loadI32
+		load.u32 = go loadU32
+		load.i16 = go loadI16
+		load.u16 = go loadU16
+		load.i8 = go loadI8
+		load.u8 = go loadU8
+		store.native = go storeNative
+		store.u32 = go storeU32
+		store.u16 = go storeU16
+		store.u8 = go storeU8
 		add = add
 		subtract = subtract
 		multiply = multiply
@@ -1079,112 +1079,112 @@ arch aarch64 {
 		test = test
 		increment = increment
 		decrement = decrement
-		shift_left_immediate = sequence aarch64ShiftLeftImmediate
-		shift_right_unsigned_immediate = sequence aarch64ShiftRightUnsignedImmediate
-		shift_right_signed_immediate = sequence aarch64ShiftRightSignedImmediate
+		shift_left_immediate = sequence shiftLeftImmediate
+		shift_right_unsigned_immediate = sequence shiftRightUnsignedImmediate
+		shift_right_signed_immediate = sequence shiftRightSignedImmediate
 		call = call
 		call_indirect = call_indirect
 		jump = jump
 		jump_condition = jump_condition
-		set_condition = sequence aarch64SetCondition
+		set_condition = sequence setCondition
 		return = return
 		leave = leave
-		host_syscall = sequence aarch64HostSyscall
-		move_immediate = sequence aarch64MoveImmediate
-		variable_shift = go aarch64VariableShift
-		signed_divide = go aarch64SignedDivide
-		copy_bytes = sequence aarch64CopyBytes
+		host_syscall = sequence hostSyscall
+		move_immediate = sequence moveImmediate
+		variable_shift = go variableShift
+		signed_divide = go signedDivide
+		copy_bytes = sequence copyBytes
 	}
 
 	exports {
-		renvoAarch64AsmEmit = sequence renvoAarch64AsmEmit
-		renvoAarch64AsmAlign = go renvoAarch64AsmAlign
-		renvoAarch64AsmMovRegReg = go renvoAarch64AsmMovRegReg
-		renvoAarch64AsmMovRegImm = go renvoAarch64AsmMovRegImm
-		renvoAarch64AsmPatchMovRegImmAt = go renvoAarch64AsmPatchMovRegImmAt
-		renvoAarch64AsmMovRegAbs = sequence renvoAarch64AsmMovRegAbs
-		renvoAarch64AsmAddRegImm = go renvoAarch64AsmAddRegImm
-		renvoAarch64AsmAddRegReg = sequence renvoAarch64AsmAddRegReg
-		renvoAarch64AsmSubRegReg = sequence renvoAarch64AsmSubRegReg
-		renvoAarch64AsmAddRegRegShift = sequence renvoAarch64AsmAddRegRegShift
-		renvoAarch64AsmMulRegReg = sequence renvoAarch64AsmMulRegReg
-		renvoAarch64AsmAddr = go renvoAarch64AsmAddr
-		renvoAarch64AsmLoadRegMem = go renvoAarch64AsmLoadRegMem
-		renvoAarch64AsmStoreRegMem = go renvoAarch64AsmStoreRegMem
-		renvoAarch64AsmLoadRegStack = sequence renvoAarch64AsmLoadRegStack
-		renvoAarch64AsmStoreRegStack = sequence renvoAarch64AsmStoreRegStack
-		renvoAarch64AsmLeaRegStack = sequence renvoAarch64AsmLeaRegStack
-		renvoAarch64AsmPushReg = sequence renvoAarch64AsmPushReg
-		renvoAarch64AsmPopReg = sequence renvoAarch64AsmPopReg
-		renvoAarch64AsmMovRaxImm = sequence renvoAarch64AsmMovRaxImm
-		renvoAarch64AsmMovRaxImm64 = sequence renvoAarch64AsmMovRaxImm64
-		renvoAarch64AsmMovRdxImm = sequence renvoAarch64AsmMovRdxImm
-		renvoAarch64AsmMovRaxDataAddr = sequence renvoAarch64AsmMovRaxDataAddr
-		renvoAarch64AsmMovRaxBssAddr = sequence renvoAarch64AsmMovRaxBssAddr
-		renvoAarch64AsmMovR10BssAddr = sequence renvoAarch64AsmMovR10BssAddr
-		renvoAarch64AsmLoadRaxBss = sequence renvoAarch64AsmLoadRaxBss
-		renvoAarch64AsmStoreRaxBss = sequence renvoAarch64AsmStoreRaxBss
-		renvoAarch64AsmMovRdiRax = sequence renvoAarch64AsmMovRdiRax
-		renvoAarch64AsmMovRaxRdx = sequence renvoAarch64AsmMovRaxRdx
-		renvoAarch64AsmMovRdxRax = sequence renvoAarch64AsmMovRdxRax
-		renvoAarch64AsmMovRcxRax = sequence renvoAarch64AsmMovRcxRax
-		renvoAarch64AsmMovRcxRdx = sequence renvoAarch64AsmMovRcxRdx
-		renvoAarch64AsmMovRsiRax = sequence renvoAarch64AsmMovRsiRax
-		renvoAarch64AsmMovR8Rax = sequence renvoAarch64AsmMovR8Rax
-		renvoAarch64AsmMovR9Rax = sequence renvoAarch64AsmMovR9Rax
-		renvoAarch64AsmAddRdxRcx = sequence renvoAarch64AsmAddRdxRcx
-		renvoAarch64AsmSyscall = sequence renvoAarch64AsmSyscall
-		renvoAarch64AsmPopRdi = sequence renvoAarch64AsmPopRdi
-		renvoAarch64AsmPopRsi = sequence renvoAarch64AsmPopRsi
-		renvoAarch64AsmStackMem = go renvoAarch64AsmStackMem
-		renvoAarch64AsmAddRdxImm = sequence renvoAarch64AsmAddRdxImm
-		renvoAarch64AsmMemDisp = go renvoAarch64AsmMemDisp
-		renvoAarch64AsmLoadQwordRaxIndexRcx8 = sequence renvoAarch64AsmLoadQwordRaxIndexRcx8
-		renvoAarch64AsmLoadQwordRaxIndexRcxDisp = sequence renvoAarch64AsmLoadQwordRaxIndexRcxDisp
-		renvoAarch64AsmLoadRaxMemRdxDisp = sequence renvoAarch64AsmLoadRaxMemRdxDisp
-		renvoAarch64AsmLoadRaxMemRdxDispSize = sequence renvoAarch64AsmLoadRaxMemRdxDispSize
-		renvoAarch64AsmLoadByteRaxIndexRcx = sequence renvoAarch64AsmLoadByteRaxIndexRcx
-		renvoAarch64AsmLoadRaxIndexRcxSize = go renvoAarch64AsmLoadRaxIndexRcxSize
-		renvoAarch64AsmStoreRaxMemRdxRcx8 = sequence renvoAarch64AsmStoreRaxMemRdxRcx8
-		renvoAarch64AsmStoreRaxMemRdxDisp = sequence renvoAarch64AsmStoreRaxMemRdxDisp
-		renvoAarch64AsmStoreRaxMemRdxDispSize = sequence renvoAarch64AsmStoreRaxMemRdxDispSize
-		renvoAarch64AsmNormalizeRaxForKind = go renvoAarch64AsmNormalizeRaxForKind
-		renvoAarch64AsmIncMemRdx = sequence renvoAarch64AsmIncMemRdx
-		renvoAarch64AsmDecMemRdx = sequence renvoAarch64AsmDecMemRdx
-		renvoAarch64AsmBoolNotRax = sequence renvoAarch64AsmBoolNotRax
-		renvoAarch64AsmNegRax = sequence renvoAarch64AsmNegRax
-		renvoAarch64AsmCmpRaxImm8 = sequence renvoAarch64AsmCmpRaxImm8
-		renvoAarch64AsmCmpRegImm = go renvoAarch64AsmCmpRegImm
-		renvoAarch64AsmCmpRegReg = sequence renvoAarch64AsmCmpRegReg
-		renvoAarch64AsmCsetRax = sequence renvoAarch64AsmCsetRax
-		renvoAarch64AsmAddRaxRcx = sequence renvoAarch64AsmAddRaxRcx
-		renvoAarch64AsmSubRaxRcx = sequence renvoAarch64AsmSubRaxRcx
-		renvoAarch64AsmShlRcxImm = sequence renvoAarch64AsmShlRcxImm
-		renvoAarch64AsmShlRaxImm = sequence renvoAarch64AsmShlRaxImm
-		renvoAarch64AsmSarRaxImm = sequence renvoAarch64AsmSarRaxImm
-		renvoAarch64AsmDivLeftRcxRightRax = go renvoAarch64AsmDivLeftRcxRightRax
-		renvoAarch64CondFromSetcc = go renvoAarch64CondFromSetcc
-		renvoAarch64AsmCmpRcxRaxSet = sequence renvoAarch64AsmCmpRcxRaxSet
-		renvoAarch64AsmPushRax = sequence renvoAarch64AsmPushRax
-		renvoAarch64AsmPushRcx = sequence renvoAarch64AsmPushRcx
-		renvoAarch64AsmPushRdx = sequence renvoAarch64AsmPushRdx
-		renvoAarch64AsmPopRax = sequence renvoAarch64AsmPopRax
-		renvoAarch64AsmPopRcx = sequence renvoAarch64AsmPopRcx
-		renvoAarch64AsmPopRdx = sequence renvoAarch64AsmPopRdx
-		renvoAarch64AsmPushImm = sequence renvoAarch64AsmPushImm
-		renvoAarch64AsmStoreSliceStack = sequence renvoAarch64AsmStoreSliceStack
-		renvoAarch64AsmStoreAlMemRdxRcx1 = sequence renvoAarch64AsmStoreAlMemRdxRcx1
-		renvoAarch64AsmStoreRaxMemRdxRcxSize = go renvoAarch64AsmStoreRaxMemRdxRcxSize
-		renvoAarch64AsmIncRcx = sequence renvoAarch64AsmIncRcx
-		renvoAarch64AsmIncRax = sequence renvoAarch64AsmIncRax
-		renvoAarch64AsmImulRcxImm = sequence renvoAarch64AsmImulRcxImm
-		renvoAarch64AsmLeave = sequence renvoAarch64AsmLeave
-		renvoAarch64AsmRet = sequence renvoAarch64AsmRet
-		renvoAarch64AsmCallLabel = sequence renvoAarch64AsmCallLabel
-		renvoAarch64AsmJmpLabel = sequence renvoAarch64AsmJmpLabel
-		renvoAarch64AsmBCondLabel = sequence renvoAarch64AsmBCondLabel
-		renvoAarch64AsmJzLabel = sequence renvoAarch64AsmJzLabel
-		renvoAarch64AsmJnzLabel = sequence renvoAarch64AsmJnzLabel
+		renvoAarch64AsmEmit = sequence asmEmit
+		renvoAarch64AsmAlign = go asmAlign
+		renvoAarch64AsmMovRegReg = go asmMovRegReg
+		renvoAarch64AsmMovRegImm = go asmMovRegImm
+		renvoAarch64AsmPatchMovRegImmAt = go asmPatchMovRegImmAt
+		renvoAarch64AsmMovRegAbs = sequence asmMovRegAbs
+		renvoAarch64AsmAddRegImm = go asmAddRegImm
+		renvoAarch64AsmAddRegReg = sequence asmAddRegReg
+		renvoAarch64AsmSubRegReg = sequence asmSubRegReg
+		renvoAarch64AsmAddRegRegShift = sequence asmAddRegRegShift
+		renvoAarch64AsmMulRegReg = sequence asmMulRegReg
+		renvoAarch64AsmAddr = go asmAddr
+		renvoAarch64AsmLoadRegMem = go asmLoadRegMem
+		renvoAarch64AsmStoreRegMem = go asmStoreRegMem
+		renvoAarch64AsmLoadRegStack = sequence asmLoadRegStack
+		renvoAarch64AsmStoreRegStack = sequence asmStoreRegStack
+		renvoAarch64AsmLeaRegStack = sequence asmLeaRegStack
+		renvoAarch64AsmPushReg = sequence asmPushReg
+		renvoAarch64AsmPopReg = sequence asmPopReg
+		renvoAarch64AsmMovRaxImm = sequence asmMovRaxImm
+		renvoAarch64AsmMovRaxImm64 = sequence asmMovRaxImm64
+		renvoAarch64AsmMovRdxImm = sequence asmMovRdxImm
+		renvoAarch64AsmMovRaxDataAddr = sequence asmMovRaxDataAddr
+		renvoAarch64AsmMovRaxBssAddr = sequence asmMovRaxBssAddr
+		renvoAarch64AsmMovR10BssAddr = sequence asmMovR10BssAddr
+		renvoAarch64AsmLoadRaxBss = sequence asmLoadRaxBss
+		renvoAarch64AsmStoreRaxBss = sequence asmStoreRaxBss
+		renvoAarch64AsmMovRdiRax = sequence asmMovRdiRax
+		renvoAarch64AsmMovRaxRdx = sequence asmMovRaxRdx
+		renvoAarch64AsmMovRdxRax = sequence asmMovRdxRax
+		renvoAarch64AsmMovRcxRax = sequence asmMovRcxRax
+		renvoAarch64AsmMovRcxRdx = sequence asmMovRcxRdx
+		renvoAarch64AsmMovRsiRax = sequence asmMovRsiRax
+		renvoAarch64AsmMovR8Rax = sequence asmMovR8Rax
+		renvoAarch64AsmMovR9Rax = sequence asmMovR9Rax
+		renvoAarch64AsmAddRdxRcx = sequence asmAddRdxRcx
+		renvoAarch64AsmSyscall = sequence asmSyscall
+		renvoAarch64AsmPopRdi = sequence asmPopRdi
+		renvoAarch64AsmPopRsi = sequence asmPopRsi
+		renvoAarch64AsmStackMem = go asmStackMem
+		renvoAarch64AsmAddRdxImm = sequence asmAddRdxImm
+		renvoAarch64AsmMemDisp = go asmMemDisp
+		renvoAarch64AsmLoadQwordRaxIndexRcx8 = sequence asmLoadQwordRaxIndexRcx8
+		renvoAarch64AsmLoadQwordRaxIndexRcxDisp = sequence asmLoadQwordRaxIndexRcxDisp
+		renvoAarch64AsmLoadRaxMemRdxDisp = sequence asmLoadRaxMemRdxDisp
+		renvoAarch64AsmLoadRaxMemRdxDispSize = sequence asmLoadRaxMemRdxDispSize
+		renvoAarch64AsmLoadByteRaxIndexRcx = sequence asmLoadByteRaxIndexRcx
+		renvoAarch64AsmLoadRaxIndexRcxSize = go asmLoadRaxIndexRcxSize
+		renvoAarch64AsmStoreRaxMemRdxRcx8 = sequence asmStoreRaxMemRdxRcx8
+		renvoAarch64AsmStoreRaxMemRdxDisp = sequence asmStoreRaxMemRdxDisp
+		renvoAarch64AsmStoreRaxMemRdxDispSize = sequence asmStoreRaxMemRdxDispSize
+		renvoAarch64AsmNormalizeRaxForKind = go asmNormalizeRaxForKind
+		renvoAarch64AsmIncMemRdx = sequence asmIncMemRdx
+		renvoAarch64AsmDecMemRdx = sequence asmDecMemRdx
+		renvoAarch64AsmBoolNotRax = sequence asmBoolNotRax
+		renvoAarch64AsmNegRax = sequence asmNegRax
+		renvoAarch64AsmCmpRaxImm8 = sequence asmCmpRaxImm8
+		renvoAarch64AsmCmpRegImm = go asmCmpRegImm
+		renvoAarch64AsmCmpRegReg = sequence asmCmpRegReg
+		renvoAarch64AsmCsetRax = sequence asmCsetRax
+		renvoAarch64AsmAddRaxRcx = sequence asmAddRaxRcx
+		renvoAarch64AsmSubRaxRcx = sequence asmSubRaxRcx
+		renvoAarch64AsmShlRcxImm = sequence asmShlRcxImm
+		renvoAarch64AsmShlRaxImm = sequence asmShlRaxImm
+		renvoAarch64AsmSarRaxImm = sequence asmSarRaxImm
+		renvoAarch64AsmDivLeftRcxRightRax = go asmDivLeftRcxRightRax
+		renvoAarch64CondFromSetcc = go condFromSetcc
+		renvoAarch64AsmCmpRcxRaxSet = sequence asmCmpRcxRaxSet
+		renvoAarch64AsmPushRax = sequence asmPushRax
+		renvoAarch64AsmPushRcx = sequence asmPushRcx
+		renvoAarch64AsmPushRdx = sequence asmPushRdx
+		renvoAarch64AsmPopRax = sequence asmPopRax
+		renvoAarch64AsmPopRcx = sequence asmPopRcx
+		renvoAarch64AsmPopRdx = sequence asmPopRdx
+		renvoAarch64AsmPushImm = sequence asmPushImm
+		renvoAarch64AsmStoreSliceStack = sequence asmStoreSliceStack
+		renvoAarch64AsmStoreAlMemRdxRcx1 = sequence asmStoreAlMemRdxRcx1
+		renvoAarch64AsmStoreRaxMemRdxRcxSize = go asmStoreRaxMemRdxRcxSize
+		renvoAarch64AsmIncRcx = sequence asmIncRcx
+		renvoAarch64AsmIncRax = sequence asmIncRax
+		renvoAarch64AsmImulRcxImm = sequence asmImulRcxImm
+		renvoAarch64AsmLeave = sequence asmLeave
+		renvoAarch64AsmRet = sequence asmRet
+		renvoAarch64AsmCallLabel = sequence asmCallLabel
+		renvoAarch64AsmJmpLabel = sequence asmJmpLabel
+		renvoAarch64AsmBCondLabel = sequence asmBCondLabel
+		renvoAarch64AsmJzLabel = sequence asmJzLabel
+		renvoAarch64AsmJnzLabel = sequence asmJnzLabel
 	}
 
 	relocation branch26 {
@@ -1212,760 +1212,760 @@ arch aarch64 {
 	}
 
 	sequences {
-		renvoAarch64AsmAddRaxRcx(a:emitter) {
-			call renvoAarch64AsmAddRegReg(a,aarch64Primary.Code,aarch64Primary.Code,aarch64Tertiary.Code)
+		asmAddRaxRcx(a:emitter) {
+			asmAddRegReg(a,primary.Code,primary.Code,tertiary.Code)
 
 		}
-		renvoAarch64AsmAddRdxImm(a:emitter, imm:int) {
-			call renvoAarch64AsmAddRegImm(a,aarch64Secondary.Code,aarch64Secondary.Code,imm)
+		asmAddRdxImm(a:emitter, imm:int) {
+			asmAddRegImm(a,secondary.Code,secondary.Code,imm)
 
 		}
-		renvoAarch64AsmAddRdxRcx(a:emitter) {
-			call renvoAarch64AsmAddRegReg(a,aarch64Secondary.Code,aarch64Secondary.Code,aarch64Tertiary.Code)
+		asmAddRdxRcx(a:emitter) {
+			asmAddRegReg(a,secondary.Code,secondary.Code,tertiary.Code)
 
 		}
-		renvoAarch64AsmAddRegReg(a:emitter, dst:int, left:int, right:int) {
-			call renvoAarch64AsmEmit(a,0x8b000000|(right<<16)|(left<<5)|dst)
+		asmAddRegReg(a:emitter, dst:int, left:int, right:int) {
+			asmEmit(a,0x8b000000|(right<<16)|(left<<5)|dst)
 
 		}
-		renvoAarch64AsmAddRegRegShift(a:emitter, dst:int, left:int, right:int, shift:int) {
-			call renvoAarch64AsmEmit(a,0x8b000000|(right<<16)|(shift<<10)|(left<<5)|dst)
+		asmAddRegRegShift(a:emitter, dst:int, left:int, right:int, shift:int) {
+			asmEmit(a,0x8b000000|(right<<16)|(shift<<10)|(left<<5)|dst)
 
 		}
-		renvoAarch64AsmBoolNotRax(a:emitter) {
-			call renvoAarch64AsmCmpRaxImm8(a,0)
+		asmBoolNotRax(a:emitter) {
+			asmCmpRaxImm8(a,0)
 
-			call renvoAarch64AsmCsetRax(a,0)
+			asmCsetRax(a,0)
 
 		}
-		renvoAarch64AsmCmpRaxImm8(a:emitter, imm:int) {
-			call renvoAarch64AsmCmpRegImm(a,aarch64Primary.Code,imm)
+		asmCmpRaxImm8(a:emitter, imm:int) {
+			asmCmpRegImm(a,primary.Code,imm)
 
 		}
-		renvoAarch64AsmCmpRegReg(a:emitter, left:int, right:int) {
-			call renvoAarch64AsmEmit(a,0xeb00001f|(right<<16)|(left<<5))
+		asmCmpRegReg(a:emitter, left:int, right:int) {
+			asmEmit(a,0xeb00001f|(right<<16)|(left<<5))
 
 		}
-		renvoAarch64AsmCsetRax(a:emitter, cond:int) {
-			call renvoAarch64AsmEmit(a,0x9a9f07e0|((cond^1)<<12))
+		asmCsetRax(a:emitter, cond:int) {
+			asmEmit(a,0x9a9f07e0|((cond^1)<<12))
 
 		}
-		renvoAarch64AsmDecMemRdx(a:emitter) {
-			call renvoAarch64AsmLoadRegMem(a,aarch64Scratch.Code,aarch64Secondary.Code,0,8)
+		asmDecMemRdx(a:emitter) {
+			asmLoadRegMem(a,scratch.Code,secondary.Code,0,8)
 
-			call renvoAarch64AsmAddRegImm(a,aarch64Scratch.Code,aarch64Scratch.Code,-1)
+			asmAddRegImm(a,scratch.Code,scratch.Code,-1)
 
-			call renvoAarch64AsmStoreRegMem(a,aarch64Scratch.Code,aarch64Secondary.Code,0,8)
+			asmStoreRegMem(a,scratch.Code,secondary.Code,0,8)
 
 		}
-		renvoAarch64AsmEmit(a:emitter, insn:int) {
-			call RTGUint32(a,insn)
+		asmEmit(a:emitter, insn:int) {
+			RTGUint32(a,insn)
 
 		}
-		renvoAarch64AsmImulRcxImm(a:emitter, imm:int) {
-			call renvoAarch64AsmMovRegImm(a,aarch64Scratch.Code,imm)
+		asmImulRcxImm(a:emitter, imm:int) {
+			asmMovRegImm(a,scratch.Code,imm)
 
-			call renvoAarch64AsmEmit(a,0x9b007c00|(aarch64Scratch.Code<<16)|(aarch64Tertiary.Code<<5)|aarch64Tertiary.Code)
+			asmEmit(a,0x9b007c00|(scratch.Code<<16)|(tertiary.Code<<5)|tertiary.Code)
 
 		}
-		renvoAarch64AsmIncMemRdx(a:emitter) {
-			call renvoAarch64AsmLoadRegMem(a,aarch64Scratch.Code,aarch64Secondary.Code,0,8)
+		asmIncMemRdx(a:emitter) {
+			asmLoadRegMem(a,scratch.Code,secondary.Code,0,8)
 
-			call renvoAarch64AsmAddRegImm(a,aarch64Scratch.Code,aarch64Scratch.Code,1)
+			asmAddRegImm(a,scratch.Code,scratch.Code,1)
 
-			call renvoAarch64AsmStoreRegMem(a,aarch64Scratch.Code,aarch64Secondary.Code,0,8)
+			asmStoreRegMem(a,scratch.Code,secondary.Code,0,8)
 
 		}
-		renvoAarch64AsmIncRax(a:emitter) {
-			call renvoAarch64AsmAddRegImm(a,aarch64Primary.Code,aarch64Primary.Code,1)
+		asmIncRax(a:emitter) {
+			asmAddRegImm(a,primary.Code,primary.Code,1)
 
 		}
-		renvoAarch64AsmIncRcx(a:emitter) {
-			call renvoAarch64AsmAddRegImm(a,aarch64Tertiary.Code,aarch64Tertiary.Code,1)
+		asmIncRcx(a:emitter) {
+			asmAddRegImm(a,tertiary.Code,tertiary.Code,1)
 
 		}
-		renvoAarch64AsmJnzLabel(a:emitter, label:int) {
-			call renvoAarch64AsmBCondLabel(a,label,1)
+		asmJnzLabel(a:emitter, label:int) {
+			asmBCondLabel(a,label,1)
 
 		}
-		renvoAarch64AsmJzLabel(a:emitter, label:int) {
-			call renvoAarch64AsmBCondLabel(a,label,0)
+		asmJzLabel(a:emitter, label:int) {
+			asmBCondLabel(a,label,0)
 
 		}
-		renvoAarch64AsmLeaRegStack(a:emitter, dst:int, offset:int) {
-			call renvoAarch64AsmAddRegImm(a,dst,aarch64Frame.Code,-offset)
+		asmLeaRegStack(a:emitter, dst:int, offset:int) {
+			asmAddRegImm(a,dst,frame.Code,-offset)
 
 		}
-		renvoAarch64AsmLeave(a:emitter) {
-			call renvoAarch64AsmEmit(a,0x910003bf)
+		asmLeave(a:emitter) {
+			asmEmit(a,0x910003bf)
 
-			call renvoAarch64AsmEmit(a,0xa8c17bfd)
+			asmEmit(a,0xa8c17bfd)
 
 		}
-		renvoAarch64AsmLoadByteRaxIndexRcx(a:emitter) {
-			call renvoAarch64AsmAddRegRegShift(a,aarch64Address.Code,aarch64Primary.Code,aarch64Tertiary.Code,0)
+		asmLoadByteRaxIndexRcx(a:emitter) {
+			asmAddRegRegShift(a,address.Code,primary.Code,tertiary.Code,0)
 
-			call renvoAarch64AsmLoadRegMem(a,aarch64Primary.Code,aarch64Address.Code,0,1)
+			asmLoadRegMem(a,primary.Code,address.Code,0,1)
 
 		}
-		renvoAarch64AsmLoadQwordRaxIndexRcx8(a:emitter) {
-			call renvoAarch64AsmAddRegRegShift(a,aarch64Address.Code,aarch64Primary.Code,aarch64Tertiary.Code,3)
+		asmLoadQwordRaxIndexRcx8(a:emitter) {
+			asmAddRegRegShift(a,address.Code,primary.Code,tertiary.Code,3)
 
-			call renvoAarch64AsmLoadRegMem(a,aarch64Primary.Code,aarch64Address.Code,0,8)
+			asmLoadRegMem(a,primary.Code,address.Code,0,8)
 
 		}
-		renvoAarch64AsmLoadQwordRaxIndexRcxDisp(a:emitter, disp:int) {
-			call renvoAarch64AsmAddRegReg(a,aarch64Address.Code,aarch64Primary.Code,aarch64Tertiary.Code)
+		asmLoadQwordRaxIndexRcxDisp(a:emitter, disp:int) {
+			asmAddRegReg(a,address.Code,primary.Code,tertiary.Code)
 
-			call renvoAarch64AsmLoadRegMem(a,aarch64Primary.Code,aarch64Address.Code,disp,8)
+			asmLoadRegMem(a,primary.Code,address.Code,disp,8)
 
 		}
-		renvoAarch64AsmLoadRaxBss(a:emitter, bssOff:int) {
-			call renvoAarch64AsmMovRegAbs(a,aarch64Address.Code,bssOff,RTGRelocationAbsoluteBSS)
+		asmLoadRaxBss(a:emitter, bssOff:int) {
+			asmMovRegAbs(a,address.Code,bssOff,RTGRelocationAbsoluteBSS)
 
-			call renvoAarch64AsmLoadRegMem(a,aarch64Primary.Code,aarch64Address.Code,0,8)
+			asmLoadRegMem(a,primary.Code,address.Code,0,8)
 
 		}
-		renvoAarch64AsmLoadRaxMemRdxDisp(a:emitter, disp:int) {
-			call renvoAarch64AsmLoadRegMem(a,aarch64Primary.Code,aarch64Secondary.Code,disp,8)
+		asmLoadRaxMemRdxDisp(a:emitter, disp:int) {
+			asmLoadRegMem(a,primary.Code,secondary.Code,disp,8)
 
 		}
-		renvoAarch64AsmLoadRaxMemRdxDispSize(a:emitter, disp:int, size:int) {
-			call renvoAarch64AsmLoadRegMem(a,aarch64Primary.Code,aarch64Secondary.Code,disp,size)
+		asmLoadRaxMemRdxDispSize(a:emitter, disp:int, size:int) {
+			asmLoadRegMem(a,primary.Code,secondary.Code,disp,size)
 
 		}
-		renvoAarch64AsmLoadRegStack(a:emitter, dst:int, offset:int) {
-			call renvoAarch64AsmLoadRegMem(a,dst,aarch64Frame.Code,-offset,8)
+		asmLoadRegStack(a:emitter, dst:int, offset:int) {
+			asmLoadRegMem(a,dst,frame.Code,-offset,8)
 
 		}
-		renvoAarch64AsmMovR10BssAddr(a:emitter, bssOff:int) {
-			call renvoAarch64AsmMovRegAbs(a,aarch64X7.Code,bssOff,RTGRelocationAbsoluteBSS)
+		asmMovR10BssAddr(a:emitter, bssOff:int) {
+			asmMovRegAbs(a,x7.Code,bssOff,RTGRelocationAbsoluteBSS)
 
 		}
-		renvoAarch64AsmMovR8Rax(a:emitter) {
-			call renvoAarch64AsmMovRegReg(a,aarch64X5.Code,aarch64Primary.Code)
+		asmMovR8Rax(a:emitter) {
+			asmMovRegReg(a,x5.Code,primary.Code)
 
 		}
-		renvoAarch64AsmMovR9Rax(a:emitter) {
-			call renvoAarch64AsmMovRegReg(a,aarch64X6.Code,aarch64Primary.Code)
+		asmMovR9Rax(a:emitter) {
+			asmMovRegReg(a,x6.Code,primary.Code)
 
 		}
-		renvoAarch64AsmMovRaxBssAddr(a:emitter, bssOff:int) {
-			call renvoAarch64AsmMovRegAbs(a,aarch64Primary.Code,bssOff,RTGRelocationAbsoluteBSS)
+		asmMovRaxBssAddr(a:emitter, bssOff:int) {
+			asmMovRegAbs(a,primary.Code,bssOff,RTGRelocationAbsoluteBSS)
 
 		}
-		renvoAarch64AsmMovRaxDataAddr(a:emitter, dataOff:int) {
-			call renvoAarch64AsmMovRegAbs(a,aarch64Primary.Code,dataOff,0)
+		asmMovRaxDataAddr(a:emitter, dataOff:int) {
+			asmMovRegAbs(a,primary.Code,dataOff,0)
 
 		}
-		renvoAarch64AsmMovRaxImm(a:emitter, imm:int) {
-			call renvoAarch64AsmMovRegImm(a,aarch64Primary.Code,imm)
+		asmMovRaxImm(a:emitter, imm:int) {
+			asmMovRegImm(a,primary.Code,imm)
 
 		}
-		renvoAarch64AsmMovRaxImm64(a:emitter, imm:int) {
-			call renvoAarch64AsmMovRaxImm(a,imm)
+		asmMovRaxImm64(a:emitter, imm:int) {
+			asmMovRaxImm(a,imm)
 
 		}
-		renvoAarch64AsmMovRaxRdx(a:emitter) {
-			call renvoAarch64AsmMovRegReg(a,aarch64Primary.Code,aarch64Secondary.Code)
+		asmMovRaxRdx(a:emitter) {
+			asmMovRegReg(a,primary.Code,secondary.Code)
 
 		}
-		renvoAarch64AsmMovRcxRax(a:emitter) {
-			call renvoAarch64AsmMovRegReg(a,aarch64Tertiary.Code,aarch64Primary.Code)
+		asmMovRcxRax(a:emitter) {
+			asmMovRegReg(a,tertiary.Code,primary.Code)
 
 		}
-		renvoAarch64AsmMovRcxRdx(a:emitter) {
-			call renvoAarch64AsmMovRegReg(a,aarch64Tertiary.Code,aarch64Secondary.Code)
+		asmMovRcxRdx(a:emitter) {
+			asmMovRegReg(a,tertiary.Code,secondary.Code)
 
 		}
-		renvoAarch64AsmMovRdiRax(a:emitter) {
-			call renvoAarch64AsmMovRegReg(a,aarch64X3.Code,aarch64Primary.Code)
+		asmMovRdiRax(a:emitter) {
+			asmMovRegReg(a,x3.Code,primary.Code)
 
 		}
-		renvoAarch64AsmMovRdxImm(a:emitter, imm:int) {
-			call renvoAarch64AsmMovRegImm(a,aarch64Secondary.Code,imm)
+		asmMovRdxImm(a:emitter, imm:int) {
+			asmMovRegImm(a,secondary.Code,imm)
 
 		}
-		renvoAarch64AsmMovRdxRax(a:emitter) {
-			call renvoAarch64AsmMovRegReg(a,aarch64Secondary.Code,aarch64Primary.Code)
+		asmMovRdxRax(a:emitter) {
+			asmMovRegReg(a,secondary.Code,primary.Code)
 
 		}
-		renvoAarch64AsmMovRsiRax(a:emitter) {
-			call renvoAarch64AsmMovRegReg(a,aarch64X4.Code,aarch64Primary.Code)
+		asmMovRsiRax(a:emitter) {
+			asmMovRegReg(a,x4.Code,primary.Code)
 
 		}
-		renvoAarch64AsmMulRegReg(a:emitter, dst:int, left:int, right:int) {
-			call renvoAarch64AsmEmit(a,0x9b007c00|(right<<16)|(left<<5)|dst)
+		asmMulRegReg(a:emitter, dst:int, left:int, right:int) {
+			asmEmit(a,0x9b007c00|(right<<16)|(left<<5)|dst)
 
 		}
-		renvoAarch64AsmNegRax(a:emitter) {
-			call renvoAarch64AsmSubRegReg(a,aarch64Primary.Code,aarch64Zero.Code,aarch64Primary.Code)
+		asmNegRax(a:emitter) {
+			asmSubRegReg(a,primary.Code,zero.Code,primary.Code)
 
 		}
-		renvoAarch64AsmPopRax(a:emitter) {
-			call renvoAarch64AsmPopReg(a,aarch64Primary.Code)
+		asmPopRax(a:emitter) {
+			asmPopReg(a,primary.Code)
 
 		}
-		renvoAarch64AsmPopRcx(a:emitter) {
-			call renvoAarch64AsmPopReg(a,aarch64Tertiary.Code)
+		asmPopRcx(a:emitter) {
+			asmPopReg(a,tertiary.Code)
 
 		}
-		renvoAarch64AsmPopRdi(a:emitter) {
-			call renvoAarch64AsmPopReg(a,aarch64X3.Code)
+		asmPopRdi(a:emitter) {
+			asmPopReg(a,x3.Code)
 
 		}
-		renvoAarch64AsmPopRdx(a:emitter) {
-			call renvoAarch64AsmPopReg(a,aarch64Secondary.Code)
+		asmPopRdx(a:emitter) {
+			asmPopReg(a,secondary.Code)
 
 		}
-		renvoAarch64AsmPopReg(a:emitter, reg:int) {
-			call renvoAarch64AsmEmit(a,0xf84107e0|reg)
+		asmPopReg(a:emitter, reg:int) {
+			asmEmit(a,0xf84107e0|reg)
 
 		}
-		renvoAarch64AsmPopRsi(a:emitter) {
-			call renvoAarch64AsmPopReg(a,aarch64X4.Code)
+		asmPopRsi(a:emitter) {
+			asmPopReg(a,x4.Code)
 
 		}
-		renvoAarch64AsmPushImm(a:emitter, imm:int) {
-			call renvoAarch64AsmMovRegImm(a,aarch64Scratch.Code,imm)
+		asmPushImm(a:emitter, imm:int) {
+			asmMovRegImm(a,scratch.Code,imm)
 
-			call renvoAarch64AsmPushReg(a,aarch64Scratch.Code)
+			asmPushReg(a,scratch.Code)
 
 		}
-		renvoAarch64AsmPushRax(a:emitter) {
-			call renvoAarch64AsmPushReg(a,aarch64Primary.Code)
+		asmPushRax(a:emitter) {
+			asmPushReg(a,primary.Code)
 
 		}
-		renvoAarch64AsmPushRcx(a:emitter) {
-			call renvoAarch64AsmPushReg(a,aarch64Tertiary.Code)
+		asmPushRcx(a:emitter) {
+			asmPushReg(a,tertiary.Code)
 
 		}
-		renvoAarch64AsmPushRdx(a:emitter) {
-			call renvoAarch64AsmPushReg(a,aarch64Secondary.Code)
+		asmPushRdx(a:emitter) {
+			asmPushReg(a,secondary.Code)
 
 		}
-		renvoAarch64AsmPushReg(a:emitter, reg:int) {
-			call renvoAarch64AsmEmit(a,0xf81f0fe0|reg)
+		asmPushReg(a:emitter, reg:int) {
+			asmEmit(a,0xf81f0fe0|reg)
 
 		}
-		renvoAarch64AsmRet(a:emitter) {
-			call renvoAarch64AsmEmit(a,0xd65f03c0)
+		asmRet(a:emitter) {
+			asmEmit(a,0xd65f03c0)
 
 		}
-		renvoAarch64AsmSarRaxImm(a:emitter, imm:int) {
-			call renvoAarch64AsmEmit(a,0x9340fc00|(imm<<16))
+		asmSarRaxImm(a:emitter, imm:int) {
+			asmEmit(a,0x9340fc00|(imm<<16))
 
 		}
-		renvoAarch64AsmShlRaxImm(a:emitter, imm:int) {
-			call renvoAarch64AsmEmit(a,0xd3400000|((64-imm)<<16)|((63-imm)<<10))
+		asmShlRaxImm(a:emitter, imm:int) {
+			asmEmit(a,0xd3400000|((64-imm)<<16)|((63-imm)<<10))
 
 		}
-		renvoAarch64AsmShlRcxImm(a:emitter, imm:int) {
-			call renvoAarch64AsmEmit(a,0xd3400000|((64-imm)<<16)|((63-imm)<<10)|(aarch64Tertiary.Code<<5)|aarch64Tertiary.Code)
+		asmShlRcxImm(a:emitter, imm:int) {
+			asmEmit(a,0xd3400000|((64-imm)<<16)|((63-imm)<<10)|(tertiary.Code<<5)|tertiary.Code)
 
 		}
-		renvoAarch64AsmStoreAlMemRdxRcx1(a:emitter) {
-			call renvoAarch64AsmAddRegRegShift(a,aarch64Address.Code,aarch64Secondary.Code,aarch64Tertiary.Code,0)
+		asmStoreAlMemRdxRcx1(a:emitter) {
+			asmAddRegRegShift(a,address.Code,secondary.Code,tertiary.Code,0)
 
-			call renvoAarch64AsmStoreRegMem(a,aarch64Primary.Code,aarch64Address.Code,0,1)
+			asmStoreRegMem(a,primary.Code,address.Code,0,1)
 
 		}
-		renvoAarch64AsmStoreRaxBss(a:emitter, bssOff:int) {
-			call renvoAarch64AsmMovRegAbs(a,aarch64Address.Code,bssOff,RTGRelocationAbsoluteBSS)
+		asmStoreRaxBss(a:emitter, bssOff:int) {
+			asmMovRegAbs(a,address.Code,bssOff,RTGRelocationAbsoluteBSS)
 
-			call renvoAarch64AsmStoreRegMem(a,aarch64Primary.Code,aarch64Address.Code,0,8)
+			asmStoreRegMem(a,primary.Code,address.Code,0,8)
 
 		}
-		renvoAarch64AsmStoreRaxMemRdxDisp(a:emitter, disp:int) {
-			call renvoAarch64AsmStoreRegMem(a,aarch64Primary.Code,aarch64Secondary.Code,disp,8)
+		asmStoreRaxMemRdxDisp(a:emitter, disp:int) {
+			asmStoreRegMem(a,primary.Code,secondary.Code,disp,8)
 
 		}
-		renvoAarch64AsmStoreRaxMemRdxDispSize(a:emitter, disp:int, size:int) {
-			call renvoAarch64AsmStoreRegMem(a,aarch64Primary.Code,aarch64Secondary.Code,disp,size)
+		asmStoreRaxMemRdxDispSize(a:emitter, disp:int, size:int) {
+			asmStoreRegMem(a,primary.Code,secondary.Code,disp,size)
 
 		}
-		renvoAarch64AsmStoreRaxMemRdxRcx8(a:emitter) {
-			call renvoAarch64AsmAddRegRegShift(a,aarch64Address.Code,aarch64Secondary.Code,aarch64Tertiary.Code,3)
+		asmStoreRaxMemRdxRcx8(a:emitter) {
+			asmAddRegRegShift(a,address.Code,secondary.Code,tertiary.Code,3)
 
-			call renvoAarch64AsmStoreRegMem(a,aarch64Primary.Code,aarch64Address.Code,0,8)
+			asmStoreRegMem(a,primary.Code,address.Code,0,8)
 
 		}
-		renvoAarch64AsmStoreRegStack(a:emitter, src:int, offset:int) {
-			call renvoAarch64AsmStoreRegMem(a,src,aarch64Frame.Code,-offset,8)
+		asmStoreRegStack(a:emitter, src:int, offset:int) {
+			asmStoreRegMem(a,src,frame.Code,-offset,8)
 
 		}
-		renvoAarch64AsmStoreSliceStack(a:emitter, offset:int) {
-			call renvoAarch64AsmStoreRegStack(a,aarch64Primary.Code,offset)
+		asmStoreSliceStack(a:emitter, offset:int) {
+			asmStoreRegStack(a,primary.Code,offset)
 
-			call renvoAarch64AsmStoreRegStack(a,aarch64Secondary.Code,offset-8)
+			asmStoreRegStack(a,secondary.Code,offset-8)
 
-			call renvoAarch64AsmStoreRegStack(a,aarch64Tertiary.Code,offset-16)
+			asmStoreRegStack(a,tertiary.Code,offset-16)
 
 		}
-		renvoAarch64AsmSubRaxRcx(a:emitter) {
-			call renvoAarch64AsmSubRegReg(a,aarch64Primary.Code,aarch64Primary.Code,aarch64Tertiary.Code)
+		asmSubRaxRcx(a:emitter) {
+			asmSubRegReg(a,primary.Code,primary.Code,tertiary.Code)
 
 		}
-		renvoAarch64AsmSubRegReg(a:emitter, dst:int, left:int, right:int) {
-			call renvoAarch64AsmEmit(a,0xcb000000|(right<<16)|(left<<5)|dst)
+		asmSubRegReg(a:emitter, dst:int, left:int, right:int) {
+			asmEmit(a,0xcb000000|(right<<16)|(left<<5)|dst)
 
 		}
-		renvoAarch64AsmSyscall(a:emitter) {
-			call renvoAarch64AsmMovRegReg(a,aarch64System.Code,aarch64Primary.Code)
+		asmSyscall(a:emitter) {
+			asmMovRegReg(a,system.Code,primary.Code)
 
-			call renvoAarch64AsmMovRegReg(a,aarch64Scratch.Code,aarch64Secondary.Code)
+			asmMovRegReg(a,scratch.Code,secondary.Code)
 
-			call renvoAarch64AsmMovRegReg(a,0,aarch64X3.Code)
+			asmMovRegReg(a,0,x3.Code)
 
-			call renvoAarch64AsmMovRegReg(a,1,aarch64X4.Code)
+			asmMovRegReg(a,1,x4.Code)
 
-			call renvoAarch64AsmMovRegReg(a,2,aarch64Scratch.Code)
+			asmMovRegReg(a,2,scratch.Code)
 
-			call renvoAarch64AsmMovRegReg(a,3,aarch64X7.Code)
+			asmMovRegReg(a,3,x7.Code)
 
-			call renvoAarch64AsmEmit(a,0xd4000001)
+			asmEmit(a,0xd4000001)
 
 		}
 
-		renvoAarch64AsmBCondLabel(a:emitter, label:int, cond:int) {
+		asmBCondLabel(a:emitter, label:int, cond:int) {
 			let at = a.Len()
 
-			call renvoAarch64AsmEmit(a,0x54000000|cond)
+			asmEmit(a,0x54000000|cond)
 
-			call a.RelocAt(at,label)
+			a.RelocAt(at,label)
 
 		}
-		renvoAarch64AsmCallLabel(a:emitter, label:int) {
+		asmCallLabel(a:emitter, label:int) {
 			let at = a.Len()
 
-			call renvoAarch64AsmEmit(a,0x94000000)
+			asmEmit(a,0x94000000)
 
-			call a.RelocAt(at,label)
-
-		}
-		renvoAarch64AsmCmpRcxRaxSet(a:emitter, setcc:int) {
-			call renvoAarch64AsmCmpRegReg(a,aarch64Tertiary.Code,aarch64Primary.Code)
-
-			let cond = renvoAarch64CondFromSetcc(setcc)
-
-			call renvoAarch64AsmCsetRax(a,cond)
+			a.RelocAt(at,label)
 
 		}
-		renvoAarch64AsmJmpLabel(a:emitter, label:int) {
+		asmCmpRcxRaxSet(a:emitter, setcc:int) {
+			asmCmpRegReg(a,tertiary.Code,primary.Code)
+
+			let cond = condFromSetcc(setcc)
+
+			asmCsetRax(a,cond)
+
+		}
+		asmJmpLabel(a:emitter, label:int) {
 			let at = a.Len()
 
-			call renvoAarch64AsmEmit(a,0x14000000)
+			asmEmit(a,0x14000000)
 
-			call a.RelocAt(at,label)
+			a.RelocAt(at,label)
 
 		}
-		renvoAarch64AsmMovRegAbs(a:emitter, reg:int, off:int, kind:int) {
+		asmMovRegAbs(a:emitter, reg:int, off:int, kind:int) {
 			let at = a.Len()
 
-			call renvoAarch64AsmMovRegImm(a,reg,0)
+			asmMovRegImm(a,reg,0)
 
-			call renvoAarch64AsmEmit(a,0xf2800000|(1<<21)|reg)
+			asmEmit(a,0xf2800000|(1<<21)|reg)
 
-			call renvoAarch64AsmEmit(a,0xf2800000|(2<<21)|reg)
+			asmEmit(a,0xf2800000|(2<<21)|reg)
 
-			call renvoAarch64AsmEmit(a,0xf2800000|(3<<21)|reg)
+			asmEmit(a,0xf2800000|(3<<21)|reg)
 
-			call a.AbsoluteReloc(at,off,kind)
+			a.AbsoluteReloc(at,off,kind)
 
 		}
 
-		aarch64CopyBytes(out:emitter) {
-			let destination = aarch64X3
-			let source = aarch64X4
-			let count = aarch64Secondary
-			let value = aarch64Scratch2
+		copyBytes(out:emitter) {
+			let destination = x3
+			let source = x4
+			let count = secondary
+			let value = scratch2
 			let forward = out.NewLabel()
 			let forwardLoop = out.NewLabel()
 			let backwardLoop = out.NewLabel()
 			let done = out.NewLabel()
-			call aarch64Compare(out,destination,source)
-			call aarch64JumpCondition(out,record_condition(Code:9),forward)
-			call aarch64EmitAddress(out,aarch64Scratch,record_address(Base:source,Index:count,Scale:1,))
-			call aarch64Compare(out,destination,aarch64Scratch)
-			call aarch64JumpCondition(out,record_condition(Code:2),forward)
-			call aarch64EmitAddress(out,source,record_address(Base:source,Index:count,Scale:1,Displacement:-1,))
-			call aarch64EmitAddress(out,destination,record_address(Base:destination,Index:count,Scale:1,Displacement:-1,))
-			call out.Mark(backwardLoop)
-			call aarch64Compare(out,count,aarch64Zero)
-			call aarch64JumpCondition(out,record_condition(Code:0),done)
-			call aarch64LoadU8(out,value,record_address(Base:source))
-			call aarch64StoreU8(out,record_address(Base:destination),value)
-			call aarch64Decrement(out,source)
-			call aarch64Decrement(out,destination)
-			call aarch64Decrement(out,count)
-			call aarch64Jump(out,backwardLoop)
-			call out.Mark(forward)
-			call out.Mark(forwardLoop)
-			call aarch64Compare(out,count,aarch64Zero)
-			call aarch64JumpCondition(out,record_condition(Code:0),done)
-			call aarch64LoadU8(out,value,record_address(Base:source))
-			call aarch64StoreU8(out,record_address(Base:destination),value)
-			call aarch64Increment(out,source)
-			call aarch64Increment(out,destination)
-			call aarch64Decrement(out,count)
-			call aarch64Jump(out,forwardLoop)
-			call out.Mark(done)
+			compare(out,destination,source)
+			jumpCondition(out,record_condition(Code:9),forward)
+			emitAddress(out,scratch,record_address(Base:source,Index:count,Scale:1,))
+			compare(out,destination,scratch)
+			jumpCondition(out,record_condition(Code:2),forward)
+			emitAddress(out,source,record_address(Base:source,Index:count,Scale:1,Displacement:-1,))
+			emitAddress(out,destination,record_address(Base:destination,Index:count,Scale:1,Displacement:-1,))
+			out.Mark(backwardLoop)
+			compare(out,count,zero)
+			jumpCondition(out,record_condition(Code:0),done)
+			loadU8(out,value,record_address(Base:source))
+			storeU8(out,record_address(Base:destination),value)
+			decrement(out,source)
+			decrement(out,destination)
+			decrement(out,count)
+			jump(out,backwardLoop)
+			out.Mark(forward)
+			out.Mark(forwardLoop)
+			compare(out,count,zero)
+			jumpCondition(out,record_condition(Code:0),done)
+			loadU8(out,value,record_address(Base:source))
+			storeU8(out,record_address(Base:destination),value)
+			increment(out,source)
+			increment(out,destination)
+			decrement(out,count)
+			jump(out,forwardLoop)
+			out.Mark(done)
 		}
-		aarch64DarwinExit(out:emitter, status:register) {
-			call renvoAarch64AsmMovRegReg(out,0,status.Code)
-			call aarch64DarwinCallImport(out,"_exit")
+		darwinExit(out:emitter, status:register) {
+			asmMovRegReg(out,0,status.Code)
+			darwinCallImport(out,"_exit")
 		}
-		aarch64FrameStart(out:emitter) -> int {
-			call renvoAarch64AsmEmit(out,0xa9bf7bfd)
-			call renvoAarch64AsmEmit(out,0x910003fd)
+		frameStart(out:emitter) -> int {
+			asmEmit(out,0xa9bf7bfd)
+			asmEmit(out,0x910003fd)
 			let at = out.Len()
-			call renvoAarch64AsmEmit(out,0xd503201f)
-			call renvoAarch64AsmEmit(out,0xd503201f)
+			asmEmit(out,0xd503201f)
+			asmEmit(out,0xd503201f)
 			return at
 		}
-		aarch64HostSyscall(out:emitter) {
-			call renvoAarch64AsmSyscall(out)
+		hostSyscall(out:emitter) {
+			asmSyscall(out)
 		}
-		aarch64MachImage(out:emitter) -> bytes {
-			let imports = aarch64MachPrepareImports(out)
-			let dataFileOff = RTGAlignValue(aarch64MachCodeOffset+out.Len(),aarch64MachPageSize)
-			let bind = aarch64MachBuildBindData(out,imports.got)
-			let symtab = aarch64MachBuildSymbolTable(out)
-			let strtab = aarch64MachBuildStringTable(out)
+		machImage(out:emitter) -> bytes {
+			let imports = machPrepareImports(out)
+			let dataFileOff = RTGAlignValue(machCodeOffset+out.Len(),machPageSize)
+			let bind = machBuildBindData(out,imports.got)
+			let symtab = machBuildSymbolTable(out)
+			let strtab = machBuildStringTable(out)
 			let undefinedCount = out.DynamicImportCount()
 			let textFileSize = dataFileOff
 			let dataFileSize = len(out.Data())
-			let dataVMSize = RTGAlignValue(dataFileSize+out.BSSSize(),aarch64MachPageSize)
+			let dataVMSize = RTGAlignValue(dataFileSize+out.BSSSize(),machPageSize)
 			let linkeditOff = dataFileOff+dataFileSize
 			let bindOff = linkeditOff
 			let symOff = RTGAlignValue(bindOff+len(bind),8)
 			let strOff = symOff+len(symtab)
 			let sigOff = RTGAlignValue(strOff+len(strtab),16)
-			let sigSize = aarch64MachCodeSignatureSize(sigOff,"renvo")
+			let sigSize = machCodeSignatureSize(sigOff,"renvo")
 			let linkeditSize = sigOff+sigSize-linkeditOff
-			let image = aarch64MachHeader(out,textFileSize,dataFileOff,dataFileSize,dataVMSize,linkeditOff,linkeditSize,bindOff,len(bind),symOff,1+undefinedCount,strOff,len(strtab),undefinedCount,sigOff,sigSize,)
+			let image = machHeader(out,textFileSize,dataFileOff,dataFileSize,dataVMSize,linkeditOff,linkeditSize,bindOff,len(bind),symOff,1+undefinedCount,strOff,len(strtab),undefinedCount,sigOff,sigSize,)
 			set image = append(image,out.Code()...)
-			set image = aarch64MachAppendUntil(image,dataFileOff)
+			set image = machAppendUntil(image,dataFileOff)
 			set image = append(image,out.Data()...)
-			set image = aarch64MachAppendUntil(image,bindOff)
+			set image = machAppendUntil(image,bindOff)
 			set image = append(image,bind...)
-			set image = aarch64MachAppendUntil(image,symOff)
+			set image = machAppendUntil(image,symOff)
 			set image = append(image,symtab...)
 			set image = append(image,strtab...)
-			set image = aarch64MachAppendUntil(image,sigOff)
-			let signature = aarch64MachCodeSignature(image,"renvo",textFileSize)
+			set image = machAppendUntil(image,sigOff)
+			let signature = machCodeSignature(image,"renvo",textFileSize)
 			return append(image,signature...)
 		}
-		aarch64Move(out:emitter, destination:register, source:register) {
-			call renvoAarch64AsmMovRegReg(out,destination.Code,source.Code)
+		move(out:emitter, destination:register, source:register) {
+			asmMovRegReg(out,destination.Code,source.Code)
 		}
-		aarch64MoveImmediate(out:emitter, destination:register, value:int64) {
-			call renvoAarch64AsmMovRegImm(out,destination.Code,int(value))
+		moveImmediate(out:emitter, destination:register, value:int64) {
+			asmMovRegImm(out,destination.Code,int(value))
 		}
-		aarch64SetCondition(out:emitter, condition:condition, destination:register) {
-			call renvoAarch64AsmEmit(out,0x9a9f07e0|((condition.Code^1)<<12)|destination.Code)
+		setCondition(out:emitter, condition:condition, destination:register) {
+			asmEmit(out,0x9a9f07e0|((condition.Code^1)<<12)|destination.Code)
 		}
-		aarch64ShiftLeftImmediate(out:emitter, operand:register, value:byte) {
+		shiftLeftImmediate(out:emitter, operand:register, value:byte) {
 			let shift = int(value)&63
-			call renvoAarch64AsmEmit(out,0xd3400000|((64-shift)<<16)|((63-shift)<<10)|(operand.Code<<5)|operand.Code)
+			asmEmit(out,0xd3400000|((64-shift)<<16)|((63-shift)<<10)|(operand.Code<<5)|operand.Code)
 		}
-		aarch64ShiftRightSignedImmediate(out:emitter, operand:register, value:byte) {
-			call renvoAarch64AsmEmit(out,0x9340fc00|((int(value)&63)<<16)|(operand.Code<<5)|operand.Code)
+		shiftRightSignedImmediate(out:emitter, operand:register, value:byte) {
+			asmEmit(out,0x9340fc00|((int(value)&63)<<16)|(operand.Code<<5)|operand.Code)
 		}
-		aarch64ShiftRightUnsignedImmediate(out:emitter, operand:register, value:byte) {
-			call renvoAarch64AsmEmit(out,0xd340fc00|((int(value)&63)<<16)|(operand.Code<<5)|operand.Code)
+		shiftRightUnsignedImmediate(out:emitter, operand:register, value:byte) {
+			asmEmit(out,0xd340fc00|((int(value)&63)<<16)|(operand.Code<<5)|operand.Code)
 		}
-		aarch64WindowsExit(out:emitter, status:register) {
-			call renvoAarch64AsmMovRegReg(out,0,status.Code)
-			call aarch64WindowsCallImport(out,8)
+		windowsExit(out:emitter, status:register) {
+			asmMovRegReg(out,0,status.Code)
+			windowsCallImport(out,8)
 		}
 
-		aarch64DarwinCallImport(out:emitter, name:string) {
-			let index = out.DynamicImport(aarch64MachLibSystem,name)
-			call renvoAarch64AsmCallLabel(out,out.DynamicImportLabel(index))
+		darwinCallImport(out:emitter, name:string) {
+			let index = out.DynamicImport(machLibSystem,name)
+			asmCallLabel(out,out.DynamicImportLabel(index))
 		}
-		aarch64EmitADR(out:emitter, destination:register, address:address) {
+		emitADR(out:emitter, destination:register, address:address) {
 			let addend = address.Addend
 			let insn = 0x10000000|destination.Code
 			set insn = insn|((addend&3)<<29)
 			set insn = insn|(((addend>>2)&0x7ffff)<<5)
 			let at = out.Len()
-			call renvoAarch64AsmEmit(out,insn)
-			call RTGAddressRelocAt(out,address,at)
+			asmEmit(out,insn)
+			RTGAddressRelocAt(out,address,at)
 		}
-		aarch64LoadI16(out:emitter, destination:register, address:address) {
-			call aarch64LoadWidth(out,destination,address,2,true)
+		loadI16(out:emitter, destination:register, address:address) {
+			loadWidth(out,destination,address,2,true)
 		}
-		aarch64LoadI32(out:emitter, destination:register, address:address) {
-			call aarch64LoadWidth(out,destination,address,4,true)
+		loadI32(out:emitter, destination:register, address:address) {
+			loadWidth(out,destination,address,4,true)
 		}
-		aarch64LoadI8(out:emitter, destination:register, address:address) {
-			call aarch64LoadWidth(out,destination,address,1,true)
+		loadI8(out:emitter, destination:register, address:address) {
+			loadWidth(out,destination,address,1,true)
 		}
-		aarch64LoadNative(out:emitter, destination:register, address:address) {
-			call aarch64LoadWidth(out,destination,address,8,false)
+		loadNative(out:emitter, destination:register, address:address) {
+			loadWidth(out,destination,address,8,false)
 		}
-		aarch64LoadU16(out:emitter, destination:register, address:address) {
-			call aarch64LoadWidth(out,destination,address,2,false)
+		loadU16(out:emitter, destination:register, address:address) {
+			loadWidth(out,destination,address,2,false)
 		}
-		aarch64LoadU32(out:emitter, destination:register, address:address) {
-			call aarch64LoadWidth(out,destination,address,4,false)
+		loadU32(out:emitter, destination:register, address:address) {
+			loadWidth(out,destination,address,4,false)
 		}
-		aarch64LoadU8(out:emitter, destination:register, address:address) {
-			call aarch64LoadWidth(out,destination,address,1,false)
+		loadU8(out:emitter, destination:register, address:address) {
+			loadWidth(out,destination,address,1,false)
 		}
-		aarch64MachAppend16(out:bytes, value:int) -> bytes {
+		machAppend16(out:bytes, value:int) -> bytes {
 			return append(out,byte(value),byte(value>>8))
 		}
-		aarch64MachAppend32(out:bytes, value:int) -> bytes {
+		machAppend32(out:bytes, value:int) -> bytes {
 			return append(out,byte(value),byte(value>>8),byte(value>>16),byte(value>>24))
 		}
-		aarch64MachAppend64(out:bytes, value:int) -> bytes {
-			set out = aarch64MachAppend32(out,value)
-			return aarch64MachAppend32(out,value>>32)
+		machAppend64(out:bytes, value:int) -> bytes {
+			set out = machAppend32(out,value)
+			return machAppend32(out,value>>32)
 		}
-		aarch64MachAppendBE32(out:bytes, value:int) -> bytes {
+		machAppendBE32(out:bytes, value:int) -> bytes {
 			set out = append(out,byte(value>>24))
 			set out = append(out,byte(value>>16))
 			set out = append(out,byte(value>>8))
 			return append(out,byte(value))
 		}
-		aarch64MachAppendBE64(out:bytes, value:int) -> bytes {
-			set out = aarch64MachAppendBE32(out,value>>32)
-			return aarch64MachAppendBE32(out,value)
+		machAppendBE64(out:bytes, value:int) -> bytes {
+			set out = machAppendBE32(out,value>>32)
+			return machAppendBE32(out,value)
 		}
-		aarch64MachAppendDataSegment(out:bytes, dataFileOff:int, dataFileSize:int, bssSize:int) -> bytes {
-			let vmSize = RTGAlignValue(dataFileSize+bssSize,aarch64MachPageSize)
-			set out = aarch64MachAppend32(out,0x19)
-			set out = aarch64MachAppend32(out,232)
-			set out = aarch64MachAppendName16(out,"__DATA")
-			set out = aarch64MachAppend64(out,aarch64MachImageBase+dataFileOff)
-			set out = aarch64MachAppend64(out,vmSize)
-			set out = aarch64MachAppend64(out,dataFileOff)
-			set out = aarch64MachAppend64(out,dataFileSize)
-			set out = aarch64MachAppend32(out,3)
-			set out = aarch64MachAppend32(out,3)
-			set out = aarch64MachAppend32(out,2)
-			set out = aarch64MachAppend32(out,0)
-			set out = aarch64MachAppendSection64(out,"__data","__DATA",aarch64MachImageBase+dataFileOff,dataFileSize,dataFileOff,3,0,)
-			return aarch64MachAppendSection64(out,"__bss","__DATA",aarch64MachImageBase+dataFileOff+dataFileSize,bssSize,0,3,1,)
+		machAppendDataSegment(out:bytes, dataFileOff:int, dataFileSize:int, bssSize:int) -> bytes {
+			let vmSize = RTGAlignValue(dataFileSize+bssSize,machPageSize)
+			set out = machAppend32(out,0x19)
+			set out = machAppend32(out,232)
+			set out = machAppendName16(out,"__DATA")
+			set out = machAppend64(out,machImageBase+dataFileOff)
+			set out = machAppend64(out,vmSize)
+			set out = machAppend64(out,dataFileOff)
+			set out = machAppend64(out,dataFileSize)
+			set out = machAppend32(out,3)
+			set out = machAppend32(out,3)
+			set out = machAppend32(out,2)
+			set out = machAppend32(out,0)
+			set out = machAppendSection64(out,"__data","__DATA",machImageBase+dataFileOff,dataFileSize,dataFileOff,3,0,)
+			return machAppendSection64(out,"__bss","__DATA",machImageBase+dataFileOff+dataFileSize,bssSize,0,3,1,)
 		}
-		aarch64MachAppendDylibCommand(out:bytes, path:string) -> bytes {
+		machAppendDylibCommand(out:bytes, path:string) -> bytes {
 			let start = len(out)
-			let size = aarch64MachDylibCommandSize(path)
-			set out = aarch64MachAppend32(out,0x0c)
-			set out = aarch64MachAppend32(out,size)
-			set out = aarch64MachAppend32(out,24)
-			set out = aarch64MachAppend32(out,2)
-			set out = aarch64MachAppend32(out,0x00010000)
-			set out = aarch64MachAppend32(out,0x00010000)
-			set out = aarch64MachAppendStringZ(out,path)
-			return aarch64MachAppendUntil(out,start+size)
+			let size = machDylibCommandSize(path)
+			set out = machAppend32(out,0x0c)
+			set out = machAppend32(out,size)
+			set out = machAppend32(out,24)
+			set out = machAppend32(out,2)
+			set out = machAppend32(out,0x00010000)
+			set out = machAppend32(out,0x00010000)
+			set out = machAppendStringZ(out,path)
+			return machAppendUntil(out,start+size)
 		}
-		aarch64MachAppendSection64(out:bytes, section:string, segment:string, addr:int, size:int, offset:int, align:int, flags:int) -> bytes {
-			set out = aarch64MachAppendName16(out,section)
-			set out = aarch64MachAppendName16(out,segment)
-			set out = aarch64MachAppend64(out,addr)
-			set out = aarch64MachAppend64(out,size)
-			set out = aarch64MachAppend32(out,offset)
-			set out = aarch64MachAppend32(out,align)
-			set out = aarch64MachAppend32(out,0)
-			set out = aarch64MachAppend32(out,0)
-			set out = aarch64MachAppend32(out,flags)
-			set out = aarch64MachAppend32(out,0)
-			set out = aarch64MachAppend32(out,0)
-			return aarch64MachAppend32(out,0)
+		machAppendSection64(out:bytes, section:string, segment:string, addr:int, size:int, offset:int, align:int, flags:int) -> bytes {
+			set out = machAppendName16(out,section)
+			set out = machAppendName16(out,segment)
+			set out = machAppend64(out,addr)
+			set out = machAppend64(out,size)
+			set out = machAppend32(out,offset)
+			set out = machAppend32(out,align)
+			set out = machAppend32(out,0)
+			set out = machAppend32(out,0)
+			set out = machAppend32(out,flags)
+			set out = machAppend32(out,0)
+			set out = machAppend32(out,0)
+			return machAppend32(out,0)
 		}
-		aarch64MachAppendSegment64(out:bytes, name:string, vmaddr:int, vmsize:int, fileoff:int, filesize:int, maxprot:int, initprot:int) -> bytes {
-			set out = aarch64MachAppend32(out,0x19)
-			set out = aarch64MachAppend32(out,72)
-			set out = aarch64MachAppendName16(out,name)
-			set out = aarch64MachAppend64(out,vmaddr)
-			set out = aarch64MachAppend64(out,vmsize)
-			set out = aarch64MachAppend64(out,fileoff)
-			set out = aarch64MachAppend64(out,filesize)
-			set out = aarch64MachAppend32(out,maxprot)
-			set out = aarch64MachAppend32(out,initprot)
-			set out = aarch64MachAppend32(out,0)
-			return aarch64MachAppend32(out,0)
+		machAppendSegment64(out:bytes, name:string, vmaddr:int, vmsize:int, fileoff:int, filesize:int, maxprot:int, initprot:int) -> bytes {
+			set out = machAppend32(out,0x19)
+			set out = machAppend32(out,72)
+			set out = machAppendName16(out,name)
+			set out = machAppend64(out,vmaddr)
+			set out = machAppend64(out,vmsize)
+			set out = machAppend64(out,fileoff)
+			set out = machAppend64(out,filesize)
+			set out = machAppend32(out,maxprot)
+			set out = machAppend32(out,initprot)
+			set out = machAppend32(out,0)
+			return machAppend32(out,0)
 		}
-		aarch64MachAppendTextSegment(out:bytes, codeSize:int, fileSize:int) -> bytes {
-			set out = aarch64MachAppend32(out,0x19)
-			set out = aarch64MachAppend32(out,152)
-			set out = aarch64MachAppendName16(out,"__TEXT")
-			set out = aarch64MachAppend64(out,aarch64MachImageBase)
-			set out = aarch64MachAppend64(out,fileSize)
-			set out = aarch64MachAppend64(out,0)
-			set out = aarch64MachAppend64(out,fileSize)
-			set out = aarch64MachAppend32(out,5)
-			set out = aarch64MachAppend32(out,5)
-			set out = aarch64MachAppend32(out,1)
-			set out = aarch64MachAppend32(out,0)
-			return aarch64MachAppendSection64(out,"__text","__TEXT",aarch64MachImageBase+aarch64MachCodeOffset,codeSize,aarch64MachCodeOffset,2,0x80000400,)
+		machAppendTextSegment(out:bytes, codeSize:int, fileSize:int) -> bytes {
+			set out = machAppend32(out,0x19)
+			set out = machAppend32(out,152)
+			set out = machAppendName16(out,"__TEXT")
+			set out = machAppend64(out,machImageBase)
+			set out = machAppend64(out,fileSize)
+			set out = machAppend64(out,0)
+			set out = machAppend64(out,fileSize)
+			set out = machAppend32(out,5)
+			set out = machAppend32(out,5)
+			set out = machAppend32(out,1)
+			set out = machAppend32(out,0)
+			return machAppendSection64(out,"__text","__TEXT",machImageBase+machCodeOffset,codeSize,machCodeOffset,2,0x80000400,)
 		}
-		aarch64MachCodeSignatureSize(codeLimit:int, identifier:string) -> int {
+		machCodeSignatureSize(codeLimit:int, identifier:string) -> int {
 			let slots = (codeLimit+16383)/16384
 			let codeDirectorySize = 88+len(identifier)+1+slots*32
 			return 20+codeDirectorySize
 		}
-		aarch64MachDylibCommandSize(path:string) -> int {
+		machDylibCommandSize(path:string) -> int {
 			return RTGAlignValue(24+len(path)+1,8)
 		}
-		aarch64MachPatchADRP(out:emitter, at:int, pc:int, target:int) {
+		machPatchADRP(out:emitter, at:int, pc:int, target:int) {
 			let delta = (target>>12)-(pc>>12)
 			let imm = delta&0x1fffff
 			let insn = 0x90000010
 			set insn = insn|((imm&3)<<29)
 			set insn = insn|(((imm>>2)&0x7ffff)<<5)
-			call out.PatchUint32(at,insn)
+			out.PatchUint32(at,insn)
 		}
-		aarch64MachSHA256Constants() -> ints {
+		machSHA256Constants() -> ints {
 			return record_ints(0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2,)
 		}
-		aarch64StoreNative(out:emitter, address:address, source:register) {
-			call aarch64StoreWidth(out,address,source,8)
+		storeNative(out:emitter, address:address, source:register) {
+			storeWidth(out,address,source,8)
 		}
-		aarch64StoreU16(out:emitter, address:address, source:register) {
-			call aarch64StoreWidth(out,address,source,2)
+		storeU16(out:emitter, address:address, source:register) {
+			storeWidth(out,address,source,2)
 		}
-		aarch64StoreU32(out:emitter, address:address, source:register) {
-			call aarch64StoreWidth(out,address,source,4)
+		storeU32(out:emitter, address:address, source:register) {
+			storeWidth(out,address,source,4)
 		}
-		aarch64StoreU8(out:emitter, address:address, source:register) {
-			call aarch64StoreWidth(out,address,source,1)
+		storeU8(out:emitter, address:address, source:register) {
+			storeWidth(out,address,source,1)
 		}
-		aarch64WindowsCallImport(out:emitter, importID:int) {
-			call renvoAarch64AsmMovRegAbs(out,16,importID,RTGRelocationImport)
-			call renvoAarch64AsmLoadRegMem(out,16,16,0,8)
-			call renvoAarch64AsmEmit(out,0xd63f0200)
-		}
-
-		aarch64DarwinRead(out:emitter) {
-			call renvoAarch64AsmMovRegReg(out,9,1)
-			call renvoAarch64AsmMovRegReg(out,0,3)
-			call renvoAarch64AsmMovRegReg(out,1,4)
-			call renvoAarch64AsmMovRegReg(out,2,9)
-			call aarch64DarwinCallImport(out,"_read")
-		}
-		aarch64DarwinWrite(out:emitter) {
-			call renvoAarch64AsmMovRegReg(out,9,1)
-			call renvoAarch64AsmMovRegReg(out,0,3)
-			call renvoAarch64AsmMovRegReg(out,1,4)
-			call renvoAarch64AsmMovRegReg(out,2,9)
-			call aarch64DarwinCallImport(out,"_write")
-		}
-		aarch64DarwinReadAt(out:emitter) {
-			call renvoAarch64AsmMovRegReg(out,9,1)
-			call renvoAarch64AsmMovRegReg(out,10,2)
-			call renvoAarch64AsmMovRegReg(out,0,3)
-			call renvoAarch64AsmMovRegReg(out,1,4)
-			call renvoAarch64AsmMovRegReg(out,2,9)
-			call renvoAarch64AsmMovRegReg(out,3,10)
-			call aarch64DarwinCallImport(out,"_pread")
-		}
-		aarch64DarwinWriteAt(out:emitter) {
-			call renvoAarch64AsmMovRegReg(out,9,1)
-			call renvoAarch64AsmMovRegReg(out,10,2)
-			call renvoAarch64AsmMovRegReg(out,0,3)
-			call renvoAarch64AsmMovRegReg(out,1,4)
-			call renvoAarch64AsmMovRegReg(out,2,9)
-			call renvoAarch64AsmMovRegReg(out,3,10)
-			call aarch64DarwinCallImport(out,"_pwrite")
-		}
-		aarch64DarwinOpen(out:emitter) {
-			call renvoAarch64AsmMovRegReg(out,9,1)
-			call renvoAarch64AsmMovRegReg(out,0,3)
-			call renvoAarch64AsmMovRegReg(out,1,4)
-			call renvoAarch64AsmPushReg(out,9)
-			call aarch64DarwinCallImport(out,"_open")
-			call renvoAarch64AsmAddRegImm(out,31,31,16)
-		}
-		aarch64DarwinClose(out:emitter) {
-			call renvoAarch64AsmMovRegReg(out,0,3)
-			call aarch64DarwinCallImport(out,"_close")
-		}
-		aarch64DarwinChmod(out:emitter) {
-			call renvoAarch64AsmMovRegReg(out,0,3)
-			call renvoAarch64AsmMovRegReg(out,1,4)
-			call aarch64DarwinCallImport(out,"_fchmod")
+		windowsCallImport(out:emitter, importID:int) {
+			asmMovRegAbs(out,16,importID,RTGRelocationImport)
+			asmLoadRegMem(out,16,16,0,8)
+			asmEmit(out,0xd63f0200)
 		}
 
-		aarch64WindowsRuntimeChmod(out:emitter) {
+		darwinRead(out:emitter) {
+			asmMovRegReg(out,9,1)
+			asmMovRegReg(out,0,3)
+			asmMovRegReg(out,1,4)
+			asmMovRegReg(out,2,9)
+			darwinCallImport(out,"_read")
+		}
+		darwinWrite(out:emitter) {
+			asmMovRegReg(out,9,1)
+			asmMovRegReg(out,0,3)
+			asmMovRegReg(out,1,4)
+			asmMovRegReg(out,2,9)
+			darwinCallImport(out,"_write")
+		}
+		darwinReadAt(out:emitter) {
+			asmMovRegReg(out,9,1)
+			asmMovRegReg(out,10,2)
+			asmMovRegReg(out,0,3)
+			asmMovRegReg(out,1,4)
+			asmMovRegReg(out,2,9)
+			asmMovRegReg(out,3,10)
+			darwinCallImport(out,"_pread")
+		}
+		darwinWriteAt(out:emitter) {
+			asmMovRegReg(out,9,1)
+			asmMovRegReg(out,10,2)
+			asmMovRegReg(out,0,3)
+			asmMovRegReg(out,1,4)
+			asmMovRegReg(out,2,9)
+			asmMovRegReg(out,3,10)
+			darwinCallImport(out,"_pwrite")
+		}
+		darwinOpen(out:emitter) {
+			asmMovRegReg(out,9,1)
+			asmMovRegReg(out,0,3)
+			asmMovRegReg(out,1,4)
+			asmPushReg(out,9)
+			darwinCallImport(out,"_open")
+			asmAddRegImm(out,31,31,16)
+		}
+		darwinClose(out:emitter) {
+			asmMovRegReg(out,0,3)
+			darwinCallImport(out,"_close")
+		}
+		darwinChmod(out:emitter) {
+			asmMovRegReg(out,0,3)
+			asmMovRegReg(out,1,4)
+			darwinCallImport(out,"_fchmod")
+		}
+
+		windowsRuntimeChmod(out:emitter) {
 			let failed = out.NewLabel()
 			let done = out.NewLabel()
-			call renvoAarch64AsmMovRegReg(out,0,3)
-			call renvoAarch64AsmMovRegImm(out,1,0)
-			call renvoAarch64AsmMovRegImm(out,2,0)
-			call renvoAarch64AsmMovRegImm(out,3,1)
-			call aarch64WindowsCallImport(out,5)
-			call renvoAarch64AsmMovRegImm(out,9,-1)
-			call renvoAarch64AsmCmpRegReg(out,0,9)
-			call aarch64JumpCondition(out,record_condition(Code:0),failed)
-			call renvoAarch64AsmMovRegImm(out,0,0)
-			call aarch64Jump(out,done)
-			call out.Mark(failed)
-			call renvoAarch64AsmMovRegImm(out,0,-1)
-			call out.Mark(done)
+			asmMovRegReg(out,0,3)
+			asmMovRegImm(out,1,0)
+			asmMovRegImm(out,2,0)
+			asmMovRegImm(out,3,1)
+			windowsCallImport(out,5)
+			asmMovRegImm(out,9,-1)
+			asmCmpRegReg(out,0,9)
+			jumpCondition(out,record_condition(Code:0),failed)
+			asmMovRegImm(out,0,0)
+			jump(out,done)
+			out.Mark(failed)
+			asmMovRegImm(out,0,-1)
+			out.Mark(done)
 		}
-		aarch64WindowsRuntimeClose(out:emitter) {
+		windowsRuntimeClose(out:emitter) {
 			let failed = out.NewLabel()
 			let done = out.NewLabel()
-			call renvoAarch64AsmMovRegReg(out,0,3)
-			call aarch64WindowsCallImport(out,2)
-			call renvoAarch64AsmCmpRegImm(out,0,0)
-			call aarch64JumpCondition(out,record_condition(Code:0),failed)
-			call renvoAarch64AsmMovRegImm(out,0,0)
-			call aarch64Jump(out,done)
-			call out.Mark(failed)
-			call renvoAarch64AsmMovRegImm(out,0,-1)
-			call out.Mark(done)
+			asmMovRegReg(out,0,3)
+			windowsCallImport(out,2)
+			asmCmpRegImm(out,0,0)
+			jumpCondition(out,record_condition(Code:0),failed)
+			asmMovRegImm(out,0,0)
+			jump(out,done)
+			out.Mark(failed)
+			asmMovRegImm(out,0,-1)
+			out.Mark(done)
 		}
-		aarch64WindowsRuntimeOpen(out:emitter) {
-			call renvoAarch64AsmMovRegReg(out,9,3)
-			call renvoAarch64AsmMovRegReg(out,0,4)
-			call aarch64WindowsTranslateCreateFileFlags(out)
-			call renvoAarch64AsmMovRegReg(out,0,9)
-			call aarch64WindowsCallImport(out,1)
+		windowsRuntimeOpen(out:emitter) {
+			asmMovRegReg(out,9,3)
+			asmMovRegReg(out,0,4)
+			windowsTranslateCreateFileFlags(out)
+			asmMovRegReg(out,0,9)
+			windowsCallImport(out,1)
 		}
-		aarch64WindowsTestRegImmediate(out:emitter, register:int, immediate:int) {
-			call renvoAarch64AsmMovRegImm(out,15,immediate)
-			call renvoAarch64AsmEmit(out,0xea00001f|(15<<16)|(register<<5))
+		windowsTestRegImmediate(out:emitter, register:int, immediate:int) {
+			asmMovRegImm(out,15,immediate)
+			asmEmit(out,0xea00001f|(15<<16)|(register<<5))
 		}
-		aarch64WindowsTranslateCreateFileFlags(out:emitter) {
+		windowsTranslateCreateFileFlags(out:emitter) {
 			let notReadWrite = out.NewLabel()
 			let accessDone = out.NewLabel()
 			let noCreate = out.NewLabel()
 			let createDone = out.NewLabel()
-			call renvoAarch64AsmMovRegImm(out,1,-2147483648)
-			call aarch64WindowsTestRegImmediate(out,0,2)
-			call aarch64JumpCondition(out,record_condition(Code:0),notReadWrite)
-			call renvoAarch64AsmMovRegImm(out,1,-1073741824)
-			call aarch64Jump(out,accessDone)
-			call out.Mark(notReadWrite)
-			call aarch64WindowsTestRegImmediate(out,0,1)
-			call aarch64JumpCondition(out,record_condition(Code:0),accessDone)
-			call renvoAarch64AsmMovRegImm(out,1,0x40000000)
-			call out.Mark(accessDone)
-			call renvoAarch64AsmMovRegImm(out,4,3)
-			call aarch64WindowsTestRegImmediate(out,0,64)
-			call aarch64JumpCondition(out,record_condition(Code:0),noCreate)
-			call renvoAarch64AsmMovRegImm(out,4,4)
-			call aarch64WindowsTestRegImmediate(out,0,512)
-			call aarch64JumpCondition(out,record_condition(Code:0),createDone)
-			call renvoAarch64AsmMovRegImm(out,4,2)
-			call aarch64Jump(out,createDone)
-			call out.Mark(noCreate)
-			call aarch64WindowsTestRegImmediate(out,0,512)
-			call aarch64JumpCondition(out,record_condition(Code:0),createDone)
-			call renvoAarch64AsmMovRegImm(out,4,5)
-			call out.Mark(createDone)
-			call renvoAarch64AsmMovRegImm(out,2,3)
-			call renvoAarch64AsmMovRegImm(out,3,0)
-			call renvoAarch64AsmMovRegImm(out,5,0x80)
-			call renvoAarch64AsmMovRegImm(out,6,0)
+			asmMovRegImm(out,1,-2147483648)
+			windowsTestRegImmediate(out,0,2)
+			jumpCondition(out,record_condition(Code:0),notReadWrite)
+			asmMovRegImm(out,1,-1073741824)
+			jump(out,accessDone)
+			out.Mark(notReadWrite)
+			windowsTestRegImmediate(out,0,1)
+			jumpCondition(out,record_condition(Code:0),accessDone)
+			asmMovRegImm(out,1,0x40000000)
+			out.Mark(accessDone)
+			asmMovRegImm(out,4,3)
+			windowsTestRegImmediate(out,0,64)
+			jumpCondition(out,record_condition(Code:0),noCreate)
+			asmMovRegImm(out,4,4)
+			windowsTestRegImmediate(out,0,512)
+			jumpCondition(out,record_condition(Code:0),createDone)
+			asmMovRegImm(out,4,2)
+			jump(out,createDone)
+			out.Mark(noCreate)
+			windowsTestRegImmediate(out,0,512)
+			jumpCondition(out,record_condition(Code:0),createDone)
+			asmMovRegImm(out,4,5)
+			out.Mark(createDone)
+			asmMovRegImm(out,2,3)
+			asmMovRegImm(out,3,0)
+			asmMovRegImm(out,5,0x80)
+			asmMovRegImm(out,6,0)
 		}
 
-		aarch64LinuxEntry(out:emitter, argsOffset:int, environmentOffset:int, environmentLengthOffset:int) {
+		linuxEntry(out:emitter, argsOffset:int, environmentOffset:int, environmentLengthOffset:int) {
 			let argumentLoop = out.NewLabel()
 			let argumentLength = out.NewLabel()
 			let argumentLengthDone = out.NewLabel()
@@ -1974,133 +1974,141 @@ arch aarch64 {
 			let environmentLength = out.NewLabel()
 			let environmentLengthDone = out.NewLabel()
 			let environmentDone = out.NewLabel()
-			call renvoAarch64AsmLoadRegMem(out,13,31,0,8)
-			call renvoAarch64AsmAddRegImm(out,10,31,8)
-			call renvoAarch64AsmMovRegAbs(out,7,argsOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmMovRegImm(out,11,0)
-			call out.Mark(argumentLoop)
-			call renvoAarch64AsmCmpRegReg(out,11,13)
-			call aarch64JumpCondition(out,record_condition(Code:0),argumentsDone)
-			call renvoAarch64AsmAddRegRegShift(out,12,10,11,3)
-			call renvoAarch64AsmLoadRegMem(out,12,12,0,8)
-			call renvoAarch64AsmStoreRegMem(out,12,7,0,8)
-			call renvoAarch64AsmMovRegImm(out,0,0)
-			call out.Mark(argumentLength)
-			call renvoAarch64AsmAddRegReg(out,9,12,0)
-			call renvoAarch64AsmLoadRegMem(out,9,9,0,1)
-			call renvoAarch64AsmCmpRegImm(out,9,0)
-			call aarch64JumpCondition(out,record_condition(Code:0),argumentLengthDone)
-			call renvoAarch64AsmAddRegImm(out,0,0,1)
-			call aarch64Jump(out,argumentLength)
-			call out.Mark(argumentLengthDone)
-			call renvoAarch64AsmStoreRegMem(out,0,7,8,8)
-			call renvoAarch64AsmAddRegImm(out,7,7,16)
-			call renvoAarch64AsmAddRegImm(out,11,11,1)
-			call aarch64Jump(out,argumentLoop)
-			call out.Mark(argumentsDone)
-			call renvoAarch64AsmAddRegRegShift(out,10,10,13,3)
-			call renvoAarch64AsmAddRegImm(out,10,10,8)
-			call renvoAarch64AsmMovRegAbs(out,7,environmentOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmMovRegImm(out,11,0)
-			call out.Mark(environmentLoop)
-			call renvoAarch64AsmLoadRegMem(out,12,10,0,8)
-			call renvoAarch64AsmCmpRegImm(out,12,0)
-			call aarch64JumpCondition(out,record_condition(Code:0),environmentDone)
-			call renvoAarch64AsmStoreRegMem(out,12,7,0,8)
-			call renvoAarch64AsmMovRegImm(out,0,0)
-			call out.Mark(environmentLength)
-			call renvoAarch64AsmAddRegReg(out,9,12,0)
-			call renvoAarch64AsmLoadRegMem(out,9,9,0,1)
-			call renvoAarch64AsmCmpRegImm(out,9,0)
-			call aarch64JumpCondition(out,record_condition(Code:0),environmentLengthDone)
-			call renvoAarch64AsmAddRegImm(out,0,0,1)
-			call aarch64Jump(out,environmentLength)
-			call out.Mark(environmentLengthDone)
-			call renvoAarch64AsmStoreRegMem(out,0,7,8,8)
-			call renvoAarch64AsmAddRegImm(out,7,7,16)
-			call renvoAarch64AsmAddRegImm(out,10,10,8)
-			call renvoAarch64AsmAddRegImm(out,11,11,1)
-			call aarch64Jump(out,environmentLoop)
-			call out.Mark(environmentDone)
-			call renvoAarch64AsmMovRegAbs(out,12,environmentLengthOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmStoreRegMem(out,11,12,0,8)
-			call renvoAarch64AsmMovRegAbs(out,3,argsOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmMovRegReg(out,4,13)
-			call renvoAarch64AsmMovRegReg(out,1,13)
-			call renvoAarch64AsmMovRegAbs(out,2,environmentOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmMovRegReg(out,5,11)
-			call renvoAarch64AsmMovRegReg(out,6,11)
+			asmLoadRegMem(out,13,31,0,8)
+			asmAddRegImm(out,10,31,8)
+			asmMovRegAbs(out,7,argsOffset,RTGRelocationAbsoluteBSS)
+			asmMovRegImm(out,11,0)
+			out.Mark(argumentLoop)
+			asmCmpRegReg(out,11,13)
+			jumpCondition(out,record_condition(Code:0),argumentsDone)
+			asmAddRegRegShift(out,12,10,11,3)
+			asmLoadRegMem(out,12,12,0,8)
+			asmStoreRegMem(out,12,7,0,8)
+			asmMovRegImm(out,0,0)
+			out.Mark(argumentLength)
+			asmAddRegReg(out,9,12,0)
+			asmLoadRegMem(out,9,9,0,1)
+			asmCmpRegImm(out,9,0)
+			jumpCondition(out,record_condition(Code:0),argumentLengthDone)
+			asmAddRegImm(out,0,0,1)
+			jump(out,argumentLength)
+			out.Mark(argumentLengthDone)
+			asmStoreRegMem(out,0,7,8,8)
+			asmAddRegImm(out,7,7,16)
+			asmAddRegImm(out,11,11,1)
+			jump(out,argumentLoop)
+			out.Mark(argumentsDone)
+			asmAddRegRegShift(out,10,10,13,3)
+			asmAddRegImm(out,10,10,8)
+			asmMovRegAbs(out,7,environmentOffset,RTGRelocationAbsoluteBSS)
+			asmMovRegImm(out,11,0)
+			out.Mark(environmentLoop)
+			asmLoadRegMem(out,12,10,0,8)
+			asmCmpRegImm(out,12,0)
+			jumpCondition(out,record_condition(Code:0),environmentDone)
+			asmStoreRegMem(out,12,7,0,8)
+			asmMovRegImm(out,0,0)
+			out.Mark(environmentLength)
+			asmAddRegReg(out,9,12,0)
+			asmLoadRegMem(out,9,9,0,1)
+			asmCmpRegImm(out,9,0)
+			jumpCondition(out,record_condition(Code:0),environmentLengthDone)
+			asmAddRegImm(out,0,0,1)
+			jump(out,environmentLength)
+			out.Mark(environmentLengthDone)
+			asmStoreRegMem(out,0,7,8,8)
+			asmAddRegImm(out,7,7,16)
+			asmAddRegImm(out,10,10,8)
+			asmAddRegImm(out,11,11,1)
+			jump(out,environmentLoop)
+			out.Mark(environmentDone)
+			asmMovRegAbs(out,12,environmentLengthOffset,RTGRelocationAbsoluteBSS)
+			asmStoreRegMem(out,11,12,0,8)
+			asmMovRegAbs(out,3,argsOffset,RTGRelocationAbsoluteBSS)
+			asmMovRegReg(out,4,13)
+			asmMovRegReg(out,1,13)
+			asmMovRegAbs(out,2,environmentOffset,RTGRelocationAbsoluteBSS)
+			asmMovRegReg(out,5,11)
+			asmMovRegReg(out,6,11)
 		}
-		aarch64DarwinEntry(out:emitter, argsOffset:int, environmentOffset:int, stateOffset:int) {
-			let argumentLoop = out.NewLabel()
-			let argumentLength = out.NewLabel()
-			let argumentLengthDone = out.NewLabel()
-			let argumentsDone = out.NewLabel()
-			let environmentLoop = out.NewLabel()
-			let environmentLength = out.NewLabel()
-			let environmentLengthDone = out.NewLabel()
-			let environmentDone = out.NewLabel()
-			call renvoAarch64AsmMovRegAbs(out,9,stateOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmLoadRegMem(out,13,9,0,8)
-			call renvoAarch64AsmLoadRegMem(out,14,9,8,8)
-			call renvoAarch64AsmLoadRegMem(out,15,9,16,8)
-			call renvoAarch64AsmMovRegAbs(out,10,argsOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmMovRegImm(out,11,0)
-			call out.Mark(argumentLoop)
-			call renvoAarch64AsmCmpRegImm(out,11,2048)
-			call aarch64JumpCondition(out,record_condition(Code:10),argumentsDone)
-			call renvoAarch64AsmCmpRegReg(out,11,13)
-			call aarch64JumpCondition(out,record_condition(Code:0),argumentsDone)
-			call renvoAarch64AsmAddRegRegShift(out,12,14,11,3)
-			call renvoAarch64AsmLoadRegMem(out,12,12,0,8)
-			call renvoAarch64AsmStoreRegMem(out,12,10,0,8)
-			call renvoAarch64AsmMovRegImm(out,0,0)
-			call out.Mark(argumentLength)
-			call renvoAarch64AsmAddRegReg(out,9,12,0)
-			call renvoAarch64AsmLoadRegMem(out,9,9,0,1)
-			call renvoAarch64AsmCmpRegImm(out,9,0)
-			call aarch64JumpCondition(out,record_condition(Code:0),argumentLengthDone)
-			call renvoAarch64AsmAddRegImm(out,0,0,1)
-			call aarch64Jump(out,argumentLength)
-			call out.Mark(argumentLengthDone)
-			call renvoAarch64AsmStoreRegMem(out,0,10,8,8)
-			call renvoAarch64AsmAddRegImm(out,10,10,16)
-			call renvoAarch64AsmAddRegImm(out,11,11,1)
-			call aarch64Jump(out,argumentLoop)
-			call out.Mark(argumentsDone)
-			call renvoAarch64AsmMovRegReg(out,13,11)
-			call renvoAarch64AsmMovRegAbs(out,10,environmentOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmMovRegImm(out,11,0)
-			call out.Mark(environmentLoop)
-			call renvoAarch64AsmCmpRegImm(out,11,2048)
-			call aarch64JumpCondition(out,record_condition(Code:10),environmentDone)
-			call renvoAarch64AsmLoadRegMem(out,12,15,0,8)
-			call renvoAarch64AsmCmpRegImm(out,12,0)
-			call aarch64JumpCondition(out,record_condition(Code:0),environmentDone)
-			call renvoAarch64AsmStoreRegMem(out,12,10,0,8)
-			call renvoAarch64AsmMovRegImm(out,0,0)
-			call out.Mark(environmentLength)
-			call renvoAarch64AsmAddRegReg(out,9,12,0)
-			call renvoAarch64AsmLoadRegMem(out,9,9,0,1)
-			call renvoAarch64AsmCmpRegImm(out,9,0)
-			call aarch64JumpCondition(out,record_condition(Code:0),environmentLengthDone)
-			call renvoAarch64AsmAddRegImm(out,0,0,1)
-			call aarch64Jump(out,environmentLength)
-			call out.Mark(environmentLengthDone)
-			call renvoAarch64AsmStoreRegMem(out,0,10,8,8)
-			call renvoAarch64AsmAddRegImm(out,10,10,16)
-			call renvoAarch64AsmAddRegImm(out,15,15,8)
-			call renvoAarch64AsmAddRegImm(out,11,11,1)
-			call aarch64Jump(out,environmentLoop)
-			call out.Mark(environmentDone)
-			call renvoAarch64AsmMovRegAbs(out,3,argsOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmMovRegReg(out,4,13)
-			call renvoAarch64AsmMovRegReg(out,1,13)
-			call renvoAarch64AsmMovRegAbs(out,2,environmentOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmMovRegReg(out,5,11)
-			call renvoAarch64AsmMovRegReg(out,6,11)
+		emitCStringRecord(out:emitter, pointer:int, table:int, length:int, scratch:int) {
+			let scan = out.NewLabel()
+			let done = out.NewLabel()
+			asmStoreRegMem(out,pointer,table,0,8)
+			asmMovRegImm(out,length,0)
+			out.Mark(scan)
+			asmAddRegReg(out,scratch,pointer,length)
+			asmLoadRegMem(out,scratch,scratch,0,1)
+			asmCmpRegImm(out,scratch,0)
+			jumpCondition(out,eq,done)
+			asmAddRegImm(out,length,length,1)
+			jump(out,scan)
+			out.Mark(done)
+			asmStoreRegMem(out,length,table,8,8)
 		}
-		aarch64WindowsEntry(out:emitter, argsOffset:int, argsTextOffset:int, argsLengthOffset:int, environmentOffset:int, environmentLengthOffset:int) {
+		emitBoundedCountedCStringTable(out:emitter, source:int, count:int, tableOffset:int, table:int, index:int, pointer:int, length:int, scratch:int) {
+			let loop = out.NewLabel()
+			let done = out.NewLabel()
+			asmMovRegAbs(out,table,tableOffset,RTGRelocationAbsoluteBSS)
+			asmMovRegImm(out,index,0)
+			out.Mark(loop)
+			asmCmpRegImm(out,index,2048)
+			jumpCondition(out,sge,done)
+			asmCmpRegReg(out,index,count)
+			jumpCondition(out,eq,done)
+			asmAddRegRegShift(out,pointer,source,index,3)
+			asmLoadRegMem(out,pointer,pointer,0,8)
+			emitCStringRecord(out,pointer,table,length,scratch)
+			asmAddRegImm(out,table,table,16)
+			asmAddRegImm(out,index,index,1)
+			jump(out,loop)
+			out.Mark(done)
+		}
+		emitBoundedTerminatedCStringTable(out:emitter, source:int, tableOffset:int, table:int, index:int, pointer:int, length:int, scratch:int) {
+			let loop = out.NewLabel()
+			let done = out.NewLabel()
+			asmMovRegAbs(out,table,tableOffset,RTGRelocationAbsoluteBSS)
+			asmMovRegImm(out,index,0)
+			out.Mark(loop)
+			asmCmpRegImm(out,index,2048)
+			jumpCondition(out,sge,done)
+			asmLoadRegMem(out,pointer,source,0,8)
+			asmCmpRegImm(out,pointer,0)
+			jumpCondition(out,eq,done)
+			emitCStringRecord(out,pointer,table,length,scratch)
+			asmAddRegImm(out,table,table,16)
+			asmAddRegImm(out,source,source,8)
+			asmAddRegImm(out,index,index,1)
+			jump(out,loop)
+			out.Mark(done)
+		}
+		bindEntryCollections(out:emitter, argsOffset:int, argsLength:int, environmentOffset:int, environmentLength:int) {
+			asmMovRegAbs(out,x3.Code,argsOffset,RTGRelocationAbsoluteBSS)
+			asmMovRegReg(out,x4.Code,argsLength)
+			asmMovRegReg(out,x1.Code,argsLength)
+			asmMovRegAbs(out,x2.Code,environmentOffset,RTGRelocationAbsoluteBSS)
+			asmMovRegReg(out,x5.Code,environmentLength)
+			asmMovRegReg(out,x6.Code,environmentLength)
+		}
+		darwinEntry(out:emitter, argsOffset:int, environmentOffset:int, stateOffset:int) {
+			asmMovRegAbs(out,x9.Code,stateOffset,RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out,x13.Code,x9.Code,0,8)
+			asmLoadRegMem(out,x14.Code,x9.Code,8,8)
+			asmLoadRegMem(out,x15.Code,x9.Code,16,8)
+			emitBoundedCountedCStringTable(
+				out,x14.Code,x13.Code,argsOffset,
+				x10.Code,x11.Code,x12.Code,x0.Code,x9.Code,
+			)
+			asmMovRegReg(out,x13.Code,x11.Code)
+			emitBoundedTerminatedCStringTable(
+				out,x15.Code,environmentOffset,
+				x10.Code,x11.Code,x12.Code,x0.Code,x9.Code,
+			)
+			bindEntryCollections(
+				out,argsOffset,x13.Code,environmentOffset,x11.Code,
+			)
+		}
+		windowsEntry(out:emitter, argsOffset:int, argsTextOffset:int, argsLengthOffset:int, environmentOffset:int, environmentLengthOffset:int) {
 			let skip = out.NewLabel()
 			let start = out.NewLabel()
 			let copyArgument = out.NewLabel()
@@ -2109,119 +2117,119 @@ arch aarch64 {
 			let copyCharacter = out.NewLabel()
 			let argumentDone = out.NewLabel()
 			let argumentsDone = out.NewLabel()
-			call aarch64WindowsCallImport(out,7)
-			call renvoAarch64AsmMovRegReg(out,9,0)
-			call renvoAarch64AsmMovRegAbs(out,10,argsOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmMovRegAbs(out,11,argsTextOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmMovRegImm(out,12,0)
-			call out.Mark(skip)
-			call renvoAarch64AsmLoadRegMem(out,13,9,0,1)
-			call renvoAarch64AsmCmpRegImm(out,13,0)
-			call aarch64JumpCondition(out,record_condition(Code:0),argumentsDone)
-			call renvoAarch64AsmCmpRegImm(out,13,92)
-			call aarch64JumpCondition(out,record_condition(Code:1),start)
-			call renvoAarch64AsmAddRegImm(out,9,9,1)
-			call aarch64Jump(out,skip)
-			call out.Mark(start)
-			call renvoAarch64AsmCmpRegImm(out,13,9)
-			call aarch64JumpCondition(out,record_condition(Code:1),copyArgument)
-			call renvoAarch64AsmAddRegImm(out,9,9,1)
-			call aarch64Jump(out,skip)
-			call out.Mark(copyArgument)
-			call renvoAarch64AsmMovRegReg(out,14,11)
-			call renvoAarch64AsmMovRegImm(out,15,0)
-			call renvoAarch64AsmMovRegImm(out,17,0)
+			windowsCallImport(out,7)
+			asmMovRegReg(out,9,0)
+			asmMovRegAbs(out,10,argsOffset,RTGRelocationAbsoluteBSS)
+			asmMovRegAbs(out,11,argsTextOffset,RTGRelocationAbsoluteBSS)
+			asmMovRegImm(out,12,0)
+			out.Mark(skip)
+			asmLoadRegMem(out,13,9,0,1)
+			asmCmpRegImm(out,13,0)
+			jumpCondition(out,record_condition(Code:0),argumentsDone)
+			asmCmpRegImm(out,13,92)
+			jumpCondition(out,record_condition(Code:1),start)
+			asmAddRegImm(out,9,9,1)
+			jump(out,skip)
+			out.Mark(start)
+			asmCmpRegImm(out,13,9)
+			jumpCondition(out,record_condition(Code:1),copyArgument)
+			asmAddRegImm(out,9,9,1)
+			jump(out,skip)
+			out.Mark(copyArgument)
+			asmMovRegReg(out,14,11)
+			asmMovRegImm(out,15,0)
+			asmMovRegImm(out,17,0)
 			let copyLoop = out.NewLabel()
-			call out.Mark(copyLoop)
-			call renvoAarch64AsmLoadRegMem(out,13,9,0,1)
-			call renvoAarch64AsmCmpRegImm(out,13,0)
-			call aarch64JumpCondition(out,record_condition(Code:0),argumentDone)
-			call renvoAarch64AsmCmpRegImm(out,13,'"')
-			call aarch64JumpCondition(out,record_condition(Code:0),quote)
-			call renvoAarch64AsmCmpRegImm(out,17,0)
-			call aarch64JumpCondition(out,record_condition(Code:1),copyCharacter)
-			call renvoAarch64AsmCmpRegImm(out,13,92)
-			call aarch64JumpCondition(out,record_condition(Code:0),argumentDone)
-			call renvoAarch64AsmCmpRegImm(out,13,9)
-			call aarch64JumpCondition(out,record_condition(Code:0),argumentDone)
-			call out.Mark(copyCharacter)
-			call renvoAarch64AsmStoreRegMem(out,13,11,0,1)
-			call renvoAarch64AsmAddRegImm(out,9,9,1)
-			call renvoAarch64AsmAddRegImm(out,11,11,1)
-			call renvoAarch64AsmAddRegImm(out,15,15,1)
-			call aarch64Jump(out,copyLoop)
-			call out.Mark(quote)
-			call renvoAarch64AsmCmpRegImm(out,17,0)
-			call aarch64JumpCondition(out,record_condition(Code:0),setQuote)
-			call renvoAarch64AsmMovRegImm(out,17,0)
-			call renvoAarch64AsmAddRegImm(out,9,9,1)
-			call aarch64Jump(out,copyLoop)
-			call out.Mark(setQuote)
-			call renvoAarch64AsmMovRegImm(out,17,1)
-			call renvoAarch64AsmAddRegImm(out,9,9,1)
-			call aarch64Jump(out,copyLoop)
-			call out.Mark(argumentDone)
-			call renvoAarch64AsmStoreRegMem(out,31,11,0,1)
-			call renvoAarch64AsmStoreRegMem(out,14,10,0,8)
-			call renvoAarch64AsmStoreRegMem(out,15,10,8,8)
-			call renvoAarch64AsmAddRegImm(out,10,10,16)
-			call renvoAarch64AsmAddRegImm(out,11,11,1)
-			call renvoAarch64AsmAddRegImm(out,12,12,1)
-			call renvoAarch64AsmCmpRegImm(out,13,0)
-			call aarch64JumpCondition(out,record_condition(Code:0),argumentsDone)
-			call renvoAarch64AsmAddRegImm(out,9,9,1)
-			call aarch64Jump(out,skip)
-			call out.Mark(argumentsDone)
-			call renvoAarch64AsmMovRegAbs(out,9,argsLengthOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmStoreRegMem(out,12,9,0,8)
+			out.Mark(copyLoop)
+			asmLoadRegMem(out,13,9,0,1)
+			asmCmpRegImm(out,13,0)
+			jumpCondition(out,record_condition(Code:0),argumentDone)
+			asmCmpRegImm(out,13,'"')
+			jumpCondition(out,record_condition(Code:0),quote)
+			asmCmpRegImm(out,17,0)
+			jumpCondition(out,record_condition(Code:1),copyCharacter)
+			asmCmpRegImm(out,13,92)
+			jumpCondition(out,record_condition(Code:0),argumentDone)
+			asmCmpRegImm(out,13,9)
+			jumpCondition(out,record_condition(Code:0),argumentDone)
+			out.Mark(copyCharacter)
+			asmStoreRegMem(out,13,11,0,1)
+			asmAddRegImm(out,9,9,1)
+			asmAddRegImm(out,11,11,1)
+			asmAddRegImm(out,15,15,1)
+			jump(out,copyLoop)
+			out.Mark(quote)
+			asmCmpRegImm(out,17,0)
+			jumpCondition(out,record_condition(Code:0),setQuote)
+			asmMovRegImm(out,17,0)
+			asmAddRegImm(out,9,9,1)
+			jump(out,copyLoop)
+			out.Mark(setQuote)
+			asmMovRegImm(out,17,1)
+			asmAddRegImm(out,9,9,1)
+			jump(out,copyLoop)
+			out.Mark(argumentDone)
+			asmStoreRegMem(out,31,11,0,1)
+			asmStoreRegMem(out,14,10,0,8)
+			asmStoreRegMem(out,15,10,8,8)
+			asmAddRegImm(out,10,10,16)
+			asmAddRegImm(out,11,11,1)
+			asmAddRegImm(out,12,12,1)
+			asmCmpRegImm(out,13,0)
+			jumpCondition(out,record_condition(Code:0),argumentsDone)
+			asmAddRegImm(out,9,9,1)
+			jump(out,skip)
+			out.Mark(argumentsDone)
+			asmMovRegAbs(out,9,argsLengthOffset,RTGRelocationAbsoluteBSS)
+			asmStoreRegMem(out,12,9,0,8)
 			let environmentLoop = out.NewLabel()
 			let environmentLength = out.NewLabel()
 			let environmentStringDone = out.NewLabel()
 			let environmentDone = out.NewLabel()
-			call aarch64WindowsCallImport(out,9)
-			call renvoAarch64AsmMovRegReg(out,9,0)
-			call renvoAarch64AsmMovRegAbs(out,10,environmentOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmMovRegImm(out,11,0)
-			call out.Mark(environmentLoop)
-			call renvoAarch64AsmLoadRegMem(out,12,9,0,1)
-			call renvoAarch64AsmCmpRegImm(out,12,0)
-			call aarch64JumpCondition(out,record_condition(Code:0),environmentDone)
-			call renvoAarch64AsmStoreRegMem(out,9,10,0,8)
-			call renvoAarch64AsmMovRegImm(out,13,0)
-			call out.Mark(environmentLength)
-			call renvoAarch64AsmAddRegReg(out,14,9,13)
-			call renvoAarch64AsmLoadRegMem(out,12,14,0,1)
-			call renvoAarch64AsmCmpRegImm(out,12,0)
-			call aarch64JumpCondition(out,record_condition(Code:0),environmentStringDone)
-			call renvoAarch64AsmAddRegImm(out,13,13,1)
-			call aarch64Jump(out,environmentLength)
-			call out.Mark(environmentStringDone)
-			call renvoAarch64AsmStoreRegMem(out,13,10,8,8)
-			call renvoAarch64AsmAddRegImm(out,10,10,16)
-			call renvoAarch64AsmAddRegImm(out,13,13,1)
-			call renvoAarch64AsmAddRegReg(out,9,9,13)
-			call renvoAarch64AsmAddRegImm(out,11,11,1)
-			call aarch64Jump(out,environmentLoop)
-			call out.Mark(environmentDone)
-			call renvoAarch64AsmMovRegAbs(out,9,environmentLengthOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmStoreRegMem(out,11,9,0,8)
-			call renvoAarch64AsmMovRegAbs(out,3,argsOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmMovRegAbs(out,9,argsLengthOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmLoadRegMem(out,4,9,0,8)
-			call renvoAarch64AsmMovRegReg(out,1,4)
-			call renvoAarch64AsmMovRegAbs(out,2,environmentOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmMovRegReg(out,5,11)
-			call renvoAarch64AsmMovRegReg(out,6,11)
+			windowsCallImport(out,9)
+			asmMovRegReg(out,9,0)
+			asmMovRegAbs(out,10,environmentOffset,RTGRelocationAbsoluteBSS)
+			asmMovRegImm(out,11,0)
+			out.Mark(environmentLoop)
+			asmLoadRegMem(out,12,9,0,1)
+			asmCmpRegImm(out,12,0)
+			jumpCondition(out,record_condition(Code:0),environmentDone)
+			asmStoreRegMem(out,9,10,0,8)
+			asmMovRegImm(out,13,0)
+			out.Mark(environmentLength)
+			asmAddRegReg(out,14,9,13)
+			asmLoadRegMem(out,12,14,0,1)
+			asmCmpRegImm(out,12,0)
+			jumpCondition(out,record_condition(Code:0),environmentStringDone)
+			asmAddRegImm(out,13,13,1)
+			jump(out,environmentLength)
+			out.Mark(environmentStringDone)
+			asmStoreRegMem(out,13,10,8,8)
+			asmAddRegImm(out,10,10,16)
+			asmAddRegImm(out,13,13,1)
+			asmAddRegReg(out,9,9,13)
+			asmAddRegImm(out,11,11,1)
+			jump(out,environmentLoop)
+			out.Mark(environmentDone)
+			asmMovRegAbs(out,9,environmentLengthOffset,RTGRelocationAbsoluteBSS)
+			asmStoreRegMem(out,11,9,0,8)
+			asmMovRegAbs(out,3,argsOffset,RTGRelocationAbsoluteBSS)
+			asmMovRegAbs(out,9,argsLengthOffset,RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out,4,9,0,8)
+			asmMovRegReg(out,1,4)
+			asmMovRegAbs(out,2,environmentOffset,RTGRelocationAbsoluteBSS)
+			asmMovRegReg(out,5,11)
+			asmMovRegReg(out,6,11)
 		}
-		aarch64WindowsReadWriteCall(out:emitter, importID:int, countOffset:int) {
-			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
-			call renvoAarch64AsmLoadRegMem(out,1,31,32,8)
-			call renvoAarch64AsmLoadRegMem(out,2,31,16,8)
-			call renvoAarch64AsmMovRegAbs(out,3,countOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmMovRegImm(out,4,0)
-			call aarch64WindowsCallImport(out,importID)
+		windowsReadWriteCall(out:emitter, importID:int, countOffset:int) {
+			asmLoadRegMem(out,0,31,48,8)
+			asmLoadRegMem(out,1,31,32,8)
+			asmLoadRegMem(out,2,31,16,8)
+			asmMovRegAbs(out,3,countOffset,RTGRelocationAbsoluteBSS)
+			asmMovRegImm(out,4,0)
+			windowsCallImport(out,importID)
 		}
-		aarch64WindowsRead(out:emitter) {
+		windowsRead(out:emitter) {
 			let helper = out.NewLabel()
 			let after = out.NewLabel()
 			let countOffset = out.ReserveBSS(8,8)
@@ -2236,91 +2244,91 @@ arch aarch64 {
 			let restore = out.NewLabel()
 			let failed = out.NewLabel()
 			let done = out.NewLabel()
-			call aarch64Jump(out,after)
-			call out.Mark(helper)
-			call renvoAarch64AsmPushReg(out,30)
-			call renvoAarch64AsmPushReg(out,3)
-			call renvoAarch64AsmPushReg(out,4)
-			call renvoAarch64AsmPushReg(out,2)
-			call renvoAarch64AsmPushReg(out,1)
-			call renvoAarch64AsmLoadRegMem(out,9,31,48,8)
-			call renvoAarch64AsmCmpRegImm(out,9,0)
-			call aarch64JumpCondition(out,record_condition(Code:0),standard)
-			call renvoAarch64AsmStoreRegMem(out,9,31,48,8)
-			call aarch64Jump(out,handleReady)
-			call out.Mark(standard)
+			jump(out,after)
+			out.Mark(helper)
+			asmPushReg(out,30)
+			asmPushReg(out,3)
+			asmPushReg(out,4)
+			asmPushReg(out,2)
+			asmPushReg(out,1)
+			asmLoadRegMem(out,9,31,48,8)
+			asmCmpRegImm(out,9,0)
+			jumpCondition(out,record_condition(Code:0),standard)
+			asmStoreRegMem(out,9,31,48,8)
+			jump(out,handleReady)
+			out.Mark(standard)
 			let standardHandle = -10
-			call renvoAarch64AsmMovRegImm(out,0,standardHandle)
-			call aarch64WindowsCallImport(out,6)
-			call renvoAarch64AsmStoreRegMem(out,0,31,48,8)
-			call aarch64Jump(out,handleReady)
-			call out.Mark(standardError)
-			call renvoAarch64AsmMovRegImm(out,0,-12)
-			call aarch64WindowsCallImport(out,6)
-			call renvoAarch64AsmStoreRegMem(out,0,31,48,8)
-			call out.Mark(handleReady)
-			call renvoAarch64AsmLoadRegMem(out,9,31,0,8)
-			call renvoAarch64AsmCmpRegImm(out,9,0)
-			call aarch64JumpCondition(out,record_condition(Code:11),sequential)
-			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
-			call renvoAarch64AsmMovRegImm(out,1,0)
-			call renvoAarch64AsmMovRegImm(out,2,0)
-			call renvoAarch64AsmMovRegImm(out,3,1)
-			call aarch64WindowsCallImport(out,5)
-			call renvoAarch64AsmMovRegImm(out,9,0xffffffff)
-			call renvoAarch64AsmCmpRegReg(out,0,9)
-			call aarch64JumpCondition(out,record_condition(Code:0),positionFailed)
-			call renvoAarch64AsmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmStoreRegMem(out,0,9,0,8)
-			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
-			call renvoAarch64AsmLoadRegMem(out,1,31,0,8)
-			call renvoAarch64AsmMovRegImm(out,2,0)
-			call renvoAarch64AsmMovRegImm(out,3,0)
-			call aarch64WindowsCallImport(out,5)
-			call renvoAarch64AsmMovRegImm(out,9,0xffffffff)
-			call renvoAarch64AsmCmpRegReg(out,0,9)
-			call aarch64JumpCondition(out,record_condition(Code:0),ioFailed)
-			call aarch64WindowsReadWriteCall(out,3,countOffset)
-			call renvoAarch64AsmCmpRegImm(out,0,0)
-			call aarch64JumpCondition(out,record_condition(Code:0),ioFailed)
-			call renvoAarch64AsmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmLoadRegMem(out,9,9,0,8)
-			call aarch64Jump(out,restore)
-			call out.Mark(ioFailed)
-			call renvoAarch64AsmMovRegImm(out,9,-1)
-			call out.Mark(restore)
-			call renvoAarch64AsmMovRegAbs(out,10,resultOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmStoreRegMem(out,9,10,0,8)
-			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
-			call renvoAarch64AsmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmLoadRegMem(out,1,9,0,8)
-			call renvoAarch64AsmMovRegImm(out,2,0)
-			call renvoAarch64AsmMovRegImm(out,3,0)
-			call aarch64WindowsCallImport(out,5)
-			call renvoAarch64AsmMovRegAbs(out,9,resultOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmLoadRegMem(out,0,9,0,8)
-			call aarch64Jump(out,done)
-			call out.Mark(positionFailed)
-			call renvoAarch64AsmMovRegImm(out,0,-1)
-			call aarch64Jump(out,done)
-			call out.Mark(sequential)
-			call aarch64WindowsReadWriteCall(out,3,countOffset)
-			call renvoAarch64AsmCmpRegImm(out,0,0)
-			call aarch64JumpCondition(out,record_condition(Code:0),failed)
-			call renvoAarch64AsmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmLoadRegMem(out,0,9,0,8)
-			call aarch64Jump(out,done)
-			call out.Mark(failed)
-			call renvoAarch64AsmMovRegImm(out,0,-1)
-			call out.Mark(done)
-			call renvoAarch64AsmAddRegImm(out,31,31,64)
-			call renvoAarch64AsmPopReg(out,30)
-			call renvoAarch64AsmRet(out)
-			call out.Mark(after)
-			call renvoAarch64AsmMovRegImm(out,2,-1)
-			call aarch64Call(out,helper)
+			asmMovRegImm(out,0,standardHandle)
+			windowsCallImport(out,6)
+			asmStoreRegMem(out,0,31,48,8)
+			jump(out,handleReady)
+			out.Mark(standardError)
+			asmMovRegImm(out,0,-12)
+			windowsCallImport(out,6)
+			asmStoreRegMem(out,0,31,48,8)
+			out.Mark(handleReady)
+			asmLoadRegMem(out,9,31,0,8)
+			asmCmpRegImm(out,9,0)
+			jumpCondition(out,record_condition(Code:11),sequential)
+			asmLoadRegMem(out,0,31,48,8)
+			asmMovRegImm(out,1,0)
+			asmMovRegImm(out,2,0)
+			asmMovRegImm(out,3,1)
+			windowsCallImport(out,5)
+			asmMovRegImm(out,9,0xffffffff)
+			asmCmpRegReg(out,0,9)
+			jumpCondition(out,record_condition(Code:0),positionFailed)
+			asmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
+			asmStoreRegMem(out,0,9,0,8)
+			asmLoadRegMem(out,0,31,48,8)
+			asmLoadRegMem(out,1,31,0,8)
+			asmMovRegImm(out,2,0)
+			asmMovRegImm(out,3,0)
+			windowsCallImport(out,5)
+			asmMovRegImm(out,9,0xffffffff)
+			asmCmpRegReg(out,0,9)
+			jumpCondition(out,record_condition(Code:0),ioFailed)
+			windowsReadWriteCall(out,3,countOffset)
+			asmCmpRegImm(out,0,0)
+			jumpCondition(out,record_condition(Code:0),ioFailed)
+			asmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out,9,9,0,8)
+			jump(out,restore)
+			out.Mark(ioFailed)
+			asmMovRegImm(out,9,-1)
+			out.Mark(restore)
+			asmMovRegAbs(out,10,resultOffset,RTGRelocationAbsoluteBSS)
+			asmStoreRegMem(out,9,10,0,8)
+			asmLoadRegMem(out,0,31,48,8)
+			asmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out,1,9,0,8)
+			asmMovRegImm(out,2,0)
+			asmMovRegImm(out,3,0)
+			windowsCallImport(out,5)
+			asmMovRegAbs(out,9,resultOffset,RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out,0,9,0,8)
+			jump(out,done)
+			out.Mark(positionFailed)
+			asmMovRegImm(out,0,-1)
+			jump(out,done)
+			out.Mark(sequential)
+			windowsReadWriteCall(out,3,countOffset)
+			asmCmpRegImm(out,0,0)
+			jumpCondition(out,record_condition(Code:0),failed)
+			asmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out,0,9,0,8)
+			jump(out,done)
+			out.Mark(failed)
+			asmMovRegImm(out,0,-1)
+			out.Mark(done)
+			asmAddRegImm(out,31,31,64)
+			asmPopReg(out,30)
+			asmRet(out)
+			out.Mark(after)
+			asmMovRegImm(out,2,-1)
+			call(out,helper)
 		}
-		aarch64WindowsWrite(out:emitter) {
+		windowsWrite(out:emitter) {
 			let helper = out.NewLabel()
 			let after = out.NewLabel()
 			let countOffset = out.ReserveBSS(8,8)
@@ -2335,299 +2343,299 @@ arch aarch64 {
 			let restore = out.NewLabel()
 			let failed = out.NewLabel()
 			let done = out.NewLabel()
-			call aarch64Jump(out,after)
-			call out.Mark(helper)
-			call renvoAarch64AsmPushReg(out,30)
-			call renvoAarch64AsmPushReg(out,3)
-			call renvoAarch64AsmPushReg(out,4)
-			call renvoAarch64AsmPushReg(out,2)
-			call renvoAarch64AsmPushReg(out,1)
-			call renvoAarch64AsmLoadRegMem(out,9,31,48,8)
-			call renvoAarch64AsmCmpRegImm(out,9,1)
-			call aarch64JumpCondition(out,record_condition(Code:0),standard)
-			call renvoAarch64AsmCmpRegImm(out,9,2)
-			call aarch64JumpCondition(out,record_condition(Code:0),standardError)
-			call renvoAarch64AsmStoreRegMem(out,9,31,48,8)
-			call aarch64Jump(out,handleReady)
-			call out.Mark(standard)
-			let standardHandle = -10
-			set standardHandle = -11
-			call renvoAarch64AsmMovRegImm(out,0,standardHandle)
-			call aarch64WindowsCallImport(out,6)
-			call renvoAarch64AsmStoreRegMem(out,0,31,48,8)
-			call aarch64Jump(out,handleReady)
-			call out.Mark(standardError)
-			call renvoAarch64AsmMovRegImm(out,0,-12)
-			call aarch64WindowsCallImport(out,6)
-			call renvoAarch64AsmStoreRegMem(out,0,31,48,8)
-			call out.Mark(handleReady)
-			call renvoAarch64AsmLoadRegMem(out,9,31,0,8)
-			call renvoAarch64AsmCmpRegImm(out,9,0)
-			call aarch64JumpCondition(out,record_condition(Code:11),sequential)
-			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
-			call renvoAarch64AsmMovRegImm(out,1,0)
-			call renvoAarch64AsmMovRegImm(out,2,0)
-			call renvoAarch64AsmMovRegImm(out,3,1)
-			call aarch64WindowsCallImport(out,5)
-			call renvoAarch64AsmMovRegImm(out,9,0xffffffff)
-			call renvoAarch64AsmCmpRegReg(out,0,9)
-			call aarch64JumpCondition(out,record_condition(Code:0),positionFailed)
-			call renvoAarch64AsmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmStoreRegMem(out,0,9,0,8)
-			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
-			call renvoAarch64AsmLoadRegMem(out,1,31,0,8)
-			call renvoAarch64AsmMovRegImm(out,2,0)
-			call renvoAarch64AsmMovRegImm(out,3,0)
-			call aarch64WindowsCallImport(out,5)
-			call renvoAarch64AsmMovRegImm(out,9,0xffffffff)
-			call renvoAarch64AsmCmpRegReg(out,0,9)
-			call aarch64JumpCondition(out,record_condition(Code:0),ioFailed)
-			call aarch64WindowsReadWriteCall(out,4,countOffset)
-			call renvoAarch64AsmCmpRegImm(out,0,0)
-			call aarch64JumpCondition(out,record_condition(Code:0),ioFailed)
-			call renvoAarch64AsmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmLoadRegMem(out,9,9,0,8)
-			call aarch64Jump(out,restore)
-			call out.Mark(ioFailed)
-			call renvoAarch64AsmMovRegImm(out,9,-1)
-			call out.Mark(restore)
-			call renvoAarch64AsmMovRegAbs(out,10,resultOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmStoreRegMem(out,9,10,0,8)
-			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
-			call renvoAarch64AsmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmLoadRegMem(out,1,9,0,8)
-			call renvoAarch64AsmMovRegImm(out,2,0)
-			call renvoAarch64AsmMovRegImm(out,3,0)
-			call aarch64WindowsCallImport(out,5)
-			call renvoAarch64AsmMovRegAbs(out,9,resultOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmLoadRegMem(out,0,9,0,8)
-			call aarch64Jump(out,done)
-			call out.Mark(positionFailed)
-			call renvoAarch64AsmMovRegImm(out,0,-1)
-			call aarch64Jump(out,done)
-			call out.Mark(sequential)
-			call aarch64WindowsReadWriteCall(out,4,countOffset)
-			call renvoAarch64AsmCmpRegImm(out,0,0)
-			call aarch64JumpCondition(out,record_condition(Code:0),failed)
-			call renvoAarch64AsmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmLoadRegMem(out,0,9,0,8)
-			call aarch64Jump(out,done)
-			call out.Mark(failed)
-			call renvoAarch64AsmMovRegImm(out,0,-1)
-			call out.Mark(done)
-			call renvoAarch64AsmAddRegImm(out,31,31,64)
-			call renvoAarch64AsmPopReg(out,30)
-			call renvoAarch64AsmRet(out)
-			call out.Mark(after)
-			call renvoAarch64AsmMovRegImm(out,2,-1)
-			call aarch64Call(out,helper)
-		}
-		aarch64WindowsReadAt(out:emitter) {
-			let helper = out.NewLabel()
-			let after = out.NewLabel()
-			let countOffset = out.ReserveBSS(8,8)
-			let positionOffset = out.ReserveBSS(8,8)
-			let resultOffset = out.ReserveBSS(8,8)
-			let standard = out.NewLabel()
-			let standardError = out.NewLabel()
-			let handleReady = out.NewLabel()
-			let sequential = out.NewLabel()
-			let positionFailed = out.NewLabel()
-			let ioFailed = out.NewLabel()
-			let restore = out.NewLabel()
-			let failed = out.NewLabel()
-			let done = out.NewLabel()
-			call aarch64Jump(out,after)
-			call out.Mark(helper)
-			call renvoAarch64AsmPushReg(out,30)
-			call renvoAarch64AsmPushReg(out,3)
-			call renvoAarch64AsmPushReg(out,4)
-			call renvoAarch64AsmPushReg(out,2)
-			call renvoAarch64AsmPushReg(out,1)
-			call renvoAarch64AsmLoadRegMem(out,9,31,48,8)
-			call renvoAarch64AsmCmpRegImm(out,9,0)
-			call aarch64JumpCondition(out,record_condition(Code:0),standard)
-			call renvoAarch64AsmStoreRegMem(out,9,31,48,8)
-			call aarch64Jump(out,handleReady)
-			call out.Mark(standard)
-			let standardHandle = -10
-			call renvoAarch64AsmMovRegImm(out,0,standardHandle)
-			call aarch64WindowsCallImport(out,6)
-			call renvoAarch64AsmStoreRegMem(out,0,31,48,8)
-			call aarch64Jump(out,handleReady)
-			call out.Mark(standardError)
-			call renvoAarch64AsmMovRegImm(out,0,-12)
-			call aarch64WindowsCallImport(out,6)
-			call renvoAarch64AsmStoreRegMem(out,0,31,48,8)
-			call out.Mark(handleReady)
-			call renvoAarch64AsmLoadRegMem(out,9,31,0,8)
-			call renvoAarch64AsmCmpRegImm(out,9,0)
-			call aarch64JumpCondition(out,record_condition(Code:11),sequential)
-			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
-			call renvoAarch64AsmMovRegImm(out,1,0)
-			call renvoAarch64AsmMovRegImm(out,2,0)
-			call renvoAarch64AsmMovRegImm(out,3,1)
-			call aarch64WindowsCallImport(out,5)
-			call renvoAarch64AsmMovRegImm(out,9,0xffffffff)
-			call renvoAarch64AsmCmpRegReg(out,0,9)
-			call aarch64JumpCondition(out,record_condition(Code:0),positionFailed)
-			call renvoAarch64AsmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmStoreRegMem(out,0,9,0,8)
-			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
-			call renvoAarch64AsmLoadRegMem(out,1,31,0,8)
-			call renvoAarch64AsmMovRegImm(out,2,0)
-			call renvoAarch64AsmMovRegImm(out,3,0)
-			call aarch64WindowsCallImport(out,5)
-			call renvoAarch64AsmMovRegImm(out,9,0xffffffff)
-			call renvoAarch64AsmCmpRegReg(out,0,9)
-			call aarch64JumpCondition(out,record_condition(Code:0),ioFailed)
-			call aarch64WindowsReadWriteCall(out,3,countOffset)
-			call renvoAarch64AsmCmpRegImm(out,0,0)
-			call aarch64JumpCondition(out,record_condition(Code:0),ioFailed)
-			call renvoAarch64AsmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmLoadRegMem(out,9,9,0,8)
-			call aarch64Jump(out,restore)
-			call out.Mark(ioFailed)
-			call renvoAarch64AsmMovRegImm(out,9,-1)
-			call out.Mark(restore)
-			call renvoAarch64AsmMovRegAbs(out,10,resultOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmStoreRegMem(out,9,10,0,8)
-			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
-			call renvoAarch64AsmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmLoadRegMem(out,1,9,0,8)
-			call renvoAarch64AsmMovRegImm(out,2,0)
-			call renvoAarch64AsmMovRegImm(out,3,0)
-			call aarch64WindowsCallImport(out,5)
-			call renvoAarch64AsmMovRegAbs(out,9,resultOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmLoadRegMem(out,0,9,0,8)
-			call aarch64Jump(out,done)
-			call out.Mark(positionFailed)
-			call renvoAarch64AsmMovRegImm(out,0,-1)
-			call aarch64Jump(out,done)
-			call out.Mark(sequential)
-			call aarch64WindowsReadWriteCall(out,3,countOffset)
-			call renvoAarch64AsmCmpRegImm(out,0,0)
-			call aarch64JumpCondition(out,record_condition(Code:0),failed)
-			call renvoAarch64AsmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmLoadRegMem(out,0,9,0,8)
-			call aarch64Jump(out,done)
-			call out.Mark(failed)
-			call renvoAarch64AsmMovRegImm(out,0,-1)
-			call out.Mark(done)
-			call renvoAarch64AsmAddRegImm(out,31,31,64)
-			call renvoAarch64AsmPopReg(out,30)
-			call renvoAarch64AsmRet(out)
-			call out.Mark(after)
-			call aarch64Call(out,helper)
-		}
-		aarch64WindowsWriteAt(out:emitter) {
-			let helper = out.NewLabel()
-			let after = out.NewLabel()
-			let countOffset = out.ReserveBSS(8,8)
-			let positionOffset = out.ReserveBSS(8,8)
-			let resultOffset = out.ReserveBSS(8,8)
-			let standard = out.NewLabel()
-			let standardError = out.NewLabel()
-			let handleReady = out.NewLabel()
-			let sequential = out.NewLabel()
-			let positionFailed = out.NewLabel()
-			let ioFailed = out.NewLabel()
-			let restore = out.NewLabel()
-			let failed = out.NewLabel()
-			let done = out.NewLabel()
-			call aarch64Jump(out,after)
-			call out.Mark(helper)
-			call renvoAarch64AsmPushReg(out,30)
-			call renvoAarch64AsmPushReg(out,3)
-			call renvoAarch64AsmPushReg(out,4)
-			call renvoAarch64AsmPushReg(out,2)
-			call renvoAarch64AsmPushReg(out,1)
-			call renvoAarch64AsmLoadRegMem(out,9,31,48,8)
-			call renvoAarch64AsmCmpRegImm(out,9,1)
-			call aarch64JumpCondition(out,record_condition(Code:0),standard)
-			call renvoAarch64AsmCmpRegImm(out,9,2)
-			call aarch64JumpCondition(out,record_condition(Code:0),standardError)
-			call renvoAarch64AsmStoreRegMem(out,9,31,48,8)
-			call aarch64Jump(out,handleReady)
-			call out.Mark(standard)
+			jump(out,after)
+			out.Mark(helper)
+			asmPushReg(out,30)
+			asmPushReg(out,3)
+			asmPushReg(out,4)
+			asmPushReg(out,2)
+			asmPushReg(out,1)
+			asmLoadRegMem(out,9,31,48,8)
+			asmCmpRegImm(out,9,1)
+			jumpCondition(out,record_condition(Code:0),standard)
+			asmCmpRegImm(out,9,2)
+			jumpCondition(out,record_condition(Code:0),standardError)
+			asmStoreRegMem(out,9,31,48,8)
+			jump(out,handleReady)
+			out.Mark(standard)
 			let standardHandle = -10
 			set standardHandle = -11
-			call renvoAarch64AsmMovRegImm(out,0,standardHandle)
-			call aarch64WindowsCallImport(out,6)
-			call renvoAarch64AsmStoreRegMem(out,0,31,48,8)
-			call aarch64Jump(out,handleReady)
-			call out.Mark(standardError)
-			call renvoAarch64AsmMovRegImm(out,0,-12)
-			call aarch64WindowsCallImport(out,6)
-			call renvoAarch64AsmStoreRegMem(out,0,31,48,8)
-			call out.Mark(handleReady)
-			call renvoAarch64AsmLoadRegMem(out,9,31,0,8)
-			call renvoAarch64AsmCmpRegImm(out,9,0)
-			call aarch64JumpCondition(out,record_condition(Code:11),sequential)
-			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
-			call renvoAarch64AsmMovRegImm(out,1,0)
-			call renvoAarch64AsmMovRegImm(out,2,0)
-			call renvoAarch64AsmMovRegImm(out,3,1)
-			call aarch64WindowsCallImport(out,5)
-			call renvoAarch64AsmMovRegImm(out,9,0xffffffff)
-			call renvoAarch64AsmCmpRegReg(out,0,9)
-			call aarch64JumpCondition(out,record_condition(Code:0),positionFailed)
-			call renvoAarch64AsmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmStoreRegMem(out,0,9,0,8)
-			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
-			call renvoAarch64AsmLoadRegMem(out,1,31,0,8)
-			call renvoAarch64AsmMovRegImm(out,2,0)
-			call renvoAarch64AsmMovRegImm(out,3,0)
-			call aarch64WindowsCallImport(out,5)
-			call renvoAarch64AsmMovRegImm(out,9,0xffffffff)
-			call renvoAarch64AsmCmpRegReg(out,0,9)
-			call aarch64JumpCondition(out,record_condition(Code:0),ioFailed)
-			call aarch64WindowsReadWriteCall(out,4,countOffset)
-			call renvoAarch64AsmCmpRegImm(out,0,0)
-			call aarch64JumpCondition(out,record_condition(Code:0),ioFailed)
-			call renvoAarch64AsmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmLoadRegMem(out,9,9,0,8)
-			call aarch64Jump(out,restore)
-			call out.Mark(ioFailed)
-			call renvoAarch64AsmMovRegImm(out,9,-1)
-			call out.Mark(restore)
-			call renvoAarch64AsmMovRegAbs(out,10,resultOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmStoreRegMem(out,9,10,0,8)
-			call renvoAarch64AsmLoadRegMem(out,0,31,48,8)
-			call renvoAarch64AsmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmLoadRegMem(out,1,9,0,8)
-			call renvoAarch64AsmMovRegImm(out,2,0)
-			call renvoAarch64AsmMovRegImm(out,3,0)
-			call aarch64WindowsCallImport(out,5)
-			call renvoAarch64AsmMovRegAbs(out,9,resultOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmLoadRegMem(out,0,9,0,8)
-			call aarch64Jump(out,done)
-			call out.Mark(positionFailed)
-			call renvoAarch64AsmMovRegImm(out,0,-1)
-			call aarch64Jump(out,done)
-			call out.Mark(sequential)
-			call aarch64WindowsReadWriteCall(out,4,countOffset)
-			call renvoAarch64AsmCmpRegImm(out,0,0)
-			call aarch64JumpCondition(out,record_condition(Code:0),failed)
-			call renvoAarch64AsmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
-			call renvoAarch64AsmLoadRegMem(out,0,9,0,8)
-			call aarch64Jump(out,done)
-			call out.Mark(failed)
-			call renvoAarch64AsmMovRegImm(out,0,-1)
-			call out.Mark(done)
-			call renvoAarch64AsmAddRegImm(out,31,31,64)
-			call renvoAarch64AsmPopReg(out,30)
-			call renvoAarch64AsmRet(out)
-			call out.Mark(after)
-			call aarch64Call(out,helper)
+			asmMovRegImm(out,0,standardHandle)
+			windowsCallImport(out,6)
+			asmStoreRegMem(out,0,31,48,8)
+			jump(out,handleReady)
+			out.Mark(standardError)
+			asmMovRegImm(out,0,-12)
+			windowsCallImport(out,6)
+			asmStoreRegMem(out,0,31,48,8)
+			out.Mark(handleReady)
+			asmLoadRegMem(out,9,31,0,8)
+			asmCmpRegImm(out,9,0)
+			jumpCondition(out,record_condition(Code:11),sequential)
+			asmLoadRegMem(out,0,31,48,8)
+			asmMovRegImm(out,1,0)
+			asmMovRegImm(out,2,0)
+			asmMovRegImm(out,3,1)
+			windowsCallImport(out,5)
+			asmMovRegImm(out,9,0xffffffff)
+			asmCmpRegReg(out,0,9)
+			jumpCondition(out,record_condition(Code:0),positionFailed)
+			asmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
+			asmStoreRegMem(out,0,9,0,8)
+			asmLoadRegMem(out,0,31,48,8)
+			asmLoadRegMem(out,1,31,0,8)
+			asmMovRegImm(out,2,0)
+			asmMovRegImm(out,3,0)
+			windowsCallImport(out,5)
+			asmMovRegImm(out,9,0xffffffff)
+			asmCmpRegReg(out,0,9)
+			jumpCondition(out,record_condition(Code:0),ioFailed)
+			windowsReadWriteCall(out,4,countOffset)
+			asmCmpRegImm(out,0,0)
+			jumpCondition(out,record_condition(Code:0),ioFailed)
+			asmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out,9,9,0,8)
+			jump(out,restore)
+			out.Mark(ioFailed)
+			asmMovRegImm(out,9,-1)
+			out.Mark(restore)
+			asmMovRegAbs(out,10,resultOffset,RTGRelocationAbsoluteBSS)
+			asmStoreRegMem(out,9,10,0,8)
+			asmLoadRegMem(out,0,31,48,8)
+			asmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out,1,9,0,8)
+			asmMovRegImm(out,2,0)
+			asmMovRegImm(out,3,0)
+			windowsCallImport(out,5)
+			asmMovRegAbs(out,9,resultOffset,RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out,0,9,0,8)
+			jump(out,done)
+			out.Mark(positionFailed)
+			asmMovRegImm(out,0,-1)
+			jump(out,done)
+			out.Mark(sequential)
+			windowsReadWriteCall(out,4,countOffset)
+			asmCmpRegImm(out,0,0)
+			jumpCondition(out,record_condition(Code:0),failed)
+			asmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out,0,9,0,8)
+			jump(out,done)
+			out.Mark(failed)
+			asmMovRegImm(out,0,-1)
+			out.Mark(done)
+			asmAddRegImm(out,31,31,64)
+			asmPopReg(out,30)
+			asmRet(out)
+			out.Mark(after)
+			asmMovRegImm(out,2,-1)
+			call(out,helper)
+		}
+		windowsReadAt(out:emitter) {
+			let helper = out.NewLabel()
+			let after = out.NewLabel()
+			let countOffset = out.ReserveBSS(8,8)
+			let positionOffset = out.ReserveBSS(8,8)
+			let resultOffset = out.ReserveBSS(8,8)
+			let standard = out.NewLabel()
+			let standardError = out.NewLabel()
+			let handleReady = out.NewLabel()
+			let sequential = out.NewLabel()
+			let positionFailed = out.NewLabel()
+			let ioFailed = out.NewLabel()
+			let restore = out.NewLabel()
+			let failed = out.NewLabel()
+			let done = out.NewLabel()
+			jump(out,after)
+			out.Mark(helper)
+			asmPushReg(out,30)
+			asmPushReg(out,3)
+			asmPushReg(out,4)
+			asmPushReg(out,2)
+			asmPushReg(out,1)
+			asmLoadRegMem(out,9,31,48,8)
+			asmCmpRegImm(out,9,0)
+			jumpCondition(out,record_condition(Code:0),standard)
+			asmStoreRegMem(out,9,31,48,8)
+			jump(out,handleReady)
+			out.Mark(standard)
+			let standardHandle = -10
+			asmMovRegImm(out,0,standardHandle)
+			windowsCallImport(out,6)
+			asmStoreRegMem(out,0,31,48,8)
+			jump(out,handleReady)
+			out.Mark(standardError)
+			asmMovRegImm(out,0,-12)
+			windowsCallImport(out,6)
+			asmStoreRegMem(out,0,31,48,8)
+			out.Mark(handleReady)
+			asmLoadRegMem(out,9,31,0,8)
+			asmCmpRegImm(out,9,0)
+			jumpCondition(out,record_condition(Code:11),sequential)
+			asmLoadRegMem(out,0,31,48,8)
+			asmMovRegImm(out,1,0)
+			asmMovRegImm(out,2,0)
+			asmMovRegImm(out,3,1)
+			windowsCallImport(out,5)
+			asmMovRegImm(out,9,0xffffffff)
+			asmCmpRegReg(out,0,9)
+			jumpCondition(out,record_condition(Code:0),positionFailed)
+			asmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
+			asmStoreRegMem(out,0,9,0,8)
+			asmLoadRegMem(out,0,31,48,8)
+			asmLoadRegMem(out,1,31,0,8)
+			asmMovRegImm(out,2,0)
+			asmMovRegImm(out,3,0)
+			windowsCallImport(out,5)
+			asmMovRegImm(out,9,0xffffffff)
+			asmCmpRegReg(out,0,9)
+			jumpCondition(out,record_condition(Code:0),ioFailed)
+			windowsReadWriteCall(out,3,countOffset)
+			asmCmpRegImm(out,0,0)
+			jumpCondition(out,record_condition(Code:0),ioFailed)
+			asmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out,9,9,0,8)
+			jump(out,restore)
+			out.Mark(ioFailed)
+			asmMovRegImm(out,9,-1)
+			out.Mark(restore)
+			asmMovRegAbs(out,10,resultOffset,RTGRelocationAbsoluteBSS)
+			asmStoreRegMem(out,9,10,0,8)
+			asmLoadRegMem(out,0,31,48,8)
+			asmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out,1,9,0,8)
+			asmMovRegImm(out,2,0)
+			asmMovRegImm(out,3,0)
+			windowsCallImport(out,5)
+			asmMovRegAbs(out,9,resultOffset,RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out,0,9,0,8)
+			jump(out,done)
+			out.Mark(positionFailed)
+			asmMovRegImm(out,0,-1)
+			jump(out,done)
+			out.Mark(sequential)
+			windowsReadWriteCall(out,3,countOffset)
+			asmCmpRegImm(out,0,0)
+			jumpCondition(out,record_condition(Code:0),failed)
+			asmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out,0,9,0,8)
+			jump(out,done)
+			out.Mark(failed)
+			asmMovRegImm(out,0,-1)
+			out.Mark(done)
+			asmAddRegImm(out,31,31,64)
+			asmPopReg(out,30)
+			asmRet(out)
+			out.Mark(after)
+			call(out,helper)
+		}
+		windowsWriteAt(out:emitter) {
+			let helper = out.NewLabel()
+			let after = out.NewLabel()
+			let countOffset = out.ReserveBSS(8,8)
+			let positionOffset = out.ReserveBSS(8,8)
+			let resultOffset = out.ReserveBSS(8,8)
+			let standard = out.NewLabel()
+			let standardError = out.NewLabel()
+			let handleReady = out.NewLabel()
+			let sequential = out.NewLabel()
+			let positionFailed = out.NewLabel()
+			let ioFailed = out.NewLabel()
+			let restore = out.NewLabel()
+			let failed = out.NewLabel()
+			let done = out.NewLabel()
+			jump(out,after)
+			out.Mark(helper)
+			asmPushReg(out,30)
+			asmPushReg(out,3)
+			asmPushReg(out,4)
+			asmPushReg(out,2)
+			asmPushReg(out,1)
+			asmLoadRegMem(out,9,31,48,8)
+			asmCmpRegImm(out,9,1)
+			jumpCondition(out,record_condition(Code:0),standard)
+			asmCmpRegImm(out,9,2)
+			jumpCondition(out,record_condition(Code:0),standardError)
+			asmStoreRegMem(out,9,31,48,8)
+			jump(out,handleReady)
+			out.Mark(standard)
+			let standardHandle = -10
+			set standardHandle = -11
+			asmMovRegImm(out,0,standardHandle)
+			windowsCallImport(out,6)
+			asmStoreRegMem(out,0,31,48,8)
+			jump(out,handleReady)
+			out.Mark(standardError)
+			asmMovRegImm(out,0,-12)
+			windowsCallImport(out,6)
+			asmStoreRegMem(out,0,31,48,8)
+			out.Mark(handleReady)
+			asmLoadRegMem(out,9,31,0,8)
+			asmCmpRegImm(out,9,0)
+			jumpCondition(out,record_condition(Code:11),sequential)
+			asmLoadRegMem(out,0,31,48,8)
+			asmMovRegImm(out,1,0)
+			asmMovRegImm(out,2,0)
+			asmMovRegImm(out,3,1)
+			windowsCallImport(out,5)
+			asmMovRegImm(out,9,0xffffffff)
+			asmCmpRegReg(out,0,9)
+			jumpCondition(out,record_condition(Code:0),positionFailed)
+			asmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
+			asmStoreRegMem(out,0,9,0,8)
+			asmLoadRegMem(out,0,31,48,8)
+			asmLoadRegMem(out,1,31,0,8)
+			asmMovRegImm(out,2,0)
+			asmMovRegImm(out,3,0)
+			windowsCallImport(out,5)
+			asmMovRegImm(out,9,0xffffffff)
+			asmCmpRegReg(out,0,9)
+			jumpCondition(out,record_condition(Code:0),ioFailed)
+			windowsReadWriteCall(out,4,countOffset)
+			asmCmpRegImm(out,0,0)
+			jumpCondition(out,record_condition(Code:0),ioFailed)
+			asmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out,9,9,0,8)
+			jump(out,restore)
+			out.Mark(ioFailed)
+			asmMovRegImm(out,9,-1)
+			out.Mark(restore)
+			asmMovRegAbs(out,10,resultOffset,RTGRelocationAbsoluteBSS)
+			asmStoreRegMem(out,9,10,0,8)
+			asmLoadRegMem(out,0,31,48,8)
+			asmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out,1,9,0,8)
+			asmMovRegImm(out,2,0)
+			asmMovRegImm(out,3,0)
+			windowsCallImport(out,5)
+			asmMovRegAbs(out,9,resultOffset,RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out,0,9,0,8)
+			jump(out,done)
+			out.Mark(positionFailed)
+			asmMovRegImm(out,0,-1)
+			jump(out,done)
+			out.Mark(sequential)
+			windowsReadWriteCall(out,4,countOffset)
+			asmCmpRegImm(out,0,0)
+			jumpCondition(out,record_condition(Code:0),failed)
+			asmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out,0,9,0,8)
+			jump(out,done)
+			out.Mark(failed)
+			asmMovRegImm(out,0,-1)
+			out.Mark(done)
+			asmAddRegImm(out,31,31,64)
+			asmPopReg(out,30)
+			asmRet(out)
+			out.Mark(after)
+			call(out,helper)
 		}
 }
 }
 
 abi aapcs64 {
 	arch = aarch64
-	frame_start = sequence aarch64FrameStart
-	frame_finish = go aarch64FrameFinish
+	frame_start = sequence frameStart
+	frame_finish = go frameFinish
 	arguments = [x0, x1, x2, x3, x4, x5, x6, x7]
 	result = [x0, x1]
 	stack_alignment = 16
@@ -2635,15 +2643,15 @@ abi aapcs64 {
 
 abi windows_arm64 {
 	arch = aarch64
-	frame_start = sequence aarch64FrameStart
-	frame_finish = go aarch64FrameFinish
+	frame_start = sequence frameStart
+	frame_finish = go frameFinish
 	arguments = [x0, x1, x2, x3, x4, x5, x6, x7]
 	result = [x0, x1]
 	stack_alignment = 16
 }
 
 runtime linux_aarch64 {
-		entry sequence aarch64LinuxEntry {
+		entry sequence linuxEntry {
 		max_parameters = 2
 		bss args 32768 16
 		bss environment 32768 16
@@ -2668,26 +2676,26 @@ runtime linux_aarch64 {
 }
 
 runtime darwin_arm64 {
-	entry sequence aarch64DarwinEntry {
+	entry sequence darwinEntry {
 		max_parameters = 2
 		requires_state = true
 		bss args 32768 16
 		bss environment 32768 16
 	}
 	entry_state_bytes = 24
-	emit_exit = sequence aarch64DarwinExit
-	operation read { emit = sequence aarch64DarwinRead }
-	operation write { emit = sequence aarch64DarwinWrite }
-	operation read_at { emit = sequence aarch64DarwinReadAt }
-	operation write_at { emit = sequence aarch64DarwinWriteAt }
-	operation open { emit = sequence aarch64DarwinOpen }
-	operation close { emit = sequence aarch64DarwinClose }
-	operation chmod { emit = sequence aarch64DarwinChmod }
+	emit_exit = sequence darwinExit
+	operation read { emit = sequence darwinRead }
+	operation write { emit = sequence darwinWrite }
+	operation read_at { emit = sequence darwinReadAt }
+	operation write_at { emit = sequence darwinWriteAt }
+	operation open { emit = sequence darwinOpen }
+	operation close { emit = sequence darwinClose }
+	operation chmod { emit = sequence darwinChmod }
 	operation print { use = write }
 }
 
 runtime windows_arm64 {
-		entry sequence aarch64WindowsEntry {
+		entry sequence windowsEntry {
 		max_parameters = 2
 		bss args 32768 16
 		bss argsText 32768 16
@@ -2695,19 +2703,19 @@ runtime windows_arm64 {
 		bss environment 32768 16
 		bss environmentLength 8 8
 	}
-	emit_exit = sequence aarch64WindowsExit
-	emit_static_call = go aarch64WindowsStaticCall
+	emit_exit = sequence windowsExit
+	emit_static_call = go windowsStaticCall
 	imports "kernel32.dll" = [
 		CreateFileA, CloseHandle, ReadFile, WriteFile, SetFilePointer,
 		GetStdHandle, GetCommandLineA, ExitProcess, GetEnvironmentStringsA
 	]
-	operation read { emit = sequence aarch64WindowsRead }
-	operation write { emit = sequence aarch64WindowsWrite }
-	operation read_at { emit = sequence aarch64WindowsReadAt }
-	operation write_at { emit = sequence aarch64WindowsWriteAt }
-	operation open { emit = sequence aarch64WindowsRuntimeOpen }
-	operation close { emit = sequence aarch64WindowsRuntimeClose }
-	operation chmod { emit = sequence aarch64WindowsRuntimeChmod }
+	operation read { emit = sequence windowsRead }
+	operation write { emit = sequence windowsWrite }
+	operation read_at { emit = sequence windowsReadAt }
+	operation write_at { emit = sequence windowsWriteAt }
+	operation open { emit = sequence windowsRuntimeOpen }
+	operation close { emit = sequence windowsRuntimeClose }
+	operation chmod { emit = sequence windowsRuntimeChmod }
 	operation print { use = write }
 }
 
@@ -2729,7 +2737,7 @@ format macho64_arm64 {
 	kind = "mach-o"
 	cpu = 0x0100000c
 	code_offset = 0x1000
-	image = sequence aarch64MachImage
+	image = sequence machImage
 }
 
 format pe64_arm64 {
@@ -2739,7 +2747,7 @@ format pe64_arm64 {
 	machine = 0xaa64
 	code_offset = 0x1000
 	image = pe_executable
-	patch_image = go aarch64PEPatch
+	patch_image = go pEPatch
 	image_base = 0x40000000
 	image_base_high = 1
 	file_alignment = 0x200

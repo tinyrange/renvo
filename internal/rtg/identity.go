@@ -21,6 +21,7 @@ func targetSemanticIdentity(document Document, target ResolvedTarget) [32]byte {
 	}
 
 	declarations := targetSemanticDeclarations(document, target)
+	hasPackages := hasSemanticVirtualPackages(document)
 	for i := 1; i < len(declarations); i++ {
 		value := declarations[i]
 		at := i
@@ -33,6 +34,9 @@ func targetSemanticIdentity(document Document, target ResolvedTarget) [32]byte {
 	for i := 0; i < len(declarations); i++ {
 		canonical = appendFramed(canonical, declarations[i].kind)
 		canonical = appendFramed(canonical, declarations[i].name)
+		if hasPackages {
+			canonical = appendFramed(canonical, declarations[i].pkg)
+		}
 		canonical = appendFramedBytes(canonical, declarations[i].body)
 	}
 
@@ -73,6 +77,7 @@ func targetSemanticDeclarations(document Document, target ResolvedTarget) []cano
 		declarations = append(declarations, canonicalDeclaration{
 			kind: declaration.Kind,
 			name: declaration.Name,
+			pkg:  semanticVirtualPackage(document, declaration),
 			body: canonicalRange(document, declaration.BodyStart, declaration.BodyEnd),
 		})
 	}

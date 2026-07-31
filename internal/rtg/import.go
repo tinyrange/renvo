@@ -12,7 +12,11 @@ func ParseImports(source []byte, filename string, loader ImportLoader) Document 
 			Diagnostics: builder.diagnostics,
 		}
 	}
-	return parseDocument(builder.source, filename, builder.segments)
+	segments := builder.segments
+	if builder.imports == 0 {
+		segments = nil
+	}
+	return parseDocument(builder.source, filename, segments)
 }
 
 type importBuilder struct {
@@ -21,6 +25,7 @@ type importBuilder struct {
 	segments    []sourceSegment
 	loading     []string
 	diagnostics []Diagnostic
+	imports     int
 }
 
 func (b *importBuilder) expand(source []byte, filename string) bool {
@@ -93,6 +98,7 @@ func (b *importBuilder) expand(source []byte, filename string) bool {
 				return false
 			}
 		}
+		b.imports++
 
 		if !b.appendSource(source[start:tokens[at].Start], filename, source, start) ||
 			!b.appendSource([]byte("\n"), filename, source, tokens[at].Start) {

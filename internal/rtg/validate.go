@@ -210,7 +210,7 @@ func validateArchitectureSequences(document Document, arch Declaration, goNames 
 				child.Tokens[0] != "call" && child.Tokens[0] != "let" &&
 					child.Tokens[0] != "set" && child.Tokens[0] != "var" &&
 					child.Tokens[0] != "increment" && child.Tokens[0] != "decrement" &&
-					child.Tokens[0] != "return" {
+					child.Tokens[0] != "return" && !sequenceBareCall(child.Tokens) {
 				diagnostics = append(diagnostics, statementDiagnostic(document, child,
 					"RTG-VALIDATE-093",
 					"bounded sequence body contains an unsupported straight-line step"))

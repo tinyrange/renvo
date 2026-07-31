@@ -848,10 +848,15 @@ target slicing and reachability
       <code>@import "relative/path.rtg"</code> is a top-level composition
       directive. Resolution is relative to the importing file, imports may be
       nested, cycles are rejected, and diagnostics map back to the owning
-      fragment. Imports do not create namespaces or packages: after expansion,
-      duplicate declarations and metadata are checked exactly as if authored
-      together. Canonical identity covers the declaration graph rather than
-      file boundaries or import spelling.
+      fragment. Each file is also a virtual package whose name is derived from
+      its basename. Embedded Go declarations and bounded sequences use short
+      names within that package; lowering adds a collision-proof internal
+      qualification automatically. A reference to another fragment is
+      explicit, for example <code>x86_64.encode</code>. Machine identities,
+      target names, and explicit export names remain catalog-global.
+      Directories and import spelling do not affect identity, but a virtual
+      package basename is semantic because it participates in helper
+      resolution.
     </p>
 
     <h3>One authoritative production projection</h3>
@@ -1179,7 +1184,9 @@ target slicing and reachability
       </li>
       <li>
         Keep each architecture's ABI, runtime, format, and target compositions
-        beside that architecture; do not invent cross-file namespaces.
+        beside that architecture. Use its file-derived virtual package for
+        private helpers and explicit package qualification for the uncommon
+        cross-architecture reference.
       </li>
       <li>
         Generate separate production files and manifests by target reachability.

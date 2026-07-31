@@ -199,6 +199,9 @@ func appendArchitectureSequences(out []byte, document Document, arch Declaration
 			if tokens[0] == "call" {
 				out = appendSequenceTokens(out, tokens[1:], document, names, prefix,
 					nativeEmitter, exports)
+			} else if sequenceBareCall(tokens) {
+				out = appendSequenceTokens(out, tokens, document, names, prefix,
+					nativeEmitter, exports)
 			} else if tokens[0] == "let" {
 				out = appendSequenceAssignment(out, tokens[1:], ":=", document, names,
 					prefix, nativeEmitter, exports)
@@ -455,6 +458,11 @@ func appendStatefulArchitectureSequences(out []byte, arch Declaration) []byte {
 				for token := 0; token < len(translated); token++ {
 					out = append(out, translated[token]...)
 				}
+			} else if sequenceBareCall(tokens) {
+				translated := translateSequenceRecordTokens(tokens)
+				for token := 0; token < len(translated); token++ {
+					out = append(out, translated[token]...)
+				}
 			} else if tokens[0] == "let" || tokens[0] == "set" {
 				operator := "="
 				if tokens[0] == "let" {
@@ -497,6 +505,13 @@ func appendStatefulArchitectureSequences(out []byte, arch Declaration) []byte {
 		out = append(out, "}\n"...)
 	}
 	return out
+}
+
+func sequenceBareCall(tokens []string) bool {
+	if len(tokens) >= 2 && tokens[1] == "(" {
+		return true
+	}
+	return len(tokens) >= 4 && tokens[1] == "." && tokens[3] == "("
 }
 
 func sequenceGoRoots(arch Declaration, document Document) []string {

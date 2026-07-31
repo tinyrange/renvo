@@ -226,7 +226,15 @@ func validateEmbeddedGoTypes(document Document) (Diagnostic, bool) {
 						message += " after " + previous
 					}
 				}
-				message += " at embedded line " + decimalString(syntax.TokenLine(token)+1)
+				line := syntax.TokenLine(token) + 1
+				message += " at embedded line " + decimalString(line)
+				text := sourceLine(file.Src, line)
+				if compactSource([]byte(text)) == "" && line > 1 {
+					text = sourceLine(file.Src, line-1)
+				}
+				if text != "" {
+					message += ": " + text
+				}
 			}
 		}
 	}
@@ -237,6 +245,25 @@ func validateEmbeddedGoTypes(document Document) (Diagnostic, bool) {
 		Code:     "RTG-GO-009",
 		Message:  message,
 	}, false
+}
+
+func sourceLine(source []byte, line int) string {
+	if line <= 0 {
+		return ""
+	}
+	start := 0
+	current := 1
+	for start < len(source) && current < line {
+		if source[start] == '\n' {
+			current++
+		}
+		start++
+	}
+	end := start
+	for end < len(source) && source[end] != '\n' && end-start < 160 {
+		end++
+	}
+	return string(source[start:end])
 }
 
 func decimalString(value int) string {

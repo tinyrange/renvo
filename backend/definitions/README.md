@@ -52,8 +52,10 @@ do not add an architecture switch to the RTG parser or generator.
 6. Describe recurring encodings in `forms` and instruction variants as rows in
    `instructions`.
 7. Use bounded `sequences` for straight-line encoder, ABI, entry, and runtime
-   composition. Sequences permit typed calls and local values but deliberately
-   have no general branch or loop construct.
+   composition. Calls use ordinary `helper(out, ...)` syntax; declared
+   registers, locations, conditions, instructions, and file-local helpers can
+   be referenced by their short names. Sequences permit typed calls and local
+   values but deliberately have no general branch or loop construct.
 8. Bind every `direct_emitter_v1` operation to an instruction, bounded
    sequence, or typed Go hook, or explicitly reject an operation supported by
    a later contract.
@@ -85,11 +87,12 @@ typed `.rtg` facts.
 ## Identity and pruning
 
 The catalog hash identifies the complete expanded declaration graph and
-appears in generated provenance headers. Import paths, comments, and file
-boundaries are not semantic. A target semantic identity hashes only the
-selected target and its transitive machine, ABI, runtime, format, and embedded
-Go dependencies. RTGU bindings, target descriptors, prepared artifacts, and
-cache keys use the target identity.
+appears in generated provenance headers. Import directories, comments, and
+formatting are not semantic. An imported file's basename is semantic because
+it supplies the virtual package used to resolve private helper names. A target
+semantic identity hashes only the selected target and its transitive machine,
+ABI, runtime, format, and embedded Go dependencies. RTGU bindings, target
+descriptors, prepared artifacts, and cache keys use the target identity.
 
 Comments, formatting, declaration order, and unreachable architectures do not
 change a target identity. Changing a reachable hook or declaration does.
@@ -102,8 +105,12 @@ reachable Go declarations.
 level. Paths are resolved relative to the importing file, nested imports are
 supported, and cycles are rejected. Imported files are fragments: the root
 owns `definition`, `unit`, and `implements`, while the parser validates the
-expanded graph as one closed catalog. Diagnostics retain the filename and
-position of the fragment that owns the invalid declaration.
+expanded graph as one closed catalog. Every file forms a virtual package named
+after its basename: Go helpers and bounded sequences are short and local by
+default, and another file can refer to one explicitly as
+`package_name.helper`. Machine declarations and explicit export names remain
+global. Diagnostics retain the filename and position of the fragment that owns
+the invalid declaration.
 
 ## Schema design checks
 
