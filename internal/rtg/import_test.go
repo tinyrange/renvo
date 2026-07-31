@@ -161,6 +161,113 @@ arch beta {
 	}
 }
 
+func TestParseImportsExtendsArchitectureWithTargetScopedSequences(t *testing.T) {
+	root := []byte(`definition 1
+unit linux_tiny
+implements direct_emitter_v1
+@import "tiny.rtg"
+go backend {
+	func targetEncode(out *RTGEmitter, register RTGRegister) {}
+}
+extend arch tiny {
+	sequences {
+		entry(out:emitter) {
+			targetEncode(out,r0)
+			encode(out)
+		}
+	}
+}
+runtime linux_tiny {
+	entry sequence entry {}
+}
+format tiny_elf {
+	kind = elf
+	image = elf_executable
+}
+target linux/tiny {
+	family = native_v1
+	os = linux
+	arch = tiny
+	abi = tiny_abi
+	runtime = linux_tiny
+	executable = tiny_elf
+}
+`)
+	files := map[string][]byte{
+		"/defs/tiny.rtg": []byte(`go backend {
+	func encode(out *RTGEmitter) {}
+}
+arch tiny {
+	registers = [r0]
+	reject = [move]
+}
+abi tiny_abi {
+	arch = tiny
+	arguments = [r0]
+	result = [r0]
+	stack_alignment = 1
+}`),
+	}
+	document := ParseImports(root, "/defs/linux_tiny.rtg", importTestLoader{files: files})
+	if !document.Ok {
+		t.Fatalf("ParseImports failed: %#v", document.Diagnostics)
+	}
+	if _, exists := document.Declaration(DeclArchExtension, "tiny"); exists {
+		t.Fatal("architecture extension remained after composition")
+	}
+	arch, ok := document.Declaration(DeclArch, "tiny")
+	if !ok {
+		t.Fatal("tiny architecture is missing")
+	}
+	sequences := architectureSequences(arch)
+	if len(sequences) != 1 || sequences[0].Name != "linux_tinyPackageEntry" {
+		t.Fatalf("extended sequences = %#v", sequences)
+	}
+	if got := sequences[0].Steps[0].Tokens; len(got) != 6 ||
+		got[0] != "linux_tinyPackageTargetEncode" || got[4] != "tinyR0" {
+		t.Fatalf("target-local call = %#v", got)
+	}
+	if got := sequences[0].Steps[1].Tokens; len(got) != 4 ||
+		got[0] != "tinyPackageEncode" {
+		t.Fatalf("inherited ISA call = %#v", got)
+	}
+}
+
+func TestParseExtendsArchitectureInStandaloneDefinition(t *testing.T) {
+	document := Parse([]byte(`definition 1
+unit tiny
+implements direct_emitter_v1
+arch tiny {
+	registers = [r0]
+	sequences {
+		base(out:emitter) {}
+	}
+}
+extend arch tiny {
+	sequences {
+		entry(out:emitter) {
+			base(out)
+		}
+	}
+}
+`), "tiny.rtg")
+	if !document.Ok {
+		t.Fatalf("Parse failed: %#v", document.Diagnostics)
+	}
+	if _, exists := document.Declaration(DeclArchExtension, "tiny"); exists {
+		t.Fatal("standalone architecture extension remained after composition")
+	}
+	arch, ok := document.Declaration(DeclArch, "tiny")
+	if !ok {
+		t.Fatal("tiny architecture is missing")
+	}
+	sequences := architectureSequences(arch)
+	if len(sequences) != 2 ||
+		sequences[0].Name != "base" || sequences[1].Name != "entry" {
+		t.Fatalf("standalone extended sequences = %#v", sequences)
+	}
+}
+
 func TestParseImportsProvidesPackageForStandaloneDefinition(t *testing.T) {
 	source := []byte(`definition 1
 unit tiny

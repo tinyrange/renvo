@@ -1,4 +1,5 @@
-# The 32-bit x86 slice owns its encoder and Linux and Windows compositions.
+# Shared 32-bit x86 machine facts, encoder, direct-emitter bindings, and Renvo
+# internal convention. Target entrypoints own platform ABIs and composition.
 go backend {
 	func asmSecondaryDisp(a *RTGEmitter, disp int) {
 		if disp == 0 {
@@ -659,161 +660,11 @@ arch x86_32 {
 			encodeGroup(out, 0xc1, selector, operand)
 			out.AppendByte(int(value))
 		}
-		windowsExit(out:emitter, status:register) {
-			out.AppendByte(0x50+status.Code)
-			out.Bytes2(0xff, 0x15)
-			let at = out.Len()
-			out.Int32(0)
-			out.AbsoluteReloc(at, 8, RTGRelocationImport)
-		}
-		windowsStaticCall(out:emitter, importID:int, wordCount:int) {
-			out.Bytes2(0xff, 0x15)
-			let at = out.Len()
-			out.Int32(0)
-			out.AbsoluteReloc(at, importID, RTGRelocationImport)
-		}
 		registerLowBits(reg:register) -> byte {
 			return byte(reg.Code&7)
 		}
 		emitModRM(out:emitter, mode:byte, reg:byte, rm:byte) {
 			out.AppendByte(int(mode<<6|(reg&7)<<3|rm&7))
-		}
-		windowsCallImport(out:emitter, importID:int) {
-			out.Bytes2(0xff, 0x15)
-			let at = out.Len()
-			out.Int32(0)
-			out.AbsoluteReloc(at, importID, RTGRelocationImport)
-		}
-		windowsRuntimeChmod(out:emitter) {
-			let eax = record_register(Code:0, Valid:true)
-			let ecx = record_register(Code:1, Valid:true)
-			let failed = out.NewLabel()
-			let done = out.NewLabel()
-			out.Bytes2(0x6a, 1)
-			out.Bytes2(0x6a, 0)
-			out.Bytes2(0x6a, 0)
-			out.AppendByte(0x53)
-			windowsCallImport(out, 5)
-			moveImmediate(out, ecx, -1)
-			encodeBinary(out, 0x39, eax, ecx)
-			jumpCondition(out, record_condition(JumpOpcode:0x84), failed)
-			moveImmediate(out, eax, 0)
-			encodeRelative(out, 0xe9, done)
-			out.Mark(failed)
-			moveImmediate(out, eax, -1)
-			out.Mark(done)
-		}
-		windowsRuntimeClose(out:emitter) {
-			let eax = record_register(Code:0, Valid:true)
-			let failed = out.NewLabel()
-			let done = out.NewLabel()
-			out.AppendByte(0x53)
-			windowsCallImport(out, 2)
-			test(out, eax, eax)
-			jumpCondition(out, record_condition(JumpOpcode:0x84), failed)
-			moveImmediate(out, eax, 0)
-			encodeRelative(out, 0xe9, done)
-			out.Mark(failed)
-			moveImmediate(out, eax, -1)
-			out.Mark(done)
-		}
-		windowsRuntimeOpen(out:emitter) {
-			let eax = record_register(Code:0, Valid:true)
-			let esi = record_register(Code:6, Valid:true)
-			move(out, eax, esi)
-			windowsTranslateCreateFileFlags(out)
-			out.Bytes2(0x6a, 0)
-			out.AppendByte(0x68)
-			out.Int32(0x80)
-			out.AppendByte(0x51)
-			out.Bytes2(0x6a, 0)
-			out.Bytes2(0x6a, 3)
-			out.AppendByte(0x52)
-			out.AppendByte(0x53)
-			windowsCallImport(out, 1)
-		}
-		windowsTranslateCreateFileFlags(out:emitter) {
-			let edx = record_register(Code:2, Valid:true)
-			let ecx = record_register(Code:1, Valid:true)
-			let notReadWrite = out.NewLabel()
-			let accessDone = out.NewLabel()
-			let noCreate = out.NewLabel()
-			let createDone = out.NewLabel()
-			moveImmediate(out, edx, -2147483648)
-			out.Bytes2(0xa8, 2)
-			jumpCondition(out, record_condition(JumpOpcode:0x84), notReadWrite)
-			moveImmediate(out, edx, -1073741824)
-			encodeRelative(out, 0xe9, accessDone)
-			out.Mark(notReadWrite)
-			out.Bytes2(0xa8, 1)
-			jumpCondition(out, record_condition(JumpOpcode:0x84), accessDone)
-			moveImmediate(out, edx, 0x40000000)
-			out.Mark(accessDone)
-			moveImmediate(out, ecx, 3)
-			out.Bytes2(0xa8, 64)
-			jumpCondition(out, record_condition(JumpOpcode:0x84), noCreate)
-			moveImmediate(out, ecx, 4)
-			out.AppendByte(0xa9)
-			out.Int32(512)
-			jumpCondition(out, record_condition(JumpOpcode:0x84), createDone)
-			moveImmediate(out, ecx, 2)
-			encodeRelative(out, 0xe9, createDone)
-			out.Mark(noCreate)
-			out.AppendByte(0xa9)
-			out.Int32(512)
-			jumpCondition(out, record_condition(JumpOpcode:0x84), createDone)
-			moveImmediate(out, ecx, 5)
-			out.Mark(createDone)
-		}
-		linuxEntry(out:emitter, argsOffset:int, environmentOffset:int, environmentLengthOffset:int) {
-			let argumentLoop = out.NewLabel()
-			let argumentLength = out.NewLabel()
-			let argumentLengthDone = out.NewLabel()
-			let argumentsDone = out.NewLabel()
-			let environmentLoop = out.NewLabel()
-			let environmentLength = out.NewLabel()
-			let environmentLengthDone = out.NewLabel()
-			let environmentDone = out.NewLabel()
-			out.Text("\x8b\x04\x24\x89\xe6\x83\xc6\x04")
-			asmMovRegPCRel(out, 7, argsOffset, RTGRelocationAbsoluteBSS)
-			out.Text("\x31\xc9")
-			out.Mark(argumentLoop)
-			out.Text("\x39\xc1")
-			jumpCondition(out, record_condition(JumpOpcode:0x8d), argumentsDone)
-			out.Text("\x8b\x14\x8e\x89\x17\x31\xdb")
-			out.Mark(argumentLength)
-			out.Text("\x80\x3c\x1a\x00")
-			jumpCondition(out, record_condition(JumpOpcode:0x84), argumentLengthDone)
-			out.Text("\x43")
-			jump(out, argumentLength)
-			out.Mark(argumentLengthDone)
-			out.Text("\x89\x5f\x08\x83\xc7\x10\x41")
-			jump(out, argumentLoop)
-			out.Mark(argumentsDone)
-			out.Text("\x8d\x74\x86\x08")
-			asmMovRegPCRel(out, 7, environmentOffset, RTGRelocationAbsoluteBSS)
-			out.Text("\x31\xc9")
-			out.Mark(environmentLoop)
-			out.Text("\x8b\x14\x8e\x85\xd2")
-			jumpCondition(out, record_condition(JumpOpcode:0x84), environmentDone)
-			out.Text("\x89\x17\x31\xdb")
-			out.Mark(environmentLength)
-			out.Text("\x80\x3c\x1a\x00")
-			jumpCondition(out, record_condition(JumpOpcode:0x84), environmentLengthDone)
-			out.Text("\x43")
-			jump(out, environmentLength)
-			out.Mark(environmentLengthDone)
-			out.Text("\x89\x5f\x08\x83\xc7\x10\x41")
-			jump(out, environmentLoop)
-			out.Mark(environmentDone)
-			asmMovRegPCRel(out, 6, environmentLengthOffset, RTGRelocationAbsoluteBSS)
-			out.Uint16(0x0e89)
-			asmMovRegPCRel(out, 3, argsOffset, RTGRelocationAbsoluteBSS)
-			out.Text("\x89\xc6\x89\xc2")
-			asmMovRegPCRel(out, 1, environmentOffset, RTGRelocationAbsoluteBSS)
-			asmMovRegPCRel(out, 0, environmentLengthOffset, RTGRelocationAbsoluteBSS)
-			out.Uint16(0x008b)
-			out.Text("\x89\xc7")
 		}
 }
 }
@@ -825,18 +676,4 @@ abi renvo_x86_32 {
 	call_words = [ebx, esi, edx, ecx, eax, edi]
 	overflow_stride = 4
 	scalar_result = eax
-}
-
-abi cdecl32 {
-	internal = renvo_x86_32
-	arguments = [stack]
-	result = [eax, edx]
-	stack_alignment = 4
-}
-
-abi win32 {
-	internal = renvo_x86_32
-	arguments = [stack]
-	result = [eax, edx]
-	stack_alignment = 4
 }

@@ -8,33 +8,36 @@ Renvo has two backend families:
   deliberately separate because structured control flow, module index spaces,
   and validation are not native-machine concepts.
 
-The built-in native source of truth is the closed catalog rooted at
-[`native.rtg`](native.rtg). That small entry point imports four ISA slices and
-one composition file for each native target:
+Each built-in native target is an independent definition entrypoint. Shared
+ISA and format fragments live beside those entrypoints and are imported only
+by targets that need them:
 
 ```text
-native.rtg
-└── native/
-    ├── x86_64.rtg              ISA, encoders, and ABIs
-    ├── x86_32.rtg
-    ├── aarch64.rtg
-    ├── arm.rtg
-    ├── linux_amd64.rtg         runtime, formats, and target
-    ├── windows_amd64.rtg
-    ├── linux_kernel_amd64.rtg
-    ├── linux_386.rtg
-    ├── windows_386.rtg
-    ├── linux_aarch64.rtg
-    ├── darwin_aarch64.rtg
-    ├── windows_aarch64.rtg
-    └── linux_arm.rtg
+backend/definitions/
+├── x86_64.rtg                 shared ISA and encoder
+├── x86_32.rtg
+├── aarch64.rtg
+├── arm.rtg
+├── elf_amd64.rtg              shared AMD64 ELF formats
+├── linux_amd64.rtg            complete target entrypoint
+├── windows_amd64.rtg
+├── linux_kernel_amd64.rtg
+├── linux_386.rtg
+├── windows_386.rtg
+├── linux_aarch64.rtg
+├── darwin_aarch64.rtg
+├── windows_aarch64.rtg
+└── linux_arm.rtg
 ```
 
-ISA slices own reusable machine facts, encoders, and calling conventions.
-Target slices own the runtime boundary, executable/object formats, and the
-final target declaration. Cross-file hooks use the ISA's virtual package
-explicitly, such as `aarch64.darwinEntry`; machine declarations and ABIs remain
-catalog-global. The Wasm/VM family remains in [`wasm32.rtg`](wasm32.rtg).
+ISA fragments own reusable machine facts, encoders, operation bindings, and
+calling conventions shared by more than one target. Target entrypoints own
+their unique ABI, runtime boundary, executable/object format, entry sequence,
+hooks, and final target declaration. `extend arch` adds target-local bounded
+sequences to an imported ISA without duplicating it. Its body inherits the
+ISA's virtual-package symbols, so target code uses short names such as
+`asmMovRegImm`; generated qualification remains automatic and collision-free.
+The Wasm/VM family remains in [`wasm32.rtg`](wasm32.rtg).
 
 Generated Go is checked in so an ordinary `go build` needs no generator:
 
@@ -51,9 +54,9 @@ the source bundle used to prepare external definitions.
 
 ## Adding a native architecture
 
-Add a new ISA slice and one target slice per supported OS/environment under
-`native/`, then import each from `native.rtg`; do not add an architecture
-switch to the RTG parser or generator.
+Add a new shared ISA fragment and one self-contained entrypoint per supported
+OS/environment directly under `backend/definitions/`; do not add an
+architecture switch to the RTG parser or generator.
 
 1. Declare the physical registers once with `registers`.
 2. Use `register_class` for overlapping constrained subsets.
@@ -77,9 +80,11 @@ switch to the RTG parser or generator.
    a later contract.
 9. Select a named label-relocation encoding and describe executable/object
    relocation facts in the format declaration.
-10. Keep reusable calling conventions in the ISA slice. Put each runtime,
-    format, and final target composition in a target-named slice such as
-    `linux_riscv64.rtg`; qualify references back to ISA helpers.
+10. Keep only genuinely shared calling conventions in the ISA fragment. Put
+    each target-specific ABI, runtime, format, entry sequence, hook, and final
+    target composition in a target-named entrypoint such as
+    `linux_riscv64.rtg`; imported ISA symbols are available by short name
+    inside its `extend arch` block.
 11. Export only the architecture algorithms used by the checked-in compiler.
 12. Add the architecture projection to `generate.go`, regenerate, and run the
     complete backend and frontend suites under the repository memory cap.
@@ -95,16 +100,17 @@ analysis. Before adding a hook, check whether a table row, an existing form, a
 bounded sequence, or a shared format constructor states the difference more
 directly.
 
-`TestNativeDefinitionEmbeddedGoBudget` enforces the complete imported native
-catalog at no more than 60,000 semantic Go bytes and 200 Go declarations. This
-is an architecture-maintainability guard, not permission to move target
-algorithms into an unmeasured file. Reusable generator code may implement a
-generic format constructor; machine and OS differences must remain visible as
-typed `.rtg` facts.
+`TestNativeDefinitionEmbeddedGoBudget` deduplicates shared declarations across
+every native entrypoint and enforces the complete native source set at no more
+than 60,000 semantic Go bytes and 200 Go declarations. This is an
+architecture-maintainability guard, not permission to move target algorithms
+into an unmeasured file. Reusable generator code may implement a generic
+format constructor; machine and OS differences must remain visible as typed
+`.rtg` facts.
 
 ## Identity and pruning
 
-The catalog hash identifies the complete expanded declaration graph and
+An entrypoint hash identifies its complete expanded declaration graph and
 appears in generated provenance headers. Import directories, comments, and
 formatting are not semantic. An imported file's basename is semantic because
 it supplies the virtual package used to resolve private helper names. A target
@@ -121,12 +127,14 @@ reachable Go declarations.
 
 `@import "relative/path.rtg"` includes another definition fragment at the top
 level. Paths are resolved relative to the importing file, nested imports are
-supported, and cycles are rejected. Imported files are fragments: the root
-owns `definition`, `unit`, and `implements`, while the parser validates the
-expanded graph as one closed catalog. Every file forms a virtual package named
-after its basename: Go helpers and bounded sequences are short and local by
-default, and another file can refer to one explicitly as
-`package_name.helper`. Machine declarations and explicit export names remain
+supported, and cycles are rejected. Imported files are fragments: the selected
+entrypoint owns `definition`, `unit`, and `implements`, while the parser
+validates the expanded graph as one closed definition. Every file forms a
+virtual package named after its basename: Go helpers and bounded sequences are
+short and local by default. `extend arch` inherits the imported ISA's public
+statement and helper symbols into the target file while keeping newly declared
+helpers target-local. Explicit `package_name.helper` references remain
+available when needed. Machine declarations and explicit export names remain
 global. Diagnostics retain the filename and position of the fragment that owns
 the invalid declaration.
 
@@ -167,6 +175,6 @@ systemd-run --user --scope \
 ```
 
 The per-target metrics in `backend/docs/machine-definitions.generated.md` are
-review aids. The closed native-catalog Go ceiling is separately enforced by
+review aids. The deduplicated native-source Go ceiling is separately enforced by
 the RTG tests. Compiler and output performance acceptance remains exclusively
 defined by the existing hard gates in `backend/main_test.go`.

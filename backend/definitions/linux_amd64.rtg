@@ -1,0 +1,63 @@
+definition 1
+unit native
+implements direct_emitter_v1
+
+@import "elf_amd64.rtg"
+
+# Runtime declarations define only the supported boundary. Missing operations
+# are rejected during definition validation rather than silently emulated.
+runtime linux_x86_64 {
+	entry process_stack {
+		argc = word(rsp, 0)
+		argv = words(rsp + 8, argc)
+		envp = words(rsp + 16 + argc * 8, until_null)
+		string = nul_terminated_bytes
+		result = [slice(argv), slice(envp)]
+	}
+
+	entry template {
+		max_parameters = 2
+		bss args 32768 16
+		bss environment 32768 16
+		bss environmentLength 8 8
+		code = "\x48\x8b\x04\x24\x49\x89\xc0\x4c\x8d\x4c\x24\x08\x4c\x8d\x15\x00\x00\x00\x00\x4d\x89\xd4\x4d\x31\xdb\x4d\x39\xc3\x7d\x22\x4b\x8b\x3c\xd9\x49\x89\x3a\x48\x31\xc0\x80\x3c\x07\x00\x74\x05\x48\xff\xc0\xeb\xf5\x49\x89\x42\x08\x49\x83\xc2\x10\x49\xff\xc3\xeb\xd9\x4c\x8d\x4c\x24\x08\x49\x83\x39\x00\x74\x06\x49\x83\xc1\x08\xeb\xf4\x49\x83\xc1\x08\x4c\x8d\x15\x00\x00\x00\x00\x4d\x31\xdb\x4b\x8b\x3c\xd9\x48\x83\xff\x00\x74\x1e\x49\x89\x3a\x48\x31\xc0\x80\x3c\x07\x00\x74\x05\x48\xff\xc0\xeb\xf5\x49\x89\x42\x08\x49\x83\xc2\x10\x49\xff\xc3\xeb\xd8\x4c\x89\xd8\x48\x89\x05\x00\x00\x00\x00\x4c\x89\xe7\x4c\x89\xc6\x4c\x89\xc2\x48\x8d\x05\x00\x00\x00\x00\x50\x59\x48\x8b\x05\x00\x00\x00\x00\x49\x89\xc0\x49\x89\xc1"
+		relocation 15 bss args
+		relocation 88 bss environment
+		relocation 141 bss environmentLength
+		relocation 157 bss environment
+		relocation 166 bss environmentLength
+	}
+
+	syscall {
+		number = rax
+		arguments = [rdi, rsi, rdx, r10, r8, r9]
+		result = rax
+		error = negative
+		instruction = syscall
+	}
+
+	operation read { number = 0 args = [fd, buffer, count] }
+	operation write { number = 1 args = [fd, buffer, count] }
+	operation open { number = 2 args = [path, flags, mode] }
+	operation close { number = 3 args = [fd] }
+	operation read_at { number = 17 args = [fd, buffer, count, offset] }
+	operation write_at { number = 18 args = [fd, buffer, count, offset] }
+	operation chmod { number = 91 args = [fd, mode] }
+	operation print { use = write args = [stderr, buffer, count] }
+	operation exit { number = 60 args = [status] noreturn = true }
+}
+
+target linux/amd64 {
+	family = native_v1
+	os = linux
+	arch = x86_64
+	abi = sysv_x86_64
+	runtime = linux_x86_64
+	executable = elf64_x86_64
+	object = elf64_object_x86_64
+	build_tags = ["linux", "unix", "amd64"]
+	capabilities = [
+		hosted, executable, object, filesystem, heap,
+		argv, environment, linkstatic
+	]
+}

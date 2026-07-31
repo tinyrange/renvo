@@ -339,14 +339,13 @@ func TestCompiledInBootstrapUsesDefinitionOwnedPEImages(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := []struct {
-		file    string
 		target  string
 		custom  string
 		machine []byte
 	}{
-		{"native.rtg", "windows/amd64", "example/windows-amd64", []byte{0x64, 0x86}},
-		{"native.rtg", "windows/386", "example/windows-386", []byte{0x4c, 0x01}},
-		{"native.rtg", "windows/arm64", "example/windows-arm64", []byte{0x64, 0xaa}},
+		{"windows/amd64", "example/windows-amd64", []byte{0x64, 0x86}},
+		{"windows/386", "example/windows-386", []byte{0x4c, 0x01}},
+		{"windows/arm64", "example/windows-arm64", []byte{0x64, 0xaa}},
 	}
 	for _, test := range cases {
 		t.Run(test.custom, func(t *testing.T) {
@@ -503,13 +502,12 @@ func TestCompiledInBootstrapUses32BitDefinitions(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := []struct {
-		file    string
 		target  string
 		custom  string
 		machine byte
 	}{
-		{"native.rtg", "linux/386", "example/386", 3},
-		{"native.rtg", "linux/arm", "example/arm", 40},
+		{"linux/386", "example/386", 3},
+		{"linux/arm", "example/arm", 40},
 	}
 	for _, test := range cases {
 		t.Run(test.custom, func(t *testing.T) {
@@ -607,14 +605,15 @@ func copyNativeDefinition(t *testing.T, root string, replacements ...string) str
 		source []byte
 	}
 	sourceRoot := filepath.Join(root, "backend", "definitions")
-	names := []string{"native.rtg"}
-	entries, err := os.ReadDir(filepath.Join(sourceRoot, "native"))
+	entries, err := os.ReadDir(sourceRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
+	var names []string
 	for _, entry := range entries {
-		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".rtg" {
-			names = append(names, filepath.Join("native", entry.Name()))
+		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".rtg" &&
+			entry.Name() != "wasm32.rtg" {
+			names = append(names, entry.Name())
 		}
 	}
 	files := make([]definitionFile, len(names))
@@ -625,6 +624,7 @@ func copyNativeDefinition(t *testing.T, root string, replacements ...string) str
 		}
 		files[i] = definitionFile{name: names[i], source: source}
 	}
+	entrypoint := ""
 	for replacement := 0; replacement < len(replacements); replacement += 2 {
 		old := []byte(replacements[replacement])
 		newText := []byte(replacements[replacement+1])
@@ -637,23 +637,26 @@ func copyNativeDefinition(t *testing.T, root string, replacements ...string) str
 				t.Fatalf("native definition replacement %q is not unique", old)
 			}
 			files[i].source = bytes.Replace(files[i].source, old, newText, 1)
+			if bytes.HasPrefix(old, []byte("target ")) {
+				entrypoint = files[i].name
+			}
 			found = true
 		}
 		if !found {
 			t.Fatalf("native definition replacement %q was not found", old)
 		}
 	}
-	destination := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(destination, "native"), 0o700); err != nil {
-		t.Fatal(err)
+	if entrypoint == "" {
+		t.Fatal("copyNativeDefinition requires a target replacement")
 	}
+	destination := t.TempDir()
 	for i := 0; i < len(files); i++ {
 		if err := os.WriteFile(filepath.Join(destination, files[i].name),
 			files[i].source, 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	return filepath.Join(destination, "native.rtg")
+	return filepath.Join(destination, entrypoint)
 }
 
 func minInt(a int, b int) int {

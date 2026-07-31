@@ -1,0 +1,791 @@
+definition 1
+unit native
+implements direct_emitter_v1
+
+@import "aarch64.rtg"
+
+go backend {
+	const machCodeOffset = 0x1000
+	const machImageBase = 0x100000000
+	const machPageSize = 0x4000
+	const machLibSystem = "/usr/lib/libSystem.B.dylib"
+
+	func machAppendStringZ(out []byte, value string) []byte {
+		for i := 0; i < len(value); i++ {
+			out = append(out, value[i])
+		}
+		return append(out, 0)
+	}
+
+	func machAppendUntil(out []byte, size int) []byte {
+		for len(out) < size {
+			out = append(out, 0)
+		}
+		return out
+	}
+
+	func machAppendULEB(out []byte, value int) []byte {
+		for {
+			b := byte(value & 127)
+			value = value >> 7
+			if value != 0 {
+				b = b | 128
+			}
+			out = append(out, b)
+			if value == 0 {
+				return out
+			}
+		}
+	}
+
+	func machAppendName16(out []byte, name string) []byte {
+		for i := 0; i < 16; i++ {
+			if i < len(name) {
+				out = append(out, name[i])
+			} else {
+				out = append(out, 0)
+			}
+		}
+		return out
+	}
+
+	func machExtraDylibs(out *RTGEmitter) []string {
+		var dylibs []string
+		for i := 0; i < out.DynamicImportCount(); i++ {
+			dylib := out.DynamicImportLibrary(i)
+			if dylib == machLibSystem {
+				continue
+			}
+			found := false
+			for j := 0; j < len(dylibs); j++ {
+				if dylibs[j] == dylib {
+					found = true
+				}
+			}
+			if !found {
+				dylibs = append(dylibs, dylib)
+			}
+		}
+		return dylibs
+	}
+
+	func machDylibOrdinal(out *RTGEmitter, dylib string) int {
+		if dylib == machLibSystem {
+			return 1
+		}
+		dylibs := machExtraDylibs(out)
+		for i := 0; i < len(dylibs); i++ {
+			if dylibs[i] == dylib {
+				return i + 2
+			}
+		}
+		return 0
+	}
+
+	type machImportLayout struct {
+		got []int
+	}
+
+	func machPatchAbsoluteRelocations(
+		out *RTGEmitter, dataFileOff int, dataSize int,
+	) {
+		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
+			at := out.AbsoluteRelocationOffset(i)
+			addend := out.AbsoluteRelocationAddend(i)
+			kind := out.AbsoluteRelocationKind(i)
+			target := dataFileOff + addend
+			if kind == RTGRelocationAbsoluteBSS {
+				target = dataFileOff + dataSize + addend
+			}
+			insn := RTGGet32At(out.Code(), at)
+			reg := insn & 31
+			address := machImageBase + target
+			pc := machImageBase + machCodeOffset + at
+			delta := (address >> 12) - (pc >> 12)
+			imm := delta & 0x1fffff
+			out.PatchUint32(at,
+				0x90000000|((imm&3)<<29)|
+					(((imm>>2)&0x7ffff)<<5)|reg)
+			out.PatchUint32(at+4,
+				0x91000000|((address&0xfff)<<10)|(reg<<5)|reg)
+			out.PatchUint32(at+8, 0xd503201f)
+			out.PatchUint32(at+12, 0xd503201f)
+		}
+	}
+
+	func machPrepareImports(
+		out *RTGEmitter,
+	) machImportLayout {
+		var layout machImportLayout
+		count := out.DynamicImportCount()
+		layout.got = make([]int, count)
+		stubs := make([]int, count)
+		for i := 0; i < count; i++ {
+			asmAlign(out)
+			out.Mark(out.DynamicImportLabel(i))
+			stubs[i] = out.Len()
+			asmEmit(out, 0x90000010)
+			asmEmit(out, 0xf9400210)
+			asmEmit(out, 0xd61f0200)
+		}
+		out.Patch()
+		dataFileOff := RTGAlignValue(
+			machCodeOffset+out.Len(), machPageSize)
+		data := out.Data()
+		data = machAppendUntil(data, RTGAlignValue(len(data), 8))
+		for i := 0; i < count; i++ {
+			layout.got[i] = len(data)
+			data = machAppend64(data, 0)
+		}
+		data = machAppendUntil(
+			data, RTGAlignValue(len(data), machPageSize))
+		out.SetData(data)
+		machPatchAbsoluteRelocations(
+			out, dataFileOff, len(data))
+		for i := 0; i < count; i++ {
+			stubAt := stubs[i]
+			target := machImageBase +
+				dataFileOff + layout.got[i]
+			pc := machImageBase +
+				machCodeOffset + stubAt
+			machPatchADRP(out, stubAt, pc, target)
+			pageOff := target & 0xfff
+			out.PatchUint32(
+				stubAt+4, 0xf9400210|((pageOff/8)<<10))
+		}
+		return layout
+	}
+
+	func machBuildBindData(
+		out *RTGEmitter, got []int,
+	) []byte {
+		bind := make([]byte, 0, 256)
+		bind = append(bind, 0x51)
+		for i := 0; i < out.DynamicImportCount(); i++ {
+			ordinal := machDylibOrdinal(
+				out, out.DynamicImportLibrary(i))
+			if ordinal < 16 {
+				bind = append(bind, byte(0x10|ordinal))
+			} else {
+				bind = append(bind, 0x20)
+				bind = machAppendULEB(bind, ordinal)
+			}
+			bind = append(bind, 0x40)
+			bind = machAppendStringZ(
+				bind, out.DynamicImportName(i))
+			bind = append(bind, 0x72)
+			bind = machAppendULEB(bind, got[i])
+			bind = append(bind, 0x90)
+		}
+		return append(bind, 0)
+	}
+
+	func machBuildStringTable(out *RTGEmitter) []byte {
+		strtab := make([]byte, 0, 128)
+		strtab = append(strtab, 0)
+		strtab = machAppendStringZ(strtab, "_main")
+		for i := 0; i < out.DynamicImportCount(); i++ {
+			strtab = machAppendStringZ(
+				strtab, out.DynamicImportName(i))
+		}
+		return strtab
+	}
+
+	func machBuildSymbolTable(out *RTGEmitter) []byte {
+		count := out.DynamicImportCount()
+		symtab := make([]byte, 0, 16*(count+1))
+		symtab = machAppend32(symtab, 1)
+		symtab = append(symtab, 0x0f, 1)
+		symtab = machAppend16(symtab, 0)
+		symtab = machAppend64(
+			symtab, machImageBase+machCodeOffset)
+		nameOff := 7
+		for i := 0; i < count; i++ {
+			symtab = machAppend32(symtab, nameOff)
+			symtab = append(symtab, 1, 0)
+			symtab = machAppend16(symtab, 0x100)
+			symtab = machAppend64(symtab, 0)
+			nameOff += len(out.DynamicImportName(i)) + 1
+		}
+		return symtab
+	}
+
+	func machHeader(
+		out *RTGEmitter,
+		textFileSize int,
+		dataFileOff int,
+		dataFileSize int,
+		dataVMSize int,
+		linkeditOff int,
+		linkeditSize int,
+		bindOff int,
+		bindSize int,
+		symOff int,
+		symbolCount int,
+		strOff int,
+		strSize int,
+		undefinedCount int,
+		sigOff int,
+		sigSize int,
+	) []byte {
+		dylibs := machExtraDylibs(out)
+		commandSize := 856
+		for i := 0; i < len(dylibs); i++ {
+			commandSize += machDylibCommandSize(dylibs[i])
+		}
+		header := make([]byte, 0, machCodeOffset)
+		header = machAppend32(header, 0xfeedfacf)
+		header = machAppend32(header, 0x0100000c)
+		header = machAppend32(header, 0)
+		header = machAppend32(header, 2)
+		header = machAppend32(header, 13+len(dylibs))
+		header = machAppend32(header, commandSize)
+		header = machAppend32(header, 0x200085)
+		header = machAppend32(header, 0)
+		header = machAppendSegment64(
+			header, "__PAGEZERO", 0, machImageBase,
+			0, 0, 0, 0)
+		header = machAppendTextSegment(
+			header, len(out.Code()), textFileSize)
+		header = machAppendDataSegment(
+			header, dataFileOff, dataFileSize, out.BSSSize())
+		header = machAppendSegment64(
+			header,
+			"__LINKEDIT",
+			machImageBase+dataFileOff+dataVMSize,
+			RTGAlignValue(linkeditSize, machPageSize),
+			linkeditOff,
+			linkeditSize,
+			1,
+			1,
+		)
+		header = machAppend32(header, 0x80000022)
+		header = machAppend32(header, 48)
+		header = machAppend32(header, 0)
+		header = machAppend32(header, 0)
+		header = machAppend32(header, bindOff)
+		header = machAppend32(header, bindSize)
+		for i := 0; i < 6; i++ {
+			header = machAppend32(header, 0)
+		}
+		header = machAppend32(header, 0x02)
+		header = machAppend32(header, 24)
+		header = machAppend32(header, symOff)
+		header = machAppend32(header, symbolCount)
+		header = machAppend32(header, strOff)
+		header = machAppend32(header, strSize)
+		header = machAppend32(header, 0x0b)
+		header = machAppend32(header, 80)
+		header = machAppend32(header, 0)
+		header = machAppend32(header, 0)
+		header = machAppend32(header, 0)
+		header = machAppend32(header, 1)
+		header = machAppend32(header, 1)
+		header = machAppend32(header, undefinedCount)
+		for i := 0; i < 12; i++ {
+			header = machAppend32(header, 0)
+		}
+		cmdStart := len(header)
+		header = machAppend32(header, 0x0e)
+		header = machAppend32(header, 32)
+		header = machAppend32(header, 12)
+		header = machAppendStringZ(header, "/usr/lib/dyld")
+		header = machAppendUntil(header, cmdStart+32)
+		header = machAppendDylibCommand(
+			header, machLibSystem)
+		for i := 0; i < len(dylibs); i++ {
+			header = machAppendDylibCommand(
+				header, dylibs[i])
+		}
+		header = machAppend32(header, 0x1b)
+		header = machAppend32(header, 24)
+		header = machAppend32(header, 0x52544758)
+		header = machAppend32(header, 0x44415257)
+		header = machAppend32(header, 0x494e4152)
+		header = machAppend32(header, 0x4d363400)
+		header = machAppend32(header, 0x32)
+		header = machAppend32(header, 24)
+		header = machAppend32(header, 1)
+		header = machAppend32(header, 0x000b0000)
+		header = machAppend32(header, 0x000b0000)
+		header = machAppend32(header, 0)
+		header = machAppend32(header, 0x80000028)
+		header = machAppend32(header, 24)
+		header = machAppend64(header, machCodeOffset)
+		header = machAppend64(header, 0)
+		header = machAppend32(header, 0x1d)
+		header = machAppend32(header, 16)
+		header = machAppend32(header, sigOff)
+		header = machAppend32(header, sigSize)
+		return machAppendUntil(header, machCodeOffset)
+	}
+
+	func machSHA256Schedule(
+		message []byte, chunk int, words []int,
+	) {
+		for i := 0; i < 16; i++ {
+			at := chunk + i*4
+			word := int(message[at]) << 24
+			word = word | (int(message[at+1]) << 16)
+			word = word | (int(message[at+2]) << 8)
+			word = word | int(message[at+3])
+			words[i] = word & 0xffffffff
+		}
+		for i := 16; i < 64; i++ {
+			x := words[i-15] & 0xffffffff
+			y := words[i-2] & 0xffffffff
+			s0 := ((x >> 7) | ((x << 25) & 0xffffffff))
+			s0 = s0 ^ ((x >> 18) | ((x << 14) & 0xffffffff))
+			s0 = s0 ^ (x >> 3)
+			s1 := ((y >> 17) | ((y << 15) & 0xffffffff))
+			s1 = s1 ^ ((y >> 19) | ((y << 13) & 0xffffffff))
+			s1 = s1 ^ (y >> 10)
+			word := words[i-16] + s0
+			word = word + words[i-7] + s1
+			words[i] = word & 0xffffffff
+		}
+	}
+
+	func machSHA256Rounds(
+		words []int, constants []int, values []int,
+	) {
+		a := values[0]
+		b := values[1]
+		c := values[2]
+		d := values[3]
+		e := values[4]
+		f := values[5]
+		g := values[6]
+		h := values[7]
+		for i := 0; i < 64; i++ {
+			e32 := e & 0xffffffff
+			a32 := a & 0xffffffff
+			s1 := (e32 >> 6) | ((e32 << 26) & 0xffffffff)
+			s1 = s1 ^ ((e32 >> 11) | ((e32 << 21) & 0xffffffff))
+			s1 = s1 ^ ((e32 >> 25) | ((e32 << 7) & 0xffffffff))
+			choose := (e & f) ^ ((e ^ 0xffffffff) & g)
+			t1 := h + s1 + choose
+			t1 = (t1 + constants[i] + words[i]) & 0xffffffff
+			s0 := (a32 >> 2) | ((a32 << 30) & 0xffffffff)
+			s0 = s0 ^ ((a32 >> 13) | ((a32 << 19) & 0xffffffff))
+			s0 = s0 ^ ((a32 >> 22) | ((a32 << 10) & 0xffffffff))
+			majority := (a & b) ^ (a & c) ^ (b & c)
+			t2 := (s0 + majority) & 0xffffffff
+			h = g
+			g = f
+			f = e
+			e = (d + t1) & 0xffffffff
+			d = c
+			c = b
+			b = a
+			a = (t1 + t2) & 0xffffffff
+		}
+		values[0] = (values[0] + a) & 0xffffffff
+		values[1] = (values[1] + b) & 0xffffffff
+		values[2] = (values[2] + c) & 0xffffffff
+		values[3] = (values[3] + d) & 0xffffffff
+		values[4] = (values[4] + e) & 0xffffffff
+		values[5] = (values[5] + f) & 0xffffffff
+		values[6] = (values[6] + g) & 0xffffffff
+		values[7] = (values[7] + h) & 0xffffffff
+	}
+
+	func machSHA256(data []byte) []byte {
+		messageSize := len(data) + 1 + 8
+		messageSize = RTGAlignValue(messageSize, 64)
+		message := make([]byte, messageSize)
+		for i := 0; i < len(data); i++ {
+			message[i] = data[i]
+		}
+		message[len(data)] = 0x80
+		bits := len(data) * 8
+		for i := 0; i < 8; i++ {
+			message[messageSize-1-i] = byte(bits >> (i * 8))
+		}
+		values := []int{
+			0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+			0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+		}
+		constants := machSHA256Constants()
+		words := make([]int, 64)
+		for chunk := 0; chunk < len(message); chunk += 64 {
+			machSHA256Schedule(message, chunk, words)
+			machSHA256Rounds(words, constants, values)
+		}
+		hash := make([]byte, 0, 32)
+		for i := 0; i < len(values); i++ {
+			hash = append(hash, byte(values[i]>>24))
+			hash = append(hash, byte(values[i]>>16))
+			hash = append(hash, byte(values[i]>>8))
+			hash = append(hash, byte(values[i]))
+		}
+		return hash
+	}
+
+	func machCodeSignature(
+		code []byte, identifier string, executableLimit int,
+	) []byte {
+		slots := (len(code) + 16383) / 16384
+		identifierOffset := 88
+		hashOffset := identifierOffset + len(identifier) + 1
+		codeDirectorySize := hashOffset + slots*32
+		totalSize := 20 + codeDirectorySize
+		signature := make([]byte, 0, totalSize)
+		signature = machAppendBE32(signature, 0xfade0cc0)
+		signature = machAppendBE32(signature, totalSize)
+		signature = machAppendBE32(signature, 1)
+		signature = machAppendBE32(signature, 0)
+		signature = machAppendBE32(signature, 20)
+		signature = machAppendBE32(signature, 0xfade0c02)
+		signature = machAppendBE32(
+			signature, codeDirectorySize)
+		signature = machAppendBE32(signature, 0x20400)
+		signature = machAppendBE32(signature, 0x2)
+		signature = machAppendBE32(signature, hashOffset)
+		signature = machAppendBE32(
+			signature, identifierOffset)
+		signature = machAppendBE32(signature, 0)
+		signature = machAppendBE32(signature, slots)
+		signature = machAppendBE32(signature, len(code))
+		signature = append(signature, 32, 2, 0, 14)
+		signature = machAppendBE32(signature, 0)
+		signature = machAppendBE32(signature, 0)
+		signature = machAppendBE32(signature, 0)
+		signature = machAppendBE32(signature, 0)
+		signature = machAppendBE64(signature, 0)
+		signature = machAppendBE64(signature, 0)
+		signature = machAppendBE64(
+			signature, executableLimit)
+		signature = machAppendBE64(signature, 1)
+		for i := 0; i < len(identifier); i++ {
+			signature = append(signature, identifier[i])
+		}
+		signature = append(signature, 0)
+		for slot := 0; slot < slots; slot++ {
+			start := slot * 16384
+			end := start + 16384
+			if end > len(code) {
+				end = len(code)
+			}
+			hash := machSHA256(code[start:end])
+			signature = append(signature, hash...)
+		}
+		return signature
+	}
+}
+
+extend arch aarch64 {
+	sequences {
+		darwinExit(out:emitter, status:register) {
+			asmMovRegReg(out, 0, status.Code)
+			darwinCallImport(out, "_exit")
+		}
+		machImage(out:emitter) -> bytes {
+			let imports = machPrepareImports(out)
+			let dataFileOff = RTGAlignValue(machCodeOffset+out.Len(), machPageSize)
+			let bind = machBuildBindData(out, imports.got)
+			let symtab = machBuildSymbolTable(out)
+			let strtab = machBuildStringTable(out)
+			let undefinedCount = out.DynamicImportCount()
+			let textFileSize = dataFileOff
+			let dataFileSize = len(out.Data())
+			let dataVMSize = RTGAlignValue(dataFileSize+out.BSSSize(), machPageSize)
+			let linkeditOff = dataFileOff+dataFileSize
+			let bindOff = linkeditOff
+			let symOff = RTGAlignValue(bindOff+len(bind), 8)
+			let strOff = symOff+len(symtab)
+			let sigOff = RTGAlignValue(strOff+len(strtab), 16)
+			let sigSize = machCodeSignatureSize(sigOff, "renvo")
+			let linkeditSize = sigOff+sigSize-linkeditOff
+			let image = machHeader(out, textFileSize, dataFileOff, dataFileSize, dataVMSize, linkeditOff, linkeditSize, bindOff, len(bind), symOff, 1+undefinedCount, strOff, len(strtab), undefinedCount, sigOff, sigSize, )
+			set image = append(image, out.Code()...)
+			set image = machAppendUntil(image, dataFileOff)
+			set image = append(image, out.Data()...)
+			set image = machAppendUntil(image, bindOff)
+			set image = append(image, bind...)
+			set image = machAppendUntil(image, symOff)
+			set image = append(image, symtab...)
+			set image = append(image, strtab...)
+			set image = machAppendUntil(image, sigOff)
+			let signature = machCodeSignature(image, "renvo", textFileSize)
+			return append(image, signature...)
+		}
+		darwinCallImport(out:emitter, name:string) {
+			let index = out.DynamicImport(machLibSystem, name)
+			asmCallLabel(out, out.DynamicImportLabel(index))
+		}
+		machAppend16(out:bytes, value:int) -> bytes {
+			return append(out, byte(value), byte(value>>8))
+		}
+		machAppend32(out:bytes, value:int) -> bytes {
+			return append(out, byte(value), byte(value>>8), byte(value>>16), byte(value>>24))
+		}
+		machAppend64(out:bytes, value:int) -> bytes {
+			set out = machAppend32(out, value)
+			return machAppend32(out, value>>32)
+		}
+		machAppendBE32(out:bytes, value:int) -> bytes {
+			set out = append(out, byte(value>>24))
+			set out = append(out, byte(value>>16))
+			set out = append(out, byte(value>>8))
+			return append(out, byte(value))
+		}
+		machAppendBE64(out:bytes, value:int) -> bytes {
+			set out = machAppendBE32(out, value>>32)
+			return machAppendBE32(out, value)
+		}
+		machAppendDataSegment(out:bytes, dataFileOff:int, dataFileSize:int, bssSize:int) -> bytes {
+			let vmSize = RTGAlignValue(dataFileSize+bssSize, machPageSize)
+			set out = machAppend32(out, 0x19)
+			set out = machAppend32(out, 232)
+			set out = machAppendName16(out, "__DATA")
+			set out = machAppend64(out, machImageBase+dataFileOff)
+			set out = machAppend64(out, vmSize)
+			set out = machAppend64(out, dataFileOff)
+			set out = machAppend64(out, dataFileSize)
+			set out = machAppend32(out, 3)
+			set out = machAppend32(out, 3)
+			set out = machAppend32(out, 2)
+			set out = machAppend32(out, 0)
+			set out = machAppendSection64(out, "__data", "__DATA", machImageBase+dataFileOff, dataFileSize, dataFileOff, 3, 0, )
+			return machAppendSection64(out, "__bss", "__DATA", machImageBase+dataFileOff+dataFileSize, bssSize, 0, 3, 1, )
+		}
+		machAppendDylibCommand(out:bytes, path:string) -> bytes {
+			let start = len(out)
+			let size = machDylibCommandSize(path)
+			set out = machAppend32(out, 0x0c)
+			set out = machAppend32(out, size)
+			set out = machAppend32(out, 24)
+			set out = machAppend32(out, 2)
+			set out = machAppend32(out, 0x00010000)
+			set out = machAppend32(out, 0x00010000)
+			set out = machAppendStringZ(out, path)
+			return machAppendUntil(out, start+size)
+		}
+		machAppendSection64(out:bytes, section:string, segment:string, addr:int, size:int, offset:int, align:int, flags:int) -> bytes {
+			set out = machAppendName16(out, section)
+			set out = machAppendName16(out, segment)
+			set out = machAppend64(out, addr)
+			set out = machAppend64(out, size)
+			set out = machAppend32(out, offset)
+			set out = machAppend32(out, align)
+			set out = machAppend32(out, 0)
+			set out = machAppend32(out, 0)
+			set out = machAppend32(out, flags)
+			set out = machAppend32(out, 0)
+			set out = machAppend32(out, 0)
+			return machAppend32(out, 0)
+		}
+		machAppendSegment64(out:bytes, name:string, vmaddr:int, vmsize:int, fileoff:int, filesize:int, maxprot:int, initprot:int) -> bytes {
+			set out = machAppend32(out, 0x19)
+			set out = machAppend32(out, 72)
+			set out = machAppendName16(out, name)
+			set out = machAppend64(out, vmaddr)
+			set out = machAppend64(out, vmsize)
+			set out = machAppend64(out, fileoff)
+			set out = machAppend64(out, filesize)
+			set out = machAppend32(out, maxprot)
+			set out = machAppend32(out, initprot)
+			set out = machAppend32(out, 0)
+			return machAppend32(out, 0)
+		}
+		machAppendTextSegment(out:bytes, codeSize:int, fileSize:int) -> bytes {
+			set out = machAppend32(out, 0x19)
+			set out = machAppend32(out, 152)
+			set out = machAppendName16(out, "__TEXT")
+			set out = machAppend64(out, machImageBase)
+			set out = machAppend64(out, fileSize)
+			set out = machAppend64(out, 0)
+			set out = machAppend64(out, fileSize)
+			set out = machAppend32(out, 5)
+			set out = machAppend32(out, 5)
+			set out = machAppend32(out, 1)
+			set out = machAppend32(out, 0)
+			return machAppendSection64(out, "__text", "__TEXT", machImageBase+machCodeOffset, codeSize, machCodeOffset, 2, 0x80000400, )
+		}
+		machCodeSignatureSize(codeLimit:int, identifier:string) -> int {
+			let slots = (codeLimit+16383)/16384
+			let codeDirectorySize = 88+len(identifier)+1+slots*32
+			return 20+codeDirectorySize
+		}
+		machDylibCommandSize(path:string) -> int {
+			return RTGAlignValue(24+len(path)+1, 8)
+		}
+		machPatchADRP(out:emitter, at:int, pc:int, target:int) {
+			let delta = (target>>12)-(pc>>12)
+			let imm = delta&0x1fffff
+			let insn = 0x90000010
+			set insn = insn|((imm&3)<<29)
+			set insn = insn|(((imm>>2)&0x7ffff)<<5)
+			out.PatchUint32(at, insn)
+		}
+		machSHA256Constants() -> ints {
+			return record_ints(0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2, )
+		}
+		darwinRead(out:emitter) {
+			asmMovRegReg(out, 9, 1)
+			asmMovRegReg(out, 0, 3)
+			asmMovRegReg(out, 1, 4)
+			asmMovRegReg(out, 2, 9)
+			darwinCallImport(out, "_read")
+		}
+		darwinWrite(out:emitter) {
+			asmMovRegReg(out, 9, 1)
+			asmMovRegReg(out, 0, 3)
+			asmMovRegReg(out, 1, 4)
+			asmMovRegReg(out, 2, 9)
+			darwinCallImport(out, "_write")
+		}
+		darwinReadAt(out:emitter) {
+			asmMovRegReg(out, 9, 1)
+			asmMovRegReg(out, 10, 2)
+			asmMovRegReg(out, 0, 3)
+			asmMovRegReg(out, 1, 4)
+			asmMovRegReg(out, 2, 9)
+			asmMovRegReg(out, 3, 10)
+			darwinCallImport(out, "_pread")
+		}
+		darwinWriteAt(out:emitter) {
+			asmMovRegReg(out, 9, 1)
+			asmMovRegReg(out, 10, 2)
+			asmMovRegReg(out, 0, 3)
+			asmMovRegReg(out, 1, 4)
+			asmMovRegReg(out, 2, 9)
+			asmMovRegReg(out, 3, 10)
+			darwinCallImport(out, "_pwrite")
+		}
+		darwinOpen(out:emitter) {
+			asmMovRegReg(out, 9, 1)
+			asmMovRegReg(out, 0, 3)
+			asmMovRegReg(out, 1, 4)
+			asmPushReg(out, 9)
+			darwinCallImport(out, "_open")
+			asmAddRegImm(out, 31, 31, 16)
+		}
+		darwinClose(out:emitter) {
+			asmMovRegReg(out, 0, 3)
+			darwinCallImport(out, "_close")
+		}
+		darwinChmod(out:emitter) {
+			asmMovRegReg(out, 0, 3)
+			asmMovRegReg(out, 1, 4)
+			darwinCallImport(out, "_fchmod")
+		}
+		emitCStringRecord(out:emitter, pointer:int, table:int, length:int, scratch:int) {
+			let scan = out.NewLabel()
+			let done = out.NewLabel()
+			asmStoreRegMem(out, pointer, table, 0, 8)
+			asmMovRegImm(out, length, 0)
+			out.Mark(scan)
+			asmAddRegReg(out, scratch, pointer, length)
+			asmLoadRegMem(out, scratch, scratch, 0, 1)
+			asmCmpRegImm(out, scratch, 0)
+			jumpCondition(out, eq, done)
+			asmAddRegImm(out, length, length, 1)
+			jump(out, scan)
+			out.Mark(done)
+			asmStoreRegMem(out, length, table, 8, 8)
+		}
+		emitBoundedCountedCStringTable(out:emitter, source:int, count:int, tableOffset:int, table:int, index:int, pointer:int, length:int, scratch:int) {
+			let loop = out.NewLabel()
+			let done = out.NewLabel()
+			asmMovRegAbs(out, table, tableOffset, RTGRelocationAbsoluteBSS)
+			asmMovRegImm(out, index, 0)
+			out.Mark(loop)
+			asmCmpRegImm(out, index, 2048)
+			jumpCondition(out, sge, done)
+			asmCmpRegReg(out, index, count)
+			jumpCondition(out, eq, done)
+			asmAddRegRegShift(out, pointer, source, index, 3)
+			asmLoadRegMem(out, pointer, pointer, 0, 8)
+			emitCStringRecord(out, pointer, table, length, scratch)
+			asmAddRegImm(out, table, table, 16)
+			asmAddRegImm(out, index, index, 1)
+			jump(out, loop)
+			out.Mark(done)
+		}
+		emitBoundedTerminatedCStringTable(out:emitter, source:int, tableOffset:int, table:int, index:int, pointer:int, length:int, scratch:int) {
+			let loop = out.NewLabel()
+			let done = out.NewLabel()
+			asmMovRegAbs(out, table, tableOffset, RTGRelocationAbsoluteBSS)
+			asmMovRegImm(out, index, 0)
+			out.Mark(loop)
+			asmCmpRegImm(out, index, 2048)
+			jumpCondition(out, sge, done)
+			asmLoadRegMem(out, pointer, source, 0, 8)
+			asmCmpRegImm(out, pointer, 0)
+			jumpCondition(out, eq, done)
+			emitCStringRecord(out, pointer, table, length, scratch)
+			asmAddRegImm(out, table, table, 16)
+			asmAddRegImm(out, source, source, 8)
+			asmAddRegImm(out, index, index, 1)
+			jump(out, loop)
+			out.Mark(done)
+		}
+		bindEntryCollections(out:emitter, argsOffset:int, argsLength:int, environmentOffset:int, environmentLength:int) {
+			asmMovRegAbs(out, x3.Code, argsOffset, RTGRelocationAbsoluteBSS)
+			asmMovRegReg(out, x4.Code, argsLength)
+			asmMovRegReg(out, x1.Code, argsLength)
+			asmMovRegAbs(out, x2.Code, environmentOffset, RTGRelocationAbsoluteBSS)
+			asmMovRegReg(out, x5.Code, environmentLength)
+			asmMovRegReg(out, x6.Code, environmentLength)
+		}
+		darwinEntry(out:emitter, argsOffset:int, environmentOffset:int, stateOffset:int) {
+			asmMovRegAbs(out, x9.Code, stateOffset, RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out, x13.Code, x9.Code, 0, 8)
+			asmLoadRegMem(out, x14.Code, x9.Code, 8, 8)
+			asmLoadRegMem(out, x15.Code, x9.Code, 16, 8)
+			emitBoundedCountedCStringTable(
+				out, x14.Code, x13.Code, argsOffset,
+				x10.Code, x11.Code, x12.Code, x0.Code, x9.Code,
+			)
+			asmMovRegReg(out, x13.Code, x11.Code)
+			emitBoundedTerminatedCStringTable(
+				out, x15.Code, environmentOffset,
+				x10.Code, x11.Code, x12.Code, x0.Code, x9.Code,
+			)
+			bindEntryCollections(
+				out, argsOffset, x13.Code, environmentOffset, x11.Code,
+			)
+		}
+	}
+}
+
+runtime darwin_arm64 {
+	entry sequence darwinEntry {
+		max_parameters = 2
+		requires_state = true
+		bss args 32768 16
+		bss environment 32768 16
+	}
+	entry_state_bytes = 24
+	emit_exit = sequence darwinExit
+	operation read { emit = sequence darwinRead }
+	operation write { emit = sequence darwinWrite }
+	operation read_at { emit = sequence darwinReadAt }
+	operation write_at { emit = sequence darwinWriteAt }
+	operation open { emit = sequence darwinOpen }
+	operation close { emit = sequence darwinClose }
+	operation chmod { emit = sequence darwinChmod }
+	operation print { use = write }
+}
+
+format macho64_arm64 {
+	byte_order = little
+	address_bits = 64
+	kind = "mach-o"
+	cpu = 0x0100000c
+	code_offset = 0x1000
+	image = sequence machImage
+}
+
+target darwin/arm64 {
+	family = native_v1
+	os = darwin
+	arch = aarch64
+	abi = aapcs64
+	runtime = darwin_arm64
+	executable = macho64_arm64
+	build_tags = [darwin, unix, aarch64, arm64]
+	capabilities = [hosted, executable, filesystem, heap, argv, environment]
+}

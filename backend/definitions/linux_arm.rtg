@@ -1,3 +1,9 @@
+definition 1
+unit native
+implements direct_emitter_v1
+
+@import "arm.rtg"
+
 runtime linux_arm {
 	entry template {
 		max_parameters = 2

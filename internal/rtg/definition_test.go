@@ -4,29 +4,62 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
 
+var nativeDefinitionEntrypoints = map[string]string{
+	"darwin/arm64":       "../../backend/definitions/darwin_aarch64.rtg",
+	"linux/386":          "../../backend/definitions/linux_386.rtg",
+	"linux/aarch64":      "../../backend/definitions/linux_aarch64.rtg",
+	"linux/amd64":        "../../backend/definitions/linux_amd64.rtg",
+	"linux/arm":          "../../backend/definitions/linux_arm.rtg",
+	"linux-kernel/amd64": "../../backend/definitions/linux_kernel_amd64.rtg",
+	"windows/386":        "../../backend/definitions/windows_386.rtg",
+	"windows/amd64":      "../../backend/definitions/windows_amd64.rtg",
+	"windows/arm64":      "../../backend/definitions/windows_aarch64.rtg",
+}
+
 func TestNativeDefinitionEmbeddedGoBudget(t *testing.T) {
-	document := parseDefinitionFile(t, "../../backend/definitions/native.rtg")
-	source := document.Source
-	resolved := ResolveDefinitions(document)
-	if !resolved.Ok {
-		t.Fatalf("ResolveDefinitions failed: %#v", resolved.Diagnostics)
+	type authoredDeclaration struct {
+		bytes int
 	}
-	if len(resolved.Targets) == 0 {
-		t.Fatal("native definition exports no targets")
+	authored := make(map[string]authoredDeclaration)
+	var source []byte
+	for _, filename := range sortedNativeEntrypoints() {
+		resolved := ResolveDefinitions(parseDefinitionFile(t, filename))
+		if !resolved.Ok {
+			t.Fatalf("ResolveDefinitions(%s) failed: %#v",
+				filename, resolved.Diagnostics)
+		}
+		if len(resolved.Targets) != 1 {
+			t.Fatalf("%s exports %d targets, want exactly one",
+				filename, len(resolved.Targets))
+		}
+		source = append(source, resolved.Document.Source...)
+		parts := reachableEmbeddedGoParts(
+			resolved.Document, embeddedGoNames(resolved.Document), nil)
+		for i := 0; i < len(parts); i++ {
+			body := authoredVirtualSource(resolved.Document, parts[i].source)
+			key := parts[i].name + "\x00" + string(body)
+			authored[key] = authoredDeclaration{bytes: len(body)}
+		}
 	}
-	metrics := MeasureTarget(resolved.Document, resolved.Targets[0])
+	var goBytes int
+	for _, declaration := range authored {
+		goBytes += declaration.bytes
+	}
 	const maxBytes = 60000
 	const maxDeclarations = 200
-	if metrics.CatalogGoBytes > maxBytes || metrics.CatalogGoDecls > maxDeclarations {
+	if goBytes > maxBytes || len(authored) > maxDeclarations {
 		t.Fatalf("native embedded Go = %d bytes / %d declarations, limit %d / %d; "+
 			"move regular machine, ABI, runtime, relocation, and format structure into "+
 			"bounded declarations rather than hiding it in another hook",
-			metrics.CatalogGoBytes, metrics.CatalogGoDecls, maxBytes, maxDeclarations)
+			goBytes, len(authored), maxBytes, maxDeclarations)
 	}
+	t.Logf("deduplicated native embedded Go = %d bytes / %d declarations",
+		goBytes, len(authored))
 	for _, legacy := range []string{
 		"x86KernelModuleImage", "aarch64WindowsRuntimeReadWrite",
 		"x86PatchRelocations", "x86_32PatchRelocations",
@@ -42,23 +75,18 @@ func TestNativeDefinitionEmbeddedGoBudget(t *testing.T) {
 }
 
 func TestAArch64DefinitionVerticalSlice(t *testing.T) {
-	resolved := Resolve(parseDefinitionFile(t, "../../backend/definitions/native.rtg"))
-	if !resolved.Ok {
-		t.Fatalf("definition failed: %#v", resolved.Diagnostics)
-	}
-	if len(resolved.Targets) != 9 {
-		t.Fatalf("native target count = %d, want 9", len(resolved.Targets))
-	}
-	darwin, found := lookupResolvedTarget(resolved, "darwin/arm64")
+	darwinResolved := resolveNativeTarget(t, "darwin/arm64")
+	darwin, found := lookupResolvedTarget(darwinResolved, "darwin/arm64")
 	if !found {
-		t.Fatal("native definition lost darwin/arm64")
+		t.Fatal("Darwin entrypoint lost darwin/arm64")
 	}
 	if stateBytes, ok := integerField(
-		resolved.Document, darwin.Runtime, "entry_state_bytes"); !ok || stateBytes != 24 {
+		darwinResolved.Document, darwin.Runtime, "entry_state_bytes"); !ok || stateBytes != 24 {
 		t.Fatalf("darwin/arm64 entry state bytes = %d, %v; want 24, true",
 			stateBytes, ok)
 	}
 	for _, target := range []string{"linux/aarch64", "darwin/arm64", "windows/arm64"} {
+		resolved := resolveNativeTarget(t, target)
 		generated := GenerateFixedBackend(resolved, target)
 		if !generated.Ok {
 			t.Fatalf("generate %s: %#v", target, generated.Diagnostics)
@@ -79,7 +107,7 @@ func TestAArch64DefinitionVerticalSlice(t *testing.T) {
 }
 
 func TestNativeCatalogTargetIdentityIgnoresUnreachableArchitecture(t *testing.T) {
-	const filename = "../../backend/definitions/native.rtg"
+	const filename = "../../backend/definitions/linux_amd64.rtg"
 	document := parseDefinitionFile(t, filename)
 	base := Resolve(document)
 	if !base.Ok {
@@ -131,7 +159,7 @@ func TestAArch64EncodingSlice(t *testing.T) {
 }
 
 func TestAArch64CheckedInArchitectureOutput(t *testing.T) {
-	resolved := Resolve(parseDefinitionFile(t, "../../backend/definitions/native.rtg"))
+	resolved := resolveNativeTarget(t, "linux/aarch64")
 	generated := GenerateCheckedInArchitectureAlgorithms(resolved, "aarch64", "main")
 	if !generated.Ok {
 		t.Fatalf("generate architecture: %#v", generated.Diagnostics)
@@ -156,13 +184,7 @@ func TestAArch64CheckedInArchitectureOutput(t *testing.T) {
 }
 
 func TestAmd64DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
-	resolved := Resolve(parseDefinitionFile(t, "../../backend/definitions/native.rtg"))
-	if !resolved.Ok {
-		t.Fatalf("definition failed: %#v", resolved.Diagnostics)
-	}
-	if len(resolved.Targets) != 9 {
-		t.Fatalf("native target count = %d, want 9", len(resolved.Targets))
-	}
+	resolved := resolveNativeTarget(t, "linux/amd64")
 	generated := GenerateCheckedInArchitectureAlgorithms(resolved, "x86_64", "main")
 	if !generated.Ok {
 		t.Fatalf("generate architecture: %#v", generated.Diagnostics)
@@ -197,10 +219,7 @@ func TestAmd64DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 }
 
 func TestArmDefinitionAndCheckedInArchitectureOutput(t *testing.T) {
-	resolved := Resolve(parseDefinitionFile(t, "../../backend/definitions/native.rtg"))
-	if !resolved.Ok {
-		t.Fatalf("definition failed: %#v", resolved.Diagnostics)
-	}
+	resolved := resolveNativeTarget(t, "linux/arm")
 	if _, ok := lookupResolvedTarget(resolved, "linux/arm"); !ok {
 		t.Fatalf("targets = %#v, want linux/arm", resolved.Targets)
 	}
@@ -227,13 +246,7 @@ func TestArmDefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 }
 
 func Test386DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
-	resolved := Resolve(parseDefinitionFile(t, "../../backend/definitions/native.rtg"))
-	if !resolved.Ok {
-		t.Fatalf("definition failed: %#v", resolved.Diagnostics)
-	}
-	if len(resolved.Targets) != 9 {
-		t.Fatalf("native target count = %d, want 9", len(resolved.Targets))
-	}
+	resolved := resolveNativeTarget(t, "linux/386")
 	generated := GenerateCheckedInArchitectureAlgorithms(resolved, "x86_32", "main")
 	if !generated.Ok {
 		t.Fatalf("generate architecture: %#v", generated.Diagnostics)
@@ -254,6 +267,33 @@ func Test386DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 			t.Errorf("generated 386 output is missing algorithm binding %s", binding)
 		}
 	}
+}
+
+func sortedNativeEntrypoints() []string {
+	filenames := make([]string, 0, len(nativeDefinitionEntrypoints))
+	for _, filename := range nativeDefinitionEntrypoints {
+		filenames = append(filenames, filename)
+	}
+	sort.Strings(filenames)
+	return filenames
+}
+
+func resolveNativeTarget(t *testing.T, target string) ResolveResult {
+	t.Helper()
+	filename, ok := nativeDefinitionEntrypoints[target]
+	if !ok {
+		t.Fatalf("no native definition entrypoint for %s", target)
+	}
+	resolved := Resolve(parseDefinitionFile(t, filename))
+	if !resolved.Ok {
+		t.Fatalf("resolve %s: %#v", filename, resolved.Diagnostics)
+	}
+	if len(resolved.Targets) != 1 ||
+		resolved.Targets[0].Descriptor.Name != target {
+		t.Fatalf("%s resolved targets = %#v, want only %s",
+			filename, resolved.Targets, target)
+	}
+	return resolved
 }
 
 func parseDefinitionFile(t *testing.T, filename string) Document {

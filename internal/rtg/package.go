@@ -20,6 +20,9 @@ type virtualSymbol struct {
 
 func applyVirtualPackages(document *Document) {
 	if len(document.sourceMap) == 0 {
+		// A standalone definition has one implicit namespace, so no symbol
+		// rewriting is needed. Architecture extensions still compose normally.
+		mergeArchitectureExtensions(document)
 		return
 	}
 	for i := 0; i < len(document.Declarations); i++ {
@@ -36,6 +39,19 @@ func applyVirtualPackages(document *Document) {
 			addVirtualGoSymbols(document, declaration)
 		} else if declaration.Kind == DeclArch {
 			addVirtualArchitectureStatementSymbols(document, declaration)
+			addVirtualSequenceSymbols(document, declaration)
+		} else if declaration.Kind == DeclArchExtension {
+			base, ok := document.Declaration(DeclArch, declaration.Name)
+			if !ok {
+				document.Diagnostics = append(document.Diagnostics,
+					resolveDiagnostic(*document, declaration, "RTG-EXTEND-001",
+						"extended architecture "+declaration.Name+" is not declared"))
+				continue
+			}
+			addVirtualArchitectureStatementSymbolsForPackage(
+				document, base, declaration.Package)
+			inheritVirtualPackageSymbols(
+				document, base.Package, declaration.Package)
 			addVirtualSequenceSymbols(document, declaration)
 		}
 	}
@@ -56,6 +72,7 @@ func applyVirtualPackages(document *Document) {
 				value, declaration.Package, document.packages)
 		}
 	}
+	mergeArchitectureExtensions(document)
 }
 
 func addVirtualPackage(document *Document, filename string, name string) {
@@ -106,6 +123,13 @@ func addVirtualSequenceSymbols(document *Document, declaration Declaration) {
 }
 
 func addVirtualArchitectureStatementSymbols(document *Document, declaration Declaration) {
+	addVirtualArchitectureStatementSymbolsForPackage(
+		document, declaration, declaration.Package)
+}
+
+func addVirtualArchitectureStatementSymbolsForPackage(
+	document *Document, declaration Declaration, packageName string,
+) {
 	prefix := architectureLocalPrefix(declaration.Name)
 	symbols := architectureSymbols(*document, declaration)
 	for i := 0; i < len(symbols); i++ {
@@ -134,7 +158,7 @@ func addVirtualArchitectureStatementSymbols(document *Document, declaration Decl
 		}
 		local = string(data)
 		for pkg := 0; pkg < len(document.packages); pkg++ {
-			if document.packages[pkg].Name == declaration.Package {
+			if document.packages[pkg].Name == packageName {
 				document.packages[pkg].StatementSymbols = append(
 					document.packages[pkg].StatementSymbols,
 					virtualSymbol{Local: local, Qualified: symbols[i].Local})
@@ -149,6 +173,111 @@ func addVirtualArchitectureStatementSymbols(document *Document, declaration Decl
 			}
 		}
 	}
+}
+
+func inheritVirtualPackageSymbols(
+	document *Document, sourcePackage string, destinationPackage string,
+) {
+	source := -1
+	destination := -1
+	for i := 0; i < len(document.packages); i++ {
+		if document.packages[i].Name == sourcePackage {
+			source = i
+		}
+		if document.packages[i].Name == destinationPackage {
+			destination = i
+		}
+	}
+	if source < 0 || destination < 0 || source == destination {
+		return
+	}
+	for i := 0; i < len(document.packages[source].Symbols); i++ {
+		symbol := document.packages[source].Symbols[i]
+		if !virtualSymbolLocalExists(document.packages[destination].Symbols, symbol.Local) {
+			document.packages[destination].Symbols = append(
+				document.packages[destination].Symbols, symbol)
+		}
+	}
+	for i := 0; i < len(document.packages[source].StatementSymbols); i++ {
+		symbol := document.packages[source].StatementSymbols[i]
+		if !virtualSymbolLocalExists(
+			document.packages[destination].StatementSymbols, symbol.Local,
+		) {
+			document.packages[destination].StatementSymbols = append(
+				document.packages[destination].StatementSymbols, symbol)
+		}
+	}
+}
+
+func virtualSymbolLocalExists(symbols []virtualSymbol, local string) bool {
+	for i := 0; i < len(symbols); i++ {
+		if symbols[i].Local == local {
+			return true
+		}
+	}
+	return false
+}
+
+func mergeArchitectureExtensions(document *Document) {
+	for extensionIndex := 0; extensionIndex < len(document.Declarations); extensionIndex++ {
+		extension := document.Declarations[extensionIndex]
+		if extension.Kind != DeclArchExtension {
+			continue
+		}
+		sequenceBlock := -1
+		valid := len(extension.Fields) == 0
+		for statement := 0; statement < len(extension.Statements); statement++ {
+			if statementBlockName(extension.Statements[statement]) != "sequences" ||
+				sequenceBlock >= 0 {
+				valid = false
+				break
+			}
+			sequenceBlock = statement
+		}
+		if !valid || sequenceBlock < 0 {
+			document.Diagnostics = append(document.Diagnostics,
+				resolveDiagnostic(*document, extension, "RTG-EXTEND-002",
+					"architecture extensions require exactly one sequences block"))
+			continue
+		}
+		baseIndex := -1
+		for declaration := 0; declaration < len(document.Declarations); declaration++ {
+			if document.Declarations[declaration].Kind == DeclArch &&
+				document.Declarations[declaration].Name == extension.Name {
+				baseIndex = declaration
+				break
+			}
+		}
+		if baseIndex < 0 {
+			document.Diagnostics = append(document.Diagnostics,
+				resolveDiagnostic(*document, extension, "RTG-EXTEND-001",
+					"extended architecture "+extension.Name+" is not declared"))
+			continue
+		}
+		baseBlock := -1
+		for statement := 0; statement < len(document.Declarations[baseIndex].Statements); statement++ {
+			if statementBlockName(document.Declarations[baseIndex].Statements[statement]) == "sequences" {
+				baseBlock = statement
+				break
+			}
+		}
+		if baseBlock < 0 {
+			document.Declarations[baseIndex].Statements = append(
+				document.Declarations[baseIndex].Statements,
+				Statement{Tokens: []string{"sequences"}, Span: extension.Span})
+			baseBlock = len(document.Declarations[baseIndex].Statements) - 1
+		}
+		document.Declarations[baseIndex].Statements[baseBlock].Children = append(
+			document.Declarations[baseIndex].Statements[baseBlock].Children,
+			extension.Statements[sequenceBlock].Children...)
+	}
+	out := document.Declarations[:0]
+	for i := 0; i < len(document.Declarations); i++ {
+		if document.Declarations[i].Kind != DeclArchExtension {
+			out = append(out, document.Declarations[i])
+		}
+	}
+	document.Declarations = out
 }
 
 func addVirtualArchitectureGoSymbol(pkg *virtualPackage, local string, qualified string) {

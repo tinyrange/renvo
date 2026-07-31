@@ -90,7 +90,11 @@ func checkedInProjectionDocument(document Document, arch Declaration) Document {
 			count++
 		}
 	}
-	if count > 1 {
+	// Native target entrypoints deliberately share the stable "native" unit
+	// name. Architecture projections still use the architecture name so the
+	// checked-in compiler-facing symbols do not depend on which target root
+	// supplied their shared ISA.
+	if document.Unit == "native" || count > 1 {
 		document.Unit = arch.Name
 	}
 	return document

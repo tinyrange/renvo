@@ -1,4 +1,5 @@
-# The 32-bit ARM slice owns its encoder and advertised Linux composition.
+# Shared 32-bit ARM machine facts, encoder, direct-emitter bindings, and
+# calling conventions. Target entrypoints own environment-specific behavior.
 go backend {
 	func asmAlign(a *RTGEmitter) {
 		for a.Len()%4 != 0 {

@@ -16,14 +16,15 @@ const (
 )
 
 const (
-	DeclSystem  = "system"
-	DeclArch    = "arch"
-	DeclABI     = "abi"
-	DeclRuntime = "runtime"
-	DeclFormat  = "format"
-	DeclTarget  = "target"
-	DeclIR      = "ir"
-	DeclGo      = "go"
+	DeclSystem        = "system"
+	DeclArch          = "arch"
+	DeclArchExtension = "extend arch"
+	DeclABI           = "abi"
+	DeclRuntime       = "runtime"
+	DeclFormat        = "format"
+	DeclTarget        = "target"
+	DeclIR            = "ir"
+	DeclGo            = "go"
 )
 
 type Position struct {

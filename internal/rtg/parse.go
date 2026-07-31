@@ -114,6 +114,8 @@ func (p *documentParser) parse() {
 			p.parseUnit()
 		} else if keyword == "implements" {
 			p.parseImplements()
+		} else if keyword == "extend" {
+			p.parseArchExtension()
 		} else if keyword == DeclSystem || keyword == DeclArch || keyword == DeclABI ||
 			keyword == DeclRuntime || keyword == DeclFormat || keyword == DeclTarget || keyword == DeclIR {
 			p.parseDeclaration(keyword)
@@ -199,18 +201,30 @@ func (p *documentParser) parseImplements() {
 	p.at++
 }
 
+func (p *documentParser) parseArchExtension() {
+	start := p.at
+	p.at++
+	if p.kind() != TokenIdent || p.text(p.at) != DeclArch {
+		p.failAt(p.at, "RTG-PARSE-015", "expected arch after extend")
+		return
+	}
+	p.parseDeclarationFrom(DeclArchExtension, start, p.at+1)
+}
+
 func (p *documentParser) parseDeclaration(kind string) {
+	p.parseDeclarationFrom(kind, p.at, p.at+1)
+}
+
+func (p *documentParser) parseDeclarationFrom(kind string, startToken int, nameStart int) {
 	if len(p.document.Declarations) >= maxDefinitionDecls {
 		p.failAt(p.at, "RTG-LIMIT-003", "machine definition exceeds the declaration limit")
 		return
 	}
-	startToken := p.at
-	p.at++
+	p.at = nameStart
 	if p.kind() == TokenEOF {
 		p.failAt(p.at, "RTG-PARSE-010", "missing declaration name")
 		return
 	}
-	nameStart := p.at
 	for p.kind() != TokenEOF && !p.operator(p.at, "{") {
 		p.at++
 	}
@@ -225,6 +239,9 @@ func (p *documentParser) parseDeclaration(kind string) {
 	}
 	for i := 0; i < len(p.document.Declarations); i++ {
 		if p.document.Declarations[i].Kind == kind && p.document.Declarations[i].Name == name {
+			if kind == DeclArchExtension {
+				continue
+			}
 			p.failAt(nameStart, "RTG-PARSE-013", "duplicate "+kind+" declaration "+name)
 			return
 		}

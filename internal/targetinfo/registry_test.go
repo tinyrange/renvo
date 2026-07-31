@@ -1,6 +1,7 @@
 package targetinfo
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -55,6 +56,9 @@ func TestGeneratedRegistryMatchesMachineDefinitions(t *testing.T) {
 		source, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if !bytes.HasPrefix(bytes.TrimSpace(source), []byte("definition ")) {
+			continue
 		}
 		resolved := rtg.ResolveDefinitions(rtg.ParseImports(
 			source, path, registryImportLoader{}))

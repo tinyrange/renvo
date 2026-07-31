@@ -73,8 +73,8 @@ func documentationSource(descriptors []sourceDescriptor) []byte {
 	out.WriteString("This is the frontend-visible completeness projection of the checked-in `.rtg` definitions. ")
 	out.WriteString("The definition column is the target semantic identity. ")
 	out.WriteString("Per-target metrics are review aids and do not loosen or replace performance gates. ")
-	out.WriteString("The closed native catalog also has a separately enforced 60,000-byte/200-declaration Go ceiling. ")
-	out.WriteString("Go volume is shown as reachable/catalog bytes and declarations.\n\n")
+	out.WriteString("The deduplicated native source set also has a separately enforced 60,000-byte/200-declaration Go ceiling. ")
+	out.WriteString("Go volume is shown as reachable/entrypoint bytes and declarations.\n\n")
 	out.WriteString("| Target | Family | OS | ISA | Int/data/code/function bits | Max align | ABI | Output | Runtime operations | Capabilities | Declarative bytes | Go bytes | Go declarations | Definition |\n")
 	out.WriteString("|---|---|---|---|---:|---:|---|---|---|---|---:|---:|---:|---|\n")
 	for _, descriptor := range descriptors {
@@ -117,6 +117,9 @@ func mergeMachineDefinitions(root string, descriptors []sourceDescriptor) error 
 		source, err := os.ReadFile(path)
 		if err != nil {
 			return err
+		}
+		if !bytes.HasPrefix(bytes.TrimSpace(source), []byte("definition ")) {
+			continue
 		}
 		resolved := rtg.ResolveDefinitions(rtg.ParseImports(
 			source, path, machineDefinitionImportLoader{}))

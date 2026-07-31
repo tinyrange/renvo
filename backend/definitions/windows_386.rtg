@@ -1,6 +1,124 @@
+definition 1
+unit native
+implements direct_emitter_v1
+
+@import "x86_32.rtg"
+
+extend arch x86_32 {
+	sequences {
+		windowsExit(out:emitter, status:register) {
+			out.AppendByte(0x50+status.Code)
+			out.Bytes2(0xff, 0x15)
+			let at = out.Len()
+			out.Int32(0)
+			out.AbsoluteReloc(at, 8, RTGRelocationImport)
+		}
+		windowsStaticCall(out:emitter, importID:int, wordCount:int) {
+			out.Bytes2(0xff, 0x15)
+			let at = out.Len()
+			out.Int32(0)
+			out.AbsoluteReloc(at, importID, RTGRelocationImport)
+		}
+		windowsCallImport(out:emitter, importID:int) {
+			out.Bytes2(0xff, 0x15)
+			let at = out.Len()
+			out.Int32(0)
+			out.AbsoluteReloc(at, importID, RTGRelocationImport)
+		}
+		windowsRuntimeChmod(out:emitter) {
+			let eax = record_register(Code:0, Valid:true)
+			let ecx = record_register(Code:1, Valid:true)
+			let failed = out.NewLabel()
+			let done = out.NewLabel()
+			out.Bytes2(0x6a, 1)
+			out.Bytes2(0x6a, 0)
+			out.Bytes2(0x6a, 0)
+			out.AppendByte(0x53)
+			windowsCallImport(out, 5)
+			moveImmediate(out, ecx, -1)
+			encodeBinary(out, 0x39, eax, ecx)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), failed)
+			moveImmediate(out, eax, 0)
+			encodeRelative(out, 0xe9, done)
+			out.Mark(failed)
+			moveImmediate(out, eax, -1)
+			out.Mark(done)
+		}
+		windowsRuntimeClose(out:emitter) {
+			let eax = record_register(Code:0, Valid:true)
+			let failed = out.NewLabel()
+			let done = out.NewLabel()
+			out.AppendByte(0x53)
+			windowsCallImport(out, 2)
+			test(out, eax, eax)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), failed)
+			moveImmediate(out, eax, 0)
+			encodeRelative(out, 0xe9, done)
+			out.Mark(failed)
+			moveImmediate(out, eax, -1)
+			out.Mark(done)
+		}
+		windowsRuntimeOpen(out:emitter) {
+			let eax = record_register(Code:0, Valid:true)
+			let esi = record_register(Code:6, Valid:true)
+			move(out, eax, esi)
+			windowsTranslateCreateFileFlags(out)
+			out.Bytes2(0x6a, 0)
+			out.AppendByte(0x68)
+			out.Int32(0x80)
+			out.AppendByte(0x51)
+			out.Bytes2(0x6a, 0)
+			out.Bytes2(0x6a, 3)
+			out.AppendByte(0x52)
+			out.AppendByte(0x53)
+			windowsCallImport(out, 1)
+		}
+		windowsTranslateCreateFileFlags(out:emitter) {
+			let edx = record_register(Code:2, Valid:true)
+			let ecx = record_register(Code:1, Valid:true)
+			let notReadWrite = out.NewLabel()
+			let accessDone = out.NewLabel()
+			let noCreate = out.NewLabel()
+			let createDone = out.NewLabel()
+			moveImmediate(out, edx, -2147483648)
+			out.Bytes2(0xa8, 2)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), notReadWrite)
+			moveImmediate(out, edx, -1073741824)
+			encodeRelative(out, 0xe9, accessDone)
+			out.Mark(notReadWrite)
+			out.Bytes2(0xa8, 1)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), accessDone)
+			moveImmediate(out, edx, 0x40000000)
+			out.Mark(accessDone)
+			moveImmediate(out, ecx, 3)
+			out.Bytes2(0xa8, 64)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), noCreate)
+			moveImmediate(out, ecx, 4)
+			out.AppendByte(0xa9)
+			out.Int32(512)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), createDone)
+			moveImmediate(out, ecx, 2)
+			encodeRelative(out, 0xe9, createDone)
+			out.Mark(noCreate)
+			out.AppendByte(0xa9)
+			out.Int32(512)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), createDone)
+			moveImmediate(out, ecx, 5)
+			out.Mark(createDone)
+		}
+	}
+}
+
+abi win32 {
+	internal = renvo_x86_32
+	arguments = [stack]
+	result = [eax, edx]
+	stack_alignment = 4
+}
+
 runtime windows_386 {
-	emit_exit = sequence x86_32.windowsExit
-	emit_static_call = sequence x86_32.windowsStaticCall
+	emit_exit = sequence windowsExit
+	emit_static_call = sequence windowsStaticCall
 	imports "kernel32.dll" = [
 		CreateFileA, CloseHandle, ReadFile, WriteFile, SetFilePointer,
 		GetStdHandle, GetCommandLineA, ExitProcess, GetEnvironmentStringsA
@@ -63,9 +181,9 @@ runtime windows_386 {
 	operation write { template = io }
 	operation read_at { template = io }
 	operation write_at { template = io }
-	operation open { emit = sequence x86_32.windowsRuntimeOpen }
-	operation close { emit = sequence x86_32.windowsRuntimeClose }
-	operation chmod { emit = sequence x86_32.windowsRuntimeChmod }
+	operation open { emit = sequence windowsRuntimeOpen }
+	operation close { emit = sequence windowsRuntimeClose }
+	operation chmod { emit = sequence windowsRuntimeChmod }
 	operation print { use = write }
 }
 

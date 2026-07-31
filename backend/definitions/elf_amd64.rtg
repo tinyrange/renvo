@@ -1,0 +1,161 @@
+@import "x86_64.rtg"
+
+go backend {
+	func nativeAppend32(out []byte, value int) []byte {
+		out = append(out, byte(value), byte(value>>8), byte(value>>16), byte(value>>24))
+		return out
+	}
+
+	func nativeAppend64(out []byte, value int) []byte {
+		out = nativeAppend32(out, value)
+		out = nativeAppend32(out, value>>32)
+		return out
+	}
+}
+
+# Shared ELF executable and relocatable formats for AMD64 Linux targets.
+extend arch x86_64 {
+	sequences {
+		kernelAppend16(out:bytes, value:int) -> bytes {
+			return append(out, byte(value), byte(value>>8))
+		}
+		kernelAppendELFHeader(out:bytes, sectionOffset:int, sectionCount:int, namesIndex:int) -> bytes {
+			set out = append(out, 0x7f, 'E', 'L', 'F', 2, 1, 1, 0)
+			set out = append(out, 0, 0, 0, 0, 0, 0, 0, 0)
+			set out = kernelAppend16(out, 1)
+			set out = kernelAppend16(out, 62)
+			set out = nativeAppend32(out, 1)
+			set out = nativeAppend64(out, 0)
+			set out = nativeAppend64(out, 0)
+			set out = nativeAppend64(out, sectionOffset)
+			set out = nativeAppend32(out, 0)
+			set out = kernelAppend16(out, 64)
+			set out = kernelAppend16(out, 0)
+			set out = kernelAppend16(out, 0)
+			set out = kernelAppend16(out, 64)
+			set out = kernelAppend16(out, sectionCount)
+			set out = kernelAppend16(out, namesIndex)
+			return out
+		}
+		kernelAppendRelocation(out:bytes, offset:int, symbol:int, kind:int, addend:int) -> bytes {
+			set out = nativeAppend64(out, offset)
+			set out = nativeAppend64(out, symbol<<32|kind)
+			set out = nativeAppend64(out, addend)
+			return out
+		}
+		kernelAppendSection(out:bytes, name:int, kind:int, flags:int, offset:int, size:int, link:int, info:int, alignment:int, entrySize:int) -> bytes {
+			set out = nativeAppend32(out, name)
+			set out = nativeAppend32(out, kind)
+			set out = nativeAppend64(out, flags)
+			set out = nativeAppend64(out, 0)
+			set out = nativeAppend64(out, offset)
+			set out = nativeAppend64(out, size)
+			set out = nativeAppend32(out, link)
+			set out = nativeAppend32(out, info)
+			set out = nativeAppend64(out, alignment)
+			set out = nativeAppend64(out, entrySize)
+			return out
+		}
+		kernelAppendSymbol(out:bytes, name:int, info:int, section:int, value:int, size:int) -> bytes {
+			set out = nativeAppend32(out, name)
+			set out = append(out, byte(info), 0)
+			set out = kernelAppend16(out, section)
+			set out = nativeAppend64(out, value)
+			set out = nativeAppend64(out, size)
+			return out
+		}
+	}
+}
+
+format elf64_x86_64 {
+	kind = elf
+	code_offset = 176
+	image = elf_executable
+	patch_absolute = relative32_le
+	patch_pc_bias = 4
+	byte_order = little
+	address_bits = 64
+	file_alignment = 0x1000
+	machine = 62
+	flags = 0
+
+	header elf {
+		magic = [0x7f, 0x45, 0x4c, 0x46]
+		class = 2
+		data = 1
+		version = 1
+		osabi = 0
+		type = 3
+		machine = 62
+		entry = address(text.start)
+		program_header_offset = sizeof(elf_header)
+		section_header_offset = stripped ? 0 : sections.offset
+		flags = 0
+		elf_header_size = 64
+		program_header_size = 56
+		program_header_count = 2
+		section_header_size = stripped ? 0 : 64
+		section_header_count = stripped ? 0 : sections.count
+		section_name_index = stripped ? 0 : sections.names
+	}
+
+	segment text {
+		type = load
+		flags = read | execute
+		file = [headers.start, data.file_start)
+		emitMemoryOperand = [headers.start, data.memory_start)
+		alignment = 0x1000
+	}
+
+	segment data {
+		type = load
+		flags = read | write
+		file = [data.file_start, data.file_end)
+		emitMemoryOperand = [data.memory_start, bss.end)
+		alignment = 0x1000
+	}
+
+	sections when !stripped {
+		text progbits alloc|execute align=16
+		data progbits alloc|write align=8
+		bss nobits alloc|write align=8
+		symtab symtab entry_size=24 link=strtab
+		strtab strtab
+		shstrtab strtab
+	}
+
+	relocation {
+		label = rel32
+		data = rel32
+		bss = rel32
+	}
+}
+
+format elf64_object_x86_64 {
+	kind = "elf-relocatable"
+	kernel_image = linux_module_elf
+	byte_order = little
+	address_bits = 64
+	machine = 62
+	type = relocatable
+	append64 = sequence nativeAppend64
+	append_header = sequence kernelAppendELFHeader
+	append_relocation = sequence kernelAppendRelocation
+	append_section = sequence kernelAppendSection
+	append_symbol = sequence kernelAppendSymbol
+
+	sections {
+		text progbits alloc|execute align=16
+		rela_text rela entry_size=24 link=symtab info=text
+		data progbits alloc|write align=8
+		bss nobits alloc|write align=8
+		symtab symtab entry_size=24 link=strtab
+		strtab strtab
+		shstrtab strtab
+	}
+
+	relocation label { number = 2 kind = pc_relative width = 32 addend = -4 }
+	relocation data { number = 2 kind = pc_relative width = 32 addend = -4 }
+	relocation bss { number = 2 kind = pc_relative width = 32 addend = -4 }
+	relocation abs64 { number = 1 kind = absolute width = 64 addend = 0 }
+}

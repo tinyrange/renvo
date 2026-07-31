@@ -6,10 +6,9 @@ workflow is in [`../definitions/README.md`](../definitions/README.md).
 
 ## Current source authority
 
-- `backend/definitions/native.rtg` is the single root of the closed built-in
-  `native_v1` catalog. It imports architecture-owned slices for amd64, 386,
-  AArch64, and ARM across Linux, Windows, Darwin, and Linux kernel-module
-  compositions.
+- Every `backend/definitions/<os>_<arch>.rtg` native file is an independent
+  `native_v1` entrypoint for exactly one target. It imports reusable amd64,
+  386, AArch64, ARM, and format fragments from the same directory.
 - `backend/definitions/wasm32.rtg` is the separate `structured32` family for
   WASI, browser Wasm, and VM32.
 - Generated production Go is checked in and compiled into ordinary Go-module
@@ -18,7 +17,7 @@ workflow is in [`../definitions/README.md`](../definitions/README.md).
   checker, reachability analysis, and direct-code generation primitives as the
   built-in catalog.
 
-The native catalog contains shared helpers once. Repeated instruction rows,
+The native source set contains shared helpers once. Repeated instruction rows,
 straight-line encoder/ABI/runtime sequences, operation dispatch, entry and I/O
 templates, architecture label relocations, ELF/PE executable relocation
 patching, ELF/PE image construction, and Linux-module ELF construction are
@@ -26,15 +25,17 @@ bounded declarations. Genuinely irregular encoders, branch relaxation, ABI
 edges, and Mach-O algorithms remain typed embedded Go hooks. The compiler does
 not analyze hook complexity or termination.
 
-Top-level `@import "relative/path.rtg"` composes definition fragments before
+Top-level `@import "relative/path.rtg"` composes one target definition before
 parsing and resolution. Imports are relative to the importing file, recursive,
 cycle-checked, included in the same source-size and semantic Go budgets, and
 source-mapped so diagnostics identify the owning fragment. Each file is a
 virtual package named after its basename. Private Go helpers and bounded
 sequences resolve locally and receive deterministic internal qualification;
-cross-file helper references use `package_name.helper`. Machine declarations
-and explicit exports remain global. Import directories and spelling are not
-semantic, while the package basename is.
+an `extend arch` block inherits the imported ISA's symbols so target-specific
+sequences can use short helper names without manual architecture prefixes.
+Explicit `package_name.helper` references remain available. Machine
+declarations and explicit exports remain global. Import directories and
+spelling are not semantic, while the package basename is.
 
 ## Backend families
 
@@ -86,19 +87,19 @@ as a table or bounded sequence. Declarative forms remain authoritative for
 operation identity, operands, effects, constraints, composition, relocation
 selection, format selection, and hook placement.
 
-The closed production native catalog is hard-limited by
+The deduplicated production native source set is hard-limited by
 `TestNativeDefinitionEmbeddedGoBudget` to 60,000 semantic Go bytes and 200 Go
-declarations. The test is deliberately a simple size/count guard, not a Go
-complexity analyzer. It also prevents the replaced opaque module-image,
-Windows-I/O, label-relocation, ELF-relocation, and x86 PE-relocation functions
-from being reintroduced.
+declarations across all entrypoints. The test is deliberately a simple
+size/count guard, not a Go complexity analyzer. It also prevents the replaced
+opaque module-image, Windows-I/O, label-relocation, ELF-relocation, and x86
+PE-relocation functions from being reintroduced.
 
 ## Identity
 
 There are two identities:
 
-1. The catalog identity hashes the complete canonical source file and records
-   authored provenance in generated manifests.
+1. The entrypoint identity hashes its complete canonical import graph and
+   records authored provenance in generated manifests.
 2. The target semantic identity hashes the selected target, its reachable
    machine/ABI/runtime/format declarations, reachable Go declarations, and
    compatibility versions.
@@ -111,9 +112,10 @@ semantic changes do.
 ## Generated topology
 
 `go generate ./backend/definitions` emits the checked-in production
-architecture projections. The four native encoder bodies and their declarative
-label-relocation finalizers remain independently prunable even though their
-source authority is one catalog.
+architecture projections from one canonical target entrypoint per ISA. The
+four native encoder bodies and their declarative label-relocation finalizers
+remain independently prunable, while each target can evolve without importing
+unrelated operating-system code.
 
 Built-ins expose stable compiler-facing names so fixed-target compilers retain
 their direct fast calls. External definitions cannot have names known to a
@@ -127,7 +129,7 @@ definition.
 - frontend and backend target registries;
 - target help;
 - `machine-definitions.generated.md`, including per-target review metrics for
-  declarative and reachable/catalog Go volume.
+  declarative and reachable/entrypoint Go volume.
 
 `go generate ./internal/backendcompiled` emits:
 
@@ -177,16 +179,16 @@ The generated production encoders, target registries, bundled compiler, custom
 preparation, RTGU/RTGB binding, Wasm/VM family, native target suites, and full
 self-hosting suite are exercised by the repository tests. Performance
 acceptance remains exclusively defined by `backend/main_test.go`; the native
-catalog ceiling adds a maintainability constraint and never loosens a compiler
+source ceiling adds a maintainability constraint and never loosens a compiler
 or output gate.
 
 ## Acceptance record
 
-The current closed native catalog is 217,610 authored bytes over 7,255 lines.
-The generated catalog report measures 57,334 semantic Go bytes and 139
-declarations; the stricter declaration-source audit measures 59,374 bytes and
-139 declarations. Both are below the enforced 60,000/200 ceiling. The four
-checked-in native algorithm projections total 44,824 bytes.
+The native source set is checked as the deduplicated union of every independent
+target entrypoint. Its current semantic Go bytes and declarations are reported
+by `TestNativeDefinitionEmbeddedGoBudget`; both remain below the enforced
+60,000/200 ceiling. The generated target report separately shows the reachable
+and complete-entrypoint volume retained by each target.
 
 Prepared production checks cover AArch64, Windows PE on amd64/386/arm64, Linux
 kernel-module ELF, and Linux 386/ARM outputs. Generation, complete backend,

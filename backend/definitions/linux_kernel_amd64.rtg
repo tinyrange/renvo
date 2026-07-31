@@ -1,0 +1,95 @@
+definition 1
+unit native
+implements direct_emitter_v1
+
+@import "elf_amd64.rtg"
+
+go backend {
+	func kernelStaticCall(out *RTGEmitter, importID int, wordCount int) {
+		registers := []RTGRegister{
+			{Code: 7, Valid: true},
+			{Code: 6, Valid: true},
+			{Code: 2, Valid: true},
+			{Code: 1, Valid: true},
+			{Code: 8, Valid: true},
+			{Code: 9, Valid: true},
+		}
+		for i := 0; i < wordCount && i < len(registers); i++ {
+			emitOpcodeRegister(out, 0x58, registers[i])
+		}
+		out.Byte(0xe8)
+		at := out.Len()
+		out.Int32(0)
+		out.AbsoluteReloc(at, importID, RTGRelocationImport)
+	}
+
+	func kernelRuntimeOperation(out *RTGEmitter, operation int) bool {
+		if operation != RTGRuntimeWrite {
+			return false
+		}
+		rax := RTGRegister{Code: 0, Valid: true}
+		rsi := RTGRegister{Code: 6, Valid: true}
+		rdi := RTGRegister{Code: 7, Valid: true}
+		rdx := RTGRegister{Code: 2, Valid: true}
+		encodeRegisterToRM(out, 0x89, rax, rsi, 64)
+		encodeRegisterToRM(out, 0x89, rsi, rdx, 64)
+		encodeRegisterToRM(out, 0x89, rdx, rax, 64)
+		data := out.Data()
+		formatOffset := len(data)
+		data = append(data, '%', '.', '*', 's', 0)
+		out.SetData(data)
+		encodeMemoryToRegister(out, 0x8d, rdi, RTGAddress{
+			Kind: 1, Addend: formatOffset,
+		}, 64)
+		moveImmediate(out, rax, 0)
+		importID := out.ExternalImport("_printk")
+		out.Byte(0xe8)
+		at := out.Len()
+		out.Int32(0)
+		out.AbsoluteReloc(at, importID, RTGRelocationImport)
+		return true
+	}
+}
+
+extend arch x86_64 {
+	sequences {
+		kernelCallbackAddress(out:emitter, label:label) {
+			out.Bytes3(0x48, 0x8d, 0x05)
+			out.Rel32(label)
+		}
+		kernelEntryEpilogue(out:emitter) {
+			out.Text("\x48\x83\xc4\x08\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5b\xc9\xc3")
+		}
+		kernelEntryPrologue(out:emitter) {
+			out.Text("\xf3\x0f\x1e\xfa\x55\x48\x89\xe5\x53\x41\x54\x41\x55\x41\x56\x41\x57\x48\x83\xec\x08")
+		}
+	}
+}
+
+runtime linux_kernel_x86_64 {
+	entry_prologue = sequence kernelEntryPrologue
+	entry_epilogue = sequence kernelEntryEpilogue
+	emit_callback_address = sequence kernelCallbackAddress
+	emit_static_call = go kernelStaticCall
+	emit_operation = go kernelRuntimeOperation
+
+	entry = kernel_module_init
+	exit = kernel_module_exit
+	operation print { import = printk }
+	operation open { unsupported = "kernel module runtime has no file API" }
+	operation close { unsupported = "kernel module runtime has no file API" }
+	operation read { unsupported = "kernel module runtime has no file API" }
+	operation write { unsupported = "kernel module runtime has no file API" }
+	operation chmod { unsupported = "kernel module runtime has no file API" }
+}
+
+target linux-kernel/amd64 {
+	family = native_v1
+	os = linux
+	arch = x86_64
+	abi = sysv_x86_64
+	runtime = linux_kernel_x86_64
+	object = elf64_object_x86_64
+	build_tags = ["linux", "unix", "amd64", "renvo_kernel"]
+	capabilities = [freestanding, kernel_module, object, imports, linkstatic]
+}
