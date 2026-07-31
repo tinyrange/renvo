@@ -1,0 +1,47 @@
+runtime linux_aarch64 {
+	entry sequence aarch64.linuxEntry {
+		max_parameters = 2
+		bss args 32768 16
+		bss environment 32768 16
+		bss environmentLength 8 8
+	}
+
+	syscall {
+		number = x8
+		arguments = [x0, x1, x2, x3, x4, x5]
+		result = x0
+		instruction = svc
+	}
+	operation read { number = 63 args = [fd, buffer, count] }
+	operation write { number = 64 args = [fd, buffer, count] }
+	operation read_at { number = 67 args = [fd, buffer, count, offset] }
+	operation write_at { number = 68 args = [fd, buffer, count, offset] }
+	operation open { number = 56 args = [dirfd, path, flags, mode] }
+	operation close { number = 57 args = [fd] }
+	operation chmod { number = 52 args = [fd, mode] }
+	operation print { use = write args = [stderr, buffer, count] }
+	operation exit { number = 93 args = [status] noreturn = true }
+}
+
+format elf64_aarch64 {
+	byte_order = little
+	address_bits = 64
+	kind = elf
+	machine = 183
+	code_offset = 176
+	file_alignment = 0x1000
+	flags = 0
+	image = elf_executable
+	patch_absolute = aarch64_page_address
+}
+
+target linux/aarch64 {
+	family = native_v1
+	os = linux
+	arch = aarch64
+	abi = aapcs64
+	runtime = linux_aarch64
+	executable = elf64_aarch64
+	build_tags = [linux, unix, aarch64, arm64]
+	capabilities = [hosted, executable, filesystem, heap, argv, environment]
+}

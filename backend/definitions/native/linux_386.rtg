@@ -1,0 +1,48 @@
+runtime linux_386 {
+	entry sequence x86_32.linuxEntry {
+		max_parameters = 2
+		bss args 32768 16
+		bss environment 32768 16
+		bss environmentLength 8 8
+	}
+
+	syscall {
+		number = eax
+		arguments = [ebx, ecx, edx, esi, edi, ebp]
+		result = eax
+		instruction = int80
+	}
+	operation read { number = 3 args = [fd, buffer, count] }
+	operation write { number = 4 args = [fd, buffer, count] }
+	operation read_at { number = 180 args = [fd, buffer, count, offset] }
+	operation write_at { number = 181 args = [fd, buffer, count, offset] }
+	operation open { number = 5 args = [path, flags, mode] }
+	operation close { number = 6 args = [fd] }
+	operation chmod { number = 94 args = [fd, mode] }
+	operation print { use = write args = [stderr, buffer, count] }
+	operation exit { number = 1 args = [status] noreturn = true }
+}
+
+format elf32_386 {
+	byte_order = little
+	address_bits = 32
+	kind = elf
+	machine = 3
+	code_offset = 116
+	file_alignment = 0x1000
+	flags = 0
+	image = elf_executable
+	patch_absolute = relative32_le
+	patch_pc_bias = -3
+}
+
+target linux/386 {
+	family = native_v1
+	os = linux
+	arch = x86_32
+	abi = cdecl32
+	runtime = linux_386
+	executable = elf32_386
+	build_tags = [linux, unix, 386]
+	capabilities = [hosted, executable, filesystem, heap, argv, environment]
+}

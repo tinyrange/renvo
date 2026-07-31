@@ -9,21 +9,32 @@ Renvo has two backend families:
   and validation are not native-machine concepts.
 
 The built-in native source of truth is the closed catalog rooted at
-[`native.rtg`](native.rtg). That small entry point imports one
-architecture-owned slice for each native ISA:
+[`native.rtg`](native.rtg). That small entry point imports four ISA slices and
+one composition file for each native target:
 
 ```text
 native.rtg
 └── native/
-    ├── x86_64.rtg
+    ├── x86_64.rtg              ISA, encoders, and ABIs
     ├── x86_32.rtg
     ├── aarch64.rtg
-    └── arm.rtg
+    ├── arm.rtg
+    ├── linux_amd64.rtg         runtime, formats, and target
+    ├── windows_amd64.rtg
+    ├── linux_kernel_amd64.rtg
+    ├── linux_386.rtg
+    ├── windows_386.rtg
+    ├── linux_aarch64.rtg
+    ├── darwin_aarch64.rtg
+    ├── windows_aarch64.rtg
+    └── linux_arm.rtg
 ```
 
-Each slice keeps an architecture beside its ABI, runtime, format, and target
-compositions. The Wasm/VM family remains in
-[`wasm32.rtg`](wasm32.rtg).
+ISA slices own reusable machine facts, encoders, and calling conventions.
+Target slices own the runtime boundary, executable/object formats, and the
+final target declaration. Cross-file hooks use the ISA's virtual package
+explicitly, such as `aarch64.darwinEntry`; machine declarations and ABIs remain
+catalog-global. The Wasm/VM family remains in [`wasm32.rtg`](wasm32.rtg).
 
 Generated Go is checked in so an ordinary `go build` needs no generator:
 
@@ -40,8 +51,9 @@ the source bundle used to prepare external definitions.
 
 ## Adding a native architecture
 
-Add a new architecture slice under `native/` and import it from `native.rtg`;
-do not add an architecture switch to the RTG parser or generator.
+Add a new ISA slice and one target slice per supported OS/environment under
+`native/`, then import each from `native.rtg`; do not add an architecture
+switch to the RTG parser or generator.
 
 1. Declare the physical registers once with `registers`.
 2. Use `register_class` for overlapping constrained subsets.
@@ -65,7 +77,9 @@ do not add an architecture switch to the RTG parser or generator.
    a later contract.
 9. Select a named label-relocation encoding and describe executable/object
    relocation facts in the format declaration.
-10. Add ABI, runtime, format, and target compositions.
+10. Keep reusable calling conventions in the ISA slice. Put each runtime,
+    format, and final target composition in a target-named slice such as
+    `linux_riscv64.rtg`; qualify references back to ISA helpers.
 11. Export only the architecture algorithms used by the checked-in compiler.
 12. Add the architecture projection to `generate.go`, regenerate, and run the
     complete backend and frontend suites under the repository memory cap.

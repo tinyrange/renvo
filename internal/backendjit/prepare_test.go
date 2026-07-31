@@ -606,15 +606,18 @@ func copyNativeDefinition(t *testing.T, root string, replacements ...string) str
 		name   string
 		source []byte
 	}
-	names := []string{
-		"native.rtg",
-		"native/x86_64.rtg",
-		"native/x86_32.rtg",
-		"native/aarch64.rtg",
-		"native/arm.rtg",
+	sourceRoot := filepath.Join(root, "backend", "definitions")
+	names := []string{"native.rtg"}
+	entries, err := os.ReadDir(filepath.Join(sourceRoot, "native"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".rtg" {
+			names = append(names, filepath.Join("native", entry.Name()))
+		}
 	}
 	files := make([]definitionFile, len(names))
-	sourceRoot := filepath.Join(root, "backend", "definitions")
 	for i := 0; i < len(names); i++ {
 		source, err := os.ReadFile(filepath.Join(sourceRoot, names[i]))
 		if err != nil {

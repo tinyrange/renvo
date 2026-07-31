@@ -1,0 +1,152 @@
+# Image fields are declared here. Header/section/relocation are generic
+# definition-language constructs, not precompiled ELF backends.
+format elf64_x86_64 {
+	kind = elf
+	code_offset = 176
+	image = elf_executable
+	patch_absolute = relative32_le
+	patch_pc_bias = 4
+	byte_order = little
+	address_bits = 64
+	file_alignment = 0x1000
+	machine = 62
+	flags = 0
+
+	header elf {
+		magic = [0x7f, 0x45, 0x4c, 0x46]
+		class = 2
+		data = 1
+		version = 1
+		osabi = 0
+		type = 3
+		machine = 62
+		entry = address(text.start)
+		program_header_offset = sizeof(elf_header)
+		section_header_offset = stripped ? 0 : sections.offset
+		flags = 0
+		elf_header_size = 64
+		program_header_size = 56
+		program_header_count = 2
+		section_header_size = stripped ? 0 : 64
+		section_header_count = stripped ? 0 : sections.count
+		section_name_index = stripped ? 0 : sections.names
+	}
+
+	segment text {
+		type = load
+		flags = read | execute
+		file = [headers.start, data.file_start)
+		emitMemoryOperand = [headers.start, data.memory_start)
+		alignment = 0x1000
+	}
+
+	segment data {
+		type = load
+		flags = read | write
+		file = [data.file_start, data.file_end)
+		emitMemoryOperand = [data.memory_start, bss.end)
+		alignment = 0x1000
+	}
+
+	sections when !stripped {
+		text progbits alloc|execute align=16
+		data progbits alloc|write align=8
+		bss nobits alloc|write align=8
+		symtab symtab entry_size=24 link=strtab
+		strtab strtab
+		shstrtab strtab
+	}
+
+	relocation {
+		label = rel32
+		data = rel32
+		bss = rel32
+	}
+}
+
+format elf64_object_x86_64 {
+	kind = "elf-relocatable"
+	kernel_image = linux_module_elf
+	byte_order = little
+	address_bits = 64
+	machine = 62
+	type = relocatable
+	append64 = sequence x86_64.nativeAppend64
+	append_header = sequence x86_64.kernelAppendELFHeader
+	append_relocation = sequence x86_64.kernelAppendRelocation
+	append_section = sequence x86_64.kernelAppendSection
+	append_symbol = sequence x86_64.kernelAppendSymbol
+
+	sections {
+		text progbits alloc|execute align=16
+		rela_text rela entry_size=24 link=symtab info=text
+		data progbits alloc|write align=8
+		bss nobits alloc|write align=8
+		symtab symtab entry_size=24 link=strtab
+		strtab strtab
+		shstrtab strtab
+	}
+
+	relocation label { number = 2 kind = pc_relative width = 32 addend = -4 }
+	relocation data { number = 2 kind = pc_relative width = 32 addend = -4 }
+	relocation bss { number = 2 kind = pc_relative width = 32 addend = -4 }
+	relocation abs64 { number = 1 kind = absolute width = 64 addend = 0 }
+}
+
+# Runtime declarations define only the supported boundary. Missing operations
+# are rejected during definition validation rather than silently emulated.
+runtime linux_x86_64 {
+	entry process_stack {
+		argc = word(rsp, 0)
+		argv = words(rsp + 8, argc)
+		envp = words(rsp + 16 + argc * 8, until_null)
+		string = nul_terminated_bytes
+		result = [slice(argv), slice(envp)]
+	}
+
+	entry template {
+		max_parameters = 2
+		bss args 32768 16
+		bss environment 32768 16
+		bss environmentLength 8 8
+		code = "\x48\x8b\x04\x24\x49\x89\xc0\x4c\x8d\x4c\x24\x08\x4c\x8d\x15\x00\x00\x00\x00\x4d\x89\xd4\x4d\x31\xdb\x4d\x39\xc3\x7d\x22\x4b\x8b\x3c\xd9\x49\x89\x3a\x48\x31\xc0\x80\x3c\x07\x00\x74\x05\x48\xff\xc0\xeb\xf5\x49\x89\x42\x08\x49\x83\xc2\x10\x49\xff\xc3\xeb\xd9\x4c\x8d\x4c\x24\x08\x49\x83\x39\x00\x74\x06\x49\x83\xc1\x08\xeb\xf4\x49\x83\xc1\x08\x4c\x8d\x15\x00\x00\x00\x00\x4d\x31\xdb\x4b\x8b\x3c\xd9\x48\x83\xff\x00\x74\x1e\x49\x89\x3a\x48\x31\xc0\x80\x3c\x07\x00\x74\x05\x48\xff\xc0\xeb\xf5\x49\x89\x42\x08\x49\x83\xc2\x10\x49\xff\xc3\xeb\xd8\x4c\x89\xd8\x48\x89\x05\x00\x00\x00\x00\x4c\x89\xe7\x4c\x89\xc6\x4c\x89\xc2\x48\x8d\x05\x00\x00\x00\x00\x50\x59\x48\x8b\x05\x00\x00\x00\x00\x49\x89\xc0\x49\x89\xc1"
+		relocation 15 bss args
+		relocation 88 bss environment
+		relocation 141 bss environmentLength
+		relocation 157 bss environment
+		relocation 166 bss environmentLength
+	}
+
+	syscall {
+		number = rax
+		arguments = [rdi, rsi, rdx, r10, r8, r9]
+		result = rax
+		error = negative
+		instruction = syscall
+	}
+
+	operation read { number = 0 args = [fd, buffer, count] }
+	operation write { number = 1 args = [fd, buffer, count] }
+	operation open { number = 2 args = [path, flags, mode] }
+	operation close { number = 3 args = [fd] }
+	operation read_at { number = 17 args = [fd, buffer, count, offset] }
+	operation write_at { number = 18 args = [fd, buffer, count, offset] }
+	operation chmod { number = 91 args = [fd, mode] }
+	operation print { use = write args = [stderr, buffer, count] }
+	operation exit { number = 60 args = [status] noreturn = true }
+}
+
+target linux/amd64 {
+	family = native_v1
+	os = linux
+	arch = x86_64
+	abi = sysv_x86_64
+	runtime = linux_x86_64
+	executable = elf64_x86_64
+	object = elf64_object_x86_64
+	build_tags = ["linux", "unix", "amd64"]
+	capabilities = [
+		hosted, executable, object, filesystem, heap,
+		argv, environment, linkstatic
+	]
+}

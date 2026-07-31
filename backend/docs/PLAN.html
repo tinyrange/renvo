@@ -829,7 +829,8 @@ instructions {
     <p>
       The built-in native source of truth is one closed catalog rooted at
       <code>backend/definitions/native.rtg</code>. The root imports four
-      architecture-owned slices; Wasm and VM source remains outside it.
+      reusable ISA slices and one composition slice for every native target;
+      Wasm and VM source remains outside it.
     </p>
     <pre><code>backend/definitions/native.rtg
     |
@@ -837,6 +838,15 @@ instructions {
     +-- @import native/x86_32.rtg
     +-- @import native/aarch64.rtg
     +-- @import native/arm.rtg
+    +-- @import native/linux_amd64.rtg
+    +-- @import native/windows_amd64.rtg
+    +-- @import native/linux_kernel_amd64.rtg
+    +-- @import native/linux_386.rtg
+    +-- @import native/windows_386.rtg
+    +-- @import native/linux_aarch64.rtg
+    +-- @import native/darwin_aarch64.rtg
+    +-- @import native/windows_aarch64.rtg
+    +-- @import native/linux_arm.rtg
     |
     v
 target slicing and reachability
@@ -1182,13 +1192,15 @@ target slicing and reachability
     <ol>
       <li>
         Root the closed catalog at <code>backend/definitions/native.rtg</code>
-        and import one coherent fragment per production architecture.
+        and import one reusable fragment per production ISA plus one
+        composition fragment per target.
       </li>
       <li>
-        Keep each architecture's ABI, runtime, format, and target compositions
-        beside that architecture. Use its file-derived virtual package for
-        private helpers and explicit package qualification for the uncommon
-        cross-architecture reference.
+        Keep machine facts, encoders, and reusable calling conventions in the
+        ISA fragment. Keep each runtime, executable/object format, and final
+        target declaration in a target-named fragment such as
+        <code>darwin_aarch64.rtg</code>. Use the ISA's file-derived virtual
+        package explicitly for cross-file hook references.
       </li>
       <li>
         Generate separate production files and manifests by target reachability.

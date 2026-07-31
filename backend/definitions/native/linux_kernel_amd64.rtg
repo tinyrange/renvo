@@ -1,0 +1,27 @@
+runtime linux_kernel_x86_64 {
+	entry_prologue = sequence x86_64.kernelEntryPrologue
+	entry_epilogue = sequence x86_64.kernelEntryEpilogue
+	emit_callback_address = sequence x86_64.kernelCallbackAddress
+	emit_static_call = go x86_64.kernelStaticCall
+	emit_operation = go x86_64.kernelRuntimeOperation
+
+	entry = kernel_module_init
+	exit = kernel_module_exit
+	operation print { import = printk }
+	operation open { unsupported = "kernel module runtime has no file API" }
+	operation close { unsupported = "kernel module runtime has no file API" }
+	operation read { unsupported = "kernel module runtime has no file API" }
+	operation write { unsupported = "kernel module runtime has no file API" }
+	operation chmod { unsupported = "kernel module runtime has no file API" }
+}
+
+target linux-kernel/amd64 {
+	family = native_v1
+	os = linux
+	arch = x86_64
+	abi = sysv_x86_64
+	runtime = linux_kernel_x86_64
+	object = elf64_object_x86_64
+	build_tags = ["linux", "unix", "amd64", "renvo_kernel"]
+	capabilities = [freestanding, kernel_module, object, imports, linkstatic]
+}
