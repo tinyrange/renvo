@@ -5,18 +5,6 @@ implements direct_emitter_v1
 # Design fixture only: this describes the awkward parts of an 8086-shaped
 # machine without claiming a DOS runtime or a production backend.
 go backend {
-	func fixture8086Move(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
-		out.Bytes2(0x89, destination.Code<<3|source.Code)
-	}
-	func fixture8086Load(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
-		out.Bytes2(0x8b, destination.Code<<3|address.Base.Code)
-	}
-	func fixture8086Store(out *RTGEmitter, address RTGAddress, source RTGRegister) {
-		out.Bytes2(0x89, source.Code<<3|address.Base.Code)
-	}
-	func fixture8086Add(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
-		out.Bytes2(0x01, destination.Code<<3|source.Code)
-	}
 	func fixture8086CallNear(out *RTGEmitter, target RTGLabel) {
 		out.Byte(0xe8)
 		out.Reloc(target)
@@ -74,18 +62,17 @@ arch intel_8086 {
 		ge 13
 	}
 	forms {
-		rr16 = go fixture8086Move
-		load16 = go fixture8086Load
-		store16 = go fixture8086Store
-		add16 = go fixture8086Add
+		rr16 = word16(destination:reg@11, source:reg@8)
+		load16 = word16(destination:reg@11, address:address_base@8)
+		store16 = word16(address:address_base@8, source:reg@11)
 		call_near = go fixture8086CallNear
 		branch_short = go fixture8086JumpCondition
 	}
 	instructions {
-		move16 rr16
-		load16 load16
-		store16 store16
-		add16 add16
+		move16 rr16 0x0089
+		load16 load16 0x008b
+		store16 store16 0x0089
+		add16 rr16 0x0001
 		call16 call_near relocation=near16
 		branch8 branch_short range=8 relocation=relative8
 	}

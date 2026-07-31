@@ -2,22 +2,10 @@
 # composition. Its explicit exports are the stable production contract used by
 # target-neutral lowering.
 go backend {
-
 	const machCodeOffset = 0x1000
 	const machImageBase = 0x100000000
 	const machPageSize = 0x4000
 	const machLibSystem = "/usr/lib/libSystem.B.dylib"
-
-	func darwinEntryStart(out *RTGEmitter, stateOffset int) bool {
-		if stateOffset < 0 {
-			return false
-		}
-		asmMovRegAbs(out, 9, stateOffset, RTGRelocationAbsoluteBSS)
-		asmStoreRegMem(out, 0, 9, 0, 8)
-		asmStoreRegMem(out, 1, 9, 8, 8)
-		asmStoreRegMem(out, 2, 9, 16, 8)
-		return true
-	}
 
 	func machAppendStringZ(out []byte, value string) []byte {
 		for i := 0; i < len(value); i++ {
@@ -571,10 +559,10 @@ go backend {
 
 	func asmPatchMovRegImmAt(a *RTGEmitter, at int, reg int, imm int) {
 		part := imm & 65535
-		a.PatchUint32( at, 0xd2800000|(part<<5)|reg)
+		a.PatchUint32(at, 0xd2800000|(part<<5)|reg)
 		for i := 1; i < 4; i++ {
 			part = (imm >> (i * 16)) & 65535
-			a.PatchUint32( at+i*4, 0xf2800000|(i<<21)|(part<<5)|reg)
+			a.PatchUint32(at+i*4, 0xf2800000|(i<<21)|(part<<5)|reg)
 		}
 	}
 
@@ -611,8 +599,8 @@ go backend {
 		if disp == 0 {
 			return base
 		}
-		asmAddRegImm(a, aarch64Address.Code, base, disp)
-		return aarch64Address.Code
+		asmAddRegImm(a, address.Code, base, disp)
+		return address.Code
 	}
 
 	func asmLoadRegMem(a *RTGEmitter, dst int, base int, disp int, size int) {
@@ -685,54 +673,54 @@ go backend {
 
 	func asmStackMem(a *RTGEmitter, offset int, base int, disp8 int, disp32 int) {
 		if base == 0x8948 && disp8 == 0x45 {
-			asmStoreRegStack(a, aarch64Primary.Code, offset)
+			asmStoreRegStack(a, primary.Code, offset)
 			return
 		}
 		if base == 0x8948 && disp8 == 0x55 {
-			asmStoreRegStack(a, aarch64Secondary.Code, offset)
+			asmStoreRegStack(a, secondary.Code, offset)
 			return
 		}
 		if base == 0x8948 && disp8 == 0x4d {
-			asmStoreRegStack(a, aarch64Tertiary.Code, offset)
+			asmStoreRegStack(a, tertiary.Code, offset)
 			return
 		}
 		if base == 0x8b48 && disp8 == 0x45 {
-			asmLoadRegStack(a, aarch64Primary.Code, offset)
+			asmLoadRegStack(a, primary.Code, offset)
 			return
 		}
 		if base == 0x8b48 && disp8 == 0x55 {
-			asmLoadRegStack(a, aarch64Secondary.Code, offset)
+			asmLoadRegStack(a, secondary.Code, offset)
 			return
 		}
 		if base == 0x8b48 && disp8 == 0x4d {
-			asmLoadRegStack(a, aarch64Tertiary.Code, offset)
+			asmLoadRegStack(a, tertiary.Code, offset)
 			return
 		}
 		if base == 0x8d48 && disp8 == 0x45 {
-			asmLeaRegStack(a, aarch64Primary.Code, offset)
+			asmLeaRegStack(a, primary.Code, offset)
 			return
 		}
 		if base == 0x8d48 && disp8 == 0x55 {
-			asmLeaRegStack(a, aarch64Secondary.Code, offset)
+			asmLeaRegStack(a, secondary.Code, offset)
 			return
 		}
 		if base == 0x8d48 && disp8 == 0x7d {
-			asmLeaRegStack(a, aarch64X3.Code, offset)
+			asmLeaRegStack(a, x3.Code, offset)
 			return
 		}
 		if base == 0x8d48 && disp8 == 0x75 {
-			asmLeaRegStack(a, aarch64X4.Code, offset)
+			asmLeaRegStack(a, x4.Code, offset)
 			return
 		}
 	}
 
 	func asmMemDisp(a *RTGEmitter, disp int, op int, disp8 int, disp32 int) {
 		if op == 0x8b48 && disp8 == 0x4a {
-			asmLoadRegMem(a, aarch64Tertiary.Code, aarch64Secondary.Code, disp, 8)
+			asmLoadRegMem(a, tertiary.Code, secondary.Code, disp, 8)
 			return
 		}
 		if op == 0x8b48 && disp8 == 0x52 {
-			asmLoadRegMem(a, aarch64Secondary.Code, aarch64Secondary.Code, disp, 8)
+			asmLoadRegMem(a, secondary.Code, secondary.Code, disp, 8)
 			return
 		}
 	}
@@ -748,8 +736,8 @@ go backend {
 		if size == 4 {
 			shift = 2
 		}
-		asmAddRegRegShift(a, aarch64Address.Code, aarch64Primary.Code, aarch64Tertiary.Code, shift)
-		asmLoadRegMem(a, aarch64Primary.Code, aarch64Address.Code, 0, size)
+		asmAddRegRegShift(a, address.Code, primary.Code, tertiary.Code, shift)
+		asmLoadRegMem(a, primary.Code, address.Code, 0, size)
 	}
 
 	func asmNormalizeRaxForKind(a *RTGEmitter, kind int) {
@@ -783,12 +771,12 @@ go backend {
 			asmEmit(a, 0xf100001f|(imm<<10)|(reg<<5))
 			return
 		}
-		asmMovRegImm(a, aarch64Scratch.Code, imm)
-		asmCmpRegReg(a, reg, aarch64Scratch.Code)
+		asmMovRegImm(a, scratch.Code, imm)
+		asmCmpRegReg(a, reg, scratch.Code)
 	}
 
 	func asmDivLeftRcxRightRax(a *RTGEmitter, mod bool) {
-		asmMovRegReg(a, aarch64Scratch.Code, aarch64Primary.Code)
+		asmMovRegReg(a, scratch.Code, primary.Code)
 		asmEmit(a, 0x9ac00c40)
 		if mod {
 			asmEmit(a, 0x9b098800)
@@ -837,59 +825,58 @@ go backend {
 		if size == 4 {
 			shift = 2
 		}
-		asmAddRegRegShift(a, aarch64Address.Code, aarch64Secondary.Code, aarch64Tertiary.Code, shift)
-		asmStoreRegMem(a, aarch64Primary.Code, aarch64Address.Code, 0, size)
+		asmAddRegRegShift(a, address.Code, secondary.Code, tertiary.Code, shift)
+		asmStoreRegMem(a, primary.Code, address.Code, 0, size)
 	}
 
-	// direct_emitter_v1 uses registers and addresses rather than the historical
-	// x86-named value helpers above. These algorithms are the architecture
-	// boundary used by generated backends.
+	// These address-aware algorithms form the architecture boundary used by
+	// generated direct-emitter backends.
 
-	func emitAddress(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
-		if RTGAddressValid(address) {
-			emitADR(out, destination, address)
+	func emitAddress(out *RTGEmitter, destination RTGRegister, memory RTGAddress) {
+		if RTGAddressValid(memory) {
+			emitADR(out, destination, memory)
 			return
 		}
-		base := address.Base.Code
-		if address.Index.Valid {
+		base := memory.Base.Code
+		if memory.Index.Valid {
 			shift := 0
-			if address.Scale == 2 {
+			if memory.Scale == 2 {
 				shift = 1
-			} else if address.Scale == 4 {
+			} else if memory.Scale == 4 {
 				shift = 2
-			} else if address.Scale == 8 {
+			} else if memory.Scale == 8 {
 				shift = 3
 			}
 			asmAddRegRegShift(
-				out, destination.Code, base, address.Index.Code, shift)
+				out, destination.Code, base, memory.Index.Code, shift)
 			base = destination.Code
 		}
 		asmAddRegImm(
-			out, destination.Code, base, address.Displacement)
+			out, destination.Code, base, memory.Displacement)
 	}
 
-	func memoryBase(out *RTGEmitter, address RTGAddress) int {
-		if RTGAddressValid(address) || address.Index.Valid {
-			emitAddress(out, aarch64Address, address)
-			return aarch64Address.Code
+	func memoryBase(out *RTGEmitter, memory RTGAddress) int {
+		if RTGAddressValid(memory) || memory.Index.Valid {
+			emitAddress(out, address, memory)
+			return address.Code
 		}
-		if address.Displacement < -256 || address.Displacement > 255 {
-			emitAddress(out, aarch64Address, address)
-			return aarch64Address.Code
+		if memory.Displacement < -256 || memory.Displacement > 255 {
+			emitAddress(out, address, memory)
+			return address.Code
 		}
-		return address.Base.Code
+		return memory.Base.Code
 	}
 
 	func loadWidth(
 		out *RTGEmitter,
 		destination RTGRegister,
-		address RTGAddress,
+		memory RTGAddress,
 		size int,
 		signed bool,
 	) {
-		base := memoryBase(out, address)
-		displacement := address.Displacement
-		if base == aarch64Address.Code {
+		base := memoryBase(out, memory)
+		displacement := memory.Displacement
+		if base == address.Code {
 			displacement = 0
 		}
 		imm := (displacement & 511) << 12
@@ -916,13 +903,13 @@ go backend {
 
 	func storeWidth(
 		out *RTGEmitter,
-		address RTGAddress,
+		memory RTGAddress,
 		source RTGRegister,
 		size int,
 	) {
-		base := memoryBase(out, address)
-		displacement := address.Displacement
-		if base == aarch64Address.Code {
+		base := memoryBase(out, memory)
+		displacement := memory.Displacement
+		if base == address.Code {
 			displacement = 0
 		}
 		imm := (displacement & 511) << 12
@@ -947,21 +934,21 @@ go backend {
 			op = 0x9ac02800
 		}
 		asmEmit(out,
-			op|(aarch64Primary.Code<<16)|
-				(aarch64Tertiary.Code<<5)|aarch64Primary.Code)
+			op|(primary.Code<<16)|
+				(tertiary.Code<<5)|primary.Code)
 	}
 
 	func signedDivide(out *RTGEmitter, remainder bool) {
 		asmMovRegReg(
-			out, aarch64Scratch.Code, aarch64Primary.Code)
+			out, scratch.Code, primary.Code)
 		asmEmit(out,
-			0x9ac00c00|(aarch64Primary.Code<<16)|
-				(aarch64Tertiary.Code<<5)|aarch64Primary.Code)
+			0x9ac00c00|(primary.Code<<16)|
+				(tertiary.Code<<5)|primary.Code)
 		if remainder {
 			asmEmit(out,
-				0x9b008000|(aarch64Scratch.Code<<16)|
-					(aarch64Primary.Code<<10)|
-					(aarch64Tertiary.Code<<5)|aarch64Primary.Code)
+				0x9b008000|(scratch.Code<<16)|
+					(primary.Code<<10)|
+					(tertiary.Code<<5)|primary.Code)
 		}
 	}
 
@@ -1213,367 +1200,257 @@ arch aarch64 {
 
 	sequences {
 		asmAddRaxRcx(a:emitter) {
-			asmAddRegReg(a,primary.Code,primary.Code,tertiary.Code)
-
+			asmAddRegReg(a, primary.Code, primary.Code, tertiary.Code)
 		}
 		asmAddRdxImm(a:emitter, imm:int) {
-			asmAddRegImm(a,secondary.Code,secondary.Code,imm)
-
+			asmAddRegImm(a, secondary.Code, secondary.Code, imm)
 		}
 		asmAddRdxRcx(a:emitter) {
-			asmAddRegReg(a,secondary.Code,secondary.Code,tertiary.Code)
-
+			asmAddRegReg(a, secondary.Code, secondary.Code, tertiary.Code)
 		}
 		asmAddRegReg(a:emitter, dst:int, left:int, right:int) {
-			asmEmit(a,0x8b000000|(right<<16)|(left<<5)|dst)
-
+			asmEmit(a, 0x8b000000|(right<<16)|(left<<5)|dst)
 		}
 		asmAddRegRegShift(a:emitter, dst:int, left:int, right:int, shift:int) {
-			asmEmit(a,0x8b000000|(right<<16)|(shift<<10)|(left<<5)|dst)
-
+			asmEmit(a, 0x8b000000|(right<<16)|(shift<<10)|(left<<5)|dst)
 		}
 		asmBoolNotRax(a:emitter) {
-			asmCmpRaxImm8(a,0)
-
-			asmCsetRax(a,0)
-
+			asmCmpRaxImm8(a, 0)
+			asmCsetRax(a, 0)
 		}
 		asmCmpRaxImm8(a:emitter, imm:int) {
-			asmCmpRegImm(a,primary.Code,imm)
-
+			asmCmpRegImm(a, primary.Code, imm)
 		}
 		asmCmpRegReg(a:emitter, left:int, right:int) {
-			asmEmit(a,0xeb00001f|(right<<16)|(left<<5))
-
+			asmEmit(a, 0xeb00001f|(right<<16)|(left<<5))
 		}
 		asmCsetRax(a:emitter, cond:int) {
-			asmEmit(a,0x9a9f07e0|((cond^1)<<12))
-
+			asmEmit(a, 0x9a9f07e0|((cond^1)<<12))
 		}
 		asmDecMemRdx(a:emitter) {
-			asmLoadRegMem(a,scratch.Code,secondary.Code,0,8)
-
-			asmAddRegImm(a,scratch.Code,scratch.Code,-1)
-
-			asmStoreRegMem(a,scratch.Code,secondary.Code,0,8)
-
+			asmLoadRegMem(a, scratch.Code, secondary.Code, 0, 8)
+			asmAddRegImm(a, scratch.Code, scratch.Code, -1)
+			asmStoreRegMem(a, scratch.Code, secondary.Code, 0, 8)
 		}
 		asmEmit(a:emitter, insn:int) {
-			RTGUint32(a,insn)
-
+			RTGUint32(a, insn)
 		}
 		asmImulRcxImm(a:emitter, imm:int) {
-			asmMovRegImm(a,scratch.Code,imm)
-
-			asmEmit(a,0x9b007c00|(scratch.Code<<16)|(tertiary.Code<<5)|tertiary.Code)
-
+			asmMovRegImm(a, scratch.Code, imm)
+			asmEmit(a, 0x9b007c00|(scratch.Code<<16)|(tertiary.Code<<5)|tertiary.Code)
 		}
 		asmIncMemRdx(a:emitter) {
-			asmLoadRegMem(a,scratch.Code,secondary.Code,0,8)
-
-			asmAddRegImm(a,scratch.Code,scratch.Code,1)
-
-			asmStoreRegMem(a,scratch.Code,secondary.Code,0,8)
-
+			asmLoadRegMem(a, scratch.Code, secondary.Code, 0, 8)
+			asmAddRegImm(a, scratch.Code, scratch.Code, 1)
+			asmStoreRegMem(a, scratch.Code, secondary.Code, 0, 8)
 		}
 		asmIncRax(a:emitter) {
-			asmAddRegImm(a,primary.Code,primary.Code,1)
-
+			asmAddRegImm(a, primary.Code, primary.Code, 1)
 		}
 		asmIncRcx(a:emitter) {
-			asmAddRegImm(a,tertiary.Code,tertiary.Code,1)
-
+			asmAddRegImm(a, tertiary.Code, tertiary.Code, 1)
 		}
 		asmJnzLabel(a:emitter, label:int) {
-			asmBCondLabel(a,label,1)
-
+			asmBCondLabel(a, label, 1)
 		}
 		asmJzLabel(a:emitter, label:int) {
-			asmBCondLabel(a,label,0)
-
+			asmBCondLabel(a, label, 0)
 		}
 		asmLeaRegStack(a:emitter, dst:int, offset:int) {
-			asmAddRegImm(a,dst,frame.Code,-offset)
-
+			asmAddRegImm(a, dst, frame.Code, -offset)
 		}
 		asmLeave(a:emitter) {
-			asmEmit(a,0x910003bf)
-
-			asmEmit(a,0xa8c17bfd)
-
+			asmEmit(a, 0x910003bf)
+			asmEmit(a, 0xa8c17bfd)
 		}
 		asmLoadByteRaxIndexRcx(a:emitter) {
-			asmAddRegRegShift(a,address.Code,primary.Code,tertiary.Code,0)
-
-			asmLoadRegMem(a,primary.Code,address.Code,0,1)
-
+			asmAddRegRegShift(a, address.Code, primary.Code, tertiary.Code, 0)
+			asmLoadRegMem(a, primary.Code, address.Code, 0, 1)
 		}
 		asmLoadQwordRaxIndexRcx8(a:emitter) {
-			asmAddRegRegShift(a,address.Code,primary.Code,tertiary.Code,3)
-
-			asmLoadRegMem(a,primary.Code,address.Code,0,8)
-
+			asmAddRegRegShift(a, address.Code, primary.Code, tertiary.Code, 3)
+			asmLoadRegMem(a, primary.Code, address.Code, 0, 8)
 		}
 		asmLoadQwordRaxIndexRcxDisp(a:emitter, disp:int) {
-			asmAddRegReg(a,address.Code,primary.Code,tertiary.Code)
-
-			asmLoadRegMem(a,primary.Code,address.Code,disp,8)
-
+			asmAddRegReg(a, address.Code, primary.Code, tertiary.Code)
+			asmLoadRegMem(a, primary.Code, address.Code, disp, 8)
 		}
 		asmLoadRaxBss(a:emitter, bssOff:int) {
-			asmMovRegAbs(a,address.Code,bssOff,RTGRelocationAbsoluteBSS)
-
-			asmLoadRegMem(a,primary.Code,address.Code,0,8)
-
+			asmMovRegAbs(a, address.Code, bssOff, RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(a, primary.Code, address.Code, 0, 8)
 		}
 		asmLoadRaxMemRdxDisp(a:emitter, disp:int) {
-			asmLoadRegMem(a,primary.Code,secondary.Code,disp,8)
-
+			asmLoadRegMem(a, primary.Code, secondary.Code, disp, 8)
 		}
 		asmLoadRaxMemRdxDispSize(a:emitter, disp:int, size:int) {
-			asmLoadRegMem(a,primary.Code,secondary.Code,disp,size)
-
+			asmLoadRegMem(a, primary.Code, secondary.Code, disp, size)
 		}
 		asmLoadRegStack(a:emitter, dst:int, offset:int) {
-			asmLoadRegMem(a,dst,frame.Code,-offset,8)
-
+			asmLoadRegMem(a, dst, frame.Code, -offset, 8)
 		}
 		asmMovR10BssAddr(a:emitter, bssOff:int) {
-			asmMovRegAbs(a,x7.Code,bssOff,RTGRelocationAbsoluteBSS)
-
+			asmMovRegAbs(a, x7.Code, bssOff, RTGRelocationAbsoluteBSS)
 		}
 		asmMovR8Rax(a:emitter) {
-			asmMovRegReg(a,x5.Code,primary.Code)
-
+			asmMovRegReg(a, x5.Code, primary.Code)
 		}
 		asmMovR9Rax(a:emitter) {
-			asmMovRegReg(a,x6.Code,primary.Code)
-
+			asmMovRegReg(a, x6.Code, primary.Code)
 		}
 		asmMovRaxBssAddr(a:emitter, bssOff:int) {
-			asmMovRegAbs(a,primary.Code,bssOff,RTGRelocationAbsoluteBSS)
-
+			asmMovRegAbs(a, primary.Code, bssOff, RTGRelocationAbsoluteBSS)
 		}
 		asmMovRaxDataAddr(a:emitter, dataOff:int) {
-			asmMovRegAbs(a,primary.Code,dataOff,0)
-
+			asmMovRegAbs(a, primary.Code, dataOff, 0)
 		}
 		asmMovRaxImm(a:emitter, imm:int) {
-			asmMovRegImm(a,primary.Code,imm)
-
+			asmMovRegImm(a, primary.Code, imm)
 		}
 		asmMovRaxImm64(a:emitter, imm:int) {
-			asmMovRaxImm(a,imm)
-
+			asmMovRaxImm(a, imm)
 		}
 		asmMovRaxRdx(a:emitter) {
-			asmMovRegReg(a,primary.Code,secondary.Code)
-
+			asmMovRegReg(a, primary.Code, secondary.Code)
 		}
 		asmMovRcxRax(a:emitter) {
-			asmMovRegReg(a,tertiary.Code,primary.Code)
-
+			asmMovRegReg(a, tertiary.Code, primary.Code)
 		}
 		asmMovRcxRdx(a:emitter) {
-			asmMovRegReg(a,tertiary.Code,secondary.Code)
-
+			asmMovRegReg(a, tertiary.Code, secondary.Code)
 		}
 		asmMovRdiRax(a:emitter) {
-			asmMovRegReg(a,x3.Code,primary.Code)
-
+			asmMovRegReg(a, x3.Code, primary.Code)
 		}
 		asmMovRdxImm(a:emitter, imm:int) {
-			asmMovRegImm(a,secondary.Code,imm)
-
+			asmMovRegImm(a, secondary.Code, imm)
 		}
 		asmMovRdxRax(a:emitter) {
-			asmMovRegReg(a,secondary.Code,primary.Code)
-
+			asmMovRegReg(a, secondary.Code, primary.Code)
 		}
 		asmMovRsiRax(a:emitter) {
-			asmMovRegReg(a,x4.Code,primary.Code)
-
+			asmMovRegReg(a, x4.Code, primary.Code)
 		}
 		asmMulRegReg(a:emitter, dst:int, left:int, right:int) {
-			asmEmit(a,0x9b007c00|(right<<16)|(left<<5)|dst)
-
+			asmEmit(a, 0x9b007c00|(right<<16)|(left<<5)|dst)
 		}
 		asmNegRax(a:emitter) {
-			asmSubRegReg(a,primary.Code,zero.Code,primary.Code)
-
+			asmSubRegReg(a, primary.Code, zero.Code, primary.Code)
 		}
 		asmPopRax(a:emitter) {
-			asmPopReg(a,primary.Code)
-
+			asmPopReg(a, primary.Code)
 		}
 		asmPopRcx(a:emitter) {
-			asmPopReg(a,tertiary.Code)
-
+			asmPopReg(a, tertiary.Code)
 		}
 		asmPopRdi(a:emitter) {
-			asmPopReg(a,x3.Code)
-
+			asmPopReg(a, x3.Code)
 		}
 		asmPopRdx(a:emitter) {
-			asmPopReg(a,secondary.Code)
-
+			asmPopReg(a, secondary.Code)
 		}
 		asmPopReg(a:emitter, reg:int) {
-			asmEmit(a,0xf84107e0|reg)
-
+			asmEmit(a, 0xf84107e0|reg)
 		}
 		asmPopRsi(a:emitter) {
-			asmPopReg(a,x4.Code)
-
+			asmPopReg(a, x4.Code)
 		}
 		asmPushImm(a:emitter, imm:int) {
-			asmMovRegImm(a,scratch.Code,imm)
-
-			asmPushReg(a,scratch.Code)
-
+			asmMovRegImm(a, scratch.Code, imm)
+			asmPushReg(a, scratch.Code)
 		}
 		asmPushRax(a:emitter) {
-			asmPushReg(a,primary.Code)
-
+			asmPushReg(a, primary.Code)
 		}
 		asmPushRcx(a:emitter) {
-			asmPushReg(a,tertiary.Code)
-
+			asmPushReg(a, tertiary.Code)
 		}
 		asmPushRdx(a:emitter) {
-			asmPushReg(a,secondary.Code)
-
+			asmPushReg(a, secondary.Code)
 		}
 		asmPushReg(a:emitter, reg:int) {
-			asmEmit(a,0xf81f0fe0|reg)
-
+			asmEmit(a, 0xf81f0fe0|reg)
 		}
 		asmRet(a:emitter) {
-			asmEmit(a,0xd65f03c0)
-
+			asmEmit(a, 0xd65f03c0)
 		}
 		asmSarRaxImm(a:emitter, imm:int) {
-			asmEmit(a,0x9340fc00|(imm<<16))
-
+			asmEmit(a, 0x9340fc00|(imm<<16))
 		}
 		asmShlRaxImm(a:emitter, imm:int) {
-			asmEmit(a,0xd3400000|((64-imm)<<16)|((63-imm)<<10))
-
+			asmEmit(a, 0xd3400000|((64-imm)<<16)|((63-imm)<<10))
 		}
 		asmShlRcxImm(a:emitter, imm:int) {
-			asmEmit(a,0xd3400000|((64-imm)<<16)|((63-imm)<<10)|(tertiary.Code<<5)|tertiary.Code)
-
+			asmEmit(a, 0xd3400000|((64-imm)<<16)|((63-imm)<<10)|(tertiary.Code<<5)|tertiary.Code)
 		}
 		asmStoreAlMemRdxRcx1(a:emitter) {
-			asmAddRegRegShift(a,address.Code,secondary.Code,tertiary.Code,0)
-
-			asmStoreRegMem(a,primary.Code,address.Code,0,1)
-
+			asmAddRegRegShift(a, address.Code, secondary.Code, tertiary.Code, 0)
+			asmStoreRegMem(a, primary.Code, address.Code, 0, 1)
 		}
 		asmStoreRaxBss(a:emitter, bssOff:int) {
-			asmMovRegAbs(a,address.Code,bssOff,RTGRelocationAbsoluteBSS)
-
-			asmStoreRegMem(a,primary.Code,address.Code,0,8)
-
+			asmMovRegAbs(a, address.Code, bssOff, RTGRelocationAbsoluteBSS)
+			asmStoreRegMem(a, primary.Code, address.Code, 0, 8)
 		}
 		asmStoreRaxMemRdxDisp(a:emitter, disp:int) {
-			asmStoreRegMem(a,primary.Code,secondary.Code,disp,8)
-
+			asmStoreRegMem(a, primary.Code, secondary.Code, disp, 8)
 		}
 		asmStoreRaxMemRdxDispSize(a:emitter, disp:int, size:int) {
-			asmStoreRegMem(a,primary.Code,secondary.Code,disp,size)
-
+			asmStoreRegMem(a, primary.Code, secondary.Code, disp, size)
 		}
 		asmStoreRaxMemRdxRcx8(a:emitter) {
-			asmAddRegRegShift(a,address.Code,secondary.Code,tertiary.Code,3)
-
-			asmStoreRegMem(a,primary.Code,address.Code,0,8)
-
+			asmAddRegRegShift(a, address.Code, secondary.Code, tertiary.Code, 3)
+			asmStoreRegMem(a, primary.Code, address.Code, 0, 8)
 		}
 		asmStoreRegStack(a:emitter, src:int, offset:int) {
-			asmStoreRegMem(a,src,frame.Code,-offset,8)
-
+			asmStoreRegMem(a, src, frame.Code, -offset, 8)
 		}
 		asmStoreSliceStack(a:emitter, offset:int) {
-			asmStoreRegStack(a,primary.Code,offset)
-
-			asmStoreRegStack(a,secondary.Code,offset-8)
-
-			asmStoreRegStack(a,tertiary.Code,offset-16)
-
+			asmStoreRegStack(a, primary.Code, offset)
+			asmStoreRegStack(a, secondary.Code, offset-8)
+			asmStoreRegStack(a, tertiary.Code, offset-16)
 		}
 		asmSubRaxRcx(a:emitter) {
-			asmSubRegReg(a,primary.Code,primary.Code,tertiary.Code)
-
+			asmSubRegReg(a, primary.Code, primary.Code, tertiary.Code)
 		}
 		asmSubRegReg(a:emitter, dst:int, left:int, right:int) {
-			asmEmit(a,0xcb000000|(right<<16)|(left<<5)|dst)
-
+			asmEmit(a, 0xcb000000|(right<<16)|(left<<5)|dst)
 		}
 		asmSyscall(a:emitter) {
-			asmMovRegReg(a,system.Code,primary.Code)
-
-			asmMovRegReg(a,scratch.Code,secondary.Code)
-
-			asmMovRegReg(a,0,x3.Code)
-
-			asmMovRegReg(a,1,x4.Code)
-
-			asmMovRegReg(a,2,scratch.Code)
-
-			asmMovRegReg(a,3,x7.Code)
-
-			asmEmit(a,0xd4000001)
-
+			asmMovRegReg(a, system.Code, primary.Code)
+			asmMovRegReg(a, scratch.Code, secondary.Code)
+			asmMovRegReg(a, 0, x3.Code)
+			asmMovRegReg(a, 1, x4.Code)
+			asmMovRegReg(a, 2, scratch.Code)
+			asmMovRegReg(a, 3, x7.Code)
+			asmEmit(a, 0xd4000001)
 		}
-
 		asmBCondLabel(a:emitter, label:int, cond:int) {
 			let at = a.Len()
-
-			asmEmit(a,0x54000000|cond)
-
-			a.RelocAt(at,label)
-
+			asmEmit(a, 0x54000000|cond)
+			a.RelocAt(at, label)
 		}
 		asmCallLabel(a:emitter, label:int) {
 			let at = a.Len()
-
-			asmEmit(a,0x94000000)
-
-			a.RelocAt(at,label)
-
+			asmEmit(a, 0x94000000)
+			a.RelocAt(at, label)
 		}
 		asmCmpRcxRaxSet(a:emitter, setcc:int) {
-			asmCmpRegReg(a,tertiary.Code,primary.Code)
-
+			asmCmpRegReg(a, tertiary.Code, primary.Code)
 			let cond = condFromSetcc(setcc)
-
-			asmCsetRax(a,cond)
-
+			asmCsetRax(a, cond)
 		}
 		asmJmpLabel(a:emitter, label:int) {
 			let at = a.Len()
-
-			asmEmit(a,0x14000000)
-
-			a.RelocAt(at,label)
-
+			asmEmit(a, 0x14000000)
+			a.RelocAt(at, label)
 		}
 		asmMovRegAbs(a:emitter, reg:int, off:int, kind:int) {
 			let at = a.Len()
-
-			asmMovRegImm(a,reg,0)
-
-			asmEmit(a,0xf2800000|(1<<21)|reg)
-
-			asmEmit(a,0xf2800000|(2<<21)|reg)
-
-			asmEmit(a,0xf2800000|(3<<21)|reg)
-
-			a.AbsoluteReloc(at,off,kind)
-
+			asmMovRegImm(a, reg, 0)
+			asmEmit(a, 0xf2800000|(1<<21)|reg)
+			asmEmit(a, 0xf2800000|(2<<21)|reg)
+			asmEmit(a, 0xf2800000|(3<<21)|reg)
+			a.AbsoluteReloc(at, off, kind)
 		}
-
 		copyBytes(out:emitter) {
 			let destination = x3
 			let source = x4
@@ -1583,44 +1460,44 @@ arch aarch64 {
 			let forwardLoop = out.NewLabel()
 			let backwardLoop = out.NewLabel()
 			let done = out.NewLabel()
-			compare(out,destination,source)
-			jumpCondition(out,record_condition(Code:9),forward)
-			emitAddress(out,scratch,record_address(Base:source,Index:count,Scale:1,))
-			compare(out,destination,scratch)
-			jumpCondition(out,record_condition(Code:2),forward)
-			emitAddress(out,source,record_address(Base:source,Index:count,Scale:1,Displacement:-1,))
-			emitAddress(out,destination,record_address(Base:destination,Index:count,Scale:1,Displacement:-1,))
+			compare(out, destination, source)
+			jumpCondition(out, record_condition(Code:9), forward)
+			emitAddress(out, scratch, record_address(Base:source, Index:count, Scale:1, ))
+			compare(out, destination, scratch)
+			jumpCondition(out, record_condition(Code:2), forward)
+			emitAddress(out, source, record_address(Base:source, Index:count, Scale:1, Displacement:-1, ))
+			emitAddress(out, destination, record_address(Base:destination, Index:count, Scale:1, Displacement:-1, ))
 			out.Mark(backwardLoop)
-			compare(out,count,zero)
-			jumpCondition(out,record_condition(Code:0),done)
-			loadU8(out,value,record_address(Base:source))
-			storeU8(out,record_address(Base:destination),value)
-			decrement(out,source)
-			decrement(out,destination)
-			decrement(out,count)
-			jump(out,backwardLoop)
+			compare(out, count, zero)
+			jumpCondition(out, record_condition(Code:0), done)
+			loadU8(out, value, record_address(Base:source))
+			storeU8(out, record_address(Base:destination), value)
+			decrement(out, source)
+			decrement(out, destination)
+			decrement(out, count)
+			jump(out, backwardLoop)
 			out.Mark(forward)
 			out.Mark(forwardLoop)
-			compare(out,count,zero)
-			jumpCondition(out,record_condition(Code:0),done)
-			loadU8(out,value,record_address(Base:source))
-			storeU8(out,record_address(Base:destination),value)
-			increment(out,source)
-			increment(out,destination)
-			decrement(out,count)
-			jump(out,forwardLoop)
+			compare(out, count, zero)
+			jumpCondition(out, record_condition(Code:0), done)
+			loadU8(out, value, record_address(Base:source))
+			storeU8(out, record_address(Base:destination), value)
+			increment(out, source)
+			increment(out, destination)
+			decrement(out, count)
+			jump(out, forwardLoop)
 			out.Mark(done)
 		}
 		darwinExit(out:emitter, status:register) {
-			asmMovRegReg(out,0,status.Code)
-			darwinCallImport(out,"_exit")
+			asmMovRegReg(out, 0, status.Code)
+			darwinCallImport(out, "_exit")
 		}
 		frameStart(out:emitter) -> int {
-			asmEmit(out,0xa9bf7bfd)
-			asmEmit(out,0x910003fd)
+			asmEmit(out, 0xa9bf7bfd)
+			asmEmit(out, 0x910003fd)
 			let at = out.Len()
-			asmEmit(out,0xd503201f)
-			asmEmit(out,0xd503201f)
+			asmEmit(out, 0xd503201f)
+			asmEmit(out, 0xd503201f)
 			return at
 		}
 		hostSyscall(out:emitter) {
@@ -1628,61 +1505,60 @@ arch aarch64 {
 		}
 		machImage(out:emitter) -> bytes {
 			let imports = machPrepareImports(out)
-			let dataFileOff = RTGAlignValue(machCodeOffset+out.Len(),machPageSize)
-			let bind = machBuildBindData(out,imports.got)
+			let dataFileOff = RTGAlignValue(machCodeOffset+out.Len(), machPageSize)
+			let bind = machBuildBindData(out, imports.got)
 			let symtab = machBuildSymbolTable(out)
 			let strtab = machBuildStringTable(out)
 			let undefinedCount = out.DynamicImportCount()
 			let textFileSize = dataFileOff
 			let dataFileSize = len(out.Data())
-			let dataVMSize = RTGAlignValue(dataFileSize+out.BSSSize(),machPageSize)
+			let dataVMSize = RTGAlignValue(dataFileSize+out.BSSSize(), machPageSize)
 			let linkeditOff = dataFileOff+dataFileSize
 			let bindOff = linkeditOff
-			let symOff = RTGAlignValue(bindOff+len(bind),8)
+			let symOff = RTGAlignValue(bindOff+len(bind), 8)
 			let strOff = symOff+len(symtab)
-			let sigOff = RTGAlignValue(strOff+len(strtab),16)
-			let sigSize = machCodeSignatureSize(sigOff,"renvo")
+			let sigOff = RTGAlignValue(strOff+len(strtab), 16)
+			let sigSize = machCodeSignatureSize(sigOff, "renvo")
 			let linkeditSize = sigOff+sigSize-linkeditOff
-			let image = machHeader(out,textFileSize,dataFileOff,dataFileSize,dataVMSize,linkeditOff,linkeditSize,bindOff,len(bind),symOff,1+undefinedCount,strOff,len(strtab),undefinedCount,sigOff,sigSize,)
-			set image = append(image,out.Code()...)
-			set image = machAppendUntil(image,dataFileOff)
-			set image = append(image,out.Data()...)
-			set image = machAppendUntil(image,bindOff)
-			set image = append(image,bind...)
-			set image = machAppendUntil(image,symOff)
-			set image = append(image,symtab...)
-			set image = append(image,strtab...)
-			set image = machAppendUntil(image,sigOff)
-			let signature = machCodeSignature(image,"renvo",textFileSize)
-			return append(image,signature...)
+			let image = machHeader(out, textFileSize, dataFileOff, dataFileSize, dataVMSize, linkeditOff, linkeditSize, bindOff, len(bind), symOff, 1+undefinedCount, strOff, len(strtab), undefinedCount, sigOff, sigSize, )
+			set image = append(image, out.Code()...)
+			set image = machAppendUntil(image, dataFileOff)
+			set image = append(image, out.Data()...)
+			set image = machAppendUntil(image, bindOff)
+			set image = append(image, bind...)
+			set image = machAppendUntil(image, symOff)
+			set image = append(image, symtab...)
+			set image = append(image, strtab...)
+			set image = machAppendUntil(image, sigOff)
+			let signature = machCodeSignature(image, "renvo", textFileSize)
+			return append(image, signature...)
 		}
 		move(out:emitter, destination:register, source:register) {
-			asmMovRegReg(out,destination.Code,source.Code)
+			asmMovRegReg(out, destination.Code, source.Code)
 		}
 		moveImmediate(out:emitter, destination:register, value:int64) {
-			asmMovRegImm(out,destination.Code,int(value))
+			asmMovRegImm(out, destination.Code, int(value))
 		}
 		setCondition(out:emitter, condition:condition, destination:register) {
-			asmEmit(out,0x9a9f07e0|((condition.Code^1)<<12)|destination.Code)
+			asmEmit(out, 0x9a9f07e0|((condition.Code^1)<<12)|destination.Code)
 		}
 		shiftLeftImmediate(out:emitter, operand:register, value:byte) {
 			let shift = int(value)&63
-			asmEmit(out,0xd3400000|((64-shift)<<16)|((63-shift)<<10)|(operand.Code<<5)|operand.Code)
+			asmEmit(out, 0xd3400000|((64-shift)<<16)|((63-shift)<<10)|(operand.Code<<5)|operand.Code)
 		}
 		shiftRightSignedImmediate(out:emitter, operand:register, value:byte) {
-			asmEmit(out,0x9340fc00|((int(value)&63)<<16)|(operand.Code<<5)|operand.Code)
+			asmEmit(out, 0x9340fc00|((int(value)&63)<<16)|(operand.Code<<5)|operand.Code)
 		}
 		shiftRightUnsignedImmediate(out:emitter, operand:register, value:byte) {
-			asmEmit(out,0xd340fc00|((int(value)&63)<<16)|(operand.Code<<5)|operand.Code)
+			asmEmit(out, 0xd340fc00|((int(value)&63)<<16)|(operand.Code<<5)|operand.Code)
 		}
 		windowsExit(out:emitter, status:register) {
-			asmMovRegReg(out,0,status.Code)
-			windowsCallImport(out,8)
+			asmMovRegReg(out, 0, status.Code)
+			windowsCallImport(out, 8)
 		}
-
 		darwinCallImport(out:emitter, name:string) {
-			let index = out.DynamicImport(machLibSystem,name)
-			asmCallLabel(out,out.DynamicImportLabel(index))
+			let index = out.DynamicImport(machLibSystem, name)
+			asmCallLabel(out, out.DynamicImportLabel(index))
 		}
 		emitADR(out:emitter, destination:register, address:address) {
 			let addend = address.Addend
@@ -1690,118 +1566,118 @@ arch aarch64 {
 			set insn = insn|((addend&3)<<29)
 			set insn = insn|(((addend>>2)&0x7ffff)<<5)
 			let at = out.Len()
-			asmEmit(out,insn)
-			RTGAddressRelocAt(out,address,at)
+			asmEmit(out, insn)
+			RTGAddressRelocAt(out, address, at)
 		}
 		loadI16(out:emitter, destination:register, address:address) {
-			loadWidth(out,destination,address,2,true)
+			loadWidth(out, destination, address, 2, true)
 		}
 		loadI32(out:emitter, destination:register, address:address) {
-			loadWidth(out,destination,address,4,true)
+			loadWidth(out, destination, address, 4, true)
 		}
 		loadI8(out:emitter, destination:register, address:address) {
-			loadWidth(out,destination,address,1,true)
+			loadWidth(out, destination, address, 1, true)
 		}
 		loadNative(out:emitter, destination:register, address:address) {
-			loadWidth(out,destination,address,8,false)
+			loadWidth(out, destination, address, 8, false)
 		}
 		loadU16(out:emitter, destination:register, address:address) {
-			loadWidth(out,destination,address,2,false)
+			loadWidth(out, destination, address, 2, false)
 		}
 		loadU32(out:emitter, destination:register, address:address) {
-			loadWidth(out,destination,address,4,false)
+			loadWidth(out, destination, address, 4, false)
 		}
 		loadU8(out:emitter, destination:register, address:address) {
-			loadWidth(out,destination,address,1,false)
+			loadWidth(out, destination, address, 1, false)
 		}
 		machAppend16(out:bytes, value:int) -> bytes {
-			return append(out,byte(value),byte(value>>8))
+			return append(out, byte(value), byte(value>>8))
 		}
 		machAppend32(out:bytes, value:int) -> bytes {
-			return append(out,byte(value),byte(value>>8),byte(value>>16),byte(value>>24))
+			return append(out, byte(value), byte(value>>8), byte(value>>16), byte(value>>24))
 		}
 		machAppend64(out:bytes, value:int) -> bytes {
-			set out = machAppend32(out,value)
-			return machAppend32(out,value>>32)
+			set out = machAppend32(out, value)
+			return machAppend32(out, value>>32)
 		}
 		machAppendBE32(out:bytes, value:int) -> bytes {
-			set out = append(out,byte(value>>24))
-			set out = append(out,byte(value>>16))
-			set out = append(out,byte(value>>8))
-			return append(out,byte(value))
+			set out = append(out, byte(value>>24))
+			set out = append(out, byte(value>>16))
+			set out = append(out, byte(value>>8))
+			return append(out, byte(value))
 		}
 		machAppendBE64(out:bytes, value:int) -> bytes {
-			set out = machAppendBE32(out,value>>32)
-			return machAppendBE32(out,value)
+			set out = machAppendBE32(out, value>>32)
+			return machAppendBE32(out, value)
 		}
 		machAppendDataSegment(out:bytes, dataFileOff:int, dataFileSize:int, bssSize:int) -> bytes {
-			let vmSize = RTGAlignValue(dataFileSize+bssSize,machPageSize)
-			set out = machAppend32(out,0x19)
-			set out = machAppend32(out,232)
-			set out = machAppendName16(out,"__DATA")
-			set out = machAppend64(out,machImageBase+dataFileOff)
-			set out = machAppend64(out,vmSize)
-			set out = machAppend64(out,dataFileOff)
-			set out = machAppend64(out,dataFileSize)
-			set out = machAppend32(out,3)
-			set out = machAppend32(out,3)
-			set out = machAppend32(out,2)
-			set out = machAppend32(out,0)
-			set out = machAppendSection64(out,"__data","__DATA",machImageBase+dataFileOff,dataFileSize,dataFileOff,3,0,)
-			return machAppendSection64(out,"__bss","__DATA",machImageBase+dataFileOff+dataFileSize,bssSize,0,3,1,)
+			let vmSize = RTGAlignValue(dataFileSize+bssSize, machPageSize)
+			set out = machAppend32(out, 0x19)
+			set out = machAppend32(out, 232)
+			set out = machAppendName16(out, "__DATA")
+			set out = machAppend64(out, machImageBase+dataFileOff)
+			set out = machAppend64(out, vmSize)
+			set out = machAppend64(out, dataFileOff)
+			set out = machAppend64(out, dataFileSize)
+			set out = machAppend32(out, 3)
+			set out = machAppend32(out, 3)
+			set out = machAppend32(out, 2)
+			set out = machAppend32(out, 0)
+			set out = machAppendSection64(out, "__data", "__DATA", machImageBase+dataFileOff, dataFileSize, dataFileOff, 3, 0, )
+			return machAppendSection64(out, "__bss", "__DATA", machImageBase+dataFileOff+dataFileSize, bssSize, 0, 3, 1, )
 		}
 		machAppendDylibCommand(out:bytes, path:string) -> bytes {
 			let start = len(out)
 			let size = machDylibCommandSize(path)
-			set out = machAppend32(out,0x0c)
-			set out = machAppend32(out,size)
-			set out = machAppend32(out,24)
-			set out = machAppend32(out,2)
-			set out = machAppend32(out,0x00010000)
-			set out = machAppend32(out,0x00010000)
-			set out = machAppendStringZ(out,path)
-			return machAppendUntil(out,start+size)
+			set out = machAppend32(out, 0x0c)
+			set out = machAppend32(out, size)
+			set out = machAppend32(out, 24)
+			set out = machAppend32(out, 2)
+			set out = machAppend32(out, 0x00010000)
+			set out = machAppend32(out, 0x00010000)
+			set out = machAppendStringZ(out, path)
+			return machAppendUntil(out, start+size)
 		}
 		machAppendSection64(out:bytes, section:string, segment:string, addr:int, size:int, offset:int, align:int, flags:int) -> bytes {
-			set out = machAppendName16(out,section)
-			set out = machAppendName16(out,segment)
-			set out = machAppend64(out,addr)
-			set out = machAppend64(out,size)
-			set out = machAppend32(out,offset)
-			set out = machAppend32(out,align)
-			set out = machAppend32(out,0)
-			set out = machAppend32(out,0)
-			set out = machAppend32(out,flags)
-			set out = machAppend32(out,0)
-			set out = machAppend32(out,0)
-			return machAppend32(out,0)
+			set out = machAppendName16(out, section)
+			set out = machAppendName16(out, segment)
+			set out = machAppend64(out, addr)
+			set out = machAppend64(out, size)
+			set out = machAppend32(out, offset)
+			set out = machAppend32(out, align)
+			set out = machAppend32(out, 0)
+			set out = machAppend32(out, 0)
+			set out = machAppend32(out, flags)
+			set out = machAppend32(out, 0)
+			set out = machAppend32(out, 0)
+			return machAppend32(out, 0)
 		}
 		machAppendSegment64(out:bytes, name:string, vmaddr:int, vmsize:int, fileoff:int, filesize:int, maxprot:int, initprot:int) -> bytes {
-			set out = machAppend32(out,0x19)
-			set out = machAppend32(out,72)
-			set out = machAppendName16(out,name)
-			set out = machAppend64(out,vmaddr)
-			set out = machAppend64(out,vmsize)
-			set out = machAppend64(out,fileoff)
-			set out = machAppend64(out,filesize)
-			set out = machAppend32(out,maxprot)
-			set out = machAppend32(out,initprot)
-			set out = machAppend32(out,0)
-			return machAppend32(out,0)
+			set out = machAppend32(out, 0x19)
+			set out = machAppend32(out, 72)
+			set out = machAppendName16(out, name)
+			set out = machAppend64(out, vmaddr)
+			set out = machAppend64(out, vmsize)
+			set out = machAppend64(out, fileoff)
+			set out = machAppend64(out, filesize)
+			set out = machAppend32(out, maxprot)
+			set out = machAppend32(out, initprot)
+			set out = machAppend32(out, 0)
+			return machAppend32(out, 0)
 		}
 		machAppendTextSegment(out:bytes, codeSize:int, fileSize:int) -> bytes {
-			set out = machAppend32(out,0x19)
-			set out = machAppend32(out,152)
-			set out = machAppendName16(out,"__TEXT")
-			set out = machAppend64(out,machImageBase)
-			set out = machAppend64(out,fileSize)
-			set out = machAppend64(out,0)
-			set out = machAppend64(out,fileSize)
-			set out = machAppend32(out,5)
-			set out = machAppend32(out,5)
-			set out = machAppend32(out,1)
-			set out = machAppend32(out,0)
-			return machAppendSection64(out,"__text","__TEXT",machImageBase+machCodeOffset,codeSize,machCodeOffset,2,0x80000400,)
+			set out = machAppend32(out, 0x19)
+			set out = machAppend32(out, 152)
+			set out = machAppendName16(out, "__TEXT")
+			set out = machAppend64(out, machImageBase)
+			set out = machAppend64(out, fileSize)
+			set out = machAppend64(out, 0)
+			set out = machAppend64(out, fileSize)
+			set out = machAppend32(out, 5)
+			set out = machAppend32(out, 5)
+			set out = machAppend32(out, 1)
+			set out = machAppend32(out, 0)
+			return machAppendSection64(out, "__text", "__TEXT", machImageBase+machCodeOffset, codeSize, machCodeOffset, 2, 0x80000400, )
 		}
 		machCodeSignatureSize(codeLimit:int, identifier:string) -> int {
 			let slots = (codeLimit+16383)/16384
@@ -1809,7 +1685,7 @@ arch aarch64 {
 			return 20+codeDirectorySize
 		}
 		machDylibCommandSize(path:string) -> int {
-			return RTGAlignValue(24+len(path)+1,8)
+			return RTGAlignValue(24+len(path)+1, 8)
 		}
 		machPatchADRP(out:emitter, at:int, pc:int, target:int) {
 			let delta = (target>>12)-(pc>>12)
@@ -1817,154 +1693,151 @@ arch aarch64 {
 			let insn = 0x90000010
 			set insn = insn|((imm&3)<<29)
 			set insn = insn|(((imm>>2)&0x7ffff)<<5)
-			out.PatchUint32(at,insn)
+			out.PatchUint32(at, insn)
 		}
 		machSHA256Constants() -> ints {
-			return record_ints(0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2,)
+			return record_ints(0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2, )
 		}
 		storeNative(out:emitter, address:address, source:register) {
-			storeWidth(out,address,source,8)
+			storeWidth(out, address, source, 8)
 		}
 		storeU16(out:emitter, address:address, source:register) {
-			storeWidth(out,address,source,2)
+			storeWidth(out, address, source, 2)
 		}
 		storeU32(out:emitter, address:address, source:register) {
-			storeWidth(out,address,source,4)
+			storeWidth(out, address, source, 4)
 		}
 		storeU8(out:emitter, address:address, source:register) {
-			storeWidth(out,address,source,1)
+			storeWidth(out, address, source, 1)
 		}
 		windowsCallImport(out:emitter, importID:int) {
-			asmMovRegAbs(out,16,importID,RTGRelocationImport)
-			asmLoadRegMem(out,16,16,0,8)
-			asmEmit(out,0xd63f0200)
+			asmMovRegAbs(out, 16, importID, RTGRelocationImport)
+			asmLoadRegMem(out, 16, 16, 0, 8)
+			asmEmit(out, 0xd63f0200)
 		}
-
 		darwinRead(out:emitter) {
-			asmMovRegReg(out,9,1)
-			asmMovRegReg(out,0,3)
-			asmMovRegReg(out,1,4)
-			asmMovRegReg(out,2,9)
-			darwinCallImport(out,"_read")
+			asmMovRegReg(out, 9, 1)
+			asmMovRegReg(out, 0, 3)
+			asmMovRegReg(out, 1, 4)
+			asmMovRegReg(out, 2, 9)
+			darwinCallImport(out, "_read")
 		}
 		darwinWrite(out:emitter) {
-			asmMovRegReg(out,9,1)
-			asmMovRegReg(out,0,3)
-			asmMovRegReg(out,1,4)
-			asmMovRegReg(out,2,9)
-			darwinCallImport(out,"_write")
+			asmMovRegReg(out, 9, 1)
+			asmMovRegReg(out, 0, 3)
+			asmMovRegReg(out, 1, 4)
+			asmMovRegReg(out, 2, 9)
+			darwinCallImport(out, "_write")
 		}
 		darwinReadAt(out:emitter) {
-			asmMovRegReg(out,9,1)
-			asmMovRegReg(out,10,2)
-			asmMovRegReg(out,0,3)
-			asmMovRegReg(out,1,4)
-			asmMovRegReg(out,2,9)
-			asmMovRegReg(out,3,10)
-			darwinCallImport(out,"_pread")
+			asmMovRegReg(out, 9, 1)
+			asmMovRegReg(out, 10, 2)
+			asmMovRegReg(out, 0, 3)
+			asmMovRegReg(out, 1, 4)
+			asmMovRegReg(out, 2, 9)
+			asmMovRegReg(out, 3, 10)
+			darwinCallImport(out, "_pread")
 		}
 		darwinWriteAt(out:emitter) {
-			asmMovRegReg(out,9,1)
-			asmMovRegReg(out,10,2)
-			asmMovRegReg(out,0,3)
-			asmMovRegReg(out,1,4)
-			asmMovRegReg(out,2,9)
-			asmMovRegReg(out,3,10)
-			darwinCallImport(out,"_pwrite")
+			asmMovRegReg(out, 9, 1)
+			asmMovRegReg(out, 10, 2)
+			asmMovRegReg(out, 0, 3)
+			asmMovRegReg(out, 1, 4)
+			asmMovRegReg(out, 2, 9)
+			asmMovRegReg(out, 3, 10)
+			darwinCallImport(out, "_pwrite")
 		}
 		darwinOpen(out:emitter) {
-			asmMovRegReg(out,9,1)
-			asmMovRegReg(out,0,3)
-			asmMovRegReg(out,1,4)
-			asmPushReg(out,9)
-			darwinCallImport(out,"_open")
-			asmAddRegImm(out,31,31,16)
+			asmMovRegReg(out, 9, 1)
+			asmMovRegReg(out, 0, 3)
+			asmMovRegReg(out, 1, 4)
+			asmPushReg(out, 9)
+			darwinCallImport(out, "_open")
+			asmAddRegImm(out, 31, 31, 16)
 		}
 		darwinClose(out:emitter) {
-			asmMovRegReg(out,0,3)
-			darwinCallImport(out,"_close")
+			asmMovRegReg(out, 0, 3)
+			darwinCallImport(out, "_close")
 		}
 		darwinChmod(out:emitter) {
-			asmMovRegReg(out,0,3)
-			asmMovRegReg(out,1,4)
-			darwinCallImport(out,"_fchmod")
+			asmMovRegReg(out, 0, 3)
+			asmMovRegReg(out, 1, 4)
+			darwinCallImport(out, "_fchmod")
 		}
-
 		windowsRuntimeChmod(out:emitter) {
 			let failed = out.NewLabel()
 			let done = out.NewLabel()
-			asmMovRegReg(out,0,3)
-			asmMovRegImm(out,1,0)
-			asmMovRegImm(out,2,0)
-			asmMovRegImm(out,3,1)
-			windowsCallImport(out,5)
-			asmMovRegImm(out,9,-1)
-			asmCmpRegReg(out,0,9)
-			jumpCondition(out,record_condition(Code:0),failed)
-			asmMovRegImm(out,0,0)
-			jump(out,done)
+			asmMovRegReg(out, 0, 3)
+			asmMovRegImm(out, 1, 0)
+			asmMovRegImm(out, 2, 0)
+			asmMovRegImm(out, 3, 1)
+			windowsCallImport(out, 5)
+			asmMovRegImm(out, 9, -1)
+			asmCmpRegReg(out, 0, 9)
+			jumpCondition(out, record_condition(Code:0), failed)
+			asmMovRegImm(out, 0, 0)
+			jump(out, done)
 			out.Mark(failed)
-			asmMovRegImm(out,0,-1)
+			asmMovRegImm(out, 0, -1)
 			out.Mark(done)
 		}
 		windowsRuntimeClose(out:emitter) {
 			let failed = out.NewLabel()
 			let done = out.NewLabel()
-			asmMovRegReg(out,0,3)
-			windowsCallImport(out,2)
-			asmCmpRegImm(out,0,0)
-			jumpCondition(out,record_condition(Code:0),failed)
-			asmMovRegImm(out,0,0)
-			jump(out,done)
+			asmMovRegReg(out, 0, 3)
+			windowsCallImport(out, 2)
+			asmCmpRegImm(out, 0, 0)
+			jumpCondition(out, record_condition(Code:0), failed)
+			asmMovRegImm(out, 0, 0)
+			jump(out, done)
 			out.Mark(failed)
-			asmMovRegImm(out,0,-1)
+			asmMovRegImm(out, 0, -1)
 			out.Mark(done)
 		}
 		windowsRuntimeOpen(out:emitter) {
-			asmMovRegReg(out,9,3)
-			asmMovRegReg(out,0,4)
+			asmMovRegReg(out, 9, 3)
+			asmMovRegReg(out, 0, 4)
 			windowsTranslateCreateFileFlags(out)
-			asmMovRegReg(out,0,9)
-			windowsCallImport(out,1)
+			asmMovRegReg(out, 0, 9)
+			windowsCallImport(out, 1)
 		}
 		windowsTestRegImmediate(out:emitter, register:int, immediate:int) {
-			asmMovRegImm(out,15,immediate)
-			asmEmit(out,0xea00001f|(15<<16)|(register<<5))
+			asmMovRegImm(out, 15, immediate)
+			asmEmit(out, 0xea00001f|(15<<16)|(register<<5))
 		}
 		windowsTranslateCreateFileFlags(out:emitter) {
 			let notReadWrite = out.NewLabel()
 			let accessDone = out.NewLabel()
 			let noCreate = out.NewLabel()
 			let createDone = out.NewLabel()
-			asmMovRegImm(out,1,-2147483648)
-			windowsTestRegImmediate(out,0,2)
-			jumpCondition(out,record_condition(Code:0),notReadWrite)
-			asmMovRegImm(out,1,-1073741824)
-			jump(out,accessDone)
+			asmMovRegImm(out, 1, -2147483648)
+			windowsTestRegImmediate(out, 0, 2)
+			jumpCondition(out, record_condition(Code:0), notReadWrite)
+			asmMovRegImm(out, 1, -1073741824)
+			jump(out, accessDone)
 			out.Mark(notReadWrite)
-			windowsTestRegImmediate(out,0,1)
-			jumpCondition(out,record_condition(Code:0),accessDone)
-			asmMovRegImm(out,1,0x40000000)
+			windowsTestRegImmediate(out, 0, 1)
+			jumpCondition(out, record_condition(Code:0), accessDone)
+			asmMovRegImm(out, 1, 0x40000000)
 			out.Mark(accessDone)
-			asmMovRegImm(out,4,3)
-			windowsTestRegImmediate(out,0,64)
-			jumpCondition(out,record_condition(Code:0),noCreate)
-			asmMovRegImm(out,4,4)
-			windowsTestRegImmediate(out,0,512)
-			jumpCondition(out,record_condition(Code:0),createDone)
-			asmMovRegImm(out,4,2)
-			jump(out,createDone)
+			asmMovRegImm(out, 4, 3)
+			windowsTestRegImmediate(out, 0, 64)
+			jumpCondition(out, record_condition(Code:0), noCreate)
+			asmMovRegImm(out, 4, 4)
+			windowsTestRegImmediate(out, 0, 512)
+			jumpCondition(out, record_condition(Code:0), createDone)
+			asmMovRegImm(out, 4, 2)
+			jump(out, createDone)
 			out.Mark(noCreate)
-			windowsTestRegImmediate(out,0,512)
-			jumpCondition(out,record_condition(Code:0),createDone)
-			asmMovRegImm(out,4,5)
+			windowsTestRegImmediate(out, 0, 512)
+			jumpCondition(out, record_condition(Code:0), createDone)
+			asmMovRegImm(out, 4, 5)
 			out.Mark(createDone)
-			asmMovRegImm(out,2,3)
-			asmMovRegImm(out,3,0)
-			asmMovRegImm(out,5,0x80)
-			asmMovRegImm(out,6,0)
+			asmMovRegImm(out, 2, 3)
+			asmMovRegImm(out, 3, 0)
+			asmMovRegImm(out, 5, 0x80)
+			asmMovRegImm(out, 6, 0)
 		}
-
 		linuxEntry(out:emitter, argsOffset:int, environmentOffset:int, environmentLengthOffset:int) {
 			let argumentLoop = out.NewLabel()
 			let argumentLength = out.NewLabel()
@@ -1974,138 +1847,138 @@ arch aarch64 {
 			let environmentLength = out.NewLabel()
 			let environmentLengthDone = out.NewLabel()
 			let environmentDone = out.NewLabel()
-			asmLoadRegMem(out,13,31,0,8)
-			asmAddRegImm(out,10,31,8)
-			asmMovRegAbs(out,7,argsOffset,RTGRelocationAbsoluteBSS)
-			asmMovRegImm(out,11,0)
+			asmLoadRegMem(out, 13, 31, 0, 8)
+			asmAddRegImm(out, 10, 31, 8)
+			asmMovRegAbs(out, 7, argsOffset, RTGRelocationAbsoluteBSS)
+			asmMovRegImm(out, 11, 0)
 			out.Mark(argumentLoop)
-			asmCmpRegReg(out,11,13)
-			jumpCondition(out,record_condition(Code:0),argumentsDone)
-			asmAddRegRegShift(out,12,10,11,3)
-			asmLoadRegMem(out,12,12,0,8)
-			asmStoreRegMem(out,12,7,0,8)
-			asmMovRegImm(out,0,0)
+			asmCmpRegReg(out, 11, 13)
+			jumpCondition(out, record_condition(Code:0), argumentsDone)
+			asmAddRegRegShift(out, 12, 10, 11, 3)
+			asmLoadRegMem(out, 12, 12, 0, 8)
+			asmStoreRegMem(out, 12, 7, 0, 8)
+			asmMovRegImm(out, 0, 0)
 			out.Mark(argumentLength)
-			asmAddRegReg(out,9,12,0)
-			asmLoadRegMem(out,9,9,0,1)
-			asmCmpRegImm(out,9,0)
-			jumpCondition(out,record_condition(Code:0),argumentLengthDone)
-			asmAddRegImm(out,0,0,1)
-			jump(out,argumentLength)
+			asmAddRegReg(out, 9, 12, 0)
+			asmLoadRegMem(out, 9, 9, 0, 1)
+			asmCmpRegImm(out, 9, 0)
+			jumpCondition(out, record_condition(Code:0), argumentLengthDone)
+			asmAddRegImm(out, 0, 0, 1)
+			jump(out, argumentLength)
 			out.Mark(argumentLengthDone)
-			asmStoreRegMem(out,0,7,8,8)
-			asmAddRegImm(out,7,7,16)
-			asmAddRegImm(out,11,11,1)
-			jump(out,argumentLoop)
+			asmStoreRegMem(out, 0, 7, 8, 8)
+			asmAddRegImm(out, 7, 7, 16)
+			asmAddRegImm(out, 11, 11, 1)
+			jump(out, argumentLoop)
 			out.Mark(argumentsDone)
-			asmAddRegRegShift(out,10,10,13,3)
-			asmAddRegImm(out,10,10,8)
-			asmMovRegAbs(out,7,environmentOffset,RTGRelocationAbsoluteBSS)
-			asmMovRegImm(out,11,0)
+			asmAddRegRegShift(out, 10, 10, 13, 3)
+			asmAddRegImm(out, 10, 10, 8)
+			asmMovRegAbs(out, 7, environmentOffset, RTGRelocationAbsoluteBSS)
+			asmMovRegImm(out, 11, 0)
 			out.Mark(environmentLoop)
-			asmLoadRegMem(out,12,10,0,8)
-			asmCmpRegImm(out,12,0)
-			jumpCondition(out,record_condition(Code:0),environmentDone)
-			asmStoreRegMem(out,12,7,0,8)
-			asmMovRegImm(out,0,0)
+			asmLoadRegMem(out, 12, 10, 0, 8)
+			asmCmpRegImm(out, 12, 0)
+			jumpCondition(out, record_condition(Code:0), environmentDone)
+			asmStoreRegMem(out, 12, 7, 0, 8)
+			asmMovRegImm(out, 0, 0)
 			out.Mark(environmentLength)
-			asmAddRegReg(out,9,12,0)
-			asmLoadRegMem(out,9,9,0,1)
-			asmCmpRegImm(out,9,0)
-			jumpCondition(out,record_condition(Code:0),environmentLengthDone)
-			asmAddRegImm(out,0,0,1)
-			jump(out,environmentLength)
+			asmAddRegReg(out, 9, 12, 0)
+			asmLoadRegMem(out, 9, 9, 0, 1)
+			asmCmpRegImm(out, 9, 0)
+			jumpCondition(out, record_condition(Code:0), environmentLengthDone)
+			asmAddRegImm(out, 0, 0, 1)
+			jump(out, environmentLength)
 			out.Mark(environmentLengthDone)
-			asmStoreRegMem(out,0,7,8,8)
-			asmAddRegImm(out,7,7,16)
-			asmAddRegImm(out,10,10,8)
-			asmAddRegImm(out,11,11,1)
-			jump(out,environmentLoop)
+			asmStoreRegMem(out, 0, 7, 8, 8)
+			asmAddRegImm(out, 7, 7, 16)
+			asmAddRegImm(out, 10, 10, 8)
+			asmAddRegImm(out, 11, 11, 1)
+			jump(out, environmentLoop)
 			out.Mark(environmentDone)
-			asmMovRegAbs(out,12,environmentLengthOffset,RTGRelocationAbsoluteBSS)
-			asmStoreRegMem(out,11,12,0,8)
-			asmMovRegAbs(out,3,argsOffset,RTGRelocationAbsoluteBSS)
-			asmMovRegReg(out,4,13)
-			asmMovRegReg(out,1,13)
-			asmMovRegAbs(out,2,environmentOffset,RTGRelocationAbsoluteBSS)
-			asmMovRegReg(out,5,11)
-			asmMovRegReg(out,6,11)
+			asmMovRegAbs(out, 12, environmentLengthOffset, RTGRelocationAbsoluteBSS)
+			asmStoreRegMem(out, 11, 12, 0, 8)
+			asmMovRegAbs(out, 3, argsOffset, RTGRelocationAbsoluteBSS)
+			asmMovRegReg(out, 4, 13)
+			asmMovRegReg(out, 1, 13)
+			asmMovRegAbs(out, 2, environmentOffset, RTGRelocationAbsoluteBSS)
+			asmMovRegReg(out, 5, 11)
+			asmMovRegReg(out, 6, 11)
 		}
 		emitCStringRecord(out:emitter, pointer:int, table:int, length:int, scratch:int) {
 			let scan = out.NewLabel()
 			let done = out.NewLabel()
-			asmStoreRegMem(out,pointer,table,0,8)
-			asmMovRegImm(out,length,0)
+			asmStoreRegMem(out, pointer, table, 0, 8)
+			asmMovRegImm(out, length, 0)
 			out.Mark(scan)
-			asmAddRegReg(out,scratch,pointer,length)
-			asmLoadRegMem(out,scratch,scratch,0,1)
-			asmCmpRegImm(out,scratch,0)
-			jumpCondition(out,eq,done)
-			asmAddRegImm(out,length,length,1)
-			jump(out,scan)
+			asmAddRegReg(out, scratch, pointer, length)
+			asmLoadRegMem(out, scratch, scratch, 0, 1)
+			asmCmpRegImm(out, scratch, 0)
+			jumpCondition(out, eq, done)
+			asmAddRegImm(out, length, length, 1)
+			jump(out, scan)
 			out.Mark(done)
-			asmStoreRegMem(out,length,table,8,8)
+			asmStoreRegMem(out, length, table, 8, 8)
 		}
 		emitBoundedCountedCStringTable(out:emitter, source:int, count:int, tableOffset:int, table:int, index:int, pointer:int, length:int, scratch:int) {
 			let loop = out.NewLabel()
 			let done = out.NewLabel()
-			asmMovRegAbs(out,table,tableOffset,RTGRelocationAbsoluteBSS)
-			asmMovRegImm(out,index,0)
+			asmMovRegAbs(out, table, tableOffset, RTGRelocationAbsoluteBSS)
+			asmMovRegImm(out, index, 0)
 			out.Mark(loop)
-			asmCmpRegImm(out,index,2048)
-			jumpCondition(out,sge,done)
-			asmCmpRegReg(out,index,count)
-			jumpCondition(out,eq,done)
-			asmAddRegRegShift(out,pointer,source,index,3)
-			asmLoadRegMem(out,pointer,pointer,0,8)
-			emitCStringRecord(out,pointer,table,length,scratch)
-			asmAddRegImm(out,table,table,16)
-			asmAddRegImm(out,index,index,1)
-			jump(out,loop)
+			asmCmpRegImm(out, index, 2048)
+			jumpCondition(out, sge, done)
+			asmCmpRegReg(out, index, count)
+			jumpCondition(out, eq, done)
+			asmAddRegRegShift(out, pointer, source, index, 3)
+			asmLoadRegMem(out, pointer, pointer, 0, 8)
+			emitCStringRecord(out, pointer, table, length, scratch)
+			asmAddRegImm(out, table, table, 16)
+			asmAddRegImm(out, index, index, 1)
+			jump(out, loop)
 			out.Mark(done)
 		}
 		emitBoundedTerminatedCStringTable(out:emitter, source:int, tableOffset:int, table:int, index:int, pointer:int, length:int, scratch:int) {
 			let loop = out.NewLabel()
 			let done = out.NewLabel()
-			asmMovRegAbs(out,table,tableOffset,RTGRelocationAbsoluteBSS)
-			asmMovRegImm(out,index,0)
+			asmMovRegAbs(out, table, tableOffset, RTGRelocationAbsoluteBSS)
+			asmMovRegImm(out, index, 0)
 			out.Mark(loop)
-			asmCmpRegImm(out,index,2048)
-			jumpCondition(out,sge,done)
-			asmLoadRegMem(out,pointer,source,0,8)
-			asmCmpRegImm(out,pointer,0)
-			jumpCondition(out,eq,done)
-			emitCStringRecord(out,pointer,table,length,scratch)
-			asmAddRegImm(out,table,table,16)
-			asmAddRegImm(out,source,source,8)
-			asmAddRegImm(out,index,index,1)
-			jump(out,loop)
+			asmCmpRegImm(out, index, 2048)
+			jumpCondition(out, sge, done)
+			asmLoadRegMem(out, pointer, source, 0, 8)
+			asmCmpRegImm(out, pointer, 0)
+			jumpCondition(out, eq, done)
+			emitCStringRecord(out, pointer, table, length, scratch)
+			asmAddRegImm(out, table, table, 16)
+			asmAddRegImm(out, source, source, 8)
+			asmAddRegImm(out, index, index, 1)
+			jump(out, loop)
 			out.Mark(done)
 		}
 		bindEntryCollections(out:emitter, argsOffset:int, argsLength:int, environmentOffset:int, environmentLength:int) {
-			asmMovRegAbs(out,x3.Code,argsOffset,RTGRelocationAbsoluteBSS)
-			asmMovRegReg(out,x4.Code,argsLength)
-			asmMovRegReg(out,x1.Code,argsLength)
-			asmMovRegAbs(out,x2.Code,environmentOffset,RTGRelocationAbsoluteBSS)
-			asmMovRegReg(out,x5.Code,environmentLength)
-			asmMovRegReg(out,x6.Code,environmentLength)
+			asmMovRegAbs(out, x3.Code, argsOffset, RTGRelocationAbsoluteBSS)
+			asmMovRegReg(out, x4.Code, argsLength)
+			asmMovRegReg(out, x1.Code, argsLength)
+			asmMovRegAbs(out, x2.Code, environmentOffset, RTGRelocationAbsoluteBSS)
+			asmMovRegReg(out, x5.Code, environmentLength)
+			asmMovRegReg(out, x6.Code, environmentLength)
 		}
 		darwinEntry(out:emitter, argsOffset:int, environmentOffset:int, stateOffset:int) {
-			asmMovRegAbs(out,x9.Code,stateOffset,RTGRelocationAbsoluteBSS)
-			asmLoadRegMem(out,x13.Code,x9.Code,0,8)
-			asmLoadRegMem(out,x14.Code,x9.Code,8,8)
-			asmLoadRegMem(out,x15.Code,x9.Code,16,8)
+			asmMovRegAbs(out, x9.Code, stateOffset, RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out, x13.Code, x9.Code, 0, 8)
+			asmLoadRegMem(out, x14.Code, x9.Code, 8, 8)
+			asmLoadRegMem(out, x15.Code, x9.Code, 16, 8)
 			emitBoundedCountedCStringTable(
-				out,x14.Code,x13.Code,argsOffset,
-				x10.Code,x11.Code,x12.Code,x0.Code,x9.Code,
+				out, x14.Code, x13.Code, argsOffset,
+				x10.Code, x11.Code, x12.Code, x0.Code, x9.Code,
 			)
-			asmMovRegReg(out,x13.Code,x11.Code)
+			asmMovRegReg(out, x13.Code, x11.Code)
 			emitBoundedTerminatedCStringTable(
-				out,x15.Code,environmentOffset,
-				x10.Code,x11.Code,x12.Code,x0.Code,x9.Code,
+				out, x15.Code, environmentOffset,
+				x10.Code, x11.Code, x12.Code, x0.Code, x9.Code,
 			)
 			bindEntryCollections(
-				out,argsOffset,x13.Code,environmentOffset,x11.Code,
+				out, argsOffset, x13.Code, environmentOffset, x11.Code,
 			)
 		}
 		windowsEntry(out:emitter, argsOffset:int, argsTextOffset:int, argsLengthOffset:int, environmentOffset:int, environmentLengthOffset:int) {
@@ -2117,124 +1990,124 @@ arch aarch64 {
 			let copyCharacter = out.NewLabel()
 			let argumentDone = out.NewLabel()
 			let argumentsDone = out.NewLabel()
-			windowsCallImport(out,7)
-			asmMovRegReg(out,9,0)
-			asmMovRegAbs(out,10,argsOffset,RTGRelocationAbsoluteBSS)
-			asmMovRegAbs(out,11,argsTextOffset,RTGRelocationAbsoluteBSS)
-			asmMovRegImm(out,12,0)
+			windowsCallImport(out, 7)
+			asmMovRegReg(out, 9, 0)
+			asmMovRegAbs(out, 10, argsOffset, RTGRelocationAbsoluteBSS)
+			asmMovRegAbs(out, 11, argsTextOffset, RTGRelocationAbsoluteBSS)
+			asmMovRegImm(out, 12, 0)
 			out.Mark(skip)
-			asmLoadRegMem(out,13,9,0,1)
-			asmCmpRegImm(out,13,0)
-			jumpCondition(out,record_condition(Code:0),argumentsDone)
-			asmCmpRegImm(out,13,92)
-			jumpCondition(out,record_condition(Code:1),start)
-			asmAddRegImm(out,9,9,1)
-			jump(out,skip)
+			asmLoadRegMem(out, 13, 9, 0, 1)
+			asmCmpRegImm(out, 13, 0)
+			jumpCondition(out, record_condition(Code:0), argumentsDone)
+			asmCmpRegImm(out, 13, 92)
+			jumpCondition(out, record_condition(Code:1), start)
+			asmAddRegImm(out, 9, 9, 1)
+			jump(out, skip)
 			out.Mark(start)
-			asmCmpRegImm(out,13,9)
-			jumpCondition(out,record_condition(Code:1),copyArgument)
-			asmAddRegImm(out,9,9,1)
-			jump(out,skip)
+			asmCmpRegImm(out, 13, 9)
+			jumpCondition(out, record_condition(Code:1), copyArgument)
+			asmAddRegImm(out, 9, 9, 1)
+			jump(out, skip)
 			out.Mark(copyArgument)
-			asmMovRegReg(out,14,11)
-			asmMovRegImm(out,15,0)
-			asmMovRegImm(out,17,0)
+			asmMovRegReg(out, 14, 11)
+			asmMovRegImm(out, 15, 0)
+			asmMovRegImm(out, 17, 0)
 			let copyLoop = out.NewLabel()
 			out.Mark(copyLoop)
-			asmLoadRegMem(out,13,9,0,1)
-			asmCmpRegImm(out,13,0)
-			jumpCondition(out,record_condition(Code:0),argumentDone)
-			asmCmpRegImm(out,13,'"')
-			jumpCondition(out,record_condition(Code:0),quote)
-			asmCmpRegImm(out,17,0)
-			jumpCondition(out,record_condition(Code:1),copyCharacter)
-			asmCmpRegImm(out,13,92)
-			jumpCondition(out,record_condition(Code:0),argumentDone)
-			asmCmpRegImm(out,13,9)
-			jumpCondition(out,record_condition(Code:0),argumentDone)
+			asmLoadRegMem(out, 13, 9, 0, 1)
+			asmCmpRegImm(out, 13, 0)
+			jumpCondition(out, record_condition(Code:0), argumentDone)
+			asmCmpRegImm(out, 13, '"')
+			jumpCondition(out, record_condition(Code:0), quote)
+			asmCmpRegImm(out, 17, 0)
+			jumpCondition(out, record_condition(Code:1), copyCharacter)
+			asmCmpRegImm(out, 13, 92)
+			jumpCondition(out, record_condition(Code:0), argumentDone)
+			asmCmpRegImm(out, 13, 9)
+			jumpCondition(out, record_condition(Code:0), argumentDone)
 			out.Mark(copyCharacter)
-			asmStoreRegMem(out,13,11,0,1)
-			asmAddRegImm(out,9,9,1)
-			asmAddRegImm(out,11,11,1)
-			asmAddRegImm(out,15,15,1)
-			jump(out,copyLoop)
+			asmStoreRegMem(out, 13, 11, 0, 1)
+			asmAddRegImm(out, 9, 9, 1)
+			asmAddRegImm(out, 11, 11, 1)
+			asmAddRegImm(out, 15, 15, 1)
+			jump(out, copyLoop)
 			out.Mark(quote)
-			asmCmpRegImm(out,17,0)
-			jumpCondition(out,record_condition(Code:0),setQuote)
-			asmMovRegImm(out,17,0)
-			asmAddRegImm(out,9,9,1)
-			jump(out,copyLoop)
+			asmCmpRegImm(out, 17, 0)
+			jumpCondition(out, record_condition(Code:0), setQuote)
+			asmMovRegImm(out, 17, 0)
+			asmAddRegImm(out, 9, 9, 1)
+			jump(out, copyLoop)
 			out.Mark(setQuote)
-			asmMovRegImm(out,17,1)
-			asmAddRegImm(out,9,9,1)
-			jump(out,copyLoop)
+			asmMovRegImm(out, 17, 1)
+			asmAddRegImm(out, 9, 9, 1)
+			jump(out, copyLoop)
 			out.Mark(argumentDone)
-			asmStoreRegMem(out,31,11,0,1)
-			asmStoreRegMem(out,14,10,0,8)
-			asmStoreRegMem(out,15,10,8,8)
-			asmAddRegImm(out,10,10,16)
-			asmAddRegImm(out,11,11,1)
-			asmAddRegImm(out,12,12,1)
-			asmCmpRegImm(out,13,0)
-			jumpCondition(out,record_condition(Code:0),argumentsDone)
-			asmAddRegImm(out,9,9,1)
-			jump(out,skip)
+			asmStoreRegMem(out, 31, 11, 0, 1)
+			asmStoreRegMem(out, 14, 10, 0, 8)
+			asmStoreRegMem(out, 15, 10, 8, 8)
+			asmAddRegImm(out, 10, 10, 16)
+			asmAddRegImm(out, 11, 11, 1)
+			asmAddRegImm(out, 12, 12, 1)
+			asmCmpRegImm(out, 13, 0)
+			jumpCondition(out, record_condition(Code:0), argumentsDone)
+			asmAddRegImm(out, 9, 9, 1)
+			jump(out, skip)
 			out.Mark(argumentsDone)
-			asmMovRegAbs(out,9,argsLengthOffset,RTGRelocationAbsoluteBSS)
-			asmStoreRegMem(out,12,9,0,8)
+			asmMovRegAbs(out, 9, argsLengthOffset, RTGRelocationAbsoluteBSS)
+			asmStoreRegMem(out, 12, 9, 0, 8)
 			let environmentLoop = out.NewLabel()
 			let environmentLength = out.NewLabel()
 			let environmentStringDone = out.NewLabel()
 			let environmentDone = out.NewLabel()
-			windowsCallImport(out,9)
-			asmMovRegReg(out,9,0)
-			asmMovRegAbs(out,10,environmentOffset,RTGRelocationAbsoluteBSS)
-			asmMovRegImm(out,11,0)
+			windowsCallImport(out, 9)
+			asmMovRegReg(out, 9, 0)
+			asmMovRegAbs(out, 10, environmentOffset, RTGRelocationAbsoluteBSS)
+			asmMovRegImm(out, 11, 0)
 			out.Mark(environmentLoop)
-			asmLoadRegMem(out,12,9,0,1)
-			asmCmpRegImm(out,12,0)
-			jumpCondition(out,record_condition(Code:0),environmentDone)
-			asmStoreRegMem(out,9,10,0,8)
-			asmMovRegImm(out,13,0)
+			asmLoadRegMem(out, 12, 9, 0, 1)
+			asmCmpRegImm(out, 12, 0)
+			jumpCondition(out, record_condition(Code:0), environmentDone)
+			asmStoreRegMem(out, 9, 10, 0, 8)
+			asmMovRegImm(out, 13, 0)
 			out.Mark(environmentLength)
-			asmAddRegReg(out,14,9,13)
-			asmLoadRegMem(out,12,14,0,1)
-			asmCmpRegImm(out,12,0)
-			jumpCondition(out,record_condition(Code:0),environmentStringDone)
-			asmAddRegImm(out,13,13,1)
-			jump(out,environmentLength)
+			asmAddRegReg(out, 14, 9, 13)
+			asmLoadRegMem(out, 12, 14, 0, 1)
+			asmCmpRegImm(out, 12, 0)
+			jumpCondition(out, record_condition(Code:0), environmentStringDone)
+			asmAddRegImm(out, 13, 13, 1)
+			jump(out, environmentLength)
 			out.Mark(environmentStringDone)
-			asmStoreRegMem(out,13,10,8,8)
-			asmAddRegImm(out,10,10,16)
-			asmAddRegImm(out,13,13,1)
-			asmAddRegReg(out,9,9,13)
-			asmAddRegImm(out,11,11,1)
-			jump(out,environmentLoop)
+			asmStoreRegMem(out, 13, 10, 8, 8)
+			asmAddRegImm(out, 10, 10, 16)
+			asmAddRegImm(out, 13, 13, 1)
+			asmAddRegReg(out, 9, 9, 13)
+			asmAddRegImm(out, 11, 11, 1)
+			jump(out, environmentLoop)
 			out.Mark(environmentDone)
-			asmMovRegAbs(out,9,environmentLengthOffset,RTGRelocationAbsoluteBSS)
-			asmStoreRegMem(out,11,9,0,8)
-			asmMovRegAbs(out,3,argsOffset,RTGRelocationAbsoluteBSS)
-			asmMovRegAbs(out,9,argsLengthOffset,RTGRelocationAbsoluteBSS)
-			asmLoadRegMem(out,4,9,0,8)
-			asmMovRegReg(out,1,4)
-			asmMovRegAbs(out,2,environmentOffset,RTGRelocationAbsoluteBSS)
-			asmMovRegReg(out,5,11)
-			asmMovRegReg(out,6,11)
+			asmMovRegAbs(out, 9, environmentLengthOffset, RTGRelocationAbsoluteBSS)
+			asmStoreRegMem(out, 11, 9, 0, 8)
+			asmMovRegAbs(out, 3, argsOffset, RTGRelocationAbsoluteBSS)
+			asmMovRegAbs(out, 9, argsLengthOffset, RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out, 4, 9, 0, 8)
+			asmMovRegReg(out, 1, 4)
+			asmMovRegAbs(out, 2, environmentOffset, RTGRelocationAbsoluteBSS)
+			asmMovRegReg(out, 5, 11)
+			asmMovRegReg(out, 6, 11)
 		}
 		windowsReadWriteCall(out:emitter, importID:int, countOffset:int) {
-			asmLoadRegMem(out,0,31,48,8)
-			asmLoadRegMem(out,1,31,32,8)
-			asmLoadRegMem(out,2,31,16,8)
-			asmMovRegAbs(out,3,countOffset,RTGRelocationAbsoluteBSS)
-			asmMovRegImm(out,4,0)
-			windowsCallImport(out,importID)
+			asmLoadRegMem(out, 0, 31, 48, 8)
+			asmLoadRegMem(out, 1, 31, 32, 8)
+			asmLoadRegMem(out, 2, 31, 16, 8)
+			asmMovRegAbs(out, 3, countOffset, RTGRelocationAbsoluteBSS)
+			asmMovRegImm(out, 4, 0)
+			windowsCallImport(out, importID)
 		}
 		windowsRead(out:emitter) {
 			let helper = out.NewLabel()
 			let after = out.NewLabel()
-			let countOffset = out.ReserveBSS(8,8)
-			let positionOffset = out.ReserveBSS(8,8)
-			let resultOffset = out.ReserveBSS(8,8)
+			let countOffset = out.ReserveBSS(8, 8)
+			let positionOffset = out.ReserveBSS(8, 8)
+			let resultOffset = out.ReserveBSS(8, 8)
 			let standard = out.NewLabel()
 			let standardError = out.NewLabel()
 			let handleReady = out.NewLabel()
@@ -2244,96 +2117,96 @@ arch aarch64 {
 			let restore = out.NewLabel()
 			let failed = out.NewLabel()
 			let done = out.NewLabel()
-			jump(out,after)
+			jump(out, after)
 			out.Mark(helper)
-			asmPushReg(out,30)
-			asmPushReg(out,3)
-			asmPushReg(out,4)
-			asmPushReg(out,2)
-			asmPushReg(out,1)
-			asmLoadRegMem(out,9,31,48,8)
-			asmCmpRegImm(out,9,0)
-			jumpCondition(out,record_condition(Code:0),standard)
-			asmStoreRegMem(out,9,31,48,8)
-			jump(out,handleReady)
+			asmPushReg(out, 30)
+			asmPushReg(out, 3)
+			asmPushReg(out, 4)
+			asmPushReg(out, 2)
+			asmPushReg(out, 1)
+			asmLoadRegMem(out, 9, 31, 48, 8)
+			asmCmpRegImm(out, 9, 0)
+			jumpCondition(out, record_condition(Code:0), standard)
+			asmStoreRegMem(out, 9, 31, 48, 8)
+			jump(out, handleReady)
 			out.Mark(standard)
 			let standardHandle = -10
-			asmMovRegImm(out,0,standardHandle)
-			windowsCallImport(out,6)
-			asmStoreRegMem(out,0,31,48,8)
-			jump(out,handleReady)
+			asmMovRegImm(out, 0, standardHandle)
+			windowsCallImport(out, 6)
+			asmStoreRegMem(out, 0, 31, 48, 8)
+			jump(out, handleReady)
 			out.Mark(standardError)
-			asmMovRegImm(out,0,-12)
-			windowsCallImport(out,6)
-			asmStoreRegMem(out,0,31,48,8)
+			asmMovRegImm(out, 0, -12)
+			windowsCallImport(out, 6)
+			asmStoreRegMem(out, 0, 31, 48, 8)
 			out.Mark(handleReady)
-			asmLoadRegMem(out,9,31,0,8)
-			asmCmpRegImm(out,9,0)
-			jumpCondition(out,record_condition(Code:11),sequential)
-			asmLoadRegMem(out,0,31,48,8)
-			asmMovRegImm(out,1,0)
-			asmMovRegImm(out,2,0)
-			asmMovRegImm(out,3,1)
-			windowsCallImport(out,5)
-			asmMovRegImm(out,9,0xffffffff)
-			asmCmpRegReg(out,0,9)
-			jumpCondition(out,record_condition(Code:0),positionFailed)
-			asmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
-			asmStoreRegMem(out,0,9,0,8)
-			asmLoadRegMem(out,0,31,48,8)
-			asmLoadRegMem(out,1,31,0,8)
-			asmMovRegImm(out,2,0)
-			asmMovRegImm(out,3,0)
-			windowsCallImport(out,5)
-			asmMovRegImm(out,9,0xffffffff)
-			asmCmpRegReg(out,0,9)
-			jumpCondition(out,record_condition(Code:0),ioFailed)
-			windowsReadWriteCall(out,3,countOffset)
-			asmCmpRegImm(out,0,0)
-			jumpCondition(out,record_condition(Code:0),ioFailed)
-			asmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
-			asmLoadRegMem(out,9,9,0,8)
-			jump(out,restore)
+			asmLoadRegMem(out, 9, 31, 0, 8)
+			asmCmpRegImm(out, 9, 0)
+			jumpCondition(out, record_condition(Code:11), sequential)
+			asmLoadRegMem(out, 0, 31, 48, 8)
+			asmMovRegImm(out, 1, 0)
+			asmMovRegImm(out, 2, 0)
+			asmMovRegImm(out, 3, 1)
+			windowsCallImport(out, 5)
+			asmMovRegImm(out, 9, 0xffffffff)
+			asmCmpRegReg(out, 0, 9)
+			jumpCondition(out, record_condition(Code:0), positionFailed)
+			asmMovRegAbs(out, 9, positionOffset, RTGRelocationAbsoluteBSS)
+			asmStoreRegMem(out, 0, 9, 0, 8)
+			asmLoadRegMem(out, 0, 31, 48, 8)
+			asmLoadRegMem(out, 1, 31, 0, 8)
+			asmMovRegImm(out, 2, 0)
+			asmMovRegImm(out, 3, 0)
+			windowsCallImport(out, 5)
+			asmMovRegImm(out, 9, 0xffffffff)
+			asmCmpRegReg(out, 0, 9)
+			jumpCondition(out, record_condition(Code:0), ioFailed)
+			windowsReadWriteCall(out, 3, countOffset)
+			asmCmpRegImm(out, 0, 0)
+			jumpCondition(out, record_condition(Code:0), ioFailed)
+			asmMovRegAbs(out, 9, countOffset, RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out, 9, 9, 0, 8)
+			jump(out, restore)
 			out.Mark(ioFailed)
-			asmMovRegImm(out,9,-1)
+			asmMovRegImm(out, 9, -1)
 			out.Mark(restore)
-			asmMovRegAbs(out,10,resultOffset,RTGRelocationAbsoluteBSS)
-			asmStoreRegMem(out,9,10,0,8)
-			asmLoadRegMem(out,0,31,48,8)
-			asmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
-			asmLoadRegMem(out,1,9,0,8)
-			asmMovRegImm(out,2,0)
-			asmMovRegImm(out,3,0)
-			windowsCallImport(out,5)
-			asmMovRegAbs(out,9,resultOffset,RTGRelocationAbsoluteBSS)
-			asmLoadRegMem(out,0,9,0,8)
-			jump(out,done)
+			asmMovRegAbs(out, 10, resultOffset, RTGRelocationAbsoluteBSS)
+			asmStoreRegMem(out, 9, 10, 0, 8)
+			asmLoadRegMem(out, 0, 31, 48, 8)
+			asmMovRegAbs(out, 9, positionOffset, RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out, 1, 9, 0, 8)
+			asmMovRegImm(out, 2, 0)
+			asmMovRegImm(out, 3, 0)
+			windowsCallImport(out, 5)
+			asmMovRegAbs(out, 9, resultOffset, RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out, 0, 9, 0, 8)
+			jump(out, done)
 			out.Mark(positionFailed)
-			asmMovRegImm(out,0,-1)
-			jump(out,done)
+			asmMovRegImm(out, 0, -1)
+			jump(out, done)
 			out.Mark(sequential)
-			windowsReadWriteCall(out,3,countOffset)
-			asmCmpRegImm(out,0,0)
-			jumpCondition(out,record_condition(Code:0),failed)
-			asmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
-			asmLoadRegMem(out,0,9,0,8)
-			jump(out,done)
+			windowsReadWriteCall(out, 3, countOffset)
+			asmCmpRegImm(out, 0, 0)
+			jumpCondition(out, record_condition(Code:0), failed)
+			asmMovRegAbs(out, 9, countOffset, RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out, 0, 9, 0, 8)
+			jump(out, done)
 			out.Mark(failed)
-			asmMovRegImm(out,0,-1)
+			asmMovRegImm(out, 0, -1)
 			out.Mark(done)
-			asmAddRegImm(out,31,31,64)
-			asmPopReg(out,30)
+			asmAddRegImm(out, 31, 31, 64)
+			asmPopReg(out, 30)
 			asmRet(out)
 			out.Mark(after)
-			asmMovRegImm(out,2,-1)
-			call(out,helper)
+			asmMovRegImm(out, 2, -1)
+			call(out, helper)
 		}
 		windowsWrite(out:emitter) {
 			let helper = out.NewLabel()
 			let after = out.NewLabel()
-			let countOffset = out.ReserveBSS(8,8)
-			let positionOffset = out.ReserveBSS(8,8)
-			let resultOffset = out.ReserveBSS(8,8)
+			let countOffset = out.ReserveBSS(8, 8)
+			let positionOffset = out.ReserveBSS(8, 8)
+			let resultOffset = out.ReserveBSS(8, 8)
 			let standard = out.NewLabel()
 			let standardError = out.NewLabel()
 			let handleReady = out.NewLabel()
@@ -2343,99 +2216,99 @@ arch aarch64 {
 			let restore = out.NewLabel()
 			let failed = out.NewLabel()
 			let done = out.NewLabel()
-			jump(out,after)
+			jump(out, after)
 			out.Mark(helper)
-			asmPushReg(out,30)
-			asmPushReg(out,3)
-			asmPushReg(out,4)
-			asmPushReg(out,2)
-			asmPushReg(out,1)
-			asmLoadRegMem(out,9,31,48,8)
-			asmCmpRegImm(out,9,1)
-			jumpCondition(out,record_condition(Code:0),standard)
-			asmCmpRegImm(out,9,2)
-			jumpCondition(out,record_condition(Code:0),standardError)
-			asmStoreRegMem(out,9,31,48,8)
-			jump(out,handleReady)
+			asmPushReg(out, 30)
+			asmPushReg(out, 3)
+			asmPushReg(out, 4)
+			asmPushReg(out, 2)
+			asmPushReg(out, 1)
+			asmLoadRegMem(out, 9, 31, 48, 8)
+			asmCmpRegImm(out, 9, 1)
+			jumpCondition(out, record_condition(Code:0), standard)
+			asmCmpRegImm(out, 9, 2)
+			jumpCondition(out, record_condition(Code:0), standardError)
+			asmStoreRegMem(out, 9, 31, 48, 8)
+			jump(out, handleReady)
 			out.Mark(standard)
 			let standardHandle = -10
 			set standardHandle = -11
-			asmMovRegImm(out,0,standardHandle)
-			windowsCallImport(out,6)
-			asmStoreRegMem(out,0,31,48,8)
-			jump(out,handleReady)
+			asmMovRegImm(out, 0, standardHandle)
+			windowsCallImport(out, 6)
+			asmStoreRegMem(out, 0, 31, 48, 8)
+			jump(out, handleReady)
 			out.Mark(standardError)
-			asmMovRegImm(out,0,-12)
-			windowsCallImport(out,6)
-			asmStoreRegMem(out,0,31,48,8)
+			asmMovRegImm(out, 0, -12)
+			windowsCallImport(out, 6)
+			asmStoreRegMem(out, 0, 31, 48, 8)
 			out.Mark(handleReady)
-			asmLoadRegMem(out,9,31,0,8)
-			asmCmpRegImm(out,9,0)
-			jumpCondition(out,record_condition(Code:11),sequential)
-			asmLoadRegMem(out,0,31,48,8)
-			asmMovRegImm(out,1,0)
-			asmMovRegImm(out,2,0)
-			asmMovRegImm(out,3,1)
-			windowsCallImport(out,5)
-			asmMovRegImm(out,9,0xffffffff)
-			asmCmpRegReg(out,0,9)
-			jumpCondition(out,record_condition(Code:0),positionFailed)
-			asmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
-			asmStoreRegMem(out,0,9,0,8)
-			asmLoadRegMem(out,0,31,48,8)
-			asmLoadRegMem(out,1,31,0,8)
-			asmMovRegImm(out,2,0)
-			asmMovRegImm(out,3,0)
-			windowsCallImport(out,5)
-			asmMovRegImm(out,9,0xffffffff)
-			asmCmpRegReg(out,0,9)
-			jumpCondition(out,record_condition(Code:0),ioFailed)
-			windowsReadWriteCall(out,4,countOffset)
-			asmCmpRegImm(out,0,0)
-			jumpCondition(out,record_condition(Code:0),ioFailed)
-			asmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
-			asmLoadRegMem(out,9,9,0,8)
-			jump(out,restore)
+			asmLoadRegMem(out, 9, 31, 0, 8)
+			asmCmpRegImm(out, 9, 0)
+			jumpCondition(out, record_condition(Code:11), sequential)
+			asmLoadRegMem(out, 0, 31, 48, 8)
+			asmMovRegImm(out, 1, 0)
+			asmMovRegImm(out, 2, 0)
+			asmMovRegImm(out, 3, 1)
+			windowsCallImport(out, 5)
+			asmMovRegImm(out, 9, 0xffffffff)
+			asmCmpRegReg(out, 0, 9)
+			jumpCondition(out, record_condition(Code:0), positionFailed)
+			asmMovRegAbs(out, 9, positionOffset, RTGRelocationAbsoluteBSS)
+			asmStoreRegMem(out, 0, 9, 0, 8)
+			asmLoadRegMem(out, 0, 31, 48, 8)
+			asmLoadRegMem(out, 1, 31, 0, 8)
+			asmMovRegImm(out, 2, 0)
+			asmMovRegImm(out, 3, 0)
+			windowsCallImport(out, 5)
+			asmMovRegImm(out, 9, 0xffffffff)
+			asmCmpRegReg(out, 0, 9)
+			jumpCondition(out, record_condition(Code:0), ioFailed)
+			windowsReadWriteCall(out, 4, countOffset)
+			asmCmpRegImm(out, 0, 0)
+			jumpCondition(out, record_condition(Code:0), ioFailed)
+			asmMovRegAbs(out, 9, countOffset, RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out, 9, 9, 0, 8)
+			jump(out, restore)
 			out.Mark(ioFailed)
-			asmMovRegImm(out,9,-1)
+			asmMovRegImm(out, 9, -1)
 			out.Mark(restore)
-			asmMovRegAbs(out,10,resultOffset,RTGRelocationAbsoluteBSS)
-			asmStoreRegMem(out,9,10,0,8)
-			asmLoadRegMem(out,0,31,48,8)
-			asmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
-			asmLoadRegMem(out,1,9,0,8)
-			asmMovRegImm(out,2,0)
-			asmMovRegImm(out,3,0)
-			windowsCallImport(out,5)
-			asmMovRegAbs(out,9,resultOffset,RTGRelocationAbsoluteBSS)
-			asmLoadRegMem(out,0,9,0,8)
-			jump(out,done)
+			asmMovRegAbs(out, 10, resultOffset, RTGRelocationAbsoluteBSS)
+			asmStoreRegMem(out, 9, 10, 0, 8)
+			asmLoadRegMem(out, 0, 31, 48, 8)
+			asmMovRegAbs(out, 9, positionOffset, RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out, 1, 9, 0, 8)
+			asmMovRegImm(out, 2, 0)
+			asmMovRegImm(out, 3, 0)
+			windowsCallImport(out, 5)
+			asmMovRegAbs(out, 9, resultOffset, RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out, 0, 9, 0, 8)
+			jump(out, done)
 			out.Mark(positionFailed)
-			asmMovRegImm(out,0,-1)
-			jump(out,done)
+			asmMovRegImm(out, 0, -1)
+			jump(out, done)
 			out.Mark(sequential)
-			windowsReadWriteCall(out,4,countOffset)
-			asmCmpRegImm(out,0,0)
-			jumpCondition(out,record_condition(Code:0),failed)
-			asmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
-			asmLoadRegMem(out,0,9,0,8)
-			jump(out,done)
+			windowsReadWriteCall(out, 4, countOffset)
+			asmCmpRegImm(out, 0, 0)
+			jumpCondition(out, record_condition(Code:0), failed)
+			asmMovRegAbs(out, 9, countOffset, RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out, 0, 9, 0, 8)
+			jump(out, done)
 			out.Mark(failed)
-			asmMovRegImm(out,0,-1)
+			asmMovRegImm(out, 0, -1)
 			out.Mark(done)
-			asmAddRegImm(out,31,31,64)
-			asmPopReg(out,30)
+			asmAddRegImm(out, 31, 31, 64)
+			asmPopReg(out, 30)
 			asmRet(out)
 			out.Mark(after)
-			asmMovRegImm(out,2,-1)
-			call(out,helper)
+			asmMovRegImm(out, 2, -1)
+			call(out, helper)
 		}
 		windowsReadAt(out:emitter) {
 			let helper = out.NewLabel()
 			let after = out.NewLabel()
-			let countOffset = out.ReserveBSS(8,8)
-			let positionOffset = out.ReserveBSS(8,8)
-			let resultOffset = out.ReserveBSS(8,8)
+			let countOffset = out.ReserveBSS(8, 8)
+			let positionOffset = out.ReserveBSS(8, 8)
+			let resultOffset = out.ReserveBSS(8, 8)
 			let standard = out.NewLabel()
 			let standardError = out.NewLabel()
 			let handleReady = out.NewLabel()
@@ -2445,95 +2318,95 @@ arch aarch64 {
 			let restore = out.NewLabel()
 			let failed = out.NewLabel()
 			let done = out.NewLabel()
-			jump(out,after)
+			jump(out, after)
 			out.Mark(helper)
-			asmPushReg(out,30)
-			asmPushReg(out,3)
-			asmPushReg(out,4)
-			asmPushReg(out,2)
-			asmPushReg(out,1)
-			asmLoadRegMem(out,9,31,48,8)
-			asmCmpRegImm(out,9,0)
-			jumpCondition(out,record_condition(Code:0),standard)
-			asmStoreRegMem(out,9,31,48,8)
-			jump(out,handleReady)
+			asmPushReg(out, 30)
+			asmPushReg(out, 3)
+			asmPushReg(out, 4)
+			asmPushReg(out, 2)
+			asmPushReg(out, 1)
+			asmLoadRegMem(out, 9, 31, 48, 8)
+			asmCmpRegImm(out, 9, 0)
+			jumpCondition(out, record_condition(Code:0), standard)
+			asmStoreRegMem(out, 9, 31, 48, 8)
+			jump(out, handleReady)
 			out.Mark(standard)
 			let standardHandle = -10
-			asmMovRegImm(out,0,standardHandle)
-			windowsCallImport(out,6)
-			asmStoreRegMem(out,0,31,48,8)
-			jump(out,handleReady)
+			asmMovRegImm(out, 0, standardHandle)
+			windowsCallImport(out, 6)
+			asmStoreRegMem(out, 0, 31, 48, 8)
+			jump(out, handleReady)
 			out.Mark(standardError)
-			asmMovRegImm(out,0,-12)
-			windowsCallImport(out,6)
-			asmStoreRegMem(out,0,31,48,8)
+			asmMovRegImm(out, 0, -12)
+			windowsCallImport(out, 6)
+			asmStoreRegMem(out, 0, 31, 48, 8)
 			out.Mark(handleReady)
-			asmLoadRegMem(out,9,31,0,8)
-			asmCmpRegImm(out,9,0)
-			jumpCondition(out,record_condition(Code:11),sequential)
-			asmLoadRegMem(out,0,31,48,8)
-			asmMovRegImm(out,1,0)
-			asmMovRegImm(out,2,0)
-			asmMovRegImm(out,3,1)
-			windowsCallImport(out,5)
-			asmMovRegImm(out,9,0xffffffff)
-			asmCmpRegReg(out,0,9)
-			jumpCondition(out,record_condition(Code:0),positionFailed)
-			asmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
-			asmStoreRegMem(out,0,9,0,8)
-			asmLoadRegMem(out,0,31,48,8)
-			asmLoadRegMem(out,1,31,0,8)
-			asmMovRegImm(out,2,0)
-			asmMovRegImm(out,3,0)
-			windowsCallImport(out,5)
-			asmMovRegImm(out,9,0xffffffff)
-			asmCmpRegReg(out,0,9)
-			jumpCondition(out,record_condition(Code:0),ioFailed)
-			windowsReadWriteCall(out,3,countOffset)
-			asmCmpRegImm(out,0,0)
-			jumpCondition(out,record_condition(Code:0),ioFailed)
-			asmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
-			asmLoadRegMem(out,9,9,0,8)
-			jump(out,restore)
+			asmLoadRegMem(out, 9, 31, 0, 8)
+			asmCmpRegImm(out, 9, 0)
+			jumpCondition(out, record_condition(Code:11), sequential)
+			asmLoadRegMem(out, 0, 31, 48, 8)
+			asmMovRegImm(out, 1, 0)
+			asmMovRegImm(out, 2, 0)
+			asmMovRegImm(out, 3, 1)
+			windowsCallImport(out, 5)
+			asmMovRegImm(out, 9, 0xffffffff)
+			asmCmpRegReg(out, 0, 9)
+			jumpCondition(out, record_condition(Code:0), positionFailed)
+			asmMovRegAbs(out, 9, positionOffset, RTGRelocationAbsoluteBSS)
+			asmStoreRegMem(out, 0, 9, 0, 8)
+			asmLoadRegMem(out, 0, 31, 48, 8)
+			asmLoadRegMem(out, 1, 31, 0, 8)
+			asmMovRegImm(out, 2, 0)
+			asmMovRegImm(out, 3, 0)
+			windowsCallImport(out, 5)
+			asmMovRegImm(out, 9, 0xffffffff)
+			asmCmpRegReg(out, 0, 9)
+			jumpCondition(out, record_condition(Code:0), ioFailed)
+			windowsReadWriteCall(out, 3, countOffset)
+			asmCmpRegImm(out, 0, 0)
+			jumpCondition(out, record_condition(Code:0), ioFailed)
+			asmMovRegAbs(out, 9, countOffset, RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out, 9, 9, 0, 8)
+			jump(out, restore)
 			out.Mark(ioFailed)
-			asmMovRegImm(out,9,-1)
+			asmMovRegImm(out, 9, -1)
 			out.Mark(restore)
-			asmMovRegAbs(out,10,resultOffset,RTGRelocationAbsoluteBSS)
-			asmStoreRegMem(out,9,10,0,8)
-			asmLoadRegMem(out,0,31,48,8)
-			asmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
-			asmLoadRegMem(out,1,9,0,8)
-			asmMovRegImm(out,2,0)
-			asmMovRegImm(out,3,0)
-			windowsCallImport(out,5)
-			asmMovRegAbs(out,9,resultOffset,RTGRelocationAbsoluteBSS)
-			asmLoadRegMem(out,0,9,0,8)
-			jump(out,done)
+			asmMovRegAbs(out, 10, resultOffset, RTGRelocationAbsoluteBSS)
+			asmStoreRegMem(out, 9, 10, 0, 8)
+			asmLoadRegMem(out, 0, 31, 48, 8)
+			asmMovRegAbs(out, 9, positionOffset, RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out, 1, 9, 0, 8)
+			asmMovRegImm(out, 2, 0)
+			asmMovRegImm(out, 3, 0)
+			windowsCallImport(out, 5)
+			asmMovRegAbs(out, 9, resultOffset, RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out, 0, 9, 0, 8)
+			jump(out, done)
 			out.Mark(positionFailed)
-			asmMovRegImm(out,0,-1)
-			jump(out,done)
+			asmMovRegImm(out, 0, -1)
+			jump(out, done)
 			out.Mark(sequential)
-			windowsReadWriteCall(out,3,countOffset)
-			asmCmpRegImm(out,0,0)
-			jumpCondition(out,record_condition(Code:0),failed)
-			asmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
-			asmLoadRegMem(out,0,9,0,8)
-			jump(out,done)
+			windowsReadWriteCall(out, 3, countOffset)
+			asmCmpRegImm(out, 0, 0)
+			jumpCondition(out, record_condition(Code:0), failed)
+			asmMovRegAbs(out, 9, countOffset, RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out, 0, 9, 0, 8)
+			jump(out, done)
 			out.Mark(failed)
-			asmMovRegImm(out,0,-1)
+			asmMovRegImm(out, 0, -1)
 			out.Mark(done)
-			asmAddRegImm(out,31,31,64)
-			asmPopReg(out,30)
+			asmAddRegImm(out, 31, 31, 64)
+			asmPopReg(out, 30)
 			asmRet(out)
 			out.Mark(after)
-			call(out,helper)
+			call(out, helper)
 		}
 		windowsWriteAt(out:emitter) {
 			let helper = out.NewLabel()
 			let after = out.NewLabel()
-			let countOffset = out.ReserveBSS(8,8)
-			let positionOffset = out.ReserveBSS(8,8)
-			let resultOffset = out.ReserveBSS(8,8)
+			let countOffset = out.ReserveBSS(8, 8)
+			let positionOffset = out.ReserveBSS(8, 8)
+			let resultOffset = out.ReserveBSS(8, 8)
 			let standard = out.NewLabel()
 			let standardError = out.NewLabel()
 			let handleReady = out.NewLabel()
@@ -2543,91 +2416,91 @@ arch aarch64 {
 			let restore = out.NewLabel()
 			let failed = out.NewLabel()
 			let done = out.NewLabel()
-			jump(out,after)
+			jump(out, after)
 			out.Mark(helper)
-			asmPushReg(out,30)
-			asmPushReg(out,3)
-			asmPushReg(out,4)
-			asmPushReg(out,2)
-			asmPushReg(out,1)
-			asmLoadRegMem(out,9,31,48,8)
-			asmCmpRegImm(out,9,1)
-			jumpCondition(out,record_condition(Code:0),standard)
-			asmCmpRegImm(out,9,2)
-			jumpCondition(out,record_condition(Code:0),standardError)
-			asmStoreRegMem(out,9,31,48,8)
-			jump(out,handleReady)
+			asmPushReg(out, 30)
+			asmPushReg(out, 3)
+			asmPushReg(out, 4)
+			asmPushReg(out, 2)
+			asmPushReg(out, 1)
+			asmLoadRegMem(out, 9, 31, 48, 8)
+			asmCmpRegImm(out, 9, 1)
+			jumpCondition(out, record_condition(Code:0), standard)
+			asmCmpRegImm(out, 9, 2)
+			jumpCondition(out, record_condition(Code:0), standardError)
+			asmStoreRegMem(out, 9, 31, 48, 8)
+			jump(out, handleReady)
 			out.Mark(standard)
 			let standardHandle = -10
 			set standardHandle = -11
-			asmMovRegImm(out,0,standardHandle)
-			windowsCallImport(out,6)
-			asmStoreRegMem(out,0,31,48,8)
-			jump(out,handleReady)
+			asmMovRegImm(out, 0, standardHandle)
+			windowsCallImport(out, 6)
+			asmStoreRegMem(out, 0, 31, 48, 8)
+			jump(out, handleReady)
 			out.Mark(standardError)
-			asmMovRegImm(out,0,-12)
-			windowsCallImport(out,6)
-			asmStoreRegMem(out,0,31,48,8)
+			asmMovRegImm(out, 0, -12)
+			windowsCallImport(out, 6)
+			asmStoreRegMem(out, 0, 31, 48, 8)
 			out.Mark(handleReady)
-			asmLoadRegMem(out,9,31,0,8)
-			asmCmpRegImm(out,9,0)
-			jumpCondition(out,record_condition(Code:11),sequential)
-			asmLoadRegMem(out,0,31,48,8)
-			asmMovRegImm(out,1,0)
-			asmMovRegImm(out,2,0)
-			asmMovRegImm(out,3,1)
-			windowsCallImport(out,5)
-			asmMovRegImm(out,9,0xffffffff)
-			asmCmpRegReg(out,0,9)
-			jumpCondition(out,record_condition(Code:0),positionFailed)
-			asmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
-			asmStoreRegMem(out,0,9,0,8)
-			asmLoadRegMem(out,0,31,48,8)
-			asmLoadRegMem(out,1,31,0,8)
-			asmMovRegImm(out,2,0)
-			asmMovRegImm(out,3,0)
-			windowsCallImport(out,5)
-			asmMovRegImm(out,9,0xffffffff)
-			asmCmpRegReg(out,0,9)
-			jumpCondition(out,record_condition(Code:0),ioFailed)
-			windowsReadWriteCall(out,4,countOffset)
-			asmCmpRegImm(out,0,0)
-			jumpCondition(out,record_condition(Code:0),ioFailed)
-			asmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
-			asmLoadRegMem(out,9,9,0,8)
-			jump(out,restore)
+			asmLoadRegMem(out, 9, 31, 0, 8)
+			asmCmpRegImm(out, 9, 0)
+			jumpCondition(out, record_condition(Code:11), sequential)
+			asmLoadRegMem(out, 0, 31, 48, 8)
+			asmMovRegImm(out, 1, 0)
+			asmMovRegImm(out, 2, 0)
+			asmMovRegImm(out, 3, 1)
+			windowsCallImport(out, 5)
+			asmMovRegImm(out, 9, 0xffffffff)
+			asmCmpRegReg(out, 0, 9)
+			jumpCondition(out, record_condition(Code:0), positionFailed)
+			asmMovRegAbs(out, 9, positionOffset, RTGRelocationAbsoluteBSS)
+			asmStoreRegMem(out, 0, 9, 0, 8)
+			asmLoadRegMem(out, 0, 31, 48, 8)
+			asmLoadRegMem(out, 1, 31, 0, 8)
+			asmMovRegImm(out, 2, 0)
+			asmMovRegImm(out, 3, 0)
+			windowsCallImport(out, 5)
+			asmMovRegImm(out, 9, 0xffffffff)
+			asmCmpRegReg(out, 0, 9)
+			jumpCondition(out, record_condition(Code:0), ioFailed)
+			windowsReadWriteCall(out, 4, countOffset)
+			asmCmpRegImm(out, 0, 0)
+			jumpCondition(out, record_condition(Code:0), ioFailed)
+			asmMovRegAbs(out, 9, countOffset, RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out, 9, 9, 0, 8)
+			jump(out, restore)
 			out.Mark(ioFailed)
-			asmMovRegImm(out,9,-1)
+			asmMovRegImm(out, 9, -1)
 			out.Mark(restore)
-			asmMovRegAbs(out,10,resultOffset,RTGRelocationAbsoluteBSS)
-			asmStoreRegMem(out,9,10,0,8)
-			asmLoadRegMem(out,0,31,48,8)
-			asmMovRegAbs(out,9,positionOffset,RTGRelocationAbsoluteBSS)
-			asmLoadRegMem(out,1,9,0,8)
-			asmMovRegImm(out,2,0)
-			asmMovRegImm(out,3,0)
-			windowsCallImport(out,5)
-			asmMovRegAbs(out,9,resultOffset,RTGRelocationAbsoluteBSS)
-			asmLoadRegMem(out,0,9,0,8)
-			jump(out,done)
+			asmMovRegAbs(out, 10, resultOffset, RTGRelocationAbsoluteBSS)
+			asmStoreRegMem(out, 9, 10, 0, 8)
+			asmLoadRegMem(out, 0, 31, 48, 8)
+			asmMovRegAbs(out, 9, positionOffset, RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out, 1, 9, 0, 8)
+			asmMovRegImm(out, 2, 0)
+			asmMovRegImm(out, 3, 0)
+			windowsCallImport(out, 5)
+			asmMovRegAbs(out, 9, resultOffset, RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out, 0, 9, 0, 8)
+			jump(out, done)
 			out.Mark(positionFailed)
-			asmMovRegImm(out,0,-1)
-			jump(out,done)
+			asmMovRegImm(out, 0, -1)
+			jump(out, done)
 			out.Mark(sequential)
-			windowsReadWriteCall(out,4,countOffset)
-			asmCmpRegImm(out,0,0)
-			jumpCondition(out,record_condition(Code:0),failed)
-			asmMovRegAbs(out,9,countOffset,RTGRelocationAbsoluteBSS)
-			asmLoadRegMem(out,0,9,0,8)
-			jump(out,done)
+			windowsReadWriteCall(out, 4, countOffset)
+			asmCmpRegImm(out, 0, 0)
+			jumpCondition(out, record_condition(Code:0), failed)
+			asmMovRegAbs(out, 9, countOffset, RTGRelocationAbsoluteBSS)
+			asmLoadRegMem(out, 0, 9, 0, 8)
+			jump(out, done)
 			out.Mark(failed)
-			asmMovRegImm(out,0,-1)
+			asmMovRegImm(out, 0, -1)
 			out.Mark(done)
-			asmAddRegImm(out,31,31,64)
-			asmPopReg(out,30)
+			asmAddRegImm(out, 31, 31, 64)
+			asmPopReg(out, 30)
 			asmRet(out)
 			out.Mark(after)
-			call(out,helper)
+			call(out, helper)
 		}
 }
 }

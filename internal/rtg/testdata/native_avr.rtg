@@ -4,26 +4,6 @@ implements direct_emitter_v1
 
 # Design fixture only: no board, firmware, or boot policy belongs here.
 go backend {
-	func fixtureAVRMove(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
-		out.Uint16(0x2c00 | destination.Code<<4 | source.Code)
-	}
-	func fixtureAVRLoad(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
-		out.Uint16(0x8000 | destination.Code<<4 | address.Base.Code)
-	}
-	func fixtureAVRStore(out *RTGEmitter, address RTGAddress, source RTGRegister) {
-		out.Uint16(0x8200 | source.Code<<4 | address.Base.Code)
-	}
-	func fixtureAVRAdd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
-		out.Uint16(0x0c00 | destination.Code<<4 | source.Code)
-	}
-	func fixtureAVRCall(out *RTGEmitter, target RTGLabel) {
-		out.Uint16(0x940e)
-		out.Reloc(target)
-	}
-	func fixtureAVRJumpCondition(out *RTGEmitter, condition RTGCondition, target RTGLabel) {
-		out.Uint16(0xf000 | condition.Code)
-		out.Reloc(target)
-	}
 	func fixtureAVRPatchRelocations(out *RTGEmitter) {
 		out.Patch()
 	}
@@ -82,20 +62,19 @@ arch avr8 {
 		ge 5
 	}
 	forms {
-		rr8 = go fixtureAVRMove
-		load8 = go fixtureAVRLoad
-		store8 = go fixtureAVRStore
-		add8 = go fixtureAVRAdd
-		call_word = go fixtureAVRCall
-		branch7 = go fixtureAVRJumpCondition
+		rr8 = word16(destination:reg@4, source:reg@0)
+		load8 = word16(destination:reg@4, address:address_base@0)
+		store8 = word16(address:address_base@0, source:reg@4)
+		call_word = word16(target:label@reloc)
+		branch7 = word16(condition:condition@0, target:label@reloc)
 	}
 	instructions {
-		move8 rr8
-		load8 load8
-		store8 store8
-		add8 add8
-		call16 call_word relocation=code_word
-		branch7 branch7 range=7 relaxation=jump
+		move8 rr8 0x2c00
+		load8 load8 0x8000
+		store8 store8 0x8200
+		add8 rr8 0x0c00
+		call16 call_word 0x940e relocation=code_word
+		branch7 branch7 0xf000 range=7 relaxation=jump
 	}
 	bind {
 		move = move8

@@ -66,8 +66,13 @@ func appendArchitectureBindings(out []byte, document Document, arch Declaration,
 			out = appendFixedInstructionWrapper(out, row, prefix, nativeEmitter)
 			continue
 		}
-		if form.Kind == "word32" {
-			out = appendWord32InstructionWrapper(out, row, form, prefix, nativeEmitter)
+		if bits := typedWordFormBits(form.Kind); bits != 0 {
+			bigEndian := false
+			if endian, found := fieldValue(document, arch, "endian"); found {
+				bigEndian = valueName(endian) == "big"
+			}
+			out = appendTypedWordInstructionWrapper(
+				out, row, form, prefix, nativeEmitter, bits, bigEndian)
 			continue
 		}
 		function, found := findBackendFunction(document, form.Algorithm)
@@ -79,11 +84,14 @@ func appendArchitectureBindings(out []byte, document Document, arch Declaration,
 	return out
 }
 
-func appendWord32InstructionWrapper(out []byte, row []string, form architectureForm, prefix string, nativeEmitter bool) []byte {
+func appendTypedWordInstructionWrapper(out []byte, row []string, form architectureForm,
+	prefix string, nativeEmitter bool, bits int, bigEndian bool) []byte {
 	if len(row) < 3 {
 		return out
 	}
-	out = append(out, "\n// Generated from declarative word32 instruction "...)
+	out = append(out, "\n// Generated from declarative "...)
+	out = append(out, form.Kind...)
+	out = append(out, " instruction "...)
 	out = append(out, row[0]...)
 	out = append(out, ".\nfunc "...)
 	out = append(out, prefix...)
@@ -101,28 +109,18 @@ func appendWord32InstructionWrapper(out []byte, row []string, form architectureF
 		out = appendArchitectureFormOperandType(out, form.Operands[i].Kind, nativeEmitter)
 	}
 	out = append(out, ") {\n\t"...)
-	if nativeEmitter {
-		out = append(out, "renvoRTGUint32(out, "...)
+	if bigEndian {
+		out = append(out, "value := "...)
 	} else {
-		out = append(out, "RTGUint32(out, "...)
+		out = appendTypedWordEmitter(out, nativeEmitter, bits)
 	}
-	out = append(out, row[2]...)
-	for i := 0; i < len(form.Operands); i++ {
-		operand := form.Operands[i]
-		for j := 0; j < len(operand.Shifts); j++ {
-			out = append(out, "|("...)
-			out = append(out, operand.Name...)
-			if operand.Kind == "reg" || operand.Kind == "condition" {
-				out = append(out, ".Code"...)
-			}
-			if operand.Shifts[j] != "0" {
-				out = append(out, "<<"...)
-				out = append(out, operand.Shifts[j]...)
-			}
-			out = append(out, ')')
-		}
+	out = appendTypedWordValue(out, row, form)
+	if bigEndian {
+		out = append(out, '\n')
+		out = appendBigEndianWord(out, nativeEmitter, bits)
+	} else {
+		out = append(out, ")\n"...)
 	}
-	out = append(out, ")\n"...)
 	for i := 0; i < len(form.Operands); i++ {
 		if !form.Operands[i].Relocation {
 			continue
@@ -139,6 +137,58 @@ func appendWord32InstructionWrapper(out []byte, row []string, form architectureF
 	return append(out, "}\n"...)
 }
 
+func appendTypedWordValue(out []byte, row []string, form architectureForm) []byte {
+	out = append(out, row[2]...)
+	for i := 0; i < len(form.Operands); i++ {
+		operand := form.Operands[i]
+		for j := 0; j < len(operand.Shifts); j++ {
+			out = append(out, "|("...)
+			out = append(out, operand.Name...)
+			if operand.Kind == "reg" || operand.Kind == "condition" {
+				out = append(out, ".Code"...)
+			} else if operand.Kind == "address_base" {
+				out = append(out, ".Base.Code"...)
+			}
+			if operand.Shifts[j] != "0" {
+				out = append(out, "<<"...)
+				out = append(out, operand.Shifts[j]...)
+			}
+			out = append(out, ')')
+		}
+	}
+	return out
+}
+
+func appendTypedWordEmitter(out []byte, nativeEmitter bool, bits int) []byte {
+	if bits == 32 {
+		if nativeEmitter {
+			return append(out, "renvoRTGUint32(out, "...)
+		}
+		return append(out, "RTGUint32(out, "...)
+	}
+	if bits == 16 {
+		if nativeEmitter {
+			return append(out, "renvoAsmEmit16(out, "...)
+		}
+		return append(out, "out.Uint16("...)
+	}
+	return out
+}
+
+func appendBigEndianWord(out []byte, nativeEmitter bool, bits int) []byte {
+	for shift := bits - 8; shift >= 0; shift -= 8 {
+		out = append(out, '\t')
+		if nativeEmitter {
+			out = append(out, "renvoRTGByte(out, byte(value>>"...)
+		} else {
+			out = append(out, "RTGByte(out, byte(value>>"...)
+		}
+		out = append(out, decimalText(shift)...)
+		out = append(out, "))\n"...)
+	}
+	return out
+}
+
 func appendArchitectureFormOperandType(out []byte, kind string, nativeEmitter bool) []byte {
 	if kind == "reg" {
 		return append(out, "RTGRegister"...)
@@ -151,6 +201,12 @@ func appendArchitectureFormOperandType(out []byte, kind string, nativeEmitter bo
 			return append(out, "int"...)
 		}
 		return append(out, "RTGLabel"...)
+	}
+	if kind == "address_base" {
+		if nativeEmitter {
+			return append(out, "renvoRTGAddress"...)
+		}
+		return append(out, "RTGAddress"...)
 	}
 	if kind == "byte" {
 		return append(out, "byte"...)
@@ -349,8 +405,9 @@ func architectureForms(arch Declaration) []architectureForm {
 			forms = append(forms, architectureForm{Name: left[0], Algorithm: right[1], Kind: right[0]})
 		} else if assignment && len(left) == 1 && len(right) == 1 && right[0] == "bytes" {
 			forms = append(forms, architectureForm{Name: left[0], Kind: "bytes"})
-		} else if assignment && len(left) == 1 && len(right) >= 3 && right[0] == "word32" {
-			form := architectureForm{Name: left[0], Kind: "word32"}
+		} else if assignment && len(left) == 1 && len(right) >= 3 &&
+			typedWordFormBits(right[0]) != 0 {
+			form := architectureForm{Name: left[0], Kind: right[0]}
 			form.Operands = decodeArchitectureFormOperands(right[1:])
 			forms = append(forms, form)
 		}
@@ -393,7 +450,7 @@ func decodeArchitectureFormOperands(tokens []string) []architectureFormOperand {
 }
 
 func architectureFormFunction(form architectureForm, name string) (embeddedFunction, bool) {
-	if form.Kind != "word32" {
+	if typedWordFormBits(form.Kind) == 0 {
 		return embeddedFunction{}, false
 	}
 	function := embeddedFunction{
@@ -422,10 +479,23 @@ func architectureFormOperandType(kind string) string {
 	if kind == "label" {
 		return "RTGLabel"
 	}
+	if kind == "address_base" {
+		return "RTGAddress"
+	}
 	if kind == "byte" {
 		return "byte"
 	}
 	return "int"
+}
+
+func typedWordFormBits(kind string) int {
+	if kind == "word16" {
+		return 16
+	}
+	if kind == "word32" {
+		return 32
+	}
+	return 0
 }
 
 func lookupArchitectureForm(forms []architectureForm, name string) (architectureForm, bool) {

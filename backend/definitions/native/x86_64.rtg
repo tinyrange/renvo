@@ -7,17 +7,13 @@ go backend {
 		return out
 	}
 
-	func nativeAppend16(out []byte, value int) []byte {
-		return append(out, byte(value), byte(value>>8))
-	}
-
 	func nativeAppend64(out []byte, value int) []byte {
 		out = nativeAppend32(out, value)
 		out = nativeAppend32(out, value>>32)
 		return out
 	}
 
-	func x86KernelStaticCall(out *RTGEmitter, importID int, wordCount int) {
+	func kernelStaticCall(out *RTGEmitter, importID int, wordCount int) {
 		registers := []RTGRegister{
 			{Code: 7, Valid: true},
 			{Code: 6, Valid: true},
@@ -27,7 +23,7 @@ go backend {
 			{Code: 9, Valid: true},
 		}
 		for i := 0; i < wordCount && i < len(registers); i++ {
-			x86OpcodeRegister(out, 0x58, registers[i])
+			emitOpcodeRegister(out, 0x58, registers[i])
 		}
 		out.Byte(0xe8)
 		at := out.Len()
@@ -35,7 +31,7 @@ go backend {
 		out.AbsoluteReloc(at, importID, RTGRelocationImport)
 	}
 
-	func x86KernelRuntimeOperation(out *RTGEmitter, operation int) bool {
+	func kernelRuntimeOperation(out *RTGEmitter, operation int) bool {
 		if operation != RTGRuntimeWrite {
 			return false
 		}
@@ -43,17 +39,17 @@ go backend {
 		rsi := RTGRegister{Code: 6, Valid: true}
 		rdi := RTGRegister{Code: 7, Valid: true}
 		rdx := RTGRegister{Code: 2, Valid: true}
-		x86RRRM(out, 0x89, rax, rsi, 64)
-		x86RRRM(out, 0x89, rsi, rdx, 64)
-		x86RRRM(out, 0x89, rdx, rax, 64)
+		encodeRegisterToRM(out, 0x89, rax, rsi, 64)
+		encodeRegisterToRM(out, 0x89, rsi, rdx, 64)
+		encodeRegisterToRM(out, 0x89, rdx, rax, 64)
 		data := out.Data()
 		formatOffset := len(data)
 		data = append(data, '%', '.', '*', 's', 0)
 		out.SetData(data)
-		x86RMR(out, 0x8d, rdi, RTGAddress{
+		encodeMemoryToRegister(out, 0x8d, rdi, RTGAddress{
 			Kind: 1, Addend: formatOffset,
 		}, 64)
-		x86MoveImmediate(out, rax, 0)
+		moveImmediate(out, rax, 0)
 		importID := out.ExternalImport("_printk")
 		out.Byte(0xe8)
 		at := out.Len()
@@ -62,9 +58,9 @@ go backend {
 		return true
 	}
 
-	func x86WindowsExit(out *RTGEmitter, status RTGRegister) {
+	func windowsExit(out *RTGEmitter, status RTGRegister) {
 		if status.Code != 1 {
-			x86RRRM(out, 0x89, RTGRegister{Code: 1, Valid: true}, status, 64)
+			encodeRegisterToRM(out, 0x89, RTGRegister{Code: 1, Valid: true}, status, 64)
 		}
 		out.Bytes4(0x48, 0x83, 0xec, 0x28)
 		out.Bytes2(0xff, 0x15)
@@ -73,7 +69,7 @@ go backend {
 		out.AbsoluteReloc(at, 8, RTGRelocationImport)
 	}
 
-	func x86WindowsLoadRAXFromR10(out *RTGEmitter, offset int) {
+	func windowsLoadRAXFromR10(out *RTGEmitter, offset int) {
 		if offset <= 127 {
 			out.Bytes4(0x49, 0x8b, 0x42, offset)
 			return
@@ -82,7 +78,7 @@ go backend {
 		out.Int32(offset)
 	}
 
-	func x86WindowsLoadRAXFromRSP(out *RTGEmitter, offset int) {
+	func windowsLoadRAXFromRSP(out *RTGEmitter, offset int) {
 		if offset <= 127 {
 			out.Bytes4(0x48, 0x8b, 0x44, 0x24)
 			out.Byte(offset)
@@ -92,7 +88,7 @@ go backend {
 		out.Int32(offset)
 	}
 
-	func x86WindowsStoreRAXToRSP(out *RTGEmitter, offset int) {
+	func windowsStoreRAXToRSP(out *RTGEmitter, offset int) {
 		if offset <= 127 {
 			out.Bytes4(0x48, 0x89, 0x44, 0x24)
 			out.Byte(offset)
@@ -102,7 +98,7 @@ go backend {
 		out.Int32(offset)
 	}
 
-	func x86WindowsStoreR10ToRSP(out *RTGEmitter, offset int) {
+	func windowsStoreR10ToRSP(out *RTGEmitter, offset int) {
 		if offset <= 127 {
 			out.Bytes4(0x4c, 0x89, 0x54, 0x24)
 			out.Byte(offset)
@@ -112,12 +108,12 @@ go backend {
 		out.Int32(offset)
 	}
 
-	func x86WindowsStaticCall(out *RTGEmitter, importID int, wordCount int) {
+	func windowsStaticCall(out *RTGEmitter, importID int, wordCount int) {
 		if wordCount > 0 {
-			x86OpcodeRegister(out, 0x58, RTGRegister{Code: 1, Valid: true})
+			emitOpcodeRegister(out, 0x58, RTGRegister{Code: 1, Valid: true})
 		}
 		if wordCount > 1 {
-			x86OpcodeRegister(out, 0x58, RTGRegister{Code: 2, Valid: true})
+			emitOpcodeRegister(out, 0x58, RTGRegister{Code: 2, Valid: true})
 		}
 		if wordCount > 2 {
 			out.Bytes2(0x41, 0x58)
@@ -140,16 +136,16 @@ go backend {
 			out.Int32(allocation)
 		}
 		for i := 0; i < stackWords; i++ {
-			x86WindowsLoadRAXFromR10(out, i*8)
-			x86WindowsStoreRAXToRSP(out, 32+i*8)
+			windowsLoadRAXFromR10(out, i*8)
+			windowsStoreRAXToRSP(out, 32+i*8)
 		}
-		x86WindowsStoreR10ToRSP(out, savedRSPOff)
+		windowsStoreR10ToRSP(out, savedRSPOff)
 		out.Bytes2(0xff, 0x15)
 		at := out.Len()
 		out.Int32(0)
 		out.AbsoluteReloc(at, importID, RTGRelocationImport)
 		out.Bytes3(0x49, 0x89, 0xc2)
-		x86WindowsLoadRAXFromRSP(out, savedRSPOff)
+		windowsLoadRAXFromRSP(out, savedRSPOff)
 		out.Bytes3(0x48, 0x89, 0xc4)
 		if stackWords > 0 {
 			adjust := stackWords * 8
@@ -163,7 +159,7 @@ go backend {
 		out.Bytes3(0x4c, 0x89, 0xd0)
 	}
 
-	func renvoAmd64AsmSecondaryDisp(a *RTGEmitter, disp int) {
+	func asmSecondaryDisp(a *RTGEmitter, disp int) {
 		if disp == 0 {
 			a.Int8(0x02)
 		} else if RTGInt8Fits(disp) {
@@ -174,7 +170,7 @@ go backend {
 		}
 	}
 
-	func renvoAmd64AsmMovRaxImm(a *RTGEmitter, imm int) {
+	func asmMovRaxImm(a *RTGEmitter, imm int) {
 		if imm == 0 {
 			a.Uint16(0xc031)
 			return
@@ -199,20 +195,20 @@ go backend {
 		a.Int64(imm)
 	}
 
-	func renvoAmd64AsmMovRdiRax(a *RTGEmitter) {
-		if renvoAmd64RewritePrimaryLoad(a, 7, false) {
+	func asmMovRdiRax(a *RTGEmitter) {
+		if rewritePrimaryLoad(a, 7, false) {
 			return
 		}
 		a.Uint16(0x5f50)
 	}
-	func renvoAmd64AsmMovRsiRax(a *RTGEmitter) {
-		if renvoAmd64RewritePrimaryLoad(a, 6, false) {
+	func asmMovRsiRax(a *RTGEmitter) {
+		if rewritePrimaryLoad(a, 6, false) {
 			return
 		}
 		a.Uint16(0x5e50)
 	}
 
-	func renvoAmd64RewritePrimaryLoad(a *RTGEmitter, reg int, pushed bool) bool {
+	func rewritePrimaryLoad(a *RTGEmitter, reg int, pushed bool) bool {
 		load := a.PrimaryLoad()
 		if pushed {
 			load = -load
@@ -233,7 +229,7 @@ go backend {
 		return true
 	}
 
-	func renvoAmd64RewritePrimaryLoadCompare(a *RTGEmitter, imm int) bool {
+	func rewritePrimaryLoadCompare(a *RTGEmitter, imm int) bool {
 		load := a.PrimaryLoad()
 		end := load >> 3
 		if load <= 0 || end != a.Len() {
@@ -241,7 +237,7 @@ go backend {
 		}
 		at := end - (load & 7)
 		// RIP-relative displacements use the original instruction end as their
-		// base, so only stack and register-relative loads can grow by one byte.
+		// base, so only stack- and register-relative loads can grow by one byte.
 		if a.ByteAt(at)&0xc7 == 0x05 {
 			return false
 		}
@@ -255,7 +251,7 @@ go backend {
 		return true
 	}
 
-	func renvoAmd64AsmMemDisp(a *RTGEmitter, disp int, op int, disp8 int, disp32 int) {
+	func asmMemDisp(a *RTGEmitter, disp int, op int, disp8 int, disp32 int) {
 		a.Uint16(op)
 		if RTGInt8Fits(disp) {
 			a.Bytes2(disp8, disp)
@@ -265,7 +261,7 @@ go backend {
 		a.Int32(disp)
 	}
 
-	func renvoAmd64AsmLoadQwordRaxIndexRcxDisp(a *RTGEmitter, disp int) {
+	func asmLoadQwordRaxIndexRcxDisp(a *RTGEmitter, disp int) {
 		a.Uint16(0x8b48)
 		if RTGInt8Fits(disp) {
 			a.Bytes3(0x44, 0x8, disp)
@@ -275,40 +271,40 @@ go backend {
 		a.Int32(disp)
 	}
 
-	func renvoAmd64AsmLoadRaxMemRdxDisp(a *RTGEmitter, disp int) {
+	func asmLoadRaxMemRdxDisp(a *RTGEmitter, disp int) {
 		if disp == 0 {
 			a.Uint24(0x028b48)
 			a.SetPrimaryLoad(a.Len()*8 + 1)
 			return
 		}
-		renvoAmd64AsmMemDisp(a, disp, 0x8b48, 0x42, 0x82)
+		asmMemDisp(a, disp, 0x8b48, 0x42, 0x82)
 		distance := 2
 		if !RTGInt8Fits(disp) {
 			distance = 5
 		}
 		a.SetPrimaryLoad(a.Len()*8 + distance)
 	}
-	func renvoAmd64AsmLoadRaxMemRdxDispSize(a *RTGEmitter, disp int, size int) {
+	func asmLoadRaxMemRdxDispSize(a *RTGEmitter, disp int, size int) {
 		if size == 1 {
 			a.Uint24(0xb60f48)
-			renvoAmd64AsmSecondaryDisp(a, disp)
+			asmSecondaryDisp(a, disp)
 			return
 		}
 		if size == 2 {
 			a.Uint24(0xbf0f48)
-			renvoAmd64AsmSecondaryDisp(a, disp)
+			asmSecondaryDisp(a, disp)
 			return
 		}
 		if size == 4 {
-			renvoAmd64AsmMemDisp(a, disp, 0x6348, 0x42, 0x82)
+			asmMemDisp(a, disp, 0x6348, 0x42, 0x82)
 			return
 		}
-		renvoAmd64AsmLoadRaxMemRdxDisp(a, disp)
+		asmLoadRaxMemRdxDisp(a, disp)
 	}
 
-	func renvoAmd64AsmLoadRaxIndexRcxSize(a *RTGEmitter, size int) {
+	func asmLoadRaxIndexRcxSize(a *RTGEmitter, size int) {
 		if size == 1 {
-			renvoAmd64AsmLoadByteRaxIndexRcx(a)
+			asmLoadByteRaxIndexRcx(a)
 			return
 		}
 		if size == 2 {
@@ -320,35 +316,35 @@ go backend {
 			a.Int32(0x88046348)
 			return
 		}
-		renvoAmd64AsmLoadQwordRaxIndexRcx8(a)
+		asmLoadQwordRaxIndexRcx8(a)
 	}
 
-	func renvoAmd64AsmStoreRaxMemRdxDisp(a *RTGEmitter, disp int) {
+	func asmStoreRaxMemRdxDisp(a *RTGEmitter, disp int) {
 		if disp == 0 {
 			a.Uint24(0x028948)
 			return
 		}
-		renvoAmd64AsmMemDisp(a, disp, 0x8948, 0x42, 0x82)
+		asmMemDisp(a, disp, 0x8948, 0x42, 0x82)
 	}
-	func renvoAmd64AsmStoreRaxMemRdxDispSize(a *RTGEmitter, disp int, size int) {
+	func asmStoreRaxMemRdxDispSize(a *RTGEmitter, disp int, size int) {
 		if size == 1 {
 			a.Int8(0x88)
-			renvoAmd64AsmSecondaryDisp(a, disp)
+			asmSecondaryDisp(a, disp)
 			return
 		}
 		if size == 2 {
 			a.Uint16(0x8966)
-			renvoAmd64AsmSecondaryDisp(a, disp)
+			asmSecondaryDisp(a, disp)
 			return
 		}
 		if size == 4 {
 			a.Int8(0x89)
-			renvoAmd64AsmSecondaryDisp(a, disp)
+			asmSecondaryDisp(a, disp)
 			return
 		}
-		renvoAmd64AsmStoreRaxMemRdxDisp(a, disp)
+		asmStoreRaxMemRdxDisp(a, disp)
 	}
-	func renvoAmd64CodeEnds(a *RTGEmitter, suffix string) bool {
+	func codeEnds(a *RTGEmitter, suffix string) bool {
 		start := a.Len() - len(suffix)
 		if start < 0 {
 			return false
@@ -360,9 +356,9 @@ go backend {
 		}
 		return true
 	}
-	func renvoAmd64AsmNormalizeRaxForKind(a *RTGEmitter, kind int) {
+	func asmNormalizeRaxForKind(a *RTGEmitter, kind int) {
 		if kind == RTGScalarByte {
-			if renvoAmd64CodeEnds(a, "\x0f\xb6\xc0") || renvoAmd64CodeEnds(a, "\x48\x0f\xb6\x02") || renvoAmd64CodeEnds(a, "\x48\x0f\xb6\x04\x08") {
+			if codeEnds(a, "\x0f\xb6\xc0") || codeEnds(a, "\x48\x0f\xb6\x02") || codeEnds(a, "\x48\x0f\xb6\x04\x08") {
 				return
 			}
 			a.Uint24(0xc0b60f)
@@ -381,7 +377,7 @@ go backend {
 			return
 		}
 		if kind == RTGScalarInt32 {
-			if renvoAmd64CodeEnds(a, "\x48\x63\xc0") || renvoAmd64CodeEnds(a, "\x48\x63\x04\x88") {
+			if codeEnds(a, "\x48\x63\xc0") || codeEnds(a, "\x48\x63\x04\x88") {
 				return
 			}
 			a.Uint24(0xc06348)
@@ -392,7 +388,7 @@ go backend {
 		}
 	}
 
-	func renvoAmd64AsmCmpRaxImm8(a *RTGEmitter, imm int) {
+	func asmCmpRaxImm8(a *RTGEmitter, imm int) {
 		if imm == 0 {
 			// Integer values occupy the full native register on amd64. Testing only
 			// EAX makes values whose low word is zero (for example 1 << 40) compare
@@ -404,13 +400,13 @@ go backend {
 		a.Bytes4(0x48, 0x83, 0xf8, imm)
 	}
 
-	func renvoAmd64AsmCmpRaxImm8Discard(a *RTGEmitter, imm int) {
-		if renvoAmd64RewritePrimaryLoadCompare(a, imm) {
+	func asmCmpRaxImm8Discard(a *RTGEmitter, imm int) {
+		if rewritePrimaryLoadCompare(a, imm) {
 			return
 		}
-		renvoAmd64AsmCmpRaxImm8(a, imm)
+		asmCmpRaxImm8(a, imm)
 	}
-	func renvoAmd64AsmDivLeftRcxRightRax(a *RTGEmitter, mod bool) {
+	func asmDivLeftRcxRightRax(a *RTGEmitter, mod bool) {
 		if mod {
 			a.Text("\x48\x83\xf8\xff\x75\x10\x6a\x01\x5a\x48\xc1\xe2\x3f\x48\x39\xd1\x75\x04\x31\xc0\xeb\x10\x53\x48\x89\xc3\x48\x89\xc8\x48\x99\x48\xf7\xfb\x48\x89\xd0\x5b")
 			return
@@ -418,26 +414,26 @@ go backend {
 		a.Text("\x48\x83\xf8\xff\x75\x11\x6a\x01\x5a\x48\xc1\xe2\x3f\x48\x39\xd1\x75\x05\x48\x89\xc8\xeb\x0d\x53\x48\x89\xc3\x48\x89\xc8\x48\x99\x48\xf7\xfb\x5b")
 	}
 
-	func x86Opcode(out *RTGEmitter, opcode uint32) {
+	func emitOpcode(out *RTGEmitter, opcode uint32) {
 		if opcode > 0xff {
 			out.AppendByte(int(opcode >> 8))
 		}
 		out.AppendByte(int(opcode))
 	}
 
-	func x86REX(out *RTGEmitter, wide bool, reg RTGRegister, index RTGRegister, base RTGRegister, byteRegister RTGRegister) {
+	func emitREX(out *RTGEmitter, wide bool, reg RTGRegister, index RTGRegister, base RTGRegister, byteRegister RTGRegister) {
 		w := byte(0)
 		if wide {
 			w = 1
 		}
-		r := x86High(reg)
+		r := registerHighBit(reg)
 		x := byte(0)
 		if index.Valid {
-			x = x86High(index)
+			x = registerHighBit(index)
 		}
 		b := byte(0)
 		if base.Valid {
-			b = x86High(base)
+			b = registerHighBit(base)
 		}
 		needsByteREX := byteRegister.Valid && byteRegister.Code >= 4
 		if w != 0 || r != 0 || x != 0 || b != 0 || needsByteREX {
@@ -445,32 +441,32 @@ go backend {
 		}
 	}
 
-	func x86Memory(out *RTGEmitter, reg byte, address RTGAddress) {
+	func emitMemoryOperand(out *RTGEmitter, reg byte, address RTGAddress) {
 		if RTGAddressValid(address) {
-			x86ModRM(out, 0, reg, 5)
+			modRM(out, 0, reg, 5)
 			RTGAddressRel32Addend(out, address)
 			return
 		}
 		base := address.Base
 		index := address.Index
 		displacement := address.Displacement
-		needsSIB := index.Valid || x86Low3(base) == 4
+		needsSIB := index.Valid || registerLowBits(base) == 4
 		mode := byte(0)
-		if displacement != 0 || x86Low3(base) == 5 {
+		if displacement != 0 || registerLowBits(base) == 5 {
 			mode = 2
 			if RTGSignedFits(int64(displacement), 8) {
 				mode = 1
 			}
 		}
 		if needsSIB {
-			x86ModRM(out, mode, reg, 4)
+			modRM(out, mode, reg, 4)
 			indexCode := byte(4)
 			if index.Valid {
-				indexCode = x86Low3(index)
+				indexCode = registerLowBits(index)
 			}
-			out.AppendByte(int(byte(RTGLog2(address.Scale))<<6 | indexCode<<3 | x86Low3(base)))
+			out.AppendByte(int(byte(RTGLog2(address.Scale))<<6 | indexCode<<3 | registerLowBits(base)))
 		} else {
-			x86ModRM(out, mode, reg, x86Low3(base))
+			modRM(out, mode, reg, registerLowBits(base))
 		}
 		if mode == 1 {
 			out.AppendByte(displacement)
@@ -479,7 +475,7 @@ go backend {
 		}
 	}
 
-	func x86RRRM(out *RTGEmitter, opcode uint32, destination RTGRegister, source RTGRegister, width int) {
+	func encodeRegisterToRM(out *RTGEmitter, opcode uint32, destination RTGRegister, source RTGRegister, width int) {
 		if width == 16 {
 			out.Byte(0x66)
 		}
@@ -487,27 +483,27 @@ go backend {
 		if width == 8 {
 			byteRegister = source
 		}
-		x86REX(out, width == 64, source, RTGNoRegister, destination, byteRegister)
-		x86Opcode(out, opcode)
-		x86ModRM(out, 3, x86Low3(source), x86Low3(destination))
+		emitREX(out, width == 64, source, RTGNoRegister, destination, byteRegister)
+		emitOpcode(out, opcode)
+		modRM(out, 3, registerLowBits(source), registerLowBits(destination))
 	}
 
-	func x86RR(out *RTGEmitter, opcode uint32, destination RTGRegister, source RTGRegister, width int) {
-		x86REX(out, width == 64, destination, RTGNoRegister, source, RTGNoRegister)
-		x86Opcode(out, opcode)
-		x86ModRM(out, 3, x86Low3(destination), x86Low3(source))
+	func encodeRegisterPair(out *RTGEmitter, opcode uint32, destination RTGRegister, source RTGRegister, width int) {
+		emitREX(out, width == 64, destination, RTGNoRegister, source, RTGNoRegister)
+		emitOpcode(out, opcode)
+		modRM(out, 3, registerLowBits(destination), registerLowBits(source))
 	}
 
-	func x86RMR(out *RTGEmitter, opcode uint32, destination RTGRegister, address RTGAddress, width int) {
+	func encodeMemoryToRegister(out *RTGEmitter, opcode uint32, destination RTGRegister, address RTGAddress, width int) {
 		if width == 16 {
 			out.Byte(0x66)
 		}
-		x86REX(out, width == 64, destination, address.Index, address.Base, RTGNoRegister)
-		x86Opcode(out, opcode)
-		x86Memory(out, x86Low3(destination), address)
+		emitREX(out, width == 64, destination, address.Index, address.Base, RTGNoRegister)
+		emitOpcode(out, opcode)
+		emitMemoryOperand(out, registerLowBits(destination), address)
 	}
 
-	func x86RRM(out *RTGEmitter, opcode uint32, address RTGAddress, source RTGRegister, width int) {
+	func encodeRegisterToMemory(out *RTGEmitter, opcode uint32, address RTGAddress, source RTGRegister, width int) {
 		if width == 16 {
 			out.Byte(0x66)
 		}
@@ -515,99 +511,99 @@ go backend {
 		if width == 8 {
 			byteRegister = source
 		}
-		x86REX(out, width == 64, source, address.Index, address.Base, byteRegister)
-		x86Opcode(out, opcode)
-		x86Memory(out, x86Low3(source), address)
+		emitREX(out, width == 64, source, address.Index, address.Base, byteRegister)
+		emitOpcode(out, opcode)
+		emitMemoryOperand(out, registerLowBits(source), address)
 	}
 
-	func x86Group(out *RTGEmitter, opcode uint32, selector byte, operand RTGRegister, width int) {
-		x86REX(out, width == 64, RTGNoRegister, RTGNoRegister, operand, RTGNoRegister)
-		x86Opcode(out, opcode)
-		x86ModRM(out, 3, selector, x86Low3(operand))
+	func encodeGroup(out *RTGEmitter, opcode uint32, selector byte, operand RTGRegister, width int) {
+		emitREX(out, width == 64, RTGNoRegister, RTGNoRegister, operand, RTGNoRegister)
+		emitOpcode(out, opcode)
+		modRM(out, 3, selector, registerLowBits(operand))
 	}
 
-	func x86GroupImmediate8(out *RTGEmitter, opcode uint32, selector byte, operand RTGRegister, value byte, width int) {
-		x86Group(out, opcode, selector, operand, width)
+	func encodeGroupImmediate8(out *RTGEmitter, opcode uint32, selector byte, operand RTGRegister, value byte, width int) {
+		encodeGroup(out, opcode, selector, operand, width)
 		out.AppendByte(int(value))
 	}
 
-	func x86Relative(out *RTGEmitter, opcode uint32, label RTGLabel) {
-		x86Opcode(out, opcode)
+	func encodeRelative(out *RTGEmitter, opcode uint32, label RTGLabel) {
+		emitOpcode(out, opcode)
 		out.Rel32(label)
 	}
 
-	func x86MoveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
+	func moveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
 		if destination.Code == 0 && value == 0 {
 			out.Bytes2(0x31, 0xc0)
 		} else if destination.Code != 4 && RTGSignedFits(value, 8) {
 			out.Bytes2(0x6a, int(value))
-			x86OpcodeRegister(out, 0x58, destination)
+			emitOpcodeRegister(out, 0x58, destination)
 		} else if value >= 0 && RTGUnsignedFits(uint64(value), 32) {
-			x86OpcodeRegister(out, 0xb8, destination)
+			emitOpcodeRegister(out, 0xb8, destination)
 			RTGUint32(out, int(value))
 		} else if RTGSignedFits(value, 32) {
 			out.Byte(0x68)
 			RTGUint32(out, int(value))
-			x86OpcodeRegister(out, 0x58, destination)
+			emitOpcodeRegister(out, 0x58, destination)
 		} else {
-			x86REX(out, true, RTGNoRegister, RTGNoRegister, destination, RTGNoRegister)
-			out.AppendByte(int(0xb8 + x86Low3(destination)))
+			emitREX(out, true, RTGNoRegister, RTGNoRegister, destination, RTGNoRegister)
+			out.AppendByte(int(0xb8 + registerLowBits(destination)))
 			out.Uint64(uint64(value))
 		}
 	}
 
-	func x86OpcodeRegister(out *RTGEmitter, opcode byte, operand RTGRegister) {
-		if x86High(operand) != 0 {
+	func emitOpcodeRegister(out *RTGEmitter, opcode byte, operand RTGRegister) {
+		if registerHighBit(operand) != 0 {
 			out.Byte(0x41)
 		}
-		out.AppendByte(int(opcode + x86Low3(operand)))
+		out.AppendByte(int(opcode + registerLowBits(operand)))
 	}
 
-	func x86VariableShift(out *RTGEmitter, direction RTGShiftDirection, signed bool) {
-		x86_64Xchg64(out, RTGRegister{Code: 0, Valid: true}, RTGRegister{Code: 1, Valid: true})
+	func variableShift(out *RTGEmitter, direction RTGShiftDirection, signed bool) {
+		xchg64(out, RTGRegister{Code: 0, Valid: true}, RTGRegister{Code: 1, Valid: true})
 		if direction == RTGShiftLeft {
-			x86_64ShlCL64(out, RTGRegister{Code: 0, Valid: true})
+			shlCL64(out, RTGRegister{Code: 0, Valid: true})
 		} else if signed {
-			x86_64SarCL64(out, RTGRegister{Code: 0, Valid: true})
+			sarCL64(out, RTGRegister{Code: 0, Valid: true})
 		} else {
-			x86_64ShrCL64(out, RTGRegister{Code: 0, Valid: true})
+			shrCL64(out, RTGRegister{Code: 0, Valid: true})
 		}
 	}
 
-	func x86SignedDivide(out *RTGEmitter, remainder bool) {
+	func signedDivide(out *RTGEmitter, remainder bool) {
 		primary := RTGRegister{Code: 0, Valid: true}
 		secondary := RTGRegister{Code: 2, Valid: true}
 		tertiary := RTGRegister{Code: 1, Valid: true}
 		scratch := RTGRegister{Code: 3, Valid: true}
 		ordinary := out.NewLabel()
 		done := out.NewLabel()
-		x86MoveImmediate(out, secondary, -1)
-		x86RRRM(out, 0x39, primary, secondary, 64)
-		x86JumpCondition(out, RTGCondition{JumpOpcode: 0x85}, ordinary)
-		x86MoveImmediate(out, secondary, 1)
-		x86GroupImmediate8(out, 0xc1, 4, secondary, 63, 64)
-		x86RRRM(out, 0x39, tertiary, secondary, 64)
-		x86JumpCondition(out, RTGCondition{JumpOpcode: 0x85}, ordinary)
+		moveImmediate(out, secondary, -1)
+		encodeRegisterToRM(out, 0x39, primary, secondary, 64)
+		jumpCondition(out, RTGCondition{JumpOpcode: 0x85}, ordinary)
+		moveImmediate(out, secondary, 1)
+		encodeGroupImmediate8(out, 0xc1, 4, secondary, 63, 64)
+		encodeRegisterToRM(out, 0x39, tertiary, secondary, 64)
+		jumpCondition(out, RTGCondition{JumpOpcode: 0x85}, ordinary)
 		if remainder {
-			x86MoveImmediate(out, primary, 0)
+			moveImmediate(out, primary, 0)
 		} else {
-			x86RRRM(out, 0x89, primary, tertiary, 64)
+			encodeRegisterToRM(out, 0x89, primary, tertiary, 64)
 		}
-		x86Relative(out, 0xe9, done)
+		encodeRelative(out, 0xe9, done)
 		out.Mark(ordinary)
-		x86OpcodeRegister(out, 0x50, scratch)
-		x86RRRM(out, 0x89, scratch, primary, 64)
-		x86RRRM(out, 0x89, primary, tertiary, 64)
+		emitOpcodeRegister(out, 0x50, scratch)
+		encodeRegisterToRM(out, 0x89, scratch, primary, 64)
+		encodeRegisterToRM(out, 0x89, primary, tertiary, 64)
 		out.Bytes2(0x48, 0x99)
-		x86Group(out, 0xf7, 7, scratch, 64)
+		encodeGroup(out, 0xf7, 7, scratch, 64)
 		if remainder {
-			x86RRRM(out, 0x89, primary, secondary, 64)
+			encodeRegisterToRM(out, 0x89, primary, secondary, 64)
 		}
-		x86OpcodeRegister(out, 0x58, scratch)
+		emitOpcodeRegister(out, 0x58, scratch)
 		out.Mark(done)
 	}
 
-	func x86FrameFinish(out *RTGEmitter, at int, stackUsed int) {
+	func frameFinish(out *RTGEmitter, at int, stackUsed int) {
 		frame := (stackUsed + 15) & -16
 		if frame > 65520 {
 			frame = 65520
@@ -628,7 +624,7 @@ arch x86_64 {
     patch_relocations = relative32_le
 
     # List position is the architectural register number. The x86 encoder
-    # derives low3, REX bits, byte-register names, RSP/R12 SIB rules, and
+    # derives registerLowBits, REX bits, byte-register names, RSP/R12 SIB rules, and
     # RBP/R13 displacement rules from this single list.
     registers gpr64 = [
         rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi,
@@ -671,16 +667,16 @@ arch x86_64 {
     }
 
     forms {
-        rr_rm = go x86RRRM
-        rr = go x86RR
-        rm_r = go x86RMR
-        r_rm = go x86RRM
-        group = go x86Group
-        group_imm8 = go x86GroupImmediate8
-        opcode_reg = go x86OpcodeRegister
-        relative = go x86Relative
-        set_condition = sequence x86SetCondition
-        jump_condition = sequence x86JumpCondition
+        rr_rm = go encodeRegisterToRM
+        rr = go encodeRegisterPair
+        rm_r = go encodeMemoryToRegister
+        r_rm = go encodeRegisterToMemory
+        encodeGroup = go encodeGroup
+        group_imm8 = go encodeGroupImmediate8
+        opcode_reg = go emitOpcodeRegister
+        encodeRelative = go encodeRelative
+        set_condition = sequence setCondition
+        jump_condition = sequence jumpCondition
         fixed = bytes
     }
 
@@ -709,22 +705,22 @@ arch x86_64 {
         imul64 rr 0x0faf
         xchg64 rr_rm 0x87
 
-        inc64 group 0xff /0
-        dec64 group 0xff /1
+        inc64 encodeGroup 0xff /0
+        dec64 encodeGroup 0xff /1
         shl_imm64 group_imm8 0xc1 /4
         shr_imm64 group_imm8 0xc1 /5
         sar_imm64 group_imm8 0xc1 /7
-        shl_cl64 group 0xd3 /4
-        shr_cl64 group 0xd3 /5
-        sar_cl64 group 0xd3 /7
-        call_reg group 0xff /2 width=64
+        shl_cl64 encodeGroup 0xd3 /4
+        shr_cl64 encodeGroup 0xd3 /5
+        sar_cl64 encodeGroup 0xd3 /7
+        call_reg encodeGroup 0xff /2 width=64
 
         push_reg opcode_reg 0x50
         pop_reg opcode_reg 0x58
         setcc set_condition
         jcc_rel32 jump_condition relocation=rel32
-        call_rel32 relative 0xe8 relocation=rel32
-        jump_rel32 relative 0xe9 relocation=rel32
+        call_rel32 encodeRelative 0xe8 relocation=rel32
+        jump_rel32 encodeRelative 0xe9 relocation=rel32
 
         ret fixed [0xc3]
         leave fixed [0xc9]
@@ -766,44 +762,44 @@ arch x86_64 {
         return = ret
         leave = leave
         host_syscall = syscall
-        move_immediate = go x86MoveImmediate
-        variable_shift = go x86VariableShift
-        signed_divide = go x86SignedDivide
-        copy_bytes = sequence x86CopyBytes
+        move_immediate = go moveImmediate
+        variable_shift = go variableShift
+        signed_divide = go signedDivide
+        copy_bytes = sequence copyBytes
     }
 
     # Target-neutral lowering consumes these stable, generated exports; their
     # architecture-specific implementations remain owned by this definition.
     exports {
-		renvoAmd64AsmSecondaryDisp = go renvoAmd64AsmSecondaryDisp
-        renvoAmd64AsmMovRaxImm = go renvoAmd64AsmMovRaxImm
-        renvoAmd64AsmMovR10BssAddr = sequence renvoAmd64AsmMovR10BssAddr
-        renvoAmd64AsmLoadRaxBss = sequence renvoAmd64AsmLoadRaxBss
-        renvoAmd64AsmStoreRaxBss = sequence renvoAmd64AsmStoreRaxBss
-        renvoAmd64AsmMovRdiRax = go renvoAmd64AsmMovRdiRax
-        renvoAmd64AsmMovRsiRax = go renvoAmd64AsmMovRsiRax
-        renvoAmd64RewritePrimaryLoad = go renvoAmd64RewritePrimaryLoad
-        renvoAmd64RewritePrimaryLoadCompare = go renvoAmd64RewritePrimaryLoadCompare
-        renvoAmd64AsmMovR8Rax = sequence renvoAmd64AsmMovR8Rax
-        renvoAmd64AsmMovR9Rax = sequence renvoAmd64AsmMovR9Rax
-        renvoAmd64AsmMemDisp = go renvoAmd64AsmMemDisp
-        renvoAmd64AsmLoadQwordRaxIndexRcx8 = sequence renvoAmd64AsmLoadQwordRaxIndexRcx8
-        renvoAmd64AsmLoadQwordRaxIndexRcxDisp = go renvoAmd64AsmLoadQwordRaxIndexRcxDisp
-        renvoAmd64AsmLoadRaxMemRdxDisp = go renvoAmd64AsmLoadRaxMemRdxDisp
-        renvoAmd64AsmLoadRaxMemRdxDispSize = go renvoAmd64AsmLoadRaxMemRdxDispSize
-        renvoAmd64AsmLoadByteRaxIndexRcx = sequence renvoAmd64AsmLoadByteRaxIndexRcx
-        renvoAmd64AsmLoadRaxIndexRcxSize = go renvoAmd64AsmLoadRaxIndexRcxSize
-        renvoAmd64AsmStoreRaxMemRdxRcx8 = sequence renvoAmd64AsmStoreRaxMemRdxRcx8
-        renvoAmd64AsmStoreRaxMemRdxDisp = go renvoAmd64AsmStoreRaxMemRdxDisp
-        renvoAmd64AsmStoreRaxMemRdxDispSize = go renvoAmd64AsmStoreRaxMemRdxDispSize
-        renvoAmd64CodeEnds = go renvoAmd64CodeEnds
-        renvoAmd64AsmNormalizeRaxForKind = go renvoAmd64AsmNormalizeRaxForKind
-        renvoAmd64AsmIncMemRdx = sequence renvoAmd64AsmIncMemRdx
-        renvoAmd64AsmDecMemRdx = sequence renvoAmd64AsmDecMemRdx
-        renvoAmd64AsmCmpRaxImm8 = go renvoAmd64AsmCmpRaxImm8
-        renvoAmd64AsmCmpRaxImm8Discard = go renvoAmd64AsmCmpRaxImm8Discard
-        renvoAmd64AsmDivLeftRcxRightRax = go renvoAmd64AsmDivLeftRcxRightRax
-        renvoAmd64AsmCmpRcxRaxSet = sequence renvoAmd64AsmCmpRcxRaxSet
+		renvoAmd64AsmSecondaryDisp = go asmSecondaryDisp
+        renvoAmd64AsmMovRaxImm = go asmMovRaxImm
+        renvoAmd64AsmMovR10BssAddr = sequence asmMovR10BssAddr
+        renvoAmd64AsmLoadRaxBss = sequence asmLoadRaxBss
+        renvoAmd64AsmStoreRaxBss = sequence asmStoreRaxBss
+        renvoAmd64AsmMovRdiRax = go asmMovRdiRax
+        renvoAmd64AsmMovRsiRax = go asmMovRsiRax
+        renvoAmd64RewritePrimaryLoad = go rewritePrimaryLoad
+        renvoAmd64RewritePrimaryLoadCompare = go rewritePrimaryLoadCompare
+        renvoAmd64AsmMovR8Rax = sequence asmMovR8Rax
+        renvoAmd64AsmMovR9Rax = sequence asmMovR9Rax
+        renvoAmd64AsmMemDisp = go asmMemDisp
+        renvoAmd64AsmLoadQwordRaxIndexRcx8 = sequence asmLoadQwordRaxIndexRcx8
+        renvoAmd64AsmLoadQwordRaxIndexRcxDisp = go asmLoadQwordRaxIndexRcxDisp
+        renvoAmd64AsmLoadRaxMemRdxDisp = go asmLoadRaxMemRdxDisp
+        renvoAmd64AsmLoadRaxMemRdxDispSize = go asmLoadRaxMemRdxDispSize
+        renvoAmd64AsmLoadByteRaxIndexRcx = sequence asmLoadByteRaxIndexRcx
+        renvoAmd64AsmLoadRaxIndexRcxSize = go asmLoadRaxIndexRcxSize
+        renvoAmd64AsmStoreRaxMemRdxRcx8 = sequence asmStoreRaxMemRdxRcx8
+        renvoAmd64AsmStoreRaxMemRdxDisp = go asmStoreRaxMemRdxDisp
+        renvoAmd64AsmStoreRaxMemRdxDispSize = go asmStoreRaxMemRdxDispSize
+        renvoAmd64CodeEnds = go codeEnds
+        renvoAmd64AsmNormalizeRaxForKind = go asmNormalizeRaxForKind
+        renvoAmd64AsmIncMemRdx = sequence asmIncMemRdx
+        renvoAmd64AsmDecMemRdx = sequence asmDecMemRdx
+        renvoAmd64AsmCmpRaxImm8 = go asmCmpRaxImm8
+        renvoAmd64AsmCmpRaxImm8Discard = go asmCmpRaxImm8Discard
+        renvoAmd64AsmDivLeftRcxRightRax = go asmDivLeftRcxRightRax
+        renvoAmd64AsmCmpRcxRaxSet = sequence asmCmpRcxRaxSet
     }
 
     relocation rel32 {
@@ -824,280 +820,252 @@ arch x86_64 {
     }
 
 	sequences {
-		renvoAmd64AsmCmpRcxRaxSet(a:emitter, setcc:int) {
-			call a.Int32(0x0fc13948)
-
-			call a.Bytes3(setcc,0xc0,0xf)
-
-			call a.Uint16(0xc0b6)
-
+		asmCmpRcxRaxSet(a:emitter, setcc:int) {
+			a.Int32(0x0fc13948)
+			a.Bytes3(setcc, 0xc0, 0xf)
+			a.Uint16(0xc0b6)
 		}
-		renvoAmd64AsmDecMemRdx(a:emitter) {
-			call a.Uint24(0x0aff48)
-
+		asmDecMemRdx(a:emitter) {
+			a.Uint24(0x0aff48)
 		}
-		renvoAmd64AsmIncMemRdx(a:emitter) {
-			call a.Uint24(0x02ff48)
-
+		asmIncMemRdx(a:emitter) {
+			a.Uint24(0x02ff48)
 		}
-		renvoAmd64AsmLoadByteRaxIndexRcx(a:emitter) {
-			call a.Int32(0x04b60f48)
-
-			call a.Int8(0x8)
-
+		asmLoadByteRaxIndexRcx(a:emitter) {
+			a.Int32(0x04b60f48)
+			a.Int8(0x8)
 		}
-		renvoAmd64AsmLoadQwordRaxIndexRcx8(a:emitter) {
-			call a.Int32(0xc8048b48)
-
+		asmLoadQwordRaxIndexRcx8(a:emitter) {
+			a.Int32(0xc8048b48)
 		}
-		renvoAmd64AsmMovR8Rax(a:emitter) {
-			call a.Uint24(0xc08949)
-
+		asmMovR8Rax(a:emitter) {
+			a.Uint24(0xc08949)
 		}
-		renvoAmd64AsmMovR9Rax(a:emitter) {
-			call a.Uint24(0xc18949)
-
+		asmMovR9Rax(a:emitter) {
+			a.Uint24(0xc18949)
 		}
-		renvoAmd64AsmStoreRaxMemRdxRcx8(a:emitter) {
-			call a.Int32(0xca048948)
-
+		asmStoreRaxMemRdxRcx8(a:emitter) {
+			a.Int32(0xca048948)
 		}
-
-		renvoAmd64AsmLoadRaxBss(a:emitter, bssOff:int) {
-			call a.Uint24(0x058b48)
-
+		asmLoadRaxBss(a:emitter, bssOff:int) {
+			a.Uint24(0x058b48)
 			let at = a.Len()
-
-			call a.Int32(0)
-
-			call a.AbsoluteReloc(at,bssOff,RTGRelocationAbsoluteBSS)
-
-			call a.SetPrimaryLoad(a.Len()*8+5)
-
+			a.Int32(0)
+			a.AbsoluteReloc(at, bssOff, RTGRelocationAbsoluteBSS)
+			a.SetPrimaryLoad(a.Len()*8+5)
 		}
-		renvoAmd64AsmMovR10BssAddr(a:emitter, bssOff:int) {
-			call a.Uint24(0x158d4c)
-
+		asmMovR10BssAddr(a:emitter, bssOff:int) {
+			a.Uint24(0x158d4c)
 			let at = a.Len()
-
-			call a.Int32(0)
-
-			call a.AbsoluteReloc(at,bssOff,RTGRelocationAbsoluteBSS)
-
+			a.Int32(0)
+			a.AbsoluteReloc(at, bssOff, RTGRelocationAbsoluteBSS)
 		}
-		renvoAmd64AsmStoreRaxBss(a:emitter, bssOff:int) {
-			call a.Uint24(0x058948)
-
+		asmStoreRaxBss(a:emitter, bssOff:int) {
+			a.Uint24(0x058948)
 			let at = a.Len()
-
-			call a.Int32(0)
-
-			call a.AbsoluteReloc(at,bssOff,RTGRelocationAbsoluteBSS)
-
+			a.Int32(0)
+			a.AbsoluteReloc(at, bssOff, RTGRelocationAbsoluteBSS)
 		}
-
-		x86CopyBytes(out:emitter) {
-			let destination = record_register(Code:7,Valid:true)
-			let source = record_register(Code:6,Valid:true)
-			let count = record_register(Code:1,Valid:true)
-			let scratch = record_register(Code:10,Valid:true)
+		copyBytes(out:emitter) {
+			let destination = record_register(Code:7, Valid:true)
+			let source = record_register(Code:6, Valid:true)
+			let count = record_register(Code:1, Valid:true)
+			let scratch = record_register(Code:10, Valid:true)
 			let forward = out.NewLabel()
 			let done = out.NewLabel()
-			call x86RRRM(out,0x39,destination,source,64)
-			call x86JumpCondition(out,record_condition(JumpOpcode:0x86),forward)
-			call x86RMR(out,0x8d,scratch,record_address(Base:source,Index:count,Scale:1),64)
-			call x86RRRM(out,0x39,destination,scratch,64)
-			call x86JumpCondition(out,record_condition(JumpOpcode:0x83),forward)
-			call x86RMR(out,0x8d,source,record_address(Base:source,Index:count,Scale:1,Displacement:-1),64)
-			call x86RMR(out,0x8d,destination,record_address(Base:destination,Index:count,Scale:1,Displacement:-1),64)
-			call out.Bytes4(0xfd,0xf3,0xa4,0xfc)
-			call x86Relative(out,0xe9,done)
-			call out.Mark(forward)
-			call out.Bytes3(0xfc,0xf3,0xa4)
-			call out.Mark(done)
+			encodeRegisterToRM(out, 0x39, destination, source, 64)
+			jumpCondition(out, record_condition(JumpOpcode:0x86), forward)
+			encodeMemoryToRegister(out, 0x8d, scratch, record_address(Base:source, Index:count, Scale:1), 64)
+			encodeRegisterToRM(out, 0x39, destination, scratch, 64)
+			jumpCondition(out, record_condition(JumpOpcode:0x83), forward)
+			encodeMemoryToRegister(out, 0x8d, source, record_address(Base:source, Index:count, Scale:1, Displacement:-1), 64)
+			encodeMemoryToRegister(out, 0x8d, destination, record_address(Base:destination, Index:count, Scale:1, Displacement:-1), 64)
+			out.Bytes4(0xfd, 0xf3, 0xa4, 0xfc)
+			encodeRelative(out, 0xe9, done)
+			out.Mark(forward)
+			out.Bytes3(0xfc, 0xf3, 0xa4)
+			out.Mark(done)
 		}
-		x86FrameStart(out:emitter) -> int {
+		frameStart(out:emitter) -> int {
 			let at = out.Len()
-			call out.Bytes4(0xc8,0,0,0)
+			out.Bytes4(0xc8, 0, 0, 0)
 			return at
 		}
-		x86JumpCondition(out:emitter, condition:condition, label:label) {
-			call out.Byte(0x0f)
-			call out.AppendByte(int(condition.JumpOpcode))
-			call out.Rel32(label)
+		jumpCondition(out:emitter, condition:condition, label:label) {
+			out.Byte(0x0f)
+			out.AppendByte(int(condition.JumpOpcode))
+			out.Rel32(label)
 		}
-		x86KernelCallbackAddress(out:emitter, label:label) {
-			call out.Bytes3(0x48,0x8d,0x05)
-			call out.Rel32(label)
+		kernelCallbackAddress(out:emitter, label:label) {
+			out.Bytes3(0x48, 0x8d, 0x05)
+			out.Rel32(label)
 		}
-		x86KernelEntryEpilogue(out:emitter) {
-			call out.Text("\x48\x83\xc4\x08\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5b\xc9\xc3")
+		kernelEntryEpilogue(out:emitter) {
+			out.Text("\x48\x83\xc4\x08\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5b\xc9\xc3")
 		}
-		x86KernelEntryPrologue(out:emitter) {
-			call out.Text("\xf3\x0f\x1e\xfa\x55\x48\x89\xe5\x53\x41\x54\x41\x55\x41\x56\x41\x57\x48\x83\xec\x08")
+		kernelEntryPrologue(out:emitter) {
+			out.Text("\xf3\x0f\x1e\xfa\x55\x48\x89\xe5\x53\x41\x54\x41\x55\x41\x56\x41\x57\x48\x83\xec\x08")
 		}
-		x86SetCondition(out:emitter, condition:condition, destination:register) {
-			call x86REX(out,false,RTGNoRegister,RTGNoRegister,destination,destination)
-			call out.Byte(0x0f)
-			call out.AppendByte(int(condition.SetOpcode))
-			call x86ModRM(out,3,0,x86Low3(destination))
+		setCondition(out:emitter, condition:condition, destination:register) {
+			emitREX(out, false, RTGNoRegister, RTGNoRegister, destination, destination)
+			out.Byte(0x0f)
+			out.AppendByte(int(condition.SetOpcode))
+			modRM(out, 3, 0, registerLowBits(destination))
 		}
-
-		x86High(reg:register) -> byte {
+		registerHighBit(reg:register) -> byte {
 			return byte(reg.Code>>3)&1
 		}
-		x86KernelAppend16(out:bytes, value:int) -> bytes {
-			return append(out,byte(value),byte(value>>8))
+		kernelAppend16(out:bytes, value:int) -> bytes {
+			return append(out, byte(value), byte(value>>8))
 		}
-		x86KernelAppendELFHeader(out:bytes, sectionOffset:int, sectionCount:int, namesIndex:int) -> bytes {
-			set out = append(out,0x7f,'E','L','F',2,1,1,0)
-			set out = append(out,0,0,0,0,0,0,0,0)
-			set out = x86KernelAppend16(out,1)
-			set out = x86KernelAppend16(out,62)
-			set out = nativeAppend32(out,1)
-			set out = nativeAppend64(out,0)
-			set out = nativeAppend64(out,0)
-			set out = nativeAppend64(out,sectionOffset)
-			set out = nativeAppend32(out,0)
-			set out = x86KernelAppend16(out,64)
-			set out = x86KernelAppend16(out,0)
-			set out = x86KernelAppend16(out,0)
-			set out = x86KernelAppend16(out,64)
-			set out = x86KernelAppend16(out,sectionCount)
-			set out = x86KernelAppend16(out,namesIndex)
+		kernelAppendELFHeader(out:bytes, sectionOffset:int, sectionCount:int, namesIndex:int) -> bytes {
+			set out = append(out, 0x7f, 'E', 'L', 'F', 2, 1, 1, 0)
+			set out = append(out, 0, 0, 0, 0, 0, 0, 0, 0)
+			set out = kernelAppend16(out, 1)
+			set out = kernelAppend16(out, 62)
+			set out = nativeAppend32(out, 1)
+			set out = nativeAppend64(out, 0)
+			set out = nativeAppend64(out, 0)
+			set out = nativeAppend64(out, sectionOffset)
+			set out = nativeAppend32(out, 0)
+			set out = kernelAppend16(out, 64)
+			set out = kernelAppend16(out, 0)
+			set out = kernelAppend16(out, 0)
+			set out = kernelAppend16(out, 64)
+			set out = kernelAppend16(out, sectionCount)
+			set out = kernelAppend16(out, namesIndex)
 			return out
 		}
-		x86KernelAppendRelocation(out:bytes, offset:int, symbol:int, kind:int, addend:int) -> bytes {
-			set out = nativeAppend64(out,offset)
-			set out = nativeAppend64(out,symbol<<32|kind)
-			set out = nativeAppend64(out,addend)
+		kernelAppendRelocation(out:bytes, offset:int, symbol:int, kind:int, addend:int) -> bytes {
+			set out = nativeAppend64(out, offset)
+			set out = nativeAppend64(out, symbol<<32|kind)
+			set out = nativeAppend64(out, addend)
 			return out
 		}
-		x86KernelAppendSection(out:bytes, name:int, kind:int, flags:int, offset:int, size:int, link:int, info:int, alignment:int, entrySize:int) -> bytes {
-			set out = nativeAppend32(out,name)
-			set out = nativeAppend32(out,kind)
-			set out = nativeAppend64(out,flags)
-			set out = nativeAppend64(out,0)
-			set out = nativeAppend64(out,offset)
-			set out = nativeAppend64(out,size)
-			set out = nativeAppend32(out,link)
-			set out = nativeAppend32(out,info)
-			set out = nativeAppend64(out,alignment)
-			set out = nativeAppend64(out,entrySize)
+		kernelAppendSection(out:bytes, name:int, kind:int, flags:int, offset:int, size:int, link:int, info:int, alignment:int, entrySize:int) -> bytes {
+			set out = nativeAppend32(out, name)
+			set out = nativeAppend32(out, kind)
+			set out = nativeAppend64(out, flags)
+			set out = nativeAppend64(out, 0)
+			set out = nativeAppend64(out, offset)
+			set out = nativeAppend64(out, size)
+			set out = nativeAppend32(out, link)
+			set out = nativeAppend32(out, info)
+			set out = nativeAppend64(out, alignment)
+			set out = nativeAppend64(out, entrySize)
 			return out
 		}
-		x86KernelAppendSymbol(out:bytes, name:int, info:int, section:int, value:int, size:int) -> bytes {
-			set out = nativeAppend32(out,name)
-			set out = append(out,byte(info),0)
-			set out = x86KernelAppend16(out,section)
-			set out = nativeAppend64(out,value)
-			set out = nativeAppend64(out,size)
+		kernelAppendSymbol(out:bytes, name:int, info:int, section:int, value:int, size:int) -> bytes {
+			set out = nativeAppend32(out, name)
+			set out = append(out, byte(info), 0)
+			set out = kernelAppend16(out, section)
+			set out = nativeAppend64(out, value)
+			set out = nativeAppend64(out, size)
 			return out
 		}
-		x86Low3(reg:register) -> byte {
+		registerLowBits(reg:register) -> byte {
 			return byte(reg.Code&7)
 		}
-		x86ModRM(out:emitter, mode:byte, reg:byte, rm:byte) {
-			call out.AppendByte(int(mode<<6|(reg&7)<<3|rm&7))
+		modRM(out:emitter, mode:byte, reg:byte, rm:byte) {
+			out.AppendByte(int(mode<<6|(reg&7)<<3|rm&7))
 		}
-		x86WindowsCallImport(out:emitter, importID:int) {
-			call out.Bytes4(0x48,0x83,0xec,0x28)
-			call out.Bytes2(0xff,0x15)
+		windowsCallImport(out:emitter, importID:int) {
+			out.Bytes4(0x48, 0x83, 0xec, 0x28)
+			out.Bytes2(0xff, 0x15)
 			let at = out.Len()
-			call out.Int32(0)
-			call out.AbsoluteReloc(at,importID,RTGRelocationImport)
-			call out.Bytes4(0x48,0x83,0xc4,0x28)
+			out.Int32(0)
+			out.AbsoluteReloc(at, importID, RTGRelocationImport)
+			out.Bytes4(0x48, 0x83, 0xc4, 0x28)
 		}
-		x86WindowsRuntimeChmod(out:emitter) {
-			let rax = record_register(Code:0,Valid:true)
-			let rcx = record_register(Code:1,Valid:true)
-			let rdx = record_register(Code:2,Valid:true)
-			let rdi = record_register(Code:7,Valid:true)
-			let r8 = record_register(Code:8,Valid:true)
-			let r9 = record_register(Code:9,Valid:true)
+		windowsRuntimeChmod(out:emitter) {
+			let rax = record_register(Code:0, Valid:true)
+			let rcx = record_register(Code:1, Valid:true)
+			let rdx = record_register(Code:2, Valid:true)
+			let rdi = record_register(Code:7, Valid:true)
+			let r8 = record_register(Code:8, Valid:true)
+			let r9 = record_register(Code:9, Valid:true)
 			let failed = out.NewLabel()
 			let done = out.NewLabel()
-			call x86RRRM(out,0x89,rcx,rdi,64)
-			call x86MoveImmediate(out,rdx,0)
-			call x86MoveImmediate(out,r8,0)
-			call x86MoveImmediate(out,r9,1)
-			call x86WindowsCallImport(out,5)
-			call x86MoveImmediate(out,rdx,-1)
-			call x86RRRM(out,0x39,rax,rdx,32)
-			call x86JumpCondition(out,record_condition(JumpOpcode:0x84),failed)
-			call x86MoveImmediate(out,rax,0)
-			call x86Relative(out,0xe9,done)
-			call out.Mark(failed)
-			call x86MoveImmediate(out,rax,-1)
-			call out.Mark(done)
+			encodeRegisterToRM(out, 0x89, rcx, rdi, 64)
+			moveImmediate(out, rdx, 0)
+			moveImmediate(out, r8, 0)
+			moveImmediate(out, r9, 1)
+			windowsCallImport(out, 5)
+			moveImmediate(out, rdx, -1)
+			encodeRegisterToRM(out, 0x39, rax, rdx, 32)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), failed)
+			moveImmediate(out, rax, 0)
+			encodeRelative(out, 0xe9, done)
+			out.Mark(failed)
+			moveImmediate(out, rax, -1)
+			out.Mark(done)
 		}
-		x86WindowsRuntimeClose(out:emitter) {
-			let rax = record_register(Code:0,Valid:true)
-			let rcx = record_register(Code:1,Valid:true)
-			let rdi = record_register(Code:7,Valid:true)
+		windowsRuntimeClose(out:emitter) {
+			let rax = record_register(Code:0, Valid:true)
+			let rcx = record_register(Code:1, Valid:true)
+			let rdi = record_register(Code:7, Valid:true)
 			let failed = out.NewLabel()
 			let done = out.NewLabel()
-			call x86RRRM(out,0x89,rcx,rdi,64)
-			call x86WindowsCallImport(out,2)
-			call x86RRRM(out,0x85,rax,rax,32)
-			call x86JumpCondition(out,record_condition(JumpOpcode:0x84),failed)
-			call x86MoveImmediate(out,rax,0)
-			call x86Relative(out,0xe9,done)
-			call out.Mark(failed)
-			call x86MoveImmediate(out,rax,-1)
-			call out.Mark(done)
+			encodeRegisterToRM(out, 0x89, rcx, rdi, 64)
+			windowsCallImport(out, 2)
+			encodeRegisterToRM(out, 0x85, rax, rax, 32)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), failed)
+			moveImmediate(out, rax, 0)
+			encodeRelative(out, 0xe9, done)
+			out.Mark(failed)
+			moveImmediate(out, rax, -1)
+			out.Mark(done)
 		}
-		x86WindowsRuntimeOpen(out:emitter) {
-			let rax = record_register(Code:0,Valid:true)
-			let rcx = record_register(Code:1,Valid:true)
-			let rsi = record_register(Code:6,Valid:true)
-			let rdi = record_register(Code:7,Valid:true)
-			let r11 = record_register(Code:11,Valid:true)
-			call x86RRRM(out,0x89,r11,rdi,64)
-			call x86RRRM(out,0x89,rax,rsi,64)
-			call x86WindowsTranslateCreateFileFlags(out)
-			call x86RRRM(out,0x89,rcx,r11,64)
+		windowsRuntimeOpen(out:emitter) {
+			let rax = record_register(Code:0, Valid:true)
+			let rcx = record_register(Code:1, Valid:true)
+			let rsi = record_register(Code:6, Valid:true)
+			let rdi = record_register(Code:7, Valid:true)
+			let r11 = record_register(Code:11, Valid:true)
+			encodeRegisterToRM(out, 0x89, r11, rdi, 64)
+			encodeRegisterToRM(out, 0x89, rax, rsi, 64)
+			windowsTranslateCreateFileFlags(out)
+			encodeRegisterToRM(out, 0x89, rcx, r11, 64)
 			let base = out.Len()
-			call out.Text("\x41\x54\x49\x89\xe4\x48\x83\xe4\xf0\x48\x83\xec\x40\x44\x89\x54\x24\x20\xc7\x44\x24\x28\x80\x00\x00\x00\x48\xc7\x44\x24\x30\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x49\x89\xc3\x4c\x89\xe4\x41\x5c\x4c\x89\xd8")
-			call out.AbsoluteReloc(base+37,1,RTGRelocationImport)
+			out.Text("\x41\x54\x49\x89\xe4\x48\x83\xe4\xf0\x48\x83\xec\x40\x44\x89\x54\x24\x20\xc7\x44\x24\x28\x80\x00\x00\x00\x48\xc7\x44\x24\x30\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x49\x89\xc3\x4c\x89\xe4\x41\x5c\x4c\x89\xd8")
+			out.AbsoluteReloc(base+37, 1, RTGRelocationImport)
 		}
-
-		x86WindowsTranslateCreateFileFlags(out:emitter) {
-			let rdx = record_register(Code:2,Valid:true)
-			let r8 = record_register(Code:8,Valid:true)
-			let r9 = record_register(Code:9,Valid:true)
-			let r10 = record_register(Code:10,Valid:true)
+		windowsTranslateCreateFileFlags(out:emitter) {
+			let rdx = record_register(Code:2, Valid:true)
+			let r8 = record_register(Code:8, Valid:true)
+			let r9 = record_register(Code:9, Valid:true)
+			let r10 = record_register(Code:10, Valid:true)
 			let notReadWrite = out.NewLabel()
 			let accessDone = out.NewLabel()
 			let noCreate = out.NewLabel()
 			let createDone = out.NewLabel()
-			call x86MoveImmediate(out,rdx,-2147483648)
-			call out.Bytes2(0xa8,2)
-			call x86JumpCondition(out,record_condition(JumpOpcode:0x84),notReadWrite)
-			call x86MoveImmediate(out,rdx,-1073741824)
-			call x86Relative(out,0xe9,accessDone)
-			call out.Mark(notReadWrite)
-			call out.Bytes2(0xa8,1)
-			call x86JumpCondition(out,record_condition(JumpOpcode:0x84),accessDone)
-			call x86MoveImmediate(out,rdx,0x40000000)
-			call out.Mark(accessDone)
-			call x86MoveImmediate(out,r10,3)
-			call out.Bytes2(0xa8,64)
-			call x86JumpCondition(out,record_condition(JumpOpcode:0x84),noCreate)
-			call x86MoveImmediate(out,r10,4)
-			call out.AppendByte(0xa9)
-			call out.Int32(512)
-			call x86JumpCondition(out,record_condition(JumpOpcode:0x84),createDone)
-			call x86MoveImmediate(out,r10,2)
-			call x86Relative(out,0xe9,createDone)
-			call out.Mark(noCreate)
-			call out.AppendByte(0xa9)
-			call out.Int32(512)
-			call x86JumpCondition(out,record_condition(JumpOpcode:0x84),createDone)
-			call x86MoveImmediate(out,r10,5)
-			call out.Mark(createDone)
-			call x86MoveImmediate(out,r8,3)
-			call x86MoveImmediate(out,r9,0)
+			moveImmediate(out, rdx, -2147483648)
+			out.Bytes2(0xa8, 2)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), notReadWrite)
+			moveImmediate(out, rdx, -1073741824)
+			encodeRelative(out, 0xe9, accessDone)
+			out.Mark(notReadWrite)
+			out.Bytes2(0xa8, 1)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), accessDone)
+			moveImmediate(out, rdx, 0x40000000)
+			out.Mark(accessDone)
+			moveImmediate(out, r10, 3)
+			out.Bytes2(0xa8, 64)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), noCreate)
+			moveImmediate(out, r10, 4)
+			out.AppendByte(0xa9)
+			out.Int32(512)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), createDone)
+			moveImmediate(out, r10, 2)
+			encodeRelative(out, 0xe9, createDone)
+			out.Mark(noCreate)
+			out.AppendByte(0xa9)
+			out.Int32(512)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), createDone)
+			moveImmediate(out, r10, 5)
+			out.Mark(createDone)
+			moveImmediate(out, r8, 3)
+			moveImmediate(out, r9, 0)
 		}
 }
 }
@@ -1140,7 +1108,7 @@ format elf64_x86_64 {
         type = load
         flags = read | execute
         file = [headers.start, data.file_start)
-        memory = [headers.start, data.memory_start)
+        emitMemoryOperand = [headers.start, data.memory_start)
         alignment = 0x1000
     }
 
@@ -1148,7 +1116,7 @@ format elf64_x86_64 {
         type = load
         flags = read | write
         file = [data.file_start, data.file_end)
-        memory = [data.memory_start, bss.end)
+        emitMemoryOperand = [data.memory_start, bss.end)
         alignment = 0x1000
     }
 
@@ -1176,10 +1144,10 @@ format elf64_object_x86_64 {
     machine = 62
     type = relocatable
     append64 = sequence nativeAppend64
-    append_header = sequence x86KernelAppendELFHeader
-    append_relocation = sequence x86KernelAppendRelocation
-    append_section = sequence x86KernelAppendSection
-    append_symbol = sequence x86KernelAppendSymbol
+    append_header = sequence kernelAppendELFHeader
+    append_relocation = sequence kernelAppendRelocation
+    append_section = sequence kernelAppendSection
+    append_symbol = sequence kernelAppendSymbol
 
     sections {
         text progbits alloc|execute align=16
@@ -1383,8 +1351,8 @@ runtime linux_x86_64 {
 }
 
 runtime win32_x86_64 {
-    emit_exit = go x86WindowsExit
-    emit_static_call = go x86WindowsStaticCall
+    emit_exit = go windowsExit
+    emit_static_call = go windowsStaticCall
 
     imports "kernel32.dll" = [
         CreateFileA,
@@ -1464,7 +1432,7 @@ runtime win32_x86_64 {
     }
 
     operation open {
-        emit = sequence x86WindowsRuntimeOpen
+        emit = sequence windowsRuntimeOpen
         call = CreateFileA
         arguments = [
             path,
@@ -1479,7 +1447,7 @@ runtime win32_x86_64 {
     }
 
     operation close {
-        emit = sequence x86WindowsRuntimeClose
+        emit = sequence windowsRuntimeClose
         call = CloseHandle
         arguments = [fd]
         result = bool_or_error
@@ -1516,7 +1484,7 @@ runtime win32_x86_64 {
     }
 
     operation chmod {
-        emit = sequence x86WindowsRuntimeChmod
+        emit = sequence windowsRuntimeChmod
         unsupported = "Win32 target does not expose chmod"
     }
 
@@ -1528,11 +1496,11 @@ runtime win32_x86_64 {
 }
 
 runtime linux_kernel_x86_64 {
-    entry_prologue = sequence x86KernelEntryPrologue
-    entry_epilogue = sequence x86KernelEntryEpilogue
-    emit_callback_address = sequence x86KernelCallbackAddress
-    emit_static_call = go x86KernelStaticCall
-    emit_operation = go x86KernelRuntimeOperation
+    entry_prologue = sequence kernelEntryPrologue
+    entry_epilogue = sequence kernelEntryEpilogue
+    emit_callback_address = sequence kernelCallbackAddress
+    emit_static_call = go kernelStaticCall
+    emit_operation = go kernelRuntimeOperation
 
     entry = kernel_module_init
     exit = kernel_module_exit
@@ -1546,8 +1514,8 @@ runtime linux_kernel_x86_64 {
 
 abi renvo_x86_64 {
     arch = x86_64
-    frame_start = sequence x86FrameStart
-    frame_finish = go x86FrameFinish
+    frame_start = sequence frameStart
+    frame_finish = go frameFinish
     call_words = [rdi, rsi, rdx, rcx, r8, r9]
     overflow_stride = 8
     scalar_result = rax

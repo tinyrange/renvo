@@ -320,7 +320,7 @@ func TestDirectEmitterV1HasCompleteEffectContracts(t *testing.T) {
 	}
 }
 
-func TestDeclarativeWord32InstructionForm(t *testing.T) {
+func TestDeclarativeFixedWordInstructionForms(t *testing.T) {
 	ensureDirectEmitterV1()
 	source := `definition 1
 unit word
@@ -334,10 +334,12 @@ arch fixed32 {
 	forms {
 		rr = word32(destination:reg@0+5, source:reg@16)
 		branch = word32(label:label@reloc)
+		half = word16(destination:reg@4, address:address_base@0)
 	}
 	instructions {
 		move_word rr 0x8b000000
 		jump_word branch 0x14000000
+		load_half half 0x8000
 	}
 	sequences {
 		emitPair(out:emitter, value:int) {
@@ -387,11 +389,34 @@ target test/fixed {
 		"renvoRTGUint32(out, 0x8b000000|(destination.Code)|(destination.Code<<5)|(source.Code<<16))",
 		"func rtgWordJumpWord(out *renvoAsm, label int)",
 		"renvoRTGReloc(out, label)",
+		"func rtgWordLoadHalf(out *renvoAsm, destination RTGRegister, address renvoRTGAddress)",
+		"renvoAsmEmit16(out, 0x8000|(destination.Code<<4)|(address.Base.Code))",
 		"func renvoEmitPair(out *renvoAsm, value int)",
 		"renvoAsmEmit32(out,value)",
 	} {
 		if !containsText(text, want) {
 			t.Errorf("generated source missing %q:\n%s", want, text)
+		}
+	}
+
+	bigEndian := ResolveDefinitions(Parse(
+		[]byte(replaceOnce(source, "endian = little", "endian = big")),
+		"word32-big-endian.rtg"))
+	if !bigEndian.Ok {
+		t.Fatalf("big-endian Resolve failed: %#v", bigEndian.Diagnostics)
+	}
+	bigGenerated := GenerateArchitectureBackend(bigEndian, "fixed32", "backend")
+	if !bigGenerated.Ok {
+		t.Fatalf("big-endian generation failed: %#v", bigGenerated.Diagnostics)
+	}
+	bigText := string(bigGenerated.Source)
+	for _, want := range []string{
+		"value := 0x8000|(destination.Code<<4)|(address.Base.Code)",
+		"renvoRTGByte(out, byte(value>>8))",
+		"renvoRTGByte(out, byte(value>>0))",
+	} {
+		if !containsText(bigText, want) {
+			t.Errorf("big-endian generated source missing %q:\n%s", want, bigText)
 		}
 	}
 }

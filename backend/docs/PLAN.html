@@ -236,7 +236,7 @@
       unusually strict limits:
     </p>
     <ul>
-      <li>the compiler executable must remain small;</li>
+      <li>the constrained Renvo compiler artifacts must remain inside their existing gates;</li>
       <li>compiler peak memory and writable reservation are bounded;</li>
       <li>compiler CPU time and deterministic VM steps are bounded;</li>
       <li>generated application binaries have hard size limits;</li>
@@ -376,7 +376,9 @@
     <p>
       These are engineering feedback, not a Go complexity policy. The hard
       acceptance criteria remain the existing executable tests and performance
-      gates.
+      gates. The size of binaries produced by the host Go toolchain is not an
+      acceptance metric; those builds are development and packaging machinery,
+      not the constrained Renvo output being optimized here.
     </p>
   </section>
 

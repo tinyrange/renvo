@@ -1,89 +1,88 @@
 # The 32-bit ARM slice owns its encoder and advertised Linux composition.
 go backend {
-
-	func renvoArmAsmAlign(a *RTGEmitter) {
+	func asmAlign(a *RTGEmitter) {
 		for a.Len()%4 != 0 {
 			RTGByte(a, 0)
 		}
 	}
 
-	func renvoArmAsmMovRegReg(a *RTGEmitter, dst int, src int) {
+	func asmMovRegReg(a *RTGEmitter, dst int, src int) {
 		if dst == src {
 			return
 		}
-		renvoArmAsmEmit(a, 0xe1a00000|(dst<<12)|src)
+		asmEmit(a, 0xe1a00000|(dst<<12)|src)
 	}
 
-	func renvoArmAsmMovRegImm(a *RTGEmitter, reg int, imm int) {
+	func asmMovRegImm(a *RTGEmitter, reg int, imm int) {
 		part := imm & 65535
-		renvoArmAsmEmit(a, 0xe3000000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
+		asmEmit(a, 0xe3000000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
 		part = (imm >> 16) & 65535
 		if part != 0 {
-			renvoArmAsmEmit(a, 0xe3400000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
+			asmEmit(a, 0xe3400000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
 		}
 	}
 
-	func renvoArmAsmAddRegImm(a *RTGEmitter, dst int, src int, imm int) {
+	func asmAddRegImm(a *RTGEmitter, dst int, src int, imm int) {
 		if imm == 0 {
-			renvoArmAsmMovRegReg(a, dst, src)
+			asmMovRegReg(a, dst, src)
 			return
 		}
-		tmp := armScratch.Code
+		tmp := scratch.Code
 		if dst == tmp || src == tmp {
-			tmp = armScratch2.Code
+			tmp = scratch2.Code
 		}
 		if imm < 0 {
-			renvoArmAsmMovRegImm(a, tmp, -imm)
-			renvoArmAsmSubRegReg(a, dst, src, tmp)
+			asmMovRegImm(a, tmp, -imm)
+			asmSubRegReg(a, dst, src, tmp)
 			return
 		}
-		renvoArmAsmMovRegImm(a, tmp, imm)
-		renvoArmAsmAddRegReg(a, dst, src, tmp)
+		asmMovRegImm(a, tmp, imm)
+		asmAddRegReg(a, dst, src, tmp)
 	}
 
-	func renvoArmAsmFrameStart(a *RTGEmitter) int {
+	func asmFrameStart(a *RTGEmitter) int {
 		at := a.Len()
-		renvoArmAsmEmit(a, 0xe3009000) // movw r9, #0
-		renvoArmAsmEmit(a, 0xe04dd009) // sub sp, sp, r9
+		asmEmit(a, 0xe3009000) // movw r9, #0
+		asmEmit(a, 0xe04dd009) // sub sp, sp, r9
 		return at
 	}
 
-	func renvoArmAsmPatchFrame(a *RTGEmitter, at int, stackUsed int) {
+	func asmPatchFrame(a *RTGEmitter, at int, stackUsed int) {
 		frame := (stackUsed + 7) & -8
 		if frame > 65528 {
 			frame = 65528
 		}
-		a.PatchUint32( at, 0xe3009000|((frame&0xf000)<<4)|(frame&0x0fff))
+		a.PatchUint32(at, 0xe3009000|((frame&0xf000)<<4)|(frame&0x0fff))
 	}
 
-	func renvoArmAsmAddRegSmallImm(a *RTGEmitter, dst int, src int, imm int) {
+	func asmAddRegSmallImm(a *RTGEmitter, dst int, src int, imm int) {
 		if imm < 0 {
-			renvoArmAsmEmit(a, 0xe2400000|(src<<16)|(dst<<12)|(-imm))
+			asmEmit(a, 0xe2400000|(src<<16)|(dst<<12)|(-imm))
 			return
 		}
-		renvoArmAsmEmit(a, 0xe2800000|(src<<16)|(dst<<12)|imm)
+		asmEmit(a, 0xe2800000|(src<<16)|(dst<<12)|imm)
 	}
 
-	func renvoArmAsmAddr(a *RTGEmitter, base int, disp int) int {
+	func asmAddr(a *RTGEmitter, base int, disp int) int {
 		if disp == 0 {
 			return base
 		}
-		renvoArmAsmAddRegImm(a, armAddress.Code, base, disp)
-		return armAddress.Code
+		asmAddRegImm(a, address.Code, base, disp)
+		return address.Code
 	}
 
-	func renvoArmAsmLoadStoreAddr(a *RTGEmitter, base int, disp int, size int) int {
+	func asmLoadStoreAddr(a *RTGEmitter, base int, disp int, size int) int {
 		if size == 2 && (disp < 0 || disp > 255) {
-			return renvoArmAsmAddr(a, base, disp)
+			return asmAddr(a, base, disp)
 		}
 		if size != 2 && (disp < -4095 || disp > 4095) {
-			return renvoArmAsmAddr(a, base, disp)
+			return asmAddr(a, base, disp)
 		}
 		return base
 	}
 
-	func renvoArmAsmLoadRegMem(a *RTGEmitter, dst int, base int, disp int, size int) {
-		addr := renvoArmAsmLoadStoreAddr(a, base, disp, size)
+	func asmLoadRegMem(a *RTGEmitter, dst int, base int, disp int, size int) {
+		addr := asmLoadStoreAddr(a, base, disp, size)
 		if addr != base {
 			disp = 0
 		}
@@ -93,18 +92,18 @@ go backend {
 			disp = -disp
 		}
 		if size == 1 {
-			renvoArmAsmEmit(a, 0xe5500000|up|(addr<<16)|(dst<<12)|disp)
+			asmEmit(a, 0xe5500000|up|(addr<<16)|(dst<<12)|disp)
 			return
 		}
 		if size == 2 {
-			renvoArmAsmEmit(a, 0xe15000f0|up|(addr<<16)|(dst<<12)|((disp&0xf0)<<4)|(disp&0x0f))
+			asmEmit(a, 0xe15000f0|up|(addr<<16)|(dst<<12)|((disp&0xf0)<<4)|(disp&0x0f))
 			return
 		}
-		renvoArmAsmEmit(a, 0xe5100000|up|(addr<<16)|(dst<<12)|disp)
+		asmEmit(a, 0xe5100000|up|(addr<<16)|(dst<<12)|disp)
 	}
 
-	func renvoArmAsmStoreRegMem(a *RTGEmitter, src int, base int, disp int, size int) {
-		addr := renvoArmAsmLoadStoreAddr(a, base, disp, size)
+	func asmStoreRegMem(a *RTGEmitter, src int, base int, disp int, size int) {
+		addr := asmLoadStoreAddr(a, base, disp, size)
 		if addr != base {
 			disp = 0
 		}
@@ -114,75 +113,75 @@ go backend {
 			disp = -disp
 		}
 		if size == 1 {
-			renvoArmAsmEmit(a, 0xe5400000|up|(addr<<16)|(src<<12)|disp)
+			asmEmit(a, 0xe5400000|up|(addr<<16)|(src<<12)|disp)
 			return
 		}
 		if size == 2 {
-			renvoArmAsmEmit(a, 0xe14000b0|up|(addr<<16)|(src<<12)|((disp&0xf0)<<4)|(disp&0x0f))
+			asmEmit(a, 0xe14000b0|up|(addr<<16)|(src<<12)|((disp&0xf0)<<4)|(disp&0x0f))
 			return
 		}
-		renvoArmAsmEmit(a, 0xe5000000|up|(addr<<16)|(src<<12)|disp)
+		asmEmit(a, 0xe5000000|up|(addr<<16)|(src<<12)|disp)
 	}
 
-	func renvoArmAsmStackMem(a *RTGEmitter, offset int, base int, disp8 int, disp32 int) {
+	func asmStackMem(a *RTGEmitter, offset int, base int, disp8 int, disp32 int) {
 		if base == 0x8948 && disp8 == 0x45 {
-			renvoArmAsmStoreRegStack(a, armPrimary.Code, offset)
+			asmStoreRegStack(a, primary.Code, offset)
 			return
 		}
 		if base == 0x8948 && disp8 == 0x55 {
-			renvoArmAsmStoreRegStack(a, armSecondary.Code, offset)
+			asmStoreRegStack(a, secondary.Code, offset)
 			return
 		}
 		if base == 0x8948 && disp8 == 0x4d {
-			renvoArmAsmStoreRegStack(a, armTertiary.Code, offset)
+			asmStoreRegStack(a, tertiary.Code, offset)
 			return
 		}
 		if base == 0x8b48 && disp8 == 0x45 {
-			renvoArmAsmLoadRegStack(a, armPrimary.Code, offset)
+			asmLoadRegStack(a, primary.Code, offset)
 			return
 		}
 		if base == 0x8b48 && disp8 == 0x55 {
-			renvoArmAsmLoadRegStack(a, armSecondary.Code, offset)
+			asmLoadRegStack(a, secondary.Code, offset)
 			return
 		}
 		if base == 0x8b48 && disp8 == 0x4d {
-			renvoArmAsmLoadRegStack(a, armTertiary.Code, offset)
+			asmLoadRegStack(a, tertiary.Code, offset)
 			return
 		}
 		if base == 0x8d48 && disp8 == 0x45 {
-			renvoArmAsmLeaRegStack(a, armPrimary.Code, offset)
+			asmLeaRegStack(a, primary.Code, offset)
 			return
 		}
 		if base == 0x8d48 && disp8 == 0x55 {
-			renvoArmAsmLeaRegStack(a, armSecondary.Code, offset)
+			asmLeaRegStack(a, secondary.Code, offset)
 			return
 		}
 		if base == 0x8d48 && disp8 == 0x7d {
-			renvoArmAsmLeaRegStack(a, armR3.Code, offset)
+			asmLeaRegStack(a, r3.Code, offset)
 			return
 		}
 		if base == 0x8d48 && disp8 == 0x75 {
-			renvoArmAsmLeaRegStack(a, armR4.Code, offset)
+			asmLeaRegStack(a, r4.Code, offset)
 			return
 		}
 	}
 
-	func renvoArmAsmMemDisp(a *RTGEmitter, disp int, op int, disp8 int, disp32 int) {
+	func asmMemDisp(a *RTGEmitter, disp int, op int, disp8 int, disp32 int) {
 		if op == 0x8b48 && disp8 == 0x4a {
-			renvoArmAsmLoadRegMem(a, armTertiary.Code, armSecondary.Code, disp, 4)
+			asmLoadRegMem(a, tertiary.Code, secondary.Code, disp, 4)
 			return
 		}
 		if op == 0x8b48 && disp8 == 0x52 {
-			renvoArmAsmLoadRegMem(a, armSecondary.Code, armSecondary.Code, disp, 4)
+			asmLoadRegMem(a, secondary.Code, secondary.Code, disp, 4)
 			return
 		}
 		if op == 0x8948 && disp8 == 0x41 {
-			renvoArmAsmStoreRegMem(a, armPrimary.Code, armTertiary.Code, disp, 4)
+			asmStoreRegMem(a, primary.Code, tertiary.Code, disp, 4)
 			return
 		}
 	}
 
-	func renvoArmAsmLoadRaxIndexRcxSize(a *RTGEmitter, size int) {
+	func asmLoadRaxIndexRcxSize(a *RTGEmitter, size int) {
 		shift := 3
 		if size == 1 {
 			shift = 0
@@ -193,42 +192,42 @@ go backend {
 		if size == 4 {
 			shift = 2
 		}
-		renvoArmAsmAddRegRegShift(a, armAddress.Code, armPrimary.Code, armTertiary.Code, shift)
-		renvoArmAsmLoadRegMem(a, armPrimary.Code, armAddress.Code, 0, size)
+		asmAddRegRegShift(a, address.Code, primary.Code, tertiary.Code, shift)
+		asmLoadRegMem(a, primary.Code, address.Code, 0, size)
 	}
 
-	func renvoArmAsmNormalizeRaxForKind(a *RTGEmitter, kind int) {
+	func asmNormalizeRaxForKind(a *RTGEmitter, kind int) {
 		if kind == RTGScalarByte {
-			renvoArmAsmEmit(a, 0xe6ef0070)
+			asmEmit(a, 0xe6ef0070)
 			return
 		}
 		if kind == RTGScalarInt8 {
-			renvoArmAsmEmit(a, 0xe6af0070)
+			asmEmit(a, 0xe6af0070)
 			return
 		}
 		if kind == RTGScalarInt16 {
-			renvoArmAsmEmit(a, 0xe6bf0070)
+			asmEmit(a, 0xe6bf0070)
 			return
 		}
 		if kind == RTGScalarUint16 {
-			renvoArmAsmEmit(a, 0xe6ff0070)
+			asmEmit(a, 0xe6ff0070)
 		}
 	}
 
-	func renvoArmAsmCmpRegImm(a *RTGEmitter, reg int, imm int) {
+	func asmCmpRegImm(a *RTGEmitter, reg int, imm int) {
 		if imm >= 0 && imm <= 255 {
-			renvoArmAsmEmit(a, 0xe3500000|(reg<<16)|imm)
+			asmEmit(a, 0xe3500000|(reg<<16)|imm)
 			return
 		}
-		tmp := armScratch.Code
+		tmp := scratch.Code
 		if reg == tmp {
-			tmp = armScratch2.Code
+			tmp = scratch2.Code
 		}
-		renvoArmAsmMovRegImm(a, tmp, imm)
-		renvoArmAsmCmpRegReg(a, reg, tmp)
+		asmMovRegImm(a, tmp, imm)
+		asmCmpRegReg(a, reg, tmp)
 	}
 
-	func renvoArmCondFromSetcc(setcc int) int {
+	func condFromSetcc(setcc int) int {
 		if setcc == 0x94 {
 			return 0
 		}
@@ -247,15 +246,15 @@ go backend {
 		return 10
 	}
 
-	func renvoArmAsmDivLeftRcxRightRax(a *RTGEmitter, mod bool) {
-		renvoArmAsmMovRegReg(a, armScratch.Code, armPrimary.Code)
-		renvoArmAsmEmit(a, 0xe710f010|(armPrimary.Code<<16)|(armPrimary.Code<<8)|armTertiary.Code)
+	func asmDivLeftRcxRightRax(a *RTGEmitter, mod bool) {
+		asmMovRegReg(a, scratch.Code, primary.Code)
+		asmEmit(a, 0xe710f010|(primary.Code<<16)|(primary.Code<<8)|tertiary.Code)
 		if mod {
-			renvoArmAsmEmit(a, 0xe0600090|(armTertiary.Code<<12)|(armScratch.Code<<8)|armPrimary.Code)
+			asmEmit(a, 0xe0600090|(tertiary.Code<<12)|(scratch.Code<<8)|primary.Code)
 		}
 	}
 
-	func renvoArmAsmStoreRaxMemRdxRcxSize(a *RTGEmitter, size int) {
+	func asmStoreRaxMemRdxRcxSize(a *RTGEmitter, size int) {
 		shift := 3
 		if size == 1 {
 			shift = 0
@@ -266,82 +265,82 @@ go backend {
 		if size == 4 {
 			shift = 2
 		}
-		renvoArmAsmAddRegRegShift(a, armAddress.Code, armSecondary.Code, armTertiary.Code, shift)
-		renvoArmAsmStoreRegMem(a, armPrimary.Code, armAddress.Code, 0, size)
+		asmAddRegRegShift(a, address.Code, secondary.Code, tertiary.Code, shift)
+		asmStoreRegMem(a, primary.Code, address.Code, 0, size)
 	}
 
-	func armEmitAddress(
-		out *RTGEmitter, destination RTGRegister, address RTGAddress,
+	func emitAddress(
+		out *RTGEmitter, destination RTGRegister, memory RTGAddress,
 	) {
-		if RTGAddressValid(address) {
-			part := address.Addend & 65535
+		if RTGAddressValid(memory) {
+			part := memory.Addend & 65535
 			at := out.Len()
-			renvoArmAsmEmit(out,
+			asmEmit(out,
 				0xe3000000|((part&0xf000)<<4)|
 					(destination.Code<<12)|(part&0x0fff))
-			part = (address.Addend >> 16) & 65535
-			renvoArmAsmEmit(out,
+			part = (memory.Addend >> 16) & 65535
+			asmEmit(out,
 				0xe3400000|((part&0xf000)<<4)|
 					(destination.Code<<12)|(part&0x0fff))
-			renvoArmAsmEmit(out,
+			asmEmit(out,
 				0xe08f0000|(destination.Code<<12)|destination.Code)
-			RTGAddressRelocAt(out, address, at)
+			RTGAddressRelocAt(out, memory, at)
 			return
 		}
-		base := address.Base.Code
-		if address.Index.Valid {
+		base := memory.Base.Code
+		if memory.Index.Valid {
 			shift := 0
-			if address.Scale == 2 {
+			if memory.Scale == 2 {
 				shift = 1
-			} else if address.Scale == 4 {
+			} else if memory.Scale == 4 {
 				shift = 2
-			} else if address.Scale == 8 {
+			} else if memory.Scale == 8 {
 				shift = 3
 			}
-			renvoArmAsmAddRegRegShift(
-				out, destination.Code, base, address.Index.Code, shift)
+			asmAddRegRegShift(
+				out, destination.Code, base, memory.Index.Code, shift)
 			base = destination.Code
 		}
-		renvoArmAsmAddRegImm(
-			out, destination.Code, base, address.Displacement)
+		asmAddRegImm(
+			out, destination.Code, base, memory.Displacement)
 	}
 
-	func armMemoryAddress(
-		out *RTGEmitter, address RTGAddress, size int,
+	func memoryAddress(
+		out *RTGEmitter, memory RTGAddress, size int,
 	) RTGAddress {
 		limit := 4095
 		if size == 2 {
 			limit = 255
 		}
-		if RTGAddressValid(address) || address.Index.Valid ||
-			address.Displacement < -limit ||
-			address.Displacement > limit {
-			armEmitAddress(out, armAddress, address)
-			return RTGAddress{Base: armAddress}
+		if RTGAddressValid(memory) || memory.Index.Valid ||
+			memory.Displacement < -limit ||
+			memory.Displacement > limit {
+			emitAddress(out, address, memory)
+			return RTGAddress{Base: address}
 		}
-		return address
+		return memory
 	}
 
-	func armLoadExtra(
+	func loadExtra(
 		out *RTGEmitter,
 		destination RTGRegister,
-		address RTGAddress,
+		memory RTGAddress,
 		opcode int,
 	) {
-		address = armMemoryAddress(out, address, 2)
-		displacement := address.Displacement
+		memory = memoryAddress(out, memory, 2)
+		displacement := memory.Displacement
 		up := 0x00800000
 		if displacement < 0 {
 			up = 0
 			displacement = -displacement
 		}
-		renvoArmAsmEmit(out,
-			opcode|up|(address.Base.Code<<16)|
+		asmEmit(out,
+			opcode|up|(memory.Base.Code<<16)|
 				(destination.Code<<12)|
 				((displacement&0xf0)<<4)|(displacement&0x0f))
 	}
 
-	func armVariableShift(
+	func variableShift(
 		out *RTGEmitter, direction RTGShiftDirection, signed bool,
 	) {
 		kind := 0x20
@@ -350,25 +349,25 @@ go backend {
 		} else if signed {
 			kind = 0x40
 		}
-		renvoArmAsmEmit(out,
-			0xe1a00010|(armPrimary.Code<<12)|
-				(armPrimary.Code<<8)|kind|armTertiary.Code)
+		asmEmit(out,
+			0xe1a00010|(primary.Code<<12)|
+				(primary.Code<<8)|kind|tertiary.Code)
 	}
 
-	func armSignedDivide(out *RTGEmitter, remainder bool) {
-		renvoArmAsmMovRegReg(
-			out, armScratch.Code, armPrimary.Code)
-		renvoArmAsmEmit(out,
-			0xe710f010|(armPrimary.Code<<16)|
-				(armPrimary.Code<<8)|armTertiary.Code)
+	func signedDivide(out *RTGEmitter, remainder bool) {
+		asmMovRegReg(
+			out, scratch.Code, primary.Code)
+		asmEmit(out,
+			0xe710f010|(primary.Code<<16)|
+				(primary.Code<<8)|tertiary.Code)
 		if remainder {
-			renvoArmAsmEmit(out,
-				0xe0600090|(armTertiary.Code<<12)|
-					(armScratch.Code<<8)|armPrimary.Code)
+			asmEmit(out,
+				0xe0600090|(tertiary.Code<<12)|
+					(scratch.Code<<8)|primary.Code)
 		}
 	}
 
-	func armFrameFinish(out *RTGEmitter, at int, stackUsed int) {
+	func frameFinish(out *RTGEmitter, at int, stackUsed int) {
 		frame := (stackUsed + 7) & -8
 		if frame > 65528 {
 			frame = 65528
@@ -444,19 +443,19 @@ arch arm {
 		leave fixed [0x0b, 0xd0, 0xa0, 0xe1, 0x00, 0x48, 0xbd, 0xe8]
 	}
 	bind {
-		move = sequence armMove
-		address = go armEmitAddress
-		load.native = go armLoadNative
-		load.i32 = go armLoadI32
-		load.u32 = go armLoadU32
-		load.i16 = go armLoadI16
-		load.u16 = go armLoadU16
-		load.i8 = go armLoadI8
-		load.u8 = go armLoadU8
-		store.native = go armStoreNative
-		store.u32 = go armStoreU32
-		store.u16 = go armStoreU16
-		store.u8 = go armStoreU8
+		move = sequence move
+		address = go emitAddress
+		load.native = go loadNative
+		load.i32 = go loadI32
+		load.u32 = go loadU32
+		load.i16 = go loadI16
+		load.u16 = go loadU16
+		load.i8 = go loadI8
+		load.u8 = go loadU8
+		store.native = go storeNative
+		store.u32 = go storeU32
+		store.u16 = go storeU16
+		store.u8 = go storeU8
 		add = add
 		subtract = subtract
 		multiply = multiply
@@ -467,117 +466,117 @@ arch arm {
 		test = test
 		increment = increment
 		decrement = decrement
-		shift_left_immediate = sequence armShiftLeftImmediate
-		shift_right_unsigned_immediate = sequence armShiftRightUnsignedImmediate
-		shift_right_signed_immediate = sequence armShiftRightSignedImmediate
+		shift_left_immediate = sequence shiftLeftImmediate
+		shift_right_unsigned_immediate = sequence shiftRightUnsignedImmediate
+		shift_right_signed_immediate = sequence shiftRightSignedImmediate
 		call = call
 		call_indirect = call_indirect
 		jump = jump
 		jump_condition = jump_condition
-		set_condition = sequence armSetCondition
+		set_condition = sequence setCondition
 		return = return
 		leave = leave
-		host_syscall = sequence armHostSyscall
-		move_immediate = sequence armMoveImmediate
-		variable_shift = go armVariableShift
-		signed_divide = go armSignedDivide
-		copy_bytes = sequence armCopyBytes
+		host_syscall = sequence hostSyscall
+		move_immediate = sequence moveImmediate
+		variable_shift = go variableShift
+		signed_divide = go signedDivide
+		copy_bytes = sequence copyBytes
 	}
 	exports {
-		renvoArmAsmEmit = sequence renvoArmAsmEmit
-		renvoArmAsmAlign = go renvoArmAsmAlign
-		renvoArmAsmMovRegReg = go renvoArmAsmMovRegReg
-		renvoArmAsmMovRegImm = go renvoArmAsmMovRegImm
-		renvoArmAsmPatchMovRegImmAt = sequence renvoArmAsmPatchMovRegImmAt
-		renvoArmAsmMovRegAbs = sequence renvoArmAsmMovRegAbs
-		renvoArmAsmAddRegImm = go renvoArmAsmAddRegImm
-		renvoArmAsmFrameStart = go renvoArmAsmFrameStart
-		renvoArmAsmPatchFrame = go renvoArmAsmPatchFrame
-		renvoArmAsmAddRegSmallImm = go renvoArmAsmAddRegSmallImm
-		renvoArmAsmAddRegReg = sequence renvoArmAsmAddRegReg
-		renvoArmAsmSubRegReg = sequence renvoArmAsmSubRegReg
-		renvoArmAsmAddRegRegShift = sequence renvoArmAsmAddRegRegShift
-		renvoArmAsmMulRegReg = sequence renvoArmAsmMulRegReg
-		renvoArmAsmAddr = go renvoArmAsmAddr
-		renvoArmAsmLoadStoreAddr = go renvoArmAsmLoadStoreAddr
-		renvoArmAsmLoadRegMem = go renvoArmAsmLoadRegMem
-		renvoArmAsmStoreRegMem = go renvoArmAsmStoreRegMem
-		renvoArmAsmLoadRegStack = sequence renvoArmAsmLoadRegStack
-		renvoArmAsmStoreRegStack = sequence renvoArmAsmStoreRegStack
-		renvoArmAsmLeaRegStack = sequence renvoArmAsmLeaRegStack
-		renvoArmAsmPushReg = sequence renvoArmAsmPushReg
-		renvoArmAsmPopReg = sequence renvoArmAsmPopReg
-		renvoArmAsmMovRaxImm = sequence renvoArmAsmMovRaxImm
-		renvoArmAsmMovRaxImm64 = sequence renvoArmAsmMovRaxImm64
-		renvoArmAsmMovRdxImm = sequence renvoArmAsmMovRdxImm
-		renvoArmAsmMovRaxDataAddr = sequence renvoArmAsmMovRaxDataAddr
-		renvoArmAsmMovRaxBssAddr = sequence renvoArmAsmMovRaxBssAddr
-		renvoArmAsmMovR10BssAddr = sequence renvoArmAsmMovR10BssAddr
-		renvoArmAsmAccessRaxBss = sequence renvoArmAsmAccessRaxBss
-		renvoArmAsmLoadRaxBss = sequence renvoArmAsmLoadRaxBss
-		renvoArmAsmStoreRaxBss = sequence renvoArmAsmStoreRaxBss
-		renvoArmAsmMovRdiRax = sequence renvoArmAsmMovRdiRax
-		renvoArmAsmMovRaxRdx = sequence renvoArmAsmMovRaxRdx
-		renvoArmAsmMovRdxRax = sequence renvoArmAsmMovRdxRax
-		renvoArmAsmMovRcxRax = sequence renvoArmAsmMovRcxRax
-		renvoArmAsmMovRcxRdx = sequence renvoArmAsmMovRcxRdx
-		renvoArmAsmMovRsiRax = sequence renvoArmAsmMovRsiRax
-		renvoArmAsmMovR8Rax = sequence renvoArmAsmMovR8Rax
-		renvoArmAsmMovR9Rax = sequence renvoArmAsmMovR9Rax
-		renvoArmAsmAddRdxRcx = sequence renvoArmAsmAddRdxRcx
-		renvoArmAsmSyscall = sequence renvoArmAsmSyscall
-		renvoArmAsmPopRdi = sequence renvoArmAsmPopRdi
-		renvoArmAsmPopRsi = sequence renvoArmAsmPopRsi
-		renvoArmAsmStackMem = go renvoArmAsmStackMem
-		renvoArmAsmAddRdxImm = sequence renvoArmAsmAddRdxImm
-		renvoArmAsmMemDisp = go renvoArmAsmMemDisp
-		renvoArmAsmLoadQwordRaxIndexRcx8 = sequence renvoArmAsmLoadQwordRaxIndexRcx8
-		renvoArmAsmLoadQwordRaxIndexRcxDisp = sequence renvoArmAsmLoadQwordRaxIndexRcxDisp
-		renvoArmAsmLoadRaxMemRdxDisp = sequence renvoArmAsmLoadRaxMemRdxDisp
-		renvoArmAsmLoadRaxMemRdxDispSize = sequence renvoArmAsmLoadRaxMemRdxDispSize
-		renvoArmAsmLoadByteRaxIndexRcx = sequence renvoArmAsmLoadByteRaxIndexRcx
-		renvoArmAsmLoadRaxIndexRcxSize = go renvoArmAsmLoadRaxIndexRcxSize
-		renvoArmAsmStoreRaxMemRdxRcx8 = sequence renvoArmAsmStoreRaxMemRdxRcx8
-		renvoArmAsmStoreRaxMemRdxDisp = sequence renvoArmAsmStoreRaxMemRdxDisp
-		renvoArmAsmStoreRaxMemRdxDispSize = sequence renvoArmAsmStoreRaxMemRdxDispSize
-		renvoArmAsmNormalizeRaxForKind = go renvoArmAsmNormalizeRaxForKind
-		renvoArmAsmIncMemRdx = sequence renvoArmAsmIncMemRdx
-		renvoArmAsmDecMemRdx = sequence renvoArmAsmDecMemRdx
-		renvoArmAsmBoolNotRax = sequence renvoArmAsmBoolNotRax
-		renvoArmAsmNegRax = sequence renvoArmAsmNegRax
-		renvoArmAsmCmpRaxImm8 = sequence renvoArmAsmCmpRaxImm8
-		renvoArmAsmCmpRegImm = go renvoArmAsmCmpRegImm
-		renvoArmAsmCmpRegReg = sequence renvoArmAsmCmpRegReg
-		renvoArmAsmCsetRax = sequence renvoArmAsmCsetRax
-		renvoArmCondFromSetcc = go renvoArmCondFromSetcc
-		renvoArmAsmCmpRcxRaxSet = sequence renvoArmAsmCmpRcxRaxSet
-		renvoArmAsmAddRaxRcx = sequence renvoArmAsmAddRaxRcx
-		renvoArmAsmSubRaxRcx = sequence renvoArmAsmSubRaxRcx
-		renvoArmAsmShlRcxImm = sequence renvoArmAsmShlRcxImm
-		renvoArmAsmShlRaxImm = sequence renvoArmAsmShlRaxImm
-		renvoArmAsmSarRaxImm = sequence renvoArmAsmSarRaxImm
-		renvoArmAsmShrRaxImm = sequence renvoArmAsmShrRaxImm
-		renvoArmAsmDivLeftRcxRightRax = go renvoArmAsmDivLeftRcxRightRax
-		renvoArmAsmPushRax = sequence renvoArmAsmPushRax
-		renvoArmAsmPushRcx = sequence renvoArmAsmPushRcx
-		renvoArmAsmPushRdx = sequence renvoArmAsmPushRdx
-		renvoArmAsmPopRax = sequence renvoArmAsmPopRax
-		renvoArmAsmPopRcx = sequence renvoArmAsmPopRcx
-		renvoArmAsmPopRdx = sequence renvoArmAsmPopRdx
-		renvoArmAsmPushImm = sequence renvoArmAsmPushImm
-		renvoArmAsmStoreSliceStack = sequence renvoArmAsmStoreSliceStack
-		renvoArmAsmStoreAlMemRdxRcx1 = sequence renvoArmAsmStoreAlMemRdxRcx1
-		renvoArmAsmStoreRaxMemRdxRcxSize = go renvoArmAsmStoreRaxMemRdxRcxSize
-		renvoArmAsmIncRcx = sequence renvoArmAsmIncRcx
-		renvoArmAsmIncRax = sequence renvoArmAsmIncRax
-		renvoArmAsmImulRcxImm = sequence renvoArmAsmImulRcxImm
-		renvoArmAsmLeave = sequence renvoArmAsmLeave
-		renvoArmAsmRet = sequence renvoArmAsmRet
-		renvoArmAsmCallLabel = sequence renvoArmAsmCallLabel
-		renvoArmAsmJmpLabel = sequence renvoArmAsmJmpLabel
-		renvoArmAsmBCondLabel = sequence renvoArmAsmBCondLabel
-		renvoArmAsmJzLabel = sequence renvoArmAsmJzLabel
-		renvoArmAsmJnzLabel = sequence renvoArmAsmJnzLabel
+		renvoArmAsmEmit = sequence asmEmit
+		renvoArmAsmAlign = go asmAlign
+		renvoArmAsmMovRegReg = go asmMovRegReg
+		renvoArmAsmMovRegImm = go asmMovRegImm
+		renvoArmAsmPatchMovRegImmAt = sequence asmPatchMovRegImmAt
+		renvoArmAsmMovRegAbs = sequence asmMovRegAbs
+		renvoArmAsmAddRegImm = go asmAddRegImm
+		renvoArmAsmFrameStart = go asmFrameStart
+		renvoArmAsmPatchFrame = go asmPatchFrame
+		renvoArmAsmAddRegSmallImm = go asmAddRegSmallImm
+		renvoArmAsmAddRegReg = sequence asmAddRegReg
+		renvoArmAsmSubRegReg = sequence asmSubRegReg
+		renvoArmAsmAddRegRegShift = sequence asmAddRegRegShift
+		renvoArmAsmMulRegReg = sequence asmMulRegReg
+		renvoArmAsmAddr = go asmAddr
+		renvoArmAsmLoadStoreAddr = go asmLoadStoreAddr
+		renvoArmAsmLoadRegMem = go asmLoadRegMem
+		renvoArmAsmStoreRegMem = go asmStoreRegMem
+		renvoArmAsmLoadRegStack = sequence asmLoadRegStack
+		renvoArmAsmStoreRegStack = sequence asmStoreRegStack
+		renvoArmAsmLeaRegStack = sequence asmLeaRegStack
+		renvoArmAsmPushReg = sequence asmPushReg
+		renvoArmAsmPopReg = sequence asmPopReg
+		renvoArmAsmMovRaxImm = sequence asmMovRaxImm
+		renvoArmAsmMovRaxImm64 = sequence asmMovRaxImm64
+		renvoArmAsmMovRdxImm = sequence asmMovRdxImm
+		renvoArmAsmMovRaxDataAddr = sequence asmMovRaxDataAddr
+		renvoArmAsmMovRaxBssAddr = sequence asmMovRaxBssAddr
+		renvoArmAsmMovR10BssAddr = sequence asmMovR10BssAddr
+		renvoArmAsmAccessRaxBss = sequence asmAccessRaxBss
+		renvoArmAsmLoadRaxBss = sequence asmLoadRaxBss
+		renvoArmAsmStoreRaxBss = sequence asmStoreRaxBss
+		renvoArmAsmMovRdiRax = sequence asmMovRdiRax
+		renvoArmAsmMovRaxRdx = sequence asmMovRaxRdx
+		renvoArmAsmMovRdxRax = sequence asmMovRdxRax
+		renvoArmAsmMovRcxRax = sequence asmMovRcxRax
+		renvoArmAsmMovRcxRdx = sequence asmMovRcxRdx
+		renvoArmAsmMovRsiRax = sequence asmMovRsiRax
+		renvoArmAsmMovR8Rax = sequence asmMovR8Rax
+		renvoArmAsmMovR9Rax = sequence asmMovR9Rax
+		renvoArmAsmAddRdxRcx = sequence asmAddRdxRcx
+		renvoArmAsmSyscall = sequence asmSyscall
+		renvoArmAsmPopRdi = sequence asmPopRdi
+		renvoArmAsmPopRsi = sequence asmPopRsi
+		renvoArmAsmStackMem = go asmStackMem
+		renvoArmAsmAddRdxImm = sequence asmAddRdxImm
+		renvoArmAsmMemDisp = go asmMemDisp
+		renvoArmAsmLoadQwordRaxIndexRcx8 = sequence asmLoadQwordRaxIndexRcx8
+		renvoArmAsmLoadQwordRaxIndexRcxDisp = sequence asmLoadQwordRaxIndexRcxDisp
+		renvoArmAsmLoadRaxMemRdxDisp = sequence asmLoadRaxMemRdxDisp
+		renvoArmAsmLoadRaxMemRdxDispSize = sequence asmLoadRaxMemRdxDispSize
+		renvoArmAsmLoadByteRaxIndexRcx = sequence asmLoadByteRaxIndexRcx
+		renvoArmAsmLoadRaxIndexRcxSize = go asmLoadRaxIndexRcxSize
+		renvoArmAsmStoreRaxMemRdxRcx8 = sequence asmStoreRaxMemRdxRcx8
+		renvoArmAsmStoreRaxMemRdxDisp = sequence asmStoreRaxMemRdxDisp
+		renvoArmAsmStoreRaxMemRdxDispSize = sequence asmStoreRaxMemRdxDispSize
+		renvoArmAsmNormalizeRaxForKind = go asmNormalizeRaxForKind
+		renvoArmAsmIncMemRdx = sequence asmIncMemRdx
+		renvoArmAsmDecMemRdx = sequence asmDecMemRdx
+		renvoArmAsmBoolNotRax = sequence asmBoolNotRax
+		renvoArmAsmNegRax = sequence asmNegRax
+		renvoArmAsmCmpRaxImm8 = sequence asmCmpRaxImm8
+		renvoArmAsmCmpRegImm = go asmCmpRegImm
+		renvoArmAsmCmpRegReg = sequence asmCmpRegReg
+		renvoArmAsmCsetRax = sequence asmCsetRax
+		renvoArmCondFromSetcc = go condFromSetcc
+		renvoArmAsmCmpRcxRaxSet = sequence asmCmpRcxRaxSet
+		renvoArmAsmAddRaxRcx = sequence asmAddRaxRcx
+		renvoArmAsmSubRaxRcx = sequence asmSubRaxRcx
+		renvoArmAsmShlRcxImm = sequence asmShlRcxImm
+		renvoArmAsmShlRaxImm = sequence asmShlRaxImm
+		renvoArmAsmSarRaxImm = sequence asmSarRaxImm
+		renvoArmAsmShrRaxImm = sequence asmShrRaxImm
+		renvoArmAsmDivLeftRcxRightRax = go asmDivLeftRcxRightRax
+		renvoArmAsmPushRax = sequence asmPushRax
+		renvoArmAsmPushRcx = sequence asmPushRcx
+		renvoArmAsmPushRdx = sequence asmPushRdx
+		renvoArmAsmPopRax = sequence asmPopRax
+		renvoArmAsmPopRcx = sequence asmPopRcx
+		renvoArmAsmPopRdx = sequence asmPopRdx
+		renvoArmAsmPushImm = sequence asmPushImm
+		renvoArmAsmStoreSliceStack = sequence asmStoreSliceStack
+		renvoArmAsmStoreAlMemRdxRcx1 = sequence asmStoreAlMemRdxRcx1
+		renvoArmAsmStoreRaxMemRdxRcxSize = go asmStoreRaxMemRdxRcxSize
+		renvoArmAsmIncRcx = sequence asmIncRcx
+		renvoArmAsmIncRax = sequence asmIncRax
+		renvoArmAsmImulRcxImm = sequence asmImulRcxImm
+		renvoArmAsmLeave = sequence asmLeave
+		renvoArmAsmRet = sequence asmRet
+		renvoArmAsmCallLabel = sequence asmCallLabel
+		renvoArmAsmJmpLabel = sequence asmJmpLabel
+		renvoArmAsmBCondLabel = sequence asmBCondLabel
+		renvoArmAsmJzLabel = sequence asmJzLabel
+		renvoArmAsmJnzLabel = sequence asmJnzLabel
 	}
 	relocation branch24 {
 		width = 4
@@ -595,511 +594,390 @@ arch arm {
 	}
 
 	sequences {
-		renvoArmAsmAddRaxRcx(a:emitter) {
-			call renvoArmAsmAddRegReg(a,armPrimary.Code,armPrimary.Code,armTertiary.Code)
-
-		}
-		renvoArmAsmAddRdxImm(a:emitter, imm:int) {
-			call renvoArmAsmAddRegImm(a,armSecondary.Code,armSecondary.Code,imm)
-
-		}
-		renvoArmAsmAddRdxRcx(a:emitter) {
-			call renvoArmAsmAddRegReg(a,armSecondary.Code,armSecondary.Code,armTertiary.Code)
-
-		}
-		renvoArmAsmAddRegReg(a:emitter, dst:int, left:int, right:int) {
-			call renvoArmAsmEmit(a,0xe0800000|(left<<16)|(dst<<12)|right)
-
-		}
-		renvoArmAsmAddRegRegShift(a:emitter, dst:int, left:int, right:int, shift:int) {
-			call renvoArmAsmEmit(a,0xe0800000|(left<<16)|(dst<<12)|(shift<<7)|right)
-
-		}
-		renvoArmAsmBoolNotRax(a:emitter) {
-			call renvoArmAsmCmpRaxImm8(a,0)
-
-			call renvoArmAsmCsetRax(a,0)
-
-		}
-		renvoArmAsmCmpRaxImm8(a:emitter, imm:int) {
-			call renvoArmAsmCmpRegImm(a,armPrimary.Code,imm)
-
-		}
-		renvoArmAsmCmpRegReg(a:emitter, left:int, right:int) {
-			call renvoArmAsmEmit(a,0xe1500000|(left<<16)|right)
-
-		}
-		renvoArmAsmCsetRax(a:emitter, cond:int) {
-			call renvoArmAsmEmit(a,0xe3a00000)
-
-			call renvoArmAsmEmit(a,(cond<<28)|0x03a00001)
-
-		}
-		renvoArmAsmDecMemRdx(a:emitter) {
-			call renvoArmAsmLoadRegMem(a,armScratch.Code,armSecondary.Code,0,4)
-
-			call renvoArmAsmAddRegImm(a,armScratch.Code,armScratch.Code,-1)
-
-			call renvoArmAsmStoreRegMem(a,armScratch.Code,armSecondary.Code,0,4)
-
-		}
-		renvoArmAsmEmit(a:emitter, insn:int) {
-			call RTGUint32(a,insn)
-
-		}
-		renvoArmAsmImulRcxImm(a:emitter, imm:int) {
-			call renvoArmAsmMovRegImm(a,armScratch.Code,imm)
-
-			call renvoArmAsmMulRegReg(a,armTertiary.Code,armTertiary.Code,armScratch.Code)
-
-		}
-		renvoArmAsmIncMemRdx(a:emitter) {
-			call renvoArmAsmLoadRegMem(a,armScratch.Code,armSecondary.Code,0,4)
-
-			call renvoArmAsmAddRegImm(a,armScratch.Code,armScratch.Code,1)
-
-			call renvoArmAsmStoreRegMem(a,armScratch.Code,armSecondary.Code,0,4)
-
-		}
-		renvoArmAsmIncRax(a:emitter) {
-			call renvoArmAsmAddRegImm(a,armPrimary.Code,armPrimary.Code,1)
-
-		}
-		renvoArmAsmIncRcx(a:emitter) {
-			call renvoArmAsmAddRegImm(a,armTertiary.Code,armTertiary.Code,1)
-
-		}
-		renvoArmAsmJnzLabel(a:emitter, label:int) {
-			call renvoArmAsmBCondLabel(a,label,1)
-
-		}
-		renvoArmAsmJzLabel(a:emitter, label:int) {
-			call renvoArmAsmBCondLabel(a,label,0)
-
-		}
-		renvoArmAsmLeaRegStack(a:emitter, dst:int, offset:int) {
-			call renvoArmAsmAddRegImm(a,dst,armFrame.Code,-offset)
-
-		}
-		renvoArmAsmLeave(a:emitter) {
-			call renvoArmAsmMovRegReg(a,armStack.Code,armFrame.Code)
-
-			call renvoArmAsmEmit(a,0xe8bd4800)
-
-		}
-		renvoArmAsmLoadByteRaxIndexRcx(a:emitter) {
-			call renvoArmAsmAddRegReg(a,armAddress.Code,armPrimary.Code,armTertiary.Code)
-
-			call renvoArmAsmLoadRegMem(a,armPrimary.Code,armAddress.Code,0,1)
-
-		}
-		renvoArmAsmLoadQwordRaxIndexRcx8(a:emitter) {
-			call renvoArmAsmAddRegRegShift(a,armAddress.Code,armPrimary.Code,armTertiary.Code,3)
-
-			call renvoArmAsmLoadRegMem(a,armPrimary.Code,armAddress.Code,0,4)
-
-		}
-		renvoArmAsmLoadQwordRaxIndexRcxDisp(a:emitter, disp:int) {
-			call renvoArmAsmAddRegReg(a,armAddress.Code,armPrimary.Code,armTertiary.Code)
-
-			call renvoArmAsmLoadRegMem(a,armPrimary.Code,armAddress.Code,disp,4)
-
-		}
-		renvoArmAsmLoadRaxBss(a:emitter, bssOff:int) {
-			call renvoArmAsmAccessRaxBss(a,bssOff,0xe79f0000|armAddress.Code)
-
-		}
-		renvoArmAsmLoadRaxMemRdxDisp(a:emitter, disp:int) {
-			call renvoArmAsmLoadRegMem(a,armPrimary.Code,armSecondary.Code,disp,4)
-
-		}
-		renvoArmAsmLoadRaxMemRdxDispSize(a:emitter, disp:int, size:int) {
-			call renvoArmAsmLoadRegMem(a,armPrimary.Code,armSecondary.Code,disp,size)
-
-		}
-		renvoArmAsmLoadRegStack(a:emitter, dst:int, offset:int) {
-			call renvoArmAsmLoadRegMem(a,dst,armFrame.Code,-offset,4)
-
-		}
-		renvoArmAsmMovR10BssAddr(a:emitter, bssOff:int) {
-			call renvoArmAsmMovRegAbs(a,armR8.Code,bssOff,RTGRelocationAbsoluteBSS)
-
-		}
-		renvoArmAsmMovR8Rax(a:emitter) {
-			call renvoArmAsmMovRegReg(a,armR5.Code,armPrimary.Code)
-
-		}
-		renvoArmAsmMovR9Rax(a:emitter) {
-			call renvoArmAsmMovRegReg(a,armR6.Code,armPrimary.Code)
-
-		}
-		renvoArmAsmMovRaxBssAddr(a:emitter, bssOff:int) {
-			call renvoArmAsmMovRegAbs(a,armPrimary.Code,bssOff,RTGRelocationAbsoluteBSS)
-
-		}
-		renvoArmAsmMovRaxDataAddr(a:emitter, dataOff:int) {
-			call renvoArmAsmMovRegAbs(a,armPrimary.Code,dataOff,0)
-
-		}
-		renvoArmAsmMovRaxImm(a:emitter, imm:int) {
-			call renvoArmAsmMovRegImm(a,armPrimary.Code,imm)
-
-		}
-		renvoArmAsmMovRaxImm64(a:emitter, imm:int) {
-			call renvoArmAsmMovRaxImm(a,imm)
-
-		}
-		renvoArmAsmMovRaxRdx(a:emitter) {
-			call renvoArmAsmMovRegReg(a,armPrimary.Code,armSecondary.Code)
-
-		}
-		renvoArmAsmMovRcxRax(a:emitter) {
-			call renvoArmAsmMovRegReg(a,armTertiary.Code,armPrimary.Code)
-
-		}
-		renvoArmAsmMovRcxRdx(a:emitter) {
-			call renvoArmAsmMovRegReg(a,armTertiary.Code,armSecondary.Code)
-
-		}
-		renvoArmAsmMovRdiRax(a:emitter) {
-			call renvoArmAsmMovRegReg(a,armR3.Code,armPrimary.Code)
-
-		}
-		renvoArmAsmMovRdxImm(a:emitter, imm:int) {
-			call renvoArmAsmMovRegImm(a,armSecondary.Code,imm)
-
-		}
-		renvoArmAsmMovRdxRax(a:emitter) {
-			call renvoArmAsmMovRegReg(a,armSecondary.Code,armPrimary.Code)
-
-		}
-		renvoArmAsmMovRsiRax(a:emitter) {
-			call renvoArmAsmMovRegReg(a,armR4.Code,armPrimary.Code)
-
-		}
-		renvoArmAsmMulRegReg(a:emitter, dst:int, left:int, right:int) {
-			call renvoArmAsmEmit(a,0xe0000090|(dst<<16)|(right<<8)|left)
-
-		}
-		renvoArmAsmNegRax(a:emitter) {
-			call renvoArmAsmEmit(a,0xe2600000)
-
-		}
-		renvoArmAsmPopRax(a:emitter) {
-			call renvoArmAsmPopReg(a,armPrimary.Code)
-
-		}
-		renvoArmAsmPopRcx(a:emitter) {
-			call renvoArmAsmPopReg(a,armTertiary.Code)
-
-		}
-		renvoArmAsmPopRdi(a:emitter) {
-			call renvoArmAsmPopReg(a,armR3.Code)
-
-		}
-		renvoArmAsmPopRdx(a:emitter) {
-			call renvoArmAsmPopReg(a,armSecondary.Code)
-
-		}
-		renvoArmAsmPopReg(a:emitter, reg:int) {
-			call renvoArmAsmEmit(a,0xe49d0004|(reg<<12))
-
-		}
-		renvoArmAsmPopRsi(a:emitter) {
-			call renvoArmAsmPopReg(a,armR4.Code)
-
-		}
-		renvoArmAsmPushImm(a:emitter, imm:int) {
-			call renvoArmAsmMovRegImm(a,armScratch.Code,imm)
-
-			call renvoArmAsmPushReg(a,armScratch.Code)
-
-		}
-		renvoArmAsmPushRax(a:emitter) {
-			call renvoArmAsmPushReg(a,armPrimary.Code)
-
-		}
-		renvoArmAsmPushRcx(a:emitter) {
-			call renvoArmAsmPushReg(a,armTertiary.Code)
-
-		}
-		renvoArmAsmPushRdx(a:emitter) {
-			call renvoArmAsmPushReg(a,armSecondary.Code)
-
-		}
-		renvoArmAsmPushReg(a:emitter, reg:int) {
-			call renvoArmAsmEmit(a,0xe52d0004|(reg<<12))
-
-		}
-		renvoArmAsmRet(a:emitter) {
-			call renvoArmAsmEmit(a,0xe12fff1e)
-
-		}
-		renvoArmAsmSarRaxImm(a:emitter, imm:int) {
-			call renvoArmAsmEmit(a,0xe1a00040|(armPrimary.Code<<12)|(imm<<7)|armPrimary.Code)
-
-		}
-		renvoArmAsmShlRaxImm(a:emitter, imm:int) {
-			call renvoArmAsmEmit(a,0xe1a00000|(armPrimary.Code<<12)|(imm<<7)|armPrimary.Code)
-
-		}
-		renvoArmAsmShlRcxImm(a:emitter, imm:int) {
-			call renvoArmAsmEmit(a,0xe1a00000|(armTertiary.Code<<12)|(imm<<7)|armTertiary.Code)
-
-		}
-		renvoArmAsmShrRaxImm(a:emitter, imm:int) {
-			call renvoArmAsmEmit(a,0xe1a00020|(armPrimary.Code<<12)|(imm<<7)|armPrimary.Code)
-
-		}
-		renvoArmAsmStoreAlMemRdxRcx1(a:emitter) {
-			call renvoArmAsmAddRegReg(a,armAddress.Code,armSecondary.Code,armTertiary.Code)
-
-			call renvoArmAsmStoreRegMem(a,armPrimary.Code,armAddress.Code,0,1)
-
-		}
-		renvoArmAsmStoreRaxBss(a:emitter, bssOff:int) {
-			call renvoArmAsmAccessRaxBss(a,bssOff,0xe78f0000|armAddress.Code)
-
-		}
-		renvoArmAsmStoreRaxMemRdxDisp(a:emitter, disp:int) {
-			call renvoArmAsmStoreRegMem(a,armPrimary.Code,armSecondary.Code,disp,4)
-
-		}
-		renvoArmAsmStoreRaxMemRdxDispSize(a:emitter, disp:int, size:int) {
-			call renvoArmAsmStoreRegMem(a,armPrimary.Code,armSecondary.Code,disp,size)
-
-		}
-		renvoArmAsmStoreRaxMemRdxRcx8(a:emitter) {
-			call renvoArmAsmAddRegRegShift(a,armAddress.Code,armSecondary.Code,armTertiary.Code,3)
-
-			call renvoArmAsmStoreRegMem(a,armPrimary.Code,armAddress.Code,0,4)
-
-		}
-		renvoArmAsmStoreRegStack(a:emitter, src:int, offset:int) {
-			call renvoArmAsmStoreRegMem(a,src,armFrame.Code,-offset,4)
-
-		}
-		renvoArmAsmStoreSliceStack(a:emitter, offset:int) {
-			call renvoArmAsmStoreRegStack(a,armPrimary.Code,offset)
-
-			call renvoArmAsmStoreRegStack(a,armSecondary.Code,offset-8)
-
-			call renvoArmAsmStoreRegStack(a,armTertiary.Code,offset-16)
-
-		}
-		renvoArmAsmSubRaxRcx(a:emitter) {
-			call renvoArmAsmSubRegReg(a,armPrimary.Code,armPrimary.Code,armTertiary.Code)
-
-		}
-		renvoArmAsmSubRegReg(a:emitter, dst:int, left:int, right:int) {
-			call renvoArmAsmEmit(a,0xe0400000|(left<<16)|(dst<<12)|right)
-
-		}
-		renvoArmAsmSyscall(a:emitter) {
-			call renvoArmAsmMovRegReg(a,armSystem.Code,armPrimary.Code)
-
-			call renvoArmAsmMovRegReg(a,armScratch.Code,armSecondary.Code)
-
-			call renvoArmAsmMovRegReg(a,0,armR3.Code)
-
-			call renvoArmAsmMovRegReg(a,1,armR4.Code)
-
-			call renvoArmAsmMovRegReg(a,2,armScratch.Code)
-
-			call renvoArmAsmMovRegReg(a,3,armR8.Code)
-
-			call renvoArmAsmMovRegReg(a,4,armR8.Code)
-
-			call renvoArmAsmMovRegImm(a,5,0)
-
-			call renvoArmAsmEmit(a,0xef000000)
-
-		}
-
-		renvoArmAsmAccessRaxBss(a:emitter, bssOff:int, insn:int) {
+		asmAddRaxRcx(a:emitter) {
+			asmAddRegReg(a, primary.Code, primary.Code, tertiary.Code)
+		}
+		asmAddRdxImm(a:emitter, imm:int) {
+			asmAddRegImm(a, secondary.Code, secondary.Code, imm)
+		}
+		asmAddRdxRcx(a:emitter) {
+			asmAddRegReg(a, secondary.Code, secondary.Code, tertiary.Code)
+		}
+		asmAddRegReg(a:emitter, dst:int, left:int, right:int) {
+			asmEmit(a, 0xe0800000|(left<<16)|(dst<<12)|right)
+		}
+		asmAddRegRegShift(a:emitter, dst:int, left:int, right:int, shift:int) {
+			asmEmit(a, 0xe0800000|(left<<16)|(dst<<12)|(shift<<7)|right)
+		}
+		asmBoolNotRax(a:emitter) {
+			asmCmpRaxImm8(a, 0)
+			asmCsetRax(a, 0)
+		}
+		asmCmpRaxImm8(a:emitter, imm:int) {
+			asmCmpRegImm(a, primary.Code, imm)
+		}
+		asmCmpRegReg(a:emitter, left:int, right:int) {
+			asmEmit(a, 0xe1500000|(left<<16)|right)
+		}
+		asmCsetRax(a:emitter, cond:int) {
+			asmEmit(a, 0xe3a00000)
+			asmEmit(a, (cond<<28)|0x03a00001)
+		}
+		asmDecMemRdx(a:emitter) {
+			asmLoadRegMem(a, scratch.Code, secondary.Code, 0, 4)
+			asmAddRegImm(a, scratch.Code, scratch.Code, -1)
+			asmStoreRegMem(a, scratch.Code, secondary.Code, 0, 4)
+		}
+		asmEmit(a:emitter, insn:int) {
+			RTGUint32(a, insn)
+		}
+		asmImulRcxImm(a:emitter, imm:int) {
+			asmMovRegImm(a, scratch.Code, imm)
+			asmMulRegReg(a, tertiary.Code, tertiary.Code, scratch.Code)
+		}
+		asmIncMemRdx(a:emitter) {
+			asmLoadRegMem(a, scratch.Code, secondary.Code, 0, 4)
+			asmAddRegImm(a, scratch.Code, scratch.Code, 1)
+			asmStoreRegMem(a, scratch.Code, secondary.Code, 0, 4)
+		}
+		asmIncRax(a:emitter) {
+			asmAddRegImm(a, primary.Code, primary.Code, 1)
+		}
+		asmIncRcx(a:emitter) {
+			asmAddRegImm(a, tertiary.Code, tertiary.Code, 1)
+		}
+		asmJnzLabel(a:emitter, label:int) {
+			asmBCondLabel(a, label, 1)
+		}
+		asmJzLabel(a:emitter, label:int) {
+			asmBCondLabel(a, label, 0)
+		}
+		asmLeaRegStack(a:emitter, dst:int, offset:int) {
+			asmAddRegImm(a, dst, frame.Code, -offset)
+		}
+		asmLeave(a:emitter) {
+			asmMovRegReg(a, stack.Code, frame.Code)
+			asmEmit(a, 0xe8bd4800)
+		}
+		asmLoadByteRaxIndexRcx(a:emitter) {
+			asmAddRegReg(a, address.Code, primary.Code, tertiary.Code)
+			asmLoadRegMem(a, primary.Code, address.Code, 0, 1)
+		}
+		asmLoadQwordRaxIndexRcx8(a:emitter) {
+			asmAddRegRegShift(a, address.Code, primary.Code, tertiary.Code, 3)
+			asmLoadRegMem(a, primary.Code, address.Code, 0, 4)
+		}
+		asmLoadQwordRaxIndexRcxDisp(a:emitter, disp:int) {
+			asmAddRegReg(a, address.Code, primary.Code, tertiary.Code)
+			asmLoadRegMem(a, primary.Code, address.Code, disp, 4)
+		}
+		asmLoadRaxBss(a:emitter, bssOff:int) {
+			asmAccessRaxBss(a, bssOff, 0xe79f0000|address.Code)
+		}
+		asmLoadRaxMemRdxDisp(a:emitter, disp:int) {
+			asmLoadRegMem(a, primary.Code, secondary.Code, disp, 4)
+		}
+		asmLoadRaxMemRdxDispSize(a:emitter, disp:int, size:int) {
+			asmLoadRegMem(a, primary.Code, secondary.Code, disp, size)
+		}
+		asmLoadRegStack(a:emitter, dst:int, offset:int) {
+			asmLoadRegMem(a, dst, frame.Code, -offset, 4)
+		}
+		asmMovR10BssAddr(a:emitter, bssOff:int) {
+			asmMovRegAbs(a, r8.Code, bssOff, RTGRelocationAbsoluteBSS)
+		}
+		asmMovR8Rax(a:emitter) {
+			asmMovRegReg(a, r5.Code, primary.Code)
+		}
+		asmMovR9Rax(a:emitter) {
+			asmMovRegReg(a, r6.Code, primary.Code)
+		}
+		asmMovRaxBssAddr(a:emitter, bssOff:int) {
+			asmMovRegAbs(a, primary.Code, bssOff, RTGRelocationAbsoluteBSS)
+		}
+		asmMovRaxDataAddr(a:emitter, dataOff:int) {
+			asmMovRegAbs(a, primary.Code, dataOff, 0)
+		}
+		asmMovRaxImm(a:emitter, imm:int) {
+			asmMovRegImm(a, primary.Code, imm)
+		}
+		asmMovRaxImm64(a:emitter, imm:int) {
+			asmMovRaxImm(a, imm)
+		}
+		asmMovRaxRdx(a:emitter) {
+			asmMovRegReg(a, primary.Code, secondary.Code)
+		}
+		asmMovRcxRax(a:emitter) {
+			asmMovRegReg(a, tertiary.Code, primary.Code)
+		}
+		asmMovRcxRdx(a:emitter) {
+			asmMovRegReg(a, tertiary.Code, secondary.Code)
+		}
+		asmMovRdiRax(a:emitter) {
+			asmMovRegReg(a, r3.Code, primary.Code)
+		}
+		asmMovRdxImm(a:emitter, imm:int) {
+			asmMovRegImm(a, secondary.Code, imm)
+		}
+		asmMovRdxRax(a:emitter) {
+			asmMovRegReg(a, secondary.Code, primary.Code)
+		}
+		asmMovRsiRax(a:emitter) {
+			asmMovRegReg(a, r4.Code, primary.Code)
+		}
+		asmMulRegReg(a:emitter, dst:int, left:int, right:int) {
+			asmEmit(a, 0xe0000090|(dst<<16)|(right<<8)|left)
+		}
+		asmNegRax(a:emitter) {
+			asmEmit(a, 0xe2600000)
+		}
+		asmPopRax(a:emitter) {
+			asmPopReg(a, primary.Code)
+		}
+		asmPopRcx(a:emitter) {
+			asmPopReg(a, tertiary.Code)
+		}
+		asmPopRdi(a:emitter) {
+			asmPopReg(a, r3.Code)
+		}
+		asmPopRdx(a:emitter) {
+			asmPopReg(a, secondary.Code)
+		}
+		asmPopReg(a:emitter, reg:int) {
+			asmEmit(a, 0xe49d0004|(reg<<12))
+		}
+		asmPopRsi(a:emitter) {
+			asmPopReg(a, r4.Code)
+		}
+		asmPushImm(a:emitter, imm:int) {
+			asmMovRegImm(a, scratch.Code, imm)
+			asmPushReg(a, scratch.Code)
+		}
+		asmPushRax(a:emitter) {
+			asmPushReg(a, primary.Code)
+		}
+		asmPushRcx(a:emitter) {
+			asmPushReg(a, tertiary.Code)
+		}
+		asmPushRdx(a:emitter) {
+			asmPushReg(a, secondary.Code)
+		}
+		asmPushReg(a:emitter, reg:int) {
+			asmEmit(a, 0xe52d0004|(reg<<12))
+		}
+		asmRet(a:emitter) {
+			asmEmit(a, 0xe12fff1e)
+		}
+		asmSarRaxImm(a:emitter, imm:int) {
+			asmEmit(a, 0xe1a00040|(primary.Code<<12)|(imm<<7)|primary.Code)
+		}
+		asmShlRaxImm(a:emitter, imm:int) {
+			asmEmit(a, 0xe1a00000|(primary.Code<<12)|(imm<<7)|primary.Code)
+		}
+		asmShlRcxImm(a:emitter, imm:int) {
+			asmEmit(a, 0xe1a00000|(tertiary.Code<<12)|(imm<<7)|tertiary.Code)
+		}
+		asmShrRaxImm(a:emitter, imm:int) {
+			asmEmit(a, 0xe1a00020|(primary.Code<<12)|(imm<<7)|primary.Code)
+		}
+		asmStoreAlMemRdxRcx1(a:emitter) {
+			asmAddRegReg(a, address.Code, secondary.Code, tertiary.Code)
+			asmStoreRegMem(a, primary.Code, address.Code, 0, 1)
+		}
+		asmStoreRaxBss(a:emitter, bssOff:int) {
+			asmAccessRaxBss(a, bssOff, 0xe78f0000|address.Code)
+		}
+		asmStoreRaxMemRdxDisp(a:emitter, disp:int) {
+			asmStoreRegMem(a, primary.Code, secondary.Code, disp, 4)
+		}
+		asmStoreRaxMemRdxDispSize(a:emitter, disp:int, size:int) {
+			asmStoreRegMem(a, primary.Code, secondary.Code, disp, size)
+		}
+		asmStoreRaxMemRdxRcx8(a:emitter) {
+			asmAddRegRegShift(a, address.Code, secondary.Code, tertiary.Code, 3)
+			asmStoreRegMem(a, primary.Code, address.Code, 0, 4)
+		}
+		asmStoreRegStack(a:emitter, src:int, offset:int) {
+			asmStoreRegMem(a, src, frame.Code, -offset, 4)
+		}
+		asmStoreSliceStack(a:emitter, offset:int) {
+			asmStoreRegStack(a, primary.Code, offset)
+			asmStoreRegStack(a, secondary.Code, offset-8)
+			asmStoreRegStack(a, tertiary.Code, offset-16)
+		}
+		asmSubRaxRcx(a:emitter) {
+			asmSubRegReg(a, primary.Code, primary.Code, tertiary.Code)
+		}
+		asmSubRegReg(a:emitter, dst:int, left:int, right:int) {
+			asmEmit(a, 0xe0400000|(left<<16)|(dst<<12)|right)
+		}
+		asmSyscall(a:emitter) {
+			asmMovRegReg(a, system.Code, primary.Code)
+			asmMovRegReg(a, scratch.Code, secondary.Code)
+			asmMovRegReg(a, 0, r3.Code)
+			asmMovRegReg(a, 1, r4.Code)
+			asmMovRegReg(a, 2, scratch.Code)
+			asmMovRegReg(a, 3, r8.Code)
+			asmMovRegReg(a, 4, r8.Code)
+			asmMovRegImm(a, 5, 0)
+			asmEmit(a, 0xef000000)
+		}
+		asmAccessRaxBss(a:emitter, bssOff:int, insn:int) {
 			let at = a.Len()
-
-			call RTGUint32(a,0xe3000000|(armAddress.Code<<12))
-
-			call RTGUint32(a,0xe3400000|(armAddress.Code<<12))
-
-			call RTGUint32(a,insn)
-
-			call a.AbsoluteReloc(at,bssOff,RTGRelocationAbsoluteBSS)
-
+			RTGUint32(a, 0xe3000000|(address.Code<<12))
+			RTGUint32(a, 0xe3400000|(address.Code<<12))
+			RTGUint32(a, insn)
+			a.AbsoluteReloc(at, bssOff, RTGRelocationAbsoluteBSS)
 		}
-		renvoArmAsmBCondLabel(a:emitter, label:int, cond:int) {
+		asmBCondLabel(a:emitter, label:int, cond:int) {
 			let at = a.Len()
-
-			call renvoArmAsmEmit(a,(cond<<28)|0x0a000000)
-
-			call a.RelocAt(at,label)
-
+			asmEmit(a, (cond<<28)|0x0a000000)
+			a.RelocAt(at, label)
 		}
-		renvoArmAsmCallLabel(a:emitter, label:int) {
+		asmCallLabel(a:emitter, label:int) {
 			let at = a.Len()
-
-			call renvoArmAsmEmit(a,0xeb000000)
-
-			call a.RelocAt(at,label)
-
+			asmEmit(a, 0xeb000000)
+			a.RelocAt(at, label)
 		}
-		renvoArmAsmCmpRcxRaxSet(a:emitter, setcc:int) {
-			call renvoArmAsmCmpRegReg(a,armTertiary.Code,armPrimary.Code)
-
-			let cond = renvoArmCondFromSetcc(setcc)
-
-			call renvoArmAsmCsetRax(a,cond)
-
+		asmCmpRcxRaxSet(a:emitter, setcc:int) {
+			asmCmpRegReg(a, tertiary.Code, primary.Code)
+			let cond = condFromSetcc(setcc)
+			asmCsetRax(a, cond)
 		}
-		renvoArmAsmJmpLabel(a:emitter, label:int) {
+		asmJmpLabel(a:emitter, label:int) {
 			let at = a.Len()
-
-			call renvoArmAsmEmit(a,0xea000000)
-
-			call a.RelocAt(at,label)
-
+			asmEmit(a, 0xea000000)
+			a.RelocAt(at, label)
 		}
-		renvoArmAsmMovRegAbs(a:emitter, reg:int, off:int, kind:int) {
+		asmMovRegAbs(a:emitter, reg:int, off:int, kind:int) {
 			let at = a.Len()
-
-			call RTGUint32(a,0xe3000000|(reg<<12))
-
-			call RTGUint32(a,0xe3400000|(reg<<12))
-
-			call RTGUint32(a,0xe08f0000|(reg<<12)|reg)
-
-			call a.AbsoluteReloc(at,off,kind)
-
+			RTGUint32(a, 0xe3000000|(reg<<12))
+			RTGUint32(a, 0xe3400000|(reg<<12))
+			RTGUint32(a, 0xe08f0000|(reg<<12)|reg)
+			a.AbsoluteReloc(at, off, kind)
 		}
-		renvoArmAsmPatchMovRegImmAt(a:emitter, at:int, reg:int, imm:int) {
+		asmPatchMovRegImmAt(a:emitter, at:int, reg:int, imm:int) {
 			let part = imm&65535
-
-			call a.PatchUint32(at,0xe3000000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
-
+			a.PatchUint32(at, 0xe3000000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
 			set part = (imm>>16)&65535
-
-			call a.PatchUint32(at+4,0xe3400000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
-
+			a.PatchUint32(at+4, 0xe3400000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
 		}
-
-		armCopyBytes(out:emitter) {
-			let destination = armR3
-			let source = armR4
-			let count = armSecondary
-			let value = armScratch2
+		copyBytes(out:emitter) {
+			let destination = r3
+			let source = r4
+			let count = secondary
+			let value = scratch2
 			let forward = out.NewLabel()
 			let forwardLoop = out.NewLabel()
 			let backwardLoop = out.NewLabel()
 			let done = out.NewLabel()
-			call armCompare(out,destination,source)
-			call armJumpCondition(out,record_condition(Code:9),forward)
-			call armEmitAddress(out,armScratch,record_address(Base:source,Index:count,Scale:1,))
-			call armCompare(out,destination,armScratch)
-			call armJumpCondition(out,record_condition(Code:2),forward)
-			call armEmitAddress(out,source,record_address(Base:source,Index:count,Scale:1,Displacement:-1,))
-			call armEmitAddress(out,destination,record_address(Base:destination,Index:count,Scale:1,Displacement:-1,))
-			call out.Mark(backwardLoop)
-			call renvoArmAsmCmpRegImm(out,count.Code,0)
-			call armJumpCondition(out,record_condition(Code:0),done)
-			call armLoadU8(out,value,record_address(Base:source))
-			call armStoreU8(out,record_address(Base:destination),value)
-			call armDecrement(out,source)
-			call armDecrement(out,destination)
-			call armDecrement(out,count)
-			call armJump(out,backwardLoop)
-			call out.Mark(forward)
-			call out.Mark(forwardLoop)
-			call renvoArmAsmCmpRegImm(out,count.Code,0)
-			call armJumpCondition(out,record_condition(Code:0),done)
-			call armLoadU8(out,value,record_address(Base:source))
-			call armStoreU8(out,record_address(Base:destination),value)
-			call armIncrement(out,source)
-			call armIncrement(out,destination)
-			call armDecrement(out,count)
-			call armJump(out,forwardLoop)
-			call out.Mark(done)
+			compare(out, destination, source)
+			jumpCondition(out, record_condition(Code:9), forward)
+			emitAddress(out, scratch, record_address(Base:source, Index:count, Scale:1, ))
+			compare(out, destination, scratch)
+			jumpCondition(out, record_condition(Code:2), forward)
+			emitAddress(out, source, record_address(Base:source, Index:count, Scale:1, Displacement:-1, ))
+			emitAddress(out, destination, record_address(Base:destination, Index:count, Scale:1, Displacement:-1, ))
+			out.Mark(backwardLoop)
+			asmCmpRegImm(out, count.Code, 0)
+			jumpCondition(out, record_condition(Code:0), done)
+			loadU8(out, value, record_address(Base:source))
+			storeU8(out, record_address(Base:destination), value)
+			decrement(out, source)
+			decrement(out, destination)
+			decrement(out, count)
+			jump(out, backwardLoop)
+			out.Mark(forward)
+			out.Mark(forwardLoop)
+			asmCmpRegImm(out, count.Code, 0)
+			jumpCondition(out, record_condition(Code:0), done)
+			loadU8(out, value, record_address(Base:source))
+			storeU8(out, record_address(Base:destination), value)
+			increment(out, source)
+			increment(out, destination)
+			decrement(out, count)
+			jump(out, forwardLoop)
+			out.Mark(done)
 		}
-		armFrameStart(out:emitter) -> int {
-			call out.Bytes4(0x00,0x48,0x2d,0xe9)
-			call renvoArmAsmMovRegReg(out,11,13)
+		frameStart(out:emitter) -> int {
+			out.Bytes4(0x00, 0x48, 0x2d, 0xe9)
+			asmMovRegReg(out, 11, 13)
 			let at = out.Len()
-			call renvoArmAsmEmit(out,0xe3009000)
-			call renvoArmAsmEmit(out,0xe04dd009)
+			asmEmit(out, 0xe3009000)
+			asmEmit(out, 0xe04dd009)
 			return at
 		}
-		armHostSyscall(out:emitter) {
-			call renvoArmAsmSyscall(out)
+		hostSyscall(out:emitter) {
+			asmSyscall(out)
 		}
-		armMove(out:emitter, destination:register, source:register) {
-			call renvoArmAsmMovRegReg(out,destination.Code,source.Code)
+		move(out:emitter, destination:register, source:register) {
+			asmMovRegReg(out, destination.Code, source.Code)
 		}
-		armMoveImmediate(out:emitter, destination:register, value:int64) {
-			call renvoArmAsmMovRegImm(out,destination.Code,int(value))
+		moveImmediate(out:emitter, destination:register, value:int64) {
+			asmMovRegImm(out, destination.Code, int(value))
 		}
-		armSetCondition(out:emitter, condition:condition, destination:register) {
-			call renvoArmAsmEmit(out,0xe3a00000|(destination.Code<<12))
-			call renvoArmAsmEmit(out,(condition.Code<<28)|0x03a00001|(destination.Code<<12))
+		setCondition(out:emitter, condition:condition, destination:register) {
+			asmEmit(out, 0xe3a00000|(destination.Code<<12))
+			asmEmit(out, (condition.Code<<28)|0x03a00001|(destination.Code<<12))
 		}
-		armShiftLeftImmediate(out:emitter, operand:register, value:byte) {
-			call armShiftImmediate(out,operand,value,0)
+		shiftLeftImmediate(out:emitter, operand:register, value:byte) {
+			shiftImmediate(out, operand, value, 0)
 		}
-		armShiftRightSignedImmediate(out:emitter, operand:register, value:byte) {
-			call armShiftImmediate(out,operand,value,0x40)
+		shiftRightSignedImmediate(out:emitter, operand:register, value:byte) {
+			shiftImmediate(out, operand, value, 0x40)
 		}
-		armShiftRightUnsignedImmediate(out:emitter, operand:register, value:byte) {
-			call armShiftImmediate(out,operand,value,0x20)
+		shiftRightUnsignedImmediate(out:emitter, operand:register, value:byte) {
+			shiftImmediate(out, operand, value, 0x20)
 		}
-
-		armLoadI16(out:emitter, destination:register, address:address) {
-			call armLoadExtra(out,destination,address,0xe15000f0)
+		loadI16(out:emitter, destination:register, address:address) {
+			loadExtra(out, destination, address, 0xe15000f0)
 		}
-		armLoadI32(out:emitter, destination:register, address:address) {
-			call armLoadNative(out,destination,address)
+		loadI32(out:emitter, destination:register, address:address) {
+			loadNative(out, destination, address)
 		}
-		armLoadI8(out:emitter, destination:register, address:address) {
-			call armLoadExtra(out,destination,address,0xe15000d0)
+		loadI8(out:emitter, destination:register, address:address) {
+			loadExtra(out, destination, address, 0xe15000d0)
 		}
-		armLoadNative(out:emitter, destination:register, address:address) {
-			set address = armMemoryAddress(out,address,4)
-			call renvoArmAsmLoadRegMem(out,destination.Code,address.Base.Code,address.Displacement,4)
+		loadNative(out:emitter, destination:register, address:address) {
+			set address = memoryAddress(out, address, 4)
+			asmLoadRegMem(out, destination.Code, address.Base.Code, address.Displacement, 4)
 		}
-		armLoadU16(out:emitter, destination:register, address:address) {
-			call armLoadExtra(out,destination,address,0xe15000b0)
+		loadU16(out:emitter, destination:register, address:address) {
+			loadExtra(out, destination, address, 0xe15000b0)
 		}
-		armLoadU32(out:emitter, destination:register, address:address) {
-			call armLoadNative(out,destination,address)
+		loadU32(out:emitter, destination:register, address:address) {
+			loadNative(out, destination, address)
 		}
-		armLoadU8(out:emitter, destination:register, address:address) {
-			set address = armMemoryAddress(out,address,1)
-			call renvoArmAsmLoadRegMem(out,destination.Code,address.Base.Code,address.Displacement,1)
+		loadU8(out:emitter, destination:register, address:address) {
+			set address = memoryAddress(out, address, 1)
+			asmLoadRegMem(out, destination.Code, address.Base.Code, address.Displacement, 1)
 		}
-		armShiftImmediate(out:emitter, operand:register, value:byte, kind:int) {
-			call renvoArmAsmEmit(out,0xe1a00000|(operand.Code<<12)|((int(value)&31)<<7)|kind|operand.Code)
+		shiftImmediate(out:emitter, operand:register, value:byte, kind:int) {
+			asmEmit(out, 0xe1a00000|(operand.Code<<12)|((int(value)&31)<<7)|kind|operand.Code)
 		}
-		armStoreNative(out:emitter, address:address, source:register) {
-			call armStoreWidth(out,address,source,4)
+		storeNative(out:emitter, address:address, source:register) {
+			storeWidth(out, address, source, 4)
 		}
-		armStoreU16(out:emitter, address:address, source:register) {
-			call armStoreWidth(out,address,source,2)
+		storeU16(out:emitter, address:address, source:register) {
+			storeWidth(out, address, source, 2)
 		}
-		armStoreU32(out:emitter, address:address, source:register) {
-			call armStoreWidth(out,address,source,4)
+		storeU32(out:emitter, address:address, source:register) {
+			storeWidth(out, address, source, 4)
 		}
-		armStoreU8(out:emitter, address:address, source:register) {
-			call armStoreWidth(out,address,source,1)
+		storeU8(out:emitter, address:address, source:register) {
+			storeWidth(out, address, source, 1)
 		}
-		armStoreWidth(out:emitter, address:address, source:register, size:int) {
-			set address = armMemoryAddress(out,address,size)
-			call renvoArmAsmStoreRegMem(out,source.Code,address.Base.Code,address.Displacement,size)
+		storeWidth(out:emitter, address:address, source:register, size:int) {
+			set address = memoryAddress(out, address, size)
+			asmStoreRegMem(out, source.Code, address.Base.Code, address.Displacement, size)
 		}
 }
 }
 
 abi renvo_arm {
 	arch = arm
-	frame_start = sequence armFrameStart
-	frame_finish = go armFrameFinish
+	frame_start = sequence frameStart
+	frame_finish = go frameFinish
 	call_words = [r0, r1, r2, r3, r4, r5]
 	overflow_stride = 4
 	scalar_result = r0
@@ -1153,7 +1031,7 @@ format elf32_arm {
 	flags = 0x05000000
 	image = elf_executable
 	patch_absolute = arm32_mov_address
-	patch_address = sequence renvoArmAsmPatchMovRegImmAt
+	patch_address = sequence asmPatchMovRegImmAt
 }
 
 target linux/arm {

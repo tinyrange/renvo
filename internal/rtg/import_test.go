@@ -161,6 +161,107 @@ arch beta {
 	}
 }
 
+func TestParseImportsProvidesPackageForStandaloneDefinition(t *testing.T) {
+	source := []byte(`definition 1
+unit tiny
+implements direct_emitter_v1
+go backend {
+	func encode(out *RTGEmitter) { out.Byte(1) }
+}
+arch tiny {
+	sequences {
+		emit(out:emitter) {
+			encode(out)
+		}
+	}
+	exports {
+		publicEmit = sequence emit
+	}
+}`)
+	document := ParseImports(source, "/defs/tiny.rtg", nil)
+	if !document.Ok {
+		t.Fatalf("ParseImports failed: %#v", document.Diagnostics)
+	}
+	arch, ok := document.Declaration(DeclArch, "tiny")
+	if !ok {
+		t.Fatal("standalone architecture is missing")
+	}
+	sequences := architectureSequences(arch)
+	if len(sequences) != 1 || sequences[0].Name != "tinyPackageEmit" ||
+		len(sequences[0].Steps) != 1 ||
+		sequences[0].Steps[0].Tokens[0] != "tinyPackageEncode" {
+		t.Fatalf("standalone package sequences = %#v", sequences)
+	}
+}
+
+func TestParseImportsDoesNotRewriteGoSelectorsAsPackageHelpers(t *testing.T) {
+	source := []byte(`definition 1
+unit tiny
+implements direct_emitter_v1
+go backend {
+	type encoder struct { encode int }
+	func encode(out *RTGEmitter) { out.Byte(1) }
+	func use(encode int, value encoder) int { return encode + value.encode }
+	func (value encoder) method() int { return value.encode }
+	func local() int { scratch := 2; return scratch }
+	func fact() RTGRegister { return scratch }
+	func base(address RTGAddress) int { return address.Base.Code }
+}
+arch tiny {
+	registers = [r0]
+	locations {
+		scratch = r0
+	}
+	instructions {
+		return = go encode
+	}
+	reject = [move]
+}`)
+	document := ParseImports(source, "/defs/tiny.rtg", nil)
+	if !document.Ok {
+		t.Fatalf("ParseImports failed: %#v", document.Diagnostics)
+	}
+	var embedded string
+	for i := 0; i < len(document.Declarations); i++ {
+		if document.Declarations[i].Kind == DeclGo {
+			embedded = string(document.Declarations[i].GoSource)
+		}
+	}
+	if !containsText(embedded, "func tinyPackageEncode(") {
+		t.Fatalf("top-level helper was not qualified:\n%s", embedded)
+	}
+	if !containsText(embedded, "struct { encode int }") {
+		t.Fatalf("struct field was rewritten as a package helper:\n%s", embedded)
+	}
+	if !containsText(embedded, "value.encode") {
+		t.Fatalf("selector was rewritten as a package helper:\n%s", embedded)
+	}
+	if !containsText(embedded,
+		"func tinyPackageUse(encode int, value tinyPackageEncoder) int") ||
+		!containsText(embedded, "return encode + value.encode") {
+		t.Fatalf("parameter shadow was rewritten as a package helper:\n%s", embedded)
+	}
+	if !containsText(embedded, "func (value tinyPackageEncoder) method() int") {
+		t.Fatalf("method was rewritten as a package helper:\n%s", embedded)
+	}
+	if !containsText(embedded,
+		"func tinyPackageLocal() int { scratch := 2; return scratch }") {
+		t.Fatalf("local shadow was rewritten as an architecture fact:\n%s", embedded)
+	}
+	if !containsText(embedded,
+		"func tinyPackageFact() RTGRegister { return tinyScratch }") {
+		t.Fatalf("architecture fact was not package-qualified:\n%s", embedded)
+	}
+	rewritten := string(appendRewrittenGoMode(
+		nil, []byte(embedded), embeddedGoNames(document), "rtgTiny", true, &document))
+	if !containsText(rewritten, "return address.Base.Code") {
+		t.Fatalf("native specialization rewrote a shadowed architecture fact:\n%s", rewritten)
+	}
+	if !containsText(rewritten, "return rtgTinyScratch") {
+		t.Fatalf("native specialization did not rewrite an architecture fact:\n%s", rewritten)
+	}
+}
+
 func TestParseImportsRejectsVirtualPackageCollision(t *testing.T) {
 	root := []byte(`definition 1
 unit tiny

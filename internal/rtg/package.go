@@ -90,6 +90,9 @@ func addVirtualGoSymbols(document *Document, declaration Declaration) {
 			string(syntax.TokenText(wrapped, file.Tokens[file.Decls[i].NameTok])))
 	}
 	for i := 0; i < len(file.Funcs); i++ {
+		if file.Funcs[i].ReceiverStart >= 0 {
+			continue
+		}
 		addVirtualSymbol(document, declaration,
 			string(syntax.TokenText(wrapped, file.Tokens[file.Funcs[i].NameTok])))
 	}
@@ -135,10 +138,28 @@ func addVirtualArchitectureStatementSymbols(document *Document, declaration Decl
 				document.packages[pkg].StatementSymbols = append(
 					document.packages[pkg].StatementSymbols,
 					virtualSymbol{Local: local, Qualified: symbols[i].Local})
+				if symbols[i].Kind == "register" ||
+					symbols[i].Kind == "location" ||
+					symbols[i].Kind == "condition" ||
+					symbols[i].Kind == "instruction" {
+					addVirtualArchitectureGoSymbol(
+						&document.packages[pkg], local, symbols[i].Local)
+				}
 				break
 			}
 		}
 	}
+}
+
+func addVirtualArchitectureGoSymbol(pkg *virtualPackage, local string, qualified string) {
+	for i := 0; i < len(pkg.Symbols); i++ {
+		if pkg.Symbols[i].Local == local {
+			return
+		}
+	}
+	pkg.Symbols = append(pkg.Symbols, virtualSymbol{
+		Local: local, Qualified: qualified,
+	})
 }
 
 func addVirtualSymbol(document *Document, declaration Declaration, local string) {
@@ -310,6 +331,7 @@ func rewriteVirtualSource(source []byte, packageName string,
 	if len(diagnostics) != 0 {
 		return source
 	}
+	protected := virtualGoProtectedIdentifiers(source, tokens)
 	var out []byte
 	last := 0
 	for i := 0; i < len(tokens) && tokens[i].Kind != TokenEOF; i++ {
@@ -327,7 +349,10 @@ func rewriteVirtualSource(source []byte, packageName string,
 			}
 		}
 		if token.Kind == TokenIdent {
-			if qualified, ok := virtualQualified(packages, packageName, text); ok {
+			selector := i > 0 && tokenText(source, tokens[i-1]) == "."
+			member := i < len(protected) && protected[i]
+			if qualified, ok := virtualQualified(packages, packageName, text); ok &&
+				!selector && !member && !virtualGoKeyword(text) {
 				out = append(out, qualified...)
 			} else {
 				out = append(out, source[token.Start:token.End]...)
@@ -338,6 +363,260 @@ func rewriteVirtualSource(source []byte, packageName string,
 		last = token.End
 	}
 	return append(out, source[last:]...)
+}
+
+func virtualGoKeyword(value string) bool {
+	for _, keyword := range []string{
+		"break", "default", "func", "interface", "select",
+		"case", "defer", "go", "map", "struct",
+		"chan", "else", "goto", "package", "switch",
+		"const", "fallthrough", "if", "range", "type",
+		"continue", "for", "import", "return", "var",
+	} {
+		if value == keyword {
+			return true
+		}
+	}
+	return false
+}
+
+// virtualGoProtectedIdentifiers marks identifiers that are members rather than
+// package names. The RTG package resolver intentionally stays a token rewrite,
+// but it must not turn a struct field, interface method, composite-literal key,
+// label, or method declaration into a package helper merely because the names
+// happen to match.
+func virtualGoProtectedIdentifiers(source []byte, tokens []Token) []bool {
+	protected := make([]bool, len(tokens))
+	protectVirtualFunctionBindings(source, tokens, protected)
+	protectVirtualMembers(source, tokens, protected)
+	return protected
+}
+
+// protectVirtualFunctionBindings keeps Go's lexical names lexical. Package
+// qualification applies to top-level RTG helpers, never to receiver, parameter,
+// or named-result bindings that happen to use the same spelling.
+func protectVirtualFunctionBindings(source []byte, tokens []Token, protected []bool) {
+	const prefix = "package backend\n"
+	wrapped := make([]byte, 0, len(prefix)+len(source))
+	wrapped = append(wrapped, prefix...)
+	wrapped = append(wrapped, source...)
+	file := syntax.ParseFile(wrapped)
+	if !file.Ok {
+		return
+	}
+	for i := 0; i < len(file.Funcs); i++ {
+		fn := file.Funcs[i]
+		var bindings []string
+		if fn.ReceiverStart >= 0 {
+			bindings = appendVirtualBindings(
+				bindings, file, fn.ReceiverStart, fn.ReceiverEnd,
+				tokens, protected, len(prefix))
+			protectVirtualSyntaxToken(
+				tokens, protected, file.Tokens[fn.NameTok].Start-len(prefix))
+		}
+		bindings = appendVirtualBindings(
+			bindings, file, fn.ParamsStart+1, fn.ParamsEnd-1,
+			tokens, protected, len(prefix))
+		if fn.ResultStart < fn.ResultEnd &&
+			string(syntax.TokenText(wrapped, file.Tokens[fn.ResultStart])) == "(" {
+			bindings = appendVirtualBindings(
+				bindings, file, fn.ResultStart+1, fn.ResultEnd-1,
+				tokens, protected, len(prefix))
+		}
+		bodyStart := file.Tokens[fn.BodyStart].Start - len(prefix)
+		bodyEnd := file.Tokens[fn.BodyEnd-1].End - len(prefix)
+		protectVirtualLocalBindings(source, tokens, protected, bodyStart, bodyEnd)
+		for at := 0; at < len(tokens) && tokens[at].Kind != TokenEOF; at++ {
+			if tokens[at].Start < bodyStart || tokens[at].End > bodyEnd {
+				continue
+			}
+			if stringIndex(bindings, tokenText(source, tokens[at])) >= 0 {
+				protected[at] = true
+			}
+		}
+	}
+}
+
+func protectVirtualLocalBindings(source []byte, tokens []Token, protected []bool,
+	bodyStart int, bodyEnd int) {
+	blockEnds := virtualBlockEnds(source, tokens)
+	for at := 0; at < len(tokens) && tokens[at].Kind != TokenEOF; at++ {
+		if tokens[at].Start < bodyStart || tokens[at].End > bodyEnd {
+			continue
+		}
+		text := tokenText(source, tokens[at])
+		if text == "var" || text == "const" {
+			name := at + 1
+			if name < len(tokens) && tokens[name].Kind == TokenIdent {
+				protectVirtualLocalScope(
+					source, tokens, protected, name, name, blockEnds)
+			}
+			continue
+		}
+		if text != ":" || at+1 >= len(tokens) ||
+			tokenText(source, tokens[at+1]) != "=" {
+			continue
+		}
+		line := tokens[at].Line
+		first := at - 1
+		for first > 0 && tokens[first-1].Line == line {
+			previous := tokenText(source, tokens[first-1])
+			if tokens[first-1].Kind != TokenIdent && previous != "," {
+				break
+			}
+			first--
+		}
+		for name := first; name < at; name++ {
+			if tokens[name].Kind == TokenIdent &&
+				tokenText(source, tokens[name]) != "_" {
+				protectVirtualLocalScope(
+					source, tokens, protected, name, at+1, blockEnds)
+			}
+		}
+	}
+}
+
+func virtualBlockEnds(source []byte, tokens []Token) []int {
+	ends := make([]int, len(tokens))
+	var stack []int
+	for i := 0; i < len(tokens) && tokens[i].Kind != TokenEOF; i++ {
+		text := tokenText(source, tokens[i])
+		if text == "{" {
+			stack = append(stack, i)
+		} else if text == "}" && len(stack) != 0 {
+			ends[stack[len(stack)-1]] = i
+			stack = stack[:len(stack)-1]
+		}
+	}
+	return ends
+}
+
+func protectVirtualLocalScope(source []byte, tokens []Token, protected []bool,
+	nameToken int, scopeStart int, blockEnds []int) {
+	name := tokenText(source, tokens[nameToken])
+	scopeEnd := len(tokens)
+	for open := nameToken; open >= 0; open-- {
+		if tokenText(source, tokens[open]) != "{" {
+			continue
+		}
+		if blockEnds[open] > nameToken {
+			scopeEnd = blockEnds[open]
+			break
+		}
+	}
+	protected[nameToken] = true
+	for at := scopeStart; at < scopeEnd; at++ {
+		if tokens[at].Kind == TokenIdent && tokenText(source, tokens[at]) == name {
+			protected[at] = true
+		}
+	}
+}
+
+func appendVirtualBindings(bindings []string, file syntax.File, start int, end int,
+	tokens []Token, protected []bool, prefix int) []string {
+	itemStart := start
+	depth := 0
+	for at := start; at <= end; at++ {
+		text := ""
+		if at < end {
+			text = string(syntax.TokenText(file.Src, file.Tokens[at]))
+		}
+		if text == "(" || text == "[" {
+			depth++
+		} else if text == ")" || text == "]" {
+			depth--
+		}
+		if at != end && (text != "," || depth != 0) {
+			continue
+		}
+		// A single-token final item is an unnamed type. Earlier single-token
+		// items belong to a grouped declaration such as "left, right int".
+		if itemStart < at && (itemStart+1 < at || at < end) {
+			first := string(syntax.TokenText(file.Src, file.Tokens[itemStart]))
+			if first != "..." && stringIndex(bindings, first) < 0 {
+				bindings = append(bindings, first)
+			}
+			protectVirtualSyntaxToken(
+				tokens, protected, file.Tokens[itemStart].Start-prefix)
+		}
+		itemStart = at + 1
+	}
+	return bindings
+}
+
+func protectVirtualSyntaxToken(tokens []Token, protected []bool, start int) {
+	for i := 0; i < len(tokens) && tokens[i].Kind != TokenEOF; i++ {
+		if tokens[i].Start == start {
+			protected[i] = true
+			return
+		}
+	}
+}
+
+func protectVirtualMembers(source []byte, tokens []Token, protected []bool) {
+	type block struct {
+		kind  string
+		depth int
+	}
+	var blocks []block
+	depth := 0
+	fieldStart := false
+	fieldLine := 0
+	for i := 0; i < len(tokens) && tokens[i].Kind != TokenEOF; i++ {
+		text := tokenText(source, tokens[i])
+		if text == "{" {
+			kind := ""
+			if i > 0 {
+				previous := tokenText(source, tokens[i-1])
+				if previous == "struct" || previous == "interface" {
+					kind = previous
+				}
+			}
+			depth++
+			if kind != "" {
+				blocks = append(blocks, block{kind: kind, depth: depth})
+				fieldStart = true
+				fieldLine = 0
+			}
+			continue
+		}
+		if text == "}" {
+			if len(blocks) != 0 && blocks[len(blocks)-1].depth == depth {
+				blocks = blocks[:len(blocks)-1]
+			}
+			depth--
+			fieldStart = false
+			continue
+		}
+		if i+1 < len(tokens) && tokenText(source, tokens[i+1]) == ":" {
+			protected[i] = true
+		}
+		if len(blocks) == 0 || blocks[len(blocks)-1].depth != depth {
+			continue
+		}
+		if text == ";" {
+			fieldStart = true
+			fieldLine = 0
+			continue
+		}
+		if fieldLine != 0 && tokens[i].Line != fieldLine {
+			fieldStart = true
+		}
+		if !fieldStart {
+			continue
+		}
+		fieldLine = tokens[i].Line
+		if tokens[i].Kind != TokenIdent || i+1 >= len(tokens) {
+			fieldStart = false
+			continue
+		}
+		next := tokenText(source, tokens[i+1])
+		if tokens[i+1].Line == tokens[i].Line &&
+			next != "}" && next != ";" && next != "." {
+			protected[i] = true
+		}
+		fieldStart = false
+	}
 }
 
 func rewriteVirtualField(value string, packageName string,

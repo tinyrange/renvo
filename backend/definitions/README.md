@@ -50,12 +50,16 @@ do not add an architecture switch to the RTG parser or generator.
 5. Map compiler roles in `locations`; names such as `primary` and `stack` are
    roles, not required physical register spellings.
 6. Describe recurring encodings in `forms` and instruction variants as rows in
-   `instructions`.
+   `instructions`. Fixed-width 16- and 32-bit words use typed `word16` and
+   `word32` forms; `address_base` covers the common simple base-register
+   operand without requiring a Go hook.
 7. Use bounded `sequences` for straight-line encoder, ABI, entry, and runtime
    composition. Calls use ordinary `helper(out, ...)` syntax; declared
    registers, locations, conditions, instructions, and file-local helpers can
-   be referenced by their short names. Sequences permit typed calls and local
-   values but deliberately have no general branch or loop construct.
+   be referenced by their short names in both sequences and embedded Go. Go
+   parameters and local variables shadow architecture facts normally.
+   Sequences permit typed calls and local values but deliberately have no
+   general branch or loop construct.
 8. Bind every `direct_emitter_v1` operation to an instruction, bounded
    sequence, or typed Go hook, or explicitly reject an operation supported by
    a later contract.

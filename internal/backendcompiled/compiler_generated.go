@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "e4cc96017957720395e728036884a3ad15ec5402e14622ce3639f3c7335f6e7e"
+const CompilerSourceDigest = "da82367830e86e830593484736ea33908d357af2d2882aa6a42cdd21f7384c3a"
 
 // source: backend/compiler_common_impl.go
 
@@ -26148,37 +26148,37 @@ return renvoRTGParseTargetArg(target)
 
 func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
 if target == renvoTargetLinuxAmd64 {
-return "linux/amd64", "\xd5ŖLm\x12\xf8\x05\x14\xd7\xf7:\xae\xe3S\x10\xe32\xbe\x1e\x04\xceo\xee\a)7\x997\xdbfX", 3, true
+return "linux/amd64", "\xf1\xd83\xdag![(\x95\xa8\x96\x89\xe4\xe7Ѷ\x15\xdd|\x88|\xa6\x10\xb6}J\x0e\x8f]\x8a\xdf\xf3", 3, true
 }
 if target == renvoTargetLinux386 {
-return "linux/386", "\x06[w\x82\xbfGP\xfelP\x8f\x13\x9b\xf2\xec\x1ao0\x8c\x1c\x15\x81\x81\xf5\x87}l4\xce\xf8\x8bv", 3, true
+return "linux/386", "\xc2\xd6e\xd8wP\r/y\x189\x8c^Hå\xbb\xae\xf0\xd2\xf6\xbc\a#[Ѻ\xb3l\xd0\xeaX", 3, true
 }
 if target == renvoTargetLinuxAarch64 {
-return "linux/aarch64", ",s^ \x00\x90\x90v\xe1\xbc\\\n\xed\xe5\x0e\xf8\x81\xa4\xe2\x85ˠtYl\x13\x94f\xcb]\xcd]", 3, true
+return "linux/aarch64", "^u\x18*\xdb)\xe8,\x83\xe7\xfc\xe4\x95R\xa9\x1b\x9a_\x99\xfcڐ\x9a7/\x10\xd0\xf9Ӡ\x86n", 3, true
 }
 if target == renvoTargetLinuxArm {
-return "linux/arm", "\x8eb\b<\xb1\x00\x98\x0f\x00\xab\xf4x͚K@\xa4\xe0\x06\xe5.|\n\xe9\a\xb2\x8c\xa2\xfew\xdbA", 3, true
+return "linux/arm", "\xe0\xd3S\x1e~\bh\x11m\xf1~(\xea\xcas\x89\xf9J\xf3\xf6諪Z\n\xfeiC\x13\x98G\xa4", 3, true
 }
 if target == renvoTargetWindowsAmd64 {
-return "windows/amd64", "\xdd\t\xf3z\x99\x96\xbf\xc4\xcbM\xe6\xab5\x87\xe4\xdb\xf6\"@Pt\xe7\xb20\xd0[\xeaw8\x19yM", 3, true
+return "windows/amd64", "\xf7\xe3\x97_z\x10p\b\x81\r\x9f\x01\xe8w<\xa5LI\xc5%\n\x8fI\x83\x06 \x96\xaf\xf4\x1c\x8e&", 3, true
 }
 if target == renvoTargetWindows386 {
-return "windows/386", "\xe9O)tAU1\xec1\x17(Kn\xf4hU\x97\xaa\xd4\xc0\x14\xbd\xcc\xc4\x00O\x89\xcdpa\xa4\x94", 3, true
+return "windows/386", "\xa0\b\xe6K\x93\xbe\xa6E\x93\xf56\xcaG\x19\xa1\xb9U&#g\xdbG\x99a\xb5\x96j\xb6-\xa4\xac\xb3", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x91M\xcbZ+\xec\x10\xcd\xe4E\x7f|@\x01\x95\xd72\x98\x1f\xaf\xb4\xc8(\x9f\x9d\xae9\x84\xb0\xc3ы", 3, true
+return "wasi/wasm32", "\x9e\xcdc\x862\xfb\x98\xe7\xfb\xf8\x16ܔ\xc4>\xf2\x04e\xf5\xb5\xad\x1c(\xe4r\x15t\xf7UHl)", 3, true
 }
 if target == renvoTargetDarwinArm64 {
-return "darwin/arm64", "`\xb83\xcc\x0f\xd8C\x97\xc21Cv\xb5\xf5\xd9S'.PZ\x84\xbd\x1f)\x9ff\x18\x98_\x05\xa5q", 3, true
+return "darwin/arm64", "\x11\xd3Y\xf2,\xa0\x1f\x00\xf8\xaa1>4$#:!\xd7Yn\x87M\xb3\x8aŃ\x1b_Z\x83En", 3, true
 }
 if target == renvoTargetLinuxKernelAmd64 {
-return "linux-kernel/amd64", "\xfaȮ%-\xf9\x99\xe022d\x89\x18j0\xd8jw\xc2\xd4#\xb7z\xad\xb0x\xe4\xeb\xfd\xb1\xc6\xd1", 3, true
+return "linux-kernel/amd64", "\xf3\xfd\x15\xc2^\xaa+\xbf\x18.Q\xa1\x1d\xc9\x12\x1f\xe8\x17\xebm학k\x05\xc2\xebP\xfeM\x84 ", 3, true
 }
 if target == renvoTargetWindowsArm64 {
-return "windows/arm64", "\xaf\x0ew\x89 Y\x9f\x9dl\x90%\xf2\x88\xd6c\x18\xfd\x94\x9f\xfd\x15,\xe8A\x9cB\x8a\x0493hO", 3, true
+return "windows/arm64", "\xaao!\xfe\x03A\xff\x16\x8b\x05\xdb\x18\xc0\x12\xd3<y(\xc0RB\xb3o[l\x9cm]/\xf3\xacH", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\xa1\xf9*\xb6\x91\x10\xf5\t\xddkƽ$\xa4\x8f|\x00ܖ\xa8\xe2h\xd2`\xf5\xba\x87UR$\xab!", 3, true
+return "vm/vm32", "7\x9c\xd7!;\xcc\xc1\xa9\xb8\xb7\xe1\x05ÿ\xcc\xf0R\xd2\x1f\x0f\xf9@4-\xfd\x11\xf1f\f\xd7g\xc5", 3, true
 }
 return "", "", 0, false
 }
@@ -28702,49 +28702,49 @@ return g.streqLabel
 
 func renvoAmd64AsmSecondaryDisp(a *renvoAsm, disp int) {
 if disp == 0 {
-renvoAsmEmit8(a,0x02)
+renvoAsmEmit8(a, 0x02)
 } else if renvoAsmImmFits8Signed(disp) {
-renvoAsmEmit2(a,0x42, disp)
+renvoAsmEmit2(a, 0x42, disp)
 } else {
-renvoAsmEmit8(a,0x82)
-renvoAsmEmit32(a,disp)
+renvoAsmEmit8(a, 0x82)
+renvoAsmEmit32(a, disp)
 }
 }
 func renvoAmd64AsmMovRaxImm(a *renvoAsm, imm int) {
 if imm == 0 {
-renvoAsmEmit16(a,0xc031)
+renvoAsmEmit16(a, 0xc031)
 return
 }
 if renvoAsmImmFits8Signed(imm) {
-renvoAsmEmit2(a,0x6a, imm)
+renvoAsmEmit2(a, 0x6a, imm)
 renvoAsmPopPrimary(a)
 return
 }
 if imm>>32 == 0 {
-renvoAsmEmit8(a,0xb8)
-renvoAsmEmit32(a,imm)
+renvoAsmEmit8(a, 0xb8)
+renvoAsmEmit32(a, imm)
 return
 }
 if imm >= -2147483647 && imm <= 2147483647 {
-renvoAsmEmit8(a,0x68)
-renvoAsmEmit32(a,imm)
+renvoAsmEmit8(a, 0x68)
+renvoAsmEmit32(a, imm)
 renvoAsmPopPrimary(a)
 return
 }
-renvoAsmEmit16(a,0xb848)
-renvoAsmEmit64(a,imm)
+renvoAsmEmit16(a, 0xb848)
+renvoAsmEmit64(a, imm)
 }
 func renvoAmd64AsmMovRdiRax(a *renvoAsm) {
 if renvoAmd64RewritePrimaryLoad(a, 7, false) {
 return
 }
-renvoAsmEmit16(a,0x5f50)
+renvoAsmEmit16(a, 0x5f50)
 }
 func renvoAmd64AsmMovRsiRax(a *renvoAsm) {
 if renvoAmd64RewritePrimaryLoad(a, 6, false) {
 return
 }
-renvoAsmEmit16(a,0x5e50)
+renvoAsmEmit16(a, 0x5e50)
 }
 func renvoAmd64RewritePrimaryLoad(a *renvoAsm, reg int, pushed bool) bool {
 load := a.lastPrimaryLoad
@@ -28788,26 +28788,26 @@ a.lastPrimaryLoad = 0
 return true
 }
 func renvoAmd64AsmMemDisp(a *renvoAsm, disp int, op int, disp8 int, disp32 int) {
-renvoAsmEmit16(a,op)
+renvoAsmEmit16(a, op)
 if renvoAsmImmFits8Signed(disp) {
-renvoAsmEmit2(a,disp8, disp)
+renvoAsmEmit2(a, disp8, disp)
 return
 }
-renvoAsmEmit8(a,disp32)
-renvoAsmEmit32(a,disp)
+renvoAsmEmit8(a, disp32)
+renvoAsmEmit32(a, disp)
 }
 func renvoAmd64AsmLoadQwordRaxIndexRcxDisp(a *renvoAsm, disp int) {
-renvoAsmEmit16(a,0x8b48)
+renvoAsmEmit16(a, 0x8b48)
 if renvoAsmImmFits8Signed(disp) {
-renvoAsmEmit3(a,0x44, 0x8, disp)
+renvoAsmEmit3(a, 0x44, 0x8, disp)
 return
 }
-renvoAsmEmit16(a,0x0884)
-renvoAsmEmit32(a,disp)
+renvoAsmEmit16(a, 0x0884)
+renvoAsmEmit32(a, disp)
 }
 func renvoAmd64AsmLoadRaxMemRdxDisp(a *renvoAsm, disp int) {
 if disp == 0 {
-renvoAsmEmit24(a,0x028b48)
+renvoAsmEmit24(a, 0x028b48)
 a.lastPrimaryLoad = len(a.code)*8 + 1
 return
 }
@@ -28820,12 +28820,12 @@ a.lastPrimaryLoad = len(a.code)*8 + distance
 }
 func renvoAmd64AsmLoadRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
 if size == 1 {
-renvoAsmEmit24(a,0xb60f48)
+renvoAsmEmit24(a, 0xb60f48)
 renvoAmd64AsmSecondaryDisp(a, disp)
 return
 }
 if size == 2 {
-renvoAsmEmit24(a,0xbf0f48)
+renvoAsmEmit24(a, 0xbf0f48)
 renvoAmd64AsmSecondaryDisp(a, disp)
 return
 }
@@ -28841,36 +28841,36 @@ renvoAmd64AsmLoadByteRaxIndexRcx(a)
 return
 }
 if size == 2 {
-renvoAsmEmit32(a,0x04bf0f48)
-renvoAsmEmit8(a,0x48)
+renvoAsmEmit32(a, 0x04bf0f48)
+renvoAsmEmit8(a, 0x48)
 return
 }
 if size == 4 {
-renvoAsmEmit32(a,0x88046348)
+renvoAsmEmit32(a, 0x88046348)
 return
 }
 renvoAmd64AsmLoadQwordRaxIndexRcx8(a)
 }
 func renvoAmd64AsmStoreRaxMemRdxDisp(a *renvoAsm, disp int) {
 if disp == 0 {
-renvoAsmEmit24(a,0x028948)
+renvoAsmEmit24(a, 0x028948)
 return
 }
 renvoAmd64AsmMemDisp(a, disp, 0x8948, 0x42, 0x82)
 }
 func renvoAmd64AsmStoreRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
 if size == 1 {
-renvoAsmEmit8(a,0x88)
+renvoAsmEmit8(a, 0x88)
 renvoAmd64AsmSecondaryDisp(a, disp)
 return
 }
 if size == 2 {
-renvoAsmEmit16(a,0x8966)
+renvoAsmEmit16(a, 0x8966)
 renvoAmd64AsmSecondaryDisp(a, disp)
 return
 }
 if size == 4 {
-renvoAsmEmit8(a,0x89)
+renvoAsmEmit8(a, 0x89)
 renvoAmd64AsmSecondaryDisp(a, disp)
 return
 }
@@ -28893,30 +28893,30 @@ if kind == 3 {
 if renvoAmd64CodeEnds(a, "\x0f\xb6\xc0") || renvoAmd64CodeEnds(a, "\x48\x0f\xb6\x02") || renvoAmd64CodeEnds(a, "\x48\x0f\xb6\x04\x08") {
 return
 }
-renvoAsmEmit24(a,0xc0b60f)
+renvoAsmEmit24(a, 0xc0b60f)
 return
 }
 if kind == 7 {
-renvoAsmEmit32(a,0xc0be0f48)
+renvoAsmEmit32(a, 0xc0be0f48)
 return
 }
 if kind == 8 {
-renvoAsmEmit32(a,0xc0bf0f48)
+renvoAsmEmit32(a, 0xc0bf0f48)
 return
 }
 if kind == 16 {
-renvoAsmEmit32(a,0xc0b70f48)
+renvoAsmEmit32(a, 0xc0b70f48)
 return
 }
 if kind == 9 {
 if renvoAmd64CodeEnds(a, "\x48\x63\xc0") || renvoAmd64CodeEnds(a, "\x48\x63\x04\x88") {
 return
 }
-renvoAsmEmit24(a,0xc06348)
+renvoAsmEmit24(a, 0xc06348)
 return
 }
 if kind == 17 {
-renvoAsmEmit16(a,0xc089)
+renvoAsmEmit16(a, 0xc089)
 }
 }
 func renvoAmd64AsmCmpRaxImm8(a *renvoAsm, imm int) {
@@ -28925,10 +28925,10 @@ if imm == 0 {
 
 
 
-renvoAsmEmit24(a,0xc08548)
+renvoAsmEmit24(a, 0xc08548)
 return
 }
-renvoAsmEmit4(a,0x48, 0x83, 0xf8, imm)
+renvoAsmEmit4(a, 0x48, 0x83, 0xf8, imm)
 }
 func renvoAmd64AsmCmpRaxImm8Discard(a *renvoAsm, imm int) {
 if renvoAmd64RewritePrimaryLoadCompare(a, imm) {
@@ -28938,67 +28938,67 @@ renvoAmd64AsmCmpRaxImm8(a, imm)
 }
 func renvoAmd64AsmDivLeftRcxRightRax(a *renvoAsm, mod bool) {
 if mod {
-renvoAsmEmitText(a,"\x48\x83\xf8\xff\x75\x10\x6a\x01\x5a\x48\xc1\xe2\x3f\x48\x39\xd1\x75\x04\x31\xc0\xeb\x10\x53\x48\x89\xc3\x48\x89\xc8\x48\x99\x48\xf7\xfb\x48\x89\xd0\x5b")
+renvoAsmEmitText(a, "\x48\x83\xf8\xff\x75\x10\x6a\x01\x5a\x48\xc1\xe2\x3f\x48\x39\xd1\x75\x04\x31\xc0\xeb\x10\x53\x48\x89\xc3\x48\x89\xc8\x48\x99\x48\xf7\xfb\x48\x89\xd0\x5b")
 return
 }
-renvoAsmEmitText(a,"\x48\x83\xf8\xff\x75\x11\x6a\x01\x5a\x48\xc1\xe2\x3f\x48\x39\xd1\x75\x05\x48\x89\xc8\xeb\x0d\x53\x48\x89\xc3\x48\x89\xc8\x48\x99\x48\xf7\xfb\x5b")
+renvoAsmEmitText(a, "\x48\x83\xf8\xff\x75\x11\x6a\x01\x5a\x48\xc1\xe2\x3f\x48\x39\xd1\x75\x05\x48\x89\xc8\xeb\x0d\x53\x48\x89\xc3\x48\x89\xc8\x48\x99\x48\xf7\xfb\x5b")
 }
 
 func renvoAmd64AsmCmpRcxRaxSet(a *renvoAsm, setcc int) {
-renvoAsmEmit32(a,0x0fc13948)
-renvoAsmEmit3(a,setcc,0xc0,0xf)
-renvoAsmEmit16(a,0xc0b6)
+renvoAsmEmit32(a, 0x0fc13948)
+renvoAsmEmit3(a, setcc,0xc0,0xf)
+renvoAsmEmit16(a, 0xc0b6)
 }
 
 func renvoAmd64AsmDecMemRdx(a *renvoAsm) {
-renvoAsmEmit24(a,0x0aff48)
+renvoAsmEmit24(a, 0x0aff48)
 }
 
 func renvoAmd64AsmIncMemRdx(a *renvoAsm) {
-renvoAsmEmit24(a,0x02ff48)
+renvoAsmEmit24(a, 0x02ff48)
 }
 
 func renvoAmd64AsmLoadByteRaxIndexRcx(a *renvoAsm) {
-renvoAsmEmit32(a,0x04b60f48)
-renvoAsmEmit8(a,0x8)
+renvoAsmEmit32(a, 0x04b60f48)
+renvoAsmEmit8(a, 0x8)
 }
 
 func renvoAmd64AsmLoadQwordRaxIndexRcx8(a *renvoAsm) {
-renvoAsmEmit32(a,0xc8048b48)
+renvoAsmEmit32(a, 0xc8048b48)
 }
 
 func renvoAmd64AsmMovR8Rax(a *renvoAsm) {
-renvoAsmEmit24(a,0xc08949)
+renvoAsmEmit24(a, 0xc08949)
 }
 
 func renvoAmd64AsmMovR9Rax(a *renvoAsm) {
-renvoAsmEmit24(a,0xc18949)
+renvoAsmEmit24(a, 0xc18949)
 }
 
 func renvoAmd64AsmStoreRaxMemRdxRcx8(a *renvoAsm) {
-renvoAsmEmit32(a,0xca048948)
+renvoAsmEmit32(a, 0xca048948)
 }
 
 func renvoAmd64AsmLoadRaxBss(a *renvoAsm, bssOff int) {
-renvoAsmEmit24(a,0x058b48)
+renvoAsmEmit24(a, 0x058b48)
 at:=len(a.code)
-renvoAsmEmit32(a,0)
-renvoAsmAddAbsReloc(a,at,bssOff,1)
+renvoAsmEmit32(a, 0)
+renvoAsmAddAbsReloc(a, at,bssOff,1)
 a.lastPrimaryLoad = len(a.code)*8+5
 }
 
 func renvoAmd64AsmMovR10BssAddr(a *renvoAsm, bssOff int) {
-renvoAsmEmit24(a,0x158d4c)
+renvoAsmEmit24(a, 0x158d4c)
 at:=len(a.code)
-renvoAsmEmit32(a,0)
-renvoAsmAddAbsReloc(a,at,bssOff,1)
+renvoAsmEmit32(a, 0)
+renvoAsmAddAbsReloc(a, at,bssOff,1)
 }
 
 func renvoAmd64AsmStoreRaxBss(a *renvoAsm, bssOff int) {
-renvoAsmEmit24(a,0x058948)
+renvoAsmEmit24(a, 0x058948)
 at:=len(a.code)
-renvoAsmEmit32(a,0)
-renvoAsmAddAbsReloc(a,at,bssOff,1)
+renvoAsmEmit32(a, 0)
+renvoAsmAddAbsReloc(a, at,bssOff,1)
 }
 
 
@@ -29749,15 +29749,15 @@ return g.streqLabel
 
 func renvo386AsmSecondaryDisp(a *renvoAsm, disp int) {
 if disp == 0 {
-renvoAsmEmit8(a,0x02)
+renvoAsmEmit8(a, 0x02)
 return
 }
 if renvoAsmImmFits8Signed(disp) {
-renvoAsmEmit2(a,0x42, disp)
+renvoAsmEmit2(a, 0x42, disp)
 return
 }
-renvoAsmEmit8(a,0x82)
-renvoAsmEmit32(a,disp)
+renvoAsmEmit8(a, 0x82)
+renvoAsmEmit32(a, disp)
 }
 func renvo386AsmMovRaxImm(a *renvoAsm, imm int) {
 if imm == 0 {
@@ -29766,7 +29766,7 @@ return
 }
 if renvoAsmImmFits8Signed(imm) {
 renvoAsmEmit2(a, 0x6a, imm)
-renvoAsmEmit8(a,0x58)
+renvoAsmEmit8(a, 0x58)
 return
 }
 if imm >= -2147483647 && imm <= 2147483647 {
@@ -29784,7 +29784,7 @@ return
 }
 if renvoAsmImmFits8Signed(imm) {
 renvoAsmEmit2(a, 0x6a, imm)
-renvoAsmEmit8(a,0x5a)
+renvoAsmEmit8(a, 0x5a)
 return
 }
 if imm >= 0 {
@@ -29805,7 +29805,7 @@ renvoAsmEmit32(a, imm)
 }
 func renvo386AsmStackMem(a *renvoAsm, offset int, base int, disp8 int, disp32 int) {
 if base > 0xff {
-renvoAsmEmit8(a, base>>8)
+renvoAsmEmit8(a, base >> 8)
 } else {
 renvoAsmEmit8(a, base)
 }
@@ -29827,7 +29827,7 @@ renvoAsmEmit32(a, imm)
 }
 func renvo386AsmMemDisp(a *renvoAsm, disp int, op int, disp8 int, disp32 int) {
 if op > 0xff {
-renvoAsmEmit8(a, op>>8)
+renvoAsmEmit8(a, op >> 8)
 } else {
 renvoAsmEmit8(a, op)
 }
@@ -29937,45 +29937,45 @@ renvoAsmEmit16(a, 0xd089)
 }
 
 func renvo386AsmAddRaxRcx(a *renvoAsm) {
-renvoAsmEmit16(a,0xc801)
+renvoAsmEmit16(a, 0xc801)
 }
 
 func renvo386AsmAddRdxRcx(a *renvoAsm) {
-renvoAsmEmit16(a,0xca01)
+renvoAsmEmit16(a, 0xca01)
 }
 
 func renvo386AsmBoolNotRax(a *renvoAsm) {
-renvoAsmEmit3(a,0x83,0xf0,1)
+renvoAsmEmit3(a, 0x83,0xf0,1)
 }
 
 func renvo386AsmCmpRcxRaxSet(a *renvoAsm, setcc int) {
-renvoAsmEmit24(a,0x0fc139)
-renvoAsmEmit3(a,setcc,0xc0,0xf)
-renvoAsmEmit16(a,0xc0b6)
+renvoAsmEmit24(a, 0x0fc139)
+renvoAsmEmit3(a, setcc,0xc0,0xf)
+renvoAsmEmit16(a, 0xc0b6)
 }
 
 func renvo386AsmDecMemRdx(a *renvoAsm) {
-renvoAsmEmit16(a,0x0aff)
+renvoAsmEmit16(a, 0x0aff)
 }
 
 func renvo386AsmIncMemRdx(a *renvoAsm) {
-renvoAsmEmit16(a,0x02ff)
+renvoAsmEmit16(a, 0x02ff)
 }
 
 func renvo386AsmLoadByteRaxIndexRcx(a *renvoAsm) {
-renvoAsmEmit32(a,0x0804b60f)
+renvoAsmEmit32(a, 0x0804b60f)
 }
 
 func renvo386AsmLoadQwordRaxIndexRcx8(a *renvoAsm) {
-renvoAsmEmit24(a,0xc8048b)
+renvoAsmEmit24(a, 0xc8048b)
 }
 
 func renvo386AsmMovR8Rax(a *renvoAsm) {
-renvoAsmEmit16(a,0xc389)
+renvoAsmEmit16(a, 0xc389)
 }
 
 func renvo386AsmMovR9Rax(a *renvoAsm) {
-renvoAsmEmit16(a,0xc389)
+renvoAsmEmit16(a, 0xc389)
 }
 
 func renvo386AsmMovRaxImm64(a *renvoAsm, imm int) {
@@ -29983,68 +29983,68 @@ renvo386AsmMovRaxImm(a,imm)
 }
 
 func renvo386AsmMovRaxRdx(a *renvoAsm) {
-renvoAsmEmit16(a,0xd089)
+renvoAsmEmit16(a, 0xd089)
 }
 
 func renvo386AsmMovRdiRax(a *renvoAsm) {
-renvoAsmEmit16(a,0xc389)
+renvoAsmEmit16(a, 0xc389)
 }
 
 func renvo386AsmMovRsiRax(a *renvoAsm) {
-renvoAsmEmit16(a,0xc189)
+renvoAsmEmit16(a, 0xc189)
 }
 
 func renvo386AsmPopRdi(a *renvoAsm) {
-renvoAsmEmit8(a,0x5b)
+renvoAsmEmit8(a, 0x5b)
 }
 
 func renvo386AsmSarRaxImm(a *renvoAsm, imm int) {
-renvoAsmEmit3(a,0xc1,0xf8,imm)
+renvoAsmEmit3(a, 0xc1,0xf8,imm)
 }
 
 func renvo386AsmShlRaxImm(a *renvoAsm, imm int) {
-renvoAsmEmit3(a,0xc1,0xe0,imm)
+renvoAsmEmit3(a, 0xc1,0xe0,imm)
 }
 
 func renvo386AsmShlRcxImm(a *renvoAsm, imm int) {
-renvoAsmEmit3(a,0xc1,0xe1,imm)
+renvoAsmEmit3(a, 0xc1,0xe1,imm)
 }
 
 func renvo386AsmShrRaxImm(a *renvoAsm, imm int) {
-renvoAsmEmit3(a,0xc1,0xe8,imm)
+renvoAsmEmit3(a, 0xc1,0xe8,imm)
 }
 
 func renvo386AsmStoreRaxMemRdxRcx8(a *renvoAsm) {
-renvoAsmEmit24(a,0xca0489)
+renvoAsmEmit24(a, 0xca0489)
 }
 
 func renvo386AsmSubRaxRcx(a *renvoAsm) {
-renvoAsmEmit16(a,0xc829)
+renvoAsmEmit16(a, 0xc829)
 }
 
 func renvo386AsmSyscall(a *renvoAsm) {
-renvoAsmEmit16(a,0x80cd)
+renvoAsmEmit16(a, 0x80cd)
 }
 
 func renvoAsmMovArg1Rax(a *renvoAsm) {
-renvoAsmEmit16(a,0xc689)
+renvoAsmEmit16(a, 0xc689)
 }
 
 func renvo386AsmJccLabel(a *renvoAsm, op int, label int) {
-renvoAsmEmit2(a,0x0f,op)
+renvoAsmEmit2(a, 0x0f,op)
 at:=len(a.code)
-renvoAsmEmit32(a,0)
-renvoAsmAddReloc(a,at,label)
+renvoAsmEmit32(a, 0)
+renvoAsmAddReloc(a, at,label)
 }
 
 func renvo386AsmMovRegPCRel(a *renvoAsm, reg int, off int, kind int) {
-renvoAsmEmit8(a,0xe8)
-renvoAsmEmit32(a,0)
-renvoAsmEmit8(a,0x58|reg)
-renvoAsmEmit2(a,0x81,0xc0|reg)
+renvoAsmEmit8(a, 0xe8)
+renvoAsmEmit32(a, 0)
+renvoAsmEmit8(a, 0x58|reg)
+renvoAsmEmit2(a, 0x81,0xc0|reg)
 at:=len(a.code)
-renvoAsmEmit32(a,0)
-renvoAsmAddAbsReloc(a,at,off,kind)
+renvoAsmEmit32(a, 0)
+renvoAsmAddAbsReloc(a, at,off,kind)
 }
 
 
@@ -30649,13 +30649,13 @@ renvoAarch64AsmEmit(a,0xd4000001)
 func renvoAarch64AsmBCondLabel(a *renvoAsm, label int, cond int) {
 at:=len(a.code)
 renvoAarch64AsmEmit(a,0x54000000|cond)
-renvoAsmAddReloc(a,at,label)
+renvoAsmAddReloc(a, at,label)
 }
 
 func renvoAarch64AsmCallLabel(a *renvoAsm, label int) {
 at:=len(a.code)
 renvoAarch64AsmEmit(a,0x94000000)
-renvoAsmAddReloc(a,at,label)
+renvoAsmAddReloc(a, at,label)
 }
 
 func renvoAarch64AsmCmpRcxRaxSet(a *renvoAsm, setcc int) {
@@ -30667,7 +30667,7 @@ renvoAarch64AsmCsetRax(a,cond)
 func renvoAarch64AsmJmpLabel(a *renvoAsm, label int) {
 at:=len(a.code)
 renvoAarch64AsmEmit(a,0x14000000)
-renvoAsmAddReloc(a,at,label)
+renvoAsmAddReloc(a, at,label)
 }
 
 func renvoAarch64AsmMovRegAbs(a *renvoAsm, reg int, off int, kind int) {
@@ -30676,7 +30676,7 @@ renvoAarch64AsmMovRegImm(a,reg,0)
 renvoAarch64AsmEmit(a,0xf2800000|(1<<21)|reg)
 renvoAarch64AsmEmit(a,0xf2800000|(2<<21)|reg)
 renvoAarch64AsmEmit(a,0xf2800000|(3<<21)|reg)
-renvoAsmAddAbsReloc(a,at,off,kind)
+renvoAsmAddAbsReloc(a, at,off,kind)
 }
 
 
@@ -31953,19 +31953,19 @@ at:=len(a.code)
 renvoAsmEmit32(a,0xe3000000|(12<<12))
 renvoAsmEmit32(a,0xe3400000|(12<<12))
 renvoAsmEmit32(a,insn)
-renvoAsmAddAbsReloc(a,at,bssOff,1)
+renvoAsmAddAbsReloc(a, at,bssOff,1)
 }
 
 func renvoArmAsmBCondLabel(a *renvoAsm, label int, cond int) {
 at:=len(a.code)
 renvoArmAsmEmit(a,(cond<<28)|0x0a000000)
-renvoAsmAddReloc(a,at,label)
+renvoAsmAddReloc(a, at,label)
 }
 
 func renvoArmAsmCallLabel(a *renvoAsm, label int) {
 at:=len(a.code)
 renvoArmAsmEmit(a,0xeb000000)
-renvoAsmAddReloc(a,at,label)
+renvoAsmAddReloc(a, at,label)
 }
 
 func renvoArmAsmCmpRcxRaxSet(a *renvoAsm, setcc int) {
@@ -31977,7 +31977,7 @@ renvoArmAsmCsetRax(a,cond)
 func renvoArmAsmJmpLabel(a *renvoAsm, label int) {
 at:=len(a.code)
 renvoArmAsmEmit(a,0xea000000)
-renvoAsmAddReloc(a,at,label)
+renvoAsmAddReloc(a, at,label)
 }
 
 func renvoArmAsmMovRegAbs(a *renvoAsm, reg int, off int, kind int) {
@@ -31985,14 +31985,14 @@ at:=len(a.code)
 renvoAsmEmit32(a,0xe3000000|(reg<<12))
 renvoAsmEmit32(a,0xe3400000|(reg<<12))
 renvoAsmEmit32(a,0xe08f0000|(reg<<12)|reg)
-renvoAsmAddAbsReloc(a,at,off,kind)
+renvoAsmAddAbsReloc(a, at,off,kind)
 }
 
 func renvoArmAsmPatchMovRegImmAt(a *renvoAsm, at int, reg int, imm int) {
 part:=imm&65535
-renvoPut32At(a.code,at,0xe3000000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
+renvoPut32At(a.code, at,0xe3000000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
 part=(imm>>16)&65535
-renvoPut32At(a.code,at+4,0xe3400000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
+renvoPut32At(a.code, at+4,0xe3400000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
 }
 
 
@@ -32407,20 +32407,20 @@ func renvoWasm32EmitBranch(a *renvoAsm, op int, label int) {
 a.code = append(a.code, byte(op))
 at := len(a.code)
 a.code = renvoAppend32(a.code, 0)
-renvoAsmAddReloc(a,at, label)
+renvoAsmAddReloc(a, at, label)
 }
 func renvoWasm32EmitCondBranch(a *renvoAsm, cond int, label int) {
 a.code = append(a.code, byte(renvoWasm32OpJCond))
 a.code = append(a.code, byte(cond))
 at := len(a.code)
 a.code = renvoAppend32(a.code, 0)
-renvoAsmAddReloc(a,at, label)
+renvoAsmAddReloc(a, at, label)
 }
 func renvoWasm32EmitCallLabel(a *renvoAsm, label int, wordCount int) {
 a.code = append(a.code, byte(renvoWasm32OpCall))
 at := len(a.code)
 a.code = renvoAppend32(a.code, 0)
-renvoAsmAddReloc(a,at, label)
+renvoAsmAddReloc(a, at, label)
 a.code = renvoAppend32(a.code, wordCount)
 }
 func renvoWasm32AsmMovRaxImm(a *renvoAsm, imm int) {
@@ -32434,24 +32434,24 @@ renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, imm)
 }
 func renvoWasm32AsmMovRaxDataAddr(a *renvoAsm, dataOff int) {
 renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRax, 0)
-renvoAsmAddAbsReloc(a,len(a.code)-4, dataOff, 0)
+renvoAsmAddAbsReloc(a, len(a.code)-4, dataOff, 0)
 }
 func renvoWasm32AsmMovRaxBssAddr(a *renvoAsm, bssOff int) {
 renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRax, 0)
-renvoAsmAddAbsReloc(a,len(a.code)-4, bssOff, 1)
+renvoAsmAddAbsReloc(a, len(a.code)-4, bssOff, 1)
 }
 func renvoWasm32AsmMovR10BssAddr(a *renvoAsm, bssOff int) {
 renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegR10, 0)
-renvoAsmAddAbsReloc(a,len(a.code)-4, bssOff, 1)
+renvoAsmAddAbsReloc(a, len(a.code)-4, bssOff, 1)
 }
 func renvoWasm32AsmLoadRaxBss(a *renvoAsm, bssOff int) {
 renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegR10, 0)
-renvoAsmAddAbsReloc(a,len(a.code)-4, bssOff, 1)
+renvoAsmAddAbsReloc(a, len(a.code)-4, bssOff, 1)
 renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRax, renvoWasm32RegR10, 0, 4)
 }
 func renvoWasm32AsmStoreRaxBss(a *renvoAsm, bssOff int) {
 renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegR10, 0)
-renvoAsmAddAbsReloc(a,len(a.code)-4, bssOff, 1)
+renvoAsmAddAbsReloc(a, len(a.code)-4, bssOff, 1)
 renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRax, renvoWasm32RegR10, 0, 4)
 }
 func renvoWasm32AsmMovRdiRax(a *renvoAsm) {
@@ -32482,7 +32482,7 @@ func renvoWasm32AsmAddRdxRcx(a *renvoAsm) {
 renvoWasm32EmitRegReg(a, renvoWasm32OpAddRegReg, renvoWasm32RegRdx, renvoWasm32RegRcx)
 }
 func renvoWasm32AsmSyscall(a *renvoAsm) {
-renvoAsmEmit8(a,renvoWasm32OpSyscall)
+renvoAsmEmit8(a, renvoWasm32OpSyscall)
 }
 func renvoWasm32AsmPushRax(a *renvoAsm) {
 renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRax)
@@ -32494,8 +32494,8 @@ func renvoWasm32AsmPushRdx(a *renvoAsm) {
 renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRdx)
 }
 func renvoWasm32AsmPushImm(a *renvoAsm, imm int) {
-renvoAsmEmit8(a,renvoWasm32OpPushImm)
-renvoAsmEmit32(a,imm)
+renvoAsmEmit8(a, renvoWasm32OpPushImm)
+renvoAsmEmit32(a, imm)
 }
 func renvoWasm32AsmPopRax(a *renvoAsm) {
 renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRax)
@@ -32619,12 +32619,12 @@ renvoWasm32EmitRegReg(a, renvoWasm32OpAndRegReg, renvoWasm32RegRax, renvoWasm32R
 }
 }
 func renvoWasm32AsmIncMemRdx(a *renvoAsm) {
-renvoAsmEmit8(a,renvoWasm32OpIncMem)
-renvoAsmEmit8(a,renvoWasm32RegRdx)
+renvoAsmEmit8(a, renvoWasm32OpIncMem)
+renvoAsmEmit8(a, renvoWasm32RegRdx)
 }
 func renvoWasm32AsmDecMemRdx(a *renvoAsm) {
-renvoAsmEmit8(a,renvoWasm32OpDecMem)
-renvoAsmEmit8(a,renvoWasm32RegRdx)
+renvoAsmEmit8(a, renvoWasm32OpDecMem)
+renvoAsmEmit8(a, renvoWasm32RegRdx)
 }
 func renvoWasm32AsmBoolNotRax(a *renvoAsm) {
 renvoWasm32EmitReg(a, renvoWasm32OpBoolNot, renvoWasm32RegRax)
@@ -32679,8 +32679,8 @@ cond = renvoWasm32CondGt
 cond = renvoWasm32CondGe
 }
 renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
-renvoAsmEmit8(a,renvoWasm32OpSetCond)
-renvoAsmEmit8(a,cond)
+renvoAsmEmit8(a, renvoWasm32OpSetCond)
+renvoAsmEmit8(a, cond)
 }
 func renvoWasm32AsmIncRcx(a *renvoAsm) {
 renvoWasm32EmitReg(a, renvoWasm32OpIncReg, renvoWasm32RegRcx)
@@ -32694,7 +32694,7 @@ renvoWasm32EmitRegImm(a, renvoWasm32OpMulRegImm, renvoWasm32RegRcx, imm)
 func renvoWasm32AsmLeave(a *renvoAsm) {
 }
 func renvoWasm32AsmRet(a *renvoAsm) {
-renvoAsmEmit8(a,renvoWasm32OpRet)
+renvoAsmEmit8(a, renvoWasm32OpRet)
 }
 func renvoWasm32AsmCallLabel(a *renvoAsm, label int) {
 renvoWasm32EmitCallLabel(a, label, 0)
@@ -32712,19 +32712,19 @@ func renvoWasm32AsmNegRax(a *renvoAsm) {
 renvoWasm32EmitReg(a, renvoWasm32OpNegReg, renvoWasm32RegRax)
 }
 func renvoWasm32AsmBuildArgvEnvSlices(a *renvoAsm, bssOff int, envOff int, envLenOff int) {
-renvoAsmEmit8(a,renvoWasm32OpBuildArgsEnv)
+renvoAsmEmit8(a, renvoWasm32OpBuildArgsEnv)
 at := len(a.code)
-renvoAsmEmit32(a,bssOff)
-renvoAsmAddAbsReloc(a,at, bssOff, 1)
+renvoAsmEmit32(a, bssOff)
+renvoAsmAddAbsReloc(a, at, bssOff, 1)
 at = len(a.code)
-renvoAsmEmit32(a,envOff)
-renvoAsmAddAbsReloc(a,at, envOff, 1)
+renvoAsmEmit32(a, envOff)
+renvoAsmAddAbsReloc(a, at, envOff, 1)
 at = len(a.code)
-renvoAsmEmit32(a,envLenOff)
-renvoAsmAddAbsReloc(a,at, envLenOff, 1)
+renvoAsmEmit32(a, envLenOff)
+renvoAsmAddAbsReloc(a, at, envLenOff, 1)
 }
 func renvoWasm32AsmExit(a *renvoAsm) {
-renvoAsmEmit8(a,renvoWasm32OpExit)
+renvoAsmEmit8(a, renvoWasm32OpExit)
 }
 func renvoWasm32RegLocal(reg int) int {
 return int(renvoWasm32RegLocals[reg])

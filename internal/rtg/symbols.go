@@ -367,7 +367,7 @@ func appendInstructionSymbolPrelude(out []byte, document Document, arch Declarat
 			if formFound && (form.Kind == "go" || form.Kind == "sequence") {
 				function, found = findBackendFunction(document, form.Algorithm)
 				constants = instructionConstants(child.Tokens)
-			} else if formFound && form.Kind == "word32" {
+			} else if formFound && typedWordFormBits(form.Kind) != 0 {
 				function, found = architectureFormFunction(form, name)
 			} else if formFound && form.Kind == "bytes" {
 				out = append(out, "var "...)

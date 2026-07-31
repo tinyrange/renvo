@@ -447,7 +447,7 @@ func directEmitterBindingFunction(document Document, arch Declaration, binding a
 				},
 			}, true
 		}
-		if form.Kind == "word32" {
+		if typedWordFormBits(form.Kind) != 0 {
 			return architectureFormFunction(form, binding.Instruction)
 		}
 		function, found := findBackendFunction(document, form.Algorithm)

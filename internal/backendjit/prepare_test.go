@@ -196,7 +196,7 @@ func TestCompiledInBootstrapPreparesAndCachesBackend(t *testing.T) {
 	definition := copyNativeDefinition(t, root,
 		"target linux/amd64 {", "target example/example64 {",
 		"out.Bytes2(0x31, 0xc0)",
-		"out.Bytes2(0x6a, 0)\n\t\t\tx86OpcodeRegister(out, 0x58, destination)")
+		"out.Bytes2(0x6a, 0)\n\t\t\temitOpcodeRegister(out, 0x58, destination)")
 	stdRoot := filepath.Join(root, "std")
 	source := filepath.Join(root, "backend", "tests", "arithmetic_return_expression.go")
 	cache := t.TempDir()

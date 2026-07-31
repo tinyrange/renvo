@@ -1972,6 +1972,10 @@ func appendRewrittenGoModeExports(out []byte, source []byte, names []string, pre
 	if len(diagnostics) != 0 {
 		return out
 	}
+	var protected []bool
+	if document != nil {
+		protected = virtualGoProtectedIdentifiers(source, tokens)
+	}
 	last := 0
 	for i := 0; i < len(tokens); i++ {
 		token := tokens[i]
@@ -2035,13 +2039,14 @@ func appendRewrittenGoModeExports(out []byte, source []byte, names []string, pre
 				if method == "PatchUint32" {
 					out = append(out, ".code"...)
 				}
-				out = append(out, ',')
+				out = append(out, ", "...)
 				last = tokens[i+3].End
 				i += 3
 				continue
 			}
 		}
-		if nativeEmitter && document != nil && token.Kind == TokenIdent && i+2 < len(tokens) &&
+		if nativeEmitter && document != nil && token.Kind == TokenIdent &&
+			(i >= len(protected) || !protected[i]) && i+2 < len(tokens) &&
 			tokenText(source, tokens[i+1]) == "." && tokenText(source, tokens[i+2]) == "Code" {
 			if code, found := generatedArchitectureCode(*document, text); found {
 				out = appendDecimalFrame(out, code)
@@ -2066,7 +2071,7 @@ func appendRewrittenGoModeExports(out []byte, source []byte, names []string, pre
 			out = append(out, external...)
 		} else if document != nil && token.Kind == TokenIdent {
 			replacement, found := generatedArchitectureOutput(*document, text)
-			if found {
+			if found && (i >= len(protected) || !protected[i]) {
 				out = append(out, replacement...)
 			} else if stringIndex(names, text) >= 0 {
 				out = append(out, prefix...)

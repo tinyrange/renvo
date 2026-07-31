@@ -280,11 +280,7 @@ func (testFilesystemImportLoader) LoadImport(
 }
 
 func TestWasm32DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
-	source, err := os.ReadFile("../../backend/definitions/wasm32.rtg")
-	if err != nil {
-		t.Fatal(err)
-	}
-	resolved := Resolve(Parse(source, "wasm32.rtg"))
+	resolved := Resolve(parseDefinitionFile(t, "../../backend/definitions/wasm32.rtg"))
 	if !resolved.Ok {
 		t.Fatalf("definition failed: %#v", resolved.Diagnostics)
 	}

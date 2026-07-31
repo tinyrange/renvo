@@ -1,7 +1,6 @@
 # The 32-bit x86 slice owns its encoder and Linux and Windows compositions.
 go backend {
-
-	func renvo386AsmSecondaryDisp(a *RTGEmitter, disp int) {
+	func asmSecondaryDisp(a *RTGEmitter, disp int) {
 		if disp == 0 {
 			a.Int8(0x02)
 			return
@@ -14,219 +13,219 @@ go backend {
 		a.Int32(disp)
 	}
 
-	func renvo386AsmMovRaxImm(a *RTGEmitter, imm int) {
+	func asmMovRaxImm(a *RTGEmitter, imm int) {
 		if imm == 0 {
-			a.Uint16( 0xc031)
+			a.Uint16(0xc031)
 			return
 		}
 		if RTGInt8Fits(imm) {
-			a.Bytes2( 0x6a, imm)
+			a.Bytes2(0x6a, imm)
 			a.Int8(0x58)
 			return
 		}
 		if imm >= -2147483647 && imm <= 2147483647 {
-			a.Int8( 0xb8)
-			a.Int32( imm)
+			a.Int8(0xb8)
+			a.Int32(imm)
 			return
 		}
-		a.Int8( 0xb8)
-		a.Int32( imm)
+		a.Int8(0xb8)
+		a.Int32(imm)
 	}
 
-	func renvo386AsmMovRdxImm(a *RTGEmitter, imm int) {
+	func asmMovRdxImm(a *RTGEmitter, imm int) {
 		if imm == 0 {
-			a.Uint16( 0xd231)
+			a.Uint16(0xd231)
 			return
 		}
 		if RTGInt8Fits(imm) {
-			a.Bytes2( 0x6a, imm)
+			a.Bytes2(0x6a, imm)
 			a.Int8(0x5a)
 			return
 		}
 		if imm >= 0 {
 			if imm <= 2147483647 {
-				a.Int8( 0xba)
-				a.Int32( imm)
+				a.Int8(0xba)
+				a.Int32(imm)
 				return
 			}
 		} else {
 			if imm >= -2147483647 {
-				a.Int8( 0xba)
-				a.Int32( imm)
+				a.Int8(0xba)
+				a.Int32(imm)
 				return
 			}
 		}
-		a.Int8( 0xba)
-		a.Int32( imm)
+		a.Int8(0xba)
+		a.Int32(imm)
 	}
 
-	func renvo386AsmStackMem(a *RTGEmitter, offset int, base int, disp8 int, disp32 int) {
+	func asmStackMem(a *RTGEmitter, offset int, base int, disp8 int, disp32 int) {
 		if base > 0xff {
-			a.Int8( base>>8)
+			a.Int8(base >> 8)
 		} else {
-			a.Int8( base)
+			a.Int8(base)
 		}
 		if offset >= 0 && offset <= 128 {
-			a.Int8( disp8)
-			a.Int8( -offset)
+			a.Int8(disp8)
+			a.Int8(-offset)
 			return
 		}
-		a.Int8( disp32)
-		a.Int32( -offset)
+		a.Int8(disp32)
+		a.Int32(-offset)
 	}
 
-	func renvo386AsmAddRdxImm(a *RTGEmitter, imm int) {
+	func asmAddRdxImm(a *RTGEmitter, imm int) {
 		if RTGInt8Fits(imm) {
-			a.Bytes3( 0x83, 0xc2, imm)
+			a.Bytes3(0x83, 0xc2, imm)
 			return
 		}
-		a.Uint16( 0xc281)
-		a.Int32( imm)
+		a.Uint16(0xc281)
+		a.Int32(imm)
 	}
 
-	func renvo386AsmMemDisp(a *RTGEmitter, disp int, op int, disp8 int, disp32 int) {
+	func asmMemDisp(a *RTGEmitter, disp int, op int, disp8 int, disp32 int) {
 		if op > 0xff {
-			a.Int8( op>>8)
+			a.Int8(op >> 8)
 		} else {
-			a.Int8( op)
+			a.Int8(op)
 		}
 		if RTGInt8Fits(disp) {
-			a.Bytes2( disp8, disp)
+			a.Bytes2(disp8, disp)
 			return
 		}
-		a.Int8( disp32)
-		a.Int32( disp)
+		a.Int8(disp32)
+		a.Int32(disp)
 	}
 
-	func renvo386AsmLoadQwordRaxIndexRcxDisp(a *RTGEmitter, disp int) {
-		a.Int8( 0x8b)
+	func asmLoadQwordRaxIndexRcxDisp(a *RTGEmitter, disp int) {
+		a.Int8(0x8b)
 		if RTGInt8Fits(disp) {
-			a.Bytes3( 0x44, 0x8, disp)
+			a.Bytes3(0x44, 0x8, disp)
 			return
 		}
-		a.Uint16( 0x0884)
-		a.Int32( disp)
+		a.Uint16(0x0884)
+		a.Int32(disp)
 	}
 
-	func renvo386AsmLoadRaxMemRdxDisp(a *RTGEmitter, disp int) {
+	func asmLoadRaxMemRdxDisp(a *RTGEmitter, disp int) {
 		if disp == 0 {
-			a.Uint16( 0x028b)
+			a.Uint16(0x028b)
 			return
 		}
-		renvo386AsmMemDisp(a, disp, 0x8b48, 0x42, 0x82)
+		asmMemDisp(a, disp, 0x8b48, 0x42, 0x82)
 	}
 
-	func renvo386AsmLoadRaxMemRdxDispSize(a *RTGEmitter, disp int, size int) {
+	func asmLoadRaxMemRdxDispSize(a *RTGEmitter, disp int, size int) {
 		if size == 1 {
-			a.Uint16( 0xb60f)
-			renvo386AsmSecondaryDisp(a, disp)
+			a.Uint16(0xb60f)
+			asmSecondaryDisp(a, disp)
 			return
 		}
 		if size == 2 {
-			a.Uint16( 0xbf0f)
-			renvo386AsmSecondaryDisp(a, disp)
+			a.Uint16(0xbf0f)
+			asmSecondaryDisp(a, disp)
 			return
 		}
-		renvo386AsmLoadRaxMemRdxDisp(a, disp)
+		asmLoadRaxMemRdxDisp(a, disp)
 	}
 
-	func renvo386AsmLoadRaxIndexRcxSize(a *RTGEmitter, size int) {
+	func asmLoadRaxIndexRcxSize(a *RTGEmitter, size int) {
 		if size == 1 {
-			renvo386AsmLoadByteRaxIndexRcx(a)
+			asmLoadByteRaxIndexRcx(a)
 			return
 		}
 		if size == 2 {
-			a.Int32( 0x4804bf0f)
+			a.Int32(0x4804bf0f)
 			return
 		}
 		if size == 4 {
-			a.Uint24( 0x88048b)
+			a.Uint24(0x88048b)
 			return
 		}
-		renvo386AsmLoadQwordRaxIndexRcx8(a)
+		asmLoadQwordRaxIndexRcx8(a)
 	}
 
-	func renvo386AsmStoreRaxMemRdxDisp(a *RTGEmitter, disp int) {
+	func asmStoreRaxMemRdxDisp(a *RTGEmitter, disp int) {
 		if disp == 0 {
-			a.Uint16( 0x0289)
+			a.Uint16(0x0289)
 			return
 		}
-		renvo386AsmMemDisp(a, disp, 0x8948, 0x42, 0x82)
+		asmMemDisp(a, disp, 0x8948, 0x42, 0x82)
 	}
 
-	func renvo386AsmStoreRaxMemRdxDispSize(a *RTGEmitter, disp int, size int) {
+	func asmStoreRaxMemRdxDispSize(a *RTGEmitter, disp int, size int) {
 		if size == 1 {
-			a.Int8( 0x88)
-			renvo386AsmSecondaryDisp(a, disp)
+			a.Int8(0x88)
+			asmSecondaryDisp(a, disp)
 			return
 		}
 		if size == 2 {
-			a.Uint16( 0x8966)
-			renvo386AsmSecondaryDisp(a, disp)
+			a.Uint16(0x8966)
+			asmSecondaryDisp(a, disp)
 			return
 		}
-		renvo386AsmStoreRaxMemRdxDisp(a, disp)
+		asmStoreRaxMemRdxDisp(a, disp)
 	}
 
-	func renvo386AsmNormalizeRaxForKind(a *RTGEmitter, kind int) {
+	func asmNormalizeRaxForKind(a *RTGEmitter, kind int) {
 		if kind == RTGScalarByte {
-			a.Uint24( 0xc0b60f)
+			a.Uint24(0xc0b60f)
 			return
 		}
 		if kind == RTGScalarInt8 {
-			a.Uint24( 0xc0be0f)
+			a.Uint24(0xc0be0f)
 			return
 		}
 		if kind == RTGScalarInt16 {
-			a.Int8( 0x98)
+			a.Int8(0x98)
 			return
 		}
 		if kind == RTGScalarUint16 {
-			a.Uint24( 0xc0b70f)
+			a.Uint24(0xc0b70f)
 		}
 	}
 
-	func renvo386AsmCmpRaxImm8(a *RTGEmitter, imm int) {
+	func asmCmpRaxImm8(a *RTGEmitter, imm int) {
 		if imm == 0 {
-			a.Uint16( 0xc085)
+			a.Uint16(0xc085)
 			return
 		}
-		a.Bytes3( 0x83, 0xf8, imm)
+		a.Bytes3(0x83, 0xf8, imm)
 	}
 
-	func renvo386AsmDivLeftRcxRightRax(a *RTGEmitter, mod bool) {
-		a.Uint16( 0xc389)
-		a.Uint16( 0xc889)
-		a.Int8( 0x99)
-		a.Uint16( 0xfbf7)
+	func asmDivLeftRcxRightRax(a *RTGEmitter, mod bool) {
+		a.Uint16(0xc389)
+		a.Uint16(0xc889)
+		a.Int8(0x99)
+		a.Uint16(0xfbf7)
 		if mod {
-			a.Uint16( 0xd089)
+			a.Uint16(0xd089)
 		}
 	}
 
-	func x86_32Memory(out *RTGEmitter, reg byte, address RTGAddress) {
+	func emitMemoryOperand(out *RTGEmitter, reg byte, address RTGAddress) {
 		base := address.Base
 		index := address.Index
 		displacement := address.Displacement
 		mode := byte(0)
 		if !base.Valid {
 			mode = 0
-		} else if displacement != 0 || x86_32Low3(base) == 5 {
+		} else if displacement != 0 || registerLowBits(base) == 5 {
 			mode = 2
 			if RTGSignedFits(int64(displacement), 8) {
 				mode = 1
 			}
 		}
-		needsSIB := index.Valid || base.Valid && x86_32Low3(base) == 4
+		needsSIB := index.Valid || base.Valid && registerLowBits(base) == 4
 		if needsSIB {
-			x86_32ModRM(out, mode, reg, 4)
+			emitModRM(out, mode, reg, 4)
 			indexCode := byte(4)
 			if index.Valid {
-				indexCode = x86_32Low3(index)
+				indexCode = registerLowBits(index)
 			}
 			baseCode := byte(5)
 			if base.Valid {
-				baseCode = x86_32Low3(base)
+				baseCode = registerLowBits(base)
 			}
 			shift := byte(0)
 			if address.Scale == 2 {
@@ -238,9 +237,9 @@ go backend {
 			}
 			out.AppendByte(int(shift<<6 | indexCode<<3 | baseCode))
 		} else if base.Valid {
-			x86_32ModRM(out, mode, reg, x86_32Low3(base))
+			emitModRM(out, mode, reg, registerLowBits(base))
 		} else {
-			x86_32ModRM(out, 0, reg, 5)
+			emitModRM(out, 0, reg, 5)
 		}
 		if !base.Valid || mode == 2 {
 			out.Int32(displacement)
@@ -249,53 +248,53 @@ go backend {
 		}
 	}
 
-	func x86_32Address(
+	func emitAddress(
 		out *RTGEmitter, destination RTGRegister, address RTGAddress,
 	) {
 		if RTGAddressValid(address) {
 			// CALL pushes the address immediately after its displacement. The
-			// relocation bias converts the ordinary field-end relative fixup
+			// Relocation bias converts the ordinary field-end relative fixup
 			// into target+addend minus that saved address.
 			out.Byte(0xe8)
 			out.Int32(0)
-			out.AppendByte(int(0x58 + x86_32Low3(destination)))
+			out.AppendByte(int(0x58 + registerLowBits(destination)))
 			out.Byte(0x81)
-			x86_32ModRM(out, 3, 0, x86_32Low3(destination))
+			emitModRM(out, 3, 0, registerLowBits(destination))
 			at := out.Len()
 			out.Int32(address.Addend + 7)
 			RTGAddressRelocAt(out, address, at)
 			return
 		}
 		out.Byte(0x8d)
-		x86_32Memory(out, x86_32Low3(destination), address)
+		emitMemoryOperand(out, registerLowBits(destination), address)
 	}
 
-	func x86_32LoadOpcode(
+	func emitLoad(
 		out *RTGEmitter,
 		destination RTGRegister,
 		address RTGAddress,
 		opcode int,
 	) {
 		if RTGAddressValid(address) {
-			x86_32Address(out, destination, address)
+			emitAddress(out, destination, address)
 			address = RTGAddress{Base: destination}
 		}
 		if opcode > 0xff {
 			out.AppendByte(int(byte(opcode >> 8)))
 		}
 		out.AppendByte(int(byte(opcode)))
-		x86_32Memory(out, x86_32Low3(destination), address)
+		emitMemoryOperand(out, registerLowBits(destination), address)
 	}
 
-	func x86_32StoreWidth(
+	func emitStoreWidth(
 		out *RTGEmitter,
 		address RTGAddress,
 		source RTGRegister,
 		size int,
 	) {
 		if RTGAddressValid(address) {
-			x86_32Address(out, x86_32Scratch, address)
-			address = RTGAddress{Base: x86_32Scratch}
+			emitAddress(out, scratch, address)
+			address = RTGAddress{Base: scratch}
 		}
 		if size == 2 {
 			out.Byte(0x66)
@@ -305,44 +304,44 @@ go backend {
 		} else {
 			out.Byte(0x89)
 		}
-		x86_32Memory(out, x86_32Low3(source), address)
+		emitMemoryOperand(out, registerLowBits(source), address)
 	}
 
-	func x86_32MoveImmediate(
+	func moveImmediate(
 		out *RTGEmitter, destination RTGRegister, value int64,
 	) {
 		if value == 0 {
-			x86_32Binary(out, 0x31, destination, destination)
+			encodeBinary(out, 0x31, destination, destination)
 			return
 		}
-		out.AppendByte(int(byte(0xb8 + x86_32Low3(destination))))
+		out.AppendByte(int(byte(0xb8 + registerLowBits(destination))))
 		RTGUint32(out, int(value))
 	}
 
-	func x86_32VariableShift(
+	func variableShift(
 		out *RTGEmitter, direction RTGShiftDirection, signed bool,
 	) {
-		x86_32Binary(out, 0x87, x86_32Primary, x86_32Tertiary)
+		encodeBinary(out, 0x87, primary, tertiary)
 		selector := byte(5)
 		if direction == RTGShiftLeft {
 			selector = 4
 		} else if signed {
 			selector = 7
 		}
-		x86_32Group(out, 0xd3, selector, x86_32Primary)
+		encodeGroup(out, 0xd3, selector, primary)
 	}
 
-	func x86_32SignedDivide(out *RTGEmitter, remainder bool) {
-		x86_32Move(out, x86_32Scratch, x86_32Primary)
-		x86_32Move(out, x86_32Primary, x86_32Tertiary)
+	func signedDivide(out *RTGEmitter, remainder bool) {
+		move(out, scratch, primary)
+		move(out, primary, tertiary)
 		out.Byte(0x99)
-		x86_32Group(out, 0xf7, 7, x86_32Scratch)
+		encodeGroup(out, 0xf7, 7, scratch)
 		if remainder {
-			x86_32Move(out, x86_32Primary, x86_32Secondary)
+			move(out, primary, secondary)
 		}
 	}
 
-	func x86_32FrameFinish(out *RTGEmitter, at int, stackUsed int) {
+	func frameFinish(out *RTGEmitter, at int, stackUsed int) {
 		frame := (stackUsed + 7) & -8
 		if frame > 65528 {
 			frame = 65528
@@ -384,17 +383,17 @@ arch x86_32 {
 		ugt 0x97 0x87
 	}
 	forms {
-		binary = sequence x86_32Binary
-		load = go x86_32LoadOpcode
-		store = go x86_32StoreWidth
-		group = sequence x86_32Group
-		shift = sequence x86_32ShiftImmediate
-		relative = sequence x86_32Relative
-		jump_condition = sequence x86_32JumpCondition
+		encodeBinary = sequence encodeBinary
+		load = go emitLoad
+		store = go emitStoreWidth
+		encodeGroup = sequence encodeGroup
+		shift = sequence shiftImmediate
+		encodeRelative = sequence encodeRelative
+		jump_condition = sequence jumpCondition
 		fixed = bytes
 	}
 	instructions {
-		move binary 0x89
+		move encodeBinary 0x89
 		load_native load 0x8b
 		load_i32 load 0x8b
 		load_u32 load 0x8b
@@ -406,21 +405,21 @@ arch x86_32 {
 		store_u32 store 0 size=4
 		store_u16 store 0 size=2
 		store_u8 store 0 size=1
-		add binary 0x01
-		subtract binary 0x29
-		bit_and binary 0x21
-		bit_or binary 0x09
-		bit_xor binary 0x31
-		compare binary 0x39
-		test binary 0x85
-		increment group 0xff /0
-		decrement group 0xff /1
+		add encodeBinary 0x01
+		subtract encodeBinary 0x29
+		bit_and encodeBinary 0x21
+		bit_or encodeBinary 0x09
+		bit_xor encodeBinary 0x31
+		compare encodeBinary 0x39
+		test encodeBinary 0x85
+		increment encodeGroup 0xff /0
+		decrement encodeGroup 0xff /1
 		shift_left_immediate shift 0xc1 /4
 		shift_right_unsigned_immediate shift 0xc1 /5
 		shift_right_signed_immediate shift 0xc1 /7
-		call relative 0xe8
-		call_indirect group 0xff /2
-		jump relative 0xe9
+		call encodeRelative 0xe8
+		call_indirect encodeGroup 0xff /2
+		jump encodeRelative 0xe9
 		jump_cond jump_condition 0
 		return fixed [0xc3]
 		leave fixed [0xc9]
@@ -428,7 +427,7 @@ arch x86_32 {
 	}
 	bind {
 		move = move
-		address = go x86_32Address
+		address = go emitAddress
 		load.native = load_native
 		load.i32 = load_i32
 		load.u32 = load_u32
@@ -442,7 +441,7 @@ arch x86_32 {
 		store.u8 = store_u8
 		add = add
 		subtract = subtract
-		multiply = sequence x86_32Multiply
+		multiply = sequence multiply
 		bit_and = bit_and
 		bit_or = bit_or
 		bit_xor = bit_xor
@@ -457,56 +456,56 @@ arch x86_32 {
 		call_indirect = call_indirect
 		jump = jump
 		jump_condition = jump_cond
-		set_condition = sequence x86_32SetCondition
+		set_condition = sequence setCondition
 		return = return
 		leave = leave
 		host_syscall = host_syscall
-		move_immediate = go x86_32MoveImmediate
-		variable_shift = go x86_32VariableShift
-		signed_divide = go x86_32SignedDivide
-		copy_bytes = sequence x86_32CopyBytes
+		move_immediate = go moveImmediate
+		variable_shift = go variableShift
+		signed_divide = go signedDivide
+		copy_bytes = sequence copyBytes
 	}
 	exports {
-		renvo386AsmSecondaryDisp = go renvo386AsmSecondaryDisp
-		renvo386AsmMovRaxImm = go renvo386AsmMovRaxImm
-		renvo386AsmMovRaxImm64 = sequence renvo386AsmMovRaxImm64
-		renvo386AsmMovRegPCRel = sequence renvo386AsmMovRegPCRel
-		renvo386AsmMovRdxImm = go renvo386AsmMovRdxImm
-		renvo386AsmMovRdiRax = sequence renvo386AsmMovRdiRax
-		renvo386AsmMovRaxRdx = sequence renvo386AsmMovRaxRdx
-		renvo386AsmMovRsiRax = sequence renvo386AsmMovRsiRax
-		renvo386AsmMovR8Rax = sequence renvo386AsmMovR8Rax
-		renvo386AsmMovR9Rax = sequence renvo386AsmMovR9Rax
-		renvo386AsmAddRdxRcx = sequence renvo386AsmAddRdxRcx
-		renvo386AsmSyscall = sequence renvo386AsmSyscall
-		renvo386AsmPopRdi = sequence renvo386AsmPopRdi
-		renvo386AsmStackMem = go renvo386AsmStackMem
-		renvo386AsmAddRdxImm = go renvo386AsmAddRdxImm
-		renvo386AsmMemDisp = go renvo386AsmMemDisp
-		renvo386AsmJccLabel = sequence renvo386AsmJccLabel
-		renvo386AsmLoadQwordRaxIndexRcx8 = sequence renvo386AsmLoadQwordRaxIndexRcx8
-		renvo386AsmLoadQwordRaxIndexRcxDisp = go renvo386AsmLoadQwordRaxIndexRcxDisp
-		renvo386AsmLoadRaxMemRdxDisp = go renvo386AsmLoadRaxMemRdxDisp
-		renvo386AsmLoadRaxMemRdxDispSize = go renvo386AsmLoadRaxMemRdxDispSize
-		renvo386AsmLoadByteRaxIndexRcx = sequence renvo386AsmLoadByteRaxIndexRcx
-		renvo386AsmLoadRaxIndexRcxSize = go renvo386AsmLoadRaxIndexRcxSize
-		renvo386AsmStoreRaxMemRdxRcx8 = sequence renvo386AsmStoreRaxMemRdxRcx8
-		renvo386AsmStoreRaxMemRdxDisp = go renvo386AsmStoreRaxMemRdxDisp
-		renvo386AsmStoreRaxMemRdxDispSize = go renvo386AsmStoreRaxMemRdxDispSize
-		renvo386AsmNormalizeRaxForKind = go renvo386AsmNormalizeRaxForKind
-		renvo386AsmIncMemRdx = sequence renvo386AsmIncMemRdx
-		renvo386AsmDecMemRdx = sequence renvo386AsmDecMemRdx
-		renvo386AsmBoolNotRax = sequence renvo386AsmBoolNotRax
-		renvo386AsmCmpRaxImm8 = go renvo386AsmCmpRaxImm8
-		renvo386AsmAddRaxRcx = sequence renvo386AsmAddRaxRcx
-		renvo386AsmSubRaxRcx = sequence renvo386AsmSubRaxRcx
-		renvo386AsmShlRcxImm = sequence renvo386AsmShlRcxImm
-		renvo386AsmShlRaxImm = sequence renvo386AsmShlRaxImm
-		renvo386AsmSarRaxImm = sequence renvo386AsmSarRaxImm
-		renvo386AsmShrRaxImm = sequence renvo386AsmShrRaxImm
-		renvo386AsmDivLeftRcxRightRax = go renvo386AsmDivLeftRcxRightRax
-		renvo386AsmCmpRcxRaxSet = sequence renvo386AsmCmpRcxRaxSet
-		renvoAsmMovArg1Rax = sequence renvoAsmMovArg1Rax
+		renvo386AsmSecondaryDisp = go asmSecondaryDisp
+		renvo386AsmMovRaxImm = go asmMovRaxImm
+		renvo386AsmMovRaxImm64 = sequence asmMovRaxImm64
+		renvo386AsmMovRegPCRel = sequence asmMovRegPCRel
+		renvo386AsmMovRdxImm = go asmMovRdxImm
+		renvo386AsmMovRdiRax = sequence asmMovRdiRax
+		renvo386AsmMovRaxRdx = sequence asmMovRaxRdx
+		renvo386AsmMovRsiRax = sequence asmMovRsiRax
+		renvo386AsmMovR8Rax = sequence asmMovR8Rax
+		renvo386AsmMovR9Rax = sequence asmMovR9Rax
+		renvo386AsmAddRdxRcx = sequence asmAddRdxRcx
+		renvo386AsmSyscall = sequence asmSyscall
+		renvo386AsmPopRdi = sequence asmPopRdi
+		renvo386AsmStackMem = go asmStackMem
+		renvo386AsmAddRdxImm = go asmAddRdxImm
+		renvo386AsmMemDisp = go asmMemDisp
+		renvo386AsmJccLabel = sequence asmJccLabel
+		renvo386AsmLoadQwordRaxIndexRcx8 = sequence asmLoadQwordRaxIndexRcx8
+		renvo386AsmLoadQwordRaxIndexRcxDisp = go asmLoadQwordRaxIndexRcxDisp
+		renvo386AsmLoadRaxMemRdxDisp = go asmLoadRaxMemRdxDisp
+		renvo386AsmLoadRaxMemRdxDispSize = go asmLoadRaxMemRdxDispSize
+		renvo386AsmLoadByteRaxIndexRcx = sequence asmLoadByteRaxIndexRcx
+		renvo386AsmLoadRaxIndexRcxSize = go asmLoadRaxIndexRcxSize
+		renvo386AsmStoreRaxMemRdxRcx8 = sequence asmStoreRaxMemRdxRcx8
+		renvo386AsmStoreRaxMemRdxDisp = go asmStoreRaxMemRdxDisp
+		renvo386AsmStoreRaxMemRdxDispSize = go asmStoreRaxMemRdxDispSize
+		renvo386AsmNormalizeRaxForKind = go asmNormalizeRaxForKind
+		renvo386AsmIncMemRdx = sequence asmIncMemRdx
+		renvo386AsmDecMemRdx = sequence asmDecMemRdx
+		renvo386AsmBoolNotRax = sequence asmBoolNotRax
+		renvo386AsmCmpRaxImm8 = go asmCmpRaxImm8
+		renvo386AsmAddRaxRcx = sequence asmAddRaxRcx
+		renvo386AsmSubRaxRcx = sequence asmSubRaxRcx
+		renvo386AsmShlRcxImm = sequence asmShlRcxImm
+		renvo386AsmShlRaxImm = sequence asmShlRaxImm
+		renvo386AsmSarRaxImm = sequence asmSarRaxImm
+		renvo386AsmShrRaxImm = sequence asmShrRaxImm
+		renvo386AsmDivLeftRcxRightRax = go asmDivLeftRcxRightRax
+		renvo386AsmCmpRcxRaxSet = sequence asmCmpRcxRaxSet
+		renvoAsmMovArg1Rax = sequence asmMovArg1Rax
 	}
 	relocation rel32 {
 		width = 4
@@ -517,297 +516,256 @@ arch x86_32 {
 	}
 
 	sequences {
-		renvo386AsmAddRaxRcx(a:emitter) {
-			call a.Uint16(0xc801)
-
+		asmAddRaxRcx(a:emitter) {
+			a.Uint16(0xc801)
 		}
-		renvo386AsmAddRdxRcx(a:emitter) {
-			call a.Uint16(0xca01)
-
+		asmAddRdxRcx(a:emitter) {
+			a.Uint16(0xca01)
 		}
-		renvo386AsmBoolNotRax(a:emitter) {
-			call a.Bytes3(0x83,0xf0,1)
-
+		asmBoolNotRax(a:emitter) {
+			a.Bytes3(0x83, 0xf0, 1)
 		}
-		renvo386AsmCmpRcxRaxSet(a:emitter, setcc:int) {
-			call a.Uint24(0x0fc139)
-
-			call a.Bytes3(setcc,0xc0,0xf)
-
-			call a.Uint16(0xc0b6)
-
+		asmCmpRcxRaxSet(a:emitter, setcc:int) {
+			a.Uint24(0x0fc139)
+			a.Bytes3(setcc, 0xc0, 0xf)
+			a.Uint16(0xc0b6)
 		}
-		renvo386AsmDecMemRdx(a:emitter) {
-			call a.Uint16(0x0aff)
-
+		asmDecMemRdx(a:emitter) {
+			a.Uint16(0x0aff)
 		}
-		renvo386AsmIncMemRdx(a:emitter) {
-			call a.Uint16(0x02ff)
-
+		asmIncMemRdx(a:emitter) {
+			a.Uint16(0x02ff)
 		}
-		renvo386AsmLoadByteRaxIndexRcx(a:emitter) {
-			call a.Int32(0x0804b60f)
-
+		asmLoadByteRaxIndexRcx(a:emitter) {
+			a.Int32(0x0804b60f)
 		}
-		renvo386AsmLoadQwordRaxIndexRcx8(a:emitter) {
-			call a.Uint24(0xc8048b)
-
+		asmLoadQwordRaxIndexRcx8(a:emitter) {
+			a.Uint24(0xc8048b)
 		}
-		renvo386AsmMovR8Rax(a:emitter) {
-			call a.Uint16(0xc389)
-
+		asmMovR8Rax(a:emitter) {
+			a.Uint16(0xc389)
 		}
-		renvo386AsmMovR9Rax(a:emitter) {
-			call a.Uint16(0xc389)
-
+		asmMovR9Rax(a:emitter) {
+			a.Uint16(0xc389)
 		}
-		renvo386AsmMovRaxImm64(a:emitter, imm:int) {
-			call renvo386AsmMovRaxImm(a,imm)
-
+		asmMovRaxImm64(a:emitter, imm:int) {
+			asmMovRaxImm(a, imm)
 		}
-		renvo386AsmMovRaxRdx(a:emitter) {
-			call a.Uint16(0xd089)
-
+		asmMovRaxRdx(a:emitter) {
+			a.Uint16(0xd089)
 		}
-		renvo386AsmMovRdiRax(a:emitter) {
-			call a.Uint16(0xc389)
-
+		asmMovRdiRax(a:emitter) {
+			a.Uint16(0xc389)
 		}
-		renvo386AsmMovRsiRax(a:emitter) {
-			call a.Uint16(0xc189)
-
+		asmMovRsiRax(a:emitter) {
+			a.Uint16(0xc189)
 		}
-		renvo386AsmPopRdi(a:emitter) {
-			call a.Int8(0x5b)
-
+		asmPopRdi(a:emitter) {
+			a.Int8(0x5b)
 		}
-		renvo386AsmSarRaxImm(a:emitter, imm:int) {
-			call a.Bytes3(0xc1,0xf8,imm)
-
+		asmSarRaxImm(a:emitter, imm:int) {
+			a.Bytes3(0xc1, 0xf8, imm)
 		}
-		renvo386AsmShlRaxImm(a:emitter, imm:int) {
-			call a.Bytes3(0xc1,0xe0,imm)
-
+		asmShlRaxImm(a:emitter, imm:int) {
+			a.Bytes3(0xc1, 0xe0, imm)
 		}
-		renvo386AsmShlRcxImm(a:emitter, imm:int) {
-			call a.Bytes3(0xc1,0xe1,imm)
-
+		asmShlRcxImm(a:emitter, imm:int) {
+			a.Bytes3(0xc1, 0xe1, imm)
 		}
-		renvo386AsmShrRaxImm(a:emitter, imm:int) {
-			call a.Bytes3(0xc1,0xe8,imm)
-
+		asmShrRaxImm(a:emitter, imm:int) {
+			a.Bytes3(0xc1, 0xe8, imm)
 		}
-		renvo386AsmStoreRaxMemRdxRcx8(a:emitter) {
-			call a.Uint24(0xca0489)
-
+		asmStoreRaxMemRdxRcx8(a:emitter) {
+			a.Uint24(0xca0489)
 		}
-		renvo386AsmSubRaxRcx(a:emitter) {
-			call a.Uint16(0xc829)
-
+		asmSubRaxRcx(a:emitter) {
+			a.Uint16(0xc829)
 		}
-		renvo386AsmSyscall(a:emitter) {
-			call a.Uint16(0x80cd)
-
+		asmSyscall(a:emitter) {
+			a.Uint16(0x80cd)
 		}
-		renvoAsmMovArg1Rax(a:emitter) {
-			call a.Uint16(0xc689)
-
+		asmMovArg1Rax(a:emitter) {
+			a.Uint16(0xc689)
 		}
-
-		renvo386AsmJccLabel(a:emitter, op:int, label:int) {
-			call a.Bytes2(0x0f,op)
-
+		asmJccLabel(a:emitter, op:int, label:int) {
+			a.Bytes2(0x0f, op)
 			let at = a.Len()
-
-			call a.Int32(0)
-
-			call a.RelocAt(at,label)
-
+			a.Int32(0)
+			a.RelocAt(at, label)
 		}
-		renvo386AsmMovRegPCRel(a:emitter, reg:int, off:int, kind:int) {
-			call a.Int8(0xe8)
-
-			call a.Int32(0)
-
-			call a.Int8(0x58|reg)
-
-			call a.Bytes2(0x81,0xc0|reg)
-
+		asmMovRegPCRel(a:emitter, reg:int, off:int, kind:int) {
+			a.Int8(0xe8)
+			a.Int32(0)
+			a.Int8(0x58|reg)
+			a.Bytes2(0x81, 0xc0|reg)
 			let at = a.Len()
-
-			call a.Int32(0)
-
-			call a.AbsoluteReloc(at,off,kind)
-
+			a.Int32(0)
+			a.AbsoluteReloc(at, off, kind)
 		}
-
-		x86_32Binary(out:emitter, opcode:byte, destination:register, source:register) {
-			call out.AppendByte(int(opcode))
-			call x86_32ModRM(out,3,x86_32Low3(source),x86_32Low3(destination))
+		encodeBinary(out:emitter, opcode:byte, destination:register, source:register) {
+			out.AppendByte(int(opcode))
+			emitModRM(out, 3, registerLowBits(source), registerLowBits(destination))
 		}
-		x86_32CopyBytes(out:emitter) {
-			let destination = x86_32CopyDestination
-			let source = x86_32CopySource
-			let count = x86_32CopyCount
-			let scratch = x86_32Scratch
+		copyBytes(out:emitter) {
+			let destination = copyDestination
+			let source = copySource
+			let count = copyCount
+			let scratch = scratch
 			let forward = out.NewLabel()
 			let done = out.NewLabel()
-			call x86_32Compare(out,destination,source)
-			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x86),forward)
-			call x86_32Address(out,scratch,record_address(Base:source,Index:count,Scale:1,))
-			call x86_32Compare(out,destination,scratch)
-			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x83),forward)
-			call x86_32Address(out,source,record_address(Base:source,Index:count,Scale:1,Displacement:-1,))
-			call x86_32Address(out,destination,record_address(Base:destination,Index:count,Scale:1,Displacement:-1,))
-			call out.Bytes4(0xfd,0xf3,0xa4,0xfc)
-			call x86_32Jump(out,done)
-			call out.Mark(forward)
-			call out.Bytes3(0xfc,0xf3,0xa4)
-			call out.Mark(done)
+			compare(out, destination, source)
+			jumpCondition(out, record_condition(JumpOpcode:0x86), forward)
+			emitAddress(out, scratch, record_address(Base:source, Index:count, Scale:1, ))
+			compare(out, destination, scratch)
+			jumpCondition(out, record_condition(JumpOpcode:0x83), forward)
+			emitAddress(out, source, record_address(Base:source, Index:count, Scale:1, Displacement:-1, ))
+			emitAddress(out, destination, record_address(Base:destination, Index:count, Scale:1, Displacement:-1, ))
+			out.Bytes4(0xfd, 0xf3, 0xa4, 0xfc)
+			jump(out, done)
+			out.Mark(forward)
+			out.Bytes3(0xfc, 0xf3, 0xa4)
+			out.Mark(done)
 		}
-		x86_32FrameStart(out:emitter) -> int {
+		frameStart(out:emitter) -> int {
 			let at = out.Len()
-			call out.Bytes4(0xc8,0,0,0)
+			out.Bytes4(0xc8, 0, 0, 0)
 			return at
 		}
-		x86_32Group(out:emitter, opcode:byte, selector:byte, operand:register) {
-			call out.AppendByte(int(opcode))
-			call x86_32ModRM(out,3,selector,x86_32Low3(operand))
+		encodeGroup(out:emitter, opcode:byte, selector:byte, operand:register) {
+			out.AppendByte(int(opcode))
+			emitModRM(out, 3, selector, registerLowBits(operand))
 		}
-		x86_32JumpCondition(out:emitter, condition:condition, label:label) {
-			call out.Byte(0x0f)
-			call out.AppendByte(int(condition.JumpOpcode))
-			call out.Rel32(label)
+		jumpCondition(out:emitter, condition:condition, label:label) {
+			out.Byte(0x0f)
+			out.AppendByte(int(condition.JumpOpcode))
+			out.Rel32(label)
 		}
-		x86_32Multiply(out:emitter, destination:register, source:register) {
-			call out.Bytes2(0x0f,0xaf)
-			call x86_32ModRM(out,3,x86_32Low3(destination),x86_32Low3(source))
+		multiply(out:emitter, destination:register, source:register) {
+			out.Bytes2(0x0f, 0xaf)
+			emitModRM(out, 3, registerLowBits(destination), registerLowBits(source))
 		}
-		x86_32Relative(out:emitter, opcode:byte, label:label) {
-			call out.AppendByte(int(opcode))
-			call out.Rel32(label)
+		encodeRelative(out:emitter, opcode:byte, label:label) {
+			out.AppendByte(int(opcode))
+			out.Rel32(label)
 		}
-		x86_32SetCondition(out:emitter, condition:condition, destination:register) {
-			call out.Byte(0x0f)
-			call out.AppendByte(int(condition.SetOpcode))
-			call x86_32ModRM(out,3,0,0)
-			call out.Bytes2(0x0f,0xb6)
-			call x86_32ModRM(out,3,x86_32Low3(destination),0)
+		setCondition(out:emitter, condition:condition, destination:register) {
+			out.Byte(0x0f)
+			out.AppendByte(int(condition.SetOpcode))
+			emitModRM(out, 3, 0, 0)
+			out.Bytes2(0x0f, 0xb6)
+			emitModRM(out, 3, registerLowBits(destination), 0)
 		}
-		x86_32ShiftImmediate(out:emitter, operand:register, value:byte, selector:byte) {
-			call x86_32Group(out,0xc1,selector,operand)
-			call out.AppendByte(int(value))
+		shiftImmediate(out:emitter, operand:register, value:byte, selector:byte) {
+			encodeGroup(out, 0xc1, selector, operand)
+			out.AppendByte(int(value))
 		}
-		x86_32WindowsExit(out:emitter, status:register) {
-			call out.AppendByte(0x50+status.Code)
-			call out.Bytes2(0xff,0x15)
+		windowsExit(out:emitter, status:register) {
+			out.AppendByte(0x50+status.Code)
+			out.Bytes2(0xff, 0x15)
 			let at = out.Len()
-			call out.Int32(0)
-			call out.AbsoluteReloc(at,8,RTGRelocationImport)
+			out.Int32(0)
+			out.AbsoluteReloc(at, 8, RTGRelocationImport)
 		}
-		x86_32WindowsStaticCall(out:emitter, importID:int, wordCount:int) {
-			call out.Bytes2(0xff,0x15)
+		windowsStaticCall(out:emitter, importID:int, wordCount:int) {
+			out.Bytes2(0xff, 0x15)
 			let at = out.Len()
-			call out.Int32(0)
-			call out.AbsoluteReloc(at,importID,RTGRelocationImport)
+			out.Int32(0)
+			out.AbsoluteReloc(at, importID, RTGRelocationImport)
 		}
-
-		x86_32Low3(reg:register) -> byte {
+		registerLowBits(reg:register) -> byte {
 			return byte(reg.Code&7)
 		}
-		x86_32ModRM(out:emitter, mode:byte, reg:byte, rm:byte) {
-			call out.AppendByte(int(mode<<6|(reg&7)<<3|rm&7))
+		emitModRM(out:emitter, mode:byte, reg:byte, rm:byte) {
+			out.AppendByte(int(mode<<6|(reg&7)<<3|rm&7))
 		}
-		x86_32WindowsCallImport(out:emitter, importID:int) {
-			call out.Bytes2(0xff,0x15)
+		windowsCallImport(out:emitter, importID:int) {
+			out.Bytes2(0xff, 0x15)
 			let at = out.Len()
-			call out.Int32(0)
-			call out.AbsoluteReloc(at,importID,RTGRelocationImport)
+			out.Int32(0)
+			out.AbsoluteReloc(at, importID, RTGRelocationImport)
 		}
-
-		x86_32WindowsRuntimeChmod(out:emitter) {
-			let eax = record_register(Code:0,Valid:true)
-			let ecx = record_register(Code:1,Valid:true)
+		windowsRuntimeChmod(out:emitter) {
+			let eax = record_register(Code:0, Valid:true)
+			let ecx = record_register(Code:1, Valid:true)
 			let failed = out.NewLabel()
 			let done = out.NewLabel()
-			call out.Bytes2(0x6a,1)
-			call out.Bytes2(0x6a,0)
-			call out.Bytes2(0x6a,0)
-			call out.AppendByte(0x53)
-			call x86_32WindowsCallImport(out,5)
-			call x86_32MoveImmediate(out,ecx,-1)
-			call x86_32Binary(out,0x39,eax,ecx)
-			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x84),failed)
-			call x86_32MoveImmediate(out,eax,0)
-			call x86_32Relative(out,0xe9,done)
-			call out.Mark(failed)
-			call x86_32MoveImmediate(out,eax,-1)
-			call out.Mark(done)
+			out.Bytes2(0x6a, 1)
+			out.Bytes2(0x6a, 0)
+			out.Bytes2(0x6a, 0)
+			out.AppendByte(0x53)
+			windowsCallImport(out, 5)
+			moveImmediate(out, ecx, -1)
+			encodeBinary(out, 0x39, eax, ecx)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), failed)
+			moveImmediate(out, eax, 0)
+			encodeRelative(out, 0xe9, done)
+			out.Mark(failed)
+			moveImmediate(out, eax, -1)
+			out.Mark(done)
 		}
-		x86_32WindowsRuntimeClose(out:emitter) {
-			let eax = record_register(Code:0,Valid:true)
+		windowsRuntimeClose(out:emitter) {
+			let eax = record_register(Code:0, Valid:true)
 			let failed = out.NewLabel()
 			let done = out.NewLabel()
-			call out.AppendByte(0x53)
-			call x86_32WindowsCallImport(out,2)
-			call x86_32Test(out,eax,eax)
-			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x84),failed)
-			call x86_32MoveImmediate(out,eax,0)
-			call x86_32Relative(out,0xe9,done)
-			call out.Mark(failed)
-			call x86_32MoveImmediate(out,eax,-1)
-			call out.Mark(done)
+			out.AppendByte(0x53)
+			windowsCallImport(out, 2)
+			test(out, eax, eax)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), failed)
+			moveImmediate(out, eax, 0)
+			encodeRelative(out, 0xe9, done)
+			out.Mark(failed)
+			moveImmediate(out, eax, -1)
+			out.Mark(done)
 		}
-		x86_32WindowsRuntimeOpen(out:emitter) {
-			let eax = record_register(Code:0,Valid:true)
-			let esi = record_register(Code:6,Valid:true)
-			call x86_32Move(out,eax,esi)
-			call x86_32WindowsTranslateCreateFileFlags(out)
-			call out.Bytes2(0x6a,0)
-			call out.AppendByte(0x68)
-			call out.Int32(0x80)
-			call out.AppendByte(0x51)
-			call out.Bytes2(0x6a,0)
-			call out.Bytes2(0x6a,3)
-			call out.AppendByte(0x52)
-			call out.AppendByte(0x53)
-			call x86_32WindowsCallImport(out,1)
+		windowsRuntimeOpen(out:emitter) {
+			let eax = record_register(Code:0, Valid:true)
+			let esi = record_register(Code:6, Valid:true)
+			move(out, eax, esi)
+			windowsTranslateCreateFileFlags(out)
+			out.Bytes2(0x6a, 0)
+			out.AppendByte(0x68)
+			out.Int32(0x80)
+			out.AppendByte(0x51)
+			out.Bytes2(0x6a, 0)
+			out.Bytes2(0x6a, 3)
+			out.AppendByte(0x52)
+			out.AppendByte(0x53)
+			windowsCallImport(out, 1)
 		}
-		x86_32WindowsTranslateCreateFileFlags(out:emitter) {
-			let edx = record_register(Code:2,Valid:true)
-			let ecx = record_register(Code:1,Valid:true)
+		windowsTranslateCreateFileFlags(out:emitter) {
+			let edx = record_register(Code:2, Valid:true)
+			let ecx = record_register(Code:1, Valid:true)
 			let notReadWrite = out.NewLabel()
 			let accessDone = out.NewLabel()
 			let noCreate = out.NewLabel()
 			let createDone = out.NewLabel()
-			call x86_32MoveImmediate(out,edx,-2147483648)
-			call out.Bytes2(0xa8,2)
-			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x84),notReadWrite)
-			call x86_32MoveImmediate(out,edx,-1073741824)
-			call x86_32Relative(out,0xe9,accessDone)
-			call out.Mark(notReadWrite)
-			call out.Bytes2(0xa8,1)
-			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x84),accessDone)
-			call x86_32MoveImmediate(out,edx,0x40000000)
-			call out.Mark(accessDone)
-			call x86_32MoveImmediate(out,ecx,3)
-			call out.Bytes2(0xa8,64)
-			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x84),noCreate)
-			call x86_32MoveImmediate(out,ecx,4)
-			call out.AppendByte(0xa9)
-			call out.Int32(512)
-			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x84),createDone)
-			call x86_32MoveImmediate(out,ecx,2)
-			call x86_32Relative(out,0xe9,createDone)
-			call out.Mark(noCreate)
-			call out.AppendByte(0xa9)
-			call out.Int32(512)
-			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x84),createDone)
-			call x86_32MoveImmediate(out,ecx,5)
-			call out.Mark(createDone)
+			moveImmediate(out, edx, -2147483648)
+			out.Bytes2(0xa8, 2)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), notReadWrite)
+			moveImmediate(out, edx, -1073741824)
+			encodeRelative(out, 0xe9, accessDone)
+			out.Mark(notReadWrite)
+			out.Bytes2(0xa8, 1)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), accessDone)
+			moveImmediate(out, edx, 0x40000000)
+			out.Mark(accessDone)
+			moveImmediate(out, ecx, 3)
+			out.Bytes2(0xa8, 64)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), noCreate)
+			moveImmediate(out, ecx, 4)
+			out.AppendByte(0xa9)
+			out.Int32(512)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), createDone)
+			moveImmediate(out, ecx, 2)
+			encodeRelative(out, 0xe9, createDone)
+			out.Mark(noCreate)
+			out.AppendByte(0xa9)
+			out.Int32(512)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), createDone)
+			moveImmediate(out, ecx, 5)
+			out.Mark(createDone)
 		}
-
-		x86_32LinuxEntry(out:emitter, argsOffset:int, environmentOffset:int, environmentLengthOffset:int) {
+		linuxEntry(out:emitter, argsOffset:int, environmentOffset:int, environmentLengthOffset:int) {
 			let argumentLoop = out.NewLabel()
 			let argumentLength = out.NewLabel()
 			let argumentLengthDone = out.NewLabel()
@@ -816,54 +774,54 @@ arch x86_32 {
 			let environmentLength = out.NewLabel()
 			let environmentLengthDone = out.NewLabel()
 			let environmentDone = out.NewLabel()
-			call out.Text("\x8b\x04\x24\x89\xe6\x83\xc6\x04")
-			call renvo386AsmMovRegPCRel(out,7,argsOffset,RTGRelocationAbsoluteBSS)
-			call out.Text("\x31\xc9")
-			call out.Mark(argumentLoop)
-			call out.Text("\x39\xc1")
-			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x8d),argumentsDone)
-			call out.Text("\x8b\x14\x8e\x89\x17\x31\xdb")
-			call out.Mark(argumentLength)
-			call out.Text("\x80\x3c\x1a\x00")
-			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x84),argumentLengthDone)
-			call out.Text("\x43")
-			call x86_32Jump(out,argumentLength)
-			call out.Mark(argumentLengthDone)
-			call out.Text("\x89\x5f\x08\x83\xc7\x10\x41")
-			call x86_32Jump(out,argumentLoop)
-			call out.Mark(argumentsDone)
-			call out.Text("\x8d\x74\x86\x08")
-			call renvo386AsmMovRegPCRel(out,7,environmentOffset,RTGRelocationAbsoluteBSS)
-			call out.Text("\x31\xc9")
-			call out.Mark(environmentLoop)
-			call out.Text("\x8b\x14\x8e\x85\xd2")
-			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x84),environmentDone)
-			call out.Text("\x89\x17\x31\xdb")
-			call out.Mark(environmentLength)
-			call out.Text("\x80\x3c\x1a\x00")
-			call x86_32JumpCondition(out,record_condition(JumpOpcode:0x84),environmentLengthDone)
-			call out.Text("\x43")
-			call x86_32Jump(out,environmentLength)
-			call out.Mark(environmentLengthDone)
-			call out.Text("\x89\x5f\x08\x83\xc7\x10\x41")
-			call x86_32Jump(out,environmentLoop)
-			call out.Mark(environmentDone)
-			call renvo386AsmMovRegPCRel(out,6,environmentLengthOffset,RTGRelocationAbsoluteBSS)
-			call out.Uint16(0x0e89)
-			call renvo386AsmMovRegPCRel(out,3,argsOffset,RTGRelocationAbsoluteBSS)
-			call out.Text("\x89\xc6\x89\xc2")
-			call renvo386AsmMovRegPCRel(out,1,environmentOffset,RTGRelocationAbsoluteBSS)
-			call renvo386AsmMovRegPCRel(out,0,environmentLengthOffset,RTGRelocationAbsoluteBSS)
-			call out.Uint16(0x008b)
-			call out.Text("\x89\xc7")
+			out.Text("\x8b\x04\x24\x89\xe6\x83\xc6\x04")
+			asmMovRegPCRel(out, 7, argsOffset, RTGRelocationAbsoluteBSS)
+			out.Text("\x31\xc9")
+			out.Mark(argumentLoop)
+			out.Text("\x39\xc1")
+			jumpCondition(out, record_condition(JumpOpcode:0x8d), argumentsDone)
+			out.Text("\x8b\x14\x8e\x89\x17\x31\xdb")
+			out.Mark(argumentLength)
+			out.Text("\x80\x3c\x1a\x00")
+			jumpCondition(out, record_condition(JumpOpcode:0x84), argumentLengthDone)
+			out.Text("\x43")
+			jump(out, argumentLength)
+			out.Mark(argumentLengthDone)
+			out.Text("\x89\x5f\x08\x83\xc7\x10\x41")
+			jump(out, argumentLoop)
+			out.Mark(argumentsDone)
+			out.Text("\x8d\x74\x86\x08")
+			asmMovRegPCRel(out, 7, environmentOffset, RTGRelocationAbsoluteBSS)
+			out.Text("\x31\xc9")
+			out.Mark(environmentLoop)
+			out.Text("\x8b\x14\x8e\x85\xd2")
+			jumpCondition(out, record_condition(JumpOpcode:0x84), environmentDone)
+			out.Text("\x89\x17\x31\xdb")
+			out.Mark(environmentLength)
+			out.Text("\x80\x3c\x1a\x00")
+			jumpCondition(out, record_condition(JumpOpcode:0x84), environmentLengthDone)
+			out.Text("\x43")
+			jump(out, environmentLength)
+			out.Mark(environmentLengthDone)
+			out.Text("\x89\x5f\x08\x83\xc7\x10\x41")
+			jump(out, environmentLoop)
+			out.Mark(environmentDone)
+			asmMovRegPCRel(out, 6, environmentLengthOffset, RTGRelocationAbsoluteBSS)
+			out.Uint16(0x0e89)
+			asmMovRegPCRel(out, 3, argsOffset, RTGRelocationAbsoluteBSS)
+			out.Text("\x89\xc6\x89\xc2")
+			asmMovRegPCRel(out, 1, environmentOffset, RTGRelocationAbsoluteBSS)
+			asmMovRegPCRel(out, 0, environmentLengthOffset, RTGRelocationAbsoluteBSS)
+			out.Uint16(0x008b)
+			out.Text("\x89\xc7")
 		}
 }
 }
 
 abi renvo_x86_32 {
 	arch = x86_32
-	frame_start = sequence x86_32FrameStart
-	frame_finish = go x86_32FrameFinish
+	frame_start = sequence frameStart
+	frame_finish = go frameFinish
 	call_words = [ebx, esi, edx, ecx, eax, edi]
 	overflow_stride = 4
 	scalar_result = eax
@@ -884,7 +842,7 @@ abi win32 {
 }
 
 runtime linux_386 {
-		entry sequence x86_32LinuxEntry {
+		entry sequence linuxEntry {
 		max_parameters = 2
 		bss args 32768 16
 		bss environment 32768 16
@@ -909,8 +867,8 @@ runtime linux_386 {
 }
 
 runtime windows_386 {
-	emit_exit = sequence x86_32WindowsExit
-	emit_static_call = sequence x86_32WindowsStaticCall
+	emit_exit = sequence windowsExit
+	emit_static_call = sequence windowsStaticCall
 	imports "kernel32.dll" = [
 		CreateFileA, CloseHandle, ReadFile, WriteFile, SetFilePointer,
 		GetStdHandle, GetCommandLineA, ExitProcess, GetEnvironmentStringsA
@@ -973,9 +931,9 @@ runtime windows_386 {
 	operation write { template = io }
 	operation read_at { template = io }
 	operation write_at { template = io }
-	operation open { emit = sequence x86_32WindowsRuntimeOpen }
-	operation close { emit = sequence x86_32WindowsRuntimeClose }
-	operation chmod { emit = sequence x86_32WindowsRuntimeChmod }
+	operation open { emit = sequence windowsRuntimeOpen }
+	operation close { emit = sequence windowsRuntimeClose }
+	operation chmod { emit = sequence windowsRuntimeChmod }
 	operation print { use = write }
 }
 

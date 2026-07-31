@@ -85,13 +85,13 @@ func validateArch(document Document, declaration Declaration, goNames []string) 
 				if len(value) == 1 && value[0] == "bytes" {
 					continue
 				}
-				if validateWord32Form(value) {
+				if validateTypedWordForm(value) {
 					continue
 				}
 				if len(value) != 2 || value[0] != "go" && value[0] != "sequence" {
 					diagnostics = append(diagnostics, statementDiagnostic(document, statement.Children[j],
 						"RTG-VALIDATE-015", "instruction form "+name[0]+
-							" must bind a Go algorithm, bytes, or a typed word32 form"))
+							" must bind a Go algorithm, bytes, or a typed word form"))
 					continue
 				}
 				if _, found := findBackendFunction(document, value[1]); !found {
@@ -237,8 +237,8 @@ func validateArchitectureSequences(document Document, arch Declaration, goNames 
 	return diagnostics
 }
 
-func validateWord32Form(value []string) bool {
-	if len(value) < 6 || value[0] != "word32" || value[1] != "(" ||
+func validateTypedWordForm(value []string) bool {
+	if len(value) < 6 || typedWordFormBits(value[0]) == 0 || value[1] != "(" ||
 		value[len(value)-1] != ")" {
 		return false
 	}
@@ -251,7 +251,7 @@ func validateWord32Form(value []string) bool {
 		if operand.Name == "" ||
 			operand.Kind != "reg" && operand.Kind != "condition" &&
 				operand.Kind != "label" && operand.Kind != "byte" &&
-				operand.Kind != "int" {
+				operand.Kind != "int" && operand.Kind != "address_base" {
 			return false
 		}
 		if len(operand.Shifts) == 0 && !operand.Relocation {
