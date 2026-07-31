@@ -107,11 +107,16 @@ func canonicalSequenceStatement(statement Statement) []byte {
 	canonical = appendDecimalFrame(canonical, len(statement.Tokens))
 	for i := 0; i < len(statement.Tokens); i++ {
 		text := statement.Tokens[i]
-		if len(text) >= 2 && text[0] == '"' && text[len(text)-1] == '"' {
+		kind := "token"
+		if len(text) >= 2 && (text[0] == '"' || text[0] == '\'' || text[0] == '`') &&
+			text[len(text)-1] == text[0] {
+			kind = "string"
 			text = unquoteSimple(text)
 		} else if len(text) != 0 && text[0] >= '0' && text[0] <= '9' {
+			kind = "number"
 			text = normalizeNumber(text)
 		}
+		canonical = appendFramed(canonical, kind)
 		canonical = appendFramed(canonical, text)
 	}
 	canonical = appendDecimalFrame(canonical, len(statement.Children))

@@ -181,6 +181,7 @@ systemd-run --user --scope \
 ```
 
 The per-target metrics in `backend/docs/machine-definitions.generated.md` are
-review aids. The deduplicated native-source Go ceiling is separately enforced by
-the RTG tests. Compiler and output performance acceptance remains exclusively
-defined by the existing hard gates in `backend/main_test.go`.
+review aids. The deduplicated native embedded-Go metric is reported by the RTG
+tests without a numeric rejection threshold. Compiler and output performance
+acceptance remains exclusively defined by the existing hard gates in
+`backend/main_test.go`.

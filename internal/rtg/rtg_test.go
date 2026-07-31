@@ -594,6 +594,20 @@ abi tiny_abi { arch = tiny64 }`)
 	}
 }
 
+func TestCanonicalSequenceIdentityDistinguishesTokenKinds(t *testing.T) {
+	identifier := canonicalSequenceStatement(Statement{Tokens: []string{"call", "emit", "(", "out", ",", "value", ")"}})
+	literal := canonicalSequenceStatement(Statement{Tokens: []string{"call", "emit", "(", "out", ",", `"value"`, ")"}})
+	if string(identifier) == string(literal) {
+		t.Fatal("sequence identifier and string literal have the same canonical identity")
+	}
+
+	decimal := canonicalSequenceStatement(Statement{Tokens: []string{"call", "emit", "(", "out", ",", "01", ")"}})
+	canonicalDecimal := canonicalSequenceStatement(Statement{Tokens: []string{"call", "emit", "(", "out", ",", "1", ")"}})
+	if string(decimal) != string(canonicalDecimal) {
+		t.Fatal("equivalent numeric spellings changed canonical sequence identity")
+	}
+}
+
 func TestTargetMetricsSeparateReachableAndCatalogGo(t *testing.T) {
 	source := testMachineDefinition + `
 go backend {

@@ -811,9 +811,9 @@ instructions {
     <div class="warning">
       There is no hook line limit, loop limit, cyclomatic-complexity check, or
       termination proof. The type boundary provides the compiler-enforced hook
-      scope. Separately, the deduplicated native source set has a deliberately
-      simple 60,000-semantic-byte and 200-declaration ceiling; this measures
-      growth without attempting Go complexity analysis.
+      scope. Deduplicated native embedded-Go bytes and declarations are
+      reported as review evidence, without pretending that source volume is a
+      proof of complexity or correctness.
     </div>
 
     <h3>Hook review rule</h3>
@@ -1580,7 +1580,7 @@ systemd-run --user --scope \
       <li>Verify fixed-target binaries contain no unrelated native architectures.</li>
       <li>Verify remaining preparation adapters contain no machine semantics.</li>
       <li>Compile and run one custom native target unknown to the release registry.</li>
-      <li>Verify the deduplicated native source set remains within 60,000 Go bytes and 200 declarations.</li>
+      <li>Record the deduplicated native embedded-Go bytes and declarations for review.</li>
       <li>Record final source, generated size, compiler size, steps, RSS, and output deltas.</li>
     </ol>
 
