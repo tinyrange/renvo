@@ -1,0 +1,787 @@
+# Shared x86-64 machine facts, encoder, direct-emitter bindings, and reusable
+# calling conventions. Target entrypoints own platform-specific code.
+go backend {
+	func asmSecondaryDisp(a *RTGEmitter, disp int) {
+		if disp == 0 {
+			a.Int8(0x02)
+		} else if RTGInt8Fits(disp) {
+			a.Bytes2(0x42, disp)
+		} else {
+			a.Int8(0x82)
+			a.Int32(disp)
+		}
+	}
+
+	func asmMovRaxImm(a *RTGEmitter, imm int) {
+		if imm == 0 {
+			a.Uint16(0xc031)
+			return
+		}
+		if RTGInt8Fits(imm) {
+			a.Bytes2(0x6a, imm)
+			RTGPopPrimary(a)
+			return
+		}
+		if imm>>32 == 0 {
+			a.Int8(0xb8)
+			a.Int32(imm)
+			return
+		}
+		if imm >= -2147483647 && imm <= 2147483647 {
+			a.Int8(0x68)
+			a.Int32(imm)
+			RTGPopPrimary(a)
+			return
+		}
+		a.Uint16(0xb848)
+		a.Int64(imm)
+	}
+
+	func asmMovRdiRax(a *RTGEmitter) {
+		if rewritePrimaryLoad(a, 7, false) {
+			return
+		}
+		if a.OptimizeRuntime() {
+			a.Bytes3(0x48, 0x89, 0xc7)
+			return
+		}
+		a.Uint16(0x5f50)
+	}
+	func asmMovRsiRax(a *RTGEmitter) {
+		if rewritePrimaryLoad(a, 6, false) {
+			return
+		}
+		if a.OptimizeRuntime() {
+			a.Bytes3(0x48, 0x89, 0xc6)
+			return
+		}
+		a.Uint16(0x5e50)
+	}
+
+	func rewritePrimaryLoad(a *RTGEmitter, reg int, pushed bool) bool {
+		load := a.PrimaryLoad()
+		if pushed {
+			load = -load
+		}
+		end := load >> 3
+		at := end - (load & 7)
+		if pushed {
+			end++
+		}
+		if load <= 0 || end != a.Len() {
+			return false
+		}
+		a.AddByteAt(at, byte(reg*8))
+		if pushed {
+			a.Truncate(a.Len() - 1)
+		}
+		a.SetPrimaryLoad(0)
+		return true
+	}
+
+	func rewritePrimaryLoadCompare(a *RTGEmitter, imm int) bool {
+		load := a.PrimaryLoad()
+		end := load >> 3
+		if load <= 0 || end != a.Len() {
+			return false
+		}
+		at := end - (load & 7)
+		// RIP-relative displacements use the original instruction end as their
+		// base, so only stack- and register-relative loads can grow by one byte.
+		if a.ByteAt(at)&0xc7 == 0x05 {
+			return false
+		}
+		// Turn `movq memory, %rax; cmpq immediate, %rax` into the shorter direct
+		// memory comparison. Callers use this only when the loaded value is dead
+		// after the flags are consumed.
+		a.SetByteAt(at-1, 0x83)
+		a.AddByteAt(at, 0x38)
+		a.AppendByte(imm)
+		a.SetPrimaryLoad(0)
+		return true
+	}
+
+	func asmMemDisp(a *RTGEmitter, disp int, op int, disp8 int, disp32 int) {
+		a.Uint16(op)
+		if RTGInt8Fits(disp) {
+			a.Bytes2(disp8, disp)
+			return
+		}
+		a.Int8(disp32)
+		a.Int32(disp)
+	}
+
+	func asmLoadQwordRaxIndexRcxDisp(a *RTGEmitter, disp int) {
+		a.Uint16(0x8b48)
+		if RTGInt8Fits(disp) {
+			a.Bytes3(0x44, 0x8, disp)
+			return
+		}
+		a.Uint16(0x0884)
+		a.Int32(disp)
+	}
+
+	func asmLoadRaxMemRdxDisp(a *RTGEmitter, disp int) {
+		if disp == 0 {
+			a.Uint24(0x028b48)
+			a.SetPrimaryLoad(a.Len()*8 + 1)
+			return
+		}
+		asmMemDisp(a, disp, 0x8b48, 0x42, 0x82)
+		distance := 2
+		if !RTGInt8Fits(disp) {
+			distance = 5
+		}
+		a.SetPrimaryLoad(a.Len()*8 + distance)
+	}
+	func asmLoadRaxMemRdxDispSize(a *RTGEmitter, disp int, size int) {
+		if size == 1 {
+			a.Uint24(0xb60f48)
+			asmSecondaryDisp(a, disp)
+			return
+		}
+		if size == 2 {
+			a.Uint24(0xbf0f48)
+			asmSecondaryDisp(a, disp)
+			return
+		}
+		if size == 4 {
+			asmMemDisp(a, disp, 0x6348, 0x42, 0x82)
+			return
+		}
+		asmLoadRaxMemRdxDisp(a, disp)
+	}
+
+	func asmLoadRaxIndexRcxSize(a *RTGEmitter, size int) {
+		if size == 1 {
+			asmLoadByteRaxIndexRcx(a)
+			return
+		}
+		if size == 2 {
+			a.Int32(0x04bf0f48)
+			a.Int8(0x48)
+			return
+		}
+		if size == 4 {
+			a.Int32(0x88046348)
+			return
+		}
+		asmLoadQwordRaxIndexRcx8(a)
+	}
+
+	func asmStoreRaxMemRdxDisp(a *RTGEmitter, disp int) {
+		if disp == 0 {
+			a.Uint24(0x028948)
+			return
+		}
+		asmMemDisp(a, disp, 0x8948, 0x42, 0x82)
+	}
+	func asmStoreRaxMemRdxDispSize(a *RTGEmitter, disp int, size int) {
+		if size == 1 {
+			a.Int8(0x88)
+			asmSecondaryDisp(a, disp)
+			return
+		}
+		if size == 2 {
+			a.Uint16(0x8966)
+			asmSecondaryDisp(a, disp)
+			return
+		}
+		if size == 4 {
+			a.Int8(0x89)
+			asmSecondaryDisp(a, disp)
+			return
+		}
+		asmStoreRaxMemRdxDisp(a, disp)
+	}
+	func codeEnds(a *RTGEmitter, suffix string) bool {
+		start := a.Len() - len(suffix)
+		if start < 0 {
+			return false
+		}
+		for i := 0; i < len(suffix); i++ {
+			if a.ByteAt(start+i) != suffix[i] {
+				return false
+			}
+		}
+		return true
+	}
+	func asmNormalizeRaxForKind(a *RTGEmitter, kind int) {
+		if kind == RTGScalarByte {
+			if codeEnds(a, "\x0f\xb6\xc0") || codeEnds(a, "\x48\x0f\xb6\x02") || codeEnds(a, "\x48\x0f\xb6\x04\x08") {
+				return
+			}
+			a.Uint24(0xc0b60f)
+			return
+		}
+		if kind == RTGScalarInt8 {
+			a.Int32(0xc0be0f48)
+			return
+		}
+		if kind == RTGScalarInt16 {
+			a.Int32(0xc0bf0f48)
+			return
+		}
+		if kind == RTGScalarUint16 {
+			a.Int32(0xc0b70f48)
+			return
+		}
+		if kind == RTGScalarInt32 {
+			if codeEnds(a, "\x48\x63\xc0") || codeEnds(a, "\x48\x63\x04\x88") {
+				return
+			}
+			a.Uint24(0xc06348)
+			return
+		}
+		if kind == RTGScalarUint32 {
+			a.Uint16(0xc089)
+		}
+	}
+
+	func asmCmpRaxImm8(a *RTGEmitter, imm int) {
+		if imm == 0 {
+			// Integer values occupy the full native register on amd64. Testing only
+			// EAX makes values whose low word is zero (for example 1 << 40) compare
+			// equal to zero and can send both user control flow and the compiler's
+			// own immediate-selection logic down the wrong path.
+			a.Uint24(0xc08548)
+			return
+		}
+		a.Bytes4(0x48, 0x83, 0xf8, imm)
+	}
+
+	func asmCmpRaxImm8Discard(a *RTGEmitter, imm int) {
+		if rewritePrimaryLoadCompare(a, imm) {
+			return
+		}
+		asmCmpRaxImm8(a, imm)
+	}
+	func asmDivLeftRcxRightRax(a *RTGEmitter, mod bool) {
+		if mod {
+			a.Text("\x48\x83\xf8\xff\x75\x10\x6a\x01\x5a\x48\xc1\xe2\x3f\x48\x39\xd1\x75\x04\x31\xc0\xeb\x10\x53\x48\x89\xc3\x48\x89\xc8\x48\x99\x48\xf7\xfb\x48\x89\xd0\x5b")
+			return
+		}
+		a.Text("\x48\x83\xf8\xff\x75\x11\x6a\x01\x5a\x48\xc1\xe2\x3f\x48\x39\xd1\x75\x05\x48\x89\xc8\xeb\x0d\x53\x48\x89\xc3\x48\x89\xc8\x48\x99\x48\xf7\xfb\x5b")
+	}
+
+	func emitOpcode(out *RTGEmitter, opcode uint32) {
+		if opcode > 0xff {
+			out.AppendByte(int(opcode >> 8))
+		}
+		out.AppendByte(int(opcode))
+	}
+
+	func emitREX(out *RTGEmitter, wide bool, reg RTGRegister, index RTGRegister, base RTGRegister, byteRegister RTGRegister) {
+		w := byte(0)
+		if wide {
+			w = 1
+		}
+		r := registerHighBit(reg)
+		x := byte(0)
+		if index.Valid {
+			x = registerHighBit(index)
+		}
+		b := byte(0)
+		if base.Valid {
+			b = registerHighBit(base)
+		}
+		needsByteREX := byteRegister.Valid && byteRegister.Code >= 4
+		if w != 0 || r != 0 || x != 0 || b != 0 || needsByteREX {
+			out.AppendByte(int(0x40 | w<<3 | r<<2 | x<<1 | b))
+		}
+	}
+
+	func emitMemoryOperand(out *RTGEmitter, reg byte, address RTGAddress) {
+		if RTGAddressValid(address) {
+			modRM(out, 0, reg, 5)
+			RTGAddressRel32Addend(out, address)
+			return
+		}
+		base := address.Base
+		index := address.Index
+		displacement := address.Displacement
+		needsSIB := index.Valid || registerLowBits(base) == 4
+		mode := byte(0)
+		if displacement != 0 || registerLowBits(base) == 5 {
+			mode = 2
+			if RTGSignedFits(int64(displacement), 8) {
+				mode = 1
+			}
+		}
+		if needsSIB {
+			modRM(out, mode, reg, 4)
+			indexCode := byte(4)
+			if index.Valid {
+				indexCode = registerLowBits(index)
+			}
+			out.AppendByte(int(byte(RTGLog2(address.Scale))<<6 | indexCode<<3 | registerLowBits(base)))
+		} else {
+			modRM(out, mode, reg, registerLowBits(base))
+		}
+		if mode == 1 {
+			out.AppendByte(displacement)
+		} else if mode == 2 {
+			RTGUint32(out, displacement)
+		}
+	}
+
+	func encodeRegisterToRM(out *RTGEmitter, opcode uint32, destination RTGRegister, source RTGRegister, width int) {
+		if width == 16 {
+			out.Byte(0x66)
+		}
+		byteRegister := RTGNoRegister
+		if width == 8 {
+			byteRegister = source
+		}
+		emitREX(out, width == 64, source, RTGNoRegister, destination, byteRegister)
+		emitOpcode(out, opcode)
+		modRM(out, 3, registerLowBits(source), registerLowBits(destination))
+	}
+
+	func encodeRegisterPair(out *RTGEmitter, opcode uint32, destination RTGRegister, source RTGRegister, width int) {
+		emitREX(out, width == 64, destination, RTGNoRegister, source, RTGNoRegister)
+		emitOpcode(out, opcode)
+		modRM(out, 3, registerLowBits(destination), registerLowBits(source))
+	}
+
+	func encodeMemoryToRegister(out *RTGEmitter, opcode uint32, destination RTGRegister, address RTGAddress, width int) {
+		if width == 16 {
+			out.Byte(0x66)
+		}
+		emitREX(out, width == 64, destination, address.Index, address.Base, RTGNoRegister)
+		emitOpcode(out, opcode)
+		emitMemoryOperand(out, registerLowBits(destination), address)
+	}
+
+	func encodeRegisterToMemory(out *RTGEmitter, opcode uint32, address RTGAddress, source RTGRegister, width int) {
+		if width == 16 {
+			out.Byte(0x66)
+		}
+		byteRegister := RTGNoRegister
+		if width == 8 {
+			byteRegister = source
+		}
+		emitREX(out, width == 64, source, address.Index, address.Base, byteRegister)
+		emitOpcode(out, opcode)
+		emitMemoryOperand(out, registerLowBits(source), address)
+	}
+
+	func encodeGroup(out *RTGEmitter, opcode uint32, selector byte, operand RTGRegister, width int) {
+		emitREX(out, width == 64, RTGNoRegister, RTGNoRegister, operand, RTGNoRegister)
+		emitOpcode(out, opcode)
+		modRM(out, 3, selector, registerLowBits(operand))
+	}
+
+	func encodeGroupImmediate8(out *RTGEmitter, opcode uint32, selector byte, operand RTGRegister, value byte, width int) {
+		encodeGroup(out, opcode, selector, operand, width)
+		out.AppendByte(int(value))
+	}
+
+	func encodeRelative(out *RTGEmitter, opcode uint32, label RTGLabel) {
+		emitOpcode(out, opcode)
+		out.Rel32(label)
+	}
+
+	func moveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
+		if destination.Code == 0 && value == 0 {
+			out.Bytes2(0x31, 0xc0)
+		} else if destination.Code != 4 && RTGSignedFits(value, 8) {
+			out.Bytes2(0x6a, int(value))
+			emitOpcodeRegister(out, 0x58, destination)
+		} else if value >= 0 && RTGUnsignedFits(uint64(value), 32) {
+			emitOpcodeRegister(out, 0xb8, destination)
+			RTGUint32(out, int(value))
+		} else if RTGSignedFits(value, 32) {
+			out.Byte(0x68)
+			RTGUint32(out, int(value))
+			emitOpcodeRegister(out, 0x58, destination)
+		} else {
+			emitREX(out, true, RTGNoRegister, RTGNoRegister, destination, RTGNoRegister)
+			out.AppendByte(int(0xb8 + registerLowBits(destination)))
+			out.Uint64(uint64(value))
+		}
+	}
+
+	func emitOpcodeRegister(out *RTGEmitter, opcode byte, operand RTGRegister) {
+		if registerHighBit(operand) != 0 {
+			out.Byte(0x41)
+		}
+		out.AppendByte(int(opcode + registerLowBits(operand)))
+	}
+
+	func variableShift(out *RTGEmitter, direction RTGShiftDirection, signed bool) {
+		xchg64(out, RTGRegister{Code: 0, Valid: true}, RTGRegister{Code: 1, Valid: true})
+		if direction == RTGShiftLeft {
+			shlCL64(out, RTGRegister{Code: 0, Valid: true})
+		} else if signed {
+			sarCL64(out, RTGRegister{Code: 0, Valid: true})
+		} else {
+			shrCL64(out, RTGRegister{Code: 0, Valid: true})
+		}
+	}
+
+	func signedDivide(out *RTGEmitter, remainder bool) {
+		primary := RTGRegister{Code: 0, Valid: true}
+		secondary := RTGRegister{Code: 2, Valid: true}
+		tertiary := RTGRegister{Code: 1, Valid: true}
+		scratch := RTGRegister{Code: 3, Valid: true}
+		ordinary := out.NewLabel()
+		done := out.NewLabel()
+		moveImmediate(out, secondary, -1)
+		encodeRegisterToRM(out, 0x39, primary, secondary, 64)
+		jumpCondition(out, RTGCondition{JumpOpcode: 0x85}, ordinary)
+		moveImmediate(out, secondary, 1)
+		encodeGroupImmediate8(out, 0xc1, 4, secondary, 63, 64)
+		encodeRegisterToRM(out, 0x39, tertiary, secondary, 64)
+		jumpCondition(out, RTGCondition{JumpOpcode: 0x85}, ordinary)
+		if remainder {
+			moveImmediate(out, primary, 0)
+		} else {
+			encodeRegisterToRM(out, 0x89, primary, tertiary, 64)
+		}
+		encodeRelative(out, 0xe9, done)
+		out.Mark(ordinary)
+		emitOpcodeRegister(out, 0x50, scratch)
+		encodeRegisterToRM(out, 0x89, scratch, primary, 64)
+		encodeRegisterToRM(out, 0x89, primary, tertiary, 64)
+		out.Bytes2(0x48, 0x99)
+		encodeGroup(out, 0xf7, 7, scratch, 64)
+		if remainder {
+			encodeRegisterToRM(out, 0x89, primary, secondary, 64)
+		}
+		emitOpcodeRegister(out, 0x58, scratch)
+		out.Mark(done)
+	}
+
+	func frameFinish(out *RTGEmitter, at int, stackUsed int) {
+		frame := (stackUsed + 15) & -16
+		if frame > 65520 {
+			frame = 65520
+		}
+		out.SetByteAt(at+1, byte(frame))
+		out.SetByteAt(at+2, byte(frame>>8))
+	}
+}
+arch x86_64 {
+    alias = "amd64"
+    endian = little
+    word_bits = 64
+    pointer_bits = 64
+    instruction_alignment = 1
+    stack_word_bytes = 8
+    stack_alignment = 16
+    unaligned_memory = true
+    patch_relocations = relative32_le
+
+    # List position is the architectural register number. The x86 encoder
+    # derives registerLowBits, REX bits, byte-register names, RSP/R12 SIB rules, and
+    # RBP/R13 displacement rules from this single list.
+    registers gpr64 = [
+        rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi,
+        r8, r9, r10, r11, r12, r13, r14, r15
+    ]
+
+    locations {
+        primary = rax
+        secondary = rdx
+        tertiary = rcx
+        scratch = r10
+        division_scratch = rbx
+        copy_destination = rdi
+        copy_source = rsi
+        copy_count = rcx
+        stack = rsp
+        frame = rbp
+    }
+
+    # One row supplies both SETcc and near Jcc. Unsigned conditions no longer
+    # need separate hand-written lowering functions.
+    conditions {
+        eq  0x94 0x84
+        ne  0x95 0x85
+        slt 0x9c 0x8c
+        sge 0x9d 0x8d
+        sle 0x9e 0x8e
+        sgt 0x9f 0x8f
+        ult 0x92 0x82
+        uge 0x93 0x83
+        ule 0x96 0x86
+        ugt 0x97 0x87
+    }
+
+    # Width and extension policy is stated once per source-language scalar.
+    scalars {
+        zero_extend { bool:1 byte:1 uint16:2 uint32:4 }
+        sign_extend { int8:1 int16:2 int32:4 }
+        native { int:8 int64:8 uint64:8 pointer:8 }
+    }
+
+    forms {
+        rr_rm = go encodeRegisterToRM
+        rr = go encodeRegisterPair
+        rm_r = go encodeMemoryToRegister
+        r_rm = go encodeRegisterToMemory
+        encodeGroup = go encodeGroup
+        group_imm8 = go encodeGroupImmediate8
+        opcode_reg = go emitOpcodeRegister
+        encodeRelative = go encodeRelative
+        set_condition = sequence setCondition
+        jump_condition = sequence jumpCondition
+        fixed = bytes
+    }
+
+    instructions {
+        mov64 rr_rm 0x89
+        load64 rm_r 0x8b
+        lea64 rm_r 0x8d
+        load_i32 rm_r 0x63
+        load_u32 rm_r 0x8b width=32
+        load_i16 rm_r 0x0fbf
+        load_u16 rm_r 0x0fb7
+        load_i8 rm_r 0x0fbe
+        load_u8 rm_r 0x0fb6
+        store64 r_rm 0x89
+        store32 r_rm 0x89 width=32
+        store16 r_rm 0x89 width=16
+        store8 r_rm 0x88 width=8
+
+        add64 rr_rm 0x01
+        sub64 rr_rm 0x29
+        and64 rr_rm 0x21
+        or64 rr_rm 0x09
+        xor64 rr_rm 0x31
+        cmp64 rr_rm 0x39
+        test64 rr_rm 0x85
+        imul64 rr 0x0faf
+        xchg64 rr_rm 0x87
+
+        inc64 encodeGroup 0xff /0
+        dec64 encodeGroup 0xff /1
+        shl_imm64 group_imm8 0xc1 /4
+        shr_imm64 group_imm8 0xc1 /5
+        sar_imm64 group_imm8 0xc1 /7
+        shl_cl64 encodeGroup 0xd3 /4
+        shr_cl64 encodeGroup 0xd3 /5
+        sar_cl64 encodeGroup 0xd3 /7
+        call_reg encodeGroup 0xff /2 width=64
+
+        push_reg opcode_reg 0x50
+        pop_reg opcode_reg 0x58
+        setcc set_condition
+        jcc_rel32 jump_condition relocation=rel32
+        call_rel32 encodeRelative 0xe8 relocation=rel32
+        jump_rel32 encodeRelative 0xe9 relocation=rel32
+
+        ret fixed [0xc3]
+        leave fixed [0xc9]
+        syscall fixed [0x0f, 0x05]
+    }
+
+    bind {
+        move = mov64
+        address = lea64
+        load.native = load64
+        load.i32 = load_i32
+        load.u32 = load_u32
+        load.i16 = load_i16
+        load.u16 = load_u16
+        load.i8 = load_i8
+        load.u8 = load_u8
+        store.native = store64
+        store.u32 = store32
+        store.u16 = store16
+        store.u8 = store8
+        add = add64
+        subtract = sub64
+        multiply = imul64
+        bit_and = and64
+        bit_or = or64
+        bit_xor = xor64
+        compare = cmp64
+        test = test64
+        increment = inc64
+        decrement = dec64
+        shift_left_immediate = shl_imm64
+        shift_right_unsigned_immediate = shr_imm64
+        shift_right_signed_immediate = sar_imm64
+        call = call_rel32
+        call_indirect = call_reg
+        jump = jump_rel32
+        jump_condition = jcc_rel32
+        set_condition = setcc
+        return = ret
+        leave = leave
+        host_syscall = syscall
+        move_immediate = go moveImmediate
+        variable_shift = go variableShift
+        signed_divide = go signedDivide
+        copy_bytes = sequence copyBytes
+    }
+
+    # Target-neutral lowering consumes these stable, generated exports; their
+    # architecture-specific implementations remain owned by this definition.
+    exports {
+		renvoAmd64AsmSecondaryDisp = go asmSecondaryDisp
+        renvoAmd64AsmMovRaxImm = go asmMovRaxImm
+        renvoAmd64AsmMovR10BssAddr = sequence asmMovR10BssAddr
+        renvoAmd64AsmLoadRaxBss = sequence asmLoadRaxBss
+        renvoAmd64AsmStoreRaxBss = sequence asmStoreRaxBss
+        renvoAmd64AsmMovRdiRax = go asmMovRdiRax
+        renvoAmd64AsmMovRsiRax = go asmMovRsiRax
+        renvoAmd64RewritePrimaryLoad = go rewritePrimaryLoad
+        renvoAmd64RewritePrimaryLoadCompare = go rewritePrimaryLoadCompare
+        renvoAmd64AsmMovR8Rax = sequence asmMovR8Rax
+        renvoAmd64AsmMovR9Rax = sequence asmMovR9Rax
+        renvoAmd64AsmMemDisp = go asmMemDisp
+        renvoAmd64AsmLoadQwordRaxIndexRcx8 = sequence asmLoadQwordRaxIndexRcx8
+        renvoAmd64AsmLoadQwordRaxIndexRcxDisp = go asmLoadQwordRaxIndexRcxDisp
+        renvoAmd64AsmLoadRaxMemRdxDisp = go asmLoadRaxMemRdxDisp
+        renvoAmd64AsmLoadRaxMemRdxDispSize = go asmLoadRaxMemRdxDispSize
+        renvoAmd64AsmLoadByteRaxIndexRcx = sequence asmLoadByteRaxIndexRcx
+        renvoAmd64AsmLoadRaxIndexRcxSize = go asmLoadRaxIndexRcxSize
+        renvoAmd64AsmStoreRaxMemRdxRcx8 = sequence asmStoreRaxMemRdxRcx8
+        renvoAmd64AsmStoreRaxMemRdxDisp = go asmStoreRaxMemRdxDisp
+        renvoAmd64AsmStoreRaxMemRdxDispSize = go asmStoreRaxMemRdxDispSize
+        renvoAmd64CodeEnds = go codeEnds
+        renvoAmd64AsmNormalizeRaxForKind = go asmNormalizeRaxForKind
+        renvoAmd64AsmIncMemRdx = sequence asmIncMemRdx
+        renvoAmd64AsmDecMemRdx = sequence asmDecMemRdx
+        renvoAmd64AsmCmpRaxImm8 = go asmCmpRaxImm8
+        renvoAmd64AsmCmpRaxImm8Discard = go asmCmpRaxImm8Discard
+        renvoAmd64AsmDivLeftRcxRightRax = go asmDivLeftRcxRightRax
+        renvoAmd64AsmCmpRcxRaxSet = sequence asmCmpRcxRaxSet
+    }
+
+    relocation rel32 {
+        width = 4
+        signed = true
+        relative_to = field_end
+        kinds = [label, data, bss, import]
+    }
+
+    frame {
+        base = rbp
+        stack = rsp
+        alignment = 16
+        maximum = 65520
+        prologue = [0xc8, frame_size:u16le, 0x00]
+        epilogue = [leave, ret]
+        overflow_arguments = rbp + 16
+    }
+
+	sequences {
+		asmCmpRcxRaxSet(a:emitter, setcc:int) {
+			a.Int32(0x0fc13948)
+			a.Bytes3(setcc, 0xc0, 0xf)
+			a.Uint16(0xc0b6)
+		}
+		asmDecMemRdx(a:emitter) {
+			a.Uint24(0x0aff48)
+		}
+		asmIncMemRdx(a:emitter) {
+			a.Uint24(0x02ff48)
+		}
+		asmLoadByteRaxIndexRcx(a:emitter) {
+			a.Int32(0x04b60f48)
+			a.Int8(0x8)
+		}
+		asmLoadQwordRaxIndexRcx8(a:emitter) {
+			a.Int32(0xc8048b48)
+		}
+		asmMovR8Rax(a:emitter) {
+			a.Uint24(0xc08949)
+		}
+		asmMovR9Rax(a:emitter) {
+			a.Uint24(0xc18949)
+		}
+		asmStoreRaxMemRdxRcx8(a:emitter) {
+			a.Int32(0xca048948)
+		}
+		asmLoadRaxBss(a:emitter, bssOff:int) {
+			a.Uint24(0x058b48)
+			let at = a.Len()
+			a.Int32(0)
+			a.AbsoluteReloc(at, bssOff, RTGRelocationAbsoluteBSS)
+			a.SetPrimaryLoad(a.Len()*8+5)
+		}
+		asmMovR10BssAddr(a:emitter, bssOff:int) {
+			a.Uint24(0x158d4c)
+			let at = a.Len()
+			a.Int32(0)
+			a.AbsoluteReloc(at, bssOff, RTGRelocationAbsoluteBSS)
+		}
+		asmStoreRaxBss(a:emitter, bssOff:int) {
+			a.Uint24(0x058948)
+			let at = a.Len()
+			a.Int32(0)
+			a.AbsoluteReloc(at, bssOff, RTGRelocationAbsoluteBSS)
+		}
+		copyBytes(out:emitter) {
+			let destination = record_register(Code:7, Valid:true)
+			let source = record_register(Code:6, Valid:true)
+			let count = record_register(Code:1, Valid:true)
+			let scratch = record_register(Code:10, Valid:true)
+			let forward = out.NewLabel()
+			let done = out.NewLabel()
+			encodeRegisterToRM(out, 0x39, destination, source, 64)
+			jumpCondition(out, record_condition(JumpOpcode:0x86), forward)
+			encodeMemoryToRegister(out, 0x8d, scratch, record_address(Base:source, Index:count, Scale:1), 64)
+			encodeRegisterToRM(out, 0x39, destination, scratch, 64)
+			jumpCondition(out, record_condition(JumpOpcode:0x83), forward)
+			encodeMemoryToRegister(out, 0x8d, source, record_address(Base:source, Index:count, Scale:1, Displacement:-1), 64)
+			encodeMemoryToRegister(out, 0x8d, destination, record_address(Base:destination, Index:count, Scale:1, Displacement:-1), 64)
+			out.Bytes4(0xfd, 0xf3, 0xa4, 0xfc)
+			encodeRelative(out, 0xe9, done)
+			out.Mark(forward)
+			out.Bytes3(0xfc, 0xf3, 0xa4)
+			out.Mark(done)
+		}
+		frameStart(out:emitter) -> int {
+			let at = out.Len()
+			out.Bytes4(0xc8, 0, 0, 0)
+			return at
+		}
+		jumpCondition(out:emitter, condition:condition, label:label) {
+			out.Byte(0x0f)
+			out.AppendByte(int(condition.JumpOpcode))
+			out.Rel32(label)
+		}
+		setCondition(out:emitter, condition:condition, destination:register) {
+			emitREX(out, false, RTGNoRegister, RTGNoRegister, destination, destination)
+			out.Byte(0x0f)
+			out.AppendByte(int(condition.SetOpcode))
+			modRM(out, 3, 0, registerLowBits(destination))
+		}
+		registerHighBit(reg:register) -> byte {
+			return byte(reg.Code>>3)&1
+		}
+		registerLowBits(reg:register) -> byte {
+			return byte(reg.Code&7)
+		}
+		modRM(out:emitter, mode:byte, reg:byte, rm:byte) {
+			out.AppendByte(int(mode<<6|(reg&7)<<3|rm&7))
+		}
+}
+}
+
+abi renvo_x86_64 {
+    arch = x86_64
+    frame_start = sequence frameStart
+    frame_finish = go frameFinish
+    call_words = [rdi, rsi, rdx, rcx, r8, r9]
+    overflow_stride = 8
+    scalar_result = rax
+    string_result = [rax, rdx]
+    slice_result = [rax, rdx, rcx]
+    hidden_result_word = 0
+}
+
+abi sysv_x86_64 {
+    internal = renvo_x86_64
+    arguments = [rdi, rsi, rdx, rcx, r8, r9]
+    result = [rax, rdx]
+    caller_saved = [rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11]
+    callee_saved = [rbx, rbp, r12, r13, r14, r15]
+    stack_alignment = 16
+    red_zone = unused
+}

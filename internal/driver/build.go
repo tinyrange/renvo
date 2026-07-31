@@ -4,6 +4,8 @@ import (
 	"renvo.dev/internal/arena"
 	"renvo.dev/internal/load"
 	"renvo.dev/internal/pipeline"
+	"renvo.dev/internal/targetinfo"
+	"renvo.dev/internal/unit"
 )
 
 const (
@@ -68,6 +70,7 @@ func BuildUnit(args []string, workDir string, stdRoot string, files []load.Sourc
 		return buildFail(result, BuildErrPipeline, "", "", -1, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
 	result.Unit = built.Link.Data
+	bindBuiltInTarget(&result.Unit, options)
 	return result
 }
 
@@ -134,6 +137,7 @@ func buildFromFSOneShotCompactWithModuleCache(args []string, workDir string, std
 		return buildFail(result, BuildErrPipeline, "", "", -1, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
 	result.Unit = built.Link.Data
+	bindBuiltInTarget(&result.Unit, options)
 	result.Sources = SourceResult{}
 	return result
 }
@@ -145,8 +149,12 @@ func buildFromFS(args []string, workDir string, stdRoot string, moduleCache stri
 		}
 		return session.Result()
 	}
-	result := newBuildResult()
 	options := parseFSOptions(args, workDir, fs)
+	return buildFromFSOptions(options, workDir, stdRoot, moduleCache, fs, compact)
+}
+
+func buildFromFSOptions(options Options, workDir string, stdRoot string, moduleCache string, fs SourceFS, compact bool) BuildResult {
+	result := newBuildResult()
 	result.Options = options
 	if !options.Ok {
 		return buildFail(result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
@@ -195,10 +203,24 @@ func buildFromFS(args []string, workDir string, stdRoot string, moduleCache stri
 		return buildFail(result, BuildErrPipeline, "", "", -1, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
 	result.Unit = built.Link.Data
+	bindBuiltInTarget(&result.Unit, options)
 	if compact {
 		result.Sources = SourceResult{}
 	}
 	return result
+}
+
+func bindBuiltInTarget(data *[]byte, options Options) {
+	name := backendTargetForOptions(options.Target, options.Mode)
+	target, definition, version, ok := targetinfo.Binding(name)
+	if !ok {
+		return
+	}
+	var targetBinding unit.TargetBinding
+	targetBinding.Target = target
+	targetBinding.Definition = definition
+	targetBinding.DescriptorVersion = version
+	unit.BindUnboundTarget(data, targetBinding)
 }
 
 func rememberEmbeddedBuild(result BuildResult) {

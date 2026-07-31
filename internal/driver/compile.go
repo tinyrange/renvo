@@ -64,7 +64,7 @@ func CompileFromFS(args []string, workDir string, stdRoot string, fs SourceFS, b
 }
 
 func CompileFromFSWithModuleCache(args []string, workDir string, stdRoot string, moduleCache string, fs SourceFS, backend Backend) CompileResult {
-	built := BuildFromFSWithModuleCache(args, workDir, stdRoot, moduleCache, fs)
+	built := BuildFromFSWithBackendModuleCache(args, workDir, stdRoot, moduleCache, fs)
 	return CompileBuildResult(built, backend)
 }
 

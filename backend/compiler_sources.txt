@@ -1,4 +1,6 @@
 compiler_common_impl.go
+compiler_object_cache_impl.go
+compiler_linked_image_impl.go
 compiler_pe_impl.go
 compiler_main.go
 compiler_runtime_impl.go
@@ -7,6 +9,9 @@ compiler_windows_impl.go
 compiler_target_policy_impl.go
 compiler_target_registry_impl.go
 compiler_target_impl.go
+compiler_rtg_generated_impl.go
+compiler_rtg_adapter_impl.go
+compiler_rtg_inactive_impl.go
 compiler_amd64_impl.go
 compiler_amd64_target_impl.go
 compiler_386_impl.go

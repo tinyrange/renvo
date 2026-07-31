@@ -1,5 +1,7 @@
 package main
 
+const renvoPreparedBackend = 0
+
 // BEGIN GENERATED TARGET REGISTRY
 const renvoTargetLinuxAmd64 = 1
 const renvoTargetLinux386 = 2
@@ -24,12 +26,18 @@ const renvoArch386 = 2
 const renvoArchAarch64 = 3
 const renvoArchArm = 4
 const renvoArchWasm32 = 5
+const renvoArchRTG = 6
 
 const renvoOSLinux = 1
 const renvoOSWindows = 2
 const renvoOSDarwin = 3
 const renvoOSWasi = 4
 const renvoOSVM = 5
+const renvoOSRTG = 6
+
+// A prepared backend is closed over exactly one external descriptor. It keeps
+// a private target identity instead of borrowing an advertised target slot.
+const renvoTargetRTG = 12
 
 const renvoEndianLittle = 1
 const renvoEndianBig = 2
@@ -110,6 +118,20 @@ type renvoTargetProfile struct {
 
 func renvoProfileForTarget(target int) (renvoTargetProfile, bool) {
 	var p renvoTargetProfile
+	if target == renvoTargetRTG {
+		if renvoRTGPreparedIntBits == 0 {
+			return p, false
+		}
+		p.target = target
+		p.os = renvoRTGPreparedOS
+		p.arch = renvoArchRTG
+		p.intBits = renvoRTGPreparedIntBits
+		p.pointerBits = p.intBits
+		p.codePointerBits = p.intBits
+		p.funcPointerBits = p.intBits
+		p.maxAlign = p.intBits / 8
+		return p, true
+	}
 	if target < renvoTargetLinuxAmd64 || target > renvoTargetVM32 {
 		return p, false
 	}
@@ -206,6 +228,10 @@ type renvoKernelCompileContext struct {
 	kernelInitOff    int
 	kernelExitOff    int
 	kernelLicense    string
+	kernelRelease    string
+	kernelVersion    string
+	kernelBTF        []byte
+	kernelSymvers    []byte
 }
 
 type renvoCompileContext struct {
@@ -216,6 +242,7 @@ type renvoCompileContext struct {
 	stripSymbols       bool
 	windowsSubsystem   int
 	emitImage          bool
+	optimizeRuntime    bool
 	kernel             *renvoKernelCompileContext
 }
 
@@ -235,6 +262,12 @@ func renvoNewCompileContext(target int, stripSymbols bool, windowsGUI bool, emit
 		context.renvoTargetOS = int(targetOSTable[target])
 		context.renvoTargetArch = int(targetArchTable[target])
 		context.renvoNativeIntSize = int(renvoTargetIntBitsTable[target]) / 8
+		return context
+	}
+	if target == renvoTargetRTG {
+		context.renvoTargetOS = renvoRTGPreparedOS
+		context.renvoTargetArch = renvoArchRTG
+		context.renvoNativeIntSize = renvoRTGPreparedIntBits / 8
 		return context
 	}
 	context.renvoTarget = renvoTargetLinuxAmd64
@@ -264,6 +297,15 @@ const renvoArenaSizeMinimum = 256
 const renvoArenaSizeMaximum = 1073741824
 
 func renvoDefaultArenaSize(target int) int {
+	if renvoFixedTarget == 0 && target == renvoTargetRTG {
+		if renvoRTGPreparedKernelModule != 0 {
+			return renvoArenaSizeKernelModule
+		}
+		if renvoNativeIntSize <= 4 {
+			return renvoArenaSize32BitHosted
+		}
+		return renvoArenaSize64BitHosted
+	}
 	if target == renvoTargetLinuxKernelAmd64 {
 		return renvoArenaSizeKernelModule
 	}
@@ -286,6 +328,12 @@ func renvoResolveArenaSize(target int, requested int) int {
 func renvoSetTarget(target int) {
 	if renvoFixedTarget != 0 {
 		target = renvoFixedTarget
+	} else if target == renvoTargetRTG {
+		renvoTarget = target
+		renvoTargetOS = renvoRTGPreparedOS
+		renvoTargetArch = renvoArchRTG
+		renvoNativeIntSize = renvoRTGPreparedIntBits / 8
+		return
 	}
 	renvoTarget = target
 	if target >= renvoTargetLinuxAmd64 && target <= renvoTargetVM32 {
@@ -303,6 +351,19 @@ func renvoSetTarget(target int) {
 
 func targetIsWindows(renvoTargetOS int) bool {
 	return renvoTargetOS == renvoOSWindows
+}
+
+func targetIsKernelModule(context *renvoCompileContext) bool {
+	if context == nil {
+		return false
+	}
+	if context.renvoTarget == renvoTargetLinuxKernelAmd64 {
+		return true
+	}
+	if renvoPreparedBackend == 0 || context.renvoTarget != renvoTargetRTG {
+		return false
+	}
+	return renvoRTGPreparedKernelModule != 0
 }
 
 func targetIsDarwin(renvoTargetOS int) bool {

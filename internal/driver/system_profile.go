@@ -1,10 +1,6 @@
 package driver
 
-import (
-	"strings"
-
-	"renvo.dev/internal/load"
-)
+import "renvo.dev/internal/load"
 
 // SystemProfile is the deliberately small hosted resource contract loaded by
 // -system. ArenaSize limits the generated program's managed allocator, while
@@ -18,6 +14,10 @@ type SystemProfile struct {
 
 func parseFSOptions(args []string, workDir string, fs SourceFS) Options {
 	return resolveSystemOptions(ParseOptions(args), workDir, fs)
+}
+
+func ResolveFSOptions(args []string, workDir string, fs SourceFS) Options {
+	return parseFSOptions(args, workDir, fs)
 }
 
 func resolveSystemOptions(options Options, workDir string, fs SourceFS) Options {
@@ -39,7 +39,9 @@ func resolveSystemOptions(options Options, workDir string, fs SourceFS) Options 
 		return parseFail(options, ParseErrInvalidSystem, options.System, options.SystemAt)
 	}
 	options.SystemName = profile.Name
-	options.Target = profile.Target
+	if !options.TargetExplicit {
+		options.Target = profile.Target
+	}
 	options.BinaryLimit = profile.BinaryLimit
 	options.ArenaSize = profile.ArenaSize
 	if options.WindowsGUI && options.Target != "windows/amd64" && options.Target != "windows/386" && options.Target != "windows/arm64" {
@@ -53,7 +55,7 @@ func resolveSystemOptions(options Options, workDir string, fs SourceFS) Options 
 
 func parseSystemProfile(src []byte) (SystemProfile, string, bool) {
 	var profile SystemProfile
-	fields := strings.Fields(string(src))
+	fields := systemFields(src)
 	if len(fields) < 3 || fields[0] != "system" {
 		return profile, "expected system declaration", false
 	}
@@ -129,13 +131,13 @@ func systemQuoted(text string) (string, bool) {
 func parseSystemSize(text string) (int, bool) {
 	multiplier := 1
 	digits := len(text)
-	if strings.HasSuffix(text, "KiB") {
+	if systemHasSuffix(text, "KiB") {
 		multiplier, digits = 1024, digits-3
-	} else if strings.HasSuffix(text, "MiB") {
+	} else if systemHasSuffix(text, "MiB") {
 		multiplier, digits = 1024*1024, digits-3
-	} else if strings.HasSuffix(text, "GiB") {
+	} else if systemHasSuffix(text, "GiB") {
 		multiplier, digits = 1024*1024*1024, digits-3
-	} else if strings.HasSuffix(text, "B") {
+	} else if systemHasSuffix(text, "B") {
 		digits--
 	}
 	if digits <= 0 {
@@ -156,6 +158,40 @@ func parseSystemSize(text string) (int, bool) {
 		return 0, false
 	}
 	return value * multiplier, true
+}
+
+func systemFields(src []byte) []string {
+	var fields []string
+	for at := 0; at < len(src); {
+		for at < len(src) && systemSpace(src[at]) {
+			at++
+		}
+		start := at
+		for at < len(src) && !systemSpace(src[at]) {
+			at++
+		}
+		if start < at {
+			fields = append(fields, string(src[start:at]))
+		}
+	}
+	return fields
+}
+
+func systemSpace(ch byte) bool {
+	return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\v' || ch == '\f'
+}
+
+func systemHasSuffix(text string, suffix string) bool {
+	if len(suffix) > len(text) {
+		return false
+	}
+	start := len(text) - len(suffix)
+	for i := 0; i < len(suffix); i++ {
+		if text[start+i] != suffix[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func systemBinaryLimitDiagnostic(name string, actual int, limit int) Diagnostic {

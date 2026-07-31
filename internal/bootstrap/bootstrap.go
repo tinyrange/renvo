@@ -171,6 +171,14 @@ func printOptionError(options driver.Options) {
 		fmt.Fprintln(os.Stderr, "renvo: -system cannot be combined with -t")
 	case driver.ParseErrSystemArenaConflict:
 		fmt.Fprintln(os.Stderr, "renvo: -system cannot be combined with -arena-size")
+	case driver.ParseErrMissingBackend:
+		fmt.Fprintln(os.Stderr, "renvo: missing backend after -backend")
+	case driver.ParseErrBackendRead:
+		fmt.Fprintf(os.Stderr, "renvo: could not read backend: %s\n", options.ErrorArg)
+	case driver.ParseErrInvalidBackend:
+		fmt.Fprintf(os.Stderr, "renvo: invalid backend: %s\n", options.ErrorArg)
+	case driver.ParseErrBackendTarget:
+		fmt.Fprintf(os.Stderr, "renvo: backend does not export target: %s\n", options.ErrorArg)
 	default:
 		fmt.Fprintf(os.Stderr, "renvo: option parse failed with error %d\n", options.Error)
 	}

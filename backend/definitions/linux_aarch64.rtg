@@ -1,0 +1,124 @@
+definition 1
+unit native
+implements direct_emitter_v1
+
+@import "aarch64.rtg"
+
+extend arch aarch64 {
+	sequences {
+		linuxEntry(out:emitter, argsOffset:int, environmentOffset:int, environmentLengthOffset:int) {
+			let argumentLoop = out.NewLabel()
+			let argumentLength = out.NewLabel()
+			let argumentLengthDone = out.NewLabel()
+			let argumentsDone = out.NewLabel()
+			let environmentLoop = out.NewLabel()
+			let environmentLength = out.NewLabel()
+			let environmentLengthDone = out.NewLabel()
+			let environmentDone = out.NewLabel()
+			asmLoadRegMem(out, 13, 31, 0, 8)
+			asmAddRegImm(out, 10, 31, 8)
+			asmMovRegAbs(out, 7, argsOffset, RTGRelocationAbsoluteBSS)
+			asmMovRegImm(out, 11, 0)
+			out.Mark(argumentLoop)
+			asmCmpRegReg(out, 11, 13)
+			jumpCondition(out, record_condition(Code:0), argumentsDone)
+			asmAddRegRegShift(out, 12, 10, 11, 3)
+			asmLoadRegMem(out, 12, 12, 0, 8)
+			asmStoreRegMem(out, 12, 7, 0, 8)
+			asmMovRegImm(out, 0, 0)
+			out.Mark(argumentLength)
+			asmAddRegReg(out, 9, 12, 0)
+			asmLoadRegMem(out, 9, 9, 0, 1)
+			asmCmpRegImm(out, 9, 0)
+			jumpCondition(out, record_condition(Code:0), argumentLengthDone)
+			asmAddRegImm(out, 0, 0, 1)
+			jump(out, argumentLength)
+			out.Mark(argumentLengthDone)
+			asmStoreRegMem(out, 0, 7, 8, 8)
+			asmAddRegImm(out, 7, 7, 16)
+			asmAddRegImm(out, 11, 11, 1)
+			jump(out, argumentLoop)
+			out.Mark(argumentsDone)
+			asmAddRegRegShift(out, 10, 10, 13, 3)
+			asmAddRegImm(out, 10, 10, 8)
+			asmMovRegAbs(out, 7, environmentOffset, RTGRelocationAbsoluteBSS)
+			asmMovRegImm(out, 11, 0)
+			out.Mark(environmentLoop)
+			asmLoadRegMem(out, 12, 10, 0, 8)
+			asmCmpRegImm(out, 12, 0)
+			jumpCondition(out, record_condition(Code:0), environmentDone)
+			asmStoreRegMem(out, 12, 7, 0, 8)
+			asmMovRegImm(out, 0, 0)
+			out.Mark(environmentLength)
+			asmAddRegReg(out, 9, 12, 0)
+			asmLoadRegMem(out, 9, 9, 0, 1)
+			asmCmpRegImm(out, 9, 0)
+			jumpCondition(out, record_condition(Code:0), environmentLengthDone)
+			asmAddRegImm(out, 0, 0, 1)
+			jump(out, environmentLength)
+			out.Mark(environmentLengthDone)
+			asmStoreRegMem(out, 0, 7, 8, 8)
+			asmAddRegImm(out, 7, 7, 16)
+			asmAddRegImm(out, 10, 10, 8)
+			asmAddRegImm(out, 11, 11, 1)
+			jump(out, environmentLoop)
+			out.Mark(environmentDone)
+			asmMovRegAbs(out, 12, environmentLengthOffset, RTGRelocationAbsoluteBSS)
+			asmStoreRegMem(out, 11, 12, 0, 8)
+			asmMovRegAbs(out, 3, argsOffset, RTGRelocationAbsoluteBSS)
+			asmMovRegReg(out, 4, 13)
+			asmMovRegReg(out, 1, 13)
+			asmMovRegAbs(out, 2, environmentOffset, RTGRelocationAbsoluteBSS)
+			asmMovRegReg(out, 5, 11)
+			asmMovRegReg(out, 6, 11)
+		}
+	}
+}
+
+runtime linux_aarch64 {
+	entry sequence linuxEntry {
+		max_parameters = 2
+		bss args 32768 16
+		bss environment 32768 16
+		bss environmentLength 8 8
+	}
+
+	syscall {
+		number = x8
+		arguments = [x0, x1, x2, x3, x4, x5]
+		result = x0
+		instruction = svc
+	}
+	operation read { number = 63 args = [fd, buffer, count] }
+	operation write { number = 64 args = [fd, buffer, count] }
+	operation read_at { number = 67 args = [fd, buffer, count, offset] }
+	operation write_at { number = 68 args = [fd, buffer, count, offset] }
+	operation open { number = 56 args = [dirfd, path, flags, mode] }
+	operation close { number = 57 args = [fd] }
+	operation chmod { number = 52 args = [fd, mode] }
+	operation print { use = write args = [stderr, buffer, count] }
+	operation exit { number = 93 args = [status] noreturn = true }
+}
+
+format elf64_aarch64 {
+	byte_order = little
+	address_bits = 64
+	kind = elf
+	machine = 183
+	code_offset = 176
+	file_alignment = 0x1000
+	flags = 0
+	image = elf_executable
+	patch_absolute = aarch64_page_address
+}
+
+target linux/aarch64 {
+	family = native_v1
+	os = linux
+	arch = aarch64
+	abi = aapcs64
+	runtime = linux_aarch64
+	executable = elf64_aarch64
+	build_tags = [linux, unix, aarch64, arm64]
+	capabilities = [hosted, executable, filesystem, heap, argv, environment]
+}

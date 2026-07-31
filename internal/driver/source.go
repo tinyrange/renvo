@@ -232,7 +232,7 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 	found := false
 	for i := 0; i < len(paths); i++ {
 		path := paths[i]
-		if !explicit && !sourceFilenameEnabled(load.BasePath(path), c.target) {
+		if !explicit && !sourceFilenameEnabledWithTags(load.BasePath(path), c.target, c.tags) {
 			continue
 		}
 		arenaStart := arena.Mark()
@@ -818,7 +818,7 @@ func isGoSourceName(name string) bool {
 // select the file for a target. Interactive tooling uses the same selection
 // rules as compilation when discovering importable packages.
 func SourceFileEnabled(name string, src []byte, target string, tags []string) (bool, bool) {
-	if !isGoSourceName(name) || !sourceFilenameEnabled(name, target) {
+	if !isGoSourceName(name) || !sourceFilenameEnabledWithTags(name, target, tags) {
 		return false, true
 	}
 	return sourceConstraintsEnabled(src, target, tags)
@@ -830,7 +830,7 @@ func filterSourcesForTargetTags(files []load.SourceFile, target string, tags []s
 		file := files[i]
 		name := load.BasePath(file.Path)
 		if isGoSourceName(name) {
-			if !sourceFilenameEnabled(name, target) {
+			if !sourceFilenameEnabledWithTags(name, target, tags) {
 				continue
 			}
 			enabled, valid := sourceConstraintsEnabled(file.Src, target, tags)
@@ -887,6 +887,10 @@ func filterSourcesForOptions(files []load.SourceFile, workDir string, options Op
 }
 
 func sourceFilenameEnabled(name string, target string) bool {
+	return sourceFilenameEnabledWithTags(name, target, nil)
+}
+
+func sourceFilenameEnabledWithTags(name string, target string, tags []string) bool {
 	stem := name[:len(name)-len(".go")]
 	last := stringLastIndexByte(stem, '_')
 	if last < 1 {
@@ -894,18 +898,18 @@ func sourceFilenameEnabled(name string, target string) bool {
 	}
 	lastTag := stem[last+1:]
 	if filenameKnownArch(lastTag) {
-		if !hasBuildTag(target, lastTag, nil) {
+		if !hasBuildTag(target, lastTag, tags) {
 			return false
 		}
 		before := stem[:last]
 		previous := stringLastIndexByte(before, '_')
 		if previous >= 1 && filenameKnownOS(before[previous+1:]) {
-			return hasBuildTag(target, before[previous+1:], nil)
+			return hasBuildTag(target, before[previous+1:], tags)
 		}
 		return true
 	}
 	if filenameKnownOS(lastTag) {
-		return hasBuildTag(target, lastTag, nil)
+		return hasBuildTag(target, lastTag, tags)
 	}
 	return true
 }

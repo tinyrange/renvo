@@ -1,0 +1,347 @@
+definition 1
+unit native
+implements direct_emitter_v1
+
+@import "x86_32.rtg"
+
+extend arch x86_32 {
+	sequences {
+		windowsExit(out:emitter, status:register) {
+			out.AppendByte(0x50+status.Code)
+			out.Bytes2(0xff, 0x15)
+			let at = out.Len()
+			out.Int32(0)
+			out.AbsoluteReloc(at, 8, RTGRelocationImport)
+		}
+		windowsStaticCall(out:emitter, importID:int, wordCount:int) {
+			out.Bytes2(0xff, 0x15)
+			let at = out.Len()
+			out.Int32(0)
+			out.AbsoluteReloc(at, importID, RTGRelocationImport)
+		}
+		windowsCallImport(out:emitter, importID:int) {
+			out.Bytes2(0xff, 0x15)
+			let at = out.Len()
+			out.Int32(0)
+			out.AbsoluteReloc(at, importID, RTGRelocationImport)
+		}
+		windowsRuntimeChmod(out:emitter) {
+			let eax = record_register(Code:0, Valid:true)
+			let ecx = record_register(Code:1, Valid:true)
+			let failed = out.NewLabel()
+			let done = out.NewLabel()
+			out.Bytes2(0x6a, 1)
+			out.Bytes2(0x6a, 0)
+			out.Bytes2(0x6a, 0)
+			out.AppendByte(0x53)
+			windowsCallImport(out, 5)
+			moveImmediate(out, ecx, -1)
+			encodeBinary(out, 0x39, eax, ecx)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), failed)
+			moveImmediate(out, eax, 0)
+			encodeRelative(out, 0xe9, done)
+			out.Mark(failed)
+			moveImmediate(out, eax, -1)
+			out.Mark(done)
+		}
+		windowsRuntimeClose(out:emitter) {
+			let eax = record_register(Code:0, Valid:true)
+			let failed = out.NewLabel()
+			let done = out.NewLabel()
+			out.AppendByte(0x53)
+			windowsCallImport(out, 2)
+			test(out, eax, eax)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), failed)
+			moveImmediate(out, eax, 0)
+			encodeRelative(out, 0xe9, done)
+			out.Mark(failed)
+			moveImmediate(out, eax, -1)
+			out.Mark(done)
+		}
+		windowsRuntimeOpen(out:emitter) {
+			let eax = record_register(Code:0, Valid:true)
+			let esi = record_register(Code:6, Valid:true)
+			move(out, eax, esi)
+			windowsTranslateCreateFileFlags(out)
+			out.Bytes2(0x6a, 0)
+			out.AppendByte(0x68)
+			out.Int32(0x80)
+			out.AppendByte(0x51)
+			out.Bytes2(0x6a, 0)
+			out.Bytes2(0x6a, 3)
+			out.AppendByte(0x52)
+			out.AppendByte(0x53)
+			windowsCallImport(out, 1)
+		}
+		windowsTranslateCreateFileFlags(out:emitter) {
+			let edx = record_register(Code:2, Valid:true)
+			let ecx = record_register(Code:1, Valid:true)
+			let notReadWrite = out.NewLabel()
+			let accessDone = out.NewLabel()
+			let noCreate = out.NewLabel()
+			let createDone = out.NewLabel()
+			moveImmediate(out, edx, -2147483648)
+			out.Bytes2(0xa8, 2)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), notReadWrite)
+			moveImmediate(out, edx, -1073741824)
+			encodeRelative(out, 0xe9, accessDone)
+			out.Mark(notReadWrite)
+			out.Bytes2(0xa8, 1)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), accessDone)
+			moveImmediate(out, edx, 0x40000000)
+			out.Mark(accessDone)
+			moveImmediate(out, ecx, 3)
+			out.Bytes2(0xa8, 64)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), noCreate)
+			moveImmediate(out, ecx, 4)
+			out.AppendByte(0xa9)
+			out.Int32(512)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), createDone)
+			moveImmediate(out, ecx, 2)
+			encodeRelative(out, 0xe9, createDone)
+			out.Mark(noCreate)
+			out.AppendByte(0xa9)
+			out.Int32(512)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), createDone)
+			moveImmediate(out, ecx, 5)
+			out.Mark(createDone)
+		}
+		windowsCompareImmediate(out:emitter, register:register, value:int) {
+			out.Byte(0x83)
+			emitModRM(out, 3, 7, registerLowBits(register))
+			out.AppendByte(int(value))
+		}
+		windowsPushRegister(out:emitter, register:register) {
+			out.AppendByte(0x50+register.Code)
+		}
+		windowsPopRegister(out:emitter, register:register) {
+			out.AppendByte(0x58+register.Code)
+		}
+		windowsPushImmediate(out:emitter, value:int) {
+			out.Byte(0x6a)
+			out.AppendByte(int(value))
+		}
+		windowsPushBSSAddress(out:emitter, offset:int) {
+			out.Byte(0x68)
+			let at = out.Len()
+			out.Int32(0)
+			out.AbsoluteReloc(at, offset, RTGRelocationAbsoluteBSS)
+		}
+		windowsStoreEAXBSS(out:emitter, offset:int) {
+			out.Byte(0xa3)
+			let at = out.Len()
+			out.Int32(0)
+			out.AbsoluteReloc(at, offset, RTGRelocationAbsoluteBSS)
+		}
+		windowsLoadEAXBSS(out:emitter, offset:int) {
+			out.Byte(0xa1)
+			let at = out.Len()
+			out.Int32(0)
+			out.AbsoluteReloc(at, offset, RTGRelocationAbsoluteBSS)
+		}
+		windowsGetStandardHandle(out:emitter, identifier:int) {
+			windowsPushImmediate(out, identifier)
+			windowsCallImport(out, 6)
+			move(out, ebx, eax)
+		}
+		windowsReadHandle(out:emitter) {
+			let ready = out.NewLabel()
+			windowsCompareImmediate(out, ebx, 0)
+			jumpCondition(out, record_condition(JumpOpcode:0x85), ready)
+			windowsGetStandardHandle(out, -10)
+			out.Mark(ready)
+		}
+		windowsWriteHandle(out:emitter) {
+			let standardError = out.NewLabel()
+			let ready = out.NewLabel()
+			windowsCompareImmediate(out, ebx, 1)
+			jumpCondition(out, record_condition(JumpOpcode:0x85), standardError)
+			windowsGetStandardHandle(out, -11)
+			jump(out, ready)
+			out.Mark(standardError)
+			windowsCompareImmediate(out, ebx, 2)
+			jumpCondition(out, record_condition(JumpOpcode:0x85), ready)
+			windowsGetStandardHandle(out, -12)
+			out.Mark(ready)
+		}
+		windowsReadWriteCall(out:emitter, importID:int, countOffset:int) {
+			windowsPushImmediate(out, 0)
+			windowsPushBSSAddress(out, countOffset)
+			windowsPushRegister(out, edx)
+			windowsPushRegister(out, esi)
+			windowsPushRegister(out, ebx)
+			windowsCallImport(out, importID)
+		}
+		windowsRestorePosition(out:emitter, countOffset:int) {
+			windowsPushImmediate(out, 0)
+			windowsPushImmediate(out, 0)
+			windowsLoadEAXBSS(out, countOffset+8)
+			windowsPushRegister(out, eax)
+			windowsPushRegister(out, ebx)
+			windowsCallImport(out, 5)
+		}
+		windowsRuntimeIOBody(out:emitter, importID:int, countOffset:int) {
+			let sequential = out.NewLabel()
+			let positionalFailed = out.NewLabel()
+			let restore = out.NewLabel()
+			let sequentialFailed = out.NewLabel()
+			windowsCompareImmediate(out, ecx, 0)
+			jumpCondition(out, record_condition(JumpOpcode:0x8c), sequential)
+
+			# Preserve the requested offset and byte count while querying and
+			# changing the process-owned Windows file pointer.
+			windowsPushRegister(out, ecx)
+			windowsPushRegister(out, edx)
+			windowsPushImmediate(out, 1)
+			windowsPushImmediate(out, 0)
+			windowsPushImmediate(out, 0)
+			windowsPushRegister(out, ebx)
+			windowsCallImport(out, 5)
+			windowsStoreEAXBSS(out, countOffset+8)
+			windowsPopRegister(out, edx)
+			windowsPopRegister(out, ecx)
+			windowsPushRegister(out, ecx)
+			windowsPushRegister(out, edx)
+			windowsPushImmediate(out, 0)
+			windowsPushImmediate(out, 0)
+			windowsPushRegister(out, ecx)
+			windowsPushRegister(out, ebx)
+			windowsCallImport(out, 5)
+			windowsPopRegister(out, edx)
+			windowsPopRegister(out, ecx)
+
+			windowsReadWriteCall(out, importID, countOffset)
+			windowsCompareImmediate(out, eax, 0)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), positionalFailed)
+			windowsLoadEAXBSS(out, countOffset)
+			jump(out, restore)
+			out.Mark(positionalFailed)
+			moveImmediate(out, eax, -1)
+			out.Mark(restore)
+			windowsStoreEAXBSS(out, countOffset)
+			windowsRestorePosition(out, countOffset)
+			windowsLoadEAXBSS(out, countOffset)
+			out.Byte(0xc3)
+
+			out.Mark(sequential)
+			windowsReadWriteCall(out, importID, countOffset)
+			windowsCompareImmediate(out, eax, 0)
+			jumpCondition(out, record_condition(JumpOpcode:0x84), sequentialFailed)
+			windowsLoadEAXBSS(out, countOffset)
+			out.Byte(0xc3)
+			out.Mark(sequentialFailed)
+			moveImmediate(out, eax, -1)
+			out.Byte(0xc3)
+		}
+		windowsReadAt(out:emitter) {
+			let helper = out.NewLabel()
+			let after = out.NewLabel()
+			let countOffset = out.ReserveBSS(16, 4)
+			jump(out, after)
+			out.Mark(helper)
+			windowsReadHandle(out)
+			windowsRuntimeIOBody(out, 3, countOffset)
+			out.Mark(after)
+			call(out, helper)
+		}
+		windowsRead(out:emitter) {
+			moveImmediate(out, ecx, -1)
+			windowsReadAt(out)
+		}
+		windowsWriteAt(out:emitter) {
+			let helper = out.NewLabel()
+			let after = out.NewLabel()
+			let countOffset = out.ReserveBSS(16, 4)
+			jump(out, after)
+			out.Mark(helper)
+			windowsWriteHandle(out)
+			windowsRuntimeIOBody(out, 4, countOffset)
+			out.Mark(after)
+			call(out, helper)
+		}
+		windowsWrite(out:emitter) {
+			moveImmediate(out, ecx, -1)
+			windowsWriteAt(out)
+		}
+	}
+}
+
+abi win32 {
+	internal = renvo_x86_32
+	arguments = [stack]
+	result = [eax, edx]
+	stack_alignment = 4
+}
+
+runtime windows_386 {
+	emit_exit = sequence windowsExit
+	emit_static_call = sequence windowsStaticCall
+	imports "kernel32.dll" = [
+		CreateFileA, CloseHandle, ReadFile, WriteFile, SetFilePointer,
+		GetStdHandle, GetCommandLineA, ExitProcess, GetEnvironmentStringsA
+	]
+	entry template {
+		max_parameters = 2
+		bss args 32768 16
+		bss argsText 32768 16
+		bss argsLength 8 8
+		bss environment 32768 16
+		bss environmentLength 8 8
+		code = "\xff\x15\x00\x00\x00\x00\x89\xc6\xbf\x00\x00\x00\x00\xb8\x00\x00\x00\x00\x89\xc2\x31\xdb\x80\x3e\x00\x0f\x84\x75\x00\x00\x00\x80\x3e\x20\x0f\x84\x09\x00\x00\x00\x80\x3e\x09\x0f\x85\x06\x00\x00\x00\x46\xe9\xdf\xff\xff\xff\x89\x17\x31\xc9\x31\xed\x8a\x06\x3c\x00\x0f\x84\x34\x00\x00\x00\x3c\x22\x0f\x85\x09\x00\x00\x00\x83\xf5\x01\x46\xe9\xe5\xff\xff\xff\x83\xfd\x00\x0f\x85\x10\x00\x00\x00\x3c\x20\x0f\x84\x12\x00\x00\x00\x3c\x09\x0f\x84\x0a\x00\x00\x00\x88\x02\x46\x42\x41\xe9\xc2\xff\xff\xff\xc6\x02\x00\x42\x89\x4f\x08\x83\xc7\x10\x43\x3c\x00\x0f\x84\x06\x00\x00\x00\x46\xe9\x82\xff\xff\xff\x89\xd8\xa3\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x89\xc6\xbf\x00\x00\x00\x00\x31\xdb\x80\x3e\x00\x0f\x84\x23\x00\x00\x00\x89\x37\x31\xc9\x80\x3c\x0e\x00\x0f\x84\x06\x00\x00\x00\x41\xe9\xf0\xff\xff\xff\x89\x4f\x08\x01\xce\x46\x83\xc7\x10\x43\xe9\xd4\xff\xff\xff\x89\xd8\xa3\x00\x00\x00\x00\xbb\x00\x00\x00\x00\x8b\x35\x00\x00\x00\x00\x89\xf2\xb9\x00\x00\x00\x00\xa1\x00\x00\x00\x00\x89\xc7"
+		relocation 2 import 7
+		relocation 9 bss args
+		relocation 14 bss argsText
+		relocation 151 bss argsLength
+		relocation 157 import 9
+		relocation 164 bss environment
+		relocation 217 bss environmentLength
+		relocation 222 bss args
+		relocation 228 bss argsLength
+		relocation 235 bss environment
+		relocation 240 bss environmentLength
+	}
+	operation read { emit = sequence windowsRead }
+	operation write { emit = sequence windowsWrite }
+	operation read_at { emit = sequence windowsReadAt }
+	operation write_at { emit = sequence windowsWriteAt }
+	operation open { emit = sequence windowsRuntimeOpen }
+	operation close { emit = sequence windowsRuntimeClose }
+	operation chmod { emit = sequence windowsRuntimeChmod }
+	operation print { use = write }
+}
+
+format pe32_386 {
+	byte_order = little
+	address_bits = 32
+	kind = pe
+	machine = 0x014c
+	code_offset = 0x1000
+	image = pe_executable
+	patch_image = pe_absolute32
+	image_base = 0x400000
+	file_alignment = 0x200
+	section_alignment = 0x1000
+	coff_characteristics = 0x0102
+	dll_characteristics = 0x100
+	os_version_major = 4
+	os_version_minor = 0
+	image_version_major = 0
+	image_version_minor = 0
+	subsystem_version_major = 4
+	subsystem_version_minor = 0
+	stack_reserve = 0x100000
+	stack_commit = 0x1000
+	heap_reserve = 0x100000
+	heap_commit = 0x1000
+}
+
+target windows/386 {
+	family = native_v1
+	os = windows
+	arch = x86_32
+	abi = win32
+	runtime = windows_386
+	executable = pe32_386
+	build_tags = [windows, 386]
+	capabilities = [hosted, executable, filesystem, heap, argv, environment]
+}

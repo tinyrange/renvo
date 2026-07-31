@@ -1,0 +1,116 @@
+definition 1
+unit native
+implements direct_emitter_v1
+
+@import "x86_32.rtg"
+
+extend arch x86_32 {
+	sequences {
+		linuxEntry(out:emitter, argsOffset:int, environmentOffset:int, environmentLengthOffset:int) {
+			let argumentLoop = out.NewLabel()
+			let argumentLength = out.NewLabel()
+			let argumentLengthDone = out.NewLabel()
+			let argumentsDone = out.NewLabel()
+			let environmentLoop = out.NewLabel()
+			let environmentLength = out.NewLabel()
+			let environmentLengthDone = out.NewLabel()
+			let environmentDone = out.NewLabel()
+			out.Text("\x8b\x04\x24\x89\xe6\x83\xc6\x04")
+			asmMovRegPCRel(out, 7, argsOffset, RTGRelocationAbsoluteBSS)
+			out.Text("\x31\xc9")
+			out.Mark(argumentLoop)
+			out.Text("\x39\xc1")
+			jumpCondition(out, record_condition(JumpOpcode:0x8d), argumentsDone)
+			out.Text("\x8b\x14\x8e\x89\x17\x31\xdb")
+			out.Mark(argumentLength)
+			out.Text("\x80\x3c\x1a\x00")
+			jumpCondition(out, record_condition(JumpOpcode:0x84), argumentLengthDone)
+			out.Text("\x43")
+			jump(out, argumentLength)
+			out.Mark(argumentLengthDone)
+			out.Text("\x89\x5f\x08\x83\xc7\x10\x41")
+			jump(out, argumentLoop)
+			out.Mark(argumentsDone)
+			out.Text("\x8d\x74\x86\x08")
+			asmMovRegPCRel(out, 7, environmentOffset, RTGRelocationAbsoluteBSS)
+			out.Text("\x31\xc9")
+			out.Mark(environmentLoop)
+			out.Text("\x8b\x14\x8e\x85\xd2")
+			jumpCondition(out, record_condition(JumpOpcode:0x84), environmentDone)
+			out.Text("\x89\x17\x31\xdb")
+			out.Mark(environmentLength)
+			out.Text("\x80\x3c\x1a\x00")
+			jumpCondition(out, record_condition(JumpOpcode:0x84), environmentLengthDone)
+			out.Text("\x43")
+			jump(out, environmentLength)
+			out.Mark(environmentLengthDone)
+			out.Text("\x89\x5f\x08\x83\xc7\x10\x41")
+			jump(out, environmentLoop)
+			out.Mark(environmentDone)
+			asmMovRegPCRel(out, 6, environmentLengthOffset, RTGRelocationAbsoluteBSS)
+			out.Uint16(0x0e89)
+			asmMovRegPCRel(out, 3, argsOffset, RTGRelocationAbsoluteBSS)
+			out.Text("\x89\xc6\x89\xc2")
+			asmMovRegPCRel(out, 1, environmentOffset, RTGRelocationAbsoluteBSS)
+			asmMovRegPCRel(out, 0, environmentLengthOffset, RTGRelocationAbsoluteBSS)
+			out.Uint16(0x008b)
+			out.Text("\x89\xc7")
+		}
+	}
+}
+
+abi cdecl32 {
+	internal = renvo_x86_32
+	arguments = [stack]
+	result = [eax, edx]
+	stack_alignment = 4
+}
+
+runtime linux_386 {
+	entry sequence linuxEntry {
+		max_parameters = 2
+		bss args 32768 16
+		bss environment 32768 16
+		bss environmentLength 8 8
+	}
+
+	syscall {
+		number = eax
+		arguments = [ebx, ecx, edx, esi, edi, ebp]
+		result = eax
+		instruction = int80
+	}
+	operation read { number = 3 args = [fd, buffer, count] }
+	operation write { number = 4 args = [fd, buffer, count] }
+	operation read_at { number = 180 args = [fd, buffer, count, offset] }
+	operation write_at { number = 181 args = [fd, buffer, count, offset] }
+	operation open { number = 5 args = [path, flags, mode] }
+	operation close { number = 6 args = [fd] }
+	operation chmod { number = 94 args = [fd, mode] }
+	operation print { use = write args = [stderr, buffer, count] }
+	operation exit { number = 1 args = [status] noreturn = true }
+}
+
+format elf32_386 {
+	byte_order = little
+	address_bits = 32
+	kind = elf
+	machine = 3
+	code_offset = 116
+	file_alignment = 0x1000
+	flags = 0
+	image = elf_executable
+	patch_absolute = relative32_le
+	patch_pc_bias = -3
+}
+
+target linux/386 {
+	family = native_v1
+	os = linux
+	arch = x86_32
+	abi = cdecl32
+	runtime = linux_386
+	executable = elf32_386
+	build_tags = [linux, unix, 386]
+	capabilities = [hosted, executable, filesystem, heap, argv, environment]
+}

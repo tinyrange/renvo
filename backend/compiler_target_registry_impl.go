@@ -38,5 +38,42 @@ func renvoParseTargetArg(target string) int {
 	if target == "vm/vm32" {
 		return renvoTargetVM32
 	}
-	return 0
+	return renvoRTGParseTargetArg(target)
+}
+
+func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
+	if target == renvoTargetLinuxAmd64 {
+		return "linux/amd64", "\a\xbc\xe9\xfb\xf7lj\xbcfi\xf9\xf7\xc04\xad\x0fwõ\xc3\xf6h#=墉\xc0\x05Y\x9b\x9a", 3, true
+	}
+	if target == renvoTargetLinux386 {
+		return "linux/386", "\x88\xa8\x88\xd5\xe6\rXu\x1f\xb7r¹㲌إ<IT\x85}\x1d\x02!\xa2\xa4\x92\xe4a\x92", 3, true
+	}
+	if target == renvoTargetLinuxAarch64 {
+		return "linux/aarch64", "S\xa0\xcdT\x12\xc0Yp\xebe\x01Z\x91K\x80\xa6\xe7$E\xd8\xf7\nW\x96\xea]I\x81\xe2N\xce\x11", 3, true
+	}
+	if target == renvoTargetLinuxArm {
+		return "linux/arm", "\x94isB\xbdpqӽ\xa6\x94\x17\xbb\n\xce\x04\xd0\xfb\xdd$\xaat\x88\fd\x1ct&+\xe8\xec\xa7", 3, true
+	}
+	if target == renvoTargetWindowsAmd64 {
+		return "windows/amd64", "={\xf3\\};a\xe2\xa8'\x92\xeat{\xd4a\xba\x9cG\xfe\x9e\xca\xc5\xc9C<\xed\x81B\xb3\x1cS", 3, true
+	}
+	if target == renvoTargetWindows386 {
+		return "windows/386", "n+$\xa3\x01\xf5\xcdM\x9f\x83އ\x05\xbe$\xcfo˃\x1c\xbf\xef\U0005e863!P\xbc\xb3@\x80", 3, true
+	}
+	if target == renvoTargetWasiWasm32 {
+		return "wasi/wasm32", "\x9e\xcdc\x862\xfb\x98\xe7\xfb\xf8\x16ܔ\xc4>\xf2\x04e\xf5\xb5\xad\x1c(\xe4r\x15t\xf7UHl)", 3, true
+	}
+	if target == renvoTargetDarwinArm64 {
+		return "darwin/arm64", "f\xf3I\xf9\xb0\xeaΏ\x96\xde\x02C\x95\x02\x807\x88\b\xcb%\x83\xb6\xd0(\a\xc2\xea^I\x03\x95\xa3", 3, true
+	}
+	if target == renvoTargetLinuxKernelAmd64 {
+		return "linux-kernel/amd64", "s\xb2\x9a{\xfei\xb2\x00G\x15\xf83K\xb0R\x97\x8a`\x92\xf2\xc1\xfe\x84\x17\xa1\xf6ĺv!\x91\xe4", 3, true
+	}
+	if target == renvoTargetWindowsArm64 {
+		return "windows/arm64", "æ\xcdǥR\xfc\x03\x93tK\x03\xeb\ag\f\x96)DE\xe6\xf1̊3\xaa#\x99U\x88\x1b\x97", 3, true
+	}
+	if target == renvoTargetVM32 {
+		return "vm/vm32", "7\x9c\xd7!;\xcc\xc1\xa9\xb8\xb7\xe1\x05ÿ\xcc\xf0R\xd2\x1f\x0f\xf9@4-\xfd\x11\xf1f\f\xd7g\xc5", 3, true
+	}
+	return "", "", 0, false
 }

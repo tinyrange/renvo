@@ -5,6 +5,9 @@ package main
 // in compiler_linux_impl.go, while target-specific image builders remain in
 // their composition files until those layers are split further.
 func compileTarget(input []int, output int, target int, arenaSize int) int {
+	if renvoPreparedBackend != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
+		return renvoCompileUnitInput(input, output, target, arenaSize)
+	}
 	// A stage compiler is specialized while its parent is lowering this source.
 	// Keep that dispatch expressed in terms of the specialization global so the
 	// fixed-target branch pruner can remove every unrelated backend call.
@@ -126,8 +129,7 @@ func renvoCompileOptionsValid(target int, options RenvoCompileOptions) bool {
 	if options.WindowsGUI && target != renvoTargetWindowsAmd64 && target != renvoTargetWindows386 && target != renvoTargetWindowsArm64 {
 		return false
 	}
-	return options.ArenaSize == 0 || target > 0 && target < len(renvoTargetIntBitsTable) &&
-		options.ArenaSize >= renvoArenaSizeMinimum && options.ArenaSize <= renvoArenaSizeMaximum
+	return options.ArenaSize == 0 || options.ArenaSize >= renvoArenaSizeMinimum && options.ArenaSize <= renvoArenaSizeMaximum
 }
 
 func RenvoCompileSourceToBytesWithOptions(source []byte, targetName string, options RenvoCompileOptions) ([]byte, bool) {
@@ -186,7 +188,8 @@ func RenvoCompileUnitToOutputStripWindowsGUI(unit []byte, targetName string, out
 
 func RenvoCompileUnitToOutputWithOptions(unit []byte, targetName string, outputPath string, options RenvoCompileOptions) bool {
 	target := renvoParseTargetArg(targetName)
-	if target == 0 || !renvoCompileOptionsValid(target, options) {
+	if target == 0 || !renvoCompileOptionsValid(target, options) ||
+		!renvoUnitBindingMatchesTarget(unit, target) {
 		return false
 	}
 	context := renvoNewCompileContext(target, options.StripSymbols, options.WindowsGUI, options.EmitImage)
@@ -205,7 +208,8 @@ func RenvoCompileUnitToOutputWithOptions(unit []byte, targetName string, outputP
 // path for script execution so the RNVI transport can remain in memory.
 func RenvoCompileUnitToBytesWithOptions(unit []byte, targetName string, options RenvoCompileOptions) ([]byte, bool) {
 	target := renvoParseTargetArg(targetName)
-	if target == 0 || !renvoCompileOptionsValid(target, options) {
+	if target == 0 || !renvoCompileOptionsValid(target, options) ||
+		!renvoUnitBindingMatchesTarget(unit, target) {
 		return nil, false
 	}
 	context := renvoNewCompileContext(target, options.StripSymbols, options.WindowsGUI, options.EmitImage)
@@ -270,7 +274,8 @@ func (s *RenvoCompileSession) Step() bool {
 	}
 	if s.stage == 0 {
 		s.target = renvoParseTargetArg(s.targetName)
-		if s.target == 0 || !renvoCompileOptionsValid(s.target, s.options) {
+		if s.target == 0 || !renvoCompileOptionsValid(s.target, s.options) ||
+			!renvoUnitBindingMatchesTarget(s.unit, s.target) {
 			s.done = true
 			return true
 		}
@@ -348,11 +353,16 @@ func renvoCompileParsedProgramArena(prog *renvoProgram, target int, arenaSize in
 	if !prog.ok {
 		return result
 	}
-	if target == renvoTargetLinuxKernelAmd64 {
+	if target == renvoTargetLinuxKernelAmd64 || target == renvoTargetRTG &&
+		renvoRTGPreparedKernelModule != 0 {
 		if !renvoPrepareKernelMetadata() {
 			return result
 		}
-		renvoCaptureKernelCompileContext(&prog.c)
+		if target == renvoTargetLinuxKernelAmd64 {
+			renvoCaptureKernelCompileContext(&prog.c)
+		} else {
+			renvoPopulateKernelCompileContext(&prog.c)
+		}
 	}
 	var meta renvoMeta
 	renvoBuildMetaInto(prog, &meta)
@@ -364,6 +374,9 @@ func renvoCompileParsedProgramArena(prog *renvoProgram, target int, arenaSize in
 }
 
 func renvoCompileProgramWithMetaScratch(prog *renvoProgram, meta *renvoMeta, target int) renvoCompileResult {
+	if renvoPreparedBackend != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
+		return renvoTryCompileScalarProgramRTG(prog, meta)
+	}
 	if target == renvoTargetLinux386 || target == renvoTargetWindows386 {
 		return renvoTryCompileScalarProgram386Scratch(prog, meta)
 	}
@@ -380,6 +393,9 @@ func renvoCompileProgramWithMetaScratch(prog *renvoProgram, meta *renvoMeta, tar
 }
 
 func renvoCompileProgramWithMeta(prog *renvoProgram, meta *renvoMeta, target int) renvoCompileResult {
+	if renvoPreparedBackend != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
+		return renvoTryCompileScalarProgramRTG(prog, meta)
+	}
 	if target == renvoTargetLinuxKernelAmd64 {
 		return renvoTryCompileScalarProgramAmd64Scratch(prog, meta)
 	}
@@ -430,7 +446,7 @@ func renvoConfigureTargetMode(targetName string, outputPath string) {
 
 func renvoConfigureCompileContext(context *renvoCompileContext, targetName string, outputPath string, moduleLicense string) {
 	renvoNonNil(context)
-	if context.renvoTarget != renvoTargetLinuxKernelAmd64 {
+	if !targetIsKernelModule(context) {
 		return
 	}
 	context.kernel = new(renvoKernelCompileContext)
@@ -451,6 +467,11 @@ func renvoCaptureKernelCompileContext(context *renvoCompileContext) {
 	context.renvoTargetOS = renvoOSLinux
 	context.renvoTargetArch = renvoArchAmd64
 	context.renvoNativeIntSize = 8
+	renvoPopulateKernelCompileContext(context)
+}
+
+func renvoPopulateKernelCompileContext(context *renvoCompileContext) {
+	renvoNonNil(context)
 	if context.kernel == nil {
 		context.kernel = new(renvoKernelCompileContext)
 		context.kernel.kernelModuleName = renvoKernelModuleName
@@ -460,6 +481,10 @@ func renvoCaptureKernelCompileContext(context *renvoCompileContext) {
 	context.kernel.kernelNameOff = renvoKernelModuleNameOff
 	context.kernel.kernelInitOff = renvoKernelModuleInitOff
 	context.kernel.kernelExitOff = renvoKernelModuleExitOff
+	context.kernel.kernelRelease = renvoKernelRelease
+	context.kernel.kernelVersion = renvoKernelVersion
+	context.kernel.kernelBTF = renvoKernelBTF
+	context.kernel.kernelSymvers = renvoKernelSymvers
 }
 
 func renvoSetKernelLicense(license string) {

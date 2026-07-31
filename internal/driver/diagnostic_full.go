@@ -89,6 +89,14 @@ func optionDiagnostic(options Options) Diagnostic {
 		code, message = "RENVO-OPTION-022", "-system cannot be combined with -t"
 	case ParseErrSystemArenaConflict:
 		code, message = "RENVO-OPTION-023", "-system cannot be combined with -arena-size"
+	case ParseErrMissingBackend:
+		code, message = "RENVO-OPTION-024", "missing backend definition after -backend"
+	case ParseErrBackendRead:
+		code, message = "RENVO-OPTION-025", "could not read backend definition "+options.ErrorArg
+	case ParseErrInvalidBackend:
+		code, message = "RENVO-OPTION-026", "invalid backend definition: "+options.ErrorArg
+	case ParseErrBackendTarget:
+		code, message = "RENVO-OPTION-027", "backend definition does not export target "+options.ErrorArg
 	}
 	return Diagnostic{Phase: "options", Code: code, Message: message}
 }
