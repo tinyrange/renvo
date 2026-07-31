@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "97c510b94c8032726ce1830a471a5c8ada30e34876e2f7e7c9c004caf1e441ee"
+const CompilerSourceDigest = "03cf124eecc6f68001b9571f3370f93aea5a9798b6b666ffdfc9b3f357a1c82d"
 
 // source: backend/compiler_common_impl.go
 

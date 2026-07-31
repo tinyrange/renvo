@@ -19,6 +19,7 @@ backend/definitions/
 ├── aarch64.rtg
 ├── arm.rtg
 ├── elf_amd64.rtg              shared AMD64 ELF formats
+├── *_algorithms.rtg            closed shared-ISA generation roots
 ├── linux_amd64.rtg            complete target entrypoint
 ├── windows_amd64.rtg
 ├── linux_kernel_amd64.rtg
@@ -47,10 +48,14 @@ go generate ./internal/targetinfo
 go generate ./internal/backendcompiled
 ```
 
-The first command emits each production architecture projection. The second
-resolves target descriptors and writes the registry and the non-enforcing
-source-volume report. The third refreshes the ordinary-Go compiled backend and
-the source bundle used to prepare external definitions.
+The first command emits each production architecture projection from its
+matching `*_algorithms.rtg` root. Those roots import only the shared ISA
+fragment, so checked-in encoder generation never depends on an arbitrary OS
+target. The second resolves target descriptors and writes the registry and the
+non-enforcing source-volume report. Architecture-only roots are validated by
+generation but intentionally contribute no registry target. The third refreshes
+the ordinary-Go compiled backend and the source bundle used to prepare external
+definitions.
 
 ## Adding a native architecture
 

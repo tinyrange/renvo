@@ -50,6 +50,17 @@ type ResolveResult struct {
 }
 
 func Resolve(document Document) ResolveResult {
+	return resolve(document, true)
+}
+
+// ResolveArchitectureDefinition validates a closed architecture projection
+// without requiring it to export a target. Checked-in architecture generation
+// uses this for roots that import only one shared ISA fragment.
+func ResolveArchitectureDefinition(document Document) ResolveResult {
+	return resolve(document, false)
+}
+
+func resolve(document Document, requireTarget bool) ResolveResult {
 	result := ResolveResult{Document: document, Ok: document.Ok}
 	if !document.Ok {
 		result.Diagnostics = append(result.Diagnostics, document.Diagnostics...)
@@ -83,7 +94,7 @@ func Resolve(document Document) ResolveResult {
 			result.Ok = false
 		}
 	}
-	if len(result.Targets) == 0 && hasMachineDeclaration(document) {
+	if requireTarget && len(result.Targets) == 0 && hasMachineDeclaration(document) {
 		result.Diagnostics = append(result.Diagnostics, documentDiagnostic(document,
 			sourceSpan(document.Source, 0, 0), "RTG-RESOLVE-002",
 			"machine definition exports no targets"))

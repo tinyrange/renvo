@@ -48,8 +48,13 @@ func main() {
 		if err != nil {
 			fail(err.Error())
 		}
-		resolved := rtg.ResolveDefinitions(rtg.ParseImports(
-			source, path, filesystemImportLoader{}))
+		parsed := rtg.ParseImports(source, path, filesystemImportLoader{})
+		var resolved rtg.ResolveResult
+		if *arch != "" {
+			resolved = rtg.ResolveArchitectureDefinition(parsed)
+		} else {
+			resolved = rtg.ResolveDefinitions(parsed)
+		}
 		if !resolved.Ok {
 			failDiagnostics(resolved.Diagnostics)
 		}

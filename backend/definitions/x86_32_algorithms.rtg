@@ -1,0 +1,6 @@
+definition 1
+unit x86_32
+implements direct_emitter_v1
+
+# Closed root for the checked-in shared 32-bit x86 algorithm projection.
+@import "x86_32.rtg"

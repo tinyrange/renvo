@@ -112,10 +112,12 @@ semantic changes do.
 ## Generated topology
 
 `go generate ./backend/definitions` emits the checked-in production
-architecture projections from one canonical target entrypoint per ISA. The
-four native encoder bodies and their declarative label-relocation finalizers
-remain independently prunable, while each target can evolve without importing
-unrelated operating-system code.
+architecture projections from four closed `*_algorithms.rtg` roots. Each root
+imports only its shared ISA fragment; no operating-system entrypoint is chosen
+as an accidental authority for an architecture. The four native encoder bodies
+and their declarative label-relocation finalizers remain independently
+prunable, while each target can evolve without affecting unrelated
+operating-system code.
 
 Built-ins expose stable compiler-facing names so fixed-target compilers retain
 their direct fast calls. External definitions cannot have names known to a

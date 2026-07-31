@@ -1,0 +1,6 @@
+definition 1
+unit aarch64
+implements direct_emitter_v1
+
+# Closed root for the checked-in shared AArch64 algorithm projection.
+@import "aarch64.rtg"

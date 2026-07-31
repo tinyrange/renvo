@@ -121,8 +121,14 @@ func mergeMachineDefinitions(root string, descriptors []sourceDescriptor) error 
 		if !bytes.HasPrefix(bytes.TrimSpace(source), []byte("definition ")) {
 			continue
 		}
-		resolved := rtg.ResolveDefinitions(rtg.ParseImports(
-			source, path, machineDefinitionImportLoader{}))
+		parsed := rtg.ParseImports(source, path, machineDefinitionImportLoader{})
+		if !parsed.Ok {
+			return fmt.Errorf("%s: %s", filepath.Base(path), parsed.Diagnostics[0].Message)
+		}
+		if !documentDeclaresTarget(parsed) {
+			continue
+		}
+		resolved := rtg.ResolveDefinitions(parsed)
 		if !resolved.Ok {
 			return fmt.Errorf("%s: %s", filepath.Base(path), resolved.Diagnostics[0].Message)
 		}
@@ -178,6 +184,15 @@ func mergeMachineDefinitions(root string, descriptors []sourceDescriptor) error 
 		return fmt.Errorf("machine definition target %q has no registry policy", name)
 	}
 	return nil
+}
+
+func documentDeclaresTarget(document rtg.Document) bool {
+	for i := 0; i < len(document.Declarations); i++ {
+		if document.Declarations[i].Kind == rtg.DeclTarget {
+			return true
+		}
+	}
+	return false
 }
 
 type machineDefinitionImportLoader struct{}

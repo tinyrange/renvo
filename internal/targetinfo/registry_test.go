@@ -60,8 +60,21 @@ func TestGeneratedRegistryMatchesMachineDefinitions(t *testing.T) {
 		if !bytes.HasPrefix(bytes.TrimSpace(source), []byte("definition ")) {
 			continue
 		}
-		resolved := rtg.ResolveDefinitions(rtg.ParseImports(
-			source, path, registryImportLoader{}))
+		parsed := rtg.ParseImports(source, path, registryImportLoader{})
+		if !parsed.Ok {
+			t.Fatalf("%s: %#v", path, parsed.Diagnostics)
+		}
+		hasTarget := false
+		for i := 0; i < len(parsed.Declarations); i++ {
+			if parsed.Declarations[i].Kind == rtg.DeclTarget {
+				hasTarget = true
+				break
+			}
+		}
+		if !hasTarget {
+			continue
+		}
+		resolved := rtg.ResolveDefinitions(parsed)
 		if !resolved.Ok {
 			t.Fatalf("%s: %#v", path, resolved.Diagnostics)
 		}

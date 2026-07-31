@@ -1,0 +1,6 @@
+definition 1
+unit arm
+implements direct_emitter_v1
+
+# Closed root for the checked-in shared ARM algorithm projection.
+@import "arm.rtg"

@@ -838,6 +838,7 @@ instructions {
     +-- x86_64.rtg, x86_32.rtg
     +-- aarch64.rtg, arm.rtg
     +-- elf_amd64.rtg
+    +-- *_algorithms.rtg       -- closed shared-ISA generation roots
     |
     +-- linux_amd64.rtg       -- @import "elf_amd64.rtg"
     +-- windows_amd64.rtg     -- @import "x86_64.rtg"
@@ -854,6 +855,12 @@ entrypoint resolution and reachability
     +-- generated target descriptors
     +-- generated fixed-target source manifests
     +-- generated ordinary-Go built-in package</code></pre>
+    <p>
+      Checked-in architecture generation uses the separate
+      <code>*_algorithms.rtg</code> roots. Each imports one shared ISA fragment
+      and exports no runtime target, avoiding an arbitrary dependency on a
+      Linux, Windows, Darwin, or kernel entrypoint.
+    </p>
     <p>
       <code>@import "relative/path.rtg"</code> is a top-level composition
       directive. Resolution is relative to the importing file, imports may be

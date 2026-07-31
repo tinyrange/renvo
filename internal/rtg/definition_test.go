@@ -21,6 +21,13 @@ var nativeDefinitionEntrypoints = map[string]string{
 	"windows/arm64":      "../../backend/definitions/windows_aarch64.rtg",
 }
 
+var nativeArchitectureProjections = map[string]string{
+	"aarch64": "../../backend/definitions/aarch64_algorithms.rtg",
+	"arm":     "../../backend/definitions/arm_algorithms.rtg",
+	"x86_32":  "../../backend/definitions/x86_32_algorithms.rtg",
+	"x86_64":  "../../backend/definitions/x86_64_algorithms.rtg",
+}
+
 func TestNativeDefinitionEmbeddedGoBudget(t *testing.T) {
 	type authoredDeclaration struct {
 		bytes int
@@ -159,7 +166,7 @@ func TestAArch64EncodingSlice(t *testing.T) {
 }
 
 func TestAArch64CheckedInArchitectureOutput(t *testing.T) {
-	resolved := resolveNativeTarget(t, "linux/aarch64")
+	resolved := resolveNativeArchitectureProjection(t, "aarch64")
 	generated := GenerateCheckedInArchitectureAlgorithms(resolved, "aarch64", "main")
 	if !generated.Ok {
 		t.Fatalf("generate architecture: %#v", generated.Diagnostics)
@@ -184,7 +191,7 @@ func TestAArch64CheckedInArchitectureOutput(t *testing.T) {
 }
 
 func TestAmd64DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
-	resolved := resolveNativeTarget(t, "linux/amd64")
+	resolved := resolveNativeArchitectureProjection(t, "x86_64")
 	generated := GenerateCheckedInArchitectureAlgorithms(resolved, "x86_64", "main")
 	if !generated.Ok {
 		t.Fatalf("generate architecture: %#v", generated.Diagnostics)
@@ -206,7 +213,8 @@ func TestAmd64DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 			t.Errorf("generated amd64 output is missing algorithm binding %s", binding)
 		}
 	}
-	prepared := GeneratePreparedBackend(resolved, "linux/amd64")
+	prepared := GeneratePreparedBackend(
+		resolveNativeTarget(t, "linux/amd64"), "linux/amd64")
 	if !prepared.Ok {
 		t.Fatalf("generate prepared amd64 backend: %#v", prepared.Diagnostics)
 	}
@@ -219,10 +227,8 @@ func TestAmd64DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 }
 
 func TestArmDefinitionAndCheckedInArchitectureOutput(t *testing.T) {
-	resolved := resolveNativeTarget(t, "linux/arm")
-	if _, ok := lookupResolvedTarget(resolved, "linux/arm"); !ok {
-		t.Fatalf("targets = %#v, want linux/arm", resolved.Targets)
-	}
+	resolveNativeTarget(t, "linux/arm")
+	resolved := resolveNativeArchitectureProjection(t, "arm")
 	generated := GenerateCheckedInArchitectureAlgorithms(resolved, "arm", "main")
 	if !generated.Ok {
 		t.Fatalf("generate architecture: %#v", generated.Diagnostics)
@@ -246,7 +252,7 @@ func TestArmDefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 }
 
 func Test386DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
-	resolved := resolveNativeTarget(t, "linux/386")
+	resolved := resolveNativeArchitectureProjection(t, "x86_32")
 	generated := GenerateCheckedInArchitectureAlgorithms(resolved, "x86_32", "main")
 	if !generated.Ok {
 		t.Fatalf("generate architecture: %#v", generated.Diagnostics)
@@ -292,6 +298,23 @@ func resolveNativeTarget(t *testing.T, target string) ResolveResult {
 		resolved.Targets[0].Descriptor.Name != target {
 		t.Fatalf("%s resolved targets = %#v, want only %s",
 			filename, resolved.Targets, target)
+	}
+	return resolved
+}
+
+func resolveNativeArchitectureProjection(t *testing.T, arch string) ResolveResult {
+	t.Helper()
+	filename, ok := nativeArchitectureProjections[arch]
+	if !ok {
+		t.Fatalf("no native architecture projection for %s", arch)
+	}
+	resolved := ResolveArchitectureDefinition(parseDefinitionFile(t, filename))
+	if !resolved.Ok {
+		t.Fatalf("resolve %s: %#v", filename, resolved.Diagnostics)
+	}
+	if len(resolved.Targets) != 0 {
+		t.Fatalf("%s resolved targets = %#v, want none",
+			filename, resolved.Targets)
 	}
 	return resolved
 }

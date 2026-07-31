@@ -1,0 +1,6 @@
+definition 1
+unit x86_64
+implements direct_emitter_v1
+
+# Closed root for the checked-in shared x86-64 algorithm projection.
+@import "x86_64.rtg"
