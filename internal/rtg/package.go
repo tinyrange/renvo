@@ -33,6 +33,9 @@ func applyVirtualPackages(document *Document) {
 	if len(document.Diagnostics) != 0 {
 		return
 	}
+	// Collect every package's own symbols before applying extensions. RTG
+	// declaration order is not semantic, so an extension must inherit the same
+	// helpers whether its import appears before or after it in the entrypoint.
 	for i := 0; i < len(document.Declarations); i++ {
 		declaration := document.Declarations[i]
 		if declaration.Kind == DeclGo {
@@ -40,7 +43,11 @@ func applyVirtualPackages(document *Document) {
 		} else if declaration.Kind == DeclArch {
 			addVirtualArchitectureStatementSymbols(document, declaration)
 			addVirtualSequenceSymbols(document, declaration)
-		} else if declaration.Kind == DeclArchExtension {
+		}
+	}
+	for i := 0; i < len(document.Declarations); i++ {
+		declaration := document.Declarations[i]
+		if declaration.Kind == DeclArchExtension {
 			base, ok := document.Declaration(DeclArch, declaration.Name)
 			if !ok {
 				document.Diagnostics = append(document.Diagnostics,

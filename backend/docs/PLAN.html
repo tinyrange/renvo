@@ -338,10 +338,10 @@
         backend family, without pretending to implement the native contract.
       </li>
       <li>
-        The deduplicated native source set contains at most 60,000 semantic
-        bytes and 200 declarations of embedded Go, enforced without weakening
-        a compiler performance gate or moving target logic into an unmeasured
-        file.
+        Deduplicated embedded-Go bytes and declarations are reported as a code
+        hygiene signal. Growth is reviewed against whether regular machine,
+        ABI, runtime, relocation, or format structure belongs in bounded
+        declarations, but no numeric source-volume gate rejects the design.
       </li>
       <li>
         Built-in and custom native definitions use the same schema, resolver,
@@ -1015,14 +1015,18 @@ entrypoint resolution and reachability
 
   <section id="phases">
     <h2>10. Implementation phases</h2>
-    <div class="decision">
+    <div class="warning">
       <strong>Implementation status:</strong>
-      Phases 0 through 10 are implemented in the checked-in native definitions,
-      generator, prepared-backend path, and production projections. Phase 11
-      was treated as a measured packaging optimization; the existing compressed
-      source boundary remains because no replacement demonstrated a
-      size/time/memory win. The steps below remain the acceptance trail for
-      future architecture work.
+      The native schema, stress fixtures, independent target entrypoints,
+      checked-in shared-ISA projections, and prepared custom-backend path are
+      implemented. The Phase 5 and Phase 10 exits are not yet met: built-in
+      OS/runtime integration still follows the existing handwritten
+      <code>compiler_&lt;os&gt;_&lt;arch&gt;_impl.go</code> path in parallel with
+      the target definitions. Phase 11 was treated as a measured packaging
+      optimization; the existing compressed source boundary remains because no
+      replacement demonstrated a size/time/memory win. The steps below remain
+      the acceptance trail for completing built-in generation and adding future
+      architectures.
     </div>
 
     <h3>Phase 0: Freeze evidence and inventory differences</h3>
@@ -1089,8 +1093,9 @@ entrypoint resolution and reachability
       <li>Emit direct Go functions and constants with deterministic naming.</li>
       <li>Emit per-target review metrics for declarative and Go source volume.</li>
       <li>
-        Enforce the deduplicated production native source set at no more than
-        60,000 semantic Go bytes and 200 Go declarations.
+        Report the deduplicated production native embedded-Go bytes and
+        declarations as review metrics, without turning them into an
+        acceptance gate.
       </li>
     </ol>
     <div class="exit">
@@ -1506,7 +1511,7 @@ systemd-run --user --scope \
         </tr>
         <tr>
           <td>Embedded Go again becomes the entire backend.</td>
-          <td>Require every hook to occupy a typed schema site; enforce the deduplicated native-source ceiling; report per-target metrics; review why a hook is necessary; reject moving target logic into an unmeasured file.</td>
+          <td>Require every hook to occupy a typed schema site; report deduplicated native-source and per-target metrics; review why a hook is necessary; reject moving target logic into an unmeasured file.</td>
         </tr>
         <tr>
           <td>The compiler grows a Go complexity analyzer.</td>

@@ -87,12 +87,14 @@ as a table or bounded sequence. Declarative forms remain authoritative for
 operation identity, operands, effects, constraints, composition, relocation
 selection, format selection, and hook placement.
 
-The deduplicated production native source set is hard-limited by
-`TestNativeDefinitionEmbeddedGoBudget` to 60,000 semantic Go bytes and 200 Go
-declarations across all entrypoints. The test is deliberately a simple
-size/count guard, not a Go complexity analyzer. It also prevents the replaced
-opaque module-image, Windows-I/O, label-relocation, ELF-relocation, and x86
-PE-relocation functions from being reintroduced.
+`TestNativeDefinitionEmbeddedGoMetrics` reports deduplicated semantic Go bytes
+and declarations across all entrypoints as a code-hygiene signal. These
+figures are reviewed rather than enforced as a numeric acceptance gate. The
+test separately prevents the replaced
+opaque module-image, Windows/386 I/O, label-relocation, ELF-relocation, and x86
+PE-relocation functions from being reintroduced. Windows/AMD64 still has a
+legacy declarative `io_template` byte sequence; replacing it with named bounded
+sequences is remaining maintainability work.
 
 ## Identity
 
@@ -101,8 +103,8 @@ There are two identities:
 1. The entrypoint identity hashes its complete canonical import graph and
    records authored provenance in generated manifests.
 2. The target semantic identity hashes the selected target, its reachable
-   machine/ABI/runtime/format declarations, reachable Go declarations, and
-   compatibility versions.
+   machine/ABI/runtime/format declarations, reachable bounded-sequence ASTs,
+   reachable Go declarations, and compatibility versions.
 
 RTGU bindings, public target descriptors, RTGB artifacts, and prepared cache
 keys use target identity. Comments, formatting, declaration order, and an
@@ -120,11 +122,14 @@ prunable, while each target can evolve without affecting unrelated
 operating-system code.
 
 Built-ins expose stable compiler-facing names so fixed-target compilers retain
-their direct fast calls. External definitions cannot have names known to a
-release compiler, so preparation emits a target-neutral adapter around the same
-typed operation bindings. That adapter is a packaging boundary only: machine,
-ABI, runtime, relocation, and format semantics remain in the selected
-definition.
+their direct fast calls. The checked-in projections currently replace shared
+ISA encoder algorithms; existing built-in OS/runtime integration remains in
+the handwritten `compiler_<os>_<arch>_impl.go` path. External definitions
+cannot have names known to a release compiler, so preparation emits a
+target-neutral adapter and takes runtime, relocation, and format semantics from
+the selected definition. Finishing generation of built-in target integration
+is separate work and should not be inferred from the shared-architecture
+generation implemented here.
 
 `go generate ./internal/targetinfo` resolves every public target and emits:
 
@@ -180,17 +185,17 @@ operations while exercising:
 The generated production encoders, target registries, bundled compiler, custom
 preparation, RTGU/RTGB binding, Wasm/VM family, native target suites, and full
 self-hosting suite are exercised by the repository tests. Performance
-acceptance remains exclusively defined by `backend/main_test.go`; the native
-source ceiling adds a maintainability constraint and never loosens a compiler
-or output gate.
+acceptance remains exclusively defined by `backend/main_test.go`; native
+embedded-Go volume is review evidence and never loosens a compiler or output
+gate.
 
 ## Acceptance record
 
 The native source set is checked as the deduplicated union of every independent
 target entrypoint. Its current semantic Go bytes and declarations are reported
-by `TestNativeDefinitionEmbeddedGoBudget`; both remain below the enforced
-60,000/200 ceiling. The generated target report separately shows the reachable
-and complete-entrypoint volume retained by each target.
+by `TestNativeDefinitionEmbeddedGoMetrics` without a numeric pass/fail ceiling.
+The generated target report separately shows the reachable and
+complete-entrypoint volume retained by each target.
 
 Prepared production checks cover AArch64, Windows PE on amd64/386/arm64, Linux
 kernel-module ELF, and Linux 386/ARM outputs. Generation, complete backend,

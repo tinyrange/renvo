@@ -5825,6 +5825,10 @@ func renvoAsmCopyPrimaryToSecondary(a *renvoAsm) {
 	if a.c.renvoTargetArch == renvoArchAmd64 && renvoAmd64RewritePrimaryLoad(a, 2, false) {
 		return
 	}
+	if renvoFixedTarget == 0 && a.c.optimizeRuntime && a.c.renvoTargetArch == renvoArchAmd64 {
+		renvoAsmEmit24(a, 0xc28948)
+		return
+	}
 	renvoAsmEmit16(a, 0x5a50)
 }
 func renvoAsmCopyPrimaryToTertiary(a *renvoAsm) {
@@ -5848,6 +5852,10 @@ func renvoAsmCopyPrimaryToTertiary(a *renvoAsm) {
 	if a.c.renvoTargetArch == renvoArchAmd64 && renvoAmd64RewritePrimaryLoad(a, 1, false) {
 		return
 	}
+	if renvoFixedTarget == 0 && a.c.optimizeRuntime && a.c.renvoTargetArch == renvoArchAmd64 {
+		renvoAsmEmit24(a, 0xc18948)
+		return
+	}
 	renvoAsmEmit16(a, 0x5950)
 }
 
@@ -5869,10 +5877,18 @@ func renvoAsmCopySecondaryToTertiary(a *renvoAsm) {
 		renvoArmAsmMovRcxRdx(a)
 		return
 	}
+	if renvoFixedTarget == 0 && a.c.optimizeRuntime && a.c.renvoTargetArch == renvoArchAmd64 {
+		renvoAsmEmit24(a, 0xd18948)
+		return
+	}
 	renvoAsmEmit16(a, 0x5952)
 }
 func renvoAsmCopyTertiaryToPrimary(a *renvoAsm) {
 	renvoNonNil(a)
+	if renvoFixedTarget == 0 && a.c.optimizeRuntime && a.c.renvoTargetArch == renvoArchAmd64 {
+		renvoAsmEmit24(a, 0xc88948)
+		return
+	}
 	renvoAsmPushTertiary(a)
 	renvoAsmPopPrimary(a)
 }
@@ -6566,6 +6582,10 @@ func renvoAsmLeave(a *renvoAsm) {
 	}
 	if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmLeave(a)
+		return
+	}
+	if renvoFixedTarget == 0 && a.c.optimizeRuntime && a.c.renvoTargetArch == renvoArchAmd64 {
+		renvoAsmEmitText(a, "\x48\x89\xec\x5d")
 		return
 	}
 	renvoAsmEmit8(a, 0xc9)
@@ -14843,7 +14863,19 @@ func renvoEmitIndexAddressPrimary(g *renvoLinearGen, ep *renvoExprParse, indexId
 		renvoAsmPopSecondary(a)
 		renvoAsmPopPrimary(a)
 		if g.c.renvoTargetArch == renvoArchAmd64 {
-			renvoAmd64CallIndexAddressHelper(a, elemSize)
+			if renvoFixedTarget == 0 && a.c.optimizeRuntime {
+				fault := renvoEnsureUncaughtRuntimeFaultHelper(g)
+				renvoAsmEmit24(a, 0xd13948)
+				renvoAmd64AsmJccLabel(a, 0x83, fault)
+				if elemSize == 8 {
+					renvoAsmEmit4(a, 0x48, 0xc1, 0xe1, 3)
+				} else if elemSize == 72 {
+					renvoAsmEmit4(a, 0x48, 0x6b, 0xc9, 72)
+				}
+				renvoAsmEmit24(a, 0xc80148)
+			} else {
+				renvoAmd64CallIndexAddressHelper(a, elemSize)
+			}
 		} else {
 			renvoAsmCallLabel(a, renvoEnsureIndexAddressHelper(g, elemSize))
 		}

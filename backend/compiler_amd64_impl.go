@@ -1,6 +1,7 @@
 package main
 
 const renvoAmd64ELFCodeOffset = 0xb0
+const renvoAmd64RuntimeOptimizationSourceThreshold = 1048576
 
 func renvoCompileAmd64(input []int, output int, arenaSize int) int {
 	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 && !renvoPrepareKernelMetadata() {
@@ -81,6 +82,12 @@ func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinear
 	g.arenaSize = meta.arenaSize
 	a := &g.asm
 	renvoAsmInitWithContext(a, g.c)
+	if renvoFixedTarget == 0 {
+		// Large dynamic programs have enough output-size headroom to favor
+		// faster instructions. Fixed-target compilers retain their compact
+		// path so their strict binary gates remain unchanged.
+		g.c.optimizeRuntime = len(p.src) >= renvoAmd64RuntimeOptimizationSourceThreshold
+	}
 	a.codeOffset = renvoAmd64ELFCodeOffset
 	if targetIsWindows(meta.c.renvoTargetOS) {
 		a.codeOffset = renvoWinSectionRVA
@@ -269,7 +276,14 @@ func renvoAmd64EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
 	g.stackPeak = 0
 	renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
 	framePatch := len(a.code)
-	renvoAsmEmit32(a, 0x000000c8)
+	if renvoFixedTarget == 0 && a.c.optimizeRuntime {
+		// Avoid the microcoded ENTER instruction in large generated programs.
+		// Keep the frame size as an immediate placeholder until emission
+		// discovers the function's peak stack use.
+		renvoAsmEmitText(a, "\x55\x48\x89\xe5\x48\x81\xec\x00\x00\x00\x00")
+	} else {
+		renvoAsmEmit32(a, 0x000000c8)
+	}
 	if renvoTypeUsesHiddenResult(g.meta, metaFn.resultType) {
 		g.returnStruct = renvoAddTypedLocal(g, 0, 0, renvoTypeInt)
 		renvoAsmStackMem(a, g.returnStruct, 0x8948, 0x7d, 0xbd)
@@ -306,8 +320,13 @@ func renvoAmd64EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
 	if frame > 65520 {
 		frame = 65520
 	}
-	a.code[framePatch+1] = byte(frame)
-	a.code[framePatch+2] = byte(frame >> 8)
+	if renvoFixedTarget == 0 && a.c.optimizeRuntime {
+		a.code[framePatch+7] = byte(frame)
+		a.code[framePatch+8] = byte(frame >> 8)
+	} else {
+		a.code[framePatch+1] = byte(frame)
+		a.code[framePatch+2] = byte(frame >> 8)
+	}
 	return true
 }
 

@@ -41,10 +41,18 @@ go backend {
 		if rewritePrimaryLoad(a, 7, false) {
 			return
 		}
+		if a.OptimizeRuntime() {
+			a.Bytes3(0x48, 0x89, 0xc7)
+			return
+		}
 		a.Uint16(0x5f50)
 	}
 	func asmMovRsiRax(a *RTGEmitter) {
 		if rewritePrimaryLoad(a, 6, false) {
+			return
+		}
+		if a.OptimizeRuntime() {
+			a.Bytes3(0x48, 0x89, 0xc6)
 			return
 		}
 		a.Uint16(0x5e50)

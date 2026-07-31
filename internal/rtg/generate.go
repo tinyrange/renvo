@@ -2093,7 +2093,7 @@ func appendRewrittenGoModeExports(out []byte, source []byte, names []string, pre
 
 func nativeEmitterStateMethod(source []byte, tokens []Token, start int, receiver string, method string,
 	names []string, prefix string, document *Document, exports []embeddedExport) ([]byte, int, bool) {
-	if method != "PrimaryLoad" && method != "SetPrimaryLoad" && method != "ByteAt" &&
+	if method != "PrimaryLoad" && method != "SetPrimaryLoad" && method != "OptimizeRuntime" && method != "ByteAt" &&
 		method != "SetByteAt" && method != "AddByteAt" && method != "AppendByte" &&
 		method != "Truncate" && method != "Code" && method != "SetCode" &&
 		method != "Data" && method != "SetData" && method != "BSSSize" &&
@@ -2153,6 +2153,11 @@ func nativeEmitterStateMethod(source []byte, tokens []Token, start int, receiver
 	if method == "PrimaryLoad" && len(arguments) == 0 {
 		replacement = append(replacement, receiver...)
 		return append(replacement, ".lastPrimaryLoad"...), end, true
+	}
+	if method == "OptimizeRuntime" && len(arguments) == 0 {
+		replacement = append(replacement, "renvoFixedTarget == 0 && "...)
+		replacement = append(replacement, receiver...)
+		return append(replacement, ".c.optimizeRuntime"...), end, true
 	}
 	if method == "Code" && len(arguments) == 0 {
 		replacement = append(replacement, receiver...)

@@ -40,8 +40,17 @@ func targetSemanticIdentity(document Document, target ResolvedTarget) [32]byte {
 		canonical = appendFramedBytes(canonical, declarations[i].body)
 	}
 
-	roots := targetGoRoots(document, target)
-	parts := reachableEmbeddedGoParts(document, roots, nil)
+	goRoots := baseTargetGoRoots(document, target)
+	goRoots, sequenceRoots := resolveArchitectureSequenceProjection(
+		document, target.Arch, goRoots, targetSequenceRoots(document, target))
+	sequences := targetSemanticSequences(target.Arch, sequenceRoots)
+	for i := 0; i < len(sequences); i++ {
+		canonical = appendFramed(canonical, "sequence")
+		canonical = appendFramed(canonical, sequences[i].name)
+		canonical = appendFramedBytes(canonical, sequences[i].body)
+	}
+
+	parts := reachableEmbeddedGoParts(document, goRoots, nil)
 	for i := 0; i < len(parts); i++ {
 		parts[i].source = canonicalTokenStream(parts[i].source)
 	}
@@ -60,6 +69,57 @@ func targetSemanticIdentity(document Document, target ResolvedTarget) [32]byte {
 		canonical = appendFramedBytes(canonical, parts[i].source)
 	}
 	return sha256Bytes(canonical)
+}
+
+type semanticSequence struct {
+	name string
+	body []byte
+}
+
+func targetSemanticSequences(
+	arch Declaration, selected []string,
+) []semanticSequence {
+	var sequences []semanticSequence
+	available := architectureSequences(arch)
+	for i := 0; i < len(available); i++ {
+		if stringIndex(selected, available[i].Name) < 0 {
+			continue
+		}
+		sequences = append(sequences, semanticSequence{
+			name: available[i].Name,
+			body: canonicalSequenceStatement(available[i].Statement),
+		})
+	}
+	for i := 1; i < len(sequences); i++ {
+		value := sequences[i]
+		at := i
+		for at > 0 && stringLess(value.name, sequences[at-1].name) {
+			sequences[at] = sequences[at-1]
+			at--
+		}
+		sequences[at] = value
+	}
+	return sequences
+}
+
+func canonicalSequenceStatement(statement Statement) []byte {
+	var canonical []byte
+	canonical = appendDecimalFrame(canonical, len(statement.Tokens))
+	for i := 0; i < len(statement.Tokens); i++ {
+		text := statement.Tokens[i]
+		if len(text) >= 2 && text[0] == '"' && text[len(text)-1] == '"' {
+			text = unquoteSimple(text)
+		} else if len(text) != 0 && text[0] >= '0' && text[0] <= '9' {
+			text = normalizeNumber(text)
+		}
+		canonical = appendFramed(canonical, text)
+	}
+	canonical = appendDecimalFrame(canonical, len(statement.Children))
+	for i := 0; i < len(statement.Children); i++ {
+		canonical = appendFramedBytes(
+			canonical, canonicalSequenceStatement(statement.Children[i]))
+	}
+	return canonical
 }
 
 func targetSemanticDeclarations(document Document, target ResolvedTarget) []canonicalDeclaration {

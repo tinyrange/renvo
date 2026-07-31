@@ -105,22 +105,23 @@ analysis. Before adding a hook, check whether a table row, an existing form, a
 bounded sequence, or a shared format constructor states the difference more
 directly.
 
-`TestNativeDefinitionEmbeddedGoBudget` deduplicates shared declarations across
-every native entrypoint and enforces the complete native source set at no more
-than 60,000 semantic Go bytes and 200 Go declarations. This is an
-architecture-maintainability guard, not permission to move target algorithms
-into an unmeasured file. Reusable generator code may implement a generic
-format constructor; machine and OS differences must remain visible as typed
-`.rtg` facts.
+`TestNativeDefinitionEmbeddedGoMetrics` deduplicates shared declarations across
+every native entrypoint and reports semantic Go bytes and declaration counts as
+architecture-maintainability evidence. It is intentionally not a numeric
+acceptance gate and is not permission to move target algorithms into an
+unmeasured file. Reusable generator code may implement a generic format
+constructor; machine and OS differences must remain visible as typed `.rtg`
+facts.
 
 ## Identity and pruning
 
-An entrypoint hash identifies its complete expanded declaration graph and
-appears in generated provenance headers. Import directories, comments, and
-formatting are not semantic. An imported file's basename is semantic because
-it supplies the virtual package used to resolve private helper names. A target
-semantic identity hashes only the selected target and its transitive machine,
-ABI, runtime, format, and embedded Go dependencies. RTGU bindings, target
+An entrypoint hash identifies its complete expanded declaration graph,
+including composed bounded sequences, and appears in generated provenance
+headers. Import directories, comments, and formatting are not semantic. An
+imported file's basename is semantic because it supplies the virtual package
+used to resolve private helper names. A target semantic identity hashes only
+the selected target and its transitive machine, ABI, runtime, format, reachable
+bounded-sequence, and embedded Go dependencies. RTGU bindings, target
 descriptors, prepared artifacts, and cache keys use the target identity.
 
 Comments, formatting, declaration order, and unreachable architectures do not

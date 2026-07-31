@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "e984311e29b809f2f0787bd52d73b0f9a2107469bb157feb02114ef4068b1c03"
+const CompilerSourceDigest = "4d5418b41bccb845fa5eb4d17d9a0abe23d5eaa248f1dbf6cf89a0f74f2b057b"
 
 // source: backend/compiler_common_impl.go
 
@@ -5832,6 +5832,10 @@ return
 if a.c.renvoTargetArch == renvoArchAmd64 && renvoAmd64RewritePrimaryLoad(a, 2, false) {
 return
 }
+if renvoFixedTarget == 0 && a.c.optimizeRuntime && a.c.renvoTargetArch == renvoArchAmd64 {
+renvoAsmEmit24(a, 0xc28948)
+return
+}
 renvoAsmEmit16(a, 0x5a50)
 }
 func renvoAsmCopyPrimaryToTertiary(a *renvoAsm) {
@@ -5855,6 +5859,10 @@ return
 if a.c.renvoTargetArch == renvoArchAmd64 && renvoAmd64RewritePrimaryLoad(a, 1, false) {
 return
 }
+if renvoFixedTarget == 0 && a.c.optimizeRuntime && a.c.renvoTargetArch == renvoArchAmd64 {
+renvoAsmEmit24(a, 0xc18948)
+return
+}
 renvoAsmEmit16(a, 0x5950)
 }
 
@@ -5876,10 +5884,18 @@ if a.c.renvoTargetArch == renvoArchArm {
 renvoArmAsmMovRcxRdx(a)
 return
 }
+if renvoFixedTarget == 0 && a.c.optimizeRuntime && a.c.renvoTargetArch == renvoArchAmd64 {
+renvoAsmEmit24(a, 0xd18948)
+return
+}
 renvoAsmEmit16(a, 0x5952)
 }
 func renvoAsmCopyTertiaryToPrimary(a *renvoAsm) {
 renvoNonNil(a)
+if renvoFixedTarget == 0 && a.c.optimizeRuntime && a.c.renvoTargetArch == renvoArchAmd64 {
+renvoAsmEmit24(a, 0xc88948)
+return
+}
 renvoAsmPushTertiary(a)
 renvoAsmPopPrimary(a)
 }
@@ -6573,6 +6589,10 @@ return
 }
 if a.c.renvoTargetArch == renvoArchArm {
 renvoArmAsmLeave(a)
+return
+}
+if renvoFixedTarget == 0 && a.c.optimizeRuntime && a.c.renvoTargetArch == renvoArchAmd64 {
+renvoAsmEmitText(a, "\x48\x89\xec\x5d")
 return
 }
 renvoAsmEmit8(a, 0xc9)
@@ -14850,7 +14870,19 @@ renvoAsmCopyPrimaryToTertiary(a)
 renvoAsmPopSecondary(a)
 renvoAsmPopPrimary(a)
 if g.c.renvoTargetArch == renvoArchAmd64 {
+if renvoFixedTarget == 0 && a.c.optimizeRuntime {
+fault := renvoEnsureUncaughtRuntimeFaultHelper(g)
+renvoAsmEmit24(a, 0xd13948)
+renvoAmd64AsmJccLabel(a, 0x83, fault)
+if elemSize == 8 {
+renvoAsmEmit4(a, 0x48, 0xc1, 0xe1, 3)
+} else if elemSize == 72 {
+renvoAsmEmit4(a, 0x48, 0x6b, 0xc9, 72)
+}
+renvoAsmEmit24(a, 0xc80148)
+} else {
 renvoAmd64CallIndexAddressHelper(a, elemSize)
+}
 } else {
 renvoAsmCallLabel(a, renvoEnsureIndexAddressHelper(g, elemSize))
 }
@@ -25773,6 +25805,7 @@ renvoNativeIntSize int
 stripSymbols       bool
 windowsSubsystem   int
 emitImage          bool
+optimizeRuntime    bool
 kernel             *renvoKernelCompileContext
 }
 
@@ -26148,34 +26181,34 @@ return renvoRTGParseTargetArg(target)
 
 func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
 if target == renvoTargetLinuxAmd64 {
-return "linux/amd64", "\x02\x19vW\xe4\xe3\x96\xfc\x0f$\xe7Э*\ae\x18=\xa9\xc6c\xd8\"M\u05cdҚ\x98\x0e\x81\n", 3, true
+return "linux/amd64", "\xff\xa2\"\xc0\xcf\t\x04\xac\x1bg\x92\xe9<\xbf\xef\xa1\x12W\x85/\x18^\x9dj\xfa\x81m\xfcbjN\xfc", 3, true
 }
 if target == renvoTargetLinux386 {
-return "linux/386", "\x04k\xea\x14\x9b&\\\x80\x94\x93\x9c\xa01S\xf6\xe4\xa8O\x7f\xb7\x0f\xdf\xf6\xb1\x16\xa7׳\xe1)L}", 3, true
+return "linux/386", "\xecJ#X\x99\xe5\xd9!\xf42\x95 \xbfc\xd9ުJ%\xafb\xc4\xe7\xa9n\x9f߬\aDFw", 3, true
 }
 if target == renvoTargetLinuxAarch64 {
-return "linux/aarch64", "n\x03@\xf3\x8e\xdb\xecS\x11\xcb\x1e\x00\"\xef\x85j\x87\xe4D\x9b\x0f`M_\xd4ɡ\fl\xd6PZ", 3, true
+return "linux/aarch64", "\xab\x83\xbf>!\f\xf2B\xe3#>\xban\x8e\xfe\x04n\x1b]{\xa4\x1a\xf6\x9fC\xed\r\xf3\x18\xee3\xe6", 3, true
 }
 if target == renvoTargetLinuxArm {
-return "linux/arm", "\x0e\xe4\x7f)\xbaz\x92\x92\xca\xd0?\xf9\xeb$\x05\x8b`S\x1ac\x944'\xc0\xf0kk\xed\xd9\xe1y\x8a", 3, true
+return "linux/arm", "\x97hV\x9e*\xc3\xfb\xad\x84\v\xb6\xb3%\xf4\xe1\xbes~\xd9~E\x9bQ\x90I\x18\xd1%=\xfd.\x93", 3, true
 }
 if target == renvoTargetWindowsAmd64 {
-return "windows/amd64", "m\xd3\xf5\x95\x1d\x04\xda\xc8#\xf1ʔ\x8b^a\xe9\xc4}\x92\xe3CF\uf630\x83\x89v\x9b\xb4\x14b", 3, true
+return "windows/amd64", "\xb0\xd6\xc2fb\x12=\xeds[IZ\xae\xfee\x9d4r\xde\xdb\xf2\x829Q\xaep7!M\x99B*", 3, true
 }
 if target == renvoTargetWindows386 {
-return "windows/386", "/p G 2\x9f/\x1c\x97\xe5M\xa9\xd5@Ҋ\xd7\x06hm\xe8\"\xf4S\x93\x1c#/B\x01\xee", 3, true
+return "windows/386", "\x05k\xa4\x992\xa6\xaf\xe9.z\x98\x98lO\x7f\xab\xfe\xd5l\xe7/\x8d\x873\x9f\x1d\xa1\xf7d\x1f$\x1c", 3, true
 }
 if target == renvoTargetWasiWasm32 {
 return "wasi/wasm32", "\x9e\xcdc\x862\xfb\x98\xe7\xfb\xf8\x16ܔ\xc4>\xf2\x04e\xf5\xb5\xad\x1c(\xe4r\x15t\xf7UHl)", 3, true
 }
 if target == renvoTargetDarwinArm64 {
-return "darwin/arm64", "\xda|\xa5G\x94\xfd\xfa\xdb\xcf\xea\x11f\x14;\x8d83\xa9/7\a\xd8>\xc3-4ۮ\x8d\xda\xf7\xda", 3, true
+return "darwin/arm64", "\x9c\xeb1\x8d\xf7E/\x90~\xff\x9a\x88\x11\xef\x7f\x14+\xf0\xd7\xe4\xedf㹝i\x12\xf0\xf00\x9f\xdf", 3, true
 }
 if target == renvoTargetLinuxKernelAmd64 {
-return "linux-kernel/amd64", "6ڌ\x16\x1fX\xeex\x14\xe4\xfay\x12\x85Fl,\xfa\x97أ\xcdK>˫\xa8頗\x1c\f", 3, true
+return "linux-kernel/amd64", "\x14C\xa8\x17IN\xf4o\x9d\x8c\bS;1\xc1\x1f\x8e\xe6\xf9Q\f4\xe8q\x17\x81\x04n,\x13\x99\xaa", 3, true
 }
 if target == renvoTargetWindowsArm64 {
-return "windows/arm64", "#\xaa\xe0\xf5I\xa0\x10\a\u07bb\xe0!~\xe9\v\x96D\xb6\x90\xa6\"^\xd5\xedZ0e\xb2g\xa4\xe0\x90", 3, true
+return "windows/arm64", "۔Q\xf7\x8e.\xe3\xe5\x91\xe8ʻK5`\x1b\xf7\xec\xd0\xdd\xee\vgI\x86\x94\xfd\xff\x95A\x13#", 3, true
 }
 if target == renvoTargetVM32 {
 return "vm/vm32", "7\x9c\xd7!;\xcc\xc1\xa9\xb8\xb7\xe1\x05ÿ\xcc\xf0R\xd2\x1f\x0f\xf9@4-\xfd\x11\xf1f\f\xd7g\xc5", 3, true
@@ -27913,6 +27946,7 @@ return 1
 // source: backend/compiler_amd64_impl.go
 
 const renvoAmd64ELFCodeOffset = 0xb0
+const renvoAmd64RuntimeOptimizationSourceThreshold = 1048576
 
 func renvoCompileAmd64(input []int, output int, arenaSize int) int {
 if renvoFixedTarget == renvoTargetLinuxKernelAmd64 && !renvoPrepareKernelMetadata() {
@@ -27993,6 +28027,12 @@ g.meta = meta
 g.arenaSize = meta.arenaSize
 a := &g.asm
 renvoAsmInitWithContext(a, g.c)
+if renvoFixedTarget == 0 {
+
+
+
+g.c.optimizeRuntime = len(p.src) >= renvoAmd64RuntimeOptimizationSourceThreshold
+}
 a.codeOffset = renvoAmd64ELFCodeOffset
 if targetIsWindows(meta.c.renvoTargetOS) {
 a.codeOffset = renvoWinSectionRVA
@@ -28181,7 +28221,14 @@ g.stackUsed = 0
 g.stackPeak = 0
 renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
 framePatch := len(a.code)
+if renvoFixedTarget == 0 && a.c.optimizeRuntime {
+
+
+
+renvoAsmEmitText(a, "\x55\x48\x89\xe5\x48\x81\xec\x00\x00\x00\x00")
+} else {
 renvoAsmEmit32(a, 0x000000c8)
+}
 if renvoTypeUsesHiddenResult(g.meta, metaFn.resultType) {
 g.returnStruct = renvoAddTypedLocal(g, 0, 0, renvoTypeInt)
 renvoAsmStackMem(a, g.returnStruct, 0x8948, 0x7d, 0xbd)
@@ -28218,8 +28265,13 @@ frame := renvoAlignValue(g.stackPeak, 16)
 if frame > 65520 {
 frame = 65520
 }
+if renvoFixedTarget == 0 && a.c.optimizeRuntime {
+a.code[framePatch+7] = byte(frame)
+a.code[framePatch+8] = byte(frame >> 8)
+} else {
 a.code[framePatch+1] = byte(frame)
 a.code[framePatch+2] = byte(frame >> 8)
+}
 return true
 }
 
@@ -28738,10 +28790,18 @@ func renvoAmd64AsmMovRdiRax(a *renvoAsm) {
 if renvoAmd64RewritePrimaryLoad(a, 7, false) {
 return
 }
+if renvoFixedTarget == 0 && a.c.optimizeRuntime {
+renvoAsmEmit3(a, 0x48, 0x89, 0xc7)
+return
+}
 renvoAsmEmit16(a, 0x5f50)
 }
 func renvoAmd64AsmMovRsiRax(a *renvoAsm) {
 if renvoAmd64RewritePrimaryLoad(a, 6, false) {
+return
+}
+if renvoFixedTarget == 0 && a.c.optimizeRuntime {
+renvoAsmEmit3(a, 0x48, 0x89, 0xc6)
 return
 }
 renvoAsmEmit16(a, 0x5e50)
@@ -34095,7 +34155,11 @@ if a.c.stripSymbols {
 oldCodeLen := len(a.code)
 var out []byte
 out = a.code
+if renvoFixedTarget == 0 && loadFileSize > cap(out) {
+out = renvoAppendUntil(out, loadFileSize)
+} else {
 renvoTruncBytes(&out, loadFileSize)
+}
 if renvoFixedTarget == 0 {
 copy(out[a.codeOffset:a.codeOffset+oldCodeLen], out[:oldCodeLen])
 } else {

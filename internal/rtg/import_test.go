@@ -233,6 +233,42 @@ abi tiny_abi {
 	}
 }
 
+func TestParseImportsExtensionIsIndependentOfDeclarationOrder(t *testing.T) {
+	root := []byte(`definition 1
+unit linux_tiny
+implements direct_emitter_v1
+extend arch tiny {
+	sequences {
+		entry(out:emitter) {
+			encode(out)
+		}
+	}
+}
+@import "tiny.rtg"
+`)
+	files := map[string][]byte{
+		"/defs/tiny.rtg": []byte(`go backend {
+	func encode(out *RTGEmitter) {}
+}
+arch tiny {
+	reject = [move]
+}`),
+	}
+	document := ParseImports(root, "/defs/linux_tiny.rtg", importTestLoader{files: files})
+	if !document.Ok {
+		t.Fatalf("ParseImports failed: %#v", document.Diagnostics)
+	}
+	arch, ok := document.Declaration(DeclArch, "tiny")
+	if !ok {
+		t.Fatal("tiny architecture is missing")
+	}
+	sequences := architectureSequences(arch)
+	if len(sequences) != 1 || len(sequences[0].Steps) != 1 ||
+		sequences[0].Steps[0].Tokens[0] != "tinyPackageEncode" {
+		t.Fatalf("extension did not inherit later package symbols: %#v", sequences)
+	}
+}
+
 func TestParseExtendsArchitectureInStandaloneDefinition(t *testing.T) {
 	document := Parse([]byte(`definition 1
 unit tiny

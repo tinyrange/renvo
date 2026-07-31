@@ -54,7 +54,60 @@ func Canonical(document Document) []byte {
 		}
 		out = appendFramedBytes(out, declarations[i].body)
 	}
+	sequences := canonicalDocumentSequences(document)
+	for i := 0; i < len(sequences); i++ {
+		out = appendFramed(out, "sequence")
+		out = appendFramed(out, sequences[i].arch)
+		out = appendFramed(out, sequences[i].name)
+		out = appendFramedBytes(out, sequences[i].body)
+	}
 	return out
+}
+
+type canonicalDocumentSequence struct {
+	arch string
+	name string
+	body []byte
+}
+
+func canonicalDocumentSequences(document Document) []canonicalDocumentSequence {
+	var out []canonicalDocumentSequence
+	for declaration := 0; declaration < len(document.Declarations); declaration++ {
+		arch := document.Declarations[declaration]
+		if arch.Kind != DeclArch {
+			continue
+		}
+		sequences := architectureSequences(arch)
+		for i := 0; i < len(sequences); i++ {
+			out = append(out, canonicalDocumentSequence{
+				arch: arch.Name,
+				name: sequences[i].Name,
+				body: canonicalSequenceStatement(sequences[i].Statement),
+			})
+		}
+	}
+	for i := 1; i < len(out); i++ {
+		value := out[i]
+		at := i
+		for at > 0 && canonicalDocumentSequenceLess(value, out[at-1]) {
+			out[at] = out[at-1]
+			at--
+		}
+		out[at] = value
+	}
+	return out
+}
+
+func canonicalDocumentSequenceLess(
+	left canonicalDocumentSequence, right canonicalDocumentSequence,
+) bool {
+	if left.arch != right.arch {
+		return stringLess(left.arch, right.arch)
+	}
+	if left.name != right.name {
+		return stringLess(left.name, right.name)
+	}
+	return bytesLess(left.body, right.body)
 }
 
 func canonicalRange(document Document, start int, end int) []byte {

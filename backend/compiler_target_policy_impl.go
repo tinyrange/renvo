@@ -242,6 +242,7 @@ type renvoCompileContext struct {
 	stripSymbols       bool
 	windowsSubsystem   int
 	emitImage          bool
+	optimizeRuntime    bool
 	kernel             *renvoKernelCompileContext
 }
 

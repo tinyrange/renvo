@@ -50,7 +50,11 @@ func renvoAsmImageAmd64(a *renvoAsm) []byte {
 		oldCodeLen := len(a.code)
 		var out []byte
 		out = a.code
-		renvoTruncBytes(&out, loadFileSize)
+		if renvoFixedTarget == 0 && loadFileSize > cap(out) {
+			out = renvoAppendUntil(out, loadFileSize)
+		} else {
+			renvoTruncBytes(&out, loadFileSize)
+		}
 		if renvoFixedTarget == 0 {
 			copy(out[a.codeOffset:a.codeOffset+oldCodeLen], out[:oldCodeLen])
 		} else {

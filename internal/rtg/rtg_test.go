@@ -554,6 +554,46 @@ func TestTargetSemanticIdentityTracksReachableSemanticsNotFormatting(t *testing.
 	}
 }
 
+func TestTargetSemanticIdentityTracksArchitectureExtensionSequences(t *testing.T) {
+	withSequence := replaceOnce(testMachineDefinition,
+		"abi tiny_abi { arch = tiny64 }",
+		`extend arch tiny64 {
+	sequences {
+		entry(out:emitter) {
+			out.Byte(1)
+		}
+	}
+}
+abi tiny_abi { arch = tiny64 }`)
+	withSequence = replaceOnce(withSequence,
+		"runtime tiny_runtime { operation print { builtin = true } }",
+		"runtime tiny_runtime {\n\tentry sequence entry {}\n\toperation print { builtin = true }\n}")
+	base := Resolve(Parse([]byte(withSequence), "tiny-extension.rtg"))
+	changed := Resolve(Parse([]byte(replaceOnce(
+		withSequence, "out.Byte(1)", "out.Byte(2)")), "tiny-extension-changed.rtg"))
+	formatted := Resolve(Parse([]byte(replaceOnce(
+		withSequence, "out.Byte(1)", "out . Byte ( 1 ) // same sequence")),
+		"tiny-extension-formatted.rtg"))
+	if !base.Ok || !changed.Ok || !formatted.Ok {
+		t.Fatalf("Resolve failed: base=%#v changed=%#v formatted=%#v",
+			base.Diagnostics, changed.Diagnostics, formatted.Diagnostics)
+	}
+	if base.Targets[0].Descriptor.Definition ==
+		changed.Targets[0].Descriptor.Definition {
+		t.Fatal("reachable extension sequence did not change target semantic identity")
+	}
+	if base.Document.Hash == changed.Document.Hash {
+		t.Fatal("extension sequence did not change entrypoint identity")
+	}
+	if base.Targets[0].Descriptor.Definition !=
+		formatted.Targets[0].Descriptor.Definition {
+		t.Fatal("extension sequence formatting changed target semantic identity")
+	}
+	if base.Document.Hash != formatted.Document.Hash {
+		t.Fatal("extension sequence formatting changed entrypoint identity")
+	}
+}
+
 func TestTargetMetricsSeparateReachableAndCatalogGo(t *testing.T) {
 	source := testMachineDefinition + `
 go backend {
