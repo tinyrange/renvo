@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"strings"
 	"testing"
 
 	backendunit "renvo.dev/backend/unit"
@@ -71,6 +72,33 @@ func TestBackendDefinitionResolvesBeforeSourceSelection(t *testing.T) {
 	}
 	if _, err := backendunit.Unmarshal(result.Unit); err != nil {
 		t.Fatalf("ordinary backend reader rejected optional binding tags: %v", err)
+	}
+}
+
+func TestBackendDefinitionResolvesRelativeImportsFromSourceFS(t *testing.T) {
+	declarationAt := strings.Index(testBackendDefinition, "arch a64")
+	if declarationAt < 0 {
+		t.Fatal("test definition has no architecture declaration")
+	}
+	root := testBackendDefinition[:declarationAt] + `@import "machine/native.rtg"` + "\n"
+	files := []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/definitions/acme.rtg", Src: []byte(root)},
+		{Path: "/repo/case/definitions/machine/native.rtg", Src: []byte(testBackendDefinition[declarationAt:])},
+		{Path: "/repo/case/cmd/app/main_linux_arm64.go", Src: []byte("package main\nfunc appMain() int { return 42 }\n")},
+	}
+	result := BuildFromFSWithBackend([]string{
+		"-backend", "definitions/acme.rtg",
+		"-t", "acme/aarch64",
+		"-emit-unit",
+		"-o", "app.unit",
+		"./cmd/app",
+	}, "/repo/case", "/std", memorySourceFS{files: files})
+	if !result.Ok {
+		t.Fatalf("imported backend BuildFromFS failed: %#v", result.Diagnostic)
+	}
+	if result.Options.Target != "acme/aarch64" {
+		t.Fatalf("imported backend target = %q", result.Options.Target)
 	}
 }
 

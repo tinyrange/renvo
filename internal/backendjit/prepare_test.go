@@ -189,24 +189,14 @@ func TestCompiledInBootstrapPreparesAndCachesBackend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	builtInDefinition := filepath.Join(root, "backend", "definitions", "native.rtg")
-	definitionSource, err := os.ReadFile(builtInDefinition)
-	if err != nil {
-		t.Fatal(err)
-	}
-	definitionSource = bytes.Replace(definitionSource,
-		[]byte("target linux/amd64 {"), []byte("target example/example64 {"), 1)
 	// Give the unknown architecture a semantically equivalent but observably
 	// different zero-immediate encoding. The output assertion below proves the
 	// prepared compiler executed this definition-owned encoder rather than an
 	// advertised amd64 fallback.
-	definitionSource = bytes.Replace(definitionSource,
-		[]byte("out.Bytes2(0x31, 0xc0)"),
-		[]byte("out.Bytes2(0x6a, 0)\n\t\t\tx86OpcodeRegister(out, 0x58, destination)"), 1)
-	definition := filepath.Join(t.TempDir(), "example-amd64.rtg")
-	if err := os.WriteFile(definition, definitionSource, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	definition := copyNativeDefinition(t, root,
+		"target linux/amd64 {", "target example/example64 {",
+		"out.Bytes2(0x31, 0xc0)",
+		"out.Bytes2(0x6a, 0)\n\t\t\tx86OpcodeRegister(out, 0x58, destination)")
 	stdRoot := filepath.Join(root, "std")
 	source := filepath.Join(root, "backend", "tests", "arithmetic_return_expression.go")
 	cache := t.TempDir()
@@ -320,16 +310,8 @@ func TestCompiledInBootstrapUsesAArch64Definition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	definitionSource, err := os.ReadFile(filepath.Join(root, "backend", "definitions", "native.rtg"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	definitionSource = bytes.Replace(definitionSource,
-		[]byte("target linux/aarch64 {"), []byte("target example/aarch64 {"), 1)
-	definition := filepath.Join(t.TempDir(), "example-aarch64.rtg")
-	if err := os.WriteFile(definition, definitionSource, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	definition := copyNativeDefinition(t, root,
+		"target linux/aarch64 {", "target example/aarch64 {")
 	result := driver.CompileFromFS([]string{
 		"-backend", definition,
 		"-t", "example/aarch64",
@@ -368,18 +350,8 @@ func TestCompiledInBootstrapUsesDefinitionOwnedPEImages(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.custom, func(t *testing.T) {
-			definitionSource, readErr := os.ReadFile(filepath.Join(
-				root, "backend", "definitions", test.file))
-			if readErr != nil {
-				t.Fatal(readErr)
-			}
-			definitionSource = bytes.Replace(definitionSource,
-				[]byte("target "+test.target+" {"),
-				[]byte("target "+test.custom+" {"), 1)
-			definition := filepath.Join(t.TempDir(), test.file)
-			if writeErr := os.WriteFile(definition, definitionSource, 0o600); writeErr != nil {
-				t.Fatal(writeErr)
-			}
+			definition := copyNativeDefinition(t, root,
+				"target "+test.target+" {", "target "+test.custom+" {")
 			result := driver.CompileFromFS([]string{
 				"-backend", definition,
 				"-t", test.custom,
@@ -434,21 +406,8 @@ func TestCompiledInBootstrapUsesDefinitionOwnedKernelModuleImage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	definitionSource, err := os.ReadFile(filepath.Join(
-		root, "backend", "definitions", "native.rtg"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	definitionSource = bytes.Replace(
-		definitionSource,
-		[]byte("target linux-kernel/amd64 {"),
-		[]byte("target example/kernel-amd64 {"),
-		1,
-	)
-	definition := filepath.Join(t.TempDir(), "amd64.rtg")
-	if err := os.WriteFile(definition, definitionSource, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	definition := copyNativeDefinition(t, root,
+		"target linux-kernel/amd64 {", "target example/kernel-amd64 {")
 	result := driver.CompileFromFS([]string{
 		"-backend", definition,
 		"-t", "example/kernel-amd64",
@@ -506,21 +465,8 @@ func TestCompiledInBootstrapUsesDefinitionOwnedMachOImage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	definitionSource, err := os.ReadFile(filepath.Join(
-		root, "backend", "definitions", "native.rtg"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	definitionSource = bytes.Replace(
-		definitionSource,
-		[]byte("target darwin/arm64 {"),
-		[]byte("target example/darwin-arm64 {"),
-		1,
-	)
-	definition := filepath.Join(t.TempDir(), "aarch64.rtg")
-	if err := os.WriteFile(definition, definitionSource, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	definition := copyNativeDefinition(t, root,
+		"target darwin/arm64 {", "target example/darwin-arm64 {")
 	result := driver.CompileFromFS([]string{
 		"-backend", definition,
 		"-t", "example/darwin-arm64",
@@ -567,18 +513,8 @@ func TestCompiledInBootstrapUses32BitDefinitions(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.custom, func(t *testing.T) {
-			definitionSource, readErr := os.ReadFile(filepath.Join(
-				root, "backend", "definitions", test.file))
-			if readErr != nil {
-				t.Fatal(readErr)
-			}
-			definitionSource = bytes.Replace(definitionSource,
-				[]byte("target "+test.target+" {"),
-				[]byte("target "+test.custom+" {"), 1)
-			definition := filepath.Join(t.TempDir(), test.file)
-			if writeErr := os.WriteFile(definition, definitionSource, 0o600); writeErr != nil {
-				t.Fatal(writeErr)
-			}
+			definition := copyNativeDefinition(t, root,
+				"target "+test.target+" {", "target "+test.custom+" {")
 			result := driver.CompileFromFS([]string{
 				"-backend", definition,
 				"-t", test.custom,
@@ -659,6 +595,62 @@ func TestCompiledInBootstrapUsesVM32Definitions(t *testing.T) {
 			}
 		})
 	}
+}
+
+func copyNativeDefinition(t *testing.T, root string, replacements ...string) string {
+	t.Helper()
+	if len(replacements)%2 != 0 {
+		t.Fatal("copyNativeDefinition requires old/new replacement pairs")
+	}
+	type definitionFile struct {
+		name   string
+		source []byte
+	}
+	names := []string{
+		"native.rtg",
+		"native/x86_64.rtg",
+		"native/x86_32.rtg",
+		"native/aarch64.rtg",
+		"native/arm.rtg",
+	}
+	files := make([]definitionFile, len(names))
+	sourceRoot := filepath.Join(root, "backend", "definitions")
+	for i := 0; i < len(names); i++ {
+		source, err := os.ReadFile(filepath.Join(sourceRoot, names[i]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		files[i] = definitionFile{name: names[i], source: source}
+	}
+	for replacement := 0; replacement < len(replacements); replacement += 2 {
+		old := []byte(replacements[replacement])
+		newText := []byte(replacements[replacement+1])
+		found := false
+		for i := 0; i < len(files); i++ {
+			if !bytes.Contains(files[i].source, old) {
+				continue
+			}
+			if found || bytes.Count(files[i].source, old) != 1 {
+				t.Fatalf("native definition replacement %q is not unique", old)
+			}
+			files[i].source = bytes.Replace(files[i].source, old, newText, 1)
+			found = true
+		}
+		if !found {
+			t.Fatalf("native definition replacement %q was not found", old)
+		}
+	}
+	destination := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(destination, "native"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < len(files); i++ {
+		if err := os.WriteFile(filepath.Join(destination, files[i].name),
+			files[i].source, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return filepath.Join(destination, "native.rtg")
 }
 
 func minInt(a int, b int) int {

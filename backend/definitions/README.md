@@ -8,9 +8,22 @@ Renvo has two backend families:
   deliberately separate because structured control flow, module index spaces,
   and validation are not native-machine concepts.
 
-The built-in native source of truth is [`native.rtg`](native.rtg). All nine
-built-in native targets are compositions in that one closed catalog. The
-Wasm/VM family remains in [`wasm32.rtg`](wasm32.rtg).
+The built-in native source of truth is the closed catalog rooted at
+[`native.rtg`](native.rtg). That small entry point imports one
+architecture-owned slice for each native ISA:
+
+```text
+native.rtg
+└── native/
+    ├── x86_64.rtg
+    ├── x86_32.rtg
+    ├── aarch64.rtg
+    └── arm.rtg
+```
+
+Each slice keeps an architecture beside its ABI, runtime, format, and target
+compositions. The Wasm/VM family remains in
+[`wasm32.rtg`](wasm32.rtg).
 
 Generated Go is checked in so an ordinary `go build` needs no generator:
 
@@ -27,8 +40,8 @@ the source bundle used to prepare external definitions.
 
 ## Adding a native architecture
 
-Add the machine to `native.rtg`; do not add an architecture switch to the RTG
-parser or generator.
+Add a new architecture slice under `native/` and import it from `native.rtg`;
+do not add an architecture switch to the RTG parser or generator.
 
 1. Declare the physical registers once with `registers`.
 2. Use `register_class` for overlapping constrained subsets.
@@ -62,17 +75,18 @@ analysis. Before adding a hook, check whether a table row, an existing form, a
 bounded sequence, or a shared format constructor states the difference more
 directly.
 
-`TestNativeDefinitionEmbeddedGoBudget` enforces the closed native catalog at no
-more than 60,000 semantic Go bytes and 200 Go declarations. This is an
-architecture-maintainability guard, not permission to move target algorithms
-into an unmeasured file. Reusable generator code may implement a generic format
-constructor; machine and OS differences must remain visible as typed `.rtg`
-facts.
+`TestNativeDefinitionEmbeddedGoBudget` enforces the complete imported native
+catalog at no more than 60,000 semantic Go bytes and 200 Go declarations. This
+is an architecture-maintainability guard, not permission to move target
+algorithms into an unmeasured file. Reusable generator code may implement a
+generic format constructor; machine and OS differences must remain visible as
+typed `.rtg` facts.
 
 ## Identity and pruning
 
-The catalog hash identifies the complete authored `.rtg` file and appears in
-generated provenance headers. A target semantic identity hashes only the
+The catalog hash identifies the complete expanded declaration graph and
+appears in generated provenance headers. Import paths, comments, and file
+boundaries are not semantic. A target semantic identity hashes only the
 selected target and its transitive machine, ABI, runtime, format, and embedded
 Go dependencies. RTGU bindings, target descriptors, prepared artifacts, and
 cache keys use the target identity.
@@ -81,6 +95,15 @@ Comments, formatting, declaration order, and unreachable architectures do not
 change a target identity. Changing a reachable hook or declaration does.
 Fixed and prepared generation starts at one selected target and emits only
 reachable Go declarations.
+
+## Imports
+
+`@import "relative/path.rtg"` includes another definition fragment at the top
+level. Paths are resolved relative to the importing file, nested imports are
+supported, and cycles are rejected. Imported files are fragments: the root
+owns `definition`, `unit`, and `implements`, while the parser validates the
+expanded graph as one closed catalog. Diagnostics retain the filename and
+position of the fragment that owns the invalid declaration.
 
 ## Schema design checks
 

@@ -92,7 +92,9 @@ func resolveBackendBuildOptions(args []string, workDir string, fs SourceFS) back
 		failed.ErrorArg = backendPath
 		return backendBuildOptions{options: failed, hasBackend: true}
 	}
-	resolved := backenddef.Resolve(source, backendPath, targetName)
+	rootPath := load.JoinPath(workDir, backendPath)
+	resolved := backenddef.ResolveImports(source, rootPath, targetName,
+		backendDefinitionImportLoader{fs: fs})
 	if !resolved.Ok {
 		failed.Error = ParseErrInvalidBackend
 		failed.ErrorArg = resolved.Message
@@ -141,6 +143,18 @@ func resolveBackendBuildOptions(args []string, workDir string, fs SourceFS) back
 		options = parseFail(options, ParseErrModeRequiresLinuxAmd64, options.Target, backendAt)
 	}
 	return backendBuildOptions{options: options, descriptor: resolved.Descriptor, hasBackend: true}
+}
+
+type backendDefinitionImportLoader struct {
+	fs SourceFS
+}
+
+func (loader backendDefinitionImportLoader) LoadImport(
+	importingFilename string, importPath string,
+) rtg.ImportSource {
+	path := load.JoinPath(load.DirPath(importingFilename), importPath)
+	imported, found := loader.fs.ReadFile(path)
+	return rtg.ImportSource{Source: imported, Filename: path, Ok: found}
 }
 
 func BuildFromFSWithBackend(args []string, workDir string, stdRoot string, fs SourceFS) BuildResult {

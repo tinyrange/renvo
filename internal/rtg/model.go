@@ -1,8 +1,9 @@
 // Package rtg parses the shared Renvo target-generation language.
 //
 // The package intentionally owns no filesystem, process, cache, or compiler
-// policy. Callers provide one source byte slice and receive a closed document
-// plus structured diagnostics.
+// policy. Callers provide source byte slices (and, for imported definitions, a
+// narrow loader capability) and receive a closed document plus structured
+// diagnostics.
 package rtg
 
 const (
@@ -93,6 +94,29 @@ type Document struct {
 	Diagnostics  []Diagnostic
 	Hash         [32]byte
 	Ok           bool
+	sourceMap    []sourceSegment
+}
+
+// ImportLoader resolves an import path relative to the importing source. The
+// returned filename is the stable name used for diagnostics and cycle checks.
+// Filesystem-backed callers normally return a cleaned absolute path; virtual
+// filesystems can return their own canonical path.
+type ImportLoader interface {
+	LoadImport(importingFilename string, importPath string) ImportSource
+}
+
+type ImportSource struct {
+	Source   []byte
+	Filename string
+	Ok       bool
+}
+
+type sourceSegment struct {
+	logicalStart int
+	logicalEnd   int
+	sourceStart  int
+	filename     string
+	source       []byte
 }
 
 func (d Document) Declaration(kind string, name string) (Declaration, bool) {
@@ -133,4 +157,41 @@ func position(source []byte, offset int) Position {
 
 func sourceSpan(source []byte, start int, end int) Span {
 	return Span{Start: position(source, start), End: position(source, end)}
+}
+
+func documentDiagnostic(document Document, span Span, code string, message string) Diagnostic {
+	filename, start := documentPosition(document, span.Start.Offset)
+	endFilename, end := documentPosition(document, span.End.Offset)
+	if endFilename != filename {
+		end = start
+	}
+	return Diagnostic{
+		Filename: filename,
+		Span:     Span{Start: start, End: end},
+		Code:     code,
+		Message:  message,
+	}
+}
+
+func documentPosition(document Document, offset int) (string, Position) {
+	if len(document.sourceMap) == 0 {
+		return document.Filename, position(document.Source, offset)
+	}
+	for i := 0; i < len(document.sourceMap); i++ {
+		segment := document.sourceMap[i]
+		if offset >= segment.logicalStart && offset < segment.logicalEnd {
+			sourceOffset := segment.sourceStart + offset - segment.logicalStart
+			return segment.filename, position(segment.source, sourceOffset)
+		}
+	}
+	if offset == len(document.Source) {
+		for i := len(document.sourceMap) - 1; i >= 0; i-- {
+			segment := document.sourceMap[i]
+			if segment.logicalEnd == offset {
+				return segment.filename, position(segment.source,
+					segment.sourceStart+segment.logicalEnd-segment.logicalStart)
+			}
+		}
+	}
+	return document.Filename, position(document.Source, offset)
 }

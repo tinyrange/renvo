@@ -57,12 +57,9 @@ func GenerateCheckedInArchitectureContract(resolved ResolveResult, archName stri
 		}}}
 	}
 	if len(architectureBindings(arch)) == 0 {
-		return GenerateResult{Diagnostics: []Diagnostic{{
-			Filename: resolved.Document.Filename,
-			Span:     arch.Span,
-			Code:     "RTG-GENERATE-005",
-			Message:  "architecture " + archName + " has no direct emitter bindings",
-		}}}
+		return GenerateResult{Diagnostics: []Diagnostic{documentDiagnostic(
+			resolved.Document, arch.Span, "RTG-GENERATE-005",
+			"architecture "+archName+" has no direct emitter bindings")}}
 	}
 	manifest := []string{resolved.Document.Unit + " " + HashText(resolved.Document.Hash)}
 	source := []byte("//go:build !renvo\n\n")

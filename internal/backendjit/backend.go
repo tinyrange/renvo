@@ -8,6 +8,7 @@ import (
 
 	"renvo.dev/internal/driver"
 	"renvo.dev/internal/linkedimage"
+	"renvo.dev/internal/rtg"
 	"renvo.dev/internal/rtgb"
 	"renvo.dev/internal/runimage"
 	"renvo.dev/internal/unit"
@@ -105,11 +106,22 @@ func (b *Backend) prepare(target string) Prepared {
 		workDir, _ := os.Getwd()
 		b.prepared = Prepare(PrepareConfig{
 			Definition: source, Filename: b.path, Target: target,
-			BackendRoot: b.backendRoot, WorkDir: workDir, StdRoot: b.stdRoot,
+			ImportLoader: filesystemImportLoader{},
+			BackendRoot:  b.backendRoot, WorkDir: workDir, StdRoot: b.stdRoot,
 			CacheDir: b.cacheDir, Bootstrap: b.bootstrap,
 		})
 	}
 	return b.prepared
+}
+
+type filesystemImportLoader struct{}
+
+func (filesystemImportLoader) LoadImport(
+	importingFilename string, importPath string,
+) rtg.ImportSource {
+	path := filepath.Clean(filepath.Join(filepath.Dir(importingFilename), importPath))
+	source, err := os.ReadFile(path)
+	return rtg.ImportSource{Source: source, Filename: path, Ok: err == nil}
 }
 
 func (ProcessRunner) Run(artifact rtgb.Artifact, request Request) driver.BackendResult {

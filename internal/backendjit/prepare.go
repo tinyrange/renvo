@@ -25,15 +25,16 @@ const (
 )
 
 type PrepareConfig struct {
-	Definition  []byte
-	Filename    string
-	Target      string
-	BackendRoot string
-	WorkDir     string
-	StdRoot     string
-	CacheDir    string
-	Cache       ArtifactCache
-	Bootstrap   driver.Backend
+	Definition   []byte
+	Filename     string
+	ImportLoader rtg.ImportLoader
+	Target       string
+	BackendRoot  string
+	WorkDir      string
+	StdRoot      string
+	CacheDir     string
+	Cache        ArtifactCache
+	Bootstrap    driver.Backend
 }
 
 // ArtifactCache lets embedders keep prepared artifacts outside the host
@@ -53,7 +54,8 @@ type Prepared struct {
 }
 
 func Prepare(config PrepareConfig) Prepared {
-	resolved := rtg.ResolveDefinitions(rtg.Parse(config.Definition, config.Filename))
+	resolved := rtg.ResolveDefinitions(rtg.ParseImports(
+		config.Definition, config.Filename, config.ImportLoader))
 	if !resolved.Ok {
 		return prepareFailure("RENVO-RTG-001", resolved.Diagnostics[0].Message)
 	}

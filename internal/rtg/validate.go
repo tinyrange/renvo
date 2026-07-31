@@ -407,21 +407,15 @@ func validateDeclarationFields(document Document, declaration Declaration) []Dia
 	for i := 0; i < len(declaration.Fields); i++ {
 		field := declaration.Fields[i]
 		if stringIndex(seen, field.Name) >= 0 {
-			diagnostics = append(diagnostics, Diagnostic{
-				Filename: document.Filename,
-				Span:     field.Span,
-				Code:     "RTG-VALIDATE-060",
-				Message:  "duplicate field " + field.Name + " in " + declaration.Kind + " " + declaration.Name,
-			})
+			diagnostics = append(diagnostics, documentDiagnostic(document, field.Span,
+				"RTG-VALIDATE-060",
+				"duplicate field "+field.Name+" in "+declaration.Kind+" "+declaration.Name))
 		}
 		seen = append(seen, field.Name)
 		if stringIndex(allowed, field.Name) < 0 && !declarationOwnsNamedAssignment(declaration, field.Name) {
-			diagnostics = append(diagnostics, Diagnostic{
-				Filename: document.Filename,
-				Span:     field.Span,
-				Code:     "RTG-VALIDATE-061",
-				Message:  "unknown field " + field.Name + " in " + declaration.Kind + " " + declaration.Name,
-			})
+			diagnostics = append(diagnostics, documentDiagnostic(document, field.Span,
+				"RTG-VALIDATE-061",
+				"unknown field "+field.Name+" in "+declaration.Kind+" "+declaration.Name))
 		}
 	}
 	return diagnostics
@@ -896,5 +890,5 @@ func statementListValues(statement Statement) []string {
 }
 
 func statementDiagnostic(document Document, statement Statement, code string, message string) Diagnostic {
-	return Diagnostic{Filename: document.Filename, Span: statement.Span, Code: code, Message: message}
+	return documentDiagnostic(document, statement.Span, code, message)
 }

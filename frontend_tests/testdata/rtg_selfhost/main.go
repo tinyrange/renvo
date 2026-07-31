@@ -5,6 +5,10 @@ import "renvo.dev/internal/rtg"
 const definition = `definition 1
 unit tiny
 implements direct_emitter_v1
+@import "machine.rtg"
+`
+
+const machine = `
 go backend {
 	func addOne(value int) int { return value + 1 }
 }
@@ -39,12 +43,35 @@ target example/tiny64 {
 }
 `
 
+type machineImportLoader struct{}
+
+func (machineImportLoader) LoadImport(_ string, path string) rtg.ImportSource {
+	if path == "machine.rtg" {
+		return rtg.ImportSource{
+			Source: []byte(machine), Filename: path, Ok: true,
+		}
+	}
+	return rtg.ImportSource{}
+}
+
 func main() {
-	parsed := rtg.Parse([]byte(definition), "tiny.rtg")
+	parsed := rtg.ParseImports([]byte(definition), "tiny.rtg", machineImportLoader{})
+	if !parsed.Ok {
+		if len(parsed.Diagnostics) != 0 {
+			print(parsed.Diagnostics[0].Code + ": " + parsed.Diagnostics[0].Message + "\n")
+		} else {
+			print("PARSE\n")
+		}
+		return
+	}
 	resolved := rtg.ResolveDefinitions(parsed)
+	if !resolved.Ok {
+		print("RESOLVE\n")
+		return
+	}
 	generated := rtg.GenerateFixedBackend(resolved, "example/tiny64")
-	if !parsed.Ok || !resolved.Ok || !generated.Ok || len(generated.Source) == 0 {
-		print("FAIL\n")
+	if !generated.Ok || len(generated.Source) == 0 {
+		print("GENERATE\n")
 		return
 	}
 	print("PASS\n")

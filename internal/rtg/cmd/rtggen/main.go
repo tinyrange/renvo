@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"renvo.dev/internal/rtg"
 )
@@ -47,7 +48,8 @@ func main() {
 		if err != nil {
 			fail(err.Error())
 		}
-		resolved := rtg.ResolveDefinitions(rtg.Parse(source, path))
+		resolved := rtg.ResolveDefinitions(rtg.ParseImports(
+			source, path, filesystemImportLoader{}))
 		if !resolved.Ok {
 			failDiagnostics(resolved.Diagnostics)
 		}
@@ -86,6 +88,16 @@ func main() {
 		failDiagnostics(generated.Diagnostics)
 	}
 	writeGenerated(*output, *check, generated)
+}
+
+type filesystemImportLoader struct{}
+
+func (filesystemImportLoader) LoadImport(
+	importingFilename string, importPath string,
+) rtg.ImportSource {
+	path := filepath.Clean(filepath.Join(filepath.Dir(importingFilename), importPath))
+	source, err := os.ReadFile(path)
+	return rtg.ImportSource{Source: source, Filename: path, Ok: err == nil}
 }
 
 func writeGenerated(output string, check bool, generated rtg.GenerateResult) {

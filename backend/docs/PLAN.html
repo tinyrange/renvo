@@ -418,13 +418,14 @@
         in ordinary Go-module builds.
       </li>
       <li>
-        A distributable custom machine definition remains one closed file. It
-        does not depend on an ambient definition search path.
+        A distributable custom machine definition remains one closed import
+        graph rooted at an explicitly selected file. Every import is relative
+        to its importer; there is no ambient definition search path.
       </li>
       <li>
-        The built-in native catalog is also one closed file. Reuse occurs among
-        named declarations inside that file, and generation emits separate
-        prunable outputs.
+        The built-in native catalog is one closed import graph rooted at
+        <code>native.rtg</code>. Architecture-owned fragments keep each ISA
+        coherent, and generation emits separate prunable outputs.
       </li>
       <li>
         Embedded Go is parsed and type-checked with Renvo's existing frontend,
@@ -438,9 +439,10 @@
       </li>
     </ul>
     <div class="warning">
-      The built-in catalog being one file does not mean its generated compiler
-      is universal. The generator must slice the resolved catalog by target and
-      emit only reachable declarations for fixed-target builds.
+      Splitting the built-in catalog into authored fragments does not make its
+      generated compiler universal. The generator must slice the resolved
+      catalog by target and emit only reachable declarations for fixed-target
+      builds.
     </div>
   </section>
 
@@ -823,18 +825,16 @@ instructions {
   <section id="generation">
     <h2>8. Source authority and generation topology</h2>
     <p>
-      The built-in native source of truth becomes one closed catalog:
-      <code>backend/definitions/native.rtg</code>. It contains shared native
-      declarations plus the four production architecture descriptions. Wasm
-      and VM source remains outside it.
+      The built-in native source of truth is one closed catalog rooted at
+      <code>backend/definitions/native.rtg</code>. The root imports four
+      architecture-owned slices; Wasm and VM source remains outside it.
     </p>
     <pre><code>backend/definitions/native.rtg
     |
-    +-- shared native operation contract
-    +-- reusable ABI templates and policies
-    +-- Linux / Windows / Darwin / kernel runtime declarations
-    +-- ELF / PE-COFF / Mach-O / relocatable format declarations
-    +-- amd64 / 386 / ARM / AArch64 machine differences
+    +-- @import native/x86_64.rtg
+    +-- @import native/x86_32.rtg
+    +-- @import native/aarch64.rtg
+    +-- @import native/arm.rtg
     |
     v
 target slicing and reachability
@@ -844,6 +844,15 @@ target slicing and reachability
     +-- generated target descriptors
     +-- generated fixed-target source manifests
     +-- generated ordinary-Go built-in package</code></pre>
+    <p>
+      <code>@import "relative/path.rtg"</code> is a top-level composition
+      directive. Resolution is relative to the importing file, imports may be
+      nested, cycles are rejected, and diagnostics map back to the owning
+      fragment. Imports do not create namespaces or packages: after expansion,
+      duplicate declarations and metadata are checked exactly as if authored
+      together. Canonical identity covers the declaration graph rather than
+      file boundaries or import spelling.
+    </p>
 
     <h3>One authoritative production projection</h3>
     <p>
@@ -1165,12 +1174,12 @@ target slicing and reachability
     <h3>Phase 8: Consolidate the built-in native catalog</h3>
     <ol>
       <li>
-        Merge shared native declarations and the four machine descriptions into
-        <code>backend/definitions/native.rtg</code>.
+        Root the closed catalog at <code>backend/definitions/native.rtg</code>
+        and import one coherent fragment per production architecture.
       </li>
       <li>
-        Remove superseded per-architecture definition files after generated
-        output is stable.
+        Keep each architecture's ABI, runtime, format, and target compositions
+        beside that architecture; do not invent cross-file namespaces.
       </li>
       <li>
         Generate separate production files and manifests by target reachability.

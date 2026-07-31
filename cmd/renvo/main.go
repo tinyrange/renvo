@@ -11,6 +11,7 @@ import (
 	"renvo.dev/internal/backendjit"
 	"renvo.dev/internal/bootstrap"
 	"renvo.dev/internal/driver"
+	"renvo.dev/internal/rtg"
 )
 
 func main() {
@@ -98,7 +99,8 @@ func buildPreparedBackend(args []string, env []string, bootstrapBackend driver.B
 	workDir, _ := os.Getwd()
 	prepared := backendjit.Prepare(backendjit.PrepareConfig{
 		Definition: source, Filename: input, Target: target,
-		BackendRoot: checkoutBackendRoot(), WorkDir: workDir,
+		ImportLoader: commandImportLoader{},
+		BackendRoot:  checkoutBackendRoot(), WorkDir: workDir,
 		StdRoot: driver.StdRootFromEnv(env), CacheDir: backendCacheDir(),
 		Bootstrap: bootstrapBackend,
 	})
@@ -111,4 +113,14 @@ func buildPreparedBackend(args []string, env []string, bootstrapBackend driver.B
 		return 1
 	}
 	return 0
+}
+
+type commandImportLoader struct{}
+
+func (commandImportLoader) LoadImport(
+	importingFilename string, importPath string,
+) rtg.ImportSource {
+	path := filepath.Clean(filepath.Join(filepath.Dir(importingFilename), importPath))
+	imported, err := os.ReadFile(path)
+	return rtg.ImportSource{Source: imported, Filename: path, Ok: err == nil}
 }

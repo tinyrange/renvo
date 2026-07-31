@@ -118,7 +118,8 @@ func mergeMachineDefinitions(root string, descriptors []sourceDescriptor) error 
 		if err != nil {
 			return err
 		}
-		resolved := rtg.ResolveDefinitions(rtg.Parse(source, filepath.Base(path)))
+		resolved := rtg.ResolveDefinitions(rtg.ParseImports(
+			source, path, machineDefinitionImportLoader{}))
 		if !resolved.Ok {
 			return fmt.Errorf("%s: %s", filepath.Base(path), resolved.Diagnostics[0].Message)
 		}
@@ -174,6 +175,16 @@ func mergeMachineDefinitions(root string, descriptors []sourceDescriptor) error 
 		return fmt.Errorf("machine definition target %q has no registry policy", name)
 	}
 	return nil
+}
+
+type machineDefinitionImportLoader struct{}
+
+func (machineDefinitionImportLoader) LoadImport(
+	importingFilename string, importPath string,
+) rtg.ImportSource {
+	path := filepath.Clean(filepath.Join(filepath.Dir(importingFilename), importPath))
+	source, err := os.ReadFile(path)
+	return rtg.ImportSource{Source: source, Filename: path, Ok: err == nil}
 }
 
 func contains(values []string, value string) bool {

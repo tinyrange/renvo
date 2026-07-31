@@ -16,6 +16,12 @@ type Result struct {
 }
 
 func Resolve(source []byte, filename string, targetName string) Result {
+	return ResolveImports(source, filename, targetName, nil)
+}
+
+func ResolveImports(
+	source []byte, filename string, targetName string, loader rtg.ImportLoader,
+) Result {
 	if rtgb.IsArtifact(source) {
 		artifact, ok := rtgb.Decode(source)
 		if !ok {
@@ -27,7 +33,7 @@ func Resolve(source []byte, filename string, targetName string) Result {
 		}
 		return Result{Message: "backend definition does not export target " + targetName}
 	}
-	resolved := rtg.ResolveDefinitions(rtg.Parse(source, filename))
+	resolved := rtg.ResolveDefinitions(rtg.ParseImports(source, filename, loader))
 	if !resolved.Ok {
 		return Result{Message: resolved.Diagnostics[0].Message}
 	}

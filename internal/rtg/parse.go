@@ -16,10 +16,15 @@ const (
 )
 
 func Parse(source []byte, filename string) Document {
+	return parseDocument(source, filename, nil)
+}
+
+func parseDocument(source []byte, filename string, sourceMap []sourceSegment) Document {
 	if len(source) > maxDefinitionBytes {
 		return Document{
-			Filename: filename,
-			Source:   source,
+			Filename:  filename,
+			Source:    source,
+			sourceMap: sourceMap,
 			Tokens: []Token{{
 				Kind: TokenEOF, Start: len(source), End: len(source), Line: 1, Column: 1,
 			}},
@@ -33,8 +38,9 @@ func Parse(source []byte, filename string) Document {
 	}
 	if invalid := invalidUTF8Offset(source); invalid >= 0 {
 		return Document{
-			Filename: filename,
-			Source:   source,
+			Filename:  filename,
+			Source:    source,
+			sourceMap: sourceMap,
 			Tokens: []Token{{
 				Kind: TokenEOF, Start: len(source), End: len(source), Line: 1, Column: 1,
 			}},
@@ -50,9 +56,16 @@ func Parse(source []byte, filename string) Document {
 	document := Document{
 		Filename:    filename,
 		Source:      source,
+		sourceMap:   sourceMap,
 		Tokens:      tokens,
 		Diagnostics: diagnostics,
 		Ok:          len(diagnostics) == 0,
+	}
+	for i := 0; i < len(document.Diagnostics); i++ {
+		document.Diagnostics[i] = documentDiagnostic(document,
+			document.Diagnostics[i].Span,
+			document.Diagnostics[i].Code,
+			document.Diagnostics[i].Message)
 	}
 	if !document.Ok {
 		return document
@@ -82,6 +95,11 @@ type documentParser struct {
 
 func (p *documentParser) parse() {
 	for p.kind() != TokenEOF {
+		if p.operator(p.at, "@") {
+			p.failAt(p.at, "RTG-IMPORT-004",
+				"definition imports require an import loader")
+			return
+		}
 		if p.kind() != TokenIdent {
 			p.failAt(p.at, "RTG-PARSE-001", "expected a top-level declaration")
 			return
@@ -513,21 +531,13 @@ func (p *documentParser) failAt(at int, code string, message string) {
 		at = len(p.document.Tokens) - 1
 	}
 	token := p.document.Tokens[at]
-	p.document.Diagnostics = append(p.document.Diagnostics, Diagnostic{
-		Filename: p.document.Filename,
-		Span:     sourceSpan(p.document.Source, token.Start, token.End),
-		Code:     code,
-		Message:  message,
-	})
+	p.document.Diagnostics = append(p.document.Diagnostics, documentDiagnostic(
+		*p.document, sourceSpan(p.document.Source, token.Start, token.End), code, message))
 }
 
 func (p *documentParser) failOffset(offset int, code string, message string) {
-	p.document.Diagnostics = append(p.document.Diagnostics, Diagnostic{
-		Filename: p.document.Filename,
-		Span:     sourceSpan(p.document.Source, offset, offset),
-		Code:     code,
-		Message:  message,
-	})
+	p.document.Diagnostics = append(p.document.Diagnostics, documentDiagnostic(
+		*p.document, sourceSpan(p.document.Source, offset, offset), code, message))
 }
 
 func invalidUTF8Offset(source []byte) int {

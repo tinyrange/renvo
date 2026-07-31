@@ -317,23 +317,17 @@ func validateImplementsContract(document Document) []Diagnostic {
 	var diagnostics []Diagnostic
 	for i := 0; i < len(document.Implements); i++ {
 		if document.Implements[i] != "direct_emitter_v1" {
-			diagnostics = append(diagnostics, Diagnostic{
-				Filename: document.Filename,
-				Span:     sourceSpan(document.Source, 0, 0),
-				Code:     "RTG-VALIDATE-070",
-				Message:  "unknown backend contract " + document.Implements[i],
-			})
+			diagnostics = append(diagnostics, documentDiagnostic(document,
+				sourceSpan(document.Source, 0, 0), "RTG-VALIDATE-070",
+				"unknown backend contract "+document.Implements[i]))
 		}
 	}
 	for i := 0; i < len(directEmitterV1); i++ {
 		operation := directEmitterV1[i]
 		if operation.Control == "" || len(operation.Preserves) == 0 {
-			diagnostics = append(diagnostics, Diagnostic{
-				Filename: document.Filename,
-				Span:     sourceSpan(document.Source, 0, 0),
-				Code:     "RTG-VALIDATE-080",
-				Message:  "incomplete direct emitter effect contract for " + operation.Name,
-			})
+			diagnostics = append(diagnostics, documentDiagnostic(document,
+				sourceSpan(document.Source, 0, 0), "RTG-VALIDATE-080",
+				"incomplete direct emitter effect contract for "+operation.Name))
 		}
 	}
 	return diagnostics

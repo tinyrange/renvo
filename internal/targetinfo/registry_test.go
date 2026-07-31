@@ -56,7 +56,8 @@ func TestGeneratedRegistryMatchesMachineDefinitions(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		resolved := rtg.ResolveDefinitions(rtg.Parse(source, filepath.Base(path)))
+		resolved := rtg.ResolveDefinitions(rtg.ParseImports(
+			source, path, registryImportLoader{}))
 		if !resolved.Ok {
 			t.Fatalf("%s: %#v", path, resolved.Diagnostics)
 		}
@@ -96,6 +97,16 @@ func TestGeneratedRegistryMatchesMachineDefinitions(t *testing.T) {
 	for name := range machines {
 		t.Errorf("%s has no target registry entry", name)
 	}
+}
+
+type registryImportLoader struct{}
+
+func (registryImportLoader) LoadImport(
+	importingFilename string, importPath string,
+) rtg.ImportSource {
+	path := filepath.Clean(filepath.Join(filepath.Dir(importingFilename), importPath))
+	source, err := os.ReadFile(path)
+	return rtg.ImportSource{Source: source, Filename: path, Ok: err == nil}
 }
 
 func stringSliceContains(values []string, value string) bool {

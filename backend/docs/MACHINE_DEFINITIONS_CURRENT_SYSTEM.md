@@ -6,9 +6,10 @@ workflow is in [`../definitions/README.md`](../definitions/README.md).
 
 ## Current source authority
 
-- `backend/definitions/native.rtg` is the single closed built-in `native_v1`
-  catalog for amd64, 386, AArch64, and ARM across Linux, Windows, Darwin, and
-  Linux kernel-module compositions.
+- `backend/definitions/native.rtg` is the single root of the closed built-in
+  `native_v1` catalog. It imports architecture-owned slices for amd64, 386,
+  AArch64, and ARM across Linux, Windows, Darwin, and Linux kernel-module
+  compositions.
 - `backend/definitions/wasm32.rtg` is the separate `structured32` family for
   WASI, browser Wasm, and VM32.
 - Generated production Go is checked in and compiled into ordinary Go-module
@@ -24,6 +25,12 @@ patching, ELF/PE image construction, and Linux-module ELF construction are
 bounded declarations. Genuinely irregular encoders, branch relaxation, ABI
 edges, and Mach-O algorithms remain typed embedded Go hooks. The compiler does
 not analyze hook complexity or termination.
+
+Top-level `@import "relative/path.rtg"` composes definition fragments before
+parsing and resolution. Imports are relative to the importing file, recursive,
+cycle-checked, included in the same source-size and semantic Go budgets, and
+source-mapped so diagnostics identify the owning fragment. File boundaries and
+import spelling do not affect catalog or target identity.
 
 ## Backend families
 

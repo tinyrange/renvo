@@ -84,12 +84,9 @@ func Resolve(document Document) ResolveResult {
 		}
 	}
 	if len(result.Targets) == 0 && hasMachineDeclaration(document) {
-		result.Diagnostics = append(result.Diagnostics, Diagnostic{
-			Filename: document.Filename,
-			Span:     sourceSpan(document.Source, 0, 0),
-			Code:     "RTG-RESOLVE-002",
-			Message:  "machine definition exports no targets",
-		})
+		result.Diagnostics = append(result.Diagnostics, documentDiagnostic(document,
+			sourceSpan(document.Source, 0, 0), "RTG-RESOLVE-002",
+			"machine definition exports no targets"))
 		result.Ok = false
 	}
 	return result
@@ -398,5 +395,5 @@ func hasMachineDeclaration(document Document) bool {
 }
 
 func resolveDiagnostic(document Document, declaration Declaration, code string, message string) Diagnostic {
-	return Diagnostic{Filename: document.Filename, Span: declaration.Span, Code: code, Message: message}
+	return documentDiagnostic(document, declaration.Span, code, message)
 }

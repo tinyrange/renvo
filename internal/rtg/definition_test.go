@@ -3,16 +3,15 @@ package rtg
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestNativeDefinitionEmbeddedGoBudget(t *testing.T) {
-	source, err := os.ReadFile("../../backend/definitions/native.rtg")
-	if err != nil {
-		t.Fatal(err)
-	}
-	resolved := ResolveDefinitions(Parse(source, "native.rtg"))
+	document := parseDefinitionFile(t, "../../backend/definitions/native.rtg")
+	source := document.Source
+	resolved := ResolveDefinitions(document)
 	if !resolved.Ok {
 		t.Fatalf("ResolveDefinitions failed: %#v", resolved.Diagnostics)
 	}
@@ -43,11 +42,7 @@ func TestNativeDefinitionEmbeddedGoBudget(t *testing.T) {
 }
 
 func TestAArch64DefinitionVerticalSlice(t *testing.T) {
-	source, err := os.ReadFile("../../backend/definitions/native.rtg")
-	if err != nil {
-		t.Fatal(err)
-	}
-	resolved := Resolve(Parse(source, "native.rtg"))
+	resolved := Resolve(parseDefinitionFile(t, "../../backend/definitions/native.rtg"))
 	if !resolved.Ok {
 		t.Fatalf("definition failed: %#v", resolved.Diagnostics)
 	}
@@ -84,11 +79,9 @@ func TestAArch64DefinitionVerticalSlice(t *testing.T) {
 }
 
 func TestNativeCatalogTargetIdentityIgnoresUnreachableArchitecture(t *testing.T) {
-	source, err := os.ReadFile("../../backend/definitions/native.rtg")
-	if err != nil {
-		t.Fatal(err)
-	}
-	base := Resolve(Parse(source, "native.rtg"))
+	document := parseDefinitionFile(t, "../../backend/definitions/native.rtg")
+	source := document.Source
+	base := Resolve(document)
 	if !base.Ok {
 		t.Fatalf("base definition failed: %#v", base.Diagnostics)
 	}
@@ -133,11 +126,7 @@ func TestAArch64EncodingSlice(t *testing.T) {
 }
 
 func TestAArch64CheckedInArchitectureOutput(t *testing.T) {
-	source, err := os.ReadFile("../../backend/definitions/native.rtg")
-	if err != nil {
-		t.Fatal(err)
-	}
-	resolved := Resolve(Parse(source, "native.rtg"))
+	resolved := Resolve(parseDefinitionFile(t, "../../backend/definitions/native.rtg"))
 	generated := GenerateCheckedInArchitectureAlgorithms(resolved, "aarch64", "main")
 	if !generated.Ok {
 		t.Fatalf("generate architecture: %#v", generated.Diagnostics)
@@ -162,11 +151,7 @@ func TestAArch64CheckedInArchitectureOutput(t *testing.T) {
 }
 
 func TestAmd64DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
-	source, err := os.ReadFile("../../backend/definitions/native.rtg")
-	if err != nil {
-		t.Fatal(err)
-	}
-	resolved := Resolve(Parse(source, "native.rtg"))
+	resolved := Resolve(parseDefinitionFile(t, "../../backend/definitions/native.rtg"))
 	if !resolved.Ok {
 		t.Fatalf("definition failed: %#v", resolved.Diagnostics)
 	}
@@ -207,11 +192,7 @@ func TestAmd64DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 }
 
 func TestArmDefinitionAndCheckedInArchitectureOutput(t *testing.T) {
-	source, err := os.ReadFile("../../backend/definitions/native.rtg")
-	if err != nil {
-		t.Fatal(err)
-	}
-	resolved := Resolve(Parse(source, "native.rtg"))
+	resolved := Resolve(parseDefinitionFile(t, "../../backend/definitions/native.rtg"))
 	if !resolved.Ok {
 		t.Fatalf("definition failed: %#v", resolved.Diagnostics)
 	}
@@ -241,11 +222,7 @@ func TestArmDefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 }
 
 func Test386DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
-	source, err := os.ReadFile("../../backend/definitions/native.rtg")
-	if err != nil {
-		t.Fatal(err)
-	}
-	resolved := Resolve(Parse(source, "native.rtg"))
+	resolved := Resolve(parseDefinitionFile(t, "../../backend/definitions/native.rtg"))
 	if !resolved.Ok {
 		t.Fatalf("definition failed: %#v", resolved.Diagnostics)
 	}
@@ -272,6 +249,29 @@ func Test386DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 			t.Errorf("generated 386 output is missing algorithm binding %s", binding)
 		}
 	}
+}
+
+func parseDefinitionFile(t *testing.T, filename string) Document {
+	t.Helper()
+	source, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := ParseImports(source, filename, testFilesystemImportLoader{})
+	if !document.Ok {
+		t.Fatalf("parse %s: %#v", filename, document.Diagnostics)
+	}
+	return document
+}
+
+type testFilesystemImportLoader struct{}
+
+func (testFilesystemImportLoader) LoadImport(
+	importingFilename string, importPath string,
+) ImportSource {
+	path := filepath.Clean(filepath.Join(filepath.Dir(importingFilename), importPath))
+	source, err := os.ReadFile(path)
+	return ImportSource{Source: source, Filename: path, Ok: err == nil}
 }
 
 func TestWasm32DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
