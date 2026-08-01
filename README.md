@@ -115,6 +115,11 @@ targets, and must match a prepared artifact. Environments that cannot prepare
 or execute a host-native backend, including WASI, use a process-capable Renvo
 host for these two commands; that host may still emit `wasi/wasm32` output.
 
+The [M5NanoC6 example](examples/m5nanoc6/README.md) uses this path to combine a
+shared RV32IM definition with an ESP32-C6 runtime and flash image. Its emulator
+oracle and SDK-free GPIO7 blink provide an end-to-end microcontroller bring-up
+without adding the board to the compiled-in host target list.
+
 The `vm/vm32` target uses 32-bit words and pointers and is executed by
 `renvo.dev/std/vm`. Callers provide hard instruction and linear-memory limits
 and receive deterministic step, peak-memory, output, file, exit, and trap
