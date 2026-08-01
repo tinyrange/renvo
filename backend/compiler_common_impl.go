@@ -8602,7 +8602,10 @@ func renvoScalarComparisonIsUnsigned(g *renvoLinearGen, ep *renvoExprParse, e *r
 }
 
 func renvoEmitUnsignedPrimaryTertiaryCompare(g *renvoLinearGen, c0 byte, c1 byte, opLen int) bool {
-	if renvoFixedTarget != 0 && g.c.renvoTargetArch != renvoArchAmd64 && g.c.renvoTargetArch != renvoArchAarch64 {
+	if renvoFixedTarget != 0 && renvoPreparedBackend == 0 &&
+		g.c.renvoTargetArch != renvoArchAmd64 &&
+		g.c.renvoTargetArch != renvoArchAarch64 &&
+		g.c.renvoTargetArch != renvoArchWasm32 {
 		return false
 	}
 	renvoNonNil(g)
@@ -19128,18 +19131,12 @@ func renvoExprHasUnsignedIntType(g *renvoLinearGen, ep *renvoExprParse, idx int)
 	if e.kind == renvoExprInt || e.kind == renvoExprChar || e.kind == renvoExprBool {
 		return false
 	}
-	if e.inferred == 0 && e.kind == renvoExprIdent {
-		local := renvoFindLocalIndex(g, e.nameStart, e.nameEnd)
-		if local >= 0 {
-			resolved := renvoResolveType(g.meta, g.locals[local].typ)
-			return resolved.kind == renvoTypeUint64
-		}
-	}
 	if e.inferred == 0 && e.kind == renvoExprUnary {
 		return renvoExprHasUnsignedIntType(g, ep, e.left)
 	}
 	resolved := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx))
-	return resolved.kind == renvoTypeUint64
+	kind := resolved.kind
+	return kind == renvoTypeByte || kind >= renvoTypeUint16 && kind <= renvoTypeUint64
 }
 
 func renvoEmitWideScalarToLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int, sourceKind int) bool {
@@ -21045,7 +21042,25 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 			}
 		}
 		renvoAsmPopTertiary(a)
+		if g.c.renvoTargetArch == renvoArchWasm32 && opLen == 2 &&
+			op0 == '>' && op1 == '>' &&
+			renvoExprHasUnsignedIntType(g, ep, e.left) {
+			renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRax)
+			renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+			renvoWasm32EmitRegReg(a, renvoWasm32OpShrUnsignedRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
+			renvoNormalizeNativeExprPrimary(g, ep, idx)
+			return true
+		}
 		if g.c.renvoNativeIntSize == 8 && (op0 == '<' || op0 == '>') && !(opLen == 2 && op1 == op0) && (renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right)) && renvoEmitUnsignedPrimaryTertiaryCompare(g, op0, op1, opLen) {
+			renvoNormalizeNativeExprPrimary(g, ep, idx)
+			return true
+		}
+		if renvoPreparedBackend != 0 && opLen == 2 && (op0 == '<' && op1 == '<' || op0 == '>' && op1 == '>') {
+			if op0 == '<' {
+				renvoRTGDirectVariableShift(a, RTGShiftLeft, false)
+			} else {
+				renvoRTGDirectVariableShift(a, RTGShiftRight, !renvoExprHasUnsignedIntType(g, ep, e.left))
+			}
 			renvoNormalizeNativeExprPrimary(g, ep, idx)
 			return true
 		}
@@ -21057,13 +21072,7 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 					mode = 2
 				}
 			}
-			if renvoPreparedBackend != 0 {
-				if mode == 0 {
-					renvoRTGDirectVariableShift(a, RTGShiftLeft, false)
-				} else {
-					renvoRTGDirectVariableShift(a, RTGShiftRight, mode == 1)
-				}
-			} else if g.c.renvoTargetArch == renvoArchAmd64 {
+			if g.c.renvoTargetArch == renvoArchAmd64 {
 				code := "\x48\x89\xc2\x48\x89\xc8\x48\x89\xd1\x48\xd3\xe0\x48\x83\xfa\x40\x48\x19\xc9\x48\x21\xc8"
 				if mode == 1 {
 					code = "\x48\x89\xc2\x48\x89\xc8\x48\x89\xd1\x48\xd3\xf8\x48\x89\xc1\x48\xc1\xf9\x3f\x48\x83\xfa\x40\x48\x0f\x43\xc1"

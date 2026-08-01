@@ -304,7 +304,10 @@ go backend {
 				funct7 = 0x20
 			}
 		}
-		encodeR(out, 0x33, funct3, funct7, primary, primary, tertiary)
+		// The expression emitter leaves the shift count in primary and the
+		// value in tertiary. RISC-V names both sources explicitly, unlike x86's
+		// implicit count register, so preserve that operand order here.
+		encodeR(out, 0x33, funct3, funct7, primary, tertiary, primary)
 	}
 	func signedDivide(out *RTGEmitter, remainder bool) {
 		funct3 := 4
