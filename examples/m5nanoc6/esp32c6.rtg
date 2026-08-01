@@ -110,6 +110,22 @@ go backend {
 		writeRegister(out, 0x600b1c30, 0xc0000000)
 	}
 
+	func clearBSS(out *RTGEmitter) {
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		riscv32.emitAddress(out, riscv32.secondary, RTGBSSAddress(0))
+		riscv32.moveImmediate(out, riscv32.copyCount, int64(stackTop))
+		riscv32.moveImmediate(out, riscv32.primary, 0)
+		out.Mark(loop)
+		riscv32.compare(out, riscv32.secondary, riscv32.copyCount)
+		riscv32.jumpCondition(out, riscv32.eq, done)
+		riscv32.storeU32(out, RTGAddress{Base: riscv32.secondary}, riscv32.primary)
+		riscv32.emitAddress(out, riscv32.secondary,
+			RTGAddress{Base: riscv32.secondary, Displacement: 4})
+		riscv32.jump(out, loop)
+		out.Mark(done)
+	}
+
 	func image(out *RTGEmitter) []byte {
 		code := out.Code()
 		data := out.Data()
@@ -179,6 +195,11 @@ go backend {
 	}
 
 	func entryStart(out *RTGEmitter, stateOffset int) bool {
+		clearBSS(out)
+		// Opening the native USB CDC endpoint toggles its control lines. Keep
+		// those transitions from resetting the chip while retaining the
+		// Serial/JTAG data endpoints used by write and print.
+		writeRegister(out, 0x6000f04c, 4)
 		disableWatchdogs(out)
 		riscv32.moveImmediate(out, riscv32.stack, int64(stackTop))
 		riscv32.move(out, riscv32.frame, riscv32.stack)
@@ -190,11 +211,48 @@ go backend {
 		out.Mark(loop)
 		riscv32.jump(out, loop)
 	}
+
+	func usbSerialWrite(out *RTGEmitter) {
+		const endpoint = 0x6000f000
+		const endpointConfig = endpoint + 4
+
+		loop := out.NewLabel()
+		ready := out.NewLabel()
+		done := out.NewLabel()
+		riscv32.move(out, riscv32.copyCount, riscv32.tertiary)
+		out.Mark(loop)
+		riscv32.moveImmediate(out, riscv32.primary, 0)
+		riscv32.compare(out, riscv32.tertiary, riscv32.primary)
+		riscv32.jumpCondition(out, riscv32.eq, done)
+		riscv32.loadU32(out, riscv32.scratch,
+			RTGAddress{Displacement: endpointConfig})
+		riscv32.moveImmediate(out, riscv32.primary, 2)
+		riscv32.bitAnd(out, riscv32.scratch, riscv32.primary)
+		riscv32.moveImmediate(out, riscv32.primary, 0)
+		riscv32.compare(out, riscv32.scratch, riscv32.primary)
+		riscv32.jumpCondition(out, riscv32.ne, ready)
+		riscv32.jump(out, loop)
+		out.Mark(ready)
+		riscv32.loadU8(out, riscv32.scratch,
+			RTGAddress{Base: riscv32.secondary})
+		riscv32.storeU32(out, RTGAddress{Displacement: endpoint},
+			riscv32.scratch)
+		riscv32.increment(out, riscv32.secondary)
+		riscv32.decrement(out, riscv32.tertiary)
+		riscv32.jump(out, loop)
+		out.Mark(done)
+		riscv32.moveImmediate(out, riscv32.scratch, 1)
+		riscv32.storeU32(out, RTGAddress{Displacement: endpointConfig},
+			riscv32.scratch)
+		riscv32.move(out, riscv32.primary, riscv32.copyCount)
+	}
 }
 
 runtime esp32c6_freestanding {
 	emit_entry_start = go entryStart
 	emit_exit = go exit
+	operation write { emit = go usbSerialWrite }
+	operation print { use = write args = [stderr, buffer, count] }
 }
 
 format esp32c6_elf {

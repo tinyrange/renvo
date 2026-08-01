@@ -66,6 +66,10 @@ func lowerOrdinaryBuiltins(program *unit.Program, transient bool) bool {
 			}
 			originalLength := len(program.Text)
 			edits := []functionValueEdit{functionValueTokenRangeEdit(program, i, close+1, replacement)}
+			// Linking retains one package clause per input package. Builtin
+			// lowering reparses that combined text, so collapse those clauses in
+			// the same way as function-value lowering before the first reparse.
+			edits = appendFunctionValuePackageEdits(program, edits)
 			if transient {
 				renvo_runtime_ArenaDiscardLinkTokens(program.Tokens)
 			}

@@ -46,3 +46,31 @@ func TestCompiledInBootstrapPreparesESP32C6Definition(t *testing.T) {
 		t.Fatal("ELF omitted the ESP application descriptor section")
 	}
 }
+
+func TestCompiledInBootstrapCompilesESP32C6MicrocontrollerSuite(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skipf("in-process prepared backend requires linux/amd64, got %s/%s",
+			runtime.GOOS, runtime.GOARCH)
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := filepath.Join(root, "examples", "m5nanoc6", "esp32c6.rtg")
+	result := driver.CompileFromFS([]string{
+		"-backend", definition,
+		"-t", "esp32c6/riscv32",
+		"-s",
+		"-o", "microcontroller-suite.elf",
+		filepath.Join(root, "frontend_tests", "single_file_microcontroller"),
+	}, root, filepath.Join(root, "std"), driver.OSFS{},
+		New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
+			t.TempDir(), backendcompiled.Backend{}))
+	if !result.Ok {
+		t.Fatalf("ESP32-C6 microcontroller suite compile failed: %#v", result.Diagnostic)
+	}
+	if len(result.Binary) < 52 || !bytes.Equal(result.Binary[:4], []byte{0x7f, 'E', 'L', 'F'}) {
+		t.Fatalf("microcontroller suite output is not ELF32: % x",
+			result.Binary[:minInt(4, len(result.Binary))])
+	}
+}

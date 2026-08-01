@@ -122,8 +122,8 @@ func renvoEmitWriteValueRegs(g *renvoLinearGen, fd int) bool {
 	renvoNonNil(g)
 	a := &g.asm
 	if renvoPreparedBackend != 0 {
-		renvoRTGDirectMove(a, renvoRTGCallWord1, renvoRTGPrimary)
 		renvoRTGDirectMove(a, renvoRTGCallWord2, renvoRTGSecondary)
+		renvoRTGDirectMove(a, renvoRTGCallWord1, renvoRTGPrimary)
 		renvoRTGDirectMoveImmediate(a, renvoRTGCallWord0, int64(fd))
 		return renvoRTGEmitRuntimeOperation(a, RTGRuntimeWrite)
 	}

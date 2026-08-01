@@ -35,7 +35,10 @@ func TestESP32C6ExternalDefinition(t *testing.T) {
 	source := string(generated.Source)
 	for _, contract := range []string{
 		"func rtgEsp32c6Esp32c6PackageImage(",
+		"func rtgEsp32c6Esp32c6PackageClearBSS(",
 		"0x60008064, 0x50d83aa1",
+		"0x6000f04c, 4",
+		"const endpoint = 0x6000f000",
 		"AppDescriptorAddress = 0x42010020",
 		"WordBits:32,PointerBits:32",
 		"func rtgEsp32c6Riscv32PackageMoveImmediate(",

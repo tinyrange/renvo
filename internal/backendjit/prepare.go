@@ -192,7 +192,8 @@ func cacheKey(descriptor rtg.TargetDescriptor, host string) string {
 	return rtg.HashText(descriptor.Definition) + "-" + encodedName(descriptor.Name) +
 		"-" + encodedName(host) + "-g" + decimal(rtg.GeneratorVersion) +
 		"-k" + decimal(KernelVersion) + "-u" + decimal(unit.Version) +
-		"-p" + decimal(ProtocolVersion) + "-o" + decimal(OptimizationVersion)
+		"-p" + decimal(ProtocolVersion) + "-o" + decimal(OptimizationVersion) +
+		"-c" + backendcompiled.CompilerSourceDigest
 }
 
 func encodedName(value string) string {

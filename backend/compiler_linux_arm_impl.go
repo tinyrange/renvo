@@ -231,22 +231,15 @@ func renvoArmEmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int
 	}
 }
 
-func renvoArmEmitRaxRcxOp(g *renvoLinearGen, tok int) bool {
+func renvoArmEmitRaxRcxOp(g *renvoLinearGen, tok int, rightShiftOpcode int) bool {
 	a := &g.asm
 	p := g.prog
-	if tok < 0 || tok >= renvoTokCount(p) {
-		return false
-	}
 	start := renvoTokStart(p, tok)
-	end := renvoTokEnd(p, tok)
-	if start >= end {
-		return false
-	}
-	c0 := p.src[start]
-	c1 := byte(0)
-	if start+1 < end {
-		c1 = p.src[start+1]
-	}
+	c0 := renvo_runtime_UnsafeByteAt(p.src, start)
+	// A parsed binary operator always has a right operand, so the byte after
+	// its first byte is available. For one-byte operators it cannot be mistaken
+	// for an operator suffix without having been tokenized as part of this token.
+	c1 := renvo_runtime_UnsafeByteAt(p.src, start+1)
 	if c0 == '+' {
 		renvoArmAsmAddRegReg(a, renvoArmRegRax, renvoArmRegRcx, renvoArmRegRax)
 		return true
@@ -284,32 +277,31 @@ func renvoArmEmitRaxRcxOp(g *renvoLinearGen, tok int) bool {
 		renvoArmAsmEmit(a, 0xe0200000|(renvoArmRegRcx<<16)|(renvoArmRegRax<<12)|renvoArmRegRax)
 		return true
 	}
-	if c0 == '<' {
-		if c1 == '<' {
-			renvoArmAsmEmit(a, 0xe1a00010|(renvoArmRegRax<<8)|(renvoArmRegRax<<12)|renvoArmRegRcx)
-		} else if c1 == '=' {
-			renvoArmAsmCmpRcxRaxSet(a, 0x9e)
+	if c0 == '<' || c0 == '>' {
+		if c1 == c0 {
+			opcode := 0xe1a00010
+			if c0 == '>' {
+				opcode = rightShiftOpcode
+			}
+			renvoArmAsmEmit(a, opcode|(renvoArmRegRax<<8)|(renvoArmRegRax<<12)|renvoArmRegRcx)
 		} else {
-			renvoArmAsmCmpRcxRaxSet(a, 0x9c)
+			setcc := 0x9c
+			if c0 == '>' {
+				setcc = 0x9f
+			}
+			if c1 == '=' {
+				setcc = setcc ^ 2
+			}
+			renvoArmAsmCmpRcxRaxSet(a, setcc)
 		}
 		return true
 	}
-	if c0 == '>' {
-		if c1 == '>' {
-			renvoArmAsmEmit(a, 0xe1a00050|(renvoArmRegRax<<8)|(renvoArmRegRax<<12)|renvoArmRegRcx)
-		} else if c1 == '=' {
-			renvoArmAsmCmpRcxRaxSet(a, 0x9d)
-		} else {
-			renvoArmAsmCmpRcxRaxSet(a, 0x9f)
+	if (c0 == '=' || c0 == '!') && c1 == '=' {
+		setcc := 0x94
+		if c0 == '!' {
+			setcc++
 		}
-		return true
-	}
-	if c0 == '=' && c1 == '=' {
-		renvoArmAsmCmpRcxRaxSet(a, 0x94)
-		return true
-	}
-	if c0 == '!' && c1 == '=' {
-		renvoArmAsmCmpRcxRaxSet(a, 0x95)
+		renvoArmAsmCmpRcxRaxSet(a, setcc)
 		return true
 	}
 	return false
