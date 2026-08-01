@@ -18,6 +18,7 @@ backend/definitions/
 ├── x86_32.rtg
 ├── aarch64.rtg
 ├── arm.rtg
+├── riscv32.rtg               shared RV32IM used by external board targets
 ├── elf_amd64.rtg              shared AMD64 ELF formats
 ├── *_algorithms.rtg            closed shared-ISA generation roots
 ├── linux_amd64.rtg            complete target entrypoint
