@@ -17089,15 +17089,15 @@ func renvoEmitPrimaryTertiaryOp(g *renvoLinearGen, tok int) bool {
 	}
 	ok := false
 	if g.c.renvoTargetArch == renvoArchWasm32 {
-		ok = renvoWasm32EmitRaxRcxOp(g, tok)
+		ok = renvoWasm32EmitRaxRcxOp(g, tok, false)
 	} else if renvoPreparedBackend != 0 {
 		ok = renvoRTGEmitPrimaryTertiaryOp(g, tok)
 	} else if g.c.renvoTargetArch == renvoArchAarch64 {
 		ok = renvoAarch64EmitRaxRcxOp(g, tok)
 	} else if g.c.renvoTargetArch == renvoArchArm {
-		ok = renvoArmEmitRaxRcxOp(g, tok)
+		ok = renvoArmEmitRaxRcxOp(g, tok, 0xe1a00050)
 	} else if g.c.renvoTargetArch == renvoArch386 {
-		ok = renvo386EmitRaxRcxOp(g, tok)
+		ok = renvo386EmitRaxRcxOp(g, tok, false)
 	} else {
 		ok = renvoAmd64EmitRaxRcxOp(g, tok)
 	}
@@ -18141,11 +18141,16 @@ func renvoEmitWideIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 			}
 		}
 		renvoAsmPopTertiary(a)
-		if !renvoEmitPrimaryTertiaryOp(g, e.tok) {
-			return false
-		}
 		resultType := renvoInferParsedExprType(g, ep, idx)
 		result := renvoResolveType(g.meta, resultType)
+		unsignedShift := result.kind == renvoTypeByte || result.kind >= renvoTypeUint16 && result.kind <= renvoTypeUint64
+		if renvoTok2Is(p, e.tok, '>', '>') && unsignedShift {
+			if !renvo386EmitRaxRcxOp(g, e.tok, true) {
+				return false
+			}
+		} else if !renvoEmitPrimaryTertiaryOp(g, e.tok) {
+			return false
+		}
 		renvoAsmNormalizePrimaryForKind(a, result.kind)
 		return true
 	}
@@ -19123,7 +19128,9 @@ func renvoEmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 }
 
 func renvoExprHasUnsignedIntType(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-	if renvoFixedTarget != 0 && g.c.renvoTargetArch != renvoArchAmd64 && g.c.renvoTargetArch != renvoArchAarch64 {
+	if renvoFixedTarget != 0 && renvoPreparedBackend == 0 &&
+		g.c.renvoTargetArch != renvoArchAmd64 &&
+		g.c.renvoTargetArch != renvoArchAarch64 {
 		return false
 	}
 	renvoNonNil(g, ep)
@@ -21042,15 +21049,6 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 			}
 		}
 		renvoAsmPopTertiary(a)
-		if g.c.renvoTargetArch == renvoArchWasm32 && opLen == 2 &&
-			op0 == '>' && op1 == '>' &&
-			renvoExprHasUnsignedIntType(g, ep, e.left) {
-			renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRax)
-			renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
-			renvoWasm32EmitRegReg(a, renvoWasm32OpShrUnsignedRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
-			renvoNormalizeNativeExprPrimary(g, ep, idx)
-			return true
-		}
 		if g.c.renvoNativeIntSize == 8 && (op0 == '<' || op0 == '>') && !(opLen == 2 && op1 == op0) && (renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right)) && renvoEmitUnsignedPrimaryTertiaryCompare(g, op0, op1, opLen) {
 			renvoNormalizeNativeExprPrimary(g, ep, idx)
 			return true
@@ -21085,6 +21083,20 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 			}
 			renvoNormalizeNativeExprPrimary(g, ep, idx)
 			return true
+		}
+		if g.c.renvoNativeIntSize == 4 && opLen == 2 && op0 == '>' && op1 == '>' {
+			resultKind := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx)).kind
+			if resultKind == renvoTypeByte || resultKind >= renvoTypeUint16 && resultKind <= renvoTypeUint64 {
+				if g.c.renvoTargetArch == renvoArchArm {
+					renvoArmEmitRaxRcxOp(g, e.tok, 0xe1a00030)
+				} else if g.c.renvoTargetArch == renvoArchWasm32 {
+					renvoWasm32EmitRaxRcxOp(g, e.tok, true)
+				} else {
+					renvo386EmitRaxRcxOp(g, e.tok, true)
+				}
+				renvoAsmNormalizePrimaryForKind(a, resultKind)
+				return true
+			}
 		}
 		if !renvoEmitPrimaryTertiaryOp(g, e.tok) {
 			return false

@@ -446,7 +446,7 @@ func renvo386StoreParamWord(g *renvoLinearGen, reg int, offset int) {
 	renvoAsmStorePrimaryStack(a, offset)
 }
 
-func renvo386EmitRaxRcxOp(g *renvoLinearGen, tok int) bool {
+func renvo386EmitRaxRcxOp(g *renvoLinearGen, tok int, unsigned bool) bool {
 	a := &g.asm
 	p := g.prog
 	if tok < 0 || tok >= renvoTokCount(p) {
@@ -518,7 +518,11 @@ func renvo386EmitRaxRcxOp(g *renvoLinearGen, tok int) bool {
 			renvoAsmEmit16(a, 0xca89)
 			renvoAsmEmit16(a, 0xc189)
 			renvoAsmEmit16(a, 0xd089)
-			renvoAsmEmit16(a, 0xf8d3)
+			opcode := 0xf8d3
+			if unsigned {
+				opcode = 0xe8d3
+			}
+			renvoAsmEmit16(a, opcode)
 		} else if c1 == '=' {
 			renvoAsmCmpTertiaryPrimarySet(a, 0x9d)
 		} else {

@@ -562,7 +562,7 @@ func renvoWasm32EmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount 
 	renvoWasm32EmitCallLabel(a, g.funcLabels[fnIndex], wordCount)
 }
 
-func renvoWasm32EmitRaxRcxOp(g *renvoLinearGen, tok int) bool {
+func renvoWasm32EmitRaxRcxOp(g *renvoLinearGen, tok int, unsigned bool) bool {
 	a := &g.asm
 	p := g.prog
 	if tok < 0 || tok >= renvoTokCount(p) {
@@ -633,7 +633,11 @@ func renvoWasm32EmitRaxRcxOp(g *renvoLinearGen, tok int) bool {
 		if c1 == '>' {
 			renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRax)
 			renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
-			renvoWasm32EmitRegReg(a, renvoWasm32OpShrRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
+			opcode := renvoWasm32OpShrRegReg
+			if unsigned {
+				opcode = renvoWasm32OpShrUnsignedRegReg
+			}
+			renvoWasm32EmitRegReg(a, opcode, renvoWasm32RegRax, renvoWasm32RegRdx)
 		} else if c1 == '=' {
 			renvoWasm32AsmCmpRcxRaxSet(a, 0x9d)
 		} else {
