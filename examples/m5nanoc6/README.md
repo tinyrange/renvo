@@ -9,6 +9,11 @@ The `button_rgb` example also drives the board's GPIO20 WS2812 through the
 ESP32-C6 RMT peripheral. Pressing the active-low GPIO9 button chooses a new
 color from the ESP32-C6 hardware RNG, mixed with the timing of the press.
 
+The `air_quality` example reads an SGP30 from the Grove I2C connector once per
+second. It displays TVOC on the RGB LED as a continuous
+green-to-orange-to-red scale. Magenta means the sensor could not be initialized
+or a measurement failed its I2C/CRC checks.
+
 The target is intentionally loaded with `-backend`: it exercises the same JIT
 preparation path available to custom boards and does not advertise itself as a
 compiled-in host target.
@@ -49,6 +54,16 @@ sandbox/renvo \
   -t esp32c6/riscv32 \
   -o sandbox/m5nanoc6-button-rgb.elf \
   ./examples/m5nanoc6/button_rgb
+```
+
+The SGP30 air-quality example is built in the same way:
+
+```sh
+sandbox/renvo \
+  -backend examples/m5nanoc6/esp32c6.rtg \
+  -t esp32c6/riscv32 \
+  -o sandbox/m5nanoc6-air-quality.elf \
+  ./examples/m5nanoc6/air_quality
 ```
 
 Convert the ELF, write only the factory application partition, and start it:

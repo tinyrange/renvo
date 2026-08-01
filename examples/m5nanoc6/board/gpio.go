@@ -6,14 +6,15 @@ package board
 import "unsafe"
 
 const (
-	ioMuxGPIO7     = uintptr(0x60090020)
-	ioMuxGPIO9     = uintptr(0x60090028)
-	gpioOut        = uintptr(0x60091004)
-	gpioOutSet     = uintptr(0x60091008)
-	gpioOutClear   = uintptr(0x6009100c)
-	gpioEnableSet  = uintptr(0x60091024)
-	gpioInput      = uintptr(0x6009103c)
-	gpio7OutSelect = uintptr(0x60091570)
+	ioMuxGPIO7      = uintptr(0x60090020)
+	ioMuxGPIO9      = uintptr(0x60090028)
+	gpioOut         = uintptr(0x60091004)
+	gpioOutSet      = uintptr(0x60091008)
+	gpioOutClear    = uintptr(0x6009100c)
+	gpioEnableSet   = uintptr(0x60091024)
+	gpioEnableClear = uintptr(0x60091028)
+	gpioInput       = uintptr(0x6009103c)
+	gpio7OutSelect  = uintptr(0x60091570)
 
 	blueLED          = uint32(1 << 7)
 	button           = uint32(1 << 9)
