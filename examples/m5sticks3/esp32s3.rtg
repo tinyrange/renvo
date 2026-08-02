@@ -19,6 +19,11 @@ go backend {
 	const instructionCacheSize = 0x4000
 	const instructionCacheWays = 8
 	const instructionCacheLineSize = 32
+	const usbSerialEndpoint = 0x60038000
+	const usbSerialEndpointConfig = usbSerialEndpoint + 4
+	const usbSerialInterruptRaw = usbSerialEndpoint + 8
+	const usbSerialStartOfFrame = 1 << 1
+	const usbSerialProbeIterations = 65536
 	// Target-private relocation resolved after the complete program has been
 	// emitted, when the final BSS size is known.
 	const relocationAbsoluteBSSEnd = 3
@@ -232,6 +237,7 @@ go backend {
 		xtensa_lx7.moveImmediate(out, xtensa_lx7.stack, int64(stackTop))
 		xtensa_lx7.move(out, xtensa_lx7.frame, xtensa_lx7.stack)
 		clearBSS(out)
+		usbSerialInitialize(out)
 		// The second-stage bootloader validates and installs the image's IROM MMU
 		// mapping before entering this IRAM bootstrap. Preserve that mapping and
 		// cache state: rewriting either here races the cache machinery that this
@@ -255,38 +261,78 @@ go backend {
 		xtensa_lx7.jump(out, loop)
 	}
 
+	func usbSerialInitialize(out *RTGEmitter) {
+		done := out.NewLabel()
+		// An attached host has already produced SOF traffic while the ESP
+		// bootloader loads this image. Preserve that raw latch as connection
+		// state; it remains clear on battery-only boots.
+		xtensa_lx7.loadU32(out, xtensa_lx7.scratch,
+			RTGAddress{Displacement: usbSerialInterruptRaw})
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.primary,
+			usbSerialStartOfFrame)
+		xtensa_lx7.bitAnd(out, xtensa_lx7.scratch, xtensa_lx7.primary)
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.primary, 0)
+		xtensa_lx7.compare(out, xtensa_lx7.scratch, xtensa_lx7.primary)
+		xtensa_lx7.jumpCondition(out, xtensa_lx7.eq, done)
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.scratch, 1)
+		xtensa_lx7.storeU32(out,
+			RTGAddress{Displacement: usbSerialEndpointConfig},
+			xtensa_lx7.scratch)
+		out.Mark(done)
+	}
+
 	func usbSerialWrite(out *RTGEmitter) {
-		const endpoint = 0x60038000
-		const endpointConfig = endpoint + 4
 
 		loop := out.NewLabel()
+		wait := out.NewLabel()
 		ready := out.NewLabel()
 		done := out.NewLabel()
+		disabled := out.NewLabel()
 		xtensa_lx7.move(out, xtensa_lx7.copyCount, xtensa_lx7.tertiary)
+		// An unset SOF latch after initialization means no USB host is present.
+		// Treat serial output as accepted instead of blocking the application.
+		xtensa_lx7.loadU32(out, xtensa_lx7.scratch,
+			RTGAddress{Displacement: usbSerialInterruptRaw})
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.primary,
+			usbSerialStartOfFrame)
+		xtensa_lx7.bitAnd(out, xtensa_lx7.scratch, xtensa_lx7.primary)
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.primary, 0)
+		xtensa_lx7.compare(out, xtensa_lx7.scratch, xtensa_lx7.primary)
+		xtensa_lx7.jumpCondition(out, xtensa_lx7.eq, disabled)
 		out.Mark(loop)
 		xtensa_lx7.moveImmediate(out, xtensa_lx7.primary, 0)
 		xtensa_lx7.compare(out, xtensa_lx7.tertiary, xtensa_lx7.primary)
 		xtensa_lx7.jumpCondition(out, xtensa_lx7.eq, done)
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.copyDestination,
+			usbSerialProbeIterations)
+		out.Mark(wait)
 		xtensa_lx7.loadU32(out, xtensa_lx7.scratch,
-			RTGAddress{Displacement: endpointConfig})
+			RTGAddress{Displacement: usbSerialEndpointConfig})
 		xtensa_lx7.moveImmediate(out, xtensa_lx7.primary, 2)
 		xtensa_lx7.bitAnd(out, xtensa_lx7.scratch, xtensa_lx7.primary)
 		xtensa_lx7.moveImmediate(out, xtensa_lx7.primary, 0)
 		xtensa_lx7.compare(out, xtensa_lx7.scratch, xtensa_lx7.primary)
 		xtensa_lx7.jumpCondition(out, xtensa_lx7.ne, ready)
-		xtensa_lx7.jump(out, loop)
+		xtensa_lx7.decrement(out, xtensa_lx7.copyDestination)
+		xtensa_lx7.compare(out, xtensa_lx7.copyDestination,
+			xtensa_lx7.primary)
+		xtensa_lx7.jumpCondition(out, xtensa_lx7.ne, wait)
+		xtensa_lx7.jump(out, done)
 		out.Mark(ready)
 		xtensa_lx7.loadU8(out, xtensa_lx7.scratch,
 			RTGAddress{Base: xtensa_lx7.secondary})
-		xtensa_lx7.storeU32(out, RTGAddress{Displacement: endpoint},
+		xtensa_lx7.storeU32(out,
+			RTGAddress{Displacement: usbSerialEndpoint},
 			xtensa_lx7.scratch)
 		xtensa_lx7.increment(out, xtensa_lx7.secondary)
 		xtensa_lx7.decrement(out, xtensa_lx7.tertiary)
 		xtensa_lx7.jump(out, loop)
 		out.Mark(done)
 		xtensa_lx7.moveImmediate(out, xtensa_lx7.scratch, 1)
-		xtensa_lx7.storeU32(out, RTGAddress{Displacement: endpointConfig},
+		xtensa_lx7.storeU32(out,
+			RTGAddress{Displacement: usbSerialEndpointConfig},
 			xtensa_lx7.scratch)
+		out.Mark(disabled)
 		xtensa_lx7.move(out, xtensa_lx7.primary, xtensa_lx7.copyCount)
 	}
 }

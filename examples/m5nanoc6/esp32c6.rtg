@@ -11,6 +11,11 @@ go backend {
 	const pageSize = 0x1000
 	const stackTop = 0x40880000
 	const appDescriptorAddress = 0x42010020
+	const usbSerialEndpoint = 0x6000f000
+	const usbSerialEndpointConfig = usbSerialEndpoint + 4
+	const usbSerialInterruptRaw = usbSerialEndpoint + 8
+	const usbSerialStartOfFrame = 1 << 1
+	const usbSerialProbeIterations = 65536
 
 	func append16(out []byte, value int) []byte {
 		return append(out, byte(value), byte(value>>8))
@@ -203,6 +208,7 @@ go backend {
 		disableWatchdogs(out)
 		riscv32.moveImmediate(out, riscv32.stack, int64(stackTop))
 		riscv32.move(out, riscv32.frame, riscv32.stack)
+		usbSerialInitialize(out)
 		return true
 	}
 
@@ -212,38 +218,75 @@ go backend {
 		riscv32.jump(out, loop)
 	}
 
+	func usbSerialInitialize(out *RTGEmitter) {
+		done := out.NewLabel()
+		// The second-stage bootloader runs long enough for an attached host to
+		// set the controller's SOF latch. Preserve it as the connection state;
+		// unlike FIFO-ready, it remains clear when the board boots on battery.
+		riscv32.loadU32(out, riscv32.scratch,
+			RTGAddress{Displacement: usbSerialInterruptRaw})
+		riscv32.moveImmediate(out, riscv32.primary, usbSerialStartOfFrame)
+		riscv32.bitAnd(out, riscv32.scratch, riscv32.primary)
+		riscv32.moveImmediate(out, riscv32.primary, 0)
+		riscv32.compare(out, riscv32.scratch, riscv32.primary)
+		riscv32.jumpCondition(out, riscv32.eq, done)
+		riscv32.moveImmediate(out, riscv32.scratch, 1)
+		riscv32.storeU32(out,
+			RTGAddress{Displacement: usbSerialEndpointConfig},
+			riscv32.scratch)
+		out.Mark(done)
+	}
+
 	func usbSerialWrite(out *RTGEmitter) {
-		const endpoint = 0x6000f000
-		const endpointConfig = endpoint + 4
 
 		loop := out.NewLabel()
+		wait := out.NewLabel()
 		ready := out.NewLabel()
 		done := out.NewLabel()
+		disabled := out.NewLabel()
 		riscv32.move(out, riscv32.copyCount, riscv32.tertiary)
+		// A host sends USB SOF packets every millisecond. Initialization clears
+		// this latch, so an unset bit means the board is running without a USB
+		// host and serial output must not hold up the application.
+		riscv32.loadU32(out, riscv32.scratch,
+			RTGAddress{Displacement: usbSerialInterruptRaw})
+		riscv32.moveImmediate(out, riscv32.primary, usbSerialStartOfFrame)
+		riscv32.bitAnd(out, riscv32.scratch, riscv32.primary)
+		riscv32.moveImmediate(out, riscv32.primary, 0)
+		riscv32.compare(out, riscv32.scratch, riscv32.primary)
+		riscv32.jumpCondition(out, riscv32.eq, disabled)
 		out.Mark(loop)
 		riscv32.moveImmediate(out, riscv32.primary, 0)
 		riscv32.compare(out, riscv32.tertiary, riscv32.primary)
 		riscv32.jumpCondition(out, riscv32.eq, done)
+		riscv32.moveImmediate(out, riscv32.copyDestination,
+			usbSerialProbeIterations)
+		out.Mark(wait)
 		riscv32.loadU32(out, riscv32.scratch,
-			RTGAddress{Displacement: endpointConfig})
+			RTGAddress{Displacement: usbSerialEndpointConfig})
 		riscv32.moveImmediate(out, riscv32.primary, 2)
 		riscv32.bitAnd(out, riscv32.scratch, riscv32.primary)
 		riscv32.moveImmediate(out, riscv32.primary, 0)
 		riscv32.compare(out, riscv32.scratch, riscv32.primary)
 		riscv32.jumpCondition(out, riscv32.ne, ready)
-		riscv32.jump(out, loop)
+		riscv32.decrement(out, riscv32.copyDestination)
+		riscv32.compare(out, riscv32.copyDestination, riscv32.primary)
+		riscv32.jumpCondition(out, riscv32.ne, wait)
+		riscv32.jump(out, done)
 		out.Mark(ready)
 		riscv32.loadU8(out, riscv32.scratch,
 			RTGAddress{Base: riscv32.secondary})
-		riscv32.storeU32(out, RTGAddress{Displacement: endpoint},
+		riscv32.storeU32(out, RTGAddress{Displacement: usbSerialEndpoint},
 			riscv32.scratch)
 		riscv32.increment(out, riscv32.secondary)
 		riscv32.decrement(out, riscv32.tertiary)
 		riscv32.jump(out, loop)
 		out.Mark(done)
 		riscv32.moveImmediate(out, riscv32.scratch, 1)
-		riscv32.storeU32(out, RTGAddress{Displacement: endpointConfig},
+		riscv32.storeU32(out,
+			RTGAddress{Displacement: usbSerialEndpointConfig},
 			riscv32.scratch)
+		out.Mark(disabled)
 		riscv32.move(out, riscv32.primary, riscv32.copyCount)
 	}
 }
