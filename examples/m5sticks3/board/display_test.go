@@ -23,13 +23,19 @@ func TestRGB565(t *testing.T) {
 	}
 }
 
-func TestDMABufferDataIsWordAligned(t *testing.T) {
+func TestDMABufferIsWordAligned(t *testing.T) {
 	var buffer dmaBuffer
-	data := dmaBufferData(&buffer)
-	if len(data) != DisplayWidth*6 {
-		t.Fatalf("DMA buffer length = %d, want %d", len(data), DisplayWidth*6)
+	if size := unsafe.Sizeof(buffer); size < DisplayWidth*6 {
+		t.Fatalf("DMA buffer size = %d, want at least %d", size, DisplayWidth*6)
 	}
-	if uintptr(unsafe.Pointer(&data[0]))&3 != 0 {
-		t.Fatalf("DMA buffer address %p is not word aligned", &data[0])
+	if uintptr(unsafe.Pointer(&buffer[0]))&3 != 0 {
+		t.Fatalf("DMA buffer address %p is not word aligned", &buffer[0])
+	}
+}
+
+func TestDMADescriptorMatchesESP32S3ABI(t *testing.T) {
+	var descriptor dmaDescriptor
+	if size := unsafe.Sizeof(descriptor); size != 12 {
+		t.Fatalf("DMA descriptor size = %d, want 12", size)
 	}
 }

@@ -50,6 +50,7 @@ const (
 	gdmaOutPeripheral = gdmaBase + 0xa8
 	gdmaMiscConfig    = gdmaBase + 0x3c8
 	spi3Enable        = uint32(1 << 16)
+	spi3DMAEnable     = uint32(1 << 27)
 	gdmaEnable        = uint32(1 << 6)
 	spi3Update        = uint32(1 << 23)
 	spi3UserStart     = uint32(1 << 24)
@@ -58,18 +59,15 @@ const (
 	gdmaOutLinkParked = uint32(1 << 23)
 )
 
-type dmaDescriptor struct {
-	control uint32
-	buffer  uintptr
-	next    uintptr
-}
+// ESP32-S3 GDMA descriptors are exactly three contiguous 32-bit words. Keep
+// this as an array rather than a Go struct: Renvo's current 32-bit target
+// representation gives struct fields widened storage slots.
+type dmaDescriptor [3]uint32
 
-type dmaBuffer struct {
-	// Leave room to align the usable scanline without relying on the target
-	// compiler's stack alignment for byte arrays. Scaled presentation stores
-	// all identical physical rows so they share one DMA transaction.
-	data [DisplayWidth*6 + 3]byte
-}
+// Store scanlines as words so every GDMA buffer is aligned by construction.
+// The maximum scaled row is DisplayWidth*6 bytes; round its storage up to a
+// complete word while passing the exact byte count to SPI.
+type dmaBuffer [(DisplayWidth*6 + 3) / 4]uint32
 
 func pointerBits(pointer unsafe.Pointer) uintptr {
 	return *(*uintptr)(unsafe.Pointer(&pointer))
@@ -79,18 +77,19 @@ func pointerBits32(pointer unsafe.Pointer) uint32 {
 	return *(*uint32)(unsafe.Pointer(&pointer))
 }
 
-func dmaBufferData(buffer *dmaBuffer) []byte {
-	data := buffer.data[:]
-	offset := 0
-	remainder := pointerBits32(unsafe.Pointer(&data[0])) & 3
-	if remainder == 1 {
-		offset = 3
-	} else if remainder == 2 {
-		offset = 2
-	} else if remainder == 3 {
-		offset = 1
-	}
-	return data[offset : offset+DisplayWidth*6]
+func dmaStoreByte(buffer *dmaBuffer, offset int, value byte) {
+	words := buffer[:]
+	wordIndex := offset / 4
+	shift := uint(offset%4) * 8
+	mask := uint32(0xff) << shift
+	words[wordIndex] = words[wordIndex]&^mask | uint32(value)<<shift
+}
+
+func dmaLoadByte(buffer *dmaBuffer, offset int) byte {
+	words := buffer[:]
+	wordIndex := offset / 4
+	shift := uint(offset%4) * 8
+	return byte(words[wordIndex] >> shift)
 }
 
 func spiWait(mask uint32) {
@@ -99,9 +98,9 @@ func spiWait(mask uint32) {
 }
 
 func spiInitialize() {
-	store32(systemClock0, load32(systemClock0)|spi3Enable)
-	store32(systemReset0, load32(systemReset0)|spi3Enable)
-	store32(systemReset0, load32(systemReset0)&^spi3Enable)
+	store32(systemClock0, load32(systemClock0)|spi3Enable|spi3DMAEnable)
+	store32(systemReset0, load32(systemReset0)|spi3Enable|spi3DMAEnable)
+	store32(systemReset0, load32(systemReset0)&^(spi3Enable|spi3DMAEnable))
 	store32(spi3ClockGate, 7)
 	store32(spi3Control, 0)
 	// Match the official M5GFX StickS3 configuration: the 80 MHz peripheral
@@ -148,11 +147,10 @@ func spiDMAWait() bool {
 	}
 }
 
-func spiDMAStart(data []byte, descriptor *dmaDescriptor) {
-	length := len(data)
-	descriptor.control = uint32(length) | uint32(length)<<12 | 1<<30 | 1<<31
-	descriptor.buffer = pointerBits(unsafe.Pointer(&data[0]))
-	descriptor.next = 0
+func spiDMAStart(buffer *dmaBuffer, length int, descriptor *dmaDescriptor) {
+	descriptor[0] = uint32(length) | uint32(length)<<12 | 1<<30 | 1<<31
+	descriptor[1] = pointerBits32(unsafe.Pointer(&buffer[0]))
+	descriptor[2] = 0
 
 	// Reset the channel and SPI DMA FIFO before mounting the one-descriptor
 	// transfer. GDMA link registers store the low 20 address bits for internal
@@ -165,8 +163,10 @@ func spiDMAStart(data []byte, descriptor *dmaDescriptor) {
 	store32(spi3DMAConfig, load32(spi3DMAConfig)&^(1<<31))
 	store32(spi3DMAIntClear, 1<<1)
 	store32(spi3DMAConfig, load32(spi3DMAConfig)|spi3DMATX)
-	store32(gdmaOutLink, uint32(pointerBits(unsafe.Pointer(descriptor)))&0xfffff|1<<21)
 	store32(spi3DataLength, uint32(length*8-1))
+	descriptorAddress := uint32(pointerBits(unsafe.Pointer(descriptor))) & 0xfffff
+	store32(gdmaOutLink, descriptorAddress)
+	store32(gdmaOutLink, descriptorAddress|1<<21)
 	store32(spi3Command, spi3Update)
 	spiWait(spi3Update)
 	store32(spi3Command, spi3UserStart)
@@ -322,27 +322,46 @@ func presentRGBA(pixels []byte, stride, scale, x0, y0, x1, y1 int) bool {
 	current := 0
 	inFlight := false
 	for y := y0; y < y1; y++ {
-		var buffer []byte
+		var buffer *dmaBuffer
 		if current == 0 {
-			buffer = dmaBufferData(&buffer0)
+			buffer = &buffer0
 		} else {
-			buffer = dmaBufferData(&buffer1)
+			buffer = &buffer1
 		}
 		used := 0
-		for x := x0; x < x1; x++ {
-			offset := y*stride + x*4
-			color := rgb565(pixels[offset], pixels[offset+1], pixels[offset+2])
-			for repeatX := 0; repeatX < scale; repeatX++ {
-				buffer[used] = byte(color >> 8)
-				buffer[used+1] = byte(color)
-				used += 2
+		if scale == 2 {
+			// Two identical RGB565 pixels are exactly one DMA word. Packing the
+			// common Forms path directly avoids per-byte read/modify/write calls.
+			words := buffer[:]
+			for x := x0; x < x1; x++ {
+				offset := y*stride + x*4
+				color := rgb565(pixels[offset], pixels[offset+1], pixels[offset+2])
+				high := uint32(byte(color >> 8))
+				low := uint32(byte(color))
+				words[used/4] = high | low<<8 | high<<16 | low<<24
+				used += 4
 			}
-		}
-		rowBytes := used
-		for repeatY := 1; repeatY < scale; repeatY++ {
-			for index := 0; index < rowBytes; index++ {
-				buffer[used] = buffer[index]
-				used++
+			rowWords := used / 4
+			for index := 0; index < rowWords; index++ {
+				words[rowWords+index] = words[index]
+			}
+			used *= 2
+		} else {
+			for x := x0; x < x1; x++ {
+				offset := y*stride + x*4
+				color := rgb565(pixels[offset], pixels[offset+1], pixels[offset+2])
+				for repeatX := 0; repeatX < scale; repeatX++ {
+					dmaStoreByte(buffer, used, byte(color>>8))
+					dmaStoreByte(buffer, used+1, byte(color))
+					used += 2
+				}
+			}
+			rowBytes := used
+			for repeatY := 1; repeatY < scale; repeatY++ {
+				for index := 0; index < rowBytes; index++ {
+					dmaStoreByte(buffer, used, dmaLoadByte(buffer, index))
+					used++
+				}
 			}
 		}
 		if inFlight {
@@ -352,7 +371,7 @@ func presentRGBA(pixels []byte, stride, scale, x0, y0, x1, y1 int) bool {
 				return false
 			}
 		}
-		spiDMAStart(buffer[:used], &descriptors[current])
+		spiDMAStart(buffer, used, &descriptors[current])
 		inFlight = true
 		current = 1 - current
 	}

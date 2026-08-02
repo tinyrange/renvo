@@ -22,6 +22,12 @@ go backend {
 	const usbSerialEndpoint = 0x60038000
 	const usbSerialEndpointConfig = usbSerialEndpoint + 4
 	const usbSerialInterruptRaw = usbSerialEndpoint + 8
+	const usbSerialConfig = usbSerialEndpoint + 0x18
+	const usbSerialMiscConfig = usbSerialEndpoint + 0x44
+	const usbSerialMemoryConfig = usbSerialEndpoint + 0x48
+	const systemClock1 = 0x600c001c
+	const systemReset1 = 0x600c0024
+	const rtcUSBConfig = 0x60008120
 	const usbSerialStartOfFrame = 1 << 1
 	const usbSerialProbeIterations = 65536
 	// Target-private relocation resolved after the complete program has been
@@ -111,6 +117,21 @@ go backend {
 		xtensa_lx7.moveImmediate(out, xtensa_lx7.primary, value)
 		xtensa_lx7.storeU32(out,
 			RTGAddress{Base: xtensa_lx7.address}, xtensa_lx7.primary)
+	}
+
+	func updateRegister(out *RTGEmitter, register int, setMask int64, clearMask int64) {
+		xtensa_lx7.loadU32(out, xtensa_lx7.scratch,
+			RTGAddress{Displacement: register})
+		if clearMask != 0 {
+			xtensa_lx7.moveImmediate(out, xtensa_lx7.primary, -clearMask-1)
+			xtensa_lx7.bitAnd(out, xtensa_lx7.scratch, xtensa_lx7.primary)
+		}
+		if setMask != 0 {
+			xtensa_lx7.moveImmediate(out, xtensa_lx7.primary, setMask)
+			xtensa_lx7.bitOr(out, xtensa_lx7.scratch, xtensa_lx7.primary)
+		}
+		xtensa_lx7.storeU32(out,
+			RTGAddress{Displacement: register}, xtensa_lx7.scratch)
 	}
 
 	func disableWatchdogs(out *RTGEmitter) {
@@ -263,6 +284,26 @@ go backend {
 
 	func usbSerialInitialize(out *RTGEmitter) {
 		done := out.NewLabel()
+		disconnect := out.NewLabel()
+		// The second-stage bootloader may gate USB Serial/JTAG when it hands off
+		// to a freestanding application. Restore the internal PHY explicitly so
+		// serial output and OpenOCD remain available after a watchdog reset.
+		updateRegister(out, systemClock1, 1<<10, 0)
+		updateRegister(out, systemReset1, 1<<10, 0)
+		updateRegister(out, systemReset1, 0, 1<<10)
+		updateRegister(out, rtcUSBConfig, 1<<20, 1<<19)
+		updateRegister(out, usbSerialConfig, 0, 1<<14|1<<0)
+		updateRegister(out, usbSerialMiscConfig, 1, 0)
+		updateRegister(out, usbSerialMemoryConfig, 1<<1, 1)
+		// Hold the pull-up off long enough for the host to observe a disconnect,
+		// then reconnect the freshly reset internal PHY.
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.copyCount, 10000)
+		out.Mark(disconnect)
+		xtensa_lx7.decrement(out, xtensa_lx7.copyCount)
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.primary, 0)
+		xtensa_lx7.compare(out, xtensa_lx7.copyCount, xtensa_lx7.primary)
+		xtensa_lx7.jumpCondition(out, xtensa_lx7.ne, disconnect)
+		updateRegister(out, usbSerialConfig, 1<<14, 1<<0)
 		// An attached host has already produced SOF traffic while the ESP
 		// bootloader loads this image. Preserve that raw latch as connection
 		// state; it remains clear on battery-only boots.
