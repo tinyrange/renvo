@@ -1,6 +1,9 @@
 package board
 
-import "testing"
+import (
+	"testing"
+	"unsafe"
+)
 
 func TestRGB565(t *testing.T) {
 	tests := []struct {
@@ -17,5 +20,16 @@ func TestRGB565(t *testing.T) {
 		if got := rgb565(test.red, test.green, test.blue); got != test.want {
 			t.Fatalf("rgb565(%d, %d, %d) = %#04x, want %#04x", test.red, test.green, test.blue, got, test.want)
 		}
+	}
+}
+
+func TestDMABufferDataIsWordAligned(t *testing.T) {
+	var buffer dmaBuffer
+	data := dmaBufferData(&buffer)
+	if len(data) != DisplayWidth*6 {
+		t.Fatalf("DMA buffer length = %d, want %d", len(data), DisplayWidth*6)
+	}
+	if uintptr(unsafe.Pointer(&data[0]))&3 != 0 {
+		t.Fatalf("DMA buffer address %p is not word aligned", &data[0])
 	}
 }

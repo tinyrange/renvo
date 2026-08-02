@@ -1,6 +1,10 @@
 package board
 
-import "renvo.dev/std/graphics"
+import (
+	"unsafe"
+
+	"renvo.dev/std/graphics"
+)
 
 const (
 	DisplayWidth  = 135
@@ -8,36 +12,85 @@ const (
 )
 
 const (
-	lcdMOSI        = 39
-	lcdClock       = 40
-	lcdChipSelect  = 41
-	lcdDataCommand = 45
-	lcdReset       = 21
-	lcdBlack       = uint16(0x0000)
-	lcdWhite       = uint16(0xffff)
-	lcdRed         = uint16(0xf800)
-	lcdYellow      = uint16(0xffe0)
-	lcdGreen       = uint16(0x07e0)
-	lcdCyan        = uint16(0x07ff)
-	lcdBlue        = uint16(0x001f)
-	lcdMagenta     = uint16(0xf81f)
-	spi3Base       = uintptr(0x60025000)
-	spi3Command    = spi3Base + 0x00
-	spi3Control    = spi3Base + 0x08
-	spi3Clock      = spi3Base + 0x0c
-	spi3User       = spi3Base + 0x10
-	spi3DataLength = spi3Base + 0x1c
-	spi3Misc       = spi3Base + 0x20
-	spi3DMAConfig  = spi3Base + 0x30
-	spi3Data       = spi3Base + 0x98
-	spi3ClockGate  = spi3Base + 0xe8
-	systemClock0   = uintptr(0x600c0018)
-	systemReset0   = uintptr(0x600c0020)
-	spi3Enable     = uint32(1 << 16)
-	spi3Update     = uint32(1 << 23)
-	spi3UserStart  = uint32(1 << 24)
-	spi3UserMOSI   = uint32(1 << 27)
+	lcdMOSI           = 39
+	lcdClock          = 40
+	lcdChipSelect     = 41
+	lcdDataCommand    = 45
+	lcdReset          = 21
+	lcdBlack          = uint16(0x0000)
+	lcdWhite          = uint16(0xffff)
+	lcdRed            = uint16(0xf800)
+	lcdYellow         = uint16(0xffe0)
+	lcdGreen          = uint16(0x07e0)
+	lcdCyan           = uint16(0x07ff)
+	lcdBlue           = uint16(0x001f)
+	lcdMagenta        = uint16(0xf81f)
+	spi3Base          = uintptr(0x60025000)
+	spi3Command       = spi3Base + 0x00
+	spi3Control       = spi3Base + 0x08
+	spi3Clock         = spi3Base + 0x0c
+	spi3User          = spi3Base + 0x10
+	spi3DataLength    = spi3Base + 0x1c
+	spi3Misc          = spi3Base + 0x20
+	spi3DMAConfig     = spi3Base + 0x30
+	spi3DMAIntClear   = spi3Base + 0x38
+	spi3DMAIntRaw     = spi3Base + 0x3c
+	spi3Data          = spi3Base + 0x98
+	spi3ClockGate     = spi3Base + 0xe8
+	systemClock0      = uintptr(0x600c0018)
+	systemClock1      = uintptr(0x600c001c)
+	systemReset0      = uintptr(0x600c0020)
+	systemReset1      = uintptr(0x600c0024)
+	gdmaBase          = uintptr(0x6003f000)
+	gdmaOutConfig0    = gdmaBase + 0x60
+	gdmaOutConfig1    = gdmaBase + 0x64
+	gdmaOutIntRaw     = gdmaBase + 0x68
+	gdmaOutIntClear   = gdmaBase + 0x74
+	gdmaOutLink       = gdmaBase + 0x80
+	gdmaOutPeripheral = gdmaBase + 0xa8
+	gdmaMiscConfig    = gdmaBase + 0x3c8
+	spi3Enable        = uint32(1 << 16)
+	gdmaEnable        = uint32(1 << 6)
+	spi3Update        = uint32(1 << 23)
+	spi3UserStart     = uint32(1 << 24)
+	spi3UserMOSI      = uint32(1 << 27)
+	spi3DMATX         = uint32(1 << 28)
 )
+
+type dmaDescriptor struct {
+	control uint32
+	buffer  uintptr
+	next    uintptr
+}
+
+type dmaBuffer struct {
+	// Leave room to align the usable scanline without relying on the target
+	// compiler's stack alignment for byte arrays. Scaled presentation stores
+	// all identical physical rows so they share one DMA transaction.
+	data [DisplayWidth*6 + 3]byte
+}
+
+func pointerBits(pointer unsafe.Pointer) uintptr {
+	return *(*uintptr)(unsafe.Pointer(&pointer))
+}
+
+func pointerBits32(pointer unsafe.Pointer) uint32 {
+	return *(*uint32)(unsafe.Pointer(&pointer))
+}
+
+func dmaBufferData(buffer *dmaBuffer) []byte {
+	data := buffer.data[:]
+	offset := 0
+	remainder := pointerBits32(unsafe.Pointer(&data[0])) & 3
+	if remainder == 1 {
+		offset = 3
+	} else if remainder == 2 {
+		offset = 2
+	} else if remainder == 3 {
+		offset = 1
+	}
+	return data[offset : offset+DisplayWidth*6]
+}
 
 func spiWait(mask uint32) {
 	for load32(spi3Command)&mask != 0 {
@@ -61,12 +114,60 @@ func spiInitialize() {
 	store32(spi3Command, spi3Update)
 	spiWait(spi3Update)
 
+	// Reserve GDMA channel 0 for SPI3 transmit. The StickS3 board package owns
+	// this otherwise bare peripheral for the lifetime of the application.
+	store32(systemClock1, load32(systemClock1)|gdmaEnable)
+	store32(systemReset1, load32(systemReset1)|gdmaEnable)
+	store32(systemReset1, load32(systemReset1)&^gdmaEnable)
+	store32(gdmaMiscConfig, load32(gdmaMiscConfig)|(1<<4))
+	store32(gdmaOutConfig1, load32(gdmaOutConfig1)|(1<<12))
+	store32(gdmaOutPeripheral, 1) // SPI3
+
 	configureGPIO(lcdMOSI, false)
 	configureGPIO(lcdClock, false)
 	connectGPIOOutput(lcdMOSI, 68)
 	connectGPIOOutput(lcdClock, 66)
 	enableGPIO(lcdMOSI, true)
 	enableGPIO(lcdClock, true)
+}
+
+func spiDMAWait() bool {
+	// Observe errors while the transfer is active: an underflow can prevent
+	// SPI's USR bit from ever clearing. Require both GDMA's end-to-end event
+	// and SPI completion before reusing the descriptor or scanline buffer.
+	for {
+		status := load32(gdmaOutIntRaw)
+		if status&(1<<2) != 0 || load32(spi3DMAIntRaw)&(1<<1) != 0 {
+			return false
+		}
+		if status&(1<<3) != 0 && load32(spi3Command)&spi3UserStart == 0 {
+			return true
+		}
+	}
+}
+
+func spiDMAStart(data []byte, descriptor *dmaDescriptor) {
+	length := len(data)
+	descriptor.control = uint32(length) | uint32(length)<<12 | 1<<30 | 1<<31
+	descriptor.buffer = pointerBits(unsafe.Pointer(&data[0]))
+	descriptor.next = 0
+
+	// Reset the channel and SPI DMA FIFO before mounting the one-descriptor
+	// transfer. GDMA link registers store the low 20 address bits for internal
+	// DRAM descriptors on ESP32-S3.
+	config := load32(gdmaOutConfig0)
+	store32(gdmaOutConfig0, config|1)
+	store32(gdmaOutConfig0, config&^1)
+	store32(gdmaOutIntClear, 0xff)
+	store32(spi3DMAConfig, load32(spi3DMAConfig)|1<<31)
+	store32(spi3DMAConfig, load32(spi3DMAConfig)&^(1<<31))
+	store32(spi3DMAIntClear, 1<<1)
+	store32(spi3DMAConfig, load32(spi3DMAConfig)|spi3DMATX)
+	store32(gdmaOutLink, uint32(pointerBits(unsafe.Pointer(descriptor)))&0xfffff|1<<21)
+	store32(spi3DataLength, uint32(length*8-1))
+	store32(spi3Command, spi3Update)
+	spiWait(spi3Update)
+	store32(spi3Command, spi3UserStart)
 }
 
 func spiStoreWord(index int, value uint32) {
@@ -213,34 +314,60 @@ func presentRGBA(pixels []byte, stride, scale, x0, y0, x1, y1 int) bool {
 	setGPIO(lcdDataCommand, false)
 	spiWriteByte(0x2c)
 	setGPIO(lcdDataCommand, true)
-	var buffer [64]byte
-	used := 0
+	var buffer0 dmaBuffer
+	var buffer1 dmaBuffer
+	var descriptors [2]dmaDescriptor
+	current := 0
+	inFlight := false
 	for y := y0; y < y1; y++ {
-		for repeatY := 0; repeatY < scale; repeatY++ {
-			for x := x0; x < x1; x++ {
-				offset := y*stride + x*4
-				color := rgb565(pixels[offset], pixels[offset+1], pixels[offset+2])
-				for repeatX := 0; repeatX < scale; repeatX++ {
-					buffer[used] = byte(color >> 8)
-					buffer[used+1] = byte(color)
-					used += 2
-					if used == len(buffer) {
-						spiWrite(buffer[:])
-						used = 0
-					}
-				}
+		var buffer []byte
+		if current == 0 {
+			buffer = dmaBufferData(&buffer0)
+		} else {
+			buffer = dmaBufferData(&buffer1)
+		}
+		used := 0
+		for x := x0; x < x1; x++ {
+			offset := y*stride + x*4
+			color := rgb565(pixels[offset], pixels[offset+1], pixels[offset+2])
+			for repeatX := 0; repeatX < scale; repeatX++ {
+				buffer[used] = byte(color >> 8)
+				buffer[used+1] = byte(color)
+				used += 2
 			}
 		}
+		rowBytes := used
+		for repeatY := 1; repeatY < scale; repeatY++ {
+			for index := 0; index < rowBytes; index++ {
+				buffer[used] = buffer[index]
+				used++
+			}
+		}
+		if inFlight {
+			if !spiDMAWait() {
+				store32(spi3DMAConfig, load32(spi3DMAConfig)&^spi3DMATX)
+				setGPIO(lcdChipSelect, true)
+				return false
+			}
+		}
+		spiDMAStart(buffer[:used], &descriptors[current])
+		inFlight = true
+		current = 1 - current
 	}
-	if used != 0 {
-		spiWrite(buffer[:used])
+	if inFlight {
+		if !spiDMAWait() {
+			store32(spi3DMAConfig, load32(spi3DMAConfig)&^spi3DMATX)
+			setGPIO(lcdChipSelect, true)
+			return false
+		}
 	}
+	store32(spi3DMAConfig, load32(spi3DMAConfig)&^spi3DMATX)
 	setGPIO(lcdChipSelect, true)
 	return true
 }
 
 // PresentRGBA copies a rectangle from a full-screen RGBA8 buffer to the
-// StickS3 LCD. Conversion uses one SPI-sized chunk and no second framebuffer.
+// StickS3 LCD using double-buffered DMA scanlines and no second framebuffer.
 func PresentRGBA(pixels []byte, stride, x0, y0, x1, y1 int) bool {
 	return presentRGBA(pixels, stride, 1, x0, y0, x1, y1)
 }
