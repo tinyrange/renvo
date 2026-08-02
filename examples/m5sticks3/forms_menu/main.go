@@ -15,7 +15,7 @@ const (
 )
 
 func present(surface *graphics.Surface) {
-	if board.PresentRGBA2x(surface.Pixels, surface.Stride, 0, 0, width, height) {
+	if board.PresentSurface2x(surface) {
 		surface.ResetDirty()
 	}
 }

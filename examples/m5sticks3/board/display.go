@@ -50,9 +50,9 @@ func spiInitialize() {
 	store32(systemReset0, load32(systemReset0)&^spi3Enable)
 	store32(spi3ClockGate, 7)
 	store32(spi3Control, 0)
-	// 80 MHz peripheral clock / 8 gives a deliberately conservative 10 MHz
-	// mode-0 LCD clock: pre=1, n=8, high=4, low=8.
-	store32(spi3Clock, uint32((7<<12)|(3<<6)|7))
+	// Match the official M5GFX StickS3 configuration: the 80 MHz peripheral
+	// clock divided by two gives the ST7789 a 40 MHz mode-0 write clock.
+	store32(spi3Clock, uint32((1<<12)|1))
 	store32(spi3User, spi3UserMOSI)
 	// Keep all hardware chip-select outputs disconnected. The panel's CS and
 	// data/command lines remain ordinary GPIOs so command boundaries are clear.
@@ -258,44 +258,30 @@ func PresentRGBA3x(pixels []byte, stride, x0, y0, x1, y1 int) bool {
 	return presentRGBA(pixels, stride, 3, x0, y0, x1, y1)
 }
 
-// PresentSurface3x presents a complete 45x80 Forms surface without forwarding
-// its slice and rectangle through more call words than Xtensa's internal ABI
-// can hold.
-func PresentSurface3x(surface *graphics.Surface) bool {
-	if surface == nil || surface.Stride < 45*4 || len(surface.Pixels) < surface.Stride*80 {
+func presentSurface(surface *graphics.Surface, scale int) bool {
+	width := DisplayWidth / scale
+	height := DisplayHeight / scale
+	if surface == nil || surface.Stride < width*4 || len(surface.Pixels) < surface.Stride*height {
 		return false
 	}
-	pixels := surface.Pixels
-	stride := surface.Stride
-	lcdWindow(0, 0, DisplayWidth-1, DisplayHeight-1)
-	setGPIO(lcdChipSelect, false)
-	setGPIO(lcdDataCommand, false)
-	spiWriteByte(0x2c)
-	setGPIO(lcdDataCommand, true)
-	var buffer [64]byte
-	used := 0
-	for y := 0; y < 80; y++ {
-		for repeatY := 0; repeatY < 3; repeatY++ {
-			for x := 0; x < 45; x++ {
-				offset := y*stride + x*4
-				color := rgb565(pixels[offset], pixels[offset+1], pixels[offset+2])
-				for repeatX := 0; repeatX < 3; repeatX++ {
-					buffer[used] = byte(color >> 8)
-					buffer[used+1] = byte(color)
-					used += 2
-					if used == len(buffer) {
-						spiWrite(buffer[:])
-						used = 0
-					}
-				}
-			}
-		}
+	dirty, ok := surface.DirtyRect()
+	if !ok {
+		return true
 	}
-	if used != 0 {
-		spiWrite(buffer[:used])
-	}
-	setGPIO(lcdChipSelect, true)
-	return true
+	return presentRGBA(surface.Pixels, surface.Stride, scale,
+		int(dirty.MinX), int(dirty.MinY), int(dirty.MaxX), int(dirty.MaxY))
+}
+
+// PresentSurface2x copies only the dirty part of a 67x120 Forms surface. The
+// caller should reset the surface's dirty state after a successful transfer.
+func PresentSurface2x(surface *graphics.Surface) bool {
+	return presentSurface(surface, 2)
+}
+
+// PresentSurface3x copies only the dirty part of a 45x80 Forms surface. The
+// caller should reset the surface's dirty state after a successful transfer.
+func PresentSurface3x(surface *graphics.Surface) bool {
+	return presentSurface(surface, 3)
 }
 
 func lcdInitialize() {
