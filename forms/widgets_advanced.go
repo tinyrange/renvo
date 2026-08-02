@@ -4,9 +4,10 @@ import "renvo.dev/std/graphics"
 
 const widgetRowHeight = 24
 
-func widgetText(surface *graphics.Surface, font *graphics.Font, x, y graphics.Scalar, text string, color graphics.Color) {
+func widgetText(surface *graphics.Surface, font *graphics.Font, position graphics.Point, text string, color graphics.Color) {
 	if font != nil && text != "" {
-		surface.DrawText(font, graphics.Point{X: x, Y: y + font.Metrics.Ascent}, text, color)
+		position.Y += font.Metrics.Ascent
+		surface.DrawText(font, position, text, color)
 	}
 }
 
@@ -89,15 +90,22 @@ func widgetInvalidateSelection(control *Control, oldIndex, newIndex int, top gra
 		return
 	}
 	bounds := control.Bounds()
-	for pass := 0; pass < 2; pass++ {
-		index := oldIndex
-		if pass == 1 {
-			index = newIndex
-		}
-		if index >= 0 && index < count {
-			control.Form().Invalidate(graphics.R(bounds.MinX+1, bounds.MinY+top+graphics.Scalar(index*widgetRowHeight), bounds.Width()-2, widgetRowHeight))
-		}
+	first, last := oldIndex, newIndex
+	if first < 0 || first >= count {
+		first = newIndex
 	}
+	if last < 0 || last >= count {
+		last = oldIndex
+	}
+	if first < 0 || first >= count || last < 0 || last >= count {
+		return
+	}
+	if first > last {
+		first, last = last, first
+	}
+	y := bounds.MinY + top + graphics.Scalar(first*widgetRowHeight)
+	height := (last - first + 1) * widgetRowHeight
+	control.Form().Invalidate(graphics.R(bounds.MinX+1, y, bounds.Width()-2, graphics.Scalar(height)))
 }
 
 // ComboBox is a compact single-selection list with a transient drop-down.
@@ -149,7 +157,7 @@ func (b *ComboBox) SetBounds(bounds graphics.Rect) {
 	b.setLayoutBounds(bounds)
 }
 func (b *ComboBox) setLayoutBounds(bounds graphics.Rect) {
-	if b == nil || rectEqual(b.closedBounds, bounds) {
+	if b == nil || b.closedBounds == bounds {
 		return
 	}
 	b.closedBounds = bounds
@@ -315,7 +323,7 @@ func (b *ComboBox) paint(surface *graphics.Surface) {
 	foreground := controlForeground(&b.Control)
 	surface.DrawLine(graphics.Point{X: arrow.MinX + 9, Y: arrow.MinY + arrow.Height()/2 - 2}, graphics.Point{X: arrow.MinX + 14, Y: arrow.MinY + arrow.Height()/2 + 3}, 1, foreground)
 	surface.DrawLine(graphics.Point{X: arrow.MinX + 14, Y: arrow.MinY + arrow.Height()/2 + 3}, graphics.Point{X: arrow.MinX + 19, Y: arrow.MinY + arrow.Height()/2 - 2}, 1, foreground)
-	widgetText(surface, b.font, bounds.MinX+7, bounds.MinY+(bounds.Height()-labelLineHeight(b.font))/2, b.accessibilityValue(), foreground)
+	widgetText(surface, b.font, graphics.Point{X: bounds.MinX + 7, Y: bounds.MinY + (bounds.Height()-labelLineHeight(b.font))/2}, b.accessibilityValue(), foreground)
 	if b.droppedDown {
 		drop := b.dropRectGlobal()
 		surface.FillRect(drop, b.Background())
@@ -328,7 +336,7 @@ func (b *ComboBox) paint(surface *graphics.Surface) {
 			if index == b.selectedIndex {
 				surface.FillRect(graphics.R(drop.MinX+1, y, drop.Width()-2, widgetRowHeight), theme.Selection)
 			}
-			widgetText(surface, b.font, drop.MinX+7, y+4, b.items[index], foreground)
+			widgetText(surface, b.font, graphics.Point{X: drop.MinX + 7, Y: y + 4}, b.items[index], foreground)
 		}
 		surface.PopClip()
 	}
@@ -414,6 +422,7 @@ type ListBox struct {
 	items         []string
 	selectedIndex int
 	hoveredIndex  int
+	scrollIndex   int
 	Changed       EventHandler
 }
 
@@ -449,10 +458,16 @@ func (b *ListBox) SetSelectedIndex(index int) {
 		return
 	}
 	old := b.selectedIndex
+	oldScroll := b.scrollIndex
 	b.selectedIndex = index
+	b.ensureSelectionVisible()
 	b.AccessibilityChanged()
 	b.AccessibilityChildrenStateChanged()
-	widgetInvalidateSelection(&b.Control, old, index, 0, len(b.items))
+	if oldScroll != b.scrollIndex {
+		b.Invalidate()
+	} else {
+		widgetInvalidateSelection(&b.Control, old-b.scrollIndex, index-b.scrollIndex, 0, b.visibleRows())
+	}
 	if b.Changed != nil {
 		b.Changed()
 	}
@@ -475,26 +490,26 @@ func (b *ListBox) accessibilityPerform(id string, action AccessibilityAction, va
 	return true
 }
 func (b *ListBox) pointerUp(x, y graphics.Scalar) {
-	index := int(y-2) / widgetRowHeight
+	index := b.scrollIndex + int(y-2)/widgetRowHeight
 	if index >= 0 && index < len(b.items) {
 		b.SetSelectedIndex(index)
 	}
 }
 func (b *ListBox) pointerMove(x, y graphics.Scalar) {
-	index := int(y-2) / widgetRowHeight
+	index := b.scrollIndex + int(y-2)/widgetRowHeight
 	if index < 0 || index >= len(b.items) {
 		index = -1
 	}
 	if b.hoveredIndex != index {
 		old := b.hoveredIndex
 		b.hoveredIndex = index
-		widgetInvalidateSelection(&b.Control, old, index, 0, len(b.items))
+		widgetInvalidateSelection(&b.Control, old-b.scrollIndex, index-b.scrollIndex, 0, b.visibleRows())
 	}
 }
 func (b *ListBox) pointerLeave() {
 	old := b.hoveredIndex
 	b.hoveredIndex = -1
-	widgetInvalidateSelection(&b.Control, old, -1, 0, len(b.items))
+	widgetInvalidateSelection(&b.Control, old-b.scrollIndex, -1, 0, b.visibleRows())
 }
 func (b *ListBox) keyDown(event graphics.Event) {
 	next := b.selectedIndex
@@ -536,8 +551,43 @@ func (b *ListBox) visibleRows() int {
 	}
 	return rows
 }
+
+func (b *ListBox) ensureSelectionVisible() {
+	rows := b.visibleRows()
+	if b.selectedIndex >= 0 && b.selectedIndex < b.scrollIndex {
+		b.scrollIndex = b.selectedIndex
+	} else if b.selectedIndex >= b.scrollIndex+rows {
+		b.scrollIndex = b.selectedIndex - rows + 1
+	}
+	maximum := len(b.items) - rows
+	if maximum < 0 {
+		maximum = 0
+	}
+	if b.scrollIndex > maximum {
+		b.scrollIndex = maximum
+	}
+}
+
 func (b *ListBox) paint(surface *graphics.Surface) {
-	paintRows(surface, &b.Control, b.font, b.displayItems(), b.selectedIndex, b.hoveredIndex, 0)
+	items := b.displayItems()
+	bounds := b.Bounds()
+	theme := controlTheme(&b.Control)
+	surface.FillRect(bounds, b.Background())
+	surface.StrokeRect(bounds, 1, theme.Border)
+	surface.PushClipRect(graphics.R(bounds.MinX+1, bounds.MinY+1, bounds.Width()-2, bounds.Height()-2))
+	if b.selectedIndex >= 0 && b.selectedIndex < len(items) {
+		y := bounds.MinY + graphics.Scalar((b.selectedIndex-b.scrollIndex)*widgetRowHeight)
+		surface.FillRect(graphics.R(bounds.MinX+1, y, bounds.Width()-2, widgetRowHeight), theme.Selection)
+	}
+	if b.hoveredIndex >= 0 && b.hoveredIndex < len(items) && b.hoveredIndex != b.selectedIndex {
+		y := bounds.MinY + graphics.Scalar((b.hoveredIndex-b.scrollIndex)*widgetRowHeight)
+		surface.FillRect(graphics.R(bounds.MinX+1, y, bounds.Width()-2, widgetRowHeight), theme.Hover)
+	}
+	for row := 0; row < b.visibleRows() && b.scrollIndex+row < len(items); row++ {
+		y := bounds.MinY + graphics.Scalar(row*widgetRowHeight)
+		widgetText(surface, b.font, graphics.Point{X: bounds.MinX + 7, Y: y + 4}, items[b.scrollIndex+row], controlForeground(&b.Control))
+	}
+	surface.PopClip()
 }
 
 func selectionNodes(control *Control, items []string, selected int, role AccessibilityRole, top graphics.Scalar) []AccessibilityNode {
@@ -547,23 +597,6 @@ func selectionNodes(control *Control, items []string, selected int, role Accessi
 		nodes = append(nodes, AccessibilityNode{ID: widgetItemID(control, i), Role: role, Name: items[i], Bounds: graphics.R(bounds.MinX+1, bounds.MinY+top+graphics.Scalar(i*widgetRowHeight), bounds.Width()-2, widgetRowHeight), Actions: AccessibilitySupportsInvoke, Selectable: true, Selected: i == selected})
 	}
 	return nodes
-}
-func paintRows(surface *graphics.Surface, control *Control, font *graphics.Font, items []string, selected, hovered int, top graphics.Scalar) {
-	bounds := control.Bounds()
-	theme := controlTheme(control)
-	surface.FillRect(bounds, control.Background())
-	surface.StrokeRect(bounds, 1, theme.Border)
-	surface.PushClipRect(graphics.R(bounds.MinX+1, bounds.MinY+1, bounds.Width()-2, bounds.Height()-2))
-	for i := 0; i < len(items); i++ {
-		y := bounds.MinY + top + graphics.Scalar(i*widgetRowHeight)
-		if i == selected {
-			surface.FillRect(graphics.R(bounds.MinX+1, y, bounds.Width()-2, widgetRowHeight), theme.Selection)
-		} else if i == hovered {
-			surface.FillRect(graphics.R(bounds.MinX+1, y, bounds.Width()-2, widgetRowHeight), theme.Hover)
-		}
-		widgetText(surface, font, bounds.MinX+7, y+4, items[i], controlForeground(control))
-	}
-	surface.PopClip()
 }
 
 // ListView displays rows under named columns.
@@ -729,7 +762,7 @@ func (v *ListView) paint(surface *graphics.Surface) {
 	surface.StrokeRect(bounds, 1, theme.Border)
 	for i := 0; i < len(v.columns); i++ {
 		x := bounds.MinX + v.columnX(i, bounds.Width())
-		widgetText(surface, v.font, x+6, bounds.MinY+4, v.columns[i], controlForeground(&v.Control))
+		widgetText(surface, v.font, graphics.Point{X: x + 6, Y: bounds.MinY + 4}, v.columns[i], controlForeground(&v.Control))
 		if i > 0 {
 			surface.FillRect(graphics.R(x, bounds.MinY, 1, bounds.Height()), theme.Border)
 		}
@@ -743,7 +776,7 @@ func (v *ListView) paint(surface *graphics.Surface) {
 		}
 		for j := 0; j < len(v.rows[i]); j++ {
 			x := bounds.MinX + v.columnX(j, bounds.Width())
-			widgetText(surface, v.font, x+6, y+4, v.rows[i][j], controlForeground(&v.Control))
+			widgetText(surface, v.font, graphics.Point{X: x + 6, Y: y + 4}, v.rows[i][j], controlForeground(&v.Control))
 		}
 	}
 }
@@ -1022,7 +1055,7 @@ func (v *TreeView) paint(surface *graphics.Surface) {
 		} else {
 			drawIcon(surface, IconFile, x+14, y+4, theme.MutedText)
 		}
-		widgetText(surface, v.font, x+36, y+4, v.nodes[i].Text, controlForeground(&v.Control))
+		widgetText(surface, v.font, graphics.Point{X: x + 36, Y: y + 4}, v.nodes[i].Text, controlForeground(&v.Control))
 		row++
 	}
 }
@@ -1292,7 +1325,7 @@ func (c *TabControl) paint(surface *graphics.Surface) {
 			drawIcon(surface, c.icons[i], textX, tab.MinY+(tab.Height()-15)/2, controlAccent(&c.Control))
 			textX += 22
 		}
-		widgetText(surface, c.font, textX, tab.MinY+(tab.Height()-labelLineHeight(c.font))/2, tabs[i], controlForeground(&c.Control))
+		widgetText(surface, c.font, graphics.Point{X: textX, Y: tab.MinY + (tab.Height()-labelLineHeight(c.font))/2}, tabs[i], controlForeground(&c.Control))
 		if i == c.selectedIndex {
 			surface.FillRect(graphics.R(tab.MinX, tab.MaxY-3, tab.Width(), 3), controlAccent(&c.Control))
 		}
@@ -1460,7 +1493,7 @@ func (n *NumericUpDown) paint(surface *graphics.Surface) {
 	surface.FillRect(buttons, theme.SurfaceRaised)
 	surface.FillRect(graphics.R(buttons.MinX, buttons.MinY+buttons.Height()/2, buttons.Width(), 1), theme.Border)
 	foreground := controlForeground(&n.Control)
-	widgetText(surface, n.font, bounds.MinX+7, bounds.MinY+(bounds.Height()-labelLineHeight(n.font))/2, widgetValue(n.value), foreground)
+	widgetText(surface, n.font, graphics.Point{X: bounds.MinX + 7, Y: bounds.MinY + (bounds.Height()-labelLineHeight(n.font))/2}, widgetValue(n.value), foreground)
 	surface.DrawLine(graphics.Point{X: buttons.MinX + 9, Y: buttons.MinY + 11}, graphics.Point{X: buttons.MinX + 14, Y: buttons.MinY + 6}, 1, foreground)
 	surface.DrawLine(graphics.Point{X: buttons.MinX + 14, Y: buttons.MinY + 6}, graphics.Point{X: buttons.MinX + 19, Y: buttons.MinY + 11}, 1, foreground)
 }
@@ -1608,7 +1641,7 @@ func (g *GroupBox) paint(surface *graphics.Surface) {
 			width = graphics.MeasureText(g.font, g.Text()).Width + 12
 		}
 		surface.FillRect(graphics.R(bounds.MinX+8, bounds.MinY, width, 18), theme.Window)
-		widgetText(surface, g.font, bounds.MinX+14, bounds.MinY, g.Text(), controlForeground(&g.Control))
+		widgetText(surface, g.font, graphics.Point{X: bounds.MinX + 14, Y: bounds.MinY}, g.Text(), controlForeground(&g.Control))
 	}
 }
 
@@ -1858,7 +1891,7 @@ func (b *ToolBar) paint(surface *graphics.Surface) {
 	surface.StrokeRect(bounds, 1, theme.Border)
 	x := bounds.MinX + 4
 	if len(b.items) == 0 && b.Text() != "" {
-		widgetText(surface, b.font, x+8, bounds.MinY+(bounds.Height()-labelLineHeight(b.font))/2, b.Text(), controlForeground(&b.Control))
+		widgetText(surface, b.font, graphics.Point{X: x + 8, Y: bounds.MinY + (bounds.Height()-labelLineHeight(b.font))/2}, b.Text(), controlForeground(&b.Control))
 	}
 	for i := 0; i < len(b.items); i++ {
 		width := b.itemWidth(i)
@@ -1874,7 +1907,7 @@ func (b *ToolBar) paint(surface *graphics.Surface) {
 			drawIcon(surface, b.items[i].Icon, item.MinX+10, item.MinY+(item.Height()-15)/2, controlAccent(&b.Control))
 			textX += 22
 		}
-		widgetText(surface, b.font, textX, item.MinY+(item.Height()-labelLineHeight(b.font))/2, b.items[i].Text, controlForeground(&b.Control))
+		widgetText(surface, b.font, graphics.Point{X: textX, Y: item.MinY + (item.Height()-labelLineHeight(b.font))/2}, b.items[i].Text, controlForeground(&b.Control))
 		x += width + 4
 	}
 }
@@ -1901,5 +1934,5 @@ func (s *StatusBar) paint(surface *graphics.Surface) {
 	bounds := s.Bounds()
 	surface.FillRect(bounds, s.Background())
 	surface.FillRect(graphics.R(bounds.MinX, bounds.MinY, bounds.Width(), 1), controlTheme(&s.Control).Border)
-	widgetText(surface, s.font, bounds.MinX+8, bounds.MinY+(bounds.Height()-labelLineHeight(s.font))/2, s.Text(), controlForeground(&s.Control))
+	widgetText(surface, s.font, graphics.Point{X: bounds.MinX + 8, Y: bounds.MinY + (bounds.Height()-labelLineHeight(s.font))/2}, s.Text(), controlForeground(&s.Control))
 }

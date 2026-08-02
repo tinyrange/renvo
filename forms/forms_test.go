@@ -50,6 +50,20 @@ func TestMovingControlKeepsOldAndNewDamageSeparate(t *testing.T) {
 	})
 }
 
+func TestAdjacentInvalidationsStaySeparate(t *testing.T) {
+	var form Form
+	form.Initialize(67, 120)
+	form.invalid = nil
+
+	form.Invalidate(graphics.R(3, 14, 63, 24))
+	form.Invalidate(graphics.R(3, 38, 63, 24))
+
+	assertRects(t, form.InvalidRects(), []graphics.Rect{
+		graphics.R(3, 14, 63, 24),
+		graphics.R(3, 38, 63, 24),
+	})
+}
+
 func TestPaintClipsControlsToInvalidRegions(t *testing.T) {
 	var form Form
 	form.Initialize(20, 10)

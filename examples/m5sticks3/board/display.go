@@ -1,5 +1,12 @@
 package board
 
+import "renvo.dev/std/graphics"
+
+const (
+	DisplayWidth  = 135
+	DisplayHeight = 240
+)
+
 const (
 	lcdMOSI        = 39
 	lcdClock       = 40
@@ -170,6 +177,127 @@ func lcdFillRectangle(x, y, width, height int, color uint16) {
 	setGPIO(lcdChipSelect, true)
 }
 
+func rgb565(red, green, blue byte) uint16 {
+	return uint16(red&0xf8)<<8 | uint16(green&0xfc)<<3 | uint16(blue)>>3
+}
+
+// FillDisplay fills the complete panel without allocating a framebuffer.
+func FillDisplay(red, green, blue byte) {
+	lcdFillRectangle(0, 0, DisplayWidth, DisplayHeight, rgb565(red, green, blue))
+}
+
+func presentRGBA(pixels []byte, stride, scale, x0, y0, x1, y1 int) bool {
+	width := DisplayWidth / scale
+	height := DisplayHeight / scale
+	if stride < width*4 || len(pixels) < stride*height {
+		return false
+	}
+	if x0 < 0 {
+		x0 = 0
+	}
+	if y0 < 0 {
+		y0 = 0
+	}
+	if x1 > width {
+		x1 = width
+	}
+	if y1 > height {
+		y1 = height
+	}
+	if x0 >= x1 || y0 >= y1 {
+		return true
+	}
+
+	lcdWindow(x0*scale, y0*scale, x1*scale-1, y1*scale-1)
+	setGPIO(lcdChipSelect, false)
+	setGPIO(lcdDataCommand, false)
+	spiWriteByte(0x2c)
+	setGPIO(lcdDataCommand, true)
+	var buffer [64]byte
+	used := 0
+	for y := y0; y < y1; y++ {
+		for repeatY := 0; repeatY < scale; repeatY++ {
+			for x := x0; x < x1; x++ {
+				offset := y*stride + x*4
+				color := rgb565(pixels[offset], pixels[offset+1], pixels[offset+2])
+				for repeatX := 0; repeatX < scale; repeatX++ {
+					buffer[used] = byte(color >> 8)
+					buffer[used+1] = byte(color)
+					used += 2
+					if used == len(buffer) {
+						spiWrite(buffer[:])
+						used = 0
+					}
+				}
+			}
+		}
+	}
+	if used != 0 {
+		spiWrite(buffer[:used])
+	}
+	setGPIO(lcdChipSelect, true)
+	return true
+}
+
+// PresentRGBA copies a rectangle from a full-screen RGBA8 buffer to the
+// StickS3 LCD. Conversion uses one SPI-sized chunk and no second framebuffer.
+func PresentRGBA(pixels []byte, stride, x0, y0, x1, y1 int) bool {
+	return presentRGBA(pixels, stride, 1, x0, y0, x1, y1)
+}
+
+// PresentRGBA2x presents a 67x120 logical surface at two physical pixels per
+// axis. The final LCD column remains black. This reduces a Forms framebuffer
+// from 129600 bytes to 32160 bytes on memory-constrained systems.
+func PresentRGBA2x(pixels []byte, stride, x0, y0, x1, y1 int) bool {
+	return presentRGBA(pixels, stride, 2, x0, y0, x1, y1)
+}
+
+// PresentRGBA3x presents a 45x80 logical surface at three physical pixels per
+// axis, using only 14400 bytes for a full Forms framebuffer.
+func PresentRGBA3x(pixels []byte, stride, x0, y0, x1, y1 int) bool {
+	return presentRGBA(pixels, stride, 3, x0, y0, x1, y1)
+}
+
+// PresentSurface3x presents a complete 45x80 Forms surface without forwarding
+// its slice and rectangle through more call words than Xtensa's internal ABI
+// can hold.
+func PresentSurface3x(surface *graphics.Surface) bool {
+	if surface == nil || surface.Stride < 45*4 || len(surface.Pixels) < surface.Stride*80 {
+		return false
+	}
+	pixels := surface.Pixels
+	stride := surface.Stride
+	lcdWindow(0, 0, DisplayWidth-1, DisplayHeight-1)
+	setGPIO(lcdChipSelect, false)
+	setGPIO(lcdDataCommand, false)
+	spiWriteByte(0x2c)
+	setGPIO(lcdDataCommand, true)
+	var buffer [64]byte
+	used := 0
+	for y := 0; y < 80; y++ {
+		for repeatY := 0; repeatY < 3; repeatY++ {
+			for x := 0; x < 45; x++ {
+				offset := y*stride + x*4
+				color := rgb565(pixels[offset], pixels[offset+1], pixels[offset+2])
+				for repeatX := 0; repeatX < 3; repeatX++ {
+					buffer[used] = byte(color >> 8)
+					buffer[used+1] = byte(color)
+					used += 2
+					if used == len(buffer) {
+						spiWrite(buffer[:])
+						used = 0
+					}
+				}
+			}
+		}
+	}
+	if used != 0 {
+		spiWrite(buffer[:used])
+	}
+	setGPIO(lcdChipSelect, true)
+	return true
+}
+
 func lcdInitialize() {
 	lcdCommand(0xb7, []byte{0x35})
 	lcdCommand(0xbb, []byte{0x28})
@@ -198,11 +326,11 @@ func lcdInitialize() {
 }
 
 func lcdDrawLines() {
-	lcdFillRectangle(0, 0, 135, 240, lcdBlack)
-	lcdFillRectangle(0, 0, 135, 3, lcdWhite)
-	lcdFillRectangle(0, 237, 135, 3, lcdWhite)
-	lcdFillRectangle(0, 0, 3, 240, lcdWhite)
-	lcdFillRectangle(132, 0, 3, 240, lcdWhite)
+	lcdFillRectangle(0, 0, DisplayWidth, DisplayHeight, lcdBlack)
+	lcdFillRectangle(0, 0, DisplayWidth, 3, lcdWhite)
+	lcdFillRectangle(0, 237, DisplayWidth, 3, lcdWhite)
+	lcdFillRectangle(0, 0, 3, DisplayHeight, lcdWhite)
+	lcdFillRectangle(132, 0, 3, DisplayHeight, lcdWhite)
 	colors := []uint16{lcdRed, lcdYellow, lcdGreen, lcdCyan, lcdBlue, lcdMagenta}
 	for index, color := range colors {
 		lcdFillRectangle(8, 24+index*36, 119, 4, color)
@@ -210,6 +338,31 @@ func lcdDrawLines() {
 	for x := 16; x < 135; x += 17 {
 		lcdFillRectangle(x, 8, 2, 224, lcdWhite)
 	}
+}
+
+// InitializeDisplay powers and initializes the StickS3 ST7789. The backlight
+// is enabled only after the panel is ready.
+func InitializeDisplay() bool {
+	if !EnableLCDPower() {
+		return false
+	}
+	for _, pin := range []int{lcdChipSelect, lcdDataCommand, lcdReset} {
+		configureGPIO(pin, false)
+		setGPIO(pin, true)
+		enableGPIO(pin, true)
+	}
+	spiInitialize()
+	ConfigureBacklight()
+	setGPIO(lcdReset, false)
+	Delay(100000)
+	setGPIO(lcdReset, true)
+	Delay(300000)
+	lcdCommand(0x01, nil)
+	Delay(300000)
+	lcdInitialize()
+	lcdFillRectangle(0, 0, DisplayWidth, DisplayHeight, lcdBlack)
+	SetBacklight(true)
+	return true
 }
 
 // DrawButtonRectangle shows a red rectangle for Button A and a cyan rectangle
@@ -234,24 +387,9 @@ func DrawButtonRectangle(button int, pressed bool) {
 // ST7789, and draws a sparse line test. The backlight stays off until all panel
 // writes are complete.
 func DrawLineDiagnostic() bool {
-	if !EnableLCDPower() {
+	if !InitializeDisplay() {
 		return false
 	}
-	for _, pin := range []int{lcdChipSelect, lcdDataCommand, lcdReset} {
-		configureGPIO(pin, false)
-		setGPIO(pin, true)
-		enableGPIO(pin, true)
-	}
-	spiInitialize()
-	ConfigureBacklight()
-	setGPIO(lcdReset, false)
-	Delay(100000)
-	setGPIO(lcdReset, true)
-	Delay(300000)
-	lcdCommand(0x01, nil)
-	Delay(300000)
-	lcdInitialize()
 	lcdDrawLines()
-	SetBacklight(true)
 	return true
 }

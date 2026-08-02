@@ -16,6 +16,12 @@ slices, strings, runes, structs, pointers, methods, closures, function values,
 interfaces, unsafe operations, and builtins. Its only system operation is
 `print`, and success is exactly `PASS\n` on USB Serial/JTAG.
 
+The `forms_menu` application renders the ordinary Forms controls through the
+built-in 135x240 display. It uses the target's `tiny` asset profile and a 3x
+logical surface to fit comfortably in internal RAM without changing the Forms
+API. The side button advances through its scrolling list and the front button
+selects the highlighted item.
+
 ## Emulator oracle
 
 Clone `tinyrange/renvo_emu` beside this repository, or set
@@ -56,3 +62,7 @@ matters. Holding the side reset button until its green indicator flashes puts
 the StickS3 into ROM download mode when automatic reset is unavailable.
 The helper requires esptool 5 or newer because it uses the ESP32-S3-aware
 watchdog reset to leave the USB flasher and start the application reliably.
+
+To build and flash the interactive Forms example, use the same commands with
+`sandbox/m5sticks3-forms.elf` as the output and
+`./examples/m5sticks3/forms_menu` as the input package.

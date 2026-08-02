@@ -1,0 +1,21 @@
+package board
+
+import "testing"
+
+func TestRGB565(t *testing.T) {
+	tests := []struct {
+		red, green, blue byte
+		want             uint16
+	}{
+		{0, 0, 0, 0x0000},
+		{255, 255, 255, 0xffff},
+		{255, 0, 0, 0xf800},
+		{0, 255, 0, 0x07e0},
+		{0, 0, 255, 0x001f},
+	}
+	for _, test := range tests {
+		if got := rgb565(test.red, test.green, test.blue); got != test.want {
+			t.Fatalf("rgb565(%d, %d, %d) = %#04x, want %#04x", test.red, test.green, test.blue, got, test.want)
+		}
+	}
+}

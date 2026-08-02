@@ -149,7 +149,7 @@ func (c *Control) SetBounds(bounds graphics.Rect) {
 }
 
 func (c *Control) setBoundsCore(bounds graphics.Rect) {
-	if c == nil || rectEqual(c.bounds, bounds) {
+	if c == nil || c.bounds == bounds {
 		return
 	}
 	old := c.bounds
@@ -876,10 +876,6 @@ func (f *Form) dismissPopupsExcept(keep *Control) {
 
 func (f *Form) clientRect() graphics.Rect {
 	return graphics.R(0, 0, graphics.Scalar(f.width), graphics.Scalar(f.height))
-}
-
-func rectEqual(a, b graphics.Rect) bool {
-	return a.MinX == b.MinX && a.MinY == b.MinY && a.MaxX == b.MaxX && a.MaxY == b.MaxY
 }
 
 func rectContains(outer, inner graphics.Rect) bool {

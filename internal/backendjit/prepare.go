@@ -19,9 +19,10 @@ import (
 )
 
 const (
-	KernelVersion       = 1
-	ProtocolVersion     = 1
-	OptimizationVersion = 1
+	KernelVersion            = 1
+	ProtocolVersion          = 1
+	OptimizationVersion      = 1
+	preparedBackendArenaSize = 1073741824
 )
 
 type PrepareConfig struct {
@@ -85,8 +86,8 @@ func Prepare(config PrepareConfig) Prepared {
 	if err != nil {
 		return prepareFailure("RENVO-RTG-004", err.Error())
 	}
-	args := make([]string, 0, len(names)+7)
-	args = append(args, "-s", "-emit-image", "-t", host, "-o", "-")
+	args := make([]string, 0, len(names)+9)
+	args = append(args, "-s", "-emit-image", "-t", host, "-arena-size", decimal(preparedBackendArenaSize), "-o", "-")
 	args = append(args, names...)
 	compiled := driver.CompileUnit(args, "/backend", config.StdRoot, sources, config.Bootstrap)
 	if !compiled.Ok {
@@ -193,6 +194,7 @@ func cacheKey(descriptor rtg.TargetDescriptor, host string) string {
 		"-" + encodedName(host) + "-g" + decimal(rtg.GeneratorVersion) +
 		"-k" + decimal(KernelVersion) + "-u" + decimal(unit.Version) +
 		"-p" + decimal(ProtocolVersion) + "-o" + decimal(OptimizationVersion) +
+		"-a" + decimal(preparedBackendArenaSize) +
 		"-c" + backendcompiled.CompilerSourceDigest
 }
 

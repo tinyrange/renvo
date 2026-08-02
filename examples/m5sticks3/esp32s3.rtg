@@ -362,7 +362,7 @@ target esp32s3/xtensa_lx7 {
 	abi = xtensa_call0
 	runtime = esp32s3_freestanding
 	executable = esp32s3_elf
-	build_tags = [esp32s3, xtensa_lx7, m5sticks3]
+	build_tags = [esp32s3, xtensa_lx7, m5sticks3, tiny]
 	capabilities = [freestanding, executable, volatile_memory]
-	arena_default = 65536
+	arena_default = 131072
 }

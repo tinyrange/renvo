@@ -332,8 +332,35 @@ go backend {
 		out.RelocAt(at, RTGLabelIndex(label))
 	}
 
-	func jump(out *RTGEmitter, label RTGLabel) {
+	// Calls may target any function in the image, beyond J's signed 18-bit
+	// range. Materialize the destination relative to a nearby CALL0 landing pad
+	// and use JX, while preserving the caller's return address in a12.
+	func emitLongJump(out *RTGEmitter, label RTGLabel) {
+		landing := out.NewLabel()
+		move(out, a12, link)
+		callDirect(out, landing)
+		for out.Len()&3 != 0 {
+			out.Byte(0)
+		}
+		out.Mark(landing)
+		move(out, scratch, link)
+		move(out, link, a12)
+		at := emitFixedImmediate(out, address, 0)
+		out.RelocAt(at, RTGLabelIndex(label))
+		add(out, address, scratch)
+		jumpIndirect(out, address)
+	}
+
+	// Reserve a long fallback after the ordinary J. Relocation keeps the direct
+	// branch when it fits and redirects only an out-of-range J into the inline
+	// materialization sequence.
+	func emitRelaxedJump(out *RTGEmitter, label RTGLabel) {
 		emitJump(out, label)
+		emitLongJump(out, label)
+	}
+
+	func jump(out *RTGEmitter, label RTGLabel) {
+		emitRelaxedJump(out, label)
 	}
 
 	func jumpCondition(out *RTGEmitter, condition RTGCondition, label RTGLabel) {
@@ -366,7 +393,7 @@ go backend {
 			out.Byte(0)
 		}
 		out.Mark(landing)
-		emitJump(out, label)
+		emitRelaxedJump(out, label)
 		out.Mark(resume)
 	}
 
@@ -450,7 +477,11 @@ go backend {
 			if instruction&0x3f == 6 {
 				delta := target - (at + 4)
 				if delta < -131072 || delta > 131071 {
-					panic("Xtensa jump exceeds signed 18-bit range")
+					if RTGGet32At(out.Code(), at+3)&0xffffff != 0x20c000 {
+						panic("Xtensa jump exceeds signed 18-bit range")
+					}
+					// The relaxed slot's long fallback starts immediately after J.
+					delta = -1
 				}
 				patched := 6|((delta&0x3ffff)<<6)
 				out.PatchUint32(at, (RTGGet32At(out.Code(), at)&0xff000000)|patched)
@@ -515,6 +546,21 @@ go backend {
 	func frameAddress(out *RTGEmitter, destination RTGRegister, offset int) {
 		emitAddress(out, destination,
 			RTGAddress{Base: frame, Displacement: -(offset + 8)})
+	}
+
+	// CALL0 leaves overflow arguments at the caller's current stack pointer.
+	// Unlike ABIs that push a return address and frame pointer, there are no
+	// two header words between frame and overflow call word 6.
+	func storeParamWord(out *RTGEmitter, word int, offset int) {
+		registers := []RTGRegister{a2, a3, a4, a5, a6, a7}
+		if word >= 0 && word < len(registers) {
+			frameStore(out, offset, registers[word])
+			return
+		}
+		loadNative(out, primary, RTGAddress{
+			Base: frame, Displacement: (word - 6) * 4,
+		})
+		frameStore(out, offset, primary)
 	}
 }
 
@@ -649,4 +695,5 @@ abi xtensa_call0 {
 	frame_load = go frameLoad
 	frame_store = go frameStore
 	frame_address = go frameAddress
+	store_param_word = go storeParamWord
 }

@@ -1,8 +1,6 @@
 package forms
 
 import (
-	_ "embed"
-
 	"renvo.dev/std/graphics"
 )
 
@@ -78,12 +76,6 @@ type iconCommand struct {
 type iconDefinition struct {
 	commands []iconCommand
 }
-
-//go:embed iconset.rvi
-var embeddedIconSet string
-
-//go:embed assets/control-icons.rim
-var embeddedControlIconMasks []byte
 
 var iconDefinitions []iconDefinition
 var iconDefinitionsLoaded bool
