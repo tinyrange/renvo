@@ -1,0 +1,409 @@
+definition 1
+unit esp32s3
+implements direct_emitter_v1
+
+@import "../../backend/definitions/xtensa_lx7.rtg"
+
+go backend {
+	const textAddress = 0x42000000
+	const textLimit = 0x44000000
+	const dataAddress = 0x3fc94000
+	const dataLimit = 0x3fccb700
+	const codeOffset = 0x100
+	const pageSize = 0x1000
+	const stackTop = 0x3fccb700
+	const appDescriptorAddress = 0x3c020020
+	const iramEntryAddress = 0x40374100
+	const iramStartupSize = 0x600
+	const romConfigureInstructionCache = 0x40001a1c
+	const instructionCacheSize = 0x4000
+	const instructionCacheWays = 8
+	const instructionCacheLineSize = 32
+	const usbSerialEndpoint = 0x60038000
+	const usbSerialEndpointConfig = usbSerialEndpoint + 4
+	const usbSerialInterruptRaw = usbSerialEndpoint + 8
+	const usbSerialConfig = usbSerialEndpoint + 0x18
+	const usbSerialMiscConfig = usbSerialEndpoint + 0x44
+	const usbSerialMemoryConfig = usbSerialEndpoint + 0x48
+	const systemClock1 = 0x600c001c
+	const systemReset1 = 0x600c0024
+	const rtcUSBConfig = 0x60008120
+	const usbSerialStartOfFrame = 1 << 1
+	const usbSerialProbeIterations = 65536
+	// Target-private relocation resolved after the complete program has been
+	// emitted, when the final BSS size is known.
+	const relocationAbsoluteBSSEnd = 3
+
+	func append16(out []byte, value int) []byte {
+		return append(out, byte(value), byte(value>>8))
+	}
+
+	func append32(out []byte, value int) []byte {
+		return append(out, byte(value), byte(value>>8), byte(value>>16), byte(value>>24))
+	}
+
+	func appendUntil(out []byte, size int) []byte {
+		for len(out) < size {
+			out = append(out, 0)
+		}
+		return out
+	}
+
+	func appendProgramHeader(
+		out []byte, offset int, address int, fileSize int,
+		memorySize int, flags int,
+	) []byte {
+		out = append32(out, 1)
+		out = append32(out, offset)
+		out = append32(out, address)
+		out = append32(out, address)
+		out = append32(out, fileSize)
+		out = append32(out, memorySize)
+		out = append32(out, flags)
+		return append32(out, pageSize)
+	}
+
+	func appendSectionHeader(
+		out []byte, name int, kind int, flags int, address int,
+		offset int, size int, alignment int,
+	) []byte {
+		out = append32(out, name)
+		out = append32(out, kind)
+		out = append32(out, flags)
+		out = append32(out, address)
+		out = append32(out, offset)
+		out = append32(out, size)
+		out = append32(out, 0)
+		out = append32(out, 0)
+		out = append32(out, alignment)
+		return append32(out, 0)
+	}
+
+	func appDescriptor() []byte {
+		descriptor := make([]byte, 256)
+		descriptor[0] = 0x32
+		descriptor[1] = 0x54
+		descriptor[2] = 0xcd
+		descriptor[3] = 0xab
+		copy(descriptor[16:], []byte("renvo"))
+		copy(descriptor[48:], []byte("renvo-m5sticks3"))
+		copy(descriptor[112:], []byte("renvo"))
+		// Leave mmu_page_size at its legacy zero value. The ESP32-S3
+		// bootloader interprets zero as its configured 64 KiB MMU page size;
+		// this also matches the descriptor in the known-good IRAM image.
+		return descriptor
+	}
+
+	func patchAbsolute(out *RTGEmitter, bssAddress int) {
+		for index := 0; index < out.AbsoluteRelocationCount(); index++ {
+			at := out.AbsoluteRelocationOffset(index)
+			addend := out.AbsoluteRelocationAddend(index)
+			kind := out.AbsoluteRelocationKind(index)
+			target := dataAddress + addend
+			if kind == RTGRelocationAbsoluteBSS {
+				target = bssAddress + addend
+			} else if kind == relocationAbsoluteBSSEnd {
+				target = bssAddress + RTGAlignValue(out.BSSSize(), 4)
+			}
+			instruction := RTGGet32At(out.Code(), at)
+			register := (instruction >> 4) & 15
+			xtensa_lx7.patchFixedImmediate(out, at,
+				RTGRegister{Code: register, Valid: true}, int64(target))
+		}
+	}
+
+	func writeRegister(out *RTGEmitter, register int, value int64) {
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.address, int64(register))
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.primary, value)
+		xtensa_lx7.storeU32(out,
+			RTGAddress{Base: xtensa_lx7.address}, xtensa_lx7.primary)
+	}
+
+	func updateRegister(out *RTGEmitter, register int, setMask int64, clearMask int64) {
+		xtensa_lx7.loadU32(out, xtensa_lx7.scratch,
+			RTGAddress{Displacement: register})
+		if clearMask != 0 {
+			xtensa_lx7.moveImmediate(out, xtensa_lx7.primary, -clearMask-1)
+			xtensa_lx7.bitAnd(out, xtensa_lx7.scratch, xtensa_lx7.primary)
+		}
+		if setMask != 0 {
+			xtensa_lx7.moveImmediate(out, xtensa_lx7.primary, setMask)
+			xtensa_lx7.bitOr(out, xtensa_lx7.scratch, xtensa_lx7.primary)
+		}
+		xtensa_lx7.storeU32(out,
+			RTGAddress{Displacement: register}, xtensa_lx7.scratch)
+	}
+
+	func disableWatchdogs(out *RTGEmitter) {
+		const timerGroup0 = 0x6001f000
+		const timerGroup1 = 0x60020000
+		const rtcControl = 0x60008000
+		const watchdogKey = 0x50d83aa1
+
+		writeRegister(out, timerGroup0+0x64, watchdogKey)
+		writeRegister(out, timerGroup0+0x48, 0)
+		writeRegister(out, timerGroup1+0x64, watchdogKey)
+		writeRegister(out, timerGroup1+0x48, 0)
+		writeRegister(out, rtcControl+0xb0, watchdogKey)
+		writeRegister(out, rtcControl+0x98, 0)
+		writeRegister(out, rtcControl+0xb8, 0x8f1d312a)
+		writeRegister(out, rtcControl+0xb4, 1<<30)
+	}
+
+	func clearBSS(out *RTGEmitter) {
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		xtensa_lx7.emitAddress(out, xtensa_lx7.secondary, RTGBSSAddress(0))
+		endAt := xtensa_lx7.emitFixedImmediate(out, xtensa_lx7.copyCount, 0)
+		out.AbsoluteReloc(endAt, 0, relocationAbsoluteBSSEnd)
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.primary, 0)
+		out.Mark(loop)
+		xtensa_lx7.compare(out, xtensa_lx7.secondary, xtensa_lx7.copyCount)
+		xtensa_lx7.jumpCondition(out, xtensa_lx7.eq, done)
+		xtensa_lx7.storeU32(out,
+			RTGAddress{Base: xtensa_lx7.secondary}, xtensa_lx7.primary)
+		xtensa_lx7.emitAddress(out, xtensa_lx7.secondary,
+			RTGAddress{Base: xtensa_lx7.secondary, Displacement: 4})
+		xtensa_lx7.jump(out, loop)
+		out.Mark(done)
+	}
+
+	func image(out *RTGEmitter) []byte {
+		code := out.Code()
+		data := out.Data()
+		bssAddress := RTGAlignValue(dataAddress+len(data), 8)
+		patchAbsolute(out, bssAddress)
+		code = out.Code()
+
+		dataOffset := RTGAlignValue(codeOffset+len(code), pageSize)
+		dataGap := bssAddress - (dataAddress + len(data))
+		dataMemorySize := len(data) + dataGap + RTGAlignValue(out.BSSSize(), 4)
+		if textAddress+codeOffset+len(code) > textLimit {
+			panic("ESP32-S3 code exceeds the flash-mapped instruction window")
+		}
+		if dataAddress+dataMemorySize > dataLimit {
+			panic("ESP32-S3 static data and BSS exceed safe internal DRAM")
+		}
+		descriptor := appDescriptor()
+		descriptorOffset := RTGAlignValue(dataOffset+len(data), 4)
+		sectionNames := []byte{0,
+			'.', 'f', 'l', 'a', 's', 'h', '.', 'a', 'p', 'p', 'd', 'e', 's', 'c', 0,
+			'.', 't', 'e', 'x', 't', 0,
+			'.', 'd', 'a', 't', 'a', 0,
+			'.', 's', 'h', 's', 't', 'r', 't', 'a', 'b', 0,
+			'.', 'i', 'r', 'a', 'm', '.', 't', 'e', 'x', 't', 0}
+		sectionNamesOffset := descriptorOffset+len(descriptor)
+		sectionHeadersOffset := RTGAlignValue(sectionNamesOffset+len(sectionNames), 4)
+
+		var result []byte
+		result = append(result,
+			0x7f, 'E', 'L', 'F', 1, 1, 1, 0,
+			0, 0, 0, 0, 0, 0, 0, 0,
+		)
+		result = append16(result, 2)
+		result = append16(result, 94)
+		result = append32(result, 1)
+		result = append32(result, iramEntryAddress)
+		result = append32(result, 52)
+		result = append32(result, sectionHeadersOffset)
+		result = append32(result, 0)
+		result = append16(result, 52)
+		result = append16(result, 32)
+		result = append16(result, 3)
+		result = append16(result, 40)
+		result = append16(result, 6)
+		result = append16(result, 5)
+		result = appendProgramHeader(result, 0, textAddress,
+			codeOffset+len(code), codeOffset+len(code), 5)
+		result = appendProgramHeader(result, dataOffset, dataAddress,
+			len(data), dataMemorySize, 6)
+		result = appendProgramHeader(result, codeOffset, iramEntryAddress,
+			iramStartupSize, iramStartupSize, 5)
+		result = appendUntil(result, codeOffset)
+		result = append(result, code...)
+		result = appendUntil(result, dataOffset)
+		result = append(result, data...)
+		result = appendUntil(result, descriptorOffset)
+		result = append(result, descriptor...)
+		result = appendUntil(result, sectionNamesOffset)
+		result = append(result, sectionNames...)
+		result = appendUntil(result, sectionHeadersOffset)
+		result = appendSectionHeader(result, 0, 0, 0, 0, 0, 0, 0)
+		result = appendSectionHeader(result, 1, 1, 2,
+			appDescriptorAddress, descriptorOffset, len(descriptor), 4)
+		result = appendSectionHeader(result, 16, 1, 6,
+			textAddress+codeOffset, codeOffset, len(code), 4)
+		result = appendSectionHeader(result, 22, 1, 3,
+			dataAddress, dataOffset, len(data), 4)
+		result = appendSectionHeader(result, 38, 1, 6,
+			iramEntryAddress, codeOffset, iramStartupSize, 4)
+		result = appendSectionHeader(result, 28, 3, 0,
+			0, sectionNamesOffset, len(sectionNames), 1)
+		return result
+	}
+
+	func entryStart(out *RTGEmitter, stateOffset int) bool {
+		xtensa_lx7.windowedEntry(out, 32)
+		// The ESP32-S3 bootloader installs the flash MMU mapping but leaves the
+		// instruction cache in its conservative boot configuration. Match the
+		// first hardware operation in ESP-IDF's IRAM startup before fetching any
+		// application instruction through IROM: 16 KiB, 8-way, 32-byte lines.
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.a10, instructionCacheSize)
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.a11, instructionCacheWays)
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.a12, instructionCacheLineSize)
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.scratch,
+			romConfigureInstructionCache)
+		xtensa_lx7.callWindowedIndirect(out, xtensa_lx7.scratch)
+		disableWatchdogs(out)
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.stack, int64(stackTop))
+		xtensa_lx7.move(out, xtensa_lx7.frame, xtensa_lx7.stack)
+		clearBSS(out)
+		usbSerialInitialize(out)
+		// The second-stage bootloader validates and installs the image's IROM MMU
+		// mapping before entering this IRAM bootstrap. Preserve that mapping and
+		// cache state: rewriting either here races the cache machinery that this
+		// code itself is using for its destination.
+		xtensa_lx7.instructionSync(out)
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.address,
+			int64(textAddress+codeOffset+iramStartupSize))
+		xtensa_lx7.jumpIndirect(out, xtensa_lx7.address)
+		if out.Len() > iramStartupSize {
+			panic("ESP32-S3 IRAM startup exceeds its reserved section")
+		}
+		for out.Len() < iramStartupSize {
+			out.Byte(0)
+		}
+		return true
+	}
+
+	func exit(out *RTGEmitter, status RTGRegister) {
+		loop := out.NewLabel()
+		out.Mark(loop)
+		xtensa_lx7.jump(out, loop)
+	}
+
+	func usbSerialInitialize(out *RTGEmitter) {
+		done := out.NewLabel()
+		disconnect := out.NewLabel()
+		// The second-stage bootloader may gate USB Serial/JTAG when it hands off
+		// to a freestanding application. Restore the internal PHY explicitly so
+		// serial output and OpenOCD remain available after a watchdog reset.
+		updateRegister(out, systemClock1, 1<<10, 0)
+		updateRegister(out, systemReset1, 1<<10, 0)
+		updateRegister(out, systemReset1, 0, 1<<10)
+		updateRegister(out, rtcUSBConfig, 1<<20, 1<<19)
+		updateRegister(out, usbSerialConfig, 0, 1<<14|1<<0)
+		updateRegister(out, usbSerialMiscConfig, 1, 0)
+		updateRegister(out, usbSerialMemoryConfig, 1<<1, 1)
+		// Hold the pull-up off long enough for the host to observe a disconnect,
+		// then reconnect the freshly reset internal PHY.
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.copyCount, 10000)
+		out.Mark(disconnect)
+		xtensa_lx7.decrement(out, xtensa_lx7.copyCount)
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.primary, 0)
+		xtensa_lx7.compare(out, xtensa_lx7.copyCount, xtensa_lx7.primary)
+		xtensa_lx7.jumpCondition(out, xtensa_lx7.ne, disconnect)
+		updateRegister(out, usbSerialConfig, 1<<14, 1<<0)
+		// An attached host has already produced SOF traffic while the ESP
+		// bootloader loads this image. Preserve that raw latch as connection
+		// state; it remains clear on battery-only boots.
+		xtensa_lx7.loadU32(out, xtensa_lx7.scratch,
+			RTGAddress{Displacement: usbSerialInterruptRaw})
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.primary,
+			usbSerialStartOfFrame)
+		xtensa_lx7.bitAnd(out, xtensa_lx7.scratch, xtensa_lx7.primary)
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.primary, 0)
+		xtensa_lx7.compare(out, xtensa_lx7.scratch, xtensa_lx7.primary)
+		xtensa_lx7.jumpCondition(out, xtensa_lx7.eq, done)
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.scratch, 1)
+		xtensa_lx7.storeU32(out,
+			RTGAddress{Displacement: usbSerialEndpointConfig},
+			xtensa_lx7.scratch)
+		out.Mark(done)
+	}
+
+	func usbSerialWrite(out *RTGEmitter) {
+
+		loop := out.NewLabel()
+		wait := out.NewLabel()
+		ready := out.NewLabel()
+		done := out.NewLabel()
+		disabled := out.NewLabel()
+		xtensa_lx7.move(out, xtensa_lx7.copyCount, xtensa_lx7.tertiary)
+		// An unset SOF latch after initialization means no USB host is present.
+		// Treat serial output as accepted instead of blocking the application.
+		xtensa_lx7.loadU32(out, xtensa_lx7.scratch,
+			RTGAddress{Displacement: usbSerialInterruptRaw})
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.primary,
+			usbSerialStartOfFrame)
+		xtensa_lx7.bitAnd(out, xtensa_lx7.scratch, xtensa_lx7.primary)
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.primary, 0)
+		xtensa_lx7.compare(out, xtensa_lx7.scratch, xtensa_lx7.primary)
+		xtensa_lx7.jumpCondition(out, xtensa_lx7.eq, disabled)
+		out.Mark(loop)
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.primary, 0)
+		xtensa_lx7.compare(out, xtensa_lx7.tertiary, xtensa_lx7.primary)
+		xtensa_lx7.jumpCondition(out, xtensa_lx7.eq, done)
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.copyDestination,
+			usbSerialProbeIterations)
+		out.Mark(wait)
+		xtensa_lx7.loadU32(out, xtensa_lx7.scratch,
+			RTGAddress{Displacement: usbSerialEndpointConfig})
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.primary, 2)
+		xtensa_lx7.bitAnd(out, xtensa_lx7.scratch, xtensa_lx7.primary)
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.primary, 0)
+		xtensa_lx7.compare(out, xtensa_lx7.scratch, xtensa_lx7.primary)
+		xtensa_lx7.jumpCondition(out, xtensa_lx7.ne, ready)
+		xtensa_lx7.decrement(out, xtensa_lx7.copyDestination)
+		xtensa_lx7.compare(out, xtensa_lx7.copyDestination,
+			xtensa_lx7.primary)
+		xtensa_lx7.jumpCondition(out, xtensa_lx7.ne, wait)
+		xtensa_lx7.jump(out, done)
+		out.Mark(ready)
+		xtensa_lx7.loadU8(out, xtensa_lx7.scratch,
+			RTGAddress{Base: xtensa_lx7.secondary})
+		xtensa_lx7.storeU32(out,
+			RTGAddress{Displacement: usbSerialEndpoint},
+			xtensa_lx7.scratch)
+		xtensa_lx7.increment(out, xtensa_lx7.secondary)
+		xtensa_lx7.decrement(out, xtensa_lx7.tertiary)
+		xtensa_lx7.jump(out, loop)
+		out.Mark(done)
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.scratch, 1)
+		xtensa_lx7.storeU32(out,
+			RTGAddress{Displacement: usbSerialEndpointConfig},
+			xtensa_lx7.scratch)
+		out.Mark(disabled)
+		xtensa_lx7.move(out, xtensa_lx7.primary, xtensa_lx7.copyCount)
+	}
+}
+
+runtime esp32s3_freestanding {
+	emit_entry_start = go entryStart
+	emit_exit = go exit
+	operation write { emit = go usbSerialWrite }
+	operation print { use = write args = [stderr, buffer, count] }
+}
+
+format esp32s3_elf {
+	kind = elf
+	byte_order = little
+	address_bits = 32
+	machine = 94
+	code_offset = 0x100
+	image = go image
+}
+
+target esp32s3/xtensa_lx7 {
+	aliases = [m5sticks3/xtensa_lx7]
+	family = native_v1
+	os = esp32s3
+	arch = xtensa_lx7
+	frontend_arch = riscv32
+	abi = xtensa_call0
+	runtime = esp32s3_freestanding
+	executable = esp32s3_elf
+	build_tags = [esp32s3, xtensa_lx7, m5sticks3, tiny]
+	capabilities = [freestanding, executable, volatile_memory]
+	arena_default = 131072
+}

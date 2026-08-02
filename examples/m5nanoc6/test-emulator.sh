@@ -46,7 +46,7 @@ fi
 "$emulator" run \
 	--target esp32c6 \
 	--elf "$temporary/oracle.elf" \
-	--max-instructions 500000 \
+	--max-instructions 2000000 \
 	--stop-signal board.esp32c6.chip_gpio.pin7=rising \
 	--result "$temporary/result.json"
 

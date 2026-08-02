@@ -171,5 +171,5 @@ func glyphBits(r int) int {
 }
 
 func glyphRow(r, y int) byte {
-	return byte((glyphBits(r) >> uint((6-y)*5)) & 31)
+	return glyphRows(r)[y]
 }

@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "c836c85bac4a8258817509d858b697f5b4a178802835ea81e82f8181a6cf7430"
+const CompilerSourceDigest = "349380562ae987745d8a5e57b0bc649dac734f42c3162ccbf3cf7961b79197fc"
 
 // source: backend/compiler_common_impl.go
 
@@ -5405,9 +5405,17 @@ renvoStoreIncomingCallWord(g, callWord+1, offset-renvoBackendValueSlotSize)
 callWord += 2
 continue
 }
+if renvoPreparedBackend != 0 && renvoStructArgByReference(g, paramType.kind) {
+address := renvoAddUnnamedLocal(g, renvoTypeInt)
+renvoStoreIncomingCallWord(g, callWord, address)
+renvoAsmLoadSecondaryStack(&g.asm, address)
+renvoEmitCopyMemSecondaryToStack(g, offset, renvoTypeSize(meta, param.typ))
+callWord++
+continue
+}
 if paramType.kind == renvoTypeStruct || paramType.kind == renvoTypeArray || g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideInt(paramType.kind) {
 size := renvoTypeSize(meta, param.typ)
-wordSize := renvoCallWordSize(g.c.renvoNativeIntSize, paramType.kind)
+wordSize := renvoCallWordSize(g, paramType.kind)
 for at := 0; at < size; at += wordSize {
 renvoStoreIncomingCallWord(g, callWord, offset-at)
 callWord++
@@ -8608,7 +8616,7 @@ return (c0 == '=' || c0 == '!') && c1 == '=' || c0 == '<' && c1 != '<' || c0 == 
 
 func renvoScalarComparisonIsUnsigned(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, c0 byte) bool {
 renvoNonNil(g, ep, e)
-return (c0 == '<' || c0 == '>') && (renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right))
+return g.c.renvoNativeIntSize == 8 && (c0 == '<' || c0 == '>') && (renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right))
 }
 
 func renvoEmitUnsignedPrimaryTertiaryCompare(g *renvoLinearGen, c0 byte, c1 byte, opLen int) bool {
@@ -12291,18 +12299,23 @@ func renvoEmitTypedLocalArgReverse(g *renvoLinearGen, offset int, typ int) int {
 renvoNonNil(g)
 t := renvoResolveType(g.meta, typ)
 renvoNonNil(t)
+if renvoPreparedBackend != 0 && renvoStructArgByReference(g, t.kind) {
+renvoAsmAddressPrimaryStack(&g.asm, offset)
+renvoAsmPushPrimary(&g.asm)
+return 1
+}
 size := renvoTypeSize(g.meta, typ)
 if size < renvoBackendValueSlotSize {
 size = renvoBackendValueSlotSize
 }
-wordSize := renvoCallWordSize(g.c.renvoNativeIntSize, t.kind)
+wordSize := renvoCallWordSize(g, t.kind)
 renvoEmitPushWords(g, offset, size, wordSize, renvoPushStack)
 return renvoAlignValue(size, wordSize) / wordSize
 }
 
-func renvoCallWordSize(renvoNativeIntSize int, kind int) int {
-if kind == renvoTypeArray || renvoNativeIntSize == 4 && renvoTypeKindIsWideInt(kind) {
-return renvoNativeIntSize
+func renvoCallWordSize(g *renvoLinearGen, kind int) int {
+if kind == renvoTypeArray || g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideInt(kind) {
+return g.c.renvoNativeIntSize
 }
 return renvoBackendValueSlotSize
 }
@@ -12993,6 +13006,21 @@ actualExprType = g.locals[localIndex].typ
 }
 actualExprResolved := renvoResolveType(meta, actualExprType)
 renvoNonNil(actualExprResolved)
+if renvoPreparedBackend != 0 && renvoStructArgByReference(g, receiver.kind) {
+if actualExprResolved.kind == renvoTypePointer {
+if !renvoEmitIntExpr(g, ep, idx) {
+return -1
+}
+} else if !renvoEmitAddressPrimary(g, ep, idx) {
+offset := renvoAddUnnamedLocal(g, receiverType)
+if !renvoEmitTypedAssign(g, ep, idx, offset) {
+return -1
+}
+renvoAsmAddressPrimaryStack(a, offset)
+}
+renvoAsmPushPrimary(a)
+return 1
+}
 if receiver.kind == renvoTypePointer {
 if actualExprResolved.kind == renvoTypePointer {
 if !renvoEmitIntExpr(g, ep, idx) {
@@ -13246,7 +13274,18 @@ if size <= 0 {
 return -1
 }
 e := &ep.exprs[idx]
-wordSize := renvoCallWordSize(g.c.renvoNativeIntSize, renvoResolveType(meta, typ).kind)
+if renvoPreparedBackend != 0 && renvoStructArgByReference(g, renvoResolveType(meta, typ).kind) {
+if !renvoEmitAddressPrimary(g, ep, idx) {
+offset := renvoAddUnnamedLocal(g, typ)
+if !renvoEmitTypedAssign(g, ep, idx, offset) {
+return -1
+}
+renvoAsmAddressPrimaryStack(a, offset)
+}
+renvoAsmPushPrimary(a)
+return 1
+}
+wordSize := renvoCallWordSize(g, renvoResolveType(meta, typ).kind)
 wordCount := renvoAlignValue(size, wordSize) / wordSize
 if e.kind == renvoExprIdent {
 localIndex := renvoFindLocalIndex(g, e.nameStart, e.nameEnd)
@@ -14121,7 +14160,9 @@ return renvoEnsureAppend64Helper(g)
 func renvoEmitAppendStringToLocation(g *renvoLinearGen, ep *renvoExprParse, locEp *renvoExprParse, loc *renvoSliceLocation, valueIndex int) bool {
 renvoNonNil(g, ep, locEp, loc)
 a := &g.asm
+if renvoPreparedBackend == 0 {
 renvoEnsureAppendAddrHelper(g)
+}
 if !renvoEmitStringValueRegs(g, ep, valueIndex) {
 return false
 }
@@ -17220,7 +17261,7 @@ if start >= end {
 return false
 }
 c0 := p.src[start]
-c1 := byte(0)
+var c1 byte
 if start+1 < end {
 c1 = p.src[start+1]
 }
@@ -17255,10 +17296,8 @@ return false
 }
 if right.kind == renvoExprIdent {
 localIndex := renvoFindLocalIndex(g, right.nameStart, right.nameEnd)
-if localIndex >= 0 {
-if renvoTypeIsString(g.meta, g.locals[localIndex].typ) {
+if localIndex >= 0 && renvoTypeIsString(g.meta, g.locals[localIndex].typ) {
 return false
-}
 }
 }
 }
@@ -19293,7 +19332,7 @@ return false
 start := int(renvoTokStart(g.prog, e.tok))
 end := int(renvoTokEnd(g.prog, e.tok))
 c0 := renvo_runtime_UnsafeByteAt(g.prog.src, start)
-c1 := byte(0)
+var c1 byte
 if start+1 < end {
 c1 = renvo_runtime_UnsafeByteAt(g.prog.src, start+1)
 }
@@ -20473,6 +20512,9 @@ return renvoAmd64EnsureAppend64Helper(g)
 }
 func renvoEnsureStringEqualHelper(g *renvoLinearGen) int {
 renvoNonNil(g)
+if renvoPreparedBackend != 0 {
+return renvoRTGEnsureStringEqualHelper(g)
+}
 if g.c.renvoTargetArch == renvoArchWasm32 {
 return renvoWasm32EnsureStringEqualHelper(g)
 }
@@ -21152,7 +21194,7 @@ if start >= end {
 return false
 }
 c0 := renvo_runtime_UnsafeByteAt(p.src, start)
-c1 := byte(0)
+var c1 byte
 if start+1 < end {
 c1 = renvo_runtime_UnsafeByteAt(p.src, start+1)
 }
@@ -21162,20 +21204,21 @@ return false
 
 
 
-if renvoBinaryUsesFloat(g, ep, e) {
-return false
-}
+usesFloat := renvoBinaryUsesFloat(g, ep, e)
 leftIndex := e.left
 rightIndex := e.right
+unsigned := renvoScalarComparisonIsUnsigned(g, ep, e, c0)
 right := &ep.exprs[rightIndex]
+if !usesFloat {
 rightConst := renvoEvalConstExpr(g, ep, rightIndex)
 if rightConst.ok && renvoAsmImmFits8Signed(rightConst.value) {
 if !renvoEmitIntExpr(g, ep, leftIndex) {
 return false
 }
 renvoAsmCmpPrimaryImm8Discard(&g.asm, rightConst.value)
-renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, g.c.renvoNativeIntSize == 8 && renvoScalarComparisonIsUnsigned(g, ep, e, c0))
+renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, unsigned)
 return true
+}
 }
 if g.c.renvoTargetArch == renvoArchAmd64 {
 left := &ep.exprs[leftIndex]
@@ -21185,7 +21228,7 @@ rightLocal := renvoFindLocalIndex(g, right.nameStart, right.nameEnd)
 if leftLocal >= 0 && rightLocal >= 0 && renvoTypeIsInt(g.meta, g.locals[leftLocal].typ) && renvoTypeIsInt(g.meta, g.locals[rightLocal].typ) {
 renvoAsmLoadPrimaryStack(&g.asm, g.locals[rightLocal].offset)
 renvoAsmStackMem(&g.asm, g.locals[leftLocal].offset, 0x3948, 0x45, 0x85)
-renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, g.c.renvoNativeIntSize == 8 && renvoScalarComparisonIsUnsigned(g, ep, e, c0))
+renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, unsigned)
 return true
 }
 }
@@ -21206,18 +21249,16 @@ return false
 }
 if right.kind == renvoExprIdent {
 localIndex := renvoFindLocalIndex(g, right.nameStart, right.nameEnd)
-if localIndex >= 0 {
-if renvoTypeIsString(g.meta, g.locals[localIndex].typ) {
+if localIndex >= 0 && renvoTypeIsString(g.meta, g.locals[localIndex].typ) {
 return false
 }
 }
 }
-}
-if !renvoEmitIntExpr(g, ep, rightIndex) {
+if !renvoEmitWideCompareOperand(g, ep, rightIndex, usesFloat) {
 return false
 }
 renvoAsmPushPrimary(&g.asm)
-if !renvoEmitIntExpr(g, ep, leftIndex) {
+if !renvoEmitWideCompareOperand(g, ep, leftIndex, usesFloat) {
 return false
 }
 renvoAsmPopTertiary(&g.asm)
@@ -21237,7 +21278,7 @@ c0 = '>'
 } else if c0 == '>' {
 c0 = '<'
 }
-renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, g.c.renvoNativeIntSize == 8 && renvoScalarComparisonIsUnsigned(g, ep, e, c0))
+renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, unsigned)
 return true
 }
 
@@ -21389,12 +21430,12 @@ if !renvoEmitSliceLocationHeaderAddressSecondary(g, locEp, loc) {
 return false
 }
 renvoRTGDirectMove(a, renvoRTGCallWord0, renvoRTGSecondary)
-renvoRTGDirectMove(a, renvoRTGCallWord1, renvoRTGSecondary)
-renvoRTGDirectMoveImmediate(a, renvoRTGScratch, 8)
-renvoRTGDirectAdd(a, renvoRTGCallWord1, renvoRTGScratch)
 renvoRTGDirectMove(a, renvoRTGCallWord5, renvoRTGSecondary)
 renvoRTGDirectMoveImmediate(a, renvoRTGScratch, 16)
 renvoRTGDirectAdd(a, renvoRTGCallWord5, renvoRTGScratch)
+renvoRTGDirectMove(a, renvoRTGCallWord1, renvoRTGSecondary)
+renvoRTGDirectMoveImmediate(a, renvoRTGScratch, 8)
+renvoRTGDirectAdd(a, renvoRTGCallWord1, renvoRTGScratch)
 return true
 }
 if loc.global {
@@ -26221,24 +26262,72 @@ if target == renvoTargetWindows386 {
 return "windows/386", "n+$\xa3\x01\xf5\xcdM\x9f\x83އ\x05\xbe$\xcfo˃\x1c\xbf\xef\U0005e863!P\xbc\xb3@\x80", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x9e\xcdc\x862\xfb\x98\xe7\xfb\xf8\x16ܔ\xc4>\xf2\x04e\xf5\xb5\xad\x1c(\xe4r\x15t\xf7UHl)", 3, true
+return "wasi/wasm32", "z<\xf4UU\xb2k\x85;\xdb\x16=\xbe\x8cQE\xb0\xf3\x9b\xf2BX\xfd \x83\xaf\xaf\x8dn\xc8\xe5,", 3, true
 }
 if target == renvoTargetDarwinArm64 {
-return "darwin/arm64", "f\xf3I\xf9\xb0\xeaΏ\x96\xde\x02C\x95\x02\x807\x88\b\xcb%\x83\xb6\xd0(\a\xc2\xea^I\x03\x95\xa3", 3, true
+return "darwin/arm64", "O\xca\xc5斻\x03F+\xf8\xf1~ű\nH\xc6'\xaf\xb3\x867K\xe2\xce\xffj{\xdb\xd3\xfa\xe5", 3, true
 }
 if target == renvoTargetLinuxKernelAmd64 {
 return "linux-kernel/amd64", "s\xb2\x9a{\xfei\xb2\x00G\x15\xf83K\xb0R\x97\x8a`\x92\xf2\xc1\xfe\x84\x17\xa1\xf6ĺv!\x91\xe4", 3, true
 }
 if target == renvoTargetWindowsArm64 {
-return "windows/arm64", "æ\xcdǥR\xfc\x03\x93tK\x03\xeb\ag\f\x96)DE\xe6\xf1̊3\xaa#\x99U\x88\x1b\x97", 3, true
+return "windows/arm64", "\xb9φ\x05\xee.\x8d\x91&)\x90\xff\x160\x94\x06ʯ\x00\xd5.~\x1b\xac \f,\xa4m\xae/q", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "7\x9c\xd7!;\xcc\xc1\xa9\xb8\xb7\xe1\x05ÿ\xcc\xf0R\xd2\x1f\x0f\xf9@4-\xfd\x11\xf1f\f\xd7g\xc5", 3, true
+return "vm/vm32", "\xf9\xb3\x95\xc8Q\xe3\xeb}\xbb\xa8\xb6\x17\x91&\x14֞)\xaaq\xd0\xfdK\xb8\xf8\xca2O\xfd\xf7!\xc8", 3, true
 }
 return "", "", 0, false
 }
 
 // source: backend/compiler_target_impl.go
+
+func renvoStructArgByReference(g *renvoLinearGen, kind int) bool {
+return g.c.renvoNativeIntSize == 4 && g.c.renvoTargetArch != renvoArchWasm32 && kind == renvoTypeStruct
+}
+
+func renvoRTGEnsureStringEqualHelper(g *renvoLinearGen) int {
+renvoNonNil(g)
+a := &g.asm
+if g.streqEmitted {
+return g.streqLabel
+}
+g.streqEmitted = true
+g.streqLabel = renvoAsmNewLabel(a)
+afterLabel := renvoAsmNewLabel(a)
+notEqualLabel := renvoAsmNewLabel(a)
+equalLabel := renvoAsmNewLabel(a)
+loopLabel := renvoAsmNewLabel(a)
+renvoAsmJmpMarkLabel(a, afterLabel, g.streqLabel)
+
+
+
+renvoRTGDirectCompare(a, renvoRTGCallWord1, renvoRTGCallWord3)
+renvoAsmJnzLabel(a, notEqualLabel)
+renvoRTGDirectMoveImmediate(a, renvoRTGCallWord4, 0)
+renvoRTGDirectCompare(a, renvoRTGCallWord1, renvoRTGCallWord4)
+renvoAsmJzLabel(a, equalLabel)
+renvoAsmMarkLabel(a, loopLabel)
+renvoRTGDirectLoadU8(a, renvoRTGScratch,
+renvoRTGAsmAddress(renvoRTGCallWord0, RTGNoRegister, 0, 1))
+renvoRTGDirectLoadU8(a, renvoRTGCallWord4,
+renvoRTGAsmAddress(renvoRTGCallWord2, RTGNoRegister, 0, 1))
+renvoRTGDirectCompare(a, renvoRTGScratch, renvoRTGCallWord4)
+renvoAsmJnzLabel(a, notEqualLabel)
+renvoRTGDirectIncrement(a, renvoRTGCallWord0)
+renvoRTGDirectIncrement(a, renvoRTGCallWord2)
+renvoRTGDirectDecrement(a, renvoRTGCallWord1)
+renvoRTGDirectMoveImmediate(a, renvoRTGCallWord4, 0)
+renvoRTGDirectCompare(a, renvoRTGCallWord1, renvoRTGCallWord4)
+renvoAsmJnzLabel(a, loopLabel)
+renvoAsmMarkLabel(a, equalLabel)
+renvoRTGDirectMoveImmediate(a, renvoRTGPrimary, 1)
+renvoAsmRet(a)
+renvoAsmMarkLabel(a, notEqualLabel)
+renvoRTGDirectMoveImmediate(a, renvoRTGPrimary, 0)
+renvoAsmRet(a)
+renvoAsmMarkLabel(a, afterLabel)
+return g.streqLabel
+}
 
 
 
