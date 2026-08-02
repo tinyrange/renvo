@@ -80,9 +80,11 @@ go backend {
 		for index := 0; index < out.AbsoluteRelocationCount(); index++ {
 			at := out.AbsoluteRelocationOffset(index)
 			addend := out.AbsoluteRelocationAddend(index)
-			target := dataAddress + addend
-			if out.AbsoluteRelocationKind(index) == RTGRelocationAbsoluteBSS {
-				target = bssAddress + addend
+			kind := out.AbsoluteRelocationKind(index)
+			target, resolved := RTGResolveAbsoluteRelocation(
+				out, kind, addend, dataAddress, bssAddress)
+			if !resolved {
+				continue
 			}
 			instruction := RTGGet32At(out.Code(), at)
 			register := (instruction >> 7) & 31
@@ -119,7 +121,7 @@ go backend {
 		loop := out.NewLabel()
 		done := out.NewLabel()
 		riscv32.emitAddress(out, riscv32.secondary, RTGBSSAddress(0))
-		riscv32.moveImmediate(out, riscv32.copyCount, int64(stackTop))
+		riscv32.emitAddress(out, riscv32.copyCount, RTGBSSEndAddress(4))
 		riscv32.moveImmediate(out, riscv32.primary, 0)
 		out.Mark(loop)
 		riscv32.compare(out, riscv32.secondary, riscv32.copyCount)
@@ -140,7 +142,7 @@ go backend {
 
 		dataOffset := RTGAlignValue(codeOffset+len(code), pageSize)
 		dataGap := bssAddress - (dataAddress + len(data))
-		dataMemorySize := len(data) + dataGap + out.BSSSize()
+		dataMemorySize := len(data) + dataGap + RTGAlignValue(out.BSSSize(), 4)
 		descriptor := appDescriptor()
 		descriptorOffset := RTGAlignValue(dataOffset+len(data), 4)
 		sectionNames := []byte{0,

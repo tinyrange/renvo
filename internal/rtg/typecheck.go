@@ -45,6 +45,7 @@ const RTGShiftRight RTGShiftDirection = 2
 const RTGRelocationAbsoluteData = 0
 const RTGRelocationAbsoluteBSS = 1
 const RTGRelocationImport = 2
+const RTGRelocationAbsoluteBSSEnd = 3
 const RTGRuntimeRead = 1
 const RTGRuntimeWrite = 2
 const RTGRuntimeReadAt = 3
@@ -148,6 +149,10 @@ func RTGAddressRel32Addend(out *RTGEmitter, address RTGAddress) {}
 func RTGAddressRelocAt(out *RTGEmitter, address RTGAddress, at int) {}
 func RTGDataAddress(offset int) RTGAddress { return RTGAddress{} }
 func RTGBSSAddress(offset int) RTGAddress { return RTGAddress{} }
+func RTGBSSEndAddress(alignment int) RTGAddress { return RTGAddress{} }
+func RTGResolveAbsoluteRelocation(out *RTGEmitter, kind int, addend int, dataAddress int, bssAddress int) (int, bool) {
+	return 0, false
+}
 func RTGInt8Fits(value int) bool { return false }
 func RTGPopPrimary(out *RTGEmitter) {}
 func RTGArenaMark() int { return 0 }

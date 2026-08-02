@@ -37,6 +37,8 @@ func TestESP32C6ExternalDefinition(t *testing.T) {
 		"func rtgEsp32c6Esp32c6PackageImage(",
 		"func rtgEsp32c6Esp32c6PackageClearBSS(",
 		"func rtgEsp32c6Esp32c6PackageUsbSerialInitialize(",
+		"RTGBSSEndAddress(4)",
+		"RTGResolveAbsoluteRelocation(",
 		"0x60008064, 0x50d83aa1",
 		"0x6000f04c, 4",
 		"UsbSerialEndpoint = 0x6000f000",

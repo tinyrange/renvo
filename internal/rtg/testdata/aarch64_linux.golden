@@ -47,6 +47,7 @@ const (
 const RTGRelocationAbsoluteData = 0
 const RTGRelocationAbsoluteBSS = 1
 const RTGRelocationImport = 2
+const RTGRelocationAbsoluteBSSEnd = 3
 const RTGRuntimeRead = 1
 const RTGRuntimeWrite = 2
 const RTGRuntimeReadAt = 3
@@ -489,6 +490,26 @@ func RTGDataAddress(offset int) RTGAddress {
 
 func RTGBSSAddress(offset int) RTGAddress {
 	return RTGAddress{Kind: 2, Addend: offset}
+}
+
+func RTGBSSEndAddress(alignment int) RTGAddress {
+	return RTGAddress{Kind: 4, Addend: alignment}
+}
+
+func RTGResolveAbsoluteRelocation(out *RTGEmitter, kind int, addend int, dataAddress int, bssAddress int) (int, bool) {
+	if kind == RTGRelocationAbsoluteData {
+		return dataAddress + addend, true
+	}
+	if kind == RTGRelocationAbsoluteBSS {
+		return bssAddress + addend, true
+	}
+	if kind == RTGRelocationAbsoluteBSSEnd {
+		if addend <= 0 {
+			addend = 1
+		}
+		return bssAddress + RTGAlignValue(out.asm.bssSize, addend), true
+	}
+	return 0, false
 }
 
 func RTGInt8Fits(value int) bool {
@@ -1728,8 +1749,8 @@ func rtgNativeElf64Aarch64PatchAbsolute(a *RTGEmitter, codeOffset int, dataOffse
 		at := a.AbsoluteRelocationOffset(i)
 		addend := a.AbsoluteRelocationAddend(i)
 		kind := a.AbsoluteRelocationKind(i)
-		target := dataOffset + addend
-		if kind == RTGRelocationAbsoluteBSS { target = bssOffset + addend }
+		target, resolved := RTGResolveAbsoluteRelocation(a, kind, addend, dataOffset, bssOffset)
+		if !resolved { continue }
 		insn := RTGGet32At(a.Code(), at)
 
 		reg := insn & 31

@@ -42,9 +42,34 @@ func TestCompiledInBootstrapPreparesESP32C6Definition(t *testing.T) {
 	if entry := binary.LittleEndian.Uint32(image[24:28]); entry != 0x42000100 {
 		t.Fatalf("ELF entry = %#x, want 0x42000100", entry)
 	}
+	const codeOffset = 0x100
+	if len(image) < codeOffset+16 {
+		t.Fatalf("ELF code is too short: %d bytes", len(image))
+	}
+	dataHeader := 52 + 32
+	bssAddress := binary.LittleEndian.Uint32(image[dataHeader+8:dataHeader+12]) +
+		binary.LittleEndian.Uint32(image[dataHeader+16:dataHeader+20])
+	bssAddress = (bssAddress + 7) &^ 7
+	bssEnd := binary.LittleEndian.Uint32(image[dataHeader+8:dataHeader+12]) +
+		binary.LittleEndian.Uint32(image[dataHeader+20:dataHeader+24])
+	if bssEnd <= bssAddress || bssEnd&3 != 0 {
+		t.Fatalf("final BSS range = [%#x, %#x), want non-empty 4-byte-aligned range", bssAddress, bssEnd)
+	}
+	if got := riscvAddressPair(image, codeOffset); got != bssAddress {
+		t.Fatalf("clear-BSS start address = %#x, want %#x", got, bssAddress)
+	}
+	if got := riscvAddressPair(image, codeOffset+8); got != bssEnd {
+		t.Fatalf("clear-BSS final address = %#x, want %#x", got, bssEnd)
+	}
 	if !bytes.Contains(image, []byte(".flash.appdesc\x00")) {
 		t.Fatal("ELF omitted the ESP application descriptor section")
 	}
+}
+
+func riscvAddressPair(image []byte, offset int) uint32 {
+	upper := int32(binary.LittleEndian.Uint32(image[offset:offset+4]) & 0xfffff000)
+	lower := int32(binary.LittleEndian.Uint32(image[offset+4:offset+8])) >> 20
+	return uint32(upper + lower)
 }
 
 func TestCompiledInBootstrapCompilesESP32C6MicrocontrollerSuite(t *testing.T) {

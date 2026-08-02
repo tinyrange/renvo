@@ -199,8 +199,14 @@ func appendDeclarativeAbsoluteRelocationPatcher(out []byte, document Document,
 	out = append(out, "\t\tat := a.AbsoluteRelocationOffset(i)\n"...)
 	out = append(out, "\t\taddend := a.AbsoluteRelocationAddend(i)\n"...)
 	out = append(out, "\t\tkind := a.AbsoluteRelocationKind(i)\n"...)
-	out = append(out, "\t\ttarget := dataOffset + addend\n"...)
-	out = append(out, "\t\tif kind == RTGRelocationAbsoluteBSS { target = bssOffset + addend }\n"...)
+	resolver := "RTGResolveAbsoluteRelocation"
+	if nativeEmitter {
+		resolver = "renvoRTGResolveAbsoluteRelocation"
+	}
+	out = append(out, "\t\ttarget, resolved := "...)
+	out = append(out, resolver...)
+	out = append(out, "(a, kind, addend, dataOffset, bssOffset)\n"...)
+	out = append(out, "\t\tif !resolved { continue }\n"...)
 	if encoding == "relative32_le" {
 		bias := formatIntegerDefault(document, format, "patch_pc_bias", 4)
 		out = append(out, "\t\ta.PatchUint32(at, target-(codeOffset+at"...)
@@ -428,9 +434,15 @@ func appendDeclarativePEImagePatcher(out []byte, document Document, format Decla
 	out = append(out, "\t\tat := out.AbsoluteRelocationOffset(i)\n"...)
 	out = append(out, "\t\taddend := out.AbsoluteRelocationAddend(i)\n"...)
 	out = append(out, "\t\tkind := out.AbsoluteRelocationKind(i)\n"...)
-	out = append(out, "\t\ttarget := dataRVA + addend\n"...)
-	out = append(out, "\t\tif kind == RTGRelocationAbsoluteBSS { target = dataRVA + dataSize + addend\n"...)
-	out = append(out, "\t\t} else if kind == RTGRelocationImport && addend > 0 && addend < len(iat) { target = iat[addend] }\n"...)
+	resolver := "RTGResolveAbsoluteRelocation"
+	if nativeEmitter {
+		resolver = "renvoRTGResolveAbsoluteRelocation"
+	}
+	out = append(out, "\t\ttarget, resolved := "...)
+	out = append(out, resolver...)
+	out = append(out, "(out, kind, addend, dataRVA, dataRVA+dataSize)\n"...)
+	out = append(out, "\t\tif kind == RTGRelocationImport && addend > 0 && addend < len(iat) { target = iat[addend]; resolved = true }\n"...)
+	out = append(out, "\t\tif !resolved { continue }\n"...)
 	if encoding == "pe_relative32" {
 		out = append(out, "\t\tout.PatchUint32(at, target-("...)
 		out = appendDecimalFrame(out, codeOffset)
