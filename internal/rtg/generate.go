@@ -464,6 +464,7 @@ const (
 const RTGRelocationAbsoluteData = 0
 const RTGRelocationAbsoluteBSS = 1
 const RTGRelocationImport = 2
+const RTGRelocationAbsoluteBSSEnd = 3
 const RTGRuntimeRead = 1
 const RTGRuntimeWrite = 2
 const RTGRuntimeReadAt = 3
@@ -874,6 +875,26 @@ func renvoRTGBSSAddress(offset int) renvoRTGAddress {
 	return renvoRTGAddress{Kind: 2, Addend: offset}
 }
 
+func renvoRTGBSSEndAddress(alignment int) renvoRTGAddress {
+	return renvoRTGAddress{Kind: 4, Addend: alignment}
+}
+
+func renvoRTGResolveAbsoluteRelocation(out *renvoAsm, kind int, addend int, dataAddress int, bssAddress int) (int, bool) {
+	if kind == RTGRelocationAbsoluteData {
+		return dataAddress + addend, true
+	}
+	if kind == RTGRelocationAbsoluteBSS {
+		return bssAddress + addend, true
+	}
+	if kind == RTGRelocationAbsoluteBSSEnd {
+		if addend <= 0 {
+			addend = 1
+		}
+		return bssAddress + renvoAlignValue(out.bssSize, addend), true
+	}
+	return 0, false
+}
+
 func renvoRTGByte(out *renvoAsm, value byte) {
 	renvoAsmEmit8(out, int(value))
 }
@@ -955,6 +976,7 @@ const (
 const RTGRelocationAbsoluteData = 0
 const RTGRelocationAbsoluteBSS = 1
 const RTGRelocationImport = 2
+const RTGRelocationAbsoluteBSSEnd = 3
 const RTGRuntimeRead = 1
 const RTGRuntimeWrite = 2
 const RTGRuntimeReadAt = 3
@@ -1397,6 +1419,26 @@ func RTGDataAddress(offset int) RTGAddress {
 
 func RTGBSSAddress(offset int) RTGAddress {
 	return RTGAddress{Kind: 2, Addend: offset}
+}
+
+func RTGBSSEndAddress(alignment int) RTGAddress {
+	return RTGAddress{Kind: 4, Addend: alignment}
+}
+
+func RTGResolveAbsoluteRelocation(out *RTGEmitter, kind int, addend int, dataAddress int, bssAddress int) (int, bool) {
+	if kind == RTGRelocationAbsoluteData {
+		return dataAddress + addend, true
+	}
+	if kind == RTGRelocationAbsoluteBSS {
+		return bssAddress + addend, true
+	}
+	if kind == RTGRelocationAbsoluteBSSEnd {
+		if addend <= 0 {
+			addend = 1
+		}
+		return bssAddress + RTGAlignValue(out.asm.bssSize, addend), true
+	}
+	return 0, false
 }
 
 func RTGInt8Fits(value int) bool {
@@ -2387,6 +2429,9 @@ func nativeBuiltinLiteral(name string) string {
 	if name == "RTGRelocationImport" {
 		return "2"
 	}
+	if name == "RTGRelocationAbsoluteBSSEnd" {
+		return "3"
+	}
 	if name == "RTGRuntimeRead" {
 		return "1"
 	}
@@ -2456,6 +2501,12 @@ func nativeEmitterFunction(name string) string {
 	}
 	if name == "RTGBSSAddress" {
 		return "renvoRTGBSSAddress"
+	}
+	if name == "RTGBSSEndAddress" {
+		return "renvoRTGBSSEndAddress"
+	}
+	if name == "RTGResolveAbsoluteRelocation" {
+		return "renvoRTGResolveAbsoluteRelocation"
 	}
 	if name == "RTGAddressRelocAt" {
 		return "renvoRTGAddressRelocAt"

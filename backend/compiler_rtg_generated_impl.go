@@ -33,6 +33,7 @@ const (
 const RTGRelocationAbsoluteData = 0
 const RTGRelocationAbsoluteBSS = 1
 const RTGRelocationImport = 2
+const RTGRelocationAbsoluteBSSEnd = 3
 const RTGRuntimeRead = 1
 const RTGRuntimeWrite = 2
 const RTGRuntimeReadAt = 3
@@ -432,6 +433,26 @@ func renvoRTGDataAddress(offset int) renvoRTGAddress {
 
 func renvoRTGBSSAddress(offset int) renvoRTGAddress {
 	return renvoRTGAddress{Kind: 2, Addend: offset}
+}
+
+func renvoRTGBSSEndAddress(alignment int) renvoRTGAddress {
+	return renvoRTGAddress{Kind: 4, Addend: alignment}
+}
+
+func renvoRTGResolveAbsoluteRelocation(out *renvoAsm, kind int, addend int, dataAddress int, bssAddress int) (int, bool) {
+	if kind == RTGRelocationAbsoluteData {
+		return dataAddress + addend, true
+	}
+	if kind == RTGRelocationAbsoluteBSS {
+		return bssAddress + addend, true
+	}
+	if kind == RTGRelocationAbsoluteBSSEnd {
+		if addend <= 0 {
+			addend = 1
+		}
+		return bssAddress + renvoAlignValue(out.bssSize, addend), true
+	}
+	return 0, false
 }
 
 func renvoRTGByte(out *renvoAsm, value byte) {

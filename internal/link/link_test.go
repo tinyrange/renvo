@@ -457,6 +457,30 @@ func appMain() int {
 	}
 }
 
+func TestLinkUnitsPreservesUnsafePointerArrayType(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/std/unsafe/unsafe.go", Src: []byte("package unsafe\n\ntype Pointer *byte\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import "unsafe"
+
+func storeWord(address uintptr, index int, value uint32) {
+	(*[16]uint32)(unsafe.Pointer(address))[index] = value
+}
+
+func main() {}
+`)},
+	})
+	program, ok := LinkUnitsCore(result.Units, result.Root)
+	if !ok {
+		t.Fatal("LinkUnits failed")
+	}
+	if bytes.Contains(program.Text, []byte("unsafe.Pointer")) || !bytes.Contains(program.Text, []byte("(*[16]uint32)(address)[index] = value")) {
+		t.Fatalf("linked source lost pointer-to-array semantics:\n%s", string(program.Text))
+	}
+}
+
 func TestLinkUnitsCoreLowersUnresolvedUnsafeSizeof(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},

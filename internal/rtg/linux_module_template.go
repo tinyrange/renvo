@@ -357,6 +357,15 @@ if kind == RTGRelocationAbsoluteBSS {
 textRelocations = MODULERELOCATION(
 textRelocations, at, 3, 2, addend-4,
 )
+} else if kind == RTGRelocationAbsoluteBSSEnd {
+alignment := addend
+if alignment <= 0 {
+alignment = 1
+}
+textRelocations = MODULERELOCATION(
+textRelocations, at, 3, 2,
+MODULEALIGN(emitter.BSSSize(), alignment)-4,
+)
 } else if kind == RTGRelocationImport {
 if addend < 0 || addend >= len(importSymbols) {
 return nil

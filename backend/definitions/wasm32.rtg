@@ -1192,6 +1192,12 @@ go backend {
 			target := dataBase + off
 			if kind == RTGRelocationAbsoluteBSS {
 				target = bssBase + off
+			} else if kind == RTGRelocationAbsoluteBSSEnd {
+				alignment := off
+				if alignment <= 0 {
+					alignment = 1
+				}
+				target = bssBase + RTGAlignValue(a.BSSSize(), alignment)
 			}
 			RTGPut32At(a.Code(), at, target)
 		}

@@ -809,6 +809,12 @@ func markCoreUnsafePointerConversionTokens(program *unit.Program, actions []toke
 		if typeEnd <= i+2 || typeEnd+1 >= len(program.Tokens) || !coreTokenTextEquals(program, typeEnd+1, "(") {
 			continue
 		}
+		// Keep pointer-to-array conversions so the backend retains the element
+		// type and array bound needed for dynamic indexing. The nested
+		// unsafe.Pointer call is still erased independently.
+		if coreTokenTextEquals(program, i+2, "[") {
+			continue
+		}
 		valueEnd := findCoreMatchingParen(program, typeEnd+1)
 		if valueEnd < 0 {
 			continue

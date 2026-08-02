@@ -6538,6 +6538,18 @@ func renvoAsmMulTertiaryImm(a *renvoAsm, imm int) {
 	renvoAsmEmit16(a, 0xc969)
 	renvoAsmEmit32(a, imm)
 }
+
+func renvoAsmAddScaledTertiary(a *renvoAsm, scale int) {
+	if scale != 1 {
+		renvoAsmMulTertiaryImm(a, scale)
+	}
+	renvoAsmAddPrimaryTertiary(a)
+}
+
+func renvoAsmPopPrimaryToTertiary(a *renvoAsm) {
+	renvoAsmCopyPrimaryToTertiary(a)
+	renvoAsmPopPrimary(a)
+}
 func renvoAsmRet(a *renvoAsm) {
 	renvoNonNil(a)
 	if renvoPreparedBackend != 0 {
@@ -8885,11 +8897,10 @@ func renvoEmitLinearCompoundLValue(g *renvoLinearGen, stmt *renvoStmt, assignTok
 	lhsIndex := len(lhs.exprs) - 1
 	lhsRoot := &lhs.exprs[lhsIndex]
 	if lhsRoot.kind == renvoExprIndex {
-		container := renvoResolveType(meta, renvoInferParsedExprType(g, lhs, lhsRoot.left))
-		renvoNonNil(container)
-		elemType := renvoResolveType(meta, container.elem)
+		elemTypeIndex := renvoInferParsedExprType(g, lhs, lhsIndex)
+		elemType := renvoResolveType(meta, elemTypeIndex)
 		renvoNonNil(elemType)
-		if (container.kind != renvoTypeArray && container.kind != renvoTypeSlice) || !renvoTypeKindIsScalarInt(elemType.kind) {
+		if !renvoTypeKindIsScalarInt(elemType.kind) {
 			return -1
 		}
 		elemSize := renvoScalarKindSize(g.c.renvoNativeIntSize, elemType.kind)
@@ -9019,7 +9030,8 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 			if lhsRoot.kind == renvoExprIndex {
 				container := renvoResolveType(meta, renvoInferParsedExprType(g, lhs, lhsRoot.left))
 				renvoNonNil(container)
-				elemType := renvoResolveType(meta, container.elem)
+				elemTypeIndex := lhsType
+				elemType := renvoResolveType(meta, elemTypeIndex)
 				renvoNonNil(elemType)
 				addrOffset := renvoAddUnnamedLocal(g, renvoTypeInt)
 				if container.kind == renvoTypeMap {
@@ -9029,13 +9041,11 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 					renvoAsmCopyPrimaryToSecondary(a)
 					renvoAsmAddSecondaryImm(a, 16)
 					renvoAsmStoreSecondaryStack(a, addrOffset)
-				} else if container.kind == renvoTypeArray || container.kind == renvoTypeSlice {
+				} else {
 					if !renvoEmitIndexAddressPrimary(g, lhs, lhsIndex) {
 						return false
 					}
 					renvoAsmStorePrimaryStack(a, addrOffset)
-				} else {
-					return false
 				}
 				rhs := renvoNewExprParse()
 				renvoNonNil(rhs)
@@ -9044,7 +9054,7 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 					return false
 				}
 				if renvoTypeKindUsesMemory(elemType.kind) || g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideInt(elemType.kind) {
-					return renvoEmitTypedExprToSavedMem(g, rhs, rhsIndex, container.elem, addrOffset)
+					return renvoEmitTypedExprToSavedMem(g, rhs, rhsIndex, elemTypeIndex, addrOffset)
 				}
 				if !renvoEmitScalarExprForKind(g, rhs, rhsIndex, elemType.kind) {
 					return false
@@ -10080,6 +10090,9 @@ func renvoInferParsedExprTypeUncached(g *renvoLinearGen, ep *renvoExprParse, idx
 		leftType := renvoInferParsedExprType(g, ep, e.left)
 		t := renvoResolveType(meta, leftType)
 		renvoNonNil(t)
+		if t.kind == renvoTypePointer {
+			t = renvoResolveType(meta, t.elem)
+		}
 		if t.kind == renvoTypeSlice || t.kind == renvoTypeArray || t.kind == renvoTypeMap {
 			return t.elem
 		}
@@ -10280,6 +10293,12 @@ func renvoFindTypeByRange(g *renvoLinearGen, nameStart int, nameEnd int) int {
 func renvoConversionTypeFromExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
 	renvoNonNil(g, ep)
 	callee := &ep.exprs[idx]
+	if callee.kind == renvoExprUnary && renvoTokCharIs(g.prog, callee.tok, '*') {
+		target := renvoTypeFromExpr(g, ep, callee.left)
+		if target != 0 {
+			return renvoAddPointerType(g.meta, target, renvoPointerSpaceData)
+		}
+	}
 	if callee.kind != renvoExprIdent {
 		return 0
 	}
@@ -11057,10 +11076,7 @@ func renvoEmitSliceValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) boo
 			renvoAsmSubPrimaryTertiary(a)
 			renvoAsmPushPrimary(a)
 			renvoAsmLoadPrimaryTertiaryStack(a, baseOff, lowOff)
-			if elemSize != 1 {
-				renvoAsmMulTertiaryImm(a, elemSize)
-			}
-			renvoAsmAddPrimaryTertiary(a)
+			renvoAsmAddScaledTertiary(a, elemSize)
 			renvoAsmPopSecondary(a)
 			renvoAsmPopTertiary(a)
 			return true
@@ -11529,8 +11545,7 @@ func renvoEmitByteSliceConversionRegs(g *renvoLinearGen, ep *renvoExprParse, idx
 	renvoAsmLoadBytePrimaryIndexTertiary(a)
 	renvoAsmPushPrimary(a)
 	renvoAsmPushStack(a, idxOff)
-	renvoAsmLoadPrimaryStack(a, destOff)
-	renvoAsmCopyPrimaryToSecondary(a)
+	renvoAsmLoadSecondaryStack(a, destOff)
 	renvoAsmPopTertiary(a)
 	renvoAsmPopPrimary(a)
 	renvoAsmStoreByteMemSecondaryTertiary(a)
@@ -12755,8 +12770,7 @@ func renvoEmitRuntimeUnsafeIndex(g *renvoLinearGen, ep *renvoExprParse, e *renvo
 	if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
 		return false
 	}
-	renvoAsmCopyPrimaryToTertiary(&g.asm)
-	renvoAsmPopPrimary(&g.asm)
+	renvoAsmPopPrimaryToTertiary(&g.asm)
 	renvoAsmLoadPrimaryIndexTertiarySize(&g.asm, size)
 	if size == 4 {
 		renvoAsmNormalizePrimaryForKind(&g.asm, renvoTypeInt32)
@@ -13788,8 +13802,7 @@ func renvoEmitAppendExpansionToLocation(g *renvoLinearGen, ep *renvoExprParse, l
 		if !renvoEmitSliceSlotAddrs(g, locEp, loc, elemSize) {
 			return false
 		}
-		renvoAsmLoadPrimaryStack(a, srcPtr)
-		renvoAsmCopyPrimaryToSecondary(a)
+		renvoAsmLoadSecondaryStack(a, srcPtr)
 		renvoAsmLoadTertiaryStack(a, srcLen)
 		renvoAsmCallLabel(a, label)
 		renvoEmitArenaAllocationCheck(g)
@@ -13866,11 +13879,9 @@ func renvoEmitAppendExpansionToLocation(g *renvoLinearGen, ep *renvoExprParse, l
 	// to the first appended byte and share the byte-accurate memmove emitter
 	// used by copy; this also handles packed element sizes without over-copying.
 	renvoAsmLoadPrimaryTertiaryStack(a, destPtr, destLen)
-	renvoAsmMulTertiaryImm(a, elemSize)
-	renvoAsmAddPrimaryTertiary(a)
+	renvoAsmAddScaledTertiary(a, elemSize)
 	renvoAsmStorePrimaryStack(a, destPtr)
-	renvoAsmLoadPrimaryStack(a, srcLen)
-	renvoAsmCopyPrimaryToTertiary(a)
+	renvoAsmLoadTertiaryStack(a, srcLen)
 	renvoAsmMulTertiaryImm(a, elemSize)
 	renvoAsmCopyTertiaryToPrimary(a)
 	renvoAsmStorePrimaryStack(a, reserveIndex)
@@ -14048,8 +14059,7 @@ func renvoEmitRTGAppendDestPrimary(g *renvoLinearGen, locEp *renvoExprParse, loc
 	finish := renvoAsmNewLabel(a)
 	renvoAsmJgeStackStack(a, length, capacity, grow)
 	renvoAsmLoadPrimaryTertiaryStack(a, data, length)
-	renvoAsmMulTertiaryImm(a, elemSize)
-	renvoAsmAddPrimaryTertiary(a)
+	renvoAsmAddScaledTertiary(a, elemSize)
 	renvoAsmStorePrimaryStack(a, result)
 	renvoAsmJmpLabel(a, finish)
 
@@ -14070,8 +14080,7 @@ func renvoEmitRTGAppendDestPrimary(g *renvoLinearGen, locEp *renvoExprParse, loc
 	renvoEmitArenaAllocStackPrimary(g, byteCount)
 	newData := renvoAddUnnamedLocal(g, renvoTypeInt)
 	renvoAsmStorePrimaryStack(a, newData)
-	renvoAsmLoadPrimaryStack(a, length)
-	renvoAsmCopyPrimaryToTertiary(a)
+	renvoAsmLoadTertiaryStack(a, length)
 	renvoAsmPrimaryImm(a, elemSize)
 	renvoRTGDirectMultiply(a, renvoRTGPrimary, renvoRTGTertiary)
 	renvoAsmStorePrimaryStack(a, byteCount)
@@ -14083,8 +14092,7 @@ func renvoEmitRTGAppendDestPrimary(g *renvoLinearGen, locEp *renvoExprParse, loc
 	renvoAsmLoadPrimaryStack(a, newCapacity)
 	renvoAsmStorePrimaryMemSecondaryDisp(a, 0)
 	renvoAsmLoadPrimaryTertiaryStack(a, newData, length)
-	renvoAsmMulTertiaryImm(a, elemSize)
-	renvoAsmAddPrimaryTertiary(a)
+	renvoAsmAddScaledTertiary(a, elemSize)
 	renvoAsmStorePrimaryStack(a, result)
 
 	renvoAsmMarkLabel(a, finish)
@@ -14463,8 +14471,7 @@ func renvoEmitBuiltinCopy(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoAsmJmpMarkLabel(a, lengthReady, useSourceLen)
 	renvoAsmCopyStackSlot(a, srcLen, copyLen)
 	renvoAsmMarkLabel(a, lengthReady)
-	renvoAsmLoadPrimaryStack(a, copyLen)
-	renvoAsmCopyPrimaryToTertiary(a)
+	renvoAsmLoadTertiaryStack(a, copyLen)
 	renvoAsmMulTertiaryImm(a, elemSize)
 	renvoAsmCopyTertiaryToPrimary(a)
 	renvoAsmStorePrimaryStack(a, copyBytes)
@@ -14530,8 +14537,7 @@ func renvoEmitSliceBasePtrLenTokens(g *renvoLinearGen, p *renvoProgram, start in
 		if g.c.renvoTargetArch == renvoArchWasm32 {
 			renvoAsmPushPrimary(a)
 			renvoAsmLoadPrimaryMemSecondaryDisp(a, 8)
-			renvoAsmCopyPrimaryToTertiary(a)
-			renvoAsmPopPrimary(a)
+			renvoAsmPopPrimaryToTertiary(a)
 		} else {
 			if renvoPreparedBackend != 0 {
 				renvoRTGDirectLoadNative(a, renvoRTGTertiary,
@@ -14554,8 +14560,7 @@ func renvoEmitMapHeaderPtrLen(g *renvoLinearGen) {
 	renvoAsmLoadPrimaryMemSecondaryDisp(a, 0)
 	renvoAsmPushPrimary(a)
 	renvoAsmLoadPrimaryMemSecondaryDisp(a, 8)
-	renvoAsmCopyPrimaryToTertiary(a)
-	renvoAsmPopPrimary(a)
+	renvoAsmPopPrimaryToTertiary(a)
 	renvoAsmJmpMarkLabel(a, doneLabel, nilLabel)
 	renvoAsmPrimaryImm(a, 0)
 	renvoAsmCopyPrimaryToTertiary(a)
@@ -14682,8 +14687,7 @@ func renvoEmitSlicePtrLen(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		if g.c.renvoTargetArch == renvoArchWasm32 {
 			renvoAsmPushPrimary(a)
 			renvoAsmLoadPrimaryMemSecondaryDisp(a, 8)
-			renvoAsmCopyPrimaryToTertiary(a)
-			renvoAsmPopPrimary(a)
+			renvoAsmPopPrimaryToTertiary(a)
 		} else {
 			if renvoPreparedBackend != 0 {
 				renvoRTGDirectLoadNative(a, renvoRTGTertiary,
@@ -14775,8 +14779,7 @@ func renvoEmitSlicePtrCap(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		renvoAsmLoadPrimaryMemSecondaryDisp(a, 0)
 		renvoAsmPushPrimary(a)
 		renvoAsmLoadPrimaryMemSecondaryDisp(a, 16)
-		renvoAsmCopyPrimaryToTertiary(a)
-		renvoAsmPopPrimary(a)
+		renvoAsmPopPrimaryToTertiary(a)
 		return true
 	}
 	if e.kind == renvoExprUnary && renvoTokCharIs(g.prog, e.tok, '*') || e.kind == renvoExprIndex || e.kind == renvoExprCall {
@@ -14795,12 +14798,24 @@ func renvoEmitIndexAddressPrimary(g *renvoLinearGen, ep *renvoExprParse, indexId
 	indexExpr := &ep.exprs[indexIdx]
 	sliceType := renvoResolveType(meta, renvoInferParsedExprType(g, ep, indexExpr.left))
 	renvoNonNil(sliceType)
-	elemSize := renvoTypeSize(meta, sliceType.elem)
+	pointerArray := sliceType.kind == renvoTypePointer
+	if pointerArray {
+		sliceType = renvoResolveType(meta, sliceType.elem)
+	}
 	if sliceType.kind != renvoTypeArray && sliceType.kind != renvoTypeSlice {
 		return false
 	}
+	elemSize := renvoTypeSize(meta, sliceType.elem)
 	baseExpr := &ep.exprs[indexExpr.left]
-	if sliceType.kind == renvoTypeArray {
+	if pointerArray {
+		if !renvoEmitIntExpr(g, ep, indexExpr.left) {
+			return false
+		}
+		renvoEmitRuntimeNonNilPrimary(g)
+		renvoAsmPushPrimary(a)
+		renvoAsmPrimaryImm(a, sliceType.count)
+		renvoAsmPopPrimaryToTertiary(a)
+	} else if sliceType.kind == renvoTypeArray {
 		base := baseExpr
 		if base.kind == renvoExprIdent {
 			localIndex := renvoFindLocalIndex(g, base.nameStart, base.nameEnd)
@@ -14840,8 +14855,7 @@ func renvoEmitIndexAddressPrimary(g *renvoLinearGen, ep *renvoExprParse, indexId
 		}
 		renvoAsmPushPrimary(a)
 		renvoAsmPrimaryImm(a, sliceType.count)
-		renvoAsmCopyPrimaryToTertiary(a)
-		renvoAsmPopPrimary(a)
+		renvoAsmPopPrimaryToTertiary(a)
 	} else {
 		if !renvoEmitSlicePtrLen(g, ep, indexExpr.left) {
 			return false
@@ -14879,10 +14893,7 @@ func renvoEmitIndexAddressPrimary(g *renvoLinearGen, ep *renvoExprParse, indexId
 	renvoEmitRuntimeBoundsCheck(g)
 	renvoAsmCopySecondaryToTertiary(a)
 	renvoAsmPopPrimary(a)
-	if elemSize != 1 {
-		renvoAsmMulTertiaryImm(a, elemSize)
-	}
-	renvoAsmAddPrimaryTertiary(a)
+	renvoAsmAddScaledTertiary(a, elemSize)
 	return true
 }
 
@@ -14932,10 +14943,7 @@ func renvoEnsureIndexAddressHelper(g *renvoLinearGen, elemSize int) int {
 	renvoAsmJzPrimary(&g.asm, invalid)
 	renvoAsmPopPrimary(&g.asm)
 	renvoAsmCopySecondaryToTertiary(&g.asm)
-	if elemSize != 1 {
-		renvoAsmMulTertiaryImm(&g.asm, elemSize)
-	}
-	renvoAsmAddPrimaryTertiary(&g.asm)
+	renvoAsmAddScaledTertiary(&g.asm, elemSize)
 	renvoAsmRet(&g.asm)
 	renvoAsmMarkLabel(&g.asm, negative)
 	renvoAsmPopTertiary(&g.asm)
@@ -14979,10 +14987,8 @@ func renvoEmitSliceBoundsChecks(g *renvoLinearGen, lowOff int, highOff int, maxO
 	if g.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmLoadPrimaryStack(a, capOff)
 		renvoAsmCopyPrimaryToCallWord0(a)
-		renvoAsmLoadPrimaryStack(a, maxOff)
-		renvoAsmCopyPrimaryToTertiary(a)
-		renvoAsmLoadPrimaryStack(a, highOff)
-		renvoAsmCopyPrimaryToSecondary(a)
+		renvoAsmLoadTertiaryStack(a, maxOff)
+		renvoAsmLoadSecondaryStack(a, highOff)
 		renvoAsmLoadPrimaryStack(a, lowOff)
 		renvoAsmCallLabel(a, renvoAmd64EnsureRuntimeCheck(g, &g.runtimeSliceBoundsLabel, 6, "\x48\x39\xc2\x72\x0b\x48\x39\xd1\x72\x06\x48\x39\xcf\x72\x01\xc3\xe9\x00\x00\x00\x00"))
 		if g.meta.panicEnabled {
@@ -17872,7 +17878,7 @@ func renvoEmitWideIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		if e.argCount == 1 {
 			conversionType := renvoConversionTypeFromExpr(g, ep, e.left)
 			conversion := renvoResolveType(g.meta, conversionType)
-			if renvoTypeKindIsScalarValue(conversion.kind) {
+			if renvoTypeKindIsScalarValue(conversion.kind) || conversion.kind == renvoTypePointer {
 				return renvoEmitScalarExprForKind(g, ep, ep.args[e.firstArg], conversion.kind)
 			}
 		}
@@ -20661,7 +20667,7 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 			conversionType := renvoConversionTypeFromExpr(g, ep, e.left)
 			conversion := renvoResolveType(meta, conversionType)
 			renvoNonNil(conversion)
-			if renvoTypeKindIsScalarValue(conversion.kind) {
+			if renvoTypeKindIsScalarValue(conversion.kind) || conversion.kind == renvoTypePointer {
 				return renvoEmitScalarExprForKind(g, ep, firstArgIndex, conversion.kind)
 			}
 		}
