@@ -1,5 +1,53 @@
 package main
 
+func renvoStructArgByReference(g *renvoLinearGen, kind int) bool {
+	return g.c.renvoNativeIntSize == 4 && g.c.renvoTargetArch != renvoArchWasm32 && kind == renvoTypeStruct
+}
+
+func renvoRTGEnsureStringEqualHelper(g *renvoLinearGen) int {
+	renvoNonNil(g)
+	a := &g.asm
+	if g.streqEmitted {
+		return g.streqLabel
+	}
+	g.streqEmitted = true
+	g.streqLabel = renvoAsmNewLabel(a)
+	afterLabel := renvoAsmNewLabel(a)
+	notEqualLabel := renvoAsmNewLabel(a)
+	equalLabel := renvoAsmNewLabel(a)
+	loopLabel := renvoAsmNewLabel(a)
+	renvoAsmJmpMarkLabel(a, afterLabel, g.streqLabel)
+
+	// String equality receives (left data, left length, right data, right
+	// length) in the first four ABI call words and returns a boolean in primary.
+	renvoRTGDirectCompare(a, renvoRTGCallWord1, renvoRTGCallWord3)
+	renvoAsmJnzLabel(a, notEqualLabel)
+	renvoRTGDirectMoveImmediate(a, renvoRTGCallWord4, 0)
+	renvoRTGDirectCompare(a, renvoRTGCallWord1, renvoRTGCallWord4)
+	renvoAsmJzLabel(a, equalLabel)
+	renvoAsmMarkLabel(a, loopLabel)
+	renvoRTGDirectLoadU8(a, renvoRTGScratch,
+		renvoRTGAsmAddress(renvoRTGCallWord0, RTGNoRegister, 0, 1))
+	renvoRTGDirectLoadU8(a, renvoRTGCallWord4,
+		renvoRTGAsmAddress(renvoRTGCallWord2, RTGNoRegister, 0, 1))
+	renvoRTGDirectCompare(a, renvoRTGScratch, renvoRTGCallWord4)
+	renvoAsmJnzLabel(a, notEqualLabel)
+	renvoRTGDirectIncrement(a, renvoRTGCallWord0)
+	renvoRTGDirectIncrement(a, renvoRTGCallWord2)
+	renvoRTGDirectDecrement(a, renvoRTGCallWord1)
+	renvoRTGDirectMoveImmediate(a, renvoRTGCallWord4, 0)
+	renvoRTGDirectCompare(a, renvoRTGCallWord1, renvoRTGCallWord4)
+	renvoAsmJnzLabel(a, loopLabel)
+	renvoAsmMarkLabel(a, equalLabel)
+	renvoRTGDirectMoveImmediate(a, renvoRTGPrimary, 1)
+	renvoAsmRet(a)
+	renvoAsmMarkLabel(a, notEqualLabel)
+	renvoRTGDirectMoveImmediate(a, renvoRTGPrimary, 0)
+	renvoAsmRet(a)
+	renvoAsmMarkLabel(a, afterLabel)
+	return g.streqLabel
+}
+
 // compileTarget composes an OS/architecture implementation after target
 // selection. It is deliberately target-neutral: Linux runtime operations live
 // in compiler_linux_impl.go, while target-specific image builders remain in
