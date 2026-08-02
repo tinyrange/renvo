@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "65685e03299e03097028e44af591b0e71029b08ff1d498180efe8d0317834859"
+const CompilerSourceDigest = "0c4eb09efdc3482b420ceea2458c39ad952509c976294fff243db32ade698c56"
 
 // source: backend/compiler_common_impl.go
 
@@ -3312,9 +3312,7 @@ return i
 
 func renvoLineContinuesAfterPrevToken(p *renvoProgram, i int) bool {
 renvoNonNil(p)
-if i <= 0 {
-return false
-}
+
 prev := i - 1
 tok := renvoTokAt(p, prev)
 tokStart := tok.start
@@ -3323,18 +3321,11 @@ if tokEnd <= tokStart {
 return false
 }
 c := renvo_runtime_UnsafeByteAt(p.src, tokStart)
-if c == ',' {
+if c == ',' || c == '*' || c == '&' || c == '|' {
 return true
 }
-if c == '*' || c == '&' {
-return true
-}
-if c == '+' {
-if tokEnd == tokStart+1 || renvo_runtime_UnsafeByteAt(p.src, tokStart+1) != '+' {
-return true
-}
-}
-return false
+return c == '+' &&
+(tokEnd == tokStart+1 || renvo_runtime_UnsafeByteAt(p.src, tokStart+1) != '+')
 }
 
 func renvoFindNextTokenText(p *renvoProgram, start int, end int, text byte) int {
@@ -16564,9 +16555,12 @@ renvoAmd64AsmLoadRaxMemRdxDisp(a, disp)
 func renvoAsmLoadPrimaryMemSecondaryDispSize(a *renvoAsm, disp int, size int) {
 renvoNonNil(a)
 if renvoPreparedBackend != 0 {
+
+
+
 renvoRTGAsmLoadSize(a, renvoRTGPrimary,
 renvoRTGAsmAddress(renvoRTGSecondary, RTGNoRegister, disp, 1),
-size, true)
+size, size != 1)
 return
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
@@ -16615,9 +16609,10 @@ renvoAmd64AsmLoadByteRaxIndexRcx(a)
 func renvoAsmLoadPrimaryIndexTertiarySize(a *renvoAsm, size int) {
 renvoNonNil(a)
 if renvoPreparedBackend != 0 {
+
 renvoRTGAsmLoadSize(a, renvoRTGPrimary,
 renvoRTGAsmAddress(renvoRTGPrimary, renvoRTGTertiary, 0, size),
-size, true)
+size, size != 1)
 return
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
@@ -17096,15 +17091,15 @@ done = renvoEmitSignedDivisionOverflowGuard(g, mod)
 }
 ok := false
 if g.c.renvoTargetArch == renvoArchWasm32 {
-ok = renvoWasm32EmitRaxRcxOp(g, tok)
+ok = renvoWasm32EmitRaxRcxOp(g, tok, false)
 } else if renvoPreparedBackend != 0 {
 ok = renvoRTGEmitPrimaryTertiaryOp(g, tok)
 } else if g.c.renvoTargetArch == renvoArchAarch64 {
 ok = renvoAarch64EmitRaxRcxOp(g, tok)
 } else if g.c.renvoTargetArch == renvoArchArm {
-ok = renvoArmEmitRaxRcxOp(g, tok)
+ok = renvoArmEmitRaxRcxOp(g, tok, 0xe1a00050)
 } else if g.c.renvoTargetArch == renvoArch386 {
-ok = renvo386EmitRaxRcxOp(g, tok)
+ok = renvo386EmitRaxRcxOp(g, tok, false)
 } else {
 ok = renvoAmd64EmitRaxRcxOp(g, tok)
 }
@@ -18148,11 +18143,16 @@ return false
 }
 }
 renvoAsmPopTertiary(a)
-if !renvoEmitPrimaryTertiaryOp(g, e.tok) {
-return false
-}
 resultType := renvoInferParsedExprType(g, ep, idx)
 result := renvoResolveType(g.meta, resultType)
+unsignedShift := result.kind == renvoTypeByte || result.kind >= renvoTypeUint16 && result.kind <= renvoTypeUint64
+if renvoTok2Is(p, e.tok, '>', '>') && unsignedShift {
+if !renvo386EmitRaxRcxOp(g, e.tok, true) {
+return false
+}
+} else if !renvoEmitPrimaryTertiaryOp(g, e.tok) {
+return false
+}
 renvoAsmNormalizePrimaryForKind(a, result.kind)
 return true
 }
@@ -19130,7 +19130,9 @@ return renvoEmitMachineIntExpr(g, ep, idx)
 }
 
 func renvoExprHasUnsignedIntType(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-if renvoFixedTarget != 0 && g.c.renvoTargetArch != renvoArchAmd64 && g.c.renvoTargetArch != renvoArchAarch64 {
+if renvoFixedTarget != 0 && renvoPreparedBackend == 0 &&
+g.c.renvoTargetArch != renvoArchAmd64 &&
+g.c.renvoTargetArch != renvoArchAarch64 {
 return false
 }
 renvoNonNil(g, ep)
@@ -21049,15 +21051,6 @@ return false
 }
 }
 renvoAsmPopTertiary(a)
-if g.c.renvoTargetArch == renvoArchWasm32 && opLen == 2 &&
-op0 == '>' && op1 == '>' &&
-renvoExprHasUnsignedIntType(g, ep, e.left) {
-renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRax)
-renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
-renvoWasm32EmitRegReg(a, renvoWasm32OpShrUnsignedRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
-renvoNormalizeNativeExprPrimary(g, ep, idx)
-return true
-}
 if g.c.renvoNativeIntSize == 8 && (op0 == '<' || op0 == '>') && !(opLen == 2 && op1 == op0) && (renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right)) && renvoEmitUnsignedPrimaryTertiaryCompare(g, op0, op1, opLen) {
 renvoNormalizeNativeExprPrimary(g, ep, idx)
 return true
@@ -21092,6 +21085,20 @@ renvoAsmCallLabel(a, renvoEnsureNativeShiftHelper(g, mode))
 }
 renvoNormalizeNativeExprPrimary(g, ep, idx)
 return true
+}
+if g.c.renvoNativeIntSize == 4 && opLen == 2 && op0 == '>' && op1 == '>' {
+resultKind := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx)).kind
+if resultKind == renvoTypeByte || resultKind >= renvoTypeUint16 && resultKind <= renvoTypeUint64 {
+if g.c.renvoTargetArch == renvoArchArm {
+renvoArmEmitRaxRcxOp(g, e.tok, 0xe1a00030)
+} else if g.c.renvoTargetArch == renvoArchWasm32 {
+renvoWasm32EmitRaxRcxOp(g, e.tok, true)
+} else {
+renvo386EmitRaxRcxOp(g, e.tok, true)
+}
+renvoAsmNormalizePrimaryForKind(a, resultKind)
+return true
+}
 }
 if !renvoEmitPrimaryTertiaryOp(g, e.tok) {
 return false
@@ -29530,7 +29537,7 @@ renvoAsmEmit32(a, 8+(reg-6)*4)
 renvoAsmStorePrimaryStack(a, offset)
 }
 
-func renvo386EmitRaxRcxOp(g *renvoLinearGen, tok int) bool {
+func renvo386EmitRaxRcxOp(g *renvoLinearGen, tok int, unsigned bool) bool {
 a := &g.asm
 p := g.prog
 if tok < 0 || tok >= renvoTokCount(p) {
@@ -29602,7 +29609,11 @@ if c1 == '>' {
 renvoAsmEmit16(a, 0xca89)
 renvoAsmEmit16(a, 0xc189)
 renvoAsmEmit16(a, 0xd089)
-renvoAsmEmit16(a, 0xf8d3)
+opcode := 0xf8d3
+if unsigned {
+opcode = 0xe8d3
+}
+renvoAsmEmit16(a, opcode)
 } else if c1 == '=' {
 renvoAsmCmpTertiaryPrimarySet(a, 0x9d)
 } else {
@@ -36326,22 +36337,15 @@ renvoArmAsmAddRegImm(a, renvoArmRegSp, renvoArmRegSp, (wordCount-6)*4)
 }
 }
 
-func renvoArmEmitRaxRcxOp(g *renvoLinearGen, tok int) bool {
+func renvoArmEmitRaxRcxOp(g *renvoLinearGen, tok int, rightShiftOpcode int) bool {
 a := &g.asm
 p := g.prog
-if tok < 0 || tok >= renvoTokCount(p) {
-return false
-}
 start := renvoTokStart(p, tok)
-end := renvoTokEnd(p, tok)
-if start >= end {
-return false
-}
-c0 := p.src[start]
-c1 := byte(0)
-if start+1 < end {
-c1 = p.src[start+1]
-}
+c0 := renvo_runtime_UnsafeByteAt(p.src, start)
+
+
+
+c1 := renvo_runtime_UnsafeByteAt(p.src, start+1)
 if c0 == '+' {
 renvoArmAsmAddRegReg(a, renvoArmRegRax, renvoArmRegRcx, renvoArmRegRax)
 return true
@@ -36379,32 +36383,31 @@ if c0 == '^' {
 renvoArmAsmEmit(a, 0xe0200000|(renvoArmRegRcx<<16)|(renvoArmRegRax<<12)|renvoArmRegRax)
 return true
 }
-if c0 == '<' {
-if c1 == '<' {
-renvoArmAsmEmit(a, 0xe1a00010|(renvoArmRegRax<<8)|(renvoArmRegRax<<12)|renvoArmRegRcx)
-} else if c1 == '=' {
-renvoArmAsmCmpRcxRaxSet(a, 0x9e)
-} else {
-renvoArmAsmCmpRcxRaxSet(a, 0x9c)
-}
-return true
-}
+if c0 == '<' || c0 == '>' {
+if c1 == c0 {
+opcode := 0xe1a00010
 if c0 == '>' {
-if c1 == '>' {
-renvoArmAsmEmit(a, 0xe1a00050|(renvoArmRegRax<<8)|(renvoArmRegRax<<12)|renvoArmRegRcx)
-} else if c1 == '=' {
-renvoArmAsmCmpRcxRaxSet(a, 0x9d)
+opcode = rightShiftOpcode
+}
+renvoArmAsmEmit(a, opcode|(renvoArmRegRax<<8)|(renvoArmRegRax<<12)|renvoArmRegRcx)
 } else {
-renvoArmAsmCmpRcxRaxSet(a, 0x9f)
+setcc := 0x9c
+if c0 == '>' {
+setcc = 0x9f
+}
+if c1 == '=' {
+setcc = setcc ^ 2
+}
+renvoArmAsmCmpRcxRaxSet(a, setcc)
 }
 return true
 }
-if c0 == '=' && c1 == '=' {
-renvoArmAsmCmpRcxRaxSet(a, 0x94)
-return true
+if (c0 == '=' || c0 == '!') && c1 == '=' {
+setcc := 0x94
+if c0 == '!' {
+setcc++
 }
-if c0 == '!' && c1 == '=' {
-renvoArmAsmCmpRcxRaxSet(a, 0x95)
+renvoArmAsmCmpRcxRaxSet(a, setcc)
 return true
 }
 return false
@@ -37378,7 +37381,7 @@ renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegR9)
 renvoWasm32EmitCallLabel(a, g.funcLabels[fnIndex], wordCount)
 }
 
-func renvoWasm32EmitRaxRcxOp(g *renvoLinearGen, tok int) bool {
+func renvoWasm32EmitRaxRcxOp(g *renvoLinearGen, tok int, unsigned bool) bool {
 a := &g.asm
 p := g.prog
 if tok < 0 || tok >= renvoTokCount(p) {
@@ -37449,7 +37452,11 @@ if c0 == '>' {
 if c1 == '>' {
 renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRax)
 renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
-renvoWasm32EmitRegReg(a, renvoWasm32OpShrRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
+opcode := renvoWasm32OpShrRegReg
+if unsigned {
+opcode = renvoWasm32OpShrUnsignedRegReg
+}
+renvoWasm32EmitRegReg(a, opcode, renvoWasm32RegRax, renvoWasm32RegRdx)
 } else if c1 == '=' {
 renvoWasm32AsmCmpRcxRaxSet(a, 0x9d)
 } else {

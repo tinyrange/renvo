@@ -3305,9 +3305,7 @@ func renvoStatementLineEnd(p *renvoProgram, start int, end int) int {
 
 func renvoLineContinuesAfterPrevToken(p *renvoProgram, i int) bool {
 	renvoNonNil(p)
-	if i <= 0 {
-		return false
-	}
+	// Both statement scanner call sites only ask after consuming a token.
 	prev := i - 1
 	tok := renvoTokAt(p, prev)
 	tokStart := tok.start
@@ -3316,18 +3314,11 @@ func renvoLineContinuesAfterPrevToken(p *renvoProgram, i int) bool {
 		return false
 	}
 	c := renvo_runtime_UnsafeByteAt(p.src, tokStart)
-	if c == ',' {
+	if c == ',' || c == '*' || c == '&' || c == '|' {
 		return true
 	}
-	if c == '*' || c == '&' {
-		return true
-	}
-	if c == '+' {
-		if tokEnd == tokStart+1 || renvo_runtime_UnsafeByteAt(p.src, tokStart+1) != '+' {
-			return true
-		}
-	}
-	return false
+	return c == '+' &&
+		(tokEnd == tokStart+1 || renvo_runtime_UnsafeByteAt(p.src, tokStart+1) != '+')
 }
 
 func renvoFindNextTokenText(p *renvoProgram, start int, end int, text byte) int {
@@ -16557,9 +16548,12 @@ func renvoAsmLoadPrimaryMemSecondaryDisp(a *renvoAsm, disp int) {
 func renvoAsmLoadPrimaryMemSecondaryDispSize(a *renvoAsm, disp int, size int) {
 	renvoNonNil(a)
 	if renvoPreparedBackend != 0 {
+		// Size-only scalar loads follow the built-in backend contract: bytes are
+		// zero-extended, while wider narrow integers are sign-extended before
+		// typed expression lowering applies any unsigned normalization.
 		renvoRTGAsmLoadSize(a, renvoRTGPrimary,
 			renvoRTGAsmAddress(renvoRTGSecondary, RTGNoRegister, disp, 1),
-			size, true)
+			size, size != 1)
 		return
 	}
 	if a.c.renvoTargetArch == renvoArchWasm32 {
@@ -16608,9 +16602,10 @@ func renvoAsmLoadBytePrimaryIndexTertiary(a *renvoAsm) {
 func renvoAsmLoadPrimaryIndexTertiarySize(a *renvoAsm, size int) {
 	renvoNonNil(a)
 	if renvoPreparedBackend != 0 {
+		// Match renvoAsmLoadPrimaryMemSecondaryDispSize's scalar-load contract.
 		renvoRTGAsmLoadSize(a, renvoRTGPrimary,
 			renvoRTGAsmAddress(renvoRTGPrimary, renvoRTGTertiary, 0, size),
-			size, true)
+			size, size != 1)
 		return
 	}
 	if a.c.renvoTargetArch == renvoArchWasm32 {
