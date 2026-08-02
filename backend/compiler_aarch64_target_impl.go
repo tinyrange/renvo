@@ -37,13 +37,9 @@ func renvoAarch64EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
 	oldStackPeak := g.stackPeak
 	oldGotoLabels := g.gotoLabels
 	oldLastRangeReturns := g.lastRangeReturns
-	var locals []renvoLocalInfo
-	var gotoLabels []renvoGlobalInfo
-	locals = make([]renvoLocalInfo, renvoFunctionLocalCap(fn))
-	gotoLabels = make([]renvoGlobalInfo, 0, 0)
-	g.locals = locals
+	g.locals = make([]renvoLocalInfo, renvoFunctionLocalCap(fn))
 	g.localCount = 0
-	g.gotoLabels = gotoLabels
+	g.gotoLabels = nil
 	g.breakDepth = 0
 	g.continueDepth = 0
 	g.pendingControl = 0

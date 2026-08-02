@@ -10,13 +10,16 @@ go backend {
 			at := out.AbsoluteRelocationOffset(i)
 			addend := out.AbsoluteRelocationAddend(i)
 			kind := out.AbsoluteRelocationKind(i)
-			target := dataRVA + addend
-			if kind == RTGRelocationAbsoluteBSS {
-				target = dataRVA + dataSize + addend
-			} else if kind == RTGRelocationImport {
+			target, resolved := RTGResolveAbsoluteRelocation(
+				out, kind, addend, dataRVA, dataRVA+dataSize)
+			if kind == RTGRelocationImport {
 				if addend > 0 && addend < len(iat) {
 					target = iat[addend]
+					resolved = true
 				}
+			}
+			if !resolved {
+				continue
 			}
 			insn := RTGGet32At(out.Code(), at)
 			reg := insn & 31
