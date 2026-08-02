@@ -55,6 +55,7 @@ const (
 	spi3UserStart     = uint32(1 << 24)
 	spi3UserMOSI      = uint32(1 << 27)
 	spi3DMATX         = uint32(1 << 28)
+	gdmaOutLinkParked = uint32(1 << 23)
 )
 
 type dmaDescriptor struct {
@@ -133,14 +134,15 @@ func spiInitialize() {
 
 func spiDMAWait() bool {
 	// Observe errors while the transfer is active: an underflow can prevent
-	// SPI's USR bit from ever clearing. Require both GDMA's end-to-end event
-	// and SPI completion before reusing the descriptor or scanline buffer.
+	// SPI's USR bit from ever clearing. The SPI master completion contract does
+	// not include GDMA TOTAL_EOF, so require the SPI transaction to finish and
+	// the GDMA descriptor FSM to return to its documented parked state.
 	for {
 		status := load32(gdmaOutIntRaw)
 		if status&(1<<2) != 0 || load32(spi3DMAIntRaw)&(1<<1) != 0 {
 			return false
 		}
-		if status&(1<<3) != 0 && load32(spi3Command)&spi3UserStart == 0 {
+		if load32(spi3Command)&spi3UserStart == 0 && load32(gdmaOutLink)&gdmaOutLinkParked != 0 {
 			return true
 		}
 	}
