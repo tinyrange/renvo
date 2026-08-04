@@ -678,7 +678,7 @@ func linkedTokenActions(program *unit.Program, aliases *[]string, symbolOffsets 
 		}
 	}
 	if coreProgramImportsUnsafe(program) {
-		markCoreUnsafeSizeofTokens(program, actions)
+		markCoreUnsafeLayoutTokens(program, actions)
 		markCoreUnsafePointerCallTokens(program, actions)
 		markCoreUnsafePointerConversionTokens(program, actions)
 	}
@@ -778,7 +778,7 @@ func markCoreUnsafePointerCallTokens(program *unit.Program, actions []tokenActio
 	}
 }
 
-func markCoreUnsafeSizeofTokens(program *unit.Program, actions []tokenAction) {
+func markCoreUnsafeLayoutTokens(program *unit.Program, actions []tokenAction) {
 	for i := 0; i < len(program.Imports); i++ {
 		imp := program.Imports[i]
 		if !coreTokenTextEquals(program, imp.PathTok, "\"unsafe\"") && !coreTokenTextEquals(program, imp.PathTok, "`unsafe`") {
@@ -792,7 +792,7 @@ func markCoreUnsafeSizeofTokens(program *unit.Program, actions []tokenAction) {
 			continue
 		}
 		for tok := 0; tok+2 < len(program.Tokens); tok++ {
-			if coreTokenText(program, tok) == name && coreTokenTextEquals(program, tok+1, ".") && coreTokenTextEquals(program, tok+2, "Sizeof") {
+			if coreTokenText(program, tok) == name && coreTokenTextEquals(program, tok+1, ".") && (coreTokenTextEquals(program, tok+2, "Sizeof") || coreTokenTextEquals(program, tok+2, "Offsetof")) {
 				markCoreRedirectToken(actions, tok, tok+2)
 				markCoreRedirectToken(actions, tok+1, tok+2)
 			}

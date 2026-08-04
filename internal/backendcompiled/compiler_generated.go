@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "349380562ae987745d8a5e57b0bc649dac734f42c3162ccbf3cf7961b79197fc"
+const CompilerSourceDigest = "c132aa1b2a9848b2ce80afe1d586f3ec2cef3a473b86cc82223a62971554e984"
 
 // source: backend/compiler_common_impl.go
 
@@ -4863,6 +4863,9 @@ return -1
 func renvoBuiltinTypeFromToken(p *renvoProgram, tokIndex int) int {
 renvoNonNil(p)
 tok := renvoTokAt(p, tokIndex)
+if renvoTokIdentIs(p, tokIndex, "uintptr") {
+return renvoTypeInt
+}
 if renvoBytesEqualText(p.src, int(tok.start), int(tok.end), "complex64") || renvoBytesEqualText(p.src, int(tok.start), int(tok.end), "complex128") {
 return renvoBuiltinTypeComplex
 }
@@ -5003,37 +5006,33 @@ renvoNativeTypeLayout(m, fn.resultType)
 }
 for i := 0; i < len(m.types); i++ {
 t := &m.types[i]
-if t.kind == renvoTypeStruct {
+if t.kind != renvoTypeStruct || t.nativeAlign > 0 {
+continue
+}
+nativeLayout := t.count > 0 && !renvoTypeIsTuple(m, i)
+offset := 0
 for j := 0; j < t.count; j++ {
-if renvoResolveType(m, m.fields[t.first+j].typ).resolved == renvoStructLayoutMarker {
+field := &m.fields[t.first+j]
+fieldType := renvoResolveType(m, field.typ)
+if fieldType.resolved == renvoStructLayoutMarker {
 t.resolved = renvoStructLayoutHost
-renvoNativeTypeLayout(m, i)
+nativeLayout = true
 break
 }
-}
-}
-current := m.types[i]
-if current.kind != renvoTypeStruct || current.nativeAlign > 0 {
-continue
-}
-offset := 0
-for j := 0; j < current.count; j++ {
-fieldIndex := current.first + j
-if fieldIndex < 0 || fieldIndex >= len(m.fields) {
-continue
+if fieldType.kind == renvoTypeInt || !renvoTypeKindIsScalarValue(fieldType.kind) {
+nativeLayout = false
 }
 offset = renvoAlignTo8(offset)
-m.fields[fieldIndex].offset = offset
-fieldSize := renvoTypeSize(m, m.fields[fieldIndex].typ)
-if fieldSize < 1 {
-fieldSize = renvoBackendValueSlotSize
+field.offset = offset
+offset += renvoTypeSize(m, field.typ)
 }
-offset += fieldSize
+if nativeLayout {
+renvoNativeTypeLayout(m, i)
+} else {
+t.size = renvoAlignTo8(offset)
 }
-m.types[i].size = renvoAlignTo8(offset)
 }
 }
-
 func renvoNativeTypeLayout(m *renvoMeta, typ int) int {
 renvoNonNil(m)
 if typ <= 0 || typ >= len(m.types) {
@@ -5068,17 +5067,8 @@ if fieldIndex < 0 || fieldIndex >= len(m.fields) {
 continue
 }
 fieldType := m.fields[fieldIndex].typ
-fieldResolved := renvoResolveType(m, fieldType)
-fieldSize := 0
-fieldAlign := 0
-if t.resolved == renvoStructLayoutHost && fieldResolved.kind == renvoTypeStruct &&
-fieldResolved.resolved != renvoStructLayoutMarker && fieldResolved.resolved != renvoStructLayoutHost {
-fieldSize = renvoTypeSize(m, fieldType)
-fieldAlign = renvoBackendValueSlotSize
-} else {
-fieldSize = renvoNativeTypeLayout(m, fieldType)
-fieldAlign = m.types[fieldType].nativeAlign
-}
+fieldSize := renvoNativeTypeLayout(m, fieldType)
+fieldAlign := m.types[fieldType].nativeAlign
 if fieldAlign < 1 {
 fieldAlign = 1
 }
@@ -5415,7 +5405,7 @@ continue
 }
 if paramType.kind == renvoTypeStruct || paramType.kind == renvoTypeArray || g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideInt(paramType.kind) {
 size := renvoTypeSize(meta, param.typ)
-wordSize := renvoCallWordSize(g, paramType.kind)
+wordSize := renvoCallWordSize(g, param.typ)
 for at := 0; at < size; at += wordSize {
 renvoStoreIncomingCallWord(g, callWord, offset-at)
 callWord++
@@ -12308,13 +12298,14 @@ size := renvoTypeSize(g.meta, typ)
 if size < renvoBackendValueSlotSize {
 size = renvoBackendValueSlotSize
 }
-wordSize := renvoCallWordSize(g, t.kind)
+wordSize := renvoCallWordSize(g, typ)
 renvoEmitPushWords(g, offset, size, wordSize, renvoPushStack)
 return renvoAlignValue(size, wordSize) / wordSize
 }
 
-func renvoCallWordSize(g *renvoLinearGen, kind int) int {
-if kind == renvoTypeArray || g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideInt(kind) {
+func renvoCallWordSize(g *renvoLinearGen, typ int) int {
+t := renvoResolveType(g.meta, typ)
+if t.kind == renvoTypeArray || g.c.renvoNativeIntSize == 4 && (renvoTypeKindIsWideInt(t.kind) || t.kind == renvoTypeStruct && t.nativeAlign > 0) {
 return g.c.renvoNativeIntSize
 }
 return renvoBackendValueSlotSize
@@ -13285,7 +13276,7 @@ renvoAsmAddressPrimaryStack(a, offset)
 renvoAsmPushPrimary(a)
 return 1
 }
-wordSize := renvoCallWordSize(g, renvoResolveType(meta, typ).kind)
+wordSize := renvoCallWordSize(g, typ)
 wordCount := renvoAlignValue(size, wordSize) / wordSize
 if e.kind == renvoExprIdent {
 localIndex := renvoFindLocalIndex(g, e.nameStart, e.nameEnd)
@@ -13763,13 +13754,7 @@ if idx >= len(ep.exprs) {
 return false
 }
 e := &ep.exprs[idx]
-if e.kind == renvoExprInt {
-return true
-}
-if e.kind == renvoExprChar {
-return true
-}
-if e.kind == renvoExprBool {
+if e.kind == renvoExprInt || e.kind == renvoExprChar || e.kind == renvoExprBool {
 return true
 }
 if e.kind == renvoExprIdent {
@@ -15221,6 +15206,9 @@ a := &g.asm
 e := &ep.exprs[idx]
 baseResolved := renvoResolveType(meta, renvoInferParsedExprType(g, ep, e.left))
 renvoNonNil(baseResolved)
+if baseResolved.kind == renvoTypePointer {
+baseResolved = renvoResolveType(meta, baseResolved.elem)
+}
 if baseResolved.kind == renvoTypeMap {
 if !renvoEmitMapEntryAddress(g, ep, e.left, e.right, 0) {
 return false
@@ -17495,20 +17483,14 @@ renvoAsmLoadPrimaryMemSecondaryDisp(a, at)
 if at == 0 {
 renvoAsmEmit16(a, 0x0189)
 } else {
-if renvoPreparedBackend != 0 {
-renvoRTGDirectStoreNative(a,
-renvoRTGAsmAddress(renvoRTGTertiary, RTGNoRegister, at, 1),
-renvoRTGPrimary)
-} else {
 renvoAsmMemDisp(a, at, 0x8948, 0x41, 0x81)
-}
 }
 }
 return true
 }
 if e.kind == renvoExprComposite {
 renvoAsmPrimaryImm(a, 0)
-for at := 0; at < size; at += 8 {
+for at := 0; at < size; at += g.c.renvoNativeIntSize {
 renvoAsmStorePrimaryMemSecondaryDisp(a, at)
 }
 for i := 0; i < e.argCount; i++ {
@@ -17911,9 +17893,17 @@ return renvoEmitArbitrarySyscall(g, ep, idx)
 if renvoFunctionValueCalleeType(g, ep, e.left) != 0 || renvoFuncInfoFromCall(g, ep, e.left) >= 0 {
 return renvoEmitUserCall(g, ep, idx)
 }
-if e.argCount == 1 && renvoExprIsIdentText(p, ep, e.left, "Sizeof") {
-renvoAsmPrimaryImm(a, renvoTypeSize(g.meta, renvoInferParsedExprType(g, ep, ep.args[e.firstArg])))
+if e.argCount == 1 {
+arg := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
+if renvoExprIsIdentText(p, ep, e.left, "Sizeof") {
+renvoAsmPrimaryImm(a, renvoTypeSize(g.meta, renvoInferParsedExprType(g, ep, arg)))
 return true
+}
+if renvoExprIsIdentText(p, ep, e.left, "Offsetof") {
+selector := &ep.exprs[arg]
+renvoAsmPrimaryImm(a, renvoStructFieldOffset(g, renvoInferParsedExprType(g, ep, selector.left), selector.nameStart, selector.nameEnd))
+return true
+}
 }
 if callee == renvoIdentPanic {
 return renvoEmitBuiltinPanic(g, ep, idx)
@@ -19052,7 +19042,7 @@ return false
 a := &g.asm
 sizeOffset := renvoAddUnnamedLocal(g, renvoTypeInt)
 addrOffset := renvoAddUnnamedLocal(g, renvoTypeInt)
-renvoAsmStoreStackImm(a, sizeOffset, size)
+renvoAsmStoreStackImm(a, sizeOffset, renvoAlignTo8(size))
 renvoEmitPersistentAllocToPrimary(g, sizeOffset)
 renvoAsmStorePrimaryStack(a, addrOffset)
 
@@ -20570,7 +20560,7 @@ indexExpr := &ep.exprs[idx]
 leftType := renvoInferParsedExprType(g, ep, indexExpr.left)
 sliceType := renvoResolveType(meta, leftType)
 renvoNonNil(sliceType)
-if sliceType.kind != renvoTypeSlice {
+if sliceType.kind != renvoTypeSlice && sliceType.kind != renvoTypeArray {
 return false
 }
 elemType := renvoResolveType(meta, sliceType.elem)
@@ -20698,9 +20688,17 @@ return renvoEmitArbitrarySyscall(g, ep, idx)
 if renvoFunctionValueCalleeType(g, ep, e.left) != 0 || renvoFuncInfoFromCall(g, ep, e.left) >= 0 {
 return renvoEmitUserCall(g, ep, idx)
 }
-if e.argCount == 1 && renvoExprIsIdentText(p, ep, e.left, "Sizeof") {
-renvoAsmPrimaryImm(a, renvoTypeSize(meta, renvoInferParsedExprType(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))))
+if e.argCount == 1 {
+arg := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
+if renvoExprIsIdentText(p, ep, e.left, "Sizeof") {
+renvoAsmPrimaryImm(a, renvoTypeSize(meta, renvoInferParsedExprType(g, ep, arg)))
 return true
+}
+if renvoExprIsIdentText(p, ep, e.left, "Offsetof") {
+selector := &ep.exprs[arg]
+renvoAsmPrimaryImm(a, renvoStructFieldOffset(g, renvoInferParsedExprType(g, ep, selector.left), selector.nameStart, selector.nameEnd))
+return true
+}
 }
 if callee == renvoIdentPanic {
 return renvoEmitBuiltinPanic(g, ep, idx)
@@ -21352,20 +21350,14 @@ renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRax, renvoWasm32RegRc
 } else if at == 0 {
 renvoAsmEmit24(a, 0x018948)
 } else {
-if renvoPreparedBackend != 0 {
-renvoRTGDirectStoreNative(a,
-renvoRTGAsmAddress(renvoRTGTertiary, RTGNoRegister, at, 1),
-renvoRTGPrimary)
-} else {
 renvoAsmMemDisp(a, at, 0x8948, 0x41, 0x81)
-}
 }
 }
 return true
 }
 if e.kind == renvoExprComposite {
 renvoAsmPrimaryImm(a, 0)
-for at := 0; at < size; at += 8 {
+for at := 0; at < size; at += g.c.renvoNativeIntSize {
 renvoAsmStorePrimaryMemSecondaryDisp(a, at)
 }
 for i := 0; i < e.argCount; i++ {
