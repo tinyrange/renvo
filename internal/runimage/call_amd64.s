@@ -1,4 +1,4 @@
-//go:build !renvo && linux && amd64
+//go:build !renvo && (linux || windows) && amd64
 
 #include "textflag.h"
 

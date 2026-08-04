@@ -54,11 +54,7 @@ if len(os.Args) == 2 { os.WriteFile(os.Args[1], []byte("PASS\n"), 0644) }
 	if err != nil || string(output) != "PASS\n" {
 		t.Fatalf("script marker = %q, %v", output, err)
 	}
-	wantLoader := "native-file"
-	if runtime.GOOS == "linux" {
-		wantLoader = "jit"
-	}
-	if result.Loader != wantLoader {
-		t.Fatalf("loader = %q, want %q", result.Loader, wantLoader)
+	if result.Loader != "jit" {
+		t.Fatalf("loader = %q, want jit", result.Loader)
 	}
 }

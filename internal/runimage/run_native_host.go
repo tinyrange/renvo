@@ -1,4 +1,4 @@
-//go:build !renvo && !linux
+//go:build !renvo && ((!linux && !windows && !darwin) || (windows && !amd64 && !386 && !arm64) || (darwin && !arm64))
 
 package runimage
 

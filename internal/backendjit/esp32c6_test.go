@@ -12,8 +12,8 @@ import (
 )
 
 func TestCompiledInBootstrapPreparesESP32C6Definition(t *testing.T) {
-	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
-		t.Skipf("in-process prepared backend requires linux/amd64, got %s/%s",
+	if hostTarget() == "" {
+		t.Skipf("no in-process prepared backend for %s/%s",
 			runtime.GOOS, runtime.GOARCH)
 	}
 	root, err := filepath.Abs("../..")
@@ -73,8 +73,8 @@ func riscvAddressPair(image []byte, offset int) uint32 {
 }
 
 func TestCompiledInBootstrapCompilesESP32C6MicrocontrollerSuite(t *testing.T) {
-	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
-		t.Skipf("in-process prepared backend requires linux/amd64, got %s/%s",
+	if hostTarget() == "" {
+		t.Skipf("no in-process prepared backend for %s/%s",
 			runtime.GOOS, runtime.GOARCH)
 	}
 	root, err := filepath.Abs("../..")
