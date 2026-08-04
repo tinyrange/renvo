@@ -47,10 +47,7 @@ func RunScriptCommand(args []string, env []string, backend Backend, stdin io.Rea
 	}
 	script := compileArgs[len(compileArgs)-1]
 	compileArgs = append(compileArgs, "-script")
-	emitImage := runtime.GOOS == "linux"
-	if emitImage {
-		compileArgs = append(compileArgs, "-emit-image")
-	}
+	compileArgs = append(compileArgs, "-emit-image")
 	compileArgs = append(compileArgs, "-t", target, "-o", "-")
 	if backend == nil {
 		return runFail(result, RunErrBackend, "")
@@ -67,12 +64,9 @@ func RunScriptCommand(args []string, env []string, backend Backend, stdin io.Rea
 	if !compiled.Ok {
 		return runFail(result, RunErrCompile, "")
 	}
-	image := linkedimage.Image{Target: target, Native: compiled.Binary}
-	if emitImage {
-		image, err = linkedimage.Decode(compiled.Binary)
-		if err != nil || image.Target != target {
-			return runFail(result, RunErrImage, target)
-		}
+	image, err := linkedimage.Decode(compiled.Binary)
+	if err != nil || image.Target != target {
+		return runFail(result, RunErrImage, target)
 	}
 	executed := runimage.Run(image, script, programArgs, env, stdin, stdout, stderr)
 	result.ExitCode = executed.ExitCode

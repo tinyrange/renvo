@@ -303,8 +303,8 @@ func TestCompiledInBootstrapPreparesAndCachesBackend(t *testing.T) {
 }
 
 func TestCompiledInBootstrapUsesAArch64Definition(t *testing.T) {
-	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
-		t.Skipf("in-process prepared backend requires linux/amd64, got %s/%s", runtime.GOOS, runtime.GOARCH)
+	if hostTarget() == "" {
+		t.Skipf("no in-process prepared backend for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 	root, err := filepath.Abs("../..")
 	if err != nil {
@@ -331,8 +331,8 @@ func TestCompiledInBootstrapUsesAArch64Definition(t *testing.T) {
 }
 
 func TestCompiledInBootstrapUsesDefinitionOwnedPEImages(t *testing.T) {
-	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
-		t.Skipf("in-process prepared backend requires linux/amd64, got %s/%s", runtime.GOOS, runtime.GOARCH)
+	if hostTarget() == "" {
+		t.Skipf("no in-process prepared backend for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 	root, err := filepath.Abs("../..")
 	if err != nil {
@@ -457,8 +457,8 @@ func TestCompiledInBootstrapUsesDefinitionOwnedKernelModuleImage(t *testing.T) {
 }
 
 func TestCompiledInBootstrapUsesDefinitionOwnedMachOImage(t *testing.T) {
-	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
-		t.Skipf("in-process prepared backend requires linux/amd64, got %s/%s", runtime.GOOS, runtime.GOARCH)
+	if hostTarget() == "" {
+		t.Skipf("no in-process prepared backend for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 	root, err := filepath.Abs("../..")
 	if err != nil {
@@ -494,8 +494,8 @@ func TestCompiledInBootstrapUsesDefinitionOwnedMachOImage(t *testing.T) {
 }
 
 func TestCompiledInBootstrapUses32BitDefinitions(t *testing.T) {
-	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
-		t.Skipf("in-process prepared backend requires linux/amd64, got %s/%s", runtime.GOOS, runtime.GOARCH)
+	if hostTarget() == "" {
+		t.Skipf("no in-process prepared backend for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 	root, err := filepath.Abs("../..")
 	if err != nil {
@@ -534,8 +534,8 @@ func TestCompiledInBootstrapUses32BitDefinitions(t *testing.T) {
 }
 
 func TestCompiledInBootstrapUsesVM32Definitions(t *testing.T) {
-	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
-		t.Skipf("in-process prepared backend requires linux/amd64, got %s/%s", runtime.GOOS, runtime.GOARCH)
+	if hostTarget() == "" {
+		t.Skipf("no in-process prepared backend for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 	root, err := filepath.Abs("../..")
 	if err != nil {

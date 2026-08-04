@@ -1,4 +1,4 @@
-//go:build !renvo && linux && 386
+//go:build !renvo && (linux || windows) && 386
 
 #include "textflag.h"
 

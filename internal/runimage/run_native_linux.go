@@ -13,8 +13,6 @@ import (
 	"renvo.dev/internal/linkedimage"
 )
 
-const jitStackSize = 8 << 20
-
 func runNative(image linkedimage.Image, script string, args []string, env []string, stdin io.Reader, stdout, stderr io.Writer) Result {
 	if stdin != os.Stdin || stdout != os.Stdout || stderr != os.Stderr {
 		return Result{ExitCode: 1, Err: errors.New("in-process execution requires the process standard streams")}
@@ -23,7 +21,7 @@ func runNative(image linkedimage.Image, script string, args []string, env []stri
 	if !ok {
 		return Result{ExitCode: 1, Err: errors.New("invalid Linux linked-image layout")}
 	}
-	memorySize = pageAlign(memorySize)
+	memorySize = pageAlign(memorySize, 4096)
 	memory, err := syscall.Mmap(-1, 0, memorySize, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANON)
 	if err != nil {
 		return Result{ExitCode: 1, Err: err}
@@ -51,8 +49,8 @@ func runNative(image linkedimage.Image, script string, args []string, env []stri
 		if segment.Permissions&1 != 0 {
 			protection |= syscall.PROT_EXEC
 		}
-		start := pageFloor(segment.Address)
-		end := pageAlign(segment.Address + segment.MemorySize)
+		start := pageFloor(segment.Address, 4096)
+		end := pageAlign(segment.Address+segment.MemorySize, 4096)
 		if err = syscall.Mprotect(memory[start:end], protection); err != nil {
 			return Result{ExitCode: 1, Err: err}
 		}
@@ -62,17 +60,13 @@ func runNative(image linkedimage.Image, script string, args []string, env []stri
 		return Result{ExitCode: 1, Err: err}
 	}
 	defer func() { _ = syscall.Munmap(stack) }()
-	programArgs := make([]string, 1, len(args)+1)
-	programArgs[0] = script
-	programArgs = append(programArgs, args...)
-	argStorage, argWords := jitStringWords(programArgs)
-	envStorage, envWords := jitStringWords(env)
+	argStorage, argWords, envStorage, envWords := jitArguments(script, args, env)
 	base := uintptr(unsafe.Pointer(&memory[0]))
 	stackTop := uintptr(unsafe.Pointer(&stack[0])) + uintptr(len(stack))
 	runtime.LockOSThread()
 	exitCode := callJIT(
 		base+uintptr(entry), stackTop,
-		jitWordPointer(argWords), uintptr(len(programArgs)),
+		jitWordPointer(argWords), uintptr(len(args)+1),
 		jitWordPointer(envWords), uintptr(len(env)),
 	)
 	runtime.UnlockOSThread()
@@ -81,33 +75,4 @@ func runNative(image linkedimage.Image, script string, args []string, env []stri
 	runtime.KeepAlive(envStorage)
 	runtime.KeepAlive(envWords)
 	return Result{ExitCode: exitCode, Loader: "jit"}
-}
-
-func jitStringWords(values []string) ([][]byte, []uintptr) {
-	storage := make([][]byte, len(values))
-	stride := 16 / int(unsafe.Sizeof(uintptr(0)))
-	words := make([]uintptr, len(values)*stride)
-	for i := range values {
-		storage[i] = []byte(values[i])
-		if len(storage[i]) != 0 {
-			words[i*stride] = uintptr(unsafe.Pointer(&storage[i][0]))
-		}
-		words[i*stride+stride/2] = uintptr(len(storage[i]))
-	}
-	return storage, words
-}
-
-func jitWordPointer(words []uintptr) uintptr {
-	if len(words) == 0 {
-		return 0
-	}
-	return uintptr(unsafe.Pointer(&words[0]))
-}
-
-func pageAlign(value int) int {
-	return (value + 4095) &^ 4095
-}
-
-func pageFloor(value int) int {
-	return value &^ 4095
 }

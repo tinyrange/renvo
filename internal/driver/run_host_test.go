@@ -16,6 +16,9 @@ func TestRunScriptCommandCompilesImageAndForwardsArguments(t *testing.T) {
 	}
 	repoRoot := driverRepoRoot(t)
 	backend := filepath.Join(t.TempDir(), "renvo-backend")
+	if runtime.GOOS == "windows" {
+		backend += ".exe"
+	}
 	command := exec.Command("go", "build", "-o", backend, "./backend")
 	command.Dir = repoRoot
 	if output, err := command.CombinedOutput(); err != nil {
@@ -54,11 +57,7 @@ if len(os.Args) == 2 { os.WriteFile(os.Args[1], []byte("PASS\n"), 0644) }
 	if err != nil || string(output) != "PASS\n" {
 		t.Fatalf("script marker = %q, %v", output, err)
 	}
-	wantLoader := "native-file"
-	if runtime.GOOS == "linux" {
-		wantLoader = "jit"
-	}
-	if result.Loader != wantLoader {
-		t.Fatalf("loader = %q, want %q", result.Loader, wantLoader)
+	if result.Loader != "jit" {
+		t.Fatalf("loader = %q, want jit", result.Loader)
 	}
 }
