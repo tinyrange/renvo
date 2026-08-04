@@ -16,6 +16,9 @@ func TestRunScriptCommandCompilesImageAndForwardsArguments(t *testing.T) {
 	}
 	repoRoot := driverRepoRoot(t)
 	backend := filepath.Join(t.TempDir(), "renvo-backend")
+	if runtime.GOOS == "windows" {
+		backend += ".exe"
+	}
 	command := exec.Command("go", "build", "-o", backend, "./backend")
 	command.Dir = repoRoot
 	if output, err := command.CombinedOutput(); err != nil {

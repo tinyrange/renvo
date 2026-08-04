@@ -163,7 +163,9 @@ jobs:
         run: go test -count=1 -timeout 15m -run '^TestBundledFrontendNativeREPLSession$' ./frontend_tests
 
       - name: Run native compiler JIT tests
-        run: go test -count=1 -timeout 15m ./internal/runimage ./internal/driver ./internal/backendjit
+        run: |
+          go test -count=1 -timeout 15m ./internal/runimage ./internal/backendjit
+          go test -count=1 -timeout 15m -run '^TestRunScriptCommandCompilesImageAndForwardsArguments$' ./internal/driver
 
   package-tests:
     name: Package tests (${{ matrix.runner }})
