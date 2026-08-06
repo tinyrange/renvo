@@ -161,6 +161,50 @@ arch beta {
 	}
 }
 
+func TestParseImportsSequenceInitializerUsesOuterArchitectureFact(t *testing.T) {
+	root := []byte(`definition 1
+unit tiny
+implements direct_emitter_v1
+@import "alpha.rtg"
+`)
+	files := map[string][]byte{
+		"/defs/alpha.rtg": []byte(`go backend {
+	func consume(out *RTGEmitter, register RTGRegister) {}
+}
+arch alpha {
+	registers = [r0]
+	locations { scratch = r0 }
+	sequences {
+		use(out:emitter) {
+			let scratch = scratch
+			call consume(out,scratch)
+		}
+	}
+}`),
+	}
+	document := ParseImports(root, "/defs/root.rtg", importTestLoader{files: files})
+	if !document.Ok {
+		t.Fatalf("ParseImports failed: %#v", document.Diagnostics)
+	}
+	alpha, ok := document.Declaration(DeclArch, "alpha")
+	if !ok {
+		t.Fatal("alpha architecture is missing")
+	}
+	sequences := architectureSequences(alpha)
+	if len(sequences) != 1 || len(sequences[0].Steps) != 2 {
+		t.Fatalf("alpha sequences = %#v", sequences)
+	}
+	initializer := sequences[0].Steps[0].Tokens
+	if len(initializer) != 4 || initializer[1] != "scratch" ||
+		initializer[3] != "alphaScratch" {
+		t.Fatalf("initializer = %#v", initializer)
+	}
+	use := sequences[0].Steps[1].Tokens
+	if len(use) != 7 || use[5] != "scratch" {
+		t.Fatalf("local use = %#v", use)
+	}
+}
+
 func TestParseImportsExtendsArchitectureWithTargetScopedSequences(t *testing.T) {
 	root := []byte(`definition 1
 unit linux_tiny

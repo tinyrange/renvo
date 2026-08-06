@@ -289,22 +289,6 @@ func renvoEmitPreparedReadWrite(
 	return renvoRTGEmitRuntimeOperation(a, operation)
 }
 
-func renvoAsmJgeLabel(a *renvoAsm, label int) {
-	renvoNonNil(a)
-	renvoAsmEmit16(a, 0x8d0f)
-	at := len(a.code)
-	renvoAsmEmit32(a, 0)
-	renvoAsmAddReloc(a, at, label)
-}
-
-func renvoAsmJlLabel(a *renvoAsm, label int) {
-	renvoNonNil(a)
-	renvoAsmEmit16(a, 0x8c0f)
-	at := len(a.code)
-	renvoAsmEmit32(a, 0)
-	renvoAsmAddReloc(a, at, label)
-}
-
 func renvoEvalBuiltinConst(g *renvoLinearGen, nameStart int, nameEnd int) renvoConstResult {
 	renvoNonNil(g)
 	p := g.prog
@@ -738,50 +722,6 @@ func renvoEmitRuntimeArenaDiscardStackRange(g *renvoLinearGen, startOff int, end
 	return true
 }
 
-func renvoEmitRuntimeArenaMark(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-	renvoNonNil(g, ep)
-	e := &ep.exprs[idx]
-	if e.argCount != 0 {
-		return false
-	}
-	a := &g.asm
-	renvoStringHeapOffsets(g)
-	readyLabel := renvoAsmNewLabel(a)
-	renvoAsmLoadPrimaryBss(a, g.stringHeapOff)
-	renvoAsmJnzPrimary(a, readyLabel)
-	renvoAsmPrimaryBssAddr(a, g.stringHeapDataOff)
-	renvoAsmStorePrimaryBss(a, g.stringHeapOff)
-	renvoAsmMarkLabel(a, readyLabel)
-	renvoAsmLoadPrimaryBss(a, g.stringHeapOff)
-	return true
-}
-
-func renvoEmitRuntimeArenaReset(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-	renvoNonNil(g, ep)
-	e := &ep.exprs[idx]
-	if e.argCount != 1 {
-		return false
-	}
-	if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-		return false
-	}
-	renvoStringHeapOffsets(g)
-	a := &g.asm
-	renvoAsmStorePrimaryBss(a, g.stringHeapOff)
-	return true
-}
-
-func renvoEmitRuntimeArenaPersistMark(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-	renvoNonNil(g, ep)
-	e := &ep.exprs[idx]
-	if e.argCount != 0 {
-		return false
-	}
-	renvoEmitPersistentArenaReady(g)
-	renvoAsmLoadPrimaryBss(&g.asm, g.stringHeapEndOff)
-	return true
-}
-
 func renvoEmitRuntimeArenaPersistReset(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
 	e := &ep.exprs[idx]
@@ -910,7 +850,7 @@ func renvoEmitPersistentAllocToPrimary(g *renvoLinearGen, sizeOff int) {
 	renvoNonNil(g)
 	a := &g.asm
 	renvoAsmLoadPrimaryStack(a, sizeOff)
-	renvoAsmCallLabel(a, renvoEnsurePersistentAllocHelper(g))
+	renvoAsmCallLabel(a, renvoEnsureDirectionalArenaAllocHelper(g, true))
 	renvoEmitArenaAllocationCheck(g)
 }
 

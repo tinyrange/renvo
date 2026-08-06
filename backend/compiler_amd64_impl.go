@@ -622,7 +622,7 @@ func renvoAmd64EmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount i
 }
 
 func renvoAmd64EmitFloatBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-	return renvoEmitAmd64FloatBinaryExpr(g, ep, idx)
+	return renvoEmitNativeFloatBinaryExpr(g, ep, idx)
 }
 func renvoAmd64AsmJccLabel(a *renvoAsm, op int, label int) {
 	renvoNonNil(a)

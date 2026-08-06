@@ -339,6 +339,11 @@ func rewriteVirtualStatements(statements []Statement, packageName string,
 		if sequenceBody {
 			statements[i].Tokens = rewriteVirtualSequenceStep(
 				statements[i].Tokens, packageName, packages, locals)
+			tokens := statements[i].Tokens
+			if len(tokens) >= 2 && (tokens[0] == "let" || tokens[0] == "var") &&
+				stringIndex(locals, tokens[1]) < 0 {
+				locals = append(locals, tokens[1])
+			}
 		} else if parent == "sequences" {
 			childLocals = virtualSequenceLocals(statements[i])
 			if len(statements[i].Tokens) != 0 {
@@ -429,16 +434,9 @@ func virtualSequenceLocals(statement Statement) []string {
 	if !ok {
 		return nil
 	}
-	locals := make([]string, 0, len(sequence.Parameters)+len(sequence.Steps))
+	locals := make([]string, 0, len(sequence.Parameters))
 	for i := 0; i < len(sequence.Parameters); i++ {
 		locals = append(locals, sequence.Parameters[i].Name)
-	}
-	for i := 0; i < len(sequence.Steps); i++ {
-		tokens := sequence.Steps[i].Tokens
-		if len(tokens) >= 2 && (tokens[0] == "let" || tokens[0] == "var") &&
-			stringIndex(locals, tokens[1]) < 0 {
-			locals = append(locals, tokens[1])
-		}
 	}
 	return locals
 }
