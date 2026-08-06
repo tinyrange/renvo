@@ -100,7 +100,7 @@ jobs:
           go test -count=1 -timeout 30m -run "^(${tests})$" ./backend
 
       - name: Run native compiler JIT tests
-        run: go test -count=1 -timeout 15m ./internal/runimage ./internal/driver ./internal/backendjit
+        run: go test -count=1 -timeout 15m ./internal/runimage ./internal/driver ./internal/backendjit ./internal/difftest
 
   backend-darwin-arm64:
     name: Backend compiler tests (darwin-arm64)
@@ -164,7 +164,7 @@ jobs:
 
       - name: Run native compiler JIT tests
         run: |
-          go test -count=1 -timeout 15m ./internal/runimage ./internal/backendjit
+          go test -count=1 -timeout 15m ./internal/runimage ./internal/backendjit ./internal/difftest
           go test -count=1 -timeout 15m -run '^TestRunScriptCommandCompilesImageAndForwardsArguments$' ./internal/driver
 
   package-tests:

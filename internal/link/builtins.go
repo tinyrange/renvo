@@ -247,6 +247,16 @@ func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end i
 		}
 		return functionValueDeclaredFunctionResultType(program, name)
 	}
+	for open := start + 1; open < end; open++ {
+		if !functionValueTokenEquals(program, open, "[") || functionValueFindMatching(program, open, "[", "]") != end-1 {
+			continue
+		}
+		container := ordinaryBuiltinExprType(program, before, start, open)
+		if ordinaryBuiltinSliceExpression(program, open+1, end-1) {
+			return ordinarySlicedType(program, container)
+		}
+		return ordinaryIndexedElementType(program, container)
+	}
 	paren := 0
 	bracket := 0
 	brace := 0
@@ -266,6 +276,82 @@ func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end i
 			brace--
 		} else if paren == 0 && bracket == 0 && brace == 0 && (text == "+" || text == "-" || text == "*" || text == "/" || text == "%" || text == "&" || text == "|" || text == "^" || text == "<<" || text == ">>") {
 			return ordinaryBuiltinExprType(program, before, start, i)
+		}
+	}
+	return ""
+}
+
+func ordinaryBuiltinSliceExpression(program *unit.Program, start int, end int) bool {
+	paren := 0
+	bracket := 0
+	for index := start; index < end; index++ {
+		text := functionValueTokenText(program, index)
+		if text == "(" {
+			paren++
+		} else if text == ")" {
+			paren--
+		} else if text == "[" {
+			bracket++
+		} else if text == "]" {
+			bracket--
+		} else if text == ":" && paren == 0 && bracket == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func ordinarySlicedType(program *unit.Program, typ string) string {
+	underlying := ordinaryUnderlyingType(program, typ, 0)
+	if underlying == "string" || functionValueHasPrefix(underlying, "[]") {
+		return typ
+	}
+	if functionValueHasPrefix(underlying, "*[") {
+		underlying = underlying[1:]
+	}
+	if len(underlying) > 0 && underlying[0] == '[' {
+		return "[]" + ordinaryIndexedElementType(program, underlying)
+	}
+	return ""
+}
+
+func ordinaryIndexedElementType(program *unit.Program, typ string) string {
+	underlying := ordinaryUnderlyingType(program, typ, 0)
+	if functionValueHasPrefix(underlying, "*[") {
+		underlying = underlying[1:]
+	}
+	if underlying == "string" {
+		return "byte"
+	}
+	if functionValueHasPrefix(underlying, "[]") {
+		return underlying[2:]
+	}
+	if functionValueHasPrefix(underlying, "map[") {
+		depth := 0
+		for index := 3; index < len(underlying); index++ {
+			if underlying[index] == '[' {
+				depth++
+			} else if underlying[index] == ']' {
+				depth--
+				if depth == 0 {
+					return underlying[index+1:]
+				}
+			}
+		}
+		return ""
+	}
+	if len(underlying) == 0 || underlying[0] != '[' {
+		return ""
+	}
+	depth := 0
+	for index := 0; index < len(underlying); index++ {
+		if underlying[index] == '[' {
+			depth++
+		} else if underlying[index] == ']' {
+			depth--
+			if depth == 0 {
+				return underlying[index+1:]
+			}
 		}
 	}
 	return ""

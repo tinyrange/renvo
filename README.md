@@ -257,6 +257,31 @@ performance gates, self-hosted frontend corpus, bundled standalone compiler
 checks, and native Windows coverage. Compiler regressions belong in
 `backend/tests/`; every passing regression prints exactly `PASS\n`.
 
+Randomized differential testing compares deterministic, type-correct programs
+under host Go and Renvo. Each seed contains shuffled cycles of arithmetic,
+control flow, arrays and slices, structs and methods, interfaces, maps,
+strings, closures, defer/recover, complex numbers, multiple results, pointers,
+embedding, and short-circuit evaluation. A discrepancy is automatically
+reduced while preserving successful host execution and its Renvo failure
+class:
+
+```sh
+go run ./cmd/renvodiff -seed 1 -count 1000
+go run ./cmd/renvodiff -minimize path/to/reproducer.go
+```
+
+Findings are written below ignored `sandbox/difftest/` directories with the
+original source, minimized source, and both execution results. Long campaigns
+should be placed under an external memory limit, for example with
+`systemd-run --user --wait --pipe -p MemoryMax=4G` on Linux.
+The default keeps one independently generated feature case in each program so
+one unsupported construct cannot mask unrelated discrepancies. Increase
+`-cases` when throughput matters more than isolating each finding.
+Use `-minimize-findings=false` for a fast discovery sweep, then pass selected
+saved sources back through `-minimize` for focused reduction.
+Use `-family expression-tree` (or another named family) to concentrate a
+campaign on one language feature; `-list-families` prints the available names.
+
 Architecture and bring-up notes live in [`backend/docs/`](backend/docs/).
 
 ## License
