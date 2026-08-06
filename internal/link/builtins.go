@@ -247,6 +247,14 @@ func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end i
 		}
 		return functionValueDeclaredFunctionResultType(program, name)
 	}
+	if end-start >= 3 && functionValueTokenEquals(program, end-2, ".") && program.Tokens[end-1].KindLine&255 == unit.TokenIdent {
+		owner := ordinaryBuiltinExprType(program, before, start, end-2)
+		if owner != "" {
+			if field := functionValueStructFieldType(program, functionValueBareType(owner), functionValueTokenText(program, end-1)); field != "" {
+				return field
+			}
+		}
+	}
 	for open := start + 1; open < end; open++ {
 		if !functionValueTokenEquals(program, open, "[") || functionValueFindMatching(program, open, "[", "]") != end-1 {
 			continue

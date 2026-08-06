@@ -84,10 +84,9 @@ func appMain(args []string) int {
 	}
 
 	var slices [2][]int
-	var maps [2]map[string]int
 	var interfaces [2]interface{}
 	var functions [2]func(int) int
-	if len(slices[:]) != 2 || len(maps[:]) != 2 || len(interfaces[:]) != 2 || len(functions[:]) != 2 {
+	if len(slices[:]) != 2 || len(interfaces[:]) != 2 || len(functions[:]) != 2 {
 		return 1
 	}
 

@@ -189,6 +189,10 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 		return empty, false
 	}
 	program.Tokens = append(program.Tokens, unit.MakeToken(unit.TokenEOF, len(program.Text), 0, line))
+	if !lowerMapsCore(&program, transient) {
+		arena.Discard(actionStart, actionEnd)
+		return empty, false
+	}
 	if !lowerFunctionValuesCore(&program, transient) {
 		arena.Discard(actionStart, actionEnd)
 		return empty, false

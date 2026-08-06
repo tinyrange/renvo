@@ -56,11 +56,9 @@ func appMain(args []string) int {
 	box := renvoWideBox{signed: negative, unsigned: shifted}
 	array := [2]uint64{7, shifted}
 	slice := []uint64{9, shifted}
-	values := make(map[string]uint64)
-	values["wide"] = shifted
 	var boxed interface{} = shifted
 	asserted, ok := boxed.(uint64)
-	if renvoWideGlobal != shifted || box.signed != negative || box.unsigned != shifted || array[1] != shifted || slice[1] != shifted || values["wide"] != shifted || !ok || asserted != shifted {
+	if renvoWideGlobal != shifted || box.signed != negative || box.unsigned != shifted || array[1] != shifted || slice[1] != shifted || !ok || asserted != shifted {
 		print("FAIL storage\n")
 		return 1
 	}

@@ -922,6 +922,13 @@ func functionValueCaptures(program *unit.Program, literalStart int, bodyOpen int
 }
 
 func functionValueEnclosingLocalType(program *unit.Program, before int, name string) string {
+	return functionValueEnclosingLocalTypeDepth(program, before, name, 0)
+}
+
+func functionValueEnclosingLocalTypeDepth(program *unit.Program, before int, name string, depth int) string {
+	if depth > 16 {
+		return ""
+	}
 	fnIndex := functionValueEnclosingFunc(program, before)
 	if fnIndex < 0 {
 		return ""
@@ -967,11 +974,25 @@ func functionValueEnclosingLocalType(program *unit.Program, before int, name str
 					callName = functionValueTokenText(program, rhs+2)
 				}
 				if callName != "" {
+					if callName == "make" {
+						open := rhs + 1
+						close := functionValueFindMatchingParen(program, open)
+						starts, ends := ordinaryBuiltinArguments(program, open+1, close)
+						if len(starts) > 0 {
+							return functionValueTokensText(program, starts[0], ends[0])
+						}
+					}
 					if typ := functionValueDeclaredFunctionResultType(program, callName); typ != "" {
 						return typ
 					}
 					if functionValueDeclaredType(program, callName) {
 						return callName
+					}
+				}
+				simpleIdent := rhs+1 >= len(program.Tokens) || functionValueTokenEquals(program, rhs+1, ";") || functionValueTokenEquals(program, rhs+1, "}") || program.Tokens[rhs+1].KindLine>>8 != program.Tokens[rhs].KindLine>>8
+				if simpleIdent {
+					if typ := functionValueEnclosingLocalTypeDepth(program, i, functionValueTokenText(program, rhs), depth+1); typ != "" {
+						return typ
 					}
 				}
 				if typ := functionValueFunctionParamType(program, fn, functionValueTokenText(program, rhs)); typ != "" {
