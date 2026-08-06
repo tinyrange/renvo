@@ -99,8 +99,7 @@ func appMain() int {
 	identityGlobal = pairLeft
 	holder := identityHolder{value: identityGlobal}
 	values := []interface{}{holder.value, pairRight}
-	lookup := map[string]interface{}{"value": pairLeft}
-	if identityGlobal != pairRight || holder.value != pairRight || values[0] != values[1] || lookup["value"] != pairRight {
+	if identityGlobal != pairRight || holder.value != pairRight || values[0] != values[1] {
 		return 6
 	}
 
