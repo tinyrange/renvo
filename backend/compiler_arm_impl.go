@@ -4,6 +4,7 @@
 // unit: arm 56bdc6d05d7f9df4e048af48eeb61e8f2f0f011b6d6a30c36357a619083e2357
 package main
 
+
 func renvoArmAsmAlign(a *renvoAsm) {
 	for len(a.code)%4 != 0 {
 		renvoAsmEmit8(a, 0)
@@ -240,14 +241,6 @@ func renvoArmAsmDivLeftRcxRightRax(a *renvoAsm, mod bool) {
 		renvoArmAsmEmit(a, 0xe0600090|(2<<12)|(9<<8)|0)
 	}
 }
-
-func renvoArmAsmUnsignedDivLeftRcxRightRax(a *renvoAsm, mod bool) {
-	renvoArmAsmMovRegReg(a, 9, 0)
-	renvoArmAsmEmit(a, 0xe730f010|(0<<16)|(0<<8)|2)
-	if mod {
-		renvoArmAsmEmit(a, 0xe0600090|(2<<12)|(9<<8)|0)
-	}
-}
 func renvoArmAsmStoreRaxMemRdxRcxSize(a *renvoAsm, size int) {
 	shift := 3
 	if size == 1 {
@@ -264,346 +257,346 @@ func renvoArmAsmStoreRaxMemRdxRcxSize(a *renvoAsm, size int) {
 }
 
 func renvoArmAsmAddRaxRcx(a *renvoAsm) {
-	renvoArmAsmAddRegReg(a, 0, 0, 2)
+	renvoArmAsmAddRegReg(a,0,0,2)
 }
 
 func renvoArmAsmAddRdxImm(a *renvoAsm, imm int) {
-	renvoArmAsmAddRegImm(a, 1, 1, imm)
+	renvoArmAsmAddRegImm(a,1,1,imm)
 }
 
 func renvoArmAsmAddRdxRcx(a *renvoAsm) {
-	renvoArmAsmAddRegReg(a, 1, 1, 2)
+	renvoArmAsmAddRegReg(a,1,1,2)
 }
 
 func renvoArmAsmAddRegReg(a *renvoAsm, dst int, left int, right int) {
-	renvoArmAsmEmit(a, 0xe0800000|(left<<16)|(dst<<12)|right)
+	renvoArmAsmEmit(a,0xe0800000|(left<<16)|(dst<<12)|right)
 }
 
 func renvoArmAsmAddRegRegShift(a *renvoAsm, dst int, left int, right int, shift int) {
-	renvoArmAsmEmit(a, 0xe0800000|(left<<16)|(dst<<12)|(shift<<7)|right)
+	renvoArmAsmEmit(a,0xe0800000|(left<<16)|(dst<<12)|(shift<<7)|right)
 }
 
 func renvoArmAsmBoolNotRax(a *renvoAsm) {
-	renvoArmAsmCmpRaxImm8(a, 0)
-	renvoArmAsmCsetRax(a, 0)
+	renvoArmAsmCmpRaxImm8(a,0)
+	renvoArmAsmCsetRax(a,0)
 }
 
 func renvoArmAsmCmpRaxImm8(a *renvoAsm, imm int) {
-	renvoArmAsmCmpRegImm(a, 0, imm)
+	renvoArmAsmCmpRegImm(a,0,imm)
 }
 
 func renvoArmAsmCmpRegReg(a *renvoAsm, left int, right int) {
-	renvoArmAsmEmit(a, 0xe1500000|(left<<16)|right)
+	renvoArmAsmEmit(a,0xe1500000|(left<<16)|right)
 }
 
 func renvoArmAsmCsetRax(a *renvoAsm, cond int) {
-	renvoArmAsmEmit(a, 0xe3a00000)
-	renvoArmAsmEmit(a, (cond<<28)|0x03a00001)
+	renvoArmAsmEmit(a,0xe3a00000)
+	renvoArmAsmEmit(a,(cond<<28)|0x03a00001)
 }
 
 func renvoArmAsmDecMemRdx(a *renvoAsm) {
-	renvoArmAsmLoadRegMem(a, 9, 1, 0, 4)
-	renvoArmAsmAddRegImm(a, 9, 9, -1)
-	renvoArmAsmStoreRegMem(a, 9, 1, 0, 4)
+	renvoArmAsmLoadRegMem(a,9,1,0,4)
+	renvoArmAsmAddRegImm(a,9,9,-1)
+	renvoArmAsmStoreRegMem(a,9,1,0,4)
 }
 
 func renvoArmAsmEmit(a *renvoAsm, insn int) {
-	renvoAsmEmit32(a, insn)
+	renvoAsmEmit32(a,insn)
 }
 
 func renvoArmAsmImulRcxImm(a *renvoAsm, imm int) {
-	renvoArmAsmMovRegImm(a, 9, imm)
-	renvoArmAsmMulRegReg(a, 2, 2, 9)
+	renvoArmAsmMovRegImm(a,9,imm)
+	renvoArmAsmMulRegReg(a,2,2,9)
 }
 
 func renvoArmAsmIncMemRdx(a *renvoAsm) {
-	renvoArmAsmLoadRegMem(a, 9, 1, 0, 4)
-	renvoArmAsmAddRegImm(a, 9, 9, 1)
-	renvoArmAsmStoreRegMem(a, 9, 1, 0, 4)
+	renvoArmAsmLoadRegMem(a,9,1,0,4)
+	renvoArmAsmAddRegImm(a,9,9,1)
+	renvoArmAsmStoreRegMem(a,9,1,0,4)
 }
 
 func renvoArmAsmIncRax(a *renvoAsm) {
-	renvoArmAsmAddRegImm(a, 0, 0, 1)
+	renvoArmAsmAddRegImm(a,0,0,1)
 }
 
 func renvoArmAsmIncRcx(a *renvoAsm) {
-	renvoArmAsmAddRegImm(a, 2, 2, 1)
+	renvoArmAsmAddRegImm(a,2,2,1)
 }
 
 func renvoArmAsmJnzLabel(a *renvoAsm, label int) {
-	renvoArmAsmBCondLabel(a, label, 1)
+	renvoArmAsmBCondLabel(a,label,1)
 }
 
 func renvoArmAsmJzLabel(a *renvoAsm, label int) {
-	renvoArmAsmBCondLabel(a, label, 0)
+	renvoArmAsmBCondLabel(a,label,0)
 }
 
 func renvoArmAsmLeaRegStack(a *renvoAsm, dst int, offset int) {
-	renvoArmAsmAddRegImm(a, dst, 11, -offset)
+	renvoArmAsmAddRegImm(a,dst,11,-offset)
 }
 
 func renvoArmAsmLeave(a *renvoAsm) {
-	renvoArmAsmMovRegReg(a, 13, 11)
-	renvoArmAsmEmit(a, 0xe8bd4800)
+	renvoArmAsmMovRegReg(a,13,11)
+	renvoArmAsmEmit(a,0xe8bd4800)
 }
 
 func renvoArmAsmLoadByteRaxIndexRcx(a *renvoAsm) {
-	renvoArmAsmAddRegReg(a, 12, 0, 2)
-	renvoArmAsmLoadRegMem(a, 0, 12, 0, 1)
+	renvoArmAsmAddRegReg(a,12,0,2)
+	renvoArmAsmLoadRegMem(a,0,12,0,1)
 }
 
 func renvoArmAsmLoadQwordRaxIndexRcx8(a *renvoAsm) {
-	renvoArmAsmAddRegRegShift(a, 12, 0, 2, 3)
-	renvoArmAsmLoadRegMem(a, 0, 12, 0, 4)
+	renvoArmAsmAddRegRegShift(a,12,0,2,3)
+	renvoArmAsmLoadRegMem(a,0,12,0,4)
 }
 
 func renvoArmAsmLoadQwordRaxIndexRcxDisp(a *renvoAsm, disp int) {
-	renvoArmAsmAddRegReg(a, 12, 0, 2)
-	renvoArmAsmLoadRegMem(a, 0, 12, disp, 4)
+	renvoArmAsmAddRegReg(a,12,0,2)
+	renvoArmAsmLoadRegMem(a,0,12,disp,4)
 }
 
 func renvoArmAsmLoadRaxBss(a *renvoAsm, bssOff int) {
-	renvoArmAsmAccessRaxBss(a, bssOff, 0xe79f0000|12)
+	renvoArmAsmAccessRaxBss(a,bssOff,0xe79f0000|12)
 }
 
 func renvoArmAsmLoadRaxMemRdxDisp(a *renvoAsm, disp int) {
-	renvoArmAsmLoadRegMem(a, 0, 1, disp, 4)
+	renvoArmAsmLoadRegMem(a,0,1,disp,4)
 }
 
 func renvoArmAsmLoadRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
-	renvoArmAsmLoadRegMem(a, 0, 1, disp, size)
+	renvoArmAsmLoadRegMem(a,0,1,disp,size)
 }
 
 func renvoArmAsmLoadRegStack(a *renvoAsm, dst int, offset int) {
-	renvoArmAsmLoadRegMem(a, dst, 11, -offset, 4)
+	renvoArmAsmLoadRegMem(a,dst,11,-offset,4)
 }
 
 func renvoArmAsmMovR10BssAddr(a *renvoAsm, bssOff int) {
-	renvoArmAsmMovRegAbs(a, 8, bssOff, 1)
+	renvoArmAsmMovRegAbs(a,8,bssOff,1)
 }
 
 func renvoArmAsmMovR8Rax(a *renvoAsm) {
-	renvoArmAsmMovRegReg(a, 5, 0)
+	renvoArmAsmMovRegReg(a,5,0)
 }
 
 func renvoArmAsmMovR9Rax(a *renvoAsm) {
-	renvoArmAsmMovRegReg(a, 6, 0)
+	renvoArmAsmMovRegReg(a,6,0)
 }
 
 func renvoArmAsmMovRaxBssAddr(a *renvoAsm, bssOff int) {
-	renvoArmAsmMovRegAbs(a, 0, bssOff, 1)
+	renvoArmAsmMovRegAbs(a,0,bssOff,1)
 }
 
 func renvoArmAsmMovRaxDataAddr(a *renvoAsm, dataOff int) {
-	renvoArmAsmMovRegAbs(a, 0, dataOff, 0)
+	renvoArmAsmMovRegAbs(a,0,dataOff,0)
 }
 
 func renvoArmAsmMovRaxImm(a *renvoAsm, imm int) {
-	renvoArmAsmMovRegImm(a, 0, imm)
+	renvoArmAsmMovRegImm(a,0,imm)
 }
 
 func renvoArmAsmMovRaxImm64(a *renvoAsm, imm int) {
-	renvoArmAsmMovRaxImm(a, imm)
+	renvoArmAsmMovRaxImm(a,imm)
 }
 
 func renvoArmAsmMovRaxRdx(a *renvoAsm) {
-	renvoArmAsmMovRegReg(a, 0, 1)
+	renvoArmAsmMovRegReg(a,0,1)
 }
 
 func renvoArmAsmMovRcxRax(a *renvoAsm) {
-	renvoArmAsmMovRegReg(a, 2, 0)
+	renvoArmAsmMovRegReg(a,2,0)
 }
 
 func renvoArmAsmMovRcxRdx(a *renvoAsm) {
-	renvoArmAsmMovRegReg(a, 2, 1)
+	renvoArmAsmMovRegReg(a,2,1)
 }
 
 func renvoArmAsmMovRdiRax(a *renvoAsm) {
-	renvoArmAsmMovRegReg(a, 3, 0)
+	renvoArmAsmMovRegReg(a,3,0)
 }
 
 func renvoArmAsmMovRdxImm(a *renvoAsm, imm int) {
-	renvoArmAsmMovRegImm(a, 1, imm)
+	renvoArmAsmMovRegImm(a,1,imm)
 }
 
 func renvoArmAsmMovRdxRax(a *renvoAsm) {
-	renvoArmAsmMovRegReg(a, 1, 0)
+	renvoArmAsmMovRegReg(a,1,0)
 }
 
 func renvoArmAsmMovRsiRax(a *renvoAsm) {
-	renvoArmAsmMovRegReg(a, 4, 0)
+	renvoArmAsmMovRegReg(a,4,0)
 }
 
 func renvoArmAsmMulRegReg(a *renvoAsm, dst int, left int, right int) {
-	renvoArmAsmEmit(a, 0xe0000090|(dst<<16)|(right<<8)|left)
+	renvoArmAsmEmit(a,0xe0000090|(dst<<16)|(right<<8)|left)
 }
 
 func renvoArmAsmNegRax(a *renvoAsm) {
-	renvoArmAsmEmit(a, 0xe2600000)
+	renvoArmAsmEmit(a,0xe2600000)
 }
 
 func renvoArmAsmPopRax(a *renvoAsm) {
-	renvoArmAsmPopReg(a, 0)
+	renvoArmAsmPopReg(a,0)
 }
 
 func renvoArmAsmPopRcx(a *renvoAsm) {
-	renvoArmAsmPopReg(a, 2)
+	renvoArmAsmPopReg(a,2)
 }
 
 func renvoArmAsmPopRdi(a *renvoAsm) {
-	renvoArmAsmPopReg(a, 3)
+	renvoArmAsmPopReg(a,3)
 }
 
 func renvoArmAsmPopRdx(a *renvoAsm) {
-	renvoArmAsmPopReg(a, 1)
+	renvoArmAsmPopReg(a,1)
 }
 
 func renvoArmAsmPopReg(a *renvoAsm, reg int) {
-	renvoArmAsmEmit(a, 0xe49d0004|(reg<<12))
+	renvoArmAsmEmit(a,0xe49d0004|(reg<<12))
 }
 
 func renvoArmAsmPopRsi(a *renvoAsm) {
-	renvoArmAsmPopReg(a, 4)
+	renvoArmAsmPopReg(a,4)
 }
 
 func renvoArmAsmPushImm(a *renvoAsm, imm int) {
-	renvoArmAsmMovRegImm(a, 9, imm)
-	renvoArmAsmPushReg(a, 9)
+	renvoArmAsmMovRegImm(a,9,imm)
+	renvoArmAsmPushReg(a,9)
 }
 
 func renvoArmAsmPushRax(a *renvoAsm) {
-	renvoArmAsmPushReg(a, 0)
+	renvoArmAsmPushReg(a,0)
 }
 
 func renvoArmAsmPushRcx(a *renvoAsm) {
-	renvoArmAsmPushReg(a, 2)
+	renvoArmAsmPushReg(a,2)
 }
 
 func renvoArmAsmPushRdx(a *renvoAsm) {
-	renvoArmAsmPushReg(a, 1)
+	renvoArmAsmPushReg(a,1)
 }
 
 func renvoArmAsmPushReg(a *renvoAsm, reg int) {
-	renvoArmAsmEmit(a, 0xe52d0004|(reg<<12))
+	renvoArmAsmEmit(a,0xe52d0004|(reg<<12))
 }
 
 func renvoArmAsmRet(a *renvoAsm) {
-	renvoArmAsmEmit(a, 0xe12fff1e)
+	renvoArmAsmEmit(a,0xe12fff1e)
 }
 
 func renvoArmAsmSarRaxImm(a *renvoAsm, imm int) {
-	renvoArmAsmEmit(a, 0xe1a00040|(0<<12)|(imm<<7)|0)
+	renvoArmAsmEmit(a,0xe1a00040|(0<<12)|(imm<<7)|0)
 }
 
 func renvoArmAsmShlRaxImm(a *renvoAsm, imm int) {
-	renvoArmAsmEmit(a, 0xe1a00000|(0<<12)|(imm<<7)|0)
+	renvoArmAsmEmit(a,0xe1a00000|(0<<12)|(imm<<7)|0)
 }
 
 func renvoArmAsmShlRcxImm(a *renvoAsm, imm int) {
-	renvoArmAsmEmit(a, 0xe1a00000|(2<<12)|(imm<<7)|2)
+	renvoArmAsmEmit(a,0xe1a00000|(2<<12)|(imm<<7)|2)
 }
 
 func renvoArmAsmShrRaxImm(a *renvoAsm, imm int) {
-	renvoArmAsmEmit(a, 0xe1a00020|(0<<12)|(imm<<7)|0)
+	renvoArmAsmEmit(a,0xe1a00020|(0<<12)|(imm<<7)|0)
 }
 
 func renvoArmAsmStoreAlMemRdxRcx1(a *renvoAsm) {
-	renvoArmAsmAddRegReg(a, 12, 1, 2)
-	renvoArmAsmStoreRegMem(a, 0, 12, 0, 1)
+	renvoArmAsmAddRegReg(a,12,1,2)
+	renvoArmAsmStoreRegMem(a,0,12,0,1)
 }
 
 func renvoArmAsmStoreRaxBss(a *renvoAsm, bssOff int) {
-	renvoArmAsmAccessRaxBss(a, bssOff, 0xe78f0000|12)
+	renvoArmAsmAccessRaxBss(a,bssOff,0xe78f0000|12)
 }
 
 func renvoArmAsmStoreRaxMemRdxDisp(a *renvoAsm, disp int) {
-	renvoArmAsmStoreRegMem(a, 0, 1, disp, 4)
+	renvoArmAsmStoreRegMem(a,0,1,disp,4)
 }
 
 func renvoArmAsmStoreRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
-	renvoArmAsmStoreRegMem(a, 0, 1, disp, size)
+	renvoArmAsmStoreRegMem(a,0,1,disp,size)
 }
 
 func renvoArmAsmStoreRaxMemRdxRcx8(a *renvoAsm) {
-	renvoArmAsmAddRegRegShift(a, 12, 1, 2, 3)
-	renvoArmAsmStoreRegMem(a, 0, 12, 0, 4)
+	renvoArmAsmAddRegRegShift(a,12,1,2,3)
+	renvoArmAsmStoreRegMem(a,0,12,0,4)
 }
 
 func renvoArmAsmStoreRegStack(a *renvoAsm, src int, offset int) {
-	renvoArmAsmStoreRegMem(a, src, 11, -offset, 4)
+	renvoArmAsmStoreRegMem(a,src,11,-offset,4)
 }
 
 func renvoArmAsmStoreSliceStack(a *renvoAsm, offset int) {
-	renvoArmAsmStoreRegStack(a, 0, offset)
-	renvoArmAsmStoreRegStack(a, 1, offset-8)
-	renvoArmAsmStoreRegStack(a, 2, offset-16)
+	renvoArmAsmStoreRegStack(a,0,offset)
+	renvoArmAsmStoreRegStack(a,1,offset-8)
+	renvoArmAsmStoreRegStack(a,2,offset-16)
 }
 
 func renvoArmAsmSubRaxRcx(a *renvoAsm) {
-	renvoArmAsmSubRegReg(a, 0, 0, 2)
+	renvoArmAsmSubRegReg(a,0,0,2)
 }
 
 func renvoArmAsmSubRegReg(a *renvoAsm, dst int, left int, right int) {
-	renvoArmAsmEmit(a, 0xe0400000|(left<<16)|(dst<<12)|right)
+	renvoArmAsmEmit(a,0xe0400000|(left<<16)|(dst<<12)|right)
 }
 
 func renvoArmAsmSyscall(a *renvoAsm) {
-	renvoArmAsmMovRegReg(a, 7, 0)
-	renvoArmAsmMovRegReg(a, 9, 1)
-	renvoArmAsmMovRegReg(a, 0, 3)
-	renvoArmAsmMovRegReg(a, 1, 4)
-	renvoArmAsmMovRegReg(a, 2, 9)
-	renvoArmAsmMovRegReg(a, 3, 8)
-	renvoArmAsmMovRegReg(a, 4, 8)
-	renvoArmAsmMovRegImm(a, 5, 0)
-	renvoArmAsmEmit(a, 0xef000000)
+	renvoArmAsmMovRegReg(a,7,0)
+	renvoArmAsmMovRegReg(a,9,1)
+	renvoArmAsmMovRegReg(a,0,3)
+	renvoArmAsmMovRegReg(a,1,4)
+	renvoArmAsmMovRegReg(a,2,9)
+	renvoArmAsmMovRegReg(a,3,8)
+	renvoArmAsmMovRegReg(a,4,8)
+	renvoArmAsmMovRegImm(a,5,0)
+	renvoArmAsmEmit(a,0xef000000)
 }
 
 func renvoArmAsmAccessRaxBss(a *renvoAsm, bssOff int, insn int) {
-	at := len(a.code)
-	renvoAsmEmit32(a, 0xe3000000|(12<<12))
-	renvoAsmEmit32(a, 0xe3400000|(12<<12))
-	renvoAsmEmit32(a, insn)
-	renvoAsmAddAbsReloc(a, at, bssOff, 1)
+	at:=len(a.code)
+	renvoAsmEmit32(a,0xe3000000|(12<<12))
+	renvoAsmEmit32(a,0xe3400000|(12<<12))
+	renvoAsmEmit32(a,insn)
+	renvoAsmAddAbsReloc(a, at,bssOff,1)
 }
 
 func renvoArmAsmBCondLabel(a *renvoAsm, label int, cond int) {
-	at := len(a.code)
-	renvoArmAsmEmit(a, (cond<<28)|0x0a000000)
-	renvoAsmAddReloc(a, at, label)
+	at:=len(a.code)
+	renvoArmAsmEmit(a,(cond<<28)|0x0a000000)
+	renvoAsmAddReloc(a, at,label)
 }
 
 func renvoArmAsmCallLabel(a *renvoAsm, label int) {
-	at := len(a.code)
-	renvoArmAsmEmit(a, 0xeb000000)
-	renvoAsmAddReloc(a, at, label)
+	at:=len(a.code)
+	renvoArmAsmEmit(a,0xeb000000)
+	renvoAsmAddReloc(a, at,label)
 }
 
 func renvoArmAsmCmpRcxRaxSet(a *renvoAsm, setcc int) {
-	renvoArmAsmCmpRegReg(a, 2, 0)
-	cond := renvoArmCondFromSetcc(setcc)
-	renvoArmAsmCsetRax(a, cond)
+	renvoArmAsmCmpRegReg(a,2,0)
+	cond:=renvoArmCondFromSetcc(setcc)
+	renvoArmAsmCsetRax(a,cond)
 }
 
 func renvoArmAsmJmpLabel(a *renvoAsm, label int) {
-	at := len(a.code)
-	renvoArmAsmEmit(a, 0xea000000)
-	renvoAsmAddReloc(a, at, label)
+	at:=len(a.code)
+	renvoArmAsmEmit(a,0xea000000)
+	renvoAsmAddReloc(a, at,label)
 }
 
 func renvoArmAsmMovRegAbs(a *renvoAsm, reg int, off int, kind int) {
-	at := len(a.code)
-	renvoAsmEmit32(a, 0xe3000000|(reg<<12))
-	renvoAsmEmit32(a, 0xe3400000|(reg<<12))
-	renvoAsmEmit32(a, 0xe08f0000|(reg<<12)|reg)
-	renvoAsmAddAbsReloc(a, at, off, kind)
+	at:=len(a.code)
+	renvoAsmEmit32(a,0xe3000000|(reg<<12))
+	renvoAsmEmit32(a,0xe3400000|(reg<<12))
+	renvoAsmEmit32(a,0xe08f0000|(reg<<12)|reg)
+	renvoAsmAddAbsReloc(a, at,off,kind)
 }
 
 func renvoArmAsmPatchMovRegImmAt(a *renvoAsm, at int, reg int, imm int) {
-	part := imm & 65535
-	renvoPut32At(a.code, at, 0xe3000000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
-	part = (imm >> 16) & 65535
-	renvoPut32At(a.code, at+4, 0xe3400000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
+	part:=imm&65535
+	renvoPut32At(a.code, at,0xe3000000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
+	part=(imm>>16)&65535
+	renvoPut32At(a.code, at+4,0xe3400000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
 }
 
 // Generated definition-owned relocation finalizer.
@@ -612,9 +605,7 @@ func rtgArmPatchRelocations(out *renvoAsm) {
 		at := int(renvo_runtime_UnsafeInt32At(out.relocs, i)) & 2147483647
 		label := int(renvo_runtime_UnsafeInt32At(out.relocs, i+1)) & 2147483647
 		target := renvoAsmLabelPosition(out, label)
-		if target < 0 {
-			continue
-		}
+		if target < 0 { continue }
 		insn := renvoGet32At(out.code, at)
 
 		if (insn & 0x0e000000) == 0x0a000000 {
