@@ -44,6 +44,50 @@ func TestGenerateNamedFamily(t *testing.T) {
 	}
 }
 
+func TestGenerateSwarmIsDeterministicAndValid(t *testing.T) {
+	first, err := GenerateSwarm(19, 40)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := GenerateSwarm(19, 40)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Fatal("same swarm seed generated different source")
+	}
+	if err := validateHostSource(first); err != nil {
+		t.Fatalf("generated swarm did not type check: %v\n%s", err, first)
+	}
+}
+
+func TestGenerationPoliciesAreDeterministicAndValid(t *testing.T) {
+	for _, policy := range Policies() {
+		first, err := GeneratePolicy(23, 90, policy)
+		if err != nil {
+			t.Fatalf("%s: %v", policy, err)
+		}
+		second, err := GeneratePolicy(23, 90, policy)
+		if err != nil {
+			t.Fatalf("%s repeat: %v", policy, err)
+		}
+		if !bytes.Equal(first, second) {
+			t.Fatalf("%s generated different source for the same seed", policy)
+		}
+		if err := validateHostSource(first); err != nil {
+			t.Fatalf("%s did not type check: %v\n%s", policy, err, first)
+		}
+	}
+	if _, err := GeneratePolicy(1, 1, "missing"); err == nil {
+		t.Fatal("unknown generation policy was accepted")
+	}
+	if source, err := GenerateFamilyPolicy(29, 4, "policy-materialization", "materialize-interface"); err != nil {
+		t.Fatal(err)
+	} else if err := validateHostSource(source); err != nil {
+		t.Fatalf("family policy did not type check: %v\n%s", err, source)
+	}
+}
+
 func TestGeneratedFamiliesTypeCheck(t *testing.T) {
 	for _, family := range caseFamilyNames {
 		for seed := uint64(1); seed <= 8; seed++ {
@@ -54,6 +98,33 @@ func TestGeneratedFamiliesTypeCheck(t *testing.T) {
 			if err := validateHostSource(source); err != nil {
 				t.Fatalf("%s seed %d did not type check: %v\n%s", family, seed, err, source)
 			}
+		}
+	}
+}
+
+func TestMetamorphicVariantsAreDistinctAndValid(t *testing.T) {
+	source, err := Generate(31, 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	variants, err := Variants(source, 31)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(variants) != 4 {
+		t.Fatalf("variant count = %d, want 4", len(variants))
+	}
+	names := make(map[string]bool)
+	for _, variant := range variants {
+		if names[variant.Name] {
+			t.Fatalf("duplicate variant name %q", variant.Name)
+		}
+		names[variant.Name] = true
+		if bytes.Equal(source, variant.Source) {
+			t.Fatalf("%s did not change the source", variant.Name)
+		}
+		if err := validateHostSource(variant.Source); err != nil {
+			t.Fatalf("%s did not type check: %v\n%s", variant.Name, err, variant.Source)
 		}
 	}
 }
@@ -103,5 +174,26 @@ func main() { print(broken()) }
 	}
 	if bytes.Contains(minimized, []byte("irrelevant")) {
 		t.Fatalf("irrelevant declaration remains:\n%s", minimized)
+	}
+}
+
+func TestMinimizeReplacesConditionalWithInterestingBranch(t *testing.T) {
+	source := []byte(`package main
+func main() {
+	if 1 == 2 {
+		print("unused")
+	} else {
+		print("broken")
+	}
+}
+`)
+	minimized, err := Minimize(source, func(candidate []byte) (bool, error) {
+		return bytes.Contains(candidate, []byte(`print("broken")`)), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(minimized, []byte("if ")) || bytes.Contains(minimized, []byte("unused")) {
+		t.Fatalf("conditional structure remains:\n%s", minimized)
 	}
 }

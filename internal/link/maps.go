@@ -257,7 +257,8 @@ func mapLowerAssignmentEdits(program *unit.Program, specs []mapLowerSpec, edits 
 			keyName := "__renvo_map_key_" + name
 			old := "__renvo_map_old_" + name
 			value := "__renvo_map_value_" + name
-			replacement := "if true {" + target + " := " + base + ";" + keyName + " := " + key + ";" + old + " := " + specs[targetSpecs[0]].get + "(" + target + "," + keyName + ");" + value + " := " + rhs + ";" + specs[targetSpecs[0]].set + "(" + target + "," + keyName + "," + old + compound + value + ");}"
+			valueType := specs[targetSpecs[0]].value
+			replacement := "if true {" + target + " := " + base + ";" + keyName + " := " + key + ";" + old + " := " + specs[targetSpecs[0]].get + "(" + target + "," + keyName + ");var " + value + " " + valueType + " = " + rhs + ";" + specs[targetSpecs[0]].set + "(" + target + "," + keyName + "," + old + compound + value + ");}"
 			edits = append(edits, functionValueTokenRangeEdit(program, start, end, replacement))
 			mapLowerCover(covered, start, end)
 			assign = end - 1
@@ -293,6 +294,10 @@ func mapLowerAssignmentEdits(program *unit.Program, specs []mapLowerSpec, edits 
 			value, ok := mapLowerLiteralValue(program, specs, rightStarts[i], rightEnds[i], expected, literals)
 			if !ok {
 				value = mapLowerReadText(program, specs, rightStarts[i], rightEnds[i])
+			}
+			sourceType := ordinaryBuiltinExprType(program, assign, rightStarts[i], rightEnds[i])
+			if expected != "" && sourceType != "" && len(rightStarts) == len(leftStarts) && compactMapLowerType(sourceType) != compactMapLowerType(expected) {
+				value = expected + "(" + value + ")"
 			}
 			replacement += value
 		}

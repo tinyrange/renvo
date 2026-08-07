@@ -286,32 +286,40 @@ func renvoWasm32EmitWideBinaryStack(g *renvoLinearGen, dest int, left int, right
 	if g.c.renvoTarget == renvoTargetVM32 {
 		return renvoWasm32EmitWideBinaryPortable(g, dest, left, right, tok, signed)
 	}
+	if renvoTokStarts2(g.prog, tok, '&', '^') {
+		ones := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+		renvoAsmStoreStackImm(&g.asm, ones, -1)
+		renvoAsmStoreStackImm(&g.asm, ones-g.c.renvoNativeIntSize, -1)
+		renvoWasm32EmitWideOp(&g.asm, renvoWasm32OpWideBinary, dest, right, ones, 0x85)
+		renvoWasm32EmitWideOp(&g.asm, renvoWasm32OpWideBinary, dest, left, dest, 0x83)
+		return true
+	}
 	op := 0
-	if renvoTokCharIs(g.prog, tok, '+') {
+	if renvoTokStartsWith(g.prog, tok, '+') {
 		op = 0x7c
-	} else if renvoTokCharIs(g.prog, tok, '-') {
+	} else if renvoTokStartsWith(g.prog, tok, '-') {
 		op = 0x7d
-	} else if renvoTokCharIs(g.prog, tok, '*') {
+	} else if renvoTokStartsWith(g.prog, tok, '*') {
 		op = 0x7e
-	} else if renvoTokCharIs(g.prog, tok, '/') {
+	} else if renvoTokStartsWith(g.prog, tok, '/') {
 		op = 0x80
 		if signed {
 			op = 0x7f
 		}
-	} else if renvoTokCharIs(g.prog, tok, '%') {
+	} else if renvoTokStartsWith(g.prog, tok, '%') {
 		op = 0x82
 		if signed {
 			op = 0x81
 		}
-	} else if renvoTokCharIs(g.prog, tok, '&') {
+	} else if renvoTokStartsWith(g.prog, tok, '&') {
 		op = 0x83
-	} else if renvoTokCharIs(g.prog, tok, '|') {
+	} else if renvoTokStartsWith(g.prog, tok, '|') {
 		op = 0x84
-	} else if renvoTokCharIs(g.prog, tok, '^') {
+	} else if renvoTokStartsWith(g.prog, tok, '^') {
 		op = 0x85
-	} else if renvoTok2Is(g.prog, tok, '<', '<') {
+	} else if renvoTokStarts2(g.prog, tok, '<', '<') {
 		op = 0x86
-	} else if renvoTok2Is(g.prog, tok, '>', '>') {
+	} else if renvoTokStarts2(g.prog, tok, '>', '>') {
 		op = 0x88
 		if signed {
 			op = 0x87
@@ -335,27 +343,27 @@ func renvoWasm32EmitWideBinaryStack(g *renvoLinearGen, dest int, left int, right
 }
 
 func renvoWasm32EmitWideBinaryPortable(g *renvoLinearGen, dest int, left int, right int, tok int, signed bool) bool {
-	if renvoTokCharIs(g.prog, tok, '+') {
+	if renvoTokStartsWith(g.prog, tok, '+') {
 		renvoEmitWideAddStack(g, dest, left, right)
 		return true
 	}
-	if renvoTokCharIs(g.prog, tok, '-') {
+	if renvoTokStartsWith(g.prog, tok, '-') {
 		renvoEmitWideSubStack(g, dest, left, right)
 		return true
 	}
-	if renvoTokCharIs(g.prog, tok, '*') {
+	if renvoTokStartsWith(g.prog, tok, '*') {
 		renvoEmitWideMulStack(g, dest, left, right)
 		return true
 	}
-	if renvoTokCharIs(g.prog, tok, '/') || renvoTokCharIs(g.prog, tok, '%') {
-		renvoEmitWideDivStack(g, dest, left, right, signed, renvoTokCharIs(g.prog, tok, '%'))
+	if renvoTokStartsWith(g.prog, tok, '/') || renvoTokStartsWith(g.prog, tok, '%') {
+		renvoEmitWideDivStack(g, dest, left, right, signed, renvoTokStartsWith(g.prog, tok, '%'))
 		return true
 	}
-	if renvoTok2Is(g.prog, tok, '<', '<') || renvoTok2Is(g.prog, tok, '>', '>') {
-		renvoEmitWideShiftStack(g, dest, left, right, renvoTok2Is(g.prog, tok, '>', '>'), signed)
+	if renvoTokStarts2(g.prog, tok, '<', '<') || renvoTokStarts2(g.prog, tok, '>', '>') {
+		renvoEmitWideShiftStack(g, dest, left, right, renvoTokStarts2(g.prog, tok, '>', '>'), signed)
 		return true
 	}
-	if renvoTokCharIs(g.prog, tok, '&') || renvoTokCharIs(g.prog, tok, '|') || renvoTokCharIs(g.prog, tok, '^') {
+	if renvoTokStartsWith(g.prog, tok, '&') || renvoTokStartsWith(g.prog, tok, '|') || renvoTokStartsWith(g.prog, tok, '^') {
 		for at := 0; at < renvoBackendValueSlotSize; at += g.c.renvoNativeIntSize {
 			renvoAsmLoadPrimaryStack(&g.asm, right-at)
 			renvoAsmLoadTertiaryStack(&g.asm, left-at)
@@ -406,6 +414,98 @@ func renvoWasm32EmitWideCompareStack(g *renvoLinearGen, left int, right int, tok
 	}
 	renvoWasm32EmitWideOp(&g.asm, renvoWasm32OpWideCompare, 0, left, right, op)
 	return true
+}
+
+func renvoEmitVM32WideShiftBy(g *renvoLinearGen, count int, opcode int) {
+	renvoAsmLoadTertiaryStack(&g.asm, count)
+	renvoWasm32EmitRegReg(&g.asm, opcode, renvoWasm32RegRax, renvoWasm32RegRcx)
+}
+
+func renvoEmitVM32WideShiftStack(g *renvoLinearGen, dest int, left int, count int, right bool, signed bool) {
+	renvoEmitCopyStackToStack(g, left, dest, renvoBackendValueSlotSize)
+	large := renvoAsmNewLabel(&g.asm)
+	atLeastWord := renvoAsmNewLabel(&g.asm)
+	done := renvoAsmNewLabel(&g.asm)
+	renvoAsmLoadPrimaryStack(&g.asm, count-g.c.renvoNativeIntSize)
+	renvoAsmJnzPrimary(&g.asm, large)
+	// A count whose low word has its sign bit set is necessarily at least 2^31.
+	renvoAsmJcmpStackImm(&g.asm, count, 0, large, 0x9c)
+	renvoAsmJcmpStackImm(&g.asm, count, 32, atLeastWord, 0x9d)
+	renvoAsmLoadPrimaryStack(&g.asm, count)
+	renvoAsmJzPrimary(&g.asm, done)
+	inverse := renvoAddUnnamedLocal(g, renvoTypeInt)
+	renvoAsmPrimaryImm(&g.asm, 32)
+	renvoAsmLoadTertiaryStack(&g.asm, count)
+	renvoAsmSubPrimaryTertiary(&g.asm)
+	renvoAsmStorePrimaryStack(&g.asm, inverse)
+	if right {
+		renvoAsmLoadPrimaryStack(&g.asm, left)
+		renvoEmitVM32WideShiftBy(g, count, renvoWasm32OpShrUnsignedRegReg)
+		renvoAsmStorePrimaryStack(&g.asm, dest)
+		renvoAsmLoadPrimaryStack(&g.asm, left-g.c.renvoNativeIntSize)
+		renvoEmitVM32WideShiftBy(g, inverse, renvoWasm32OpShlRegReg)
+		renvoAsmLoadTertiaryStack(&g.asm, dest)
+		renvoWasm32EmitRegReg(&g.asm, renvoWasm32OpOrRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+		renvoAsmStorePrimaryStack(&g.asm, dest)
+		renvoAsmLoadPrimaryStack(&g.asm, left-g.c.renvoNativeIntSize)
+		opcode := renvoWasm32OpShrUnsignedRegReg
+		if signed {
+			opcode = renvoWasm32OpShrRegReg
+		}
+		renvoEmitVM32WideShiftBy(g, count, opcode)
+		renvoAsmStorePrimaryStack(&g.asm, dest-g.c.renvoNativeIntSize)
+	} else {
+		renvoAsmLoadPrimaryStack(&g.asm, left-g.c.renvoNativeIntSize)
+		renvoEmitVM32WideShiftBy(g, count, renvoWasm32OpShlRegReg)
+		renvoAsmStorePrimaryStack(&g.asm, dest-g.c.renvoNativeIntSize)
+		renvoAsmLoadPrimaryStack(&g.asm, left)
+		renvoEmitVM32WideShiftBy(g, inverse, renvoWasm32OpShrUnsignedRegReg)
+		renvoAsmLoadTertiaryStack(&g.asm, dest-g.c.renvoNativeIntSize)
+		renvoWasm32EmitRegReg(&g.asm, renvoWasm32OpOrRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+		renvoAsmStorePrimaryStack(&g.asm, dest-g.c.renvoNativeIntSize)
+		renvoAsmLoadPrimaryStack(&g.asm, left)
+		renvoEmitVM32WideShiftBy(g, count, renvoWasm32OpShlRegReg)
+		renvoAsmStorePrimaryStack(&g.asm, dest)
+	}
+	renvoAsmJmpLabel(&g.asm, done)
+	renvoAsmMarkLabel(&g.asm, atLeastWord)
+	renvoAsmJcmpStackImm(&g.asm, count, 64, large, 0x9d)
+	renvoAsmLoadPrimaryStack(&g.asm, count)
+	renvoWasm32EmitRegImm(&g.asm, renvoWasm32OpAddRegImm, renvoWasm32RegRax, -32)
+	renvoAsmStorePrimaryStack(&g.asm, inverse)
+	if right {
+		renvoAsmLoadPrimaryStack(&g.asm, left-g.c.renvoNativeIntSize)
+		opcode := renvoWasm32OpShrUnsignedRegReg
+		if signed {
+			opcode = renvoWasm32OpShrRegReg
+		}
+		renvoEmitVM32WideShiftBy(g, inverse, opcode)
+		renvoAsmStorePrimaryStack(&g.asm, dest)
+		if signed {
+			renvoAsmLoadPrimaryStack(&g.asm, left-g.c.renvoNativeIntSize)
+			renvoAsmSarPrimaryImm(&g.asm, 31)
+			renvoAsmStorePrimaryStack(&g.asm, dest-g.c.renvoNativeIntSize)
+		} else {
+			renvoAsmStoreStackImm(&g.asm, dest-g.c.renvoNativeIntSize, 0)
+		}
+	} else {
+		renvoAsmLoadPrimaryStack(&g.asm, left)
+		renvoEmitVM32WideShiftBy(g, inverse, renvoWasm32OpShlRegReg)
+		renvoAsmStorePrimaryStack(&g.asm, dest-g.c.renvoNativeIntSize)
+		renvoAsmStoreStackImm(&g.asm, dest, 0)
+	}
+	renvoAsmJmpLabel(&g.asm, done)
+	renvoAsmMarkLabel(&g.asm, large)
+	if right && signed {
+		renvoAsmLoadPrimaryStack(&g.asm, left-g.c.renvoNativeIntSize)
+		renvoAsmSarPrimaryImm(&g.asm, 31)
+		renvoAsmStorePrimaryStack(&g.asm, dest)
+		renvoAsmStorePrimaryStack(&g.asm, dest-g.c.renvoNativeIntSize)
+	} else {
+		renvoAsmStoreStackImm(&g.asm, dest, 0)
+		renvoAsmStoreStackImm(&g.asm, dest-g.c.renvoNativeIntSize, 0)
+	}
+	renvoAsmMarkLabel(&g.asm, done)
 }
 
 func renvoWasm32EmitWideComparePortable(g *renvoLinearGen, left int, right int, tok int, signed bool) bool {

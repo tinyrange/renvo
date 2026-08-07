@@ -21,7 +21,22 @@ func Minimize(source []byte, predicate Predicate) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	interesting, err := predicate(current)
+	type predicateResult struct {
+		interesting bool
+	}
+	results := make(map[string]predicateResult)
+	evaluate := func(candidate []byte) (bool, error) {
+		key := string(candidate)
+		if result, ok := results[key]; ok {
+			return result.interesting, nil
+		}
+		interesting, predicateErr := predicate(candidate)
+		if predicateErr == nil {
+			results[key] = predicateResult{interesting: interesting}
+		}
+		return interesting, predicateErr
+	}
+	interesting, err := evaluate(current)
 	if err != nil {
 		return nil, err
 	}
@@ -31,14 +46,14 @@ func Minimize(source []byte, predicate Predicate) ([]byte, error) {
 
 	for {
 		changed := false
-		for _, phase := range []func([]byte) []sourceEdit{deletionEdits, expressionEdits} {
+		for _, phase := range []func([]byte) []sourceEdit{deletionEdits, structuralEdits, expressionEdits} {
 			for _, edit := range phase(current) {
 				candidate := applyEdit(current, edit)
 				formatted, formatErr := format.Source(candidate)
 				if formatErr != nil || !sourceIsSimpler(formatted, current) {
 					continue
 				}
-				keep, predicateErr := predicate(formatted)
+				keep, predicateErr := evaluate(formatted)
 				if predicateErr != nil {
 					continue
 				}
@@ -56,6 +71,35 @@ func Minimize(source []byte, predicate Predicate) ([]byte, error) {
 			return current, nil
 		}
 	}
+}
+
+// structuralEdits preserve Go syntax while discarding control-flow and value
+// construction structure. The predicate remains responsible for rejecting
+// candidates that no longer type check or reproduce the discrepancy.
+func structuralEdits(source []byte) []sourceEdit {
+	fileSet := token.NewFileSet()
+	file, err := parser.ParseFile(fileSet, "main.go", source, parser.SkipObjectResolution)
+	if err != nil {
+		return nil
+	}
+	var edits []sourceEdit
+	ast.Inspect(file, func(node ast.Node) bool {
+		switch value := node.(type) {
+		case *ast.IfStmt:
+			edits = append(edits, nodeSourceEdit(fileSet, source, value.Body, value, 2))
+			if value.Else != nil {
+				edits = append(edits, nodeSourceEdit(fileSet, source, value.Else, value, 2))
+			}
+		case *ast.CompositeLit:
+			if value.Type != nil && len(value.Elts) != 0 {
+				start, end := offset(fileSet, value.Type.Pos()), offset(fileSet, value.Type.End())
+				edits = append(edits, nodeEdit(fileSet, value, string(source[start:end])+"{}", 3))
+			}
+		}
+		return true
+	})
+	sortEdits(edits)
+	return edits
 }
 
 func sourceIsSimpler(candidate, current []byte) bool {
@@ -129,9 +173,9 @@ func expressionEdits(source []byte) []sourceEdit {
 			var replacements []string
 			switch value.Kind {
 			case token.INT:
-				replacements = []string{"0", "1"}
+				replacements = []string{"0", "1", "-1"}
 			case token.FLOAT:
-				replacements = []string{"0.0", "1.0"}
+				replacements = []string{"0.0", "1.0", "-1.0"}
 			case token.IMAG:
 				replacements = []string{"0i", "1i"}
 			case token.CHAR:
@@ -148,6 +192,15 @@ func expressionEdits(source []byte) []sourceEdit {
 		case *ast.ParenExpr:
 			edits = append(edits, nodeSourceEdit(fileSet, source, value.X, expression, 3))
 		case *ast.UnaryExpr:
+			edits = append(edits, nodeSourceEdit(fileSet, source, value.X, expression, 3))
+		case *ast.CallExpr:
+			for _, argument := range value.Args {
+				edits = append(edits, nodeSourceEdit(fileSet, source, argument, expression, 3))
+			}
+		case *ast.IndexExpr:
+			edits = append(edits, nodeSourceEdit(fileSet, source, value.X, expression, 3))
+			edits = append(edits, nodeSourceEdit(fileSet, source, value.Index, expression, 3))
+		case *ast.SelectorExpr:
 			edits = append(edits, nodeSourceEdit(fileSet, source, value.X, expression, 3))
 		}
 		return true
