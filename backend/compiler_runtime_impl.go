@@ -573,7 +573,7 @@ func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int
 	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
 		return renvoAmd64EmitKernelLinkStaticCall(g, fn, wordCount)
 	}
-	if renvoPreparedBackend != 0 && targetIsKernelModule(g.c) {
+	if renvoPreparedBackend != 0 {
 		importID := renvoAsmAddKernelImport(
 			&g.asm, g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
 		if importID < 0 {
@@ -611,8 +611,7 @@ func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int
 // the call was emitted.
 func renvoEmitTargetStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) int {
 	renvoNonNil(g, fn)
-	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-		renvoPreparedBackend != 0 && targetIsKernelModule(g.c) {
+	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 || renvoPreparedBackend != 0 {
 		if !renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "kernel") {
 			return 0
 		}

@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "a1f6a10dbad01460c2a81afb635a4604bc8b63fd2c58e02e50c7e76f41dab8f3"
+const CompilerSourceDigest = "18fff17c72645a06c4c78db480b68ac70c1c50a597ed4010bc4e9d3e758719fe"
 
 // source: backend/compiler_common_impl.go
 
@@ -286,8 +286,7 @@ a.symbolName = symbolName
 a.staticImports = staticImports
 a.darwinImports = darwinImports
 a.data = data
-if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-renvoPreparedBackend != 0 && targetIsKernelModule(a.c) {
+if renvoFixedTarget == renvoTargetLinuxKernelAmd64 || renvoPreparedBackend != 0 {
 a.kernelImportNames = make([]byte, 0, 1024)
 a.kernelImportOffsets = make([]int, 0, 128)
 }
@@ -11739,7 +11738,7 @@ return false
 }
 wordCount += words
 if fn.linkStatic != 0 && (renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-renvoPreparedBackend != 0 && targetIsKernelModule(g.c) ||
+renvoPreparedBackend != 0 ||
 targetIsDarwin(g.c.renvoTargetOS) && renvo_runtime_UnsafeByteAt(g.prog.src, fn.linkDLLStart) == '/' ||
 targetIsWindows(g.c.renvoTargetOS) && renvo_runtime_UnsafeByteAt(g.prog.src, fn.linkDLLStart) != '/') {
 g.stackUsed = renvoAlignTo8(g.stackUsed + wordCount*renvoBackendValueSlotSize)
@@ -23651,7 +23650,7 @@ renvoNonNil(g, fn)
 if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
 return renvoAmd64EmitKernelLinkStaticCall(g, fn, wordCount)
 }
-if renvoPreparedBackend != 0 && targetIsKernelModule(g.c) {
+if renvoPreparedBackend != 0 {
 importID := renvoAsmAddKernelImport(
 &g.asm, g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
 if importID < 0 {
@@ -23689,8 +23688,7 @@ return true
 
 func renvoEmitTargetStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) int {
 renvoNonNil(g, fn)
-if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-renvoPreparedBackend != 0 && targetIsKernelModule(g.c) {
+if renvoFixedTarget == renvoTargetLinuxKernelAmd64 || renvoPreparedBackend != 0 {
 if !renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "kernel") {
 return 0
 }
