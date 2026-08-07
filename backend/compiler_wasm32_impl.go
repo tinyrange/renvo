@@ -4,11 +4,11 @@
 // unit: wasm32 17b1645b3c6bce76dec4b0d8739e9768ca33d6e4c37ed97282155128dc26a8cf
 package main
 
+
 type renvoWasmBuffer struct {
 	data   []byte
 	length int
 }
-
 const renvoWasm32RegRax = 0
 const renvoWasm32RegRdx = 1
 const renvoWasm32RegRcx = 2
@@ -130,7 +130,6 @@ const renvoVMHeaderSize = 40
 const renvoVMDataBase = 256
 const renvoVMRoutineSize = 12
 const renvoVMRoutineFramed = 1
-
 func renvoWasmPut(out *renvoWasmBuffer, value byte) {
 	if out.length >= len(out.data) {
 		nextLen := len(out.data) * 2
@@ -1014,17 +1013,17 @@ func renvoWasm32AppendCond(out *renvoWasmBuffer, cond int) {
 }
 func renvoWasm32Patch(a *renvoAsm, dataBase int, bssBase int) {
 	for i := 0; i+1 < len(a.relocs); i += 2 {
-		at := int(renvo_runtime_UnsafeInt32At(a.relocs, i))
-		label := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1))
-		target := renvoAsmLabelPosition(a, label)
+		at := int(renvo_runtime_UnsafeInt32At(a.relocs,i))
+		label := int(renvo_runtime_UnsafeInt32At(a.relocs,i+1))
+		target := renvoAsmLabelPosition(a,label)
 		if target >= 0 {
 			renvoPut32At(a.code, at, target)
 		}
 	}
 	for i := 0; i+2 < len(a.absRelocs); i += 3 {
-		at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i))
-		off := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1))
-		kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2))
+		at := int(renvo_runtime_UnsafeInt32At(a.absRelocs,i))
+		off := int(renvo_runtime_UnsafeInt32At(a.absRelocs,i+1))
+		kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs,i+2))
 		target := dataBase + off
 		if kind == 1 {
 			target = bssBase + off
@@ -1485,7 +1484,7 @@ func renvoWasm32SymbolPcs(a *renvoAsm) []int {
 	pcs := make([]int, 0, 2048)
 	for i := 0; i < len(a.symbols); i++ {
 		symbol := &a.symbols[i]
-		pc := renvoAsmLabelPosition(a, symbol.label)
+		pc := renvoAsmLabelPosition(a,symbol.label)
 		if pc >= 0 {
 			if !renvoWasm32PcInList(pcs, pc) {
 				pcs = append(pcs, pc)
@@ -1502,7 +1501,7 @@ func renvoWasm32RoutinePcs(a *renvoAsm, code []byte, instrPcs []int) []int {
 	marks[0] = 1
 	for i := 0; i < len(a.symbols); i++ {
 		symbol := &a.symbols[i]
-		pc := renvoAsmLabelPosition(a, symbol.label)
+		pc := renvoAsmLabelPosition(a,symbol.label)
 		if pc >= 0 {
 			if pc >= 0 && pc < len(marks) && marks[pc] == 0 {
 				pcs = append(pcs, pc)
@@ -1828,7 +1827,7 @@ func renvoWasm32NamedRoutine(a *renvoAsm, routinePcs []int, name string) int {
 		if !matched {
 			continue
 		}
-		pc := renvoAsmLabelPosition(a, symbol.label)
+		pc := renvoAsmLabelPosition(a,symbol.label)
 		if pc >= 0 {
 			return renvoWasm32FindRoutineIndex(routinePcs, pc)
 		}

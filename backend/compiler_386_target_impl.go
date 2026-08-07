@@ -4,6 +4,7 @@
 // unit: x86_32 0337879195b167087dd47fb29d58fd6aa0098ce3b3fb1ae8f2a762f2dcf3e2e2
 package main
 
+
 func renvo386AsmSecondaryDisp(a *renvoAsm, disp int) {
 	if disp == 0 {
 		renvoAsmEmit8(a, 0x02)
@@ -62,7 +63,7 @@ func renvo386AsmMovRdxImm(a *renvoAsm, imm int) {
 }
 func renvo386AsmStackMem(a *renvoAsm, offset int, base int, disp8 int, disp32 int) {
 	if base > 0xff {
-		renvoAsmEmit8(a, base>>8)
+		renvoAsmEmit8(a, base >> 8)
 	} else {
 		renvoAsmEmit8(a, base)
 	}
@@ -84,7 +85,7 @@ func renvo386AsmAddRdxImm(a *renvoAsm, imm int) {
 }
 func renvo386AsmMemDisp(a *renvoAsm, disp int, op int, disp8 int, disp32 int) {
 	if op > 0xff {
-		renvoAsmEmit8(a, op>>8)
+		renvoAsmEmit8(a, op >> 8)
 	} else {
 		renvoAsmEmit8(a, op)
 	}
@@ -193,14 +194,6 @@ func renvo386AsmDivLeftRcxRightRax(a *renvoAsm, mod bool) {
 	}
 }
 
-func renvo386AsmUnsignedDivLeftRcxRightRax(a *renvoAsm, mod bool) {
-	renvoAsmEmitText(a, "\x53\x89\xc3\x89\xc8\x31\xd2\xf7\xf3")
-	if mod {
-		renvoAsmEmit16(a, 0xd089)
-	}
-	renvoAsmEmit8(a, 0x5b)
-}
-
 func renvo386AsmAddRaxRcx(a *renvoAsm) {
 	renvoAsmEmit16(a, 0xc801)
 }
@@ -210,12 +203,12 @@ func renvo386AsmAddRdxRcx(a *renvoAsm) {
 }
 
 func renvo386AsmBoolNotRax(a *renvoAsm) {
-	renvoAsmEmit3(a, 0x83, 0xf0, 1)
+	renvoAsmEmit3(a, 0x83,0xf0,1)
 }
 
 func renvo386AsmCmpRcxRaxSet(a *renvoAsm, setcc int) {
 	renvoAsmEmit24(a, 0x0fc139)
-	renvoAsmEmit3(a, setcc, 0xc0, 0xf)
+	renvoAsmEmit3(a, setcc,0xc0,0xf)
 	renvoAsmEmit16(a, 0xc0b6)
 }
 
@@ -244,7 +237,7 @@ func renvo386AsmMovR9Rax(a *renvoAsm) {
 }
 
 func renvo386AsmMovRaxImm64(a *renvoAsm, imm int) {
-	renvo386AsmMovRaxImm(a, imm)
+	renvo386AsmMovRaxImm(a,imm)
 }
 
 func renvo386AsmMovRaxRdx(a *renvoAsm) {
@@ -264,19 +257,19 @@ func renvo386AsmPopRdi(a *renvoAsm) {
 }
 
 func renvo386AsmSarRaxImm(a *renvoAsm, imm int) {
-	renvoAsmEmit3(a, 0xc1, 0xf8, imm)
+	renvoAsmEmit3(a, 0xc1,0xf8,imm)
 }
 
 func renvo386AsmShlRaxImm(a *renvoAsm, imm int) {
-	renvoAsmEmit3(a, 0xc1, 0xe0, imm)
+	renvoAsmEmit3(a, 0xc1,0xe0,imm)
 }
 
 func renvo386AsmShlRcxImm(a *renvoAsm, imm int) {
-	renvoAsmEmit3(a, 0xc1, 0xe1, imm)
+	renvoAsmEmit3(a, 0xc1,0xe1,imm)
 }
 
 func renvo386AsmShrRaxImm(a *renvoAsm, imm int) {
-	renvoAsmEmit3(a, 0xc1, 0xe8, imm)
+	renvoAsmEmit3(a, 0xc1,0xe8,imm)
 }
 
 func renvo386AsmStoreRaxMemRdxRcx8(a *renvoAsm) {
@@ -296,20 +289,20 @@ func renvoAsmMovArg1Rax(a *renvoAsm) {
 }
 
 func renvo386AsmJccLabel(a *renvoAsm, op int, label int) {
-	renvoAsmEmit2(a, 0x0f, op)
-	at := len(a.code)
+	renvoAsmEmit2(a, 0x0f,op)
+	at:=len(a.code)
 	renvoAsmEmit32(a, 0)
-	renvoAsmAddReloc(a, at, label)
+	renvoAsmAddReloc(a, at,label)
 }
 
 func renvo386AsmMovRegPCRel(a *renvoAsm, reg int, off int, kind int) {
 	renvoAsmEmit8(a, 0xe8)
 	renvoAsmEmit32(a, 0)
 	renvoAsmEmit8(a, 0x58|reg)
-	renvoAsmEmit2(a, 0x81, 0xc0|reg)
-	at := len(a.code)
+	renvoAsmEmit2(a, 0x81,0xc0|reg)
+	at:=len(a.code)
 	renvoAsmEmit32(a, 0)
-	renvoAsmAddAbsReloc(a, at, off, kind)
+	renvoAsmAddAbsReloc(a, at,off,kind)
 }
 
 // Generated definition-owned relocation finalizer.
@@ -318,9 +311,7 @@ func rtgX8632PatchRelocations(out *renvoAsm) {
 		at := int(renvo_runtime_UnsafeInt32At(out.relocs, i)) & 2147483647
 		label := int(renvo_runtime_UnsafeInt32At(out.relocs, i+1)) & 2147483647
 		target := renvoAsmLabelPosition(out, label)
-		if target < 0 {
-			continue
-		}
+		if target < 0 { continue }
 		addend := renvoGet32At(out.code, at)
 		renvoPut32At(out.code, at, target+addend-(at+4))
 	}

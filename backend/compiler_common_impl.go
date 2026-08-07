@@ -16712,13 +16712,29 @@ func renvoEmitUnsignedPrimaryTertiaryOp(g *renvoLinearGen, tok int, kind int) bo
 		return true
 	}
 	if g.c.renvoTargetArch == renvoArch386 {
-		renvo386AsmUnsignedDivLeftRcxRightRax(&g.asm, mod)
+		renvoAsmEmitText(&g.asm, "\x53\x89\xc3\x89\xc8\x31\xd2\xf7\xf3")
+		if mod {
+			renvoAsmEmit16(&g.asm, 0xd089)
+		}
+		renvoAsmEmit8(&g.asm, 0x5b)
 	} else if g.c.renvoTargetArch == renvoArchArm {
-		renvoArmAsmUnsignedDivLeftRcxRightRax(&g.asm, mod)
+		renvoArmAsmMovRegReg(&g.asm, 9, 0)
+		renvoArmAsmEmit(&g.asm, 0xe730f010|(0<<16)|(0<<8)|2)
+		if mod {
+			renvoArmAsmEmit(&g.asm, 0xe0600090|(2<<12)|(9<<8)|0)
+		}
 	} else if g.c.renvoTargetArch == renvoArchAarch64 {
-		renvoAarch64AsmUnsignedDivLeftRcxRightRax(&g.asm, mod)
+		renvoAarch64AsmMovRegReg(&g.asm, 9, 0)
+		renvoAarch64AsmEmit(&g.asm, 0x9ac00840)
+		if mod {
+			renvoAarch64AsmEmit(&g.asm, 0x9b098800)
+		}
 	} else if g.c.renvoTargetArch == renvoArchAmd64 {
-		renvoAmd64AsmUnsignedDivLeftRcxRightRax(&g.asm, mod)
+		renvoAsmEmitText(&g.asm, "\x53\x48\x89\xc3\x48\x89\xc8\x31\xd2\x48\xf7\xf3")
+		if mod {
+			renvoAsmEmitText(&g.asm, "\x48\x89\xd0")
+		}
+		renvoAsmEmit8(&g.asm, 0x5b)
 	} else {
 		return false
 	}
