@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repository_root"
+
+run_check() {
+	local description="$1"
+	shift
+	printf '\n==> %s\n' "$description"
+	if [[ -n "${RENVO_CHECK_MEMORY_MAX:-}" ]]; then
+		if [[ "$(uname -s)" != "Linux" ]] || ! command -v systemd-run >/dev/null 2>&1; then
+			printf 'RENVO_CHECK_MEMORY_MAX requires systemd-run on Linux\n' >&2
+			return 1
+		fi
+		systemd-run --user --wait --pipe --collect --same-dir \
+			-p "MemoryMax=$RENVO_CHECK_MEMORY_MAX" -- "$@"
+	else
+		"$@"
+	fi
+}
+
+check_generated() {
+	run_check "checked-in generated source" \
+		go test -count=1 ./internal/rtg ./internal/backendcompiled
+}
+
+check_packages() {
+	run_check "tracked package suites" \
+		go test -count=1 ./internal/... ./std/... ./cmd/... \
+		./backend/unit ./backend/target ./backend/bringup \
+		./backend/omnibus/... ./backend/cmd/...
+	run_check "bundled driver and bootstrap" \
+		go test -count=1 -tags renvo_bundle ./internal/driver ./cmd/renvobootstrap
+}
+
+check_preflight() {
+	local started=$SECONDS
+	check_generated
+	check_packages
+	run_check "backend and frontend test compilation" \
+		go test -run '^$' ./backend ./frontend_tests
+	local elapsed=$((SECONDS - started))
+	printf '\nPreflight completed in %ds (budget: 60s)\n' "$elapsed"
+	if ((elapsed > 60)); then
+		printf 'development preflight exceeded its 60-second budget\n' >&2
+		return 1
+	fi
+}
+
+backend_test_pattern() {
+	go test -list '^Test' ./backend |
+		sed -n '/^Test/p' |
+		grep -v '^TestCompilerPerformance$' |
+		grep -v '^TestCompilerPerformanceWASI$' |
+		grep -v '^TestCompilerResourceGates$' |
+		grep -v '^TestFrontendCompilerPerformance$' |
+		grep -v '^TestVM32FullBackendSuite$' |
+		grep -v '^TestVM32SelfHostedBackend$' |
+		paste -sd'|' -
+}
+
+check_backend() {
+	local pattern
+	pattern="$(backend_test_pattern)"
+	if [[ -z "$pattern" ]]; then
+		printf 'no ordinary backend tests found\n' >&2
+		return 1
+	fi
+	if [[ "$(go env GOOS)/$(go env GOARCH)" == "linux/amd64" ]]; then
+		run_check "ordinary backend suite" env RENVO_CROSS_ARCH_TESTS=1 \
+			go test -count=1 -timeout 30m -run "^(${pattern})$" ./backend
+		run_check "deterministic VM backend gates" \
+			go test -count=1 -timeout 5m \
+			-run '^(TestVM32FullBackendSuite|TestVM32SelfHostedBackend)$' ./backend
+	else
+		run_check "ordinary backend suite" \
+			go test -count=1 -timeout 30m -run "^(${pattern})$" ./backend
+	fi
+}
+
+check_performance() {
+	run_check "compiler performance and resource gates" \
+		env RENVO_COMPILER_RESOURCE_GATES=1 RENVO_STDROOT="$repository_root/std" \
+		go test -count=1 -timeout 15m \
+		-run '^(TestCompilerPerformance|TestCompilerPerformanceWASI|TestCompilerResourceGates|TestFrontendCompilerPerformance)$' \
+		./backend
+}
+
+check_ci_performance() {
+	run_check "shared-runner compiler resource and normalized frontend gates" \
+		env RENVO_COMPILER_RESOURCE_GATES=1 RENVO_STDROOT="$repository_root/std" \
+		go test -count=1 -timeout 15m \
+		-run '^(TestCompilerResourceGates|TestFrontendCompilerPerformance)$' \
+		./backend
+}
+
+check_frontend() {
+	run_check "full frontend corpus and self-hosting suite" \
+		go test -count=1 -timeout 30m ./frontend_tests
+}
+
+usage() {
+	cat <<'EOF'
+Usage: ./tools/check MODE
+
+Modes:
+  generated    Verify checked-in generated source is current.
+  packages     Run the tracked Go package and bundled-build suites.
+  preflight    Run the development checks (hard budget: 60 seconds).
+  backend      Run the ordinary backend suite and applicable VM gates.
+  performance  Run all compiler time, memory, and binary-size gates.
+  ci-performance
+               Run only gates that are stable on shared CI runners.
+  frontend     Run the complete frontend corpus and self-hosting suite.
+  full         Run PR-level preflight, backend, performance, and frontend checks.
+
+Set RENVO_CHECK_MEMORY_MAX=4G on systemd-based Linux to put each command in a
+memory-limited user unit. This prevents a runaway compiler test from taking
+down the interactive session while retaining the command's exit status.
+EOF
+}
+
+case "${1:-}" in
+	generated)
+		check_generated
+		;;
+	packages)
+		check_packages
+		;;
+	preflight)
+		check_preflight
+		;;
+	backend)
+		check_backend
+		;;
+	performance)
+		check_performance
+		;;
+	ci-performance)
+		check_ci_performance
+		;;
+	frontend)
+		check_frontend
+		;;
+	full)
+		check_preflight
+		check_backend
+		check_performance
+		check_frontend
+		;;
+	-h|--help|help)
+		usage
+		;;
+	*)
+		usage >&2
+		exit 2
+		;;
+esac
