@@ -279,8 +279,7 @@ func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 	a.staticImports = staticImports
 	a.darwinImports = darwinImports
 	a.data = data
-	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-		renvoPreparedBackend != 0 && targetIsKernelModule(a.c) {
+	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 || renvoPreparedBackend != 0 {
 		a.kernelImportNames = make([]byte, 0, 1024)
 		a.kernelImportOffsets = make([]int, 0, 128)
 	}
@@ -11732,7 +11731,7 @@ func renvoEmitUserCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	}
 	wordCount += words
 	if fn.linkStatic != 0 && (renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-		renvoPreparedBackend != 0 && targetIsKernelModule(g.c) ||
+		renvoPreparedBackend != 0 ||
 		targetIsDarwin(g.c.renvoTargetOS) && renvo_runtime_UnsafeByteAt(g.prog.src, fn.linkDLLStart) == '/' ||
 		targetIsWindows(g.c.renvoTargetOS) && renvo_runtime_UnsafeByteAt(g.prog.src, fn.linkDLLStart) != '/') {
 		g.stackUsed = renvoAlignTo8(g.stackUsed + wordCount*renvoBackendValueSlotSize)
