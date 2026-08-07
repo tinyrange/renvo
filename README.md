@@ -222,6 +222,7 @@ std/                Renvo's target standard library
 forms/ and ide/     reusable IDE and UI packages
 frontend_tests/     package, diagnostic, self-host, and standalone acceptance tests
 backend/            code generators, runtime shell, target descriptions, and backend tests
+tools/check         canonical development and PR validation driver
 ```
 
 The root is the frontend module, published under the canonical path
@@ -234,7 +235,19 @@ The frontend/backend wire format is specified in
 
 The repository contains independent programs in `backend/tests/` and generated
 corpus modules in `frontend_tests/`, so `go test ./...` is intentionally not the
-whole-project command.
+whole-project command. Use the checked-in test driver instead:
+
+```sh
+./tools/check preflight  # sub-minute development check
+./tools/check full       # PR-level backend, gates, corpus, and self-hosting
+```
+
+On systemd-based Linux, long checks can be isolated from the rest of the user
+session without changing any compiler limit:
+
+```sh
+RENVO_CHECK_MEMORY_MAX=4G ./tools/check full
+```
 
 Useful focused checks are:
 
@@ -273,7 +286,8 @@ go run ./cmd/renvodiff -minimize path/to/reproducer.go
 Findings are written below ignored `sandbox/difftest/` directories with the
 original source, minimized source, and both execution results. Long campaigns
 should be placed under an external memory limit, for example with
-`systemd-run --user --wait --pipe -p MemoryMax=4G` on Linux.
+`systemd-run --user --wait --pipe -p MemoryMax=4G` on Linux. The check driver's
+memory limit above is equivalent for repository test suites.
 The default keeps one independently generated feature case in each program so
 one unsupported construct cannot mask unrelated discrepancies. Increase
 `-cases` when throughput matters more than isolating each finding.

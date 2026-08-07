@@ -5,13 +5,37 @@ on:
     branches:
       - main
   pull_request:
+  merge_group:
 
 permissions:
   contents: read
 
+concurrency:
+  group: tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  preflight:
+    name: Generated source and package preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Run preflight
+        run: ./tools/check preflight
+
   backend-amd64:
     name: Backend compiler tests (linux-amd64)
+    needs: preflight
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -50,16 +74,6 @@ jobs:
       - name: Run deterministic VM backend gates
         run: go test -count=1 -timeout 5m -run '^(TestVM32FullBackendSuite|TestVM32SelfHostedBackend)$' ./backend
 
-      - name: Run compiler resource gates
-        env:
-          RENVO_COMPILER_RESOURCE_GATES: "1"
-        run: go test -count=1 -timeout 5m -run '^TestCompilerResourceGates$' ./backend
-
-      - name: Run frontend compiler performance gate
-        env:
-          RENVO_STDROOT: ${{ github.workspace }}/std
-        run: go test -count=1 -timeout 5m -run '^TestFrontendCompilerPerformance$' ./backend
-
       - name: Run backend tests
         env:
           RENVO_CROSS_ARCH_TESTS: "1"
@@ -69,6 +83,7 @@ jobs:
 
   backend-arm64:
     name: Backend compiler tests (linux-arm64)
+    needs: preflight
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
 
@@ -104,6 +119,7 @@ jobs:
 
   backend-darwin-arm64:
     name: Backend compiler tests (darwin-arm64)
+    needs: preflight
     runs-on: macos-14
     timeout-minutes: 30
 
@@ -138,7 +154,8 @@ jobs:
         run: go test -count=1 -timeout 30m ./frontend_tests
 
   windows-e2e:
-    name: Windows targets end to end (amd64 and 386)
+    name: Windows targets (amd64, 386, and arm64 images)
+    needs: preflight
     runs-on: windows-latest
     timeout-minutes: 15
 
@@ -168,15 +185,10 @@ jobs:
           go test -count=1 -timeout 15m -run '^TestRunScriptCommandCompilesImageAndForwardsArguments$' ./internal/driver
 
   package-tests:
-    name: Package tests (${{ matrix.runner }})
-    runs-on: ${{ matrix.runner }}
+    name: Package tests (macos-14)
+    needs: preflight
+    runs-on: macos-14
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        runner:
-          - ubuntu-latest
-          - macos-14
 
     steps:
       - name: Check out repository
@@ -189,16 +201,33 @@ jobs:
           cache: false
 
       - name: Run tracked package suites
-        run: |
-          # Do not replace these patterns with ./...: backend/tests and the
-          # generated corpus contain independent programs with intentionally
-          # conflicting declarations, while sandbox/ contains local scratch.
-          go test -count=1 ./internal/... ./std/... ./cmd/... ./backend/unit ./backend/target ./backend/bringup ./backend/omnibus/... ./backend/cmd/...
-          go test -count=1 -tags renvo_bundle ./internal/driver ./cmd/renvobootstrap
+        run: ./tools/check packages
+
+  performance:
+    name: Compiler performance and resources
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Run all compiler gates
+        run: ./tools/check performance
 
   frontend-corpus:
     name: Frontend corpus tests
-    needs: backend-amd64
+    needs:
+      - preflight
+      - backend-amd64
+      - package-tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -213,4 +242,39 @@ jobs:
           cache: false
 
       - name: Run frontend corpus tests
-        run: go test -count=1 ./frontend_tests
+        run: ./tools/check frontend
+
+  required:
+    name: Required
+    if: ${{ always() }}
+    needs:
+      - preflight
+      - backend-amd64
+      - backend-arm64
+      - backend-darwin-arm64
+      - windows-e2e
+      - package-tests
+      - performance
+      - frontend-corpus
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Require every test job to pass
+        run: |
+          results=(
+            '${{ needs.preflight.result }}'
+            '${{ needs.backend-amd64.result }}'
+            '${{ needs.backend-arm64.result }}'
+            '${{ needs.backend-darwin-arm64.result }}'
+            '${{ needs.windows-e2e.result }}'
+            '${{ needs.package-tests.result }}'
+            '${{ needs.performance.result }}'
+            '${{ needs.frontend-corpus.result }}'
+          )
+          for result in "${results[@]}"; do
+            if [[ "$result" != success ]]; then
+              echo "A required test job ended with: $result"
+              exit 1
+            fi
+          done

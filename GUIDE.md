@@ -741,6 +741,36 @@ The frontend corpus contains thousands of independent modules. `sandbox/`
 contains scratch experiments. A recursive module test is not a meaningful
 whole-repository check.
 
+The canonical entry point is `tools/check`. It keeps the test partition in one
+reviewable place shared by developers and CI:
+
+```sh
+./tools/check preflight
+./tools/check backend
+./tools/check performance
+./tools/check frontend
+./tools/check full
+```
+
+`preflight` is the normal development loop. It checks generated-source
+authority first, then the tracked package and bundled-build suites, and finally
+compiles the backend and frontend test packages. It has a hard one-minute
+budget so stale generation or an ordinary Go build failure is always cheap to
+discover. `full` runs every mode in that order and is reserved for PR-level
+validation. The narrower modes are diagnostic tools, not a substitute for the
+PR checks before a change is merged.
+
+Compiler fuzzing, self-hosting, and wide backend runs can consume enough memory
+to kill an interactive session when they regress. On systemd-based Linux, use:
+
+```sh
+RENVO_CHECK_MEMORY_MAX=4G ./tools/check full
+```
+
+The driver places each child command in a memory-limited user unit and returns
+its real status. This is an outer safety boundary only; it does not replace or
+relax Renvo's measured compiler RSS limits.
+
 Useful package checks are:
 
 ```sh
@@ -797,6 +827,28 @@ The backend test cache lives under `backend/.renvo/test-cache`. Its keys include
 compiler sources and test inputs. Preserve the cache during ordinary work; if
 you find an invalidation bug, fix the key rather than disabling caching.
 
+### Reading a failed run
+
+Start with the first failed check mode and its first concrete diagnostic. One
+compiler defect can otherwise produce a long tail of stage1, stage2, corpus,
+and self-hosting failures that are not independent bugs.
+
+- A generated-source digest or RTG authority failure is drift: regenerate the
+  named authority and review the resulting diff before running anything wider.
+- A Go build or package failure belongs to the host implementation and should
+  be fixed before interpreting backend output.
+- Exit 137, `signal: killed`, or a vanished terminal usually indicates the
+  outer memory boundary, not Renvo's measured 16/32 MiB RSS gate. Reproduce the
+  named child command inside `RENVO_CHECK_MEMORY_MAX` and inspect that first.
+- A gate failure should name runtime, RSS, binary size, or frontend CPU. Do not
+  trade one budget for another or raise a threshold to make the aggregate green.
+- Wrong output, a target crash, or a stage mismatch is a compiler bug. Reduce it
+  to the smallest applicable `backend/tests/` or `frontend_tests/regressions/`
+  case before editing compiler code.
+
+When a rerun passes without a source or environment change, record it as a
+flaky or infrastructure failure rather than treating the green rerun as a fix.
+
 ### Regression style
 
 For a backend miscompile:
@@ -828,6 +880,13 @@ The explicit resource gate is:
 ```sh
 RENVO_COMPILER_RESOURCE_GATES=1 \
   go test -count=1 -run '^TestCompilerResourceGates$' ./backend
+```
+
+The complete performance mode also runs the native 50 ms gate, the WASI 100 ms
+gate, both compiler binary/RSS policies, and the self-hosted frontend gate:
+
+```sh
+./tools/check performance
 ```
 
 The self-hosted frontend gate builds through stage3 and currently requires:
@@ -1121,6 +1180,20 @@ Check:
 Main is protected by a merge queue. A green PR may still need to be marked
 ready and enqueued; wait for the queue validation and confirm the merge commit
 rather than treating “queued” as “merged.”
+
+The Actions workflow handles `pull_request`, `merge_group`, and pushes to
+`main`. A fast `preflight` job gates the expensive platform suites. The final
+job is deliberately named `Required` and succeeds only when every platform,
+performance, package, and frontend job succeeds. Repository rules should
+require this single stable context with strict/merge-queue validation; do not
+require individual matrix job names as they are implementation details. Keep
+the post-merge `main` run enabled as a backstop, not as the first place a change
+is validated. New commits cancel stale in-progress PR runs, while merge-queue
+and `main` runs are never cancelled.
+
+Windows CI executes amd64 and 386 programs natively and constructs and validates
+ARM64 PE images. Full Windows/ARM64 execution requires a native ARM64 Windows
+runner; image validation must not be described as runtime coverage.
 
 ## Final perspective
 
