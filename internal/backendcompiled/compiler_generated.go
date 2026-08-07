@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "18fff17c72645a06c4c78db480b68ac70c1c50a597ed4010bc4e9d3e758719fe"
+const CompilerSourceDigest = "e5fbe81e10d878751e56fab01d8340bda5b7dcef220c53e2c99be82e6fae1f2c"
 
 // source: backend/compiler_common_impl.go
 
@@ -23650,7 +23650,8 @@ renvoNonNil(g, fn)
 if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
 return renvoAmd64EmitKernelLinkStaticCall(g, fn, wordCount)
 }
-if renvoPreparedBackend != 0 {
+if renvoPreparedBackend != 0 &&
+renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "kernel") {
 importID := renvoAsmAddKernelImport(
 &g.asm, g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
 if importID < 0 {
@@ -23688,10 +23689,17 @@ return true
 
 func renvoEmitTargetStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) int {
 renvoNonNil(g, fn)
-if renvoFixedTarget == renvoTargetLinuxKernelAmd64 || renvoPreparedBackend != 0 {
+if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
 if !renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "kernel") {
 return 0
 }
+if renvoEmitLinkStaticCall(g, fn, wordCount) {
+return 1
+}
+return 0
+}
+if renvoPreparedBackend != 0 &&
+renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "kernel") {
 if renvoEmitLinkStaticCall(g, fn, wordCount) {
 return 1
 }
