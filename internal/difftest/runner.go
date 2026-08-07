@@ -78,6 +78,9 @@ func (r Runner) Compare(source []byte) (comparison Comparison, err error) {
 	if r.Target == "" {
 		return comparison, fmt.Errorf("unsupported host %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
+	if err := TargetRunnable(r.Target); err != nil {
+		return comparison, err
+	}
 	if err := validateHostSource(source); err != nil {
 		return comparison, fmt.Errorf("generated source rejected by host Go type checker: %w", err)
 	}
@@ -157,15 +160,57 @@ func (r Runner) compileRenvo(dir string) (execution Execution) {
 	if err := os.WriteFile(binary, compiled.Binary, 0o755); err != nil {
 		return Execution{Diagnostic: err.Error()}
 	}
-	return runProgram(binary, dir, r.Timeout)
+	return runTargetProgram(binary, dir, r.Target, r.Timeout)
+}
+
+// TargetRunnable reports whether this host can execute output for target.
+func TargetRunnable(target string) error {
+	if target == HostTarget() || runtime.GOOS == "linux" && runtime.GOARCH == "amd64" && target == "linux/386" {
+		return nil
+	}
+	runner := ""
+	if runtime.GOOS == "linux" && target == "linux/aarch64" {
+		runner = "qemu-aarch64"
+	} else if runtime.GOOS == "linux" && target == "linux/arm" {
+		runner = "qemu-arm"
+	} else if target == "wasi/wasm32" {
+		runner = "wasmtime"
+	} else {
+		return fmt.Errorf("target %s is not runnable on %s/%s", target, runtime.GOOS, runtime.GOARCH)
+	}
+	if _, err := exec.LookPath(runner); err != nil {
+		return fmt.Errorf("target %s requires %s: %w", target, runner, err)
+	}
+	return nil
+}
+
+func runTargetProgram(binary string, dir string, target string, timeout time.Duration) Execution {
+	command := []string{binary}
+	environment := []string{"PWD=" + dir}
+	if target != HostTarget() && target != "linux/386" {
+		switch target {
+		case "linux/aarch64":
+			command = []string{"qemu-aarch64", binary}
+		case "linux/arm":
+			command = []string{"qemu-arm", binary}
+		case "wasi/wasm32":
+			command = []string{"wasmtime", "run", "--dir=.", "--dir=/", "--env", "PWD", "--env", "PATH", binary}
+			environment = append(environment, "PATH="+os.Getenv("PATH"))
+		}
+	}
+	return runProgramCommand(command, dir, environment, timeout)
 }
 
 func runProgram(binary string, dir string, timeout time.Duration) Execution {
+	return runProgramCommand([]string{binary}, dir, []string{"PWD=" + dir}, timeout)
+}
+
+func runProgramCommand(arguments []string, dir string, environment []string, timeout time.Duration) Execution {
 	contextValue, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	command := exec.CommandContext(contextValue, binary)
+	command := exec.CommandContext(contextValue, arguments[0], arguments[1:]...)
 	command.Dir = dir
-	command.Env = []string{"PWD=" + dir}
+	command.Env = environment
 	output, err := command.CombinedOutput()
 	execution := Execution{Compiled: true, Output: output, ExitCode: 0}
 	if contextValue.Err() == context.DeadlineExceeded {

@@ -219,6 +219,25 @@ func main() {
 	}
 }
 
+func TestCheckGraphCoreDoesNotShadowEarlierUseWithFunctionLiteralParameter(t *testing.T) {
+	graph := checkTestGraph(t, []load.SourceFile{{
+		Path: "/repo/case/cmd/app/main.go",
+		Src: []byte(`package main
+
+func main() {
+	values := []int{1}
+	total := 0
+	for _, value := range values { total += value }
+	identity := func(value int) int { return value }
+	print(total + identity(0))
+}
+`),
+	}})
+	if program := CheckGraphCore(graph); !program.Ok {
+		t.Fatalf("earlier range-variable use was shadowed: %#v", program)
+	}
+}
+
 func TestCheckGraphCoreRecognizesFunctionLiteralScope(t *testing.T) {
 	graph := checkTestGraph(t, []load.SourceFile{{
 		Path: "/repo/case/cmd/app/main.go",

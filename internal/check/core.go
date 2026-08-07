@@ -610,6 +610,7 @@ func lookupScopeTokenNameCore(scope CoreScope, file *syntax.File, tok int) int {
 		return -1
 	}
 	hash := hashCoreToken(file.Src, token.Start, size)
+	future := -1
 	// References overwhelmingly resolve to parameters and locals declared near
 	// the point of use. Search newest declarations first so large compiler
 	// functions do not rescan their full scope for every identifier.
@@ -636,10 +637,18 @@ func lookupScopeTokenNameCore(scope CoreScope, file *syntax.File, tok int) int {
 			}
 		}
 		if matches {
-			return i
+			if nameTok <= tok {
+				return i
+			}
+			// Scope collection precedes resolution. Prefer declarations already
+			// visible at this source position, but retain the historical fallback
+			// for forward labels and syntactic names in local type declarations.
+			if future < 0 {
+				future = i
+			}
 		}
 	}
-	return -1
+	return future
 }
 
 func lookupImportTokenNameCore(info *PackageInfo, fileIndex int, file *syntax.File, tok int) int {

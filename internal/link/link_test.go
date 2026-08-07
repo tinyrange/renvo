@@ -924,6 +924,52 @@ func appMain() int {
 	}
 }
 
+func TestLinkBuildCoreTypesMapValuesInMultipleAssignment(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+func appMain() int {
+	values := map[string]int64{"zero": 31}
+	key := "zero"
+	key, values[key] = "one", -44
+	return int(values["zero"])
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	if !bytes.Contains(linked.Program.Text, []byte(`int64(-44)`)) {
+		t.Fatalf("map value temporary lost its assignment type:\n%s", linked.Program.Text)
+	}
+}
+
+func TestLinkBuildCoreDoesNotConvertTypedCompositeMapValue(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+type value struct { total int64 }
+
+func appMain() int {
+	values := map[string]value{}
+	current := value{total: 7}
+	values["current"] = current
+	return int(values["current"].total)
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	if bytes.Contains(linked.Program.Text, []byte(`value(current)`)) {
+		t.Fatalf("typed composite map value gained a redundant conversion:\n%s", linked.Program.Text)
+	}
+}
+
 func TestLinkBuildCoreSplitsEllipsisTokens(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},

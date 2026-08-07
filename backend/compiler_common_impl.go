@@ -965,6 +965,7 @@ const renvoTypeComplex = 21
 const renvoNamedTypeAlias = 1
 const renvoStructLayoutMarker = -1
 const renvoStructLayoutHost = -2
+const renvoStructLayoutDense = -3
 
 const renvoBuiltinTypeUint16 = 10
 const renvoBuiltinTypeUint32 = 11
@@ -1668,6 +1669,25 @@ func renvoTok2Is(p *renvoProgram, i int, a byte, b byte) bool {
 		return false
 	}
 	return renvo_runtime_UnsafeByteAt(p.src, start+1) == b
+}
+
+func renvoTokStarts2(p *renvoProgram, i int, a byte, b byte) bool {
+	renvoNonNil(p)
+	if i < 0 || i >= renvoTokCount(p) {
+		return false
+	}
+	start := int(renvoTokStart(p, i))
+	end := int(renvoTokEnd(p, i))
+	return end-start >= 2 && renvo_runtime_UnsafeByteAt(p.src, start) == a && renvo_runtime_UnsafeByteAt(p.src, start+1) == b
+}
+
+func renvoTokStartsWith(p *renvoProgram, i int, value byte) bool {
+	renvoNonNil(p)
+	if i < 0 || i >= renvoTokCount(p) {
+		return false
+	}
+	start := int(renvoTokStart(p, i))
+	return int(renvoTokEnd(p, i)) > start && renvo_runtime_UnsafeByteAt(p.src, start) == value
 }
 
 func renvoBoolTokenValue(p *renvoProgram, tok int) int {
@@ -4149,12 +4169,16 @@ func renvoParseFuncInfo(m *renvoMeta, fnIndex int) {
 	receiverType := 0
 	if fn.receiverStart < fn.receiverEnd {
 		beforeReceiver := len(m.params)
-		unnamedReceiver := renvoParseType(m, p, fn.receiverStart, fn.receiverEnd)
-		if unnamedReceiver.typ != 0 && unnamedReceiver.next == fn.receiverEnd {
+		if renvoTokIsKind(p, fn.receiverStart, renvoTokIdent) && fn.receiverStart+1 < fn.receiverEnd {
+			renvoParseParamList(m, p, fn.receiverStart, fn.receiverEnd, &paramCount)
+		} else {
+			unnamedReceiver := renvoParseType(m, p, fn.receiverStart, fn.receiverEnd)
+			if unnamedReceiver.typ == 0 || unnamedReceiver.next != fn.receiverEnd {
+				renvoMetaError(m)
+				return
+			}
 			m.params = append(m.params, renvoSymbolInfo{typ: unnamedReceiver.typ})
 			paramCount++
-		} else {
-			renvoParseParamList(m, p, fn.receiverStart, fn.receiverEnd, &paramCount)
 		}
 		if len(m.params) <= beforeReceiver {
 			renvoMetaError(m)
@@ -4773,8 +4797,14 @@ func renvoClosureIndexByToken(meta *renvoMeta, tok int) int {
 func renvoBuiltinTypeFromToken(p *renvoProgram, tokIndex int) int {
 	renvoNonNil(p)
 	tok := renvoTokAt(p, tokIndex)
+	if renvoTokIdentIs(p, tokIndex, "any") || renvoTokIdentIs(p, tokIndex, "error") {
+		return renvoBuiltinTypeInterface
+	}
 	if renvoTokIdentIs(p, tokIndex, "uintptr") {
 		return renvoTypeInt
+	}
+	if renvoBytesEqualText(p.src, int(tok.start), int(tok.end), "float32") || renvoBytesEqualText(p.src, int(tok.start), int(tok.end), "float64") {
+		return renvoTypeFloat64
 	}
 	if renvoBytesEqualText(p.src, int(tok.start), int(tok.end), "complex64") || renvoBytesEqualText(p.src, int(tok.start), int(tok.end), "complex128") {
 		return renvoBuiltinTypeComplex
@@ -4931,6 +4961,31 @@ func renvoFinalizeTypeLayouts(m *renvoMeta) {
 			t.size = renvoAlignTo8(offset)
 		}
 	}
+	for i := 0; i < len(m.types); i++ {
+		renvoMarkDenseCallWords(m, i)
+	}
+}
+
+func renvoMarkDenseCallWords(m *renvoMeta, typ int) bool {
+	if typ <= 0 || typ >= len(m.types) {
+		return false
+	}
+	t := renvoResolveType(m, typ)
+	if renvoTypeKindIsWideInt(t.kind) || t.kind == renvoTypeArray || t.kind == renvoTypeStruct && t.nativeAlign > 0 {
+		if t.kind == renvoTypeStruct {
+			t.resolved = renvoStructLayoutDense
+		}
+		return true
+	}
+	if t.kind == renvoTypeStruct {
+		for i := 0; i < t.count; i++ {
+			if renvoMarkDenseCallWords(m, m.fields[t.first+i].typ) {
+				t.resolved = renvoStructLayoutDense
+				return true
+			}
+		}
+	}
+	return false
 }
 func renvoNativeTypeLayout(m *renvoMeta, typ int) int {
 	renvoNonNil(m)
@@ -5134,7 +5189,7 @@ func renvoTypeKindIsScalarValue(kind int) bool {
 }
 
 func renvoTypeKindUsesMemory(kind int) bool {
-	return kind == renvoTypeString || (kind >= renvoTypeSlice && kind <= renvoTypeStruct) || kind == renvoTypeArray || kind == renvoTypeInterface
+	return kind == renvoTypeString || (kind >= renvoTypeSlice && kind <= renvoTypeStruct) || kind == renvoTypeArray || kind == renvoTypeInterface || kind == renvoTypeComplex
 }
 
 func renvoScalarKindSize(renvoNativeIntSize int, kind int) int {
@@ -5276,6 +5331,12 @@ func renvoBindFunctionParams(g *renvoLinearGen, fnIndex int) {
 			continue
 		}
 		if paramType.kind == renvoTypeInterface {
+			renvoStoreIncomingCallWord(g, callWord, offset)
+			renvoStoreIncomingCallWord(g, callWord+1, offset-renvoBackendValueSlotSize)
+			callWord += 2
+			continue
+		}
+		if paramType.kind == renvoTypeComplex {
 			renvoStoreIncomingCallWord(g, callWord, offset)
 			renvoStoreIncomingCallWord(g, callWord+1, offset-renvoBackendValueSlotSize)
 			callWord += 2
@@ -5594,6 +5655,8 @@ func renvoEmitFunctionControlEpilogue(g *renvoLinearGen) bool {
 		}
 	} else if renvoTypeIsString(g.meta, fn.resultType) {
 		renvoAsmLoadPrimarySecondaryStack(a, g.deferResultOffset, g.deferResultOffset-renvoBackendValueSlotSize)
+	} else if renvoResolveType(g.meta, fn.resultType).kind == renvoTypeComplex {
+		renvoAsmLoadPrimarySecondaryStack(a, g.deferResultOffset, g.deferResultOffset-renvoBackendValueSlotSize)
 	} else {
 		renvoAsmLoadPrimaryStack(a, g.deferResultOffset)
 	}
@@ -5635,6 +5698,10 @@ func renvoEmitBareReturnValues(g *renvoLinearGen) bool {
 			return renvoEmitCopySliceRegsToArena(g, result.typ)
 		}
 		if resolved.kind == renvoTypeString {
+			renvoAsmLoadPrimarySecondaryStack(&g.asm, offset, offset-renvoBackendValueSlotSize)
+			return true
+		}
+		if resolved.kind == renvoTypeComplex {
 			renvoAsmLoadPrimarySecondaryStack(&g.asm, offset, offset-renvoBackendValueSlotSize)
 			return true
 		}
@@ -7017,7 +7084,11 @@ func renvoEmitLinearStmtCore(g *renvoLinearGen, stmt *renvoStmt) bool {
 		} else {
 			resultResolved := renvoResolveType(g.meta, resultType)
 			renvoNonNil(resultResolved)
-			if !renvoEmitScalarExprForKind(g, ep, rootIndex, resultResolved.kind) {
+			if resultResolved.kind == renvoTypeComplex {
+				if !renvoEmitComplexValueRegs(g, ep, rootIndex) {
+					return false
+				}
+			} else if !renvoEmitScalarExprForKind(g, ep, rootIndex, resultResolved.kind) {
 				return false
 			}
 		}
@@ -7396,6 +7467,13 @@ func renvoEmitLinearScopedControl(g *renvoLinearGen, stmt *renvoStmt, split int)
 			ok = renvoEmitLinearIf(g, stmt)
 			stmt.exprStart = oldExprStart
 		}
+	} else if stmt.kind == renvoStmtSwitch {
+		if renvoEmitLinearSimpleRange(g, stmt.exprStart, split) {
+			oldExprStart := stmt.exprStart
+			stmt.exprStart = split + 1
+			ok = renvoEmitLinearSwitch(g, stmt)
+			stmt.exprStart = oldExprStart
+		}
 	} else if renvoTokCharIs(g.prog, split, ';') {
 		ok = renvoEmitLinearClassicForScoped(g, stmt, split)
 	} else {
@@ -7687,6 +7765,10 @@ func renvoEmitLinearSwitch(g *renvoLinearGen, stmt *renvoStmt) bool {
 	renvoNonNil(g, stmt)
 	a := &g.asm
 	p := g.prog
+	semi := renvoFindTokenTextInRange(p, stmt.exprStart, stmt.exprEnd, ';')
+	if semi >= stmt.exprStart {
+		return renvoEmitLinearScopedControl(g, stmt, semi)
+	}
 	ep := renvoNewExprParse()
 	renvoNonNil(ep)
 	rootIndex := -1
@@ -7842,7 +7924,7 @@ func renvoCopyInterfaceValueToLocal(g *renvoLinearGen, sourceOffset int, typ int
 	}
 	size := renvoTypeSize(g.meta, typ)
 	if size <= renvoBackendValueSlotSize {
-		renvoAsmCopyStackSlot(&g.asm, sourceOffset, valueOffset)
+		renvoEmitCopyStackToStack(g, sourceOffset, valueOffset, size)
 		return
 	}
 	renvoAsmLoadSecondaryStack(&g.asm, sourceOffset)
@@ -8724,6 +8806,19 @@ func renvoEmitPointerAssignment(g *renvoLinearGen, left *renvoExprParse, pointer
 		renvoAsmStorePrimaryStack(a, addrOffset)
 		return renvoEmitTypedExprToSavedMem(g, right, rightIndex, targetType, addrOffset)
 	}
+	if g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideInt(kind) {
+		addrOffset := renvoAddUnnamedLocal(g, renvoTypeInt)
+		valueOffset := renvoAddUnnamedLocal(g, targetType)
+		renvoAsmStorePrimaryStack(a, addrOffset)
+		renvoAsmCopyPrimaryToSecondary(a)
+		renvoEmitCopyMemSecondaryToStack(g, valueOffset, renvoTypeSize(g.meta, targetType))
+		if !renvoEmitWideCompoundLocal(g, right, rightIndex, valueOffset, kind, assignTok) {
+			return false
+		}
+		renvoAsmLoadSecondaryStack(a, addrOffset)
+		renvoEmitCopyStackToMemSecondary(g, valueOffset, 0, renvoTypeSize(g.meta, targetType))
+		return true
+	}
 	renvoAsmPushPrimary(a)
 	renvoAsmCopyPrimaryToSecondary(a)
 	renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, renvoScalarKindSize(g.c.renvoNativeIntSize, kind))
@@ -8732,7 +8827,7 @@ func renvoEmitPointerAssignment(g *renvoLinearGen, left *renvoExprParse, pointer
 		return false
 	}
 	renvoAsmPopTertiary(a)
-	if !renvoEmitTypedPrimaryTertiaryOp(g, assignTok, kind == renvoTypeFloat64) {
+	if !renvoEmitTypedPrimaryTertiaryOp(g, assignTok, kind) {
 		return false
 	}
 	renvoAsmNormalizePrimaryForKind(a, kind)
@@ -8767,6 +8862,20 @@ func renvoEmitLinearCompoundLValue(g *renvoLinearGen, stmt *renvoStmt, assignTok
 			return -1
 		}
 		renvoAsmStorePrimaryStack(a, addrOffset)
+		if g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideInt(elemType.kind) {
+			valueOffset := renvoAddUnnamedLocal(g, elemTypeIndex)
+			renvoAsmCopyPrimaryToSecondary(a)
+			renvoEmitCopyMemSecondaryToStack(g, valueOffset, renvoTypeSize(meta, elemTypeIndex))
+			rhs := renvoNewExprParse()
+			renvoNonNil(rhs)
+			rhsIndex := renvoParseExpressionRoot(rhs, p, assignTok+1, stmt.endTok)
+			if rhsIndex < 0 || !renvoEmitWideCompoundLocal(g, rhs, rhsIndex, valueOffset, elemType.kind, assignTok) {
+				return -1
+			}
+			renvoAsmLoadSecondaryStack(a, addrOffset)
+			renvoEmitCopyStackToMemSecondary(g, valueOffset, 0, renvoTypeSize(meta, elemTypeIndex))
+			return 1
+		}
 		renvoAsmCopyPrimaryToSecondary(a)
 		renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, elemSize)
 		renvoAsmPushPrimary(a)
@@ -8799,6 +8908,18 @@ func renvoEmitLinearCompoundLValue(g *renvoLinearGen, stmt *renvoStmt, assignTok
 			return -1
 		}
 		rhsIndex := len(rhs.exprs) - 1
+		if g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideInt(lhsResolved.kind) {
+			valueType := renvoInferParsedExprType(g, lhs, lhsIndex)
+			valueOffset := renvoAddUnnamedLocal(g, valueType)
+			renvoAsmLoadSecondaryStack(a, addrOffset)
+			renvoEmitCopyMemSecondaryToStack(g, valueOffset, renvoTypeSize(meta, valueType))
+			if !renvoEmitWideCompoundLocal(g, rhs, rhsIndex, valueOffset, lhsResolved.kind, assignTok) {
+				return -1
+			}
+			renvoAsmLoadSecondaryStack(a, addrOffset)
+			renvoEmitCopyStackToMemSecondary(g, valueOffset, 0, renvoTypeSize(meta, valueType))
+			return 1
+		}
 		if lhsResolved.kind == renvoTypeString {
 			if !renvoTok2Is(p, assignTok, '+', '=') || lhs.exprs[lhsRoot.left].kind != renvoExprIdent || !renvoEmitStringConcatPairValueRegs(g, lhs, lhsIndex, rhs, rhsIndex) {
 				return -1
@@ -8816,7 +8937,7 @@ func renvoEmitLinearCompoundLValue(g *renvoLinearGen, stmt *renvoStmt, assignTok
 			return -1
 		}
 		renvoAsmPopTertiary(a)
-		if !renvoEmitTypedPrimaryTertiaryOp(g, assignTok, lhsResolved.kind == renvoTypeFloat64) {
+		if !renvoEmitTypedPrimaryTertiaryOp(g, assignTok, lhsResolved.kind) {
 			return -1
 		}
 		renvoAsmNormalizePrimaryForKind(a, lhsResolved.kind)
@@ -9123,6 +9244,24 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 			}
 			return true
 		}
+		if g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideInt(targetResolved.kind) {
+			valueOffset := offset
+			if globalOffset >= 0 {
+				valueOffset = renvoAddUnnamedLocal(g, targetType)
+				for at := 0; at < renvoTypeSize(meta, targetType); at += g.c.renvoNativeIntSize {
+					renvoAsmCopyBssToStackSlot(a, globalOffset+at, valueOffset-at)
+				}
+			}
+			if !renvoEmitWideCompoundLocal(g, ep, rootIndex, valueOffset, targetResolved.kind, assignTok) {
+				return false
+			}
+			if globalOffset >= 0 {
+				renvoEmitCopyStackToBss(g, valueOffset, globalOffset, renvoTypeSize(meta, targetType))
+			} else if fieldStackOffset < 0 {
+				renvoClearLocalConstAtOffset(g, offset)
+			}
+			return true
+		}
 		memoryOp := 0
 		if renvoTok2Is(p, assignTok, '+', '=') {
 			memoryOp = 0x0148
@@ -9153,7 +9292,7 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 			return false
 		}
 		renvoAsmPopTertiary(a)
-		if !renvoEmitTypedPrimaryTertiaryOp(g, assignTok, targetResolved.kind == renvoTypeFloat64) {
+		if !renvoEmitTypedPrimaryTertiaryOp(g, assignTok, targetResolved.kind) {
 			return false
 		}
 		renvoAsmNormalizePrimaryForKind(a, targetResolved.kind)
@@ -9181,7 +9320,7 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 		renvoAsmStoreSliceBss(a, globalOffset)
 		return true
 	}
-	if globalOffset >= 0 && (renvoTypeIsStruct(meta, targetType) || targetResolved.kind == renvoTypeInterface || g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideInt(targetResolved.kind)) {
+	if globalOffset >= 0 && (renvoTypeIsStruct(meta, targetType) || targetResolved.kind == renvoTypeInterface || targetResolved.kind == renvoTypeComplex || g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideInt(targetResolved.kind)) {
 		tempOffset := renvoAddUnnamedLocal(g, targetType)
 		if !renvoEmitTypedAssign(g, ep, rootIndex, tempOffset) {
 			return false
@@ -9345,11 +9484,17 @@ func renvoEmitMultiAssign(g *renvoLinearGen, stmt *renvoStmt, assignTok int) boo
 	if lhsCount != rhsCount {
 		return false
 	}
+	targetTypes := renvoFixedIntScratch(lhsCount)
 	for i := 0; i < lhsCount; i++ {
 		target := renvoNewExprParse()
 		renvoNonNil(target)
+		targetType := 0
 		if renvoParseExpressionOK(target, p, lhs[i*2], lhs[i*2+1]) {
-			root := &target.exprs[len(target.exprs)-1]
+			rootIndex := len(target.exprs) - 1
+			root := &target.exprs[rootIndex]
+			if stmt.kind == renvoStmtAssign {
+				targetType = renvoInferParsedExprType(g, target, rootIndex)
+			}
 			if root.kind == renvoExprIdent &&
 				(root.nameEnd != root.nameStart+1 || renvo_runtime_UnsafeByteAt(p.src, root.nameStart) != '_') {
 				localIndex := renvoFindLocalIndex(g, root.nameStart, root.nameEnd)
@@ -9361,6 +9506,7 @@ func renvoEmitMultiAssign(g *renvoLinearGen, stmt *renvoStmt, assignTok int) boo
 				}
 			}
 		}
+		targetTypes = append(targetTypes, targetType)
 	}
 	if stmt.kind == renvoStmtAssign && lhsCount > 1 {
 		for i := 0; i < lhsCount; i++ {
@@ -9391,6 +9537,9 @@ func renvoEmitMultiAssign(g *renvoLinearGen, stmt *renvoStmt, assignTok int) boo
 			return false
 		}
 		typ := renvoInferParsedExprType(g, ep, rootIndex)
+		if targetTypes[i] != 0 {
+			typ = targetTypes[i]
+		}
 		if typ == 0 {
 			typ = renvoTypeInt
 		}
@@ -10311,6 +10460,12 @@ func renvoEmitInterfaceAssignToLocal(g *renvoLinearGen, ep *renvoExprParse, idx 
 			}
 			return renvoEmitRecoverToLocal(g, offset)
 		}
+		if e.kind == renvoExprCall && e.argCount == 1 {
+			conversionType := renvoConversionTypeFromExpr(g, ep, e.left)
+			if conversionType != 0 && renvoResolveType(g.meta, conversionType).kind == renvoTypeInterface {
+				return renvoEmitInterfaceAssignToLocal(g, ep, ep.args[e.firstArg], offset)
+			}
+		}
 	}
 	sourceType := renvoInferParsedExprType(g, ep, idx)
 	source := renvoResolveType(g.meta, sourceType)
@@ -10339,7 +10494,7 @@ func renvoEmitInterfaceAssignToLocal(g *renvoLinearGen, ep *renvoExprParse, idx 
 		return false
 	}
 	if size <= renvoBackendValueSlotSize {
-		renvoAsmCopyStackSlot(&g.asm, valueOffset, offset)
+		renvoEmitCopyStackToStack(g, valueOffset, offset, size)
 	} else {
 		sizeOffset := renvoAddUnnamedLocal(g, renvoTypeInt)
 		addrOffset := renvoAddUnnamedLocal(g, renvoTypeInt)
@@ -11271,7 +11426,12 @@ func renvoEmitCompositeFieldToStack(g *renvoLinearGen, ep *renvoExprParse, idx i
 	if fieldResolved.kind == renvoTypeArray {
 		e := &ep.exprs[idx]
 		if e.kind != renvoExprComposite {
-			return false
+			tempOffset := renvoAddUnnamedLocal(g, fieldType)
+			if !renvoEmitTypedAssign(g, ep, idx, tempOffset) {
+				return false
+			}
+			renvoEmitCopyStackToStack(g, tempOffset, destOffset, renvoTypeSize(g.meta, fieldType))
+			return true
 		}
 		elemSize := renvoTypeSize(g.meta, fieldResolved.elem)
 		next := 0
@@ -11310,7 +11470,7 @@ func renvoEmitCompositeFieldToStack(g *renvoLinearGen, ep *renvoExprParse, idx i
 		renvoAsmStorePrimarySecondaryStack(a, destOffset, destOffset-8)
 		return true
 	}
-	if fieldResolved.kind == renvoTypeStruct || fieldResolved.kind == renvoTypeInterface || g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideInt(fieldResolved.kind) {
+	if fieldResolved.kind == renvoTypeStruct || fieldResolved.kind == renvoTypeInterface || fieldResolved.kind == renvoTypeComplex || g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideInt(fieldResolved.kind) {
 		tempOffset := renvoAddUnnamedLocal(g, fieldType)
 		if !renvoEmitTypedAssign(g, ep, idx, tempOffset) {
 			return false
@@ -11366,6 +11526,8 @@ func renvoEmitRTGCopyStructAddressToAddress(g *renvoLinearGen, typ int, sourceOf
 const renvoNativeCopyStackToStack = 1
 const renvoNativeCopyStackToMem = 2
 const renvoNativeCopyMemToStack = 3
+const renvoNativeCopyStackToBSS = 4
+const renvoNativeCopyBSSToStack = 5
 
 func renvoEmitCopyNative(g *renvoLinearGen, srcOffset int, destOffset int, size int, mode int) {
 	renvoNonNil(g)
@@ -11377,11 +11539,15 @@ func renvoEmitCopyNative(g *renvoLinearGen, srcOffset int, destOffset int, size 
 		}
 		if mode == renvoNativeCopyMemToStack {
 			renvoAsmLoadPrimaryMemSecondaryDispSize(a, at, chunkSize)
+		} else if mode == renvoNativeCopyBSSToStack {
+			renvoAsmLoadPrimaryBss(a, srcOffset+at)
 		} else {
 			renvoAsmLoadPrimaryStack(a, srcOffset-at)
 		}
 		if mode == renvoNativeCopyStackToMem {
 			renvoAsmStorePrimaryMemSecondaryDispSize(a, destOffset+at, chunkSize)
+		} else if mode == renvoNativeCopyStackToBSS {
+			renvoAsmStorePrimaryBss(a, destOffset+at)
 		} else {
 			renvoAsmStorePrimaryStackSize(a, destOffset-at, chunkSize)
 		}
@@ -11979,10 +12145,18 @@ func renvoEmitTypedLocalArgReverse(g *renvoLinearGen, offset int, typ int) int {
 
 func renvoCallWordSize(g *renvoLinearGen, typ int) int {
 	t := renvoResolveType(g.meta, typ)
-	if t.kind == renvoTypeArray || g.c.renvoNativeIntSize == 4 && (renvoTypeKindIsWideInt(t.kind) || t.kind == renvoTypeStruct && t.nativeAlign > 0) {
+	if t.kind == renvoTypeArray || g.c.renvoNativeIntSize == 4 && (renvoTypeKindIsWideInt(t.kind) || t.kind == renvoTypeStruct && renvoTypeNeedsDenseCallWords(g.meta, typ)) {
 		return g.c.renvoNativeIntSize
 	}
 	return renvoBackendValueSlotSize
+}
+
+func renvoTypeNeedsDenseCallWords(meta *renvoMeta, typ int) bool {
+	if typ <= 0 || typ >= len(meta.types) {
+		return false
+	}
+	t := renvoResolveType(meta, typ)
+	return renvoTypeKindIsWideInt(t.kind) || t.kind == renvoTypeArray || t.kind == renvoTypeStruct && t.resolved == renvoStructLayoutDense
 }
 
 func renvoEmitFunctionValueDispatch(g *renvoLinearGen, funcType int, handleOffset int, argOffsets []int, resultOffset int) bool {
@@ -12297,14 +12471,16 @@ func renvoEmitPanicState(g *renvoLinearGen, valueOffset int) bool {
 	g.suppressPanicCheck = oldSuppressPanicCheck
 	renvoAsmStorePrimaryStack(&g.asm, nodeOffset)
 	renvoEmitStorePanicNodeField(g, nodeOffset, g.panicValueOff, 0)
+	if g.c.renvoNativeIntSize == 4 {
+		renvoEmitStorePanicNodeField(g, nodeOffset, g.panicValueOff+4, 4)
+	}
 	renvoEmitStorePanicNodeField(g, nodeOffset, g.panicTypeOff, renvoBackendValueSlotSize)
 	renvoEmitStorePanicNodeField(g, nodeOffset, g.panicIDOff, 2*renvoBackendValueSlotSize)
 	renvoEmitStorePanicNodeField(g, nodeOffset, g.panicPrevOff, 3*renvoBackendValueSlotSize)
 	renvoAsmLoadPrimaryStack(&g.asm, nodeOffset)
 	renvoAsmStorePrimaryBss(&g.asm, g.panicPrevOff)
 	renvoAsmMarkLabel(&g.asm, noPrevious)
-	renvoAsmLoadPrimaryStack(&g.asm, valueOffset)
-	renvoAsmStorePrimaryBss(&g.asm, g.panicValueOff)
+	renvoEmitCopyNative(g, valueOffset, g.panicValueOff, renvoBackendValueSlotSize, renvoNativeCopyStackToBSS)
 	renvoAsmLoadPrimaryStack(&g.asm, valueOffset-renvoBackendValueSlotSize)
 	renvoAsmStorePrimaryBss(&g.asm, g.panicTypeOff)
 	renvoAsmLoadPrimaryBss(&g.asm, g.panicNextIDOff)
@@ -12580,7 +12756,7 @@ func renvoEmitRecoverToLocal(g *renvoLinearGen, offset int) bool {
 	renvoAsmJzPrimary(a, noneLabel)
 	renvoAsmLoadPrimaryBss(a, g.panicIDOff)
 	renvoAsmJzPrimary(a, noneLabel)
-	renvoAsmCopyBssToStackSlot(a, g.panicValueOff, offset)
+	renvoEmitCopyNative(g, g.panicValueOff, offset, renvoBackendValueSlotSize, renvoNativeCopyBSSToStack)
 	renvoAsmCopyBssToStackSlot(a, g.panicTypeOff, offset-renvoBackendValueSlotSize)
 	renvoAsmStoreStackImm(a, g.panicRecoverAllowedOffset, 0)
 	renvoAsmPrimaryImm(a, 1)
@@ -12588,6 +12764,9 @@ func renvoEmitRecoverToLocal(g *renvoLinearGen, offset int) bool {
 	renvoAsmCopyBssToStackSlot(a, g.panicPrevOff, previousOffset)
 	renvoAsmJzPrimary(a, clearLabel)
 	renvoEmitLoadPanicNodeField(g, previousOffset, g.panicValueOff, 0)
+	if g.c.renvoNativeIntSize == 4 {
+		renvoEmitLoadPanicNodeField(g, previousOffset, g.panicValueOff+4, 4)
+	}
 	renvoEmitLoadPanicNodeField(g, previousOffset, g.panicTypeOff, renvoBackendValueSlotSize)
 	renvoEmitLoadPanicNodeField(g, previousOffset, g.panicIDOff, 2*renvoBackendValueSlotSize)
 	renvoEmitLoadPanicNodeField(g, previousOffset, g.panicPrevOff, 3*renvoBackendValueSlotSize)
@@ -12706,13 +12885,14 @@ func renvoEmitMethodReceiverArgReverse(g *renvoLinearGen, ep *renvoExprParse, id
 		}
 		renvoAsmCopyPrimaryToSecondary(a)
 		size := renvoTypeSize(meta, receiverType)
-		if size <= renvoBackendValueSlotSize {
+		wordSize := renvoCallWordSize(g, receiverType)
+		if size <= wordSize {
 			renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, size)
 			renvoAsmPushPrimary(a)
 			return 1
 		}
-		renvoEmitPushWords(g, 0, size, renvoBackendValueSlotSize, 0)
-		return size / renvoBackendValueSlotSize
+		renvoEmitPushWords(g, 0, size, wordSize, 0)
+		return renvoAlignValue(size, wordSize) / wordSize
 	}
 	return renvoEmitCallArgReverse(g, ep, idx)
 }
@@ -12739,6 +12919,10 @@ func renvoEmitAddressPrimary(g *renvoLinearGen, ep *renvoExprParse, idx int) boo
 	if e.kind == renvoExprIdent {
 		localIndex := renvoFindLocalIndex(g, e.nameStart, e.nameEnd)
 		if localIndex >= 0 {
+			if g.locals[localIndex].captureOff > 0 {
+				renvoAsmLoadPrimaryStack(a, g.locals[localIndex].captureOff)
+				return true
+			}
 			renvoAsmAddressPrimaryStack(a, g.locals[localIndex].offset)
 			return true
 		}
@@ -12831,6 +13015,14 @@ func renvoEmitCallArgReverse(g *renvoLinearGen, ep *renvoExprParse, idx int) int
 	}
 	resolved := renvoResolveType(g.meta, typ)
 	renvoNonNil(resolved)
+	if resolved.kind == renvoTypeComplex {
+		if !renvoEmitComplexValueRegs(g, ep, idx) {
+			return -1
+		}
+		renvoAsmPushSecondary(a)
+		renvoAsmPushPrimary(a)
+		return 2
+	}
 	if resolved.kind == renvoTypeStruct || resolved.kind == renvoTypeArray || g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideInt(resolved.kind) {
 		return renvoEmitStructArgReverse(g, ep, idx, typ)
 	}
@@ -13308,6 +13500,14 @@ func renvoEmitAppendOneToLocation(g *renvoLinearGen, stmt *renvoStmt, ep *renvoE
 		return true
 	}
 	if renvoTypeKindIsScalarValue(elem.kind) || elem.kind == renvoTypePointer {
+		elemSize := renvoScalarKindSize(g.c.renvoNativeIntSize, elem.kind)
+		if elem.kind != renvoTypePointer && elemSize > g.c.renvoNativeIntSize {
+			temp := renvoAddUnnamedLocal(g, elemType)
+			if !renvoEmitExprToLocal(g, ep, valueIndex, temp) {
+				return false
+			}
+			return renvoEmitAppendLocalToLocation(g, locEp, loc, elem, elemType, temp)
+		}
 		if !renvoEmitAppendScalarToLocation(g, ep, locEp, loc, elem.kind, valueIndex) {
 			return false
 		}
@@ -13333,6 +13533,14 @@ func renvoEmitAppendLocalToLocation(g *renvoLinearGen, locEp *renvoExprParse, lo
 	a := &g.asm
 	if renvoTypeKindIsScalarValue(elem.kind) || elem.kind == renvoTypePointer {
 		elemSize := renvoScalarKindSize(g.c.renvoNativeIntSize, elem.kind)
+		if elem.kind != renvoTypePointer && elemSize > g.c.renvoNativeIntSize {
+			if !renvoEmitAppendDestPrimary(g, locEp, loc, elemSize) {
+				return false
+			}
+			renvoAsmCopyPrimaryToSecondary(a)
+			renvoEmitCopyStackToMemSecondary(g, offset, 0, elemSize)
+			return true
+		}
 		renvoAsmPushStack(a, offset)
 		if elem.kind == renvoTypePointer || g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArchAarch64 || elemSize == 1 || elemSize == 2 || elemSize == 4 {
 			if !renvoEmitAppendDestPrimary(g, locEp, loc, elemSize) {
@@ -14492,7 +14700,7 @@ func renvoEmitIndexAddressPrimary(g *renvoLinearGen, ep *renvoExprParse, indexId
 			if !renvoEmitAddressPrimary(g, ep, indexExpr.left) {
 				return false
 			}
-		} else if base.kind == renvoExprCall {
+		} else if base.kind == renvoExprCall || base.kind == renvoExprComposite {
 			baseType := renvoInferParsedExprType(g, ep, indexExpr.left)
 			tempOffset := renvoAddUnnamedLocal(g, baseType)
 			if !renvoEmitTypedAssign(g, ep, indexExpr.left, tempOffset) {
@@ -15327,8 +15535,7 @@ func renvoEmitInterfaceMethodCall(g *renvoLinearGen, ep *renvoExprParse, idx int
 
 		wordCount := 0
 		if receiverSize <= renvoBackendValueSlotSize {
-			renvoAsmPushStackWord(&g.asm, receiverOffset)
-			wordCount++
+			wordCount += renvoEmitTypedLocalArgReverse(g, receiverOffset, fn.receiverType)
 		} else {
 			renvoAsmLoadSecondaryStack(&g.asm, receiverOffset)
 			renvoEmitPushWords(g, 0, receiverSize, renvoBackendValueSlotSize, 0)
@@ -16460,9 +16667,10 @@ func renvoAsmCmpTertiaryPrimarySet(a *renvoAsm, setcc int) {
 	}
 	renvoAmd64AsmCmpRcxRaxSet(a, setcc)
 }
-func renvoEmitTypedPrimaryTertiaryOp(g *renvoLinearGen, tok int, float bool) bool {
+func renvoEmitTypedPrimaryTertiaryOp(g *renvoLinearGen, tok int, kind int) bool {
 	renvoNonNil(g)
 	a := &g.asm
+	float := kind == renvoTypeFloat64
 	if float && renvoTok2Is(g.prog, tok, '*', '=') {
 		if !renvoEmitPrimaryTertiaryOp(g, tok) {
 			return false
@@ -16473,7 +16681,48 @@ func renvoEmitTypedPrimaryTertiaryOp(g *renvoLinearGen, tok int, float bool) boo
 	if float && renvoTok2Is(g.prog, tok, '/', '=') {
 		renvoAsmShlTertiaryImm(a, 2)
 	}
+	if !float && (kind == renvoTypeByte || kind >= renvoTypeUint16 && kind <= renvoTypeUint64) && (renvoTokStartsWith(g.prog, tok, '/') || renvoTokStartsWith(g.prog, tok, '%')) {
+		return renvoEmitUnsignedPrimaryTertiaryOp(g, tok, kind)
+	}
 	return renvoEmitPrimaryTertiaryOp(g, tok)
+}
+
+func renvoEmitUnsignedPrimaryTertiaryOp(g *renvoLinearGen, tok int, kind int) bool {
+	if kind == renvoTypeByte || kind == renvoTypeUint16 {
+		return renvoEmitPrimaryTertiaryOp(g, tok)
+	}
+	mod := renvoTokStartsWith(g.prog, tok, '%')
+	renvoEmitRuntimeNonNilPrimary(g)
+	if g.c.renvoNativeIntSize == 4 && (renvoPreparedBackend != 0 || g.c.renvoTargetArch == renvoArchWasm32) {
+		dividend := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+		divisor := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+		quotient := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+		remainder := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+		renvoAsmStorePrimaryStack(&g.asm, divisor)
+		renvoAsmStoreStackImm(&g.asm, divisor-g.c.renvoNativeIntSize, 0)
+		renvoAsmCopyTertiaryToPrimary(&g.asm)
+		renvoAsmStorePrimaryStack(&g.asm, dividend)
+		renvoAsmStoreStackImm(&g.asm, dividend-g.c.renvoNativeIntSize, 0)
+		renvoEmitWideUnsignedDivStack(g, quotient, remainder, dividend, divisor)
+		if mod {
+			renvoAsmLoadPrimaryStack(&g.asm, remainder)
+		} else {
+			renvoAsmLoadPrimaryStack(&g.asm, quotient)
+		}
+		return true
+	}
+	if g.c.renvoTargetArch == renvoArch386 {
+		renvo386AsmUnsignedDivLeftRcxRightRax(&g.asm, mod)
+	} else if g.c.renvoTargetArch == renvoArchArm {
+		renvoArmAsmUnsignedDivLeftRcxRightRax(&g.asm, mod)
+	} else if g.c.renvoTargetArch == renvoArchAarch64 {
+		renvoAarch64AsmUnsignedDivLeftRcxRightRax(&g.asm, mod)
+	} else if g.c.renvoTargetArch == renvoArchAmd64 {
+		renvoAmd64AsmUnsignedDivLeftRcxRightRax(&g.asm, mod)
+	} else {
+		return false
+	}
+	return true
 }
 
 func renvoEmitPrimaryTertiaryOp(g *renvoLinearGen, tok int) bool {
@@ -16631,7 +16880,7 @@ func renvoEmitWideCompareJump(g *renvoLinearGen, ep *renvoExprParse, e *renvoExp
 		leftType := renvoInferParsedExprType(g, ep, leftIndex)
 		rightType := renvoInferParsedExprType(g, ep, rightIndex)
 		leftResolved := renvoResolveType(g.meta, leftType)
-		if leftResolved.kind == renvoTypeArray || leftResolved.kind == renvoTypeStruct {
+		if leftResolved.kind == renvoTypeArray || leftResolved.kind == renvoTypeStruct || leftResolved.kind == renvoTypeComplex {
 			return false
 		}
 		if renvoTypeIsString(g.meta, leftType) || renvoTypeIsString(g.meta, rightType) {
@@ -16795,16 +17044,6 @@ func renvoEmitWideStructReturnExpr(g *renvoLinearGen, ep *renvoExprParse, idx in
 		if localIndex < 0 || renvoTypeSize(meta, g.locals[localIndex].typ) != size {
 			return false
 		}
-		if renvoPreparedBackend != 0 {
-			source := renvoAddUnnamedLocal(g, renvoTypeInt)
-			dest := renvoAddUnnamedLocal(g, renvoTypeInt)
-			renvoAsmAddressPrimaryStack(a, g.locals[localIndex].offset)
-			renvoAsmStorePrimaryStack(a, source)
-			renvoAsmLoadPrimaryStack(a, g.returnStruct)
-			renvoAsmStorePrimaryStack(a, dest)
-			renvoEmitRTGCopyStructAddressToAddress(g, resultType, source, dest)
-			return true
-		}
 		renvoEmitCopyStackToMemSecondary(g, g.locals[localIndex].offset, 0, size)
 		return true
 	}
@@ -16827,12 +17066,10 @@ func renvoEmitWideStructReturnExpr(g *renvoLinearGen, ep *renvoExprParse, idx in
 		renvoAsmCopyPrimaryToSecondary(a)
 		renvoAsmAddSecondaryTertiary(a)
 		if renvoPreparedBackend != 0 {
-			source := renvoAddUnnamedLocal(g, renvoTypeInt)
-			dest := renvoAddUnnamedLocal(g, renvoTypeInt)
-			renvoAsmStoreSecondaryStack(a, source)
-			renvoAsmLoadPrimaryStack(a, g.returnStruct)
-			renvoAsmStorePrimaryStack(a, dest)
-			renvoEmitRTGCopyStructAddressToAddress(g, resultType, source, dest)
+			temp := renvoAddUnnamedLocal(g, resultType)
+			renvoEmitCopyMemSecondaryToStack(g, temp, size)
+			renvoAsmLoadSecondaryStack(a, g.returnStruct)
+			renvoEmitCopyStackToMemSecondary(g, temp, 0, size)
 			return true
 		}
 		renvoAsmLoadTertiaryStack(a, g.returnStruct)
@@ -16916,7 +17153,7 @@ func renvoEmitWideFloatBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int
 			return false
 		}
 		renvoAsmPopTertiary(a)
-		renvoAsmEmit24(a, 0xc1af0f)
+		renvoAsmMulPrimaryTertiary(g)
 		renvoAsmSarPrimaryImm(a, 2)
 		return true
 	}
@@ -16949,7 +17186,10 @@ func renvoEmitWideIndexedStructField(g *renvoLinearGen, ep *renvoExprParse, inde
 	indexExpr := &ep.exprs[indexIdx]
 	leftType := renvoInferParsedExprType(g, ep, indexExpr.left)
 	sliceType := renvoResolveType(g.meta, leftType)
-	if sliceType.kind != renvoTypeSlice {
+	if sliceType.kind == renvoTypePointer {
+		sliceType = renvoResolveType(g.meta, sliceType.elem)
+	}
+	if sliceType.kind != renvoTypeSlice && sliceType.kind != renvoTypeArray {
 		return false
 	}
 	elemType := renvoResolveType(g.meta, sliceType.elem)
@@ -16983,7 +17223,7 @@ func renvoEmitWideSelectorAddressSecondary(g *renvoLinearGen, ep *renvoExprParse
 	if renvoStructPromotedPointerField(g, baseType, e.nameStart, e.nameEnd) >= 0 {
 		return renvoEmitPromotedPointerSelectorAddress(g, ep, idx, baseType)
 	}
-	if base.kind == renvoExprCall {
+	if base.kind == renvoExprCall || base.kind == renvoExprAssert {
 		baseResolved := renvoResolveType(meta, baseType)
 		if baseResolved.kind != renvoTypePointer && baseResolved.kind != renvoTypeStruct {
 			return false
@@ -17000,7 +17240,7 @@ func renvoEmitWideSelectorAddressSecondary(g *renvoLinearGen, ep *renvoExprParse
 			return true
 		}
 	}
-	if base.kind == renvoExprComposite || base.kind == renvoExprCall {
+	if base.kind == renvoExprComposite || base.kind == renvoExprCall || base.kind == renvoExprAssert {
 		offset := renvoAddUnnamedLocal(g, baseType)
 		if !renvoEmitTypedAssign(g, ep, e.left, offset) {
 			return false
@@ -17330,7 +17570,9 @@ func renvoEmitWideIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 				localIndex := renvoFindLocalIndex(g, inner.nameStart, inner.nameEnd)
 				if localIndex >= 0 {
 					renvoInvalidateCheckedPointerLocal(g, localIndex)
-					if renvoPreparedBackend != 0 {
+					if g.locals[localIndex].captureOff > 0 {
+						renvoAsmLoadPrimaryStack(a, g.locals[localIndex].captureOff)
+					} else if renvoPreparedBackend != 0 {
 						renvoAsmAddressPrimaryStack(a, g.locals[localIndex].offset)
 					} else {
 						renvoAsmStackMem(a, g.locals[localIndex].offset, 0x8d48, 0x45, 0x85)
@@ -17400,7 +17642,7 @@ func renvoEmitWideIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		if renvoTok2Is(p, e.tok, '=', '=') || renvoTok2Is(p, e.tok, '!', '=') {
 			leftType := renvoInferParsedExprType(g, ep, e.left)
 			leftResolved := renvoResolveType(g.meta, leftType)
-			if leftResolved.kind == renvoTypeArray || leftResolved.kind == renvoTypeStruct {
+			if leftResolved.kind == renvoTypeArray || leftResolved.kind == renvoTypeStruct || leftResolved.kind == renvoTypeComplex {
 				return renvoEmitCompositeCompare(g, ep, e, leftType)
 			}
 		}
@@ -17450,6 +17692,10 @@ func renvoEmitWideIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		unsignedShift := result.kind == renvoTypeByte || result.kind >= renvoTypeUint16 && result.kind <= renvoTypeUint64
 		if renvoTok2Is(p, e.tok, '>', '>') && unsignedShift {
 			if !renvo386EmitRaxRcxOp(g, e.tok, true) {
+				return false
+			}
+		} else if unsignedShift && (renvoTokCharIs(p, e.tok, '/') || renvoTokCharIs(p, e.tok, '%')) {
+			if !renvoEmitUnsignedPrimaryTertiaryOp(g, e.tok, result.kind) {
 				return false
 			}
 		} else if !renvoEmitPrimaryTertiaryOp(g, e.tok) {
@@ -18123,7 +18369,8 @@ func renvoEmitStructReturnExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) b
 	resultType := g.meta.funcs[g.currentFunc].resultType
 	resultKind := renvoResolveType(g.meta, resultType).kind
 	renvoNonNil(resultKind)
-	if resultKind != renvoTypeStruct || idx >= 0 && idx < len(ep.exprs) && (ep.exprs[idx].kind == renvoExprAssert || ep.exprs[idx].kind == renvoExprSelector || ep.exprs[idx].kind == renvoExprIdent && renvoFindLocalIndex(g, ep.exprs[idx].nameStart, ep.exprs[idx].nameEnd) < 0) {
+	indirect := idx >= 0 && idx < len(ep.exprs) && ep.exprs[idx].kind == renvoExprUnary && renvoTokCharIs(g.prog, ep.exprs[idx].tok, '*')
+	if resultKind != renvoTypeStruct || indirect || idx >= 0 && idx < len(ep.exprs) && (ep.exprs[idx].kind == renvoExprAssert || ep.exprs[idx].kind == renvoExprSelector || ep.exprs[idx].kind == renvoExprIdent && renvoFindLocalIndex(g, ep.exprs[idx].nameStart, ep.exprs[idx].nameEnd) < 0) {
 		if g.returnStruct <= 0 {
 			return false
 		}
@@ -18368,16 +18615,25 @@ func renvoExprHasUnsignedIntType(g *renvoLinearGen, ep *renvoExprParse, idx int)
 	return kind == renvoTypeByte || kind >= renvoTypeUint16 && kind <= renvoTypeUint64
 }
 
-func renvoEmitWideScalarToLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int, sourceKind int) bool {
+func renvoEmitWideScalarToLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int, sourceKind int, destKind int) bool {
 	if renvoFixedTarget != 0 && g.c.renvoTargetArch != renvoArch386 && g.c.renvoTargetArch != renvoArchArm && g.c.renvoTargetArch != renvoArchWasm32 {
 		return false
 	}
 	renvoNonNil(g, ep)
-	if !renvoEmitIntExpr(g, ep, idx) {
+	ok := false
+	if sourceKind == renvoTypeFloat64 {
+		ok = renvoEmitScalarExprForKind(g, ep, idx, destKind)
+	} else {
+		ok = renvoEmitIntExpr(g, ep, idx)
+	}
+	if !ok {
 		return false
 	}
+	if sourceKind != renvoTypeFloat64 {
+		renvoAsmNormalizePrimaryForKind(&g.asm, sourceKind)
+	}
 	renvoAsmStorePrimaryStack(&g.asm, offset)
-	if sourceKind == renvoTypeInt || sourceKind == renvoTypeInt8 || sourceKind == renvoTypeInt16 || sourceKind == renvoTypeInt32 || sourceKind == renvoTypeInt64 {
+	if sourceKind == renvoTypeInt || sourceKind == renvoTypeInt8 || sourceKind == renvoTypeInt16 || sourceKind == renvoTypeInt32 || sourceKind == renvoTypeInt64 || sourceKind == renvoTypeFloat64 && destKind == renvoTypeInt64 {
 		renvoAsmSarPrimaryImm(&g.asm, 31)
 	} else {
 		renvoAsmPrimaryImm(&g.asm, 0)
@@ -18399,7 +18655,7 @@ func renvoEmitWideExprToLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, of
 		return true
 	}
 	if e.kind == renvoExprChar {
-		return renvoEmitWideScalarToLocal(g, ep, idx, offset, renvoTypeInt)
+		return renvoEmitWideScalarToLocal(g, ep, idx, offset, renvoTypeInt, destKind)
 	}
 	if e.kind == renvoExprIdent && renvoFindLocalIndex(g, e.nameStart, e.nameEnd) < 0 {
 		constant := renvoEvalConstExpr(g, ep, idx)
@@ -18420,10 +18676,12 @@ func renvoEmitWideExprToLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, of
 			source := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, arg))
 			renvoNonNil(source)
 			argKind := ep.exprs[arg].kind
-			if g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideInt(source.kind) || argKind == renvoExprInt || argKind == renvoExprUnary || argKind == renvoExprBinary {
+			wideSource := g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideInt(source.kind)
+			untypedInteger := (argKind == renvoExprInt || argKind == renvoExprUnary || argKind == renvoExprBinary) && renvoExprIsUntypedInteger(ep, arg)
+			if wideSource || untypedInteger {
 				return renvoEmitWideExprToLocal(g, ep, arg, offset, destKind)
 			}
-			return renvoEmitWideScalarToLocal(g, ep, arg, offset, source.kind)
+			return renvoEmitWideScalarToLocal(g, ep, arg, offset, source.kind, destKind)
 		}
 		return renvoEmitStructCallToLocal(g, ep, idx, renvoInferParsedExprType(g, ep, idx), offset)
 	}
@@ -18442,7 +18700,7 @@ func renvoEmitWideExprToLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, of
 		if renvoTokCharIs(g.prog, e.tok, '+') {
 			return renvoEmitWideExprToLocal(g, ep, e.left, offset, destKind)
 		}
-		temp := renvoAddUnnamedLocal(g, renvoTypeUint64)
+		temp := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
 		if !renvoEmitWideExprToLocal(g, ep, e.left, temp, destKind) {
 			return false
 		}
@@ -18454,8 +18712,8 @@ func renvoEmitWideExprToLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, of
 		if g.c.renvoTargetArch != renvoArchWasm32 {
 			mode = renvoWideBinaryMode(g, e.tok, signed)
 		}
-		left := renvoAddUnnamedLocal(g, renvoTypeUint64)
-		right := renvoAddUnnamedLocal(g, renvoTypeUint64)
+		left := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+		right := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
 		if !renvoEmitWideExprToLocal(g, ep, e.left, left, destKind) {
 			return false
 		}
@@ -18507,8 +18765,8 @@ func renvoEmitWideCompareExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bo
 	if !renvoTypeKindIsWideInt(leftKind) {
 		leftKind = rightKind
 	}
-	left := renvoAddUnnamedLocal(g, renvoTypeUint64)
-	right := renvoAddUnnamedLocal(g, renvoTypeUint64)
+	left := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+	right := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
 	if !renvoEmitWideExprToLocal(g, ep, e.left, left, leftKind) || !renvoEmitWideExprToLocal(g, ep, e.right, right, leftKind) {
 		return false
 	}
@@ -18523,7 +18781,7 @@ func renvoEmitWideUnaryStack(g *renvoLinearGen, dest int, source int, tok int) b
 		return false
 	}
 	renvoNonNil(g)
-	other := renvoAddUnnamedLocal(g, renvoTypeUint64)
+	other := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
 	if renvoTokCharIs(g.prog, tok, '^') {
 		renvoAsmStoreStackImm(&g.asm, other, -1)
 		renvoAsmStoreStackImm(&g.asm, other-g.c.renvoNativeIntSize, -1)
@@ -18651,7 +18909,14 @@ func renvoWideBinaryMode(g *renvoLinearGen, tok int, signed bool) int {
 	c0 := renvo_runtime_UnsafeByteAt(g.prog.src, start)
 	table := "\xff\x04\x0a\xff\xff\x0f\xff\xff\x01\xff\x03\xff\xff\xff\x00\x02\xff\xff\xff\x0b\xff\x0c\xff\xff\xff\x12\x0e\x10\xff\xff\xff\xff"
 	mode := int(table[(int(c0)^int(c0)>>3)&31])
-	if end-start == 2 {
+	if end-start == 3 && renvo_runtime_UnsafeByteAt(g.prog.src, start+2) == '=' {
+		c1 := renvo_runtime_UnsafeByteAt(g.prog.src, start+1)
+		if c0 == '<' && c1 == '<' {
+			mode = 7
+		} else if c0 == '>' && c1 == '>' {
+			mode = 8
+		}
+	} else if end-start == 2 {
 		c1 := renvo_runtime_UnsafeByteAt(g.prog.src, start+1)
 		if c1 == '=' {
 			if mode >= 16 {
@@ -18676,6 +18941,32 @@ func renvoWideBinaryMode(g *renvoLinearGen, tok int, signed bool) int {
 		mode += 4
 	}
 	return mode
+}
+
+func renvoEmitWideCompoundLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int, kind int, tok int) bool {
+	left := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+	right := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+	result := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+	renvoEmitCopyStackToStack(g, offset, left, renvoBackendValueSlotSize)
+	mode := renvoWideBinaryMode(g, tok, kind == renvoTypeInt64)
+	if mode >= 7 && mode <= 9 {
+		if !renvoEmitIntExpr(g, ep, idx) {
+			return false
+		}
+		renvoAsmStorePrimaryStack(&g.asm, right)
+		renvoAsmStoreStackImm(&g.asm, right-g.c.renvoNativeIntSize, 0)
+	} else if !renvoEmitWideExprToLocal(g, ep, idx, right, kind) {
+		return false
+	}
+	if g.c.renvoTargetArch == renvoArchWasm32 {
+		if !renvoWasm32EmitWideBinaryStack(g, result, left, right, tok, kind == renvoTypeInt64) {
+			return false
+		}
+	} else if !renvoEmitNativeWideStack(g, result, left, right, mode) {
+		return false
+	}
+	renvoEmitCopyStackToStack(g, result, offset, renvoBackendValueSlotSize)
+	return true
 }
 
 func renvoAsmPrimaryToNegative(a *renvoAsm) {
@@ -18908,6 +19199,10 @@ func renvoEmitWideShiftStack(g *renvoLinearGen, dest int, left int, count int, r
 		return
 	}
 	renvoNonNil(g)
+	if g.c.renvoTarget == renvoTargetVM32 {
+		renvoEmitVM32WideShiftStack(g, dest, left, count, right, signed)
+		return
+	}
 	renvoEmitCopyStackToStack(g, left, dest, renvoBackendValueSlotSize)
 	counter := renvoAddUnnamedLocal(g, renvoTypeInt)
 	limit := renvoAddUnnamedLocal(g, renvoTypeInt)
@@ -18960,8 +19255,8 @@ func renvoEmitWideMulStack(g *renvoLinearGen, dest int, left int, right int) {
 		renvoAsmStorePrimaryStack(&g.asm, dest-g.c.renvoNativeIntSize)
 		return
 	}
-	multiplicand := renvoAddUnnamedLocal(g, renvoTypeUint64)
-	multiplier := renvoAddUnnamedLocal(g, renvoTypeUint64)
+	multiplicand := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+	multiplier := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
 	renvoEmitCopyStackToStack(g, left, multiplicand, renvoBackendValueSlotSize)
 	renvoEmitCopyStackToStack(g, right, multiplier, renvoBackendValueSlotSize)
 	renvoZeroLocalAtOffset(g, dest)
@@ -18989,8 +19284,8 @@ func renvoEmitWideNegateInPlace(g *renvoLinearGen, value int) {
 		return
 	}
 	renvoNonNil(g)
-	zero := renvoAddUnnamedLocal(g, renvoTypeUint64)
-	result := renvoAddUnnamedLocal(g, renvoTypeUint64)
+	zero := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+	result := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
 	renvoZeroLocalAtOffset(g, zero)
 	renvoEmitWideSubStack(g, result, zero, value)
 	renvoEmitCopyStackToStack(g, result, value, renvoBackendValueSlotSize)
@@ -19001,7 +19296,7 @@ func renvoEmitWideUnsignedDivStack(g *renvoLinearGen, quotient int, remainder in
 		return
 	}
 	renvoNonNil(g)
-	dividend := renvoAddUnnamedLocal(g, renvoTypeUint64)
+	dividend := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
 	renvoEmitCopyStackToStack(g, dividendValue, dividend, renvoBackendValueSlotSize)
 	renvoZeroLocalAtOffset(g, quotient)
 	renvoZeroLocalAtOffset(g, remainder)
@@ -19047,8 +19342,8 @@ func renvoEmitWideDivStack(g *renvoLinearGen, dest int, left int, right int, sig
 	renvoAsmLoadPrimaryStack(&g.asm, right)
 	renvoEmitRuntimeNonNilPrimary(g)
 	renvoAsmMarkLabel(&g.asm, nonzero)
-	dividend := renvoAddUnnamedLocal(g, renvoTypeUint64)
-	divisor := renvoAddUnnamedLocal(g, renvoTypeUint64)
+	dividend := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+	divisor := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
 	renvoEmitCopyStackToStack(g, left, dividend, renvoBackendValueSlotSize)
 	renvoEmitCopyStackToStack(g, right, divisor, renvoBackendValueSlotSize)
 	leftNegative := renvoAddUnnamedLocal(g, renvoTypeInt)
@@ -19071,8 +19366,8 @@ func renvoEmitWideDivStack(g *renvoLinearGen, dest int, left int, right int, sig
 		renvoEmitWideNegateInPlace(g, divisor)
 		renvoAsmMarkLabel(&g.asm, rightReady)
 	}
-	quotient := renvoAddUnnamedLocal(g, renvoTypeUint64)
-	remainder := renvoAddUnnamedLocal(g, renvoTypeUint64)
+	quotient := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+	remainder := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
 	renvoEmitWideUnsignedDivStack(g, quotient, remainder, dividend, divisor)
 	if remainderResult {
 		renvoEmitCopyStackToStack(g, remainder, dest, renvoBackendValueSlotSize)
@@ -19130,6 +19425,27 @@ func renvoEmitComplexValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) b
 		renvoAsmLoadPrimarySecondaryStack(&g.asm, g.locals[localIndex].offset, g.locals[localIndex].offset-renvoBackendValueSlotSize)
 		return true
 	}
+	if e.kind == renvoExprIndex {
+		if !renvoEmitIndexAddressPrimary(g, ep, idx) {
+			return false
+		}
+		renvoAsmCopyPrimaryToSecondary(&g.asm)
+		return renvoEmitComplexMemSecondaryRegs(g, renvoInferParsedExprType(g, ep, idx))
+	}
+	if e.kind == renvoExprSelector {
+		if !renvoEmitSelectorAddressSecondary(g, ep, idx) {
+			return false
+		}
+		return renvoEmitComplexMemSecondaryRegs(g, renvoInferParsedExprType(g, ep, idx))
+	}
+	if e.kind == renvoExprUnary && renvoTokCharIs(g.prog, e.tok, '*') {
+		if !renvoEmitIntExpr(g, ep, e.left) {
+			return false
+		}
+		renvoEmitRuntimeNonNilPrimary(g)
+		renvoAsmCopyPrimaryToSecondary(&g.asm)
+		return renvoEmitComplexMemSecondaryRegs(g, renvoInferParsedExprType(g, ep, idx))
+	}
 	if (e.kind == renvoExprInt || e.kind == renvoExprFloat) && renvoExprTokenIsImaginary(g.prog, e.tok) {
 		renvoAsmPrimaryImm(&g.asm, 0)
 		renvoAsmSecondaryImm(&g.asm, renvoParseImaginaryTokenScaled(g.prog, e.tok))
@@ -19152,7 +19468,10 @@ func renvoEmitComplexValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) b
 		renvoAsmPopSecondary(&g.asm)
 		return true
 	}
-	if e.kind == renvoExprBinary && (renvoTokCharIs(g.prog, e.tok, '+') || renvoTokCharIs(g.prog, e.tok, '-')) {
+	if e.kind == renvoExprCall && renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx)).kind == renvoTypeComplex {
+		return renvoEmitUserCall(g, ep, idx)
+	}
+	if e.kind == renvoExprBinary && (renvoTokCharIs(g.prog, e.tok, '+') || renvoTokCharIs(g.prog, e.tok, '-') || renvoTokCharIs(g.prog, e.tok, '*') || renvoTokCharIs(g.prog, e.tok, '/')) {
 		leftReal := renvoAddUnnamedLocal(g, renvoTypeFloat64)
 		leftImag := renvoAddUnnamedLocal(g, renvoTypeFloat64)
 		rightReal := renvoAddUnnamedLocal(g, renvoTypeFloat64)
@@ -19165,6 +19484,9 @@ func renvoEmitComplexValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) b
 			return false
 		}
 		renvoAsmStorePrimarySecondaryStack(&g.asm, rightReal, rightImag)
+		if renvoTokCharIs(g.prog, e.tok, '*') || renvoTokCharIs(g.prog, e.tok, '/') {
+			return renvoEmitComplexMultiplyDivide(g, leftReal, leftImag, rightReal, rightImag, e.tok)
+		}
 		renvoEmitComplexBinaryComponent(g, leftReal, rightReal, renvoTokCharIs(g.prog, e.tok, '-'))
 		renvoAsmStorePrimaryStack(&g.asm, leftReal)
 		renvoEmitComplexBinaryComponent(g, leftImag, rightImag, renvoTokCharIs(g.prog, e.tok, '-'))
@@ -19181,6 +19503,83 @@ func renvoEmitComplexValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) b
 		return true
 	}
 	return false
+}
+
+func renvoEmitComplexScaledProduct(g *renvoLinearGen, left int, right int) {
+	renvoAsmLoadPrimaryTertiaryStack(&g.asm, right, left)
+	renvoAsmMulPrimaryTertiary(g)
+	renvoAsmSarPrimaryImm(&g.asm, 2)
+}
+
+func renvoEmitComplexProductPair(g *renvoLinearGen, firstLeft int, firstRight int, secondLeft int, secondRight int, subtract bool) {
+	temp := renvoAddUnnamedLocal(g, renvoTypeFloat64)
+	renvoEmitComplexScaledProduct(g, firstLeft, firstRight)
+	renvoAsmStorePrimaryStack(&g.asm, temp)
+	renvoEmitComplexScaledProduct(g, secondLeft, secondRight)
+	if subtract {
+		renvoAsmCopyPrimaryToTertiary(&g.asm)
+		renvoAsmLoadPrimaryStack(&g.asm, temp)
+		renvoAsmSubPrimaryTertiary(&g.asm)
+	} else {
+		renvoAsmLoadTertiaryStack(&g.asm, temp)
+		renvoAsmAddPrimaryTertiary(&g.asm)
+	}
+}
+
+func renvoAsmMulPrimaryTertiary(g *renvoLinearGen) {
+	a := &g.asm
+	if renvoPreparedBackend != 0 {
+		renvoRTGDirectMultiply(a, renvoRTGPrimary, renvoRTGTertiary)
+	} else if g.c.renvoTargetArch == renvoArchWasm32 {
+		renvoWasm32EmitRegReg(a, renvoWasm32OpMulRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+	} else if g.c.renvoTargetArch == renvoArchAarch64 {
+		renvoAarch64AsmEmit(a, 0x9b007c40)
+	} else if g.c.renvoTargetArch == renvoArchArm {
+		renvoArmAsmMulRegReg(a, renvoArmRegRax, renvoArmRegRcx, renvoArmRegRax)
+	} else if g.c.renvoTargetArch == renvoArch386 {
+		renvoAsmEmit24(a, 0xc1af0f)
+	} else {
+		renvoAsmEmit32(a, 0xc1af0f48)
+	}
+}
+
+func renvoEmitComplexMultiplyDivide(g *renvoLinearGen, leftReal int, leftImag int, rightReal int, rightImag int, tok int) bool {
+	realPart := renvoAddUnnamedLocal(g, renvoTypeFloat64)
+	imagPart := renvoAddUnnamedLocal(g, renvoTypeFloat64)
+	multiply := renvoTokCharIs(g.prog, tok, '*')
+	renvoEmitComplexProductPair(g, leftReal, rightReal, leftImag, rightImag, multiply)
+	renvoAsmStorePrimaryStack(&g.asm, realPart)
+	renvoEmitComplexProductPair(g, leftImag, rightReal, leftReal, rightImag, !multiply)
+	renvoAsmStorePrimaryStack(&g.asm, imagPart)
+	if !multiply {
+		denominator := renvoAddUnnamedLocal(g, renvoTypeFloat64)
+		renvoEmitComplexProductPair(g, rightReal, rightReal, rightImag, rightImag, false)
+		renvoAsmStorePrimaryStack(&g.asm, denominator)
+		renvoAsmLoadPrimaryTertiaryStack(&g.asm, denominator, realPart)
+		renvoAsmShlTertiaryImm(&g.asm, 2)
+		if !renvoEmitPrimaryTertiaryOp(g, tok) {
+			return false
+		}
+		renvoAsmStorePrimaryStack(&g.asm, realPart)
+		renvoAsmLoadPrimaryTertiaryStack(&g.asm, denominator, imagPart)
+		renvoAsmShlTertiaryImm(&g.asm, 2)
+		if !renvoEmitPrimaryTertiaryOp(g, tok) {
+			return false
+		}
+		renvoAsmStorePrimaryStack(&g.asm, imagPart)
+	}
+	renvoAsmLoadPrimarySecondaryStack(&g.asm, realPart, imagPart)
+	return true
+}
+
+func renvoEmitComplexMemSecondaryRegs(g *renvoLinearGen, typ int) bool {
+	if renvoResolveType(g.meta, typ).kind != renvoTypeComplex {
+		return false
+	}
+	offset := renvoAddUnnamedLocal(g, typ)
+	renvoEmitCopyMemSecondaryToStack(g, offset, renvoTypeSize(g.meta, typ))
+	renvoAsmLoadPrimarySecondaryStack(&g.asm, offset, offset-renvoBackendValueSlotSize)
+	return true
 }
 
 func renvoEmitComplexBinaryComponent(g *renvoLinearGen, left int, right int, subtract bool) {
@@ -19483,15 +19882,7 @@ func renvoEmitNativeFloatBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx i
 	}
 	renvoAsmPopTertiary(a)
 	if multiply {
-		if renvoPreparedBackend != 0 {
-			renvoRTGDirectMultiply(a, renvoRTGPrimary, renvoRTGTertiary)
-		} else if g.c.renvoTargetArch == renvoArchAarch64 {
-			renvoAarch64AsmEmit(a, 0x9b007c40)
-		} else if g.c.renvoTargetArch == renvoArchArm {
-			renvoArmAsmMulRegReg(a, renvoArmRegRax, renvoArmRegRcx, renvoArmRegRax)
-		} else {
-			renvoAsmEmit32(a, 0xc1af0f48)
-		}
+		renvoAsmMulPrimaryTertiary(g)
 		renvoAsmSarPrimaryImm(a, 2)
 		return true
 	}
@@ -19618,6 +20009,10 @@ func renvoEmitIndexedSelectorAddressSecondary(g *renvoLinearGen, ep *renvoExprPa
 	leftType := renvoInferParsedExprType(g, ep, indexExpr.left)
 	sliceType := renvoResolveType(meta, leftType)
 	renvoNonNil(sliceType)
+	if sliceType.kind == renvoTypePointer {
+		sliceType = renvoResolveType(meta, sliceType.elem)
+		renvoNonNil(sliceType)
+	}
 	if sliceType.kind != renvoTypeSlice && sliceType.kind != renvoTypeArray {
 		return false
 	}
@@ -19961,7 +20356,11 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 				localIndex := renvoFindLocalIndex(g, inner.nameStart, inner.nameEnd)
 				if localIndex >= 0 {
 					renvoInvalidateCheckedPointerLocal(g, localIndex)
-					renvoAsmAddressPrimaryStack(a, g.locals[localIndex].offset)
+					if g.locals[localIndex].captureOff > 0 {
+						renvoAsmLoadPrimaryStack(a, g.locals[localIndex].captureOff)
+					} else {
+						renvoAsmAddressPrimaryStack(a, g.locals[localIndex].offset)
+					}
 					return true
 				}
 				globalOffset := renvoFindGlobalOffset(g, inner.nameStart, inner.nameEnd)
@@ -20041,7 +20440,7 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 			leftType := renvoInferParsedExprType(g, ep, e.left)
 			leftResolved := renvoResolveType(meta, leftType)
 			renvoNonNil(leftResolved)
-			if leftResolved.kind == renvoTypeArray || leftResolved.kind == renvoTypeStruct {
+			if leftResolved.kind == renvoTypeArray || leftResolved.kind == renvoTypeStruct || leftResolved.kind == renvoTypeComplex {
 				return renvoEmitCompositeCompare(g, ep, e, leftType)
 			}
 		}
@@ -20204,7 +20603,13 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 				return true
 			}
 		}
-		if !renvoEmitPrimaryTertiaryOp(g, e.tok) {
+		resultKind := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx)).kind
+		unsigned := resultKind == renvoTypeByte || resultKind >= renvoTypeUint16 && resultKind <= renvoTypeUint64
+		if unsigned && (op0 == '/' || op0 == '%') {
+			if !renvoEmitUnsignedPrimaryTertiaryOp(g, e.tok, resultKind) {
+				return false
+			}
+		} else if !renvoEmitPrimaryTertiaryOp(g, e.tok) {
 			return false
 		}
 		renvoNormalizeNativeExprPrimary(g, ep, idx)
@@ -20294,7 +20699,7 @@ func renvoEmitNativeCompareJump(g *renvoLinearGen, ep *renvoExprParse, e *renvoE
 		rightType := renvoInferParsedExprType(g, ep, rightIndex)
 		leftResolved := renvoResolveType(g.meta, leftType)
 		renvoNonNil(leftResolved)
-		if leftResolved.kind == renvoTypeArray || leftResolved.kind == renvoTypeStruct {
+		if leftResolved.kind == renvoTypeArray || leftResolved.kind == renvoTypeStruct || leftResolved.kind == renvoTypeComplex {
 			return false
 		}
 		if renvoTypeIsString(g.meta, leftType) || renvoTypeIsString(g.meta, rightType) {
@@ -20354,16 +20759,6 @@ func renvoEmitNativeStructReturnExpr(g *renvoLinearGen, ep *renvoExprParse, idx 
 		if localIndex < 0 || renvoTypeSize(meta, g.locals[localIndex].typ) != size {
 			return false
 		}
-		if renvoPreparedBackend != 0 {
-			source := renvoAddUnnamedLocal(g, renvoTypeInt)
-			dest := renvoAddUnnamedLocal(g, renvoTypeInt)
-			renvoAsmAddressPrimaryStack(a, g.locals[localIndex].offset)
-			renvoAsmStorePrimaryStack(a, source)
-			renvoAsmLoadPrimaryStack(a, g.returnStruct)
-			renvoAsmStorePrimaryStack(a, dest)
-			renvoEmitRTGCopyStructAddressToAddress(g, resultType, source, dest)
-			return true
-		}
 		renvoEmitCopyStackToMemSecondary(g, g.locals[localIndex].offset, 0, size)
 		return true
 	}
@@ -20388,12 +20783,10 @@ func renvoEmitNativeStructReturnExpr(g *renvoLinearGen, ep *renvoExprParse, idx 
 		renvoAsmCopyPrimaryToSecondary(a)
 		renvoAsmAddSecondaryTertiary(a)
 		if renvoPreparedBackend != 0 {
-			source := renvoAddUnnamedLocal(g, renvoTypeInt)
-			dest := renvoAddUnnamedLocal(g, renvoTypeInt)
-			renvoAsmStoreSecondaryStack(a, source)
-			renvoAsmLoadPrimaryStack(a, g.returnStruct)
-			renvoAsmStorePrimaryStack(a, dest)
-			renvoEmitRTGCopyStructAddressToAddress(g, resultType, source, dest)
+			temp := renvoAddUnnamedLocal(g, resultType)
+			renvoEmitCopyMemSecondaryToStack(g, temp, size)
+			renvoAsmLoadSecondaryStack(a, g.returnStruct)
+			renvoEmitCopyStackToMemSecondary(g, temp, 0, size)
 			return true
 		}
 		renvoAsmLoadTertiaryStack(a, g.returnStruct)
@@ -20582,7 +20975,11 @@ func renvoEmitNativeIndexedStructField(g *renvoLinearGen, ep *renvoExprParse, in
 	leftType := renvoInferParsedExprType(g, ep, indexExpr.left)
 	sliceType := renvoResolveType(g.meta, leftType)
 	renvoNonNil(sliceType)
-	if sliceType.kind != renvoTypeSlice {
+	if sliceType.kind == renvoTypePointer {
+		sliceType = renvoResolveType(g.meta, sliceType.elem)
+		renvoNonNil(sliceType)
+	}
+	if sliceType.kind != renvoTypeSlice && sliceType.kind != renvoTypeArray {
 		return false
 	}
 	elemType := renvoResolveType(g.meta, sliceType.elem)
@@ -20617,7 +21014,7 @@ func renvoEmitNativeSelectorAddressSecondary(g *renvoLinearGen, ep *renvoExprPar
 	if renvoStructPromotedPointerField(g, baseType, e.nameStart, e.nameEnd) >= 0 {
 		return renvoEmitPromotedPointerSelectorAddress(g, ep, idx, baseType)
 	}
-	if base.kind == renvoExprCall {
+	if base.kind == renvoExprCall || base.kind == renvoExprAssert {
 		baseResolved := renvoResolveType(meta, baseType)
 		renvoNonNil(baseResolved)
 		if baseResolved.kind != renvoTypePointer && baseResolved.kind != renvoTypeStruct {
@@ -20632,7 +21029,7 @@ func renvoEmitNativeSelectorAddressSecondary(g *renvoLinearGen, ep *renvoExprPar
 			return true
 		}
 	}
-	if base.kind == renvoExprComposite || base.kind == renvoExprCall {
+	if base.kind == renvoExprComposite || base.kind == renvoExprCall || base.kind == renvoExprAssert {
 		offset := renvoAddUnnamedLocal(g, baseType)
 		if !renvoEmitTypedAssign(g, ep, e.left, offset) {
 			return false

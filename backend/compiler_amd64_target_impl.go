@@ -4,7 +4,6 @@
 // unit: x86_64 0d6dd1e26d5003eb66efd859e99e533640d1ac359372c1de8605d9fcd4764332
 package main
 
-
 func renvoAmd64AsmSecondaryDisp(a *renvoAsm, disp int) {
 	if disp == 0 {
 		renvoAsmEmit8(a, 0x02)
@@ -72,9 +71,9 @@ func renvoAmd64RewritePrimaryLoad(a *renvoAsm, reg int, pushed bool) bool {
 	if load <= 0 || end != len(a.code) {
 		return false
 	}
-	a.code[at] += byte(reg*8)
+	a.code[at] += byte(reg * 8)
 	if pushed {
-		renvoTruncBytes(&a.code, len(a.code) - 1)
+		renvoTruncBytes(&a.code, len(a.code)-1)
 	}
 	a.lastPrimaryLoad = 0
 	return true
@@ -257,9 +256,17 @@ func renvoAmd64AsmDivLeftRcxRightRax(a *renvoAsm, mod bool) {
 	renvoAsmEmitText(a, "\x48\x83\xf8\xff\x75\x11\x6a\x01\x5a\x48\xc1\xe2\x3f\x48\x39\xd1\x75\x05\x48\x89\xc8\xeb\x0d\x53\x48\x89\xc3\x48\x89\xc8\x48\x99\x48\xf7\xfb\x5b")
 }
 
+func renvoAmd64AsmUnsignedDivLeftRcxRightRax(a *renvoAsm, mod bool) {
+	renvoAsmEmitText(a, "\x53\x48\x89\xc3\x48\x89\xc8\x31\xd2\x48\xf7\xf3")
+	if mod {
+		renvoAsmEmitText(a, "\x48\x89\xd0")
+	}
+	renvoAsmEmit8(a, 0x5b)
+}
+
 func renvoAmd64AsmCmpRcxRaxSet(a *renvoAsm, setcc int) {
 	renvoAsmEmit32(a, 0x0fc13948)
-	renvoAsmEmit3(a, setcc,0xc0,0xf)
+	renvoAsmEmit3(a, setcc, 0xc0, 0xf)
 	renvoAsmEmit16(a, 0xc0b6)
 }
 
@@ -294,24 +301,24 @@ func renvoAmd64AsmStoreRaxMemRdxRcx8(a *renvoAsm) {
 
 func renvoAmd64AsmLoadRaxBss(a *renvoAsm, bssOff int) {
 	renvoAsmEmit24(a, 0x058b48)
-	at:=len(a.code)
+	at := len(a.code)
 	renvoAsmEmit32(a, 0)
-	renvoAsmAddAbsReloc(a, at,bssOff,1)
-	a.lastPrimaryLoad = len(a.code)*8+5
+	renvoAsmAddAbsReloc(a, at, bssOff, 1)
+	a.lastPrimaryLoad = len(a.code)*8 + 5
 }
 
 func renvoAmd64AsmMovR10BssAddr(a *renvoAsm, bssOff int) {
 	renvoAsmEmit24(a, 0x158d4c)
-	at:=len(a.code)
+	at := len(a.code)
 	renvoAsmEmit32(a, 0)
-	renvoAsmAddAbsReloc(a, at,bssOff,1)
+	renvoAsmAddAbsReloc(a, at, bssOff, 1)
 }
 
 func renvoAmd64AsmStoreRaxBss(a *renvoAsm, bssOff int) {
 	renvoAsmEmit24(a, 0x058948)
-	at:=len(a.code)
+	at := len(a.code)
 	renvoAsmEmit32(a, 0)
-	renvoAsmAddAbsReloc(a, at,bssOff,1)
+	renvoAsmAddAbsReloc(a, at, bssOff, 1)
 }
 
 // Generated definition-owned relocation finalizer.
@@ -320,7 +327,9 @@ func rtgX8664PatchRelocations(out *renvoAsm) {
 		at := int(renvo_runtime_UnsafeInt32At(out.relocs, i)) & 2147483647
 		label := int(renvo_runtime_UnsafeInt32At(out.relocs, i+1)) & 2147483647
 		target := renvoAsmLabelPosition(out, label)
-		if target < 0 { continue }
+		if target < 0 {
+			continue
+		}
 		addend := renvoGet32At(out.code, at)
 		renvoPut32At(out.code, at, target+addend-(at+4))
 	}
