@@ -49,6 +49,22 @@ programs intentionally contain conflicting package-level symbols. Do not use
 corpus modules and local scratch programs. Prefer explicit package sets and
 `go test ./frontend_tests` plus the intended `./backend` harness tests.
 
+Use the repository-owned check driver for presubmit work:
+
+```sh
+./tools/check preflight
+./tools/check full
+```
+
+The first command is the normal development loop: it catches stale generated
+sources, package failures, and test compilation errors and enforces a one-minute
+budget. Save `full` for PR validation; it adds the backend, every compiler
+performance/resource gate, and the complete frontend suite including
+self-hosting. On a systemd-based Linux host, set
+`RENVO_CHECK_MEMORY_MAX=4G` to isolate each command from the interactive
+session. Do not change check modes to skip or weaken a gate; use a narrower
+documented mode only while diagnosing a failure.
+
 ## Frontend scope
 
 The exclusion list is closed: generics, goroutines, channels, `select`, and cgo
