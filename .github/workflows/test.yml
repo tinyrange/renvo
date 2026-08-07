@@ -204,7 +204,7 @@ jobs:
         run: ./tools/check packages
 
   performance:
-    name: Compiler performance and resources
+    name: Compiler CI resource gates
     needs: preflight
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -219,8 +219,8 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      - name: Run all compiler gates
-        run: ./tools/check performance
+      - name: Run shared-runner-safe compiler gates
+        run: ./tools/check ci-performance
 
   frontend-corpus:
     name: Frontend corpus tests
