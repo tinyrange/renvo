@@ -889,6 +889,19 @@ gate, both compiler binary/RSS policies, and the self-hosted frontend gate:
 ./tools/check performance
 ```
 
+Absolute elapsed time and maximum RSS are properties of a controlled host, not
+stable signals on GitHub's shared runners. Actions therefore uses:
+
+```sh
+./tools/check ci-performance
+```
+
+That mode retains the native compiler resource/binary policy and the
+calibrated frontend CPU/RSS/binary policy. It omits the absolute native and
+WASI performance tests, which remain mandatory through `performance` on a
+suitable development or dedicated benchmark host. Do not interpret this CI
+partition as permission to loosen or skip those limits locally.
+
 The self-hosted frontend gate builds through stage3 and currently requires:
 
 - normalized compiler CPU no more than twice a deterministic
@@ -1184,12 +1197,13 @@ rather than treating “queued” as “merged.”
 The Actions workflow handles `pull_request`, `merge_group`, and pushes to
 `main`. A fast `preflight` job gates the expensive platform suites. The final
 job is deliberately named `Required` and succeeds only when every platform,
-performance, package, and frontend job succeeds. Repository rules should
-require this single stable context with strict/merge-queue validation; do not
-require individual matrix job names as they are implementation details. Keep
-the post-merge `main` run enabled as a backstop, not as the first place a change
-is validated. New commits cancel stale in-progress PR runs, while merge-queue
-and `main` runs are never cancelled.
+shared-runner-safe resource/performance, package, and frontend job succeeds.
+Repository rules should require this single stable context with
+strict/merge-queue validation; do not require individual matrix job names as
+they are implementation details. Keep the post-merge `main` run enabled as a
+backstop, not as the first place a change is validated. New commits cancel
+stale in-progress PR runs, while merge-queue and `main` runs are never
+cancelled.
 
 Windows CI executes amd64 and 386 programs natively and constructs and validates
 ARM64 PE images. Full Windows/ARM64 execution requires a native ARM64 Windows

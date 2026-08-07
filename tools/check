@@ -88,6 +88,14 @@ check_performance() {
 		./backend
 }
 
+check_ci_performance() {
+	run_check "shared-runner compiler resource and normalized frontend gates" \
+		env RENVO_COMPILER_RESOURCE_GATES=1 RENVO_STDROOT="$repository_root/std" \
+		go test -count=1 -timeout 15m \
+		-run '^(TestCompilerResourceGates|TestFrontendCompilerPerformance)$' \
+		./backend
+}
+
 check_frontend() {
 	run_check "full frontend corpus and self-hosting suite" \
 		go test -count=1 -timeout 30m ./frontend_tests
@@ -103,6 +111,8 @@ Modes:
   preflight    Run the development checks (hard budget: 60 seconds).
   backend      Run the ordinary backend suite and applicable VM gates.
   performance  Run all compiler time, memory, and binary-size gates.
+  ci-performance
+               Run only gates that are stable on shared CI runners.
   frontend     Run the complete frontend corpus and self-hosting suite.
   full         Run PR-level preflight, backend, performance, and frontend checks.
 
@@ -127,6 +137,9 @@ case "${1:-}" in
 		;;
 	performance)
 		check_performance
+		;;
+	ci-performance)
+		check_ci_performance
 		;;
 	frontend)
 		check_frontend

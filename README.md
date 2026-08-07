@@ -265,10 +265,12 @@ unchanged, and edited-project benchmarks:
 go test ./cmd/renvoide -run '^$' -bench '^BenchmarkGUIFrontend' -benchmem
 ```
 
-The GitHub Actions workflow runs the complete backend matrix, resource and
-performance gates, self-hosted frontend corpus, bundled standalone compiler
-checks, and native Windows coverage. Compiler regressions belong in
-`backend/tests/`; every passing regression prints exactly `PASS\n`.
+The GitHub Actions workflow runs the complete backend matrix, compiler resource
+and normalized frontend performance gates, self-hosted frontend corpus,
+bundled standalone compiler checks, and native Windows coverage. Absolute
+runtime and WASI RSS gates remain part of `./tools/check performance`; they are
+not used as pass/fail signals on variable shared runners. Compiler regressions
+belong in `backend/tests/`; every passing regression prints exactly `PASS\n`.
 
 Randomized differential testing compares deterministic, type-correct programs
 under host Go and Renvo. Each seed contains shuffled cycles of arithmetic,
