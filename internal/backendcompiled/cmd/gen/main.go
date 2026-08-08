@@ -20,7 +20,26 @@ func main() {
 	backend := flag.String("backend", "", "backend source directory")
 	output := flag.String("o", "", "generated output")
 	sourcesOutput := flag.String("sources", "", "generated embedded source bundle")
+	prepareSource := flag.String("prepare-source", "", "specialize one compiler source for a prepared backend")
 	flag.Parse()
+	if *prepareSource != "" {
+		if *output == "" {
+			fmt.Fprintln(os.Stderr, "usage: gen -prepare-source input.go -o output.go")
+			os.Exit(2)
+		}
+		source, err := os.ReadFile(*prepareSource)
+		if err != nil {
+			fail(err)
+		}
+		prepared, err := specializePreparationSource(filepath.Base(*prepareSource), source)
+		if err != nil {
+			fail(err)
+		}
+		if err = os.WriteFile(*output, prepared, 0o644); err != nil {
+			fail(err)
+		}
+		return
+	}
 	if *backend == "" || *output == "" || *sourcesOutput == "" {
 		fmt.Fprintln(os.Stderr, "usage: gen -backend directory -o output.go -sources sources.go")
 		os.Exit(2)

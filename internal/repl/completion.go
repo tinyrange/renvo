@@ -4,7 +4,7 @@ import (
 	"renvo.dev/internal/arena"
 	"renvo.dev/internal/check"
 	"renvo.dev/internal/driver"
-	"renvo.dev/internal/intellisense"
+	"renvo.dev/internal/languageservice"
 	"renvo.dev/internal/load"
 	"renvo.dev/internal/syntax"
 )
@@ -66,9 +66,9 @@ func (fs completionOverlayFS) PathExists(path string) bool {
 // Complete runs the same graph/checker completion query used by the IDE over
 // a synthetic source file containing the live REPL generation.
 func (s *State) Complete(input string, cursor int, env []string) []Completion {
-	importContext := intellisense.ImportPathAt([]byte(input), cursor)
+	importContext := languageservice.ImportPathAt([]byte(input), cursor)
 	if importContext.Ok {
-		paths := intellisense.CompleteStandardImportPaths(
+		paths := languageservice.CompleteStandardImportPaths(
 			replCompletionStdRoot(env), replCompletionTarget(), nil,
 			importContext.Prefix, replCompletionFS(),
 		)
@@ -130,12 +130,12 @@ func (s *State) Signature(input string, cursor int, env []string) SignatureHelp 
 	return result
 }
 
-func (s *State) completionAnalysis(input string, cursor int, env []string) (intellisense.AnalysisResult, string, int, int, bool) {
+func (s *State) completionAnalysis(input string, cursor int, env []string) (languageservice.AnalysisResult, string, int, int, bool) {
 	mark := arena.Mark()
 	source, query := s.completionSource(input, cursor)
 	if query < 0 {
 		arena.Reset(mark)
-		return intellisense.AnalysisResult{}, "", 0, mark, false
+		return languageservice.AnalysisResult{}, "", 0, mark, false
 	}
 	workDir := replEnvValue(env, "PWD")
 	if workDir == "" {
@@ -159,12 +159,12 @@ func (s *State) completionAnalysis(input string, cursor int, env []string) (inte
 	)
 	if !sources.Ok && sources.Error != driver.SourceErrParse {
 		arena.Reset(mark)
-		return intellisense.AnalysisResult{}, "", 0, mark, false
+		return languageservice.AnalysisResult{}, "", 0, mark, false
 	}
-	analysis := intellisense.AnalyzeWorkspace(workDir, replCompletionStdRoot(env), ".", sources.Files)
+	analysis := languageservice.AnalyzeWorkspace(workDir, replCompletionStdRoot(env), ".", sources.Files)
 	if !analysis.Workspace.Ok {
 		arena.Reset(mark)
-		return intellisense.AnalysisResult{}, "", 0, mark, false
+		return languageservice.AnalysisResult{}, "", 0, mark, false
 	}
 	return analysis, fs.sourcePath, query, mark, true
 }

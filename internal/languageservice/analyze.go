@@ -1,4 +1,4 @@
-package intellisense
+package languageservice
 
 import (
 	"renvo.dev/internal/check"

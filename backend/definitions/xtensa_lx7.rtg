@@ -90,7 +90,7 @@ go backend {
 		at := out.Len()
 		code := fixedImmediateBytes(destination, value)
 		for index := 0; index < len(code); index++ {
-			out.Byte(code[index])
+			out.Byte(int(code[index]))
 		}
 		return at
 	}

@@ -395,7 +395,7 @@ Useful commands are:
 
 The line editor is implemented in Renvo and supports cursor movement, history,
 UTF-8-aware redraw, and tab completion. Completion and signature help reuse the
-same parser/checker/intellisense infrastructure as the IDE. Do not build a
+same parser/checker/language-service infrastructure as the IDE. Do not build a
 second identifier parser inside the REPL. Import completion should query the
 bundled standard-library packages, and argument help should use checked
 function signatures.
@@ -418,7 +418,7 @@ pointers, and import-generation mistakes.
 
 `cmd/renvoide` is a beta IDE written to run as a Renvo application. It is also
 an integration test for the compiler, graphics stack, forms library,
-filesystem, incremental builds, intellisense, and accessibility layer.
+filesystem, incremental builds, language service, and accessibility layer.
 
 Build it with a standalone compiler:
 
@@ -433,7 +433,7 @@ renvo-standalone \
 
 The IDE uses the same checked package graph as command-line compilation.
 Editor completion overlays the unsaved current buffer on the filesystem and
-then asks `internal/intellisense` and `internal/check` for:
+then asks `internal/languageservice` and `internal/check` for:
 
 - lexical and semantic names;
 - members after a selector;

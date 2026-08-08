@@ -107,6 +107,14 @@ func appMain(args []string, env []string) int {
 			outputPath = args[i]
 			continue
 		}
+		if args[i] == "-t" && i+1 < len(args) {
+			i++
+			if args[i] != "wasi/wasm32" {
+				renvoPrintErr("renvo: fixed backend only supports wasi/wasm32\n")
+				return 1
+			}
+			continue
+		}
 		if args[i] == "-arena-size" && i+1 < len(args) {
 			i++
 			var ok bool
