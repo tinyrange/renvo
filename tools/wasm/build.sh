@@ -6,6 +6,7 @@ backend_output=${2:-${output%.wasm}-backend.wasm}
 build_dir=sandbox/wasm/build
 
 mkdir -p "$build_dir" "$(dirname "$output")" "$(dirname "$backend_output")"
+go build -o "$build_dir/renvo-backend" ./backend
 go build -tags renvo_bundle -o "$build_dir/renvo-bootstrap" ./cmd/renvobootstrap
 "$build_dir/renvo-bootstrap" \
   -tags renvo_bundle \

@@ -756,9 +756,9 @@ reviewable place shared by developers and CI:
 authority first, then the tracked package and bundled-build suites, and finally
 compiles the backend and frontend test packages. It has a hard one-minute
 budget so stale generation or an ordinary Go build failure is always cheap to
-discover. `full` runs every mode in that order and is reserved for PR-level
+discover. `full` runs every mode in that order and is reserved for merge-queue
 validation. The narrower modes are diagnostic tools, not a substitute for the
-PR checks before a change is merged.
+queue checks before a change is merged.
 
 Compiler fuzzing, self-hosting, and wide backend runs can consume enough memory
 to kill an interactive session when they regress. On systemd-based Linux, use:
@@ -1195,15 +1195,16 @@ ready and enqueued; wait for the queue validation and confirm the merge commit
 rather than treating “queued” as “merged.”
 
 The Actions workflow handles `pull_request`, `merge_group`, and pushes to
-`main`. A fast `preflight` job gates the expensive platform suites. The final
-job is deliberately named `Required` and succeeds only when every platform,
-shared-runner-safe resource/performance, package, and frontend job succeeds.
-Repository rules should require this single stable context with
-strict/merge-queue validation; do not require individual matrix job names as
-they are implementation details. Keep the post-merge `main` run enabled as a
-backstop, not as the first place a change is validated. New commits cancel
-stale in-progress PR runs, while merge-queue and `main` runs are never
-cancelled.
+`main`. Pull requests run the fast `preflight` and can enter the merge queue
+once it passes. The exact prospective `main` commit then runs every platform,
+shared-runner-safe resource/performance, package, and frontend job before the
+final `Required` job succeeds. This keeps full testing as a pre-merge gate
+without running the same suite twice. Repository rules should require the
+single stable `Required` context with strict/merge-queue validation; do not
+require individual job names as they are implementation details. Keep the
+post-merge `main` run enabled as a backstop, not as the first place a change is
+validated. New commits cancel stale in-progress PR runs, while merge-queue and
+`main` runs are never cancelled.
 
 Windows CI executes amd64 and 386 programs natively and constructs and validates
 ARM64 PE images. Full Windows/ARM64 execution requires a native ARM64 Windows
