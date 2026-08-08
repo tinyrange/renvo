@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "eee766f79b73c667b6c94cf3c71cfca1464e075eba4c2e690827fe0a58cab9a1"
+const CompilerSourceDigest = "2c837bdf99d40366e23790b52e090b27d53d4aaf2d1a4d8cd9b0dbbc2b88e9b2"
 
 // source: backend/compiler_common_impl.go
 
@@ -36968,6 +36968,16 @@ candidates[j] = 0
 }
 for pc := functionPC; pc < len(a.code); pc += int(renvoWasm32InstructionSizes[int(renvo_runtime_UnsafeByteAt(a.code, pc))]) {
 op := int(renvo_runtime_UnsafeByteAt(a.code, pc))
+
+
+
+
+if op == renvoWasm32OpWideBinary || op == renvoWasm32OpWideCompare {
+for j := 0; j < len(candidates); j++ {
+candidates[j] = 0
+}
+continue
+}
 memoryOffsets := make([]int, 0, 3)
 memorySizes := make([]int, 0, 3)
 if op == renvoWasm32OpLoadStack || op == renvoWasm32OpStoreStack {
@@ -36976,16 +36986,6 @@ memorySizes = append(memorySizes, g.c.renvoNativeIntSize)
 } else if op == renvoWasm32OpLeaStack {
 memoryOffsets = append(memoryOffsets, renvoWasm32GetS32(a.code, pc+2))
 memorySizes = append(memorySizes, renvoBackendValueSlotSize)
-} else if op == renvoWasm32OpWideBinary {
-for field := 1; field <= 9; field += 4 {
-memoryOffsets = append(memoryOffsets, renvoWasm32GetS32(a.code, pc+field))
-memorySizes = append(memorySizes, renvoBackendValueSlotSize)
-}
-} else if op == renvoWasm32OpWideCompare {
-for field := 1; field <= 5; field += 4 {
-memoryOffsets = append(memoryOffsets, renvoWasm32GetS32(a.code, pc+field))
-memorySizes = append(memorySizes, renvoBackendValueSlotSize)
-}
 }
 for k := 0; k < len(memoryOffsets); k++ {
 for j := 0; j < len(candidates); j++ {
@@ -36993,7 +36993,8 @@ candidate := candidates[j]
 if candidate == 0 {
 continue
 }
-if op == renvoWasm32OpLeaStack || memoryOffsets[k] != candidate {
+directScalarAccess := (op == renvoWasm32OpLoadStack || op == renvoWasm32OpStoreStack) && memoryOffsets[k] == candidate
+if !directScalarAccess {
 if renvoWasm32RangesOverlap(candidate, renvoBackendValueSlotSize, memoryOffsets[k], memorySizes[k]) {
 candidates[j] = 0
 }

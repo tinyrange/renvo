@@ -627,6 +627,16 @@ func renvoWasm32RecordDirectLocals(g *renvoLinearGen, functionPC int) {
 	}
 	for pc := functionPC; pc < len(a.code); pc += int(renvoWasm32InstructionSizes[int(renvo_runtime_UnsafeByteAt(a.code, pc))]) {
 		op := int(renvo_runtime_UnsafeByteAt(a.code, pc))
+		// Wide operations read and write whole frame-backed slots. Stack slots
+		// are reused across expression lifetimes, so a scalar local at the same
+		// offset cannot be proven coherent with those accesses. Keep the routine
+		// frame-backed when either operation is present.
+		if op == renvoWasm32OpWideBinary || op == renvoWasm32OpWideCompare {
+			for j := 0; j < len(candidates); j++ {
+				candidates[j] = 0
+			}
+			continue
+		}
 		memoryOffsets := make([]int, 0, 3)
 		memorySizes := make([]int, 0, 3)
 		if op == renvoWasm32OpLoadStack || op == renvoWasm32OpStoreStack {
@@ -635,16 +645,6 @@ func renvoWasm32RecordDirectLocals(g *renvoLinearGen, functionPC int) {
 		} else if op == renvoWasm32OpLeaStack {
 			memoryOffsets = append(memoryOffsets, renvoWasm32GetS32(a.code, pc+2))
 			memorySizes = append(memorySizes, renvoBackendValueSlotSize)
-		} else if op == renvoWasm32OpWideBinary {
-			for field := 1; field <= 9; field += 4 {
-				memoryOffsets = append(memoryOffsets, renvoWasm32GetS32(a.code, pc+field))
-				memorySizes = append(memorySizes, renvoBackendValueSlotSize)
-			}
-		} else if op == renvoWasm32OpWideCompare {
-			for field := 1; field <= 5; field += 4 {
-				memoryOffsets = append(memoryOffsets, renvoWasm32GetS32(a.code, pc+field))
-				memorySizes = append(memorySizes, renvoBackendValueSlotSize)
-			}
 		}
 		for k := 0; k < len(memoryOffsets); k++ {
 			for j := 0; j < len(candidates); j++ {
@@ -652,7 +652,8 @@ func renvoWasm32RecordDirectLocals(g *renvoLinearGen, functionPC int) {
 				if candidate == 0 {
 					continue
 				}
-				if op == renvoWasm32OpLeaStack || memoryOffsets[k] != candidate {
+				directScalarAccess := (op == renvoWasm32OpLoadStack || op == renvoWasm32OpStoreStack) && memoryOffsets[k] == candidate
+				if !directScalarAccess {
 					if renvoWasm32RangesOverlap(candidate, renvoBackendValueSlotSize, memoryOffsets[k], memorySizes[k]) {
 						candidates[j] = 0
 					}

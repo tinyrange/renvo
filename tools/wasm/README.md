@@ -81,9 +81,9 @@ target backend without replacing the frontend.
 ## Reference result
 
 On Node v20.19.1, Linux/x64, and an Intel i7-13620H, the self-hosted frontend is
-1,961,115 bytes and the separately cached backend is 837,452 bytes. The
+1,961,115 bytes and the separately cached backend is 837,097 bytes. The
 frontend compiles its own package in about 500 ms; the backend turns that unit
-into a runnable compiler in about 330 ms, for an approximately 831 ms complete
+into a runnable compiler in about 330 ms, for an approximately 832 ms complete
 self-host pipeline. The frontend reserves about 171 MiB of linear memory and
 peaks around 130 MiB resident. These figures are comparison data; the enforced
 portable gates are a frontend no larger than 2 MiB and self-hosting under one
