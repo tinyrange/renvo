@@ -18,6 +18,7 @@ func main() {
 	statefulEmitter := flag.Bool("stateful-emitter", false, "keep the stateful RTG emitter in architecture output")
 	algorithms := flag.Bool("algorithms", false, "emit the pruned checked-in algorithm projection")
 	contract := flag.Bool("contract", false, "emit the checked-in semantic contract projection")
+	prepared := flag.Bool("prepared", false, "emit a prepared custom backend for compiler package main")
 	kernel := flag.Bool("kernel", false, "generate the shared checked-in architecture kernel")
 	inactiveKernel := flag.Bool("inactive-kernel", false, "generate the self-hosted inactive architecture kernel")
 	packageName := flag.String("package", "backend", "generated Go package")
@@ -62,7 +63,7 @@ func main() {
 	}
 	var generated rtg.GenerateResult
 	if *arch != "" {
-		if *target != "" || len(definitions) != 1 {
+		if *target != "" || *prepared || len(definitions) != 1 {
 			fail("architecture generation requires one definition and no -t")
 		}
 		if *algorithms && *contract || *algorithms && *statefulEmitter ||
@@ -83,6 +84,11 @@ func main() {
 			fail("-stateful-emitter requires -arch")
 		}
 		generated = rtg.GenerateUniversalBackend(definitions)
+	} else if *prepared {
+		if len(definitions) != 1 {
+			fail("prepared generation accepts exactly one closed definition")
+		}
+		generated = rtg.GeneratePreparedBackend(definitions[0], *target)
 	} else {
 		if len(definitions) != 1 {
 			fail("fixed generation accepts exactly one closed definition")

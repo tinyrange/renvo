@@ -25,11 +25,13 @@ node tools/wasm/run.mjs --workspace . sandbox/wasm/renvowasi.wasm -- \
   -o sandbox/wasm/renvowasi.unit -tags renvo_wasi_frontend ./cmd/renvowasi
 ```
 
-The compact frontend interface accepts `-o`, repeatable `-tags`, and one package path.
-Its target is fixed to `wasi/wasm32`; `-s` and `-emit-unit` are accepted as
-no-ops for compatibility. Human-readable, source-mapped diagnostics remain a
-host/UI responsibility so that presentation code is not linked into every
-compiler worker.
+The compact frontend interface accepts `-o`, `-t`, repeatable `-tags`, and one
+package path. Built-in targets are recorded directly in the canonical unit.
+Custom targets also pass the resolved definition hash and descriptor version;
+the matching lazy backend remains responsible for the actual code generation.
+`-s` and `-emit-unit` are accepted as no-ops for compatibility. Human-readable,
+source-mapped diagnostics remain a host/UI responsibility so that presentation
+code is not linked into every compiler worker.
 
 Run the complete frontend/backend pipeline from Node:
 
@@ -61,22 +63,66 @@ is the WASM reservation and is normally higher than resident memory because
 V8 commits pages on demand. The WASI profile reserves a 160 MiB compiler arena
 and permits a 6 MiB generated unit.
 
-## Browser playground
+## Browser editor
 
-Put both modules beside `tools/wasm/browser/index.html`, or pass their URLs in
-the query string, then serve the repository over HTTP:
+Build the deployable static bundle and serve it over HTTP:
 
 ```sh
-python3 -m http.server 8000
-# http://localhost:8000/tools/wasm/browser/?compiler=/sandbox/wasm/renvowasi.wasm&backend=/sandbox/wasm/renvowasi-backend.wasm
+tools/wasm/build-browser.sh sandbox/wasm/browser
+python3 -m http.server 8000 --directory sandbox/wasm/browser
+# http://localhost:8000/browser/
 ```
 
-The page keeps both compiled `WebAssembly.Module` objects in a worker and
-creates fresh WASI instances for each command. The modules share a virtual
-workspace only through the canonical unit. The worker returns per-phase timing,
-peak linear-memory size, diagnostics, and downloadable application files. This
-boundary is intended to grow into the IDE worker protocol and can load another
-target backend without replacing the frontend.
+The GitHub Pages layout also places the editor at the bundle root:
+
+```sh
+tools/wasm/build-browser.sh sandbox/wasm/pages pages
+python3 -m http.server 8000 --directory sandbox/wasm/pages
+# http://localhost:8000/
+```
+
+`.github/workflows/pages.yml` builds that layout after every push to `main`
+and deploys it through GitHub Pages. The checked-in `CNAME` publishes the site
+as `renvo.dev`; repository Pages settings and the domain's DNS records must
+also name that domain before the first deployment.
+
+The page loads the compact frontend and language-service modules at startup.
+Backends are fetched and compiled only when their target is first built. One
+shared native module covers every advertised desktop and VM target; WASI has
+its size-optimized backend; ESP32-C6 and ESP32-S3 each use a prepared custom
+backend generated from their checked-in RTG definitions. A target change does
+not replace or reload the frontend.
+
+Library metadata is small and loaded once. Standard-library, Forms, and ESP32
+platform source is fetched only when it is browsed or imported, including its
+dependencies. The same files are then passed to continuous diagnostics,
+completion, signature help, definition/reference navigation, and compilation,
+keeping editor and compiler views of the workspace consistent. Selecting a
+catalogued `package main` example makes it the build root and selects its board
+target.
+
+Each command runs in a fresh WASI instance inside the worker. Build results
+include per-phase timing, peak linear-memory size, diagnostics, and downloadable
+artifacts. WASI command artifacts can run directly in the terminal panel with
+arguments and preloaded standard input. For ESP32-C6 and ESP32-S3, Flash & Run
+converts Renvo's ELF to the documented Espressif app-image format, writes the
+app partition through WebSerial, reboots the board, and attaches the terminal
+as a serial monitor. WebSerial requires an HTTPS or localhost origin and a
+Chromium-based browser. Native artifacts remain downloads.
+
+The ESP ROM-loader implementation is first-party and has no third-party
+runtime dependency. Its protocol behavior was checked against Espressif's
+Apache-2.0-licensed [esptool-js at commit c2956c5](https://github.com/espressif/esptool-js/tree/c2956c5aac35d7ef24d614b734590263662eb8d8),
+and against Espressif's public serial-protocol and firmware-image
+documentation. No esptool-js source is copied or bundled.
+
+The browser shell uses Monaco Editor 0.56.0 and keeps the small editable
+workspace in browser local storage. Press Ctrl/Cmd+Enter to build or F5 to run
+a WASI or ESP target; Run automatically builds first when the artifact is missing or the
+workspace, target, or compiler arguments changed. Press Ctrl/Cmd+S to save the
+current workspace and Ctrl/Cmd+J to toggle the panel. Monaco is loaded from
+jsDelivr for now. Pass
+`monaco=/assets/monaco/min/` to use a self-hosted copy in production.
 
 ## Reference result
 

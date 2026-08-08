@@ -301,6 +301,9 @@ func renvoDefaultArenaSize(target int) int {
 		if renvoRTGPreparedKernelModule != 0 {
 			return renvoArenaSizeKernelModule
 		}
+		if size := renvoRTGDefaultArenaSize(target); size != 0 {
+			return size
+		}
 		if renvoNativeIntSize <= 4 {
 			return renvoArenaSize32BitHosted
 		}

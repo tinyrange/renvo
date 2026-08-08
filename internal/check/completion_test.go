@@ -12,6 +12,7 @@ func TestCompleteGraphResolvesScopeFieldsAndChainedMethods(t *testing.T) {
 func (f *MainForm) update() {
 	localValue := 1
 	_ = loc
+	ret
 	f.mes
 	f.messageLabel.SetT
 	f.messageLabel.StP
@@ -48,6 +49,7 @@ type MainForm struct { messageLabel *forms.Label }
 		t.Fatalf("completion at %q = %#v, want %q", marker, items, want)
 	}
 	assertCompletion("loc\n", "localValue")
+	assertCompletion("ret\n", "return")
 	assertCompletion("f.mes\n", "messageLabel")
 	assertCompletion("f.messageLabel.SetT\n", "SetText")
 	assertCompletion("f.messageLabel.StP\n", "SetPosition")
@@ -70,6 +72,13 @@ type Label struct{}
 func (l *Label) SetPosition(x int, y int) {}
 func update(label *Label) {
 	label.SetPosition(10, 20)
+}
+
+func TestCompleteKeywordsWorksWithoutAValidProgram(t *testing.T) {
+	items := CompleteKeywords([]byte("func main() { ret"), len("func main() { ret"))
+	if len(items) != 1 || items[0].Name != "return" || items[0].Kind != CompletionKeyword {
+		t.Fatalf("keyword completion = %#v", items)
+	}
 }
 `)
 	files := []load.SourceFile{

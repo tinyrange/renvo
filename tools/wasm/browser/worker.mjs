@@ -1,6 +1,7 @@
 let frontendModule;
-let backendModule;
+let languageServiceModule;
 let compilerError;
+const backendModules = new Map();
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -8,9 +9,9 @@ self.addEventListener("message", async (event) => {
   const request = event.data;
   if (request.type === "init") {
     try {
-      [frontendModule, backendModule] = await Promise.all([
+      [frontendModule, languageServiceModule] = await Promise.all([
         loadModule(request.compiler, "frontend"),
-        loadModule(request.backend, "backend"),
+        request.languageService ? loadModule(request.languageService, "language service") : Promise.resolve(null),
       ]);
       self.postMessage({ type: "ready" });
     } catch (error) {
@@ -19,14 +20,70 @@ self.addEventListener("message", async (event) => {
     }
     return;
   }
+  if (request.type === "run") {
+    const context = newContext(new Map(), request.stdin || "");
+    const started = performance.now();
+    let exitCode = 1;
+    try {
+      const module = await WebAssembly.compile(request.data);
+      exitCode = await runModule(module, context, [request.name || "app", ...(request.args || [])]);
+    } catch (error) {
+      context.stderr.push(encoder.encode(String(error) + "\n"));
+    }
+    self.postMessage({
+      type: "run-result", id: request.id, exitCode,
+      stdout: decodeParts(context.stdout), stderr: decodeParts(context.stderr),
+      elapsedMilliseconds: performance.now() - started,
+      linearMemoryBytes: context.maxLinearMemoryBytes,
+    });
+    return;
+  }
+  if (request.type === "analyze" || request.type === "complete" || request.type === "signature" ||
+      request.type === "definition" || request.type === "references") {
+    if (!languageServiceModule) {
+      self.postMessage({ type: "language-result", id: request.id, mode: request.type, output: "", error: "language service is unavailable" });
+      return;
+    }
+    const files = new Map(request.files.map((file) => [clean(file.name), new Uint8Array(file.data)]));
+    const context = newContext(files);
+    const args = ["renvo-language", request.type, "-target", request.target, "-file", request.file, "-offset", String(request.offset)];
+    for (const tag of request.tags || []) args.push("-tags", tag);
+    args.push(request.packageAt || ".");
+    await runModule(languageServiceModule, context, args);
+    self.postMessage({
+      type: "language-result", id: request.id, mode: request.type,
+      output: decodeParts(context.stdout), error: decodeParts(context.stderr),
+    });
+    return;
+  }
   if (request.type !== "compile") return;
-  if (!frontendModule || !backendModule) {
+  if (!frontendModule) {
     self.postMessage({ type: "result", exitCode: 1, stdout: "", stderr: String(compilerError || "compiler is not ready"), files: [], elapsedMilliseconds: 0, linearMemoryBytes: 0 });
     return;
   }
-  const result = await runPipeline(request);
-  self.postMessage(result, result.files.map((file) => file.data));
+  try {
+    const result = await runPipeline(request);
+    self.postMessage(result, result.files.map((file) => file.data));
+  } catch (error) {
+    self.postMessage({
+      type: "result", id: request.id, exitCode: 1, stdout: "", stderr: String(error),
+      files: [], elapsedMilliseconds: 0, frontendMilliseconds: 0,
+      backendMilliseconds: 0, linearMemoryBytes: 0,
+    });
+  }
 });
+
+function newContext(files, stdin = "") {
+  return {
+    memory: null, maxLinearMemoryBytes: 0, files, fds: new Map(), nextFd: 4,
+    stdout: [], stderr: [], stdin: encoder.encode(stdin), stdinOffset: 0,
+  };
+}
+
+async function backendModule(url) {
+  if (!backendModules.has(url)) backendModules.set(url, loadModule(url, "backend"));
+  return backendModules.get(url);
+}
 
 async function loadModule(url, name) {
   const response = await fetch(url);
@@ -42,8 +99,8 @@ async function loadModule(url, name) {
 async function runPipeline(request) {
   const files = new Map(request.files.map((file) => [clean(file.name), new Uint8Array(file.data)]));
   const inputNames = new Set(files.keys());
-  const context = { memory: null, maxLinearMemoryBytes: 0, files, fds: new Map(), nextFd: 4, stdout: [], stderr: [] };
-  const plan = pipelineArguments(request.args, files);
+  const context = newContext(files);
+  const plan = pipelineArguments(request.args, files, request.backendTarget);
   const started = performance.now();
   const frontendStarted = performance.now();
   let exitCode = await runModule(frontendModule, context, ["renvo", ...plan.frontend]);
@@ -51,7 +108,8 @@ async function runPipeline(request) {
   let backendMilliseconds = 0;
   if (exitCode === 0 && plan.backend) {
     const backendStarted = performance.now();
-    exitCode = await runModule(backendModule, context, ["renvo-wasi-backend", ...plan.backend]);
+    const backend = await backendModule(request.backend);
+    exitCode = await runModule(backend, context, ["renvo-backend", ...plan.backend]);
     backendMilliseconds = performance.now() - backendStarted;
   }
   if (plan.backend) files.delete(plan.temporary);
@@ -64,6 +122,7 @@ async function runPipeline(request) {
   outputs.sort((left, right) => left.name.localeCompare(right.name));
   return {
     type: "result",
+    id: request.id,
     exitCode,
     stdout: decodeParts(context.stdout),
     stderr: decodeParts(context.stderr),
@@ -97,7 +156,7 @@ async function runModule(module, context, args) {
   return exitCode;
 }
 
-function pipelineArguments(args, files) {
+function pipelineArguments(args, files, backendTarget) {
   const frontend = [];
   let output = "";
   let outputAt = -1;
@@ -121,7 +180,7 @@ function pipelineArguments(args, files) {
   let temporary = ".renvo/frontend.unit";
   for (let suffix = 1; files.has(temporary); suffix++) temporary = `.renvo/frontend-${suffix}.unit`;
   frontend[outputAt] = temporary;
-  const backend = [];
+  const backend = ["-t", backendTarget];
   if (strip) backend.push("-s");
   if (arenaSize) backend.push("-arena-size", arenaSize);
   backend.push("-o", output, temporary);
@@ -138,11 +197,19 @@ function wasiImports(context, args) {
     path_open: (...values) => pathOpen(context, ...values),
     fd_close: (fd) => { context.fds.delete(fd); return 0; },
     fd_fdstat_get: (fd, at) => fdStat(context, fd, at),
+    fd_fdstat_set_flags: () => 0,
     fd_readdir: (fd, at, length, cookie, usedAt) => fdReaddir(context, fd, at, length, cookie, usedAt),
+    fd_prestat_get: (fd, at) => fdPrestat(context, fd, at),
+    fd_prestat_dir_name: (fd, at, length) => fdPrestatName(context, fd, at, length),
+    path_filestat_get: (fd, flags, pathAt, pathLength, at) => pathFileStat(context, fd, flags, pathAt, pathLength, at),
     args_sizes_get: (countAt, sizeAt) => writeStringSizes(context, args, countAt, sizeAt),
     args_get: (pointersAt, dataAt) => writeStrings(context, args, pointersAt, dataAt),
     environ_sizes_get: (countAt, sizeAt) => writeStringSizes(context, env, countAt, sizeAt),
     environ_get: (pointersAt, dataAt) => writeStrings(context, env, pointersAt, dataAt),
+    clock_time_get: (_clock, _precision, at) => clockTime(context, at),
+    random_get: (at, length) => randomGet(context, at, length),
+    poll_oneoff: (inputAt, outputAt, count, eventsAt) => pollOneoff(context, inputAt, outputAt, count, eventsAt),
+    sched_yield: () => 0,
     proc_exit: (code) => { throw { renvoExitCode: code }; },
   } };
 }
@@ -183,6 +250,20 @@ function fdWrite(context, fd, at, count, writtenAt, explicitOffset) {
 }
 
 function fdRead(context, fd, at, count, readAt, explicitOffset) {
+  if (fd === 0) {
+    let offset = explicitOffset === undefined ? context.stdinOffset : explicitOffset;
+    let total = 0;
+    for (const part of iovecs(context, at, count)) {
+      const size = Math.max(0, Math.min(part.length, context.stdin.length - offset));
+      part.set(context.stdin.subarray(offset, offset + size));
+      offset += size;
+      total += size;
+      if (size < part.length) break;
+    }
+    if (explicitOffset === undefined) context.stdinOffset = offset;
+    view(context).setUint32(readAt, total, true);
+    return 0;
+  }
   const entry = context.fds.get(fd);
   if (!entry || entry.directory) return 8;
   const source = context.files.get(entry.path) || new Uint8Array(0);
@@ -218,6 +299,55 @@ function fdStat(context, fd, at) {
   if (!entry && fd !== 3 && fd > 2) return 8;
   new Uint8Array(context.memory.buffer, at, 24).fill(0);
   new Uint8Array(context.memory.buffer)[at] = fd === 3 || entry?.directory ? 3 : 4;
+  return 0;
+}
+
+function fdPrestat(context, fd, at) {
+  if (fd !== 3) return 8;
+  const data = new Uint8Array(context.memory.buffer, at, 8); data.fill(0);
+  new DataView(data.buffer, data.byteOffset, data.byteLength).setUint32(4, 1, true);
+  return 0;
+}
+
+function fdPrestatName(context, fd, at, length) {
+  if (fd !== 3 || length < 1) return 28;
+  new Uint8Array(context.memory.buffer, at, length)[0] = 0x2e;
+  return 0;
+}
+
+function pathFileStat(context, _fd, _flags, pathAt, pathLength, at) {
+  const name = clean(decoder.decode(new Uint8Array(context.memory.buffer, pathAt, pathLength)));
+  const directory = isDirectory(context, name);
+  const source = context.files.get(name);
+  if (!directory && !source) return 44;
+  const data = new Uint8Array(context.memory.buffer, at, 64); data.fill(0);
+  const stat = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  stat.setUint8(16, directory ? 3 : 4);
+  stat.setBigUint64(24, 1n, true);
+  stat.setBigUint64(32, BigInt(source?.length || 0), true);
+  return 0;
+}
+
+function clockTime(context, at) {
+  view(context).setBigUint64(at, BigInt(Date.now()) * 1000000n, true);
+  return 0;
+}
+
+function randomGet(context, at, length) {
+  const destination = new Uint8Array(context.memory.buffer, at, length);
+  for (let offset = 0; offset < length; offset += 65536) crypto.getRandomValues(destination.subarray(offset, Math.min(length, offset + 65536)));
+  return 0;
+}
+
+function pollOneoff(context, inputAt, outputAt, count, eventsAt) {
+  if (count <= 0) { view(context).setUint32(eventsAt, 0, true); return 0; }
+  const memory = new Uint8Array(context.memory.buffer);
+  const input = new DataView(memory.buffer, inputAt, 48);
+  const output = new Uint8Array(memory.buffer, outputAt, 32); output.fill(0);
+  const event = new DataView(output.buffer, output.byteOffset, output.byteLength);
+  event.setBigUint64(0, input.getBigUint64(0, true), true);
+  event.setUint8(10, input.getUint8(8));
+  view(context).setUint32(eventsAt, 1, true);
   return 0;
 }
 

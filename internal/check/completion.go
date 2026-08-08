@@ -40,6 +40,20 @@ type completionType struct {
 	Name    string
 }
 
+// CompleteKeywords returns Go keywords matching the identifier at offset.
+// Language-service hosts use this small syntax-independent fallback while an
+// editor buffer is temporarily too incomplete to build a package graph.
+func CompleteKeywords(source []byte, offset int) []CompletionItem {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(source) {
+		offset = len(source)
+	}
+	start := completionIdentifierStart(source, offset)
+	return completionKeywordItems(nil, string(source[start:offset]))
+}
+
 // CompleteGraph returns semantic names visible at a source offset. It is
 // deliberately a query over the frontend graph: editor widgets remain unaware
 // of Go packages and the same answer is available in host and self-hosted IDEs.
@@ -152,6 +166,10 @@ func completionScopeItems(items []CompletionItem, graph load.Graph, prog Program
 	for i := 0; i < len(builtins); i++ {
 		items = completionAdd(items, builtins[i], "builtin", CompletionFunction, prefix)
 	}
+	return completionKeywordItems(items, prefix)
+}
+
+func completionKeywordItems(items []CompletionItem, prefix string) []CompletionItem {
 	keywords := []string{"break", "case", "const", "continue", "defer", "else", "fallthrough", "for", "func", "go", "goto", "if", "import", "interface", "map", "package", "range", "return", "struct", "switch", "type", "var"}
 	for i := 0; i < len(keywords); i++ {
 		items = completionAdd(items, keywords[i], "keyword", CompletionKeyword, prefix)

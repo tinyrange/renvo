@@ -3,38 +3,121 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Renvo WebAssembly compiler</title>
-  <style>
-    :root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
-    body { max-width: 1100px; margin: 0 auto; padding: 24px; background: #12151a; color: #e8e8e8; }
-    h1 { margin: 0 0 8px; font: 600 24px system-ui, sans-serif; }
-    p { color: #aeb7c4; }
-    label { display: block; margin: 16px 0 6px; color: #cbd3de; }
-    input, textarea, button { box-sizing: border-box; border: 1px solid #46505e; border-radius: 5px; background: #1b2028; color: inherit; font: inherit; }
-    input, textarea { width: 100%; padding: 10px; }
-    textarea { min-height: 360px; resize: vertical; tab-size: 4; }
-    button { margin-top: 14px; padding: 10px 18px; background: #2563a9; border-color: #397bc5; cursor: pointer; }
-    button:disabled { opacity: .55; cursor: wait; }
-    pre { min-height: 56px; padding: 12px; overflow: auto; background: #090b0e; border-radius: 5px; white-space: pre-wrap; }
-    #outputs a { display: inline-block; margin: 0 12px 8px 0; color: #7cc4ff; }
-  </style>
+  <meta name="color-scheme" content="dark">
+  <title>Renvo</title>
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <h1>Renvo compiler</h1>
-  <p>The WASI-only frontend and backend run in a dedicated worker. The frontend emits a canonical unit, then the separately JIT-compiled backend turns it into a command-line WebAssembly app.</p>
-  <label for="command">Compiler arguments</label>
-  <input id="command" value="-s -o app.wasm ." spellcheck="false">
-  <label for="source">main.go</label>
-  <textarea id="source" spellcheck="false">package main
+  <div class="ide" id="ide">
+    <header class="command-bar">
+      <div class="brand" aria-label="Renvo">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h8.5a5.5 5.5 0 0 1 0 11H9l6 5H9l-4-4v-5h8.5a1.5 1.5 0 0 0 0-3H5V4Z"/></svg>
+      </div>
+      <div class="project-title"><span>playground</span><span class="muted">— Renvo</span></div>
+      <label class="command-input" title="Compiler arguments">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3 5 5-5 5M10 13h3"/></svg>
+        <input id="command" value="-s -o app.wasm ." spellcheck="false" aria-label="Compiler arguments">
+      </label>
+      <div class="command-actions">
+        <div class="target-picker" id="target-picker">
+          <button id="target-button" type="button" aria-label="Build target" aria-haspopup="listbox" aria-expanded="false">
+            <span id="target-label">wasi/wasm32</span>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>
+          </button>
+          <div class="target-menu" id="target-menu" role="listbox" aria-label="Build target" hidden></div>
+        </div>
+        <button class="secondary-action" id="run" disabled title="Run console app (F5)">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3 8 5-8 5V3Z"/></svg>
+          <span>Run</span>
+        </button>
+        <button class="primary-action" id="compile" disabled title="Build (Ctrl+Enter)">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3 8 5-8 5V3Z"/></svg>
+          <span>Build</span>
+        </button>
+      </div>
+    </header>
 
-func main() {
-	print("Hello from Renvo!\n")
-}
-</textarea>
-  <button id="compile" disabled>Loading compiler…</button>
-  <label>Diagnostics</label>
-  <pre id="diagnostics" aria-live="polite"></pre>
-  <div id="outputs"></div>
+    <nav class="activity-bar" aria-label="Workspace views">
+      <button class="activity active" data-view="explorer" title="Explorer">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h6l2 2h8v16H4V3Zm0 6h16"/></svg>
+      </button>
+      <button class="activity" data-view="output" title="Build output">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 6-5 6 5 6m8-12 5 6-5 6m-3-15-3 18"/></svg>
+      </button>
+      <div class="activity-spacer"></div>
+    </nav>
+
+    <aside class="sidebar" aria-label="Explorer">
+      <div class="sidebar-title">EXPLORER</div>
+      <div class="section-title"><span class="chevron">⌄</span><span>PLAYGROUND</span></div>
+      <div class="file-tree" role="tree">
+        <button class="file active" data-file="main.go" role="treeitem">
+          <span class="go-icon">Go</span><span>main.go</span><span class="dirty" aria-label="Modified"></span>
+        </button>
+        <button class="file" data-file="go.mod" role="treeitem">
+          <span class="mod-icon">M</span><span>go.mod</span><span class="dirty" aria-label="Modified"></span>
+        </button>
+      </div>
+      <div class="section-title"><span class="chevron">⌄</span><span>LIBRARIES</span></div>
+      <div class="stdlib-tree" id="stdlib-tree" role="tree"><span class="tree-loading">Loading packages…</span></div>
+      <div class="section-title collapsed"><span class="chevron">›</span><span>OUTLINE</span></div>
+    </aside>
+
+    <main class="workbench">
+      <div class="editor-tabs" role="tablist" aria-label="Open editors">
+        <button class="editor-tab active" data-file="main.go" role="tab">
+          <span class="go-icon">Go</span><span>main.go</span>
+        </button>
+        <div class="editor-toolbar">
+          <button id="toggle-panel" title="Toggle panel (Ctrl+J)">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2h12v12H2V2Zm0 8h12"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="editor-host" id="editor" aria-label="Code editor">
+        <div class="editor-loading"><span class="spinner"></span><span>Loading editor…</span></div>
+      </div>
+
+      <section class="panel" id="panel" aria-label="Build panel">
+        <div class="panel-tabs" role="tablist">
+          <button class="panel-tab active" data-panel="output" role="tab">OUTPUT</button>
+          <button class="panel-tab" data-panel="problems" role="tab">PROBLEMS <span id="problem-count">0</span></button>
+          <button class="panel-tab" data-panel="terminal" role="tab">TERMINAL</button>
+          <button class="panel-tab" data-panel="artifacts" role="tab">ARTIFACTS <span id="artifact-count">0</span></button>
+          <div class="panel-actions">
+            <button id="clear-output" title="Clear output">Clear</button>
+            <button id="close-panel" title="Close panel">×</button>
+          </div>
+        </div>
+        <div class="panel-content">
+          <pre class="panel-view active" id="output" data-panel-view="output" aria-live="polite">Initializing compiler…</pre>
+          <div class="panel-view problems" data-panel-view="problems" id="problems"><div class="empty-state">No problems detected.</div></div>
+          <div class="panel-view terminal" data-panel-view="terminal" id="terminal">
+            <div class="terminal-options">
+              <label>ARGS <input id="run-args" spellcheck="false" placeholder="command-line arguments"></label>
+              <label>STDIN <textarea id="run-stdin" spellcheck="false" placeholder="optional input"></textarea></label>
+            </div>
+            <pre id="terminal-output" aria-live="polite">Build a WASI target, then press Run.</pre>
+          </div>
+          <div class="panel-view artifacts" data-panel-view="artifacts" id="artifacts"><div class="empty-state">Build outputs will appear here.</div></div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="status-bar">
+      <button class="status-item" id="compiler-status"><span class="status-dot"></span><span>Starting compiler</span></button>
+      <button class="status-item" id="problem-status" title="Show problems">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1 15 14H1L8 1Zm0 5v4m0 2v1"/></svg><span>0</span>
+      </button>
+      <span class="status-spacer"></span>
+      <span class="status-item" id="language-status">Language service starting</span>
+      <span class="status-item" id="cursor-status">Ln 1, Col 1</span>
+      <span class="status-item">Tab Size: 4</span>
+      <span class="status-item">UTF-8</span>
+      <span class="status-item">Go</span>
+      <span class="status-item" id="memory-status">— MiB</span>
+    </footer>
+  </div>
   <script type="module" src="app.mjs"></script>
 </body>
 </html>
