@@ -220,17 +220,19 @@ func decompressArchive(compressed string, size int) ([]byte, bool) {
 	if size < 0 {
 		return nil, false
 	}
-	out := make([]byte, 0, size)
+	out := make([]byte, size)
+	written := 0
 	pos := 0
-	for pos < len(compressed) && len(out) < size {
+	for pos < len(compressed) && written < size {
 		flags := compressed[pos]
 		pos++
-		for bit := 0; bit < 8 && len(out) < size; bit++ {
+		for bit := 0; bit < 8 && written < size; bit++ {
 			if flags&(1<<bit) != 0 {
 				if pos >= len(compressed) {
 					return nil, false
 				}
-				out = append(out, compressed[pos])
+				out[written] = compressed[pos]
+				written++
 				pos++
 				continue
 			}
@@ -241,15 +243,16 @@ func decompressArchive(compressed string, size int) ([]byte, bool) {
 			pos += 2
 			distance := (pair >> 4) + 1
 			length := pair&15 + 3
-			if distance > len(out) || len(out)+length > size {
+			if distance > written || written+length > size {
 				return nil, false
 			}
 			for i := 0; i < length; i++ {
-				out = append(out, out[len(out)-distance])
+				out[written] = out[written-distance]
+				written++
 			}
 		}
 	}
-	if len(out) != size || pos != len(compressed) {
+	if written != size || pos != len(compressed) {
 		return nil, false
 	}
 	return out, true

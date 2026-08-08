@@ -5,12 +5,18 @@ implements direct_emitter_v1
 # This closed definition owns the structured WebAssembly encoder, the RNVB
 # vm32 image, WASI imports, and both advertised target compositions.
 go backend {
-	type renvoWasmBuffer struct {
-		data   []byte
-		length int
+		type renvoWasmBuffer struct {
+		data           []byte
+		length         int
+		lastLocalOp    int
+		lastLocalIndex int
+		lastLocalStart int
+		lastLocalEnd   int
+		frameSize      int
 	}
-	
-	func renvoWasmPut(out *renvoWasmBuffer, value byte) {
+
+		func renvoWasmPut(out *renvoWasmBuffer, value byte) {
+		out.lastLocalOp = 0
 		if out.length >= len(out.data) {
 			nextLen := len(out.data) * 2
 			if nextLen < 256 {
@@ -23,7 +29,7 @@ go backend {
 		out.data[out.length] = value
 		out.length++
 	}
-	
+
 	func renvoWasmAppendU32(out *renvoWasmBuffer, v int) {
 		for i := 0; i < 5; i++ {
 			b := byte(v & 0x7f)
@@ -42,7 +48,7 @@ go backend {
 		}
 		return
 	}
-	
+
 	func renvoWasmAppendS32(out *renvoWasmBuffer, v int) {
 		for {
 			b := byte(v & 0x7f)
@@ -64,7 +70,7 @@ go backend {
 			}
 		}
 	}
-	
+
 	func renvoWasmAppendName(out *renvoWasmBuffer, name string) {
 		renvoWasmAppendU32(out, len(name))
 		renvoWasm32EnsureAdditionalCapacity(out, len(name))
@@ -74,7 +80,7 @@ go backend {
 		}
 		return
 	}
-	
+
 	func renvoWasmAppendByteVec(out *renvoWasmBuffer, data []byte) {
 		renvoWasmAppendU32(out, len(data))
 		renvoWasm32EnsureAdditionalCapacity(out, len(data))
@@ -84,7 +90,7 @@ go backend {
 		}
 		return
 	}
-	
+
 	func renvoWasmAppendEncoded(out *renvoWasmBuffer, encoded string) {
 		renvoWasm32EnsureAdditionalCapacity(out, len(encoded))
 		for i := 0; i < len(encoded); i++ {
@@ -93,8 +99,8 @@ go backend {
 		}
 		return
 	}
-	
-	func renvoWasmAppendRecipe(out *renvoWasmBuffer, recipe string, p0 int, p1 int, p2 int, p3 int) {
+
+		func renvoWasmAppendRecipe(out *renvoWasmBuffer, recipe string, p0 int, p1 int, p2 int, p3 int) {
 		renvoWasm32EnsureAdditionalCapacity(out, len(recipe)*5)
 		for i := 0; i < len(recipe); i++ {
 			if recipe[i] != 0xff {
@@ -127,9 +133,9 @@ go backend {
 			} else if command == 6 {
 				renvoWasm32StackAddr(out, value)
 			} else if command == 7 {
-				renvoWasm32LoadSized(out, value)
+				renvoWasm32LoadSized(out, value, 0)
 			} else if command == 8 {
-				renvoWasm32StoreSized(out, value)
+				renvoWasm32StoreSized(out, value, 0)
 			} else if command == 9 {
 				renvoWasm32AppendCond(out, value)
 			} else if command == 10 {
@@ -147,7 +153,7 @@ go backend {
 		}
 		return
 	}
-	
+
 	func renvoWasmAppendSection(out *renvoWasmBuffer, id int, payload []byte) {
 		renvoWasm32EnsureAdditionalCapacity(out, len(payload)+6)
 		renvoWasmPut(out, byte(id))
@@ -157,20 +163,20 @@ go backend {
 		}
 		return
 	}
-	
+
 	func renvoWasmAppendI32Const(out *renvoWasmBuffer, value int) {
 		renvoWasmPut(out, 0x41)
 		value = renvoWasm32Sign32(value)
 		renvoWasmAppendS32(out, value)
 		return
 	}
-	
+
 	func renvoWasmAppendCall(out *renvoWasmBuffer, index int) {
 		renvoWasmPut(out, 0x10)
 		renvoWasmAppendU32(out, index)
 		return
 	}
-	
+
 	func renvoWasmAppendU32Fixed5(out *renvoWasmBuffer, v int) {
 		for i := 0; i < 5; i++ {
 			b := byte(v & 0x7f)
@@ -184,7 +190,7 @@ go backend {
 		}
 		return
 	}
-	
+
 	func renvoWasmCompactU32Fixed5(out *renvoWasmBuffer, at int, v int) {
 		for i := 0; i < 5; i++ {
 			b := byte(v & 0x7f)
@@ -196,43 +202,43 @@ go backend {
 		}
 		return
 	}
-	
+
 	func renvoWasmAppendI32Store(out *renvoWasmBuffer) {
 		renvoWasmPut(out, 0x36)
 		renvoWasmAppendU32(out, 2)
 		renvoWasmAppendU32(out, 0)
 		return
 	}
-	
+
 	func renvoWasmAppendI64Load(out *renvoWasmBuffer) {
 		renvoWasmAppend3(out, 0x29, 3, 0)
 		return
 	}
-	
+
 	func renvoWasmAppendI64Store(out *renvoWasmBuffer) {
 		renvoWasmAppend3(out, 0x37, 3, 0)
 		return
 	}
-	
+
 	func renvoWasmAppendI64Const(out *renvoWasmBuffer, value int) {
 		renvoWasmPut(out, 0x42)
 		renvoWasmAppendS32(out, value)
 		return
 	}
-	
+
 	func renvoWasmAppend2(out *renvoWasmBuffer, a int, b int) {
 		renvoWasmPut(out, byte(a))
 		renvoWasmPut(out, byte(b))
 		return
 	}
-	
+
 	func renvoWasmAppend3(out *renvoWasmBuffer, a int, b int, c int) {
 		renvoWasmPut(out, byte(a))
 		renvoWasmPut(out, byte(b))
 		renvoWasmPut(out, byte(c))
 		return
 	}
-	
+
 	func renvoWasmAppend4(out *renvoWasmBuffer, a int, b int, c int, d int) {
 		renvoWasmPut(out, byte(a))
 		renvoWasmPut(out, byte(b))
@@ -240,7 +246,7 @@ go backend {
 		renvoWasmPut(out, byte(d))
 		return
 	}
-	
+
 	func renvoWasmAppend5(out *renvoWasmBuffer, a int, b int, c int, d int, e int) {
 		renvoWasmPut(out, byte(a))
 		renvoWasmPut(out, byte(b))
@@ -249,7 +255,7 @@ go backend {
 		renvoWasmPut(out, byte(e))
 		return
 	}
-	
+
 	const renvoWasm32RegRax = 0
 	const renvoWasm32RegRdx = 1
 	const renvoWasm32RegRcx = 2
@@ -258,7 +264,7 @@ go backend {
 	const renvoWasm32RegR8 = 5
 	const renvoWasm32RegR9 = 6
 	const renvoWasm32RegR10 = 7
-	
+
 	const renvoWasm32OpExit = 1
 	const renvoWasm32OpBuildArgsEnv = 2
 	const renvoWasm32OpMovRegImm = 3
@@ -305,14 +311,14 @@ go backend {
 	const renvoWasm32OpShrUnsignedRegReg = 44
 	const renvoWasm32OpWideBinary = 45
 	const renvoWasm32OpWideCompare = 46
-	
+
 	const renvoWasm32InstructionSizes = "\x01\x01\x0d\x06\x03\x02\x05\x02\x06\x06\x06\x08\x08\x0a\x0a\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x06\x06\x02\x02\x02\x02\x02\x06\x03\x02\x05\x05\x05\x06\x09\x01\x01\x01\x03\x0e\x0a"
 	const renvoWasm32RegLocals = "\x02\x03\x04\x05\x06\x07\x08\x0b"
 	const renvoWasm32CondOpcodes = "\x46\x47\x48\x4c\x4a\x4e\x49\x4f\x4d\x4b"
 	const renvoWasm32BinaryOpcodes = "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x6a\x6b\x6c\x6d\x6f\x71\x72\x73\x00\x74\x75\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x76"
 	const renvoWasm32SimpleRecipeOffsets = "\x00\x00\x00\x01\x08\x0f\x1f\x2f\x3d\x47\x51\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x58\x63\x6e\x78\x88\x98\xa0\xaa\xb4\xbe\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
 	const renvoWasm32SimpleRecipes = "\x00\x06\xff\x00\x01\xff\x05\x00\x06\xff\x04\x01\xff\x05\x00\x0f\x20\x00\xff\x04\x00\x36\x02\x00\x20\x00\x41\x04\x6a\x21\x00\x0f\x20\x00\xff\x00\x00\x36\x02\x00\x20\x00\x41\x04\x6a\x21\x00\x0d\x20\x00\x41\x04\x6b\x22\x00\x28\x02\x00\xff\x05\x00\x09\xff\x06\x01\x28\x02\x00\xff\x05\x00\x09\xff\x06\x01\xff\x04\x00\x36\x02\x00\x06\xff\x06\x01\xff\x05\x00\x0a\xff\x04\x00\xff\x00\x01\x6a\xff\x05\x00\x0a\xff\x04\x00\xff\x00\x01\x6c\xff\x05\x00\x09\xff\x04\x00\x41\x01\x6a\xff\x05\x00\x0f\xff\x04\x00\xff\x04\x00\x28\x02\x00\x41\x01\x6a\x36\x02\x00\x0f\xff\x04\x00\xff\x04\x00\x28\x02\x00\x41\x01\x6b\x36\x02\x00\x07\xff\x04\x00\x45\xff\x05\x00\x09\x41\x00\xff\x04\x00\x6b\xff\x05\x00\x09\xff\x04\x00\xff\x00\x01\x6b\x21\x0c\x09\xff\x04\x00\xff\x04\x01\x6b\x21\x0c\x05\xff\x09\x00\x21\x02"
-	
+
 	const renvoWasm32CondEq = 0
 	const renvoWasm32CondNe = 1
 	const renvoWasm32CondLt = 2
@@ -323,30 +329,30 @@ go backend {
 	const renvoWasm32CondUge = 7
 	const renvoWasm32CondUle = 8
 	const renvoWasm32CondUgt = 9
-	
+
 	func renvoWasm32EmitRegImm(a *RTGEmitter, op int, reg int, imm int) {
 		a.SetCode(append(a.Code(), byte(op)))
 		a.SetCode(append(a.Code(), byte(reg)))
 		a.SetCode(RTGAppend32(a.Code(), imm))
 	}
-	
+
 	func renvoWasm32EmitRegReg(a *RTGEmitter, op int, dst int, src int) {
 		a.SetCode(append(a.Code(), byte(op)))
 		a.SetCode(append(a.Code(), byte(dst)))
 		a.SetCode(append(a.Code(), byte(src)))
 	}
-	
+
 	func renvoWasm32EmitReg(a *RTGEmitter, op int, reg int) {
 		a.SetCode(append(a.Code(), byte(op)))
 		a.SetCode(append(a.Code(), byte(reg)))
 	}
-	
+
 	func renvoWasm32EmitStack(a *RTGEmitter, op int, reg int, offset int) {
 		a.SetCode(append(a.Code(), byte(op)))
 		a.SetCode(append(a.Code(), byte(reg)))
 		a.SetCode(RTGAppend32(a.Code(), offset))
 	}
-	
+
 	func renvoWasm32EmitWideOp(a *RTGEmitter, op int, dest int, left int, right int, wasmOp int) {
 		a.SetCode(append(a.Code(), byte(op)))
 		if op == renvoWasm32OpWideBinary {
@@ -356,7 +362,7 @@ go backend {
 		a.SetCode(RTGAppend32(a.Code(), right))
 		a.SetCode(append(a.Code(), byte(wasmOp)))
 	}
-	
+
 	func renvoWasm32EmitMem(a *RTGEmitter, op int, reg int, base int, disp int, size int) {
 		a.SetCode(append(a.Code(), byte(op)))
 		a.SetCode(append(a.Code(), byte(reg)))
@@ -364,7 +370,7 @@ go backend {
 		a.SetCode(RTGAppend32(a.Code(), disp))
 		a.SetCode(append(a.Code(), byte(size)))
 	}
-	
+
 	func renvoWasm32EmitIndex(a *RTGEmitter, op int, reg int, base int, index int, scale int, disp int, size int) {
 		a.SetCode(append(a.Code(), byte(op)))
 		a.SetCode(append(a.Code(), byte(reg)))
@@ -374,14 +380,14 @@ go backend {
 		a.SetCode(RTGAppend32(a.Code(), disp))
 		a.SetCode(append(a.Code(), byte(size)))
 	}
-	
+
 	func renvoWasm32EmitBranch(a *RTGEmitter, op int, label int) {
 		a.SetCode(append(a.Code(), byte(op)))
 		at := len(a.Code())
 		a.SetCode(RTGAppend32(a.Code(), 0))
 		a.RelocAt(at, label)
 	}
-	
+
 	func renvoWasm32EmitCondBranch(a *RTGEmitter, cond int, label int) {
 		a.SetCode(append(a.Code(), byte(renvoWasm32OpJCond)))
 		a.SetCode(append(a.Code(), byte(cond)))
@@ -389,7 +395,7 @@ go backend {
 		a.SetCode(RTGAppend32(a.Code(), 0))
 		a.RelocAt(at, label)
 	}
-	
+
 	func renvoWasm32EmitCallLabel(a *RTGEmitter, label int, wordCount int) {
 		a.SetCode(append(a.Code(), byte(renvoWasm32OpCall)))
 		at := len(a.Code())
@@ -397,123 +403,123 @@ go backend {
 		a.RelocAt(at, label)
 		a.SetCode(RTGAppend32(a.Code(), wordCount))
 	}
-	
+
 	func renvoWasm32AsmMovRaxImm(a *RTGEmitter, imm int) {
 		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRax, imm)
 	}
-	
+
 	func renvoWasm32AsmMovRaxImm64(a *RTGEmitter, imm int) {
 		renvoWasm32AsmMovRaxImm(a, imm)
 	}
-	
+
 	func renvoWasm32AsmMovRdxImm(a *RTGEmitter, imm int) {
 		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, imm)
 	}
-	
+
 	func renvoWasm32AsmMovRaxDataAddr(a *RTGEmitter, dataOff int) {
 		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRax, 0)
 		a.AbsoluteReloc(len(a.Code())-4, dataOff, 0)
 	}
-	
+
 	func renvoWasm32AsmMovRaxBssAddr(a *RTGEmitter, bssOff int) {
 		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRax, 0)
 		a.AbsoluteReloc(len(a.Code())-4, bssOff, RTGRelocationAbsoluteBSS)
 	}
-	
+
 	func renvoWasm32AsmMovR10BssAddr(a *RTGEmitter, bssOff int) {
 		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegR10, 0)
 		a.AbsoluteReloc(len(a.Code())-4, bssOff, RTGRelocationAbsoluteBSS)
 	}
-	
+
 	func renvoWasm32AsmLoadRaxBss(a *RTGEmitter, bssOff int) {
 		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegR10, 0)
 		a.AbsoluteReloc(len(a.Code())-4, bssOff, RTGRelocationAbsoluteBSS)
 		renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRax, renvoWasm32RegR10, 0, 4)
 	}
-	
+
 	func renvoWasm32AsmStoreRaxBss(a *RTGEmitter, bssOff int) {
 		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegR10, 0)
 		a.AbsoluteReloc(len(a.Code())-4, bssOff, RTGRelocationAbsoluteBSS)
 		renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRax, renvoWasm32RegR10, 0, 4)
 	}
-	
+
 	func renvoWasm32AsmMovRdiRax(a *RTGEmitter) {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdi, renvoWasm32RegRax)
 	}
-	
+
 	func renvoWasm32AsmMovRaxRdx(a *RTGEmitter) {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
 	}
-	
+
 	func renvoWasm32AsmMovRdxRax(a *RTGEmitter) {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRax)
 	}
-	
+
 	func renvoWasm32AsmMovRcxRax(a *RTGEmitter) {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
 	}
-	
+
 	func renvoWasm32AsmMovRcxRdx(a *RTGEmitter) {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
 	}
-	
+
 	func renvoWasm32AsmMovRsiRax(a *RTGEmitter) {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRsi, renvoWasm32RegRax)
 	}
-	
+
 	func renvoWasm32AsmMovR8Rax(a *RTGEmitter) {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegR8, renvoWasm32RegRax)
 	}
-	
+
 	func renvoWasm32AsmMovR9Rax(a *RTGEmitter) {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegR9, renvoWasm32RegRax)
 	}
-	
+
 	func renvoWasm32AsmAddRdxRcx(a *RTGEmitter) {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpAddRegReg, renvoWasm32RegRdx, renvoWasm32RegRcx)
 	}
-	
+
 	func renvoWasm32AsmSyscall(a *RTGEmitter) {
 		a.Int8(renvoWasm32OpSyscall)
 	}
-	
+
 	func renvoWasm32AsmPushRax(a *RTGEmitter) {
 		renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRax)
 	}
-	
+
 	func renvoWasm32AsmPushRcx(a *RTGEmitter) {
 		renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRcx)
 	}
-	
+
 	func renvoWasm32AsmPushRdx(a *RTGEmitter) {
 		renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRdx)
 	}
-	
+
 	func renvoWasm32AsmPushImm(a *RTGEmitter, imm int) {
 		a.Int8(renvoWasm32OpPushImm)
 		a.Int32(imm)
 	}
-	
+
 	func renvoWasm32AsmPopRax(a *RTGEmitter) {
 		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRax)
 	}
-	
+
 	func renvoWasm32AsmPopRcx(a *RTGEmitter) {
 		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRcx)
 	}
-	
+
 	func renvoWasm32AsmPopRdx(a *RTGEmitter) {
 		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRdx)
 	}
-	
+
 	func renvoWasm32AsmPopRdi(a *RTGEmitter) {
 		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRdi)
 	}
-	
+
 	func renvoWasm32AsmPopRsi(a *RTGEmitter) {
 		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRsi)
 	}
-	
+
 	func renvoWasm32AsmStackMem(a *RTGEmitter, offset int, base int, disp8 int, disp32 int) {
 		op := base & 0xff00
 		regCode := disp8
@@ -543,26 +549,26 @@ go backend {
 		}
 		renvoWasm32EmitStack(a, renvoWasm32OpLeaStack, reg, offset)
 	}
-	
+
 	func renvoWasm32AsmAddRdxImm(a *RTGEmitter, imm int) {
 		renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRdx, imm)
 	}
-	
+
 	func renvoWasm32AsmLoadRaxMemRdxDisp(a *RTGEmitter, disp int) {
 		renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRax, renvoWasm32RegRdx, disp, 4)
 	}
-	
+
 	func renvoWasm32AsmLoadRaxMemRdxDispSize(a *RTGEmitter, disp int, size int) {
 		if size > 4 {
 			size = 4
 		}
 		renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRax, renvoWasm32RegRdx, disp, size)
 	}
-	
+
 	func renvoWasm32AsmLoadByteRaxIndexRcx(a *RTGEmitter) {
 		renvoWasm32EmitIndex(a, renvoWasm32OpLoadIndex, renvoWasm32RegRax, renvoWasm32RegRax, renvoWasm32RegRcx, 1, 0, 1)
 	}
-	
+
 	func renvoWasm32AsmLoadRaxIndexRcxSize(a *RTGEmitter, size int) {
 		scale := size
 		if size > 4 {
@@ -570,30 +576,30 @@ go backend {
 		}
 		renvoWasm32EmitIndex(a, renvoWasm32OpLoadIndex, renvoWasm32RegRax, renvoWasm32RegRax, renvoWasm32RegRcx, scale, 0, size)
 	}
-	
+
 	func renvoWasm32AsmLoadQwordRaxIndexRcx8(a *RTGEmitter) {
 		renvoWasm32EmitIndex(a, renvoWasm32OpLoadIndex, renvoWasm32RegRax, renvoWasm32RegRax, renvoWasm32RegRcx, 8, 0, 4)
 	}
-	
+
 	func renvoWasm32AsmLoadQwordRaxIndexRcxDisp(a *RTGEmitter, disp int) {
 		renvoWasm32EmitIndex(a, renvoWasm32OpLoadIndex, renvoWasm32RegRax, renvoWasm32RegRax, renvoWasm32RegRcx, 1, disp, 4)
 	}
-	
+
 	func renvoWasm32AsmStoreRaxMemRdxRcx8(a *RTGEmitter) {
 		renvoWasm32EmitIndex(a, renvoWasm32OpStoreIndex, renvoWasm32RegRax, renvoWasm32RegRdx, renvoWasm32RegRcx, 8, 0, 4)
 	}
-	
+
 	func renvoWasm32AsmStoreRaxMemRdxDisp(a *RTGEmitter, disp int) {
 		renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRax, renvoWasm32RegRdx, disp, 4)
 	}
-	
+
 	func renvoWasm32AsmStoreRaxMemRdxDispSize(a *RTGEmitter, disp int, size int) {
 		if size > 4 {
 			size = 4
 		}
 		renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRax, renvoWasm32RegRdx, disp, size)
 	}
-	
+
 	func renvoWasm32AsmStoreRaxMemRdxRcxSize(a *RTGEmitter, size int) {
 		scale := size
 		if size > 4 {
@@ -601,13 +607,13 @@ go backend {
 		}
 		renvoWasm32EmitIndex(a, renvoWasm32OpStoreIndex, renvoWasm32RegRax, renvoWasm32RegRdx, renvoWasm32RegRcx, scale, 0, size)
 	}
-	
+
 	func renvoWasm32AsmStoreSliceStack(a *RTGEmitter, offset int) {
 		renvoWasm32EmitStack(a, renvoWasm32OpStoreStack, renvoWasm32RegRax, offset)
 		renvoWasm32EmitStack(a, renvoWasm32OpStoreStack, renvoWasm32RegRdx, offset-8)
 		renvoWasm32EmitStack(a, renvoWasm32OpStoreStack, renvoWasm32RegRcx, offset-16)
 	}
-	
+
 	func renvoWasm32AsmNormalizeRaxForKind(a *RTGEmitter, kind int) {
 		if kind == RTGScalarByte {
 			renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, 255)
@@ -633,48 +639,48 @@ go backend {
 			renvoWasm32EmitRegReg(a, renvoWasm32OpAndRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
 		}
 	}
-	
+
 	func renvoWasm32AsmIncMemRdx(a *RTGEmitter) {
 		a.Int8(renvoWasm32OpIncMem)
 		a.Int8(renvoWasm32RegRdx)
 	}
-	
+
 	func renvoWasm32AsmDecMemRdx(a *RTGEmitter) {
 		a.Int8(renvoWasm32OpDecMem)
 		a.Int8(renvoWasm32RegRdx)
 	}
-	
+
 	func renvoWasm32AsmBoolNotRax(a *RTGEmitter) {
 		renvoWasm32EmitReg(a, renvoWasm32OpBoolNot, renvoWasm32RegRax)
 	}
-	
+
 	func renvoWasm32AsmCmpRaxImm8(a *RTGEmitter, imm int) {
 		renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRax, imm)
 	}
-	
+
 	func renvoWasm32AsmAddRaxRcx(a *RTGEmitter) {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpAddRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
 	}
-	
+
 	func renvoWasm32AsmSubRaxRcx(a *RTGEmitter) {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpSubRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
 	}
-	
+
 	func renvoWasm32AsmShlRcxImm(a *RTGEmitter, imm int) {
 		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, imm)
 		renvoWasm32EmitRegReg(a, renvoWasm32OpShlRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
 	}
-	
+
 	func renvoWasm32AsmShlRaxImm(a *RTGEmitter, imm int) {
 		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, imm)
 		renvoWasm32EmitRegReg(a, renvoWasm32OpShlRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
 	}
-	
+
 	func renvoWasm32AsmSarRaxImm(a *RTGEmitter, imm int) {
 		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, imm)
 		renvoWasm32EmitRegReg(a, renvoWasm32OpShrRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
 	}
-	
+
 	func renvoWasm32AsmShrRaxImm(a *RTGEmitter, imm int) {
 		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, imm)
 		// The ordinary shift op is signed because Go's machine-int path uses it
@@ -682,7 +688,7 @@ go backend {
 		// two-word uint64 lowering.
 		renvoWasm32EmitRegReg(a, renvoWasm32OpShrUnsignedRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
 	}
-	
+
 	func renvoWasm32AsmDivLeftRcxRightRax(a *RTGEmitter, mod bool) {
 		if mod {
 			renvoWasm32EmitRegReg(a, renvoWasm32OpModRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
@@ -691,7 +697,7 @@ go backend {
 		}
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
 	}
-	
+
 	func renvoWasm32AsmCmpRcxRaxSet(a *RTGEmitter, setcc int) {
 		cond := renvoWasm32CondEq
 		if setcc == 0x95 {
@@ -709,46 +715,46 @@ go backend {
 		a.Int8(renvoWasm32OpSetCond)
 		a.Int8(cond)
 	}
-	
+
 	func renvoWasm32AsmIncRcx(a *RTGEmitter) {
 		renvoWasm32EmitReg(a, renvoWasm32OpIncReg, renvoWasm32RegRcx)
 	}
-	
+
 	func renvoWasm32AsmIncRax(a *RTGEmitter) {
 		renvoWasm32EmitReg(a, renvoWasm32OpIncReg, renvoWasm32RegRax)
 	}
-	
+
 	func renvoWasm32AsmImulRcxImm(a *RTGEmitter, imm int) {
 		renvoWasm32EmitRegImm(a, renvoWasm32OpMulRegImm, renvoWasm32RegRcx, imm)
 	}
-	
+
 	func renvoWasm32AsmLeave(a *RTGEmitter) {
 	}
-	
+
 	func renvoWasm32AsmRet(a *RTGEmitter) {
 		a.Int8(renvoWasm32OpRet)
 	}
-	
+
 	func renvoWasm32AsmCallLabel(a *RTGEmitter, label int) {
 		renvoWasm32EmitCallLabel(a, label, 0)
 	}
-	
+
 	func renvoWasm32AsmJmpLabel(a *RTGEmitter, label int) {
 		renvoWasm32EmitBranch(a, renvoWasm32OpJmp, label)
 	}
-	
+
 	func renvoWasm32AsmJzLabel(a *RTGEmitter, label int) {
 		renvoWasm32EmitBranch(a, renvoWasm32OpJz, label)
 	}
-	
+
 	func renvoWasm32AsmJnzLabel(a *RTGEmitter, label int) {
 		renvoWasm32EmitBranch(a, renvoWasm32OpJnz, label)
 	}
-	
+
 	func renvoWasm32AsmNegRax(a *RTGEmitter) {
 		renvoWasm32EmitReg(a, renvoWasm32OpNegReg, renvoWasm32RegRax)
 	}
-	
+
 	func renvoWasm32AsmBuildArgvEnvSlices(a *RTGEmitter, bssOff int, envOff int, envLenOff int) {
 		a.Int8(renvoWasm32OpBuildArgsEnv)
 		at := len(a.Code())
@@ -783,7 +789,7 @@ go backend {
 		renvoWasm32AsmBuildArgvEnvSlices(a, 0, 0, 0)
 		return true
 	}
-	
+
 	func renvoWasm32AsmExit(a *RTGEmitter) {
 		a.Int8(renvoWasm32OpExit)
 	}
@@ -791,13 +797,12 @@ go backend {
 	func vm32RuntimeExit(a *RTGEmitter, status RTGRegister) {
 		renvoWasm32AsmExit(a)
 	}
-	
+
 	const renvoWasm32ProgramBase = 262144
 	const renvoWasm32StackGuardSize = 16384
 	const renvoWasm32ExprStackSize = 1048576
 	const renvoWasm32CallStackSize = 65536
 	const renvoWasm32FrameStackSize = 8388608
-	const renvoWasm32ImageOutputCapacity = 2097152
 	const renvoWasm32RoutineBodyCapacity = 8192
 	const renvoWasm32ScratchIov = 0
 	const renvoWasm32ScratchN = 8
@@ -811,7 +816,7 @@ go backend {
 	const renvoWasm32ArgsDataArea = 8192
 	const renvoWasm32EnvPtrArea = 65536
 	const renvoWasm32EnvDataArea = 131072
-	
+
 	const renvoWasm32ImportFdWrite = 0
 	const renvoWasm32ImportFdRead = 1
 	const renvoWasm32ImportFdPread = 2
@@ -828,7 +833,7 @@ go backend {
 	const renvoWasm32StartFuncIndex = 13
 	const renvoWasm32VmFuncType = 7
 	const renvoWasm32VmFuncBase = 14
-	
+
 	const renvoWasm32LocalSp = 0
 	const renvoWasm32LocalFp = 1
 	const renvoWasm32LocalRax = 2
@@ -845,11 +850,11 @@ go backend {
 	const renvoWasm32LocalTmp = 13
 	const renvoWasm32LocalTmp2 = 14
 	const renvoWasm32LocalTmp3 = 15
-	
+
 	func renvoWasm32RegLocal(reg int) int {
 		return int(renvoWasm32RegLocals[reg])
 	}
-	
+
 	func renvoWasm32Sign32(v int) int {
 		if v > 2147483647 {
 			v -= 2147483647
@@ -858,18 +863,20 @@ go backend {
 		}
 		return v
 	}
-	
+
 	func renvoWasm32GetS32(in []byte, at int) int {
 		return renvoWasm32Sign32(RTGGet32At(in, at))
 	}
-	
+
 	func renvoWasm32NextInstructionPc(code []byte, pc int) int {
 		op := int(RTGByteAt(code, pc))
 		return pc + int(renvoWasm32InstructionSizes[op])
 	}
-	
+
 	func renvoWasm32InstructionPcs(code []byte) []int {
-		out := RTGMakeIntScratch(131072)
+		// The scratch slice grows when a very instruction-dense program needs it;
+		// reserving the old 128K entries eagerly cost 256 KiB on ordinary builds.
+		out := RTGMakeIntScratch(81920)
 		pc := 0
 		for pc < len(code) {
 			out = append(out, pc)
@@ -877,7 +884,7 @@ go backend {
 		}
 		return out
 	}
-	
+
 	func renvoWasm32PcLowerBound(pcs []int, pc int) int {
 		lo := 0
 		hi := len(pcs)
@@ -891,15 +898,12 @@ go backend {
 		}
 		return lo
 	}
-	
-	func renvoWasm32IsControlOp(op int) bool {
+
+		func renvoWasm32IsControlOp(op int) bool {
 		if op == renvoWasm32OpExit || op == renvoWasm32OpBuildArgsEnv {
 			return true
 		}
 		if op == renvoWasm32OpJmp || op == renvoWasm32OpJz || op == renvoWasm32OpJnz || op == renvoWasm32OpJCond {
-			return true
-		}
-		if op == renvoWasm32OpCall {
 			return true
 		}
 		if op == renvoWasm32OpRet {
@@ -907,8 +911,8 @@ go backend {
 		}
 		return false
 	}
-	
-	func renvoWasm32OpHasTarget(op int) bool {
+
+		func renvoWasm32OpHasTarget(op int) bool {
 		if op == renvoWasm32OpJmp {
 			return true
 		}
@@ -918,12 +922,9 @@ go backend {
 		if op == renvoWasm32OpJnz {
 			return true
 		}
-		if op == renvoWasm32OpCall {
-			return true
-		}
 		return false
 	}
-	
+
 	func renvoWasm32BuildBlockStartsLocal(code []byte, pcs []int) []int {
 		starts := make([]int, 0, 512)
 		instrCount := len(pcs)
@@ -962,14 +963,14 @@ go backend {
 		}
 		return starts
 	}
-	
+
 	func renvoWasm32BlockEnd(starts []int, blockIndex int, instrCount int) int {
 		if blockIndex+1 < len(starts) {
 			return starts[blockIndex+1]
 		}
 		return instrCount
 	}
-	
+
 	func renvoWasm32BuildInstrBlockIndex(starts []int, instrCount int) []int {
 		blockIndex := make([]int, instrCount+1, instrCount+1)
 		block := 0
@@ -982,39 +983,64 @@ go backend {
 		blockIndex[instrCount] = len(starts)
 		return blockIndex
 	}
-	
+
 	func renvoWasm32BlockForInstrFast(blockIndex []int, idx int) int {
 		if idx >= 0 && idx < len(blockIndex) {
 			return blockIndex[idx]
 		}
 		return len(blockIndex) - 1
 	}
-	
-	func renvoWasmLocalGet(out *renvoWasmBuffer, local int) {
+
+		func renvoWasmLocalGet(out *renvoWasmBuffer, local int) {
+		if out.lastLocalOp == 0x21 && out.lastLocalIndex == local && out.lastLocalEnd == out.length {
+			out.data[out.lastLocalStart] = 0x22
+			out.lastLocalOp = 0x22
+			return
+		}
+		start := out.length
 		renvoWasmPut(out, 0x20)
 		renvoWasmAppendU32(out, local)
+		out.lastLocalOp = 0x20
+		out.lastLocalIndex = local
+		out.lastLocalStart = start
+		out.lastLocalEnd = out.length
 		return
 	}
-	
-	func renvoWasmLocalSet(out *renvoWasmBuffer, local int) {
+
+		func renvoWasmLocalSet(out *renvoWasmBuffer, local int) {
+		if out.lastLocalOp == 0x20 && out.lastLocalIndex == local && out.lastLocalEnd == out.length {
+			out.length = out.lastLocalStart
+			out.lastLocalOp = 0
+			return
+		}
+		start := out.length
 		renvoWasmPut(out, 0x21)
 		renvoWasmAppendU32(out, local)
+		out.lastLocalOp = 0x21
+		out.lastLocalIndex = local
+		out.lastLocalStart = start
+		out.lastLocalEnd = out.length
 		return
 	}
-	
-	func renvoWasmLocalTee(out *renvoWasmBuffer, local int) {
+
+		func renvoWasmLocalTee(out *renvoWasmBuffer, local int) {
+		start := out.length
 		renvoWasmPut(out, 0x22)
 		renvoWasmAppendU32(out, local)
+		out.lastLocalOp = 0x22
+		out.lastLocalIndex = local
+		out.lastLocalStart = start
+		out.lastLocalEnd = out.length
 		return
 	}
-	
+
 	func renvoWasmI32Load(out *renvoWasmBuffer, align int, off int) {
 		renvoWasmPut(out, 0x28)
 		renvoWasmAppendU32(out, align)
 		renvoWasmAppendU32(out, off)
 		return
 	}
-	
+
 	func renvoWasmI32Load8U(out *renvoWasmBuffer) {
 		renvoWasmPut(out, 0x2d)
 		renvoWasmAppendU32(out, 0)
@@ -1028,7 +1054,7 @@ go backend {
 		renvoWasmAppendU32(out, 0)
 		return
 	}
-	
+
 	func renvoWasmI32Load16S(out *renvoWasmBuffer) {
 		renvoWasmPut(out, 0x2e)
 		renvoWasmAppendU32(out, 1)
@@ -1042,75 +1068,80 @@ go backend {
 		renvoWasmAppendU32(out, 0)
 		return
 	}
-	
+
 	func renvoWasmI32Store(out *renvoWasmBuffer, align int, off int) {
 		renvoWasmPut(out, 0x36)
 		renvoWasmAppendU32(out, align)
 		renvoWasmAppendU32(out, off)
 		return
 	}
-	
+
 	func renvoWasmI32Store8(out *renvoWasmBuffer) {
 		renvoWasmPut(out, 0x3a)
 		renvoWasmAppendU32(out, 0)
 		renvoWasmAppendU32(out, 0)
 		return
 	}
-	
+
 	func renvoWasmI32Store16(out *renvoWasmBuffer) {
 		renvoWasmPut(out, 0x3b)
 		renvoWasmAppendU32(out, 1)
 		renvoWasmAppendU32(out, 0)
 		return
 	}
-	
+
 	func renvoWasmI64Const(out *renvoWasmBuffer, value int) {
 		renvoWasmPut(out, 0x42)
 		renvoWasmAppendS32(out, value)
 		return
 	}
-	
+
 	func renvoWasmBr(out *renvoWasmBuffer, depth int) {
 		renvoWasmPut(out, 0x0c)
 		renvoWasmAppendU32(out, depth)
 		return
 	}
-	
+
 	func renvoWasmBrIf(out *renvoWasmBuffer, depth int) {
 		renvoWasmPut(out, 0x0d)
 		renvoWasmAppendU32(out, depth)
 		return
 	}
-	
+
 	func renvoWasm32SetPc(out *renvoWasmBuffer, pc int) {
 		renvoWasmAppendI32Const(out, pc)
 		renvoWasmLocalSet(out, renvoWasm32LocalPc)
 		return
 	}
-	
+
 	func renvoWasm32RegGet(out *renvoWasmBuffer, reg int) {
 		renvoWasmLocalGet(out, renvoWasm32RegLocal(reg))
 		return
 	}
-	
+
 	func renvoWasm32RegSet(out *renvoWasmBuffer, reg int) {
 		renvoWasmLocalSet(out, renvoWasm32RegLocal(reg))
 		return
 	}
-	
-	func renvoWasm32StackAddr(out *renvoWasmBuffer, offset int) {
-		renvoWasmLocalGet(out, renvoWasm32LocalFp)
-		renvoWasmAppendI32Const(out, offset)
-		renvoWasmPut(out, 0x6b)
+
+		func renvoWasm32StackAddr(out *renvoWasmBuffer, offset int) {
+		renvoWasmLocalGet(out, renvoWasm32LocalFrameBase)
+		delta := out.frameSize - offset
+		if delta > 0 {
+			renvoWasmAppendI32Const(out, delta)
+			renvoWasmPut(out, 0x6a)
+		}
 		return
 	}
-	
-	func renvoWasm32StackI64(out *renvoWasmBuffer, offset int) {
-		renvoWasm32StackAddr(out, offset)
-		renvoWasmAppendI64Load(out)
+
+		func renvoWasm32StackI64(out *renvoWasmBuffer, offset int) {
+		renvoWasmLocalGet(out, renvoWasm32LocalFrameBase)
+		renvoWasmPut(out, 0x29)
+		renvoWasmAppendU32(out, 3)
+		renvoWasmAppendU32(out, out.frameSize-offset)
 		return
 	}
-	
+
 	func renvoWasm32MemAddr(out *renvoWasmBuffer, base int, disp int) {
 		renvoWasm32RegGet(out, base)
 		if disp != 0 {
@@ -1119,7 +1150,7 @@ go backend {
 		}
 		return
 	}
-	
+
 	func renvoWasm32IndexAddr(out *renvoWasmBuffer, base int, index int, scale int, disp int) {
 		renvoWasm32RegGet(out, base)
 		renvoWasm32RegGet(out, index)
@@ -1134,48 +1165,52 @@ go backend {
 		}
 		return
 	}
-	
-	func renvoWasm32LoadSized(out *renvoWasmBuffer, size int) {
+
+		func renvoWasm32LoadSized(out *renvoWasmBuffer, size int, off int) {
+		op := 0x28
+		align := 2
 		if size == 129 {
-			renvoWasmI32Load8S(out)
-			return
+			op = 0x2c
+			align = 0
+		} else if size == 66 {
+			op = 0x2f
+			align = 1
+		} else if size == 1 {
+			op = 0x2d
+			align = 0
+		} else if size == 2 {
+			op = 0x2e
+			align = 1
 		}
-		if size == 66 {
-			renvoWasmI32Load16U(out)
-			return
-		}
-		if size == 1 {
-			renvoWasmI32Load8U(out)
-			return
-		}
-		if size == 2 {
-			renvoWasmI32Load16S(out)
-			return
-		}
-		renvoWasmI32Load(out, 2, 0)
+		renvoWasmPut(out, byte(op))
+		renvoWasmAppendU32(out, align)
+		renvoWasmAppendU32(out, off)
 		return
 	}
-	
-	func renvoWasm32StoreSized(out *renvoWasmBuffer, size int) {
+
+		func renvoWasm32StoreSized(out *renvoWasmBuffer, size int, off int) {
+		op := 0x36
+		align := 2
 		if size == 1 {
-			renvoWasmI32Store8(out)
-			return
+			op = 0x3a
+			align = 0
+		} else if size == 2 {
+			op = 0x3b
+			align = 1
 		}
-		if size == 2 {
-			renvoWasmI32Store16(out)
-			return
-		}
-		renvoWasmI32Store(out, 2, 0)
+		renvoWasmPut(out, byte(op))
+		renvoWasmAppendU32(out, align)
+		renvoWasmAppendU32(out, off)
 		return
 	}
-	
+
 	func renvoWasm32AppendCond(out *renvoWasmBuffer, cond int) {
 		renvoWasmLocalGet(out, renvoWasm32LocalFlag)
 		renvoWasmAppendI32Const(out, 0)
 		renvoWasmPut(out, renvoWasm32CondOpcodes[cond])
 		return
 	}
-	
+
 	func renvoWasm32Patch(a *RTGEmitter, dataBase int, bssBase int) {
 		for i := 0; i+1 < a.RelocationWordCount(); i += 2 {
 			at := a.RelocationWord(i)
@@ -1202,14 +1237,14 @@ go backend {
 			RTGPut32At(a.Code(), at, target)
 		}
 	}
-	
+
 	func renvoWasm32AppendStoreConst(out *renvoWasmBuffer, addr int, value int) {
 		renvoWasmAppendI32Const(out, addr)
 		renvoWasmAppendI32Const(out, value)
 		renvoWasmI32Store(out, 2, 0)
 		return
 	}
-	
+
 	func renvoWasm32AppendIov(out *renvoWasmBuffer, ptrLocal int, lenLocal int) {
 		renvoWasmAppendI32Const(out, renvoWasm32ScratchIov)
 		renvoWasmLocalGet(out, ptrLocal)
@@ -1219,7 +1254,7 @@ go backend {
 		renvoWasmI32Store(out, 2, 0)
 		return
 	}
-	
+
 	func renvoWasm32AppendErrnoResult(out *renvoWasmBuffer, resultPtr int) {
 		renvoWasmLocalTee(out, renvoWasm32LocalTmp)
 		renvoWasmPut(out, 0x45)
@@ -1233,7 +1268,7 @@ go backend {
 		renvoWasmPut(out, 0x0b)
 		return
 	}
-	
+
 	func renvoWasm32AppendErrnoOnlyResult(out *renvoWasmBuffer) {
 		renvoWasmLocalTee(out, renvoWasm32LocalTmp)
 		renvoWasmPut(out, 0x45)
@@ -1246,12 +1281,12 @@ go backend {
 		renvoWasmPut(out, 0x0b)
 		return
 	}
-	
+
 	func renvoWasm32AppendSyscall(out *renvoWasmBuffer) {
 		renvoWasmAppendEncoded(out, "\x20\x02\x41\x01\x46\x04\x40\x41\x00\x20\x06\x36\x02\x00\x41\x04\x20\x03\x36\x02\x00\x20\x05\x41\x00\x41\x01\x41\x08\x10\x00\x22\x0d\x45\x04\x40\x41\x08\x28\x02\x00\x21\x02\x05\x41\x7f\x21\x02\x0b\x05\x20\x02\x41\x00\x46\x04\x40\x41\x00\x20\x06\x36\x02\x00\x41\x04\x20\x03\x36\x02\x00\x20\x05\x41\x00\x41\x01\x41\x08\x10\x01\x22\x0d\x45\x04\x40\x41\x08\x28\x02\x00\x21\x02\x05\x41\x7f\x21\x02\x0b\x05\x20\x02\x41\x12\x46\x04\x40\x41\x00\x20\x06\x36\x02\x00\x41\x04\x20\x03\x36\x02\x00\x20\x05\x41\x00\x41\x01\x20\x0b\xac\x41\x08\x10\x03\x22\x0d\x45\x04\x40\x41\x08\x28\x02\x00\x21\x02\x05\x41\x7f\x21\x02\x0b\x05\x20\x02\x41\x11\x46\x04\x40\x41\x00\x20\x06\x36\x02\x00\x41\x04\x20\x03\x36\x02\x00\x20\x05\x41\x00\x41\x01\x20\x0b\xac\x41\x08\x10\x02\x22\x0d\x45\x04\x40\x41\x08\x28\x02\x00\x21\x02\x05\x41\x7f\x21\x02\x0b\x05\x20\x02\x41\x03\x46\x04\x40\x20\x05\x10\x05\x22\x0d\x45\x04\x40\x41\x00\x21\x02\x05\x41\x7f\x21\x02\x0b\x05\x20\x02\x41\xdb\x00\x46\x04\x40\x20\x05\x41\xc0\x00\x10\x06\x22\x0d\x45\x04\x40\x41\x00\x21\x02\x05\x41\x7f\x21\x02\x0b\x05\x20\x02\x41\xd9\x01\x46\x04\x40\x20\x05\x20\x06\x20\x03\x42\x00\x41\x08\x10\x07\x22\x0d\x45\x04\x40\x41\x08\x28\x02\x00\x21\x02\x05\x41\x7f\x21\x02\x0b\x05\x20\x03\x41\x00\x4b\x04\x40\x20\x05\x20\x03\x41\x01\x6b\x6a\x2d\x00\x00\x45\x04\x40\x20\x03\x41\x01\x6b\x21\x03\x0b\x0b\x41\x00\x21\x0d\x20\x06\x41\xc0\x00\x71\x45\x45\x04\x40\x20\x0d\x41\x01\x72\x21\x0d\x0b\x20\x06\x41\x80\x04\x71\x45\x45\x04\x40\x20\x0d\x41\x08\x72\x21\x0d\x0b\x20\x05\x2d\x00\x00\x41\x2f\x46\x04\x40\x20\x05\x41\x01\x6a\x21\x05\x20\x03\x41\x01\x6b\x21\x03\x0b\x41\x03\x21\x0e\x02\x40\x03\x40\x20\x0e\x41\x00\x20\x05\x20\x03\x20\x0d\x20\x06\x41\x02\x71\x45\x04\x7e\x42\x82\x80\x01\x05\x42\xe6\x80\x80\x01\x0b\x42\x00\x41\x00\x41\x0c\x10\x04\x22\x0f\x45\x04\x40\x41\x0c\x28\x02\x00\x21\x02\x0c\x02\x0b\x20\x0e\x41\x01\x6a\x22\x0e\x41\x08\x4c\x0d\x00\x0b\x41\x7f\x21\x02\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b")
 		return
 	}
-	
+
 	func renvoWasm32AppendOpen(out *renvoWasmBuffer) {
 		renvoWasmLocalGet(out, renvoWasm32LocalRdx)
 		renvoWasmAppendI32Const(out, 0)
@@ -1270,7 +1305,7 @@ go backend {
 		renvoWasmLocalSet(out, renvoWasm32LocalRdx)
 		renvoWasmPut(out, 0x0b)
 		renvoWasmPut(out, 0x0b)
-	
+
 		renvoWasmAppendI32Const(out, 0)
 		renvoWasmLocalSet(out, renvoWasm32LocalTmp)
 		renvoWasmLocalGet(out, renvoWasm32LocalRsi)
@@ -1291,7 +1326,7 @@ go backend {
 		renvoWasmPut(out, 0x72)
 		renvoWasmLocalSet(out, renvoWasm32LocalTmp)
 		renvoWasmPut(out, 0x0b)
-	
+
 		renvoWasmLocalGet(out, renvoWasm32LocalRdi)
 		renvoWasmI32Load8U(out)
 		renvoWasmAppendI32Const(out, 47)
@@ -1306,7 +1341,7 @@ go backend {
 		renvoWasmPut(out, 0x6b)
 		renvoWasmLocalSet(out, renvoWasm32LocalRdx)
 		renvoWasmPut(out, 0x0b)
-	
+
 		renvoWasmAppendI32Const(out, 3)
 		renvoWasmLocalSet(out, renvoWasm32LocalTmp2)
 		renvoWasmAppend2(out, 0x02, 0x40)
@@ -1349,12 +1384,12 @@ go backend {
 		renvoWasmPut(out, 0x0b)
 		return
 	}
-	
+
 	func renvoWasm32AppendStringSliceBuild(out *renvoWasmBuffer, ptrArea int, countLocal int, destAddr int) {
 		renvoWasmAppendRecipe(out, "\x41\x00\x21\x0d\x02\x40\x03\x40\x20\x0d\xff\x01\x01\x4f\x0d\x01\xff\x00\x00\x20\x0d\x41\x04\x6c\x6a\x28\x02\x00\x21\x0e\x41\x00\x21\x0f\x02\x40\x03\x40\x20\x0e\x20\x0f\x6a\x2d\x00\x00\x45\x0d\x01\x20\x0f\x41\x01\x6a\x21\x0f\x0c\x00\x0b\x0b\xff\x00\x02\x20\x0d\x41\x10\x6c\x6a\x20\x0e\x36\x02\x00\xff\x00\x03\x20\x0d\x41\x10\x6c\x6a\x20\x0f\x36\x02\x00\x20\x0d\x41\x01\x6a\x21\x0d\x0c\x00\x0b\x0b", ptrArea, countLocal, destAddr, destAddr+8)
 		return
 	}
-	
+
 	func renvoWasm32AppendBuildArgsEnv(out *renvoWasmBuffer, argsAddr int, envAddr int, envLenAddr int) {
 		renvoWasmAppendRecipe(out, "\x41\x10\x41\x14\x10\x08\x1a\x41\x80\x20\x41\x80\xc0\x00\x10\x09\x1a\x41\x10\x28\x02\x00\x21\x06\x20\x06\x21\x03\xff\x00\x00\x21\x05", argsAddr, 0, 0, 0)
 		renvoWasm32AppendStringSliceBuild(out, renvoWasm32ArgsPtrArea, renvoWasm32LocalRsi, argsAddr)
@@ -1362,12 +1397,12 @@ go backend {
 		renvoWasm32AppendStringSliceBuild(out, renvoWasm32EnvPtrArea, renvoWasm32LocalR8, envAddr)
 		return
 	}
-	
+
 	func renvoWasm32AppendBinaryOp(out *renvoWasmBuffer, op int) {
 		renvoWasmPut(out, renvoWasm32BinaryOpcodes[op])
 	}
-	
-	func renvoWasm32AppendInstr(out *renvoWasmBuffer, code []byte, pc int, nextIndex int, targetIndex int, loopDepth int) {
+
+		func renvoWasm32AppendInstr(out *renvoWasmBuffer, code []byte, pc int, nextIndex int, targetIndex int, loopDepth int) {
 		op := int(RTGByteAt(code, pc))
 		if op == renvoWasm32OpExit {
 			renvoWasmLocalGet(out, renvoWasm32LocalRax)
@@ -1376,6 +1411,9 @@ go backend {
 		}
 		if op == renvoWasm32OpBuildArgsEnv {
 			renvoWasm32AppendBuildArgsEnv(out, RTGGet32At(code, pc+1), RTGGet32At(code, pc+5), RTGGet32At(code, pc+9))
+			if loopDepth < 0 {
+				return
+			}
 			renvoWasm32SetPc(out, nextIndex)
 			renvoWasmBr(out, loopDepth)
 			return
@@ -1410,6 +1448,26 @@ go backend {
 			renvoWasmAppendRecipe(out, "\xff\x0b\x00\xff\x0b\x01\xff\x0e\x02\xff\x05\x03", renvoWasm32GetS32(code, pc+1), renvoWasm32GetS32(code, pc+5), int(RTGByteAt(code, pc+9)), renvoWasm32RegRax)
 			return
 		}
+		if op == renvoWasm32OpLoadStack {
+			renvoWasmLocalGet(out, renvoWasm32LocalFrameBase)
+			renvoWasmI32Load(out, 2, out.frameSize-renvoWasm32GetS32(code, pc+2))
+			renvoWasm32RegSet(out, int(RTGByteAt(code, pc+1)))
+			if loopDepth >= 0 {
+				renvoWasm32SetPc(out, nextIndex)
+				renvoWasmBr(out, loopDepth)
+			}
+			return
+		}
+		if op == renvoWasm32OpStoreStack {
+			renvoWasmLocalGet(out, renvoWasm32LocalFrameBase)
+			renvoWasm32RegGet(out, int(RTGByteAt(code, pc+1)))
+			renvoWasmI32Store(out, 2, out.frameSize-renvoWasm32GetS32(code, pc+2))
+			if loopDepth >= 0 {
+				renvoWasm32SetPc(out, nextIndex)
+				renvoWasmBr(out, loopDepth)
+			}
+			return
+		}
 		recipeAt := int(renvoWasm32SimpleRecipeOffsets[op])
 		if recipeAt != 0 {
 			argA := int(RTGByteAt(code, pc+1))
@@ -1426,20 +1484,20 @@ go backend {
 			renvoWasmAppendRecipe(out, renvoWasm32SimpleRecipes[recipeAt+1:recipeAt+1+recipeLen], argA, argB, 0, 0)
 		} else if op == renvoWasm32OpLoadMem {
 			renvoWasm32MemAddr(out, int(RTGByteAt(code, pc+2)), renvoWasm32GetS32(code, pc+3))
-			renvoWasm32LoadSized(out, int(RTGByteAt(code, pc+7)))
+			renvoWasm32LoadSized(out, int(RTGByteAt(code, pc+7)), 0)
 			renvoWasm32RegSet(out, int(RTGByteAt(code, pc+1)))
 		} else if op == renvoWasm32OpStoreMem {
 			renvoWasm32MemAddr(out, int(RTGByteAt(code, pc+2)), renvoWasm32GetS32(code, pc+3))
 			renvoWasm32RegGet(out, int(RTGByteAt(code, pc+1)))
-			renvoWasm32StoreSized(out, int(RTGByteAt(code, pc+7)))
+			renvoWasm32StoreSized(out, int(RTGByteAt(code, pc+7)), 0)
 		} else if op == renvoWasm32OpLoadIndex {
 			renvoWasm32IndexAddr(out, int(RTGByteAt(code, pc+2)), int(RTGByteAt(code, pc+3)), int(RTGByteAt(code, pc+4)), renvoWasm32GetS32(code, pc+5))
-			renvoWasm32LoadSized(out, int(RTGByteAt(code, pc+9)))
+			renvoWasm32LoadSized(out, int(RTGByteAt(code, pc+9)), 0)
 			renvoWasm32RegSet(out, int(RTGByteAt(code, pc+1)))
 		} else if op == renvoWasm32OpStoreIndex {
 			renvoWasm32IndexAddr(out, int(RTGByteAt(code, pc+2)), int(RTGByteAt(code, pc+3)), int(RTGByteAt(code, pc+4)), renvoWasm32GetS32(code, pc+5))
 			renvoWasm32RegGet(out, int(RTGByteAt(code, pc+1)))
-			renvoWasm32StoreSized(out, int(RTGByteAt(code, pc+9)))
+			renvoWasm32StoreSized(out, int(RTGByteAt(code, pc+9)), 0)
 		} else if op >= renvoWasm32OpAddRegReg && op <= renvoWasm32OpShrRegReg || op == renvoWasm32OpShrUnsignedRegReg {
 			argA := int(RTGByteAt(code, pc+1))
 			argB := int(RTGByteAt(code, pc+2))
@@ -1481,37 +1539,33 @@ go backend {
 		renvoWasmBr(out, loopDepth)
 		return
 	}
-	
-	func renvoWasm32AppendDirectArgs(out *renvoWasmBuffer, frameSize int) {
+
+		func renvoWasm32AppendDirectArgs(out *renvoWasmBuffer, frameSize int) {
 		renvoWasmLocalGet(out, renvoWasm32LocalSp)
 		renvoWasmLocalGet(out, renvoWasm32LocalFp)
 		if frameSize > 0 {
 			renvoWasmAppendI32Const(out, frameSize)
 			renvoWasmPut(out, 0x6b)
 		}
-		renvoWasmLocalGet(out, renvoWasm32LocalRax)
-		renvoWasmLocalGet(out, renvoWasm32LocalRdx)
-		renvoWasmLocalGet(out, renvoWasm32LocalRcx)
-		renvoWasmLocalGet(out, renvoWasm32LocalRdi)
-		renvoWasmLocalGet(out, renvoWasm32LocalRsi)
-		renvoWasmLocalGet(out, renvoWasm32LocalR8)
-		renvoWasmLocalGet(out, renvoWasm32LocalR9)
+		for reg := 0; reg < 7; reg++ {
+			renvoWasm32RegGet(out, reg)
+		}
 		return
 	}
-	
-	func renvoWasm32AppendStateResults(out *renvoWasmBuffer) {
-		renvoWasmLocalGet(out, renvoWasm32LocalRax)
-		renvoWasmLocalGet(out, renvoWasm32LocalRdx)
-		renvoWasmLocalGet(out, renvoWasm32LocalRcx)
+
+		func renvoWasm32AppendStateResults(out *renvoWasmBuffer) {
+		for reg := 0; reg < 3; reg++ {
+			renvoWasm32RegGet(out, reg)
+		}
 		return
 	}
-	
+
 	func renvoWasm32AppendStateReturn(out *renvoWasmBuffer) {
 		renvoWasm32AppendStateResults(out)
 		renvoWasmPut(out, 0x0f)
 		return
 	}
-	
+
 	func renvoWasm32FindRoutineIndex(routinePcs []int, pc int) int {
 		lo := 0
 		hi := len(routinePcs)
@@ -1529,17 +1583,17 @@ go backend {
 		}
 		return -1
 	}
-	
-	func renvoWasm32AppendDirectCall(out *renvoWasmBuffer, funcIndex int, frameSize int) {
+
+		func renvoWasm32AppendDirectCall(out *renvoWasmBuffer, funcIndex int, frameSize int) {
 		renvoWasm32AppendDirectArgs(out, frameSize)
 		renvoWasmAppendCall(out, funcIndex)
-		renvoWasmLocalSet(out, renvoWasm32LocalRcx)
-		renvoWasmLocalSet(out, renvoWasm32LocalRdx)
-		renvoWasmLocalSet(out, renvoWasm32LocalRax)
+		for reg := 2; reg >= 0; reg-- {
+			renvoWasm32RegSet(out, reg)
+		}
 		return
 	}
-	
-	func renvoWasm32AppendInstrDirect(out *renvoWasmBuffer, code []byte, pc int, nextIndex int, targetIndex int, loopDepth int, callStackBase int, frameSize int, routinePcs []int, symbolPcs []int) {
+
+		func renvoWasm32AppendInstrDirect(out *renvoWasmBuffer, code []byte, pc int, nextIndex int, targetIndex int, loopDepth int, frameSize int, routinePcs []int, symbolPcs []int, callArgBase int) {
 		op := int(RTGByteAt(code, pc))
 		if op == renvoWasm32OpExit {
 			renvoWasmLocalGet(out, renvoWasm32LocalRax)
@@ -1558,6 +1612,9 @@ go backend {
 			if argA != 0 && renvoWasm32SortedPcContains(symbolPcs, argA) {
 				callFrameSize = frameSize
 			}
+			if argB > 6 && callArgBase > 0 {
+				renvoWasm32AppendLocalCallArgs(out, callArgBase, argB-6)
+			}
 			renvoWasm32AppendDirectCall(out, renvoWasm32VmFuncBase+routineIndex, callFrameSize)
 			if argB > 6 {
 				// Direct wasm calls pass SP by value; drop caller-owned stack args.
@@ -1574,31 +1631,13 @@ go backend {
 			return
 		}
 		if op == renvoWasm32OpRet {
-			renvoWasmLocalGet(out, renvoWasm32LocalCsp)
-			renvoWasmAppendI32Const(out, callStackBase)
-			renvoWasmPut(out, 0x46)
-			renvoWasmAppend2(out, 0x04, 0x40)
 			renvoWasm32AppendStateReturn(out)
-			renvoWasmPut(out, 0x05)
-			renvoWasmLocalGet(out, renvoWasm32LocalCsp)
-			renvoWasmAppendI32Const(out, 8)
-			renvoWasmPut(out, 0x6b)
-			renvoWasmLocalTee(out, renvoWasm32LocalCsp)
-			renvoWasmI32Load(out, 2, 0)
-			renvoWasmLocalSet(out, renvoWasm32LocalPc)
-			renvoWasmLocalGet(out, renvoWasm32LocalCsp)
-			renvoWasmI32Load(out, 2, 4)
-			renvoWasmLocalSet(out, renvoWasm32LocalFp)
-			renvoWasmPut(out, 0x0b)
-			if loopDepth >= 0 {
-				renvoWasmBr(out, loopDepth)
-			}
 			return
 		}
 		renvoWasm32AppendInstr(out, code, pc, nextIndex, targetIndex, loopDepth)
 		return
 	}
-	
+
 	func renvoWasm32CanFusePair(code []byte, firstPc int, secondPc int) bool {
 		firstOp := int(RTGByteAt(code, firstPc))
 		secondOp := int(RTGByteAt(code, secondPc))
@@ -1615,7 +1654,7 @@ go backend {
 		}
 		return false
 	}
-	
+
 	func renvoWasm32AppendFusedPair(out *renvoWasmBuffer, code []byte, firstPc int, secondPc int) {
 		firstOp := int(RTGByteAt(code, firstPc))
 		firstA := int(RTGByteAt(code, firstPc+1))
@@ -1643,7 +1682,7 @@ go backend {
 		renvoWasm32RegSet(out, secondA)
 		return
 	}
-	
+
 	func renvoWasm32PcInList(pcs []int, pc int) bool {
 		for i := 0; i < len(pcs); i++ {
 			if pcs[i] == pc {
@@ -1652,7 +1691,7 @@ go backend {
 		}
 		return false
 	}
-	
+
 	func renvoWasm32SortPcs(pcs []int) []int {
 		for i := 1; i < len(pcs); i++ {
 			value := pcs[i]
@@ -1665,7 +1704,7 @@ go backend {
 		}
 		return pcs
 	}
-	
+
 	func renvoWasm32SymbolPcs(a *RTGEmitter) []int {
 		pcs := make([]int, 0, 2048)
 		for i := 0; i < a.SymbolCount(); i++ {
@@ -1680,7 +1719,7 @@ go backend {
 		pcs = renvoWasm32SortPcs(pcs)
 		return pcs
 	}
-	
+
 	func renvoWasm32RoutinePcs(a *RTGEmitter, code []byte, instrPcs []int) []int {
 		pcs := make([]int, 0, 1024)
 		marks := make([]byte, len(code)+1)
@@ -1712,7 +1751,7 @@ go backend {
 		pcs = renvoWasm32SortPcs(pcs)
 		return pcs
 	}
-	
+
 	func renvoWasm32SortedPcContains(pcs []int, pc int) bool {
 		lo := 0
 		hi := len(pcs)
@@ -1726,7 +1765,7 @@ go backend {
 		}
 		return lo < len(pcs) && pcs[lo] == pc
 	}
-	
+
 	func renvoWasm32RoutineEnds(routinePcs []int, symbolPcs []int, code []byte, instrPcs []int) []int {
 		ends := make([]int, len(routinePcs))
 		symbolIndex := 0
@@ -1762,7 +1801,7 @@ go backend {
 		}
 		return ends
 	}
-	
+
 	func renvoWasm32RoutineFrameSize(code []byte, pcs []int) int {
 		frameSize := 0
 		for i := 0; i < len(pcs); i++ {
@@ -1791,17 +1830,141 @@ go backend {
 		}
 		return RTGAlignValue(frameSize, 16)
 	}
-	
-	func renvoWasm32AppendDirectRoutineBody(body *renvoWasmBuffer, code []byte, pcs []int, routinePcs []int, symbolPcs []int, callStackBase int, frameSize int) {
+
+		func renvoWasm32AppendDirectRoutineBody(body *renvoWasmBuffer, code []byte, pcs []int, routinePcs []int, symbolPcs []int, frameSize int, directLocals []int32) {
 		blockStarts := renvoWasm32BuildBlockStartsLocal(code, pcs)
-		instrBlockIndex := renvoWasm32BuildInstrBlockIndex(blockStarts, len(pcs))
+		localStack, localStackCount := renvoWasm32LocalStackMap(code, pcs, blockStarts)
 		renvoWasmAppendU32(body, 1)
-		renvoWasmAppendU32(body, 7)
+		renvoWasmAppendU32(body, 8+localStackCount+len(directLocals))
 		renvoWasmPut(body, 0x7f)
+		renvoWasmLocalGet(body, renvoWasm32LocalFp)
+		if frameSize > 0 {
+			renvoWasmAppendI32Const(body, frameSize)
+			renvoWasmPut(body, 0x6b)
+		}
+		renvoWasmLocalSet(body, renvoWasm32LocalFrameBase)
+		directLocalBase := 17 + localStackCount
+		if len(blockStarts) == 1 {
+			for i := 0; i < len(pcs); i++ {
+				pc := pcs[i]
+				op := int(RTGByteAt(code, pc))
+				directLocal := -1
+				if op == renvoWasm32OpLoadStack || op == renvoWasm32OpStoreStack {
+					directLocal = renvoWasm32DirectLocal(directLocals, renvoWasm32GetS32(code, pc+2), directLocalBase)
+				}
+				if directLocal >= 0 {
+					renvoWasm32AppendDirectLocalOp(body, code, pc, directLocal)
+					continue
+				}
+				mayFuse := op == renvoWasm32OpPushReg || op == renvoWasm32OpPushImm || op == renvoWasm32OpStoreStack
+				if mayFuse && i+1 < len(pcs) && renvoWasm32CanFusePair(code, pc, pcs[i+1]) {
+					renvoWasm32AppendFusedPair(body, code, pc, pcs[i+1])
+					i++
+					continue
+				}
+				if localStack[i] != 0 && (op == renvoWasm32OpPushReg || op == renvoWasm32OpPushImm || op == renvoWasm32OpPopReg) {
+					renvoWasm32AppendLocalStackOp(body, code, pc, localStack[i])
+					continue
+				}
+				renvoWasm32AppendInstrDirect(body, code, pc, 0, 0, -1, frameSize, routinePcs, symbolPcs, localStack[i])
+			}
+			renvoWasm32AppendStateResults(body)
+			renvoWasmPut(body, 0x0b)
+			return
+		}
+		instrBlockIndex := renvoWasm32BuildInstrBlockIndex(blockStarts, len(pcs))
+		loopHeaders, loopTails, structured := renvoWasm32RoutineStructure(code, pcs, blockStarts, instrBlockIndex)
+		if structured {
+			labels := make([]int, 0, len(blockStarts)+len(loopHeaders))
+			for target := len(blockStarts); target >= 1; target-- {
+				if renvoWasm32BlockRegion(target, loopHeaders, loopTails) >= 0 {
+					continue
+				}
+				renvoWasmAppend2(body, 0x02, 0x40)
+				labels = append(labels, target)
+			}
+			for block := 0; block < len(blockStarts); block++ {
+				if block > 0 {
+					renvoWasmPut(body, 0x0b)
+					labels = labels[:len(labels)-1]
+				}
+				loop := renvoWasm32LoopAt(block, loopHeaders)
+				if loop >= 0 {
+					renvoWasmAppend2(body, 0x03, 0x40)
+					labels = append(labels, -block-1)
+					for target := loopTails[loop]; target > block; target-- {
+						if renvoWasm32BlockRegion(target, loopHeaders, loopTails) != loop {
+							continue
+						}
+						renvoWasmAppend2(body, 0x02, 0x40)
+						labels = append(labels, target)
+					}
+				}
+				start := blockStarts[block]
+				end := renvoWasm32BlockEnd(blockStarts, block, len(pcs))
+				for i := start; i < end; i++ {
+					pc := pcs[i]
+					op := int(RTGByteAt(code, pc))
+					directLocal := -1
+					if op == renvoWasm32OpLoadStack || op == renvoWasm32OpStoreStack {
+						directLocal = renvoWasm32DirectLocal(directLocals, renvoWasm32GetS32(code, pc+2), directLocalBase)
+					}
+					if directLocal >= 0 {
+						renvoWasm32AppendDirectLocalOp(body, code, pc, directLocal)
+						continue
+					}
+					mayFuse := op == renvoWasm32OpPushReg || op == renvoWasm32OpPushImm || op == renvoWasm32OpStoreStack
+					if mayFuse && i+1 < end && renvoWasm32CanFusePair(code, pc, pcs[i+1]) {
+						renvoWasm32AppendFusedPair(body, code, pc, pcs[i+1])
+						i++
+						continue
+					}
+					if localStack[i] != 0 && (op == renvoWasm32OpPushReg || op == renvoWasm32OpPushImm || op == renvoWasm32OpPopReg) {
+						renvoWasm32AppendLocalStackOp(body, code, pc, localStack[i])
+						continue
+					}
+					if i+1 == end && (renvoWasm32OpHasTarget(op) || op == renvoWasm32OpJCond) {
+						targetPC := RTGGet32At(code, pc+1)
+						if op == renvoWasm32OpJCond {
+							targetPC = RTGGet32At(code, pc+2)
+						}
+						target := renvoWasm32PcLowerBound(pcs, targetPC)
+						targetBlock := renvoWasm32BlockForInstrFast(instrBlockIndex, target)
+						wanted := targetBlock
+						if targetBlock <= block {
+							wanted = -targetBlock - 1
+						}
+						depth := -1
+						for label := len(labels) - 1; label >= 0; label-- {
+							if labels[label] == wanted {
+								depth = len(labels) - 1 - label
+								break
+							}
+						}
+						if depth >= 0 {
+							renvoWasm32AppendStructuredBranch(body, code, pc, depth)
+						}
+						continue
+					}
+					renvoWasm32AppendInstrDirect(body, code, pc, 0, 0, -1, frameSize, routinePcs, symbolPcs, localStack[i])
+				}
+				for i := len(loopTails) - 1; i >= 0; i-- {
+					if loopTails[i] == block {
+						renvoWasmPut(body, 0x0b)
+						labels = labels[:len(labels)-1]
+					}
+				}
+			}
+			for len(labels) > 0 {
+				renvoWasmPut(body, 0x0b)
+				labels = labels[:len(labels)-1]
+			}
+			renvoWasm32AppendStateResults(body)
+			renvoWasmPut(body, 0x0b)
+			return
+		}
 		renvoWasmAppendI32Const(body, 0)
 		renvoWasmLocalSet(body, renvoWasm32LocalPc)
-		renvoWasmAppendI32Const(body, callStackBase)
-		renvoWasmLocalSet(body, renvoWasm32LocalCsp)
 		if len(blockStarts) == 0 {
 			renvoWasm32AppendStateResults(body)
 			renvoWasmPut(body, 0x0b)
@@ -1828,6 +1991,20 @@ go backend {
 			for i < end {
 				pc := pcs[i]
 				op := int(RTGByteAt(code, pc))
+				directLocal := -1
+				if op == renvoWasm32OpLoadStack || op == renvoWasm32OpStoreStack {
+					directLocal = renvoWasm32DirectLocal(directLocals, renvoWasm32GetS32(code, pc+2), directLocalBase)
+				}
+				if directLocal >= 0 {
+					renvoWasm32AppendDirectLocalOp(body, code, pc, directLocal)
+					if i+1 >= end {
+						nextBlock := renvoWasm32BlockForInstrFast(instrBlockIndex, i+1)
+						renvoWasm32SetPc(body, nextBlock)
+						renvoWasmBr(body, blockIndex)
+					}
+					i++
+					continue
+				}
 				mayFuse := op == renvoWasm32OpPushReg || op == renvoWasm32OpPushImm || op == renvoWasm32OpStoreStack
 				if mayFuse && i+1 < end && renvoWasm32CanFusePair(code, pc, pcs[i+1]) {
 					renvoWasm32AppendFusedPair(body, code, pc, pcs[i+1])
@@ -1840,8 +2017,18 @@ go backend {
 					i += 2
 					continue
 				}
+				if localStack[i] != 0 && (op == renvoWasm32OpPushReg || op == renvoWasm32OpPushImm || op == renvoWasm32OpPopReg) {
+					renvoWasm32AppendLocalStackOp(body, code, pc, localStack[i])
+					if i+1 >= end {
+						nextBlock := renvoWasm32BlockForInstrFast(instrBlockIndex, i+1)
+						renvoWasm32SetPc(body, nextBlock)
+						renvoWasmBr(body, blockIndex)
+					}
+					i++
+					continue
+				}
 				if i+1 < end {
-					renvoWasm32AppendInstrDirect(body, code, pc, 0, 0, -1, callStackBase, frameSize, routinePcs, symbolPcs)
+					renvoWasm32AppendInstrDirect(body, code, pc, 0, 0, -1, frameSize, routinePcs, symbolPcs, localStack[i])
 				} else {
 					nextIndex := i + 1
 					nextBlock := renvoWasm32BlockForInstrFast(instrBlockIndex, nextIndex)
@@ -1854,7 +2041,7 @@ go backend {
 						targetIndex := renvoWasm32PcLowerBound(pcs, targetPc)
 						targetBlock = renvoWasm32BlockForInstrFast(instrBlockIndex, targetIndex)
 					}
-					renvoWasm32AppendInstrDirect(body, code, pc, nextBlock, targetBlock, blockIndex, callStackBase, frameSize, routinePcs, symbolPcs)
+					renvoWasm32AppendInstrDirect(body, code, pc, nextBlock, targetBlock, blockIndex, frameSize, routinePcs, symbolPcs, localStack[i])
 				}
 				i++
 			}
@@ -1866,8 +2053,8 @@ go backend {
 		renvoWasmPut(body, 0x0b)
 		return
 	}
-	
-	func renvoWasm32AppendDirectStartBody(body *renvoWasmBuffer, topFunc int, exprStackBase int, callStackBase int, frameTop int) {
+
+		func renvoWasm32AppendDirectStartBody(body *renvoWasmBuffer, topFunc int, exprStackBase int, callStackBase int, frameTop int) {
 		renvoWasmAppendU32(body, 1)
 		renvoWasmAppendU32(body, 16)
 		renvoWasmPut(body, 0x7f)
@@ -1881,21 +2068,19 @@ go backend {
 		renvoWasmLocalSet(body, renvoWasm32LocalCsp)
 		renvoWasm32AppendDirectArgs(body, 0)
 		renvoWasmAppendCall(body, topFunc)
-		renvoWasmLocalSet(body, renvoWasm32LocalRcx)
-		renvoWasmLocalSet(body, renvoWasm32LocalRdx)
-		renvoWasmLocalSet(body, renvoWasm32LocalRax)
+		for reg := 2; reg >= 0; reg-- {
+			renvoWasm32RegSet(body, reg)
+		}
 		renvoWasmLocalGet(body, renvoWasm32LocalRax)
 		renvoWasmAppendCall(body, renvoWasm32ImportProcExit)
 		renvoWasmPut(body, 0x0b)
 		return
 	}
-	
-	func renvoWasm32TypeSectionFull() []byte {
-		var out renvoWasmBuffer
-		renvoWasmAppendEncoded(&out, "\x08\x60\x04\x7f\x7f\x7f\x7f\x01\x7f\x60\x05\x7f\x7f\x7f\x7e\x7f\x01\x7f\x60\x09\x7f\x7f\x7f\x7f\x7f\x7e\x7e\x7f\x7f\x01\x7f\x60\x01\x7f\x01\x7f\x60\x01\x7f\x00\x60\x00\x00\x60\x02\x7f\x7f\x01\x7f\x60\x09\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x03\x7f\x7f\x7f")
-		return out.data[:out.length]
+
+		func renvoWasm32TypeSectionFull() []byte {
+		return []byte("\x08\x60\x04\x7f\x7f\x7f\x7f\x01\x7f\x60\x05\x7f\x7f\x7f\x7e\x7f\x01\x7f\x60\x09\x7f\x7f\x7f\x7f\x7f\x7e\x7e\x7f\x7f\x01\x7f\x60\x01\x7f\x01\x7f\x60\x01\x7f\x00\x60\x00\x00\x60\x02\x7f\x7f\x01\x7f\x60\x09\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x03\x7f\x7f\x7f")
 	}
-	
+
 	func renvoWasm32AppendImport(out *renvoWasmBuffer, name string, typ int) {
 		renvoWasmAppendName(out, "wasi_snapshot_preview1")
 		renvoWasmAppendName(out, name)
@@ -1903,13 +2088,11 @@ go backend {
 		renvoWasmAppendU32(out, typ)
 		return
 	}
-	
-	func renvoWasm32ImportSectionFull() []byte {
-		var out renvoWasmBuffer
-		renvoWasmAppendEncoded(&out, "\x0d\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x08\x66\x64\x5f\x77\x72\x69\x74\x65\x00\x00\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x07\x66\x64\x5f\x72\x65\x61\x64\x00\x00\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x08\x66\x64\x5f\x70\x72\x65\x61\x64\x00\x01\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x09\x66\x64\x5f\x70\x77\x72\x69\x74\x65\x00\x01\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x09\x70\x61\x74\x68\x5f\x6f\x70\x65\x6e\x00\x02\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x08\x66\x64\x5f\x63\x6c\x6f\x73\x65\x00\x03\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x0d\x66\x64\x5f\x66\x64\x73\x74\x61\x74\x5f\x67\x65\x74\x00\x06\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x0a\x66\x64\x5f\x72\x65\x61\x64\x64\x69\x72\x00\x01\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x0e\x61\x72\x67\x73\x5f\x73\x69\x7a\x65\x73\x5f\x67\x65\x74\x00\x06\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x08\x61\x72\x67\x73\x5f\x67\x65\x74\x00\x06\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x11\x65\x6e\x76\x69\x72\x6f\x6e\x5f\x73\x69\x7a\x65\x73\x5f\x67\x65\x74\x00\x06\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x0b\x65\x6e\x76\x69\x72\x6f\x6e\x5f\x67\x65\x74\x00\x06\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x09\x70\x72\x6f\x63\x5f\x65\x78\x69\x74\x00\x04")
-		return out.data[:out.length]
+
+		func renvoWasm32ImportSectionFull() []byte {
+		return []byte("\x0d\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x08\x66\x64\x5f\x77\x72\x69\x74\x65\x00\x00\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x07\x66\x64\x5f\x72\x65\x61\x64\x00\x00\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x08\x66\x64\x5f\x70\x72\x65\x61\x64\x00\x01\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x09\x66\x64\x5f\x70\x77\x72\x69\x74\x65\x00\x01\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x09\x70\x61\x74\x68\x5f\x6f\x70\x65\x6e\x00\x02\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x08\x66\x64\x5f\x63\x6c\x6f\x73\x65\x00\x03\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x0d\x66\x64\x5f\x66\x64\x73\x74\x61\x74\x5f\x67\x65\x74\x00\x06\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x0a\x66\x64\x5f\x72\x65\x61\x64\x64\x69\x72\x00\x01\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x0e\x61\x72\x67\x73\x5f\x73\x69\x7a\x65\x73\x5f\x67\x65\x74\x00\x06\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x08\x61\x72\x67\x73\x5f\x67\x65\x74\x00\x06\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x11\x65\x6e\x76\x69\x72\x6f\x6e\x5f\x73\x69\x7a\x65\x73\x5f\x67\x65\x74\x00\x06\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x0b\x65\x6e\x76\x69\x72\x6f\x6e\x5f\x67\x65\x74\x00\x06\x16\x77\x61\x73\x69\x5f\x73\x6e\x61\x70\x73\x68\x6f\x74\x5f\x70\x72\x65\x76\x69\x65\x77\x31\x09\x70\x72\x6f\x63\x5f\x65\x78\x69\x74\x00\x04")
 	}
-	
+
 	func renvoWasm32FunctionSectionDirect(routineCount int, browserStep bool) []byte {
 		var out renvoWasmBuffer
 		count := routineCount + 1
@@ -1926,7 +2109,7 @@ go backend {
 		}
 		return out.data[:out.length]
 	}
-	
+
 	func renvoWasm32MemorySectionFull(memSize int) []byte {
 		pages := (memSize + 65535) / 65536
 		if pages < 16 {
@@ -1938,7 +2121,7 @@ go backend {
 		renvoWasmAppendU32(&out, pages)
 		return out.data[:out.length]
 	}
-	
+
 	func renvoWasm32ExportSectionFull(browserStepIndex int) []byte {
 		var out renvoWasmBuffer
 		count := 2
@@ -1959,7 +2142,7 @@ go backend {
 		}
 		return out.data[:out.length]
 	}
-	
+
 	func renvoWasm32AppendCodeSectionDirect(out *renvoWasmBuffer, a *RTGEmitter, instrPcs []int, routinePcs []int, routineEnds []int, symbolPcs []int, callStackBase int, frameTop int, exprStackBase int, browserStepRoutine int) {
 		renvoWasmPut(out, 10)
 		lenAt := out.length
@@ -1981,7 +2164,7 @@ go backend {
 			startIndex := renvoWasm32PcLowerBound(instrPcs, startPc)
 			endIndex := renvoWasm32PcLowerBound(instrPcs, endPc)
 			routineInstrPcs := instrPcs[startIndex:endIndex]
-			renvoWasm32AppendDirectRoutine(out, a.Code(), routineInstrPcs, routinePcs, symbolPcs, callStackBase)
+		renvoWasm32AppendDirectRoutine(out, a.Code(), routineInstrPcs, routinePcs, symbolPcs, renvoWasm32DirectLocalsForRoutine(a, startPc))
 		}
 		if browserStepRoutine >= 0 {
 			stepLenAt := out.length
@@ -1993,8 +2176,8 @@ go backend {
 		renvoWasmCompactU32Fixed5(out, lenAt, out.length-payloadStart)
 		return
 	}
-	
-	func renvoWasm32AppendBrowserStepBody(body *renvoWasmBuffer, stepFunc int, exprStackBase int, callStackBase int, frameTop int) {
+
+		func renvoWasm32AppendBrowserStepBody(body *renvoWasmBuffer, stepFunc int, exprStackBase int, callStackBase int, frameTop int) {
 		renvoWasmAppendU32(body, 1)
 		renvoWasmAppendU32(body, 16)
 		renvoWasmPut(body, 0x7f)
@@ -2008,10 +2191,13 @@ go backend {
 		renvoWasmLocalSet(body, renvoWasm32LocalCsp)
 		renvoWasm32AppendDirectArgs(body, 0)
 		renvoWasmAppendCall(body, stepFunc)
-		renvoWasmAppend4(body, 0x1a, 0x1a, 0x1a, 0x0b)
+		for i := 0; i < 3; i++ {
+			renvoWasmPut(body, 0x1a)
+		}
+		renvoWasmPut(body, 0x0b)
 		return
 	}
-	
+
 	func renvoWasm32NamedRoutine(a *RTGEmitter, routinePcs []int, name string) int {
 		for i := 0; i < a.SymbolCount(); i++ {
 			symbol := a.Symbol(i)
@@ -2035,7 +2221,7 @@ go backend {
 		}
 		return -1
 	}
-	
+
 	func renvoWasm32EnsureAdditionalCapacity(out *renvoWasmBuffer, additional int) {
 		need := out.length + additional
 		if need <= len(out.data) {
@@ -2050,23 +2236,24 @@ go backend {
 		out.data = next
 		return
 	}
-	
-	func renvoWasm32AppendDirectRoutine(out *renvoWasmBuffer, code []byte, instrPcs []int, routinePcs []int, symbolPcs []int, callStackBase int) {
+
+		func renvoWasm32AppendDirectRoutine(out *renvoWasmBuffer, code []byte, instrPcs []int, routinePcs []int, symbolPcs []int, directLocals []int32) {
 		renvoWasm32EnsureAdditionalCapacity(out, len(instrPcs)*16+renvoWasm32RoutineBodyCapacity)
 		mark := RTGArenaMark()
 		frameSize := renvoWasm32RoutineFrameSize(code, instrPcs)
 		oldCap := len(out.data)
+		out.frameSize = frameSize
 		lenAt := out.length
 		renvoWasmAppendU32Fixed5(out, 0)
 		bodyStart := out.length
-		renvoWasm32AppendDirectRoutineBody(out, code, instrPcs, routinePcs, symbolPcs, callStackBase, frameSize)
+		renvoWasm32AppendDirectRoutineBody(out, code, instrPcs, routinePcs, symbolPcs, frameSize, directLocals)
 		renvoWasmCompactU32Fixed5(out, lenAt, out.length-bodyStart)
 		if len(out.data) == oldCap {
 			RTGArenaReset(mark)
 		}
 		return
 	}
-	
+
 	func renvoWasm32DataSectionFull(dataBase int, data []byte) []byte {
 		var out renvoWasmBuffer
 		renvoWasmAppendU32(&out, 1)
@@ -2076,7 +2263,7 @@ go backend {
 		renvoWasmAppendByteVec(&out, data)
 		return out.data[:out.length]
 	}
-	
+
 	// RNVB v1 is a fixed header, a table of (PC, frame size, flags) records, the
 	// compact instruction stream, and initialized data. All integers are little
 	// endian and the checksum covers everything after the header.
@@ -2084,7 +2271,7 @@ go backend {
 	const renvoVMDataBase = 256
 	const renvoVMRoutineSize = 12
 	const renvoVMRoutineFramed = 1
-	
+
 	func renvoVMChecksum(data []byte) int {
 		checkA := 1
 		checkB := 0
@@ -2094,7 +2281,7 @@ go backend {
 		}
 		return checkA | checkB<<16
 	}
-	
+
 	// renvoVMImage preserves the compact instruction stream used as the input to
 	// the WebAssembly formatter. This keeps VM execution on the same fully lowered
 	// backend path while avoiding the size and nondeterminism of a host runtime.
@@ -2137,7 +2324,7 @@ go backend {
 		RTGPut32At(out, 32, renvoVMChecksum(out[renvoVMHeaderSize:]))
 		return out
 	}
-	
+
 	func renvoWasm32Image(a *RTGEmitter) []byte {
 		dataBase := renvoWasm32ProgramBase
 		bssBase := RTGAlign8(dataBase + len(a.Data()))
@@ -2152,7 +2339,11 @@ go backend {
 		frameTop := callStackBase + renvoWasm32CallStackSize + renvoWasm32FrameStackSize
 		memSize := bssBase + a.BSSSize() + renvoWasm32StackGuardSize + renvoWasm32ExprStackSize + renvoWasm32CallStackSize + renvoWasm32FrameStackSize + renvoWasm32StackGuardSize
 		var out renvoWasmBuffer
-		out.data = RTGMakeByteBuffer(renvoWasm32ImageOutputCapacity)
+		imageCapacity := len(a.Code()) + len(a.Code())/2 + len(a.Data()) + 65536
+		if imageCapacity < 262144 {
+			imageCapacity = 262144
+		}
+		out.data = RTGMakeByteBuffer(imageCapacity)
 		renvoWasmAppendEncoded(&out, "\x00\x61\x73\x6d\x01\x00\x00\x00")
 		renvoWasmAppendSection(&out, 1, renvoWasm32TypeSectionFull())
 		renvoWasmAppendSection(&out, 2, renvoWasm32ImportSectionFull())
@@ -2169,8 +2360,8 @@ go backend {
 		}
 		return out.data[:out.length]
 	}
-	
-	
+
+
 	func renvoWasiWasm32AppendPrint(out *renvoWasmBuffer, ptr int, length int) {
 		renvoWasmAppendI32Const(out, 0)
 		renvoWasmAppendI32Const(out, ptr)
@@ -2185,7 +2376,7 @@ go backend {
 		renvoWasmAppendCall(out, 0)
 		renvoWasmPut(out, 0x1a)
 	}
-	
+
 	func renvoWasiWasm32TypeSection() []byte {
 		var out renvoWasmBuffer
 		renvoWasmAppendU32(&out, 3)
@@ -2202,7 +2393,7 @@ go backend {
 		renvoWasmAppendU32(&out, 0)
 		return out.data[:out.length]
 	}
-	
+
 	func renvoWasiWasm32ImportSection() []byte {
 		var out renvoWasmBuffer
 		renvoWasmAppendU32(&out, 2)
@@ -2216,14 +2407,14 @@ go backend {
 		renvoWasmAppendU32(&out, 1)
 		return out.data[:out.length]
 	}
-	
+
 	func renvoWasiWasm32FunctionSection() []byte {
 		var out renvoWasmBuffer
 		renvoWasmAppendU32(&out, 1)
 		renvoWasmAppendU32(&out, 2)
 		return out.data[:out.length]
 	}
-	
+
 	func renvoWasiWasm32MemorySection() []byte {
 		var out renvoWasmBuffer
 		renvoWasmAppendU32(&out, 1)
@@ -2231,7 +2422,7 @@ go backend {
 		renvoWasmAppendU32(&out, 1)
 		return out.data[:out.length]
 	}
-	
+
 	func renvoWasiWasm32ExportSection() []byte {
 		var out renvoWasmBuffer
 		renvoWasmAppendU32(&out, 2)
@@ -2243,7 +2434,7 @@ go backend {
 		renvoWasmAppendU32(&out, 2)
 		return out.data[:out.length]
 	}
-	
+
 	func renvoWasiWasm32CodeSection(code []byte) []byte {
 		var body renvoWasmBuffer
 		renvoWasmAppendU32(&body, 0)
@@ -2256,7 +2447,7 @@ go backend {
 		renvoWasmAppendByteVec(&out, body.data)
 		return out.data[:out.length]
 	}
-	
+
 	func renvoWasiWasm32DataSection(dataOff int, data []byte) []byte {
 		var out renvoWasmBuffer
 		renvoWasmAppendU32(&out, 1)
@@ -2753,6 +2944,260 @@ go backend {
 		RTGReloc(out, label)
 		out.Int32(wordCount)
 	}
+
+	const renvoWasm32LocalFrameBase = 16
+
+	func renvoWasm32AppendDirectLocalOp(out *renvoWasmBuffer, code []byte, pc int, local int) {
+		reg := int(RTGByteAt(code, pc+1))
+		if int(RTGByteAt(code, pc)) == renvoWasm32OpLoadStack {
+			renvoWasmLocalGet(out, local)
+			renvoWasm32RegSet(out, reg)
+			return
+		}
+		renvoWasm32RegGet(out, reg)
+		renvoWasmLocalSet(out, local)
+	}
+
+	func renvoWasm32AppendLocalCallArgs(out *renvoWasmBuffer, base int, count int) {
+		for i := 0; i < count; i++ {
+			renvoWasmLocalGet(out, renvoWasm32LocalSp)
+			renvoWasmLocalGet(out, 16+base+i)
+			renvoWasmI32Store(out, 2, i*4)
+		}
+		renvoWasmLocalGet(out, renvoWasm32LocalSp)
+		renvoWasmAppendI32Const(out, count*4)
+		renvoWasmPut(out, 0x6a)
+		renvoWasmLocalSet(out, renvoWasm32LocalSp)
+	}
+
+	func renvoWasm32AppendLocalStackOp(out *renvoWasmBuffer, code []byte, pc int, slot int) {
+		op := int(RTGByteAt(code, pc))
+		if slot < 0 {
+			if op == renvoWasm32OpPushReg {
+				renvoWasm32RegGet(out, int(RTGByteAt(code, pc+1)))
+				return
+			}
+			if op == renvoWasm32OpPushImm {
+				renvoWasmAppendI32Const(out, renvoWasm32GetS32(code, pc+1))
+				return
+			}
+			renvoWasm32RegSet(out, int(RTGByteAt(code, pc+1)))
+			return
+		}
+		local := 16 + slot
+		if op == renvoWasm32OpPushReg {
+			renvoWasm32RegGet(out, int(RTGByteAt(code, pc+1)))
+			renvoWasmLocalSet(out, local)
+			return
+		}
+		if op == renvoWasm32OpPushImm {
+			renvoWasmAppendI32Const(out, renvoWasm32GetS32(code, pc+1))
+			renvoWasmLocalSet(out, local)
+			return
+		}
+		renvoWasmLocalGet(out, local)
+		renvoWasm32RegSet(out, int(RTGByteAt(code, pc+1)))
+	}
+
+	func renvoWasm32AppendStructuredBranch(out *renvoWasmBuffer, code []byte, pc int, depth int) {
+		op := int(RTGByteAt(code, pc))
+		if op == renvoWasm32OpJmp {
+			renvoWasmBr(out, depth)
+			return
+		}
+		if op == renvoWasm32OpJz {
+			renvoWasmLocalGet(out, renvoWasm32LocalFlag)
+			renvoWasmPut(out, 0x45)
+		} else if op == renvoWasm32OpJnz {
+			renvoWasmLocalGet(out, renvoWasm32LocalFlag)
+			renvoWasmAppend2(out, 0x45, 0x45)
+		} else {
+			renvoWasm32AppendCond(out, int(RTGByteAt(code, pc+1)))
+		}
+		renvoWasmBrIf(out, depth)
+	}
+
+	func renvoWasm32BlockRegion(block int, headers []int, tails []int) int {
+		region := -1
+		for i := 0; i < len(headers); i++ {
+			if block > headers[i] && block <= tails[i] {
+				region = i
+			}
+		}
+		return region
+	}
+
+	func renvoWasm32DirectLocal(offsets []int32, offset int, base int) int {
+		for i := 0; i < len(offsets); i++ {
+			if int(offsets[i]) == offset {
+				return base + i
+			}
+		}
+		return -1
+	}
+
+	func renvoWasm32DirectLocalsForRoutine(a *RTGEmitter, routinePC int) []int32 {
+		slots := a.WasmLocalSlots()
+		for i := 0; i+1 < len(slots); {
+			pc := int(slots[i])
+			count := int(slots[i+1])
+			if pc == routinePC {
+				return slots[i+2 : i+2+count]
+			}
+			i += count + 2
+		}
+		return nil
+	}
+
+	func renvoWasm32LocalStackMap(code []byte, pcs []int, starts []int) ([]int, int) {
+		locals := make([]int, len(pcs))
+		maxCallArgs := 0
+		stack := make([]int, 0, 16)
+		for block := 0; block < len(starts); block++ {
+			end := renvoWasm32BlockEnd(starts, block, len(pcs))
+			stack = stack[:0]
+			for i := starts[block]; i < end; i++ {
+				op := int(RTGByteAt(code, pcs[i]))
+				if op == renvoWasm32OpCall {
+					extra := RTGGet32At(code, pcs[i]+5) - 6
+					if extra < 0 {
+						extra = 0
+					}
+					if extra > len(stack) {
+						stack = stack[:0]
+					} else {
+					base := len(stack) - extra
+					if extra > 0 {
+						locals[i] = 1
+						}
+						for depth := 0; depth < extra; depth++ {
+							locals[stack[base+depth]] = depth + 1
+						}
+						if extra > maxCallArgs {
+							maxCallArgs = extra
+						}
+						stack = stack[:len(stack)-extra]
+					}
+					continue
+				}
+				if op == renvoWasm32OpPushReg || op == renvoWasm32OpPushImm {
+					stack = append(stack, i)
+					continue
+				}
+				if op != renvoWasm32OpPopReg || len(stack) == 0 {
+					continue
+				}
+				depth := len(stack)
+				push := stack[depth-1]
+				stack = stack[:depth-1]
+				locals[push] = -1
+				locals[i] = -1
+			}
+		}
+		return locals, maxCallArgs
+	}
+
+	func renvoWasm32LoopAt(header int, headers []int) int {
+		for i := 0; i < len(headers); i++ {
+			if headers[i] == header {
+				return i
+			}
+		}
+		return -1
+	}
+
+	func renvoWasm32RoutineStructure(code []byte, pcs []int, blockStarts []int, blockIndex []int) ([]int, []int, bool) {
+		headers := make([]int, 0, 8)
+		tails := make([]int, 0, 8)
+		for block := 0; block < len(blockStarts); block++ {
+			end := renvoWasm32BlockEnd(blockStarts, block, len(pcs))
+			if end <= blockStarts[block] {
+				continue
+			}
+			pc := pcs[end-1]
+			op := int(RTGByteAt(code, pc))
+			if !renvoWasm32OpHasTarget(op) && op != renvoWasm32OpJCond {
+				continue
+			}
+			targetPC := RTGGet32At(code, pc+1)
+			if op == renvoWasm32OpJCond {
+				targetPC = RTGGet32At(code, pc+2)
+			}
+			target := renvoWasm32PcLowerBound(pcs, targetPC)
+			targetBlock := renvoWasm32BlockForInstrFast(blockIndex, target)
+			if targetBlock <= block {
+				found := -1
+				for i := 0; i < len(headers); i++ {
+					if headers[i] == targetBlock {
+						found = i
+						break
+					}
+				}
+				if found < 0 {
+					headers = append(headers, targetBlock)
+					tails = append(tails, block)
+				} else if block > tails[found] {
+					tails[found] = block
+				}
+			}
+		}
+		for i := 1; i < len(headers); i++ {
+			header := headers[i]
+			tail := tails[i]
+			j := i - 1
+			for j >= 0 && headers[j] > header {
+				headers[j+1] = headers[j]
+				tails[j+1] = tails[j]
+				j--
+			}
+			headers[j+1] = header
+			tails[j+1] = tail
+		}
+		for i := 1; i < len(headers); i++ {
+			for outer := i - 1; outer >= 0; outer-- {
+				if headers[i] > tails[outer] {
+					break
+				}
+				if tails[i] > tails[outer] {
+					tails[outer] = tails[i]
+				}
+			}
+		}
+		for block := 0; block < len(blockStarts); block++ {
+			end := renvoWasm32BlockEnd(blockStarts, block, len(pcs))
+			if end <= blockStarts[block] {
+				continue
+			}
+			pc := pcs[end-1]
+			op := int(RTGByteAt(code, pc))
+			if !renvoWasm32OpHasTarget(op) && op != renvoWasm32OpJCond {
+				continue
+			}
+			targetPC := RTGGet32At(code, pc+1)
+			if op == renvoWasm32OpJCond {
+				targetPC = RTGGet32At(code, pc+2)
+			}
+			target := renvoWasm32BlockForInstrFast(blockIndex, renvoWasm32PcLowerBound(pcs, targetPC))
+			if target <= block {
+				valid := false
+				for i := 0; i < len(headers); i++ {
+					if target == headers[i] && block <= tails[i] {
+						valid = true
+						break
+					}
+				}
+				if !valid {
+					return nil, nil, false
+				}
+			}
+			for i := 0; i < len(headers); i++ {
+				if target > headers[i] && target <= tails[i] && (block < headers[i] || block > tails[i]) {
+					return nil, nil, false
+				}
+			}
+		}
+		return headers, tails, true
+	}
 }
 
 # The compiler's direct emitter produces Renvo VM32 instructions. Wasm is a
@@ -2973,7 +3418,6 @@ arch vm32 {
 		renvoWasm32FunctionSectionDirect = go renvoWasm32FunctionSectionDirect
 		renvoWasm32GetS32 = go renvoWasm32GetS32
 		renvoWasm32Image = go renvoWasm32Image
-		renvoWasm32ImageOutputCapacity = go renvoWasm32ImageOutputCapacity
 		renvoWasm32ImportArgsGet = go renvoWasm32ImportArgsGet
 		renvoWasm32ImportArgsSizesGet = go renvoWasm32ImportArgsSizesGet
 		renvoWasm32ImportEnvironGet = go renvoWasm32ImportEnvironGet

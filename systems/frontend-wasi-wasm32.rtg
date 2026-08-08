@@ -1,0 +1,5 @@
+system "renvo-frontend-wasi-wasm32" {
+    target = "wasi/wasm32"
+    binary = 6MiB
+    arena = 160MiB
+}

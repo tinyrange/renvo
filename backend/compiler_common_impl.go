@@ -122,6 +122,7 @@ type renvoAsm struct {
 	lastPrimaryStoreOff int
 	lastPrimaryLoad     int
 	replSymbols         []renvoReplSymbol
+	wasmLocalSlots      []int32
 	c                   *renvoCompileContext
 }
 
@@ -15675,7 +15676,7 @@ func renvoLinearPersistentCapacity(g *renvoLinearGen) int {
 	// The remaining slices are either fixed-size or completely populated before
 	// function emission begins. Only slices which can grow while a function is
 	// emitted need to prevent the scratch arena from being rewound.
-	return cap(a.code) + cap(a.labelPos) + cap(a.relocs) + cap(a.absRelocs) + cap(a.symbols) + cap(a.symbolName) + cap(a.staticImports) + cap(a.darwinImports) + cap(a.darwinImportLabels) + cap(a.darwinImportUsed) + cap(a.data) + objectStringCapacity + cap(g.breakLabels) + cap(g.continueLabels) + cap(m.types) + cap(m.fields) + cap(m.captures)
+	return cap(a.code) + cap(a.labelPos) + cap(a.relocs) + cap(a.absRelocs) + cap(a.symbols) + cap(a.symbolName) + cap(a.staticImports) + cap(a.darwinImports) + cap(a.darwinImportLabels) + cap(a.darwinImportUsed) + cap(a.data) + cap(a.wasmLocalSlots) + objectStringCapacity + cap(g.breakLabels) + cap(g.continueLabels) + cap(m.types) + cap(m.fields) + cap(m.captures)
 }
 
 func renvoStoreIncomingCallWord(g *renvoLinearGen, word int, offset int) {
@@ -21190,4 +21191,103 @@ func renvoAddCheckedNativeSecondaryFieldOffset(g *renvoLinearGen, fieldOffset in
 	renvoNonNil(g)
 	renvoEmitRuntimeNonNilSecondary(g)
 	renvoAddNativeSecondaryFieldOffset(&g.asm, fieldOffset)
+}
+
+func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, arenaSize int) int {
+	renvoNonNil(prog)
+	renvoSetTarget(target)
+	context := renvoNewCompileContext(target, renvoCompilerStripSymbols, renvoCompilerWindowsSubsystem == 2, renvoCompilerEmitImage)
+	prog.c = *context
+	if !prog.ok {
+		renvoPrintErr("renvo: parse failed\n")
+		return 1
+	}
+	if targetIsKernelModule(context) {
+		if !renvoPrepareKernelMetadata() {
+			renvoPrintErr("renvo: kernel metadata unavailable\n")
+			return 1
+		}
+		if target == renvoTargetLinuxKernelAmd64 {
+			renvoCaptureKernelCompileContext(context)
+		} else {
+			renvoPopulateKernelCompileContext(context)
+		}
+		prog.c = *context
+	}
+	var meta renvoMeta
+	renvoBuildMetaInto(prog, &meta)
+	if !meta.ok {
+		renvoPrintErr("renvo: meta failed\n")
+		return 1
+	}
+	meta.arenaSize = renvoResolveArenaSize(target, arenaSize)
+	var result renvoCompileResult
+	if renvoPreparedBackend != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
+		result = renvoTryCompileScalarProgramRTG(prog, &meta)
+	} else if renvoFixedTarget == renvoTargetLinux386 || renvoFixedTarget == renvoTargetWindows386 {
+		result = renvoTryCompileScalarProgram386Cached(prog, &meta)
+	} else if renvoFixedTarget == renvoTargetLinuxAarch64 || renvoFixedTarget == renvoTargetDarwinArm64 || renvoFixedTarget == renvoTargetWindowsArm64 {
+		result = renvoTryCompileScalarProgramAarch64Cached(prog, &meta)
+	} else if renvoFixedTarget == renvoTargetLinuxArm {
+		result = renvoTryCompileScalarProgramArmCached(prog, &meta)
+	} else if renvoFixedTarget == renvoTargetWasiWasm32 || renvoFixedTarget == renvoTargetVM32 {
+		result = renvoTryCompileScalarProgramWasm32(prog, &meta)
+	} else if renvoFixedTarget != 0 {
+		result = renvoTryCompileScalarProgramAmd64Cached(prog, &meta)
+	} else if target == renvoTargetLinux386 || target == renvoTargetWindows386 {
+		result = renvoTryCompileScalarProgram386Cached(prog, &meta)
+	} else if target == renvoTargetLinuxAarch64 || target == renvoTargetDarwinArm64 || target == renvoTargetWindowsArm64 {
+		result = renvoTryCompileScalarProgramAarch64Cached(prog, &meta)
+	} else if target == renvoTargetLinuxArm {
+		result = renvoTryCompileScalarProgramArmCached(prog, &meta)
+	} else if target == renvoTargetWasiWasm32 || target == renvoTargetVM32 {
+		result = renvoTryCompileScalarProgramWasm32(prog, &meta)
+	} else {
+		result = renvoTryCompileScalarProgramAmd64Cached(prog, &meta)
+	}
+	if result.ok {
+		write(output, renvoCompileOutputDataWithContext(context, result.data, target), -1)
+		return 0
+	}
+	renvoPrintErr("renvo: compilation failed\n")
+	return 1
+}
+
+func renvoCompileUnitInput(input []int, output int, target int, arenaSize int) int {
+	if len(input) != 1 {
+		return -1
+	}
+	if input[0] == 0 {
+		var src []byte
+		src = renvoReadAll(input[0], src)
+		if len(src) >= 4 && src[0] == 'R' && src[1] == 'N' && src[2] == 'V' && src[3] == 'O' {
+			prog, isUnit, ok := renvoDecodeUnitProgram(src)
+			if !isUnit {
+				return -1
+			}
+			if !ok {
+				renvoPrintErr("renvo: invalid unit input\n")
+				return 1
+			}
+			return renvoCompileProgramToOutput(&prog, output, target, arenaSize)
+		}
+		prog := renvoParseProgram(src)
+		return renvoCompileProgramToOutput(&prog, output, target, arenaSize)
+	}
+	header := make([]byte, 4)
+	n := read(input[0], header, 0)
+	if n != 4 || header[0] != 'R' || header[1] != 'N' || header[2] != 'V' || header[3] != 'O' {
+		return -1
+	}
+	var unit []byte
+	unit = renvoReadAll(input[0], unit)
+	prog, isUnit, ok := renvoDecodeUnitProgram(unit)
+	if !isUnit {
+		return -1
+	}
+	if !ok {
+		renvoPrintErr("renvo: invalid unit input\n")
+		return 1
+	}
+	return renvoCompileProgramToOutput(&prog, output, target, arenaSize)
 }

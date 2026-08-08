@@ -162,11 +162,7 @@ func (b *coreUnitBuilder) addFileTokens(file syntax.File, src []byte, fileIndex 
 		if tok.KindLine&255 == syntax.TokenEOF {
 			continue
 		}
-		kind, ok := coreUnitTokenKind(src, tok)
-		if !ok {
-			b.setErr(EmitErrToken, fileIndex, i)
-			return coreTokenMap{}, false
-		}
+		kind := coreUnitTokenKind(src, tok)
 		b.program.Tokens = append(b.program.Tokens, unit.MakeToken(kind, base+tok.Start, tok.End-tok.Start, lineOffset+syntax.TokenLine(tok)))
 	}
 	if transient {
@@ -592,39 +588,39 @@ func (b *coreUnitBuilder) setErr(err int, file int, tok int) {
 	b.errToken = tok
 }
 
-func coreUnitTokenKind(src []byte, tok syntax.Token) (int, bool) {
+func coreUnitTokenKind(src []byte, tok syntax.Token) int {
 	kind := tok.KindLine & 255
 	if kind >= syntax.TokenEOF && kind <= syntax.TokenIdent {
-		return kind, true
+		return kind
 	}
 	if kind == syntax.TokenNumber {
 		if syntax.NumberTokenIsFloat(src, tok) {
-			return unit.TokenFloat, true
+			return unit.TokenFloat
 		}
-		return unit.TokenNumber, true
+		return unit.TokenNumber
 	}
 	if kind >= syntax.TokenString && kind <= syntax.TokenChar {
-		return kind + 1, true
+		return kind + 1
 	}
 	if kind == syntax.TokenOperator {
-		return unit.TokenOp, true
+		return unit.TokenOp
 	}
 	if kind == syntax.TokenPackage {
-		return unit.TokenPackage, true
+		return unit.TokenPackage
 	}
 	if kind >= syntax.TokenConst && kind <= syntax.TokenStruct {
-		return kind - 1, true
+		return kind - 1
 	}
 	if kind >= syntax.TokenReturn && kind <= syntax.TokenFor {
-		return kind - 3, true
+		return kind - 3
 	}
 	if kind >= syntax.TokenSwitch && kind <= syntax.TokenDefault {
-		return kind - 1, true
+		return kind - 1
 	}
 	if kind >= syntax.TokenBreak && kind <= syntax.TokenGoto {
-		return kind - 7, true
+		return kind - 7
 	}
-	return unit.TokenIdent, true
+	return unit.TokenIdent
 }
 
 func coreUnitDeclKind(kind int) (int, bool) {

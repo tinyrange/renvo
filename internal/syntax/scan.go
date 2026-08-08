@@ -83,8 +83,13 @@ func scanTokens(src []byte) ([]Token, bool) {
 			start := i
 			i++
 			for i < len(src) && src[i] != '"' {
-				if src[i] == '\\' && i+1 < len(src) {
-					i += 2
+				if src[i] == '\\' {
+					next, _, _, valid := stringEscapeValue(src, i, len(src))
+					if !valid {
+						ok = false
+						break
+					}
+					i = next
 					continue
 				}
 				if src[i] == '\n' {
@@ -92,22 +97,8 @@ func scanTokens(src []byte) ([]Token, bool) {
 				}
 				i++
 			}
-			if i >= len(src) || src[i] != '"' {
+			if !ok || i >= len(src) || src[i] != '"' {
 				ok = false
-				break
-			}
-			for escape := start + 1; escape < i; escape++ {
-				if src[escape] != '\\' {
-					continue
-				}
-				next, _, _, valid := stringEscapeValue(src, escape, i)
-				if !valid {
-					ok = false
-					break
-				}
-				escape = next - 1
-			}
-			if !ok {
 				break
 			}
 			i++

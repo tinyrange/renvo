@@ -880,6 +880,10 @@ func sourceEmbedArchiveAddPosition(data []byte, buckets []int32, previous []int3
 }
 
 func sourceEmbedArchiveMatch(data []byte, buckets []int32, previous []int32, pos int) (int, int) {
+	// The bundled compiler archive favors this latency bound: searching 64
+	// entries saves less than 1 KiB but costs more self-host time, while still
+	// deeper greedy searches can make the final stream larger as well as slower.
+	const maxCandidates = 32
 	if pos+2 >= len(data) {
 		return 0, 0
 	}
@@ -887,7 +891,7 @@ func sourceEmbedArchiveMatch(data []byte, buckets []int32, previous []int32, pos
 	bestLength := 0
 	checked := 0
 	bucket := sourceEmbedArchiveBucket(data, pos, len(buckets))
-	for candidate := int(buckets[bucket]) - 1; candidate >= 0 && checked < 128; candidate = int(previous[candidate]) - 1 {
+	for candidate := int(buckets[bucket]) - 1; candidate >= 0 && checked < maxCandidates; candidate = int(previous[candidate]) - 1 {
 		distance := pos - candidate
 		if distance > 4096 {
 			break

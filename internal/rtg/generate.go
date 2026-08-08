@@ -2138,7 +2138,7 @@ func nativeEmitterStateMethod(source []byte, tokens []Token, start int, receiver
 	if method != "PrimaryLoad" && method != "SetPrimaryLoad" && method != "OptimizeRuntime" && method != "ByteAt" &&
 		method != "SetByteAt" && method != "AddByteAt" && method != "AppendByte" &&
 		method != "Truncate" && method != "Code" && method != "SetCode" &&
-		method != "Data" && method != "SetData" && method != "BSSSize" &&
+		method != "Data" && method != "SetData" && method != "BSSSize" && method != "WasmLocalSlots" &&
 		method != "WindowsSubsystem" && method != "StaticImportCount" &&
 		method != "StaticImportDLL" && method != "StaticImportName" &&
 		method != "RelocationCount" &&
@@ -2222,6 +2222,10 @@ func nativeEmitterStateMethod(source []byte, tokens []Token, start int, receiver
 	if method == "BSSSize" && len(arguments) == 0 {
 		replacement = append(replacement, receiver...)
 		return append(replacement, ".bssSize"...), end, true
+	}
+	if method == "WasmLocalSlots" && len(arguments) == 0 {
+		replacement = append(replacement, receiver...)
+		return append(replacement, ".wasmLocalSlots"...), end, true
 	}
 	if method == "WindowsSubsystem" && len(arguments) == 0 {
 		replacement = append(replacement, receiver...)

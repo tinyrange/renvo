@@ -322,17 +322,21 @@ func CheckRootMain(pkg load.Package) (int, int, int) {
 		file := pkg.Files[fileIndex].File
 		for i := 0; i < len(file.Funcs); i++ {
 			fn := file.Funcs[i]
-			name := tokenString(&file, fn.NameTok)
+			if fn.NameTok < 0 || fn.NameTok >= len(file.Tokens) {
+				continue
+			}
+			name := file.Tokens[fn.NameTok]
+			isMain := tokenMatchesCoreSymbol(file.Src, name.Start, name.End-name.Start, "main")
 			if fn.ReceiverStart >= 0 {
-				if name == "main" {
+				if isMain {
 					methodFile, methodTok = fileIndex, fn.NameTok
 				}
 				continue
 			}
-			if name == "appMain" {
+			if tokenMatchesCoreSymbol(file.Src, name.Start, name.End-name.Start, "appMain") {
 				return CheckOK, -1, -1
 			}
-			if name == "main" {
+			if isMain {
 				if fn.ParamsEnd != fn.ParamsStart+2 || fn.ResultEnd != fn.ResultStart {
 					return CheckErrMainSignature, fileIndex, fn.NameTok
 				}
