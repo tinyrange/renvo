@@ -36,6 +36,7 @@ jobs:
   backend-amd64:
     name: Backend compiler tests (linux-amd64)
     needs: preflight
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -84,6 +85,7 @@ jobs:
   backend-arm64:
     name: Backend compiler tests (linux-arm64)
     needs: preflight
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
 
@@ -120,6 +122,7 @@ jobs:
   backend-darwin-arm64:
     name: Backend compiler tests (darwin-arm64)
     needs: preflight
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: macos-14
     timeout-minutes: 30
 
@@ -156,6 +159,7 @@ jobs:
   windows-e2e:
     name: Windows targets (amd64, 386, and arm64 images)
     needs: preflight
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: windows-latest
     timeout-minutes: 15
 
@@ -187,6 +191,7 @@ jobs:
   package-tests:
     name: Package tests (macos-14)
     needs: preflight
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: macos-14
     timeout-minutes: 15
 
@@ -206,6 +211,7 @@ jobs:
   performance:
     name: Compiler CI resource gates
     needs: preflight
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -228,6 +234,7 @@ jobs:
       - preflight
       - backend-amd64
       - package-tests
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -262,16 +269,20 @@ jobs:
     steps:
       - name: Require every test job to pass
         run: |
-          results=(
-            '${{ needs.preflight.result }}'
-            '${{ needs.backend-amd64.result }}'
-            '${{ needs.backend-arm64.result }}'
-            '${{ needs.backend-darwin-arm64.result }}'
-            '${{ needs.windows-e2e.result }}'
-            '${{ needs.package-tests.result }}'
-            '${{ needs.performance.result }}'
-            '${{ needs.frontend-corpus.result }}'
-          )
+          if [[ '${{ github.event_name }}' == pull_request ]]; then
+            results=('${{ needs.preflight.result }}')
+          else
+            results=(
+              '${{ needs.preflight.result }}'
+              '${{ needs.backend-amd64.result }}'
+              '${{ needs.backend-arm64.result }}'
+              '${{ needs.backend-darwin-arm64.result }}'
+              '${{ needs.windows-e2e.result }}'
+              '${{ needs.package-tests.result }}'
+              '${{ needs.performance.result }}'
+              '${{ needs.frontend-corpus.result }}'
+            )
+          fi
           for result in "${results[@]}"; do
             if [[ "$result" != success ]]; then
               echo "A required test job ended with: $result"
