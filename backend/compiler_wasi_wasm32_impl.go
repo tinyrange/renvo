@@ -74,6 +74,11 @@ func renvoTryCompileScalarProgramWasm32(p *renvoProgram, meta *renvoMeta) renvoC
 	}
 	a := &g.asm
 	renvoAsmInitWithContext(a, g.c)
+	localSlotCapacity := len(meta.funcs) * 4
+	if localSlotCapacity < 256 {
+		localSlotCapacity = 256
+	}
+	a.wasmLocalSlots = make([]int32, 0, localSlotCapacity)
 	for i := 0; i < len(meta.funcs); i++ {
 		label := renvoAsmNewLabel(a)
 		g.funcLabels = append(g.funcLabels, label)
@@ -582,6 +587,89 @@ func renvoWasm32MarkFunc(g *renvoLinearGen, fnIndex int) {
 	renvoAsmAddFuncSymbol(&g.asm, src, nameStart, nameEnd, g.funcLabels[fnIndex])
 }
 
+func renvoWasm32RangesOverlap(aOffset int, aSize int, bOffset int, bSize int) bool {
+	aStart := aOffset - aSize
+	bStart := bOffset - bSize
+	return aStart < bOffset && bStart < aOffset
+}
+
+func renvoWasm32RecordDirectLocals(g *renvoLinearGen, functionPC int) {
+	a := &g.asm
+	candidates := make([]int, 0, g.localCount)
+	for i := 0; i < g.localCount; i++ {
+		local := &g.locals[i]
+		if local.size != renvoBackendValueSlotSize || local.captureOff != 0 || renvoTypeSize(g.meta, local.typ) > g.c.renvoNativeIntSize {
+			continue
+		}
+		found := false
+		for j := 0; j < len(candidates); j++ {
+			if candidates[j] == local.offset {
+				found = true
+				break
+			}
+		}
+		if !found {
+			candidates = append(candidates, local.offset)
+		}
+	}
+	for i := 0; i < g.localCount; i++ {
+		local := &g.locals[i]
+		direct := local.size == renvoBackendValueSlotSize && local.captureOff == 0 && renvoTypeSize(g.meta, local.typ) <= g.c.renvoNativeIntSize
+		for j := 0; j < len(candidates); j++ {
+			candidate := candidates[j]
+			if candidate != 0 && renvoWasm32RangesOverlap(candidate, renvoBackendValueSlotSize, local.offset, local.size) && (!direct || candidate != local.offset) {
+				candidates[j] = 0
+			}
+			if candidate != 0 && local.captureOff > 0 && renvoWasm32RangesOverlap(candidate, renvoBackendValueSlotSize, local.captureOff, renvoBackendValueSlotSize) {
+				candidates[j] = 0
+			}
+		}
+	}
+	for pc := functionPC; pc < len(a.code); pc += int(renvoWasm32InstructionSizes[int(renvo_runtime_UnsafeByteAt(a.code, pc))]) {
+		op := int(renvo_runtime_UnsafeByteAt(a.code, pc))
+		memoryOffsets := make([]int, 0, 3)
+		memorySizes := make([]int, 0, 3)
+		if op == renvoWasm32OpLoadStack || op == renvoWasm32OpStoreStack {
+			memoryOffsets = append(memoryOffsets, renvoWasm32GetS32(a.code, pc+2))
+			memorySizes = append(memorySizes, g.c.renvoNativeIntSize)
+		} else if op == renvoWasm32OpLeaStack {
+			memoryOffsets = append(memoryOffsets, renvoWasm32GetS32(a.code, pc+2))
+			memorySizes = append(memorySizes, renvoBackendValueSlotSize)
+		} else if op == renvoWasm32OpWideBinary {
+			for field := 1; field <= 9; field += 4 {
+				memoryOffsets = append(memoryOffsets, renvoWasm32GetS32(a.code, pc+field))
+				memorySizes = append(memorySizes, renvoBackendValueSlotSize)
+			}
+		} else if op == renvoWasm32OpWideCompare {
+			for field := 1; field <= 5; field += 4 {
+				memoryOffsets = append(memoryOffsets, renvoWasm32GetS32(a.code, pc+field))
+				memorySizes = append(memorySizes, renvoBackendValueSlotSize)
+			}
+		}
+		for k := 0; k < len(memoryOffsets); k++ {
+			for j := 0; j < len(candidates); j++ {
+				candidate := candidates[j]
+				if candidate == 0 {
+					continue
+				}
+				if op == renvoWasm32OpLeaStack || memoryOffsets[k] != candidate {
+					if renvoWasm32RangesOverlap(candidate, renvoBackendValueSlotSize, memoryOffsets[k], memorySizes[k]) {
+						candidates[j] = 0
+					}
+				}
+			}
+		}
+	}
+	recordStart := len(a.wasmLocalSlots)
+	a.wasmLocalSlots = append(a.wasmLocalSlots, int32(functionPC), 0)
+	for i := 0; i < len(candidates); i++ {
+		if candidates[i] != 0 {
+			a.wasmLocalSlots = append(a.wasmLocalSlots, int32(candidates[i]))
+		}
+	}
+	a.wasmLocalSlots[recordStart+1] = int32(len(a.wasmLocalSlots) - recordStart - 2)
+}
+
 func renvoWasm32EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
 	a := &g.asm
 	metaFn := &g.meta.funcs[fnInfoIndex]
@@ -604,6 +692,7 @@ func renvoWasm32EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
 	g.stackUsed = 0
 	g.stackPeak = 0
 	g.lastRangeReturns = false
+	functionPC := len(a.code)
 	renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
 	if renvoTypeUsesHiddenResult(g.meta, metaFn.resultType) {
 		g.returnStruct = renvoAddTypedLocal(g, 0, 0, renvoTypeInt)
@@ -635,6 +724,7 @@ func renvoWasm32EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
 		renvoAsmLeave(a)
 		renvoAsmRet(a)
 	}
+	renvoWasm32RecordDirectLocals(g, functionPC)
 	return true
 }
 

@@ -78,6 +78,71 @@ func BuildFromFS(args []string, workDir string, stdRoot string, fs SourceFS) Bui
 	return buildFromFS(args, workDir, stdRoot, "", fs, false)
 }
 
+// BuildFromFSOneShot builds one command-line invocation without retaining the
+// incremental session state used by editors and long-lived compiler hosts.
+func BuildFromFSOneShot(args []string, workDir string, stdRoot string, fs SourceFS) BuildResult {
+	return buildFromFSOneShotCompactWithModuleCache(args, workDir, stdRoot, "", fs)
+}
+
+// BuildPackageUnitFromFS is the narrow frontend boundary used by fixed-target
+// command-line compilers. Option parsing and backend selection stay in the
+// host, while this function only discovers, checks, and lowers one package.
+func BuildPackageUnitFromFS(packageArg string, target string, tags []string, workDir string, stdRoot string, fs SourceFS) BuildResult {
+	result := newBuildResult()
+	result.Options = Options{Package: packageArg, Target: target, Tags: tags, Ok: true}
+	sources := CollectSourcesForTargetTagsWithModuleCache(workDir, stdRoot, packageArg, target, tags, "", fs)
+	result.Sources = sources
+	if !sources.Ok {
+		return buildFail(result, BuildErrSource, "", sources.ErrorPath, -1, -1, -1, -1)
+	}
+	built := pipeline.BuildUnit(workDir, stdRoot, packageArg, sources.Files)
+	result.Pipeline = built
+	if !built.Ok {
+		return buildFail(result, BuildErrPipeline, "", "", -1, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
+	}
+	result.Unit = built.Link.Data
+	bindBuiltInTarget(&result.Unit, result.Options)
+	return result
+}
+
+type PackageUnitResult struct {
+	Unit         []byte
+	Path         string
+	Ok           bool
+	Phase        int
+	Error        int
+	ErrorPackage int
+	ErrorFile    int
+	ErrorToken   int
+}
+
+// BuildPackageUnitCompact returns machine-readable failure coordinates. The
+// command or browser host owns human-readable diagnostic text, keeping that UI
+// policy out of a size-constrained frontend module.
+func BuildPackageUnitCompact(packageArg string, target string, tags []string, workDir string, stdRoot string, fs SourceFS) PackageUnitResult {
+	var result PackageUnitResult
+	sources := CollectSourcesForTargetTagsWithModuleCache(workDir, stdRoot, packageArg, target, tags, "", fs)
+	if !sources.Ok {
+		result.Phase = BuildErrSource
+		result.Error = sources.Error
+		result.Path = sources.ErrorPath
+		return result
+	}
+	built := pipeline.BuildUnit(workDir, stdRoot, packageArg, sources.Files)
+	if !built.Ok {
+		result.Phase = BuildErrPipeline
+		result.Error = built.Error
+		result.ErrorPackage = built.ErrorPackage
+		result.ErrorFile = built.ErrorFile
+		result.ErrorToken = built.ErrorToken
+		return result
+	}
+	result.Unit = built.Link.Data
+	bindBuiltInTarget(&result.Unit, Options{Target: target})
+	result.Ok = true
+	return result
+}
+
 func buildFromFSCompact(args []string, workDir string, stdRoot string, fs SourceFS) BuildResult {
 	return buildFromFS(args, workDir, stdRoot, "", fs, true)
 }

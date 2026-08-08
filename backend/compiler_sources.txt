@@ -31,3 +31,4 @@ compiler_linux_arm_impl.go
 compiler_wasi_wasm32_impl.go
 compiler_darwin_arm64_impl.go
 compiler_unit_impl.go
+compiler_unit_decode_impl.go

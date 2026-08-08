@@ -9,6 +9,7 @@ import (
 	frontendbuild "renvo.dev/internal/build"
 	"renvo.dev/internal/load"
 	"renvo.dev/internal/pipeline"
+	wireunit "renvo.dev/internal/unit"
 )
 
 func TestBuildUnitFromDriverOptions(t *testing.T) {
@@ -28,6 +29,18 @@ func TestBuildUnitFromDriverOptions(t *testing.T) {
 	}
 	if decoded.Package != "main" || len(decoded.Funcs) != 2 {
 		t.Fatalf("decoded unit = package %q funcs %d", decoded.Package, len(decoded.Funcs))
+	}
+}
+
+func TestCompactPackageUnitCarriesFixedTargetBinding(t *testing.T) {
+	files := driverTestFiles()
+	result := BuildPackageUnitCompact("./cmd/app", "wasi/wasm32", nil, "/repo/case", "/std", memorySourceFS{files: files})
+	if !result.Ok {
+		t.Fatalf("compact package build = %#v", result)
+	}
+	binding, ok := wireunit.ReadTargetBinding(result.Unit)
+	if !ok || binding.Target != "wasi/wasm32" || len(binding.Definition) != 32 || binding.DescriptorVersion <= 0 {
+		t.Fatalf("compact target binding = %#v, ok=%v", binding, ok)
 	}
 }
 
