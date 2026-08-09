@@ -5,6 +5,9 @@ output=${1:-sandbox/wasm/browser}
 layout=${2:-nested}
 build_dir=sandbox/wasm/build
 native=$build_dir/renvo-native
+if [ "$(go env GOHOSTOS)" = windows ]; then
+  native=$native.exe
+fi
 
 case "$layout" in
   nested|pages) ;;
@@ -82,10 +85,10 @@ build_custom_backend esp32s3/xtensa_lx7 examples/m5sticks3/esp32s3.rtg esp32s3-x
 go run ./tools/wasm/cmd/browserassets -o "$output"
 cp tools/wasm/browser/index.html tools/wasm/browser/styles.css \
 	tools/wasm/browser/app.mjs tools/wasm/browser/worker.mjs \
-	tools/wasm/browser/esp-webserial.mjs "$output/browser/"
+	tools/wasm/browser/esp-webserial.mjs tools/wasm/browser/esp-webusb.mjs "$output/browser/"
 
 if [ "$layout" = pages ]; then
   cp tools/wasm/browser/index.html tools/wasm/browser/styles.css \
     tools/wasm/browser/app.mjs tools/wasm/browser/worker.mjs \
-    tools/wasm/browser/esp-webserial.mjs "$output/"
+    tools/wasm/browser/esp-webserial.mjs tools/wasm/browser/esp-webusb.mjs "$output/"
 fi

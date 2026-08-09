@@ -108,6 +108,7 @@ export class ESPWebSerial {
     this.reading = false;
     this.reader = undefined;
     this.dtr = false;
+    this.webUSB = port.transport === "webusb";
   }
 
   async open() {
@@ -172,7 +173,10 @@ export class ESPWebSerial {
 
   async connectBootloader() {
     const nativeUSB = this.port.getInfo?.().usbProductId === 0x1001;
-    const resets = nativeUSB ? [
+    const resets = this.webUSB ? [
+      ["USB/JTAG", () => this.usbJTAGReset()],
+      ["USB/JTAG retry", async () => { await delay(300); await this.usbJTAGReset(); }],
+    ] : nativeUSB ? [
       ["USB/JTAG", () => this.usbJTAGReset()],
       ["classic", () => this.classicReset(50)],
       ["classic delayed", () => this.classicReset(550)],
@@ -187,13 +191,15 @@ export class ESPWebSerial {
       await reset();
       this.discardFrames();
       try {
-        await this.synchronize();
+        if (this.webUSB) await delay(250);
+        await this.synchronize(this.webUSB ? 800 : 300);
         return;
       } catch (error) {
         lastError = error;
       }
     }
-    throw new Error(`could not synchronize with the ESP ROM loader: ${lastError?.message || "timeout"}`);
+    const diagnostics = this.port.diagnostics?.();
+    throw new Error(`could not synchronize with the ESP ROM loader: ${lastError?.message || "timeout"}${diagnostics ? `; ${diagnostics}` : ""}`);
   }
 
   async usbJTAGReset() {
@@ -205,7 +211,7 @@ export class ESPWebSerial {
     await delay(100);
     await this.setRTS(true);
     await this.setDTR(false);
-    await this.setRTS(true);
+    if (!this.webUSB) await this.setRTS(true);
     await delay(100);
     await this.setRTS(false);
     await this.setDTR(false);
@@ -235,14 +241,14 @@ export class ESPWebSerial {
     await delay(targetName === "esp32c6/riscv32" ? 1000 : 500);
   }
 
-  async synchronize() {
+  async synchronize(timeout = 300) {
     const payload = new Uint8Array(36);
     payload.set([0x07, 0x07, 0x12, 0x20]);
     payload.fill(0x55, 4);
     let lastError;
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
-        await this.command(0x08, payload, 300);
+        await this.command(0x08, payload, timeout);
         return;
       } catch (error) {
         lastError = error;
@@ -282,7 +288,7 @@ export class ESPWebSerial {
     // Windows' usbser.sys may not send an RTS-only control-line change. A
     // no-op DTR update commits the combined state, matching Espressif's
     // WebSerial transport workaround.
-    await this.setDTR(this.dtr);
+    if (!this.webUSB) await this.setDTR(this.dtr);
   }
 
   async readLoop() {
@@ -349,8 +355,15 @@ export class ESPWebSerial {
 
   async close() {
     this.closed = true;
-    try { await this.reader?.cancel(); } catch {}
-    try { await this.port.close(); } catch {}
+    if (this.webUSB) {
+      // A WebUSB reader may be blocked in transferIn(). Closing the USBDevice
+      // first aborts that transfer and releases the claimed CDC interfaces.
+      try { await this.port.close(); } catch {}
+      try { await this.reader?.cancel(); } catch {}
+    } else {
+      try { await this.reader?.cancel(); } catch {}
+      try { await this.port.close(); } catch {}
+    }
   }
 }
 

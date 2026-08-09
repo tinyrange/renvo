@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
   <meta name="color-scheme" content="dark">
   <title>Renvo</title>
   <link rel="stylesheet" href="styles.css">
@@ -26,14 +26,34 @@
           </button>
           <div class="target-menu" id="target-menu" role="listbox" aria-label="Build target" hidden></div>
         </div>
-        <button class="secondary-action" id="run" disabled title="Run console app (F5)">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3 8 5-8 5V3Z"/></svg>
-          <span>Run</span>
-        </button>
+        <div class="run-actions">
+          <button class="secondary-action" id="run" disabled title="Run console app (F5)">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3 8 5-8 5V3Z"/></svg>
+            <span>Run</span>
+          </button>
+          <select id="flash-transport" aria-label="ESP flash transport" title="ESP flash transport" hidden>
+            <option value="webserial">WebSerial</option>
+            <option value="webusb">WebUSB</option>
+          </select>
+        </div>
         <button class="primary-action" id="compile" disabled title="Build (Ctrl+Enter)">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3 8 5-8 5V3Z"/></svg>
           <span>Build</span>
         </button>
+      </div>
+    </header>
+
+    <header class="mobile-header">
+      <div class="mobile-heading">
+        <span id="mobile-step">Choose a file</span>
+        <span id="mobile-context">playground</span>
+      </div>
+      <div class="mobile-header-actions">
+        <button id="mobile-target-button" type="button">Target</button>
+        <div class="mobile-editor-actions" hidden>
+          <button id="mobile-build" type="button" disabled>Build</button>
+          <button id="mobile-run" type="button" disabled>Run</button>
+        </div>
       </div>
     </header>
 
@@ -63,12 +83,28 @@
       <div class="section-title collapsed"><span class="chevron">›</span><span>OUTLINE</span></div>
     </aside>
 
+    <section class="mobile-target-view" id="mobile-target-view" aria-label="Select build target">
+      <div class="mobile-view-intro">
+        <strong>Select a target</strong>
+        <span>Choose where this program will run.</span>
+      </div>
+      <div class="mobile-transport-picker" aria-label="ESP flash transport">
+        <span>ESP connection</span>
+        <div role="radiogroup" aria-label="ESP flash transport">
+          <button type="button" data-mobile-transport="webusb" role="radio" aria-checked="false">WebUSB</button>
+          <button type="button" data-mobile-transport="webserial" role="radio" aria-checked="false">WebSerial</button>
+        </div>
+      </div>
+      <div class="mobile-target-list" id="mobile-target-list" role="listbox" aria-label="Build target"></div>
+    </section>
+
     <main class="workbench">
       <div class="editor-tabs" role="tablist" aria-label="Open editors">
         <button class="editor-tab active" data-file="main.go" role="tab">
           <span class="go-icon">Go</span><span>main.go</span>
         </button>
         <div class="editor-toolbar">
+          <button id="copy-to-playground" type="button" title="Replace playground/main.go with this library source" hidden>Copy into main.go</button>
           <button id="toggle-panel" title="Toggle panel (Ctrl+J)">
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2h12v12H2V2Zm0 8h12"/></svg>
           </button>
@@ -117,6 +153,24 @@
       <span class="status-item">Go</span>
       <span class="status-item" id="memory-status">— MiB</span>
     </footer>
+
+    <nav class="mobile-nav" aria-label="Workspace steps">
+      <button type="button" data-mobile-view="files" class="active"><span>1</span>Files</button>
+      <button type="button" data-mobile-view="editor"><span>2</span>Code</button>
+      <button type="button" data-mobile-view="console"><span>3</span>Console</button>
+    </nav>
+
+    <section class="mobile-flash-view" id="mobile-flash-view" aria-label="Flash progress and serial console" hidden>
+      <header>
+        <div>
+          <span class="mobile-flash-kicker">FLASH &amp; RUN</span>
+          <strong id="mobile-flash-state">Ready</strong>
+        </div>
+        <button id="mobile-flash-close" type="button">Code</button>
+      </header>
+      <progress id="mobile-flash-progress" max="1" aria-label="Flash progress"></progress>
+      <pre id="mobile-flash-output" aria-live="polite"></pre>
+    </section>
   </div>
   <script type="module" src="app.mjs"></script>
 </body>
