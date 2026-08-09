@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "ecd8b822eea0164cf325f8b64d976dee7eed74ae7e6997ac6b8459ebfb03a4f7"
+const CompilerSourceDigest = "dcfc1f77ac8ec79052ce7e8bb5191d5edeec65da78eccae14f3ef1dd4e771fa9"
 
 // source: backend/compiler_common_impl.go
 
@@ -25005,7 +25005,7 @@ if target == renvoTargetLinuxArm {
 return "linux/arm", "\x94isB\xbdpqӽ\xa6\x94\x17\xbb\n\xce\x04\xd0\xfb\xdd$\xaat\x88\fd\x1ct&+\xe8\xec\xa7", 3, true
 }
 if target == renvoTargetWindowsAmd64 {
-return "windows/amd64", "\xf3\xbf\x8b,\x84\xf77mI \x9cGq-I\xf6\xc4\xc0N\x17\x82\xd0H\x1fJ\xcdO\xcb[\xea\xbd\xd3", 3, true
+return "windows/amd64", "o\xf6\x1d\xbd/\xb7c\xd9%Ȅ\xc7\xcb\x17\xb1\xd7Mc6'M\xaev\x89\xd2\r7\xa3*tƸ", 3, true
 }
 if target == renvoTargetWindows386 {
 return "windows/386", "\x91\x83\xec\x9dQ\x19\x84\xb9\x13\xcd\x069Nw\xc3Jò\xab\xab\xa68\xbcv.HJ\xa62,\x1en", 3, true
@@ -33775,11 +33775,13 @@ notReadWrite := renvoAsmNewLabel(out)
 accessDone := renvoAsmNewLabel(out)
 noCreate := renvoAsmNewLabel(out)
 createDone := renvoAsmNewLabel(out)
-renvoAsmEmit2(out, 0x6a, -128)
+renvoAsmEmit8(out, 0x68)
+renvoAsmEmit32(out, -2147483648)
 renvoAsmEmit8(out, 0x5a)
 renvoAsmEmit2(out, 0xa8, 2)
 rtgBuiltinWindowsAmd64PackageWindowsConditionalJump(out, 0x84, notReadWrite)
-renvoAsmEmit2(out, 0x6a, -64)
+renvoAsmEmit8(out, 0x68)
+renvoAsmEmit32(out, -1073741824)
 renvoAsmEmit8(out, 0x5a)
 renvoAsmEmit8(out, 0xe9)
 renvoWindowsAmd64Rel32(out, accessDone)
