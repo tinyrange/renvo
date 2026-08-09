@@ -1886,12 +1886,12 @@ func rtgNativeJumpCondition(out *RTGEmitter, condition RTGCondition, label RTGLa
 
 // Generated from instruction return.
 func rtgNativeReturn(out *RTGEmitter) {
-	RTGUint32(out, 0xd6<<8|0x5f<<8|0x03<<8|0xc0)
+	RTGUint32(out, 0xc0|0x03<<8|0x5f<<16|0xd6<<24)
 }
 
 // Generated from instruction leave.
 func rtgNativeLeave(out *RTGEmitter) {
-	RTGUint64(out, 0xa8<<8|0xc1<<8|0x7b<<8|0xfd<<8|0x91<<8|0x00<<8|0x03<<8|0xbf)
+	RTGUint64(out, 0xbf|0x03<<8|0x00<<16|0x91<<24|0xfd<<32|0x7b<<40|0xc1<<48|0xa8<<56)
 }
 
 // Generated direct_emitter_v1 binding for move.

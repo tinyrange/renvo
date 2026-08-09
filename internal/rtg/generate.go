@@ -221,7 +221,8 @@ func appendPreparedTargetFacts(source []byte, descriptor TargetDescriptor, activ
 		source = append(source, '0')
 	}
 	source = append(source, "\nconst renvoRTGPreparedFunctionSymbols = "...)
-	if active && (descriptor.OutputKind == "rnvm" ||
+	if active && (stringIndex(descriptor.Capabilities, "function_symbols") >= 0 ||
+		descriptor.OutputKind == "rnvm" ||
 		descriptor.OutputKind == "wasm" ||
 		descriptor.OutputKind == "html-wasm") {
 		source = append(source, '1')

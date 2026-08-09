@@ -1,0 +1,101 @@
+@import "../../backend/definitions/darwin_aarch64.rtg"
+
+# The shared Darwin emitter already supplies AArch64 lowering, libSystem
+# imports, Mach-O layout, and an ad-hoc signature. The iOS target changes the
+# Mach-O platform contract and then refreshes the signature over that header.
+go backend {
+	func iosSegmentNameEquals(image []byte, at int, name string) bool {
+		if at < 0 || at+16 > len(image) {
+			return false
+		}
+		for i := 0; i < 16; i++ {
+			want := byte(0)
+			if i < len(name) {
+				want = name[i]
+			}
+			if image[at+i] != want {
+				return false
+			}
+		}
+		return true
+	}
+
+	func iosPatchImage(image []byte) []byte {
+		if len(image) < 32 {
+			return image
+		}
+		commands := RTGGet32At(image, 16)
+		at := 32
+		signatureOffset := 0
+		signatureSize := 0
+		executableLimit := 0
+		for i := 0; i < commands; i++ {
+			if at < 0 || at+8 > len(image) {
+				return image
+			}
+			command := RTGGet32At(image, at)
+			size := RTGGet32At(image, at+4)
+			if size < 8 || at+size > len(image) {
+				return image
+			}
+			if command == 0x19 && size >= 72 &&
+				iosSegmentNameEquals(image, at+8, "__TEXT") {
+				executableLimit = RTGGet32At(image, at+48)
+			}
+			if command == 0x32 && size >= 24 {
+				RTGPut32At(image, at+8, 2)
+				RTGPut32At(image, at+12, 0x000d0000)
+				RTGPut32At(image, at+16, 0x000d0000)
+			}
+			if command == 0x1d && size >= 16 {
+				signatureOffset = RTGGet32At(image, at+8)
+				signatureSize = RTGGet32At(image, at+12)
+			}
+			at += size
+		}
+		if signatureOffset <= 0 || signatureSize <= 0 ||
+			signatureOffset+signatureSize > len(image) ||
+			executableLimit <= 0 {
+			return image
+		}
+		signature := darwin_aarch64.machCodeSignature(
+			image[:signatureOffset], "renvo", executableLimit)
+		if len(signature) != signatureSize {
+			return image
+		}
+		for i := 0; i < len(signature); i++ {
+			image[signatureOffset+i] = signature[i]
+		}
+		return image
+	}
+}
+
+extend arch aarch64 {
+	sequences {
+		iosMachImage(out:emitter) -> bytes {
+			let image = darwin_aarch64.machImage(out)
+			return iosPatchImage(image)
+		}
+	}
+}
+
+format macho64_ios_arm64 {
+	byte_order = little
+	address_bits = 64
+	kind = "mach-o"
+	cpu = 0x0100000c
+	code_offset = 0x1000
+	image = sequence iosMachImage
+}
+
+target ios/arm64 {
+	family = native_v1
+	os = darwin
+	arch = aarch64
+	frontend_arch = aarch64
+	abi = aapcs64
+	runtime = darwin_arm64
+	executable = macho64_ios_arm64
+	build_tags = [ios, darwin, unix, aarch64, arm64]
+	capabilities = [hosted, executable, filesystem, heap, argv, environment]
+}

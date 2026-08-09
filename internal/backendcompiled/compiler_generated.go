@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "2c837bdf99d40366e23790b52e090b27d53d4aaf2d1a4d8cd9b0dbbc2b88e9b2"
+const CompilerSourceDigest = "513a331a6e382a593a0f4fb182056afb271c93ad5d08b8c86a22ddbc6bc88c25"
 
 // source: backend/compiler_common_impl.go
 
@@ -23212,13 +23212,19 @@ renvoNonNil(g, fn)
 if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
 return renvoAmd64EmitKernelLinkStaticCall(g, fn, wordCount)
 }
-if renvoPreparedBackend != 0 &&
+if renvoPreparedBackend != 0 && renvoRTGPreparedKernelModule != 0 &&
 renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "kernel") {
 importID := renvoAsmAddKernelImport(
 &g.asm, g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
 if importID < 0 {
 return false
 }
+return renvoRTGEmitStaticCall(&g.asm, importID, wordCount)
+}
+if renvoPreparedBackend != 0 {
+importID := renvoAsmAddPreparedStaticImport(&g.asm,
+fn.linkDLLStart, fn.linkDLLEnd,
+fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
 return renvoRTGEmitStaticCall(&g.asm, importID, wordCount)
 }
 if targetIsDarwin(g.c.renvoTargetOS) {
@@ -23260,8 +23266,7 @@ return 1
 }
 return 0
 }
-if renvoPreparedBackend != 0 &&
-renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "kernel") {
+if renvoPreparedBackend != 0 {
 if renvoEmitLinkStaticCall(g, fn, wordCount) {
 return 1
 }
@@ -23286,6 +23291,22 @@ return 1
 return 0
 }
 return -1
+}
+
+func renvoAsmAddPreparedStaticImport(
+a *renvoAsm, libraryStart int, libraryEnd int,
+nameStart int, nameEnd int, src []byte,
+) int {
+renvoNonNil(a)
+library := renvoStringFromBytes(src, libraryStart, libraryEnd)
+name := renvoStringFromBytes(src, nameStart, nameEnd)
+for i := 0; i < len(a.staticImports); i++ {
+if a.staticImports[i].dll == library && a.staticImports[i].name == name {
+return i
+}
+}
+a.staticImports = append(a.staticImports, renvoStaticImport{dll: library, name: name})
+return len(a.staticImports) - 1
 }
 func renvoEmitRuntimeArenaDiscard(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 renvoNonNil(g, ep)
@@ -24904,6 +24925,9 @@ func renvoDefaultArenaSize(target int) int {
 if renvoFixedTarget == 0 && target == renvoTargetRTG {
 if renvoRTGPreparedKernelModule != 0 {
 return renvoArenaSizeKernelModule
+}
+if size := renvoRTGDefaultArenaSize(target); size != 0 {
+return size
 }
 if renvoNativeIntSize <= 4 {
 return renvoArenaSize32BitHosted

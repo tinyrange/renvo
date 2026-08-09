@@ -572,7 +572,12 @@ func appendPreparedFormatAdapters(out []byte, document Document, target Resolved
 	out = append(out, "const renvoRTGEntryStateBytes = "...)
 	out = appendDecimalFrame(out, entryStateBytes)
 	out = append(out, "\nfunc renvoRTGEmitEntryStart(out *renvoAsm, stateOffset int) bool {\n"...)
-	if algorithm, hasAlgorithm := architectureGoHook(target.Runtime, "emit_entry_start"); hasAlgorithm {
+	if algorithm, hasAlgorithm := architectureGoHook(target.Runtime, "emit_entry_start_simple"); hasAlgorithm {
+		out = append(out, "\t_ = stateOffset\n\treturn rtg"...)
+		out = append(out, exportedName(document.Unit)...)
+		out = append(out, exportedName(algorithm)...)
+		out = append(out, "(out)\n"...)
+	} else if algorithm, hasAlgorithm := architectureGoHook(target.Runtime, "emit_entry_start"); hasAlgorithm {
 		out = append(out, "\treturn rtg"...)
 		out = append(out, exportedName(document.Unit)...)
 		out = append(out, exportedName(algorithm)...)

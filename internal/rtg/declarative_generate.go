@@ -278,11 +278,15 @@ func instructionByteValues(row []string) []string {
 }
 
 func appendPackedBytes(out []byte, values []string) []byte {
-	for i := len(values) - 1; i >= 0; i-- {
-		if i != len(values)-1 {
-			out = append(out, "<<8|"...)
+	for i := 0; i < len(values); i++ {
+		if i != 0 {
+			out = append(out, '|')
 		}
 		out = append(out, values[i]...)
+		if i != 0 {
+			out = append(out, "<<"...)
+			out = appendDecimalFrame(out, i*8)
+		}
 	}
 	return out
 }

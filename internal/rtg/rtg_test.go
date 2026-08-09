@@ -663,6 +663,38 @@ func TestGeneratePreparedUsesStableUnitSymbols(t *testing.T) {
 		t.Fatalf("prepared generation retained an unmangled embedded symbol:\n%s", text)
 	}
 }
+
+func TestGeneratePreparedSupportsSimpleEntryStart(t *testing.T) {
+	source := replaceOnce(testMachineDefinition,
+		"func addTwo(value int) int { return addOne(addOne(value)) }",
+		`func addTwo(value int) int { return addOne(addOne(value)) }
+	func entryStart(out *RTGEmitter) bool { return true }`)
+	source = replaceOnce(source,
+		"runtime tiny_runtime { operation print { builtin = true } }",
+		`runtime tiny_runtime {
+	emit_entry_start_simple = go entryStart
+	operation print { builtin = true }
+}`)
+	resolved := Resolve(Parse([]byte(source), "tiny.rtg"))
+	if !resolved.Ok {
+		t.Fatalf("Resolve failed: %#v", resolved.Diagnostics)
+	}
+	generated := GeneratePreparedBackend(resolved, "test/tiny64")
+	if !generated.Ok {
+		t.Fatalf("GeneratePreparedBackend failed: %#v", generated.Diagnostics)
+	}
+	text := string(generated.Source)
+	for _, want := range []string{
+		"func renvoRTGEmitEntryStart(out *renvoAsm, stateOffset int) bool",
+		"_ = stateOffset",
+		"return rtgTinyEntryStart(out)",
+	} {
+		if !containsText(text, want) {
+			t.Errorf("prepared source missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestResolveRejectsUnknownCompositionReference(t *testing.T) {
 	source := replaceOnce(testMachineDefinition, "abi = tiny_abi", "abi = missing")
 	resolved := Resolve(Parse([]byte(source), "bad.rtg"))
@@ -1135,6 +1167,7 @@ func TestFixedInstructionFormUsesWideEmitterWrites(t *testing.T) {
 	forms { fixed = bytes }
 	instructions {
 		trap fixed [0x01, 0x02, 0x03, 0x04]
+		leave fixed [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
 		stop fixed [0xff]
 	}`)
 	resolved := Resolve(Parse([]byte(source), "tiny.rtg"))
@@ -1148,7 +1181,8 @@ func TestFixedInstructionFormUsesWideEmitterWrites(t *testing.T) {
 	text := string(generated.Source)
 	for _, want := range []string{
 		"func rtgTinyTrap(out *RTGEmitter)",
-		"RTGUint32(out, 0x04<<8|0x03<<8|0x02<<8|0x01)",
+		"RTGUint32(out, 0x01|0x02<<8|0x03<<16|0x04<<24)",
+		"RTGUint64(out, 0x01|0x02<<8|0x03<<16|0x04<<24|0x05<<32|0x06<<40|0x07<<48|0x08<<56)",
 		"func rtgTinyStop(out *RTGEmitter)",
 		"RTGByte(out, 0xff)",
 	} {
