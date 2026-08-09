@@ -439,6 +439,48 @@ func intersectPixelRect(a, b pixelRect) pixelRect {
 	return a
 }
 
+func pointBounds4(a, b, c, d Point) (Scalar, Scalar, Scalar, Scalar) {
+	minX, maxX := a.X, a.X
+	minY, maxY := a.Y, a.Y
+	if b.X < minX {
+		minX = b.X
+	}
+	if b.X > maxX {
+		maxX = b.X
+	}
+	if b.Y < minY {
+		minY = b.Y
+	}
+	if b.Y > maxY {
+		maxY = b.Y
+	}
+	if c.X < minX {
+		minX = c.X
+	}
+	if c.X > maxX {
+		maxX = c.X
+	}
+	if c.Y < minY {
+		minY = c.Y
+	}
+	if c.Y > maxY {
+		maxY = c.Y
+	}
+	if d.X < minX {
+		minX = d.X
+	}
+	if d.X > maxX {
+		maxX = d.X
+	}
+	if d.Y < minY {
+		minY = d.Y
+	}
+	if d.Y > maxY {
+		maxY = d.Y
+	}
+	return minX, maxX, minY, maxY
+}
+
 func (s *Surface) PushClipRect(r Rect) {
 	s.clips = append(s.clips, s.clip)
 	next := s.transformedPixelRect(r)
@@ -450,23 +492,7 @@ func (s *Surface) transformedPixelRect(r Rect) pixelRect {
 	b := s.transformPoint(Point{X: r.MaxX, Y: r.MinY})
 	c := s.transformPoint(Point{X: r.MaxX, Y: r.MaxY})
 	d := s.transformPoint(Point{X: r.MinX, Y: r.MaxY})
-	minX, maxX := a.X, a.X
-	minY, maxY := a.Y, a.Y
-	points := []Point{b, c, d}
-	for i := 0; i < len(points); i++ {
-		if points[i].X < minX {
-			minX = points[i].X
-		}
-		if points[i].X > maxX {
-			maxX = points[i].X
-		}
-		if points[i].Y < minY {
-			minY = points[i].Y
-		}
-		if points[i].Y > maxY {
-			maxY = points[i].Y
-		}
-	}
+	minX, maxX, minY, maxY := pointBounds4(a, b, c, d)
 	return pixelRect{minX: scalarFloor(minX), minY: scalarFloor(minY), maxX: scalarCeil(maxX), maxY: scalarCeil(maxY)}
 }
 
@@ -573,23 +599,7 @@ func (s *Surface) FillRect(r Rect, color Color) {
 	s.transformPointInPlace(&b)
 	s.transformPointInPlace(&c)
 	s.transformPointInPlace(&d)
-	minX, maxX, minY, maxY := a.X, a.X, a.Y, a.Y
-	points := []Point{b, c, d}
-	for i := 0; i < len(points); i++ {
-		point := points[i]
-		if point.X < minX {
-			minX = point.X
-		}
-		if point.X > maxX {
-			maxX = point.X
-		}
-		if point.Y < minY {
-			minY = point.Y
-		}
-		if point.Y > maxY {
-			maxY = point.Y
-		}
-	}
+	minX, maxX, minY, maxY := pointBounds4(a, b, c, d)
 	if s.transformB == 0.0 && s.transformC == 0.0 {
 		s.fillPixelRect(pixelRect{minX: scalarFloor(minX), minY: scalarFloor(minY), maxX: scalarCeil(maxX), maxY: scalarCeil(maxY)}, color)
 		return
@@ -814,23 +824,7 @@ func (s *Surface) DrawImage(image *Surface, src, dst Rect, sampling Sampling, ti
 	s.transformPointInPlace(&b)
 	s.transformPointInPlace(&c)
 	s.transformPointInPlace(&d)
-	minX, maxX, minY, maxY := a.X, a.X, a.Y, a.Y
-	points := []Point{b, c, d}
-	for i := 0; i < len(points); i++ {
-		p := points[i]
-		if p.X < minX {
-			minX = p.X
-		}
-		if p.X > maxX {
-			maxX = p.X
-		}
-		if p.Y < minY {
-			minY = p.Y
-		}
-		if p.Y > maxY {
-			maxY = p.Y
-		}
-	}
+	minX, maxX, minY, maxY := pointBounds4(a, b, c, d)
 	determinant := s.transformA*s.transformD - s.transformB*s.transformC
 	if determinant == 0.0 {
 		return

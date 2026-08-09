@@ -10,12 +10,22 @@ go backend {
 	const androidNativeActivityName = "ANativeActivity_onCreate"
 	const androidSONAME = "librenvo.so"
 	const androidSelfLibrary = "librenvo.so"
-	const androidInstallCallbacksName = "renvoAndroidInstallCallbacks"
+	const androidActivityCallbacksName = "renvoAndroidActivityCallbacks"
+	const androidWindowCreatedCallbackName = "renvoAndroidWindowCreatedCallback"
+	const androidWindowResizedCallbackName = "renvoAndroidWindowResizedCallback"
+	const androidWindowRedrawCallbackName = "renvoAndroidWindowRedrawCallback"
+	const androidWindowDestroyedCallbackName = "renvoAndroidWindowDestroyedCallback"
+	const androidInputQueueCreatedCallbackName = "renvoAndroidInputQueueCreatedCallback"
+	const androidInputQueueDestroyedCallbackName = "renvoAndroidInputQueueDestroyedCallback"
+	const androidInputPollCallbackName = "renvoAndroidInputPollCallback"
 	const androidCallbackRelocation = 16
 	const androidCallbackWindowCreated = 1
 	const androidCallbackWindowResized = 2
 	const androidCallbackWindowRedraw = 3
 	const androidCallbackWindowDestroyed = 4
+	const androidCallbackInputQueueCreated = 5
+	const androidCallbackInputQueueDestroyed = 6
+	const androidCallbackInputPoll = 7
 
 	func androidAppend16(out []byte, value int) []byte {
 		return append(out, byte(value), byte(value>>8))
@@ -94,6 +104,15 @@ go backend {
 		if id == androidCallbackWindowDestroyed {
 			return "androidOnNativeWindowDestroyed"
 		}
+		if id == androidCallbackInputQueueCreated {
+			return "androidOnInputQueueCreated"
+		}
+		if id == androidCallbackInputQueueDestroyed {
+			return "androidOnInputQueueDestroyed"
+		}
+		if id == androidCallbackInputPoll {
+			return "androidOnInputReady"
+		}
 		return ""
 	}
 
@@ -126,6 +145,8 @@ go backend {
 			addend := out.AbsoluteRelocationAddend(i)
 			kind := out.AbsoluteRelocationKind(i)
 			if kind == androidCallbackRelocation {
+				insn := RTGGet32At(out.Code(), at)
+				reg := insn & 31
 				pc := androidSymbolPC(out, androidCallbackName(addend))
 				if pc < 0 {
 					panic("Android NativeActivity callback is missing")
@@ -134,10 +155,10 @@ go backend {
 				pageDelta := (target >> 12) - ((androidCodeOffset + at) >> 12)
 				imm := pageDelta & 0x1fffff
 				out.PatchUint32(at,
-					0x9000000a|((imm&3)<<29)|
-						(((imm>>2)&0x7ffff)<<5))
+					0x90000000|((imm&3)<<29)|
+						(((imm>>2)&0x7ffff)<<5)|reg)
 				out.PatchUint32(at+4,
-					0x9100014a|((target&0xfff)<<10))
+					0x91000000|((target&0xfff)<<10)|(reg<<5)|reg)
 				continue
 			}
 			target, resolved := RTGResolveAbsoluteRelocation(
@@ -206,25 +227,19 @@ go backend {
 		return true
 	}
 
-	func androidEmitCallbackAddress(
-		out *RTGEmitter, callbacks int, offset int, callback int,
+	func androidEmitCallbackPointer(
+		out *RTGEmitter, reg int, callback int,
 	) {
 		at := out.Len()
-		out.Uint32(0x9000000a)
-		out.Uint32(0x9100014a)
+		out.Uint32(0x90000000 | reg)
+		out.Uint32(0x91000000 | (reg << 5) | reg)
 		out.Uint32(0xd503201f)
 		out.Uint32(0xd503201f)
 		out.AbsoluteReloc(at, callback, androidCallbackRelocation)
-		aarch64.asmStoreRegMem(out, 10, callbacks, offset, 8)
 	}
 
-	func androidInstallCallbacks(out *RTGEmitter) {
-		aarch64.asmLoadRegMem(out, 9, 19, 0, 8)
-		androidEmitCallbackAddress(out, 9, 56,
-			androidCallbackWindowCreated)
-		androidEmitCallbackAddress(out, 9, 80,
-			androidCallbackWindowDestroyed)
-		aarch64.asmMovRegImm(out, 0, 1)
+	func androidActivityCallbacks(out *RTGEmitter) {
+		aarch64.asmLoadRegMem(out, 0, 19, 0, 8)
 	}
 
 	func androidStaticCall(
@@ -249,13 +264,33 @@ go backend {
 		aarch64.asmStoreRegMem(out, 9, 31, savedSPOff, 8)
 		library := out.StaticImportDLL(importID)
 		name := out.StaticImportName(importID)
-		if library == androidSelfLibrary &&
-			name == androidInstallCallbacksName {
-			androidInstallCallbacks(out)
+		if library == androidSelfLibrary && name == androidActivityCallbacksName {
+			androidActivityCallbacks(out)
+		} else if library == androidSelfLibrary && name == androidWindowCreatedCallbackName {
+			androidEmitCallbackPointer(out, 0, androidCallbackWindowCreated)
+		} else if library == androidSelfLibrary && name == androidWindowResizedCallbackName {
+			androidEmitCallbackPointer(out, 0, androidCallbackWindowResized)
+		} else if library == androidSelfLibrary && name == androidWindowRedrawCallbackName {
+			androidEmitCallbackPointer(out, 0, androidCallbackWindowRedraw)
+		} else if library == androidSelfLibrary && name == androidWindowDestroyedCallbackName {
+			androidEmitCallbackPointer(out, 0, androidCallbackWindowDestroyed)
+		} else if library == androidSelfLibrary && name == androidInputQueueCreatedCallbackName {
+			androidEmitCallbackPointer(out, 0, androidCallbackInputQueueCreated)
+		} else if library == androidSelfLibrary && name == androidInputQueueDestroyedCallbackName {
+			androidEmitCallbackPointer(out, 0, androidCallbackInputQueueDestroyed)
+		} else if library == androidSelfLibrary && name == androidInputPollCallbackName {
+			androidEmitCallbackPointer(out, 0, androidCallbackInputPoll)
 		} else {
 			index := out.DynamicImport(library, name)
 			aarch64.asmCallLabel(out,
 				out.DynamicImportLabel(index))
+		}
+		// Android returns motion coordinates as C float values in s0. Touch input
+		// only needs pixel precision, so convert them directly to integer pixels
+		// in Renvo's x0 value register before preserving x0 below.
+		if library == "libandroid.so" &&
+			(name == "AMotionEvent_getX" || name == "AMotionEvent_getY") {
+			out.Uint32(0x9e380000)
 		}
 		aarch64.asmMovRegReg(out, 10, 0)
 		aarch64.asmLoadRegMem(out, 9, 31, savedSPOff, 8)
@@ -551,6 +586,8 @@ abi android_aapcs64 {
 	push_register = go androidPushRegister
 	push_immediate = go androidPushImmediate
 	pop_register = go androidPopRegister
+	store_param_word = go aarch64.aapcs64StoreParamWord
+	call_word_count = go aarch64.aapcs64CallWordCount
 	arguments = [x0, x1, x2, x3, x4, x5, x6, x7]
 	result = [x0, x1]
 	stack_alignment = 16
@@ -574,6 +611,6 @@ target android/arm64 {
 	runtime = android_native_activity_arm64
 	executable = android_elf64_arm64
 	build_tags = [android, linux, unix, aarch64, arm64, tiny]
-	arena_default = 950000
+	arena_default = 134217728
 	capabilities = [hosted, executable, filesystem, heap, function_symbols]
 }

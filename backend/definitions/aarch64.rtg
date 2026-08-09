@@ -444,6 +444,49 @@ go backend {
 			out.PatchUint32(at+4, 0xd10003ff|(low<<10))
 		}
 	}
+
+	// AArch64 register-form add/sub treats register 31 as XZR, not SP. The
+	// generic ABI stack fallback therefore cannot adjust SP on this target.
+	// Use the architecture's pre/post-indexed load/store forms instead.
+	func aapcs64PushRegister(out *RTGEmitter, source RTGRegister) {
+		asmEmit(out, 0xf81f0fe0|source.Code)
+	}
+
+	func aapcs64PushImmediate(out *RTGEmitter, value int) {
+		asmMovRegImm(out, scratch.Code, value)
+		asmEmit(out, 0xf81f0fe0|scratch.Code)
+	}
+
+	func aapcs64PopRegister(out *RTGEmitter, destination RTGRegister) {
+		asmEmit(out, 0xf84107e0|destination.Code)
+	}
+
+	func aapcs64StoreParamWord(out *RTGEmitter, word int, offset int) {
+		if word < 6 {
+			asmStoreRegStack(out, word, offset)
+			return
+		}
+		// Every pushed AArch64 call word occupies a 16-byte aligned slot.
+		// FP points below the saved FP/LR pair, so stacked arguments begin
+		// at FP+16 and retain that same stride.
+		asmLoadRegMem(out, scratch.Code, frame.Code,
+			16+(word-6)*16, 8)
+		asmStoreRegStack(out, scratch.Code, offset)
+	}
+
+	func aapcs64CallWordCount(out *RTGEmitter, label RTGLabel, wordCount int) {
+		limit := wordCount
+		if limit > 6 {
+			limit = 6
+		}
+		for i := 0; i < limit; i++ {
+			aapcs64PopRegister(out, RTGRegister{Code: i, Valid: true})
+		}
+		asmCallLabel(out, label)
+		if wordCount > 6 {
+			asmAddRegImm(out, 31, 31, (wordCount-6)*16)
+		}
+	}
 }
 arch aarch64 {
 	alias = "aarch64"
@@ -978,7 +1021,10 @@ arch aarch64 {
 			return at
 		}
 		hostSyscall(out:emitter) {
-			asmSyscall(out)
+			# Direct runtimes already place the syscall number and arguments in
+			# their declared registers. Do not apply the legacy pseudo-register
+			# shuffle here or it overwrites x8 immediately before SVC.
+			asmEmit(out, 0xd4000001)
 		}
 		move(out:emitter, destination:register, source:register) {
 			asmMovRegReg(out, destination.Code, source.Code)
@@ -1000,12 +1046,14 @@ arch aarch64 {
 			asmEmit(out, 0xd340fc00|((int(value)&63)<<16)|(operand.Code<<5)|operand.Code)
 		}
 		emitADR(out:emitter, destination:register, address:address) {
-			let addend = address.Addend
-			let insn = 0x10000000|destination.Code
-			set insn = insn|((addend&3)<<29)
-			set insn = insn|(((addend>>2)&0x7ffff)<<5)
 			let at = out.Len()
-			asmEmit(out, insn)
+			# Executable absolute relocation patchers replace this whole slot
+			# with ADRP, ADD, NOP, NOP. Reserve all four instructions so the
+			# patch cannot overwrite the operations which follow the address.
+			asmEmit(out, 0x90000000|destination.Code)
+			asmEmit(out, 0xd503201f)
+			asmEmit(out, 0xd503201f)
+			asmEmit(out, 0xd503201f)
 			RTGAddressRelocAt(out, address, at)
 		}
 		loadI16(out:emitter, destination:register, address:address) {
@@ -1048,6 +1096,11 @@ abi aapcs64 {
 	arch = aarch64
 	frame_start = sequence frameStart
 	frame_finish = go frameFinish
+	push_register = go aapcs64PushRegister
+	push_immediate = go aapcs64PushImmediate
+	pop_register = go aapcs64PopRegister
+	store_param_word = go aapcs64StoreParamWord
+	call_word_count = go aapcs64CallWordCount
 	arguments = [x0, x1, x2, x3, x4, x5, x6, x7]
 	result = [x0, x1]
 	stack_alignment = 16

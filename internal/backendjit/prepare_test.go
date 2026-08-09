@@ -696,15 +696,16 @@ func TestCompiledInBootstrapUsesDefinitionOwnedMachOImage(t *testing.T) {
 	}
 	definition := copyNativeDefinition(t, root,
 		"target darwin/arm64 {", "target example/darwin-arm64 {")
+	prepared := New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
+		t.TempDir(), backendcompiled.Backend{})
 	result := driver.CompileFromFS([]string{
 		"-backend", definition,
 		"-t", "example/darwin-arm64",
 		"-s",
 		"-o", "app",
-		filepath.Join(root, "internal", "backendjit", "testdata", "minimal.go"),
+		filepath.Join(root, "backend", "tests", "rtg_aarch64_expression_stack.go"),
 	}, root, filepath.Join(root, "std"), driver.OSFS{},
-		New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
-			t.TempDir(), backendcompiled.Backend{}))
+		prepared)
 	if !result.Ok {
 		t.Fatalf("custom Darwin backend compile failed: %#v", result.Diagnostic)
 	}
@@ -720,6 +721,50 @@ func TestCompiledInBootstrapUsesDefinitionOwnedMachOImage(t *testing.T) {
 	}
 	if !bytes.Contains(result.Binary, []byte{0xfa, 0xde, 0x0c, 0xc0}) {
 		t.Fatal("custom Mach-O output is missing its ad-hoc code signature")
+	}
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+		executable := filepath.Join(t.TempDir(), "custom-aarch64-output")
+		if err := os.WriteFile(executable, result.Binary, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		execution, err := exec.Command(executable).CombinedOutput()
+		if err != nil {
+			t.Fatalf("custom AArch64 output failed: %v\n%s", err, execution)
+		}
+		if string(execution) != "PASS\n" {
+			t.Fatalf("custom AArch64 output = %q, want PASS", execution)
+		}
+	}
+	for _, name := range []string{
+		"rtg_aarch64_many_call_words.go",
+		"rtg_aarch64_string_compare.go",
+	} {
+		t.Run(name, func(t *testing.T) {
+			regression := driver.CompileFromFS([]string{
+				"-backend", definition,
+				"-t", "example/darwin-arm64",
+				"-s",
+				"-o", "app",
+				filepath.Join(root, "backend", "tests", name),
+			}, root, filepath.Join(root, "std"), driver.OSFS{}, prepared)
+			if !regression.Ok {
+				t.Fatalf("custom Darwin regression compile failed: %#v", regression.Diagnostic)
+			}
+			if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
+				return
+			}
+			executable := filepath.Join(t.TempDir(), "custom-aarch64-regression")
+			if err := os.WriteFile(executable, regression.Binary, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			execution, err := exec.Command(executable).CombinedOutput()
+			if err != nil {
+				t.Fatalf("custom AArch64 regression failed: %v\n%s", err, execution)
+			}
+			if string(execution) != "PASS\n" {
+				t.Fatalf("custom AArch64 regression output = %q, want PASS", execution)
+			}
+		})
 	}
 }
 

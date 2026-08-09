@@ -556,7 +556,30 @@ func lowerFunctionValueAssignment(program *unit.Program, op int, signatures []fu
 		edits = append(edits, functionValueTokenEdit(program, rhs, signatures[sigIndex].name+"{}"))
 		return edits, true
 	}
+	if program.Tokens[rhs].KindLine&255 == unit.TokenIdent {
+		name := functionValueTokenText(program, rhs)
+		if functionValueEnclosingLocalType(program, op, name) == "" && functionValueDeclaredDirectFunction(program, name) {
+			implIndex := functionValueImplIndex(signatures[sigIndex], "", "", name)
+			if implIndex < 0 {
+				implIndex = len(signatures[sigIndex].impls)
+				signatures[sigIndex].impls = append(signatures[sigIndex].impls, functionValueImpl{function: name})
+			}
+			replacement := signatures[sigIndex].name + "{kind: " + functionValueDecimal(implIndex+1) + "}"
+			edits = append(edits, functionValueTokenEdit(program, rhs, replacement))
+			return edits, true
+		}
+	}
 	return lowerFunctionValueBoundMethod(program, op, rhs, sigIndex, signatures, edits), true
+}
+
+func functionValueDeclaredDirectFunction(program *unit.Program, name string) bool {
+	for i := 0; i < len(program.Funcs); i++ {
+		fn := program.Funcs[i]
+		if fn.ReceiverStart == fn.ReceiverEnd && functionValueTokenText(program, fn.NameTok) == name {
+			return true
+		}
+	}
+	return false
 }
 
 func lowerFunctionValueBoundMethod(program *unit.Program, at int, rhs int, sigIndex int, signatures []functionValueSignature, edits []functionValueEdit) []functionValueEdit {
@@ -571,10 +594,13 @@ func lowerFunctionValueBoundMethod(program *unit.Program, at int, rhs int, sigIn
 	implIndex := functionValueImplIndex(signatures[sigIndex], receiverType, method, "")
 	if implIndex < 0 {
 		implIndex = len(signatures[sigIndex].impls)
-		fieldName := "receiver" + functionValueDecimal(implIndex)
+		fieldName := functionValueSharedMethodReceiverField(signatures[sigIndex], receiverType)
+		if fieldName == "" {
+			fieldName = "receiver" + functionValueDecimal(len(signatures[sigIndex].fields))
+			signatures[sigIndex].fields = append(signatures[sigIndex].fields, fieldName)
+			signatures[sigIndex].fieldTypes = append(signatures[sigIndex].fieldTypes, receiverType)
+		}
 		signatures[sigIndex].impls = append(signatures[sigIndex].impls, functionValueImpl{receiverType: receiverType, receiverField: fieldName, method: method})
-		signatures[sigIndex].fields = append(signatures[sigIndex].fields, fieldName)
-		signatures[sigIndex].fieldTypes = append(signatures[sigIndex].fieldTypes, receiverType)
 	}
 	impl := signatures[sigIndex].impls[implIndex]
 	receiver := functionValueTokenText(program, rhs)
@@ -585,6 +611,16 @@ func lowerFunctionValueBoundMethod(program *unit.Program, at int, rhs int, sigIn
 	replacement := signatures[sigIndex].name + "{kind: " + functionValueDecimal(implIndex+1) + ", " + impl.receiverField + ": " + receiver + "}"
 	edits = append(edits, functionValueTokenRangeEdit(program, rhs, rhs+3, replacement))
 	return edits
+}
+
+func functionValueSharedMethodReceiverField(sig functionValueSignature, receiverType string) string {
+	for i := 0; i < len(sig.impls); i++ {
+		impl := sig.impls[i]
+		if impl.method != "" && impl.receiverType == receiverType {
+			return impl.receiverField
+		}
+	}
+	return ""
 }
 
 func lowerFunctionValueCallArguments(program *unit.Program, signatures []functionValueSignature, edits []functionValueEdit) []functionValueEdit {
@@ -1004,7 +1040,10 @@ func functionValueEnclosingLocalTypeDepth(program *unit.Program, before int, nam
 			return functionValueTokensText(program, i+1, functionValueTypeEnd(program, i+1))
 		}
 	}
-	return functionValueFunctionParamType(program, fn, name)
+	if typ := functionValueFunctionParamType(program, fn, name); typ != "" {
+		return typ
+	}
+	return ordinaryGlobalType(program, name)
 }
 
 func functionValueDeclaredType(program *unit.Program, name string) bool {

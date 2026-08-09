@@ -15,10 +15,10 @@ The image contract is deliberately small:
 - `android`, `linux`, `unix`, `aarch64`, and `arm64` frontend build tags
 
 The exported NativeActivity entry runs `appMain()` and returns to Android. The
-graphics port registers NativeActivity window-created/window-destroyed
-callbacks, renders into a Renvo software surface, and presents it through
-`ANativeWindow_lock`/`ANativeWindow_unlockAndPost`. APK packaging is provided by
-`cmd/renvoapk`.
+graphics port registers the NativeActivity window and input-queue lifecycle,
+renders into a native-resolution Renvo software surface, dispatches touch input,
+and presents through `ANativeWindow_lock`/`ANativeWindow_unlockAndPost`. APK
+packaging is provided by `cmd/renvoapk`.
 
 Run the host-independent validation with:
 
@@ -36,7 +36,7 @@ go run ./cmd/renvo \
   internal/backendjit/testdata/mobile_entry.go
 ```
 
-Compile the compact Forms example instead with:
+Compile the Forms hello example instead with:
 
 ```sh
 go run ./cmd/renvo \
@@ -44,6 +44,19 @@ go run ./cmd/renvo \
   -t android/arm64 \
   -s -o sandbox/librenvo-forms.so \
   ./examples/android/forms_hello
+```
+
+The full control gallery uses a 360 × 800 dp layout, renders at the device's
+native density, and demonstrates touch targets, text fields, selection
+controls, list scrolling, sliders, split-view dragging, themes, and advanced
+controls:
+
+```sh
+go run ./cmd/renvo \
+  -backend examples/android/android_arm64.rtg \
+  -t android/arm64 \
+  -s -o sandbox/librenvo-controls.so \
+  ./examples/android/forms_controls
 ```
 
 Build the SDK-free packager with Renvo, create a development-signed APK, and
@@ -63,12 +76,10 @@ adb shell am start -W \
   -n dev.renvo.example/android.app.NativeActivity
 ```
 
-This flow has been verified through native buffer lock/post on a physical ARM64
-Android 15 device. The Android Forms build is intentionally a compact first
-profile: it provides the retained Form root, background invalidation, software
-painting, and NativeActivity presentation. General controls, text rendering,
-input dispatch, accessibility, and resize/redraw event delivery remain future
-Android layers; the full desktop and browser Forms profiles are unchanged.
+This flow has been verified through native-resolution buffer lock/post, full
+TrueType text, taps, list scrolling, and control dragging on a physical ARM64
+Android 15 device. Android uses the same retained Forms controls as the desktop
+and browser targets.
 
 See [`cmd/renvoapk/README.md`](../../cmd/renvoapk/README.md) for the config and
 signing contracts.

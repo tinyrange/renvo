@@ -1,5 +1,3 @@
-//go:build !android || !renvo
-
 package forms
 
 import "renvo.dev/std/graphics"
@@ -269,7 +267,21 @@ func paintTextEntry(surface *graphics.Surface, control *Control, font *graphics.
 		if !multiline {
 			baseline = bounds.MinY + (bounds.Height()-lineHeight)/2 + font.Metrics.Ascent
 		}
-		surface.DrawText(font, graphics.Point{X: bounds.MinX + 6, Y: baseline}, text[lineStart:i], controlForeground(control))
+		lineText := text[lineStart:i]
+		textX := bounds.MinX + 6
+		metrics := graphics.MeasureText(font, lineText)
+		if !multiline {
+			available := bounds.Width() - 12
+			if metrics.Width > available {
+				textX -= metrics.Width - available
+			}
+		}
+		surface.DrawText(font, graphics.Point{X: textX, Y: baseline}, lineText, controlForeground(control))
+		if control.Focused() && i == len(text) {
+			caretX := textX + metrics.Width + 1
+			surface.FillRect(graphics.R(caretX, baseline-font.Metrics.Ascent, 1,
+				font.Metrics.Ascent+font.Metrics.Descent), controlForeground(control))
+		}
 		line++
 		lineStart = i + 1
 		if !multiline {

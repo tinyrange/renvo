@@ -1,7 +1,5 @@
 // Package forms provides retained controls and Windows Forms-style event
 // wiring on top of RENVO's portable graphics package.
-//go:build !android || !renvo
-
 package forms
 
 import "renvo.dev/std/graphics"
@@ -350,6 +348,7 @@ type Form struct {
 	background                      graphics.Color
 	controls                        []*Control
 	invalid                         []graphics.Rect
+	invalidSpare                    []graphics.Rect
 	focused                         *Control
 	pressed                         *Control
 	hovered                         *Control
@@ -384,6 +383,7 @@ func (f *Form) Initialize(width, height int) {
 	f.background = f.theme.Window
 	f.controls = nil
 	f.invalid = nil
+	f.invalidSpare = nil
 	f.focused = nil
 	f.pressed = nil
 	f.hovered = nil
@@ -627,7 +627,7 @@ func (f *Form) Paint(surface *graphics.Surface) bool {
 		return false
 	}
 	invalid := f.invalid
-	f.invalid = nil
+	f.invalid = f.invalidSpare[:0]
 	for i := 0; i < len(invalid); i++ {
 		dirty := invalid[i]
 		surface.BeginDamage(dirty)
@@ -652,6 +652,7 @@ func (f *Form) Paint(surface *graphics.Surface) bool {
 		surface.PopClip()
 		surface.EndDamage()
 	}
+	f.invalidSpare = invalid[:0]
 	return true
 }
 

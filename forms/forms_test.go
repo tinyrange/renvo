@@ -50,6 +50,28 @@ func TestMovingControlKeepsOldAndNewDamageSeparate(t *testing.T) {
 	})
 }
 
+func TestPaintReusesInvalidationBuffers(t *testing.T) {
+	var form Form
+	form.Initialize(100, 80)
+	surface := graphics.NewSurface(100, 80)
+	form.Paint(surface)
+	for cycle := 0; cycle < 2; cycle++ {
+		form.Invalidate(graphics.R(2, 2, 8, 8))
+		form.Invalidate(graphics.R(70, 50, 8, 8))
+		form.Paint(surface)
+	}
+	invalidCapacity := cap(form.invalid)
+	spareCapacity := cap(form.invalidSpare)
+	for cycle := 0; cycle < 100; cycle++ {
+		form.Invalidate(graphics.R(2, 2, 8, 8))
+		form.Invalidate(graphics.R(70, 50, 8, 8))
+		form.Paint(surface)
+	}
+	if cap(form.invalid) != invalidCapacity || cap(form.invalidSpare) != spareCapacity {
+		t.Fatalf("invalidation capacities changed from %d/%d to %d/%d", invalidCapacity, spareCapacity, cap(form.invalid), cap(form.invalidSpare))
+	}
+}
+
 func TestAdjacentInvalidationsStaySeparate(t *testing.T) {
 	var form Form
 	form.Initialize(67, 120)
