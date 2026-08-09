@@ -228,8 +228,8 @@ func renvoEmitProgramEntryArgsAmd64(g *renvoLinearGen, appIndex int) bool {
 		return false
 	}
 	argsOff := g.asm.bssSize
-	g.asm.bssSize += 32768
 	if targetIsWindows(g.c.renvoTargetOS) {
+		g.asm.bssSize += 32768
 		argsTextOff := g.asm.bssSize
 		g.asm.bssSize += 32768
 		argsLenOff := g.asm.bssSize
@@ -240,10 +240,14 @@ func renvoEmitProgramEntryArgsAmd64(g *renvoLinearGen, appIndex int) bool {
 		g.asm.bssSize += 8
 		renvoAsmBuildWindowsArgvEnvSlicesAmd64(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
 	} else {
-		envDataOff := g.asm.bssSize
-		g.asm.bssSize += 32768
-		envLenOff := g.asm.bssSize
-		g.asm.bssSize += 8
+		argsOff = renvoAlignValue(g.asm.bssSize, renvoLinuxAmd64ArgsBSSAlignment)
+		g.asm.bssSize = argsOff + renvoLinuxAmd64ArgsBSSSize
+		envDataOff := renvoAlignValue(
+			g.asm.bssSize, renvoLinuxAmd64EnvironmentBSSAlignment)
+		g.asm.bssSize = envDataOff + renvoLinuxAmd64EnvironmentBSSSize
+		envLenOff := renvoAlignValue(
+			g.asm.bssSize, renvoLinuxAmd64EnvironmentLengthBSSAlignment)
+		g.asm.bssSize = envLenOff + renvoLinuxAmd64EnvironmentLengthBSSSize
 		renvoAsmBuildArgvEnvSlicesAmd64(&g.asm, argsOff, envDataOff, envLenOff)
 	}
 	if app.paramCount == 1 {

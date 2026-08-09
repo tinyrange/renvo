@@ -81,8 +81,9 @@ func main() {
 			generated = rtg.GenerateArchitectureBackend(definitions[0], *arch, *packageName)
 		}
 	} else if *targetProjection {
-		if *target == "" || *prepared || *statefulEmitter || len(definitions) != 1 {
-			fail("target projection requires one definition, -t, and no prepared or stateful mode")
+		if *target == "" || *prepared || *statefulEmitter || *algorithms || *contract ||
+			len(definitions) != 1 {
+			fail("target projection requires one definition, -t, and no other generation mode")
 		}
 		generated = rtg.GenerateCheckedInTargetProjection(definitions[0], *target, *packageName)
 	} else if *target == "" {

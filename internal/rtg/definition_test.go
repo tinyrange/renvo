@@ -221,6 +221,8 @@ func TestAmd64DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 	for _, binding := range []string{
 		"target: target-projection/linux/amd64",
 		"const renvoLinuxAmd64SysReadSeq = 0",
+		"const renvoLinuxAmd64ArgsBSSSize = 32768",
+		"const renvoLinuxAmd64EnvironmentBSSAlignment = 16",
 		"func renvoAsmBuildArgvEnvSlicesAmd64(",
 		"func renvoAsmImageAmd64(",
 		"const renvoLinuxAmd64ELFMachine = 62",
@@ -244,6 +246,79 @@ func TestAmd64DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 	}
 	if containsText(string(prepared.Source), directEmitterV1Schema) {
 		t.Error("prepared amd64 backend retained the direct emitter schema as runtime data")
+	}
+}
+
+func TestCheckedInLinuxAmd64ProjectionOwnsEntryBSSLayout(t *testing.T) {
+	const filename = "../../backend/definitions/linux_amd64.rtg"
+	original, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modified := bytes.Replace(original,
+		[]byte("bss args 32768 16"), []byte("bss args 16384 32"), 1)
+	if bytes.Equal(modified, original) {
+		t.Fatal("fixture did not contain the args BSS declaration")
+	}
+	resolved := ResolveDefinitions(ParseImports(
+		modified, filename, testFilesystemImportLoader{}))
+	if !resolved.Ok {
+		t.Fatalf("modified definition did not resolve: %#v", resolved.Diagnostics)
+	}
+	generated := GenerateCheckedInTargetProjection(resolved, "linux/amd64", "main")
+	if !generated.Ok {
+		t.Fatalf("modified projection failed: %#v", generated.Diagnostics)
+	}
+	for _, binding := range []string{
+		"const renvoLinuxAmd64ArgsBSSSize = 16384",
+		"const renvoLinuxAmd64ArgsBSSAlignment = 32",
+	} {
+		if !containsText(string(generated.Source), binding) {
+			t.Errorf("modified projection is missing %s", binding)
+		}
+	}
+}
+
+func TestCheckedInLinuxAmd64ProjectionRejectsIncompleteDefinition(t *testing.T) {
+	const filename = "../../backend/definitions/linux_amd64.rtg"
+	original, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		old  string
+		new  string
+	}{
+		{
+			name: "missing syscall number",
+			old:  "operation read { number = 0 args = [fd, buffer, count] }",
+			new:  "operation read { args = [fd, buffer, count] }",
+		},
+		{
+			name: "incompatible entry arity",
+			old:  "max_parameters = 2",
+			new:  "max_parameters = 1",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			modified := bytes.Replace(original, []byte(test.old), []byte(test.new), 1)
+			if bytes.Equal(modified, original) {
+				t.Fatalf("fixture did not contain %q", test.old)
+			}
+			resolved := ResolveDefinitions(ParseImports(
+				modified, filename, testFilesystemImportLoader{}))
+			if !resolved.Ok {
+				t.Fatalf("modified definition did not resolve: %#v", resolved.Diagnostics)
+			}
+			generated := GenerateCheckedInTargetProjection(
+				resolved, "linux/amd64", "main")
+			if generated.Ok || len(generated.Diagnostics) != 1 ||
+				generated.Diagnostics[0].Code != "RTG-GENERATE-006" {
+				t.Fatalf("incomplete projection result = %#v", generated)
+			}
+		})
 	}
 }
 

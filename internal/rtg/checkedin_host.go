@@ -42,11 +42,15 @@ func GenerateCheckedInTargetProjection(
 		return checkedInTargetProjectionFailure(resolved.Document, target.Runtime,
 			"linux/amd64 runtime is missing its syscall ABI sequences")
 	}
-	template, hasTemplate := decodeRuntimeEntryTemplate(target.Runtime)
-	if !hasTemplate || template.algorithm != "" || len(template.code) == 0 ||
-		len(template.bss) != 3 {
+	operations, missingOperation := checkedInLinuxAmd64RuntimeOperations(target.Runtime)
+	if missingOperation != "" {
 		return checkedInTargetProjectionFailure(resolved.Document, target.Runtime,
-			"linux/amd64 requires a three-buffer literal entry template")
+			"linux/amd64 runtime operation "+missingOperation+" requires a syscall number")
+	}
+	template, hasTemplate := decodeRuntimeEntryTemplate(target.Runtime)
+	if !hasTemplate || !checkedInLinuxAmd64EntryTemplateValid(template) {
+		return checkedInTargetProjectionFailure(resolved.Document, target.Runtime,
+			"linux/amd64 requires a complete three-buffer literal entry template")
 	}
 	codeOffset, hasCodeOffset := integerField(
 		resolved.Document, target.Executable, "code_offset")
@@ -65,13 +69,13 @@ func GenerateCheckedInTargetProjection(
 	source := generateHeaderPackage(
 		manifest, "target-projection/"+target.Descriptor.Name, packageName)
 	projection := resolved.Document
-	projection.Unit = "builtin_linux_amd64"
+	projection.Unit = "builtin"
 	_, sequences := resolveArchitectureSequenceProjection(
 		projection, target.Arch, nil, []string{prepareBuffer, moveOffset})
 	source = appendArchitectureSequences(
 		source, projection, target.Arch, true, false, false, sequences)
-	source = appendCheckedInLinuxAmd64Runtime(source, target.Runtime,
-		projection.Unit, prepareBuffer, moveOffset)
+	source = appendCheckedInLinuxAmd64Runtime(
+		source, operations, projection.Unit, prepareBuffer, moveOffset)
 	source = appendCheckedInLinuxAmd64Entry(source, template)
 	source = append(source, "\nconst renvoLinuxAmd64ELFMachine = "...)
 	source = appendDecimalFrame(source, machine)
@@ -88,27 +92,76 @@ func checkedInTargetProjectionFailure(
 		document, declaration.Span, "RTG-GENERATE-006", message)}}
 }
 
-func appendCheckedInLinuxAmd64Runtime(
-	source []byte, runtime Declaration, unit string, prepareBuffer string, moveOffset string,
-) []byte {
-	operations := []struct {
-		name   string
-		symbol string
-	}{
-		{"read", "renvoLinuxAmd64SysReadSeq"},
-		{"write", "renvoLinuxAmd64SysWriteSeq"},
-		{"open", "renvoLinuxAmd64SysOpen"},
-		{"close", "renvoLinuxAmd64SysClose"},
-		{"read_at", "renvoLinuxAmd64SysReadAt"},
-		{"write_at", "renvoLinuxAmd64SysWriteAt"},
-		{"chmod", "renvoLinuxAmd64SysFchmod"},
+type checkedInLinuxAmd64RuntimeOperation struct {
+	name   string
+	symbol string
+	value  int
+}
+
+func checkedInLinuxAmd64RuntimeOperations(
+	runtime Declaration,
+) ([]checkedInLinuxAmd64RuntimeOperation, string) {
+	operations := []checkedInLinuxAmd64RuntimeOperation{
+		{name: "read", symbol: "renvoLinuxAmd64SysReadSeq"},
+		{name: "write", symbol: "renvoLinuxAmd64SysWriteSeq"},
+		{name: "open", symbol: "renvoLinuxAmd64SysOpen"},
+		{name: "close", symbol: "renvoLinuxAmd64SysClose"},
+		{name: "read_at", symbol: "renvoLinuxAmd64SysReadAt"},
+		{name: "write_at", symbol: "renvoLinuxAmd64SysWriteAt"},
+		{name: "chmod", symbol: "renvoLinuxAmd64SysFchmod"},
 	}
 	for i := 0; i < len(operations); i++ {
-		value, _ := runtimeOperationInteger(runtime, operations[i].name, "number")
+		value, ok := runtimeOperationInteger(runtime, operations[i].name, "number")
+		if !ok || value < 0 {
+			return nil, operations[i].name
+		}
+		operations[i].value = value
+	}
+	return operations, ""
+}
+
+func checkedInLinuxAmd64EntryTemplateValid(template runtimeEntryTemplate) bool {
+	if template.algorithm != "" || len(template.code) == 0 || template.maxParameters != 2 ||
+		template.requiresState || len(template.bss) != 3 || len(template.relocations) == 0 {
+		return false
+	}
+	expectedBSS := []string{"args", "environment", "environmentLength"}
+	for i := 0; i < len(template.bss); i++ {
+		bss := template.bss[i]
+		if bss.name != expectedBSS[i] || bss.size <= 0 || bss.alignment <= 0 ||
+			bss.alignment&(bss.alignment-1) != 0 {
+			return false
+		}
+	}
+	for i := 0; i < len(template.relocations); i++ {
+		relocation := template.relocations[i]
+		if relocation.kind != "bss" || relocation.offset < 0 ||
+			relocation.offset+4 > len(template.code) {
+			return false
+		}
+		found := false
+		for j := 0; j < len(template.bss); j++ {
+			if relocation.target == template.bss[j].name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func appendCheckedInLinuxAmd64Runtime(
+	source []byte, operations []checkedInLinuxAmd64RuntimeOperation,
+	unit string, prepareBuffer string, moveOffset string,
+) []byte {
+	for i := 0; i < len(operations); i++ {
 		source = append(source, "\nconst "...)
 		source = append(source, operations[i].symbol...)
 		source = append(source, " = "...)
-		source = appendDecimalFrame(source, value)
+		source = appendDecimalFrame(source, operations[i].value)
 	}
 	source = append(source, "\n\nfunc renvoAmd64AsmPrepareReadWriteBuf(a *renvoAsm) {\n\trenvoNonNil(a)\n"...)
 	source = append(source, "\trenvoAsmCopyPrimaryToCallWord1(a)\n\trtg"...)
@@ -122,7 +175,22 @@ func appendCheckedInLinuxAmd64Runtime(
 }
 
 func appendCheckedInLinuxAmd64Entry(source []byte, template runtimeEntryTemplate) []byte {
-	source = append(source, "\nfunc renvoAsmBuildArgvEnvSlicesAmd64(a *renvoAsm"...)
+	bssSymbols := []string{
+		"renvoLinuxAmd64ArgsBSS",
+		"renvoLinuxAmd64EnvironmentBSS",
+		"renvoLinuxAmd64EnvironmentLengthBSS",
+	}
+	for i := 0; i < len(template.bss); i++ {
+		source = append(source, "\nconst "...)
+		source = append(source, bssSymbols[i]...)
+		source = append(source, "Size = "...)
+		source = appendDecimalFrame(source, template.bss[i].size)
+		source = append(source, "\nconst "...)
+		source = append(source, bssSymbols[i]...)
+		source = append(source, "Alignment = "...)
+		source = appendDecimalFrame(source, template.bss[i].alignment)
+	}
+	source = append(source, "\n\nfunc renvoAsmBuildArgvEnvSlicesAmd64(a *renvoAsm"...)
 	for i := 0; i < len(template.bss); i++ {
 		source = append(source, ", "...)
 		source = append(source, template.bss[i].name...)

@@ -302,6 +302,102 @@ func TestCompiledInBootstrapPreparesAndCachesBackend(t *testing.T) {
 	}
 }
 
+func TestLinuxAmd64BuiltInProjectionMatchesPreparedDefinitionBehavior(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skipf("in-process prepared backend requires linux/amd64, got %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdRoot := filepath.Join(root, "std")
+	source := filepath.Join(root, "backend", "tests", "arithmetic_return_expression.go")
+	builtInArgs := []string{"-t", "linux/amd64", "-s", "-o", "app", source}
+	builtIn := driver.CompileFromFS(
+		builtInArgs, root, stdRoot, driver.OSFS{}, backendcompiled.Backend{})
+	if !builtIn.Ok {
+		t.Fatalf("built-in linux/amd64 compile failed: %#v", builtIn.Diagnostic)
+	}
+
+	definition := copyNativeDefinition(t, root,
+		"target linux/amd64 {", "target equivalence/linux64 {")
+	preparedArgs := []string{
+		"-backend", definition,
+		"-t", "equivalence/linux64",
+		"-s",
+		"-o", "app",
+		source,
+	}
+	preparedBackend := New(definition, filepath.Join(root, "backend"), stdRoot,
+		t.TempDir(), backendcompiled.Backend{})
+	prepared := driver.CompileFromFS(
+		preparedArgs, root, stdRoot, driver.OSFS{}, preparedBackend)
+	if !prepared.Ok {
+		t.Fatalf("prepared equivalent linux/amd64 compile failed: %#v", prepared.Diagnostic)
+	}
+
+	outputs := make([][]byte, 0, 2)
+	for _, image := range []struct {
+		name   string
+		binary []byte
+	}{
+		{name: "built-in", binary: builtIn.Binary},
+		{name: "prepared", binary: prepared.Binary},
+	} {
+		parsed, err := elf.NewFile(bytes.NewReader(image.binary))
+		if err != nil {
+			t.Fatalf("parse %s linux/amd64 output: %v", image.name, err)
+		}
+		if parsed.Class != elf.ELFCLASS64 || parsed.Data != elf.ELFDATA2LSB ||
+			parsed.Type != elf.ET_DYN || parsed.Machine != elf.EM_X86_64 {
+			t.Fatalf("%s linux/amd64 ELF contract = class %v, data %v, type %v, machine %v",
+				image.name, parsed.Class, parsed.Data, parsed.Type, parsed.Machine)
+		}
+		loadCount := 0
+		hasReadExecute := false
+		hasReadWrite := false
+		entryInExecutableLoad := false
+		for _, program := range parsed.Progs {
+			if program.Type != elf.PT_LOAD {
+				continue
+			}
+			loadCount++
+			if program.Align != 0x1000 {
+				t.Fatalf("%s linux/amd64 PT_LOAD alignment = %#x", image.name, program.Align)
+			}
+			switch program.Flags {
+			case elf.PF_R | elf.PF_X:
+				hasReadExecute = true
+				entryInExecutableLoad = parsed.Entry >= program.Vaddr &&
+					parsed.Entry < program.Vaddr+program.Memsz
+			case elf.PF_R | elf.PF_W:
+				hasReadWrite = true
+			}
+		}
+		if loadCount != 2 || !hasReadExecute || !hasReadWrite || !entryInExecutableLoad {
+			t.Fatalf("%s linux/amd64 load contract = count %d, rx %v, rw %v, entry-in-rx %v",
+				image.name, loadCount, hasReadExecute, hasReadWrite, entryInExecutableLoad)
+		}
+		if err := parsed.Close(); err != nil {
+			t.Fatalf("close %s linux/amd64 output: %v", image.name, err)
+		}
+
+		executable := filepath.Join(t.TempDir(), image.name+"-linux-amd64")
+		if err := os.WriteFile(executable, image.binary, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		output, err := exec.Command(executable).CombinedOutput()
+		if err != nil {
+			t.Fatalf("execute %s linux/amd64 output: %v\n%s", image.name, err, output)
+		}
+		outputs = append(outputs, output)
+	}
+	if !bytes.Equal(outputs[0], outputs[1]) || string(outputs[0]) != "PASS\n" {
+		t.Fatalf("linux/amd64 outputs: built-in %q, prepared %q, want PASS",
+			outputs[0], outputs[1])
+	}
+}
+
 func TestCompiledInBootstrapUsesAArch64Definition(t *testing.T) {
 	if hostTarget() == "" {
 		t.Skipf("no in-process prepared backend for %s/%s", runtime.GOOS, runtime.GOARCH)

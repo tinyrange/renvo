@@ -5,11 +5,11 @@
 package main
 
 
-func rtgBuiltinLinuxAmd64LinuxAmd64PackageLinuxPrepareReadWriteBuffer(out *renvoAsm) {
+func rtgBuiltinLinuxAmd64PackageLinuxPrepareReadWriteBuffer(out *renvoAsm) {
 	renvoAsmEmit16(out, 0x5a51)
 }
 
-func rtgBuiltinLinuxAmd64LinuxAmd64PackageLinuxMoveOffsetArgument(out *renvoAsm) {
+func rtgBuiltinLinuxAmd64PackageLinuxMoveOffsetArgument(out *renvoAsm) {
 	renvoAsmEmit24(out, 0xc28949)
 }
 
@@ -24,12 +24,12 @@ const renvoLinuxAmd64SysFchmod = 91
 func renvoAmd64AsmPrepareReadWriteBuf(a *renvoAsm) {
 	renvoNonNil(a)
 	renvoAsmCopyPrimaryToCallWord1(a)
-	rtgBuiltinLinuxAmd64LinuxAmd64PackageLinuxPrepareReadWriteBuffer(a)
+	rtgBuiltinLinuxAmd64PackageLinuxPrepareReadWriteBuffer(a)
 }
 
 func renvoAmd64AsmMoveOffsetArg(a *renvoAsm) {
 	renvoNonNil(a)
-	rtgBuiltinLinuxAmd64LinuxAmd64PackageLinuxMoveOffsetArgument(a)
+	rtgBuiltinLinuxAmd64PackageLinuxMoveOffsetArgument(a)
 }
 
 func compileLinuxAmd64(input []int, output int) int {
@@ -40,6 +40,13 @@ func compileLinuxAmd64Arena(input []int, output int, arenaSize int) int {
 	renvoSetTarget(renvoTargetLinuxAmd64)
 	return renvoCompileAmd64(input, output, arenaSize)
 }
+
+const renvoLinuxAmd64ArgsBSSSize = 32768
+const renvoLinuxAmd64ArgsBSSAlignment = 16
+const renvoLinuxAmd64EnvironmentBSSSize = 32768
+const renvoLinuxAmd64EnvironmentBSSAlignment = 16
+const renvoLinuxAmd64EnvironmentLengthBSSSize = 8
+const renvoLinuxAmd64EnvironmentLengthBSSAlignment = 8
 
 func renvoAsmBuildArgvEnvSlicesAmd64(a *renvoAsm, argsOff int, environmentOff int, environmentLengthOff int) {
 	renvoNonNil(a)
