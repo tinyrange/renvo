@@ -120,7 +120,6 @@ go backend {
 	func windowsBuiltinRuntimeClose(out *RTGEmitter) {
 		failed := out.NewLabel()
 		done := out.NewLabel()
-		out.Bytes3(0x48, 0x89, 0xf9)
 		windowsCallImport(out, 2)
 		out.Bytes2(0x85, 0xc0)
 		windowsConditionalJump(out, 0x84, failed)
@@ -136,7 +135,6 @@ go backend {
 	func windowsBuiltinRuntimeChmod(out *RTGEmitter) {
 		failed := out.NewLabel()
 		done := out.NewLabel()
-		out.Bytes3(0x48, 0x89, 0xf9)
 		out.Bytes2(0x31, 0xd2)
 		out.Bytes3(0x45, 0x31, 0xc0)
 		out.Bytes2(0x41, 0xb9)
@@ -220,7 +218,6 @@ extend arch x86_64 {
 		windowsRuntimeChmod(out:emitter) {
 			let failed = out.NewLabel()
 			let done = out.NewLabel()
-			encodeRegisterToRM(out, 0x89, record_register(Code:1, Valid:true), record_register(Code:7, Valid:true), 64)
 			moveImmediate(out, record_register(Code:2, Valid:true), 0)
 			moveImmediate(out, record_register(Code:8, Valid:true), 0)
 			moveImmediate(out, record_register(Code:9, Valid:true), 1)
@@ -237,7 +234,6 @@ extend arch x86_64 {
 		windowsRuntimeClose(out:emitter) {
 			let failed = out.NewLabel()
 			let done = out.NewLabel()
-			encodeRegisterToRM(out, 0x89, record_register(Code:1, Valid:true), record_register(Code:7, Valid:true), 64)
 			windowsCallImport(out, 2)
 			encodeRegisterToRM(out, 0x85, record_register(Code:0, Valid:true), record_register(Code:0, Valid:true), 32)
 			jumpCondition(out, record_condition(JumpOpcode:0x84), failed)
