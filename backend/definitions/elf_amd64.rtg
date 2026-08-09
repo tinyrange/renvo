@@ -71,6 +71,7 @@ format elf64_x86_64 {
 	kind = elf
 	code_offset = 176
 	image = elf_executable
+	production_image = elf_executable_symbols
 	patch_absolute = relative32_le
 	patch_pc_bias = 4
 	byte_order = little

@@ -206,6 +206,34 @@ func TestAmd64DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 			t.Errorf("generated amd64 output is missing algorithm binding %s", binding)
 		}
 	}
+	targetProjection := GenerateCheckedInTargetProjection(
+		resolveNativeTarget(t, "linux/amd64"), "linux/amd64", "main")
+	if !targetProjection.Ok {
+		t.Fatalf("generate linux/amd64 target projection: %#v", targetProjection.Diagnostics)
+	}
+	checkedInTarget, err := os.ReadFile("../../backend/compiler_linux_amd64_impl.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(targetProjection.Source, checkedInTarget) {
+		t.Fatal("checked-in linux/amd64 target projection is stale; run go generate ./backend/definitions")
+	}
+	for _, binding := range []string{
+		"target: target-projection/linux/amd64",
+		"const renvoLinuxAmd64SysReadSeq = 0",
+		"func renvoAsmBuildArgvEnvSlicesAmd64(",
+		"func renvoAsmImageAmd64(",
+		"const renvoLinuxAmd64ELFMachine = 62",
+	} {
+		if !containsText(string(checkedInTarget), binding) {
+			t.Errorf("generated linux/amd64 target output is missing %s", binding)
+		}
+	}
+	for _, forbidden := range []string{"type RTGEmitter struct", "func renvoRTGImage("} {
+		if containsText(string(checkedInTarget), forbidden) {
+			t.Errorf("generated linux/amd64 target output retained prepared bridge %s", forbidden)
+		}
+	}
 	prepared := GeneratePreparedBackend(
 		resolveNativeTarget(t, "linux/amd64"), "linux/amd64")
 	if !prepared.Ok {

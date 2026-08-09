@@ -4,9 +4,27 @@ implements direct_emitter_v1
 
 @import "elf_amd64.rtg"
 
+# Linux uses the SysV call words for ordinary Renvo calls but the kernel syscall
+# convention moves the buffer length and positional offset into different
+# registers. Keep those compact shuffles in the target definition so the
+# checked-in production projection does not own handwritten ABI bytes.
+extend arch x86_64 {
+	sequences {
+		linuxPrepareReadWriteBuffer(out:emitter) {
+			out.Uint16(0x5a51)
+		}
+		linuxMoveOffsetArgument(out:emitter) {
+			out.Uint24(0xc28949)
+		}
+	}
+}
+
 # Runtime declarations define only the supported boundary. Missing operations
 # are rejected during definition validation rather than silently emulated.
 runtime linux_x86_64 {
+	prepare_read_write_buffer = sequence linuxPrepareReadWriteBuffer
+	move_offset_argument = sequence linuxMoveOffsetArgument
+
 	entry process_stack {
 		argc = word(rsp, 0)
 		argv = words(rsp + 8, argc)

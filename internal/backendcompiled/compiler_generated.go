@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "513a331a6e382a593a0f4fb182056afb271c93ad5d08b8c86a22ddbc6bc88c25"
+const CompilerSourceDigest = "9562b1c075f19f1ebd55caceeda1bac9f1488e3fc6d750bfd1145fdf8b3dbcee"
 
 // source: backend/compiler_common_impl.go
 
@@ -25246,7 +25246,7 @@ return renvoRTGParseTargetArg(target)
 
 func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
 if target == renvoTargetLinuxAmd64 {
-return "linux/amd64", "\a\xbc\xe9\xfb\xf7lj\xbcfi\xf9\xf7\xc04\xad\x0fwõ\xc3\xf6h#=墉\xc0\x05Y\x9b\x9a", 3, true
+return "linux/amd64", "4\xfd\x9b͘3]\x8aU=)\xfa\xc2\xe8\xd5`̵\xf1\x12\x1e$m8\xc8tf\xae\xe3\x18\x94R", 3, true
 }
 if target == renvoTargetLinux386 {
 return "linux/386", "\x05T\x05\x1e\x13^g\x9b\xed\xfa6\xe3#\t\x97꠱\x8a\xee\x19\x89\xe0\xc4,Azƺ\xf4\xd4G", 3, true
@@ -33675,6 +33675,15 @@ return headers, tails, true
 
 // source: backend/compiler_linux_amd64_impl.go
 
+
+func rtgBuiltinLinuxAmd64LinuxAmd64PackageLinuxPrepareReadWriteBuffer(out *renvoAsm) {
+renvoAsmEmit16(out, 0x5a51)
+}
+
+func rtgBuiltinLinuxAmd64LinuxAmd64PackageLinuxMoveOffsetArgument(out *renvoAsm) {
+renvoAsmEmit24(out, 0xc28949)
+}
+
 const renvoLinuxAmd64SysReadSeq = 0
 const renvoLinuxAmd64SysWriteSeq = 1
 const renvoLinuxAmd64SysOpen = 2
@@ -33686,12 +33695,12 @@ const renvoLinuxAmd64SysFchmod = 91
 func renvoAmd64AsmPrepareReadWriteBuf(a *renvoAsm) {
 renvoNonNil(a)
 renvoAsmCopyPrimaryToCallWord1(a)
-renvoAsmEmit16(a, 0x5a51)
+rtgBuiltinLinuxAmd64LinuxAmd64PackageLinuxPrepareReadWriteBuffer(a)
 }
 
 func renvoAmd64AsmMoveOffsetArg(a *renvoAsm) {
 renvoNonNil(a)
-renvoAsmEmit24(a, 0xc28949)
+rtgBuiltinLinuxAmd64LinuxAmd64PackageLinuxMoveOffsetArgument(a)
 }
 
 func compileLinuxAmd64(input []int, output int) int {
@@ -33703,18 +33712,18 @@ renvoSetTarget(renvoTargetLinuxAmd64)
 return renvoCompileAmd64(input, output, arenaSize)
 }
 
-func renvoAsmBuildArgvEnvSlicesAmd64(a *renvoAsm, bssOff int, envOff int, envLenOff int) {
+func renvoAsmBuildArgvEnvSlicesAmd64(a *renvoAsm, argsOff int, environmentOff int, environmentLengthOff int) {
 renvoNonNil(a)
-
-
 base := len(a.code)
 renvoAsmEmitText(a, "\x48\x8b\x04\x24\x49\x89\xc0\x4c\x8d\x4c\x24\x08\x4c\x8d\x15\x00\x00\x00\x00\x4d\x89\xd4\x4d\x31\xdb\x4d\x39\xc3\x7d\x22\x4b\x8b\x3c\xd9\x49\x89\x3a\x48\x31\xc0\x80\x3c\x07\x00\x74\x05\x48\xff\xc0\xeb\xf5\x49\x89\x42\x08\x49\x83\xc2\x10\x49\xff\xc3\xeb\xd9\x4c\x8d\x4c\x24\x08\x49\x83\x39\x00\x74\x06\x49\x83\xc1\x08\xeb\xf4\x49\x83\xc1\x08\x4c\x8d\x15\x00\x00\x00\x00\x4d\x31\xdb\x4b\x8b\x3c\xd9\x48\x83\xff\x00\x74\x1e\x49\x89\x3a\x48\x31\xc0\x80\x3c\x07\x00\x74\x05\x48\xff\xc0\xeb\xf5\x49\x89\x42\x08\x49\x83\xc2\x10\x49\xff\xc3\xeb\xd8\x4c\x89\xd8\x48\x89\x05\x00\x00\x00\x00\x4c\x89\xe7\x4c\x89\xc6\x4c\x89\xc2\x48\x8d\x05\x00\x00\x00\x00\x50\x59\x48\x8b\x05\x00\x00\x00\x00\x49\x89\xc0\x49\x89\xc1")
-renvoAsmAddAbsReloc(a, base+15, bssOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+88, envOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+141, envLenOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+157, envOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+166, envLenOff, renvoAbsBssReloc)
+renvoAsmAddAbsReloc(a, base+15, argsOff, renvoAbsBssReloc)
+renvoAsmAddAbsReloc(a, base+88, environmentOff, renvoAbsBssReloc)
+renvoAsmAddAbsReloc(a, base+141, environmentLengthOff, renvoAbsBssReloc)
+renvoAsmAddAbsReloc(a, base+157, environmentOff, renvoAbsBssReloc)
+renvoAsmAddAbsReloc(a, base+166, environmentLengthOff, renvoAbsBssReloc)
 }
+
+const renvoLinuxAmd64ELFMachine = 62
 
 func renvoAsmImageAmd64(a *renvoAsm) []byte {
 renvoNonNil(a)
@@ -33794,10 +33803,12 @@ return out
 func renvoAppendElfHeaderAmd64(out []byte, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int) []byte {
 start := len(out)
 base := 0
-header := "\x7f\x45\x4c\x46\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x3e\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x38\x00\x02\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x05\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00"
+header := "\x7f\x45\x4c\x46\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x38\x00\x02\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x05\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00"
 for i := 0; i < len(header); i++ {
 out = append(out, header[i])
 }
+out[start+18] = byte(renvoLinuxAmd64ELFMachine)
+out[start+19] = byte(renvoLinuxAmd64ELFMachine >> 8)
 
 
 out[start+16] = 3

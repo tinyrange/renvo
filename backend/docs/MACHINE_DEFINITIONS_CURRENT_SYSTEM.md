@@ -122,14 +122,16 @@ prunable, while each target can evolve without affecting unrelated
 operating-system code.
 
 Built-ins expose stable compiler-facing names so fixed-target compilers retain
-their direct fast calls. The checked-in projections currently replace shared
-ISA encoder algorithms; existing built-in OS/runtime integration remains in
-the handwritten `compiler_<os>_<arch>_impl.go` path. External definitions
-cannot have names known to a release compiler, so preparation emits a
-target-neutral adapter and takes runtime, relocation, and format semantics from
-the selected definition. Finishing generation of built-in target integration
-is separate work and should not be inferred from the shared-architecture
-generation implemented here.
+their direct fast calls. Shared projections replace ISA encoder algorithms.
+Linux/amd64 is the first authoritative production target projection: its
+runtime numbers, syscall ABI shuffles, process-stack entry template, and ELF
+image integration are generated from `linux_amd64.rtg` and its imported format
+definition into `compiler_linux_amd64_impl.go`. Its private symbols use a
+separate built-in namespace so prepared definitions can coexist in the same
+self-hosted compiler source bundle. The remaining built-in OS/runtime paths
+are still handwritten pending their own equivalence migrations. External
+definitions use the target-neutral prepared adapter and take runtime,
+relocation, and format semantics from the selected definition.
 
 `go generate ./internal/targetinfo` resolves every public target and emits:
 
