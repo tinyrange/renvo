@@ -40,7 +40,7 @@ func compile(unit []byte, options driver.BackendCompileOptions) driver.BackendRe
 	data, ok := RenvoCompileUnitToBytesWithOptions(unit, target, RenvoCompileOptions{
 		ArenaSize: options.ArenaSize, StripSymbols: options.Strip,
 		WindowsGUI: options.WindowsGUI, EmitImage: options.EmitImage,
-		ModuleLicense: options.ModuleLicense,
+		ModuleLicense: options.ModuleLicense, ModuleNamePath: options.Output,
 	})
 	if !ok {
 		return driver.BackendResult{Diagnostic: driver.Diagnostic{

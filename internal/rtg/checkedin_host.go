@@ -28,6 +28,10 @@ func GenerateCheckedInTargetProjection(
 		return generateCheckedInWindowsAmd64Projection(
 			resolved, target, packageName)
 	}
+	if target.Descriptor.Name == "linux-kernel/amd64" && target.Arch.Name == "x86_64" {
+		return generateCheckedInLinuxKernelAmd64Projection(
+			resolved, target, packageName)
+	}
 	if target.Descriptor.Name != "linux/amd64" || target.Arch.Name != "x86_64" {
 		return checkedInTargetProjectionFailure(resolved.Document, target.Declaration,
 			"checked-in production projection is not implemented for "+target.Descriptor.Name)

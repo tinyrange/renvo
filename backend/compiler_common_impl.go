@@ -1,8 +1,6 @@
 package main
 
 const renvoAbsBssReloc = 1
-const renvoAbsKernelPrintReloc = 3
-const renvoAbsKernelImportRelocBase = 4
 
 func renvoAsmAddExternalImportName(a *renvoAsm, name string) int {
 	renvoNonNil(a)
@@ -11732,6 +11730,7 @@ func renvoEmitUserCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	}
 	wordCount += words
 	if fn.linkStatic != 0 && (renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+		renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) ||
 		renvoPreparedBackend != 0 ||
 		targetIsDarwin(g.c.renvoTargetOS) && renvo_runtime_UnsafeByteAt(g.prog.src, fn.linkDLLStart) == '/' ||
 		targetIsWindows(g.c.renvoTargetOS) && renvo_runtime_UnsafeByteAt(g.prog.src, fn.linkDLLStart) != '/') {
@@ -12805,7 +12804,8 @@ func renvoEmitCallParamArgReverse(g *renvoLinearGen, ep *renvoExprParse, idx int
 			if renvoPreparedBackend != 0 && targetIsKernelModule(g.c) {
 				return renvoRTGEmitKernelCallbackArgReverse(g, ep, idx, param.typ)
 			}
-			if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+			if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+				renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
 				return renvoAmd64EmitKernelCallbackArgReverse(g, ep, idx, param.typ)
 			}
 		}

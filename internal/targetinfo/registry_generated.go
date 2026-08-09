@@ -89,7 +89,7 @@ func descriptorAt(index int) Descriptor {
 		return Descriptor{Name: "vm/vm32", Backend: "vm/vm32", Aliases: []string(nil), Family: "structured32", OS: "vm", ISA: "vm32", WordBits: 32, PointerBits: 32, CodePointerBits: 32, FunctionPointerBits: 32, MaxAlign: 8, Endian: "little", ABI: "vm32_internal", Image: "rnvm", Runtime: []string{"read", "write", "read_at", "write_at", "open", "close", "chmod", "print", "hosted"}, Tags: []string{"vm", "vm32"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted"}, Definition: [32]uint8{0x1a, 0x62, 0x58, 0x92, 0xac, 0xef, 0x3, 0x44, 0x34, 0xb4, 0xad, 0xc5, 0xab, 0x65, 0x5d, 0x4b, 0xb4, 0x41, 0xa2, 0x2f, 0x44, 0xc2, 0xf1, 0x3, 0x49, 0x11, 0x22, 0x90, 0x92, 0xcd, 0x79, 0x89}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "renvo-vm32.rnvb", IDE: false}
 	}
 	if index == 11 {
-		return Descriptor{Name: "linux-kernel/amd64", Backend: "linux-kernel/amd64", Aliases: []string(nil), Family: "native_v1", OS: "linux", ISA: "amd64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "sysv_x86_64", Image: "elf-relocatable", Runtime: []string{"print", "open", "close", "read", "write", "chmod"}, Tags: []string{"amd64", "linux", "renvo_kernel", "unix"}, Capabilities: []string{"freestanding", "imports", "kernel_module", "linkstatic", "object"}, Definition: [32]uint8{0x73, 0xb2, 0x9a, 0x7b, 0xfe, 0x69, 0xb2, 0x0, 0x47, 0x15, 0xf8, 0x33, 0x4b, 0xb0, 0x52, 0x97, 0x8a, 0x60, 0x92, 0xf2, 0xc1, 0xfe, 0x84, 0x17, 0xa1, 0xf6, 0xc4, 0xba, 0x76, 0x21, 0x91, 0xe4}, DescriptorVersion: 3, Advertised: false, Virtual: false, DefaultArena: 0, ReleaseArtifact: "", IDE: false}
+		return Descriptor{Name: "linux-kernel/amd64", Backend: "linux-kernel/amd64", Aliases: []string(nil), Family: "native_v1", OS: "linux", ISA: "amd64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "sysv_x86_64", Image: "elf-relocatable", Runtime: []string{"print", "open", "close", "read", "write", "chmod"}, Tags: []string{"amd64", "linux", "renvo_kernel", "unix"}, Capabilities: []string{"freestanding", "imports", "kernel_module", "linkstatic", "object"}, Definition: [32]uint8{0x24, 0x21, 0xef, 0xff, 0x70, 0x92, 0x95, 0xb4, 0x93, 0xad, 0x41, 0x19, 0x9f, 0xb3, 0xb9, 0x18, 0x2a, 0xca, 0x32, 0xd2, 0x2d, 0x90, 0x6, 0xbd, 0xa0, 0xb6, 0x34, 0x5e, 0xb9, 0xc4, 0x6a, 0xa1}, DescriptorVersion: 3, Advertised: false, Virtual: false, DefaultArena: 0, ReleaseArtifact: "", IDE: false}
 	}
 	return Descriptor{}
 }
@@ -129,7 +129,7 @@ func Binding(name string) (string, string, int, bool) {
 		return "vm/vm32", "\x1abX\x92\xac\xef\x03D4\xb4\xadūe]K\xb4A\xa2/D\xc2\xf1\x03I\x11\"\x90\x92\xcdy\x89", 3, true
 	}
 	if name == "linux-kernel/amd64" {
-		return "linux-kernel/amd64", "s\xb2\x9a{\xfei\xb2\x00G\x15\xf83K\xb0R\x97\x8a`\x92\xf2\xc1\xfe\x84\x17\xa1\xf6ĺv!\x91\xe4", 3, true
+		return "linux-kernel/amd64", "$!\xef\xffp\x92\x95\xb4\x93\xadA\x19\x9f\xb3\xb9\x18*\xca2\xd2-\x90\x06\xbd\xa0\xb64^\xb9\xc4j\xa1", 3, true
 	}
 	return "", "", 0, false
 }

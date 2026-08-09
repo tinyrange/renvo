@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"sync"
 	"testing"
 
@@ -577,6 +578,17 @@ func TestCompiledInBootstrapUsesDefinitionOwnedKernelModuleImage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	source := filepath.Join(
+		root, "internal", "backendjit", "testdata", "kernel_runtime.go")
+	builtIn := driver.CompileFromFS([]string{
+		"-t", "linux/amd64",
+		"-mode=kernel-module",
+		"-o", "prepared.ko",
+		source,
+	}, root, filepath.Join(root, "std"), driver.OSFS{}, backendcompiled.Backend{})
+	if !builtIn.Ok {
+		t.Fatalf("built-in kernel backend compile failed: %#v", builtIn.Diagnostic)
+	}
 	definition := copyNativeDefinition(t, root,
 		"target linux-kernel/amd64 {", "target example/kernel-amd64 {")
 	result := driver.CompileFromFS([]string{
@@ -584,12 +596,58 @@ func TestCompiledInBootstrapUsesDefinitionOwnedKernelModuleImage(t *testing.T) {
 		"-t", "example/kernel-amd64",
 		"-mode=kernel-module",
 		"-o", "prepared.ko",
-		filepath.Join(root, "internal", "backendjit", "testdata", "kernel_runtime.go"),
+		source,
 	}, root, filepath.Join(root, "std"), driver.OSFS{},
 		New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
 			t.TempDir(), backendcompiled.Backend{}))
 	if !result.Ok {
 		t.Fatalf("custom kernel backend compile failed: %#v", result.Diagnostic)
+	}
+	var expectedModuleInfo []byte
+	var expectedImports []string
+	for _, candidate := range []struct {
+		name string
+		data []byte
+	}{{"built-in", builtIn.Binary}, {"prepared", result.Binary}} {
+		parsed, parseErr := elf.NewFile(bytes.NewReader(candidate.data))
+		if parseErr != nil {
+			t.Fatalf("parse %s kernel module: %v", candidate.name, parseErr)
+		}
+		if parsed.Type != elf.ET_REL || parsed.Machine != elf.EM_X86_64 {
+			t.Fatalf("%s kernel image type/machine = %v/%v",
+				candidate.name, parsed.Type, parsed.Machine)
+		}
+		for _, name := range []string{
+			".text", ".rela.text", ".modinfo", ".gnu.linkonce.this_module",
+			".rela.gnu.linkonce.this_module",
+		} {
+			if parsed.Section(name) == nil {
+				t.Fatalf("%s kernel image is missing %s", candidate.name, name)
+			}
+		}
+		moduleInfo, dataErr := parsed.Section(".modinfo").Data()
+		if dataErr != nil {
+			t.Fatalf("read %s module information: %v", candidate.name, dataErr)
+		}
+		symbols, symbolErr := parsed.Symbols()
+		if symbolErr != nil {
+			t.Fatalf("read %s kernel symbols: %v", candidate.name, symbolErr)
+		}
+		var imports []string
+		for i := 0; i < len(symbols); i++ {
+			if symbols[i].Section == elf.SHN_UNDEF && symbols[i].Name != "" {
+				imports = append(imports, symbols[i].Name)
+			}
+		}
+		sort.Strings(imports)
+		if expectedModuleInfo == nil {
+			expectedModuleInfo = moduleInfo
+			expectedImports = imports
+		} else if !bytes.Equal(expectedModuleInfo, moduleInfo) ||
+			!equalStrings(expectedImports, imports) {
+			t.Fatalf("prepared kernel metadata/imports differ from built-in: %q/%q and %q/%q",
+				moduleInfo, expectedModuleInfo, imports, expectedImports)
+		}
 	}
 	image, err := elf.NewFile(bytes.NewReader(result.Binary))
 	if err != nil {

@@ -127,7 +127,8 @@ func renvoEmitWriteValueRegs(g *renvoLinearGen, fd int) bool {
 		renvoRTGDirectMoveImmediate(a, renvoRTGCallWord0, int64(fd))
 		return renvoRTGEmitRuntimeOperation(a, RTGRuntimeWrite)
 	}
-	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+		renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
 		renvoAmd64EmitKernelPrintValue(a)
 		return true
 	}
@@ -569,7 +570,8 @@ func renvoEmitExitStatus(g *renvoLinearGen) bool {
 
 func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
 	renvoNonNil(g, fn)
-	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+		renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
 		return renvoAmd64EmitKernelLinkStaticCall(g, fn, wordCount)
 	}
 	if renvoPreparedBackend != 0 && renvoRTGPreparedKernelModule != 0 &&
@@ -617,7 +619,8 @@ func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int
 // the call was emitted.
 func renvoEmitTargetStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) int {
 	renvoNonNil(g, fn)
-	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+		renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
 		if !renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "kernel") {
 			return 0
 		}

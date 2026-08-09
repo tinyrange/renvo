@@ -409,6 +409,72 @@ func TestCheckedInWindowsAmd64ProjectionRejectsIncompatibleDefinition(t *testing
 	}
 }
 
+func TestCheckedInLinuxKernelAmd64ProjectionOutput(t *testing.T) {
+	resolved := resolveNativeTarget(t, "linux-kernel/amd64")
+	generated := GenerateCheckedInTargetProjection(
+		resolved, "linux-kernel/amd64", "main")
+	if !generated.Ok {
+		t.Fatalf("generate linux-kernel/amd64 target projection: %#v",
+			generated.Diagnostics)
+	}
+	checkedIn, err := os.ReadFile(
+		"../../backend/compiler_linux_kernel_amd64_target_impl.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(generated.Source, checkedIn) {
+		t.Fatal("checked-in linux-kernel/amd64 target projection is stale; run go generate ./backend/definitions")
+	}
+	for _, binding := range []string{
+		"target: target-projection/linux-kernel/amd64",
+		"func renvoAmd64KernelEntryPrologue(",
+		"func renvoAmd64KernelCallbackAddress(",
+		"func renvoAmd64EmitKernelPrintValue(",
+		"func renvoAmd64EmitKernelStaticCall(",
+		"func renvoAsmImageKernelModuleAmd64(",
+		"Generated from the declarative Linux-module ELF format",
+	} {
+		if !containsText(string(checkedIn), binding) {
+			t.Errorf("generated linux-kernel/amd64 target output is missing %s", binding)
+		}
+	}
+	for _, forbidden := range []string{
+		"type RTGEmitter struct", "func renvoRTGImage(", "rtgBuiltinX8664",
+		"RTGRegister", "renvoRTGAddress", ".KernelBTF()",
+	} {
+		if containsText(string(checkedIn), forbidden) {
+			t.Errorf("generated linux-kernel/amd64 target retained pruned bridge %s", forbidden)
+		}
+	}
+}
+
+func TestCheckedInLinuxKernelAmd64ProjectionOwnsRuntimeAndEntry(t *testing.T) {
+	const filename = "../../backend/definitions/linux_kernel_amd64.rtg"
+	original, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modified := bytes.Replace(original,
+		[]byte(`out.Text("\xf3\x0f\x1e\xfa`),
+		[]byte(`out.Text("\x90\x0f\x1e\xfa`), 1)
+	if bytes.Equal(modified, original) {
+		t.Fatal("fixture did not contain the kernel entry sequence")
+	}
+	resolved := ResolveDefinitions(ParseImports(
+		modified, filename, testFilesystemImportLoader{}))
+	if !resolved.Ok {
+		t.Fatalf("modified definition did not resolve: %#v", resolved.Diagnostics)
+	}
+	generated := GenerateCheckedInTargetProjection(
+		resolved, "linux-kernel/amd64", "main")
+	if !generated.Ok {
+		t.Fatalf("modified projection failed: %#v", generated.Diagnostics)
+	}
+	if !containsText(string(generated.Source), `"\x90\x0f\x1e\xfa`) {
+		t.Fatal("modified kernel entry sequence did not reach the target projection")
+	}
+}
+
 func TestArmDefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 	resolveNativeTarget(t, "linux/arm")
 	resolved := resolveNativeArchitectureProjection(t, "arm")

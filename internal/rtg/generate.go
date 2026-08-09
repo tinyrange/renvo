@@ -2080,6 +2080,8 @@ func appendRewrittenGoModeExports(out []byte, source []byte, names []string, pre
 				replacement = "renvoAsmEmit4"
 			} else if method == "Text" {
 				replacement = "renvoAsmEmitText"
+			} else if method == "ExternalImport" {
+				replacement = "renvoAsmAddExternalImportName"
 			}
 			if replacement != "" {
 				out = append(out, replacement...)
