@@ -6,13 +6,34 @@
 package main
 
 
-type RTGRegister struct { Code int; Valid bool }
-type RTGCondition struct { Code int; SetOpcode byte; JumpOpcode byte }
+type RTGRegister struct {
+	Code int
+	Valid bool
+}
+
+type RTGCondition struct {
+	Code       int
+	SetOpcode  byte
+	JumpOpcode byte
+}
+
+type RTGSymbol struct {
+	nameStart int
+	nameEnd   int
+	label     int
+}
+
 type RTGShiftDirection int
+
 const (
 	RTGShiftLeft RTGShiftDirection = 1
 	RTGShiftRight RTGShiftDirection = 2
 )
+
+const RTGRelocationAbsoluteData = 0
+const RTGRelocationAbsoluteBSS = 1
+const RTGRelocationImport = 2
+const RTGRelocationAbsoluteBSSEnd = 3
 const RTGRuntimeRead = 1
 const RTGRuntimeWrite = 2
 const RTGRuntimeReadAt = 3
@@ -20,8 +41,460 @@ const RTGRuntimeWriteAt = 4
 const RTGRuntimeOpen = 5
 const RTGRuntimeClose = 6
 const RTGRuntimeChmod = 7
+
+const RTGScalarByte = 3
+const RTGScalarInt8 = 7
+const RTGScalarInt16 = 8
+const RTGScalarInt32 = 9
+const RTGScalarUint16 = 16
+const RTGScalarUint32 = 17
+
 var RTGNoRegister = RTGRegister{}
-type renvoRTGAddress struct{}
+
+func renvoRTGLabelCode(code int) int {
+	return code
+}
+
+func RTGSignedFits(value int64, bits int) bool {
+	if bits <= 0 {
+		return false
+	}
+	if bits >= 63 {
+		return true
+	}
+	limit := int64(1) << (bits - 1)
+	return value >= -limit && value < limit
+}
+
+func RTGUnsignedFits(value uint64, bits int) bool {
+	if bits <= 0 {
+		return false
+	}
+	if bits >= 63 {
+		return true
+	}
+	return value < uint64(1)<<bits
+}
+
+func renvoRTGRel32(out *renvoAsm, label int) {
+	at := len(out.code)
+	renvoAsmEmit32(out, 0)
+	if label >= 0 {
+		renvoAsmAddReloc(out, at, label)
+	}
+}
+
+func RTGLog2(value int) int {
+	result := 0
+	for value > 1 {
+		value >>= 1
+		result++
+	}
+	return result
+}
+
+type renvoRTGAddress struct {
+	Target       int
+	TargetValid  bool
+	Kind         int
+	Addend       int
+	Base         RTGRegister
+	Index        RTGRegister
+	Displacement int
+	Scale        int
+}
+
+func (out *renvoAsm) Byte(value byte) {
+	renvoAsmEmit8(out, int(value))
+}
+
+func (out *renvoAsm) Uint32(value uint32) {
+	renvoAsmEmit32(out, int(value))
+}
+
+func (out *renvoAsm) Uint64(value uint64) {
+	renvoAsmEmit32(out, int(value))
+	renvoAsmEmit32(out, int(value >> 32))
+}
+
+func (out *renvoAsm) PatchUint32(at int, value int) {
+	renvoPut32At(out.code, at, value)
+}
+
+func (out *renvoAsm) NewLabel() int {
+	return renvoAsmNewLabel(out)
+}
+
+func (out *renvoAsm) Mark(label int) {
+	if label >= 0 {
+		renvoAsmMarkLabel(out, label)
+	}
+}
+
+func (out *renvoAsm) Rel32(label int) {
+	out.Rel32Addend(label, 0)
+}
+
+func (out *renvoAsm) Rel32Addend(label int, addend int) {
+	at := len(out.code)
+	renvoAsmEmit32(out, addend)
+	if label >= 0 {
+		renvoAsmAddReloc(out, at, label)
+	}
+}
+
+func (out *renvoAsm) Reloc(label int) {
+	if label >= 0 && len(out.code) >= 4 {
+		renvoAsmAddReloc(out, len(out.code)-4, label)
+	}
+}
+
+func (out *renvoAsm) Patch() {
+	renvoAsmPatch(out)
+}
+
+func (out *renvoAsm) Code() []byte {
+	return out.code
+}
+
+func (out *renvoAsm) SetCode(value []byte) {
+	out.code = value
+}
+
+func (out *renvoAsm) Data() []byte {
+	return out.data
+}
+
+func (out *renvoAsm) SetData(value []byte) {
+	out.data = value
+}
+
+func (out *renvoAsm) BSSSize() int {
+	return out.bssSize
+}
+
+func (out *renvoAsm) ReserveBSS(size int, alignment int) int {
+	if alignment <= 0 {
+		alignment = 1
+	}
+	offset := renvoAlignValue(out.bssSize, alignment)
+	out.bssSize = offset + size
+	return offset
+}
+
+func (out *renvoAsm) WindowsSubsystem() int {
+	return out.c.windowsSubsystem
+}
+
+func (out *renvoAsm) StaticImportCount() int {
+	return len(out.staticImports)
+}
+
+func (out *renvoAsm) StaticImportDLL(index int) string {
+	return out.staticImports[index].dll
+}
+
+func (out *renvoAsm) StaticImportName(index int) string {
+	return out.staticImports[index].name
+}
+
+func (out *renvoAsm) DynamicImport(library string, name string) int {
+	for i := 0; i < len(out.darwinImports); i++ {
+		if out.darwinImports[i].dylib == library && out.darwinImports[i].name == name {
+			out.darwinImports[i].used = true
+			return i
+		}
+	}
+	label := renvoAsmNewLabel(out)
+	out.darwinImports = append(out.darwinImports,
+		renvoDarwinStaticImport{dylib: library, name: name, label: label, used: true})
+	return len(out.darwinImports) - 1
+}
+
+func (out *renvoAsm) DynamicImportCount() int {
+	return len(out.darwinImports)
+}
+
+func (out *renvoAsm) DynamicImportLibrary(index int) string {
+	return out.darwinImports[index].dylib
+}
+
+func (out *renvoAsm) DynamicImportName(index int) string {
+	return out.darwinImports[index].name
+}
+
+func (out *renvoAsm) DynamicImportLabel(index int) int {
+	return out.darwinImports[index].label
+}
+
+func (out *renvoAsm) ExternalImport(name string) int {
+	return renvoAsmAddExternalImportName(out, name)
+}
+
+func (out *renvoAsm) ExternalImportCount() int {
+	return len(out.kernelImportOffsets) / 2
+}
+
+func (out *renvoAsm) ExternalImportName(index int) string {
+	at := index * 2
+	if at < 0 || at+1 >= len(out.kernelImportOffsets) {
+		return ""
+	}
+	return string(out.kernelImportNames[
+		out.kernelImportOffsets[at]:out.kernelImportOffsets[at+1]])
+}
+
+func (out *renvoAsm) KernelModuleName() string {
+	if out.c == nil || out.c.kernel == nil {
+		return ""
+	}
+	return out.c.kernel.kernelModuleName
+}
+
+func (out *renvoAsm) KernelLicense() string {
+	if out.c == nil || out.c.kernel == nil {
+		return ""
+	}
+	return out.c.kernel.kernelLicense
+}
+
+func (out *renvoAsm) KernelRelease() string {
+	if out.c == nil || out.c.kernel == nil {
+		return ""
+	}
+	return out.c.kernel.kernelRelease
+}
+
+func (out *renvoAsm) KernelVersion() string {
+	if out.c == nil || out.c.kernel == nil {
+		return ""
+	}
+	return out.c.kernel.kernelVersion
+}
+
+func (out *renvoAsm) KernelBTF() []byte {
+	if out.c == nil || out.c.kernel == nil {
+		return nil
+	}
+	return out.c.kernel.kernelBTF
+}
+
+func (out *renvoAsm) KernelSymvers() []byte {
+	if out.c == nil || out.c.kernel == nil {
+		return nil
+	}
+	return out.c.kernel.kernelSymvers
+}
+
+func (out *renvoAsm) RelocationCount() int {
+	return len(out.relocs) / 2
+}
+
+func (out *renvoAsm) RelocationAt(index int) (int, int) {
+	at := index * 2
+	return int(out.relocs[at]), int(out.relocs[at+1])
+}
+
+func (out *renvoAsm) RelocationOffset(index int) int {
+	return int(out.relocs[index*2])
+}
+
+func (out *renvoAsm) RelocationLabel(index int) int {
+	return int(out.relocs[index*2+1])
+}
+
+func (out *renvoAsm) RelocationWordCount() int {
+	return len(out.relocs)
+}
+
+func (out *renvoAsm) RelocationWord(index int) int {
+	return int(renvo_runtime_UnsafeInt32At(out.relocs, index))
+}
+
+func (out *renvoAsm) AbsoluteRelocationCount() int {
+	return len(out.absRelocs) / 3
+}
+
+func (out *renvoAsm) AbsoluteRelocationAt(index int) (int, int, int) {
+	at := index * 3
+	return int(out.absRelocs[at]), int(out.absRelocs[at+1]), int(out.absRelocs[at+2])
+}
+
+func (out *renvoAsm) AbsoluteRelocationOffset(index int) int {
+	return int(out.absRelocs[index*3])
+}
+
+func (out *renvoAsm) AbsoluteRelocationAddend(index int) int {
+	return int(out.absRelocs[index*3+1])
+}
+
+func (out *renvoAsm) AbsoluteRelocationKind(index int) int {
+	return int(out.absRelocs[index*3+2])
+}
+
+func (out *renvoAsm) AbsoluteRelocationWordCount() int {
+	return len(out.absRelocs)
+}
+
+func (out *renvoAsm) AbsoluteRelocationWord(index int) int {
+	return int(renvo_runtime_UnsafeInt32At(out.absRelocs, index))
+}
+
+func (out *renvoAsm) LabelPosition(label int) int {
+	return renvoAsmLabelPosition(out, label)
+}
+
+func (out *renvoAsm) SymbolCount() int {
+	return len(out.symbols)
+}
+
+func (out *renvoAsm) SymbolPC(index int) int {
+	return renvoAsmLabelPosition(out, out.symbols[index].label)
+}
+
+func (out *renvoAsm) SymbolNameEquals(index int, name string) bool {
+	symbol := &out.symbols[index]
+	if symbol.nameEnd-symbol.nameStart != len(name) {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		if out.symbolName[symbol.nameStart+i] != name[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (out *renvoAsm) SymbolNameLength(index int) int {
+	symbol := &out.symbols[index]
+	return symbol.nameEnd - symbol.nameStart
+}
+
+func (out *renvoAsm) SymbolNameByte(index int, offset int) byte {
+	symbol := &out.symbols[index]
+	return out.symbolName[symbol.nameStart+offset]
+}
+
+func (out *renvoAsm) Symbol(index int) *RTGSymbol {
+	symbol := &out.symbols[index]
+	return &RTGSymbol{nameStart: symbol.nameStart, nameEnd: symbol.nameEnd, label: symbol.label}
+}
+
+func (out *renvoAsm) SymbolNameByteAt(index int) byte {
+	return out.symbolName[index]
+}
+
+func renvoRTGRelocationAt(out *renvoAsm, index int) (int, int) {
+	at := index * 2
+	return int(out.relocs[at]), int(out.relocs[at+1])
+}
+
+func renvoRTGAbsoluteRelocationAt(out *renvoAsm, index int) (int, int, int) {
+	at := index * 3
+	return int(out.absRelocs[at]), int(out.absRelocs[at+1]), int(out.absRelocs[at+2])
+}
+
+func renvoRTGSymbolPC(out *renvoAsm, index int) int {
+	return renvoAsmLabelPosition(out, out.symbols[index].label)
+}
+
+func renvoRTGSymbolNameEquals(out *renvoAsm, index int, name string) bool {
+	symbol := &out.symbols[index]
+	if symbol.nameEnd-symbol.nameStart != len(name) {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		if out.symbolName[symbol.nameStart+i] != name[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func renvoRTGAddressValid(address renvoRTGAddress) bool {
+	return address.TargetValid || address.Kind != 0
+}
+
+func renvoRTGAddressRel32Addend(out *renvoAsm, address renvoRTGAddress) {
+	if address.Kind != 0 {
+		at := len(out.code)
+		renvoAsmEmit32(out, 0)
+		renvoAsmAddAbsReloc(out, at, address.Addend, address.Kind-1)
+		return
+	}
+	out.Rel32Addend(address.Target, address.Addend)
+}
+
+func renvoRTGAddressRelocAt(out *renvoAsm, address renvoRTGAddress, at int) {
+	if address.Kind != 0 {
+		renvoAsmAddAbsReloc(out, at, address.Addend, address.Kind-1)
+		return
+	}
+	if address.TargetValid {
+		renvoAsmAddReloc(out, at, address.Target)
+	}
+}
+
+func renvoRTGDataAddress(offset int) renvoRTGAddress {
+	return renvoRTGAddress{Kind: 1, Addend: offset}
+}
+
+func renvoRTGBSSAddress(offset int) renvoRTGAddress {
+	return renvoRTGAddress{Kind: 2, Addend: offset}
+}
+
+func renvoRTGBSSEndAddress(alignment int) renvoRTGAddress {
+	return renvoRTGAddress{Kind: 4, Addend: alignment}
+}
+
+func renvoRTGResolveAbsoluteRelocation(out *renvoAsm, kind int, addend int, dataAddress int, bssAddress int) (int, bool) {
+	if kind == RTGRelocationAbsoluteData {
+		return dataAddress + addend, true
+	}
+	if kind == RTGRelocationAbsoluteBSS {
+		return bssAddress + addend, true
+	}
+	if kind == RTGRelocationAbsoluteBSSEnd {
+		if addend <= 0 {
+			addend = 1
+		}
+		return bssAddress + renvoAlignValue(out.bssSize, addend), true
+	}
+	return 0, false
+}
+
+func renvoRTGByte(out *renvoAsm, value byte) {
+	renvoAsmEmit8(out, int(value))
+}
+
+func renvoRTGUint32(out *renvoAsm, value int) {
+	renvoAsmEmit32(out, value)
+}
+
+func renvoRTGUint64(out *renvoAsm, value uint64) {
+	renvoAsmEmit32(out, int(value))
+	renvoAsmEmit32(out, int(value >> 32))
+}
+
+func renvoRTGPatchUint32(out *renvoAsm, at int, value int) {
+	renvoPut32At(out.code, at, value)
+}
+
+func renvoRTGNewLabel(out *renvoAsm) int {
+	return renvoAsmNewLabel(out)
+}
+
+func renvoRTGMark(out *renvoAsm, label int) {
+	if label >= 0 {
+		renvoAsmMarkLabel(out, label)
+	}
+}
+
+func renvoRTGReloc(out *renvoAsm, label int) {
+	if label >= 0 && len(out.code) >= 4 {
+		renvoAsmAddReloc(out, len(out.code)-4, label)
+	}
+}
 
 var renvoRTGUnsupportedOperation bool
 

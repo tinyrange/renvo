@@ -76,6 +76,14 @@ func RTGUnsignedFits(value uint64, bits int) bool {
 	return value < uint64(1)<<bits
 }
 
+func renvoRTGRel32(out *renvoAsm, label int) {
+	at := len(out.code)
+	renvoAsmEmit32(out, 0)
+	if label >= 0 {
+		renvoAsmAddReloc(out, at, label)
+	}
+}
+
 func RTGLog2(value int) int {
 	result := 0
 	for value > 1 {

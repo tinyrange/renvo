@@ -230,7 +230,7 @@ func renvoAppendPEHeader64WithContext(context *renvoCompileContext, out []byte, 
 	machine := 0x8664
 	imageBase := renvoWinImageBase
 	stackReserve := 0x800000
-	stackCommit := 0x100000
+	stackCommit := 0x1000
 	if context.renvoTargetArch == renvoArchAarch64 {
 		machine = 0xaa64
 		imageBase = 0x140000000

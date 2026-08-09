@@ -24,6 +24,10 @@ func GenerateCheckedInTargetProjection(
 			Message:  "definition does not export target " + targetName,
 		}}}
 	}
+	if target.Descriptor.Name == "windows/amd64" && target.Arch.Name == "x86_64" {
+		return generateCheckedInWindowsAmd64Projection(
+			resolved, target, packageName)
+	}
 	if target.Descriptor.Name != "linux/amd64" || target.Arch.Name != "x86_64" {
 		return checkedInTargetProjectionFailure(resolved.Document, target.Declaration,
 			"checked-in production projection is not implemented for "+target.Descriptor.Name)

@@ -140,8 +140,7 @@ func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinear
 	if renvoFixedTarget == 0 && meta.c.emitImage {
 		renvoAsmRet(a)
 	} else if targetIsWindows(meta.c.renvoTargetOS) {
-		renvoAsmCopyPrimaryToTertiary(a)
-		renvoWinAmd64CallImport(a, renvoWinImportExitProcess)
+		renvoWinAmd64EmitExit(a)
 		renvoAsmRet(a)
 	} else {
 		renvoAsmCopyPrimaryToCallWord0(a)
@@ -229,15 +228,20 @@ func renvoEmitProgramEntryArgsAmd64(g *renvoLinearGen, appIndex int) bool {
 	}
 	argsOff := g.asm.bssSize
 	if targetIsWindows(g.c.renvoTargetOS) {
-		g.asm.bssSize += 32768
-		argsTextOff := g.asm.bssSize
-		g.asm.bssSize += 32768
-		argsLenOff := g.asm.bssSize
-		g.asm.bssSize += 8
-		envDataOff := g.asm.bssSize
-		g.asm.bssSize += 32768
-		envLenOff := g.asm.bssSize
-		g.asm.bssSize += 8
+		argsOff = renvoAlignValue(g.asm.bssSize, renvoWindowsAmd64ArgsBSSAlignment)
+		g.asm.bssSize = argsOff + renvoWindowsAmd64ArgsBSSSize
+		argsTextOff := renvoAlignValue(
+			g.asm.bssSize, renvoWindowsAmd64ArgsTextBSSAlignment)
+		g.asm.bssSize = argsTextOff + renvoWindowsAmd64ArgsTextBSSSize
+		argsLenOff := renvoAlignValue(
+			g.asm.bssSize, renvoWindowsAmd64ArgsLengthBSSAlignment)
+		g.asm.bssSize = argsLenOff + renvoWindowsAmd64ArgsLengthBSSSize
+		envDataOff := renvoAlignValue(
+			g.asm.bssSize, renvoWindowsAmd64EnvironmentBSSAlignment)
+		g.asm.bssSize = envDataOff + renvoWindowsAmd64EnvironmentBSSSize
+		envLenOff := renvoAlignValue(
+			g.asm.bssSize, renvoWindowsAmd64EnvironmentLengthBSSAlignment)
+		g.asm.bssSize = envLenOff + renvoWindowsAmd64EnvironmentLengthBSSSize
 		renvoAsmBuildWindowsArgvEnvSlicesAmd64(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
 	} else {
 		argsOff = renvoAlignValue(g.asm.bssSize, renvoLinuxAmd64ArgsBSSAlignment)

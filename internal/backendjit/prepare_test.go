@@ -5,6 +5,7 @@ package backendjit
 import (
 	"bytes"
 	"debug/elf"
+	"debug/pe"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -195,8 +196,8 @@ func TestCompiledInBootstrapPreparesAndCachesBackend(t *testing.T) {
 	// advertised amd64 fallback.
 	definition := copyNativeDefinition(t, root,
 		"target linux/amd64 {", "target example/example64 {",
-		"out.Bytes2(0x31, 0xc0)",
-		"out.Bytes2(0x6a, 0)\n\t\t\temitOpcodeRegister(out, 0x58, destination)")
+		"if destination.Code == 0 && value == 0 {\n\t\t\tout.Bytes2(0x31, 0xc0)",
+		"if destination.Code == 0 && value == 0 {\n\t\t\tout.Bytes2(0x6a, 0)\n\t\t\temitOpcodeRegister(out, 0x58, destination)")
 	stdRoot := filepath.Join(root, "std")
 	source := filepath.Join(root, "backend", "tests", "arithmetic_return_expression.go")
 	cache := t.TempDir()
@@ -396,6 +397,81 @@ func TestLinuxAmd64BuiltInProjectionMatchesPreparedDefinitionBehavior(t *testing
 		t.Fatalf("linux/amd64 outputs: built-in %q, prepared %q, want PASS",
 			outputs[0], outputs[1])
 	}
+}
+
+func TestWindowsAmd64BuiltInProjectionMatchesPreparedDefinitionBehavior(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skipf("in-process prepared backend requires linux/amd64, got %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdRoot := filepath.Join(root, "std")
+	source := filepath.Join(root, "backend", "tests", "arithmetic_return_expression.go")
+	builtIn := driver.CompileFromFS([]string{
+		"-t", "windows/amd64", "-s", "-o", "app.exe", source,
+	}, root, stdRoot, driver.OSFS{}, backendcompiled.Backend{})
+	if !builtIn.Ok {
+		t.Fatalf("built-in windows/amd64 compile failed: %#v", builtIn.Diagnostic)
+	}
+
+	definition := copyNativeDefinition(t, root,
+		"target windows/amd64 {", "target equivalence/windows64 {")
+	preparedBackend := New(definition, filepath.Join(root, "backend"), stdRoot,
+		t.TempDir(), backendcompiled.Backend{})
+	prepared := driver.CompileFromFS([]string{
+		"-backend", definition, "-t", "equivalence/windows64", "-s",
+		"-o", "app.exe", source,
+	}, root, stdRoot, driver.OSFS{}, preparedBackend)
+	if !prepared.Ok {
+		t.Fatalf("prepared equivalent windows/amd64 compile failed: %#v", prepared.Diagnostic)
+	}
+
+	var expectedImports []string
+	for _, image := range []struct {
+		name string
+		data []byte
+	}{{"built-in", builtIn.Binary}, {"prepared", prepared.Binary}} {
+		parsed, err := pe.NewFile(bytes.NewReader(image.data))
+		if err != nil {
+			t.Fatalf("parse %s windows/amd64 output: %v", image.name, err)
+		}
+		if parsed.Machine != pe.IMAGE_FILE_MACHINE_AMD64 || len(parsed.Sections) != 2 {
+			t.Fatalf("%s PE contract = machine %#x, sections %d",
+				image.name, parsed.Machine, len(parsed.Sections))
+		}
+		header, ok := parsed.OptionalHeader.(*pe.OptionalHeader64)
+		if !ok || header.Subsystem != pe.IMAGE_SUBSYSTEM_WINDOWS_CUI {
+			t.Fatalf("%s PE optional header = %#v", image.name, parsed.OptionalHeader)
+		}
+		if parsed.Sections[0].Name != ".text" || parsed.Sections[1].Name != ".data" {
+			t.Fatalf("%s PE sections = %q, %q", image.name,
+				parsed.Sections[0].Name, parsed.Sections[1].Name)
+		}
+		imports, err := parsed.ImportedSymbols()
+		if err != nil {
+			t.Fatalf("read %s imports: %v", image.name, err)
+		}
+		if expectedImports == nil {
+			expectedImports = imports
+		} else if !equalStrings(expectedImports, imports) {
+			t.Fatalf("prepared imports %q differ from built-in imports %q",
+				imports, expectedImports)
+		}
+	}
+}
+
+func equalStrings(left []string, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := 0; i < len(left); i++ {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestCompiledInBootstrapUsesAArch64Definition(t *testing.T) {

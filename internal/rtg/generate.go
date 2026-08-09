@@ -93,7 +93,9 @@ func GenerateArchitectureKernel(packageName string) GenerateResult {
 	ensureDirectEmitterV1()
 	source := []byte("//go:build !renvo\n\n")
 	source = append(source, generateHeaderPackage(nil, "architecture-kernel", packageName)...)
-	source = appendArchitectureBackendAPI(source)
+	source = appendNativeRegisterAPI(source)
+	source = appendNativeArchitectureAPI(source)
+	source = appendNativeEmitterAPI(source)
 	source = appendDirectEmitterKernelAdapters(source)
 	source = appendPreparedTargetFacts(source, TargetDescriptor{}, false)
 	return GenerateResult{Source: source, Ok: true}
@@ -107,24 +109,9 @@ func GenerateInactiveArchitectureKernel(packageName string) GenerateResult {
 	ensureDirectEmitterV1()
 	source := []byte("//go:build renvo\n\n")
 	source = append(source, generateHeaderPackage(nil, "inactive-architecture-kernel", packageName)...)
-	source = append(source, `
-type RTGRegister struct { Code int; Valid bool }
-type RTGCondition struct { Code int; SetOpcode byte; JumpOpcode byte }
-type RTGShiftDirection int
-const (
-	RTGShiftLeft RTGShiftDirection = 1
-	RTGShiftRight RTGShiftDirection = 2
-)
-const RTGRuntimeRead = 1
-const RTGRuntimeWrite = 2
-const RTGRuntimeReadAt = 3
-const RTGRuntimeWriteAt = 4
-const RTGRuntimeOpen = 5
-const RTGRuntimeClose = 6
-const RTGRuntimeChmod = 7
-var RTGNoRegister = RTGRegister{}
-type renvoRTGAddress struct{}
-`...)
+	source = appendNativeRegisterAPI(source)
+	source = appendNativeArchitectureAPI(source)
+	source = appendNativeEmitterAPI(source)
 	source = appendDirectEmitterKernelAdapters(source)
 	source = append(source, `
 func renvoRTGAsmAddress(base RTGRegister, index RTGRegister, displacement int, scale int) renvoRTGAddress {
@@ -436,13 +423,17 @@ func GenerateUniversalBackend(definitions []ResolveResult) GenerateResult {
 // after native rewriting. RTGEmitter, RTGLabel, RTGAddress, and RTGSymbol are
 // rewritten onto existing compiler types, while these semantic value types and
 // pure helpers intentionally remain shared by every generated architecture.
-func appendNativeArchitectureAPI(source []byte) []byte {
+func appendNativeRegisterAPI(source []byte) []byte {
 	return append(source, `
 type RTGRegister struct {
 	Code int
 	Valid bool
 }
+`...)
+}
 
+func appendNativeArchitectureAPI(source []byte) []byte {
+	return append(source, `
 type RTGCondition struct {
 	Code       int
 	SetOpcode  byte
@@ -508,6 +499,14 @@ func RTGUnsignedFits(value uint64, bits int) bool {
 	return value < uint64(1)<<bits
 }
 
+func renvoRTGRel32(out *renvoAsm, label int) {
+	at := len(out.code)
+	renvoAsmEmit32(out, 0)
+	if label >= 0 {
+		renvoAsmAddReloc(out, at, label)
+	}
+}
+
 func RTGLog2(value int) int {
 	result := 0
 	for value > 1 {
@@ -524,7 +523,12 @@ func RTGLog2(value int) int {
 // *RTGEmitter signatures, while Go sees the receiver as the existing
 // *renvoAsm and introduces no temporary emitter state in hot paths.
 func appendArchitectureBackendAPI(source []byte) []byte {
+	source = appendNativeRegisterAPI(source)
 	source = appendNativeArchitectureAPI(source)
+	return appendNativeEmitterAPI(source)
+}
+
+func appendNativeEmitterAPI(source []byte) []byte {
 	return append(source, `
 type renvoRTGAddress struct {
 	Target       int
@@ -2066,6 +2070,8 @@ func appendRewrittenGoModeExports(out []byte, source []byte, names []string, pre
 				replacement = "renvoAsmEmit32"
 			} else if method == "Int64" {
 				replacement = "renvoAsmEmit64"
+			} else if method == "Rel32" {
+				replacement = "renvoRTGRel32"
 			} else if method == "Bytes2" {
 				replacement = "renvoAsmEmit2"
 			} else if method == "Bytes3" {
