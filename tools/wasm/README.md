@@ -9,6 +9,9 @@ does not increase the frontend module.
 
 The production build uses the standard Go bootstrap and Renvo itself. TinyGo,
 LLVM, Binaryen, and other post-link optimizers are not part of the build.
+The transient self-hosted compiler is built for the current supported host,
+including Linux x86, x86-64, ARM, and ARM64, macOS ARM64, and Windows x86,
+x86-64, and ARM64.
 
 Build from the repository root:
 
@@ -106,9 +109,13 @@ include per-phase timing, peak linear-memory size, diagnostics, and downloadable
 artifacts. WASI command artifacts can run directly in the terminal panel with
 arguments and preloaded standard input. For ESP32-C6 and ESP32-S3, Flash & Run
 converts Renvo's ELF to the documented Espressif app-image format, writes the
-app partition through WebSerial, reboots the board, and attaches the terminal
-as a serial monitor. WebSerial requires an HTTPS or localhost origin and a
-Chromium-based browser. Native artifacts remain downloads.
+app partition through WebSerial or WebUSB, reboots the board, and attaches the
+terminal as a serial monitor. The transport picker uses WebUSB on Android and
+WebSerial on desktop, where the operating-system CDC driver owns the control
+interface required for reset. It remembers an explicit valid choice and falls
+back to the available browser API. Both transports require an HTTPS or localhost
+origin and a Chromium-based browser. The terminal reports build, flash, and
+combined elapsed time. Native artifacts remain downloads.
 
 The ESP ROM-loader implementation is first-party and has no third-party
 runtime dependency. Its protocol behavior was checked against Espressif's
@@ -123,6 +130,14 @@ workspace, target, or compiler arguments changed. Press Ctrl/Cmd+S to save the
 current workspace and Ctrl/Cmd+J to toggle the panel. Monaco is loaded from
 jsDelivr for now. Pass
 `monaco=/assets/monaco/min/` to use a self-hosted copy in production.
+
+On phone-sized screens the desktop chrome becomes full-screen Files, Code, and
+Console workspace views. Selecting a source opens the editor directly; a
+persistent Target action opens full-screen target selection when needed. Flash
+opens a full-screen progress and serial-console view. WebUSB/WebSerial becomes
+a touch choice in the target view rather than a compact dropdown. Read-only
+library sources can replace the locally persisted playground `main.go` through
+the editor's Copy into main.go action without changing the bundled original.
 
 ## Reference result
 

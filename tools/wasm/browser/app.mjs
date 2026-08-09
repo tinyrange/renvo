@@ -1,4 +1,5 @@
 import { ESPWebSerial, requestESPPort } from "./esp-webserial.mjs";
+import { preferredESPTransport, requestESPUSBPort, supportsESPWebUSBPlatform } from "./esp-webusb.mjs";
 
 const MONACO_VERSION = "0.56.0";
 const encoder = new TextEncoder();
@@ -18,6 +19,7 @@ const elements = {
   command: document.querySelector("#command"),
   compile: document.querySelector("#compile"),
   run: document.querySelector("#run"),
+  flashTransport: document.querySelector("#flash-transport"),
   targetPicker: document.querySelector("#target-picker"),
   targetButton: document.querySelector("#target-button"),
   targetLabel: document.querySelector("#target-label"),
@@ -38,7 +40,21 @@ const elements = {
   workbench: document.querySelector(".workbench"),
   editorHost: document.querySelector("#editor"),
   stdlibTree: document.querySelector("#stdlib-tree"),
+  ide: document.querySelector("#ide"),
+  mobileStep: document.querySelector("#mobile-step"),
+  mobileContext: document.querySelector("#mobile-context"),
+  mobileEditorActions: document.querySelector(".mobile-editor-actions"),
+  mobileTargetButton: document.querySelector("#mobile-target-button"),
+  mobileBuild: document.querySelector("#mobile-build"),
+  mobileRun: document.querySelector("#mobile-run"),
+  mobileTargetList: document.querySelector("#mobile-target-list"),
+  mobileFlashView: document.querySelector("#mobile-flash-view"),
+  mobileFlashState: document.querySelector("#mobile-flash-state"),
+  mobileFlashProgress: document.querySelector("#mobile-flash-progress"),
+  mobileFlashOutput: document.querySelector("#mobile-flash-output"),
+  copyToPlayground: document.querySelector("#copy-to-playground"),
 };
+const phoneWorkspace = matchMedia("(max-width: 680px)");
 
 const initialFiles = {
   "main.go": `package main
@@ -51,6 +67,7 @@ func main() {
 };
 const savedFiles = loadSavedFiles();
 const fileValues = Object.fromEntries(Object.entries(initialFiles).map(([name, source]) => [name, savedFiles[name] ?? source]));
+const editableBaselines = new Map(Object.entries(fileValues));
 const models = new Map();
 const stdlibFiles = new Map();
 const loadedStandardPackages = new Set();
@@ -70,6 +87,7 @@ let artifactUrls = [];
 let lastRunnableArtifact;
 let espPort;
 let espSession;
+let espPortTransport;
 let selectedTarget;
 let targetCatalog;
 let standardCatalog;
@@ -126,6 +144,7 @@ async function loadTargetCatalog() {
 
 function configureTargets(targets) {
   const entries = [];
+  const mobileEntries = [];
   let group = "";
   for (let index = 0; index < targets.length; index++) {
     const target = targets[index];
@@ -136,6 +155,10 @@ function configureTargets(targets) {
       heading.className = "target-group";
       heading.textContent = group;
       entries.push(heading);
+      const mobileHeading = document.createElement("div");
+      mobileHeading.className = "mobile-target-group";
+      mobileHeading.textContent = group;
+      mobileEntries.push(mobileHeading);
     }
     const option = document.createElement("button");
     option.type = "button";
@@ -147,8 +170,21 @@ function configureTargets(targets) {
     option.setAttribute("aria-selected", "false");
     option.textContent = target.name;
     entries.push(option);
+    const mobileOption = document.createElement("button");
+    mobileOption.type = "button";
+    mobileOption.className = "mobile-target-option";
+    mobileOption.dataset.target = target.name;
+    mobileOption.setAttribute("role", "option");
+    mobileOption.setAttribute("aria-selected", "false");
+    mobileOption.textContent = target.name;
+    mobileOption.addEventListener("click", () => {
+      selectTarget(target.name, true);
+      showMobileView("editor");
+    });
+    mobileEntries.push(mobileOption);
   }
   elements.targetMenu.replaceChildren(...entries);
+  elements.mobileTargetList.replaceChildren(...mobileEntries);
   const requested = parameters.get("target");
   const initial = targets.some((target) => target.name === requested) ? requested :
     targets.some((target) => target.name === "wasi/wasm32") ? "wasi/wasm32" : targets[0].name;
@@ -182,7 +218,7 @@ async function loadMonaco() {
     const model = monaco.editor.createModel(value, language, monaco.Uri.parse(`file:///${name}`));
     model.onDidChangeContent(() => handleModelChange(name, model));
     models.set(name, model);
-    document.querySelector(`.file[data-file="${name}"]`)?.classList.toggle("modified", value !== initialFiles[name]);
+    document.querySelector(`.file[data-file="${name}"]`)?.classList.toggle("modified", value !== editableBaselines.get(name));
   }
   editor = monaco.editor.create(elements.editorHost, {
     model: models.get(activeFile), theme: "renvo-dark", automaticLayout: true,
@@ -203,8 +239,9 @@ async function loadMonaco() {
   editor.addCommand(monaco.KeyCode.F5, runArtifact);
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, saveFiles);
   elements.editorHost.querySelector(".editor-loading")?.remove();
+  configureEditorForViewport();
   updateReadyState();
-  editor.focus();
+  if (!isPhoneWorkspace()) editor.focus();
 }
 
 function initializeCompiler(languageService) {
@@ -234,6 +271,30 @@ worker.addEventListener("error", (event) => showFatalError(new Error(event.messa
 function setupShell() {
   elements.compile.addEventListener("click", compile);
   elements.run.addEventListener("click", runArtifact);
+  configureFlashTransports();
+  elements.flashTransport.addEventListener("change", changeFlashTransport);
+  elements.mobileBuild.addEventListener("click", compile);
+  elements.mobileRun.addEventListener("click", runArtifact);
+  elements.mobileTargetButton.addEventListener("click", () => {
+    showMobileView(elements.ide.dataset.mobileView === "target" ? "editor" : "target");
+  });
+  elements.copyToPlayground.addEventListener("click", copyActiveFileToPlayground);
+  document.querySelectorAll("[data-mobile-transport]").forEach((button) => button.addEventListener("click", () => {
+    if (button.disabled) return;
+    elements.flashTransport.value = button.dataset.mobileTransport;
+    elements.flashTransport.dispatchEvent(new Event("change"));
+  }));
+  document.querySelector("#mobile-flash-close").addEventListener("click", () => closeMobileFlashView());
+  document.querySelectorAll(".mobile-nav button").forEach((button) => button.addEventListener("click", () => {
+    showMobileView(button.dataset.mobileView);
+  }));
+  new MutationObserver(syncMobileFlashOutput).observe(elements.terminalOutput, {
+    childList: true, subtree: true, characterData: true,
+  });
+  phoneWorkspace.addEventListener?.("change", configureMobileWorkspace);
+  globalThis.visualViewport?.addEventListener("resize", layoutMobileEditor);
+  window.addEventListener("resize", layoutMobileEditor);
+  configureMobileWorkspace();
   elements.targetButton.addEventListener("click", () => toggleTargetMenu());
   elements.targetButton.addEventListener("keydown", handleTargetKeydown);
   elements.targetMenu.addEventListener("click", (event) => {
@@ -249,10 +310,7 @@ function setupShell() {
   });
   elements.command.addEventListener("input", markBuildStale);
   elements.command.addEventListener("keydown", (event) => { if (event.key === "Enter") compile(); });
-  document.querySelectorAll(".file").forEach((button) => button.addEventListener("click", () => {
-    openFile(button.dataset.file);
-    setBuildPackage(".", "wasi/wasm32");
-  }));
+  document.querySelectorAll(".file").forEach((button) => installWorkspaceFileButton(button));
   document.querySelectorAll(".activity[data-view]").forEach((button) => button.addEventListener("click", () => activateView(button.dataset.view)));
   document.querySelectorAll(".panel-tab").forEach((button) => button.addEventListener("click", () => showPanel(button.dataset.panel)));
   document.querySelector("#toggle-panel").addEventListener("click", togglePanel);
@@ -281,16 +339,22 @@ function selectTarget(name, updateCommand) {
     else espPort.close().catch(() => {});
     espSession = undefined;
     espPort = undefined;
+    espPortTransport = undefined;
   }
   elements.targetLabel.textContent = selectedTarget.name;
   elements.targetButton.title = `Build target: ${selectedTarget.name}`;
   const board = selectedTarget.device === "esp32";
+  elements.flashTransport.hidden = !board;
   elements.run.title = board ? "Build, flash, and run on the connected ESP board (F5)" : "Run console app (F5)";
   elements.runArgs.closest("label").hidden = board;
   elements.runStdin.closest("label").hidden = board;
   for (const option of elements.targetMenu.querySelectorAll(".target-option")) {
     option.setAttribute("aria-selected", String(option.dataset.target === selectedTarget.name));
   }
+  for (const option of elements.mobileTargetList.querySelectorAll(".mobile-target-option")) {
+    option.setAttribute("aria-selected", String(option.dataset.target === selectedTarget.name));
+  }
+  updateMobileHeader();
   lastRunnableArtifact = undefined;
   if (updateCommand) elements.command.value = replaceOutput(elements.command.value, selectedTarget.output);
   if (changed) markBuildStale();
@@ -444,6 +508,7 @@ function renderResult(result) {
       lastRunnableArtifact = {
         name: artifact.name, data: artifact.data.slice(0),
         revision: build.revision, target: build.target.name,
+        buildMilliseconds: result.elapsedMilliseconds,
       };
     }
   }
@@ -452,6 +517,10 @@ function renderResult(result) {
   updateReadyState();
   if (result.exitCode !== 0) showPanel(problems.length ? "problems" : "output");
   else if (result.files.length) showPanel("artifacts");
+  if (result.exitCode !== 0 && shouldRun && isPhoneWorkspace()) {
+    elements.terminalOutput.textContent = `${text}${text && !text.endsWith("\n") ? "\n" : ""}${summary}\n`;
+    setMobileFlashProgress("Build failed", 0);
+  }
   if (result.exitCode === 0 && shouldRun) queueMicrotask(resumeArtifactAfterBuild);
 }
 
@@ -465,14 +534,25 @@ function resumeArtifactAfterBuild() {
 
 async function runArtifactWithMode(resumeAfterBuild) {
   if ((!selectedTarget?.runnable && selectedTarget?.device !== "esp32") || running) return;
+  const board = selectedTarget.device === "esp32";
+  if (board && !resumeAfterBuild) openMobileFlashView("Select a device");
+  if (board && !resumeAfterBuild && espPortTransport === "webusb" && espSession) {
+    const previousSession = espSession;
+    espSession = undefined;
+    await previousSession.close();
+  }
   const activeESPPort = espPort && (espPort.readable || espPort.writable);
-  if (selectedTarget.device === "esp32" && !resumeAfterBuild && !activeESPPort) {
+  const reusableESPPort = espPortTransport === "webusb" && espPort?.canReopen?.();
+  if (board && !resumeAfterBuild && !activeESPPort && !reusableESPPort) {
     try {
       const previousSession = espSession;
       const previousPort = espPort;
       // Start the permission prompt while the click/key activation is still
       // live; cleanup can safely happen after the user selects the device.
-      const nextPort = await requestESPPort(selectedTarget.name);
+      const transport = elements.flashTransport.value;
+      const nextPort = transport === "webusb"
+        ? await requestESPUSBPort(selectedTarget.name)
+        : await requestESPPort(selectedTarget.name);
       espSession = undefined;
       espPort = undefined;
       if (previousSession) await previousSession.close();
@@ -480,14 +560,17 @@ async function runArtifactWithMode(resumeAfterBuild) {
         try { await previousPort.close(); } catch {}
       }
       espPort = nextPort;
+      espPortTransport = transport;
     } catch (error) {
       elements.terminalOutput.textContent = `${error.message || error}\n`;
+      setMobileFlashProgress("Device selection failed", 0);
       showPanel("terminal");
       return;
     }
   }
-  if (selectedTarget.device === "esp32" && !espPort) {
-    elements.terminalOutput.textContent = "The selected ESP serial port disconnected before flashing. Click Flash & Run again.\n";
+  if (board && !espPort) {
+    elements.terminalOutput.textContent = "The selected ESP device disconnected before flashing. Click Flash & Run again.\n";
+    setMobileFlashProgress("Device disconnected", 0);
     showPanel("terminal");
     return;
   }
@@ -503,6 +586,7 @@ async function runArtifactWithMode(resumeAfterBuild) {
     lastRunnableArtifact.target !== selectedTarget.name;
   if (building || stale) {
     runAfterBuild = true;
+    if (board) setMobileFlashProgress("Building…");
     updateReadyState();
     if (!building) compile();
     return;
@@ -510,22 +594,33 @@ async function runArtifactWithMode(resumeAfterBuild) {
   running = true;
   updateReadyState();
   showPanel("terminal");
-  if (selectedTarget.device === "esp32") {
+  if (board) {
+    openMobileFlashView("Connecting…");
+    setMobileFlashProgress("Connecting…");
     const portInfo = espPort.getInfo?.() || {};
     const identity = portInfo.usbVendorId === undefined ? "" :
       ` (USB ${portInfo.usbVendorId.toString(16).padStart(4, "0")}:${(portInfo.usbProductId || 0).toString(16).padStart(4, "0")})`;
-    elements.terminalOutput.textContent = `$ flash ${selectedTarget.name}${identity}\n`;
+    const transportName = espPortTransport === "webusb" ? "WebUSB" : "WebSerial";
+    elements.terminalOutput.textContent = `$ flash --transport ${transportName} ${selectedTarget.name}${identity}\n`;
+    elements.terminalOutput.textContent += `Build: ${formatElapsed(lastRunnableArtifact.buildMilliseconds)}\n`;
+    const flashStarted = performance.now();
     try {
       if (!espSession) espSession = new ESPWebSerial(espPort, {
         log: (message) => { elements.terminalOutput.textContent += `${message}\n`; },
         serial: (text) => { elements.terminalOutput.textContent += text; },
         progress: (value) => {
           elements.run.querySelector("span").textContent = `Flashing ${Math.round(value * 100)}%`;
+          setMobileFlashProgress(`Flashing ${Math.round(value * 100)}%`, value);
         },
       });
       await espSession.flash(lastRunnableArtifact.data, selectedTarget.name);
+      const flashMilliseconds = performance.now() - flashStarted;
+      elements.terminalOutput.textContent += `Flash: ${formatElapsed(flashMilliseconds)} · Build + flash: ${formatElapsed(lastRunnableArtifact.buildMilliseconds + flashMilliseconds)}\n`;
+      setMobileFlashProgress("Running — serial console attached", 1);
     } catch (error) {
-      elements.terminalOutput.textContent += `Flash failed: ${error.message || error}\n`;
+      const flashMilliseconds = performance.now() - flashStarted;
+      elements.terminalOutput.textContent += `Flash failed after ${formatElapsed(flashMilliseconds)}: ${error.message || error}\n`;
+      setMobileFlashProgress("Flash failed", 0);
       const failedSession = espSession;
       espSession = undefined;
       try {
@@ -533,6 +628,7 @@ async function runArtifactWithMode(resumeAfterBuild) {
         else if (espPort) await espPort.close();
       } catch {}
       espPort = undefined;
+      espPortTransport = undefined;
     } finally {
       running = false;
       updateReadyState();
@@ -833,7 +929,9 @@ function openFile(name) {
   if (!model || !editor) return;
   activeFile = name;
   editor.setModel(model);
-  editor.updateOptions({ readOnly: !Object.hasOwn(initialFiles, name), readOnlyMessage: { value: "Library sources are read-only." } });
+  const editable = isEditableFile(name);
+  editor.updateOptions({ readOnly: !editable, readOnlyMessage: { value: "Copy this library source to the playground to edit it." } });
+  elements.copyToPlayground.hidden = editable;
   document.querySelectorAll(".file").forEach((item) => item.classList.toggle("active", item.dataset.file === name));
   document.querySelectorAll(".stdlib-file").forEach((item) => item.classList.toggle("active", item.dataset.file === name));
   const tab = document.querySelector(".editor-tab");
@@ -843,11 +941,38 @@ function openFile(name) {
   icon.className = name.endsWith(".go") ? "go-icon" : "mod-icon";
   tab.querySelector("span:nth-child(2)").textContent = name.split("/").pop();
   tab.title = name;
-  editor.focus();
+  updateMobileHeader();
+  if (!isPhoneWorkspace()) editor.focus();
+}
+
+function isEditableFile(name) {
+  return Object.hasOwn(initialFiles, name);
+}
+
+function installWorkspaceFileButton(button) {
+  if (button.dataset.installed) return;
+  button.dataset.installed = "true";
+  button.addEventListener("click", () => {
+    openFile(button.dataset.file);
+    setBuildPackage(".");
+    if (isPhoneWorkspace()) showMobileView("editor");
+  });
+}
+
+function copyActiveFileToPlayground() {
+  const source = models.get(activeFile);
+  if (!source || isEditableFile(activeFile)) return;
+  const main = models.get("main.go");
+  if (!main) return;
+  main.pushEditOperations([], [{ range: main.getFullModelRange(), text: source.getValue() }], () => null);
+  openFile("main.go");
+  setBuildPackage(".");
+  scheduleAnalysis(20);
+  if (isPhoneWorkspace()) showMobileView("editor");
 }
 
 function handleModelChange(name, model) {
-  document.querySelector(`.file[data-file="${name}"]`)?.classList.toggle("modified", model.getValue() !== initialFiles[name]);
+  document.querySelector(`.file[data-file="${name}"]`)?.classList.toggle("modified", model.getValue() !== editableBaselines.get(name));
   saveFiles();
   markBuildStale();
   if (name.endsWith(".go") || name === "go.mod") scheduleAnalysis();
@@ -969,15 +1094,154 @@ function setCompilerStatus(state, text) {
 function updateReadyState() {
   elements.compile.disabled = !compilerReady || !monaco || building;
   elements.compile.querySelector("span").textContent = building ? "Building…" : "Build";
+  elements.mobileBuild.disabled = elements.compile.disabled;
+  elements.mobileBuild.textContent = building ? "Building…" : "Build";
   elements.targetButton.disabled = building || running;
   const board = selectedTarget?.device === "esp32";
   const executable = selectedTarget?.runnable || board;
-  elements.run.disabled = !compilerReady || !monaco || !executable || running || runAfterBuild;
+  const transportAvailable = !board || !elements.flashTransport.selectedOptions[0]?.disabled;
+  elements.run.disabled = !compilerReady || !monaco || !executable || !transportAvailable || running || runAfterBuild;
+  elements.flashTransport.disabled = building || running || runAfterBuild;
   elements.run.querySelector("span").textContent = running ? (board ? "Flashing…" : "Running…") :
     runAfterBuild ? (board ? "Flash pending…" : "Run pending…") : (board ? "Flash & Run" : "Run");
+  elements.mobileRun.disabled = elements.run.disabled;
+  elements.mobileRun.textContent = running ? (board ? "Flashing…" : "Running…") :
+    runAfterBuild ? (board ? "Pending…" : "Pending…") : (board ? "Flash" : "Run");
   if (autoBuildPending && compilerReady && monaco && selectedTarget && !building) {
     autoBuildPending = false;
     queueMicrotask(compile);
+  }
+}
+
+function isPhoneWorkspace() {
+  return phoneWorkspace.matches;
+}
+
+function configureMobileWorkspace() {
+  if (isPhoneWorkspace()) {
+    if (!elements.ide.dataset.mobileView) elements.ide.dataset.mobileView = "files";
+    showMobileView(elements.ide.dataset.mobileView);
+  } else {
+    elements.mobileFlashView.hidden = true;
+  }
+  configureEditorForViewport();
+}
+
+function configureEditorForViewport() {
+  if (!editor) return;
+  editor.updateOptions(isPhoneWorkspace() ? {
+    wordWrap: "on", wrappingIndent: "same", fontSize: 14, lineHeight: 22,
+    quickSuggestions: { other: false, comments: false, strings: false },
+  } : {
+    wordWrap: "off", fontSize: 13, lineHeight: 20,
+    quickSuggestions: { other: true, comments: false, strings: false },
+  });
+  requestAnimationFrame(() => editor?.layout());
+}
+
+function layoutMobileEditor() {
+  if (!isPhoneWorkspace()) return;
+  requestAnimationFrame(() => editor?.layout());
+}
+
+function showMobileView(view) {
+  if (!isPhoneWorkspace()) return;
+  elements.mobileFlashView.hidden = true;
+  elements.ide.dataset.mobileView = view;
+  elements.mobileEditorActions.hidden = view !== "editor";
+  document.querySelectorAll(".mobile-nav button").forEach((button) => {
+    button.classList.toggle("active", button.dataset.mobileView === view);
+  });
+  if (view === "console") showPanel("terminal");
+  updateMobileHeader();
+  if (view === "editor") requestAnimationFrame(() => editor?.layout());
+}
+
+function updateMobileHeader() {
+  const view = elements.ide.dataset.mobileView || "files";
+  const file = activeFile.split("/").pop();
+  elements.mobileTargetButton.textContent = view === "target" ? "Done" : "Target";
+  elements.mobileTargetButton.title = selectedTarget ? `Select target (currently ${selectedTarget.name})` : "Select target";
+  if (view === "files") {
+    elements.mobileStep.textContent = "Choose a file";
+    elements.mobileContext.textContent = "playground and libraries";
+  } else if (view === "target") {
+    elements.mobileStep.textContent = "Choose a target";
+    elements.mobileContext.textContent = file;
+  } else if (view === "editor") {
+    elements.mobileStep.textContent = file;
+    elements.mobileContext.textContent = selectedTarget?.name || "Choose a target";
+  } else {
+    elements.mobileStep.textContent = "Console";
+    elements.mobileContext.textContent = selectedTarget?.name || "Build and run output";
+  }
+}
+
+function openMobileFlashView(state = "Preparing…") {
+  if (!isPhoneWorkspace()) return;
+  elements.mobileFlashView.hidden = false;
+  elements.mobileFlashState.textContent = state;
+  document.querySelectorAll(".mobile-nav button").forEach((button) => {
+    button.classList.toggle("active", button.dataset.mobileView === "console");
+  });
+  syncMobileFlashOutput();
+}
+
+function closeMobileFlashView() {
+  elements.mobileFlashView.hidden = true;
+  showMobileView("editor");
+}
+
+function setMobileFlashProgress(state, value) {
+  elements.mobileFlashState.textContent = state;
+  if (value === undefined) elements.mobileFlashProgress.removeAttribute("value");
+  else elements.mobileFlashProgress.value = Math.max(0, Math.min(1, value));
+}
+
+function syncMobileFlashOutput() {
+  elements.mobileFlashOutput.textContent = elements.terminalOutput.textContent;
+  elements.mobileFlashOutput.scrollTop = elements.mobileFlashOutput.scrollHeight;
+}
+
+function configureFlashTransports() {
+  const platform = navigator.userAgentData?.platform || navigator.platform || "";
+  const android = supportsESPWebUSBPlatform({ platform, userAgent: navigator.userAgent });
+  const choices = {
+    webserial: Boolean(navigator.serial),
+    webusb: Boolean(navigator.usb) && android,
+  };
+  for (const option of elements.flashTransport.options) {
+    option.disabled = !choices[option.value];
+    const name = option.value === "webusb" ? "WebUSB (Android)" : "WebSerial";
+    option.textContent = `${name}${option.disabled ? " unavailable" : ""}`;
+  }
+  const saved = localStorage.getItem("renvo.espFlashTransport");
+  elements.flashTransport.value = preferredESPTransport({
+    saved, android, webSerial: choices.webserial, webUSB: choices.webusb,
+  });
+  syncMobileTransportPicker();
+}
+
+async function changeFlashTransport() {
+  localStorage.setItem("renvo.espFlashTransport", elements.flashTransport.value);
+  syncMobileTransportPicker();
+  if (!espPort || espPortTransport === elements.flashTransport.value) return;
+  const session = espSession;
+  const port = espPort;
+  espSession = undefined;
+  espPort = undefined;
+  espPortTransport = undefined;
+  try {
+    if (session) await session.close();
+    else await port.close();
+  } catch {}
+}
+
+function syncMobileTransportPicker() {
+  for (const button of document.querySelectorAll("[data-mobile-transport]")) {
+    const option = elements.flashTransport.querySelector(`option[value="${button.dataset.mobileTransport}"]`);
+    button.disabled = Boolean(option?.disabled);
+    button.setAttribute("aria-checked", String(button.dataset.mobileTransport === elements.flashTransport.value));
   }
 }
 
@@ -1018,7 +1282,7 @@ function loadScript(url) {
 function saveFiles() {
   if (!models.size) return;
   const values = {};
-  for (const name of Object.keys(initialFiles)) if (models.has(name)) values[name] = models.get(name).getValue();
+  for (const [name, model] of models) if (isEditableFile(name)) values[name] = model.getValue();
   try { localStorage.setItem("renvo.playground.files.v1", JSON.stringify(values)); } catch {}
 }
 
@@ -1112,7 +1376,11 @@ function libraryPackage(catalog, importPath, item) {
         const icon = document.createElement("span"); icon.className = "go-icon"; icon.textContent = "Go";
         const label = document.createElement("span"); label.textContent = file;
         entry.append(icon, label);
-        entry.addEventListener("click", async () => { await ensureSourceModel(path); openFile(path); });
+        entry.addEventListener("click", async () => {
+          await ensureSourceModel(path);
+          openFile(path);
+          if (isPhoneWorkspace()) showMobileView("editor");
+        });
         return entry;
       }));
       if (item.main) await openPackageEntry(item);
@@ -1172,4 +1440,8 @@ function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KiB`;
   return `${(bytes / 1048576).toFixed(1)} MiB`;
+}
+
+function formatElapsed(milliseconds) {
+  return milliseconds < 1000 ? `${milliseconds.toFixed(1)} ms` : `${(milliseconds / 1000).toFixed(2)} s`;
 }

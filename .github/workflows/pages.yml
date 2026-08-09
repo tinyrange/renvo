@@ -31,8 +31,8 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      - name: Test WebSerial transport
-        run: node --test tools/wasm/browser/esp-webserial.test.mjs
+      - name: Test browser ESP transports
+        run: node --test tools/wasm/browser/*.test.mjs
 
       - name: Build browser bundle
         run: tools/wasm/build-browser.sh dist/pages pages

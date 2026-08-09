@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { elfToESPImage, supportsESPWebSerial } from "./esp-webserial.mjs";
+import { ESPWebSerial, elfToESPImage, supportsESPWebSerial } from "./esp-webserial.mjs";
 
 test("ELF conversion creates a checksummed, aligned C6 app image", async () => {
   const elf = syntheticELF(243, 0x42000100, [
@@ -34,6 +34,38 @@ test("ESP targets and ELF machines are checked", async () => {
   assert.equal(supportsESPWebSerial("esp32s3/xtensa_lx7"), true);
   assert.equal(supportsESPWebSerial("linux/amd64"), false);
   await assert.rejects(() => elfToESPImage(syntheticELF(94, 0x40370000, []), "esp32c6/riscv32"), /does not match/);
+});
+
+test("ROM loader synchronization works through a WebUSB-shaped stream", async () => {
+  let input;
+  const readable = new ReadableStream({ start(controller) { input = controller; } });
+  const writable = new WritableStream({
+    write() {
+      input.enqueue(Uint8Array.from([0xc0, 1, 0x08, 2, 0, 0, 0, 0, 0, 0, 0, 0xc0]));
+    },
+  });
+  const port = {
+    transport: "webusb", readable, writable,
+    async close() { try { input.close(); } catch {} },
+  };
+  const session = new ESPWebSerial(port);
+  await session.open();
+  await session.synchronize(100);
+  await session.close();
+});
+
+test("WebUSB closes the device before cancelling its pending reader", async () => {
+  let portClosed = false;
+  const port = {
+    transport: "webusb",
+    async close() { portClosed = true; },
+  };
+  const session = new ESPWebSerial(port);
+  session.reader = {
+    async cancel() { assert.equal(portClosed, true); },
+  };
+  await session.close();
+  assert.equal(portClosed, true);
 });
 
 function syntheticELF(machine, entry, sections) {
