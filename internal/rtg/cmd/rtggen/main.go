@@ -18,6 +18,7 @@ func main() {
 	statefulEmitter := flag.Bool("stateful-emitter", false, "keep the stateful RTG emitter in architecture output")
 	algorithms := flag.Bool("algorithms", false, "emit the pruned checked-in algorithm projection")
 	contract := flag.Bool("contract", false, "emit the checked-in semantic contract projection")
+	targetProjection := flag.Bool("target-projection", false, "emit a checked-in production target projection")
 	prepared := flag.Bool("prepared", false, "emit a prepared custom backend for compiler package main")
 	kernel := flag.Bool("kernel", false, "generate the shared checked-in architecture kernel")
 	inactiveKernel := flag.Bool("inactive-kernel", false, "generate the self-hosted inactive architecture kernel")
@@ -30,7 +31,7 @@ func main() {
 		os.Exit(2)
 	}
 	if *kernel || *inactiveKernel {
-		if *target != "" || *arch != "" || *statefulEmitter || flag.NArg() != 0 {
+		if *target != "" || *arch != "" || *statefulEmitter || *targetProjection || flag.NArg() != 0 {
 			fail("kernel generation does not accept definitions, -t, or -arch")
 		}
 		if *kernel && *inactiveKernel {
@@ -63,7 +64,7 @@ func main() {
 	}
 	var generated rtg.GenerateResult
 	if *arch != "" {
-		if *target != "" || *prepared || len(definitions) != 1 {
+		if *target != "" || *prepared || *targetProjection || len(definitions) != 1 {
 			fail("architecture generation requires one definition and no -t")
 		}
 		if *algorithms && *contract || *algorithms && *statefulEmitter ||
@@ -79,6 +80,12 @@ func main() {
 		} else {
 			generated = rtg.GenerateArchitectureBackend(definitions[0], *arch, *packageName)
 		}
+	} else if *targetProjection {
+		if *target == "" || *prepared || *statefulEmitter || *algorithms || *contract ||
+			len(definitions) != 1 {
+			fail("target projection requires one definition, -t, and no other generation mode")
+		}
+		generated = rtg.GenerateCheckedInTargetProjection(definitions[0], *target, *packageName)
 	} else if *target == "" {
 		if *statefulEmitter {
 			fail("-stateful-emitter requires -arch")

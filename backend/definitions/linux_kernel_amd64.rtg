@@ -6,16 +6,23 @@ implements direct_emitter_v1
 
 go backend {
 	func kernelStaticCall(out *RTGEmitter, importID int, wordCount int) {
-		registers := []RTGRegister{
-			{Code: 7, Valid: true},
-			{Code: 6, Valid: true},
-			{Code: 2, Valid: true},
-			{Code: 1, Valid: true},
-			{Code: 8, Valid: true},
-			{Code: 9, Valid: true},
+		if wordCount > 0 {
+			out.Byte(0x5f)
 		}
-		for i := 0; i < wordCount && i < len(registers); i++ {
-			emitOpcodeRegister(out, 0x58, registers[i])
+		if wordCount > 1 {
+			out.Byte(0x5e)
+		}
+		if wordCount > 2 {
+			out.Byte(0x5a)
+		}
+		if wordCount > 3 {
+			out.Byte(0x59)
+		}
+		if wordCount > 4 {
+			out.Bytes2(0x41, 0x58)
+		}
+		if wordCount > 5 {
+			out.Bytes2(0x41, 0x59)
 		}
 		out.Byte(0xe8)
 		at := out.Len()
@@ -27,24 +34,23 @@ go backend {
 		if operation != RTGRuntimeWrite {
 			return false
 		}
-		rax := RTGRegister{Code: 0, Valid: true}
-		rsi := RTGRegister{Code: 6, Valid: true}
-		rdi := RTGRegister{Code: 7, Valid: true}
-		rdx := RTGRegister{Code: 2, Valid: true}
-		encodeRegisterToRM(out, 0x89, rax, rsi, 64)
-		encodeRegisterToRM(out, 0x89, rsi, rdx, 64)
-		encodeRegisterToRM(out, 0x89, rdx, rax, 64)
+		// _printk("%.*s", length, pointer). The runtime supplies the pointer in
+		// RAX and the length in RDX.
+		out.Byte(0x50)
+		out.Bytes3(0x48, 0x89, 0xd6)
+		out.Byte(0x5a)
 		data := out.Data()
 		formatOffset := len(data)
 		data = append(data, '%', '.', '*', 's', 0)
 		out.SetData(data)
-		encodeMemoryToRegister(out, 0x8d, rdi, RTGAddress{
-			Kind: 1, Addend: formatOffset,
-		}, 64)
-		moveImmediate(out, rax, 0)
+		out.Bytes3(0x48, 0x8d, 0x3d)
+		at := out.Len()
+		out.Int32(0)
+		out.AbsoluteReloc(at, formatOffset, RTGRelocationAbsoluteData)
+		out.Bytes2(0x31, 0xc0)
 		importID := out.ExternalImport("_printk")
 		out.Byte(0xe8)
-		at := out.Len()
+		at = out.Len()
 		out.Int32(0)
 		out.AbsoluteReloc(at, importID, RTGRelocationImport)
 		return true

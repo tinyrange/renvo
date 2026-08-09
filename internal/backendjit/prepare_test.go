@@ -5,10 +5,12 @@ package backendjit
 import (
 	"bytes"
 	"debug/elf"
+	"debug/pe"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"sync"
 	"testing"
 
@@ -195,8 +197,8 @@ func TestCompiledInBootstrapPreparesAndCachesBackend(t *testing.T) {
 	// advertised amd64 fallback.
 	definition := copyNativeDefinition(t, root,
 		"target linux/amd64 {", "target example/example64 {",
-		"out.Bytes2(0x31, 0xc0)",
-		"out.Bytes2(0x6a, 0)\n\t\t\temitOpcodeRegister(out, 0x58, destination)")
+		"if destination.Code == 0 && value == 0 {\n\t\t\tout.Bytes2(0x31, 0xc0)",
+		"if destination.Code == 0 && value == 0 {\n\t\t\tout.Bytes2(0x6a, 0)\n\t\t\temitOpcodeRegister(out, 0x58, destination)")
 	stdRoot := filepath.Join(root, "std")
 	source := filepath.Join(root, "backend", "tests", "arithmetic_return_expression.go")
 	cache := t.TempDir()
@@ -302,6 +304,177 @@ func TestCompiledInBootstrapPreparesAndCachesBackend(t *testing.T) {
 	}
 }
 
+func TestLinuxAmd64BuiltInProjectionMatchesPreparedDefinitionBehavior(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skipf("in-process prepared backend requires linux/amd64, got %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdRoot := filepath.Join(root, "std")
+	source := filepath.Join(root, "backend", "tests", "arithmetic_return_expression.go")
+	builtInArgs := []string{"-t", "linux/amd64", "-s", "-o", "app", source}
+	builtIn := driver.CompileFromFS(
+		builtInArgs, root, stdRoot, driver.OSFS{}, backendcompiled.Backend{})
+	if !builtIn.Ok {
+		t.Fatalf("built-in linux/amd64 compile failed: %#v", builtIn.Diagnostic)
+	}
+
+	definition := copyNativeDefinition(t, root,
+		"target linux/amd64 {", "target equivalence/linux64 {")
+	preparedArgs := []string{
+		"-backend", definition,
+		"-t", "equivalence/linux64",
+		"-s",
+		"-o", "app",
+		source,
+	}
+	preparedBackend := New(definition, filepath.Join(root, "backend"), stdRoot,
+		t.TempDir(), backendcompiled.Backend{})
+	prepared := driver.CompileFromFS(
+		preparedArgs, root, stdRoot, driver.OSFS{}, preparedBackend)
+	if !prepared.Ok {
+		t.Fatalf("prepared equivalent linux/amd64 compile failed: %#v", prepared.Diagnostic)
+	}
+
+	outputs := make([][]byte, 0, 2)
+	for _, image := range []struct {
+		name   string
+		binary []byte
+	}{
+		{name: "built-in", binary: builtIn.Binary},
+		{name: "prepared", binary: prepared.Binary},
+	} {
+		parsed, err := elf.NewFile(bytes.NewReader(image.binary))
+		if err != nil {
+			t.Fatalf("parse %s linux/amd64 output: %v", image.name, err)
+		}
+		if parsed.Class != elf.ELFCLASS64 || parsed.Data != elf.ELFDATA2LSB ||
+			parsed.Type != elf.ET_DYN || parsed.Machine != elf.EM_X86_64 {
+			t.Fatalf("%s linux/amd64 ELF contract = class %v, data %v, type %v, machine %v",
+				image.name, parsed.Class, parsed.Data, parsed.Type, parsed.Machine)
+		}
+		loadCount := 0
+		hasReadExecute := false
+		hasReadWrite := false
+		entryInExecutableLoad := false
+		for _, program := range parsed.Progs {
+			if program.Type != elf.PT_LOAD {
+				continue
+			}
+			loadCount++
+			if program.Align != 0x1000 {
+				t.Fatalf("%s linux/amd64 PT_LOAD alignment = %#x", image.name, program.Align)
+			}
+			switch program.Flags {
+			case elf.PF_R | elf.PF_X:
+				hasReadExecute = true
+				entryInExecutableLoad = parsed.Entry >= program.Vaddr &&
+					parsed.Entry < program.Vaddr+program.Memsz
+			case elf.PF_R | elf.PF_W:
+				hasReadWrite = true
+			}
+		}
+		if loadCount != 2 || !hasReadExecute || !hasReadWrite || !entryInExecutableLoad {
+			t.Fatalf("%s linux/amd64 load contract = count %d, rx %v, rw %v, entry-in-rx %v",
+				image.name, loadCount, hasReadExecute, hasReadWrite, entryInExecutableLoad)
+		}
+		if err := parsed.Close(); err != nil {
+			t.Fatalf("close %s linux/amd64 output: %v", image.name, err)
+		}
+
+		executable := filepath.Join(t.TempDir(), image.name+"-linux-amd64")
+		if err := os.WriteFile(executable, image.binary, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		output, err := exec.Command(executable).CombinedOutput()
+		if err != nil {
+			t.Fatalf("execute %s linux/amd64 output: %v\n%s", image.name, err, output)
+		}
+		outputs = append(outputs, output)
+	}
+	if !bytes.Equal(outputs[0], outputs[1]) || string(outputs[0]) != "PASS\n" {
+		t.Fatalf("linux/amd64 outputs: built-in %q, prepared %q, want PASS",
+			outputs[0], outputs[1])
+	}
+}
+
+func TestWindowsAmd64BuiltInProjectionMatchesPreparedDefinitionBehavior(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skipf("in-process prepared backend requires linux/amd64, got %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdRoot := filepath.Join(root, "std")
+	source := filepath.Join(root, "backend", "tests", "arithmetic_return_expression.go")
+	builtIn := driver.CompileFromFS([]string{
+		"-t", "windows/amd64", "-s", "-o", "app.exe", source,
+	}, root, stdRoot, driver.OSFS{}, backendcompiled.Backend{})
+	if !builtIn.Ok {
+		t.Fatalf("built-in windows/amd64 compile failed: %#v", builtIn.Diagnostic)
+	}
+
+	definition := copyNativeDefinition(t, root,
+		"target windows/amd64 {", "target equivalence/windows64 {")
+	preparedBackend := New(definition, filepath.Join(root, "backend"), stdRoot,
+		t.TempDir(), backendcompiled.Backend{})
+	prepared := driver.CompileFromFS([]string{
+		"-backend", definition, "-t", "equivalence/windows64", "-s",
+		"-o", "app.exe", source,
+	}, root, stdRoot, driver.OSFS{}, preparedBackend)
+	if !prepared.Ok {
+		t.Fatalf("prepared equivalent windows/amd64 compile failed: %#v", prepared.Diagnostic)
+	}
+
+	var expectedImports []string
+	for _, image := range []struct {
+		name string
+		data []byte
+	}{{"built-in", builtIn.Binary}, {"prepared", prepared.Binary}} {
+		parsed, err := pe.NewFile(bytes.NewReader(image.data))
+		if err != nil {
+			t.Fatalf("parse %s windows/amd64 output: %v", image.name, err)
+		}
+		if parsed.Machine != pe.IMAGE_FILE_MACHINE_AMD64 || len(parsed.Sections) != 2 {
+			t.Fatalf("%s PE contract = machine %#x, sections %d",
+				image.name, parsed.Machine, len(parsed.Sections))
+		}
+		header, ok := parsed.OptionalHeader.(*pe.OptionalHeader64)
+		if !ok || header.Subsystem != pe.IMAGE_SUBSYSTEM_WINDOWS_CUI {
+			t.Fatalf("%s PE optional header = %#v", image.name, parsed.OptionalHeader)
+		}
+		if parsed.Sections[0].Name != ".text" || parsed.Sections[1].Name != ".data" {
+			t.Fatalf("%s PE sections = %q, %q", image.name,
+				parsed.Sections[0].Name, parsed.Sections[1].Name)
+		}
+		imports, err := parsed.ImportedSymbols()
+		if err != nil {
+			t.Fatalf("read %s imports: %v", image.name, err)
+		}
+		if expectedImports == nil {
+			expectedImports = imports
+		} else if !equalStrings(expectedImports, imports) {
+			t.Fatalf("prepared imports %q differ from built-in imports %q",
+				imports, expectedImports)
+		}
+	}
+}
+
+func equalStrings(left []string, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := 0; i < len(left); i++ {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestCompiledInBootstrapUsesAArch64Definition(t *testing.T) {
 	if hostTarget() == "" {
 		t.Skipf("no in-process prepared backend for %s/%s", runtime.GOOS, runtime.GOARCH)
@@ -405,6 +578,17 @@ func TestCompiledInBootstrapUsesDefinitionOwnedKernelModuleImage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	source := filepath.Join(
+		root, "internal", "backendjit", "testdata", "kernel_runtime.go")
+	builtIn := driver.CompileFromFS([]string{
+		"-t", "linux/amd64",
+		"-mode=kernel-module",
+		"-o", "prepared.ko",
+		source,
+	}, root, filepath.Join(root, "std"), driver.OSFS{}, backendcompiled.Backend{})
+	if !builtIn.Ok {
+		t.Fatalf("built-in kernel backend compile failed: %#v", builtIn.Diagnostic)
+	}
 	definition := copyNativeDefinition(t, root,
 		"target linux-kernel/amd64 {", "target example/kernel-amd64 {")
 	result := driver.CompileFromFS([]string{
@@ -412,12 +596,58 @@ func TestCompiledInBootstrapUsesDefinitionOwnedKernelModuleImage(t *testing.T) {
 		"-t", "example/kernel-amd64",
 		"-mode=kernel-module",
 		"-o", "prepared.ko",
-		filepath.Join(root, "internal", "backendjit", "testdata", "kernel_runtime.go"),
+		source,
 	}, root, filepath.Join(root, "std"), driver.OSFS{},
 		New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
 			t.TempDir(), backendcompiled.Backend{}))
 	if !result.Ok {
 		t.Fatalf("custom kernel backend compile failed: %#v", result.Diagnostic)
+	}
+	var expectedModuleInfo []byte
+	var expectedImports []string
+	for _, candidate := range []struct {
+		name string
+		data []byte
+	}{{"built-in", builtIn.Binary}, {"prepared", result.Binary}} {
+		parsed, parseErr := elf.NewFile(bytes.NewReader(candidate.data))
+		if parseErr != nil {
+			t.Fatalf("parse %s kernel module: %v", candidate.name, parseErr)
+		}
+		if parsed.Type != elf.ET_REL || parsed.Machine != elf.EM_X86_64 {
+			t.Fatalf("%s kernel image type/machine = %v/%v",
+				candidate.name, parsed.Type, parsed.Machine)
+		}
+		for _, name := range []string{
+			".text", ".rela.text", ".modinfo", ".gnu.linkonce.this_module",
+			".rela.gnu.linkonce.this_module",
+		} {
+			if parsed.Section(name) == nil {
+				t.Fatalf("%s kernel image is missing %s", candidate.name, name)
+			}
+		}
+		moduleInfo, dataErr := parsed.Section(".modinfo").Data()
+		if dataErr != nil {
+			t.Fatalf("read %s module information: %v", candidate.name, dataErr)
+		}
+		symbols, symbolErr := parsed.Symbols()
+		if symbolErr != nil {
+			t.Fatalf("read %s kernel symbols: %v", candidate.name, symbolErr)
+		}
+		var imports []string
+		for i := 0; i < len(symbols); i++ {
+			if symbols[i].Section == elf.SHN_UNDEF && symbols[i].Name != "" {
+				imports = append(imports, symbols[i].Name)
+			}
+		}
+		sort.Strings(imports)
+		if expectedModuleInfo == nil {
+			expectedModuleInfo = moduleInfo
+			expectedImports = imports
+		} else if !bytes.Equal(expectedModuleInfo, moduleInfo) ||
+			!equalStrings(expectedImports, imports) {
+			t.Fatalf("prepared kernel metadata/imports differ from built-in: %q/%q and %q/%q",
+				moduleInfo, expectedModuleInfo, imports, expectedImports)
+		}
 	}
 	image, err := elf.NewFile(bytes.NewReader(result.Binary))
 	if err != nil {

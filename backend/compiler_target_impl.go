@@ -104,7 +104,7 @@ func compileTarget(input []int, output int, target int, arenaSize int) int {
 		return compileLinuxAmd64Arena(input, output, arenaSize)
 	}
 	if target == renvoTargetLinuxKernelAmd64 {
-		return compileLinuxAmd64Arena(input, output, arenaSize)
+		return compileLinuxKernelAmd64Arena(input, output, arenaSize)
 	}
 	if target == renvoTargetWindowsAmd64 {
 		return compileWindowsAmd64Arena(input, output, arenaSize)
@@ -148,11 +148,12 @@ func RenvoCompileSourceToBytesStrip(source []byte, targetName string, stripSymbo
 }
 
 type RenvoCompileOptions struct {
-	ArenaSize     int
-	StripSymbols  bool
-	WindowsGUI    bool
-	EmitImage     bool
-	ModuleLicense string
+	ArenaSize      int
+	StripSymbols   bool
+	WindowsGUI     bool
+	EmitImage      bool
+	ModuleLicense  string
+	ModuleNamePath string
 }
 
 // RenvoInitializeObjectCache reserves the bounded in-process object store when
@@ -186,7 +187,11 @@ func RenvoCompileSourceToBytesWithOptions(source []byte, targetName string, opti
 		return nil, false
 	}
 	context := renvoNewCompileContext(target, options.StripSymbols, options.WindowsGUI, options.EmitImage)
-	renvoConfigureCompileContext(context, targetName, "renvo", options.ModuleLicense)
+	moduleNamePath := options.ModuleNamePath
+	if moduleNamePath == "" {
+		moduleNamePath = "renvo"
+	}
+	renvoConfigureCompileContext(context, targetName, moduleNamePath, options.ModuleLicense)
 	prog := renvoParseProgramWithContext(source, context)
 	result := renvoCompileParsedProgramArena(&prog, target, options.ArenaSize)
 	if !result.ok {
@@ -261,7 +266,11 @@ func RenvoCompileUnitToBytesWithOptions(unit []byte, targetName string, options 
 		return nil, false
 	}
 	context := renvoNewCompileContext(target, options.StripSymbols, options.WindowsGUI, options.EmitImage)
-	renvoConfigureCompileContext(context, targetName, "renvo", options.ModuleLicense)
+	moduleNamePath := options.ModuleNamePath
+	if moduleNamePath == "" {
+		moduleNamePath = "renvo"
+	}
+	renvoConfigureCompileContext(context, targetName, moduleNamePath, options.ModuleLicense)
 	prog, isUnit, ok := renvoDecodeUnitProgram(unit)
 	if !isUnit || !ok {
 		return nil, false

@@ -3,13 +3,11 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "513a331a6e382a593a0f4fb182056afb271c93ad5d08b8c86a22ddbc6bc88c25"
+const CompilerSourceDigest = "dcfc1f77ac8ec79052ce7e8bb5191d5edeec65da78eccae14f3ef1dd4e771fa9"
 
 // source: backend/compiler_common_impl.go
 
 const renvoAbsBssReloc = 1
-const renvoAbsKernelPrintReloc = 3
-const renvoAbsKernelImportRelocBase = 4
 
 func renvoAsmAddExternalImportName(a *renvoAsm, name string) int {
 renvoNonNil(a)
@@ -11739,6 +11737,7 @@ return false
 }
 wordCount += words
 if fn.linkStatic != 0 && (renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) ||
 renvoPreparedBackend != 0 ||
 targetIsDarwin(g.c.renvoTargetOS) && renvo_runtime_UnsafeByteAt(g.prog.src, fn.linkDLLStart) == '/' ||
 targetIsWindows(g.c.renvoTargetOS) && renvo_runtime_UnsafeByteAt(g.prog.src, fn.linkDLLStart) != '/') {
@@ -12812,7 +12811,8 @@ if resolved.kind == renvoTypeFunc {
 if renvoPreparedBackend != 0 && targetIsKernelModule(g.c) {
 return renvoRTGEmitKernelCallbackArgReverse(g, ep, idx, param.typ)
 }
-if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
 return renvoAmd64EmitKernelCallbackArgReverse(g, ep, idx, param.typ)
 }
 }
@@ -22281,7 +22281,7 @@ func renvoAppendPEHeader64WithContext(context *renvoCompileContext, out []byte, 
 machine := 0x8664
 imageBase := renvoWinImageBase
 stackReserve := 0x800000
-stackCommit := 0x100000
+stackCommit := 0x1000
 if context.renvoTargetArch == renvoArchAarch64 {
 machine = 0xaa64
 imageBase = 0x140000000
@@ -22766,7 +22766,8 @@ renvoRTGDirectMove(a, renvoRTGCallWord1, renvoRTGPrimary)
 renvoRTGDirectMoveImmediate(a, renvoRTGCallWord0, int64(fd))
 return renvoRTGEmitRuntimeOperation(a, RTGRuntimeWrite)
 }
-if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
 renvoAmd64EmitKernelPrintValue(a)
 return true
 }
@@ -23197,8 +23198,7 @@ if g.c.renvoTargetArch != renvoArchAmd64 {
 return false
 }
 if targetIsWindows(g.c.renvoTargetOS) {
-renvoAsmCopyPrimaryToTertiary(a)
-renvoWinAmd64CallImport(a, renvoWinImportExitProcess)
+renvoWinAmd64EmitExit(a)
 } else {
 renvoAsmCopyPrimaryToCallWord0(a)
 renvoAsmPrimaryImm(a, 60)
@@ -23209,7 +23209,8 @@ return true
 
 func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
 renvoNonNil(g, fn)
-if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
 return renvoAmd64EmitKernelLinkStaticCall(g, fn, wordCount)
 }
 if renvoPreparedBackend != 0 && renvoRTGPreparedKernelModule != 0 &&
@@ -23257,7 +23258,8 @@ return true
 
 func renvoEmitTargetStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) int {
 renvoNonNil(g, fn)
-if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
 if !renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "kernel") {
 return 0
 }
@@ -23996,43 +23998,9 @@ renvoAmd64AsmMoveOffsetArg(a)
 
 // source: backend/compiler_windows_impl.go
 
-func renvoWinAmd64CallImport(a *renvoAsm, importID int) {
-renvoNonNil(a)
-
-
-
-base := len(a.code)
-renvoAsmEmitText(a, "\x41\x54\x49\x89\xe4\x48\x83\xe4\xf0\x48\x83\xec\x20\xff\x15\x00\x00\x00\x00\x49\x89\xc3\x4c\x89\xe4\x41\x5c\x4c\x89\xd8")
-renvoAsmAddWinImportReloc(a, base+15, importID)
-}
-
 func renvoWin386CallImport(a *renvoAsm, importID int) {
 renvoNonNil(a)
 renvoAsmEmit16(a, 0x15ff)
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddWinImportReloc(a, at, importID)
-}
-
-func renvoWinAmd64LoadImportPtrRax(a *renvoAsm, importID int) {
-renvoNonNil(a)
-renvoAsmEmit24(a, 0x058b48)
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddWinImportReloc(a, at, importID)
-}
-
-func renvoWinAmd64LoadImportPtrR9(a *renvoAsm, importID int) {
-renvoNonNil(a)
-renvoAsmEmit24(a, 0x0d8b4c)
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddWinImportReloc(a, at, importID)
-}
-
-func renvoWinAmd64LoadImportPtrR10(a *renvoAsm, importID int) {
-renvoNonNil(a)
-renvoAsmEmit24(a, 0x158b4c)
 at := len(a.code)
 renvoAsmEmit32(a, 0)
 renvoAsmAddWinImportReloc(a, at, importID)
@@ -24110,63 +24078,6 @@ renvoAsmEmit32(a, 0)
 renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
 }
 
-func renvoWinAmd64EmitReadWriteHelper(g *renvoLinearGen, isWrite bool) int {
-renvoNonNil(g)
-
-
-
-a := &g.asm
-if isWrite {
-if g.winWriteEmitted {
-return g.winWriteLabel
-}
-} else if g.winReadEmitted {
-return g.winReadLabel
-}
-label := renvoAsmNewLabel(a)
-if isWrite {
-g.winWriteEmitted = true
-g.winWriteLabel = label
-} else {
-g.winReadEmitted = true
-g.winReadLabel = label
-}
-countOff := a.bssSize
-a.bssSize += 8
-posOff := a.bssSize
-a.bssSize += 8
-importID := renvoWinImportReadFile
-prefix := "\xe9\x32\x01\x00\x00\x57\x56\x52\x51\x48\x83\x7c\x24\x18\x00\x74\x02\xeb\x18\xb9\xf6"
-if isWrite {
-importID = renvoWinImportWriteFile
-prefix = "\xe9\x54\x01\x00\x00\x57\x56\x52\x51\x48\x83\x7c\x24\x18\x01\x74\x0a\x48\x83\x7c\x24\x18\x02\x74\x1c\xeb\x32\xb9\xf5\xff\xff\xff\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\x44\x24\x18\xeb\x18\xb9\xf4"
-}
-base := len(a.code)
-renvoAsmEmitText(a, prefix)
-a.labelPos[label] = int32(base + 5)
-a.lastPrimaryStoreEnd = -1
-commonBase := len(a.code)
-renvoAsmEmitText(a, "\xff\xff\xff\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\x44\x24\x18\x48\x83\x3c\x24\x00\x0f\x8c\x80\x00\x00\x00\x48\x8b\x4c\x24\x18\x31\xd2\x45\x31\xc0\x41\xb9\x01\x00\x00\x00\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\x05\x00\x00\x00\x00\x48\x8b\x4c\x24\x18\x48\x8b\x14\x24\x45\x31\xc0\x45\x31\xc9\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x8b\x4c\x24\x18\x48\x8b\x54\x24\x10\x4c\x8b\x44\x24\x08\x48\x8d\x05\x00\x00\x00\x00\x49\x89\xc1\x48\x83\xec\x28\x48\xc7\x44\x24\x20\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x83\xf8\x00\x74\x52\x48\x8b\x05\x00\x00\x00\x00\xeb\x4c\x48\x8b\x4c\x24\x18\x48\x8b\x54\x24\x10\x4c\x8b\x44\x24\x08\x48\x8d\x05\x00\x00\x00\x00\x49\x89\xc1\x48\x83\xec\x28\x48\xc7\x44\x24\x20\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x83\xf8\x00\x74\x0c\x48\x8b\x05\x00\x00\x00\x00\x48\x83\xc4\x20\xc3\x6a\xff\x58\x48\x83\xc4\x20\xc3\x6a\xff\x58\x48\x89\x05\x00\x00\x00\x00\x48\x8b\x4c\x24\x18\x48\x8b\x05\x00\x00\x00\x00\x50\x5a\x45\x31\xc0\x45\x31\xc9\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x8b\x05\x00\x00\x00\x00\x48\x83\xc4\x20\xc3")
-if isWrite {
-renvoAsmAddWinImportReloc(a, base+38, renvoWinImportGetStdHandle)
-}
-renvoAsmAddWinImportReloc(a, commonBase+9, renvoWinImportGetStdHandle)
-renvoAsmAddWinImportReloc(a, commonBase+55, renvoWinImportSetFilePointer)
-renvoAsmAddAbsReloc(a, commonBase+66, posOff, renvoAbsBssReloc)
-renvoAsmAddWinImportReloc(a, commonBase+91, renvoWinImportSetFilePointer)
-renvoAsmAddAbsReloc(a, commonBase+117, countOff, renvoAbsBssReloc)
-renvoAsmAddWinImportReloc(a, commonBase+139, importID)
-renvoAsmAddAbsReloc(a, commonBase+155, countOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, commonBase+179, countOff, renvoAbsBssReloc)
-renvoAsmAddWinImportReloc(a, commonBase+201, importID)
-renvoAsmAddAbsReloc(a, commonBase+217, countOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, commonBase+240, countOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, commonBase+252, posOff, renvoAbsBssReloc)
-renvoAsmAddWinImportReloc(a, commonBase+270, renvoWinImportSetFilePointer)
-renvoAsmAddAbsReloc(a, commonBase+281, countOff, renvoAbsBssReloc)
-return label
-}
-
 func renvoWin386EmitReadWriteHelper(g *renvoLinearGen, isWrite bool) int {
 a := &g.asm
 if isWrite {
@@ -24227,50 +24138,6 @@ renvoAsmEmit8(a, 0x53)
 renvoWin386CallImport(a, importID)
 }
 
-func renvoWinAmd64TranslateCreateFileFlags(a *renvoAsm) {
-renvoNonNil(a)
-notRDWRLabel := renvoAsmNewLabel(a)
-accessDoneLabel := renvoAsmNewLabel(a)
-noCreateLabel := renvoAsmNewLabel(a)
-createDoneLabel := renvoAsmNewLabel(a)
-
-renvoAsmSecondaryImm(a, -2147483648)
-renvoAsmEmit2(a, 0xa8, 2)
-renvoAsmJzLabel(a, notRDWRLabel)
-renvoAsmSecondaryImm(a, -1073741824)
-renvoAsmJmpMarkLabel(a, accessDoneLabel, notRDWRLabel)
-renvoAsmEmit2(a, 0xa8, 1)
-renvoAsmJzLabel(a, accessDoneLabel)
-renvoAsmSecondaryImm(a, 0x40000000)
-renvoAsmMarkLabel(a, accessDoneLabel)
-
-renvoWinAmd64MovR10Imm(a, 3)
-renvoAsmEmit2(a, 0xa8, 64)
-renvoAsmJzLabel(a, noCreateLabel)
-renvoWinAmd64MovR10Imm(a, 4)
-renvoAsmEmit8(a, 0xa9)
-renvoAsmEmit32(a, 512)
-renvoAsmJzLabel(a, createDoneLabel)
-renvoWinAmd64MovR10Imm(a, 2)
-renvoAsmJmpMarkLabel(a, createDoneLabel, noCreateLabel)
-renvoAsmEmit8(a, 0xa9)
-renvoAsmEmit32(a, 512)
-renvoAsmJzLabel(a, createDoneLabel)
-renvoWinAmd64MovR10Imm(a, 5)
-renvoAsmMarkLabel(a, createDoneLabel)
-renvoAsmEmit8(a, 0x41)
-renvoAsmEmit8(a, 0xb8)
-renvoAsmEmit32(a, 3)
-renvoAsmEmit24(a, 0xc93145)
-}
-
-func renvoWinAmd64MovR10Imm(a *renvoAsm, imm int) {
-renvoNonNil(a)
-renvoAsmEmit8(a, 0x41)
-renvoAsmEmit8(a, 0xba)
-renvoAsmEmit32(a, imm)
-}
-
 func renvoWin386TranslateCreateFileFlags(a *renvoAsm) {
 renvoNonNil(a)
 notRDWRLabel := renvoAsmNewLabel(a)
@@ -24311,101 +24178,6 @@ renvoAsmEmit32(a, 5)
 renvoAsmMarkLabel(a, createDoneLabel)
 }
 
-func renvoWinAmd64CallStaticImport(a *renvoAsm, importID int, wordCount int) {
-renvoNonNil(a)
-if wordCount > 0 {
-renvoAsmPopTertiary(a)
-}
-if wordCount > 1 {
-renvoAsmPopSecondary(a)
-}
-if wordCount > 2 {
-renvoAsmEmit16(a, 0x5841)
-}
-if wordCount > 3 {
-renvoAsmEmit16(a, 0x5941)
-}
-stackWords := 0
-if wordCount > 4 {
-stackWords = wordCount - 4
-}
-
-
-
-
-renvoAsmEmit24(a, 0xe28949)
-renvoAsmEmit4(a, 0x48, 0x83, 0xe4, 0xf0)
-savedRSPOff := 32 + stackWords*8
-allocation := renvoAlignValue(savedRSPOff+8, 16)
-if renvoAsmImmFits8Signed(allocation) {
-renvoAsmEmit4(a, 0x48, 0x83, 0xec, allocation)
-} else {
-renvoAsmEmit24(a, 0xec8148)
-renvoAsmEmit32(a, allocation)
-}
-for i := 0; i < stackWords; i++ {
-renvoWinAmd64LoadRAXFromR10(a, i*8)
-renvoWinAmd64StoreRAXToRSP(a, 32+i*8)
-}
-renvoWinAmd64StoreR10ToRSP(a, savedRSPOff)
-renvoAsmEmit16(a, 0x15ff)
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddWinImportReloc(a, at, importID)
-renvoAsmEmit24(a, 0xc28949)
-renvoWinAmd64LoadRAXFromRSP(a, savedRSPOff)
-renvoAsmEmit24(a, 0xc48948)
-if stackWords > 0 {
-adjust := stackWords * 8
-if renvoAsmImmFits8Signed(adjust) {
-renvoAsmEmit4(a, 0x48, 0x83, 0xc4, adjust)
-} else {
-renvoAsmEmit24(a, 0xc48148)
-renvoAsmEmit32(a, adjust)
-}
-}
-renvoAsmEmit24(a, 0xd0894c)
-}
-
-func renvoWinAmd64LoadRAXFromR10(a *renvoAsm, offset int) {
-renvoNonNil(a)
-if offset <= 127 {
-renvoAsmEmit4(a, 0x49, 0x8b, 0x42, offset)
-return
-}
-renvoAsmEmit24(a, 0x828b49)
-renvoAsmEmit32(a, offset)
-}
-
-func renvoWinAmd64LoadRAXFromRSP(a *renvoAsm, offset int) {
-renvoNonNil(a)
-if offset <= 127 {
-renvoAsmEmit5(a, 0x48, 0x8b, 0x44, 0x24, offset)
-return
-}
-renvoAsmEmit4(a, 0x48, 0x8b, 0x84, 0x24)
-renvoAsmEmit32(a, offset)
-}
-
-func renvoWinAmd64StoreRAXToRSP(a *renvoAsm, offset int) {
-renvoNonNil(a)
-if offset <= 127 {
-renvoAsmEmit5(a, 0x48, 0x89, 0x44, 0x24, offset)
-return
-}
-renvoAsmEmit4(a, 0x48, 0x89, 0x84, 0x24)
-renvoAsmEmit32(a, offset)
-}
-
-func renvoWinAmd64StoreR10ToRSP(a *renvoAsm, offset int) {
-renvoNonNil(a)
-if offset <= 127 {
-renvoAsmEmit5(a, 0x4c, 0x89, 0x54, 0x24, offset)
-return
-}
-renvoAsmEmit4(a, 0x4c, 0x89, 0x94, 0x24)
-renvoAsmEmit32(a, offset)
-}
 func renvoEmitWindowsReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, isWrite bool) bool {
 renvoNonNil(g, ep)
 a := &g.asm
@@ -24504,17 +24276,9 @@ renvoAarch64AsmMovRegReg(a, 0, 9)
 renvoWinArm64CallImport(a, renvoWinImportCreateFileA)
 return true
 }
-renvoAsmPushPrimary(a)
-renvoAsmCopyPrimaryToTertiary(a)
-renvoAsmPopTertiary(a)
-renvoAsmPopPrimary(a)
-renvoWinAmd64TranslateCreateFileFlags(a)
-
-
-
-base := len(a.code)
-renvoAsmEmitText(a, "\x41\x54\x49\x89\xe4\x48\x83\xe4\xf0\x48\x83\xec\x40\x44\x89\x54\x24\x20\xc7\x44\x24\x28\x80\x00\x00\x00\x48\xc7\x44\x24\x30\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x49\x89\xc3\x4c\x89\xe4\x41\x5c\x4c\x89\xd8")
-renvoAsmAddWinImportReloc(a, base+37, renvoWinImportCreateFileA)
+renvoAsmCopyPrimaryToCallWord0(a)
+renvoAsmPopCallWord1(a)
+renvoWinAmd64EmitRuntimeOpen(a)
 return true
 }
 
@@ -24552,13 +24316,7 @@ renvoAsmMarkLabel(a, doneLabel)
 return true
 }
 renvoAsmCopyPrimaryToTertiary(a)
-renvoWinAmd64CallImport(a, renvoWinImportCloseHandle)
-renvoAsmEmit3(a, 0x83, 0xf8, 0)
-renvoAsmJzLabel(a, failLabel)
-renvoAsmPrimaryImm(a, 0)
-renvoAsmJmpMarkLabel(a, doneLabel, failLabel)
-renvoAsmPrimaryImm(a, -1)
-renvoAsmMarkLabel(a, doneLabel)
+renvoWinAmd64EmitRuntimeClose(a)
 return true
 }
 
@@ -24608,18 +24366,7 @@ renvoAsmMarkLabel(a, doneLabel)
 return true
 }
 renvoAsmPopTertiary(a)
-renvoAsmEmit16(a, 0xd231)
-renvoAsmEmit8(a, 0x41)
-renvoAsmEmit8(a, 0xb9)
-renvoAsmEmit32(a, 1)
-renvoAsmEmit24(a, 0xc03145)
-renvoWinAmd64CallImport(a, renvoWinImportSetFilePointer)
-renvoAsmEmit3(a, 0x83, 0xf8, -1)
-renvoAsmJzLabel(a, failLabel)
-renvoAsmPrimaryImm(a, 0)
-renvoAsmJmpMarkLabel(a, doneLabel, failLabel)
-renvoAsmPrimaryImm(a, -1)
-renvoAsmMarkLabel(a, doneLabel)
+renvoWinAmd64EmitRuntimeChmod(a)
 return true
 }
 
@@ -25246,7 +24993,7 @@ return renvoRTGParseTargetArg(target)
 
 func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
 if target == renvoTargetLinuxAmd64 {
-return "linux/amd64", "\a\xbc\xe9\xfb\xf7lj\xbcfi\xf9\xf7\xc04\xad\x0fwõ\xc3\xf6h#=墉\xc0\x05Y\x9b\x9a", 3, true
+return "linux/amd64", "4\xfd\x9b͘3]\x8aU=)\xfa\xc2\xe8\xd5`̵\xf1\x12\x1e$m8\xc8tf\xae\xe3\x18\x94R", 3, true
 }
 if target == renvoTargetLinux386 {
 return "linux/386", "\x05T\x05\x1e\x13^g\x9b\xed\xfa6\xe3#\t\x97꠱\x8a\xee\x19\x89\xe0\xc4,Azƺ\xf4\xd4G", 3, true
@@ -25258,7 +25005,7 @@ if target == renvoTargetLinuxArm {
 return "linux/arm", "\x94isB\xbdpqӽ\xa6\x94\x17\xbb\n\xce\x04\xd0\xfb\xdd$\xaat\x88\fd\x1ct&+\xe8\xec\xa7", 3, true
 }
 if target == renvoTargetWindowsAmd64 {
-return "windows/amd64", "={\xf3\\};a\xe2\xa8'\x92\xeat{\xd4a\xba\x9cG\xfe\x9e\xca\xc5\xc9C<\xed\x81B\xb3\x1cS", 3, true
+return "windows/amd64", "o\xf6\x1d\xbd/\xb7c\xd9%Ȅ\xc7\xcb\x17\xb1\xd7Mc6'M\xaev\x89\xd2\r7\xa3*tƸ", 3, true
 }
 if target == renvoTargetWindows386 {
 return "windows/386", "\x91\x83\xec\x9dQ\x19\x84\xb9\x13\xcd\x069Nw\xc3Jò\xab\xab\xa68\xbcv.HJ\xa62,\x1en", 3, true
@@ -25270,7 +25017,7 @@ if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "O\xca\xc5斻\x03F+\xf8\xf1~ű\nH\xc6'\xaf\xb3\x867K\xe2\xce\xffj{\xdb\xd3\xfa\xe5", 3, true
 }
 if target == renvoTargetLinuxKernelAmd64 {
-return "linux-kernel/amd64", "s\xb2\x9a{\xfei\xb2\x00G\x15\xf83K\xb0R\x97\x8a`\x92\xf2\xc1\xfe\x84\x17\xa1\xf6ĺv!\x91\xe4", 3, true
+return "linux-kernel/amd64", "$!\xef\xffp\x92\x95\xb4\x93\xadA\x19\x9f\xb3\xb9\x18*\xca2\xd2-\x90\x06\xbd\xa0\xb64^\xb9\xc4j\xa1", 3, true
 }
 if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\xb9φ\x05\xee.\x8d\x91&)\x90\xff\x160\x94\x06ʯ\x00\xd5.~\x1b\xac \f,\xa4m\xae/q", 3, true
@@ -25387,7 +25134,7 @@ renvoFixedTarget = renvoTargetLinuxAmd64
 return compileLinuxAmd64Arena(input, output, arenaSize)
 }
 if target == renvoTargetLinuxKernelAmd64 {
-return compileLinuxAmd64Arena(input, output, arenaSize)
+return compileLinuxKernelAmd64Arena(input, output, arenaSize)
 }
 if target == renvoTargetWindowsAmd64 {
 return compileWindowsAmd64Arena(input, output, arenaSize)
@@ -25431,11 +25178,12 @@ return RenvoCompileSourceToBytesWithOptions(source, targetName, RenvoCompileOpti
 }
 
 type RenvoCompileOptions struct {
-ArenaSize     int
-StripSymbols  bool
-WindowsGUI    bool
-EmitImage     bool
-ModuleLicense string
+ArenaSize      int
+StripSymbols   bool
+WindowsGUI     bool
+EmitImage      bool
+ModuleLicense  string
+ModuleNamePath string
 }
 
 
@@ -25469,7 +25217,11 @@ if target == 0 || !renvoCompileOptionsValid(target, options) {
 return nil, false
 }
 context := renvoNewCompileContext(target, options.StripSymbols, options.WindowsGUI, options.EmitImage)
-renvoConfigureCompileContext(context, targetName, "renvo", options.ModuleLicense)
+moduleNamePath := options.ModuleNamePath
+if moduleNamePath == "" {
+moduleNamePath = "renvo"
+}
+renvoConfigureCompileContext(context, targetName, moduleNamePath, options.ModuleLicense)
 prog := renvoParseProgramWithContext(source, context)
 result := renvoCompileParsedProgramArena(&prog, target, options.ArenaSize)
 if !result.ok {
@@ -25544,7 +25296,11 @@ if target == 0 || !renvoCompileOptionsValid(target, options) ||
 return nil, false
 }
 context := renvoNewCompileContext(target, options.StripSymbols, options.WindowsGUI, options.EmitImage)
-renvoConfigureCompileContext(context, targetName, "renvo", options.ModuleLicense)
+moduleNamePath := options.ModuleNamePath
+if moduleNamePath == "" {
+moduleNamePath = "renvo"
+}
+renvoConfigureCompileContext(context, targetName, moduleNamePath, options.ModuleLicense)
 prog, isUnit, ok := renvoDecodeUnitProgram(unit)
 if !isUnit || !ok {
 return nil, false
@@ -25895,6 +25651,14 @@ if bits >= 63 {
 return true
 }
 return value < uint64(1)<<bits
+}
+
+func renvoRTGRel32(out *renvoAsm, label int) {
+at := len(out.code)
+renvoAsmEmit32(out, 0)
+if label >= 0 {
+renvoAsmAddReloc(out, at, label)
+}
 }
 
 func RTGLog2(value int) int {
@@ -27083,7 +26847,9 @@ const renvoAmd64ELFCodeOffset = 0xb0
 const renvoAmd64RuntimeOptimizationSourceThreshold = 1048576
 
 func renvoCompileAmd64(input []int, output int, arenaSize int) int {
-if renvoFixedTarget == renvoTargetLinuxKernelAmd64 && !renvoPrepareKernelMetadata() {
+if (renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+renvoFixedTarget == 0 && renvoTarget == renvoTargetLinuxKernelAmd64) &&
+!renvoPrepareKernelMetadata() {
 renvoPrintErr("renvo: kernel metadata unavailable\n")
 return 1
 }
@@ -27094,7 +26860,8 @@ src = append(src, '\n')
 }
 var prog renvoProgram
 prog = renvoParseProgram(src)
-if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+renvoFixedTarget == 0 && renvoTarget == renvoTargetLinuxKernelAmd64 {
 renvoCaptureKernelCompileContext(&prog.c)
 }
 if !prog.ok {
@@ -27179,7 +26946,8 @@ label := renvoAsmNewLabel(a)
 g.funcLabels = append(g.funcLabels, label)
 }
 renvoInitFuncQueue(g, len(meta.funcs))
-if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(meta.c) {
 if !renvoBeginKernelModuleAmd64(g, appIndex) {
 return nil
 }
@@ -27219,8 +26987,7 @@ return nil
 if renvoFixedTarget == 0 && meta.c.emitImage {
 renvoAsmRet(a)
 } else if targetIsWindows(meta.c.renvoTargetOS) {
-renvoAsmCopyPrimaryToTertiary(a)
-renvoWinAmd64CallImport(a, renvoWinImportExitProcess)
+renvoWinAmd64EmitExit(a)
 renvoAsmRet(a)
 } else {
 renvoAsmCopyPrimaryToCallWord0(a)
@@ -27276,7 +27043,8 @@ a := &g.asm
 var data []byte
 if targetIsWindows(g.c.renvoTargetOS) {
 data = renvoAsmImageWindowsAmd64(a)
-} else if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+} else if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
 data = renvoAsmImageKernelModuleAmd64(a, g.kernelInitLabel, g.kernelExitLabel)
 } else {
 data = renvoAsmImageAmd64(a)
@@ -27307,22 +27075,31 @@ if !renvoTypeIsStringSlice(g.meta, first.typ) {
 return false
 }
 argsOff := g.asm.bssSize
-g.asm.bssSize += 32768
 if targetIsWindows(g.c.renvoTargetOS) {
-argsTextOff := g.asm.bssSize
-g.asm.bssSize += 32768
-argsLenOff := g.asm.bssSize
-g.asm.bssSize += 8
-envDataOff := g.asm.bssSize
-g.asm.bssSize += 32768
-envLenOff := g.asm.bssSize
-g.asm.bssSize += 8
+argsOff = renvoAlignValue(g.asm.bssSize, renvoWindowsAmd64ArgsBSSAlignment)
+g.asm.bssSize = argsOff + renvoWindowsAmd64ArgsBSSSize
+argsTextOff := renvoAlignValue(
+g.asm.bssSize, renvoWindowsAmd64ArgsTextBSSAlignment)
+g.asm.bssSize = argsTextOff + renvoWindowsAmd64ArgsTextBSSSize
+argsLenOff := renvoAlignValue(
+g.asm.bssSize, renvoWindowsAmd64ArgsLengthBSSAlignment)
+g.asm.bssSize = argsLenOff + renvoWindowsAmd64ArgsLengthBSSSize
+envDataOff := renvoAlignValue(
+g.asm.bssSize, renvoWindowsAmd64EnvironmentBSSAlignment)
+g.asm.bssSize = envDataOff + renvoWindowsAmd64EnvironmentBSSSize
+envLenOff := renvoAlignValue(
+g.asm.bssSize, renvoWindowsAmd64EnvironmentLengthBSSAlignment)
+g.asm.bssSize = envLenOff + renvoWindowsAmd64EnvironmentLengthBSSSize
 renvoAsmBuildWindowsArgvEnvSlicesAmd64(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
 } else {
-envDataOff := g.asm.bssSize
-g.asm.bssSize += 32768
-envLenOff := g.asm.bssSize
-g.asm.bssSize += 8
+argsOff = renvoAlignValue(g.asm.bssSize, renvoLinuxAmd64ArgsBSSAlignment)
+g.asm.bssSize = argsOff + renvoLinuxAmd64ArgsBSSSize
+envDataOff := renvoAlignValue(
+g.asm.bssSize, renvoLinuxAmd64EnvironmentBSSAlignment)
+g.asm.bssSize = envDataOff + renvoLinuxAmd64EnvironmentBSSSize
+envLenOff := renvoAlignValue(
+g.asm.bssSize, renvoLinuxAmd64EnvironmentLengthBSSAlignment)
+g.asm.bssSize = envLenOff + renvoLinuxAmd64EnvironmentLengthBSSSize
 renvoAsmBuildArgvEnvSlicesAmd64(&g.asm, argsOff, envDataOff, envLenOff)
 }
 if app.paramCount == 1 {
@@ -33675,6 +33452,15 @@ return headers, tails, true
 
 // source: backend/compiler_linux_amd64_impl.go
 
+
+func rtgBuiltinLinuxAmd64PackageLinuxPrepareReadWriteBuffer(out *renvoAsm) {
+renvoAsmEmit16(out, 0x5a51)
+}
+
+func rtgBuiltinLinuxAmd64PackageLinuxMoveOffsetArgument(out *renvoAsm) {
+renvoAsmEmit24(out, 0xc28949)
+}
+
 const renvoLinuxAmd64SysReadSeq = 0
 const renvoLinuxAmd64SysWriteSeq = 1
 const renvoLinuxAmd64SysOpen = 2
@@ -33686,12 +33472,12 @@ const renvoLinuxAmd64SysFchmod = 91
 func renvoAmd64AsmPrepareReadWriteBuf(a *renvoAsm) {
 renvoNonNil(a)
 renvoAsmCopyPrimaryToCallWord1(a)
-renvoAsmEmit16(a, 0x5a51)
+rtgBuiltinLinuxAmd64PackageLinuxPrepareReadWriteBuffer(a)
 }
 
 func renvoAmd64AsmMoveOffsetArg(a *renvoAsm) {
 renvoNonNil(a)
-renvoAsmEmit24(a, 0xc28949)
+rtgBuiltinLinuxAmd64PackageLinuxMoveOffsetArgument(a)
 }
 
 func compileLinuxAmd64(input []int, output int) int {
@@ -33703,18 +33489,25 @@ renvoSetTarget(renvoTargetLinuxAmd64)
 return renvoCompileAmd64(input, output, arenaSize)
 }
 
-func renvoAsmBuildArgvEnvSlicesAmd64(a *renvoAsm, bssOff int, envOff int, envLenOff int) {
+const renvoLinuxAmd64ArgsBSSSize = 32768
+const renvoLinuxAmd64ArgsBSSAlignment = 16
+const renvoLinuxAmd64EnvironmentBSSSize = 32768
+const renvoLinuxAmd64EnvironmentBSSAlignment = 16
+const renvoLinuxAmd64EnvironmentLengthBSSSize = 8
+const renvoLinuxAmd64EnvironmentLengthBSSAlignment = 8
+
+func renvoAsmBuildArgvEnvSlicesAmd64(a *renvoAsm, argsOff int, environmentOff int, environmentLengthOff int) {
 renvoNonNil(a)
-
-
 base := len(a.code)
 renvoAsmEmitText(a, "\x48\x8b\x04\x24\x49\x89\xc0\x4c\x8d\x4c\x24\x08\x4c\x8d\x15\x00\x00\x00\x00\x4d\x89\xd4\x4d\x31\xdb\x4d\x39\xc3\x7d\x22\x4b\x8b\x3c\xd9\x49\x89\x3a\x48\x31\xc0\x80\x3c\x07\x00\x74\x05\x48\xff\xc0\xeb\xf5\x49\x89\x42\x08\x49\x83\xc2\x10\x49\xff\xc3\xeb\xd9\x4c\x8d\x4c\x24\x08\x49\x83\x39\x00\x74\x06\x49\x83\xc1\x08\xeb\xf4\x49\x83\xc1\x08\x4c\x8d\x15\x00\x00\x00\x00\x4d\x31\xdb\x4b\x8b\x3c\xd9\x48\x83\xff\x00\x74\x1e\x49\x89\x3a\x48\x31\xc0\x80\x3c\x07\x00\x74\x05\x48\xff\xc0\xeb\xf5\x49\x89\x42\x08\x49\x83\xc2\x10\x49\xff\xc3\xeb\xd8\x4c\x89\xd8\x48\x89\x05\x00\x00\x00\x00\x4c\x89\xe7\x4c\x89\xc6\x4c\x89\xc2\x48\x8d\x05\x00\x00\x00\x00\x50\x59\x48\x8b\x05\x00\x00\x00\x00\x49\x89\xc0\x49\x89\xc1")
-renvoAsmAddAbsReloc(a, base+15, bssOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+88, envOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+141, envLenOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+157, envOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+166, envLenOff, renvoAbsBssReloc)
+renvoAsmAddAbsReloc(a, base+15, argsOff, renvoAbsBssReloc)
+renvoAsmAddAbsReloc(a, base+88, environmentOff, renvoAbsBssReloc)
+renvoAsmAddAbsReloc(a, base+141, environmentLengthOff, renvoAbsBssReloc)
+renvoAsmAddAbsReloc(a, base+157, environmentOff, renvoAbsBssReloc)
+renvoAsmAddAbsReloc(a, base+166, environmentLengthOff, renvoAbsBssReloc)
 }
+
+const renvoLinuxAmd64ELFMachine = 62
 
 func renvoAsmImageAmd64(a *renvoAsm) []byte {
 renvoNonNil(a)
@@ -33794,10 +33587,12 @@ return out
 func renvoAppendElfHeaderAmd64(out []byte, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int) []byte {
 start := len(out)
 base := 0
-header := "\x7f\x45\x4c\x46\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x3e\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x38\x00\x02\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x05\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00"
+header := "\x7f\x45\x4c\x46\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x38\x00\x02\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x05\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00"
 for i := 0; i < len(header); i++ {
 out = append(out, header[i])
 }
+out[start+18] = byte(renvoLinuxAmd64ELFMachine)
+out[start+19] = byte(renvoLinuxAmd64ELFMachine >> 8)
 
 
 out[start+16] = 3
@@ -33818,6 +33613,328 @@ return out
 
 // source: backend/compiler_windows_amd64_impl.go
 
+
+
+type renvoWindowsAmd64Register struct {
+Code int
+Valid bool
+}
+
+var renvoWindowsAmd64RaxRegister = renvoWindowsAmd64Register{Code: 0, Valid: true}
+
+const renvoWindowsAmd64RelocationAbsoluteBSS = 1
+const renvoWindowsAmd64RelocationImport = 2
+
+func renvoWindowsAmd64Rel32(out *renvoAsm, label int) {
+at := len(out.code)
+renvoAsmEmit32(out, 0)
+if label >= 0 {
+renvoAsmAddReloc(out, at, label)
+}
+}
+
+func rtgBuiltinWindowsAmd64PackageWindowsExit(out *renvoAsm, status renvoWindowsAmd64Register) {
+if status.Code != 1 {
+if status.Code >= 8 {
+renvoAsmEmit8(out, 0x49)
+} else {
+renvoAsmEmit8(out, 0x48)
+}
+renvoAsmEmit8(out, 0x89)
+out.code = append(out.code, byte(0xc1 | (status.Code&7)<<3))
+}
+renvoAsmEmit4(out, 0x48, 0x83, 0xec, 0x28)
+renvoAsmEmit2(out, 0xff, 0x15)
+at := len(out.code)
+renvoAsmEmit32(out, 0)
+renvoAsmAddAbsReloc(out, at, 8, 2)
+}
+func rtgBuiltinWindowsAmd64PackageWindowsLoadRAXFromR10(out *renvoAsm, offset int) {
+if offset <= 127 {
+renvoAsmEmit4(out, 0x49, 0x8b, 0x42, offset)
+return
+}
+renvoAsmEmit3(out, 0x49, 0x8b, 0x82)
+renvoAsmEmit32(out, offset)
+}
+func rtgBuiltinWindowsAmd64PackageWindowsLoadRAXFromRSP(out *renvoAsm, offset int) {
+if offset <= 127 {
+renvoAsmEmit4(out, 0x48, 0x8b, 0x44, 0x24)
+renvoAsmEmit8(out, offset)
+return
+}
+renvoAsmEmit4(out, 0x48, 0x8b, 0x84, 0x24)
+renvoAsmEmit32(out, offset)
+}
+func rtgBuiltinWindowsAmd64PackageWindowsStoreRAXToRSP(out *renvoAsm, offset int) {
+if offset <= 127 {
+renvoAsmEmit4(out, 0x48, 0x89, 0x44, 0x24)
+renvoAsmEmit8(out, offset)
+return
+}
+renvoAsmEmit4(out, 0x48, 0x89, 0x84, 0x24)
+renvoAsmEmit32(out, offset)
+}
+func rtgBuiltinWindowsAmd64PackageWindowsStoreR10ToRSP(out *renvoAsm, offset int) {
+if offset <= 127 {
+renvoAsmEmit4(out, 0x4c, 0x89, 0x54, 0x24)
+renvoAsmEmit8(out, offset)
+return
+}
+renvoAsmEmit4(out, 0x4c, 0x89, 0x94, 0x24)
+renvoAsmEmit32(out, offset)
+}
+func rtgBuiltinWindowsAmd64PackageWindowsStaticCall(out *renvoAsm, importID int, wordCount int) {
+if wordCount > 0 {
+renvoAsmEmit8(out, 0x59)
+}
+if wordCount > 1 {
+renvoAsmEmit8(out, 0x5a)
+}
+if wordCount > 2 {
+renvoAsmEmit2(out, 0x41, 0x58)
+}
+if wordCount > 3 {
+renvoAsmEmit2(out, 0x41, 0x59)
+}
+stackWords := 0
+if wordCount > 4 {
+stackWords = wordCount - 4
+}
+renvoAsmEmit3(out, 0x49, 0x89, 0xe2)
+renvoAsmEmit4(out, 0x48, 0x83, 0xe4, 0xf0)
+savedRSPOff := 32 + stackWords*8
+allocation := renvoAlignValue(savedRSPOff+8, 16)
+if renvoAsmImmFits8Signed(allocation) {
+renvoAsmEmit4(out, 0x48, 0x83, 0xec, allocation)
+} else {
+renvoAsmEmit3(out, 0x48, 0x81, 0xec)
+renvoAsmEmit32(out, allocation)
+}
+for i := 0; i < stackWords; i++ {
+rtgBuiltinWindowsAmd64PackageWindowsLoadRAXFromR10(out, i*8)
+rtgBuiltinWindowsAmd64PackageWindowsStoreRAXToRSP(out, 32+i*8)
+}
+rtgBuiltinWindowsAmd64PackageWindowsStoreR10ToRSP(out, savedRSPOff)
+renvoAsmEmit2(out, 0xff, 0x15)
+at := len(out.code)
+renvoAsmEmit32(out, 0)
+renvoAsmAddAbsReloc(out, at, importID, 2)
+renvoAsmEmit3(out, 0x49, 0x89, 0xc2)
+rtgBuiltinWindowsAmd64PackageWindowsLoadRAXFromRSP(out, savedRSPOff)
+renvoAsmEmit3(out, 0x48, 0x89, 0xc4)
+if stackWords > 0 {
+adjust := stackWords * 8
+if renvoAsmImmFits8Signed(adjust) {
+renvoAsmEmit4(out, 0x48, 0x83, 0xc4, adjust)
+} else {
+renvoAsmEmit3(out, 0x48, 0x81, 0xc4)
+renvoAsmEmit32(out, adjust)
+}
+}
+renvoAsmEmit3(out, 0x4c, 0x89, 0xd0)
+}
+func rtgBuiltinWindowsAmd64PackageWindowsConditionalJump(out *renvoAsm, opcode byte, label int) {
+renvoAsmEmit2(out, 0x0f, int(opcode))
+renvoWindowsAmd64Rel32(out, label)
+}
+func rtgBuiltinWindowsAmd64PackageWindowsBuiltinRuntimeClose(out *renvoAsm) {
+failed := renvoAsmNewLabel(out)
+done := renvoAsmNewLabel(out)
+rtgBuiltinWindowsAmd64PackageWindowsCallImport(out, 2)
+renvoAsmEmit2(out, 0x85, 0xc0)
+rtgBuiltinWindowsAmd64PackageWindowsConditionalJump(out, 0x84, failed)
+renvoAsmEmit2(out, 0x31, 0xc0)
+renvoAsmEmit8(out, 0xe9)
+renvoWindowsAmd64Rel32(out, done)
+renvoAsmMarkLabel(out, failed)
+renvoAsmEmit2(out, 0x6a, -1)
+renvoAsmEmit8(out, 0x58)
+renvoAsmMarkLabel(out, done)
+}
+func rtgBuiltinWindowsAmd64PackageWindowsBuiltinRuntimeChmod(out *renvoAsm) {
+failed := renvoAsmNewLabel(out)
+done := renvoAsmNewLabel(out)
+renvoAsmEmit2(out, 0x31, 0xd2)
+renvoAsmEmit3(out, 0x45, 0x31, 0xc0)
+renvoAsmEmit2(out, 0x41, 0xb9)
+renvoAsmEmit32(out, 1)
+rtgBuiltinWindowsAmd64PackageWindowsCallImport(out, 5)
+renvoAsmEmit3(out, 0x83, 0xf8, -1)
+rtgBuiltinWindowsAmd64PackageWindowsConditionalJump(out, 0x84, failed)
+renvoAsmEmit2(out, 0x31, 0xc0)
+renvoAsmEmit8(out, 0xe9)
+renvoWindowsAmd64Rel32(out, done)
+renvoAsmMarkLabel(out, failed)
+renvoAsmEmit2(out, 0x6a, -1)
+renvoAsmEmit8(out, 0x58)
+renvoAsmMarkLabel(out, done)
+}
+func rtgBuiltinWindowsAmd64PackageWindowsBuiltinTranslateCreateFileFlags(out *renvoAsm) {
+notReadWrite := renvoAsmNewLabel(out)
+accessDone := renvoAsmNewLabel(out)
+noCreate := renvoAsmNewLabel(out)
+createDone := renvoAsmNewLabel(out)
+renvoAsmEmit8(out, 0x68)
+renvoAsmEmit32(out, -2147483648)
+renvoAsmEmit8(out, 0x5a)
+renvoAsmEmit2(out, 0xa8, 2)
+rtgBuiltinWindowsAmd64PackageWindowsConditionalJump(out, 0x84, notReadWrite)
+renvoAsmEmit8(out, 0x68)
+renvoAsmEmit32(out, -1073741824)
+renvoAsmEmit8(out, 0x5a)
+renvoAsmEmit8(out, 0xe9)
+renvoWindowsAmd64Rel32(out, accessDone)
+renvoAsmMarkLabel(out, notReadWrite)
+renvoAsmEmit2(out, 0xa8, 1)
+rtgBuiltinWindowsAmd64PackageWindowsConditionalJump(out, 0x84, accessDone)
+renvoAsmEmit8(out, 0xba)
+renvoAsmEmit32(out, 0x40000000)
+renvoAsmMarkLabel(out, accessDone)
+renvoAsmEmit2(out, 0x41, 0xba)
+renvoAsmEmit32(out, 3)
+renvoAsmEmit2(out, 0xa8, 64)
+rtgBuiltinWindowsAmd64PackageWindowsConditionalJump(out, 0x84, noCreate)
+renvoAsmEmit2(out, 0x41, 0xba)
+renvoAsmEmit32(out, 4)
+renvoAsmEmit8(out, 0xa9)
+renvoAsmEmit32(out, 512)
+rtgBuiltinWindowsAmd64PackageWindowsConditionalJump(out, 0x84, createDone)
+renvoAsmEmit2(out, 0x41, 0xba)
+renvoAsmEmit32(out, 2)
+renvoAsmEmit8(out, 0xe9)
+renvoWindowsAmd64Rel32(out, createDone)
+renvoAsmMarkLabel(out, noCreate)
+renvoAsmEmit8(out, 0xa9)
+renvoAsmEmit32(out, 512)
+rtgBuiltinWindowsAmd64PackageWindowsConditionalJump(out, 0x84, createDone)
+renvoAsmEmit2(out, 0x41, 0xba)
+renvoAsmEmit32(out, 5)
+renvoAsmMarkLabel(out, createDone)
+renvoAsmEmit2(out, 0x41, 0xb8)
+renvoAsmEmit32(out, 3)
+renvoAsmEmit3(out, 0x45, 0x31, 0xc9)
+}
+func rtgBuiltinWindowsAmd64PackageWindowsBuiltinRuntimeOpen(out *renvoAsm) {
+renvoAsmEmit3(out, 0x49, 0x89, 0xfb)
+renvoAsmEmit3(out, 0x48, 0x89, 0xf0)
+rtgBuiltinWindowsAmd64PackageWindowsBuiltinTranslateCreateFileFlags(out)
+renvoAsmEmit3(out, 0x4c, 0x89, 0xd9)
+base := len(out.code)
+renvoAsmEmitText(out, "\x41\x54\x49\x89\xe4\x48\x83\xe4\xf0\x48\x83\xec\x40\x44\x89\x54\x24\x20\xc7\x44\x24\x28\x80\x00\x00\x00\x48\xc7\x44\x24\x30\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x49\x89\xc3\x4c\x89\xe4\x41\x5c\x4c\x89\xd8")
+renvoAsmAddAbsReloc(out, base+37, 1, 2)
+}
+
+func rtgBuiltinWindowsAmd64PackageWindowsCallImport(out *renvoAsm, importID int) {
+base:=len(out.code)
+renvoAsmEmitText(out, "\x41\x54\x49\x89\xe4\x48\x83\xe4\xf0\x48\x83\xec\x20\xff\x15\x00\x00\x00\x00\x49\x89\xc3\x4c\x89\xe4\x41\x5c\x4c\x89\xd8")
+renvoAsmAddAbsReloc(out, base+15,importID,2)
+}
+
+func renvoWinAmd64EmitExit(a *renvoAsm) {
+rtgBuiltinWindowsAmd64PackageWindowsExit(a, renvoWindowsAmd64RaxRegister)
+}
+
+func renvoWinAmd64CallImport(a *renvoAsm, importID int) {
+rtgBuiltinWindowsAmd64PackageWindowsCallImport(a, importID)
+}
+
+func renvoWinAmd64CallStaticImport(a *renvoAsm, importID int, wordCount int) {
+rtgBuiltinWindowsAmd64PackageWindowsStaticCall(a, importID, wordCount)
+}
+
+func renvoWinAmd64EmitRuntimeOpen(a *renvoAsm) {
+rtgBuiltinWindowsAmd64PackageWindowsBuiltinRuntimeOpen(a)
+}
+
+func renvoWinAmd64EmitRuntimeClose(a *renvoAsm) {
+rtgBuiltinWindowsAmd64PackageWindowsBuiltinRuntimeClose(a)
+}
+
+func renvoWinAmd64EmitRuntimeChmod(a *renvoAsm) {
+rtgBuiltinWindowsAmd64PackageWindowsBuiltinRuntimeChmod(a)
+}
+
+func renvoWinAmd64EmitReadWriteHelper(g *renvoLinearGen, isWrite bool) int {
+renvoNonNil(g)
+a := &g.asm
+if isWrite {
+if g.winWriteEmitted { return g.winWriteLabel }
+} else if g.winReadEmitted { return g.winReadLabel }
+label := renvoAsmNewLabel(a)
+if isWrite { g.winWriteEmitted = true; g.winWriteLabel = label } else { g.winReadEmitted = true; g.winReadLabel = label }
+countOff := renvoAlignValue(a.bssSize, 8)
+a.bssSize = countOff + 8
+positionOff := renvoAlignValue(a.bssSize, 8)
+a.bssSize = positionOff + 8
+code := "WVRQH\x83|$\x18\x00t\x02\xeb\x18\xb9\xf6"
+codeSize := 306
+if isWrite { code = "WVRQH\x83|$\x18\x01t\x0aH\x83|$\x18\x02t\x1c\xeb2\xb9\xf5\xff\xff\xffH\x83\xec(\xff\x15\x00\x00\x00\x00H\x83\xc4(H\x89D$\x18\xeb\x18\xb9\xf4"; codeSize = 340 }
+base := len(a.code)
+renvoAsmEmit8(a, 0xe9)
+renvoAsmEmit32(a, codeSize)
+a.labelPos[label] = int32(base + 5)
+renvoAsmEmitText(a, code)
+commonBase := len(a.code)
+renvoAsmEmitText(a, "\xff\xff\xffH\x83\xec(\xff\x15\x00\x00\x00\x00H\x83\xc4(H\x89D$\x18H\x83<$\x00\x0f\x8c\x80\x00\x00\x00H\x8bL$\x181\xd2E1\xc0A\xb9\x01\x00\x00\x00H\x83\xec(\xff\x15\x00\x00\x00\x00H\x83\xc4(H\x89\x05\x00\x00\x00\x00H\x8bL$\x18H\x8b\x14$E1\xc0E1\xc9H\x83\xec(\xff\x15\x00\x00\x00\x00H\x83\xc4(H\x8bL$\x18H\x8bT$\x10L\x8bD$\x08H\x8d\x05\x00\x00\x00\x00I\x89\xc1H\x83\xec(H\xc7D$ \x00\x00\x00\x00\xff\x15\x00\x00\x00\x00H\x83\xc4(\x83\xf8\x00tRH\x8b\x05\x00\x00\x00\x00\xebLH\x8bL$\x18H\x8bT$\x10L\x8bD$\x08H\x8d\x05\x00\x00\x00\x00I\x89\xc1H\x83\xec(H\xc7D$ \x00\x00\x00\x00\xff\x15\x00\x00\x00\x00H\x83\xc4(\x83\xf8\x00t\x0cH\x8b\x05\x00\x00\x00\x00H\x83\xc4 \xc3j\xffXH\x83\xc4 \xc3j\xffXH\x89\x05\x00\x00\x00\x00H\x8bL$\x18H\x8b\x05\x00\x00\x00\x00PZE1\xc0E1\xc9H\x83\xec(\xff\x15\x00\x00\x00\x00H\x83\xc4(H\x8b\x05\x00\x00\x00\x00H\x83\xc4 \xc3")
+if isWrite {
+renvoAsmAddAbsReloc(a, base + 5 + 33, 6, renvoWindowsAmd64RelocationImport)
+} else {
+}
+renvoAsmAddAbsReloc(a, commonBase + 9, 6, renvoWindowsAmd64RelocationImport)
+renvoAsmAddAbsReloc(a, commonBase + 55, 5, renvoWindowsAmd64RelocationImport)
+renvoAsmAddAbsReloc(a, commonBase + 66, positionOff, renvoWindowsAmd64RelocationAbsoluteBSS)
+renvoAsmAddAbsReloc(a, commonBase + 91, 5, renvoWindowsAmd64RelocationImport)
+renvoAsmAddAbsReloc(a, commonBase + 117, countOff, renvoWindowsAmd64RelocationAbsoluteBSS)
+if isWrite {
+renvoAsmAddAbsReloc(a, commonBase + 139, 4, renvoWindowsAmd64RelocationImport)
+} else {
+renvoAsmAddAbsReloc(a, commonBase + 139, 3, renvoWindowsAmd64RelocationImport)
+}
+renvoAsmAddAbsReloc(a, commonBase + 155, countOff, renvoWindowsAmd64RelocationAbsoluteBSS)
+renvoAsmAddAbsReloc(a, commonBase + 179, countOff, renvoWindowsAmd64RelocationAbsoluteBSS)
+if isWrite {
+renvoAsmAddAbsReloc(a, commonBase + 201, 4, renvoWindowsAmd64RelocationImport)
+} else {
+renvoAsmAddAbsReloc(a, commonBase + 201, 3, renvoWindowsAmd64RelocationImport)
+}
+renvoAsmAddAbsReloc(a, commonBase + 217, countOff, renvoWindowsAmd64RelocationAbsoluteBSS)
+renvoAsmAddAbsReloc(a, commonBase + 240, countOff, renvoWindowsAmd64RelocationAbsoluteBSS)
+renvoAsmAddAbsReloc(a, commonBase + 252, positionOff, renvoWindowsAmd64RelocationAbsoluteBSS)
+renvoAsmAddAbsReloc(a, commonBase + 270, 5, renvoWindowsAmd64RelocationImport)
+renvoAsmAddAbsReloc(a, commonBase + 281, countOff, renvoWindowsAmd64RelocationAbsoluteBSS)
+return label
+}
+
+const renvoWindowsAmd64ArgsBSSSize = 32768
+const renvoWindowsAmd64ArgsBSSAlignment = 16
+const renvoWindowsAmd64ArgsTextBSSSize = 32768
+const renvoWindowsAmd64ArgsTextBSSAlignment = 16
+const renvoWindowsAmd64ArgsLengthBSSSize = 8
+const renvoWindowsAmd64ArgsLengthBSSAlignment = 8
+const renvoWindowsAmd64EnvironmentBSSSize = 32768
+const renvoWindowsAmd64EnvironmentBSSAlignment = 16
+const renvoWindowsAmd64EnvironmentLengthBSSSize = 8
+const renvoWindowsAmd64EnvironmentLengthBSSAlignment = 8
+
+func renvoAsmBuildWindowsArgvEnvSlicesAmd64(a *renvoAsm, argsOff int, argsTextOff int, argsLengthOff int, environmentOff int, environmentLengthOff int) {
+renvoNonNil(a)
+base := len(a.code)
+renvoAsmEmitText(a, "\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\xc6\x4c\x8d\x15\x00\x00\x00\x00\x48\x8d\x05\x00\x00\x00\x00\x50\x5a\x4d\x31\xdb\x80\x3e\x00\x0f\x84\x62\x00\x00\x00\x80\x3e\x20\x74\x05\x80\x3e\x09\x75\x05\x48\xff\xc6\xeb\xe8\x49\x89\x12\x31\xc9\x45\x31\xc0\x8a\x06\x3c\x00\x74\x28\x3c\x22\x75\x09\x41\x83\xf0\x01\x48\xff\xc6\xeb\xed\x41\x83\xf8\x00\x75\x08\x3c\x20\x74\x11\x3c\x09\x74\x0d\x88\x02\x48\xff\xc6\x48\xff\xc2\x48\xff\xc1\xeb\xd2\xc6\x02\x00\x48\xff\xc2\x49\x89\x4a\x08\x49\x83\xc2\x10\x49\xff\xc3\x3c\x00\x74\x08\x48\xff\xc6\xe9\x95\xff\xff\xff\x4c\x89\xd8\x48\x89\x05\x00\x00\x00\x00\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\xc6\x4c\x8d\x15\x00\x00\x00\x00\x4d\x31\xdb\x80\x3e\x00\x74\x23\x49\x89\x32\x31\xc9\x80\x3c\x0e\x00\x74\x05\x48\xff\xc1\xeb\xf5\x49\x89\x4a\x08\x48\x01\xce\x48\xff\xc6\x49\x83\xc2\x10\x49\xff\xc3\xeb\xd8\x4c\x89\xd8\x48\x89\x05\x00\x00\x00\x00\x48\x8d\x05\x00\x00\x00\x00\x50\x5f\x48\x8b\x05\x00\x00\x00\x00\x50\x5e\x50\x5a\x48\x8d\x05\x00\x00\x00\x00\x50\x59\x48\x8b\x05\x00\x00\x00\x00\x49\x89\xc0\x49\x89\xc1")
+renvoAsmAddAbsReloc(a, base+6, 7, renvoWindowsAmd64RelocationImport)
+renvoAsmAddAbsReloc(a, base+20, argsOff, renvoWindowsAmd64RelocationAbsoluteBSS)
+renvoAsmAddAbsReloc(a, base+27, argsTextOff, renvoWindowsAmd64RelocationAbsoluteBSS)
+renvoAsmAddAbsReloc(a, base+149, argsLengthOff, renvoWindowsAmd64RelocationAbsoluteBSS)
+renvoAsmAddAbsReloc(a, base+159, 9, renvoWindowsAmd64RelocationImport)
+renvoAsmAddAbsReloc(a, base+173, environmentOff, renvoWindowsAmd64RelocationAbsoluteBSS)
+renvoAsmAddAbsReloc(a, base+226, environmentLengthOff, renvoWindowsAmd64RelocationAbsoluteBSS)
+renvoAsmAddAbsReloc(a, base+233, argsOff, renvoWindowsAmd64RelocationAbsoluteBSS)
+renvoAsmAddAbsReloc(a, base+242, argsLengthOff, renvoWindowsAmd64RelocationAbsoluteBSS)
+renvoAsmAddAbsReloc(a, base+253, environmentOff, renvoWindowsAmd64RelocationAbsoluteBSS)
+renvoAsmAddAbsReloc(a, base+262, environmentLengthOff, renvoWindowsAmd64RelocationAbsoluteBSS)
+}
+
+
 func compileWindowsAmd64(input []int, output int) int {
 return compileWindowsAmd64Arena(input, output, 0)
 }
@@ -33827,24 +33944,8 @@ renvoSetTarget(renvoTargetWindowsAmd64)
 return renvoCompileAmd64(input, output, arenaSize)
 }
 
-func renvoAsmBuildWindowsArgvEnvSlicesAmd64(a *renvoAsm, bssOff int, argsTextOff int, argsLenOff int, envOff int, envLenOff int) {
-renvoNonNil(a)
 
 
-base := len(a.code)
-renvoAsmEmitText(a, "\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\xc6\x4c\x8d\x15\x00\x00\x00\x00\x48\x8d\x05\x00\x00\x00\x00\x50\x5a\x4d\x31\xdb\x80\x3e\x00\x0f\x84\x62\x00\x00\x00\x80\x3e\x20\x74\x05\x80\x3e\x09\x75\x05\x48\xff\xc6\xeb\xe8\x49\x89\x12\x31\xc9\x45\x31\xc0\x8a\x06\x3c\x00\x74\x28\x3c\x22\x75\x09\x41\x83\xf0\x01\x48\xff\xc6\xeb\xed\x41\x83\xf8\x00\x75\x08\x3c\x20\x74\x11\x3c\x09\x74\x0d\x88\x02\x48\xff\xc6\x48\xff\xc2\x48\xff\xc1\xeb\xd2\xc6\x02\x00\x48\xff\xc2\x49\x89\x4a\x08\x49\x83\xc2\x10\x49\xff\xc3\x3c\x00\x74\x08\x48\xff\xc6\xe9\x95\xff\xff\xff\x4c\x89\xd8\x48\x89\x05\x00\x00\x00\x00\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\xc6\x4c\x8d\x15\x00\x00\x00\x00\x4d\x31\xdb\x80\x3e\x00\x74\x23\x49\x89\x32\x31\xc9\x80\x3c\x0e\x00\x74\x05\x48\xff\xc1\xeb\xf5\x49\x89\x4a\x08\x48\x01\xce\x48\xff\xc6\x49\x83\xc2\x10\x49\xff\xc3\xeb\xd8\x4c\x89\xd8\x48\x89\x05\x00\x00\x00\x00\x48\x8d\x05\x00\x00\x00\x00\x50\x5f\x48\x8b\x05\x00\x00\x00\x00\x50\x5e\x50\x5a\x48\x8d\x05\x00\x00\x00\x00\x50\x59\x48\x8b\x05\x00\x00\x00\x00\x49\x89\xc0\x49\x89\xc1")
-renvoAsmAddWinImportReloc(a, base+6, renvoWinImportGetCommandLineA)
-renvoAsmAddAbsReloc(a, base+20, bssOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+27, argsTextOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+149, argsLenOff, renvoAbsBssReloc)
-renvoAsmAddWinImportReloc(a, base+159, renvoWinImportGetEnvironmentStringsA)
-renvoAsmAddAbsReloc(a, base+173, envOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+226, envLenOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+233, bssOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+242, argsLenOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+253, envOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+262, envLenOff, renvoAbsBssReloc)
-}
 
 func renvoAsmImageWindowsAmd64(a *renvoAsm) []byte {
 renvoNonNil(a)
@@ -33880,6 +33981,766 @@ if renvoFixedTarget == 0 && a.c.emitImage {
 return renvoAppendReplLinkTable(out, a)
 }
 return out
+}
+
+// source: backend/compiler_linux_kernel_amd64_target_impl.go
+
+
+
+const renvoKernelAmd64RelocationAbsoluteData = 0
+const renvoKernelAmd64RelocationAbsoluteBSS = 1
+const renvoKernelAmd64RelocationImport = 2
+const renvoKernelAmd64RelocationAbsoluteBSSEnd = 3
+
+func renvoKernelAmd64Rel32(out *renvoAsm, label int) {
+at := len(out.code)
+renvoAsmEmit32(out, 0)
+if label >= 0 {
+renvoAsmAddReloc(out, at, label)
+}
+}
+
+func renvoKernelAmd64ExternalImportCount(out *renvoAsm) int {
+return len(out.kernelImportOffsets) / 2
+}
+
+func renvoKernelAmd64ExternalImportName(out *renvoAsm, index int) string {
+at := index * 2
+if at < 0 || at+1 >= len(out.kernelImportOffsets) {
+return ""
+}
+start := out.kernelImportOffsets[at]
+end := out.kernelImportOffsets[at+1]
+return string(out.kernelImportNames[start:end])
+}
+
+func renvoKernelAmd64AbsoluteRelocationOffset(out *renvoAsm, index int) int {
+return int(renvo_runtime_UnsafeInt32At(out.absRelocs, index*3))
+}
+
+func renvoKernelAmd64AbsoluteRelocationAddend(out *renvoAsm, index int) int {
+return int(renvo_runtime_UnsafeInt32At(out.absRelocs, index*3+1))
+}
+
+func renvoKernelAmd64AbsoluteRelocationKind(out *renvoAsm, index int) int {
+return int(renvo_runtime_UnsafeInt32At(out.absRelocs, index*3+2))
+}
+
+func rtgBuiltinElfAmd64PackageNativeAppend32(out []byte, value int) []byte {
+out = append(out, byte(value), byte(value>>8), byte(value>>16), byte(value>>24))
+return out
+}
+func rtgBuiltinElfAmd64PackageNativeAppend64(out []byte, value int) []byte {
+out = rtgBuiltinElfAmd64PackageNativeAppend32(out, value)
+out = rtgBuiltinElfAmd64PackageNativeAppend32(out, value>>32)
+return out
+}
+func rtgBuiltinLinuxKernelAmd64PackageKernelStaticCall(out *renvoAsm, importID int, wordCount int) {
+if wordCount > 0 {
+renvoAsmEmit8(out, 0x5f)
+}
+if wordCount > 1 {
+renvoAsmEmit8(out, 0x5e)
+}
+if wordCount > 2 {
+renvoAsmEmit8(out, 0x5a)
+}
+if wordCount > 3 {
+renvoAsmEmit8(out, 0x59)
+}
+if wordCount > 4 {
+renvoAsmEmit2(out, 0x41, 0x58)
+}
+if wordCount > 5 {
+renvoAsmEmit2(out, 0x41, 0x59)
+}
+renvoAsmEmit8(out, 0xe8)
+at := len(out.code)
+renvoAsmEmit32(out, 0)
+renvoAsmAddAbsReloc(out, at, importID, 2)
+}
+func rtgBuiltinLinuxKernelAmd64PackageKernelRuntimeOperation(out *renvoAsm, operation int) bool {
+if operation != 2 {
+return false
+}
+
+
+renvoAsmEmit8(out, 0x50)
+renvoAsmEmit3(out, 0x48, 0x89, 0xd6)
+renvoAsmEmit8(out, 0x5a)
+data := out.data
+formatOffset := len(data)
+data = append(data, '%', '.', '*', 's', 0)
+out.data = data
+renvoAsmEmit3(out, 0x48, 0x8d, 0x3d)
+at := len(out.code)
+renvoAsmEmit32(out, 0)
+renvoAsmAddAbsReloc(out, at, formatOffset, 0)
+renvoAsmEmit2(out, 0x31, 0xc0)
+importID := renvoAsmAddExternalImportName(out, "_printk")
+renvoAsmEmit8(out, 0xe8)
+at = len(out.code)
+renvoAsmEmit32(out, 0)
+renvoAsmAddAbsReloc(out, at, importID, 2)
+return true
+}
+
+func rtgBuiltinElfAmd64PackageKernelAppend16(out []byte, value int) []byte {
+return append(out,byte(value),byte(value>>8))
+}
+
+func rtgBuiltinElfAmd64PackageKernelAppendELFHeader(out []byte, sectionOffset int, sectionCount int, namesIndex int) []byte {
+out=append(out,0x7f,'E','L','F',2,1,1,0)
+out=append(out,0,0,0,0,0,0,0,0)
+out=rtgBuiltinElfAmd64PackageKernelAppend16(out,1)
+out=rtgBuiltinElfAmd64PackageKernelAppend16(out,62)
+out=rtgBuiltinElfAmd64PackageNativeAppend32(out,1)
+out=rtgBuiltinElfAmd64PackageNativeAppend64(out,0)
+out=rtgBuiltinElfAmd64PackageNativeAppend64(out,0)
+out=rtgBuiltinElfAmd64PackageNativeAppend64(out,sectionOffset)
+out=rtgBuiltinElfAmd64PackageNativeAppend32(out,0)
+out=rtgBuiltinElfAmd64PackageKernelAppend16(out,64)
+out=rtgBuiltinElfAmd64PackageKernelAppend16(out,0)
+out=rtgBuiltinElfAmd64PackageKernelAppend16(out,0)
+out=rtgBuiltinElfAmd64PackageKernelAppend16(out,64)
+out=rtgBuiltinElfAmd64PackageKernelAppend16(out,sectionCount)
+out=rtgBuiltinElfAmd64PackageKernelAppend16(out,namesIndex)
+return out
+}
+
+func rtgBuiltinElfAmd64PackageKernelAppendRelocation(out []byte, offset int, symbol int, kind int, addend int) []byte {
+out=rtgBuiltinElfAmd64PackageNativeAppend64(out,offset)
+out=rtgBuiltinElfAmd64PackageNativeAppend64(out,symbol<<32|kind)
+out=rtgBuiltinElfAmd64PackageNativeAppend64(out,addend)
+return out
+}
+
+func rtgBuiltinElfAmd64PackageKernelAppendSection(out []byte, name int, kind int, flags int, offset int, size int, link int, info int, alignment int, entrySize int) []byte {
+out=rtgBuiltinElfAmd64PackageNativeAppend32(out,name)
+out=rtgBuiltinElfAmd64PackageNativeAppend32(out,kind)
+out=rtgBuiltinElfAmd64PackageNativeAppend64(out,flags)
+out=rtgBuiltinElfAmd64PackageNativeAppend64(out,0)
+out=rtgBuiltinElfAmd64PackageNativeAppend64(out,offset)
+out=rtgBuiltinElfAmd64PackageNativeAppend64(out,size)
+out=rtgBuiltinElfAmd64PackageNativeAppend32(out,link)
+out=rtgBuiltinElfAmd64PackageNativeAppend32(out,info)
+out=rtgBuiltinElfAmd64PackageNativeAppend64(out,alignment)
+out=rtgBuiltinElfAmd64PackageNativeAppend64(out,entrySize)
+return out
+}
+
+func rtgBuiltinElfAmd64PackageKernelAppendSymbol(out []byte, name int, info int, section int, value int, size int) []byte {
+out=rtgBuiltinElfAmd64PackageNativeAppend32(out,name)
+out=append(out,byte(info),0)
+out=rtgBuiltinElfAmd64PackageKernelAppend16(out,section)
+out=rtgBuiltinElfAmd64PackageNativeAppend64(out,value)
+out=rtgBuiltinElfAmd64PackageNativeAppend64(out,size)
+return out
+}
+
+func rtgBuiltinLinuxKernelAmd64PackageKernelCallbackAddress(out *renvoAsm, label int) {
+renvoAsmEmit3(out, 0x48,0x8d,0x05)
+renvoKernelAmd64Rel32(out, label)
+}
+
+func rtgBuiltinLinuxKernelAmd64PackageKernelEntryEpilogue(out *renvoAsm) {
+renvoAsmEmitText(out, "\x48\x83\xc4\x08\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5b\xc9\xc3")
+}
+
+func rtgBuiltinLinuxKernelAmd64PackageKernelEntryPrologue(out *renvoAsm) {
+renvoAsmEmitText(out, "\xf3\x0f\x1e\xfa\x55\x48\x89\xe5\x53\x41\x54\x41\x55\x41\x56\x41\x57\x48\x83\xec\x08")
+}
+
+
+func rtgBuiltinElf64ObjectX8664Get32(data []byte, at int) int {
+if at < 0 || at+4 > len(data) {
+return 0
+}
+value := int(data[at])
+value |= int(data[at+1]) << 8
+value |= int(data[at+2]) << 16
+value |= int(data[at+3]) << 24
+return value
+}
+
+func rtgBuiltinElf64ObjectX8664BTFString(data []byte, base int, offset int, value string) bool {
+position := base + offset
+if offset < 0 || position < 0 || position+len(value) >= len(data) {
+return false
+}
+for i := 0; i < len(value); i++ {
+if data[position+i] != value[i] {
+return false
+}
+}
+return data[position+len(value)] == 0
+}
+
+type rtgBuiltinElf64ObjectX8664ModuleLayout struct {
+size		int
+nameOffset	int
+initOffset	int
+exitOffset	int
+ok		bool
+}
+
+func rtgBuiltinElf64ObjectX8664BTFModuleLayout(data []byte) rtgBuiltinElf64ObjectX8664ModuleLayout {
+var result rtgBuiltinElf64ObjectX8664ModuleLayout
+if len(data) < 24 || data[0] != 0x9f || data[1] != 0xeb {
+return result
+}
+headerLength := rtgBuiltinElf64ObjectX8664Get32(data, 4)
+typeStart := headerLength + rtgBuiltinElf64ObjectX8664Get32(data, 8)
+typeEnd := typeStart + rtgBuiltinElf64ObjectX8664Get32(data, 12)
+stringStart := headerLength + rtgBuiltinElf64ObjectX8664Get32(data, 16)
+if headerLength < 24 || typeStart < headerLength ||
+typeEnd > len(data) || stringStart < headerLength ||
+stringStart >= len(data) {
+return result
+}
+position := typeStart
+for position+12 <= typeEnd {
+name := rtgBuiltinElf64ObjectX8664Get32(data, position)
+info := rtgBuiltinElf64ObjectX8664Get32(data, position+4)
+size := rtgBuiltinElf64ObjectX8664Get32(data, position+8)
+kind := (info >> 24) & 31
+count := info & 65535
+extra := 0
+if kind == 1 {
+extra = 4
+} else if kind == 3 {
+extra = 12
+} else if kind == 4 || kind == 5 {
+extra = count * 12
+} else if kind == 6 || kind == 13 {
+extra = count * 8
+} else if kind == 14 || kind == 17 {
+extra = 4
+} else if kind == 15 || kind == 19 {
+extra = count * 12
+}
+next := position + 12 + extra
+if next > typeEnd || next <= position {
+return result
+}
+if kind == 4 &&
+rtgBuiltinElf64ObjectX8664BTFString(data, stringStart, name, "module") {
+nameOffset := -1
+initOffset := -1
+exitOffset := -1
+member := position + 12
+for i := 0; i < count; i++ {
+memberName := rtgBuiltinElf64ObjectX8664Get32(data, member)
+bitOffset := rtgBuiltinElf64ObjectX8664Get32(data, member+8) & 0x00ffffff
+if bitOffset%8 == 0 {
+if rtgBuiltinElf64ObjectX8664BTFString(
+data, stringStart, memberName, "name",
+) {
+nameOffset = bitOffset / 8
+} else if rtgBuiltinElf64ObjectX8664BTFString(
+data, stringStart, memberName, "init",
+) {
+initOffset = bitOffset / 8
+} else if rtgBuiltinElf64ObjectX8664BTFString(
+data, stringStart, memberName, "exit",
+) {
+exitOffset = bitOffset / 8
+}
+}
+member += 12
+}
+result.size = size
+result.nameOffset = nameOffset
+result.initOffset = initOffset
+result.exitOffset = exitOffset
+result.ok = nameOffset >= 0 && initOffset >= 0
+return result
+}
+position = next
+}
+return result
+}
+
+func rtgBuiltinElf64ObjectX8664HexDigit(ch byte) int {
+if ch >= '0' && ch <= '9' {
+return int(ch - '0')
+}
+if ch >= 'a' && ch <= 'f' {
+return int(ch-'a') + 10
+}
+if ch >= 'A' && ch <= 'F' {
+return int(ch-'A') + 10
+}
+return -1
+}
+
+func rtgBuiltinElf64ObjectX8664SymbolCRC(data []byte, symbol string) (int, bool) {
+line := 0
+for line < len(data) {
+end := line
+for end < len(data) && data[end] != '\n' {
+end++
+}
+firstTab := line
+for firstTab < end && data[firstTab] != '\t' {
+firstTab++
+}
+secondTab := firstTab + 1
+for secondTab < end && data[secondTab] != '\t' {
+secondTab++
+}
+if secondTab-firstTab-1 == len(symbol) {
+match := true
+for i := 0; i < len(symbol); i++ {
+if data[firstTab+1+i] != symbol[i] {
+match = false
+}
+}
+if match {
+value := 0
+start := line
+if start+2 <= firstTab &&
+data[start] == '0' && data[start+1] == 'x' {
+start += 2
+}
+for i := start; i < firstTab; i++ {
+digit := rtgBuiltinElf64ObjectX8664HexDigit(data[i])
+if digit < 0 {
+return 0, false
+}
+value = value<<4 | digit
+}
+return value, true
+}
+}
+line = end + 1
+}
+return 0, false
+}
+
+func rtgBuiltinElf64ObjectX8664SymbolGPLOnly(data []byte, symbol string) bool {
+line := 0
+for line < len(data) {
+end := line
+for end < len(data) && data[end] != '\n' {
+end++
+}
+firstTab := line
+for firstTab < end && data[firstTab] != '\t' {
+firstTab++
+}
+secondTab := firstTab + 1
+for secondTab < end && data[secondTab] != '\t' {
+secondTab++
+}
+if secondTab-firstTab-1 == len(symbol) {
+match := true
+for i := 0; i < len(symbol); i++ {
+if data[firstTab+1+i] != symbol[i] {
+match = false
+}
+}
+if match {
+thirdTab := secondTab + 1
+for thirdTab < end && data[thirdTab] != '\t' {
+thirdTab++
+}
+exportStart := thirdTab + 1
+exportEnd := exportStart
+for exportEnd < end && data[exportEnd] != '\t' {
+exportEnd++
+}
+if exportEnd-exportStart < 4 {
+return false
+}
+if data[exportEnd-4] != '_' || data[exportEnd-3] != 'G' {
+return false
+}
+return data[exportEnd-2] == 'P' && data[exportEnd-1] == 'L'
+}
+}
+line = end + 1
+}
+return false
+}
+
+func rtgBuiltinElf64ObjectX8664LicenseGPLCompatible(license string) bool {
+if license == "GPL" || license == "GPL v2" {
+return true
+}
+if license == "GPL and additional rights" ||
+license == "Dual BSD/GPL" {
+return true
+}
+return license == "Dual MIT/GPL" || license == "Dual MPL/GPL"
+}
+
+func rtgBuiltinElf64ObjectX8664Contains(text string, needle string) bool {
+if len(needle) == 0 || len(needle) > len(text) {
+return false
+}
+for i := 0; i+len(needle) <= len(text); i++ {
+match := true
+for j := 0; j < len(needle); j++ {
+if text[i+j] != needle[j] {
+match = false
+}
+}
+if match {
+return true
+}
+}
+return false
+}
+
+func rtgBuiltinElf64ObjectX8664Vermagic(
+release string, version string, exitOffset int, symvers []byte,
+) string {
+out := release
+if rtgBuiltinElf64ObjectX8664Contains(version, " SMP ") ||
+rtgBuiltinElf64ObjectX8664Contains(version, " SMP") {
+out += " SMP"
+}
+if rtgBuiltinElf64ObjectX8664Contains(version, "PREEMPT") {
+out += " preempt"
+}
+if exitOffset >= 0 {
+out += " mod_unload"
+}
+crc, ok := rtgBuiltinElf64ObjectX8664SymbolCRC(symvers, "module_layout")
+if ok && crc != 0 {
+out += " modversions"
+}
+return out + " "
+}
+
+func rtgBuiltinElf64ObjectX8664AppendString(out []byte, value string) []byte {
+for i := 0; i < len(value); i++ {
+out = append(out, value[i])
+}
+return append(out, 0)
+}
+
+func rtgBuiltinElf64ObjectX8664Until(out []byte, size int) []byte {
+for len(out) < size {
+out = append(out, 0)
+}
+return out
+}
+
+func rtgBuiltinElf64ObjectX8664AppendVersion(out []byte, symbol string, crc int) []byte {
+start := len(out)
+out = rtgBuiltinElfAmd64PackageNativeAppend64(out, crc)
+for i := 0; i < len(symbol) && i < 55; i++ {
+out = append(out, symbol[i])
+}
+out = append(out, 0)
+return rtgBuiltinElf64ObjectX8664Until(out, start+64)
+}
+
+func rtgBuiltinElf64ObjectX8664KernelImage(
+emitter *renvoAsm, initLabel int, exitLabel int,
+) []byte {
+initPosition := renvoAsmLabelPosition(emitter, initLabel)
+exitPosition := renvoAsmLabelPosition(emitter, exitLabel)
+layout := rtgBuiltinElf64ObjectX8664BTFModuleLayout(emitter.c.kernel.kernelBTF)
+if initPosition < 0 || !layout.ok || layout.size <= 0 {
+return nil
+}
+moduleName := emitter.c.kernel.kernelModuleName
+license := emitter.c.kernel.kernelLicense
+symvers := emitter.c.kernel.kernelSymvers
+if moduleName == "" || license == "" || len(symvers) == 0 {
+return nil
+}
+
+var strings []byte
+strings = append(strings, 0)
+initName := len(strings)
+strings = rtgBuiltinElf64ObjectX8664AppendString(strings, "init_module")
+exitName := len(strings)
+strings = rtgBuiltinElf64ObjectX8664AppendString(strings, "cleanup_module")
+moduleSymbolName := len(strings)
+strings = rtgBuiltinElf64ObjectX8664AppendString(strings, "__this_module")
+var importNames []int
+for i := 0; i < renvoKernelAmd64ExternalImportCount(emitter); i++ {
+importNames = append(importNames, len(strings))
+strings = rtgBuiltinElf64ObjectX8664AppendString(
+strings, renvoKernelAmd64ExternalImportName(emitter, i),
+)
+}
+
+var symbols []byte
+symbols = rtgBuiltinElfAmd64PackageKernelAppendSymbol(symbols, 0, 0, 0, 0, 0)
+symbols = rtgBuiltinElfAmd64PackageKernelAppendSymbol(symbols, 0, 3, 1, 0, 0)
+symbols = rtgBuiltinElfAmd64PackageKernelAppendSymbol(symbols, 0, 3, 3, 0, 0)
+symbols = rtgBuiltinElfAmd64PackageKernelAppendSymbol(symbols, 0, 3, 4, 0, 0)
+symbols = rtgBuiltinElfAmd64PackageKernelAppendSymbol(symbols, 0, 3, 7, 0, 0)
+initSymbol := 5
+symbols = rtgBuiltinElfAmd64PackageKernelAppendSymbol(
+symbols, initName, 18, 1, initPosition, 0,
+)
+exitSymbol := 0
+if exitPosition >= 0 {
+exitSymbol = len(symbols) / 24
+symbols = rtgBuiltinElfAmd64PackageKernelAppendSymbol(
+symbols, exitName, 18, 1, exitPosition, 0,
+)
+}
+symbols = rtgBuiltinElfAmd64PackageKernelAppendSymbol(
+symbols, moduleSymbolName, 17, 7, 0, layout.size,
+)
+var importSymbols []int
+for i := 0; i < len(importNames); i++ {
+importSymbols = append(importSymbols, len(symbols)/24)
+symbols = rtgBuiltinElfAmd64PackageKernelAppendSymbol(
+symbols, importNames[i], 16, 0, 0, 0,
+)
+}
+
+var textRelocations []byte
+for i := 0; i < len(emitter.absRelocs)/3; i++ {
+at := renvoKernelAmd64AbsoluteRelocationOffset(emitter, i)
+addend := renvoKernelAmd64AbsoluteRelocationAddend(emitter, i)
+kind := renvoKernelAmd64AbsoluteRelocationKind(emitter, i)
+if kind == renvoKernelAmd64RelocationAbsoluteBSS {
+textRelocations = rtgBuiltinElfAmd64PackageKernelAppendRelocation(
+textRelocations, at, 3, 2, addend-4,
+)
+} else if kind == renvoKernelAmd64RelocationAbsoluteBSSEnd {
+alignment := addend
+if alignment <= 0 {
+alignment = 1
+}
+textRelocations = rtgBuiltinElfAmd64PackageKernelAppendRelocation(
+textRelocations, at, 3, 2,
+renvoAlignValue(emitter.bssSize, alignment)-4,
+)
+} else if kind == renvoKernelAmd64RelocationImport {
+if addend < 0 || addend >= len(importSymbols) {
+return nil
+}
+textRelocations = rtgBuiltinElfAmd64PackageKernelAppendRelocation(
+textRelocations, at, importSymbols[addend], 4, -4,
+)
+} else {
+textRelocations = rtgBuiltinElfAmd64PackageKernelAppendRelocation(
+textRelocations, at, 2, 2, addend-4,
+)
+}
+}
+
+thisModule := make([]byte, layout.size)
+if layout.nameOffset+len(moduleName) >= len(thisModule) {
+return nil
+}
+for i := 0; i < len(moduleName); i++ {
+thisModule[layout.nameOffset+i] = moduleName[i]
+}
+var moduleRelocations []byte
+moduleRelocations = rtgBuiltinElfAmd64PackageKernelAppendRelocation(
+moduleRelocations, layout.initOffset, initSymbol, 1, 0,
+)
+if exitSymbol != 0 && layout.exitOffset >= 0 {
+moduleRelocations = rtgBuiltinElfAmd64PackageKernelAppendRelocation(
+moduleRelocations, layout.exitOffset, exitSymbol, 1, 0,
+)
+}
+
+var versions []byte
+moduleCRC, moduleOK := rtgBuiltinElf64ObjectX8664SymbolCRC(
+symvers, "module_layout",
+)
+if moduleOK && moduleCRC != 0 {
+versions = rtgBuiltinElf64ObjectX8664AppendVersion(
+versions, "module_layout", moduleCRC,
+)
+}
+for i := 0; i < len(importSymbols); i++ {
+name := renvoKernelAmd64ExternalImportName(emitter, i)
+if rtgBuiltinElf64ObjectX8664SymbolGPLOnly(symvers, name) &&
+!rtgBuiltinElf64ObjectX8664LicenseGPLCompatible(license) {
+return nil
+}
+crc, ok := rtgBuiltinElf64ObjectX8664SymbolCRC(symvers, name)
+if !ok {
+return nil
+}
+if crc != 0 {
+versions = rtgBuiltinElf64ObjectX8664AppendVersion(versions, name, crc)
+}
+}
+
+var moduleInfo []byte
+moduleInfo = rtgBuiltinElf64ObjectX8664AppendString(
+moduleInfo, "license="+license,
+)
+moduleInfo = rtgBuiltinElf64ObjectX8664AppendString(moduleInfo, "depends=")
+moduleInfo = rtgBuiltinElf64ObjectX8664AppendString(
+moduleInfo, "name="+moduleName,
+)
+moduleInfo = rtgBuiltinElf64ObjectX8664AppendString(
+moduleInfo,
+"vermagic="+rtgBuiltinElf64ObjectX8664Vermagic(
+emitter.c.kernel.kernelRelease, emitter.c.kernel.kernelVersion,
+layout.exitOffset, symvers,
+),
+)
+
+var sectionNames []byte
+sectionNames = append(sectionNames, 0)
+textName := len(sectionNames)
+sectionNames = rtgBuiltinElf64ObjectX8664AppendString(sectionNames, ".text")
+textRelocationName := len(sectionNames)
+sectionNames = rtgBuiltinElf64ObjectX8664AppendString(sectionNames, ".rela.text")
+dataName := len(sectionNames)
+sectionNames = rtgBuiltinElf64ObjectX8664AppendString(sectionNames, ".rodata")
+bssName := len(sectionNames)
+sectionNames = rtgBuiltinElf64ObjectX8664AppendString(sectionNames, ".bss")
+infoName := len(sectionNames)
+sectionNames = rtgBuiltinElf64ObjectX8664AppendString(sectionNames, ".modinfo")
+versionName := len(sectionNames)
+sectionNames = rtgBuiltinElf64ObjectX8664AppendString(sectionNames, "__versions")
+moduleNameSection := len(sectionNames)
+sectionNames = rtgBuiltinElf64ObjectX8664AppendString(
+sectionNames, ".gnu.linkonce.this_module",
+)
+moduleRelocationName := len(sectionNames)
+sectionNames = rtgBuiltinElf64ObjectX8664AppendString(
+sectionNames, ".rela.gnu.linkonce.this_module",
+)
+symbolName := len(sectionNames)
+sectionNames = rtgBuiltinElf64ObjectX8664AppendString(sectionNames, ".symtab")
+stringName := len(sectionNames)
+sectionNames = rtgBuiltinElf64ObjectX8664AppendString(sectionNames, ".strtab")
+sectionStringName := len(sectionNames)
+sectionNames = rtgBuiltinElf64ObjectX8664AppendString(sectionNames, ".shstrtab")
+
+code := emitter.code
+data := emitter.data
+var image []byte
+image = rtgBuiltinElf64ObjectX8664Until(image, 64)
+textOffset := renvoAlignValue(len(image), 16)
+image = rtgBuiltinElf64ObjectX8664Until(image, textOffset)
+image = append(image, code...)
+textRelocationOffset := renvoAlignValue(len(image), 8)
+image = rtgBuiltinElf64ObjectX8664Until(image, textRelocationOffset)
+image = append(image, textRelocations...)
+dataOffset := renvoAlignValue(len(image), 8)
+image = rtgBuiltinElf64ObjectX8664Until(image, dataOffset)
+image = append(image, data...)
+bssOffset := len(image)
+infoOffset := len(image)
+image = append(image, moduleInfo...)
+versionOffset := renvoAlignValue(len(image), 8)
+image = rtgBuiltinElf64ObjectX8664Until(image, versionOffset)
+image = append(image, versions...)
+moduleOffset := renvoAlignValue(len(image), 64)
+image = rtgBuiltinElf64ObjectX8664Until(image, moduleOffset)
+image = append(image, thisModule...)
+moduleRelocationOffset := renvoAlignValue(len(image), 8)
+image = rtgBuiltinElf64ObjectX8664Until(image, moduleRelocationOffset)
+image = append(image, moduleRelocations...)
+symbolOffset := renvoAlignValue(len(image), 8)
+image = rtgBuiltinElf64ObjectX8664Until(image, symbolOffset)
+image = append(image, symbols...)
+stringOffset := len(image)
+image = append(image, strings...)
+sectionStringOffset := len(image)
+image = append(image, sectionNames...)
+sectionOffset := renvoAlignValue(len(image), 8)
+image = rtgBuiltinElf64ObjectX8664Until(image, sectionOffset)
+image = rtgBuiltinElfAmd64PackageKernelAppendSection(image, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+image = rtgBuiltinElfAmd64PackageKernelAppendSection(
+image, textName, 1, 6, textOffset, len(code), 0, 0, 16, 0,
+)
+image = rtgBuiltinElfAmd64PackageKernelAppendSection(
+image, textRelocationName, 4, 64, textRelocationOffset,
+len(textRelocations), 9, 1, 8, 24,
+)
+image = rtgBuiltinElfAmd64PackageKernelAppendSection(
+image, dataName, 1, 2, dataOffset, len(data), 0, 0, 8, 0,
+)
+image = rtgBuiltinElfAmd64PackageKernelAppendSection(
+image, bssName, 8, 3, bssOffset, emitter.bssSize,
+0, 0, 8, 0,
+)
+image = rtgBuiltinElfAmd64PackageKernelAppendSection(
+image, infoName, 1, 2, infoOffset, len(moduleInfo),
+0, 0, 1, 0,
+)
+image = rtgBuiltinElfAmd64PackageKernelAppendSection(
+image, versionName, 1, 2, versionOffset, len(versions),
+0, 0, 8, 0,
+)
+image = rtgBuiltinElfAmd64PackageKernelAppendSection(
+image, moduleNameSection, 1, 3, moduleOffset,
+len(thisModule), 0, 0, 64, 0,
+)
+image = rtgBuiltinElfAmd64PackageKernelAppendSection(
+image, moduleRelocationName, 4, 64, moduleRelocationOffset,
+len(moduleRelocations), 9, 7, 8, 24,
+)
+image = rtgBuiltinElfAmd64PackageKernelAppendSection(
+image, symbolName, 2, 0, symbolOffset, len(symbols),
+10, 5, 8, 24,
+)
+image = rtgBuiltinElfAmd64PackageKernelAppendSection(
+image, stringName, 3, 0, stringOffset, len(strings),
+0, 0, 1, 0,
+)
+image = rtgBuiltinElfAmd64PackageKernelAppendSection(
+image, sectionStringName, 3, 0, sectionStringOffset,
+len(sectionNames), 0, 0, 1, 0,
+)
+var header []byte
+header = rtgBuiltinElfAmd64PackageKernelAppendELFHeader(header, sectionOffset, 12, 11)
+for i := 0; i < len(header); i++ {
+image[i] = header[i]
+}
+return image
+}
+
+
+func renvoAmd64KernelBTFModuleLayout(data []byte) (int, int, int, int, bool) {
+layout := rtgBuiltinElf64ObjectX8664BTFModuleLayout(data)
+return layout.size, layout.nameOffset, layout.initOffset, layout.exitOffset, layout.ok
+}
+
+func renvoAmd64KernelEntryPrologue(a *renvoAsm) {
+rtgBuiltinLinuxKernelAmd64PackageKernelEntryPrologue(a)
+}
+
+func renvoAmd64KernelEntryEpilogue(a *renvoAsm) {
+rtgBuiltinLinuxKernelAmd64PackageKernelEntryEpilogue(a)
+}
+
+func renvoAmd64KernelCallbackAddress(a *renvoAsm, label int) {
+rtgBuiltinLinuxKernelAmd64PackageKernelCallbackAddress(a, label)
+}
+
+func renvoAmd64EmitKernelPrintValue(a *renvoAsm) {
+rtgBuiltinLinuxKernelAmd64PackageKernelRuntimeOperation(a, 2)
+}
+
+func renvoAmd64EmitKernelStaticCall(a *renvoAsm, importID int, wordCount int) {
+rtgBuiltinLinuxKernelAmd64PackageKernelStaticCall(a, importID, wordCount)
+}
+
+
+func compileLinuxKernelAmd64(input []int, output int) int {
+return compileLinuxKernelAmd64Arena(input, output, 0)
+}
+
+func compileLinuxKernelAmd64Arena(input []int, output int, arenaSize int) int {
+renvoSetTarget(renvoTargetLinuxKernelAmd64)
+return renvoCompileAmd64(input, output, arenaSize)
+}
+
+func renvoAsmImageKernelModuleAmd64(a *renvoAsm, initLabel int, exitLabel int) []byte {
+renvoNonNil(a)
+renvoAsmPatch(a)
+return rtgBuiltinElf64ObjectX8664KernelImage(a, initLabel, exitLabel)
 }
 
 // source: backend/compiler_linux_kernel_amd64_impl.go
@@ -33953,10 +34814,7 @@ g.kernelCallbackLabels[fnIndex] = label
 }
 
 
-renvoAsmEmitText(a, "\x48\x8d\x05")
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddReloc(a, at, label)
+renvoAmd64KernelCallbackAddress(a, label)
 renvoAsmPushPrimary(a)
 if first {
 after := renvoAsmNewLabel(a)
@@ -33971,35 +34829,6 @@ renvoAmd64KernelEntryEpilogue(a)
 renvoAsmMarkLabel(a, after)
 }
 return 1
-}
-
-func renvoAmd64KernelEntryPrologue(a *renvoAsm) {
-renvoNonNil(a)
-
-
-renvoAsmEmitText(a, "\xf3\x0f\x1e\xfa\x55\x48\x89\xe5\x53\x41\x54\x41\x55\x41\x56\x41\x57\x48\x83\xec\x08")
-}
-
-func renvoAmd64KernelEntryEpilogue(a *renvoAsm) {
-renvoNonNil(a)
-renvoAsmEmitText(a, "\x48\x83\xc4\x08\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5b\xc9\xc3")
-}
-
-func renvoAmd64EmitKernelPrintValue(a *renvoAsm) {
-renvoNonNil(a)
-
-renvoAsmPushPrimary(a)
-renvoAsmEmitText(a, "\x48\x89\xd6")
-renvoAsmEmit8(a, 0x5a)
-formatOff := len(a.data)
-a.data = append(a.data, '%', '.', '*', 's', 0)
-renvoAsmPrimaryDataAddr(a, formatOff)
-renvoAsmCopyPrimaryToCallWord0(a)
-renvoAsmPrimaryImm(a, 0)
-renvoAsmEmit8(a, 0xe8)
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddAbsReloc(a, at, 0, renvoAbsKernelPrintReloc)
 }
 
 func renvoAsmAddKernelImport(a *renvoAsm, src []byte, nameStart int, nameEnd int) int {
@@ -34020,43 +34849,12 @@ if wordCount < 0 || wordCount > 6 {
 return false
 }
 a := &g.asm
-if wordCount > 0 {
-renvoAsmPopCallWord0(a)
-}
-if wordCount > 1 {
-renvoAsmPopCallWord1(a)
-}
-if wordCount > 2 {
-renvoAsmPopSecondary(a)
-}
-if wordCount > 3 {
-renvoAsmPopTertiary(a)
-}
-if wordCount > 4 {
-renvoAsmEmit16(a, 0x5841)
-}
-if wordCount > 5 {
-renvoAsmEmit16(a, 0x5941)
-}
 importID := renvoAsmAddKernelImport(a, g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
 if importID < 0 {
 return false
 }
-renvoAsmEmit8(a, 0xe8)
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddAbsReloc(a, at, importID, renvoAbsKernelImportRelocBase+importID)
+renvoAmd64EmitKernelStaticCall(a, importID, wordCount)
 return true
-}
-
-func renvoKernelImportName(a *renvoAsm, importID int) string {
-index := importID * 2
-if index < 0 || index+1 >= len(a.kernelImportOffsets) {
-return ""
-}
-start := a.kernelImportOffsets[index]
-end := a.kernelImportOffsets[index+1]
-return string(a.kernelImportNames[start:end])
 }
 
 func renvoKernelNameFromOutput(path string) string {
@@ -34120,7 +34918,7 @@ if len(renvoKernelBTF) == 0 || len(renvoKernelSymvers) == 0 {
 return false
 }
 if renvoKernelModuleSize <= 0 {
-size, nameOff, initOff, exitOff, ok := renvoKernelBTFModuleLayout(renvoKernelBTF)
+size, nameOff, initOff, exitOff, ok := renvoAmd64KernelBTFModuleLayout(renvoKernelBTF)
 if !ok || size <= 0 || nameOff < 0 || initOff < 0 {
 return false
 }
@@ -34321,308 +35119,6 @@ return false
 func renvoKernelLicenseGPLCompatible() bool {
 license := renvoKernelLicense
 return license == "GPL" || license == "GPL v2" || license == "GPL and additional rights" || license == "Dual BSD/GPL" || license == "Dual MIT/GPL" || license == "Dual MPL/GPL"
-}
-
-func renvoKernelContains(text string, needle string) bool {
-if len(needle) == 0 || len(needle) > len(text) {
-return false
-}
-for i := 0; i+len(needle) <= len(text); i++ {
-match := true
-for j := 0; j < len(needle); j++ {
-if text[i+j] != needle[j] {
-match = false
-}
-}
-if match {
-return true
-}
-}
-return false
-}
-
-func renvoKernelVermagic() string {
-out := renvoKernelRelease
-if renvoKernelContains(renvoKernelVersion, " SMP ") || renvoKernelContains(renvoKernelVersion, " SMP") {
-out += " SMP"
-}
-if renvoKernelContains(renvoKernelVersion, "PREEMPT") {
-out += " preempt"
-}
-if renvoKernelModuleExitOff >= 0 {
-out += " mod_unload"
-}
-if crc, ok := renvoKernelSymbolCRC("module_layout"); ok && crc != 0 {
-out += " modversions"
-}
-return out + " "
-}
-
-func renvoKernelAppendString(out []byte, value string) []byte {
-for i := 0; i < len(value); i++ {
-out = append(out, value[i])
-}
-return append(out, 0)
-}
-
-func renvoKernelAppendSym64(out []byte, name int, info int, section int, value int, size int) []byte {
-out = renvoAppend32(out, name)
-out = append(out, byte(info), 0)
-out = renvoAppend16(out, section)
-out = renvoAppend64(out, value)
-out = renvoAppend64(out, size)
-return out
-}
-
-func renvoKernelAppendRela(out []byte, offset int, symbol int, kind int, addend int) []byte {
-out = renvoAppend64(out, offset)
-out = renvoAppend64(out, (symbol<<32)|kind)
-out = renvoAppend64(out, addend)
-return out
-}
-
-func renvoKernelAppendVersion(out []byte, symbol string, crc int) []byte {
-start := len(out)
-out = renvoAppend64(out, crc)
-for i := 0; i < len(symbol) && i < 55; i++ {
-out = append(out, symbol[i])
-}
-out = append(out, 0)
-return renvoAppendUntil(out, start+64)
-}
-
-func renvoKernelAppendELFHeader(out []byte, shoff int, shnum int, shstrndx int) []byte {
-out = append(out, 0x7f, 'E', 'L', 'F', 2, 1, 1, 0)
-out = renvoAppendUntil(out, 16)
-out = renvoAppend16(out, 1)
-out = renvoAppend16(out, 62)
-out = renvoAppend32(out, 1)
-out = renvoAppend64(out, 0)
-out = renvoAppend64(out, 0)
-out = renvoAppend64(out, shoff)
-out = renvoAppend32(out, 0)
-out = renvoAppend16(out, 64)
-out = renvoAppend16(out, 0)
-out = renvoAppend16(out, 0)
-out = renvoAppend16(out, 64)
-out = renvoAppend16(out, shnum)
-out = renvoAppend16(out, shstrndx)
-return out
-}
-
-func renvoKernelAppendShdr64(out []byte, name int, kind int, flags int, off int, size int, link int, info int, align int, entsize int) []byte {
-out = renvoAppend32(out, name)
-out = renvoAppend32(out, kind)
-out = renvoAppend64(out, flags)
-out = renvoAppend64(out, 0)
-out = renvoAppend64(out, off)
-out = renvoAppend64(out, size)
-out = renvoAppend32(out, link)
-out = renvoAppend32(out, info)
-out = renvoAppend64(out, align)
-out = renvoAppend64(out, entsize)
-return out
-}
-
-func renvoAsmImageKernelModuleAmd64(a *renvoAsm, initLabel int, exitLabel int) []byte {
-renvoNonNil(a)
-renvoAsmPatch(a)
-initPos := renvoAsmLabelPosition(a, initLabel)
-exitPos := renvoAsmLabelPosition(a, exitLabel)
-if initPos < 0 || a.c.kernel.kernelModuleSize <= 0 {
-return nil
-}
-hasPrint := false
-for i := 0; i+2 < len(a.absRelocs); i += 3 {
-if int(a.absRelocs[i+2]) == renvoAbsKernelPrintReloc {
-hasPrint = true
-}
-}
-
-var strtab []byte
-strtab = append(strtab, 0)
-initName := len(strtab)
-strtab = renvoKernelAppendString(strtab, "init_module")
-exitName := len(strtab)
-strtab = renvoKernelAppendString(strtab, "cleanup_module")
-thisName := len(strtab)
-strtab = renvoKernelAppendString(strtab, "__this_module")
-printName := len(strtab)
-strtab = renvoKernelAppendString(strtab, "_printk")
-var importNames []int
-for i := 0; i+1 < len(a.kernelImportOffsets); i += 2 {
-importNames = append(importNames, len(strtab))
-strtab = renvoKernelAppendString(strtab, renvoKernelImportName(a, i/2))
-}
-
-var symtab []byte
-symtab = renvoKernelAppendSym64(symtab, 0, 0, 0, 0, 0)
-symtab = renvoKernelAppendSym64(symtab, 0, 3, 1, 0, 0)
-symtab = renvoKernelAppendSym64(symtab, 0, 3, 3, 0, 0)
-symtab = renvoKernelAppendSym64(symtab, 0, 3, 4, 0, 0)
-symtab = renvoKernelAppendSym64(symtab, 0, 3, 7, 0, 0)
-initSym := 5
-symtab = renvoKernelAppendSym64(symtab, initName, 18, 1, initPos, 0)
-exitSym := 0
-if exitPos >= 0 {
-exitSym = len(symtab) / 24
-symtab = renvoKernelAppendSym64(symtab, exitName, 18, 1, exitPos, 0)
-}
-symtab = renvoKernelAppendSym64(symtab, thisName, 17, 7, 0, a.c.kernel.kernelModuleSize)
-printSym := 0
-if hasPrint {
-printSym = len(symtab) / 24
-symtab = renvoKernelAppendSym64(symtab, printName, 16, 0, 0, 0)
-}
-var importSymbols []int
-for i := 0; i < len(importNames); i++ {
-importSymbols = append(importSymbols, len(symtab)/24)
-symtab = renvoKernelAppendSym64(symtab, importNames[i], 16, 0, 0, 0)
-}
-
-var relaText []byte
-for i := 0; i+2 < len(a.absRelocs); i += 3 {
-at := int(a.absRelocs[i]) & 2147483647
-off := int(a.absRelocs[i+1]) & 2147483647
-kind := int(a.absRelocs[i+2]) & 2147483647
-if kind == renvoAbsBssReloc {
-relaText = renvoKernelAppendRela(relaText, at, 3, 2, off-4)
-} else if kind == renvoAbsKernelPrintReloc {
-relaText = renvoKernelAppendRela(relaText, at, printSym, 4, -4)
-} else if kind >= renvoAbsKernelImportRelocBase {
-importID := kind - renvoAbsKernelImportRelocBase
-if importID < 0 || importID >= len(importSymbols) {
-return nil
-}
-relaText = renvoKernelAppendRela(relaText, at, importSymbols[importID], 4, -4)
-} else {
-relaText = renvoKernelAppendRela(relaText, at, 2, 2, off-4)
-}
-}
-
-thisModule := make([]byte, a.c.kernel.kernelModuleSize)
-if a.c.kernel.kernelNameOff+len(a.c.kernel.kernelModuleName) >= len(thisModule) {
-return nil
-}
-for i := 0; i < len(a.c.kernel.kernelModuleName); i++ {
-thisModule[a.c.kernel.kernelNameOff+i] = a.c.kernel.kernelModuleName[i]
-}
-var relaThis []byte
-relaThis = renvoKernelAppendRela(relaThis, a.c.kernel.kernelInitOff, initSym, 1, 0)
-if exitSym != 0 && a.c.kernel.kernelExitOff >= 0 {
-relaThis = renvoKernelAppendRela(relaThis, a.c.kernel.kernelExitOff, exitSym, 1, 0)
-}
-
-var versions []byte
-moduleCRC, moduleOK := renvoKernelSymbolCRC("module_layout")
-if moduleOK && moduleCRC != 0 {
-versions = renvoKernelAppendVersion(versions, "module_layout", moduleCRC)
-}
-if hasPrint {
-printCRC, ok := renvoKernelSymbolCRC("_printk")
-if !ok {
-return nil
-}
-versions = renvoKernelAppendVersion(versions, "_printk", printCRC)
-}
-for i := 0; i < len(importSymbols); i++ {
-name := renvoKernelImportName(a, i)
-if renvoKernelSymbolGPLOnly(name) && !renvoKernelLicenseGPLCompatible() {
-renvoPrintErr("renvo: GPL-only kernel symbol requires a GPL-compatible module license: ")
-renvoPrintErr(name)
-renvoPrintErr("\n")
-return nil
-}
-crc, ok := renvoKernelSymbolCRC(name)
-if !ok {
-return nil
-}
-if crc != 0 {
-versions = renvoKernelAppendVersion(versions, name, crc)
-}
-}
-
-var modinfo []byte
-modinfo = renvoKernelAppendString(modinfo, "license="+a.c.kernel.kernelLicense)
-modinfo = renvoKernelAppendString(modinfo, "depends=")
-modinfo = renvoKernelAppendString(modinfo, "name="+a.c.kernel.kernelModuleName)
-modinfo = renvoKernelAppendString(modinfo, "vermagic="+renvoKernelVermagic())
-
-var shstr []byte
-shstr = append(shstr, 0)
-textName := len(shstr)
-shstr = renvoKernelAppendString(shstr, ".text")
-relaTextName := len(shstr)
-shstr = renvoKernelAppendString(shstr, ".rela.text")
-rodataName := len(shstr)
-shstr = renvoKernelAppendString(shstr, ".rodata")
-bssName := len(shstr)
-shstr = renvoKernelAppendString(shstr, ".bss")
-modinfoName := len(shstr)
-shstr = renvoKernelAppendString(shstr, ".modinfo")
-versionsName := len(shstr)
-shstr = renvoKernelAppendString(shstr, "__versions")
-thisSectionName := len(shstr)
-shstr = renvoKernelAppendString(shstr, ".gnu.linkonce.this_module")
-relaThisName := len(shstr)
-shstr = renvoKernelAppendString(shstr, ".rela.gnu.linkonce.this_module")
-symtabName := len(shstr)
-shstr = renvoKernelAppendString(shstr, ".symtab")
-strtabName := len(shstr)
-shstr = renvoKernelAppendString(shstr, ".strtab")
-shstrName := len(shstr)
-shstr = renvoKernelAppendString(shstr, ".shstrtab")
-
-var out []byte
-out = renvoAppendUntil(out, 64)
-textOff := renvoAlignValue(len(out), 16)
-out = renvoAppendUntil(out, textOff)
-out = append(out, a.code...)
-relaTextOff := renvoAlignValue(len(out), 8)
-out = renvoAppendUntil(out, relaTextOff)
-out = append(out, relaText...)
-rodataOff := renvoAlignValue(len(out), 8)
-out = renvoAppendUntil(out, rodataOff)
-out = append(out, a.data...)
-bssOff := len(out)
-modinfoOff := len(out)
-out = append(out, modinfo...)
-versionsOff := renvoAlignValue(len(out), 8)
-out = renvoAppendUntil(out, versionsOff)
-out = append(out, versions...)
-thisOff := renvoAlignValue(len(out), 64)
-out = renvoAppendUntil(out, thisOff)
-out = append(out, thisModule...)
-relaThisOff := renvoAlignValue(len(out), 8)
-out = renvoAppendUntil(out, relaThisOff)
-out = append(out, relaThis...)
-symtabOff := renvoAlignValue(len(out), 8)
-out = renvoAppendUntil(out, symtabOff)
-out = append(out, symtab...)
-strtabOff := len(out)
-out = append(out, strtab...)
-shstrOff := len(out)
-out = append(out, shstr...)
-shoff := renvoAlignValue(len(out), 8)
-out = renvoAppendUntil(out, shoff)
-out = renvoKernelAppendShdr64(out, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-out = renvoKernelAppendShdr64(out, textName, 1, 6, textOff, len(a.code), 0, 0, 16, 0)
-out = renvoKernelAppendShdr64(out, relaTextName, 4, 64, relaTextOff, len(relaText), 9, 1, 8, 24)
-out = renvoKernelAppendShdr64(out, rodataName, 1, 2, rodataOff, len(a.data), 0, 0, 8, 0)
-out = renvoKernelAppendShdr64(out, bssName, 8, 3, bssOff, a.bssSize, 0, 0, 8, 0)
-out = renvoKernelAppendShdr64(out, modinfoName, 1, 2, modinfoOff, len(modinfo), 0, 0, 1, 0)
-out = renvoKernelAppendShdr64(out, versionsName, 1, 2, versionsOff, len(versions), 0, 0, 8, 0)
-out = renvoKernelAppendShdr64(out, thisSectionName, 1, 3, thisOff, len(thisModule), 0, 0, 64, 0)
-out = renvoKernelAppendShdr64(out, relaThisName, 4, 64, relaThisOff, len(relaThis), 9, 7, 8, 24)
-out = renvoKernelAppendShdr64(out, symtabName, 2, 0, symtabOff, len(symtab), 10, 5, 8, 24)
-out = renvoKernelAppendShdr64(out, strtabName, 3, 0, strtabOff, len(strtab), 0, 0, 1, 0)
-out = renvoKernelAppendShdr64(out, shstrName, 3, 0, shstrOff, len(shstr), 0, 0, 1, 0)
-var header []byte
-header = renvoKernelAppendELFHeader(header, shoff, 12, 11)
-for i := 0; i < len(header); i++ {
-out[i] = header[i]
-}
-return out
 }
 
 // source: backend/compiler_linux_386_impl.go

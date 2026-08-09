@@ -4,7 +4,9 @@ const renvoAmd64ELFCodeOffset = 0xb0
 const renvoAmd64RuntimeOptimizationSourceThreshold = 1048576
 
 func renvoCompileAmd64(input []int, output int, arenaSize int) int {
-	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 && !renvoPrepareKernelMetadata() {
+	if (renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+		renvoFixedTarget == 0 && renvoTarget == renvoTargetLinuxKernelAmd64) &&
+		!renvoPrepareKernelMetadata() {
 		renvoPrintErr("renvo: kernel metadata unavailable\n")
 		return 1
 	}
@@ -15,7 +17,8 @@ func renvoCompileAmd64(input []int, output int, arenaSize int) int {
 	}
 	var prog renvoProgram
 	prog = renvoParseProgram(src)
-	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+		renvoFixedTarget == 0 && renvoTarget == renvoTargetLinuxKernelAmd64 {
 		renvoCaptureKernelCompileContext(&prog.c)
 	}
 	if !prog.ok {
@@ -100,7 +103,8 @@ func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinear
 		g.funcLabels = append(g.funcLabels, label)
 	}
 	renvoInitFuncQueue(g, len(meta.funcs))
-	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+		renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(meta.c) {
 		if !renvoBeginKernelModuleAmd64(g, appIndex) {
 			return nil
 		}
@@ -140,8 +144,7 @@ func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinear
 	if renvoFixedTarget == 0 && meta.c.emitImage {
 		renvoAsmRet(a)
 	} else if targetIsWindows(meta.c.renvoTargetOS) {
-		renvoAsmCopyPrimaryToTertiary(a)
-		renvoWinAmd64CallImport(a, renvoWinImportExitProcess)
+		renvoWinAmd64EmitExit(a)
 		renvoAsmRet(a)
 	} else {
 		renvoAsmCopyPrimaryToCallWord0(a)
@@ -197,7 +200,8 @@ func renvoFinishScalarProgramAmd64(g *renvoLinearGen) renvoCompileResult {
 	var data []byte
 	if targetIsWindows(g.c.renvoTargetOS) {
 		data = renvoAsmImageWindowsAmd64(a)
-	} else if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+	} else if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+		renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
 		data = renvoAsmImageKernelModuleAmd64(a, g.kernelInitLabel, g.kernelExitLabel)
 	} else {
 		data = renvoAsmImageAmd64(a)
@@ -228,22 +232,31 @@ func renvoEmitProgramEntryArgsAmd64(g *renvoLinearGen, appIndex int) bool {
 		return false
 	}
 	argsOff := g.asm.bssSize
-	g.asm.bssSize += 32768
 	if targetIsWindows(g.c.renvoTargetOS) {
-		argsTextOff := g.asm.bssSize
-		g.asm.bssSize += 32768
-		argsLenOff := g.asm.bssSize
-		g.asm.bssSize += 8
-		envDataOff := g.asm.bssSize
-		g.asm.bssSize += 32768
-		envLenOff := g.asm.bssSize
-		g.asm.bssSize += 8
+		argsOff = renvoAlignValue(g.asm.bssSize, renvoWindowsAmd64ArgsBSSAlignment)
+		g.asm.bssSize = argsOff + renvoWindowsAmd64ArgsBSSSize
+		argsTextOff := renvoAlignValue(
+			g.asm.bssSize, renvoWindowsAmd64ArgsTextBSSAlignment)
+		g.asm.bssSize = argsTextOff + renvoWindowsAmd64ArgsTextBSSSize
+		argsLenOff := renvoAlignValue(
+			g.asm.bssSize, renvoWindowsAmd64ArgsLengthBSSAlignment)
+		g.asm.bssSize = argsLenOff + renvoWindowsAmd64ArgsLengthBSSSize
+		envDataOff := renvoAlignValue(
+			g.asm.bssSize, renvoWindowsAmd64EnvironmentBSSAlignment)
+		g.asm.bssSize = envDataOff + renvoWindowsAmd64EnvironmentBSSSize
+		envLenOff := renvoAlignValue(
+			g.asm.bssSize, renvoWindowsAmd64EnvironmentLengthBSSAlignment)
+		g.asm.bssSize = envLenOff + renvoWindowsAmd64EnvironmentLengthBSSSize
 		renvoAsmBuildWindowsArgvEnvSlicesAmd64(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
 	} else {
-		envDataOff := g.asm.bssSize
-		g.asm.bssSize += 32768
-		envLenOff := g.asm.bssSize
-		g.asm.bssSize += 8
+		argsOff = renvoAlignValue(g.asm.bssSize, renvoLinuxAmd64ArgsBSSAlignment)
+		g.asm.bssSize = argsOff + renvoLinuxAmd64ArgsBSSSize
+		envDataOff := renvoAlignValue(
+			g.asm.bssSize, renvoLinuxAmd64EnvironmentBSSAlignment)
+		g.asm.bssSize = envDataOff + renvoLinuxAmd64EnvironmentBSSSize
+		envLenOff := renvoAlignValue(
+			g.asm.bssSize, renvoLinuxAmd64EnvironmentLengthBSSAlignment)
+		g.asm.bssSize = envLenOff + renvoLinuxAmd64EnvironmentLengthBSSSize
 		renvoAsmBuildArgvEnvSlicesAmd64(&g.asm, argsOff, envDataOff, envLenOff)
 	}
 	if app.paramCount == 1 {

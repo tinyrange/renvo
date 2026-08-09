@@ -206,6 +206,36 @@ func TestAmd64DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 			t.Errorf("generated amd64 output is missing algorithm binding %s", binding)
 		}
 	}
+	targetProjection := GenerateCheckedInTargetProjection(
+		resolveNativeTarget(t, "linux/amd64"), "linux/amd64", "main")
+	if !targetProjection.Ok {
+		t.Fatalf("generate linux/amd64 target projection: %#v", targetProjection.Diagnostics)
+	}
+	checkedInTarget, err := os.ReadFile("../../backend/compiler_linux_amd64_impl.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(targetProjection.Source, checkedInTarget) {
+		t.Fatal("checked-in linux/amd64 target projection is stale; run go generate ./backend/definitions")
+	}
+	for _, binding := range []string{
+		"target: target-projection/linux/amd64",
+		"const renvoLinuxAmd64SysReadSeq = 0",
+		"const renvoLinuxAmd64ArgsBSSSize = 32768",
+		"const renvoLinuxAmd64EnvironmentBSSAlignment = 16",
+		"func renvoAsmBuildArgvEnvSlicesAmd64(",
+		"func renvoAsmImageAmd64(",
+		"const renvoLinuxAmd64ELFMachine = 62",
+	} {
+		if !containsText(string(checkedInTarget), binding) {
+			t.Errorf("generated linux/amd64 target output is missing %s", binding)
+		}
+	}
+	for _, forbidden := range []string{"type RTGEmitter struct", "func renvoRTGImage("} {
+		if containsText(string(checkedInTarget), forbidden) {
+			t.Errorf("generated linux/amd64 target output retained prepared bridge %s", forbidden)
+		}
+	}
 	prepared := GeneratePreparedBackend(
 		resolveNativeTarget(t, "linux/amd64"), "linux/amd64")
 	if !prepared.Ok {
@@ -216,6 +246,232 @@ func TestAmd64DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 	}
 	if containsText(string(prepared.Source), directEmitterV1Schema) {
 		t.Error("prepared amd64 backend retained the direct emitter schema as runtime data")
+	}
+}
+
+func TestCheckedInLinuxAmd64ProjectionOwnsEntryBSSLayout(t *testing.T) {
+	const filename = "../../backend/definitions/linux_amd64.rtg"
+	original, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modified := bytes.Replace(original,
+		[]byte("bss args 32768 16"), []byte("bss args 16384 32"), 1)
+	if bytes.Equal(modified, original) {
+		t.Fatal("fixture did not contain the args BSS declaration")
+	}
+	resolved := ResolveDefinitions(ParseImports(
+		modified, filename, testFilesystemImportLoader{}))
+	if !resolved.Ok {
+		t.Fatalf("modified definition did not resolve: %#v", resolved.Diagnostics)
+	}
+	generated := GenerateCheckedInTargetProjection(resolved, "linux/amd64", "main")
+	if !generated.Ok {
+		t.Fatalf("modified projection failed: %#v", generated.Diagnostics)
+	}
+	for _, binding := range []string{
+		"const renvoLinuxAmd64ArgsBSSSize = 16384",
+		"const renvoLinuxAmd64ArgsBSSAlignment = 32",
+	} {
+		if !containsText(string(generated.Source), binding) {
+			t.Errorf("modified projection is missing %s", binding)
+		}
+	}
+}
+
+func TestCheckedInLinuxAmd64ProjectionRejectsIncompleteDefinition(t *testing.T) {
+	const filename = "../../backend/definitions/linux_amd64.rtg"
+	original, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		old  string
+		new  string
+	}{
+		{
+			name: "missing syscall number",
+			old:  "operation read { number = 0 args = [fd, buffer, count] }",
+			new:  "operation read { args = [fd, buffer, count] }",
+		},
+		{
+			name: "incompatible entry arity",
+			old:  "max_parameters = 2",
+			new:  "max_parameters = 1",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			modified := bytes.Replace(original, []byte(test.old), []byte(test.new), 1)
+			if bytes.Equal(modified, original) {
+				t.Fatalf("fixture did not contain %q", test.old)
+			}
+			resolved := ResolveDefinitions(ParseImports(
+				modified, filename, testFilesystemImportLoader{}))
+			if !resolved.Ok {
+				t.Fatalf("modified definition did not resolve: %#v", resolved.Diagnostics)
+			}
+			generated := GenerateCheckedInTargetProjection(
+				resolved, "linux/amd64", "main")
+			if generated.Ok || len(generated.Diagnostics) != 1 ||
+				generated.Diagnostics[0].Code != "RTG-GENERATE-006" {
+				t.Fatalf("incomplete projection result = %#v", generated)
+			}
+		})
+	}
+}
+
+func TestCheckedInWindowsAmd64ProjectionOutput(t *testing.T) {
+	resolved := resolveNativeTarget(t, "windows/amd64")
+	generated := GenerateCheckedInTargetProjection(resolved, "windows/amd64", "main")
+	if !generated.Ok {
+		t.Fatalf("generate windows/amd64 target projection: %#v", generated.Diagnostics)
+	}
+	checkedIn, err := os.ReadFile("../../backend/compiler_windows_amd64_impl.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(generated.Source, checkedIn) {
+		t.Fatal("checked-in windows/amd64 target projection is stale; run go generate ./backend/definitions")
+	}
+	for _, binding := range []string{
+		"target: target-projection/windows/amd64",
+		"const renvoWindowsAmd64ArgsBSSSize = 32768",
+		"func renvoWinAmd64CallImport(",
+		"func renvoWinAmd64EmitReadWriteHelper(",
+		"func renvoAsmBuildWindowsArgvEnvSlicesAmd64(",
+		"func renvoAsmImageWindowsAmd64(",
+	} {
+		if !containsText(string(checkedIn), binding) {
+			t.Errorf("generated windows/amd64 target output is missing %s", binding)
+		}
+	}
+	for _, forbidden := range []string{
+		"type RTGEmitter struct", "func renvoRTGImage(", "rtgBuiltinX8664",
+	} {
+		if containsText(string(checkedIn), forbidden) {
+			t.Errorf("generated windows/amd64 target retained pruned bridge %s", forbidden)
+		}
+	}
+}
+
+func TestCheckedInWindowsAmd64ProjectionOwnsEntryBSSLayout(t *testing.T) {
+	const filename = "../../backend/definitions/windows_amd64.rtg"
+	original, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modified := bytes.Replace(original,
+		[]byte("bss args 32768 16"), []byte("bss args 16384 32"), 1)
+	resolved := ResolveDefinitions(ParseImports(
+		modified, filename, testFilesystemImportLoader{}))
+	if !resolved.Ok {
+		t.Fatalf("modified definition did not resolve: %#v", resolved.Diagnostics)
+	}
+	generated := GenerateCheckedInTargetProjection(resolved, "windows/amd64", "main")
+	if !generated.Ok {
+		t.Fatalf("modified projection failed: %#v", generated.Diagnostics)
+	}
+	for _, binding := range []string{
+		"const renvoWindowsAmd64ArgsBSSSize = 16384",
+		"const renvoWindowsAmd64ArgsBSSAlignment = 32",
+	} {
+		if !containsText(string(generated.Source), binding) {
+			t.Errorf("modified projection is missing %s", binding)
+		}
+	}
+}
+
+func TestCheckedInWindowsAmd64ProjectionRejectsIncompatibleDefinition(t *testing.T) {
+	const filename = "../../backend/definitions/windows_amd64.rtg"
+	original, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct{ old, new string }{
+		{`stack_commit = 0x1000`, `stack_commit = 0x2000`},
+		{`GetCommandLineA,`, `GetCommandLineW,`},
+		{`max_parameters = 2`, `max_parameters = 1`},
+	}
+	for _, test := range tests {
+		modified := bytes.Replace(original, []byte(test.old), []byte(test.new), 1)
+		resolved := ResolveDefinitions(ParseImports(
+			modified, filename, testFilesystemImportLoader{}))
+		if !resolved.Ok {
+			continue
+		}
+		generated := GenerateCheckedInTargetProjection(resolved, "windows/amd64", "main")
+		if generated.Ok || len(generated.Diagnostics) != 1 ||
+			generated.Diagnostics[0].Code != "RTG-GENERATE-006" {
+			t.Fatalf("incompatible projection result = %#v", generated)
+		}
+	}
+}
+
+func TestCheckedInLinuxKernelAmd64ProjectionOutput(t *testing.T) {
+	resolved := resolveNativeTarget(t, "linux-kernel/amd64")
+	generated := GenerateCheckedInTargetProjection(
+		resolved, "linux-kernel/amd64", "main")
+	if !generated.Ok {
+		t.Fatalf("generate linux-kernel/amd64 target projection: %#v",
+			generated.Diagnostics)
+	}
+	checkedIn, err := os.ReadFile(
+		"../../backend/compiler_linux_kernel_amd64_target_impl.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(generated.Source, checkedIn) {
+		t.Fatal("checked-in linux-kernel/amd64 target projection is stale; run go generate ./backend/definitions")
+	}
+	for _, binding := range []string{
+		"target: target-projection/linux-kernel/amd64",
+		"func renvoAmd64KernelEntryPrologue(",
+		"func renvoAmd64KernelCallbackAddress(",
+		"func renvoAmd64EmitKernelPrintValue(",
+		"func renvoAmd64EmitKernelStaticCall(",
+		"func renvoAsmImageKernelModuleAmd64(",
+		"Generated from the declarative Linux-module ELF format",
+	} {
+		if !containsText(string(checkedIn), binding) {
+			t.Errorf("generated linux-kernel/amd64 target output is missing %s", binding)
+		}
+	}
+	for _, forbidden := range []string{
+		"type RTGEmitter struct", "func renvoRTGImage(", "rtgBuiltinX8664",
+		"RTGRegister", "renvoRTGAddress", ".KernelBTF()",
+	} {
+		if containsText(string(checkedIn), forbidden) {
+			t.Errorf("generated linux-kernel/amd64 target retained pruned bridge %s", forbidden)
+		}
+	}
+}
+
+func TestCheckedInLinuxKernelAmd64ProjectionOwnsRuntimeAndEntry(t *testing.T) {
+	const filename = "../../backend/definitions/linux_kernel_amd64.rtg"
+	original, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modified := bytes.Replace(original,
+		[]byte(`out.Text("\xf3\x0f\x1e\xfa`),
+		[]byte(`out.Text("\x90\x0f\x1e\xfa`), 1)
+	if bytes.Equal(modified, original) {
+		t.Fatal("fixture did not contain the kernel entry sequence")
+	}
+	resolved := ResolveDefinitions(ParseImports(
+		modified, filename, testFilesystemImportLoader{}))
+	if !resolved.Ok {
+		t.Fatalf("modified definition did not resolve: %#v", resolved.Diagnostics)
+	}
+	generated := GenerateCheckedInTargetProjection(
+		resolved, "linux-kernel/amd64", "main")
+	if !generated.Ok {
+		t.Fatalf("modified projection failed: %#v", generated.Diagnostics)
+	}
+	if !containsText(string(generated.Source), `"\x90\x0f\x1e\xfa`) {
+		t.Fatal("modified kernel entry sequence did not reach the target projection")
 	}
 }
 

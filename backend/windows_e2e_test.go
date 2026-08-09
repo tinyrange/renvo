@@ -70,6 +70,9 @@ func TestWindowsTargetsEndToEnd(t *testing.T) {
 			t.Run("stage0_open_smoke", func(t *testing.T) {
 				compileAndRunWindowsInput(t, target.name, stage0, []string{"tests/windows_open_create_close_smoke.go"})
 			})
+			t.Run("stage0_open_read_smoke", func(t *testing.T) {
+				compileAndRunWindowsInput(t, target.name, stage0, []string{"tests/windows_open_read_close_smoke.go"})
+			})
 			stage1 := buildWindowsStage1(t, stage0, target.name, files, targetDir)
 			stage2 := filepath.Join(targetDir, "renvo-stage2.exe")
 			compileArgs := []string{"-t", target.name, "-s", "-o", stage2}

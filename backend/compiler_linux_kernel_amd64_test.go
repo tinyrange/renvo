@@ -228,6 +228,8 @@ func TestKernelModuleWithoutExitOmitsCleanup(t *testing.T) {
 	savedFixed := renvoFixedTarget
 	savedRelease := renvoKernelRelease
 	savedName := renvoKernelModuleName
+	savedLicense := renvoKernelLicense
+	savedBTF := renvoKernelBTF
 	savedSymvers := renvoKernelSymvers
 	savedVersion := renvoKernelVersion
 	savedSize := renvoKernelModuleSize
@@ -238,6 +240,8 @@ func TestKernelModuleWithoutExitOmitsCleanup(t *testing.T) {
 		renvoFixedTarget = savedFixed
 		renvoKernelRelease = savedRelease
 		renvoKernelModuleName = savedName
+		renvoKernelLicense = savedLicense
+		renvoKernelBTF = savedBTF
 		renvoKernelSymvers = savedSymvers
 		renvoKernelVersion = savedVersion
 		renvoKernelModuleSize = savedSize
@@ -249,6 +253,8 @@ func TestKernelModuleWithoutExitOmitsCleanup(t *testing.T) {
 	renvoSetTarget(renvoTargetLinuxKernelAmd64)
 	renvoKernelRelease = "6.18.0-test"
 	renvoKernelModuleName = "init_only"
+	renvoKernelLicense = "Proprietary"
+	renvoKernelBTF = testKernelBTF()
 	renvoKernelSymvers = []byte("0xb1976aeb\tmodule_layout\tvmlinux\tEXPORT_SYMBOL\n0x92997ed8\t_printk\tvmlinux\tEXPORT_SYMBOL\n")
 	renvoKernelVersion = "Linux version 6.18.0-test SMP PREEMPT"
 	renvoKernelModuleSize = 128

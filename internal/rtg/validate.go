@@ -462,6 +462,7 @@ func declarationAllowedFields(kind string) []string {
 			"entry_state_bytes", "emit_entry_start", "emit_entry", "emit_exit",
 			"emit_static_call", "emit_operation", "entry_prologue", "entry_epilogue",
 			"emit_callback_address", "emit_entry_start_simple",
+			"prepare_read_write_buffer", "move_offset_argument",
 		}
 	}
 	if kind == DeclFormat {
@@ -469,6 +470,7 @@ func declarationAllowedFields(kind string) []string {
 			"byte_order", "address_bits", "file_alignment", "section_alignment", "page_size",
 			"image_base", "image_base_high", "machine", "kind", "cpu", "subsystem", "entry", "strip",
 			"type", "headers_size", "text_rva", "sections", "code_offset", "image",
+			"production_image",
 			"kernel_image", "flags", "patch_absolute", "patch_image",
 			"coff_characteristics", "dll_characteristics",
 			"os_version_major", "os_version_minor", "image_version_major",
@@ -587,8 +589,9 @@ func validateRuntime(document Document, declaration Declaration) []Diagnostic {
 	hookNames := []string{
 		"emit_entry_start", "emit_entry_start_simple", "emit_entry", "emit_exit", "emit_static_call",
 		"emit_operation", "entry_prologue", "entry_epilogue", "emit_callback_address",
+		"prepare_read_write_buffer", "move_offset_argument",
 	}
-	hookParameters := make([][]string, 9)
+	hookParameters := make([][]string, 11)
 	hookParameters[0] = []string{"*RTGEmitter", "int"}
 	hookParameters[1] = []string{"*RTGEmitter"}
 	hookParameters[2] = []string{"*RTGEmitter", "int", "int"}
@@ -598,7 +601,9 @@ func validateRuntime(document Document, declaration Declaration) []Diagnostic {
 	hookParameters[6] = []string{"*RTGEmitter"}
 	hookParameters[7] = []string{"*RTGEmitter"}
 	hookParameters[8] = []string{"*RTGEmitter", "RTGLabel"}
-	hookResults := []string{"bool", "bool", "bool", "", "", "bool", "", "", ""}
+	hookParameters[9] = []string{"*RTGEmitter"}
+	hookParameters[10] = []string{"*RTGEmitter"}
+	hookResults := []string{"bool", "bool", "bool", "", "", "bool", "", "", "", "", ""}
 	for i := 0; i < len(declaration.Statements); i++ {
 		left, right, assignment := statementAssignment(declaration.Statements[i])
 		if assignment && len(left) == 1 {
@@ -751,6 +756,13 @@ func validateFormat(document Document, declaration Declaration) []Diagnostic {
 				"elf_executable requires kind=elf, little endian, 32/64 address_bits, machine, "+
 					"code_offset, power-of-two file_alignment, and patch_absolute"))
 		}
+	}
+	if production, found := fieldValue(document, declaration, "production_image"); found &&
+		(valueName(production) != "elf_executable_symbols" ||
+			declarativeFormatImage(declaration) != "elf_executable") {
+		diagnostics = append(diagnostics, resolveDiagnostic(document, declaration,
+			"RTG-VALIDATE-048",
+			"production_image must be elf_executable_symbols on an ELF executable format"))
 	}
 	if declarativeFormatImage(declaration) == "pe_executable" {
 		kind, hasKind := fieldValue(document, declaration, "kind")

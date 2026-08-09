@@ -7,7 +7,13 @@ implements direct_emitter_v1
 go backend {
 	func windowsExit(out *RTGEmitter, status RTGRegister) {
 		if status.Code != 1 {
-			encodeRegisterToRM(out, 0x89, RTGRegister{Code: 1, Valid: true}, status, 64)
+			if status.Code >= 8 {
+				out.Byte(0x49)
+			} else {
+				out.Byte(0x48)
+			}
+			out.Byte(0x89)
+			out.AppendByte(0xc1 | (status.Code&7)<<3)
 		}
 		out.Bytes4(0x48, 0x83, 0xec, 0x28)
 		out.Bytes2(0xff, 0x15)
@@ -57,10 +63,10 @@ go backend {
 
 	func windowsStaticCall(out *RTGEmitter, importID int, wordCount int) {
 		if wordCount > 0 {
-			emitOpcodeRegister(out, 0x58, RTGRegister{Code: 1, Valid: true})
+			out.Byte(0x59)
 		}
 		if wordCount > 1 {
-			emitOpcodeRegister(out, 0x58, RTGRegister{Code: 2, Valid: true})
+			out.Byte(0x5a)
 		}
 		if wordCount > 2 {
 			out.Bytes2(0x41, 0x58)
@@ -76,7 +82,7 @@ go backend {
 		out.Bytes4(0x48, 0x83, 0xe4, 0xf0)
 		savedRSPOff := 32 + stackWords*8
 		allocation := RTGAlignValue(savedRSPOff+8, 16)
-		if RTGSignedFits(int64(allocation), 8) {
+		if RTGInt8Fits(allocation) {
 			out.Bytes4(0x48, 0x83, 0xec, allocation)
 		} else {
 			out.Bytes3(0x48, 0x81, 0xec)
@@ -96,7 +102,7 @@ go backend {
 		out.Bytes3(0x48, 0x89, 0xc4)
 		if stackWords > 0 {
 			adjust := stackWords * 8
-			if RTGSignedFits(int64(adjust), 8) {
+			if RTGInt8Fits(adjust) {
 				out.Bytes4(0x48, 0x83, 0xc4, adjust)
 			} else {
 				out.Bytes3(0x48, 0x81, 0xc4)
@@ -105,6 +111,101 @@ go backend {
 		}
 		out.Bytes3(0x4c, 0x89, 0xd0)
 	}
+
+	func windowsConditionalJump(out *RTGEmitter, opcode byte, label RTGLabel) {
+		out.Bytes2(0x0f, int(opcode))
+		out.Rel32(label)
+	}
+
+	func windowsBuiltinRuntimeClose(out *RTGEmitter) {
+		failed := out.NewLabel()
+		done := out.NewLabel()
+		windowsCallImport(out, 2)
+		out.Bytes2(0x85, 0xc0)
+		windowsConditionalJump(out, 0x84, failed)
+		out.Bytes2(0x31, 0xc0)
+		out.Byte(0xe9)
+		out.Rel32(done)
+		out.Mark(failed)
+		out.Bytes2(0x6a, -1)
+		out.Byte(0x58)
+		out.Mark(done)
+	}
+
+	func windowsBuiltinRuntimeChmod(out *RTGEmitter) {
+		failed := out.NewLabel()
+		done := out.NewLabel()
+		out.Bytes2(0x31, 0xd2)
+		out.Bytes3(0x45, 0x31, 0xc0)
+		out.Bytes2(0x41, 0xb9)
+		out.Int32(1)
+		windowsCallImport(out, 5)
+		out.Bytes3(0x83, 0xf8, -1)
+		windowsConditionalJump(out, 0x84, failed)
+		out.Bytes2(0x31, 0xc0)
+		out.Byte(0xe9)
+		out.Rel32(done)
+		out.Mark(failed)
+		out.Bytes2(0x6a, -1)
+		out.Byte(0x58)
+		out.Mark(done)
+	}
+
+	func windowsBuiltinTranslateCreateFileFlags(out *RTGEmitter) {
+		notReadWrite := out.NewLabel()
+		accessDone := out.NewLabel()
+		noCreate := out.NewLabel()
+		createDone := out.NewLabel()
+		out.Byte(0x68)
+		out.Int32(-2147483648)
+		out.Byte(0x5a)
+		out.Bytes2(0xa8, 2)
+		windowsConditionalJump(out, 0x84, notReadWrite)
+		out.Byte(0x68)
+		out.Int32(-1073741824)
+		out.Byte(0x5a)
+		out.Byte(0xe9)
+		out.Rel32(accessDone)
+		out.Mark(notReadWrite)
+		out.Bytes2(0xa8, 1)
+		windowsConditionalJump(out, 0x84, accessDone)
+		out.Byte(0xba)
+		out.Int32(0x40000000)
+		out.Mark(accessDone)
+		out.Bytes2(0x41, 0xba)
+		out.Int32(3)
+		out.Bytes2(0xa8, 64)
+		windowsConditionalJump(out, 0x84, noCreate)
+		out.Bytes2(0x41, 0xba)
+		out.Int32(4)
+		out.Byte(0xa9)
+		out.Int32(512)
+		windowsConditionalJump(out, 0x84, createDone)
+		out.Bytes2(0x41, 0xba)
+		out.Int32(2)
+		out.Byte(0xe9)
+		out.Rel32(createDone)
+		out.Mark(noCreate)
+		out.Byte(0xa9)
+		out.Int32(512)
+		windowsConditionalJump(out, 0x84, createDone)
+		out.Bytes2(0x41, 0xba)
+		out.Int32(5)
+		out.Mark(createDone)
+		out.Bytes2(0x41, 0xb8)
+		out.Int32(3)
+		out.Bytes3(0x45, 0x31, 0xc9)
+	}
+
+	func windowsBuiltinRuntimeOpen(out *RTGEmitter) {
+		out.Bytes3(0x49, 0x89, 0xfb)
+		out.Bytes3(0x48, 0x89, 0xf0)
+		windowsBuiltinTranslateCreateFileFlags(out)
+		out.Bytes3(0x4c, 0x89, 0xd9)
+		base := out.Len()
+		out.Text("\x41\x54\x49\x89\xe4\x48\x83\xe4\xf0\x48\x83\xec\x40\x44\x89\x54\x24\x20\xc7\x44\x24\x28\x80\x00\x00\x00\x48\xc7\x44\x24\x30\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x49\x89\xc3\x4c\x89\xe4\x41\x5c\x4c\x89\xd8")
+		out.AbsoluteReloc(base+37, 1, RTGRelocationImport)
+	}
 }
 
 # Image fields are declared here. Header/section/relocation are generic
@@ -112,102 +213,79 @@ go backend {
 extend arch x86_64 {
 	sequences {
 		windowsCallImport(out:emitter, importID:int) {
-			out.Bytes4(0x48, 0x83, 0xec, 0x28)
-			out.Bytes2(0xff, 0x15)
-			let at = out.Len()
-			out.Int32(0)
-			out.AbsoluteReloc(at, importID, RTGRelocationImport)
-			out.Bytes4(0x48, 0x83, 0xc4, 0x28)
+			let base = out.Len()
+			out.Text("\x41\x54\x49\x89\xe4\x48\x83\xe4\xf0\x48\x83\xec\x20\xff\x15\x00\x00\x00\x00\x49\x89\xc3\x4c\x89\xe4\x41\x5c\x4c\x89\xd8")
+			out.AbsoluteReloc(base+15, importID, RTGRelocationImport)
 		}
 		windowsRuntimeChmod(out:emitter) {
-			let rax = record_register(Code:0, Valid:true)
-			let rcx = record_register(Code:1, Valid:true)
-			let rdx = record_register(Code:2, Valid:true)
-			let rdi = record_register(Code:7, Valid:true)
-			let r8 = record_register(Code:8, Valid:true)
-			let r9 = record_register(Code:9, Valid:true)
 			let failed = out.NewLabel()
 			let done = out.NewLabel()
-			encodeRegisterToRM(out, 0x89, rcx, rdi, 64)
-			moveImmediate(out, rdx, 0)
-			moveImmediate(out, r8, 0)
-			moveImmediate(out, r9, 1)
+			moveImmediate(out, record_register(Code:2, Valid:true), 0)
+			moveImmediate(out, record_register(Code:8, Valid:true), 0)
+			moveImmediate(out, record_register(Code:9, Valid:true), 1)
 			windowsCallImport(out, 5)
-			moveImmediate(out, rdx, -1)
-			encodeRegisterToRM(out, 0x39, rax, rdx, 32)
+			moveImmediate(out, record_register(Code:2, Valid:true), -1)
+			encodeRegisterToRM(out, 0x39, record_register(Code:0, Valid:true), record_register(Code:2, Valid:true), 32)
 			jumpCondition(out, record_condition(JumpOpcode:0x84), failed)
-			moveImmediate(out, rax, 0)
+			moveImmediate(out, record_register(Code:0, Valid:true), 0)
 			encodeRelative(out, 0xe9, done)
 			out.Mark(failed)
-			moveImmediate(out, rax, -1)
+			moveImmediate(out, record_register(Code:0, Valid:true), -1)
 			out.Mark(done)
 		}
 		windowsRuntimeClose(out:emitter) {
-			let rax = record_register(Code:0, Valid:true)
-			let rcx = record_register(Code:1, Valid:true)
-			let rdi = record_register(Code:7, Valid:true)
 			let failed = out.NewLabel()
 			let done = out.NewLabel()
-			encodeRegisterToRM(out, 0x89, rcx, rdi, 64)
 			windowsCallImport(out, 2)
-			encodeRegisterToRM(out, 0x85, rax, rax, 32)
+			encodeRegisterToRM(out, 0x85, record_register(Code:0, Valid:true), record_register(Code:0, Valid:true), 32)
 			jumpCondition(out, record_condition(JumpOpcode:0x84), failed)
-			moveImmediate(out, rax, 0)
+			moveImmediate(out, record_register(Code:0, Valid:true), 0)
 			encodeRelative(out, 0xe9, done)
 			out.Mark(failed)
-			moveImmediate(out, rax, -1)
+			moveImmediate(out, record_register(Code:0, Valid:true), -1)
 			out.Mark(done)
 		}
 		windowsRuntimeOpen(out:emitter) {
-			let rax = record_register(Code:0, Valid:true)
-			let rcx = record_register(Code:1, Valid:true)
-			let rsi = record_register(Code:6, Valid:true)
-			let rdi = record_register(Code:7, Valid:true)
-			let r11 = record_register(Code:11, Valid:true)
-			encodeRegisterToRM(out, 0x89, r11, rdi, 64)
-			encodeRegisterToRM(out, 0x89, rax, rsi, 64)
+			encodeRegisterToRM(out, 0x89, record_register(Code:11, Valid:true), record_register(Code:7, Valid:true), 64)
+			encodeRegisterToRM(out, 0x89, record_register(Code:0, Valid:true), record_register(Code:6, Valid:true), 64)
 			windowsTranslateCreateFileFlags(out)
-			encodeRegisterToRM(out, 0x89, rcx, r11, 64)
+			encodeRegisterToRM(out, 0x89, record_register(Code:1, Valid:true), record_register(Code:11, Valid:true), 64)
 			let base = out.Len()
 			out.Text("\x41\x54\x49\x89\xe4\x48\x83\xe4\xf0\x48\x83\xec\x40\x44\x89\x54\x24\x20\xc7\x44\x24\x28\x80\x00\x00\x00\x48\xc7\x44\x24\x30\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x49\x89\xc3\x4c\x89\xe4\x41\x5c\x4c\x89\xd8")
 			out.AbsoluteReloc(base+37, 1, RTGRelocationImport)
 		}
 		windowsTranslateCreateFileFlags(out:emitter) {
-			let rdx = record_register(Code:2, Valid:true)
-			let r8 = record_register(Code:8, Valid:true)
-			let r9 = record_register(Code:9, Valid:true)
-			let r10 = record_register(Code:10, Valid:true)
 			let notReadWrite = out.NewLabel()
 			let accessDone = out.NewLabel()
 			let noCreate = out.NewLabel()
 			let createDone = out.NewLabel()
-			moveImmediate(out, rdx, -2147483648)
+			moveImmediate(out, record_register(Code:2, Valid:true), -2147483648)
 			out.Bytes2(0xa8, 2)
 			jumpCondition(out, record_condition(JumpOpcode:0x84), notReadWrite)
-			moveImmediate(out, rdx, -1073741824)
+			moveImmediate(out, record_register(Code:2, Valid:true), -1073741824)
 			encodeRelative(out, 0xe9, accessDone)
 			out.Mark(notReadWrite)
 			out.Bytes2(0xa8, 1)
 			jumpCondition(out, record_condition(JumpOpcode:0x84), accessDone)
-			moveImmediate(out, rdx, 0x40000000)
+			moveImmediate(out, record_register(Code:2, Valid:true), 0x40000000)
 			out.Mark(accessDone)
-			moveImmediate(out, r10, 3)
+			moveImmediate(out, record_register(Code:10, Valid:true), 3)
 			out.Bytes2(0xa8, 64)
 			jumpCondition(out, record_condition(JumpOpcode:0x84), noCreate)
-			moveImmediate(out, r10, 4)
+			moveImmediate(out, record_register(Code:10, Valid:true), 4)
 			out.AppendByte(0xa9)
 			out.Int32(512)
 			jumpCondition(out, record_condition(JumpOpcode:0x84), createDone)
-			moveImmediate(out, r10, 2)
+			moveImmediate(out, record_register(Code:10, Valid:true), 2)
 			encodeRelative(out, 0xe9, createDone)
 			out.Mark(noCreate)
 			out.AppendByte(0xa9)
 			out.Int32(512)
 			jumpCondition(out, record_condition(JumpOpcode:0x84), createDone)
-			moveImmediate(out, r10, 5)
+			moveImmediate(out, record_register(Code:10, Valid:true), 5)
 			out.Mark(createDone)
-			moveImmediate(out, r8, 3)
-			moveImmediate(out, r9, 0)
+			moveImmediate(out, record_register(Code:8, Valid:true), 3)
+			moveImmediate(out, record_register(Code:9, Valid:true), 0)
 		}
 	}
 }
@@ -390,35 +468,35 @@ runtime win32_x86_64 {
 		bss position 8 8
 		read_code = "\x57\x56\x52\x51\x48\x83\x7c\x24\x18\x00\x74\x02\xeb\x18\xb9\xf6\xff\xff\xff\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\x44\x24\x18\x48\x83\x3c\x24\x00\x0f\x8c\x80\x00\x00\x00\x48\x8b\x4c\x24\x18\x31\xd2\x45\x31\xc0\x41\xb9\x01\x00\x00\x00\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\x05\x00\x00\x00\x00\x48\x8b\x4c\x24\x18\x48\x8b\x14\x24\x45\x31\xc0\x45\x31\xc9\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x8b\x4c\x24\x18\x48\x8b\x54\x24\x10\x4c\x8b\x44\x24\x08\x48\x8d\x05\x00\x00\x00\x00\x49\x89\xc1\x48\x83\xec\x28\x48\xc7\x44\x24\x20\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x83\xf8\x00\x74\x52\x48\x8b\x05\x00\x00\x00\x00\xeb\x4c\x48\x8b\x4c\x24\x18\x48\x8b\x54\x24\x10\x4c\x8b\x44\x24\x08\x48\x8d\x05\x00\x00\x00\x00\x49\x89\xc1\x48\x83\xec\x28\x48\xc7\x44\x24\x20\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x83\xf8\x00\x74\x0c\x48\x8b\x05\x00\x00\x00\x00\x48\x83\xc4\x20\xc3\x6a\xff\x58\x48\x83\xc4\x20\xc3\x6a\xff\x58\x48\x89\x05\x00\x00\x00\x00\x48\x8b\x4c\x24\x18\x48\x8b\x05\x00\x00\x00\x00\x50\x5a\x45\x31\xc0\x45\x31\xc9\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x8b\x05\x00\x00\x00\x00\x48\x83\xc4\x20\xc3"
 		write_code = "\x57\x56\x52\x51\x48\x83\x7c\x24\x18\x01\x74\x0a\x48\x83\x7c\x24\x18\x02\x74\x1c\xeb\x32\xb9\xf5\xff\xff\xff\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\x44\x24\x18\xeb\x18\xb9\xf4\xff\xff\xff\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\x44\x24\x18\x48\x83\x3c\x24\x00\x0f\x8c\x80\x00\x00\x00\x48\x8b\x4c\x24\x18\x31\xd2\x45\x31\xc0\x41\xb9\x01\x00\x00\x00\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\x05\x00\x00\x00\x00\x48\x8b\x4c\x24\x18\x48\x8b\x14\x24\x45\x31\xc0\x45\x31\xc9\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x8b\x4c\x24\x18\x48\x8b\x54\x24\x10\x4c\x8b\x44\x24\x08\x48\x8d\x05\x00\x00\x00\x00\x49\x89\xc1\x48\x83\xec\x28\x48\xc7\x44\x24\x20\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x83\xf8\x00\x74\x52\x48\x8b\x05\x00\x00\x00\x00\xeb\x4c\x48\x8b\x4c\x24\x18\x48\x8b\x54\x24\x10\x4c\x8b\x44\x24\x08\x48\x8d\x05\x00\x00\x00\x00\x49\x89\xc1\x48\x83\xec\x28\x48\xc7\x44\x24\x20\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x83\xf8\x00\x74\x0c\x48\x8b\x05\x00\x00\x00\x00\x48\x83\xc4\x20\xc3\x6a\xff\x58\x48\x83\xc4\x20\xc3\x6a\xff\x58\x48\x89\x05\x00\x00\x00\x00\x48\x8b\x4c\x24\x18\x48\x8b\x05\x00\x00\x00\x00\x50\x5a\x45\x31\xc0\x45\x31\xc9\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x8b\x05\x00\x00\x00\x00\x48\x83\xc4\x20\xc3"
-		read_relocation 33 import 6
-		read_relocation 79 import 5
-		read_relocation 90 bss position
-		read_relocation 115 import 5
-		read_relocation 141 bss count
-		read_relocation 163 import 3
-		read_relocation 179 bss count
-		read_relocation 203 bss count
-		read_relocation 225 import 3
-		read_relocation 241 bss count
-		read_relocation 264 bss count
-		read_relocation 276 bss position
-		read_relocation 294 import 5
-		read_relocation 305 bss count
-		write_relocation 38 import 6
-		write_relocation 77 import 6
-		write_relocation 123 import 5
-		write_relocation 134 bss position
-		write_relocation 159 import 5
-		write_relocation 185 bss count
-		write_relocation 207 import 4
-		write_relocation 223 bss count
-		write_relocation 247 bss count
-		write_relocation 269 import 4
-		write_relocation 285 bss count
-		write_relocation 308 bss count
-		write_relocation 320 bss position
-		write_relocation 338 import 5
-		write_relocation 349 bss count
+		read_relocation 25 import 6
+		read_relocation 71 import 5
+		read_relocation 82 bss position
+		read_relocation 107 import 5
+		read_relocation 133 bss count
+		read_relocation 155 import 3
+		read_relocation 171 bss count
+		read_relocation 195 bss count
+		read_relocation 217 import 3
+		read_relocation 233 bss count
+		read_relocation 256 bss count
+		read_relocation 268 bss position
+		read_relocation 286 import 5
+		read_relocation 297 bss count
+		write_relocation 33 import 6
+		write_relocation 59 import 6
+		write_relocation 105 import 5
+		write_relocation 116 bss position
+		write_relocation 141 import 5
+		write_relocation 167 bss count
+		write_relocation 189 import 4
+		write_relocation 205 bss count
+		write_relocation 229 bss count
+		write_relocation 251 import 4
+		write_relocation 267 bss count
+		write_relocation 290 bss count
+		write_relocation 302 bss position
+		write_relocation 320 import 5
+		write_relocation 331 bss count
 	}
 
 	entry template {
@@ -451,7 +529,7 @@ runtime win32_x86_64 {
 	}
 
 	operation open {
-		emit = sequence windowsRuntimeOpen
+		emit = go windowsBuiltinRuntimeOpen
 		call = CreateFileA
 		arguments = [
 			path,
@@ -466,7 +544,7 @@ runtime win32_x86_64 {
 	}
 
 	operation close {
-		emit = sequence windowsRuntimeClose
+		emit = go windowsBuiltinRuntimeClose
 		call = CloseHandle
 		arguments = [fd]
 		result = bool_or_error
@@ -503,7 +581,7 @@ runtime win32_x86_64 {
 	}
 
 	operation chmod {
-		emit = sequence windowsRuntimeChmod
+		emit = go windowsBuiltinRuntimeChmod
 		unsupported = "Win32 target does not expose chmod"
 	}
 
