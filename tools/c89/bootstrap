@@ -1,0 +1,55 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 4 ]; then
+    echo "usage: tools/c89/bootstrap <backend.c> <backend-unit> <frontend-unit> <backend-smoke-unit>" >&2
+    exit 2
+fi
+
+root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
+backend_c=$(CDPATH= cd -- "$(dirname "$1")" && pwd)/$(basename "$1")
+backend_unit=$(CDPATH= cd -- "$(dirname "$2")" && pwd)/$(basename "$2")
+frontend_unit=$(CDPATH= cd -- "$(dirname "$3")" && pwd)/$(basename "$3")
+backend_smoke_unit=$(CDPATH= cd -- "$(dirname "$4")" && pwd)/$(basename "$4")
+
+run_compiler() {
+    name=$1
+    platform=$2
+    compile=$3
+    image="renvo-c89-$name"
+    docker build ${platform:+--platform "$platform"} -t "$image" \
+        "$root/tools/c89/compilers/$name"
+    docker run --rm ${platform:+--platform "$platform"} \
+        -v "$root:/repo:ro" \
+        -v "$backend_c:/work/backend.c:ro" \
+        -v "$backend_unit:/work/backend.rtgu:ro" \
+        -v "$frontend_unit:/work/frontend.rtgu:ro" \
+        -v "$backend_smoke_unit:/work/backend-smoke.rtgu:ro" \
+        -w /repo "$image" sh -ceu '
+            eval "$1 /work/backend.c -o /tmp/backend-c89"
+            /tmp/backend-c89 -t linux/amd64 -arena-size 134217728 -s -o /tmp/backend-stage1 /work/backend.rtgu
+            chmod 755 /tmp/backend-stage1
+            /tmp/backend-stage1 -t linux/amd64 -s -o /tmp/backend-smoke /work/backend-smoke.rtgu
+            chmod 755 /tmp/backend-smoke
+            test "$(/tmp/backend-smoke)" = PASS
+            /tmp/backend-c89 -t linux/amd64 -arena-size 134217728 -s -o /tmp/frontend-stage1 /work/frontend.rtgu
+            chmod 755 /tmp/frontend-stage1
+            /tmp/frontend-stage1 -t linux/amd64 -tags renvo_bundle -s -o /tmp/frontend-stage2 ./cmd/renvo
+            /tmp/frontend-stage2 -t linux/amd64 -tags renvo_bundle -s -o /tmp/frontend-stage3 ./cmd/renvo
+            cmp /tmp/frontend-stage2 /tmp/frontend-stage3
+            /tmp/frontend-stage3 -t linux/amd64 -s -o /tmp/frontend-smoke ./internal/backendjit/testdata/c89_frontend_smoke.go
+            test "$(/tmp/frontend-smoke)" = PASS
+        ' sh "$compile"
+    echo "C89 $name bootstrap: PASS"
+}
+
+run_compiler gcc "" \
+    "gcc -m32 -std=c89 -pedantic-errors -Wall -Wextra -Werror -O2"
+run_compiler gcc49 "" \
+    "gcc -m32 -std=c89 -pedantic-errors -Wall -Wextra -Werror -O2"
+run_compiler clang "" \
+    "clang -m32 -fno-pie -no-pie -std=c89 -pedantic-errors -Wall -Wextra -Werror -O2"
+run_compiler tcc linux/386 \
+    "tcc -Wall -Werror"
+run_compiler pcc linux/386 \
+    "pcc -std=c89 -Wall -Werror"

@@ -526,6 +526,9 @@ func renvoEmitPreparedTargetRuntime(
 func renvoEmitExitStatus(g *renvoLinearGen) bool {
 	renvoNonNil(g)
 	a := &g.asm
+	if renvoPreparedBackend != 0 {
+		return renvoRTGEmitExit(a, renvoRTGPrimary)
+	}
 	if g.c.renvoTargetArch == renvoArchWasm32 {
 		renvoAsmEmit8(a, renvoWasm32OpExit)
 		return true

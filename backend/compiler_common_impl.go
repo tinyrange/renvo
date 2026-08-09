@@ -20738,7 +20738,7 @@ func renvoEmitNativeCompareJump(g *renvoLinearGen, ep *renvoExprParse, e *renvoE
 	usesFloat := renvoBinaryUsesFloat(g, ep, e)
 	leftIndex := e.left
 	rightIndex := e.right
-	unsigned := g.c.renvoNativeIntSize == 8 && (c0 == '<' || c0 == '>') && (renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right))
+	unsigned := (g.c.renvoNativeIntSize == 8 || renvoPreparedBackend != 0) && (c0 == '<' || c0 == '>') && (renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right))
 	right := &ep.exprs[rightIndex]
 	if !usesFloat {
 		rightConst := renvoEvalConstExpr(g, ep, rightIndex)
