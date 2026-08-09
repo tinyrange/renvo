@@ -1,5 +1,7 @@
 // Package forms provides retained controls and Windows Forms-style event
 // wiring on top of RENVO's portable graphics package.
+//go:build !android || !renvo
+
 package forms
 
 import "renvo.dev/std/graphics"

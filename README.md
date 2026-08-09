@@ -215,6 +215,7 @@ module `vendor` directory, or populate `RENVO_MODCACHE` beforehand.
 
 ```text
 cmd/renvo/          command-line compiler
+cmd/renvoapk/       Renvo-built Android NativeActivity packager
 cmd/renvorepl/      experimental pure-Renvo interactive compiler
 cmd/renvoide/       beta graphical development environment
 internal/           parser, checker, loader, lowering, linker, and driver
