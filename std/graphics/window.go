@@ -26,6 +26,7 @@ const (
 	EventTextInput
 	EventTimer
 	EventAccessibilityAction
+	EventPointerCancel
 )
 
 type Modifiers int

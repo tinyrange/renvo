@@ -21,6 +21,8 @@ const androidMotionActionCancel = 3
 const androidMotionActionPointerDown = 5
 const androidMotionActionPointerUp = 6
 const androidLooperInput = 1
+const androidNoPointer = -1
+const androidInputBatchLimit = 64
 
 var androidWindow *Window
 var androidClipboard string
@@ -29,6 +31,7 @@ var androidViewportWidth int
 var androidPhysicalWidth int
 var androidDeviceScale Scalar = 1.0
 var androidNativeBuffer = make([]byte, 48)
+var androidActivePointer = androidNoPointer
 
 // The Android target only materializes runtime-owned pointers. Callback-table
 // layout and lifecycle policy remain in this Go client.
@@ -115,6 +118,22 @@ func androidMotionEventX(event, pointer int) int { return 0 }
 
 // renvo:linkstatic libandroid.so,AMotionEvent_getY
 func androidMotionEventY(event, pointer int) int { return 0 }
+
+// renvo:linkstatic libandroid.so,AMotionEvent_getPointerId
+func androidMotionEventPointerID(event, pointer int) int { return -1 }
+
+// renvo:linkstatic libandroid.so,AMotionEvent_getPointerCount
+func androidMotionEventPointerCount(event int) int { return 0 }
+
+func androidMotionPointerIndex(event, id int) int {
+	count := androidMotionEventPointerCount(event)
+	for pointer := 0; pointer < count; pointer++ {
+		if androidMotionEventPointerID(event, pointer) == id {
+			return pointer
+		}
+	}
+	return -1
+}
 
 func androidUint32(data []byte, at int) int {
 	return int(data[at]) |
@@ -271,6 +290,7 @@ func androidOnNativeWindowDestroyed(native, activity int) {
 	if w != nil && w.native == native {
 		w.native = 0
 	}
+	androidActivePointer = androidNoPointer
 }
 
 func androidOnInputQueueCreated(queue, activity int) {
@@ -297,6 +317,7 @@ func androidOnInputQueueDestroyed(queue, activity int) {
 	if androidInputQueue == queue {
 		androidInputQueue = 0
 	}
+	androidActivePointer = androidNoPointer
 }
 
 func androidSendEvent(w *Window, event *Event) {
@@ -440,7 +461,9 @@ func androidKeyText(code, meta int) string {
 		return " "
 	}
 	if code == 66 {
-		return "\n"
+		// TextArea handles Enter from EventKeyDown. Emitting text as well would
+		// insert two newlines for one physical key press.
+		return ""
 	}
 	if code == 55 {
 		if shift {
@@ -528,15 +551,20 @@ func androidHandleInputEvent(input int) int {
 		if action == androidKeyActionUp {
 			eventType = EventKeyUp
 		}
-		event := Event{Type: eventType, Key: androidKey(code),
+		key := androidKey(code)
+		keyText := androidKeyText(code, meta)
+		if key == KeyUnknown && keyText == "" {
+			// Leave Android system keys such as Back and volume unclaimed.
+			return 0
+		}
+		event := Event{Type: eventType, Key: key,
 			Modifiers: androidModifiers(meta),
 			Repeat:    androidKeyEventRepeatCount(input) > 0}
 		androidQueueInputEvent(w, event)
 		if action == androidKeyActionDown && event.Modifiers&(ModifierControl|ModifierAlt|ModifierCommand) == 0 {
-			text := androidKeyText(code, meta)
-			if text != "" {
+			if keyText != "" {
 				androidQueueInputEvent(w, Event{Type: EventTextInput,
-					Text: text, Modifiers: event.Modifiers})
+					Text: keyText, Modifiers: event.Modifiers})
 			}
 		}
 		return 1
@@ -546,15 +574,40 @@ func androidHandleInputEvent(input int) int {
 	}
 	action := androidMotionEventAction(input)
 	kind := action & androidMotionActionMask
-	pointer := (action >> androidMotionPointerIndexShift) & androidMotionPointerIndexMask
+	actionPointer := (action >> androidMotionPointerIndexShift) & androidMotionPointerIndexMask
 	eventType := EventNone
-	if kind == androidMotionActionDown || kind == androidMotionActionPointerDown {
+	pointer := actionPointer
+	if kind == androidMotionActionDown {
+		androidActivePointer = androidMotionEventPointerID(input, pointer)
 		eventType = EventPointerDown
-	} else if kind == androidMotionActionUp || kind == androidMotionActionPointerUp ||
-		kind == androidMotionActionCancel {
+	} else if kind == androidMotionActionPointerDown {
+		// Forms currently exposes one logical pointer. Keep the original pointer
+		// active and consume additional contacts without disturbing its gesture.
+		return 1
+	} else if kind == androidMotionActionUp || kind == androidMotionActionPointerUp {
+		if androidActivePointer == androidNoPointer ||
+			androidMotionEventPointerID(input, pointer) != androidActivePointer {
+			return 1
+		}
 		eventType = EventPointerUp
 	} else if kind == androidMotionActionMove {
+		if androidActivePointer == androidNoPointer {
+			return 1
+		}
+		pointer = androidMotionPointerIndex(input, androidActivePointer)
+		if pointer < 0 {
+			return 1
+		}
 		eventType = EventPointerMove
+	} else if kind == androidMotionActionCancel {
+		if androidActivePointer == androidNoPointer {
+			return 1
+		}
+		pointer = androidMotionPointerIndex(input, androidActivePointer)
+		if pointer < 0 {
+			pointer = 0
+		}
+		eventType = EventPointerCancel
 	}
 	if eventType == EventNone {
 		return 0
@@ -572,22 +625,28 @@ func androidHandleInputEvent(input int) int {
 		Button: 1,
 	}
 	androidQueueInputEvent(w, event)
+	if eventType == EventPointerUp || eventType == EventPointerCancel {
+		androidActivePointer = androidNoPointer
+	}
 	return 1
 }
 
 // ALooper invokes this callback whenever the NativeActivity input queue has
-// work. Drain and finish every event so Android's input dispatcher never waits
-// on the application after a touch.
+// work. Finish a bounded batch before dispatching it to the client. An input
+// producer can otherwise keep the native queue perpetually non-empty, grow the
+// client event arena without bound, and starve both painting and the looper.
 func androidOnInputReady(data, events, fd int) int {
 	queue := androidInputQueue
 	if queue == 0 {
 		return 1
 	}
-	for {
+	processed := 0
+	for processed < androidInputBatchLimit {
 		var input int
 		if androidInputQueueGetEvent(queue, &input) < 0 || input == 0 {
 			break
 		}
+		processed++
 		if androidInputQueuePreDispatchEvent(queue, input) != 0 {
 			continue
 		}
@@ -726,6 +785,7 @@ func (w *Window) Close() {
 	w.active = false
 	w.native = 0
 	w.EventHandler = nil
+	androidActivePointer = androidNoPointer
 	if androidWindow == w {
 		androidWindow = nil
 	}

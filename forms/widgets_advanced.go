@@ -442,6 +442,7 @@ func NewListBox() *ListBox {
 	b.Paint = b.paint
 	b.PointerDown = b.pointerDown
 	b.PointerUp = b.pointerUp
+	b.PointerCancel = b.pointerCancel
 	b.PointerMove = b.pointerMove
 	b.PointerWheel = b.pointerWheel
 	b.PointerLeave = b.pointerLeave
@@ -514,6 +515,10 @@ func (b *ListBox) pointerDown(x, y graphics.Scalar) {
 	b.dragStartY = y
 	b.dragStart = b.scrollOffset
 	b.dragging = true
+	b.dragMoved = false
+}
+func (b *ListBox) pointerCancel() {
+	b.dragging = false
 	b.dragMoved = false
 }
 func (b *ListBox) pointerMove(x, y graphics.Scalar) {
@@ -1599,6 +1604,7 @@ func NewSlider() *Slider {
 	s.PointerDown = s.pointerDown
 	s.PointerMove = s.pointerMove
 	s.PointerUp = s.pointerUp
+	s.PointerCancel = s.pointerCancel
 	s.KeyDown = s.keyDown
 	return s
 }
@@ -1655,6 +1661,12 @@ func (s *Slider) pointerMove(x, y graphics.Scalar) {
 func (s *Slider) pointerUp(x, y graphics.Scalar) {
 	if s.dragging {
 		s.updateFromPointer(x)
+		s.dragging = false
+		s.Invalidate()
+	}
+}
+func (s *Slider) pointerCancel() {
+	if s.dragging {
 		s.dragging = false
 		s.Invalidate()
 	}
@@ -1745,6 +1757,7 @@ func NewSplitContainer() *SplitContainer {
 	s.PointerDown = s.pointerDown
 	s.PointerMove = s.pointerMove
 	s.PointerUp = s.pointerUp
+	s.PointerCancel = s.pointerCancel
 	s.PointerLeave = s.pointerLeave
 	s.PointerCursor = s.pointerCursor
 	return s
@@ -1827,6 +1840,12 @@ func (s *SplitContainer) pointerMove(x, y graphics.Scalar) {
 func (s *SplitContainer) pointerUp(x, y graphics.Scalar) {
 	if s.dragging {
 		s.SetSplitterDistance(s.splitterPosition(x, y))
+		s.dragging = false
+		s.Invalidate()
+	}
+}
+func (s *SplitContainer) pointerCancel() {
+	if s.dragging {
 		s.dragging = false
 		s.Invalidate()
 	}

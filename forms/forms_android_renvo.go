@@ -85,6 +85,11 @@ func (f *Form) Dispatch(event *graphics.Event) {
 		if clicked && f.ActionClick != nil {
 			f.ActionClick()
 		}
+		return
+	}
+	if event.Type == graphics.EventPointerCancel {
+		f.actionPressed = false
+		f.invalid = true
 	}
 }
 

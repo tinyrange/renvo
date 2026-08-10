@@ -35,12 +35,12 @@ func buildManifest(config Config) []byte {
 	resourceNames := []string{
 		"versionCode", "versionName", "minSdkVersion", "targetSdkVersion",
 		"label", "hasCode", "extractNativeLibs", "name", "exported",
-		"theme", "value",
+		"theme", "value", "screenOrientation",
 	}
 	resourceIDs := []int{
 		0x0101021b, 0x0101021c, 0x0101020c, 0x01010270,
 		0x01010001, 0x0101000c, 0x010104ea, 0x01010003, 0x01010010,
-		0x01010000, 0x01010024,
+		0x01010000, 0x01010024, 0x0101001e,
 	}
 	for i := 0; i < len(resourceNames); i++ {
 		pool.add(resourceNames[i])
@@ -83,11 +83,17 @@ func buildManifest(config Config) []byte {
 		manifestBooleanAttribute(androidNamespace, 6, true),
 		manifestReferenceAttribute(androidNamespace, 9, 0x01030007),
 	})
-	body = manifestStartElement(body, activityName, []manifestAttribute{
+	activityAttributes := []manifestAttribute{
 		manifestStringAttribute(androidNamespace, 7, nativeActivityValue),
 		manifestStringAttribute(androidNamespace, 4, labelValue),
 		manifestBooleanAttribute(androidNamespace, 8, true),
-	})
+	}
+	if config.Orientation == "portrait" {
+		activityAttributes = append(activityAttributes, manifestIntegerAttribute(androidNamespace, 11, 1))
+	} else if config.Orientation == "landscape" {
+		activityAttributes = append(activityAttributes, manifestIntegerAttribute(androidNamespace, 11, 0))
+	}
+	body = manifestStartElement(body, activityName, activityAttributes)
 	body = manifestStartElement(body, metadataName, []manifestAttribute{
 		manifestStringAttribute(androidNamespace, 7, libMetadataName),
 		manifestStringAttribute(androidNamespace, 10, libMetadataValue),

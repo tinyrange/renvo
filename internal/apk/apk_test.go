@@ -21,6 +21,7 @@ version_code=7
 version_name=2.3
 min_sdk=24
 target_sdk=35
+orientation=portrait
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -68,6 +69,7 @@ func TestParseConfigRejectsUnsupportedAndUnsafeValues(t *testing.T) {
 		"package=dev.renvo.app\nname=bad\x01name\n",
 		"package=dev.renvo.app\nunknown=value\n",
 		"package=dev.renvo.app\nmin_sdk=35\ntarget_sdk=34\n",
+		"package=dev.renvo.app\norientation=upside-down\n",
 	}
 	for i := 0; i < len(cases); i++ {
 		if _, err := ParseConfig([]byte(cases[i])); err == nil {
@@ -280,6 +282,12 @@ func verifyNativeActivityManifest(t *testing.T, manifest []byte, config Config) 
 					(kind != manifestTypeBoolean || uint32(value) != 0xffffffff) {
 					t.Fatal("launcher NativeActivity must be exported")
 				}
+				if name == "activity" && attributeName == "screenOrientation" {
+					if config.Orientation == "portrait" && (kind != manifestTypeInteger || value != 1) {
+						t.Fatal("launcher NativeActivity must request portrait orientation")
+					}
+					found["screenOrientation"] = true
+				}
 			}
 		}
 		next += size
@@ -291,6 +299,9 @@ func verifyNativeActivityManifest(t *testing.T, manifest []byte, config Config) 
 		if !found[name] {
 			t.Fatalf("AndroidManifest.xml omitted <%s>", name)
 		}
+	}
+	if config.Orientation == "portrait" && !found["screenOrientation"] {
+		t.Fatal("AndroidManifest.xml omitted portrait screenOrientation")
 	}
 }
 

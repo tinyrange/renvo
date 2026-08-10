@@ -59,6 +59,7 @@ func NewButton() *Button {
 	button.Paint = button.paint
 	button.PointerDown = button.pointerDown
 	button.PointerUp = button.pointerUp
+	button.PointerCancel = button.pointerCancel
 	button.KeyDown = button.keyDown
 	return button
 }
@@ -96,6 +97,14 @@ func (b *Button) pointerDown(x, y graphics.Scalar) {
 }
 
 func (b *Button) pointerUp(x, y graphics.Scalar) {
+	if b == nil || !b.pressed {
+		return
+	}
+	b.pressed = false
+	b.Invalidate()
+}
+
+func (b *Button) pointerCancel() {
 	if b == nil || !b.pressed {
 		return
 	}
@@ -183,12 +192,12 @@ func (b *TextBox) textInput(text string) {
 			return
 		}
 	}
-	b.SetText(b.Text() + text)
+	b.AppendText(text)
 }
 
 func (b *TextBox) keyDown(event graphics.Event) {
-	if event.Key == graphics.KeyBackspace && len(b.Text()) > 0 {
-		b.SetText(removeLastUTF8(b.Text()))
+	if event.Key == graphics.KeyBackspace {
+		b.BackspaceText()
 	}
 }
 
@@ -228,13 +237,13 @@ func (a *TextArea) paint(surface *graphics.Surface) {
 	paintTextEntry(surface, &a.Control, a.font, true)
 }
 
-func (a *TextArea) textInput(text string) { a.SetText(a.Text() + text) }
+func (a *TextArea) textInput(text string) { a.AppendText(text) }
 
 func (a *TextArea) keyDown(event graphics.Event) {
-	if event.Key == graphics.KeyBackspace && len(a.Text()) > 0 {
-		a.SetText(removeLastUTF8(a.Text()))
+	if event.Key == graphics.KeyBackspace {
+		a.BackspaceText()
 	} else if event.Key == graphics.KeyEnter {
-		a.SetText(a.Text() + "\n")
+		a.AppendText("\n")
 	}
 }
 
@@ -258,26 +267,40 @@ func paintTextEntry(surface *graphics.Surface, control *Control, font *graphics.
 	lineHeight := labelLineHeight(font)
 	lineStart := 0
 	line := 0
-	text := control.Text()
-	for i := 0; i <= len(text); i++ {
-		if i < len(text) && text[i] != '\n' {
+	textBytes, editing := control.textBytes()
+	text := ""
+	textLength := len(textBytes)
+	if !editing {
+		text = control.Text()
+		textLength = len(text)
+	}
+	for i := 0; i <= textLength; i++ {
+		if i < textLength && ((editing && textBytes[i] != '\n') || (!editing && text[i] != '\n')) {
 			continue
 		}
 		baseline := bounds.MinY + 4 + graphics.Scalar(line)*lineHeight + font.Metrics.Ascent
 		if !multiline {
 			baseline = bounds.MinY + (bounds.Height()-lineHeight)/2 + font.Metrics.Ascent
 		}
-		lineText := text[lineStart:i]
 		textX := bounds.MinX + 6
-		metrics := graphics.MeasureText(font, lineText)
+		metrics := graphics.TextMetrics{}
+		if editing {
+			metrics = graphics.MeasureTextBytes(font, textBytes[lineStart:i])
+		} else {
+			metrics = graphics.MeasureText(font, text[lineStart:i])
+		}
 		if !multiline {
 			available := bounds.Width() - 12
 			if metrics.Width > available {
 				textX -= metrics.Width - available
 			}
 		}
-		surface.DrawText(font, graphics.Point{X: textX, Y: baseline}, lineText, controlForeground(control))
-		if control.Focused() && i == len(text) {
+		if editing {
+			surface.DrawTextBytes(font, graphics.Point{X: textX, Y: baseline}, textBytes[lineStart:i], controlForeground(control))
+		} else {
+			surface.DrawText(font, graphics.Point{X: textX, Y: baseline}, text[lineStart:i], controlForeground(control))
+		}
+		if control.Focused() && i == textLength {
 			caretX := textX + metrics.Width + 1
 			surface.FillRect(graphics.R(caretX, baseline-font.Metrics.Ascent, 1,
 				font.Metrics.Ascent+font.Metrics.Descent), controlForeground(control))
@@ -289,14 +312,6 @@ func paintTextEntry(surface *graphics.Surface, control *Control, font *graphics.
 		}
 	}
 	surface.PopClip()
-}
-
-func removeLastUTF8(text string) string {
-	i := len(text) - 1
-	for i > 0 && text[i]&0xc0 == 0x80 {
-		i--
-	}
-	return text[:i]
 }
 
 // CheckBox provides an independently toggled boolean property.

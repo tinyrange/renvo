@@ -188,6 +188,8 @@ func TestCompilerJITAndroidARM64FormsImage(t *testing.T) {
 		"AInputQueue_preDispatchEvent",
 		"ALooper_forThread",
 		"AMotionEvent_getAction",
+		"AMotionEvent_getPointerCount",
+		"AMotionEvent_getPointerId",
 		"AMotionEvent_getX",
 		"AMotionEvent_getY",
 		"ANativeWindow_getHeight",

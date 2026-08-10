@@ -17,6 +17,27 @@ func TestPremultipliedColorAndSourceOver(t *testing.T) {
 	}
 }
 
+func TestSurfaceResizeReusesAndClearsFramebuffer(t *testing.T) {
+	s := NewSurface(16, 16)
+	first := &s.Pixels[0]
+	for i := 0; i < len(s.Pixels); i++ {
+		s.Pixels[i] = 0xff
+	}
+	s.Resize(8, 8)
+	if &s.Pixels[0] != first {
+		t.Fatal("shrinking a surface replaced its reusable framebuffer")
+	}
+	for i := 0; i < len(s.Pixels); i++ {
+		if s.Pixels[i] != 0 {
+			t.Fatalf("resized framebuffer byte %d was not cleared", i)
+		}
+	}
+	s.Resize(16, 16)
+	if &s.Pixels[0] != first {
+		t.Fatal("restoring a surface within capacity replaced its framebuffer")
+	}
+}
+
 func TestFillRectBlendsEachCoveredPixelOnce(t *testing.T) {
 	s := NewSurface(8, 8)
 	s.FillRect(R(1, 1, 6, 6), RGBA(255, 0, 0, 128))

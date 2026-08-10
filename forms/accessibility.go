@@ -191,13 +191,13 @@ func (c *Control) accessibilityNode() AccessibilityNode {
 	}
 	name := c.accessibilityName
 	if name == "" && c.accessibilityRole != AccessibilityRoleTextBox {
-		name = c.text
+		name = c.Text()
 	}
 	value := ""
 	if c.AccessibilityValue != nil {
 		value = c.AccessibilityValue()
 	} else if c.accessibilityRole == AccessibilityRoleTextBox {
-		value = c.text
+		value = c.Text()
 	}
 	checkable, checked := c.AccessibilityCheckable, false
 	if c.AccessibilityChecked != nil {

@@ -140,7 +140,15 @@ func (s *Surface) reset(width, height int) {
 	s.Width = width
 	s.Height = height
 	s.Stride = width * 4
-	s.Pixels = make([]byte, s.Stride*height)
+	pixelBytes := s.Stride * height
+	if pixelBytes <= cap(s.Pixels) {
+		s.Pixels = s.Pixels[:pixelBytes]
+		for i := 0; i < len(s.Pixels); i++ {
+			s.Pixels[i] = 0
+		}
+	} else {
+		s.Pixels = make([]byte, pixelBytes)
+	}
 	s.Format = PixelRGBA8
 	s.blend = BlendSourceOver
 	s.clip = pixelRect{maxX: width, maxY: height}

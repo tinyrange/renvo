@@ -32,11 +32,12 @@ version_code=1
 version_name=1.0
 min_sdk=24
 target_sdk=35
+orientation=portrait
 ```
 
 `min_sdk` cannot be lower than 24 because the packager deliberately emits the
 modern v2 signature without the older JAR/v1 signature. The current payload is
-AArch64-only.
+AArch64-only. `orientation` is optional and may be `portrait` or `landscape`.
 
 ## Development signing key
 

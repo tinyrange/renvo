@@ -59,6 +59,10 @@ type Control struct {
 	themeRole                ThemeRole
 	hasTheme                 bool
 	text                     string
+	editBuffer               []byte
+	editLength               int
+	editLimit                int
+	editingText              bool
 	accessibilityID          string
 	accessibilityRole        AccessibilityRole
 	accessibilityName        string
@@ -72,6 +76,7 @@ type Control struct {
 	Click         EventHandler
 	PointerDown   PointerHandler
 	PointerUp     PointerHandler
+	PointerCancel EventHandler
 	PointerMove   PointerHandler
 	PointerWheel  WheelHandler
 	PointerEnter  EventHandler
@@ -130,10 +135,15 @@ func (c *Control) Foreground() graphics.Color { return c.foreground }
 func (c *Control) Cursor() graphics.Cursor    { return c.cursor }
 func (c *Control) Theme() Theme               { return controlTheme(c) }
 func (c *Control) ThemeRole() ThemeRole       { return c.themeRole }
-func (c *Control) Text() string               { return c.text }
-func (c *Control) Form() *Form                { return c.form }
-func (c *Control) Focused() bool              { return c.form != nil && c.form.focused == c }
-func (c *Control) Hovered() bool              { return c.form != nil && c.form.hovered == c }
+func (c *Control) Text() string {
+	if c != nil && c.editingText {
+		return string(c.editBuffer[:c.editLength])
+	}
+	return c.text
+}
+func (c *Control) Form() *Form   { return c.form }
+func (c *Control) Focused() bool { return c.form != nil && c.form.focused == c }
+func (c *Control) Hovered() bool { return c.form != nil && c.form.hovered == c }
 
 func (c *Control) SetBounds(bounds graphics.Rect) {
 	if c == nil {
@@ -319,12 +329,138 @@ func (c *Control) ApplyTheme(theme Theme) {
 }
 
 func (c *Control) SetText(text string) {
-	if c == nil || c.text == text {
+	if c == nil {
+		return
+	}
+	if c.editingText {
+		length := boundedUTF8Length(text, c.editLimit)
+		if editTextEquals(c.editBuffer[:c.editLength], text[:length]) {
+			return
+		}
+		for i := 0; i < length; i++ {
+			c.editBuffer[i] = text[i]
+		}
+		c.editLength = length
+		c.Invalidate()
+		return
+	}
+	if c.text == text {
 		return
 	}
 	c.text = text
 	c.AccessibilityChanged()
 	c.Invalidate()
+}
+
+// BeginTextEdit prepares fixed-capacity storage for an editing session. Text
+// entry can then mutate the buffer without allocating on every key press.
+func (c *Control) BeginTextEdit(limit int) {
+	if c == nil || limit <= 0 {
+		return
+	}
+	if cap(c.editBuffer) < limit {
+		c.editBuffer = make([]byte, limit)
+	} else {
+		c.editBuffer = c.editBuffer[:limit]
+	}
+	c.editLimit = limit
+	c.editLength = boundedUTF8Length(c.text, limit)
+	for i := 0; i < c.editLength; i++ {
+		c.editBuffer[i] = c.text[i]
+	}
+	c.editingText = true
+}
+
+// AppendText appends committed UTF-8 input while respecting the active edit
+// limit. It returns false when the text would exceed that limit.
+func (c *Control) AppendText(text string) bool {
+	if c == nil || text == "" {
+		return false
+	}
+	if !c.editingText {
+		c.BeginTextEdit(4096)
+	}
+	if c.editLength+len(text) > c.editLimit {
+		return false
+	}
+	for i := 0; i < len(text); i++ {
+		c.editBuffer[c.editLength+i] = text[i]
+	}
+	c.editLength += len(text)
+	c.Invalidate()
+	return true
+}
+
+// BackspaceText removes the final UTF-8 code point from the active edit.
+func (c *Control) BackspaceText() bool {
+	if c == nil {
+		return false
+	}
+	if !c.editingText {
+		c.BeginTextEdit(4096)
+	}
+	if c.editLength == 0 {
+		return false
+	}
+	at := c.editLength - 1
+	for at > 0 && c.editBuffer[at]&0xc0 == 0x80 {
+		at--
+	}
+	c.editLength = at
+	c.Invalidate()
+	return true
+}
+
+// EndTextEdit finishes an editing session. Committing creates the immutable Go
+// string once; canceling restores the previously committed value.
+func (c *Control) EndTextEdit(commit bool) {
+	if c == nil || !c.editingText {
+		return
+	}
+	changed := false
+	if commit {
+		text := string(c.editBuffer[:c.editLength])
+		if c.text != text {
+			c.text = text
+			changed = true
+		}
+	}
+	c.editingText = false
+	c.editLength = 0
+	if changed {
+		c.AccessibilityChanged()
+	}
+	c.Invalidate()
+}
+
+func (c *Control) textBytes() ([]byte, bool) {
+	if c == nil || !c.editingText {
+		return nil, false
+	}
+	return c.editBuffer[:c.editLength], true
+}
+
+func boundedUTF8Length(text string, limit int) int {
+	if len(text) <= limit {
+		return len(text)
+	}
+	at := limit
+	for at > 0 && text[at]&0xc0 == 0x80 {
+		at--
+	}
+	return at
+}
+
+func editTextEquals(left []byte, right string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := 0; i < len(left); i++ {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *Control) Focus() {
@@ -669,7 +805,7 @@ func (f *Form) Dispatch(event graphics.Event) {
 	}
 	if event.Type == graphics.EventWindowFocusLost {
 		f.DismissTransientUI()
-		f.pressed = nil
+		f.cancelPressed()
 		f.setHovered(nil)
 		return
 	}
@@ -714,6 +850,11 @@ func (f *Form) Dispatch(event graphics.Event) {
 			control.Click()
 		}
 		f.pressed = nil
+		return
+	}
+	if event.Type == graphics.EventPointerCancel {
+		f.cancelPressed()
+		f.setHovered(nil)
 		return
 	}
 	if event.Type == graphics.EventPointerMove {
@@ -770,6 +911,17 @@ func (f *Form) Dispatch(event graphics.Event) {
 	}
 }
 
+func (f *Form) cancelPressed() {
+	if f == nil || f.pressed == nil {
+		return
+	}
+	control := f.pressed
+	f.pressed = nil
+	if control.PointerCancel != nil {
+		control.PointerCancel()
+	}
+}
+
 // DismissTransientUI closes menus and drop-downs without disturbing the
 // control that owns keyboard focus. Hosts call it when the application loses
 // activation, and applications may use it before presenting modal UI.
@@ -819,6 +971,7 @@ func (f *Form) setFocused(control *Control) {
 	old := f.focused
 	f.focused = control
 	if old != nil {
+		old.EndTextEdit(true)
 		f.markAccessibilityChanged(old)
 	}
 	if control != nil {

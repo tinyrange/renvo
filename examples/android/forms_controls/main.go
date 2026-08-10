@@ -73,12 +73,19 @@ func newTouchKeyboard(font *graphics.Font) *touchKeyboard {
 	k.Paint = k.paint
 	k.PointerDown = k.pointerDown
 	k.PointerUp = k.pointerUp
+	k.PointerCancel = k.pointerCancel
 	k.PointerMove = k.pointerMove
 	k.PointerLeave = k.pointerLeave
 	return k
 }
 
 func (k *touchKeyboard) show(target *forms.Control, multiline bool) {
+	if k.target != target {
+		if k.target != nil {
+			k.target.EndTextEdit(true)
+		}
+		target.BeginTextEdit(keyboardMaximumTextBytes)
+	}
 	k.target = target
 	k.multiline = multiline
 	k.shiftMode = 1
@@ -88,27 +95,24 @@ func (k *touchKeyboard) show(target *forms.Control, multiline bool) {
 }
 
 func (k *touchKeyboard) hide() {
+	if k.target != nil {
+		k.target.EndTextEdit(true)
+	}
 	k.SetVisible(false)
 	k.target = nil
 	k.pressed = keyNone
 }
 
 func (k *touchKeyboard) append(text string) {
-	if k.target != nil && len(k.target.Text())+len(text) <= keyboardMaximumTextBytes {
-		k.target.SetText(k.target.Text() + text)
+	if k.target != nil {
+		k.target.AppendText(text)
 	}
 }
 
 func (k *touchKeyboard) backspace() {
-	if k.target == nil || len(k.target.Text()) == 0 {
-		return
+	if k.target != nil {
+		k.target.BackspaceText()
 	}
-	text := k.target.Text()
-	at := len(text) - 1
-	for at > 0 && text[at]&0xc0 == 0x80 {
-		at--
-	}
-	k.target.SetText(text[:at])
 }
 
 func keyboardRowKey(row string, x, start, width int) int {
@@ -173,7 +177,6 @@ func (k *touchKeyboard) keyAt(x, y graphics.Scalar) int {
 
 func (k *touchKeyboard) pointerDown(x, y graphics.Scalar) {
 	k.pressed = k.keyAt(x, y)
-	k.commitKey(k.pressed)
 	k.Invalidate()
 }
 
@@ -202,8 +205,19 @@ func keyboardCharacter(key int) string {
 }
 
 func (k *touchKeyboard) pointerUp(x, y graphics.Scalar) {
+	key := k.keyAt(x, y)
+	if key == k.pressed {
+		k.commitKey(key)
+	}
 	k.pressed = keyNone
 	k.Invalidate()
+}
+
+func (k *touchKeyboard) pointerCancel() {
+	if k.pressed != keyNone {
+		k.pressed = keyNone
+		k.Invalidate()
+	}
 }
 
 func (k *touchKeyboard) commitKey(key int) {
@@ -366,6 +380,21 @@ func (d *controlsDemo) keyboardDone() {
 	d.status.SetText("Text entry complete")
 }
 
+func (d *controlsDemo) resize() {
+	width, height := d.form.Size()
+	if width <= 0 || height <= 0 || d.tabs == nil || d.status == nil || d.keyboard == nil {
+		return
+	}
+	d.tabs.SetBounds(graphics.R(0, 112, graphics.Scalar(width), 52))
+	statusY := graphics.Scalar(height - 56)
+	d.status.SetBounds(graphics.R(0, statusY, graphics.Scalar(width), 32))
+	keyboardX := graphics.Scalar(width-360) / 2
+	if keyboardX < 0 {
+		keyboardX = 0
+	}
+	d.keyboard.SetBounds(graphics.R(keyboardX, statusY-318, 360, 318))
+}
+
 func (d *controlsDemo) editTextBox() {
 	if d.textBox.Text() == "Tap to focus" {
 		d.textBox.SetText("")
@@ -474,7 +503,7 @@ func (d *controlsDemo) initialize(width, height int) {
 	subtitle := forms.NewLabel()
 	subtitle.SetBounds(graphics.R(16, 82, 328, 24))
 	subtitle.SetFont(d.bodyFont)
-	subtitle.SetText("Native Android • 360 × 800 dp • 2× density")
+	subtitle.SetText("Native Android • 360 dp canvas • 2× density")
 	d.form.Add(&subtitle.Control)
 
 	d.tabs = forms.NewTabControl()
@@ -500,6 +529,8 @@ func (d *controlsDemo) initialize(width, height int) {
 	d.keyboard.SetBounds(graphics.R(0, 426, 360, 318))
 	d.keyboard.Done = d.keyboardDone
 	d.form.Add(&d.keyboard.Control)
+	d.form.Resize = d.resize
+	d.resize()
 	d.showSelectedPage()
 }
 
