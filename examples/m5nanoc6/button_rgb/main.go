@@ -21,7 +21,7 @@ func main() {
 		for !board.ButtonPressed() {
 			timing++
 		}
-		board.Delay(100000)
+		board.DelayMilliseconds(10)
 		if !board.ButtonPressed() {
 			continue
 		}
@@ -32,6 +32,6 @@ func main() {
 		for board.ButtonPressed() {
 			timing++
 		}
-		board.Delay(100000)
+		board.DelayMilliseconds(10)
 	}
 }

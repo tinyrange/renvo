@@ -284,6 +284,42 @@ func Println(values ...interface{}) (int, error) { return 0, nil }
 	}
 }
 
+func TestLinkUnitsMarksRenvoMemoryDirectivesAsCompilerIntrinsics(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+//renvo:load
+func readWord(address uintptr) uint32 { return uint32(address) }
+
+//renvo:store
+func writeWord(address uintptr, value uint32) {}
+
+func ordinary(address uintptr) uint32 { return uint32(address) }
+
+func appMain() int {
+	writeWord(16, readWord(16))
+	fn := readWord
+	if fn(7) == 7 && ordinary(9) == 9 { return 0 }
+	return 1
+}
+`)},
+	})
+	program, ok := LinkUnitsCore(result.Units, result.Root)
+	if !ok {
+		t.Fatal("LinkUnits failed")
+	}
+	if bytes.Count(program.Text, []byte("renvo_runtime_M4")) < 2 {
+		t.Fatalf("memory directive aliases missing:\n%s", program.Text)
+	}
+	if !bytes.Contains(program.Text, []byte("fn := renvo_runtime_M")) {
+		t.Fatalf("annotated function value lost its ordinary body identity:\n%s", program.Text)
+	}
+	if !bytes.Contains(program.Text, []byte("ordinary(9)")) {
+		t.Fatalf("ordinary function was marked as an intrinsic:\n%s", program.Text)
+	}
+}
+
 func TestLinkUnitsMarksOSSyscallAsCompilerIntrinsic(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},

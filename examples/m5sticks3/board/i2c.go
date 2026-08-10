@@ -7,9 +7,7 @@ const (
 )
 
 func i2cDelay() {
-	for count := 0; count < 128; count++ {
-		_ = load32(gpioOut1)
-	}
+	DelayMicroseconds(2)
 }
 
 func i2cRelease(pin int) {
@@ -136,6 +134,6 @@ func EnableLCDPower() bool {
 	if !pmicWrite(0x09, 0) {
 		return false
 	}
-	Delay(250000)
+	DelayMilliseconds(10)
 	return true
 }

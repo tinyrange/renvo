@@ -450,13 +450,13 @@ func lcdInitialize() {
 		0x54, 0x47, 0x0e, 0x1c, 0x17, 0x1b, 0x1e,
 	})
 	lcdCommand(0x11, nil)
-	Delay(300000)
+	DelayMilliseconds(120)
 	lcdCommand(0x38, nil)
 	lcdCommand(0x3a, []byte{0x55})
 	lcdCommand(0x36, []byte{0x08})
 	lcdCommand(0x21, nil)
 	lcdCommand(0x29, nil)
-	Delay(100000)
+	DelayMilliseconds(20)
 }
 
 func lcdDrawLines() {
@@ -488,11 +488,11 @@ func InitializeDisplay() bool {
 	spiInitialize()
 	ConfigureBacklight()
 	setGPIO(lcdReset, false)
-	Delay(100000)
+	DelayMilliseconds(10)
 	setGPIO(lcdReset, true)
-	Delay(300000)
+	DelayMilliseconds(120)
 	lcdCommand(0x01, nil)
-	Delay(300000)
+	DelayMilliseconds(120)
 	lcdInitialize()
 	lcdFillRectangle(0, 0, DisplayWidth, DisplayHeight, lcdBlack)
 	SetBacklight(true)
