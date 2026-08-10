@@ -11,6 +11,8 @@ type App struct {
 	Form          *Form
 	DispatchEvent func(graphics.Event)
 	AfterEvent    func(graphics.Event)
+	BeforeRender  func()
+	AfterRender   func()
 }
 
 func NewApp(window *graphics.Window, form *Form) *App {
@@ -23,8 +25,19 @@ func (a *App) paint() bool {
 	if a == nil || a.Window == nil || a.Form == nil {
 		return false
 	}
+	if len(a.Form.invalid) == 0 {
+		return true
+	}
+	if a.BeforeRender != nil {
+		a.BeforeRender()
+	}
 	if a.Form.Paint(a.Window.Surface()) {
-		return a.Window.Present()
+		if !a.Window.Present() {
+			return false
+		}
+		if a.AfterRender != nil {
+			a.AfterRender()
+		}
 	}
 	return true
 }

@@ -31,7 +31,7 @@ func main() {
 	title := forms.NewLabel()
 	title.SetBounds(graphics.R(24, 72, 312, 48))
 	title.SetFont(titleFont)
-	title.SetText("Renvo for Android")
+	title.SetText(formsHelloTitle)
 	demoForm.Add(&title.Control)
 
 	demoBody = forms.NewLabel()

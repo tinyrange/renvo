@@ -1,4 +1,4 @@
-//go:build renvo && darwin && arm64
+//go:build renvo && darwin && !ios && arm64
 
 package graphics
 

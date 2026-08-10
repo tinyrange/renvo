@@ -1,4 +1,4 @@
-//go:build !browser && (!renvo || !darwin || !arm64)
+//go:build !browser && (!renvo || !darwin || !arm64 || ios)
 
 package forms
 

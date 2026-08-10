@@ -48,17 +48,34 @@ func TestTouchKeyboardHitGeometry(t *testing.T) {
 		x, y graphics.Scalar
 		key  int
 	}{
-		{21, 38, int('q')},
-		{127, 38, int('r')},
-		{91, 114, int('s')},
-		{180, 190, int('v')},
-		{28, 190, keyShift},
-		{332, 190, keyBackspace},
-		{170, 266, keySpace},
-		{322, 266, keyDone},
+		{21, 32, int('q')},
+		{127, 32, int('r')},
+		{91, 92, int('s')},
+		{180, 152, int('v')},
+		{28, 152, keyShift},
+		{332, 152, keyBackspace},
+		{170, 212, keySpace},
+		{322, 212, keyDone},
 	} {
 		if got := keyboard.keyAt(test.x, test.y); got != test.key {
 			t.Errorf("keyAt(%v, %v) = %d, want %d", test.x, test.y, got, test.key)
 		}
+	}
+}
+
+func TestRenderTimingDisplayUsesRollingWindow(t *testing.T) {
+	d := controlsDemo{renderTimes: make([]int, renderTimingSampleCount)}
+	if got := d.renderTimingText(); got != "Render timing: waiting for first frame" {
+		t.Fatalf("empty timing text = %q", got)
+	}
+	for i := 0; i < renderTimingSampleCount+1; i++ {
+		d.renderTimes[d.renderNext] = (i + 1) * 1000
+		d.renderNext = (d.renderNext + 1) % renderTimingSampleCount
+		if d.renderCount < renderTimingSampleCount {
+			d.renderCount++
+		}
+	}
+	if got := d.renderTimingText(); got != "Render 21.0 ms  avg 11.5  peak 21.0" {
+		t.Fatalf("rolling timing text = %q", got)
 	}
 }
