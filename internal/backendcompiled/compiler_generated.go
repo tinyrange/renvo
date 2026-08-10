@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "42191798aa89f7dcbe91733993b6040f6ee06dbee8a2f647899f646acecbacec"
+const CompilerSourceDigest = "6b04014be6f753b44e3b0a22b4799a9ae1bf5c1d1638f55694b601058622ba51"
 
 // source: backend/compiler_common_impl.go
 
@@ -1639,7 +1639,11 @@ if i < 0 || i >= p.toks.count {
 return 0
 }
 base := i * renvoTokenStride
-return byte(int(renvo_runtime_UnsafeInt32At(p.toks.data, base)) >> 24)
+first := int(renvo_runtime_UnsafeInt32At(p.toks.data, base))
+if first&255 != renvoTokOp {
+return 0
+}
+return byte(first >> 24)
 }
 
 func renvoTokCharIs(p *renvoProgram, i int, c byte) bool {
@@ -1648,7 +1652,8 @@ if uint(i) >= uint(p.toks.count) {
 return false
 }
 base := i * renvoTokenStride
-return byte(int(renvo_runtime_UnsafeInt32At(p.toks.data, base))>>24) == c
+first := int(renvo_runtime_UnsafeInt32At(p.toks.data, base))
+return first&255 == renvoTokOp && byte(first>>24) == c
 }
 
 func renvoTok2Is(p *renvoProgram, i int, a byte, b byte) bool {

@@ -1632,7 +1632,11 @@ func renvoTokSingleChar(p *renvoProgram, i int) byte {
 		return 0
 	}
 	base := i * renvoTokenStride
-	return byte(int(renvo_runtime_UnsafeInt32At(p.toks.data, base)) >> 24)
+	first := int(renvo_runtime_UnsafeInt32At(p.toks.data, base))
+	if first&255 != renvoTokOp {
+		return 0
+	}
+	return byte(first >> 24)
 }
 
 func renvoTokCharIs(p *renvoProgram, i int, c byte) bool {
@@ -1641,7 +1645,8 @@ func renvoTokCharIs(p *renvoProgram, i int, c byte) bool {
 		return false
 	}
 	base := i * renvoTokenStride
-	return byte(int(renvo_runtime_UnsafeInt32At(p.toks.data, base))>>24) == c
+	first := int(renvo_runtime_UnsafeInt32At(p.toks.data, base))
+	return first&255 == renvoTokOp && byte(first>>24) == c
 }
 
 func renvoTok2Is(p *renvoProgram, i int, a byte, b byte) bool {
