@@ -42,7 +42,7 @@ func c89GeneratedByteArray(t *testing.T, source []byte, name string) []byte {
 	return result
 }
 
-func compileC89SourceArena(t *testing.T, target string, sourcePath string, arenaSize int) ([]byte, string) {
+func compileC89SourceArenaTags(t *testing.T, target string, sourcePath string, arenaSize int, tags string) ([]byte, string) {
 	t.Helper()
 	if hostTarget() == "" {
 		t.Skipf("no in-process prepared backend for %s/%s", runtime.GOOS, runtime.GOARCH)
@@ -59,6 +59,9 @@ func compileC89SourceArena(t *testing.T, target string, sourcePath string, arena
 	if arenaSize > 0 {
 		args = append(args, "-arena-size", strconv.Itoa(arenaSize))
 	}
+	if tags != "" {
+		args = append(args, "-tags", tags)
+	}
 	args = append(args, "-s", "-o", "program.c", sourcePath)
 	result := driver.CompileFromFS(args, root, filepath.Join(root, "std"), driver.OSFS{},
 		New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
@@ -67,6 +70,11 @@ func compileC89SourceArena(t *testing.T, target string, sourcePath string, arena
 		t.Fatalf("C89 CompilerJIT compile failed: %#v", result.Diagnostic)
 	}
 	return result.Binary, root
+}
+
+func compileC89SourceArena(t *testing.T, target string, sourcePath string, arenaSize int) ([]byte, string) {
+	t.Helper()
+	return compileC89SourceArenaTags(t, target, sourcePath, arenaSize, "")
 }
 
 func compileC89Source(t *testing.T, target string, sourcePath string) ([]byte, string) {
@@ -202,6 +210,9 @@ func TestCompilerJITC89HostedProcessRuntime(t *testing.T) {
 		[]byte("fopen("),
 		[]byte("fread("),
 		[]byte("fgetpos("),
+		[]byte("opendir("),
+		[]byte("readdir("),
+		[]byte("chmod("),
 		[]byte("getenv("),
 	} {
 		if !bytes.Contains(source, required) {
@@ -253,7 +264,11 @@ func TestCompilerJITC89DockerMatrix(t *testing.T) {
 	corpus := []string{
 		"arithmetic_mod_remainder.go",
 		"append_expansion_byte_overlap.go",
+		"c89_function_zero_composite.go",
+		"c89_host_syscall.go",
 		"c89_indirect_calls.go",
+		"c89_interface_struct_result.go",
+		"c89_large_struct_arguments.go",
 		"c89_scratch_decrement.go",
 		"int64_uint64_32bit_operations.go",
 		"unsafe_pointer_array_index.go",
@@ -296,12 +311,15 @@ func TestCompilerJITC89DockerBootstrap(t *testing.T) {
 	}
 	backendSource, _ := compileC89SourceArena(t, "c89/hosted32",
 		filepath.Join(root, "backend"), 128*1024*1024)
+	frontendSource, _ := compileC89SourceArenaTags(t, "c89/hosted32",
+		filepath.Join(root, "cmd", "renvo"), 256*1024*1024, "renvo_bundle")
 	backendUnit := compileC89Unit(t, root, filepath.Join(root, "backend"), "")
 	frontendUnit := compileC89Unit(t, root, filepath.Join(root, "cmd", "renvo"), "renvo_bundle")
 	backendSmokeUnit := compileC89Unit(t, root,
 		filepath.Join(root, "backend", "tests", "c89_scratch_decrement.go"), "")
 	command := exec.Command(filepath.Join(root, "tools", "c89", "bootstrap"),
 		write("backend.c", backendSource),
+		write("frontend.c", frontendSource),
 		write("backend.rtgu", backendUnit),
 		write("frontend.rtgu", frontendUnit),
 		write("backend-smoke.rtgu", backendSmokeUnit))

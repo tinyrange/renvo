@@ -265,6 +265,9 @@ func TestFrontendBackendDiagnosticPreservesDetail(t *testing.T) {
 	}
 	root := repoRoot(t)
 	frontend := frontendCompiler(t, root)
+	if frontend.backend == "" {
+		t.Skip("selected standalone frontend uses its embedded backend")
+	}
 	dir := t.TempDir()
 	backend := filepath.Join(dir, "backend-failure")
 	if err := os.WriteFile(backend, []byte("#!/bin/sh\necho 'intentional backend failure' >&2\nexit 23\n"), 0o755); err != nil {

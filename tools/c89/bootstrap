@@ -1,16 +1,17 @@
 #!/bin/sh
 set -eu
 
-if [ "$#" -ne 4 ]; then
-    echo "usage: tools/c89/bootstrap <backend.c> <backend-unit> <frontend-unit> <backend-smoke-unit>" >&2
+if [ "$#" -ne 5 ]; then
+    echo "usage: tools/c89/bootstrap <backend.c> <frontend.c> <backend-unit> <frontend-unit> <backend-smoke-unit>" >&2
     exit 2
 fi
 
 root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 backend_c=$(CDPATH= cd -- "$(dirname "$1")" && pwd)/$(basename "$1")
-backend_unit=$(CDPATH= cd -- "$(dirname "$2")" && pwd)/$(basename "$2")
-frontend_unit=$(CDPATH= cd -- "$(dirname "$3")" && pwd)/$(basename "$3")
-backend_smoke_unit=$(CDPATH= cd -- "$(dirname "$4")" && pwd)/$(basename "$4")
+frontend_c=$(CDPATH= cd -- "$(dirname "$2")" && pwd)/$(basename "$2")
+backend_unit=$(CDPATH= cd -- "$(dirname "$3")" && pwd)/$(basename "$3")
+frontend_unit=$(CDPATH= cd -- "$(dirname "$4")" && pwd)/$(basename "$4")
+backend_smoke_unit=$(CDPATH= cd -- "$(dirname "$5")" && pwd)/$(basename "$5")
 
 run_compiler() {
     name=$1
@@ -22,6 +23,7 @@ run_compiler() {
     docker run --rm ${platform:+--platform "$platform"} \
         -v "$root:/repo:ro" \
         -v "$backend_c:/work/backend.c:ro" \
+        -v "$frontend_c:/work/frontend.c:ro" \
         -v "$backend_unit:/work/backend.rtgu:ro" \
         -v "$frontend_unit:/work/frontend.rtgu:ro" \
         -v "$backend_smoke_unit:/work/backend-smoke.rtgu:ro" \
@@ -37,8 +39,17 @@ run_compiler() {
             /tmp/frontend-stage1 -t linux/amd64 -tags renvo_bundle -s -o /tmp/frontend-stage2 ./cmd/renvo
             /tmp/frontend-stage2 -t linux/amd64 -tags renvo_bundle -s -o /tmp/frontend-stage3 ./cmd/renvo
             cmp /tmp/frontend-stage2 /tmp/frontend-stage3
-            /tmp/frontend-stage3 -t linux/amd64 -s -o /tmp/frontend-smoke ./internal/backendjit/testdata/c89_frontend_smoke.go
+            /tmp/frontend-stage3 -t linux/amd64 -s -o /tmp/frontend-smoke ./backend/tests/c89_frontend_wide_literal.go
             test "$(/tmp/frontend-smoke)" = PASS
+            eval "$1 /work/frontend.c -o /tmp/frontend-c89"
+            /tmp/frontend-c89 -t linux/amd64 -tags renvo_bundle -arena-size 134217728 -s -o /tmp/direct-stage1 ./cmd/renvo
+            test -x /tmp/direct-stage1
+            /tmp/direct-stage1 -t linux/amd64 -tags renvo_bundle -s -o /tmp/direct-stage2 ./cmd/renvo
+            /tmp/direct-stage2 -t linux/amd64 -tags renvo_bundle -s -o /tmp/direct-stage3 ./cmd/renvo
+            cmp /tmp/direct-stage2 /tmp/direct-stage3
+            /tmp/frontend-c89 -t linux/amd64 -s -o /tmp/direct-smoke ./backend/tests/c89_frontend_wide_literal.go
+            test -x /tmp/direct-smoke
+            test "$(/tmp/direct-smoke)" = PASS
         ' sh "$compile"
     echo "C89 $name bootstrap: PASS"
 }

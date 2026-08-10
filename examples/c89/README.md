@@ -32,11 +32,11 @@ the internal ABI use the indirect path in normal generated programs, while
 retaining the same register and overflow-argument convention.
 
 The hosted profile maps `open`, `close`, `read`, `write`, `read_at`, and
-`write_at` to the ISO C stream API. It exposes `PATH`, `PWD`, `RENVO_STDROOT`,
-`RENVO_MODCACHE`, and `TMPDIR` when they exist. ISO C89 has no portable API for
-Unix executable permission bits, so `chmod` validates an open descriptor but
-does not change host permissions; bootstrap scripts apply executable mode
-after the C-generated compiler writes an ELF file.
+`write_at` to the C stream API. Its compiler-hosting extensions use POSIX
+`opendir`, `readdir`, and `chmod`, allowing a C89-built full frontend to walk
+source trees and create executable outputs without a native wrapper. It exposes
+`PATH`, `PWD`, `RENVO_STDROOT`, `RENVO_MODCACHE`, and `TMPDIR` when they exist.
+The freestanding profile remains independent of both libc and POSIX.
 
 Generate C with:
 
@@ -80,13 +80,18 @@ rules without requiring Docker. The full container matrix is opt-in:
 RENVO_C89_DOCKER=1 go test ./internal/backendjit -run TestCompilerJITC89DockerMatrix
 ```
 
-The deeper bootstrap gate uses a 128 MiB arena for the C89-hosted compiler. For
-each of GCC, GCC 4.9, Clang, TCC, and PCC it performs this complete chain:
+The deeper bootstrap gate gives the C89-hosted backend a 128 MiB arena and the
+full C89-hosted frontend a 256 MiB arena. For each of GCC, GCC 4.9, Clang, TCC,
+and PCC it performs both complete chains:
 
 ```text
 backend source -> C89 translation unit -> C compiler -> Renvo backend
 Renvo frontend unit -> C89-built backend -> stage 1 frontend
 stage 1 frontend -> stage 2 frontend -> byte-identical stage 3 frontend
+
+full frontend source -> C89 translation unit -> C compiler -> Renvo frontend
+C89-built frontend -> native stage 1 frontend -> native stage 2 frontend
+native stage 2 frontend -> byte-identical native stage 3 frontend
 ```
 
 The C89 process remains a 32-bit program, but the self-hosted backend and
