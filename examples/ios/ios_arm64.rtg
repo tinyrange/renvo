@@ -141,7 +141,9 @@ go backend {
 
 		if library == iosSelfLibrary {
 			resultFloat := -1
-			if name == "renvoIOSObjcMsgPointX" {
+			if name == "renvoIOSObjcMsgFloat" {
+				resultFloat = 0
+			} else if name == "renvoIOSObjcMsgPointX" {
 				resultFloat = 0
 			} else if name == "renvoIOSObjcMsgPointY" {
 				resultFloat = 1

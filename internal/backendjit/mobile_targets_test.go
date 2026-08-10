@@ -374,7 +374,9 @@ func TestCompilerJITIOSARM64FormsImage(t *testing.T) {
 		"_class_addMethod",
 		"_sel_registerName",
 		"_CGColorSpaceCreateDeviceRGB",
-		"_CGDataProviderCreateWithData",
+		"_CFDataCreate",
+		"_CFRelease",
+		"_CGDataProviderCreateWithCFData",
 		"_CGImageCreate",
 	} {
 		if !bytes.Contains(image, append([]byte(name), 0)) {
@@ -387,6 +389,7 @@ func TestCompilerJITIOSARM64FormsImage(t *testing.T) {
 	}
 	for _, pseudo := range []string{
 		"renvoIOSObjcMsgRect",
+		"renvoIOSObjcMsgFloat",
 		"renvoIOSDelegateDidFinishCallback",
 		"renvoIOSTouchesBeganCallback",
 	} {
@@ -397,11 +400,15 @@ func TestCompilerJITIOSARM64FormsImage(t *testing.T) {
 	for _, dylib := range []string{
 		"/System/Library/Frameworks/UIKit.framework/UIKit",
 		"/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics",
+		"/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation",
 		"/usr/lib/libobjc.A.dylib",
 	} {
 		if !bytes.Contains(image, append([]byte(dylib), 0)) {
 			t.Errorf("iOS Forms image omits dylib %q", dylib)
 		}
+	}
+	if bytes.Contains(image, []byte("_CGDataProviderCreateWithData")) {
+		t.Fatal("iOS Forms image aliases its mutable framebuffer through CoreGraphics")
 	}
 	// UIKit returns CGPoint/CGRect components in floating-point registers. The
 	// target bridge converts those values to integral Forms coordinates.
@@ -439,7 +446,10 @@ func TestCompilerJITIOSARM64ControlsImage(t *testing.T) {
 	if bytes.Contains(image, []byte("Native Android")) {
 		t.Fatal("shared controls gallery retained its Android platform subtitle")
 	}
-	for _, name := range []string{"_UIApplicationMain", "_CGImageCreate"} {
+	for _, name := range []string{
+		"_UIApplicationMain", "_CGImageCreate",
+		"_mach_absolute_time", "_mach_timebase_info",
+	} {
 		if !bytes.Contains(image, append([]byte(name), 0)) {
 			t.Errorf("iOS controls image omits dynamic import %q", name)
 		}

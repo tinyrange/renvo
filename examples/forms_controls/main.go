@@ -24,6 +24,10 @@ const (
 )
 
 const keyboardMaximumTextBytes = 1024
+const touchKeyboardHeight = 244
+const touchKeyboardRowStride = 60
+const touchKeyboardKeyHeight = 52
+const renderTimingSampleCount = 20
 
 type controlsDemo struct {
 	form          forms.Form
@@ -31,6 +35,7 @@ type controlsDemo struct {
 	titleFont     *graphics.Font
 	tabs          *forms.TabControl
 	status        *forms.StatusBar
+	renderDebug   *forms.Label
 	inputProgress *forms.ProgressBar
 	textBox       *forms.TextBox
 	textArea      *forms.TextArea
@@ -44,6 +49,10 @@ type controlsDemo struct {
 	check         *forms.CheckBox
 	split         *forms.SplitContainer
 	keyboard      *touchKeyboard
+	renderStarted int
+	renderTimes   []int
+	renderCount   int
+	renderNext    int
 	inputPage     []*forms.Control
 	listPage      []*forms.Control
 	motionPage    []*forms.Control
@@ -125,8 +134,9 @@ func keyboardRowKey(row string, x, start, width int) int {
 
 func (k *touchKeyboard) keyAt(x, y graphics.Scalar) int {
 	ix, iy := int(x), int(y)
-	row := (iy - 4) / 76
-	if iy < 4 || row < 0 || row > 3 || iy-row*76 > 72 {
+	row := (iy - 4) / touchKeyboardRowStride
+	if iy < 4 || row < 0 || row > 3 ||
+		(iy-4)%touchKeyboardRowStride >= touchKeyboardKeyHeight+4 {
 		return keyNone
 	}
 	row0, row1, row2 := "qwertyuiop", "asdfghjkl", "zxcvbnm"
@@ -285,7 +295,8 @@ func (k *touchKeyboard) paintRow(surface *graphics.Surface, row string, x, y, wi
 			at := key - int('a')
 			label = upper[at : at+1]
 		}
-		k.paintKey(surface, key, label, graphics.R(left+2, y+2, keyWidth-4, 68))
+		k.paintKey(surface, key, label,
+			graphics.R(left+2, y+2, keyWidth-4, touchKeyboardKeyHeight))
 	}
 }
 
@@ -300,37 +311,114 @@ func (k *touchKeyboard) paint(surface *graphics.Surface) {
 		row0, row1, row2 = "1234567890", "@#$%&-+()", "*\"':;!?"
 	}
 	k.paintRow(surface, row0, 4, 4, 352)
-	k.paintRow(surface, row1, 21, 80, 318)
+	k.paintRow(surface, row1, 21, 64, 318)
 	shiftLabel := "Shift"
 	if k.symbols {
 		shiftLabel = "ABC"
 	} else if k.shiftMode == 2 {
 		shiftLabel = "CAPS"
 	}
-	k.paintKey(surface, keyShift, shiftLabel, graphics.R(6, 158, 44, 68))
-	k.paintRow(surface, row2, 56, 156, 248)
-	k.paintKey(surface, keyBackspace, "Back", graphics.R(310, 158, 44, 68))
+	k.paintKey(surface, keyShift, shiftLabel,
+		graphics.R(6, 126, 44, touchKeyboardKeyHeight))
+	k.paintRow(surface, row2, 56, 124, 248)
+	k.paintKey(surface, keyBackspace, "Back",
+		graphics.R(310, 126, 44, touchKeyboardKeyHeight))
 	symbolLabel := "?123"
 	if k.symbols {
 		symbolLabel = "ABC"
 	}
-	k.paintKey(surface, keySymbols, symbolLabel, graphics.R(6, 234, 48, 68))
-	k.paintKey(surface, int(','), ",", graphics.R(62, 234, 34, 68))
+	k.paintKey(surface, keySymbols, symbolLabel,
+		graphics.R(6, 186, 48, touchKeyboardKeyHeight))
+	k.paintKey(surface, int(','), ",",
+		graphics.R(62, 186, 34, touchKeyboardKeyHeight))
 	if k.multiline {
-		k.paintKey(surface, keySpace, "space", graphics.R(104, 234, 96, 68))
-		k.paintKey(surface, int('.'), ".", graphics.R(208, 234, 30, 68))
-		k.paintKey(surface, keyEnter, "Enter", graphics.R(246, 234, 48, 68))
-		k.paintKey(surface, keyDone, "Done", graphics.R(302, 234, 52, 68))
+		k.paintKey(surface, keySpace, "space",
+			graphics.R(104, 186, 96, touchKeyboardKeyHeight))
+		k.paintKey(surface, int('.'), ".",
+			graphics.R(208, 186, 30, touchKeyboardKeyHeight))
+		k.paintKey(surface, keyEnter, "Enter",
+			graphics.R(246, 186, 48, touchKeyboardKeyHeight))
+		k.paintKey(surface, keyDone, "Done",
+			graphics.R(302, 186, 52, touchKeyboardKeyHeight))
 	} else {
-		k.paintKey(surface, keySpace, "space", graphics.R(104, 234, 136, 68))
-		k.paintKey(surface, int('.'), ".", graphics.R(248, 234, 34, 68))
-		k.paintKey(surface, keyDone, "Done", graphics.R(290, 234, 64, 68))
+		k.paintKey(surface, keySpace, "space",
+			graphics.R(104, 186, 136, touchKeyboardKeyHeight))
+		k.paintKey(surface, int('.'), ".",
+			graphics.R(248, 186, 34, touchKeyboardKeyHeight))
+		k.paintKey(surface, keyDone, "Done",
+			graphics.R(290, 186, 64, touchKeyboardKeyHeight))
 	}
 	surface.PopTransform()
 	surface.PopClip()
 }
 
 var demo controlsDemo
+
+func formatRenderMilliseconds(microseconds int) string {
+	tenths := (microseconds + 50) / 100
+	return renderDecimal(tenths/10) + "." + renderDecimal(tenths%10)
+}
+
+func renderDecimal(value int) string {
+	if value == 0 {
+		return "0"
+	}
+	var digits [20]byte
+	at := len(digits)
+	for value > 0 {
+		at--
+		digits[at] = byte('0' + value%10)
+		value /= 10
+	}
+	return string(digits[at:])
+}
+
+func (d *controlsDemo) renderTimingText() string {
+	if d.renderCount == 0 {
+		return "Render timing: waiting for first frame"
+	}
+	total, peak := 0, 0
+	for i := 0; i < d.renderCount; i++ {
+		total += d.renderTimes[i]
+		if d.renderTimes[i] > peak {
+			peak = d.renderTimes[i]
+		}
+	}
+	last := d.renderNext - 1
+	if last < 0 {
+		last = renderTimingSampleCount - 1
+	}
+	average := total / d.renderCount
+	return "Render " + formatRenderMilliseconds(d.renderTimes[last]) +
+		" ms  avg " + formatRenderMilliseconds(average) +
+		"  peak " + formatRenderMilliseconds(peak)
+}
+
+func (d *controlsDemo) beforeRender() {
+	// The label reports the preceding completed render. Updating it here folds
+	// the overlay into an already-needed frame instead of creating a debug-only
+	// repaint loop.
+	d.renderDebug.SetText(d.renderTimingText())
+	d.renderStarted = renderTimestampMicroseconds()
+}
+
+func (d *controlsDemo) afterRender() {
+	finished := renderTimestampMicroseconds()
+	if finished <= d.renderStarted {
+		return
+	}
+	if len(d.renderTimes) != renderTimingSampleCount {
+		d.renderTimes = make([]int, renderTimingSampleCount)
+	}
+	d.renderTimes[d.renderNext] = finished - d.renderStarted
+	d.renderNext++
+	if d.renderNext == renderTimingSampleCount {
+		d.renderNext = 0
+	}
+	if d.renderCount < renderTimingSampleCount {
+		d.renderCount++
+	}
+}
 
 func (d *controlsDemo) addPage(page int, control *forms.Control) {
 	d.form.Add(control)
@@ -392,7 +480,8 @@ func (d *controlsDemo) resize() {
 	if keyboardX < 0 {
 		keyboardX = 0
 	}
-	d.keyboard.SetBounds(graphics.R(keyboardX, statusY-318, 360, 318))
+	d.keyboard.SetBounds(graphics.R(keyboardX, statusY-touchKeyboardHeight,
+		360, touchKeyboardHeight))
 }
 
 func (d *controlsDemo) editTextBox() {
@@ -489,6 +578,7 @@ func (d *controlsDemo) label(page int, text string, bounds graphics.Rect, title 
 }
 
 func (d *controlsDemo) initialize(width, height int) {
+	d.renderTimes = make([]int, renderTimingSampleCount)
 	d.bodyFont = gofont.New(14)
 	d.titleFont = gofont.New(20)
 	d.form.Initialize(width, height)
@@ -500,11 +590,11 @@ func (d *controlsDemo) initialize(width, height int) {
 	title.SetText("Renvo controls")
 	d.form.Add(&title.Control)
 
-	subtitle := forms.NewLabel()
-	subtitle.SetBounds(graphics.R(16, 82, 328, 24))
-	subtitle.SetFont(d.bodyFont)
-	subtitle.SetText(controlsPlatformSubtitle)
-	d.form.Add(&subtitle.Control)
+	d.renderDebug = forms.NewLabel()
+	d.renderDebug.SetBounds(graphics.R(16, 82, 328, 24))
+	d.renderDebug.SetFont(d.bodyFont)
+	d.renderDebug.SetText(controlsPlatformSubtitle)
+	d.form.Add(&d.renderDebug.Control)
 
 	d.tabs = forms.NewTabControl()
 	d.tabs.SetBounds(graphics.R(0, 112, 360, 52))
@@ -526,7 +616,7 @@ func (d *controlsDemo) initialize(width, height int) {
 	d.buildMotionPage()
 	d.buildMorePage()
 	d.keyboard = newTouchKeyboard(d.bodyFont)
-	d.keyboard.SetBounds(graphics.R(0, 426, 360, 318))
+	d.keyboard.SetBounds(graphics.R(0, 500, 360, touchKeyboardHeight))
 	d.keyboard.Done = d.keyboardDone
 	d.form.Add(&d.keyboard.Control)
 	d.form.Resize = d.resize
@@ -747,5 +837,7 @@ func main() {
 		return
 	}
 	demo.initialize(360, 800)
-	forms.NewApp(window, &demo.form).Run()
+	app := forms.NewApp(window, &demo.form)
+	configureRenderTiming(app)
+	app.Run()
 }

@@ -4,12 +4,17 @@ package graphics
 
 const iosUIKit = "/System/Library/Frameworks/UIKit.framework/UIKit"
 const iosCoreGraphics = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics"
+const iosCoreFoundation = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
 const iosObjC = "/usr/lib/libobjc.A.dylib"
 const iosSelfLibrary = "renvo-ios"
 
 const iosBitmapRGBA = 0x4001
 
 var iosWindow *Window
+var iosViewportWidth int
+var iosViewportHeight int
+var iosPhysicalWidth int
+var iosPhysicalHeight int
 
 // renvo:linkstatic /System/Library/Frameworks/UIKit.framework/UIKit,_UIApplicationMain
 func iosUIApplicationMain(argc, argv, principalClass, delegateClass int) int { return 1 }
@@ -50,14 +55,23 @@ func iosObjcMsgRectWidth(object, selector int) int { return 0 }
 // renvo:linkstatic renvo-ios,renvoIOSObjcMsgRectHeight
 func iosObjcMsgRectHeight(object, selector int) int { return 0 }
 
+// renvo:linkstatic renvo-ios,renvoIOSObjcMsgFloat
+func iosObjcMsgFloat(object, selector int) int { return 0 }
+
 // renvo:linkstatic renvo-ios,renvoIOSObjcMsgPointX
 func iosObjcMsgPointX(object, selector, view int) int { return 0 }
 
 // renvo:linkstatic renvo-ios,renvoIOSObjcMsgPointY
 func iosObjcMsgPointY(object, selector, view int) int { return 0 }
 
-// renvo:linkstatic /System/Library/Frameworks/CoreGraphics.framework/CoreGraphics,_CGDataProviderCreateWithData
-func iosDataProviderCreate(info int, data *byte, size, releaseData int) int { return 0 }
+// renvo:linkstatic /System/Library/Frameworks/CoreFoundation.framework/CoreFoundation,_CFDataCreate
+func iosDataCreate(allocator int, data *byte, size int) int { return 0 }
+
+// renvo:linkstatic /System/Library/Frameworks/CoreFoundation.framework/CoreFoundation,_CFRelease
+func iosRelease(value int) {}
+
+// renvo:linkstatic /System/Library/Frameworks/CoreGraphics.framework/CoreGraphics,_CGDataProviderCreateWithCFData
+func iosDataProviderCreate(data int) int { return 0 }
 
 // renvo:linkstatic /System/Library/Frameworks/CoreGraphics.framework/CoreGraphics,_CGDataProviderRelease
 func iosDataProviderRelease(provider int) {}
@@ -188,8 +202,39 @@ func NewWindow(options WindowOptions) *Window {
 	}
 	w.surface = NewSurface(w.width, w.height)
 	iosWindow = w
+	iosViewportWidth = options.Width
+	iosViewportHeight = options.Height
+	iosPhysicalWidth = 0
+	iosPhysicalHeight = 0
 	iosRetainCallbacks()
 	return w
+}
+
+func iosConfigureBackingSurface(w *Window) bool {
+	if w == nil || w.surface == nil || iosViewportWidth <= 0 ||
+		iosViewportHeight <= 0 ||
+		iosPhysicalWidth <= 0 || iosPhysicalHeight <= 0 {
+		return false
+	}
+	scale := Scalar(iosPhysicalWidth) / Scalar(iosViewportWidth)
+	heightScale := Scalar(iosPhysicalHeight) / Scalar(iosViewportHeight)
+	if heightScale > scale {
+		scale = heightScale
+	}
+	if scale < 1.0 {
+		scale = 1.0
+	}
+	backingWidth := int(Scalar(iosViewportWidth) * scale)
+	backingHeight := int(Scalar(iosViewportHeight) * scale)
+	resized := w.width != iosViewportWidth || w.height != iosViewportHeight ||
+		w.surface.Width != backingWidth || w.surface.Height != backingHeight
+	w.width = iosViewportWidth
+	w.height = iosViewportHeight
+	if w.surface.Width != backingWidth || w.surface.Height != backingHeight {
+		w.surface.Resize(backingWidth, backingHeight)
+	}
+	w.surface.setDeviceScale(scale)
+	return resized
 }
 
 // RunIOSApplication transfers the main thread to UIKit after Forms has built
@@ -216,12 +261,19 @@ func iosDidFinishLaunching(options, application, selector, self int) int {
 	screen := iosObjcMsg0(iosClass("UIScreen"), iosSelector("mainScreen"))
 	width := iosObjcMsgRectWidth(screen, iosSelector("bounds"))
 	height := iosObjcMsgRectHeight(screen, iosSelector("bounds"))
+	backingScale := iosObjcMsgFloat(screen, iosSelector("scale"))
 	if width <= 0 {
 		width = w.width
 	}
 	if height <= 0 {
 		height = w.height
 	}
+	if backingScale <= 0 {
+		backingScale = 1
+	}
+	iosPhysicalWidth = width * backingScale
+	iosPhysicalHeight = height * backingScale
+	resized := iosConfigureBackingSurface(w)
 
 	native := iosObjcMsg0(iosClass("UIWindow"), iosSelector("alloc"))
 	native = iosObjcMsgRect(native, iosSelector("initWithFrame:"),
@@ -235,13 +287,22 @@ func iosDidFinishLaunching(options, application, selector, self int) int {
 	iosObjcMsg1(view, iosSelector("setContentMode:"), 0)
 	iosObjcMsg1(controller, iosSelector("setView:"), view)
 	iosObjcMsg1(native, iosSelector("setRootViewController:"), controller)
-	iosObjcMsg0(native, iosSelector("makeKeyAndVisible"))
 	w.app = application
 	w.native = native
 	w.view = view
 	w.context = controller
-	w.focused = true
-	w.queue(Event{Type: EventWindowFocusGained})
+	if w.shown {
+		iosObjcMsg0(native, iosSelector("makeKeyAndVisible"))
+		w.focused = true
+		w.queue(Event{Type: EventWindowFocusGained})
+	} else {
+		iosObjcMsg1(native, iosSelector("setHidden:"), 1)
+		w.focused = false
+	}
+	if resized {
+		w.queue(Event{Type: EventWindowResize,
+			Dirty: R(0, 0, Scalar(w.width), Scalar(w.height))})
+	}
 	w.queue(Event{Type: EventWindowExpose,
 		Dirty: R(0, 0, Scalar(w.width), Scalar(w.height))})
 	iosDispatchQueuedEvents(w)
@@ -307,8 +368,15 @@ func (w *Window) Present() bool {
 	if len(w.surface.Pixels) == 0 {
 		return false
 	}
-	provider := iosDataProviderCreate(0, &w.surface.Pixels[0],
-		len(w.surface.Pixels), 0)
+	// CFDataCreate copies the live Forms framebuffer. UIImage retains the
+	// resulting CGImage after Present returns, so its provider must not alias
+	// pixels that the next retained-mode paint will mutate.
+	data := iosDataCreate(0, &w.surface.Pixels[0], len(w.surface.Pixels))
+	if data == 0 {
+		return false
+	}
+	provider := iosDataProviderCreate(data)
+	iosRelease(data)
 	space := iosColorSpaceCreateDeviceRGB()
 	if provider == 0 || space == 0 {
 		if provider != 0 {
@@ -366,9 +434,19 @@ func (w *Window) Show() bool {
 	if w == nil || w.closed {
 		return false
 	}
+	wasShown := w.shown
 	w.shown = true
 	if w.native != 0 {
 		iosObjcMsg0(w.native, iosSelector("makeKeyAndVisible"))
+		if !w.focused {
+			w.focused = true
+			w.queue(Event{Type: EventWindowFocusGained})
+		}
+		if !wasShown {
+			w.queue(Event{Type: EventWindowExpose,
+				Dirty: R(0, 0, Scalar(w.width), Scalar(w.height))})
+		}
+		iosDispatchQueuedEvents(w)
 	}
 	return true
 }
@@ -380,6 +458,11 @@ func (w *Window) Hide() bool {
 	w.shown = false
 	if w.native != 0 {
 		iosObjcMsg1(w.native, iosSelector("setHidden:"), 1)
+		if w.focused {
+			w.focused = false
+			w.queue(Event{Type: EventWindowFocusLost})
+			iosDispatchQueuedEvents(w)
+		}
 	}
 	return true
 }
@@ -388,12 +471,18 @@ func (w *Window) SetSize(width, height int) bool {
 	if w == nil || w.closed || width <= 0 || height <= 0 {
 		return false
 	}
-	w.width, w.height = width, height
-	w.surface.Resize(width, height)
+	iosViewportWidth = width
+	iosViewportHeight = height
+	if iosPhysicalWidth > 0 && iosPhysicalHeight > 0 {
+		iosConfigureBackingSurface(w)
+	} else {
+		w.width, w.height = width, height
+		w.surface.Resize(width, height)
+	}
 	w.queue(Event{Type: EventWindowResize,
-		Dirty: R(0, 0, Scalar(width), Scalar(height))})
+		Dirty: R(0, 0, Scalar(w.width), Scalar(w.height))})
 	w.queue(Event{Type: EventWindowExpose,
-		Dirty: R(0, 0, Scalar(width), Scalar(height))})
+		Dirty: R(0, 0, Scalar(w.width), Scalar(w.height))})
 	iosDispatchQueuedEvents(w)
 	return true
 }
