@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "5428f1ec1c53a9aa70a8cd7fc3560f33bb46891db93de9d32cb76273efa16f9b"
+const CompilerSourceDigest = "fc7d5f12ad7d148d2cbfeb2613a03308de19bd43678870d195c403f7ebd0153b"
 
 // source: backend/compiler_common_impl.go
 
@@ -11722,11 +11722,9 @@ if fnIndex >= len(g.funcLabels) {
 return false
 }
 fn := &g.meta.funcs[fnIndex]
-if fn.nameEnd-fn.nameStart > 13 &&
-renvo_runtime_UnsafeByteAt(g.prog.src, fn.nameStart) == 'r' &&
-renvo_runtime_UnsafeByteAt(g.prog.src, fn.nameStart+13) == '_' &&
+if fn.nameEnd > fn.nameStart+13 &&
 renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameStart+14, "renvo_runtime_") {
-if fn.nameEnd-fn.nameStart > 15 && renvo_runtime_UnsafeByteAt(g.prog.src, fn.nameStart+14) == 'M' {
+if renvo_runtime_UnsafeByteAt(g.prog.src, fn.nameStart+14) == 'M' {
 size := int(renvo_runtime_UnsafeByteAt(g.prog.src, fn.nameStart+15) - '0')
 if size == 0 {
 size = g.c.renvoNativeIntSize

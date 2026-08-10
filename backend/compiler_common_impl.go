@@ -11715,11 +11715,9 @@ func renvoEmitUserCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		return false
 	}
 	fn := &g.meta.funcs[fnIndex]
-	if fn.nameEnd-fn.nameStart > 13 &&
-		renvo_runtime_UnsafeByteAt(g.prog.src, fn.nameStart) == 'r' &&
-		renvo_runtime_UnsafeByteAt(g.prog.src, fn.nameStart+13) == '_' &&
+	if fn.nameEnd > fn.nameStart+13 &&
 		renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameStart+14, "renvo_runtime_") {
-		if fn.nameEnd-fn.nameStart > 15 && renvo_runtime_UnsafeByteAt(g.prog.src, fn.nameStart+14) == 'M' {
+		if renvo_runtime_UnsafeByteAt(g.prog.src, fn.nameStart+14) == 'M' {
 			size := int(renvo_runtime_UnsafeByteAt(g.prog.src, fn.nameStart+15) - '0')
 			if size == 0 {
 				size = g.c.renvoNativeIntSize
