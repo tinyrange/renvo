@@ -168,6 +168,20 @@ func TestSourceEmbedArchiveRoundTripAndDirectoryRules(t *testing.T) {
 	}
 }
 
+func TestSourceEmbedArchiveLongMatchRoundTrip(t *testing.T) {
+	data := bytes.Repeat([]byte("repeated source line\n"), 20)
+	archive := buildSourceEmbedArchive([]sourceEmbedFile{{
+		name: "assets/repeated.txt",
+		data: data,
+	}})
+	compressed := compressSourceEmbedArchive(archive)
+	embedded := renvoembed.NewFS(string(compressed), len(archive))
+	got, err := embedded.ReadFile("assets/repeated.txt")
+	if err != nil || !bytes.Equal(got, data) {
+		t.Fatalf("long-match round trip = %q, %v", got, err)
+	}
+}
+
 func TestSourceEmbedPrunesHiddenDirectoriesBeforeWalking(t *testing.T) {
 	fs := embedRejectHiddenReadFS{embedMemorySourceFS{files: []load.SourceFile{
 		{Path: "/repo/app/cmd/app/assets/message.txt", Src: []byte("message")},

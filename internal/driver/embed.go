@@ -851,9 +851,21 @@ func compressSourceEmbedArchive(data []byte) []byte {
 		flags := byte(0)
 		for bit := 0; bit < 8 && pos < len(data); bit++ {
 			distance, length := sourceEmbedArchiveMatch(data, buckets, previous, pos)
+			if length == 18 {
+				// The zero extension byte prevents the next position from
+				// starting a match; stopping at 17 compresses this archive better.
+				length = 17
+			}
 			if length >= 3 {
-				pair := (distance-1)<<4 | (length - 3)
+				lengthCode := length - 3
+				if length >= 18 {
+					lengthCode = 15
+				}
+				pair := (distance-1)<<4 | lengthCode
 				out = append(out, byte(pair>>8), byte(pair))
+				if length >= 18 {
+					out = append(out, byte(length-18))
+				}
 				for i := 0; i < length; i++ {
 					sourceEmbedArchiveAddPosition(data, buckets, previous, pos+i)
 				}
@@ -880,10 +892,10 @@ func sourceEmbedArchiveAddPosition(data []byte, buckets []int32, previous []int3
 }
 
 func sourceEmbedArchiveMatch(data []byte, buckets []int32, previous []int32, pos int) (int, int) {
-	// The bundled compiler archive favors this latency bound: searching 64
-	// entries saves less than 1 KiB but costs more self-host time, while still
-	// deeper greedy searches can make the final stream larger as well as slower.
+	// The bundled compiler archive favors this latency bound: deeper searches
+	// save little space but cost more self-host time.
 	const maxCandidates = 32
+	const maxLength = 273
 	if pos+2 >= len(data) {
 		return 0, 0
 	}
@@ -901,13 +913,13 @@ func sourceEmbedArchiveMatch(data []byte, buckets []int32, previous []int32, pos
 			continue
 		}
 		length := 0
-		for length < 18 && pos+length < len(data) && data[candidate+length] == data[pos+length] {
+		for length < maxLength && pos+length < len(data) && data[candidate+length] == data[pos+length] {
 			length++
 		}
 		if length > bestLength {
 			bestDistance = distance
 			bestLength = length
-			if length == 18 {
+			if length == maxLength {
 				break
 			}
 		}
