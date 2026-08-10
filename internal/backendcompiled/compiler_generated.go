@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "e5d496561dd880d4c2df54d2e94a22075c9f45ccf7124fbbf0999458018b47b8"
+const CompilerSourceDigest = "5428f1ec1c53a9aa70a8cd7fc3560f33bb46891db93de9d32cb76273efa16f9b"
 
 // source: backend/compiler_common_impl.go
 
@@ -11722,7 +11722,11 @@ if fnIndex >= len(g.funcLabels) {
 return false
 }
 fn := &g.meta.funcs[fnIndex]
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameStart+15, "renvo_runtime_M") {
+if fn.nameEnd-fn.nameStart > 13 &&
+renvo_runtime_UnsafeByteAt(g.prog.src, fn.nameStart) == 'r' &&
+renvo_runtime_UnsafeByteAt(g.prog.src, fn.nameStart+13) == '_' &&
+renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameStart+14, "renvo_runtime_") {
+if fn.nameEnd-fn.nameStart > 15 && renvo_runtime_UnsafeByteAt(g.prog.src, fn.nameStart+14) == 'M' {
 size := int(renvo_runtime_UnsafeByteAt(g.prog.src, fn.nameStart+15) - '0')
 if size == 0 {
 size = g.c.renvoNativeIntSize
@@ -11734,6 +11738,7 @@ return renvoEmitRuntimeTruncateSlice(g, ep, e, size)
 }
 if renvoEmitRuntimeArenaCall(g, ep, idx, fn) {
 return true
+}
 }
 receiverIndex := -1
 if fn.receiverType != 0 {
