@@ -43,10 +43,12 @@ const (
 	gpioOutputSignal = uint32(256)
 )
 
+//renvo:load
 func load32(address uintptr) uint32 {
 	return *(*uint32)(unsafe.Pointer(address))
 }
 
+//renvo:store
 func store32(address uintptr, value uint32) {
 	*(*uint32)(unsafe.Pointer(address)) = value
 }
@@ -174,11 +176,4 @@ func ConfigureBacklight() {
 
 func SetBacklight(on bool) {
 	setGPIO(38, on)
-}
-
-// Delay performs observable MMIO reads so the compiler cannot remove it.
-func Delay(iterations int) {
-	for count := 0; count < iterations; count++ {
-		_ = load32(gpioOut1)
-	}
 }

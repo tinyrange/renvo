@@ -4,8 +4,14 @@ import "testing"
 
 func TestTargetCoreTablesCoverEveryTarget(t *testing.T) {
 	want := renvoTargetVM32 + 1
-	if len(targetOSTable) != want || len(targetArchTable) != want || len(renvoTargetIntBitsTable) != want {
-		t.Fatalf("core target table lengths = os:%d arch:%d int:%d, want %d", len(targetOSTable), len(targetArchTable), len(renvoTargetIntBitsTable), want)
+	if got := len(targetOSTable); got != want {
+		t.Fatalf("OS target table length = %d, want %d", got, want)
+	}
+	if got := len(targetArchTable); got != want {
+		t.Fatalf("architecture target table length = %d, want %d", got, want)
+	}
+	if got := len(renvoTargetIntBitsTable); got != want {
+		t.Fatalf("integer-width target table length = %d, want %d", got, want)
 	}
 }
 

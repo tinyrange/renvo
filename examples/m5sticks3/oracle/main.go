@@ -6,7 +6,7 @@ func main() {
 	if !board.DrawLineDiagnostic() {
 		for {
 			print("FAIL: M5PM1 identity or acknowledgement\n")
-			board.Delay(2000000)
+			board.DelayMilliseconds(1000)
 		}
 	}
 	board.ConfigureButton(11)
@@ -20,7 +20,7 @@ func main() {
 		buttonAIsPressed := board.ButtonPressed(11)
 		buttonBIsPressed := board.ButtonPressed(12)
 		if buttonAIsPressed != buttonAWasPressed {
-			board.Delay(20000)
+			board.DelayMilliseconds(20)
 			buttonAIsPressed = board.ButtonPressed(11)
 			if buttonAIsPressed != buttonAWasPressed {
 				buttonAWasPressed = buttonAIsPressed
@@ -31,7 +31,7 @@ func main() {
 			}
 		}
 		if buttonBIsPressed != buttonBWasPressed {
-			board.Delay(20000)
+			board.DelayMilliseconds(20)
 			buttonBIsPressed = board.ButtonPressed(12)
 			if buttonBIsPressed != buttonBWasPressed {
 				buttonBWasPressed = buttonBIsPressed
@@ -41,6 +41,6 @@ func main() {
 				}
 			}
 		}
-		board.Delay(10000)
+		board.DelayMilliseconds(10)
 	}
 }

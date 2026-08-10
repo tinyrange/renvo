@@ -972,11 +972,23 @@ func corePackageSymbolAliases(programs []unit.Program, root int, symbolOffsets [
 			index := symbolOffsets[i] + j
 			name := programs[i].Symbols[j].Name
 			names[index] = name
+			directiveSize := -1
+			nameTok := programs[i].Symbols[j].Token
+			if nameTok > 0 && nameTok < len(programs[i].Tokens) && programs[i].Tokens[nameTok-1].KindLine&255 == unit.TokenFunc {
+				end := programs[i].Tokens[nameTok-1].Start - 1
+				if end >= 12 && (end == 12 || programs[i].Text[end-13] == '\n') && coreText(programs[i].Text, end-12, end) == "//renvo:load" {
+					directiveSize = coreMemoryDirectiveSize(&programs[i], nameTok, true)
+				} else if end >= 13 && (end == 13 || programs[i].Text[end-14] == '\n') && coreText(programs[i].Text, end-13, end) == "//renvo:store" {
+					directiveSize = coreMemoryDirectiveSize(&programs[i], nameTok, false)
+				}
+			}
 			if name == "init" {
 				out[index] = coreInitFunctionAliasName(i, initOrdinal)
 				initOrdinal++
 			} else if alias := coreCompilerIntrinsicAlias(programs[i].ImportPath, name); alias != "" {
 				out[index] = alias
+			} else if directiveSize >= 0 {
+				out[index] = coreMemoryDirectiveAliasName(directiveSize, index)
 			}
 			bucket := coreSymbolAliasHash(name) % len(buckets)
 			next[index] = buckets[bucket]
@@ -1001,6 +1013,44 @@ func corePackageSymbolAliases(programs []unit.Program, root int, symbolOffsets [
 		}
 	}
 	return out
+}
+
+func coreMemoryDirectiveSize(program *unit.Program, nameTok int, load bool) int {
+	closeTok := nameTok + 1
+	depth := 0
+	for closeTok < len(program.Tokens) {
+		text := coreTokenText(program, closeTok)
+		if text == "(" {
+			depth++
+		} else if text == ")" {
+			depth--
+			if depth == 0 {
+				break
+			}
+		}
+		closeTok++
+	}
+	typeTok := closeTok - 1
+	if load {
+		typeTok = closeTok + 1
+		if coreTokenText(program, typeTok) == "(" {
+			typeTok++
+		}
+	}
+	name := coreTokenText(program, typeTok)
+	if name == "byte" || name == "uint8" || name == "int8" {
+		return 1
+	}
+	if name == "uint16" || name == "int16" {
+		return 2
+	}
+	if name == "uint32" || name == "int32" {
+		return 4
+	}
+	if name == "uint" || name == "int" || name == "uintptr" {
+		return 0
+	}
+	return -1
 }
 
 // Compiler intrinsics are selected by both package identity and declaration
@@ -1092,6 +1142,13 @@ func coreInitFunctionAliasName(pkg int, function int) string {
 	out := []byte("renvoi")
 	out = appendCoreInt(out, pkg)
 	out = append(out, '_')
+	out = appendCoreInt(out, function)
+	return string(out)
+}
+
+func coreMemoryDirectiveAliasName(size int, function int) string {
+	out := []byte("renvo_runtime_M")
+	out = append(out, byte('0'+size))
 	out = appendCoreInt(out, function)
 	return string(out)
 }

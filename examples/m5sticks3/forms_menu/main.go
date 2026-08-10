@@ -22,9 +22,9 @@ func present(surface *graphics.Surface) {
 
 func waitButtonRelease(pin int) {
 	for board.ButtonPressed(pin) {
-		board.Delay(10000)
+		board.DelayMilliseconds(10)
 	}
-	board.Delay(20000)
+	board.DelayMilliseconds(20)
 }
 
 func main() {
@@ -71,7 +71,7 @@ func main() {
 	present(surface)
 	for {
 		if board.ButtonPressed(sideButton) {
-			board.Delay(20000)
+			board.DelayMilliseconds(20)
 			if board.ButtonPressed(sideButton) {
 				next := selectedIndex + 1
 				if next == len(items) {
@@ -83,7 +83,7 @@ func main() {
 			}
 		}
 		if board.ButtonPressed(frontButton) {
-			board.Delay(20000)
+			board.DelayMilliseconds(20)
 			if board.ButtonPressed(frontButton) {
 				result.SetText(items[selectedIndex])
 				waitButtonRelease(frontButton)
@@ -92,6 +92,6 @@ func main() {
 		if form.Paint(surface) {
 			present(surface)
 		}
-		board.Delay(10000)
+		board.DelayMilliseconds(10)
 	}
 }

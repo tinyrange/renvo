@@ -7,7 +7,7 @@ import "renvo.dev/examples/m5nanoc6/board"
 // stores all executed successfully without making the test artificially slow.
 func main() {
 	board.ConfigureBlueLED()
-	board.Delay(5000)
+	board.DelayMicroseconds(100)
 	board.SetBlueLED(true)
 	for {
 	}

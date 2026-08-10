@@ -13,7 +13,7 @@ func Random32() uint32 {
 	store32(randomClock, load32(randomClock)|randomClockEnable)
 	result := uint32(0)
 	for sample := 0; sample < 5; sample++ {
-		Delay(6000)
+		DelayMicroseconds(100)
 		result = result ^ load32(randomData)
 	}
 	return result

@@ -26,10 +26,12 @@ const (
 	gpioOutputSignal = uint32(128)
 )
 
+//renvo:load
 func load32(address uintptr) uint32 {
 	return *(*uint32)(unsafe.Pointer(address))
 }
 
+//renvo:store
 func store32(address uintptr, value uint32) {
 	*(*uint32)(unsafe.Pointer(address)) = value
 }
@@ -62,13 +64,4 @@ func ConfigureButton() {
 
 func ButtonPressed() bool {
 	return load32(gpioInput)&button == 0
-}
-
-// Delay performs volatile GPIO reads. Using an MMIO read rather than an empty
-// loop keeps the delay observable to the compiler and deterministic in the
-// emulator.
-func Delay(iterations int) {
-	for count := 0; count < iterations; count++ {
-		_ = load32(gpioOut)
-	}
 }

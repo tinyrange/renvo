@@ -11715,8 +11715,21 @@ func renvoEmitUserCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		return false
 	}
 	fn := &g.meta.funcs[fnIndex]
-	if renvoEmitRuntimeArenaCall(g, ep, idx, fn) {
-		return true
+	if fn.nameEnd > fn.nameStart+13 &&
+		renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameStart+14, "renvo_runtime_") {
+		if renvo_runtime_UnsafeByteAt(g.prog.src, fn.nameStart+14) == 'M' {
+			size := int(renvo_runtime_UnsafeByteAt(g.prog.src, fn.nameStart+15) - '0')
+			if size == 0 {
+				size = g.c.renvoNativeIntSize
+			}
+			if e.argCount == 1 {
+				return renvoEmitRuntimeUnsafeIndex(g, ep, e, size)
+			}
+			return renvoEmitRuntimeTruncateSlice(g, ep, e, size)
+		}
+		if renvoEmitRuntimeArenaCall(g, ep, idx, fn) {
+			return true
+		}
 	}
 	receiverIndex := -1
 	if fn.receiverType != 0 {
@@ -12369,9 +12382,10 @@ func renvoEmitRuntimeArenaCall(g *renvoLinearGen, ep *renvoExprParse, idx int, f
 }
 
 // Compiler-private intrinsics live in the reserved renvo_runtime namespace.
-// A bounded hash and independent byte checksum keep their dispatch table
-// compact in every standalone backend while making accidental aliases
-// infeasible across ordinary source identifiers.
+// A bounded name hash mixed with an independent byte checksum keeps their
+// dispatch table compact while making accidental aliases impractical.
+const renvoRuntimeIntrinsicTable = "\x9f\x85\x31\x61\x01\xcb\x5d\x4c\x2e\x02\x03\x1e\x4f\x00\x03\x67\x75\x10\x6e\x04\xaf\xd8\xf6\x20\x05\x1b\xfe\x37\x3f\x06\xe7\x1a\x8d\x21\x07\x15\x6b\xc1\x4f\x08\x07\xf9\x8f\x0d\x08\x8b\x07\x40\x3f\x08\x3b\x59\x62\x4e\x08\x47\x47\xc5\x5f\x0c\x47\x02\x93\x57\x0d\xc5\x07\xc6\x53\x0d\xad\xfc\x67\x17\x0d\x0b\x3b\x57\x66\x0d\x4f\x60\xcb\x57\x0d\x8b\xd1\xdd\x57\x0d"
+
 func renvoRuntimeIntrinsicID(src []byte, start int, end int) int {
 	hash1 := 5381
 	hash2 := 0
@@ -12380,59 +12394,12 @@ func renvoRuntimeIntrinsicID(src []byte, start int, end int) int {
 		hash1 = (((hash1 << 5) + hash1) ^ ch) & 2147483647
 		hash2 += ch
 	}
-	if hash1 == 1723302425 && hash2 == 1926 {
-		return 1
-	}
-	if hash1 == 655512725 && hash2 == 2398 {
-		return 2
-	}
-	if hash1 == 161028053 && hash2 == 2518 {
-		return 3
-	}
-	if hash1 == 1649965359 && hash2 == 3144 {
-		return 4
-	}
-	if hash1 == 741790831 && hash2 == 3264 {
-		return 5
-	}
-	if hash1 == 839119663 && hash2 == 3380 {
-		return 6
-	}
-	if hash1 == 759764515 && hash2 == 3268 {
-		return 7
-	}
-	if hash1 == 1080911033 && hash2 == 4012 {
-		return 8
-	}
-	if hash1 == 484698219 && hash2 == 4460 {
-		return 8
-	}
-	if hash1 == 814549062 && hash2 == 4045 {
-		return 8
-	}
-	if hash1 == 1090017185 && hash2 == 3738 {
-		return 8
-	}
-	if hash1 == 1430801866 && hash2 == 2701 {
-		return 12
-	}
-	if hash1 == 1527189203 && hash2 == 3220 {
-		return 13
-	}
-	if hash1 == 1567033700 && hash2 == 3745 {
-		return 13
-	}
-	if hash1 == 434696738 && hash2 == 3727 {
-		return 13
-	}
-	if hash1 == 1767715841 && hash2 == 3850 {
-		return 13
-	}
-	if hash1 == 1538485303 && hash2 == 3192 {
-		return 13
-	}
-	if hash1 == 1532091655 && hash2 == 3212 {
-		return 13
+	key := (hash1 ^ hash2*65537) & 2147483647
+	for i := 0; i < len(renvoRuntimeIntrinsicTable); i += 5 {
+		entryHash := int(renvoRuntimeIntrinsicTable[i]) | int(renvoRuntimeIntrinsicTable[i+1])<<8 | int(renvoRuntimeIntrinsicTable[i+2])<<16 | int(renvoRuntimeIntrinsicTable[i+3])<<24
+		if key == entryHash {
+			return int(renvoRuntimeIntrinsicTable[i+4])
+		}
 	}
 	return 0
 }
@@ -12640,6 +12607,14 @@ func renvoRuntimeNonNilLocalNeeded(g *renvoLinearGen, localIndex int) bool {
 
 func renvoEmitRuntimeUnsafeIndex(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, size int) bool {
 	renvoNonNil(g, ep, e)
+	if e.argCount == 1 {
+		if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+			return false
+		}
+		renvoAsmCopyPrimaryToSecondary(&g.asm)
+		renvoAsmLoadPrimaryMemSecondaryDispSize(&g.asm, 0, size)
+		return true
+	}
 	if e.argCount != 2 || !renvoEmitSlicePtrLen(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
 		return false
 	}
@@ -12655,7 +12630,7 @@ func renvoEmitRuntimeUnsafeIndex(g *renvoLinearGen, ep *renvoExprParse, e *renvo
 	return true
 }
 
-func renvoEmitRuntimeTruncateSlice(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr) bool {
+func renvoEmitRuntimeTruncateSlice(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, size int) bool {
 	renvoNonNil(g)
 	renvoNonNil(ep)
 	renvoNonNil(e)
@@ -12667,7 +12642,12 @@ func renvoEmitRuntimeTruncateSlice(g *renvoLinearGen, ep *renvoExprParse, e *ren
 		return false
 	}
 	renvoAsmPopSecondary(&g.asm)
-	renvoAsmStorePrimaryMemSecondaryDisp(&g.asm, renvoBackendValueSlotSize)
+	displacement := 0
+	if size < 0 {
+		displacement = renvoBackendValueSlotSize
+		size = g.c.renvoNativeIntSize
+	}
+	renvoAsmStorePrimaryMemSecondaryDispSize(&g.asm, displacement, size)
 	return true
 }
 
@@ -17454,7 +17434,7 @@ func renvoEmitWideIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 			return renvoEmitRuntimeUnsafeIndex(g, ep, e, g.c.renvoNativeIntSize)
 		}
 		if renvoExprIsIdentText(p, ep, e.left, "renvoTruncBytes") || renvoExprIsIdentText(p, ep, e.left, "renvoTruncParams") || renvoExprIsIdentText(p, ep, e.left, "renvoTruncTypes") || renvoExprIsIdentText(p, ep, e.left, "renvoTruncFields") {
-			return renvoEmitRuntimeTruncateSlice(g, ep, e)
+			return renvoEmitRuntimeTruncateSlice(g, ep, e, -1)
 		}
 		callee := renvoExprIdentCode(p, ep, e.left)
 		if callee == renvoIdentSyscall || renvoExprIsIdentText(p, ep, e.left, "renvo_runtime_Syscall") {
@@ -20195,7 +20175,7 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 			return renvoEmitRuntimeUnsafeIndex(g, ep, e, g.c.renvoNativeIntSize)
 		}
 		if renvoExprIsIdentText(p, ep, e.left, "renvoTruncBytes") || renvoExprIsIdentText(p, ep, e.left, "renvoTruncParams") || renvoExprIsIdentText(p, ep, e.left, "renvoTruncTypes") || renvoExprIsIdentText(p, ep, e.left, "renvoTruncFields") {
-			return renvoEmitRuntimeTruncateSlice(g, ep, e)
+			return renvoEmitRuntimeTruncateSlice(g, ep, e, -1)
 		}
 		callee := renvoExprIdentCode(p, ep, e.left)
 		if callee == renvoIdentSyscall || renvoExprIsIdentText(p, ep, e.left, "renvo_runtime_Syscall") {
