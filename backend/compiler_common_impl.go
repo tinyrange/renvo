@@ -1632,7 +1632,11 @@ func renvoTokSingleChar(p *renvoProgram, i int) byte {
 		return 0
 	}
 	base := i * renvoTokenStride
-	return byte(int(renvo_runtime_UnsafeInt32At(p.toks.data, base)) >> 24)
+	first := int(renvo_runtime_UnsafeInt32At(p.toks.data, base))
+	if first&255 != renvoTokOp {
+		return 0
+	}
+	return byte(first >> 24)
 }
 
 func renvoTokCharIs(p *renvoProgram, i int, c byte) bool {
@@ -1641,7 +1645,8 @@ func renvoTokCharIs(p *renvoProgram, i int, c byte) bool {
 		return false
 	}
 	base := i * renvoTokenStride
-	return byte(int(renvo_runtime_UnsafeInt32At(p.toks.data, base))>>24) == c
+	first := int(renvo_runtime_UnsafeInt32At(p.toks.data, base))
+	return first&255 == renvoTokOp && byte(first>>24) == c
 }
 
 func renvoTok2Is(p *renvoProgram, i int, a byte, b byte) bool {
@@ -5230,6 +5235,9 @@ func renvoTypeUsesNativeABI(m *renvoMeta, typ int) bool {
 	}
 	t := renvoResolveType(m, typ)
 	renvoNonNil(t)
+	if t.nativeAlign > 0 {
+		return true
+	}
 	return t.kind == renvoTypePointer && t.elem >= 0 && t.elem < len(m.types) && m.types[t.elem].nativeAlign > 0
 }
 
@@ -5548,6 +5556,11 @@ func renvoEmitDeferredReturn(g *renvoLinearGen, stmt *renvoStmt) bool {
 					if !renvoEmitStructReturnExpr(g, ep, root) {
 						return false
 					}
+				} else if renvoTypeIsSlice(g.meta, fn.resultType) {
+					if g.deferResultOffset <= 0 || !renvoEmitSliceReturnValueRegs(g, ep, root, fn.resultType) {
+						return false
+					}
+					renvoAsmStoreSliceStack(&g.asm, g.deferResultOffset)
 				} else if g.deferResultOffset <= 0 || !renvoEmitExprToLocal(g, ep, root, g.deferResultOffset) {
 					return false
 				}
@@ -5648,9 +5661,6 @@ func renvoEmitFunctionControlEpilogue(g *renvoLinearGen) bool {
 	} else if renvoTypeIsSlice(g.meta, fn.resultType) {
 		renvoAsmLoadPrimarySecondaryStack(a, g.deferResultOffset, g.deferResultOffset-renvoBackendValueSlotSize)
 		renvoAsmLoadTertiaryStack(a, g.deferResultOffset-2*renvoBackendValueSlotSize)
-		if !renvoEmitCopySliceRegsToArena(g, fn.resultType) {
-			return false
-		}
 	} else if renvoTypeIsString(g.meta, fn.resultType) {
 		renvoAsmLoadPrimarySecondaryStack(a, g.deferResultOffset, g.deferResultOffset-renvoBackendValueSlotSize)
 	} else if renvoResolveType(g.meta, fn.resultType).kind == renvoTypeComplex {
@@ -13542,7 +13552,7 @@ func renvoEmitAppendLocalToLocation(g *renvoLinearGen, locEp *renvoExprParse, lo
 			return true
 		}
 		renvoAsmPushStack(a, offset)
-		if elem.kind == renvoTypePointer || g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArchAarch64 || elemSize == 1 || elemSize == 2 || elemSize == 4 {
+		if renvoPreparedBackend != 0 || elem.kind == renvoTypePointer || g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArchAarch64 || elemSize == 1 || elemSize == 2 || elemSize == 4 {
 			if !renvoEmitAppendDestPrimary(g, locEp, loc, elemSize) {
 				return false
 			}
@@ -13898,7 +13908,7 @@ func renvoEmitAppendScalarToLocation(g *renvoLinearGen, ep *renvoExprParse, locE
 		return false
 	}
 	renvoAsmPushPrimary(a)
-	if elemKind == renvoTypePointer || g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArchAarch64 || elemSize == 1 || elemSize == 2 || elemSize == 4 {
+	if renvoPreparedBackend != 0 || elemKind == renvoTypePointer || g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArchAarch64 || elemSize == 1 || elemSize == 2 || elemSize == 4 {
 		if !renvoEmitAppendDestPrimary(g, locEp, loc, elemSize) {
 			return false
 		}
@@ -14278,6 +14288,31 @@ func renvoEmitStringCompare(g *renvoLinearGen, ep *renvoExprParse, left int, rig
 	renvoNonNil(g, ep)
 	a := &g.asm
 	label := renvoEnsureStringEqualHelper(g)
+	if renvoPreparedBackend != 0 {
+		// A prepared target may use ABI argument registers which overlap the
+		// primary/secondary value pair. Preserve both descriptors in the frame
+		// before populating the four call words so no move can destroy a later
+		// argument (AArch64 uses x0/x1 for both roles).
+		leftOff := renvoAddUnnamedLocal(g, renvoTypeString)
+		rightOff := renvoAddUnnamedLocal(g, renvoTypeString)
+		if !renvoEmitStringValueRegs(g, ep, left) {
+			return false
+		}
+		renvoAsmStorePrimarySecondaryStack(a, leftOff, leftOff-8)
+		if !renvoEmitStringValueRegs(g, ep, right) {
+			return false
+		}
+		renvoAsmStorePrimarySecondaryStack(a, rightOff, rightOff-8)
+		renvoRTGAsmLoadFrame(a, renvoRTGCallWord0, leftOff)
+		renvoRTGAsmLoadFrame(a, renvoRTGCallWord1, leftOff-8)
+		renvoRTGAsmLoadFrame(a, renvoRTGCallWord2, rightOff)
+		renvoRTGAsmLoadFrame(a, renvoRTGCallWord3, rightOff-8)
+		renvoAsmCallLabel(a, label)
+		if notEqual {
+			renvoAsmBoolNotPrimary(a)
+		}
+		return true
+	}
 	rightExpr := &ep.exprs[right]
 	if rightExpr.kind == renvoExprSelector {
 		rightOff := renvoAddUnnamedLocal(g, renvoTypeString)
@@ -16621,7 +16656,19 @@ func renvoAsmShrPrimaryImm(a *renvoAsm, imm int) {
 func renvoAsmDivLeftTertiaryRightPrimary(a *renvoAsm, mod bool) {
 	renvoNonNil(a)
 	if renvoPreparedBackend != 0 {
-		renvoRTGDirectSignedDivide(a, mod)
+		if mod {
+			// Keep the divisor while producing the quotient, then construct the
+			// remainder as dividend - quotient*divisor.  This keeps prepared
+			// targets on the common RTG register contract and does not depend on
+			// a target-specific fused multiply/subtract operand order.
+			renvoRTGDirectMove(a, renvoRTGScratch, renvoRTGPrimary)
+			renvoRTGDirectSignedDivide(a, false)
+			renvoRTGDirectMultiply(a, renvoRTGPrimary, renvoRTGScratch)
+			renvoRTGDirectSubtract(a, renvoRTGTertiary, renvoRTGPrimary)
+			renvoRTGDirectMove(a, renvoRTGPrimary, renvoRTGTertiary)
+		} else {
+			renvoRTGDirectSignedDivide(a, false)
+		}
 		return
 	}
 	if a.c.renvoTargetArch == renvoArchWasm32 {

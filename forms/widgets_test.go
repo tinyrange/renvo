@@ -31,6 +31,23 @@ func TestButtonPropertiesPaintAndDispatchClick(t *testing.T) {
 	}
 }
 
+func TestPointerCancelDoesNotClickOrLeaveButtonPressed(t *testing.T) {
+	var form Form
+	form.Initialize(180, 80)
+	button := NewButton()
+	button.SetBounds(graphics.R(10, 10, 120, 36))
+	clicks := 0
+	button.Click = func() { clicks++ }
+	form.Add(&button.Control)
+
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerDown, X: 20, Y: 20})
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerCancel, X: 20, Y: 20})
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerUp, X: 20, Y: 20})
+	if clicks != 0 || button.pressed || form.pressed != nil {
+		t.Fatalf("canceled button state: clicks=%d button.pressed=%v form.pressed=%v", clicks, button.pressed, form.pressed != nil)
+	}
+}
+
 func TestChoiceAndButtonKeyboardActivation(t *testing.T) {
 	var form Form
 	form.Initialize(320, 180)
@@ -101,6 +118,33 @@ func TestTextControlsEditThroughPortableInputEvents(t *testing.T) {
 	form.Dispatch(graphics.Event{Type: graphics.EventTextInput, Text: "two"})
 	if area.Text() != "one\ntwo" {
 		t.Fatalf("text area value = %q", area.Text())
+	}
+}
+
+func TestTextEditBufferIsBoundedAndReused(t *testing.T) {
+	control := NewControl()
+	control.SetText("é")
+	control.BeginTextEdit(16)
+	buffer := &control.editBuffer[0]
+	for cycle := 0; cycle < 1000; cycle++ {
+		if !control.AppendText("x") {
+			t.Fatalf("append failed in cycle %d", cycle)
+		}
+		if !control.BackspaceText() {
+			t.Fatalf("backspace failed in cycle %d", cycle)
+		}
+	}
+	if &control.editBuffer[0] != buffer {
+		t.Fatal("editing replaced its fixed-capacity buffer")
+	}
+	for control.AppendText("x") {
+	}
+	if control.editLength != 16 {
+		t.Fatalf("bounded edit length = %d, want 16", control.editLength)
+	}
+	control.EndTextEdit(true)
+	if len(control.Text()) != 16 {
+		t.Fatalf("committed edit length = %d, want 16", len(control.Text()))
 	}
 }
 

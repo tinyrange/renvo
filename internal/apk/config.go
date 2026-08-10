@@ -12,6 +12,7 @@ type Config struct {
 	VersionName string
 	MinSDK      int
 	TargetSDK   int
+	Orientation string
 }
 
 func DefaultConfig() Config {
@@ -70,6 +71,8 @@ func ParseConfig(source []byte) (Config, error) {
 					return Config{}, errors.New("target_sdk must be a positive integer")
 				}
 				config.TargetSDK = parsed
+			case "orientation":
+				config.Orientation = value
 			default:
 				return Config{}, errors.New("unknown config key")
 			}
@@ -103,6 +106,9 @@ func validateConfig(config Config) error {
 	}
 	if config.TargetSDK < config.MinSDK || config.TargetSDK > 10000 {
 		return errors.New("target_sdk must be between min_sdk and 10000")
+	}
+	if config.Orientation != "" && config.Orientation != "portrait" && config.Orientation != "landscape" {
+		return errors.New("orientation must be portrait or landscape")
 	}
 	return nil
 }

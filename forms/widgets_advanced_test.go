@@ -133,6 +133,51 @@ func TestAdvancedControlsExposePropertiesInteractionAndSemantics(t *testing.T) {
 	}
 }
 
+func TestListBoxScrollsWithWheelAndTouchDrag(t *testing.T) {
+	var form Form
+	form.Initialize(240, 180)
+	list := NewListBox()
+	list.SetBounds(graphics.R(10, 10, 180, 74))
+	for _, item := range []string{"One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight"} {
+		list.AddItem(item)
+	}
+	form.Add(&list.Control)
+
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerWheel, X: 30, Y: 30, WheelY: 1})
+	if list.scrollIndex != 1 {
+		t.Fatalf("wheel scroll index = %d, want 1", list.scrollIndex)
+	}
+
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerDown, X: 60, Y: 74, Button: 1})
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerMove, X: 60, Y: 22, Button: 1})
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerUp, X: 60, Y: 22, Button: 1})
+	if list.scrollOffset != 76 {
+		t.Fatalf("touch-drag scroll offset = %d, want 76", list.scrollOffset)
+	}
+	if list.SelectedIndex() != -1 {
+		t.Fatalf("touch drag selected item %d", list.SelectedIndex())
+	}
+
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerDown, X: 60, Y: 22, Button: 1})
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerUp, X: 60, Y: 22, Button: 1})
+	if list.SelectedIndex() != 3 {
+		t.Fatalf("tap after drag selected %d, want 3", list.SelectedIndex())
+	}
+}
+
+func TestListBoxDragPreservesSubRowScrollPosition(t *testing.T) {
+	list := NewListBox()
+	list.SetBounds(graphics.R(0, 0, 160, 74))
+	for i := 0; i < 8; i++ {
+		list.AddItem("item")
+	}
+	list.pointerDown(20, 60)
+	list.pointerMove(20, 49)
+	if list.scrollOffset != 11 || list.scrollIndex != 0 {
+		t.Fatalf("smooth scroll position = %d, row = %d", list.scrollOffset, list.scrollIndex)
+	}
+}
+
 func TestAdvancedControlsApplyCompleteThemeAndColumnLayout(t *testing.T) {
 	var form Form
 	form.Initialize(480, 240)

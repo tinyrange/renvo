@@ -157,6 +157,26 @@ func nextUTF8(text string, at int) (int, int) {
 	return 0xfffd, 1
 }
 
+func nextUTF8Bytes(text []byte, at int) (int, int) {
+	if at >= len(text) {
+		return 0, 0
+	}
+	b0 := text[at]
+	if b0 < 0x80 {
+		return int(b0), 1
+	}
+	if b0&0xe0 == 0xc0 && at+1 < len(text) {
+		return int(b0&0x1f)<<6 | int(text[at+1]&0x3f), 2
+	}
+	if b0&0xf0 == 0xe0 && at+2 < len(text) {
+		return int(b0&0x0f)<<12 | int(text[at+1]&0x3f)<<6 | int(text[at+2]&0x3f), 3
+	}
+	if b0&0xf8 == 0xf0 && at+3 < len(text) {
+		return int(b0&7)<<18 | int(text[at+1]&0x3f)<<12 | int(text[at+2]&0x3f)<<6 | int(text[at+3]&0x3f), 4
+	}
+	return 0xfffd, 1
+}
+
 func MeasureText(font *Font, text string) TextMetrics {
 	if font == nil {
 		return TextMetrics{}
@@ -166,6 +186,49 @@ func MeasureText(font *Font, text string) TextMetrics {
 	previous := -1
 	for at := 0; at < len(text); {
 		r, size := nextUTF8(text, at)
+		at += size
+		if r == 10 {
+			if x > width {
+				width = x
+			}
+			x = 0
+			height += lineHeight
+			previous = -1
+		} else if r == 9 {
+			if font.trueType != nil {
+				space := font.cachedGlyph(' ')
+				x += space.advance * 4
+			} else {
+				x += Scalar(6*font.Scale) * 4
+			}
+			previous = -1
+		} else {
+			if font.trueType != nil {
+				glyph := font.cachedGlyph(r)
+				x += font.kern(previous, glyph.index) + glyph.advance
+				previous = glyph.index
+			} else {
+				x += Scalar(6 * font.Scale)
+			}
+		}
+	}
+	if x > width {
+		width = x
+	}
+	return TextMetrics{Width: width, Height: height}
+}
+
+// MeasureTextBytes is the allocation-free byte-slice counterpart to
+// MeasureText. It is useful for rendering mutable fixed-capacity text buffers.
+func MeasureTextBytes(font *Font, text []byte) TextMetrics {
+	if font == nil {
+		return TextMetrics{}
+	}
+	lineHeight := font.Metrics.Ascent + font.Metrics.Descent + font.Metrics.LineGap
+	x, width, height := Scalar(0), Scalar(0), lineHeight
+	previous := -1
+	for at := 0; at < len(text); {
+		r, size := nextUTF8Bytes(text, at)
 		at += size
 		if r == 10 {
 			if x > width {
@@ -433,6 +496,58 @@ func (s *Surface) DrawText(font *Font, baseline Point, text string, color Color)
 				// Glyph bitmaps are rasterized without a subpixel shift, so place
 				// them on the corresponding nearest pixel and composite the A8 mask
 				// directly. A 1:1 glyph upload does not require affine resampling.
+				origin := s.transformPoint(Point{X: x, Y: y})
+				drawX := scalarFloor(origin.X + glyph.xOffset + 0.5)
+				drawY := scalarFloor(origin.Y + glyph.yOffset + 0.5)
+				s.drawGlyphMask(glyph.mask, drawX, drawY, color)
+			}
+			x += glyph.advance
+			previous = glyph.index
+		} else {
+			s.drawBuiltinGlyph(font, Point{X: x, Y: y - font.Metrics.Ascent}, r, color)
+			x += Scalar(6 * font.Scale)
+		}
+	}
+}
+
+// DrawTextBytes draws UTF-8 from a byte slice without converting it to an
+// immutable string.
+func (s *Surface) DrawTextBytes(font *Font, baseline Point, text []byte, color Color) {
+	if font == nil {
+		return
+	}
+	lineHeight := font.Metrics.Ascent + font.Metrics.Descent + font.Metrics.LineGap
+	originX := baseline.X
+	x, y := baseline.X, baseline.Y
+	previous := -1
+	rasterScale := 1
+	textScale := s.transformA * s.deviceScale
+	if s.transformB == 0.0 && s.transformC == 0.0 && s.transformA == s.transformD && textScale >= 1.0 && textScale <= 4.0 && Scalar(int(textScale)) == textScale {
+		rasterScale = int(textScale)
+	}
+	for at := 0; at < len(text); {
+		r, size := nextUTF8Bytes(text, at)
+		at += size
+		if r == 10 {
+			x = originX
+			y += lineHeight
+			previous = -1
+			continue
+		}
+		if r == 9 {
+			if font.trueType != nil {
+				space := font.cachedGlyph(' ')
+				x += space.advance * 4
+			} else {
+				x += Scalar(6*font.Scale) * 4
+			}
+			previous = -1
+			continue
+		}
+		if font.trueType != nil {
+			glyph := font.cachedGlyphAtScale(r, rasterScale)
+			x += font.kern(previous, glyph.index)
+			if glyph.mask != nil {
 				origin := s.transformPoint(Point{X: x, Y: y})
 				drawX := scalarFloor(origin.X + glyph.xOffset + 0.5)
 				drawY := scalarFloor(origin.Y + glyph.yOffset + 0.5)

@@ -39,6 +39,46 @@ func TestLinuxLayoutNormalizesLoadSegments(t *testing.T) {
 	}
 }
 
+func TestDarwinLayoutNormalizesMachSegmentPermissions(t *testing.T) {
+	const (
+		segmentSize = 72
+		mainSize    = 24
+		commands    = 3*segmentSize + mainSize
+		fileStart   = 32 + commands
+	)
+	native := make([]byte, fileStart+3)
+	copy(native, "\xcf\xfa\xed\xfe")
+	binary.LittleEndian.PutUint32(native[16:20], 4)
+	binary.LittleEndian.PutUint32(native[20:24], commands)
+	protections := []uint32{5, 3, 1} // Mach: RX, RW, R.
+	for i, protection := range protections {
+		at := 32 + i*segmentSize
+		binary.LittleEndian.PutUint32(native[at:at+4], 0x19)
+		binary.LittleEndian.PutUint32(native[at+4:at+8], segmentSize)
+		binary.LittleEndian.PutUint64(native[at+24:at+32], uint64(0x100000000+i*0x4000))
+		binary.LittleEndian.PutUint64(native[at+32:at+40], 0x4000)
+		binary.LittleEndian.PutUint64(native[at+40:at+48], uint64(fileStart+i))
+		binary.LittleEndian.PutUint64(native[at+48:at+56], 1)
+		binary.LittleEndian.PutUint32(native[at+60:at+64], protection)
+	}
+	main := 32 + 3*segmentSize
+	binary.LittleEndian.PutUint32(native[main:main+4], 0x80000028)
+	binary.LittleEndian.PutUint32(native[main+4:main+8], mainSize)
+	binary.LittleEndian.PutUint64(native[main+8:main+16], fileStart)
+
+	entry, memorySize, segments, _, _, ok := DarwinLayout(native)
+	if !ok || entry != 0 || memorySize != 0xc000 || len(segments) != 3 {
+		t.Fatalf("DarwinLayout = entry %#x, size %#x, segments %#v, ok %v",
+			entry, memorySize, segments, ok)
+	}
+	want := []int{5, 6, 4} // Native/ELF convention: RX, RW, R.
+	for i := range want {
+		if segments[i].Permissions != want[i] {
+			t.Fatalf("segment %d permissions = %d, want %d", i, segments[i].Permissions, want[i])
+		}
+	}
+}
+
 func TestPersistentSymbolsDecodeLinkTrailer(t *testing.T) {
 	native := testELFImage()
 	native = append(native,

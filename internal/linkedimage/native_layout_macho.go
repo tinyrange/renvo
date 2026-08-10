@@ -54,7 +54,7 @@ func DarwinLayout(native []byte) (entry int, memorySize int, segments []NativeSe
 			allSegments = append(allSegments, imageMachSegment{
 				address: address, memorySize: segmentMemory,
 				fileOffset: fileOffset, fileSize: fileSize,
-				permissions: imageRead32(native, at+60),
+				permissions: imageMachNativePermissions(imageRead32(native, at+60)),
 			})
 			if address != 0 || fileSize != 0 {
 				if base < 0 || address < base {
@@ -138,6 +138,22 @@ func DarwinLayout(native []byte) (entry int, memorySize int, segments []NativeSe
 		}
 	}
 	return entryAddress, memorySize, segments, imports, libraries, true
+}
+
+// Mach VM protections encode read=1, write=2, execute=4, while NativeSegment
+// deliberately follows the ELF convention read=4, write=2, execute=1.
+func imageMachNativePermissions(protection int) int {
+	permissions := 0
+	if protection&1 != 0 {
+		permissions |= 4
+	}
+	if protection&2 != 0 {
+		permissions |= 2
+	}
+	if protection&4 != 0 {
+		permissions |= 1
+	}
+	return permissions
 }
 
 func imageDarwinImports(bind []byte, segments []imageMachSegment, base int, libraries []string) ([]NativeImport, bool) {

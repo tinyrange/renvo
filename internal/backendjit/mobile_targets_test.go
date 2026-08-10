@@ -175,12 +175,31 @@ func TestCompilerJITAndroidARM64FormsImage(t *testing.T) {
 		"android/arm64", "librenvo.so",
 		filepath.Join("examples", "android", "forms_hello"))
 
-	for _, name := range []string{
+	expectedImports := []string{
+		"AInputEvent_getType",
+		"AKeyEvent_getAction",
+		"AKeyEvent_getKeyCode",
+		"AKeyEvent_getMetaState",
+		"AKeyEvent_getRepeatCount",
+		"AInputQueue_attachLooper",
+		"AInputQueue_detachLooper",
+		"AInputQueue_finishEvent",
+		"AInputQueue_getEvent",
+		"AInputQueue_preDispatchEvent",
+		"ALooper_forThread",
+		"AMotionEvent_getAction",
+		"AMotionEvent_getPointerCount",
+		"AMotionEvent_getPointerId",
+		"AMotionEvent_getX",
+		"AMotionEvent_getY",
+		"ANativeWindow_getHeight",
+		"ANativeWindow_getWidth",
 		"ANativeWindow_setBuffersGeometry",
 		"ANativeWindow_lock",
 		"ANativeWindow_unlockAndPost",
 		"memcpy",
-	} {
+	}
+	for _, name := range expectedImports {
 		if !bytes.Contains(image, append([]byte(name), 0)) {
 			t.Errorf("Android Forms image omits dynamic import %q", name)
 		}
@@ -188,14 +207,19 @@ func TestCompilerJITAndroidARM64FormsImage(t *testing.T) {
 	if bytes.Contains(image, []byte("__android_log_write")) {
 		t.Fatal("Android Forms image contains a temporary device logging probe")
 	}
-	// NativeActivityCallbacks.onNativeWindowCreated and
-	// onNativeWindowDestroyed are slots 7 and 10 in the public callback table.
+	if !bytes.Contains(image[0x4000:], []byte{
+		0x00, 0x00, 0x38, 0x9e, // fcvtzs x0, s0
+	}) {
+		t.Fatal("Android Forms image does not bridge C float motion coordinates to integer pixels")
+	}
+	// Callback-table layout belongs to the Go client. The target materializes
+	// function pointers but must not encode NativeActivity callback slots.
 	for _, store := range [][]byte{
 		{0x2a, 0x81, 0x03, 0xf8}, // stur x10, [x9, #56]
 		{0x2a, 0x01, 0x05, 0xf8}, // stur x10, [x9, #80]
 	} {
-		if !bytes.Contains(image[0x4000:], store) {
-			t.Fatalf("Android Forms image omits callback store % x", store)
+		if bytes.Contains(image[0x4000:], store) {
+			t.Fatalf("Android target still owns callback-table store % x", store)
 		}
 	}
 
@@ -221,7 +245,7 @@ func TestCompilerJITAndroidARM64FormsImage(t *testing.T) {
 			break
 		}
 	}
-	if dynamic[7] == 0 || dynamic[8] != 4*24 || dynamic[9] != 24 {
+	if dynamic[7] == 0 || dynamic[8] != uint64(len(expectedImports)*24) || dynamic[9] != 24 {
 		t.Fatalf("Android Forms RELA contract is invalid: %#v", dynamic)
 	}
 	for at := int(dynamic[7]); at < int(dynamic[7]+dynamic[8]); at += 24 {

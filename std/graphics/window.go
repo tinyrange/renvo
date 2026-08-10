@@ -26,6 +26,7 @@ const (
 	EventTextInput
 	EventTimer
 	EventAccessibilityAction
+	EventPointerCancel
 )
 
 type Modifiers int
@@ -164,6 +165,8 @@ type Window struct {
 	height         int
 	surface        *Surface
 	events         []Event
+	eventHead      int
+	EventHandler   func()
 	closed         bool
 	active         bool
 	shown          bool
@@ -194,11 +197,16 @@ func (w *Window) Surface() *Surface { return w.surface }
 func (w *Window) Size() (int, int)  { return w.width, w.height }
 
 func (w *Window) nextQueuedEvent() (Event, bool) {
-	if len(w.events) == 0 {
+	if w.eventHead >= len(w.events) {
 		return Event{}, false
 	}
-	e := w.events[0]
-	w.events = w.events[1:]
+	e := w.events[w.eventHead]
+	w.events[w.eventHead] = Event{}
+	w.eventHead++
+	if w.eventHead == len(w.events) {
+		w.events = w.events[:0]
+		w.eventHead = 0
+	}
 	return e, true
 }
 

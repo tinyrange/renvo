@@ -27,24 +27,7 @@ func (s *Surface) ellipseBounds(rect Rect) (Scalar, Scalar, Scalar, Scalar) {
 	s.transformPointInPlace(&b)
 	s.transformPointInPlace(&c)
 	s.transformPointInPlace(&d)
-	minX, maxX, minY, maxY := a.X, a.X, a.Y, a.Y
-	points := []Point{b, c, d}
-	for i := 0; i < len(points); i++ {
-		p := points[i]
-		if p.X < minX {
-			minX = p.X
-		}
-		if p.X > maxX {
-			maxX = p.X
-		}
-		if p.Y < minY {
-			minY = p.Y
-		}
-		if p.Y > maxY {
-			maxY = p.Y
-		}
-	}
-	return minX, maxX, minY, maxY
+	return pointBounds4(a, b, c, d)
 }
 
 func (s *Surface) inversePoint(x, y Scalar) (Point, bool) {

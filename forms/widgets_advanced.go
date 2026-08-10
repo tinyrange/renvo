@@ -1,5 +1,3 @@
-//go:build !android || !renvo
-
 package forms
 
 import "renvo.dev/std/graphics"
@@ -425,6 +423,11 @@ type ListBox struct {
 	selectedIndex int
 	hoveredIndex  int
 	scrollIndex   int
+	scrollOffset  int
+	dragStartY    graphics.Scalar
+	dragStart     int
+	dragging      bool
+	dragMoved     bool
 	Changed       EventHandler
 }
 
@@ -437,8 +440,11 @@ func NewListBox() *ListBox {
 	b.AccessibilityChildren = b.accessibilityChildren
 	b.AccessibilityPerform = b.accessibilityPerform
 	b.Paint = b.paint
+	b.PointerDown = b.pointerDown
 	b.PointerUp = b.pointerUp
+	b.PointerCancel = b.pointerCancel
 	b.PointerMove = b.pointerMove
+	b.PointerWheel = b.pointerWheel
 	b.PointerLeave = b.pointerLeave
 	b.KeyDown = b.keyDown
 	b.TextInput = b.textInput
@@ -460,15 +466,15 @@ func (b *ListBox) SetSelectedIndex(index int) {
 		return
 	}
 	old := b.selectedIndex
-	oldScroll := b.scrollIndex
+	oldOffset := b.scrollOffset
 	b.selectedIndex = index
 	b.ensureSelectionVisible()
 	b.AccessibilityChanged()
 	b.AccessibilityChildrenStateChanged()
-	if oldScroll != b.scrollIndex {
+	if oldOffset != b.scrollOffset {
 		b.Invalidate()
 	} else {
-		widgetInvalidateSelection(&b.Control, old-b.scrollIndex, index-b.scrollIndex, 0, b.visibleRows())
+		b.invalidateSelection(old, index)
 	}
 	if b.Changed != nil {
 		b.Changed()
@@ -492,26 +498,70 @@ func (b *ListBox) accessibilityPerform(id string, action AccessibilityAction, va
 	return true
 }
 func (b *ListBox) pointerUp(x, y graphics.Scalar) {
-	index := b.scrollIndex + int(y-2)/widgetRowHeight
+	if b.dragging {
+		moved := b.dragMoved
+		b.dragging = false
+		b.dragMoved = false
+		if moved {
+			return
+		}
+	}
+	index := (b.scrollOffset + int(y) - 2) / widgetRowHeight
 	if index >= 0 && index < len(b.items) {
 		b.SetSelectedIndex(index)
 	}
 }
+func (b *ListBox) pointerDown(x, y graphics.Scalar) {
+	b.dragStartY = y
+	b.dragStart = b.scrollOffset
+	b.dragging = true
+	b.dragMoved = false
+}
+func (b *ListBox) pointerCancel() {
+	b.dragging = false
+	b.dragMoved = false
+}
 func (b *ListBox) pointerMove(x, y graphics.Scalar) {
-	index := b.scrollIndex + int(y-2)/widgetRowHeight
+	if b.dragging {
+		delta := b.dragStartY - y
+		if delta < -6 || delta > 6 {
+			b.dragMoved = true
+		}
+		b.setScrollOffset(b.dragStart + int(delta))
+		return
+	}
+	index := (b.scrollOffset + int(y) - 2) / widgetRowHeight
 	if index < 0 || index >= len(b.items) {
 		index = -1
 	}
 	if b.hoveredIndex != index {
 		old := b.hoveredIndex
 		b.hoveredIndex = index
-		widgetInvalidateSelection(&b.Control, old-b.scrollIndex, index-b.scrollIndex, 0, b.visibleRows())
+		b.invalidateSelection(old, index)
+	}
+}
+func (b *ListBox) pointerWheel(x, y graphics.Scalar) {
+	if y > 0 {
+		b.setScrollOffset(b.scrollOffset + widgetRowHeight)
+	} else if y < 0 {
+		b.setScrollOffset(b.scrollOffset - widgetRowHeight)
 	}
 }
 func (b *ListBox) pointerLeave() {
 	old := b.hoveredIndex
 	b.hoveredIndex = -1
-	widgetInvalidateSelection(&b.Control, old-b.scrollIndex, -1, 0, b.visibleRows())
+	b.invalidateSelection(old, -1)
+}
+
+func (b *ListBox) invalidateSelection(oldIndex, newIndex int) {
+	// Row-local invalidation is only exact when the viewport is row-aligned.
+	// During a touch drag, rows can be partially visible at both edges.
+	if b.scrollOffset%widgetRowHeight != 0 {
+		b.Invalidate()
+		return
+	}
+	widgetInvalidateSelection(&b.Control, oldIndex-b.scrollIndex,
+		newIndex-b.scrollIndex, 0, b.visibleRows())
 }
 func (b *ListBox) keyDown(event graphics.Event) {
 	next := b.selectedIndex
@@ -555,18 +605,46 @@ func (b *ListBox) visibleRows() int {
 }
 
 func (b *ListBox) ensureSelectionVisible() {
-	rows := b.visibleRows()
-	if b.selectedIndex >= 0 && b.selectedIndex < b.scrollIndex {
-		b.scrollIndex = b.selectedIndex
-	} else if b.selectedIndex >= b.scrollIndex+rows {
-		b.scrollIndex = b.selectedIndex - rows + 1
+	if b.selectedIndex < 0 {
+		return
 	}
-	maximum := len(b.items) - rows
+	top := b.selectedIndex * widgetRowHeight
+	bottom := top + widgetRowHeight
+	viewport := b.listViewportHeight()
+	if top < b.scrollOffset {
+		b.setScrollOffset(top)
+	} else if bottom > b.scrollOffset+viewport {
+		b.setScrollOffset(bottom - viewport)
+	}
+}
+
+func (b *ListBox) setScrollIndex(index int) {
+	b.setScrollOffset(index * widgetRowHeight)
+}
+
+func (b *ListBox) listViewportHeight() int {
+	height := int(b.Bounds().Height()) - 2
+	if height < 1 {
+		height = 1
+	}
+	return height
+}
+
+func (b *ListBox) setScrollOffset(offset int) {
+	maximum := len(b.items)*widgetRowHeight - b.listViewportHeight()
 	if maximum < 0 {
 		maximum = 0
 	}
-	if b.scrollIndex > maximum {
-		b.scrollIndex = maximum
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > maximum {
+		offset = maximum
+	}
+	if b.scrollOffset != offset {
+		b.scrollOffset = offset
+		b.scrollIndex = offset / widgetRowHeight
+		b.Invalidate()
 	}
 }
 
@@ -577,17 +655,20 @@ func (b *ListBox) paint(surface *graphics.Surface) {
 	surface.FillRect(bounds, b.Background())
 	surface.StrokeRect(bounds, 1, theme.Border)
 	surface.PushClipRect(graphics.R(bounds.MinX+1, bounds.MinY+1, bounds.Width()-2, bounds.Height()-2))
+	first := b.scrollOffset / widgetRowHeight
+	pixelOffset := b.scrollOffset % widgetRowHeight
 	if b.selectedIndex >= 0 && b.selectedIndex < len(items) {
-		y := bounds.MinY + graphics.Scalar((b.selectedIndex-b.scrollIndex)*widgetRowHeight)
+		y := bounds.MinY + graphics.Scalar(b.selectedIndex*widgetRowHeight-b.scrollOffset)
 		surface.FillRect(graphics.R(bounds.MinX+1, y, bounds.Width()-2, widgetRowHeight), theme.Selection)
 	}
 	if b.hoveredIndex >= 0 && b.hoveredIndex < len(items) && b.hoveredIndex != b.selectedIndex {
-		y := bounds.MinY + graphics.Scalar((b.hoveredIndex-b.scrollIndex)*widgetRowHeight)
+		y := bounds.MinY + graphics.Scalar(b.hoveredIndex*widgetRowHeight-b.scrollOffset)
 		surface.FillRect(graphics.R(bounds.MinX+1, y, bounds.Width()-2, widgetRowHeight), theme.Hover)
 	}
-	for row := 0; row < b.visibleRows() && b.scrollIndex+row < len(items); row++ {
-		y := bounds.MinY + graphics.Scalar(row*widgetRowHeight)
-		widgetText(surface, b.font, graphics.Point{X: bounds.MinX + 7, Y: y + 4}, items[b.scrollIndex+row], controlForeground(&b.Control))
+	rows := b.visibleRows() + 1
+	for row := 0; row < rows && first+row < len(items); row++ {
+		y := bounds.MinY + graphics.Scalar(row*widgetRowHeight-pixelOffset)
+		widgetText(surface, b.font, graphics.Point{X: bounds.MinX + 7, Y: y + 4}, items[first+row], controlForeground(&b.Control))
 	}
 	surface.PopClip()
 }
@@ -1523,6 +1604,7 @@ func NewSlider() *Slider {
 	s.PointerDown = s.pointerDown
 	s.PointerMove = s.pointerMove
 	s.PointerUp = s.pointerUp
+	s.PointerCancel = s.pointerCancel
 	s.KeyDown = s.keyDown
 	return s
 }
@@ -1579,6 +1661,12 @@ func (s *Slider) pointerMove(x, y graphics.Scalar) {
 func (s *Slider) pointerUp(x, y graphics.Scalar) {
 	if s.dragging {
 		s.updateFromPointer(x)
+		s.dragging = false
+		s.Invalidate()
+	}
+}
+func (s *Slider) pointerCancel() {
+	if s.dragging {
 		s.dragging = false
 		s.Invalidate()
 	}
@@ -1669,6 +1757,7 @@ func NewSplitContainer() *SplitContainer {
 	s.PointerDown = s.pointerDown
 	s.PointerMove = s.pointerMove
 	s.PointerUp = s.pointerUp
+	s.PointerCancel = s.pointerCancel
 	s.PointerLeave = s.pointerLeave
 	s.PointerCursor = s.pointerCursor
 	return s
@@ -1751,6 +1840,12 @@ func (s *SplitContainer) pointerMove(x, y graphics.Scalar) {
 func (s *SplitContainer) pointerUp(x, y graphics.Scalar) {
 	if s.dragging {
 		s.SetSplitterDistance(s.splitterPosition(x, y))
+		s.dragging = false
+		s.Invalidate()
+	}
+}
+func (s *SplitContainer) pointerCancel() {
+	if s.dragging {
 		s.dragging = false
 		s.Invalidate()
 	}

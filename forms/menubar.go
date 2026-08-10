@@ -1,5 +1,3 @@
-//go:build !android || !renvo
-
 package forms
 
 import "renvo.dev/std/graphics"

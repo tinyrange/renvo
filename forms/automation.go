@@ -1,5 +1,3 @@
-//go:build !android || !renvo
-
 package forms
 
 // AutomationDriver operates the same semantic tree exported to assistive
