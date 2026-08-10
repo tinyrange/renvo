@@ -242,7 +242,15 @@ func decompressArchive(compressed string, size int) ([]byte, bool) {
 			pair := int(compressed[pos])<<8 | int(compressed[pos+1])
 			pos += 2
 			distance := (pair >> 4) + 1
-			length := pair&15 + 3
+			lengthCode := pair & 15
+			length := lengthCode + 3
+			if lengthCode == 15 {
+				if pos >= len(compressed) {
+					return nil, false
+				}
+				length = 18 + int(compressed[pos])
+				pos++
+			}
 			if distance > written || written+length > size {
 				return nil, false
 			}

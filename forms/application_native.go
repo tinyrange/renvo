@@ -1,4 +1,4 @@
-//go:build !browser && !android
+//go:build !browser && !android && !ios
 
 package forms
 

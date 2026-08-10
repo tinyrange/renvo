@@ -173,7 +173,7 @@ func TestCompilerJITAndroidARM64FormsImage(t *testing.T) {
 	image := compileMobileProgram(t,
 		filepath.Join("android", "android_arm64.rtg"),
 		"android/arm64", "librenvo.so",
-		filepath.Join("examples", "android", "forms_hello"))
+		filepath.Join("examples", "forms_hello"))
 
 	expectedImports := []string{
 		"AInputEvent_getType",
@@ -203,6 +203,10 @@ func TestCompilerJITAndroidARM64FormsImage(t *testing.T) {
 		if !bytes.Contains(image, append([]byte(name), 0)) {
 			t.Errorf("Android Forms image omits dynamic import %q", name)
 		}
+	}
+	if !bytes.Contains(image, []byte("Renvo for Android")) ||
+		bytes.Contains(image, []byte("Renvo for iPhone")) {
+		t.Fatal("shared Forms hello selected the wrong Android platform title")
 	}
 	if bytes.Contains(image, []byte("__android_log_write")) {
 		t.Fatal("Android Forms image contains a temporary device logging probe")
@@ -251,6 +255,25 @@ func TestCompilerJITAndroidARM64FormsImage(t *testing.T) {
 	for at := int(dynamic[7]); at < int(dynamic[7]+dynamic[8]); at += 24 {
 		if kind := binary.LittleEndian.Uint32(image[at+8 : at+12]); kind != 1025 {
 			t.Fatalf("Android Forms relocation at %#x = %d, want R_AARCH64_GLOB_DAT", at, kind)
+		}
+	}
+}
+
+func TestCompilerJITAndroidARM64ControlsImage(t *testing.T) {
+	image := compileMobileProgram(t,
+		filepath.Join("android", "android_arm64.rtg"),
+		"android/arm64", "librenvo-controls.so",
+		filepath.Join("examples", "forms_controls"))
+
+	if !bytes.Contains(image, []byte("Native Android")) {
+		t.Fatal("shared controls gallery omitted its Android platform specialization")
+	}
+	if bytes.Contains(image, []byte("Native iOS")) {
+		t.Fatal("shared controls gallery retained its iOS platform subtitle")
+	}
+	for _, name := range []string{"ANativeWindow_lock", "AMotionEvent_getX"} {
+		if !bytes.Contains(image, append([]byte(name), 0)) {
+			t.Errorf("Android controls image omits dynamic import %q", name)
 		}
 	}
 }
@@ -335,6 +358,102 @@ func TestCompilerJITIOSARM64MachOImage(t *testing.T) {
 			hasIOSVersion, hasMain, hasLibSystem)
 	}
 	validateIOSAdHocSignature(t, image, signatureOffset, signatureSize)
+}
+
+func TestCompilerJITIOSARM64FormsImage(t *testing.T) {
+	image := compileMobileProgram(t,
+		filepath.Join("ios", "ios_arm64.rtg"),
+		"ios/arm64", "RenvoForms",
+		filepath.Join("examples", "forms_hello"))
+
+	for _, name := range []string{
+		"_UIApplicationMain",
+		"_objc_allocateClassPair",
+		"_objc_getClass",
+		"_objc_msgSend",
+		"_class_addMethod",
+		"_sel_registerName",
+		"_CGColorSpaceCreateDeviceRGB",
+		"_CFDataCreate",
+		"_CFRelease",
+		"_CGDataProviderCreateWithCFData",
+		"_CGImageCreate",
+	} {
+		if !bytes.Contains(image, append([]byte(name), 0)) {
+			t.Errorf("iOS Forms image omits dynamic import %q", name)
+		}
+	}
+	if !bytes.Contains(image, []byte("Renvo for iPhone")) ||
+		bytes.Contains(image, []byte("Renvo for Android")) {
+		t.Fatal("shared Forms hello selected the wrong iOS platform title")
+	}
+	for _, pseudo := range []string{
+		"renvoIOSObjcMsgRect",
+		"renvoIOSObjcMsgFloat",
+		"renvoIOSDelegateDidFinishCallback",
+		"renvoIOSTouchesBeganCallback",
+	} {
+		if bytes.Contains(image, []byte(pseudo)) {
+			t.Errorf("iOS Forms image leaks compiler-only pseudo import %q", pseudo)
+		}
+	}
+	for _, dylib := range []string{
+		"/System/Library/Frameworks/UIKit.framework/UIKit",
+		"/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics",
+		"/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation",
+		"/usr/lib/libobjc.A.dylib",
+	} {
+		if !bytes.Contains(image, append([]byte(dylib), 0)) {
+			t.Errorf("iOS Forms image omits dylib %q", dylib)
+		}
+	}
+	if bytes.Contains(image, []byte("_CGDataProviderCreateWithData")) {
+		t.Fatal("iOS Forms image aliases its mutable framebuffer through CoreGraphics")
+	}
+	// UIKit returns CGPoint/CGRect components in floating-point registers. The
+	// target bridge converts those values to integral Forms coordinates.
+	if !bytes.Contains(image[0x1000:], []byte{
+		0x20, 0x00, 0x78, 0x9e, // fcvtzs x0, d1
+	}) || !bytes.Contains(image[0x1000:], []byte{
+		0x40, 0x00, 0x78, 0x9e, // fcvtzs x0, d2
+	}) {
+		t.Fatal("iOS Forms image omits UIKit geometry result bridges")
+	}
+
+	commands := int(binary.LittleEndian.Uint32(image[16:20]))
+	at := 32
+	signatureOffset, signatureSize := 0, 0
+	for i := 0; i < commands; i++ {
+		size := int(binary.LittleEndian.Uint32(image[at+4 : at+8]))
+		if binary.LittleEndian.Uint32(image[at:at+4]) == 0x1d && size >= 16 {
+			signatureOffset = int(binary.LittleEndian.Uint32(image[at+8 : at+12]))
+			signatureSize = int(binary.LittleEndian.Uint32(image[at+12 : at+16]))
+		}
+		at += size
+	}
+	validateIOSAdHocSignature(t, image, signatureOffset, signatureSize)
+}
+
+func TestCompilerJITIOSARM64ControlsImage(t *testing.T) {
+	image := compileMobileProgram(t,
+		filepath.Join("ios", "ios_arm64.rtg"),
+		"ios/arm64", "RenvoControls",
+		filepath.Join("examples", "forms_controls"))
+
+	if !bytes.Contains(image, []byte("Native iOS")) {
+		t.Fatal("shared controls gallery omitted its iOS platform specialization")
+	}
+	if bytes.Contains(image, []byte("Native Android")) {
+		t.Fatal("shared controls gallery retained its Android platform subtitle")
+	}
+	for _, name := range []string{
+		"_UIApplicationMain", "_CGImageCreate",
+		"_mach_absolute_time", "_mach_timebase_info",
+	} {
+		if !bytes.Contains(image, append([]byte(name), 0)) {
+			t.Errorf("iOS controls image omits dynamic import %q", name)
+		}
+	}
 }
 
 func TestRenvoBuiltAPKPackagerMatchesHostBuilder(t *testing.T) {
