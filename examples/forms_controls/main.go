@@ -503,7 +503,7 @@ func (d *controlsDemo) initialize(width, height int) {
 	subtitle := forms.NewLabel()
 	subtitle.SetBounds(graphics.R(16, 82, 328, 24))
 	subtitle.SetFont(d.bodyFont)
-	subtitle.SetText("Native Android • 360 dp canvas • 2× density")
+	subtitle.SetText(controlsPlatformSubtitle)
 	d.form.Add(&subtitle.Control)
 
 	d.tabs = forms.NewTabControl()

@@ -74,7 +74,7 @@ adb install -r path/to/app.apk
 adb shell am start -W -n dev.renvo.example/android.app.NativeActivity
 ```
 
-The Forms example under `examples/android/forms_hello` paints through the
+The shared Forms example under `examples/forms_hello` paints through the
 NativeActivity-backed Android graphics port. Build `librenvo-forms.so` with the
 commands in that example's README, then pass it to `renvoapk` as the `-so`
 payload.

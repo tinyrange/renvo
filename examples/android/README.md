@@ -43,7 +43,7 @@ go run ./cmd/renvo \
   -backend examples/android/android_arm64.rtg \
   -t android/arm64 \
   -s -o sandbox/librenvo-forms.so \
-  ./examples/android/forms_hello
+  ./examples/forms_hello
 ```
 
 The full control gallery uses a 360 × 800 dp layout, renders at the device's
@@ -56,7 +56,7 @@ go run ./cmd/renvo \
   -backend examples/android/android_arm64.rtg \
   -t android/arm64 \
   -s -o sandbox/librenvo-controls.so \
-  ./examples/android/forms_controls
+  ./examples/forms_controls
 ```
 
 Build the SDK-free packager with Renvo, create a development-signed APK, and
