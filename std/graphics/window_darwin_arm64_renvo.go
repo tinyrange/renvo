@@ -43,6 +43,9 @@ func objcMsg1(object, selector, a int) int { return 0 }
 func objcMsg2(object, selector, a, b int) int { return 0 }
 
 // renvo:linkstatic /usr/lib/libobjc.A.dylib,objc_msgSend
+func objcMsg3(object, selector, a, b, c int) int { return 0 }
+
+// renvo:linkstatic /usr/lib/libobjc.A.dylib,objc_msgSend
 func objcMsg4(object, selector, a, b, c, d int) int { return 0 }
 
 // renvo:linkstatic /usr/lib/libobjc.A.dylib,objc_msgSend
@@ -53,6 +56,9 @@ func objcMsgBytes(object, selector int, value []byte) int { return 0 }
 
 // renvo:linkstatic /usr/lib/libobjc.A.dylib,objc_msgSend
 func objcMsgBytes3(object, selector int, value []byte, maximum, encoding int) int { return 0 }
+
+// renvo:linkstatic /usr/lib/libobjc.A.dylib,objc_msgSend
+func objcMsgPointer3(object, selector int, value *byte, length, options int) int { return 0 }
 
 // renvo:linkstatic /usr/lib/libobjc.A.dylib,objc_msgSend
 func objcMsgInts(object, selector int, value []int32) int { return 0 }
@@ -194,6 +200,7 @@ func NewWindow(options WindowOptions) *Window {
 		w.timerActive[i] = false
 	}
 	w.surface = NewSurface(w.width, w.height)
+	w.renderer = RendererSoftware
 	w.bottomUp = make([]byte, len(w.surface.Pixels))
 	w.app = objcMsg0(objcGetClass("NSApplication"), selector("sharedApplication"))
 	if w.app == 0 {
@@ -236,6 +243,28 @@ func NewWindow(options WindowOptions) *Window {
 	}
 	objcMsg1(w.context, selector("setView:"), w.view)
 	objcMsg0(w.context, selector("makeCurrentContext"))
+	if options.Renderer == RendererAuto || options.Renderer == RendererMetal {
+		backend := newMetalFrameBackend(w)
+		if backend != nil {
+			w.setFrameBackend(RendererMetal, backend)
+		} else if options.Renderer == RendererMetal {
+			setLastWindowError("Metal renderer initialization failed", 0)
+			w.Close()
+			return nil
+		}
+	}
+	if w.backend == nil && (options.Renderer == RendererAuto || options.Renderer == RendererOpenGL) {
+		backend := newOpenGLFrameBackend(w)
+		if backend == nil {
+			if options.Renderer == RendererOpenGL {
+				setLastWindowError("OpenGL renderer initialization failed", 0)
+				w.Close()
+				return nil
+			}
+		} else {
+			w.setFrameBackend(RendererOpenGL, backend)
+		}
+	}
 	w.eventMode = cocoaString("kCFRunLoopDefaultMode")
 	w.SetTitle(options.Title)
 	if !options.Hidden {
@@ -314,6 +343,9 @@ func (w *Window) resetBackingSurface() {
 	w.surface.Resize(w.width*w.backingScale, w.height*w.backingScale)
 	w.surface.setDeviceScale(Scalar(w.backingScale))
 	w.bottomUp = make([]byte, len(w.surface.Pixels))
+	if w.backend != nil {
+		w.backend.Resize(w.surface.Width, w.surface.Height)
+	}
 }
 
 func (w *Window) RequestRepaint(rect Rect) {
@@ -677,6 +709,13 @@ func (w *Window) ReadPixels() *Image {
 	if width <= 0 || height <= 0 {
 		return nil
 	}
+	if w.backend != nil {
+		image := NewImage(width, height, nil)
+		if !w.backend.ReadPixels(image) {
+			return nil
+		}
+		return image
+	}
 	bottomUp := make([]byte, width*height*4)
 	objcMsg0(w.context, selector("makeCurrentContext"))
 	glFinish()
@@ -700,6 +739,11 @@ func (w *Window) Close() {
 	w.closed = true
 	w.shown = false
 	darwinAccessibilityForget(w)
+	if w.backend != nil {
+		w.backend.Destroy()
+		w.backend = nil
+		w.frameCanvas = nil
+	}
 	if w.context != 0 {
 		objcMsg0(w.context, selector("clearDrawable"))
 		objcMsg0(w.context, selector("release"))

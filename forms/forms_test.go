@@ -92,7 +92,7 @@ func TestPaintClipsControlsToInvalidRegions(t *testing.T) {
 	form.SetBackground(graphics.Black)
 	control := NewControl()
 	control.SetBounds(graphics.R(0, 0, 20, 10))
-	control.Paint = func(surface *graphics.Surface) {
+	control.Paint = func(surface graphics.Canvas) {
 		surface.FillRect(control.Bounds(), graphics.White)
 	}
 	form.Add(control)
@@ -118,7 +118,7 @@ func TestFormPaintBackgroundOverridesDefaultDrawing(t *testing.T) {
 	var form Form
 	form.Initialize(80, 50)
 	painted := 0
-	form.PaintBackground = func(surface *graphics.Surface) {
+	form.PaintBackground = func(surface graphics.Canvas) {
 		painted++
 		surface.FillRect(graphics.R(0, 0, 80, 50), graphics.RGBA(12, 34, 56, 255))
 	}

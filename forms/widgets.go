@@ -32,7 +32,7 @@ func (l *Label) SetFont(font *graphics.Font) {
 	l.Invalidate()
 }
 
-func (l *Label) paint(surface *graphics.Surface) {
+func (l *Label) paint(surface graphics.Canvas) {
 	if l.font == nil {
 		return
 	}
@@ -112,7 +112,7 @@ func (b *Button) pointerCancel() {
 	b.Invalidate()
 }
 
-func (b *Button) paint(surface *graphics.Surface) {
+func (b *Button) paint(surface graphics.Canvas) {
 	bounds := b.Bounds()
 	background := b.Background()
 	foreground := controlForeground(&b.Control)
@@ -182,7 +182,7 @@ func (b *TextBox) SetFont(font *graphics.Font) {
 	b.Invalidate()
 }
 
-func (b *TextBox) paint(surface *graphics.Surface) {
+func (b *TextBox) paint(surface graphics.Canvas) {
 	paintTextEntry(surface, &b.Control, b.font, false)
 }
 
@@ -233,7 +233,7 @@ func (a *TextArea) SetFont(font *graphics.Font) {
 	a.Invalidate()
 }
 
-func (a *TextArea) paint(surface *graphics.Surface) {
+func (a *TextArea) paint(surface graphics.Canvas) {
 	paintTextEntry(surface, &a.Control, a.font, true)
 }
 
@@ -247,7 +247,7 @@ func (a *TextArea) keyDown(event graphics.Event) {
 	}
 }
 
-func paintTextEntry(surface *graphics.Surface, control *Control, font *graphics.Font, multiline bool) {
+func paintTextEntry(surface graphics.Canvas, control *Control, font *graphics.Font, multiline bool) {
 	bounds := control.Bounds()
 	surface.FillRect(bounds, control.Background())
 	theme := controlTheme(control)
@@ -379,7 +379,7 @@ func (b *CheckBox) pointerUp(x, y graphics.Scalar) {
 	}
 }
 
-func (b *CheckBox) paint(surface *graphics.Surface) {
+func (b *CheckBox) paint(surface graphics.Canvas) {
 	bounds := b.Bounds()
 	theme := controlTheme(&b.Control)
 	if b.Hovered() {
@@ -466,7 +466,7 @@ func (b *RadioButton) pointerUp(x, y graphics.Scalar) {
 	}
 }
 
-func (b *RadioButton) paint(surface *graphics.Surface) {
+func (b *RadioButton) paint(surface graphics.Canvas) {
 	bounds := b.Bounds()
 	theme := controlTheme(&b.Control)
 	if b.Hovered() {
@@ -481,7 +481,7 @@ func (b *RadioButton) paint(surface *graphics.Surface) {
 	paintChoiceText(surface, bounds, b.font, b.Text(), controlForeground(&b.Control))
 }
 
-func paintChoiceText(surface *graphics.Surface, bounds graphics.Rect, font *graphics.Font, text string, color graphics.Color) {
+func paintChoiceText(surface graphics.Canvas, bounds graphics.Rect, font *graphics.Font, text string, color graphics.Color) {
 	if font == nil || text == "" {
 		return
 	}
@@ -506,7 +506,7 @@ func NewPictureBox() *PictureBox {
 
 func (b *PictureBox) applyTheme(theme Theme) { applyRaisedTheme(&b.Control, theme) }
 
-func (b *PictureBox) paint(surface *graphics.Surface) {
+func (b *PictureBox) paint(surface graphics.Canvas) {
 	bounds := b.Bounds()
 	surface.FillRect(bounds, b.Background())
 	theme := controlTheme(&b.Control)
@@ -535,7 +535,7 @@ func NewPanel() *Panel {
 
 func (p *Panel) applyTheme(theme Theme) { applyRaisedTheme(&p.Control, theme) }
 
-func (p *Panel) paint(surface *graphics.Surface) {
+func (p *Panel) paint(surface graphics.Canvas) {
 	surface.FillRect(p.Bounds(), p.Background())
 	surface.StrokeRect(p.Bounds(), 1, controlTheme(&p.Control).Border)
 }

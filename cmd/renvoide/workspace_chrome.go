@@ -198,7 +198,7 @@ func (c *workspaceAppBar) accessibilityPerform(id string, action forms.Accessibi
 	return false
 }
 
-func (c *workspaceAppBar) paint(surface *graphics.Surface) {
+func (c *workspaceAppBar) paint(surface graphics.Canvas) {
 	bounds := c.Bounds()
 	surface.FillRect(bounds, workspaceWhite)
 	surface.FillRect(graphics.R(bounds.MinX, bounds.MaxY-1, bounds.Width(), 1), workspaceBorder)
@@ -273,7 +273,7 @@ func (c *workspaceTargetMenu) pointerDown(x, y graphics.Scalar) {
 	}
 }
 
-func (c *workspaceTargetMenu) paint(surface *graphics.Surface) {
+func (c *workspaceTargetMenu) paint(surface graphics.Canvas) {
 	bounds := c.Bounds()
 	surface.FillRect(bounds, workspaceWhite)
 	surface.StrokeRect(bounds, 1, workspaceBorder)
@@ -298,7 +298,7 @@ func newWorkspaceExplorerFrame(font *graphics.Font) *workspaceExplorerFrame {
 	return control
 }
 
-func (c *workspaceExplorerFrame) paint(surface *graphics.Surface) {
+func (c *workspaceExplorerFrame) paint(surface graphics.Canvas) {
 	bounds := c.Bounds()
 	surface.FillRect(bounds, workspaceWhite)
 	surface.FillRect(graphics.R(bounds.MaxX-1, bounds.MinY, 1, bounds.Height()), workspaceBorder)
@@ -393,7 +393,7 @@ func (c *workspaceEditorFrame) SetDocumentState(path string, dirty bool, line, c
 	}
 }
 
-func (c *workspaceEditorFrame) paint(surface *graphics.Surface) {
+func (c *workspaceEditorFrame) paint(surface graphics.Canvas) {
 	bounds := c.Bounds()
 	surface.FillRect(bounds, workspaceWhite)
 	surface.FillRect(graphics.R(bounds.MaxX-1, bounds.MinY, 1, bounds.Height()), workspaceBorder)
@@ -742,7 +742,7 @@ func (c *workspaceDesigner) pointerUp(x, y graphics.Scalar) {
 	}
 }
 
-func (c *workspaceDesigner) paint(surface *graphics.Surface) {
+func (c *workspaceDesigner) paint(surface graphics.Canvas) {
 	bounds := c.Bounds()
 	surface.FillRect(bounds, workspaceWhite)
 	surface.FillRect(graphics.R(bounds.MaxX-1, bounds.MinY, 1, bounds.Height()), workspaceBorder)
@@ -792,7 +792,7 @@ func (c *workspaceOutput) SetMessage(message string, ok bool) {
 
 func (c *workspaceOutput) accessibilityValue() string { return c.message }
 
-func (c *workspaceOutput) paint(surface *graphics.Surface) {
+func (c *workspaceOutput) paint(surface graphics.Canvas) {
 	bounds := c.Bounds()
 	surface.FillRect(bounds, workspaceWhite)
 	surface.FillRect(graphics.R(bounds.MinX, bounds.MinY, bounds.Width(), 1), workspaceBorder)
@@ -888,7 +888,7 @@ func workspaceOutputNextUTF8(text string, at int) int {
 	return at + width
 }
 
-func (c *workspaceDesigner) drawForm(surface *graphics.Surface, canvas graphics.Rect) {
+func (c *workspaceDesigner) drawForm(surface graphics.Canvas, canvas graphics.Rect) {
 	if c.design == nil {
 		return
 	}
@@ -981,7 +981,7 @@ func (c *workspaceDesigner) drawForm(surface *graphics.Surface, canvas graphics.
 	}
 }
 
-func drawDesignerChoice(surface *graphics.Surface, font *graphics.Font, bounds graphics.Rect, text string, checked, radio bool) {
+func drawDesignerChoice(surface graphics.Canvas, font *graphics.Font, bounds graphics.Rect, text string, checked, radio bool) {
 	mark := graphics.R(bounds.MinX, bounds.MinY+(bounds.Height()-16)/2, 16, 16)
 	if radio {
 		surface.FillEllipse(mark, workspaceWhite)
@@ -1501,7 +1501,7 @@ func (c *workspaceInspector) propertyValue(name string) string {
 	return control.paintHandler
 }
 
-func (c *workspaceInspector) paint(surface *graphics.Surface) {
+func (c *workspaceInspector) paint(surface graphics.Canvas) {
 	bounds := c.Bounds()
 	surface.FillRect(bounds, workspaceWhite)
 	surface.FillRect(graphics.R(bounds.MinX, bounds.MinY+workspacePaneHeaderHeight-1, bounds.Width(), 1), workspaceBorder)
@@ -1510,7 +1510,7 @@ func (c *workspaceInspector) paint(surface *graphics.Surface) {
 	c.drawProperties(surface, graphics.R(bounds.MinX+1, bounds.MinY+workspacePaneHeaderHeight, bounds.Width()-2, bounds.Height()-workspacePaneHeaderHeight))
 }
 
-func (c *workspaceInspector) drawProperties(surface *graphics.Surface, bounds graphics.Rect) {
+func (c *workspaceInspector) drawProperties(surface graphics.Canvas, bounds graphics.Rect) {
 	surface.PushClipRect(bounds)
 	title := "MainForm"
 	if c.design != nil && c.selected >= 0 && c.selected < len(c.design.controls) {
@@ -1540,7 +1540,7 @@ func (c *workspaceInspector) drawProperties(surface *graphics.Surface, bounds gr
 	surface.PopClip()
 }
 
-func drawPropertyField(surface *graphics.Surface, font *graphics.Font, bounds graphics.Rect, y graphics.Scalar, label, value string, kind int) {
+func drawPropertyField(surface graphics.Canvas, font *graphics.Font, bounds graphics.Rect, y graphics.Scalar, label, value string, kind int) {
 	drawWorkspaceText(surface, font, bounds.MinX+12, y+17, label, workspaceText)
 	fieldX := bounds.MinX + 70
 	fieldWidth := bounds.MaxX - fieldX - 12
@@ -1622,7 +1622,7 @@ func designerPaletteTooltipBounds(font *graphics.Font, bounds graphics.Rect, ind
 	return graphics.R(bounds.MinX+designerPaletteWidth+7, y, width, 28)
 }
 
-func drawDesignerPalette(surface *graphics.Surface, font *graphics.Font, bounds graphics.Rect, hover int) {
+func drawDesignerPalette(surface graphics.Canvas, font *graphics.Font, bounds graphics.Rect, hover int) {
 	rail := graphics.R(bounds.MinX, bounds.MinY+workspacePaneHeaderHeight, designerPaletteWidth, bounds.Height()-workspacePaneHeaderHeight)
 	surface.FillRect(rail, workspaceField)
 	surface.FillRect(graphics.R(rail.MaxX-1, rail.MinY, 1, rail.Height()), workspaceBorder)
@@ -1647,7 +1647,7 @@ func drawDesignerPalette(surface *graphics.Surface, font *graphics.Font, bounds 
 	}
 }
 
-func drawWorkspaceGrid(surface *graphics.Surface, bounds graphics.Rect) {
+func drawWorkspaceGrid(surface graphics.Canvas, bounds graphics.Rect) {
 	for y := bounds.MinY + 8; y < bounds.MaxY; y += 10 {
 		for x := bounds.MinX + 8; x < bounds.MaxX; x += 10 {
 			surface.FillRect(graphics.R(x, y, 1, 1), workspaceGrid)
@@ -1655,7 +1655,7 @@ func drawWorkspaceGrid(surface *graphics.Surface, bounds graphics.Rect) {
 	}
 }
 
-func drawSelectionHandles(surface *graphics.Surface, bounds graphics.Rect) {
+func drawSelectionHandles(surface graphics.Canvas, bounds graphics.Rect) {
 	middleX := (bounds.MinX + bounds.MaxX) / 2
 	middleY := (bounds.MinY + bounds.MaxY) / 2
 	drawSelectionHandle(surface, bounds.MinX, bounds.MinY)
@@ -1668,33 +1668,33 @@ func drawSelectionHandles(surface *graphics.Surface, bounds graphics.Rect) {
 	drawSelectionHandle(surface, bounds.MaxX, bounds.MaxY)
 }
 
-func drawSelectionHandle(surface *graphics.Surface, x, y graphics.Scalar) {
+func drawSelectionHandle(surface graphics.Canvas, x, y graphics.Scalar) {
 	handle := graphics.R(x-3, y-3, 7, 7)
 	surface.FillRect(handle, workspaceWhite)
 	surface.StrokeRect(handle, 1, workspaceBlue)
 }
 
-func drawMockField(surface *graphics.Surface, font *graphics.Font, bounds graphics.Rect, placeholder string) {
+func drawMockField(surface graphics.Canvas, font *graphics.Font, bounds graphics.Rect, placeholder string) {
 	surface.FillRect(bounds, workspaceWhite)
 	surface.StrokeRect(bounds, 1, workspaceBorder)
 	drawWorkspaceText(surface, font, bounds.MinX+9, bounds.MinY+20, placeholder, workspaceMuted)
 }
 
-func drawWorkspaceText(surface *graphics.Surface, font *graphics.Font, x, baseline graphics.Scalar, text string, color graphics.Color) {
+func drawWorkspaceText(surface graphics.Canvas, font *graphics.Font, x, baseline graphics.Scalar, text string, color graphics.Color) {
 	if font == nil || text == "" {
 		return
 	}
 	surface.DrawText(font, graphics.Point{X: x, Y: baseline}, text, color)
 }
 
-func drawCenteredWorkspaceText(surface *graphics.Surface, font *graphics.Font, bounds graphics.Rect, text string, color graphics.Color) {
+func drawCenteredWorkspaceText(surface graphics.Canvas, font *graphics.Font, bounds graphics.Rect, text string, color graphics.Color) {
 	metrics := graphics.MeasureText(font, text)
 	x := bounds.MinX + (bounds.Width()-metrics.Width)/2
 	baseline := bounds.MinY + (bounds.Height()-metrics.Height)/2 + font.Metrics.Ascent
 	drawWorkspaceText(surface, font, x, baseline, text, color)
 }
 
-func drawDocumentTabs(surface *graphics.Surface, font *graphics.Font, bounds graphics.Rect, fileName string, dirty bool, designerActive bool) {
+func drawDocumentTabs(surface graphics.Canvas, font *graphics.Font, bounds graphics.Rect, fileName string, dirty bool, designerActive bool) {
 	codeWidth := graphics.Scalar(workspaceCodeTabWidth)
 	designWidth := graphics.Scalar(workspaceDesignerTabWidth)
 	if codeWidth > bounds.Width() {
@@ -1723,7 +1723,7 @@ func drawDocumentTabs(surface *graphics.Surface, font *graphics.Font, bounds gra
 	drawWorkspaceText(surface, font, designX+12, bounds.MinY+21, "MainForm [Design]", workspaceText)
 }
 
-func drawRunIcon(surface *graphics.Surface, x, y graphics.Scalar, color graphics.Color) {
+func drawRunIcon(surface graphics.Canvas, x, y graphics.Scalar, color graphics.Color) {
 	for column := 0; column < 10; column++ {
 		halfHeight := graphics.Scalar(6 - column/2)
 		centerY := y + 6
@@ -1731,14 +1731,14 @@ func drawRunIcon(surface *graphics.Surface, x, y graphics.Scalar, color graphics
 	}
 }
 
-func drawPaletteIcon(surface *graphics.Surface, x, y graphics.Scalar, kind int, color graphics.Color) {
+func drawPaletteIcon(surface graphics.Canvas, x, y graphics.Scalar, kind int, color graphics.Color) {
 	if kind < 0 || kind >= len(designerControlKinds) {
 		return
 	}
 	forms.DrawControlIcon(surface, forms.Icon(int(forms.IconControlLabel)+kind), graphics.R(x, y, 26, 26), color, workspaceField, workspaceBlue)
 }
 
-func drawDeleteIcon(surface *graphics.Surface, x, y graphics.Scalar, color graphics.Color) {
+func drawDeleteIcon(surface graphics.Canvas, x, y graphics.Scalar, color graphics.Color) {
 	surface.StrokeRect(graphics.R(x+3, y+4, 10, 12), 1, color)
 	surface.FillRect(graphics.R(x+1, y+3, 14, 2), color)
 	surface.FillRect(graphics.R(x+5, y, 6, 2), color)
@@ -1746,7 +1746,7 @@ func drawDeleteIcon(surface *graphics.Surface, x, y graphics.Scalar, color graph
 	surface.FillRect(graphics.R(x+10, y+7, 1, 6), color)
 }
 
-func drawChevron(surface *graphics.Surface, x, y graphics.Scalar, expanded bool, color graphics.Color) {
+func drawChevron(surface graphics.Canvas, x, y graphics.Scalar, expanded bool, color graphics.Color) {
 	if expanded {
 		surface.DrawLine(graphics.Point{X: x, Y: y}, graphics.Point{X: x + 4, Y: y + 4}, 1, color)
 		surface.DrawLine(graphics.Point{X: x + 4, Y: y + 4}, graphics.Point{X: x + 8, Y: y}, 1, color)

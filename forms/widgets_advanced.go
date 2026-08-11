@@ -4,7 +4,7 @@ import "renvo.dev/std/graphics"
 
 const widgetRowHeight = 24
 
-func widgetText(surface *graphics.Surface, font *graphics.Font, position graphics.Point, text string, color graphics.Color) {
+func widgetText(surface graphics.Canvas, font *graphics.Font, position graphics.Point, text string, color graphics.Color) {
 	if font != nil && text != "" {
 		position.Y += font.Metrics.Ascent
 		surface.DrawText(font, position, text, color)
@@ -309,7 +309,7 @@ func (b *ComboBox) textInput(text string) {
 		b.ensureSelectionVisible()
 	}
 }
-func (b *ComboBox) paint(surface *graphics.Surface) {
+func (b *ComboBox) paint(surface graphics.Canvas) {
 	bounds := b.closedBounds
 	theme := controlTheme(&b.Control)
 	surface.FillRect(bounds, b.Background())
@@ -648,7 +648,7 @@ func (b *ListBox) setScrollOffset(offset int) {
 	}
 }
 
-func (b *ListBox) paint(surface *graphics.Surface) {
+func (b *ListBox) paint(surface graphics.Canvas) {
 	items := b.displayItems()
 	bounds := b.Bounds()
 	theme := controlTheme(&b.Control)
@@ -837,7 +837,7 @@ func (v *ListView) visibleRows() int {
 	}
 	return rows
 }
-func (v *ListView) paint(surface *graphics.Surface) {
+func (v *ListView) paint(surface graphics.Canvas) {
 	bounds := v.Bounds()
 	theme := controlTheme(&v.Control)
 	surface.FillRect(bounds, v.Background())
@@ -1115,7 +1115,7 @@ func (v *TreeView) textInput(text string) {
 		}
 	}
 }
-func (v *TreeView) paint(surface *graphics.Surface) {
+func (v *TreeView) paint(surface graphics.Canvas) {
 	bounds := v.Bounds()
 	theme := controlTheme(&v.Control)
 	surface.FillRect(bounds, v.Background())
@@ -1382,7 +1382,7 @@ func (c *TabControl) keyDown(event graphics.Event) {
 	}
 	c.SetSelectedIndex(index)
 }
-func (c *TabControl) paint(surface *graphics.Surface) {
+func (c *TabControl) paint(surface graphics.Canvas) {
 	bounds := c.Bounds()
 	theme := controlTheme(&c.Control)
 	surface.FillRect(bounds, c.Background())
@@ -1460,7 +1460,7 @@ func (b *ProgressBar) SetValue(value int) {
 	b.Invalidate()
 }
 func (b *ProgressBar) accessibilityValue() string { return widgetValue(b.value) }
-func (b *ProgressBar) paint(surface *graphics.Surface) {
+func (b *ProgressBar) paint(surface graphics.Canvas) {
 	bounds := b.Bounds()
 	theme := controlTheme(&b.Control)
 	surface.FillRect(bounds, b.Background())
@@ -1563,7 +1563,7 @@ func (n *NumericUpDown) keyDown(event graphics.Event) {
 		n.SetValue(n.maximum)
 	}
 }
-func (n *NumericUpDown) paint(surface *graphics.Surface) {
+func (n *NumericUpDown) paint(surface graphics.Canvas) {
 	bounds := n.Bounds()
 	theme := controlTheme(&n.Control)
 	surface.FillRect(bounds, n.Background())
@@ -1686,7 +1686,7 @@ func (s *Slider) keyDown(event graphics.Event) {
 		s.SetValue(s.maximum)
 	}
 }
-func (s *Slider) paint(surface *graphics.Surface) {
+func (s *Slider) paint(surface graphics.Canvas) {
 	bounds := s.Bounds()
 	theme := controlTheme(&s.Control)
 	y := bounds.MinY + bounds.Height()/2
@@ -1720,7 +1720,7 @@ func NewGroupBox() *GroupBox {
 func (g *GroupBox) applyTheme(theme Theme)      { applyTransparentTheme(&g.Control, theme) }
 func (g *GroupBox) Font() *graphics.Font        { return g.font }
 func (g *GroupBox) SetFont(font *graphics.Font) { g.font = font; g.Invalidate() }
-func (g *GroupBox) paint(surface *graphics.Surface) {
+func (g *GroupBox) paint(surface graphics.Canvas) {
 	bounds := g.Bounds()
 	theme := controlTheme(&g.Control)
 	top := bounds.MinY + 8
@@ -1856,7 +1856,7 @@ func (s *SplitContainer) pointerLeave() {
 		s.Invalidate()
 	}
 }
-func (s *SplitContainer) paint(surface *graphics.Surface) {
+func (s *SplitContainer) paint(surface graphics.Canvas) {
 	bounds := s.Bounds()
 	theme := controlTheme(&s.Control)
 	surface.FillRect(bounds, s.Background())
@@ -1981,7 +1981,7 @@ func (b *ToolBar) accessibilityPerform(id string, action AccessibilityAction, va
 	}
 	return true
 }
-func (b *ToolBar) paint(surface *graphics.Surface) {
+func (b *ToolBar) paint(surface graphics.Canvas) {
 	bounds := b.Bounds()
 	theme := controlTheme(&b.Control)
 	surface.FillRect(bounds, b.Background())
@@ -2027,7 +2027,7 @@ func NewStatusBar() *StatusBar {
 func (s *StatusBar) applyTheme(theme Theme)      { applyRaisedTheme(&s.Control, theme) }
 func (s *StatusBar) Font() *graphics.Font        { return s.font }
 func (s *StatusBar) SetFont(font *graphics.Font) { s.font = font; s.Invalidate() }
-func (s *StatusBar) paint(surface *graphics.Surface) {
+func (s *StatusBar) paint(surface graphics.Canvas) {
 	bounds := s.Bounds()
 	surface.FillRect(bounds, s.Background())
 	surface.FillRect(graphics.R(bounds.MinX, bounds.MinY, bounds.Width(), 1), controlTheme(&s.Control).Border)

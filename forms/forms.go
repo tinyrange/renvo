@@ -31,7 +31,7 @@ const (
 	ThemeTransparent
 )
 
-type PaintHandler func(surface *graphics.Surface)
+type PaintHandler func(surface graphics.Canvas)
 type EventHandler func()
 type PointerHandler func(x, y graphics.Scalar)
 type WheelHandler func(x, y graphics.Scalar)
@@ -758,7 +758,7 @@ func (f *Form) InvalidRects() []graphics.Rect {
 // Paint redraws only invalidated regions. Each region is clipped independently
 // and all intersecting controls are painted in z-order so moved or overlapping
 // controls leave correct pixels behind.
-func (f *Form) Paint(surface *graphics.Surface) bool {
+func (f *Form) Paint(surface graphics.Canvas) bool {
 	if f == nil || surface == nil || len(f.invalid) == 0 {
 		return false
 	}
