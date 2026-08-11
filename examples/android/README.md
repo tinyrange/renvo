@@ -16,9 +16,11 @@ The image contract is deliberately small:
 
 The exported NativeActivity entry runs `appMain()` and returns to Android. The
 graphics port registers the NativeActivity window and input-queue lifecycle,
-renders into a native-resolution Renvo software surface, dispatches touch input,
-and presents through `ANativeWindow_lock`/`ANativeWindow_unlockAndPost`. APK
-packaging is provided by `cmd/renvoapk`.
+dispatches touch input, and renders at native resolution. `RendererAuto` uses
+an EGL/OpenGL ES 2 frame backend when it is available, while
+`RendererSoftware` retains the portable Renvo surface and
+`ANativeWindow_lock`/`ANativeWindow_unlockAndPost` path. APK packaging is
+provided by `cmd/renvoapk`.
 
 Run the host-independent validation with:
 
@@ -46,10 +48,10 @@ go run ./cmd/renvo \
   ./examples/forms_hello
 ```
 
-The full control gallery uses a 360 × 800 dp layout, renders at the device's
-native density, and demonstrates touch targets, text fields, selection
-controls, list scrolling, sliders, split-view dragging, themes, and advanced
-controls:
+The full control gallery uses a 360 × 800 dp layout, requests OpenGL ES
+explicitly, renders at the device's native density, and demonstrates touch
+targets, text fields, selection controls, list scrolling, sliders, split-view
+dragging, themes, and advanced controls:
 
 ```sh
 go run ./cmd/renvo \
@@ -76,10 +78,11 @@ adb shell am start -W \
   -n dev.renvo.example/android.app.NativeActivity
 ```
 
-This flow has been verified through native-resolution buffer lock/post, full
-TrueType text, taps, list scrolling, and control dragging on a physical ARM64
-Android 15 device. Android uses the same retained Forms controls as the desktop
-and browser targets.
+This flow has been verified through EGL/OpenGL ES 2 rendering, full TrueType
+text, taps, list scrolling, and control dragging on a physical ARM64 Android 15
+device. The explicit software renderer remains available for portability and
+uses native-resolution buffer lock/post. Android uses the same retained Forms
+controls as the desktop and browser targets.
 
 See [`cmd/renvoapk/README.md`](../../cmd/renvoapk/README.md) for the config and
 signing contracts.
