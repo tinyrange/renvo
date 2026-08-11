@@ -1,46 +1,44 @@
 package main
 
-import "renvo.dev/examples/m5sticks3/board"
+import board "renvo.dev/device/board/m5sticks3"
 
 func main() {
-	if !board.DrawLineDiagnostic() {
+	if !board.Display.DrawLineDiagnostic() {
 		for {
 			print("FAIL: M5PM1 identity or acknowledgement\n")
-			board.DelayMilliseconds(1000)
+			board.Clock.DelayMilliseconds(1000)
 		}
 	}
-	board.ConfigureButton(11)
-	board.ConfigureButton(12)
 	buttonAWasPressed := false
 	buttonBWasPressed := false
 	buttonARectangleVisible := false
 	buttonBRectangleVisible := false
 	print("PASS: LCD and buttons ready\n")
 	for {
-		buttonAIsPressed := board.ButtonPressed(11)
-		buttonBIsPressed := board.ButtonPressed(12)
+		buttonAIsPressed := board.FrontButton.Pressed()
+		buttonBIsPressed := board.SideButton.Pressed()
 		if buttonAIsPressed != buttonAWasPressed {
-			board.DelayMilliseconds(20)
-			buttonAIsPressed = board.ButtonPressed(11)
+			board.Clock.DelayMilliseconds(20)
+			buttonAIsPressed = board.FrontButton.Pressed()
 			if buttonAIsPressed != buttonAWasPressed {
 				buttonAWasPressed = buttonAIsPressed
 				if buttonAIsPressed {
 					buttonARectangleVisible = !buttonARectangleVisible
-					board.DrawButtonRectangle(0, buttonARectangleVisible)
+					board.Display.DrawButtonRectangle(0, buttonARectangleVisible)
 				}
 			}
 		}
 		if buttonBIsPressed != buttonBWasPressed {
-			board.DelayMilliseconds(20)
-			buttonBIsPressed = board.ButtonPressed(12)
+			board.Clock.DelayMilliseconds(20)
+			buttonBIsPressed = board.SideButton.Pressed()
 			if buttonBIsPressed != buttonBWasPressed {
 				buttonBWasPressed = buttonBIsPressed
 				if buttonBIsPressed {
 					buttonBRectangleVisible = !buttonBRectangleVisible
-					board.DrawButtonRectangle(1, buttonBRectangleVisible)
+					board.Display.DrawButtonRectangle(1, buttonBRectangleVisible)
 				}
 			}
 		}
-		board.DelayMilliseconds(10)
+		board.Clock.DelayMilliseconds(10)
 	}
 }

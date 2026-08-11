@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Renvo Microcontroller Refactor and ESP32 USB Plan</title>
+  <style>
+    :root { color-scheme: light dark; --bg:#eef3f1; --panel:#fff; --ink:#17201d; --muted:#64706b; --line:#ccd8d3; --accent:#087c61; --soft:#dff2eb; --warn:#9a550d; --warn-soft:#fff0d8; --code:#11201a; --code-ink:#dff7ed; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#0d1411; --panel:#151f1b; --ink:#e5eee9; --muted:#a1afa8; --line:#34433d; --accent:#6bd8b1; --soft:#1d3b31; --warn:#f2b766; --warn-soft:#3c2b18; --code:#09100d; --code-ink:#dbf4e9; } }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.62 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    main { width:min(1160px,calc(100% - 32px)); margin:auto; padding:44px 0 90px; }
+    header,section { margin:0 0 22px; padding:28px 34px; border:1px solid var(--line); border-radius:14px; background:var(--panel); box-shadow:0 8px 28px rgb(0 0 0 / 6%); }
+    header { border-top:7px solid var(--accent); }
+    h1,h2,h3 { line-height:1.18; letter-spacing:-.025em; scroll-margin-top:16px; }
+    h1 { margin:3px 0 12px; font-size:clamp(2.25rem,5vw,4rem); }
+    h2 { margin:0 0 17px; font-size:1.9rem; }
+    h3 { margin:27px 0 8px; font-size:1.3rem; }
+    p { margin:9px 0 15px; }
+    a { color:var(--accent); }
+    nav { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:6px 18px; margin-top:22px; }
+    nav a { padding:5px 0; border-bottom:1px dotted var(--line); text-decoration:none; }
+    ul,ol { padding-left:1.35rem; } li { margin:7px 0; }
+    table { width:100%; margin:17px 0 24px; border-collapse:collapse; font-size:.94rem; }
+    th,td { padding:10px 12px; border:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { background:var(--soft); }
+    code,pre { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+    :not(pre)>code { padding:.12em .34em; border-radius:5px; color:var(--accent); background:var(--soft); font-size:.91em; }
+    pre { overflow:auto; padding:18px; border-radius:10px; background:var(--code); color:var(--code-ink); line-height:1.48; }
+    .lead { max-width:930px; font-size:1.18rem; }
+    .meta { color:var(--muted); font-size:.92rem; }
+    .label { display:inline-block; padding:3px 9px; border-radius:999px; color:var(--accent); background:var(--soft); font-size:.78rem; font-weight:750; letter-spacing:.06em; text-transform:uppercase; }
+    .decision,.warning,.exit { margin:18px 0; padding:15px 19px; border-left:5px solid var(--accent); border-radius:0 9px 9px 0; background:var(--soft); }
+    .warning { border-left-color:var(--warn); background:var(--warn-soft); }
+    .exit { border-top:1px solid var(--line); border-right:1px solid var(--line); border-bottom:1px solid var(--line); background:transparent; }
+    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+    .card { padding:16px 18px; border:1px solid var(--line); border-radius:10px; }
+    .card h3 { margin-top:0; }
+    @media (max-width:760px) { main { width:min(100% - 18px,1160px); padding-top:18px; } header,section { padding:22px 19px; } .grid { grid-template-columns:1fr; } table { display:block; overflow-x:auto; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <span class="label">Issues 348 + 347</span>
+    <h1>Microcontroller refactor and ESP32 USB stack</h1>
+    <p class="lead">Turn the current example-local ESP32 code into a small, reusable device library built from structs implementing narrow interfaces, then build a controller-independent USB device stack above it. Validate each layer against <code>tinyrange/renvo_emu</code> before expanding the supported USB classes.</p>
+    <p class="meta">Planning document · 11 August 2026 · implementation has not started</p>
+    <nav aria-label="Document sections">
+      <a href="#outcome">1. Outcome</a><a href="#baseline">2. Current baseline</a><a href="#boundaries">3. Boundaries</a><a href="#packages">4. Package architecture</a><a href="#interfaces">5. Interface contracts</a><a href="#usb">6. USB architecture</a><a href="#classes">7. Class sequence</a><a href="#emulator">8. Emulator strategy</a><a href="#phases">9. Delivery phases</a><a href="#testing">10. Test matrix</a><a href="#risks">11. Risks and decisions</a><a href="#done">12. Definition of done</a>
+    </nav>
+  </header>
+
+  <section id="outcome">
+    <h2>1. Target outcome</h2>
+    <div class="grid">
+      <div class="card"><h3>Microcontrollers</h3><p>Applications import one hardware package as <code>board</code>, use attached devices directly—such as <code>board.BlueLED.Set(true)</code>—and pass typed board connectors to portable constructors such as <code>i2c.New(board.Grove)</code>. Chip details remain behind those values.</p></div>
+      <div class="card"><h3>USB</h3><p>USB protocol and class logic is independent of the ESP32 controller. ESP32-S3 supplies a DWC2 device-controller implementation; ESP32-C6 retains its fixed USB Serial/JTAG console through a separate adapter.</p></div>
+    </div>
+    <div class="decision"><strong>Primary success measure:</strong> an application can select a board, compose one or more USB functions, compile with Renvo, enumerate in the emulator, and run unchanged on supported hardware without importing example-internal code.</div>
+  </section>
+
+  <section id="baseline">
+    <h2>2. Current baseline</h2>
+    <table>
+      <thead><tr><th>Area</th><th>Today</th><th>Consequence</th></tr></thead>
+      <tbody>
+        <tr><td>Boards</td><td><code>examples/m5nanoc6/board</code> and <code>examples/m5sticks3/board</code> own raw addresses and procedural GPIO, I²C, time, RMT, SPI/display, and random helpers.</td><td>Useful chip logic is coupled to a specific example and similar operations have different APIs.</td></tr>
+        <tr><td>Console USB</td><td>USB Serial/JTAG initialization and writes are embedded in each target <code>.rtg</code> file as the target <code>write</code> operation.</td><td>It is useful for diagnostics, but it is neither a general endpoint API nor a class stack.</td></tr>
+        <tr><td>General USB</td><td>No Renvo USB package exists. The S3 emulator already models the USB wrapper, DWC2 registers, endpoint FIFOs, interrupts, reset, setup packets, and a scripted host.</td><td>The emulator provides a strong test seam, but compiler-side code currently cannot use it as a library.</td></tr>
+        <tr><td>Runtime model</td><td>Microcontroller programs are freestanding and the supported frontend deliberately excludes goroutines and channels.</td><td>The stack must use explicit polling and bounded state machines; it cannot depend on a scheduler.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="boundaries">
+    <h2>3. Scope and boundaries</h2>
+    <ul>
+      <li>Keep MMIO addresses and register bit definitions in chip packages, board wiring in board packages, protocol behavior in portable packages, and target startup/ABI behavior in RTG targets.</li>
+      <li>Use ordinary Renvo-supported Go: concrete structs, small interfaces, slices and fixed arrays. Do not require generics, goroutines, channels, cgo, reflection, or an ESP-IDF dependency.</li>
+      <li>Use statically owned buffers with explicit capacities. No allocation or interface dispatch is required in an interrupt path.</li>
+      <li>Implement USB <em>device</em> mode first. USB host and OTG role switching are separate projects.</li>
+      <li>Preserve the existing <code>print</code> path and its bounded no-host behavior while migrating internals.</li>
+    </ul>
+    <div class="warning"><strong>Hardware boundary:</strong> ESP32-C6 USB Serial/JTAG is a fixed-function peripheral and must not masquerade as the general USB device controller. The planned multi-class stack targets ESP32-S3 DWC2 first. Any later chip is admitted only after its controller satisfies the same low-level contract.</div>
+  </section>
+
+  <section id="packages">
+    <h2>4. Proposed package architecture</h2>
+    <pre><code>device/
+  mmio/                 volatile Register8/16/32 primitives
+  gpio/                 Pin capability plus LED and Button devices
+  i2c/ spi/ uart/       typed ports, buses and portable constructors
+  clock/                monotonic clock and delay capability
+  usb/                  typed USB port, portable core and descriptors
+    cdcacm/ hid/ vendor/ ...
+  esp/
+    usbserialjtag/       fixed console adapter used by C6 and S3 targets
+    dwc2/                ESP32-S3 device-controller driver
+  esp32c6/               GPIO, IO mux, clocks, I2C, SPI, RMT, RNG
+  esp32s3/               GPIO, IO mux, clocks, I2C, SPI, GDMA, DWC2 glue
+  board/
+    m5nanoc6/            package board: exported devices and connectors
+    m5sticks3/           package board: exported devices and connectors</code></pre>
+    <p>The exact root name is confirmed at the start of implementation after checking import-path conventions. The important boundary is dependency direction:</p>
+    <pre><code>application → board → chip/controller → mmio
+           ↘ i2c/spi/usb constructor → capability interface ┘
+           ↘ USB class → USB core → controller interface</code></pre>
+    <p>Every hardware package declares <code>package board</code>, so applications can swap the import path without rewriting selectors. Portable code never imports a board or concrete ESP controller. The board package is the composition root: it binds reusable chip objects to physical pins and exposes them as named devices or typed connector descriptions.</p>
+  </section>
+
+  <section id="interfaces">
+    <h2>5. Board-first interface contracts</h2>
+    <p>The public API begins with the board, not the MCU. Applications should not configure IO muxes, choose controller numbers, or translate pin constants for ordinary board features.</p>
+    <pre><code>import (
+    board "renvo.dev/device/board/m5nanoc6"
+    "renvo.dev/device/i2c"
+    "renvo.dev/device/sensor/sgp30"
+)
+
+func appMain(args []string) int {
+    board.BlueLED.Set(true)
+
+    bus := i2c.New(board.Grove)
+    air := sgp30.New(bus)
+    reading, err := air.Measure()
+    // ...
+}</code></pre>
+
+    <h3>5.1 Exported board values</h3>
+    <p>A board exports two deliberately different kinds of value:</p>
+    <table>
+      <thead><tr><th>Kind</th><th>Examples</th><th>Behavior</th></tr></thead>
+      <tbody>
+        <tr><td>Attached device</td><td><code>board.BlueLED</code>, <code>board.Button</code>, <code>board.RGB</code>, <code>board.Display</code></td><td>Ready to use. Board-specific polarity, pins, power gates and reset wiring are already encoded by the value.</td></tr>
+        <tr><td>Connector/port</td><td><code>board.Grove</code>, <code>board.HeaderSPI</code>, <code>board.USB</code></td><td>A typed immutable description consumed by a portable constructor. It carries controller capability, pin routing, defaults and shared ownership state.</td></tr>
+      </tbody>
+    </table>
+    <p>Board globals are concrete, addressable values. Methods that mutate hardware use pointer receivers internally, while normal calls retain the direct form <code>board.BlueLED.Set(true)</code>. Attached-device methods perform idempotent lazy initialization on first use, so that call alone configures the IO mux, initial level and output enable safely; an application does not need a preceding <code>ConfigureBlueLED</code> call. Applications never receive raw GPIO numbers for an attached LED or button.</p>
+
+    <h3>5.2 Narrow capabilities below the board</h3>
+    <pre><code>// package gpio
+type Pin interface {
+    Configure(Config) error
+    Set(bool)
+    Get() bool
+}
+
+// package i2c
+type Controller interface {
+    Configure(sda, scl gpio.Pin, frequency uint32) error
+    Tx(address uint16, write, read []byte) error
+}
+
+type Port struct {
+    // Constructed by board packages; details are intentionally not needed by apps.
+}
+
+func New(port Port) *Bus
+
+// package clock
+type Source interface {
+    NowTicks() uint64
+    TicksPerSecond() uint64
+}</code></pre>
+    <p><code>i2c.New</code> returns a concrete bus bound to the controller and pins carried by the port. A board-provided port is valid by construction; transaction failures are returned from <code>Tx</code>. The same shape applies to <code>spi.New(board.HeaderSPI)</code> and <code>usb.New(board.USB, ...)</code>.</p>
+
+    <h3>5.3 Composition and ownership rules</h3>
+    <ul>
+      <li><strong>Names describe the PCB:</strong> use <code>BlueLED</code>, <code>Grove</code> and <code>Display</code> when those names appear in board documentation. Do not make users rediscover <code>GPIO7</code> or <code>I2C0</code>.</li>
+      <li><strong>Devices are values:</strong> an active-low LED is a <code>gpio.LED</code> configured with polarity; a button is a <code>gpio.Button</code> configured with pull and active level. Their API is board-independent, initialization is idempotent, and the first ordinary operation makes the device ready.</li>
+      <li><strong>Connectors are descriptions:</strong> <code>board.Grove</code> identifies its SDA/SCL pins, usable controller, default frequency and ownership token. It does not eagerly start the bus during package initialization.</li>
+      <li><strong>Constructors choose policy:</strong> <code>i2c.New</code> turns an I²C port into a bus. Sensor constructors consume the small transaction interface, so <code>sgp30.New(bus)</code> is independent of board and chip.</li>
+      <li><strong>One owner per controller:</strong> copied port values refer to shared controller state. Conflicting live configurations return a stable busy/configuration error rather than silently reprogramming hardware.</li>
+      <li><strong>Time:</strong> expose a monotonic clock plus a polling delay helper. Frequency conversion lives with the clock implementation.</li>
+      <li><strong>MMIO:</strong> typed register wrappers centralize volatile access and read/modify/write intent. Registers that are write-one-to-clear or set/clear aliases expose operations that prevent accidental generic RMW.</li>
+      <li><strong>Errors:</strong> use a small stable set of sentinel errors—invalid configuration, busy, timeout, NAK, short transfer, disconnected—without formatted allocation in low-level code.</li>
+    </ul>
+    <div class="decision"><strong>API rule:</strong> board-level selectors are concrete and ergonomic; interfaces appear at reusable driver seams. Hot loops and interrupt/poll handlers operate on concrete receivers so the generated code remains predictable.</div>
+  </section>
+
+  <section id="usb">
+    <h2>6. USB stack architecture</h2>
+    <h3>6.1 Controller contract</h3>
+    <p>The portable core consumes events and submits endpoint transfers. It does not read DWC2 registers.</p>
+    <pre><code>type DeviceController interface {
+    Start(DeviceConfig) error
+    Connect() error
+    Disconnect()
+    Poll(*Event) bool
+    ConfigureEndpoint(EndpointConfig) error
+    SubmitIn(endpoint uint8, data []byte) error
+    PrepareOut(endpoint uint8, data []byte) error
+    Stall(endpoint uint8, in bool)
+    SetAddress(address uint8)
+}</code></pre>
+    <p><code>Poll</code> emits reset, suspend, resume, setup, IN-complete, OUT-complete and error events. Address application is delayed until the status stage completes. The controller owns FIFO/DMA mechanics; the core owns USB protocol state.</p>
+
+    <h3>6.2 Portable device core</h3>
+    <ul>
+      <li>Explicit states: detached, default, addressed, configured and suspended.</li>
+      <li>A dedicated EP0 state machine handles setup, bounded data stages, status stages, cancellation on a new setup packet, stalls, and standard requests.</li>
+      <li>Descriptor writing is deterministic and capacity checked. Device, configuration, interface, endpoint, string, BOS and device-qualifier responses share one encoder.</li>
+      <li>A composite builder allocates interface numbers, string indexes and endpoint addresses once at startup, then freezes the descriptor graph.</li>
+      <li>Class/vendor requests route by recipient and interface ownership. Unknown or malformed requests stall EP0.</li>
+      <li><code>Device.Poll()</code> drains a bounded number of controller events and class work per call so applications remain responsive without goroutines.</li>
+    </ul>
+
+    <h3>6.3 ESP32-S3 DWC2 driver</h3>
+    <ol>
+      <li>Power and clock the internal PHY through the ESP USB wrapper; force device mode and validate the Synopsys core identity/configuration.</li>
+      <li>Perform core reset and RX/TX FIFO sizing from the composed endpoint requirements.</li>
+      <li>Implement EP0 receive status decoding, FIFO reads, FIFO-empty writes, transfer-complete handling and bus-reset recovery.</li>
+      <li>Add non-control bulk, interrupt and isochronous endpoints incrementally. Keep ISR work to acknowledging/capturing state; protocol advancement occurs in <code>Poll</code>.</li>
+      <li>Make timeouts and FIFO bounds explicit. A disconnected host or wedged endpoint must not block the whole application.</li>
+    </ol>
+
+    <h3>6.4 Fixed USB Serial/JTAG adapter</h3>
+    <p>Move duplicated C6/S3 console mechanics behind a concrete writer/reader abstraction shared by target glue. It remains available for <code>print</code> and recovery logging even when S3 DWC2 runs a composite device. It is not registered as a <code>DeviceController</code>.</p>
+  </section>
+
+  <section id="classes">
+    <h2>7. USB class delivery sequence</h2>
+    <table>
+      <thead><tr><th>Order</th><th>Function</th><th>Why here</th><th>Completion evidence</th></tr></thead>
+      <tbody>
+        <tr><td>0</td><td>Enumeration + vendor loopback</td><td>Exercises EP0 and bulk endpoints with the smallest protocol surface.</td><td>Descriptor golden tests, emulator control script, bidirectional bulk payloads.</td></tr>
+        <tr><td>1</td><td>CDC ACM</td><td>Provides a practical serial channel and validates composite IAD, notifications and line coding.</td><td>Host opens port, sets line state, and echoes binary data.</td></tr>
+        <tr><td>2</td><td>HID + WebUSB/vendor</td><td>HID validates interrupt endpoints; WebUSB adds BOS and vendor control requests.</td><td>Keyboard/mouse report test and browser-compatible landing-page descriptors.</td></tr>
+        <tr><td>3</td><td>Mass storage</td><td>Adds BOT state, bulk recovery and SCSI commands without isochronous timing.</td><td>Read-only RAM disk first, then writable block-device interface and reset recovery.</td></tr>
+        <tr><td>4</td><td>MIDI</td><td>Builds on bulk endpoints but has nontrivial class descriptors and packet framing.</td><td>Bidirectional MIDI event stream.</td></tr>
+        <tr><td>5</td><td>CDC Ethernet</td><td>Needs a deliberate host-compatibility choice and network frame buffering.</td><td>CDC-ECM baseline; NCM only if throughput evidence justifies it. No implicit RNDIS promise.</td></tr>
+        <tr><td>6</td><td>Audio</td><td>Requires isochronous scheduling, alternate settings and clock feedback.</td><td>Audio 1.0 speaker/microphone profile with measured underrun behavior.</td></tr>
+        <tr><td>7</td><td>MTP</td><td>Large command/data/response protocol and storage model.</td><td>Host lists and transfers objects using a bounded object-store interface.</td></tr>
+        <tr><td>8</td><td>ADB</td><td>Vendor protocol with authentication and stream multiplexing; highest policy surface.</td><td>Explicitly scoped transport and authentication design before implementation.</td></tr>
+      </tbody>
+    </table>
+    <div class="decision"><strong>Delivery rule:</strong> the refactor, USB core, ESP32-S3 controller, and every class listed in issue #347 are delivered together in one implementation PR. The sequence above defines the order of development and review checkpoints within that branch; it does not split the work into follow-up PRs. Audio, MTP and ADB are implemented after the shared transfer paths are stable, but before the PR is considered complete.</div>
+  </section>
+
+  <section id="emulator">
+    <h2>8. Emulator-first development with renvo_emu</h2>
+    <p>The adjacent <code>tinyrange/renvo_emu</code> repository already contains the useful S3 substrate: USB wrapper state, a DWC2 device model, endpoint FIFOs and interrupts, and a scripted functional host. Use that as executable specification, not merely a smoke-test runner.</p>
+    <ol>
+      <li>Add tiny Renvo firmware fixtures that expose one behavior at a time: reset handling, each standard request, address timing, configuration, stall recovery, endpoint IN/OUT and composite routing.</li>
+      <li>Extend the emulator host script only when a new observable host action is needed. Keep assertions at the USB transaction level rather than recognizing a particular firmware image.</li>
+      <li>For every emulator-model gap uncovered by valid firmware, first add a focused emulator regression, then extend the model. Do not weaken firmware to accommodate an inaccurate model.</li>
+      <li>Capture deterministic transfer traces for failures. Debug logging remains opt-in and tests compare structured outcomes, not log strings.</li>
+      <li>Run the same application-level protocol vectors against a fake in-memory controller, the DWC2 emulator, and physical S3 hardware.</li>
+    </ol>
+    <p>The C6 emulator continues testing the fixed Serial/JTAG adapter and board refactor. It is not used to claim support for arbitrary USB classes.</p>
+  </section>
+
+  <section id="phases">
+    <h2>9. Single-PR delivery phases</h2>
+    <p>All phases below are commits or reviewable checkpoints on one implementation branch and one PR. The branch remains draft while any phase is incomplete, and it becomes mergeable only after the final definition of done is satisfied.</p>
+    <h3>Phase A — contracts and one vertical refactor</h3>
+    <ul><li>Add MMIO primitives and the minimal <code>gpio</code>, <code>i2c</code>, <code>spi</code> and <code>clock</code> capability interfaces.</li><li>Refactor M5NanoC6 GPIO/LED/button into concrete ESP32-C6 structs exported by <code>package board</code>.</li><li>Make <code>board.BlueLED.Set(true)</code> a complete, safe first operation with no hidden prerequisite call.</li><li>Keep compatibility wrappers temporarily so examples remain green.</li><li>Add frontend acceptance coverage for package globals, pointer-receiver calls, interface fields and the exact constructor patterns used by device packages.</li></ul>
+    <div class="exit"><strong>Exit:</strong> a blink application consists of a board import plus <code>board.BlueLED.Set(...)</code>; blink and button/RGB applications pass in <code>renvo_emu</code> and on the NanoC6; generated output contains real interface semantics, not special cases.</div>
+
+    <h3>Phase B — buses, time and board migration</h3>
+    <ul><li>Move clocks, software/hardware I²C, SPI, RMT/RNG and board-attached device drivers behind the new seams.</li><li>Migrate M5StickS3 display and buttons without combining display policy with SPI/GDMA ownership.</li><li>Delete compatibility wrappers only after both example trees use the new packages.</li></ul>
+    <div class="exit"><strong>Exit:</strong> current microcontroller examples import reusable packages; example-local code contains applications and wiring only.</div>
+
+    <h3>Phase C — USB foundation</h3>
+    <ul><li>Add setup packet, descriptors, device states, EP0 and a fake controller test double.</li><li>Add the S3 DWC2 controller through reset, enumeration and vendor bulk loopback.</li><li>Extract the fixed Serial/JTAG adapter without changing <code>print</code> behavior.</li></ul>
+    <div class="exit"><strong>Exit:</strong> S3 enumerates deterministically in <code>renvo_emu</code> and on hardware, passes malformed-request/stall/reset cases, and performs bidirectional bulk transfers.</div>
+
+    <h3>Phase D — useful composite device</h3>
+    <ul><li>Implement CDC ACM, HID and WebUSB/vendor functions.</li><li>Prove endpoint/interface allocation with a CDC + HID + vendor composite configuration.</li><li>Add host-specific checks on Linux, macOS, Windows and a WebUSB-capable browser where applicable.</li></ul>
+    <div class="exit"><strong>Exit:</strong> the composite firmware works without descriptor forks per operating system and survives reconnect, reset and repeated configuration.</div>
+
+    <h3>Phase E — advanced classes</h3>
+    <p>Deliver Mass Storage, MIDI, CDC Ethernet, Audio, MTP and ADB in the sequence above. Each receives its own protocol package, emulator host coverage, memory budget and hardware demonstration.</p>
+  </section>
+
+  <section id="testing">
+    <h2>10. Verification matrix</h2>
+    <table>
+      <thead><tr><th>Layer</th><th>Required tests</th><th>Gate</th></tr></thead>
+      <tbody>
+        <tr><td>Frontend/compiler</td><td>Struct receivers, interface assignment/calls, fixed arrays, slices, error returns and polling state machines.</td><td><code>./tools/check frontend 'focused_filter'</code>, then preflight.</td></tr>
+        <tr><td>Portable device packages</td><td>Host-Go unit tests for descriptors, routing, class framing, boundary lengths and malformed inputs; Renvo acceptance tests for executable semantics.</td><td>All checked-in expected output remains deterministic.</td></tr>
+        <tr><td>Controller</td><td>Fake-controller event sequences plus DWC2 register/transfer scenarios in <code>renvo_emu</code>.</td><td>Reset, disconnect, stall and timeout paths are covered, not only happy-path enumeration.</td></tr>
+        <tr><td>Firmware integration</td><td>Bounded emulator runs for NanoC6 board behavior and S3 USB host scripts.</td><td>No hangs; exact host-visible descriptors and payloads.</td></tr>
+        <tr><td>Physical hardware</td><td>M5NanoC6 for refactor/console; the attached M5StickS3 for native USB-OTG class-stack development.</td><td>Cold boot, warm reset, unplug/replug and sustained transfer soak.</td></tr>
+        <tr><td>Repository</td><td>Focused backend/frontend filters while iterating, then <code>./tools/check preflight</code> throughout the implementation PR.</td><td>No performance/resource gate is weakened. Full validation remains merge-queue work unless explicitly requested.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="risks">
+    <h2>11. Risks and decisions to lock early</h2>
+    <ul>
+      <li><strong>Frontend gaps:</strong> prove the intended interface patterns in a small Phase A vertical slice. Fix general language semantics with regressions instead of reshaping APIs around a compiler bug.</li>
+      <li><strong>DWC2 complexity:</strong> begin with EP0 and one bulk pair. FIFO sizing, reset ordering and W1C register behavior receive dedicated tests before class work.</li>
+      <li><strong>Interrupt support:</strong> polling is the baseline API and correctness path. Interrupts may reduce latency later by feeding the same event queue; class code must not depend on ISR execution.</li>
+      <li><strong>Memory:</strong> every function declares descriptor bytes, endpoint count, FIFO words and transfer-buffer bytes. Composite construction fails clearly when the controller budget is exceeded.</li>
+      <li><strong>Interface overhead:</strong> benchmark code size and critical loops at each migration slice. Use interfaces for substitution, concrete types for ownership and hot paths.</li>
+      <li><strong>Host variance:</strong> descriptor correctness is necessary but insufficient. Keep OS-specific observations in tests and documentation, not scattered conditionals in the core.</li>
+      <li><strong>Shared S3 PHY:</strong> the M5StickS3 currently enumerates through the fixed USB Serial/JTAG function. DWC2 firmware must deliberately route the internal PHY to USB-OTG, so the debug serial device may disappear while a custom device is active. Preserve a recovery/flashing path and use another observable output when testing early controller bring-up.</li>
+      <li><strong>API stability:</strong> mark device APIs experimental until CDC ACM, HID and vendor composite operation is proven. Stabilize the narrow interfaces before advanced class work.</li>
+    </ul>
+    <h3>Decisions required during Phase C</h3>
+    <ol><li>Final package root and versioning policy for device APIs.</li><li>Whether the first DWC2 driver uses FIFO-only transfers or introduces GDMA after the FIFO path is correct.</li><li>Confirm the M5StickS3 USB connector exposes the S3 internal PHY path required by DWC2; use it as the qualification board once the emulator enumeration fixture passes.</li><li>VID/PID policy for examples and tests; no project-wide production identifier is implied.</li></ol>
+  </section>
+
+  <section id="done">
+    <h2>12. Definition of done</h2>
+    <h3>Issue 348 — microcontroller refactor</h3>
+    <ul><li>GPIO, time, buses and reusable device drivers are concrete structs satisfying documented narrow interfaces.</li><li>Board-attached hardware is directly usable through selectors such as <code>board.BlueLED.Set(true)</code>; external buses are created from named connectors such as <code>i2c.New(board.Grove)</code>.</li><li>M5NanoC6 and M5StickS3 examples use the shared packages and retain emulator/hardware behavior.</li><li>Raw chip addresses, GPIO numbers and controller selection do not leak into applications or board-agnostic drivers.</li><li>Temporary compatibility wrappers and duplicated board logic are removed.</li></ul>
+    <h3>Issue 347 — ESP32 USB stack</h3>
+    <ul><li>Portable EP0, descriptor, composite and class logic is independent of DWC2.</li><li>ESP32-S3 enumerates and transfers through the controller interface in emulator and on hardware.</li><li>The fixed ESP USB Serial/JTAG path is explicit and preserved, especially on C6.</li><li>Every requested class—Mass Storage, HID, CDC Ethernet, CDC ACM, MIDI, Audio, WebUSB/vendor, MTP and ADB—is implemented and validated in the same PR; none is deferred to a follow-up.</li><li>Public examples explain memory budgets, polling requirements, host compatibility and recovery behavior.</li></ul>
+    <p class="meta">Source issues: <a href="https://github.com/tinyrange/renvo/issues/348">#348 Refactor Microcontroller Code</a> and <a href="https://github.com/tinyrange/renvo/issues/347">#347 Add ESP32 USB Stack</a>.</p>
+  </section>
+</main>
+</body>
+</html>
