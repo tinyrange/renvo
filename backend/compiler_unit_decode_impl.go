@@ -421,6 +421,7 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 	}
 	renvo_runtime_ArenaDiscardBytes(src[:textStart])
 	renvo_runtime_ArenaDiscardBytes(src[textEnd:])
+	renvoSetCompilerIntWidth(prog)
 	prog.ok = true
 	return true
 }

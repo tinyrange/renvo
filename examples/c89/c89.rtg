@@ -1,0 +1,793 @@
+definition 1
+unit c89
+implements direct_emitter_v1
+
+# This is a real CompilerJIT backend. The ordinary backend lowering feeds its
+# direct_emitter_v1 bindings; the image writer turns that lowered stream into a
+# self-contained ISO C89 translation unit.
+go backend {
+	const c89OpExit = 1
+	const c89OpFrame = 2
+	const c89OpMoveImmediate = 3
+	const c89OpMove = 4
+	const c89OpPushRegister = 5
+	const c89OpPushImmediate = 6
+	const c89OpPopRegister = 7
+	const c89OpLoadFrame = 8
+	const c89OpStoreFrame = 9
+	const c89OpAddressFrame = 10
+	const c89OpLoadMemory = 11
+	const c89OpStoreMemory = 12
+	const c89OpLoadIndex = 13
+	const c89OpStoreIndex = 14
+	const c89OpAdd = 15
+	const c89OpSubtract = 16
+	const c89OpMultiply = 17
+	const c89OpDivide = 18
+	const c89OpRemainder = 19
+	const c89OpAnd = 20
+	const c89OpOr = 21
+	const c89OpXor = 22
+	const c89OpShiftLeft = 23
+	const c89OpShiftRightSigned = 24
+	const c89OpShiftRightUnsigned = 25
+	const c89OpIncrement = 26
+	const c89OpCompare = 27
+	const c89OpSetCondition = 28
+	const c89OpJump = 29
+	const c89OpJumpCondition = 30
+	const c89OpCall = 31
+	const c89OpReturn = 32
+	const c89OpSyscall = 33
+	const c89OpCopyBytes = 34
+	const c89OpAddress = 35
+	const c89OpWrite = 36
+	const c89OpCallIndirect = 37
+	const c89OpOpen = 38
+	const c89OpClose = 39
+	const c89OpRead = 40
+	const c89OpChmod = 41
+	const c89OpReadAt = 42
+	const c89OpWriteAt = 43
+	const c89OpBuildArgsEnv = 44
+	const c89OpDecrement = 45
+	const c89OpHostSyscall = 46
+	const c89HostArgsBytes = 65536
+
+	const c89DataBase = 256
+	const c89StackBytes = 1048576
+
+	func c89EmitRegister(out *RTGEmitter, operation int, register int) {
+		out.Int8(operation)
+		out.Int8(register)
+	}
+
+	func c89EmitRegisters(
+		out *RTGEmitter, operation int, destination int, source int,
+	) {
+		out.Int8(operation)
+		out.Int8(destination)
+		out.Int8(source)
+	}
+
+	func c89EmitRegisterImmediate(
+		out *RTGEmitter, operation int, register int, value int,
+	) {
+		out.Int8(operation)
+		out.Int8(register)
+		out.Int32(value)
+	}
+
+	func c89Move(
+		out *RTGEmitter, destination RTGRegister, source RTGRegister,
+	) {
+		c89EmitRegisters(out, c89OpMove, destination.Code, source.Code)
+	}
+
+	func c89Address(
+		out *RTGEmitter, destination RTGRegister, address RTGAddress,
+	) {
+		if RTGAddressValid(address) {
+			c89EmitRegisterImmediate(
+				out, c89OpMoveImmediate, destination.Code, address.Addend)
+			RTGAddressRelocAt(out, address, out.Len()-4)
+			return
+		}
+		out.Int8(c89OpAddress)
+		out.Int8(destination.Code)
+		if address.Base.Valid {
+			out.Int8(address.Base.Code)
+		} else {
+			out.Int8(255)
+		}
+		if address.Index.Valid {
+			out.Int8(address.Index.Code)
+		} else {
+			out.Int8(255)
+		}
+		scale := address.Scale
+		if scale == 0 {
+			scale = 1
+		}
+		out.Int32(scale)
+		out.Int32(address.Displacement)
+	}
+
+	func c89LoadWidth(
+		out *RTGEmitter, destination RTGRegister,
+		address RTGAddress, size int,
+	) {
+		if RTGAddressValid(address) {
+			c89Address(out, c89vm32Scratch, address)
+			address = RTGAddress{Base: c89vm32Scratch}
+		}
+		if address.Index.Valid {
+			scale := address.Scale
+			if scale == 0 {
+				scale = 1
+			}
+			out.Int8(c89OpLoadIndex)
+			out.Int8(destination.Code)
+			out.Int8(address.Base.Code)
+			out.Int8(address.Index.Code)
+			out.Int8(scale)
+			out.Int32(address.Displacement)
+			out.Int8(size)
+			return
+		}
+		out.Int8(c89OpLoadMemory)
+		out.Int8(destination.Code)
+		out.Int8(address.Base.Code)
+		out.Int32(address.Displacement)
+		out.Int8(size)
+	}
+
+	func c89LoadNative(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+		c89LoadWidth(out, destination, address, 4)
+	}
+	func c89LoadI32(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+		c89LoadWidth(out, destination, address, 4)
+	}
+	func c89LoadU32(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+		c89LoadWidth(out, destination, address, 4)
+	}
+	func c89LoadI16(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+		c89LoadWidth(out, destination, address, 18)
+	}
+	func c89LoadU16(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+		c89LoadWidth(out, destination, address, 2)
+	}
+	func c89LoadI8(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+		c89LoadWidth(out, destination, address, 17)
+	}
+	func c89LoadU8(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+		c89LoadWidth(out, destination, address, 1)
+	}
+
+	func c89StoreWidth(
+		out *RTGEmitter, address RTGAddress,
+		source RTGRegister, size int,
+	) {
+		if RTGAddressValid(address) {
+			c89Address(out, c89vm32Scratch, address)
+			address = RTGAddress{Base: c89vm32Scratch}
+		}
+		if address.Index.Valid {
+			scale := address.Scale
+			if scale == 0 {
+				scale = 1
+			}
+			out.Int8(c89OpStoreIndex)
+			out.Int8(source.Code)
+			out.Int8(address.Base.Code)
+			out.Int8(address.Index.Code)
+			out.Int8(scale)
+			out.Int32(address.Displacement)
+			out.Int8(size)
+			return
+		}
+		out.Int8(c89OpStoreMemory)
+		out.Int8(source.Code)
+		out.Int8(address.Base.Code)
+		out.Int32(address.Displacement)
+		out.Int8(size)
+	}
+
+	func c89StoreNative(out *RTGEmitter, address RTGAddress, source RTGRegister) {
+		c89StoreWidth(out, address, source, 4)
+	}
+	func c89StoreU32(out *RTGEmitter, address RTGAddress, source RTGRegister) {
+		c89StoreWidth(out, address, source, 4)
+	}
+	func c89StoreU16(out *RTGEmitter, address RTGAddress, source RTGRegister) {
+		c89StoreWidth(out, address, source, 2)
+	}
+	func c89StoreU8(out *RTGEmitter, address RTGAddress, source RTGRegister) {
+		c89StoreWidth(out, address, source, 1)
+	}
+
+	func c89Binary(out *RTGEmitter, operation int, destination RTGRegister, source RTGRegister) {
+		c89EmitRegisters(out, operation, destination.Code, source.Code)
+	}
+	func c89Add(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		c89Binary(out, c89OpAdd, destination, source)
+	}
+	func c89Subtract(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		c89Binary(out, c89OpSubtract, destination, source)
+	}
+	func c89Multiply(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		c89Binary(out, c89OpMultiply, destination, source)
+	}
+	func c89BitAnd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		c89Binary(out, c89OpAnd, destination, source)
+	}
+	func c89BitOr(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		c89Binary(out, c89OpOr, destination, source)
+	}
+	func c89BitXor(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		c89Binary(out, c89OpXor, destination, source)
+	}
+	func c89Compare(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		c89Binary(out, c89OpCompare, left, right)
+	}
+	func c89Test(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		c89Move(out, c89vm32Scratch, left)
+		c89Binary(out, c89OpAnd, c89vm32Scratch, right)
+		c89EmitRegisterImmediate(out, c89OpMoveImmediate, c89vm32Primary.Code, 0)
+		c89Binary(out, c89OpCompare, c89vm32Scratch, c89vm32Primary)
+	}
+	func c89Increment(out *RTGEmitter, operand RTGRegister) {
+		c89EmitRegister(out, c89OpIncrement, operand.Code)
+	}
+	func c89Decrement(out *RTGEmitter, operand RTGRegister) {
+		c89EmitRegister(out, c89OpDecrement, operand.Code)
+	}
+
+	func c89ShiftImmediate(
+		out *RTGEmitter, operation int, operand RTGRegister, value byte,
+	) {
+		c89EmitRegisterImmediate(
+			out, c89OpMoveImmediate, c89vm32Scratch.Code, int(value))
+		c89Binary(out, operation, operand, c89vm32Scratch)
+	}
+	func c89ShiftLeftImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		c89ShiftImmediate(out, c89OpShiftLeft, operand, value)
+	}
+	func c89ShiftRightUnsignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		c89ShiftImmediate(out, c89OpShiftRightUnsigned, operand, value)
+	}
+	func c89ShiftRightSignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		c89ShiftImmediate(out, c89OpShiftRightSigned, operand, value)
+	}
+
+	func c89Call(out *RTGEmitter, label RTGLabel) {
+		out.Int8(c89OpCall)
+		at := out.Len()
+		out.Int32(0)
+		out.RelocAt(at, RTGLabelIndex(label))
+		out.Int32(0)
+	}
+	func c89CallIndirectWordCount(
+		out *RTGEmitter, target RTGRegister, wordCount int,
+	) {
+		out.Int8(c89OpCallIndirect)
+		out.Int8(target.Code)
+		out.Int32(wordCount)
+	}
+	func c89CallIndirect(out *RTGEmitter, target RTGRegister) {
+		c89CallIndirectWordCount(out, target, 0)
+	}
+	func c89Jump(out *RTGEmitter, label RTGLabel) {
+		out.Int8(c89OpJump)
+		at := out.Len()
+		out.Int32(0)
+		out.RelocAt(at, RTGLabelIndex(label))
+	}
+	func c89JumpCondition(out *RTGEmitter, condition RTGCondition, label RTGLabel) {
+		out.Int8(c89OpJumpCondition)
+		out.Int8(condition.Code)
+		at := out.Len()
+		out.Int32(0)
+		out.RelocAt(at, RTGLabelIndex(label))
+	}
+	func c89SetCondition(out *RTGEmitter, condition RTGCondition, destination RTGRegister) {
+		out.Int8(c89OpSetCondition)
+		out.Int8(condition.Code)
+		out.Int8(destination.Code)
+	}
+	func c89Return(out *RTGEmitter) {
+		out.Int8(c89OpReturn)
+	}
+	func c89Leave(out *RTGEmitter) {
+	}
+	func c89HostSyscall(out *RTGEmitter) {
+		out.Int8(c89OpHostSyscall)
+	}
+	func c89Write(out *RTGEmitter) {
+		out.Int8(c89OpWrite)
+	}
+	func c89Open(out *RTGEmitter) {
+		out.Int8(c89OpOpen)
+	}
+	func c89Close(out *RTGEmitter) {
+		out.Int8(c89OpClose)
+	}
+	func c89Read(out *RTGEmitter) {
+		out.Int8(c89OpRead)
+	}
+	func c89Chmod(out *RTGEmitter) {
+		out.Int8(c89OpChmod)
+	}
+	func c89ReadAt(out *RTGEmitter) {
+		out.Int8(c89OpReadAt)
+	}
+	func c89WriteAt(out *RTGEmitter) {
+		out.Int8(c89OpWriteAt)
+	}
+	func c89StaticCall(out *RTGEmitter, importID int, wordCount int) {
+		for i := 0; i < wordCount; i++ {
+			c89PopRegister(out, c89vm32Scratch)
+		}
+		result := -1
+		if importID >= 0 && importID < out.StaticImportCount() &&
+			out.StaticImportName(importID) == "CC_SHA256" {
+			// The backend already contains its defined-operation SHA-256 fallback.
+			// Returning zero selects it when ISO C89 cannot provide CommonCrypto.
+			result = 0
+		}
+		c89MoveImmediate(out, c89vm32Primary, int64(result))
+	}
+	func c89MoveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
+		c89EmitRegisterImmediate(out, c89OpMoveImmediate, destination.Code, int(value))
+	}
+	func c89VariableShift(out *RTGEmitter, direction RTGShiftDirection, signed bool) {
+		c89Move(out, c89vm32Scratch, c89vm32Primary)
+		c89Move(out, c89vm32Primary, c89vm32Tertiary)
+		operation := c89OpShiftRightUnsigned
+		if direction == RTGShiftLeft {
+			operation = c89OpShiftLeft
+		} else if signed {
+			operation = c89OpShiftRightSigned
+		}
+		c89Binary(out, operation, c89vm32Primary, c89vm32Scratch)
+	}
+	func c89SignedDivide(out *RTGEmitter, remainder bool) {
+		operation := c89OpDivide
+		if remainder {
+			operation = c89OpRemainder
+		}
+		c89Move(out, c89vm32Scratch, c89vm32Primary)
+		c89Move(out, c89vm32Primary, c89vm32Tertiary)
+		c89Binary(out, operation, c89vm32Primary, c89vm32Scratch)
+	}
+	func c89CopyBytes(out *RTGEmitter) {
+		out.Int8(c89OpCopyBytes)
+	}
+
+	func c89PatchRelocations(out *RTGEmitter) {
+		dataBase := c89DataBase
+		bssBase := RTGAlignValue(dataBase+len(out.Data()), 8)
+		for i := 0; i < out.RelocationCount(); i++ {
+			at := out.RelocationOffset(i)
+			target := out.LabelPosition(out.RelocationLabel(i))
+			if target >= 0 {
+				RTGPut32At(out.Code(), at, target+RTGGet32At(out.Code(), at))
+			}
+		}
+		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
+			at := out.AbsoluteRelocationOffset(i)
+			target, resolved := RTGResolveAbsoluteRelocation(out,
+				out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i),
+				dataBase, bssBase)
+			if resolved {
+				RTGPut32At(out.Code(), at, target)
+			}
+		}
+	}
+
+	func c89FrameStart(out *RTGEmitter) int {
+		out.Int8(c89OpFrame)
+		at := out.Len()
+		out.Int32(0)
+		return at
+	}
+	func c89FrameFinish(out *RTGEmitter, framePatch int, stackUsed int) {
+		out.PatchUint32(framePatch, RTGAlignValue(stackUsed, 8))
+	}
+	func c89PushRegister(out *RTGEmitter, source RTGRegister) {
+		c89EmitRegister(out, c89OpPushRegister, source.Code)
+	}
+	func c89PushImmediate(out *RTGEmitter, value int) {
+		out.Int8(c89OpPushImmediate)
+		out.Int32(value)
+	}
+	func c89PopRegister(out *RTGEmitter, destination RTGRegister) {
+		c89EmitRegister(out, c89OpPopRegister, destination.Code)
+	}
+	func c89LoadFrame(out *RTGEmitter, destination RTGRegister, offset int) {
+		c89EmitRegisterImmediate(out, c89OpLoadFrame, destination.Code, offset)
+	}
+	func c89StoreFrame(out *RTGEmitter, offset int, source RTGRegister) {
+		c89EmitRegisterImmediate(out, c89OpStoreFrame, source.Code, offset)
+	}
+	func c89AddressFrame(out *RTGEmitter, destination RTGRegister, offset int) {
+		c89EmitRegisterImmediate(out, c89OpAddressFrame, destination.Code, offset)
+	}
+	func c89StoreParamWord(out *RTGEmitter, word int, offset int) {
+		registers := []RTGRegister{
+			{Code: 3, Valid: true}, {Code: 4, Valid: true},
+			{Code: 1, Valid: true}, {Code: 2, Valid: true},
+			{Code: 5, Valid: true}, {Code: 6, Valid: true},
+		}
+		register := c89vm32Primary
+		if word >= 0 && word < len(registers) {
+			register = registers[word]
+		} else {
+			c89PopRegister(out, register)
+		}
+		c89StoreFrame(out, offset, register)
+	}
+	func c89CallWordCount(out *RTGEmitter, label RTGLabel, wordCount int) {
+		registers := []RTGRegister{
+			{Code: 3, Valid: true}, {Code: 4, Valid: true},
+			{Code: 1, Valid: true}, {Code: 2, Valid: true},
+			{Code: 5, Valid: true}, {Code: 6, Valid: true},
+		}
+		limit := wordCount
+		if limit > len(registers) {
+			limit = len(registers)
+		}
+		for i := 0; i < limit; i++ {
+			c89PopRegister(out, registers[i])
+		}
+		c89EmitRegisterImmediate(
+			out, c89OpMoveImmediate, c89vm32Scratch.Code, 0)
+		at := out.Len()-4
+		out.RelocAt(at, RTGLabelIndex(label))
+		c89CallIndirectWordCount(out, c89vm32Scratch, wordCount)
+	}
+	func c89HostedEntry(out *RTGEmitter, parameterCount int, stateOffset int) bool {
+		_ = stateOffset
+		if parameterCount < 0 || parameterCount > 2 {
+			return false
+		}
+		if parameterCount > 0 {
+			argsOffset := out.ReserveBSS(c89HostArgsBytes, 16)
+			out.Int8(c89OpBuildArgsEnv)
+			at := out.Len()
+			out.Int32(argsOffset)
+			out.AbsoluteReloc(at, argsOffset, RTGRelocationAbsoluteBSS)
+			out.Int8(parameterCount)
+		}
+		return true
+	}
+	func c89FreestandingEntry(out *RTGEmitter, parameterCount int, stateOffset int) bool {
+		_ = out
+		_ = stateOffset
+		return parameterCount >= 0 && parameterCount <= 2
+	}
+	func c89Exit(out *RTGEmitter, status RTGRegister) {
+		if status.Code != c89vm32Primary.Code {
+			c89Move(out, c89vm32Primary, status)
+		}
+		out.Int8(c89OpExit)
+	}
+
+	func c89Text(out []byte, value string) []byte {
+		for i := 0; i < len(value); i++ {
+			out = append(out, value[i])
+		}
+		return out
+	}
+	func c89Decimal(out []byte, value int) []byte {
+		if value == 0 {
+			return append(out, '0')
+		}
+		if value < 0 {
+			out = append(out, '-')
+			value = -value
+		}
+		var digits []byte
+		for value > 0 {
+			digits = append(digits, byte('0'+value%10))
+			value /= 10
+		}
+		for i := len(digits)-1; i >= 0; i-- {
+			out = append(out, digits[i])
+		}
+		return out
+	}
+	func c89ByteArray(out []byte, name string, data []byte) []byte {
+		out = c89Text(out, "static unsigned char ")
+		out = c89Text(out, name)
+		out = c89Text(out, "[] = {\n")
+		for i := 0; i < len(data); i++ {
+			if i%16 == 0 {
+				out = c89Text(out, "    ")
+			}
+			out = c89Decimal(out, int(data[i]))
+			out = append(out, ',')
+			if i%16 == 15 || i+1 == len(data) {
+				out = append(out, '\n')
+			} else {
+				out = append(out, ' ')
+			}
+		}
+		return c89Text(out, "};\n")
+	}
+	func c89ImageProfile(
+		out *RTGEmitter, automaticCarrier bool, hosted bool,
+	) []byte {
+		code := out.Code()
+		data := out.Data()
+		bssBase := RTGAlignValue(c89DataBase+len(data), 8)
+		memorySize := bssBase+out.BSSSize()+c89StackBytes
+		var result []byte
+		result = c89Text(result, "#include <limits.h>\n")
+		if hosted {
+			result = c89Text(result, "#include <stdio.h>\n")
+			result = c89Text(result, "#include <stdlib.h>\n#include <string.h>\n#include <dirent.h>\n#include <sys/types.h>\n#include <sys/stat.h>\n")
+		}
+		result = c89Text(result, "typedef char renvo_assumption_char_bit[(CHAR_BIT == 8) ? 1 : -1];\n")
+		if automaticCarrier {
+			result = c89Text(result, "#if UINT_MAX == 4294967295UL\ntypedef unsigned int rgu32;\n#elif ULONG_MAX == 4294967295UL\ntypedef unsigned long rgu32;\n#else\n#error RENVO_C89_REQUIRES_U32\n#endif\n")
+		} else {
+			result = c89Text(result, "typedef char renvo_assumption_unsigned_int_width[(UINT_MAX == 4294967295UL) ? 1 : -1];\ntypedef unsigned int rgu32;\n")
+		}
+		result = c89Text(result, "typedef char renvo_assumption_pointer_width[(sizeof(void *) * CHAR_BIT == 32) ? 1 : -1];\n")
+		result = c89Text(result, "#define RGMEMS ")
+		result = c89Decimal(result, memorySize)
+		result = c89Text(result, "UL\n#define RGDATA ")
+		result = c89Decimal(result, c89DataBase)
+		result = c89Text(result, "UL\n#define RGBSS ")
+		result = c89Decimal(result, bssBase)
+		result = c89Text(result, "UL\n")
+		result = c89ByteArray(result, "rgcod", code)
+		if len(data) == 0 {
+			data = []byte{0}
+		}
+		result = c89ByteArray(result, "rgdat", data)
+		result = c89Text(result, "static unsigned char rgmem[RGMEMS];\n")
+		if hosted {
+			result = c89Text(result, "static FILE *rgfil[64];\n")
+			result = c89Text(result, "static DIR *rgdir[64];\nstatic char rgpth[64][4096];\n")
+			result = c89Text(result, "static const char *rgenv[] = {\"PATH\",\"PWD\",\"RENVO_STDROOT\",\"RENVO_MODCACHE\",\"TMPDIR\",(const char *)0};\n")
+		}
+		result = c89Text(result, "typedef struct { rgu32 pc, fp, sp, fs, drop; } rgfrm;\nstatic rgfrm rgcal[4096];\n")
+		result = c89Text(result, "static rgu32 rg32(unsigned char *p)\n{\n    return (rgu32)p[0] | (rgu32)p[1] << 8 | (rgu32)p[2] << 16 | (rgu32)p[3] << 24;\n}\n")
+		result = c89Text(result, "static int rgslt(rgu32 a, rgu32 b)\n{\n    rgu32 s;\n    s = 1UL << 31;\n    if (((a ^ b) & s) != 0UL) return (a & s) != 0UL;\n    return a < b;\n}\n")
+		result = c89Text(result, "static rgu32 rgneg(rgu32 v)\n{\n    return ~v + 1UL;\n}\n")
+		result = c89Text(result, "static rgu32 rgdiv(rgu32 a, rgu32 b, int rem)\n{\n    rgu32 s, am, bm, q;\n    s = 1UL << 31;\n    if (b == 0UL) return 0UL;\n    am = (a & s) != 0UL ? rgneg(a) : a;\n    bm = (b & s) != 0UL ? rgneg(b) : b;\n    q = rem ? am % bm : am / bm;\n    if (rem ? (a & s) != 0UL : ((a ^ b) & s) != 0UL) q = rgneg(q);\n    return q;\n}\n")
+		result = c89Text(result, "static int rgcon(rgu32 a, rgu32 b, rgu32 c)\n{\n    if (c == 0UL) return a == b;\n    if (c == 1UL) return a != b;\n    if (c == 2UL) return rgslt(a, b);\n    if (c == 3UL) return a == b || rgslt(a, b);\n    if (c == 4UL) return rgslt(b, a);\n    if (c == 5UL) return a == b || rgslt(b, a);\n    if (c == 6UL) return a < b;\n    if (c == 7UL) return a >= b;\n    if (c == 8UL) return a <= b;\n    return a > b;\n}\n")
+		result = c89Text(result, "static rgu32 rgld(rgu32 a, rgu32 n, int *bad)\n{\n    rgu32 v;\n    if (n == 0UL || n > 4UL || a > RGMEMS - n) { *bad = 1; return 0UL; }\n    v = (rgu32)rgmem[a];\n    if (n > 1UL) v |= (rgu32)rgmem[a+1] << 8;\n    if (n > 2UL) v |= (rgu32)rgmem[a+2] << 16;\n    if (n > 3UL) v |= (rgu32)rgmem[a+3] << 24;\n    return v;\n}\n")
+		result = c89Text(result, "static void rgst(rgu32 a, rgu32 n, rgu32 v, int *bad)\n{\n    if (n == 0UL || n > 4UL || a > RGMEMS - n) { *bad = 1; return; }\n    rgmem[a] = (unsigned char)v;\n    if (n > 1UL) rgmem[a+1] = (unsigned char)(v >> 8);\n    if (n > 2UL) rgmem[a+2] = (unsigned char)(v >> 16);\n    if (n > 3UL) rgmem[a+3] = (unsigned char)(v >> 24);\n}\n")
+		if hosted {
+			result = c89Text(result, "int main(int argc, char **argv)\n")
+		} else {
+			result = c89Text(result, "int rgmain(void)\n")
+		}
+		result = c89Text(result, "{\n    rgu32 r[8], pc, sp, fp, fs, fl, fr, cs, op, a, b, c, v, n, t, w, i;\n    int bad;\n")
+		if hosted {
+			result = c89Text(result, "    rgu32 j, k, e;\n    FILE *f;\n    DIR *d;\n    struct dirent *de;\n    const char *m;\n    const char *s;\n    char rgchk[4096];\n    fpos_t p;\n    int saved;\n")
+		}
+		result = c89Text(result, "    for (i = 0UL; i < 8UL; i++) r[i] = 0UL;\n    for (i = 0UL; i < (rgu32)sizeof(rgdat); i++) rgmem[RGDATA+i] = rgdat[i];\n    pc = 0UL; sp = ")
+		result = c89Decimal(result, bssBase+out.BSSSize())
+		result = c89Text(result, "UL; fp = RGMEMS; fs = fl = fr = cs = 0UL; bad = 0;\n    for (;;) {\n        if (pc >= (rgu32)sizeof(rgcod)) return 126;\n        op = (rgu32)rgcod[pc++];\n        if (op == 1UL) return (int)(r[0] & 255UL);\n        if (op == 2UL) { fs=rg32(rgcod+pc);pc+=4UL; }\n        else if (op == 3UL) { a=rgcod[pc++]; r[a]=rg32(rgcod+pc); pc+=4UL; }\n        else if (op == 4UL) { a=rgcod[pc++]; b=rgcod[pc++]; r[a]=r[b]; }\n        else if (op == 5UL || op == 6UL) { v=op==5UL?r[rgcod[pc++]]:rg32(rgcod+pc); if(op==6UL)pc+=4UL; if(sp>RGMEMS-4UL)return 125; rgst(sp,4UL,v,&bad); sp+=4UL; }\n        else if (op == 7UL) { a=rgcod[pc++]; if(sp<4UL)return 125; sp-=4UL; r[a]=rgld(sp,4UL,&bad); }\n        else if (op>=8UL && op<=10UL) { a=rgcod[pc++]; b=rg32(rgcod+pc); pc+=4UL; t=fp-b; if(op==8UL)r[a]=rgld(t,4UL,&bad); else if(op==9UL)rgst(t,4UL,r[a],&bad); else r[a]=t; }\n        else if (op==11UL || op==12UL) { a=rgcod[pc++]; b=rgcod[pc++]; t=r[b]+rg32(rgcod+pc); pc+=4UL; n=rgcod[pc++]; if(op==11UL){c=n;n=n&15UL;v=rgld(t,n,&bad);if(c==17UL&&(v&128UL)!=0UL)v|=~255UL;if(c==18UL&&(v&32768UL)!=0UL)v|=~65535UL;r[a]=v;}else rgst(t,n,r[a],&bad); }\n        else if (op==13UL || op==14UL) { a=rgcod[pc++]; b=rgcod[pc++]; c=rgcod[pc++]; n=rgcod[pc++]; t=r[b]+r[c]*n+rg32(rgcod+pc); pc+=4UL; n=rgcod[pc++]; if(op==13UL){c=n;n=n&15UL;v=rgld(t,n,&bad);if(c==17UL&&(v&128UL)!=0UL)v|=~255UL;if(c==18UL&&(v&32768UL)!=0UL)v|=~65535UL;r[a]=v;}else rgst(t,n,r[a],&bad); }\n        else if (op>=15UL && op<=25UL) { a=rgcod[pc++]; b=rgcod[pc++]; v=r[a]; t=r[b]; if(op==15UL)r[a]=v+t;else if(op==16UL)r[a]=v-t;else if(op==17UL)r[a]=v*t;else if(op==18UL)r[a]=rgdiv(v,t,0);else if(op==19UL)r[a]=rgdiv(v,t,1);else if(op==20UL)r[a]=v&t;else if(op==21UL)r[a]=v|t;else if(op==22UL)r[a]=v^t;else if(op==23UL)r[a]=t>=32UL?0UL:v<<t;else if(op==25UL)r[a]=t>=32UL?0UL:v>>t;else if(t>=32UL)r[a]=(v&(1UL<<31))?~0UL:0UL;else if(t==0UL)r[a]=v;else{r[a]=v>>t;if((v&(1UL<<31))!=0UL)r[a]|=~0UL<<(32UL-t);} }\n        else if (op==26UL) { a=rgcod[pc++]; r[a]++; }\n        else if (op==27UL) { a=rgcod[pc++]; b=rgcod[pc++]; fl=r[a]; fr=r[b]; }\n        else if (op==28UL) { c=rgcod[pc++]; a=rgcod[pc++]; r[a]=rgcon(fl,fr,c)?1UL:0UL; }\n        else if (op==29UL) { pc=rg32(rgcod+pc); }\n        else if (op==30UL) { c=rgcod[pc++]; t=rg32(rgcod+pc); pc+=4UL; if(rgcon(fl,fr,c))pc=t; }\n        else if (op==31UL) { t=rg32(rgcod+pc); w=rg32(rgcod+pc+4UL); pc+=8UL; if(cs>=4096UL||t>=sizeof(rgcod)||fp<fs||fp-fs<sp)return 125;rgcal[cs].pc=pc;rgcal[cs].fp=fp;rgcal[cs].sp=sp;rgcal[cs].fs=fs;rgcal[cs].drop=w>6UL?(w-6UL)*4UL:0UL;cs++;fp-=fs;pc=t; }\n        else if (op==32UL) { if(cs==0UL)return (int)(r[0]&255UL);cs--;pc=rgcal[cs].pc;fp=rgcal[cs].fp;fs=rgcal[cs].fs;if(rgcal[cs].drop>rgcal[cs].sp)return 125;sp=rgcal[cs].sp-rgcal[cs].drop; }\n        else if (op==33UL) { r[0]=~0UL; }\n        else if (op==34UL) { a=r[4];b=r[3];n=r[1];if(n>RGMEMS||a>RGMEMS-n||b>RGMEMS-n)return 125;if(b<=a||b>=a+n){for(i=0UL;i<n;i++)rgmem[b+i]=rgmem[a+i];}else{for(i=n;i>0UL;i--)rgmem[b+i-1UL]=rgmem[a+i-1UL];} }\n        else if (op==35UL) { a=rgcod[pc++];b=rgcod[pc++];c=rgcod[pc++];v=rg32(rgcod+pc);pc+=4UL;n=rg32(rgcod+pc);pc+=4UL;t=b<8UL?r[b]:0UL;w=c<8UL?r[c]:0UL;r[a]=t+w*v+n; }\n")
+		if hosted {
+			result = c89Text(result, "        else if (op==36UL) { a=r[3];b=r[4];n=r[1];f=a==1UL?stdout:a==2UL?stderr:a<64UL?rgfil[a]:(FILE *)0;if(n>RGMEMS||b>RGMEMS-n||f==(FILE *)0)r[0]=~0UL;else r[0]=(rgu32)fwrite(rgmem+b,1,(size_t)n,f); }\n")
+		} else {
+			result = c89Text(result, "        else if (op==36UL) { r[0]=~0UL; }\n")
+		}
+		result = c89Text(result, "        else if (op==37UL) { a=rgcod[pc++];t=r[a];w=rg32(rgcod+pc);pc+=4UL;if(cs>=4096UL||t>=sizeof(rgcod)||fp<fs||fp-fs<sp)return 125;rgcal[cs].pc=pc;rgcal[cs].fp=fp;rgcal[cs].sp=sp;rgcal[cs].fs=fs;rgcal[cs].drop=w>6UL?(w-6UL)*4UL:0UL;cs++;fp-=fs;pc=t; }\n")
+		if hosted {
+			result = c89Text(result, "        else if (op==38UL) { a=r[3];v=r[4];r[0]=~0UL;if(a<RGMEMS){for(n=a;n<RGMEMS&&rgmem[n]!=0;n++){}if(n<RGMEMS){d=(DIR *)0;if((v&3UL)==0UL&&(v&(64UL|512UL))==0UL)d=opendir((char *)(rgmem+a));if(d!=(DIR *)0){k=n-a;if(k<4096UL){for(i=3UL;i<64UL&&(rgfil[i]!=(FILE *)0||rgdir[i]!=(DIR *)0);i++){}if(i<64UL){rgdir[i]=d;for(j=0UL;j<k;j++)rgpth[i][j]=(char)rgmem[a+j];rgpth[i][k]=0;r[0]=i;}else closedir(d);}else closedir(d);}else{m=(v&512UL)!=0UL?((v&3UL)!=0UL?\"w+b\":\"wb\"):((v&3UL)!=0UL?\"r+b\":\"rb\");f=fopen((char *)(rgmem+a),m);if(f==(FILE *)0&&(v&64UL)!=0UL)f=fopen((char *)(rgmem+a),(v&3UL)!=0UL?\"w+b\":\"wb\");if(f!=(FILE *)0){k=n-a;if(k<4096UL){for(i=3UL;i<64UL&&(rgfil[i]!=(FILE *)0||rgdir[i]!=(DIR *)0);i++){}if(i<64UL){rgfil[i]=f;for(j=0UL;j<k;j++)rgpth[i][j]=(char)rgmem[a+j];rgpth[i][k]=0;r[0]=i;}else fclose(f);}else fclose(f);}}}} }\n")
+			result = c89Text(result, "        else if (op==39UL) { a=r[3];if(a>=3UL&&a<64UL&&rgfil[a]!=(FILE *)0){r[0]=fclose(rgfil[a])==0?0UL:~0UL;rgfil[a]=(FILE *)0;rgpth[a][0]=0;}else if(a>=3UL&&a<64UL&&rgdir[a]!=(DIR *)0){r[0]=closedir(rgdir[a])==0?0UL:~0UL;rgdir[a]=(DIR *)0;rgpth[a][0]=0;}else r[0]=~0UL; }\n")
+			result = c89Text(result, "        else if (op==40UL) { a=r[3];b=r[4];n=r[1];f=a==0UL?stdin:a<64UL?rgfil[a]:(FILE *)0;if(n>RGMEMS||b>RGMEMS-n||f==(FILE *)0)r[0]=~0UL;else r[0]=(rgu32)fread(rgmem+b,1,(size_t)n,f); }\n")
+			result = c89Text(result, "        else if (op==41UL) { a=r[3];r[0]=a<3UL?0UL:(a<64UL&&rgfil[a]!=(FILE *)0&&chmod(rgpth[a],r[4])==0)?0UL:~0UL; }\n")
+			result = c89Text(result, "        else if (op==42UL||op==43UL) { a=r[3];b=r[4];n=r[1];t=r[2];f=a==0UL?stdin:a==1UL?stdout:a==2UL?stderr:a<64UL?rgfil[a]:(FILE *)0;r[0]=~0UL;if(n<=RGMEMS&&b<=RGMEMS-n&&t<=(rgu32)LONG_MAX&&f!=(FILE *)0){saved=fgetpos(f,&p)==0;if(saved&&fseek(f,(long)t,SEEK_SET)==0){r[0]=op==42UL?(rgu32)fread(rgmem+b,1,(size_t)n,f):(rgu32)fwrite(rgmem+b,1,(size_t)n,f);}if(saved)fsetpos(f,&p);} }\n")
+			result = c89Text(result, "        else if (op==44UL) { a=rg32(rgcod+pc);pc+=4UL;e=rgcod[pc++];c=(rgu32)argc;w=0UL;for(i=0UL;rgenv[i]!=(const char *)0;i++)if(getenv(rgenv[i])!=(char *)0)w++;if(a>RGMEMS-65536UL||c>4096UL){bad=1;}else{b=a+c*16UL;v=(b+w*16UL+7UL)&~7UL;if(v>a+65536UL){bad=1;}else{if(e>0UL){r[3]=a;r[4]=c;r[1]=c;}if(e>1UL){r[2]=b;r[5]=w;r[6]=w;}for(i=0UL;i<c&&!bad;i++){s=argv[i];k=(rgu32)strlen(s);if(k>=a+65536UL-v){bad=1;break;}rgst(a+i*16UL,4UL,v,&bad);rgst(a+i*16UL+4UL,4UL,0UL,&bad);rgst(a+i*16UL+8UL,4UL,k,&bad);rgst(a+i*16UL+12UL,4UL,0UL,&bad);for(j=0UL;j<k;j++)rgmem[v+j]=(unsigned char)s[j];rgmem[v+k]=0;v+=k+1UL;}e=0UL;for(i=0UL;rgenv[i]!=(const char *)0&&!bad;i++){m=getenv(rgenv[i]);if(m!=(char *)0){j=(rgu32)strlen(rgenv[i]);k=(rgu32)strlen(m);if(j>=a+65536UL-v||k>=a+65536UL-v-j-1UL){bad=1;break;}n=j+1UL+k;rgst(b+e*16UL,4UL,v,&bad);rgst(b+e*16UL+4UL,4UL,0UL,&bad);rgst(b+e*16UL+8UL,4UL,n,&bad);rgst(b+e*16UL+12UL,4UL,0UL,&bad);for(t=0UL;t<j;t++)rgmem[v+t]=(unsigned char)rgenv[i][t];rgmem[v+j]=(unsigned char)'=';for(t=0UL;t<k;t++)rgmem[v+j+1UL+t]=(unsigned char)m[t];rgmem[v+n]=0;v+=n+1UL;e++;}}}} }\n")
+		} else {
+			result = c89Text(result, "        else if (op>=38UL&&op<=44UL) { r[0]=~0UL; }\n")
+		}
+		result = c89Text(result, "        else if (op==45UL) { a=rgcod[pc++];r[a]--; }\n")
+		if hosted {
+			result = c89Text(result, "        else if (op==46UL) { v=r[0];a=r[3];b=r[4];n=r[1];r[0]=~0UL;if(v==217UL&&a>=3UL&&a<64UL&&rgdir[a]!=(DIR *)0&&n<=RGMEMS&&b<=RGMEMS-n){de=readdir(rgdir[a]);if(de==(struct dirent *)0)r[0]=0UL;else{k=(rgu32)strlen(de->d_name);t=(19UL+k+1UL+7UL)&~7UL;if(t<=n){c=8UL;j=(rgu32)strlen(rgpth[a]);if(j+1UL+k<4096UL){for(i=0UL;i<j;i++)rgchk[i]=rgpth[a][i];if(j>0UL&&rgchk[j-1UL]!='/')rgchk[j++]='/';for(i=0UL;i<k;i++)rgchk[j+i]=de->d_name[i];rgchk[j+k]=0;d=opendir(rgchk);if(d!=(DIR *)0){c=4UL;closedir(d);}}for(i=0UL;i<t;i++)rgmem[b+i]=0;rgmem[b+16UL]=(unsigned char)t;rgmem[b+17UL]=(unsigned char)(t>>8);rgmem[b+18UL]=(unsigned char)c;for(i=0UL;i<k;i++)rgmem[b+19UL+i]=(unsigned char)de->d_name[i];r[0]=t;}}} }\n")
+		} else {
+			result = c89Text(result, "        else if (op==46UL) { r[0]=~0UL; }\n")
+		}
+		result = c89Text(result, "        else return 126;\n")
+		result = c89Text(result, "        if (bad) return 125;\n    }\n}\n")
+		return result
+	}
+
+	func c89ImageHosted32(out *RTGEmitter) []byte {
+		return c89ImageProfile(out, false, true)
+	}
+	func c89ImageHosted32Automatic(out *RTGEmitter) []byte {
+		return c89ImageProfile(out, true, true)
+	}
+	func c89ImageFreestanding32(out *RTGEmitter) []byte {
+		return c89ImageProfile(out, false, false)
+	}
+}
+
+arch c89vm32 {
+	alias = c89vm32
+	endian = little
+	word_bits = 32
+	pointer_bits = 32
+	stack_word_bytes = 4
+	stack_alignment = 8
+	unaligned_memory = true
+	patch_relocations = go c89PatchRelocations
+	registers virtual = [rax, rdx, rcx, rdi, rsi, r8, r9, r10]
+	locations {
+		primary = rax
+		secondary = rdx
+		tertiary = rcx
+		scratch = r10
+		copy_destination = rdi
+		copy_source = rsi
+		copy_count = rdx
+	}
+	conditions {
+		eq = 0
+		ne = 1
+		slt = 2
+		sle = 3
+		sgt = 4
+		sge = 5
+		ult = 6
+		uge = 7
+		ule = 8
+		ugt = 9
+	}
+	bind {
+		move = go c89Move
+		address = go c89Address
+		load.native = go c89LoadNative
+		load.i32 = go c89LoadI32
+		load.u32 = go c89LoadU32
+		load.i16 = go c89LoadI16
+		load.u16 = go c89LoadU16
+		load.i8 = go c89LoadI8
+		load.u8 = go c89LoadU8
+		store.native = go c89StoreNative
+		store.u32 = go c89StoreU32
+		store.u16 = go c89StoreU16
+		store.u8 = go c89StoreU8
+		add = go c89Add
+		subtract = go c89Subtract
+		multiply = go c89Multiply
+		bit_and = go c89BitAnd
+		bit_or = go c89BitOr
+		bit_xor = go c89BitXor
+		compare = go c89Compare
+		test = go c89Test
+		increment = go c89Increment
+		decrement = go c89Decrement
+		shift_left_immediate = go c89ShiftLeftImmediate
+		shift_right_unsigned_immediate = go c89ShiftRightUnsignedImmediate
+		shift_right_signed_immediate = go c89ShiftRightSignedImmediate
+		call = go c89Call
+		call_indirect = go c89CallIndirect
+		jump = go c89Jump
+		jump_condition = go c89JumpCondition
+		set_condition = go c89SetCondition
+		return = go c89Return
+		leave = go c89Leave
+		host_syscall = go c89HostSyscall
+		move_immediate = go c89MoveImmediate
+		variable_shift = go c89VariableShift
+		signed_divide = go c89SignedDivide
+		copy_bytes = go c89CopyBytes
+	}
+}
+
+abi c89_internal {
+	arch = c89vm32
+	frame_start = go c89FrameStart
+	frame_finish = go c89FrameFinish
+	push_register = go c89PushRegister
+	push_immediate = go c89PushImmediate
+	pop_register = go c89PopRegister
+	frame_load = go c89LoadFrame
+	frame_store = go c89StoreFrame
+	frame_address = go c89AddressFrame
+	store_param_word = go c89StoreParamWord
+	call_word_count = go c89CallWordCount
+	call_words = [rdi, rsi, rdx, rcx, r8, r9]
+	result = [primary, secondary, tertiary]
+	stack_alignment = 8
+}
+
+runtime c89_hosted {
+	emit_entry = go c89HostedEntry
+	emit_exit = go c89Exit
+	emit_static_call = go c89StaticCall
+	syscall {
+		number = rax
+		arguments = [rdi, rsi, rdx, rcx, r8, r9]
+		result = rax
+		instruction = host_syscall
+	}
+	operation read { emit = go c89Read }
+	operation write { emit = go c89Write }
+	operation read_at { emit = go c89ReadAt }
+	operation write_at { emit = go c89WriteAt }
+	operation open { emit = go c89Open }
+	operation close { emit = go c89Close }
+	operation chmod { emit = go c89Chmod }
+	operation print { use = write args = [stderr, buffer, count] }
+}
+
+runtime c89_freestanding {
+	emit_entry = go c89FreestandingEntry
+	emit_exit = go c89Exit
+}
+
+format c89_hosted32_translation_unit {
+	byte_order = little
+	address_bits = 32
+	kind = "c-source"
+	code_offset = 0
+	image = go c89ImageHosted32
+}
+
+format c89_hosted32_auto_translation_unit {
+	byte_order = little
+	address_bits = 32
+	kind = "c-source"
+	code_offset = 0
+	image = go c89ImageHosted32Automatic
+}
+
+format c89_freestanding32_translation_unit {
+	byte_order = little
+	address_bits = 32
+	kind = "c-source"
+	code_offset = 0
+	image = go c89ImageFreestanding32
+}
+
+target c89/hosted32 {
+	family = structured32
+	os = c89
+	arch = c89vm32
+	frontend_arch = vm32
+	max_align = 8
+	abi = c89_internal
+	runtime = c89_hosted
+	executable = c89_hosted32_translation_unit
+	arena_default = 1048576
+	build_tags = [c89, vm, vm32]
+	capabilities = [hosted, executable, heap]
+}
+
+target c89/hosted32-auto {
+	family = structured32
+	os = c89
+	arch = c89vm32
+	frontend_arch = vm32
+	max_align = 8
+	abi = c89_internal
+	runtime = c89_hosted
+	executable = c89_hosted32_auto_translation_unit
+	arena_default = 1048576
+	build_tags = [c89, vm, vm32]
+	capabilities = [hosted, executable, heap]
+}
+
+target c89/freestanding32 {
+	family = structured32
+	os = c89
+	arch = c89vm32
+	frontend_arch = vm32
+	max_align = 8
+	abi = c89_internal
+	runtime = c89_freestanding
+	executable = c89_freestanding32_translation_unit
+	arena_default = 1048576
+	build_tags = [c89, freestanding, vm, vm32]
+	capabilities = [executable, heap]
+}

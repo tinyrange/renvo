@@ -1,0 +1,72 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 6 ]; then
+    echo "usage: tools/c89/matrix <hosted-explicit.c> <hosted-auto.c> <freestanding-explicit.c> <hosted-write.c> <hosted-fault.c> <corpus-dir>" >&2
+    exit 2
+fi
+
+root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
+hosted_explicit=$(CDPATH= cd -- "$(dirname "$1")" && pwd)/$(basename "$1")
+hosted_auto=$(CDPATH= cd -- "$(dirname "$2")" && pwd)/$(basename "$2")
+freestanding_explicit=$(CDPATH= cd -- "$(dirname "$3")" && pwd)/$(basename "$3")
+hosted_write=$(CDPATH= cd -- "$(dirname "$4")" && pwd)/$(basename "$4")
+hosted_fault=$(CDPATH= cd -- "$(dirname "$5")" && pwd)/$(basename "$5")
+corpus_dir=$(CDPATH= cd -- "$6" && pwd)
+
+run_compiler() {
+    name=$1
+    platform=$2
+    command=$3
+    corpus_command=$4
+    fault_command=$5
+    image="renvo-c89-$name"
+    if [ -n "$platform" ]; then
+        docker build --platform "$platform" -t "$image" \
+            "$root/tools/c89/compilers/$name"
+        docker run --rm --platform "$platform" \
+            -v "$hosted_explicit:/work/hosted-explicit.c:ro" \
+            -v "$hosted_auto:/work/hosted-auto.c:ro" \
+            -v "$freestanding_explicit:/work/freestanding-explicit.c:ro" \
+            -v "$hosted_write:/work/hosted-write.c:ro" \
+            "$image" sh -c "$command"
+        docker run --rm --platform "$platform" -v "$corpus_dir:/work/corpus:ro" \
+            "$image" sh -c "$corpus_command"
+        docker run --rm --platform "$platform" -v "$hosted_fault:/work/hosted-fault.c:ro" \
+            "$image" sh -c "$fault_command"
+    else
+        docker build -t "$image" "$root/tools/c89/compilers/$name"
+        docker run --rm \
+            -v "$hosted_explicit:/work/hosted-explicit.c:ro" \
+            -v "$hosted_auto:/work/hosted-auto.c:ro" \
+            -v "$freestanding_explicit:/work/freestanding-explicit.c:ro" \
+            -v "$hosted_write:/work/hosted-write.c:ro" \
+            "$image" sh -c "$command"
+        docker run --rm -v "$corpus_dir:/work/corpus:ro" \
+            "$image" sh -c "$corpus_command"
+        docker run --rm -v "$hosted_fault:/work/hosted-fault.c:ro" \
+            "$image" sh -c "$fault_command"
+    fi
+    echo "C89 $name: PASS"
+}
+
+run_compiler gcc "" \
+    "if gcc -std=c89 -pedantic-errors -c /work/hosted-explicit.c -o /tmp/mismatch.o 2>/tmp/mismatch.log; then exit 1; fi && grep renvo_assumption_pointer_width /tmp/mismatch.log >/dev/null && gcc -m32 -std=c89 -pedantic-errors -Wall -Wextra -Werror /work/hosted-explicit.c -o /tmp/explicit && /tmp/explicit && gcc -m32 -std=c89 -pedantic-errors -Wall -Wextra -Werror /work/hosted-auto.c -o /tmp/auto && /tmp/auto && gcc -m32 -std=c89 -pedantic-errors -Wall -Wextra -Werror /work/hosted-write.c -o /tmp/write && /tmp/write >/tmp/write.out && grep -x PASS /tmp/write.out >/dev/null && gcc -m32 -fno-pie -std=c89 -pedantic-errors -Wall -Wextra -Werror -ffreestanding -c /work/freestanding-explicit.c -o /tmp/freestanding.o && test -z \"\$(nm -u /tmp/freestanding.o)\"" \
+    "for source in /work/corpus/*.c; do gcc -m32 -std=c89 -pedantic-errors -Wall -Wextra -Werror \"\$source\" -o /tmp/corpus && /tmp/corpus >/tmp/corpus.out && grep -x PASS /tmp/corpus.out >/dev/null || exit 1; done" \
+    "gcc -m32 -std=c89 -pedantic-errors -Wall -Wextra -Werror /work/hosted-fault.c -o /tmp/fault && (set +e; /tmp/fault >/tmp/fault.out 2>/tmp/fault.err; status=\$?; set -e; test \"\$status\" -eq 2 && test ! -s /tmp/fault.out && grep -x panic /tmp/fault.err >/dev/null)"
+run_compiler gcc49 "" \
+    "if gcc -std=c89 -pedantic-errors -c /work/hosted-explicit.c -o /tmp/mismatch.o 2>/tmp/mismatch.log; then exit 1; fi && grep renvo_assumption_pointer_width /tmp/mismatch.log >/dev/null && gcc -m32 -std=c89 -pedantic-errors -Wall -Wextra -Werror /work/hosted-explicit.c -o /tmp/explicit && /tmp/explicit && gcc -m32 -std=c89 -pedantic-errors -Wall -Wextra -Werror /work/hosted-auto.c -o /tmp/auto && /tmp/auto && gcc -m32 -std=c89 -pedantic-errors -Wall -Wextra -Werror /work/hosted-write.c -o /tmp/write && /tmp/write >/tmp/write.out && grep -x PASS /tmp/write.out >/dev/null && gcc -m32 -fno-pie -std=c89 -pedantic-errors -Wall -Wextra -Werror -ffreestanding -c /work/freestanding-explicit.c -o /tmp/freestanding.o && test -z \"\$(nm -u /tmp/freestanding.o)\"" \
+    "for source in /work/corpus/*.c; do gcc -m32 -std=c89 -pedantic-errors -Wall -Wextra -Werror \"\$source\" -o /tmp/corpus && /tmp/corpus >/tmp/corpus.out && grep -x PASS /tmp/corpus.out >/dev/null || exit 1; done" \
+    "gcc -m32 -std=c89 -pedantic-errors -Wall -Wextra -Werror /work/hosted-fault.c -o /tmp/fault && (set +e; /tmp/fault >/tmp/fault.out 2>/tmp/fault.err; status=\$?; set -e; test \"\$status\" -eq 2 && test ! -s /tmp/fault.out && grep -x panic /tmp/fault.err >/dev/null)"
+run_compiler clang "" \
+    "if clang -std=c89 -pedantic-errors -c /work/hosted-explicit.c -o /tmp/mismatch.o 2>/tmp/mismatch.log; then exit 1; fi && grep renvo_assumption_pointer_width /tmp/mismatch.log >/dev/null && clang -m32 -fno-pie -no-pie -std=c89 -pedantic-errors -Wall -Wextra -Werror /work/hosted-explicit.c -o /tmp/explicit && /tmp/explicit && clang -m32 -fno-pie -no-pie -std=c89 -pedantic-errors -Wall -Wextra -Werror /work/hosted-auto.c -o /tmp/auto && /tmp/auto && clang -m32 -fno-pie -no-pie -std=c89 -pedantic-errors -Wall -Wextra -Werror /work/hosted-write.c -o /tmp/write && /tmp/write >/tmp/write.out && grep -x PASS /tmp/write.out >/dev/null && clang -m32 -fno-pie -std=c89 -pedantic-errors -Wall -Wextra -Werror -ffreestanding -c /work/freestanding-explicit.c -o /tmp/freestanding.o && test -z \"\$(nm -u /tmp/freestanding.o)\"" \
+    "for source in /work/corpus/*.c; do clang -m32 -fno-pie -no-pie -std=c89 -pedantic-errors -Wall -Wextra -Werror \"\$source\" -o /tmp/corpus && /tmp/corpus >/tmp/corpus.out && grep -x PASS /tmp/corpus.out >/dev/null || exit 1; done" \
+    "clang -m32 -fno-pie -no-pie -std=c89 -pedantic-errors -Wall -Wextra -Werror /work/hosted-fault.c -o /tmp/fault && (set +e; /tmp/fault >/tmp/fault.out 2>/tmp/fault.err; status=\$?; set -e; test \"\$status\" -eq 2 && test ! -s /tmp/fault.out && grep -x panic /tmp/fault.err >/dev/null)"
+run_compiler tcc linux/386 \
+    "tcc -Wall -Werror /work/hosted-explicit.c -o /tmp/explicit && /tmp/explicit && tcc -Wall -Werror /work/hosted-auto.c -o /tmp/auto && /tmp/auto && tcc -Wall -Werror /work/hosted-write.c -o /tmp/write && /tmp/write >/tmp/write.out && grep -x PASS /tmp/write.out >/dev/null && tcc -Wall -Werror -c /work/freestanding-explicit.c -o /tmp/freestanding.o && test -z \"\$(nm -u /tmp/freestanding.o)\"" \
+    "for source in /work/corpus/*.c; do tcc -Wall -Werror \"\$source\" -o /tmp/corpus && /tmp/corpus >/tmp/corpus.out && grep -x PASS /tmp/corpus.out >/dev/null || exit 1; done" \
+    "tcc -Wall -Werror /work/hosted-fault.c -o /tmp/fault && (set +e; /tmp/fault >/tmp/fault.out 2>/tmp/fault.err; status=\$?; set -e; test \"\$status\" -eq 2 && test ! -s /tmp/fault.out && grep -x panic /tmp/fault.err >/dev/null)"
+run_compiler pcc linux/386 \
+    "pcc -std=c89 -Wall -Werror /work/hosted-explicit.c -o /tmp/explicit && /tmp/explicit && pcc -std=c89 -Wall -Werror /work/hosted-auto.c -o /tmp/auto && /tmp/auto && pcc -std=c89 -Wall -Werror /work/hosted-write.c -o /tmp/write && /tmp/write >/tmp/write.out && grep -x PASS /tmp/write.out >/dev/null && pcc -std=c89 -Wall -Werror -c /work/freestanding-explicit.c -o /tmp/freestanding.o && test -z \"\$(nm -u /tmp/freestanding.o)\"" \
+    "for source in /work/corpus/*.c; do pcc -std=c89 -Wall -Werror \"\$source\" -o /tmp/corpus && /tmp/corpus >/tmp/corpus.out && grep -x PASS /tmp/corpus.out >/dev/null || exit 1; done" \
+    "pcc -std=c89 -Wall -Werror /work/hosted-fault.c -o /tmp/fault && (set +e; /tmp/fault >/tmp/fault.out 2>/tmp/fault.err; status=\$?; set -e; test \"\$status\" -eq 2 && test ! -s /tmp/fault.out && grep -x panic /tmp/fault.err >/dev/null)"
