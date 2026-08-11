@@ -1,10 +1,11 @@
 package graphics
 
 type WindowOptions struct {
-	Title  string
-	Width  int
-	Height int
-	Hidden bool
+	Title    string
+	Width    int
+	Height   int
+	Hidden   bool
+	Renderer Renderer
 }
 
 type EventType int
@@ -191,6 +192,11 @@ type Window struct {
 	bottomUp     []byte
 	tracking     bool
 	pendingUTF16 int
+
+	renderer    Renderer
+	frameCanvas *gpuCanvas
+	backend     frameBackend
+	renderStats RenderStats
 }
 
 func (w *Window) Surface() *Surface { return w.surface }

@@ -31,13 +31,11 @@ func (a *App) paint() bool {
 	if a.BeforeRender != nil {
 		a.BeforeRender()
 	}
-	if a.Form.Paint(a.Window.Surface()) {
-		if !a.Window.Present() {
-			return false
-		}
-		if a.AfterRender != nil {
-			a.AfterRender()
-		}
+	if !paintAppWindow(a) {
+		return false
+	}
+	if a.AfterRender != nil {
+		a.AfterRender()
 	}
 	return true
 }

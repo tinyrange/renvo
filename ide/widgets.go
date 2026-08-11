@@ -109,7 +109,7 @@ func (c *ExplorerControl) SetModel(model *Explorer) {
 
 func (c *ExplorerControl) RowHeight() int { return c.rowHeight }
 
-func (c *ExplorerControl) paint(surface *graphics.Surface) {
+func (c *ExplorerControl) paint(surface graphics.Canvas) {
 	bounds := c.Bounds()
 	palette := editorPalette(c.Theme())
 	c.clampScroll()
@@ -146,7 +146,7 @@ func (c *ExplorerControl) paint(surface *graphics.Surface) {
 	surface.FillRect(graphics.R(bounds.MaxX-1, bounds.MinY, 1, bounds.Height()), palette.border)
 }
 
-func drawExplorerChevron(surface *graphics.Surface, x, y graphics.Scalar, expanded bool, color graphics.Color) {
+func drawExplorerChevron(surface graphics.Canvas, x, y graphics.Scalar, expanded bool, color graphics.Color) {
 	if expanded {
 		surface.DrawLine(graphics.Point{X: x, Y: y}, graphics.Point{X: x + 4, Y: y + 4}, 1, color)
 		surface.DrawLine(graphics.Point{X: x + 4, Y: y + 4}, graphics.Point{X: x + 8, Y: y}, 1, color)
@@ -156,13 +156,13 @@ func drawExplorerChevron(surface *graphics.Surface, x, y graphics.Scalar, expand
 	surface.DrawLine(graphics.Point{X: x + 4, Y: y + 4}, graphics.Point{X: x, Y: y + 8}, 1, color)
 }
 
-func drawExplorerFolder(surface *graphics.Surface, x, y graphics.Scalar, palette editorThemePalette) {
+func drawExplorerFolder(surface graphics.Canvas, x, y graphics.Scalar, palette editorThemePalette) {
 	surface.FillRect(graphics.R(x+1, y, 7, 3), palette.currentLine)
 	surface.FillRect(graphics.R(x, y+3, 16, 11), palette.currentLine)
 	surface.StrokeRect(graphics.R(x, y+3, 16, 11), 1, palette.lineNumber)
 }
 
-func drawExplorerFile(surface *graphics.Surface, x, y graphics.Scalar, palette editorThemePalette) {
+func drawExplorerFile(surface graphics.Canvas, x, y graphics.Scalar, palette editorThemePalette) {
 	surface.StrokeRect(graphics.R(x+2, y, 12, 15), 1, palette.lineNumber)
 }
 
@@ -457,7 +457,7 @@ func (c *EditorControl) VisibleGrid() (int, int) {
 	return visibleLines, visibleColumns
 }
 
-func (c *EditorControl) paint(surface *graphics.Surface) {
+func (c *EditorControl) paint(surface graphics.Canvas) {
 	bounds := c.Bounds()
 	palette := editorPalette(c.Theme())
 	c.clampScroll()
@@ -527,7 +527,7 @@ func (c *EditorControl) paint(surface *graphics.Surface) {
 	surface.FillRect(graphics.R(bounds.MinX, bounds.MinY, 1, bounds.Height()), palette.border)
 }
 
-func (c *EditorControl) drawLineDiagnostics(surface *graphics.Surface, line, lineStart, lineEnd int, y, textX graphics.Scalar, palette editorThemePalette) {
+func (c *EditorControl) drawLineDiagnostics(surface graphics.Canvas, line, lineStart, lineEnd int, y, textX graphics.Scalar, palette editorThemePalette) {
 	for i := 0; i < len(c.diagnostics); i++ {
 		diagnostic := c.diagnostics[i]
 		start, end := diagnostic.Start, diagnostic.End
@@ -585,7 +585,7 @@ func (c *EditorControl) invalidateDiagnostics(diagnostics []Diagnostic) {
 	}
 }
 
-func (c *EditorControl) drawHighlightedLine(surface *graphics.Surface, x, baseline graphics.Scalar, line string, spans []syntaxSpan, palette editorThemePalette) {
+func (c *EditorControl) drawHighlightedLine(surface graphics.Canvas, x, baseline graphics.Scalar, line string, spans []syntaxSpan, palette editorThemePalette) {
 	for i := 0; i < len(spans); i++ {
 		span := spans[i]
 		text := line[span.start:span.end]
@@ -1048,7 +1048,7 @@ func (c *EditorControl) closeCompletion() {
 	c.AccessibilityChildrenChanged()
 }
 
-func (c *EditorControl) paintCompletion(surface *graphics.Surface) {
+func (c *EditorControl) paintCompletion(surface graphics.Canvas) {
 	if len(c.completions) == 0 || c.Font == nil {
 		return
 	}
@@ -1073,7 +1073,7 @@ func (c *EditorControl) paintCompletion(surface *graphics.Surface) {
 	}
 }
 
-func (c *EditorControl) paintSignature(surface *graphics.Surface) {
+func (c *EditorControl) paintSignature(surface graphics.Canvas) {
 	if !c.signature.Ok || c.Font == nil || c.signature.Label == "" {
 		return
 	}

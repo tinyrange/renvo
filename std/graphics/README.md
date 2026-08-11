@@ -1,14 +1,15 @@
 # Renvo graphics
 
-`graphics` is RENVO's portable windowing and software-rendered 2D package. Its
-baseline is intentionally small enough to map to modern OpenGL and a future
-Win98 GDI/DIB backend without changing application code.
+`graphics` is RENVO's portable windowing and 2D package. Its baseline is
+intentionally small enough to use as a software renderer on constrained
+targets or map to a native GPU without changing application code.
 
 Darwin/arm64 and Windows/amd64 are native targets. Darwin creates Cocoa windows
-through Objective-C runtime calls; Windows uses Unicode Win32 and WGL. Both
-backends declare their platform entry points with `renvo:linkstatic`, create a
-legacy OpenGL context, and present the platform-neutral software surface with
-`glDrawPixels`. They use no cgo or third-party library.
+through Objective-C runtime calls; Windows uses Unicode Win32 and WGL. Native
+entry points use `renvo:linkstatic`, with no cgo or third-party library. macOS
+Forms frames default to Metal, can explicitly select OpenGL, and retain the
+software surface path as a fallback. Windows currently presents the software
+surface through a legacy OpenGL context.
 
 ## Coordinate and pixel contract
 
@@ -22,6 +23,17 @@ legacy OpenGL context, and present the platform-neutral software surface with
 - `PixelRGBA8` and `PixelA8` are guaranteed image formats.
 
 ## Rendering
+
+`Canvas` is the shared drawing contract implemented by the CPU-backed
+`Surface` and the internal GPU command canvas. `Window.BeginFrame` returns a
+balanced `Frame` containing that interface; `Frame.Present` submits either the
+software surface or the selected accelerated backend. Existing callers may
+continue to use `Window.Surface` and `Window.Present` directly.
+
+`WindowOptions.Renderer` accepts `RendererAuto`, `RendererSoftware`,
+`RendererMetal`, or `RendererOpenGL`. The accelerated implementations currently
+target RENVO macOS/arm64. Auto selects Metal when available and otherwise falls
+back to OpenGL; all other platforms preserve their software behavior.
 
 Surfaces and images are the same CPU-backed resource, so any off-screen surface
 can be drawn as an image. Implemented operations include:
@@ -55,8 +67,8 @@ or externally rasterized glyph runs.
 The native backends implement:
 
 - create, close, show, hide, title, client size, repaint requests and present;
-- top-down RGBA8 window capture, using `glReadPixels` from the displayed front
-  buffer (physical pixels on high-DPI Darwin displays);
+- top-down RGBA8 window capture from the active renderer (physical pixels on
+  high-DPI Darwin displays);
 - dependency-free binary PPM export through `Image.EncodePPM`;
 - multiple simultaneous windows;
 - poll and blocking wait event loops;
@@ -66,8 +78,8 @@ The native backends implement:
 - cursor selection;
 - one-shot timers;
 - UTF-8 clipboard text;
-- live resize and OpenGL presentation; Darwin additionally provides
-  backing-scale-aware dirty-row uploads.
+- live resize and presentation; the macOS OpenGL renderer retains unchanged
+  regions across partial frames, while Metal redraws complete Forms frames.
 
 The Windows/amd64 implementation uses a `CS_OWNDC` Unicode window class, a
 legacy double-buffered WGL context, and the original OpenGL 1.1 exports from

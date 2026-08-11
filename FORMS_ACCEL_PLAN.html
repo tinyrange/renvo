@@ -1,0 +1,954 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Renvo Forms Acceleration Architecture</title>
+  <style>
+    :root {
+      --paper: #f4f2eb;
+      --panel: #fffdf8;
+      --panel-2: #f8f6ef;
+      --ink: #1e2624;
+      --muted: #626c69;
+      --faint: #8c9592;
+      --line: #d9d8d0;
+      --teal: #087f75;
+      --teal-dark: #075f59;
+      --teal-soft: #dcefeb;
+      --blue: #2f69b2;
+      --blue-soft: #e2ecf8;
+      --amber: #9b5e08;
+      --amber-soft: #f7ead4;
+      --red: #a73c35;
+      --red-soft: #f8e3df;
+      --code: #14201e;
+      --code-ink: #e5f1ee;
+      --shadow: 0 12px 36px rgb(25 39 35 / 8%);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --paper: #101614;
+        --panel: #18201e;
+        --panel-2: #1d2724;
+        --ink: #e4ece9;
+        --muted: #abb8b4;
+        --faint: #84918d;
+        --line: #35423e;
+        --teal: #75d9cb;
+        --teal-dark: #9de8dd;
+        --teal-soft: #1d3b36;
+        --blue: #91bdf1;
+        --blue-soft: #203247;
+        --amber: #f3bc6c;
+        --amber-soft: #42311d;
+        --red: #f19b91;
+        --red-soft: #472925;
+        --code: #0c1211;
+        --code-ink: #deebe7;
+        --shadow: 0 12px 36px rgb(0 0 0 / 22%);
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 15% -10%, rgb(8 127 117 / 10%), transparent 30rem),
+        var(--paper);
+      color: var(--ink);
+      font: 16.5px/1.62 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    a { color: var(--teal-dark); text-underline-offset: 0.16em; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    :not(pre) > code {
+      color: var(--teal-dark);
+      background: var(--teal-soft);
+      border-radius: 5px;
+      padding: 0.1em 0.34em;
+      font-size: 0.91em;
+    }
+    .shell {
+      width: min(1420px, calc(100% - 32px));
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 250px minmax(0, 1fr);
+      gap: 24px;
+      padding: 34px 0 90px;
+    }
+    aside {
+      align-self: start;
+      position: sticky;
+      top: 20px;
+      max-height: calc(100vh - 40px);
+      overflow: auto;
+      padding: 20px;
+      background: color-mix(in srgb, var(--panel) 94%, transparent);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+    }
+    .wordmark {
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--teal-dark);
+      margin-bottom: 4px;
+    }
+    aside .caption { color: var(--muted); font-size: 0.85rem; margin-bottom: 18px; }
+    aside nav { display: grid; gap: 3px; }
+    aside nav a {
+      color: var(--muted);
+      text-decoration: none;
+      padding: 6px 9px;
+      border-radius: 7px;
+      font-size: 0.89rem;
+    }
+    aside nav a:hover, aside nav a:focus { color: var(--ink); background: var(--teal-soft); }
+    main { min-width: 0; }
+    header, section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      padding: clamp(24px, 4vw, 46px);
+      margin-bottom: 24px;
+    }
+    header {
+      overflow: hidden;
+      position: relative;
+      border-top: 7px solid var(--teal);
+    }
+    header::after {
+      content: "";
+      position: absolute;
+      width: 280px;
+      height: 280px;
+      right: -110px;
+      top: -145px;
+      border: 42px solid var(--teal-soft);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+    h1, h2, h3, h4 { line-height: 1.19; letter-spacing: -0.025em; scroll-margin-top: 20px; }
+    h1 { font-size: clamp(2.45rem, 6vw, 5.4rem); max-width: 980px; margin: 16px 0 18px; }
+    h2 { font-size: clamp(1.75rem, 3vw, 2.45rem); margin: 0 0 20px; }
+    h3 { font-size: 1.32rem; margin: 30px 0 10px; }
+    h4 { font-size: 1.06rem; margin: 24px 0 7px; }
+    p { margin: 9px 0 16px; }
+    ul, ol { padding-left: 1.35rem; }
+    li { margin: 7px 0; }
+    .eyebrow {
+      position: relative;
+      z-index: 1;
+      color: var(--teal-dark);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-size: 0.78rem;
+      font-weight: 800;
+    }
+    .lead { font-size: 1.19rem; max-width: 920px; color: var(--muted); }
+    .meta { color: var(--muted); font-size: 0.88rem; }
+    .tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
+    .tag {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 5px 11px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      background: var(--panel-2);
+    }
+    .tag.accent { color: var(--teal-dark); background: var(--teal-soft); border-color: transparent; }
+    .decision, .note, .warning {
+      border-left: 5px solid var(--teal);
+      border-radius: 0 10px 10px 0;
+      background: var(--teal-soft);
+      padding: 17px 20px;
+      margin: 20px 0;
+    }
+    .decision strong, .note strong, .warning strong { display: block; margin-bottom: 4px; }
+    .note { border-color: var(--blue); background: var(--blue-soft); }
+    .warning { border-color: var(--amber); background: var(--amber-soft); }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 20px 0; }
+    .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel-2);
+      padding: 18px;
+    }
+    .card h3, .card h4 { margin-top: 0; }
+    .card p:last-child, .card ul:last-child { margin-bottom: 0; }
+    .number {
+      display: inline-grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      color: var(--panel);
+      background: var(--teal);
+      font-weight: 800;
+      margin-bottom: 10px;
+    }
+    .pipeline {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(120px, 1fr));
+      gap: 23px;
+      align-items: stretch;
+      margin: 24px 0;
+    }
+    .node {
+      position: relative;
+      display: grid;
+      align-content: center;
+      min-height: 108px;
+      padding: 14px;
+      text-align: center;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: var(--panel-2);
+      font-weight: 750;
+    }
+    .node small { display: block; color: var(--muted); font-weight: 500; margin-top: 5px; line-height: 1.35; }
+    .node:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      right: -21px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--teal);
+      font-size: 1.45rem;
+    }
+    .node.hot { background: var(--red-soft); border-color: color-mix(in srgb, var(--red) 35%, var(--line)); }
+    .node.good { background: var(--teal-soft); border-color: color-mix(in srgb, var(--teal) 35%, var(--line)); }
+    .fork {
+      display: grid;
+      grid-template-columns: minmax(150px, 0.72fr) minmax(0, 1fr) minmax(0, 1fr);
+      gap: 16px;
+      margin: 24px 0;
+      align-items: stretch;
+    }
+    .fork .lane { border: 1px solid var(--line); border-radius: 12px; padding: 18px; background: var(--panel-2); }
+    .fork .lane.software { border-top: 5px solid var(--amber); }
+    .fork .lane.gpu { border-top: 5px solid var(--teal); }
+    .fork .source { display: grid; place-items: center; text-align: center; background: var(--blue-soft); }
+    pre {
+      margin: 16px 0 22px;
+      overflow: auto;
+      color: var(--code-ink);
+      background: var(--code);
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      padding: 19px 21px;
+      line-height: 1.5;
+      font-size: 0.86rem;
+      tab-size: 4;
+    }
+    .comment { color: #8fc4b8; }
+    table { width: 100%; border-collapse: collapse; margin: 18px 0 25px; font-size: 0.91rem; }
+    th, td { border: 1px solid var(--line); padding: 11px 12px; text-align: left; vertical-align: top; }
+    th { background: var(--teal-soft); }
+    td:first-child { font-weight: 700; }
+    .yes { color: var(--teal-dark); font-weight: 800; }
+    .no { color: var(--red); font-weight: 800; }
+    .timeline { counter-reset: phase; display: grid; gap: 15px; margin-top: 18px; }
+    .phase {
+      counter-increment: phase;
+      display: grid;
+      grid-template-columns: 52px minmax(0, 1fr);
+      gap: 14px;
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      border-radius: 12px;
+      padding: 18px;
+    }
+    .phase::before {
+      content: counter(phase);
+      display: grid;
+      place-items: center;
+      align-self: start;
+      width: 42px;
+      height: 42px;
+      color: var(--panel);
+      background: var(--teal);
+      border-radius: 50%;
+      font-size: 1.05rem;
+      font-weight: 850;
+    }
+    .phase h3 { margin: 2px 0 7px; }
+    .phase p, .phase ul { margin-top: 5px; }
+    .checklist { list-style: none; padding-left: 0; }
+    .checklist li { position: relative; padding-left: 29px; }
+    .checklist li::before {
+      content: "✓";
+      position: absolute;
+      left: 0;
+      top: 0;
+      color: var(--teal-dark);
+      font-weight: 900;
+    }
+    .filetree {
+      display: grid;
+      grid-template-columns: minmax(220px, 0.65fr) minmax(0, 1.35fr);
+      gap: 0;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      overflow: hidden;
+      margin: 18px 0;
+    }
+    .filetree div { padding: 10px 13px; border-bottom: 1px solid var(--line); }
+    .filetree div:nth-last-child(-n + 2) { border-bottom: 0; }
+    .filetree div:nth-child(4n + 1), .filetree div:nth-child(4n + 2) { background: var(--panel-2); }
+    .filetree .path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--teal-dark); font-size: 0.86rem; }
+    .small { color: var(--muted); font-size: 0.89rem; }
+    footer { color: var(--muted); text-align: center; padding: 18px; font-size: 0.85rem; }
+    @media (max-width: 1050px) {
+      .shell { grid-template-columns: 1fr; }
+      aside { position: static; max-height: none; }
+      aside nav { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .pipeline { grid-template-columns: 1fr; gap: 28px; }
+      .node:not(:last-child)::after { content: "↓"; right: auto; left: 50%; top: auto; bottom: -27px; transform: translateX(-50%); }
+    }
+    @media (max-width: 760px) {
+      body { font-size: 16px; }
+      .shell { width: min(100% - 18px, 1420px); padding-top: 10px; }
+      aside nav, .grid, .grid.three, .fork { grid-template-columns: 1fr; }
+      header, section { border-radius: 13px; padding: 22px 18px; }
+      .filetree { grid-template-columns: 1fr; }
+      .filetree div { border-bottom: 0; }
+      .filetree .path { padding-bottom: 2px; }
+      .filetree div:not(.path) { padding-top: 2px; border-bottom: 1px solid var(--line); }
+      .filetree div:last-child { border-bottom: 0; }
+      table { display: block; overflow-x: auto; }
+    }
+    @media print {
+      :root { --paper: #fff; --panel: #fff; --panel-2: #fafafa; --ink: #111; --muted: #444; --line: #bbb; --shadow: none; }
+      body { background: #fff; font-size: 10.5pt; }
+      .shell { width: 100%; display: block; padding: 0; }
+      aside { display: none; }
+      header, section { break-inside: avoid; box-shadow: none; border-radius: 0; margin: 0 0 12pt; padding: 18pt; }
+      pre { white-space: pre-wrap; }
+      a { color: inherit; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside aria-label="Document navigation">
+      <div class="wordmark">Renvo</div>
+      <div class="caption">Forms acceleration design</div>
+      <nav>
+        <a href="#decision">Decision</a>
+        <a href="#constraints">Constraints</a>
+        <a href="#current">Current pipeline</a>
+        <a href="#architecture">Architecture</a>
+        <a href="#interfaces">Go interfaces</a>
+        <a href="#commands">Command model</a>
+        <a href="#geometry">Geometry &amp; text</a>
+        <a href="#damage">Frames &amp; damage</a>
+        <a href="#resources">Resources</a>
+        <a href="#backends">Metal &amp; OpenGL</a>
+        <a href="#software">Software path</a>
+        <a href="#files">Code organization</a>
+        <a href="#migration">Migration</a>
+        <a href="#tests">Validation</a>
+        <a href="#risks">Risks</a>
+        <a href="#acceptance">Merge criteria</a>
+      </nav>
+    </aside>
+
+    <main>
+      <header>
+        <div class="eyebrow">Architecture proposal · Issue 345</div>
+        <h1>Fully accelerated Forms rendering</h1>
+        <p class="lead">A dual-path rendering design that lets Forms paint the same way into a tiny software framebuffer or a retained GPU target—without turning <code>Surface.Pixels</code> into a misleading compatibility trap.</p>
+        <div class="tags" aria-label="Document status">
+          <span class="tag accent">Proposed</span>
+          <span class="tag">macOS only</span>
+          <span class="tag">Metal first</span>
+          <span class="tag">OpenGL conformance</span>
+          <span class="tag">Software preserved</span>
+          <span class="tag">No generics</span>
+        </div>
+        <p class="meta">Prepared for <a href="https://github.com/tinyrange/renvo/issues/345">tinyrange/renvo#345</a> · 11 August 2026</p>
+      </header>
+
+      <section id="decision">
+        <h2>Decision</h2>
+        <div class="decision">
+          <strong>Make drawing polymorphic; keep pixel storage concrete.</strong>
+          Add a composed <code>graphics.Canvas</code> interface. <code>*graphics.Surface</code> remains the CPU-backed implementation and continues to own public pixels. A new unexported <code>*gpuCanvas</code> implements the same drawing contract by producing a compact, backend-neutral draw list. Forms paint handlers move from <code>func(*graphics.Surface)</code> to <code>func(graphics.Canvas)</code>.
+        </div>
+        <div class="note">
+          <strong>Initial platform scope: macOS only.</strong>
+          This work delivers and validates Metal and OpenGL acceleration on macOS. iOS and Android integration belong in later PRs after the Canvas contract and draw-list behavior have stabilized. The shared interfaces should permit those ports, but this PR must not add their native backends or make mobile testing a merge requirement.
+        </div>
+        <p>This is a purposeful source migration, not a cosmetic abstraction. A GPU target cannot safely masquerade as the current <code>Surface</code>: direct writes to the exported <code>Pixels</code> slice cannot be observed, and GPU drawing cannot cheaply keep that slice current. The interface puts the seam at the operation boundary, where both implementations have honest semantics.</p>
+        <div class="fork" aria-label="Proposed dual rendering path">
+          <div class="lane source">
+            <div><strong>Forms widgets</strong><br><span class="small">paint to <code>graphics.Canvas</code></span></div>
+          </div>
+          <div class="lane software">
+            <strong>Software lane</strong>
+            <p><code>*Surface</code> immediately rasterizes into premultiplied RGBA8 or A8 pixels. Native display, browser upload, image export, and microcontroller display continue to consume those pixels.</p>
+          </div>
+          <div class="lane gpu">
+            <strong>Accelerated lane</strong>
+            <p><code>*gpuCanvas</code> transforms and encodes geometry, image, text, clip, and blend commands. Metal or OpenGL renders them into a persistent texture, then presents it.</p>
+          </div>
+        </div>
+        <h3>Why this boundary</h3>
+        <div class="grid three">
+          <article class="card"><span class="number">1</span><h4>One widget implementation</h4><p>Controls keep calling familiar drawing methods. They do not import Metal, OpenGL, shaders, or platform types.</p></article>
+          <article class="card"><span class="number">2</span><h4>No per-pixel interface cost</h4><p>The software implementation enters a concrete <code>*Surface</code> method once per primitive; its inner pixel loops remain direct calls.</p></article>
+          <article class="card"><span class="number">3</span><h4>Truthful resource semantics</h4><p><code>Surface</code> always means CPU pixels. A GPU canvas has no exported fake framebuffer and readback stays explicit.</p></article>
+        </div>
+      </section>
+
+      <section id="constraints">
+        <h2>Constraints and invariants</h2>
+        <div class="grid">
+          <article class="card">
+            <h3>Must remain true</h3>
+            <ul class="checklist">
+              <li>Software rendering remains a first-class renderer, not a fallback shim.</li>
+              <li>Microcontrollers can use <code>NewSurface</code> with no GPU code, native handles, or command-list allocation.</li>
+              <li>Coordinates stay upper-left, half-open, and device-scale aware.</li>
+              <li>RGBA8 remains premultiplied; <code>BlendCopy</code> and source-over remain deterministic contracts.</li>
+              <li>Forms damage rectangles retain unchanged pixels between frames.</li>
+              <li>The ordinary Go headless renderer remains the pixel-correctness oracle.</li>
+              <li>Renvo builds use no cgo or third-party runtime dependency.</li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>Deliberately out of scope</h3>
+            <ul>
+              <li>A scene graph or retained widget display list across frames.</li>
+              <li>Replacing Forms layout, event dispatch, or invalidation.</li>
+              <li>iOS or Android accelerated backends, native layer integration, and device validation.</li>
+              <li>Subpixel LCD text, HDR, color management, perspective, or arbitrary clip paths.</li>
+              <li>Making raw <code>Surface.Pixels</code> writes automatically uploadable.</li>
+              <li>Introducing generics, goroutines, channels, reflection, or <code>any</code>-based command payloads.</li>
+            </ul>
+          </article>
+        </div>
+        <div class="warning">
+          <strong>Compiler constraints shape the Go design.</strong>
+          Renvo intentionally excludes generics, goroutines, and channels. Use explicit structs, typed enums, interface composition, embedding, and build-tag-selected factories. Keep hot data homogeneous and avoid interface values inside command arrays so lowering stays simple and predictable.
+        </div>
+      </section>
+
+      <section id="current">
+        <h2>Current rendering pipeline</h2>
+        <div class="pipeline" aria-label="Current Forms rendering pipeline">
+          <div class="node">Forms invalidation<small>up to 64 exact dirty rectangles</small></div>
+          <div class="node hot"><code>*Surface</code> methods<small>CPU rasterization and blending</small></div>
+          <div class="node hot"><code>Surface.Pixels</code><small>full physical-resolution RGBA buffer</small></div>
+          <div class="node hot">Presentation copy<small>row flips, CFData snapshots, or host upload</small></div>
+          <div class="node">Native drawable<small>OpenGL front buffer or UIImage</small></div>
+        </div>
+        <p>The Forms side is already well positioned for abstraction: production widgets paint through <code>Surface</code> methods, and <code>Form.Paint</code> supplies independent damage and clip scopes. The expensive work is below that seam.</p>
+        <table>
+          <thead><tr><th>Area</th><th>Current behavior</th><th>Consequence</th></tr></thead>
+          <tbody>
+            <tr><td>Primitives</td><td>Rectangles, triangles, lines, ellipses, paths, images, and glyph masks run nested CPU pixel loops.</td><td>Paint time grows with damaged pixel area rather than primarily with primitive count.</td></tr>
+            <tr><td>macOS</td><td>Dirty rows are flipped into <code>bottomUp</code> and sent with legacy <code>glDrawPixels</code>.</td><td>OpenGL is currently a presentation API, not a renderer.</td></tr>
+            <tr><td>Text</td><td>TrueType outlines become cached A8 masks, then each covered mask pixel is tinted and blended on the CPU.</td><td>Glyph generation is reusable, but composition is bandwidth-heavy.</td></tr>
+            <tr><td>Types</td><td><code>Image</code> aliases <code>Surface</code>; <code>PaintHandler</code> accepts <code>*Surface</code>.</td><td>Pixel storage and drawing capability are coupled even where Forms needs only operations.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="architecture">
+        <h2>Proposed architecture</h2>
+        <div class="pipeline" aria-label="Proposed accelerated rendering pipeline">
+          <div class="node">Forms paint<small><code>graphics.Canvas</code></small></div>
+          <div class="node good">GPU canvas<small>state normalization and CPU geometry</small></div>
+          <div class="node good">Draw list<small>typed commands, vertices, image references</small></div>
+          <div class="node good">Render backend<small>Metal or OpenGL command execution</small></div>
+          <div class="node">Persistent target<small>damage updates, then drawable present</small></div>
+        </div>
+        <p>There are three stable layers. Each owns one kind of variability:</p>
+        <ol>
+          <li><strong>Canvas contract:</strong> portable drawing semantics shared by widgets and applications.</li>
+          <li><strong>GPU draw-list encoder:</strong> shared transforms, tessellation, batching decisions, image references, and validation.</li>
+          <li><strong>Render backend:</strong> native resource creation and execution for Metal or OpenGL.</li>
+        </ol>
+        <p>The software path implements layer 1 directly and bypasses layers 2 and 3. This is intentional. Forcing software through a GPU-shaped command list would add allocations and latency to the smallest targets while making the existing optimized pixel routines harder to reason about.</p>
+        <div class="note">
+          <strong>The draw list is per frame, not retained UI state.</strong>
+          Forms remains the source of truth. Only pixels in the persistent render target survive between frames. This preserves current invalidation semantics and avoids cache invalidation bugs when application paint callbacks depend on mutable state.
+        </div>
+      </section>
+
+      <section id="interfaces">
+        <h2>Go interface design</h2>
+        <p>Use interface composition to keep capabilities reviewable. <code>Canvas</code> is the convenient union used by paint handlers; focused code can accept a smaller constituent interface. Both <code>*Surface</code> and <code>*gpuCanvas</code> satisfy it implicitly.</p>
+        <pre><code>package graphics
+
+type CanvasState interface {
+	SetBlendMode(BlendMode)
+	SetTransform(*Mat2x3)
+	SetAffine(a, b, c, d, tx, ty Scalar)
+	SetTranslation(x, y Scalar)
+	ResetTransform()
+	PushTransform()
+	PopTransform()
+	PushClipRect(Rect)
+	PopClip()
+}
+
+type ShapeCanvas interface {
+	Clear(Color)
+	DrawPoint(Point, Color)
+	DrawLine(a, b Point, width Scalar, color Color)
+	DrawPolyline([]Point, Scalar, Color)
+	FillRect(Rect, Color)
+	StrokeRect(Rect, Scalar, Color)
+	FillTriangle(a, b, c Point, color Color)
+	FillPolygon([]Point, FillRule, Color)
+	FillConvexPolygon([]Point, Color)
+	FillEllipse(Rect, Color)
+	StrokeEllipse(Rect, Scalar, Color)
+	FillPath(*Path, FillRule, Color)
+	StrokePath(*Path, Scalar, Color)
+}
+
+type ImageCanvas interface {
+	DrawImage(*Image, src, dst Rect, sampling Sampling, tint Color)
+}
+
+type TextCanvas interface {
+	DrawText(*Font, Point, string, Color)
+	DrawTextBytes(*Font, Point, []byte, Color)
+	DrawGlyphRun(Point, []Glyph, Color)
+}
+
+type DamageCanvas interface {
+	BeginDamage(Rect)
+	EndDamage()
+}
+
+type Canvas interface {
+	CanvasState
+	ShapeCanvas
+	ImageCanvas
+	TextCanvas
+	DamageCanvas
+}
+
+var _ Canvas = (*Surface)(nil)
+var _ Canvas = (*gpuCanvas)(nil)</code></pre>
+        <p>Method names and drawing semantics remain familiar. The main API migration is visible and mechanical:</p>
+        <pre><code><span class="comment">// Before</span>
+type PaintHandler func(surface *graphics.Surface)
+
+<span class="comment">// After</span>
+type PaintHandler func(canvas graphics.Canvas)
+
+func (b *Button) paint(canvas graphics.Canvas) {
+	canvas.FillRect(b.Bounds(), b.background)
+	canvas.DrawText(b.font, b.textOrigin(), b.Text, b.foreground)
+}</code></pre>
+
+        <h3>Frame ownership</h3>
+        <p>A concrete frame type makes begin/present pairing explicit without adding another large public interface. Existing immediate-mode window callers keep <code>Surface()</code> and <code>Present()</code>; Forms uses the frame API.</p>
+        <pre><code>type Frame struct {
+	window  *Window
+	canvas  Canvas
+	backend frameBackend
+	ended   bool
+}
+
+func (w *Window) BeginFrame() *Frame
+func (f *Frame) Canvas() Canvas
+func (f *Frame) Present() bool
+func (f *Frame) Cancel()
+
+func (a *App) paint() bool {
+	if len(a.Form.invalid) == 0 {
+		return true
+	}
+	frame := a.Window.BeginFrame()
+	if frame == nil {
+		return false
+	}
+	if !a.Form.Paint(frame.Canvas()) {
+		frame.Cancel()
+		return true
+	}
+	return frame.Present()
+}</code></pre>
+        <p><code>Frame</code> prevents accidental double presentation and gives timing instrumentation a natural lifetime. <code>Window.Present</code> remains a compatibility wrapper for the software surface path, but GPU Forms code never depends on <code>Window.Surface()</code>.</p>
+
+        <h3>Backend contract</h3>
+        <p>Keep the platform interface narrow. It receives already-normalized work; it does not know about Forms controls, paths, fonts, or affine stacks.</p>
+        <pre><code>type frameConfig struct {
+	width, height int       <span class="comment">// physical pixels</span>
+	damage        []pixelRect
+	clear         bool      <span class="comment">// true after create/resize/context loss</span>
+}
+
+type frameBackend interface {
+	Begin(frameConfig) bool
+	Render(*drawList) bool
+	Present() bool
+	Resize(width, height int) bool
+	ReadPixels(*Surface) bool
+	Destroy()
+	Stats() RenderStats
+}
+
+var _ frameBackend = (*metalBackend)(nil)
+var _ frameBackend = (*openGLBackend)(nil)</code></pre>
+        <p>Do not expose native device, queue, texture, or context handles through this interface. Backend-specific helper types can use embedding for shared lifecycle state, while capability differences are handled during backend construction rather than with type assertions in the paint loop.</p>
+
+        <h3>Construction and renderer choice</h3>
+        <pre><code>type Renderer int
+
+const (
+	RendererAuto Renderer = iota
+	RendererSoftware
+	RendererMetal
+	RendererOpenGL
+)
+
+type WindowOptions struct {
+	Title    string
+	Width    int
+	Height   int
+	Hidden   bool
+	Renderer Renderer
+}
+
+type backendFactory func(*Window) (frameBackend, *Error)
+
+<span class="comment">// Selected by target-specific files and build tags.</span>
+func platformBackendFactory(Renderer) backendFactory</code></pre>
+        <p>On macOS, <code>RendererAuto</code> prefers Metal, then OpenGL where the required profile exists, then software. An explicitly requested backend fails with a useful <code>LastWindowError</code> instead of silently changing semantics. Other platforms continue selecting their existing software/presentation path in this PR. A typed option field is preferable to functional options here: it is simpler for the frontend, avoids closure allocation, and makes configuration serializable and easy to inspect.</p>
+      </section>
+
+      <section id="commands">
+        <h2>Typed command model</h2>
+        <p>The GPU canvas owns reusable slices for vertices, commands, damage, and image references. Reset slice lengths at frame start and retain capacity. Commands contain only scalar values and integer indices—never <code>any</code>, reflection metadata, closures, or per-command interface values.</p>
+        <pre><code>type commandKind uint8
+
+const (
+	commandSolid commandKind = iota
+	commandTexture
+	commandMask
+	commandPathStencil
+)
+
+type vertex struct {
+	x, y Scalar
+	u, v Scalar
+}
+
+type drawCommand struct {
+	kind       commandKind
+	blend      BlendMode
+	sampling   Sampling
+	clip       pixelRect
+	first      int
+	count      int
+	image      int       <span class="comment">// index into drawList.images; -1 for solid</span>
+	color      Color
+	pathFirst  int
+	pathCount  int
+	fillRule   FillRule
+}
+
+type drawList struct {
+	vertices []vertex
+	commands []drawCommand
+	images   []*Image
+	paths    []pathEdge
+}
+
+func (l *drawList) Reset() {
+	l.vertices = l.vertices[:0]
+	l.commands = l.commands[:0]
+	l.images = l.images[:0]
+	l.paths = l.paths[:0]
+}</code></pre>
+        <h3>Batching rule</h3>
+        <p>Preserve painter order. Merge only adjacent commands with identical pipeline, blend, texture, sampling, and clip state. This captures the common Forms case—many neighboring solid rectangles or glyphs—without reordering translucent controls.</p>
+        <div class="grid">
+          <article class="card"><h3>Normalize on the CPU</h3><p>Apply the complete affine transform and device scale before appending vertices. Convert upper-left coordinates to backend viewport coordinates in one shared place. Backends receive physical-pixel geometry and identical scissor rectangles.</p></article>
+          <article class="card"><h3>Execute on the GPU</h3><p>Upload growing vertex ranges through a reusable ring buffer, bind the small pipeline set, resolve images through the texture cache, set scissor/blend state, and draw.</p></article>
+        </div>
+        <p>Encoding CPU geometry is still “fully accelerated” in the useful sense: expensive coverage, sampling, tinting, blending, and framebuffer writes move to the GPU. Keeping portable tessellation above the backend also prevents Metal and OpenGL from slowly diverging.</p>
+      </section>
+
+      <section id="geometry">
+        <h2>Geometry, paths, images, and text</h2>
+        <table>
+          <thead><tr><th>Canvas operation</th><th>GPU representation</th><th>Parity note</th></tr></thead>
+          <tbody>
+            <tr><td>Clear / FillRect</td><td>Scissored clear when legal; otherwise two solid triangles.</td><td>Snap only where the software renderer currently floors/ceils an axis-aligned rectangle.</td></tr>
+            <tr><td>FillTriangle</td><td>One transformed triangle.</td><td>Use the same top-left fill convention and pixel-center definition.</td></tr>
+            <tr><td>Lines / strokes</td><td>CPU-generated quad plus round-cap fans; path strokes reuse the same builder.</td><td>Adaptive segment count is based on physical radius and capped for predictable command size.</td></tr>
+            <tr><td>Ellipse</td><td>Adaptive triangle fan or ring generated in physical space.</td><td>Begin with geometry, not an analytic shader, to keep Metal/OpenGL behavior aligned.</td></tr>
+            <tr><td>RGBA image</td><td>Textured quad with nearest or linear sampler and premultiplied tint.</td><td>Clamp sampling at the source rectangle edge, not the whole texture, to avoid atlas bleed.</td></tr>
+            <tr><td>A8 mask</td><td>Single-channel texture; shader multiplies coverage by premultiplied tint.</td><td>Matches current TrueType mask composition.</td></tr>
+            <tr><td>General path fill</td><td>Shared flattened edges rendered into stencil, then a bounded color cover pass.</td><td>Stencil supports concavity, holes, even-odd, and non-zero winding without a fragile polygon triangulator.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Path filling</h3>
+        <p><code>Path</code> already flattens quadratic and cubic curves into portable line contours. Reuse those contours. For a fill command, render signed contour fans or edge wedges into an 8-bit stencil attachment, using invert for even-odd and increment/decrement wrapping for non-zero winding. Then draw the path bounds where the stencil test passes and clear only that stencil rectangle.</p>
+        <p>Keep the existing software point-in-path rasterizer as the exact fallback. A later optimization may add a robust tessellator for simple contours, but it is not a prerequisite for correctness.</p>
+
+        <h3>Text</h3>
+        <ol>
+          <li>Keep TrueType parsing, kerning, layout, and A8 glyph rasterization in shared Go code.</li>
+          <li>Pack generated masks into renderer-owned A8 atlas pages. Store atlas coordinates beside the renderer cache entry, not in <code>Font</code>, because a font may be drawn by multiple windows or backends.</li>
+          <li>Emit glyph quads in text order; batch adjacent glyphs on the same atlas page and clip.</li>
+          <li>Use nearest sampling for integer-scaled built-in glyphs and linear sampling for TrueType masks when transformed.</li>
+        </ol>
+        <div class="note">
+          <strong>First milestone can skip atlas packing.</strong>
+          Uploading one immutable texture per cached glyph proves the interface and shader semantics. Add the atlas before calling the work performance-complete, not before the first pixel-correct Metal frame.
+        </div>
+      </section>
+
+      <section id="damage">
+        <h2>Frame lifecycle and damage</h2>
+        <p>Damage-scoped repainting requires persistent GPU storage. A swapchain or <code>CAMetalLayer</code> drawable is not guaranteed to preserve old pixels, so Forms must never paint partial damage directly into the drawable.</p>
+        <div class="pipeline" aria-label="GPU frame lifecycle">
+          <div class="node">BeginFrame<small>acquire encoder; reset draw list</small></div>
+          <div class="node">Form.Paint<small>record commands inside damage clips</small></div>
+          <div class="node good">Persistent texture<small>update only damaged regions</small></div>
+          <div class="node">Drawable pass<small>one full-screen copy or quad</small></div>
+          <div class="node">Present<small>commit and publish timings</small></div>
+        </div>
+        <ul>
+          <li>Create one private RGBA8 render target and stencil attachment per window at physical pixel size.</li>
+          <li>On create, resize, scale change, context loss, or backend switch, invalidate the whole target and require a full Forms repaint.</li>
+          <li><code>BeginDamage</code> records the exact transformed region and intersects the active scissor. Nested damage stays balanced.</li>
+          <li>Each command is clipped by both the Forms damage clip and the canvas clip stack, so commands for one invalid region cannot touch preserved pixels in another.</li>
+          <li>The final pass copies the persistent target to the current drawable. Start with a full copy; optimize partial platform presents only after measurement.</li>
+          <li>If no drawable is available, cancel without clearing Forms invalidation. Never reset damage merely because command submission failed.</li>
+        </ul>
+
+        <h3>Timing model</h3>
+        <pre><code>type RenderStats struct {
+	Backend       Renderer
+	Frame         uint64
+	DamageRects   int
+	Commands      int
+	Triangles     int
+	TextureBytes  int
+	EncodeSeconds Scalar
+	SubmitSeconds Scalar
+	GPUSeconds    Scalar  <span class="comment">// one or more frames delayed when required</span>
+	PresentSeconds Scalar
+}</code></pre>
+        <p>The existing debugging display should report at least event-to-paint, paint/encode, backend submit, GPU completion, and present separately. Do not label CPU submission time as render time. GPU timing may arrive a frame later; expose the sampled frame number so the overlay is honest.</p>
+      </section>
+
+      <section id="resources">
+        <h2>Images, revisions, and resource lifetime</h2>
+        <p>The current <code>Image = Surface</code> alias can remain during the first implementation. GPU caches are backend-owned and keyed by image pointer plus a monotonically increasing content revision.</p>
+        <pre><code>type Surface struct {
+	Width, Height, Stride int
+	Pixels                []byte
+	Format                PixelFormat
+
+	contentRevision uint64
+	<span class="comment">// existing software draw state follows</span>
+}
+
+func (s *Surface) MarkUpdated(rect Rect) {
+	<span class="comment">// Clip, register upload damage, and increment once per logical update.</span>
+}
+
+func (s *Surface) UpdateImage(rect Rect, pixels []byte) {
+	<span class="comment">// Copy pixels, then call MarkUpdated once.</span>
+}
+
+type textureEntry struct {
+	image       *Image
+	revision    uint64
+	lastFrame   uint64
+	native      int
+	width       int
+	height      int
+	format      PixelFormat
+}</code></pre>
+        <div class="warning">
+          <strong>Raw pixel writes require an explicit commit.</strong>
+          Existing software users may continue writing <code>Pixels</code> directly. If that object is later used as a GPU image, the caller must invoke <code>MarkUpdated</code>. This is observable and testable; pretending to detect arbitrary slice writes is not.
+        </div>
+        <table>
+          <thead><tr><th>Resource</th><th>Owner</th><th>Creation</th><th>Release / recovery</th></tr></thead>
+          <tbody>
+            <tr><td>Draw list buffers</td><td><code>gpuCanvas</code></td><td>Grow on demand; retain capacity.</td><td>Release with window; reset length each frame.</td></tr>
+            <tr><td>Persistent color/stencil</td><td>Backend window instance</td><td>Create at physical size.</td><td>Recreate on resize, scale change, or context/device loss.</td></tr>
+            <tr><td>Image textures</td><td>Backend texture cache</td><td>Lazy on first command; update on revision mismatch.</td><td>Explicit <code>Image.Destroy</code> notification plus age-based eviction.</td></tr>
+            <tr><td>Glyph atlas</td><td>Backend texture cache</td><td>Lazy pages, A8 format.</td><td>Release with backend; rebuild from CPU masks after loss.</td></tr>
+            <tr><td>Native drawable</td><td>Platform layer</td><td>Acquire for present only.</td><td>Release/commit every frame; never treat as retained content.</td></tr>
+          </tbody>
+        </table>
+        <p>A later cleanup may split <code>Image</code> and <code>Surface</code> around an embedded pixel-buffer type, but that is not necessary to accelerate Forms and should not be coupled to the first backend. The Canvas migration already removes the harmful dependency from paint handlers.</p>
+      </section>
+
+      <section id="backends">
+        <h2>Metal and OpenGL responsibilities</h2>
+        <table>
+          <thead><tr><th>Concern</th><th>Metal</th><th>OpenGL</th><th>Shared contract</th></tr></thead>
+          <tbody>
+            <tr><td>Target</td><td><code>MTLTexture</code> plus <code>CAMetalLayer</code> drawable.</td><td>RGBA texture attached to FBO plus default framebuffer.</td><td>Persistent top-down RGBA8 content.</td></tr>
+            <tr><td>Geometry</td><td>Reusable <code>MTLBuffer</code> ring.</td><td>Reusable VBO, grown geometrically.</td><td>Same transformed vertices and indices.</td></tr>
+            <tr><td>Pipelines</td><td>Solid, RGBA texture, A8 mask, stencil cover.</td><td>Equivalent GLSL programs and fixed blend/stencil state.</td><td>Premultiplied source-over and copy.</td></tr>
+            <tr><td>Clip</td><td>Scissor rectangles.</td><td><code>glScissor</code>.</td><td>Physical upper-left rect converted once at backend edge.</td></tr>
+            <tr><td>Timing</td><td>Command-buffer GPU start/end where available.</td><td>Timer query where available; otherwise submit timing marked CPU-only.</td><td>Never fabricate unavailable GPU duration.</td></tr>
+            <tr><td>Readback</td><td>Blit/synchronize target into CPU buffer.</td><td><code>glReadPixels</code> from FBO.</td><td>Return top-down premultiplied RGBA8 <code>*Image</code>.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Implementation order</h3>
+        <p>Build Metal first on macOS because the development machine can test it directly and Metal is the long-term Apple API. Keep device, queue, pipeline, resource, and shader logic separate from Cocoa window lifecycle so a later iOS PR can reuse the portable pieces without making iOS part of this implementation. Then implement macOS OpenGL against the exact same draw-list conformance tests.</p>
+        <p>OpenGL should use a shader-capable profile and FBOs. The existing <code>glDrawPixels</code> path remains a software-presentation fallback; it is not the accelerated backend. On platforms where only the legacy API is available, <code>RendererAuto</code> should select software instead of claiming acceleration.</p>
+        <div class="warning">
+          <strong>Keep native ABI work narrow.</strong>
+          Metal calls still cross Renvo’s Objective-C/runtime boundary. Isolate selector declarations, structure layouts, and native handle management in target files. The shared encoder must be ordinary Go that the host test suite can exercise without a GPU.
+        </div>
+      </section>
+
+      <section id="software">
+        <h2>Software rendering remains the reference path</h2>
+        <p>The software renderer should become cleaner as a result of this work, not more conditional:</p>
+        <ul>
+          <li><code>Surface</code> continues to allocate only its pixel storage and existing state slices.</li>
+          <li>Its methods stay concrete and invoke concrete helpers such as <code>fillPixelRect</code> and <code>putPixel</code>.</li>
+          <li>No backend interface is stored on <code>Surface</code>; no nil check is added to every primitive; no draw list is created.</li>
+          <li>Direct pixel access, offscreen drawing, PPM export, the browser path, and microcontroller display code remain valid.</li>
+          <li>Target build tags prevent Metal/OpenGL source from entering small target compilation units. Bundled source size is still measured separately.</li>
+        </ul>
+        <pre><code><span class="comment">// A display-oriented microcontroller program is unchanged.</span>
+surface := graphics.NewSurface(width, height)
+surface.FillRect(graphics.R(0, 0, width, height), background)
+drawDashboard(surface) <span class="comment">// *Surface implicitly satisfies Canvas if desired</span>
+display.Present(surface.Pixels, surface.Stride)</code></pre>
+        <p>Where interface dispatch matters on a small target, application helpers may continue accepting <code>*Surface</code>. Forms uses <code>Canvas</code> because it needs polymorphism; the graphics package does not force every caller through it.</p>
+      </section>
+
+      <section id="files">
+        <h2>Suggested code organization</h2>
+        <p>Split platform windowing from rendering. The existing large native window files should retain event, view, and lifecycle code while renderers move behind the shared contracts.</p>
+        <div class="filetree" role="table" aria-label="Suggested file layout">
+          <div class="path" role="cell">std/graphics/canvas.go</div><div role="cell">Public composed Canvas interfaces and compile-time assertions.</div>
+          <div class="path" role="cell">std/graphics/surface.go</div><div role="cell">Concrete software canvas, pixels, damage, state, and optimized raster routines.</div>
+          <div class="path" role="cell">std/graphics/gpu_canvas.go</div><div role="cell">Portable state stack, geometry builders, typed draw list, and command batching.</div>
+          <div class="path" role="cell">std/graphics/gpu_path.go</div><div role="cell">Portable flattened-edge and stencil-fill encoding.</div>
+          <div class="path" role="cell">std/graphics/gpu_text.go</div><div role="cell">Glyph quad emission and backend-neutral atlas allocation metadata.</div>
+          <div class="path" role="cell">std/graphics/render_backend.go</div><div role="cell">Frame/backend interfaces, renderer enum, stats, resource revision rules.</div>
+          <div class="path" role="cell">std/graphics/render_metal_darwin_arm64_renvo.go</div><div role="cell">macOS Metal device, pipeline, texture, command-buffer, and CAMetalLayer integration.</div>
+          <div class="path" role="cell">std/graphics/render_opengl_*_renvo.go</div><div role="cell">Shader/FBO backend and platform context integration.</div>
+          <div class="path" role="cell">std/graphics/window_*.go</div><div role="cell">Window creation, events, BeginFrame selection, legacy software presentation.</div>
+          <div class="path" role="cell">forms/forms.go</div><div role="cell">Canvas-based PaintHandler and damage-scoped Form.Paint.</div>
+          <div class="path" role="cell">forms/application*.go</div><div role="cell">Frame lifecycle, failure handling, and render timing hooks.</div>
+          <div class="path" role="cell">std/graphics/render_contract_test.go</div><div role="cell">Backend-independent command, state, damage, and pixel parity suite.</div>
+        </div>
+        <p>Use embedded implementation structs only for real state sharing—for example a <code>gpuResourceCache</code> embedded in both native backends. Do not create inheritance-shaped base types whose methods contain backend conditionals.</p>
+      </section>
+
+      <section id="migration">
+        <h2>Migration plan</h2>
+        <div class="timeline">
+          <article class="phase">
+            <div><h3>Introduce Canvas without behavior change</h3><p>Add the composed interfaces and compile-time assertions. Mechanically migrate Forms widgets, IDE paint callbacks, examples, generator output, and tests to <code>graphics.Canvas</code>. Keep <code>Form.PaintSurface(*Surface)</code> as a short-lived compatibility helper if downstream migration needs staging.</p><p><strong>Exit:</strong> all existing software screenshots and package tests are unchanged.</p></div>
+          </article>
+          <article class="phase">
+            <div><h3>Build and test the portable GPU encoder</h3><p>Add <code>gpuCanvas</code>, draw-list structs, geometry builders, state normalization, command recorder tests, and a fake backend. Cover every Canvas method before native code.</p><p><strong>Exit:</strong> Forms controls produce valid, bounded commands with correct ordering, clips, transforms, damage, and image references.</p></div>
+          </article>
+          <article class="phase">
+            <div><h3>Render Metal on macOS</h3><p>Implement solid and textured pipelines, persistent target, scissor, blending, resize, readback, and frame stats. Start with rectangles/images, then lines/ellipses, text masks, and stencil paths.</p><p><strong>Exit:</strong> the Forms controls demo and IDE render completely without CPU framebuffer rasterization.</p></div>
+          </article>
+          <article class="phase">
+            <div><h3>Add the macOS OpenGL conformance backend</h3><p>Implement shaders, VBO, FBO, textures, stencil, readback, and truthful timing availability in the macOS window path. Use the same draw lists and parity scenes.</p><p><strong>Exit:</strong> switching between Metal, OpenGL, and software on macOS changes no Forms layout or drawing behavior within defined raster tolerance.</p></div>
+          </article>
+          <article class="phase">
+            <div><h3>Optimize measured bottlenecks</h3><p>Add glyph atlas pages, adjacent-command batching, reusable upload rings, texture damage uploads, and cache eviction. Measure before adding complexity.</p><p><strong>Exit:</strong> target latency and frame-time goals pass without regressing software size or speed gates.</p></div>
+          </article>
+        </div>
+        <div class="note">
+          <strong>Recommended PR shape.</strong>
+          Keep the Canvas migration and portable encoder reviewable independently from native Metal ABI work. The issue can be delivered as a short stack of mergeable PRs rather than one platform-heavy change whose type design is difficult to revise.
+        </div>
+      </section>
+
+      <section id="tests">
+        <h2>Validation strategy</h2>
+        <table>
+          <thead><tr><th>Layer</th><th>Test</th><th>Failure caught</th></tr></thead>
+          <tbody>
+            <tr><td>Canvas contract</td><td>Compile-time assertions for Surface and GPU canvas; compile representative Renvo paint callbacks.</td><td>Missing methods, unsupported interface lowering, accidental API drift.</td></tr>
+            <tr><td>Command encoder</td><td>Fake backend inspects transformed vertices, commands, clips, resources, and batch boundaries.</td><td>State leakage, incorrect device scale, bad painter ordering, hidden allocations.</td></tr>
+            <tr><td>Pixel parity</td><td>Render canonical scenes in software and each GPU backend, read back, compare exact interior pixels and tolerance-bounded coverage edges.</td><td>Blend, tint, sampling, winding, glyph, and coordinate-origin differences.</td></tr>
+            <tr><td>Damage retention</td><td>Paint disjoint regions across multiple frames and verify untouched pixels survive.</td><td>Drawing directly to discardable drawables or over-broad clears.</td></tr>
+            <tr><td>Resources</td><td>Create/update/destroy images, mutate with <code>MarkUpdated</code>, resize windows, and simulate context loss.</td><td>Stale textures, leaks, use-after-destroy, missing full invalidation.</td></tr>
+            <tr><td>Forms integration</td><td>Controls demo, menus/popups, editor, designer, debug overlay, screenshots.</td><td>Unimplemented primitive paths and z-order regressions.</td></tr>
+            <tr><td>Native</td><td>macOS Metal/OpenGL, Retina and non-Retina scale, hide/show, live resize, and multiple windows.</td><td>Drawable lifecycle, backing scale, Cocoa integration, context ownership, and ABI defects.</td></tr>
+            <tr><td>Budgets</td><td><code>./tools/check preflight</code>, then <code>./tools/check full</code>; measure bundled frontend binary and representative application size.</td><td>Compiler correctness, self-hosting, performance/resource, and 2 MiB packaging regressions.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Canonical parity scene</h3>
+        <p>Build one deterministic scene covering opaque and translucent rectangles, transformed lines, clipped ellipses, both path rules with holes, nearest and linear image scaling, tinted RGBA/A8 images, built-in text, TrueType text, overlapping popups, and multiple disjoint damage rectangles. Keep a software-rendered reference image and compare GPU readback at physical scale.</p>
+        <p>Exact comparison is required away from antialiased coverage edges. At defined edges, allow a small per-channel tolerance and a bounded number of differing pixels; record that policy in the test rather than broadly weakening comparisons.</p>
+      </section>
+
+      <section id="risks">
+        <h2>Risks and resolved alternatives</h2>
+        <table>
+          <thead><tr><th>Choice</th><th>Decision</th><th>Reason</th></tr></thead>
+          <tbody>
+            <tr><td>Put a renderer interface inside <code>Surface</code></td><td class="no">Reject</td><td>It makes <code>Pixels</code> stale on GPU targets or forces double rendering, and adds a branch to software primitives.</td></tr>
+            <tr><td>Keep <code>PaintHandler func(*Surface)</code> unchanged</td><td class="no">Reject</td><td>A concrete pointer prevents a distinct GPU implementation. A façade would preserve syntax by weakening the type’s pixel contract.</td></tr>
+            <tr><td>Pass <code>any</code> commands to backends</td><td class="no">Reject</td><td>Type switches, boxing, and layout ambiguity are unnecessary and unfriendly to a small compiler.</td></tr>
+            <tr><td>Render Forms directly into each drawable</td><td class="no">Reject</td><td>Partial damage requires retained pixels, which swapchain/CAMetalLayer drawables do not promise.</td></tr>
+            <tr><td>Force software through the command encoder</td><td class="no">Reject</td><td>It taxes microcontrollers and replaces proven raster loops with a GPU-shaped abstraction.</td></tr>
+            <tr><td>Backend-specific path tessellation</td><td class="no">Reject</td><td>It duplicates difficult geometry and creates pixel drift. Shared edges plus stencil are easier to validate.</td></tr>
+            <tr><td>Functional window options</td><td class="no">Reject</td><td>A typed renderer enum is smaller, clearer to lower, and avoids function-value allocation at construction.</td></tr>
+            <tr><td>Small composed Go interfaces</td><td class="yes">Adopt</td><td>They express capabilities, enable a truthful second implementation, and allow focused tests without changing application drawing vocabulary.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Highest implementation risks</h3>
+        <ol>
+          <li><strong>Raster parity:</strong> GPU edge rules, sampler coordinates, premultiplication, and winding must match the portable contract closely enough that widgets do not shimmer or shift.</li>
+          <li><strong>Native ABI surface:</strong> Metal expands Objective-C/runtime calls and native struct handling. Keep it isolated and test basic resource calls before building the full renderer.</li>
+          <li><strong>Frontend/code-size pressure:</strong> interfaces, shader strings, and target sources affect compilation or bundled-source size. Run the real system profile throughout, not only at the end.</li>
+          <li><strong>Lifecycle correctness:</strong> resize, scale, hide/show, drawable starvation, and context loss must retain or invalidate Forms damage consistently.</li>
+        </ol>
+      </section>
+
+      <section id="acceptance">
+        <h2>Merge criteria for the completed issue</h2>
+        <ul class="checklist">
+          <li>Forms paint handlers use <code>graphics.Canvas</code>; all built-in widgets render through both implementations.</li>
+          <li><code>*graphics.Surface</code> remains a pixel-backed, independently tested software renderer with no GPU dependency or per-pixel interface dispatch.</li>
+          <li>Metal rendering on macOS covers every Canvas primitive used by Forms, including text, images, transforms, clipping, blend modes, and both path fill rules.</li>
+          <li>macOS OpenGL implements the same draw-list contract where its required profile is available; legacy software presentation remains a valid fallback.</li>
+          <li>Partial damage preserves all pixels outside invalid regions through multiple frames and resize forces full repaint.</li>
+          <li><code>ReadPixels</code>, debug timing, backend failure, and explicit renderer selection have documented, tested semantics.</li>
+          <li>The canonical Metal and OpenGL readbacks pass software parity tests on the development Mac at each available backing scale.</li>
+          <li>iOS and Android continue using their existing rendering paths; neither mobile acceleration nor device testing is required by this PR.</li>
+          <li>No regression in microcontroller software rendering, browser presentation, frontend self-hosting, performance/resource gates, or the 2 MiB bundled frontend limit.</li>
+          <li><code>./tools/check preflight</code> and <code>./tools/check full</code> pass without weakening any gate.</li>
+        </ul>
+        <div class="decision">
+          <strong>Suggested first implementation slice</strong>
+          Land the Canvas migration plus a host-testable GPU command recorder and fake backend. It proves the architectural seam, exercises Renvo interface dispatch, and exposes command/state mistakes before Metal ABI and shader work make changes expensive.
+        </div>
+      </section>
+
+      <footer>Renvo Forms Acceleration Architecture · software pixels remain the portable baseline</footer>
+    </main>
+  </div>
+</body>
+</html>

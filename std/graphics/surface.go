@@ -9,11 +9,12 @@ type pixelRect struct {
 
 // Surface is a top-down, tightly packed, premultiplied RGBA8 render target.
 type Surface struct {
-	Width  int
-	Height int
-	Stride int
-	Pixels []byte
-	Format PixelFormat
+	Width    int
+	Height   int
+	Stride   int
+	Pixels   []byte
+	Format   PixelFormat
+	revision int
 
 	blend              BlendMode
 	clip               pixelRect
@@ -68,9 +69,11 @@ func (s *Surface) Destroy() {
 	s.Height = 0
 	s.Stride = 0
 	s.Pixels = nil
+	s.revision++
 }
 
 func (s *Surface) UpdateImage(rect Rect, pixels []byte) {
+	s.revision++
 	minX, minY := scalarFloor(rect.MinX), scalarFloor(rect.MinY)
 	maxX, maxY := scalarCeil(rect.MaxX), scalarCeil(rect.MaxY)
 	if minX < 0 {
@@ -103,6 +106,25 @@ func (s *Surface) UpdateImage(rect Rect, pixels []byte) {
 			s.markDirty(x, y)
 		}
 	}
+}
+
+// MarkUpdated commits direct writes to Pixels. Software callers do not need it
+// for visibility, but accelerated canvases use the revision to refresh a cached
+// GPU image before the next DrawImage call.
+func (s *Surface) MarkUpdated(rect Rect) {
+	if s == nil || rect.Empty() {
+		return
+	}
+	region := pixelRect{
+		minX: scalarFloor(rect.MinX), minY: scalarFloor(rect.MinY),
+		maxX: scalarCeil(rect.MaxX), maxY: scalarCeil(rect.MaxY),
+	}
+	region = intersectPixelRect(pixelRect{maxX: s.Width, maxY: s.Height}, region)
+	if region.maxX <= region.minX || region.maxY <= region.minY {
+		return
+	}
+	s.revision++
+	s.markDirtyRect(region)
 }
 
 func (s *Surface) DrawPolyline(points []Point, width Scalar, color Color) {
@@ -150,6 +172,7 @@ func (s *Surface) reset(width, height int) {
 		s.Pixels = make([]byte, pixelBytes)
 	}
 	s.Format = PixelRGBA8
+	s.revision++
 	s.blend = BlendSourceOver
 	s.clip = pixelRect{maxX: width, maxY: height}
 	s.dirty = pixelRect{maxX: width, maxY: height}

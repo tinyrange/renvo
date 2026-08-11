@@ -389,6 +389,7 @@ func TestCompilerJITIOSARM64FormsImage(t *testing.T) {
 	}
 	for _, pseudo := range []string{
 		"renvoIOSObjcMsgRect",
+		"renvoIOSObjcMsgSize",
 		"renvoIOSObjcMsgFloat",
 		"renvoIOSDelegateDidFinishCallback",
 		"renvoIOSTouchesBeganCallback",
@@ -448,10 +449,19 @@ func TestCompilerJITIOSARM64ControlsImage(t *testing.T) {
 	}
 	for _, name := range []string{
 		"_UIApplicationMain", "_CGImageCreate",
+		"_MTLCreateSystemDefaultDevice",
 		"_mach_absolute_time", "_mach_timebase_info",
 	} {
 		if !bytes.Contains(image, append([]byte(name), 0)) {
 			t.Errorf("iOS controls image omits dynamic import %q", name)
+		}
+	}
+	if !bytes.Contains(image, []byte("CAMetalLayer")) {
+		t.Fatal("iOS controls image omits the Metal presentation layer")
+	}
+	for _, pseudo := range []string{"renvoIOSObjcMsgRect", "renvoIOSObjcMsgSize"} {
+		if bytes.Contains(image, []byte(pseudo)) {
+			t.Errorf("iOS controls image leaks compiler-only pseudo import %q", pseudo)
 		}
 	}
 }

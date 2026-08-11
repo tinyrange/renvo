@@ -197,13 +197,13 @@ func iconForName(name string) Icon {
 
 // DrawIcon renders an embedded vector into arbitrary bounds. Coordinates in
 // iconset.rvi use a fixed 16x16 view box and are scaled only while drawing.
-func DrawIcon(surface *graphics.Surface, icon Icon, bounds graphics.Rect, color graphics.Color) {
+func DrawIcon(surface graphics.Canvas, icon Icon, bounds graphics.Rect, color graphics.Color) {
 	DrawIconColors(surface, icon, bounds, color, color)
 }
 
 // DrawIconColors renders primary strokes and optional A-prefixed accent
 // commands from the embedded vector definition with separate theme colors.
-func DrawIconColors(surface *graphics.Surface, icon Icon, bounds graphics.Rect, color, accent graphics.Color) {
+func DrawIconColors(surface graphics.Canvas, icon Icon, bounds graphics.Rect, color, accent graphics.Color) {
 	if surface == nil || icon <= IconNone || int(icon) > IconCount() || bounds.Empty() {
 		return
 	}
@@ -267,7 +267,7 @@ func DrawIconColors(surface *graphics.Surface, icon Icon, bounds graphics.Rect, 
 // The embedded image is stored as primary, fill, and accent alpha masks so the
 // original imagegen shapes remain crisp while still following application
 // themes instead of baking light-theme colors into the binary.
-func DrawControlIcon(surface *graphics.Surface, icon Icon, bounds graphics.Rect, primary, fill, accent graphics.Color) {
+func DrawControlIcon(surface graphics.Canvas, icon Icon, bounds graphics.Rect, primary, fill, accent graphics.Color) {
 	if surface == nil || icon < IconControlLabel || icon > IconControlMenuBar || bounds.Empty() {
 		return
 	}
@@ -308,11 +308,11 @@ func loadControlIconMasks() {
 	controlIconMasksValid = true
 }
 
-func drawIcon(surface *graphics.Surface, icon Icon, x, y graphics.Scalar, color graphics.Color) {
+func drawIcon(surface graphics.Canvas, icon Icon, x, y graphics.Scalar, color graphics.Color) {
 	DrawIcon(surface, icon, graphics.R(x, y, iconViewBox, iconViewBox), color)
 }
 
-func drawChevronIcon(surface *graphics.Surface, x, y graphics.Scalar, expanded bool, color graphics.Color) {
+func drawChevronIcon(surface graphics.Canvas, x, y graphics.Scalar, expanded bool, color graphics.Color) {
 	icon := IconChevronRight
 	if expanded {
 		icon = IconChevronDown

@@ -267,7 +267,7 @@ func (k *touchKeyboard) commitKey(key int) {
 	}
 }
 
-func (k *touchKeyboard) paintKey(surface *graphics.Surface, key int, text string, bounds graphics.Rect) {
+func (k *touchKeyboard) paintKey(surface graphics.Canvas, key int, text string, bounds graphics.Rect) {
 	background := graphics.RGBA(48, 55, 67, 255)
 	if key == k.pressed {
 		background = graphics.RGBA(74, 134, 204, 255)
@@ -284,7 +284,7 @@ func (k *touchKeyboard) paintKey(surface *graphics.Surface, key int, text string
 	surface.DrawText(k.font, graphics.Point{X: x, Y: y}, text, graphics.RGBA(240, 243, 248, 255))
 }
 
-func (k *touchKeyboard) paintRow(surface *graphics.Surface, row string, x, y, width graphics.Scalar) {
+func (k *touchKeyboard) paintRow(surface graphics.Canvas, row string, x, y, width graphics.Scalar) {
 	keyWidth := width / graphics.Scalar(len(row))
 	for i := 0; i < len(row); i++ {
 		left := x + graphics.Scalar(i)*keyWidth
@@ -300,7 +300,7 @@ func (k *touchKeyboard) paintRow(surface *graphics.Surface, row string, x, y, wi
 	}
 }
 
-func (k *touchKeyboard) paint(surface *graphics.Surface) {
+func (k *touchKeyboard) paint(surface graphics.Canvas) {
 	bounds := k.Bounds()
 	surface.FillRect(bounds, graphics.RGBA(25, 29, 36, 255))
 	surface.PushClipRect(bounds)
@@ -832,6 +832,7 @@ func (d *controlsDemo) buildMorePage() {
 func main() {
 	window := graphics.NewWindow(graphics.WindowOptions{
 		Title: "Renvo Controls", Width: 360, Height: 800,
+		Renderer: controlsRenderer(),
 	})
 	if window == nil {
 		return

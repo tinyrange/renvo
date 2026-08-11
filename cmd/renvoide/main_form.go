@@ -513,7 +513,7 @@ func (f *MainForm) createDesignerEvent(handler string, paint bool) {
 	}
 	signature := "func (f *MainForm) " + handler + "()"
 	if paint {
-		signature = "func (f *MainForm) " + handler + "(surface *graphics.Surface)"
+		signature = "func (f *MainForm) " + handler + "(surface graphics.Canvas)"
 	}
 	if workspaceContains(string(data), signature) {
 		return
