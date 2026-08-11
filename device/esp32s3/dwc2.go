@@ -289,12 +289,17 @@ func (d *DWC2) OpenEndpoint(config usb.EndpointConfig) error {
 	}
 	control := epActive | endpointType(config.Transfer) | uint32(config.MaxPacketSize)
 	if config.Direction == usb.In {
+		// ESP32-S3 implements four dedicated device-mode transmit FIFO
+		// configuration registers. Offset 0x100 is HPTXFSIZ, not DIEPTXF1.
+		if config.Number > 4 {
+			return errDWC2Endpoint
+		}
 		words := uint16((config.MaxPacketSize + 3) / 4)
 		if words == 0 || words > d.fifoTop || d.fifoTop-words < d.rxWords {
 			return errDWC2Endpoint
 		}
 		d.fifoTop -= words
-		coreRegister(0x100 + uintptr(config.Number-1)*4).Store(uint32(d.fifoTop) | uint32(words)<<16)
+		coreRegister(0x100 + uintptr(config.Number)*4).Store(uint32(d.fifoTop) | uint32(words)<<16)
 		control |= uint32(config.Number) << 22
 		inControl(config.Number).Store(control)
 		d.configuredIn[config.Number] = true
@@ -442,8 +447,9 @@ func (d *DWC2) Poll(event *usb.Event) bool {
 			USBRecoveryStage(0x3100 | uint32(d.setup[1]))
 			// SETUP_RX only moves bytes into the FIFO. The core permits the
 			// control transfer after SETUP_DONE, so dispatch at that boundary.
+			// The portable control path owns the next EP0 OUT arm: pre-arming
+			// here makes its status Receive observe a spurious busy endpoint.
 			outInterrupt(0).Store(1 << 3)
-			d.armSetup()
 			event.Setup = d.setup
 			d.setupPending = false
 			event.Kind, event.Endpoint = usb.EventSetup, 0
