@@ -10,6 +10,10 @@ var (
 	ErrBusy               = errors.New("usb endpoint busy")
 )
 
+// ControlNotHandled is returned by Function.Control when the request belongs
+// to another function or is unsupported.
+const ControlNotHandled = -1
+
 // Direction is an endpoint transfer direction.
 type Direction uint8
 
@@ -109,8 +113,8 @@ func DefinePort(controller Controller) Port { return Port{controller: controller
 type Function interface {
 	Bind(*DescriptorBuilder) error
 	Attach(EndpointIO)
-	Control(*Setup, []byte) ([]byte, bool)
-	ControlOut(*Setup, []byte) bool
+	Control(Setup, []byte) int
+	ControlOut(Setup, []byte) bool
 	BOSDescriptor() []byte
 	Configured(bool)
 	Handle(Event)

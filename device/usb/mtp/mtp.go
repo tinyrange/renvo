@@ -73,21 +73,21 @@ func (f *Function) Bind(b *usb.DescriptorBuilder) error {
 	return b.EndpointDescriptor(f.eventIn, usb.In, usb.Interrupt, 16, 6)
 }
 func (f *Function) Attach(io usb.EndpointIO) { f.eventIO = io; f.DuplexPipe.Attach(io) }
-func (f *Function) Control(setup *usb.Setup, buffer []byte) ([]byte, bool) {
+func (f *Function) Control(setup usb.Setup, buffer []byte) int {
 	if uint8(setup.Index) != f.interfaceNumber || setup.RequestType&0x60 != 0x20 {
-		return nil, false
+		return usb.ControlNotHandled
 	}
 	// Cancel, GetExtendedEventData, DeviceReset and GetDeviceStatus.
 	if setup.Request == 0x64 || setup.Request == 0x65 || setup.Request == 0x66 {
-		return buffer[:0], true
+		return 0
 	}
 	if setup.Request == 0x67 {
 		buffer[0], buffer[1], buffer[2], buffer[3] = 4, 0, 1, 0x20
-		return buffer[:4], true
+		return 4
 	}
-	return nil, false
+	return usb.ControlNotHandled
 }
-func (f *Function) ControlOut(setup *usb.Setup, data []byte) bool {
+func (f *Function) ControlOut(setup usb.Setup, data []byte) bool {
 	return setup.Request == 0x64 && len(data) == 6
 }
 func (*Function) BOSDescriptor() []byte    { return nil }

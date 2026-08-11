@@ -53,12 +53,12 @@ func (f *Function) Bind(b *usb.DescriptorBuilder) error {
 	}
 	return b.EndpointDescriptor(f.In, usb.In, usb.Bulk, 64, 0)
 }
-func (f *Function) Attach(io usb.EndpointIO)                { f.DuplexPipe.Attach(io) }
-func (*Function) Control(*usb.Setup, []byte) ([]byte, bool) { return nil, false }
-func (*Function) ControlOut(*usb.Setup, []byte) bool        { return false }
-func (*Function) BOSDescriptor() []byte                     { return nil }
-func (f *Function) Configured(value bool)                   { f.ConfiguredState(value) }
-func (f *Function) Handle(event usb.Event)                  { f.HandleEvent(event) }
+func (f *Function) Attach(io usb.EndpointIO)        { f.DuplexPipe.Attach(io) }
+func (*Function) Control(usb.Setup, []byte) int     { return usb.ControlNotHandled }
+func (*Function) ControlOut(usb.Setup, []byte) bool { return false }
+func (*Function) BOSDescriptor() []byte             { return nil }
+func (f *Function) Configured(value bool)           { f.ConfiguredState(value) }
+func (f *Function) Handle(event usb.Event)          { f.HandleEvent(event) }
 
 func put32(data []byte, value uint32) {
 	data[0], data[1], data[2], data[3] = byte(value), byte(value>>8), byte(value>>16), byte(value>>24)

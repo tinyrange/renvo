@@ -71,12 +71,12 @@ func (f *Function) Bind(b *usb.DescriptorBuilder) error {
 	}
 	return b.Append(5, 0x25, 1, 1, 2)
 }
-func (f *Function) Attach(io usb.EndpointIO)                { f.DuplexPipe.Attach(io) }
-func (*Function) Control(*usb.Setup, []byte) ([]byte, bool) { return nil, false }
-func (*Function) ControlOut(*usb.Setup, []byte) bool        { return false }
-func (*Function) BOSDescriptor() []byte                     { return nil }
-func (f *Function) Configured(value bool)                   { f.ConfiguredState(value) }
-func (f *Function) Handle(event usb.Event)                  { f.HandleEvent(event) }
+func (f *Function) Attach(io usb.EndpointIO)        { f.DuplexPipe.Attach(io) }
+func (*Function) Control(usb.Setup, []byte) int     { return usb.ControlNotHandled }
+func (*Function) ControlOut(usb.Setup, []byte) bool { return false }
+func (*Function) BOSDescriptor() []byte             { return nil }
+func (f *Function) Configured(value bool)           { f.ConfiguredState(value) }
+func (f *Function) Handle(event usb.Event)          { f.HandleEvent(event) }
 
 // WriteEvent sends one or more four-byte USB-MIDI event packets.
 func (f *Function) WriteEvent(packets []byte) error {

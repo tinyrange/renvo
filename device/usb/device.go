@@ -163,7 +163,10 @@ func (d *Device) setup(packet [8]byte) {
 	}
 	if !ok {
 		for _, function := range d.config.Functions {
-			if response, ok = function.Control(&setup, d.control[:]); ok {
+			length := function.Control(setup, d.control[:])
+			if length >= 0 && length <= len(d.control) {
+				response = d.control[:min16(setup.Length, length)]
+				ok = true
 				owner = function
 				break
 			}
@@ -238,7 +241,7 @@ func (d *Device) Poll() {
 			d.setup(event.Setup)
 		case EventOut:
 			if event.Endpoint == 0 && d.controlOutPending {
-				accepted := d.controlFunction.ControlOut(&d.controlSetup, event.Data)
+				accepted := d.controlFunction.ControlOut(d.controlSetup, event.Data)
 				d.controlOutPending = false
 				d.controlFunction = nil
 				if accepted {

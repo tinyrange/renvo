@@ -52,30 +52,30 @@ func (f *Function) Bind(b *usb.DescriptorBuilder) error {
 	return b.EndpointDescriptor(f.In, usb.In, usb.Bulk, 64, 0)
 }
 func (f *Function) Attach(io usb.EndpointIO) { f.io = io; f.DuplexPipe.Attach(io) }
-func (f *Function) Control(setup *usb.Setup, buffer []byte) ([]byte, bool) {
+func (f *Function) Control(setup usb.Setup, buffer []byte) int {
 	if setup.RequestType&0x60 == 0 && setup.Request == 10 && uint8(setup.Index) == f.dataInterface {
 		buffer[0] = f.dataAlternate
-		return buffer[:1], true
+		return 1
 	}
 	if setup.RequestType&0x60 == 0 && setup.Request == 11 && uint8(setup.Index) == f.dataInterface {
 		if setup.Length != 0 || setup.Value > 1 {
-			return nil, false
+			return usb.ControlNotHandled
 		}
 		f.dataAlternate = uint8(setup.Value)
 		f.Activate(f.dataAlternate != 0, f.dataAlternate != 0)
-		return buffer[:0], true
+		return 0
 	}
 	if uint8(setup.Index) != f.controlInterface || setup.RequestType&0x60 != 0x20 {
-		return nil, false
+		return usb.ControlNotHandled
 	}
 	if setup.Request == 0x43 {
 		f.packetFilter = setup.Value
-		return buffer[:0], true
+		return 0
 	}
-	return nil, false
+	return usb.ControlNotHandled
 }
-func (*Function) ControlOut(*usb.Setup, []byte) bool { return false }
-func (*Function) BOSDescriptor() []byte              { return nil }
+func (*Function) ControlOut(usb.Setup, []byte) bool { return false }
+func (*Function) BOSDescriptor() []byte             { return nil }
 func (f *Function) Configured(value bool) {
 	f.dataAlternate = 0
 	f.Activate(false, false)

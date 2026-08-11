@@ -60,22 +60,22 @@ func (f *Function) Bind(b *usb.DescriptorBuilder) error {
 	return b.EndpointDescriptor(f.in, usb.In, usb.Bulk, 64, 0)
 }
 func (f *Function) Attach(io usb.EndpointIO) { f.io = io }
-func (f *Function) Control(setup *usb.Setup, buffer []byte) ([]byte, bool) {
+func (f *Function) Control(setup usb.Setup, buffer []byte) int {
 	if uint8(setup.Index) != f.interfaceNumber || setup.RequestType&0x60 != 0x20 {
-		return nil, false
+		return usb.ControlNotHandled
 	}
 	if setup.Request == 0xfe && setup.RequestType&0x80 != 0 {
 		buffer[0] = 0 // one logical unit
-		return buffer[:1], true
+		return 1
 	}
 	if setup.Request == 0xff && setup.Length == 0 {
 		f.resetTransport()
-		return buffer[:0], true
+		return 0
 	}
-	return nil, false
+	return usb.ControlNotHandled
 }
-func (*Function) ControlOut(*usb.Setup, []byte) bool { return false }
-func (*Function) BOSDescriptor() []byte              { return nil }
+func (*Function) ControlOut(usb.Setup, []byte) bool { return false }
+func (*Function) BOSDescriptor() []byte             { return nil }
 func (f *Function) Configured(value bool) {
 	f.configured = value
 	if value {

@@ -40,9 +40,9 @@ func (f *Function) Bind(b *usb.DescriptorBuilder) error {
 }
 
 func (f *Function) Attach(io usb.EndpointIO) { f.io = io }
-func (f *Function) Control(setup *usb.Setup, buffer []byte) ([]byte, bool) {
+func (f *Function) Control(setup usb.Setup, buffer []byte) int {
 	if uint8(setup.Index) != f.interfaceNumber {
-		return nil, false
+		return usb.ControlNotHandled
 	}
 	if setup.Request == 6 && byte(setup.Value>>8) == 0x22 {
 		length := len(f.report)
@@ -50,19 +50,19 @@ func (f *Function) Control(setup *usb.Setup, buffer []byte) ([]byte, bool) {
 			length = int(setup.Length)
 		}
 		copy(buffer, f.report[:length])
-		return buffer[:length], true
+		return length
 	}
 	if setup.RequestType&0x60 == 0x20 {
 		switch setup.Request {
 		case 1:
-			return buffer[:0], true // GET_REPORT, empty default
+			return 0 // GET_REPORT, empty default
 		case 9, 10, 11:
-			return buffer[:0], true // SET_REPORT/IDLE/PROTOCOL
+			return 0 // SET_REPORT/IDLE/PROTOCOL
 		}
 	}
-	return nil, false
+	return usb.ControlNotHandled
 }
-func (f *Function) ControlOut(setup *usb.Setup, data []byte) bool {
+func (f *Function) ControlOut(setup usb.Setup, data []byte) bool {
 	if setup.Request == 9 {
 		f.lastOutLength = copy(f.lastOut[:], data)
 		return true

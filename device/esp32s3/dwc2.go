@@ -10,6 +10,7 @@ import (
 const (
 	usbCoreBase = uintptr(0x60080000)
 	usbWrapBase = uintptr(0x60039000)
+	rtcUsbConf  = uintptr(0x60008120)
 
 	gahbCfg   = uintptr(0x008)
 	gusbCfg   = uintptr(0x00c)
@@ -19,12 +20,14 @@ const (
 	grxStsP   = uintptr(0x020)
 	grxFsiz   = uintptr(0x024)
 	gnptxFsiz = uintptr(0x028)
+	gdfifoCfg = uintptr(0x05c)
 	dcfg      = uintptr(0x800)
 	dctl      = uintptr(0x804)
 	diepMsk   = uintptr(0x810)
 	doepMsk   = uintptr(0x814)
 	daint     = uintptr(0x818)
 	daintMsk  = uintptr(0x81c)
+	gotgCtl   = uintptr(0x000)
 
 	gintRxFIFO   = uint32(1 << 4)
 	gintReset    = uint32(1 << 12)
@@ -38,6 +41,21 @@ const (
 	epSetNAK   = uint32(1 << 27)
 	epActive   = uint32(1 << 15)
 	epStall    = uint32(1 << 21)
+
+	wrapClockEnable      = uint32(1 << 31)
+	wrapFIFOForceUp      = uint32(1 << 22)
+	wrapPHYClockForceOn  = uint32(1 << 20)
+	wrapAHBClockForceOn  = uint32(1 << 19)
+	wrapUSBPadEnable     = uint32(1 << 18)
+	wrapDMPulldown       = uint32(1 << 16)
+	wrapDMPullup         = uint32(1 << 15)
+	wrapDPPulldown       = uint32(1 << 14)
+	wrapDPPullup         = uint32(1 << 13)
+	wrapPadPullOverride  = uint32(1 << 12)
+	wrapFIFOForceDown    = uint32(1 << 3)
+	wrapExternalPHY      = uint32(1 << 2)
+	rtcSoftwarePHYSelect = uint32(1 << 20)
+	rtcSelectUSBOTG      = uint32(1 << 19)
 )
 
 var errDWC2Endpoint = errors.New("esp32s3 dwc2 endpoint is unsupported")
@@ -48,6 +66,10 @@ type DWC2 struct {
 	receive       [7][]byte
 	configuredIn  [7]bool
 	configuredOut [7]bool
+	maxPacketIn   [7]uint16
+	maxPacketOut  [7]uint16
+	fifoTop       uint16
+	rxWords       uint16
 	started       bool
 }
 
@@ -96,21 +118,34 @@ func (d *DWC2) Start() error {
 	if d.started {
 		return nil
 	}
-	// Keep the internal PHY, AHB clock, PHY clock, pads and FIFO powered. The
-	// reset pull policy already selects the full-speed D+ pull-up.
-	mmio.Register32(usbWrapBase).Replace((1<<3)|(1<<2), (1<<31)|(1<<22)|(1<<20)|(1<<19)|(1<<18))
-	coreRegister(dctl).Store(coreRegister(dctl).Load() | 1<<1)
+	// ESP32-S3's internal PHY is shared with the fixed USB Serial/JTAG block.
+	// Override the eFuse selection and route it to DWC2 before touching the
+	// core. Hold both data lines down until Connect exposes the D+ pull-up.
+	mmio.Register32(rtcUsbConf).Replace(0, rtcSoftwarePHYSelect|rtcSelectUSBOTG)
+	mmio.Register32(usbWrapBase).Replace(
+		wrapFIFOForceDown|wrapExternalPHY|wrapDPPullup|wrapDMPullup,
+		wrapClockEnable|wrapFIFOForceUp|wrapPHYClockForceOn|wrapAHBClockForceOn|
+			wrapUSBPadEnable|wrapPadPullOverride|wrapDPPulldown|wrapDMPulldown,
+	)
 	coreRegister(gusbCfg).Store(coreRegister(gusbCfg).Load() | 1<<30)
 	d.resetCore()
+	coreRegister(gusbCfg).Store(coreRegister(gusbCfg).Load() | 1<<30)
+	coreRegister(dctl).Store(coreRegister(dctl).Load() | 1<<1)
+	// This board does not wire a separate VBUS-sense input. Force the DWC2
+	// B-session valid state and select its full-speed PHY encoding.
+	coreRegister(gotgCtl).Replace(1<<4, 1<<6|1<<7)
 
-	// 256 Rx words, then one 64-word FIFO for EP0 and each of EP1..EP6.
-	coreRegister(grxFsiz).Store(256)
-	coreRegister(gnptxFsiz).Store(256 | 64<<16)
-	for endpoint := uint8(1); endpoint <= 6; endpoint++ {
-		start := uint32(256 + 64*uint32(endpoint))
-		coreRegister(0x100 + uintptr(endpoint-1)*4).Store(start | 64<<16)
-	}
-	coreRegister(dcfg).Store(coreRegister(dcfg).Load() &^ (0x7f << 4))
+	// The S3 has 256 words shared by every RX and TX FIFO. Reserve a
+	// specification-sized RX area for EP0 and allocate IN FIFOs downwards as
+	// endpoints are opened. Keeping free space between them lets larger OUT
+	// endpoints grow the shared RX FIFO safely.
+	d.fifoTop = 256
+	d.rxWords = receiveFIFOWords(64)
+	coreRegister(gdfifoCfg).Store(256 | 256<<16)
+	coreRegister(grxFsiz).Store(uint32(d.rxWords))
+	d.fifoTop -= 16
+	coreRegister(gnptxFsiz).Store(uint32(d.fifoTop) | 16<<16)
+	coreRegister(dcfg).Replace(3|(0x7f<<4), 3|1<<2)
 	coreRegister(diepMsk).Store(1)
 	coreRegister(doepMsk).Store(1 | 1<<3)
 	coreRegister(daintMsk).Store(1 | 1<<16)
@@ -124,6 +159,7 @@ func (d *DWC2) Start() error {
 
 func (d *DWC2) configureControlEndpoint() {
 	d.configuredIn[0], d.configuredOut[0] = true, true
+	d.maxPacketIn[0], d.maxPacketOut[0] = 64, 64
 	inControl(0).Store(epActive)
 	outControl(0).Store(epActive)
 	d.armSetup()
@@ -135,12 +171,20 @@ func (d *DWC2) armSetup() {
 }
 
 func (d *DWC2) Connect() error {
+	// Return pull control to DWC2. Its soft-disconnect state then owns the
+	// normal full-speed D+ pull-up while the wrapper remains responsible only
+	// for forcing a visible disconnect.
+	mmio.Register32(usbWrapBase).Replace(
+		wrapPadPullOverride|wrapDPPullup|wrapDPPulldown|wrapDMPullup|wrapDMPulldown,
+		0,
+	)
 	coreRegister(dctl).Store(coreRegister(dctl).Load() &^ (1 << 1))
 	return nil
 }
 
 func (d *DWC2) Disconnect() {
 	coreRegister(dctl).Store(coreRegister(dctl).Load() | 1<<1)
+	mmio.Register32(usbWrapBase).Replace(wrapDPPullup|wrapDMPullup, wrapDPPulldown|wrapDMPulldown)
 }
 
 func (d *DWC2) OpenEndpoint(config usb.EndpointConfig) error {
@@ -149,12 +193,28 @@ func (d *DWC2) OpenEndpoint(config usb.EndpointConfig) error {
 	}
 	control := epActive | endpointType(config.Transfer) | uint32(config.MaxPacketSize)
 	if config.Direction == usb.In {
+		words := uint16((config.MaxPacketSize + 3) / 4)
+		if words == 0 || words > d.fifoTop || d.fifoTop-words < d.rxWords {
+			return errDWC2Endpoint
+		}
+		d.fifoTop -= words
+		coreRegister(0x100 + uintptr(config.Number-1)*4).Store(uint32(d.fifoTop) | uint32(words)<<16)
 		control |= uint32(config.Number) << 22
 		inControl(config.Number).Store(control)
 		d.configuredIn[config.Number] = true
+		d.maxPacketIn[config.Number] = config.MaxPacketSize
 	} else {
+		required := receiveFIFOWords(config.MaxPacketSize)
+		if required > d.fifoTop {
+			return errDWC2Endpoint
+		}
+		if required > d.rxWords {
+			d.rxWords = required
+			coreRegister(grxFsiz).Store(uint32(d.rxWords))
+		}
 		outControl(config.Number).Store(control)
 		d.configuredOut[config.Number] = true
+		d.maxPacketOut[config.Number] = config.MaxPacketSize
 	}
 	mask := coreRegister(daintMsk).Load()
 	if config.Direction == usb.In {
@@ -166,13 +226,21 @@ func (d *DWC2) OpenEndpoint(config usb.EndpointConfig) error {
 	return nil
 }
 
+// receiveFIFOWords follows the DWC2 device-mode sizing formula for one
+// setup queue, two largest packets, and bookkeeping for seven OUT endpoints.
+func receiveFIFOWords(maxPacket uint16) uint16 {
+	packetWords := (maxPacket + 3) / 4
+	return 13 + 1 + 2*(packetWords+1) + 2*7
+}
+
 func (d *DWC2) Send(endpoint uint8, data []byte) error {
 	if endpoint > 6 || !d.configuredIn[endpoint] || len(data) > 1023 {
 		return errDWC2Endpoint
 	}
 	packets := uint32(1)
 	if len(data) > 0 {
-		packets = uint32((len(data) + 63) / 64)
+		maxPacket := int(d.maxPacketIn[endpoint])
+		packets = uint32((len(data) + maxPacket - 1) / maxPacket)
 	}
 	inSize(endpoint).Store(uint32(len(data)) | packets<<19)
 	inControl(endpoint).Store(inControl(endpoint).Load() | epEnable | epClearNAK)
@@ -193,7 +261,8 @@ func (d *DWC2) Receive(endpoint uint8, buffer []byte) error {
 	d.receive[endpoint] = buffer
 	packets := uint32(1)
 	if len(buffer) > 0 {
-		packets = uint32((len(buffer) + 63) / 64)
+		maxPacket := int(d.maxPacketOut[endpoint])
+		packets = uint32((len(buffer) + maxPacket - 1) / maxPacket)
 	}
 	outSize(endpoint).Store(uint32(len(buffer)) | packets<<19)
 	outControl(endpoint).Store(outControl(endpoint).Load() | epEnable | epClearNAK)

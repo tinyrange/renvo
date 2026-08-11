@@ -8,12 +8,12 @@ func (*fakeFunction) Bind(b *DescriptorBuilder) error {
 	i := b.Interface()
 	return b.InterfaceDescriptor(i, 0, 0, 0xff, 0, 0, 0)
 }
-func (*fakeFunction) Attach(EndpointIO)                     {}
-func (*fakeFunction) Control(*Setup, []byte) ([]byte, bool) { return nil, false }
-func (*fakeFunction) ControlOut(*Setup, []byte) bool        { return false }
-func (*fakeFunction) BOSDescriptor() []byte                 { return nil }
-func (f *fakeFunction) Configured(value bool)               { f.configured = value }
-func (*fakeFunction) Handle(Event)                          {}
+func (*fakeFunction) Attach(EndpointIO)             {}
+func (*fakeFunction) Control(Setup, []byte) int     { return ControlNotHandled }
+func (*fakeFunction) ControlOut(Setup, []byte) bool { return false }
+func (*fakeFunction) BOSDescriptor() []byte         { return nil }
+func (f *fakeFunction) Configured(value bool)       { f.configured = value }
+func (*fakeFunction) Handle(Event)                  {}
 
 type sentPacket struct {
 	ep   uint8

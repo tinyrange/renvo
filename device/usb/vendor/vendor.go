@@ -43,9 +43,9 @@ func (f *Function) BOSDescriptor() []byte {
 	// BOS header followed by the WebUSB platform capability UUID.
 	return []byte{5, 15, 29, 0, 1, 24, 16, 5, 0, 0x38, 0xb6, 0x08, 0x34, 0xa9, 0x09, 0xa0, 0x47, 0x8b, 0xfd, 0xa0, 0x76, 0x88, 0x15, 0xb6, 0x65, 0, 1, f.requestCode, 1}
 }
-func (f *Function) Control(setup *usb.Setup, buffer []byte) ([]byte, bool) {
+func (f *Function) Control(setup usb.Setup, buffer []byte) int {
 	if setup.RequestType != 0xc0 || setup.Request != f.requestCode || setup.Index != 2 || setup.Value != 1 {
-		return nil, false
+		return usb.ControlNotHandled
 	}
 	length := len(f.url)
 	if length > len(buffer)-3 {
@@ -53,9 +53,9 @@ func (f *Function) Control(setup *usb.Setup, buffer []byte) ([]byte, bool) {
 	}
 	buffer[0], buffer[1], buffer[2] = byte(length+3), 3, 1 // HTTPS
 	copy(buffer[3:], f.url[:length])
-	return buffer[:length+3], true
+	return length + 3
 }
-func (*Function) ControlOut(*usb.Setup, []byte) bool { return false }
+func (*Function) ControlOut(usb.Setup, []byte) bool { return false }
 func (f *Function) Configured(value bool) {
 	f.configured = value
 	if value {

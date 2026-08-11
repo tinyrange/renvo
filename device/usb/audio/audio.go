@@ -53,21 +53,21 @@ func (f *Function) Bind(b *usb.DescriptorBuilder) error {
 	return b.EndpointDescriptor(f.In, usb.In, usb.Isochronous, 192, 1)
 }
 func (f *Function) Attach(io usb.EndpointIO) { f.DuplexPipe.Attach(io) }
-func (f *Function) Control(setup *usb.Setup, buffer []byte) ([]byte, bool) {
+func (f *Function) Control(setup usb.Setup, buffer []byte) int {
 	if setup.RequestType&0x60 == 0 && setup.Request == 10 {
 		if uint8(setup.Index) == f.streamingOut {
 			buffer[0] = f.outAlternate
-			return buffer[:1], true
+			return 1
 		}
 		if uint8(setup.Index) == f.streamingIn {
 			buffer[0] = f.inAlternate
-			return buffer[:1], true
+			return 1
 		}
 	}
 	if setup.RequestType&0x60 == 0 && setup.Request == 11 &&
 		(uint8(setup.Index) == f.streamingOut || uint8(setup.Index) == f.streamingIn) {
 		if setup.Length != 0 || setup.Value > 1 {
-			return nil, false
+			return usb.ControlNotHandled
 		}
 		if uint8(setup.Index) == f.streamingOut {
 			f.outAlternate = uint8(setup.Value)
@@ -75,19 +75,19 @@ func (f *Function) Control(setup *usb.Setup, buffer []byte) ([]byte, bool) {
 			f.inAlternate = uint8(setup.Value)
 		}
 		f.Activate(f.outAlternate != 0 || f.inAlternate != 0, f.outAlternate != 0)
-		return buffer[:0], true
+		return 0
 	}
 	// Audio endpoint sampling-frequency GET_CUR/SET_CUR.
 	if setup.RequestType&0x60 == 0x20 && setup.Request == 0x81 {
 		buffer[0], buffer[1], buffer[2] = byte(f.sampleRate), byte(f.sampleRate>>8), byte(f.sampleRate>>16)
-		return buffer[:3], true
+		return 3
 	}
 	if setup.RequestType&0x60 == 0x20 && setup.Request == 1 {
-		return buffer[:0], true
+		return 0
 	}
-	return nil, false
+	return usb.ControlNotHandled
 }
-func (f *Function) ControlOut(setup *usb.Setup, data []byte) bool {
+func (f *Function) ControlOut(setup usb.Setup, data []byte) bool {
 	if setup.Request == 1 && len(data) == 3 {
 		f.sampleRate = uint32(data[0]) | uint32(data[1])<<8 | uint32(data[2])<<16
 		return f.sampleRate != 0

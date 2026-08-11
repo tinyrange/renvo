@@ -70,26 +70,35 @@ func (f *Function) Bind(b *usb.DescriptorBuilder) error {
 
 func (f *Function) Attach(io usb.EndpointIO) { f.io = io }
 
-func (f *Function) Control(setup *usb.Setup, buffer []byte) ([]byte, bool) {
-	if uint8(setup.Index) != f.controlInterface || setup.RequestType&0x60 != 0x20 {
-		return nil, false
+func (f *Function) Control(setup usb.Setup, buffer []byte) int {
+	if uint8(setup.Index) != f.controlInterface {
+		return usb.ControlNotHandled
+	}
+	if setup.RequestType&0x60 != 0x20 {
+		return usb.ControlNotHandled
 	}
 	switch setup.Request {
 	case 0x20: // SET_LINE_CODING; data is accepted by the EP0 core.
-		return buffer[:0], setup.Length == 7
+		if setup.Length == 7 {
+			return 0
+		}
 	case 0x21: // GET_LINE_CODING
 		copy(buffer, f.lineCoding[:])
-		return buffer[:7], true
+		return 7
 	case 0x22: // SET_CONTROL_LINE_STATE
 		f.controlLineState = setup.Value
-		return buffer[:0], setup.Length == 0
+		if setup.Length == 0 {
+			return 0
+		}
 	case 0x23: // SEND_BREAK
-		return buffer[:0], setup.Length == 0
+		if setup.Length == 0 {
+			return 0
+		}
 	}
-	return nil, false
+	return usb.ControlNotHandled
 }
 
-func (f *Function) ControlOut(setup *usb.Setup, data []byte) bool {
+func (f *Function) ControlOut(setup usb.Setup, data []byte) bool {
 	if setup.Request == 0x20 && len(data) == len(f.lineCoding) {
 		copy(f.lineCoding[:], data)
 		return true

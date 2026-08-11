@@ -28,6 +28,12 @@ const (
 	tiocmbicR   = 0x5417
 	tiocmDTRR   = 0x002
 	tiocmRTSR   = 0x004
+
+	s3Option1R       = 0x6000812c
+	s3WDTConfig0R    = 0x60008098
+	s3WDTConfig1R    = 0x6000809c
+	s3WDTWriteGuardR = 0x600080b0
+	s3WDTKeyR        = 0x50d83aa1
 )
 
 type flashErrorR struct{ text string }
@@ -146,6 +152,13 @@ func flashFileR(path string, portName string) error {
 			print("Wrote " + decimalR(sequence+1) + "/" + decimalR(blocks) + " blocks\n")
 		}
 	}
+	if chip.chipID == 9 {
+		if err = loader.resetS3Watchdog(); err != nil {
+			return err
+		}
+		print("Application started\n")
+		return nil
+	}
 	if _, err = loader.command(0x04, wordsR([]uint32{1}), 0, 30); err != nil {
 		return err
 	}
@@ -156,12 +169,11 @@ func flashFileR(path string, portName string) error {
 		return err
 	}
 	sleepR(200)
-	if err = port.setRTS(false); err != nil {
-		return err
-	}
-	if err = port.setDTR(false); err != nil {
-		return err
-	}
+	// Native USB boards disappear as soon as reset is asserted. Deassertion is
+	// best-effort because the old tty may already be gone and the new USB
+	// personality may not provide modem-control ioctls.
+	_ = port.setRTS(false)
+	_ = port.setDTR(false)
 	print("Application started\n")
 	// Keep the native USB endpoint open for one second while reset settles and
 	// relay any boot output, matching the browser workflow.
@@ -179,6 +191,33 @@ func flashFileR(path string, portName string) error {
 			print(string(buffer[:n]))
 		}
 	}
+	return nil
+}
+
+func (loader *loaderR) writeRegister(address uint32, value uint32, mask uint32) error {
+	_, err := loader.command(0x09, wordsR([]uint32{address, value, mask, 0}), 0, 30)
+	return err
+}
+
+// resetS3Watchdog leaves native USB download mode without depending on modem
+// control lines that disappear as soon as the shared USB PHY changes owner.
+func (loader *loaderR) resetS3Watchdog() error {
+	if err := loader.writeRegister(s3Option1R, 0, 1); err != nil {
+		return failR("clear S3 forced-download state: " + err.Error())
+	}
+	if err := loader.writeRegister(s3WDTWriteGuardR, s3WDTKeyR, 0xffffffff); err != nil {
+		return failR("unlock S3 watchdog: " + err.Error())
+	}
+	if err := loader.writeRegister(s3WDTConfig1R, 2000, 0xffffffff); err != nil {
+		return failR("set S3 watchdog timeout: " + err.Error())
+	}
+	if err := loader.writeRegister(s3WDTConfig0R, 0xd0000102, 0xffffffff); err != nil {
+		return failR("arm S3 watchdog: " + err.Error())
+	}
+	if err := loader.writeRegister(s3WDTWriteGuardR, 0, 0xffffffff); err != nil {
+		return failR("lock S3 watchdog: " + err.Error())
+	}
+	sleepR(500)
 	return nil
 }
 
@@ -343,9 +382,10 @@ func openSerialR(path string) (*serialR, error) {
 	}
 	port := &serialR{fd: fd}
 	termios := make([]byte, 64)
-	if port.ioctl(tcgetsR, termios) < 0 {
+	result := port.ioctl(tcgetsR, termios)
+	if result < 0 {
 		port.close()
-		return nil, failR("read serial settings failed")
+		return nil, failR("read serial settings failed (errno " + decimalR(-result) + ")")
 	}
 	put32R(termios, 0, 4)                      // IGNPAR
 	put32R(termios, 4, 0)                      // no output processing
@@ -353,9 +393,10 @@ func openSerialR(path string) (*serialR, error) {
 	put32R(termios, 12, 0)                     // raw local mode
 	termios[17+5] = 1                          // VTIME: 100 ms
 	termios[17+6] = 0                          // VMIN
-	if port.ioctl(tcsetsR, termios) < 0 {
+	result = port.ioctl(tcsetsR, termios)
+	if result < 0 {
 		port.close()
-		return nil, failR("configure serial port failed")
+		return nil, failR("configure serial port failed (errno " + decimalR(-result) + ")")
 	}
 	return port, nil
 }

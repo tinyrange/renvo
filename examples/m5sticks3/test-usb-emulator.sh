@@ -21,7 +21,7 @@ fi
 	-o "$temporary/usb-cdc.elf" "$example_root/usb_cdc"
 
 "$emulator" run --target esp32s3 --elf "$temporary/usb-cdc.elf" \
-	--max-instructions 3000000 --result "$temporary/result.json"
+	--max-instructions 500000 --result "$temporary/result.json"
 
 compact=$(tr -d '[:space:]' < "$temporary/result.json")
 case "$compact" in
