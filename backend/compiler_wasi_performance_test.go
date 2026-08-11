@@ -3,10 +3,8 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -16,10 +14,6 @@ func TestCompilerPerformanceWASI(t *testing.T) {
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
 		t.Skipf("WASI compiler performance gate requires linux/amd64 host, got %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
-	if _, err := exec.LookPath("/usr/bin/time"); err != nil {
-		t.Skip("WASI compiler performance gate requires /usr/bin/time")
-	}
-
 	outDir := t.TempDir()
 	files := getPerformanceCompilerFiles(t, compilerTarget{name: "wasi/wasm32"}, outDir)
 	compilerPath := filepath.Join(outDir, "compiler")
@@ -42,32 +36,13 @@ func TestCompilerPerformanceWASI(t *testing.T) {
 	bestRSS := 1 << 30
 	for attempt := 0; attempt < 3; attempt++ {
 		outputPath := filepath.Join(outDir, fmt.Sprintf("compiler-output-%d", attempt))
-		rssPath := filepath.Join(outDir, fmt.Sprintf("compile-rss-%d", attempt))
 		compileArgs := append([]string{"-s", "-o", outputPath}, files...)
-		timeArgs := append([]string{"-f", "%e %M", "-o", rssPath, compilerPath}, compileArgs...)
-		cmd := exec.Command("/usr/bin/time", timeArgs...)
-		cmd.Env = []string{}
-		output, runErr := cmd.CombinedOutput()
+		usage, runErr := runMeasuredProcess(t, "", []string{}, compilerPath, compileArgs...)
 		if runErr != nil {
-			t.Fatalf("resource-measured WASI compilation failed: %v\nOutput: %s", runErr, string(output))
+			t.Fatalf("resource-measured WASI compilation failed: %v\nOutput: %s", runErr, string(usage.output))
 		}
-		rssData, readErr := os.ReadFile(rssPath)
-		if readErr != nil {
-			t.Fatalf("read WASI compiler resource usage: %v", readErr)
-		}
-		fields := strings.Fields(string(rssData))
-		if len(fields) < 2 {
-			t.Fatalf("invalid WASI compiler resource usage %q", string(rssData))
-		}
-		seconds, parseErr := strconv.ParseFloat(fields[0], 64)
-		if parseErr != nil {
-			t.Fatalf("parse WASI compiler elapsed time %q: %v", string(rssData), parseErr)
-		}
-		rss, parseErr := strconv.Atoi(fields[len(fields)-1])
-		if parseErr != nil {
-			t.Fatalf("parse WASI compiler RSS %q: %v", string(rssData), parseErr)
-		}
-		elapsed := time.Duration(seconds * float64(time.Second))
+		elapsed := usage.elapsed
+		rss := usage.maxRSSKB
 		if elapsed < bestElapsed {
 			bestElapsed = elapsed
 		}

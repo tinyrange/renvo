@@ -136,12 +136,8 @@ func renvoAsmImageAarch64(a *renvoAsm) []byte {
 	if a.c.stripSymbols {
 		out := make([]byte, 0, loadFileSize)
 		out = renvoAppendElfHeaderAarch64(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, 0)
-		for i := 0; i < len(a.code); i++ {
-			out = append(out, a.code[i])
-		}
-		for i := 0; i < len(a.data); i++ {
-			out = append(out, a.data[i])
-		}
+		out = append(out, a.code...)
+		out = append(out, a.data...)
 		if renvoFixedTarget == 0 {
 			return renvoAppendReplLinkTable(out, a)
 		}

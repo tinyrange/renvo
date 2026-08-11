@@ -26,7 +26,7 @@ func compileLinux386(input []int, output int) int {
 
 func compileLinux386Arena(input []int, output int, arenaSize int) int {
 	renvoSetTarget(renvoTargetLinux386)
-	src := renvoMakeByteScratch(589824)
+	src := renvoMakeByteScratch(786432)
 	for i := 0; i < len(input); i++ {
 		src = renvoReadAll(input[i], src)
 		src = append(src, '\n')

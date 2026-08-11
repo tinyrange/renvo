@@ -756,8 +756,10 @@ reviewable place shared by developers and CI:
 authority first, then the tracked package and bundled-build suites, and finally
 compiles the backend and frontend test packages. It has a hard one-minute
 budget so stale generation or an ordinary Go build failure is always cheap to
-discover. `full` runs every mode in that order and is reserved for merge-queue
-validation. The narrower modes are diagnostic tools, not a substitute for the
+discover. `full` runs every mode in that order, can consume its complete
+30-minute timeout, and is reserved for merge-queue validation. Do not launch it
+as an interactive development check unless full local validation was explicitly
+requested. The narrower modes are diagnostic tools, not a substitute for the
 queue checks before a change is merged.
 
 Compiler fuzzing, self-hosting, and wide backend runs can consume enough memory
@@ -783,6 +785,15 @@ Useful backend harness checks are:
 
 ```sh
 go test -run '^(TestCompileTests|TestUnitFrontendCompileTests)$' ./backend
+```
+
+For one backend or frontend regression, prefer the repository driver's focused
+filter. It is a regular expression matched against slash-normalized corpus case
+names and prints periodic progress plus the five slowest cases:
+
+```sh
+./tools/check backend 'tagged_memory_access'
+./tools/check frontend 'map_frontend_lowering'
 ```
 
 To run the ordinary backend test list while excluding separately managed
@@ -822,6 +833,13 @@ To test a particular self-hosted frontend:
 RENVO_FRONTEND=/absolute/path/to/renvo \
   go test -count=1 ./frontend_tests
 ```
+
+Positive backend programs use sibling `.expected` files and positive frontend
+modules use `expected.txt`. Corpus execution compares the Renvo program directly
+with these checked-in values instead of building every program with host Go.
+Run `go run ./cmd/renvoexpect -write` after adding a positive case, then review
+the generated expectation. Frontend negative tests retain their exact
+`expect.json` diagnostics.
 
 The backend test cache lives under `backend/.renvo/test-cache`. Its keys include
 compiler sources and test inputs. Preserve the cache during ordinary work; if

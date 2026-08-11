@@ -10,7 +10,7 @@ func renvoCompileAmd64(input []int, output int, arenaSize int) int {
 		renvoPrintErr("renvo: kernel metadata unavailable\n")
 		return 1
 	}
-	src := renvoMakeByteScratch(589824)
+	src := renvoMakeByteScratch(786432)
 	for i := 0; i < len(input); i++ {
 		src = renvoReadAll(input[i], src)
 		src = append(src, '\n')
@@ -454,6 +454,7 @@ func renvoAmd64RelaxBranches(a *renvoAsm) {
 		}
 	}
 	relocCount := 0
+	relocBranch := 0
 	for i := 0; i+1 < len(a.relocs); i += 2 {
 		rawAt := int(renvo_runtime_UnsafeInt32At(a.relocs, i))
 		rawLabel := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1))
@@ -472,14 +473,28 @@ func renvoAmd64RelaxBranches(a *renvoAsm) {
 				continue
 			}
 		}
-		a.relocs[relocCount] = int32(renvoAmd64RelaxedPosition(branches, savings, at))
+		for relocBranch < len(branches) && int(branches[relocBranch])/2 < at {
+			relocBranch++
+		}
+		newAt := at
+		if relocBranch > 0 {
+			newAt -= int(renvo_runtime_UnsafeInt32At(savings, relocBranch-1))
+		}
+		a.relocs[relocCount] = int32(newAt)
 		a.relocs[relocCount+1] = int32(label)
 		relocCount += 2
 	}
 	a.relocs = a.relocs[:relocCount]
+	absBranch := 0
 	for i := 0; i+2 < len(a.absRelocs); i += 3 {
 		at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i)) & 2147483647
-		a.absRelocs[i] = int32(renvoAmd64RelaxedPosition(branches, savings, at))
+		for absBranch < len(branches) && int(branches[absBranch])/2 < at {
+			absBranch++
+		}
+		if absBranch > 0 {
+			at -= int(renvo_runtime_UnsafeInt32At(savings, absBranch-1))
+		}
+		a.absRelocs[i] = int32(at)
 	}
 }
 

@@ -1,15 +1,17 @@
 package frontend_tests
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+
+	"renvo.dev/internal/testprogress"
 )
 
 const frontendEnv = "RENVO_FRONTEND"
@@ -90,16 +92,78 @@ func runFrontendCorpusDirectory(t *testing.T, corpusRoot string, parallel bool, 
 	if len(cases) == 0 {
 		t.Fatalf("no frontend corpus cases found in %s", corpusRoot)
 	}
-
+	names := make([]string, len(cases))
+	for i := range cases {
+		names[i] = cases[i].name
+	}
+	selectedNames, err := testprogress.Filter(names, os.Getenv(testprogress.FilterEnv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	selectedSet := make(map[string]bool, len(selectedNames))
+	for _, name := range selectedNames {
+		selectedSet[name] = true
+	}
+	selected := make([]corpusCase, 0, len(selectedNames))
 	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
+		if selectedSet[tc.name] {
+			selected = append(selected, tc)
+		}
+	}
+	if len(selected) == 0 {
+		t.Skipf("no frontend corpus cases in %s match %s=%q", corpusRoot, testprogress.FilterEnv, os.Getenv(testprogress.FilterEnv))
+	}
+
+	tasks := make(chan corpusCase, len(selected))
+	for _, tc := range selected {
+		tasks <- tc
+	}
+	close(tasks)
+	progress := testprogress.New(t, filepath.Base(corpusRoot), len(selected))
+	t.Cleanup(progress.Close)
+	workers := frontendCorpusWorkers(parallel)
+	if workers > len(selected) {
+		workers = len(selected)
+	}
+	for worker := 0; worker < workers; worker++ {
+		worker := worker
+		t.Run(fmt.Sprintf("worker-%02d", worker+1), func(t *testing.T) {
 			if parallel {
 				t.Parallel()
 			}
-			runFrontendCorpusCase(t, frontend, tc.dir)
+			for tc := range tasks {
+				func() {
+					done := progress.Begin(tc.name)
+					defer done()
+					defer func() {
+						if t.Failed() {
+							t.Logf("failing corpus case: %s", tc.name)
+						}
+					}()
+					runFrontendCorpusCase(t, frontend, tc.dir)
+				}()
+			}
 		})
 	}
+}
+
+func frontendCorpusWorkers(parallel bool) int {
+	if !parallel {
+		return 1
+	}
+	if value := os.Getenv("RENVO_TEST_JOBS"); value != "" {
+		if jobs, err := strconv.Atoi(value); err == nil && jobs > 0 {
+			return jobs
+		}
+	}
+	workers := runtime.NumCPU()
+	if workers > 16 {
+		workers = 16
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	return workers
 }
 
 func discoverCorpusCases(t *testing.T, root string) []corpusCase {
@@ -236,15 +300,23 @@ func envKey(item string) string {
 func runFrontendCorpusCase(t *testing.T, frontend frontendConfig, dir string) {
 	t.Helper()
 
-	hostOut := runHostCase(t, dir)
-	if !bytes.Equal(hostOut, []byte("PASS\n")) {
-		t.Fatalf("host output = %q, want PASS\\n", string(hostOut))
+	expected, err := os.ReadFile(filepath.Join(dir, "expected.txt"))
+	if err != nil {
+		t.Fatalf("read checked-in expectation: %v", err)
+	}
+	if string(expected) != "PASS\n" {
+		t.Fatalf("invalid positive-test expectation %q, want PASS\\n", string(expected))
 	}
 	if frontend.compiler == "" {
 		return
 	}
 
-	out := filepath.Join(t.TempDir(), "app")
+	outDir, err := os.MkdirTemp("", "renvo-frontend-corpus-case-*")
+	if err != nil {
+		t.Fatalf("create corpus output directory: %v", err)
+	}
+	defer os.RemoveAll(outDir)
+	out := filepath.Join(outDir, "app")
 	cmd := frontendCommand(frontend, "-t", frontend.target, "-s", "-o", out, "./cmd/app")
 	cmd.Dir = dir
 	cmd.Env = frontendCommandEnv(frontend.env, dir)
@@ -260,7 +332,7 @@ func runFrontendCorpusCase(t *testing.T, frontend frontendConfig, dir string) {
 	if err != nil {
 		t.Fatalf("frontend executable failed: %v\n%s", err, string(frontOut))
 	}
-	if !bytes.Equal(frontOut, hostOut) {
+	if string(frontOut) != string(expected) {
 		size := int64(-1)
 		if info, statErr := os.Stat(out); statErr == nil {
 			size = info.Size()
@@ -269,21 +341,9 @@ func runFrontendCorpusCase(t *testing.T, frontend frontendConfig, dir string) {
 		retryCmd.Dir = dir
 		retryCmd.Env = []string{"PWD=" + dir}
 		retryOut, retryErr := retryCmd.CombinedOutput()
-		t.Fatalf("frontend output = %q, host output = %q, size=%d, retryErr=%v, retryOut=%q",
-			string(frontOut), string(hostOut), size, retryErr, string(retryOut))
+		t.Fatalf("frontend output = %q, checked-in output = %q, size=%d, retryErr=%v, retryOut=%q",
+			string(frontOut), string(expected), size, retryErr, string(retryOut))
 	}
-}
-
-func runHostCase(t *testing.T, dir string) []byte {
-	t.Helper()
-
-	cmd := exec.Command("go", "run", "./cmd/app")
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("host case failed: %v\n%s", err, string(out))
-	}
-	return out
 }
 
 func frontendCompiler(t *testing.T, root string) frontendConfig {

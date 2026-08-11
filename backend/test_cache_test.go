@@ -2,7 +2,6 @@ package main
 
 import (
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -131,80 +130,6 @@ func cachedTestArtifact(t *testing.T, kind string, key string, build func(string
 		t.Fatalf("failed to publish cached %s artifact: %v", kind, err)
 	}
 	return path
-}
-
-type cachedCommandResultData struct {
-	Stdout   string `json:"stdout"`
-	Stderr   string `json:"stderr"`
-	ExitCode int    `json:"exit_code"`
-}
-
-// cachedCommandResult stores the observable result instead of the host Go
-// executable. A host executable is several megabytes, while its result is
-// normally only a few bytes and is all the comparison tests consume.
-func cachedCommandResult(t *testing.T, kind string, key string, run func() (commandResult, error)) commandResult {
-	t.Helper()
-	cacheDir := filepath.Join(".renvo", "test-cache", testArtifactCacheVersion, kind)
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
-		t.Fatalf("failed to create command result cache: %v", err)
-	}
-	path, err := filepath.Abs(filepath.Join(cacheDir, key+".json"))
-	if err != nil {
-		t.Fatalf("failed to resolve command result cache path: %v", err)
-	}
-	lockValue, _ := testArtifactLocks.LoadOrStore(path, &sync.Mutex{})
-	lock := lockValue.(*sync.Mutex)
-	lock.Lock()
-	defer lock.Unlock()
-
-	decode := func() (commandResult, bool) {
-		data, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return commandResult{}, false
-		}
-		var cached cachedCommandResultData
-		if json.Unmarshal(data, &cached) != nil {
-			return commandResult{}, false
-		}
-		return commandResult{stdout: cached.Stdout, stderr: cached.Stderr, exitCode: cached.ExitCode}, true
-	}
-	if result, ok := decode(); ok {
-		return result
-	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		t.Fatalf("failed to remove invalid cached %s result: %v", kind, err)
-	}
-
-	result, err := run()
-	if err != nil {
-		t.Fatalf("failed to produce cached %s result: %v", kind, err)
-	}
-	data, err := json.Marshal(cachedCommandResultData{
-		Stdout: result.stdout, Stderr: result.stderr, ExitCode: result.exitCode,
-	})
-	if err != nil {
-		t.Fatalf("failed to encode cached %s result: %v", kind, err)
-	}
-	temp, err := os.CreateTemp(cacheDir, ".result-*")
-	if err != nil {
-		t.Fatalf("failed to create cached result temporary file: %v", err)
-	}
-	tempPath := temp.Name()
-	defer os.Remove(tempPath)
-	if _, err := temp.Write(data); err != nil {
-		temp.Close()
-		t.Fatalf("failed to write cached %s result: %v", kind, err)
-	}
-	if err := temp.Close(); err != nil {
-		t.Fatalf("failed to close cached %s result: %v", kind, err)
-	}
-	if err := os.Rename(tempPath, path); err != nil {
-		if existing, ok := decode(); ok {
-			return existing
-		}
-		t.Fatalf("failed to publish cached %s result: %v", kind, err)
-	}
-	return result
 }
 
 func cachedStage3Compiler(t *testing.T, target compilerTarget, stage2 string, unitPath string) string {

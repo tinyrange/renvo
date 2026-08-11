@@ -429,7 +429,7 @@ func compileLinuxArm(input []int, output int) int {
 
 func compileLinuxArmArena(input []int, output int, arenaSize int) int {
 	renvoSetTarget(renvoTargetLinuxArm)
-	src := renvoMakeByteScratch(589824)
+	src := renvoMakeByteScratch(786432)
 	for i := 0; i < len(input); i++ {
 		src = renvoReadAll(input[i], src)
 		src = append(src, '\n')

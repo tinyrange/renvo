@@ -393,7 +393,7 @@ func renvoAarch64EnsureStringEqualHelper(g *renvoLinearGen) int {
 const renvoAarch64ELFCodeOffset = 0xb0
 
 func renvoCompileAarch64(input []int, output int, arenaSize int) int {
-	sourceCapacity := 589824
+	sourceCapacity := 786432
 	src := make([]byte, 0, sourceCapacity)
 	for i := 0; i < len(input); i++ {
 		src = renvoReadAll(input[i], src)
