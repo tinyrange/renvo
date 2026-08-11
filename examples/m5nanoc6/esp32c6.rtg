@@ -133,6 +133,24 @@ go backend {
 		out.Mark(done)
 	}
 
+	// JAL keeps the return address in ra, and frameStart preserves ra/fp below
+	// the caller's stack pointer. Overflow call words therefore begin at the
+	// incoming frame pointer, with no stack-resident return-address header.
+	func storeParamWord(out *RTGEmitter, word int, offset int) {
+		registers := []RTGRegister{
+			riscv32.a0, riscv32.a1, riscv32.a2,
+			riscv32.a3, riscv32.a4, riscv32.a5,
+		}
+		if word >= 0 && word < len(registers) {
+			riscv32.frameStore(out, offset, registers[word])
+			return
+		}
+		riscv32.loadNative(out, riscv32.primary, RTGAddress{
+			Base: riscv32.frame, Displacement: (word - 6) * 4,
+		})
+		riscv32.frameStore(out, offset, riscv32.primary)
+	}
+
 	func image(out *RTGEmitter) []byte {
 		code := out.Code()
 		data := out.Data()
@@ -293,6 +311,22 @@ go backend {
 	}
 }
 
+abi esp32c6_internal {
+	arch = riscv32
+	arguments = [a0, a1, a2, a3, a4, a5]
+	call_words = [a0, a1, a2, a3, a4, a5]
+	result = [a0, a1]
+	stack_alignment = 16
+	return_address = link
+	frame_pointer = frame
+	frame_start = go riscv32.frameStart
+	frame_finish = go riscv32.frameFinish
+	frame_load = go riscv32.frameLoad
+	frame_store = go riscv32.frameStore
+	frame_address = go riscv32.frameAddress
+	store_param_word = go storeParamWord
+}
+
 runtime esp32c6_freestanding {
 	emit_entry_start = go entryStart
 	emit_exit = go exit
@@ -315,7 +349,7 @@ target esp32c6/riscv32 {
 	os = esp32c6
 	arch = riscv32
 	frontend_arch = riscv32
-	abi = riscv32_internal
+	abi = esp32c6_internal
 	runtime = esp32c6_freestanding
 	executable = esp32c6_elf
 	build_tags = [esp32c6, riscv32, m5nanoc6]

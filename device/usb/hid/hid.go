@@ -8,6 +8,7 @@ type Function struct {
 	io                       usb.EndpointIO
 	interfaceNumber, out, in uint8
 	report                   []byte
+	packetSize               uint16
 	receive                  [64]byte
 	lastOut                  [64]byte
 	lastOutLength            int
@@ -15,15 +16,23 @@ type Function struct {
 }
 
 // New returns a HID function using reportDescriptor.
-func New(reportDescriptor []byte) *Function { return &Function{report: reportDescriptor} }
+func New(reportDescriptor []byte) *Function {
+	return &Function{report: reportDescriptor, packetSize: 64}
+}
+
+// NewLowSpeed returns a HID function whose interrupt endpoints obey the USB
+// low-speed maximum packet size.
+func NewLowSpeed(reportDescriptor []byte) *Function {
+	return &Function{report: reportDescriptor, packetSize: 8}
+}
 
 func (f *Function) Bind(b *usb.DescriptorBuilder) error {
 	f.interfaceNumber = b.Interface()
 	var err error
-	if f.out, err = b.Endpoint(usb.Out, usb.Interrupt, 64, 1); err != nil {
+	if f.out, err = b.Endpoint(usb.Out, usb.Interrupt, f.packetSize, 1); err != nil {
 		return err
 	}
-	if f.in, err = b.Endpoint(usb.In, usb.Interrupt, 64, 1); err != nil {
+	if f.in, err = b.Endpoint(usb.In, usb.Interrupt, f.packetSize, 1); err != nil {
 		return err
 	}
 	if err = b.InterfaceDescriptor(f.interfaceNumber, 0, 2, 3, 0, 0, 0); err != nil {
@@ -33,10 +42,10 @@ func (f *Function) Bind(b *usb.DescriptorBuilder) error {
 	if err = b.Append(9, 0x21, 0x11, 0x01, 0, 1, 0x22, byte(length), byte(length>>8)); err != nil {
 		return err
 	}
-	if err = b.EndpointDescriptor(f.out, usb.Out, usb.Interrupt, 64, 1); err != nil {
+	if err = b.EndpointDescriptor(f.out, usb.Out, usb.Interrupt, f.packetSize, 1); err != nil {
 		return err
 	}
-	return b.EndpointDescriptor(f.in, usb.In, usb.Interrupt, 64, 1)
+	return b.EndpointDescriptor(f.in, usb.In, usb.Interrupt, f.packetSize, 1)
 }
 
 func (f *Function) Attach(io usb.EndpointIO) { f.io = io }

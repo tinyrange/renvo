@@ -28,7 +28,7 @@ type Function struct {
 	disk                     BlockDevice
 	interfaceNumber, out, in uint8
 	receive                  [64]byte
-	block                    [blockSize]byte
+	block                    [512]byte
 	tx                       [64]byte
 	tag                      uint32
 	residue                  uint32
@@ -96,7 +96,6 @@ func be16(data []byte) uint16 { return uint16(data[0])<<8 | uint16(data[1]) }
 func be32(data []byte) uint32 {
 	return uint32(data[0])<<24 | uint32(data[1])<<16 | uint32(data[2])<<8 | uint32(data[3])
 }
-
 func (f *Function) command(data []byte) {
 	if len(data) != 31 || le32(data) != 0x43425355 || data[14] == 0 || data[14] > 16 {
 		f.io.StallEndpoint(f.out, usb.Out)

@@ -35,6 +35,21 @@ Clone `tinyrange/renvo_emu` beside this repository, or set
 ESP32-S3 Xtensa core and the modeled hardware USB Serial/JTAG registers; it
 does not use the emulator's compiler-only UART facade.
 
+The native USB qualification covers Mass Storage, HID, CDC Ethernet, CDC ACM,
+MIDI, Audio, WebUSB, MTP, and ADB. Each profile enumerates through the modeled
+DWC2 controller and completes one class-specific control or data transaction:
+
+```sh
+./examples/m5sticks3/test-usb-emulator.sh
+```
+
+For the normal edit loop, name only the profiles being changed. This avoids
+waiting for all nine instruction-level simulations:
+
+```sh
+./examples/m5sticks3/test-usb-emulator.sh hid msc
+```
+
 ## Build and flash
 
 Build Renvo, then compile the same suite for the board:

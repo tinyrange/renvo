@@ -99,13 +99,13 @@ func (b *DescriptorBuilder) finish() []byte {
 	return b.data[:b.length]
 }
 
-func deviceDescriptor(config Config) [18]byte {
+func deviceDescriptor(config Config, controlPacketSize byte) [18]byte {
 	class, subclass, protocol := byte(0), byte(0), byte(0)
 	if len(config.Functions) > 1 {
 		class, subclass, protocol = 0xef, 2, 1
 	}
 	return [18]byte{
-		18, 1, 0x00, 0x02, class, subclass, protocol, 64,
+		18, 1, 0x00, 0x02, class, subclass, protocol, controlPacketSize,
 		byte(config.VendorID), byte(config.VendorID >> 8),
 		byte(config.ProductID), byte(config.ProductID >> 8),
 		byte(config.DeviceBCD), byte(config.DeviceBCD >> 8),

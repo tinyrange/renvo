@@ -122,11 +122,14 @@ type Function interface {
 
 // Config identifies a USB device and the functions it exposes.
 type Config struct {
-	VendorID     uint16
-	ProductID    uint16
-	DeviceBCD    uint16
-	Manufacturer string
-	Product      string
-	Serial       string
-	Functions    []Function
+	VendorID  uint16
+	ProductID uint16
+	DeviceBCD uint16
+	// ControlPacketSize selects endpoint zero's maximum packet size. Zero uses
+	// 64 bytes; low-speed software devices use 8.
+	ControlPacketSize uint8
+	Manufacturer      string
+	Product           string
+	Serial            string
+	Functions         []Function
 }

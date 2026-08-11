@@ -31,6 +31,7 @@ type Device struct {
 	controlIn         []byte
 	controlInOffset   int
 	controlInZLP      bool
+	controlPacketSize int
 	configured        bool
 	endpointsOpened   bool
 	started           bool
@@ -42,7 +43,14 @@ func New(port Port, config Config) (*Device, error) {
 	if config.VendorID == 0 || config.ProductID == 0 || len(config.Functions) == 0 {
 		return nil, ErrInvalidConfig
 	}
-	d := &Device{controller: port.controller, config: config, builder: newDescriptorBuilder()}
+	controlPacketSize := int(config.ControlPacketSize)
+	if controlPacketSize == 0 {
+		controlPacketSize = 64
+	}
+	if controlPacketSize != 8 && controlPacketSize != 16 && controlPacketSize != 32 && controlPacketSize != 64 {
+		return nil, ErrInvalidConfig
+	}
+	d := &Device{controller: port.controller, config: config, builder: newDescriptorBuilder(), controlPacketSize: controlPacketSize}
 	for _, function := range config.Functions {
 		if err := function.Bind(&d.builder); err != nil {
 			return nil, err
@@ -50,7 +58,7 @@ func New(port Port, config Config) (*Device, error) {
 		function.Attach(d)
 	}
 	d.configuration = d.builder.finish()
-	d.device = deviceDescriptor(config)
+	d.device = deviceDescriptor(config, byte(controlPacketSize))
 	return d, nil
 }
 
@@ -219,7 +227,7 @@ func (d *Device) setup(packet [8]byte) {
 	if setup.RequestType&0x80 != 0 {
 		d.controlIn = response
 		d.controlInOffset = 0
-		d.controlInZLP = len(response) != 0 && len(response)%64 == 0 && len(response) < int(setup.Length)
+		d.controlInZLP = len(response) != 0 && len(response)%d.controlPacketSize == 0 && len(response) < int(setup.Length)
 		d.sendControlIn()
 		_ = d.controller.Receive(0, d.out[:0])
 	} else {
@@ -229,7 +237,7 @@ func (d *Device) setup(packet [8]byte) {
 
 func (d *Device) sendControlIn() {
 	if d.controlInOffset < len(d.controlIn) {
-		end := d.controlInOffset + 64
+		end := d.controlInOffset + d.controlPacketSize
 		if end > len(d.controlIn) {
 			end = len(d.controlIn)
 		}

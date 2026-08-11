@@ -96,15 +96,30 @@ func appMain(args []string, env []string) int {
 		print("0x" + hexR(address) + " = 0x" + hexR(value) + "\n")
 		return 0
 	}
+	if len(args) >= 2 && args[1] == "--recover" {
+		if len(args) < 3 || len(args) > 4 {
+			print("usage: renvoflash --recover ELF-OR-BIN [PORT]\n")
+			return 2
+		}
+		port := "/dev/ttyACM0"
+		if len(args) == 4 {
+			port = args[3]
+		}
+		if err := flashFileR(args[2], port, true); err != nil {
+			print("renvoflash: " + err.Error() + "\n")
+			return 1
+		}
+		return 0
+	}
 	if len(args) < 2 || len(args) > 3 {
-		print("usage: renvoflash ELF-OR-BIN [PORT]\n       renvoflash --convert ELF BIN\n       renvoflash --read-register HEX [PORT]\n")
+		print("usage: renvoflash ELF-OR-BIN [PORT]\n       renvoflash --recover ELF-OR-BIN [PORT]\n       renvoflash --convert ELF BIN\n       renvoflash --read-register HEX [PORT]\n")
 		return 2
 	}
 	port := "/dev/ttyACM0"
 	if len(args) == 3 {
 		port = args[2]
 	}
-	if err := flashFileR(args[1], port); err != nil {
+	if err := flashFileR(args[1], port, false); err != nil {
 		print("renvoflash: " + err.Error() + "\n")
 		return 1
 	}
@@ -124,7 +139,7 @@ func readRegisterR(address uint32, portName string) (uint32, error) {
 	return loader.command(0x0a, wordsR([]uint32{address}), 0, 30)
 }
 
-func flashFileR(path string, portName string) error {
+func flashFileR(path string, portName string, recover bool) error {
 	source, err := readFileR(path)
 	if err != nil {
 		return err
@@ -134,15 +149,11 @@ func flashFileR(path string, portName string) error {
 		return err
 	}
 	print("Prepared " + decimalR(len(image)) + " byte ESP app image (" + chip.name + ")\n")
-	port, err := openSerialR(portName)
+	port, loader, err := connectLoaderR(portName, recover)
 	if err != nil {
 		return err
 	}
 	defer port.close()
-	loader := &loaderR{port: port}
-	if err := loader.connect(); err != nil {
-		return err
-	}
 	magic, err := loader.command(0x0a, wordsR([]uint32{0x40001000}), 0, 30)
 	if err != nil {
 		return err
@@ -223,6 +234,28 @@ func flashFileR(path string, portName string) error {
 		}
 	}
 	return nil
+}
+
+func connectLoaderR(portName string, recover bool) (*serialR, *loaderR, error) {
+	waiting := false
+	for {
+		port, err := openSerialR(portName)
+		if err == nil {
+			loader := &loaderR{port: port}
+			if err = loader.connect(); err == nil {
+				return port, loader, nil
+			}
+			port.close()
+		}
+		if !recover {
+			return nil, nil, err
+		}
+		if !waiting {
+			print("Waiting for the C6 USB recovery window on " + portName + " (Ctrl-C to stop)\n")
+			waiting = true
+		}
+		sleepR(250)
+	}
 }
 
 func (loader *loaderR) writeRegister(address uint32, value uint32, mask uint32) error {

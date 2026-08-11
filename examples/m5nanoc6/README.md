@@ -32,6 +32,48 @@ on the first rising edge of `board.esp32c6.chip_gpio.pin7`. It deliberately
 does not request a bus log because long bus logs are expensive and the signal
 edge is the assertion under test.
 
+The C6 has no general USB controller, but its USB Serial/JTAG block documents a
+raw PHY test interface. The software-USB probe first runs the portable packet
+SIE and USB device stack through a complete synthetic low-speed HID
+enumeration: bus reset, 8-byte endpoint-zero descriptor segmentation, address
+assignment, configuration, endpoint data toggles, and one interrupt report. It
+then takes over the raw PHY interface, selects the low-speed D- pull-up, and
+transmits that report with NRZI, bit stuffing, CRC16, and EOP before restoring
+USB Serial/JTAG:
+
+```sh
+./examples/m5nanoc6/test-usb-emulator.sh
+```
+
+Set `ESPTOOL` to an esptool 5 executable to convert the ELF and ask the
+emulator to validate the resulting application image against the direct ELF in
+the same run:
+
+```sh
+ESPTOOL=esptool ./examples/m5nanoc6/test-usb-emulator.sh
+```
+
+The emulator accepts output only when the report returned by the emulated SIE
+is exact and the complete transmitted packet is wire-valid at 102--111
+instruction ticks per bit cell. Unit tests separately round-trip data, token,
+and handshake waveforms; the emulator's independent oracle accepts no packet
+with a malformed PID, CRC, bit-stuffing sequence, EOP, or transmit cadence.
+This qualifies the Go protocol state, target code generation, packet encoder,
+C6 register takeover/restore path, deterministic transmit cadence, and the
+watchdog-reset/retained-marker recovery sequence. It does not prove electrical
+behavior, receiver sampling or arbitration jitter, clock calibration, host
+turnaround deadlines, USB re-enumeration latency, or modem-control behavior on
+the real USB-Serial-JTAG programming connection; those remain hardware tests.
+
+The first hardware raw-PHY test is guarded by a twenty-second Timer Group 0
+watchdog. If the attempt wedges, the C6 resets with USB Serial/JTAG restored and
+holds a five-second recovery window before trying again. Start the recovery
+flasher before resetting the board so it can automatically replace the image:
+
+```sh
+./sandbox/renvoflash --recover sandbox/m5nanoc6-blink.elf /dev/ttyACM0
+```
+
 ## Build and flash
 
 Build Renvo and the blinking application:
