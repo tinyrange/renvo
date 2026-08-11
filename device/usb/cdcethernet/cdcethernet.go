@@ -8,6 +8,7 @@ type Function struct {
 	controlInterface, dataInterface, notifyIn uint8
 	io                                        usb.EndpointIO
 	packetFilter                              uint16
+	dataAlternate                             uint8
 }
 
 func New() *Function { return &Function{} }
@@ -52,8 +53,17 @@ func (f *Function) Bind(b *usb.DescriptorBuilder) error {
 }
 func (f *Function) Attach(io usb.EndpointIO) { f.io = io; f.DuplexPipe.Attach(io) }
 func (f *Function) Control(setup *usb.Setup, buffer []byte) ([]byte, bool) {
+	if setup.RequestType&0x60 == 0 && setup.Request == 10 && uint8(setup.Index) == f.dataInterface {
+		buffer[0] = f.dataAlternate
+		return buffer[:1], true
+	}
 	if setup.RequestType&0x60 == 0 && setup.Request == 11 && uint8(setup.Index) == f.dataInterface {
-		return buffer[:0], setup.Length == 0 && setup.Value <= 1
+		if setup.Length != 0 || setup.Value > 1 {
+			return nil, false
+		}
+		f.dataAlternate = uint8(setup.Value)
+		f.Activate(f.dataAlternate != 0, f.dataAlternate != 0)
+		return buffer[:0], true
 	}
 	if uint8(setup.Index) != f.controlInterface || setup.RequestType&0x60 != 0x20 {
 		return nil, false
@@ -67,7 +77,8 @@ func (f *Function) Control(setup *usb.Setup, buffer []byte) ([]byte, bool) {
 func (*Function) ControlOut(*usb.Setup, []byte) bool { return false }
 func (*Function) BOSDescriptor() []byte              { return nil }
 func (f *Function) Configured(value bool) {
-	f.ConfiguredState(value)
+	f.dataAlternate = 0
+	f.Activate(false, false)
 	if value {
 		// NETWORK_CONNECTION notification (connected).
 		n := []byte{0xa1, 0, 1, 0, f.controlInterface, 0, 0, 0}

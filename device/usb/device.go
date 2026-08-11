@@ -159,11 +159,6 @@ func (d *Device) setup(packet [8]byte) {
 			response, ok = d.control[:min16(setup.Length, 2)], true
 		case requestClearFeature, requestSetFeature:
 			response, ok = d.control[:0], setup.Length == 0
-		case requestGetInterface:
-			d.control[0] = 0
-			response, ok = d.control[:min16(setup.Length, 1)], true
-		case requestSetInterface:
-			response, ok = d.control[:0], setup.Value == 0 && setup.Length == 0
 		}
 	}
 	if !ok {
@@ -172,6 +167,14 @@ func (d *Device) setup(packet [8]byte) {
 				owner = function
 				break
 			}
+		}
+	}
+	if !ok && setup.RequestType&0x60 == 0 {
+		if setup.Request == requestGetInterface {
+			d.control[0] = 0
+			response, ok = d.control[:min16(setup.Length, 1)], true
+		} else if setup.Request == requestSetInterface && setup.Value == 0 && setup.Length == 0 {
+			response, ok = d.control[:0], true
 		}
 	}
 	if !ok {

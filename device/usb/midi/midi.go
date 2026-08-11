@@ -3,6 +3,33 @@ package midi
 
 import "renvo.dev/device/usb"
 
+// Event is one four-byte USB-MIDI 1.0 event packet.
+type Event struct {
+	Cable uint8
+	Code  uint8
+	Byte0 byte
+	Byte1 byte
+	Byte2 byte
+}
+
+func (e Event) Bytes(output []byte) bool {
+	if len(output) < 4 || e.Cable > 15 || e.Code > 15 {
+		return false
+	}
+	output[0] = e.Cable<<4 | e.Code
+	output[1], output[2], output[3] = e.Byte0, e.Byte1, e.Byte2
+	return true
+}
+
+func Parse(packet []byte, event *Event) bool {
+	if len(packet) != 4 {
+		return false
+	}
+	event.Cable, event.Code = packet[0]>>4, packet[0]&15
+	event.Byte0, event.Byte1, event.Byte2 = packet[1], packet[2], packet[3]
+	return true
+}
+
 type Function struct {
 	usb.DuplexPipe
 	controlInterface, streamingInterface uint8

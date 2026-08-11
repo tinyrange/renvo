@@ -5,7 +5,6 @@ import (
 	"renvo.dev/device/esp32s3"
 	"renvo.dev/device/gpio"
 	"renvo.dev/device/usb"
-	legacy "renvo.dev/examples/m5sticks3/board"
 	"renvo.dev/std/graphics"
 )
 
@@ -24,22 +23,21 @@ var usbController = esp32s3.DWC2{}
 var USB = usb.DefinePort(&usbController)
 
 // Screen exposes the board-attached ST7789 without leaking its SPI and GDMA
-// wiring. Its temporary legacy calls are removed when that driver moves below
-// the board package in the next migration slice.
+// wiring.
 type Screen struct{}
 
 // Display is the attached 135x240 LCD.
 var Display = Screen{}
 
-func (*Screen) Width() int  { return legacy.DisplayWidth }
-func (*Screen) Height() int { return legacy.DisplayHeight }
+func (*Screen) Width() int  { return DisplayWidth }
+func (*Screen) Height() int { return DisplayHeight }
 func (*Screen) Initialize() bool {
-	return legacy.InitializeDisplay()
+	return InitializeDisplay()
 }
 func (*Screen) PresentSurface2x(surface *graphics.Surface) bool {
-	return legacy.PresentSurface2x(surface)
+	return PresentSurface2x(surface)
 }
-func (*Screen) DrawLineDiagnostic() bool { return legacy.DrawLineDiagnostic() }
+func (*Screen) DrawLineDiagnostic() bool { return DrawLineDiagnostic() }
 func (*Screen) DrawButtonRectangle(index int, visible bool) {
-	legacy.DrawButtonRectangle(index, visible)
+	DrawButtonRectangle(index, visible)
 }

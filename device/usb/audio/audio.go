@@ -7,6 +7,7 @@ type Function struct {
 	usb.DuplexPipe
 	controlInterface, streamingOut, streamingIn uint8
 	sampleRate                                  uint32
+	outAlternate, inAlternate                   uint8
 }
 
 func New(sampleRate uint32) *Function { return &Function{sampleRate: sampleRate} }
@@ -53,9 +54,28 @@ func (f *Function) Bind(b *usb.DescriptorBuilder) error {
 }
 func (f *Function) Attach(io usb.EndpointIO) { f.DuplexPipe.Attach(io) }
 func (f *Function) Control(setup *usb.Setup, buffer []byte) ([]byte, bool) {
+	if setup.RequestType&0x60 == 0 && setup.Request == 10 {
+		if uint8(setup.Index) == f.streamingOut {
+			buffer[0] = f.outAlternate
+			return buffer[:1], true
+		}
+		if uint8(setup.Index) == f.streamingIn {
+			buffer[0] = f.inAlternate
+			return buffer[:1], true
+		}
+	}
 	if setup.RequestType&0x60 == 0 && setup.Request == 11 &&
 		(uint8(setup.Index) == f.streamingOut || uint8(setup.Index) == f.streamingIn) {
-		return buffer[:0], setup.Length == 0 && setup.Value <= 1
+		if setup.Length != 0 || setup.Value > 1 {
+			return nil, false
+		}
+		if uint8(setup.Index) == f.streamingOut {
+			f.outAlternate = uint8(setup.Value)
+		} else {
+			f.inAlternate = uint8(setup.Value)
+		}
+		f.Activate(f.outAlternate != 0 || f.inAlternate != 0, f.outAlternate != 0)
+		return buffer[:0], true
 	}
 	// Audio endpoint sampling-frequency GET_CUR/SET_CUR.
 	if setup.RequestType&0x60 == 0x20 && setup.Request == 0x81 {
@@ -74,7 +94,10 @@ func (f *Function) ControlOut(setup *usb.Setup, data []byte) bool {
 	}
 	return false
 }
-func (*Function) BOSDescriptor() []byte               { return nil }
-func (f *Function) Configured(value bool)             { f.ConfiguredState(value) }
+func (*Function) BOSDescriptor() []byte { return nil }
+func (f *Function) Configured(value bool) {
+	f.outAlternate, f.inAlternate = 0, 0
+	f.Activate(false, false)
+}
 func (f *Function) Handle(event usb.Event)            { f.HandleEvent(event) }
 func (f *Function) WriteSamples(samples []byte) error { return f.Write(samples) }

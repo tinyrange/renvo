@@ -27,8 +27,15 @@ func (p *DuplexPipe) BindEndpoints(b *DescriptorBuilder, transfer TransferType, 
 func (p *DuplexPipe) Attach(io EndpointIO) { p.IO = io }
 
 func (p *DuplexPipe) ConfiguredState(value bool) {
+	p.Activate(value, value)
+}
+
+// Activate changes the data-path state and optionally arms the OUT endpoint.
+// Alternate-setting classes use this to keep their zero-bandwidth setting
+// inactive until the host selects a streaming interface.
+func (p *DuplexPipe) Activate(value, armReceive bool) {
 	p.Active = value
-	if value && p.IO != nil {
+	if value && armReceive && p.IO != nil {
 		_ = p.IO.EndpointReceive(p.Out, p.receive[:])
 	}
 }
