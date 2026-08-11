@@ -22,6 +22,18 @@ var usbController = esp32s3.DWC2{}
 // USB is the native USB-C device connection on GPIO19/GPIO20.
 var USB = usb.DefinePort(&usbController)
 
+// USBDownload provides a recoverable way out of an invalid native-USB image.
+// Calling Enter resets into the fixed ESP ROM USB Serial/JTAG downloader.
+var USBDownload = DownloadMode{}
+
+type DownloadMode struct{}
+
+func (*DownloadMode) Arm()                     { esp32s3.ArmUSBRecovery(1) }
+func (*DownloadMode) Complete()                { esp32s3.CompleteUSBRecovery() }
+func (*DownloadMode) Enter()                   { esp32s3.ResetToUSBDownload() }
+func (*DownloadMode) Return()                  { usbController.ReturnToSerialJTAG() }
+func (*DownloadMode) Trace(index uint8) uint32 { return esp32s3.USBRecoveryTrace(index) }
+
 // Screen exposes the board-attached ST7789 without leaking its SPI and GDMA
 // wiring.
 type Screen struct{}

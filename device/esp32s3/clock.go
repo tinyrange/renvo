@@ -19,6 +19,8 @@ func (*SystemTimer) Ticks() uint32 {
 	return mmio.Load32(systemTimerValueLow)
 }
 
+func (*SystemTimer) TicksPerSecond() uint32 { return 16000000 }
+
 func (*SystemTimer) DelayMicroseconds(microseconds uint32) {
 	timer := SystemTimer{}
 	started := timer.Ticks()

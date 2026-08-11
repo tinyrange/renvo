@@ -79,11 +79,18 @@ func (b *DescriptorBuilder) InterfaceDescriptor(number, alternate, endpoints, cl
 
 // EndpointDescriptor appends the standard descriptor for a reserved endpoint.
 func (b *DescriptorBuilder) EndpointDescriptor(number uint8, direction Direction, transfer TransferType, maxPacket uint16, interval uint8) error {
+	return b.EndpointDescriptorAttributes(number, direction, byte(transfer), maxPacket, interval)
+}
+
+// EndpointDescriptorAttributes appends an endpoint with the complete USB
+// bmAttributes byte. Class packages use this for isochronous synchronization
+// and usage bits that do not fit in TransferType alone.
+func (b *DescriptorBuilder) EndpointDescriptorAttributes(number uint8, direction Direction, attributes uint8, maxPacket uint16, interval uint8) error {
 	address := number
 	if direction == In {
 		address |= 0x80
 	}
-	return b.Append(7, 5, address, byte(transfer), byte(maxPacket), byte(maxPacket>>8), interval)
+	return b.Append(7, 5, address, attributes, byte(maxPacket), byte(maxPacket>>8), interval)
 }
 
 func (b *DescriptorBuilder) finish() []byte {

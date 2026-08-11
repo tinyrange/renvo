@@ -32,7 +32,9 @@ type Device struct {
 	controlInOffset   int
 	controlInZLP      bool
 	configured        bool
+	endpointsOpened   bool
 	started           bool
+	err               error
 }
 
 // New composes config against the controller carried by a board USB port.
@@ -60,14 +62,30 @@ func (d *Device) Start() error {
 	if err := d.controller.Start(); err != nil {
 		return err
 	}
-	for index := 0; index < d.builder.endpointCount; index++ {
-		if err := d.controller.OpenEndpoint(d.builder.endpoints[index]); err != nil {
-			return err
-		}
-	}
 	d.started = true
 	return d.controller.Connect()
 }
+
+func (d *Device) openEndpoints() bool {
+	if d.endpointsOpened {
+		return true
+	}
+	for index := 0; index < d.builder.endpointCount; index++ {
+		if err := d.controller.OpenEndpoint(d.builder.endpoints[index]); err != nil {
+			d.err = err
+			return false
+		}
+	}
+	d.endpointsOpened = true
+	return true
+}
+
+// Configured reports whether the host has selected the device configuration.
+// It is useful for bounded polling loops and hardware recovery watchdogs.
+func (d *Device) Configured() bool { return d.configured }
+
+// Err returns the first asynchronous endpoint-configuration failure.
+func (d *Device) Err() error { return d.err }
 
 func min16(a uint16, b int) int {
 	if int(a) < b {
@@ -144,6 +162,9 @@ func (d *Device) setup(packet [8]byte) {
 			}
 		case requestSetConfiguration:
 			ok = setup.Value <= 1 && setup.Length == 0
+			if ok && setup.Value == 1 {
+				ok = d.openEndpoints()
+			}
 			if ok {
 				d.pendingConfig = uint8(setup.Value) + 1
 				response = d.control[:0]

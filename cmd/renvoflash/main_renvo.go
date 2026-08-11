@@ -78,8 +78,26 @@ func appMain(args []string, env []string) int {
 		}
 		return 0
 	}
+	if len(args) >= 3 && len(args) <= 4 && args[1] == "--read-register" {
+		address, err := parseHexR(args[2])
+		if err != nil {
+			print("renvoflash: " + err.Error() + "\n")
+			return 2
+		}
+		port := "/dev/ttyACM0"
+		if len(args) == 4 {
+			port = args[3]
+		}
+		value, err := readRegisterR(address, port)
+		if err != nil {
+			print("renvoflash: " + err.Error() + "\n")
+			return 1
+		}
+		print("0x" + hexR(address) + " = 0x" + hexR(value) + "\n")
+		return 0
+	}
 	if len(args) < 2 || len(args) > 3 {
-		print("usage: renvoflash ELF-OR-BIN [PORT]\n       renvoflash --convert ELF BIN\n")
+		print("usage: renvoflash ELF-OR-BIN [PORT]\n       renvoflash --convert ELF BIN\n       renvoflash --read-register HEX [PORT]\n")
 		return 2
 	}
 	port := "/dev/ttyACM0"
@@ -91,6 +109,19 @@ func appMain(args []string, env []string) int {
 		return 1
 	}
 	return 0
+}
+
+func readRegisterR(address uint32, portName string) (uint32, error) {
+	port, err := openSerialR(portName)
+	if err != nil {
+		return 0, err
+	}
+	defer port.close()
+	loader := &loaderR{port: port}
+	if err = loader.connect(); err != nil {
+		return 0, err
+	}
+	return loader.command(0x0a, wordsR([]uint32{address}), 0, 30)
 }
 
 func flashFileR(path string, portName string) error {
@@ -731,4 +762,28 @@ func hexR(value uint32) string {
 		result = append(result, reverse[i])
 	}
 	return string(result)
+}
+
+func parseHexR(value string) (uint32, error) {
+	if len(value) >= 2 && value[0] == '0' && (value[1] == 'x' || value[1] == 'X') {
+		value = value[2:]
+	}
+	if len(value) == 0 || len(value) > 8 {
+		return 0, failR("register address must contain 1 to 8 hexadecimal digits")
+	}
+	var result uint32
+	for i := 0; i < len(value); i++ {
+		digit := uint32(0)
+		if value[i] >= '0' && value[i] <= '9' {
+			digit = uint32(value[i] - '0')
+		} else if value[i] >= 'a' && value[i] <= 'f' {
+			digit = uint32(value[i]-'a') + 10
+		} else if value[i] >= 'A' && value[i] <= 'F' {
+			digit = uint32(value[i]-'A') + 10
+		} else {
+			return 0, failR("register address is not hexadecimal")
+		}
+		result = result<<4 | digit
+	}
+	return result, nil
 }

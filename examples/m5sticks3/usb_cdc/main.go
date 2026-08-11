@@ -24,10 +24,29 @@ func main() {
 		}
 	}
 	written := false
+	polls := 0
 	for {
 		device.Poll()
+		polls++
 		if !written && serial.Write([]byte("PASS\n")) == nil {
+			board.USBDownload.Complete()
 			written = true
 		}
+		if !written && polls >= 500000 {
+			board.USBDownload.Return()
+			for {
+				print("USBTRACE " + traceHex(board.USBDownload.Trace(0)) + " " + traceHex(board.USBDownload.Trace(1)) + " " + traceHex(board.USBDownload.Trace(2)) + " " + traceHex(board.USBDownload.Trace(3)) + "\n")
+			}
+		}
 	}
+}
+
+func traceHex(value uint32) string {
+	digits := "0123456789abcdef"
+	result := make([]byte, 8)
+	for index := 7; index >= 0; index-- {
+		result[index] = digits[value&15]
+		value >>= 4
+	}
+	return string(result)
 }

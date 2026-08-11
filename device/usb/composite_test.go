@@ -55,6 +55,14 @@ func (*testController) SetAddress(uint8)           {}
 
 func setup(bytes [8]byte) usb.Event { return usb.Event{Kind: usb.EventSetup, Setup: bytes} }
 
+func configure(device *usb.Device, controller *testController) {
+	controller.events = []usb.Event{
+		setup([8]byte{0, 9, 1, 0, 0, 0, 0, 0}),
+		{Kind: usb.EventInComplete},
+	}
+	device.Poll()
+}
+
 type testDisk struct{ blocks [2][512]byte }
 
 func (*testDisk) BlockCount() uint32 { return 2 }
@@ -94,6 +102,7 @@ func TestEveryClassBuildsADeviceProfile(t *testing.T) {
 			if err := device.Start(); err != nil {
 				t.Fatal(err)
 			}
+			configure(device, controller)
 			for _, endpoint := range controller.opened {
 				if endpoint.Number > 6 {
 					t.Fatalf("endpoint %d exceeds ESP32-S3 budget", endpoint.Number)
@@ -119,6 +128,7 @@ func TestDeveloperCompositeFitsS3EndpointBudget(t *testing.T) {
 	if err := device.Start(); err != nil {
 		t.Fatal(err)
 	}
+	configure(device, controller)
 	maximum := uint8(0)
 	for _, endpoint := range controller.opened {
 		if endpoint.Number > maximum {
@@ -196,6 +206,7 @@ func TestMassStorageInquiryAndCommandStatus(t *testing.T) {
 	if err := device.Start(); err != nil {
 		t.Fatal(err)
 	}
+	configure(device, controller)
 	var out, in uint8
 	for _, endpoint := range controller.opened {
 		if endpoint.Direction == usb.Out {
@@ -213,8 +224,6 @@ func TestMassStorageInquiryAndCommandStatus(t *testing.T) {
 	cbw[15] = 0x12
 	cbw[19] = 36
 	controller.events = []usb.Event{
-		setup([8]byte{0, 9, 1, 0, 0, 0, 0, 0}),
-		{Kind: usb.EventInComplete},
 		{Kind: usb.EventOut, Endpoint: out, Data: cbw},
 		{Kind: usb.EventInComplete, Endpoint: in},
 	}
