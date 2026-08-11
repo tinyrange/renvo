@@ -30,6 +30,7 @@ var androidInputQueue int
 var androidViewportWidth int
 var androidPhysicalWidth int
 var androidDeviceScale Scalar = 1.0
+var androidRequestedRenderer Renderer
 var androidNativeBuffer = make([]byte, 48)
 var androidActivePointer = androidNoPointer
 
@@ -60,70 +61,70 @@ func androidInputQueueDestroyedCallback() int { return 0 }
 func androidInputPollCallback() int { return 0 }
 
 // renvo:linkstatic libandroid.so,ANativeWindow_setBuffersGeometry
-func androidSetBuffersGeometry(window, width, height, format int) int { return -1 }
+func androidSetBuffersGeometry(int, int, int, int) int { return -1 }
 
 // renvo:linkstatic libandroid.so,ANativeWindow_getWidth
-func androidNativeWindowWidth(window int) int { return 0 }
+func androidNativeWindowWidth(int) int { return 0 }
 
 // renvo:linkstatic libandroid.so,ANativeWindow_getHeight
-func androidNativeWindowHeight(window int) int { return 0 }
+func androidNativeWindowHeight(int) int { return 0 }
 
 // renvo:linkstatic libandroid.so,ANativeWindow_lock
-func androidLockWindow(window int, buffer *byte, dirty *byte) int { return -1 }
+func androidLockWindow(int, *byte, *byte) int { return -1 }
 
 // renvo:linkstatic libandroid.so,ANativeWindow_unlockAndPost
-func androidUnlockAndPost(window int) int { return -1 }
+func androidUnlockAndPost(int) int { return -1 }
 
 // renvo:linkstatic libc.so,memcpy
-func androidCopyMemory(destination int, source *byte, size int) int { return 0 }
+func androidCopyMemory(int, *byte, int) int { return 0 }
 
 // renvo:linkstatic libandroid.so,ALooper_forThread
 func androidLooperForThread() int { return 0 }
 
 // renvo:linkstatic libandroid.so,AInputQueue_attachLooper
-func androidAttachInputQueue(queue, looper, ident, callback, data int) {}
+func androidAttachInputQueue(int, int, int, int, int) {}
 
 // renvo:linkstatic libandroid.so,AInputQueue_detachLooper
-func androidDetachInputQueue(queue int) {}
+func androidDetachInputQueue(int) {}
 
 // renvo:linkstatic libandroid.so,AInputQueue_getEvent
-func androidInputQueueGetEvent(queue int, event *int) int { return -1 }
+func androidInputQueueGetEvent(int, *int) int { return -1 }
 
 // renvo:linkstatic libandroid.so,AInputQueue_preDispatchEvent
-func androidInputQueuePreDispatchEvent(queue, event int) int { return 0 }
+func androidInputQueuePreDispatchEvent(int, int) int { return 0 }
 
 // renvo:linkstatic libandroid.so,AInputQueue_finishEvent
-func androidInputQueueFinishEvent(queue, event, handled int) {}
+func androidInputQueueFinishEvent(int, int, int) {}
 
 // renvo:linkstatic libandroid.so,AInputEvent_getType
-func androidInputEventType(event int) int { return 0 }
+func androidInputEventType(int) int { return 0 }
 
 // renvo:linkstatic libandroid.so,AKeyEvent_getAction
-func androidKeyEventAction(event int) int { return 0 }
+func androidKeyEventAction(int) int { return 0 }
 
 // renvo:linkstatic libandroid.so,AKeyEvent_getKeyCode
-func androidKeyEventKeyCode(event int) int { return 0 }
+func androidKeyEventKeyCode(int) int { return 0 }
 
 // renvo:linkstatic libandroid.so,AKeyEvent_getMetaState
-func androidKeyEventMetaState(event int) int { return 0 }
+func androidKeyEventMetaState(int) int { return 0 }
 
 // renvo:linkstatic libandroid.so,AKeyEvent_getRepeatCount
-func androidKeyEventRepeatCount(event int) int { return 0 }
+func androidKeyEventRepeatCount(int) int { return 0 }
 
 // renvo:linkstatic libandroid.so,AMotionEvent_getAction
-func androidMotionEventAction(event int) int { return 0 }
+func androidMotionEventAction(int) int { return 0 }
 
 // renvo:linkstatic libandroid.so,AMotionEvent_getX
-func androidMotionEventX(event, pointer int) int { return 0 }
+func androidMotionEventX(int, int) int { return 0 }
 
 // renvo:linkstatic libandroid.so,AMotionEvent_getY
-func androidMotionEventY(event, pointer int) int { return 0 }
+func androidMotionEventY(int, int) int { return 0 }
 
 // renvo:linkstatic libandroid.so,AMotionEvent_getPointerId
-func androidMotionEventPointerID(event, pointer int) int { return -1 }
+func androidMotionEventPointerID(int, int) int { return -1 }
 
 // renvo:linkstatic libandroid.so,AMotionEvent_getPointerCount
-func androidMotionEventPointerCount(event int) int { return 0 }
+func androidMotionEventPointerCount(int) int { return 0 }
 
 func androidMotionPointerIndex(event, id int) int {
 	count := androidMotionEventPointerCount(event)
@@ -200,14 +201,19 @@ func NewWindow(options WindowOptions) *Window {
 		setLastWindowError("Android NativeActivity supports one window", 0)
 		return nil
 	}
+	if options.Renderer == RendererMetal {
+		setLastWindowError("Metal renderer is unavailable on Android", 0)
+		return nil
+	}
 	w := &Window{
 		width: options.Width, height: options.Height,
-		active: true, shown: !options.Hidden,
+		active: true, shown: !options.Hidden, renderer: RendererSoftware,
 	}
 	w.surface = NewSurface(w.width, w.height)
 	androidWindow = w
 	androidViewportWidth = options.Width
 	androidDeviceScale = 1.0
+	androidRequestedRenderer = options.Renderer
 	androidRetainCallbacks()
 	installed := androidInstallNativeActivityCallbacks()
 	if installed == 0 {
@@ -218,17 +224,32 @@ func NewWindow(options WindowOptions) *Window {
 	return w
 }
 
+func androidDestroyFrameBackend(w *Window) {
+	if w == nil {
+		return
+	}
+	if w.backend != nil {
+		w.backend.Destroy()
+	}
+	w.backend = nil
+	w.frameCanvas = nil
+	w.renderer = RendererSoftware
+}
+
 func androidAttachWindow(native int) {
 	w := androidWindow
 	if w == nil || w.closed || native == 0 {
 		return
 	}
 	changedWindow := w.native != native
+	if changedWindow {
+		androidDestroyFrameBackend(w)
+	}
 	w.native = native
 	// A zero size selects Android's base window dimensions. Requesting the
 	// logical Forms size here makes SurfaceFlinger enlarge a low-resolution
 	// buffer, which blurs text and controls.
-	if changedWindow {
+	if changedWindow && androidRequestedRenderer == RendererSoftware {
 		if androidSetBuffersGeometry(native, 0, 0,
 			androidWindowFormatRGBA8888) != 0 {
 			return
@@ -251,7 +272,23 @@ func androidAttachWindow(native int) {
 		w.surface.Resize(physicalWidth, physicalHeight)
 	}
 	w.surface.setDeviceScale(androidDeviceScale)
-	if resized {
+	if w.backend == nil && (androidRequestedRenderer == RendererAuto ||
+		androidRequestedRenderer == RendererOpenGL) {
+		backend := newGLESFrameBackend(w, native)
+		if backend != nil {
+			w.setFrameBackend(RendererOpenGL, backend)
+		} else {
+			// Auto falls back to the native software framebuffer.
+			androidSetBuffersGeometry(native, 0, 0, androidWindowFormatRGBA8888)
+			if androidRequestedRenderer == RendererOpenGL {
+				setLastWindowError("OpenGL ES renderer initialization failed", 0)
+			}
+		}
+	}
+	if w.backend != nil && resized {
+		w.backend.Resize(physicalWidth, physicalHeight)
+	}
+	if changedWindow || resized {
 		resizeEvent := Event{Type: EventWindowResize,
 			Dirty: R(0, 0, Scalar(w.width), Scalar(w.height))}
 		androidSendEvent(w, &resizeEvent)
@@ -259,7 +296,9 @@ func androidAttachWindow(native int) {
 			Dirty: R(0, 0, Scalar(w.width), Scalar(w.height))}
 		androidSendEvent(w, &exposeEvent)
 	}
-	w.Present()
+	if w.backend == nil {
+		w.Present()
+	}
 }
 
 // Renvo's AArch64 internal call convention assigns source parameters to
@@ -282,12 +321,15 @@ func androidOnNativeWindowRedrawNeeded(native, activity int) {
 		androidAttachWindow(native)
 		return
 	}
-	w.Present()
+	exposeEvent := Event{Type: EventWindowExpose,
+		Dirty: R(0, 0, Scalar(w.width), Scalar(w.height))}
+	androidSendEvent(w, &exposeEvent)
 }
 
 func androidOnNativeWindowDestroyed(native, activity int) {
 	w := androidWindow
 	if w != nil && w.native == native {
+		androidDestroyFrameBackend(w)
 		w.native = 0
 	}
 	androidActivePointer = androidNoPointer
@@ -720,6 +762,13 @@ func (w *Window) ReadPixels() *Image {
 	if w == nil || w.closed || w.surface == nil {
 		return nil
 	}
+	if w.backend != nil {
+		capture := NewSurface(w.surface.Width, w.surface.Height)
+		if !w.backend.ReadPixels(capture) {
+			return nil
+		}
+		return NewImage(capture.Width, capture.Height, capture.Pixels)
+	}
 	return NewImage(w.surface.Width, w.surface.Height, w.surface.Pixels)
 }
 
@@ -754,7 +803,12 @@ func (w *Window) SetSize(width, height int) bool {
 
 func (w *Window) RequestRepaint(rect Rect) {
 	if w != nil && !w.closed {
-		w.Present()
+		if w.backend == nil {
+			w.Present()
+			return
+		}
+		event := Event{Type: EventWindowExpose, Dirty: rect}
+		androidSendEvent(w, &event)
 	}
 }
 func (w *Window) SetCursor(cursor Cursor) bool {
@@ -783,6 +837,7 @@ func (w *Window) Close() {
 	}
 	w.closed = true
 	w.active = false
+	androidDestroyFrameBackend(w)
 	w.native = 0
 	w.EventHandler = nil
 	androidActivePointer = androidNoPointer

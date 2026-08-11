@@ -721,7 +721,7 @@ func shortcutMatches(shortcut Shortcut, event graphics.Event) bool {
 	return actual == shortcut.Modifiers
 }
 
-func (bar *MenuBar) paint(surface *graphics.Surface) {
+func (bar *MenuBar) paint(surface graphics.Canvas) {
 	if bar == nil {
 		return
 	}
@@ -784,7 +784,7 @@ func (bar *MenuBar) paint(surface *graphics.Surface) {
 	}
 }
 
-func (bar *MenuBar) drawText(surface *graphics.Surface, x, baseline graphics.Scalar, text string, color graphics.Color) {
+func (bar *MenuBar) drawText(surface graphics.Canvas, x, baseline graphics.Scalar, text string, color graphics.Color) {
 	if bar.font != nil {
 		surface.DrawText(bar.font, graphics.Point{X: x, Y: baseline}, text, color)
 	}

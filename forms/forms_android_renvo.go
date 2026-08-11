@@ -100,7 +100,7 @@ func (f *Form) SetBackground(color graphics.Color) {
 	}
 }
 
-func (f *Form) Paint(surface *graphics.Surface) bool {
+func (f *Form) Paint(surface graphics.Canvas) bool {
 	if f == nil || surface == nil || !f.invalid {
 		return false
 	}

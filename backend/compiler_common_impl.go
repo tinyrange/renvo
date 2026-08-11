@@ -5220,7 +5220,12 @@ func renvoTypeUsesNativeABI(m *renvoMeta, typ int) bool {
 	if t.nativeAlign > 0 {
 		return true
 	}
-	return t.kind == renvoTypePointer && t.elem >= 0 && t.elem < len(m.types) && m.types[t.elem].nativeAlign > 0
+	if t.kind == renvoTypePointer && t.elem > 0 && t.elem < len(m.types) {
+		elem := renvoResolveType(m, t.elem)
+		renvoNonNil(elem)
+		return elem.nativeAlign > 0
+	}
+	return false
 }
 
 func renvoTypeUsesHiddenResult(m *renvoMeta, typ int) bool {

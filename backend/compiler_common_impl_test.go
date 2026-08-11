@@ -275,6 +275,20 @@ func consumeLayouts(pairValue *pair, mixedValue *mixed, outerValue *outer, array
 	}
 }
 
+func TestNativeABIRecognizesPointerToNamedStruct(t *testing.T) {
+	meta := renvoMeta{
+		types: []renvoTypeInfo{
+			{},
+			{kind: renvoTypeNamed, elem: 2},
+			{kind: renvoTypeStruct, nativeAlign: 1},
+			{kind: renvoTypePointer, elem: 1},
+		},
+	}
+	if !renvoTypeUsesNativeABI(&meta, 3) {
+		t.Fatal("pointer to named native-layout struct did not use the native ABI")
+	}
+}
+
 func TestStructLayoutHonorsTargetMaximumAlignment(t *testing.T) {
 	oldFixedTarget := renvoFixedTarget
 	oldCurrentTarget := renvoTarget

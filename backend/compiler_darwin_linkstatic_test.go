@@ -47,6 +47,28 @@ func appMain() int {
 	}
 }
 
+func TestDarwinArm64LinkStaticIntegerStackArguments(t *testing.T) {
+	src := []byte(`package main
+
+// renvo:linkstatic /usr/lib/librenvo_missing.dylib,renvo_nine_arguments
+func nativeNine(a, b, c, d, e, f, g, h, i int) {}
+
+func appMain() int {
+	nativeNine(1, 2, 3, 4, 5, 6, 7, 8, 9)
+	return 0
+}
+`)
+	data, ok := RenvoCompileSourceToBytes(src, "darwin/arm64")
+	if !ok {
+		t.Fatal("nine-argument Darwin linkstatic compile failed")
+	}
+	for _, want := range []string{"/usr/lib/librenvo_missing.dylib", "_renvo_nine_arguments"} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("Darwin image missing %q", want)
+		}
+	}
+}
+
 func TestDarwinArm64SelfHostedLinkStaticNamesSurvivePackageUnits(t *testing.T) {
 	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
 		t.Skipf("Darwin self-host linkstatic test requires darwin/arm64, got %s/%s", runtime.GOOS, runtime.GOARCH)

@@ -197,6 +197,49 @@ func TestCompilerJITAndroidARM64FormsImage(t *testing.T) {
 		"ANativeWindow_setBuffersGeometry",
 		"ANativeWindow_lock",
 		"ANativeWindow_unlockAndPost",
+		"eglChooseConfig",
+		"eglCreateContext",
+		"eglCreateWindowSurface",
+		"eglDestroyContext",
+		"eglDestroySurface",
+		"eglGetConfigAttrib",
+		"eglGetDisplay",
+		"eglInitialize",
+		"eglMakeCurrent",
+		"eglSwapBuffers",
+		"eglTerminate",
+		"glAttachShader",
+		"glBindAttribLocation",
+		"glBindBuffer",
+		"glBindTexture",
+		"glBlendFunc",
+		"glBufferData",
+		"glCompileShader",
+		"glCreateProgram",
+		"glCreateShader",
+		"glDeleteBuffers",
+		"glDeleteProgram",
+		"glDeleteShader",
+		"glDeleteTextures",
+		"glDisable",
+		"glDrawArrays",
+		"glEnable",
+		"glEnableVertexAttribArray",
+		"glGenBuffers",
+		"glGenTextures",
+		"glGetUniformLocation",
+		"glLinkProgram",
+		"glPixelStorei",
+		"glScissor",
+		"glShaderSource",
+		"glTexImage2D",
+		"glTexParameteri",
+		"glUniform2iv",
+		"glUniform4iv",
+		"glUniform1i",
+		"glUseProgram",
+		"glVertexAttribPointer",
+		"glViewport",
 		"memcpy",
 	}
 	for _, name := range expectedImports {
@@ -271,9 +314,17 @@ func TestCompilerJITAndroidARM64ControlsImage(t *testing.T) {
 	if bytes.Contains(image, []byte("Native iOS")) {
 		t.Fatal("shared controls gallery retained its iOS platform subtitle")
 	}
-	for _, name := range []string{"ANativeWindow_lock", "AMotionEvent_getX"} {
+	for _, name := range []string{
+		"ANativeWindow_lock", "AMotionEvent_getX", "eglCreateContext",
+		"eglSwapBuffers", "glCreateShader", "glDrawArrays",
+	} {
 		if !bytes.Contains(image, append([]byte(name), 0)) {
 			t.Errorf("Android controls image omits dynamic import %q", name)
+		}
+	}
+	for _, library := range []string{"libEGL.so", "libGLESv2.so"} {
+		if !bytes.Contains(image, append([]byte(library), 0)) {
+			t.Errorf("Android controls image omits shared library %q", library)
 		}
 	}
 }
@@ -389,6 +440,7 @@ func TestCompilerJITIOSARM64FormsImage(t *testing.T) {
 	}
 	for _, pseudo := range []string{
 		"renvoIOSObjcMsgRect",
+		"renvoIOSObjcMsgSize",
 		"renvoIOSObjcMsgFloat",
 		"renvoIOSDelegateDidFinishCallback",
 		"renvoIOSTouchesBeganCallback",
@@ -448,10 +500,19 @@ func TestCompilerJITIOSARM64ControlsImage(t *testing.T) {
 	}
 	for _, name := range []string{
 		"_UIApplicationMain", "_CGImageCreate",
+		"_MTLCreateSystemDefaultDevice",
 		"_mach_absolute_time", "_mach_timebase_info",
 	} {
 		if !bytes.Contains(image, append([]byte(name), 0)) {
 			t.Errorf("iOS controls image omits dynamic import %q", name)
+		}
+	}
+	if !bytes.Contains(image, []byte("CAMetalLayer")) {
+		t.Fatal("iOS controls image omits the Metal presentation layer")
+	}
+	for _, pseudo := range []string{"renvoIOSObjcMsgRect", "renvoIOSObjcMsgSize"} {
+		if bytes.Contains(image, []byte(pseudo)) {
+			t.Errorf("iOS controls image leaks compiler-only pseudo import %q", pseudo)
 		}
 	}
 }

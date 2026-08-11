@@ -82,6 +82,8 @@ go backend {
 		name := out.StaticImportName(importID)
 		rectCall := library == iosSelfLibrary &&
 			name == "renvoIOSObjcMsgRect"
+		sizeCall := library == iosSelfLibrary &&
+			name == "renvoIOSObjcMsgSize"
 		registerWords := wordCount
 		if registerWords > 8 {
 			registerWords = 8
@@ -93,13 +95,20 @@ go backend {
 				aarch64.asmPopReg(out, 16)
 				out.Uint32(0x9e620000|(16<<5)|i)
 			}
+		} else if sizeCall {
+			aarch64.asmPopReg(out, 0)
+			aarch64.asmPopReg(out, 1)
+			for i := 0; i < 2; i++ {
+				aarch64.asmPopReg(out, 16)
+				out.Uint32(0x9e620000|(16<<5)|i)
+			}
 		} else {
 			for i := 0; i < registerWords; i++ {
 				aarch64.asmPopReg(out, i)
 			}
 		}
 		stackWords := wordCount - registerWords
-		if rectCall {
+		if rectCall || sizeCall {
 			stackWords = 0
 		}
 		aarch64.asmEmit(out, 0x910003e9)

@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "1128a2c3116af4e35fe5724d6340c3dcad023bd9a7f25f98f862e44d9eecc204"
+const CompilerSourceDigest = "0a2dbcd3629cb70aed5f590d22ca0635a47377c72e302a3be9f950bc0101642f"
 
 // source: backend/compiler_common_impl.go
 
@@ -5227,7 +5227,12 @@ renvoNonNil(t)
 if t.nativeAlign > 0 {
 return true
 }
-return t.kind == renvoTypePointer && t.elem >= 0 && t.elem < len(m.types) && m.types[t.elem].nativeAlign > 0
+if t.kind == renvoTypePointer && t.elem > 0 && t.elem < len(m.types) {
+elem := renvoResolveType(m, t.elem)
+renvoNonNil(elem)
+return elem.nativeAlign > 0
+}
+return false
 }
 
 func renvoTypeUsesHiddenResult(m *renvoMeta, typ int) bool {
@@ -38262,6 +38267,45 @@ a.darwinImports = append(a.darwinImports, renvoDarwinStaticImport{dylib: dylib, 
 return len(a.darwinImports) - 1
 }
 
+
+
+
+
+
+func renvoDarwinArm64EmitIntegerStackCall(a *renvoAsm, importIndex int, paramCount int) {
+registerWords := paramCount
+if registerWords > 8 {
+registerWords = 8
+}
+for i := 0; i < registerWords; i++ {
+renvoAarch64AsmPopReg(a, i)
+}
+stackWords := paramCount - registerWords
+if stackWords == 0 {
+for i := registerWords; i < 8; i++ {
+renvoAarch64AsmMovRegImm(a, i, 0)
+}
+renvoAsmCallLabel(a, a.darwinImports[importIndex].label)
+return
+}
+
+renvoAarch64AsmEmit(a, 0x910003e9)
+savedSPOff := stackWords * 8
+allocation := renvoAlignValue(savedSPOff+8, 16)
+renvoAarch64AsmAddRegImm(a, 31, 31, -allocation)
+for i := 0; i < stackWords; i++ {
+renvoAarch64AsmLoadRegMem(a, 10, 9, i*16, 8)
+renvoAarch64AsmStoreRegMem(a, 10, 31, i*8, 8)
+}
+renvoAarch64AsmStoreRegMem(a, 9, 31, savedSPOff, 8)
+renvoAsmCallLabel(a, a.darwinImports[importIndex].label)
+renvoAarch64AsmMovRegReg(a, 10, 0)
+renvoAarch64AsmLoadRegMem(a, 9, 31, savedSPOff, 8)
+renvoAarch64AsmEmit(a, 0x9100013f)
+renvoAarch64AsmAddRegImm(a, 31, 31, stackWords*16)
+renvoAarch64AsmMovRegReg(a, 0, 10)
+}
+
 func renvoDarwinArm64EmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
 if g.c.renvoTargetArch != renvoArchAarch64 {
 return false
@@ -38270,6 +38314,17 @@ dylib := renvoStringFromBytes(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd)
 name := renvoStringFromBytes(g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
 importIndex := renvoAsmAddDarwinStaticImport(&g.asm, dylib, name)
 a := &g.asm
+allIntegerWords := wordCount == fn.paramCount
+for i := 0; i < fn.paramCount && allIntegerWords; i++ {
+typ := renvoResolveType(g.meta, g.meta.params[fn.firstParam+i].typ)
+if typ.kind == renvoTypeFloat64 || typ.kind == renvoTypeString || typ.kind == renvoTypeSlice || typ.kind == renvoTypeStruct || typ.kind == renvoTypeArray {
+allIntegerWords = false
+}
+}
+if allIntegerWords && fn.paramCount > 8 {
+renvoDarwinArm64EmitIntegerStackCall(a, importIndex, fn.paramCount)
+return true
+}
 intReg := 0
 floatReg := 0
 consumed := 0

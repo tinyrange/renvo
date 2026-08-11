@@ -458,7 +458,7 @@ func TestDesignerCreatesTypedPaintHandlerInUserCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(user)
-	if !strings.Contains(text, `import "renvo.dev/std/graphics"`) || !strings.Contains(text, "func (f *MainForm) mainFormPaint(surface *graphics.Surface)") {
+	if !strings.Contains(text, `import "renvo.dev/std/graphics"`) || !strings.Contains(text, "func (f *MainForm) mainFormPaint(surface graphics.Canvas)") {
 		t.Fatalf("paint handler source =\n%s", text)
 	}
 }

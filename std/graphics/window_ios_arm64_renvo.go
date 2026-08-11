@@ -196,9 +196,13 @@ func NewWindow(options WindowOptions) *Window {
 		setLastWindowError("iOS supports one application window", 0)
 		return nil
 	}
+	if options.Renderer == RendererOpenGL {
+		setLastWindowError("OpenGL renderer is unavailable on iOS", 0)
+		return nil
+	}
 	w := &Window{
 		width: options.Width, height: options.Height,
-		active: true, shown: !options.Hidden,
+		active: true, shown: !options.Hidden, renderer: options.Renderer,
 	}
 	w.surface = NewSurface(w.width, w.height)
 	iosWindow = w
@@ -234,6 +238,9 @@ func iosConfigureBackingSurface(w *Window) bool {
 		w.surface.Resize(backingWidth, backingHeight)
 	}
 	w.surface.setDeviceScale(scale)
+	if resized && w.backend != nil {
+		w.backend.Resize(backingWidth, backingHeight)
+	}
 	return resized
 }
 
@@ -261,6 +268,8 @@ func iosDidFinishLaunching(options, application, selector, self int) int {
 	screen := iosObjcMsg0(iosClass("UIScreen"), iosSelector("mainScreen"))
 	width := iosObjcMsgRectWidth(screen, iosSelector("bounds"))
 	height := iosObjcMsgRectHeight(screen, iosSelector("bounds"))
+	physicalWidth := iosObjcMsgRectWidth(screen, iosSelector("nativeBounds"))
+	physicalHeight := iosObjcMsgRectHeight(screen, iosSelector("nativeBounds"))
 	backingScale := iosObjcMsgFloat(screen, iosSelector("scale"))
 	if width <= 0 {
 		width = w.width
@@ -271,8 +280,15 @@ func iosDidFinishLaunching(options, application, selector, self int) int {
 	if backingScale <= 0 {
 		backingScale = 1
 	}
-	iosPhysicalWidth = width * backingScale
-	iosPhysicalHeight = height * backingScale
+	iosViewportWidth = width
+	iosViewportHeight = height
+	if physicalWidth > 0 && physicalHeight > 0 {
+		iosPhysicalWidth = physicalWidth
+		iosPhysicalHeight = physicalHeight
+	} else {
+		iosPhysicalWidth = width * backingScale
+		iosPhysicalHeight = height * backingScale
+	}
 	resized := iosConfigureBackingSurface(w)
 
 	native := iosObjcMsg0(iosClass("UIWindow"), iosSelector("alloc"))
@@ -291,6 +307,18 @@ func iosDidFinishLaunching(options, application, selector, self int) int {
 	w.native = native
 	w.view = view
 	w.context = controller
+	requestedRenderer := w.renderer
+	w.renderer = RendererSoftware
+	if requestedRenderer == RendererAuto || requestedRenderer == RendererMetal {
+		backend := newMetalFrameBackend(w)
+		if backend != nil {
+			w.setFrameBackend(RendererMetal, backend)
+		} else if requestedRenderer == RendererMetal {
+			setLastWindowError("Metal renderer initialization failed", 0)
+			w.Close()
+			return 0
+		}
+	}
 	if w.shown {
 		iosObjcMsg0(native, iosSelector("makeKeyAndVisible"))
 		w.focused = true
@@ -425,6 +453,13 @@ func (w *Window) ReadPixels() *Image {
 	if w == nil || w.closed || w.surface == nil {
 		return nil
 	}
+	if w.backend != nil {
+		image := NewSurface(w.surface.Width, w.surface.Height)
+		if !w.backend.ReadPixels(image) {
+			return nil
+		}
+		return NewImage(image.Width, image.Height, image.Pixels)
+	}
 	return NewImage(w.surface.Width, w.surface.Height, w.surface.Pixels)
 }
 
@@ -532,6 +567,11 @@ func (w *Window) Close() {
 	w.closed = true
 	w.active = false
 	w.shown = false
+	if w.backend != nil {
+		w.backend.Destroy()
+		w.backend = nil
+		w.frameCanvas = nil
+	}
 	if w.native != 0 {
 		iosObjcMsg1(w.native, iosSelector("setHidden:"), 1)
 	}
