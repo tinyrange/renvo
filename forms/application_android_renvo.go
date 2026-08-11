@@ -16,15 +16,33 @@ func NewApp(window *graphics.Window, form *Form) *App {
 	return &App{Window: window, Form: form}
 }
 
+func paintAndroidApp(a *App) bool {
+	if a == nil || a.Window == nil || a.Form == nil {
+		return false
+	}
+	// EGL swaps do not preserve partial Forms damage without a persistent target.
+	if a.Window.Renderer() == graphics.RendererOpenGL {
+		width, height := a.Form.Size()
+		a.Form.Invalidate(graphics.R(0, 0, graphics.Scalar(width), graphics.Scalar(height)))
+	}
+	frame := a.Window.BeginFrame()
+	if frame == nil {
+		return false
+	}
+	if !a.Form.Paint(frame.Canvas()) {
+		frame.Cancel()
+		return true
+	}
+	return frame.Present()
+}
+
 func (a *App) Run() int {
 	if a == nil || a.Window == nil || a.Form == nil {
 		return 1
 	}
 	androidApp = a
 	a.Window.EventHandler = androidDispatchAppEvents
-	if a.Form.Paint(a.Window.Surface()) {
-		a.Window.Present()
-	}
+	paintAndroidApp(a)
 	return 0
 }
 
@@ -40,7 +58,5 @@ func androidDispatchAppEvents() {
 		}
 		a.Form.Dispatch(event)
 	}
-	if a.Form.Paint(a.Window.Surface()) {
-		a.Window.Present()
-	}
+	paintAndroidApp(a)
 }

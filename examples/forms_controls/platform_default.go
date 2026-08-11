@@ -1,4 +1,4 @@
-//go:build !ios && (!renvo || !darwin || !arm64)
+//go:build !ios && (!renvo || !arm64 || (!darwin && !android))
 
 package main
 
