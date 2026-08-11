@@ -313,8 +313,14 @@ go backend {
 			return 10, left, right
 		case 6:
 			return 3, left, right
-		default:
+		case 7:
 			return 11, left, right
+		case 8:
+			return 11, right, left
+		case 9:
+			return 3, right, left
+		default:
+			return 0, left, right
 		}
 	}
 
@@ -602,6 +608,8 @@ arch xtensa_lx7 {
 		sge = 5
 		ult = 6
 		uge = 7
+		ule = 8
+		ugt = 9
 	}
 	bind {
 		move = go move

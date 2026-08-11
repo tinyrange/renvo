@@ -37,6 +37,8 @@ func TestESP32S3ExternalDefinition(t *testing.T) {
 		"UsbSerialEndpoint = 0x60038000",
 		"UsbSerialInterruptRaw = ",
 		"UsbSerialProbeIterations = 65536",
+		"if setcc == 150 { return rtgEsp32s3ULE }",
+		"if setcc == 151 { return rtgEsp32s3UGT }",
 	} {
 		if !strings.Contains(source, contract) {
 			t.Errorf("prepared backend omitted %q", contract)

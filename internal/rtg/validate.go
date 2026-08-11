@@ -841,6 +841,306 @@ func validateTargetComposition(document Document, target ResolvedTarget) []Diagn
 	return diagnostics
 }
 
+// validatePreparedTarget checks the facts consumed by the shared prepared
+// lowering kernel. Architecture-only projections may intentionally be partial,
+// but a prepared target must not turn a missing semantic fact into a zero-value
+// register, condition, or relocation policy.
+func validatePreparedTarget(document Document, target ResolvedTarget) []Diagnostic {
+	var diagnostics []Diagnostic
+	diagnostics = append(diagnostics, validatePreparedArchitecture(document, target)...)
+	diagnostics = append(diagnostics, validatePreparedABI(document, target)...)
+	diagnostics = append(diagnostics, validatePreparedRuntime(document, target)...)
+	return diagnostics
+}
+
+func validatePreparedArchitecture(document Document, target ResolvedTarget) []Diagnostic {
+	arch := target.Arch
+	var diagnostics []Diagnostic
+
+	locations, hasLocations := declarationBlock(arch, "locations")
+	seenLocations := []string{}
+	if hasLocations {
+		for i := 0; i < len(locations.Children); i++ {
+			child := locations.Children[i]
+			left, right, assignment := statementAssignment(child)
+			if !assignment || len(left) != 1 || len(right) == 0 {
+				diagnostics = append(diagnostics, statementDiagnostic(document, child,
+					"RTG-VALIDATE-100", "architecture location must assign one or more registers"))
+				continue
+			}
+			if stringIndex(seenLocations, left[0]) >= 0 {
+				diagnostics = append(diagnostics, statementDiagnostic(document, child,
+					"RTG-VALIDATE-101", "duplicate architecture location "+left[0]))
+			}
+			seenLocations = append(seenLocations, left[0])
+			registers := statementListValues(child)
+			if len(registers) == 0 {
+				diagnostics = append(diagnostics, statementDiagnostic(document, child,
+					"RTG-VALIDATE-100", "architecture location must assign one or more registers"))
+			}
+			for j := 0; j < len(registers); j++ {
+				if !architectureRegisterReferenceValid(document, arch, registers[j]) {
+					diagnostics = append(diagnostics, statementDiagnostic(document, child,
+						"RTG-VALIDATE-102", "architecture location "+left[0]+
+							" references unknown register "+registers[j]))
+				}
+			}
+		}
+	}
+	if target.Descriptor.Family == BackendFamilyNativeV1 {
+		required := []string{
+			"primary", "secondary", "tertiary", "scratch", "copy_destination",
+			"copy_source", "copy_count", "stack", "frame",
+		}
+		for i := 0; i < len(required); i++ {
+			if stringIndex(seenLocations, required[i]) < 0 {
+				diagnostics = append(diagnostics, resolveDiagnostic(document, arch,
+					"RTG-VALIDATE-103", "prepared architecture "+arch.Name+
+						" is missing required location "+required[i]))
+			}
+		}
+		if declarativeArchitectureRelocations(arch) == "" {
+			if _, found := architectureGoHook(arch, "patch_relocations"); !found {
+				diagnostics = append(diagnostics, resolveDiagnostic(document, arch,
+					"RTG-VALIDATE-104", "prepared architecture "+arch.Name+
+						" has no relocation patcher"))
+			}
+		}
+	}
+	for _, field := range []string{"instruction_alignment", "stack_alignment"} {
+		if value, found := fieldValue(document, arch, field); found {
+			alignment, ok := parseInteger(valueName(value))
+			if !ok || alignment <= 0 || alignment&(alignment-1) != 0 {
+				diagnostics = append(diagnostics, resolveDiagnostic(document, arch,
+					"RTG-VALIDATE-121", "architecture "+arch.Name+" has invalid "+field))
+			}
+		}
+	}
+
+	conditions, hasConditions := declarationBlock(arch, "conditions")
+	seenConditions := []string{}
+	if hasConditions {
+		for i := 0; i < len(conditions.Children); i++ {
+			child := conditions.Children[i]
+			name, code, jump, ok := preparedConditionRow(child)
+			if !ok {
+				diagnostics = append(diagnostics, statementDiagnostic(document, child,
+					"RTG-VALIDATE-105", "architecture condition must have one or two integer encodings"))
+				continue
+			}
+			if stringIndex(seenConditions, name) >= 0 {
+				diagnostics = append(diagnostics, statementDiagnostic(document, child,
+					"RTG-VALIDATE-106", "duplicate architecture condition "+name))
+			}
+			seenConditions = append(seenConditions, name)
+			if code < 0 || jump < -1 || jump > 255 {
+				diagnostics = append(diagnostics, statementDiagnostic(document, child,
+					"RTG-VALIDATE-107", "architecture condition "+name+" has an invalid encoding"))
+			}
+		}
+	}
+	requiredConditions := []string{"eq", "ne", "slt", "sge", "sle", "sgt", "ult", "uge", "ule", "ugt"}
+	for i := 0; i < len(requiredConditions); i++ {
+		if stringIndex(seenConditions, requiredConditions[i]) < 0 {
+			diagnostics = append(diagnostics, resolveDiagnostic(document, arch,
+				"RTG-VALIDATE-108", "prepared architecture "+arch.Name+
+					" is missing condition "+requiredConditions[i]))
+		}
+	}
+
+	ensureDirectEmitterV1()
+	rejected := architectureRejectedOperations(arch)
+	for i := 0; i < len(rejected); i++ {
+		operation := directEmitterOperationIndex(rejected[i])
+		if operation >= 0 && !directEmitterV1[operation].Rejectable {
+			diagnostics = append(diagnostics, resolveDiagnostic(document, arch,
+				"RTG-VALIDATE-109", "prepared architecture "+arch.Name+
+					" rejects required direct emitter operation "+rejected[i]))
+		}
+	}
+	return diagnostics
+}
+
+func preparedConditionRow(statement Statement) (string, int, int, bool) {
+	left, right, assignment := statementAssignment(statement)
+	if assignment {
+		if len(left) != 1 || len(right) != 1 {
+			return "", 0, 0, false
+		}
+		code, ok := parseInteger(right[0])
+		return left[0], code, -1, ok
+	}
+	if len(statement.Tokens) != 2 && len(statement.Tokens) != 3 {
+		return "", 0, 0, false
+	}
+	code, ok := parseInteger(statement.Tokens[1])
+	if !ok {
+		return "", 0, 0, false
+	}
+	jump := -1
+	if len(statement.Tokens) == 3 {
+		jump, ok = parseInteger(statement.Tokens[2])
+	}
+	return statement.Tokens[0], code, jump, ok
+}
+
+func architectureRegisterReferenceValid(document Document, arch Declaration, name string) bool {
+	if valueName(name) == "xzr" {
+		return true
+	}
+	local := architectureLocalPrefix(arch.Name) + upperIdentifier(valueName(name))
+	_, ok := generatedArchitectureCode(document, local)
+	return ok
+}
+
+func validatePreparedABI(document Document, target ResolvedTarget) []Diagnostic {
+	var diagnostics []Diagnostic
+	words := targetABICallWords(document, target.ABI)
+	for i := 0; i < len(words); i++ {
+		if !architectureRegisterReferenceValid(document, target.Arch, words[i]) {
+			diagnostics = append(diagnostics, resolveDiagnostic(document, target.ABI,
+				"RTG-VALIDATE-110", "ABI "+target.ABI.Name+
+					" references unknown call-word register "+words[i]))
+		}
+	}
+	if target.Descriptor.Family == BackendFamilyNativeV1 && len(words) != 6 {
+		_, storesWords := targetABIGoHook(document, target.ABI, "store_param_word")
+		_, callsWords := targetABIGoHook(document, target.ABI, "call_word_count")
+		if !storesWords || !callsWords {
+			diagnostics = append(diagnostics, resolveDiagnostic(document, target.ABI,
+				"RTG-VALIDATE-111", "ABI "+target.ABI.Name+
+					" must provide six call words or both variable-word ABI hooks"))
+		}
+	}
+	if value, found := fieldValue(document, target.Arch, "stack_word_bytes"); found {
+		wordBytes, ok := parseInteger(valueName(value))
+		if !ok || wordBytes <= 0 {
+			diagnostics = append(diagnostics, resolveDiagnostic(document, target.Arch,
+				"RTG-VALIDATE-112", "architecture "+target.Arch.Name+
+					" has invalid stack_word_bytes"))
+		}
+	}
+	return diagnostics
+}
+
+func validatePreparedRuntime(document Document, target ResolvedTarget) []Diagnostic {
+	var diagnostics []Diagnostic
+	runtime := target.Runtime
+	registerFields := []string{"number", "arguments", "result"}
+	if syscall, found := declarationBlock(runtime, "syscall"); found {
+		for i := 0; i < len(registerFields); i++ {
+			registers := targetRuntimeRegisterList(runtime, registerFields[i])
+			for j := 0; j < len(registers); j++ {
+				if !architectureRegisterReferenceValid(document, target.Arch, registers[j]) {
+					diagnostics = append(diagnostics, resolveDiagnostic(document, runtime,
+						"RTG-VALIDATE-113", "runtime "+runtime.Name+" syscall "+registerFields[i]+
+							" references unknown register "+registers[j]))
+				}
+			}
+		}
+		_ = syscall
+	}
+
+	needsResult := false
+	returning := []string{"read", "write", "read_at", "write_at", "open", "close", "chmod"}
+	for i := 0; i < len(returning); i++ {
+		if _, found := runtimeOperationInteger(runtime, returning[i], "number"); found {
+			needsResult = true
+		}
+	}
+	if needsResult && len(targetRuntimeRegisterList(runtime, "result")) == 0 {
+		diagnostics = append(diagnostics, resolveDiagnostic(document, runtime,
+			"RTG-VALIDATE-114", "runtime "+runtime.Name+
+				" has returning syscalls but no result register"))
+	}
+	if stringIndex(target.Descriptor.Capabilities, "kernel_module") >= 0 {
+		for _, hook := range []string{"entry_prologue", "entry_epilogue", "emit_callback_address"} {
+			if _, found := architectureGoHook(runtime, hook); !found {
+				diagnostics = append(diagnostics, resolveDiagnostic(document, runtime,
+					"RTG-VALIDATE-122", "kernel-module runtime "+runtime.Name+
+						" is missing "+hook))
+			}
+		}
+	}
+	diagnostics = append(diagnostics, validatePreparedRuntimeTemplates(document, runtime)...)
+	return diagnostics
+}
+
+func validatePreparedRuntimeTemplates(document Document, runtime Declaration) []Diagnostic {
+	var diagnostics []Diagnostic
+	for i := 0; i < len(runtime.Statements); i++ {
+		statement := runtime.Statements[i]
+		entry := len(statement.Tokens) >= 2 && statement.Tokens[0] == "entry" &&
+			(statement.Tokens[1] == "template" || statement.Tokens[1] == "sequence")
+		ioTemplate := len(statement.Tokens) == 1 && statement.Tokens[0] == "io_template"
+		if !entry && !ioTemplate {
+			continue
+		}
+		for j := 0; j < len(statement.Children); j++ {
+			child := statement.Children[j]
+			left, right, assignment := statementAssignment(child)
+			if entry && assignment && len(left) == 1 && len(right) == 1 {
+				if left[0] == "max_parameters" {
+					value, ok := parseInteger(right[0])
+					if !ok || value <= 0 {
+						diagnostics = append(diagnostics, statementDiagnostic(document, child,
+							"RTG-VALIDATE-115", "entry max_parameters must be positive"))
+					}
+					continue
+				}
+				if left[0] == "code" {
+					continue
+				}
+				if left[0] == "requires_state" {
+					if right[0] != "true" && right[0] != "false" {
+						diagnostics = append(diagnostics, statementDiagnostic(document, child,
+							"RTG-VALIDATE-116", "entry requires_state must be true or false"))
+					}
+					continue
+				}
+			}
+			if ioTemplate && assignment && len(left) == 1 && len(right) == 1 &&
+				(left[0] == "read_code" || left[0] == "write_code") {
+				continue
+			}
+			if len(child.Tokens) == 4 && child.Tokens[0] == "bss" {
+				size, sizeOK := parseInteger(child.Tokens[2])
+				alignment, alignmentOK := parseInteger(child.Tokens[3])
+				if !sizeOK || size < 0 || !alignmentOK || alignment <= 0 {
+					diagnostics = append(diagnostics, statementDiagnostic(document, child,
+						"RTG-VALIDATE-117", "runtime template BSS requires non-negative size and positive alignment"))
+				}
+				continue
+			}
+			if entry && len(child.Tokens) == 4 && child.Tokens[0] == "relocation" {
+				offset, ok := parseInteger(child.Tokens[1])
+				if !ok || offset < 0 || child.Tokens[2] != "bss" && child.Tokens[2] != "import" {
+					diagnostics = append(diagnostics, statementDiagnostic(document, child,
+						"RTG-VALIDATE-118", "entry relocation has invalid offset or kind"))
+				}
+				continue
+			}
+			if ioTemplate && len(child.Tokens) >= 4 && len(child.Tokens) <= 5 &&
+				(child.Tokens[0] == "read_relocation" || child.Tokens[0] == "write_relocation") {
+				offset, ok := parseInteger(child.Tokens[1])
+				addendOK := true
+				if len(child.Tokens) == 5 {
+					_, addendOK = parseInteger(child.Tokens[4])
+				}
+				if !ok || offset < 0 || !addendOK ||
+					child.Tokens[2] != "bss" && child.Tokens[2] != "import" {
+					diagnostics = append(diagnostics, statementDiagnostic(document, child,
+						"RTG-VALIDATE-119", "I/O relocation has invalid offset, addend, or kind"))
+				}
+				continue
+			}
+			diagnostics = append(diagnostics, statementDiagnostic(document, child,
+				"RTG-VALIDATE-120", "unknown or malformed runtime template entry"))
+		}
+	}
+	return diagnostics
+}
+
 func abiArchitecture(document Document, declaration Declaration) (string, bool) {
 	seen := []string{}
 	for declaration.Name != "" {

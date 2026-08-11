@@ -122,6 +122,7 @@ type renvoAsm struct {
 	replSymbols         []renvoReplSymbol
 	wasmLocalSlots      []int32
 	c                   *renvoCompileContext
+	patchFailed         bool
 }
 
 // A backend object is an unpatched function fragment plus its local labels,
@@ -16032,7 +16033,9 @@ func renvoAsmPopCallWord0(a *renvoAsm) {
 func renvoAsmStackMem(a *renvoAsm, offset int, base int, disp8 int, disp32 int) {
 	renvoNonNil(a)
 	if renvoPreparedBackend != 0 {
-		renvoRTGUnsupportedOperation = true
+		if renvoRTGUnsupportedOperation == 0 {
+			renvoRTGUnsupportedOperation = 4001
+		}
 		return
 	}
 	if a.c.renvoTargetArch == renvoArchWasm32 {
@@ -16093,7 +16096,9 @@ func renvoAsmAddSecondaryImm(a *renvoAsm, imm int) {
 func renvoAsmMemDisp(a *renvoAsm, disp int, op int, disp8 int, disp32 int) {
 	renvoNonNil(a)
 	if renvoPreparedBackend != 0 {
-		renvoRTGUnsupportedOperation = true
+		if renvoRTGUnsupportedOperation == 0 {
+			renvoRTGUnsupportedOperation = 4002
+		}
 		return
 	}
 	if a.c.renvoTargetArch == renvoArchAarch64 {
@@ -20703,7 +20708,9 @@ func renvoEmitNativeCompareJump(g *renvoLinearGen, ep *renvoExprParse, e *renvoE
 	usesFloat := renvoBinaryUsesFloat(g, ep, e)
 	leftIndex := e.left
 	rightIndex := e.right
-	unsigned := (g.c.renvoNativeIntSize == 8 || renvoPreparedBackend != 0) && (c0 == '<' || c0 == '>') && (renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right))
+	unsigned := (c0 == '<' || c0 == '>') &&
+		(renvoExprHasUnsignedIntType(g, ep, e.left) ||
+			renvoExprHasUnsignedIntType(g, ep, e.right))
 	right := &ep.exprs[rightIndex]
 	if !usesFloat {
 		rightConst := renvoEvalConstExpr(g, ep, rightIndex)

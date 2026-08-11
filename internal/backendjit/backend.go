@@ -168,10 +168,15 @@ func (ProcessRunner) Run(artifact rtgb.Artifact, request Request) driver.Backend
 		args = append(args, "-module-license", options.ModuleLicense)
 	}
 	args = append(args, "-o", outputPath, inputPath)
-	executed := runimage.Run(image, "renvo-prepared-backend", args, os.Environ(), os.Stdin, os.Stdout, os.Stderr)
+	executed := runimage.Run(image, "renvo-prepared-backend", args, os.Environ(), os.Stdin,
+		os.Stdout, os.Stderr)
 	if executed.Err != nil || executed.ExitCode != 0 {
+		message := "prepared backend execution failed"
+		if executed.Err != nil {
+			message += ": " + executed.Err.Error()
+		}
 		return driver.BackendResult{Diagnostic: driver.Diagnostic{
-			Phase: "backend", Code: "RENVO-BACKEND-009", Message: "prepared backend execution failed",
+			Phase: "backend", Code: "RENVO-BACKEND-009", Message: message,
 		}}
 	}
 	output, err := os.ReadFile(outputPath)

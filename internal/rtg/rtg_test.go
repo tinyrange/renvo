@@ -648,7 +648,7 @@ func TestGenerateUniversalSortsManifestAndTargets(t *testing.T) {
 }
 
 func TestGeneratePreparedUsesStableUnitSymbols(t *testing.T) {
-	resolved := Resolve(Parse([]byte(testMachineDefinition), "tiny.rtg"))
+	resolved := Resolve(Parse([]byte(completeDirectEmitterDefinition()), "tiny.rtg"))
 	generated := GeneratePreparedBackend(resolved, "test/tiny64")
 	if !generated.Ok {
 		t.Fatalf("GeneratePreparedBackend failed: %#v", generated.Diagnostics)
@@ -665,15 +665,15 @@ func TestGeneratePreparedUsesStableUnitSymbols(t *testing.T) {
 }
 
 func TestGeneratePreparedSupportsSimpleEntryStart(t *testing.T) {
-	source := replaceOnce(testMachineDefinition,
-		"func addTwo(value int) int { return addOne(addOne(value)) }",
-		`func addTwo(value int) int { return addOne(addOne(value)) }
+	source := replaceOnce(completeDirectEmitterDefinition(),
+		"go backend {",
+		`go backend {
 	func entryStart(out *RTGEmitter) bool { return true }`)
 	source = replaceOnce(source,
-		"runtime tiny_runtime { operation print { builtin = true } }",
+		"runtime tiny_runtime { operations = [print] }",
 		`runtime tiny_runtime {
 	emit_entry_start_simple = go entryStart
-	operation print { builtin = true }
+	operations = [print]
 }`)
 	resolved := Resolve(Parse([]byte(source), "tiny.rtg"))
 	if !resolved.Ok {
@@ -692,6 +692,62 @@ func TestGeneratePreparedSupportsSimpleEntryStart(t *testing.T) {
 		if !containsText(text, want) {
 			t.Errorf("prepared source missing %q:\n%s", want, text)
 		}
+	}
+}
+
+func TestPreparedBackendRejectsUnsafeDefaults(t *testing.T) {
+	base := completeDirectEmitterDefinition()
+	tests := []struct {
+		name string
+		edit func(string) string
+		code string
+	}{
+		{"missing condition", func(source string) string {
+			return replaceOnce(source, "\t\tule=8\n", "")
+		}, "RTG-VALIDATE-108"},
+		{"unknown location register", func(source string) string {
+			return replaceOnce(source, "primary=r0", "primary=missing")
+		}, "RTG-VALIDATE-102"},
+		{"missing relocation patcher", func(source string) string {
+			return replaceOnce(source, "\tpatch_relocations = relative32_le\n", "")
+		}, "RTG-VALIDATE-104"},
+		{"required operation rejected", func(source string) string {
+			source = replaceOnce(source, "\tpatch_relocations = relative32_le\n",
+				"\tpatch_relocations = relative32_le\n\treject = [move]\n")
+			return replaceOnce(source, "\t\tmove = go operation0\n", "")
+		}, "RTG-VALIDATE-109"},
+		{"incomplete call words", func(source string) string {
+			return replaceOnce(source, "[r0,r1,r2,r3,r4,r5]", "[r0,r1,r2,r3,r4]")
+		}, "RTG-VALIDATE-111"},
+		{"malformed runtime relocation", func(source string) string {
+			return replaceOnce(source, "runtime tiny_runtime { operations = [print] }", `runtime tiny_runtime {
+	operations = [print]
+	entry template {
+		max_parameters = 1
+		code = "x"
+		relocation 0 mystery 0
+	}
+}`)
+		}, "RTG-VALIDATE-118"},
+		{"missing syscall result", func(source string) string {
+			return replaceOnce(source, "runtime tiny_runtime { operations = [print] }", `runtime tiny_runtime {
+	syscall { number = r0 arguments = [r1, r2, r3] }
+	operation read { number = 0 args = [fd, buffer, count] }
+}`)
+		}, "RTG-VALIDATE-114"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			resolved := Resolve(Parse([]byte(test.edit(base)), "unsafe.rtg"))
+			if !resolved.Ok {
+				t.Fatalf("fixture did not resolve: %#v", resolved.Diagnostics)
+			}
+			generated := GeneratePreparedBackend(resolved, "test/tiny64")
+			if generated.Ok || !hasDiagnosticCode(generated.Diagnostics, test.code) {
+				t.Fatalf("GeneratePreparedBackend = ok %v diagnostics %#v, want %s",
+					generated.Ok, generated.Diagnostics, test.code)
+			}
+		})
 	}
 }
 
@@ -861,8 +917,10 @@ func TestResolveRejectsABIHookContractErrors(t *testing.T) {
 			}
 			source = replaceOnce(source, "}\narch tiny64 {",
 				"\tfunc abiHook("+parameters+") {}\n}\narch tiny64 {")
-			source = replaceOnce(source, "abi tiny_abi { arch = tiny64 }",
-				"abi tiny_abi {\n\tarch = tiny64\n\t"+hook.name+" = go abiHook\n}")
+			source = replaceOnce(source,
+				"abi tiny_abi {\n\tarch = tiny64\n\tcall_words = [r0,r1,r2,r3,r4,r5]\n}",
+				"abi tiny_abi {\n\tarch = tiny64\n\tcall_words = [r0,r1,r2,r3,r4,r5]\n\t"+
+					hook.name+" = go abiHook\n}")
 			resolved := Resolve(Parse([]byte(source), "abi-"+hook.name+".rtg"))
 			if resolved.Ok || !hasDiagnosticCode(resolved.Diagnostics, "RTG-VALIDATE-026") {
 				t.Fatalf("diagnostics = %#v, want RTG-VALIDATE-026", resolved.Diagnostics)
@@ -871,8 +929,9 @@ func TestResolveRejectsABIHookContractErrors(t *testing.T) {
 	}
 
 	source := replaceOnce(completeDirectEmitterDefinition(),
-		"abi tiny_abi { arch = tiny64 }",
-		"abi tiny_abi {\n\tarch = tiny64\n\tframe_start = operation0\n}")
+		"abi tiny_abi {\n\tarch = tiny64\n\tcall_words = [r0,r1,r2,r3,r4,r5]\n}",
+		"abi tiny_abi {\n\tarch = tiny64\n\tcall_words = [r0,r1,r2,r3,r4,r5]\n"+
+			"\tframe_start = operation0\n}")
 	resolved := Resolve(Parse([]byte(source), "abi-invalid-binding.rtg"))
 	if resolved.Ok || !hasDiagnosticCode(resolved.Diagnostics, "RTG-VALIDATE-025") {
 		t.Fatalf("diagnostics = %#v, want RTG-VALIDATE-025", resolved.Diagnostics)
@@ -883,6 +942,8 @@ func completeDirectEmitterDefinition() string {
 	ensureDirectEmitterV1()
 	source := "definition 1\nunit tiny\nimplements direct_emitter_v1\n"
 	source += "go backend {\n"
+	source += "\tfunc addOne(value int) int { return value + 1 }\n"
+	source += "\tfunc addTwo(value int) int { return addOne(addOne(value)) }\n"
 	for i := 0; i < len(directEmitterV1); i++ {
 		source += "\tfunc operation" + testDecimal(i) + "("
 		for parameter := 0; parameter < len(directEmitterV1[i].Parameters); parameter++ {
@@ -893,12 +954,19 @@ func completeDirectEmitterDefinition() string {
 		}
 		source += ") {}\n"
 	}
-	source += "}\narch tiny64 {\n\tendian = little\n\tword_bits = 64\n\tbind {\n"
+	source += "}\narch tiny64 {\n\tendian = little\n\tword_bits = 64\n"
+	source += "\tstack_word_bytes = 8\n\tpatch_relocations = relative32_le\n"
+	source += "\tregisters integer = [r0,r1,r2,r3,r4,r5,r6,r7,r8]\n"
+	source += "\tlocations {\n\t\tprimary=r0\n\t\tsecondary=r1\n\t\ttertiary=r2\n\t\tscratch=r3\n"
+	source += "\t\tcopy_destination=r4\n\t\tcopy_source=r5\n\t\tcopy_count=r6\n\t\tstack=r7\n\t\tframe=r8\n\t}\n"
+	source += "\tconditions {\n\t\teq=0\n\t\tne=1\n\t\tslt=2\n\t\tsge=3\n\t\tsle=4\n"
+	source += "\t\tsgt=5\n\t\tult=6\n\t\tuge=7\n\t\tule=8\n\t\tugt=9\n\t}\n"
+	source += "\texports { renvoTinyAddTwo = go addTwo }\n\tbind {\n"
 	for i := 0; i < len(directEmitterV1); i++ {
 		source += "\t\t" + directEmitterV1[i].Name + " = go operation" + testDecimal(i) + "\n"
 	}
 	source += "\t}\n}\n"
-	source += "abi tiny_abi { arch = tiny64 }\n"
+	source += "abi tiny_abi {\n\tarch = tiny64\n\tcall_words = [r0,r1,r2,r3,r4,r5]\n}\n"
 	source += "runtime tiny_runtime { operations = [print] }\n"
 	source += "format tiny_image { kind = tiny address_bits = 64 byte_order = little }\n"
 	source += "target test/tiny64 {\n"
