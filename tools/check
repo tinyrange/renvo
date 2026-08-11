@@ -77,6 +77,18 @@ backend_test_pattern() {
 }
 
 check_backend() {
+	local filter="${1:-}"
+	if [[ -n "$filter" ]]; then
+		if ! rg --files backend/tests -g '*.go' | rg -q -- "$filter"; then
+			printf 'no backend corpus cases match %q\n' "$filter" >&2
+			return 1
+		fi
+		run_check "focused backend corpus ($filter)" \
+			env RENVO_TEST_FILTER="$filter" \
+			go test -v -count=1 -timeout 10m \
+			-run '^(TestCompileTests|TestUnitFrontendCompileTests)$' ./backend
+		return
+	fi
 	local pattern
 	pattern="$(backend_test_pattern)"
 	if [[ -z "$pattern" ]]; then
@@ -85,13 +97,13 @@ check_backend() {
 	fi
 	if [[ "$(go env GOOS)/$(go env GOARCH)" == "linux/amd64" ]]; then
 		run_check "ordinary backend suite" env RENVO_CROSS_ARCH_TESTS=1 \
-			go test -count=1 -timeout 30m -run "^(${pattern})$" ./backend
+			go test -v -count=1 -timeout 30m -run "^(${pattern})$" ./backend
 		run_check "deterministic VM backend gates" \
 			go test -count=1 -timeout 5m \
 			-run '^(TestVM32FullBackendSuite|TestVM32SelfHostedBackend)$' ./backend
 	else
 		run_check "ordinary backend suite" \
-			go test -count=1 -timeout 30m -run "^(${pattern})$" ./backend
+			go test -v -count=1 -timeout 30m -run "^(${pattern})$" ./backend
 	fi
 }
 
@@ -112,24 +124,43 @@ check_ci_performance() {
 }
 
 check_frontend() {
+	local filter="${1:-}"
+	if [[ -n "$filter" ]]; then
+		if ! rg --files frontend_tests/quick frontend_tests/extended \
+			frontend_tests/regressions frontend_tests/std_compat -g 'go.mod' | rg -q -- "$filter"; then
+			printf 'no positive frontend corpus cases match %q\n' "$filter" >&2
+			return 1
+		fi
+		run_check "focused frontend corpus ($filter)" \
+			env RENVO_TEST_FILTER="$filter" \
+			go test -v -count=1 -timeout 10m \
+			-run '^(TestFrontend(Quick|Regression|Extended|Stage3Quick|Stage3Regression|Stage3Extended)Corpus|TestFrontendStdCompatibility)$' \
+			./frontend_tests
+		return
+	fi
 	run_check "full frontend corpus and self-hosting suite" \
-		go test -count=1 -timeout 30m ./frontend_tests
+		go test -v -count=1 -timeout 30m ./frontend_tests
 }
 
 usage() {
 	cat <<'EOF'
-Usage: ./tools/check MODE
+Usage: ./tools/check MODE [CORPUS_FILTER]
 
 Modes:
   generated    Verify checked-in generated source is current.
   packages     Run the tracked Go package and bundled-build suites.
   preflight    Run the development checks (hard budget: 60 seconds).
-  backend      Run the ordinary backend suite and applicable VM gates.
+  backend      Run the ordinary backend suite and applicable VM gates. An
+               optional regular expression runs matching source and unit cases
+               on the native target only.
   performance  Run all compiler time, memory, and binary-size gates.
   ci-performance
                Run only gates that are stable on shared CI runners.
-  frontend     Run the complete frontend corpus and self-hosting suite.
-  full         Run PR-level preflight, backend, performance, and frontend checks.
+  frontend     Run the complete frontend corpus and self-hosting suite. An
+               optional regular expression runs matching positive corpus cases.
+  full         Run PR-level performance, preflight, backend, and frontend checks.
+               This can take the full 30-minute timeout and is intended for the
+               merge queue, not the normal interactive development loop.
 
 Set RENVO_CHECK_MEMORY_MAX=4G on systemd-based Linux to put each command in a
 memory-limited user unit. This prevents a runaway compiler test from taking
@@ -137,7 +168,18 @@ down the interactive session while retaining the command's exit status.
 EOF
 }
 
-case "${1:-}" in
+mode="${1:-}"
+filter="${2:-}"
+if (($# > 2)); then
+	usage >&2
+	exit 2
+fi
+if [[ -n "$filter" && "$mode" != "backend" && "$mode" != "frontend" ]]; then
+	printf 'a corpus filter is only valid with backend or frontend mode\n' >&2
+	exit 2
+fi
+
+case "$mode" in
 	generated)
 		check_generated
 		;;
@@ -148,7 +190,7 @@ case "${1:-}" in
 		check_preflight
 		;;
 	backend)
-		check_backend
+		check_backend "$filter"
 		;;
 	performance)
 		check_performance
@@ -157,12 +199,14 @@ case "${1:-}" in
 		check_ci_performance
 		;;
 	frontend)
-		check_frontend
+		check_frontend "$filter"
 		;;
 	full)
+		# Measure before the parallel package and corpus suites can heat and
+		# throttle the host; the performance limits themselves stay unchanged.
+		check_performance
 		check_preflight
 		check_backend
-		check_performance
 		check_frontend
 		;;
 	-h|--help|help)

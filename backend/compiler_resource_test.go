@@ -3,9 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -41,28 +39,11 @@ func TestCompilerResourceGates(t *testing.T) {
 			for attempt := 0; attempt < 3; attempt++ {
 				outputPath := filepath.Join(outDir, fmt.Sprintf("compiler-output-%d", attempt))
 				compileArgs := append([]string{"-s", "-o", outputPath}, files...)
-
-				rssFile := filepath.Join(outDir, fmt.Sprintf("compile-rss-%d", attempt))
-				timeArgs := append([]string{"-f", "%M", "-o", rssFile, compilerPath}, compileArgs...)
-				cmd := exec.Command("/usr/bin/time", timeArgs...)
-				cmd.Env = []string{}
-				output, err := cmd.CombinedOutput()
+				usage, err := runMeasuredProcess(t, "", []string{}, compilerPath, compileArgs...)
 				if err != nil {
-					t.Fatalf("resource-measured compilation failed: %v\nOutput: %s", err, string(output))
+					t.Fatalf("resource-measured compilation failed: %v\nOutput: %s", err, string(usage.output))
 				}
-
-				rssData, err := os.ReadFile(rssFile)
-				if err != nil {
-					t.Fatalf("failed to read compile resource usage: %v", err)
-				}
-				rssFields := strings.Fields(string(rssData))
-				if len(rssFields) == 0 {
-					t.Fatalf("failed to read compile resource usage")
-				}
-				maxRSS, err := strconv.Atoi(rssFields[len(rssFields)-1])
-				if err != nil {
-					t.Fatalf("failed to parse compile resource usage %q: %v", string(rssData), err)
-				}
+				maxRSS := usage.maxRSSKB
 				if maxRSS < bestRSS {
 					bestRSS = maxRSS
 				}

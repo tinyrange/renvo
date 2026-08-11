@@ -37,32 +37,28 @@ func TestUnitFrontendCompileTests(t *testing.T) {
 			outDir := t.TempDir()
 			stage2 := buildStage2Compiler(t, target, outDir)
 
-			for _, path := range inputFiles {
-				path := path
-				t.Run(path, func(t *testing.T) {
-					t.Parallel()
-
-					expected := runWithHostGo(t, path)
-
-					testOutDir := t.TempDir()
-					unitPath := filepath.Join(testOutDir, "test.unit")
-					program, err := unit.ConvertFiles([]string{path})
-					if err != nil {
-						t.Fatalf("unit conversion failed: %v", err)
-					}
-					if err := unit.WriteFile(unitPath, program); err != nil {
-						t.Fatalf("unit write failed: %v", err)
-					}
-
-					outputFile := cachedTargetProgram(t, target, stage2, "unit", []string{unitPath})
-
-					actual, err := runTargetCommand(t, target, outputFile)
-					if err != nil {
-						t.Fatalf("execution failed: %v", err)
-					}
-					compareCommandResult(t, expected, actual)
-				})
-			}
+			runBackendCorpusCases(t, target.name+" unit frontend", inputFiles, func(t *testing.T, path string) {
+				expected := expectedCommandResult(t, path)
+				testOutDir, err := os.MkdirTemp("", "renvo-unit-corpus-*")
+				if err != nil {
+					t.Fatalf("create unit directory for %s: %v", path, err)
+				}
+				defer os.RemoveAll(testOutDir)
+				unitPath := filepath.Join(testOutDir, "test.unit")
+				program, err := unit.ConvertFiles([]string{path})
+				if err != nil {
+					t.Fatalf("convert %s to unit: %v", path, err)
+				}
+				if err := unit.WriteFile(unitPath, program); err != nil {
+					t.Fatalf("write unit for %s: %v", path, err)
+				}
+				outputFile := cachedTargetProgram(t, target, stage2, "unit", []string{unitPath})
+				actual, err := runTargetCommand(t, target, outputFile)
+				if err != nil {
+					t.Fatalf("execute %s: %v", path, err)
+				}
+				compareCommandResult(t, expected, actual)
+			})
 		})
 	}
 }

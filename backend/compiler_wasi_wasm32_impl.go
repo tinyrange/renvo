@@ -66,7 +66,7 @@ func renvoTryCompileScalarProgramWasm32(p *renvoProgram, meta *renvoMeta) renvoC
 	g.arenaSize = meta.arenaSize
 	g.fixedTargetState = 1
 	g.fixedTargetValue = meta.c.renvoTarget
-	if meta.c.renvoTarget == renvoTargetVM32 {
+	if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && meta.c.renvoTarget == renvoTargetVM32 {
 		// VM bytecode is an execution format, not a restriction on the targets
 		// exposed by a compiler running inside the VM. Preserve dynamic target
 		// selection so a runtime -t value remains authoritative.
@@ -97,14 +97,17 @@ func renvoTryCompileScalarProgramWasm32(p *renvoProgram, meta *renvoMeta) renvoC
 	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
 		i := g.funcQueue[queueIndex]
 		if !renvoEmitScalarFunctionScratch(&g, i) {
-			renvoPrintErr("renvo: wasm32 failed in function ")
-			write(2, meta.prog.src[meta.funcs[i].nameStart:meta.funcs[i].nameEnd], -1)
-			renvoPrintErr("\n")
+			if renvoFixedTarget == 0 {
+				renvoPrintErr("renvo: wasm32 failed in function ")
+				write(2, meta.prog.src[meta.funcs[i].nameStart:meta.funcs[i].nameEnd], -1)
+				renvoPrintErr("\n")
+			}
 			return renvoCompileResult{}
 		}
 	}
+	renvo_runtime_ArenaDiscard(meta.scratchStart, meta.scratchEnd)
 	var result renvoCompileResult
-	if meta.c.renvoTarget == renvoTargetVM32 {
+	if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && meta.c.renvoTarget == renvoTargetVM32 {
 		result.data = renvoVMImage(a)
 	} else {
 		result.data = renvoWasm32Image(a)
@@ -120,7 +123,7 @@ func renvoEmitProgramEntryArgsWasm32(g *renvoLinearGen, appIndex int) bool {
 	argsOff := g.asm.bssSize
 	envDataOff := argsOff
 	envLenOff := argsOff
-	if g.fixedTargetValue == 0 {
+	if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && g.fixedTargetValue == 0 {
 		// VM execution receives arguments from the VM host.
 	} else {
 		g.asm.bssSize += 32768
@@ -179,10 +182,9 @@ func renvoTryCompileWasiWasm32(p *renvoProgram, meta *renvoMeta) renvoCompileRes
 	}
 	fn := &p.funcs[app.declIndex]
 	var body renvoBodyParse
-	body.stmtData = make([]int, 1024*renvoStmtWordCount)
 	body.prog = p
-	body.stmtCount = 0
 	body.ok = true
+	statements := make([]renvoStmt, 0, 64)
 	i := fn.bodyStart + 1
 	for body.ok && i < fn.bodyEnd {
 		if renvoTokCharIs(p, i, ';') {
@@ -192,19 +194,20 @@ func renvoTryCompileWasiWasm32(p *renvoProgram, meta *renvoMeta) renvoCompileRes
 		if renvoTokCharIs(p, i, '}') || renvoTokIsKind(p, i, renvoTokEOF) {
 			break
 		}
-		before := body.stmtCount
+		body.stmtCount = 0
 		next := renvoParseOneStatement(&body, i, fn.bodyEnd)
-		if !body.ok || next <= i || body.stmtCount <= before {
+		if !body.ok || next <= i || body.stmtCount != 1 {
 			var result renvoCompileResult
 			return result
 		}
+		statements = append(statements, body.stmt)
 		i = next
 	}
 	if !body.ok {
 		var result renvoCompileResult
 		return result
 	}
-	data := renvoWasiWasm32EmitBinary(p, meta, &body)
+	data := renvoWasiWasm32EmitBinary(p, meta, statements)
 	if len(data) == 0 {
 		var result renvoCompileResult
 		return result
@@ -215,7 +218,7 @@ func renvoTryCompileWasiWasm32(p *renvoProgram, meta *renvoMeta) renvoCompileRes
 	return result
 }
 
-func renvoWasiWasm32EmitBinary(p *renvoProgram, meta *renvoMeta, body *renvoBodyParse) []byte {
+func renvoWasiWasm32EmitBinary(p *renvoProgram, meta *renvoMeta, statements []renvoStmt) []byte {
 	dataOff := 1024
 	exitCode := 0
 	var code renvoWasmBuffer
@@ -223,12 +226,8 @@ func renvoWasiWasm32EmitBinary(p *renvoProgram, meta *renvoMeta, body *renvoBody
 	var gen renvoLinearGen
 	gen.prog = p
 	gen.meta = meta
-	for i := 0; i < body.stmtCount; i++ {
-		stmtValue := renvoBodyStmtAt(body, i)
-		if !body.ok {
-			return nil
-		}
-		stmt := &stmtValue
+	for i := 0; i < len(statements); i++ {
+		stmt := &statements[i]
 		if stmt.kind == renvoStmtExpr {
 			var ep renvoExprParse
 			renvoParseExpressionInto(&ep, p, stmt.exprStart, stmt.exprEnd)

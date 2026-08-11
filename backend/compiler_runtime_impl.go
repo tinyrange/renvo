@@ -1,8 +1,7 @@
 package main
 
 func renvoReadAll(fd int, out []byte) []byte {
-	buf := make([]byte, 0, 1024)
-	renvoTruncBytes(&buf, cap(buf))
+	var buf []byte
 	for {
 		base := len(out)
 		if renvoFixedTarget == renvoTargetWasiWasm32 &&
@@ -22,6 +21,10 @@ func renvoReadAll(fd int, out []byte) []byte {
 			out = expanded
 			renvoTruncBytes(&out, base+n)
 			continue
+		}
+		if len(buf) == 0 {
+			buf = make([]byte, 0, 1024)
+			renvoTruncBytes(&buf, cap(buf))
 		}
 		n := read(fd, buf, -1)
 		if n <= 0 {

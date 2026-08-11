@@ -1492,6 +1492,7 @@ func writeCase(root string, tc testCase) {
 		mod = modulePath(tc.tier, tc.group, caseIndex(tc.name))
 	}
 	must(os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module "+mod+"\n\ngo 1.25\n"), 0644))
+	must(os.WriteFile(filepath.Join(dir, "expected.txt"), []byte("PASS\n"), 0644))
 	for name, content := range tc.files {
 		path := filepath.Join(dir, name)
 		must(os.MkdirAll(filepath.Dir(path), 0755))

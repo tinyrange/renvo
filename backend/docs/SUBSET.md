@@ -223,8 +223,9 @@ Compiled programs may use these runtime constants:
 
 ## Anti-Cheat Test Guidelines
 
-- Tests should compare compiled behavior against host Go through the existing
-  harness.
+- Tests compare compiled behavior with the sibling checked-in `.expected`
+  value through the existing harness. Host Go is not part of an ordinary
+  corpus run; use `go run ./cmd/renvoexpect -write` when adding a positive test.
 - Each test file must print exactly `PASS\n` on success.
 - A failing test should print a distinct diagnostic and return a non-zero exit
   code.

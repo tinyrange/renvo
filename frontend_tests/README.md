@@ -14,11 +14,23 @@ bundled frontend checks, and the full self-hosted frontend coverage.
 
 `corpus_manifest.json` records case, declared-variant, and normalized AST-shape counts. Tests recompute those fingerprints from the checked tree, so clone count cannot stand in for structural coverage.
 
-By default the harness validates that each corpus case is valid host Go and
-prints `PASS\n`. It builds `./cmd/renvobootstrap` with Go for stage0 coverage,
-then checks the embedded-backend self-hosted frontend stages. Set
+Each positive module has a checked-in `expected.txt`. The normal harness
+compares Renvo output directly with that value, avoiding thousands of host-Go
+builds and their Go-cache footprint. It builds `./cmd/renvobootstrap` with Go
+for stage0 coverage, then checks the embedded-backend self-hosted frontend
+stages. Set
 `RENVO_FRONTEND=/path/to/compiler` to test a specific compiler, such as a
 stage2 self-hosted binary.
+
+Use a focused regular expression while iterating:
+
+```sh
+./tools/check frontend 'map_frontend_lowering'
+```
+
+Add missing positive expectations with
+`go run ./cmd/renvoexpect -write`. Negative cases continue to use their exact
+diagnostic `expect.json` files.
 
 The generated corpus is maintained by:
 

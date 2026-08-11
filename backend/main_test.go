@@ -2,15 +2,17 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"renvo.dev/internal/testprogress"
 )
 
 type commandResult struct {
@@ -752,45 +754,19 @@ func runFrontendCPUCalibration(t *testing.T, executable string) time.Duration {
 	return cpu
 }
 
-func runMeasuredFrontendCompile(t *testing.T, compiler string, target string, source string, output string, rssFile string) (time.Duration, int) {
+func runMeasuredFrontendCompile(t *testing.T, compiler string, target string, source string, output string) (time.Duration, int) {
 	t.Helper()
-	timeArgs := []string{
-		"-f", "%U %S %M",
-		"-o", rssFile,
-		compiler,
+	args := []string{
 		"-t", target,
 		"-s",
 		"-o", output,
 		source,
 	}
-	cmd := exec.Command("/usr/bin/time", timeArgs...)
-	cmd.Dir = "."
-	cmd.Env = os.Environ()
-	combined, err := cmd.CombinedOutput()
+	usage, err := runMeasuredProcess(t, ".", os.Environ(), compiler, args...)
 	if err != nil {
-		t.Fatalf("resource-measured frontend self-host failed: %v\nOutput: %s", err, string(combined))
+		t.Fatalf("resource-measured frontend self-host failed: %v\nOutput: %s", err, string(usage.output))
 	}
-	rssData, err := os.ReadFile(rssFile)
-	if err != nil {
-		t.Fatalf("failed to read frontend compile resource usage: %v", err)
-	}
-	rssFields := strings.Fields(string(rssData))
-	if len(rssFields) != 3 {
-		t.Fatalf("failed to read frontend compile resource usage %q", string(rssData))
-	}
-	userSeconds, err := strconv.ParseFloat(rssFields[0], 64)
-	if err != nil {
-		t.Fatalf("failed to parse frontend compile user CPU time %q: %v", string(rssData), err)
-	}
-	systemSeconds, err := strconv.ParseFloat(rssFields[1], 64)
-	if err != nil {
-		t.Fatalf("failed to parse frontend compile system CPU time %q: %v", string(rssData), err)
-	}
-	maxRSS, err := strconv.Atoi(rssFields[2])
-	if err != nil {
-		t.Fatalf("failed to parse frontend compile max RSS %q: %v", string(rssData), err)
-	}
-	return time.Duration((userSeconds + systemSeconds) * float64(time.Second)), maxRSS
+	return usage.cpu, usage.maxRSSKB
 }
 
 func TestCompilerTargetDiagnostics(t *testing.T) {
@@ -909,48 +885,81 @@ func buildStage2Compiler(t *testing.T, target compilerTarget, outDir string) str
 	})
 }
 
-func runWithHostGo(t *testing.T, path string) commandResult {
+func expectedCommandResult(t *testing.T, path string) commandResult {
 	t.Helper()
-	runtimeData, err := os.ReadFile("renvo_main.go")
+	expectedPath := strings.TrimSuffix(path, filepath.Ext(path)) + ".expected"
+	data, err := os.ReadFile(expectedPath)
 	if err != nil {
-		t.Fatalf("failed to read runtime: %v", err)
+		t.Fatalf("read checked-in expectation %s: %v", expectedPath, err)
 	}
-	testData, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("failed to read test source: %v", err)
+	if len(data) > 0 && data[0] == '{' {
+		var expected struct {
+			Stdout   string `json:"stdout"`
+			Stderr   string `json:"stderr"`
+			ExitCode int    `json:"exit_code"`
+		}
+		if err := json.Unmarshal(data, &expected); err != nil {
+			t.Fatalf("decode checked-in expectation %s: %v", expectedPath, err)
+		}
+		return commandResult{stdout: expected.Stdout, stderr: expected.Stderr, exitCode: expected.ExitCode}
 	}
-	key := testArtifactKey([]byte("host-go-result"), []byte(path), runtimeData, testData)
-	return cachedCommandResult(t, "host-go-result", key, func() (commandResult, error) {
-		outDir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(outDir, "renvo_main.go"), runtimeData, 0644); err != nil {
-			return commandResult{}, fmt.Errorf("write runtime copy: %w", err)
-		}
-		if err := os.WriteFile(filepath.Join(outDir, "test.go"), testData, 0644); err != nil {
-			return commandResult{}, fmt.Errorf("write test copy: %w", err)
-		}
-		hostBinary := filepath.Join(outDir, "host-test")
-		buildResult, err := runCommandInDir(t, outDir, "go", "build", "-o", hostBinary, "renvo_main.go", "test.go")
-		if err != nil {
-			return commandResult{}, fmt.Errorf("host go build failed: %w", err)
-		}
-		if buildResult.exitCode != 0 {
-			return commandResult{}, fmt.Errorf("host go build failed with exit code %d\nstdout: %sstderr: %s", buildResult.exitCode, buildResult.stdout, buildResult.stderr)
-		}
-		result, err := runCommand(t, hostBinary)
-		if err != nil {
-			return commandResult{}, fmt.Errorf("host-built execution failed: %w", err)
-		}
-		return result, nil
-	})
+	return commandResult{stdout: string(data)}
 }
 
 func compareCommandResult(t *testing.T, expected commandResult, actual commandResult) {
 	t.Helper()
 	if actual.stdout != expected.stdout || actual.stderr != expected.stderr || actual.exitCode != expected.exitCode {
-		t.Fatalf("compiled output did not match host go\nstdout: got %q, want %q\nstderr: got %q, want %q\nexit code: got %d, want %d",
+		t.Fatalf("compiled output did not match the checked-in expectation\nstdout: got %q, want %q\nstderr: got %q, want %q\nexit code: got %d, want %d",
 			actual.stdout, expected.stdout,
 			actual.stderr, expected.stderr,
 			actual.exitCode, expected.exitCode)
+	}
+}
+
+func runBackendCorpusCases(t *testing.T, label string, inputFiles []string, run func(*testing.T, string)) {
+	t.Helper()
+	selected, err := testprogress.Filter(inputFiles, os.Getenv(testprogress.FilterEnv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(selected) == 0 {
+		t.Skipf("no backend corpus cases match %s=%q", testprogress.FilterEnv, os.Getenv(testprogress.FilterEnv))
+	}
+	workers := testProcessLimit()
+	if workers > len(selected) {
+		workers = len(selected)
+	}
+	tasks := make(chan string, len(selected)+workers)
+	for _, path := range selected {
+		tasks <- path
+	}
+	for worker := 0; worker < workers; worker++ {
+		tasks <- ""
+	}
+
+	progress := testprogress.New(t, label, len(selected))
+	t.Cleanup(progress.Close)
+	for worker := 0; worker < workers; worker++ {
+		worker := worker
+		t.Run(fmt.Sprintf("worker-%02d", worker+1), func(t *testing.T) {
+			t.Parallel()
+			for {
+				path := <-tasks
+				if path == "" {
+					return
+				}
+				func() {
+					done := progress.Begin(path)
+					defer done()
+					defer func() {
+						if t.Failed() {
+							t.Logf("failing corpus case: %s", path)
+						}
+					}()
+					run(t, path)
+				}()
+			}
+		})
 	}
 }
 
@@ -981,22 +990,15 @@ func TestCompileTests(t *testing.T) {
 			outDir := t.TempDir()
 			stage2 := buildStage2Compiler(t, target, outDir)
 
-			for _, path := range inputFiles {
-				path := path
-				t.Run(path, func(t *testing.T) {
-					t.Parallel()
-
-					expected := runWithHostGo(t, path)
-
-					outputFile := cachedTargetProgram(t, target, stage2, "source", []string{path})
-
-					actual, err := runTargetCommand(t, target, outputFile)
-					if err != nil {
-						t.Fatalf("execution failed: %v", err)
-					}
-					compareCommandResult(t, expected, actual)
-				})
-			}
+			runBackendCorpusCases(t, target.name+" direct source", inputFiles, func(t *testing.T, path string) {
+				expected := expectedCommandResult(t, path)
+				outputFile := cachedTargetProgram(t, target, stage2, "source", []string{path})
+				actual, err := runTargetCommand(t, target, outputFile)
+				if err != nil {
+					t.Fatalf("execute %s: %v", path, err)
+				}
+				compareCommandResult(t, expected, actual)
+			})
 		})
 	}
 }
@@ -1048,15 +1050,10 @@ func TestRunTests(t *testing.T) {
 	}
 
 	for _, path := range inputFiles {
-		t.Run(path, func(t *testing.T) {
-			t.Parallel()
-
-			expected := runWithHostGo(t, path)
-
-			if expected.exitCode != 0 {
-				t.Fatalf("host go execution failed with exit code %d\nstdout: %sstderr: %s", expected.exitCode, expected.stdout, expected.stderr)
-			}
-		})
+		expected := expectedCommandResult(t, path)
+		if expected.stdout+expected.stderr != "PASS\n" || expected.exitCode != 0 {
+			t.Fatalf("invalid positive-test expectation for %s: exit=%d stdout=%q stderr=%q", path, expected.exitCode, expected.stdout, expected.stderr)
+		}
 	}
 }
 
@@ -1089,33 +1086,12 @@ func TestCompilerPerformance(t *testing.T) {
 			for attempt := 0; attempt < 3; attempt++ {
 				outputPath := filepath.Join(outDir, fmt.Sprintf("compiler-output-%d", attempt))
 				compileArgs := append([]string{"-s", "-o", outputPath}, files...)
-
-				rssFile := filepath.Join(outDir, fmt.Sprintf("compile-rss-%d", attempt))
-				timeArgs := append([]string{"-f", "%e %M", "-o", rssFile, compilerPath}, compileArgs...)
-				cmd := exec.Command("/usr/bin/time", timeArgs...)
-				cmd.Env = []string{}
-				output, err := cmd.CombinedOutput()
+				usage, err := runMeasuredProcess(t, "", []string{}, compilerPath, compileArgs...)
 				if err != nil {
-					t.Fatalf("resource-measured compilation failed: %v\nOutput: %s", err, string(output))
+					t.Fatalf("resource-measured compilation failed: %v\nOutput: %s", err, string(usage.output))
 				}
-
-				rssData, err := os.ReadFile(rssFile)
-				if err != nil {
-					t.Fatalf("failed to read compile resource usage: %v", err)
-				}
-				rssLines := strings.Fields(string(rssData))
-				if len(rssLines) == 0 {
-					t.Fatalf("failed to read compile resource usage")
-				}
-				elapsedSeconds, err := strconv.ParseFloat(rssLines[0], 64)
-				if err != nil {
-					t.Fatalf("failed to parse compile elapsed time %q: %v", string(rssData), err)
-				}
-				elapsed := time.Duration(elapsedSeconds * float64(time.Second))
-				maxRSS, err := strconv.Atoi(rssLines[len(rssLines)-1])
-				if err != nil {
-					t.Fatalf("failed to parse compile resource usage %q: %v", string(rssData), err)
-				}
+				elapsed := usage.elapsed
+				maxRSS := usage.maxRSSKB
 				if elapsed < bestElapsed {
 					bestElapsed = elapsed
 				}
@@ -1170,8 +1146,7 @@ func TestFrontendCompilerPerformance(t *testing.T) {
 	for attempt := 0; attempt < frontendPerformanceAttempts; attempt++ {
 		calibrationCPU := runFrontendCPUCalibration(t, calibration)
 		stage3 := filepath.Join(outDir, fmt.Sprintf("renvo-stage3-%d", attempt))
-		rssFile := filepath.Join(outDir, fmt.Sprintf("frontend-rss-%d", attempt))
-		cpu, maxRSS := runMeasuredFrontendCompile(t, stage2, target, source, stage3, rssFile)
+		cpu, maxRSS := runMeasuredFrontendCompile(t, stage2, target, source, stage3)
 		cpuPerCalibration := int64(cpu) * frontendPerformanceCalibrationScale / int64(calibrationCPU)
 		stage3Info, err := os.Stat(stage3)
 		if err != nil {

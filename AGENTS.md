@@ -58,12 +58,28 @@ Use the repository-owned check driver for presubmit work:
 
 The first command is the normal development loop: it catches stale generated
 sources, package failures, and test compilation errors and enforces a one-minute
-budget. Save `full` for PR validation; it adds the backend, every compiler
-performance/resource gate, and the complete frontend suite including
-self-hosting. On a systemd-based Linux host, set
+budget. Do not run `full` during normal interactive agent work: it can consume
+the complete 30-minute timeout and populate several gigabytes of Go and Renvo
+test cache. The merge queue runs that validation. Use the narrow modes and
+focused corpus filters while iterating, for example:
+
+```sh
+./tools/check backend 'tagged_memory_access'
+./tools/check frontend 'map_frontend_lowering'
+```
+
+`full` adds the backend, every compiler performance/resource gate, and the
+complete frontend suite including self-hosting. Only run it locally when the
+user explicitly requests the full validation. On a systemd-based Linux host, set
 `RENVO_CHECK_MEMORY_MAX=4G` to isolate each command from the interactive
 session. Do not change check modes to skip or weaken a gate; use a narrower
 documented mode only while diagnosing a failure.
+
+Positive backend programs have a sibling `.expected` file, and positive
+frontend modules have an `expected.txt` file. Normal corpus checks compare
+Renvo output directly with these checked-in values and must not invoke host Go
+as an oracle. After adding a positive test, run
+`go run ./cmd/renvoexpect -write` and review the companion expectation.
 
 ## Frontend scope
 
