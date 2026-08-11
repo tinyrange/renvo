@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "8c08a61cf80b1ba7be17361325f0cbc62a2be322e96615758dd01233ec9b1497"
+const CompilerSourceDigest = "0a2dbcd3629cb70aed5f590d22ca0635a47377c72e302a3be9f950bc0101642f"
 
 // source: backend/compiler_common_impl.go
 
@@ -5227,7 +5227,12 @@ renvoNonNil(t)
 if t.nativeAlign > 0 {
 return true
 }
-return t.kind == renvoTypePointer && t.elem >= 0 && t.elem < len(m.types) && m.types[t.elem].nativeAlign > 0
+if t.kind == renvoTypePointer && t.elem > 0 && t.elem < len(m.types) {
+elem := renvoResolveType(m, t.elem)
+renvoNonNil(elem)
+return elem.nativeAlign > 0
+}
+return false
 }
 
 func renvoTypeUsesHiddenResult(m *renvoMeta, typ int) bool {
