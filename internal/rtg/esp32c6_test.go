@@ -46,6 +46,8 @@ func TestESP32C6ExternalDefinition(t *testing.T) {
 		"AppDescriptorAddress = 0x42010020",
 		"WordBits:32,PointerBits:32",
 		"func rtgEsp32c6Riscv32PackageMoveImmediate(",
+		"if setcc == 150 { return rtgEsp32c6ULE }",
+		"if setcc == 151 { return rtgEsp32c6UGT }",
 	} {
 		if !strings.Contains(source, contract) {
 			t.Errorf("prepared backend omitted %q", contract)

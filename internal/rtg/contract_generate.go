@@ -238,11 +238,11 @@ func appendDeclarativeArchitectureRelocationBody(out []byte, encoding string,
 		out = append(out, "\t\tat := int(renvo_runtime_UnsafeInt32At(out.relocs, i)) & 2147483647\n"...)
 		out = append(out, "\t\tlabel := int(renvo_runtime_UnsafeInt32At(out.relocs, i+1)) & 2147483647\n"...)
 		out = append(out, "\t\ttarget := renvoAsmLabelPosition(out, label)\n"...)
-		if compactNativeLabels {
-			out = append(out, "\t\tif target < 0 { continue }\n"...)
-		} else {
-			out = append(out, "\t\tif at+4 > len(out.code) || target < 0 { continue }\n"...)
-		}
+		out = append(out, "\t\tif at < 0 || at+4 > len(out.code) {\n"...)
+		out = append(out, "\t\t\tout.patchFailed = true\n"...)
+		out = append(out, "\t\t\tcontinue\n"...)
+		out = append(out, "\t\t}\n"...)
+		out = append(out, "\t\tif target < 0 { continue }\n"...)
 	} else {
 		out = append(out, "\tfor i := 0; i < out.RelocationCount(); i++ {\n"...)
 		out = append(out, "\t\tat := out.RelocationOffset(i)\n"...)
@@ -376,7 +376,7 @@ const declarativeARM32CompactNativeLabelRelocationBody = `
 func appendPreparedDirectEmitterAdapters(out []byte, document Document, target ResolvedTarget) []byte {
 	prefix := "rtg" + exportedName(document.Unit)
 	bindings := architectureBindings(target.Arch)
-	out = append(out, "\nvar renvoRTGUnsupportedOperation bool\n"...)
+	out = append(out, "\nvar renvoRTGUnsupportedOperation int\n"...)
 	for operation := 0; operation < len(directEmitterV1); operation++ {
 		found := false
 		for i := 0; i < len(bindings); i++ {
@@ -402,7 +402,7 @@ func appendPreparedDirectEmitterAdapters(out []byte, document Document, target R
 }
 
 func appendDirectEmitterKernelAdapters(out []byte) []byte {
-	out = append(out, "\nvar renvoRTGUnsupportedOperation bool\n"...)
+	out = append(out, "\nvar renvoRTGUnsupportedOperation int\n"...)
 	for i := 0; i < len(directEmitterV1); i++ {
 		out = appendDirectEmitterAdapterFunction(out, directEmitterV1[i], "", false)
 	}
@@ -903,7 +903,7 @@ func appendPreparedRuntimeOperationAdapter(
 		out = append(out, "\tif operation == "...)
 		out = appendDecimalFrame(out, operations[i].code)
 		out = append(out, " {\n"...)
-		valid := true
+		valid := resultOK
 		sources := make([]string, len(arguments))
 		destinations := make([]string, len(arguments))
 		sourceIndices := make([]int, len(arguments))
@@ -1142,7 +1142,9 @@ func appendDirectEmitterAdapterFunction(out []byte, operation directEmitterOpera
 		}
 		out = append(out, ")\n"...)
 	} else {
-		out = append(out, "\trenvoRTGUnsupportedOperation = true\n"...)
+		out = append(out, "\tif renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = "...)
+		out = appendDecimalFrame(out, directEmitterOperationIndex(operation.Name)+1)
+		out = append(out, " }\n"...)
 	}
 	out = append(out, "}\n"...)
 	return out
@@ -1345,6 +1347,7 @@ func appendPreparedConditionAdapter(out []byte, document Document, arch Declarat
 		out = append(out, symbol...)
 		out = append(out, " }\n"...)
 	}
+	out = append(out, "if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 1000 + setcc }\n"...)
 	out = append(out, "return RTGCondition{}\n}\n"...)
 	return out
 }

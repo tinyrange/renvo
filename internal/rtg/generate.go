@@ -2,7 +2,7 @@ package rtg
 
 import "renvo.dev/internal/syntax"
 
-const GeneratorVersion = 1
+const GeneratorVersion = 2
 
 type GenerateResult struct {
 	Source      []byte
@@ -165,6 +165,9 @@ func GeneratePreparedBackend(resolved ResolveResult, targetName string) Generate
 			Code:     "RTG-GENERATE-001",
 			Message:  "definition does not export target " + targetName,
 		}}}
+	}
+	if diagnostics := validatePreparedTarget(resolved.Document, target); len(diagnostics) != 0 {
+		return GenerateResult{Diagnostics: diagnostics}
 	}
 	manifest := []string{resolved.Document.Unit + " " + HashText(resolved.Document.Hash)}
 	source := generateHeaderPackage(manifest, target.Descriptor.Name, "main")
@@ -504,6 +507,8 @@ func renvoRTGRel32(out *renvoAsm, label int) {
 	renvoAsmEmit32(out, 0)
 	if label >= 0 {
 		renvoAsmAddReloc(out, at, label)
+	} else if renvoRTGUnsupportedOperation == 0 {
+		renvoRTGUnsupportedOperation = 2001
 	}
 }
 
@@ -563,9 +568,13 @@ func (out *renvoAsm) NewLabel() int {
 }
 
 func (out *renvoAsm) Mark(label int) {
-	if label >= 0 {
-		renvoAsmMarkLabel(out, label)
+	if label < 0 || label >= len(out.labelPos) || renvoAsmLabelPosition(out, label) >= 0 {
+		if renvoRTGUnsupportedOperation == 0 {
+			renvoRTGUnsupportedOperation = 2002
+		}
+		return
 	}
+	renvoAsmMarkLabel(out, label)
 }
 
 func (out *renvoAsm) Rel32(label int) {
@@ -577,12 +586,16 @@ func (out *renvoAsm) Rel32Addend(label int, addend int) {
 	renvoAsmEmit32(out, addend)
 	if label >= 0 {
 		renvoAsmAddReloc(out, at, label)
+	} else if renvoRTGUnsupportedOperation == 0 {
+		renvoRTGUnsupportedOperation = 2001
 	}
 }
 
 func (out *renvoAsm) Reloc(label int) {
 	if label >= 0 && len(out.code) >= 4 {
 		renvoAsmAddReloc(out, len(out.code)-4, label)
+	} else if renvoRTGUnsupportedOperation == 0 {
+		renvoRTGUnsupportedOperation = 2003
 	}
 }
 
@@ -922,14 +935,20 @@ func renvoRTGNewLabel(out *renvoAsm) int {
 }
 
 func renvoRTGMark(out *renvoAsm, label int) {
-	if label >= 0 {
-		renvoAsmMarkLabel(out, label)
+	if label < 0 || label >= len(out.labelPos) || renvoAsmLabelPosition(out, label) >= 0 {
+		if renvoRTGUnsupportedOperation == 0 {
+			renvoRTGUnsupportedOperation = 2002
+		}
+		return
 	}
+	renvoAsmMarkLabel(out, label)
 }
 
 func renvoRTGReloc(out *renvoAsm, label int) {
 	if label >= 0 && len(out.code) >= 4 {
 		renvoAsmAddReloc(out, len(out.code)-4, label)
+	} else if renvoRTGUnsupportedOperation == 0 {
+		renvoRTGUnsupportedOperation = 2003
 	}
 }
 `...)

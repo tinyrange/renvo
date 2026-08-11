@@ -256,14 +256,19 @@ func appendArchitectureFacts(out []byte, document Document, arch Declaration, ma
 			}
 			if stringIndex(declared, value) < 0 {
 				code := 0
+				valid := false
 				if len(symbol.Value) >= 2 && symbol.Value[len(symbol.Value)-2:] == "ZR" {
 					code = 31
+					valid = true
 				}
 				out = append(out, "\nvar "...)
 				out = append(out, value...)
 				out = append(out, " = RTGRegister{Code:"...)
 				out = appendDecimalFrame(out, code)
-				out = append(out, ", Valid:true}\n"...)
+				if valid {
+					out = append(out, ", Valid:true"...)
+				}
+				out = append(out, "}\n"...)
 				declared = append(declared, value)
 			}
 			out = append(out, "var "...)

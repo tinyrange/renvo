@@ -32,7 +32,10 @@ check_packages() {
 		./backend/unit ./backend/target ./backend/bringup
 		./backend/omnibus/... ./backend/cmd/...
 	)
-	if [[ "${1:-}" == "exclude-generated" ]]; then
+	if [[ "${1:-}" == "preflight" ]]; then
+		run_check "checked-in generated source and tracked package suites" \
+			go test -count=1 "${package_patterns[@]}"
+	elif [[ "${1:-}" == "exclude-generated" ]]; then
 		local packages=()
 		while IFS= read -r package; do
 			case "$package" in
@@ -50,10 +53,9 @@ check_packages() {
 
 check_preflight() {
 	local started=$SECONDS
-	check_generated
-	# These exact packages already ran above for generated-source authority.
-	# Avoid running them twice while retaining all package coverage.
-	check_packages exclude-generated
+	# The tracked patterns include the generated-source authority packages. Keep
+	# them in one Go invocation so cold preflight builds compile each package once.
+	check_packages preflight
 	run_check "backend and frontend test compilation" \
 		go test -run '^$' ./backend ./frontend_tests
 	local elapsed=$((SECONDS - started))

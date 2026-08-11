@@ -641,6 +641,10 @@ func (s *renvoAarch64ProgramSession) finishStep() bool {
 	} else if targetIsDarwin(s.gen.c.renvoTargetOS) {
 		data = renvoAsmImageDarwinArm64(a)
 	}
+	if a.patchFailed || len(data) == 0 {
+		s.done = true
+		return true
+	}
 	s.result.data = data
 	s.result.ok = true
 	s.done = true

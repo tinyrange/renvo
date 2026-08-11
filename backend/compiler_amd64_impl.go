@@ -207,7 +207,7 @@ func renvoFinishScalarProgramAmd64(g *renvoLinearGen) renvoCompileResult {
 		data = renvoAsmImageAmd64(a)
 	}
 	var result renvoCompileResult
-	if len(data) == 0 {
+	if a.patchFailed || len(data) == 0 {
 		return result
 	}
 	result.data = data

@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "a4d2039df5ed13e181e4ee5e74b3212410d368e3db02173c6c46b1b14de1e270"
+const CompilerSourceDigest = "1128a2c3116af4e35fe5724d6340c3dcad023bd9a7f25f98f862e44d9eecc204"
 
 // source: backend/compiler_common_impl.go
 
@@ -129,6 +129,7 @@ lastPrimaryLoad     int
 replSymbols         []renvoReplSymbol
 wasmLocalSlots      []int32
 c                   *renvoCompileContext
+patchFailed         bool
 }
 
 
@@ -16039,7 +16040,9 @@ renvoAsmEmit8(a, 0x5f)
 func renvoAsmStackMem(a *renvoAsm, offset int, base int, disp8 int, disp32 int) {
 renvoNonNil(a)
 if renvoPreparedBackend != 0 {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 4001
+}
 return
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
@@ -16100,7 +16103,9 @@ renvoAsmEmit32(a, imm)
 func renvoAsmMemDisp(a *renvoAsm, disp int, op int, disp8 int, disp32 int) {
 renvoNonNil(a)
 if renvoPreparedBackend != 0 {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 4002
+}
 return
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
@@ -20710,7 +20715,9 @@ return false
 usesFloat := renvoBinaryUsesFloat(g, ep, e)
 leftIndex := e.left
 rightIndex := e.right
-unsigned := (g.c.renvoNativeIntSize == 8 || renvoPreparedBackend != 0) && (c0 == '<' || c0 == '>') && (renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right))
+unsigned := (c0 == '<' || c0 == '>') &&
+(renvoExprHasUnsignedIntType(g, ep, e.left) ||
+renvoExprHasUnsignedIntType(g, ep, e.right))
 right := &ep.exprs[rightIndex]
 if !usesFloat {
 rightConst := renvoEvalConstExpr(g, ep, rightIndex)
@@ -25018,37 +25025,37 @@ return renvoRTGParseTargetArg(target)
 
 func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
 if target == renvoTargetLinuxAmd64 {
-return "linux/amd64", "4\xfd\x9b͘3]\x8aU=)\xfa\xc2\xe8\xd5`̵\xf1\x12\x1e$m8\xc8tf\xae\xe3\x18\x94R", 3, true
+return "linux/amd64", "c4\xa8\xe7\xea5-\xcf\xd4\xea\x03\x88\x936\x06\xf62\x9c\xc49Z\xe6E\x7f\xb5\xdbE\xb6t\x1ba\xf7", 3, true
 }
 if target == renvoTargetLinux386 {
-return "linux/386", "\x05T\x05\x1e\x13^g\x9b\xed\xfa6\xe3#\t\x97꠱\x8a\xee\x19\x89\xe0\xc4,Azƺ\xf4\xd4G", 3, true
+return "linux/386", "\x1e\xd2A\xf1+&cc\xf9\xb3(0\xa2\xb5\xb9j<\x01\xe4\x0eLd\x8ch\x99\xf2X_o\x9a\xe7\x94", 3, true
 }
 if target == renvoTargetLinuxAarch64 {
-return "linux/aarch64", "\xd81\x8e\xb1\xd2A\x19\\\x89\xdb\xd8F\x12\xc1]\xbfq}\x8e\xa9\x1d\xcef\x95\u0086\x89\b\xa1\xdd3\x15", 3, true
+return "linux/aarch64", "J\xb4![\xa0\xc6G\xa0\xb8\xc4xbm\xcaz)\x18\xd6\xe0\x00\xb0\x90\xaf(#\xd6\t \xfb\x9a6|", 3, true
 }
 if target == renvoTargetLinuxArm {
-return "linux/arm", "\x94isB\xbdpqӽ\xa6\x94\x17\xbb\n\xce\x04\xd0\xfb\xdd$\xaat\x88\fd\x1ct&+\xe8\xec\xa7", 3, true
+return "linux/arm", "\xc6Α(\x066\xf1E\x15\xf2]V\xb5r|gFc\xf9\xadv\xbe\xa8}\x99t\xce\x1f\xd1+ef", 3, true
 }
 if target == renvoTargetWindowsAmd64 {
-return "windows/amd64", "o\xf6\x1d\xbd/\xb7c\xd9%Ȅ\xc7\xcb\x17\xb1\xd7Mc6'M\xaev\x89\xd2\r7\xa3*tƸ", 3, true
+return "windows/amd64", "\xdc\x01!]\x897М\xe81r\x88&\xcc7X\xc3-\xa2F`\x90.ze\x9e\xb4\xe2\xe2bP\x84", 3, true
 }
 if target == renvoTargetWindows386 {
-return "windows/386", "\x91\x83\xec\x9dQ\x19\x84\xb9\x13\xcd\x069Nw\xc3Jò\xab\xab\xa68\xbcv.HJ\xa62,\x1en", 3, true
+return "windows/386", ",\xd4\a\xe0\xe9(\n\xdb\x02\xf57\x89\x97YZ\xf9\x97\x0f\xb9\xfbh\x9a\xf2\x92\x1d\xf0\x10\xda\xc3\x12W\x7f", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\b~\xfa\xc3\xf6\xde\xf8\xabN\x18Ƚ\xf5\xe7\x01\x03\xaa\x9f\xd8\x1fL\xf5\xb7\x1fR\xa7xO\xc2\x14\n\xd5", 3, true
+return "wasi/wasm32", ">\xea\xf1ƻ\x13\xc8\xd9\xcd\xd7Z[\x93\xf4ѕ\x15\x9f\xe6\xc0$\xc7A\xb3\xac~\x98}\x05dIQ", 3, true
 }
 if target == renvoTargetDarwinArm64 {
-return "darwin/arm64", "q7\x91\xdf(\xa1x\"\xa2\x13\xc2j7IR>\x11Aؘ\x9e\x11}\xcc\x1e\x06yU\xd5\xcb{\r", 3, true
+return "darwin/arm64", "\xe8!)f\x95\xf13Ǝ\xf4\x81\xc1`k\xb6\xd3{C\xba\xd9\xf1u\xcca\x1c{4\xeb\x00\x80\xd6;", 3, true
 }
 if target == renvoTargetLinuxKernelAmd64 {
-return "linux-kernel/amd64", "$!\xef\xffp\x92\x95\xb4\x93\xadA\x19\x9f\xb3\xb9\x18*\xca2\xd2-\x90\x06\xbd\xa0\xb64^\xb9\xc4j\xa1", 3, true
+return "linux-kernel/amd64", "\xf5\\\\W:r\xcaʞm\xa9\xfb\x8c\xb9\x01\xa0\xb8\x17\x0e\x9d\xf8\x10\x17K\x9bz\xd5h\xa4%\xe8\x92", 3, true
 }
 if target == renvoTargetWindowsArm64 {
-return "windows/arm64", "\xe3\xbc\xf5\xf3\xdaN\"\x9a\x88\xa5KX\x82\\s\x85\xf3\xffZ\x88\x8c\x97-\xf7)\x8e\xeb|\x99\v\x99\xbb", 3, true
+return "windows/arm64", "\x8d\r\xe8\xa0ת>\xa4C6N\xde8X\xdb\xc0\x81>+\xa5\xdb\xcc3K\xb1\x9a\xaf\xb1\x85~\x18j", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x1abX\x92\xac\xef\x03D4\xb4\xadūe]K\xb4A\xa2/D\xc2\xf1\x03I\x11\"\x90\x92\xcdy\x89", 3, true
+return "vm/vm32", "\x16\xc9۽7ԋG@;.Δ\xa4im\xae:\xa1R W@.\xb7\xa2-\b\xce9p|", 3, true
 }
 return "", "", 0, false
 }
@@ -25683,6 +25690,8 @@ at := len(out.code)
 renvoAsmEmit32(out, 0)
 if label >= 0 {
 renvoAsmAddReloc(out, at, label)
+} else if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 2001
 }
 }
 
@@ -25728,9 +25737,13 @@ return renvoAsmNewLabel(out)
 }
 
 func (out *renvoAsm) Mark(label int) {
-if label >= 0 {
-renvoAsmMarkLabel(out, label)
+if label < 0 || label >= len(out.labelPos) || renvoAsmLabelPosition(out, label) >= 0 {
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 2002
 }
+return
+}
+renvoAsmMarkLabel(out, label)
 }
 
 func (out *renvoAsm) Rel32(label int) {
@@ -25742,12 +25755,16 @@ at := len(out.code)
 renvoAsmEmit32(out, addend)
 if label >= 0 {
 renvoAsmAddReloc(out, at, label)
+} else if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 2001
 }
 }
 
 func (out *renvoAsm) Reloc(label int) {
 if label >= 0 && len(out.code) >= 4 {
 renvoAsmAddReloc(out, len(out.code)-4, label)
+} else if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 2003
 }
 }
 
@@ -26087,169 +26104,175 @@ return renvoAsmNewLabel(out)
 }
 
 func renvoRTGMark(out *renvoAsm, label int) {
-if label >= 0 {
-renvoAsmMarkLabel(out, label)
+if label < 0 || label >= len(out.labelPos) || renvoAsmLabelPosition(out, label) >= 0 {
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 2002
 }
+return
+}
+renvoAsmMarkLabel(out, label)
 }
 
 func renvoRTGReloc(out *renvoAsm, label int) {
 if label >= 0 && len(out.code) >= 4 {
 renvoAsmAddReloc(out, len(out.code)-4, label)
+} else if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 2003
 }
 }
 
-var renvoRTGUnsupportedOperation bool
+var renvoRTGUnsupportedOperation int
 
 func renvoRTGDirectMove(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 1 }
 }
 
 func renvoRTGDirectAddress(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 2 }
 }
 
 func renvoRTGDirectLoadNative(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 3 }
 }
 
 func renvoRTGDirectLoadI32(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 4 }
 }
 
 func renvoRTGDirectLoadU32(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 5 }
 }
 
 func renvoRTGDirectLoadI16(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 6 }
 }
 
 func renvoRTGDirectLoadU16(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 7 }
 }
 
 func renvoRTGDirectLoadI8(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 8 }
 }
 
 func renvoRTGDirectLoadU8(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 9 }
 }
 
 func renvoRTGDirectStoreNative(out *renvoAsm, address renvoRTGAddress, source RTGRegister) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 10 }
 }
 
 func renvoRTGDirectStoreU32(out *renvoAsm, address renvoRTGAddress, source RTGRegister) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 11 }
 }
 
 func renvoRTGDirectStoreU16(out *renvoAsm, address renvoRTGAddress, source RTGRegister) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 12 }
 }
 
 func renvoRTGDirectStoreU8(out *renvoAsm, address renvoRTGAddress, source RTGRegister) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 13 }
 }
 
 func renvoRTGDirectAdd(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 14 }
 }
 
 func renvoRTGDirectSubtract(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 15 }
 }
 
 func renvoRTGDirectMultiply(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 16 }
 }
 
 func renvoRTGDirectBitAnd(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 17 }
 }
 
 func renvoRTGDirectBitOr(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 18 }
 }
 
 func renvoRTGDirectBitXor(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 19 }
 }
 
 func renvoRTGDirectCompare(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 20 }
 }
 
 func renvoRTGDirectTest(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 21 }
 }
 
 func renvoRTGDirectIncrement(out *renvoAsm, operand RTGRegister) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 22 }
 }
 
 func renvoRTGDirectDecrement(out *renvoAsm, operand RTGRegister) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 23 }
 }
 
 func renvoRTGDirectShiftLeftImmediate(out *renvoAsm, destination RTGRegister, value byte) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 24 }
 }
 
 func renvoRTGDirectShiftRightUnsignedImmediate(out *renvoAsm, destination RTGRegister, value byte) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 25 }
 }
 
 func renvoRTGDirectShiftRightSignedImmediate(out *renvoAsm, destination RTGRegister, value byte) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 26 }
 }
 
 func renvoRTGDirectCall(out *renvoAsm, label int) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 27 }
 }
 
 func renvoRTGDirectCallIndirect(out *renvoAsm, operand RTGRegister) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 28 }
 }
 
 func renvoRTGDirectJump(out *renvoAsm, label int) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 29 }
 }
 
 func renvoRTGDirectJumpCondition(out *renvoAsm, condition RTGCondition, label int) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 30 }
 }
 
 func renvoRTGDirectSetCondition(out *renvoAsm, condition RTGCondition, source RTGRegister) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 31 }
 }
 
 func renvoRTGDirectReturn(out *renvoAsm) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 32 }
 }
 
 func renvoRTGDirectLeave(out *renvoAsm) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 33 }
 }
 
 func renvoRTGDirectHostSyscall(out *renvoAsm) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 34 }
 }
 
 func renvoRTGDirectMoveImmediate(out *renvoAsm, destination RTGRegister, value int64) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 35 }
 }
 
 func renvoRTGDirectVariableShift(out *renvoAsm, direction RTGShiftDirection, signed bool) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 36 }
 }
 
 func renvoRTGDirectSignedDivide(out *renvoAsm, remainder bool) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 37 }
 }
 
 func renvoRTGDirectCopyBytes(out *renvoAsm) {
-renvoRTGUnsupportedOperation = true
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 38 }
 }
 
 var renvoRTGPrimary = RTGNoRegister
@@ -26662,6 +26685,10 @@ if registers[word].Valid {
 renvoRTGAsmStoreFrame(&g.asm, offset, registers[word])
 return
 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 3001
+}
+return
 }
 source := renvoRTGAsmAddress(renvoRTGFrame, RTGNoRegister,
 2*renvoRTGStackWordBytes+(word-6)*renvoRTGStackWordBytes, 1)
@@ -26682,6 +26709,12 @@ if limit > len(registers) {
 limit = len(registers)
 }
 for i := 0; i < limit; i++ {
+if !registers[i].Valid {
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 3002
+}
+return
+}
 renvoRTGAsmPopRegister(&g.asm, registers[i])
 }
 renvoAsmCallLabel(&g.asm, g.funcLabels[fnIndex])
@@ -26701,7 +26734,8 @@ renvoRTGDirectCopyBytes(&g.asm)
 }
 
 func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-renvoRTGUnsupportedOperation = false
+renvoRTGUnsupportedOperation = 0
+renvoRTGFailureDetail = -1
 appIndex := -1
 for i := 0; i < len(meta.funcs); i++ {
 if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
@@ -26726,11 +26760,20 @@ if renvoRTGPreparedKernelModule != 0 {
 if !renvoBeginKernelModuleRTG(g, appIndex) {
 return renvoCompileResult{}
 }
-if !renvoEmitAllQueuedFunctionsScratch(g) || renvoRTGUnsupportedOperation {
+if !renvoEmitAllQueuedFunctionsScratch(g) {
+return renvoCompileResult{}
+}
+if renvoRTGUnsupportedOperation != 0 {
+renvoRTGReportFailure(g)
 return renvoCompileResult{}
 }
 renvoAsmPatch(&g.asm)
 data := renvoRTGKernelImage(&g.asm, g.kernelInitLabel, g.kernelExitLabel)
+renvoRTGValidateRelocations(&g.asm)
+if renvoRTGUnsupportedOperation != 0 {
+renvoRTGReportFailure(g)
+return renvoCompileResult{}
+}
 if len(data) == 0 {
 return renvoCompileResult{}
 }
@@ -26777,15 +26820,86 @@ return renvoCompileResult{}
 if !renvoEmitAllQueuedFunctionsScratch(g) {
 return renvoCompileResult{}
 }
-if renvoRTGUnsupportedOperation {
+if renvoRTGUnsupportedOperation != 0 {
+renvoRTGReportFailure(g)
 return renvoCompileResult{}
 }
 renvoAsmPatch(&g.asm)
 data := renvoRTGImage(&g.asm)
+renvoRTGValidateRelocations(&g.asm)
+if renvoRTGUnsupportedOperation != 0 {
+renvoRTGReportFailure(g)
+return renvoCompileResult{}
+}
 if len(data) == 0 {
 return renvoCompileResult{}
 }
 return renvoCompileResult{data: data, ok: true}
+}
+
+func renvoRTGReportFailure(g *renvoLinearGen) {
+renvoPrintErr("renvo: prepared backend ")
+name, _, _, found := renvoRTGTargetBinding(renvoTargetRTG)
+if found {
+renvoPrintErr(name)
+} else {
+renvoPrintErr("<unknown>")
+}
+if renvoRTGUnsupportedOperation >= 1000 && renvoRTGUnsupportedOperation < 2000 {
+renvoPrintErr(" is missing condition selector ")
+renvoPrintIntErr(renvoRTGUnsupportedOperation - 1000)
+} else if renvoRTGUnsupportedOperation >= 4000 {
+renvoPrintErr(" reached an unsupported compiler helper ")
+renvoPrintIntErr(renvoRTGUnsupportedOperation - 4000)
+} else if renvoRTGUnsupportedOperation >= 3000 {
+renvoPrintErr(" used an invalid required register")
+} else if renvoRTGUnsupportedOperation >= 2000 {
+renvoPrintErr(" left an invalid or unresolved relocation ")
+renvoPrintIntErr(renvoRTGUnsupportedOperation - 2000)
+if renvoRTGFailureDetail >= 0 {
+renvoPrintErr(" targeting label ")
+renvoPrintIntErr(renvoRTGFailureDetail)
+for i := 0; i < len(g.funcLabels); i++ {
+if g.funcLabels[i] == renvoRTGFailureDetail {
+renvoPrintErr(" (")
+write(2, g.prog.src[g.meta.funcs[i].nameStart:g.meta.funcs[i].nameEnd], -1)
+renvoPrintErr(")")
+}
+}
+}
+} else {
+renvoPrintErr(" is missing direct emitter operation ")
+renvoPrintIntErr(renvoRTGUnsupportedOperation)
+}
+renvoPrintErr("\n")
+}
+
+var renvoRTGFailureDetail = -1
+
+func renvoRTGValidateRelocations(out *renvoAsm) {
+if out.patchFailed && renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 2004
+}
+for i := 0; i+1 < len(out.relocs); i += 2 {
+at := int(renvo_runtime_UnsafeInt32At(out.relocs, i)) & 2147483647
+label := int(renvo_runtime_UnsafeInt32At(out.relocs, i+1)) & 2147483647
+if at < 0 || at+4 > len(out.code) || renvoAsmLabelPosition(out, label) < 0 {
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 2004
+}
+if renvoRTGFailureDetail < 0 {
+renvoRTGFailureDetail = label
+}
+}
+}
+for i := 0; i+2 < len(out.absRelocs); i += 3 {
+at := int(renvo_runtime_UnsafeInt32At(out.absRelocs, i)) & 2147483647
+if at < 0 || at+4 > len(out.code) {
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 2005
+}
+}
+}
 }
 
 func renvoBeginKernelModuleRTG(g *renvoLinearGen, appIndex int) bool {
@@ -27075,7 +27189,7 @@ data = renvoAsmImageKernelModuleAmd64(a, g.kernelInitLabel, g.kernelExitLabel)
 data = renvoAsmImageAmd64(a)
 }
 var result renvoCompileResult
-if len(data) == 0 {
+if a.patchFailed || len(data) == 0 {
 return result
 }
 result.data = data
@@ -28018,6 +28132,10 @@ for i := 0; i+1 < len(out.relocs); i += 2 {
 at := int(renvo_runtime_UnsafeInt32At(out.relocs, i)) & 2147483647
 label := int(renvo_runtime_UnsafeInt32At(out.relocs, i+1)) & 2147483647
 target := renvoAsmLabelPosition(out, label)
+if at < 0 || at+4 > len(out.code) {
+out.patchFailed = true
+continue
+}
 if target < 0 { continue }
 addend := renvoGet32At(out.code, at)
 renvoPut32At(out.code, at, target+addend-(at+4))
@@ -28142,6 +28260,9 @@ data = renvoAsmImageWindows386(a)
 data = renvoAsmImage386(a)
 }
 var result renvoCompileResult
+if a.patchFailed || len(data) == 0 {
+return result
+}
 result.data = data
 result.ok = true
 return result
@@ -29064,6 +29185,10 @@ for i := 0; i+1 < len(out.relocs); i += 2 {
 at := int(renvo_runtime_UnsafeInt32At(out.relocs, i)) & 2147483647
 label := int(renvo_runtime_UnsafeInt32At(out.relocs, i+1)) & 2147483647
 target := renvoAsmLabelPosition(out, label)
+if at < 0 || at+4 > len(out.code) {
+out.patchFailed = true
+continue
+}
 if target < 0 { continue }
 addend := renvoGet32At(out.code, at)
 renvoPut32At(out.code, at, target+addend-(at+4))
@@ -29696,6 +29821,10 @@ for i := 0; i+1 < len(out.relocs); i += 2 {
 at := int(renvo_runtime_UnsafeInt32At(out.relocs, i)) & 2147483647
 label := int(renvo_runtime_UnsafeInt32At(out.relocs, i+1)) & 2147483647
 target := renvoAsmLabelPosition(out, label)
+if at < 0 || at+4 > len(out.code) {
+out.patchFailed = true
+continue
+}
 if target < 0 { continue }
 insn := renvoGet32At(out.code, at)
 
@@ -30350,6 +30479,10 @@ if targetIsWindows(s.gen.c.renvoTargetOS) {
 data = renvoAsmImageWindowsArm64(a)
 } else if targetIsDarwin(s.gen.c.renvoTargetOS) {
 data = renvoAsmImageDarwinArm64(a)
+}
+if a.patchFailed || len(data) == 0 {
+s.done = true
+return true
 }
 s.result.data = data
 s.result.ok = true
@@ -31008,6 +31141,10 @@ for i := 0; i+1 < len(out.relocs); i += 2 {
 at := int(renvo_runtime_UnsafeInt32At(out.relocs, i)) & 2147483647
 label := int(renvo_runtime_UnsafeInt32At(out.relocs, i+1)) & 2147483647
 target := renvoAsmLabelPosition(out, label)
+if at < 0 || at+4 > len(out.code) {
+out.patchFailed = true
+continue
+}
 if target < 0 { continue }
 insn := renvoGet32At(out.code, at)
 
@@ -36764,6 +36901,9 @@ renvoNonNil(g)
 a := &g.asm
 data := renvoAsmImageArm(a)
 var result renvoCompileResult
+if a.patchFailed || len(data) == 0 {
+return result
+}
 result.data = data
 result.ok = true
 return result

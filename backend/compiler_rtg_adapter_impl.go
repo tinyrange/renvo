@@ -330,6 +330,10 @@ func renvoRTGStoreParamWord(g *renvoLinearGen, word int, offset int) {
 			renvoRTGAsmStoreFrame(&g.asm, offset, registers[word])
 			return
 		}
+		if renvoRTGUnsupportedOperation == 0 {
+			renvoRTGUnsupportedOperation = 3001
+		}
+		return
 	}
 	source := renvoRTGAsmAddress(renvoRTGFrame, RTGNoRegister,
 		2*renvoRTGStackWordBytes+(word-6)*renvoRTGStackWordBytes, 1)
@@ -350,6 +354,12 @@ func renvoRTGEmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int
 		limit = len(registers)
 	}
 	for i := 0; i < limit; i++ {
+		if !registers[i].Valid {
+			if renvoRTGUnsupportedOperation == 0 {
+				renvoRTGUnsupportedOperation = 3002
+			}
+			return
+		}
 		renvoRTGAsmPopRegister(&g.asm, registers[i])
 	}
 	renvoAsmCallLabel(&g.asm, g.funcLabels[fnIndex])
@@ -369,7 +379,8 @@ func renvoRTGEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount
 }
 
 func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-	renvoRTGUnsupportedOperation = false
+	renvoRTGUnsupportedOperation = 0
+	renvoRTGFailureDetail = -1
 	appIndex := -1
 	for i := 0; i < len(meta.funcs); i++ {
 		if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
@@ -394,11 +405,20 @@ func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoComp
 		if !renvoBeginKernelModuleRTG(g, appIndex) {
 			return renvoCompileResult{}
 		}
-		if !renvoEmitAllQueuedFunctionsScratch(g) || renvoRTGUnsupportedOperation {
+		if !renvoEmitAllQueuedFunctionsScratch(g) {
+			return renvoCompileResult{}
+		}
+		if renvoRTGUnsupportedOperation != 0 {
+			renvoRTGReportFailure(g)
 			return renvoCompileResult{}
 		}
 		renvoAsmPatch(&g.asm)
 		data := renvoRTGKernelImage(&g.asm, g.kernelInitLabel, g.kernelExitLabel)
+		renvoRTGValidateRelocations(&g.asm)
+		if renvoRTGUnsupportedOperation != 0 {
+			renvoRTGReportFailure(g)
+			return renvoCompileResult{}
+		}
 		if len(data) == 0 {
 			return renvoCompileResult{}
 		}
@@ -445,15 +465,86 @@ func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoComp
 	if !renvoEmitAllQueuedFunctionsScratch(g) {
 		return renvoCompileResult{}
 	}
-	if renvoRTGUnsupportedOperation {
+	if renvoRTGUnsupportedOperation != 0 {
+		renvoRTGReportFailure(g)
 		return renvoCompileResult{}
 	}
 	renvoAsmPatch(&g.asm)
 	data := renvoRTGImage(&g.asm)
+	renvoRTGValidateRelocations(&g.asm)
+	if renvoRTGUnsupportedOperation != 0 {
+		renvoRTGReportFailure(g)
+		return renvoCompileResult{}
+	}
 	if len(data) == 0 {
 		return renvoCompileResult{}
 	}
 	return renvoCompileResult{data: data, ok: true}
+}
+
+func renvoRTGReportFailure(g *renvoLinearGen) {
+	renvoPrintErr("renvo: prepared backend ")
+	name, _, _, found := renvoRTGTargetBinding(renvoTargetRTG)
+	if found {
+		renvoPrintErr(name)
+	} else {
+		renvoPrintErr("<unknown>")
+	}
+	if renvoRTGUnsupportedOperation >= 1000 && renvoRTGUnsupportedOperation < 2000 {
+		renvoPrintErr(" is missing condition selector ")
+		renvoPrintIntErr(renvoRTGUnsupportedOperation - 1000)
+	} else if renvoRTGUnsupportedOperation >= 4000 {
+		renvoPrintErr(" reached an unsupported compiler helper ")
+		renvoPrintIntErr(renvoRTGUnsupportedOperation - 4000)
+	} else if renvoRTGUnsupportedOperation >= 3000 {
+		renvoPrintErr(" used an invalid required register")
+	} else if renvoRTGUnsupportedOperation >= 2000 {
+		renvoPrintErr(" left an invalid or unresolved relocation ")
+		renvoPrintIntErr(renvoRTGUnsupportedOperation - 2000)
+		if renvoRTGFailureDetail >= 0 {
+			renvoPrintErr(" targeting label ")
+			renvoPrintIntErr(renvoRTGFailureDetail)
+			for i := 0; i < len(g.funcLabels); i++ {
+				if g.funcLabels[i] == renvoRTGFailureDetail {
+					renvoPrintErr(" (")
+					write(2, g.prog.src[g.meta.funcs[i].nameStart:g.meta.funcs[i].nameEnd], -1)
+					renvoPrintErr(")")
+				}
+			}
+		}
+	} else {
+		renvoPrintErr(" is missing direct emitter operation ")
+		renvoPrintIntErr(renvoRTGUnsupportedOperation)
+	}
+	renvoPrintErr("\n")
+}
+
+var renvoRTGFailureDetail = -1
+
+func renvoRTGValidateRelocations(out *renvoAsm) {
+	if out.patchFailed && renvoRTGUnsupportedOperation == 0 {
+		renvoRTGUnsupportedOperation = 2004
+	}
+	for i := 0; i+1 < len(out.relocs); i += 2 {
+		at := int(renvo_runtime_UnsafeInt32At(out.relocs, i)) & 2147483647
+		label := int(renvo_runtime_UnsafeInt32At(out.relocs, i+1)) & 2147483647
+		if at < 0 || at+4 > len(out.code) || renvoAsmLabelPosition(out, label) < 0 {
+			if renvoRTGUnsupportedOperation == 0 {
+				renvoRTGUnsupportedOperation = 2004
+			}
+			if renvoRTGFailureDetail < 0 {
+				renvoRTGFailureDetail = label
+			}
+		}
+	}
+	for i := 0; i+2 < len(out.absRelocs); i += 3 {
+		at := int(renvo_runtime_UnsafeInt32At(out.absRelocs, i)) & 2147483647
+		if at < 0 || at+4 > len(out.code) {
+			if renvoRTGUnsupportedOperation == 0 {
+				renvoRTGUnsupportedOperation = 2005
+			}
+		}
+	}
 }
 
 func renvoBeginKernelModuleRTG(g *renvoLinearGen, appIndex int) bool {

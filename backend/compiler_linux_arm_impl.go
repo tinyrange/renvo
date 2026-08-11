@@ -576,6 +576,9 @@ func renvoFinishScalarProgramArm(g *renvoLinearGen) renvoCompileResult {
 	a := &g.asm
 	data := renvoAsmImageArm(a)
 	var result renvoCompileResult
+	if a.patchFailed || len(data) == 0 {
+		return result
+	}
 	result.data = data
 	result.ok = true
 	return result
