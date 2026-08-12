@@ -355,6 +355,12 @@ go backend {
 			riscv32.emit(out, 0x000580e7) // jalr ra, a1, 0
 			return
 		}
+		if name == "realtime_call" && wordCount == 1 {
+			staticCallArguments(out, wordCount)
+			riscv32.emit(out, 0x0000100f) // fence.i
+			riscv32.emit(out, 0x000500e7) // jalr ra, a0, 0
+			return
+		}
 		if name == "realtime_receive_pid" && wordCount == 2 {
 			staticCallArguments(out, wordCount)
 			realtimeReceivePID(out)
