@@ -27,6 +27,15 @@ func USBRecoveryPending() bool {
 // window. Successful boots do not wait.
 func OpenUSBRecoveryWindow() {
 	if USBRecoveryPending() {
+		// The raw PHY configuration survives the watchdog's HP-system reset.
+		// Restore the fixed-function full-speed attachment before waiting for a
+		// recovery flasher; otherwise the host continues to see the unfinished
+		// low-speed personality throughout this window.
+		mmio.Store32(usbSerialJTAGTest, 0)
+		config := mmio.Load32(usbSerialJTAGConf0)
+		config &^= usbPadPullOverride | usbDPPullUp | usbDPPullDown | usbDMPullUp | usbDMPullDown
+		config |= usbDPPullUp | usbPadEnable
+		mmio.Store32(usbSerialJTAGConf0, config)
 		timer := SystemTimer{}
 		timer.DelayMilliseconds(5000)
 	}
@@ -47,7 +56,8 @@ func ArmUSBRecovery() {
 }
 
 // CompleteUSBRecovery clears the retained attempt marker and disarms the
-// watchdog after the raw PHY has been returned to USB Serial/JTAG.
+// watchdog after enumeration succeeds or the raw PHY is returned to USB
+// Serial/JTAG.
 func CompleteUSBRecovery() {
 	mmio.Store32(timerGroup0WDTProtect, timerGroup0WDTKey)
 	mmio.Store32(timerGroup0WDTConfig0, 0)

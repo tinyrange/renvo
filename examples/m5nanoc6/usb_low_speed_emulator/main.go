@@ -1,5 +1,5 @@
-// usb_low_speed qualifies the portable software SIE, low-speed HID
-// enumeration, and the ESP32-C6 raw PHY transmit path.
+// usb_low_speed_emulator qualifies the portable software SIE and raw-PHY
+// transmit waveform without depending on a hardware USB host.
 package main
 
 import (
@@ -8,6 +8,9 @@ import (
 	"renvo.dev/device/usb/hid"
 	"renvo.dev/device/usb/lowspeed"
 )
+
+var proofStates [128]byte
+var proofCount int
 
 func hostToken(sie *lowspeed.SIE, pid, address, endpoint byte) {
 	value := uint16(address) | uint16(endpoint)<<7
@@ -61,50 +64,20 @@ func control(sie *lowspeed.SIE, device *usb.Device, address byte, setup [8]byte)
 	return 0, true
 }
 
-func encodeReply(states []byte, pid byte, data []byte) int {
-	if pid == lowspeed.PIDData0 || pid == lowspeed.PIDData1 {
-		return lowspeed.EncodeData(states, pid, data)
-	}
-	return lowspeed.EncodeHandshake(states, pid)
-}
-
-func runPhysical(sie *lowspeed.SIE, device *usb.Device) {
-	phy := esp32c6.NewRMTUSBPHY()
-	phy.TakeoverDetached()
-	esp32c6.ArmUSBRecovery()
-	var states [128]byte
-	var data [16]byte
-	var reply [8]byte
-	recoveryArmed := true
-	for {
-		count, reset := phy.Receive(states[:])
-		if reset {
-			sie.BusReset()
-			device.Poll()
-			continue
-		}
-		pid, length, ok := phy.Packet(data[:])
-		if !ok {
-			continue
-		}
-		sie.HandlePacket(pid, data[:length])
-		replyPID, replyLength, ready := sie.TakeReply(reply[:])
-		if ready {
-			encoded := encodeReply(states[:], replyPID, reply[:replyLength])
-			if encoded != 0 {
-				phy.Transmit(states[:encoded])
-			}
-		}
-		device.Poll()
-		if recoveryArmed && device.Configured() {
-			esp32c6.CompleteUSBRecovery()
-			recoveryArmed = false
+func transmitProof() {
+	payload := [8]byte{'C', '6', ' ', 'P', 'A', 'S', 'S', '\n'}
+	proofCount = lowspeed.EncodeData(proofStates[:], lowspeed.PIDData0, payload[:])
+	if proofCount == 0 {
+		for {
 		}
 	}
+	phy := esp32c6.NewUSBPHY(0)
+	phy.Takeover()
+	phy.Transmit(proofStates[:proofCount])
+	phy.Release()
 }
 
 func main() {
-	esp32c6.OpenUSBRecoveryWindow()
 	reportDescriptor := []byte{0x06, 0x00, 0xff, 0x09, 1, 0xa1, 1, 0xc0}
 	function := hid.NewLowSpeed(reportDescriptor)
 	sie := &lowspeed.SIE{}
@@ -148,6 +121,7 @@ func main() {
 			}
 		}
 	}
-
-	runPhysical(sie, device)
+	transmitProof()
+	for {
+	}
 }

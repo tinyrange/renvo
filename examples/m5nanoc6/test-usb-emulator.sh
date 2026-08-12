@@ -17,10 +17,10 @@ if [ ! -x "$emulator" ]; then
 fi
 
 "$renvo" -backend "$example_root/esp32c6.rtg" -t esp32c6/riscv32 \
-	-o "$temporary/usb-low-speed.elf" "$example_root/usb_low_speed"
+	-o "$temporary/usb-low-speed.elf" "$example_root/usb_low_speed_emulator"
 
 set -- run --target esp32c6 --elf "$temporary/usb-low-speed.elf" \
-	--max-instructions 250000 --result "$temporary/result.json"
+	--max-instructions 500000 --result "$temporary/result.json"
 if [ -n "${ESPTOOL:-}" ]; then
 	"$ESPTOOL" --chip esp32c6 elf2image \
 		--flash-mode dio --flash-freq 80m --flash-size 4MB \
