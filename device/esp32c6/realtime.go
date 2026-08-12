@@ -28,6 +28,15 @@ func RealtimeStart120MHz() {}
 // renvo:linkstatic esp32c6,realtime_enter_at
 func RealtimeEnterAt(cycle uint32, entry uintptr) {}
 
+// RealtimeReceivePID waits for a full-speed packet and returns a validated PID.
+// It stores the cycle at the first EOP SE0 sample through eopCycle, which must
+// not be nil. The target emits fixed-ten-cycle SYNC/PID sampling directly at
+// the call site. A zero PID indicates timeout or invalid synchronization/PID
+// complement.
+//
+// renvo:linkstatic esp32c6,realtime_receive_pid
+func RealtimeReceivePID(timeout uint32, eopCycle *uint32) byte { return 0 }
+
 const fullSpeedWaveformWords = 800
 
 // FullSpeedWaveform owns an unrolled PHY-test transmitter in executable
