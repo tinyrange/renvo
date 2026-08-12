@@ -77,7 +77,7 @@ func runPhysical(sie *lowspeed.SIE, device *usb.Device) {
 	var reply [8]byte
 	recoveryArmed := true
 	for {
-		count, reset := phy.Receive(states[:])
+		_, reset := phy.Receive(states[:])
 		if reset {
 			sie.BusReset()
 			device.Poll()

@@ -309,6 +309,53 @@ go backend {
 		out.Mark(disabled)
 		riscv32.move(out, riscv32.primary, riscv32.copyCount)
 	}
+
+	// Target-owned static calls are the narrow escape hatch for operations
+	// whose instruction layout is itself part of the hardware contract.  The
+	// portable declaration supplies the Go signature; this definition supplies
+	// the RV32 implementation selected by the wider build.
+	func staticCall(out *RTGEmitter, importID int, wordCount int) {
+		library := out.StaticImportDLL(importID)
+		name := out.StaticImportName(importID)
+		if library != "esp32c6" {
+			// Unknown target imports must fail visibly instead of becoming an
+			// accidental no-op in a freestanding image.
+			riscv32.emit(out, 0x00100073) // ebreak
+			return
+		}
+		if name == "realtime_dedicated_gpio" && wordCount == 0 {
+			riscv32.emit(out, 0x80402573) // csrr a0, 0x804
+			return
+		}
+		if name == "realtime_cycle" && wordCount == 0 {
+			riscv32.emit(out, 0x7e202573) // csrr a0, 0x7e2
+			return
+		}
+		if name == "realtime_start_120mhz" && wordCount == 0 {
+			// Select PLL/4, then expose a resettable cycle counter through the
+			// C6 performance-monitor CSR bank used by the critical block.
+			riscv32.emit(out, 0x600962b7) // lui t0, 0x60096
+			riscv32.emit(out, 0x11828293) // addi t0, t0, 0x118
+			riscv32.emit(out, 0x00010337) // lui t1, 0x10
+			riscv32.emit(out, 0x0062a023) // sw t1, 0(t0)
+			riscv32.emit(out, 0x00100293) // li t0, 1
+			riscv32.emit(out, 0x7e029073) // csrw 0x7e0, t0
+			riscv32.emit(out, 0x00300293) // li t0, 3
+			riscv32.emit(out, 0x7e129073) // csrw 0x7e1, t0
+			riscv32.emit(out, 0x7e201073) // csrw 0x7e2, zero
+			return
+		}
+		if name == "realtime_enter_at" && wordCount == 2 {
+			// a0 is the target cycle and a1 is an executable internal-SRAM
+			// address.  fence.i publishes a freshly generated waveform block.
+			riscv32.emit(out, 0x0000100f) // fence.i
+			riscv32.emit(out, 0x7e2022f3) // csrr t0, 0x7e2
+			riscv32.emit(out, 0xfea2eee3) // bltu t0, a0, -4
+			riscv32.emit(out, 0x000580e7) // jalr ra, a1, 0
+			return
+		}
+		riscv32.emit(out, 0x00100073) // ebreak
+	}
 }
 
 abi esp32c6_internal {
@@ -330,6 +377,7 @@ abi esp32c6_internal {
 runtime esp32c6_freestanding {
 	emit_entry_start = go entryStart
 	emit_exit = go exit
+	emit_static_call = go staticCall
 	operation write { emit = go usbSerialWrite }
 	operation print { use = write args = [stderr, buffer, count] }
 }

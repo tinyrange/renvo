@@ -9,6 +9,9 @@ const (
 	usbSerialJTAGConf0 = uintptr(0x6000f018)
 	usbSerialJTAGTest  = uintptr(0x6000f01c)
 	usbDPIOMux         = uintptr(0x6009003c) // GPIO13
+	usbDMIOMux         = uintptr(0x60090038) // GPIO12
+	cpuGPIOInput0      = uintptr(0x600911c4)
+	cpuGPIOInput1      = uintptr(0x600911c8)
 	rmtInputSelect0    = uintptr(0x60091270) // RMT_SIG_IN0_IDX
 	rmtRXConfig0       = uintptr(0x60006018)
 	rmtRXConfig1       = uintptr(0x6000601c)
@@ -67,15 +70,20 @@ const (
 // speed PHY test interface. The software protocol may operate at low speed;
 // no programmable USB controller is assumed.
 type USBPHY struct {
-	originalConf uint32
-	bitDelay     uint32
-	hardwareTX   bool
-	owned        bool
-	resetSeen    bool
-	receivedPID  byte
-	receivedData [16]byte
-	receivedLen  int
-	receivedOK   bool
+	originalConf  uint32
+	originalDPMux uint32
+	originalDMMux uint32
+	originalCPU0  uint32
+	originalCPU1  uint32
+	bitDelay      uint32
+	hardwareTX    bool
+	owned         bool
+	dedicatedRX   bool
+	resetSeen     bool
+	receivedPID   byte
+	receivedData  [16]byte
+	receivedLen   int
+	receivedOK    bool
 }
 
 func usbLine(dp, dm bool) (byte, bool) {
@@ -170,11 +178,56 @@ func (p *USBPHY) TakeoverDetached() {
 	p.owned = true
 }
 
+// TakeoverFullSpeedDetached disconnects USB Serial/JTAG and reattaches the raw
+// PHY with the internal full-speed D+ pull-up. PHY-test mode retains the C6's
+// analog receiver, transmitter, and USB pad electrical characteristics.
+func (p *USBPHY) TakeoverFullSpeedDetached() {
+	if p.owned {
+		return
+	}
+	p.originalConf = mmio.Load32(usbSerialJTAGConf0)
+	config := p.originalConf &^ (usbDPPullUp | usbDPPullDown | usbDMPullUp | usbDMPullDown)
+	config |= usbPadPullOverride | usbPadEnable
+	mmio.Store32(usbSerialJTAGConf0, config)
+	mmio.Store32(usbSerialJTAGTest, usbTestEnable)
+	timer := SystemTimer{}
+	timer.DelayMilliseconds(usbDetachMilliseconds)
+	mmio.Store32(usbSerialJTAGConf0, config|usbDPPullUp)
+	p.resetSeen = false
+	p.owned = true
+}
+
+// EnableDedicatedUSBInputs taps D-/D+ into bits 0/1 of the CPU dedicated-GPIO
+// input CSR without changing either pad's USB IOMUX function. Release restores
+// every modified register.
+func (p *USBPHY) EnableDedicatedUSBInputs() bool {
+	if !p.owned || p.dedicatedRX {
+		return p.owned
+	}
+	p.originalDMMux = mmio.Load32(usbDMIOMux)
+	p.originalDPMux = mmio.Load32(usbDPIOMux)
+	p.originalCPU0 = mmio.Load32(cpuGPIOInput0)
+	p.originalCPU1 = mmio.Load32(cpuGPIOInput1)
+	mmio.Store32(usbDMIOMux, p.originalDMMux|gpioInputEnable)
+	mmio.Store32(usbDPIOMux, p.originalDPMux|gpioInputEnable)
+	mmio.Store32(cpuGPIOInput0, 12|1<<7)
+	mmio.Store32(cpuGPIOInput1, 13|1<<7)
+	p.dedicatedRX = true
+	return true
+}
+
 // Release restores the fixed USB Serial/JTAG function for programming and
 // debugging. It is safe to call more than once.
 func (p *USBPHY) Release() {
 	if !p.owned {
 		return
+	}
+	if p.dedicatedRX {
+		mmio.Store32(cpuGPIOInput0, p.originalCPU0)
+		mmio.Store32(cpuGPIOInput1, p.originalCPU1)
+		mmio.Store32(usbDMIOMux, p.originalDMMux)
+		mmio.Store32(usbDPIOMux, p.originalDPMux)
+		p.dedicatedRX = false
 	}
 	config := mmio.Load32(usbSerialJTAGConf0)
 	config &^= usbDPPullUp | usbDMPullUp
