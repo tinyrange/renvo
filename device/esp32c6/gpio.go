@@ -36,7 +36,7 @@ func GPIO(number uint8) *Pin { return &Pin{number: number} }
 func (p *Pin) bit() uint32 { return uint32(1) << uint(p.number) }
 
 func (p *Pin) ioMux() uintptr {
-	return ioMuxBase + uintptr(p.number+1)*4
+	return ioMuxBase + uintptr(p.number)*4
 }
 
 func (p *Pin) outputSelect() uintptr {
