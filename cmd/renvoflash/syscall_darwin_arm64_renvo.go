@@ -50,7 +50,7 @@ func hostRTS() int                 { return 0x004 }
 func hostModemSet() int            { return 0x8004746c }
 func hostModemClear() int          { return 0x8004746b }
 func hostClose(fd int) int         { return darwinClose(fd) }
-func hostLastError() int {
+func hostError(result int) int {
 	pointer := darwinErrorPointer()
 	if pointer == nil {
 		return -1

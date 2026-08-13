@@ -26,8 +26,12 @@ func hostRTS() int                 { return 0x004 }
 func hostModemSet() int            { return 0x5416 }
 func hostModemClear() int          { return 0x5417 }
 func hostClose(fd int) int         { return syscall(sysClose, fd, 0, 0, 0, 0, 0) }
-func hostLastError() int           { return 0 }
-func hostWouldBlock() int          { return 11 }
+func hostError(result int) int {
+	// Renvo's Linux syscall intrinsic returns the kernel result directly, so
+	// failures are -errno rather than libc's -1 plus a thread-local errno.
+	return -result
+}
+func hostWouldBlock() int { return 11 }
 func hostIoctl(fd int, request int, pointer int) int {
 	return syscall(sysIoctl, fd, request, pointer, 0, 0, 0)
 }

@@ -553,8 +553,9 @@ func (port *serial) modem(bit int, state bool) error {
 	if state {
 		request = hostModemSet()
 	}
-	if port.ioctl(request, data) < 0 {
-		return fail("set serial control lines failed (host error " + decimal(hostLastError()) + ")")
+	result := port.ioctl(request, data)
+	if result < 0 {
+		return fail("set serial control lines failed (host error " + decimal(hostError(result)) + ")")
 	}
 	return nil
 }
@@ -564,7 +565,7 @@ func (port *serial) write(data []byte) error {
 	wouldBlock := 0
 	for offset < len(data) {
 		n := hostWrite(port.fd, int(unsafe.Pointer(&data[offset])), len(data)-offset)
-		if n < 0 && hostLastError() == hostWouldBlock() {
+		if n < 0 && hostError(n) == hostWouldBlock() {
 			wouldBlock++
 			if wouldBlock >= 10000 {
 				return fail("serial write remained blocked")
@@ -573,7 +574,7 @@ func (port *serial) write(data []byte) error {
 			continue
 		}
 		if n <= 0 {
-			return fail("serial write failed (host error " + decimal(hostLastError()) + ")")
+			return fail("serial write failed (host error " + decimal(hostError(n)) + ")")
 		}
 		wouldBlock = 0
 		offset += n
@@ -586,7 +587,7 @@ func (port *serial) read(data []byte) int {
 		return 0
 	}
 	n := hostRead(port.fd, int(unsafe.Pointer(&data[0])), len(data))
-	if n < 0 && hostLastError() == hostWouldBlock() {
+	if n < 0 && hostError(n) == hostWouldBlock() {
 		return 0
 	}
 	return n
