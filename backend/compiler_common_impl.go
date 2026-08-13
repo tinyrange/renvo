@@ -2901,14 +2901,9 @@ func renvoTokenPrecedence(p *renvoProgram, pos int) int {
 	if pos < 0 || pos >= renvoTokCount(p) {
 		return 0
 	}
-	base := pos * renvoTokenStride
-	if int(renvo_runtime_UnsafeInt32At(p.toks.data, base))&255 != renvoTokOp {
-		return 0
-	}
-	packed := int(renvo_runtime_UnsafeInt32At(p.toks.data, base+1))
-	start := packed & 0xffffff
-	size := packed >> 24 & 255
-	if size == 1 {
+	start := renvoTokStart(p, pos)
+	end := renvoTokEnd(p, pos)
+	if end-start == 1 {
 		c := renvo_runtime_UnsafeByteAt(p.src, start)
 		if c == '<' || c == '>' {
 			return 3
@@ -2921,7 +2916,7 @@ func renvoTokenPrecedence(p *renvoProgram, pos int) int {
 		}
 		return 0
 	}
-	if size == 2 {
+	if end-start == 2 {
 		c0 := renvo_runtime_UnsafeByteAt(p.src, start)
 		c1 := renvo_runtime_UnsafeByteAt(p.src, start+1)
 		if c0 == '|' && c1 == '|' {
@@ -2994,11 +2989,7 @@ func renvoFindMatchingExprClose(p *renvoProgram, start int, end int, open byte, 
 	depth := 0
 	i := start
 	for i < end {
-		first := int(renvo_runtime_UnsafeInt32At(p.toks.data, i*renvoTokenStride))
-		c := byte(first >> 24)
-		if first&255 != renvoTokOp {
-			c = 0
-		}
+		c := renvoTokSingleChar(p, i)
 		if c == open {
 			depth++
 		} else if c == close {
@@ -3389,18 +3380,13 @@ func renvoFindStatementBodyOpen(p *renvoProgram, start int, end int) int {
 
 func renvoFindMatchingBrace(p *renvoProgram, openTok int, end int) int {
 	renvoNonNil(p)
-	first := int(renvo_runtime_UnsafeInt32At(p.toks.data, openTok*renvoTokenStride))
-	if first&255 != renvoTokOp || byte(first>>24) != '{' {
+	if renvoTokSingleChar(p, openTok) != '{' {
 		return openTok
 	}
 	depth := 1
 	i := openTok + 1
 	for i < end {
-		first = int(renvo_runtime_UnsafeInt32At(p.toks.data, i*renvoTokenStride))
-		c := byte(first >> 24)
-		if first&255 != renvoTokOp {
-			c = 0
-		}
+		c := renvoTokSingleChar(p, i)
 		if c == '{' {
 			depth++
 		} else if c == '}' {
@@ -4151,20 +4137,13 @@ func renvoInferTopLiteralType(m *renvoMeta, p *renvoProgram, start int, end int)
 			typ := renvoParseType(m, p, start, tok).typ
 			resolved := renvoResolveType(m, typ)
 			renvoNonNil(resolved)
-			if resolved.kind != renvoTypeArray || resolved.count >= 0 {
-				return typ
-			}
-			ep := renvoNewExprParse()
-			renvoNonNil(ep)
-			rootIndex := renvoParseExpressionRoot(ep, p, start, end)
-			if rootIndex < 0 {
-				return 0
-			}
-			var g renvoLinearGen
-			g.prog = p
-			g.meta = m
-			if !renvoResolveInferredArrayCompositeLength(&g, ep, rootIndex, typ) {
-				return 0
+			if resolved.kind == renvoTypeArray && resolved.count < 0 {
+				ep := renvoNewExprParse()
+				renvoNonNil(ep)
+				rootIndex := renvoParseExpressionRoot(ep, p, start, end)
+				if rootIndex < 0 || !renvoResolveInferredArrayCompositeLength(m, nil, ep, rootIndex, typ) {
+					return 0
+				}
 			}
 			return typ
 		}
@@ -10364,17 +10343,17 @@ func renvoTypeFromExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
 		endTok++
 	}
 	typeResult := renvoParseType(meta, p, e.tok, endTok)
-	if !renvoResolveInferredArrayCompositeLength(g, ep, idx, typeResult.typ) {
+	if !renvoResolveInferredArrayCompositeLength(meta, g, ep, idx, typeResult.typ) {
 		return 0
 	}
 	return typeResult.typ
 }
-func renvoResolveInferredArrayCompositeLength(g *renvoLinearGen, ep *renvoExprParse, idx int, typ int) bool {
-	renvoNonNil(g, ep)
-	if typ <= 0 || typ >= len(g.meta.types) {
+func renvoResolveInferredArrayCompositeLength(meta *renvoMeta, g *renvoLinearGen, ep *renvoExprParse, idx int, typ int) bool {
+	renvoNonNil(meta, ep)
+	if typ <= 0 || typ >= len(meta.types) {
 		return true
 	}
-	t := &g.meta.types[typ]
+	t := &meta.types[typ]
 	e := &ep.exprs[idx]
 	if t.kind != renvoTypeArray || t.count >= 0 || e.kind != renvoExprComposite {
 		return true
@@ -10385,7 +10364,10 @@ func renvoResolveInferredArrayCompositeLength(g *renvoLinearGen, ep *renvoExprPa
 		field := ep.fields[e.firstArg+i]
 		at := next
 		if field.key >= 0 {
-			key := renvoEvalConstExpr(g, ep, field.key)
+			key := renvoEvalMetaParsedConstExpr(meta, meta.prog, ep, field.key, 0)
+			if g != nil {
+				key = renvoEvalConstExpr(g, ep, field.key)
+			}
 			if !key.ok || key.value < 0 {
 				return false
 			}
@@ -10397,7 +10379,7 @@ func renvoResolveInferredArrayCompositeLength(g *renvoLinearGen, ep *renvoExprPa
 		}
 	}
 	t.count = count
-	t.size = count * renvoTypeSize(g.meta, t.elem)
+	t.size = count * renvoTypeSize(meta, t.elem)
 	return true
 }
 func renvoFindTypeByRange(g *renvoLinearGen, nameStart int, nameEnd int) int {
