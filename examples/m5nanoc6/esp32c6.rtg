@@ -133,6 +133,24 @@ go backend {
 		out.Mark(done)
 	}
 
+	// JAL keeps the return address in ra, and frameStart preserves ra/fp below
+	// the caller's stack pointer. Overflow call words therefore begin at the
+	// incoming frame pointer, with no stack-resident return-address header.
+	func storeParamWord(out *RTGEmitter, word int, offset int) {
+		registers := []RTGRegister{
+			riscv32.a0, riscv32.a1, riscv32.a2,
+			riscv32.a3, riscv32.a4, riscv32.a5,
+		}
+		if word >= 0 && word < len(registers) {
+			riscv32.frameStore(out, offset, registers[word])
+			return
+		}
+		riscv32.loadNative(out, riscv32.primary, RTGAddress{
+			Base: riscv32.frame, Displacement: (word - 6) * 4,
+		})
+		riscv32.frameStore(out, offset, riscv32.primary)
+	}
+
 	func image(out *RTGEmitter) []byte {
 		code := out.Code()
 		data := out.Data()
@@ -291,11 +309,243 @@ go backend {
 		out.Mark(disabled)
 		riscv32.move(out, riscv32.primary, riscv32.copyCount)
 	}
+
+	// Target-owned static calls are the narrow escape hatch for operations
+	// whose instruction layout is itself part of the hardware contract.  The
+	// portable declaration supplies the Go signature; this definition supplies
+	// the RV32 implementation selected by the wider build.
+	func staticCall(out *RTGEmitter, importID int, wordCount int) {
+		library := out.StaticImportDLL(importID)
+		name := out.StaticImportName(importID)
+		if library != "esp32c6" {
+			// Unknown target imports must fail visibly instead of becoming an
+			// accidental no-op in a freestanding image.
+			riscv32.emit(out, 0x00100073) // ebreak
+			return
+		}
+		if name == "realtime_dedicated_gpio" && wordCount == 0 {
+			riscv32.emit(out, 0x80402573) // csrr a0, 0x804
+			return
+		}
+		if name == "realtime_cycle" && wordCount == 0 {
+			riscv32.emit(out, 0x7e202573) // csrr a0, 0x7e2
+			return
+		}
+		if name == "realtime_start_120mhz" && wordCount == 0 {
+			// Select PLL/4, then expose a resettable cycle counter through the
+			// C6 performance-monitor CSR bank used by the critical block.
+			riscv32.emit(out, 0x600962b7) // lui t0, 0x60096
+			riscv32.emit(out, 0x11828293) // addi t0, t0, 0x118
+			riscv32.emit(out, 0x00010337) // lui t1, 0x10
+			riscv32.emit(out, 0x0062a023) // sw t1, 0(t0)
+			riscv32.emit(out, 0x00100293) // li t0, 1
+			riscv32.emit(out, 0x7e029073) // csrw 0x7e0, t0
+			riscv32.emit(out, 0x00300293) // li t0, 3
+			riscv32.emit(out, 0x7e129073) // csrw 0x7e1, t0
+			riscv32.emit(out, 0x7e201073) // csrw 0x7e2, zero
+			return
+		}
+		if name == "realtime_enter_at" && wordCount == 2 {
+			staticCallArguments(out, wordCount)
+			// a0 is the target cycle and a1 is an executable internal-SRAM
+			// address.  fence.i publishes a freshly generated waveform block.
+			riscv32.emit(out, 0x0000100f) // fence.i
+			riscv32.emit(out, 0x7e2022f3) // csrr t0, 0x7e2
+			riscv32.emit(out, 0xfea2eee3) // bltu t0, a0, -4
+			riscv32.emit(out, 0x000580e7) // jalr ra, a1, 0
+			return
+		}
+		if name == "realtime_call" && wordCount == 1 {
+			staticCallArguments(out, wordCount)
+			riscv32.emit(out, 0x0000100f) // fence.i
+			riscv32.emit(out, 0x000500e7) // jalr ra, a0, 0
+			return
+		}
+		if name == "realtime_receive_pid" && wordCount == 2 {
+			staticCallArguments(out, wordCount)
+			realtimeReceivePID(out)
+			return
+		}
+		riscv32.emit(out, 0x00100073) // ebreak
+	}
+
+	func staticCallArguments(out *RTGEmitter, wordCount int) {
+		// Link-static arguments arrive on the compiler expression stack. Move
+		// them to the target ABI and consume their stack slots before emitting
+		// the inline operation.
+		if wordCount > 0 {
+			riscv32.loadNative(out, riscv32.a0,
+				RTGAddress{Base: riscv32.stack})
+			riscv32.encodeI(out, 0x13, 0, riscv32.stack, riscv32.stack, 4)
+		}
+		if wordCount > 1 {
+			riscv32.loadNative(out, riscv32.a1,
+				RTGAddress{Base: riscv32.stack})
+			riscv32.encodeI(out, 0x13, 0, riscv32.stack, riscv32.stack, 4)
+		}
+		if wordCount > 2 {
+			riscv32.loadNative(out, riscv32.a2,
+				RTGAddress{Base: riscv32.stack})
+			riscv32.encodeI(out, 0x13, 0, riscv32.stack, riscv32.stack, 4)
+		}
+		if wordCount > 3 {
+			riscv32.loadNative(out, riscv32.a3,
+				RTGAddress{Base: riscv32.stack})
+			riscv32.encodeI(out, 0x13, 0, riscv32.stack, riscv32.stack, 4)
+		}
+		if wordCount > 4 {
+			riscv32.loadNative(out, riscv32.a4,
+				RTGAddress{Base: riscv32.stack})
+			riscv32.encodeI(out, 0x13, 0, riscv32.stack, riscv32.stack, 4)
+		}
+		if wordCount > 5 {
+			riscv32.loadNative(out, riscv32.a5,
+				RTGAddress{Base: riscv32.stack})
+			riscv32.encodeI(out, 0x13, 0, riscv32.stack, riscv32.stack, 4)
+		}
+	}
+
+	func realtimeSyncSample(
+		out *RTGEmitter, expected RTGRegister,
+	) {
+		riscv32.emit(out, 0x804022f3) // csrr t0, 0x804
+		riscv32.encodeI(out, 0x13, 7, riscv32.t0, riscv32.t0, 3)
+		riscv32.encodeR(out, 0x33, 4, 0, riscv32.t3, riscv32.t0, expected)
+		riscv32.encodeR(out, 0x33, 6, 0, riscv32.a3, riscv32.a3, riscv32.t3)
+		riscv32.move(out, riscv32.t4, riscv32.t0)
+		for delay := 0; delay < 5; delay++ {
+			riscv32.emit(out, 0x00000013)
+		}
+	}
+
+	func realtimePIDSample(out *RTGEmitter, shift int) {
+		riscv32.emit(out, 0x804022f3) // csrr t0, 0x804
+		riscv32.encodeI(out, 0x13, 7, riscv32.t0, riscv32.t0, 3)
+		riscv32.encodeR(out, 0x33, 4, 0, riscv32.t3, riscv32.t0, riscv32.t4)
+		riscv32.encodeI(out, 0x13, 3, riscv32.t3, riscv32.t3, 1)
+		riscv32.encodeI(out, 0x13, 1, riscv32.t3, riscv32.t3, shift)
+		riscv32.encodeR(out, 0x33, 6, 0, riscv32.a2, riscv32.a2, riscv32.t3)
+		riscv32.move(out, riscv32.t4, riscv32.t0)
+		for delay := 0; delay < 3; delay++ {
+			riscv32.emit(out, 0x00000013)
+		}
+	}
+
+	func realtimeReceivePID(out *RTGEmitter) {
+		waitJ := out.NewLabel()
+		waitK := out.NewLabel()
+		sync := out.NewLabel()
+		eopRelease := out.NewLabel()
+		invalid := out.NewLabel()
+		done := out.NewLabel()
+		riscv32.move(out, riscv32.a4, riscv32.a0)
+		riscv32.move(out, riscv32.a5, riscv32.a1)
+		riscv32.moveImmediate(out, riscv32.t1, 1) // full-speed K
+		riscv32.moveImmediate(out, riscv32.t2, 2) // full-speed J
+
+		out.Mark(waitJ)
+		riscv32.emit(out, 0x804022f3) // csrr t0, 0x804
+		riscv32.encodeI(out, 0x13, 7, riscv32.t0, riscv32.t0, 3)
+		riscv32.compare(out, riscv32.t0, riscv32.t2)
+		riscv32.jumpCondition(out, riscv32.eq, waitK)
+		riscv32.decrement(out, riscv32.a4)
+		riscv32.compare(out, riscv32.a4, riscv32.zero)
+		riscv32.jumpCondition(out, riscv32.ne, waitJ)
+		riscv32.moveImmediate(out, riscv32.a0, 0)
+		riscv32.moveImmediate(out, riscv32.a1, 0)
+		riscv32.storeU32(out, RTGAddress{Base: riscv32.a5}, riscv32.a1)
+		riscv32.jump(out, done)
+
+		out.Mark(waitK)
+		riscv32.emit(out, 0x804022f3)
+		riscv32.encodeI(out, 0x13, 7, riscv32.t0, riscv32.t0, 3)
+		// Poll at five-cycle resolution so detection of the SOP K edge has a
+		// bounded phase error. The taken branch skips the success JAL.
+		riscv32.branchInstruction(out, 1, riscv32.t0, riscv32.t1, 8)
+		riscv32.jump(out, sync)
+		riscv32.decrement(out, riscv32.a4)
+		riscv32.branchInstruction(out, 1, riscv32.a4, riscv32.zero, -20)
+		riscv32.moveImmediate(out, riscv32.a0, 0)
+		riscv32.moveImmediate(out, riscv32.a1, 0)
+		riscv32.storeU32(out, RTGAddress{Base: riscv32.a5}, riscv32.a1)
+		riscv32.jump(out, done)
+
+		// The wait loop already sampled the first K in SYNC. Nine setup
+		// instructions put the J sample 13 cycles after the first observed K;
+		// with the five-cycle edge-search resolution this lands three to seven
+		// cycles into the next cell. Every later expansion is ten instructions.
+		out.Mark(sync)
+		riscv32.moveImmediate(out, riscv32.a3, 0)
+		riscv32.moveImmediate(out, riscv32.a2, 0)
+		riscv32.move(out, riscv32.t4, riscv32.t0)
+		for delay := 0; delay < 6; delay++ {
+			riscv32.emit(out, 0x00000013)
+		}
+		realtimeSyncSample(out, riscv32.t2)
+		realtimeSyncSample(out, riscv32.t1)
+		realtimeSyncSample(out, riscv32.t2)
+		realtimeSyncSample(out, riscv32.t1)
+		realtimeSyncSample(out, riscv32.t2)
+		realtimeSyncSample(out, riscv32.t1)
+		realtimeSyncSample(out, riscv32.t1)
+		for shift := 0; shift < 8; shift++ {
+			realtimePIDSample(out, shift)
+		}
+
+		// Scan the rest of the packet while preserving the first-SE0 cycle
+		// needed to schedule an immediate response.
+		out.Mark(eopRelease)
+		riscv32.emit(out, 0x804022f3)
+		riscv32.encodeI(out, 0x13, 7, riscv32.t0, riscv32.t0, 3)
+		riscv32.compare(out, riscv32.t0, riscv32.zero)
+		riscv32.jumpCondition(out, riscv32.ne, eopRelease)
+		riscv32.emit(out, 0x7e2025f3) // csrr a1, 0x7e2
+		riscv32.storeU32(out, RTGAddress{Base: riscv32.a5}, riscv32.a1)
+		waitRelease := out.NewLabel()
+		out.Mark(waitRelease)
+		riscv32.emit(out, 0x804022f3)
+		riscv32.encodeI(out, 0x13, 7, riscv32.t0, riscv32.t0, 3)
+		riscv32.compare(out, riscv32.t0, riscv32.zero)
+		riscv32.jumpCondition(out, riscv32.eq, waitRelease)
+
+		// Reject bad SYNC and PID complements.
+		riscv32.compare(out, riscv32.a3, riscv32.zero)
+		riscv32.jumpCondition(out, riscv32.ne, invalid)
+		riscv32.encodeI(out, 0x13, 7, riscv32.t0, riscv32.a2, 0x0f)
+		riscv32.encodeI(out, 0x13, 5, riscv32.t1, riscv32.a2, 4)
+		riscv32.encodeI(out, 0x13, 4, riscv32.t1, riscv32.t1, 0x0f)
+		riscv32.encodeI(out, 0x13, 7, riscv32.t1, riscv32.t1, 0x0f)
+		riscv32.compare(out, riscv32.t0, riscv32.t1)
+		riscv32.jumpCondition(out, riscv32.ne, invalid)
+		riscv32.move(out, riscv32.a0, riscv32.a2)
+		riscv32.jump(out, done)
+
+		out.Mark(invalid)
+		riscv32.moveImmediate(out, riscv32.a0, 0)
+		out.Mark(done)
+	}
+}
+
+abi esp32c6_internal {
+	arch = riscv32
+	arguments = [a0, a1, a2, a3, a4, a5]
+	call_words = [a0, a1, a2, a3, a4, a5]
+	result = [a0, a1]
+	stack_alignment = 16
+	return_address = link
+	frame_pointer = frame
+	frame_start = go riscv32.frameStart
+	frame_finish = go riscv32.frameFinish
+	frame_load = go riscv32.frameLoad
+	frame_store = go riscv32.frameStore
+	frame_address = go riscv32.frameAddress
+	store_param_word = go storeParamWord
 }
 
 runtime esp32c6_freestanding {
 	emit_entry_start = go entryStart
 	emit_exit = go exit
+	emit_static_call = go staticCall
 	operation write { emit = go usbSerialWrite }
 	operation print { use = write args = [stderr, buffer, count] }
 }
@@ -315,7 +565,7 @@ target esp32c6/riscv32 {
 	os = esp32c6
 	arch = riscv32
 	frontend_arch = riscv32
-	abi = riscv32_internal
+	abi = esp32c6_internal
 	runtime = esp32c6_freestanding
 	executable = esp32c6_elf
 	build_tags = [esp32c6, riscv32, m5nanoc6]

@@ -14414,12 +14414,21 @@ func renvoEmitBuiltinCopy(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(destSlice)
 	srcSlice := renvoResolveType(g.meta, srcType)
 	renvoNonNil(srcSlice)
-	if destSlice.kind != renvoTypeSlice || srcSlice.kind != renvoTypeSlice {
+	if destSlice.kind != renvoTypeSlice {
 		return false
 	}
 	elemSize := renvoTypeSize(g.meta, destSlice.elem)
-	if elemSize != renvoTypeSize(g.meta, srcSlice.elem) {
-		return false
+	sourceString := srcSlice.kind == renvoTypeString
+	if sourceString {
+		destElem := renvoResolveType(g.meta, destSlice.elem)
+		renvoNonNil(destElem)
+		if destElem.kind != renvoTypeByte {
+			return false
+		}
+	} else {
+		if srcSlice.kind != renvoTypeSlice || elemSize != renvoTypeSize(g.meta, srcSlice.elem) {
+			return false
+		}
 	}
 	if elemSize < 1 {
 		elemSize = 8
@@ -14434,8 +14443,14 @@ func renvoEmitBuiltinCopy(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		return false
 	}
 	renvoAsmStorePrimarySecondaryStack(a, destPtr, destLen)
-	if !renvoEmitSliceValueRegs(g, ep, srcIndex) {
-		return false
+	if sourceString {
+		if !renvoEmitStringValueRegs(g, ep, srcIndex) {
+			return false
+		}
+	} else {
+		if !renvoEmitSliceValueRegs(g, ep, srcIndex) {
+			return false
+		}
 	}
 	renvoAsmStorePrimarySecondaryStack(a, srcPtr, srcLen)
 	renvoAsmCopyStackSlot(a, destLen, copyLen)
