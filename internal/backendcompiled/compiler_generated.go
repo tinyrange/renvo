@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "bb9f9e0680ee80e776d1ebdca3996a2902182de868637c611b2f1d42f1e2dcfc"
+const CompilerSourceDigest = "22eec4c351f608e7d15caa3215c8bd38248c5235531e1aad7de9fde8baa9667a"
 
 // source: backend/compiler_common_impl.go
 
@@ -26725,8 +26725,15 @@ renvoRTGUnsupportedOperation = 3001
 }
 return
 }
+overflowBase := 2 * renvoRTGStackWordBytes
+
+
+
+if renvoRTGCallWord0.Code == renvoRTGPrimary.Code {
+overflowBase = 0
+}
 source := renvoRTGAsmAddress(renvoRTGFrame, RTGNoRegister,
-2*renvoRTGStackWordBytes+(word-6)*renvoRTGStackWordBytes, 1)
+overflowBase+(word-6)*renvoRTGStackWordBytes, 1)
 renvoRTGDirectLoadNative(&g.asm, renvoRTGPrimary, source)
 renvoRTGAsmStoreFrame(&g.asm, offset, renvoRTGPrimary)
 }
