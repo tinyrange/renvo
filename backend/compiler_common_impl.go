@@ -1072,14 +1072,6 @@ type renvoConstResult struct {
 	ok    bool
 }
 
-type renvoConstSpecState struct {
-	names     []int
-	values    []int
-	endTok    int
-	typeStart int
-	typeEnd   int
-}
-
 type renvoTypeResult struct {
 	typ  int
 	next int
@@ -3727,7 +3719,9 @@ func renvoAddBuiltinType(m *renvoMeta, kind int, size int) {
 
 func renvoParseConstDecls(m *renvoMeta, p *renvoProgram, start int, end int) {
 	renvoNonNil(m, p)
-	var state renvoConstSpecState
+	prevTypeStart := 0
+	prevTypeEnd := 0
+	prevValues := renvoFixedIntScratch(8)
 	iotaValue := 0
 	j := start
 	for j < end {
@@ -3735,24 +3729,66 @@ func renvoParseConstDecls(m *renvoMeta, p *renvoProgram, start int, end int) {
 			j++
 			continue
 		}
-		renvoParseConstSpec(p, j, end, &state)
-		if len(state.names) == 0 {
+		specEnd := renvoStatementLineEnd(p, j, end)
+		if specEnd <= j {
+			renvoMetaError(m)
+			return
+		}
+		eq := renvoFindConstSpecEqual(p, j, specEnd)
+		headEnd := specEnd
+		if eq > j {
+			headEnd = eq
+		}
+		names := renvoFixedIntScratch(4)
+		k := j
+		for k < headEnd {
+			if !renvoTokIsKind(p, k, renvoTokIdent) {
+				break
+			}
+			names = append(names, k)
+			k++
+			if renvoTokCharIs(p, k, ',') {
+				k++
+				continue
+			}
+			break
+		}
+		if len(names) == 0 {
+			renvoMetaError(m)
+			return
+		}
+		if eq > j {
+			prevTypeStart = k
+			prevTypeEnd = headEnd
+			newValues, ok := renvoSplitTopLevelComma(p, eq+1, specEnd)
+			if !ok {
+				renvoMetaError(m)
+				return
+			}
+			prevValues = newValues
+		}
+		valueCount := len(prevValues) / 2
+		if valueCount == 0 {
+			renvoMetaError(m)
+			return
+		}
+		if valueCount != len(names) {
 			renvoMetaError(m)
 			return
 		}
 		typ := 0
-		if state.typeStart < state.typeEnd {
-			typeResult := renvoParseType(m, p, state.typeStart, state.typeEnd)
+		if prevTypeStart < prevTypeEnd {
+			typeResult := renvoParseType(m, p, prevTypeStart, prevTypeEnd)
 			typ = typeResult.typ
 		}
-		for i := 0; i < len(state.names); i++ {
-			nameTok := state.names[i]
+		for i := 0; i < len(names); i++ {
+			nameTok := names[i]
 			name := renvoTokAt(p, nameTok)
 			if renvoBytesEqualText(p.src, int(name.start), int(name.end), "_") {
 				continue
 			}
-			initStart := state.values[i*2]
-			initEnd := state.values[i*2+1]
+			initStart := prevValues[i*2]
+			initEnd := prevValues[i*2+1]
 			constType := typ
 			if constType == 0 {
 				constType = renvoInferTopLiteralType(m, p, initStart, initEnd)
@@ -3776,40 +3812,7 @@ func renvoParseConstDecls(m *renvoMeta, p *renvoProgram, start int, end int) {
 			renvoMetaAppendGlobal(m, sym)
 		}
 		iotaValue++
-		j = state.endTok
-	}
-}
-
-func renvoParseConstSpec(p *renvoProgram, start int, end int, state *renvoConstSpecState) {
-	state.names = nil
-	specEnd := renvoStatementLineEnd(p, start, end)
-	eq := renvoFindConstSpecEqual(p, start, specEnd)
-	headEnd := specEnd
-	if eq > start {
-		headEnd = eq
-	}
-	names := renvoFixedIntScratch(4)
-	at := start
-	for at < headEnd && renvoTokIsKind(p, at, renvoTokIdent) {
-		names = append(names, at)
-		at++
-		if !renvoTokCharIs(p, at, ',') {
-			break
-		}
-		at++
-	}
-	if eq > start {
-		values, ok := renvoSplitTopLevelComma(p, eq+1, specEnd)
-		if !ok {
-			return
-		}
-		state.typeStart = at
-		state.typeEnd = headEnd
-		state.values = values
-	}
-	state.endTok = specEnd
-	if len(names) > 0 && len(state.values)/2 == len(names) {
-		state.names = names
+		j = specEnd
 	}
 }
 
@@ -6864,6 +6867,9 @@ func renvoFunctionLocalCap(fn *renvoFuncDecl) int {
 
 func renvoEmitLinearRange(g *renvoLinearGen, start int, end int) bool {
 	renvoNonNil(g)
+	constGroup := g.constEvalIotaValid != 0
+	constGroupRepeatStart := 0
+	constGroupRepeatEnd := 0
 	var bp renvoBodyParse
 	prog := g.meta.prog
 	bp.prog = prog
@@ -6894,6 +6900,21 @@ func renvoEmitLinearRange(g *renvoLinearGen, start int, end int) bool {
 		if !bp.ok {
 			return false
 		}
+		if constGroup {
+			if stmt.kind == renvoStmtAssign {
+				constGroupRepeatStart = stmt.startTok
+				constGroupRepeatEnd = stmt.endTok
+			} else {
+				if constGroupRepeatStart == 0 {
+					return false
+				}
+				count := (stmt.endTok - stmt.startTok) * renvoTokenStride
+				renvoCopyTokenData(prog, constGroupRepeatStart*renvoTokenStride, stmt.startTok*renvoTokenStride, count)
+				stmt.startTok = constGroupRepeatStart
+				stmt.endTok = constGroupRepeatEnd
+			}
+			stmt.kind = renvoStmtVar
+		}
 		lastKind = stmt.kind
 		i = next
 		statementLocalBase := g.localCount
@@ -6905,6 +6926,9 @@ func renvoEmitLinearRange(g *renvoLinearGen, start int, end int) bool {
 				renvoPrintErr("\n")
 			}
 			return false
+		}
+		if constGroup {
+			g.constEvalIota++
 		}
 		for g.localCount > statementLocalBase {
 			local := &g.locals[g.localCount-1]
@@ -8993,18 +9017,21 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 	p := g.prog
 	renvoNonNil(meta)
 	renvoNonNil(p)
-	groupedConst := renvoEmitGroupedConstDecl(g, stmt)
-	if groupedConst != 0 {
-		return groupedConst > 0
-	}
 	a := &g.asm
 	tokenData := p.toks.data
 	startBase := stmt.startTok * renvoTokenStride
 	startKind := int(tokenData[startBase]) & 255
+	if startKind == renvoTokConst && renvoTokCharIs(p, stmt.startTok+1, '(') {
+		g.constEvalIota = 0
+		g.constEvalIotaValid = 1
+		ok := renvoEmitLinearRange(g, stmt.startTok+2, stmt.endTok-1)
+		g.constEvalIotaValid = 0
+		return ok
+	}
 	nameStart := stmt.nameStart
 	nameEnd := stmt.nameEnd
 	nextBase := startBase + renvoTokenStride
-	if (stmt.kind == renvoStmtVar || startKind == renvoTokVar) && int(tokenData[nextBase])&255 == renvoTokIdent {
+	if (startKind == renvoTokVar || startKind == renvoTokConst) && int(tokenData[nextBase])&255 == renvoTokIdent {
 		nameStart = renvoTokStart(p, stmt.startTok+1)
 		nameEnd = renvoTokEnd(p, stmt.startTok+1)
 	} else if startKind == renvoTokIdent {
@@ -9192,8 +9219,12 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 				if assignTok <= stmt.startTok {
 					typeEnd = stmt.endTok
 				}
-				if stmt.startTok+2 < typeEnd {
-					typeResult := renvoParseType(meta, g.prog, stmt.startTok+2, typeEnd)
+				typeStart := stmt.startTok + 2
+				if startKind == renvoTokIdent {
+					typeStart--
+				}
+				if typeStart < typeEnd {
+					typeResult := renvoParseType(meta, g.prog, typeStart, typeEnd)
 					if typeResult.typ != 0 {
 						localType = typeResult.typ
 					}
@@ -9401,94 +9432,10 @@ func renvoEmitTypedExprToSavedMem(g *renvoLinearGen, ep *renvoExprParse, idx int
 	return true
 }
 
-// renvoEmitGroupedConstDecl handles parenthesized const declarations in
-// function bodies. It returns zero for other statements, one on success, and
-// -1 on an emission failure.
-func renvoEmitGroupedConstDecl(g *renvoLinearGen, stmt *renvoStmt) int {
-	p := g.prog
-	if !renvoTokIsKind(p, stmt.startTok, renvoTokConst) ||
-		!renvoTokCharIs(p, stmt.startTok+1, '(') {
-		return 0
-	}
-	groupEnd := stmt.endTok - 1
-	var state renvoConstSpecState
-	iotaValue := 0
-	g.constEvalIotaValid = 1
-	pos := stmt.startTok + 2
-	for pos < groupEnd {
-		if renvoTokCharIs(p, pos, ';') {
-			pos++
-			continue
-		}
-		renvoParseConstSpec(p, pos, groupEnd, &state)
-		if len(state.names) == 0 {
-			return -1
-		}
-		typ := 0
-		if state.typeStart < state.typeEnd {
-			typeResult := renvoParseType(g.meta, p, state.typeStart, state.typeEnd)
-			if typeResult.typ == 0 {
-				return -1
-			}
-			typ = typeResult.typ
-		}
-		g.constEvalIota = iotaValue
-		if !renvoEmitLocalConstSpec(g, state.names, state.values, typ, state.endTok) {
-			return -1
-		}
-		iotaValue++
-		pos = state.endTok
-	}
-	g.constEvalIotaValid = 0
-	return 1
-}
-
-func renvoEmitLocalConstSpec(g *renvoLinearGen, names []int, values []int, typ int, afterTok int) bool {
-	p := g.prog
-	count := len(names)
-	temps := renvoFixedIntScratch(count)
+func renvoCopyTokenData(p *renvoProgram, to int, from int, count int) {
 	for i := 0; i < count; i++ {
-		ep := renvoNewExprParse()
-		renvoNonNil(ep)
-		rootIndex := renvoParseExpressionRoot(ep, p, values[i*2], values[i*2+1])
-		if rootIndex < 0 {
-			return false
-		}
-		valueType := typ
-		if valueType == 0 {
-			valueType = renvoInferParsedExprType(g, ep, rootIndex)
-		}
-		if valueType == 0 {
-			valueType = renvoTypeInt
-		}
-		value := renvoEvalConstExpr(g, ep, rootIndex)
-		temp := renvoAddUnnamedLocal(g, valueType)
-		tempIndex := g.localCount - 1
-		if !renvoEmitExprToLocal(g, ep, rootIndex, temp) {
-			return false
-		}
-		g.locals[tempIndex].constValue = value.value
-		if value.ok {
-			g.locals[tempIndex].constValid = 1
-		}
-		temps = append(temps, tempIndex)
+		p.toks.data[to+i] = renvo_runtime_UnsafeInt32At(p.toks.data, from+i)
 	}
-	for i := 0; i < count; i++ {
-		name := renvoTokAt(p, names[i])
-		nameStart := int(name.start)
-		nameEnd := int(name.end)
-		if nameEnd == nameStart+1 && renvo_runtime_UnsafeByteAt(p.src, nameStart) == '_' {
-			continue
-		}
-		temp := g.locals[temps[i]]
-		offset := renvoAddTypedLocal(g, nameStart, nameEnd, temp.typ)
-		renvoEmitCopyStackToStack(g, temp.offset, offset, renvoTypeCopySize(g.meta, temp.typ))
-		if renvoFixedTarget == 0 && temp.constValid != 0 && renvoLocalConstTrackable(g, temp.typ, nameStart, nameEnd, afterTok) {
-			kind := renvoResolveType(g.meta, temp.typ).kind
-			renvoSetLocalConstAtOffset(g, offset, temp.constValue, kind)
-		}
-	}
-	return true
 }
 
 // renvoEmitGroupedTypedVarDecl handles VarSpecs whose identifier list shares one
@@ -9498,28 +9445,30 @@ func renvoEmitLocalConstSpec(g *renvoLinearGen, names []int, values []int, typ i
 func renvoEmitGroupedTypedVarDecl(g *renvoLinearGen, stmt *renvoStmt, assignTok int) int {
 	renvoNonNil(g, stmt)
 	p := g.prog
-	if stmt.kind != renvoStmtVar || !renvoTokIsKind(p, stmt.startTok, renvoTokVar) {
+	if stmt.kind != renvoStmtVar {
 		return 0
 	}
 	typeEnd := stmt.endTok
 	if assignTok > stmt.startTok {
 		typeEnd = assignTok
 	}
-	nameRanges := renvoFixedIntScratch(4)
-	pos := stmt.startTok + 1
+	names := renvoFixedIntScratch(4)
+	pos := stmt.startTok
+	if renvoTokIsKind(p, pos, renvoTokVar) {
+		pos++
+	}
 	for {
 		if pos >= typeEnd || !renvoTokIsKind(p, pos, renvoTokIdent) {
 			return 0
 		}
-		nameRanges = append(nameRanges, pos)
-		nameRanges = append(nameRanges, pos+1)
+		names = append(names, pos)
 		pos++
 		if pos >= typeEnd || !renvoTokCharIs(p, pos, ',') {
 			break
 		}
 		pos++
 	}
-	nameCount := len(nameRanges) / 2
+	nameCount := len(names)
 	if nameCount < 2 || pos >= typeEnd {
 		return 0
 	}
@@ -9551,29 +9500,19 @@ func renvoEmitGroupedTypedVarDecl(g *renvoLinearGen, stmt *renvoStmt, assignTok 
 			temps = append(temps, temp)
 		}
 	}
-	offsets := renvoFixedIntScratch(nameCount)
-	for i := 0; i < nameCount; i++ {
-		tok := nameRanges[i*2]
-		nameStart := int(renvoTokStart(p, tok))
-		nameEnd := int(renvoTokEnd(p, tok))
-		offset := 0
-		if nameEnd != nameStart+1 || renvo_runtime_UnsafeByteAt(p.src, nameStart) != '_' {
-			offset = renvoAddTypedLocal(g, nameStart, nameEnd, typeResult.typ)
-		}
-		offsets = append(offsets, offset)
-	}
-	if assignTok <= stmt.startTok {
-		for i := 0; i < nameCount; i++ {
-			if offsets[i] != 0 {
-				renvoZeroLocalAtOffset(g, offsets[i])
-			}
-		}
-		return 1
-	}
 	size := renvoTypeCopySize(g.meta, typeResult.typ)
 	for i := 0; i < nameCount; i++ {
-		if offsets[i] != 0 {
-			renvoEmitCopyStackToStack(g, temps[i], offsets[i], size)
+		tok := names[i]
+		nameStart := int(renvoTokStart(p, tok))
+		nameEnd := int(renvoTokEnd(p, tok))
+		if nameEnd == nameStart+1 && renvo_runtime_UnsafeByteAt(p.src, nameStart) == '_' {
+			continue
+		}
+		offset := renvoAddTypedLocal(g, nameStart, nameEnd, typeResult.typ)
+		if assignTok > stmt.startTok {
+			renvoEmitCopyStackToStack(g, temps[i], offset, size)
+		} else {
+			renvoZeroLocalAtOffset(g, offset)
 		}
 	}
 	return 1
