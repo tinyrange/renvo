@@ -5,6 +5,12 @@ import (
 	"unsafe"
 )
 
+func TestDisplayDimensions(t *testing.T) {
+	if Display.Width() != 135 || Display.Height() != 240 {
+		t.Fatalf("display dimensions = %dx%d", Display.Width(), Display.Height())
+	}
+}
+
 func TestRGB565(t *testing.T) {
 	tests := []struct {
 		red, green, blue byte
@@ -25,8 +31,8 @@ func TestRGB565(t *testing.T) {
 
 func TestDMABufferIsWordAligned(t *testing.T) {
 	var buffer dmaBuffer
-	if size := unsafe.Sizeof(buffer); size < DisplayWidth*6 {
-		t.Fatalf("DMA buffer size = %d, want at least %d", size, DisplayWidth*6)
+	if size := unsafe.Sizeof(buffer); size < displayWidth*6 {
+		t.Fatalf("DMA buffer size = %d, want at least %d", size, displayWidth*6)
 	}
 	if uintptr(unsafe.Pointer(&buffer[0]))&3 != 0 {
 		t.Fatalf("DMA buffer address %p is not word aligned", &buffer[0])

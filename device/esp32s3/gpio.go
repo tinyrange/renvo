@@ -106,3 +106,23 @@ func (p *Pin) ConfigureOutputSignal(signal uint32) error {
 	p.enable(true)
 	return nil
 }
+
+// ConfigureOpenDrain prepares a pin for software I2C. The output latch stays
+// low; output-enable selects between pulling low and releasing the line.
+func (p *Pin) ConfigureOpenDrain() error {
+	value := mmio.Load32(p.ioMux()) &^ (gpioFunctionMask | gpioPullDown)
+	mmio.Store32(p.ioMux(), value|gpioFunction|gpioInputEnable|gpioPullUp)
+	mmio.Store32(p.outputSelect(), gpioOutputSignal)
+	p.Set(false)
+	p.enable(false)
+	return nil
+}
+
+// PullLow drives an open-drain pin low.
+func (p *Pin) PullLow() { p.enable(true) }
+
+// Release stops driving an open-drain pin.
+func (p *Pin) Release() { p.enable(false) }
+
+// High samples an open-drain pin.
+func (p *Pin) High() bool { return p.Get() }

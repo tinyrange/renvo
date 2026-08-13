@@ -2,6 +2,7 @@
 package board
 
 import (
+	"renvo.dev/device/clock"
 	"renvo.dev/device/esp32c6"
 	"renvo.dev/device/gpio"
 	"renvo.dev/device/i2c"
@@ -14,8 +15,10 @@ var BlueLED = gpio.NewLED(esp32c6.GPIO(7), false)
 // the normal boot strapping level when released.
 var Button = gpio.NewButton(esp32c6.GPIO(9), gpio.PullUp, true)
 
+var clockSource = esp32c6.SystemTimer{}
+
 // Clock is the board monotonic clock and busy-wait timer.
-var Clock = esp32c6.SystemTimer{}
+var Clock = clock.New(&clockSource)
 
 // Random is the hardware entropy source.
 var Random = esp32c6.Random{}

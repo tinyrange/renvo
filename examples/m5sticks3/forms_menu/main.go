@@ -27,10 +27,6 @@ func waitButtonRelease(button *gpio.Button) {
 }
 
 func main() {
-	if !board.Display.Initialize() {
-		return
-	}
-
 	font := graphics.NewBuiltinFont(1)
 	var form forms.Form
 	form.Initialize(width, height)

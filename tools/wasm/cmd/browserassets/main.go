@@ -203,8 +203,6 @@ func buildPlatformPackages(root string, output string) (map[string]standardPacka
 		{Path: "device/gpio"},
 		{Path: "device/clock"},
 		{Path: "device/i2c"},
-		{Path: "device/spi"},
-		{Path: "device/uart"},
 		{Path: "device/sensor/sgp30"},
 		{Path: "device/esp32c6", Target: "esp32c6/riscv32"},
 		{Path: "device/board/m5nanoc6", Target: "esp32c6/riscv32"},

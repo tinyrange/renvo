@@ -31,9 +31,9 @@ if [ -n "${RENVO_EMU:-}" ]; then
 		exit 2
 	fi
 else
-	emulator="$emulator_root/target/debug/renvo"
+	emulator="$emulator_root/target/debug/remu"
 	if [ ! -x "$emulator" ]; then
-		(cd "$emulator_root" && cargo build --quiet -p renvo-cli --bin renvo)
+		(cd "$emulator_root" && cargo build --quiet -p remu-cli --bin remu)
 	fi
 fi
 
