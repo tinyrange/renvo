@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "bb9f9e0680ee80e776d1ebdca3996a2902182de868637c611b2f1d42f1e2dcfc"
+const CompilerSourceDigest = "a6822000fa1bd92d8967f125b37439a4251c78529d58e3bf314ab62ff4b9ac31"
 
 // source: backend/compiler_common_impl.go
 
@@ -14421,12 +14421,21 @@ destSlice := renvoResolveType(g.meta, destType)
 renvoNonNil(destSlice)
 srcSlice := renvoResolveType(g.meta, srcType)
 renvoNonNil(srcSlice)
-if destSlice.kind != renvoTypeSlice || srcSlice.kind != renvoTypeSlice {
+if destSlice.kind != renvoTypeSlice {
 return false
 }
 elemSize := renvoTypeSize(g.meta, destSlice.elem)
-if elemSize != renvoTypeSize(g.meta, srcSlice.elem) {
+sourceString := srcSlice.kind == renvoTypeString
+if sourceString {
+destElem := renvoResolveType(g.meta, destSlice.elem)
+renvoNonNil(destElem)
+if destElem.kind != renvoTypeByte {
 return false
+}
+} else {
+if srcSlice.kind != renvoTypeSlice || elemSize != renvoTypeSize(g.meta, srcSlice.elem) {
+return false
+}
 }
 if elemSize < 1 {
 elemSize = 8
@@ -14441,8 +14450,14 @@ if !renvoEmitSliceValueRegs(g, ep, destIndex) {
 return false
 }
 renvoAsmStorePrimarySecondaryStack(a, destPtr, destLen)
+if sourceString {
+if !renvoEmitStringValueRegs(g, ep, srcIndex) {
+return false
+}
+} else {
 if !renvoEmitSliceValueRegs(g, ep, srcIndex) {
 return false
+}
 }
 renvoAsmStorePrimarySecondaryStack(a, srcPtr, srcLen)
 renvoAsmCopyStackSlot(a, destLen, copyLen)

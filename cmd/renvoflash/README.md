@@ -12,6 +12,19 @@ sandbox/renvo -o sandbox/renvoflash ./cmd/renvoflash
 ./sandbox/renvoflash firmware.elf /dev/ttyACM0
 ```
 
+For the first ESP32-C6 raw-PHY tests, start recovery flashing before resetting
+or powering the board:
+
+```sh
+./sandbox/renvoflash --recover known-good.elf /dev/ttyACM0
+```
+
+Recovery mode waits indefinitely while the experimental USB personality owns
+the pins. A guarded firmware attempt watchdog-resets after twenty seconds, then
+leaves the reset-default USB Serial/JTAG interface active for five seconds.
+`renvoflash` catches that repeating window, enters the ROM loader, and replaces
+the application automatically. Press Ctrl-C to stop waiting.
+
 The default port is `/dev/ttyACM0`. On Linux the user must have read/write
 permission for the serial device (commonly through the `dialout` or `uucp`
 group). Use `--convert ELF BIN` to produce an application image without

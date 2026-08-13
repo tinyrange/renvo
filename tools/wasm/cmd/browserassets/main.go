@@ -204,6 +204,8 @@ func buildPlatformPackages(root string, output string) (map[string]standardPacka
 		{Path: "device/clock"},
 		{Path: "device/i2c"},
 		{Path: "device/sensor/sgp30"},
+		{Path: "device/usb"},
+		{Path: "device/usb/cdcacm"},
 		{Path: "device/esp32c6", Target: "esp32c6/riscv32"},
 		{Path: "device/board/m5nanoc6", Target: "esp32c6/riscv32"},
 		{Path: "examples/m5nanoc6/blink", Target: "esp32c6/riscv32"},
@@ -214,6 +216,7 @@ func buildPlatformPackages(root string, output string) (map[string]standardPacka
 		{Path: "device/board/m5sticks3", Target: "esp32s3/xtensa_lx7"},
 		{Path: "examples/m5sticks3/forms_menu", Target: "esp32s3/xtensa_lx7"},
 		{Path: "examples/m5sticks3/oracle", Target: "esp32s3/xtensa_lx7"},
+		{Path: "examples/m5sticks3/usb_cdc", Target: "esp32s3/xtensa_lx7"},
 	}
 	packages := make(map[string]standardPackage)
 	for _, spec := range specs {
