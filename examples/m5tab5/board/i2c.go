@@ -117,6 +117,73 @@ func i2cBeginWithEvents(lastCommand int) bool {
 	return false
 }
 
+func i2cContinueRead(data []byte) bool {
+	command := 0
+	i2cCommand(command, i2cOperationRestart)
+	command++
+	i2cCommand(command, i2cOperationWrite|1<<8|1)
+	command++
+	if len(data) > 1 {
+		i2cCommand(command, i2cOperationRead|uint32(len(data)-1))
+		command++
+	}
+	i2cCommand(command, i2cOperationRead|1<<10|1)
+	command++
+	i2cCommand(command, i2cOperationStop)
+	command++
+	i2cCommand(command, i2cOperationEnd)
+
+	store32(i2cClear, 0x7ffff)
+	lastI2CEvent = 0
+	lastI2CByte = 0
+	lastI2CState = 0
+	lastI2CFIFO = 0
+	update32(i2cControl, 0, 1<<11)
+	update32(i2cControl, 0, 1<<5)
+	offset := 0
+	errorMask := uint32((1 << 2) | (1 << 5) | (1 << 8) | (1 << 10) | (1 << 12) | (1 << 13))
+	for attempt := 0; attempt < 200000; attempt++ {
+		// Drain while the transaction is active. A single uninterrupted read is
+		// important for ST7121 coordinate snapshots, but its 70-byte report is
+		// larger than the P4's 32-byte RX FIFO.
+		available := int(load32(i2cBase+0x08) >> 8 & 0x3f)
+		for available > 0 && offset < len(data) {
+			data[offset] = byte(load32(i2cData))
+			offset++
+			available--
+		}
+		events := load32(i2cInterrupt)
+		if events&errorMask != 0 {
+			lastI2CEvent = events
+			lastI2CByte = load32(i2cBase+0x14) >> 10 & 0x1f
+			i2cRecover()
+			return false
+		}
+		if events&(1<<7) != 0 {
+			available = int(load32(i2cBase+0x08) >> 8 & 0x3f)
+			for available > 0 && offset < len(data) {
+				data[offset] = byte(load32(i2cData))
+				offset++
+				available--
+			}
+			if offset != len(data) {
+				lastI2CEvent = 0xffffffff
+				lastI2CState = load32(i2cBase + 0x08)
+				lastI2CFIFO = load32(i2cBase + 0x14)
+				i2cRecover()
+				return false
+			}
+			return i2cWaitIdle()
+		}
+		delay(20)
+	}
+	lastI2CEvent = 0xffffffff
+	lastI2CState = load32(i2cBase + 0x08)
+	lastI2CFIFO = load32(i2cBase + 0x14)
+	i2cRecover()
+	return false
+}
+
 func configureI2C(dataPin, clockPin int) {
 	// Enable and reset I2C0 through the ESP32-P4 HP clock controller.
 	update32(i2cClockGate, 0, 1<<12)
@@ -229,49 +296,12 @@ func i2cWriteRead(address byte, register []byte, data []byte) bool {
 
 	// Do not reset the FIFO or master FSM here: END deliberately preserves the
 	// active bus transaction. The first phase consumed the FIFO completely, so
-	// append the read address and continue with a repeated start. Reports larger
-	// than the 32-byte FIFO are split with END, not STOP. This lets the CPU drain
-	// each FIFO load while the controller retains one coherent device snapshot.
+	// append the read address and continue with a repeated start. Drain long
+	// reads while the command engine runs so the device sees one transaction.
 	store32(i2cData, uint32(address)*2+1)
-	offset := 0
-	first := true
-	for offset < len(data) {
-		length := len(data) - offset
-		// A completely full RX FIFO stalls this P4 before command completion.
-		// Leave one slot free, as the polling path cannot service a watermark IRQ.
-		if length > 31 {
-			length = 31
-		}
-		final := offset+length == len(data)
-		command := 0
-		if first {
-			i2cCommand(command, i2cOperationRestart)
-			command++
-			i2cCommand(command, i2cOperationWrite|1<<8|1)
-			command++
-		}
-		if final {
-			if length > 1 {
-				i2cCommand(command, i2cOperationRead|uint32(length-1))
-				command++
-			}
-			i2cCommand(command, i2cOperationRead|1<<10|1)
-			command++
-			i2cCommand(command, i2cOperationStop)
-		} else {
-			i2cCommand(command, i2cOperationRead|uint32(length))
-			command++
-			i2cCommand(command, i2cOperationEnd)
-		}
-		if !i2cBegin(command) {
-			lastI2CFailure = 10
-			return false
-		}
-		for index := 0; index < length; index++ {
-			data[offset+index] = byte(load32(i2cData))
-		}
-		offset += length
-		first = false
+	if !i2cContinueRead(data) {
+		lastI2CFailure = 10
+		return false
 	}
 	return true
 }

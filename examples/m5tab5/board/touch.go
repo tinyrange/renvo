@@ -4,14 +4,56 @@ const touchAddress = byte(0x55)
 
 // TouchPoint is one ST7121 contact in the native 720 by 1280 orientation.
 type TouchPoint struct {
-	ID       int
-	X        int
-	Y        int
-	Strength int
+	ID        int
+	X         int
+	Y         int
+	Strength  int
+	Intensity int
+}
+
+// TouchReportStats describes the most recently consumed controller report.
+// Checksum is -1 when the active firmware does not include one in its report.
+// The remaining checksum fields are retained for firmware variants which do.
+type TouchReportStats struct {
+	SensingCounter int
+	Advanced       int
+	RawCount       int
+	Checksum       int
+	CoordSum       int
+	ReportSum      int
+	CoordXOR       int
+	Reports        int
 }
 
 var touchMaximum = 10
+var touchFirmware int
+var touchMiscellaneous int
 var touchReadFailure int
+var touchIRQBefore int
+var touchIRQAfter int
+var touchLastAdvanced int
+var touchLastPoints [10]TouchPoint
+var touchLastCount int
+var touchLastRawPoints [10]TouchPoint
+var touchLastRawCount int
+var touchSensingCounter int
+var touchChecksum = -1
+var touchChecksumCoordSum int
+var touchChecksumReportSum int
+var touchChecksumCoordXOR int
+var touchReports int
+var tab5TouchFilter touchFilter
+
+func copyLastTouches(points []TouchPoint) int {
+	count := touchLastCount
+	if count > len(points) {
+		count = len(points)
+	}
+	for index := 0; index < count; index++ {
+		points[index] = touchLastPoints[index]
+	}
+	return count
+}
 
 // InitTouch verifies the ST7121 firmware and its native coordinate range.
 func InitTouch() bool {
@@ -32,7 +74,7 @@ func InitTouch() bool {
 		return false
 	}
 	print("TAB5 TOUCH ENDPOINT PASS\n")
-	var info [10]byte
+	var info [16]byte
 	read := false
 	for attempt := 0; attempt < 6 && !read; attempt++ {
 		read = i2cReadRegister(touchSDA, touchSCL, touchAddress, 0, info[:])
@@ -126,7 +168,26 @@ func InitTouch() bool {
 	maximumX := int(info[5])<<8 | int(info[6])
 	maximumY := int(info[7])<<8 | int(info[8])
 	touchMaximum = int(info[9])
-	if info[0] != 1 {
+	touchFirmware = int(info[0])
+	var miscellaneous [1]byte
+	if !i2cReadRegister(touchSDA, touchSCL, touchAddress, 0x00f0, miscellaneous[:]) {
+		print("TAB5 TOUCH MISC INFO FAIL\n")
+		return false
+	}
+	touchMiscellaneous = int(miscellaneous[0])
+	touchLastCount = 0
+	touchLastRawCount = 0
+	touchSensingCounter = 0
+	touchChecksum = -1
+	touchChecksumCoordSum = 0
+	touchChecksumReportSum = 0
+	touchChecksumCoordXOR = 0
+	touchReports = 0
+	tab5TouchFilter.reset()
+	// TP_INT pulses low for each sensing frame. Hardware edge latching retains
+	// that event while the renderer is busy at a frame boundary.
+	configureGPIOFallingEdge(23)
+	if touchFirmware != 1 {
 		print("TAB5 TOUCH FIRMWARE FAIL\n")
 		return false
 	}
@@ -145,43 +206,128 @@ func InitTouch() bool {
 // The caller supplies storage so polling does not allocate.
 func ReadTouches(points []TouchPoint) (int, bool) {
 	touchReadFailure = 0
-	var advanced [1]byte
-	if !i2cReadRegister(touchSDA, touchSCL, touchAddress, 0x0010, advanced[:]) {
+	touchIRQBefore = 0
+	interruptHigh := readGPIO(23)
+	if interruptHigh {
+		touchIRQBefore = 1
+	}
+	ready := gpioInterruptPending(23) || !interruptHigh
+	if !ready {
+		touchIRQAfter = 1
+		// Never read the report page without a real data-ready event. Such reads
+		// produce coherent synthetic edge/grid contacts on the integrated ST7121.
+		return copyLastTouches(points), true
+	}
+	// Clear before reading so a new falling edge during this transaction remains
+	// latched for the next call instead of being erased after the report ACK.
+	clearGPIOInterrupt(23)
+	// Read Advanced Touch Info and all coordinate slots as one report-page
+	// transaction. Register 0x000a's sensing counter cannot be included in this
+	// read: although numerically adjacent, the ST7121 does not auto-increment
+	// from that status region into the report page on this firmware. Reading
+	// through the final coordinate byte acknowledges the returned snapshot.
+	var page [74]byte
+	const reportOffset = 0
+	const coordinateOffset = 4
+	pageLength := coordinateOffset + touchMaximum*7
+	if !i2cReadRegister(touchSDA, touchSCL, touchAddress, 0x0010, page[:pageLength]) {
 		touchReadFailure = 1
 		return 0, false
 	}
-	if advanced[0]&0x08 == 0 {
-		return 0, true
+	touchLastAdvanced = int(page[reportOffset])
+	touchReports++
+	// Firmware 1.80.1.16 advertises checksum capability in Miscellaneous Info,
+	// but its Advanced Touch Info value does not include a checksum in the active
+	// report. Do not fetch CkAddr separately: it is not tied atomically to this
+	// frame and cannot safely validate or reject coordinates.
+	touchChecksum = -1
+	touchChecksumCoordSum = 0
+	touchChecksumReportSum = 0
+	touchChecksumCoordXOR = 0
+	if page[reportOffset]&0x08 == 0 {
+		touchLastRawCount = 0
+		touchIRQAfter = 0
+		if readGPIO(23) {
+			touchIRQAfter = 1
+		}
+		return copyLastTouches(points), true
 	}
-	var reports [70]byte
-	length := touchMaximum * 7
-	if !i2cReadRegister(touchSDA, touchSCL, touchAddress, 0x0014, reports[:length]) {
-		touchReadFailure = 2
-		return 0, false
-	}
-	count := 0
-	for contact := 0; contact < touchMaximum && count < len(points); contact++ {
-		offset := contact * 7
-		if reports[offset]&0x80 == 0 {
+	var raw [10]TouchPoint
+	rawCount := 0
+	for contact := 0; contact < touchMaximum; contact++ {
+		offset := coordinateOffset + contact*7
+		if page[offset]&0x80 == 0 {
 			continue
 		}
-		points[count].ID = contact
-		points[count].X = int(reports[offset]&0x3f)<<8 | int(reports[offset+1])
-		points[count].Y = int(reports[offset+2])<<8 | int(reports[offset+3])
-		points[count].Strength = int(reports[offset+4])
+		raw[rawCount].ID = contact
+		raw[rawCount].X = int(page[offset]&0x3f)<<8 | int(page[offset+1])
+		raw[rawCount].Y = int(page[offset+2])<<8 | int(page[offset+3])
+		raw[rawCount].Strength = int(page[offset+4])
+		raw[rawCount].Intensity = int(page[offset+5])
 		// Ignore transient records outside the geometry reported by firmware.
 		// Passing them to Forms creates clipped markers along the display edge.
-		if points[count].X < 0 || points[count].X >= DisplayWidth ||
-			points[count].Y < 0 || points[count].Y >= DisplayHeight {
+		if raw[rawCount].X < 0 || raw[rawCount].X >= DisplayWidth ||
+			raw[rawCount].Y < 0 || raw[rawCount].Y >= DisplayHeight {
 			continue
 		}
-		count++
+		rawCount++
+	}
+	touchLastRawCount = rawCount
+	for index := 0; index < rawCount; index++ {
+		touchLastRawPoints[index] = raw[index]
+	}
+	count := tab5TouchFilter.apply(raw[:rawCount], points)
+	touchIRQAfter = 0
+	if readGPIO(23) {
+		touchIRQAfter = 1
+	}
+	touchLastCount = count
+	for index := 0; index < count; index++ {
+		touchLastPoints[index] = points[index]
 	}
 	return count, true
 }
 
-// TouchReadFailure identifies the failed polling phase for serial diagnostics:
-// one is the advanced-status byte and two is the coordinate report.
+// TouchProtocolInfo reports the controller identity and optional feature bits.
+func TouchProtocolInfo() (int, int) {
+	return touchFirmware, touchMiscellaneous
+}
+
+// TouchRawReport copies the unfiltered coordinates from the most recently
+// consumed sensing frame. Applications can use this for diagnostics without
+// allowing controller artifacts into their input path.
+func TouchRawReport(points []TouchPoint) int {
+	count := touchLastRawCount
+	if count > len(points) {
+		count = len(points)
+	}
+	for index := 0; index < count; index++ {
+		points[index] = touchLastRawPoints[index]
+	}
+	return count
+}
+
+// TouchLastReportStats returns protocol-level evidence for the last report.
+func TouchLastReportStats() TouchReportStats {
+	return TouchReportStats{
+		SensingCounter: touchSensingCounter,
+		Advanced:       touchLastAdvanced,
+		RawCount:       touchLastRawCount,
+		Checksum:       touchChecksum,
+		CoordSum:       touchChecksumCoordSum,
+		ReportSum:      touchChecksumReportSum,
+		CoordXOR:       touchChecksumCoordXOR,
+		Reports:        touchReports,
+	}
+}
+
+// TouchInterruptLevels returns the GPIO23 levels sampled around the most
+// recent report transaction. ST7121 asserts this data-ready signal low.
+func TouchInterruptLevels() (int, int) {
+	return touchIRQBefore, touchIRQAfter
+}
+
+// TouchReadFailure is one when the combined sensing/report transaction fails.
 func TouchReadFailure() int {
 	return touchReadFailure
 }

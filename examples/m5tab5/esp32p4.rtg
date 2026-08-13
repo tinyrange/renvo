@@ -11,7 +11,7 @@ go backend {
 	const bssLimit = 0x4ff2a000
 	const codeOffset = 0x100
 	const pageSize = 0x1000
-	const stackTop = 0x4ff2b000
+	const stackTop = 0x4ff3f000
 	const appDescriptorAddress = 0x40010020
 	const psramCommandAddress = 0x4ff2a000
 	const psramAddressStorage = psramCommandAddress + 32
@@ -26,6 +26,8 @@ go backend {
 	const usbSerialInterruptRaw = usbSerialEndpoint + 8
 	const usbSerialStartOfFrame = 1 << 1
 	const usbSerialProbeIterations = 65536
+	const displayInterruptAddress = 0x40000140
+	const displayMailbox = 0x4ff40080
 
 	func append16(out []byte, value int) []byte {
 		return append(out, byte(value), byte(value>>8))
@@ -132,6 +134,59 @@ go backend {
 	func callROM(out *RTGEmitter, address int64) {
 		riscv32.moveImmediate(out, riscv32.scratch, address)
 		riscv32.callIndirect(out, riscv32.scratch)
+	}
+
+	func emitDisplayInterruptHandler(out *RTGEmitter) bool {
+		entry := out.NewLabel()
+		riscv32.jump(out, entry)
+		vectorOffset := displayInterruptAddress - (textAddress + codeOffset)
+		for out.Len() < vectorOffset {
+			riscv32.emit(out, 0x00000013)
+		}
+		if out.Len() != vectorOffset {
+			return false
+		}
+
+		// This is a deliberately leaf-only interrupt handler. It saves the three
+		// temporaries it uses, revalidates and attaches the descriptor selected by
+		// the foreground mailbox, clears full-transfer status, and immediately
+		// starts the next frame before the DSI bridge FIFO can drain.
+		riscv32.emit(out, 0xff010113) // addi sp, sp, -16
+		riscv32.emit(out, 0x00512023) // sw t0, 0(sp)
+		riscv32.emit(out, 0x00612223) // sw t1, 4(sp)
+		riscv32.emit(out, 0x00712423) // sw t2, 8(sp)
+		riscv32.emit(out, 0x4ff402b7) // lui t0, 0x4ff40
+		riscv32.emit(out, 0x08028293) // addi t0, t0, 0x80
+		riscv32.emit(out, 0x0002a303) // lw t1, 0(t0)
+		riscv32.emit(out, 0x400002b7) // lui t0, 0x40000
+		riscv32.emit(out, 0x005303b3) // add t2, t1, t0
+		riscv32.emit(out, 0xc01092b7) // lui t0, 0xc0109
+		riscv32.emit(out, 0x84028293) // addi t0, t0, -0x7c0
+		riscv32.emit(out, 0x0253a223) // sw t0, 36(t2)
+		riscv32.emit(out, 0x0ff0000f) // fence iorw, iorw
+		riscv32.emit(out, 0x500812b7) // lui t0, 0x50081
+		riscv32.emit(out, 0x10028293) // addi t0, t0, 0x100
+		riscv32.emit(out, 0x00200393) // addi t2, zero, 2
+		riscv32.emit(out, 0x0872ac23) // sw t2, 152(t0)
+		riscv32.emit(out, 0x00136393) // ori t2, t1, 1
+		riscv32.emit(out, 0x0272a423) // sw t2, 40(t0)
+		riscv32.emit(out, 0xf0028293) // addi t0, t0, -256
+		riscv32.emit(out, 0x10100393) // addi t2, zero, 0x101
+		riscv32.emit(out, 0x0072ac23) // sw t2, 24(t0)
+		riscv32.emit(out, 0x0ff0000f) // fence iorw, iorw
+		riscv32.emit(out, 0x4ff402b7) // lui t0, 0x4ff40
+		riscv32.emit(out, 0x08028293) // addi t0, t0, 0x80
+		riscv32.emit(out, 0x0062a423) // sw t1, 8(t0)
+		riscv32.emit(out, 0x0042a383) // lw t2, 4(t0)
+		riscv32.emit(out, 0x00138393) // addi t2, t2, 1
+		riscv32.emit(out, 0x0072a223) // sw t2, 4(t0)
+		riscv32.emit(out, 0x00012283) // lw t0, 0(sp)
+		riscv32.emit(out, 0x00412303) // lw t1, 4(sp)
+		riscv32.emit(out, 0x00812383) // lw t2, 8(sp)
+		riscv32.emit(out, 0x01010113) // addi sp, sp, 16
+		riscv32.emit(out, 0x30200073) // mret
+		out.Mark(entry)
+		return true
 	}
 
 	func psramCommand(
@@ -466,14 +521,28 @@ go backend {
 	}
 
 	func entryStart(out *RTGEmitter, stateOffset int) bool {
+		if !emitDisplayInterruptHandler(out) {
+			return false
+		}
+		riscv32.moveImmediate(out, riscv32.stack, int64(stackTop))
+		riscv32.move(out, riscv32.frame, riscv32.stack)
+		// ESP32-P4 CLIC uses mtvec mode 3 and a 64-byte-aligned base. No CLIC
+		// source is enabled until the display driver has finished configuring its
+		// descriptor and routing state.
+		riscv32.moveImmediate(out, riscv32.scratch,
+			int64(displayInterruptAddress|3))
+		riscv32.emit(out, 0x30529073) // csrw mtvec, t0
+		// The second-stage bootloader can leave peripheral routes and CLIC enables
+		// behind. Keep every priority masked until the display driver has installed
+		// its sole source, then it lowers the threshold as the final setup step.
+		writeRegister(out, 0x20800008, -1<<24)
+		riscv32.emit(out, 0x30046073) // csrsi mstatus, 8
 		clearBSS(out)
 		// Opening the native USB CDC endpoint toggles its control lines. Keep
 		// those transitions from resetting the chip while retaining the
 		// Serial/JTAG data endpoints used by write and print.
 		writeRegister(out, 0x500d204c, 4)
 		disableWatchdogs(out)
-		riscv32.moveImmediate(out, riscv32.stack, int64(stackTop))
-		riscv32.move(out, riscv32.frame, riscv32.stack)
 		usbSerialInitialize(out)
 		initializePSRAM(out)
 		return true

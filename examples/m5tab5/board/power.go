@@ -78,10 +78,8 @@ func resetPanelAndTouch() bool {
 	if panelReset {
 		return true
 	}
-	// Match bsp_reset_tp(): GPIO23 is released before LCD_RST and TP_RST are
-	// held low together for 100 ms, then both are released for another 100 ms.
-	// Keep the speaker disabled throughout the pulse. Output 6 remains released,
-	// matching both the M5Stack BSP and M5GFX Tab5 reset sequences.
+	// Release TP_INT before pulsing the panel and touch reset outputs, matching
+	// the current M5Stack UserDemo sequence for integrated ST712x panels.
 	configureGPIO(23, true, false)
 	enableGPIO(23, false)
 	if !i2cWriteRegister8(internalSDA, internalSCL, powerAddress, 0x05, 0x44) {

@@ -14,6 +14,12 @@ type Device struct {
 	bus Bus
 }
 
+// Reading contains one air-quality sample from the sensor.
+type Reading struct {
+	ECO2 uint16
+	TVOC uint16
+}
+
 // New binds an SGP30 to bus.
 func New(bus Bus) *Device { return &Device{bus: bus} }
 
@@ -47,20 +53,31 @@ func crc(first, second byte) byte {
 	return result
 }
 
-// Measure returns total volatile organic compounds in parts per billion.
-func (d *Device) Measure() (uint16, error) {
+// Read returns equivalent CO2 in ppm and total volatile organic compounds in
+// ppb. Call it once per second to keep the sensor's IAQ algorithm running.
+func (d *Device) Read() (Reading, error) {
 	if err := d.command(0x2008); err != nil {
-		return 0, err
+		return Reading{}, err
 	}
 	d.bus.DelayMilliseconds(15)
 	response := [6]byte{}
 	if err := d.bus.Tx(address, nil, response[:]); err != nil {
-		return 0, err
+		return Reading{}, err
 	}
 	if crc(response[0], response[1]) != response[2] || crc(response[3], response[4]) != response[5] {
-		return 0, ErrCRC
+		return Reading{}, ErrCRC
 	}
-	return uint16(response[3])<<8 | uint16(response[4]), nil
+	return Reading{
+		ECO2: uint16(response[0])<<8 | uint16(response[1]),
+		TVOC: uint16(response[3])<<8 | uint16(response[4]),
+	}, nil
+}
+
+// Measure returns total volatile organic compounds in parts per billion.
+// Deprecated: use Read to obtain both values.
+func (d *Device) Measure() (uint16, error) {
+	reading, err := d.Read()
+	return reading.TVOC, err
 }
 
 // sensorError is allocation-free and implements error.

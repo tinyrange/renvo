@@ -1,5 +1,7 @@
 package graphics
 
+import "unsafe"
+
 type FontMetrics struct {
 	Ascent  Scalar
 	Descent Scalar
@@ -11,6 +13,9 @@ type Font struct {
 	Metrics FontMetrics
 
 	trueType    *trueTypeInfo
+	raster      bool
+	rasterFirst int
+	rasterDense bool
 	pixelHeight Scalar
 	glyphs      []fontGlyph
 }
@@ -28,6 +33,17 @@ type Glyph struct {
 	Advance Scalar
 }
 
+// RasterGlyph is one pre-rasterized, reusable A8 glyph. It allows constrained
+// targets to use antialiased fonts without parsing or rasterizing outlines at
+// runtime.
+type RasterGlyph struct {
+	Codepoint int
+	Mask      *Image
+	XOffset   Scalar
+	YOffset   Scalar
+	Advance   Scalar
+}
+
 type fontGlyph struct {
 	codepoint   int
 	rasterScale int
@@ -43,6 +59,32 @@ func NewBuiltinFont(scale int) *Font {
 		scale = 1
 	}
 	return &Font{Scale: scale, Metrics: FontMetrics{Ascent: Scalar(7 * scale), Descent: Scalar(2 * scale), LineGap: Scalar(scale)}}
+}
+
+// NewRasterFont creates a font from pre-rasterized glyph masks. The masks are
+// retained by reference and the small glyph metadata table is copied.
+func NewRasterFont(metrics FontMetrics, glyphs []RasterGlyph) *Font {
+	font := &Font{Metrics: metrics, raster: true, rasterDense: len(glyphs) > 0}
+	if len(glyphs) > 0 {
+		font.rasterFirst = glyphs[0].Codepoint
+	}
+	font.glyphs = make([]fontGlyph, len(glyphs))
+	for i := 0; i < len(glyphs); i++ {
+		glyph := glyphs[i]
+		if glyph.Codepoint != font.rasterFirst+i {
+			font.rasterDense = false
+		}
+		font.glyphs[i] = fontGlyph{
+			codepoint: glyph.Codepoint, rasterScale: 1, index: glyph.Codepoint,
+			mask: glyph.Mask, xOffset: glyph.XOffset, yOffset: glyph.YOffset,
+			advance: glyph.Advance,
+		}
+	}
+	return font
+}
+
+func (font *Font) usesRasterGlyphs() bool {
+	return font != nil && (font.trueType != nil || font.raster)
 }
 
 // NewTrueTypeFont parses a TrueType font and prepares it for antialiased
@@ -101,10 +143,32 @@ func (font *Font) cachedGlyphAtScale(codepoint, rasterScale int) *fontGlyph {
 	if rasterScale < 1 {
 		rasterScale = 1
 	}
+	if rasterScale == 1 && font.rasterDense {
+		index := codepoint - font.rasterFirst
+		if index >= 0 && index < len(font.glyphs) {
+			return &font.glyphs[index]
+		}
+	}
 	for i := 0; i < len(font.glyphs); i++ {
 		if font.glyphs[i].codepoint == codepoint && font.glyphs[i].rasterScale == rasterScale {
 			return &font.glyphs[i]
 		}
+	}
+	if font.trueType == nil {
+		// Pre-rasterized fonts cannot synthesize a new scale or codepoint. Use
+		// their question-mark glyph when available.
+		if rasterScale == 1 && font.rasterDense {
+			index := int('?') - font.rasterFirst
+			if index >= 0 && index < len(font.glyphs) {
+				return &font.glyphs[index]
+			}
+		}
+		for i := 0; i < len(font.glyphs); i++ {
+			if font.glyphs[i].codepoint == '?' && font.glyphs[i].rasterScale == rasterScale {
+				return &font.glyphs[i]
+			}
+		}
+		return nil
 	}
 	info := font.trueType
 	scale := font.trueTypeScale() * Scalar(rasterScale)
@@ -195,18 +259,22 @@ func MeasureText(font *Font, text string) TextMetrics {
 			height += lineHeight
 			previous = -1
 		} else if r == 9 {
-			if font.trueType != nil {
+			if font.usesRasterGlyphs() {
 				space := font.cachedGlyph(' ')
-				x += space.advance * 4
+				if space != nil {
+					x += space.advance * 4
+				}
 			} else {
 				x += Scalar(6*font.Scale) * 4
 			}
 			previous = -1
 		} else {
-			if font.trueType != nil {
+			if font.usesRasterGlyphs() {
 				glyph := font.cachedGlyph(r)
-				x += font.kern(previous, glyph.index) + glyph.advance
-				previous = glyph.index
+				if glyph != nil {
+					x += font.kern(previous, glyph.index) + glyph.advance
+					previous = glyph.index
+				}
 			} else {
 				x += Scalar(6 * font.Scale)
 			}
@@ -238,18 +306,22 @@ func MeasureTextBytes(font *Font, text []byte) TextMetrics {
 			height += lineHeight
 			previous = -1
 		} else if r == 9 {
-			if font.trueType != nil {
+			if font.usesRasterGlyphs() {
 				space := font.cachedGlyph(' ')
-				x += space.advance * 4
+				if space != nil {
+					x += space.advance * 4
+				}
 			} else {
 				x += Scalar(6*font.Scale) * 4
 			}
 			previous = -1
 		} else {
-			if font.trueType != nil {
+			if font.usesRasterGlyphs() {
 				glyph := font.cachedGlyph(r)
-				x += font.kern(previous, glyph.index) + glyph.advance
-				previous = glyph.index
+				if glyph != nil {
+					x += font.kern(previous, glyph.index) + glyph.advance
+					previous = glyph.index
+				}
 			} else {
 				x += Scalar(6 * font.Scale)
 			}
@@ -429,9 +501,20 @@ func (s *Surface) drawBuiltinGlyph(font *Font, position Point, r int, color Colo
 	scale := Scalar(font.Scale)
 	for y := 0; y < 7; y++ {
 		bits := glyphRow(r, y)
-		for x := 0; x < 5; x++ {
-			if bits&(1<<uint(4-x)) != 0 {
-				s.FillRect(R(position.X+Scalar(x)*scale, position.Y+Scalar(y)*scale, scale, scale), color)
+		for x := 0; x < 5; {
+			for x < 5 && bits&(1<<uint(4-x)) == 0 {
+				x++
+			}
+			start := x
+			for x < 5 && bits&(1<<uint(4-x)) != 0 {
+				x++
+			}
+			if start < x {
+				s.FillRect(R(
+					position.X+Scalar(start)*scale,
+					position.Y+Scalar(y)*scale,
+					Scalar(x-start)*scale, scale,
+				), color)
 			}
 		}
 	}
@@ -441,8 +524,30 @@ func (s *Surface) drawGlyphMask(mask *Image, x, y int, color Color) {
 	if mask == nil || mask.Format != PixelA8 {
 		return
 	}
-	for maskY := 0; maskY < mask.Height; maskY++ {
-		for maskX := 0; maskX < mask.Width; maskX++ {
+	minX, minY := 0, 0
+	maxX, maxY := mask.Width, mask.Height
+	if x < s.clip.minX {
+		minX = s.clip.minX - x
+	}
+	if y < s.clip.minY {
+		minY = s.clip.minY - y
+	}
+	if x+maxX > s.clip.maxX {
+		maxX = s.clip.maxX - x
+	}
+	if y+maxY > s.clip.maxY {
+		maxY = s.clip.maxY - y
+	}
+	if minX >= maxX || minY >= maxY {
+		return
+	}
+	s.markDirtyRect(pixelRect{minX: x + minX, minY: y + minY, maxX: x + maxX, maxY: y + maxY})
+	if s.Format == PixelRGB565 && color.A == 255 && s.blend == BlendSourceOver {
+		s.drawGlyphMaskRGB565(mask, x, y, minX, minY, maxX, maxY, color)
+		return
+	}
+	for maskY := minY; maskY < maxY; maskY++ {
+		for maskX := minX; maskX < maxX; maskX++ {
 			alpha := int(mask.Pixels[maskY*mask.Stride+maskX])
 			if alpha != 0 {
 				tinted := Color{
@@ -451,9 +556,63 @@ func (s *Surface) drawGlyphMask(mask *Image, x, y int, color Color) {
 					B: byte((int(color.B)*alpha + 127) / 255),
 					A: byte((int(color.A)*alpha + 127) / 255),
 				}
-				s.putPixel(x+maskX, y+maskY, tinted)
+				s.writePixel(x+maskX, y+maskY, tinted)
 			}
 		}
+	}
+}
+
+func blendRGB565Channel(source, destination, alpha int) int {
+	return (source*alpha + destination*(255-alpha) + 127) / 255
+}
+
+func (s *Surface) drawGlyphMaskRGB565(mask *Image, x, y, minX, minY, maxX, maxY int, color Color) {
+	solid := encodeRGB565(color)
+	for maskY := minY; maskY < maxY; maskY++ {
+		for maskX := minX; maskX < maxX; {
+			alpha := int(mask.Pixels[maskY*mask.Stride+maskX])
+			if alpha == 0 {
+				maskX++
+				continue
+			}
+			if alpha == 255 {
+				start := maskX
+				for maskX < maxX && mask.Pixels[maskY*mask.Stride+maskX] == 255 {
+					maskX++
+				}
+				s.fillRGB565Run(y+maskY, x+start, x+maskX, solid)
+				continue
+			}
+			offset := (y+maskY)*s.Stride + (x+maskX)*2
+			destination := decodeRGB565(s.Pixels[offset], s.Pixels[offset+1])
+			blended := Color{
+				R: byte(blendRGB565Channel(int(color.R), int(destination.R), alpha)),
+				G: byte(blendRGB565Channel(int(color.G), int(destination.G), alpha)),
+				B: byte(blendRGB565Channel(int(color.B), int(destination.B), alpha)),
+				A: 255,
+			}
+			pixel := encodeRGB565(blended)
+			s.Pixels[offset], s.Pixels[offset+1] = byte(pixel), byte(pixel>>8)
+			maskX++
+		}
+	}
+}
+
+func (s *Surface) fillRGB565Run(y, minX, maxX int, pixel uint16) {
+	start := y*s.Stride + minX*2
+	end := y*s.Stride + maxX*2
+	base := uintptr(unsafe.Pointer(&s.Pixels[0]))
+	if start < end && (base+uintptr(start))&3 != 0 {
+		s.Pixels[start], s.Pixels[start+1] = byte(pixel), byte(pixel>>8)
+		start += 2
+	}
+	word := uint32(pixel) | uint32(pixel)<<16
+	for start+4 <= end {
+		storeSurface32(base+uintptr(start), word)
+		start += 4
+	}
+	if start < end {
+		s.Pixels[start], s.Pixels[start+1] = byte(pixel), byte(pixel>>8)
 	}
 }
 
@@ -480,17 +639,22 @@ func (s *Surface) DrawText(font *Font, baseline Point, text string, color Color)
 			continue
 		}
 		if r == 9 {
-			if font.trueType != nil {
+			if font.usesRasterGlyphs() {
 				space := font.cachedGlyph(' ')
-				x += space.advance * 4
+				if space != nil {
+					x += space.advance * 4
+				}
 			} else {
 				x += Scalar(6*font.Scale) * 4
 			}
 			previous = -1
 			continue
 		}
-		if font.trueType != nil {
+		if font.usesRasterGlyphs() {
 			glyph := font.cachedGlyphAtScale(r, rasterScale)
+			if glyph == nil {
+				continue
+			}
 			x += font.kern(previous, glyph.index)
 			if glyph.mask != nil {
 				// Glyph bitmaps are rasterized without a subpixel shift, so place
@@ -535,17 +699,22 @@ func (s *Surface) DrawTextBytes(font *Font, baseline Point, text []byte, color C
 			continue
 		}
 		if r == 9 {
-			if font.trueType != nil {
+			if font.usesRasterGlyphs() {
 				space := font.cachedGlyph(' ')
-				x += space.advance * 4
+				if space != nil {
+					x += space.advance * 4
+				}
 			} else {
 				x += Scalar(6*font.Scale) * 4
 			}
 			previous = -1
 			continue
 		}
-		if font.trueType != nil {
+		if font.usesRasterGlyphs() {
 			glyph := font.cachedGlyphAtScale(r, rasterScale)
+			if glyph == nil {
+				continue
+			}
 			x += font.kern(previous, glyph.index)
 			if glyph.mask != nil {
 				origin := s.transformPoint(Point{X: x, Y: y})

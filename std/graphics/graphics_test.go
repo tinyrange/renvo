@@ -3,6 +3,10 @@ package graphics
 import "testing"
 
 func pixel(s *Surface, x, y int) Color {
+	if s.Format == PixelRGB565 {
+		o := y*s.Stride + x*2
+		return decodeRGB565(s.Pixels[o], s.Pixels[o+1])
+	}
 	o := y*s.Stride + x*4
 	return Color{s.Pixels[o], s.Pixels[o+1], s.Pixels[o+2], s.Pixels[o+3]}
 }
@@ -54,6 +58,51 @@ func TestSurfaceBufferUsesCallerStorage(t *testing.T) {
 	}
 	if NewSurfaceBuffer(4, 3, pixels[:len(pixels)-1]) != nil {
 		t.Fatal("short surface buffer was accepted")
+	}
+}
+
+func TestSurfaceBufferFormatPreservesCallerStorage(t *testing.T) {
+	pixels := []byte{1, 2, 3, 4}
+	s := NewSurfaceBufferFormatPreserve(2, 1, PixelRGB565, pixels)
+	if s == nil || &s.Pixels[0] != &pixels[0] {
+		t.Fatal("preserved surface did not retain caller storage")
+	}
+	for index, want := range []byte{1, 2, 3, 4} {
+		if s.Pixels[index] != want {
+			t.Fatalf("preserved byte %d = %d, want %d", index, s.Pixels[index], want)
+		}
+	}
+}
+
+func TestRGB565SurfaceRendersDirectlyIntoCallerStorage(t *testing.T) {
+	pixels := make([]byte, 4*3*2)
+	s := NewSurfaceBufferFormat(4, 3, PixelRGB565, pixels)
+	if s == nil || s.Stride != 8 || &s.Pixels[0] != &pixels[0] {
+		t.Fatalf("RGB565 surface = %#v", s)
+	}
+	s.Clear(RGBA(0, 0, 255, 255))
+	s.FillRect(R(1, 1, 2, 1), RGBA(255, 0, 0, 128))
+	if got := pixel(s, 0, 0); got != (Color{B: 255, A: 255}) {
+		t.Fatalf("opaque RGB565 pixel = %#v", got)
+	}
+	// Premultiplied half-red over blue quantizes to the nearest representable
+	// 5-bit channels while remaining an opaque scanout pixel.
+	got := pixel(s, 1, 1)
+	if got.R < 123 || got.R > 132 || got.B < 123 || got.B > 132 || got.A != 255 {
+		t.Fatalf("blended RGB565 pixel = %#v", got)
+	}
+	if len(s.Pixels) != 24 {
+		t.Fatalf("RGB565 storage length = %d", len(s.Pixels))
+	}
+}
+
+func TestRGB565SurfaceResizePreservesFormatAndStorage(t *testing.T) {
+	pixels := make([]byte, 8*8*2)
+	s := NewSurfaceBufferFormat(8, 8, PixelRGB565, pixels)
+	first := &s.Pixels[0]
+	s.Resize(4, 4)
+	if s.Format != PixelRGB565 || s.Stride != 8 || &s.Pixels[0] != first {
+		t.Fatalf("resized RGB565 surface changed format or storage: format=%d stride=%d", s.Format, s.Stride)
 	}
 }
 

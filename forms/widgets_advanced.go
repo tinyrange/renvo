@@ -524,7 +524,7 @@ func (b *ListBox) pointerCancel() {
 func (b *ListBox) pointerMove(x, y graphics.Scalar) {
 	if b.dragging {
 		delta := b.dragStartY - y
-		if delta < -6 || delta > 6 {
+		if delta < -10 || delta > 10 {
 			b.dragMoved = true
 		}
 		b.setScrollOffset(b.dragStart + int(delta))
@@ -1589,6 +1589,7 @@ type Slider struct {
 	smallChange int
 	largeChange int
 	dragging    bool
+	dragOffset  graphics.Scalar
 	Changed     EventHandler
 }
 
@@ -1633,14 +1634,33 @@ func (s *Slider) SetValue(value int) {
 	if s.value == value {
 		return
 	}
+	old := s.value
 	s.value = value
 	s.AccessibilityChanged()
-	s.Invalidate()
+	s.invalidateKnob(old)
+	s.invalidateKnob(value)
 	if s.Changed != nil {
 		s.Changed()
 	}
 }
 func (s *Slider) accessibilityValue() string { return widgetValue(s.value) }
+func (s *Slider) knobCenter(value int) graphics.Scalar {
+	x := graphics.Scalar(8)
+	if s.maximum > s.minimum {
+		x += (s.Bounds().Width() - 16) * graphics.Scalar(value-s.minimum) / graphics.Scalar(s.maximum-s.minimum)
+	}
+	return x
+}
+func (s *Slider) invalidateKnob(value int) {
+	if s.form == nil || !s.visible {
+		return
+	}
+	bounds := s.Bounds()
+	x := bounds.MinX + s.knobCenter(value)
+	y := bounds.MinY + bounds.Height()/2
+	// Include the drag/hover halo as well as the solid knob.
+	s.form.Invalidate(graphics.R(x-12, y-12, 24, 24))
+}
 func (s *Slider) updateFromPointer(x graphics.Scalar) {
 	width := s.Bounds().Width() - 16
 	if width <= 0 {
@@ -1651,24 +1671,33 @@ func (s *Slider) updateFromPointer(x graphics.Scalar) {
 }
 func (s *Slider) pointerDown(x, y graphics.Scalar) {
 	s.dragging = true
-	s.updateFromPointer(x)
+	center := s.knobCenter(s.value)
+	s.dragOffset = 0
+	if x >= center-24 && x <= center+24 {
+		// Grabbing the thumb away from its centre must not make it jump under
+		// the finger. Track taps still move directly to the requested position.
+		s.dragOffset = x - center
+	}
+	s.updateFromPointer(x - s.dragOffset)
 }
 func (s *Slider) pointerMove(x, y graphics.Scalar) {
 	if s.dragging {
-		s.updateFromPointer(x)
+		s.updateFromPointer(x - s.dragOffset)
 	}
 }
 func (s *Slider) pointerUp(x, y graphics.Scalar) {
 	if s.dragging {
-		s.updateFromPointer(x)
+		s.updateFromPointer(x - s.dragOffset)
 		s.dragging = false
-		s.Invalidate()
+		s.dragOffset = 0
+		s.invalidateKnob(s.value)
 	}
 }
 func (s *Slider) pointerCancel() {
 	if s.dragging {
 		s.dragging = false
-		s.Invalidate()
+		s.dragOffset = 0
+		s.invalidateKnob(s.value)
 	}
 }
 func (s *Slider) keyDown(event graphics.Event) {
@@ -1691,10 +1720,7 @@ func (s *Slider) paint(surface graphics.Canvas) {
 	theme := controlTheme(&s.Control)
 	y := bounds.MinY + bounds.Height()/2
 	surface.FillRect(graphics.R(bounds.MinX+8, y-2, bounds.Width()-16, 4), theme.Border)
-	x := bounds.MinX + 8
-	if s.maximum > s.minimum {
-		x += (bounds.Width() - 16) * graphics.Scalar(s.value-s.minimum) / graphics.Scalar(s.maximum-s.minimum)
-	}
+	x := bounds.MinX + s.knobCenter(s.value)
 	knob := graphics.R(x-7, y-7, 14, 14)
 	if s.Hovered() || s.dragging {
 		surface.FillEllipse(graphics.R(x-10, y-10, 20, 20), theme.Hover)
@@ -1742,6 +1768,7 @@ type SplitContainer struct {
 	panel2MinSize    int
 	vertical         bool
 	dragging         bool
+	dragOffset       int
 	hoverSplitter    bool
 	Changed          EventHandler
 }
@@ -1819,12 +1846,12 @@ func (s *SplitContainer) pointerCursor(x, y graphics.Scalar) graphics.Cursor {
 }
 func (s *SplitContainer) overSplitter(x, y graphics.Scalar) bool {
 	position := s.splitterPosition(x, y)
-	return position >= s.splitterDistance-5 && position <= s.splitterDistance+5
+	return position >= s.splitterDistance-12 && position <= s.splitterDistance+12
 }
 func (s *SplitContainer) pointerDown(x, y graphics.Scalar) {
 	if s.overSplitter(x, y) {
 		s.dragging = true
-		s.SetSplitterDistance(s.splitterPosition(x, y))
+		s.dragOffset = s.splitterPosition(x, y) - s.splitterDistance
 	}
 }
 func (s *SplitContainer) pointerMove(x, y graphics.Scalar) {
@@ -1834,19 +1861,21 @@ func (s *SplitContainer) pointerMove(x, y graphics.Scalar) {
 		s.Invalidate()
 	}
 	if s.dragging {
-		s.SetSplitterDistance(s.splitterPosition(x, y))
+		s.SetSplitterDistance(s.splitterPosition(x, y) - s.dragOffset)
 	}
 }
 func (s *SplitContainer) pointerUp(x, y graphics.Scalar) {
 	if s.dragging {
-		s.SetSplitterDistance(s.splitterPosition(x, y))
+		s.SetSplitterDistance(s.splitterPosition(x, y) - s.dragOffset)
 		s.dragging = false
+		s.dragOffset = 0
 		s.Invalidate()
 	}
 }
 func (s *SplitContainer) pointerCancel() {
 	if s.dragging {
 		s.dragging = false
+		s.dragOffset = 0
 		s.Invalidate()
 	}
 }

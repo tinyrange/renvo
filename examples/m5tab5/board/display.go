@@ -33,8 +33,8 @@ func enableDisplayPower() {
 
 func enableDisplayClocks() {
 	// DSI system clock, 20 MHz D-PHY config/reference clocks, and a 240 MHz
-	// DPI source divided by three. The resulting 80 MHz clock is the integer
-	// divider selected by ESP-IDF for the requested 70 MHz timing.
+	// DPI source divided by three. The P4 divider is integer-only, so the 70 MHz
+	// panel request resolves to an 80 MHz DPI clock, exactly as in ESP-IDF.
 	update32(clockBase+0x18, 0, 1<<12)
 	update32(clockBase+0x38, 3<<30, 0)
 	update32(clockBase+0x3c, 0xffff, 0x2a3)
@@ -48,12 +48,14 @@ func initializePHY() bool {
 	store32(dsiBase+0xa0, 7)
 	store32(dsiBase+0xa0, 0x0f)
 
-	// 965 Mbps request on the legacy 20 MHz reference resolves to a 960 Mbps
-	// lane clock (M=48, N=1). 0x1a is the 950-999 Mbps PHY range.
-	writePHY(0x44, 0x34)
+	// Use the newer M5Stack ST7121 profile published with the Tab5 Keyboard:
+	// 1040 Mbps on a 20 MHz reference is exact with M=52 and N=1. The wider
+	// link accompanies its longer vertical touch-sensing blanking interval.
+	// 0x2a is the 1000-1049 Mbps PHY range.
+	writePHY(0x44, 0x54)
 	writePHY(0x19, 0x30)
 	writePHY(0x17, 0)
-	writePHY(0x18, 0x0f)
+	writePHY(0x18, 0x13)
 	writePHY(0x18, 0x81)
 
 	for count := 0; count < 5000000; count++ {
@@ -67,7 +69,8 @@ func initializePHY() bool {
 func configureVideo() {
 	// Host values correspond to the official Tab5 configuration: RGB565,
 	// 720x1280, two lanes, and ST7121 portrait timing.
-	store32(dsiBase+0x08, 0x00000c06)
+	// At 1040 Mbps the timeout and escape dividers are 13 and 7.
+	store32(dsiBase+0x08, 0x00000d07)
 	store32(dsiBase+0x0c, 0)
 	store32(dsiBase+0x10, 0)
 	store32(dsiBase+0x14, 0)
@@ -78,11 +81,15 @@ func configureVideo() {
 	store32(dsiBase+0x40, 0)
 	store32(dsiBase+0x44, 0)
 	store32(dsiBase+0x48, 3)
-	store32(dsiBase+0x4c, 60)
-	store32(dsiBase+0x50, 1203)
+	// Horizontal host values use the divider's actual 80 MHz clock. At
+	// 1040 Mbps, one pixel clock is 1.625 lane-byte clocks.
+	store32(dsiBase+0x4c, 65)
+	store32(dsiBase+0x50, 1303)
 	store32(dsiBase+0x54, 20)
 	store32(dsiBase+0x58, 24)
-	store32(dsiBase+0x5c, 200)
+	// The integrated touch scanner is synchronized to vertical blanking.
+	// M5Stack's newer ST7121 profile reserves 220 front-porch lines.
+	store32(dsiBase+0x5c, 220)
 	store32(dsiBase+0x60, DisplayHeight)
 	store32(dsiBase+0x68, 0x010f7f02)
 	store32(dsiBase+0x94, 3)
@@ -100,13 +107,12 @@ func startPattern() {
 	store32(dsiBase+0x34, 0)
 }
 
-// InitPattern starts the DSI link and the controller's vertical color bars.
-// It returns false if the D-PHY cannot lock or its three lanes do not stop.
-func InitPattern() bool {
+func initDisplay(showPattern bool) bool {
 	if !InitPower() {
 		print("TAB5 DISPLAY POWER FAIL\n")
 		return false
 	}
+	disableBacklight()
 	if !resetPanelAndTouch() {
 		print("TAB5 DISPLAY RESET FAIL\n")
 		return false
@@ -119,7 +125,15 @@ func InitPattern() bool {
 	}
 	configureVideo()
 	initializeST7121()
-	enableBacklight()
 	startPattern()
+	if showPattern {
+		enableBacklight()
+	}
 	return true
+}
+
+// InitPattern starts the DSI link and deliberately exposes the controller's
+// vertical color bars. It is only for the explicit DSI link probe.
+func InitPattern() bool {
+	return initDisplay(true)
 }

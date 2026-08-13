@@ -178,6 +178,41 @@ func TestListBoxDragPreservesSubRowScrollPosition(t *testing.T) {
 	}
 }
 
+func TestSliderDragPreservesFingerGrabOffset(t *testing.T) {
+	var form Form
+	form.Initialize(300, 100)
+	slider := NewSlider()
+	slider.SetBounds(graphics.R(10, 20, 240, 40))
+	slider.SetValue(50)
+	form.Add(&slider.Control)
+	form.invalid = nil
+
+	// The thumb centre is local x=120. Grab ten pixels to its right and move
+	// twenty pixels; only the movement, not the initial offset, changes value.
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerDown, X: 140, Y: 40, Button: 1})
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerMove, X: 160, Y: 40, Button: 1})
+	form.Dispatch(graphics.Event{Type: graphics.EventPointerUp, X: 160, Y: 40, Button: 1})
+	if slider.Value() != 58 {
+		t.Fatalf("offset-preserving slider value = %d, want 58", slider.Value())
+	}
+}
+
+func TestSliderValueInvalidatesOnlyOldAndNewThumbs(t *testing.T) {
+	var form Form
+	form.Initialize(300, 100)
+	slider := NewSlider()
+	slider.SetBounds(graphics.R(10, 20, 240, 40))
+	slider.SetValue(25)
+	form.Add(&slider.Control)
+	form.invalid = nil
+
+	slider.SetValue(75)
+	assertRects(t, form.InvalidRects(), []graphics.Rect{
+		graphics.R(62, 28, 24, 24),
+		graphics.R(174, 28, 24, 24),
+	})
+}
+
 func TestAdvancedControlsApplyCompleteThemeAndColumnLayout(t *testing.T) {
 	var form Form
 	form.Initialize(480, 240)
