@@ -199,13 +199,19 @@ type platformPackageSpec struct {
 func buildPlatformPackages(root string, output string) (map[string]standardPackage, error) {
 	specs := []platformPackageSpec{
 		{Path: "forms"},
-		{Path: "examples/m5nanoc6/board", Target: "esp32c6/riscv32"},
-		{Path: "examples/m5nanoc6/sgp30", Target: "esp32c6/riscv32"},
+		{Path: "device/mmio"},
+		{Path: "device/gpio"},
+		{Path: "device/clock"},
+		{Path: "device/i2c"},
+		{Path: "device/sensor/sgp30"},
+		{Path: "device/esp32c6", Target: "esp32c6/riscv32"},
+		{Path: "device/board/m5nanoc6", Target: "esp32c6/riscv32"},
 		{Path: "examples/m5nanoc6/blink", Target: "esp32c6/riscv32"},
 		{Path: "examples/m5nanoc6/button_rgb", Target: "esp32c6/riscv32"},
 		{Path: "examples/m5nanoc6/oracle", Target: "esp32c6/riscv32"},
 		{Path: "examples/m5nanoc6/air_quality", Target: "esp32c6/riscv32"},
-		{Path: "examples/m5sticks3/board", Target: "esp32s3/xtensa_lx7"},
+		{Path: "device/esp32s3", Target: "esp32s3/xtensa_lx7"},
+		{Path: "device/board/m5sticks3", Target: "esp32s3/xtensa_lx7"},
 		{Path: "examples/m5sticks3/forms_menu", Target: "esp32s3/xtensa_lx7"},
 		{Path: "examples/m5sticks3/oracle", Target: "esp32s3/xtensa_lx7"},
 	}

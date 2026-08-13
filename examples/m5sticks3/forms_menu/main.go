@@ -1,39 +1,32 @@
 package main
 
 import (
-	"renvo.dev/examples/m5sticks3/board"
+	board "renvo.dev/device/board/m5sticks3"
+	"renvo.dev/device/gpio"
 	"renvo.dev/forms"
 	"renvo.dev/std/graphics"
 )
 
 const (
-	frontButton = 11
-	sideButton  = 12
-	scale       = 2
-	width       = board.DisplayWidth / scale
-	height      = board.DisplayHeight / scale
+	scale  = 2
+	width  = 135 / scale
+	height = 240 / scale
 )
 
 func present(surface *graphics.Surface) {
-	if board.PresentSurface2x(surface) {
+	if board.Display.PresentSurface2x(surface) {
 		surface.ResetDirty()
 	}
 }
 
-func waitButtonRelease(pin int) {
-	for board.ButtonPressed(pin) {
-		board.DelayMilliseconds(10)
+func waitButtonRelease(button *gpio.Button) {
+	for button.Pressed() {
+		board.Clock.DelayMilliseconds(10)
 	}
-	board.DelayMilliseconds(20)
+	board.Clock.DelayMilliseconds(20)
 }
 
 func main() {
-	if !board.InitializeDisplay() {
-		return
-	}
-	board.ConfigureButton(frontButton)
-	board.ConfigureButton(sideButton)
-
 	font := graphics.NewBuiltinFont(1)
 	var form forms.Form
 	form.Initialize(width, height)
@@ -70,28 +63,28 @@ func main() {
 	form.Paint(surface)
 	present(surface)
 	for {
-		if board.ButtonPressed(sideButton) {
-			board.DelayMilliseconds(20)
-			if board.ButtonPressed(sideButton) {
+		if board.SideButton.Pressed() {
+			board.Clock.DelayMilliseconds(20)
+			if board.SideButton.Pressed() {
 				next := selectedIndex + 1
 				if next == len(items) {
 					next = 0
 				}
 				selectedIndex = next
 				menu.SetSelectedIndex(next)
-				waitButtonRelease(sideButton)
+				waitButtonRelease(&board.SideButton)
 			}
 		}
-		if board.ButtonPressed(frontButton) {
-			board.DelayMilliseconds(20)
-			if board.ButtonPressed(frontButton) {
+		if board.FrontButton.Pressed() {
+			board.Clock.DelayMilliseconds(20)
+			if board.FrontButton.Pressed() {
 				result.SetText(items[selectedIndex])
-				waitButtonRelease(frontButton)
+				waitButtonRelease(&board.FrontButton)
 			}
 		}
 		if form.Paint(surface) {
 			present(surface)
 		}
-		board.DelayMilliseconds(10)
+		board.Clock.DelayMilliseconds(10)
 	}
 }

@@ -335,8 +335,15 @@ func renvoRTGStoreParamWord(g *renvoLinearGen, word int, offset int) {
 		}
 		return
 	}
+	overflowBase := 2 * renvoRTGStackWordBytes
+	// Current link-register ABIs also use their first call word as the primary
+	// result register. Their frame prologues save the link and old frame below
+	// the incoming stack pointer, so overflow arguments start at frame itself.
+	if renvoRTGCallWord0.Code == renvoRTGPrimary.Code {
+		overflowBase = 0
+	}
 	source := renvoRTGAsmAddress(renvoRTGFrame, RTGNoRegister,
-		2*renvoRTGStackWordBytes+(word-6)*renvoRTGStackWordBytes, 1)
+		overflowBase+(word-6)*renvoRTGStackWordBytes, 1)
 	renvoRTGDirectLoadNative(&g.asm, renvoRTGPrimary, source)
 	renvoRTGAsmStoreFrame(&g.asm, offset, renvoRTGPrimary)
 }
