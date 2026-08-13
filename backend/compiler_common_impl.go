@@ -4114,7 +4114,25 @@ func renvoInferTopLiteralType(m *renvoMeta, p *renvoProgram, start int, end int)
 	typ := 0
 	for tok := start; tok < end; tok++ {
 		if renvoTokCharIs(p, tok, '{') && tok > start {
-			return renvoParseType(m, p, start, tok).typ
+			typ := renvoParseType(m, p, start, tok).typ
+			resolved := renvoResolveType(m, typ)
+			renvoNonNil(resolved)
+			if resolved.kind != renvoTypeArray || resolved.count >= 0 {
+				return typ
+			}
+			ep := renvoNewExprParse()
+			renvoNonNil(ep)
+			rootIndex := renvoParseExpressionRoot(ep, p, start, end)
+			if rootIndex < 0 {
+				return 0
+			}
+			var g renvoLinearGen
+			g.prog = p
+			g.meta = m
+			if !renvoResolveInferredArrayCompositeLength(&g, ep, rootIndex, typ) {
+				return 0
+			}
+			return typ
 		}
 		if renvoTokIsKind(p, tok, renvoTokFloat) {
 			typ = renvoTypeFloat64
@@ -7553,6 +7571,15 @@ func renvoEmitLinearRangeForScoped(g *renvoLinearGen, stmt *renvoStmt, rangeTok 
 	sourceType := renvoInferParsedExprType(g, source, sourceIndex)
 	resolved := renvoResolveType(g.meta, sourceType)
 	renvoNonNil(resolved)
+	arrayPointer := false
+	if resolved.kind == renvoTypePointer {
+		target := renvoResolveType(g.meta, resolved.elem)
+		renvoNonNil(target)
+		if target.kind == renvoTypeArray {
+			resolved = target
+			arrayPointer = true
+		}
+	}
 	if resolved.kind != renvoTypeArray && resolved.kind != renvoTypeSlice && resolved.kind != renvoTypeString {
 		return false
 	}
@@ -7636,7 +7663,11 @@ func renvoEmitLinearRangeForScoped(g *renvoLinearGen, stmt *renvoStmt, rangeTok 
 			renvoAsmMulTertiaryImm(a, elemSize)
 		}
 		if resolved.kind == renvoTypeArray {
-			renvoAsmAddressPrimaryStack(a, sourceOffset)
+			if arrayPointer {
+				renvoAsmLoadPrimaryStack(a, sourceOffset)
+			} else {
+				renvoAsmAddressPrimaryStack(a, sourceOffset)
+			}
 		} else {
 			renvoAsmLoadPrimaryStack(a, sourceOffset)
 		}
@@ -10295,28 +10326,41 @@ func renvoTypeFromExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
 		endTok++
 	}
 	typeResult := renvoParseType(meta, p, e.tok, endTok)
-	if typeResult.typ > 0 && typeResult.typ < len(meta.types) && meta.types[typeResult.typ].kind == renvoTypeArray && meta.types[typeResult.typ].count < 0 && e.kind == renvoExprComposite {
-		count := 0
-		next := 0
-		for i := 0; i < e.argCount; i++ {
-			field := ep.fields[e.firstArg+i]
-			at := next
-			if field.key >= 0 {
-				key := renvoEvalConstExpr(g, ep, field.key)
-				if !key.ok || key.value < 0 {
-					return 0
-				}
-				at = key.value
-			}
-			next = at + 1
-			if next > count {
-				count = next
-			}
-		}
-		g.meta.types[typeResult.typ].count = count
-		g.meta.types[typeResult.typ].size = count * renvoTypeSize(g.meta, g.meta.types[typeResult.typ].elem)
+	if !renvoResolveInferredArrayCompositeLength(g, ep, idx, typeResult.typ) {
+		return 0
 	}
 	return typeResult.typ
+}
+func renvoResolveInferredArrayCompositeLength(g *renvoLinearGen, ep *renvoExprParse, idx int, typ int) bool {
+	renvoNonNil(g, ep)
+	if typ <= 0 || typ >= len(g.meta.types) {
+		return true
+	}
+	t := &g.meta.types[typ]
+	e := &ep.exprs[idx]
+	if t.kind != renvoTypeArray || t.count >= 0 || e.kind != renvoExprComposite {
+		return true
+	}
+	count := 0
+	next := 0
+	for i := 0; i < e.argCount; i++ {
+		field := ep.fields[e.firstArg+i]
+		at := next
+		if field.key >= 0 {
+			key := renvoEvalConstExpr(g, ep, field.key)
+			if !key.ok || key.value < 0 {
+				return false
+			}
+			at = key.value
+		}
+		next = at + 1
+		if next > count {
+			count = next
+		}
+	}
+	t.count = count
+	t.size = count * renvoTypeSize(g.meta, t.elem)
+	return true
 }
 func renvoFindTypeByRange(g *renvoLinearGen, nameStart int, nameEnd int) int {
 	renvoNonNil(g)
