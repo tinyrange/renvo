@@ -38,6 +38,25 @@ func TestSurfaceResizeReusesAndClearsFramebuffer(t *testing.T) {
 	}
 }
 
+func TestSurfaceBufferUsesCallerStorage(t *testing.T) {
+	pixels := make([]byte, 4*3*4)
+	for i := range pixels {
+		pixels[i] = 0xff
+	}
+	s := NewSurfaceBuffer(4, 3, pixels)
+	if s == nil || &s.Pixels[0] != &pixels[0] {
+		t.Fatal("surface did not retain caller storage")
+	}
+	for i := range pixels {
+		if pixels[i] != 0 {
+			t.Fatalf("surface buffer byte %d was not cleared", i)
+		}
+	}
+	if NewSurfaceBuffer(4, 3, pixels[:len(pixels)-1]) != nil {
+		t.Fatal("short surface buffer was accepted")
+	}
+}
+
 func TestFillRectBlendsEachCoveredPixelOnce(t *testing.T) {
 	s := NewSurface(8, 8)
 	s.FillRect(R(1, 1, 6, 6), RGBA(255, 0, 0, 128))
@@ -527,12 +546,27 @@ func TestSurfaceDamageRegionsPreserveDisjointUpdates(t *testing.T) {
 	if len(regions) != 2 || regions[0] != R(2, 3, 4, 5) || regions[1] != R(80, 40, 3, 2) {
 		t.Fatalf("damage regions = %#v", regions)
 	}
+	if surface.DirtyRectCount() != len(regions) {
+		t.Fatalf("damage region count = %d, want %d", surface.DirtyRectCount(), len(regions))
+	}
+	for i := 0; i < len(regions); i++ {
+		region, ok := surface.DirtyRectAt(i)
+		if !ok || region != regions[i] {
+			t.Fatalf("damage region %d = %#v, %v; want %#v, true", i, region, ok, regions[i])
+		}
+	}
+	if _, ok := surface.DirtyRectAt(len(regions)); ok {
+		t.Fatal("out-of-range damage region reported as valid")
+	}
 	bounding, ok := surface.DirtyRect()
 	if !ok || bounding != (Rect{MinX: 2, MinY: 3, MaxX: 83, MaxY: 42}) {
 		t.Fatalf("damage bounding rect = %#v, %v", bounding, ok)
 	}
 
 	surface.ResetDirty()
+	if surface.DirtyRectCount() != 0 {
+		t.Fatal("damage region count did not reset")
+	}
 	surface.FillRect(R(7, 8, 1, 1), White)
 	regions = surface.DirtyRects()
 	if len(regions) != 1 || regions[0] != R(7, 8, 1, 1) {

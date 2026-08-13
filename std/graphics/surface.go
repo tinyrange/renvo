@@ -152,6 +152,19 @@ func NewSurface(width, height int) *Surface {
 	return s
 }
 
+// NewSurfaceBuffer creates a surface using caller-owned RGBA8 storage. It is
+// useful on systems whose large display buffers live outside the ordinary Go
+// allocation arena. The buffer must hold at least width*height*4 bytes.
+func NewSurfaceBuffer(width, height int, pixels []byte) *Surface {
+	if width < 0 || height < 0 || len(pixels) < width*height*4 {
+		return nil
+	}
+	s := allocSurface()
+	s.Pixels = pixels
+	s.reset(width, height)
+	return s
+}
+
 func (s *Surface) reset(width, height int) {
 	if width < 0 {
 		width = 0
@@ -214,6 +227,27 @@ func (s *Surface) DirtyRects() []Rect {
 		out[i] = Rect{MinX: Scalar(region.minX), MinY: Scalar(region.minY), MaxX: Scalar(region.maxX), MaxY: Scalar(region.maxY)}
 	}
 	return out
+}
+
+// DirtyRectCount reports the number of precise pending damage regions without
+// allocating a copy of the region list.
+func (s *Surface) DirtyRectCount() int {
+	if s == nil || !s.dirtyValid {
+		return 0
+	}
+	return len(s.dirtyRects)
+}
+
+// DirtyRectAt returns one precise pending damage region without allocating.
+func (s *Surface) DirtyRectAt(index int) (Rect, bool) {
+	if s == nil || !s.dirtyValid || index < 0 || index >= len(s.dirtyRects) {
+		return Rect{}, false
+	}
+	region := s.dirtyRects[index]
+	return Rect{
+		MinX: Scalar(region.minX), MinY: Scalar(region.minY),
+		MaxX: Scalar(region.maxX), MaxY: Scalar(region.maxY),
+	}, true
 }
 
 // BeginDamage declares the exact clipped area a retained view is about to

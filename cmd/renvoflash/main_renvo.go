@@ -1,4 +1,4 @@
-//go:build renvo && linux
+//go:build renvo && (linux || darwin)
 
 // Command renvoflash is a dependency-free ESP ROM-loader client compiled by
 // Renvo itself. Keep this implementation within Renvo's supported language and
@@ -6,147 +6,316 @@
 // intrinsic used for serial I/O and control-line ioctls.
 package main
 
-import "unsafe"
-
-const (
-	flashOffsetR   = 0x10000
-	flashBlockR    = 0x400
-	checksumMagicR = 0xef
-
-	sysReadR      = 0
-	sysWriteR     = 1
-	sysOpenR      = 2
-	sysCloseR     = 3
-	sysIoctlR     = 16
-	sysNanosleepR = 35
-
-	oReadWriteR = 2
-	oNoCTTYR    = 0x100
-	tcgetsR     = 0x5401
-	tcsetsR     = 0x5402
-	tiocmbisR   = 0x5416
-	tiocmbicR   = 0x5417
-	tiocmDTRR   = 0x002
-	tiocmRTSR   = 0x004
+import (
+	"os"
+	"unsafe"
 )
 
-type flashErrorR struct{ text string }
+const (
+	flashOffset   = 0x10000
+	flashBlock    = 0x400
+	flashBatch    = 128
+	checksumMagic = 0xef
+	backupChunk   = 64
+	backupBuffer  = 64 * 1024
+	backupBatch   = 32
+)
 
-func (e *flashErrorR) Error() string {
+type flashError struct{ text string }
+
+func (e *flashError) Error() string {
 	if e == nil {
 		return ""
 	}
 	return e.text
 }
 
-func failR(text string) error { return &flashErrorR{text: text} }
+func fail(text string) error { return &flashError{text: text} }
 
-type targetR struct {
+type target struct {
 	name        string
 	machine     uint16
 	chipID      uint16
 	flashConfig byte
 	magic       uint32
+	flashSize   int
 }
 
-var targetsR = []targetR{
-	{name: "esp32c6/riscv32", machine: 243, chipID: 13, flashConfig: 0x20, magic: 0x2ce0806f},
-	{name: "esp32s3/xtensa_lx7", machine: 94, chipID: 9, flashConfig: 0x3f, magic: 0x09},
+var targets = []target{
+	{name: "esp32c6/riscv32", machine: 243, chipID: 13, flashConfig: 0x20, magic: 0x2ce0806f, flashSize: 4 * 1024 * 1024},
+	{name: "esp32s3/xtensa_lx7", machine: 94, chipID: 9, flashConfig: 0x3f, magic: 0x09, flashSize: 8 * 1024 * 1024},
+	// ESP32-P4 shares ELF machine 243 with ESP32-C6. P4 application binaries
+	// are accepted by chip ID, but ELF conversion remains C6 until a P4 board
+	// target can supply an unambiguous image target.
+	{name: "esp32p4/riscv32", machine: 243, chipID: 18, flashConfig: 0x4f, flashSize: 16 * 1024 * 1024},
 }
 
 func appMain(args []string, env []string) int {
+	if len(args) >= 3 && len(args) <= 4 && args[1] == "--backup" {
+		port := ""
+		if len(args) == 4 {
+			port = args[3]
+		} else {
+			var detectErr error
+			port, detectErr = detectPort()
+			if detectErr != nil {
+				print("renvoflash: " + detectErr.Error() + "\n")
+				return 1
+			}
+		}
+		if err := backupFlash(args[2], port); err != nil {
+			print("renvoflash: " + err.Error() + "\n")
+			return 1
+		}
+		return 0
+	}
 	if len(args) == 4 && args[1] == "--convert" {
-		source, err := readFileR(args[2])
+		source, err := readFile(args[2])
 		if err != nil {
 			print("renvoflash: " + err.Error() + "\n")
 			return 1
 		}
-		image, _, err := prepareImageR(source)
+		image, _, err := prepareImage(source)
 		if err != nil {
 			print("renvoflash: " + err.Error() + "\n")
 			return 1
 		}
-		if err = writeFileR(args[3], image); err != nil {
+		if err = writeFile(args[3], image); err != nil {
 			print("renvoflash: " + err.Error() + "\n")
 			return 1
 		}
 		return 0
 	}
 	if len(args) < 2 || len(args) > 3 {
-		print("usage: renvoflash ELF-OR-BIN [PORT]\n       renvoflash --convert ELF BIN\n")
+		print("usage: renvoflash ELF-OR-BIN [PORT]\n       renvoflash --backup BIN [PORT]\n       renvoflash --convert ELF BIN\n")
 		return 2
 	}
-	port := "/dev/ttyACM0"
+	port := ""
 	if len(args) == 3 {
 		port = args[2]
+	} else {
+		var detectErr error
+		port, detectErr = detectPort()
+		if detectErr != nil {
+			print("renvoflash: " + detectErr.Error() + "\n")
+			return 1
+		}
 	}
-	if err := flashFileR(args[1], port); err != nil {
+	if err := flashFile(args[1], port); err != nil {
 		print("renvoflash: " + err.Error() + "\n")
 		return 1
 	}
 	return 0
 }
 
-func flashFileR(path string, portName string) error {
-	source, err := readFileR(path)
+func detectPort() (string, error) {
+	entries, err := os.ReadDir("/dev")
 	if err != nil {
-		return err
+		return "", fail("could not scan /dev for a serial port")
 	}
-	image, chip, err := prepareImageR(source)
-	if err != nil {
-		return err
+	prefixes := serialPortPrefixes()
+	var matches []string
+	for i := 0; i < len(entries); i++ {
+		name := entries[i].Name()
+		for j := 0; j < len(prefixes); j++ {
+			if hasPrefix(name, prefixes[j]) {
+				matches = append(matches, "/dev/"+name)
+				break
+			}
+		}
 	}
-	print("Prepared " + decimalR(len(image)) + " byte ESP app image (" + chip.name + ")\n")
-	port, err := openSerialR(portName)
+	if len(matches) == 0 {
+		return "", fail("no USB serial port found; connect the board or pass PORT explicitly")
+	}
+	if len(matches) != 1 {
+		message := "multiple USB serial ports found"
+		for i := 0; i < len(matches); i++ {
+			message += " " + matches[i]
+		}
+		return "", fail(message + "; pass PORT explicitly")
+	}
+	print("Detected serial port " + matches[0] + "\n")
+	return matches[0], nil
+}
+
+func hasPrefix(text string, prefix string) bool {
+	if len(text) < len(prefix) {
+		return false
+	}
+	return text[:len(prefix)] == prefix
+}
+
+func backupFlash(path string, portName string) error {
+	port, err := openSerial(portName)
 	if err != nil {
 		return err
 	}
 	defer port.close()
-	loader := &loaderR{port: port}
-	if err := loader.connect(); err != nil {
+	loader := &loader{port: port}
+	print("Serial port configured\n")
+	if err = loader.connect(); err != nil {
 		return err
 	}
-	magic, err := loader.command(0x0a, wordsR([]uint32{0x40001000}), 0, 30)
+	chip, security, err := loader.identify()
 	if err != nil {
 		return err
 	}
-	if magic != chip.magic {
-		return failR("connected chip 0x" + hexR(magic) + " does not match " + chip.name)
+	print("ROM loader connected (" + chip.name + ")\n")
+	if len(security) >= 20 {
+		flags := u32(security, 0)
+		crypt := security[4]
+		print("Security flags 0x" + hex(flags) + ", flash crypt count " + decimal(int(crypt)) + "\n")
+		if flags&4 != 0 {
+			return fail("secure download mode does not permit a restorable firmware backup")
+		}
+		if bitCount(crypt)&1 != 0 {
+			return fail("flash encryption is enabled; refusing to create a plaintext backup")
+		}
+	}
+	if _, err = loader.command(0x0d, words([]uint32{0}), 0, 30); err != nil {
+		return err
+	}
+	flashParameters := words([]uint32{0, uint32(chip.flashSize), 64 * 1024, 4 * 1024, 256, 0xffff})
+	if _, err = loader.command(0x0b, flashParameters, 0, 30); err != nil {
+		return fail("configure flash geometry: " + err.Error())
+	}
+	digestPayload := words([]uint32{0, uint32(chip.flashSize), 0, 0})
+	digest, digestErr := loader.commandData(0x13, digestPayload, 0, 30000)
+	if digestErr != nil {
+		return fail("device digest failed: " + digestErr.Error())
+	}
+	if len(digest) < 32 {
+		return fail("device returned an invalid flash digest")
+	}
+	fd := hostOpen(path, hostCreateFlags(), 0x1b6)
+	if fd < 0 {
+		return fail("write " + path + " failed")
+	}
+	completed := false
+	defer func() {
+		hostClose(fd)
+		if !completed {
+			print("Backup is incomplete; do not use it for restore\n")
+		}
+	}()
+	print("Reading " + decimal(chip.flashSize) + " bytes to " + path + "\n")
+	payload := make([]byte, 8)
+	block := make([]byte, backupChunk)
+	buffer := make([]byte, 0, backupBuffer)
+	batchData := make([]byte, backupBatch*backupChunk)
+	for batchOffset := 0; batchOffset < chip.flashSize; batchOffset += backupChunk * backupBatch {
+		batchCount := backupBatch
+		if batchOffset+batchCount*backupChunk > chip.flashSize {
+			batchCount = (chip.flashSize - batchOffset) / backupChunk
+		}
+		for i := 0; i < batchCount; i++ {
+			put32(payload, 0, batchOffset+i*backupChunk)
+			put32(payload, 4, backupChunk)
+			if commandErr := loader.sendCommand(0x0e, payload, 0); commandErr != nil {
+				return fail("request flash at 0x" + hex(uint32(batchOffset+i*backupChunk)) + ": " + commandErr.Error())
+			}
+		}
+		if commandErr := loader.receiveFlashBatch(batchCount, batchData[:batchCount*backupChunk]); commandErr != nil {
+			return fail("read flash batch at 0x" + hex(uint32(batchOffset)) + ": " + commandErr.Error())
+		}
+		for i := 0; i < batchCount; i++ {
+			offset := batchOffset + i*backupChunk
+			copy(block, batchData[i*backupChunk:(i+1)*backupChunk])
+			buffer = append(buffer, block...)
+			if len(buffer) == backupBuffer {
+				if hostWriteAll(fd, buffer) < 0 {
+					return fail("write " + path + " failed")
+				}
+				buffer = buffer[:0]
+			}
+			read := offset + backupChunk
+			if read%(1024*1024) == 0 || read == chip.flashSize {
+				print("Read " + decimal(read/(1024*1024)) + "/" + decimal(chip.flashSize/(1024*1024)) + " MiB\n")
+			}
+		}
+	}
+	if len(buffer) != 0 && hostWriteAll(fd, buffer) < 0 {
+		return fail("write " + path + " failed")
+	}
+	completed = true
+	print("Backup complete\nDevice MD5: " + string(digest[:32]) + "\n")
+	return nil
+}
+
+func flashFile(path string, portName string) error {
+	source, err := readFile(path)
+	if err != nil {
+		return err
+	}
+	image, chip, err := prepareImage(source)
+	if err != nil {
+		return err
+	}
+	print("Prepared " + decimal(len(image)) + " byte ESP app image (" + chip.name + ")\n")
+	port, err := openSerial(portName)
+	if err != nil {
+		return err
+	}
+	defer port.close()
+	loader := &loader{port: port}
+	if err := loader.connect(); err != nil {
+		return err
+	}
+	connected, _, err := loader.identify()
+	if err != nil {
+		return err
+	}
+	if connected.chipID != chip.chipID {
+		return fail("connected " + connected.name + " does not match " + chip.name)
 	}
 	print("ROM loader connected (" + chip.name + ")\n")
-	if _, err = loader.command(0x0d, wordsR([]uint32{0}), 0, 30); err != nil {
+	if _, err = loader.command(0x0d, words([]uint32{0}), 0, 30); err != nil {
 		return err
 	}
-	blocks := (len(image) + flashBlockR - 1) / flashBlockR
-	begin := []uint32{uint32(len(image)), uint32(blocks), flashBlockR, flashOffsetR, 0}
-	if _, err = loader.command(0x02, wordsR(begin), 0, 100); err != nil {
-		return err
+	blocks := (len(image) + flashBlock - 1) / flashBlock
+	written := 0
+	// Bound each ROM erase so native USB never disappears behind a long
+	// FLASH_BEGIN. Write high addresses first and the image-header batch last;
+	// an interrupted update therefore remains explicitly non-bootable.
+	for batchEnd := blocks; batchEnd > 0; {
+		batchStart := (batchEnd - 1) / flashBatch * flashBatch
+		batchBlocks := batchEnd - batchStart
+		begin := []uint32{
+			uint32(batchBlocks * flashBlock), uint32(batchBlocks), flashBlock,
+			uint32(flashOffset + batchStart*flashBlock), 0,
+		}
+		if _, err = loader.command(0x02, words(begin), 0, 10000); err != nil {
+			return fail("erase batch at 0x" + hex(uint32(flashOffset+batchStart*flashBlock)) + ": " + err.Error())
+		}
+		for sequence := 0; sequence < batchBlocks; sequence++ {
+			blockIndex := batchStart + sequence
+			block := make([]byte, flashBlock)
+			for i := 0; i < len(block); i++ {
+				block[i] = 0xff
+			}
+			start := blockIndex * flashBlock
+			end := start + flashBlock
+			if end > len(image) {
+				end = len(image)
+			}
+			copy(block, image[start:end])
+			checksum := byte(checksumMagic)
+			for i := 0; i < len(block); i++ {
+				checksum = checksum ^ block[i]
+			}
+			payload := words([]uint32{flashBlock, uint32(sequence), 0, 0})
+			payload = append(payload, block...)
+			if _, err = loader.command(0x03, payload, uint32(checksum), 50); err != nil {
+				return fail("write block " + decimal(blockIndex+1) + "/" + decimal(blocks) + ": " + err.Error())
+			}
+			written++
+			if written == blocks || written%16 == 0 {
+				print("Wrote " + decimal(written) + "/" + decimal(blocks) + " blocks\n")
+			}
+		}
+		batchEnd = batchStart
 	}
-	for sequence := 0; sequence < blocks; sequence++ {
-		block := make([]byte, flashBlockR)
-		for i := 0; i < len(block); i++ {
-			block[i] = 0xff
-		}
-		start := sequence * flashBlockR
-		end := start + flashBlockR
-		if end > len(image) {
-			end = len(image)
-		}
-		copy(block, image[start:end])
-		checksum := byte(checksumMagicR)
-		for i := 0; i < len(block); i++ {
-			checksum = checksum ^ block[i]
-		}
-		payload := wordsR([]uint32{flashBlockR, uint32(sequence), 0, 0})
-		payload = append(payload, block...)
-		if _, err = loader.command(0x03, payload, uint32(checksum), 50); err != nil {
-			return failR("write block " + decimalR(sequence+1) + "/" + decimalR(blocks) + ": " + err.Error())
-		}
-		if sequence+1 == blocks || (sequence+1)%16 == 0 {
-			print("Wrote " + decimalR(sequence+1) + "/" + decimalR(blocks) + " blocks\n")
-		}
-	}
-	if _, err = loader.command(0x04, wordsR([]uint32{1}), 0, 30); err != nil {
+	if _, err = loader.command(0x04, words([]uint32{1}), 0, 30); err != nil {
 		return err
 	}
 	if err = port.setDTR(false); err != nil {
@@ -155,7 +324,7 @@ func flashFileR(path string, portName string) error {
 	if err = port.setRTS(true); err != nil {
 		return err
 	}
-	sleepR(200)
+	sleep(200)
 	if err = port.setRTS(false); err != nil {
 		return err
 	}
@@ -170,7 +339,7 @@ func flashFileR(path string, portName string) error {
 	for empty < 10 {
 		n := port.read(buffer)
 		if n < 0 {
-			return failR("serial monitor read failed")
+			return fail("serial monitor read failed")
 		}
 		if n == 0 {
 			empty++
@@ -182,122 +351,117 @@ func flashFileR(path string, portName string) error {
 	return nil
 }
 
-type sectionR struct {
+type section struct {
 	name    string
 	address uint32
 	data    []byte
 }
 
-func prepareImageR(source []byte) ([]byte, targetR, error) {
+func prepareImage(source []byte) ([]byte, target, error) {
 	if len(source) >= 4 && source[0] == 0x7f && source[1] == 'E' && source[2] == 'L' && source[3] == 'F' {
-		return elfToImageR(source)
+		return elfToImage(source)
 	}
 	if len(source) < 24 || source[0] != 0xe9 {
-		return nil, targetR{}, failR("input is neither an ELF32 file nor an ESP application image")
+		return nil, target{}, fail("input is neither an ELF32 file nor an ESP application image")
 	}
-	chipID := u16R(source, 12)
-	for i := 0; i < len(targetsR); i++ {
-		if targetsR[i].chipID == chipID {
-			return source, targetsR[i], nil
+	chipID := u16(source, 12)
+	for i := 0; i < len(targets); i++ {
+		if targets[i].chipID == chipID {
+			return source, targets[i], nil
 		}
 	}
-	return nil, targetR{}, failR("unsupported ESP image chip ID " + decimalR(int(chipID)))
+	return nil, target{}, fail("unsupported ESP image chip ID " + decimal(int(chipID)))
 }
 
-func elfToImageR(source []byte) ([]byte, targetR, error) {
+func elfToImage(source []byte) ([]byte, target, error) {
 	if len(source) < 52 || source[4] != 1 || source[5] != 1 {
-		return nil, targetR{}, failR("ESP flashing requires a little-endian ELF32 file")
+		return nil, target{}, fail("ESP flashing requires a little-endian ELF32 file")
 	}
-	machine := u16R(source, 18)
-	chip := targetR{}
-	for i := 0; i < len(targetsR); i++ {
-		if targetsR[i].machine == machine {
-			chip = targetsR[i]
-		}
-	}
+	machine := u16(source, 18)
+	entry := u32(source, 24)
+	chip := targetForELF(machine, entry)
 	if chip.name == "" {
-		return nil, targetR{}, failR("unsupported ELF machine " + decimalR(int(machine)))
+		return nil, target{}, fail("unsupported ELF machine " + decimal(int(machine)))
 	}
-	entry := u32R(source, 24)
-	sectionAt := int(u32R(source, 32))
-	sectionSize := int(u16R(source, 46))
-	sectionCount := int(u16R(source, 48))
-	namesIndex := int(u16R(source, 50))
+	sectionAt := int(u32(source, 32))
+	sectionSize := int(u16(source, 46))
+	sectionCount := int(u16(source, 48))
+	namesIndex := int(u16(source, 50))
 	if sectionSize < 40 || namesIndex >= sectionCount || sectionAt < 0 || sectionAt+sectionSize*sectionCount > len(source) {
-		return nil, targetR{}, failR("ELF section table is invalid")
+		return nil, target{}, fail("ELF section table is invalid")
 	}
 	namesHeader := sectionAt + namesIndex*sectionSize
-	namesAt := int(u32R(source, namesHeader+16))
-	namesSize := int(u32R(source, namesHeader+20))
+	namesAt := int(u32(source, namesHeader+16))
+	namesSize := int(u32(source, namesHeader+20))
 	if namesAt < 0 || namesAt+namesSize > len(source) {
-		return nil, targetR{}, failR("ELF section names are invalid")
+		return nil, target{}, fail("ELF section names are invalid")
 	}
-	var appdesc []sectionR
-	var ram []sectionR
-	var flash []sectionR
+	var appdesc []section
+	var ram []section
+	var flash []section
 	for index := 0; index < sectionCount; index++ {
 		at := sectionAt + index*sectionSize
-		typ := u32R(source, at+4)
-		flags := u32R(source, at+8)
-		offset := int(u32R(source, at+16))
-		size := int(u32R(source, at+20))
+		typ := u32(source, at+4)
+		flags := u32(source, at+8)
+		offset := int(u32(source, at+16))
+		size := int(u32(source, at+20))
 		if typ != 1 || flags&2 == 0 || size == 0 {
 			continue
 		}
 		if offset < 0 || offset+size > len(source) {
-			return nil, targetR{}, failR("ELF section data is invalid")
+			return nil, target{}, fail("ELF section data is invalid")
 		}
-		nameOffset := int(u32R(source, at))
+		nameOffset := int(u32(source, at))
 		if nameOffset < 0 || nameOffset >= namesSize {
-			return nil, targetR{}, failR("ELF section name is invalid")
+			return nil, target{}, fail("ELF section name is invalid")
 		}
 		nameEnd := namesAt + nameOffset
 		for nameEnd < namesAt+namesSize && source[nameEnd] != 0 {
 			nameEnd++
 		}
-		var item sectionR
+		var item section
 		item.name = string(source[namesAt+nameOffset : nameEnd])
-		item.address = u32R(source, at+12)
+		item.address = u32(source, at+12)
 		item.data = append([]byte{}, source[offset:offset+size]...)
 		if item.name == ".flash.appdesc" {
 			appdesc = append(appdesc, item)
-		} else if flashAddressR(chip, item.address) {
+		} else if flashAddress(chip, item.address) {
 			flash = append(flash, item)
 		} else {
 			ram = append(ram, item)
 		}
 	}
-	sortSectionsR(ram)
-	sortSectionsR(flash)
-	segments := make([]sectionR, 0, len(appdesc)+len(ram)+len(flash)*2)
+	sortSections(ram)
+	sortSections(flash)
+	segments := make([]section, 0, len(appdesc)+len(ram)+len(flash)*2)
 	imageLength := 24
 	for i := 0; i < len(appdesc); i++ {
-		segments, imageLength = appendSegmentR(segments, imageLength, appdesc[i])
+		segments, imageLength = appendSegment(segments, imageLength, appdesc[i])
 	}
 	for i := 0; i < len(ram); i++ {
-		segments, imageLength = appendSegmentR(segments, imageLength, ram[i])
+		segments, imageLength = appendSegment(segments, imageLength, ram[i])
 	}
 	for i := 0; i < len(flash); i++ {
-		desired := int((flash[i].address - flashOffsetR) & 0xffff)
+		desired := int((flash[i].address - flashOffset) & 0xffff)
 		if (imageLength+8)&0xffff != desired {
 			padding := (desired - imageLength - 16) & 0xffff
-			segments, imageLength = appendSegmentR(segments, imageLength, sectionR{data: make([]byte, padding)})
+			segments, imageLength = appendSegment(segments, imageLength, section{data: make([]byte, padding)})
 		}
-		segments, imageLength = appendSegmentR(segments, imageLength, flash[i])
+		segments, imageLength = appendSegment(segments, imageLength, flash[i])
 	}
 	if len(segments) == 0 || len(segments) > 255 {
-		return nil, targetR{}, failR("ELF has an invalid number of loadable sections")
+		return nil, target{}, fail("ELF has an invalid number of loadable sections")
 	}
 	image := []byte{0xe9, byte(len(segments)), 0x02, chip.flashConfig}
-	image = append(image, wordR(entry)...)
+	image = append(image, word(entry)...)
 	// hash_appended is zero. The ESP image checksum below remains mandatory;
 	// omitting the optional SHA-256 trailer keeps this Renvo-only utility small
 	// and avoids depending on a crypto standard-library package.
 	image = append(image, 0xee, 0, 0, 0, byte(chip.chipID), byte(chip.chipID>>8), 0, 0, 0, 0xff, 0xff, 0, 0, 0, 0, 0)
-	checksum := byte(checksumMagicR)
+	checksum := byte(checksumMagic)
 	for i := 0; i < len(segments); i++ {
-		image = append(image, wordR(segments[i].address)...)
-		image = append(image, wordR(uint32(len(segments[i].data)))...)
+		image = append(image, word(segments[i].address)...)
+		image = append(image, word(uint32(len(segments[i].data)))...)
 		image = append(image, segments[i].data...)
 		for j := 0; j < len(segments[i].data); j++ {
 			checksum = checksum ^ segments[i].data[j]
@@ -310,14 +474,36 @@ func elfToImageR(source []byte) ([]byte, targetR, error) {
 	return image, chip, nil
 }
 
-func flashAddressR(chip targetR, address uint32) bool {
+func targetForELF(machine uint16, entry uint32) target {
+	// ESP32-C6 and ESP32-P4 both use the standard RISC-V ELF machine ID.
+	// Their flash execution windows are distinct in Renvo-produced images.
+	if machine == 243 {
+		if entry >= 0x42000000 && entry < 0x43000000 {
+			return targets[0]
+		}
+		if entry >= 0x40000000 && entry < 0x44000000 || entry >= 0x4ff00000 && entry < 0x4ffc0000 {
+			return targets[2]
+		}
+	}
+	for i := 0; i < len(targets); i++ {
+		if targets[i].machine == machine && targets[i].chipID != 13 && targets[i].chipID != 18 {
+			return targets[i]
+		}
+	}
+	return target{}
+}
+
+func flashAddress(chip target, address uint32) bool {
 	if chip.chipID == 13 {
 		return address >= 0x42000000 && address < 0x43000000
+	}
+	if chip.chipID == 18 {
+		return address >= 0x40000000 && address < 0x44000000 || address >= 0x48000000 && address < 0x4c000000
 	}
 	return address >= 0x3c000000 && address < 0x3d000000 || address >= 0x42000000 && address < 0x44000000
 }
 
-func appendSegmentR(segments []sectionR, imageLength int, item sectionR) ([]sectionR, int) {
+func appendSegment(segments []section, imageLength int, item section) ([]section, int) {
 	for len(item.data)&3 != 0 {
 		item.data = append(item.data, 0)
 	}
@@ -325,7 +511,7 @@ func appendSegmentR(segments []sectionR, imageLength int, item sectionR) ([]sect
 	return segments, imageLength + 8 + len(item.data)
 }
 
-func sortSectionsR(items []sectionR) {
+func sortSections(items []section) {
 	for i := 1; i < len(items); i++ {
 		for j := i; j > 0 && items[j].address < items[j-1].address; j-- {
 			items[j], items[j-1] = items[j-1], items[j]
@@ -333,86 +519,120 @@ func sortSectionsR(items []sectionR) {
 	}
 }
 
-type serialR struct{ fd int }
+type serial struct{ fd int }
 
-func openSerialR(path string) (*serialR, error) {
-	name := append([]byte(path), 0)
-	fd := syscall(sysOpenR, int(unsafe.Pointer(&name[0])), oReadWriteR|oNoCTTYR, 0, 0, 0, 0)
+func openSerial(path string) (*serial, error) {
+	fd := hostOpen(path, hostSerialFlags(), 0)
 	if fd < 0 {
-		return nil, failR("open serial port " + path + " failed")
+		return nil, fail("open serial port " + path + " failed")
 	}
-	port := &serialR{fd: fd}
-	termios := make([]byte, 64)
-	if port.ioctl(tcgetsR, termios) < 0 {
+	port := &serial{fd: fd}
+	if configureSerial(port) < 0 {
 		port.close()
-		return nil, failR("read serial settings failed")
-	}
-	put32R(termios, 0, 4)                      // IGNPAR
-	put32R(termios, 4, 0)                      // no output processing
-	put32R(termios, 8, 0x1002|0x30|0x80|0x800) // B115200, CS8, CREAD, CLOCAL
-	put32R(termios, 12, 0)                     // raw local mode
-	termios[17+5] = 1                          // VTIME: 100 ms
-	termios[17+6] = 0                          // VMIN
-	if port.ioctl(tcsetsR, termios) < 0 {
-		port.close()
-		return nil, failR("configure serial port failed")
+		return nil, fail("configure serial port failed")
 	}
 	return port, nil
 }
 
-func (port *serialR) ioctl(request int, data []byte) int {
+func (port *serial) ioctl(request int, data []byte) int {
 	if len(data) == 0 {
 		return -1
 	}
-	return syscall(sysIoctlR, port.fd, request, int(unsafe.Pointer(&data[0])), 0, 0, 0)
+	return hostIoctl(port.fd, request, int(unsafe.Pointer(&data[0])))
 }
 
-func (port *serialR) close() { syscall(sysCloseR, port.fd, 0, 0, 0, 0, 0) }
+func (port *serial) close() { hostClose(port.fd) }
 
-func (port *serialR) setDTR(state bool) error { return port.modem(tiocmDTRR, state) }
-func (port *serialR) setRTS(state bool) error { return port.modem(tiocmRTSR, state) }
+func (port *serial) setDTR(state bool) error { return port.modem(hostDTR(), state) }
+func (port *serial) setRTS(state bool) error { return port.modem(hostRTS(), state) }
 
-func (port *serialR) modem(bit int, state bool) error {
+func (port *serial) modem(bit int, state bool) error {
 	data := make([]byte, 4)
-	put32R(data, 0, bit)
-	request := tiocmbicR
+	put32(data, 0, bit)
+	request := hostModemClear()
 	if state {
-		request = tiocmbisR
+		request = hostModemSet()
 	}
 	if port.ioctl(request, data) < 0 {
-		return failR("set serial control lines failed")
+		return fail("set serial control lines failed (host error " + decimal(hostLastError()) + ")")
 	}
 	return nil
 }
 
-func (port *serialR) write(data []byte) error {
+func (port *serial) write(data []byte) error {
 	offset := 0
+	wouldBlock := 0
 	for offset < len(data) {
-		n := syscall(sysWriteR, port.fd, int(unsafe.Pointer(&data[offset])), len(data)-offset, 0, 0, 0)
-		if n <= 0 {
-			return failR("serial write failed")
+		n := hostWrite(port.fd, int(unsafe.Pointer(&data[offset])), len(data)-offset)
+		if n < 0 && hostLastError() == hostWouldBlock() {
+			wouldBlock++
+			if wouldBlock >= 10000 {
+				return fail("serial write remained blocked")
+			}
+			sleep(1)
+			continue
 		}
+		if n <= 0 {
+			return fail("serial write failed (host error " + decimal(hostLastError()) + ")")
+		}
+		wouldBlock = 0
 		offset += n
 	}
 	return nil
 }
 
-func (port *serialR) read(data []byte) int {
+func (port *serial) read(data []byte) int {
 	if len(data) == 0 {
 		return 0
 	}
-	return syscall(sysReadR, port.fd, int(unsafe.Pointer(&data[0])), len(data), 0, 0, 0)
+	n := hostRead(port.fd, int(unsafe.Pointer(&data[0])), len(data))
+	if n < 0 && hostLastError() == hostWouldBlock() {
+		return 0
+	}
+	return n
 }
 
-type loaderR struct {
-	port    *serialR
-	frame   []byte
-	escaped bool
-	inside  bool
+type loader struct {
+	port         *serial
+	frame        []byte
+	buffer       []byte
+	bufferOffset int
+	bufferLength int
+	request      []byte
+	escaped      bool
+	inside       bool
 }
 
-func (loader *loaderR) connect() error {
+func (loader *loader) identify() (target, []byte, error) {
+	security, securityErr := loader.commandData(0x14, nil, 0, 1000)
+	if securityErr == nil && len(security) >= 20 {
+		chipID := u32(security, 12)
+		for i := 0; i < len(targets); i++ {
+			if uint32(targets[i].chipID) == chipID {
+				copyOfSecurity := append([]byte{}, security...)
+				return targets[i], copyOfSecurity, nil
+			}
+		}
+		return target{}, nil, fail("unsupported connected ESP chip ID " + decimal(int(chipID)))
+	}
+	magic, err := loader.command(0x0a, words([]uint32{0x40001000}), 0, 1000)
+	if err != nil {
+		if securityErr != nil {
+			return target{}, nil, fail("could not identify connected ESP chip: security info: " + securityErr.Error() + "; magic: " + err.Error())
+		}
+		return target{}, nil, fail("could not identify connected ESP chip: " + err.Error())
+	}
+	for i := 0; i < len(targets); i++ {
+		if targets[i].magic != 0 && targets[i].magic == magic {
+			return targets[i], nil, nil
+		}
+	}
+	return target{}, nil, fail("unsupported connected ESP chip magic 0x" + hex(magic))
+}
+
+func (loader *loader) connect() error {
 	var last error
+	print("Entering ROM download mode\n")
 	for attempt := 0; attempt < 3; attempt++ {
 		var err error
 		if attempt == 0 {
@@ -427,63 +647,69 @@ func (loader *loaderR) connect() error {
 			continue
 		}
 		loader.frame = nil
+		loader.bufferOffset = 0
+		loader.bufferLength = 0
 		loader.inside = false
 		loader.escaped = false
 		if err = loader.sync(); err == nil {
+			print("Synchronized\n")
 			return nil
 		}
 		last = err
 	}
-	return failR("could not synchronize with ESP ROM loader: " + last.Error())
+	return fail("could not synchronize with ESP ROM loader: " + last.Error())
 }
 
-func (loader *loaderR) usbReset() error {
+func (loader *loader) usbReset() error {
 	if err := loader.port.setRTS(false); err != nil {
 		return err
 	}
 	if err := loader.port.setDTR(false); err != nil {
 		return err
 	}
-	sleepR(100)
+	sleep(100)
 	if err := loader.port.setDTR(true); err != nil {
 		return err
 	}
 	if err := loader.port.setRTS(false); err != nil {
 		return err
 	}
-	sleepR(100)
+	sleep(100)
 	if err := loader.port.setRTS(true); err != nil {
 		return err
 	}
 	if err := loader.port.setDTR(false); err != nil {
 		return err
 	}
-	sleepR(100)
-	if err := loader.port.setRTS(false); err != nil {
+	if err := loader.port.setRTS(true); err != nil {
 		return err
 	}
-	return loader.port.setDTR(false)
+	sleep(100)
+	if err := loader.port.setDTR(false); err != nil {
+		return err
+	}
+	return loader.port.setRTS(false)
 }
 
-func (loader *loaderR) classicReset(delay int) error {
+func (loader *loader) classicReset(delay int) error {
 	if err := loader.port.setDTR(false); err != nil {
 		return err
 	}
 	if err := loader.port.setRTS(true); err != nil {
 		return err
 	}
-	sleepR(100)
+	sleep(100)
 	if err := loader.port.setDTR(true); err != nil {
 		return err
 	}
 	if err := loader.port.setRTS(false); err != nil {
 		return err
 	}
-	sleepR(delay)
+	sleep(delay)
 	return loader.port.setDTR(false)
 }
 
-func (loader *loaderR) sync() error {
+func (loader *loader) sync() error {
 	payload := make([]byte, 36)
 	payload[0], payload[1], payload[2], payload[3] = 7, 7, 0x12, 0x20
 	for i := 4; i < len(payload); i++ {
@@ -491,61 +717,179 @@ func (loader *loaderR) sync() error {
 	}
 	var last error
 	for attempt := 0; attempt < 5; attempt++ {
-		if _, err := loader.command(0x08, payload, 0, 3); err == nil {
-			return nil
+		if _, err := loader.command(0x08, payload, 0, 300); err == nil {
+			return loader.drainSyncReplies()
 		} else {
 			last = err
 		}
-		sleepR(80)
+		sleep(80)
 	}
 	return last
 }
 
-func (loader *loaderR) command(opcode byte, payload []byte, checksum uint32, emptyLimit int) (uint32, error) {
-	request := []byte{0, opcode, byte(len(payload)), byte(len(payload) >> 8)}
-	request = append(request, wordR(checksum)...)
-	request = append(request, payload...)
-	if err := loader.port.write(slipR(request)); err != nil {
-		return 0, err
+func (loader *loader) drainSyncReplies() error {
+	received := 0
+	for empty := 0; received < 7 && empty < 100; {
+		frame, hadData, err := loader.nextFrame()
+		if err != nil {
+			return err
+		}
+		if !hadData {
+			empty++
+			sleep(1)
+			continue
+		}
+		if len(frame) >= 2 && frame[0] == 1 && frame[1] == 0x08 {
+			received++
+		}
+	}
+	if received != 7 {
+		return fail("ESP SYNC response sequence was incomplete")
+	}
+	return nil
+}
+
+func (loader *loader) command(opcode byte, payload []byte, checksum uint32, emptyLimit int) (uint32, error) {
+	value, _, err := loader.commandResponse(opcode, payload, checksum, emptyLimit)
+	return value, err
+}
+
+func (loader *loader) commandData(opcode byte, payload []byte, checksum uint32, emptyLimit int) ([]byte, error) {
+	_, body, err := loader.commandResponse(opcode, payload, checksum, emptyLimit)
+	return body, err
+}
+
+func (loader *loader) commandResponse(opcode byte, payload []byte, checksum uint32, emptyLimit int) (uint32, []byte, error) {
+	if err := loader.sendCommand(opcode, payload, checksum); err != nil {
+		return 0, nil, err
 	}
 	for empty := 0; empty < emptyLimit; {
 		frame, hadData, err := loader.nextFrame()
 		if err != nil {
-			return 0, err
+			return 0, nil, err
 		}
 		if !hadData {
 			empty++
+			sleep(1)
 			continue
 		}
-		if len(frame) == 0 {
-			continue
-		}
-		if len(frame) < 8 || frame[0] != 1 || frame[1] != opcode {
+		if len(frame) == 0 || len(frame) < 8 || frame[0] != 1 || frame[1] != opcode {
 			continue
 		}
 		body := frame[8:]
 		if len(body) >= 2 && body[len(body)-2] != 0 {
-			return 0, failR("ESP command 0x" + hexR(uint32(opcode)) + " failed")
+			return 0, nil, fail("ESP command 0x" + hex(uint32(opcode)) + " failed")
 		}
-		return u32R(frame, 4), nil
+		if len(body) >= 2 {
+			body = body[:len(body)-2]
+		}
+		return u32(frame, 4), body, nil
 	}
-	return 0, failR("ESP command 0x" + hexR(uint32(opcode)) + " timed out")
+	return 0, nil, fail("ESP command 0x" + hex(uint32(opcode)) + " timed out")
 }
 
-func (loader *loaderR) nextFrame() ([]byte, bool, error) {
-	buffer := make([]byte, 256)
-	n := loader.port.read(buffer)
-	if n < 0 {
-		return nil, false, failR("serial read failed")
+func (loader *loader) sendCommand(opcode byte, payload []byte, checksum uint32) error {
+	loader.request = loader.request[:0]
+	loader.request = append(loader.request, 0xc0)
+	header := []byte{0, opcode, byte(len(payload)), byte(len(payload) >> 8), byte(checksum), byte(checksum >> 8), byte(checksum >> 16), byte(checksum >> 24)}
+	loader.request = appendEscaped(loader.request, header)
+	loader.request = appendEscaped(loader.request, payload)
+	loader.request = append(loader.request, 0xc0)
+	if err := loader.port.write(loader.request); err != nil {
+		return err
 	}
-	if n == 0 {
-		return nil, false, nil
+	return nil
+}
+
+func (loader *loader) receiveFlashBatch(count int, output []byte) error {
+	if len(loader.buffer) == 0 {
+		loader.buffer = make([]byte, 256)
 	}
-	for i := 0; i < n; i++ {
-		value := buffer[i]
+	loader.frame = loader.frame[:0]
+	escaped := false
+	inside := false
+	received := 0
+	empty := 0
+	for received < count {
+		n := loader.port.read(loader.buffer)
+		if n < 0 {
+			return fail("serial read failed")
+		}
+		if n == 0 {
+			empty++
+			if empty > 10000 {
+				return fail("ESP command 0xe timed out")
+			}
+			sleep(1)
+			continue
+		}
+		empty = 0
+		for i := 0; i < n; i++ {
+			value := loader.buffer[i]
+			if value == 0xc0 {
+				if inside && len(loader.frame) != 0 {
+					if len(loader.frame) < 8+backupChunk+2 || loader.frame[0] != 1 || loader.frame[1] != 0x0e {
+						return fail("invalid pipelined flash response")
+					}
+					body := loader.frame[8:]
+					if body[len(body)-2] != 0 {
+						return fail("ESP command 0xe failed")
+					}
+					copy(output[received*backupChunk:(received+1)*backupChunk], body[:backupChunk])
+					received++
+					loader.frame = loader.frame[:0]
+					escaped = false
+					if received == count {
+						return nil
+					}
+				}
+				inside = true
+				loader.frame = loader.frame[:0]
+				escaped = false
+			} else if !inside {
+				continue
+			} else if escaped {
+				if value == 0xdc {
+					loader.frame = append(loader.frame, 0xc0)
+				} else if value == 0xdd {
+					loader.frame = append(loader.frame, 0xdb)
+				} else {
+					loader.frame = append(loader.frame, 0xdb, value)
+				}
+				escaped = false
+			} else if value == 0xdb {
+				escaped = true
+			} else {
+				loader.frame = append(loader.frame, value)
+			}
+		}
+	}
+	return nil
+}
+
+func (loader *loader) nextFrame() ([]byte, bool, error) {
+	if len(loader.buffer) == 0 {
+		loader.buffer = make([]byte, 256)
+	}
+	hadData := false
+	for {
+		if loader.bufferOffset == loader.bufferLength {
+			n := loader.port.read(loader.buffer)
+			if n < 0 {
+				return nil, false, fail("serial read failed")
+			}
+			if n == 0 {
+				return nil, hadData, nil
+			}
+			loader.bufferOffset = 0
+			loader.bufferLength = n
+			hadData = true
+		}
+		value := loader.buffer[loader.bufferOffset]
+		loader.bufferOffset++
 		if value == 0xc0 {
 			if loader.inside && len(loader.frame) != 0 {
-				result := append([]byte{}, loader.frame...)
+				result := loader.frame
 				loader.frame = loader.frame[:0]
 				loader.escaped = false
 				return result, true, nil
@@ -570,11 +914,15 @@ func (loader *loaderR) nextFrame() ([]byte, bool, error) {
 			loader.frame = append(loader.frame, value)
 		}
 	}
-	return nil, true, nil
 }
 
-func slipR(data []byte) []byte {
+func slip(data []byte) []byte {
 	result := []byte{0xc0}
+	result = appendEscaped(result, data)
+	return append(result, 0xc0)
+}
+
+func appendEscaped(result []byte, data []byte) []byte {
 	for i := 0; i < len(data); i++ {
 		if data[i] == 0xc0 {
 			result = append(result, 0xdb, 0xdc)
@@ -584,22 +932,21 @@ func slipR(data []byte) []byte {
 			result = append(result, data[i])
 		}
 	}
-	return append(result, 0xc0)
+	return result
 }
 
-func readFileR(path string) ([]byte, error) {
-	name := append([]byte(path), 0)
-	fd := syscall(sysOpenR, int(unsafe.Pointer(&name[0])), 0, 0, 0, 0, 0)
+func readFile(path string) ([]byte, error) {
+	fd := hostOpen(path, hostReadFlags(), 0)
 	if fd < 0 {
-		return nil, failR("read " + path + " failed")
+		return nil, fail("read " + path + " failed")
 	}
-	defer syscall(sysCloseR, fd, 0, 0, 0, 0, 0)
+	defer hostClose(fd)
 	var result []byte
 	buffer := make([]byte, 4096)
 	for {
-		n := syscall(sysReadR, fd, int(unsafe.Pointer(&buffer[0])), len(buffer), 0, 0, 0)
+		n := hostRead(fd, int(unsafe.Pointer(&buffer[0])), len(buffer))
 		if n < 0 {
-			return nil, failR("read " + path + " failed")
+			return nil, fail("read " + path + " failed")
 		}
 		if n == 0 {
 			return result, nil
@@ -608,60 +955,70 @@ func readFileR(path string) ([]byte, error) {
 	}
 }
 
-func writeFileR(path string, data []byte) error {
-	name := append([]byte(path), 0)
-	fd := syscall(sysOpenR, int(unsafe.Pointer(&name[0])), 2|64|512, 0x1b6, 0, 0, 0)
+func writeFile(path string, data []byte) error {
+	fd := hostOpen(path, hostCreateFlags(), 0x1b6)
 	if fd < 0 {
-		return failR("write " + path + " failed")
+		return fail("write " + path + " failed")
 	}
 	offset := 0
 	for offset < len(data) {
-		n := syscall(sysWriteR, fd, int(unsafe.Pointer(&data[offset])), len(data)-offset, 0, 0, 0)
+		n := hostWrite(fd, int(unsafe.Pointer(&data[offset])), len(data)-offset)
 		if n <= 0 {
-			syscall(sysCloseR, fd, 0, 0, 0, 0, 0)
-			return failR("write " + path + " failed")
+			hostClose(fd)
+			return fail("write " + path + " failed")
 		}
 		offset += n
 	}
-	syscall(sysCloseR, fd, 0, 0, 0, 0, 0)
+	hostClose(fd)
 	return nil
 }
 
-func sleepR(milliseconds int) {
-	timespec := make([]byte, 16)
-	seconds := milliseconds / 1000
-	nanoseconds := (milliseconds % 1000) * 1000000
-	put64R(timespec, 0, int64(seconds))
-	put64R(timespec, 8, int64(nanoseconds))
-	syscall(sysNanosleepR, int(unsafe.Pointer(&timespec[0])), 0, 0, 0, 0, 0)
+func hostWriteAll(fd int, data []byte) int {
+	written := 0
+	for written < len(data) {
+		n := hostWrite(fd, int(unsafe.Pointer(&data[written])), len(data)-written)
+		if n <= 0 {
+			return -1
+		}
+		written += n
+	}
+	return written
 }
 
-func u16R(data []byte, at int) uint16 { return uint16(data[at]) | uint16(data[at+1])<<8 }
-func u32R(data []byte, at int) uint32 {
+func u16(data []byte, at int) uint16 { return uint16(data[at]) | uint16(data[at+1])<<8 }
+func u32(data []byte, at int) uint32 {
 	return uint32(data[at]) | uint32(data[at+1])<<8 | uint32(data[at+2])<<16 | uint32(data[at+3])<<24
 }
-func wordR(value uint32) []byte {
+func word(value uint32) []byte {
 	return []byte{byte(value), byte(value >> 8), byte(value >> 16), byte(value >> 24)}
 }
-func wordsR(values []uint32) []byte {
+func words(values []uint32) []byte {
 	var out []byte
 	for i := 0; i < len(values); i++ {
-		out = append(out, wordR(values[i])...)
+		out = append(out, word(values[i])...)
 	}
 	return out
 }
-func put32R(data []byte, at int, value int) {
+func put32(data []byte, at int, value int) {
 	data[at] = byte(value)
 	data[at+1] = byte(value >> 8)
 	data[at+2] = byte(value >> 16)
 	data[at+3] = byte(value >> 24)
 }
-func put64R(data []byte, at int, value int64) {
+func put64(data []byte, at int, value int64) {
 	for i := 0; i < 8; i++ {
 		data[at+i] = byte(value >> uint(i*8))
 	}
 }
-func decimalR(value int) string {
+func bitCount(value byte) int {
+	count := 0
+	for value != 0 {
+		count += int(value & 1)
+		value >>= 1
+	}
+	return count
+}
+func decimal(value int) string {
 	if value == 0 {
 		return "0"
 	}
@@ -676,7 +1033,7 @@ func decimalR(value int) string {
 	}
 	return string(result)
 }
-func hexR(value uint32) string {
+func hex(value uint32) string {
 	if value == 0 {
 		return "0"
 	}
