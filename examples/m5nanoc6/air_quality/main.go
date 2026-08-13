@@ -1,8 +1,9 @@
 package main
 
 import (
-	"renvo.dev/examples/m5nanoc6/board"
-	"renvo.dev/examples/m5nanoc6/sgp30"
+	board "renvo.dev/device/board/m5nanoc6"
+	"renvo.dev/device/i2c"
+	"renvo.dev/device/sensor/sgp30"
 )
 
 const maximumBrightness = uint32(64)
@@ -36,28 +37,28 @@ func airQualityColor(tvoc uint16) (uint8, uint8, uint8) {
 }
 
 func main() {
-	board.ConfigureRGB()
-	board.SetRGB(0, 0, 0)
+	board.RGB.Set(0, 0, 0)
+	air := sgp30.New(i2c.New(board.Grove))
 
 	for {
-		if !sgp30.Initialize() {
-			board.SetRGB(32, 0, 32)
-			board.DelayMilliseconds(1000)
+		if air.Initialize() != nil {
+			board.RGB.Set(32, 0, 32)
+			board.Clock.DelayMilliseconds(1000)
 			continue
 		}
 
 		for {
-			started := board.TimerTicks()
-			tvoc := uint16(0)
-			if !sgp30.Measure(&tvoc) {
-				board.SetRGB(32, 0, 32)
-				board.DelayUntil(started, 1000000)
+			started := board.Clock.Ticks()
+			tvoc, err := air.Measure()
+			if err != nil {
+				board.RGB.Set(32, 0, 32)
+				board.Clock.DelayUntil(started, 1000000)
 				break
 			}
 			red, green, blue := airQualityColor(tvoc)
-			board.SetRGB(red, green, blue)
+			board.RGB.Set(red, green, blue)
 
-			board.DelayUntil(started, 1000000)
+			board.Clock.DelayUntil(started, 1000000)
 		}
 	}
 }

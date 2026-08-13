@@ -1,13 +1,14 @@
 package main
 
-import "renvo.dev/examples/m5nanoc6/board"
+import (
+	board "renvo.dev/device/board/m5nanoc6"
+)
 
 func main() {
-	board.ConfigureBlueLED()
 	for {
-		board.DelayMilliseconds(500)
-		board.SetBlueLED(true)
-		board.DelayMilliseconds(500)
-		board.SetBlueLED(false)
+		board.Clock.DelayMilliseconds(500)
+		board.BlueLED.Set(true)
+		board.Clock.DelayMilliseconds(500)
+		board.BlueLED.Set(false)
 	}
 }
