@@ -6867,6 +6867,9 @@ func renvoFunctionLocalCap(fn *renvoFuncDecl) int {
 
 func renvoEmitLinearRange(g *renvoLinearGen, start int, end int) bool {
 	renvoNonNil(g)
+	constGroup := g.constEvalIotaValid != 0
+	constGroupRepeatStart := 0
+	constGroupRepeatEnd := 0
 	var bp renvoBodyParse
 	prog := g.meta.prog
 	bp.prog = prog
@@ -6897,6 +6900,21 @@ func renvoEmitLinearRange(g *renvoLinearGen, start int, end int) bool {
 		if !bp.ok {
 			return false
 		}
+		if constGroup {
+			if stmt.kind == renvoStmtAssign {
+				constGroupRepeatStart = stmt.startTok
+				constGroupRepeatEnd = stmt.endTok
+			} else {
+				if constGroupRepeatStart == 0 {
+					return false
+				}
+				count := (stmt.endTok - stmt.startTok) * renvoTokenStride
+				renvoCopyTokenData(prog, constGroupRepeatStart*renvoTokenStride, stmt.startTok*renvoTokenStride, count)
+				stmt.startTok = constGroupRepeatStart
+				stmt.endTok = constGroupRepeatEnd
+			}
+			stmt.kind = renvoStmtVar
+		}
 		lastKind = stmt.kind
 		i = next
 		statementLocalBase := g.localCount
@@ -6908,6 +6926,9 @@ func renvoEmitLinearRange(g *renvoLinearGen, start int, end int) bool {
 				renvoPrintErr("\n")
 			}
 			return false
+		}
+		if constGroup {
+			g.constEvalIota++
 		}
 		for g.localCount > statementLocalBase {
 			local := &g.locals[g.localCount-1]
@@ -9000,10 +9021,17 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 	tokenData := p.toks.data
 	startBase := stmt.startTok * renvoTokenStride
 	startKind := int(tokenData[startBase]) & 255
+	if startKind == renvoTokConst && renvoTokCharIs(p, stmt.startTok+1, '(') {
+		g.constEvalIota = 0
+		g.constEvalIotaValid = 1
+		ok := renvoEmitLinearRange(g, stmt.startTok+2, stmt.endTok-1)
+		g.constEvalIotaValid = 0
+		return ok
+	}
 	nameStart := stmt.nameStart
 	nameEnd := stmt.nameEnd
 	nextBase := startBase + renvoTokenStride
-	if (stmt.kind == renvoStmtVar || startKind == renvoTokVar) && int(tokenData[nextBase])&255 == renvoTokIdent {
+	if (startKind == renvoTokVar || startKind == renvoTokConst) && int(tokenData[nextBase])&255 == renvoTokIdent {
 		nameStart = renvoTokStart(p, stmt.startTok+1)
 		nameEnd = renvoTokEnd(p, stmt.startTok+1)
 	} else if startKind == renvoTokIdent {
@@ -9191,8 +9219,12 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 				if assignTok <= stmt.startTok {
 					typeEnd = stmt.endTok
 				}
-				if stmt.startTok+2 < typeEnd {
-					typeResult := renvoParseType(meta, g.prog, stmt.startTok+2, typeEnd)
+				typeStart := stmt.startTok + 2
+				if startKind == renvoTokIdent {
+					typeStart--
+				}
+				if typeStart < typeEnd {
+					typeResult := renvoParseType(meta, g.prog, typeStart, typeEnd)
 					if typeResult.typ != 0 {
 						localType = typeResult.typ
 					}
@@ -9400,6 +9432,12 @@ func renvoEmitTypedExprToSavedMem(g *renvoLinearGen, ep *renvoExprParse, idx int
 	return true
 }
 
+func renvoCopyTokenData(p *renvoProgram, to int, from int, count int) {
+	for i := 0; i < count; i++ {
+		p.toks.data[to+i] = renvo_runtime_UnsafeInt32At(p.toks.data, from+i)
+	}
+}
+
 // renvoEmitGroupedTypedVarDecl handles VarSpecs whose identifier list shares one
 // explicit type, such as "var first, second int". It returns zero when the
 // statement is not such a declaration, one on success, and -1 on an emission
@@ -9407,28 +9445,30 @@ func renvoEmitTypedExprToSavedMem(g *renvoLinearGen, ep *renvoExprParse, idx int
 func renvoEmitGroupedTypedVarDecl(g *renvoLinearGen, stmt *renvoStmt, assignTok int) int {
 	renvoNonNil(g, stmt)
 	p := g.prog
-	if stmt.kind != renvoStmtVar || !renvoTokIsKind(p, stmt.startTok, renvoTokVar) {
+	if stmt.kind != renvoStmtVar {
 		return 0
 	}
 	typeEnd := stmt.endTok
 	if assignTok > stmt.startTok {
 		typeEnd = assignTok
 	}
-	nameRanges := renvoFixedIntScratch(4)
-	pos := stmt.startTok + 1
+	names := renvoFixedIntScratch(4)
+	pos := stmt.startTok
+	if renvoTokIsKind(p, pos, renvoTokVar) {
+		pos++
+	}
 	for {
 		if pos >= typeEnd || !renvoTokIsKind(p, pos, renvoTokIdent) {
 			return 0
 		}
-		nameRanges = append(nameRanges, pos)
-		nameRanges = append(nameRanges, pos+1)
+		names = append(names, pos)
 		pos++
 		if pos >= typeEnd || !renvoTokCharIs(p, pos, ',') {
 			break
 		}
 		pos++
 	}
-	nameCount := len(nameRanges) / 2
+	nameCount := len(names)
 	if nameCount < 2 || pos >= typeEnd {
 		return 0
 	}
@@ -9460,29 +9500,19 @@ func renvoEmitGroupedTypedVarDecl(g *renvoLinearGen, stmt *renvoStmt, assignTok 
 			temps = append(temps, temp)
 		}
 	}
-	offsets := renvoFixedIntScratch(nameCount)
-	for i := 0; i < nameCount; i++ {
-		tok := nameRanges[i*2]
-		nameStart := int(renvoTokStart(p, tok))
-		nameEnd := int(renvoTokEnd(p, tok))
-		offset := 0
-		if nameEnd != nameStart+1 || renvo_runtime_UnsafeByteAt(p.src, nameStart) != '_' {
-			offset = renvoAddTypedLocal(g, nameStart, nameEnd, typeResult.typ)
-		}
-		offsets = append(offsets, offset)
-	}
-	if assignTok <= stmt.startTok {
-		for i := 0; i < nameCount; i++ {
-			if offsets[i] != 0 {
-				renvoZeroLocalAtOffset(g, offsets[i])
-			}
-		}
-		return 1
-	}
 	size := renvoTypeCopySize(g.meta, typeResult.typ)
 	for i := 0; i < nameCount; i++ {
-		if offsets[i] != 0 {
-			renvoEmitCopyStackToStack(g, temps[i], offsets[i], size)
+		tok := names[i]
+		nameStart := int(renvoTokStart(p, tok))
+		nameEnd := int(renvoTokEnd(p, tok))
+		if nameEnd == nameStart+1 && renvo_runtime_UnsafeByteAt(p.src, nameStart) == '_' {
+			continue
+		}
+		offset := renvoAddTypedLocal(g, nameStart, nameEnd, typeResult.typ)
+		if assignTok > stmt.startTok {
+			renvoEmitCopyStackToStack(g, temps[i], offset, size)
+		} else {
+			renvoZeroLocalAtOffset(g, offset)
 		}
 	}
 	return 1
