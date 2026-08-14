@@ -23,6 +23,8 @@ func hostSerialFlags() int         { return 2 | 0x100 | 0x800 }
 func hostCreateFlags() int         { return 2 | 64 | 512 }
 func hostDTR() int                 { return 0x002 }
 func hostRTS() int                 { return 0x004 }
+func hostModemGet() int            { return 0x5415 }
+func hostModemWrite() int          { return 0x5418 }
 func hostModemSet() int            { return 0x5416 }
 func hostModemClear() int          { return 0x5417 }
 func hostClose(fd int) int         { return syscall(sysClose, fd, 0, 0, 0, 0, 0) }

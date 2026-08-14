@@ -315,6 +315,11 @@ func flashFile(path string, portName string) error {
 		}
 		batchEnd = batchStart
 	}
+	// Finalize the flash while remaining in the loader so the response proves
+	// that the last write has completed. FLASH_END terminates the current flash
+	// operation even when its stay-in-loader flag is set, so a second FLASH_END
+	// is not a reliable way to request the reboot. Use the USB Serial/JTAG hard
+	// reset sequence from Espressif's host tools instead.
 	if _, err = loader.command(0x04, words([]uint32{1}), 0, 30); err != nil {
 		return err
 	}
@@ -324,16 +329,23 @@ func flashFile(path string, portName string) error {
 	if err = port.setRTS(true); err != nil {
 		return err
 	}
+	// Native USB needs time to process the control-line change on each side of
+	// reset before accepting the next one.
 	sleep(200)
 	if err = port.setRTS(false); err != nil {
 		return err
 	}
+	sleep(200)
 	if err = port.setDTR(false); err != nil {
 		return err
 	}
 	print("Application started\n")
-	// Keep the native USB endpoint open for one second while reset settles and
-	// relay any boot output, matching the browser workflow.
+	// Native USB disappears during the reboot. Reopen it for the short serial
+	// monitor when the application exposes a serial endpoint, but flashing is
+	// already complete if an application deliberately does not do so.
+	if err = port.reopen(10); err != nil {
+		return nil
+	}
 	buffer := make([]byte, 4096)
 	empty := 0
 	for empty < 10 {
@@ -519,14 +531,18 @@ func sortSections(items []section) {
 	}
 }
 
-type serial struct{ fd int }
+type serial struct {
+	fd   int
+	path string
+	dtr  bool
+}
 
 func openSerial(path string) (*serial, error) {
 	fd := hostOpen(path, hostSerialFlags(), 0)
 	if fd < 0 {
 		return nil, fail("open serial port " + path + " failed")
 	}
-	port := &serial{fd: fd}
+	port := &serial{fd: fd, path: path}
 	if configureSerial(port) < 0 {
 		port.close()
 		return nil, fail("configure serial port failed")
@@ -541,10 +557,72 @@ func (port *serial) ioctl(request int, data []byte) int {
 	return hostIoctl(port.fd, request, int(unsafe.Pointer(&data[0])))
 }
 
-func (port *serial) close() { hostClose(port.fd) }
+func (port *serial) close() {
+	if port.fd >= 0 {
+		hostClose(port.fd)
+		port.fd = -1
+	}
+}
 
-func (port *serial) setDTR(state bool) error { return port.modem(hostDTR(), state) }
-func (port *serial) setRTS(state bool) error { return port.modem(hostRTS(), state) }
+func (port *serial) reopen(attempts int) error {
+	port.close()
+	for attempt := 0; attempt < attempts; attempt++ {
+		fd := hostOpen(port.path, hostSerialFlags(), 0)
+		if fd >= 0 {
+			port.fd = fd
+			if configureSerial(port) >= 0 {
+				return nil
+			}
+			port.close()
+		}
+		sleep(100)
+	}
+	return fail("reopen serial port " + port.path + " failed")
+}
+
+func (port *serial) setDTR(state bool) error {
+	if err := port.modem(hostDTR(), state); err != nil {
+		return err
+	}
+	port.dtr = state
+	return nil
+}
+
+func (port *serial) setRTS(state bool) error {
+	if err := port.modem(hostRTS(), state); err != nil {
+		return err
+	}
+	// Some native USB drivers coalesce SET_CONTROL_LINE_STATE requests. A DTR
+	// rewrite after every RTS transition makes each phase observable and is the
+	// sequence used by Espressif's host tools on every platform.
+	return port.modem(hostDTR(), port.dtr)
+}
+
+func (port *serial) setLines(dtr bool, rts bool) error {
+	data := make([]byte, 4)
+	result := port.ioctl(hostModemGet(), data)
+	if result < 0 {
+		return fail("read serial control lines failed (host error " + decimal(hostError(result)) + ")")
+	}
+	bits := int(u32(data, 0))
+	if dtr {
+		bits = bits | hostDTR()
+	} else {
+		bits = bits &^ hostDTR()
+	}
+	if rts {
+		bits = bits | hostRTS()
+	} else {
+		bits = bits &^ hostRTS()
+	}
+	put32(data, 0, bits)
+	result = port.ioctl(hostModemWrite(), data)
+	if result < 0 {
+		return fail("set serial control lines failed (host error " + decimal(hostError(result)) + ")")
+	}
+	port.dtr = dtr
+	return nil
+}
 
 func (port *serial) modem(bit int, state bool) error {
 	data := make([]byte, 4)
@@ -639,19 +717,25 @@ func (loader *loader) connect() error {
 		if attempt == 0 {
 			err = loader.usbReset()
 		} else if attempt == 1 {
-			err = loader.classicReset(50)
+			err = loader.tightReset(50)
 		} else {
-			err = loader.classicReset(550)
+			err = loader.tightReset(550)
 		}
-		if err != nil {
+		if err == nil {
+			loader.clearInput()
+			if err = loader.sync(); err == nil {
+				print("Synchronized\n")
+				return nil
+			}
+		}
+		last = err
+		// Internal USB can disappear midway through a reset. Retry the sync
+		// using the re-enumerated endpoint before issuing another reset.
+		if err = loader.port.reopen(30); err != nil {
 			last = err
 			continue
 		}
-		loader.frame = nil
-		loader.bufferOffset = 0
-		loader.bufferLength = 0
-		loader.inside = false
-		loader.escaped = false
+		loader.clearInput()
 		if err = loader.sync(); err == nil {
 			print("Synchronized\n")
 			return nil
@@ -659,6 +743,14 @@ func (loader *loader) connect() error {
 		last = err
 	}
 	return fail("could not synchronize with ESP ROM loader: " + last.Error())
+}
+
+func (loader *loader) clearInput() {
+	loader.frame = nil
+	loader.bufferOffset = 0
+	loader.bufferLength = 0
+	loader.inside = false
+	loader.escaped = false
 }
 
 func (loader *loader) usbReset() error {
@@ -707,6 +799,29 @@ func (loader *loader) classicReset(delay int) error {
 		return err
 	}
 	sleep(delay)
+	return loader.port.setDTR(false)
+}
+
+func (loader *loader) tightReset(delay int) error {
+	// Espressif's POSIX reset sequence uses TIOCMSET for each complete
+	// DTR/RTS state. This avoids transient states between separate ioctls.
+	if err := loader.port.setLines(false, false); err != nil {
+		return err
+	}
+	if err := loader.port.setLines(true, true); err != nil {
+		return err
+	}
+	if err := loader.port.setLines(false, true); err != nil {
+		return err
+	}
+	sleep(100)
+	if err := loader.port.setLines(true, false); err != nil {
+		return err
+	}
+	sleep(delay)
+	if err := loader.port.setLines(false, false); err != nil {
+		return err
+	}
 	return loader.port.setDTR(false)
 }
 
