@@ -1,15 +1,17 @@
 // Package i2c provides board-independent I2C ports, buses, and controllers.
 package i2c
 
-import "errors"
+type busError string
 
-var (
+func (e busError) Error() string { return string(e) }
+
+const (
 	// ErrBusy reports that a controller or bus line could not be acquired.
-	ErrBusy = errors.New("i2c bus busy")
+	ErrBusy busError = "i2c bus busy"
 	// ErrNAK reports that a target did not acknowledge an address or byte.
-	ErrNAK = errors.New("i2c not acknowledged")
+	ErrNAK busError = "i2c not acknowledged"
 	// ErrTimeout reports that a clock-stretched line did not become high.
-	ErrTimeout = errors.New("i2c timeout")
+	ErrTimeout busError = "i2c timeout"
 )
 
 // Controller is the capability supplied by hardware or software I2C engines.

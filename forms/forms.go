@@ -755,6 +755,22 @@ func (f *Form) InvalidRects() []graphics.Rect {
 	return out
 }
 
+// InvalidRectCount reports queued repaint regions without allocating a copy.
+func (f *Form) InvalidRectCount() int {
+	if f == nil {
+		return 0
+	}
+	return len(f.invalid)
+}
+
+// InvalidRectAt returns one queued repaint region without allocating.
+func (f *Form) InvalidRectAt(index int) (graphics.Rect, bool) {
+	if f == nil || index < 0 || index >= len(f.invalid) {
+		return graphics.Rect{}, false
+	}
+	return f.invalid[index], true
+}
+
 // Paint redraws only invalidated regions. Each region is clipped independently
 // and all intersecting controls are painted in z-order so moved or overlapping
 // controls leave correct pixels behind.

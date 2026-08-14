@@ -1,0 +1,661 @@
+definition 1
+unit esp32p4
+implements direct_emitter_v1
+
+@import "../../backend/definitions/riscv32.rtg"
+
+go backend {
+	const textAddress = 0x40000000
+	const textLimit = 0x44000000
+	const bssAddress = 0x4ff00100
+	const bssLimit = 0x4ff2a000
+	const codeOffset = 0x100
+	const pageSize = 0x1000
+	const stackTop = 0x4ff3f000
+	const appDescriptorAddress = 0x40010020
+	const psramCommandAddress = 0x4ff2a000
+	const psramAddressStorage = psramCommandAddress + 32
+	const psramTransferStorage = psramCommandAddress + 36
+	const romSPICommandConfig = 0x4fc00108
+	const romSPICommandStart = 0x4fc0010c
+	const romSPISetOperationMode = 0x4fc00110
+	const romPSRAMMMUInitialize = 0x4fc00514
+	const romPSRAMMMUSet = 0x4fc00520
+	const usbSerialEndpoint = 0x500d2000
+	const usbSerialEndpointConfig = usbSerialEndpoint + 4
+	const usbSerialInterruptRaw = usbSerialEndpoint + 8
+	const usbSerialStartOfFrame = 1 << 1
+	const usbSerialProbeIterations = 65536
+	const displayInterruptAddress = 0x40000140
+	const displayMailbox = 0x4ff40080
+
+	func append16(out []byte, value int) []byte {
+		return append(out, byte(value), byte(value>>8))
+	}
+
+	func append32(out []byte, value int) []byte {
+		return append(out, byte(value), byte(value>>8), byte(value>>16), byte(value>>24))
+	}
+
+	func appendUntil(out []byte, size int) []byte {
+		for len(out) < size {
+			out = append(out, 0)
+		}
+		return out
+	}
+
+	func appendProgramHeader(
+		out []byte, offset int, address int, fileSize int,
+		memorySize int, flags int,
+	) []byte {
+		out = append32(out, 1)
+		out = append32(out, offset)
+		out = append32(out, address)
+		out = append32(out, address)
+		out = append32(out, fileSize)
+		out = append32(out, memorySize)
+		out = append32(out, flags)
+		return append32(out, pageSize)
+	}
+
+	func appendSectionHeader(
+		out []byte, name int, kind int, flags int, address int,
+		offset int, size int, alignment int,
+	) []byte {
+		out = append32(out, name)
+		out = append32(out, kind)
+		out = append32(out, flags)
+		out = append32(out, address)
+		out = append32(out, offset)
+		out = append32(out, size)
+		out = append32(out, 0)
+		out = append32(out, 0)
+		out = append32(out, alignment)
+		return append32(out, 0)
+	}
+
+	func appDescriptor() []byte {
+		// esp_app_desc_t is an ESP-IDF bootloader contract. Keeping it as a
+		// dedicated section lets standard esptool place it at image offset 0x20.
+		descriptor := make([]byte, 256)
+		descriptor[0] = 0x32
+		descriptor[1] = 0x54
+		descriptor[2] = 0xcd
+		descriptor[3] = 0xab
+		copy(descriptor[16:], []byte("renvo"))
+		copy(descriptor[48:], []byte("renvo-m5tab5"))
+		copy(descriptor[112:], []byte("renvo"))
+		// ESP32-P4's second-stage bootloader uses this log2 page size when
+		// installing the flash/PSRAM XIP mappings for application segments.
+		descriptor[180] = 16
+		return descriptor
+	}
+
+	func patchAbsolute(out *RTGEmitter, dataAddress int, bssAddress int) {
+		for index := 0; index < out.AbsoluteRelocationCount(); index++ {
+			at := out.AbsoluteRelocationOffset(index)
+			addend := out.AbsoluteRelocationAddend(index)
+			kind := out.AbsoluteRelocationKind(index)
+			target, resolved := RTGResolveAbsoluteRelocation(
+				out, kind, addend, dataAddress, bssAddress)
+			if !resolved {
+				continue
+			}
+			instruction := RTGGet32At(out.Code(), at)
+			register := (instruction >> 7) & 31
+			hi := (target + 0x800) >> 12
+			lo := target - (hi << 12)
+			out.PatchUint32(at, 0x37|(register<<7)|(hi<<12))
+			out.PatchUint32(at+4,
+				0x13|(register<<7)|(register<<15)|((lo&0xfff)<<20))
+		}
+	}
+
+	func writeRegister(out *RTGEmitter, register int, value int64) {
+		riscv32.moveImmediate(out, riscv32.primary, value)
+		riscv32.storeU32(out, RTGAddress{Displacement: register}, riscv32.primary)
+	}
+
+	func updateRegister(out *RTGEmitter, register int, setMask int64, clearMask int64) {
+		riscv32.loadU32(out, riscv32.scratch,
+			RTGAddress{Displacement: register})
+		if clearMask != 0 {
+			riscv32.moveImmediate(out, riscv32.primary, -clearMask-1)
+			riscv32.bitAnd(out, riscv32.scratch, riscv32.primary)
+		}
+		if setMask != 0 {
+			riscv32.moveImmediate(out, riscv32.primary, setMask)
+			riscv32.bitOr(out, riscv32.scratch, riscv32.primary)
+		}
+		riscv32.storeU32(out,
+			RTGAddress{Displacement: register}, riscv32.scratch)
+	}
+
+	func callROM(out *RTGEmitter, address int64) {
+		riscv32.moveImmediate(out, riscv32.scratch, address)
+		riscv32.callIndirect(out, riscv32.scratch)
+	}
+
+	func emitDisplayInterruptHandler(out *RTGEmitter) bool {
+		entry := out.NewLabel()
+		riscv32.jump(out, entry)
+		vectorOffset := displayInterruptAddress - (textAddress + codeOffset)
+		for out.Len() < vectorOffset {
+			riscv32.emit(out, 0x00000013)
+		}
+		if out.Len() != vectorOffset {
+			return false
+		}
+
+		// This is a deliberately leaf-only interrupt handler. It saves the three
+		// temporaries it uses, revalidates and attaches the descriptor selected by
+		// the foreground mailbox, clears full-transfer status, and immediately
+		// starts the next frame before the DSI bridge FIFO can drain.
+		riscv32.emit(out, 0xff010113) // addi sp, sp, -16
+		riscv32.emit(out, 0x00512023) // sw t0, 0(sp)
+		riscv32.emit(out, 0x00612223) // sw t1, 4(sp)
+		riscv32.emit(out, 0x00712423) // sw t2, 8(sp)
+		riscv32.emit(out, 0x4ff402b7) // lui t0, 0x4ff40
+		riscv32.emit(out, 0x08028293) // addi t0, t0, 0x80
+		riscv32.emit(out, 0x0002a303) // lw t1, 0(t0)
+		riscv32.emit(out, 0x400002b7) // lui t0, 0x40000
+		riscv32.emit(out, 0x005303b3) // add t2, t1, t0
+		riscv32.emit(out, 0xc01092b7) // lui t0, 0xc0109
+		riscv32.emit(out, 0x84028293) // addi t0, t0, -0x7c0
+		riscv32.emit(out, 0x0253a223) // sw t0, 36(t2)
+		riscv32.emit(out, 0x0ff0000f) // fence iorw, iorw
+		riscv32.emit(out, 0x500812b7) // lui t0, 0x50081
+		riscv32.emit(out, 0x10028293) // addi t0, t0, 0x100
+		riscv32.emit(out, 0x00200393) // addi t2, zero, 2
+		riscv32.emit(out, 0x0872ac23) // sw t2, 152(t0)
+		riscv32.emit(out, 0x00136393) // ori t2, t1, 1
+		riscv32.emit(out, 0x0272a423) // sw t2, 40(t0)
+		riscv32.emit(out, 0xf0028293) // addi t0, t0, -256
+		riscv32.emit(out, 0x10100393) // addi t2, zero, 0x101
+		riscv32.emit(out, 0x0072ac23) // sw t2, 24(t0)
+		riscv32.emit(out, 0x0ff0000f) // fence iorw, iorw
+		riscv32.emit(out, 0x4ff402b7) // lui t0, 0x4ff40
+		riscv32.emit(out, 0x08028293) // addi t0, t0, 0x80
+		riscv32.emit(out, 0x0062a423) // sw t1, 8(t0)
+		riscv32.emit(out, 0x0042a383) // lw t2, 4(t0)
+		riscv32.emit(out, 0x00138393) // addi t2, t2, 1
+		riscv32.emit(out, 0x0072a223) // sw t2, 4(t0)
+		riscv32.emit(out, 0x00012283) // lw t0, 0(sp)
+		riscv32.emit(out, 0x00412303) // lw t1, 4(sp)
+		riscv32.emit(out, 0x00812383) // lw t2, 8(sp)
+		riscv32.emit(out, 0x01010113) // addi sp, sp, 16
+		riscv32.emit(out, 0x30200073) // mret
+		out.Mark(entry)
+		return true
+	}
+
+	func psramCommand(
+		out *RTGEmitter, command int, address int, dummyBits int,
+		transmitAddress int, transmitBits int,
+		receiveAddress int, receiveBits int,
+	) {
+		// esp_rom_spi_cmd_t is eight 32-bit words on RV32. MSPI3 is the
+		// application-facing PSRAM command controller; mode 7 is OPI DTR.
+		writeRegister(out, psramAddressStorage, int64(address))
+		writeRegister(out, psramCommandAddress,
+			int64((command&0xffff)|(16<<16)))
+		writeRegister(out, psramCommandAddress+4,
+			int64(psramAddressStorage))
+		writeRegister(out, psramCommandAddress+8, 32)
+		writeRegister(out, psramCommandAddress+12, int64(transmitAddress))
+		writeRegister(out, psramCommandAddress+16, int64(transmitBits))
+		writeRegister(out, psramCommandAddress+20, int64(receiveAddress))
+		writeRegister(out, psramCommandAddress+24, int64(receiveBits))
+		writeRegister(out, psramCommandAddress+28, int64(dummyBits))
+
+		riscv32.moveImmediate(out, riscv32.primary, 3)
+		riscv32.moveImmediate(out, riscv32.secondary, 7)
+		callROM(out, romSPISetOperationMode)
+		riscv32.moveImmediate(out, riscv32.primary, 3)
+		riscv32.moveImmediate(out, riscv32.secondary,
+			int64(psramCommandAddress))
+		callROM(out, romSPICommandConfig)
+		riscv32.moveImmediate(out, riscv32.primary, 3)
+		riscv32.moveImmediate(out, riscv32.secondary,
+			int64(receiveAddress))
+		riscv32.moveImmediate(out, riscv32.tertiary,
+			int64(receiveBits/8))
+		riscv32.moveImmediate(out, riscv32.copyDestination, 2)
+		riscv32.moveImmediate(out, riscv32.copySource, 0)
+		callROM(out, romSPICommandStart)
+	}
+
+	func waitAnalogI2C(out *RTGEmitter) {
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		out.Mark(loop)
+		riscv32.loadU32(out, riscv32.scratch,
+			RTGAddress{Displacement: 0x50124000})
+		riscv32.moveImmediate(out, riscv32.primary, 1<<25)
+		riscv32.bitAnd(out, riscv32.scratch, riscv32.primary)
+		riscv32.moveImmediate(out, riscv32.primary, 0)
+		riscv32.compare(out, riscv32.scratch, riscv32.primary)
+		riscv32.jumpCondition(out, riscv32.eq, done)
+		riscv32.jump(out, loop)
+		out.Mark(done)
+	}
+
+	func analogRead(out *RTGEmitter, register int) {
+		waitAnalogI2C(out)
+		writeRegister(out, 0x50124000, int64(0x63|(register<<8)))
+		waitAnalogI2C(out)
+		riscv32.loadU32(out, riscv32.primary,
+			RTGAddress{Displacement: 0x50124000})
+		riscv32.shiftRightUnsignedImmediate(out, riscv32.primary, 16)
+		riscv32.moveImmediate(out, riscv32.secondary, 0xff)
+		riscv32.bitAnd(out, riscv32.primary, riscv32.secondary)
+	}
+
+	func analogWritePrimary(out *RTGEmitter, register int) {
+		riscv32.storeU32(out,
+			RTGAddress{Displacement: psramTransferStorage}, riscv32.primary)
+		waitAnalogI2C(out)
+		riscv32.loadU32(out, riscv32.primary,
+			RTGAddress{Displacement: psramTransferStorage})
+		riscv32.shiftLeftImmediate(out, riscv32.primary, 16)
+		riscv32.moveImmediate(out, riscv32.secondary,
+			int64(0x63|(register<<8)|(1<<24)))
+		riscv32.bitOr(out, riscv32.primary, riscv32.secondary)
+		riscv32.storeU32(out,
+			RTGAddress{Displacement: 0x50124000}, riscv32.primary)
+		waitAnalogI2C(out)
+	}
+
+	func configureMPLL(out *RTGEmitter) {
+		// ESP32-P4 implements the ROM regi2c API as an IDF patch. Reproduce the
+		// small MPLL subset here: select the MSPI analog block, set 400 MHz,
+		// and wait for self-calibration before selecting it as the PSRAM clock.
+		updateRegister(out, 0x50120000, 1<<27, 0)
+		updateRegister(out, 0x5012401c, 0, 0xffffff)
+		updateRegister(out, 0x50124020, 1<<9, 0xffffff)
+		updateRegister(out, 0x50124034, 1, 0)
+
+		updateRegister(out, 0x500e60bc, 1<<9, 0)
+		analogRead(out, 3)
+		riscv32.moveImmediate(out, riscv32.secondary, 0x30)
+		riscv32.bitOr(out, riscv32.primary, riscv32.secondary)
+		analogWritePrimary(out, 3)
+		analogRead(out, 1)
+		riscv32.move(out, riscv32.tertiary, riscv32.primary)
+		riscv32.moveImmediate(out, riscv32.secondary, 0xdf)
+		riscv32.bitAnd(out, riscv32.primary, riscv32.secondary)
+		analogWritePrimary(out, 1)
+		riscv32.move(out, riscv32.primary, riscv32.tertiary)
+		riscv32.moveImmediate(out, riscv32.secondary, 0x20)
+		riscv32.bitOr(out, riscv32.primary, riscv32.secondary)
+		analogWritePrimary(out, 1)
+		riscv32.moveImmediate(out, riscv32.primary, 0x99)
+		analogWritePrimary(out, 2)
+		updateRegister(out, 0x500e60bc, 0, 1<<9)
+
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		out.Mark(loop)
+		riscv32.loadU32(out, riscv32.scratch,
+			RTGAddress{Displacement: 0x500e60bc})
+		riscv32.moveImmediate(out, riscv32.primary, 1<<8)
+		riscv32.bitAnd(out, riscv32.scratch, riscv32.primary)
+		riscv32.moveImmediate(out, riscv32.primary, 0)
+		riscv32.compare(out, riscv32.scratch, riscv32.primary)
+		riscv32.jumpCondition(out, riscv32.ne, done)
+		riscv32.jump(out, loop)
+		out.Mark(done)
+		updateRegister(out, 0x500e60bc, 1<<9, 0)
+	}
+
+	func initializePSRAM(out *RTGEmitter) {
+		// Match esp_psram_impl_enable's clock/reset handoff before touching the
+		// command controller. USB download resets leave dual MSPI at defaults,
+		// even when the memory device itself remains in OPI-DTR mode.
+		// LDO channel 2 supplies the MPLL at 1.9 V. These are the calibrated
+		// values measured from the Tab5 factory firmware on this P4 revision.
+		writeRegister(out, 0x501151d0, 0x40200180)
+		writeRegister(out, 0x501151d4, 0x76800000)
+		riscv32.moveImmediate(out, riscv32.copyCount, 0)
+		riscv32.moveImmediate(out, riscv32.secondary, 200000)
+		ldoWait := out.NewLabel()
+		ldoReady := out.NewLabel()
+		out.Mark(ldoWait)
+		riscv32.compare(out, riscv32.copyCount, riscv32.secondary)
+		riscv32.jumpCondition(out, riscv32.eq, ldoReady)
+		riscv32.emitAddress(out, riscv32.copyCount,
+			RTGAddress{Base: riscv32.copyCount, Displacement: 1})
+		riscv32.jump(out, ldoWait)
+		out.Mark(ldoReady)
+		updateRegister(out, 0x5011515c, 1<<24, 0)
+		updateRegister(out, 0x50111040, 1<<28, 0)
+		configureMPLL(out)
+		updateRegister(out, 0x500e6014, 1<<31, 0)
+		updateRegister(out, 0x500e6030, 1<<12|1<<14|1<<15, 1<<13)
+		updateRegister(out, 0x500e60c0, 1<<23, 0)
+		updateRegister(out, 0x500e60c0, 0, 1<<23)
+		updateRegister(out, 0x500e60c0, 1<<25, 0)
+		updateRegister(out, 0x500e60c0, 0, 1<<25)
+
+		// Tab5 uses the P4's dedicated 16-bit AP Memory PSRAM interface.
+		// Select drive strength 2 on all data, DQS, clock, and CS pins.
+		for _, register := range []int{
+			0x500e121c, 0x500e1220, 0x500e1224, 0x500e1228,
+			0x500e122c, 0x500e1230, 0x500e1234, 0x500e1238,
+			0x500e1248, 0x500e124c, 0x500e1250, 0x500e1254,
+			0x500e1258, 0x500e125c, 0x500e1260, 0x500e1264,
+			0x500e1240, 0x500e1244,
+		} {
+			updateRegister(out, register, 2<<12, 3<<12)
+		}
+		updateRegister(out, 0x500e123c, 1|(2<<15), 3<<15)
+		updateRegister(out, 0x500e1268, 1|(2<<15), 3<<15)
+
+		// These values are the stable result of ESP-IDF 5.4.2's hex-PSRAM
+		// setup and timing calibration on this ESP32-P4 v1.3 Tab5. The reset
+		// state was captured separately over USB-JTAG, so read-only/status
+		// fields are intentionally omitted.
+		writeRegister(out, 0x5008e00c, 0x2ee00000)
+		writeRegister(out, 0x5008e050, 0x00010001)
+		writeRegister(out, 0x5008e0d8, 0x00003023)
+		writeRegister(out, 0x5008e180, 0x00000021)
+		writeRegister(out, 0x5008e190, 0x00000021)
+		writeRegister(out, 0x5008e1a0, 0x8400b18f)
+		writeRegister(out, 0x5008f014, 0x00010001)
+		writeRegister(out, 0x5008f0d4, 0x00000023)
+
+		// Program MR0/MR4 without disturbing the vendor-owned adjacent byte.
+		// At 200 MHz the fixed read latency is 14 cycles and write latency is
+		// 7 cycles. MR8 selects linear burst, RBX, and the 16-bit data bus.
+		psramCommand(out, 0x4040, 0, 12,
+			0, 0, psramTransferStorage, 16)
+		riscv32.loadU32(out, riscv32.primary,
+			RTGAddress{Displacement: psramTransferStorage})
+		riscv32.moveImmediate(out, riscv32.secondary, 0xffffff00)
+		riscv32.bitAnd(out, riscv32.primary, riscv32.secondary)
+		riscv32.moveImmediate(out, riscv32.secondary, 0x30)
+		riscv32.bitOr(out, riscv32.primary, riscv32.secondary)
+		riscv32.storeU32(out,
+			RTGAddress{Displacement: psramTransferStorage}, riscv32.primary)
+		psramCommand(out, 0xc0c0, 0, 0,
+			psramTransferStorage, 16, 0, 0)
+
+		psramCommand(out, 0x4040, 4, 12,
+			0, 0, psramTransferStorage, 16)
+		riscv32.loadU32(out, riscv32.primary,
+			RTGAddress{Displacement: psramTransferStorage})
+		riscv32.moveImmediate(out, riscv32.secondary, 0xffffff1f)
+		riscv32.bitAnd(out, riscv32.primary, riscv32.secondary)
+		riscv32.moveImmediate(out, riscv32.secondary, 0x20)
+		riscv32.bitOr(out, riscv32.primary, riscv32.secondary)
+		riscv32.storeU32(out,
+			RTGAddress{Displacement: psramTransferStorage}, riscv32.primary)
+		psramCommand(out, 0xc0c0, 4, 0,
+			psramTransferStorage, 16, 0, 0)
+
+		writeRegister(out, psramTransferStorage, 0x4b)
+		psramCommand(out, 0xc0c0, 8, 0,
+			psramTransferStorage, 16, 0, 0)
+
+		// Configure MSPI2's cached PSRAM path after the mode-register writes.
+		writeRegister(out, 0x5008e03c, 0x40000001)
+		writeRegister(out, 0x5008e040, 0x02f7c679)
+		writeRegister(out, 0x5008e044, 0x8cfc0000)
+		writeRegister(out, 0x5008e048, 0xf0000000)
+		writeRegister(out, 0x5008e04c, 0xf0008080)
+
+		// Give the dedicated MMU a clean 32 MiB linear mapping at 0x48000000.
+		callROM(out, romPSRAMMMUInitialize)
+		riscv32.moveImmediate(out, riscv32.primary, 0)
+		riscv32.moveImmediate(out, riscv32.secondary, 0x48000000)
+		riscv32.moveImmediate(out, riscv32.tertiary, 0)
+		riscv32.moveImmediate(out, riscv32.copyDestination, 64)
+		riscv32.moveImmediate(out, riscv32.copySource, 512)
+		riscv32.moveImmediate(out, riscv32.copyCount, 0)
+		callROM(out, romPSRAMMMUSet)
+		riscv32.emit(out, 0x0000100f)
+	}
+
+	func disableWatchdogs(out *RTGEmitter) {
+		// The ESP-IDF bootloader leaves watchdogs armed so a broken application
+		// resets. A freestanding runtime owns them from entry onward.
+		writeRegister(out, 0x500c2064, 0x50d83aa1)
+		writeRegister(out, 0x500c2048, 0)
+		writeRegister(out, 0x500c3064, 0x50d83aa1)
+		writeRegister(out, 0x500c3048, 0)
+		writeRegister(out, 0x50116018, 0x50d83aa1)
+		writeRegister(out, 0x50116000, 0)
+	}
+
+	func clearBSS(out *RTGEmitter) {
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		riscv32.emitAddress(out, riscv32.secondary, RTGBSSAddress(0))
+		riscv32.emitAddress(out, riscv32.copyCount, RTGBSSEndAddress(4))
+		riscv32.moveImmediate(out, riscv32.primary, 0)
+		out.Mark(loop)
+		riscv32.compare(out, riscv32.secondary, riscv32.copyCount)
+		riscv32.jumpCondition(out, riscv32.eq, done)
+		riscv32.storeU32(out, RTGAddress{Base: riscv32.secondary}, riscv32.primary)
+		riscv32.emitAddress(out, riscv32.secondary,
+			RTGAddress{Base: riscv32.secondary, Displacement: 4})
+		riscv32.jump(out, loop)
+		out.Mark(done)
+	}
+
+	func image(out *RTGEmitter) []byte {
+		code := out.Code()
+		data := out.Data()
+		dataOffset := RTGAlignValue(codeOffset+len(code), 8)
+		mappedDataAddress := textAddress+dataOffset
+		patchAbsolute(out, mappedDataAddress, bssAddress)
+		code = out.Code()
+
+		mappedFileSize := dataOffset+len(data)
+		if textAddress+mappedFileSize > textLimit {
+			panic("ESP32-P4 code and immutable data exceed the flash-mapped window")
+		}
+		if bssAddress+RTGAlignValue(out.BSSSize(), 4) > bssLimit {
+			panic("ESP32-P4 BSS exceeds pre-v3 internal SRAM")
+		}
+		descriptor := appDescriptor()
+		descriptorOffset := RTGAlignValue(mappedFileSize, 4)
+		internalDataOffset := descriptorOffset+len(descriptor)
+		internalData := make([]byte, 256)
+		sectionNames := []byte{0,
+			'.', 'f', 'l', 'a', 's', 'h', '.', 'a', 'p', 'p', 'd', 'e', 's', 'c', 0,
+			'.', 't', 'e', 'x', 't', 0,
+			'.', 'd', 'a', 't', 'a', 0,
+			'.', 's', 'h', 's', 't', 'r', 't', 'a', 'b', 0}
+		sectionNamesOffset := internalDataOffset+len(internalData)
+		sectionHeadersOffset := RTGAlignValue(
+			sectionNamesOffset+len(sectionNames), 4)
+
+		var result []byte
+		result = append(result,
+			0x7f, 'E', 'L', 'F', 1, 1, 1, 0,
+			0, 0, 0, 0, 0, 0, 0, 0,
+		)
+		result = append16(result, 2)
+		result = append16(result, 243)
+		result = append32(result, 1)
+		result = append32(result, textAddress+codeOffset)
+		result = append32(result, 52)
+		result = append32(result, sectionHeadersOffset)
+		result = append32(result, 0)
+		result = append16(result, 52)
+		result = append16(result, 32)
+		result = append16(result, 2)
+		result = append16(result, 40)
+		result = append16(result, 5)
+		result = append16(result, 4)
+		result = appendProgramHeader(
+			result, 0, textAddress, mappedFileSize,
+			mappedFileSize, 5,
+		)
+		result = appendProgramHeader(
+			result, 0, bssAddress, 0,
+			RTGAlignValue(out.BSSSize(), 4), 6,
+		)
+		result = appendUntil(result, codeOffset)
+		result = append(result, code...)
+		result = appendUntil(result, dataOffset)
+		result = append(result, data...)
+		result = appendUntil(result, descriptorOffset)
+		result = append(result, descriptor...)
+		result = appendUntil(result, internalDataOffset)
+		result = append(result, internalData...)
+		result = appendUntil(result, sectionNamesOffset)
+		result = append(result, sectionNames...)
+		result = appendUntil(result, sectionHeadersOffset)
+		result = appendSectionHeader(result, 0, 0, 0, 0, 0, 0, 0)
+		result = appendSectionHeader(result, 1, 1, 2,
+			appDescriptorAddress, descriptorOffset, len(descriptor), 4)
+		result = appendSectionHeader(result, 16, 1, 6,
+			textAddress+codeOffset, codeOffset, mappedFileSize-codeOffset, 4)
+		result = appendSectionHeader(result, 22, 1, 3,
+			0x4ff00000, internalDataOffset, len(internalData), 4)
+		result = appendSectionHeader(result, 28, 3, 0,
+			0, sectionNamesOffset, len(sectionNames), 1)
+		return result
+	}
+
+	func entryStart(out *RTGEmitter, stateOffset int) bool {
+		if !emitDisplayInterruptHandler(out) {
+			return false
+		}
+		riscv32.moveImmediate(out, riscv32.stack, int64(stackTop))
+		riscv32.move(out, riscv32.frame, riscv32.stack)
+		// ESP32-P4 CLIC uses mtvec mode 3 and a 64-byte-aligned base. No CLIC
+		// source is enabled until the display driver has finished configuring its
+		// descriptor and routing state.
+		riscv32.moveImmediate(out, riscv32.scratch,
+			int64(displayInterruptAddress|3))
+		riscv32.emit(out, 0x30529073) // csrw mtvec, t0
+		// The second-stage bootloader can leave peripheral routes and CLIC enables
+		// behind. Keep every priority masked until the display driver has installed
+		// its sole source, then it lowers the threshold as the final setup step.
+		writeRegister(out, 0x20800008, -1<<24)
+		riscv32.emit(out, 0x30046073) // csrsi mstatus, 8
+		clearBSS(out)
+		// Opening the native USB CDC endpoint toggles its control lines. Keep
+		// those transitions from resetting the chip while retaining the
+		// Serial/JTAG data endpoints used by write and print.
+		writeRegister(out, 0x500d204c, 4)
+		disableWatchdogs(out)
+		usbSerialInitialize(out)
+		initializePSRAM(out)
+		return true
+	}
+
+	func exit(out *RTGEmitter, status RTGRegister) {
+		loop := out.NewLabel()
+		out.Mark(loop)
+		riscv32.jump(out, loop)
+	}
+
+	func usbSerialInitialize(out *RTGEmitter) {
+		done := out.NewLabel()
+		// The second-stage bootloader runs long enough for an attached host to
+		// set the controller's SOF latch. Preserve it as the connection state;
+		// unlike FIFO-ready, it remains clear when the board boots on battery.
+		riscv32.loadU32(out, riscv32.scratch,
+			RTGAddress{Displacement: usbSerialInterruptRaw})
+		riscv32.moveImmediate(out, riscv32.primary, usbSerialStartOfFrame)
+		riscv32.bitAnd(out, riscv32.scratch, riscv32.primary)
+		riscv32.moveImmediate(out, riscv32.primary, 0)
+		riscv32.compare(out, riscv32.scratch, riscv32.primary)
+		riscv32.jumpCondition(out, riscv32.eq, done)
+		riscv32.moveImmediate(out, riscv32.scratch, 1)
+		riscv32.storeU32(out,
+			RTGAddress{Displacement: usbSerialEndpointConfig},
+			riscv32.scratch)
+		out.Mark(done)
+	}
+
+	func usbSerialWrite(out *RTGEmitter) {
+
+		loop := out.NewLabel()
+		wait := out.NewLabel()
+		ready := out.NewLabel()
+		done := out.NewLabel()
+		disabled := out.NewLabel()
+		riscv32.move(out, riscv32.copyCount, riscv32.tertiary)
+		// A host sends USB SOF packets every millisecond. Initialization clears
+		// this latch, so an unset bit means the board is running without a USB
+		// host and serial output must not hold up the application.
+		riscv32.loadU32(out, riscv32.scratch,
+			RTGAddress{Displacement: usbSerialInterruptRaw})
+		riscv32.moveImmediate(out, riscv32.primary, usbSerialStartOfFrame)
+		riscv32.bitAnd(out, riscv32.scratch, riscv32.primary)
+		riscv32.moveImmediate(out, riscv32.primary, 0)
+		riscv32.compare(out, riscv32.scratch, riscv32.primary)
+		riscv32.jumpCondition(out, riscv32.eq, disabled)
+		out.Mark(loop)
+		riscv32.moveImmediate(out, riscv32.primary, 0)
+		riscv32.compare(out, riscv32.tertiary, riscv32.primary)
+		riscv32.jumpCondition(out, riscv32.eq, done)
+		riscv32.moveImmediate(out, riscv32.copyDestination,
+			usbSerialProbeIterations)
+		out.Mark(wait)
+		riscv32.loadU32(out, riscv32.scratch,
+			RTGAddress{Displacement: usbSerialEndpointConfig})
+		riscv32.moveImmediate(out, riscv32.primary, 2)
+		riscv32.bitAnd(out, riscv32.scratch, riscv32.primary)
+		riscv32.moveImmediate(out, riscv32.primary, 0)
+		riscv32.compare(out, riscv32.scratch, riscv32.primary)
+		riscv32.jumpCondition(out, riscv32.ne, ready)
+		riscv32.decrement(out, riscv32.copyDestination)
+		riscv32.compare(out, riscv32.copyDestination, riscv32.primary)
+		riscv32.jumpCondition(out, riscv32.ne, wait)
+		riscv32.jump(out, done)
+		out.Mark(ready)
+		riscv32.loadU8(out, riscv32.scratch,
+			RTGAddress{Base: riscv32.secondary})
+		riscv32.storeU32(out, RTGAddress{Displacement: usbSerialEndpoint},
+			riscv32.scratch)
+		riscv32.increment(out, riscv32.secondary)
+		riscv32.decrement(out, riscv32.tertiary)
+		riscv32.jump(out, loop)
+		out.Mark(done)
+		riscv32.moveImmediate(out, riscv32.scratch, 1)
+		riscv32.storeU32(out,
+			RTGAddress{Displacement: usbSerialEndpointConfig},
+			riscv32.scratch)
+		out.Mark(disabled)
+		riscv32.move(out, riscv32.primary, riscv32.copyCount)
+	}
+}
+
+runtime esp32p4_freestanding {
+	emit_entry_start = go entryStart
+	emit_exit = go exit
+	operation write { emit = go usbSerialWrite }
+	operation print { use = write args = [stderr, buffer, count] }
+}
+
+format esp32p4_elf {
+	kind = elf
+	byte_order = little
+	address_bits = 32
+	machine = 243
+	code_offset = 0x100
+	image = go image
+}
+
+target esp32p4/riscv32 {
+	aliases = [m5tab5/riscv32]
+	family = native_v1
+	os = esp32p4
+	arch = riscv32
+	frontend_arch = riscv32
+	abi = riscv32_internal
+	runtime = esp32p4_freestanding
+	executable = esp32p4_elf
+	// Tab5 applications run with a small internal startup arena before PSRAM
+	// becomes application storage. Exclude optional desktop designer artwork so
+	// embedded byte assets are not copied into that arena before main.
+	build_tags = [esp32p4, riscv32, m5tab5, tiny]
+	capabilities = [freestanding, executable, volatile_memory]
+	arena_default = 65536
+}

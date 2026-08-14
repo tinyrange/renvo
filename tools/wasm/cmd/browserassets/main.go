@@ -58,6 +58,7 @@ type customTarget struct {
 var customTargets = []customTarget{
 	{Name: "esp32c6/riscv32", Definition: "examples/m5nanoc6/esp32c6.rtg", Backend: "backends/esp32c6-riscv32.wasm"},
 	{Name: "esp32s3/xtensa_lx7", Definition: "examples/m5sticks3/esp32s3.rtg", Backend: "backends/esp32s3-xtensa_lx7.wasm"},
+	{Name: "esp32p4/riscv32", Definition: "examples/m5tab5/esp32p4.rtg", Backend: "backends/esp32p4-riscv32.wasm"},
 }
 
 func main() {
@@ -204,6 +205,8 @@ func buildPlatformPackages(root string, output string) (map[string]standardPacka
 		{Path: "device/clock"},
 		{Path: "device/i2c"},
 		{Path: "device/input/tca8418"},
+		{Path: "device/input/st7121"},
+		{Path: "device/display/st7121"},
 		{Path: "device/sensor/sgp30"},
 		{Path: "device/esp32c6", Target: "esp32c6/riscv32"},
 		{Path: "device/board/m5nanoc6", Target: "esp32c6/riscv32"},
@@ -218,6 +221,12 @@ func buildPlatformPackages(root string, output string) (map[string]standardPacka
 		{Path: "device/board/m5cardputeradv", Target: "esp32s3/xtensa_lx7"},
 		{Path: "examples/m5cardputeradv/oracle", Target: "esp32s3/xtensa_lx7"},
 		{Path: "examples/m5cardputeradv/terminal", Target: "esp32s3/xtensa_lx7"},
+		{Path: "device/esp32p4", Target: "esp32p4/riscv32"},
+		{Path: "device/board/m5tab5", Target: "esp32p4/riscv32"},
+		{Path: "examples/m5tab5/fontcache", Target: "esp32p4/riscv32"},
+		{Path: "examples/m5tab5/forms_demo", Target: "esp32p4/riscv32"},
+		{Path: "examples/m5tab5/sgp30_demo", Target: "esp32p4/riscv32"},
+		{Path: "examples/m5tab5/touch_trails", Target: "esp32p4/riscv32"},
 	}
 	packages := make(map[string]standardPackage)
 	for _, spec := range specs {

@@ -5675,7 +5675,7 @@ func renvoEmitFunctionControlEpilogue(g *renvoLinearGen) bool {
 		renvoAsmJmpMarkLabel(a, loopLabel, nextLabel)
 	}
 	renvoAsmJmpMarkLabel(a, loopLabel, doneDefers)
-	renvoMoveCapturedLocals(g, true)
+	renvoMoveCapturedResultsFromCells(g)
 	panicReturn := renvoAsmNewLabel(a)
 	normalReturn := renvoAsmNewLabel(a)
 	renvoAsmLoadPrimaryBss(a, g.panicIDOff)
@@ -5708,6 +5708,21 @@ func renvoEmitFunctionControlEpilogue(g *renvoLinearGen) bool {
 	renvoAsmLeave(a)
 	renvoAsmRet(a)
 	return true
+}
+
+func renvoMoveCapturedResultsFromCells(g *renvoLinearGen) {
+	renvoNonNil(g)
+	fn := &g.meta.funcs[g.currentFunc]
+	for i := 0; i < fn.resultCount; i++ {
+		result := &g.meta.params[fn.firstResult+i]
+		if result.nameEnd <= result.nameStart {
+			continue
+		}
+		localIndex := renvoFindLocalIndex(g, result.nameStart, result.nameEnd)
+		if localIndex >= 0 {
+			renvoMoveCapturedLocal(g, localIndex, false)
+		}
+	}
 }
 
 func renvoEmitBareReturnValues(g *renvoLinearGen) bool {

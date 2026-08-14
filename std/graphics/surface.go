@@ -1,5 +1,11 @@
 package graphics
 
+import "unsafe"
+
+func storeSurface32(address uintptr, value uint32) {
+	*(*uint32)(unsafe.Pointer(address)) = value
+}
+
 type pixelRect struct {
 	minX int
 	minY int
@@ -7,7 +13,8 @@ type pixelRect struct {
 	maxY int
 }
 
-// Surface is a top-down, tightly packed, premultiplied RGBA8 render target.
+// Surface is a top-down, tightly packed software render target. RGBA8 is the
+// default; caller-owned RGB565 buffers can be used for direct display scanout.
 type Surface struct {
 	Width    int
 	Height   int
@@ -44,12 +51,8 @@ func NewImage(width, height int, pixels []byte) *Image {
 }
 
 func NewImageFormat(width, height int, format PixelFormat, pixels []byte) *Image {
-	image := NewSurface(width, height)
-	image.Format = format
-	if format == PixelA8 {
-		image.Stride = width
-		image.Pixels = make([]byte, image.Stride*height)
-	}
+	image := allocSurface()
+	image.resetFormat(width, height, format)
 	limit := len(image.Pixels)
 	if len(pixels) < limit {
 		limit = len(pixels)
@@ -88,10 +91,7 @@ func (s *Surface) UpdateImage(rect Rect, pixels []byte) {
 	if maxY > s.Height {
 		maxY = s.Height
 	}
-	pixelSize := 4
-	if s.Format == PixelA8 {
-		pixelSize = 1
-	}
+	pixelSize := pixelFormatBytes(s.Format)
 	i := 0
 	for y := minY; y < maxY; y++ {
 		for x := minX; x < maxX; x++ {
@@ -148,11 +148,60 @@ func (s *Surface) FillConvexPolygon(points []Point, color Color) {
 
 func NewSurface(width, height int) *Surface {
 	s := allocSurface()
-	s.reset(width, height)
+	s.resetFormat(width, height, PixelRGBA8)
 	return s
 }
 
-func (s *Surface) reset(width, height int) {
+// NewSurfaceBuffer creates a surface using caller-owned RGBA8 storage. It is
+// useful on systems whose large display buffers live outside the ordinary Go
+// allocation arena. The buffer must hold at least width*height*4 bytes.
+func NewSurfaceBuffer(width, height int, pixels []byte) *Surface {
+	return NewSurfaceBufferFormat(width, height, PixelRGBA8, pixels)
+}
+
+// NewSurfaceBufferFormat creates a surface using caller-owned tightly packed
+// storage in format. RGB565 buffers are useful when the same PSRAM allocation
+// is both a software render target and a display DMA source.
+func NewSurfaceBufferFormat(width, height int, format PixelFormat, pixels []byte) *Surface {
+	return newSurfaceBufferFormat(width, height, format, pixels, true)
+}
+
+// NewSurfaceBufferFormatPreserve creates a surface over caller-owned storage
+// without clearing it. It is intended for large display buffers which will be
+// completely repainted or whose existing contents must remain intact.
+func NewSurfaceBufferFormatPreserve(width, height int, format PixelFormat, pixels []byte) *Surface {
+	return newSurfaceBufferFormat(width, height, format, pixels, false)
+}
+
+func newSurfaceBufferFormat(width, height int, format PixelFormat, pixels []byte, clear bool) *Surface {
+	pixelSize := pixelFormatBytes(format)
+	if width < 0 || height < 0 || pixelSize == 0 || len(pixels) < width*height*pixelSize {
+		return nil
+	}
+	s := allocSurface()
+	s.Pixels = pixels
+	s.resetFormatStorage(width, height, format, clear)
+	return s
+}
+
+func pixelFormatBytes(format PixelFormat) int {
+	if format == PixelA8 {
+		return 1
+	}
+	if format == PixelRGB565 {
+		return 2
+	}
+	if format == PixelRGBA8 {
+		return 4
+	}
+	return 0
+}
+
+func (s *Surface) resetFormat(width, height int, format PixelFormat) {
+	s.resetFormatStorage(width, height, format, true)
+}
+
+func (s *Surface) resetFormatStorage(width, height int, format PixelFormat, clear bool) {
 	if width < 0 {
 		width = 0
 	}
@@ -161,17 +210,24 @@ func (s *Surface) reset(width, height int) {
 	}
 	s.Width = width
 	s.Height = height
-	s.Stride = width * 4
+	pixelSize := pixelFormatBytes(format)
+	if pixelSize == 0 {
+		format = PixelRGBA8
+		pixelSize = 4
+	}
+	s.Stride = width * pixelSize
 	pixelBytes := s.Stride * height
 	if pixelBytes <= cap(s.Pixels) {
 		s.Pixels = s.Pixels[:pixelBytes]
-		for i := 0; i < len(s.Pixels); i++ {
-			s.Pixels[i] = 0
+		if clear {
+			for i := 0; i < len(s.Pixels); i++ {
+				s.Pixels[i] = 0
+			}
 		}
 	} else {
 		s.Pixels = make([]byte, pixelBytes)
 	}
-	s.Format = PixelRGBA8
+	s.Format = format
 	s.revision++
 	s.blend = BlendSourceOver
 	s.clip = pixelRect{maxX: width, maxY: height}
@@ -190,7 +246,7 @@ func (s *Surface) reset(width, height int) {
 }
 
 func (s *Surface) Resize(width, height int) {
-	s.reset(width, height)
+	s.resetFormat(width, height, s.Format)
 }
 
 func (s *Surface) DirtyRect() (Rect, bool) {
@@ -214,6 +270,27 @@ func (s *Surface) DirtyRects() []Rect {
 		out[i] = Rect{MinX: Scalar(region.minX), MinY: Scalar(region.minY), MaxX: Scalar(region.maxX), MaxY: Scalar(region.maxY)}
 	}
 	return out
+}
+
+// DirtyRectCount reports the number of precise pending damage regions without
+// allocating a copy of the region list.
+func (s *Surface) DirtyRectCount() int {
+	if s == nil || !s.dirtyValid {
+		return 0
+	}
+	return len(s.dirtyRects)
+}
+
+// DirtyRectAt returns one precise pending damage region without allocating.
+func (s *Surface) DirtyRectAt(index int) (Rect, bool) {
+	if s == nil || !s.dirtyValid || index < 0 || index >= len(s.dirtyRects) {
+		return Rect{}, false
+	}
+	region := s.dirtyRects[index]
+	return Rect{
+		MinX: Scalar(region.minX), MinY: Scalar(region.minY),
+		MaxX: Scalar(region.maxX), MaxY: Scalar(region.maxY),
+	}, true
 }
 
 // BeginDamage declares the exact clipped area a retained view is about to
@@ -539,8 +616,36 @@ func (s *Surface) putPixel(x, y int, c Color) {
 	if x < s.clip.minX || x >= s.clip.maxX || y < s.clip.minY || y >= s.clip.maxY {
 		return
 	}
-	o := y*s.Stride + x*4
 	s.markDirty(x, y)
+	s.writePixel(x, y, c)
+}
+
+// writePixel writes a known-clipped pixel without updating damage. Batched
+// rasterizers mark their bounds once and use this path for every covered pixel.
+func (s *Surface) writePixel(x, y int, c Color) {
+	if s.Format == PixelRGB565 {
+		o := y*s.Stride + x*2
+		if s.blend != BlendCopy && c.A != 255 {
+			destination := decodeRGB565(s.Pixels[o], s.Pixels[o+1])
+			inv := 255 - int(c.A)
+			c.R = byte(int(c.R) + (int(destination.R)*inv+127)/255)
+			c.G = byte(int(c.G) + (int(destination.G)*inv+127)/255)
+			c.B = byte(int(c.B) + (int(destination.B)*inv+127)/255)
+		}
+		pixel := encodeRGB565(c)
+		s.Pixels[o], s.Pixels[o+1] = byte(pixel), byte(pixel>>8)
+		return
+	}
+	if s.Format == PixelA8 {
+		o := y*s.Stride + x
+		if s.blend == BlendCopy || c.A == 255 {
+			s.Pixels[o] = c.A
+		} else {
+			s.Pixels[o] = byte(int(c.A) + (int(s.Pixels[o])*(255-int(c.A))+127)/255)
+		}
+		return
+	}
+	o := y*s.Stride + x*4
 	if s.blend == BlendCopy || c.A == 255 {
 		s.Pixels[o], s.Pixels[o+1], s.Pixels[o+2], s.Pixels[o+3] = c.R, c.G, c.B, c.A
 		return
@@ -550,6 +655,23 @@ func (s *Surface) putPixel(x, y int, c Color) {
 	s.Pixels[o+1] = byte(int(c.G) + (int(s.Pixels[o+1])*inv+127)/255)
 	s.Pixels[o+2] = byte(int(c.B) + (int(s.Pixels[o+2])*inv+127)/255)
 	s.Pixels[o+3] = byte(int(c.A) + (int(s.Pixels[o+3])*inv+127)/255)
+}
+
+func encodeRGB565(color Color) uint16 {
+	return uint16(color.R&0xf8)<<8 | uint16(color.G&0xfc)<<3 | uint16(color.B)>>3
+}
+
+func decodeRGB565(low, high byte) Color {
+	pixel := uint16(low) | uint16(high)<<8
+	red := byte((pixel >> 11) & 0x1f)
+	green := byte((pixel >> 5) & 0x3f)
+	blue := byte(pixel & 0x1f)
+	return Color{
+		R: red<<3 | red>>2,
+		G: green<<2 | green>>4,
+		B: blue<<3 | blue>>2,
+		A: 255,
+	}
 }
 
 func (s *Surface) Clear(c Color) {
@@ -622,6 +744,13 @@ func (s *Surface) FillTriangle(a, b, c Point, color Color) {
 }
 
 func (s *Surface) FillRect(r Rect, color Color) {
+	if s.transformIsIdentity() {
+		s.fillPixelRect(pixelRect{
+			minX: scalarFloor(r.MinX), minY: scalarFloor(r.MinY),
+			maxX: scalarCeil(r.MaxX), maxY: scalarCeil(r.MaxY),
+		}, color)
+		return
+	}
 	a := Point{X: r.MinX, Y: r.MinY}
 	b := Point{X: r.MaxX, Y: r.MinY}
 	c := Point{X: r.MaxX, Y: r.MaxY}
@@ -659,6 +788,29 @@ func (s *Surface) fillPixelRect(region pixelRect, color Color) {
 	if s.blend == BlendSourceOver && color.A == 0 {
 		return
 	}
+	if s.Format == PixelRGB565 && (s.blend == BlendCopy || color.A == 255) {
+		s.markDirtyRect(region)
+		pixel := encodeRGB565(color)
+		low, high := byte(pixel), byte(pixel>>8)
+		word := uint32(pixel) | uint32(pixel)<<16
+		base := uintptr(unsafe.Pointer(&s.Pixels[0]))
+		for y := region.minY; y < region.maxY; y++ {
+			start := y*s.Stride + region.minX*2
+			end := y*s.Stride + region.maxX*2
+			for start < end && (base+uintptr(start))&3 != 0 {
+				s.Pixels[start], s.Pixels[start+1] = low, high
+				start += 2
+			}
+			for start+4 <= end {
+				storeSurface32(base+uintptr(start), word)
+				start += 4
+			}
+			if start < end {
+				s.Pixels[start], s.Pixels[start+1] = low, high
+			}
+		}
+		return
+	}
 	if s.Format != PixelRGBA8 || s.blend != BlendCopy && color.A != 255 {
 		for y := region.minY; y < region.maxY; y++ {
 			for x := region.minX; x < region.maxX; x++ {
@@ -691,6 +843,26 @@ func (s *Surface) StrokeRect(r Rect, width Scalar, color Color) {
 }
 
 func (s *Surface) DrawLine(a, b Point, width Scalar, color Color) {
+	if s.transformIsIdentity() && width > 0.0 && width <= 3.0 {
+		s.drawPixelLine(scalarFloor(a.X+0.5), scalarFloor(a.Y+0.5), scalarFloor(b.X+0.5), scalarFloor(b.Y+0.5), scalarCeil(width), color)
+		return
+	}
+	if s.transformIsIdentity() && width > 0.0 && (a.X == b.X || a.Y == b.Y) {
+		half := width / 2.0
+		minX, maxX := a.X, b.X
+		minY, maxY := a.Y, b.Y
+		if minX > maxX {
+			minX, maxX = maxX, minX
+		}
+		if minY > maxY {
+			minY, maxY = maxY, minY
+		}
+		s.fillPixelRect(pixelRect{
+			minX: scalarFloor(minX - half), minY: scalarFloor(minY - half),
+			maxX: scalarCeil(maxX + half), maxY: scalarCeil(maxY + half),
+		}, color)
+		return
+	}
 	s.transformPointInPlace(&a)
 	s.transformPointInPlace(&b)
 	if width <= 0.0 {
@@ -732,6 +904,70 @@ func (s *Surface) DrawLine(a, b Point, width Scalar, color Color) {
 	}
 }
 
+func absolutePixelDelta(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
+}
+
+func (s *Surface) drawPixelLine(x0, y0, x1, y1, thickness int, color Color) {
+	if thickness < 1 {
+		thickness = 1
+	}
+	brushMin := -thickness / 2
+	brushMax := brushMin + thickness
+	minX, maxX := x0, x1
+	minY, maxY := y0, y1
+	if minX > maxX {
+		minX, maxX = maxX, minX
+	}
+	if minY > maxY {
+		minY, maxY = maxY, minY
+	}
+	damage := intersectPixelRect(s.clip, pixelRect{
+		minX: minX + brushMin, minY: minY + brushMin,
+		maxX: maxX + brushMax, maxY: maxY + brushMax,
+	})
+	if damage.maxX > damage.minX && damage.maxY > damage.minY {
+		s.markDirtyRect(damage)
+	}
+	dx := absolutePixelDelta(x1 - x0)
+	sx := -1
+	if x0 < x1 {
+		sx = 1
+	}
+	dy := -absolutePixelDelta(y1 - y0)
+	sy := -1
+	if y0 < y1 {
+		sy = 1
+	}
+	errorValue := dx + dy
+	for {
+		for brushY := brushMin; brushY < brushMax; brushY++ {
+			pixelY := y0 + brushY
+			for brushX := brushMin; brushX < brushMax; brushX++ {
+				pixelX := x0 + brushX
+				if pixelX >= s.clip.minX && pixelX < s.clip.maxX && pixelY >= s.clip.minY && pixelY < s.clip.maxY {
+					s.writePixel(pixelX, pixelY, color)
+				}
+			}
+		}
+		if x0 == x1 && y0 == y1 {
+			return
+		}
+		doubleError := errorValue * 2
+		if doubleError >= dy {
+			errorValue += dy
+			x0 += sx
+		}
+		if doubleError <= dx {
+			errorValue += dx
+			y0 += sy
+		}
+	}
+}
+
 func tintColor(src, tint Color) Color {
 	return Color{R: byte((int(src.R)*int(tint.R) + 127) / 255), G: byte((int(src.G)*int(tint.G) + 127) / 255), B: byte((int(src.B)*int(tint.B) + 127) / 255), A: byte((int(src.A)*int(tint.A) + 127) / 255)}
 }
@@ -743,6 +979,10 @@ func (image *Surface) imagePixel(x, y int) Color {
 	if image.Format == PixelA8 {
 		a := image.Pixels[y*image.Stride+x]
 		return Color{R: a, G: a, B: a, A: a}
+	}
+	if image.Format == PixelRGB565 {
+		o := y*image.Stride + x*2
+		return decodeRGB565(image.Pixels[o], image.Pixels[o+1])
 	}
 	o := y*image.Stride + x*4
 	return Color{image.Pixels[o], image.Pixels[o+1], image.Pixels[o+2], image.Pixels[o+3]}

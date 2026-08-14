@@ -86,6 +86,29 @@ func TestAdjacentInvalidationsStaySeparate(t *testing.T) {
 	})
 }
 
+func TestInvalidRectAccessorsDoNotCopyDamage(t *testing.T) {
+	var form Form
+	form.Initialize(100, 80)
+	form.invalid = nil
+	first := graphics.R(3, 4, 10, 12)
+	second := graphics.R(60, 40, 8, 9)
+	form.Invalidate(first)
+	form.Invalidate(second)
+
+	if form.InvalidRectCount() != 2 {
+		t.Fatalf("invalid rect count = %d, want 2", form.InvalidRectCount())
+	}
+	if rect, ok := form.InvalidRectAt(0); !ok || rect != first {
+		t.Fatalf("first invalid rect = %#v, %v", rect, ok)
+	}
+	if rect, ok := form.InvalidRectAt(1); !ok || rect != second {
+		t.Fatalf("second invalid rect = %#v, %v", rect, ok)
+	}
+	if _, ok := form.InvalidRectAt(2); ok {
+		t.Fatal("out-of-range invalid rect reported as valid")
+	}
+}
+
 func TestPaintClipsControlsToInvalidRegions(t *testing.T) {
 	var form Form
 	form.Initialize(20, 10)

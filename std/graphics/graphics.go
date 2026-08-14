@@ -65,6 +65,10 @@ type PixelFormat int
 const (
 	PixelRGBA8 PixelFormat = iota
 	PixelA8
+	// PixelRGB565 stores opaque pixels in little-endian 5:6:5 form. It is
+	// intended for memory-constrained software render targets and scanout
+	// buffers; source-over rendering treats the destination as opaque.
+	PixelRGB565
 )
 
 // Mat2x3 is an affine matrix. TransformPoint computes

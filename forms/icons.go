@@ -211,17 +211,51 @@ func DrawIconColors(surface graphics.Canvas, icon Icon, bounds graphics.Rect, co
 		DrawControlIcon(surface, icon, bounds, color, graphics.Color{}, accent)
 		return
 	}
-	loadIconDefinitions()
-	if !iconDefinitionsValid || int(icon) >= len(iconDefinitions) {
-		return
-	}
-	commands := iconDefinitions[int(icon)].commands
+	// These primitives occur in core controls and must not pay the cost of
+	// parsing the complete optional vector catalogue on first interaction.
 	scaleX := bounds.Width() / iconViewBox
 	scaleY := bounds.Height() / iconViewBox
 	strokeScale := scaleX
 	if scaleY < strokeScale {
 		strokeScale = scaleY
 	}
+	if icon == IconCheck {
+		surface.DrawLine(iconPoint(bounds, scaleX, scaleY, 1, 8), iconPoint(bounds, scaleX, scaleY, 6, 13), 2*strokeScale, color)
+		surface.DrawLine(iconPoint(bounds, scaleX, scaleY, 6, 13), iconPoint(bounds, scaleX, scaleY, 15, 2), 2*strokeScale, color)
+		return
+	}
+	if icon == IconChevronRight {
+		surface.DrawLine(iconPoint(bounds, scaleX, scaleY, 4, 2), iconPoint(bounds, scaleX, scaleY, 10, 8), 2*strokeScale, color)
+		surface.DrawLine(iconPoint(bounds, scaleX, scaleY, 10, 8), iconPoint(bounds, scaleX, scaleY, 4, 14), 2*strokeScale, color)
+		return
+	}
+	if icon == IconChevronDown {
+		surface.DrawLine(iconPoint(bounds, scaleX, scaleY, 2, 4), iconPoint(bounds, scaleX, scaleY, 8, 10), 2*strokeScale, color)
+		surface.DrawLine(iconPoint(bounds, scaleX, scaleY, 8, 10), iconPoint(bounds, scaleX, scaleY, 14, 4), 2*strokeScale, color)
+		return
+	}
+	if icon == IconFolder {
+		folder := graphics.R(bounds.MinX+scaleX, bounds.MinY+6*scaleY, 14*scaleX, 8*scaleY)
+		surface.FillRect(folder, color)
+		surface.StrokeRect(folder, strokeScale, color)
+		surface.DrawLine(iconPoint(bounds, scaleX, scaleY, 2, 6), iconPoint(bounds, scaleX, scaleY, 6, 6), strokeScale, color)
+		surface.DrawLine(iconPoint(bounds, scaleX, scaleY, 2, 6), iconPoint(bounds, scaleX, scaleY, 4, 4), strokeScale, color)
+		surface.DrawLine(iconPoint(bounds, scaleX, scaleY, 4, 4), iconPoint(bounds, scaleX, scaleY, 8, 4), strokeScale, color)
+		return
+	}
+	if icon == IconFile {
+		file := graphics.R(bounds.MinX+2*scaleX, bounds.MinY+scaleY, 12*scaleX, 14*scaleY)
+		surface.StrokeRect(file, strokeScale, color)
+		surface.DrawLine(iconPoint(bounds, scaleX, scaleY, 9, 1), iconPoint(bounds, scaleX, scaleY, 14, 6), strokeScale, color)
+		surface.DrawLine(iconPoint(bounds, scaleX, scaleY, 9, 1), iconPoint(bounds, scaleX, scaleY, 9, 6), strokeScale, color)
+		surface.DrawLine(iconPoint(bounds, scaleX, scaleY, 9, 6), iconPoint(bounds, scaleX, scaleY, 14, 6), strokeScale, color)
+		return
+	}
+	loadIconDefinitions()
+	if !iconDefinitionsValid || int(icon) >= len(iconDefinitions) {
+		return
+	}
+	commands := iconDefinitions[int(icon)].commands
 	for i := 0; i < len(commands); i++ {
 		command := commands[i]
 		commandColor := color

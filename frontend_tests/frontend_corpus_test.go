@@ -16,6 +16,7 @@ import (
 
 const frontendEnv = "RENVO_FRONTEND"
 const targetEnv = "RENVO_FRONTEND_TARGET"
+const selfHostedFrontendArenaSize = "268435456"
 
 var frontendOnce sync.Once
 var frontendPath string
@@ -267,7 +268,12 @@ func selfHostedFrontendCompiler(t *testing.T, root string) frontendConfig {
 }
 
 func compileFrontendSource(root string, compiler string, target string, output string, env []string) error {
-	cmd := exec.Command(compiler, "-t", target, "-s", "-o", output, "./cmd/renvo")
+	cmd := exec.Command(compiler,
+		"-t", target,
+		"-arena-size", selfHostedFrontendArenaSize,
+		"-s", "-o", output,
+		"./cmd/renvo",
+	)
 	cmd.Dir = root
 	cmd.Env = frontendCommandEnv(env, root)
 	out, err := cmd.CombinedOutput()
