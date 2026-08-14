@@ -42,6 +42,7 @@ type standardPackage struct {
 	Root    string   `json:"root,omitempty"`
 	Main    bool     `json:"main,omitempty"`
 	Target  string   `json:"target,omitempty"`
+	Board   string   `json:"board,omitempty"`
 }
 
 type standardCatalog struct {
@@ -195,10 +196,11 @@ func buildStandardLibrary(root string, output string) error {
 type platformPackageSpec struct {
 	Path   string
 	Target string
+	Board  string
 }
 
-func buildPlatformPackages(root string, output string) (map[string]standardPackage, error) {
-	specs := []platformPackageSpec{
+func platformPackageSpecs() []platformPackageSpec {
+	return []platformPackageSpec{
 		{Path: "forms"},
 		{Path: "device/mmio"},
 		{Path: "device/gpio"},
@@ -208,34 +210,39 @@ func buildPlatformPackages(root string, output string) (map[string]standardPacka
 		{Path: "device/input/st7121"},
 		{Path: "device/display/st7121"},
 		{Path: "device/sensor/sgp30"},
+		{Path: "device/ws2812"},
+		{Path: "device/internal/esprmt"},
 		{Path: "device/esp32c6", Target: "esp32c6/riscv32"},
 		{Path: "device/board/m5nanoc6", Target: "esp32c6/riscv32"},
-		{Path: "examples/m5nanoc6/blink", Target: "esp32c6/riscv32"},
-		{Path: "examples/m5nanoc6/button_rgb", Target: "esp32c6/riscv32"},
-		{Path: "examples/m5nanoc6/oracle", Target: "esp32c6/riscv32"},
-		{Path: "examples/m5nanoc6/air_quality", Target: "esp32c6/riscv32"},
+		{Path: "examples/m5nanoc6/blink", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
+		{Path: "examples/m5nanoc6/button_rgb", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
+		{Path: "examples/m5nanoc6/air_quality", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
 		{Path: "device/esp32s3", Target: "esp32s3/xtensa_lx7"},
+		{Path: "device/board/m5atoms3lite", Target: "esp32s3/xtensa_lx7"},
+		{Path: "examples/m5atoms3lite/button_rgb", Target: "esp32s3/xtensa_lx7", Board: "M5Stack AtomS3 Lite"},
+		{Path: "examples/m5atoms3lite/sk6812_strip", Target: "esp32s3/xtensa_lx7", Board: "M5Stack AtomS3 Lite"},
 		{Path: "device/board/m5sticks3", Target: "esp32s3/xtensa_lx7"},
-		{Path: "examples/m5sticks3/forms_menu", Target: "esp32s3/xtensa_lx7"},
-		{Path: "examples/m5sticks3/oracle", Target: "esp32s3/xtensa_lx7"},
+		{Path: "examples/m5sticks3/forms_menu", Target: "esp32s3/xtensa_lx7", Board: "M5Stack StickS3"},
 		{Path: "device/board/m5cardputeradv", Target: "esp32s3/xtensa_lx7"},
-		{Path: "examples/m5cardputeradv/oracle", Target: "esp32s3/xtensa_lx7"},
-		{Path: "examples/m5cardputeradv/terminal", Target: "esp32s3/xtensa_lx7"},
+		{Path: "examples/m5cardputeradv/terminal", Target: "esp32s3/xtensa_lx7", Board: "M5Stack Cardputer Adv"},
 		{Path: "device/esp32p4", Target: "esp32p4/riscv32"},
 		{Path: "device/board/m5tab5", Target: "esp32p4/riscv32"},
 		{Path: "examples/m5tab5/fontcache", Target: "esp32p4/riscv32"},
-		{Path: "examples/m5tab5/forms_demo", Target: "esp32p4/riscv32"},
-		{Path: "examples/m5tab5/sgp30_demo", Target: "esp32p4/riscv32"},
-		{Path: "examples/m5tab5/touch_trails", Target: "esp32p4/riscv32"},
+		{Path: "examples/m5tab5/forms_demo", Target: "esp32p4/riscv32", Board: "M5Stack Tab5"},
+		{Path: "examples/m5tab5/sgp30_demo", Target: "esp32p4/riscv32", Board: "M5Stack Tab5"},
+		{Path: "examples/m5tab5/touch_trails", Target: "esp32p4/riscv32", Board: "M5Stack Tab5"},
 	}
+}
+
+func buildPlatformPackages(root string, output string) (map[string]standardPackage, error) {
 	packages := make(map[string]standardPackage)
-	for _, spec := range specs {
+	for _, spec := range platformPackageSpecs() {
 		path := filepath.Join(root, filepath.FromSlash(spec.Path))
 		entries, err := os.ReadDir(path)
 		if err != nil {
 			return nil, err
 		}
-		item := standardPackage{Root: spec.Path, Target: spec.Target}
+		item := standardPackage{Root: spec.Path, Target: spec.Target, Board: spec.Board}
 		imports := make(map[string]bool)
 		for _, entry := range entries {
 			if strings.HasPrefix(entry.Name(), ".") {
