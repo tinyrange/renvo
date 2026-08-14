@@ -51,7 +51,7 @@ func compileC89SourceArenaTags(t *testing.T, target string, sourcePath string, a
 	if err != nil {
 		t.Fatal(err)
 	}
-	definition := filepath.Join(root, "examples", "c89", "c89.rtg")
+	definition := filepath.Join(root, "backends", "c89.rtg")
 	args := []string{
 		"-backend", definition,
 		"-t", target,

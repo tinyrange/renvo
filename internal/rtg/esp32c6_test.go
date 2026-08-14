@@ -6,7 +6,7 @@ import (
 )
 
 func TestESP32C6ExternalDefinition(t *testing.T) {
-	const filename = "../../examples/m5nanoc6/esp32c6.rtg"
+	const filename = "../../backends/esp32c6.rtg"
 	resolved := Resolve(parseDefinitionFile(t, filename))
 	if !resolved.Ok {
 		t.Fatalf("resolve %s: %#v", filename, resolved.Diagnostics)

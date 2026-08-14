@@ -39,7 +39,7 @@ Build Renvo and the blinking application:
 ```sh
 go build -o sandbox/renvo ./cmd/renvo
 sandbox/renvo \
-  -backend examples/m5nanoc6/esp32c6.rtg \
+  -backend backends/esp32c6.rtg \
   -t esp32c6/riscv32 \
   -o sandbox/m5nanoc6-blink.elf \
   ./examples/m5nanoc6/blink
@@ -50,7 +50,7 @@ package argument:
 
 ```sh
 sandbox/renvo \
-  -backend examples/m5nanoc6/esp32c6.rtg \
+  -backend backends/esp32c6.rtg \
   -t esp32c6/riscv32 \
   -o sandbox/m5nanoc6-button-rgb.elf \
   ./examples/m5nanoc6/button_rgb
@@ -60,7 +60,7 @@ The SGP30 air-quality example is built in the same way:
 
 ```sh
 sandbox/renvo \
-  -backend examples/m5nanoc6/esp32c6.rtg \
+  -backend backends/esp32c6.rtg \
   -t esp32c6/riscv32 \
   -o sandbox/m5nanoc6-air-quality.elf \
   ./examples/m5nanoc6/air_quality

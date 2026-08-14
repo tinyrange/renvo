@@ -42,7 +42,7 @@ Build Renvo, then compile the same suite for the board:
 ```sh
 go build -o sandbox/renvo ./cmd/renvo
 sandbox/renvo \
-  -backend examples/m5sticks3/esp32s3.rtg \
+  -backend backends/esp32s3.rtg \
   -t esp32s3/xtensa_lx7 \
   -o sandbox/m5sticks3-suite.elf \
   ./frontend_tests/single_file_microcontroller

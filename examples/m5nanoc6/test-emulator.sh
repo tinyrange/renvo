@@ -38,7 +38,7 @@ else
 fi
 
 "$renvo" \
-	-backend "$example_root/esp32c6.rtg" \
+	-backend "$repository_root/backends/esp32c6.rtg" \
 	-t esp32c6/riscv32 \
 	-o "$temporary/oracle.elf" \
 	"$example_root/oracle"

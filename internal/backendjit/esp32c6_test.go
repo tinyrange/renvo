@@ -20,7 +20,7 @@ func TestCompiledInBootstrapPreparesESP32C6Definition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	definition := filepath.Join(root, "examples", "m5nanoc6", "esp32c6.rtg")
+	definition := filepath.Join(root, "backends", "esp32c6.rtg")
 	result := driver.CompileFromFS([]string{
 		"-backend", definition,
 		"-t", "esp32c6/riscv32",
@@ -81,7 +81,7 @@ func TestCompiledInBootstrapCompilesESP32C6MicrocontrollerSuite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	definition := filepath.Join(root, "examples", "m5nanoc6", "esp32c6.rtg")
+	definition := filepath.Join(root, "backends", "esp32c6.rtg")
 	result := driver.CompileFromFS([]string{
 		"-backend", definition,
 		"-t", "esp32c6/riscv32",

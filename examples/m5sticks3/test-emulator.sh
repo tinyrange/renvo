@@ -30,7 +30,7 @@ else
 fi
 
 "$renvo" \
-	-backend "$example_root/esp32s3.rtg" \
+	-backend "$repository_root/backends/esp32s3.rtg" \
 	-t esp32s3/xtensa_lx7 \
 	-o "$temporary/suite.elf" \
 	"$repository_root/frontend_tests/single_file_microcontroller"

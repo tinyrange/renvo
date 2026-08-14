@@ -14,7 +14,7 @@ controller. Tab5 wiring and framebuffer support live in
 ```sh
 go build -o sandbox/renvo ./cmd/renvo
 sandbox/renvo \
-  -backend examples/m5tab5/esp32p4.rtg \
+  -backend backends/esp32p4.rtg \
   -t esp32p4/riscv32 \
   -o sandbox/m5tab5-hello.elf \
   ./examples/m5tab5/hello

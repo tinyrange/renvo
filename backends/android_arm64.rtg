@@ -1,4 +1,4 @@
-@import "../../backend/definitions/linux_aarch64.rtg"
+@import "../backend/definitions/linux_aarch64.rtg"
 
 # Android loads NativeActivity applications as ELF shared objects. This target
 # keeps the compiler itself portable: the resulting librenvo.so can be packaged

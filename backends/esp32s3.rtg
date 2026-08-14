@@ -2,7 +2,7 @@ definition 1
 unit esp32s3
 implements direct_emitter_v1
 
-@import "../../backend/definitions/xtensa_lx7.rtg"
+@import "../backend/definitions/xtensa_lx7.rtg"
 
 go backend {
 	const textAddress = 0x42000000

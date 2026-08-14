@@ -10,7 +10,7 @@ Build the compiler, the Renvo-native flasher, and the example on macOS with:
 go build -o sandbox/renvo ./cmd/renvo
 sandbox/renvo -t darwin/arm64 -o sandbox/renvoflash ./cmd/renvoflash
 sandbox/renvo \
-  -backend examples/m5sticks3/esp32s3.rtg \
+  -backend backends/esp32s3.rtg \
   -t esp32s3/xtensa_lx7 \
   -o sandbox/m5atoms3lite-button-rgb.elf \
   ./examples/m5atoms3lite/button_rgb
