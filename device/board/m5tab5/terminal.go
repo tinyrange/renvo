@@ -1,6 +1,7 @@
 package board
 
 import (
+	"renvo.dev/device/terminal"
 	"renvo.dev/std/graphics"
 	"unsafe"
 )
@@ -16,6 +17,52 @@ type Screen struct {
 
 // Display is the Tab5's 720 by 1280 portrait display.
 var Display = Screen{}
+
+// Console is the board's active terminal after StartTerminal succeeds.
+var Console *terminal.Terminal
+
+func defaultTerminalOptions() terminal.Options {
+	return terminal.Options{
+		Scrollback:     256,
+		Font:           graphics.NewBuiltinFont(3),
+		CellWidth:      18,
+		CellHeight:     30,
+		Baseline:       21,
+		Pointer:        &Touch,
+		TouchKeyboard:  true,
+		KeyboardHeight: 450,
+		FlushPolicy:    terminal.FlushManual,
+		Clock:          &Display,
+	}
+}
+
+// StartTerminal initializes a large-font color terminal with scrollback and
+// the Tab5 touch keyboard, then assigns it to Console and stdout mirroring.
+func StartTerminal() error {
+	return StartTerminalWithOptions(defaultTerminalOptions())
+}
+
+// StartTerminalWithOptions initializes Console with caller-supplied terminal
+// options. StartTerminal supplies the recommended Tab5 defaults.
+func StartTerminalWithOptions(options terminal.Options) error {
+	console, err := terminal.Start(&Display, options)
+	if err != nil {
+		return err
+	}
+	Console = console
+	return nil
+}
+
+// TickTerminal services Console at the Tab5 display's 60 Hz cadence. It is
+// intended for the condition in a cooperative application loop.
+func TickTerminal() bool {
+	return TickTerminalEvery(terminal.Second / 60)
+}
+
+// TickTerminalEvery services Console at a caller-selected interval.
+func TickTerminalEvery(interval terminal.Duration) bool {
+	return Console != nil && Console.Tick(interval)
+}
 
 // InitializeTerminal initializes the framebuffer and returns its RGB565 back
 // surface. Repeated calls reuse the same surface.

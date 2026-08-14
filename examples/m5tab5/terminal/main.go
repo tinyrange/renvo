@@ -6,7 +6,6 @@ import (
 	"renvo.dev/device/sensor/adxl345"
 	"renvo.dev/device/terminal"
 	"renvo.dev/std/fmt"
-	"renvo.dev/std/graphics"
 )
 
 func discardInput(console *terminal.Terminal) {
@@ -20,23 +19,12 @@ func discardInput(console *terminal.Terminal) {
 }
 
 func main() {
-	console, err := terminal.Start(&board.Display, terminal.Options{
-		Scrollback:     48,
-		Font:           graphics.NewBuiltinFont(3),
-		CellWidth:      18,
-		CellHeight:     30,
-		Baseline:       21,
-		Pointer:        &board.Touch,
-		TouchKeyboard:  true,
-		KeyboardHeight: 450,
-		FlushPolicy:    terminal.FlushManual,
-		Clock:          &board.Display,
-	})
-	if err != nil {
+	if err := board.StartTerminal(); err != nil {
 		for {
 			print("Tab5 terminal initialization failed: ", err.Error(), "\n")
 		}
 	}
+	console := board.Console
 
 	bus := i2c.New(board.PortA())
 	sensor := adxl345.New(bus, adxl345.AddressLow)
@@ -53,7 +41,7 @@ func main() {
 	var reading adxl345.Reading
 	// The sensor produces data at 100 Hz by default. A 60 Hz cooperative loop
 	// matches the display cadence without requesting duplicate display frames.
-	for terminal.Tick(terminal.Second / 60) {
+	for board.TickTerminal() {
 		discardInput(console)
 		if err := sensor.ReadInto(&reading); err != nil {
 			fmt.Fprintf(console, "\x1b[31mADXL345 read failed: %s\x1b[0m\r\n", err)

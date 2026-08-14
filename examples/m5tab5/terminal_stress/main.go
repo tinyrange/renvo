@@ -6,7 +6,6 @@ import (
 	"renvo.dev/device/sensor/adxl345"
 	"renvo.dev/device/terminal"
 	"renvo.dev/std/fmt"
-	"renvo.dev/std/graphics"
 )
 
 func nextRandom(state *uint32) uint32 {
@@ -45,23 +44,12 @@ func setStressStyle(console *terminal.Terminal, sequence, random uint32) {
 }
 
 func main() {
-	console, err := terminal.Start(&board.Display, terminal.Options{
-		Scrollback:     256,
-		Font:           graphics.NewBuiltinFont(3),
-		CellWidth:      18,
-		CellHeight:     30,
-		Baseline:       21,
-		Pointer:        &board.Touch,
-		TouchKeyboard:  true,
-		KeyboardHeight: 450,
-		FlushPolicy:    terminal.FlushManual,
-		Clock:          &board.Display,
-	})
-	if err != nil {
+	if err := board.StartTerminal(); err != nil {
 		for {
 			print("Tab5 terminal stress initialization failed: ", err.Error(), "\n")
 		}
 	}
+	console := board.Console
 
 	bus := i2c.New(board.PortA())
 	sensor := adxl345.New(bus, adxl345.AddressLow)
@@ -85,7 +73,7 @@ func main() {
 	windowStarted := board.Milliseconds()
 	var reading adxl345.Reading
 
-	for terminal.Tick(terminal.Second / 60) {
+	for board.TickTerminal() {
 		drainKeyboard(console)
 		if sensorErr == nil {
 			sensorErr = sensor.ReadInto(&reading)
