@@ -4,7 +4,7 @@ package renvo
 
 import "embed"
 
-//go:embed std forms
+//go:embed std forms device
 var bundledStdFiles embed.FS
 
 func bundledStdRawReadFile(path string) ([]byte, bool) {

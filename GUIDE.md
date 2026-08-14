@@ -58,9 +58,9 @@ The bootstrap resolves `renvo-backend` beside itself. Pass
 `-bootstrap-backend <path>` immediately after the executable name only when a
 test or packaging workflow deliberately stores the backend elsewhere.
 
-`renvo_bundle` embeds the supported standard-library sources. It does not
-change compiler semantics. Without bundling, set `RENVO_STDROOT` or arrange an
-adjacent standard-library tree.
+`renvo_bundle` embeds `std/`, `forms/`, and `device/`. It does not change
+compiler semantics. Without bundling, set `RENVO_STDROOT` or arrange an
+adjacent source tree.
 
 Running the bootstrap without arguments is intentionally useful:
 
@@ -165,8 +165,11 @@ Profiles accept byte counts with `B`, `KiB`, `MiB`, or `GiB` suffixes. Both
 limits and the target are required. `-system` cannot be combined with `-t` or
 `-arena-size`.
 
-The checked-in `systems/frontend-linux-amd64.rtg` profile keeps a stripped,
-bundled frontend below 2 MiB and gives the running compiler a 128 MiB arena:
+The frontend size checks measure two payloads independently: the stripped
+compiler with its native backends stays below 2 MiB, while the offline bundle
+containing `std/`, `forms/`, and `device/` stays below 4 MiB. The checked-in
+`systems/frontend-linux-amd64.rtg` profile applies the full-bundle limit and
+gives the running compiler a 128 MiB arena:
 
 ```sh
 renvo -system systems/frontend-linux-amd64.rtg -tags renvo_bundle -s \

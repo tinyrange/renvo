@@ -38,7 +38,7 @@ func TestBundledStandardLibraryFS(t *testing.T) {
 	}
 }
 
-func TestBundledFormsModuleCache(t *testing.T) {
+func TestBundledOptionalModuleCache(t *testing.T) {
 	data, ok := bundledStdReadFile("/modules/renvo.dev@v0.0.0/go.mod")
 	if !ok || string(data) != "module renvo.dev\n" {
 		t.Fatalf("bundled module file = %q/%v", string(data), ok)
@@ -47,9 +47,28 @@ func TestBundledFormsModuleCache(t *testing.T) {
 	if !ok || len(data) == 0 {
 		t.Fatal("bundled Forms source missing")
 	}
+	data, ok = bundledStdReadFile("/modules/renvo.dev@v0.0.0/device/i2c/i2c.go")
+	if !ok || len(data) == 0 {
+		t.Fatal("bundled device source missing")
+	}
 	entries, ok := bundledStdReadDir("/modules/renvo.dev@v0.0.0")
-	if !ok || len(entries) != 3 || entries[0].Name != "go.mod" || entries[1].Name != "forms" || entries[2].Name != "std" {
+	if !ok || len(entries) != 4 || entries[0].Name != "go.mod" || entries[1].Name != "device" || entries[2].Name != "forms" || entries[3].Name != "std" {
 		t.Fatalf("bundled module root = %#v/%v", entries, ok)
+	}
+}
+
+func TestBundledDeviceModuleCompilesOffline(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\nrequire renvo.dev v0.0.0\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	source := []byte("package main\nimport \"renvo.dev/device/i2c\"\nfunc main() { _ = i2c.ErrBusy }\n")
+	if err := os.WriteFile(filepath.Join(root, "main.go"), source, 0644); err != nil {
+		t.Fatal(err)
+	}
+	result := BuildFromFSWithModuleCache([]string{"-t", "linux/amd64", "-o", "app", "."}, root, "/std", "/modules", OSFS{})
+	if !result.Ok {
+		t.Fatalf("offline device build failed: %#v", result.Diagnostic)
 	}
 }
 
