@@ -40,3 +40,20 @@ sandbox/renvo \
   ./examples/m5atoms3lite/sk6812_strip
 ./sandbox/renvoflash sandbox/m5atoms3lite-sk6812-strip.elf
 ```
+
+## ADXL345 accelerometer
+
+The `adxl345` example reads signed raw X, Y, and Z acceleration once per
+second from an ADXL345 connected to the Grove port. The status LED is green
+while samples are arriving, red after a read failure, and blue when the device
+does not initialize. It uses the sensor's `0x53` address, selected when the
+SDO/ALT ADDRESS pin is grounded.
+
+```sh
+sandbox/renvo \
+  -backend backends/esp32s3.rtg \
+  -t esp32s3/xtensa_lx7 \
+  -o sandbox/m5atoms3lite-adxl345.elf \
+  ./examples/m5atoms3lite/adxl345
+./sandbox/renvoflash sandbox/m5atoms3lite-adxl345.elf
+```
