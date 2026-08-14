@@ -22,3 +22,21 @@ partition table, NVS, and eFuses:
 ```sh
 ./sandbox/renvoflash sandbox/m5atoms3lite-button-rgb.elf
 ```
+
+## SK6812 strip
+
+The `sk6812_strip` example drives the 10 cm, 15-pixel M5Stack A035 RGB LED
+Strip from the AtomS3 Lite Grove port on GPIO2. Each debounced button press
+chooses a low-brightness color from the hardware RNG and shoots it from the
+connector end to the far end of the strip. Input remains live during the
+animation, so rapid presses launch independently moving shots while holding
+the button still triggers only once.
+
+```sh
+sandbox/renvo \
+  -backend backends/esp32s3.rtg \
+  -t esp32s3/xtensa_lx7 \
+  -o sandbox/m5atoms3lite-sk6812-strip.elf \
+  ./examples/m5atoms3lite/sk6812_strip
+./sandbox/renvoflash sandbox/m5atoms3lite-sk6812-strip.elf
+```

@@ -1,12 +1,17 @@
 package esp32c6
 
-import "renvo.dev/device/mmio"
+import (
+	"renvo.dev/device/internal/esprmt"
+	"renvo.dev/device/mmio"
+	"renvo.dev/device/ws2812"
+)
 
 const (
 	rmtConfig          = uintptr(0x60006010)
 	rmtInterruptRaw    = uintptr(0x60006038)
 	rmtInterruptEnable = uintptr(0x60006040)
 	rmtInterruptClear  = uintptr(0x60006044)
+	rmtTransmitLimit   = uintptr(0x60006058)
 	rmtSystemConfig    = uintptr(0x60006068)
 	rmtMemory          = uintptr(0x60006400)
 	pcrRMTConfig       = uintptr(0x6009602c)
@@ -20,25 +25,42 @@ const (
 	rmtDirectMemory = uint32(1)
 	rmtIdleLow      = uint32(1 << 6)
 	rmtDivider10MHz = uint32(8 << 8)
-	rmtMemoryBlock  = uint32(1 << 16)
-	rmtUpdate       = uint32(1 << 24)
-	rmtStart        = uint32(1)
-	rmtResetRead    = uint32(1 << 1)
-	rmtResetMemory  = uint32(1 << 2)
-	rmtTransmitDone = uint32(1)
+	rmtMemoryBlocks = uint32(4 << 16)
+	rmtWrap         = uint32(1 << 4)
+
+	rmtMemoryWords = 4 * 48
 )
 
-// WS2812 is one ESP32-C6 RMT-backed RGB pixel with an optional power pin.
-type WS2812 struct {
+// RGB is one red, green and blue addressable-LED value.
+type RGB = ws2812.RGB
+
+// WS2812 is the portable WS2812-compatible strip driver.
+type WS2812 = ws2812.Strip
+
+type ws2812RMT struct {
 	data        *Pin
 	power       *Pin
 	initialized bool
+	sender      esprmt.Sender
 }
 
-// NewWS2812 describes a pixel routed through RMT channel zero.
-func NewWS2812(data, power *Pin) WS2812 { return WS2812{data: data, power: power} }
+// NewWS2812 describes a pixel or strip routed through RMT channel zero.
+func NewWS2812(data, power *Pin) WS2812 {
+	transport := &ws2812RMT{data: data, power: power}
+	transport.sender = esprmt.New(esprmt.Config{
+		ConfigAddress:          rmtConfig,
+		InterruptRawAddress:    rmtInterruptRaw,
+		InterruptEnableAddress: rmtInterruptEnable,
+		InterruptClearAddress:  rmtInterruptClear,
+		TransmitLimitAddress:   rmtTransmitLimit,
+		MemoryAddress:          rmtMemory,
+		BaseConfig:             rmtIdleLow | rmtDivider10MHz | rmtMemoryBlocks | rmtWrap,
+		MemoryWords:            rmtMemoryWords,
+	})
+	return ws2812.New(transport)
+}
 
-func (p *WS2812) initialize() {
+func (p *ws2812RMT) initialize() {
 	if p.initialized {
 		return
 	}
@@ -54,41 +76,12 @@ func (p *WS2812) initialize() {
 	mmio.Store32(pcrRMTConfig, clock&^rmtReset)
 	mmio.Store32(pcrRMTClockConfig, rmtClock80MHz|rmtSourceEnable)
 	mmio.Store32(rmtSystemConfig, rmtDirectMemory)
-	mmio.Store32(rmtInterruptEnable, 0)
-	mmio.Store32(rmtInterruptClear, uint32(0xffffffff))
-	mmio.Store32(rmtConfig, rmtIdleLow|rmtDivider10MHz|rmtMemoryBlock)
+	p.sender.Initialize()
 	p.initialized = true
 }
 
-func rmtSymbol(one bool) uint32 {
-	high, low := uint32(3), uint32(9)
-	if one {
-		high, low = 9, 3
-	}
-	return high | uint32(1<<15) | low<<16
-}
-
-// Set emits red, green and blue in WS2812 GRB wire order.
-func (p *WS2812) Set(red, green, blue uint8) {
+func (p *ws2812RMT) Transmit(data []byte) bool {
 	p.initialize()
-	color := uint32(green)<<16 | uint32(red)<<8 | uint32(blue)
-	bit, address := uint32(1<<23), rmtMemory
-	for bit != 0 {
-		mmio.Store32(address, rmtSymbol(color&bit != 0))
-		address += 4
-		bit >>= 1
-	}
-	mmio.Store32(address, 0)
-
-	config := rmtIdleLow | rmtDivider10MHz | rmtMemoryBlock
-	mmio.Store32(rmtInterruptClear, rmtTransmitDone)
-	mmio.Store32(rmtConfig, config|rmtResetRead)
-	mmio.Store32(rmtConfig, config)
-	mmio.Store32(rmtConfig, config|rmtResetMemory)
-	mmio.Store32(rmtConfig, config)
-	mmio.Store32(rmtConfig, config|rmtUpdate)
-	mmio.Store32(rmtConfig, config|rmtStart)
-	for mmio.Load32(rmtInterruptRaw)&rmtTransmitDone == 0 {
-	}
-	mmio.Store32(rmtInterruptClear, rmtTransmitDone)
+	timer := SystemTimer{}
+	return p.sender.Transmit(data, &timer)
 }
