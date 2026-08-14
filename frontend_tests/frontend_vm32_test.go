@@ -72,7 +72,6 @@ func TestVM32FrontendPerformanceGate(t *testing.T) {
 	}
 	imagePath := filepath.Join(t.TempDir(), "renvo-frontend.rnvb")
 	cmd := frontendCommand(frontend,
-		"-tags", "renvo_bundle",
 		"-t", "vm/vm32",
 		"-arena-size", "134217728",
 		"-s", "-o", imagePath,
@@ -91,11 +90,15 @@ func TestVM32FrontendPerformanceGate(t *testing.T) {
 	compileResult := vm.RunConfig(image, vm.Config{
 		Limits: vm.Limits{Steps: 9 * 1000 * 1000 * 1000, Memory: 192 * 1024 * 1024},
 		Args: []string{
-			"renvo", "-tags", "renvo_bundle",
+			"renvo",
 			"-system", "/workspace/systems/frontend-linux-amd64.rtg",
 			"-s", "-o", "/workspace/renvo-linux-amd64", "./cmd/renvo",
 		},
-		Env:   []string{"PATH=/vm", "PWD=/workspace"},
+		Env: []string{
+			"PATH=/vm",
+			"PWD=/workspace",
+			"RENVO_STDROOT=/workspace/std",
+		},
 		Files: files,
 	})
 	if compileResult.Trap != vm.TrapNone || compileResult.ExitCode != 0 {
