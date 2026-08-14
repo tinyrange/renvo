@@ -47,6 +47,8 @@ func hostSerialFlags() int         { return 2 | 0x20000 | 0x4 }
 func hostCreateFlags() int         { return 2 | 0x200 | 0x400 }
 func hostDTR() int                 { return 0x002 }
 func hostRTS() int                 { return 0x004 }
+func hostModemGet() int            { return 0x4004746a }
+func hostModemWrite() int          { return 0x8004746d }
 func hostModemSet() int            { return 0x8004746c }
 func hostModemClear() int          { return 0x8004746b }
 func hostClose(fd int) int         { return darwinClose(fd) }

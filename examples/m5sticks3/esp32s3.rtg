@@ -27,6 +27,7 @@ go backend {
 	const usbSerialMemoryConfig = usbSerialEndpoint + 0x48
 	const systemClock1 = 0x600c001c
 	const systemReset1 = 0x600c0024
+	const rtcOptions0 = 0x60008000
 	const rtcUSBConfig = 0x60008120
 	const usbSerialStartOfFrame = 1 << 1
 	const usbSerialProbeIterations = 65536
@@ -284,26 +285,16 @@ go backend {
 
 	func usbSerialInitialize(out *RTGEmitter) {
 		done := out.NewLabel()
-		disconnect := out.NewLabel()
-		// The second-stage bootloader may gate USB Serial/JTAG when it hands off
-		// to a freestanding application. Restore the internal PHY explicitly so
-		// serial output and OpenOCD remain available after a watchdog reset.
+		// Keep the bootloader's USB Serial/JTAG controller state intact. In
+		// particular, do not pulse its peripheral reset here: the controller must
+		// retain the host DTR/RTS state while it resets the CPUs into the ROM
+		// downloader. Keep the PHY and IO mux alive across that CPU reset too.
 		updateRegister(out, systemClock1, 1<<10, 0)
-		updateRegister(out, systemReset1, 1<<10, 0)
 		updateRegister(out, systemReset1, 0, 1<<10)
-		updateRegister(out, rtcUSBConfig, 1<<20, 1<<19)
-		updateRegister(out, usbSerialConfig, 0, 1<<14|1<<0)
+		updateRegister(out, rtcUSBConfig, 1<<20|1<<18|1<<17, 1<<19)
+		updateRegister(out, usbSerialConfig, 1<<14, 1<<0)
 		updateRegister(out, usbSerialMiscConfig, 1, 0)
 		updateRegister(out, usbSerialMemoryConfig, 1<<1, 1)
-		// Hold the pull-up off long enough for the host to observe a disconnect,
-		// then reconnect the freshly reset internal PHY.
-		xtensa_lx7.moveImmediate(out, xtensa_lx7.copyCount, 10000)
-		out.Mark(disconnect)
-		xtensa_lx7.decrement(out, xtensa_lx7.copyCount)
-		xtensa_lx7.moveImmediate(out, xtensa_lx7.primary, 0)
-		xtensa_lx7.compare(out, xtensa_lx7.copyCount, xtensa_lx7.primary)
-		xtensa_lx7.jumpCondition(out, xtensa_lx7.ne, disconnect)
-		updateRegister(out, usbSerialConfig, 1<<14, 1<<0)
 		// An attached host has already produced SOF traffic while the ESP
 		// bootloader loads this image. Preserve that raw latch as connection
 		// state; it remains clear on battery-only boots.
@@ -315,6 +306,11 @@ go backend {
 		xtensa_lx7.moveImmediate(out, xtensa_lx7.primary, 0)
 		xtensa_lx7.compare(out, xtensa_lx7.scratch, xtensa_lx7.primary)
 		xtensa_lx7.jumpCondition(out, xtensa_lx7.eq, done)
+		// USB Serial/JTAG uses the BBPLL for its 48 MHz PHY clock. Keep the
+		// crystal, PLL and their I2C controls powered while a host is attached so
+		// the controller survives its CPU-reset download sequence.
+		updateRegister(out, rtcOptions0,
+			1<<13|1<<11|1<<9|1<<7, 1<<12|1<<10|1<<8|1<<6)
 		xtensa_lx7.moveImmediate(out, xtensa_lx7.scratch, 1)
 		xtensa_lx7.storeU32(out,
 			RTGAddress{Displacement: usbSerialEndpointConfig},
