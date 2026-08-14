@@ -1341,18 +1341,36 @@ function renderLibraryCatalog(catalog) {
     for (const [name, item] of entries) children.push(libraryPackage(catalog, name, item));
   };
   appendGroup("Standard library", Object.entries(catalog.packages || {}).sort(([left], [right]) => left.localeCompare(right)));
-  appendGroup("ESP32 platforms", Object.entries(catalog.platforms || {}).filter(([name]) => name.includes("/examples/m5"))
-    .sort(([left], [right]) => left.localeCompare(right)));
-  const forms = Object.entries(catalog.platforms || {}).filter(([name]) => !name.includes("/examples/m5"));
+  const platforms = Object.entries(catalog.platforms || {});
+  const boards = new Map();
+  for (const entry of platforms) {
+    const board = entry[1].board;
+    if (!board || !entry[1].main) continue;
+    if (!boards.has(board)) boards.set(board, []);
+    boards.get(board).push(entry);
+  }
+  if (boards.size) {
+    const heading = document.createElement("div");
+    heading.className = "library-group"; heading.textContent = "ESP32 platforms"; children.push(heading);
+    for (const [board, entries] of [...boards].sort(([left], [right]) => left.localeCompare(right))) {
+      const boardHeading = document.createElement("div");
+      boardHeading.className = "library-subgroup"; boardHeading.textContent = board; children.push(boardHeading);
+      for (const [name, item] of entries.sort(([left], [right]) => left.localeCompare(right))) {
+        children.push(libraryPackage(catalog, name, item, item.root.split("/").pop()));
+      }
+    }
+  }
+  const forms = platforms.filter(([name]) => !name.includes("/examples/m5"));
   if (forms.length) appendGroup("Frameworks", forms);
   elements.stdlibTree.replaceChildren(...children);
 }
 
-function libraryPackage(catalog, importPath, item) {
+function libraryPackage(catalog, importPath, item, label = importPath.replace(/^renvo\.dev\//, "")) {
   const wrapper = document.createElement("div");
+  if (item.board) wrapper.className = "library-board-package";
   const button = document.createElement("button");
   button.type = "button"; button.className = "stdlib-package";
-  button.textContent = importPath.replace(/^renvo\.dev\//, "");
+  button.textContent = label;
   button.title = item.main ? `${importPath} — click to use as the active app` : importPath;
   const files = document.createElement("div");
   files.className = "stdlib-files"; files.hidden = true;
