@@ -284,6 +284,30 @@ func Println(values ...interface{}) (int, error) { return 0, nil }
 	}
 }
 
+func TestLinkUnitsKeepsPrintMirrorRuntimeName(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import "example.com/case/terminal"
+
+func appMain() int { terminal.Start(); print("PASS\n"); return 0 }
+`)},
+		{Path: "/repo/case/terminal/terminal.go", Src: []byte(`package terminal
+
+func Start() {}
+func renvo_runtime_PrintMirror(text string) {}
+`)},
+	})
+	program, ok := LinkUnitsCore(result.Units, result.Root)
+	if !ok {
+		t.Fatal("LinkUnits failed")
+	}
+	if findLinkedFunc(program, "renvo_runtime_PrintMirror") < 0 {
+		t.Fatalf("print mirror runtime name was mangled:\n%s", program.Text)
+	}
+}
+
 func TestLinkUnitsMarksRenvoMemoryDirectivesAsCompilerIntrinsics(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},

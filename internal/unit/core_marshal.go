@@ -21,7 +21,7 @@ func MarshalCoreTransient(program CoreProgram) ([]byte, bool) {
 }
 
 func marshalCore(program CoreProgram, transient bool) ([]byte, bool) {
-	capacity := 146 + len(program.Package) + len(program.ImportPath) + len(program.Text) + len(program.Tokens)*5 + len(program.Decls)*8 + len(program.Funcs)*12 + len(program.Packages)*48
+	capacity := 82 + unboundTargetBindingReserve + len(program.Package) + len(program.ImportPath) + len(program.Text) + len(program.Tokens)*5 + len(program.Decls)*8 + len(program.Funcs)*12 + len(program.Packages)*48
 	out := make([]byte, 0, capacity)
 	for i := 0; i < len(Magic); i++ {
 		out = append(out, Magic[i])

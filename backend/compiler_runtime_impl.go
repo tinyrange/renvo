@@ -121,9 +121,40 @@ func renvoEmitPrintStaticByte(g *renvoLinearGen, value byte, fd int) bool {
 	return renvoEmitWriteValueRegs(g, fd)
 }
 
+func renvoPrintMirrorFunction(g *renvoLinearGen) int {
+	renvoNonNil(g)
+	for i := 0; i < len(g.meta.funcs); i++ {
+		fn := &g.meta.funcs[i]
+		if fn.receiverType == 0 && fn.paramCount == 1 &&
+			renvoTypeIsString(g.meta, g.meta.params[fn.firstParam].typ) &&
+			renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_PrintMirror") {
+			return i
+		}
+	}
+	return -1
+}
+
+func renvoEmitPrintMirror(g *renvoLinearGen) {
+	renvoNonNil(g)
+	fnIndex := renvoPrintMirrorFunction(g)
+	if fnIndex < 0 || fnIndex == g.currentFunc {
+		return
+	}
+	// Preserve the pointer and length for the real stdout write below while a
+	// second pair becomes the mirror function's string argument.
+	renvoAsmPushSecondary(&g.asm)
+	renvoAsmPushPrimary(&g.asm)
+	renvoAsmPushSecondary(&g.asm)
+	renvoAsmPushPrimary(&g.asm)
+	renvoEmitCallWithWordCount(g, fnIndex, renvoBackendStringWordCount)
+	renvoAsmPopPrimary(&g.asm)
+	renvoAsmPopSecondary(&g.asm)
+}
+
 func renvoEmitWriteValueRegs(g *renvoLinearGen, fd int) bool {
 	renvoNonNil(g)
 	a := &g.asm
+	renvoEmitPrintMirror(g)
 	if renvoPreparedBackend != 0 {
 		renvoRTGDirectMove(a, renvoRTGCallWord2, renvoRTGSecondary)
 		renvoRTGDirectMove(a, renvoRTGCallWord1, renvoRTGPrimary)

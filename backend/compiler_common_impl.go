@@ -10895,7 +10895,10 @@ func renvoEmitCopySliceRegsToArena(g *renvoLinearGen, sliceType int) bool {
 	if elemSize < 1 {
 		elemSize = 8
 	}
-	slackSize := 64
+	// Returned slices need enough spare capacity for the largest small
+	// in-place metadata append. Target binding currently needs up to 70 bytes;
+	// keeping 80 avoids copying a multi-megabyte linked unit at peak arena use.
+	slackSize := 80
 	if elemSize > slackSize {
 		slackSize = elemSize
 	}

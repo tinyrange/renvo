@@ -19,6 +19,12 @@ func New(source Source) Clock { return Clock{source: source} }
 // Ticks returns the current low 32 bits of the monotonic counter.
 func (c *Clock) Ticks() uint32 { return c.source.Ticks() }
 
+// Milliseconds returns the low 32 bits of the monotonic time in milliseconds.
+// It is intended for short wrap-safe elapsed-time measurements.
+func (c *Clock) Milliseconds() uint32 {
+	return c.Ticks() / (c.source.TicksPerSecond() / 1000)
+}
+
 // DelayMicroseconds waits for at least microseconds.
 func (c *Clock) DelayMicroseconds(microseconds uint32) {
 	started := c.Ticks()

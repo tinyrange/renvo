@@ -1,6 +1,10 @@
 package unit
 
-import "testing"
+import (
+	"testing"
+
+	"renvo.dev/internal/targetinfo"
+)
 
 func TestTargetBindingRoundTrip(t *testing.T) {
 	base, ok := MarshalCore(CoreProgram{
@@ -92,6 +96,24 @@ func TestUnboundTargetBindingUsesReservedTail(t *testing.T) {
 	got, ok := ReadTargetBinding(bound)
 	if !ok || got != binding {
 		t.Fatalf("binding = %#v, ok %v", got, ok)
+	}
+}
+
+func TestUnboundTargetBindingReserveCoversRegisteredTargets(t *testing.T) {
+	base, ok := MarshalCore(CoreProgram{
+		Package: "main",
+		Text:    []byte("package main"),
+		Tokens:  []Token{MakeToken(TokenEOF, 12, 0, 1)},
+	})
+	if !ok {
+		t.Fatal("MarshalCore failed")
+	}
+	reserved := cap(base) - len(base)
+	for _, target := range targetinfo.All() {
+		required := targetBindingFixedSize + len(target.Name)
+		if reserved < required {
+			t.Errorf("target %q requires %d binding bytes; MarshalCore reserved %d", target.Name, required, reserved)
+		}
 	}
 }
 

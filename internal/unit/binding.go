@@ -1,9 +1,13 @@
 package unit
 
 const (
-	TagDefinitionTarget  = 4
-	TagDefinitionHash    = 5
-	TagDescriptorVersion = 6
+	TagDefinitionTarget    = 4
+	TagDefinitionHash      = 5
+	TagDescriptorVersion   = 6
+	targetBindingFixedSize = 52
+	// Leave enough capacity on a newly marshaled unit for every registered
+	// target name, plus room for future names, without copying the whole unit.
+	unboundTargetBindingReserve = 80
 )
 
 type TargetBinding struct {
@@ -21,8 +25,7 @@ func BindUnboundTarget(data *[]byte, binding TargetBinding) bool {
 	if !validUnitRoot(*data) || binding.Target == "" || len(binding.Definition) != 32 || binding.DescriptorVersion <= 0 {
 		return false
 	}
-	const fixedSize = 52
-	required := fixedSize + len(binding.Target)
+	required := targetBindingFixedSize + len(binding.Target)
 	if cap(*data)-len(*data) < required {
 		out := *data
 		out = appendStringNodeCore(out, TagDefinitionTarget, binding.Target)

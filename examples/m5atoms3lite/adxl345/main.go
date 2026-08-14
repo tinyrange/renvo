@@ -19,7 +19,8 @@ func main() {
 		}
 
 		for {
-			reading, err := sensor.Read()
+			var reading adxl345.Reading
+			err := sensor.ReadInto(&reading)
 			if err != nil {
 				board.RGB.Set(32, 0, 0)
 				print("ADXL345 read failed: ", err.Error(), "\n")

@@ -75,12 +75,13 @@ func prepareDMA2DDescriptor(
 	store32(descriptor+20, 0)
 }
 
-func copyRectDMA2D(source, destination uintptr, minX, minY, maxX, maxY int) bool {
+func copyRectDMA2DAt(
+	source, destination uintptr,
+	sourceX, sourceY, destinationX, destinationY, width, height int,
+) bool {
 	if dma2DFailed {
 		return false
 	}
-	width := maxX - minX
-	height := maxY - minY
 	if width <= 0 || height <= 0 {
 		return true
 	}
@@ -92,8 +93,8 @@ func copyRectDMA2D(source, destination uintptr, minX, minY, maxX, maxY int) bool
 
 	txDescriptor := dma2DTXDescriptor
 	rxDescriptor := dma2DRXDescriptor
-	prepareDMA2DDescriptor(txDescriptor, source, DisplayWidth, DisplayHeight, width, height, minX, minY)
-	prepareDMA2DDescriptor(rxDescriptor, destination, DisplayWidth, DisplayHeight, width, height, minX, minY)
+	prepareDMA2DDescriptor(txDescriptor, source, DisplayWidth, DisplayHeight, width, height, sourceX, sourceY)
+	prepareDMA2DDescriptor(rxDescriptor, destination, DisplayWidth, DisplayHeight, width, height, destinationX, destinationY)
 	// M2M uses the first free peripheral selectors from the hardware's
 	// documented ranges: TX=4 and RX=3. A 128-byte burst with page-boundary
 	// protection is the ESP-IDF default for external-memory copies.
@@ -126,4 +127,11 @@ func copyRectDMA2D(source, destination uintptr, minX, minY, maxX, maxY int) bool
 	// never disguise a broken accelerator by changing to a PSRAM-heavy CPU path.
 	dma2DFailed = true
 	return false
+}
+
+func copyRectDMA2D(source, destination uintptr, minX, minY, maxX, maxY int) bool {
+	return copyRectDMA2DAt(
+		source, destination,
+		minX, minY, minX, minY, maxX-minX, maxY-minY,
+	)
 }

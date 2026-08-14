@@ -206,6 +206,7 @@ func platformPackageSpecs() []platformPackageSpec {
 		{Path: "device/gpio"},
 		{Path: "device/clock"},
 		{Path: "device/i2c"},
+		{Path: "device/terminal"},
 		{Path: "device/input/tca8418"},
 		{Path: "device/input/st7121"},
 		{Path: "device/display/st7121"},
@@ -232,6 +233,8 @@ func platformPackageSpecs() []platformPackageSpec {
 		{Path: "examples/m5tab5/fontcache", Target: "esp32p4/riscv32"},
 		{Path: "examples/m5tab5/forms_demo", Target: "esp32p4/riscv32", Board: "M5Stack Tab5"},
 		{Path: "examples/m5tab5/sgp30_demo", Target: "esp32p4/riscv32", Board: "M5Stack Tab5"},
+		{Path: "examples/m5tab5/terminal", Target: "esp32p4/riscv32", Board: "M5Stack Tab5"},
+		{Path: "examples/m5tab5/terminal_stress", Target: "esp32p4/riscv32", Board: "M5Stack Tab5"},
 		{Path: "examples/m5tab5/touch_trails", Target: "esp32p4/riscv32", Board: "M5Stack Tab5"},
 	}
 }

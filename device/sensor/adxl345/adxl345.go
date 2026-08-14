@@ -61,18 +61,28 @@ func decode(low, high byte) int16 {
 	return int16(uint16(low) | uint16(high)<<8)
 }
 
-// Read returns one coherent X, Y, and Z sample using a single burst read.
-func (d *Device) Read() (Reading, error) {
+// ReadInto stores one coherent X, Y, and Z sample using a single burst read.
+// Supplying the result is useful in steady-state embedded loops because it
+// avoids copying the sample through a multi-value return.
+func (d *Device) ReadInto(result *Reading) error {
 	register := [1]byte{dataRegister}
 	response := [6]byte{}
 	if err := d.bus.Tx(d.address, register[:], response[:]); err != nil {
-		return Reading{}, err
+		return err
 	}
-	return Reading{
+	*result = Reading{
 		X: decode(response[0], response[1]),
 		Y: decode(response[2], response[3]),
 		Z: decode(response[4], response[5]),
-	}, nil
+	}
+	return nil
+}
+
+// Read returns one coherent X, Y, and Z sample using a single burst read.
+func (d *Device) Read() (Reading, error) {
+	var result Reading
+	err := d.ReadInto(&result)
+	return result, err
 }
 
 type sensorError string
