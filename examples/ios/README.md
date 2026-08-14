@@ -1,6 +1,7 @@
 # iOS CompilerJIT target
 
-`ios_arm64.rtg` is the compiler-side iOS port. It reuses the shared AArch64 and
+[`ios_arm64.rtg`](../../backends/ios_arm64.rtg) is the compiler-side iOS port.
+It reuses the shared AArch64 and
 Darwin lowering through an external CompilerJIT definition, then specializes
 the generated Mach-O contract for iOS. The Renvo compile does not require Xcode
 or an iPhoneOS SDK.
@@ -36,7 +37,7 @@ For a small compiler smoke test:
 
 ```sh
 go run ./cmd/renvo \
-  -backend examples/ios/ios_arm64.rtg \
+  -backend backends/ios_arm64.rtg \
   -t ios/arm64 \
   -s -o sandbox/renvo-ios \
   internal/backendjit/testdata/mobile_entry.go
@@ -48,7 +49,7 @@ The hello application is a small 360 x 800 retained Forms layout:
 
 ```sh
 go run ./cmd/renvo \
-  -backend examples/ios/ios_arm64.rtg \
+  -backend backends/ios_arm64.rtg \
   -t ios/arm64 \
   -s -o sandbox/RenvoForms \
   ./examples/forms_hello
@@ -60,7 +61,7 @@ event handlers:
 
 ```sh
 go run ./cmd/renvo \
-  -backend examples/ios/ios_arm64.rtg \
+  -backend backends/ios_arm64.rtg \
   -t ios/arm64 \
   -s -o sandbox/RenvoControls \
   ./examples/forms_controls
@@ -167,7 +168,7 @@ executable slot:
 mkdir -p "$RENVO_IOS_APP"
 
 go run ./cmd/renvo \
-  -backend examples/ios/ios_arm64.rtg \
+  -backend backends/ios_arm64.rtg \
   -t ios/arm64 \
   -s -o "$RENVO_IOS_APP/RenvoForms" \
   ./examples/forms_controls

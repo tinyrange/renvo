@@ -19,7 +19,7 @@ func TestCompiledInBootstrapPreparesESP32P4Definition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	definition := filepath.Join(root, "examples", "m5tab5", "esp32p4.rtg")
+	definition := filepath.Join(root, "backends", "esp32p4.rtg")
 	result := driver.CompileFromFS([]string{
 		"-backend", definition,
 		"-t", "esp32p4/riscv32",

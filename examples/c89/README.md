@@ -1,13 +1,14 @@
 # C89 CompilerJIT backend
 
-`c89.rtg` is a custom backend definition, not a frontend transpiler. It
+[`c89.rtg`](../../backends/c89.rtg) is a custom backend definition, not a
+frontend transpiler. It
 implements `direct_emitter_v1`, is prepared through the same CompilerJIT path
 as the ESP32 targets, consumes the canonical linked unit, and emits an ISO C89
 translation unit.
 
 All current targets use the `c89vm32` RTG architecture: little-endian,
 eight-bit bytes, 32-bit Renvo `int` and pointers, four-byte stack words, and
-the internal register-machine ABI declared in `c89.rtg`. These properties are
+the internal register-machine ABI declared in the backend. These properties are
 fixed before C emission; the generated C never infers target endianness or
 layout from its compiler.
 
@@ -42,7 +43,7 @@ Generate C with:
 
 ```sh
 renvo \
-  -backend examples/c89/c89.rtg \
+  -backend backends/c89.rtg \
   -t c89/hosted32 \
   -s \
   -o program.c \

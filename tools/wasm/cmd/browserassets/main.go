@@ -56,9 +56,9 @@ type customTarget struct {
 }
 
 var customTargets = []customTarget{
-	{Name: "esp32c6/riscv32", Definition: "examples/m5nanoc6/esp32c6.rtg", Backend: "backends/esp32c6-riscv32.wasm"},
-	{Name: "esp32s3/xtensa_lx7", Definition: "examples/m5sticks3/esp32s3.rtg", Backend: "backends/esp32s3-xtensa_lx7.wasm"},
-	{Name: "esp32p4/riscv32", Definition: "examples/m5tab5/esp32p4.rtg", Backend: "backends/esp32p4-riscv32.wasm"},
+	{Name: "esp32c6/riscv32", Definition: "backends/esp32c6.rtg", Backend: "backends/esp32c6-riscv32.wasm"},
+	{Name: "esp32s3/xtensa_lx7", Definition: "backends/esp32s3.rtg", Backend: "backends/esp32s3-xtensa_lx7.wasm"},
+	{Name: "esp32p4/riscv32", Definition: "backends/esp32p4.rtg", Backend: "backends/esp32p4-riscv32.wasm"},
 }
 
 func main() {

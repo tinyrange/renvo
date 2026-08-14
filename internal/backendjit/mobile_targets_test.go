@@ -35,7 +35,7 @@ func compileMobileProgram(
 	if err != nil {
 		t.Fatal(err)
 	}
-	definition := filepath.Join(root, "examples", definitionName)
+	definition := filepath.Join(root, "backends", definitionName)
 	result := driver.CompileFromFS([]string{
 		"-backend", definition,
 		"-t", target,
@@ -53,7 +53,7 @@ func compileMobileProgram(
 
 func TestCompilerJITAndroidARM64NativeActivityImage(t *testing.T) {
 	image := compileMobileTarget(t,
-		filepath.Join("android", "android_arm64.rtg"),
+		"android_arm64.rtg",
 		"android/arm64", "librenvo.so")
 	if len(image) < 64 || !bytes.Equal(image[:4], []byte{0x7f, 'E', 'L', 'F'}) {
 		t.Fatalf("Android output is not ELF64: % x", image[:minInt(4, len(image))])
@@ -171,7 +171,7 @@ func TestCompilerJITAndroidARM64NativeActivityImage(t *testing.T) {
 
 func TestCompilerJITAndroidARM64FormsImage(t *testing.T) {
 	image := compileMobileProgram(t,
-		filepath.Join("android", "android_arm64.rtg"),
+		"android_arm64.rtg",
 		"android/arm64", "librenvo.so",
 		filepath.Join("examples", "forms_hello"))
 
@@ -304,7 +304,7 @@ func TestCompilerJITAndroidARM64FormsImage(t *testing.T) {
 
 func TestCompilerJITAndroidARM64ControlsImage(t *testing.T) {
 	image := compileMobileProgram(t,
-		filepath.Join("android", "android_arm64.rtg"),
+		"android_arm64.rtg",
 		"android/arm64", "librenvo-controls.so",
 		filepath.Join("examples", "forms_controls"))
 
@@ -331,7 +331,7 @@ func TestCompilerJITAndroidARM64ControlsImage(t *testing.T) {
 
 func TestCompilerJITIOSARM64MachOImage(t *testing.T) {
 	image := compileMobileTarget(t,
-		filepath.Join("ios", "ios_arm64.rtg"),
+		"ios_arm64.rtg",
 		"ios/arm64", "renvo-ios")
 	if len(image) < 32 || binary.LittleEndian.Uint32(image[:4]) != 0xfeedfacf {
 		t.Fatalf("iOS output is not Mach-O 64: % x", image[:minInt(4, len(image))])
@@ -413,7 +413,7 @@ func TestCompilerJITIOSARM64MachOImage(t *testing.T) {
 
 func TestCompilerJITIOSARM64FormsImage(t *testing.T) {
 	image := compileMobileProgram(t,
-		filepath.Join("ios", "ios_arm64.rtg"),
+		"ios_arm64.rtg",
 		"ios/arm64", "RenvoForms",
 		filepath.Join("examples", "forms_hello"))
 
@@ -488,7 +488,7 @@ func TestCompilerJITIOSARM64FormsImage(t *testing.T) {
 
 func TestCompilerJITIOSARM64ControlsImage(t *testing.T) {
 	image := compileMobileProgram(t,
-		filepath.Join("ios", "ios_arm64.rtg"),
+		"ios_arm64.rtg",
 		"ios/arm64", "RenvoControls",
 		filepath.Join("examples", "forms_controls"))
 
@@ -519,7 +519,7 @@ func TestCompilerJITIOSARM64ControlsImage(t *testing.T) {
 
 func TestRenvoBuiltAPKPackagerMatchesHostBuilder(t *testing.T) {
 	sharedObject := compileMobileTarget(t,
-		filepath.Join("android", "android_arm64.rtg"),
+		"android_arm64.rtg",
 		"android/arm64", "librenvo.so")
 	root, err := filepath.Abs("../..")
 	if err != nil {

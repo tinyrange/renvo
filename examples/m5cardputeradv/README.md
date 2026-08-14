@@ -26,7 +26,7 @@ Build Renvo and compile the oracle with the shared ESP32-S3 target:
 ```sh
 go build -o sandbox/renvo ./cmd/renvo
 sandbox/renvo \
-  -backend examples/m5sticks3/esp32s3.rtg \
+  -backend backends/esp32s3.rtg \
   -t esp32s3/xtensa_lx7 \
   -o sandbox/m5cardputeradv-oracle.elf \
   ./examples/m5cardputeradv/oracle

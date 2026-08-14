@@ -1,6 +1,7 @@
 # Android CompilerJIT target
 
-`android_arm64.rtg` is the compiler-side Android port. It prepares through the
+[`android_arm64.rtg`](../../backends/android_arm64.rtg) is the compiler-side
+Android port. It prepares through the
 same external CompilerJIT path as the ESP32 targets and emits a position-
 independent AArch64 `librenvo.so`; compiling it does not require the Android
 NDK.
@@ -32,7 +33,7 @@ For a local compiler smoke test:
 
 ```sh
 go run ./cmd/renvo \
-  -backend examples/android/android_arm64.rtg \
+  -backend backends/android_arm64.rtg \
   -t android/arm64 \
   -s -o sandbox/librenvo.so \
   internal/backendjit/testdata/mobile_entry.go
@@ -42,7 +43,7 @@ Compile the Forms hello example instead with:
 
 ```sh
 go run ./cmd/renvo \
-  -backend examples/android/android_arm64.rtg \
+  -backend backends/android_arm64.rtg \
   -t android/arm64 \
   -s -o sandbox/librenvo-forms.so \
   ./examples/forms_hello
@@ -55,7 +56,7 @@ dragging, themes, and advanced controls:
 
 ```sh
 go run ./cmd/renvo \
-  -backend examples/android/android_arm64.rtg \
+  -backend backends/android_arm64.rtg \
   -t android/arm64 \
   -s -o sandbox/librenvo-controls.so \
   ./examples/forms_controls

@@ -1,4 +1,4 @@
-@import "../../backend/definitions/darwin_aarch64.rtg"
+@import "../backend/definitions/darwin_aarch64.rtg"
 
 # The shared Darwin emitter already supplies AArch64 lowering, libSystem
 # imports, Mach-O layout, and an ad-hoc signature. The iOS target changes the
