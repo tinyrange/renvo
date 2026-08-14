@@ -37,3 +37,13 @@ func TestAnalyzeWorkspaceAcceptsValidFrontendProgram(t *testing.T) {
 		t.Fatalf("analysis = %#v", result)
 	}
 }
+
+func TestAnalyzeWorkspaceNamesTheOffendingIdentifier(t *testing.T) {
+	result := AnalyzeWorkspace("/repo", "/std", ".", []load.SourceFile{
+		{Path: "/repo/go.mod", Src: []byte("module example.com/app\n")},
+		{Path: "/repo/main.go", Src: []byte("package main\nfunc main() { print(missingValue) }\n")},
+	})
+	if result.Ok || result.Diagnostic.Message != "undefined identifier: missingValue" {
+		t.Fatalf("analysis diagnostic = %#v", result.Diagnostic)
+	}
+}

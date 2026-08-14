@@ -21,14 +21,15 @@ func main() {
 	board.Clock.DelayMicroseconds(3)
 
 	bus := i2c.New(board.Grove)
+	device := bus.Device(0x58)
 	read := []byte{0}
-	err := bus.Tx(0x58, []byte{1, 2}, read)
-	if err != nil || read[0] != 9 {
+	n, err := device.ReadAt(read, 1)
+	if err != nil || n != 1 || read[0] != 9 {
 		print("FAIL: port transaction\n")
 		return
 	}
-	err = bus.Write(0x58, []byte{3})
-	if err != nil {
+	n, err = device.WriteAt([]byte{3}, 2)
+	if err != nil || n != 1 {
 		print("FAIL: repeated transaction\n")
 		return
 	}

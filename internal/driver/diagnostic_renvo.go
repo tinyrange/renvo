@@ -271,10 +271,18 @@ func renvoBuildDiagnosticLocation(result BuildResult, d Diagnostic) Diagnostic {
 	}
 	d.Start = source.File.Tokens[tok].Start
 	d.End = source.File.Tokens[tok].End
+	if renvoDiagnosticNamesToken(d.Code) && d.Start >= 0 && d.End > d.Start && d.End <= len(source.Src) {
+		d.Message += ": " + string(source.Src[d.Start:d.End])
+	}
 	d.Line = syntax.TokenLine(source.File.Tokens[tok])
 	d.Column = 1
 	for i := d.Start - 1; i >= 0 && source.Src[i] != '\n'; i-- {
 		d.Column++
 	}
 	return d
+}
+
+func renvoDiagnosticNamesToken(code string) bool {
+	return code == "RENVO-CHECK-010" || code == "RENVO-CHECK-011" || code == "RENVO-CHECK-020" ||
+		code == "RENVO-CHECK-027" || code == "RENVO-CHECK-028" || code == "RENVO-CHECK-029" || code == "RENVO-CHECK-032"
 }

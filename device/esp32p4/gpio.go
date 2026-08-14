@@ -49,6 +49,7 @@ func (p *Pin) outputSelect() uintptr {
 	return outputSelectBase + uintptr(p.number)*4
 }
 
+// Configure selects ordinary input or output operation and the requested pull.
 func (p *Pin) Configure(config gpio.Config) error {
 	value := mmio.Load32(p.ioMux()) &^ (gpioFunctionMask | gpioInputEnable | gpioPullUp | gpioPullDown)
 	value |= gpioFunction
@@ -78,6 +79,7 @@ func (p *Pin) enable(enabled bool) {
 	}
 }
 
+// Set drives a configured output high or low.
 func (p *Pin) Set(high bool) {
 	set, clear := gpioOutSet, gpioOutClear
 	if p.number >= 32 {
@@ -90,6 +92,7 @@ func (p *Pin) Set(high bool) {
 	}
 }
 
+// Get reports the current logic level sampled at the pin.
 func (p *Pin) Get() bool {
 	input := gpioInput
 	if p.number >= 32 {

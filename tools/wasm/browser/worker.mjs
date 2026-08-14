@@ -39,7 +39,7 @@ self.addEventListener("message", async (event) => {
     return;
   }
   if (request.type === "analyze" || request.type === "complete" || request.type === "signature" ||
-      request.type === "definition" || request.type === "references") {
+      request.type === "definition" || request.type === "references" || request.type === "hover") {
     if (!languageServiceModule) {
       self.postMessage({ type: "language-result", id: request.id, mode: request.type, output: "", error: "language service is unavailable" });
       return;

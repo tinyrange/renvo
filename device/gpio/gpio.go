@@ -5,7 +5,9 @@ package gpio
 type Direction uint8
 
 const (
+	// Input configures a pin for sampling.
 	Input Direction = iota
+	// Output configures a pin for driving.
 	Output
 )
 
@@ -13,8 +15,11 @@ const (
 type Pull uint8
 
 const (
+	// PullNone disables the pin's internal bias.
 	PullNone Pull = iota
+	// PullUp biases an undriven input high.
 	PullUp
+	// PullDown biases an undriven input low.
 	PullDown
 )
 

@@ -35,7 +35,7 @@ func analysisInt(text string) (int, bool) {
 func analysisParse(args []string) (analysisOptions, bool) {
 	options := analysisOptions{mode: "analyze", target: "wasi/wasm32", file: "main.go", packageAt: "."}
 	for i := 1; i < len(args); i++ {
-		if args[i] == "analyze" || args[i] == "complete" || args[i] == "signature" || args[i] == "definition" || args[i] == "references" {
+		if args[i] == "analyze" || args[i] == "complete" || args[i] == "signature" || args[i] == "definition" || args[i] == "references" || args[i] == "hover" {
 			options.mode = args[i]
 			continue
 		}
@@ -131,6 +131,9 @@ func analysisSourceFailure(source driver.SourceResult) {
 		message = "go.mod was not found"
 	} else if source.Error == driver.SourceErrImport || source.Error == driver.SourceErrDependencyMissing || source.Error == driver.SourceErrStandardPackage {
 		message = "import could not be resolved"
+		if source.ErrorPath != "" {
+			message += ": " + source.ErrorPath
+		}
 	} else if source.Error == driver.SourceErrParse {
 		message = "source syntax is invalid"
 	}
@@ -139,7 +142,13 @@ func analysisSourceFailure(source driver.SourceResult) {
 }
 
 func analysisCompletion(item check.CompletionItem) {
-	analysisLine("C", item.Name, item.Detail, analysisDecimal(item.Kind), item.Signature)
+	analysisLine("C", item.Name, item.Detail, analysisDecimal(item.Kind), item.Signature, item.Documentation)
+}
+
+func analysisHover(hover check.HoverInfo) {
+	if hover.Ok {
+		analysisLine("H", hover.Signature, hover.Documentation, analysisDecimal(hover.Start), analysisDecimal(hover.End))
+	}
 }
 
 func analysisKeywordCompletions(files []load.SourceFile, path string, offset int) {
@@ -241,6 +250,13 @@ func appMain(args []string, env []string) int {
 			for i := 0; i < len(navigation.References); i++ {
 				analysisLocation(navigation.References[i])
 			}
+		}
+		return 0
+	}
+	if options.mode == "hover" {
+		if result.Program.Ok {
+			analysisHover(check.HoverProgram(result.Workspace.Graph, result.Program,
+				load.CleanPath(options.file), options.offset))
 		}
 		return 0
 	}

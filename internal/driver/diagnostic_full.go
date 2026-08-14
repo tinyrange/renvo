@@ -361,6 +361,9 @@ func diagnosticAtToken(diagnostic Diagnostic, source load.SourceFile, tokens []s
 	if tokenIndex >= 0 && tokenIndex < len(tokens) {
 		token := tokens[tokenIndex]
 		start, end, line = token.Start, token.End, syntax.TokenLine(token)
+		if diagnosticNamesToken(diagnostic.Code) && start >= 0 && end > start && end <= len(source.Src) {
+			diagnostic.Message += ": " + string(source.Src[start:end])
+		}
 	} else if len(source.Src) > 0 {
 		start, end = len(source.Src), len(source.Src)
 		line = lineAtOffset(source.Src, start)
@@ -370,6 +373,11 @@ func diagnosticAtToken(diagnostic Diagnostic, source load.SourceFile, tokens []s
 	diagnostic.Line = line
 	diagnostic.Column = columnAtOffset(source.Src, start)
 	return diagnostic
+}
+
+func diagnosticNamesToken(code string) bool {
+	return code == "RENVO-CHECK-010" || code == "RENVO-CHECK-011" || code == "RENVO-CHECK-020" ||
+		code == "RENVO-CHECK-027" || code == "RENVO-CHECK-028" || code == "RENVO-CHECK-029" || code == "RENVO-CHECK-032"
 }
 
 func findSource(files []load.SourceFile, path string) (load.SourceFile, bool) {

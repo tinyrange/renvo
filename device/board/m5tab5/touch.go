@@ -4,7 +4,10 @@ import touchcontroller "renvo.dev/device/input/st7121"
 
 const touchAddress = touchcontroller.Address
 
+// TouchPoint is one filtered contact in the panel's native coordinate space.
 type TouchPoint = touchcontroller.Point
+
+// TouchReportStats describes the most recently decoded controller report.
 type TouchReportStats = touchcontroller.ReportStats
 
 var touchMaximum = 10

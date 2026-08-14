@@ -73,13 +73,6 @@ func (l *Label) SetPosition(x int, y int) {}
 func update(label *Label) {
 	label.SetPosition(10, 20)
 }
-
-func TestCompleteKeywordsWorksWithoutAValidProgram(t *testing.T) {
-	items := CompleteKeywords([]byte("func main() { ret"), len("func main() { ret"))
-	if len(items) != 1 || items[0].Name != "return" || items[0].Kind != CompletionKeyword {
-		t.Fatalf("keyword completion = %#v", items)
-	}
-}
 `)
 	files := []load.SourceFile{
 		{Path: "/repo/go.mod", Src: []byte("module example.com/app\n")},
@@ -101,6 +94,64 @@ func TestCompleteKeywordsWorksWithoutAValidProgram(t *testing.T) {
 	if !cached.Ok || cached.Label != help.Label || cached.ActiveParameter != help.ActiveParameter {
 		t.Fatalf("cached signature help = %#v, want %#v", cached, help)
 	}
+}
+
+func TestCompleteKeywordsWorksWithoutAValidProgram(t *testing.T) {
+	items := CompleteKeywords([]byte("func main() { ret"), len("func main() { ret"))
+	if len(items) != 1 || items[0].Name != "return" || items[0].Kind != CompletionKeyword {
+		t.Fatalf("keyword completion = %#v", items)
+	}
+}
+
+func TestCompleteProgramInfersMethodResultFromMultiValueAssignment(t *testing.T) {
+	mainSource := []byte(`package main
+import "example.com/app/sensor"
+func main() {
+	device := sensor.New()
+	value, err := device.Read()
+	_ = err
+	value.
+}
+`)
+	files := []load.SourceFile{
+		{Path: "/repo/go.mod", Src: []byte("module example.com/app\n")},
+		{Path: "/repo/sensor/sensor.go", Src: []byte(`package sensor
+type Reading struct { X uint16 }
+type Device struct{}
+func New() *Device { return &Device{} }
+func (d *Device) Read() (Reading, error) { return Reading{}, nil }
+`)},
+		{Path: "/repo/main.go", Src: mainSource},
+	}
+	workspace := load.LoadWorkspace("/repo", "/std", ".", files)
+	program := CheckGraph(workspace.Graph)
+	items := CompleteProgram(workspace.Graph, program, "/repo/main.go", completionTestOffset(mainSource, "value.\n"))
+	for i := 0; i < len(items); i++ {
+		if items[i].Name == "X" {
+			return
+		}
+	}
+	t.Fatalf("completion after inferred method result = %#v", items)
+}
+
+func TestCompletionIncludesDeclarationDocumentation(t *testing.T) {
+	mainSource := []byte("package main\nimport \"example.com/app/lib\"\nfunc main() { lib.Rea }\n")
+	files := []load.SourceFile{
+		{Path: "/repo/go.mod", Src: []byte("module example.com/app\n")},
+		{Path: "/repo/lib/lib.go", Src: []byte("package lib\n// Read returns the current sample.\nfunc Read() int { return 1 }\n")},
+		{Path: "/repo/main.go", Src: mainSource},
+	}
+	workspace := load.LoadWorkspace("/repo", "/std", ".", files)
+	items := CompleteGraph(workspace.Graph, "/repo/main.go", completionTestOffset(mainSource, "lib.Rea"))
+	for i := 0; i < len(items); i++ {
+		if items[i].Name == "Read" {
+			if items[i].Documentation != "Read returns the current sample." {
+				t.Fatalf("Read documentation = %q", items[i].Documentation)
+			}
+			return
+		}
+	}
+	t.Fatal("Read completion was not returned")
 }
 
 func completionTestOffset(source []byte, marker string) int {

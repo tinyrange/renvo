@@ -28,7 +28,10 @@ type Screen struct {
 // Display is the attached 135x240 LCD.
 var Display = Screen{}
 
-func (*Screen) Width() int  { return displayWidth }
+// Width returns the display width in pixels.
+func (*Screen) Width() int { return displayWidth }
+
+// Height returns the display height in pixels.
 func (*Screen) Height() int { return displayHeight }
 
 // Initialize powers and configures the display once. Ordinary display
@@ -41,6 +44,7 @@ func (s *Screen) Initialize() bool {
 	return s.ready
 }
 
+// Fill paints the entire display with one RGB color.
 func (s *Screen) Fill(red, green, blue byte) bool {
 	if !s.Initialize() {
 		return false
@@ -48,36 +52,48 @@ func (s *Screen) Fill(red, green, blue byte) bool {
 	fillDisplay(red, green, blue)
 	return true
 }
+
+// PresentRGBA copies an RGBA rectangle to the display at native scale.
 func (s *Screen) PresentRGBA(pixels []byte, stride, x0, y0, x1, y1 int) bool {
 	if !s.Initialize() {
 		return false
 	}
 	return presentRGBA(pixels, stride, x0, y0, x1, y1)
 }
+
+// PresentRGBA2x copies an RGBA rectangle while doubling each source pixel.
 func (s *Screen) PresentRGBA2x(pixels []byte, stride, x0, y0, x1, y1 int) bool {
 	if !s.Initialize() {
 		return false
 	}
 	return presentRGBA2x(pixels, stride, x0, y0, x1, y1)
 }
+
+// PresentRGBA3x copies an RGBA rectangle while tripling each source pixel.
 func (s *Screen) PresentRGBA3x(pixels []byte, stride, x0, y0, x1, y1 int) bool {
 	if !s.Initialize() {
 		return false
 	}
 	return presentRGBA3x(pixels, stride, x0, y0, x1, y1)
 }
+
+// PresentSurface2x displays a graphics surface at double scale.
 func (s *Screen) PresentSurface2x(surface *graphics.Surface) bool {
 	if !s.Initialize() {
 		return false
 	}
 	return presentSurface2x(surface)
 }
+
+// PresentSurface3x displays a graphics surface at triple scale.
 func (s *Screen) PresentSurface3x(surface *graphics.Surface) bool {
 	if !s.Initialize() {
 		return false
 	}
 	return presentSurface3x(surface)
 }
+
+// DrawLineDiagnostic draws a border and alignment grid over the panel.
 func (s *Screen) DrawLineDiagnostic() bool {
 	if !s.Initialize() {
 		return false
@@ -85,6 +101,8 @@ func (s *Screen) DrawLineDiagnostic() bool {
 	lcdDrawLines()
 	return true
 }
+
+// DrawButtonRectangle draws or clears the diagnostic rectangle for a button.
 func (s *Screen) DrawButtonRectangle(index int, visible bool) bool {
 	if !s.Initialize() {
 		return false
