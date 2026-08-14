@@ -1071,6 +1071,7 @@ func coreCompilerIntrinsicAlias(importPath string, name string) string {
 func coreSymbolKeepsRuntimeName(name string) bool {
 	switch name {
 	case "renvo_runtime_Exit",
+		"renvo_runtime_PrintMirror",
 		"renvo_runtime_ArenaMark",
 		"renvo_runtime_ArenaReset",
 		"renvo_runtime_ArenaPersistMark",

@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "94b957128dff85db626bd68698d4970aed5f3c9ed4bee2543e97544f4fc76c76"
+const CompilerSourceDigest = "026337af66b6cd9b3a3b7ca3b6803e88eaea6e97628a6ede56bc276e493521e2"
 
 // source: backend/compiler_common_impl.go
 
@@ -22928,9 +22928,40 @@ renvoAsmSecondaryImm(&g.asm, 1)
 return renvoEmitWriteValueRegs(g, fd)
 }
 
+func renvoPrintMirrorFunction(g *renvoLinearGen) int {
+renvoNonNil(g)
+for i := 0; i < len(g.meta.funcs); i++ {
+fn := &g.meta.funcs[i]
+if fn.receiverType == 0 && fn.paramCount == 1 &&
+renvoTypeIsString(g.meta, g.meta.params[fn.firstParam].typ) &&
+renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_PrintMirror") {
+return i
+}
+}
+return -1
+}
+
+func renvoEmitPrintMirror(g *renvoLinearGen) {
+renvoNonNil(g)
+fnIndex := renvoPrintMirrorFunction(g)
+if fnIndex < 0 || fnIndex == g.currentFunc {
+return
+}
+
+
+renvoAsmPushSecondary(&g.asm)
+renvoAsmPushPrimary(&g.asm)
+renvoAsmPushSecondary(&g.asm)
+renvoAsmPushPrimary(&g.asm)
+renvoEmitCallWithWordCount(g, fnIndex, renvoBackendStringWordCount)
+renvoAsmPopPrimary(&g.asm)
+renvoAsmPopSecondary(&g.asm)
+}
+
 func renvoEmitWriteValueRegs(g *renvoLinearGen, fd int) bool {
 renvoNonNil(g)
 a := &g.asm
+renvoEmitPrintMirror(g)
 if renvoPreparedBackend != 0 {
 renvoRTGDirectMove(a, renvoRTGCallWord2, renvoRTGSecondary)
 renvoRTGDirectMove(a, renvoRTGCallWord1, renvoRTGPrimary)

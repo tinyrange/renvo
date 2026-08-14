@@ -36,6 +36,11 @@ The useful Tab5 demos are also published in the web editor:
   on-screen keyboard.
 - `sgp30_demo` composes the board, I2C, SGP30, Forms, and graphics packages into
   a compact air-quality dashboard for a Unit connected to Port A.
+- `terminal` mirrors `print` and `fmt.Printf` to a color terminal with
+  scrollback and a touch keyboard. It streams ADXL345 readings from Port A.
+- `terminal_stress` drives variable multi-line bursts through wrapping, ANSI
+  rendition, DMA scrolling, stdout mirroring, touch input, and live display
+  diagnostics while continuing to sample the ADXL345.
 - `touch_trails` visualizes every filtered multitouch contact and is useful for
   validating a display after flashing.
 

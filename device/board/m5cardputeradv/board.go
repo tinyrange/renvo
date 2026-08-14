@@ -95,6 +95,20 @@ func (s *Screen) PresentSurface3x(surface *graphics.Surface) bool {
 	return presentSurface3x(surface)
 }
 
+// InitializeTerminal returns a memory-efficient 120 by 67 surface for the
+// embedded terminal package.
+func (s *Screen) InitializeTerminal() (*graphics.Surface, bool) {
+	if !s.Initialize() {
+		return nil, false
+	}
+	return graphics.NewSurface(displayWidth/2, displayHeight/2), true
+}
+
+// PresentTerminal presents a terminal surface at double physical scale.
+func (s *Screen) PresentTerminal(surface *graphics.Surface) bool {
+	return s.PresentSurface2x(surface)
+}
+
 // DrawLineDiagnostic draws a border and color/alignment grid over the panel.
 func (s *Screen) DrawLineDiagnostic() bool {
 	if !s.Initialize() {

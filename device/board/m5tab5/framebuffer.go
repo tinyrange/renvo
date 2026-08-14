@@ -464,6 +464,58 @@ func copySurfaceDamageDMA2D(surface *graphics.Surface, source, destination []byt
 	return true
 }
 
+func copySurfaceRegionDMA2D(
+	surface *graphics.Surface, sourceBase, destinationBase uintptr,
+	minX, minY, maxX, maxY int,
+) bool {
+	if minX >= maxX || minY >= maxY {
+		return true
+	}
+	start := minY * surface.Stride
+	size := (maxY - minY) * surface.Stride
+	writeBackInvalidate(destinationBase+uintptr(start), size)
+	if !copyRectDMA2D(sourceBase, destinationBase, minX, minY, maxX, maxY) {
+		return false
+	}
+	invalidate(destinationBase+uintptr(start), size)
+	return true
+}
+
+func copySurfaceDamageDMA2DOutside(
+	surface *graphics.Surface, source, destination []byte, excludedTop, excludedBottom int,
+) bool {
+	if len(source) == 0 || len(destination) == 0 {
+		return false
+	}
+	sourceBase := uintptr(unsafe.Pointer(&source[0]))
+	destinationBase := uintptr(unsafe.Pointer(&destination[0]))
+	for region := 0; region < surface.DirtyRectCount(); region++ {
+		minX, minY, maxX, maxY, ok := clippedDamage(surface, region)
+		if !ok {
+			continue
+		}
+		if minY < excludedTop {
+			topEnd := maxY
+			if topEnd > excludedTop {
+				topEnd = excludedTop
+			}
+			if !copySurfaceRegionDMA2D(surface, sourceBase, destinationBase, minX, minY, maxX, topEnd) {
+				return false
+			}
+		}
+		if maxY > excludedBottom {
+			bottomStart := minY
+			if bottomStart < excludedBottom {
+				bottomStart = excludedBottom
+			}
+			if !copySurfaceRegionDMA2D(surface, sourceBase, destinationBase, minX, bottomStart, maxX, maxY) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func copyWholeFramebuffer(source, destination uintptr) bool {
 	// Establish an identical generation in both buffers before incremental
 	// damage rendering begins. DMA2D is required for this display pipeline.
@@ -475,7 +527,7 @@ func copyWholeFramebuffer(source, destination uintptr) bool {
 	return false
 }
 
-func presentPortrait(surface *graphics.Surface, synchronizeDamage bool) bool {
+func presentPortrait(surface *graphics.Surface, synchronizeDamage bool, excludedTop, excludedBottom int) bool {
 	if surface == nil || surface.Width != DisplayWidth ||
 		surface.Height != DisplayHeight || surface.Format != graphics.PixelRGB565 ||
 		surface.Stride != DisplayWidth*2 || len(surface.Pixels) < framebufferSize {
@@ -517,8 +569,14 @@ func presentPortrait(surface *graphics.Surface, synchronizeDamage bool) bool {
 		var destination []byte
 		bindExternalBytes(&source, frontFramebuffer, framebufferSize)
 		bindExternalBytes(&destination, backFramebuffer, framebufferSize)
-		if !copySurfaceDamageDMA2D(surface, source, destination) {
-			return false
+		if excludedTop < excludedBottom {
+			if !copySurfaceDamageDMA2DOutside(surface, source, destination, excludedTop, excludedBottom) {
+				return false
+			}
+		} else {
+			if !copySurfaceDamageDMA2D(surface, source, destination) {
+				return false
+			}
 		}
 	}
 	bindExternalBytes(&surface.Pixels, backFramebuffer, framebufferSize)
@@ -529,7 +587,7 @@ func presentPortrait(surface *graphics.Surface, synchronizeDamage bool) bool {
 // boundary. After the flip, changed regions are copied into the old front so
 // an ordinary incremental renderer starts from the latest generation.
 func PresentPortrait(surface *graphics.Surface) bool {
-	return presentPortrait(surface, true)
+	return presentPortrait(surface, true, 0, 0)
 }
 
 // PresentPortraitRetained publishes without copying damage into the old front.
@@ -537,7 +595,7 @@ func PresentPortrait(surface *graphics.Surface) bool {
 // and the preceding frame's damage before each call. This avoids a synchronous
 // post-flip DMA transaction while keeping both buffers generation-correct.
 func PresentPortraitRetained(surface *graphics.Surface) bool {
-	return presentPortrait(surface, false)
+	return presentPortrait(surface, false, 0, 0)
 }
 
 // PresentLandscape rotates an RGBA forms surface through the same 90-degree

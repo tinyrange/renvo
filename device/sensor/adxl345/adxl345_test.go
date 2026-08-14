@@ -63,6 +63,18 @@ func TestReadUsesOneBurstAndDecodesSignedLittleEndianValues(t *testing.T) {
 	}
 }
 
+func TestReadIntoUsesCallerStorage(t *testing.T) {
+	bus := &fakeBus{responses: [2][]byte{{0xfe, 0xff, 0x03, 0x00, 0xe5, 0x00}, nil}}
+	device := New(bus, AddressLow)
+	var reading Reading
+	if err := device.ReadInto(&reading); err != nil {
+		t.Fatal(err)
+	}
+	if reading != (Reading{X: -2, Y: 3, Z: 229}) {
+		t.Fatalf("ReadInto() = %#v", reading)
+	}
+}
+
 func TestInitializeRejectsWrongDevice(t *testing.T) {
 	bus := &fakeBus{responses: [2][]byte{{0x00}, nil}}
 	if err := New(bus, AddressLow).Initialize(); err != ErrDeviceID {
