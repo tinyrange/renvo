@@ -81,6 +81,7 @@ build_custom_backend() {
 
 build_custom_backend esp32c6/riscv32 examples/m5nanoc6/esp32c6.rtg esp32c6-riscv32 go
 build_custom_backend esp32s3/xtensa_lx7 examples/m5sticks3/esp32s3.rtg esp32s3-xtensa_lx7 go
+build_custom_backend esp32p4/riscv32 examples/m5tab5/esp32p4.rtg esp32p4-riscv32 go
 
 go run ./tools/wasm/cmd/browserassets -o "$output"
 cp tools/wasm/browser/index.html tools/wasm/browser/styles.css \

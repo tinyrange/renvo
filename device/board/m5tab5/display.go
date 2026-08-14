@@ -1,5 +1,7 @@
 package board
 
+import "renvo.dev/device/display/st7121"
+
 const (
 	clockBase = uintptr(0x500e6000)
 	dsiBase   = uintptr(0x500a0000)
@@ -124,7 +126,7 @@ func initDisplay(showPattern bool) bool {
 		return false
 	}
 	configureVideo()
-	initializeST7121()
+	st7121.Initialize(panelTransport{})
 	startPattern()
 	if showPattern {
 		enableBacklight()

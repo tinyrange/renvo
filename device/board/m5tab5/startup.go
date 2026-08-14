@@ -1,3 +1,4 @@
+// Package board describes the hardware attached to an M5Stack Tab5.
 package board
 
 import "renvo.dev/internal/arena"

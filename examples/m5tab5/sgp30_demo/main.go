@@ -1,9 +1,9 @@
 package main
 
 import (
+	"renvo.dev/device/board/m5tab5"
 	"renvo.dev/device/i2c"
 	"renvo.dev/device/sensor/sgp30"
-	"renvo.dev/examples/m5tab5/board"
 	"renvo.dev/examples/m5tab5/fontcache"
 	"renvo.dev/forms"
 	"renvo.dev/std/graphics"

@@ -5,9 +5,9 @@ application code. It uses Renvo's shared RV32IM backend, the ESP32-P4 flash and
 pre-v3 internal-SRAM map, watchdog handoff, and native USB Serial/JTAG output.
 
 The connected development unit uses the ST7121 integrated display and touch
-controller. Display and multitouch support live in the `board` package and are
-kept separate from the processor target so startup can be verified before
-enabling the MIPI-DSI and PSRAM subsystems.
+controller. Tab5 wiring and framebuffer support live in
+`device/board/m5tab5`; the reusable controller protocol packages live under
+`device/display/st7121` and `device/input/st7121`.
 
 ## Build and run the startup probe
 
@@ -28,10 +28,16 @@ not write the bootloader, partition table, NVS, data partitions, or eFuses.
 Restore the checked and verified whole-flash backup before relying on the
 factory software again.
 
-## Run the DSI link probe
+## Demos
 
-Build `./examples/m5tab5/display_probe` with the same target. It first uses the
-ESP32-P4 DSI host's color-bar generator to establish the PHY and cold-initialize
-the ST7121, then switches to a bordered RGB565 color chart rendered in PSRAM
-and supplied through the DSI bridge and DW-GDMA. A successful scanout prints
-`TAB5 PSRAM FRAME PASS`.
+The useful Tab5 demos are also published in the web editor:
+
+- `forms_demo` exercises controls, cached TrueType glyphs, dragging, and the
+  on-screen keyboard.
+- `sgp30_demo` composes the board, I2C, SGP30, Forms, and graphics packages into
+  a compact air-quality dashboard for a Unit connected to Port A.
+- `touch_trails` visualizes every filtered multitouch contact and is useful for
+  validating a display after flashing.
+
+Build any demo by replacing the final package in the startup command, for
+example `./examples/m5tab5/forms_demo`.

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"renvo.dev/examples/m5tab5/board"
+	"renvo.dev/device/board/m5tab5"
 	"renvo.dev/std/graphics"
 	"renvo.dev/std/strconv"
 )

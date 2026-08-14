@@ -1,4 +1,36 @@
-package board
+// Package st7121 decodes and filters touch reports from an ST7121 controller.
+package st7121
+
+const (
+	// Address is the controller's I2C address.
+	Address = byte(0x55)
+	// NativeWidth and NativeHeight describe the controller's portrait raster.
+	NativeWidth  = 720
+	NativeHeight = 1280
+	// MaximumContacts is the largest report supported by the controller.
+	MaximumContacts = 10
+)
+
+// Point is one touch contact in the native portrait orientation.
+type Point struct {
+	ID        int
+	X         int
+	Y         int
+	Strength  int
+	Intensity int
+}
+
+// ReportStats describes the most recently consumed controller report.
+type ReportStats struct {
+	SensingCounter int
+	Advanced       int
+	RawCount       int
+	Checksum       int
+	CoordSum       int
+	ReportSum      int
+	CoordXOR       int
+	Reports        int
+}
 
 // ST7121 firmware 1.80.1.16 occasionally reports coherent phantom contacts
 // while the integrated display scanner is active. They are not damaged I2C
@@ -17,50 +49,52 @@ const touchReplacementIntensityMinimum = 20
 const touchLowIntensityTrackDistanceSquared = 48 * 48
 
 type filteredTouchTrack struct {
-	point   TouchPoint
+	point   Point
 	active  bool
 	primary bool
 	missing int
 }
 
 type pendingTouchTrack struct {
-	point  TouchPoint
+	point  Point
 	streak int
 	seen   bool
 }
 
-type touchFilter struct {
+// Filter suppresses scanner-coupled phantom contacts while preserving tracked
+// fingers and rapid primary-contact replacement.
+type Filter struct {
 	tracks      [10]filteredTouchTrack
 	pending     [10]pendingTouchTrack
 	replacement pendingTouchTrack
 }
 
-func touchDistanceSquared(left TouchPoint, right TouchPoint) int {
+func touchDistanceSquared(left Point, right Point) int {
 	dx := left.X - right.X
 	dy := left.Y - right.Y
 	return dx*dx + dy*dy
 }
 
-func touchMirrorPair(left TouchPoint, right TouchPoint) bool {
+func touchMirrorPair(left Point, right Point) bool {
 	if left.X > right.X {
 		left, right = right, left
 	}
-	return left.X < 96 && right.X >= DisplayWidth-96 &&
-		left.X+right.X >= DisplayWidth-112 &&
-		left.X+right.X <= DisplayWidth+80
+	return left.X < 96 && right.X >= NativeWidth-96 &&
+		left.X+right.X >= NativeWidth-112 &&
+		left.X+right.X <= NativeWidth+80
 }
 
-func touchKnownLoneGhost(point TouchPoint) bool {
+func touchKnownLoneGhost(point Point) bool {
 	// Captured single-frame artifacts cluster at the two native X rails around
 	// the vertical midpoint and normally have area one or two. Preserve a short
 	// confirmation only for that signature; applying it to every distant lone
 	// contact is what made rapid taps at the landscape ends feel unresponsive.
 	return point.Strength <= 2 &&
-		(point.X < 8 || point.X >= DisplayWidth-8) &&
-		point.Y >= DisplayHeight/2-96 && point.Y <= DisplayHeight/2+96
+		(point.X < 8 || point.X >= NativeWidth-8) &&
+		point.Y >= NativeHeight/2-96 && point.Y <= NativeHeight/2+96
 }
 
-func touchSecondaryIntensityTrusted(point TouchPoint) bool {
+func touchSecondaryIntensityTrusted(point Point) bool {
 	// Firmware 1.80.1.16's coupled secondary images can have plausible area and
 	// coordinates, but the captured intensity remains below the real contact.
 	// Zero keeps synthetic/unit-test points and older reports without intensity
@@ -68,7 +102,7 @@ func touchSecondaryIntensityTrusted(point TouchPoint) bool {
 	return point.Intensity == 0 || point.Intensity >= touchSecondaryIntensityMinimum
 }
 
-func touchTrackCandidateTrusted(track TouchPoint, candidate TouchPoint, distance int) bool {
+func touchTrackCandidateTrusted(track Point, candidate Point, distance int) bool {
 	// Do not let a nearby low-intensity secondary image take over a strong
 	// established finger during a one-frame dropout. Genuine release pressure
 	// can decay below the threshold, but then its displacement remains small.
@@ -77,7 +111,8 @@ func touchTrackCandidateTrusted(track TouchPoint, candidate TouchPoint, distance
 		distance <= touchLowIntensityTrackDistanceSquared
 }
 
-func (filter *touchFilter) reset() {
+// Reset forgets all established and pending contacts.
+func (filter *Filter) Reset() {
 	for index := 0; index < len(filter.tracks); index++ {
 		filter.tracks[index].active = false
 		filter.tracks[index].primary = false
@@ -89,7 +124,7 @@ func (filter *touchFilter) reset() {
 	filter.replacement.seen = false
 }
 
-func (filter *touchFilter) activeCount() int {
+func (filter *Filter) activeCount() int {
 	count := 0
 	for index := 0; index < len(filter.tracks); index++ {
 		if filter.tracks[index].active {
@@ -99,7 +134,7 @@ func (filter *touchFilter) activeCount() int {
 	return count
 }
 
-func (filter *touchFilter) allocate(point TouchPoint, primary bool) int {
+func (filter *Filter) allocate(point Point, primary bool) int {
 	for index := 0; index < len(filter.tracks); index++ {
 		if !filter.tracks[index].active {
 			point.ID = index
@@ -113,7 +148,7 @@ func (filter *touchFilter) allocate(point TouchPoint, primary bool) int {
 	return -1
 }
 
-func appendFilteredTouch(points []TouchPoint, count int, point TouchPoint) int {
+func appendFilteredTouch(points []Point, count int, point Point) int {
 	if count < len(points) {
 		points[count] = point
 		return count + 1
@@ -121,9 +156,10 @@ func appendFilteredTouch(points []TouchPoint, count int, point TouchPoint) int {
 	return count
 }
 
-func (filter *touchFilter) apply(raw []TouchPoint, points []TouchPoint) int {
+// Apply filters one raw controller frame into caller-provided storage.
+func (filter *Filter) Apply(raw []Point, points []Point) int {
 	if len(raw) == 0 {
-		filter.reset()
+		filter.Reset()
 		return 0
 	}
 
@@ -219,7 +255,7 @@ func (filter *touchFilter) apply(raw []TouchPoint, points []TouchPoint) int {
 		}
 		if filter.replacement.streak >= required {
 			point := raw[0]
-			filter.reset()
+			filter.Reset()
 			trackID := filter.allocate(point, true)
 			if trackID >= 0 {
 				count = 0

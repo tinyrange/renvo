@@ -1,29 +1,11 @@
 package board
 
-const touchAddress = byte(0x55)
+import touchcontroller "renvo.dev/device/input/st7121"
 
-// TouchPoint is one ST7121 contact in the native 720 by 1280 orientation.
-type TouchPoint struct {
-	ID        int
-	X         int
-	Y         int
-	Strength  int
-	Intensity int
-}
+const touchAddress = touchcontroller.Address
 
-// TouchReportStats describes the most recently consumed controller report.
-// Checksum is -1 when the active firmware does not include one in its report.
-// The remaining checksum fields are retained for firmware variants which do.
-type TouchReportStats struct {
-	SensingCounter int
-	Advanced       int
-	RawCount       int
-	Checksum       int
-	CoordSum       int
-	ReportSum      int
-	CoordXOR       int
-	Reports        int
-}
+type TouchPoint = touchcontroller.Point
+type TouchReportStats = touchcontroller.ReportStats
 
 var touchMaximum = 10
 var touchFirmware int
@@ -42,7 +24,7 @@ var touchChecksumCoordSum int
 var touchChecksumReportSum int
 var touchChecksumCoordXOR int
 var touchReports int
-var tab5TouchFilter touchFilter
+var tab5TouchFilter touchcontroller.Filter
 
 func copyLastTouches(points []TouchPoint) int {
 	count := touchLastCount
@@ -183,7 +165,7 @@ func InitTouch() bool {
 	touchChecksumReportSum = 0
 	touchChecksumCoordXOR = 0
 	touchReports = 0
-	tab5TouchFilter.reset()
+	tab5TouchFilter.Reset()
 	// TP_INT pulses low for each sensing frame. Hardware edge latching retains
 	// that event while the renderer is busy at a frame boundary.
 	configureGPIOFallingEdge(23)
@@ -227,14 +209,20 @@ func ReadTouches(points []TouchPoint) (int, bool) {
 	// from that status region into the report page on this firmware. Reading
 	// through the final coordinate byte acknowledges the returned snapshot.
 	var page [74]byte
-	const reportOffset = 0
-	const coordinateOffset = 4
-	pageLength := coordinateOffset + touchMaximum*7
+	pageLength := touchcontroller.ReportSize(touchMaximum)
 	if !i2cReadRegister(touchSDA, touchSCL, touchAddress, 0x0010, page[:pageLength]) {
 		touchReadFailure = 1
 		return 0, false
 	}
-	touchLastAdvanced = int(page[reportOffset])
+	var raw [touchcontroller.MaximumContacts]TouchPoint
+	advanced, rawCount, decoded := touchcontroller.DecodeReport(
+		page[:pageLength], touchMaximum, DisplayWidth, DisplayHeight, raw[:],
+	)
+	if !decoded {
+		touchReadFailure = 2
+		return 0, false
+	}
+	touchLastAdvanced = advanced
 	touchReports++
 	// Firmware 1.80.1.16 advertises checksum capability in Miscellaneous Info,
 	// but its Advanced Touch Info value does not include a checksum in the active
@@ -244,7 +232,7 @@ func ReadTouches(points []TouchPoint) (int, bool) {
 	touchChecksumCoordSum = 0
 	touchChecksumReportSum = 0
 	touchChecksumCoordXOR = 0
-	if page[reportOffset]&0x08 == 0 {
+	if advanced&0x08 == 0 {
 		touchLastRawCount = 0
 		touchIRQAfter = 0
 		if readGPIO(23) {
@@ -252,31 +240,11 @@ func ReadTouches(points []TouchPoint) (int, bool) {
 		}
 		return copyLastTouches(points), true
 	}
-	var raw [10]TouchPoint
-	rawCount := 0
-	for contact := 0; contact < touchMaximum; contact++ {
-		offset := coordinateOffset + contact*7
-		if page[offset]&0x80 == 0 {
-			continue
-		}
-		raw[rawCount].ID = contact
-		raw[rawCount].X = int(page[offset]&0x3f)<<8 | int(page[offset+1])
-		raw[rawCount].Y = int(page[offset+2])<<8 | int(page[offset+3])
-		raw[rawCount].Strength = int(page[offset+4])
-		raw[rawCount].Intensity = int(page[offset+5])
-		// Ignore transient records outside the geometry reported by firmware.
-		// Passing them to Forms creates clipped markers along the display edge.
-		if raw[rawCount].X < 0 || raw[rawCount].X >= DisplayWidth ||
-			raw[rawCount].Y < 0 || raw[rawCount].Y >= DisplayHeight {
-			continue
-		}
-		rawCount++
-	}
 	touchLastRawCount = rawCount
 	for index := 0; index < rawCount; index++ {
 		touchLastRawPoints[index] = raw[index]
 	}
-	count := tab5TouchFilter.apply(raw[:rawCount], points)
+	count := tab5TouchFilter.Apply(raw[:rawCount], points)
 	touchIRQAfter = 0
 	if readGPIO(23) {
 		touchIRQAfter = 1
