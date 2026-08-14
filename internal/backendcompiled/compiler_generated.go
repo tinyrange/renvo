@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "026337af66b6cd9b3a3b7ca3b6803e88eaea6e97628a6ede56bc276e493521e2"
+const CompilerSourceDigest = "6574c23e3de2a2d510f5255cbb09e393995559313e9ad489a04b37c7459060a6"
 
 // source: backend/compiler_common_impl.go
 
@@ -10902,7 +10902,10 @@ elemSize := renvoTypeSize(g.meta, t.elem)
 if elemSize < 1 {
 elemSize = 8
 }
-slackSize := 64
+
+
+
+slackSize := 80
 if elemSize > slackSize {
 slackSize = elemSize
 }
