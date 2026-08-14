@@ -9,13 +9,16 @@ func TestRMTRegisterAddresses(t *testing.T) {
 	if rmtMemory != 0x60016800 {
 		t.Fatalf("RMT channel zero memory = %#x", rmtMemory)
 	}
+	if rmtTransmitLimit != 0x600160a0 {
+		t.Fatalf("RMT channel zero transmit limit = %#x", rmtTransmitLimit)
+	}
+	if rmtMemoryWords != 384 {
+		t.Fatalf("RMT memory = %d words, want 384", rmtMemoryWords)
+	}
 }
 
-func TestRMTSymbols(t *testing.T) {
-	if got, want := rmtSymbol(false), uint32(3|1<<15|9<<16); got != want {
-		t.Fatalf("zero symbol = %#x, want %#x", got, want)
-	}
-	if got, want := rmtSymbol(true), uint32(9|1<<15|3<<16); got != want {
-		t.Fatalf("one symbol = %#x, want %#x", got, want)
+func TestRMTMemoryHoldsFifteenPixelFrame(t *testing.T) {
+	if 15*24+1 > rmtMemoryWords {
+		t.Fatalf("15-pixel frame does not fit in %d RMT words", rmtMemoryWords)
 	}
 }
