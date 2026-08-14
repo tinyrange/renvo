@@ -12,6 +12,7 @@ const (
 // SystemTimer is the ESP32-P4 16 MHz monotonic counter.
 type SystemTimer struct{}
 
+// Ticks returns the low 32 bits of the monotonic hardware counter.
 func (*SystemTimer) Ticks() uint32 {
 	mmio.Store32(systemTimerOperation, systemTimerUpdate)
 	for mmio.Load32(systemTimerOperation)&systemTimerValid == 0 {
@@ -19,6 +20,7 @@ func (*SystemTimer) Ticks() uint32 {
 	return mmio.Load32(systemTimerValueLow)
 }
 
+// TicksPerSecond returns the fixed 16 MHz counter frequency.
 func (*SystemTimer) TicksPerSecond() uint32 { return 16000000 }
 
 // DelayMicroseconds waits using the monotonic system timer.

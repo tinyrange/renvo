@@ -1,17 +1,39 @@
 //go:build renvo
 
+// Package fmt provides compact, allocation-conscious formatting for Renvo's
+// supported scalar, string, byte-slice, Boolean, and error values.
 package fmt
 
+// Writer is the minimal byte sink accepted by the Fprint functions.
 type Writer interface {
 	Write(p []byte) (n int, err error)
 }
 
+// Print formats its operands, writes them to standard output, and returns the
+// number of bytes written.
+func Print(a ...interface{}) (int, error) {
+	text := Sprint(a...)
+	print(text)
+	return len(text), nil
+}
+
+// Println formats its operands, writes them to standard output followed by a
+// newline, and returns the number of bytes written.
 func Println(a ...interface{}) (int, error) {
 	text := Sprint(a...) + "\n"
 	print(text)
 	return len(text), nil
 }
 
+// Printf formats according to format, writes the result to standard output,
+// and returns the number of bytes written.
+func Printf(format string, a ...interface{}) (int, error) {
+	text := Sprintf(format, a...)
+	print(text)
+	return len(text), nil
+}
+
+// Sprint formats its operands and returns the resulting string.
 func Sprint(a ...interface{}) string {
 	out := ""
 	prevString := false
@@ -27,6 +49,8 @@ func Sprint(a ...interface{}) string {
 	return out
 }
 
+// Sprintf formats according to format and returns the resulting string. Renvo
+// supports %v, %s, %d, %x, %q, %t, and %%.
 func Sprintf(format string, a ...interface{}) string {
 	var out []byte
 	arg := 0
@@ -60,14 +84,17 @@ func Sprintf(format string, a ...interface{}) string {
 	return string(out)
 }
 
+// Fprint formats its operands and writes them to w.
 func Fprint(w Writer, a ...interface{}) (int, error) {
 	return writeString(w, Sprint(a...))
 }
 
+// Fprintf formats according to format and writes the result to w.
 func Fprintf(w Writer, format string, a ...interface{}) (int, error) {
 	return writeString(w, Sprintf(format, a...))
 }
 
+// Fprintln formats its operands and writes them to w followed by a newline.
 func Fprintln(w Writer, a ...interface{}) (int, error) {
 	return writeString(w, Sprint(a...)+"\n")
 }
@@ -101,6 +128,30 @@ func formatValue(v interface{}, verb byte) (string, bool) {
 		if verb == 'd' || verb == 'v' {
 			return formatInt(int64(value), 10), false
 		}
+	case int8:
+		value := v.(int8)
+		if verb == 'x' {
+			return formatInt(int64(value), 16), false
+		}
+		if verb == 'd' || verb == 'v' {
+			return formatInt(int64(value), 10), false
+		}
+	case int16:
+		value := v.(int16)
+		if verb == 'x' {
+			return formatInt(int64(value), 16), false
+		}
+		if verb == 'd' || verb == 'v' {
+			return formatInt(int64(value), 10), false
+		}
+	case int32:
+		value := v.(int32)
+		if verb == 'x' {
+			return formatInt(int64(value), 16), false
+		}
+		if verb == 'd' || verb == 'v' {
+			return formatInt(int64(value), 10), false
+		}
 	case int64:
 		value := v.(int64)
 		if verb == 'x' {
@@ -117,6 +168,30 @@ func formatValue(v interface{}, verb byte) (string, bool) {
 		if verb == 'd' || verb == 'v' {
 			return formatUint(uint64(value), 10), false
 		}
+	case uint8:
+		value := v.(uint8)
+		if verb == 'x' {
+			return formatUint(uint64(value), 16), false
+		}
+		if verb == 'd' || verb == 'v' {
+			return formatUint(uint64(value), 10), false
+		}
+	case uint16:
+		value := v.(uint16)
+		if verb == 'x' {
+			return formatUint(uint64(value), 16), false
+		}
+		if verb == 'd' || verb == 'v' {
+			return formatUint(uint64(value), 10), false
+		}
+	case uint32:
+		value := v.(uint32)
+		if verb == 'x' {
+			return formatUint(uint64(value), 16), false
+		}
+		if verb == 'd' || verb == 'v' {
+			return formatUint(uint64(value), 10), false
+		}
 	case uint64:
 		value := v.(uint64)
 		if verb == 'x' {
@@ -124,6 +199,19 @@ func formatValue(v interface{}, verb byte) (string, bool) {
 		}
 		if verb == 'd' || verb == 'v' {
 			return formatUint(value, 10), false
+		}
+	case []byte:
+		value := v.([]byte)
+		if verb == 'x' {
+			return hexBytes(value), true
+		}
+		if verb == 's' || verb == 'v' {
+			return string(value), true
+		}
+	case error:
+		value := v.(error)
+		if verb == 's' || verb == 'v' {
+			return value.Error(), true
 		}
 	}
 	var out []byte

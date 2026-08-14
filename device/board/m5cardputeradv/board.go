@@ -30,7 +30,10 @@ type Screen struct {
 // Display is the attached 240x135 landscape LCD.
 var Display = Screen{}
 
-func (*Screen) Width() int  { return displayWidth }
+// Width returns the display width in pixels.
+func (*Screen) Width() int { return displayWidth }
+
+// Height returns the display height in pixels.
 func (*Screen) Height() int { return displayHeight }
 
 // Initialize powers and configures the display once. Ordinary display
@@ -43,6 +46,7 @@ func (s *Screen) Initialize() bool {
 	return s.ready
 }
 
+// Fill paints the entire display with one RGB color.
 func (s *Screen) Fill(red, green, blue byte) bool {
 	if !s.Initialize() {
 		return false
@@ -51,6 +55,7 @@ func (s *Screen) Fill(red, green, blue byte) bool {
 	return true
 }
 
+// PresentRGBA copies an RGBA rectangle to the display at native scale.
 func (s *Screen) PresentRGBA(pixels []byte, stride, x0, y0, x1, y1 int) bool {
 	if !s.Initialize() {
 		return false
@@ -58,6 +63,7 @@ func (s *Screen) PresentRGBA(pixels []byte, stride, x0, y0, x1, y1 int) bool {
 	return presentRGBA(pixels, stride, x0, y0, x1, y1)
 }
 
+// PresentRGBA2x copies an RGBA rectangle while doubling each source pixel.
 func (s *Screen) PresentRGBA2x(pixels []byte, stride, x0, y0, x1, y1 int) bool {
 	if !s.Initialize() {
 		return false
@@ -65,6 +71,7 @@ func (s *Screen) PresentRGBA2x(pixels []byte, stride, x0, y0, x1, y1 int) bool {
 	return presentRGBA2x(pixels, stride, x0, y0, x1, y1)
 }
 
+// PresentRGBA3x copies an RGBA rectangle while tripling each source pixel.
 func (s *Screen) PresentRGBA3x(pixels []byte, stride, x0, y0, x1, y1 int) bool {
 	if !s.Initialize() {
 		return false
@@ -72,6 +79,7 @@ func (s *Screen) PresentRGBA3x(pixels []byte, stride, x0, y0, x1, y1 int) bool {
 	return presentRGBA3x(pixels, stride, x0, y0, x1, y1)
 }
 
+// PresentSurface2x displays a graphics surface at double scale.
 func (s *Screen) PresentSurface2x(surface *graphics.Surface) bool {
 	if !s.Initialize() {
 		return false
@@ -79,6 +87,7 @@ func (s *Screen) PresentSurface2x(surface *graphics.Surface) bool {
 	return presentSurface2x(surface)
 }
 
+// PresentSurface3x displays a graphics surface at triple scale.
 func (s *Screen) PresentSurface3x(surface *graphics.Surface) bool {
 	if !s.Initialize() {
 		return false

@@ -19,6 +19,10 @@ func TestSprintfAndSprint(t *testing.T) {
 	if got != "id:-7:ff:-f:\"go\\n\":%:true" {
 		t.Fatalf("Sprintf = %q", got)
 	}
+	got = Sprintf("%d:%d:%d:%d:%x:%x", int8(-1), int16(-2), uint8(3), uint16(4), int32(15), uint32(16))
+	if got != "-1:-2:3:4:f:10" {
+		t.Fatalf("Sprintf integer widths = %q", got)
+	}
 }
 
 func TestFprint(t *testing.T) {

@@ -99,8 +99,9 @@ not replace or reload the frontend.
 Library metadata is small and loaded once. Standard-library, Forms, and ESP32
 platform source is fetched only when it is browsed or imported, including its
 dependencies. The same files are then passed to continuous diagnostics,
-completion, signature help, definition/reference navigation, and compilation,
-keeping editor and compiler views of the workspace consistent. Selecting a
+completion with API documentation, inferred-type hover, signature help,
+definition/reference navigation, and compilation, keeping editor and compiler
+views of the workspace consistent. Selecting a
 catalogued `package main` example makes it the build root and selects its board
 target.
 

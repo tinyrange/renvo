@@ -6,6 +6,8 @@ import "renvo.dev/device/input/tca8418"
 // printable Key has the same value as its lower-case ASCII character.
 type Key uint16
 
+// Named non-printable keys occupy values above the ASCII range. KeyNone means
+// that no logical key is assigned at a matrix position.
 const (
 	KeyNone Key = 0
 
@@ -154,9 +156,17 @@ func (k *KeyboardDevice) NextEvent() (event KeyEvent, ok bool, err error) {
 	return event, true, nil
 }
 
-// Modifier state can be queried after each event.
+// FunctionPressed reports whether the Fn key is currently held.
 func (k *KeyboardDevice) FunctionPressed() bool { return k.function }
-func (k *KeyboardDevice) ShiftPressed() bool    { return k.shift }
-func (k *KeyboardDevice) ControlPressed() bool  { return k.control }
-func (k *KeyboardDevice) OptionPressed() bool   { return k.option }
-func (k *KeyboardDevice) AltPressed() bool      { return k.alt }
+
+// ShiftPressed reports whether the Shift key is currently held.
+func (k *KeyboardDevice) ShiftPressed() bool { return k.shift }
+
+// ControlPressed reports whether the Control key is currently held.
+func (k *KeyboardDevice) ControlPressed() bool { return k.control }
+
+// OptionPressed reports whether the Option key is currently held.
+func (k *KeyboardDevice) OptionPressed() bool { return k.option }
+
+// AltPressed reports whether the Alt key is currently held.
+func (k *KeyboardDevice) AltPressed() bool { return k.alt }

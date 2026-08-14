@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "1dc1047e4f4525e449e62643d1b8b6a7dbb08bf951d67e67ea6b0a47861cfd13"
+const CompilerSourceDigest = "94b957128dff85db626bd68698d4970aed5f3c9ed4bee2543e97544f4fc76c76"
 
 // source: backend/compiler_common_impl.go
 
@@ -15685,7 +15685,15 @@ renvoEmitCallWithWordCount(g, fnIndex, wordCount)
 renvoAsmJmpMarkLabel(&g.asm, doneLabel, nextLabel)
 }
 if !matched {
-return false
+
+
+
+
+
+renvoAsmMarkLabel(&g.asm, doneLabel)
+renvoEmitStaticWrite(g, "interface method call has no linked implementation\n", 2)
+renvoAsmPrimaryImm(&g.asm, 2)
+return renvoEmitExitStatus(g)
 }
 if !usesHiddenResult {
 renvoAsmPrimaryImm(&g.asm, 0)

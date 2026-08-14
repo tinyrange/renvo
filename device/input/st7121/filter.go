@@ -4,8 +4,9 @@ package st7121
 const (
 	// Address is the controller's I2C address.
 	Address = byte(0x55)
-	// NativeWidth and NativeHeight describe the controller's portrait raster.
-	NativeWidth  = 720
+	// NativeWidth is the controller's portrait raster width.
+	NativeWidth = 720
+	// NativeHeight is the controller's portrait raster height.
 	NativeHeight = 1280
 	// MaximumContacts is the largest report supported by the controller.
 	MaximumContacts = 10

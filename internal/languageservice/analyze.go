@@ -128,7 +128,20 @@ func analysisCheckDiagnostic(graph load.Graph, program check.Program) Diagnostic
 	if program.ErrorFile < 0 || program.ErrorFile >= len(pkg.Files) {
 		return diagnostic
 	}
-	return analysisDiagnosticAtToken(diagnostic, pkg.Files[program.ErrorFile], program.ErrorToken)
+	file := pkg.Files[program.ErrorFile]
+	diagnostic = analysisDiagnosticAtToken(diagnostic, file, program.ErrorToken)
+	if analysisDiagnosticNamesToken(code) && program.ErrorToken >= 0 && program.ErrorToken < len(file.File.Tokens) {
+		token := file.File.Tokens[program.ErrorToken]
+		if token.Start >= 0 && token.End > token.Start && token.End <= len(file.Src) {
+			diagnostic.Message += ": " + string(file.Src[token.Start:token.End])
+		}
+	}
+	return diagnostic
+}
+
+func analysisDiagnosticNamesToken(code string) bool {
+	return code == "RENVO-CHECK-010" || code == "RENVO-CHECK-011" || code == "RENVO-CHECK-020" ||
+		code == "RENVO-CHECK-027" || code == "RENVO-CHECK-028" || code == "RENVO-CHECK-029" || code == "RENVO-CHECK-032"
 }
 
 func analysisDiagnosticAtToken(diagnostic Diagnostic, file load.ParsedFile, tokenIndex int) Diagnostic {

@@ -15678,7 +15678,15 @@ func renvoEmitInterfaceMethodCall(g *renvoLinearGen, ep *renvoExprParse, idx int
 		renvoAsmJmpMarkLabel(&g.asm, doneLabel, nextLabel)
 	}
 	if !matched {
-		return false
+		// A closed program can contain a polymorphic helper whose interface method
+		// has no linked concrete implementation. The helper is still valid when
+		// that path is unreachable (for example, a formatter's error case in a
+		// program that never constructs an error). Keep it compilable and provide
+		// a useful failure if an invalid interface value reaches the call.
+		renvoAsmMarkLabel(&g.asm, doneLabel)
+		renvoEmitStaticWrite(g, "interface method call has no linked implementation\n", 2)
+		renvoAsmPrimaryImm(&g.asm, 2)
+		return renvoEmitExitStatus(g)
 	}
 	if !usesHiddenResult {
 		renvoAsmPrimaryImm(&g.asm, 0)

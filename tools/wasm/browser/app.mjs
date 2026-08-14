@@ -1,5 +1,6 @@
 import { ESPWebSerial, requestESPPort } from "./esp-webserial.mjs";
 import { preferredESPTransport, requestESPUSBPort, supportsESPWebUSBPlatform } from "./esp-webusb.mjs";
+import { cleanLanguagePath } from "./language-path.mjs";
 
 const MONACO_VERSION = "0.56.0";
 const encoder = new TextEncoder();
@@ -727,9 +728,9 @@ function installLanguageProviders() {
       const result = await requestLanguage("complete", model, byteOffset(model, position));
       for (const record of result.filter((record) => record[0] === "C")) {
         suggestions.set(record[1], {
-          label: record[1], detail: record[2],
+          label: record[1], detail: record[4] || record[2],
           kind: completionKind(Number(record[3])), insertText: record[1],
-          documentation: record[4] || undefined,
+          documentation: record[5] || undefined,
         });
       }
       return { suggestions: Array.from(suggestions.values()) };
@@ -753,6 +754,21 @@ function installLanguageProviders() {
       const records = await requestLanguage("definition", model, byteOffset(model, position));
       const record = records.find((item) => item[0] === "L");
       return record ? languageLocation(record) : undefined;
+    },
+  });
+  monaco.languages.registerHoverProvider("go", {
+    provideHover: async (model, position) => {
+      const records = await requestLanguage("hover", model, byteOffset(model, position));
+      const record = records.find((item) => item[0] === "H");
+      if (!record) return undefined;
+      const start = positionAtByteOffset(model, Number(record[3]));
+      const end = positionAtByteOffset(model, Number(record[4]));
+      const contents = [{ value: `\`\`\`go\n${record[1]}\n\`\`\`` }];
+      if (record[2]) contents.push({ value: record[2] });
+      return {
+        contents,
+        range: new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column),
+      };
     },
   });
   monaco.languages.registerReferenceProvider("go", {
@@ -805,8 +821,9 @@ function receiveLanguageResult(result) {
   const records = parseProtocol(result.output || "");
   const pending = languageRequests.get(result.id);
   if (pending) {
-    languageRequests.delete(result.id);
-    pending(records);
+	languageRequests.delete(result.id);
+	if (result.error) elements.languageStatus.textContent = `Language service error: ${result.error.trim()}`;
+	pending(records);
     return;
   }
   if (result.mode === "analyze") applyAnalysis(result.id, records, result.error);
@@ -1318,19 +1335,7 @@ function replaceOutput(command, output) {
 }
 
 function cleanPath(name) {
-  let value = name.replaceAll("\\", "/").replace(/^\.\//, "");
-  if (value.startsWith("std/") || value.startsWith("examples/") || value.startsWith("forms/")) return value;
-  const standard = value.indexOf("/std/");
-  if (standard >= 0) return value.slice(standard + 1);
-  const examples = value.indexOf("/examples/");
-  if (examples >= 0) return value.slice(examples + 1);
-  const forms = value.indexOf("/forms/");
-  if (forms >= 0) return value.slice(forms + 1);
-  while (value.startsWith("../")) value = value.slice(3);
-  value = value.replace(/^\/+/, "");
-  if (models.has(value)) return value;
-  const base = value.split("/").pop();
-  return models.has(base) || Object.hasOwn(initialFiles, base) ? base : value;
+  return cleanLanguagePath(name, models, initialFiles);
 }
 
 function renderLibraryCatalog(catalog) {
