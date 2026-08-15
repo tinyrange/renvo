@@ -63,19 +63,16 @@ check_preflight() {
 	local started=$SECONDS
 	# The tracked patterns include the generated-source authority packages. Keep
 	# them in one Go invocation so cold preflight builds compile each package once.
-	# The bundled-tag build and corpus compilation are independent checks; run all
-	# three groups together so cold CI does not add their tail latency serially.
-	check_tracked_packages preflight &
-	local tracked_pid=$!
+	# The tracked suite saturates small CI runners, so let it finish first. The
+	# bundled-tag build and corpus compilation are short, independent cached
+	# checks; overlap only that tail instead of oversubscribing the main suite.
+	check_tracked_packages preflight
 	check_bundled_packages &
 	local bundled_pid=$!
 	run_check "backend and frontend test compilation" \
 		go test -run '^$' ./backend ./frontend_tests &
 	local compile_pid=$!
 	local failed=0
-	if ! wait "$tracked_pid"; then
-		failed=1
-	fi
 	if ! wait "$bundled_pid"; then
 		failed=1
 	fi
