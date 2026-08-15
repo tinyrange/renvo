@@ -147,6 +147,339 @@ int inspect(void) {
 	}
 }
 
+func TestTranslateGNUAttributesPreserveAggregateLayout(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+typedef struct aligned_record {
+	unsigned char tag;
+} __attribute__((aligned(sizeof(void *)))) aligned_record;
+typedef struct packed_record {
+	unsigned char tag;
+	int value;
+} __attribute__((packed)) packed_record;
+static __attribute__((__noinline__, __noclone__, __no_stack_protector__, nocf_check, __no_sanitize_address__, __no_profile_instrument_function__)) inline __attribute__((__gnu_inline__, __unused__)) int inspect(void) {
+	aligned_record aligned;
+	packed_record packed;
+	aligned.tag = 3;
+	packed.tag = 5;
+	packed.value = 7;
+	return sizeof(aligned_record) + _Alignof(aligned_record) +
+		sizeof(packed_record) + _Alignof(packed_record) +
+		__builtin_offsetof(packed_record, value) + aligned.tag + packed.value;
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("GNU attribute translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{
+		[]byte("type __c_struct_aligned_record struct{__c_align uint64}"),
+		[]byte("type __c_struct_packed_record struct{__c_align uint8;__c_tail [4]byte}"),
+		[]byte("return 23+"),
+		[]byte(".__c_ptr_value()"),
+	} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("translated GNU attribute source is missing %q:\n%s", want, result.Source)
+		}
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("translated GNU attribute source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateRejectsUnknownGNUAttribute(t *testing.T) {
+	result := TranslateObject("main", []byte(`int value __attribute__((renvo_unknown));`), nil)
+	if result.Ok || result.Error != TranslateErrUnsupported {
+		t.Fatalf("unknown GNU attribute result = %#v, want explicit unsupported error", result)
+	}
+}
+
+func TestCheckTransparentUnionCallingConventionAttribute(t *testing.T) {
+	source := []byte(`
+typedef union { int *integers; long *longs; } argument __attribute__((__transparent_union__));
+void release(argument value);
+`)
+	checked := CheckObjectForDataModel(source, DataModelLP64)
+	if !checked.Ok {
+		t.Fatalf("transparent union check failed: error=%d at=%d", checked.Error, checked.ErrorAt)
+	}
+	lowered := TranslateObject("main", source, nil)
+	if lowered.Ok || lowered.Error != TranslateErrUnsupported {
+		t.Fatalf("transparent union lowering result = %#v, want explicit unsupported error", lowered)
+	}
+}
+
+func TestCheckAliasSymbolAttribute(t *testing.T) {
+	source := []byte(`long target(void); long alias(void) __attribute__((weak, __alias__("target")));`)
+	checked := CheckObjectForDataModel(source, DataModelLP64)
+	if !checked.Ok {
+		t.Fatalf("alias attribute check failed: error=%d at=%d", checked.Error, checked.ErrorAt)
+	}
+	lowered := TranslateObject("main", source, nil)
+	if lowered.Ok || lowered.Error != TranslateErrUnsupported {
+		t.Fatalf("alias lowering result = %#v, want explicit unsupported error", lowered)
+	}
+}
+
+func TestCheckFileScopeAssembler(t *testing.T) {
+	source := []byte(`asm(".section .initcall4, \"a\"\n.long initialize - .\n.previous");`)
+	checked := CheckObjectForDataModel(source, DataModelLP64)
+	if !checked.Ok {
+		t.Fatalf("file-scope asm check failed: error=%d at=%d", checked.Error, checked.ErrorAt)
+	}
+	lowered := TranslateObject("main", source, nil)
+	if lowered.Ok || lowered.Error != TranslateErrUnsupported {
+		t.Fatalf("file-scope asm lowering result = %#v, want explicit unsupported error", lowered)
+	}
+}
+
+func TestCheckVisibilitySymbolAttribute(t *testing.T) {
+	source := []byte(`extern int hidden[2] __attribute__((visibility("hidden")));`)
+	checked := CheckObjectForDataModel(source, DataModelLP64)
+	if !checked.Ok {
+		t.Fatalf("visibility attribute check failed: error=%d at=%d", checked.Error, checked.ErrorAt)
+	}
+	lowered := TranslateObject("main", source, nil)
+	if lowered.Ok || lowered.Error != TranslateErrUnsupported {
+		t.Fatalf("visibility lowering result = %#v, want explicit unsupported error", lowered)
+	}
+}
+
+func TestCheckCallingConventionAttribute(t *testing.T) {
+	source := []byte(`
+typedef unsigned long firmware_call(unsigned int command);
+struct services { firmware_call __attribute__((ms_abi)) *call; };
+`)
+	checked := CheckObjectForDataModel(source, DataModelLP64)
+	if !checked.Ok {
+		t.Fatalf("calling-convention attribute check failed: error=%d at=%d", checked.Error, checked.ErrorAt)
+	}
+	lowered := TranslateObject("main", source, nil)
+	if lowered.Ok || lowered.Error != TranslateErrUnsupported {
+		t.Fatalf("calling-convention lowering result = %#v, want explicit unsupported error", lowered)
+	}
+}
+
+func TestTranslateBuiltinVaListUsesX8664SysVLayout(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+typedef __builtin_va_list va_list;
+extern int consume(const char *, va_list);
+int inspect(void) { return sizeof(va_list) + _Alignof(va_list); }
+`), nil)
+	if !result.Ok {
+		t.Fatalf("builtin va_list translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{
+		[]byte("func consume(p0 string,p1 *uintptr) int32"),
+		[]byte("return 32"),
+	} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("translated builtin va_list source is missing %q:\n%s", want, result.Source)
+		}
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("translated builtin va_list source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestCheckObjectAcceptsDeferredGNUAsm(t *testing.T) {
+	source := []byte(`
+register unsigned long stack_pointer asm("rsp");
+void *adjust(void *pointer) {
+	asm volatile("leaq %c1(%%rip), %0" : "=r"(pointer) : "i"(pointer));
+	return pointer;
+}
+`)
+	checked := CheckObjectForDataModel(source, DataModelLP64)
+	if !checked.Ok {
+		t.Fatalf("GNU asm semantic check failed: error=%d at=%d", checked.Error, checked.ErrorAt)
+	}
+	lowered := TranslateObjectForDataModel("main", source, nil, DataModelLP64)
+	if lowered.Ok || lowered.Error != TranslateErrUnsupported {
+		t.Fatalf("GNU asm lowering result = %#v, want explicit unsupported error", lowered)
+	}
+	malformed := CheckObjectForDataModel([]byte(`int inspect(void) { asm("broken"; }`), DataModelLP64)
+	if malformed.Ok {
+		t.Fatalf("malformed GNU asm check = %#v, want failure", malformed)
+	}
+}
+
+func TestCheckObjectAcceptsDeferredCleanupAttribute(t *testing.T) {
+	source := []byte(`
+void release(int *value);
+int inspect(void) { int value __attribute__((__cleanup__(release))) = 3; return value; }
+`)
+	checked := CheckObjectForDataModel(source, DataModelLP64)
+	if !checked.Ok {
+		t.Fatalf("cleanup attribute check failed: error=%d at=%d", checked.Error, checked.ErrorAt)
+	}
+	lowered := TranslateObjectForDataModel("main", source, nil, DataModelLP64)
+	if lowered.Ok || lowered.Error != TranslateErrUnsupported {
+		t.Fatalf("cleanup attribute lowering result = %#v, want explicit unsupported error", lowered)
+	}
+}
+
+func TestCheckObjectModelsDeferredInt128(t *testing.T) {
+	source := []byte(`
+typedef __signed__ __int128 s128 __attribute__((aligned(16)));
+typedef unsigned __int128 u128 __attribute__((aligned(16)));
+union halves { u128 full; struct { unsigned long low, high; }; };
+int widths[(sizeof(u128) == 16 && _Alignof(u128) == 16 && sizeof(union halves) == 16) ? 1 : -1];
+`)
+	checked := CheckObjectForDataModel(source, DataModelLP64)
+	if !checked.Ok {
+		t.Fatalf("int128 semantic check failed: error=%d at=%d", checked.Error, checked.ErrorAt)
+	}
+	lowered := TranslateObjectForDataModel("main", source, nil, DataModelLP64)
+	if lowered.Ok || lowered.Error != TranslateErrUnsupported {
+		t.Fatalf("int128 lowering result = %#v, want explicit unsupported error", lowered)
+	}
+}
+
+func TestTranslateAutoTypeInfersInitializerType(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+int inspect(unsigned short *source) {
+	const __auto_type saved = source;
+	return *saved;
+}
+`), nil)
+	if !result.Ok || !bytes.Contains(result.Source, []byte("var saved *uint16=source")) {
+		t.Fatalf("__auto_type translation = %#v\n%s", result, result.Source)
+	}
+	for _, source := range []string{
+		"int inspect(void) { __auto_type missing; return 0; }",
+		"int inspect(void) { __auto_type first = 1, second = 2; return first; }",
+	} {
+		invalid := TranslateObject("main", []byte(source), nil)
+		if invalid.Ok || invalid.Error != TranslateErrDeclaration {
+			t.Fatalf("invalid __auto_type %q result = %#v", source, invalid)
+		}
+	}
+}
+
+func TestTranslateTypeofExpressionAndTypeName(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+struct record { unsigned short value; };
+int inspect(struct record *source) {
+	typeof(source->value) first = 3;
+	__typeof__(unsigned long) second = 4;
+	return first + second;
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("typeof translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{[]byte("var first uint16=3"), []byte("var second uint64=4")} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("translated typeof source is missing %q:\n%s", want, result.Source)
+		}
+	}
+}
+
+func TestTranslateGNUZeroLengthArrayLayout(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+struct trailer { int head; char data[20 - 2 * sizeof(long) - sizeof(int)]; };
+int inspect(void) { return sizeof(struct trailer) + __builtin_offsetof(struct trailer, data); }
+`), nil)
+	if !result.Ok || !bytes.Contains(result.Source, []byte("return 8")) {
+		t.Fatalf("zero-length array translation = %#v\n%s", result, result.Source)
+	}
+}
+
+func TestCheckObjectAppliesPostfixIncrementBeforeUnaryDereference(t *testing.T) {
+	checked := CheckObjectForDataModel([]byte(`
+int inspect(const unsigned char *cursor) {
+	while (*cursor++) { }
+	return 0;
+}
+`), DataModelLP64)
+	if !checked.Ok {
+		t.Fatalf("postfix pointer increment check failed: error=%d at=%d", checked.Error, checked.ErrorAt)
+	}
+}
+
+func TestCheckObjectValidatesGNUCaseRanges(t *testing.T) {
+	valid := CheckObjectForDataModel([]byte(`
+int classify(int value) {
+	switch (value) { case '0' ... '9': return 1; default: return 0; }
+}
+`), DataModelLP64)
+	if !valid.Ok {
+		t.Fatalf("GNU case range was rejected: %#v", valid)
+	}
+	invalid := CheckObjectForDataModel([]byte(`
+int classify(int value) {
+	switch (value) { case 9 ... 0: return 1; default: return 0; }
+}
+`), DataModelLP64)
+	if invalid.Ok || invalid.Error != TranslateErrStatement {
+		t.Fatalf("reversed GNU case range result = %#v", invalid)
+	}
+	lowered := TranslateObject("main", []byte(`
+int classify(int value) {
+	switch (value) { case 0 ... 9: return 1; default: return 0; }
+}
+`), nil)
+	if lowered.Ok || lowered.Error != TranslateErrUnsupported {
+		t.Fatalf("case range lowering result = %#v", lowered)
+	}
+}
+
+func TestCheckObjectSpeculativeCastDoesNotReportVLA(t *testing.T) {
+	checked := CheckObjectForDataModel([]byte(`
+unsigned long inspect(unsigned long *map, unsigned long index, unsigned long offset) {
+	return (map[index] >> offset) & 3;
+}
+`), DataModelLP64)
+	if !checked.Ok {
+		t.Fatalf("parenthesized array expression check failed: error=%d at=%d", checked.Error, checked.ErrorAt)
+	}
+}
+
+func TestTranslateStaticAssertions(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+struct cacheline { unsigned char data[64]; };
+struct rows { int values[3]; };
+_Static_assert(sizeof(struct cacheline) == 64, "cacheline layout");
+_Static_assert(__builtin_offsetof(struct cacheline, data) == 0, "field offset");
+_Static_assert(__builtin_offsetof(struct rows, values[2]) == 8, "array designator offset");
+int inspect(void) { static_assert(_Alignof(long) == 8); return 0; }
+`), nil)
+	if !result.Ok {
+		t.Fatalf("static assertion translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	invalid := TranslateObject("main", []byte(`_Static_assert(sizeof(long) == 4, "wrong model");`), nil)
+	if invalid.Ok || invalid.Error != TranslateErrDeclaration {
+		t.Fatalf("false static assertion result = %#v", invalid)
+	}
+}
+
+func TestTranslateBuiltinTypeAndConstantQueries(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+int first(int);
+int second(int);
+long different(long);
+struct wrapper { int value; };
+_Static_assert(__builtin_types_compatible_p(typeof(first), typeof(second)), "same function type");
+_Static_assert(!__builtin_types_compatible_p(typeof(first), typeof(different)), "different function type");
+_Static_assert(__builtin_types_compatible_p(typeof(*((struct wrapper *)0)), typeof(struct wrapper)), "cast dereference type");
+_Static_assert(__builtin_types_compatible_p(typeof(((struct wrapper *)0)->value), typeof(int)), "cast member type");
+_Static_assert(__builtin_constant_p(3 + 4), "constant expression");
+_Static_assert(!__builtin_constant_p(first(3)), "runtime expression");
+`), nil)
+	if !result.Ok {
+		t.Fatalf("builtin type query translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+}
+
+func TestTranslateHexDigitsAreNotFloatingSuffixes(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+enum flags { FIRST = 0x000e, SECOND = 0xff, BOTH = FIRST | SECOND };
+_Static_assert(BOTH == 0xff, "hex digits remain integer constants");
+`), nil)
+	if !result.Ok {
+		t.Fatalf("hex integer translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+}
+
 func TestTranslateTypedefAndTagNamespacesAreBlockScoped(t *testing.T) {
 	result := TranslateObject("main", []byte(`
 typedef int item;
@@ -303,7 +636,7 @@ int layout(void) {
 	if !result.Ok {
 		t.Fatalf("anonymous aggregate translation failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
-	if !bytes.Contains(result.Source, []byte("return 24+8+12+8+16")) {
+	if !bytes.Contains(result.Source, []byte("return 68")) {
 		t.Fatalf("anonymous aggregate offsets were not preserved:\n%s", result.Source)
 	}
 	if !bytes.Contains(result.Source, []byte("struct{__c_align uint64}")) {
@@ -636,6 +969,245 @@ int inspect(const int parameter, int *restrict cursor) {
 	}
 }
 
+func TestCheckGNUAlternateQualifierKeywords(t *testing.T) {
+	result := CheckObjectForDataModel([]byte(`
+static __inline__ char *copy(char *__restrict__ destination, const char *__restrict source) {
+	char *__volatile__ cursor = destination;
+	return cursor + (*source != 0);
+}
+`), DataModelLP64)
+	if !result.Ok {
+		t.Fatalf("GNU alternate qualifier keywords failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+}
+
+func TestCheckFunctionParameterScope(t *testing.T) {
+	valid := CheckObjectForDataModel([]byte(`
+long error;
+void *error_pointer(long error) { return (void *)error; }
+`), DataModelLP64)
+	if !valid.Ok {
+		t.Fatalf("file-scope object could not be shadowed by a parameter: error=%d at=%d", valid.Error, valid.ErrorAt)
+	}
+
+	invalid := CheckObjectForDataModel([]byte(`
+int duplicate(int value) { int value = 1; return value; }
+`), DataModelLP64)
+	if invalid.Ok || invalid.Error != TranslateErrDeclaration {
+		t.Fatalf("outer function block redeclared a parameter: %#v", invalid)
+	}
+}
+
+func TestCheckQualifiedIncompleteTypeTracksCompletion(t *testing.T) {
+	result := CheckObjectForDataModel([]byte(`
+struct device;
+int inspect(const struct device *device);
+struct device { int value; };
+int inspect(const struct device *device);
+`), DataModelLP64)
+	if !result.Ok {
+		t.Fatalf("qualified incomplete type lost its completion: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+}
+
+func TestCheckSizeofExpressionIsAnIntegerConstant(t *testing.T) {
+	result := CheckObjectForDataModel([]byte(`
+void format(unsigned long value) {
+	char buffer[8 * sizeof(value) + 1];
+	buffer[0] = 0;
+}
+`), DataModelLP64)
+	if !result.Ok {
+		t.Fatalf("sizeof expression was rejected as an array bound: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+}
+
+func TestCheckGNUIntegerBuiltinsInConstants(t *testing.T) {
+	result := CheckObjectForDataModel([]byte(`
+int leading[__builtin_clzll(1) == 63 ? 1 : -1];
+int trailing[__builtin_ctz(8) == 3 ? 1 : -1];
+int population[__builtin_popcount(7) == 3 ? 1 : -1];
+int first[__builtin_ffs(8) == 4 ? 1 : -1];
+`), DataModelLP64)
+	if !result.Ok {
+		t.Fatalf("GNU integer builtin constants failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+}
+
+func TestCheckConstantConditionalSkipsRuntimeArm(t *testing.T) {
+	result := CheckObjectForDataModel([]byte(`
+int runtime_size(void);
+int selected_left[1 ? 4 : runtime_size()];
+int selected_right[0 ? runtime_size() : 4];
+`), DataModelLP64)
+	if !result.Ok {
+		t.Fatalf("constant conditional evaluated its runtime arm: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+}
+
+func TestCheckGNUComposedTypeExpressions(t *testing.T) {
+	result := CheckObjectForDataModel([]byte(`
+struct node { int value; };
+void inspect(struct node *pointer) {
+	_Static_assert(__builtin_types_compatible_p(
+		typeof(({ struct node *copy = pointer; copy; })), struct node *), "statement expression type");
+	_Static_assert(__builtin_types_compatible_p(
+		typeof(_Generic(pointer, int: 0, default: pointer)), struct node *), "generic selection type");
+}
+`), DataModelLP64)
+	if !result.Ok {
+		t.Fatalf("composed GNU type expressions failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+}
+
+func TestCheckAddressedMemberTypeExpression(t *testing.T) {
+	result := CheckObjectForDataModel([]byte(`
+struct list { struct list *next; };
+struct event { struct list sibling; };
+void inspect(struct event *leader, struct event *event) {
+	_Static_assert(__builtin_types_compatible_p(
+		typeof(*((&leader->sibling)->next)),
+		typeof(((typeof(*event) *)0)->sibling)), "addressed member type");
+}
+`), DataModelLP64)
+	if !result.Ok {
+		t.Fatalf("addressed member type check failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+}
+
+func TestCheckTypeofFunctionDeclarator(t *testing.T) {
+	result := CheckObjectForDataModel([]byte(`
+struct operations { void (*call)(int); };
+extern struct operations *operations;
+extern typeof(*operations->call) call_thunk;
+typedef void (*callback)(int);
+void implementation(int value) { (void)value; }
+extern typeof(implementation) implementation;
+_Static_assert(__builtin_types_compatible_p(typeof(callback), typeof(&implementation)), "function address type");
+`), DataModelLP64)
+	if !result.Ok {
+		t.Fatalf("typeof function declaration failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+}
+
+func TestCheckFunctionTypeTypedefDeclarations(t *testing.T) {
+	result := CheckObjectForDataModel([]byte(`
+struct target;
+typedef int active_fn(struct target *target, unsigned int index);
+extern active_fn first_active, second_active;
+`), DataModelLP64)
+	if !result.Ok {
+		t.Fatalf("function type typedef declarations failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+}
+
+func TestCheckStaticForwardFunctionType(t *testing.T) {
+	result := CheckObjectForDataModel([]byte(`
+struct registers;
+typedef unsigned int u32;
+static void dispatch(struct registers *, u32);
+void wrapper(struct registers *registers) {
+	_Static_assert(__builtin_types_compatible_p(
+		typeof(&dispatch), void (*)(struct registers *, u32)), "static forward function type");
+}
+static void dispatch(struct registers *registers, u32 vector) { (void)registers; (void)vector; }
+`), DataModelLP64)
+	if !result.Ok {
+		t.Fatalf("static forward function type check failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+}
+
+func TestTranslatePackedEnumUsesSmallestIntegerRepresentation(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+enum rw_hint { WRITE_NONE, WRITE_SHORT, WRITE_LONG = 5 } __attribute__((__packed__));
+int inspect(void) { _Static_assert(sizeof(enum rw_hint) == 1, "packed enum"); return sizeof(enum rw_hint); }
+`), nil)
+	if !result.Ok {
+		t.Fatalf("packed enum translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("return 1")) {
+		t.Fatalf("packed enum did not use a one-byte representation:\n%s", result.Source)
+	}
+}
+
+func TestCheckGNUArrayRangeDesignators(t *testing.T) {
+	source := []byte(`
+struct page { unsigned offset; unsigned size; };
+static const struct page pages[8] = {
+	[1 ... 3] = { .offset = 4, .size = 8 },
+	[7] = { .offset = 12, .size = 16 },
+};
+`)
+	checked := CheckObjectForDataModel(source, DataModelLP64)
+	if !checked.Ok {
+		t.Fatalf("array range designator check failed: error=%d at=%d", checked.Error, checked.ErrorAt)
+	}
+	lowered := TranslateObject("main", source, nil)
+	if lowered.Ok || lowered.Error != TranslateErrUnsupported {
+		t.Fatalf("array range lowering result = %#v, want explicit unsupported error", lowered)
+	}
+}
+
+func TestCheckGNUOmittedConditionalOperand(t *testing.T) {
+	source := []byte(`
+struct aligned { char value; } __attribute__((aligned((0) ? : 64)));
+int select_value(int value) { return value ? : 7; }
+`)
+	checked := CheckObjectForDataModel(source, DataModelLP64)
+	if !checked.Ok {
+		t.Fatalf("omitted conditional operand check failed: error=%d at=%d", checked.Error, checked.ErrorAt)
+	}
+	lowered := TranslateObject("main", source, nil)
+	if lowered.Ok || lowered.Error != TranslateErrUnsupported {
+		t.Fatalf("omitted conditional lowering result = %#v, want explicit unsupported error", lowered)
+	}
+}
+
+func TestTranslateGNUEmptyInferredArray(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+static const int none[] = {};
+int inspect(void) { return sizeof(none); }
+`), nil)
+	if !result.Ok {
+		t.Fatalf("empty inferred array translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("var none [0]int32")) || !bytes.Contains(result.Source, []byte("return 0")) {
+		t.Fatalf("empty inferred array representation is wrong:\n%s", result.Source)
+	}
+}
+
+func TestCheckGNUEmptyLocalAggregateInitializer(t *testing.T) {
+	result := CheckObjectForDataModel([]byte(`
+union revision { unsigned int full; struct { unsigned char stepping; }; };
+unsigned int inspect(void) { union revision value = {}; return value.full; }
+`), DataModelLP64)
+	if !result.Ok {
+		t.Fatalf("empty local aggregate initializer check failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+}
+
+func TestCheckExplicitZeroLengthLocalArray(t *testing.T) {
+	valid := CheckObjectForDataModel([]byte(`int inspect(void) { int values[0]; return sizeof(values); }`), DataModelLP64)
+	if !valid.Ok {
+		t.Fatalf("explicit zero-length local array failed: error=%d at=%d", valid.Error, valid.ErrorAt)
+	}
+	invalid := CheckObjectForDataModel([]byte(`int inspect(void) { int values[]; return 0; }`), DataModelLP64)
+	if invalid.Ok || invalid.Error != TranslateErrDeclaration {
+		t.Fatalf("incomplete local array result = %#v", invalid)
+	}
+}
+
+func TestCheckBracedScalarInitializer(t *testing.T) {
+	result := CheckObjectForDataModel([]byte(`
+struct operations { int value; };
+static const struct operations implementation = { .value = 1 };
+static const struct operations *selected = { &implementation };
+`), DataModelLP64)
+	if !result.Ok {
+		t.Fatalf("braced scalar initializer check failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+}
+
 func TestTranslateIntegerPromotionsAndConversions(t *testing.T) {
 	result := TranslateObject("main", []byte(`
 int inspect(void) {
@@ -725,6 +1297,7 @@ int inspect(int choose) {
 func TestTranslateCharacterArrayStringInitialization(t *testing.T) {
 	result := TranslateObject("main", []byte(`
 char inferred[] = "A" "\x42";
+char escape[] = "\e";
 char exact[2] = "ok";
 unsigned char padded[4] = u8"x";
 int inspect(void) { return sizeof inferred + sizeof "xy" + inferred[0] + inferred[1] + inferred[2] + exact[1] + padded[1] + padded[3]; }
@@ -734,6 +1307,7 @@ int inspect(void) { return sizeof inferred + sizeof "xy" + inferred[0] + inferre
 	}
 	for _, want := range [][]byte{
 		[]byte("var inferred [3]int8=[3]int8{65,66,0}"),
+		[]byte("var escape [2]int8=[2]int8{27,0}"),
 		[]byte("var exact [2]int8=[2]int8{111,107}"),
 		[]byte("var padded [4]uint8=[4]uint8{120,0}"),
 		[]byte("return 3+3+int32(inferred[0])"),

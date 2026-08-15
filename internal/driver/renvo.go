@@ -70,6 +70,16 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 		}
 		return 0, ""
 	}
+	if CSyntaxCommandRequested(args) {
+		result := CheckCCommand(args, renvoWorkDir(env), RenvoFS{})
+		if !result.Ok {
+			return 1, FormatDiagnostic(CSyntaxCommandDiagnostic(result))
+		}
+		if len(result.DependencyData) > 0 && os.WriteFile(result.DependencyFile, result.DependencyData, 0644) != nil {
+			return 1, "renvo cc: failed to write dependency file\n"
+		}
+		return 0, ""
+	}
 	if len(args) > 1 && args[1] == "run" {
 		return runRenvoScript(args, env)
 	}

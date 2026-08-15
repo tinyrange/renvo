@@ -45,6 +45,7 @@ const (
 	cTypeUnion
 	cTypeFunction
 	cTypeOpaque
+	cTypeAuto
 )
 
 const (
@@ -67,24 +68,28 @@ const (
 // flat arena so declarations remain cheap even for generated and kernel-sized
 // translation units.
 type cTypeInfo struct {
-	kind       int
-	base       int
-	count      int
-	size       int
-	align      int
-	fieldStart int
-	fieldCount int
-	paramStart int
-	paramCount int
-	variadic   bool
-	qualifiers int
-	goName     string
+	kind             int
+	canonical        int
+	base             int
+	count            int
+	size             int
+	align            int
+	fieldStart       int
+	fieldCount       int
+	paramStart       int
+	paramCount       int
+	variadic         bool
+	indirect         bool
+	transparentUnion bool
+	qualifiers       int
+	goName           string
 }
 
 type cField struct {
 	name      string
 	typeID    int
 	offset    int
+	align     int
 	bitOffset int
 	bitWidth  int
 	carrier   string
@@ -180,7 +185,15 @@ func (t *translator) typeInfo(typeID int) cTypeInfo {
 	if typeID < 0 || typeID >= len(t.types) {
 		return cTypeInfo{}
 	}
-	return t.types[typeID]
+	info := t.types[typeID]
+	if info.canonical > 0 && info.canonical-1 != typeID {
+		qualifiers := info.qualifiers
+		canonical := info.canonical
+		info = t.types[canonical-1]
+		info.qualifiers |= qualifiers
+		info.canonical = canonical
+	}
+	return info
 }
 
 func (t *translator) pointerType(base int) int {
@@ -197,14 +210,17 @@ func (t *translator) qualifiedType(typeID int, qualifiers int) int {
 	if qualifiers == 0 || t.typeInfo(typeID).qualifiers&qualifiers == qualifiers {
 		return typeID
 	}
-	want := t.typeInfo(typeID)
-	want.qualifiers |= qualifiers
+	raw := t.types[typeID]
+	canonical := typeID + 1
+	if raw.canonical > 0 {
+		canonical = raw.canonical
+	}
+	want := t.typeInfo(canonical - 1)
+	want.qualifiers = t.typeInfo(typeID).qualifiers | qualifiers
+	want.canonical = canonical
 	for i := 0; i < len(t.types); i++ {
 		info := t.types[i]
-		if info.kind == want.kind && info.base == want.base && info.count == want.count &&
-			info.fieldStart == want.fieldStart && info.fieldCount == want.fieldCount &&
-			info.paramStart == want.paramStart && info.paramCount == want.paramCount &&
-			info.variadic == want.variadic && info.qualifiers == want.qualifiers {
+		if info.canonical == canonical && info.qualifiers == want.qualifiers {
 			return i
 		}
 	}

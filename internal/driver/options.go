@@ -103,7 +103,7 @@ func NormalizeCCompilerCommand(args []string) []string {
 		if cCompilerInertOption(arg) {
 			continue
 		}
-		option, width := cCompilerOptionIndex("-nostdinc|-E|-P|-S", arg, false)
+		option, width := cCompilerOptionIndex("-nostdinc|-E|-P|-S|-fsyntax-only", arg, false)
 		if option >= 0 {
 			switch option {
 			case 0:
@@ -114,6 +114,8 @@ func NormalizeCCompilerCommand(args []string) []string {
 				out = append(out, "-cc-no-line-markers")
 			case 3:
 				out = append(out, "-c", "-cc-assembly-output")
+			case 4:
+				out = append(out, "-cc-syntax-only")
 			}
 			continue
 		}
@@ -473,8 +475,12 @@ func optionArgIsCFile(arg string) bool {
 	return len(arg) > 2 && arg[len(arg)-2:] == ".c"
 }
 
+func optionArgIsPreprocessedCFile(arg string) bool {
+	return len(arg) > 2 && arg[len(arg)-2:] == ".i"
+}
+
 func optionArgIsSourceFile(arg string) bool {
-	return optionArgIsGoFile(arg) || optionArgIsCFile(arg)
+	return optionArgIsGoFile(arg) || optionArgIsCFile(arg) || optionArgIsPreprocessedCFile(arg)
 }
 
 func parseBuildTags(value string) ([]string, bool) {

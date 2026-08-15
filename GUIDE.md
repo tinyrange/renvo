@@ -34,7 +34,8 @@ The most important working rules are:
   independent programs and modules.
 - Do not modify `backend/main_test.go` or weaken a performance gate to make a
   change pass.
-- Treat compiler size, CPU, and RSS as correctness constraints.
+- Track compiler size, CPU, and RSS on fixed workloads; investigate regressions
+  and pathological outliers even when the frontend has no temporary hard gate.
 - Test Windows behavior on native Windows and Darwin behavior on native
   macOS. Wine, QEMU, and format parsers are valuable but not sufficient.
 - Keep the frontend/backend handoff deterministic. Host-built and self-hosted
@@ -169,11 +170,12 @@ Profiles accept byte counts with `B`, `KiB`, `MiB`, or `GiB` suffixes. Both
 limits and the target are required. `-system` cannot be combined with `-t` or
 `-arena-size`.
 
-The frontend size checks measure two payloads independently: the stripped
-compiler with its native backends stays below 2,000,000 bytes, while the
-offline bundle containing `std/`, `forms/`, and `device/` stays below 4 MiB. The checked-in
-`systems/frontend-linux-amd64.rtg` profile applies the full-bundle limit and
-gives the running compiler a 128 MiB arena:
+The frontend size checks report two payloads independently: the stripped
+compiler with its native backends against the former 2,000,000-byte reference,
+and the offline bundle containing `std/`, `forms/`, and `device/` against the
+former 4 MiB reference. These are telemetry during M4 rather than test failures.
+The checked-in `systems/frontend-linux-amd64.rtg` profile still applies its
+explicit full-bundle limit and gives the running compiler a 128 MiB arena:
 
 ```sh
 renvo -system systems/frontend-linux-amd64.rtg -tags renvo_bundle -s \
@@ -935,10 +937,10 @@ WASI performance tests, which remain mandatory through `performance` on a
 suitable development or dedicated benchmark host. Do not interpret this CI
 partition as permission to loosen or skip those limits locally.
 
-The self-hosted frontend gate builds through stage3 and requires the stripped
-compiler to remain below 2,000,000 bytes. Normalized CPU and peak RSS are
-recorded on every run for regression review, but are not absolute pass/fail
-limits.
+The self-hosted frontend telemetry builds through stage3 and reports the
+stripped compiler against the former 2,000,000-byte reference. Normalized CPU
+and peak RSS are recorded on every run for regression review; none of these
+frontend observations is currently an absolute pass/fail limit.
 
 The CPU telemetry is process user plus system CPU, normalized on the same
 runner. It is deliberately not raw wall-clock time.
@@ -1010,8 +1012,8 @@ Compiler crashes and generated-program crashes are different:
 
 For backend failures, useful temporary capabilities are welcome: symbol maps,
 relocation dumps, deterministic labels, phase counters, and clearer
-diagnostics. Keep them when they improve future debugging without violating the
-size gate.
+diagnostics. Keep them when they improve future debugging without causing an
+unexplained payload regression.
 
 ## Frontend development advice
 

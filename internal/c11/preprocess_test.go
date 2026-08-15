@@ -30,6 +30,13 @@ func TestPreprocessProbeSelectsAndExpandsObjectMacros(t *testing.T) {
 	}
 }
 
+func TestPreprocessDefinesTargetInt128Width(t *testing.T) {
+	result := PreprocessProbe([]byte("#ifdef __SIZEOF_INT128__\n__SIZEOF_INT128__\n#endif\n"), nil)
+	if !result.Ok || string(result.Source) != "16\n" {
+		t.Fatalf("int128 target predefine = %#v, source %q", result, result.Source)
+	}
+}
+
 func TestPreprocessProbeRejectsUnsupportedActiveDirective(t *testing.T) {
 	result := PreprocessProbe([]byte("#include <stdio.h>\n"), nil)
 	if result.Ok || result.Line != 1 {
