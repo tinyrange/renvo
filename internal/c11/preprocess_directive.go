@@ -197,7 +197,7 @@ func (p *preprocessor) include(tokens []ppToken, from string, displayPath string
 		return
 	}
 	p.addDependency(path)
-	includeEmit := emit && p.config.EmitIncludes
+	includeEmit := emit && (p.config.EmitIncludes || p.config.EmitQuotedIncludes && !angled)
 	p.processFile(path, src, includeEmit, depth+1)
 	if includeEmit && p.config.LineMarkers && p.ok {
 		p.appendLineMarker(line+1, displayPath)

@@ -1,6 +1,9 @@
 package c11
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 type preprocessTestReader struct {
 	files map[string][]byte
@@ -126,6 +129,41 @@ func TestPreprocessSuppressesIncludedTokensButRetainsMacros(t *testing.T) {
 	})
 	if !result.Ok || string(result.Source) != "int value = 41 + 1 ;\n" {
 		t.Fatalf("preprocess = %#v, source %q", result, result.Source)
+	}
+}
+
+func TestPreprocessEmitsQuotedProjectHeadersOnly(t *testing.T) {
+	reader := preprocessTestReader{files: map[string][]byte{
+		"project.h": []byte("typedef struct item { int value; } item;\n#include <system.h>\n#define PROJECT_VALUE 42\n"),
+		"system.h":  []byte("typedef int unrelated_system_type;\n#define SYSTEM_VALUE 7\n"),
+		"forced.h":  []byte("typedef int forced_environment_type;\n#define FORCED_VALUE 1\n"),
+	}}
+	result := Preprocess(PreprocessConfig{
+		Path: "main.c", Source: []byte("#include \"project.h\"\nint value = PROJECT_VALUE + SYSTEM_VALUE + FORCED_VALUE;\n"), Reader: reader,
+		ForcedIncludes: []string{"forced.h"}, EmitQuotedIncludes: true,
+	})
+	if !result.Ok {
+		t.Fatalf("Preprocess failed: %#v", result)
+	}
+	if !bytes.Contains(result.Source, []byte("typedef struct item")) ||
+		bytes.Contains(result.Source, []byte("unrelated_system_type")) ||
+		bytes.Contains(result.Source, []byte("forced_environment_type")) ||
+		!bytes.Contains(result.Source, []byte("int value = 42 + 7 + 1")) {
+		t.Fatalf("project/system include boundary was not preserved:\n%s", result.Source)
+	}
+}
+
+func TestPreprocessCanSuppressForcedDeclarationsWhileEmittingIncludes(t *testing.T) {
+	reader := preprocessTestReader{files: map[string][]byte{
+		"forced.h": []byte("typedef int forced_type;\n#define FORCED_VALUE 9\n"),
+	}}
+	result := Preprocess(PreprocessConfig{
+		Path: "main.c", Source: []byte("int value = FORCED_VALUE;\n"), Reader: reader,
+		ForcedIncludes: []string{"forced.h"}, EmitIncludes: true, SuppressForcedIncludes: true,
+	})
+	if !result.Ok || bytes.Contains(result.Source, []byte("forced_type")) ||
+		!bytes.Contains(result.Source, []byte("int value = 9")) {
+		t.Fatalf("forced declaration boundary was not preserved: %#v\n%s", result, result.Source)
 	}
 }
 

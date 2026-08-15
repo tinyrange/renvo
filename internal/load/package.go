@@ -28,6 +28,7 @@ type SourceFile struct {
 	Src        []byte
 	CPrelude   []byte
 	CObject    bool
+	CDataModel int
 	ArenaStart int
 	ArenaEnd   int
 }
@@ -156,7 +157,7 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 		if isCSourceFile(source.Path) {
 			translated := c11.Translate(pkg.Name, source.Src)
 			if source.CObject {
-				translated = c11.TranslateObject(pkg.Name, source.Src, source.CPrelude)
+				translated = c11.TranslateObjectForDataModel(pkg.Name, source.Src, source.CPrelude, source.CDataModel)
 			}
 			if !translated.Ok {
 				pkg.ErrorOffset = translated.ErrorAt
@@ -306,7 +307,7 @@ func selectPackageFiles(dir string, files []SourceFile) []SourceFile {
 		if DirPath(path) != dir {
 			continue
 		}
-		selected = append(selected, SourceFile{Path: path, Src: files[i].Src, CPrelude: files[i].CPrelude, CObject: files[i].CObject, ArenaStart: files[i].ArenaStart, ArenaEnd: files[i].ArenaEnd})
+		selected = append(selected, SourceFile{Path: path, Src: files[i].Src, CPrelude: files[i].CPrelude, CObject: files[i].CObject, CDataModel: files[i].CDataModel, ArenaStart: files[i].ArenaStart, ArenaEnd: files[i].ArenaEnd})
 	}
 	sortSourceFiles(selected)
 	return selected

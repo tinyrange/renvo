@@ -557,7 +557,7 @@ cc hello.o -o hello
                 <li>Represent types and declarations by integer IDs in flat arenas; avoid pointer-rich object graphs.</li>
                 <li>Reject VLAs initially if the selected kernel config forbids them; parse them well enough to diagnose precisely.</li>
               </ul>
-              <div class="gate">Active · freestanding C regression programs cover layout, calls, globals, pointers, aggregates, and control flow on host and stage3.</div>
+              <div class="gate">Active · the first host/stage3 object regression now covers quoted project headers, typedef structs, LP64 padding, arrays, globals, pointers, calls, and control flow; the fresh pinned header-closure observation is 0.02 s wall and 15,692 KiB peak RSS. Full ISO C semantics remain in progress.</div>
             </div>
           </article>
 
@@ -820,11 +820,12 @@ cc hello.o -o hello
         </div>
 
         <div class="callout">
-          <strong>Active next step:</strong> M3 replaces the bounded Go-shaped C
-          declaration adapter with integer-ID C types, namespaces, declarators,
-          aggregates, constant expressions, and SysV layout. Feed it the M2 token
-          stream directly while keeping the M0 hosted link, M1 Kbuild handshake,
-          and M2 host/stage3 preprocessing corpus permanently green.
+          <strong>Active next step:</strong> Continue M3 from the landed integer-ID
+          type/layout slice: finish parenthesized and function declarators, enum
+          constants, unions/bitfields, designated aggregate initialization, and
+          C promotions. Object translation now consumes M2 output directly while
+          retaining quoted project declarations and bounding system headers; keep
+          the M0 hosted link, M1 Kbuild handshake, and M2 host/stage3 corpus green.
         </div>
       </div>
     </section>

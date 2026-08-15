@@ -20,6 +20,16 @@ func TestFrontendStage3CObjectSystemLink(t *testing.T) {
 	runCObjectSystemLink(t, selfHostedFrontendCompiler(t, root))
 }
 
+func TestFrontendCObjectTypeLayoutSystemLink(t *testing.T) {
+	root := repoRoot(t)
+	runCObjectTypeLayoutSystemLink(t, frontendCompiler(t, root))
+}
+
+func TestFrontendStage3CObjectTypeLayoutSystemLink(t *testing.T) {
+	root := repoRoot(t)
+	runCObjectTypeLayoutSystemLink(t, selfHostedFrontendCompiler(t, root))
+}
+
 func TestFrontendCObjectWithoutMainSystemLink(t *testing.T) {
 	root := repoRoot(t)
 	frontend := frontendCompiler(t, root)
@@ -143,5 +153,93 @@ func runCObjectSystemLink(t *testing.T, frontend frontendConfig) {
 	}
 	if combined, err := exec.Command(executable).CombinedOutput(); err != nil || string(combined) != "Hello, world!\n" {
 		t.Fatalf("run linked C object: %v, output %q", err, combined)
+	}
+}
+
+func runCObjectTypeLayoutSystemLink(t *testing.T, frontend frontendConfig) {
+	t.Helper()
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skip("the first C object target is Linux/amd64")
+	}
+	linkerDriver, err := exec.LookPath("cc")
+	if err != nil {
+		t.Skip("system C linker driver is unavailable")
+	}
+
+	dir := t.TempDir()
+	header := filepath.Join(dir, "layout.h")
+	source := filepath.Join(dir, "layout.c")
+	harness := filepath.Join(dir, "harness.c")
+	object := filepath.Join(dir, "layout.o")
+	executable := filepath.Join(dir, "layout-test")
+	if err := os.WriteFile(header, []byte(`#ifndef RENVO_LAYOUT_H
+#define RENVO_LAYOUT_H
+#define RENVO_VALUE_COUNT 3
+#define RENVO_EXPECTED_SIZE 24
+typedef struct renvo_record {
+	unsigned char tag;
+	int values[RENVO_VALUE_COUNT];
+	long tail;
+} renvo_record;
+#endif
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte(`#include "layout.h"
+static renvo_record global_record;
+static int global_value;
+int renvo_layout(void) {
+	renvo_record value;
+	renvo_record *cursor = &value;
+	int i = 0;
+	int total = 0;
+	cursor->tag = 7;
+	value.values[0] = 1;
+	value.values[1] = 2;
+	value.values[2] = 3;
+	value.tail = 13;
+	global_record.tail = cursor->tail;
+	for (i = 0; i < RENVO_VALUE_COUNT; i++) total += value.values[i];
+	if (sizeof(renvo_record) != RENVO_EXPECTED_SIZE) return 1;
+	if (_Alignof(renvo_record) != 8) return 2;
+	if (__builtin_offsetof(renvo_record, tag) != 0) return 3;
+	if (__builtin_offsetof(renvo_record, values) != 4) return 4;
+	if (__builtin_offsetof(renvo_record, tail) != 16) return 5;
+	if (cursor->tag != 7) return 6;
+	if (total != 6) return 7;
+	if (global_value != 0) return 8;
+	if (global_record.tail != 13) return 9;
+	return 5008;
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(harness, []byte(`extern int renvo_layout(void);
+int main(void) { return renvo_layout() == 5008 ? 0 : 1; }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := frontendCommand(frontend, "cc", "-c", filepath.Base(source), "-o", object)
+	command.Dir = dir
+	command.Env = frontendCommandEnv(frontend.env, dir)
+	if combined, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("compile C type/layout object with Renvo: %v\n%s", err, combined)
+	}
+	file, err := elf.Open(object)
+	if err != nil {
+		t.Fatalf("open C type/layout object: %v", err)
+	}
+	bss := file.Section(".bss")
+	if bss == nil || bss.Type != elf.SHT_NOBITS || bss.Size < 32 {
+		file.Close()
+		t.Fatalf("C object BSS section = %#v", bss)
+	}
+	file.Close()
+	link := exec.Command(linkerDriver, harness, object, "-o", executable)
+	if combined, err := link.CombinedOutput(); err != nil {
+		t.Fatalf("system-link Renvo C type/layout object: %v\n%s", err, combined)
+	}
+	if combined, err := exec.Command(executable).CombinedOutput(); err != nil {
+		t.Fatalf("run linked C type/layout object: %v, output %q", err, combined)
 	}
 }

@@ -93,29 +93,33 @@ func CPreprocessCommandDiagnostic(result CPreprocessCommandResult) Diagnostic {
 	if result.Option != "" {
 		return Diagnostic{Phase: "options", Code: "RENVO-OPTION-005", Message: "unknown option " + result.Option}
 	}
+	return cPreprocessDiagnostic(result.Error, result.ErrorPath, result.ErrorLine, result.Detail)
+}
+
+func cPreprocessDiagnostic(preprocessError int, path string, line int, detail string) Diagnostic {
 	message := "C preprocessing failed"
 	code := "RENVO-CPP-002"
-	if result.Error == c11.PreprocessErrToken {
+	if preprocessError == c11.PreprocessErrToken {
 		message = "invalid preprocessing token or unterminated comment/literal"
-		if result.Detail != "" {
-			message += ": " + result.Detail
+		if detail != "" {
+			message += ": " + detail
 		}
-	} else if result.Error == c11.PreprocessErrDirective {
+	} else if preprocessError == c11.PreprocessErrDirective {
 		message = "invalid or unsupported preprocessing directive"
-	} else if result.Error == c11.PreprocessErrExpression {
+	} else if preprocessError == c11.PreprocessErrExpression {
 		message = "invalid preprocessor constant expression"
-	} else if result.Error == c11.PreprocessErrMacro {
+	} else if preprocessError == c11.PreprocessErrMacro {
 		message = "invalid macro definition or expansion"
-		if result.Detail != "" {
-			message += ": " + result.Detail
+		if detail != "" {
+			message += ": " + detail
 		}
-	} else if result.Error == c11.PreprocessErrDepth {
+	} else if preprocessError == c11.PreprocessErrDepth {
 		message = "preprocessor include or expansion depth exceeded"
-	} else if result.Error == c11.PreprocessErrInclude {
-		message = "C include could not be read: " + result.ErrorPath
+	} else if preprocessError == c11.PreprocessErrInclude {
+		message = "C include could not be read: " + path
 		code = "RENVO-CPP-001"
 	}
-	return Diagnostic{Phase: "preprocessor", Code: code, Message: message, Path: result.ErrorPath, Line: result.ErrorLine, Column: 1}
+	return Diagnostic{Phase: "preprocessor", Code: code, Message: message, Path: path, Line: line, Column: 1}
 }
 
 func cCommandMacros(definitions []string) []c11.Macro {

@@ -24,24 +24,17 @@ type Result struct {
 	ErrorAt int
 }
 
-type cType struct {
-	name    string
-	pointer int
-	arrays  [][]token
-	opaque  bool
-}
-
 type declarator struct {
 	name        token
-	typeInfo    cType
+	typeID      int
 	params      []parameter
 	function    bool
 	initializer []token
 }
 
 type parameter struct {
-	name     token
-	typeInfo cType
+	name   token
+	typeID int
 }
 
 type translator struct {
@@ -54,23 +47,34 @@ type translator struct {
 	ok          bool
 	err         int
 	errorAt     int
-	namedTypes  []string
+	types       []cTypeInfo
+	fields      []cField
+	typedefs    []cTypeName
+	tags        []cTypeName
+	opaqueTypes []cTypeName
+	typeSerial  int
+	dataModel   int
+	pointerSize int
 }
 
 // Translate lowers one preprocessed C translation unit into the shared Go
 // frontend syntax. It deliberately performs no backend-specific lowering.
 func Translate(packageName string, src []byte) Result {
-	return translate(packageName, src, nil, false)
+	return translate(packageName, src, nil, false, DataModelLP64)
 }
 
 // TranslateObject lowers a hosted C translation unit. Prelude contains
 // declarations recovered from the translation unit's included headers; it is
 // kept separate so diagnostics in src retain their original byte offsets.
 func TranslateObject(packageName string, src []byte, prelude []byte) Result {
-	return translate(packageName, src, prelude, true)
+	return TranslateObjectForDataModel(packageName, src, prelude, DataModelLP64)
 }
 
-func translate(packageName string, src []byte, prelude []byte, object bool) Result {
+func TranslateObjectForDataModel(packageName string, src []byte, prelude []byte, dataModel int) Result {
+	return translate(packageName, src, prelude, true, dataModel)
+}
+
+func translate(packageName string, src []byte, prelude []byte, object bool, dataModel int) Result {
 	t := translator{
 		packageName: packageName,
 		out:         make([]byte, 0, len(src)+len(src)/4+len(prelude)+64),
@@ -78,6 +82,7 @@ func translate(packageName string, src []byte, prelude []byte, object bool) Resu
 		ok:          true,
 		errorAt:     -1,
 	}
+	t.initTypes(dataModel)
 	t.out = append(t.out, "package "...)
 	t.out = append(t.out, packageName...)
 	t.out = append(t.out, '\n')
@@ -163,6 +168,9 @@ func (t *translator) externalDeclaration() {
 		t.fail(TranslateErrDeclaration)
 		return
 	}
+	if t.take(";") {
+		return
+	}
 	decl, ok := t.parseDeclarator(base, true)
 	if !ok {
 		t.fail(TranslateErrDeclaration)
@@ -198,7 +206,9 @@ func (t *translator) externalDeclaration() {
 		return
 	}
 	if storage == storageTypedef {
-		t.fail(TranslateErrUnsupported)
+		for i := 0; i < len(decls); i++ {
+			t.rememberTypedef(string(tokenText(t.src, decls[i].name)), decls[i].typeID)
+		}
 		return
 	}
 	if storage == storageExtern {
@@ -207,6 +217,145 @@ func (t *translator) externalDeclaration() {
 	for i := 0; i < len(decls); i++ {
 		t.emitVariable(decls[i])
 	}
+}
+
+func (t *translator) parseAggregateType(union bool) (int, bool) {
+	kind := cTypeStruct
+	prefix := "__c_struct_"
+	if union {
+		kind = cTypeUnion
+		prefix = "__c_union_"
+	}
+	t.pos++
+	name := ""
+	if t.kind() == tokenIdent {
+		name = string(tokenText(t.src, t.tokens[t.pos]))
+		t.pos++
+	}
+	if !t.currentIs("{") {
+		if name == "" {
+			return cTypeVoidID, false
+		}
+		if typeID, ok := t.lookupTag([]byte(name)); ok {
+			return typeID, true
+		}
+		t.typeSerial++
+		t.types = append(t.types, cTypeInfo{kind: kind, size: 0, align: 1, goName: prefix + name})
+		typeID := len(t.types) - 1
+		t.tags = append(t.tags, cTypeName{name: name, typeID: typeID})
+		return typeID, true
+	}
+	t.typeSerial++
+	goName := prefix + name
+	if name == "" {
+		goName = prefix + "anon_" + decimalString(t.typeSerial)
+	}
+	t.types = append(t.types, cTypeInfo{kind: kind, align: 1, goName: goName})
+	typeID := len(t.types) - 1
+	if name != "" {
+		if prior, ok := t.lookupTag([]byte(name)); ok && t.types[prior].size == 0 {
+			t.types = t.types[:len(t.types)-1]
+			typeID = prior
+			t.types[typeID].goName = goName
+			t.types[typeID].kind = kind
+		} else {
+			t.tags = append(t.tags, cTypeName{name: name, typeID: typeID})
+		}
+	}
+	t.pos++
+	var aggregateFields []cField
+	offset := 0
+	maxAlign := 1
+	maxSize := 0
+	for !t.currentIs("}") && t.kind() != tokenEOF {
+		fieldBase, storage, ok := t.parseType()
+		if !ok || storage != storageNone && storage != storageOther {
+			return cTypeVoidID, false
+		}
+		for {
+			field, valid := t.parseDeclarator(fieldBase, false)
+			if !valid {
+				return cTypeVoidID, false
+			}
+			fieldInfo := t.typeInfo(field.typeID)
+			alignment := t.typeAlign(field.typeID)
+			fieldOffset := 0
+			if union {
+				if fieldInfo.size > maxSize {
+					maxSize = fieldInfo.size
+				}
+			} else {
+				offset = alignC(offset, alignment)
+				fieldOffset = offset
+				offset += fieldInfo.size
+			}
+			if alignment > maxAlign {
+				maxAlign = alignment
+			}
+			aggregateFields = append(aggregateFields, cField{name: string(tokenText(t.src, field.name)), typeID: field.typeID, offset: fieldOffset})
+			if !t.take(",") {
+				break
+			}
+		}
+		if !t.take(";") {
+			return cTypeVoidID, false
+		}
+	}
+	if !t.take("}") {
+		return cTypeVoidID, false
+	}
+	size := offset
+	if union {
+		size = maxSize
+	}
+	size = alignC(size, maxAlign)
+	fieldStart := len(t.fields)
+	t.fields = append(t.fields, aggregateFields...)
+	t.types[typeID].size = size
+	t.types[typeID].align = maxAlign
+	t.types[typeID].fieldStart = fieldStart
+	t.types[typeID].fieldCount = len(t.fields) - fieldStart
+	t.emitAggregateDeclaration(typeID)
+	return typeID, true
+}
+
+func (t *translator) emitAggregateDeclaration(typeID int) {
+	info := t.typeInfo(typeID)
+	t.out = append(t.out, "type "...)
+	t.out = append(t.out, info.goName...)
+	if info.kind == cTypeUnion {
+		t.out = append(t.out, " ["...)
+		t.appendDecimal(info.size)
+		t.out = append(t.out, "]byte;\n"...)
+		return
+	}
+	t.out = append(t.out, " struct{"...)
+	for i := 0; i < info.fieldCount; i++ {
+		field := t.fields[info.fieldStart+i]
+		t.out = append(t.out, field.name...)
+		t.out = append(t.out, ' ')
+		t.emitType(field.typeID)
+		t.out = append(t.out, ';')
+	}
+	t.out = append(t.out, '}', ';', '\n')
+}
+
+func decimalString(value int) string {
+	if value == 0 {
+		return "0"
+	}
+	var digits [20]byte
+	count := 0
+	for value > 0 {
+		digits[count] = byte('0' + value%10)
+		count++
+		value /= 10
+	}
+	out := make([]byte, count)
+	for i := 0; i < count; i++ {
+		out[i] = digits[count-i-1]
+	}
+	return string(out)
 }
 
 func (t *translator) emitForeignFunction(decl declarator) {
@@ -223,17 +372,17 @@ func (t *translator) emitForeignFunction(decl declarator) {
 		t.out = append(t.out, 'p')
 		t.appendDecimal(i)
 		t.out = append(t.out, ' ')
-		t.emitForeignType(decl.params[i].typeInfo)
+		t.emitForeignType(decl.params[i].typeID)
 	}
 	t.out = append(t.out, ')')
-	if decl.typeInfo.name != "" || decl.typeInfo.pointer > 0 {
+	if decl.typeID != cTypeVoidID {
 		t.out = append(t.out, ' ')
-		t.emitType(decl.typeInfo)
+		t.emitType(decl.typeID)
 	}
 	t.out = append(t.out, '{')
-	if decl.typeInfo.pointer > 0 {
+	if t.typeInfo(decl.typeID).kind == cTypePointer {
 		t.out = append(t.out, "return nil"...)
-	} else if decl.typeInfo.name != "" {
+	} else if decl.typeID != cTypeVoidID {
 		t.out = append(t.out, "return 0"...)
 	}
 	t.out = append(t.out, '}', '\n')
@@ -257,27 +406,30 @@ func (t *translator) appendDecimal(value int) {
 	}
 }
 
-func (t *translator) emitForeignType(info cType) {
+func (t *translator) emitForeignType(typeID int) {
 	// A Go string is used only as the shared frontend carrier for a C string
 	// pointer. Object-mode call lowering emits its data word alone, so the ELF
 	// boundary is the exact one-register System V `char *` ABI.
-	if info.name == "int8" && info.pointer == 1 && len(info.arrays) == 0 {
+	info := t.typeInfo(typeID)
+	if info.kind == cTypePointer && info.base == cTypeInt8ID {
 		t.out = append(t.out, "string"...)
 		return
 	}
-	t.emitType(info)
+	t.emitType(typeID)
 }
 
-func (t *translator) parseType() (cType, int, bool) {
+func (t *translator) parseType() (int, int, bool) {
 	storage := storageNone
 	unsigned := false
 	longCount := 0
 	base := ""
-	named := ""
-	opaque := false
+	typeID := cTypeVoidID
+	hasTypeID := false
 	seen := false
 	for t.kind() == tokenIdent {
 		switch {
+		case t.currentIs("__extension__"):
+			t.pos++
 		case t.currentIs("static") || t.currentIs("register") || t.currentIs("auto") || t.currentIs("inline"):
 			if storage == storageNone {
 				storage = storageOther
@@ -294,7 +446,7 @@ func (t *translator) parseType() (cType, int, bool) {
 		case t.currentIs("unsigned"):
 			unsigned, seen = true, true
 			t.pos++
-		case t.currentIs("signed"):
+		case t.currentIs("signed") || t.currentIs("__signed__"):
 			seen = true
 			t.pos++
 		case t.currentIs("long"):
@@ -325,16 +477,36 @@ func (t *translator) parseType() (cType, int, bool) {
 		case t.currentIs("_Bool"):
 			base, seen = "bool", true
 			t.pos++
+		case t.currentIs("struct") || t.currentIs("union"):
+			if seen {
+				goto done
+			}
+			typeID, hasTypeID = t.parseAggregateType(t.currentIs("union"))
+			if !hasTypeID {
+				return cTypeVoidID, storage, false
+			}
+			seen = true
 		default:
 			if !seen {
 				typeName := tokenText(t.src, t.tokens[t.pos])
 				var known bool
-				named, known = namedCType(typeName)
+				typeID, known = t.lookupTypedef(typeName)
 				if !known {
-					named = "byte"
-					opaque = true
-					t.rememberNamedType(typeName)
+					typeID, known = builtinCType(typeName)
 				}
+				if !known {
+					for i := 0; i < len(t.opaqueTypes); i++ {
+						if textEquals(typeName, t.opaqueTypes[i].name) {
+							typeID = t.opaqueTypes[i].typeID
+							known = true
+							break
+						}
+					}
+				}
+				if !known {
+					typeID = t.opaqueType(string(typeName))
+				}
+				hasTypeID = true
 				seen = true
 				t.pos++
 				continue
@@ -344,102 +516,59 @@ func (t *translator) parseType() (cType, int, bool) {
 	}
 done:
 	if !seen {
-		return cType{}, storage, false
+		return cTypeVoidID, storage, false
 	}
-	if named != "" {
-		return cType{name: named, opaque: opaque}, storage, true
+	if hasTypeID {
+		return typeID, storage, true
 	}
 	if base == "" {
 		base = "int"
 	}
-	name := "int32"
+	typeID = cTypeInt32ID
 	switch base {
 	case "void":
-		name = ""
+		typeID = cTypeVoidID
 	case "bool":
-		name = "bool"
+		typeID = cTypeBoolID
 	case "char":
 		if unsigned {
-			name = "uint8"
+			typeID = cTypeUint8ID
 		} else {
-			name = "int8"
+			typeID = cTypeInt8ID
 		}
 	case "short":
 		if unsigned {
-			name = "uint16"
+			typeID = cTypeUint16ID
 		} else {
-			name = "int16"
+			typeID = cTypeInt16ID
 		}
 	case "float":
-		name = "float32"
+		typeID = cTypeFloat32ID
 	case "double":
-		name = "float64"
+		typeID = cTypeFloat64ID
 	default:
 		if longCount > 0 {
 			if unsigned {
-				name = "uint64"
+				typeID = cTypeUint64ID
 			} else {
-				name = "int64"
+				typeID = cTypeInt64ID
 			}
 		} else if unsigned {
-			name = "uint32"
+			typeID = cTypeUint32ID
 		}
 	}
-	return cType{name: name}, storage, true
+	return typeID, storage, true
 }
 
-func (t *translator) rememberNamedType(name []byte) {
-	for i := 0; i < len(t.namedTypes); i++ {
-		if textEquals(name, t.namedTypes[i]) {
-			return
-		}
-	}
-	t.namedTypes = append(t.namedTypes, string(name))
-}
-
-func namedCType(name []byte) (string, bool) {
-	if textEquals(name, "size_t") || textEquals(name, "uintptr_t") {
-		return "uintptr", true
-	}
-	if textEquals(name, "intptr_t") || textEquals(name, "ptrdiff_t") {
-		return "int64", true
-	}
-	if textEquals(name, "int8_t") {
-		return "int8", true
-	}
-	if textEquals(name, "uint8_t") {
-		return "uint8", true
-	}
-	if textEquals(name, "int16_t") {
-		return "int16", true
-	}
-	if textEquals(name, "uint16_t") {
-		return "uint16", true
-	}
-	if textEquals(name, "int32_t") {
-		return "int32", true
-	}
-	if textEquals(name, "uint32_t") {
-		return "uint32", true
-	}
-	if textEquals(name, "int64_t") {
-		return "int64", true
-	}
-	if textEquals(name, "uint64_t") {
-		return "uint64", true
-	}
-	return "", false
-}
-
-func (t *translator) parseDeclarator(base cType, allowFunction bool) (declarator, bool) {
-	result := declarator{typeInfo: base}
+func (t *translator) parseDeclarator(base int, allowFunction bool) (declarator, bool) {
+	result := declarator{typeID: base}
 	for t.take("*") {
-		result.typeInfo.pointer++
+		result.typeID = t.pointerType(result.typeID)
 		for t.currentIs("const") || t.currentIs("volatile") || t.currentIs("restrict") {
 			t.pos++
 		}
 	}
-	if result.typeInfo.opaque && result.typeInfo.pointer == 0 {
+	if t.typeInfo(result.typeID).kind == cTypeOpaque {
 		// The ABI size of an unknown scalar typedef cannot be inferred safely
 		// from an unpreprocessed header. Opaque typedefs are exact when used
 		// behind a pointer, which is the normal system-library handle shape.
@@ -465,10 +594,10 @@ func (t *translator) parseDeclarator(base cType, allowFunction bool) (declarator
 				return result, false
 			}
 			param, ok := t.parseDeclarator(paramType, false)
-			if !ok || len(param.typeInfo.arrays) != 0 {
+			if !ok {
 				return result, false
 			}
-			result.params = append(result.params, parameter{name: param.name, typeInfo: param.typeInfo})
+			result.params = append(result.params, parameter{name: param.name, typeID: param.typeID})
 			if t.take(")") {
 				break
 			}
@@ -478,16 +607,59 @@ func (t *translator) parseDeclarator(base cType, allowFunction bool) (declarator
 		}
 		return result, true
 	}
+	var arrayCounts []int
 	for t.take("[") {
 		start := t.pos
 		end := t.findClosing("]")
 		if end <= start {
 			return result, false
 		}
-		result.typeInfo.arrays = append(result.typeInfo.arrays, t.tokens[start:end])
+		count, valid := integerTokenValue(t.src, t.tokens[start:end])
+		if !valid || count < 1 {
+			return result, false
+		}
+		arrayCounts = append(arrayCounts, count)
 		t.pos = end + 1
 	}
+	for i := len(arrayCounts) - 1; i >= 0; i-- {
+		result.typeID = t.arrayType(result.typeID, arrayCounts[i])
+	}
 	return result, true
+}
+
+func integerTokenValue(src []byte, tokens []token) (int, bool) {
+	if len(tokens) != 1 || tokenKind(tokens[0]) != tokenNumber {
+		return 0, false
+	}
+	text := trimIntegerSuffix(tokenText(src, tokens[0]))
+	base := 10
+	at := 0
+	if len(text) > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X') {
+		base = 16
+		at = 2
+	} else if len(text) > 1 && text[0] == '0' {
+		base = 8
+		at = 1
+	}
+	value := 0
+	if at == len(text) {
+		return 0, true
+	}
+	for ; at < len(text); at++ {
+		digit := -1
+		if text[at] >= '0' && text[at] <= '9' {
+			digit = int(text[at] - '0')
+		} else if text[at] >= 'a' && text[at] <= 'f' {
+			digit = int(text[at]-'a') + 10
+		} else if text[at] >= 'A' && text[at] <= 'F' {
+			digit = int(text[at]-'A') + 10
+		}
+		if digit < 0 || digit >= base {
+			return 0, false
+		}
+		value = value*base + digit
+	}
+	return value, true
 }
 
 func (t *translator) takeInitializer() []token {
@@ -521,7 +693,7 @@ func (t *translator) takeInitializer() []token {
 
 func (t *translator) emitFunction(decl declarator, storage int) {
 	if tokenIs(t.src, decl.name, "main") && t.packageName == "main" &&
-		(len(decl.params) != 0 || decl.typeInfo.name != "int32" || decl.typeInfo.pointer != 0 || len(decl.typeInfo.arrays) != 0) {
+		(len(decl.params) != 0 || decl.typeID != cTypeInt32ID) {
 		t.fail(TranslateErrUnsupported)
 		return
 	}
@@ -543,12 +715,12 @@ func (t *translator) emitFunction(decl declarator, storage int) {
 		}
 		t.out = append(t.out, tokenText(t.src, decl.params[i].name)...)
 		t.out = append(t.out, ' ')
-		t.emitType(decl.params[i].typeInfo)
+		t.emitType(decl.params[i].typeID)
 	}
 	t.out = append(t.out, ')')
-	if decl.typeInfo.name != "" || decl.typeInfo.pointer > 0 {
+	if decl.typeID != cTypeVoidID {
 		t.out = append(t.out, ' ')
-		t.emitType(decl.typeInfo)
+		t.emitType(decl.typeID)
 	}
 	t.out = append(t.out, ' ')
 	t.block()
@@ -559,31 +731,16 @@ func (t *translator) emitVariable(decl declarator) {
 	t.out = append(t.out, "var "...)
 	t.out = append(t.out, tokenText(t.src, decl.name)...)
 	t.out = append(t.out, ' ')
-	t.emitType(decl.typeInfo)
+	t.emitType(decl.typeID)
 	if len(decl.initializer) > 0 {
 		t.out = append(t.out, '=')
-		if len(decl.typeInfo.arrays) > 0 && tokenIs(t.src, decl.initializer[0], "{") {
-			t.emitType(decl.typeInfo)
+		kind := t.typeInfo(decl.typeID).kind
+		if (kind == cTypeArray || kind == cTypeStruct) && tokenIs(t.src, decl.initializer[0], "{") {
+			t.emitType(decl.typeID)
 		}
 		t.expression(decl.initializer)
 	}
 	t.out = append(t.out, ';', '\n')
-}
-
-func (t *translator) emitType(info cType) {
-	for i := 0; i < len(info.arrays); i++ {
-		t.out = append(t.out, '[')
-		t.expression(info.arrays[i])
-		t.out = append(t.out, ']')
-	}
-	for i := 0; i < info.pointer; i++ {
-		t.out = append(t.out, '*')
-	}
-	if info.name == "" {
-		t.out = append(t.out, "byte"...)
-	} else {
-		t.out = append(t.out, info.name...)
-	}
 }
 
 func (t *translator) block() {
@@ -708,8 +865,11 @@ func (t *translator) controlledStatement() {
 
 func (t *translator) localDeclaration() {
 	base, storage, ok := t.parseType()
-	if !ok || storage == storageTypedef || storage == storageExtern {
+	if !ok || storage == storageExtern {
 		t.fail(TranslateErrUnsupported)
+		return
+	}
+	if t.take(";") {
 		return
 	}
 	for {
@@ -719,7 +879,11 @@ func (t *translator) localDeclaration() {
 			return
 		}
 		decl.initializer = t.takeInitializer()
-		t.emitVariable(decl)
+		if storage == storageTypedef {
+			t.rememberTypedef(string(tokenText(t.src, decl.name)), decl.typeID)
+		} else {
+			t.emitVariable(decl)
+		}
 		if !t.take(",") {
 			break
 		}
@@ -793,6 +957,40 @@ func (t *translator) condition(tokens []token) {
 func (t *translator) expression(tokens []token) {
 	for i := 0; i < len(tokens); i++ {
 		tok := tokens[i]
+		if tokenIs(t.src, tok, "sizeof") || tokenIs(t.src, tok, "_Alignof") {
+			end := matchingToken(t.src, tokens, i+1, "(", ")")
+			if end > i+2 {
+				if typeID, ok := t.typeFromTokens(tokens[i+2 : end]); ok {
+					if tokenIs(t.src, tok, "sizeof") {
+						t.appendDecimal(t.typeSize(typeID))
+					} else {
+						t.appendDecimal(t.typeAlign(typeID))
+					}
+					i = end
+					continue
+				}
+			}
+		}
+		if tokenIs(t.src, tok, "__builtin_offsetof") {
+			end := matchingToken(t.src, tokens, i+1, "(", ")")
+			if end > i+3 {
+				parts := splitTopLevel(t.src, tokens[i+2:end], ",")
+				if len(parts) == 2 {
+					if typeID, ok := t.typeFromTokens(parts[0]); ok {
+						if offset, found := t.fieldOffset(typeID, parts[1]); found {
+							t.appendDecimal(offset)
+							i = end
+							continue
+						}
+					}
+				}
+			}
+		}
+		if consumed := t.nullPointerPrefix(tokens[i:]); consumed > 0 {
+			t.out = append(t.out, "nil"...)
+			i += consumed - 1
+			continue
+		}
 		text := tokenText(t.src, tok)
 		if t.object && tokenKind(tok) == tokenString {
 			t.emitCStringValue(text)
@@ -815,6 +1013,172 @@ func (t *translator) expression(tokens []token) {
 			t.out = append(t.out, ' ')
 		}
 	}
+}
+
+func matchingToken(src []byte, tokens []token, at int, open string, close string) int {
+	if at < 0 || at >= len(tokens) || !tokenIs(src, tokens[at], open) {
+		return -1
+	}
+	depth := 0
+	for i := at; i < len(tokens); i++ {
+		if tokenIs(src, tokens[i], open) {
+			depth++
+		} else if tokenIs(src, tokens[i], close) {
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func (t *translator) typeFromTokens(tokens []token) (int, bool) {
+	start, end := 0, len(tokens)
+	for start < end && (tokenIs(t.src, tokens[start], "const") || tokenIs(t.src, tokens[start], "volatile") || tokenIs(t.src, tokens[start], "restrict")) {
+		start++
+	}
+	for end > start && (tokenIs(t.src, tokens[end-1], "const") || tokenIs(t.src, tokens[end-1], "volatile") || tokenIs(t.src, tokens[end-1], "restrict")) {
+		end--
+	}
+	tokens = tokens[start:end]
+	if len(tokens) == 0 {
+		return cTypeVoidID, false
+	}
+	pointers := 0
+	for len(tokens) > 0 && tokenIs(t.src, tokens[len(tokens)-1], "*") {
+		pointers++
+		tokens = tokens[:len(tokens)-1]
+	}
+	typeID := cTypeVoidID
+	ok := false
+	if len(tokens) == 1 {
+		name := tokenText(t.src, tokens[0])
+		typeID, ok = t.lookupTypedef(name)
+		if !ok {
+			typeID, ok = builtinCType(name)
+		}
+		if !ok {
+			typeID, ok = scalarCType(string(name), false, 0)
+		}
+	} else if len(tokens) == 2 && (tokenIs(t.src, tokens[0], "struct") || tokenIs(t.src, tokens[0], "union")) {
+		typeID, ok = t.lookupTag(tokenText(t.src, tokens[1]))
+	} else {
+		unsigned := false
+		longCount := 0
+		base := ""
+		valid := true
+		for i := 0; i < len(tokens); i++ {
+			switch {
+			case tokenIs(t.src, tokens[i], "unsigned"):
+				unsigned = true
+			case tokenIs(t.src, tokens[i], "signed") || tokenIs(t.src, tokens[i], "__signed__") || tokenIs(t.src, tokens[i], "int"):
+			case tokenIs(t.src, tokens[i], "long"):
+				longCount++
+			case tokenIs(t.src, tokens[i], "short"):
+				base = "short"
+			case tokenIs(t.src, tokens[i], "char"):
+				base = "char"
+			case tokenIs(t.src, tokens[i], "void"):
+				base = "void"
+			case tokenIs(t.src, tokens[i], "float"):
+				base = "float"
+			case tokenIs(t.src, tokens[i], "double"):
+				base = "double"
+			case tokenIs(t.src, tokens[i], "_Bool"):
+				base = "bool"
+			default:
+				valid = false
+			}
+		}
+		if valid {
+			typeID, ok = scalarCType(base, unsigned, longCount)
+		}
+	}
+	if !ok {
+		return cTypeVoidID, false
+	}
+	for i := 0; i < pointers; i++ {
+		typeID = t.pointerType(typeID)
+	}
+	return typeID, true
+}
+
+func scalarCType(base string, unsigned bool, longCount int) (int, bool) {
+	if base == "" {
+		base = "int"
+	}
+	switch base {
+	case "void":
+		return cTypeVoidID, true
+	case "bool":
+		return cTypeBoolID, true
+	case "char":
+		if unsigned {
+			return cTypeUint8ID, true
+		}
+		return cTypeInt8ID, true
+	case "short":
+		if unsigned {
+			return cTypeUint16ID, true
+		}
+		return cTypeInt16ID, true
+	case "float":
+		return cTypeFloat32ID, true
+	case "double":
+		return cTypeFloat64ID, true
+	case "int":
+		if longCount > 0 {
+			if unsigned {
+				return cTypeUint64ID, true
+			}
+			return cTypeInt64ID, true
+		}
+		if unsigned {
+			return cTypeUint32ID, true
+		}
+		return cTypeInt32ID, true
+	}
+	return cTypeVoidID, false
+}
+
+func (t *translator) fieldOffset(typeID int, tokens []token) (int, bool) {
+	info := t.typeInfo(typeID)
+	if info.kind != cTypeStruct && info.kind != cTypeUnion || len(tokens) != 1 || tokenKind(tokens[0]) != tokenIdent {
+		return 0, false
+	}
+	name := tokenText(t.src, tokens[0])
+	for i := 0; i < info.fieldCount; i++ {
+		field := t.fields[info.fieldStart+i]
+		if textEquals(name, field.name) {
+			return field.offset, true
+		}
+	}
+	return 0, false
+}
+
+func (t *translator) nullPointerPrefix(tokens []token) int {
+	if len(tokens) < 5 || !tokenIs(t.src, tokens[0], "(") {
+		return 0
+	}
+	outer := matchingToken(t.src, tokens, 0, "(", ")")
+	if outer < 0 {
+		return 0
+	}
+	inside := tokens[1:outer]
+	for len(inside) >= 2 && tokenIs(t.src, inside[0], "(") {
+		close := matchingToken(t.src, inside, 0, "(", ")")
+		if close <= 1 || close+1 >= len(inside) {
+			break
+		}
+		if typeID, ok := t.typeFromTokens(inside[1:close]); ok && t.typeInfo(typeID).kind == cTypePointer {
+			if value, valid := integerTokenValue(t.src, inside[close+1:]); valid && value == 0 {
+				return outer + 1
+			}
+		}
+		break
+	}
+	return 0
 }
 
 func (t *translator) emitCStringValue(text []byte) {
@@ -959,11 +1323,14 @@ func (t *translator) isTypeStart() bool {
 		return true
 	}
 	name := tokenText(t.src, tok)
-	if _, known := namedCType(name); known {
+	if _, known := builtinCType(name); known {
 		return true
 	}
-	for i := 0; i < len(t.namedTypes); i++ {
-		if textEquals(name, t.namedTypes[i]) {
+	if _, known := t.lookupTypedef(name); known {
+		return true
+	}
+	for i := 0; i < len(t.opaqueTypes); i++ {
+		if textEquals(name, t.opaqueTypes[i].name) {
 			return true
 		}
 	}
@@ -977,7 +1344,8 @@ func isTypeToken(src []byte, tok token) bool {
 		tokenIs(src, tok, "void") || tokenIs(src, tok, "char") || tokenIs(src, tok, "short") ||
 		tokenIs(src, tok, "int") || tokenIs(src, tok, "long") || tokenIs(src, tok, "float") ||
 		tokenIs(src, tok, "double") || tokenIs(src, tok, "signed") || tokenIs(src, tok, "unsigned") ||
-		tokenIs(src, tok, "_Bool") || tokenIs(src, tok, "_Atomic")
+		tokenIs(src, tok, "_Bool") || tokenIs(src, tok, "_Atomic") || tokenIs(src, tok, "struct") ||
+		tokenIs(src, tok, "union") || tokenIs(src, tok, "__extension__") || tokenIs(src, tok, "__signed__")
 }
 
 func splitTopLevel(src []byte, tokens []token, separator string) [][]token {
