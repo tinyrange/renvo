@@ -52,6 +52,7 @@ func (s *FSBuildSession) Step() bool {
 			s.stage = 4
 			return true
 		}
+		s.workDir = objectSourceWorkDir(s.workDir, options)
 		s.fs = sourceFSForOptions(s.fs, s.workDir, options)
 		s.stage = 1
 		return false

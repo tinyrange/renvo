@@ -166,6 +166,7 @@ func buildFromFSOneShotCompactWithModuleCache(args []string, workDir string, std
 	if !options.Ok {
 		return buildFail(result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
 	}
+	workDir = objectSourceWorkDir(workDir, options)
 	fs = sourceFSForOptions(fs, workDir, options)
 	sourcesStart := arena.Mark()
 	var sources SourceResult
@@ -224,6 +225,7 @@ func buildFromFSOptions(options Options, workDir string, stdRoot string, moduleC
 	if !options.Ok {
 		return buildFail(result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
 	}
+	workDir = objectSourceWorkDir(workDir, options)
 	fs = sourceFSForOptions(fs, workDir, options)
 	sourcesStart := arena.Mark()
 	var sources SourceResult

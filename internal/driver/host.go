@@ -129,7 +129,7 @@ func compileAndWrite(args []string, stdRoot string, moduleCache string, backend 
 	}
 	output := compiled.Build.Options.Output
 	mode := os.FileMode(0o755)
-	if compiled.Build.Options.EmitUnit || compiled.Build.Options.EmitImage || compiled.Build.Options.Target == "browser/wasm32" {
+	if compiled.Build.Options.EmitUnit || compiled.Build.Options.EmitImage || compiled.Build.Options.Mode == ModeObject || compiled.Build.Options.Target == "browser/wasm32" {
 		mode = 0o644
 	}
 	if output == "-" {

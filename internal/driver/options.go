@@ -34,10 +34,14 @@ const (
 	ParseErrInvalidBackend
 	ParseErrBackendTarget
 	ParseErrScriptRequiresGo
+	ParseErrObjectRequiresLinuxAmd64
+	ParseErrObjectFileCount
+	ParseErrObjectRequiresC
 )
 
 const ModeExecutable = "executable"
 const ModeKernelModule = "kernel-module"
+const ModeObject = "object"
 const DefaultModuleLicense = "Proprietary"
 
 const RunHelpText = "Usage: renvo run [-s] [-tags <list>] [-arena-size <bytes>] <script.go> [-- arguments...]\nTop-level statements form func main. The script is compiled for and executed on the host target.\n"
@@ -72,6 +76,18 @@ func CommandHelpRequested(args []string) bool {
 	return len(args) <= 1 || len(args) == 2 && args[1] == "--help"
 }
 
+// NormalizeCCompilerCommand removes the cc command selector while leaving its
+// compiler-style flags for the shared option parser. This keeps the alternate
+// frontend on the ordinary driver/build/backend path.
+func NormalizeCCompilerCommand(args []string) []string {
+	if len(args) < 2 || args[1] != "cc" {
+		return args
+	}
+	out := make([]string, 1, len(args)-1)
+	out[0] = args[0]
+	return append(out, args[2:]...)
+}
+
 func ParseOptions(args []string) Options {
 	return parseOptions(args, true)
 }
@@ -101,6 +117,12 @@ func parseOptions(args []string, requireAdvertisedTarget bool) Options {
 			i++
 			continue
 		}
+		if arg == "-c" {
+			options.Mode = ModeObject
+			modeAt = i
+			i++
+			continue
+		}
 		if arg == "-emit-unit" {
 			options.EmitUnit = true
 			i++
@@ -127,7 +149,7 @@ func parseOptions(args []string, requireAdvertisedTarget bool) Options {
 			if mode == "" {
 				return parseFail(options, ParseErrMissingMode, arg, i)
 			}
-			if mode != ModeExecutable && mode != ModeKernelModule {
+			if mode != ModeExecutable && mode != ModeKernelModule && mode != ModeObject {
 				return parseFail(options, ParseErrUnsupportedMode, mode, i)
 			}
 			options.Mode = mode
@@ -240,12 +262,21 @@ func parseOptions(args []string, requireAdvertisedTarget bool) Options {
 	if options.Script && !optionArgIsGoFile(options.Files[0]) {
 		return parseFail(options, ParseErrScriptRequiresGo, options.Files[0], len(args))
 	}
+	if options.Mode == ModeObject && len(options.Files) != 1 {
+		return parseFail(options, ParseErrObjectFileCount, options.Package, len(args))
+	}
+	if options.Mode == ModeObject && !optionArgIsCFile(options.Files[0]) {
+		return parseFail(options, ParseErrObjectRequiresC, options.Files[0], len(args))
+	}
 	if requireAdvertisedTarget && options.System == "" {
 		if options.WindowsGUI && options.Target != "windows/amd64" && options.Target != "windows/386" && options.Target != "windows/arm64" {
 			return parseFail(options, ParseErrWindowsGUIRequiresWindows, options.Target, windowsGUIAt)
 		}
 		if options.Mode == ModeKernelModule && options.Target != "linux/amd64" {
 			return parseFail(options, ParseErrModeRequiresLinuxAmd64, options.Target, modeAt)
+		}
+		if options.Mode == ModeObject && options.Target != "linux/amd64" {
+			return parseFail(options, ParseErrObjectRequiresLinuxAmd64, options.Target, modeAt)
 		}
 	}
 	return options
@@ -277,8 +308,12 @@ func optionArgIsGoFile(arg string) bool {
 	return len(arg) > 3 && arg[len(arg)-3:] == ".go"
 }
 
+func optionArgIsCFile(arg string) bool {
+	return len(arg) > 2 && arg[len(arg)-2:] == ".c"
+}
+
 func optionArgIsSourceFile(arg string) bool {
-	return optionArgIsGoFile(arg) || len(arg) > 2 && arg[len(arg)-2:] == ".c"
+	return optionArgIsGoFile(arg) || optionArgIsCFile(arg)
 }
 
 func parseBuildTags(value string) ([]string, bool) {

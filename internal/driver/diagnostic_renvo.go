@@ -66,6 +66,12 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			d.Code, d.Message = "RENVO-OPTION-023", "-system cannot be combined with -arena-size"
 		} else if result.Options.Error == ParseErrScriptRequiresGo {
 			d.Code, d.Message = "RENVO-OPTION-028", "-script requires a .go source file"
+		} else if result.Options.Error == ParseErrObjectRequiresLinuxAmd64 {
+			d.Code, d.Message = "RENVO-OPTION-029", "object mode requires linux/amd64"
+		} else if result.Options.Error == ParseErrObjectFileCount {
+			d.Code, d.Message = "RENVO-OPTION-030", "object mode requires exactly one explicit C source file"
+		} else if result.Options.Error == ParseErrObjectRequiresC {
+			d.Code, d.Message = "RENVO-OPTION-031", "object mode requires a .c source file"
 		}
 		return d
 	}

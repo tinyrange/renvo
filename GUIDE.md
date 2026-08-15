@@ -117,9 +117,10 @@ Compile exactly named files:
 renvo -t windows/amd64 -o app.exe main.go platform.go
 ```
 
-Explicit files must be `.go` files in one directory and package. Exactly those
-files are used. For the explicit root file list, build constraints and
-OS/architecture suffixes are ignored and `_test.go` files are skipped.
+Explicit files must be `.go` or `.c` files in one directory and package.
+Exactly those files are used. For the explicit root file list, build
+constraints and OS/architecture suffixes are ignored and test files are
+skipped.
 Dependencies still use normal target selection rules. Prefer package mode when
 you want ordinary Go build selection.
 
@@ -134,6 +135,8 @@ Useful options include:
 - `-emit-unit`: stop after frontend linking and write the canonical unit;
 - `-emit-image`: write the `RNVI` linked-image transport;
 - `-mode=kernel-module`: build a Linux/amd64 kernel module;
+- `cc -c`: compile one standalone C translation unit to a system-linkable
+  Linux/amd64 ELF relocatable object;
 - `-script`: treat one explicit file as a script.
 
 ### Hosted system profiles

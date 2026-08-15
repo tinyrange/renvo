@@ -21527,7 +21527,7 @@ func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, are
 		renvoPrintErr("renvo: parse failed\n")
 		return 1
 	}
-	if targetIsKernelModule(context) {
+	if targetIsKernelModule(context) && !context.objectFile {
 		if !renvoPrepareKernelMetadata() {
 			renvoPrintErr("renvo: kernel metadata unavailable\n")
 			return 1

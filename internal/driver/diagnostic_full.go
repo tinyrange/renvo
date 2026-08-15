@@ -75,6 +75,12 @@ func optionDiagnostic(options Options) Diagnostic {
 		code, message = "RENVO-OPTION-015", "unsupported output mode "+options.ErrorArg
 	case ParseErrModeRequiresLinuxAmd64:
 		code, message = "RENVO-OPTION-016", "kernel-module mode requires linux/amd64"
+	case ParseErrObjectRequiresLinuxAmd64:
+		code, message = "RENVO-OPTION-029", "object mode requires linux/amd64"
+	case ParseErrObjectFileCount:
+		code, message = "RENVO-OPTION-030", "object mode requires exactly one explicit C source file"
+	case ParseErrObjectRequiresC:
+		code, message = "RENVO-OPTION-031", "object mode requires a .c source file"
 	case ParseErrInvalidModuleLicense:
 		code, message = "RENVO-OPTION-017", "invalid renvo:module-license directive"
 	case ParseErrConflictingModuleLicense:

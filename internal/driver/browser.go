@@ -14,7 +14,7 @@ func backendTarget(target string) string {
 }
 
 func backendTargetForOptions(target string, mode string) string {
-	if mode == ModeKernelModule {
+	if mode == ModeKernelModule || mode == ModeObject {
 		return "linux-kernel/amd64"
 	}
 	return backendTarget(target)

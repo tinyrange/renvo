@@ -95,6 +95,38 @@ type scriptSourceFS struct {
 	path string
 }
 
+type objectSourceFS struct {
+	base       SourceFS
+	modulePath string
+}
+
+func (fs objectSourceFS) ReadDir(path string) ([]DirEntry, bool) {
+	entries, ok := fs.base.ReadDir(path)
+	return entries, ok
+}
+
+func (fs objectSourceFS) ReadFile(path string) ([]byte, bool) {
+	if load.CleanPath(path) == fs.modulePath {
+		return []byte("module renvo.c.object\n"), true
+	}
+	src, ok := fs.base.ReadFile(path)
+	return src, ok
+}
+
+func (fs objectSourceFS) PathExists(path string) bool {
+	if load.CleanPath(path) == fs.modulePath {
+		return true
+	}
+	return fs.base.PathExists(path)
+}
+
+func objectSourceWorkDir(workDir string, options Options) string {
+	if options.Mode != ModeObject || len(options.Files) != 1 {
+		return workDir
+	}
+	return load.DirPath(load.CleanPath(load.JoinPath(workDir, options.Files[0])))
+}
+
 func (fs scriptSourceFS) ReadDir(path string) ([]DirEntry, bool) {
 	entries, ok := fs.base.ReadDir(path)
 	return entries, ok
@@ -113,11 +145,17 @@ func (fs scriptSourceFS) PathExists(path string) bool {
 }
 
 func sourceFSForOptions(fs SourceFS, workDir string, options Options) SourceFS {
-	if !options.Script || len(options.Files) != 1 {
-		return fs
+	if options.Mode == ModeObject && len(options.Files) == 1 {
+		fs = objectSourceFS{
+			base:       fs,
+			modulePath: load.CleanPath(load.JoinPath(workDir, "go.mod")),
+		}
 	}
-	return scriptSourceFS{
-		base: fs,
-		path: load.CleanPath(load.JoinPath(workDir, options.Files[0])),
+	if options.Script && len(options.Files) == 1 {
+		fs = scriptSourceFS{
+			base: fs,
+			path: load.CleanPath(load.JoinPath(workDir, options.Files[0])),
+		}
 	}
+	return fs
 }

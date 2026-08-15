@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "d701d64165eb1bc7bb36c36905aa25f81698694823f2813a52bbbf2fdfb79e95"
+const CompilerSourceDigest = "2f173d81f969fc83d6118475e2b78dd4fc83d05ef98357f64923f53bcb17a4b1"
 
 // source: backend/compiler_common_impl.go
 
@@ -21534,7 +21534,7 @@ if !prog.ok {
 renvoPrintErr("renvo: parse failed\n")
 return 1
 }
-if targetIsKernelModule(context) {
+if targetIsKernelModule(context) && !context.objectFile {
 if !renvoPrepareKernelMetadata() {
 renvoPrintErr("renvo: kernel metadata unavailable\n")
 return 1
@@ -22687,6 +22687,7 @@ var renvoKernelModuleNameOff int
 var renvoKernelModuleInitOff int
 var renvoKernelModuleExitOff int
 var renvoKernelLicense string
+var renvoCompilerObjectFile bool
 
 func renvoOpenArg(path string, env []string) int {
 directFd := open(path, O_RDONLY)
@@ -22783,6 +22784,7 @@ target := renvoDefaultTarget
 arenaSize := 0
 renvoCompilerStripSymbols = false
 renvoCompilerEmitImage = false
+renvoCompilerObjectFile = false
 renvoCompilerWindowsSubsystem = 3
 if len(args) == 0 {
 renvoPrintErr("renvo: missing output path (-o)\n")
@@ -22799,6 +22801,11 @@ continue
 }
 if arg == "-emit-image" {
 renvoCompilerEmitImage = true
+i++
+continue
+}
+if arg == "-object" {
+renvoCompilerObjectFile = true
 i++
 continue
 }
@@ -25010,6 +25017,7 @@ renvoNativeIntSize int
 stripSymbols       bool
 windowsSubsystem   int
 emitImage          bool
+objectFile         bool
 optimizeRuntime    bool
 kernel             *renvoKernelCompileContext
 }
@@ -25023,6 +25031,7 @@ context.renvoTarget = target
 context.stripSymbols = stripSymbols
 context.windowsSubsystem = 3
 context.emitImage = emitImage
+context.objectFile = renvoCompilerObjectFile
 if windowsGUI {
 context.windowsSubsystem = 2
 }
@@ -25050,6 +25059,7 @@ context := new(renvoCompileContext)
 context.stripSymbols = renvoCompilerStripSymbols
 context.windowsSubsystem = renvoCompilerWindowsSubsystem
 context.emitImage = renvoCompilerEmitImage
+context.objectFile = renvoCompilerObjectFile
 context.renvoTarget = renvoTarget
 context.renvoTargetOS = renvoTargetOS
 context.renvoTargetArch = renvoTargetArch
@@ -25621,6 +25631,7 @@ WindowsGUI     bool
 EmitImage      bool
 ModuleLicense  string
 ModuleNamePath string
+ObjectFile     bool
 }
 
 
@@ -25654,6 +25665,7 @@ if target == 0 || !renvoCompileOptionsValid(target, options) {
 return nil, false
 }
 context := renvoNewCompileContext(target, options.StripSymbols, options.WindowsGUI, options.EmitImage)
+context.objectFile = options.ObjectFile
 moduleNamePath := options.ModuleNamePath
 if moduleNamePath == "" {
 moduleNamePath = "renvo"
@@ -25677,6 +25689,7 @@ if target == 0 || !renvoCompileOptionsValid(target, options) {
 return false
 }
 context := renvoNewCompileContext(target, options.StripSymbols, options.WindowsGUI, options.EmitImage)
+context.objectFile = options.ObjectFile
 renvoConfigureCompileContext(context, targetName, outputPath, options.ModuleLicense)
 prog := renvoParseProgramWithContext(source, context)
 result := renvoCompileParsedProgramArena(&prog, target, options.ArenaSize)
@@ -25713,6 +25726,7 @@ if target == 0 || !renvoCompileOptionsValid(target, options) ||
 return false
 }
 context := renvoNewCompileContext(target, options.StripSymbols, options.WindowsGUI, options.EmitImage)
+context.objectFile = options.ObjectFile
 renvoConfigureCompileContext(context, targetName, outputPath, options.ModuleLicense)
 prog, isUnit, ok := renvoDecodeUnitProgram(unit)
 if !isUnit || !ok {
@@ -25733,6 +25747,7 @@ if target == 0 || !renvoCompileOptionsValid(target, options) ||
 return nil, false
 }
 context := renvoNewCompileContext(target, options.StripSymbols, options.WindowsGUI, options.EmitImage)
+context.objectFile = options.ObjectFile
 moduleNamePath := options.ModuleNamePath
 if moduleNamePath == "" {
 moduleNamePath = "renvo"
@@ -25763,7 +25778,11 @@ return false
 }
 write(output, renvoCompileOutputDataWithContext(context, result.data, context.renvoTarget), -1)
 if outputPath != "-" {
-chmod(output, 493)
+mode := 493
+if context.objectFile {
+mode = 420
+}
+chmod(output, mode)
 close(output)
 }
 return true
@@ -25804,6 +25823,7 @@ s.done = true
 return true
 }
 s.context = renvoNewCompileContext(s.target, s.options.StripSymbols, s.options.WindowsGUI, s.options.EmitImage)
+s.context.objectFile = s.options.ObjectFile
 renvoConfigureCompileContext(s.context, s.targetName, s.outputPath, s.options.ModuleLicense)
 prog, isUnit, decoded := renvoDecodeUnitProgram(s.unit)
 if !isUnit || !decoded {
@@ -25816,7 +25836,7 @@ s.stage = 1
 return false
 }
 if s.stage == 1 {
-if s.target == renvoTargetLinuxKernelAmd64 {
+if s.target == renvoTargetLinuxKernelAmd64 && !s.context.objectFile {
 if !renvoPrepareKernelMetadata() {
 s.done = true
 return true
@@ -25877,8 +25897,8 @@ var result renvoCompileResult
 if !prog.ok {
 return result
 }
-if target == renvoTargetLinuxKernelAmd64 || target == renvoTargetRTG &&
-renvoRTGPreparedKernelModule != 0 {
+if !prog.c.objectFile && (target == renvoTargetLinuxKernelAmd64 || target == renvoTargetRTG &&
+renvoRTGPreparedKernelModule != 0) {
 if !renvoPrepareKernelMetadata() {
 return result
 }
@@ -27621,7 +27641,11 @@ if targetIsWindows(g.c.renvoTargetOS) {
 data = renvoAsmImageWindowsAmd64(a)
 } else if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
 renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
+if g.c.objectFile {
+data = renvoAsmImageObjectAmd64(a, g.kernelInitLabel)
+} else {
 data = renvoAsmImageKernelModuleAmd64(a, g.kernelInitLabel, g.kernelExitLabel)
+}
 } else {
 data = renvoAsmImageAmd64(a)
 }
@@ -35535,6 +35559,14 @@ renvoAsmMarkLabel(a, g.kernelInitLabel)
 
 renvoAmd64KernelEntryPrologue(a)
 renvoLinearMarkFunc(g, appIndex)
+if g.c.objectFile {
+
+
+
+renvoAsmCallLabel(a, g.funcLabels[appIndex])
+renvoAmd64KernelEntryEpilogue(a)
+return true
+}
 if !g.meta.panicEnabled {
 renvoAmd64InitRuntimeCheckRegs(g)
 }
@@ -35653,6 +35685,151 @@ if len(out) == 0 {
 return "renvo"
 }
 return string(out)
+}
+
+
+
+
+
+
+func renvoAsmImageObjectAmd64(emitter *renvoAsm, mainLabel int) []byte {
+renvoNonNil(emitter)
+renvoAsmPatch(emitter)
+mainPosition := renvoAsmLabelPosition(emitter, mainLabel)
+if mainPosition < 0 {
+return nil
+}
+
+var strings []byte
+strings = append(strings, 0)
+mainName := len(strings)
+strings = rtgBuiltinElf64ObjectX8664AppendString(strings, "main")
+var importNames []int
+for i := 0; i < renvoKernelAmd64ExternalImportCount(emitter); i++ {
+importNames = append(importNames, len(strings))
+strings = rtgBuiltinElf64ObjectX8664AppendString(
+strings, renvoKernelAmd64ExternalImportName(emitter, i),
+)
+}
+
+var symbols []byte
+symbols = rtgBuiltinElfAmd64PackageKernelAppendSymbol(symbols, 0, 0, 0, 0, 0)
+symbols = rtgBuiltinElfAmd64PackageKernelAppendSymbol(symbols, 0, 3, 1, 0, 0)
+symbols = rtgBuiltinElfAmd64PackageKernelAppendSymbol(symbols, 0, 3, 3, 0, 0)
+symbols = rtgBuiltinElfAmd64PackageKernelAppendSymbol(symbols, 0, 3, 4, 0, 0)
+symbols = rtgBuiltinElfAmd64PackageKernelAppendSymbol(
+symbols, mainName, 18, 1, mainPosition, 0,
+)
+var importSymbols []int
+for i := 0; i < len(importNames); i++ {
+importSymbols = append(importSymbols, len(symbols)/24)
+symbols = rtgBuiltinElfAmd64PackageKernelAppendSymbol(
+symbols, importNames[i], 16, 0, 0, 0,
+)
+}
+
+var textRelocations []byte
+for i := 0; i < len(emitter.absRelocs)/3; i++ {
+at := renvoKernelAmd64AbsoluteRelocationOffset(emitter, i)
+addend := renvoKernelAmd64AbsoluteRelocationAddend(emitter, i)
+kind := renvoKernelAmd64AbsoluteRelocationKind(emitter, i)
+if kind == renvoKernelAmd64RelocationAbsoluteBSS {
+textRelocations = rtgBuiltinElfAmd64PackageKernelAppendRelocation(
+textRelocations, at, 3, 2, addend-4,
+)
+} else if kind == renvoKernelAmd64RelocationAbsoluteBSSEnd {
+alignment := addend
+if alignment <= 0 {
+alignment = 1
+}
+textRelocations = rtgBuiltinElfAmd64PackageKernelAppendRelocation(
+textRelocations, at, 3, 2,
+renvoAlignValue(emitter.bssSize, alignment)-4,
+)
+} else if kind == renvoKernelAmd64RelocationImport {
+if addend < 0 || addend >= len(importSymbols) {
+return nil
+}
+textRelocations = rtgBuiltinElfAmd64PackageKernelAppendRelocation(
+textRelocations, at, importSymbols[addend], 4, -4,
+)
+} else {
+textRelocations = rtgBuiltinElfAmd64PackageKernelAppendRelocation(
+textRelocations, at, 2, 2, addend-4,
+)
+}
+}
+
+var sectionNames []byte
+sectionNames = append(sectionNames, 0)
+textName := len(sectionNames)
+sectionNames = rtgBuiltinElf64ObjectX8664AppendString(sectionNames, ".text")
+textRelocationName := len(sectionNames)
+sectionNames = rtgBuiltinElf64ObjectX8664AppendString(sectionNames, ".rela.text")
+dataName := len(sectionNames)
+sectionNames = rtgBuiltinElf64ObjectX8664AppendString(sectionNames, ".rodata")
+bssName := len(sectionNames)
+sectionNames = rtgBuiltinElf64ObjectX8664AppendString(sectionNames, ".bss")
+symbolName := len(sectionNames)
+sectionNames = rtgBuiltinElf64ObjectX8664AppendString(sectionNames, ".symtab")
+stringName := len(sectionNames)
+sectionNames = rtgBuiltinElf64ObjectX8664AppendString(sectionNames, ".strtab")
+sectionStringName := len(sectionNames)
+sectionNames = rtgBuiltinElf64ObjectX8664AppendString(sectionNames, ".shstrtab")
+
+code := emitter.code
+data := emitter.data
+var image []byte
+image = rtgBuiltinElf64ObjectX8664Until(image, 64)
+textOffset := renvoAlignValue(len(image), 16)
+image = rtgBuiltinElf64ObjectX8664Until(image, textOffset)
+image = append(image, code...)
+textRelocationOffset := renvoAlignValue(len(image), 8)
+image = rtgBuiltinElf64ObjectX8664Until(image, textRelocationOffset)
+image = append(image, textRelocations...)
+dataOffset := renvoAlignValue(len(image), 8)
+image = rtgBuiltinElf64ObjectX8664Until(image, dataOffset)
+image = append(image, data...)
+bssOffset := len(image)
+symbolOffset := renvoAlignValue(len(image), 8)
+image = rtgBuiltinElf64ObjectX8664Until(image, symbolOffset)
+image = append(image, symbols...)
+stringOffset := len(image)
+image = append(image, strings...)
+sectionStringOffset := len(image)
+image = append(image, sectionNames...)
+sectionOffset := renvoAlignValue(len(image), 8)
+image = rtgBuiltinElf64ObjectX8664Until(image, sectionOffset)
+image = rtgBuiltinElfAmd64PackageKernelAppendSection(image, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+image = rtgBuiltinElfAmd64PackageKernelAppendSection(
+image, textName, 1, 6, textOffset, len(code), 0, 0, 16, 0,
+)
+image = rtgBuiltinElfAmd64PackageKernelAppendSection(
+image, textRelocationName, 4, 64, textRelocationOffset,
+len(textRelocations), 5, 1, 8, 24,
+)
+image = rtgBuiltinElfAmd64PackageKernelAppendSection(
+image, dataName, 1, 2, dataOffset, len(data), 0, 0, 8, 0,
+)
+image = rtgBuiltinElfAmd64PackageKernelAppendSection(
+image, bssName, 8, 3, bssOffset, emitter.bssSize, 0, 0, 8, 0,
+)
+image = rtgBuiltinElfAmd64PackageKernelAppendSection(
+image, symbolName, 2, 0, symbolOffset, len(symbols), 6, 4, 8, 24,
+)
+image = rtgBuiltinElfAmd64PackageKernelAppendSection(
+image, stringName, 3, 0, stringOffset, len(strings), 0, 0, 1, 0,
+)
+image = rtgBuiltinElfAmd64PackageKernelAppendSection(
+image, sectionStringName, 3, 0, sectionStringOffset,
+len(sectionNames), 0, 0, 1, 0,
+)
+var header []byte
+header = rtgBuiltinElfAmd64PackageKernelAppendELFHeader(header, sectionOffset, 8, 7)
+for i := 0; i < len(header); i++ {
+image[i] = header[i]
+}
+return image
 }
 
 func renvoKernelReadFile(path string) []byte {

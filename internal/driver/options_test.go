@@ -67,10 +67,27 @@ func TestCommandHelpRequested(t *testing.T) {
 	if CommandHelpRequested([]string{"renvo", "-o", "app", "."}) {
 		t.Fatal("compile command requested help")
 	}
-	for _, want := range []string{"Usage: renvo", "-o <file>", "-system <file.rtg>", "-mode=<mode>", "kernel-module", "source files...", "Explicit .go and .c files", "Exactly the named files", "windows/amd64", "windows/arm64", "darwin/arm64", "wasi/wasm32", "vm/vm32"} {
+	for _, want := range []string{"Usage: renvo", "renvo cc -c", "-o <file>", "-system <file.rtg>", "-mode=<mode>", "kernel-module", "object", "source files...", "Explicit .go and .c files", "Exactly the named files", "windows/amd64", "windows/arm64", "darwin/arm64", "wasi/wasm32", "vm/vm32"} {
 		if !strings.Contains(HelpText, want) {
 			t.Fatalf("HelpText missing %q", want)
 		}
+	}
+}
+
+func TestNormalizeCCompilerCommand(t *testing.T) {
+	args := NormalizeCCompilerCommand([]string{"renvo", "cc", "-c", "hello.c", "-o", "hello.o"})
+	want := []string{"renvo", "-c", "hello.c", "-o", "hello.o"}
+	if len(args) != len(want) {
+		t.Fatalf("normalized args = %#v", args)
+	}
+	for i := 0; i < len(want); i++ {
+		if args[i] != want[i] {
+			t.Fatalf("normalized args = %#v", args)
+		}
+	}
+	options := ParseOptions(args[1:])
+	if !options.Ok || options.Mode != ModeObject || options.Target != "linux/amd64" || options.Package != "hello.c" || options.Output != "hello.o" {
+		t.Fatalf("C compiler options = %#v", options)
 	}
 }
 
@@ -125,6 +142,10 @@ func TestParseOptionsRejectsInvalidInputs(t *testing.T) {
 		{name: "missing mode", args: []string{"-mode=", "-o", "app", "main.go"}, err: ParseErrMissingMode, arg: "-mode=", at: 0},
 		{name: "unsupported mode", args: []string{"-mode=firmware", "-o", "app", "main.go"}, err: ParseErrUnsupportedMode, arg: "firmware", at: 0},
 		{name: "kernel module on non-Linux target", args: []string{"-mode=kernel-module", "-t", "windows/amd64", "-o", "app.ko", "main.go"}, err: ParseErrModeRequiresLinuxAmd64, arg: "windows/amd64", at: 0},
+		{name: "object on non-Linux target", args: []string{"-c", "-t", "windows/amd64", "-o", "app.o", "main.c"}, err: ParseErrObjectRequiresLinuxAmd64, arg: "windows/amd64", at: 0},
+		{name: "object package mode", args: []string{"-c", "-o", "app.o", "./cmd/app"}, err: ParseErrObjectFileCount, arg: "./cmd/app", at: 4},
+		{name: "object multiple files", args: []string{"-c", "-o", "app.o", "main.c", "other.c"}, err: ParseErrObjectFileCount, arg: "main.c", at: 5},
+		{name: "object Go file", args: []string{"-c", "-o", "app.o", "main.go"}, err: ParseErrObjectRequiresC, arg: "main.go", at: 4},
 		{name: "C script", args: []string{"-script", "-o", "app", "main.c"}, err: ParseErrScriptRequiresGo, arg: "main.c", at: 4},
 	}
 	for i := 0; i < len(tests); i++ {
