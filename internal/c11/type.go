@@ -60,6 +60,7 @@ type cField struct {
 	bitWidth  int
 	carrier   string
 	emit      bool
+	synthetic bool
 }
 
 type cTypeName struct {

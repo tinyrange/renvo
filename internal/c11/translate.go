@@ -52,6 +52,17 @@ type declaratorOp struct {
 	params []parameter
 }
 
+type initializerPath struct {
+	start  int
+	count  int
+	typeID int
+}
+
+type initializerStep struct {
+	field int
+	index int
+}
+
 type translator struct {
 	src            []byte
 	tokens         []token
@@ -412,7 +423,7 @@ func (t *translator) parseAggregateType(union bool) (int, bool) {
 						t.typeSerial++
 						bitCarrier = "__c_bits_" + decimalString(t.typeSerial)
 						aggregateFields = append(aggregateFields, cField{
-							name: bitCarrier, typeID: storageType, offset: bitOffset, emit: true,
+							name: bitCarrier, typeID: storageType, offset: bitOffset, emit: true, synthetic: true,
 						})
 					}
 					if len(tokenText(t.src, field.name)) > 0 {
@@ -1432,8 +1443,7 @@ func (t *translator) emitVariableName(name string, decl declarator) {
 		t.out = append(t.out, '=')
 		kind := t.typeInfo(decl.typeID).kind
 		if (kind == cTypeArray || kind == cTypeStruct) && tokenIs(t.src, decl.initializer[0], "{") {
-			t.emitType(decl.typeID)
-			t.emitAggregateInitializer(decl.typeID, decl.initializer)
+			t.emitInitializerValue(decl.typeID, decl.initializer)
 		} else if kind == cTypeUnion && tokenIs(t.src, decl.initializer[0], "{") {
 			t.emitUnionInitializer(decl.typeID, decl.initializer)
 		} else {
@@ -1861,12 +1871,7 @@ func (t *translator) emitExpression(tokens []token) {
 				if typeID, ok := t.typeFromTokens(tokens[i+1 : close]); ok && end > close+1 {
 					kind := t.typeInfo(typeID).kind
 					if kind == cTypeStruct || kind == cTypeArray || kind == cTypeUnion {
-						if kind == cTypeUnion {
-							t.emitUnionInitializer(typeID, tokens[close+1:end+1])
-						} else {
-							t.emitType(typeID)
-							t.emitAggregateInitializer(typeID, tokens[close+1:end+1])
-						}
+						t.emitInitializerValue(typeID, tokens[close+1:end+1])
 						i = end
 						continue
 					}
@@ -2015,7 +2020,7 @@ func (t *translator) emitAggregateInitializer(typeID int, tokens []token) {
 				valueType = info.base
 				arrayIndex++
 			} else {
-				for fieldIndex < info.fieldCount && !t.fields[info.fieldStart+fieldIndex].emit {
+				for fieldIndex < info.fieldCount && t.fields[info.fieldStart+fieldIndex].synthetic {
 					fieldIndex++
 				}
 				if fieldIndex >= info.fieldCount {
@@ -2023,30 +2028,220 @@ func (t *translator) emitAggregateInitializer(typeID int, tokens []token) {
 					return
 				}
 				field := t.fields[info.fieldStart+fieldIndex]
-				if field.bitWidth != 0 {
-					t.fail(TranslateErrUnsupported)
-					return
-				}
 				valueType = field.typeID
 				fieldIndex++
 				t.out = append(t.out, field.name...)
 				t.out = append(t.out, ':')
 			}
 		}
-		valueInfo := t.typeInfo(valueType)
-		if len(value) > 0 && tokenIs(t.src, value[0], "{") && (valueInfo.kind == cTypeStruct || valueInfo.kind == cTypeArray || valueInfo.kind == cTypeUnion) {
-			if valueInfo.kind == cTypeUnion {
-				t.emitUnionInitializer(valueType, value)
-			} else {
-				t.emitType(valueType)
-				t.emitAggregateInitializer(valueType, value)
-			}
-		} else {
-			t.expression(value)
-		}
+		t.emitInitializerValue(valueType, value)
 		written++
 	}
 	t.out = append(t.out, '}')
+}
+
+func (t *translator) emitInitializerValue(typeID int, value []token) {
+	info := t.typeInfo(typeID)
+	if len(value) > 0 && tokenIs(t.src, value[0], "{") && (info.kind == cTypeStruct || info.kind == cTypeArray || info.kind == cTypeUnion) {
+		if info.kind == cTypeUnion {
+			t.emitUnionInitializer(typeID, value)
+		} else {
+			if t.emitMutationInitializer(typeID, value) {
+				return
+			}
+			t.emitType(typeID)
+			t.emitAggregateInitializer(typeID, value)
+		}
+		return
+	}
+	t.expression(value)
+}
+
+func (t *translator) emitMutationInitializer(typeID int, tokens []token) bool {
+	info := t.typeInfo(typeID)
+	items := splitTopLevel(t.src, tokens[1:len(tokens)-1], ",")
+	paths := make([]initializerPath, 0, len(items))
+	values := make([][]token, 0, len(items))
+	steps := make([]initializerStep, 0, len(items))
+	next := 0
+	mutation := false
+	for i := 0; i < len(items); i++ {
+		item := items[i]
+		if len(item) == 0 {
+			continue
+		}
+		path := initializerPath{start: len(steps), typeID: typeID}
+		at := 0
+		if tokenIs(t.src, item[0], ".") || tokenIs(t.src, item[0], "[") {
+			mutation = true
+			first := true
+			for at < len(item) && (tokenIs(t.src, item[at], ".") || tokenIs(t.src, item[at], "[")) {
+				current := t.typeInfo(path.typeID)
+				if tokenIs(t.src, item[at], ".") {
+					if at+1 >= len(item) || tokenKind(item[at+1]) != tokenIdent || current.kind != cTypeStruct && current.kind != cTypeUnion {
+						t.fail(TranslateErrUnsupported)
+						return true
+					}
+					fieldIndex := -1
+					for j := 0; j < current.fieldCount; j++ {
+						field := t.fields[current.fieldStart+j]
+						if !field.synthetic && textEquals(tokenText(t.src, item[at+1]), field.name) {
+							fieldIndex = current.fieldStart + j
+							break
+						}
+					}
+					if fieldIndex < 0 {
+						t.fail(TranslateErrUnsupported)
+						return true
+					}
+					steps = append(steps, initializerStep{field: fieldIndex})
+					path.typeID = t.fields[fieldIndex].typeID
+					if first && info.kind == cTypeStruct {
+						next = fieldIndex - info.fieldStart + 1
+					}
+					at += 2
+				} else {
+					close := matchingToken(t.src, item, at, "[", "]")
+					if close <= at+1 || current.kind != cTypeArray {
+						t.fail(TranslateErrUnsupported)
+						return true
+					}
+					index, ok := t.constantExpression(item[at+1 : close])
+					if !ok || index < 0 || index >= current.count {
+						t.fail(TranslateErrUnsupported)
+						return true
+					}
+					steps = append(steps, initializerStep{field: -1, index: index})
+					path.typeID = current.base
+					if first && info.kind == cTypeArray {
+						next = index + 1
+					}
+					at = close + 1
+				}
+				first = false
+			}
+			if at >= len(item) || !tokenIs(t.src, item[at], "=") {
+				t.fail(TranslateErrUnsupported)
+				return true
+			}
+			at++
+		} else if info.kind == cTypeArray {
+			if next >= info.count {
+				t.fail(TranslateErrUnsupported)
+				return true
+			}
+			steps = append(steps, initializerStep{field: -1, index: next})
+			path.typeID = info.base
+			next++
+		} else {
+			for next < info.fieldCount && t.fields[info.fieldStart+next].synthetic {
+				next++
+			}
+			if next >= info.fieldCount {
+				t.fail(TranslateErrUnsupported)
+				return true
+			}
+			fieldIndex := info.fieldStart + next
+			steps = append(steps, initializerStep{field: fieldIndex})
+			path.typeID = t.fields[fieldIndex].typeID
+			if t.fields[fieldIndex].bitWidth > 0 {
+				mutation = true
+			}
+			next++
+		}
+		path.count = len(steps) - path.start
+		paths = append(paths, path)
+		values = append(values, item[at:])
+	}
+	if !mutation {
+		return false
+	}
+	t.typeSerial++
+	name := "__c_aggregate_init_" + decimalString(t.typeSerial)
+	t.out = append(t.out, name...)
+	t.out = append(t.out, '(')
+	for i := 0; i < len(paths); i++ {
+		if i > 0 {
+			t.out = append(t.out, ',')
+		}
+		t.emitInitializerValue(paths[i].typeID, values[i])
+	}
+	t.out = append(t.out, ')')
+	outer := t.out
+	t.out = t.staticOut
+	t.out = append(t.out, "func "...)
+	t.out = append(t.out, name...)
+	t.out = append(t.out, '(')
+	for i := 0; i < len(paths); i++ {
+		if i > 0 {
+			t.out = append(t.out, ',')
+		}
+		t.out = append(t.out, 'v')
+		t.appendDecimal(i)
+		t.out = append(t.out, ' ')
+		last := steps[paths[i].start+paths[i].count-1]
+		if last.field >= 0 && t.typeInfo(paths[i].typeID).kind == cTypeBool && t.fields[last.field].bitWidth > 0 {
+			t.out = append(t.out, "uint8"...)
+		} else {
+			t.emitType(paths[i].typeID)
+		}
+	}
+	t.out = append(t.out, ") "...)
+	t.emitType(typeID)
+	t.out = append(t.out, "{var p "...)
+	t.emitType(typeID)
+	t.out = append(t.out, ';')
+	for i := 0; i < len(paths); i++ {
+		path := paths[i]
+		last := steps[path.start+path.count-1]
+		if last.field >= 0 && t.fields[last.field].bitWidth > 0 {
+			t.emitInitializerPath(steps[path.start:path.start+path.count-1], typeID)
+			t.out = append(t.out, ".__c_set_"...)
+			t.out = append(t.out, t.fields[last.field].name...)
+			t.out = append(t.out, "(v"...)
+			t.appendDecimal(i)
+			t.out = append(t.out, ");"...)
+		} else {
+			t.emitInitializerPath(steps[path.start:path.start+path.count], typeID)
+			t.out = append(t.out, "=v"...)
+			t.appendDecimal(i)
+			t.out = append(t.out, ';')
+		}
+	}
+	t.out = append(t.out, "return p}\n"...)
+	t.staticOut = t.out
+	t.out = outer
+	return true
+}
+
+func (t *translator) emitInitializerPath(steps []initializerStep, typeID int) {
+	outer := t.out
+	t.out = nil
+	t.out = append(t.out, 'p')
+	for i := 0; i < len(steps); i++ {
+		step := steps[i]
+		if step.field < 0 {
+			t.out = append(t.out, '[')
+			t.appendDecimal(step.index)
+			t.out = append(t.out, ']')
+			typeID = t.typeInfo(typeID).base
+			continue
+		}
+		field := t.fields[step.field]
+		if t.typeInfo(typeID).kind == cTypeUnion {
+			receiver := t.out
+			t.out = append([]byte("(*"), receiver...)
+			t.out = append(t.out, ".__c_ptr_"...)
+			t.out = append(t.out, field.name...)
+			t.out = append(t.out, "())"...)
+		} else {
+			t.out = append(t.out, '.')
+			t.out = append(t.out, field.name...)
+		}
+		typeID = field.typeID
+	}
+	outer = append(outer, t.out...)
+	t.out = outer
 }
 
 func (t *translator) emitUnionInitializer(typeID int, tokens []token) {
@@ -2098,17 +2293,7 @@ func (t *translator) emitUnionInitializer(typeID int, tokens []token) {
 	name := "__c_union_init_" + decimalString(t.typeSerial)
 	t.out = append(t.out, name...)
 	t.out = append(t.out, '(')
-	valueInfo := t.typeInfo(field.typeID)
-	if len(value) > 0 && tokenIs(t.src, value[0], "{") && (valueInfo.kind == cTypeStruct || valueInfo.kind == cTypeArray || valueInfo.kind == cTypeUnion) {
-		if valueInfo.kind == cTypeUnion {
-			t.emitUnionInitializer(field.typeID, value)
-		} else {
-			t.emitType(field.typeID)
-			t.emitAggregateInitializer(field.typeID, value)
-		}
-	} else {
-		t.expression(value)
-	}
+	t.emitInitializerValue(field.typeID, value)
 	t.out = append(t.out, ')')
 	outer := t.out
 	t.out = t.staticOut
