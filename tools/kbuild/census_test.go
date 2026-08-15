@@ -2,7 +2,7 @@ package main
 
 import "testing"
 
-func TestShellWordsAndFlagClassification(t *testing.T) {
+func TestCensusShellWordsAndFlagClassification(t *testing.T) {
 	words := shellWords(`cc -DNAME='kernel value' -Wp,-MMD,obj.d -c source.c -o source.o`)
 	if len(words) != 7 || words[1] != "-DNAME=kernel value" || words[3] != "-c" || classifyFlag(words[2]) != "-Wp," {
 		t.Fatalf("words/classification = %#v/%q", words, classifyFlag(words[2]))

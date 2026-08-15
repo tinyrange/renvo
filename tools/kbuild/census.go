@@ -1,4 +1,4 @@
-// Command renvokbuildcensus summarizes a prepared Linux build tree without
+// Command census summarizes a prepared Linux build tree without
 // modifying it. The JSON output is a blocker dashboard, not a compatibility
 // gate: time and memory are telemetry while semantic progress is monotonic.
 package main

@@ -45,5 +45,5 @@ fi
 readelf -h "$tree/scripts/mod/empty.o" | rg -q 'Type:[[:space:]]+REL \(Relocatable file\)'
 rg -q 'savedcmd_scripts/mod/empty.o := .*renvo cc' "$tree/scripts/mod/.empty.o.cmd"
 
-(cd "$repository_root" && go run ./cmd/renvokbuildcensus -kernel "$tree" -metrics "$metrics" -out "$dashboard")
+(cd "$repository_root" && go run ./tools/kbuild -kernel "$tree" -metrics "$metrics" -out "$dashboard")
 printf 'gate=PASS\nlog=%s\ndashboard=%s\n' "$log" "$dashboard"
