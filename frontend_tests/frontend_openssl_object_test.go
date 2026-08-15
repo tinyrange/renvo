@@ -52,26 +52,7 @@ func runGoOpenSSLObjectSystemLink(
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
 		t.Skip("the hosted OpenSSL object target is Linux/amd64")
 	}
-	linkerDriver, err := exec.LookPath("cc")
-	if err != nil {
-		t.Skip("system C linker driver is unavailable")
-	}
-	pkgConfig, err := exec.LookPath("pkg-config")
-	if err != nil {
-		t.Skip("pkg-config is unavailable")
-	}
-	probe := exec.Command(pkgConfig, "--exists", "openssl")
-	if err := probe.Run(); err != nil {
-		t.Skip("system OpenSSL development package is unavailable")
-	}
-	flagsOutput, err := exec.Command(pkgConfig, "--libs", "openssl").Output()
-	if err != nil {
-		t.Fatalf("query OpenSSL linker flags: %v", err)
-	}
-	linkFlags := strings.Fields(string(flagsOutput))
-	if len(linkFlags) == 0 {
-		t.Fatal("pkg-config returned no OpenSSL linker flags")
-	}
+	system := requireSystemOpenSSL(t)
 
 	dir := t.TempDir()
 	source := filepath.Join(root, "frontend_tests", "testdata", "openssl_object.go")
@@ -163,12 +144,54 @@ func runGoOpenSSLObjectSystemLink(
 		t.Fatal(err)
 	}
 	linkArgs := []string{harness, object, "-o", executable}
-	linkArgs = append(linkArgs, linkFlags...)
-	link := exec.Command(linkerDriver, linkArgs...)
+	linkArgs = append(linkArgs, system.linkArgs...)
+	link := exec.Command(system.linker, linkArgs...)
 	if combined, err := link.CombinedOutput(); err != nil {
 		t.Fatalf("system-link Renvo OpenSSL object: %v\n%s", err, combined)
 	}
 	if combined, err := exec.Command(executable).CombinedOutput(); err != nil {
 		t.Fatalf("run linked OpenSSL object: %v, output %q", err, combined)
+	}
+}
+
+type systemOpenSSLConfig struct {
+	linker      string
+	includeArgs []string
+	linkArgs    []string
+}
+
+func requireSystemOpenSSL(t *testing.T) systemOpenSSLConfig {
+	t.Helper()
+	linker, err := exec.LookPath("cc")
+	if err != nil {
+		t.Skip("system C linker driver is unavailable")
+	}
+	pkgConfig, err := exec.LookPath("pkg-config")
+	if err != nil {
+		t.Skip("pkg-config is unavailable")
+	}
+	if err := exec.Command(pkgConfig, "--exists", "openssl").Run(); err != nil {
+		t.Skip("system OpenSSL development package is unavailable")
+	}
+	cflagsOutput, err := exec.Command(pkgConfig, "--cflags", "openssl").Output()
+	if err != nil {
+		t.Fatalf("query OpenSSL compiler flags: %v", err)
+	}
+	var includeArgs []string
+	for _, flag := range strings.Fields(string(cflagsOutput)) {
+		if strings.HasPrefix(flag, "-I") && len(flag) > 2 {
+			includeArgs = append(includeArgs, flag)
+		}
+	}
+	linkOutput, err := exec.Command(pkgConfig, "--libs", "openssl").Output()
+	if err != nil {
+		t.Fatalf("query OpenSSL linker flags: %v", err)
+	}
+	linkArgs := strings.Fields(string(linkOutput))
+	if len(linkArgs) == 0 {
+		t.Fatal("pkg-config returned no OpenSSL linker flags")
+	}
+	return systemOpenSSLConfig{
+		linker: linker, includeArgs: includeArgs, linkArgs: linkArgs,
 	}
 }

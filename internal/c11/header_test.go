@@ -32,3 +32,13 @@ func TestBuildObjectPreludeReportsMissingHeaderAtDirective(t *testing.T) {
 		t.Fatalf("BuildObjectPrelude missing header = %#v", result)
 	}
 }
+
+func TestBuildObjectPreludeAcceptsDefaultExternalLibraryPrototypes(t *testing.T) {
+	source := []byte("#include <crypto.h>\nint main(void) { return EVP_DigestUpdate(0, 0, 0); }\n")
+	header := []byte("static int private_helper(void);\n#define UNUSED_HELPER() private_helper()\n#endif\n__owur int EVP_DigestUpdate(EVP_MD_CTX *ctx, const void *data, size_t count);\n")
+	result := BuildObjectPrelude("/tmp/main.c", source, headerTestReader{name: "crypto.h", src: header})
+	want := []byte("int EVP_DigestUpdate ( EVP_MD_CTX * ctx , const void * data , size_t count );\n")
+	if !result.Ok || !bytes.Equal(result.Prelude, want) {
+		t.Fatalf("BuildObjectPrelude library prototype = %#v, prelude %q", result, result.Prelude)
+	}
+}
