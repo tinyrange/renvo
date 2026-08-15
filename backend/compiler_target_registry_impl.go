@@ -52,7 +52,7 @@ func renvoParseTargetArg(target string) int {
 
 func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
 	if target == renvoTargetLinuxAmd64 {
-		return "linux/amd64", "%Bf\xb5\x19\xe4\x0fD;\xd3\x0eD\xcc\x00{T\x06\x8a@\x12ϣ\x1f\x95Fwg'\x85\xff\xbf\xed", 3, true
+		return "linux/amd64", "\x00\x83\xf7\xf9,Z\xfc\"z\xb0\x04\xbb\xaa\x86\x1e\xd0jaL\x8e\x1d\xe8\xe5\x13:j\x8e6,\xebp\xe1", 3, true
 	}
 	if target == renvoTargetLinux386 {
 		return "linux/386", "\x1e\xd2A\xf1+&cc\xf9\xb3(0\xa2\xb5\xb9j<\x01\xe4\x0eLd\x8ch\x99\xf2X_o\x9a\xe7\x94", 3, true

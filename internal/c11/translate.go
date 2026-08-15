@@ -32,6 +32,7 @@ type declarator struct {
 	typeID      int
 	params      []parameter
 	function    bool
+	variadic    bool
 	initializer []token
 }
 
@@ -47,9 +48,10 @@ const (
 )
 
 type declaratorOp struct {
-	kind   int
-	count  int
-	params []parameter
+	kind     int
+	count    int
+	params   []parameter
+	variadic bool
 }
 
 type initializerPath struct {
@@ -83,6 +85,7 @@ type translator struct {
 	tentatives     []cObjectName
 	definitions    []cObjectName
 	functions      []cFunctionName
+	variadicCalls  []cVariadicCall
 	functionParams []int
 	typeSerial     int
 	dataModel      int
@@ -233,6 +236,10 @@ func (t *translator) externalDeclaration() {
 		}
 		if !t.currentIs("{") {
 			t.fail(TranslateErrDeclaration)
+			return
+		}
+		if decl.variadic {
+			t.fail(TranslateErrUnsupported)
 			return
 		}
 		if !t.rememberFunction(decl, true) {
@@ -586,7 +593,7 @@ func (t *translator) rememberFunction(decl declarator, definition bool) bool {
 		if fn.name != name {
 			continue
 		}
-		if fn.resultType != decl.typeID || fn.paramCount != len(decl.params) || definition && fn.defined {
+		if fn.resultType != decl.typeID || fn.paramCount != len(decl.params) || fn.variadic != decl.variadic || definition && fn.defined {
 			return false
 		}
 		for j := 0; j < fn.paramCount; j++ {
@@ -605,7 +612,7 @@ func (t *translator) rememberFunction(decl declarator, definition bool) bool {
 	}
 	t.functions = append(t.functions, cFunctionName{
 		name: name, resultType: decl.typeID, paramStart: start,
-		paramCount: len(decl.params), defined: definition,
+		paramCount: len(decl.params), variadic: decl.variadic, defined: definition,
 	})
 	return true
 }
@@ -690,9 +697,12 @@ func (t *translator) completeInitializerArray(decl *declarator) bool {
 func (t *translator) emitPendingDeclarations() {
 	t.out = append(t.out, t.staticOut...)
 	for i := 0; i < len(t.functions); i++ {
-		if !t.functions[i].defined {
+		if !t.functions[i].defined && !t.functions[i].variadic {
 			t.emitForeignFunctionName(t.functions[i])
 		}
+	}
+	for i := 0; i < len(t.variadicCalls); i++ {
+		t.emitVariadicForeignFunction(t.variadicCalls[i])
 	}
 	for i := 0; i < len(t.tentatives); i++ {
 		typeID := t.tentatives[i].typeID
@@ -723,6 +733,15 @@ func (t *translator) lookupObject(name []byte) (cObjectName, bool) {
 		}
 	}
 	return cObjectName{}, false
+}
+
+func (t *translator) lookupFunction(name []byte) (int, bool) {
+	for i := len(t.functions) - 1; i >= 0; i-- {
+		if textEquals(name, t.functions[i].name) {
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 func (t *translator) lookupField(typeID int, name []byte) (cField, bool) {
@@ -943,32 +962,41 @@ func decimalString(value int) string {
 }
 
 func (t *translator) emitForeignFunctionName(fn cFunctionName) {
+	t.emitForeignFunction(fn.name, fn.name, fn.resultType, fn.paramStart, fn.paramCount)
+}
+
+func (t *translator) emitForeignFunction(symbol string, goName string, resultType int, paramStart int, paramCount int) {
 	t.out = append(t.out, "// renvo:linkstatic libc,"...)
-	t.out = append(t.out, fn.name...)
+	t.out = append(t.out, symbol...)
 	t.out = append(t.out, '\n', 'f', 'u', 'n', 'c', ' ')
-	t.out = append(t.out, fn.name...)
+	t.out = append(t.out, goName...)
 	t.out = append(t.out, '(')
-	for i := 0; i < fn.paramCount; i++ {
+	for i := 0; i < paramCount; i++ {
 		if i > 0 {
 			t.out = append(t.out, ',')
 		}
 		t.out = append(t.out, 'p')
 		t.appendDecimal(i)
 		t.out = append(t.out, ' ')
-		t.emitForeignType(t.functionParams[fn.paramStart+i])
+		t.emitForeignType(t.functionParams[paramStart+i])
 	}
 	t.out = append(t.out, ')')
-	if fn.resultType != cTypeVoidID {
+	if resultType != cTypeVoidID {
 		t.out = append(t.out, ' ')
-		t.emitType(fn.resultType)
+		t.emitType(resultType)
 	}
 	t.out = append(t.out, '{')
-	if t.typeInfo(fn.resultType).kind == cTypePointer {
+	if t.typeInfo(resultType).kind == cTypePointer {
 		t.out = append(t.out, "return nil"...)
-	} else if fn.resultType != cTypeVoidID {
+	} else if resultType != cTypeVoidID {
 		t.out = append(t.out, "return 0"...)
 	}
 	t.out = append(t.out, '}', '\n')
+}
+
+func (t *translator) emitVariadicForeignFunction(call cVariadicCall) {
+	fn := t.functions[call.function]
+	t.emitForeignFunction(fn.name, call.goName, fn.resultType, call.paramStart, call.paramCount)
 }
 
 func (t *translator) appendDecimal(value int) {
@@ -1202,7 +1230,7 @@ func (t *translator) parseDeclarator(base int, allowFunction bool) (declarator, 
 			if t.typeInfo(result.typeID).kind == cTypeArray || t.typeInfo(result.typeID).kind == cTypeFunction {
 				return result, false
 			}
-			result.typeID = t.functionType(result.typeID, ops[i].params)
+			result.typeID = t.functionType(result.typeID, ops[i].params, ops[i].variadic)
 		}
 	}
 	info := t.typeInfo(result.typeID)
@@ -1212,6 +1240,7 @@ func (t *translator) parseDeclarator(base int, allowFunction bool) (declarator, 
 		}
 		result.function = true
 		result.params = ops[0].params
+		result.variadic = ops[0].variadic
 		result.typeID = info.base
 	} else if info.kind == cTypeOpaque {
 		// The ABI size of an unknown scalar typedef cannot be inferred safely
@@ -1263,11 +1292,11 @@ func (t *translator) parseDeclaratorOps(abstract bool) (token, []declaratorOp, b
 			continue
 		}
 		if t.take("(") {
-			params, valid := t.parseParameterList()
+			params, variadic, valid := t.parseParameterList()
 			if !valid {
 				return name, ops, false
 			}
-			ops = append(ops, declaratorOp{kind: declaratorFunction, params: params})
+			ops = append(ops, declaratorOp{kind: declaratorFunction, params: params, variadic: variadic})
 			continue
 		}
 		break
@@ -1279,23 +1308,23 @@ func (t *translator) parseDeclaratorOps(abstract bool) (token, []declaratorOp, b
 	return name, ops, true
 }
 
-func (t *translator) parseParameterList() ([]parameter, bool) {
+func (t *translator) parseParameterList() ([]parameter, bool, bool) {
 	if t.take(")") {
-		return nil, true
+		return nil, false, true
 	}
 	if t.currentIs("void") && t.pos+1 < len(t.tokens) && tokenIs(t.src, t.tokens[t.pos+1], ")") {
 		t.pos += 2
-		return nil, true
+		return nil, false, true
 	}
 	var params []parameter
 	for {
 		paramBase, _, ok := t.parseType()
 		if !ok {
-			return params, false
+			return params, false, false
 		}
 		name, ops, ok := t.parseDeclaratorOps(true)
 		if !ok {
-			return params, false
+			return params, false, false
 		}
 		paramType := paramBase
 		for i := len(ops) - 1; i >= 0; i-- {
@@ -1305,7 +1334,7 @@ func (t *translator) parseParameterList() ([]parameter, bool) {
 			case declaratorArray:
 				paramType = t.arrayType(paramType, ops[i].count)
 			case declaratorFunction:
-				paramType = t.functionType(paramType, ops[i].params)
+				paramType = t.functionType(paramType, ops[i].params, ops[i].variadic)
 			}
 		}
 		paramInfo := t.typeInfo(paramType)
@@ -1316,10 +1345,16 @@ func (t *translator) parseParameterList() ([]parameter, bool) {
 		}
 		params = append(params, parameter{name: name, typeID: paramType})
 		if t.take(")") {
-			return params, true
+			return params, false, true
 		}
-		if !t.take(",") || t.currentIs("...") {
-			return params, false
+		if !t.take(",") {
+			return params, false, false
+		}
+		if t.take("...") {
+			if !t.take(")") {
+				return params, false, false
+			}
+			return params, true, true
 		}
 	}
 }
@@ -1862,8 +1897,29 @@ func (t *translator) expression(tokens []token) {
 }
 
 func (t *translator) emitExpression(tokens []token) {
+	if len(tokens) > 2 && tokenIs(t.src, tokens[0], "(") {
+		close := matchingToken(t.src, tokens, 0, "(", ")")
+		if close > 1 && close < len(tokens)-1 && !tokenIs(t.src, tokens[close+1], "{") {
+			if typeID, ok := t.typeFromTokens(tokens[1:close]); ok {
+				t.emitType(typeID)
+				t.out = append(t.out, '(')
+				t.emitExpression(tokens[close+1:])
+				t.out = append(t.out, ')')
+				return
+			}
+		}
+	}
 	for i := 0; i < len(tokens); i++ {
 		tok := tokens[i]
+		if tokenKind(tok) == tokenIdent && i+1 < len(tokens) && tokenIs(t.src, tokens[i+1], "(") {
+			if function, ok := t.lookupFunction(tokenText(t.src, tok)); ok && t.functions[function].variadic && !t.functions[function].defined {
+				close := matchingToken(t.src, tokens, i+1, "(", ")")
+				if close > i+1 && t.emitVariadicCall(function, tokens[i+2:close]) {
+					i = close
+					continue
+				}
+			}
+		}
 		if tokenIs(t.src, tok, "(") {
 			close := matchingToken(t.src, tokens, i, "(", ")")
 			if close > i+1 && close+1 < len(tokens) && tokenIs(t.src, tokens[close+1], "{") {
@@ -1949,6 +2005,149 @@ func (t *translator) emitExpression(tokens []token) {
 			t.out = append(t.out, ' ')
 		}
 	}
+}
+
+func (t *translator) emitVariadicCall(function int, tokens []token) bool {
+	fn := t.functions[function]
+	args := splitTopLevel(t.src, tokens, ",")
+	if len(tokens) == 0 {
+		args = nil
+	}
+	if len(args) < fn.paramCount {
+		t.fail(TranslateErrUnsupported)
+		return true
+	}
+	start := len(t.functionParams)
+	for i := 0; i < len(args); i++ {
+		typeID := cTypeInt32ID
+		if i < fn.paramCount {
+			typeID = t.functionParams[fn.paramStart+i]
+		} else {
+			typeID = t.defaultArgumentType(t.expressionType(args[i]))
+		}
+		t.functionParams = append(t.functionParams, typeID)
+	}
+	callIndex := -1
+	for i := 0; i < len(t.variadicCalls); i++ {
+		call := t.variadicCalls[i]
+		if call.function != function || call.paramCount != len(args) {
+			continue
+		}
+		equal := true
+		for j := 0; j < call.paramCount; j++ {
+			if t.functionParams[call.paramStart+j] != t.functionParams[start+j] {
+				equal = false
+				break
+			}
+		}
+		if equal {
+			callIndex = i
+			break
+		}
+	}
+	if callIndex < 0 {
+		t.typeSerial++
+		callIndex = len(t.variadicCalls)
+		t.variadicCalls = append(t.variadicCalls, cVariadicCall{
+			function: function, paramStart: start, paramCount: len(args),
+			goName: "__c_variadic_" + decimalString(t.typeSerial),
+		})
+	} else {
+		t.functionParams = t.functionParams[:start]
+	}
+	call := t.variadicCalls[callIndex]
+	t.out = append(t.out, call.goName...)
+	t.out = append(t.out, '(')
+	for i := 0; i < len(args); i++ {
+		if i > 0 {
+			t.out = append(t.out, ',')
+		}
+		typeID := t.functionParams[call.paramStart+i]
+		original := t.expressionType(args[i])
+		if i >= fn.paramCount && typeID != original && t.typeInfo(typeID).kind != cTypePointer {
+			t.emitType(typeID)
+			t.out = append(t.out, '(')
+			t.emitExpression(args[i])
+			t.out = append(t.out, ')')
+		} else {
+			t.emitExpression(args[i])
+		}
+	}
+	t.out = append(t.out, ')')
+	return true
+}
+
+func (t *translator) defaultArgumentType(typeID int) int {
+	info := t.typeInfo(typeID)
+	if info.kind == cTypeBool || (info.kind == cTypeInt || info.kind == cTypeUint) && info.size < 4 {
+		return cTypeInt32ID
+	}
+	if typeID == cTypeFloat32ID {
+		return cTypeFloat64ID
+	}
+	if info.kind == cTypeArray {
+		return t.pointerType(info.base)
+	}
+	if info.kind == cTypeFunction {
+		return t.pointerType(typeID)
+	}
+	return typeID
+}
+
+func (t *translator) expressionType(tokens []token) int {
+	for len(tokens) > 1 && tokenIs(t.src, tokens[0], "(") && matchingToken(t.src, tokens, 0, "(", ")") == len(tokens)-1 {
+		tokens = tokens[1 : len(tokens)-1]
+	}
+	if len(tokens) == 0 {
+		return cTypeInt32ID
+	}
+	if tokenIs(t.src, tokens[0], "(") {
+		close := matchingToken(t.src, tokens, 0, "(", ")")
+		if close > 1 && close < len(tokens)-1 {
+			if typeID, ok := t.typeFromTokens(tokens[1:close]); ok {
+				return typeID
+			}
+		}
+	}
+	if access, ok := t.memberAccess(tokens, 0); ok && access.end == len(tokens) {
+		return access.typeID
+	}
+	if tokenKind(tokens[0]) == tokenIdent {
+		if len(tokens) > 1 && tokenIs(t.src, tokens[1], "(") {
+			if function, ok := t.lookupFunction(tokenText(t.src, tokens[0])); ok {
+				return t.functions[function].resultType
+			}
+		}
+		if object, ok := t.lookupObject(tokenText(t.src, tokens[0])); ok {
+			return object.typeID
+		}
+		if _, ok := t.lookupValue(tokenText(t.src, tokens[0])); ok {
+			return cTypeInt32ID
+		}
+	}
+	if tokenKind(tokens[0]) == tokenString {
+		return t.pointerType(cTypeInt8ID)
+	}
+	if tokenKind(tokens[0]) == tokenNumber {
+		text := tokenText(t.src, tokens[0])
+		floating := false
+		float32 := false
+		for i := 0; i < len(text); i++ {
+			if text[i] == '.' || text[i] == 'e' || text[i] == 'E' || text[i] == 'p' || text[i] == 'P' {
+				floating = true
+			}
+			if text[i] == 'f' || text[i] == 'F' {
+				float32 = true
+			}
+		}
+		if floating {
+			if float32 {
+				return cTypeFloat32ID
+			}
+			return cTypeFloat64ID
+		}
+	}
+	return cTypeInt32ID
 }
 
 func (t *translator) emitAggregateInitializer(typeID int, tokens []token) {

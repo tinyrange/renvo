@@ -455,6 +455,7 @@ int inspect(void) {
 		word.bytes[0] + bytes.bytes[1] + packed.high + packed.low + packed.value +
 		sequence.low + sequence.high + sequence.value + overwritten[0];
 }
+
 `), nil)
 	if !result.Ok {
 		t.Fatalf("aggregate initializer translation failed: error=%d at=%d", result.Error, result.ErrorAt)
@@ -479,6 +480,35 @@ int inspect(void) {
 	}
 	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
 		t.Fatalf("translated aggregate initializer does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateVariadicPrototypeCalls(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+int printf(const char *format, ...);
+int inspect(void) {
+	unsigned char small = 7;
+	short negative = -3;
+	return printf("values %d %d %.1f\n", small, negative, (float)2.5);
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("variadic translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{
+		[]byte("return __c_variadic_"),
+		[]byte("int32(small),int32(negative)"),
+		[]byte("float64(float32(2.5))"),
+		[]byte("// renvo:linkstatic libc,printf"),
+		[]byte("func __c_variadic_"),
+		[]byte("(p0 string,p1 int32,p2 int32,p3 float64) int32"),
+	} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("variadic source is missing %q:\n%s", want, result.Source)
+		}
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("translated variadic call does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
 	}
 }
 

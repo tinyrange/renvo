@@ -8,25 +8,47 @@ go backend {
 	func linuxObjectStaticCall(
 		out *RTGEmitter, importID int, wordCount int,
 	) {
-		if wordCount > 0 {
-			out.Byte(0x5f)
+		vectorMask := wordCount >> 8
+		wordCount &= 255
+		integerCount := 0
+		vectorCount := 0
+		for i := 0; i < wordCount; i++ {
+			if vectorMask&(1<<i) != 0 {
+				out.Byte(0x58)
+				out.Bytes4(0xf2, 0x48, 0x0f, 0x2a)
+				out.Byte(0xc0 | vectorCount<<3)
+				vectorCount++
+			} else {
+				if integerCount == 0 {
+					out.Byte(0x5f)
+				} else if integerCount == 1 {
+					out.Byte(0x5e)
+				} else if integerCount == 2 {
+					out.Byte(0x5a)
+				} else if integerCount == 3 {
+					out.Byte(0x59)
+				} else if integerCount == 4 {
+					out.Bytes2(0x41, 0x58)
+				} else {
+					out.Bytes2(0x41, 0x59)
+				}
+				integerCount++
+			}
 		}
-		if wordCount > 1 {
-			out.Byte(0x5e)
-		}
-		if wordCount > 2 {
-			out.Byte(0x5a)
-		}
-		if wordCount > 3 {
-			out.Byte(0x59)
-		}
-		if wordCount > 4 {
-			out.Bytes2(0x41, 0x58)
-		}
-		if wordCount > 5 {
-			out.Bytes2(0x41, 0x59)
+		if vectorCount != 0 {
+			out.Byte(0xb8)
+			out.Int32(4)
+			out.Bytes4(0xf2, 0x4c, 0x0f, 0x2a)
+			out.Byte(0xc0)
+			for i := 0; i < vectorCount; i++ {
+				out.Bytes4(0xf2, 0x41, 0x0f, 0x5e)
+				out.Byte(0xc0 | i<<3)
+			}
 		}
 		externalID := out.ExternalImport(out.StaticImportName(importID))
+		// Fixed callees ignore AL; variadic callees use it as the vector count.
+		out.Byte(0xb0)
+		out.Byte(vectorCount)
 		out.Byte(0xe8)
 		at := out.Len()
 		out.Int32(0)

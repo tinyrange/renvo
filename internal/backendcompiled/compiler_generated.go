@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "c4023e8a8a19130827a6b7762bdf13e09c42b326238d500002e6d5de991c4743"
+const CompilerSourceDigest = "3ad1eee4ba53211c2c43c12a8ce80138ebf1cc470a7c82dc1abfc1f1fee7e505"
 
 // source: backend/compiler_common_impl.go
 
@@ -18828,6 +18828,20 @@ g := renvoBeginLinearProgram(p, meta)
 if g == nil {
 return nil
 }
+
+
+
+
+for i := 0; i < len(meta.globals); i++ {
+s := &meta.globals[i]
+if s.kind != renvoTokVar || s.initStart < s.initEnd {
+continue
+}
+off := g.asm.bssSize
+s.iotaValue = off
+g.globals = append(g.globals, renvoGlobalInfo{nameStart: s.nameStart, nameEnd: s.nameEnd, offset: off})
+g.asm.bssSize += renvoAlignTo8(renvoTypeCopySize(meta, s.typ))
+}
 for i := 0; i < len(meta.funcs); i++ {
 fn := &meta.funcs[i]
 if fn.exportNameEnd <= fn.exportNameStart {
@@ -23737,7 +23751,8 @@ return true
 func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
 renvoNonNil(g, fn)
 if renvoIsHostedObjectAmd64(g.c) {
-if wordCount < 0 || wordCount > 6 {
+vectorMask := renvoObjectCallVectorMask(g, fn, wordCount)
+if vectorMask < 0 {
 return false
 }
 importID := renvoAsmAddPreparedStaticImport(&g.asm,
@@ -23746,7 +23761,7 @@ fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
 if importID < 0 {
 return false
 }
-renvoAmd64EmitObjectStaticCall(&g.asm, importID, wordCount)
+renvoAmd64EmitObjectStaticCall(&g.asm, importID, wordCount|vectorMask<<8)
 return true
 }
 if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
@@ -23791,6 +23806,28 @@ return false
 }
 renvoWinAmd64CallStaticImport(&g.asm, importID, wordCount)
 return true
+}
+
+func renvoObjectCallVectorMask(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) int {
+if wordCount < 0 || wordCount != fn.paramCount {
+return -1
+}
+mask := 0
+integers := 0
+vectors := 0
+for i := 0; i < fn.paramCount; i++ {
+typ := renvoResolveType(g.meta, g.meta.params[fn.firstParam+i].typ)
+if typ.kind == renvoTypeFloat64 {
+mask |= 1 << i
+vectors++
+} else {
+integers++
+}
+}
+if integers > 6 || vectors > 8 {
+return -1
+}
+return mask
 }
 
 
@@ -25622,7 +25659,7 @@ return renvoRTGParseTargetArg(target)
 
 func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
 if target == renvoTargetLinuxAmd64 {
-return "linux/amd64", "%Bf\xb5\x19\xe4\x0fD;\xd3\x0eD\xcc\x00{T\x06\x8a@\x12ϣ\x1f\x95Fwg'\x85\xff\xbf\xed", 3, true
+return "linux/amd64", "\x00\x83\xf7\xf9,Z\xfc\"z\xb0\x04\xbb\xaa\x86\x1e\xd0jaL\x8e\x1d\xe8\xe5\x13:j\x8e6,\xebp\xe1", 3, true
 }
 if target == renvoTargetLinux386 {
 return "linux/386", "\x1e\xd2A\xf1+&cc\xf9\xb3(0\xa2\xb5\xb9j<\x01\xe4\x0eLd\x8ch\x99\xf2X_o\x9a\xe7\x94", 3, true
@@ -34402,6 +34439,56 @@ return headers, tails, true
 // source: backend/compiler_linux_amd64_impl.go
 
 
+func rtgBuiltinLinuxAmd64PackageLinuxObjectStaticCall(
+out *renvoAsm, importID int, wordCount int,
+) {
+vectorMask := wordCount >> 8
+wordCount &= 255
+integerCount := 0
+vectorCount := 0
+for i := 0; i < wordCount; i++ {
+if vectorMask&(1<<i) != 0 {
+renvoAsmEmit8(out, 0x58)
+renvoAsmEmit4(out, 0xf2, 0x48, 0x0f, 0x2a)
+renvoAsmEmit8(out, 0xc0 | vectorCount<<3)
+vectorCount++
+} else {
+if integerCount == 0 {
+renvoAsmEmit8(out, 0x5f)
+} else if integerCount == 1 {
+renvoAsmEmit8(out, 0x5e)
+} else if integerCount == 2 {
+renvoAsmEmit8(out, 0x5a)
+} else if integerCount == 3 {
+renvoAsmEmit8(out, 0x59)
+} else if integerCount == 4 {
+renvoAsmEmit2(out, 0x41, 0x58)
+} else {
+renvoAsmEmit2(out, 0x41, 0x59)
+}
+integerCount++
+}
+}
+if vectorCount != 0 {
+renvoAsmEmit8(out, 0xb8)
+renvoAsmEmit32(out, 4)
+renvoAsmEmit4(out, 0xf2, 0x4c, 0x0f, 0x2a)
+renvoAsmEmit8(out, 0xc0)
+for i := 0; i < vectorCount; i++ {
+renvoAsmEmit4(out, 0xf2, 0x41, 0x0f, 0x5e)
+renvoAsmEmit8(out, 0xc0 | i<<3)
+}
+}
+externalID := renvoAsmAddExternalImportName(out, out.staticImports[importID].name)
+
+renvoAsmEmit8(out, 0xb0)
+renvoAsmEmit8(out, vectorCount)
+renvoAsmEmit8(out, 0xe8)
+at := len(out.code)
+renvoAsmEmit32(out, 0)
+renvoAsmAddAbsReloc(out, at, externalID, 2)
+}
+
 func rtgBuiltinLinuxAmd64PackageLinuxPrepareReadWriteBuffer(out *renvoAsm) {
 renvoAsmEmit16(out, 0x5a51)
 }
@@ -34578,8 +34665,7 @@ return image
 }
 
 func renvoAmd64EmitObjectStaticCall(out *renvoAsm, importID int, wordCount int) {
-externalID := renvoAsmAddExternalImportName(out, out.staticImports[importID].name)
-rtgBuiltinLinuxKernelAmd64PackageKernelStaticCall(out, externalID, wordCount)
+rtgBuiltinLinuxAmd64PackageLinuxObjectStaticCall(out, importID, wordCount)
 }
 
 const renvoLinuxAmd64ELFMachine = 62
