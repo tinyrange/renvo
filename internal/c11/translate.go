@@ -601,7 +601,7 @@ func (t *translator) rememberFunction(decl declarator, definition bool) bool {
 
 func (t *translator) fileVariable(decl declarator) bool {
 	name := string(tokenText(t.src, decl.name))
-	if len(decl.initializer) > 0 && t.typeInfo(decl.typeID).kind == cTypeArray && t.typeInfo(decl.typeID).count == 0 {
+	if !t.completeInitializerArray(&decl) {
 		return false
 	}
 	t.rememberObject([]byte(name), decl.typeID)
@@ -636,6 +636,43 @@ func (t *translator) fileVariable(decl declarator) bool {
 	}
 	t.definitions = append(t.definitions, cObjectName{name: name, typeID: decl.typeID})
 	t.emitVariable(decl)
+	return true
+}
+
+func (t *translator) completeInitializerArray(decl *declarator) bool {
+	info := t.typeInfo(decl.typeID)
+	if info.kind != cTypeArray || info.count != 0 {
+		return true
+	}
+	if len(decl.initializer) < 2 || !tokenIs(t.src, decl.initializer[0], "{") || !tokenIs(t.src, decl.initializer[len(decl.initializer)-1], "}") {
+		return len(decl.initializer) == 0
+	}
+	items := splitTopLevel(t.src, decl.initializer[1:len(decl.initializer)-1], ",")
+	next, count := 0, 0
+	for i := 0; i < len(items); i++ {
+		if len(items[i]) == 0 {
+			continue
+		}
+		if tokenIs(t.src, items[i][0], "[") {
+			close := matchingToken(t.src, items[i], 0, "[", "]")
+			if close <= 1 {
+				return false
+			}
+			index, ok := t.constantExpression(items[i][1:close])
+			if !ok || index < 0 {
+				return false
+			}
+			next = index
+		}
+		next++
+		if next > count {
+			count = next
+		}
+	}
+	if count == 0 {
+		return false
+	}
+	decl.typeID = t.arrayType(info.base, count)
 	return true
 }
 
@@ -1396,8 +1433,12 @@ func (t *translator) emitVariableName(name string, decl declarator) {
 		kind := t.typeInfo(decl.typeID).kind
 		if (kind == cTypeArray || kind == cTypeStruct) && tokenIs(t.src, decl.initializer[0], "{") {
 			t.emitType(decl.typeID)
+			t.emitAggregateInitializer(decl.typeID, decl.initializer)
+		} else if kind == cTypeUnion && tokenIs(t.src, decl.initializer[0], "{") {
+			t.emitUnionInitializer(decl.typeID, decl.initializer)
+		} else {
+			t.expression(decl.initializer)
 		}
-		t.expression(decl.initializer)
 	}
 	t.out = append(t.out, ';', '\n')
 }
@@ -1579,7 +1620,7 @@ func (t *translator) localDeclaration() {
 			return
 		}
 		decl.initializer = t.takeInitializer()
-		if t.typeInfo(decl.typeID).kind == cTypeArray && t.typeInfo(decl.typeID).count == 0 && storage != storageExtern {
+		if storage != storageExtern && (!t.completeInitializerArray(&decl) || t.typeInfo(decl.typeID).kind == cTypeArray && t.typeInfo(decl.typeID).count == 0) {
 			t.fail(TranslateErrDeclaration)
 			return
 		}
@@ -1813,6 +1854,25 @@ func (t *translator) expression(tokens []token) {
 func (t *translator) emitExpression(tokens []token) {
 	for i := 0; i < len(tokens); i++ {
 		tok := tokens[i]
+		if tokenIs(t.src, tok, "(") {
+			close := matchingToken(t.src, tokens, i, "(", ")")
+			if close > i+1 && close+1 < len(tokens) && tokenIs(t.src, tokens[close+1], "{") {
+				end := matchingToken(t.src, tokens, close+1, "{", "}")
+				if typeID, ok := t.typeFromTokens(tokens[i+1 : close]); ok && end > close+1 {
+					kind := t.typeInfo(typeID).kind
+					if kind == cTypeStruct || kind == cTypeArray || kind == cTypeUnion {
+						if kind == cTypeUnion {
+							t.emitUnionInitializer(typeID, tokens[close+1:end+1])
+						} else {
+							t.emitType(typeID)
+							t.emitAggregateInitializer(typeID, tokens[close+1:end+1])
+						}
+						i = end
+						continue
+					}
+				}
+			}
+		}
 		if tokenIs(t.src, tok, "sizeof") || tokenIs(t.src, tok, "_Alignof") {
 			end := matchingToken(t.src, tokens, i+1, "(", ")")
 			if end > i+2 {
@@ -1884,6 +1944,199 @@ func (t *translator) emitExpression(tokens []token) {
 			t.out = append(t.out, ' ')
 		}
 	}
+}
+
+func (t *translator) emitAggregateInitializer(typeID int, tokens []token) {
+	info := t.typeInfo(typeID)
+	if len(tokens) < 2 || !tokenIs(t.src, tokens[0], "{") || !tokenIs(t.src, tokens[len(tokens)-1], "}") ||
+		(info.kind != cTypeStruct && info.kind != cTypeArray) {
+		t.fail(TranslateErrUnsupported)
+		return
+	}
+	items := splitTopLevel(t.src, tokens[1:len(tokens)-1], ",")
+	fieldIndex := 0
+	arrayIndex := 0
+	t.out = append(t.out, '{')
+	written := 0
+	for i := 0; i < len(items); i++ {
+		item := items[i]
+		if len(item) == 0 {
+			continue
+		}
+		valueType := cTypeVoidID
+		value := item
+		keyed := false
+		if info.kind == cTypeStruct && len(item) >= 4 && tokenIs(t.src, item[0], ".") && tokenKind(item[1]) == tokenIdent && tokenIs(t.src, item[2], "=") {
+			field, ok := t.lookupField(typeID, tokenText(t.src, item[1]))
+			if !ok || !field.emit || field.bitWidth != 0 {
+				t.fail(TranslateErrUnsupported)
+				return
+			}
+			if written > 0 {
+				t.out = append(t.out, ',')
+			}
+			t.out = append(t.out, field.name...)
+			t.out = append(t.out, ':')
+			valueType, value, keyed = field.typeID, item[3:], true
+			for j := 0; j < info.fieldCount; j++ {
+				if t.fields[info.fieldStart+j].name == field.name {
+					fieldIndex = j + 1
+					break
+				}
+			}
+		} else if info.kind == cTypeArray && len(item) >= 4 && tokenIs(t.src, item[0], "[") {
+			close := matchingToken(t.src, item, 0, "[", "]")
+			if close <= 1 || close+1 >= len(item) || !tokenIs(t.src, item[close+1], "=") {
+				t.fail(TranslateErrUnsupported)
+				return
+			}
+			index, ok := t.constantExpression(item[1:close])
+			if !ok || index < 0 || index >= info.count {
+				t.fail(TranslateErrUnsupported)
+				return
+			}
+			if written > 0 {
+				t.out = append(t.out, ',')
+			}
+			t.appendDecimal(index)
+			t.out = append(t.out, ':')
+			valueType, value, keyed = info.base, item[close+2:], true
+			arrayIndex = index + 1
+		}
+		if !keyed {
+			if written > 0 {
+				t.out = append(t.out, ',')
+			}
+			if info.kind == cTypeArray {
+				if arrayIndex >= info.count {
+					t.fail(TranslateErrUnsupported)
+					return
+				}
+				valueType = info.base
+				arrayIndex++
+			} else {
+				for fieldIndex < info.fieldCount && !t.fields[info.fieldStart+fieldIndex].emit {
+					fieldIndex++
+				}
+				if fieldIndex >= info.fieldCount {
+					t.fail(TranslateErrUnsupported)
+					return
+				}
+				field := t.fields[info.fieldStart+fieldIndex]
+				if field.bitWidth != 0 {
+					t.fail(TranslateErrUnsupported)
+					return
+				}
+				valueType = field.typeID
+				fieldIndex++
+				t.out = append(t.out, field.name...)
+				t.out = append(t.out, ':')
+			}
+		}
+		valueInfo := t.typeInfo(valueType)
+		if len(value) > 0 && tokenIs(t.src, value[0], "{") && (valueInfo.kind == cTypeStruct || valueInfo.kind == cTypeArray || valueInfo.kind == cTypeUnion) {
+			if valueInfo.kind == cTypeUnion {
+				t.emitUnionInitializer(valueType, value)
+			} else {
+				t.emitType(valueType)
+				t.emitAggregateInitializer(valueType, value)
+			}
+		} else {
+			t.expression(value)
+		}
+		written++
+	}
+	t.out = append(t.out, '}')
+}
+
+func (t *translator) emitUnionInitializer(typeID int, tokens []token) {
+	info := t.typeInfo(typeID)
+	if info.kind != cTypeUnion || len(tokens) < 2 || !tokenIs(t.src, tokens[0], "{") || !tokenIs(t.src, tokens[len(tokens)-1], "}") {
+		t.fail(TranslateErrUnsupported)
+		return
+	}
+	items := splitTopLevel(t.src, tokens[1:len(tokens)-1], ",")
+	var item []token
+	for i := 0; i < len(items); i++ {
+		if len(items[i]) == 0 {
+			continue
+		}
+		if item != nil {
+			t.fail(TranslateErrUnsupported)
+			return
+		}
+		item = items[i]
+	}
+	if item == nil {
+		t.fail(TranslateErrUnsupported)
+		return
+	}
+	field := cField{}
+	value := item
+	if len(item) >= 4 && tokenIs(t.src, item[0], ".") && tokenKind(item[1]) == tokenIdent && tokenIs(t.src, item[2], "=") {
+		var ok bool
+		field, ok = t.lookupField(typeID, tokenText(t.src, item[1]))
+		if !ok || !field.emit {
+			t.fail(TranslateErrUnsupported)
+			return
+		}
+		value = item[3:]
+	} else {
+		for i := 0; i < info.fieldCount; i++ {
+			candidate := t.fields[info.fieldStart+i]
+			if candidate.emit && candidate.name != "" {
+				field = candidate
+				break
+			}
+		}
+	}
+	if field.name == "" {
+		t.fail(TranslateErrUnsupported)
+		return
+	}
+	t.typeSerial++
+	name := "__c_union_init_" + decimalString(t.typeSerial)
+	t.out = append(t.out, name...)
+	t.out = append(t.out, '(')
+	valueInfo := t.typeInfo(field.typeID)
+	if len(value) > 0 && tokenIs(t.src, value[0], "{") && (valueInfo.kind == cTypeStruct || valueInfo.kind == cTypeArray || valueInfo.kind == cTypeUnion) {
+		if valueInfo.kind == cTypeUnion {
+			t.emitUnionInitializer(field.typeID, value)
+		} else {
+			t.emitType(field.typeID)
+			t.emitAggregateInitializer(field.typeID, value)
+		}
+	} else {
+		t.expression(value)
+	}
+	t.out = append(t.out, ')')
+	outer := t.out
+	t.out = t.staticOut
+	t.out = append(t.out, "func "...)
+	t.out = append(t.out, name...)
+	t.out = append(t.out, "(v "...)
+	if t.typeInfo(field.typeID).kind == cTypeBool && field.bitWidth > 0 {
+		t.out = append(t.out, "uint8"...)
+	} else {
+		t.emitType(field.typeID)
+	}
+	t.out = append(t.out, ") "...)
+	t.emitType(typeID)
+	t.out = append(t.out, "{var p "...)
+	t.emitType(typeID)
+	t.out = append(t.out, ';')
+	if field.bitWidth > 0 {
+		t.out = append(t.out, "p.__c_set_"...)
+		t.out = append(t.out, field.name...)
+		t.out = append(t.out, "(v);"...)
+	} else {
+		t.out = append(t.out, "(*p.__c_ptr_"...)
+		t.out = append(t.out, field.name...)
+		t.out = append(t.out, "())=v;"...)
+	}
+	t.out = append(t.out, "return p}\n"...)
+	t.staticOut = t.out
+	t.out = outer
 }
 
 func (t *translator) emitBitfieldMutation(tokens []token) bool {

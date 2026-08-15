@@ -31,6 +31,9 @@ allocation-unit layout plus generated read/modify/write accessors. File-scope
 prototypes and tentative definitions coalesce by C linkage rules; incomplete
 tentative arrays complete at the end of the translation unit, and block
 `static` objects are hoisted with scope-safe internal names.
+Aggregate initialization supports positional and designated structure/array
+members, inferred array bounds, nested braces, union active members, and
+structure/union compound literals.
 Header directive lines and function prototypes are accepted so declarations can
 be supplied by Go files in the same package. The output-only preprocessing path
 implements translation-phase splicing/comments, recursive includes and
@@ -40,8 +43,8 @@ with hide sets, stringizing/pasting, conditionals and integer expressions,
 now consumes that stream directly: declarations from quoted project headers are
 retained, while large system headers remain bounded by demand-selecting the
 referenced external prototypes. Variadic functions, thread-local storage,
-complete qualifier semantics, integer promotions/conversions, and complete
-aggregate initialization remain frozen M3 work. Attributes and the other GNU C
+complete qualifier semantics, integer promotions/conversions, and the remaining
+aggregate-initializer edge cases remain frozen M3 work. Attributes and the other GNU C
 surface remain M4 work.
 Unsupported constructs must fail in this frontend rather than reaching a
 backend.

@@ -60,6 +60,16 @@ func TestFrontendStage3CObjectTentativeDefinitionSystemLink(t *testing.T) {
 	runCObjectTentativeDefinitionSystemLink(t, selfHostedFrontendCompiler(t, root))
 }
 
+func TestFrontendCObjectAggregateInitializerSystemLink(t *testing.T) {
+	root := repoRoot(t)
+	runCObjectAggregateInitializerSystemLink(t, frontendCompiler(t, root))
+}
+
+func TestFrontendStage3CObjectAggregateInitializerSystemLink(t *testing.T) {
+	root := repoRoot(t)
+	runCObjectAggregateInitializerSystemLink(t, selfHostedFrontendCompiler(t, root))
+}
+
 func TestFrontendCObjectWithoutMainSystemLink(t *testing.T) {
 	root := repoRoot(t)
 	frontend := frontendCompiler(t, root)
@@ -302,6 +312,66 @@ int main(void) {
 	}
 	if combined, err := exec.Command(executable).CombinedOutput(); err != nil {
 		t.Fatalf("run linked C tentative-definition object: %v, output %q", err, combined)
+	}
+}
+
+func runCObjectAggregateInitializerSystemLink(t *testing.T, frontend frontendConfig) {
+	t.Helper()
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skip("the first C object target is Linux/amd64")
+	}
+	linkerDriver, err := exec.LookPath("cc")
+	if err != nil {
+		t.Skip("system C linker driver is unavailable")
+	}
+	dir := t.TempDir()
+	source := filepath.Join(dir, "aggregate.c")
+	harness := filepath.Join(dir, "harness.c")
+	object := filepath.Join(dir, "aggregate.o")
+	executable := filepath.Join(dir, "aggregate-test")
+	if err := os.WriteFile(source, []byte(`struct inner { int x; int y; };
+struct record {
+	int head;
+	struct inner nested;
+	int values[3];
+	int tail;
+};
+union word { unsigned whole; unsigned char bytes[4]; };
+int renvo_aggregate(void) {
+	struct record selected = {
+		.tail = 5,
+		.nested = { .y = 3, .x = 2 },
+		.values = { [2] = 7, [0] = 1 }
+	};
+	struct record positional = { 1, { 2, 3 }, { 4, 5, 6 }, 7 };
+	int sparse[5] = { [3] = 9, 10 };
+	int inferred[] = { [2] = 8, 9 };
+	union word word = { .whole = 0x04030201 };
+	union word bytes = (union word){ .bytes = { 9, 8, 7, 6 } };
+	return selected.tail + selected.nested.x + selected.values[2] +
+		positional.nested.y + sparse[4] + inferred[3] + ((struct inner){ .x = 4, .y = 6 }).y +
+		word.bytes[0] + bytes.bytes[1];
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(harness, []byte(`extern int renvo_aggregate(void);
+int main(void) { return renvo_aggregate() == 51 ? 0 : 1; }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := frontendCommand(frontend, "cc", "-c", filepath.Base(source), "-o", object)
+	command.Dir = dir
+	command.Env = frontendCommandEnv(frontend.env, dir)
+	if combined, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("compile C aggregate-initializer object with Renvo: %v\n%s", err, combined)
+	}
+	link := exec.Command(linkerDriver, harness, object, "-o", executable)
+	if combined, err := link.CombinedOutput(); err != nil {
+		t.Fatalf("system-link C aggregate-initializer object: %v\n%s", err, combined)
+	}
+	if combined, err := exec.Command(executable).CombinedOutput(); err != nil {
+		t.Fatalf("run linked C aggregate-initializer object: %v, output %q", err, combined)
 	}
 }
 
