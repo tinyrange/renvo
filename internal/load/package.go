@@ -26,6 +26,8 @@ const (
 type SourceFile struct {
 	Path       string
 	Src        []byte
+	CPrelude   []byte
+	CObject    bool
 	ArenaStart int
 	ArenaEnd   int
 }
@@ -153,6 +155,9 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 		source := selected[i]
 		if isCSourceFile(source.Path) {
 			translated := c11.Translate(pkg.Name, source.Src)
+			if source.CObject {
+				translated = c11.TranslateObject(pkg.Name, source.Src, source.CPrelude)
+			}
 			if !translated.Ok {
 				pkg.ErrorOffset = translated.ErrorAt
 				pkg.Files = append(pkg.Files, ParsedFile{Path: source.Path, Src: source.Src, ArenaStart: source.ArenaStart, ArenaEnd: source.ArenaEnd})
@@ -301,7 +306,7 @@ func selectPackageFiles(dir string, files []SourceFile) []SourceFile {
 		if DirPath(path) != dir {
 			continue
 		}
-		selected = append(selected, SourceFile{Path: path, Src: files[i].Src, ArenaStart: files[i].ArenaStart, ArenaEnd: files[i].ArenaEnd})
+		selected = append(selected, SourceFile{Path: path, Src: files[i].Src, CPrelude: files[i].CPrelude, CObject: files[i].CObject, ArenaStart: files[i].ArenaStart, ArenaEnd: files[i].ArenaEnd})
 	}
 	sortSourceFiles(selected)
 	return selected

@@ -72,6 +72,8 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			d.Code, d.Message = "RENVO-OPTION-030", "object mode requires exactly one explicit C source file"
 		} else if result.Options.Error == ParseErrObjectRequiresC {
 			d.Code, d.Message = "RENVO-OPTION-031", "object mode requires a .c source file"
+		} else if result.Options.Error == ParseErrMissingIncludePath {
+			d.Code, d.Message = "RENVO-OPTION-032", "missing include directory after "+result.Options.ErrorArg
 		}
 		return d
 	}
@@ -111,6 +113,8 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			d.Code, d.Message = "RENVO-LOAD-021", "named source files must all be in one directory"
 		} else if result.Sources.Error == SourceErrFileListEmpty {
 			d.Code, d.Message = "RENVO-LOAD-022", "explicit source list contains no buildable Go or C files"
+		} else if result.Sources.Error == SourceErrCInclude {
+			d.Phase, d.Code, d.Message = "preprocessor", "RENVO-CPP-001", "C include could not be read: "+result.ErrorPath
 		}
 		if result.Sources.ErrorSourcePath != "" {
 			d.Path = result.Sources.ErrorSourcePath

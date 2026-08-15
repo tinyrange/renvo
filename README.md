@@ -98,15 +98,22 @@ It treats one explicit C file as a standalone translation unit, so no
 `go.mod` is required:
 
 ```sh
+# hello.c contains:
+#include <stdio.h>
+int main(void) { puts("Hello, world!"); return 0; }
+
 renvo cc -c hello.c -o hello.o
 cc hello.o -o hello
 ./hello
 ```
 
 The system C driver is used only for startup objects and the final link. Renvo
-is the compiler for `hello.c`. The initial scalar subset can already produce
-and system-link a `main` that returns an integer; preprocessing system headers
-and importing libc calls are the next C frontend milestones.
+is the compiler for `hello.c`: it searches installed and `-I`/`-isystem`
+headers, retains referenced external declarations from the real header, emits
+NUL-terminated C string data and an undefined `puts` with a standard x86_64
+PLT relocation, and leaves libc resolution to the system link. Full macro
+preprocessing and the broader GNU C declaration grammar remain later Linux
+frontend milestones.
 
 Running `renvo` with no arguments or with `--help` prints the complete command
 reference and target list.

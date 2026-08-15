@@ -79,6 +79,28 @@ func TestTranslateReportsOriginalOffset(t *testing.T) {
 	}
 }
 
+func TestTranslateObjectEmitsForeignDeclarationAndCStringData(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+#include <stdio.h>
+int main(void) { puts("Hello, world!"); return 0; }
+`), []byte("extern int puts (const char *__s);\n"))
+	if !result.Ok {
+		t.Fatalf("TranslateObject failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{
+		[]byte("// renvo:linkstatic libc,puts"),
+		[]byte("func puts(__s string) int{return 0}"),
+		[]byte(`puts("\x48\x65\x6c\x6c\x6f\x2c\x20\x77\x6f\x72\x6c\x64\x21\x00")`),
+	} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("translated object source is missing %q:\n%s", want, result.Source)
+		}
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("translated object source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
 func TestTranslateRejectsSemanticsNotYetPreserved(t *testing.T) {
 	for _, source := range []string{
 		"#if 0\nint hidden(void) { return 1; }\n#endif\n",

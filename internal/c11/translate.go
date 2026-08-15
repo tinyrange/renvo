@@ -49,6 +49,7 @@ type translator struct {
 	pos         int
 	packageName string
 	out         []byte
+	object      bool
 	ok          bool
 	err         int
 	errorAt     int
@@ -57,17 +58,47 @@ type translator struct {
 // Translate lowers one preprocessed C translation unit into the shared Go
 // frontend syntax. It deliberately performs no backend-specific lowering.
 func Translate(packageName string, src []byte) Result {
-	scanned := scan(src)
-	if !scanned.ok {
-		return Result{Ok: false, Error: TranslateErrScan, ErrorAt: scanned.errorAt}
-	}
+	return translate(packageName, src, nil, false)
+}
+
+// TranslateObject lowers a hosted C translation unit. Prelude contains
+// declarations recovered from the translation unit's included headers; it is
+// kept separate so diagnostics in src retain their original byte offsets.
+func TranslateObject(packageName string, src []byte, prelude []byte) Result {
+	return translate(packageName, src, prelude, true)
+}
+
+func translate(packageName string, src []byte, prelude []byte, object bool) Result {
 	t := translator{
-		src: src, tokens: scanned.tokens, packageName: packageName,
-		out: make([]byte, 0, len(src)+len(src)/4+32), ok: true, errorAt: -1,
+		packageName: packageName,
+		out:         make([]byte, 0, len(src)+len(src)/4+len(prelude)+64),
+		object:      object,
+		ok:          true,
+		errorAt:     -1,
 	}
 	t.out = append(t.out, "package "...)
 	t.out = append(t.out, packageName...)
 	t.out = append(t.out, '\n')
+	if len(prelude) > 0 && !t.translateSource(prelude) {
+		return Result{Ok: false, Error: t.err, ErrorAt: -1}
+	}
+	if !t.translateSource(src) {
+		return Result{Ok: false, Error: t.err, ErrorAt: t.errorAt}
+	}
+	return Result{Source: t.out, Ok: true, Error: TranslateOK, ErrorAt: -1}
+}
+
+func (t *translator) translateSource(src []byte) bool {
+	scanned := scan(src)
+	if !scanned.ok {
+		t.ok = false
+		t.err = TranslateErrScan
+		t.errorAt = scanned.errorAt
+		return false
+	}
+	t.src = src
+	t.tokens = scanned.tokens
+	t.pos = 0
 	for t.ok && t.kind() != tokenEOF {
 		t.skipDirectives()
 		if t.kind() == tokenEOF {
@@ -75,10 +106,7 @@ func Translate(packageName string, src []byte) Result {
 		}
 		t.externalDeclaration()
 	}
-	if !t.ok {
-		return Result{Ok: false, Error: t.err, ErrorAt: t.errorAt}
-	}
-	return Result{Source: t.out, Ok: true, Error: TranslateOK, ErrorAt: -1}
+	return t.ok
 }
 
 func (t *translator) kind() int {
@@ -140,7 +168,10 @@ func (t *translator) externalDeclaration() {
 	}
 	if decl.function {
 		if t.take(";") {
-			return // A prototype is satisfied by a C or Go definition in the package.
+			if t.object {
+				t.emitForeignFunction(decl)
+			}
+			return // Otherwise a C or Go definition in the package satisfies it.
 		}
 		if !t.currentIs("{") {
 			t.fail(TranslateErrDeclaration)
@@ -174,6 +205,46 @@ func (t *translator) externalDeclaration() {
 	for i := 0; i < len(decls); i++ {
 		t.emitVariable(decls[i])
 	}
+}
+
+func (t *translator) emitForeignFunction(decl declarator) {
+	name := tokenText(t.src, decl.name)
+	t.out = append(t.out, "// renvo:linkstatic libc,"...)
+	t.out = append(t.out, name...)
+	t.out = append(t.out, '\n', 'f', 'u', 'n', 'c', ' ')
+	t.out = append(t.out, name...)
+	t.out = append(t.out, '(')
+	for i := 0; i < len(decl.params); i++ {
+		if i > 0 {
+			t.out = append(t.out, ',')
+		}
+		t.out = append(t.out, tokenText(t.src, decl.params[i].name)...)
+		t.out = append(t.out, ' ')
+		t.emitForeignType(decl.params[i].typeInfo)
+	}
+	t.out = append(t.out, ')')
+	if decl.typeInfo.name != "" || decl.typeInfo.pointer > 0 {
+		t.out = append(t.out, ' ')
+		t.emitType(decl.typeInfo)
+	}
+	t.out = append(t.out, '{')
+	if decl.typeInfo.pointer > 0 {
+		t.out = append(t.out, "return nil"...)
+	} else if decl.typeInfo.name != "" {
+		t.out = append(t.out, "return 0"...)
+	}
+	t.out = append(t.out, '}', '\n')
+}
+
+func (t *translator) emitForeignType(info cType) {
+	// A Go string is used only as the shared frontend carrier for a C string
+	// pointer. Object-mode call lowering emits its data word alone, so the ELF
+	// boundary is the exact one-register System V `char *` ABI.
+	if info.name == "int8" && info.pointer == 1 && len(info.arrays) == 0 {
+		t.out = append(t.out, "string"...)
+		return
+	}
+	t.emitType(info)
 }
 
 func (t *translator) parseType() (cType, int, bool) {
@@ -617,7 +688,10 @@ func (t *translator) expression(tokens []token) {
 	for i := 0; i < len(tokens); i++ {
 		tok := tokens[i]
 		text := tokenText(t.src, tok)
-		if tokenKind(tok) == tokenNumber {
+		if t.object && tokenKind(tok) == tokenString {
+			t.emitCStringValue(text)
+			continue
+		} else if tokenKind(tok) == tokenNumber {
 			text = trimIntegerSuffix(text)
 		} else if tokenIs(t.src, tok, "NULL") {
 			text = []byte("nil")
@@ -635,6 +709,72 @@ func (t *translator) expression(tokens []token) {
 			t.out = append(t.out, ' ')
 		}
 	}
+}
+
+func (t *translator) emitCStringValue(text []byte) {
+	value, ok := decodeCString(text)
+	if !ok {
+		t.fail(TranslateErrUnsupported)
+		return
+	}
+	t.out = append(t.out, '"')
+	hex := "0123456789abcdef"
+	for i := 0; i < len(value); i++ {
+		t.out = append(t.out, '\\', 'x', hex[value[i]>>4], hex[value[i]&15])
+	}
+	t.out = append(t.out, '\\', 'x', '0', '0', '"')
+}
+
+func decodeCString(text []byte) ([]byte, bool) {
+	start := 0
+	for start < len(text) && text[start] != '"' {
+		start++
+	}
+	if start >= len(text) || len(text) < start+2 || text[len(text)-1] != '"' {
+		return nil, false
+	}
+	out := make([]byte, 0, len(text)-start-2)
+	for i := start + 1; i < len(text)-1; i++ {
+		ch := text[i]
+		if ch != '\\' {
+			out = append(out, ch)
+			continue
+		}
+		i++
+		if i >= len(text)-1 {
+			return nil, false
+		}
+		ch = text[i]
+		switch ch {
+		case 'a':
+			out = append(out, 7)
+		case 'b':
+			out = append(out, 8)
+		case 'f':
+			out = append(out, 12)
+		case 'n':
+			out = append(out, 10)
+		case 'r':
+			out = append(out, 13)
+		case 't':
+			out = append(out, 9)
+		case 'v':
+			out = append(out, 11)
+		case '\\', '\'', '"', '?':
+			out = append(out, ch)
+		default:
+			if ch < '0' || ch > '7' {
+				return nil, false
+			}
+			value := int(ch - '0')
+			for count := 1; count < 3 && i+1 < len(text)-1 && text[i+1] >= '0' && text[i+1] <= '7'; count++ {
+				i++
+				value = value*8 + int(text[i]-'0')
+			}
+			out = append(out, byte(value))
+		}
+	}
+	return out, true
 }
 
 func expressionNeedsSpace(left []byte, right []byte) bool {

@@ -656,6 +656,15 @@ func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int
 // the call was emitted.
 func renvoEmitTargetStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) int {
 	renvoNonNil(g, fn)
+	if g.c.objectFile {
+		if !renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "libc") {
+			return 0
+		}
+		if renvoEmitLinkStaticCall(g, fn, wordCount) {
+			return 1
+		}
+		return 0
+	}
 	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
 		renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
 		if !renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "kernel") {

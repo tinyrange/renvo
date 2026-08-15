@@ -81,6 +81,8 @@ func optionDiagnostic(options Options) Diagnostic {
 		code, message = "RENVO-OPTION-030", "object mode requires exactly one explicit C source file"
 	case ParseErrObjectRequiresC:
 		code, message = "RENVO-OPTION-031", "object mode requires a .c source file"
+	case ParseErrMissingIncludePath:
+		code, message = "RENVO-OPTION-032", "missing include directory after "+options.ErrorArg
 	case ParseErrInvalidModuleLicense:
 		code, message = "RENVO-OPTION-017", "invalid renvo:module-license directive"
 	case ParseErrConflictingModuleLicense:
@@ -148,6 +150,8 @@ func sourceDiagnostic(result BuildResult) Diagnostic {
 		code, message = "RENVO-LOAD-021", "named source files must all be in one directory"
 	case SourceErrFileListEmpty:
 		code, message = "RENVO-LOAD-022", "explicit source list contains no buildable Go or C files"
+	case SourceErrCInclude:
+		phase, code, message = "preprocessor", "RENVO-CPP-001", "C include could not be read: "+result.Sources.ErrorPath
 	}
 	path := result.ErrorPath
 	if result.Sources.ErrorSourcePath != "" {

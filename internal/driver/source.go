@@ -25,6 +25,7 @@ const (
 	SourceErrStandardPackage
 	SourceErrFileDirectory
 	SourceErrFileListEmpty
+	SourceErrCInclude
 )
 
 type DirEntry struct {

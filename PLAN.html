@@ -798,29 +798,29 @@ cc hello.o -o hello
     <section id="next">
       <div class="wrap">
         <div class="eyebrow">08 · Immediate sequence</div>
-        <h2>Three small PRs to ordinary Hello World.</h2>
-        <p class="section-intro">Finish one end-to-end hosted object before widening the compiler for Kbuild.</p>
+        <h2>The hosted Hello World slice is green.</h2>
+        <p class="section-intro">These three increments now form a permanent host-and-stage3 acceptance path; the active edge moves to a pinned Kbuild invocation.</p>
 
         <div class="grid three">
           <article class="card next-pr" data-number="1">
             <h3>Ordinary ET_REL skeleton</h3>
             <p>Add the thin <code>renvo cc -c</code> persona and emit a conventional Linux/x86_64 object for a no-include <code>int main(void) { return 0; }</code>. Link it through the system C driver and run it.</p>
-            <div class="gate"><code>readelf</code> accepts the object and the host linker produces a working executable.</div>
+            <div class="gate">Complete · <code>readelf</code> accepts the object and the host linker produces a working executable.</div>
           </article>
           <article class="card next-pr" data-number="2">
             <h3>Real system-header path</h3>
-            <p>Add target predefined macros, installed include search, compact macro expansion, typedefs, and safely classified attributes until unmodified <code>#include &lt;stdio.h&gt;</code> supplies the declaration. Reduce every newly required construct into a fixture.</p>
-            <div class="gate">The source compiles through the host's actual <code>stdio.h</code>; there is no bundled replacement header.</div>
+            <p>Search installed and explicit include roots and retain referenced external declarations directly from the unmodified header. The first demand-driven slice avoids materializing unrelated libc declarations; complete macro expansion and typedef handling remain M2/M3 work.</p>
+            <div class="gate">Complete · the source compiles through the host's actual <code>stdio.h</code>; there is no bundled replacement header.</div>
           </article>
           <article class="card next-pr" data-number="3">
             <h3>SysV external call + Hello World</h3>
             <p>Lower string data and the call to <code>puts</code>, emit its undefined symbol and relocation, then add the acceptance path that links with system startup files/libc and checks exact output.</p>
-            <div class="gate"><code>renvo cc -c hello.c</code> → system link → <code>Hello, world!</code></div>
+            <div class="gate">Complete · <code>renvo cc -c hello.c</code> → system link → <code>Hello, world!</code></div>
           </article>
         </div>
 
         <div class="callout">
-          <strong>Then approach Linux:</strong> pin the upstream commit and config,
+          <strong>Active next step:</strong> pin the upstream commit and config,
           harden the same driver for truthful Kbuild probes and dependency output,
           capture the census, and expand the preprocessor/type system in blocker
           order. The Hello World path remains a permanent fast acceptance test for

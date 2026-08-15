@@ -37,6 +37,7 @@ const (
 	ParseErrObjectRequiresLinuxAmd64
 	ParseErrObjectFileCount
 	ParseErrObjectRequiresC
+	ParseErrMissingIncludePath
 )
 
 const ModeExecutable = "executable"
@@ -66,6 +67,7 @@ type Options struct {
 	SystemError    string
 	SystemAt       int
 	Tags           []string
+	IncludePaths   []string
 	Ok             bool
 	Error          int
 	ErrorArg       string
@@ -168,6 +170,19 @@ func parseOptions(args []string, requireAdvertisedTarget bool) Options {
 			options.ArenaSize = size
 			arenaAt = i
 			i += 2
+			continue
+		}
+		if arg == "-I" || arg == "-isystem" {
+			if i+1 >= len(args) {
+				return parseFail(options, ParseErrMissingIncludePath, arg, i)
+			}
+			options.IncludePaths = append(options.IncludePaths, args[i+1])
+			i += 2
+			continue
+		}
+		if len(arg) > 2 && arg[0] == '-' && arg[1] == 'I' {
+			options.IncludePaths = append(options.IncludePaths, arg[2:])
+			i++
 			continue
 		}
 		if arg == "-system" {
