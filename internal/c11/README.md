@@ -31,9 +31,10 @@ allocation-unit layout plus generated read/modify/write accessors. File-scope
 prototypes and tentative definitions coalesce by C linkage rules; incomplete
 tentative arrays complete at the end of the translation unit, and block
 `static` objects are hoisted with scope-safe internal names.
-Aggregate initialization supports positional and designated structure/array
-members, inferred array bounds, nested braces, union active members, and
-structure/union compound literals.
+Aggregate initialization supports positional and chained designated
+structure/array members, repeated-designator overwrite, inferred array bounds,
+nested braces, bitfields, union active members, and structure/union compound
+literals.
 Header directive lines and function prototypes are accepted so declarations can
 be supplied by Go files in the same package. The output-only preprocessing path
 implements translation-phase splicing/comments, recursive includes and

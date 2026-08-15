@@ -433,34 +433,45 @@ struct record {
 	int tail;
 };
 union word { unsigned whole; unsigned char bytes[4]; };
+struct packed { unsigned low : 3; unsigned high : 5; int value; };
 int inspect(void) {
 	struct record selected = {
 		.tail = 5,
-		.nested = { .y = 3, .x = 2 },
-		.values = { [2] = 7, [0] = 1 }
+		.nested.y = 3,
+		.nested.x = 2,
+		.values[2] = 7,
+		.values[0] = 1
 	};
 	struct record positional = { 1, { 2, 3 }, { 4, 5, 6 }, 7 };
 	int sparse[5] = { [3] = 9, 10 };
 	int inferred[] = { [2] = 8, 9 };
+	int overwritten[2] = { [0] = 1, [0] = 4 };
 	union word word = { .whole = 0x04030201 };
 	union word bytes = (union word){ .bytes = { 9, 8, 7, 6 } };
+	struct packed packed = { .high = 17, .low = 5, .value = 4 };
+	struct packed sequence = { 6, 3, 2 };
 	return selected.tail + selected.nested.x + selected.values[2] +
 		positional.nested.y + sparse[4] + inferred[3] + ((struct inner){ .x = 4, .y = 6 }).y +
-		word.bytes[0] + bytes.bytes[1];
+		word.bytes[0] + bytes.bytes[1] + packed.high + packed.low + packed.value +
+		sequence.low + sequence.high + sequence.value + overwritten[0];
 }
 `), nil)
 	if !result.Ok {
 		t.Fatalf("aggregate initializer translation failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
 	for _, want := range [][]byte{
-		[]byte("__c_struct_record{tail:5,nested:__c_struct_inner{y:3,x:2},values:[3]int32{2:7,0:1}}"),
+		[]byte("p.nested.y=v1;p.nested.x=v2;p.values[2]=v3;p.values[0]=v4"),
 		[]byte("__c_struct_record{head:1,nested:__c_struct_inner{x:2,y:3},values:[3]int32{4,5,6},tail:7}"),
-		[]byte("[5]int32{3:9,10}"),
-		[]byte("var inferred [4]int32=[4]int32{2:8,9}"),
-		[]byte("(__c_struct_inner{x:4,y:6}).y"),
+		[]byte("p[3]=v0;p[4]=v1"),
+		[]byte("var inferred [4]int32=__c_aggregate_init_"),
+		[]byte("p[0]=v0;p[0]=v1"),
 		[]byte("func __c_union_init_"),
 		[]byte("(*p.__c_ptr_whole())=v"),
 		[]byte("(*p.__c_ptr_bytes())=v"),
+		[]byte("func __c_aggregate_init_"),
+		[]byte("p.__c_set_high(v0)"),
+		[]byte("p.__c_set_low(v1)"),
+		[]byte("p.value=v2"),
 	} {
 		if !bytes.Contains(result.Source, want) {
 			t.Fatalf("aggregate initializer source is missing %q:\n%s", want, result.Source)
