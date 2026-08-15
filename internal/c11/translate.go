@@ -89,56 +89,64 @@ type initializerStep struct {
 }
 
 type translator struct {
-	src             []byte
-	tokens          []token
-	pos             int
-	packageName     string
-	out             []byte
-	object          bool
-	checkOnly       bool
-	speculativeType bool
-	ok              bool
-	err             int
-	errorAt         int
-	types           []cTypeInfo
-	fields          []cField
-	opaqueTypes     []cTypeName
-	names           []cNamespaceName
-	objects         []cObjectName
-	tentatives      []cObjectName
-	definitions     []cObjectName
-	threadNames     []cObjectName
-	functions       []cFunctionName
-	variadicCalls   []cVariadicCall
-	functionParams  []int
-	typeSerial      int
-	dataModel       int
-	pointerSize     int
-	packageHeader   int
-	usesUnsafe      bool
-	staticOut       []byte
-	resultType      int
-	boolHelper      bool
-	tlsRuntime      bool
-	localStart      int
-	initializing    int
-	nameStart       int
+	src              []byte
+	tokens           []token
+	pos              int
+	packageName      string
+	out              []byte
+	object           bool
+	checkOnly        bool
+	speculativeType  bool
+	ok               bool
+	err              int
+	errorAt          int
+	types            []cTypeInfo
+	fields           []cField
+	opaqueTypes      []cTypeName
+	names            []cNamespaceName
+	objects          []cObjectName
+	tentatives       []cObjectName
+	definitions      []cObjectName
+	threadNames      []cObjectName
+	functions        []cFunctionName
+	variadicCalls    []cVariadicCall
+	functionParams   []int
+	ordinaryNames    []int
+	tagNames         []int
+	pointerTypes     []int
+	qualifiedTypes   []int
+	pointerChanges   []cTypeCacheChange
+	qualifiedChanges []cTypeCacheChange
+	typeSerial       int
+	dataModel        int
+	pointerSize      int
+	packageHeader    int
+	usesUnsafe       bool
+	staticOut        []byte
+	resultType       int
+	boolHelper       bool
+	tlsRuntime       bool
+	localStart       int
+	initializing     int
+	nameStart        int
 }
 
 type checkScratchMark struct {
-	mark                                 int
-	out, staticOut                       []byte
-	typesLen, typesCap                   int
-	fieldsLen, fieldsCap                 int
-	opaqueTypesLen, opaqueTypesCap       int
-	namesLen, namesCap                   int
-	objectsLen, objectsCap               int
-	tentativesLen, tentativesCap         int
-	definitionsLen, definitionsCap       int
-	threadNamesLen, threadNamesCap       int
-	functionsLen, functionsCap           int
-	variadicCallsLen, variadicCallsCap   int
-	functionParamsLen, functionParamsCap int
+	mark                                   int
+	out, staticOut                         []byte
+	typesLen, typesCap                     int
+	fieldsLen, fieldsCap                   int
+	opaqueTypesLen, opaqueTypesCap         int
+	namesLen, namesCap                     int
+	objectsLen, objectsCap                 int
+	tentativesLen, tentativesCap           int
+	definitionsLen, definitionsCap         int
+	threadNamesLen, threadNamesCap         int
+	functionsLen, functionsCap             int
+	variadicCallsLen, variadicCallsCap     int
+	functionParamsLen, functionParamsCap   int
+	pointerTypesCap, qualifiedTypesCap     int
+	pointerChangesCap, qualifiedChangesCap int
 }
 
 // Translate lowers one preprocessed C translation unit into the shared Go
@@ -216,6 +224,7 @@ func (t *translator) translateSource(src []byte) bool {
 	t.src = src
 	t.tokens = scanned.tokens
 	t.pos = 0
+	t.ensureNameIndex(len(t.tokens))
 	if t.checkOnly {
 		t.reserveCheckTables(len(t.tokens))
 	}
@@ -238,6 +247,27 @@ func (t *translator) translateSource(src []byte) bool {
 	return t.ok
 }
 
+func (t *translator) ensureNameIndex(tokens int) {
+	want := 128
+	for want < tokens/8+1 {
+		want *= 2
+	}
+	if len(t.ordinaryNames) >= want {
+		return
+	}
+	t.ordinaryNames = make([]int, want)
+	t.tagNames = make([]int, want)
+	for i := 0; i < len(t.names); i++ {
+		buckets := t.ordinaryNames
+		if t.names[i].kind == cNameTag {
+			buckets = t.tagNames
+		}
+		bucket := cNameHashString(t.names[i].name) & (len(buckets) - 1)
+		t.names[i].hashPrev = buckets[bucket]
+		buckets[bucket] = i + 1
+	}
+}
+
 func (t *translator) reserveCheckTables(tokens int) {
 	// A self-hosted compiler cannot rely on garbage collection to recover old
 	// slice backing arrays. Reserve compact semantic tables from input size so
@@ -247,6 +277,10 @@ func (t *translator) reserveCheckTables(tokens int) {
 	types := make([]cTypeInfo, len(t.types), len(t.types)+tokens/32+64)
 	copy(types, t.types)
 	t.types = types
+	t.pointerTypes = make([]int, cap(types))
+	t.qualifiedTypes = make([]int, cap(types)*16)
+	t.pointerChanges = make([]cTypeCacheChange, 0, cap(types))
+	t.qualifiedChanges = make([]cTypeCacheChange, 0, cap(types))
 	fields := make([]cField, len(t.fields), len(t.fields)+tokens/48+64)
 	copy(fields, t.fields)
 	t.fields = fields
@@ -293,6 +327,8 @@ func (t *translator) beginCheckScratch() checkScratchMark {
 		functionsLen: len(t.functions), functionsCap: cap(t.functions),
 		variadicCallsLen: len(t.variadicCalls), variadicCallsCap: cap(t.variadicCalls),
 		functionParamsLen: len(t.functionParams), functionParamsCap: cap(t.functionParams),
+		pointerTypesCap: cap(t.pointerTypes), qualifiedTypesCap: cap(t.qualifiedTypes),
+		pointerChangesCap: cap(t.pointerChanges), qualifiedChangesCap: cap(t.qualifiedChanges),
 	}
 }
 
@@ -342,9 +378,11 @@ func (t *translator) endCheckScratch(mark checkScratchMark) {
 		mark.objectsCap == cap(t.objects) && mark.tentativesCap == cap(t.tentatives) &&
 		mark.definitionsCap == cap(t.definitions) && mark.threadNamesCap == cap(t.threadNames) &&
 		mark.functionsCap == cap(t.functions) && mark.variadicCallsCap == cap(t.variadicCalls) &&
-		mark.functionParamsCap == cap(t.functionParams)
+		mark.functionParamsCap == cap(t.functionParams) && mark.pointerTypesCap == cap(t.pointerTypes) &&
+		mark.qualifiedTypesCap == cap(t.qualifiedTypes) && mark.pointerChangesCap == cap(t.pointerChanges) &&
+		mark.qualifiedChangesCap == cap(t.qualifiedChanges)
 	if stable || !t.ok {
-		arena.Reset(mark.mark)
+		arena.Rewind(mark.mark)
 	}
 }
 
@@ -583,8 +621,25 @@ func (t *translator) checkFunction(decl declarator, storage int) {
 	functions := t.functions
 	variadicCalls := t.variadicCalls
 	functionParams := t.functionParams
-
+	pointerTypes := t.pointerTypes
+	qualifiedTypes := t.qualifiedTypes
+	pointerChanges := t.pointerChanges
+	qualifiedChanges := t.qualifiedChanges
+	pointerChangeMark := len(t.pointerChanges)
+	qualifiedChangeMark := len(t.qualifiedChanges)
 	t.emitFunction(decl, storage)
+	for i := len(t.pointerChanges) - 1; i >= pointerChangeMark; i-- {
+		change := t.pointerChanges[i]
+		if change.index >= 0 && change.index < len(pointerTypes) {
+			pointerTypes[change.index] = change.previous
+		}
+	}
+	for i := len(t.qualifiedChanges) - 1; i >= qualifiedChangeMark; i-- {
+		change := t.qualifiedChanges[i]
+		if change.index >= 0 && change.index < len(qualifiedTypes) {
+			qualifiedTypes[change.index] = change.previous
+		}
+	}
 
 	t.out = out
 	t.staticOut = staticOut
@@ -599,8 +654,12 @@ func (t *translator) checkFunction(decl declarator, storage int) {
 	t.functions = functions
 	t.variadicCalls = variadicCalls
 	t.functionParams = functionParams
+	t.pointerTypes = pointerTypes
+	t.qualifiedTypes = qualifiedTypes
+	t.pointerChanges = pointerChanges
+	t.qualifiedChanges = qualifiedChanges
 	arena.PersistReset(persistMark)
-	arena.Reset(mark)
+	arena.Rewind(mark)
 }
 
 func (t *translator) parseAggregateType(union bool) (int, bool) {
@@ -635,7 +694,7 @@ func (t *translator) parseAggregateType(union bool) (int, bool) {
 		t.typeSerial++
 		t.types = append(t.types, cTypeInfo{kind: kind, size: 0, align: 1, goName: prefix + name})
 		typeID := len(t.types) - 1
-		t.names = append(t.names, cNamespaceName{name: name, index: typeID, kind: cNameTag})
+		t.appendName(name, typeID, cNameTag)
 		return typeID, true
 	}
 	t.typeSerial++
@@ -647,11 +706,8 @@ func (t *translator) parseAggregateType(union bool) (int, bool) {
 	typeID := len(t.types) - 1
 	if name != "" {
 		prior, current := cTypeVoidID, false
-		for i := len(t.names) - 1; i >= t.nameStart; i-- {
-			if t.names[i].kind == cNameTag && t.names[i].name == name {
-				prior, current = t.names[i].index, true
-				break
-			}
+		if entry := t.lookupNameEntryString(name, true); entry >= t.nameStart {
+			prior, current = t.names[entry].index, true
 		}
 		if current && t.types[prior].size == 0 {
 			t.types = t.types[:len(t.types)-1]
@@ -659,7 +715,7 @@ func (t *translator) parseAggregateType(union bool) (int, bool) {
 			t.types[typeID].goName = arena.PersistString(goName)
 			t.types[typeID].kind = kind
 		} else {
-			t.names = append(t.names, cNamespaceName{name: name, index: typeID, kind: cNameTag})
+			t.appendName(name, typeID, cNameTag)
 		}
 	}
 	t.pos++
@@ -951,7 +1007,7 @@ func (t *translator) parseEnumType() (int, bool) {
 		if typeID, ok := t.lookupTag([]byte(name)); ok {
 			return typeID, true
 		}
-		t.names = append(t.names, cNamespaceName{name: name, index: cTypeInt32ID, kind: cNameTag})
+		t.appendName(name, cTypeInt32ID, cNameTag)
 		return cTypeInt32ID, true
 	}
 	value := 0
@@ -1020,13 +1076,11 @@ func (t *translator) parseEnumType() (int, bool) {
 		}
 	}
 	if name != "" {
-		for i := len(t.names) - 1; i >= t.nameStart; i-- {
-			if t.names[i].kind == cNameTag && t.names[i].name == name {
-				t.names[i].index = typeID
-				return typeID, true
-			}
+		if entry := t.lookupNameEntryString(name, true); entry >= t.nameStart {
+			t.names[entry].index = typeID
+			return typeID, true
 		}
-		t.names = append(t.names, cNamespaceName{name: name, index: typeID, kind: cNameTag})
+		t.appendName(name, typeID, cNameTag)
 	}
 	return typeID, true
 }
@@ -1044,11 +1098,9 @@ func (t *translator) rememberObject(name []byte, typeID int) {
 		return
 	}
 	if t.localStart >= 0 {
-		for i := len(t.names) - 1; i >= t.nameStart; i-- {
-			if t.names[i].kind != cNameTag && textEquals(name, t.names[i].name) {
-				t.fail(TranslateErrDeclaration)
-				return
-			}
+		if entry := t.lookupNameEntry(name, false); entry >= t.nameStart {
+			t.fail(TranslateErrDeclaration)
+			return
 		}
 	}
 	t.objects = append(t.objects, cObjectName{name: string(name), goName: string(name), typeID: typeID, auto: t.localStart >= 0})
@@ -1065,11 +1117,24 @@ func (t *translator) rememberAliasedObject(name []byte, goName string, typeID in
 
 func (t *translator) rememberFunction(decl declarator, definition bool) bool {
 	name := string(tokenText(t.src, decl.name))
-	for i := 0; i < len(t.functions); i++ {
-		fn := &t.functions[i]
-		if fn.name != name {
-			continue
+	function := -1
+	if entry := t.lookupNameEntryString(name, false); entry >= 0 {
+		if t.names[entry].kind == cNameFunction {
+			function = t.names[entry].index
+		} else {
+			// A block-scope ordinary identifier can shadow a file-scope function.
+			// Preserve the function declaration table independently of that
+			// namespace lookup; this uncommon path does not affect normal hashing.
+			for i := 0; i < len(t.functions); i++ {
+				if t.functions[i].name == name {
+					function = i
+					break
+				}
+			}
 		}
+	}
+	if function >= 0 {
+		fn := &t.functions[function]
 		if !t.compatibleParameterType(fn.resultType, decl.typeID) || fn.paramCount != len(decl.params) || fn.variadic != decl.variadic || definition && fn.defined {
 			return false
 		}
@@ -1095,13 +1160,13 @@ func (t *translator) rememberFunction(decl declarator, definition bool) bool {
 }
 
 func (t *translator) rememberName(name string, index int, kind int) bool {
-	for i := len(t.names) - 1; i >= t.nameStart; i-- {
-		if t.names[i].kind != cNameTag && t.names[i].name == name && t.names[i].kind != kind {
+	if kind != cNameTag {
+		if entry := t.lookupNameEntryString(name, false); entry >= t.nameStart && t.names[entry].kind != kind {
 			t.fail(TranslateErrDeclaration)
 			return false
 		}
 	}
-	t.names = append(t.names, cNamespaceName{name: name, index: index, kind: kind})
+	t.appendName(name, index, kind)
 	return true
 }
 
@@ -1273,15 +1338,103 @@ func (t *translator) lookupFunction(name []byte) (int, bool) {
 }
 
 func (t *translator) lookupName(name []byte, kind int) (int, bool) {
-	for i := len(t.names) - 1; i >= 0; i-- {
-		if (kind == cNameTag) != (t.names[i].kind == cNameTag) {
-			continue
-		}
-		if textEquals(name, t.names[i].name) {
-			return t.names[i].index, t.names[i].kind == kind
-		}
+	entry := t.lookupNameEntry(name, kind == cNameTag)
+	if entry >= 0 {
+		return t.names[entry].index, t.names[entry].kind == kind
 	}
 	return 0, false
+}
+
+func (t *translator) lookupNameEntry(name []byte, tag bool) int {
+	buckets := t.ordinaryNames
+	if tag {
+		buckets = t.tagNames
+	}
+	if len(buckets) == 0 {
+		for i := len(t.names) - 1; i >= 0; i-- {
+			if (t.names[i].kind == cNameTag) == tag && textEquals(name, t.names[i].name) {
+				return i
+			}
+		}
+		return -1
+	}
+	entry := buckets[cNameHash(name)&(len(buckets)-1)]
+	for entry > 0 {
+		i := entry - 1
+		if textEquals(name, t.names[i].name) {
+			return i
+		}
+		entry = t.names[i].hashPrev
+	}
+	return -1
+}
+
+func (t *translator) lookupNameEntryString(name string, tag bool) int {
+	buckets := t.ordinaryNames
+	if tag {
+		buckets = t.tagNames
+	}
+	if len(buckets) == 0 {
+		for i := len(t.names) - 1; i >= 0; i-- {
+			if (t.names[i].kind == cNameTag) == tag && t.names[i].name == name {
+				return i
+			}
+		}
+		return -1
+	}
+	entry := buckets[cNameHashString(name)&(len(buckets)-1)]
+	for entry > 0 {
+		i := entry - 1
+		if t.names[i].name == name {
+			return i
+		}
+		entry = t.names[i].hashPrev
+	}
+	return -1
+}
+
+func (t *translator) appendName(name string, index int, kind int) {
+	buckets := t.ordinaryNames
+	if kind == cNameTag {
+		buckets = t.tagNames
+	}
+	previous := 0
+	if len(buckets) > 0 {
+		bucket := cNameHashString(name) & (len(buckets) - 1)
+		previous = buckets[bucket]
+		buckets[bucket] = len(t.names) + 1
+	}
+	t.names = append(t.names, cNamespaceName{name: name, index: index, kind: kind, hashPrev: previous})
+}
+
+func (t *translator) truncateNames(length int) {
+	for i := len(t.names) - 1; i >= length; i-- {
+		buckets := t.ordinaryNames
+		if t.names[i].kind == cNameTag {
+			buckets = t.tagNames
+		}
+		if len(buckets) > 0 {
+			bucket := cNameHashString(t.names[i].name) & (len(buckets) - 1)
+			buckets[bucket] = t.names[i].hashPrev
+		}
+	}
+	t.names = t.names[:length]
+}
+
+func cNameHash(name []byte) int {
+	hash := 5381
+	for i := 0; i < len(name); i++ {
+		hash = ((hash << 5) + hash + int(name[i])) & 2147483647
+	}
+	return hash
+}
+
+func cNameHashString(name string) int {
+	hash := 5381
+	for i := 0; i < len(name); i++ {
+		hash = ((hash << 5) + hash + int(name[i])) & 2147483647
+	}
+	return hash
 }
 
 func (t *translator) beginScope() cScopeMark {
@@ -1291,7 +1444,7 @@ func (t *translator) beginScope() cScopeMark {
 }
 
 func (t *translator) endScope(mark cScopeMark) {
-	t.names = t.names[:mark.names]
+	t.truncateNames(mark.names)
 	t.nameStart = mark.nameStart
 }
 

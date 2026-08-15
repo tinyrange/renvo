@@ -571,7 +571,7 @@ cc hello.o -o hello
                 <li>Lower kernel builtins to canonical operations, constants, or explicit calls—never recognize spellings in a machine emitter.</li>
                 <li>Preserve early, structured diagnostics for extensions not yet implemented.</li>
               </ul>
-              <div class="gate">Complete · the fixed-point self-hosted compiler parses and type-checks all 482 preprocessed target C files recorded by Linux 6.12.99 x86_64 tinyconfig. The uninterrupted gate completed in 19m34.765s aggregate wall time (1,078.35s user / 93.82s system) at 141,024 KiB peak RSS. A stripped self-rebuild is 0.39s wall / 26,824 KiB peak RSS and produces a 2,085,473-byte compiler; deferred code-generation operations remain explicit rather than being faked.</div>
+              <div class="gate">Complete · the fixed-point self-hosted compiler parses and type-checks all 482 preprocessed target C files recorded by Linux 6.12.99 x86_64 tinyconfig. With 16 bounded workers the uninterrupted gate completes in 17.008s (245.63s user / 17.85s system) at 158,176 KiB maximum child RSS. A stripped fixed-point self-rebuild is 0.55s wall / 60,412 KiB peak RSS and produces a 2,647,569-byte compiler; deferred code-generation operations remain explicit rather than being faked.</div>
             </div>
           </article>
 

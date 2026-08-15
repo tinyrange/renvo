@@ -24,6 +24,12 @@ func Reset(mark int) {
 	renvo_runtime_ArenaReset(mark)
 }
 
+// Rewind makes short-lived storage reusable without returning its pages to the
+// operating system. Tight compiler loops use it when the same scratch high-water
+// mark will be touched again; the enclosing phase still calls Reset to release
+// those pages once the translation unit is complete.
+func Rewind(mark int) { renvo_runtime_ArenaReset(mark) }
+
 func PersistMark() int { return renvo_runtime_ArenaPersistMark() }
 
 func PersistReset(mark int) { renvo_runtime_ArenaPersistReset(mark) }

@@ -1045,6 +1045,38 @@ int selected_right[0 ? runtime_size() : 4];
 	}
 }
 
+func TestCheckHashedNamespacesAndTypeCachesAcrossScopes(t *testing.T) {
+	source := []byte(`
+typedef unsigned long word;
+struct word { int value; };
+int target(const volatile word *value);
+
+int first(const volatile word *value) {
+	word target = *value;
+	{
+		typedef int word;
+		word inner = 1;
+		target += inner;
+	}
+	return target;
+}
+
+int second(const volatile word *value) {
+	struct word local = { (int)*value };
+	return local.value;
+}
+`)
+	result := CheckObjectForDataModel(source, DataModelLP64)
+	if !result.Ok {
+		t.Fatalf("hashed semantic check failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+
+	invalid := CheckObjectForDataModel([]byte(`typedef int value; int value;`), DataModelLP64)
+	if invalid.Ok || invalid.Error != TranslateErrDeclaration {
+		t.Fatalf("same-scope ordinary namespace collision = %#v, want declaration error", invalid)
+	}
+}
+
 func TestCheckGNUComposedTypeExpressions(t *testing.T) {
 	result := CheckObjectForDataModel([]byte(`
 struct node { int value; };
