@@ -163,6 +163,97 @@ signed_quad second(signed_quad value) { return value; }
 	}
 }
 
+func TestTranslateParenthesizedAndFunctionDeclarators(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+typedef int (*binary_op)(int, int);
+struct callbacks {
+	binary_op apply;
+	int (*direct)(int);
+	int *values[3];
+	int (*matrix)[3];
+};
+int *select_value(int *value);
+int consume(int (*matrix)[3], int values[3]);
+`), nil)
+	if !result.Ok {
+		t.Fatalf("declarator translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{
+		[]byte("apply func(int32,int32) int32"),
+		[]byte("direct func(int32) int32"),
+		[]byte("values [3]*int32"),
+		[]byte("matrix *[3]int32"),
+		[]byte("func select_value(p0 *int32) *int32"),
+		[]byte("func consume(p0 *[3]int32,p1 *int32) int32"),
+	} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("translated declarators are missing %q:\n%s", want, result.Source)
+		}
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("translated declarators do not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateEnumConstantsAndConstantArrayBounds(t *testing.T) {
+	result := Translate("main", []byte(`
+enum mode {
+	mode_zero,
+	mode_four = 1 << 2,
+	mode_five,
+	mode_mask = mode_four | 2
+};
+int values[1024 / (8 * sizeof(long))];
+int selected(void) { return mode_five + mode_mask; }
+`))
+	if !result.Ok {
+		t.Fatalf("enum translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{
+		[]byte("var values [16]int32"),
+		[]byte("return 5+6"),
+	} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("translated enum source is missing %q:\n%s", want, result.Source)
+		}
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("translated enum source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateAnonymousAggregateMemberLayout(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+struct envelope {
+	char prefix;
+	union {
+		struct { int low; short high; };
+		long both;
+	};
+	char tail;
+};
+int layout(void) {
+	return sizeof(struct envelope) +
+		__builtin_offsetof(struct envelope, low) +
+		__builtin_offsetof(struct envelope, high) +
+		__builtin_offsetof(struct envelope, both) +
+		__builtin_offsetof(struct envelope, tail);
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("anonymous aggregate translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("return 24+8+12+8+16")) {
+		t.Fatalf("anonymous aggregate offsets were not preserved:\n%s", result.Source)
+	}
+	if !bytes.Contains(result.Source, []byte("struct{__c_align uint64}")) {
+		t.Fatalf("anonymous union carrier does not preserve alignment:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("translated anonymous aggregate does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
 func TestTranslateReportsOriginalOffset(t *testing.T) {
 	source := []byte("int main(void) { int value = 1")
 	result := Translate("main", source)
