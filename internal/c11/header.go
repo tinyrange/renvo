@@ -4,6 +4,7 @@ package c11
 // frontend to a particular filesystem implementation.
 type IncludeReader interface {
 	ReadInclude(from string, name string, angled bool) ([]byte, string, bool)
+	ReadIncludeNext(from string, name string, angled bool) ([]byte, string, bool)
 }
 
 type HeaderResult struct {

@@ -1,347 +1,611 @@
 package c11
 
-// Macro is one object-like preprocessor definition. Function-like macros are
-// deliberately left to the full token preprocessor; the compiler-identification
-// handshake only needs object replacement and conditional selection.
+const (
+	PreprocessOK = iota
+	PreprocessErrToken
+	PreprocessErrDirective
+	PreprocessErrInclude
+	PreprocessErrExpression
+	PreprocessErrMacro
+	PreprocessErrDepth
+)
+
+// Macro is one command-line or target predefined macro. Value is tokenized
+// once when preprocessing starts; ordinary source definitions use the same
+// compact replacement-list representation.
 type Macro struct {
 	Name  string
 	Value string
 }
 
-// PreprocessResult is the small, allocation-bounded preprocessing result used
-// by compiler-driver probes. Unsupported or malformed directives fail instead
-// of being copied through, which keeps feature probes truthful.
-type PreprocessResult struct {
-	Source []byte
-	Ok     bool
-	Line   int
+// PreprocessConfig describes one translation unit. Included declarations are
+// emitted for -E, but object translation can suppress them while retaining
+// their definitions and expanding the root source.
+type PreprocessConfig struct {
+	Path           string
+	Source         []byte
+	Reader         IncludeReader
+	Predefined     []Macro
+	Undefined      []string
+	ForcedIncludes []string
+	EmitIncludes   bool
+	LineMarkers    bool
 }
 
-type conditionalLevel struct {
+// PreprocessResult owns only the final rendered token stream plus dependency
+// paths. Expansion itself uses byte spans into a source table rather than a
+// pointer-rich token graph.
+type PreprocessResult struct {
+	Source       []byte
+	Dependencies []string
+	Ok           bool
+	Error        int
+	ErrorPath    string
+	Line         int
+	Detail       string
+}
+
+const (
+	ppEOF = iota
+	ppIdent
+	ppNumber
+	ppString
+	ppChar
+	ppPunct
+)
+
+const (
+	ppKindMask    = 15
+	ppSpaceFlag   = 16
+	ppSourceShift = 5
+	ppSourceBits  = 18
+	ppSourceMask  = (1 << ppSourceBits) - 1
+	ppHideShift   = ppSourceShift + ppSourceBits
+)
+
+// ppToken is three machine words, matching the ordinary C scanner token. Its
+// spelling is a span into sources[meta>>ppSourceShift].
+type ppToken struct {
+	start int
+	end   int
+	meta  int
+}
+
+func ppMakeToken(kind int, source int, start int, end int, space bool) ppToken {
+	meta := kind | source<<ppSourceShift
+	if space {
+		meta |= ppSpaceFlag
+	}
+	return ppToken{start: start, end: end, meta: meta}
+}
+
+func ppTokenKind(tok ppToken) int   { return tok.meta & ppKindMask }
+func ppTokenSource(tok ppToken) int { return tok.meta >> ppSourceShift & ppSourceMask }
+func ppTokenHide(tok ppToken) int   { return tok.meta >> ppHideShift }
+func ppTokenSpace(tok ppToken) bool { return tok.meta&ppSpaceFlag != 0 }
+func ppWithSpace(tok ppToken, space bool) ppToken {
+	if space {
+		tok.meta |= ppSpaceFlag
+	} else {
+		tok.meta &^= ppSpaceFlag
+	}
+	return tok
+}
+
+func ppWithHide(tok ppToken, hide int) ppToken {
+	tok.meta = tok.meta&(1<<ppHideShift-1) | hide<<ppHideShift
+	return tok
+}
+
+type ppHide struct {
+	macro int
+	next  int
+}
+
+type ppMacro struct {
+	name     string
+	params   []string
+	replace  []ppToken
+	function bool
+	variadic bool
+	deleted  bool
+}
+
+type ppConditional struct {
 	parentActive bool
 	active       bool
 	matched      bool
 	seenElse     bool
 }
 
-// PreprocessProbe handles the conditional and object-macro subset needed by
-// compiler identification probes. It is intentionally a real general subset,
-// not a spelling check for Linux's probe source.
-func PreprocessProbe(src []byte, predefined []Macro) PreprocessResult {
-	macros := make([]Macro, len(predefined))
-	copy(macros, predefined)
-	out := make([]byte, 0, len(src))
-	var stack []conditionalLevel
-	active := true
-	line := 1
-	for start := 0; start <= len(src); line++ {
-		end := start
-		for end < len(src) && src[end] != '\n' {
-			end++
+type preprocessor struct {
+	config         PreprocessConfig
+	sources        [][]byte
+	macros         []ppMacro
+	buckets        []int
+	hides          []ppHide
+	conditionals   []ppConditional
+	dependencies   []string
+	once           []string
+	out            []byte
+	ok             bool
+	err            int
+	errorPath      string
+	errorLine      int
+	errorDetail    string
+	currentPath    string
+	currentDisplay string
+	currentLine    int
+	counter        int
+}
+
+// Preprocess runs translation phases 2-4 for one C translation unit.
+func Preprocess(config PreprocessConfig) PreprocessResult {
+	p := preprocessor{config: config, ok: true}
+	p.sources = append(p.sources, nil) // source zero is generated spelling.
+	p.hides = append(p.hides, ppHide{})
+	p.installPredefined(config.Predefined)
+	for i := 0; i < len(config.Undefined); i++ {
+		if index := p.lookupName([]byte(config.Undefined[i])); index >= 0 {
+			p.macros[index].deleted = true
 		}
-		text := src[start:end]
-		at := skipHorizontal(text, 0)
-		if at < len(text) && text[at] == '#' {
-			nameStart := skipHorizontal(text, at+1)
-			nameEnd := nameStart
-			for nameEnd < len(text) && identByte(text[nameEnd]) {
-				nameEnd++
-			}
-			name := string(text[nameStart:nameEnd])
-			rest := text[skipHorizontal(text, nameEnd):]
-			switch name {
-			case "if", "ifdef", "ifndef":
-				condition := false
-				ok := true
-				if name == "ifdef" || name == "ifndef" {
-					identifier, valid := singleIdentifier(rest)
-					ok = valid
-					condition = macroIndex(macros, identifier) >= 0
-					if name == "ifndef" {
-						condition = !condition
-					}
-				} else {
-					condition, ok = evaluateProbeExpression(rest, macros)
-				}
-				if !ok {
-					return PreprocessResult{Ok: false, Line: line}
-				}
-				level := conditionalLevel{parentActive: active, active: active && condition, matched: condition}
-				stack = append(stack, level)
-				active = level.active
-			case "elif":
-				if len(stack) == 0 || stack[len(stack)-1].seenElse {
-					return PreprocessResult{Ok: false, Line: line}
-				}
-				condition, ok := evaluateProbeExpression(rest, macros)
-				if !ok {
-					return PreprocessResult{Ok: false, Line: line}
-				}
-				level := &stack[len(stack)-1]
-				level.active = level.parentActive && !level.matched && condition
-				level.matched = level.matched || condition
-				active = level.active
-			case "else":
-				if len(stack) == 0 || stack[len(stack)-1].seenElse {
-					return PreprocessResult{Ok: false, Line: line}
-				}
-				level := &stack[len(stack)-1]
-				level.seenElse = true
-				level.active = level.parentActive && !level.matched
-				level.matched = true
-				active = level.active
-			case "endif":
-				if len(stack) == 0 {
-					return PreprocessResult{Ok: false, Line: line}
-				}
-				stack = stack[:len(stack)-1]
-				active = true
-				if len(stack) > 0 {
-					active = stack[len(stack)-1].active
-				}
-			case "define":
-				if active {
-					identifier, value, ok := macroDefinition(rest)
-					if !ok {
-						return PreprocessResult{Ok: false, Line: line}
-					}
-					macros = defineMacro(macros, identifier, value)
-				}
-			case "undef":
-				if active {
-					identifier, ok := singleIdentifier(rest)
-					if !ok {
-						return PreprocessResult{Ok: false, Line: line}
-					}
-					macros = undefineMacro(macros, identifier)
-				}
-			case "":
-			default:
-				if active {
-					return PreprocessResult{Ok: false, Line: line}
-				}
-			}
-		} else if active {
-			out = appendExpandedIdentifiers(out, text, macros)
-			if end < len(src) {
-				out = append(out, '\n')
-			}
-		}
-		if end == len(src) {
+	}
+	for i := 0; i < len(config.ForcedIncludes) && p.ok; i++ {
+		if config.Reader == nil {
+			p.fail(PreprocessErrInclude, config.ForcedIncludes[i], 1)
 			break
 		}
-		start = end + 1
+		src, path, ok := config.Reader.ReadInclude(config.Path, config.ForcedIncludes[i], false)
+		if !ok {
+			p.fail(PreprocessErrInclude, config.ForcedIncludes[i], 1)
+			break
+		}
+		p.addDependency(path)
+		p.processFile(path, src, config.EmitIncludes, 0)
 	}
-	if len(stack) != 0 {
-		return PreprocessResult{Ok: false, Line: line - 1}
+	if p.ok {
+		p.processFile(config.Path, config.Source, true, 0)
 	}
-	return PreprocessResult{Source: out, Ok: true}
+	if p.ok && len(p.conditionals) != 0 {
+		p.fail(PreprocessErrDirective, p.currentPath, p.currentLine)
+	}
+	if !p.ok {
+		return PreprocessResult{Ok: false, Error: p.err, ErrorPath: p.errorPath, Line: p.errorLine, Detail: p.errorDetail}
+	}
+	return PreprocessResult{Source: p.out, Dependencies: p.dependencies, Ok: true, Error: PreprocessOK}
 }
 
-func appendExpandedIdentifiers(out []byte, line []byte, macros []Macro) []byte {
-	for at := 0; at < len(line); {
-		if !identStartByte(line[at]) {
-			out = append(out, line[at])
-			at++
-			continue
-		}
-		end := at + 1
-		for end < len(line) && identByte(line[end]) {
+// PreprocessProbe preserves the compiler-identity API while using the same
+// engine as real translation units.
+func PreprocessProbe(src []byte, predefined []Macro) PreprocessResult {
+	return Preprocess(PreprocessConfig{Path: "<stdin>", Source: src, Predefined: predefined, EmitIncludes: true})
+}
+
+func (p *preprocessor) installPredefined(predefined []Macro) {
+	p.installMacroText(ppDefaultMacroText)
+	for i := 0; i < len(predefined); i++ {
+		p.defineText(predefined[i].Name, nil, false, false, predefined[i].Value)
+	}
+	for start := 0; start < len(ppFeatureMacros); {
+		end := start
+		for end < len(ppFeatureMacros) && ppFeatureMacros[end] != ' ' {
 			end++
 		}
-		index := macroIndex(macros, string(line[at:end]))
-		if index >= 0 {
-			out = append(out, macros[index].Value...)
-		} else {
-			out = append(out, line[at:end]...)
+		p.defineText(ppFeatureMacros[start:end], []string{"x"}, true, false, "0")
+		start = end + 1
+	}
+}
+
+const ppFeatureMacros = "__has_attribute __has_builtin __has_feature __has_extension __has_c_attribute"
+
+const ppDefaultMacroText = `__STDC__=1
+__STDC_VERSION__=201112L
+__STDC_HOSTED__=0
+__RENVO__=1
+__GNUC__=5
+__GNUC_MINOR__=1
+__GNUC_PATCHLEVEL__=0
+__VERSION__="Renvo 5.1.0 compatible"
+__x86_64__=1
+__x86_64=1
+__amd64__=1
+__linux__=1
+__linux=1
+linux=1
+__ELF__=1
+__LP64__=1
+_LP64=1
+__CHAR_BIT__=8
+__SIZEOF_SHORT__=2
+__SIZEOF_INT__=4
+__SIZEOF_LONG__=8
+__SIZEOF_LONG_LONG__=8
+__SIZEOF_POINTER__=8
+__SIZEOF_SIZE_T__=8
+__SIZEOF_PTRDIFF_T__=8
+__SIZE_TYPE__=long unsigned int
+__PTRDIFF_TYPE__=long int
+__INTPTR_TYPE__=long int
+__UINTPTR_TYPE__=long unsigned int
+__ORDER_LITTLE_ENDIAN__=1234
+__ORDER_BIG_ENDIAN__=4321
+__BYTE_ORDER__=__ORDER_LITTLE_ENDIAN__
+__GCC_ATOMIC_BOOL_LOCK_FREE=2
+__GCC_ATOMIC_CHAR_LOCK_FREE=2
+__GCC_ATOMIC_SHORT_LOCK_FREE=2
+__GCC_ATOMIC_INT_LOCK_FREE=2
+__GCC_ATOMIC_LONG_LOCK_FREE=2
+__GCC_ATOMIC_LLONG_LOCK_FREE=2
+__GCC_ATOMIC_POINTER_LOCK_FREE=2`
+
+func (p *preprocessor) installMacroText(text string) {
+	for start := 0; start < len(text); {
+		separator := start
+		for separator < len(text) && text[separator] != '=' {
+			separator++
 		}
-		at = end
+		end := separator + 1
+		for end < len(text) && text[end] != '\n' {
+			end++
+		}
+		p.defineText(text[start:separator], nil, false, false, text[separator+1:end])
+		start = end + 1
 	}
-	return out
 }
 
-func macroDefinition(text []byte) (string, string, bool) {
-	at := skipHorizontal(text, 0)
-	if at >= len(text) || !identStartByte(text[at]) {
-		return "", "", false
+func (p *preprocessor) processFile(path string, src []byte, emit bool, depth int) {
+	if !p.ok {
+		return
 	}
-	end := at + 1
-	for end < len(text) && identByte(text[end]) {
-		end++
+	if depth >= 128 {
+		p.fail(PreprocessErrDepth, path, 1)
+		return
 	}
-	if end < len(text) && text[end] == '(' {
-		return "", "", false
+	if findPPText(p.once, path) >= 0 {
+		return
 	}
-	valueAt := skipHorizontal(text, end)
-	value := "1"
-	if valueAt < len(text) {
-		value = string(text[valueAt:])
+	normalized, lines, lineNumbers, ok := ppNormalize(src)
+	if !ok {
+		p.fail(PreprocessErrToken, path, 1)
+		return
 	}
-	return string(text[at:end]), value, true
+	sourceID := len(p.sources)
+	p.sources = append(p.sources, normalized)
+	previousPath, previousDisplay, previousLine := p.currentPath, p.currentDisplay, p.currentLine
+	p.currentPath = path
+	p.currentDisplay = path
+	lineBias := 0
+	displayPath := path
+	baseConditional := len(p.conditionals)
+	var pending []ppToken
+	pendingLine := 0
+	parenDepth := 0
+	if emit && p.config.LineMarkers {
+		p.appendLineMarker(1, displayPath)
+	}
+	for i := 0; i+1 < len(lines) && p.ok; i++ {
+		physicalLine := lineNumbers[i]
+		p.currentLine = physicalLine + lineBias
+		start, end := lines[i], lines[i+1]
+		if end > start && normalized[end-1] == '\n' {
+			end--
+		}
+		tokens, valid := p.lex(sourceID, start, end)
+		if !valid {
+			p.errorDetail = string(normalized[start:end])
+			p.fail(PreprocessErrToken, displayPath, p.currentLine)
+			break
+		}
+		if len(tokens) > 0 && p.tokenIs(tokens[0], "#") {
+			if len(pending) > 0 {
+				p.flushPending(pending, pendingLine)
+				pending = nil
+				parenDepth = 0
+			}
+			newBias, newPath := p.directive(tokens[1:], path, displayPath, p.currentLine, emit, depth)
+			if newPath != "" {
+				displayPath = newPath
+				p.currentDisplay = newPath
+			}
+			if newBias != 0 {
+				lineBias = newBias - physicalLine - 1
+				if emit && p.config.LineMarkers {
+					p.appendLineMarker(newBias, displayPath)
+				}
+			}
+			continue
+		}
+		if p.active() && emit {
+			if len(tokens) == 0 {
+				continue
+			}
+			if len(pending) == 0 {
+				pendingLine = p.currentLine
+			}
+			pending = append(pending, tokens...)
+			for j := 0; j < len(tokens); j++ {
+				if p.tokenIs(tokens[j], "(") {
+					parenDepth++
+				} else if p.tokenIs(tokens[j], ")") {
+					parenDepth--
+				}
+			}
+			if parenDepth <= 0 {
+				p.flushPending(pending, pendingLine)
+				pending = nil
+				parenDepth = 0
+			}
+		}
+	}
+	if p.ok && len(pending) > 0 {
+		p.flushPending(pending, pendingLine)
+	}
+	if p.ok && len(p.conditionals) != baseConditional {
+		p.fail(PreprocessErrDirective, displayPath, p.currentLine)
+	}
+	p.conditionals = p.conditionals[:baseConditional]
+	p.currentPath, p.currentDisplay, p.currentLine = previousPath, previousDisplay, previousLine
 }
 
-func defineMacro(macros []Macro, name string, value string) []Macro {
-	if index := macroIndex(macros, name); index >= 0 {
-		macros[index].Value = value
-		return macros
+func (p *preprocessor) flushPending(tokens []ppToken, line int) {
+	currentLine := p.currentLine
+	p.currentLine = line
+	expanded := p.expand(tokens, 0)
+	if p.ok {
+		p.renderLine(expanded)
 	}
-	return append(macros, Macro{Name: name, Value: value})
+	p.currentLine = currentLine
 }
 
-func undefineMacro(macros []Macro, name string) []Macro {
-	index := macroIndex(macros, name)
-	if index < 0 {
-		return macros
-	}
-	copy(macros[index:], macros[index+1:])
-	return macros[:len(macros)-1]
+func (p *preprocessor) active() bool {
+	return len(p.conditionals) == 0 || p.conditionals[len(p.conditionals)-1].active
 }
 
-func macroIndex(macros []Macro, name string) int {
-	for i := len(macros) - 1; i >= 0; i-- {
-		if macros[i].Name == name {
+func (p *preprocessor) fail(err int, path string, line int) {
+	if !p.ok {
+		return
+	}
+	p.ok = false
+	p.err = err
+	p.errorPath = path
+	p.errorLine = line
+}
+
+func (p *preprocessor) addDependency(path string) {
+	if findPPText(p.dependencies, path) < 0 {
+		p.dependencies = append(p.dependencies, path)
+	}
+}
+
+func findPPText(values []string, value string) int {
+	for i := 0; i < len(values); i++ {
+		if values[i] == value {
 			return i
 		}
 	}
 	return -1
 }
 
-func singleIdentifier(text []byte) (string, bool) {
-	at := skipHorizontal(text, 0)
-	if at >= len(text) || !identStartByte(text[at]) {
-		return "", false
-	}
-	end := at + 1
-	for end < len(text) && identByte(text[end]) {
-		end++
-	}
-	return string(text[at:end]), skipHorizontal(text, end) == len(text)
-}
-
-type probeExpressionParser struct {
-	text   []byte
-	at     int
-	macros []Macro
-	ok     bool
-}
-
-func evaluateProbeExpression(text []byte, macros []Macro) (bool, bool) {
-	p := probeExpressionParser{text: text, macros: macros, ok: true}
-	value := p.parseOr()
-	p.at = skipHorizontal(p.text, p.at)
-	return value, p.ok && p.at == len(p.text)
-}
-
-func (p *probeExpressionParser) parseOr() bool {
-	value := p.parseAnd()
-	for p.take("||") {
-		value = p.parseAnd() || value
-	}
-	return value
-}
-
-func (p *probeExpressionParser) parseAnd() bool {
-	value := p.parseUnary()
-	for p.take("&&") {
-		value = p.parseUnary() && value
-	}
-	return value
-}
-
-func (p *probeExpressionParser) parseUnary() bool {
-	p.at = skipHorizontal(p.text, p.at)
-	if p.take("!") {
-		return !p.parseUnary()
-	}
-	if p.take("(") {
-		value := p.parseOr()
-		if !p.take(")") {
-			p.ok = false
+// ppNormalize performs line splicing before replacing comments with spaces.
+// Newlines inside block comments are retained so diagnostics remain stable.
+func ppNormalize(src []byte) ([]byte, []int, []int, bool) {
+	out := make([]byte, 0, len(src)+1)
+	lines := []int{0}
+	lineNumbers := []int{1}
+	physicalLine := 1
+	inString := byte(0)
+	for i := 0; i < len(src); {
+		if src[i] == '\\' && i+1 < len(src) && src[i+1] == '\n' {
+			physicalLine++
+			i += 2
+			continue
 		}
-		return value
-	}
-	start := p.at
-	for p.at < len(p.text) && identByte(p.text[p.at]) {
-		p.at++
-	}
-	word := string(p.text[start:p.at])
-	if word == "defined" {
-		parenthesized := p.take("(")
-		name, ok := p.identifier()
-		if !ok || parenthesized && !p.take(")") {
-			p.ok = false
-			return false
+		if inString != 0 {
+			ch := src[i]
+			out = append(out, ch)
+			i++
+			if ch == '\\' && i < len(src) {
+				out = append(out, src[i])
+				i++
+			} else if ch == inString {
+				inString = 0
+			} else if ch == '\n' {
+				return nil, nil, nil, false
+			}
+			continue
 		}
-		return macroIndex(p.macros, name) >= 0
-	}
-	if word != "" {
-		index := macroIndex(p.macros, word)
-		if index < 0 {
-			return false
+		if src[i] == '"' || src[i] == '\'' {
+			inString = src[i]
+			out = append(out, src[i])
+			i++
+			continue
 		}
-		return decimalNonzero(p.macros[index].Value)
-	}
-	if p.at < len(p.text) && p.text[p.at] >= '0' && p.text[p.at] <= '9' {
-		start = p.at
-		for p.at < len(p.text) && p.text[p.at] >= '0' && p.text[p.at] <= '9' {
-			p.at++
+		if src[i] == '/' && i+1 < len(src) && src[i+1] == '/' {
+			out = append(out, ' ')
+			i += 2
+			for i < len(src) && src[i] != '\n' {
+				if src[i] == '\\' && i+1 < len(src) && src[i+1] == '\n' {
+					physicalLine++
+					i += 2
+					continue
+				}
+				i++
+			}
+			continue
 		}
-		return decimalNonzero(string(p.text[start:p.at]))
+		if src[i] == '/' && i+1 < len(src) && src[i+1] == '*' {
+			out = append(out, ' ')
+			i += 2
+			closed := false
+			for i < len(src) {
+				if src[i] == '\\' && i+1 < len(src) && src[i+1] == '\n' {
+					physicalLine++
+					i += 2
+					continue
+				}
+				if i+1 < len(src) && src[i] == '*' && src[i+1] == '/' {
+					i += 2
+					closed = true
+					break
+				}
+				if src[i] == '\n' {
+					out = append(out, '\n')
+					physicalLine++
+					lines = append(lines, len(out))
+					lineNumbers = append(lineNumbers, physicalLine)
+				}
+				i++
+			}
+			if !closed {
+				return nil, nil, nil, false
+			}
+			continue
+		}
+		out = append(out, src[i])
+		if src[i] == '\n' {
+			physicalLine++
+			lines = append(lines, len(out))
+			lineNumbers = append(lineNumbers, physicalLine)
+		}
+		i++
 	}
-	p.ok = false
-	return false
+	if inString != 0 {
+		return nil, nil, nil, false
+	}
+	if len(out) == 0 || out[len(out)-1] != '\n' {
+		out = append(out, '\n')
+		lines = append(lines, len(out))
+		lineNumbers = append(lineNumbers, physicalLine+1)
+	}
+	return out, lines, lineNumbers, true
 }
 
-func (p *probeExpressionParser) identifier() (string, bool) {
-	p.at = skipHorizontal(p.text, p.at)
-	if p.at >= len(p.text) || !identStartByte(p.text[p.at]) {
-		return "", false
-	}
-	start := p.at
-	p.at++
-	for p.at < len(p.text) && identByte(p.text[p.at]) {
-		p.at++
-	}
-	return string(p.text[start:p.at]), true
-}
-
-func (p *probeExpressionParser) take(value string) bool {
-	p.at = skipHorizontal(p.text, p.at)
-	if p.at+len(value) > len(p.text) {
-		return false
-	}
-	for i := 0; i < len(value); i++ {
-		if p.text[p.at+i] != value[i] {
-			return false
+func (p *preprocessor) lex(source int, start int, end int) ([]ppToken, bool) {
+	src := p.sources[source]
+	var out []ppToken
+	space := false
+	for i := start; i < end; {
+		ch := src[i]
+		if ch == ' ' || ch == '\t' || ch == '\r' || ch == '\v' || ch == '\f' {
+			space = true
+			i++
+			continue
 		}
-	}
-	p.at += len(value)
-	return true
-}
-
-func decimalNonzero(value string) bool {
-	for i := 0; i < len(value); i++ {
-		if value[i] >= '1' && value[i] <= '9' {
-			return true
+		tokenStart := i
+		kind := ppPunct
+		if isIdentStart(ch) {
+			kind = ppIdent
+			i++
+			for i < end && isIdentPart(src[i]) {
+				i++
+			}
+			if i < end && (src[i] == '"' || src[i] == '\'') && literalPrefix(src[tokenStart:i]) {
+				delim := src[i]
+				i++
+				for i < end && src[i] != delim {
+					if src[i] == '\\' {
+						i++
+					}
+					i++
+				}
+				if i >= end {
+					return nil, false
+				}
+				i++
+				kind = ppString
+				if delim == '\'' {
+					kind = ppChar
+				}
+			}
+		} else if isDigit(ch) || ch == '.' && i+1 < end && isDigit(src[i+1]) {
+			kind = ppNumber
+			i = scanNumber(src[:end], i)
+		} else if ch == '"' || ch == '\'' {
+			delim := ch
+			i++
+			for i < end && src[i] != delim {
+				if src[i] == '\\' {
+					i++
+				}
+				i++
+			}
+			if i >= end {
+				return nil, false
+			}
+			i++
+			kind = ppString
+			if delim == '\'' {
+				kind = ppChar
+			}
+		} else {
+			i = punctEnd(src[:end], i)
+			if i == tokenStart {
+				// GNU headers carry assembler macro spellings such as \@ and $
+				// through preprocessing. Preserve printable extension bytes as
+				// single tokens; the later language parser remains strict.
+				if ch < 32 || ch == 127 {
+					return nil, false
+				}
+				i++
+			}
 		}
-		if value[i] < '0' || value[i] > '9' {
-			return false
+		out = append(out, ppMakeToken(kind, source, tokenStart, i, space))
+		space = false
+	}
+	return out, true
+}
+
+func (p *preprocessor) tokenText(tok ppToken) []byte {
+	source := ppTokenSource(tok)
+	if source < 0 || source >= len(p.sources) || tok.start < 0 || tok.end < tok.start || tok.end > len(p.sources[source]) {
+		return nil
+	}
+	return p.sources[source][tok.start:tok.end]
+}
+
+func (p *preprocessor) tokenIs(tok ppToken, text string) bool {
+	return ppBytesStringEqual(p.tokenText(tok), text)
+}
+
+func (p *preprocessor) generatedToken(kind int, text []byte, space bool) ppToken {
+	start := len(p.sources[0])
+	p.sources[0] = append(p.sources[0], text...)
+	return ppMakeToken(kind, 0, start, len(p.sources[0]), space)
+}
+
+func (p *preprocessor) renderLine(tokens []ppToken) {
+	for i := 0; i < len(tokens); i++ {
+		if i > 0 {
+			p.out = append(p.out, ' ')
 		}
+		p.out = append(p.out, p.tokenText(tokens[i])...)
 	}
-	return false
+	p.out = append(p.out, '\n')
 }
 
-func skipHorizontal(text []byte, at int) int {
-	for at < len(text) && (text[at] == ' ' || text[at] == '\t' || text[at] == '\r') {
-		at++
+func (p *preprocessor) appendLineMarker(line int, path string) {
+	p.out = append(p.out, '#', ' ')
+	p.out = ppAppendDecimal(p.out, line)
+	p.out = append(p.out, ' ', '"')
+	for i := 0; i < len(path); i++ {
+		if path[i] == '\\' || path[i] == '"' {
+			p.out = append(p.out, '\\')
+		}
+		p.out = append(p.out, path[i])
 	}
-	return at
+	p.out = append(p.out, '"', '\n')
 }
 
-func identStartByte(ch byte) bool {
-	return ch == '_' || ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z'
-}
-
-func identByte(ch byte) bool {
-	return identStartByte(ch) || ch >= '0' && ch <= '9'
+func ppAppendDecimal(out []byte, value int) []byte {
+	if value == 0 {
+		return append(out, '0')
+	}
+	var digits [24]byte
+	i := len(digits)
+	for value > 0 {
+		i--
+		digits[i] = byte('0' + value%10)
+		value /= 10
+	}
+	return append(out, digits[i:]...)
 }

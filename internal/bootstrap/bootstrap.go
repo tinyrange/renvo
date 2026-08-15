@@ -37,6 +37,34 @@ func Run(args []string, env []string, backend driver.Backend) int {
 		return status
 	}
 	args = driver.NormalizeCCompilerCommand(args)
+	if driver.CPreprocessCommandRequested(args) {
+		workDir, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "renvo cc: failed to determine working directory")
+			return 1
+		}
+		result := driver.PreprocessCCommand(args, workDir, driver.OSFS{})
+		if !result.Ok {
+			fmt.Fprint(os.Stderr, driver.FormatDiagnostic(driver.CPreprocessCommandDiagnostic(result)))
+			return 1
+		}
+		if result.Output == "-" {
+			_, err = os.Stdout.Write(result.Source)
+		} else {
+			err = os.WriteFile(result.Output, result.Source, 0o644)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "renvo cc: failed to write preprocessor output")
+			return 1
+		}
+		if len(result.DependencyData) > 0 {
+			if err := os.WriteFile(result.DependencyFile, result.DependencyData, 0o644); err != nil {
+				fmt.Fprintln(os.Stderr, "renvo cc: failed to write dependency file")
+				return 1
+			}
+		}
+		return 0
+	}
 	if driver.TestCommandRequested(args) {
 		if len(args) == 3 && (args[2] == "--help" || args[2] == "-h") {
 			fmt.Fprint(os.Stdout, driver.TestHelpText)

@@ -16,6 +16,9 @@ tree="$work_root/linux-$RENVO_LINUX_VERSION"
 frontend="$work_root/renvo"
 log="$work_root/prepare.log"
 metrics="$work_root/prepare.metrics"
+preprocess_metrics="$work_root/preprocess.metrics"
+preprocessed="$work_root/devicetable-offsets.i"
+preprocess_dependency="$work_root/devicetable-offsets.d"
 dashboard="$work_root/dashboard.json"
 
 printf 'workspace=%s\n' "$work_root"
@@ -45,5 +48,22 @@ fi
 readelf -h "$tree/scripts/mod/empty.o" | rg -q 'Type:[[:space:]]+REL \(Relocatable file\)'
 rg -q 'savedcmd_scripts/mod/empty.o := .*renvo cc' "$tree/scripts/mod/.empty.o.cmd"
 
+(cd "$tree" && /usr/bin/time -f 'elapsed_seconds=%e\nuser_seconds=%U\nsystem_seconds=%S\npeak_rss_kib=%M' -o "$preprocess_metrics" \
+	"$frontend" cc -E -P -Wp,-MMD,"$preprocess_dependency" -nostdinc \
+	-I./arch/x86/include -I./arch/x86/include/generated -I./include \
+	-I./arch/x86/include/uapi -I./arch/x86/include/generated/uapi \
+	-I./include/uapi -I./include/generated/uapi \
+	-include ./include/linux/compiler-version.h -include ./include/linux/kconfig.h \
+	-include ./include/linux/compiler_types.h -D__KERNEL__ -std=gnu11 -m64 \
+	-DKBUILD_MODFILE='"scripts/mod/devicetable-offsets"' \
+	-DKBUILD_BASENAME='"devicetable_offsets"' \
+	-DKBUILD_MODNAME='"devicetable_offsets"' \
+	-D__KBUILD_MODNAME=kmod_devicetable_offsets \
+	scripts/mod/devicetable-offsets.c -o "$preprocessed")
+rg -q 'SIZE_usb_device_id' "$preprocessed"
+rg -q 'OFF_usb_device_id_match_flags' "$preprocessed"
+rg -q 'scripts/mod/devicetable-offsets.c' "$preprocess_dependency"
+
 (cd "$repository_root" && go run ./tools/kbuild -kernel "$tree" -metrics "$metrics" -out "$dashboard")
-printf 'gate=PASS\nlog=%s\ndashboard=%s\n' "$log" "$dashboard"
+printf 'gate=PASS\nlog=%s\npreprocessed=%s\npreprocess_metrics=%s\ndashboard=%s\n' \
+	"$log" "$preprocessed" "$preprocess_metrics" "$dashboard"

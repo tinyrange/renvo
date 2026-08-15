@@ -107,6 +107,14 @@ func NormalizeCCompilerCommand(args []string) []string {
 			out = append(out, "-cc-nostdinc")
 			continue
 		}
+		if arg == "-E" {
+			out = append(out, "-cc-preprocess")
+			continue
+		}
+		if arg == "-P" {
+			out = append(out, "-cc-no-line-markers")
+			continue
+		}
 		if arg == "-S" {
 			out = append(out, "-c", "-cc-assembly-output")
 			continue
@@ -160,7 +168,7 @@ func NormalizeCCompilerCommand(args []string) []string {
 
 func cCompilerInertOption(arg string) bool {
 	switch arg {
-	case "-MMD", "-MD", "-MP", "-P", "-pipe",
+	case "-MMD", "-MD", "-MP", "-pipe",
 		"-std=gnu11", "-std=c11", "-m64", "-Os", "-O0", "-O1", "-O2", "-O3",
 		"-fshort-wchar", "-funsigned-char", "-fno-common", "-fno-PIE", "-fno-pie",
 		"-fno-strict-aliasing", "-fno-asynchronous-unwind-tables", "-fno-delete-null-pointer-checks",

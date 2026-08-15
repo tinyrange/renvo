@@ -27,6 +27,24 @@ func (r cObjectIncludeReader) ReadInclude(from string, name string, angled bool)
 	return nil, name, false
 }
 
+func (r cObjectIncludeReader) ReadIncludeNext(from string, name string, _ bool) ([]byte, string, bool) {
+	fromDir := load.DirPath(from)
+	start := 0
+	for i := 0; i < len(r.paths); i++ {
+		if load.CleanPath(r.paths[i]) == load.CleanPath(fromDir) {
+			start = i + 1
+			break
+		}
+	}
+	for i := start; i < len(r.paths); i++ {
+		path := load.JoinPath(r.paths[i], name)
+		if src, ok := r.fs.ReadFile(path); ok {
+			return src, path, true
+		}
+	}
+	return nil, name, false
+}
+
 func prepareCObjectSources(result SourceResult, options *Options, workDir string, fs SourceFS) SourceResult {
 	if !result.Ok || options.Mode != ModeObject {
 		return result

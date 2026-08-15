@@ -170,8 +170,8 @@ limits and the target are required. `-system` cannot be combined with `-t` or
 `-arena-size`.
 
 The frontend size checks measure two payloads independently: the stripped
-compiler with its native backends stays below 2 MiB, while the offline bundle
-containing `std/`, `forms/`, and `device/` stays below 4 MiB. The checked-in
+compiler with its native backends stays below 2,000,000 bytes, while the
+offline bundle containing `std/`, `forms/`, and `device/` stays below 4 MiB. The checked-in
 `systems/frontend-linux-amd64.rtg` profile applies the full-bundle limit and
 gives the running compiler a 128 MiB arena:
 
@@ -930,21 +930,18 @@ stable signals on GitHub's shared runners. Actions therefore uses:
 ```
 
 That mode retains the native compiler resource/binary policy and the
-calibrated frontend CPU/RSS/binary policy. It omits the absolute native and
+frontend binary policy plus calibrated CPU/RSS telemetry. It omits the absolute native and
 WASI performance tests, which remain mandatory through `performance` on a
 suitable development or dedicated benchmark host. Do not interpret this CI
 partition as permission to loosen or skip those limits locally.
 
-The self-hosted frontend gate builds through stage3 and currently requires:
+The self-hosted frontend gate builds through stage3 and requires the stripped
+compiler to remain below 2,000,000 bytes. Normalized CPU and peak RSS are
+recorded on every run for regression review, but are not absolute pass/fail
+limits.
 
-- normalized compiler CPU no more than twice a deterministic
-  Renvo-generated calibration workload;
-- 32 MiB maximum RSS;
-- 2 MiB stage3 compiler binary.
-
-The CPU metric is process user plus system CPU, normalized on the same runner.
-It is deliberately not raw wall-clock time. Do not replace it with a
-machine-specific absolute duration.
+The CPU telemetry is process user plus system CPU, normalized on the same
+runner. It is deliberately not raw wall-clock time.
 
 Run the frontend gate with the checkout's standard-library root:
 

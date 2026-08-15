@@ -15,6 +15,9 @@ archive, builds Renvo, keeps host utilities on `HOSTCC`, and assigns only target
   is consumed by `fixdep`;
 - the build reaches the checked, source-located C11 blocker in
   `scripts/mod/devicetable-offsets.c`.
+- the M2 frontend preprocesses that complete translation unit, expands the
+  checked `SIZE_`/`OFF_` paste results, and records its transitive dependency
+  rule plus CPU/RSS telemetry.
 
 The script leaves its tree, full log, timing/RSS telemetry, and read-only JSON
 census in the printed workspace. CPU and RSS are observations, not gates. The
