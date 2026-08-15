@@ -26,7 +26,7 @@ check_generated() {
 		go test -count=1 ./internal/rtg ./internal/backendcompiled
 }
 
-check_packages() {
+check_tracked_packages() {
 	local package_patterns=(
 		./internal/... ./std/... ./cmd/...
 		./backend/unit ./backend/target ./backend/bringup
@@ -47,19 +47,46 @@ check_packages() {
 	else
 		run_check "tracked package suites" go test -count=1 "${package_patterns[@]}"
 	fi
+}
+
+check_bundled_packages() {
 	run_check "bundled driver and bootstrap" \
 		go test -count=1 -tags renvo_bundle ./internal/driver ./cmd/renvobootstrap
+}
+
+check_packages() {
+	check_tracked_packages "${1:-}"
+	check_bundled_packages
 }
 
 check_preflight() {
 	local started=$SECONDS
 	# The tracked patterns include the generated-source authority packages. Keep
 	# them in one Go invocation so cold preflight builds compile each package once.
-	check_packages preflight
+	# The bundled-tag build and corpus compilation are independent checks; run all
+	# three groups together so cold CI does not add their tail latency serially.
+	check_tracked_packages preflight &
+	local tracked_pid=$!
+	check_bundled_packages &
+	local bundled_pid=$!
 	run_check "backend and frontend test compilation" \
-		go test -run '^$' ./backend ./frontend_tests
+		go test -run '^$' ./backend ./frontend_tests &
+	local compile_pid=$!
+	local failed=0
+	if ! wait "$tracked_pid"; then
+		failed=1
+	fi
+	if ! wait "$bundled_pid"; then
+		failed=1
+	fi
+	if ! wait "$compile_pid"; then
+		failed=1
+	fi
 	local elapsed=$((SECONDS - started))
 	printf '\nPreflight completed in %ds (budget: 60s)\n' "$elapsed"
+	if ((failed != 0)); then
+		return 1
+	fi
 	if ((elapsed > 60)); then
 		printf 'development preflight exceeded its 60-second budget\n' >&2
 		return 1
