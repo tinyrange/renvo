@@ -135,6 +135,8 @@ func renvoRTGEmitPrimaryTertiaryOp(g *renvoLinearGen, tok int) bool { return fal
 func renvoRTGEmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool { return false }
 func renvoRTGStoreParamWord(g *renvoLinearGen, word int, offset int) {}
 func renvoRTGEmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {}
+func renvoRTGPushObjectCallWord(a *renvoAsm, word int) bool { return false }
+func renvoRTGAdjustObjectStack(a *renvoAsm, reserve bool) {}
 func renvoRTGEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {}
 func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 	return renvoCompileResult{}
@@ -206,6 +208,13 @@ func appendPreparedTargetFacts(source []byte, descriptor TargetDescriptor, activ
 	}
 	source = append(source, "\nconst renvoRTGPreparedKernelModule = "...)
 	if active && stringIndex(descriptor.Capabilities, "kernel_module") >= 0 {
+		source = append(source, '1')
+	} else {
+		source = append(source, '0')
+	}
+	source = append(source, "\nconst renvoRTGPreparedObject = "...)
+	if active && descriptor.Executable == "" && descriptor.Object != "" &&
+		stringIndex(descriptor.Capabilities, "kernel_module") < 0 {
 		source = append(source, '1')
 	} else {
 		source = append(source, '0')

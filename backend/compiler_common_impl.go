@@ -2,6 +2,11 @@ package main
 
 const renvoAbsBssReloc = 1
 
+func renvoIsHostedObjectAmd64(c *renvoCompileContext) bool {
+	return c != nil && c.objectFile && c.renvoTargetOS == renvoOSLinux &&
+		c.renvoTargetArch == renvoArchAmd64 && !targetIsKernelModule(c)
+}
+
 func renvoAsmAddExternalImportName(a *renvoAsm, name string) int {
 	renvoNonNil(a)
 	if name == "" {
@@ -184,6 +189,9 @@ const renvoWasm32FallbackSliceBackingSize = 4096
 func renvoAsmNeedsFunctionSymbols(a *renvoAsm) bool {
 	renvoNonNil(a)
 	if a.c.renvoTargetArch == renvoArchWasm32 {
+		return true
+	}
+	if renvoIsHostedObjectAmd64(a.c) {
 		return true
 	}
 	if renvoPreparedBackend == 0 {
@@ -1026,6 +1034,8 @@ type renvoFuncInfo struct {
 	linkDLLEnd      int
 	linkMethodStart int
 	linkMethodEnd   int
+	exportNameStart int
+	exportNameEnd   int
 	literalTok      int // positive for a literal; negative after named-function init scanning
 }
 
@@ -4205,7 +4215,8 @@ func renvoParseFuncInfo(m *renvoMeta, fnIndex int) {
 		resultType, resultCount = renvoParseFuncResults(m, p, rparen+1, fn.bodyStart)
 	}
 	linkStatic := renvoParseLinkStaticDirective(p, fn.nameStart)
-	m.funcs = append(m.funcs, renvoFuncInfo{declIndex: fnIndex, nameStart: nameStart, nameEnd: nameEnd, firstParam: firstParam, paramCount: paramCount, firstResult: firstResult, resultCount: resultCount, resultType: resultType, receiverType: receiverType, bodyStart: fn.bodyStart + 1, bodyEnd: fn.bodyEnd, linkStatic: linkStatic.ok, linkDLLStart: linkStatic.dllStart, linkDLLEnd: linkStatic.dllEnd, linkMethodStart: linkStatic.methodStart, linkMethodEnd: linkStatic.methodEnd})
+	export := renvoParseExportDirective(p, fn.nameStart)
+	m.funcs = append(m.funcs, renvoFuncInfo{declIndex: fnIndex, nameStart: nameStart, nameEnd: nameEnd, firstParam: firstParam, paramCount: paramCount, firstResult: firstResult, resultCount: resultCount, resultType: resultType, receiverType: receiverType, bodyStart: fn.bodyStart + 1, bodyEnd: fn.bodyEnd, linkStatic: linkStatic.ok, linkDLLStart: linkStatic.dllStart, linkDLLEnd: linkStatic.dllEnd, linkMethodStart: linkStatic.methodStart, linkMethodEnd: linkStatic.methodEnd, exportNameStart: export.nameStart, exportNameEnd: export.nameEnd})
 	if receiverType != 0 && renvoResolveType(m, receiverType).kind != renvoTypePointer {
 		renvoAddPointerType(m, receiverType, renvoPointerSpaceData)
 	}
@@ -4354,59 +4365,66 @@ type renvoLinkStaticDirective struct {
 	methodEnd   int
 }
 
-func renvoParseLinkStaticDirective(p *renvoProgram, pos int) renvoLinkStaticDirective {
-	renvoNonNil(p)
-	var d renvoLinkStaticDirective
-	src := p.src
+type renvoExportDirective struct {
+	nameStart int
+	nameEnd   int
+}
+
+func renvoPreviousDirectiveBody(src []byte, pos int, prefix string) (int, int) {
 	if pos < 0 || pos > len(src) {
-		return d
+		return 0, 0
 	}
 	lineStart := pos
-	for lineStart > 0 {
-		prev := lineStart - 1
-		c := renvo_runtime_UnsafeByteAt(src, prev)
-		if c == '\n' {
-			break
-		}
+	for lineStart > 0 && renvo_runtime_UnsafeByteAt(src, lineStart-1) != '\n' {
 		lineStart--
 	}
 	end := lineStart
 	for end > 0 {
-		prev := end - 1
-		c := renvo_runtime_UnsafeByteAt(src, prev)
-		if c != ' ' && c != '\t' && c != '\r' && c != '\n' {
+		ch := renvo_runtime_UnsafeByteAt(src, end-1)
+		if ch != ' ' && ch != '\t' && ch != '\r' && ch != '\n' {
 			break
 		}
 		end--
 	}
-	if end <= 0 {
-		return d
-	}
 	start := end
-	for start > 0 {
-		prev := start - 1
-		c := renvo_runtime_UnsafeByteAt(src, prev)
-		if c == '\n' {
-			break
-		}
+	for start > 0 && renvo_runtime_UnsafeByteAt(src, start-1) != '\n' {
 		start--
 	}
 	for start < end && (renvo_runtime_UnsafeByteAt(src, start) == ' ' || renvo_runtime_UnsafeByteAt(src, start) == '\t') {
 		start++
 	}
-	prefix := "// renvo:linkstatic "
-	if end-start < len(prefix) {
-		return d
-	}
-	for i := 0; i < len(prefix); i++ {
-		if renvo_runtime_UnsafeByteAt(src, start+i) != prefix[i] {
-			return d
-		}
+	if end-start < len(prefix) ||
+		!renvoBytesEqualText(src, start, start+len(prefix), prefix) {
+		return 0, 0
 	}
 	bodyStart := start + len(prefix)
 	for bodyStart < end && (renvo_runtime_UnsafeByteAt(src, bodyStart) == ' ' || renvo_runtime_UnsafeByteAt(src, bodyStart) == '\t') {
 		bodyStart++
 	}
+	for end > bodyStart && (renvo_runtime_UnsafeByteAt(src, end-1) == ' ' || renvo_runtime_UnsafeByteAt(src, end-1) == '\t') {
+		end--
+	}
+	return bodyStart, end
+}
+
+func renvoParseExportDirective(p *renvoProgram, pos int) renvoExportDirective {
+	renvoNonNil(p)
+	var result renvoExportDirective
+	nameStart, nameEnd := renvoPreviousDirectiveBody(p.src, pos, "//export ")
+	if nameEnd <= nameStart {
+		return result
+	}
+	result.nameStart = nameStart
+	result.nameEnd = nameEnd
+	return result
+}
+
+func renvoParseLinkStaticDirective(p *renvoProgram, pos int) renvoLinkStaticDirective {
+	renvoNonNil(p)
+	var d renvoLinkStaticDirective
+	src := p.src
+	bodyStart, end := renvoPreviousDirectiveBody(
+		src, pos, "// renvo:linkstatic ")
 	comma := bodyStart
 	for comma < end && renvo_runtime_UnsafeByteAt(src, comma) != ',' {
 		comma++
@@ -11896,13 +11914,21 @@ func renvoEmitUserCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		}
 		wordCount += words
 	}
-	words := renvoEmitCallArgsReverse(g, ep, e, fn, receiverIndex)
+	cObjectForeign := g.c.objectFile && fn.linkStatic != 0 && receiverIndex < 0 &&
+		renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "libc")
+	words := -1
+	if cObjectForeign {
+		words = renvoEmitCObjectCallArgsReverse(g, ep, e, fn)
+	} else {
+		words = renvoEmitCallArgsReverse(g, ep, e, fn, receiverIndex)
+	}
 	if words < 0 {
 		return false
 	}
 	wordCount += words
 	if fn.linkStatic != 0 && (renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
 		renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) ||
+		renvoIsHostedObjectAmd64(g.c) ||
 		renvoPreparedBackend != 0 ||
 		targetIsDarwin(g.c.renvoTargetOS) && renvo_runtime_UnsafeByteAt(g.prog.src, fn.linkDLLStart) == '/' ||
 		targetIsWindows(g.c.renvoTargetOS) && renvo_runtime_UnsafeByteAt(g.prog.src, fn.linkDLLStart) != '/') {
@@ -11919,7 +11945,9 @@ func renvoEmitUserCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 			resolved := renvoResolveType(g.meta, typ)
 			renvoNonNil(resolved)
 			callWords := 1
-			if renvoPreparedBackend == 0 || !renvoStructArgByReference(g, resolved.kind) {
+			if cObjectForeign && renvoTypeIsString(g.meta, typ) {
+				callWords = 1
+			} else if renvoPreparedBackend == 0 || !renvoStructArgByReference(g, resolved.kind) {
 				callWordSize := renvoCallWordSize(g, typ)
 				callWords = renvoAlignValue(renvoTypeCopySize(g.meta, typ), callWordSize) / callWordSize
 			}
@@ -18588,6 +18616,15 @@ func renvoLinearMarkFunc(g *renvoLinearGen, fnIndex int) {
 	}
 	g.funcReachable[fnIndex] = true
 	g.funcQueue = append(g.funcQueue, fnIndex)
+	// Relocatable targets publish only explicit export-wrapper labels. The
+	// implementation functions and any dependencies they reach remain local to
+	// the translation unit and therefore do not enter the ELF global symtab.
+	if renvoPreparedBackend != 0 && renvoRTGPreparedObject != 0 {
+		return
+	}
+	if renvoIsHostedObjectAmd64(g.c) {
+		return
+	}
 	if g.c.stripSymbols && !renvoAsmNeedsFunctionSymbols(&g.asm) {
 		return
 	}
@@ -18595,6 +18632,114 @@ func renvoLinearMarkFunc(g *renvoLinearGen, fnIndex int) {
 	nameStart := g.meta.funcs[fnIndex].nameStart
 	nameEnd := g.meta.funcs[fnIndex].nameEnd
 	renvoAsmAddFuncSymbol(&g.asm, src, nameStart, nameEnd, g.funcLabels[fnIndex])
+}
+
+func renvoObjectExportWordCount(meta *renvoMeta, fn *renvoFuncInfo) int {
+	renvoNonNil(meta, fn)
+	if fn.receiverType != 0 || fn.literalTok != 0 || fn.linkStatic != 0 ||
+		renvoTypeUsesHiddenResult(meta, fn.resultType) {
+		return -1
+	}
+	if fn.resultType != 0 {
+		result := renvoResolveType(meta, fn.resultType)
+		renvoNonNil(result)
+		if !renvoTypeKindIsScalarInt(result.kind) && result.kind != renvoTypePointer {
+			return -1
+		}
+	}
+	wordCount := 0
+	for i := 0; i < fn.paramCount; i++ {
+		param := renvoResolveType(meta, meta.params[fn.firstParam+i].typ)
+		renvoNonNil(param)
+		if !renvoTypeKindIsScalarInt(param.kind) && param.kind != renvoTypePointer {
+			return -1
+		}
+		wordCount++
+	}
+	if wordCount > 6 {
+		return -1
+	}
+	return wordCount
+}
+
+func renvoBeginObjectProgram(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
+	g := renvoBeginLinearProgram(p, meta)
+	if g == nil {
+		return nil
+	}
+	for i := 0; i < len(meta.funcs); i++ {
+		fn := &meta.funcs[i]
+		if fn.exportNameEnd <= fn.exportNameStart {
+			continue
+		}
+		if !renvoEmitObjectExport(g, i) {
+			return nil
+		}
+	}
+	return g
+}
+
+func renvoBeginLinearProgram(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
+	renvoNonNil(p, meta)
+	renvo_runtime_ArenaDiscardDecls(p.decls)
+	renvo_runtime_ArenaDiscardFuncs(p.funcs)
+	g := new(renvoLinearGen)
+	g.c = meta.c
+	g.prog = p
+	g.meta = meta
+	g.arenaSize = meta.arenaSize
+	renvoAsmInitWithContext(&g.asm, g.c)
+	if renvoFixedTarget != 0 {
+		g.funcLabels = make([]int, 0, len(meta.funcs))
+	}
+	for i := 0; i < len(meta.funcs); i++ {
+		g.funcLabels = append(g.funcLabels, renvoAsmNewLabel(&g.asm))
+	}
+	renvoInitFuncQueue(g, len(meta.funcs))
+	return g
+}
+
+func renvoEmitObjectExport(g *renvoLinearGen, fnIndex int) bool {
+	renvoNonNil(g)
+	fn := &g.meta.funcs[fnIndex]
+	wordCount := renvoObjectExportWordCount(g.meta, fn)
+	if wordCount < 0 || fn.exportNameEnd <= fn.exportNameStart {
+		return false
+	}
+	wrapper := renvoAsmNewLabel(&g.asm)
+	renvoAsmMarkLabel(&g.asm, wrapper)
+	renvoAsmAddFuncSymbol(
+		&g.asm, g.prog.src, fn.exportNameStart, fn.exportNameEnd, wrapper)
+	renvoAdjustObjectStack(&g.asm, true)
+	if renvoPreparedBackend != 0 {
+		for i := 0; i < wordCount; i++ {
+			if !renvoRTGPushObjectCallWord(&g.asm, i) {
+				return false
+			}
+		}
+	} else {
+		byteCount := int("\x00\x01\x02\x03\x04\x06\x08"[wordCount])
+		renvoAsmEmitText(&g.asm, "\x57\x56\x52\x51\x41\x50\x41\x51"[:byteCount])
+	}
+	renvoLinearMarkFunc(g, fnIndex)
+	if renvoPreparedBackend != 0 {
+		renvoRTGEmitCallWithWordCount(g, fnIndex, wordCount)
+	} else {
+		renvoAmd64EmitCallWithWordCount(g, fnIndex, wordCount)
+	}
+	renvoAdjustObjectStack(&g.asm, false)
+	renvoAsmRet(&g.asm)
+	return true
+}
+
+func renvoAdjustObjectStack(a *renvoAsm, reserve bool) {
+	if renvoPreparedBackend != 0 {
+		renvoRTGAdjustObjectStack(a, reserve)
+	} else if reserve {
+		renvoAsmEmitText(a, "\x48\x83\xec\x08")
+	} else {
+		renvoAsmEmitText(a, "\x48\x83\xc4\x08")
+	}
 }
 
 func renvoInitFuncQueue(g *renvoLinearGen, count int) {

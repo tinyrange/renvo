@@ -36,7 +36,6 @@ const (
 	ParseErrScriptRequiresGo
 	ParseErrObjectRequiresLinuxAmd64
 	ParseErrObjectFileCount
-	ParseErrObjectRequiresC
 	ParseErrMissingIncludePath
 )
 
@@ -279,9 +278,6 @@ func parseOptions(args []string, requireAdvertisedTarget bool) Options {
 	}
 	if options.Mode == ModeObject && len(options.Files) != 1 {
 		return parseFail(options, ParseErrObjectFileCount, options.Package, len(args))
-	}
-	if options.Mode == ModeObject && !optionArgIsCFile(options.Files[0]) {
-		return parseFail(options, ParseErrObjectRequiresC, options.Files[0], len(args))
 	}
 	if requireAdvertisedTarget && options.System == "" {
 		if options.WindowsGUI && options.Target != "windows/amd64" && options.Target != "windows/386" && options.Target != "windows/arm64" {

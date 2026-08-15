@@ -4,6 +4,36 @@ implements direct_emitter_v1
 
 @import "elf_amd64.rtg"
 
+go backend {
+	func linuxObjectStaticCall(
+		out *RTGEmitter, importID int, wordCount int,
+	) {
+		if wordCount > 0 {
+			out.Byte(0x5f)
+		}
+		if wordCount > 1 {
+			out.Byte(0x5e)
+		}
+		if wordCount > 2 {
+			out.Byte(0x5a)
+		}
+		if wordCount > 3 {
+			out.Byte(0x59)
+		}
+		if wordCount > 4 {
+			out.Bytes2(0x41, 0x58)
+		}
+		if wordCount > 5 {
+			out.Bytes2(0x41, 0x59)
+		}
+		externalID := out.ExternalImport(out.StaticImportName(importID))
+		out.Byte(0xe8)
+		at := out.Len()
+		out.Int32(0)
+		out.AbsoluteReloc(at, externalID, RTGRelocationImport)
+	}
+}
+
 # Linux uses the SysV call words for ordinary Renvo calls but the kernel syscall
 # convention moves the buffer length and positional offset into different
 # registers. Keep those compact shuffles in the target definition so the
@@ -24,6 +54,7 @@ extend arch x86_64 {
 runtime linux_x86_64 {
 	prepare_read_write_buffer = sequence linuxPrepareReadWriteBuffer
 	move_offset_argument = sequence linuxMoveOffsetArgument
+	emit_static_call = go linuxObjectStaticCall
 
 	entry process_stack {
 		argc = word(rsp, 0)

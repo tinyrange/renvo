@@ -69,9 +69,7 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 		} else if result.Options.Error == ParseErrObjectRequiresLinuxAmd64 {
 			d.Code, d.Message = "RENVO-OPTION-029", "object mode requires linux/amd64"
 		} else if result.Options.Error == ParseErrObjectFileCount {
-			d.Code, d.Message = "RENVO-OPTION-030", "object mode requires exactly one explicit C source file"
-		} else if result.Options.Error == ParseErrObjectRequiresC {
-			d.Code, d.Message = "RENVO-OPTION-031", "object mode requires a .c source file"
+			d.Code, d.Message = "RENVO-OPTION-030", "object mode requires exactly one explicit source file"
 		} else if result.Options.Error == ParseErrMissingIncludePath {
 			d.Code, d.Message = "RENVO-OPTION-032", "missing include directory after "+result.Options.ErrorArg
 		}

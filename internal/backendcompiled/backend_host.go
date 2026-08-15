@@ -28,7 +28,7 @@ func (Backend) CompileUnitWithOptions(unit []byte, options driver.BackendCompile
 
 func compile(unit []byte, options driver.BackendCompileOptions) driver.BackendResult {
 	target := options.Target
-	if options.Mode == driver.ModeKernelModule || options.Mode == driver.ModeObject {
+	if options.Mode == driver.ModeKernelModule {
 		target = "linux-kernel/amd64"
 	}
 	if !unitBindingMatches(unit, target) {

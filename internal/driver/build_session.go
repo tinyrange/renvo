@@ -96,7 +96,15 @@ func (s *FSBuildSession) Step() bool {
 		if len(options.Files) > 0 {
 			s.rootArg = sources.Root.Dir
 		}
-		s.pipeline = pipeline.BeginSession(s.workDir, s.stdRoot, s.rootArg, sources.Files, s.sourcesStart, s.sourcesEnd, s.compact, s.cached)
+		if options.Mode == ModeObject {
+			s.pipeline = pipeline.BeginObjectSession(
+				s.workDir, s.stdRoot, s.rootArg, sources.Files,
+				s.sourcesStart, s.sourcesEnd, s.compact, s.cached)
+		} else {
+			s.pipeline = pipeline.BeginSession(
+				s.workDir, s.stdRoot, s.rootArg, sources.Files,
+				s.sourcesStart, s.sourcesEnd, s.compact, s.cached)
+		}
 		s.stage = 2
 		return false
 	}

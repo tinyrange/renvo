@@ -304,21 +304,7 @@ if moduleName == "" || license == "" || len(symvers) == 0 {
 return nil
 }
 
-var strings []byte
-strings = append(strings, 0)
-initName := len(strings)
-strings = LINUXMODULEAppendString(strings, "init_module")
-exitName := len(strings)
-strings = LINUXMODULEAppendString(strings, "cleanup_module")
-moduleSymbolName := len(strings)
-strings = LINUXMODULEAppendString(strings, "__this_module")
-var importNames []int
-for i := 0; i < emitter.ExternalImportCount(); i++ {
-importNames = append(importNames, len(strings))
-strings = LINUXMODULEAppendString(
-strings, emitter.ExternalImportName(i),
-)
-}
+strings := []byte("\x00init_module\x00cleanup_module\x00__this_module\x00")
 
 var symbols []byte
 symbols = MODULESYMBOL(symbols, 0, 0, 0, 0, 0)
@@ -328,24 +314,26 @@ symbols = MODULESYMBOL(symbols, 0, 3, 4, 0, 0)
 symbols = MODULESYMBOL(symbols, 0, 3, 7, 0, 0)
 initSymbol := 5
 symbols = MODULESYMBOL(
-symbols, initName, 18, 1, initPosition, 0,
+symbols, 1, 18, 1, initPosition, 0,
 )
 exitSymbol := 0
 if exitPosition >= 0 {
 exitSymbol = len(symbols) / 24
 symbols = MODULESYMBOL(
-symbols, exitName, 18, 1, exitPosition, 0,
+symbols, 13, 18, 1, exitPosition, 0,
 )
 }
 symbols = MODULESYMBOL(
-symbols, moduleSymbolName, 17, 7, 0, layout.size,
+symbols, 28, 17, 7, 0, layout.size,
 )
-var importSymbols []int
-for i := 0; i < len(importNames); i++ {
-importSymbols = append(importSymbols, len(symbols)/24)
+firstImportSymbol := len(symbols)/24
+nameOffset := len(strings)
+for i := 0; i < emitter.ExternalImportCount(); i++ {
 symbols = MODULESYMBOL(
-symbols, importNames[i], 16, 0, 0, 0,
+symbols, nameOffset, 16, 0, 0, 0,
 )
+strings = LINUXMODULEAppendString(strings, emitter.ExternalImportName(i))
+nameOffset = len(strings)
 }
 
 var textRelocations []byte
@@ -367,11 +355,11 @@ textRelocations, at, 3, 2,
 MODULEALIGN(emitter.BSSSize(), alignment)-4,
 )
 } else if kind == RTGRelocationImport {
-if addend < 0 || addend >= len(importSymbols) {
+if addend < 0 || addend >= emitter.ExternalImportCount() {
 return nil
 }
 textRelocations = MODULERELOCATION(
-textRelocations, at, importSymbols[addend], 4, -4,
+textRelocations, at, firstImportSymbol+addend, 4, -4,
 )
 } else {
 textRelocations = MODULERELOCATION(
@@ -406,7 +394,7 @@ versions = LINUXMODULEAppendVersion(
 versions, "module_layout", moduleCRC,
 )
 }
-for i := 0; i < len(importSymbols); i++ {
+for i := 0; i < emitter.ExternalImportCount(); i++ {
 name := emitter.ExternalImportName(i)
 if LINUXMODULESymbolGPLOnly(symvers, name) &&
 !LINUXMODULELicenseGPLCompatible(license) {
@@ -437,34 +425,7 @@ layout.exitOffset, symvers,
 ),
 )
 
-var sectionNames []byte
-sectionNames = append(sectionNames, 0)
-textName := len(sectionNames)
-sectionNames = LINUXMODULEAppendString(sectionNames, ".text")
-textRelocationName := len(sectionNames)
-sectionNames = LINUXMODULEAppendString(sectionNames, ".rela.text")
-dataName := len(sectionNames)
-sectionNames = LINUXMODULEAppendString(sectionNames, ".rodata")
-bssName := len(sectionNames)
-sectionNames = LINUXMODULEAppendString(sectionNames, ".bss")
-infoName := len(sectionNames)
-sectionNames = LINUXMODULEAppendString(sectionNames, ".modinfo")
-versionName := len(sectionNames)
-sectionNames = LINUXMODULEAppendString(sectionNames, "__versions")
-moduleNameSection := len(sectionNames)
-sectionNames = LINUXMODULEAppendString(
-sectionNames, ".gnu.linkonce.this_module",
-)
-moduleRelocationName := len(sectionNames)
-sectionNames = LINUXMODULEAppendString(
-sectionNames, ".rela.gnu.linkonce.this_module",
-)
-symbolName := len(sectionNames)
-sectionNames = LINUXMODULEAppendString(sectionNames, ".symtab")
-stringName := len(sectionNames)
-sectionNames = LINUXMODULEAppendString(sectionNames, ".strtab")
-sectionStringName := len(sectionNames)
-sectionNames = LINUXMODULEAppendString(sectionNames, ".shstrtab")
+sectionNames := []byte("\x00.text\x00.rela.text\x00.rodata\x00.bss\x00.modinfo\x00__versions\x00.gnu.linkonce.this_module\x00.rela.gnu.linkonce.this_module\x00.symtab\x00.strtab\x00.shstrtab\x00")
 
 code := emitter.Code()
 data := emitter.Data()
@@ -502,45 +463,45 @@ sectionOffset := MODULEALIGN(len(image), 8)
 image = LINUXMODULEUntil(image, sectionOffset)
 image = MODULESECTION(image, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 image = MODULESECTION(
-image, textName, 1, 6, textOffset, len(code), 0, 0, 16, 0,
+image, 1, 1, 6, textOffset, len(code), 0, 0, 16, 0,
 )
 image = MODULESECTION(
-image, textRelocationName, 4, 64, textRelocationOffset,
+image, 7, 4, 64, textRelocationOffset,
 len(textRelocations), 9, 1, 8, 24,
 )
 image = MODULESECTION(
-image, dataName, 1, 2, dataOffset, len(data), 0, 0, 8, 0,
+image, 18, 1, 2, dataOffset, len(data), 0, 0, 8, 0,
 )
 image = MODULESECTION(
-image, bssName, 8, 3, bssOffset, emitter.BSSSize(),
+image, 26, 8, 3, bssOffset, emitter.BSSSize(),
 0, 0, 8, 0,
 )
 image = MODULESECTION(
-image, infoName, 1, 2, infoOffset, len(moduleInfo),
+image, 31, 1, 2, infoOffset, len(moduleInfo),
 0, 0, 1, 0,
 )
 image = MODULESECTION(
-image, versionName, 1, 2, versionOffset, len(versions),
+image, 40, 1, 2, versionOffset, len(versions),
 0, 0, 8, 0,
 )
 image = MODULESECTION(
-image, moduleNameSection, 1, 3, moduleOffset,
+image, 51, 1, 3, moduleOffset,
 len(thisModule), 0, 0, 64, 0,
 )
 image = MODULESECTION(
-image, moduleRelocationName, 4, 64, moduleRelocationOffset,
+image, 77, 4, 64, moduleRelocationOffset,
 len(moduleRelocations), 9, 7, 8, 24,
 )
 image = MODULESECTION(
-image, symbolName, 2, 0, symbolOffset, len(symbols),
+image, 108, 2, 0, symbolOffset, len(symbols),
 10, 5, 8, 24,
 )
 image = MODULESECTION(
-image, stringName, 3, 0, stringOffset, len(strings),
+image, 116, 3, 0, stringOffset, len(strings),
 0, 0, 1, 0,
 )
 image = MODULESECTION(
-image, sectionStringName, 3, 0, sectionStringOffset,
+image, 124, 3, 0, sectionStringOffset,
 len(sectionNames), 0, 0, 1, 0,
 )
 var header []byte
