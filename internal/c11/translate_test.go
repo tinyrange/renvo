@@ -58,6 +58,46 @@ int main(void) {
 	}
 }
 
+func TestTranslateDeclarationAfterControlFlow(t *testing.T) {
+	result := Translate("main", []byte(`
+int main(void) {
+	if (1) { int first = 1; }
+	int second = 2;
+	return second;
+}
+`))
+	if !result.Ok || !bytes.Contains(result.Source, []byte("}\nvar second int32=2")) {
+		t.Fatalf("declaration after control flow translation = %#v\n%s", result, result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("translated declaration boundary does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateWrapsUnbracedControlledStatements(t *testing.T) {
+	result := Translate("main", []byte(`
+int main(void) {
+	int value = 0;
+	if (value == 0) value = 1; else value = 2;
+	while (value < 3) value++;
+	for (value = 3; value < 4; value++) value += 1;
+	return value;
+}
+`))
+	for _, want := range [][]byte{
+		[]byte("if value==0 {value=1;} else {value=2;}"),
+		[]byte("for value<3 {value++;}"),
+		[]byte("for value=3;value<4;value++ {value+=1;}"),
+	} {
+		if !result.Ok || !bytes.Contains(result.Source, want) {
+			t.Fatalf("controlled statement translation is missing %q: %#v\n%s", want, result, result.Source)
+		}
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("translated controlled statements do not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
 func TestTranslateFixedArray(t *testing.T) {
 	result := Translate("main", []byte(`int first(void) {
 	int values[3] = {42, 1, 2};
@@ -90,7 +130,7 @@ int main(void) { puts("Hello, world!"); return 0; }
 	for _, want := range [][]byte{
 		[]byte("//export main"),
 		[]byte("// renvo:linkstatic libc,puts"),
-		[]byte("func puts(__s string) int32{return 0}"),
+		[]byte("func puts(p0 string) int32{return 0}"),
 		[]byte(`puts("\x48\x65\x6c\x6c\x6f\x2c\x20\x77\x6f\x72\x6c\x64\x21\x00")`),
 	} {
 		if !bytes.Contains(result.Source, want) {
@@ -99,6 +139,36 @@ int main(void) { puts("Hello, world!"); return 0; }
 	}
 	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
 		t.Fatalf("translated object source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateObjectMapsSystemTypedefsAndOpaquePointers(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+int main(void) {
+	EVP_MD_CTX *context = EVP_MD_CTX_new();
+	size_t count = 0;
+	return 0;
+}
+`), []byte(`
+EVP_MD_CTX *EVP_MD_CTX_new(void);
+int EVP_DigestUpdate(EVP_MD_CTX *ctx, const void *data, size_t count);
+int EVP_DigestFinal_ex(EVP_MD_CTX *ctx, unsigned char *md, uint32_t *size);
+`))
+	if !result.Ok {
+		t.Fatalf("TranslateObject failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{
+		[]byte("var context *byte=EVP_MD_CTX_new()"),
+		[]byte("var count uintptr=0"),
+		[]byte("func EVP_DigestUpdate(p0 *byte,p1 *byte,p2 uintptr) int32"),
+		[]byte("func EVP_DigestFinal_ex(p0 *byte,p1 *uint8,p2 *uint32) int32"),
+	} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("translated object source is missing %q:\n%s", want, result.Source)
+		}
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("translated system declarations do not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
 	}
 }
 

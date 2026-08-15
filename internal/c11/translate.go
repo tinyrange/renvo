@@ -28,6 +28,7 @@ type cType struct {
 	name    string
 	pointer int
 	arrays  [][]token
+	opaque  bool
 }
 
 type declarator struct {
@@ -53,6 +54,7 @@ type translator struct {
 	ok          bool
 	err         int
 	errorAt     int
+	namedTypes  []string
 }
 
 // Translate lowers one preprocessed C translation unit into the shared Go
@@ -218,7 +220,8 @@ func (t *translator) emitForeignFunction(decl declarator) {
 		if i > 0 {
 			t.out = append(t.out, ',')
 		}
-		t.out = append(t.out, tokenText(t.src, decl.params[i].name)...)
+		t.out = append(t.out, 'p')
+		t.appendDecimal(i)
 		t.out = append(t.out, ' ')
 		t.emitForeignType(decl.params[i].typeInfo)
 	}
@@ -234,6 +237,24 @@ func (t *translator) emitForeignFunction(decl declarator) {
 		t.out = append(t.out, "return 0"...)
 	}
 	t.out = append(t.out, '}', '\n')
+}
+
+func (t *translator) appendDecimal(value int) {
+	if value == 0 {
+		t.out = append(t.out, '0')
+		return
+	}
+	var digits [20]byte
+	count := 0
+	for value > 0 {
+		digits[count] = byte('0' + value%10)
+		count++
+		value /= 10
+	}
+	for count > 0 {
+		count--
+		t.out = append(t.out, digits[count])
+	}
 }
 
 func (t *translator) emitForeignType(info cType) {
@@ -252,6 +273,8 @@ func (t *translator) parseType() (cType, int, bool) {
 	unsigned := false
 	longCount := 0
 	base := ""
+	named := ""
+	opaque := false
 	seen := false
 	for t.kind() == tokenIdent {
 		switch {
@@ -304,7 +327,17 @@ func (t *translator) parseType() (cType, int, bool) {
 			t.pos++
 		default:
 			if !seen {
-				return cType{}, storage, false
+				typeName := tokenText(t.src, t.tokens[t.pos])
+				var known bool
+				named, known = namedCType(typeName)
+				if !known {
+					named = "byte"
+					opaque = true
+					t.rememberNamedType(typeName)
+				}
+				seen = true
+				t.pos++
+				continue
 			}
 			goto done
 		}
@@ -312,6 +345,9 @@ func (t *translator) parseType() (cType, int, bool) {
 done:
 	if !seen {
 		return cType{}, storage, false
+	}
+	if named != "" {
+		return cType{name: named, opaque: opaque}, storage, true
 	}
 	if base == "" {
 		base = "int"
@@ -352,6 +388,49 @@ done:
 	return cType{name: name}, storage, true
 }
 
+func (t *translator) rememberNamedType(name []byte) {
+	for i := 0; i < len(t.namedTypes); i++ {
+		if textEquals(name, t.namedTypes[i]) {
+			return
+		}
+	}
+	t.namedTypes = append(t.namedTypes, string(name))
+}
+
+func namedCType(name []byte) (string, bool) {
+	if textEquals(name, "size_t") || textEquals(name, "uintptr_t") {
+		return "uintptr", true
+	}
+	if textEquals(name, "intptr_t") || textEquals(name, "ptrdiff_t") {
+		return "int64", true
+	}
+	if textEquals(name, "int8_t") {
+		return "int8", true
+	}
+	if textEquals(name, "uint8_t") {
+		return "uint8", true
+	}
+	if textEquals(name, "int16_t") {
+		return "int16", true
+	}
+	if textEquals(name, "uint16_t") {
+		return "uint16", true
+	}
+	if textEquals(name, "int32_t") {
+		return "int32", true
+	}
+	if textEquals(name, "uint32_t") {
+		return "uint32", true
+	}
+	if textEquals(name, "int64_t") {
+		return "int64", true
+	}
+	if textEquals(name, "uint64_t") {
+		return "uint64", true
+	}
+	return "", false
+}
+
 func (t *translator) parseDeclarator(base cType, allowFunction bool) (declarator, bool) {
 	result := declarator{typeInfo: base}
 	for t.take("*") {
@@ -359,6 +438,12 @@ func (t *translator) parseDeclarator(base cType, allowFunction bool) (declarator
 		for t.currentIs("const") || t.currentIs("volatile") || t.currentIs("restrict") {
 			t.pos++
 		}
+	}
+	if result.typeInfo.opaque && result.typeInfo.pointer == 0 {
+		// The ABI size of an unknown scalar typedef cannot be inferred safely
+		// from an unpreprocessed header. Opaque typedefs are exact when used
+		// behind a pointer, which is the normal system-library handle shape.
+		return result, false
 	}
 	if t.kind() != tokenIdent {
 		return result, false
@@ -513,6 +598,12 @@ func (t *translator) block() {
 			break
 		}
 		t.statement()
+		if t.ok {
+			// A newline is a Go statement terminator after a completed block.
+			// Without it, valid C99 such as `if (...) {} int value;` becomes
+			// the invalid shared-syntax token sequence `}var`.
+			t.out = append(t.out, '\n')
+		}
 	}
 	if !t.take("}") {
 		t.fail(TranslateErrStatement)
@@ -534,10 +625,10 @@ func (t *translator) statement() {
 		t.out = append(t.out, "if "...)
 		t.parenthesizedCondition()
 		t.out = append(t.out, ' ')
-		t.statement()
+		t.controlledStatement()
 		if t.take("else") {
 			t.out = append(t.out, " else "...)
-			t.statement()
+			t.controlledStatement()
 		}
 		return
 	}
@@ -545,7 +636,7 @@ func (t *translator) statement() {
 		t.out = append(t.out, "for "...)
 		t.parenthesizedCondition()
 		t.out = append(t.out, ' ')
-		t.statement()
+		t.controlledStatement()
 		return
 	}
 	if t.take("for") {
@@ -605,6 +696,16 @@ func (t *translator) statement() {
 	t.pos = end + 1
 }
 
+func (t *translator) controlledStatement() {
+	if t.currentIs("{") {
+		t.block()
+		return
+	}
+	t.out = append(t.out, '{')
+	t.statement()
+	t.out = append(t.out, '}')
+}
+
 func (t *translator) localDeclaration() {
 	base, storage, ok := t.parseType()
 	if !ok || storage == storageTypedef || storage == storageExtern {
@@ -651,7 +752,7 @@ func (t *translator) forStatement() {
 	t.expression(parts[2])
 	t.pos = close + 1
 	t.out = append(t.out, ' ')
-	t.statement()
+	t.controlledStatement()
 }
 
 func (t *translator) parenthesizedCondition() {
@@ -850,7 +951,23 @@ func (t *translator) findAtDepth(text string) int {
 }
 
 func (t *translator) isTypeStart() bool {
-	return t.kind() == tokenIdent && isTypeToken(t.src, t.tokens[t.pos])
+	if t.kind() != tokenIdent {
+		return false
+	}
+	tok := t.tokens[t.pos]
+	if isTypeToken(t.src, tok) {
+		return true
+	}
+	name := tokenText(t.src, tok)
+	if _, known := namedCType(name); known {
+		return true
+	}
+	for i := 0; i < len(t.namedTypes); i++ {
+		if textEquals(name, t.namedTypes[i]) {
+			return true
+		}
+	}
+	return false
 }
 
 func isTypeToken(src []byte, tok token) bool {

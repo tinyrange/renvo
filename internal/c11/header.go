@@ -135,14 +135,29 @@ func headerDeclarations(src []byte, wanted []string, emitted []string) ([]byte, 
 			!tokenIs(src, scanned.tokens[start-1], "{") && !tokenIs(src, scanned.tokens[start-1], "}") {
 			start--
 		}
-		hasExtern := false
-		for j := start; j < i; j++ {
-			if tokenIs(src, scanned.tokens[j], "extern") {
-				hasExtern = true
-				break
+		for start < i && tokenOnDirectiveLine(src, scanned.tokens, start) {
+			line := tokenLine(scanned.tokens[start])
+			for start < i && tokenLine(scanned.tokens[start]) == line {
+				start++
 			}
 		}
-		if !hasExtern {
+		for start < i && headerDeclarationDecoration(src, scanned.tokens[start]) {
+			start++
+		}
+		hasStatic := false
+		hasTypedef := false
+		for j := start; j < i; j++ {
+			if tokenIs(src, scanned.tokens[j], "static") {
+				hasStatic = true
+			}
+			if tokenIs(src, scanned.tokens[j], "typedef") {
+				hasTypedef = true
+			}
+		}
+		// A file-scope function declaration has external linkage unless it is
+		// explicitly static. libc commonly spells prototypes with extern while
+		// other system libraries, including OpenSSL, rely on the C default.
+		if hasStatic || hasTypedef {
 			continue
 		}
 		depth := 0
@@ -158,7 +173,8 @@ func headerDeclarations(src []byte, wanted []string, emitted []string) ([]byte, 
 				}
 			}
 		}
-		if close < 0 {
+		if close < 0 || close+1 >= len(scanned.tokens) ||
+			!tokenIs(src, scanned.tokens[close+1], ";") {
 			continue
 		}
 		for j := start; j <= close; j++ {
@@ -171,6 +187,12 @@ func headerDeclarations(src []byte, wanted []string, emitted []string) ([]byte, 
 		names = append(names, name)
 	}
 	return out, names, true
+}
+
+func headerDeclarationDecoration(src []byte, tok token) bool {
+	text := tokenText(src, tok)
+	return textHasPrefix(text, "__") || textHasSuffix(text, "_EXPORT") ||
+		textContains(text, "DEPRECATED")
 }
 
 func tokenOnDirectiveLine(src []byte, tokens []token, index int) bool {
@@ -202,4 +224,30 @@ func textEquals(value []byte, text string) bool {
 		}
 	}
 	return true
+}
+
+func textHasPrefix(value []byte, prefix string) bool {
+	if len(value) < len(prefix) {
+		return false
+	}
+	return textEquals(value[:len(prefix)], prefix)
+}
+
+func textHasSuffix(value []byte, suffix string) bool {
+	if len(value) < len(suffix) {
+		return false
+	}
+	return textEquals(value[len(value)-len(suffix):], suffix)
+}
+
+func textContains(value []byte, part string) bool {
+	if len(part) == 0 {
+		return true
+	}
+	for i := 0; i+len(part) <= len(value); i++ {
+		if textEquals(value[i:i+len(part)], part) {
+			return true
+		}
+	}
+	return false
 }
