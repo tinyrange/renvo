@@ -1,9 +1,10 @@
 package c11
 
 type constantParser struct {
-	t      *translator
-	tokens []token
-	pos    int
+	t           *translator
+	tokens      []token
+	pos         int
+	ignoreValue bool
 }
 
 func (t *translator) constantExpression(tokens []token) (int, bool) {
@@ -13,24 +14,42 @@ func (t *translator) constantExpression(tokens []token) (int, bool) {
 }
 
 func (p *constantParser) conditional() (int, bool) {
+	conditionStart := p.pos
 	condition, ok := p.binary(1)
 	if !ok || !p.current("?") {
 		return condition, ok
 	}
+	conditionEnd := p.pos
 	p.pos++
 	leftStart := p.pos
-	left, leftOK := p.conditional()
+	left, leftOK := condition, true
+	if !p.current(":") {
+		outerIgnore := p.ignoreValue
+		p.ignoreValue = outerIgnore || condition == 0
+		left, leftOK = p.conditional()
+		p.ignoreValue = outerIgnore
+	}
 	if !leftOK || !p.current(":") {
 		return 0, false
 	}
 	leftEnd := p.pos
 	p.pos++
 	rightStart := p.pos
+	outerIgnore := p.ignoreValue
+	p.ignoreValue = outerIgnore || condition != 0
 	right, rightOK := p.conditional()
+	p.ignoreValue = outerIgnore
 	if !rightOK {
 		return 0, false
 	}
-	typeID := p.t.usualArithmeticType(p.t.expressionType(p.tokens[leftStart:leftEnd]), p.t.expressionType(p.tokens[rightStart:p.pos]))
+	if outerIgnore {
+		return 0, true
+	}
+	leftTypeTokens := p.tokens[leftStart:leftEnd]
+	if leftStart == leftEnd {
+		leftTypeTokens = p.tokens[conditionStart:conditionEnd]
+	}
+	typeID := p.t.usualArithmeticType(p.t.expressionType(leftTypeTokens), p.t.expressionType(p.tokens[rightStart:p.pos]))
 	value := right
 	if condition != 0 {
 		value = left
@@ -61,6 +80,10 @@ func (p *constantParser) binary(minimum int) (int, bool) {
 		right, valid := p.binary(precedence + 1)
 		if !valid {
 			return 0, false
+		}
+		if p.ignoreValue {
+			left = 0
+			continue
 		}
 		leftType := p.t.expressionType(p.tokens[leftStart:opAt])
 		rightType := p.t.expressionType(p.tokens[rightStart:p.pos])
@@ -96,6 +119,29 @@ func (p *constantParser) unary() (int, bool) {
 	if p.pos >= len(p.tokens) {
 		return 0, false
 	}
+	if p.ignoreValue && tokenKind(p.tokens[p.pos]) == tokenIdent {
+		p.pos++
+		if p.current("(") {
+			end := matchingToken(p.t.src, p.tokens, p.pos, "(", ")")
+			if end < 0 {
+				return 0, false
+			}
+			p.pos = end + 1
+		}
+		return 0, true
+	}
+	if p.current("__builtin_types_compatible_p") {
+		return p.typesCompatible()
+	}
+	if p.current("__builtin_constant_p") {
+		return p.constantP()
+	}
+	if p.current("__builtin_offsetof") || p.current("offsetof") {
+		return p.offsetof()
+	}
+	if value, ok, matched := p.integerBuiltin(); matched {
+		return value, ok
+	}
 	if p.current("+") || p.current("-") || p.current("~") || p.current("!") {
 		op := string(tokenText(p.t.src, p.tokens[p.pos]))
 		p.pos++
@@ -120,8 +166,8 @@ func (p *constantParser) unary() (int, bool) {
 			return boolConstant(value == 0), true
 		}
 	}
-	if p.current("sizeof") || p.current("_Alignof") {
-		align := p.current("_Alignof")
+	if p.current("sizeof") || p.current("_Alignof") || p.current("__alignof") || p.current("__alignof__") {
+		align := !p.current("sizeof")
 		p.pos++
 		if !p.current("(") {
 			return 0, false
@@ -130,9 +176,16 @@ func (p *constantParser) unary() (int, bool) {
 		if end < 0 {
 			return 0, false
 		}
-		typeID, ok := p.t.typeFromTokens(p.tokens[p.pos+1 : end])
+		operand := p.tokens[p.pos+1 : end]
+		typeID, ok := p.t.typeFromTokens(operand)
 		if !ok {
-			return 0, false
+			if align {
+				return 0, false
+			}
+			typeID = p.t.expressionType(operand)
+			if typeID == cTypeVoidID {
+				return 0, false
+			}
 		}
 		p.pos = end + 1
 		if align {
@@ -173,6 +226,146 @@ func (p *constantParser) unary() (int, bool) {
 		return p.t.lookupValue(tokenText(p.t.src, tok))
 	}
 	return 0, false
+}
+
+func (p *constantParser) integerBuiltin() (int, bool, bool) {
+	if p.pos >= len(p.tokens) || tokenKind(p.tokens[p.pos]) != tokenIdent {
+		return 0, false, false
+	}
+	name := string(tokenText(p.t.src, p.tokens[p.pos]))
+	width, operation := 0, ""
+	switch name {
+	case "__builtin_clz":
+		width, operation = 32, "clz"
+	case "__builtin_clzl", "__builtin_clzll":
+		width, operation = 64, "clz"
+	case "__builtin_ctz":
+		width, operation = 32, "ctz"
+	case "__builtin_ctzl", "__builtin_ctzll":
+		width, operation = 64, "ctz"
+	case "__builtin_ffs":
+		width, operation = 32, "ffs"
+	case "__builtin_ffsl", "__builtin_ffsll":
+		width, operation = 64, "ffs"
+	case "__builtin_popcount":
+		width, operation = 32, "popcount"
+	case "__builtin_popcountl", "__builtin_popcountll":
+		width, operation = 64, "popcount"
+	case "__builtin_parity":
+		width, operation = 32, "parity"
+	case "__builtin_parityl", "__builtin_parityll":
+		width, operation = 64, "parity"
+	default:
+		return 0, false, false
+	}
+	p.pos++
+	if !p.current("(") {
+		return 0, false, true
+	}
+	end := matchingToken(p.t.src, p.tokens, p.pos, "(", ")")
+	if end < 0 {
+		return 0, false, true
+	}
+	value, ok := p.t.constantExpression(p.tokens[p.pos+1 : end])
+	if !ok {
+		return 0, false, true
+	}
+	p.pos = end + 1
+	bits := uint64(value)
+	if width == 32 {
+		bits = uint64(uint32(value))
+	}
+	switch operation {
+	case "clz":
+		count := 0
+		for bit := width - 1; bit >= 0 && bits&(uint64(1)<<bit) == 0; bit-- {
+			count++
+		}
+		return count, true, true
+	case "ctz", "ffs":
+		count := 0
+		for count < width && bits&(uint64(1)<<count) == 0 {
+			count++
+		}
+		if operation == "ffs" {
+			if bits == 0 {
+				return 0, true, true
+			}
+			count++
+		}
+		return count, true, true
+	default:
+		count := 0
+		for bits != 0 {
+			count += int(bits & 1)
+			bits >>= 1
+		}
+		if operation == "parity" {
+			count &= 1
+		}
+		return count, true, true
+	}
+}
+
+func (p *constantParser) typesCompatible() (int, bool) {
+	p.pos++
+	if !p.current("(") {
+		return 0, false
+	}
+	end := matchingToken(p.t.src, p.tokens, p.pos, "(", ")")
+	if end < 0 {
+		return 0, false
+	}
+	items := splitTopLevel(p.t.src, p.tokens[p.pos+1:end], ",")
+	if len(items) != 2 {
+		return 0, false
+	}
+	left, leftOK := p.t.typeFromTokens(items[0])
+	right, rightOK := p.t.typeFromTokens(items[1])
+	if !leftOK || !rightOK {
+		return 0, false
+	}
+	p.pos = end + 1
+	return boolConstant(p.t.compatibleParameterType(left, right)), true
+}
+
+func (p *constantParser) constantP() (int, bool) {
+	p.pos++
+	if !p.current("(") {
+		return 0, false
+	}
+	end := matchingToken(p.t.src, p.tokens, p.pos, "(", ")")
+	if end < 0 {
+		return 0, false
+	}
+	_, constant := p.t.constantExpression(p.tokens[p.pos+1 : end])
+	p.pos = end + 1
+	return boolConstant(constant), true
+}
+
+func (p *constantParser) offsetof() (int, bool) {
+	p.pos++
+	if !p.current("(") {
+		return 0, false
+	}
+	end := matchingToken(p.t.src, p.tokens, p.pos, "(", ")")
+	if end < 0 {
+		return 0, false
+	}
+	items := splitTopLevel(p.t.src, p.tokens[p.pos+1:end], ",")
+	if len(items) != 2 {
+		return 0, false
+	}
+	typeID, ok := p.t.typeFromTokens(items[0])
+	if !ok {
+		return 0, false
+	}
+	offset, ok := p.t.fieldOffset(typeID, items[1])
+	if !ok {
+		return 0, false
+	}
+	p.pos = end + 1
+	return offset, true
 }
 
 func (t *translator) convertIntegerConstant(typeID int, value int) (int, bool) {

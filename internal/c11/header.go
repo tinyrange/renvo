@@ -108,7 +108,8 @@ func sourceCallNames(src []byte) []string {
 		if tokenKind(scanned.tokens[i]) != tokenIdent || !tokenIs(src, scanned.tokens[i+1], "(") ||
 			tokenIs(src, scanned.tokens[i], "if") || tokenIs(src, scanned.tokens[i], "for") ||
 			tokenIs(src, scanned.tokens[i], "while") || tokenIs(src, scanned.tokens[i], "switch") ||
-			tokenIs(src, scanned.tokens[i], "sizeof") || tokenIs(src, scanned.tokens[i], "_Alignof") {
+			tokenIs(src, scanned.tokens[i], "sizeof") || tokenIs(src, scanned.tokens[i], "_Alignof") ||
+			tokenIs(src, scanned.tokens[i], "__alignof") || tokenIs(src, scanned.tokens[i], "__alignof__") {
 			continue
 		}
 		name := string(tokenText(src, scanned.tokens[i]))

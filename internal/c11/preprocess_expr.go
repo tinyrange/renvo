@@ -318,6 +318,8 @@ func ppParseChar(text []byte) (int64, bool) {
 		return 7, true
 	case 'b':
 		return 8, true
+	case 'e':
+		return 27, true
 	case '\\', '\'', '"', '?':
 		return int64(text[start]), true
 	}

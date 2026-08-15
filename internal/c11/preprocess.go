@@ -232,6 +232,7 @@ __SIZEOF_LONG_LONG__=8
 __SIZEOF_POINTER__=8
 __SIZEOF_SIZE_T__=8
 __SIZEOF_PTRDIFF_T__=8
+__SIZEOF_INT128__=16
 __SIZE_TYPE__=long unsigned int
 __PTRDIFF_TYPE__=long int
 __INTPTR_TYPE__=long int

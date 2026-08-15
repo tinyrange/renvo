@@ -1,5 +1,7 @@
 package c11
 
+import "renvo.dev/internal/arena"
+
 const (
 	TranslateOK = iota
 	TranslateErrScan
@@ -31,13 +33,28 @@ type Result struct {
 }
 
 type declarator struct {
-	name         token
-	typeID       int
-	params       []parameter
-	function     bool
-	variadic     bool
-	initializer  []token
-	functionType int
+	name            token
+	typeID          int
+	attributes      cAttributes
+	params          []parameter
+	function        bool
+	variadic        bool
+	initializer     []token
+	functionType    int
+	incompleteArray bool
+}
+
+// cAttributes contains only properties which affect C semantics at the shared
+// frontend boundary. Diagnostic and optimizer hints are recognized by name but
+// deliberately do not grow this record.
+type cAttributes struct {
+	align             int
+	packed            bool
+	transparentUnion  bool
+	alias             bool
+	visibility        bool
+	weak              bool
+	callingConvention bool
 }
 
 type parameter struct {
@@ -57,6 +74,7 @@ type declaratorOp struct {
 	params     []parameter
 	variadic   bool
 	qualifiers int
+	incomplete bool
 }
 
 type initializerPath struct {
@@ -71,44 +89,62 @@ type initializerStep struct {
 }
 
 type translator struct {
-	src            []byte
-	tokens         []token
-	pos            int
-	packageName    string
-	out            []byte
-	object         bool
-	ok             bool
-	err            int
-	errorAt        int
-	types          []cTypeInfo
-	fields         []cField
-	opaqueTypes    []cTypeName
-	names          []cNamespaceName
-	objects        []cObjectName
-	tentatives     []cObjectName
-	definitions    []cObjectName
-	threadNames    []cObjectName
-	functions      []cFunctionName
-	variadicCalls  []cVariadicCall
-	functionParams []int
-	typeSerial     int
-	dataModel      int
-	pointerSize    int
-	packageHeader  int
-	usesUnsafe     bool
-	staticOut      []byte
-	resultType     int
-	boolHelper     bool
-	tlsRuntime     bool
-	localStart     int
-	initializing   int
-	nameStart      int
+	src             []byte
+	tokens          []token
+	pos             int
+	packageName     string
+	out             []byte
+	object          bool
+	checkOnly       bool
+	speculativeType bool
+	ok              bool
+	err             int
+	errorAt         int
+	types           []cTypeInfo
+	fields          []cField
+	opaqueTypes     []cTypeName
+	names           []cNamespaceName
+	objects         []cObjectName
+	tentatives      []cObjectName
+	definitions     []cObjectName
+	threadNames     []cObjectName
+	functions       []cFunctionName
+	variadicCalls   []cVariadicCall
+	functionParams  []int
+	typeSerial      int
+	dataModel       int
+	pointerSize     int
+	packageHeader   int
+	usesUnsafe      bool
+	staticOut       []byte
+	resultType      int
+	boolHelper      bool
+	tlsRuntime      bool
+	localStart      int
+	initializing    int
+	nameStart       int
+}
+
+type checkScratchMark struct {
+	mark                                 int
+	out, staticOut                       []byte
+	typesLen, typesCap                   int
+	fieldsLen, fieldsCap                 int
+	opaqueTypesLen, opaqueTypesCap       int
+	namesLen, namesCap                   int
+	objectsLen, objectsCap               int
+	tentativesLen, tentativesCap         int
+	definitionsLen, definitionsCap       int
+	threadNamesLen, threadNamesCap       int
+	functionsLen, functionsCap           int
+	variadicCallsLen, variadicCallsCap   int
+	functionParamsLen, functionParamsCap int
 }
 
 // Translate lowers one preprocessed C translation unit into the shared Go
 // frontend syntax. It deliberately performs no backend-specific lowering.
 func Translate(packageName string, src []byte) Result {
-	return translate(packageName, src, nil, false, DataModelLP64)
+	return translate(packageName, src, nil, false, DataModelLP64, false)
 }
 
 // TranslateObject lowers a hosted C translation unit. Prelude contains
@@ -119,14 +155,23 @@ func TranslateObject(packageName string, src []byte, prelude []byte) Result {
 }
 
 func TranslateObjectForDataModel(packageName string, src []byte, prelude []byte, dataModel int) Result {
-	return translate(packageName, src, prelude, true, dataModel)
+	return translate(packageName, src, prelude, true, dataModel, false)
 }
 
-func translate(packageName string, src []byte, prelude []byte, object bool, dataModel int) Result {
+// CheckObjectForDataModel parses and type-checks a preprocessed C translation
+// unit without requiring all target code-generation operations to exist yet.
+// It is the M4 boundary used for constructs such as inline assembly whose
+// lowering belongs to a later milestone.
+func CheckObjectForDataModel(src []byte, dataModel int) Result {
+	return translate("main", src, nil, true, dataModel, true)
+}
+
+func translate(packageName string, src []byte, prelude []byte, object bool, dataModel int, checkOnly bool) Result {
 	t := translator{
 		packageName:  packageName,
 		out:          make([]byte, 0, len(src)+len(src)/4+len(prelude)+64),
 		object:       object,
+		checkOnly:    checkOnly,
 		ok:           true,
 		errorAt:      -1,
 		localStart:   -1,
@@ -142,6 +187,9 @@ func translate(packageName string, src []byte, prelude []byte, object bool, data
 	}
 	if !t.translateSource(src) {
 		return Result{Ok: false, Error: t.err, ErrorAt: t.errorAt}
+	}
+	if checkOnly {
+		return Result{Ok: true, Error: TranslateOK, ErrorAt: -1}
 	}
 	t.emitPendingDeclarations()
 	if !t.ok {
@@ -168,14 +216,136 @@ func (t *translator) translateSource(src []byte) bool {
 	t.src = src
 	t.tokens = scanned.tokens
 	t.pos = 0
+	if t.checkOnly {
+		t.reserveCheckTables(len(t.tokens))
+	}
 	for t.ok && t.kind() != tokenEOF {
 		t.skipDirectives()
 		if t.kind() == tokenEOF {
 			break
 		}
-		t.externalDeclaration()
+		if t.take(";") {
+			continue
+		}
+		if t.checkOnly {
+			mark := t.beginCheckScratch()
+			t.externalDeclaration()
+			t.endCheckScratch(mark)
+		} else {
+			t.externalDeclaration()
+		}
 	}
 	return t.ok
+}
+
+func (t *translator) reserveCheckTables(tokens int) {
+	// A self-hosted compiler cannot rely on garbage collection to recover old
+	// slice backing arrays. Reserve compact semantic tables from input size so
+	// ordinary growth does not pin a declaration's scratch arena. Correctness
+	// does not depend on these estimates: endCheckScratch simply retains the
+	// low arena when a pathological input exceeds one of them.
+	types := make([]cTypeInfo, len(t.types), len(t.types)+tokens/32+64)
+	copy(types, t.types)
+	t.types = types
+	fields := make([]cField, len(t.fields), len(t.fields)+tokens/48+64)
+	copy(fields, t.fields)
+	t.fields = fields
+	opaqueTypes := make([]cTypeName, len(t.opaqueTypes), len(t.opaqueTypes)+tokens/256+16)
+	copy(opaqueTypes, t.opaqueTypes)
+	t.opaqueTypes = opaqueTypes
+	names := make([]cNamespaceName, len(t.names), len(t.names)+tokens/32+64)
+	copy(names, t.names)
+	t.names = names
+	objects := make([]cObjectName, len(t.objects), len(t.objects)+tokens/128+32)
+	copy(objects, t.objects)
+	t.objects = objects
+	tentatives := make([]cObjectName, len(t.tentatives), len(t.tentatives)+tokens/256+16)
+	copy(tentatives, t.tentatives)
+	t.tentatives = tentatives
+	definitions := make([]cObjectName, len(t.definitions), len(t.definitions)+tokens/256+16)
+	copy(definitions, t.definitions)
+	t.definitions = definitions
+	threadNames := make([]cObjectName, len(t.threadNames), len(t.threadNames)+tokens/256+16)
+	copy(threadNames, t.threadNames)
+	t.threadNames = threadNames
+	functions := make([]cFunctionName, len(t.functions), len(t.functions)+tokens/48+32)
+	copy(functions, t.functions)
+	t.functions = functions
+	variadicCalls := make([]cVariadicCall, len(t.variadicCalls), len(t.variadicCalls)+tokens/256+16)
+	copy(variadicCalls, t.variadicCalls)
+	t.variadicCalls = variadicCalls
+	functionParams := make([]int, len(t.functionParams), len(t.functionParams)+tokens/16+64)
+	copy(functionParams, t.functionParams)
+	t.functionParams = functionParams
+}
+
+func (t *translator) beginCheckScratch() checkScratchMark {
+	return checkScratchMark{
+		mark: arena.Mark(), out: t.out, staticOut: t.staticOut,
+		typesLen: len(t.types), typesCap: cap(t.types),
+		fieldsLen: len(t.fields), fieldsCap: cap(t.fields),
+		opaqueTypesLen: len(t.opaqueTypes), opaqueTypesCap: cap(t.opaqueTypes),
+		namesLen: len(t.names), namesCap: cap(t.names),
+		objectsLen: len(t.objects), objectsCap: cap(t.objects),
+		tentativesLen: len(t.tentatives), tentativesCap: cap(t.tentatives),
+		definitionsLen: len(t.definitions), definitionsCap: cap(t.definitions),
+		threadNamesLen: len(t.threadNames), threadNamesCap: cap(t.threadNames),
+		functionsLen: len(t.functions), functionsCap: cap(t.functions),
+		variadicCallsLen: len(t.variadicCalls), variadicCallsCap: cap(t.variadicCalls),
+		functionParamsLen: len(t.functionParams), functionParamsCap: cap(t.functionParams),
+	}
+}
+
+func (t *translator) endCheckScratch(mark checkScratchMark) {
+	// Strings retained by the semantic symbol/type tables must outlive the
+	// low-arena declaration scratch that produced them.
+	for i := mark.typesLen; i < len(t.types); i++ {
+		t.types[i].goName = arena.PersistString(t.types[i].goName)
+	}
+	for i := mark.fieldsLen; i < len(t.fields); i++ {
+		t.fields[i].name = arena.PersistString(t.fields[i].name)
+		t.fields[i].carrier = arena.PersistString(t.fields[i].carrier)
+	}
+	for i := mark.opaqueTypesLen; i < len(t.opaqueTypes); i++ {
+		t.opaqueTypes[i].name = arena.PersistString(t.opaqueTypes[i].name)
+	}
+	for i := mark.namesLen; i < len(t.names); i++ {
+		t.names[i].name = arena.PersistString(t.names[i].name)
+	}
+	for i := mark.objectsLen; i < len(t.objects); i++ {
+		t.objects[i].name = arena.PersistString(t.objects[i].name)
+		t.objects[i].goName = arena.PersistString(t.objects[i].goName)
+	}
+	for i := mark.tentativesLen; i < len(t.tentatives); i++ {
+		t.tentatives[i].name = arena.PersistString(t.tentatives[i].name)
+		t.tentatives[i].goName = arena.PersistString(t.tentatives[i].goName)
+	}
+	for i := mark.definitionsLen; i < len(t.definitions); i++ {
+		t.definitions[i].name = arena.PersistString(t.definitions[i].name)
+		t.definitions[i].goName = arena.PersistString(t.definitions[i].goName)
+	}
+	for i := mark.threadNamesLen; i < len(t.threadNames); i++ {
+		t.threadNames[i].name = arena.PersistString(t.threadNames[i].name)
+		t.threadNames[i].goName = arena.PersistString(t.threadNames[i].goName)
+	}
+	for i := mark.functionsLen; i < len(t.functions); i++ {
+		t.functions[i].name = arena.PersistString(t.functions[i].name)
+	}
+	for i := mark.variadicCallsLen; i < len(t.variadicCalls); i++ {
+		t.variadicCalls[i].goName = arena.PersistString(t.variadicCalls[i].goName)
+	}
+
+	t.out = mark.out
+	t.staticOut = mark.staticOut
+	stable := mark.typesCap == cap(t.types) && mark.fieldsCap == cap(t.fields) &&
+		mark.opaqueTypesCap == cap(t.opaqueTypes) && mark.namesCap == cap(t.names) &&
+		mark.objectsCap == cap(t.objects) && mark.tentativesCap == cap(t.tentatives) &&
+		mark.definitionsCap == cap(t.definitions) && mark.threadNamesCap == cap(t.threadNames) &&
+		mark.functionsCap == cap(t.functions) && mark.variadicCallsCap == cap(t.variadicCalls) &&
+		mark.functionParamsCap == cap(t.functionParams)
+	if stable || !t.ok {
+		arena.Reset(mark.mark)
+	}
 }
 
 func (t *translator) kind() int {
@@ -225,6 +395,18 @@ func (t *translator) skipDirectives() {
 }
 
 func (t *translator) externalDeclaration() {
+	if t.currentIs("asm") || t.currentIs("__asm") || t.currentIs("__asm__") {
+		if !t.checkOnly || !t.takeAsmStatement() {
+			t.fail(TranslateErrUnsupported)
+		}
+		return
+	}
+	if t.currentIs("_Static_assert") || t.currentIs("static_assert") {
+		if !t.takeStaticAssert() {
+			t.fail(TranslateErrDeclaration)
+		}
+		return
+	}
 	base, storage, ok := t.parseType()
 	if !ok {
 		t.fail(TranslateErrDeclaration)
@@ -242,25 +424,40 @@ func (t *translator) externalDeclaration() {
 		t.fail(TranslateErrDeclaration)
 		return
 	}
+	if storage == storageTypedef && decl.function {
+		t.rememberTypedef(string(tokenText(t.src, decl.name)), decl.functionType)
+		for t.take(",") {
+			next, valid := t.parseDeclarator(base, true)
+			if !valid || !next.function {
+				t.fail(TranslateErrDeclaration)
+				return
+			}
+			t.rememberTypedef(string(tokenText(t.src, next.name)), next.functionType)
+		}
+		if !t.take(";") {
+			t.fail(TranslateErrDeclaration)
+		}
+		return
+	}
 	if decl.function {
 		if storage == storageThread || storage == storageThreadStatic || storage == storageThreadExtern {
 			t.fail(TranslateErrDeclaration)
 			return
 		}
 		if t.take(";") {
-			if t.object && storage != storageStatic && !t.rememberFunction(decl, false) {
+			if (t.checkOnly || t.object && storage != storageStatic) && !t.rememberFunction(decl, false) {
 				t.fail(TranslateErrDeclaration)
 			}
 			return // Otherwise a C or Go definition in the package satisfies it.
 		}
 		if t.take(",") {
-			if t.object && storage != storageStatic && !t.rememberFunction(decl, false) {
+			if (t.checkOnly || t.object && storage != storageStatic) && !t.rememberFunction(decl, false) {
 				t.fail(TranslateErrDeclaration)
 				return
 			}
 			for {
 				next, valid := t.parseDeclarator(base, true)
-				if !valid || !next.function || t.object && storage != storageStatic && !t.rememberFunction(next, false) {
+				if !valid || !next.function || (t.checkOnly || t.object && storage != storageStatic) && !t.rememberFunction(next, false) {
 					t.fail(TranslateErrDeclaration)
 					return
 				}
@@ -281,12 +478,25 @@ func (t *translator) externalDeclaration() {
 			t.fail(TranslateErrDeclaration)
 			return
 		}
+		if t.checkOnly {
+			t.checkFunction(decl, storage)
+			return
+		}
 		t.emitFunction(decl, storage)
 		return
 	}
 	decl.initializer = t.takeInitializer()
+	autoDeclaration := t.typeInfo(decl.typeID).kind == cTypeAuto
+	if !t.resolveAutoDeclarator(&decl) {
+		t.fail(TranslateErrDeclaration)
+		return
+	}
 	decls := []declarator{decl}
 	for t.take(",") {
+		if autoDeclaration {
+			t.fail(TranslateErrDeclaration)
+			return
+		}
 		next, valid := t.parseDeclarator(base, false)
 		if !valid {
 			t.fail(TranslateErrDeclaration)
@@ -301,6 +511,17 @@ func (t *translator) externalDeclaration() {
 	}
 	if storage == storageTypedef {
 		for i := 0; i < len(decls); i++ {
+			if decls[i].attributes.transparentUnion {
+				if t.typeInfo(decls[i].typeID).kind != cTypeUnion {
+					t.fail(TranslateErrDeclaration)
+					return
+				}
+				t.types[decls[i].typeID].transparentUnion = true
+				if !t.checkOnly {
+					t.fail(TranslateErrUnsupported)
+					return
+				}
+			}
 			t.rememberTypedef(string(tokenText(t.src, decls[i].name)), decls[i].typeID)
 		}
 		return
@@ -324,6 +545,12 @@ func (t *translator) externalDeclaration() {
 		return
 	}
 	if storage == storageOther {
+		if t.checkOnly {
+			for i := 0; i < len(decls); i++ {
+				t.rememberObject(tokenText(t.src, decls[i].name), decls[i].typeID)
+			}
+			return
+		}
 		t.fail(TranslateErrDeclaration)
 		return
 	}
@@ -335,6 +562,47 @@ func (t *translator) externalDeclaration() {
 	}
 }
 
+// checkFunction retains file-scope declarations while giving each function
+// body a scratch lifetime. The native frontend has a garbage collector for
+// these short-lived slices; a self-hosted compiler uses a bump arena instead,
+// so retaining every expression temporary until the translation unit ends
+// makes large preprocessed inputs needlessly scale with total body complexity.
+func (t *translator) checkFunction(decl declarator, storage int) {
+	mark := arena.Mark()
+	persistMark := arena.PersistMark()
+	out := t.out
+	staticOut := t.staticOut
+	types := t.types
+	fields := t.fields
+	opaqueTypes := t.opaqueTypes
+	names := t.names
+	objects := t.objects
+	tentatives := t.tentatives
+	definitions := t.definitions
+	threadNames := t.threadNames
+	functions := t.functions
+	variadicCalls := t.variadicCalls
+	functionParams := t.functionParams
+
+	t.emitFunction(decl, storage)
+
+	t.out = out
+	t.staticOut = staticOut
+	t.types = types
+	t.fields = fields
+	t.opaqueTypes = opaqueTypes
+	t.names = names
+	t.objects = objects
+	t.tentatives = tentatives
+	t.definitions = definitions
+	t.threadNames = threadNames
+	t.functions = functions
+	t.variadicCalls = variadicCalls
+	t.functionParams = functionParams
+	arena.PersistReset(persistMark)
+	arena.Reset(mark)
+}
+
 func (t *translator) parseAggregateType(union bool) (int, bool) {
 	kind := cTypeStruct
 	prefix := "__c_struct_"
@@ -343,11 +611,20 @@ func (t *translator) parseAggregateType(union bool) (int, bool) {
 		prefix = "__c_union_"
 	}
 	t.pos++
+	attributes, ok := t.parseAttributes()
+	if !ok {
+		return cTypeVoidID, false
+	}
 	name := ""
 	if t.kind() == tokenIdent {
 		name = string(tokenText(t.src, t.tokens[t.pos]))
 		t.pos++
 	}
+	afterName, ok := t.parseAttributes()
+	if !ok {
+		return cTypeVoidID, false
+	}
+	attributes.merge(afterName)
 	if !t.currentIs("{") {
 		if name == "" {
 			return cTypeVoidID, false
@@ -379,7 +656,7 @@ func (t *translator) parseAggregateType(union bool) (int, bool) {
 		if current && t.types[prior].size == 0 {
 			t.types = t.types[:len(t.types)-1]
 			typeID = prior
-			t.types[typeID].goName = goName
+			t.types[typeID].goName = arena.PersistString(goName)
 			t.types[typeID].kind = kind
 		} else {
 			t.names = append(t.names, cNamespaceName{name: name, index: typeID, kind: cNameTag})
@@ -390,6 +667,7 @@ func (t *translator) parseAggregateType(union bool) (int, bool) {
 	offset := 0
 	maxAlign := 1
 	maxSize := 0
+	indirect := false
 	bitActive := false
 	bitSize := 0
 	bitAlign := 0
@@ -397,6 +675,15 @@ func (t *translator) parseAggregateType(union bool) (int, bool) {
 	bitUsed := 0
 	bitCarrier := ""
 	for !t.currentIs("}") && t.kind() != tokenEOF {
+		if t.take(";") {
+			continue
+		}
+		if t.currentIs("_Static_assert") || t.currentIs("static_assert") {
+			if !t.takeStaticAssert() {
+				return cTypeVoidID, false
+			}
+			continue
+		}
 		fieldBase, storage, ok := t.parseType()
 		if !ok || storage != storageNone && storage != storageOther {
 			return cTypeVoidID, false
@@ -441,6 +728,10 @@ func (t *translator) parseAggregateType(union bool) (int, bool) {
 			}
 			fieldInfo := t.typeInfo(field.typeID)
 			alignment := t.typeAlign(field.typeID)
+			if field.attributes.align > alignment {
+				alignment = field.attributes.align
+				indirect = true
+			}
 			if t.take(":") {
 				if fieldInfo.kind != cTypeInt && fieldInfo.kind != cTypeUint && fieldInfo.kind != cTypeBool {
 					return cTypeVoidID, false
@@ -517,7 +808,7 @@ func (t *translator) parseAggregateType(union bool) (int, bool) {
 			if alignment > maxAlign {
 				maxAlign = alignment
 			}
-			aggregateFields = append(aggregateFields, cField{name: string(tokenText(t.src, field.name)), typeID: field.typeID, offset: fieldOffset, emit: true})
+			aggregateFields = append(aggregateFields, cField{name: string(tokenText(t.src, field.name)), typeID: field.typeID, offset: fieldOffset, align: field.attributes.align, emit: true})
 			if !t.take(",") {
 				break
 			}
@@ -529,6 +820,32 @@ func (t *translator) parseAggregateType(union bool) (int, bool) {
 	if !t.take("}") {
 		return cTypeVoidID, false
 	}
+	afterBody, ok := t.parseAttributes()
+	if !ok {
+		return cTypeVoidID, false
+	}
+	attributes.merge(afterBody)
+	if attributes.transparentUnion {
+		if !union {
+			return cTypeVoidID, false
+		}
+		t.types[typeID].transparentUnion = true
+		if !t.checkOnly {
+			t.fail(TranslateErrUnsupported)
+			return cTypeVoidID, false
+		}
+	}
+	naturalAlign := maxAlign
+	if attributes.packed {
+		offset, maxSize, maxAlign = t.packAggregateFields(aggregateFields, union)
+		indirect = true
+	}
+	if attributes.align > maxAlign {
+		maxAlign = attributes.align
+	}
+	if attributes.align > naturalAlign {
+		indirect = true
+	}
 	size := offset
 	if union {
 		size = maxSize
@@ -538,6 +855,7 @@ func (t *translator) parseAggregateType(union bool) (int, bool) {
 	t.fields = append(t.fields, aggregateFields...)
 	t.types[typeID].size = size
 	t.types[typeID].align = maxAlign
+	t.types[typeID].indirect = indirect
 	t.types[typeID].fieldStart = fieldStart
 	t.types[typeID].fieldCount = len(t.fields) - fieldStart
 	t.emitAggregateDeclaration(typeID)
@@ -545,13 +863,87 @@ func (t *translator) parseAggregateType(union bool) (int, bool) {
 	return typeID, true
 }
 
+func (attributes *cAttributes) merge(other cAttributes) {
+	if other.align > attributes.align {
+		attributes.align = other.align
+	}
+	attributes.packed = attributes.packed || other.packed
+	attributes.transparentUnion = attributes.transparentUnion || other.transparentUnion
+	attributes.alias = attributes.alias || other.alias
+	attributes.visibility = attributes.visibility || other.visibility
+	attributes.weak = attributes.weak || other.weak
+	attributes.callingConvention = attributes.callingConvention || other.callingConvention
+}
+
+func (attributes cAttributes) requiresObjectMetadata() bool {
+	return attributes.alias || attributes.visibility || attributes.weak || attributes.callingConvention
+}
+
+func (t *translator) packAggregateFields(fields []cField, union bool) (int, int, int) {
+	offset := 0
+	maxSize := 0
+	maxAlign := 1
+	containerOld := 0
+	containerNew := 0
+	carrier := ""
+	carrierOffset := 0
+	for i := 0; i < len(fields); i++ {
+		field := &fields[i]
+		if !field.emit {
+			if field.carrier != "" && field.carrier == carrier {
+				field.offset = carrierOffset
+			} else {
+				field.offset = containerNew + field.offset - containerOld
+			}
+			continue
+		}
+		alignment := 1
+		if field.align > alignment {
+			alignment = field.align
+		}
+		if alignment > maxAlign {
+			maxAlign = alignment
+		}
+		containerOld = field.offset
+		containerNew = 0
+		if !union {
+			offset = alignC(offset, alignment)
+			containerNew = offset
+		}
+		field.offset = containerNew
+		size := t.typeSize(field.typeID)
+		if size > maxSize {
+			maxSize = size
+		}
+		if !union {
+			offset += size
+		}
+		if field.synthetic {
+			carrier = field.name
+			carrierOffset = field.offset
+		} else {
+			carrier = ""
+		}
+	}
+	return offset, maxSize, maxAlign
+}
+
 func (t *translator) parseEnumType() (int, bool) {
 	t.pos++
+	attributes, ok := t.parseAttributes()
+	if !ok {
+		return cTypeVoidID, false
+	}
 	name := ""
 	if t.kind() == tokenIdent {
 		name = string(tokenText(t.src, t.tokens[t.pos]))
 		t.pos++
 	}
+	afterName, ok := t.parseAttributes()
+	if !ok {
+		return cTypeVoidID, false
+	}
+	attributes.merge(afterName)
 	if !t.take("{") {
 		if name == "" {
 			return cTypeVoidID, false
@@ -563,6 +955,8 @@ func (t *translator) parseEnumType() (int, bool) {
 		return cTypeInt32ID, true
 	}
 	value := 0
+	minimum, maximum := 0, 0
+	haveValue := false
 	for !t.currentIs("}") && t.kind() != tokenEOF {
 		if t.kind() != tokenIdent {
 			return cTypeVoidID, false
@@ -590,6 +984,13 @@ func (t *translator) parseEnumType() (int, bool) {
 			}
 		}
 		t.rememberValue(enumerator, value)
+		if !haveValue || value < minimum {
+			minimum = value
+		}
+		if !haveValue || value > maximum {
+			maximum = value
+		}
+		haveValue = true
 		value++
 		if !t.take(",") {
 			break
@@ -598,16 +999,36 @@ func (t *translator) parseEnumType() (int, bool) {
 	if !t.take("}") {
 		return cTypeVoidID, false
 	}
+	afterDefinition, ok := t.parseAttributes()
+	if !ok {
+		return cTypeVoidID, false
+	}
+	attributes.merge(afterDefinition)
+	typeID := cTypeInt32ID
+	if attributes.packed {
+		switch {
+		case minimum >= 0 && maximum <= 1<<8-1:
+			typeID = cTypeUint8ID
+		case minimum >= -1<<7 && maximum <= 1<<7-1:
+			typeID = cTypeInt8ID
+		case minimum >= 0 && maximum <= 1<<16-1:
+			typeID = cTypeUint16ID
+		case minimum >= -1<<15 && maximum <= 1<<15-1:
+			typeID = cTypeInt16ID
+		case minimum >= 0:
+			typeID = cTypeUint32ID
+		}
+	}
 	if name != "" {
 		for i := len(t.names) - 1; i >= t.nameStart; i-- {
 			if t.names[i].kind == cNameTag && t.names[i].name == name {
-				t.names[i].index = cTypeInt32ID
-				return cTypeInt32ID, true
+				t.names[i].index = typeID
+				return typeID, true
 			}
 		}
-		t.names = append(t.names, cNamespaceName{name: name, index: cTypeInt32ID, kind: cNameTag})
+		t.names = append(t.names, cNamespaceName{name: name, index: typeID, kind: cNameTag})
 	}
-	return cTypeInt32ID, true
+	return typeID, true
 }
 
 func (t *translator) rememberValue(name string, value int) {
@@ -621,6 +1042,14 @@ func (t *translator) lookupValue(name []byte) (int, bool) {
 func (t *translator) rememberObject(name []byte, typeID int) {
 	if len(name) == 0 {
 		return
+	}
+	if t.localStart >= 0 {
+		for i := len(t.names) - 1; i >= t.nameStart; i-- {
+			if t.names[i].kind != cNameTag && textEquals(name, t.names[i].name) {
+				t.fail(TranslateErrDeclaration)
+				return
+			}
+		}
 	}
 	t.objects = append(t.objects, cObjectName{name: string(name), goName: string(name), typeID: typeID, auto: t.localStart >= 0})
 	t.rememberName(string(name), len(t.objects)-1, cNameObject)
@@ -743,11 +1172,12 @@ func (t *translator) fileVariable(decl declarator) bool {
 
 func (t *translator) completeInitializerArray(decl *declarator) bool {
 	info := t.typeInfo(decl.typeID)
-	if info.kind != cTypeArray || info.count != 0 {
+	if info.kind != cTypeArray || !decl.incompleteArray {
 		return true
 	}
 	if value, ok := t.cStringBytes(decl.initializer); ok && t.typeInfo(info.base).size == 1 {
 		decl.typeID = t.arrayType(info.base, len(value))
+		decl.incompleteArray = false
 		return true
 	}
 	if len(decl.initializer) < 2 || !tokenIs(t.src, decl.initializer[0], "{") || !tokenIs(t.src, decl.initializer[len(decl.initializer)-1], "}") {
@@ -764,9 +1194,21 @@ func (t *translator) completeInitializerArray(decl *declarator) bool {
 			if close <= 1 {
 				return false
 			}
-			index, ok := t.constantExpression(items[i][1:close])
+			rangeAt := topLevelToken(t.src, items[i][1:close], "...")
+			indexTokens := items[i][1:close]
+			if rangeAt >= 0 {
+				indexTokens = items[i][1 : 1+rangeAt]
+			}
+			index, ok := t.constantExpression(indexTokens)
 			if !ok || index < 0 {
 				return false
+			}
+			if rangeAt >= 0 {
+				last, valid := t.constantExpression(items[i][2+rangeAt : close])
+				if !valid || last < index {
+					return false
+				}
+				index = last
 			}
 			next = index
 		}
@@ -775,10 +1217,8 @@ func (t *translator) completeInitializerArray(decl *declarator) bool {
 			count = next
 		}
 	}
-	if count == 0 {
-		return false
-	}
 	decl.typeID = t.arrayType(info.base, count)
+	decl.incompleteArray = false
 	return true
 }
 
@@ -886,7 +1326,7 @@ func (t *translator) emitAggregateDeclaration(typeID int) {
 	info := t.typeInfo(typeID)
 	t.appendText("type ")
 	t.out = append(t.out, info.goName...)
-	if info.kind == cTypeUnion {
+	if info.kind == cTypeUnion || info.indirect {
 		t.appendText(" struct{__c_align ")
 		switch info.align {
 		case 8:
@@ -924,11 +1364,11 @@ func (t *translator) emitAggregateAccessors(typeID int) {
 	info := t.typeInfo(typeID)
 	for i := 0; i < info.fieldCount; i++ {
 		field := t.fields[info.fieldStart+i]
-		if field.name == "" || field.emit && info.kind != cTypeUnion {
+		if field.name == "" || field.emit && info.kind != cTypeUnion && !info.indirect {
 			continue
 		}
 		if field.bitWidth == 0 {
-			if info.kind != cTypeUnion {
+			if info.kind != cTypeUnion && !info.indirect {
 				continue
 			}
 			t.usesUnsafe = true
@@ -940,7 +1380,9 @@ func (t *translator) emitAggregateAccessors(typeID int) {
 			t.emitType(field.typeID)
 			t.appendText("{return (*")
 			t.emitType(field.typeID)
-			t.appendText(")(__c_unsafe.Pointer(p))}\n")
+			t.appendText(")(__c_unsafe.Pointer(uintptr(__c_unsafe.Pointer(p))+uintptr(")
+			t.appendDecimal(field.offset)
+			t.appendText(")))}\n")
 			continue
 		}
 		t.emitBitfieldAccessors(typeID, field)
@@ -992,11 +1434,13 @@ func (t *translator) emitBitfieldAccessors(typeID int, field cField) {
 		t.emitType(field.typeID)
 	}
 	t.appendText("){")
-	if info.kind == cTypeUnion {
+	if info.kind == cTypeUnion || info.indirect {
 		t.usesUnsafe = true
 		t.appendText("q:=(*")
 		t.emitType(storageType)
-		t.appendText(")(__c_unsafe.Pointer(p));*q=")
+		t.appendText(")(__c_unsafe.Pointer(uintptr(__c_unsafe.Pointer(p))+uintptr(")
+		t.appendDecimal(field.offset)
+		t.appendText(")));*q=")
 		t.emitBitfieldUpdated("*q", storageType, field, bits)
 	} else {
 		t.appendText("p.")
@@ -1008,11 +1452,13 @@ func (t *translator) emitBitfieldAccessors(typeID int, field cField) {
 }
 
 func (t *translator) emitBitfieldCarrier(info cTypeInfo, field cField, storageType int) {
-	if info.kind == cTypeUnion {
+	if info.kind == cTypeUnion || info.indirect {
 		t.usesUnsafe = true
 		t.appendText("*(*")
 		t.emitType(storageType)
-		t.appendText(")(__c_unsafe.Pointer(p))")
+		t.appendText(")(__c_unsafe.Pointer(uintptr(__c_unsafe.Pointer(p))+uintptr(")
+		t.appendDecimal(field.offset)
+		t.appendText(")))")
 		return
 	}
 	t.appendText("p.")
@@ -1174,6 +1620,169 @@ func (t *translator) appendDecimalSigned(value int) {
 	t.appendDecimal(value)
 }
 
+func (t *translator) isGNUAttribute() bool {
+	return t.currentIs("__attribute__") || t.currentIs("__attribute")
+}
+
+func (t *translator) parseAttributes() (cAttributes, bool) {
+	var attributes cAttributes
+	for t.isGNUAttribute() {
+		t.pos++
+		if !t.take("(") || !t.take("(") {
+			return attributes, false
+		}
+		for {
+			if t.take(")") {
+				if !t.take(")") {
+					return attributes, false
+				}
+				break
+			}
+			if t.kind() != tokenIdent {
+				return attributes, false
+			}
+			name := string(tokenText(t.src, t.tokens[t.pos]))
+			t.pos++
+			var arguments []token
+			if t.take("(") {
+				end := t.findClosing(")")
+				if end < t.pos {
+					return attributes, false
+				}
+				arguments = t.tokens[t.pos:end]
+				t.pos = end + 1
+			}
+			switch name {
+			case "aligned", "__aligned__":
+				alignment := 16
+				if len(arguments) > 0 {
+					var valid bool
+					alignment, valid = t.constantExpression(arguments)
+					if !valid {
+						return attributes, false
+					}
+				}
+				if alignment < 1 || alignment > 1<<30 || alignment&(alignment-1) != 0 {
+					return attributes, false
+				}
+				if alignment > attributes.align {
+					attributes.align = alignment
+				}
+			case "packed", "__packed__":
+				if len(arguments) != 0 {
+					return attributes, false
+				}
+				attributes.packed = true
+			case "transparent_union", "__transparent_union__":
+				if len(arguments) != 0 {
+					return attributes, false
+				}
+				attributes.transparentUnion = true
+			case "alias", "__alias__":
+				if len(arguments) != 1 || tokenKind(arguments[0]) != tokenString {
+					return attributes, false
+				}
+				attributes.alias = true
+			case "visibility", "__visibility__":
+				if len(arguments) != 1 || tokenKind(arguments[0]) != tokenString {
+					return attributes, false
+				}
+				attributes.visibility = true
+			case "weak", "__weak__":
+				if len(arguments) != 0 {
+					return attributes, false
+				}
+				attributes.weak = true
+			case "ms_abi", "__ms_abi__", "sysv_abi", "__sysv_abi__":
+				if len(arguments) != 0 {
+					return attributes, false
+				}
+				attributes.callingConvention = true
+			case "cleanup", "__cleanup__":
+				if len(arguments) != 1 || tokenKind(arguments[0]) != tokenIdent {
+					return attributes, false
+				}
+				if !t.checkOnly {
+					t.fail(TranslateErrUnsupported)
+					return attributes, false
+				}
+			case "__gnu_inline__", "__unused__", "unused", "__no_instrument_function__", "no_instrument_function",
+				"__always_inline__", "always_inline", "__warn_unused_result__", "warn_unused_result", "__pure__", "pure",
+				"__noinline__", "noinline",
+				"__const__", "const",
+				"__format__", "format", "__noreturn__", "noreturn", "__section__", "section", "__malloc__", "malloc",
+				"__error__", "error", "__warning__", "warning",
+				"__designated_init__", "designated_init",
+				"__externally_visible__", "externally_visible",
+				"__alloc_size__", "alloc_size",
+				"__assume_aligned__", "assume_aligned",
+				"__nonnull__", "nonnull",
+				"cold", "__cold__", "hot", "__hot__", "used", "__used__", "nocf_check", "__nocf_check__",
+				"no_sanitize_address", "__no_sanitize_address__", "no_profile_instrument_function", "__no_profile_instrument_function__",
+				"noclone", "__noclone__", "no_stack_protector", "__no_stack_protector__":
+				// These attributes affect diagnostics, optimization, liveness, or
+				// later object placement, but not C type layout or evaluation.
+			default:
+				t.fail(TranslateErrUnsupported)
+				return attributes, false
+			}
+			if t.take(",") {
+				continue
+			}
+			if !t.take(")") || !t.take(")") {
+				return attributes, false
+			}
+			break
+		}
+	}
+	return attributes, true
+}
+
+func (t *translator) takeAsmClause() bool {
+	if !t.currentIs("asm") && !t.currentIs("__asm") && !t.currentIs("__asm__") {
+		return false
+	}
+	t.pos++
+	for t.currentIs("volatile") || t.currentIs("__volatile") || t.currentIs("__volatile__") ||
+		t.currentIs("inline") || t.currentIs("__inline") || t.currentIs("__inline__") || t.currentIs("goto") {
+		t.pos++
+	}
+	end := matchingToken(t.src, t.tokens, t.pos, "(", ")")
+	if end < 0 {
+		return false
+	}
+	t.pos = end + 1
+	return true
+}
+
+func (t *translator) takeAsmStatement() bool {
+	return t.takeAsmClause() && t.take(";")
+}
+
+func (t *translator) takeStaticAssert() bool {
+	t.pos++
+	if !t.take("(") {
+		return false
+	}
+	end := t.findClosing(")")
+	if end < t.pos {
+		return false
+	}
+	items := splitTopLevel(t.src, t.tokens[t.pos:end], ",")
+	if len(items) < 1 || len(items) > 2 || len(items[0]) == 0 {
+		return false
+	}
+	value, ok := t.constantExpression(items[0])
+	if !ok || value == 0 {
+		return false
+	}
+	if len(items) == 2 && (len(items[1]) != 1 || tokenKind(items[1][0]) != tokenString) {
+		return false
+	}
+	t.pos = end + 1
+	return t.take(";")
+}
+
 func (t *translator) emitForeignType(typeID int) {
 	// A Go string is used only as the shared frontend carrier for a C string
 	// pointer. Object-mode call lowering emits its data word alone, so the ELF
@@ -1200,6 +1809,13 @@ func (t *translator) parseType() (int, int, bool) {
 		switch {
 		case t.currentIs("__extension__"):
 			t.pos++
+		case t.isGNUAttribute():
+			if seen {
+				goto done
+			}
+			if _, ok := t.parseAttributes(); !ok {
+				return cTypeVoidID, storage, false
+			}
 		case t.currentIs("static"):
 			if storage == storageNone {
 				storage = storageStatic
@@ -1227,7 +1843,7 @@ func (t *translator) parseType() (int, int, bool) {
 				storage = storageInvalid
 			}
 			t.pos++
-		case t.currentIs("inline"):
+		case t.currentIs("inline") || t.currentIs("__inline") || t.currentIs("__inline__"):
 			t.pos++
 		case t.currentIs("extern"):
 			if storage == storageNone {
@@ -1245,13 +1861,13 @@ func (t *translator) parseType() (int, int, bool) {
 				storage = storageInvalid
 			}
 			t.pos++
-		case t.currentIs("const"):
+		case t.currentIs("const") || t.currentIs("__const") || t.currentIs("__const__"):
 			qualifiers |= cQualifierConst
 			t.pos++
-		case t.currentIs("volatile"):
+		case t.currentIs("volatile") || t.currentIs("__volatile") || t.currentIs("__volatile__"):
 			qualifiers |= cQualifierVolatile
 			t.pos++
-		case t.currentIs("restrict"):
+		case t.currentIs("restrict") || t.currentIs("__restrict") || t.currentIs("__restrict__"):
 			qualifiers |= cQualifierRestrict
 			t.pos++
 		case t.currentIs("_Atomic"):
@@ -1285,6 +1901,9 @@ func (t *translator) parseType() (int, int, bool) {
 			longCount++
 			seen = true
 			t.pos++
+		case t.currentIs("__int128"):
+			base, seen = "int128", true
+			t.pos++
 		case t.currentIs("short"):
 			base, seen = "short", true
 			t.pos++
@@ -1309,6 +1928,47 @@ func (t *translator) parseType() (int, int, bool) {
 		case t.currentIs("_Bool"):
 			base, seen = "bool", true
 			t.pos++
+		case t.currentIs("__auto_type"):
+			if seen {
+				return cTypeVoidID, storage, false
+			}
+			typeID, hasTypeID, seen = t.autoType(), true, true
+			t.pos++
+		case t.currentIs("typeof") || t.currentIs("__typeof") || t.currentIs("__typeof__"):
+			if seen {
+				goto done
+			}
+			t.pos++
+			if !t.take("(") {
+				return cTypeVoidID, storage, false
+			}
+			end := t.findClosing(")")
+			if end < t.pos {
+				return cTypeVoidID, storage, false
+			}
+			operand := t.tokens[t.pos:end]
+			if len(operand) == 0 {
+				return cTypeVoidID, storage, false
+			}
+			outerTokens, outerPos := t.tokens, t.pos
+			t.tokens, t.pos = operand, 0
+			typeOperand := t.isTypeStart()
+			t.tokens, t.pos = outerTokens, outerPos
+			var valid bool
+			if typeOperand {
+				typeID, valid = t.typeFromTokens(operand)
+			} else {
+				typeID = t.lvalueType(operand)
+				if typeID == cTypeVoidID {
+					typeID = t.expressionType(operand)
+				}
+				valid = true
+			}
+			if !valid {
+				return cTypeVoidID, storage, false
+			}
+			t.pos = end + 1
+			hasTypeID, seen = true, true
 		case t.currentIs("struct") || t.currentIs("union"):
 			if seen {
 				goto done
@@ -1332,6 +1992,13 @@ func (t *translator) parseType() (int, int, bool) {
 				typeName := tokenText(t.src, t.tokens[t.pos])
 				var known bool
 				typeID, known = t.lookupTypedef(typeName)
+				if !known && textEquals(typeName, "__builtin_va_list") {
+					// x86_64 SysV defines va_list as an array containing one
+					// 24-byte, 8-byte-aligned record. Three uintptr slots preserve
+					// its size, alignment, and array-parameter decay at the ABI
+					// boundary without teaching later Go phases a C-only type.
+					typeID, known = t.arrayType(cTypeUintptrID, 3), true
+				}
 				if !known {
 					typeID, known = builtinCType(typeName)
 				}
@@ -1345,6 +2012,9 @@ func (t *translator) parseType() (int, int, bool) {
 					}
 				}
 				if !known {
+					if t.speculativeType {
+						return cTypeVoidID, storage, false
+					}
 					typeID = t.opaqueType(string(typeName))
 				}
 				hasTypeID = true
@@ -1390,6 +2060,12 @@ done:
 		typeID = cTypeFloat32ID
 	case "double":
 		typeID = cTypeFloat64ID
+	case "int128":
+		if !t.checkOnly {
+			t.fail(TranslateErrUnsupported)
+			return cTypeVoidID, storage, false
+		}
+		typeID = t.integer128Type(unsigned)
 	default:
 		if longCount > 0 {
 			if unsigned {
@@ -1404,9 +2080,54 @@ done:
 	return t.qualifiedType(typeID, qualifiers), storage, true
 }
 
+func (t *translator) integer128Type(unsigned bool) int {
+	kind := cTypeInt
+	name := "[2]int64"
+	if unsigned {
+		kind = cTypeUint
+		name = "[2]uint64"
+	}
+	for i := cTypeUintptrID + 1; i < len(t.types); i++ {
+		if t.types[i].kind == kind && t.types[i].size == 16 && t.types[i].align == 16 {
+			return i
+		}
+	}
+	t.types = append(t.types, cTypeInfo{kind: kind, size: 16, align: 16, goName: name})
+	return len(t.types) - 1
+}
+
+func (t *translator) autoType() int {
+	for i := cTypeUintptrID + 1; i < len(t.types); i++ {
+		if t.types[i].kind == cTypeAuto && t.types[i].qualifiers == 0 {
+			return i
+		}
+	}
+	t.types = append(t.types, cTypeInfo{kind: cTypeAuto, align: 1})
+	return len(t.types) - 1
+}
+
+func (t *translator) resolveAutoDeclarator(decl *declarator) bool {
+	info := t.typeInfo(decl.typeID)
+	if info.kind != cTypeAuto {
+		return true
+	}
+	if len(decl.initializer) == 0 {
+		return false
+	}
+	inferred := t.expressionType(decl.initializer)
+	if inferred == cTypeVoidID || t.typeInfo(inferred).kind == cTypeFunction {
+		return false
+	}
+	if inferredInfo := t.typeInfo(inferred); inferredInfo.kind == cTypeArray {
+		inferred = t.pointerType(inferredInfo.base)
+	}
+	decl.typeID = t.qualifiedType(inferred, info.qualifiers)
+	return true
+}
+
 func (t *translator) parseDeclarator(base int, allowFunction bool) (declarator, bool) {
-	name, ops, ok := t.parseDeclaratorOps(false)
-	result := declarator{name: name, typeID: base}
+	name, ops, attributes, ok := t.parseDeclaratorOps(false)
+	result := declarator{name: name, typeID: base, attributes: attributes}
 	if !ok {
 		return result, false
 	}
@@ -1414,15 +2135,29 @@ func (t *translator) parseDeclarator(base int, allowFunction bool) (declarator, 
 	if !ok {
 		return result, false
 	}
+	if len(ops) > 0 && ops[0].kind == declaratorArray && ops[0].incomplete {
+		result.incompleteArray = true
+	}
+	if result.attributes.requiresObjectMetadata() && !t.checkOnly {
+		t.fail(TranslateErrUnsupported)
+		return result, false
+	}
 	info := t.typeInfo(result.typeID)
 	if info.kind == cTypeFunction {
-		if !allowFunction || len(ops) == 0 || ops[0].kind != declaratorFunction {
+		if !allowFunction {
 			return result, false
 		}
 		result.function = true
 		result.functionType = result.typeID
-		result.params = ops[0].params
-		result.variadic = ops[0].variadic
+		if len(ops) > 0 && ops[0].kind == declaratorFunction {
+			result.params = ops[0].params
+			result.variadic = ops[0].variadic
+		} else {
+			for i := 0; i < info.paramCount; i++ {
+				result.params = append(result.params, parameter{typeID: t.functionParams[info.paramStart+i]})
+			}
+			result.variadic = info.variadic
+		}
 		result.typeID = info.base
 	} else if info.kind == cTypeOpaque {
 		// The ABI size of an unknown scalar typedef cannot be inferred safely
@@ -1451,16 +2186,31 @@ func (t *translator) applyDeclaratorOps(typeID int, ops []declaratorOp) (int, bo
 	return typeID, true
 }
 
-func (t *translator) parseDeclaratorOps(abstract bool) (token, []declaratorOp, bool) {
+func (t *translator) parseDeclaratorOps(abstract bool) (token, []declaratorOp, cAttributes, bool) {
+	attributes, ok := t.parseAttributes()
+	if !ok {
+		return token{}, nil, attributes, false
+	}
 	var pointerQualifiers []int
 	for t.take("*") {
 		qualifiers := 0
-		for t.currentIs("const") || t.currentIs("volatile") || t.currentIs("restrict") || t.currentIs("_Atomic") {
-			if t.currentIs("const") {
+		for t.currentIs("const") || t.currentIs("__const") || t.currentIs("__const__") ||
+			t.currentIs("volatile") || t.currentIs("__volatile") || t.currentIs("__volatile__") ||
+			t.currentIs("restrict") || t.currentIs("__restrict") || t.currentIs("__restrict__") ||
+			t.currentIs("_Atomic") || t.isGNUAttribute() {
+			if t.isGNUAttribute() {
+				parsed, valid := t.parseAttributes()
+				if !valid {
+					return token{}, nil, attributes, false
+				}
+				attributes.merge(parsed)
+				continue
+			}
+			if t.currentIs("const") || t.currentIs("__const") || t.currentIs("__const__") {
 				qualifiers |= cQualifierConst
-			} else if t.currentIs("volatile") {
+			} else if t.currentIs("volatile") || t.currentIs("__volatile") || t.currentIs("__volatile__") {
 				qualifiers |= cQualifierVolatile
-			} else if t.currentIs("restrict") {
+			} else if t.currentIs("restrict") || t.currentIs("__restrict") || t.currentIs("__restrict__") {
 				qualifiers |= cQualifierRestrict
 			} else {
 				qualifiers |= cQualifierAtomic
@@ -1469,36 +2219,56 @@ func (t *translator) parseDeclaratorOps(abstract bool) (token, []declaratorOp, b
 		}
 		pointerQualifiers = append(pointerQualifiers, qualifiers)
 	}
+	parsed, valid := t.parseAttributes()
+	if !valid {
+		return token{}, nil, attributes, false
+	}
+	attributes.merge(parsed)
 	var name token
 	var ops []declaratorOp
 	if t.kind() == tokenIdent {
 		name = t.tokens[t.pos]
 		t.pos++
 	} else if t.take("(") {
-		var ok bool
-		name, ops, ok = t.parseDeclaratorOps(abstract)
+		var nested cAttributes
+		name, ops, nested, ok = t.parseDeclaratorOps(abstract)
+		attributes.merge(nested)
 		if !ok || !t.take(")") {
-			return name, ops, false
+			return name, ops, attributes, false
 		}
 	} else if !abstract {
-		return name, ops, false
+		return name, ops, attributes, false
 	}
 	for {
+		parsed, valid = t.parseAttributes()
+		if !valid {
+			return name, ops, attributes, false
+		}
+		attributes.merge(parsed)
+		if t.currentIs("asm") || t.currentIs("__asm") || t.currentIs("__asm__") {
+			if !t.checkOnly || !t.takeAsmClause() {
+				t.fail(TranslateErrUnsupported)
+				return name, ops, attributes, false
+			}
+			continue
+		}
 		if t.take("[") {
 			qualifiers := 0
-			for t.currentIs("static") || t.currentIs("const") || t.currentIs("volatile") || t.currentIs("restrict") {
-				if t.currentIs("const") {
+			for t.currentIs("static") || t.currentIs("const") || t.currentIs("__const") || t.currentIs("__const__") ||
+				t.currentIs("volatile") || t.currentIs("__volatile") || t.currentIs("__volatile__") ||
+				t.currentIs("restrict") || t.currentIs("__restrict") || t.currentIs("__restrict__") {
+				if t.currentIs("const") || t.currentIs("__const") || t.currentIs("__const__") {
 					qualifiers |= cQualifierConst
-				} else if t.currentIs("volatile") {
+				} else if t.currentIs("volatile") || t.currentIs("__volatile") || t.currentIs("__volatile__") {
 					qualifiers |= cQualifierVolatile
-				} else if t.currentIs("restrict") {
+				} else if t.currentIs("restrict") || t.currentIs("__restrict") || t.currentIs("__restrict__") {
 					qualifiers |= cQualifierRestrict
 				}
 				t.pos++
 			}
 			end := t.findClosing("]")
 			if end < t.pos {
-				return name, ops, false
+				return name, ops, attributes, false
 			}
 			count := 0
 			if end > t.pos {
@@ -1506,20 +2276,20 @@ func (t *translator) parseDeclaratorOps(abstract bool) (token, []declaratorOp, b
 				count, valid = t.constantExpression(t.tokens[t.pos:end])
 				if !valid {
 					t.fail(TranslateErrVLA)
-					return name, ops, false
+					return name, ops, attributes, false
 				}
-				if count < 1 {
-					return name, ops, false
+				if count < 0 {
+					return name, ops, attributes, false
 				}
 			}
-			ops = append(ops, declaratorOp{kind: declaratorArray, count: count, qualifiers: qualifiers})
+			ops = append(ops, declaratorOp{kind: declaratorArray, count: count, qualifiers: qualifiers, incomplete: end == t.pos})
 			t.pos = end + 1
 			continue
 		}
 		if t.take("(") {
 			params, variadic, valid := t.parseParameterList()
 			if !valid {
-				return name, ops, false
+				return name, ops, attributes, false
 			}
 			ops = append(ops, declaratorOp{kind: declaratorFunction, params: params, variadic: variadic})
 			continue
@@ -1529,7 +2299,7 @@ func (t *translator) parseDeclaratorOps(abstract bool) (token, []declaratorOp, b
 	for i := len(pointerQualifiers) - 1; i >= 0; i-- {
 		ops = append(ops, declaratorOp{kind: declaratorPointer, qualifiers: pointerQualifiers[i]})
 	}
-	return name, ops, true
+	return name, ops, attributes, true
 }
 
 func (t *translator) parseParameterList() ([]parameter, bool, bool) {
@@ -1549,7 +2319,7 @@ func (t *translator) parseParameterList() ([]parameter, bool, bool) {
 		if t.typeInfo(paramBase).qualifiers&cQualifierRestrict != 0 && t.typeInfo(paramBase).kind != cTypePointer {
 			return params, false, false
 		}
-		name, ops, ok := t.parseDeclaratorOps(true)
+		name, ops, _, ok := t.parseDeclaratorOps(true)
 		if !ok {
 			return params, false, false
 		}
@@ -1644,7 +2414,7 @@ func (t *translator) takeInitializer() []token {
 }
 
 func (t *translator) emitFunction(decl declarator, storage int) {
-	if tokenIs(t.src, decl.name, "main") && t.packageName == "main" &&
+	if !t.checkOnly && tokenIs(t.src, decl.name, "main") && t.packageName == "main" &&
 		(len(decl.params) != 0 || decl.typeID != cTypeInt32ID) {
 		t.fail(TranslateErrUnsupported)
 		return
@@ -1676,7 +2446,7 @@ func (t *translator) emitFunction(decl declarator, storage int) {
 	}
 	t.out = append(t.out, ' ')
 	objectMark := len(t.objects)
-	nameMark := len(t.names)
+	functionScope := t.beginScope()
 	oldLocalStart := t.localStart
 	t.localStart = objectMark
 	oldResult := t.resultType
@@ -1684,11 +2454,11 @@ func (t *translator) emitFunction(decl declarator, storage int) {
 	for i := 0; i < len(decl.params); i++ {
 		t.rememberObject(tokenText(t.src, decl.params[i].name), decl.params[i].typeID)
 	}
-	t.block()
+	t.blockInCurrentScope()
 	t.resultType = oldResult
 	t.localStart = oldLocalStart
 	t.objects = t.objects[:objectMark]
-	t.names = t.names[:nameMark]
+	t.endScope(functionScope)
 	t.out = append(t.out, '\n')
 }
 
@@ -1714,7 +2484,9 @@ func (t *translator) emitVariableName(name string, decl declarator) {
 	if len(decl.initializer) > 0 {
 		t.out = append(t.out, '=')
 		kind := t.typeInfo(decl.typeID).kind
-		if kind == cTypeArray && t.emitStringArrayInitializer(decl.typeID, decl.initializer) {
+		if t.checkOnly {
+			t.checkInitializerValue(decl.typeID, decl.initializer)
+		} else if kind == cTypeArray && t.emitStringArrayInitializer(decl.typeID, decl.initializer) {
 		} else if (kind == cTypeArray || kind == cTypeStruct) && tokenIs(t.src, decl.initializer[0], "{") {
 			t.emitInitializerValue(decl.typeID, decl.initializer)
 		} else if kind == cTypeUnion && tokenIs(t.src, decl.initializer[0], "{") {
@@ -1851,20 +2623,37 @@ func (t *translator) ensureThreadRuntime() {
 }
 
 func (t *translator) block() {
+	t.blockWithScope(true)
+}
+
+func (t *translator) blockInCurrentScope() {
+	t.blockWithScope(false)
+}
+
+func (t *translator) blockWithScope(scoped bool) {
 	if !t.take("{") {
 		t.fail(TranslateErrStatement)
 		return
 	}
 	objectMark := len(t.objects)
-	scope := t.beginScope()
+	var scope cScopeMark
+	if scoped {
+		scope = t.beginScope()
+	}
 	t.out = append(t.out, '{')
 	for t.ok && t.kind() != tokenEOF && !t.currentIs("}") {
 		t.skipDirectives()
 		if t.currentIs("}") {
 			break
 		}
-		t.statement()
-		if t.ok {
+		if t.checkOnly {
+			mark := t.beginCheckScratch()
+			t.statement()
+			t.endCheckScratch(mark)
+		} else {
+			t.statement()
+		}
+		if t.ok && !t.checkOnly {
 			// A newline is a Go statement terminator after a completed block.
 			// Without it, valid C99 such as `if (...) {} int value;` becomes
 			// the invalid shared-syntax token sequence `}var`.
@@ -1877,10 +2666,18 @@ func (t *translator) block() {
 	}
 	t.out = append(t.out, '}')
 	t.objects = t.objects[:objectMark]
-	t.endScope(scope)
+	if scoped {
+		t.endScope(scope)
+	}
 }
 
 func (t *translator) statement() {
+	if t.currentIs("_Static_assert") || t.currentIs("static_assert") {
+		if !t.takeStaticAssert() {
+			t.fail(TranslateErrDeclaration)
+		}
+		return
+	}
 	if t.currentIs("{") {
 		t.block()
 		return
@@ -1934,8 +2731,15 @@ func (t *translator) statement() {
 		t.out = append(t.out, ';')
 		return
 	}
-	if t.currentIs("case") || t.currentIs("default") || t.currentIs("asm") ||
-		t.currentIs("__asm") || t.currentIs("__asm__") {
+	if t.currentIs("asm") || t.currentIs("__asm") || t.currentIs("__asm__") {
+		if !t.checkOnly || !t.takeAsmStatement() {
+			t.fail(TranslateErrUnsupported)
+			return
+		}
+		t.out = append(t.out, ';')
+		return
+	}
+	if t.currentIs("case") || t.currentIs("default") {
 		t.fail(TranslateErrUnsupported)
 		return
 	}
@@ -2018,7 +2822,12 @@ func (t *translator) localDeclaration() {
 			return
 		}
 		decl.initializer = t.takeInitializer()
-		if storage != storageExtern && (!t.completeInitializerArray(&decl) || t.typeInfo(decl.typeID).kind == cTypeArray && t.typeInfo(decl.typeID).count == 0) {
+		autoDeclaration := t.typeInfo(decl.typeID).kind == cTypeAuto
+		if !t.resolveAutoDeclarator(&decl) {
+			t.fail(TranslateErrDeclaration)
+			return
+		}
+		if storage != storageExtern && (!t.completeInitializerArray(&decl) || t.typeInfo(decl.typeID).kind == cTypeArray && decl.incompleteArray) {
 			t.fail(TranslateErrDeclaration)
 			return
 		}
@@ -2042,6 +2851,10 @@ func (t *translator) localDeclaration() {
 		}
 		if !t.take(",") {
 			break
+		}
+		if autoDeclaration {
+			t.fail(TranslateErrDeclaration)
+			return
 		}
 	}
 	if !t.take(";") {
@@ -2146,8 +2959,23 @@ func (t *translator) switchStatementBody() {
 					t.fail(TranslateErrStatement)
 					return
 				}
+				caseTokens := t.tokens[t.pos:end]
+				if rangeAt := topLevelToken(t.src, caseTokens, "..."); rangeAt >= 0 {
+					if !t.checkOnly {
+						t.fail(TranslateErrUnsupported)
+						return
+					}
+					first, firstOK := t.constantExpression(caseTokens[:rangeAt])
+					last, lastOK := t.constantExpression(caseTokens[rangeAt+1:])
+					if !firstOK || !lastOK || first > last {
+						t.fail(TranslateErrStatement)
+						return
+					}
+					t.pos = end + 1
+					continue
+				}
 				t.appendText("case ")
-				t.convertedExpression(switchType, t.tokens[t.pos:end])
+				t.convertedExpression(switchType, caseTokens)
 				t.out = append(t.out, ':')
 				t.pos = end + 1
 			} else {
@@ -2167,8 +2995,14 @@ func (t *translator) switchStatementBody() {
 		if t.currentIs("break") || t.currentIs("continue") || t.currentIs("return") || t.currentIs("goto") {
 			terminal = true
 		}
-		t.statement()
-		if t.ok {
+		if t.checkOnly {
+			mark := t.beginCheckScratch()
+			t.statement()
+			t.endCheckScratch(mark)
+		} else {
+			t.statement()
+		}
+		if t.ok && !t.checkOnly {
 			t.out = append(t.out, '\n')
 		}
 	}
@@ -2228,6 +3062,10 @@ func (t *translator) parenthesizedCondition() {
 }
 
 func (t *translator) condition(tokens []token) {
+	if t.checkOnly {
+		t.checkExpression(tokens)
+		return
+	}
 	if len(tokens) == 0 {
 		t.appendText("true")
 		return
@@ -2236,6 +3074,10 @@ func (t *translator) condition(tokens []token) {
 }
 
 func (t *translator) expression(tokens []token) {
+	if t.checkOnly {
+		t.checkExpression(tokens)
+		return
+	}
 	if t.rejectConstMutation(tokens) {
 		return
 	}
@@ -2246,6 +3088,31 @@ func (t *translator) expression(tokens []token) {
 		return
 	}
 	t.emitExpression(tokens)
+}
+
+func (t *translator) checkExpression(tokens []token) {
+	if len(tokens) == 0 || t.rejectConstMutation(tokens) {
+		return
+	}
+	for i := 0; i+2 < len(tokens); i++ {
+		if !tokenIs(t.src, tokens[i], "(") || !tokenIs(t.src, tokens[i+1], "{") {
+			continue
+		}
+		bodyEnd := matchingToken(t.src, tokens, i+1, "{", "}")
+		if bodyEnd < 0 || bodyEnd+1 >= len(tokens) || !tokenIs(t.src, tokens[bodyEnd+1], ")") {
+			t.fail(TranslateErrStatement)
+			return
+		}
+		outerTokens, outerPos := t.tokens, t.pos
+		t.tokens, t.pos = tokens[i+1:bodyEnd+1], 0
+		t.block()
+		t.tokens, t.pos = outerTokens, outerPos
+		if !t.ok {
+			return
+		}
+		i = bodyEnd + 1
+	}
+	_ = t.expressionType(tokens)
 }
 
 func (t *translator) emitConvertedAssignment(tokens []token) bool {
@@ -2266,6 +3133,10 @@ func (t *translator) emitConvertedAssignment(tokens []token) bool {
 }
 
 func (t *translator) convertedExpression(typeID int, tokens []token) {
+	if t.checkOnly {
+		t.checkExpression(tokens)
+		return
+	}
 	if t.typeInfo(typeID).kind == cTypePointer {
 		if value, ok := t.constantExpression(tokens); ok && value == 0 {
 			t.appendText("nil")
@@ -2397,7 +3268,7 @@ func (t *translator) rejectConstMutation(tokens []token) bool {
 		}
 	}
 	if len(tokens) > 1 && (tokenIs(t.src, tokens[len(tokens)-1], "++") || tokenIs(t.src, tokens[len(tokens)-1], "--")) {
-		if t.typeInfo(t.lvalueType(tokens[:len(tokens)-1])).qualifiers&cQualifierConst != 0 {
+		if t.typeInfo(t.postfixMutationType(tokens[:len(tokens)-1])).qualifiers&cQualifierConst != 0 {
 			t.fail(TranslateErrUnsupported)
 			return true
 		}
@@ -2405,14 +3276,35 @@ func (t *translator) rejectConstMutation(tokens []token) bool {
 	return false
 }
 
+func (t *translator) postfixMutationType(tokens []token) int {
+	// Postfix operators bind before an unparenthesized unary prefix: *p++ is
+	// *(p++), while (*p)++ still targets the pointee.
+	for len(tokens) > 1 && !tokenIs(t.src, tokens[0], "(") && t.unaryOperator(tokens[0]) {
+		tokens = tokens[1:]
+	}
+	return t.lvalueType(tokens)
+}
+
 func (t *translator) lvalueType(tokens []token) int {
+	for len(tokens) > 1 && tokenIs(t.src, tokens[0], "(") && matchingToken(t.src, tokens, 0, "(", ")") == len(tokens)-1 {
+		tokens = tokens[1 : len(tokens)-1]
+	}
 	if len(tokens) == 1 && tokenKind(tokens[0]) == tokenIdent {
 		if object, ok := t.lookupObject(tokenText(t.src, tokens[0])); ok {
 			return object.typeID
 		}
+		if function, ok := t.lookupFunction(tokenText(t.src, tokens[0])); ok {
+			return t.functions[function].typeID
+		}
 	}
 	if access, ok := t.memberAccess(tokens, 0); ok && access.end == len(tokens) {
 		return access.typeID
+	}
+	if memberType, ok := t.memberExpressionType(tokens); ok {
+		return memberType
+	}
+	if subscriptType, ok := t.subscriptExpressionType(tokens); ok {
+		return subscriptType
 	}
 	if len(tokens) > 1 && tokenIs(t.src, tokens[0], "*") {
 		pointer := t.typeInfo(t.expressionType(tokens[1:]))
@@ -2527,7 +3419,7 @@ func (t *translator) emitExpression(tokens []token) {
 				}
 			}
 		}
-		if tokenIs(t.src, tok, "sizeof") || tokenIs(t.src, tok, "_Alignof") {
+		if tokenIs(t.src, tok, "sizeof") || t.isAlignof(tok) {
 			end := matchingToken(t.src, tokens, i+1, "(", ")")
 			if end > i+2 {
 				if typeID, ok := t.typeFromTokens(tokens[i+2 : end]); ok {
@@ -2610,7 +3502,7 @@ func (t *translator) emitExpression(tokens []token) {
 
 func (t *translator) emitSizeof(tokens []token) {
 	operand := tokens[1:]
-	if tokenIs(t.src, tokens[0], "_Alignof") && (len(operand) < 3 || !tokenIs(t.src, operand[0], "(")) {
+	if t.isAlignof(tokens[0]) && (len(operand) < 3 || !tokenIs(t.src, operand[0], "(")) {
 		t.fail(TranslateErrUnsupported)
 		return
 	}
@@ -2626,7 +3518,7 @@ func (t *translator) emitSizeof(tokens []token) {
 		}
 		operand = inside
 	}
-	if tokenIs(t.src, tokens[0], "_Alignof") {
+	if t.isAlignof(tokens[0]) {
 		t.fail(TranslateErrUnsupported)
 		return
 	}
@@ -2693,6 +3585,10 @@ func (t *translator) conditionalOperator(tokens []token) (int, int) {
 }
 
 func (t *translator) emitConditionalExpression(tokens []token, question int, colon int) {
+	if colon == question+1 {
+		t.fail(TranslateErrUnsupported)
+		return
+	}
 	left, right := t.expressionType(tokens[question+1:colon]), t.expressionType(tokens[colon+1:])
 	typeID := t.usualArithmeticType(left, right)
 	if t.typeInfo(left).kind == cTypePointer {
@@ -3057,6 +3953,12 @@ func (t *translator) expressionType(tokens []token) int {
 	if len(tokens) == 0 {
 		return cTypeInt32ID
 	}
+	if typeID, ok := t.statementExpressionType(tokens); ok {
+		return typeID
+	}
+	if typeID, ok := t.genericExpressionType(tokens); ok {
+		return typeID
+	}
 	if at := t.commaOperator(tokens); at >= 0 {
 		return t.expressionType(tokens[at+1:])
 	}
@@ -3084,7 +3986,11 @@ func (t *translator) expressionType(tokens []token) int {
 		}
 	}
 	if question, colon := t.conditionalOperator(tokens); question >= 0 {
-		left, right := t.expressionType(tokens[question+1:colon]), t.expressionType(tokens[colon+1:])
+		leftTokens := tokens[question+1 : colon]
+		if len(leftTokens) == 0 {
+			leftTokens = tokens[:question]
+		}
+		left, right := t.expressionType(leftTokens), t.expressionType(tokens[colon+1:])
 		if t.typeInfo(left).kind == cTypePointer {
 			return left
 		}
@@ -3101,6 +4007,12 @@ func (t *translator) expressionType(tokens []token) int {
 			return t.integerPromotion(t.expressionType(tokens[:at]))
 		}
 		return t.usualArithmeticType(t.expressionType(tokens[:at]), t.expressionType(tokens[at+1:]))
+	}
+	if subscriptType, ok := t.subscriptExpressionType(tokens); ok {
+		return subscriptType
+	}
+	if memberType, ok := t.memberExpressionType(tokens); ok {
+		return memberType
 	}
 	if access, ok := t.memberAccess(tokens, 0); ok && access.end == len(tokens) {
 		return access.typeID
@@ -3148,13 +4060,14 @@ func (t *translator) expressionType(tokens []token) int {
 		text := tokenText(t.src, tokens[0])
 		floating := false
 		float32 := false
+		hexadecimal := len(text) > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X')
 		for i := 0; i < len(text); i++ {
-			if text[i] == '.' || text[i] == 'e' || text[i] == 'E' || text[i] == 'p' || text[i] == 'P' {
+			if text[i] == '.' || hexadecimal && (text[i] == 'p' || text[i] == 'P') || !hexadecimal && (text[i] == 'e' || text[i] == 'E') {
 				floating = true
 			}
-			if text[i] == 'f' || text[i] == 'F' {
-				float32 = true
-			}
+		}
+		if floating && len(text) > 0 && (text[len(text)-1] == 'f' || text[len(text)-1] == 'F') {
+			float32 = true
 		}
 		if floating {
 			if float32 {
@@ -3189,6 +4102,182 @@ func (t *translator) expressionType(tokens []token) int {
 		}
 	}
 	return cTypeInt32ID
+}
+
+func (t *translator) statementExpressionType(tokens []token) (int, bool) {
+	if len(tokens) < 3 || !tokenIs(t.src, tokens[0], "{") || !tokenIs(t.src, tokens[len(tokens)-1], "}") {
+		return cTypeVoidID, false
+	}
+	start, lastStart, lastEnd := 1, -1, -1
+	paren, bracket, brace := 0, 0, 0
+	for i := 1; i < len(tokens)-1; i++ {
+		switch {
+		case tokenIs(t.src, tokens[i], "("):
+			paren++
+		case tokenIs(t.src, tokens[i], ")"):
+			paren--
+		case tokenIs(t.src, tokens[i], "["):
+			bracket++
+		case tokenIs(t.src, tokens[i], "]"):
+			bracket--
+		case tokenIs(t.src, tokens[i], "{"):
+			brace++
+		case tokenIs(t.src, tokens[i], "}"):
+			brace--
+		case paren == 0 && bracket == 0 && brace == 0 && tokenIs(t.src, tokens[i], ";"):
+			if i > start {
+				lastStart, lastEnd = start, i
+			}
+			start = i + 1
+		}
+	}
+	if lastStart < 0 {
+		return cTypeVoidID, false
+	}
+	if !t.checkOnly {
+		return t.expressionType(tokens[lastStart:lastEnd]), true
+	}
+	outerTokens, outerPos := t.tokens, t.pos
+	outerOut, outerStaticOut := t.out, t.staticOut
+	objectMark := len(t.objects)
+	scope := t.beginScope()
+	t.tokens, t.pos, t.out = tokens, 1, nil
+	for t.ok && t.pos < lastStart {
+		t.statement()
+	}
+	typeID := cTypeVoidID
+	if t.ok && t.pos == lastStart {
+		typeID = t.expressionType(tokens[lastStart:lastEnd])
+	}
+	t.tokens, t.pos, t.out, t.staticOut = outerTokens, outerPos, outerOut, outerStaticOut
+	t.objects = t.objects[:objectMark]
+	t.endScope(scope)
+	return typeID, t.ok && typeID != cTypeVoidID
+}
+
+func (t *translator) genericExpressionType(tokens []token) (int, bool) {
+	if len(tokens) < 4 || !tokenIs(t.src, tokens[0], "_Generic") || !tokenIs(t.src, tokens[1], "(") {
+		return cTypeVoidID, false
+	}
+	end := matchingToken(t.src, tokens, 1, "(", ")")
+	if end != len(tokens)-1 {
+		return cTypeVoidID, false
+	}
+	items := splitTopLevel(t.src, tokens[2:end], ",")
+	if len(items) < 2 {
+		return cTypeVoidID, false
+	}
+	controlType := t.expressionType(items[0])
+	defaultType, haveDefault := cTypeVoidID, false
+	for i := 1; i < len(items); i++ {
+		colon := topLevelToken(t.src, items[i], ":")
+		if colon <= 0 || colon+1 >= len(items[i]) {
+			return cTypeVoidID, false
+		}
+		resultType := t.expressionType(items[i][colon+1:])
+		if colon == 1 && tokenIs(t.src, items[i][0], "default") {
+			defaultType, haveDefault = resultType, true
+			continue
+		}
+		associationType, ok := t.typeFromTokens(items[i][:colon])
+		if !ok {
+			return cTypeVoidID, false
+		}
+		if t.compatibleParameterType(controlType, associationType) {
+			return resultType, true
+		}
+	}
+	return defaultType, haveDefault
+}
+
+func topLevelToken(src []byte, tokens []token, text string) int {
+	paren, bracket, brace := 0, 0, 0
+	for i := 0; i < len(tokens); i++ {
+		if paren == 0 && bracket == 0 && brace == 0 && tokenIs(src, tokens[i], text) {
+			return i
+		}
+		switch {
+		case tokenIs(src, tokens[i], "("):
+			paren++
+		case tokenIs(src, tokens[i], ")"):
+			paren--
+		case tokenIs(src, tokens[i], "["):
+			bracket++
+		case tokenIs(src, tokens[i], "]"):
+			bracket--
+		case tokenIs(src, tokens[i], "{"):
+			brace++
+		case tokenIs(src, tokens[i], "}"):
+			brace--
+		}
+	}
+	return -1
+}
+
+func (t *translator) subscriptExpressionType(tokens []token) (int, bool) {
+	if len(tokens) < 3 || !tokenIs(t.src, tokens[len(tokens)-1], "]") {
+		return cTypeVoidID, false
+	}
+	paren, bracket := 0, 0
+	open := -1
+	for i := 0; i < len(tokens)-1; i++ {
+		switch {
+		case tokenIs(t.src, tokens[i], "("):
+			paren++
+		case tokenIs(t.src, tokens[i], ")"):
+			paren--
+		case tokenIs(t.src, tokens[i], "["):
+			if paren == 0 && bracket == 0 {
+				open = i
+			}
+			bracket++
+		case tokenIs(t.src, tokens[i], "]"):
+			bracket--
+		}
+	}
+	if open <= 0 || matchingToken(t.src, tokens, open, "[", "]") != len(tokens)-1 {
+		return cTypeVoidID, false
+	}
+	base := t.typeInfo(t.expressionType(tokens[:open]))
+	if base.kind != cTypeArray && base.kind != cTypePointer {
+		return cTypeVoidID, false
+	}
+	return base.base, true
+}
+
+func (t *translator) memberExpressionType(tokens []token) (int, bool) {
+	paren, bracket := 0, 0
+	member := -1
+	for i := 0; i+1 < len(tokens); i++ {
+		switch {
+		case tokenIs(t.src, tokens[i], "("):
+			paren++
+		case tokenIs(t.src, tokens[i], ")"):
+			paren--
+		case tokenIs(t.src, tokens[i], "["):
+			bracket++
+		case tokenIs(t.src, tokens[i], "]"):
+			bracket--
+		case paren == 0 && bracket == 0 && (tokenIs(t.src, tokens[i], ".") || tokenIs(t.src, tokens[i], "->")):
+			member = i
+		}
+	}
+	if member <= 0 || member+1 >= len(tokens) || tokenKind(tokens[member+1]) != tokenIdent || member+2 != len(tokens) {
+		return cTypeVoidID, false
+	}
+	base := t.expressionType(tokens[:member])
+	if tokenIs(t.src, tokens[member], "->") {
+		pointer := t.typeInfo(base)
+		if pointer.kind != cTypePointer {
+			return cTypeVoidID, false
+		}
+		base = pointer.base
+	}
+	field, ok := t.lookupField(base, tokenText(t.src, tokens[member+1]))
+	if !ok {
+		return cTypeVoidID, false
+	}
+	return field.typeID, true
 }
 
 func (t *translator) emitAggregateInitializer(typeID int, tokens []token) {
@@ -3238,6 +4327,10 @@ func (t *translator) emitAggregateInitializer(typeID int, tokens []token) {
 }
 
 func (t *translator) emitInitializerValue(typeID int, value []token) {
+	if t.checkOnly {
+		t.checkInitializerValue(typeID, value)
+		return
+	}
 	info := t.typeInfo(typeID)
 	if info.kind == cTypeArray && t.emitStringArrayInitializer(typeID, value) {
 		return
@@ -3255,6 +4348,157 @@ func (t *translator) emitInitializerValue(typeID int, value []token) {
 		return
 	}
 	t.convertedExpression(typeID, value)
+}
+
+func (t *translator) checkInitializerValue(typeID int, value []token) {
+	if len(value) == 0 {
+		t.fail(TranslateErrDeclaration)
+		return
+	}
+	if !tokenIs(t.src, value[0], "{") {
+		t.checkExpression(value)
+		return
+	}
+	if len(value) < 2 || !tokenIs(t.src, value[len(value)-1], "}") {
+		t.fail(TranslateErrDeclaration)
+		return
+	}
+	info := t.typeInfo(typeID)
+	items := value[1 : len(value)-1]
+	if info.kind != cTypeArray && info.kind != cTypeStruct && info.kind != cTypeUnion {
+		seen := false
+		for start := 0; ; {
+			item, nextStart, done := nextTopLevelItem(t.src, items, start)
+			if len(item) != 0 && (seen || tokenIs(t.src, item[0], ".") || tokenIs(t.src, item[0], "[")) {
+				t.fail(TranslateErrDeclaration)
+				return
+			}
+			if len(item) != 0 {
+				seen = true
+				t.checkInitializerValue(typeID, item)
+			}
+			if done {
+				break
+			}
+			start = nextStart
+		}
+		return
+	}
+	next := 0
+	for start := 0; t.ok; {
+		item, nextStart, done := nextTopLevelItem(t.src, items, start)
+		if len(item) == 0 {
+			if done {
+				break
+			}
+			start = nextStart
+			continue
+		}
+		mark := t.beginCheckScratch()
+		next = t.checkAggregateInitializerItem(typeID, info, item, next)
+		t.endCheckScratch(mark)
+		if done {
+			break
+		}
+		start = nextStart
+	}
+}
+
+func (t *translator) checkAggregateInitializerItem(typeID int, info cTypeInfo, item []token, next int) int {
+	targetType, at := typeID, 0
+	designated := tokenIs(t.src, item[0], ".") || tokenIs(t.src, item[0], "[")
+	if designated {
+		for at < len(item) && (tokenIs(t.src, item[at], ".") || tokenIs(t.src, item[at], "[")) {
+			current := t.typeInfo(targetType)
+			if tokenIs(t.src, item[at], ".") {
+				if at+1 >= len(item) || tokenKind(item[at+1]) != tokenIdent || current.kind != cTypeStruct && current.kind != cTypeUnion {
+					t.fail(TranslateErrDeclaration)
+					return next
+				}
+				field, ok := t.lookupField(targetType, tokenText(t.src, item[at+1]))
+				if !ok {
+					t.fail(TranslateErrDeclaration)
+					return next
+				}
+				targetType = field.typeID
+				at += 2
+				continue
+			}
+			close := matchingToken(t.src, item, at, "[", "]")
+			if close <= at+1 || current.kind != cTypeArray {
+				t.fail(TranslateErrDeclaration)
+				return next
+			}
+			designator := item[at+1 : close]
+			rangeAt := topLevelToken(t.src, designator, "...")
+			firstTokens := designator
+			if rangeAt >= 0 {
+				firstTokens = designator[:rangeAt]
+			}
+			first, ok := t.constantExpression(firstTokens)
+			last := first
+			if rangeAt >= 0 {
+				last, ok = t.constantExpression(designator[rangeAt+1:])
+			}
+			if !ok || first < 0 || last < first || current.count > 0 && last >= current.count {
+				t.fail(TranslateErrDeclaration)
+				return next
+			}
+			targetType = current.base
+			if at == 0 {
+				next = last + 1
+			}
+			at = close + 1
+		}
+		if at >= len(item) || !tokenIs(t.src, item[at], "=") {
+			t.fail(TranslateErrDeclaration)
+			return next
+		}
+		at++
+	} else if info.kind == cTypeArray {
+		if info.count > 0 && next >= info.count {
+			t.fail(TranslateErrDeclaration)
+			return next
+		}
+		targetType = info.base
+		next++
+	} else {
+		for next < info.fieldCount && t.fields[info.fieldStart+next].synthetic {
+			next++
+		}
+		if next >= info.fieldCount || info.kind == cTypeUnion && next > 0 {
+			t.fail(TranslateErrDeclaration)
+			return next
+		}
+		targetType = t.fields[info.fieldStart+next].typeID
+		next++
+	}
+	t.checkInitializerValue(targetType, item[at:])
+	return next
+}
+
+func nextTopLevelItem(src []byte, tokens []token, start int) ([]token, int, bool) {
+	paren, bracket, brace := 0, 0, 0
+	for i := start; i < len(tokens); i++ {
+		if paren == 0 && bracket == 0 && brace == 0 && tokenIs(src, tokens[i], ",") {
+			return tokens[start:i], i + 1, false
+		}
+		switch {
+		case tokenIs(src, tokens[i], "("):
+			paren++
+		case tokenIs(src, tokens[i], ")"):
+			paren--
+		case tokenIs(src, tokens[i], "["):
+			bracket++
+		case tokenIs(src, tokens[i], "]"):
+			bracket--
+		case tokenIs(src, tokens[i], "{"):
+			brace++
+		case tokenIs(src, tokens[i], "}"):
+			brace--
+		}
+	}
+	return tokens[start:], len(tokens), true
 }
 
 func (t *translator) emitMutationInitializer(typeID int, tokens []token) bool {
@@ -3428,7 +4672,7 @@ func (t *translator) emitInitializerPath(steps []initializerStep, typeID int) {
 			continue
 		}
 		field := t.fields[step.field]
-		if t.typeInfo(typeID).kind == cTypeUnion {
+		if info := t.typeInfo(typeID); info.kind == cTypeUnion || info.indirect {
 			receiver := t.out
 			t.out = append([]byte("(*"), receiver...)
 			t.appendText(".__c_ptr_")
@@ -3593,7 +4837,11 @@ func (t *translator) unaryArithmetic(tok token) bool {
 }
 
 func (t *translator) sizeOperator(tok token) bool {
-	return cTokenSetContains("sizeof,_Alignof", tokenText(t.src, tok))
+	return tokenIs(t.src, tok, "sizeof") || t.isAlignof(tok)
+}
+
+func (t *translator) isAlignof(tok token) bool {
+	return cTokenSetContains("_Alignof,__alignof,__alignof__", tokenText(t.src, tok))
 }
 
 func (t *translator) unaryOperator(tok token) bool {
@@ -3649,7 +4897,7 @@ func (t *translator) memberAccess(tokens []token, start int) (cMemberAccess, boo
 			result.bitfield = true
 			return result, true
 		}
-		if aggregate.kind == cTypeUnion {
+		if aggregate.kind == cTypeUnion || aggregate.indirect {
 			wrapped := make([]byte, 0, len(expr)+len(field.name)+15)
 			wrapped = append(wrapped, '(', '*')
 			wrapped = append(wrapped, expr...)
@@ -3694,17 +4942,22 @@ func (t *translator) typeFromTokens(tokens []token) (int, bool) {
 		return cTypeVoidID, false
 	}
 	outerTokens, outerPos := t.tokens, t.pos
-	t.tokens, t.pos = tokens, 0
+	outerOK, outerErr, outerErrorAt := t.ok, t.err, t.errorAt
+	outerSpeculative := t.speculativeType
+	t.tokens, t.pos, t.speculativeType = tokens, 0, true
 	typeID, storage, ok := t.parseType()
 	if ok && storage == storageNone && t.pos < len(t.tokens) {
-		name, ops, valid := t.parseDeclaratorOps(true)
+		name, ops, _, valid := t.parseDeclaratorOps(true)
 		if valid && len(tokenText(t.src, name)) == 0 {
 			typeID, valid = t.applyDeclaratorOps(typeID, ops)
 		}
 		ok = valid
 	}
 	ok = ok && storage == storageNone && t.pos == len(t.tokens)
-	t.tokens, t.pos = outerTokens, outerPos
+	t.tokens, t.pos, t.speculativeType = outerTokens, outerPos, outerSpeculative
+	if !ok {
+		t.ok, t.err, t.errorAt = outerOK, outerErr, outerErrorAt
+	}
 	return typeID, ok
 }
 
@@ -3747,16 +5000,40 @@ func scalarCType(base string, unsigned bool, longCount int) (int, bool) {
 }
 
 func (t *translator) fieldOffset(typeID int, tokens []token) (int, bool) {
-	info := t.typeInfo(typeID)
-	if info.kind != cTypeStruct && info.kind != cTypeUnion || len(tokens) != 1 || tokenKind(tokens[0]) != tokenIdent {
-		return 0, false
-	}
-	name := tokenText(t.src, tokens[0])
-	for i := 0; i < info.fieldCount; i++ {
-		field := t.fields[info.fieldStart+i]
-		if field.bitWidth == 0 && textEquals(name, field.name) {
-			return field.offset, true
+	offset := 0
+	for pos := 0; pos < len(tokens); {
+		info := t.typeInfo(typeID)
+		if (info.kind != cTypeStruct && info.kind != cTypeUnion) || tokenKind(tokens[pos]) != tokenIdent {
+			return 0, false
 		}
+		field, found := t.lookupField(typeID, tokenText(t.src, tokens[pos]))
+		if !found || field.bitWidth != 0 {
+			return 0, false
+		}
+		offset += field.offset
+		typeID = field.typeID
+		pos++
+		for pos < len(tokens) && tokenIs(t.src, tokens[pos], "[") {
+			end := matchingToken(t.src, tokens, pos, "[", "]")
+			info = t.typeInfo(typeID)
+			if end < 0 || info.kind != cTypeArray {
+				return 0, false
+			}
+			index, ok := t.constantExpression(tokens[pos+1 : end])
+			if !ok || index < 0 {
+				return 0, false
+			}
+			offset += index * t.typeSize(info.base)
+			typeID = info.base
+			pos = end + 1
+		}
+		if pos == len(tokens) {
+			return offset, true
+		}
+		if !tokenIs(t.src, tokens[pos], ".") {
+			return 0, false
+		}
+		pos++
 	}
 	return 0, false
 }
@@ -3892,6 +5169,8 @@ func decodeCLiteral(text []byte, quote byte) ([]byte, bool) {
 			out = append(out, 7)
 		case 'b':
 			out = append(out, 8)
+		case 'e':
+			out = append(out, 27)
 		case 'f':
 			out = append(out, 12)
 		case 'n':
@@ -4053,6 +5332,15 @@ func (t *translator) isTypeStart() bool {
 		return true
 	}
 	name := tokenText(t.src, tok)
+	// Ordinary identifiers in the innermost scope shadow typedef names (and
+	// provisional opaque header types) when deciding whether a statement starts
+	// with a declaration.
+	if _, known := t.lookupObject(name); known {
+		return false
+	}
+	if _, known := t.lookupValue(name); known {
+		return false
+	}
 	if _, known := builtinCType(name); known {
 		return true
 	}
@@ -4068,7 +5356,7 @@ func (t *translator) isTypeStart() bool {
 }
 
 func isTypeToken(src []byte, tok token) bool {
-	return cTokenSetContains("auto,register,static,extern,typedef,const,volatile,restrict,inline,void,char,short,int,long,float,double,signed,unsigned,_Bool,_Atomic,_Thread_local,struct,union,enum,__extension__,__signed__", tokenText(src, tok))
+	return cTokenSetContains("auto,register,static,extern,typedef,const,__const,__const__,volatile,__volatile,__volatile__,restrict,__restrict,__restrict__,inline,__inline,__inline__,void,char,short,int,long,float,double,signed,unsigned,_Bool,_Atomic,_Thread_local,struct,union,enum,__extension__,__signed__,__int128,__auto_type,typeof,__typeof,__typeof__", tokenText(src, tok))
 }
 
 func cTokenSetContains(set string, text []byte) bool {
