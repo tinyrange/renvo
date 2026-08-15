@@ -117,6 +117,18 @@
       white-space: nowrap;
     }
 
+    .recipe {
+      margin: 1rem 0 0;
+      padding: 1rem 1.15rem;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: .6rem;
+      background: #0b0d0a;
+      color: #dfffa8;
+      font: .88rem/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre;
+    }
+
     nav {
       position: sticky;
       top: 0;
@@ -411,6 +423,24 @@
           <code>-c</code> object mode; it must not smuggle module wrappers or
           <code>.modinfo</code> into ordinary kernel objects.
         </div>
+
+        <div class="callout">
+          <strong>First concrete checkpoint: hosted Hello World.</strong> Before
+          touching Kbuild, compile an ordinary C file through a real installed
+          system header into a conventional ELF relocatable object. The host C
+          driver is used only to supply startup objects, libc, and the system
+          linker; Renvo is the sole compiler for <code>hello.c</code>.
+          <pre class="recipe">#include &lt;stdio.h&gt;
+int main(void) { puts("Hello, world!"); return 0; }
+
+renvo cc -c hello.c -o hello.o
+cc hello.o -o hello
+./hello
+# stdout: Hello, world!</pre>
+          The object must expose <code>main</code>, leave <code>puts</code>
+          undefined, carry standard x86_64 SysV relocations, and require no Renvo
+          runtime or source-specific linker trick.
+        </div>
       </div>
     </section>
 
@@ -433,7 +463,7 @@
           <div class="node shared"><span>Checked core</span><small>types, layout, constants, control flow, source spans</small></div>
           <div class="node shared"><span>Renvo unit</span><small>shared symbols, linker, reachability, canonical ops</small></div>
           <div class="node shared"><span>amd64 emitter</span><small>shared machine operations and ABI</small></div>
-          <div class="node external"><span>ELF + Kbuild</span><small>ET_REL, external asm/archive/link at first</small></div>
+          <div class="node external"><span>ELF + system tools</span><small>host link first; Kbuild asm/archive/link next</small></div>
         </div>
         <div class="legend">
           <span class="c">C-specific</span>
@@ -474,38 +504,40 @@
 
         <div class="timeline">
           <article class="milestone">
-            <div class="phase">M0<br>Freeze the target</div>
+            <div class="phase">M0<br>Hosted object</div>
             <div>
-              <h3>Pin the kernel and measure the obstacle</h3>
-              <p>Create an ignored, reproducible kernel checkout plus a small manifest containing the exact upstream commit, config hash, tool versions, and command line. Capture Kbuild's real compiler invocations and classify unique syntax, builtin, flag, section, and relocation requirements.</p>
+              <h3>Compile and system-link ordinary C Hello World</h3>
+              <p>Build the smallest complete compiler-driver slice before introducing Kbuild: read <code>#include &lt;stdio.h&gt;</code> through the installed system include paths, compile a normal <code>main</code> that calls <code>puts</code>, emit an ordinary Linux/x86_64 ELF ET_REL object, and link it with the system C driver.</p>
               <ul>
-                <li>Add a read-only census tool that consumes <code>.cmd</code> files or a compilation database.</li>
-                <li>Record GCC/Clang wall time, peak RSS, object sizes, and selected translation-unit sizes.</li>
-                <li>Turn every Renvo failure into a stable category, not a pile of log strings.</li>
+                <li>Add the minimal <code>renvo cc -c input.c -o output.o</code> persona, include search, target predefined macros, and diagnostics needed by the real header.</li>
+                <li>Lower C entry/call boundaries to the x86_64 SysV ABI; emit an exported <code>main</code>, undefined <code>puts</code>, string data, and standard relocations.</li>
+                <li>Inspect the result with <code>readelf</code>, link with <code>cc hello.o -o hello</code>, run it, and check exactly <code>Hello, world!\n</code>.</li>
+                <li>Do not special-case the source filename, <code>stdio.h</code>, <code>puts</code>, the output bytes, or host library paths.</li>
               </ul>
-              <div class="gate">A versioned manifest and blocker dashboard can reproduce the same baseline on a clean machine.</div>
+              <div class="gate">A checked acceptance test produces <code>hello.o</code>; the system linker and libc accept it; the executable prints the expected line.</div>
             </div>
           </article>
 
           <article class="milestone">
             <div class="phase">M1<br>Kbuild handshake</div>
             <div>
-              <h3>Behave like a compiler driver before being one</h3>
-              <p>Add a GCC-compatible C invocation surface without disturbing Renvo's package-oriented CLI: <code>-c</code>, <code>-E</code>, <code>-o</code>, <code>-x c</code>, include paths, defines, forced includes, dependency files, target flags, response files, version queries, and correct exit codes for option probes.</p>
+              <h3>Turn the hosted slice into a truthful kernel driver</h3>
+              <p>Pin an upstream kernel commit/config, capture its real compiler invocations, then extend the M0 driver without disturbing Renvo's package-oriented CLI: <code>-E</code>, <code>-x c</code>, kernel include paths, defines, forced includes, dependency files, target flags, response files, version queries, and correct exit codes for option probes.</p>
               <ul>
                 <li>Accept harmless warning/optimization flags explicitly; reject unsupported semantic flags.</li>
                 <li>Make <code>cc-option</code> probes truthful—unknown flags must never silently succeed.</li>
                 <li>Keep host tools on <code>HOSTCC</code>; only target <code>CC</code> points to Renvo.</li>
+                <li>Add a read-only census over Kbuild <code>.cmd</code> files and classify syntax, builtins, flags, sections, relocations, CPU, RSS, and object sizes.</li>
               </ul>
-              <div class="gate"><code>make ARCH=x86_64 CC=renvo tinyconfig prepare</code> reaches the first genuine preprocessing or language error.</div>
+              <div class="gate">A pinned blocker dashboard is reproducible, and <code>make ARCH=x86_64 CC=renvo tinyconfig prepare</code> reaches the first genuine preprocessing or language error.</div>
             </div>
           </article>
 
           <article class="milestone">
             <div class="phase">M2<br>Preprocessor</div>
             <div>
-              <h3>Build the small, serious preprocessor</h3>
-              <p>Implement translation phases needed by GNU C11: line splicing, comments, object/function/variadic macros, rescanning, hide sets, <code>#</code>, <code>##</code>, <code>#include</code>, conditionals, <code>defined</code>, <code>#line</code>, include guards, <code>#pragma once</code>, and compiler predefined macros.</p>
+              <h3>Generalize the hosted slice into a serious preprocessor</h3>
+              <p>Extend the behavior proven by the real <code>stdio.h</code> path to all translation phases needed by GNU C11: line splicing, comments, object/function/variadic macros, rescanning, hide sets, <code>#</code>, <code>##</code>, <code>#include</code>, conditionals, <code>defined</code>, <code>#line</code>, include guards, <code>#pragma once</code>, and kernel/compiler predefined macros.</p>
               <ul>
                 <li>Represent replacement lists as compact token spans and intern macro names once.</li>
                 <li>Use an include stack and expansion stack; do not materialize a giant preprocessed file.</li>
@@ -546,8 +578,8 @@
           <article class="milestone">
             <div class="phase">M5<br>Kernel objects</div>
             <div>
-              <h3>Emit ordinary Kbuild-compatible ET_REL files</h3>
-              <p>Split general kernel object output from Renvo's existing kernel-module wrapper. Emit named text/data/rodata/BSS sections, symbol bindings and visibility, alignment, weak/alias symbols, section groups where required, and the x86_64 relocations used by the pinned build.</p>
+              <h3>Promote hosted ET_REL into Kbuild-compatible objects</h3>
+              <p>Extend M0's minimal system-linkable object mode while keeping it separate from Renvo's existing kernel-module wrapper. Emit arbitrary named text/data/rodata/BSS sections, symbol bindings and visibility, alignment, weak/alias symbols, section groups where required, and the x86_64 relocations used by the pinned build.</p>
               <ul>
                 <li>Add <code>-ffunction-sections</code>/<code>-fdata-sections</code>-equivalent placement only when Kbuild requests it.</li>
                 <li>Carry section and alignment attributes through the checked core instead of reconstructing them late.</li>
@@ -642,17 +674,18 @@
               <tr><th>Area</th><th>Current foundation</th><th>Kernel-grade requirement</th><th>Gate</th></tr>
             </thead>
             <tbody>
-              <tr><td>Lexing</td><td>Compact byte-span tokens</td><td>All literals, escapes, universal spellings needed by corpus, preprocessing tokens, source maps</td><td><span class="status now">M2</span></td></tr>
-              <tr><td>Preprocessing</td><td>Directive lines accepted as placeholders</td><td>Includes, macros, rescanning, variadics, stringize/paste, conditionals, builtins, dep tracking</td><td><span class="status next">M2</span></td></tr>
-              <tr><td>Declarations</td><td>Scalars, pointers, fixed arrays, direct functions</td><td>Full declarators, typedefs, qualifiers, linkage, function pointers, variadics</td><td><span class="status next">M3</span></td></tr>
+              <tr><td>Lexing</td><td>Compact byte-span tokens</td><td>System-header Hello World slice first; then every literal, escape, preprocessing token, and source map needed by the kernel corpus</td><td><span class="status now">M0/M2</span></td></tr>
+              <tr><td>Preprocessing</td><td>Directive lines accepted as placeholders</td><td>Real installed <code>stdio.h</code> include path first; then full macro rescanning, variadics, stringize/paste, conditionals, builtins, and dep tracking</td><td><span class="status now">M0/M2</span></td></tr>
+              <tr><td>Declarations</td><td>Scalars, pointers, fixed arrays, direct functions</td><td>Enough typedef/attribute declarations for hosted Hello World first; then full declarators, qualifiers, linkage, function pointers, and variadics</td><td><span class="status now">M0/M3</span></td></tr>
               <tr><td>Data model</td><td>Go-shaped scalar mapping</td><td>C promotions/conversions, structs, unions, enums, bitfields, flexible/zero-length arrays, SysV layout</td><td><span class="status next">M3–4</span></td></tr>
               <tr><td>Control flow</td><td><code>if</code>, <code>while</code>, expression <code>for</code>, return</td><td><code>switch</code>, <code>do</code>, labels/goto, case ranges, statement expressions, computed goto if observed</td><td><span class="status next">M3–4</span></td></tr>
               <tr><td>Initialization</td><td>Simple scalar expressions</td><td>Constant evaluator, strings, aggregate/designated initializers, compound literals, tentative definitions</td><td><span class="status next">M3</span></td></tr>
               <tr><td>GNU surface</td><td>Rejected precisely</td><td><code>typeof</code>, attributes, alternate keywords, <code>__auto_type</code>, omitted operands, kernel pseudo-keywords</td><td><span class="status later">M4</span></td></tr>
               <tr><td>Builtins</td><td>None</td><td>Constant/type queries, offsetof, branch hints, bit operations, overflow, object size, unreachable, atomics</td><td><span class="status later">M4/M7</span></td></tr>
               <tr><td>Inline asm</td><td>Out of initial issue scope</td><td>Operands, constraints, clobbers, volatile, goto edges, x86 templates or typed primitives</td><td><span class="status later">M7</span></td></tr>
-              <tr><td>Artifacts</td><td>Shared executable pipeline; kernel-module ET_REL backend exists</td><td>Ordinary per-TU ELF64 ET_REL, arbitrary sections/symbols/relocations, depfiles</td><td><span class="status later">M5</span></td></tr>
-              <tr><td>Kbuild</td><td>Renvo package CLI</td><td>Truthful GCC-compatible driver persona and compiler feature probes</td><td><span class="status next">M1</span></td></tr>
+              <tr><td>C ABI</td><td>Renvo-internal calls; kernel import machinery exists</td><td>System-linkable SysV <code>main</code> and external calls first; complete aggregate/variadic boundaries later</td><td><span class="status now">M0/M3</span></td></tr>
+              <tr><td>Artifacts</td><td>Shared executable pipeline; kernel-module ET_REL backend exists</td><td>Minimal system-linkable ELF64 ET_REL first; then arbitrary kernel sections, symbols, relocations, and depfiles</td><td><span class="status now">M0/M5</span></td></tr>
+              <tr><td>Driver</td><td>Renvo package CLI</td><td><code>cc -c</code> hosted object slice first; then truthful Kbuild flags and compiler feature probes</td><td><span class="status now">M0/M1</span></td></tr>
             </tbody>
           </table>
         </div>
@@ -708,7 +741,7 @@
           </article>
           <article class="card">
             <h3>Layer 2 · ABI/object corpus</h3>
-            <p>Checked-in expected layouts, symbol tables, section maps, and relocations. Reference compilers may generate fixtures during explicit maintenance, never act as the normal test oracle.</p>
+            <p>Start with the hosted <code>hello.o</code>: checked symbols, string section, undefined libc call, relocations, system link, and execution. Grow into checked-in layouts, section maps, and relocation fixtures. Reference compilers may generate fixtures during explicit maintenance, never act as the normal test oracle.</p>
           </article>
           <article class="card">
             <h3>Layer 3 · Pinned Linux</h3>
@@ -765,32 +798,33 @@
     <section id="next">
       <div class="wrap">
         <div class="eyebrow">08 · Immediate sequence</div>
-        <h2>The next three reviewable bets.</h2>
-        <p class="section-intro">Do the measuring and toolchain handshake before expanding syntax blindly.</p>
+        <h2>Three small PRs to ordinary Hello World.</h2>
+        <p class="section-intro">Finish one end-to-end hosted object before widening the compiler for Kbuild.</p>
 
         <div class="grid three">
           <article class="card next-pr" data-number="1">
-            <h3>Kernel census harness</h3>
-            <p>Pin commit/config, capture real target compiler commands, add the ignored checkout workflow, establish GCC/Clang baselines, and produce the blocker/resource dashboard. No language expansion yet.</p>
-            <div class="gate">We know the exact first 20 blockers and their frequency.</div>
+            <h3>Ordinary ET_REL skeleton</h3>
+            <p>Add the thin <code>renvo cc -c</code> persona and emit a conventional Linux/x86_64 object for a no-include <code>int main(void) { return 0; }</code>. Link it through the system C driver and run it.</p>
+            <div class="gate"><code>readelf</code> accepts the object and the host linker produces a working executable.</div>
           </article>
           <article class="card next-pr" data-number="2">
-            <h3>Streaming preprocessor core</h3>
-            <p>Implement include resolution, object/function macros, rescanning, conditionals, source maps, and bounded storage. Land with reduced fixtures from high-frequency kernel headers.</p>
-            <div class="gate">First kernel headers produce stable tokens with no unexplained CPU or memory regression.</div>
+            <h3>Real system-header path</h3>
+            <p>Add target predefined macros, installed include search, compact macro expansion, typedefs, and safely classified attributes until unmodified <code>#include &lt;stdio.h&gt;</code> supplies the declaration. Reduce every newly required construct into a fixture.</p>
+            <div class="gate">The source compiles through the host's actual <code>stdio.h</code>; there is no bundled replacement header.</div>
           </article>
           <article class="card next-pr" data-number="3">
-            <h3>GCC-compatible driver + <code>-E</code></h3>
-            <p>Add the target-compiler persona, dependency output, truthful option probes, and preprocessing mode. Keep it as a thin adapter over the normal driver and filesystem.</p>
-            <div class="gate">Kbuild preparation reaches real C parsing with Renvo as CC.</div>
+            <h3>SysV external call + Hello World</h3>
+            <p>Lower string data and the call to <code>puts</code>, emit its undefined symbol and relocation, then add the acceptance path that links with system startup files/libc and checks exact output.</p>
+            <div class="gate"><code>renvo cc -c hello.c</code> → system link → <code>Hello, world!</code></div>
           </article>
         </div>
 
         <div class="callout">
-          <strong>Decision checkpoint after PR 3:</strong> regenerate the census.
-          If aggregate declarations dominate, proceed to M3. If preprocessing
-          mismatches still dominate, finish those first. The corpus, not enthusiasm,
-          chooses the next feature.
+          <strong>Then approach Linux:</strong> pin the upstream commit and config,
+          harden the same driver for truthful Kbuild probes and dependency output,
+          capture the census, and expand the preprocessor/type system in blocker
+          order. The Hello World path remains a permanent fast acceptance test for
+          the hosted C ABI and object contract.
         </div>
       </div>
     </section>
