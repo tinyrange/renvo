@@ -120,11 +120,16 @@ func (fs objectSourceFS) PathExists(path string) bool {
 	return fs.base.PathExists(path)
 }
 
-func objectSourceWorkDir(workDir string, options Options) string {
+func objectSourceContext(workDir string, options Options) (string, Options) {
 	if options.Mode != ModeObject || len(options.Files) != 1 {
-		return workDir
+		return workDir, options
 	}
-	return load.DirPath(load.CleanPath(load.JoinPath(workDir, options.Files[0])))
+	path := load.CleanPath(load.JoinPath(workDir, options.Files[0]))
+	workDir = load.DirPath(path)
+	name := load.BasePath(path)
+	options.Package = name
+	options.Files = []string{name}
+	return workDir, options
 }
 
 func (fs scriptSourceFS) ReadDir(path string) ([]DirEntry, bool) {

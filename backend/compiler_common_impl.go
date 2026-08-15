@@ -11780,7 +11780,13 @@ func renvoPrepareStructCall(g *renvoLinearGen, ep *renvoExprParse, idx int, dest
 		}
 		wordCount += words
 	}
-	words := renvoEmitCallArgsReverse(g, ep, e, fn, receiverIndex)
+	words := -1
+	if g.c.objectFile && fn.linkStatic != 0 && receiverIndex < 0 &&
+		renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "libc") {
+		words = renvoEmitCObjectCallArgsReverse(g, ep, e, fn)
+	} else {
+		words = renvoEmitCallArgsReverse(g, ep, e, fn, receiverIndex)
+	}
 	if words < 0 {
 		return -1, 0
 	}
@@ -11955,6 +11961,34 @@ func renvoEmitUserCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	}
 	renvoEmitCallWithWordCount(g, fnIndex, wordCount)
 	return true
+}
+
+func renvoEmitCObjectCallArgsReverse(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, fn *renvoFuncInfo) int {
+	renvoNonNil(g, ep, e, fn)
+	if e.argCount != fn.paramCount {
+		return -1
+	}
+	wordCount := 0
+	for i := 0; i < e.argCount; i++ {
+		arg := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+i)
+		param := fn.firstParam + i
+		if renvoTypeIsString(g.meta, g.meta.params[param].typ) {
+			if !renvoEmitStringValueRegs(g, ep, arg) {
+				return -1
+			}
+			// The C frontend uses string as a compact checked carrier for
+			// NUL-terminated char pointers. Only its data word crosses SysV.
+			renvoAsmPushPrimary(&g.asm)
+			wordCount++
+			continue
+		}
+		words := renvoEmitCallParamArgReverse(g, ep, arg, param)
+		if words < 0 {
+			return -1
+		}
+		wordCount += words
+	}
+	return wordCount
 }
 
 func renvoFunctionValueCalleeType(g *renvoLinearGen, ep *renvoExprParse, idx int) int {

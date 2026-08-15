@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "2f173d81f969fc83d6118475e2b78dd4fc83d05ef98357f64923f53bcb17a4b1"
+const CompilerSourceDigest = "4360a9bce4417e4cd2e93026ecab4dcacb46f28fb7513748ab9b4e9f397462c8"
 
 // source: backend/compiler_common_impl.go
 
@@ -11787,7 +11787,13 @@ return -1, 0
 }
 wordCount += words
 }
-words := renvoEmitCallArgsReverse(g, ep, e, fn, receiverIndex)
+words := -1
+if g.c.objectFile && fn.linkStatic != 0 && receiverIndex < 0 &&
+renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "libc") {
+words = renvoEmitCObjectCallArgsReverse(g, ep, e, fn)
+} else {
+words = renvoEmitCallArgsReverse(g, ep, e, fn, receiverIndex)
+}
 if words < 0 {
 return -1, 0
 }
@@ -11962,6 +11968,34 @@ return staticResult > 0
 }
 renvoEmitCallWithWordCount(g, fnIndex, wordCount)
 return true
+}
+
+func renvoEmitCObjectCallArgsReverse(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, fn *renvoFuncInfo) int {
+renvoNonNil(g, ep, e, fn)
+if e.argCount != fn.paramCount {
+return -1
+}
+wordCount := 0
+for i := 0; i < e.argCount; i++ {
+arg := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+i)
+param := fn.firstParam + i
+if renvoTypeIsString(g.meta, g.meta.params[param].typ) {
+if !renvoEmitStringValueRegs(g, ep, arg) {
+return -1
+}
+
+
+renvoAsmPushPrimary(&g.asm)
+wordCount++
+continue
+}
+words := renvoEmitCallParamArgReverse(g, ep, arg, param)
+if words < 0 {
+return -1
+}
+wordCount += words
+}
+return wordCount
 }
 
 func renvoFunctionValueCalleeType(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
@@ -23608,6 +23642,15 @@ return true
 
 func renvoEmitTargetStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) int {
 renvoNonNil(g, fn)
+if g.c.objectFile {
+if !renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "libc") {
+return 0
+}
+if renvoEmitLinkStaticCall(g, fn, wordCount) {
+return 1
+}
+return 0
+}
 if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
 renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
 if !renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "kernel") {

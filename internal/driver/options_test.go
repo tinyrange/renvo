@@ -67,10 +67,17 @@ func TestCommandHelpRequested(t *testing.T) {
 	if CommandHelpRequested([]string{"renvo", "-o", "app", "."}) {
 		t.Fatal("compile command requested help")
 	}
-	for _, want := range []string{"Usage: renvo", "renvo cc -c", "-o <file>", "-system <file.rtg>", "-mode=<mode>", "kernel-module", "object", "source files...", "Explicit .go and .c files", "Exactly the named files", "windows/amd64", "windows/arm64", "darwin/arm64", "wasi/wasm32", "vm/vm32"} {
+	for _, want := range []string{"Usage: renvo", "renvo cc -c", "-o <file>", "-I", "-isystem", "-system <file.rtg>", "-mode=<mode>", "kernel-module", "object", "source files...", "Explicit .go and .c files", "Exactly the named files", "windows/amd64", "windows/arm64", "darwin/arm64", "wasi/wasm32", "vm/vm32"} {
 		if !strings.Contains(HelpText, want) {
 			t.Fatalf("HelpText missing %q", want)
 		}
+	}
+}
+
+func TestParseOptionsCIncludePaths(t *testing.T) {
+	options := ParseOptions([]string{"-c", "-I", "include", "-Ivendor/include", "-isystem", "/sdk/include", "-o", "hello.o", "hello.c"})
+	if !options.Ok || len(options.IncludePaths) != 3 || options.IncludePaths[0] != "include" || options.IncludePaths[1] != "vendor/include" || options.IncludePaths[2] != "/sdk/include" {
+		t.Fatalf("C include options = %#v", options)
 	}
 }
 
@@ -146,6 +153,8 @@ func TestParseOptionsRejectsInvalidInputs(t *testing.T) {
 		{name: "object package mode", args: []string{"-c", "-o", "app.o", "./cmd/app"}, err: ParseErrObjectFileCount, arg: "./cmd/app", at: 4},
 		{name: "object multiple files", args: []string{"-c", "-o", "app.o", "main.c", "other.c"}, err: ParseErrObjectFileCount, arg: "main.c", at: 5},
 		{name: "object Go file", args: []string{"-c", "-o", "app.o", "main.go"}, err: ParseErrObjectRequiresC, arg: "main.go", at: 4},
+		{name: "missing include path", args: []string{"-c", "-I"}, err: ParseErrMissingIncludePath, arg: "-I", at: 1},
+		{name: "missing system include path", args: []string{"-c", "-isystem"}, err: ParseErrMissingIncludePath, arg: "-isystem", at: 1},
 		{name: "C script", args: []string{"-script", "-o", "app", "main.c"}, err: ParseErrScriptRequiresGo, arg: "main.c", at: 4},
 	}
 	for i := 0; i < len(tests); i++ {

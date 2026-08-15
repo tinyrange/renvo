@@ -137,6 +137,7 @@ Useful options include:
 - `-mode=kernel-module`: build a Linux/amd64 kernel module;
 - `cc -c`: compile one standalone C translation unit to a system-linkable
   Linux/amd64 ELF relocatable object;
+- `-I <dir>` / `-I<dir>` / `-isystem <dir>`: add C header search roots;
 - `-script`: treat one explicit file as a script.
 
 ### Hosted system profiles

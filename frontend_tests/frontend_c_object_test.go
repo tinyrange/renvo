@@ -2,6 +2,7 @@ package frontend_tests
 
 import (
 	"debug/elf"
+	"encoding/binary"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,10 +34,10 @@ func runCObjectSystemLink(t *testing.T, frontend frontendConfig) {
 	source := filepath.Join(dir, "hello.c")
 	object := filepath.Join(dir, "hello.o")
 	executable := filepath.Join(dir, "hello")
-	if err := os.WriteFile(source, []byte("int main(void) { return 0; }\n"), 0o644); err != nil {
+	if err := os.WriteFile(source, []byte("#include <stdio.h>\nint main(void) { puts(\"Hello, world!\"); return 0; }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	command := frontendCommand(frontend, "cc", "-c", source, "-o", object)
+	command := frontendCommand(frontend, "cc", "-c", filepath.Base(source), "-o", object)
 	command.Dir = dir
 	command.Env = frontendCommandEnv(frontend.env, dir)
 	if combined, err := command.CombinedOutput(); err != nil {
@@ -59,23 +60,50 @@ func runCObjectSystemLink(t *testing.T, frontend frontendConfig) {
 		t.Fatal(err)
 	}
 	foundMain := false
-	for _, symbol := range symbols {
+	putsSymbol := -1
+	for i, symbol := range symbols {
 		if symbol.Name == "_printk" {
 			t.Fatal("ordinary C object imports the kernel module runtime")
 		}
 		if symbol.Name == "main" && elf.ST_BIND(symbol.Info) == elf.STB_GLOBAL && symbol.Section != elf.SHN_UNDEF {
 			foundMain = true
 		}
+		if symbol.Name == "puts" && elf.ST_BIND(symbol.Info) == elf.STB_GLOBAL && symbol.Section == elf.SHN_UNDEF {
+			// debug/elf omits the mandatory null symbol from Symbols().
+			putsSymbol = i + 1
+		}
 	}
 	if !foundMain {
 		t.Fatal("C object does not export a defined global main")
+	}
+	if putsSymbol < 0 {
+		t.Fatal("C object does not contain an undefined global puts")
+	}
+	relocations := file.Section(".rela.text")
+	if relocations == nil {
+		t.Fatal("C object has no .rela.text section")
+	}
+	relocationData, err := relocations.Data()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundPutsRelocation := false
+	for at := 0; at+24 <= len(relocationData); at += 24 {
+		info := binary.LittleEndian.Uint64(relocationData[at+8 : at+16])
+		if int(info>>32) == putsSymbol && elf.R_X86_64(uint32(info)) == elf.R_X86_64_PLT32 {
+			foundPutsRelocation = true
+			break
+		}
+	}
+	if !foundPutsRelocation {
+		t.Fatal("C object has no R_X86_64_PLT32 relocation for puts")
 	}
 
 	link := exec.Command(linkerDriver, object, "-o", executable)
 	if combined, err := link.CombinedOutput(); err != nil {
 		t.Fatalf("system-link Renvo C object: %v\n%s", err, combined)
 	}
-	if combined, err := exec.Command(executable).CombinedOutput(); err != nil || len(combined) != 0 {
+	if combined, err := exec.Command(executable).CombinedOutput(); err != nil || string(combined) != "Hello, world!\n" {
 		t.Fatalf("run linked C object: %v, output %q", err, combined)
 	}
 }
