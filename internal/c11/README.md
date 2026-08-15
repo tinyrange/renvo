@@ -19,7 +19,8 @@ The adapter is intentionally compact:
 
 The executable subset includes scalar and basic pointer declarations, fixed
 arrays, direct functions and calls, local/global variables, integer expressions,
-`if`, `while`, expression-form `for`, and returns. The first M3 slice adds
+and ISO control flow including `if`/`else`, `while`, `do`/`while`, both forms of
+`for`, C-fallthrough `switch`, labels/`goto`, break/continue, and returns. M3 adds
 integer-ID C types in flat arenas, typedef names, named and anonymous structures,
 x86_64 LP64 field/array layout, anonymous aggregate-member promotion, enum
 constants, recursive parenthesized/array/function declarators, function-pointer
@@ -34,6 +35,7 @@ with hide sets, stringizing/pasting, conditionals and integer expressions,
 now consumes that stream directly: declarations from quoted project headers are
 retained, while large system headers remain bounded by demand-selecting the
 referenced external prototypes. Variadic functions, complete union access,
-bitfields, integer promotions/conversions, attributes, and complete aggregate
-initialization remain M3/M4 work. Unsupported constructs must fail in this
-frontend rather than reaching a backend.
+bitfields, qualifiers/linkage, integer promotions/conversions, and complete
+aggregate initialization remain frozen M3 work. Attributes and the other GNU C
+surface remain M4 work. Unsupported constructs must fail in this frontend
+rather than reaching a backend.

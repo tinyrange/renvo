@@ -254,6 +254,53 @@ int layout(void) {
 	}
 }
 
+func TestTranslateCompleteISOControlFlow(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+int control(int choice) {
+	int i = 0;
+	int total = 0;
+	do {
+		i++;
+		if (i < 3) continue;
+		total += i;
+	} while (i < 4);
+	for (int j = 0; j < 3; j++) total += j;
+	switch (choice) {
+	case 0:
+		total += 1;
+	case 1:
+		total += 2;
+		break;
+	default:
+		total += 9;
+	}
+	goto done;
+	total = 1000;
+done:
+	return total;
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("control-flow translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{
+		[]byte("bool=true;for __c_do_first_"),
+		[]byte("var j int32=0;"),
+		[]byte("for ;j<3;j++"),
+		[]byte("case 0:total+=1;"),
+		[]byte("fallthrough;case 1:"),
+		[]byte("goto done;"),
+		[]byte("done:"),
+	} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("translated control flow is missing %q:\n%s", want, result.Source)
+		}
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("translated control flow does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
 func TestTranslateReportsOriginalOffset(t *testing.T) {
 	source := []byte("int main(void) { int value = 1")
 	result := Translate("main", source)
@@ -319,8 +366,6 @@ func TestTranslateRejectsSemanticsNotYetPreserved(t *testing.T) {
 	for _, source := range []string{
 		"#if 0\nint hidden(void) { return 1; }\n#endif\n",
 		"int main(int argc, char **argv) { return argc; }\n",
-		"int value(void) { switch (1) { case 1: return 1; default: return 0; } }\n",
-		"int value(void) { goto done; done: return 1; }\n",
 	} {
 		result := Translate("main", []byte(source))
 		if result.Ok || result.Error != TranslateErrUnsupported {
