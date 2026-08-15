@@ -111,9 +111,10 @@ const (
 )
 
 type cNamespaceName struct {
-	name  string
-	index int
-	kind  int
+	name     string
+	index    int
+	kind     int
+	hashPrev int
 }
 
 type cScopeMark struct {
@@ -135,6 +136,11 @@ type cFunctionName struct {
 	paramCount int
 	variadic   bool
 	defined    bool
+}
+
+type cTypeCacheChange struct {
+	index    int
+	previous int
 }
 
 type cVariadicCall struct {
@@ -197,13 +203,23 @@ func (t *translator) typeInfo(typeID int) cTypeInfo {
 }
 
 func (t *translator) pointerType(base int) int {
-	for i := cTypeUintptrID + 1; i < len(t.types); i++ {
-		if t.types[i].kind == cTypePointer && t.types[i].base == base {
-			return i
+	if base >= 0 && base < len(t.pointerTypes) && t.pointerTypes[base] > 0 {
+		return t.pointerTypes[base] - 1
+	}
+	for len(t.pointerTypes) <= base {
+		growth := len(t.pointerTypes)
+		if growth < 16 {
+			growth = 16
 		}
+		t.pointerTypes = append(t.pointerTypes, make([]int, growth)...)
 	}
 	t.types = append(t.types, cTypeInfo{kind: cTypePointer, base: base, size: t.pointerSize, align: t.pointerSize})
-	return len(t.types) - 1
+	result := len(t.types) - 1
+	if t.checkOnly {
+		t.pointerChanges = append(t.pointerChanges, cTypeCacheChange{index: base, previous: t.pointerTypes[base]})
+	}
+	t.pointerTypes[base] = result + 1
+	return result
 }
 
 func (t *translator) qualifiedType(typeID int, qualifiers int) int {
@@ -218,14 +234,24 @@ func (t *translator) qualifiedType(typeID int, qualifiers int) int {
 	want := t.typeInfo(canonical - 1)
 	want.qualifiers = t.typeInfo(typeID).qualifiers | qualifiers
 	want.canonical = canonical
-	for i := 0; i < len(t.types); i++ {
-		info := t.types[i]
-		if info.canonical == canonical && info.qualifiers == want.qualifiers {
-			return i
+	key := (canonical-1)*16 + want.qualifiers
+	if key >= 0 && key < len(t.qualifiedTypes) && t.qualifiedTypes[key] > 0 {
+		return t.qualifiedTypes[key] - 1
+	}
+	for len(t.qualifiedTypes) <= key {
+		growth := len(t.qualifiedTypes)
+		if growth < 256 {
+			growth = 256
 		}
+		t.qualifiedTypes = append(t.qualifiedTypes, make([]int, growth)...)
 	}
 	t.types = append(t.types, want)
-	return len(t.types) - 1
+	result := len(t.types) - 1
+	if t.checkOnly {
+		t.qualifiedChanges = append(t.qualifiedChanges, cTypeCacheChange{index: key, previous: t.qualifiedTypes[key]})
+	}
+	t.qualifiedTypes[key] = result + 1
+	return result
 }
 
 func (t *translator) arrayType(base int, count int) int {

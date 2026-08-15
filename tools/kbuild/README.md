@@ -37,11 +37,14 @@ go run ./tools/kbuild/syntax \
 
 The system compiler is used only to preprocess each exact Kbuild command. Renvo
 receives each result as a standard preprocessed-C `.i` input, then
-performs the GNU C11 parse and type check sequentially while retaining at most
-one translation unit at a time. The command prints its workspace so a failing
-unit remains available for diagnosis. The frozen M4 result is 482/482 on the
-fixed-point self-hosted compiler; the uninterrupted replay took 19m34.765s and
-peaked at 141,024 KiB RSS across the driver and its children.
+performs the GNU C11 parse and type check through a bounded worker pool (the
+logical CPU count by default, configurable with `-j`). Each worker retains at
+most one translation unit. The command prints its workspace so a failing unit
+remains available for diagnosis. The frozen M4 result is 482/482 on the
+fixed-point self-hosted compiler: 16 workers completed the uninterrupted replay
+in 17.008s (245.63s user / 17.85s system), with a 158,176 KiB maximum child RSS.
+The 16-worker per-child upper bound is approximately 2.42 GiB; CPU and memory
+remain telemetry rather than acceptance limits.
 
 Regenerate a census for any prepared tree without modifying it:
 

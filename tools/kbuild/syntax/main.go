@@ -5,23 +5,40 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
+
+type syntaxJob struct {
+	index   int
+	source  string
+	command string
+}
+
+type syntaxResult struct {
+	job    syntaxJob
+	phase  string
+	err    error
+	output []byte
+}
 
 func main() {
 	kernel := flag.String("kernel", "", "prepared Linux build tree")
 	compiler := flag.String("compiler", "", "Renvo compiler executable")
 	expected := flag.Int("expected", 0, "required number of target C commands")
+	workers := flag.Int("j", runtime.NumCPU(), "parallel preprocessing and syntax-check workers")
 	flag.Parse()
-	if *kernel == "" || *compiler == "" || flag.NArg() != 0 {
+	if *kernel == "" || *compiler == "" || *workers < 1 || flag.NArg() != 0 {
 		flag.Usage()
 		os.Exit(2)
 	}
@@ -52,29 +69,82 @@ func main() {
 	// A .i suffix tells the compiler that the system compiler has already
 	// performed translation phases 1-4. This gate measures Renvo's M4 parser
 	// and semantic checker rather than redundantly preprocessing the result.
-	unit := filepath.Join(workspace, "unit.i")
-	started := time.Now()
-	fmt.Printf("workspace=%s\ncommands=%d\n", workspace, len(commands))
+	jobs := make([]syntaxJob, len(commands))
 	for i, command := range commands {
-		source, preprocess, ok := preprocessingCommand(command, unit)
+		source, _, ok := preprocessingCommand(command, filepath.Join(workspace, "validate.i"))
 		if !ok {
 			fatalf("target command has an unsupported compile suffix: %s", command)
 		}
-		cmd := exec.Command("sh", "-c", preprocess)
-		cmd.Dir = *kernel
-		if output, err := cmd.CombinedOutput(); err != nil {
-			fatalf("system preprocessing failed %d/%d %s: %v\n%s", i+1, len(commands), source, err, output)
+		jobs[i] = syntaxJob{index: i, source: source, command: command}
+	}
+	if *workers > len(jobs) {
+		*workers = len(jobs)
+	}
+	started := time.Now()
+	fmt.Printf("workspace=%s\ncommands=%d\nworkers=%d\n", workspace, len(commands), *workers)
+	ctx, cancel := context.WithCancel(context.Background())
+	jobQueue := make(chan syntaxJob)
+	results := make(chan syntaxResult)
+	var group sync.WaitGroup
+	for worker := 0; worker < *workers; worker++ {
+		group.Add(1)
+		go syntaxWorker(ctx, &group, worker, *kernel, compilerPath, workspace, jobQueue, results)
+	}
+	go func() {
+		defer close(jobQueue)
+		for _, job := range jobs {
+			select {
+			case jobQueue <- job:
+			case <-ctx.Done():
+				return
+			}
 		}
-		cmd = exec.Command(compilerPath, "cc", "-fsyntax-only", "-x", "c", unit)
-		cmd.Dir = *kernel
-		if output, err := cmd.CombinedOutput(); err != nil {
-			fatalf("Renvo syntax check failed %d/%d %s: %v\n%s", i+1, len(commands), source, err, output)
+	}()
+	go func() {
+		group.Wait()
+		close(results)
+	}()
+	checked := 0
+	var failed syntaxResult
+	for result := range results {
+		if result.err != nil && failed.err == nil {
+			failed = result
+			cancel()
+			continue
 		}
-		if (i+1)%25 == 0 || i+1 == len(commands) {
-			fmt.Printf("checked=%d/%d source=%s\n", i+1, len(commands), source)
+		if result.err == nil {
+			checked++
+			if checked%25 == 0 || checked == len(commands) {
+				fmt.Printf("checked=%d/%d source=%s\n", checked, len(commands), result.job.source)
+			}
 		}
 	}
+	cancel()
+	if failed.err != nil {
+		fatalf("%s failed %d/%d %s: %v\n%s", failed.phase, failed.job.index+1, len(commands), failed.job.source, failed.err, failed.output)
+	}
 	fmt.Printf("gate=PASS\nelapsed=%s\n", time.Since(started).Round(time.Millisecond))
+}
+
+func syntaxWorker(ctx context.Context, group *sync.WaitGroup, worker int, kernel string, compiler string, workspace string, jobs <-chan syntaxJob, results chan<- syntaxResult) {
+	defer group.Done()
+	unit := filepath.Join(workspace, fmt.Sprintf("unit-%d.i", worker))
+	for job := range jobs {
+		_, preprocess, _ := preprocessingCommand(job.command, unit)
+		cmd := exec.CommandContext(ctx, "sh", "-c", preprocess)
+		cmd.Dir = kernel
+		if output, err := cmd.CombinedOutput(); err != nil {
+			results <- syntaxResult{job: job, phase: "system preprocessing", err: err, output: output}
+			continue
+		}
+		cmd = exec.CommandContext(ctx, compiler, "cc", "-fsyntax-only", "-x", "c", unit)
+		cmd.Dir = kernel
+		if output, err := cmd.CombinedOutput(); err != nil {
+			results <- syntaxResult{job: job, phase: "Renvo syntax check", err: err, output: output}
+			continue
+		}
+		results <- syntaxResult{job: job}
+	}
 }
 
 func targetCCommands(root string) ([]string, error) {
