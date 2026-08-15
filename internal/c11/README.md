@@ -21,8 +21,10 @@ The executable subset includes scalar and basic pointer declarations, fixed
 arrays, direct functions and calls, local/global variables, integer expressions,
 `if`, `while`, expression-form `for`, and returns. The first M3 slice adds
 integer-ID C types in flat arenas, typedef names, named and anonymous structures,
-x86_64 LP64 field/array layout, and constant folding for `sizeof`, `_Alignof`,
-and direct-field `__builtin_offsetof`.
+x86_64 LP64 field/array layout, anonymous aggregate-member promotion, enum
+constants, recursive parenthesized/array/function declarators, function-pointer
+types, and constant folding for `sizeof`, `_Alignof`, array bounds, and
+direct-field `__builtin_offsetof`.
 Header directive lines and function prototypes are accepted so declarations can
 be supplied by Go files in the same package. The output-only preprocessing path
 implements translation-phase splicing/comments, recursive includes and
@@ -31,7 +33,7 @@ with hide sets, stringizing/pasting, conditionals and integer expressions,
 `#line`, target predefines, and transitive dependency capture. Object translation
 now consumes that stream directly: declarations from quoted project headers are
 retained, while large system headers remain bounded by demand-selecting the
-referenced external prototypes. Full declarators, unions, enums, bitfields,
-integer promotions/conversions, function pointers, and complete aggregate
-initialization remain M3 work. Unsupported constructs must fail in this frontend
-rather than reaching a backend.
+referenced external prototypes. Variadic functions, complete union access,
+bitfields, integer promotions/conversions, attributes, and complete aggregate
+initialization remain M3/M4 work. Unsupported constructs must fail in this
+frontend rather than reaching a backend.

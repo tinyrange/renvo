@@ -181,6 +181,17 @@ typedef struct renvo_record {
 	int values[RENVO_VALUE_COUNT];
 	long tail;
 } renvo_record;
+enum renvo_mode {
+	RENVO_MODE_BASE = 1 << 2,
+	RENVO_MODE_NEXT,
+	RENVO_MODE_MASK = RENVO_MODE_BASE | 2
+};
+typedef int (*renvo_binary_op)(int, int);
+typedef struct renvo_callbacks {
+	renvo_binary_op apply;
+	int *values[3];
+	int (*matrix)[3];
+} renvo_callbacks;
 #endif
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -205,6 +216,11 @@ int renvo_layout(void) {
 	if (__builtin_offsetof(renvo_record, tag) != 0) return 3;
 	if (__builtin_offsetof(renvo_record, values) != 4) return 4;
 	if (__builtin_offsetof(renvo_record, tail) != 16) return 5;
+	if (sizeof(renvo_callbacks) != 40) return 10;
+	if (__builtin_offsetof(renvo_callbacks, apply) != 0) return 11;
+	if (__builtin_offsetof(renvo_callbacks, values) != 8) return 12;
+	if (__builtin_offsetof(renvo_callbacks, matrix) != 32) return 13;
+	if (RENVO_MODE_NEXT != 5 || RENVO_MODE_MASK != 6) return 14;
 	if (cursor->tag != 7) return 6;
 	if (total != 6) return 7;
 	if (global_value != 0) return 8;

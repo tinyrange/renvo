@@ -13,8 +13,9 @@ archive, builds Renvo, keeps host utilities on `HOSTCC`, and assigns only target
 - unsupported option probes return failure;
 - `scripts/mod/empty.c` becomes a valid ET_REL object and its dependency rule
   is consumed by `fixdep`;
-- the build reaches the checked C11 declaration blocker in the fully
-  preprocessed `scripts/mod/devicetable-offsets.c` header closure.
+- the build parses the closure's anonymous aggregates, enums, constant array
+  bounds, and function-pointer declarators, then reaches the checked GNU
+  attribute blocker reported at `scripts/mod/devicetable-offsets.c:152:19`.
 - the M2 frontend preprocesses that complete translation unit, expands the
   checked `SIZE_`/`OFF_` paste results, and records its transitive dependency
   rule plus CPU/RSS telemetry.

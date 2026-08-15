@@ -40,7 +40,7 @@ if [[ "$prepare_status" -eq 0 ]]; then
 	printf 'pinned prepare unexpectedly completed; advance the checked blocker\n' >&2
 	exit 1
 fi
-if ! rg -q 'scripts/mod/devicetable-offsets.c:17:6: error RENVO-C11-001' "$log"; then
+if ! rg -q 'scripts/mod/devicetable-offsets.c:152:19: error RENVO-C11-001' "$log"; then
 	printf 'prepare did not reach the checked C11 blocker\n' >&2
 	tail -n 40 "$log" >&2
 	exit 1

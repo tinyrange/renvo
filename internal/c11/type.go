@@ -16,6 +16,7 @@ const (
 	cTypeArray
 	cTypeStruct
 	cTypeUnion
+	cTypeFunction
 	cTypeOpaque
 )
 
@@ -46,6 +47,8 @@ type cTypeInfo struct {
 	align      int
 	fieldStart int
 	fieldCount int
+	paramStart int
+	paramCount int
 	goName     string
 }
 
@@ -53,11 +56,17 @@ type cField struct {
 	name   string
 	typeID int
 	offset int
+	emit   bool
 }
 
 type cTypeName struct {
 	name   string
 	typeID int
+}
+
+type cValueName struct {
+	name  string
+	value int
 }
 
 func (t *translator) initTypes(dataModel int) {
@@ -111,6 +120,22 @@ func (t *translator) arrayType(base int, count int) int {
 	return len(t.types) - 1
 }
 
+func (t *translator) functionType(result int, params []parameter) int {
+	start := len(t.functionParams)
+	for i := 0; i < len(params); i++ {
+		t.functionParams = append(t.functionParams, params[i].typeID)
+	}
+	t.types = append(t.types, cTypeInfo{
+		kind:       cTypeFunction,
+		base:       result,
+		size:       t.pointerSize,
+		align:      t.pointerSize,
+		paramStart: start,
+		paramCount: len(params),
+	})
+	return len(t.types) - 1
+}
+
 func (t *translator) opaqueType(name string) int {
 	for i := 0; i < len(t.opaqueTypes); i++ {
 		if t.opaqueTypes[i].name == name {
@@ -155,6 +180,10 @@ func (t *translator) emitType(typeID int) {
 	info := t.typeInfo(typeID)
 	switch info.kind {
 	case cTypePointer:
+		if t.typeInfo(info.base).kind == cTypeFunction {
+			t.emitType(info.base)
+			break
+		}
 		t.out = append(t.out, '*')
 		t.emitType(info.base)
 	case cTypeArray:
@@ -164,6 +193,19 @@ func (t *translator) emitType(typeID int) {
 		t.emitType(info.base)
 	case cTypeStruct, cTypeUnion:
 		t.out = append(t.out, info.goName...)
+	case cTypeFunction:
+		t.out = append(t.out, "func("...)
+		for i := 0; i < info.paramCount; i++ {
+			if i > 0 {
+				t.out = append(t.out, ',')
+			}
+			t.emitType(t.functionParams[info.paramStart+i])
+		}
+		t.out = append(t.out, ')')
+		if info.base != cTypeVoidID {
+			t.out = append(t.out, ' ')
+			t.emitType(info.base)
+		}
 	case cTypeVoid:
 		t.out = append(t.out, "byte"...)
 	default:
