@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	frontendBackendsLimit = int64(2 * 1024 * 1024)
+	frontendBackendsLimit = int64(2_000_000)
 	frontendBundleLimit   = int64(4 * 1024 * 1024)
 )
 

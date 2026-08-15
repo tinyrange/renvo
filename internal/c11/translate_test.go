@@ -111,6 +111,58 @@ func TestTranslateFixedArray(t *testing.T) {
 	}
 }
 
+func TestTranslateTypedefStructLayoutToSharedSyntax(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+typedef struct record {
+	unsigned char tag;
+	int values[3];
+	long tail;
+} record;
+
+int inspect(void) {
+	record value;
+	value.tag = 7;
+	value.values[2] = 11;
+	value.tail = 13;
+	if (sizeof(record) != 24 || _Alignof(record) != 8 || __builtin_offsetof(record, values) != 4) {
+		return 0;
+	}
+	return value.tag + value.values[2] + value.tail;
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("TranslateObject failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{
+		[]byte("type __c_struct_record struct{tag uint8;values [3]int32;tail int64;}"),
+		[]byte("var value __c_struct_record"),
+		[]byte("if 24!=24||8!=8||4!=4"),
+	} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("translated struct source is missing %q:\n%s", want, result.Source)
+		}
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("translated struct source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateLinuxSignedIntegerSpellings(t *testing.T) {
+	result := Translate("main", []byte(`
+typedef __signed__ char signed_byte;
+__extension__ typedef __signed__ long long signed_quad;
+signed_byte first(signed_byte value) { return value; }
+signed_quad second(signed_quad value) { return value; }
+`))
+	if !result.Ok || !bytes.Contains(result.Source, []byte("func first(value int8) int8")) ||
+		!bytes.Contains(result.Source, []byte("func second(value int64) int64")) {
+		t.Fatalf("Linux integer spelling translation = %#v\n%s", result, result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("translated Linux integer spellings do not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
 func TestTranslateReportsOriginalOffset(t *testing.T) {
 	source := []byte("int main(void) { int value = 1")
 	result := Translate("main", source)

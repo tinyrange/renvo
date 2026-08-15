@@ -150,6 +150,9 @@ func sourceDiagnostic(result BuildResult) Diagnostic {
 		code, message = "RENVO-LOAD-022", "explicit source list contains no buildable Go or C files"
 	case SourceErrCInclude:
 		phase, code, message = "preprocessor", "RENVO-CPP-001", "C include could not be read: "+result.Sources.ErrorPath
+	case SourceErrCPreprocess:
+		return cPreprocessDiagnostic(result.Sources.CPreprocessError, result.Sources.ErrorPath,
+			result.Sources.CPreprocessLine, result.Sources.CPreprocessDetail)
 	}
 	path := result.ErrorPath
 	if result.Sources.ErrorSourcePath != "" {

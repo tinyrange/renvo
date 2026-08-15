@@ -26,6 +26,7 @@ const (
 	SourceErrFileDirectory
 	SourceErrFileListEmpty
 	SourceErrCInclude
+	SourceErrCPreprocess
 )
 
 type DirEntry struct {
@@ -40,14 +41,17 @@ type SourceFS interface {
 }
 
 type SourceResult struct {
-	Files           []load.SourceFile
-	Module          load.Module
-	Root            load.PackageRef
-	Ok              bool
-	Error           int
-	ErrorPath       string
-	ErrorSourcePath string
-	ErrorOffset     int
+	Files             []load.SourceFile
+	Module            load.Module
+	Root              load.PackageRef
+	Ok                bool
+	Error             int
+	ErrorPath         string
+	ErrorSourcePath   string
+	ErrorOffset       int
+	CPreprocessError  int
+	CPreprocessLine   int
+	CPreprocessDetail string
 }
 
 type sourceCollector struct {

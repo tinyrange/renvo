@@ -17,17 +17,21 @@ The adapter is intentionally compact:
 - there is no host C compiler, linker, or target C runtime dependency;
 - generated source is released with the package's existing transient arena.
 
-The initial executable subset includes scalar and basic pointer declarations,
-fixed arrays, direct functions and calls, local/global variables, integer
-expressions, `if`, `while`, expression-form `for`, and returns.
+The executable subset includes scalar and basic pointer declarations, fixed
+arrays, direct functions and calls, local/global variables, integer expressions,
+`if`, `while`, expression-form `for`, and returns. The first M3 slice adds
+integer-ID C types in flat arenas, typedef names, named and anonymous structures,
+x86_64 LP64 field/array layout, and constant folding for `sizeof`, `_Alignof`,
+and direct-field `__builtin_offsetof`.
 Header directive lines and function prototypes are accepted so declarations can
 be supplied by Go files in the same package. The output-only preprocessing path
 implements translation-phase splicing/comments, recursive includes and
 `include_next`, guards/`pragma once`, object/function/variadic macros, rescanning
 with hide sets, stringizing/pasting, conditionals and integer expressions,
 `#line`, target predefines, and transitive dependency capture. Object translation
-continues to use its bounded declaration adapter until the M3 C type system can
-consume the complete preprocessed header stream. Aggregate layout, full C
-integer conversions, function pointers, C string/pointer semantics, and libc
-compatibility remain future work. Unsupported constructs must fail in this
-frontend rather than reaching a backend.
+now consumes that stream directly: declarations from quoted project headers are
+retained, while large system headers remain bounded by demand-selecting the
+referenced external prototypes. Full declarators, unions, enums, bitfields,
+integer promotions/conversions, function pointers, and complete aggregate
+initialization remain M3 work. Unsupported constructs must fail in this frontend
+rather than reaching a backend.

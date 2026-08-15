@@ -29,7 +29,13 @@ type PreprocessConfig struct {
 	Undefined      []string
 	ForcedIncludes []string
 	EmitIncludes   bool
-	LineMarkers    bool
+	// EmitQuotedIncludes keeps project-header declarations in object-mode
+	// translation while system-header declarations remain demand-selected.
+	EmitQuotedIncludes bool
+	// SuppressForcedIncludes retains forced-header macro state without adding
+	// its declaration tokens to the result.
+	SuppressForcedIncludes bool
+	LineMarkers            bool
 }
 
 // PreprocessResult owns only the final rendered token stream plus dependency
@@ -161,7 +167,10 @@ func Preprocess(config PreprocessConfig) PreprocessResult {
 			break
 		}
 		p.addDependency(path)
-		p.processFile(path, src, config.EmitIncludes, 0)
+		// A compiler-forced header supplies the translation environment. Object
+		// mode retains its macros and dependencies without injecting its often
+		// target-specific declaration corpus ahead of the source-level frontend.
+		p.processFile(path, src, config.EmitIncludes && !config.SuppressForcedIncludes, 0)
 	}
 	if p.ok {
 		p.processFile(config.Path, config.Source, true, 0)

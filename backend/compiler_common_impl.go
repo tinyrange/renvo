@@ -18667,6 +18667,20 @@ func renvoBeginObjectProgram(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
 	if g == nil {
 		return nil
 	}
+	// Relocatable objects have no process entrypoint that can run the ordinary
+	// global initializer function. Tentative/zero-valued globals instead live
+	// directly in the object's NOBITS section and are addressed through the
+	// existing BSS relocation path.
+	for i := 0; i < len(meta.globals); i++ {
+		s := &meta.globals[i]
+		if s.kind != renvoTokVar || s.initStart < s.initEnd {
+			continue
+		}
+		off := g.asm.bssSize
+		s.iotaValue = off
+		g.globals = append(g.globals, renvoGlobalInfo{nameStart: s.nameStart, nameEnd: s.nameEnd, offset: off})
+		g.asm.bssSize += renvoAlignTo8(renvoTypeCopySize(meta, s.typ))
+	}
 	for i := 0; i < len(meta.funcs); i++ {
 		fn := &meta.funcs[i]
 		if fn.exportNameEnd <= fn.exportNameStart {

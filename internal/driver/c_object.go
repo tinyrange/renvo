@@ -50,12 +50,17 @@ func prepareCObjectSources(result SourceResult, options *Options, workDir string
 		return result
 	}
 	reader := cObjectIncludeReader{fs: fs, paths: cObjectIncludePaths(workDir, options.IncludePaths, options.CNoStdIncludes, fs)}
+	// ModeObject is rejected unless the canonical target is linux/amd64, whose
+	// C ABI is LP64. Carry the model explicitly so translation never depends on
+	// the host Go process and later object targets do not require a rewrite.
+	dataModel := c11.DataModelLP64
 	for i := 0; i < len(result.Files); i++ {
 		if !optionArgIsCFile(result.Files[i].Path) {
 			continue
 		}
 		options.CDependencies = appendUniquePath(options.CDependencies, result.Files[i].Path)
 		source := result.Files[i].Src
+		headerSource := source
 		if len(options.CForcedInclude) > 0 {
 			prefix := make([]byte, 0, len(options.CForcedInclude)*32)
 			for j := 0; j < len(options.CForcedInclude); j++ {
@@ -65,19 +70,37 @@ func prepareCObjectSources(result SourceResult, options *Options, workDir string
 				prefix = append(prefix, '"', '\n')
 			}
 			prefix = append(prefix, source...)
-			source = prefix
+			headerSource = prefix
 		}
-		header := c11.BuildObjectPrelude(result.Files[i].Path, source, reader)
+		header := c11.BuildObjectPrelude(result.Files[i].Path, headerSource, reader)
 		if !header.Ok {
 			result = sourceFail(result, SourceErrCInclude, header.ErrorPath)
 			result.ErrorSourcePath = result.Files[i].Path
 			result.ErrorOffset = header.ErrorAt
 			return result
 		}
+		processed := c11.Preprocess(c11.PreprocessConfig{
+			Path: result.Files[i].Path, Source: source, Reader: reader,
+			Predefined: cCommandMacros(options.CDefines), Undefined: options.CUndefines,
+			ForcedIncludes: options.CForcedInclude, EmitIncludes: options.CNoStdIncludes, EmitQuotedIncludes: true,
+			SuppressForcedIncludes: true,
+		})
+		if !processed.Ok {
+			result = sourceFail(result, SourceErrCPreprocess, processed.ErrorPath)
+			result.CPreprocessError = processed.Error
+			result.CPreprocessLine = processed.Line
+			result.CPreprocessDetail = processed.Detail
+			return result
+		}
 		result.Files[i].CObject = true
+		result.Files[i].CDataModel = dataModel
 		result.Files[i].CPrelude = header.Prelude
+		result.Files[i].Src = processed.Source
 		for j := 0; j < len(header.Dependencies); j++ {
 			options.CDependencies = appendUniquePath(options.CDependencies, header.Dependencies[j])
+		}
+		for j := 0; j < len(processed.Dependencies); j++ {
+			options.CDependencies = appendUniquePath(options.CDependencies, processed.Dependencies[j])
 		}
 	}
 	return result
