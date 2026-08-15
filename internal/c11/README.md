@@ -45,7 +45,10 @@ now consumes that stream directly: declarations from quoted project headers are
 retained, while large system headers remain bounded by demand-selecting the
 referenced external prototypes. Variadic functions, thread-local storage,
 complete qualifier semantics, integer promotions/conversions, and the remaining
-aggregate-initializer edge cases remain frozen M3 work. Attributes and the other GNU C
+aggregate-initializer edge cases remain frozen M3 work. Direct external variadic
+calls are arity-specialized after C default argument promotion; the shared
+x86_64 object-call descriptor classifies integer and floating arguments and
+sets the SysV vector count. Attributes and the other GNU C
 surface remain M4 work.
 Unsupported constructs must fail in this frontend rather than reaching a
 backend.

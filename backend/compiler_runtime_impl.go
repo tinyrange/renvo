@@ -608,7 +608,8 @@ func renvoEmitExitStatus(g *renvoLinearGen) bool {
 func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
 	renvoNonNil(g, fn)
 	if renvoIsHostedObjectAmd64(g.c) {
-		if wordCount < 0 || wordCount > 6 {
+		vectorMask := renvoObjectCallVectorMask(g, fn, wordCount)
+		if vectorMask < 0 {
 			return false
 		}
 		importID := renvoAsmAddPreparedStaticImport(&g.asm,
@@ -617,7 +618,7 @@ func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int
 		if importID < 0 {
 			return false
 		}
-		renvoAmd64EmitObjectStaticCall(&g.asm, importID, wordCount)
+		renvoAmd64EmitObjectStaticCall(&g.asm, importID, wordCount|vectorMask<<8)
 		return true
 	}
 	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
@@ -662,6 +663,28 @@ func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int
 	}
 	renvoWinAmd64CallStaticImport(&g.asm, importID, wordCount)
 	return true
+}
+
+func renvoObjectCallVectorMask(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) int {
+	if wordCount < 0 || wordCount != fn.paramCount {
+		return -1
+	}
+	mask := 0
+	integers := 0
+	vectors := 0
+	for i := 0; i < fn.paramCount; i++ {
+		typ := renvoResolveType(g.meta, g.meta.params[fn.firstParam+i].typ)
+		if typ.kind == renvoTypeFloat64 {
+			mask |= 1 << i
+			vectors++
+		} else {
+			integers++
+		}
+	}
+	if integers > 6 || vectors > 8 {
+		return -1
+	}
+	return mask
 }
 
 // renvoEmitTargetStaticCall returns -1 when the declaration is not a foreign

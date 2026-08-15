@@ -51,7 +51,7 @@ func GenerateCheckedInTargetProjection(
 		target.Runtime, "prepare_read_write_buffer")
 	moveOffset, hasMoveOffset := architectureGoHook(
 		target.Runtime, "move_offset_argument")
-	_, hasStaticCall := architectureGoHook(
+	staticCall, hasStaticCall := architectureGoHook(
 		target.Runtime, "emit_static_call")
 	if !hasPrepareBuffer || !hasMoveOffset || !hasStaticCall {
 		return checkedInTargetProjectionFailure(resolved.Document, target.Runtime,
@@ -85,8 +85,10 @@ func GenerateCheckedInTargetProjection(
 		manifest, "target-projection/"+target.Descriptor.Name, packageName)
 	projection := resolved.Document
 	projection.Unit = "builtin"
-	_, sequences := resolveArchitectureSequenceProjection(
-		projection, target.Arch, nil, []string{prepareBuffer, moveOffset})
+	goRoots, sequences := resolveArchitectureSequenceProjection(
+		projection, target.Arch, []string{staticCall}, []string{prepareBuffer, moveOffset})
+	source = appendReachableEmbeddedGo(
+		source, projection, goRoots, true, architectureExports(target.Arch))
 	source = appendArchitectureSequences(
 		source, projection, target.Arch, true, false, false, sequences)
 	source = appendCheckedInLinuxAmd64Runtime(
@@ -94,8 +96,9 @@ func GenerateCheckedInTargetProjection(
 	source = appendCheckedInLinuxAmd64Entry(source, template)
 	source = append(source, checkedInLinuxAmd64ObjectImageSource...)
 	source = append(source, "\nfunc renvoAmd64EmitObjectStaticCall(out *renvoAsm, importID int, wordCount int) {\n"...)
-	source = append(source, "\texternalID := renvoAsmAddExternalImportName(out, out.staticImports[importID].name)\n"...)
-	source = append(source, "\trtgBuiltinLinuxKernelAmd64PackageKernelStaticCall(out, externalID, wordCount)\n}\n"...)
+	source = append(source, '\t')
+	source = append(source, checkedInProjectionAlgorithmName(projection, staticCall)...)
+	source = append(source, "(out, importID, wordCount)\n}\n"...)
 	source = append(source, "\nconst renvoLinuxAmd64ELFMachine = "...)
 	source = appendDecimalFrame(source, machine)
 	source = append(source, checkedInLinuxAmd64ImageSource...)

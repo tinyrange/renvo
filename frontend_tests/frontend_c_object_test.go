@@ -70,6 +70,16 @@ func TestFrontendStage3CObjectAggregateInitializerSystemLink(t *testing.T) {
 	runCObjectAggregateInitializerSystemLink(t, selfHostedFrontendCompiler(t, root))
 }
 
+func TestFrontendCObjectVariadicSystemLink(t *testing.T) {
+	root := repoRoot(t)
+	runCObjectVariadicSystemLink(t, frontendCompiler(t, root))
+}
+
+func TestFrontendStage3CObjectVariadicSystemLink(t *testing.T) {
+	root := repoRoot(t)
+	runCObjectVariadicSystemLink(t, selfHostedFrontendCompiler(t, root))
+}
+
 func TestFrontendCObjectWithoutMainSystemLink(t *testing.T) {
 	root := repoRoot(t)
 	frontend := frontendCompiler(t, root)
@@ -359,6 +369,7 @@ int renvo_aggregate(void) {
 		word.bytes[0] + bytes.bytes[1] + packed.high + packed.low + packed.value +
 		sequence.low + sequence.high + sequence.value + overwritten[0];
 }
+
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -379,6 +390,53 @@ int main(void) { return renvo_aggregate() == 92 ? 0 : 1; }
 	}
 	if combined, err := exec.Command(executable).CombinedOutput(); err != nil {
 		t.Fatalf("run linked C aggregate-initializer object: %v, output %q", err, combined)
+	}
+}
+
+func runCObjectVariadicSystemLink(t *testing.T, frontend frontendConfig) {
+	t.Helper()
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skip("the first C object target is Linux/amd64")
+	}
+	linkerDriver, err := exec.LookPath("cc")
+	if err != nil {
+		t.Skip("system C linker driver is unavailable")
+	}
+	dir := t.TempDir()
+	source := filepath.Join(dir, "variadic.c")
+	harness := filepath.Join(dir, "harness.c")
+	object := filepath.Join(dir, "variadic.o")
+	executable := filepath.Join(dir, "variadic-test")
+	if err := os.WriteFile(source, []byte(`int printf(const char *format, ...);
+int renvo_variadic(void) {
+	unsigned char small = 7;
+	short negative = -3;
+	return printf("renvo variadic %d %d %.1f\n", small, negative, (float)2.5);
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(harness, []byte(`extern int renvo_variadic(void);
+int main(void) { return renvo_variadic() == 24 ? 0 : 1; }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := frontendCommand(frontend, "cc", "-c", filepath.Base(source), "-o", object)
+	command.Dir = dir
+	command.Env = frontendCommandEnv(frontend.env, dir)
+	if combined, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("compile C variadic object with Renvo: %v\n%s", err, combined)
+	}
+	link := exec.Command(linkerDriver, harness, object, "-o", executable)
+	if combined, err := link.CombinedOutput(); err != nil {
+		t.Fatalf("system-link C variadic object: %v\n%s", err, combined)
+	}
+	combined, err := exec.Command(executable).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run linked C variadic object: %v, output %q", err, combined)
+	}
+	if string(combined) != "renvo variadic 7 -3 2.5\n" {
+		t.Fatalf("variadic output = %q", combined)
 	}
 }
 

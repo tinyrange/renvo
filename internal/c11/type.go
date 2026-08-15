@@ -49,6 +49,7 @@ type cTypeInfo struct {
 	fieldCount int
 	paramStart int
 	paramCount int
+	variadic   bool
 	goName     string
 }
 
@@ -84,7 +85,15 @@ type cFunctionName struct {
 	resultType int
 	paramStart int
 	paramCount int
+	variadic   bool
 	defined    bool
+}
+
+type cVariadicCall struct {
+	function   int
+	paramStart int
+	paramCount int
+	goName     string
 }
 
 type cMemberAccess struct {
@@ -147,7 +156,7 @@ func (t *translator) arrayType(base int, count int) int {
 	return len(t.types) - 1
 }
 
-func (t *translator) functionType(result int, params []parameter) int {
+func (t *translator) functionType(result int, params []parameter, variadic bool) int {
 	start := len(t.functionParams)
 	for i := 0; i < len(params); i++ {
 		t.functionParams = append(t.functionParams, params[i].typeID)
@@ -159,6 +168,7 @@ func (t *translator) functionType(result int, params []parameter) int {
 		align:      t.pointerSize,
 		paramStart: start,
 		paramCount: len(params),
+		variadic:   variadic,
 	})
 	return len(t.types) - 1
 }
@@ -227,6 +237,12 @@ func (t *translator) emitType(typeID int) {
 				t.out = append(t.out, ',')
 			}
 			t.emitType(t.functionParams[info.paramStart+i])
+		}
+		if info.variadic {
+			if info.paramCount > 0 {
+				t.out = append(t.out, ',')
+			}
+			t.out = append(t.out, "...uintptr"...)
 		}
 		t.out = append(t.out, ')')
 		if info.base != cTypeVoidID {
