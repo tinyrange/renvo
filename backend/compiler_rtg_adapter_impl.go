@@ -47,14 +47,15 @@ func renvoRTGAsmPushImmediate(a *renvoAsm, value int) {
 	if renvoRTGABIPushImmediate(a, value) {
 		return
 	}
-	// Store below SP before using the scratch register to adjust SP, so one
-	// reserved scratch location is sufficient.
-	renvoRTGDirectMoveImmediate(a, renvoRTGScratch, int64(value))
-	renvoRTGDirectStoreNative(a,
-		renvoRTGAsmAddress(renvoRTGStack, RTGNoRegister, -renvoRTGStackWordBytes, 1),
-		renvoRTGScratch)
+	// Move SP before materializing the value. An architecture may implement an
+	// immediate move with a temporary push/pop sequence, so staging the value
+	// below the old SP first would let that sequence overwrite it.
 	renvoRTGDirectMoveImmediate(a, renvoRTGScratch, int64(renvoRTGStackWordBytes))
 	renvoRTGDirectSubtract(a, renvoRTGStack, renvoRTGScratch)
+	renvoRTGDirectMoveImmediate(a, renvoRTGScratch, int64(value))
+	renvoRTGDirectStoreNative(a,
+		renvoRTGAsmAddress(renvoRTGStack, RTGNoRegister, 0, 1),
+		renvoRTGScratch)
 }
 
 func renvoRTGAsmPopRegister(a *renvoAsm, destination RTGRegister) {

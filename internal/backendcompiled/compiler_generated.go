@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "b016bff7a1e0ce1de7d7cc4397379177989bdb001a72b2d9025eed2d17b37965"
+const CompilerSourceDigest = "41ebb16e87d808ca9518e64b97929dce00e2a880a71ea0543db7bde261d6ddd9"
 
 // source: backend/compiler_common_impl.go
 
@@ -18717,7 +18717,7 @@ wrapper := renvoAsmNewLabel(&g.asm)
 renvoAsmMarkLabel(&g.asm, wrapper)
 renvoAsmAddFuncSymbol(
 &g.asm, g.prog.src, fn.exportNameStart, fn.exportNameEnd, wrapper)
-renvoAdjustObjectStack(&g.asm, true)
+renvoObjectExportFrame(g, true)
 if renvoPreparedBackend != 0 {
 for i := 0; i < wordCount; i++ {
 if !renvoRTGPushObjectCallWord(&g.asm, i) {
@@ -18734,18 +18734,16 @@ renvoRTGEmitCallWithWordCount(g, fnIndex, wordCount)
 } else {
 renvoAmd64EmitCallWithWordCount(g, fnIndex, wordCount)
 }
-renvoAdjustObjectStack(&g.asm, false)
+renvoObjectExportFrame(g, false)
 renvoAsmRet(&g.asm)
 return true
 }
 
-func renvoAdjustObjectStack(a *renvoAsm, reserve bool) {
+func renvoObjectExportFrame(g *renvoLinearGen, reserve bool) {
 if renvoPreparedBackend != 0 {
-renvoRTGAdjustObjectStack(a, reserve)
-} else if reserve {
-renvoAsmEmitText(a, "\x48\x83\xec\x08")
+renvoRTGAdjustObjectStack(&g.asm, reserve)
 } else {
-renvoAsmEmitText(a, "\x48\x83\xc4\x08")
+renvoAmd64ObjectExportFrame(g, reserve)
 }
 }
 
@@ -23666,10 +23664,6 @@ return true
 func renvoEmitTargetStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) int {
 renvoNonNil(g, fn)
 if g.c.objectFile {
-if renvoRTGPreparedObject == 0 &&
-!renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "libc") {
-return 0
-}
 if renvoEmitLinkStaticCall(g, fn, wordCount) {
 return 1
 }
@@ -26809,12 +26803,13 @@ return
 }
 
 
-renvoRTGDirectMoveImmediate(a, renvoRTGScratch, int64(value))
-renvoRTGDirectStoreNative(a,
-renvoRTGAsmAddress(renvoRTGStack, RTGNoRegister, -renvoRTGStackWordBytes, 1),
-renvoRTGScratch)
+
 renvoRTGDirectMoveImmediate(a, renvoRTGScratch, int64(renvoRTGStackWordBytes))
 renvoRTGDirectSubtract(a, renvoRTGStack, renvoRTGScratch)
+renvoRTGDirectMoveImmediate(a, renvoRTGScratch, int64(value))
+renvoRTGDirectStoreNative(a,
+renvoRTGAsmAddress(renvoRTGStack, RTGNoRegister, 0, 1),
+renvoRTGScratch)
 }
 
 func renvoRTGAsmPopRegister(a *renvoAsm, destination RTGRegister) {
@@ -28095,6 +28090,20 @@ renvoAmd64InitRuntimeCheckReg(a, 0x2d8d4c, renvoAmd64EnsureRuntimeCheck(g, &g.ru
 renvoAmd64InitRuntimeCheckReg(a, 0x358d4c, renvoAmd64EnsureRuntimeCheck(g, &g.runtimeByteIndexLabel, 3, "\x48\x39\xd1\x73\x04\x48\x01\xc8\xc3\xe9\x00\x00\x00\x00"))
 renvoAmd64InitRuntimeCheckReg(a, 0x3d8d4c, renvoAmd64EnsureRuntimeCheck(g, &g.runtimeWordIndexLabel, 4, "\x48\x39\xd1\x73\x08\x48\xc1\xe1\x03\x48\x01\xc8\xc3\xe9\x00\x00\x00\x00"))
 renvoAmd64InitRuntimeCheckReg(a, 0x1d8d48, renvoAmd64EnsureRuntimeCheck(g, &g.runtimeWideIndexLabel, 5, "\x48\x39\xd1\x73\x08\x48\x6b\xc9\x48\x48\x01\xc8\xc3\xe9\x00\x00\x00\x00"))
+}
+
+func renvoAmd64ObjectExportFrame(g *renvoLinearGen, reserve bool) {
+if reserve {
+
+
+
+renvoAsmEmitText(&g.asm, "\x53\x41\x54\x41\x55\x41\x56\x41\x57")
+if !g.meta.panicEnabled {
+renvoAmd64InitRuntimeCheckRegs(g)
+}
+return
+}
+renvoAsmEmitText(&g.asm, "\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5b")
 }
 
 func renvoAmd64InitRuntimeCheckReg(a *renvoAsm, op int, label int) {

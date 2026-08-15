@@ -670,10 +670,6 @@ func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int
 func renvoEmitTargetStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) int {
 	renvoNonNil(g, fn)
 	if g.c.objectFile {
-		if renvoRTGPreparedObject == 0 &&
-			!renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "libc") {
-			return 0
-		}
 		if renvoEmitLinkStaticCall(g, fn, wordCount) {
 			return 1
 		}
