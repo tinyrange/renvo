@@ -103,62 +103,54 @@ func NormalizeCCompilerCommand(args []string) []string {
 		if cCompilerInertOption(arg) {
 			continue
 		}
-		if arg == "-nostdinc" {
-			out = append(out, "-cc-nostdinc")
+		option, width := cCompilerOptionIndex("-nostdinc|-E|-P|-S", arg, false)
+		if option >= 0 {
+			switch option {
+			case 0:
+				out = append(out, "-cc-nostdinc")
+			case 1:
+				out = append(out, "-cc-preprocess")
+			case 2:
+				out = append(out, "-cc-no-line-markers")
+			case 3:
+				out = append(out, "-c", "-cc-assembly-output")
+			}
 			continue
 		}
-		if arg == "-E" {
-			out = append(out, "-cc-preprocess")
-			continue
-		}
-		if arg == "-P" {
-			out = append(out, "-cc-no-line-markers")
-			continue
-		}
-		if arg == "-S" {
-			out = append(out, "-c", "-cc-assembly-output")
-			continue
-		}
-		if arg == "-x" || arg == "-include" || arg == "-D" || arg == "-U" || arg == "-MF" || arg == "-MT" {
+		option, _ = cCompilerOptionIndex("-x|-include|-D|-U|-MF|-MT", arg, false)
+		if option >= 0 {
 			if i+1 >= len(args) {
 				out = append(out, arg)
 				continue
 			}
 			i++
 			prefix := "-cc-language="
-			switch arg {
-			case "-include":
+			switch option {
+			case 1:
 				prefix = "-cc-include="
-			case "-D":
+			case 2:
 				prefix = "-cc-define="
-			case "-U":
+			case 3:
 				prefix = "-cc-undefine="
-			case "-MF":
+			case 4:
 				prefix = "-cc-depfile="
-			case "-MT":
+			case 5:
 				prefix = "-cc-deptarget="
 			}
 			out = append(out, prefix+args[i])
 			continue
 		}
-		if len(arg) > 2 && arg[:2] == "-D" {
-			out = append(out, "-cc-define="+arg[2:])
-			continue
-		}
-		if len(arg) > 2 && arg[:2] == "-U" {
-			out = append(out, "-cc-undefine="+arg[2:])
-			continue
-		}
-		if len(arg) > 9 && arg[:9] == "-Wp,-MMD," {
-			out = append(out, "-cc-depfile="+arg[9:])
-			continue
-		}
-		if len(arg) > 8 && arg[:8] == "-Wp,-MD," {
-			out = append(out, "-cc-depfile="+arg[8:])
-			continue
-		}
-		if len(arg) > 8 && arg[:8] == "-Wp,-MT," {
-			out = append(out, "-cc-deptarget="+arg[8:])
+		option, width = cCompilerOptionIndex("-D|-U|-Wp,-MMD,|-Wp,-MD,|-Wp,-MT,", arg, true)
+		if option >= 0 {
+			prefix := "-cc-depfile="
+			if option == 0 {
+				prefix = "-cc-define="
+			} else if option == 1 {
+				prefix = "-cc-undefine="
+			} else if option == 4 {
+				prefix = "-cc-deptarget="
+			}
+			out = append(out, prefix+arg[width:])
 			continue
 		}
 		out = append(out, arg)
@@ -166,26 +158,37 @@ func NormalizeCCompilerCommand(args []string) []string {
 	return out
 }
 
+const cCompilerInertOptions = "-MMD|-MD|-MP|-pipe|-std=gnu11|-std=c11|-m64|-Os|-O0|-O1|-O2|-O3|-fshort-wchar|-funsigned-char|-fno-common|-fno-PIE|-fno-pie|-fno-strict-aliasing|-fno-asynchronous-unwind-tables|-fno-delete-null-pointer-checks|-fno-stack-protector|-fomit-frame-pointer|-fno-strict-overflow|-fno-stack-check|-fconserve-stack|-fno-builtin-wcslen|-falign-functions=16|-fverbose-asm|-mno-sse|-mno-mmx|-mno-sse2|-mno-3dnow|-mno-avx|-mno-80387|-mtune=generic|-mno-red-zone|-mcmodel=kernel|-Wall|-Wextra|-Wundef|-Werror|-Werror=implicit-function-declaration|-Werror=implicit-int|-Werror=return-type|-Werror=strict-prototypes|-Wno-format-security|-Wno-trigraphs|-Wmissing-declarations|-Wmissing-prototypes|-Wframe-larger-than=2048|-Wno-main|-Wvla|-Wno-pointer-sign|-Werror=date-time|-Wunused|-Wno-override-init|-Wno-missing-field-initializers|-Wno-type-limits|-Wno-shift-negative-value|-Wno-maybe-uninitialized|-Wno-sign-compare|-Wno-unused-parameter"
+
 func cCompilerInertOption(arg string) bool {
-	switch arg {
-	case "-MMD", "-MD", "-MP", "-pipe",
-		"-std=gnu11", "-std=c11", "-m64", "-Os", "-O0", "-O1", "-O2", "-O3",
-		"-fshort-wchar", "-funsigned-char", "-fno-common", "-fno-PIE", "-fno-pie",
-		"-fno-strict-aliasing", "-fno-asynchronous-unwind-tables", "-fno-delete-null-pointer-checks",
-		"-fno-stack-protector", "-fomit-frame-pointer", "-fno-strict-overflow", "-fno-stack-check",
-		"-fconserve-stack", "-fno-builtin-wcslen", "-falign-functions=16", "-fverbose-asm",
-		"-mno-sse", "-mno-mmx", "-mno-sse2", "-mno-3dnow", "-mno-avx", "-mno-80387",
-		"-mtune=generic", "-mno-red-zone", "-mcmodel=kernel",
-		"-Wall", "-Wextra", "-Wundef", "-Werror", "-Werror=implicit-function-declaration",
-		"-Werror=implicit-int", "-Werror=return-type", "-Werror=strict-prototypes",
-		"-Wno-format-security", "-Wno-trigraphs", "-Wmissing-declarations", "-Wmissing-prototypes",
-		"-Wframe-larger-than=2048", "-Wno-main", "-Wvla", "-Wno-pointer-sign",
-		"-Werror=date-time", "-Wunused", "-Wno-override-init", "-Wno-missing-field-initializers",
-		"-Wno-type-limits", "-Wno-shift-negative-value", "-Wno-maybe-uninitialized",
-		"-Wno-sign-compare", "-Wno-unused-parameter":
-		return true
+	option, _ := cCompilerOptionIndex(cCompilerInertOptions, arg, false)
+	return option >= 0
+}
+
+func cCompilerOptionIndex(options string, arg string, prefix bool) (int, int) {
+	option := 0
+	for start := 0; start < len(options); {
+		end := start
+		for end < len(options) && options[end] != '|' {
+			end++
+		}
+		width := end - start
+		if width == len(arg) || prefix && width < len(arg) {
+			match := true
+			for i := 0; i < width; i++ {
+				if arg[i] != options[start+i] {
+					match = false
+					break
+				}
+			}
+			if match {
+				return option, width
+			}
+		}
+		start = end + 1
+		option++
 	}
-	return false
+	return -1, 0
 }
 
 func ParseOptions(args []string) Options {

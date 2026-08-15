@@ -6,6 +6,7 @@ const (
 	TranslateErrDeclaration
 	TranslateErrStatement
 	TranslateErrUnsupported
+	TranslateErrVLA
 )
 
 const (
@@ -30,12 +31,13 @@ type Result struct {
 }
 
 type declarator struct {
-	name        token
-	typeID      int
-	params      []parameter
-	function    bool
-	variadic    bool
-	initializer []token
+	name         token
+	typeID       int
+	params       []parameter
+	function     bool
+	variadic     bool
+	initializer  []token
+	functionType int
 }
 
 type parameter struct {
@@ -80,13 +82,12 @@ type translator struct {
 	errorAt        int
 	types          []cTypeInfo
 	fields         []cField
-	typedefs       []cTypeName
-	tags           []cTypeName
 	opaqueTypes    []cTypeName
-	values         []cValueName
+	names          []cNamespaceName
 	objects        []cObjectName
 	tentatives     []cObjectName
 	definitions    []cObjectName
+	threadNames    []cObjectName
 	functions      []cFunctionName
 	variadicCalls  []cVariadicCall
 	functionParams []int
@@ -99,6 +100,9 @@ type translator struct {
 	resultType     int
 	boolHelper     bool
 	tlsRuntime     bool
+	localStart     int
+	initializing   int
+	nameStart      int
 }
 
 // Translate lowers one preprocessed C translation unit into the shared Go
@@ -120,11 +124,13 @@ func TranslateObjectForDataModel(packageName string, src []byte, prelude []byte,
 
 func translate(packageName string, src []byte, prelude []byte, object bool, dataModel int) Result {
 	t := translator{
-		packageName: packageName,
-		out:         make([]byte, 0, len(src)+len(src)/4+len(prelude)+64),
-		object:      object,
-		ok:          true,
-		errorAt:     -1,
+		packageName:  packageName,
+		out:          make([]byte, 0, len(src)+len(src)/4+len(prelude)+64),
+		object:       object,
+		ok:           true,
+		errorAt:      -1,
+		localStart:   -1,
+		initializing: -1,
 	}
 	t.initTypes(dataModel)
 	t.appendText("package ")
@@ -138,6 +144,9 @@ func translate(packageName string, src []byte, prelude []byte, object bool, data
 		return Result{Ok: false, Error: t.err, ErrorAt: t.errorAt}
 	}
 	t.emitPendingDeclarations()
+	if !t.ok {
+		return Result{Ok: false, Error: t.err, ErrorAt: t.errorAt}
+	}
 	if t.usesUnsafe {
 		declaration := []byte("import __c_unsafe \"unsafe\"\n")
 		at := t.packageHeader
@@ -239,17 +248,33 @@ func (t *translator) externalDeclaration() {
 			return
 		}
 		if t.take(";") {
-			if t.object && storage != storageStatic {
-				t.rememberFunction(decl, false)
+			if t.object && storage != storageStatic && !t.rememberFunction(decl, false) {
+				t.fail(TranslateErrDeclaration)
 			}
 			return // Otherwise a C or Go definition in the package satisfies it.
 		}
-		if !t.currentIs("{") {
-			t.fail(TranslateErrDeclaration)
+		if t.take(",") {
+			if t.object && storage != storageStatic && !t.rememberFunction(decl, false) {
+				t.fail(TranslateErrDeclaration)
+				return
+			}
+			for {
+				next, valid := t.parseDeclarator(base, true)
+				if !valid || !next.function || t.object && storage != storageStatic && !t.rememberFunction(next, false) {
+					t.fail(TranslateErrDeclaration)
+					return
+				}
+				if !t.take(",") {
+					break
+				}
+			}
+			if !t.take(";") {
+				t.fail(TranslateErrDeclaration)
+			}
 			return
 		}
-		if decl.variadic {
-			t.fail(TranslateErrUnsupported)
+		if !t.currentIs("{") {
+			t.fail(TranslateErrDeclaration)
 			return
 		}
 		if !t.rememberFunction(decl, true) {
@@ -282,12 +307,14 @@ func (t *translator) externalDeclaration() {
 	}
 	if storage == storageThread || storage == storageThreadStatic {
 		for i := 0; i < len(decls); i++ {
-			t.emitThreadVariable(decls[i])
+			t.emitThreadVariable(decls[i], true)
 		}
 		return
 	}
 	if storage == storageThreadExtern {
-		t.fail(TranslateErrUnsupported)
+		for i := 0; i < len(decls); i++ {
+			t.rememberThreadExtern(decls[i])
+		}
 		return
 	}
 	if storage == storageExtern {
@@ -331,7 +358,7 @@ func (t *translator) parseAggregateType(union bool) (int, bool) {
 		t.typeSerial++
 		t.types = append(t.types, cTypeInfo{kind: kind, size: 0, align: 1, goName: prefix + name})
 		typeID := len(t.types) - 1
-		t.tags = append(t.tags, cTypeName{name: name, typeID: typeID})
+		t.names = append(t.names, cNamespaceName{name: name, index: typeID, kind: cNameTag})
 		return typeID, true
 	}
 	t.typeSerial++
@@ -342,13 +369,20 @@ func (t *translator) parseAggregateType(union bool) (int, bool) {
 	t.types = append(t.types, cTypeInfo{kind: kind, align: 1, goName: goName})
 	typeID := len(t.types) - 1
 	if name != "" {
-		if prior, ok := t.lookupTag([]byte(name)); ok && t.types[prior].size == 0 {
+		prior, current := cTypeVoidID, false
+		for i := len(t.names) - 1; i >= t.nameStart; i-- {
+			if t.names[i].kind == cNameTag && t.names[i].name == name {
+				prior, current = t.names[i].index, true
+				break
+			}
+		}
+		if current && t.types[prior].size == 0 {
 			t.types = t.types[:len(t.types)-1]
 			typeID = prior
 			t.types[typeID].goName = goName
 			t.types[typeID].kind = kind
 		} else {
-			t.tags = append(t.tags, cTypeName{name: name, typeID: typeID})
+			t.names = append(t.names, cNamespaceName{name: name, index: typeID, kind: cNameTag})
 		}
 	}
 	t.pos++
@@ -525,7 +559,7 @@ func (t *translator) parseEnumType() (int, bool) {
 		if typeID, ok := t.lookupTag([]byte(name)); ok {
 			return typeID, true
 		}
-		t.tags = append(t.tags, cTypeName{name: name, typeID: cTypeInt32ID})
+		t.names = append(t.names, cNamespaceName{name: name, index: cTypeInt32ID, kind: cNameTag})
 		return cTypeInt32ID, true
 	}
 	value := 0
@@ -565,38 +599,31 @@ func (t *translator) parseEnumType() (int, bool) {
 		return cTypeVoidID, false
 	}
 	if name != "" {
-		for i := len(t.tags) - 1; i >= 0; i-- {
-			if t.tags[i].name == name {
-				t.tags[i].typeID = cTypeInt32ID
+		for i := len(t.names) - 1; i >= t.nameStart; i-- {
+			if t.names[i].kind == cNameTag && t.names[i].name == name {
+				t.names[i].index = cTypeInt32ID
 				return cTypeInt32ID, true
 			}
 		}
-		t.tags = append(t.tags, cTypeName{name: name, typeID: cTypeInt32ID})
+		t.names = append(t.names, cNamespaceName{name: name, index: cTypeInt32ID, kind: cNameTag})
 	}
 	return cTypeInt32ID, true
 }
 
 func (t *translator) rememberValue(name string, value int) {
-	for i := len(t.values) - 1; i >= 0; i-- {
-		if t.values[i].name == name {
-			t.values[i].value = value
-			return
-		}
-	}
-	t.values = append(t.values, cValueName{name: name, value: value})
+	t.rememberName(name, value, cNameValue)
 }
 
 func (t *translator) lookupValue(name []byte) (int, bool) {
-	for i := len(t.values) - 1; i >= 0; i-- {
-		if textEquals(name, t.values[i].name) {
-			return t.values[i].value, true
-		}
-	}
-	return 0, false
+	return t.lookupName(name, cNameValue)
 }
 
 func (t *translator) rememberObject(name []byte, typeID int) {
-	t.rememberAliasedObject(name, string(name), typeID)
+	if len(name) == 0 {
+		return
+	}
+	t.objects = append(t.objects, cObjectName{name: string(name), goName: string(name), typeID: typeID, auto: t.localStart >= 0})
+	t.rememberName(string(name), len(t.objects)-1, cNameObject)
 }
 
 func (t *translator) rememberAliasedObject(name []byte, goName string, typeID int) {
@@ -604,6 +631,7 @@ func (t *translator) rememberAliasedObject(name []byte, goName string, typeID in
 		return
 	}
 	t.objects = append(t.objects, cObjectName{name: string(name), goName: goName, typeID: typeID})
+	t.rememberName(string(name), len(t.objects)-1, cNameObject)
 }
 
 func (t *translator) rememberFunction(decl declarator, definition bool) bool {
@@ -631,9 +659,20 @@ func (t *translator) rememberFunction(decl declarator, definition bool) bool {
 		t.functionParams = append(t.functionParams, decl.params[i].typeID)
 	}
 	t.functions = append(t.functions, cFunctionName{
-		name: name, resultType: decl.typeID, paramStart: start,
+		name: name, typeID: decl.functionType, resultType: decl.typeID, paramStart: start,
 		paramCount: len(decl.params), variadic: decl.variadic, defined: definition,
 	})
+	return t.rememberName(name, len(t.functions)-1, cNameFunction)
+}
+
+func (t *translator) rememberName(name string, index int, kind int) bool {
+	for i := len(t.names) - 1; i >= t.nameStart; i-- {
+		if t.names[i].kind != cNameTag && t.names[i].name == name && t.names[i].kind != kind {
+			t.fail(TranslateErrDeclaration)
+			return false
+		}
+	}
+	t.names = append(t.names, cNamespaceName{name: name, index: index, kind: kind})
 	return true
 }
 
@@ -642,9 +681,24 @@ func (t *translator) compatibleParameterType(left int, right int) bool {
 		return true
 	}
 	a, b := t.typeInfo(left), t.typeInfo(right)
-	return a.kind == b.kind && a.base == b.base && a.count == b.count &&
-		a.fieldStart == b.fieldStart && a.paramStart == b.paramStart &&
-		a.paramCount == b.paramCount && a.variadic == b.variadic
+	if a.kind != b.kind || a.count != b.count || a.fieldStart != b.fieldStart || a.fieldCount != b.fieldCount ||
+		a.paramCount != b.paramCount || a.variadic != b.variadic || a.size != b.size {
+		return false
+	}
+	if a.kind == cTypePointer || a.kind == cTypeArray {
+		return t.compatibleParameterType(a.base, b.base)
+	}
+	if a.kind == cTypeFunction {
+		if !t.compatibleParameterType(a.base, b.base) {
+			return false
+		}
+		for i := 0; i < a.paramCount; i++ {
+			if !t.compatibleParameterType(t.functionParams[a.paramStart+i], t.functionParams[b.paramStart+i]) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (t *translator) fileVariable(decl declarator) bool {
@@ -690,6 +744,10 @@ func (t *translator) fileVariable(decl declarator) bool {
 func (t *translator) completeInitializerArray(decl *declarator) bool {
 	info := t.typeInfo(decl.typeID)
 	if info.kind != cTypeArray || info.count != 0 {
+		return true
+	}
+	if value, ok := t.cStringBytes(decl.initializer); ok && t.typeInfo(info.base).size == 1 {
+		decl.typeID = t.arrayType(info.base, len(value))
 		return true
 	}
 	if len(decl.initializer) < 2 || !tokenIs(t.src, decl.initializer[0], "{") || !tokenIs(t.src, decl.initializer[len(decl.initializer)-1], "}") {
@@ -746,6 +804,12 @@ func (t *translator) emitPendingDeclarations() {
 		t.emitType(typeID)
 		t.out = append(t.out, ';', '\n')
 	}
+	for i := 0; i < len(t.threadNames); i++ {
+		if !t.threadNames[i].auto {
+			t.fail(TranslateErrUnsupported)
+			return
+		}
+	}
 }
 
 func (t *translator) compatibleType(left int, right int) bool {
@@ -757,21 +821,38 @@ func (t *translator) compatibleType(left int, right int) bool {
 }
 
 func (t *translator) lookupObject(name []byte) (cObjectName, bool) {
-	for i := len(t.objects) - 1; i >= 0; i-- {
-		if textEquals(name, t.objects[i].name) {
-			return t.objects[i], true
-		}
+	index, ok := t.lookupName(name, cNameObject)
+	if ok {
+		return t.objects[index], true
 	}
 	return cObjectName{}, false
 }
 
 func (t *translator) lookupFunction(name []byte) (int, bool) {
-	for i := len(t.functions) - 1; i >= 0; i-- {
-		if textEquals(name, t.functions[i].name) {
-			return i, true
+	return t.lookupName(name, cNameFunction)
+}
+
+func (t *translator) lookupName(name []byte, kind int) (int, bool) {
+	for i := len(t.names) - 1; i >= 0; i-- {
+		if (kind == cNameTag) != (t.names[i].kind == cNameTag) {
+			continue
+		}
+		if textEquals(name, t.names[i].name) {
+			return t.names[i].index, t.names[i].kind == kind
 		}
 	}
 	return 0, false
+}
+
+func (t *translator) beginScope() cScopeMark {
+	mark := cScopeMark{names: len(t.names), nameStart: t.nameStart}
+	t.nameStart = mark.names
+	return mark
+}
+
+func (t *translator) endScope(mark cScopeMark) {
+	t.names = t.names[:mark.names]
+	t.nameStart = mark.nameStart
 }
 
 func (t *translator) lookupField(typeID int, name []byte) (cField, bool) {
@@ -822,7 +903,7 @@ func (t *translator) emitAggregateDeclaration(typeID int) {
 			t.appendDecimal(tail)
 			t.appendText("]byte")
 		}
-		t.out = append(t.out, "};\n"...)
+		t.appendText("};\n")
 		return
 	}
 	t.appendText(" struct{")
@@ -859,7 +940,7 @@ func (t *translator) emitAggregateAccessors(typeID int) {
 			t.emitType(field.typeID)
 			t.appendText("{return (*")
 			t.emitType(field.typeID)
-			t.out = append(t.out, ")(__c_unsafe.Pointer(p))}\n"...)
+			t.appendText(")(__c_unsafe.Pointer(p))}\n")
 			continue
 		}
 		t.emitBitfieldAccessors(typeID, field)
@@ -900,7 +981,7 @@ func (t *translator) emitBitfieldAccessors(typeID int, field cField) {
 		t.appendText(")&")
 		t.emitBitfieldMask(storageType, field.bitWidth, bits)
 	}
-	t.out = append(t.out, "}\nfunc(p *"...)
+	t.appendText("}\nfunc(p *")
 	t.out = append(t.out, info.goName...)
 	t.appendText(")__c_set_")
 	t.out = append(t.out, field.name...)
@@ -923,7 +1004,7 @@ func (t *translator) emitBitfieldAccessors(typeID int, field cField) {
 		t.out = append(t.out, '=')
 		t.emitBitfieldUpdated("p."+field.carrier, storageType, field, bits)
 	}
-	t.out = append(t.out, "}\n"...)
+	t.appendText("}\n")
 }
 
 func (t *translator) emitBitfieldCarrier(info cTypeInfo, field cField, storageType int) {
@@ -1026,6 +1107,40 @@ func (t *translator) emitForeignFunction(symbol string, goName string, resultTyp
 
 func (t *translator) emitVariadicForeignFunction(call cVariadicCall) {
 	fn := t.functions[call.function]
+	if fn.defined {
+		t.appendText("func ")
+		t.out = append(t.out, call.goName...)
+		t.out = append(t.out, '(')
+		for i := 0; i < call.paramCount; i++ {
+			if i > 0 {
+				t.out = append(t.out, ',')
+			}
+			t.out = append(t.out, 'p')
+			t.appendDecimal(i)
+			t.out = append(t.out, ' ')
+			t.emitType(t.functionParams[call.paramStart+i])
+		}
+		t.out = append(t.out, ')')
+		if fn.resultType != cTypeVoidID {
+			t.out = append(t.out, ' ')
+			t.emitType(fn.resultType)
+		}
+		t.out = append(t.out, '{')
+		if fn.resultType != cTypeVoidID {
+			t.appendText("return ")
+		}
+		t.out = append(t.out, fn.name...)
+		t.out = append(t.out, '(')
+		for i := 0; i < fn.paramCount; i++ {
+			if i > 0 {
+				t.out = append(t.out, ',')
+			}
+			t.out = append(t.out, 'p')
+			t.appendDecimal(i)
+		}
+		t.appendText(")}\n")
+		return
+	}
 	t.emitForeignFunction(fn.name, call.goName, fn.resultType, call.paramStart, call.paramCount)
 }
 
@@ -1140,8 +1255,26 @@ func (t *translator) parseType() (int, int, bool) {
 			qualifiers |= cQualifierRestrict
 			t.pos++
 		case t.currentIs("_Atomic"):
-			qualifiers |= cQualifierAtomic
 			t.pos++
+			if t.take("(") {
+				if seen {
+					return cTypeVoidID, storage, false
+				}
+				end := t.findClosing(")")
+				if end <= t.pos {
+					return cTypeVoidID, storage, false
+				}
+				var valid bool
+				typeID, valid = t.typeFromTokens(t.tokens[t.pos:end])
+				if !valid || t.typeInfo(typeID).kind == cTypeArray || t.typeInfo(typeID).kind == cTypeFunction || t.typeInfo(typeID).qualifiers&cQualifierAtomic != 0 {
+					return cTypeVoidID, storage, false
+				}
+				t.pos = end + 1
+				qualifiers |= cQualifierAtomic
+				hasTypeID, seen = true, true
+			} else {
+				qualifiers |= cQualifierAtomic
+			}
 		case t.currentIs("unsigned"):
 			unsigned, seen = true, true
 			t.pos++
@@ -1227,6 +1360,9 @@ done:
 		return cTypeVoidID, storage, false
 	}
 	if hasTypeID {
+		if qualifiers&cQualifierAtomic != 0 && (t.typeInfo(typeID).kind == cTypeArray || t.typeInfo(typeID).kind == cTypeFunction || t.typeInfo(typeID).qualifiers&cQualifierAtomic != 0) {
+			return cTypeVoidID, storage, false
+		}
 		return t.qualifiedType(typeID, qualifiers), storage, true
 	}
 	if base == "" {
@@ -1274,18 +1410,9 @@ func (t *translator) parseDeclarator(base int, allowFunction bool) (declarator, 
 	if !ok {
 		return result, false
 	}
-	for i := len(ops) - 1; i >= 0; i-- {
-		switch ops[i].kind {
-		case declaratorPointer:
-			result.typeID = t.qualifiedType(t.pointerType(result.typeID), ops[i].qualifiers)
-		case declaratorArray:
-			result.typeID = t.arrayType(result.typeID, ops[i].count)
-		case declaratorFunction:
-			if t.typeInfo(result.typeID).kind == cTypeArray || t.typeInfo(result.typeID).kind == cTypeFunction {
-				return result, false
-			}
-			result.typeID = t.functionType(result.typeID, ops[i].params, ops[i].variadic)
-		}
+	result.typeID, ok = t.applyDeclaratorOps(base, ops)
+	if !ok {
+		return result, false
 	}
 	info := t.typeInfo(result.typeID)
 	if info.kind == cTypeFunction {
@@ -1293,6 +1420,7 @@ func (t *translator) parseDeclarator(base int, allowFunction bool) (declarator, 
 			return result, false
 		}
 		result.function = true
+		result.functionType = result.typeID
 		result.params = ops[0].params
 		result.variadic = ops[0].variadic
 		result.typeID = info.base
@@ -1305,17 +1433,37 @@ func (t *translator) parseDeclarator(base int, allowFunction bool) (declarator, 
 	return result, true
 }
 
+func (t *translator) applyDeclaratorOps(typeID int, ops []declaratorOp) (int, bool) {
+	for i := len(ops) - 1; i >= 0; i-- {
+		switch ops[i].kind {
+		case declaratorPointer:
+			typeID = t.qualifiedType(t.pointerType(typeID), ops[i].qualifiers)
+		case declaratorArray:
+			typeID = t.qualifiedType(t.arrayType(typeID, ops[i].count), ops[i].qualifiers)
+		case declaratorFunction:
+			kind := t.typeInfo(typeID).kind
+			if kind == cTypeArray || kind == cTypeFunction {
+				return typeID, false
+			}
+			typeID = t.functionType(typeID, ops[i].params, ops[i].variadic)
+		}
+	}
+	return typeID, true
+}
+
 func (t *translator) parseDeclaratorOps(abstract bool) (token, []declaratorOp, bool) {
 	var pointerQualifiers []int
 	for t.take("*") {
 		qualifiers := 0
-		for t.currentIs("const") || t.currentIs("volatile") || t.currentIs("restrict") {
+		for t.currentIs("const") || t.currentIs("volatile") || t.currentIs("restrict") || t.currentIs("_Atomic") {
 			if t.currentIs("const") {
 				qualifiers |= cQualifierConst
 			} else if t.currentIs("volatile") {
 				qualifiers |= cQualifierVolatile
-			} else {
+			} else if t.currentIs("restrict") {
 				qualifiers |= cQualifierRestrict
+			} else {
+				qualifiers |= cQualifierAtomic
 			}
 			t.pos++
 		}
@@ -1337,6 +1485,17 @@ func (t *translator) parseDeclaratorOps(abstract bool) (token, []declaratorOp, b
 	}
 	for {
 		if t.take("[") {
+			qualifiers := 0
+			for t.currentIs("static") || t.currentIs("const") || t.currentIs("volatile") || t.currentIs("restrict") {
+				if t.currentIs("const") {
+					qualifiers |= cQualifierConst
+				} else if t.currentIs("volatile") {
+					qualifiers |= cQualifierVolatile
+				} else if t.currentIs("restrict") {
+					qualifiers |= cQualifierRestrict
+				}
+				t.pos++
+			}
 			end := t.findClosing("]")
 			if end < t.pos {
 				return name, ops, false
@@ -1345,11 +1504,15 @@ func (t *translator) parseDeclaratorOps(abstract bool) (token, []declaratorOp, b
 			if end > t.pos {
 				var valid bool
 				count, valid = t.constantExpression(t.tokens[t.pos:end])
-				if !valid || count < 1 {
+				if !valid {
+					t.fail(TranslateErrVLA)
+					return name, ops, false
+				}
+				if count < 1 {
 					return name, ops, false
 				}
 			}
-			ops = append(ops, declaratorOp{kind: declaratorArray, count: count})
+			ops = append(ops, declaratorOp{kind: declaratorArray, count: count, qualifiers: qualifiers})
 			t.pos = end + 1
 			continue
 		}
@@ -1390,20 +1553,13 @@ func (t *translator) parseParameterList() ([]parameter, bool, bool) {
 		if !ok {
 			return params, false, false
 		}
-		paramType := paramBase
-		for i := len(ops) - 1; i >= 0; i-- {
-			switch ops[i].kind {
-			case declaratorPointer:
-				paramType = t.qualifiedType(t.pointerType(paramType), ops[i].qualifiers)
-			case declaratorArray:
-				paramType = t.arrayType(paramType, ops[i].count)
-			case declaratorFunction:
-				paramType = t.functionType(paramType, ops[i].params, ops[i].variadic)
-			}
+		paramType, ok := t.applyDeclaratorOps(paramBase, ops)
+		if !ok {
+			return params, false, false
 		}
 		paramInfo := t.typeInfo(paramType)
 		if paramInfo.kind == cTypeArray {
-			paramType = t.pointerType(paramInfo.base)
+			paramType = t.qualifiedType(t.pointerType(paramInfo.base), paramInfo.qualifiers)
 		} else if paramInfo.kind == cTypeFunction {
 			paramType = t.pointerType(paramType)
 		}
@@ -1520,6 +1676,9 @@ func (t *translator) emitFunction(decl declarator, storage int) {
 	}
 	t.out = append(t.out, ' ')
 	objectMark := len(t.objects)
+	nameMark := len(t.names)
+	oldLocalStart := t.localStart
+	t.localStart = objectMark
 	oldResult := t.resultType
 	t.resultType = decl.typeID
 	for i := 0; i < len(decl.params); i++ {
@@ -1527,13 +1686,24 @@ func (t *translator) emitFunction(decl declarator, storage int) {
 	}
 	t.block()
 	t.resultType = oldResult
+	t.localStart = oldLocalStart
 	t.objects = t.objects[:objectMark]
+	t.names = t.names[:nameMark]
 	t.out = append(t.out, '\n')
 }
 
 func (t *translator) emitVariable(decl declarator) {
 	t.rememberObject(tokenText(t.src, decl.name), decl.typeID)
-	t.emitVariableName(string(tokenText(t.src, decl.name)), decl)
+	name := string(tokenText(t.src, decl.name))
+	oldInitializing := t.initializing
+	t.initializing = len(t.objects) - 1
+	t.emitVariableName(name, decl)
+	t.initializing = oldInitializing
+	if t.localStart >= 0 {
+		t.appendText("_=&")
+		t.out = append(t.out, name...)
+		t.appendText(";")
+	}
 }
 
 func (t *translator) emitVariableName(name string, decl declarator) {
@@ -1544,7 +1714,8 @@ func (t *translator) emitVariableName(name string, decl declarator) {
 	if len(decl.initializer) > 0 {
 		t.out = append(t.out, '=')
 		kind := t.typeInfo(decl.typeID).kind
-		if (kind == cTypeArray || kind == cTypeStruct) && tokenIs(t.src, decl.initializer[0], "{") {
+		if kind == cTypeArray && t.emitStringArrayInitializer(decl.typeID, decl.initializer) {
+		} else if (kind == cTypeArray || kind == cTypeStruct) && tokenIs(t.src, decl.initializer[0], "{") {
 			t.emitInitializerValue(decl.typeID, decl.initializer)
 		} else if kind == cTypeUnion && tokenIs(t.src, decl.initializer[0], "{") {
 			t.emitUnionInitializer(decl.typeID, decl.initializer)
@@ -1566,12 +1737,61 @@ func (t *translator) emitStaticLocal(decl declarator) {
 	t.out = outer
 }
 
-func (t *translator) emitThreadVariable(decl declarator) {
-	t.ensureThreadRuntime()
+func (t *translator) rememberThreadExtern(decl declarator) {
+	name := string(tokenText(t.src, decl.name))
+	index := t.threadName(name)
+	if index >= 0 {
+		if !t.compatibleParameterType(t.threadNames[index].typeID, decl.typeID) {
+			t.fail(TranslateErrDeclaration)
+			return
+		}
+		t.rememberThreadObject(name, t.threadNames[index].goName, decl.typeID)
+		return
+	}
 	t.typeSerial++
-	number := decimalString(t.typeSerial)
-	getter := "__c_tls_get_" + number
-	t.rememberAliasedObject(tokenText(t.src, decl.name), "(*"+getter+"())", decl.typeID)
+	getter := "__c_tls_get_" + decimalString(t.typeSerial)
+	t.threadNames = append(t.threadNames, cObjectName{name: name, goName: getter, typeID: decl.typeID})
+	t.rememberThreadObject(name, getter, decl.typeID)
+}
+
+func (t *translator) threadName(name string) int {
+	for i := 0; i < len(t.threadNames); i++ {
+		if t.threadNames[i].name == name {
+			return i
+		}
+	}
+	return -1
+}
+
+func (t *translator) rememberThreadObject(name string, getter string, typeID int) {
+	t.rememberAliasedObject([]byte(name), "(*"+getter+"())", typeID)
+}
+
+func (t *translator) emitThreadVariable(decl declarator, linked bool) {
+	t.ensureThreadRuntime()
+	name := string(tokenText(t.src, decl.name))
+	getter, number := "", ""
+	if linked {
+		index := t.threadName(name)
+		if index >= 0 {
+			if t.threadNames[index].auto || !t.compatibleParameterType(t.threadNames[index].typeID, decl.typeID) {
+				t.fail(TranslateErrDeclaration)
+				return
+			}
+			t.threadNames[index].auto = true
+			getter = t.threadNames[index].goName
+			number = getter[len("__c_tls_get_"):]
+		}
+	}
+	if getter == "" {
+		t.typeSerial++
+		number = decimalString(t.typeSerial)
+		getter = "__c_tls_get_" + number
+		if linked {
+			t.threadNames = append(t.threadNames, cObjectName{name: name, goName: getter, typeID: decl.typeID, auto: true})
+		}
+	}
+	t.rememberThreadObject(name, getter, decl.typeID)
 	var initializer []byte
 	if len(decl.initializer) != 0 {
 		outer := t.out
@@ -1636,6 +1856,7 @@ func (t *translator) block() {
 		return
 	}
 	objectMark := len(t.objects)
+	scope := t.beginScope()
 	t.out = append(t.out, '{')
 	for t.ok && t.kind() != tokenEOF && !t.currentIs("}") {
 		t.skipDirectives()
@@ -1656,6 +1877,7 @@ func (t *translator) block() {
 	}
 	t.out = append(t.out, '}')
 	t.objects = t.objects[:objectMark]
+	t.endScope(scope)
 }
 
 func (t *translator) statement() {
@@ -1808,11 +2030,11 @@ func (t *translator) localDeclaration() {
 				return
 			}
 			t.rememberObject(tokenText(t.src, decl.name), decl.typeID)
+			t.objects[len(t.objects)-1].auto = false
 		} else if storage == storageThread || storage == storageThreadStatic {
-			t.emitThreadVariable(decl)
+			t.emitThreadVariable(decl, false)
 		} else if storage == storageThreadExtern {
-			t.fail(TranslateErrUnsupported)
-			return
+			t.rememberThreadExtern(decl)
 		} else if storage == storageStatic {
 			t.emitStaticLocal(decl)
 		} else {
@@ -1829,8 +2051,10 @@ func (t *translator) localDeclaration() {
 
 func (t *translator) forStatement() {
 	objectMark := len(t.objects)
+	scope := t.beginScope()
 	t.forStatementBody()
 	t.objects = t.objects[:objectMark]
+	t.endScope(scope)
 }
 
 func (t *translator) forStatementBody() {
@@ -1881,8 +2105,10 @@ func (t *translator) forStatementBody() {
 
 func (t *translator) switchStatement() {
 	objectMark := len(t.objects)
+	scope := t.beginScope()
 	t.switchStatementBody()
 	t.objects = t.objects[:objectMark]
+	t.endScope(scope)
 }
 
 func (t *translator) switchStatementBody() {
@@ -1895,8 +2121,9 @@ func (t *translator) switchStatementBody() {
 		t.fail(TranslateErrStatement)
 		return
 	}
+	switchType := t.integerPromotion(t.expressionType(t.tokens[t.pos:close]))
 	t.appendText("switch ")
-	t.expression(t.tokens[t.pos:close])
+	t.convertedExpression(switchType, t.tokens[t.pos:close])
 	t.pos = close + 1
 	if !t.take("{") {
 		t.fail(TranslateErrStatement)
@@ -1920,7 +2147,7 @@ func (t *translator) switchStatementBody() {
 					return
 				}
 				t.appendText("case ")
-				t.expression(t.tokens[t.pos:end])
+				t.convertedExpression(switchType, t.tokens[t.pos:end])
 				t.out = append(t.out, ':')
 				t.pos = end + 1
 			} else {
@@ -2065,7 +2292,30 @@ func (t *translator) convertedExpression(typeID int, tokens []token) {
 		t.out = append(t.out, ')')
 		return
 	}
+	info := t.typeInfo(typeID)
+	if info.kind == cTypeInt || info.kind == cTypeUint {
+		if value, ok := t.constantExpression(tokens); ok {
+			if value, ok = t.convertIntegerConstant(typeID, value); ok {
+				if info.kind == cTypeUint && info.size == 8 && value < 0 {
+					t.appendText("^uint64(")
+					t.appendDecimal(-value - 1)
+					t.out = append(t.out, ')')
+				} else {
+					t.appendDecimalSigned(value)
+				}
+				return
+			}
+		}
+	}
 	sourceType := t.expressionType(tokens)
+	sourceInfo := t.typeInfo(sourceType)
+	if t.typeInfo(typeID).kind == cTypePointer && sourceInfo.kind == cTypeArray &&
+		t.compatibleParameterType(t.typeInfo(typeID).base, sourceInfo.base) {
+		t.appendText("&(")
+		t.expression(tokens)
+		t.appendText(")[0]")
+		return
+	}
 	if typeID == cTypeVoidID || sourceType == typeID && !t.booleanExpression(tokens) || t.pointerConversionCompatible(typeID, sourceType) {
 		t.expression(tokens)
 		return
@@ -2074,7 +2324,6 @@ func (t *translator) convertedExpression(typeID int, tokens []token) {
 		t.emitBoolInteger(tokens)
 		return
 	}
-	info := t.typeInfo(typeID)
 	if info.kind == cTypeStruct || info.kind == cTypeUnion || info.kind == cTypeArray || info.kind == cTypeFunction {
 		t.expression(tokens)
 		return
@@ -2096,9 +2345,7 @@ func (t *translator) pointerConversionCompatible(left int, right int) bool {
 	if a.kind != cTypePointer || b.kind != cTypePointer {
 		return false
 	}
-	a, b = t.typeInfo(a.base), t.typeInfo(b.base)
-	return a.kind == b.kind && a.size == b.size && a.base == b.base &&
-		a.fieldStart == b.fieldStart && a.fieldCount == b.fieldCount && a.paramStart == b.paramStart
+	return t.compatibleParameterType(a.base, b.base)
 }
 
 func (t *translator) emitBoolIntegerComparison(tokens []token) {
@@ -2185,15 +2432,18 @@ func (t *translator) lvalueType(tokens []token) int {
 }
 
 func (t *translator) emitExpression(tokens []token) {
-	if len(tokens) > 1 && tokenIs(t.src, tokens[0], "!") {
-		t.out = append(t.out, '!')
-		t.emitConditionExpression(tokens[1:])
+	if consumed := t.nullPointerPrefix(tokens); consumed == len(tokens) {
+		t.appendText("nil")
 		return
 	}
 	if len(tokens) > 2 && tokenIs(t.src, tokens[0], "(") && matchingToken(t.src, tokens, 0, "(", ")") == len(tokens)-1 {
 		t.out = append(t.out, '(')
 		t.emitExpression(tokens[1 : len(tokens)-1])
 		t.out = append(t.out, ')')
+		return
+	}
+	if at := t.commaOperator(tokens); at >= 0 {
+		t.emitCommaExpression(tokens[:at], tokens[at+1:])
 		return
 	}
 	if question, colon := t.conditionalOperator(tokens); question >= 0 {
@@ -2204,11 +2454,43 @@ func (t *translator) emitExpression(tokens []token) {
 		t.emitBinaryExpression(tokens, at)
 		return
 	}
+	if len(tokens) > 1 && tokenIs(t.src, tokens[0], "!") {
+		t.out = append(t.out, '!')
+		t.emitConditionExpression(tokens[1:])
+		return
+	}
+	if len(tokens) > 1 && t.unaryArithmetic(tokens[0]) {
+		typeID := t.integerPromotion(t.expressionType(tokens[1:]))
+		t.emitType(typeID)
+		t.out = append(t.out, '(')
+		if tokenIs(t.src, tokens[0], "~") {
+			t.out = append(t.out, '-')
+			t.convertedExpression(typeID, tokens[1:])
+			t.appendText("-1)")
+			return
+		} else {
+			t.out = append(t.out, tokenText(t.src, tokens[0])...)
+		}
+		t.convertedExpression(typeID, tokens[1:])
+		t.out = append(t.out, ')')
+		return
+	}
+	if len(tokens) > 1 && t.sizeOperator(tokens[0]) {
+		t.emitSizeof(tokens)
+		return
+	}
 	if len(tokens) > 2 && tokenIs(t.src, tokens[0], "(") {
 		close := matchingToken(t.src, tokens, 0, "(", ")")
 		if close > 1 && close < len(tokens)-1 && !tokenIs(t.src, tokens[close+1], "{") {
 			if typeID, ok := t.typeFromTokens(tokens[1:close]); ok {
+				pointer := t.typeInfo(typeID).kind == cTypePointer
+				if pointer {
+					t.out = append(t.out, '(')
+				}
 				t.emitType(typeID)
+				if pointer {
+					t.out = append(t.out, ')')
+				}
 				t.out = append(t.out, '(')
 				t.emitExpression(tokens[close+1:])
 				t.out = append(t.out, ')')
@@ -2221,7 +2503,7 @@ func (t *translator) emitExpression(tokens []token) {
 		if tokenKind(tok) == tokenIdent && i+1 < len(tokens) && tokenIs(t.src, tokens[i+1], "(") {
 			if function, ok := t.lookupFunction(tokenText(t.src, tok)); ok {
 				close := matchingToken(t.src, tokens, i+1, "(", ")")
-				if close > i+1 && t.functions[function].variadic && !t.functions[function].defined && t.emitVariadicCall(function, tokens[i+2:close]) {
+				if close > i+1 && t.functions[function].variadic && t.emitVariadicCall(function, tokens[i+2:close]) {
 					i = close
 					continue
 				}
@@ -2326,6 +2608,35 @@ func (t *translator) emitExpression(tokens []token) {
 	}
 }
 
+func (t *translator) emitSizeof(tokens []token) {
+	operand := tokens[1:]
+	if tokenIs(t.src, tokens[0], "_Alignof") && (len(operand) < 3 || !tokenIs(t.src, operand[0], "(")) {
+		t.fail(TranslateErrUnsupported)
+		return
+	}
+	if len(operand) > 2 && tokenIs(t.src, operand[0], "(") && matchingToken(t.src, operand, 0, "(", ")") == len(operand)-1 {
+		inside := operand[1 : len(operand)-1]
+		if typeID, ok := t.typeFromTokens(inside); ok {
+			if tokenIs(t.src, tokens[0], "sizeof") {
+				t.appendDecimal(t.typeSize(typeID))
+			} else {
+				t.appendDecimal(t.typeAlign(typeID))
+			}
+			return
+		}
+		operand = inside
+	}
+	if tokenIs(t.src, tokens[0], "_Alignof") {
+		t.fail(TranslateErrUnsupported)
+		return
+	}
+	if value, ok := t.cStringBytes(operand); ok {
+		t.appendDecimal(len(value))
+		return
+	}
+	t.appendDecimal(t.typeSize(t.expressionType(operand)))
+}
+
 func (t *translator) emitFixedCall(function int, tokens []token) bool {
 	fn := t.functions[function]
 	args := splitTopLevel(t.src, tokens, ",")
@@ -2394,24 +2705,133 @@ func (t *translator) emitConditionalExpression(tokens []token, question int, col
 	t.out = append(t.out, name...)
 	t.out = append(t.out, '(')
 	t.emitConditionExpression(tokens[:question])
-	t.out = append(t.out, ',')
-	t.convertedExpression(typeID, tokens[question+1:colon])
-	t.out = append(t.out, ',')
-	t.convertedExpression(typeID, tokens[colon+1:])
+	t.emitCaptureArguments(true)
 	t.out = append(t.out, ')')
-	outer := t.out
-	t.out = t.staticOut
+	outer, names := t.beginHelper()
 	t.appendText("func ")
 	t.out = append(t.out, name...)
-	t.appendText("(c bool,a ")
-	t.emitType(typeID)
-	t.appendText(",b ")
-	t.emitType(typeID)
+	t.appendText("(c bool")
+	t.emitCaptureParameters(true)
 	t.appendText(") ")
 	t.emitType(typeID)
-	t.out = append(t.out, "{if c{return a};return b}\n"...)
-	t.staticOut = t.out
+	t.appendText("{if c{return ")
+	t.convertedExpression(typeID, tokens[question+1:colon])
+	t.appendText("};return ")
+	t.convertedExpression(typeID, tokens[colon+1:])
+	t.appendText("}\n")
+	t.endHelper(outer, names)
+}
+
+func (t *translator) commaOperator(tokens []token) int {
+	paren, bracket, brace := 0, 0, 0
+	for i := len(tokens) - 1; i >= 0; i-- {
+		switch {
+		case tokenIs(t.src, tokens[i], ")"):
+			paren++
+		case tokenIs(t.src, tokens[i], "("):
+			paren--
+		case tokenIs(t.src, tokens[i], "]"):
+			bracket++
+		case tokenIs(t.src, tokens[i], "["):
+			bracket--
+		case tokenIs(t.src, tokens[i], "}"):
+			brace++
+		case tokenIs(t.src, tokens[i], "{"):
+			brace--
+		case paren == 0 && bracket == 0 && brace == 0 && tokenIs(t.src, tokens[i], ","):
+			return i
+		}
+	}
+	return -1
+}
+
+func (t *translator) emitCommaExpression(left []token, right []token) {
+	typeID := t.expressionType(right)
+	t.typeSerial++
+	name := "__c_comma_" + decimalString(t.typeSerial)
+	t.out = append(t.out, name...)
+	t.out = append(t.out, '(')
+	t.emitCaptureArguments(false)
+	t.out = append(t.out, ')')
+	outer, names := t.beginHelper()
+	t.appendText("func ")
+	t.out = append(t.out, name...)
+	t.out = append(t.out, '(')
+	t.emitCaptureParameters(false)
+	t.appendText(") ")
+	t.emitType(typeID)
+	t.out = append(t.out, '{')
+	t.expression(left)
+	t.appendText(";return ")
+	t.convertedExpression(typeID, right)
+	t.appendText("}\n")
+	t.endHelper(outer, names)
+}
+
+func (t *translator) emitCaptureArguments(comma bool) {
+	if t.localStart < 0 {
+		return
+	}
+	for i := t.localStart; i < len(t.objects); i++ {
+		if t.captureObject(i) {
+			if comma {
+				t.out = append(t.out, ',')
+			}
+			t.out = append(t.out, '&')
+			t.out = append(t.out, t.objects[i].goName...)
+			comma = true
+		}
+	}
+}
+
+func (t *translator) emitCaptureParameters(comma bool) {
+	parameter := 0
+	for i := t.localStart; i >= 0 && i < len(t.objects); i++ {
+		if !t.captureObject(i) {
+			continue
+		}
+		if comma || parameter > 0 {
+			t.out = append(t.out, ',')
+		}
+		t.out = append(t.out, 'p')
+		t.appendDecimal(parameter)
+		t.appendText(" *")
+		t.emitType(t.objects[i].typeID)
+		parameter++
+	}
+}
+
+func (t *translator) beginHelper() ([]byte, []string) {
+	outer := t.out
+	t.out = nil
+	var names []string
+	parameter := 0
+	for i := t.localStart; i >= 0 && i < len(t.objects); i++ {
+		if !t.captureObject(i) {
+			continue
+		}
+		names = append(names, t.objects[i].goName)
+		t.objects[i].goName = "(*p" + decimalString(parameter) + ")"
+		parameter++
+	}
+	return outer, names
+}
+
+func (t *translator) endHelper(outer []byte, names []string) {
+	body := t.out
+	name := 0
+	for i := t.localStart; i >= 0 && i < len(t.objects); i++ {
+		if name < len(names) && t.objects[i].auto && t.objects[i].goName == "(*p"+decimalString(name)+")" {
+			t.objects[i].goName = names[name]
+			name++
+		}
+	}
+	t.staticOut = append(t.staticOut, body...)
 	t.out = outer
+}
+
+func (t *translator) captureObject(index int) bool {
+	return index >= 0 && index < len(t.objects) && index != t.initializing && t.objects[index].auto
 }
 
 func (t *translator) binaryOperator(tokens []token) int {
@@ -2438,8 +2858,11 @@ func (t *translator) binaryOperator(tokens []token) int {
 		if paren != 0 || bracket != 0 {
 			continue
 		}
+		if operand && t.unaryOperator(tokens[i]) {
+			continue
+		}
 		p := t.binaryPrecedence(tokens[i])
-		if p != 0 && !(operand && (tokenIs(t.src, tokens[i], "+") || tokenIs(t.src, tokens[i], "-") || tokenIs(t.src, tokens[i], "*") || tokenIs(t.src, tokens[i], "&"))) {
+		if p != 0 {
 			if p <= precedence {
 				best, precedence = i, p
 			}
@@ -2452,29 +2875,7 @@ func (t *translator) binaryOperator(tokens []token) int {
 }
 
 func (t *translator) binaryPrecedence(tok token) int {
-	switch string(tokenText(t.src, tok)) {
-	case "||":
-		return 1
-	case "&&":
-		return 2
-	case "|":
-		return 3
-	case "^":
-		return 4
-	case "&":
-		return 5
-	case "==", "!=":
-		return 6
-	case "<", ">", "<=", ">=":
-		return 7
-	case "<<", ">>":
-		return 8
-	case "+", "-":
-		return 9
-	case "*", "/", "%":
-		return 10
-	}
-	return 0
+	return cBinaryPrecedence(tokenText(t.src, tok))
 }
 
 func (t *translator) emitBinaryExpression(tokens []token, at int) {
@@ -2487,10 +2888,14 @@ func (t *translator) emitBinaryExpression(tokens []token, at int) {
 		return
 	}
 	leftType, rightType := t.expressionType(left), t.expressionType(right)
+	shift := tokenIs(t.src, op, "<<") || tokenIs(t.src, op, ">>")
 	typeID := t.usualArithmeticType(leftType, rightType)
+	if shift {
+		typeID = t.integerPromotion(leftType)
+	}
 	t.convertedExpression(typeID, left)
 	t.out = append(t.out, tokenText(t.src, op)...)
-	if tokenIs(t.src, op, "<<") || tokenIs(t.src, op, ">>") {
+	if shift {
 		t.convertedExpression(t.integerPromotion(rightType), right)
 	} else {
 		t.convertedExpression(typeID, right)
@@ -2652,6 +3057,24 @@ func (t *translator) expressionType(tokens []token) int {
 	if len(tokens) == 0 {
 		return cTypeInt32ID
 	}
+	if at := t.commaOperator(tokens); at >= 0 {
+		return t.expressionType(tokens[at+1:])
+	}
+	if len(tokens) > 1 && tokenIs(t.src, tokens[0], "!") {
+		return cTypeInt32ID
+	}
+	if len(tokens) > 1 && t.unaryArithmetic(tokens[0]) {
+		return t.integerPromotion(t.expressionType(tokens[1:]))
+	}
+	if len(tokens) > 1 && tokenIs(t.src, tokens[0], "*") {
+		info := t.typeInfo(t.expressionType(tokens[1:]))
+		if info.kind == cTypePointer {
+			return info.base
+		}
+	}
+	if len(tokens) > 1 && tokenIs(t.src, tokens[0], "&") {
+		return t.pointerType(t.lvalueType(tokens[1:]))
+	}
 	if tokenIs(t.src, tokens[0], "(") {
 		close := matchingToken(t.src, tokens, 0, "(", ")")
 		if close > 1 && close < len(tokens)-1 {
@@ -2682,10 +3105,27 @@ func (t *translator) expressionType(tokens []token) int {
 	if access, ok := t.memberAccess(tokens, 0); ok && access.end == len(tokens) {
 		return access.typeID
 	}
+	if len(tokens) > 3 && tokenKind(tokens[0]) == tokenIdent && tokenIs(t.src, tokens[1], "[") && tokenIs(t.src, tokens[len(tokens)-1], "]") {
+		if object, ok := t.lookupObject(tokenText(t.src, tokens[0])); ok {
+			info := t.typeInfo(object.typeID)
+			if info.kind == cTypeArray || info.kind == cTypePointer {
+				return info.base
+			}
+		}
+	}
 	if tokenKind(tokens[0]) == tokenIdent {
 		if len(tokens) > 1 && tokenIs(t.src, tokens[1], "(") {
 			if function, ok := t.lookupFunction(tokenText(t.src, tokens[0])); ok {
 				return t.functions[function].resultType
+			}
+			if object, ok := t.lookupObject(tokenText(t.src, tokens[0])); ok {
+				info := t.typeInfo(object.typeID)
+				if info.kind == cTypePointer {
+					info = t.typeInfo(info.base)
+				}
+				if info.kind == cTypeFunction {
+					return info.base
+				}
 			}
 		}
 		if object, ok := t.lookupObject(tokenText(t.src, tokens[0])); ok {
@@ -2694,6 +3134,12 @@ func (t *translator) expressionType(tokens []token) int {
 		if _, ok := t.lookupValue(tokenText(t.src, tokens[0])); ok {
 			return cTypeInt32ID
 		}
+		if function, ok := t.lookupFunction(tokenText(t.src, tokens[0])); ok {
+			return t.pointerType(t.functions[function].typeID)
+		}
+	}
+	if tokenKind(tokens[0]) == tokenChar {
+		return cTypeInt32ID
 	}
 	if tokenKind(tokens[0]) == tokenString {
 		return t.pointerType(cTypeInt8ID)
@@ -2793,6 +3239,9 @@ func (t *translator) emitAggregateInitializer(typeID int, tokens []token) {
 
 func (t *translator) emitInitializerValue(typeID int, value []token) {
 	info := t.typeInfo(typeID)
+	if info.kind == cTypeArray && t.emitStringArrayInitializer(typeID, value) {
+		return
+	}
 	if len(value) > 0 && tokenIs(t.src, value[0], "{") && (info.kind == cTypeStruct || info.kind == cTypeArray || info.kind == cTypeUnion) {
 		if info.kind == cTypeUnion {
 			t.emitUnionInitializer(typeID, value)
@@ -2805,7 +3254,7 @@ func (t *translator) emitInitializerValue(typeID int, value []token) {
 		}
 		return
 	}
-	t.expression(value)
+	t.convertedExpression(typeID, value)
 }
 
 func (t *translator) emitMutationInitializer(typeID int, tokens []token) bool {
@@ -2959,7 +3408,7 @@ func (t *translator) emitMutationInitializer(typeID int, tokens []token) bool {
 			t.out = append(t.out, ';')
 		}
 	}
-	t.out = append(t.out, "return p}\n"...)
+	t.appendText("return p}\n")
 	t.staticOut = t.out
 	t.out = outer
 	return true
@@ -3070,7 +3519,7 @@ func (t *translator) emitUnionInitializer(typeID int, tokens []token) {
 		t.out = append(t.out, field.name...)
 		t.appendText("())=v;")
 	}
-	t.out = append(t.out, "return p}\n"...)
+	t.appendText("return p}\n")
 	t.staticOut = t.out
 	t.out = outer
 }
@@ -3135,10 +3584,24 @@ func (t *translator) emitBitfieldStep(access cMemberAccess, op token) {
 }
 
 func isAssignmentToken(src []byte, tok token) bool {
-	return tokenIs(src, tok, "=") || tokenIs(src, tok, "+=") || tokenIs(src, tok, "-=") ||
-		tokenIs(src, tok, "*=") || tokenIs(src, tok, "/=") || tokenIs(src, tok, "%=") ||
-		tokenIs(src, tok, "<<=") || tokenIs(src, tok, ">>=") || tokenIs(src, tok, "&=") ||
-		tokenIs(src, tok, "^=") || tokenIs(src, tok, "|=")
+	return cTokenSetContains("=,+=,-=,*=,/=,%=,<<=,>>=,&=,^=,|=", tokenText(src, tok))
+}
+
+func (t *translator) unaryArithmetic(tok token) bool {
+	text := tokenText(t.src, tok)
+	return len(text) == 1 && (text[0] == '+' || text[0] == '-' || text[0] == '~')
+}
+
+func (t *translator) sizeOperator(tok token) bool {
+	return cTokenSetContains("sizeof,_Alignof", tokenText(t.src, tok))
+}
+
+func (t *translator) unaryOperator(tok token) bool {
+	text := tokenText(t.src, tok)
+	if len(text) == 1 {
+		return text[0] == '+' || text[0] == '-' || text[0] == '*' || text[0] == '&' || text[0] == '!' || text[0] == '~'
+	}
+	return t.sizeOperator(tok)
 }
 
 func (t *translator) memberAccess(tokens []token, start int) (cMemberAccess, bool) {
@@ -3227,83 +3690,22 @@ func matchingToken(src []byte, tokens []token, at int, open string, close string
 }
 
 func (t *translator) typeFromTokens(tokens []token) (int, bool) {
-	start, end := 0, len(tokens)
-	for start < end && (tokenIs(t.src, tokens[start], "const") || tokenIs(t.src, tokens[start], "volatile") || tokenIs(t.src, tokens[start], "restrict")) {
-		start++
-	}
-	for end > start && (tokenIs(t.src, tokens[end-1], "const") || tokenIs(t.src, tokens[end-1], "volatile") || tokenIs(t.src, tokens[end-1], "restrict")) {
-		end--
-	}
-	tokens = tokens[start:end]
 	if len(tokens) == 0 {
 		return cTypeVoidID, false
 	}
-	pointers := 0
-	for len(tokens) > 0 && tokenIs(t.src, tokens[len(tokens)-1], "*") {
-		pointers++
-		tokens = tokens[:len(tokens)-1]
-	}
-	typeID := cTypeVoidID
-	ok := false
-	if len(tokens) == 1 {
-		name := tokenText(t.src, tokens[0])
-		typeID, ok = t.lookupTypedef(name)
-		if !ok {
-			typeID, ok = builtinCType(name)
+	outerTokens, outerPos := t.tokens, t.pos
+	t.tokens, t.pos = tokens, 0
+	typeID, storage, ok := t.parseType()
+	if ok && storage == storageNone && t.pos < len(t.tokens) {
+		name, ops, valid := t.parseDeclaratorOps(true)
+		if valid && len(tokenText(t.src, name)) == 0 {
+			typeID, valid = t.applyDeclaratorOps(typeID, ops)
 		}
-		if !ok {
-			switch {
-			case textEquals(name, "long"):
-				typeID, ok = scalarCType("int", false, 1)
-			case textEquals(name, "unsigned"):
-				typeID, ok = scalarCType("int", true, 0)
-			case textEquals(name, "signed") || textEquals(name, "__signed__"):
-				typeID, ok = scalarCType("int", false, 0)
-			default:
-				typeID, ok = scalarCType(string(name), false, 0)
-			}
-		}
-	} else if len(tokens) == 2 && (tokenIs(t.src, tokens[0], "struct") || tokenIs(t.src, tokens[0], "union")) {
-		typeID, ok = t.lookupTag(tokenText(t.src, tokens[1]))
-	} else {
-		unsigned := false
-		longCount := 0
-		base := ""
-		valid := true
-		for i := 0; i < len(tokens); i++ {
-			switch {
-			case tokenIs(t.src, tokens[i], "unsigned"):
-				unsigned = true
-			case tokenIs(t.src, tokens[i], "signed") || tokenIs(t.src, tokens[i], "__signed__") || tokenIs(t.src, tokens[i], "int"):
-			case tokenIs(t.src, tokens[i], "long"):
-				longCount++
-			case tokenIs(t.src, tokens[i], "short"):
-				base = "short"
-			case tokenIs(t.src, tokens[i], "char"):
-				base = "char"
-			case tokenIs(t.src, tokens[i], "void"):
-				base = "void"
-			case tokenIs(t.src, tokens[i], "float"):
-				base = "float"
-			case tokenIs(t.src, tokens[i], "double"):
-				base = "double"
-			case tokenIs(t.src, tokens[i], "_Bool"):
-				base = "bool"
-			default:
-				valid = false
-			}
-		}
-		if valid {
-			typeID, ok = scalarCType(base, unsigned, longCount)
-		}
+		ok = valid
 	}
-	if !ok {
-		return cTypeVoidID, false
-	}
-	for i := 0; i < pointers; i++ {
-		typeID = t.pointerType(typeID)
-	}
-	return typeID, true
+	ok = ok && storage == storageNone && t.pos == len(t.tokens)
+	t.tokens, t.pos = outerTokens, outerPos
+	return typeID, ok
 }
 
 func scalarCType(base string, unsigned bool, longCount int) (int, bool) {
@@ -3384,27 +3786,93 @@ func (t *translator) nullPointerPrefix(tokens []token) int {
 }
 
 func (t *translator) emitCStringValues(tokens []token) {
+	value, ok := t.cStringBytes(tokens)
+	if !ok {
+		t.fail(TranslateErrUnsupported)
+		return
+	}
 	t.out = append(t.out, '"')
 	hex := "0123456789abcdef"
+	for i := 0; i < len(value); i++ {
+		t.out = append(t.out, '\\', 'x', hex[value[i]>>4], hex[value[i]&15])
+	}
+	t.out = append(t.out, '"')
+}
+
+func (t *translator) cStringBytes(tokens []token) ([]byte, bool) {
+	var out []byte
+	if len(tokens) == 0 {
+		return nil, false
+	}
 	for i := 0; i < len(tokens); i++ {
-		value, ok := decodeCString(tokenText(t.src, tokens[i]))
-		if !ok {
-			t.fail(TranslateErrUnsupported)
-			return
+		if tokenKind(tokens[i]) != tokenString {
+			return nil, false
 		}
-		for j := 0; j < len(value); j++ {
-			t.out = append(t.out, '\\', 'x', hex[value[j]>>4], hex[value[j]&15])
+		text := tokenText(t.src, tokens[i])
+		quote := 0
+		for quote < len(text) && text[quote] != '"' {
+			quote++
+		}
+		if quote != 0 && !(quote == 2 && text[0] == 'u' && text[1] == '8') {
+			return nil, false
+		}
+		value, ok := decodeCString(text)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, value...)
+	}
+	return append(out, 0), true
+}
+
+func (t *translator) emitStringArrayInitializer(typeID int, tokens []token) bool {
+	info := t.typeInfo(typeID)
+	base := t.typeInfo(info.base)
+	value, ok := t.cStringBytes(tokens)
+	if !ok || (base.kind != cTypeInt && base.kind != cTypeUint) || base.size != 1 {
+		return false
+	}
+	if len(value)-1 > info.count {
+		t.fail(TranslateErrDeclaration)
+		return true
+	}
+	if len(value) > info.count {
+		value = value[:info.count]
+	}
+	t.emitType(typeID)
+	t.out = append(t.out, '{')
+	for i := 0; i < len(value); i++ {
+		if i > 0 {
+			t.out = append(t.out, ',')
+		}
+		if base.kind == cTypeInt && value[i] >= 128 {
+			t.appendDecimalSigned(int(value[i]) - 256)
+		} else {
+			t.appendDecimal(int(value[i]))
 		}
 	}
-	t.out = append(t.out, '\\', 'x', '0', '0', '"')
+	t.out = append(t.out, '}')
+	return true
 }
 
 func decodeCString(text []byte) ([]byte, bool) {
+	return decodeCLiteral(text, '"')
+}
+
+func decodeCCharacter(text []byte) (int, bool) {
+	value, ok := decodeCLiteral(text, '\'')
+	if !ok || len(value) != 1 {
+		return 0, false
+	}
+	return int(value[0]), true
+}
+
+func decodeCLiteral(text []byte, quote byte) ([]byte, bool) {
 	start := 0
-	for start < len(text) && text[start] != '"' {
+	for start < len(text) && text[start] != quote {
 		start++
 	}
-	if start >= len(text) || len(text) < start+2 || text[len(text)-1] != '"' {
+	if start >= len(text) || len(text) < start+2 || text[len(text)-1] != quote {
 		return nil, false
 	}
 	out := make([]byte, 0, len(text)-start-2)
@@ -3600,14 +4068,30 @@ func (t *translator) isTypeStart() bool {
 }
 
 func isTypeToken(src []byte, tok token) bool {
-	return tokenIs(src, tok, "auto") || tokenIs(src, tok, "register") || tokenIs(src, tok, "static") ||
-		tokenIs(src, tok, "extern") || tokenIs(src, tok, "typedef") || tokenIs(src, tok, "const") ||
-		tokenIs(src, tok, "volatile") || tokenIs(src, tok, "restrict") || tokenIs(src, tok, "inline") ||
-		tokenIs(src, tok, "void") || tokenIs(src, tok, "char") || tokenIs(src, tok, "short") ||
-		tokenIs(src, tok, "int") || tokenIs(src, tok, "long") || tokenIs(src, tok, "float") ||
-		tokenIs(src, tok, "double") || tokenIs(src, tok, "signed") || tokenIs(src, tok, "unsigned") ||
-		tokenIs(src, tok, "_Bool") || tokenIs(src, tok, "_Atomic") || tokenIs(src, tok, "_Thread_local") || tokenIs(src, tok, "struct") ||
-		tokenIs(src, tok, "union") || tokenIs(src, tok, "enum") || tokenIs(src, tok, "__extension__") || tokenIs(src, tok, "__signed__")
+	return cTokenSetContains("auto,register,static,extern,typedef,const,volatile,restrict,inline,void,char,short,int,long,float,double,signed,unsigned,_Bool,_Atomic,_Thread_local,struct,union,enum,__extension__,__signed__", tokenText(src, tok))
+}
+
+func cTokenSetContains(set string, text []byte) bool {
+	for start := 0; start < len(set); {
+		end := start
+		for end < len(set) && set[end] != ',' {
+			end++
+		}
+		if end-start == len(text) {
+			equal := true
+			for i := 0; i < len(text); i++ {
+				if set[start+i] != text[i] {
+					equal = false
+					break
+				}
+			}
+			if equal {
+				return true
+			}
+		}
+		start = end + 1
+	}
+	return false
 }
 
 func splitTopLevel(src []byte, tokens []token, separator string) [][]token {

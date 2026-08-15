@@ -4,6 +4,7 @@ package driver
 
 import (
 	"renvo.dev/internal/build"
+	"renvo.dev/internal/c11"
 	"renvo.dev/internal/check"
 	"renvo.dev/internal/load"
 	"renvo.dev/internal/pipeline"
@@ -19,6 +20,58 @@ type Diagnostic struct {
 	End     int
 	Line    int
 	Column  int
+}
+
+const renvoCheckMessageBlob = "duplicate declarationinvalid import declarationinvalid method declarationinvalid function bodyinvalid name or scopereturn value count does not match function resultsassignment value is not assignable to its destinationfeature is not supported by RENVOimport is not usedcalled expression is not a functionleft side of assignment is not assignableassignment count does not matchbreak is not inside a loop or switchcontinue is not inside a loopcall argument is not assignable to its parametergoroutines are not supported by RENVOchannels are not supported by RENVOselect statements are not supported by RENVOlocal variable is declared but not usedpackage main has no top-level func main()func main must have no parameters or resultsmethod main does not define the package entry pointcannot slice an unaddressable array valueconstant array index is out of boundsdeferred builtin call discards a resultinvalid number of arguments to builtininvalid operand type for builtinundefined identifierinvalid operation for operand typesreturn value is not assignable to the function resultfunction call argument count does not match parameters"
+
+var renvoCheckMessageOffsets = [...]int{0, 0, 0, 21, 47, 73, 94, 115, 165, 218, 251, 269, 304, 345, 376, 412, 441, 489, 526, 561, 605, 644, 685, 729, 780, 821, 858, 897, 935, 967, 987, 1022, 1075, 1129}
+
+const renvoSourceMessageBlob = "go.mod was not foundinvalid module declarationpackage path is outside the main modulepackage directory could not be readsource file could not be readinvalid build constraintsource syntax is invalidunresolved import dependency source is unavailable for dependency version is excluded: dependency has an invalid or missing go.mod: dependency import is ambiguous: invalid go:embed directive or pattern: cgo is not supported by RENVOstandard library package named source files must all be in one directoryexplicit source list contains no buildable Go or C filesC include could not be read: "
+
+var renvoSourceMessageOffsets = [...]int{0, 0, 20, 46, 85, 120, 149, 173, 197, 215, 252, 284, 329, 361, 400, 429, 454, 501, 557, 586}
+
+func renvoCheckMessage(detail int) string {
+	return renvoCheckMessageBlob[renvoCheckMessageOffsets[detail]:renvoCheckMessageOffsets[detail+1]]
+}
+
+func renvoDiagnosticCode(group string, number int) string {
+	text := diagnosticIntText(number)
+	if number < 10 {
+		text = "00" + text
+	} else if number < 100 {
+		text = "0" + text
+	}
+	return "RENVO-" + group + "-" + text
+}
+
+func renvoOptionMessage(detail int) string {
+	switch detail {
+	case ParseErrInvalidModuleLicense:
+		return "invalid renvo:module-license directive"
+	case ParseErrConflictingModuleLicense:
+		return "conflicting renvo:module-license directives"
+	case ParseErrMissingSystem:
+		return "missing system profile after -system"
+	case ParseErrSystemTargetConflict:
+		return "-system cannot be combined with -t"
+	case ParseErrSystemArenaConflict:
+		return "-system cannot be combined with -arena-size"
+	case ParseErrScriptRequiresGo:
+		return "-script requires a .go source file"
+	case ParseErrObjectRequiresLinuxAmd64:
+		return "object mode requires linux/amd64"
+	case ParseErrObjectFileCount:
+		return "object mode requires exactly one explicit source file"
+	}
+	return ""
+}
+
+func renvoSetDiagnostic(d *Diagnostic, phase string, code string, message string) {
+	d.Phase, d.Code, d.Message = phase, code, message
+}
+
+func renvoSetDiagnosticDetail(d *Diagnostic, code string, message string) {
+	d.Code, d.Message = code, message
 }
 
 func (d Diagnostic) Valid() bool { return d.Code != "" }
@@ -47,75 +100,56 @@ func printRenvoDiagnostic(d Diagnostic) {
 func diagnosticForBuild(result BuildResult) Diagnostic {
 	d := Diagnostic{Phase: "frontend", Code: "RENVO-FRONTEND-001", Message: "frontend build failed"}
 	if result.Error == BuildErrOptions {
-		d.Phase, d.Code, d.Message = "options", "RENVO-OPTION-001", "invalid command options"
-		if result.Options.Error == ParseErrUnknownOption {
-			d.Code, d.Message = "RENVO-OPTION-005", "unknown option "+result.Options.ErrorArg
-		} else if result.Options.Error == ParseErrMixedFileList {
-			d.Code, d.Message = "RENVO-OPTION-011", "explicit source list contains a non-.go/.c argument "+result.Options.ErrorArg
-		} else if result.Options.Error == ParseErrInvalidModuleLicense {
-			d.Code, d.Message = "RENVO-OPTION-017", "invalid renvo:module-license directive"
-		} else if result.Options.Error == ParseErrConflictingModuleLicense {
-			d.Code, d.Message = "RENVO-OPTION-018", "conflicting renvo:module-license directives"
-		} else if result.Options.Error == ParseErrMissingSystem {
-			d.Code, d.Message = "RENVO-OPTION-019", "missing system profile after -system"
-		} else if result.Options.Error == ParseErrSystemRead {
-			d.Code, d.Message = "RENVO-OPTION-020", result.Options.SystemError
-		} else if result.Options.Error == ParseErrInvalidSystem {
-			d.Code, d.Message = "RENVO-OPTION-021", "invalid system profile "+result.Options.ErrorArg+": "+result.Options.SystemError
-		} else if result.Options.Error == ParseErrSystemTargetConflict {
-			d.Code, d.Message = "RENVO-OPTION-022", "-system cannot be combined with -t"
-		} else if result.Options.Error == ParseErrSystemArenaConflict {
-			d.Code, d.Message = "RENVO-OPTION-023", "-system cannot be combined with -arena-size"
-		} else if result.Options.Error == ParseErrScriptRequiresGo {
-			d.Code, d.Message = "RENVO-OPTION-028", "-script requires a .go source file"
-		} else if result.Options.Error == ParseErrObjectRequiresLinuxAmd64 {
-			d.Code, d.Message = "RENVO-OPTION-029", "object mode requires linux/amd64"
-		} else if result.Options.Error == ParseErrObjectFileCount {
-			d.Code, d.Message = "RENVO-OPTION-030", "object mode requires exactly one explicit source file"
-		} else if result.Options.Error == ParseErrMissingIncludePath {
-			d.Code, d.Message = "RENVO-OPTION-032", "missing include directory after "+result.Options.ErrorArg
+		renvoSetDiagnostic(&d, "options", "RENVO-OPTION-001", "invalid command options")
+		optionError := result.Options.Error
+		if optionError == ParseErrUnknownOption {
+			renvoSetDiagnosticDetail(&d, "RENVO-OPTION-005", "unknown option "+result.Options.ErrorArg)
+		} else if optionError == ParseErrMixedFileList {
+			renvoSetDiagnosticDetail(&d, "RENVO-OPTION-011", "explicit source list contains a non-.go/.c argument "+result.Options.ErrorArg)
+		} else if optionError == ParseErrSystemRead {
+			renvoSetDiagnosticDetail(&d, "RENVO-OPTION-020", result.Options.SystemError)
+		} else if optionError == ParseErrInvalidSystem {
+			renvoSetDiagnosticDetail(&d, "RENVO-OPTION-021", "invalid system profile "+result.Options.ErrorArg+": "+result.Options.SystemError)
+		} else if optionError == ParseErrMissingIncludePath {
+			renvoSetDiagnosticDetail(&d, "RENVO-OPTION-032", "missing include directory after "+result.Options.ErrorArg)
+		} else {
+			message := renvoOptionMessage(optionError)
+			if message != "" {
+				number := optionError + 1
+				if optionError >= ParseErrMissingSystem {
+					number = optionError - 2
+				}
+				renvoSetDiagnosticDetail(&d, renvoDiagnosticCode("OPTION", number), message)
+			}
 		}
 		return d
 	}
 	if result.Error == BuildErrSource {
-		d.Phase, d.Code, d.Message, d.Path = "loader", "RENVO-LOAD-001", "source collection failed", result.ErrorPath
-		if result.Sources.Error == SourceErrMissingModule {
-			d.Code, d.Message = "RENVO-LOAD-002", "go.mod was not found"
-		} else if result.Sources.Error == SourceErrModule {
-			d.Code, d.Message = "RENVO-LOAD-003", "invalid module declaration"
-		} else if result.Sources.Error == SourceErrPackageArg {
-			d.Code, d.Message = "RENVO-LOAD-004", "package path is outside the main module"
-		} else if result.Sources.Error == SourceErrReadDir {
-			d.Code, d.Message = "RENVO-LOAD-005", "package directory could not be read"
-		} else if result.Sources.Error == SourceErrReadFile {
-			d.Code, d.Message = "RENVO-LOAD-006", "source file could not be read"
-		} else if result.Sources.Error == SourceErrBuildConstraint {
-			d.Code, d.Message = "RENVO-LOAD-007", "invalid build constraint"
-		} else if result.Sources.Error == SourceErrParse {
-			d.Phase, d.Code, d.Message = "parser", "RENVO-PARSE-001", "source syntax is invalid"
-		} else if result.Sources.Error == SourceErrImport {
-			d.Code, d.Message = "RENVO-LOAD-008", "unresolved import "+result.ErrorPath
-		} else if result.Sources.Error == SourceErrDependencyMissing {
-			d.Code, d.Message = "RENVO-LOAD-014", "dependency source is unavailable for "+result.ErrorPath
-		} else if result.Sources.Error == SourceErrDependencyExcluded {
-			d.Code, d.Message = "RENVO-LOAD-015", "dependency version is excluded: "+result.ErrorPath
-		} else if result.Sources.Error == SourceErrDependencyModule {
-			d.Code, d.Message = "RENVO-LOAD-016", "dependency has an invalid or missing go.mod: "+result.ErrorPath
-		} else if result.Sources.Error == SourceErrDependencyAmbiguous {
-			d.Code, d.Message = "RENVO-LOAD-017", "dependency import is ambiguous: "+result.ErrorPath
-		} else if result.Sources.Error == SourceErrEmbed {
-			d.Code, d.Message = "RENVO-LOAD-018", "invalid go:embed directive or pattern: "+result.ErrorPath
-		} else if result.Sources.Error == SourceErrCgo {
-			d.Code, d.Message = "RENVO-LOAD-019", "cgo is not supported by RENVO"
-		} else if result.Sources.Error == SourceErrStandardPackage {
-			d.Code, d.Message = "RENVO-LOAD-020", "standard library package "+result.ErrorPath+" is not included in this RENVO build"
-		} else if result.Sources.Error == SourceErrFileDirectory {
-			d.Code, d.Message = "RENVO-LOAD-021", "named source files must all be in one directory"
-		} else if result.Sources.Error == SourceErrFileListEmpty {
-			d.Code, d.Message = "RENVO-LOAD-022", "explicit source list contains no buildable Go or C files"
-		} else if result.Sources.Error == SourceErrCInclude {
-			d.Phase, d.Code, d.Message = "preprocessor", "RENVO-CPP-001", "C include could not be read: "+result.ErrorPath
-		} else if result.Sources.Error == SourceErrCPreprocess {
+		renvoSetDiagnostic(&d, "loader", "RENVO-LOAD-001", "source collection failed")
+		d.Path = result.ErrorPath
+		sourceError := result.Sources.Error
+		if sourceError > SourceOK && sourceError <= SourceErrCInclude {
+			d.Message = renvoSourceMessageBlob[renvoSourceMessageOffsets[sourceError]:renvoSourceMessageOffsets[sourceError+1]]
+			number := sourceError + 1
+			if sourceError == SourceErrParse {
+				d.Phase, d.Code = "parser", "RENVO-PARSE-001"
+			} else if sourceError == SourceErrCInclude {
+				d.Phase, d.Code = "preprocessor", "RENVO-CPP-001"
+			} else {
+				if sourceError == SourceErrImport {
+					number = 8
+				} else if sourceError >= SourceErrDependencyMissing {
+					number += 4
+				}
+				d.Code = renvoDiagnosticCode("LOAD", number)
+			}
+			if sourceError >= SourceErrImport && sourceError <= SourceErrEmbed || sourceError == SourceErrStandardPackage || sourceError == SourceErrCInclude {
+				d.Message += result.ErrorPath
+			}
+			if sourceError == SourceErrStandardPackage {
+				d.Message += " is not included in this RENVO build"
+			}
+		} else if sourceError == SourceErrCPreprocess {
 			return cPreprocessDiagnostic(result.Sources.CPreprocessError, result.Sources.ErrorPath,
 				result.Sources.CPreprocessLine, result.Sources.CPreprocessDetail)
 		}
@@ -123,15 +157,7 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			d.Path = result.Sources.ErrorSourcePath
 			for i := 0; i < len(result.Sources.Files); i++ {
 				if result.Sources.Files[i].Path == d.Path {
-					d.Start = result.Sources.ErrorOffset
-					d.Line, d.Column = 1, 1
-					for j := 0; j < d.Start && j < len(result.Sources.Files[i].Src); j++ {
-						if result.Sources.Files[i].Src[j] == '\n' {
-							d.Line, d.Column = d.Line+1, 1
-						} else {
-							d.Column++
-						}
-					}
+					d = renvoDiagnosticOffset(d, result.Sources.Files[i].Src, result.Sources.ErrorOffset)
 				}
 			}
 		}
@@ -142,22 +168,14 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 	}
 	built := result.Pipeline
 	if built.Error == pipeline.PipelineErrLoad {
-		d.Phase, d.Code, d.Message = "loader", "RENVO-LOAD-009", "workspace loading failed"
+		renvoSetDiagnostic(&d, "loader", "RENVO-LOAD-009", "workspace loading failed")
 		graph := built.Workspace.Graph
 		if graph.Error == load.GraphErrCycle {
-			d.Code, d.Message = "RENVO-LOAD-011", "import cycle detected"
+			renvoSetDiagnosticDetail(&d, "RENVO-LOAD-011", "import cycle detected")
 			d.Path = graph.ErrorPath
 			for i := 0; i < len(result.Sources.Files); i++ {
 				if result.Sources.Files[i].Path == d.Path {
-					d.Start = graph.ErrorOffset
-					d.Line, d.Column = 1, 1
-					for j := 0; j < d.Start && j < len(result.Sources.Files[i].Src); j++ {
-						if result.Sources.Files[i].Src[j] == '\n' {
-							d.Line, d.Column = d.Line+1, 1
-						} else {
-							d.Column++
-						}
-					}
+					d = renvoDiagnosticOffset(d, result.Sources.Files[i].Src, graph.ErrorOffset)
 				}
 			}
 			return d
@@ -169,22 +187,25 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			if pkg >= 0 && pkg < len(graph.Packages) {
 				packageError := graph.Packages[pkg].Error
 				if packageError == load.PackageErrParse {
-					d.Phase, d.Code, d.Message = "parser", "RENVO-PARSE-001", "source syntax is invalid"
+					renvoSetDiagnostic(&d, "parser", "RENVO-PARSE-001", "source syntax is invalid")
 				} else if packageError == load.PackageErrC11 {
-					d.Phase, d.Code, d.Message = "c11", "RENVO-C11-001", "C11 source is not supported or is invalid"
+					renvoSetDiagnostic(&d, "c11", "RENVO-C11-001", "C11 source is not supported or is invalid")
+					if graph.Packages[pkg].C11Error == c11.TranslateErrVLA {
+						renvoSetDiagnosticDetail(&d, "RENVO-C11-002", "variable length arrays are not supported")
+					}
 				} else if packageError == load.PackageErrName {
-					d.Code, d.Message = "RENVO-LOAD-012", "files in one directory declare different packages"
+					renvoSetDiagnosticDetail(&d, "RENVO-LOAD-012", "files in one directory declare different packages")
 				} else if packageError == load.PackageErrImport {
-					d.Code, d.Message = "RENVO-LOAD-008", "import could not be resolved"
+					renvoSetDiagnosticDetail(&d, "RENVO-LOAD-008", "import could not be resolved")
 				} else if packageError == load.PackageErrNoFiles {
-					d.Code, d.Message = "RENVO-LOAD-013", "package contains no selected Go or C files"
+					renvoSetDiagnosticDetail(&d, "RENVO-LOAD-013", "package contains no selected Go or C files")
 				}
 				result.ErrorPackage = pkg
 				result.ErrorFile = graph.Packages[pkg].ErrorFile
 				if packageError == load.PackageErrParse && result.ErrorFile >= 0 && result.ErrorFile < len(graph.Packages[pkg].Files) {
 					file := graph.Packages[pkg].Files[result.ErrorFile]
 					if offset := sourceGenericsOffset(file.Src); offset >= 0 {
-						d.Code, d.Message = "RENVO-PARSE-002", "generics are not supported by RENVO"
+						renvoSetDiagnosticDetail(&d, "RENVO-PARSE-002", "generics are not supported by RENVO")
 						for i := 0; i < len(file.File.Tokens); i++ {
 							if file.File.Tokens[i].Start == offset {
 								file.File.ErrorTok = i
@@ -197,74 +218,15 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			}
 		}
 	} else if built.Error == pipeline.PipelineErrBuild {
-		d.Phase, d.Code, d.Message = "checker", "RENVO-CHECK-001", "type checking failed"
+		renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-001", "type checking failed")
 		if built.Build.Error == build.BuildErrLower {
-			d.Phase, d.Code, d.Message = "lowerer", "RENVO-LOWER-001", "checked program could not be lowered"
-		} else if built.Build.ErrorDetail == check.CheckErrDuplicate {
-			d.Code, d.Message = "RENVO-CHECK-002", "duplicate declaration"
-		} else if built.Build.ErrorDetail == check.CheckErrImport {
-			d.Code, d.Message = "RENVO-CHECK-003", "invalid import declaration"
-		} else if built.Build.ErrorDetail == check.CheckErrMethod {
-			d.Code, d.Message = "RENVO-CHECK-004", "invalid method declaration"
-		} else if built.Build.ErrorDetail == check.CheckErrReturnCount {
-			d.Code, d.Message = "RENVO-CHECK-007", "return value count does not match function results"
-		} else if built.Build.ErrorDetail == check.CheckErrType {
-			d.Code, d.Message = "RENVO-CHECK-008", "assignment value is not assignable to its destination"
-		} else if built.Build.ErrorDetail == check.CheckErrBody {
-			d.Code, d.Message = "RENVO-CHECK-005", "invalid function body"
-		} else if built.Build.ErrorDetail == check.CheckErrScope {
-			d.Code, d.Message = "RENVO-CHECK-006", "invalid name or scope"
-		} else if built.Build.ErrorDetail == check.CheckErrExcluded {
-			d.Code, d.Message = "RENVO-CHECK-009", "feature is not supported by RENVO"
-		} else if built.Build.ErrorDetail == check.CheckErrUnusedImport {
-			d.Code, d.Message = "RENVO-CHECK-010", "import is not used"
-		} else if built.Build.ErrorDetail == check.CheckErrCall {
-			d.Code, d.Message = "RENVO-CHECK-011", "called expression is not a function"
-		} else if built.Build.ErrorDetail == check.CheckErrAssignTarget {
-			d.Code, d.Message = "RENVO-CHECK-012", "left side of assignment is not assignable"
-		} else if built.Build.ErrorDetail == check.CheckErrAssignCount {
-			d.Code, d.Message = "RENVO-CHECK-013", "assignment count does not match"
-		} else if built.Build.ErrorDetail == check.CheckErrBreak {
-			d.Code, d.Message = "RENVO-CHECK-014", "break is not inside a loop or switch"
-		} else if built.Build.ErrorDetail == check.CheckErrContinue {
-			d.Code, d.Message = "RENVO-CHECK-015", "continue is not inside a loop"
-		} else if built.Build.ErrorDetail == check.CheckErrCallArgument {
-			d.Code, d.Message = "RENVO-CHECK-016", "call argument is not assignable to its parameter"
-		} else if built.Build.ErrorDetail == check.CheckErrGoroutine {
-			d.Code, d.Message = "RENVO-CHECK-017", "goroutines are not supported by RENVO"
-		} else if built.Build.ErrorDetail == check.CheckErrChannel {
-			d.Code, d.Message = "RENVO-CHECK-018", "channels are not supported by RENVO"
-		} else if built.Build.ErrorDetail == check.CheckErrSelect {
-			d.Code, d.Message = "RENVO-CHECK-019", "select statements are not supported by RENVO"
-		} else if built.Build.ErrorDetail == check.CheckErrUnusedLocal {
-			d.Code, d.Message = "RENVO-CHECK-020", "local variable is declared but not used"
-		} else if built.Build.ErrorDetail == check.CheckErrMissingMain {
-			d.Code, d.Message = "RENVO-CHECK-021", "package main has no top-level func main()"
-		} else if built.Build.ErrorDetail == check.CheckErrMainSignature {
-			d.Code, d.Message = "RENVO-CHECK-022", "func main must have no parameters or results"
-		} else if built.Build.ErrorDetail == check.CheckErrMainMethod {
-			d.Code, d.Message = "RENVO-CHECK-023", "method main does not define the package entry point"
-		} else if built.Build.ErrorDetail == check.CheckErrSliceOperand {
-			d.Code, d.Message = "RENVO-CHECK-024", "cannot slice an unaddressable array value"
-		} else if built.Build.ErrorDetail == check.CheckErrArrayIndex {
-			d.Code, d.Message = "RENVO-CHECK-025", "constant array index is out of bounds"
-		} else if built.Build.ErrorDetail == check.CheckErrDeferBuiltin {
-			d.Code, d.Message = "RENVO-CHECK-026", "deferred builtin call discards a result"
-		} else if built.Build.ErrorDetail == check.CheckErrBuiltinArity {
-			d.Code, d.Message = "RENVO-CHECK-027", "invalid number of arguments to builtin"
-		} else if built.Build.ErrorDetail == check.CheckErrBuiltinOperand {
-			d.Code, d.Message = "RENVO-CHECK-028", "invalid operand type for builtin"
-		} else if built.Build.ErrorDetail == check.CheckErrUndefined {
-			d.Code, d.Message = "RENVO-CHECK-029", "undefined identifier"
-		} else if built.Build.ErrorDetail == check.CheckErrOperand {
-			d.Code, d.Message = "RENVO-CHECK-030", "invalid operation for operand types"
-		} else if built.Build.ErrorDetail == check.CheckErrReturnType {
-			d.Code, d.Message = "RENVO-CHECK-031", "return value is not assignable to the function result"
-		} else if built.Build.ErrorDetail == check.CheckErrCallArity {
-			d.Code, d.Message = "RENVO-CHECK-032", "function call argument count does not match parameters"
+			renvoSetDiagnostic(&d, "lowerer", "RENVO-LOWER-001", "checked program could not be lowered")
+		} else if built.Build.ErrorDetail >= check.CheckErrDuplicate && built.Build.ErrorDetail <= check.CheckErrCallArity {
+			d.Code = renvoDiagnosticCode("CHECK", built.Build.ErrorDetail)
+			d.Message = renvoCheckMessage(built.Build.ErrorDetail)
 		}
 	} else {
-		d.Phase, d.Code, d.Message = "linker", "RENVO-LINK-001", "package linking failed"
+		renvoSetDiagnostic(&d, "linker", "RENVO-LINK-001", "package linking failed")
 	}
 	return renvoBuildDiagnosticLocation(result, d)
 }
@@ -283,23 +245,7 @@ func renvoBuildDiagnosticLocation(result BuildResult, d Diagnostic) Diagnostic {
 	source := graph.Packages[pkg].Files[file]
 	d.Path = source.Path
 	if graph.Packages[pkg].Error == load.PackageErrC11 {
-		d.Start = graph.Packages[pkg].ErrorOffset
-		if d.Start < 0 {
-			d.Start = 0
-		}
-		if d.Start > len(source.Src) {
-			d.Start = len(source.Src)
-		}
-		d.End = d.Start
-		d.Line, d.Column = 1, 1
-		for i := 0; i < d.Start; i++ {
-			if source.Src[i] == '\n' {
-				d.Line, d.Column = d.Line+1, 1
-			} else {
-				d.Column++
-			}
-		}
-		return d
+		return renvoDiagnosticOffset(d, source.Src, graph.Packages[pkg].ErrorOffset)
 	}
 	tok := result.ErrorToken
 	if tok < 0 || tok >= len(source.File.Tokens) {
@@ -318,7 +264,29 @@ func renvoBuildDiagnosticLocation(result BuildResult, d Diagnostic) Diagnostic {
 	return d
 }
 
+func renvoDiagnosticOffset(d Diagnostic, source []byte, offset int) Diagnostic {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(source) {
+		offset = len(source)
+	}
+	d.Start, d.End = offset, offset
+	d.Line, d.Column = 1, 1
+	for i := 0; i < offset; i++ {
+		if source[i] == '\n' {
+			d.Line, d.Column = d.Line+1, 1
+		} else {
+			d.Column++
+		}
+	}
+	return d
+}
+
 func renvoDiagnosticNamesToken(code string) bool {
-	return code == "RENVO-CHECK-010" || code == "RENVO-CHECK-011" || code == "RENVO-CHECK-020" ||
-		code == "RENVO-CHECK-027" || code == "RENVO-CHECK-028" || code == "RENVO-CHECK-029" || code == "RENVO-CHECK-032"
+	if len(code) != 15 || code[6] != 'C' {
+		return false
+	}
+	number := int(code[13]-'0')*10 + int(code[14]-'0')
+	return number == 10 || number == 11 || number == 20 || number >= 27 && number <= 29 || number == 32
 }
