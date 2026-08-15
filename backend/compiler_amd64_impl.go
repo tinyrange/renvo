@@ -685,6 +685,20 @@ func renvoAmd64InitRuntimeCheckRegs(g *renvoLinearGen) {
 	renvoAmd64InitRuntimeCheckReg(a, 0x1d8d48, renvoAmd64EnsureRuntimeCheck(g, &g.runtimeWideIndexLabel, 5, "\x48\x39\xd1\x73\x08\x48\x6b\xc9\x48\x48\x01\xc8\xc3\xe9\x00\x00\x00\x00"))
 }
 
+func renvoAmd64ObjectExportFrame(g *renvoLinearGen, reserve bool) {
+	if reserve {
+		// Renvo uses RBX for division and R12-R15 for compact runtime helpers.
+		// They are callee-saved in the System V ABI, so an exported wrapper must
+		// preserve the C caller's values before installing its own helper set.
+		renvoAsmEmitText(&g.asm, "\x53\x41\x54\x41\x55\x41\x56\x41\x57")
+		if !g.meta.panicEnabled {
+			renvoAmd64InitRuntimeCheckRegs(g)
+		}
+		return
+	}
+	renvoAsmEmitText(&g.asm, "\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5b")
+}
+
 func renvoAmd64InitRuntimeCheckReg(a *renvoAsm, op int, label int) {
 	renvoNonNil(a)
 	renvoAsmEmit24(a, op)

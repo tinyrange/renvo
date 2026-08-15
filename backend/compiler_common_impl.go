@@ -18864,7 +18864,7 @@ func renvoEmitObjectExport(g *renvoLinearGen, fnIndex int) bool {
 	renvoAsmMarkLabel(&g.asm, wrapper)
 	renvoAsmAddFuncSymbol(
 		&g.asm, g.prog.src, fn.exportNameStart, fn.exportNameEnd, wrapper)
-	renvoAdjustObjectStack(&g.asm, true)
+	renvoObjectExportFrame(g, true)
 	if renvoPreparedBackend != 0 {
 		for i := 0; i < wordCount; i++ {
 			if !renvoRTGPushObjectCallWord(&g.asm, i) {
@@ -18881,18 +18881,16 @@ func renvoEmitObjectExport(g *renvoLinearGen, fnIndex int) bool {
 	} else {
 		renvoAmd64EmitCallWithWordCount(g, fnIndex, wordCount)
 	}
-	renvoAdjustObjectStack(&g.asm, false)
+	renvoObjectExportFrame(g, false)
 	renvoAsmRet(&g.asm)
 	return true
 }
 
-func renvoAdjustObjectStack(a *renvoAsm, reserve bool) {
+func renvoObjectExportFrame(g *renvoLinearGen, reserve bool) {
 	if renvoPreparedBackend != 0 {
-		renvoRTGAdjustObjectStack(a, reserve)
-	} else if reserve {
-		renvoAsmEmitText(a, "\x48\x83\xec\x08")
+		renvoRTGAdjustObjectStack(&g.asm, reserve)
 	} else {
-		renvoAsmEmitText(a, "\x48\x83\xc4\x08")
+		renvoAmd64ObjectExportFrame(g, reserve)
 	}
 }
 

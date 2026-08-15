@@ -271,6 +271,23 @@ func TestCompiledInBootstrapPreparesAndCachesBackend(t *testing.T) {
 	if string(equalityExecution) != "PASS\n" {
 		t.Fatalf("custom backend equality output = %q, want PASS", equalityExecution)
 	}
+	immediateArgs := append([]string(nil), args...)
+	immediateArgs[len(immediateArgs)-1] = filepath.Join(root, "backend", "tests", "prepared_push_immediate_argument.go")
+	immediateResult := driver.CompileFromFS(immediateArgs, root, stdRoot, driver.OSFS{}, first)
+	if !immediateResult.Ok {
+		t.Fatalf("custom backend immediate argument compile failed: %#v", immediateResult.Diagnostic)
+	}
+	immediateExecutable := filepath.Join(t.TempDir(), "custom-backend-immediate-argument-output")
+	if err := os.WriteFile(immediateExecutable, immediateResult.Binary, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	immediateExecution, err := exec.Command(immediateExecutable).CombinedOutput()
+	if err != nil {
+		t.Fatalf("custom backend immediate argument output failed: %v\n%s", err, immediateExecution)
+	}
+	if string(immediateExecution) != "PASS\n" {
+		t.Fatalf("custom backend immediate argument output = %q, want PASS", immediateExecution)
+	}
 	for _, mutate := range []func(*rtgb.Artifact){
 		func(artifact *rtgb.Artifact) { artifact.Protocol++ },
 		func(artifact *rtgb.Artifact) { artifact.Unit++ },
