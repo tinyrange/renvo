@@ -11,6 +11,7 @@ import (
 
 func Run(args []string, env []string, backend driver.Backend) int {
 	args, backend = bootstrapArgs(args, backend)
+	args = driver.NormalizeCCompilerCommand(args)
 	if driver.TestCommandRequested(args) {
 		if len(args) == 3 && (args[2] == "--help" || args[2] == "-h") {
 			fmt.Fprint(os.Stdout, driver.TestHelpText)

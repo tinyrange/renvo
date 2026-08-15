@@ -154,6 +154,7 @@ type RenvoCompileOptions struct {
 	EmitImage      bool
 	ModuleLicense  string
 	ModuleNamePath string
+	ObjectFile     bool
 }
 
 // RenvoInitializeObjectCache reserves the bounded in-process object store when
@@ -187,6 +188,7 @@ func RenvoCompileSourceToBytesWithOptions(source []byte, targetName string, opti
 		return nil, false
 	}
 	context := renvoNewCompileContext(target, options.StripSymbols, options.WindowsGUI, options.EmitImage)
+	context.objectFile = options.ObjectFile
 	moduleNamePath := options.ModuleNamePath
 	if moduleNamePath == "" {
 		moduleNamePath = "renvo"
@@ -210,6 +212,7 @@ func RenvoCompileSourceToOutputWithOptions(source []byte, targetName string, out
 		return false
 	}
 	context := renvoNewCompileContext(target, options.StripSymbols, options.WindowsGUI, options.EmitImage)
+	context.objectFile = options.ObjectFile
 	renvoConfigureCompileContext(context, targetName, outputPath, options.ModuleLicense)
 	prog := renvoParseProgramWithContext(source, context)
 	result := renvoCompileParsedProgramArena(&prog, target, options.ArenaSize)
@@ -246,6 +249,7 @@ func RenvoCompileUnitToOutputWithOptions(unit []byte, targetName string, outputP
 		return false
 	}
 	context := renvoNewCompileContext(target, options.StripSymbols, options.WindowsGUI, options.EmitImage)
+	context.objectFile = options.ObjectFile
 	renvoConfigureCompileContext(context, targetName, outputPath, options.ModuleLicense)
 	prog, isUnit, ok := renvoDecodeUnitProgram(unit)
 	if !isUnit || !ok {
@@ -266,6 +270,7 @@ func RenvoCompileUnitToBytesWithOptions(unit []byte, targetName string, options 
 		return nil, false
 	}
 	context := renvoNewCompileContext(target, options.StripSymbols, options.WindowsGUI, options.EmitImage)
+	context.objectFile = options.ObjectFile
 	moduleNamePath := options.ModuleNamePath
 	if moduleNamePath == "" {
 		moduleNamePath = "renvo"
@@ -296,7 +301,11 @@ func renvoWriteCompileResult(context *renvoCompileContext, result renvoCompileRe
 	}
 	write(output, renvoCompileOutputDataWithContext(context, result.data, context.renvoTarget), -1)
 	if outputPath != "-" {
-		chmod(output, 493)
+		mode := 493
+		if context.objectFile {
+			mode = 420
+		}
+		chmod(output, mode)
 		close(output)
 	}
 	return true
@@ -337,6 +346,7 @@ func (s *RenvoCompileSession) Step() bool {
 			return true
 		}
 		s.context = renvoNewCompileContext(s.target, s.options.StripSymbols, s.options.WindowsGUI, s.options.EmitImage)
+		s.context.objectFile = s.options.ObjectFile
 		renvoConfigureCompileContext(s.context, s.targetName, s.outputPath, s.options.ModuleLicense)
 		prog, isUnit, decoded := renvoDecodeUnitProgram(s.unit)
 		if !isUnit || !decoded {
@@ -349,7 +359,7 @@ func (s *RenvoCompileSession) Step() bool {
 		return false
 	}
 	if s.stage == 1 {
-		if s.target == renvoTargetLinuxKernelAmd64 {
+		if s.target == renvoTargetLinuxKernelAmd64 && !s.context.objectFile {
 			if !renvoPrepareKernelMetadata() {
 				s.done = true
 				return true
@@ -410,8 +420,8 @@ func renvoCompileParsedProgramArena(prog *renvoProgram, target int, arenaSize in
 	if !prog.ok {
 		return result
 	}
-	if target == renvoTargetLinuxKernelAmd64 || target == renvoTargetRTG &&
-		renvoRTGPreparedKernelModule != 0 {
+	if !prog.c.objectFile && (target == renvoTargetLinuxKernelAmd64 || target == renvoTargetRTG &&
+		renvoRTGPreparedKernelModule != 0) {
 		if !renvoPrepareKernelMetadata() {
 			return result
 		}

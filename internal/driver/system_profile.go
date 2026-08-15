@@ -50,6 +50,9 @@ func resolveSystemOptions(options Options, workDir string, fs SourceFS) Options 
 	if options.Mode == ModeKernelModule && options.Target != "linux/amd64" {
 		return parseFail(options, ParseErrModeRequiresLinuxAmd64, options.Target, options.SystemAt)
 	}
+	if options.Mode == ModeObject && options.Target != "linux/amd64" {
+		return parseFail(options, ParseErrObjectRequiresLinuxAmd64, options.Target, options.SystemAt)
+	}
 	return options
 }
 

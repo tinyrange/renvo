@@ -24,14 +24,14 @@ func (b CommandBackend) CompileUnitWithArena(unit []byte, target string, strip b
 }
 
 func (b CommandBackend) CompileUnitWithOptions(unit []byte, options BackendCompileOptions) BackendResult {
-	return b.compileUnitImage(unit, backendTargetForOptions(options.Target, options.Mode), options.Output, options.Strip, options.WindowsGUI, options.EmitImage, options.ArenaSize, options.ModuleLicense)
+	return b.compileUnitImage(unit, backendTargetForOptions(options.Target, options.Mode), options.Output, options.Strip, options.WindowsGUI, options.EmitImage, options.ArenaSize, options.ModuleLicense, options.ObjectFile || options.Mode == ModeObject)
 }
 
 func (b CommandBackend) compileUnit(unit []byte, target string, output string, strip bool, windowsGUI bool, arenaSize int, moduleLicense string) BackendResult {
-	return b.compileUnitImage(unit, target, output, strip, windowsGUI, false, arenaSize, moduleLicense)
+	return b.compileUnitImage(unit, target, output, strip, windowsGUI, false, arenaSize, moduleLicense, false)
 }
 
-func (b CommandBackend) compileUnitImage(unit []byte, target string, output string, strip bool, windowsGUI bool, emitImage bool, arenaSize int, moduleLicense string) BackendResult {
+func (b CommandBackend) compileUnitImage(unit []byte, target string, output string, strip bool, windowsGUI bool, emitImage bool, arenaSize int, moduleLicense string, objectFile bool) BackendResult {
 	if b.Path == "" || target == "" || len(unit) == 0 {
 		return BackendResult{Diagnostic: Diagnostic{Phase: "backend", Code: "RENVO-BACKEND-002", Message: "backend command is not configured"}}
 	}
@@ -46,6 +46,9 @@ func (b CommandBackend) compileUnitImage(unit []byte, target string, output stri
 	}
 	if emitImage {
 		args = append(args, "-emit-image")
+	}
+	if objectFile {
+		args = append(args, "-object")
 	}
 	if arenaSize > 0 {
 		args = append(args, "-arena-size", arenaSizeDecimal(arenaSize))

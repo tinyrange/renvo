@@ -242,6 +242,7 @@ type renvoCompileContext struct {
 	stripSymbols       bool
 	windowsSubsystem   int
 	emitImage          bool
+	objectFile         bool
 	optimizeRuntime    bool
 	kernel             *renvoKernelCompileContext
 }
@@ -255,6 +256,7 @@ func renvoNewCompileContext(target int, stripSymbols bool, windowsGUI bool, emit
 	context.stripSymbols = stripSymbols
 	context.windowsSubsystem = 3
 	context.emitImage = emitImage
+	context.objectFile = renvoCompilerObjectFile
 	if windowsGUI {
 		context.windowsSubsystem = 2
 	}
@@ -282,6 +284,7 @@ func renvoLegacyCompileContext() *renvoCompileContext {
 	context.stripSymbols = renvoCompilerStripSymbols
 	context.windowsSubsystem = renvoCompilerWindowsSubsystem
 	context.emitImage = renvoCompilerEmitImage
+	context.objectFile = renvoCompilerObjectFile
 	context.renvoTarget = renvoTarget
 	context.renvoTargetOS = renvoTargetOS
 	context.renvoTargetArch = renvoTargetArch

@@ -77,6 +77,21 @@ func TestCompileKernelModePassesStructuredBackendOptions(t *testing.T) {
 	}
 }
 
+func TestCompileCObjectPassesStructuredBackendOptions(t *testing.T) {
+	backend := &recordingOptionsBackend{binary: []byte("object")}
+	files := []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/main.c", Src: []byte("int main(void) { return 0; }\n")},
+	}
+	result := CompileUnit([]string{"-c", "-o", "hello.o", "main.c"}, "/repo/case", "/std", files, backend)
+	if !result.Ok || !bytes.Equal(result.Binary, backend.binary) {
+		t.Fatalf("object compile = %#v", result)
+	}
+	if backend.options.Target != "linux/amd64" || backend.options.Mode != ModeObject || backend.options.Output != "hello.o" || !backend.options.ObjectFile {
+		t.Fatalf("backend options = %#v", backend.options)
+	}
+}
+
 func TestCompileReportsBuildFailure(t *testing.T) {
 	backend := &recordingBackend{binary: []byte("binary")}
 	result := CompileUnit([]string{"-t", "invalid", "-o", "app", "./cmd/app"}, "/repo/case", "/std", driverTestFiles(), backend)

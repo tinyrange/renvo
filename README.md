@@ -93,6 +93,21 @@ The bootstrap looks for `renvo-backend` beside its own executable. Tooling that
 keeps the backend elsewhere can pass `-bootstrap-backend <path>` immediately
 after the bootstrap executable name.
 
+The C driver can also emit an ordinary Linux/x86_64 ELF relocatable object.
+It treats one explicit C file as a standalone translation unit, so no
+`go.mod` is required:
+
+```sh
+renvo cc -c hello.c -o hello.o
+cc hello.o -o hello
+./hello
+```
+
+The system C driver is used only for startup objects and the final link. Renvo
+is the compiler for `hello.c`. The initial scalar subset can already produce
+and system-link a `main` that returns an integer; preprocessing system headers
+and importing libc calls are the next C frontend milestones.
+
 Running `renvo` with no arguments or with `--help` prints the complete command
 reference and target list.
 
