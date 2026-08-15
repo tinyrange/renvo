@@ -33,6 +33,7 @@ const (
 	ParseErrBackendRead
 	ParseErrInvalidBackend
 	ParseErrBackendTarget
+	ParseErrScriptRequiresGo
 )
 
 const ModeExecutable = "executable"
@@ -200,7 +201,7 @@ func parseOptions(args []string, requireAdvertisedTarget bool) Options {
 		}
 		if options.Package == "" {
 			options.Package = arg
-			if optionArgIsGoFile(arg) {
+			if optionArgIsSourceFile(arg) {
 				options.Files = append(options.Files, arg)
 			}
 			i++
@@ -209,7 +210,7 @@ func parseOptions(args []string, requireAdvertisedTarget bool) Options {
 		if len(options.Files) == 0 {
 			return parseFail(options, ParseErrExtraPackage, arg, i)
 		}
-		if !optionArgIsGoFile(arg) {
+		if !optionArgIsSourceFile(arg) {
 			return parseFail(options, ParseErrMixedFileList, arg, i)
 		}
 		options.Files = append(options.Files, arg)
@@ -235,6 +236,9 @@ func parseOptions(args []string, requireAdvertisedTarget bool) Options {
 	}
 	if options.Script && len(options.Files) != 1 {
 		return parseFail(options, ParseErrScriptFileCount, options.Package, len(args))
+	}
+	if options.Script && !optionArgIsGoFile(options.Files[0]) {
+		return parseFail(options, ParseErrScriptRequiresGo, options.Files[0], len(args))
 	}
 	if requireAdvertisedTarget && options.System == "" {
 		if options.WindowsGUI && options.Target != "windows/amd64" && options.Target != "windows/386" && options.Target != "windows/arm64" {
@@ -271,6 +275,10 @@ func parseArenaSize(value string) (int, bool) {
 
 func optionArgIsGoFile(arg string) bool {
 	return len(arg) > 3 && arg[len(arg)-3:] == ".go"
+}
+
+func optionArgIsSourceFile(arg string) bool {
+	return optionArgIsGoFile(arg) || len(arg) > 2 && arg[len(arg)-2:] == ".c"
 }
 
 func parseBuildTags(value string) ([]string, bool) {

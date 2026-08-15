@@ -2,6 +2,7 @@ package load
 
 import (
 	"renvo.dev/internal/arena"
+	"renvo.dev/internal/c11"
 	"renvo.dev/internal/syntax"
 )
 
@@ -12,6 +13,7 @@ const (
 	PackageErrParse
 	PackageErrName
 	PackageErrImport
+	PackageErrC11
 )
 
 const (
@@ -45,6 +47,7 @@ type Package struct {
 	Error          int
 	ErrorFile      int
 	ErrorImport    int
+	ErrorOffset    int
 	CoreArenaStart int
 	CoreArenaEnd   int
 }
@@ -91,16 +94,17 @@ func loadGraphFromRoot(module Module, stdRoot string, root PackageRef, dependenc
 }
 
 func LoadPackage(module Module, stdRoot string, ref PackageRef, files []SourceFile) Package {
-	return loadPackage(module, stdRoot, ref, nil, files)
+	return loadPackage(module, stdRoot, ref, nil, files, false)
 }
 
-func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []ModuleDependency, files []SourceFile) Package {
+func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []ModuleDependency, files []SourceFile, root bool) Package {
 	pkg := Package{
 		Ref:         ref,
 		Ok:          true,
 		Error:       PackageOK,
 		ErrorFile:   -1,
 		ErrorImport: -1,
+		ErrorOffset: -1,
 	}
 	if !ref.Ok || ref.Dir == "" {
 		return packageFail(pkg, PackageErrRef, -1, -1)
@@ -109,28 +113,74 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 	if len(selected) == 0 {
 		return packageFail(pkg, PackageErrNoFiles, -1, -1)
 	}
+	hasC := false
 	for i := 0; i < len(selected); i++ {
-		parsed := syntax.ParseFile(selected[i].Src)
+		if isCSourceFile(selected[i].Path) {
+			hasC = true
+			break
+		}
+	}
+	var parsedGo []syntax.File
+	if hasC {
+		parsedGo = make([]syntax.File, len(selected))
+		for i := 0; i < len(selected); i++ {
+			if !isGoSourceFile(selected[i].Path) {
+				continue
+			}
+			parsedGo[i] = syntax.ParseFile(selected[i].Src)
+			if !parsedGo[i].Ok {
+				continue
+			}
+			name := string(syntax.TokenText(parsedGo[i].Src, parsedGo[i].Tokens[parsedGo[i].PackageName]))
+			if pkg.Name == "" {
+				pkg.Name = name
+			} else if pkg.Name != name {
+				// Preserve the established file index contract below.
+				break
+			}
+		}
+		if pkg.Name == "" {
+			pkg.Name = cPackageName(ref, root)
+		}
+	}
+	for i := 0; i < len(selected); i++ {
+		var parsed syntax.File
+		if hasC {
+			parsed = parsedGo[i]
+		} else {
+			parsed = syntax.ParseFile(selected[i].Src)
+		}
+		source := selected[i]
+		if isCSourceFile(source.Path) {
+			translated := c11.Translate(pkg.Name, source.Src)
+			if !translated.Ok {
+				pkg.ErrorOffset = translated.ErrorAt
+				pkg.Files = append(pkg.Files, ParsedFile{Path: source.Path, Src: source.Src, ArenaStart: source.ArenaStart, ArenaEnd: source.ArenaEnd})
+				return packageFail(pkg, PackageErrC11, i, -1)
+			}
+			source.Src = translated.Source
+			parsed = syntax.ParseFile(source.Src)
+		}
 		if !parsed.Ok {
-			pkg.Files = append(pkg.Files, newParsedFile(selected[i], parsed))
+			pkg.Files = append(pkg.Files, newParsedFile(source, parsed))
 			return packageFail(pkg, PackageErrParse, i, -1)
 		}
 		name := string(syntax.TokenText(parsed.Src, parsed.Tokens[parsed.PackageName]))
 		if pkg.Name == "" {
 			pkg.Name = name
 		} else if pkg.Name != name {
-			pkg.Files = append(pkg.Files, newParsedFile(selected[i], parsed))
+			pkg.Files = append(pkg.Files, newParsedFile(source, parsed))
 			return packageFail(pkg, PackageErrName, i, -1)
 		}
 		refs := FileImportsWithDependencies(module, stdRoot, dependencies, parsed)
 		for j := 0; j < len(refs); j++ {
 			pkg.Imports = appendImport(pkg.Imports, refs[j])
 			if !refs[j].Ok {
-				pkg.Files = append(pkg.Files, newParsedFile(selected[i], parsed))
+				pkg.Files = append(pkg.Files, newParsedFile(source, parsed))
 				return packageFail(pkg, PackageErrImport, i, len(pkg.Imports)-1)
 			}
 		}
-		pkg.Files = append(pkg.Files, newParsedFile(selected[i], parsed))
+		pkg.Files = append(pkg.Files, newParsedFile(source, parsed))
 	}
 	return pkg
 }
@@ -172,7 +222,7 @@ func (b *graphBuilder) load(ref PackageRef) int {
 	}
 	b.loading = append(b.loading, ref.ImportPath)
 	packageStart := arena.Mark()
-	pkg := loadPackage(b.module, b.stdRoot, ref, b.dependencies, b.files)
+	pkg := loadPackage(b.module, b.stdRoot, ref, b.dependencies, b.files, ref.ImportPath == b.graph.Root)
 	pkg.CoreArenaStart = packageStart
 	pkg.CoreArenaEnd = arena.Mark()
 	if !pkg.Ok {
@@ -245,7 +295,7 @@ func selectPackageFiles(dir string, files []SourceFile) []SourceFile {
 	var selected []SourceFile
 	for i := 0; i < len(files); i++ {
 		path := CleanPath(files[i].Path)
-		if !isGoSourceFile(path) {
+		if !isFrontendSourceFile(path) {
 			continue
 		}
 		if DirPath(path) != dir {
@@ -357,6 +407,42 @@ func BasePath(path string) string {
 func isGoSourceFile(path string) bool {
 	base := BasePath(path)
 	return stringHasSuffix(base, ".go") && !stringHasSuffix(base, "_test.go")
+}
+
+func isCSourceFile(path string) bool {
+	base := BasePath(path)
+	return stringHasSuffix(base, ".c") && !stringHasSuffix(base, "_test.c")
+}
+
+func isFrontendSourceFile(path string) bool {
+	return isGoSourceFile(path) || isCSourceFile(path)
+}
+
+func cPackageName(ref PackageRef, root bool) string {
+	if root {
+		return "main"
+	}
+	name := BasePath(ref.Dir)
+	if name == "" || !cPackageIdentStart(name[0]) {
+		return "c"
+	}
+	out := make([]byte, len(name))
+	for i := 0; i < len(name); i++ {
+		if i == 0 && cPackageIdentStart(name[i]) || i > 0 && cPackageIdentPart(name[i]) {
+			out[i] = name[i]
+		} else {
+			out[i] = '_'
+		}
+	}
+	return string(out)
+}
+
+func cPackageIdentStart(c byte) bool {
+	return c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+}
+
+func cPackageIdentPart(c byte) bool {
+	return cPackageIdentStart(c) || c >= '0' && c <= '9'
 }
 
 func stringHasSuffix(text string, suffix string) bool {

@@ -25,6 +25,24 @@ func Value() int {
 	runtime.KeepAlive(0)
 	return 42
 }
+
+func TestCollectSourcesDiscoversC11Files(t *testing.T) {
+	fs := memorySourceFS{files: []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc main() { _ = cValue() }\n")},
+		{Path: "/repo/case/cmd/app/value.c", Src: []byte("int cValue(void) { return 42; }\n")},
+		{Path: "/repo/case/cmd/app/value_test.c", Src: []byte("broken\n")},
+	}}
+	result := CollectSourcesForTarget("/repo/case", "/std", "./cmd/app", "linux/amd64", fs)
+	if !result.Ok {
+		t.Fatalf("CollectSources failed: err=%d path=%q", result.Error, result.ErrorPath)
+	}
+	assertSourcePaths(t, result.Files, []string{
+		"/repo/case/go.mod",
+		"/repo/case/cmd/app/main.go",
+		"/repo/case/cmd/app/value.c",
+	})
+}
 `)},
 		{Path: "/std/runtime/runtime.go", Src: []byte(`package runtime
 
@@ -508,6 +526,25 @@ func TestBuildFromFS(t *testing.T) {
 	}
 	if decoded.Package != "main" || len(decoded.Funcs) != 2 {
 		t.Fatalf("decoded unit = package %q funcs %d", decoded.Package, len(decoded.Funcs))
+	}
+}
+
+func TestBuildFromFSMixedGoAndC11(t *testing.T) {
+	fs := memorySourceFS{files: []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc goValue() int { return 40 }\nfunc main() { if cValue() == 42 { print(\"PASS\\n\") } }\n")},
+		{Path: "/repo/case/cmd/app/value.c", Src: []byte("int cValue(void) { return goValue() + 2; }\n")},
+	}}
+	result := BuildFromFS([]string{"-emit-unit", "-o", "app.unit", "./cmd/app"}, "/repo/case", "/std", fs)
+	if !result.Ok {
+		t.Fatalf("mixed BuildFromFS failed: diagnostic=%#v result=%#v", result.Diagnostic, result)
+	}
+	decoded, err := unit.Unmarshal(result.Unit)
+	if err != nil {
+		t.Fatalf("mixed unit did not decode: %v", err)
+	}
+	if decoded.Package != "main" || len(decoded.Funcs) < 4 {
+		t.Fatalf("mixed decoded unit = package %q funcs %d", decoded.Package, len(decoded.Funcs))
 	}
 }
 

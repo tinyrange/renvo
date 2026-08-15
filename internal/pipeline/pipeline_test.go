@@ -44,6 +44,63 @@ func Value() int { return answer }
 	}
 }
 
+func TestBuildUnitLinksMixedGoAndC11Files(t *testing.T) {
+	result := BuildUnit("/repo/case", "/std", "./cmd/app", []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+func goDouble(value int) int { return value * 2 }
+
+func main() {
+	if cAdd(20, 22) == 42 && callGo(21) == 42 {
+		print("PASS\n")
+	}
+}
+`)},
+		{Path: "/repo/case/cmd/app/math.c", Src: []byte(`
+int cAdd(int left, int right) { return left + right; }
+int callGo(int value) { return goDouble(value); }
+`)},
+	})
+	if !result.Ok {
+		t.Fatalf("mixed BuildUnit failed: err=%d pkg=%d file=%d tok=%d graph=%#v", result.Error, result.ErrorPackage, result.ErrorFile, result.ErrorToken, result.Workspace.Graph)
+	}
+	decoded, err := unit.Unmarshal(result.Link.Data)
+	if err != nil {
+		t.Fatalf("mixed linked unit did not decode: %v", err)
+	}
+	for _, name := range []string{"goDouble", "cAdd", "callGo", "main", "appMain"} {
+		found := false
+		for i := 0; i < len(decoded.Funcs); i++ {
+			fn := decoded.Funcs[i]
+			if string(decoded.Text[fn.NameStart:fn.NameEnd]) == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("linked unit is missing %s: %s", name, decoded.Text)
+		}
+	}
+}
+
+func TestBuildUnitCompilesC11OnlyRoot(t *testing.T) {
+	result := BuildUnit("/repo/case", "/std", "./cmd/app", []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.c", Src: []byte(`int main(void) { print("PASS\n"); return 0; }`)},
+	})
+	if !result.Ok {
+		t.Fatalf("C-only BuildUnit failed: err=%d pkg=%d file=%d tok=%d", result.Error, result.ErrorPackage, result.ErrorFile, result.ErrorToken)
+	}
+	decoded, err := unit.Unmarshal(result.Link.Data)
+	if err != nil {
+		t.Fatalf("C-only linked unit did not decode: %v", err)
+	}
+	if decoded.Package != "main" {
+		t.Fatalf("C-only package = %q, want main", decoded.Package)
+	}
+}
+
 func TestBuildUnitReportsLoadError(t *testing.T) {
 	result := BuildUnit("/repo/case", "/std", "./cmd/app", []load.SourceFile{
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc appMain() int { return 0 }\n")},

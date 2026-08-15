@@ -56,6 +56,13 @@ defer/panic/recover, arrays and slices, complex values, and the builtins needed
 by Renvo itself. Generics, goroutines, channels, `select`, and cgo are currently
 out of scope.
 
+Packages may also contain `.c` files. The initial C11 frontend is a compact
+source adapter into the same package checker, linker, unit format, and backends
+used for Go, allowing direct calls between C and Go functions in one package.
+Its current scalar/control-flow subset is deliberately smaller than the Go
+frontend; see [`internal/c11/README.md`](internal/c11/README.md) for its exact
+scope and growth boundary.
+
 ## Build and try it
 
 A Go-built bootstrap uses a sibling standalone backend during development.
@@ -68,6 +75,18 @@ go build -tags renvo_bundle -o renvo-bootstrap ./cmd/renvobootstrap
 
 ./renvo-bootstrap \
   -t linux/amd64 -o hello ./path/to/hello-package
+```
+
+A package can mix the two source languages without cgo:
+
+```go
+package main
+
+func main() { print(cAdd(20, 22)) }
+```
+
+```c
+int cAdd(int left, int right) { return left + right; }
 ```
 
 The bootstrap looks for `renvo-backend` beside its own executable. Tooling that

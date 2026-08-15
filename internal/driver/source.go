@@ -118,7 +118,7 @@ func collectSourcesForTargetTagsWithModuleCache(workDir string, stdRoot string, 
 		rootDir := ""
 		for i := 0; i < len(explicitFiles); i++ {
 			path := load.JoinPath(workDir, explicitFiles[i])
-			if !isGoSourceName(load.BasePath(path)) {
+			if !isFrontendSourceName(load.BasePath(path)) {
 				continue
 			}
 			dir := load.DirPath(path)
@@ -224,7 +224,7 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 		}
 		sortDirEntries(entries)
 		for i := 0; i < len(entries); i++ {
-			if !entries[i].IsDir && isGoSourceName(entries[i].Name) {
+			if !entries[i].IsDir && isFrontendSourceName(entries[i].Name) {
 				paths = append(paths, load.JoinPath(ref.Dir, entries[i].Name))
 			}
 		}
@@ -232,7 +232,9 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 	found := false
 	for i := 0; i < len(paths); i++ {
 		path := paths[i]
-		if !explicit && !sourceFilenameEnabledWithTags(load.BasePath(path), c.target, c.tags) {
+		name := load.BasePath(path)
+		goSource := isGoSourceName(name)
+		if !explicit && !frontendFilenameEnabledWithTags(name, c.target, c.tags) {
 			continue
 		}
 		arenaStart := arena.Mark()
@@ -242,7 +244,7 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 			c.fail(SourceErrReadFile, path)
 			return
 		}
-		if !explicit {
+		if !explicit && goSource {
 			enabled, valid := sourceConstraintsEnabled(src, c.target, c.tags)
 			if !valid {
 				c.fail(SourceErrBuildConstraint, path)
@@ -258,16 +260,21 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 				continue
 			}
 		}
-		expanded, embedOK, embedOffset, embedPath := expandSourceEmbeds(c.fs, path, owner.Root, src)
-		if !embedOK {
-			c.files = append(c.files, load.SourceFile{Path: path, Src: src, ArenaStart: arenaStart, ArenaEnd: arena.Mark()})
-			c.failAt(SourceErrEmbed, embedPath, path, embedOffset)
-			return
+		if goSource {
+			expanded, embedOK, embedOffset, embedPath := expandSourceEmbeds(c.fs, path, owner.Root, src)
+			if !embedOK {
+				c.files = append(c.files, load.SourceFile{Path: path, Src: src, ArenaStart: arenaStart, ArenaEnd: arena.Mark()})
+				c.failAt(SourceErrEmbed, embedPath, path, embedOffset)
+				return
+			}
+			src = expanded
 		}
-		src = expanded
 		arenaEnd = arena.Mark()
 		found = true
 		c.files = append(c.files, load.SourceFile{Path: path, Src: src, ArenaStart: arenaStart, ArenaEnd: arenaEnd})
+		if !goSource {
+			continue
+		}
 		imports, importsOK := collectSourceImports(owner, c.stdRoot, src)
 		if !importsOK {
 			c.failAt(SourceErrParse, path, path, len(src))
@@ -814,6 +821,24 @@ func isGoSourceName(name string) bool {
 	return stringHasSuffix(name, ".go") && name[0] != '.' && name[0] != '_' && !stringHasSuffix(name, "_test.go")
 }
 
+func isCSourceName(name string) bool {
+	return stringHasSuffix(name, ".c") && name[0] != '.' && name[0] != '_' && !stringHasSuffix(name, "_test.c")
+}
+
+func isFrontendSourceName(name string) bool {
+	return isGoSourceName(name) || isCSourceName(name)
+}
+
+func frontendFilenameEnabledWithTags(name string, target string, tags []string) bool {
+	if isGoSourceName(name) {
+		return sourceFilenameEnabledWithTags(name, target, tags)
+	}
+	if isCSourceName(name) {
+		return sourceFilenameEnabledWithExtension(name, ".c", target, tags)
+	}
+	return false
+}
+
 // SourceFileEnabled reports whether a source filename and its build constraints
 // select the file for a target. Interactive tooling uses the same selection
 // rules as compilation when discovering importable packages.
@@ -829,16 +854,18 @@ func filterSourcesForTargetTags(files []load.SourceFile, target string, tags []s
 	for i := 0; i < len(files); i++ {
 		file := files[i]
 		name := load.BasePath(file.Path)
-		if isGoSourceName(name) {
-			if !sourceFilenameEnabledWithTags(name, target, tags) {
+		if isFrontendSourceName(name) {
+			if !frontendFilenameEnabledWithTags(name, target, tags) {
 				continue
 			}
-			enabled, valid := sourceConstraintsEnabled(file.Src, target, tags)
-			if !valid {
-				return nil, file.Path, false
-			}
-			if !enabled {
-				continue
+			if isGoSourceName(name) {
+				enabled, valid := sourceConstraintsEnabled(file.Src, target, tags)
+				if !valid {
+					return nil, file.Path, false
+				}
+				if !enabled {
+					continue
+				}
 			}
 		}
 		out = append(out, file)
@@ -861,14 +888,14 @@ func filterSourcesForOptions(files []load.SourceFile, workDir string, options Op
 		if load.DirPath(path) != rootDir {
 			return nil, path, SourceErrFileDirectory
 		}
-		if isGoSourceName(load.BasePath(path)) {
+		if isFrontendSourceName(load.BasePath(path)) {
 			selected = append(selected, path)
 		}
 	}
 	var out []load.SourceFile
 	for i := 0; i < len(files); i++ {
 		path := load.CleanPath(files[i].Path)
-		if load.DirPath(path) == rootDir && isGoSourceName(load.BasePath(path)) {
+		if load.DirPath(path) == rootDir && isFrontendSourceName(load.BasePath(path)) {
 			if findString(selected, path) >= 0 {
 				out = append(out, files[i])
 			}
@@ -891,7 +918,11 @@ func sourceFilenameEnabled(name string, target string) bool {
 }
 
 func sourceFilenameEnabledWithTags(name string, target string, tags []string) bool {
-	stem := name[:len(name)-len(".go")]
+	return sourceFilenameEnabledWithExtension(name, ".go", target, tags)
+}
+
+func sourceFilenameEnabledWithExtension(name string, extension string, target string, tags []string) bool {
+	stem := name[:len(name)-len(extension)]
 	last := stringLastIndexByte(stem, '_')
 	if last < 1 {
 		return true
