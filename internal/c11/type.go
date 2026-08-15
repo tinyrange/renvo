@@ -74,7 +74,16 @@ type cValueName struct {
 
 type cObjectName struct {
 	name   string
+	goName string
 	typeID int
+}
+
+type cFunctionName struct {
+	name       string
+	resultType int
+	paramStart int
+	paramCount int
+	defined    bool
 }
 
 type cMemberAccess struct {

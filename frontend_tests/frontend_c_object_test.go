@@ -50,6 +50,16 @@ func TestFrontendStage3CObjectUnionBitfieldSystemLink(t *testing.T) {
 	runCObjectUnionBitfieldSystemLink(t, selfHostedFrontendCompiler(t, root))
 }
 
+func TestFrontendCObjectTentativeDefinitionSystemLink(t *testing.T) {
+	root := repoRoot(t)
+	runCObjectTentativeDefinitionSystemLink(t, frontendCompiler(t, root))
+}
+
+func TestFrontendStage3CObjectTentativeDefinitionSystemLink(t *testing.T) {
+	root := repoRoot(t)
+	runCObjectTentativeDefinitionSystemLink(t, selfHostedFrontendCompiler(t, root))
+}
+
 func TestFrontendCObjectWithoutMainSystemLink(t *testing.T) {
 	root := repoRoot(t)
 	frontend := frontendCompiler(t, root)
@@ -237,6 +247,61 @@ int main(void) { return renvo_union_bits() == 103 ? 0 : 1; }
 	}
 	if combined, err := exec.Command(executable).CombinedOutput(); err != nil {
 		t.Fatalf("run linked C union/bitfield object: %v, output %q", err, combined)
+	}
+}
+
+func runCObjectTentativeDefinitionSystemLink(t *testing.T, frontend frontendConfig) {
+	t.Helper()
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skip("the first C object target is Linux/amd64")
+	}
+	linkerDriver, err := exec.LookPath("cc")
+	if err != nil {
+		t.Skip("system C linker driver is unavailable")
+	}
+	dir := t.TempDir()
+	source := filepath.Join(dir, "storage.c")
+	harness := filepath.Join(dir, "harness.c")
+	object := filepath.Join(dir, "storage.o")
+	executable := filepath.Join(dir, "storage-test")
+	if err := os.WriteFile(source, []byte(`int renvo_accumulate(int value);
+int shared;
+extern int shared;
+int shared;
+static int hidden;
+int singleton[];
+int renvo_accumulate(int value) {
+	extern int shared;
+	static int calls;
+	calls++;
+	hidden++;
+	shared += value;
+	singleton[0]++;
+	return shared + hidden + calls + singleton[0];
+}
+int renvo_accumulate(int value);
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(harness, []byte(`extern int renvo_accumulate(int);
+int main(void) {
+	return renvo_accumulate(20) == 23 && renvo_accumulate(20) == 46 ? 0 : 1;
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := frontendCommand(frontend, "cc", "-c", filepath.Base(source), "-o", object)
+	command.Dir = dir
+	command.Env = frontendCommandEnv(frontend.env, dir)
+	if combined, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("compile C tentative-definition object with Renvo: %v\n%s", err, combined)
+	}
+	link := exec.Command(linkerDriver, harness, object, "-o", executable)
+	if combined, err := link.CombinedOutput(); err != nil {
+		t.Fatalf("system-link C tentative-definition object: %v\n%s", err, combined)
+	}
+	if combined, err := exec.Command(executable).CombinedOutput(); err != nil {
+		t.Fatalf("run linked C tentative-definition object: %v, output %q", err, combined)
 	}
 }
 
