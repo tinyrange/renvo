@@ -30,6 +30,16 @@ func TestFrontendStage3CObjectTypeLayoutSystemLink(t *testing.T) {
 	runCObjectTypeLayoutSystemLink(t, selfHostedFrontendCompiler(t, root))
 }
 
+func TestFrontendCObjectControlFlowSystemLink(t *testing.T) {
+	root := repoRoot(t)
+	runCObjectControlFlowSystemLink(t, frontendCompiler(t, root))
+}
+
+func TestFrontendStage3CObjectControlFlowSystemLink(t *testing.T) {
+	root := repoRoot(t)
+	runCObjectControlFlowSystemLink(t, selfHostedFrontendCompiler(t, root))
+}
+
 func TestFrontendCObjectWithoutMainSystemLink(t *testing.T) {
 	root := repoRoot(t)
 	frontend := frontendCompiler(t, root)
@@ -257,5 +267,70 @@ int main(void) { return renvo_layout() == 5008 ? 0 : 1; }
 	}
 	if combined, err := exec.Command(executable).CombinedOutput(); err != nil {
 		t.Fatalf("run linked C type/layout object: %v, output %q", err, combined)
+	}
+}
+
+func runCObjectControlFlowSystemLink(t *testing.T, frontend frontendConfig) {
+	t.Helper()
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skip("the first C object target is Linux/amd64")
+	}
+	linkerDriver, err := exec.LookPath("cc")
+	if err != nil {
+		t.Skip("system C linker driver is unavailable")
+	}
+
+	dir := t.TempDir()
+	source := filepath.Join(dir, "control.c")
+	harness := filepath.Join(dir, "harness.c")
+	object := filepath.Join(dir, "control.o")
+	executable := filepath.Join(dir, "control-test")
+	if err := os.WriteFile(source, []byte(`int renvo_control(int choice) {
+	int i = 0;
+	int total = 0;
+	do {
+		i++;
+		if (i < 3) continue;
+		total += i;
+	} while (i < 4);
+	for (int j = 0; j < 3; j++) total += j;
+	switch (choice) {
+	case 0:
+		total += 1;
+	case 1:
+		total += 2;
+		break;
+	default:
+		total += 9;
+	}
+	goto done;
+	total = 1000;
+done:
+	return total;
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(harness, []byte(`extern int renvo_control(int);
+int main(void) {
+	return renvo_control(0) == 13 &&
+		renvo_control(1) == 12 &&
+		renvo_control(2) == 19 ? 0 : 1;
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := frontendCommand(frontend, "cc", "-c", filepath.Base(source), "-o", object)
+	command.Dir = dir
+	command.Env = frontendCommandEnv(frontend.env, dir)
+	if combined, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("compile C control-flow object with Renvo: %v\n%s", err, combined)
+	}
+	link := exec.Command(linkerDriver, harness, object, "-o", executable)
+	if combined, err := link.CombinedOutput(); err != nil {
+		t.Fatalf("system-link Renvo C control-flow object: %v\n%s", err, combined)
+	}
+	if combined, err := exec.Command(executable).CombinedOutput(); err != nil {
+		t.Fatalf("run linked C control-flow object: %v, output %q", err, combined)
 	}
 }

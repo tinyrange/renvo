@@ -557,7 +557,7 @@ cc hello.o -o hello
                 <li>Represent types and declarations by integer IDs in flat arenas; avoid pointer-rich object graphs.</li>
                 <li>Reject VLAs initially if the selected kernel config forbids them; parse them well enough to diagnose precisely.</li>
               </ul>
-              <div class="gate">Active · host/stage3 object regressions now cover quoted project headers, typedef structs, LP64 padding, recursive declarators, function-pointer types, enum constants, arrays, globals, pointers, calls, and control flow. The fresh pinned header closure advances to the GNU-attribute frontier with 1.98 s prepare wall / 35,044 KiB peak RSS and 0.02 s preprocess wall / 16,096 KiB peak RSS; the stripped frontend is 1,901,561 bytes. Full ISO C semantics remain in progress.</div>
+              <div class="gate">Active · host/stage3 object regressions now cover quoted project headers, typedef structs, LP64 padding, recursive declarators, function-pointer types, enum constants, arrays, globals, pointers, calls, and ISO control flow including C switch fallthrough, do/while, labels/goto, and declaration-form for. The fresh pinned header closure remains at the M4 GNU-attribute frontier with 1.98 s prepare wall / 35,044 KiB peak RSS and 0.02 s preprocess wall / 16,096 KiB peak RSS; the stripped frontend is 1,906,225 bytes. The M3 scope above is frozen and full ISO C semantics remain in progress.</div>
             </div>
           </article>
 
@@ -823,10 +823,12 @@ cc hello.o -o hello
           <strong>Active next step:</strong> Continue M3 from the landed integer-ID
           type/layout slice. Parenthesized/array/function declarators, function
           pointer types, enum constants, constant array bounds, and anonymous
-          aggregate-member offsets now pass the real kernel closure; implement
-          GNU attribute placement plus aligned/packed layout semantics next,
-          followed by complete unions/bitfields, designated aggregate
-          initialization, and C promotions. Object translation consumes M2 output directly while
+          aggregate-member offsets now pass the real kernel closure, and the
+          ISO control-flow slice is covered by a system-linked host/stage3 object.
+          Continue only the frozen M3 scope with complete unions/bitfields,
+          qualifiers/linkage/tentative definitions, designated aggregate
+          initialization, variadics, and C promotions. The observed GNU-attribute
+          blocker remains M4 work and must not expand M3. Object translation consumes M2 output directly while
           retaining quoted project declarations and bounding system headers; keep
           the M0 hosted link, M1 Kbuild handshake, and M2 host/stage3 corpus green.
         </div>

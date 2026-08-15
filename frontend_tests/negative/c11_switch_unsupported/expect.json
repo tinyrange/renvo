@@ -1,8 +1,0 @@
-{
-  "phase": "c11",
-  "code": "RENVO-C11-001",
-  "file": "cmd/app/main.c",
-  "line": 2,
-  "column": 5,
-  "message": "C11 source is not supported or is invalid"
-}

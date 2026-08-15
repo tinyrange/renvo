@@ -1028,8 +1028,30 @@ func (t *translator) statement() {
 		t.forStatement()
 		return
 	}
-	if t.currentIs("switch") || t.currentIs("case") || t.currentIs("default") ||
-		t.currentIs("do") || t.currentIs("goto") || t.currentIs("asm") ||
+	if t.take("switch") {
+		t.switchStatement()
+		return
+	}
+	if t.take("do") {
+		t.doStatement()
+		return
+	}
+	if t.take("goto") {
+		if t.kind() != tokenIdent {
+			t.fail(TranslateErrStatement)
+			return
+		}
+		t.out = append(t.out, "goto "...)
+		t.out = append(t.out, tokenText(t.src, t.tokens[t.pos])...)
+		t.pos++
+		if !t.take(";") {
+			t.fail(TranslateErrStatement)
+			return
+		}
+		t.out = append(t.out, ';')
+		return
+	}
+	if t.currentIs("case") || t.currentIs("default") || t.currentIs("asm") ||
 		t.currentIs("__asm") || t.currentIs("__asm__") {
 		t.fail(TranslateErrUnsupported)
 		return
@@ -1067,7 +1089,9 @@ func (t *translator) statement() {
 		return
 	}
 	if t.kind() == tokenIdent && t.pos+1 < len(t.tokens) && tokenIs(t.src, t.tokens[t.pos+1], ":") {
-		t.fail(TranslateErrUnsupported)
+		t.out = append(t.out, tokenText(t.src, t.tokens[t.pos])...)
+		t.out = append(t.out, ':')
+		t.pos += 2
 		return
 	}
 	start := t.pos
@@ -1126,25 +1150,146 @@ func (t *translator) forStatement() {
 		t.fail(TranslateErrStatement)
 		return
 	}
+	declaration := t.isTypeStart()
+	if declaration {
+		t.out = append(t.out, '{')
+		t.localDeclaration()
+		if !t.ok {
+			return
+		}
+		t.out = append(t.out, "for ;"...)
+	} else {
+		end := t.findAtDepth(";")
+		if end < 0 {
+			t.fail(TranslateErrStatement)
+			return
+		}
+		t.out = append(t.out, "for "...)
+		t.expression(t.tokens[t.pos:end])
+		t.out = append(t.out, ';')
+		t.pos = end + 1
+	}
+	end := t.findAtDepth(";")
+	if end < 0 {
+		t.fail(TranslateErrStatement)
+		return
+	}
+	t.condition(t.tokens[t.pos:end])
+	t.out = append(t.out, ';')
+	t.pos = end + 1
 	close := t.findClosing(")")
 	if close < 0 {
 		t.fail(TranslateErrStatement)
 		return
 	}
-	parts := splitTopLevel(t.src, t.tokens[t.pos:close], ";")
-	if len(parts) != 3 || len(parts[0]) > 0 && isTypeToken(t.src, parts[0][0]) {
-		t.fail(TranslateErrUnsupported)
-		return
-	}
-	t.out = append(t.out, "for "...)
-	t.expression(parts[0])
-	t.out = append(t.out, ';')
-	t.condition(parts[1])
-	t.out = append(t.out, ';')
-	t.expression(parts[2])
+	t.expression(t.tokens[t.pos:close])
 	t.pos = close + 1
 	t.out = append(t.out, ' ')
 	t.controlledStatement()
+	if declaration {
+		t.out = append(t.out, '}')
+	}
+}
+
+func (t *translator) switchStatement() {
+	if !t.take("(") {
+		t.fail(TranslateErrStatement)
+		return
+	}
+	close := t.findClosing(")")
+	if close < 0 {
+		t.fail(TranslateErrStatement)
+		return
+	}
+	t.out = append(t.out, "switch "...)
+	t.expression(t.tokens[t.pos:close])
+	t.pos = close + 1
+	if !t.take("{") {
+		t.fail(TranslateErrStatement)
+		return
+	}
+	t.out = append(t.out, '{')
+	haveCase := false
+	terminal := false
+	for t.ok && t.kind() != tokenEOF && !t.currentIs("}") {
+		t.skipDirectives()
+		if t.currentIs("case") || t.currentIs("default") {
+			if haveCase && !terminal {
+				t.out = append(t.out, "fallthrough;"...)
+			}
+			terminal = false
+			haveCase = true
+			if t.take("case") {
+				end := t.findAtDepth(":")
+				if end < 0 || end == t.pos {
+					t.fail(TranslateErrStatement)
+					return
+				}
+				t.out = append(t.out, "case "...)
+				t.expression(t.tokens[t.pos:end])
+				t.out = append(t.out, ':')
+				t.pos = end + 1
+			} else {
+				t.pos++
+				if !t.take(":") {
+					t.fail(TranslateErrStatement)
+					return
+				}
+				t.out = append(t.out, "default:"...)
+			}
+			continue
+		}
+		if !haveCase {
+			t.fail(TranslateErrUnsupported)
+			return
+		}
+		if t.currentIs("break") || t.currentIs("continue") || t.currentIs("return") || t.currentIs("goto") {
+			terminal = true
+		}
+		t.statement()
+		if t.ok {
+			t.out = append(t.out, '\n')
+		}
+	}
+	if !t.take("}") {
+		t.fail(TranslateErrStatement)
+		return
+	}
+	t.out = append(t.out, '}')
+}
+
+func (t *translator) doStatement() {
+	outer := t.out
+	t.out = nil
+	t.controlledStatement()
+	body := t.out
+	t.out = outer
+	if !t.ok || len(body) == 0 || body[0] != '{' || !t.take("while") || !t.take("(") {
+		t.fail(TranslateErrStatement)
+		return
+	}
+	close := t.findClosing(")")
+	if close < 0 {
+		t.fail(TranslateErrStatement)
+		return
+	}
+	t.typeSerial++
+	name := "__c_do_first_" + decimalString(t.typeSerial)
+	t.out = append(t.out, "{var "...)
+	t.out = append(t.out, name...)
+	t.out = append(t.out, " bool=true;for "...)
+	t.out = append(t.out, name...)
+	t.out = append(t.out, "||"...)
+	t.condition(t.tokens[t.pos:close])
+	t.out = append(t.out, " {"...)
+	t.out = append(t.out, name...)
+	t.out = append(t.out, "=false;"...)
+	t.out = append(t.out, body[1:]...)
+	t.out = append(t.out, '}')
+	t.pos = close + 1
+	if !t.take(";") {
+		t.fail(TranslateErrStatement)
+	}
 }
 
 func (t *translator) parenthesizedCondition() {
@@ -1162,6 +1307,10 @@ func (t *translator) parenthesizedCondition() {
 }
 
 func (t *translator) condition(tokens []token) {
+	if len(tokens) == 0 {
+		t.out = append(t.out, "true"...)
+		return
+	}
 	boolean := false
 	for i := 0; i < len(tokens); i++ {
 		if tokenIs(t.src, tokens[i], "==") || tokenIs(t.src, tokens[i], "!=") ||
