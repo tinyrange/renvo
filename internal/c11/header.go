@@ -7,10 +7,11 @@ type IncludeReader interface {
 }
 
 type HeaderResult struct {
-	Prelude   []byte
-	Ok        bool
-	ErrorPath string
-	ErrorAt   int
+	Prelude      []byte
+	Dependencies []string
+	Ok           bool
+	ErrorPath    string
+	ErrorAt      int
 }
 
 type includeSpec struct {
@@ -35,6 +36,9 @@ func BuildObjectPrelude(path string, src []byte, reader IncludeReader) HeaderRes
 		header, headerPath, ok := reader.ReadInclude(path, includes[i].name, includes[i].angled)
 		if !ok {
 			return HeaderResult{Ok: false, ErrorPath: includes[i].name, ErrorAt: includes[i].at}
+		}
+		if findText(result.Dependencies, headerPath) < 0 {
+			result.Dependencies = append(result.Dependencies, headerPath)
 		}
 		declarations, names, ok := headerDeclarations(header, wanted, emitted)
 		if !ok {

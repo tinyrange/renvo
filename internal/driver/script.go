@@ -132,6 +132,22 @@ func objectSourceContext(workDir string, options Options) (string, Options) {
 	return workDir, options
 }
 
+// Kbuild invokes the compiler from the kernel root while naming sources in
+// subdirectories. Resolve search and forced-include paths before the ordinary
+// single-file object path changes its loader context to the source directory.
+func resolveCCompilerPaths(workDir string, options Options) Options {
+	if !options.CCompiler {
+		return options
+	}
+	for i := 0; i < len(options.IncludePaths); i++ {
+		options.IncludePaths[i] = load.JoinPath(workDir, options.IncludePaths[i])
+	}
+	for i := 0; i < len(options.CForcedInclude); i++ {
+		options.CForcedInclude[i] = load.JoinPath(workDir, options.CForcedInclude[i])
+	}
+	return options
+}
+
 func (fs scriptSourceFS) ReadDir(path string) ([]DirEntry, bool) {
 	entries, ok := fs.base.ReadDir(path)
 	return entries, ok

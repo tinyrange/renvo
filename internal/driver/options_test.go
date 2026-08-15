@@ -91,7 +91,7 @@ func TestParseOptionsGoObject(t *testing.T) {
 
 func TestNormalizeCCompilerCommand(t *testing.T) {
 	args := NormalizeCCompilerCommand([]string{"renvo", "cc", "-c", "hello.c", "-o", "hello.o"})
-	want := []string{"renvo", "-c", "hello.c", "-o", "hello.o"}
+	want := []string{"renvo", "-cc", "-c", "hello.c", "-o", "hello.o"}
 	if len(args) != len(want) {
 		t.Fatalf("normalized args = %#v", args)
 	}
@@ -103,6 +103,30 @@ func TestNormalizeCCompilerCommand(t *testing.T) {
 	options := ParseOptions(args[1:])
 	if !options.Ok || options.Mode != ModeObject || options.Target != "linux/amd64" || options.Package != "hello.c" || options.Output != "hello.o" {
 		t.Fatalf("C compiler options = %#v", options)
+	}
+}
+
+func TestNormalizeKbuildCCompilerCommand(t *testing.T) {
+	args := NormalizeCCompilerCommand([]string{"renvo", "cc", "-Wp,-MMD,obj/.leaf.o.d", "-nostdinc", "-Iinclude", "-include", "include/config.h", "-D__KERNEL__", "-std=gnu11", "-m64", "-Wall", "-c", "leaf.c", "-o", "obj/leaf.o"})
+	options := ParseOptions(args[1:])
+	if !options.Ok || !options.CCompiler || !options.CNoStdIncludes || options.DependencyFile != "obj/.leaf.o.d" || len(options.CForcedInclude) != 1 || options.CForcedInclude[0] != "include/config.h" || len(options.CDefines) != 1 || options.CDefines[0] != "__KERNEL__" {
+		t.Fatalf("normalized Kbuild options = %#v (args %#v)", options, args)
+	}
+}
+
+func TestNormalizeKbuildCCompilerCommandRejectsUnknownSemanticFlag(t *testing.T) {
+	args := NormalizeCCompilerCommand([]string{"renvo", "cc", "-fmade-up-semantics", "-c", "leaf.c", "-o", "leaf.o"})
+	options := ParseOptions(args[1:])
+	if options.Ok || options.Error != ParseErrUnknownOption || options.ErrorArg != "-fmade-up-semantics" {
+		t.Fatalf("unknown Kbuild options = %#v", options)
+	}
+}
+
+func TestNormalizeKbuildAssemblyOutput(t *testing.T) {
+	args := NormalizeCCompilerCommand([]string{"renvo", "cc", "-fverbose-asm", "-S", "offsets.c", "-o", "offsets.s"})
+	options := ParseOptions(args[1:])
+	if !options.Ok || options.Mode != ModeObject || !options.CAssemblyOutput {
+		t.Fatalf("assembly output options = %#v (args %#v)", options, args)
 	}
 }
 

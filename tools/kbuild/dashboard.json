@@ -1,0 +1,87 @@
+{
+  "schema": 1,
+  "pin": {
+    "kernel": "linux-6.12.99",
+    "commit": "720e8bcaa674dfa40b989207d6cdb44b3aaa8db6",
+    "config": "x86_64 tinyconfig",
+    "archive_sha256": "6a477222c132033381cda981eb0127f29fbcbba17e820283bc21290f8e408629"
+  },
+  "gate": {
+    "compiler_identity": "GCC-compatible 5.1.0",
+    "unknown_option_probe": "rejected",
+    "first_target_object": "scripts/mod/empty.o",
+    "first_target_object_format": "ELF64 ET_REL x86_64",
+    "dependency_rule_consumed": true,
+    "accepted_target_commands": 1,
+    "blocker": {
+      "path": "scripts/mod/devicetable-offsets.c",
+      "line": 5,
+      "column": 1,
+      "phase": "c11",
+      "code": "RENVO-C11-001"
+    }
+  },
+  "census": {
+    "command_files": 30,
+    "compiler_commands": 14,
+    "target_c_commands": 1,
+    "source_files": {
+      "c": 19,
+      "assembly": 0
+    },
+    "flags": {
+      "defines": 5,
+      "include_paths": 29,
+      "optimizations": 17,
+      "warnings": 73,
+      "preprocessor_dependency": 17,
+      "compile_only": 14,
+      "code_generation": 31,
+      "forced_includes": 3,
+      "machine": 10,
+      "nostdinc": 1,
+      "language_standard": 17
+    },
+    "observed_syntax": {
+      "asm": 3,
+      "attribute": 11,
+      "statement_expression": 1,
+      "typeof": 0
+    },
+    "observed_builtins": {
+      "__builtin_alloca": 2,
+      "__builtin_memcpy": 2
+    },
+    "objects": {
+      "count": 14,
+      "total_bytes": 312544,
+      "maximum_bytes": 49992,
+      "sections": {
+        "bss": 14,
+        "data": 14,
+        "eh_frame": 13,
+        "rela_data": 4,
+        "rela_eh_frame": 13,
+        "rela_rodata": 10,
+        "rela_text": 14,
+        "rodata": 11,
+        "symtab": 14,
+        "text": 14
+      },
+      "relocations": {
+        "R_X86_64_32": 934,
+        "R_X86_64_32S": 234,
+        "R_X86_64_64": 837,
+        "R_X86_64_PC32": 1363,
+        "R_X86_64_PLT32": 1468
+      }
+    }
+  },
+  "telemetry": {
+    "scope": "fresh extracted tree through the checked blocker; informational only",
+    "elapsed_seconds": 2.48,
+    "user_seconds": 1.59,
+    "system_seconds": 0.97,
+    "peak_rss_kib": 44384
+  }
+}

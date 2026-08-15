@@ -529,7 +529,7 @@ cc hello.o -o hello
                 <li>Keep host tools on <code>HOSTCC</code>; only target <code>CC</code> points to Renvo.</li>
                 <li>Add a read-only census over Kbuild <code>.cmd</code> files and classify syntax, builtins, flags, sections, relocations, CPU, RSS, and object sizes.</li>
               </ul>
-              <div class="gate">A pinned blocker dashboard is reproducible, and <code>make ARCH=x86_64 CC=renvo tinyconfig prepare</code> reaches the first genuine preprocessing or language error.</div>
+              <div class="gate">Complete · Linux 6.12.99 x86_64 tinyconfig reaches <code>scripts/mod/devicetable-offsets.c:5:1</code> after Renvo emits Kbuild's first ET_REL object and dependency rule.</div>
             </div>
           </article>
 
@@ -798,33 +798,33 @@ cc hello.o -o hello
     <section id="next">
       <div class="wrap">
         <div class="eyebrow">08 · Immediate sequence</div>
-        <h2>The hosted Hello World slice is green.</h2>
-        <p class="section-intro">These three increments now form a permanent host-and-stage3 acceptance path; the active edge moves to a pinned Kbuild invocation.</p>
+        <h2>The Kbuild handshake is green.</h2>
+        <p class="section-intro">The hosted object path and M1 driver contract now form permanent host-and-stage3 acceptance paths; the active edge moves to the real kernel preprocessor corpus.</p>
 
         <div class="grid three">
           <article class="card next-pr" data-number="1">
-            <h3>Ordinary ET_REL skeleton</h3>
-            <p>Add the thin <code>renvo cc -c</code> persona and emit a conventional Linux/x86_64 object for a no-include <code>int main(void) { return 0; }</code>. Link it through the system C driver and run it.</p>
-            <div class="gate">Complete · <code>readelf</code> accepts the object and the host linker produces a working executable.</div>
+            <h3>Pin and census</h3>
+            <p>Fix Linux 6.12.99 by peeled commit and kernel.org archive digest, select x86_64 <code>tinyconfig</code>, and provide a read-only <code>.cmd</code>, syntax, builtin, flag, ELF section, relocation, object-size, CPU, and RSS census.</p>
+            <div class="gate">Complete · <code>tools/kbuild/prepare</code> recreates the tree and leaves a machine-readable dashboard.</div>
           </article>
           <article class="card next-pr" data-number="2">
-            <h3>Real system-header path</h3>
-            <p>Search installed and explicit include roots and retain referenced external declarations directly from the unmodified header. The first demand-driven slice avoids materializing unrelated libc declarations; complete macro expansion and typedef handling remain M2/M3 work.</p>
-            <div class="gate">Complete · the source compiles through the host's actual <code>stdio.h</code>; there is no bundled replacement header.</div>
+            <h3>Truthful compiler persona</h3>
+            <p>Handle GCC-compatible identity preprocessing, version queries, nested response files, forced includes, target include roots, defines, dependency output, and the pinned harmless/target flags. Preserve strict failure for every unclassified semantic option.</p>
+            <div class="gate">Complete · checked probes succeed only for classified behavior on both the Go-hosted and stage3 compilers.</div>
           </article>
           <article class="card next-pr" data-number="3">
-            <h3>SysV external call + Hello World</h3>
-            <p>Lower string data and the call to <code>puts</code>, emit its undefined symbol and relocation, then add the acceptance path that links with system startup files/libc and checks exact output.</p>
-            <div class="gate">Complete · <code>renvo cc -c hello.c</code> → system link → <code>Hello, world!</code></div>
+            <h3>First Kbuild target object</h3>
+            <p>Keep generators on <code>HOSTCC</code>, compile <code>scripts/mod/empty.c</code> with Renvo, let <code>fixdep</code> consume its dependency rule, and continue until the first source-located C frontend blocker.</p>
+            <div class="gate">Complete · <code>empty.o</code> is accepted; the active blocker is <code>devicetable-offsets.c:5:1</code>.</div>
           </article>
         </div>
 
         <div class="callout">
-          <strong>Active next step:</strong> pin the upstream commit and config,
-          harden the same driver for truthful Kbuild probes and dependency output,
-          capture the census, and expand the preprocessor/type system in blocker
-          order. The Hello World path remains a permanent fast acceptance test for
-          the hosted C ABI and object contract.
+          <strong>Active next step:</strong> M2 turns the bounded identity
+          preprocessor into a streaming token preprocessor for the forced kernel
+          headers and <code>devicetable-offsets.c</code>. Expand macros, includes,
+          conditionals, stringizing, and token pasting in measured blocker order;
+          keep the M0 hosted-link and M1 Kbuild-handshake paths permanently green.
         </div>
       </div>
     </section>

@@ -4,6 +4,7 @@ package bootstrap
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"renvo.dev/internal/driver"
@@ -11,6 +12,30 @@ import (
 
 func Run(args []string, env []string, backend driver.Backend) int {
 	args, backend = bootstrapArgs(args, backend)
+	if response := driver.ExpandCCompilerResponseFiles(args, driver.OSFS{}); response.Ok {
+		args = response.Args
+	} else {
+		fmt.Fprintf(os.Stderr, "renvo cc: could not read response file: %s\n", response.ErrorPath)
+		return 1
+	}
+	if request := driver.InspectCCompilerRequest(args); request.Kind != driver.CCompilerRequestNone {
+		var input []byte
+		if request.Kind == driver.CCompilerRequestPreprocessStdin {
+			var err error
+			input, err = io.ReadAll(os.Stdin)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "renvo cc: failed to read standard input")
+				return 1
+			}
+		}
+		status, output := driver.ExecuteCCompilerRequest(request, input)
+		if status == 0 {
+			fmt.Fprint(os.Stdout, output)
+		} else {
+			fmt.Fprint(os.Stderr, output)
+		}
+		return status
+	}
 	args = driver.NormalizeCCompilerCommand(args)
 	if driver.TestCommandRequested(args) {
 		if len(args) == 3 && (args[2] == "--help" || args[2] == "-h") {

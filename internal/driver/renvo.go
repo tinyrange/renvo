@@ -38,6 +38,22 @@ func RunRenvoCommandCapture(args []string, env []string) (int, string) {
 }
 
 func runRenvoCommand(args []string, env []string) (int, string) {
+	if response := ExpandCCompilerResponseFiles(args, RenvoFS{}); response.Ok {
+		args = response.Args
+	} else {
+		return 1, "renvo cc: could not read response file: " + response.ErrorPath + "\n"
+	}
+	if request := InspectCCompilerRequest(args); request.Kind != CCompilerRequestNone {
+		var input []byte
+		if request.Kind == CCompilerRequestPreprocessStdin {
+			var ok bool
+			input, ok = renvoReadStandardInput()
+			if !ok {
+				return 1, "renvo cc: failed to read standard input\n"
+			}
+		}
+		return ExecuteCCompilerRequest(request, input)
+	}
 	args = NormalizeCCompilerCommand(args)
 	if len(args) > 1 && args[1] == "run" {
 		return runRenvoScript(args, env)
@@ -64,6 +80,8 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 	output := built.Options.Output
 	systemName := built.Options.SystemName
 	moduleLicense := built.Options.ModuleLicense
+	dependencyFile := built.Options.DependencyFile
+	dependencyOutput := CDependencyOutput(built.Options)
 	arenaSize := backendArenaSize(target, built.Options.Tags, built.Options.ArenaSize)
 	if built.Options.EmitUnit {
 		if output == "-" {
@@ -75,6 +93,9 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 			arena.Reset(mark)
 		}
 		return 0, ""
+	}
+	if built.Options.CAssemblyOutput {
+		return finishRenvoCommandFailure(renvoCommandDiagnosticBuffer[:], Diagnostic{Phase: "backend", Code: "RENVO-BACKEND-007", Message: "C assembly output is not implemented"}, resetArena, mark)
 	}
 	persistMark := 0
 	if resetArena {
@@ -88,6 +109,7 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 		output = arena.PersistString(output)
 		systemName = arena.PersistString(systemName)
 		moduleLicense = arena.PersistString(moduleLicense)
+		dependencyFile = arena.PersistString(dependencyFile)
 		backendMark := mark
 		remainder := backendMark % 4096
 		if remainder != 0 {
@@ -121,10 +143,41 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 		}
 		return status, message
 	}
+	if len(dependencyOutput) > 0 {
+		if os.WriteFile(dependencyFile, dependencyOutput, 0644) != nil {
+			if resetArena {
+				arena.PersistReset(persistMark)
+			}
+			return 1, "renvo cc: failed to write dependency file\n"
+		}
+	}
 	if resetArena {
 		arena.PersistReset(persistMark)
 	}
 	return 0, ""
+}
+
+func renvoReadStandardInput() ([]byte, bool) {
+	out := make([]byte, 4096)
+	used := 0
+	for {
+		if used == len(out) {
+			next := make([]byte, len(out)*2)
+			copy(next, out)
+			arena.DiscardBytes(out)
+			out = next
+		}
+		n := read(0, out[used:], -1)
+		if n < 0 {
+			return nil, false
+		}
+		if n == 0 {
+			break
+		}
+		used += n
+	}
+	arena.DiscardBytes(out[used:])
+	return out[:used], true
 }
 
 func finishRenvoCommandFailure(buffer []byte, diagnostic Diagnostic, resetArena bool, mark int) (int, string) {

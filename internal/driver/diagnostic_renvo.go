@@ -48,7 +48,9 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 	d := Diagnostic{Phase: "frontend", Code: "RENVO-FRONTEND-001", Message: "frontend build failed"}
 	if result.Error == BuildErrOptions {
 		d.Phase, d.Code, d.Message = "options", "RENVO-OPTION-001", "invalid command options"
-		if result.Options.Error == ParseErrMixedFileList {
+		if result.Options.Error == ParseErrUnknownOption {
+			d.Code, d.Message = "RENVO-OPTION-005", "unknown option "+result.Options.ErrorArg
+		} else if result.Options.Error == ParseErrMixedFileList {
 			d.Code, d.Message = "RENVO-OPTION-011", "explicit source list contains a non-.go/.c argument "+result.Options.ErrorArg
 		} else if result.Options.Error == ParseErrInvalidModuleLicense {
 			d.Code, d.Message = "RENVO-OPTION-017", "invalid renvo:module-license directive"

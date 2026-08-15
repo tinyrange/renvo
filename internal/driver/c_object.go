@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"renvo.dev/internal/arena"
 	"renvo.dev/internal/c11"
 	"renvo.dev/internal/load"
 )
@@ -26,16 +27,29 @@ func (r cObjectIncludeReader) ReadInclude(from string, name string, angled bool)
 	return nil, name, false
 }
 
-func prepareCObjectSources(result SourceResult, options Options, workDir string, fs SourceFS) SourceResult {
+func prepareCObjectSources(result SourceResult, options *Options, workDir string, fs SourceFS) SourceResult {
 	if !result.Ok || options.Mode != ModeObject {
 		return result
 	}
-	reader := cObjectIncludeReader{fs: fs, paths: cObjectIncludePaths(workDir, options.IncludePaths, fs)}
+	reader := cObjectIncludeReader{fs: fs, paths: cObjectIncludePaths(workDir, options.IncludePaths, options.CNoStdIncludes, fs)}
 	for i := 0; i < len(result.Files); i++ {
 		if !optionArgIsCFile(result.Files[i].Path) {
 			continue
 		}
-		header := c11.BuildObjectPrelude(result.Files[i].Path, result.Files[i].Src, reader)
+		options.CDependencies = appendUniquePath(options.CDependencies, result.Files[i].Path)
+		source := result.Files[i].Src
+		if len(options.CForcedInclude) > 0 {
+			prefix := make([]byte, 0, len(options.CForcedInclude)*32)
+			for j := 0; j < len(options.CForcedInclude); j++ {
+				path := load.JoinPath(workDir, options.CForcedInclude[j])
+				prefix = append(prefix, "#include \""...)
+				prefix = append(prefix, path...)
+				prefix = append(prefix, '"', '\n')
+			}
+			prefix = append(prefix, source...)
+			source = prefix
+		}
+		header := c11.BuildObjectPrelude(result.Files[i].Path, source, reader)
 		if !header.Ok {
 			result = sourceFail(result, SourceErrCInclude, header.ErrorPath)
 			result.ErrorSourcePath = result.Files[i].Path
@@ -44,15 +58,106 @@ func prepareCObjectSources(result SourceResult, options Options, workDir string,
 		}
 		result.Files[i].CObject = true
 		result.Files[i].CPrelude = header.Prelude
+		for j := 0; j < len(header.Dependencies); j++ {
+			options.CDependencies = appendUniquePath(options.CDependencies, header.Dependencies[j])
+		}
 	}
 	return result
 }
 
-func cObjectIncludePaths(workDir string, explicit []string, fs SourceFS) []string {
+// CDependencyOutput emits the make-compatible dependency rule requested by a
+// C compiler invocation. The dependency order follows source discovery and is
+// deterministic for a fixed translation unit.
+func CDependencyOutput(options Options) []byte {
+	if len(options.CDependencyData) > 0 {
+		return options.CDependencyData
+	}
+	if options.DependencyFile == "" {
+		return nil
+	}
+	out := make([]byte, 0, CDependencyOutputSize(options))
+	return AppendCDependencyOutput(out, options)
+}
+
+func CDependencyOutputSize(options Options) int {
+	if len(options.CDependencyData) > 0 {
+		return len(options.CDependencyData)
+	}
+	if options.DependencyFile == "" {
+		return 0
+	}
+	target := options.DependencyTarget
+	if target == "" {
+		target = options.Output
+	}
+	size := makeDependencyWordSize(target) + 2
+	for i := 0; i < len(options.CDependencies); i++ {
+		size += 1 + makeDependencyWordSize(options.CDependencies[i])
+	}
+	return size
+}
+
+func AppendCDependencyOutput(out []byte, options Options) []byte {
+	if len(options.CDependencyData) > 0 {
+		return append(out, options.CDependencyData...)
+	}
+	if options.DependencyFile == "" {
+		return out
+	}
+	target := options.DependencyTarget
+	if target == "" {
+		target = options.Output
+	}
+	out = appendMakeDependencyWord(out, target)
+	out = append(out, ':')
+	for i := 0; i < len(options.CDependencies); i++ {
+		out = append(out, ' ')
+		out = appendMakeDependencyWord(out, options.CDependencies[i])
+	}
+	out = append(out, '\n')
+	return out
+}
+
+func finalizeCDependencyOptions(options Options) Options {
+	if options.DependencyFile == "" || len(options.CDependencyData) > 0 {
+		return options
+	}
+	options.CDependencyData = arena.PersistBytes(CDependencyOutput(options))
+	return options
+}
+
+func makeDependencyWordSize(value string) int {
+	size := len(value)
+	for i := 0; i < len(value); i++ {
+		switch value[i] {
+		case ' ', '\t', '#', ':', '$':
+			size++
+		}
+	}
+	return size
+}
+
+func appendMakeDependencyWord(out []byte, value string) []byte {
+	for i := 0; i < len(value); i++ {
+		switch value[i] {
+		case ' ', '\t', '#', ':':
+			out = append(out, '\\')
+		case '$':
+			out = append(out, '$')
+		}
+		out = append(out, value[i])
+	}
+	return out
+}
+
+func cObjectIncludePaths(workDir string, explicit []string, noStandard bool, fs SourceFS) []string {
 	paths := make([]string, 0, len(explicit)+8)
 	for i := 0; i < len(explicit); i++ {
 		path := load.JoinPath(workDir, explicit[i])
 		paths = appendUniquePath(paths, path)
+	}
+	if noStandard {
+		return paths
 	}
 
 	// GCC installs target-independent headers such as stddef.h ahead of the
