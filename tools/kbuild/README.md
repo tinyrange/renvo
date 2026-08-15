@@ -23,5 +23,5 @@ checked frontend/backend binary-size gates remain authoritative.
 Regenerate a census for any prepared tree without modifying it:
 
 ```sh
-go run ./cmd/renvokbuildcensus -kernel /path/to/linux -out dashboard.json
+go run ./tools/kbuild -kernel /path/to/linux -out dashboard.json
 ```
