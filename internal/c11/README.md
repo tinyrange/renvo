@@ -35,6 +35,9 @@ Aggregate initialization supports positional and chained designated
 structure/array members, repeated-designator overwrite, inferred array bounds,
 nested braces, bitfields, union active members, and structure/union compound
 literals.
+Qualifier IDs are retained on scalar, aggregate, and individual pointer levels;
+`const` lvalue mutation and invalid non-pointer `restrict` are diagnosed, while
+volatile loads/stores remain explicit in the shared unoptimized object path.
 Header directive lines and function prototypes are accepted so declarations can
 be supplied by Go files in the same package. The output-only preprocessing path
 implements translation-phase splicing/comments, recursive includes and
@@ -44,7 +47,7 @@ with hide sets, stringizing/pasting, conditionals and integer expressions,
 now consumes that stream directly: declarations from quoted project headers are
 retained, while large system headers remain bounded by demand-selecting the
 referenced external prototypes. Variadic functions, thread-local storage,
-complete qualifier semantics, integer promotions/conversions, and the remaining
+atomic/remaining qualifier semantics, integer promotions/conversions, and the remaining
 aggregate-initializer edge cases remain frozen M3 work. Direct external variadic
 calls are arity-specialized after C default argument promotion; the shared
 x86_64 object-call descriptor classifies integer and floating arguments and

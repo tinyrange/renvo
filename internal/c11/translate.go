@@ -48,10 +48,11 @@ const (
 )
 
 type declaratorOp struct {
-	kind     int
-	count    int
-	params   []parameter
-	variadic bool
+	kind       int
+	count      int
+	params     []parameter
+	variadic   bool
+	qualifiers int
 }
 
 type initializerPath struct {
@@ -212,6 +213,10 @@ func (t *translator) skipDirectives() {
 func (t *translator) externalDeclaration() {
 	base, storage, ok := t.parseType()
 	if !ok {
+		t.fail(TranslateErrDeclaration)
+		return
+	}
+	if t.typeInfo(base).qualifiers&cQualifierRestrict != 0 && t.typeInfo(base).kind != cTypePointer {
 		t.fail(TranslateErrDeclaration)
 		return
 	}
@@ -593,11 +598,11 @@ func (t *translator) rememberFunction(decl declarator, definition bool) bool {
 		if fn.name != name {
 			continue
 		}
-		if fn.resultType != decl.typeID || fn.paramCount != len(decl.params) || fn.variadic != decl.variadic || definition && fn.defined {
+		if !t.compatibleParameterType(fn.resultType, decl.typeID) || fn.paramCount != len(decl.params) || fn.variadic != decl.variadic || definition && fn.defined {
 			return false
 		}
 		for j := 0; j < fn.paramCount; j++ {
-			if t.functionParams[fn.paramStart+j] != decl.params[j].typeID {
+			if !t.compatibleParameterType(t.functionParams[fn.paramStart+j], decl.params[j].typeID) {
 				return false
 			}
 		}
@@ -615,6 +620,16 @@ func (t *translator) rememberFunction(decl declarator, definition bool) bool {
 		paramCount: len(decl.params), variadic: decl.variadic, defined: definition,
 	})
 	return true
+}
+
+func (t *translator) compatibleParameterType(left int, right int) bool {
+	if left == right {
+		return true
+	}
+	a, b := t.typeInfo(left), t.typeInfo(right)
+	return a.kind == b.kind && a.base == b.base && a.count == b.count &&
+		a.fieldStart == b.fieldStart && a.paramStart == b.paramStart &&
+		a.paramCount == b.paramCount && a.variadic == b.variadic
 }
 
 func (t *translator) fileVariable(decl declarator) bool {
@@ -1030,7 +1045,8 @@ func (t *translator) emitForeignType(typeID int) {
 	// pointer. Object-mode call lowering emits its data word alone, so the ELF
 	// boundary is the exact one-register System V `char *` ABI.
 	info := t.typeInfo(typeID)
-	if info.kind == cTypePointer && info.base == cTypeInt8ID {
+	base := t.typeInfo(info.base)
+	if info.kind == cTypePointer && base.kind == cTypeInt && base.size == 1 {
 		t.out = append(t.out, "string"...)
 		return
 	}
@@ -1039,6 +1055,7 @@ func (t *translator) emitForeignType(typeID int) {
 
 func (t *translator) parseType() (int, int, bool) {
 	storage := storageNone
+	qualifiers := 0
 	unsigned := false
 	longCount := 0
 	base := ""
@@ -1086,7 +1103,17 @@ func (t *translator) parseType() (int, int, bool) {
 				storage = storageInvalid
 			}
 			t.pos++
-		case t.currentIs("const") || t.currentIs("volatile") || t.currentIs("restrict") || t.currentIs("_Atomic"):
+		case t.currentIs("const"):
+			qualifiers |= cQualifierConst
+			t.pos++
+		case t.currentIs("volatile"):
+			qualifiers |= cQualifierVolatile
+			t.pos++
+		case t.currentIs("restrict"):
+			qualifiers |= cQualifierRestrict
+			t.pos++
+		case t.currentIs("_Atomic"):
+			qualifiers |= cQualifierAtomic
 			t.pos++
 		case t.currentIs("unsigned"):
 			unsigned, seen = true, true
@@ -1173,7 +1200,7 @@ done:
 		return cTypeVoidID, storage, false
 	}
 	if hasTypeID {
-		return typeID, storage, true
+		return t.qualifiedType(typeID, qualifiers), storage, true
 	}
 	if base == "" {
 		base = "int"
@@ -1211,7 +1238,7 @@ done:
 			typeID = cTypeUint32ID
 		}
 	}
-	return typeID, storage, true
+	return t.qualifiedType(typeID, qualifiers), storage, true
 }
 
 func (t *translator) parseDeclarator(base int, allowFunction bool) (declarator, bool) {
@@ -1223,7 +1250,7 @@ func (t *translator) parseDeclarator(base int, allowFunction bool) (declarator, 
 	for i := len(ops) - 1; i >= 0; i-- {
 		switch ops[i].kind {
 		case declaratorPointer:
-			result.typeID = t.pointerType(result.typeID)
+			result.typeID = t.qualifiedType(t.pointerType(result.typeID), ops[i].qualifiers)
 		case declaratorArray:
 			result.typeID = t.arrayType(result.typeID, ops[i].count)
 		case declaratorFunction:
@@ -1252,12 +1279,20 @@ func (t *translator) parseDeclarator(base int, allowFunction bool) (declarator, 
 }
 
 func (t *translator) parseDeclaratorOps(abstract bool) (token, []declaratorOp, bool) {
-	pointers := 0
+	var pointerQualifiers []int
 	for t.take("*") {
-		pointers++
+		qualifiers := 0
 		for t.currentIs("const") || t.currentIs("volatile") || t.currentIs("restrict") {
+			if t.currentIs("const") {
+				qualifiers |= cQualifierConst
+			} else if t.currentIs("volatile") {
+				qualifiers |= cQualifierVolatile
+			} else {
+				qualifiers |= cQualifierRestrict
+			}
 			t.pos++
 		}
+		pointerQualifiers = append(pointerQualifiers, qualifiers)
 	}
 	var name token
 	var ops []declaratorOp
@@ -1301,9 +1336,8 @@ func (t *translator) parseDeclaratorOps(abstract bool) (token, []declaratorOp, b
 		}
 		break
 	}
-	for pointers > 0 {
-		ops = append(ops, declaratorOp{kind: declaratorPointer})
-		pointers--
+	for i := len(pointerQualifiers) - 1; i >= 0; i-- {
+		ops = append(ops, declaratorOp{kind: declaratorPointer, qualifiers: pointerQualifiers[i]})
 	}
 	return name, ops, true
 }
@@ -1322,6 +1356,9 @@ func (t *translator) parseParameterList() ([]parameter, bool, bool) {
 		if !ok {
 			return params, false, false
 		}
+		if t.typeInfo(paramBase).qualifiers&cQualifierRestrict != 0 && t.typeInfo(paramBase).kind != cTypePointer {
+			return params, false, false
+		}
 		name, ops, ok := t.parseDeclaratorOps(true)
 		if !ok {
 			return params, false, false
@@ -1330,7 +1367,7 @@ func (t *translator) parseParameterList() ([]parameter, bool, bool) {
 		for i := len(ops) - 1; i >= 0; i-- {
 			switch ops[i].kind {
 			case declaratorPointer:
-				paramType = t.pointerType(paramType)
+				paramType = t.qualifiedType(t.pointerType(paramType), ops[i].qualifiers)
 			case declaratorArray:
 				paramType = t.arrayType(paramType, ops[i].count)
 			case declaratorFunction:
@@ -1651,6 +1688,10 @@ func (t *translator) localDeclaration() {
 		t.fail(TranslateErrUnsupported)
 		return
 	}
+	if t.typeInfo(base).qualifiers&cQualifierRestrict != 0 && t.typeInfo(base).kind != cTypePointer {
+		t.fail(TranslateErrDeclaration)
+		return
+	}
 	if storage == storageThread {
 		t.fail(TranslateErrUnsupported)
 		return
@@ -1890,10 +1931,71 @@ func (t *translator) condition(tokens []token) {
 }
 
 func (t *translator) expression(tokens []token) {
+	if t.rejectConstMutation(tokens) {
+		return
+	}
 	if t.emitBitfieldMutation(tokens) {
 		return
 	}
 	t.emitExpression(tokens)
+}
+
+func (t *translator) rejectConstMutation(tokens []token) bool {
+	depth := 0
+	for i := 0; i < len(tokens); i++ {
+		switch {
+		case tokenIs(t.src, tokens[i], "(") || tokenIs(t.src, tokens[i], "["):
+			depth++
+		case tokenIs(t.src, tokens[i], ")") || tokenIs(t.src, tokens[i], "]"):
+			depth--
+		}
+		if depth == 0 && isAssignmentToken(t.src, tokens[i]) {
+			if t.typeInfo(t.lvalueType(tokens[:i])).qualifiers&cQualifierConst != 0 {
+				t.fail(TranslateErrUnsupported)
+				return true
+			}
+			return false
+		}
+	}
+	if len(tokens) > 1 && (tokenIs(t.src, tokens[0], "++") || tokenIs(t.src, tokens[0], "--")) {
+		if t.typeInfo(t.lvalueType(tokens[1:])).qualifiers&cQualifierConst != 0 {
+			t.fail(TranslateErrUnsupported)
+			return true
+		}
+	}
+	if len(tokens) > 1 && (tokenIs(t.src, tokens[len(tokens)-1], "++") || tokenIs(t.src, tokens[len(tokens)-1], "--")) {
+		if t.typeInfo(t.lvalueType(tokens[:len(tokens)-1])).qualifiers&cQualifierConst != 0 {
+			t.fail(TranslateErrUnsupported)
+			return true
+		}
+	}
+	return false
+}
+
+func (t *translator) lvalueType(tokens []token) int {
+	if len(tokens) == 1 && tokenKind(tokens[0]) == tokenIdent {
+		if object, ok := t.lookupObject(tokenText(t.src, tokens[0])); ok {
+			return object.typeID
+		}
+	}
+	if access, ok := t.memberAccess(tokens, 0); ok && access.end == len(tokens) {
+		return access.typeID
+	}
+	if len(tokens) > 1 && tokenIs(t.src, tokens[0], "*") {
+		pointer := t.typeInfo(t.expressionType(tokens[1:]))
+		if pointer.kind == cTypePointer {
+			return pointer.base
+		}
+	}
+	if len(tokens) > 3 && tokenKind(tokens[0]) == tokenIdent && tokenIs(t.src, tokens[1], "[") && tokenIs(t.src, tokens[len(tokens)-1], "]") {
+		if object, ok := t.lookupObject(tokenText(t.src, tokens[0])); ok {
+			info := t.typeInfo(object.typeID)
+			if info.kind == cTypeArray || info.kind == cTypePointer {
+				return info.base
+			}
+		}
+	}
+	return cTypeVoidID
 }
 
 func (t *translator) emitExpression(tokens []token) {
@@ -2617,6 +2719,10 @@ func (t *translator) memberAccess(tokens []token, start int) (cMemberAccess, boo
 		if !found {
 			break
 		}
+		fieldType := field.typeID
+		if aggregate.qualifiers&cQualifierConst != 0 {
+			fieldType = t.qualifiedType(fieldType, cQualifierConst)
+		}
 		receiver := append([]byte{}, result.expr...)
 		if field.bitWidth > 0 {
 			expr = append(expr, ".__c_get_"...)
@@ -2625,7 +2731,7 @@ func (t *translator) memberAccess(tokens []token, start int) (cMemberAccess, boo
 			result.expr = expr
 			result.receiver = receiver
 			result.field = field
-			result.typeID = field.typeID
+			result.typeID = fieldType
 			result.end += 2
 			result.bitfield = true
 			return result, true
@@ -2646,7 +2752,7 @@ func (t *translator) memberAccess(tokens []token, start int) (cMemberAccess, boo
 		}
 		result.expr = expr
 		result.field = field
-		result.typeID = field.typeID
+		result.typeID = fieldType
 		result.end += 2
 	}
 	return result, result.end > start+1
