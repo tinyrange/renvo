@@ -51,6 +51,13 @@ func TestParseOptionsAcceptsExplicitGoFiles(t *testing.T) {
 	}
 }
 
+func TestParseOptionsAcceptsMixedGoAndCFiles(t *testing.T) {
+	options := ParseOptions([]string{"main.go", "-o", "app", "helper.c"})
+	if !options.Ok || len(options.Files) != 2 || options.Files[1] != "helper.c" {
+		t.Fatalf("mixed file-list options = %#v", options)
+	}
+}
+
 func TestCommandHelpRequested(t *testing.T) {
 	for _, args := range [][]string{nil, {"renvo"}, {"renvo", "--help"}} {
 		if !CommandHelpRequested(args) {
@@ -60,7 +67,7 @@ func TestCommandHelpRequested(t *testing.T) {
 	if CommandHelpRequested([]string{"renvo", "-o", "app", "."}) {
 		t.Fatal("compile command requested help")
 	}
-	for _, want := range []string{"Usage: renvo", "-o <file>", "-system <file.rtg>", "-mode=<mode>", "kernel-module", "file.go...", "Exactly the named files", "windows/amd64", "windows/arm64", "darwin/arm64", "wasi/wasm32", "vm/vm32"} {
+	for _, want := range []string{"Usage: renvo", "-o <file>", "-system <file.rtg>", "-mode=<mode>", "kernel-module", "source files...", "Explicit .go and .c files", "Exactly the named files", "windows/amd64", "windows/arm64", "darwin/arm64", "wasi/wasm32", "vm/vm32"} {
 		if !strings.Contains(HelpText, want) {
 			t.Fatalf("HelpText missing %q", want)
 		}
@@ -118,6 +125,7 @@ func TestParseOptionsRejectsInvalidInputs(t *testing.T) {
 		{name: "missing mode", args: []string{"-mode=", "-o", "app", "main.go"}, err: ParseErrMissingMode, arg: "-mode=", at: 0},
 		{name: "unsupported mode", args: []string{"-mode=firmware", "-o", "app", "main.go"}, err: ParseErrUnsupportedMode, arg: "firmware", at: 0},
 		{name: "kernel module on non-Linux target", args: []string{"-mode=kernel-module", "-t", "windows/amd64", "-o", "app.ko", "main.go"}, err: ParseErrModeRequiresLinuxAmd64, arg: "windows/amd64", at: 0},
+		{name: "C script", args: []string{"-script", "-o", "app", "main.c"}, err: ParseErrScriptRequiresGo, arg: "main.c", at: 4},
 	}
 	for i := 0; i < len(tests); i++ {
 		tc := tests[i]

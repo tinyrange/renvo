@@ -215,7 +215,7 @@ func contains(values []string, value string) bool {
 }
 
 func driverHelpSource(descriptors []sourceDescriptor) []byte {
-	const prefix = "Usage: renvo -o <file> [-t <target>] [-backend <file.rtg|file.rtgb>] [-system <file.rtg>] [-mode=<mode>] [-tags <list>] [-arena-size <bytes>] [-s] [-emit-unit] [-emit-image] [-windows-gui] <package | file.go...>\n" +
+	const prefix = "Usage: renvo -o <file> [-t <target>] [-backend <file.rtg|file.rtgb>] [-system <file.rtg>] [-mode=<mode>] [-tags <list>] [-arena-size <bytes>] [-s] [-emit-unit] [-emit-image] [-windows-gui] <package | source files...>\n" +
 		"       renvo run [build options] <script.go> [-- script arguments...]\n" +
 		"       renvo test [build options] [package]\n" +
 		"Options:\n" +
@@ -228,8 +228,8 @@ func driverHelpSource(descriptors []sourceDescriptor) []byte {
 		"  -script      compile one file whose top-level statements form func main\n" +
 		"  -windows-gui select the Windows GUI subsystem instead of the console subsystem\n" +
 		"Source files:\n" +
-		"  Explicit .go files must share one directory and package. Exactly the named files are used;\n" +
-		"  build constraints and OS/architecture suffixes are ignored, while _test.go files are skipped.\n" +
+		"  Explicit .go and .c files must share one directory and package. Exactly the named files are used;\n" +
+		"  build constraints and OS/architecture suffixes are ignored, while test files are skipped.\n" +
 		"Targets:\n  "
 	const suffix = "Unsupported language/toolchain features:\n  generics, cgo\nConcurrency:\n  goroutines, channels, and select are frontend-lowered through renvo.dev/x/runtime; v1 handlers serialize execution.\n"
 	var advertised []string

@@ -49,7 +49,7 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 	if result.Error == BuildErrOptions {
 		d.Phase, d.Code, d.Message = "options", "RENVO-OPTION-001", "invalid command options"
 		if result.Options.Error == ParseErrMixedFileList {
-			d.Code, d.Message = "RENVO-OPTION-011", "explicit source list contains a non-.go argument "+result.Options.ErrorArg
+			d.Code, d.Message = "RENVO-OPTION-011", "explicit source list contains a non-.go/.c argument "+result.Options.ErrorArg
 		} else if result.Options.Error == ParseErrInvalidModuleLicense {
 			d.Code, d.Message = "RENVO-OPTION-017", "invalid renvo:module-license directive"
 		} else if result.Options.Error == ParseErrConflictingModuleLicense {
@@ -64,6 +64,8 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			d.Code, d.Message = "RENVO-OPTION-022", "-system cannot be combined with -t"
 		} else if result.Options.Error == ParseErrSystemArenaConflict {
 			d.Code, d.Message = "RENVO-OPTION-023", "-system cannot be combined with -arena-size"
+		} else if result.Options.Error == ParseErrScriptRequiresGo {
+			d.Code, d.Message = "RENVO-OPTION-028", "-script requires a .go source file"
 		}
 		return d
 	}
@@ -102,7 +104,7 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 		} else if result.Sources.Error == SourceErrFileDirectory {
 			d.Code, d.Message = "RENVO-LOAD-021", "named source files must all be in one directory"
 		} else if result.Sources.Error == SourceErrFileListEmpty {
-			d.Code, d.Message = "RENVO-LOAD-022", "explicit source list contains no buildable Go files"
+			d.Code, d.Message = "RENVO-LOAD-022", "explicit source list contains no buildable Go or C files"
 		}
 		if result.Sources.ErrorSourcePath != "" {
 			d.Path = result.Sources.ErrorSourcePath
@@ -155,12 +157,14 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 				packageError := graph.Packages[pkg].Error
 				if packageError == load.PackageErrParse {
 					d.Phase, d.Code, d.Message = "parser", "RENVO-PARSE-001", "source syntax is invalid"
+				} else if packageError == load.PackageErrC11 {
+					d.Phase, d.Code, d.Message = "c11", "RENVO-C11-001", "C11 source is not supported or is invalid"
 				} else if packageError == load.PackageErrName {
 					d.Code, d.Message = "RENVO-LOAD-012", "files in one directory declare different packages"
 				} else if packageError == load.PackageErrImport {
 					d.Code, d.Message = "RENVO-LOAD-008", "import could not be resolved"
 				} else if packageError == load.PackageErrNoFiles {
-					d.Code, d.Message = "RENVO-LOAD-013", "package contains no selected Go files"
+					d.Code, d.Message = "RENVO-LOAD-013", "package contains no selected Go or C files"
 				}
 				result.ErrorPackage = pkg
 				result.ErrorFile = graph.Packages[pkg].ErrorFile
@@ -265,6 +269,25 @@ func renvoBuildDiagnosticLocation(result BuildResult, d Diagnostic) Diagnostic {
 	}
 	source := graph.Packages[pkg].Files[file]
 	d.Path = source.Path
+	if graph.Packages[pkg].Error == load.PackageErrC11 {
+		d.Start = graph.Packages[pkg].ErrorOffset
+		if d.Start < 0 {
+			d.Start = 0
+		}
+		if d.Start > len(source.Src) {
+			d.Start = len(source.Src)
+		}
+		d.End = d.Start
+		d.Line, d.Column = 1, 1
+		for i := 0; i < d.Start; i++ {
+			if source.Src[i] == '\n' {
+				d.Line, d.Column = d.Line+1, 1
+			} else {
+				d.Column++
+			}
+		}
+		return d
+	}
 	tok := result.ErrorToken
 	if tok < 0 || tok >= len(source.File.Tokens) {
 		return d
