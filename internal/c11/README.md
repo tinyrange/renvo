@@ -25,7 +25,9 @@ integer-ID C types in flat arenas, typedef names, named and anonymous structures
 x86_64 LP64 field/array layout, anonymous aggregate-member promotion, enum
 constants, recursive parenthesized/array/function declarators, function-pointer
 types, and constant folding for `sizeof`, `_Alignof`, array bounds, and
-direct-field `__builtin_offsetof`.
+direct-field `__builtin_offsetof`. SysV union storage uses alignment-preserving
+carriers with typed overlapping access, and integer/`_Bool` bitfields use
+allocation-unit layout plus generated read/modify/write accessors.
 Header directive lines and function prototypes are accepted so declarations can
 be supplied by Go files in the same package. The output-only preprocessing path
 implements translation-phase splicing/comments, recursive includes and
@@ -34,8 +36,8 @@ with hide sets, stringizing/pasting, conditionals and integer expressions,
 `#line`, target predefines, and transitive dependency capture. Object translation
 now consumes that stream directly: declarations from quoted project headers are
 retained, while large system headers remain bounded by demand-selecting the
-referenced external prototypes. Variadic functions, complete union access,
-bitfields, qualifiers/linkage, integer promotions/conversions, and complete
-aggregate initialization remain frozen M3 work. Attributes and the other GNU C
-surface remain M4 work. Unsupported constructs must fail in this frontend
-rather than reaching a backend.
+referenced external prototypes. Variadic functions, qualifiers/linkage,
+integer promotions/conversions, and complete aggregate initialization remain
+frozen M3 work. Attributes and the other GNU C surface remain M4 work.
+Unsupported constructs must fail in this frontend rather than reaching a
+backend.

@@ -278,6 +278,17 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 		found = true
 		c.files = append(c.files, load.SourceFile{Path: path, Src: src, ArenaStart: arenaStart, ArenaEnd: arenaEnd})
 		if !goSource {
+			// C translation can introduce the unsafe.Pointer import used for exact
+			// union overlap after source discovery has completed. Make that small
+			// standard package available to the normal graph loader up front; the
+			// graph still retains it only when translated source imports it.
+			unsafeRef := load.ResolveImport(owner, c.stdRoot, "unsafe")
+			if _, present := c.fs.ReadDir(unsafeRef.Dir); unsafeRef.Ok && present {
+				c.collectPackage(unsafeRef)
+				if !c.ok {
+					return
+				}
+			}
 			continue
 		}
 		imports, importsOK := collectSourceImports(owner, c.stdRoot, src)

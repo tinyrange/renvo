@@ -40,6 +40,16 @@ func TestFrontendStage3CObjectControlFlowSystemLink(t *testing.T) {
 	runCObjectControlFlowSystemLink(t, selfHostedFrontendCompiler(t, root))
 }
 
+func TestFrontendCObjectUnionBitfieldSystemLink(t *testing.T) {
+	root := repoRoot(t)
+	runCObjectUnionBitfieldSystemLink(t, frontendCompiler(t, root))
+}
+
+func TestFrontendStage3CObjectUnionBitfieldSystemLink(t *testing.T) {
+	root := repoRoot(t)
+	runCObjectUnionBitfieldSystemLink(t, selfHostedFrontendCompiler(t, root))
+}
+
 func TestFrontendCObjectWithoutMainSystemLink(t *testing.T) {
 	root := repoRoot(t)
 	frontend := frontendCompiler(t, root)
@@ -163,6 +173,70 @@ func runCObjectSystemLink(t *testing.T, frontend frontendConfig) {
 	}
 	if combined, err := exec.Command(executable).CombinedOutput(); err != nil || string(combined) != "Hello, world!\n" {
 		t.Fatalf("run linked C object: %v, output %q", err, combined)
+	}
+}
+
+func runCObjectUnionBitfieldSystemLink(t *testing.T, frontend frontendConfig) {
+	t.Helper()
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skip("the first C object target is Linux/amd64")
+	}
+	linkerDriver, err := exec.LookPath("cc")
+	if err != nil {
+		t.Skip("system C linker driver is unavailable")
+	}
+	dir := t.TempDir()
+	source := filepath.Join(dir, "layout.c")
+	harness := filepath.Join(dir, "harness.c")
+	object := filepath.Join(dir, "layout.o")
+	executable := filepath.Join(dir, "layout-test")
+	if err := os.WriteFile(source, []byte(`union word {
+	unsigned whole;
+	unsigned char bytes[4];
+};
+struct flags {
+	unsigned low : 3;
+	unsigned high : 5;
+	signed delta : 6;
+	unsigned : 0;
+	_Bool ready : 1;
+	unsigned tail : 7;
+};
+int renvo_union_bits(void) {
+	union word word;
+	union word *word_cursor = &word;
+	struct flags flags;
+	struct flags *flag_cursor = &flags;
+	word_cursor->whole = 0x04030201;
+	flags.low = 5;
+	flags.high = 17;
+	flags.delta = -3;
+	flags.ready = 1;
+	flag_cursor->tail = 65;
+	flags.low += 1;
+	return sizeof(union word) + sizeof(struct flags) + word.bytes[0] +
+		flags.low + flags.high + flags.delta + flags.ready + flags.tail;
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(harness, []byte(`extern int renvo_union_bits(void);
+int main(void) { return renvo_union_bits() == 103 ? 0 : 1; }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := frontendCommand(frontend, "cc", "-c", filepath.Base(source), "-o", object)
+	command.Dir = dir
+	command.Env = frontendCommandEnv(frontend.env, dir)
+	if combined, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("compile C union/bitfield object with Renvo: %v\n%s", err, combined)
+	}
+	link := exec.Command(linkerDriver, harness, object, "-o", executable)
+	if combined, err := link.CombinedOutput(); err != nil {
+		t.Fatalf("system-link C union/bitfield object: %v\n%s", err, combined)
+	}
+	if combined, err := exec.Command(executable).CombinedOutput(); err != nil {
+		t.Fatalf("run linked C union/bitfield object: %v, output %q", err, combined)
 	}
 }
 

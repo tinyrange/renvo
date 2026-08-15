@@ -254,6 +254,56 @@ int layout(void) {
 	}
 }
 
+func TestTranslateUnionOverlapAndBitfieldAccess(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+union word {
+	unsigned whole;
+	unsigned char bytes[4];
+};
+struct flags {
+	unsigned low : 3;
+	unsigned high : 5;
+	signed delta : 6;
+	unsigned : 0;
+	_Bool ready : 1;
+	unsigned tail : 7;
+};
+int inspect(void) {
+	union word word;
+	union word *word_cursor = &word;
+	struct flags flags;
+	struct flags *flag_cursor = &flags;
+	word_cursor->whole = 0x04030201;
+	flags.low = 5;
+	flags.high = 17;
+	flags.delta = -3;
+	flags.ready = 1;
+	flag_cursor->tail = 65;
+	flags.low += 1;
+	return sizeof(union word) + sizeof(struct flags) + word.bytes[0] +
+		flags.low + flags.high + flags.delta + flags.ready + flags.tail;
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("union/bitfield translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{
+		[]byte("import __c_unsafe \"unsafe\""),
+		[]byte("func(p *__c_union_word)__c_ptr_whole()*uint32"),
+		[]byte("func(p *__c_struct_flags)__c_get_delta() int32"),
+		[]byte("flags.__c_set_low(flags.__c_get_low()+1)"),
+		[]byte("(*word_cursor.__c_ptr_whole())=0x04030201"),
+		[]byte("return 4+12+(*word.__c_ptr_bytes())[0]+flags.__c_get_low()"),
+	} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("translated union/bitfield source is missing %q:\n%s", want, result.Source)
+		}
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("translated union/bitfield source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
 func TestTranslateCompleteISOControlFlow(t *testing.T) {
 	result := TranslateObject("main", []byte(`
 int control(int choice) {

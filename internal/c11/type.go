@@ -53,10 +53,13 @@ type cTypeInfo struct {
 }
 
 type cField struct {
-	name   string
-	typeID int
-	offset int
-	emit   bool
+	name      string
+	typeID    int
+	offset    int
+	bitOffset int
+	bitWidth  int
+	carrier   string
+	emit      bool
 }
 
 type cTypeName struct {
@@ -67,6 +70,20 @@ type cTypeName struct {
 type cValueName struct {
 	name  string
 	value int
+}
+
+type cObjectName struct {
+	name   string
+	typeID int
+}
+
+type cMemberAccess struct {
+	expr     []byte
+	receiver []byte
+	field    cField
+	typeID   int
+	end      int
+	bitfield bool
 }
 
 func (t *translator) initTypes(dataModel int) {

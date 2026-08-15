@@ -557,7 +557,7 @@ cc hello.o -o hello
                 <li>Represent types and declarations by integer IDs in flat arenas; avoid pointer-rich object graphs.</li>
                 <li>Reject VLAs initially if the selected kernel config forbids them; parse them well enough to diagnose precisely.</li>
               </ul>
-              <div class="gate">Active · host/stage3 object regressions now cover quoted project headers, typedef structs, LP64 padding, recursive declarators, function-pointer types, enum constants, arrays, globals, pointers, calls, and ISO control flow including C switch fallthrough, do/while, labels/goto, and declaration-form for. The fresh pinned header closure remains at the M4 GNU-attribute frontier with 1.98 s prepare wall / 35,044 KiB peak RSS and 0.02 s preprocess wall / 16,096 KiB peak RSS; the stripped frontend is 1,906,225 bytes. The M3 scope above is frozen and full ISO C semantics remain in progress.</div>
+              <div class="gate">Active · host/stage3 object regressions now cover quoted project headers, typedef structs, LP64 padding, recursive declarators, function-pointer types, enum constants, arrays, globals, pointers, calls, ISO control flow, true union overlap, and signed/unsigned/<code>_Bool</code> bitfield layout and read/modify/write access. The fresh pinned header closure remains at the M4 GNU-attribute frontier with 1.99 s prepare wall / 34,724 KiB peak RSS; the stripped frontend plus x86_64 backends is 1,934,835 bytes. The M3 scope above is frozen and full ISO C semantics remain in progress.</div>
             </div>
           </article>
 
@@ -825,8 +825,8 @@ cc hello.o -o hello
           pointer types, enum constants, constant array bounds, and anonymous
           aggregate-member offsets now pass the real kernel closure, and the
           ISO control-flow slice is covered by a system-linked host/stage3 object.
-          Continue only the frozen M3 scope with complete unions/bitfields,
-          qualifiers/linkage/tentative definitions, designated aggregate
+          Continue only the frozen M3 scope with qualifiers/linkage/tentative
+          definitions, designated aggregate
           initialization, variadics, and C promotions. The observed GNU-attribute
           blocker remains M4 work and must not expand M3. Object translation consumes M2 output directly while
           retaining quoted project declarations and bounding system headers; keep

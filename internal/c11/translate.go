@@ -65,10 +65,13 @@ type translator struct {
 	tags           []cTypeName
 	opaqueTypes    []cTypeName
 	values         []cValueName
+	objects        []cObjectName
 	functionParams []int
 	typeSerial     int
 	dataModel      int
 	pointerSize    int
+	packageHeader  int
+	usesUnsafe     bool
 }
 
 // Translate lowers one preprocessed C translation unit into the shared Go
@@ -100,11 +103,19 @@ func translate(packageName string, src []byte, prelude []byte, object bool, data
 	t.out = append(t.out, "package "...)
 	t.out = append(t.out, packageName...)
 	t.out = append(t.out, '\n')
+	t.packageHeader = len(t.out)
 	if len(prelude) > 0 && !t.translateSource(prelude) {
 		return Result{Ok: false, Error: t.err, ErrorAt: -1}
 	}
 	if !t.translateSource(src) {
 		return Result{Ok: false, Error: t.err, ErrorAt: t.errorAt}
+	}
+	if t.usesUnsafe {
+		declaration := []byte("import __c_unsafe \"unsafe\"\n")
+		at := t.packageHeader
+		t.out = append(t.out, make([]byte, len(declaration))...)
+		copy(t.out[at+len(declaration):], t.out[at:len(t.out)-len(declaration)])
+		copy(t.out[at:], declaration)
 	}
 	return Result{Source: t.out, Ok: true, Error: TranslateOK, ErrorAt: -1}
 }
@@ -281,6 +292,12 @@ func (t *translator) parseAggregateType(union bool) (int, bool) {
 	offset := 0
 	maxAlign := 1
 	maxSize := 0
+	bitActive := false
+	bitSize := 0
+	bitAlign := 0
+	bitOffset := 0
+	bitUsed := 0
+	bitCarrier := ""
 	for !t.currentIs("}") && t.kind() != tokenEOF {
 		fieldBase, storage, ok := t.parseType()
 		if !ok || storage != storageNone && storage != storageOther {
@@ -316,12 +333,79 @@ func (t *translator) parseAggregateType(union bool) (int, bool) {
 			continue
 		}
 		for {
-			field, valid := t.parseDeclarator(fieldBase, false)
+			field := declarator{typeID: fieldBase}
+			valid := true
+			if !t.currentIs(":") {
+				field, valid = t.parseDeclarator(fieldBase, false)
+			}
 			if !valid {
 				return cTypeVoidID, false
 			}
 			fieldInfo := t.typeInfo(field.typeID)
 			alignment := t.typeAlign(field.typeID)
+			if t.take(":") {
+				if fieldInfo.kind != cTypeInt && fieldInfo.kind != cTypeUint && fieldInfo.kind != cTypeBool {
+					return cTypeVoidID, false
+				}
+				end := t.findFieldSeparator()
+				if end <= t.pos {
+					return cTypeVoidID, false
+				}
+				width, widthOK := t.constantExpression(t.tokens[t.pos:end])
+				if !widthOK || width < 0 || width > fieldInfo.size*8 || width == 0 && len(tokenText(t.src, field.name)) != 0 {
+					return cTypeVoidID, false
+				}
+				t.pos = end
+				if alignment > maxAlign {
+					maxAlign = alignment
+				}
+				if union {
+					bitActive = false
+					if width > 0 && fieldInfo.size > maxSize {
+						maxSize = fieldInfo.size
+					}
+					if len(tokenText(t.src, field.name)) > 0 {
+						aggregateFields = append(aggregateFields, cField{
+							name: string(tokenText(t.src, field.name)), typeID: field.typeID,
+							offset: 0, bitWidth: width,
+						})
+					}
+				} else if width == 0 {
+					bitActive = false
+					offset = alignC(offset, alignment)
+				} else {
+					storageType := t.unsignedStorageType(fieldInfo.size)
+					if !bitActive || bitSize != fieldInfo.size || bitAlign != alignment || width > bitSize*8-bitUsed {
+						offset = alignC(offset, alignment)
+						bitOffset = offset
+						offset += fieldInfo.size
+						bitSize = fieldInfo.size
+						bitAlign = alignment
+						bitUsed = 0
+						bitActive = true
+						t.typeSerial++
+						bitCarrier = "__c_bits_" + decimalString(t.typeSerial)
+						aggregateFields = append(aggregateFields, cField{
+							name: bitCarrier, typeID: storageType, offset: bitOffset, emit: true,
+						})
+					}
+					if len(tokenText(t.src, field.name)) > 0 {
+						aggregateFields = append(aggregateFields, cField{
+							name: string(tokenText(t.src, field.name)), typeID: field.typeID,
+							offset: bitOffset, bitOffset: bitUsed, bitWidth: width, carrier: bitCarrier,
+						})
+					}
+					bitUsed += width
+					if bitUsed == bitSize*8 {
+						bitActive = false
+					}
+				}
+				if !t.take(",") {
+					break
+				}
+				continue
+			}
+			bitActive = false
 			fieldOffset := 0
 			if union {
 				if fieldInfo.size > maxSize {
@@ -359,6 +443,7 @@ func (t *translator) parseAggregateType(union bool) (int, bool) {
 	t.types[typeID].fieldStart = fieldStart
 	t.types[typeID].fieldCount = len(t.fields) - fieldStart
 	t.emitAggregateDeclaration(typeID)
+	t.emitAggregateAccessors(typeID)
 	return typeID, true
 }
 
@@ -446,6 +531,49 @@ func (t *translator) lookupValue(name []byte) (int, bool) {
 	return 0, false
 }
 
+func (t *translator) rememberObject(name []byte, typeID int) {
+	if len(name) == 0 {
+		return
+	}
+	t.objects = append(t.objects, cObjectName{name: string(name), typeID: typeID})
+}
+
+func (t *translator) lookupObject(name []byte) (int, bool) {
+	for i := len(t.objects) - 1; i >= 0; i-- {
+		if textEquals(name, t.objects[i].name) {
+			return t.objects[i].typeID, true
+		}
+	}
+	return cTypeVoidID, false
+}
+
+func (t *translator) lookupField(typeID int, name []byte) (cField, bool) {
+	info := t.typeInfo(typeID)
+	if info.kind != cTypeStruct && info.kind != cTypeUnion {
+		return cField{}, false
+	}
+	for i := 0; i < info.fieldCount; i++ {
+		field := t.fields[info.fieldStart+i]
+		if textEquals(name, field.name) {
+			return field, true
+		}
+	}
+	return cField{}, false
+}
+
+func (t *translator) unsignedStorageType(size int) int {
+	switch size {
+	case 1:
+		return cTypeUint8ID
+	case 2:
+		return cTypeUint16ID
+	case 4:
+		return cTypeUint32ID
+	default:
+		return cTypeUint64ID
+	}
+}
+
 func (t *translator) emitAggregateDeclaration(typeID int) {
 	info := t.typeInfo(typeID)
 	t.out = append(t.out, "type "...)
@@ -482,6 +610,140 @@ func (t *translator) emitAggregateDeclaration(typeID int) {
 		t.out = append(t.out, ';')
 	}
 	t.out = append(t.out, '}', ';', '\n')
+}
+
+func (t *translator) emitAggregateAccessors(typeID int) {
+	info := t.typeInfo(typeID)
+	for i := 0; i < info.fieldCount; i++ {
+		field := t.fields[info.fieldStart+i]
+		if field.name == "" || field.emit && info.kind != cTypeUnion {
+			continue
+		}
+		if field.bitWidth == 0 {
+			if info.kind != cTypeUnion {
+				continue
+			}
+			t.usesUnsafe = true
+			t.out = append(t.out, "func(p *"...)
+			t.out = append(t.out, info.goName...)
+			t.out = append(t.out, ")__c_ptr_"...)
+			t.out = append(t.out, field.name...)
+			t.out = append(t.out, "()*"...)
+			t.emitType(field.typeID)
+			t.out = append(t.out, "{return (*"...)
+			t.emitType(field.typeID)
+			t.out = append(t.out, ")(__c_unsafe.Pointer(p))}\n"...)
+			continue
+		}
+		t.emitBitfieldAccessors(typeID, field)
+	}
+}
+
+func (t *translator) emitBitfieldAccessors(typeID int, field cField) {
+	info := t.typeInfo(typeID)
+	fieldInfo := t.typeInfo(field.typeID)
+	storageType := t.unsignedStorageType(fieldInfo.size)
+	bits := fieldInfo.size * 8
+	t.out = append(t.out, "func(p *"...)
+	t.out = append(t.out, info.goName...)
+	t.out = append(t.out, ")__c_get_"...)
+	t.out = append(t.out, field.name...)
+	t.out = append(t.out, "() "...)
+	if fieldInfo.kind == cTypeBool {
+		t.out = append(t.out, "uint8"...)
+	} else {
+		t.emitType(field.typeID)
+	}
+	t.out = append(t.out, "{return "...)
+	if fieldInfo.kind == cTypeInt {
+		t.emitType(field.typeID)
+		t.out = append(t.out, '(')
+		t.emitBitfieldCarrier(info, field, storageType)
+		t.out = append(t.out, "<<"...)
+		t.appendDecimal(bits - field.bitOffset - field.bitWidth)
+		t.out = append(t.out, ")>>"...)
+		t.appendDecimal(bits - field.bitWidth)
+	} else {
+		t.out = append(t.out, '(')
+		t.emitBitfieldCarrier(info, field, storageType)
+		if field.bitOffset > 0 {
+			t.out = append(t.out, ">>"...)
+			t.appendDecimal(field.bitOffset)
+		}
+		t.out = append(t.out, ")&"...)
+		t.emitBitfieldMask(storageType, field.bitWidth, bits)
+	}
+	t.out = append(t.out, "}\nfunc(p *"...)
+	t.out = append(t.out, info.goName...)
+	t.out = append(t.out, ")__c_set_"...)
+	t.out = append(t.out, field.name...)
+	t.out = append(t.out, "(v "...)
+	if fieldInfo.kind == cTypeBool {
+		t.out = append(t.out, "uint8"...)
+	} else {
+		t.emitType(field.typeID)
+	}
+	t.out = append(t.out, "){"...)
+	if info.kind == cTypeUnion {
+		t.usesUnsafe = true
+		t.out = append(t.out, "q:=(*"...)
+		t.emitType(storageType)
+		t.out = append(t.out, ")(__c_unsafe.Pointer(p));*q="...)
+		t.emitBitfieldUpdated("*q", storageType, field, bits)
+	} else {
+		t.out = append(t.out, "p."...)
+		t.out = append(t.out, field.carrier...)
+		t.out = append(t.out, '=')
+		t.emitBitfieldUpdated("p."+field.carrier, storageType, field, bits)
+	}
+	t.out = append(t.out, "}\n"...)
+}
+
+func (t *translator) emitBitfieldCarrier(info cTypeInfo, field cField, storageType int) {
+	if info.kind == cTypeUnion {
+		t.usesUnsafe = true
+		t.out = append(t.out, "*(*"...)
+		t.emitType(storageType)
+		t.out = append(t.out, ")(__c_unsafe.Pointer(p))"...)
+		return
+	}
+	t.out = append(t.out, "p."...)
+	t.out = append(t.out, field.carrier...)
+}
+
+func (t *translator) emitBitfieldMask(storageType int, width int, bits int) {
+	if width == bits {
+		t.out = append(t.out, '^')
+		t.emitType(storageType)
+		t.out = append(t.out, "(0)"...)
+		return
+	}
+	t.out = append(t.out, "(("...)
+	t.emitType(storageType)
+	t.out = append(t.out, "(1)<<"...)
+	t.appendDecimal(width)
+	t.out = append(t.out, ")-1)"...)
+}
+
+func (t *translator) emitBitfieldUpdated(carrier string, storageType int, field cField, bits int) {
+	t.out = append(t.out, '(')
+	t.out = append(t.out, carrier...)
+	t.out = append(t.out, "&^("...)
+	t.emitBitfieldMask(storageType, field.bitWidth, bits)
+	if field.bitOffset > 0 {
+		t.out = append(t.out, "<<"...)
+		t.appendDecimal(field.bitOffset)
+	}
+	t.out = append(t.out, "))|(("...)
+	t.emitType(storageType)
+	t.out = append(t.out, "(v)&"...)
+	t.emitBitfieldMask(storageType, field.bitWidth, bits)
+	t.out = append(t.out, ')')
+	if field.bitOffset > 0 {
+		t.out = append(t.out, "<<"...)
+		t.appendDecimal(field.bitOffset)
+	}
+	t.out = append(t.out, ')')
 }
 
 func decimalString(value int) string {
@@ -951,11 +1213,17 @@ func (t *translator) emitFunction(decl declarator, storage int) {
 		t.emitType(decl.typeID)
 	}
 	t.out = append(t.out, ' ')
+	objectMark := len(t.objects)
+	for i := 0; i < len(decl.params); i++ {
+		t.rememberObject(tokenText(t.src, decl.params[i].name), decl.params[i].typeID)
+	}
 	t.block()
+	t.objects = t.objects[:objectMark]
 	t.out = append(t.out, '\n')
 }
 
 func (t *translator) emitVariable(decl declarator) {
+	t.rememberObject(tokenText(t.src, decl.name), decl.typeID)
 	t.out = append(t.out, "var "...)
 	t.out = append(t.out, tokenText(t.src, decl.name)...)
 	t.out = append(t.out, ' ')
@@ -976,6 +1244,7 @@ func (t *translator) block() {
 		t.fail(TranslateErrStatement)
 		return
 	}
+	objectMark := len(t.objects)
 	t.out = append(t.out, '{')
 	for t.ok && t.kind() != tokenEOF && !t.currentIs("}") {
 		t.skipDirectives()
@@ -995,6 +1264,7 @@ func (t *translator) block() {
 		return
 	}
 	t.out = append(t.out, '}')
+	t.objects = t.objects[:objectMark]
 }
 
 func (t *translator) statement() {
@@ -1146,6 +1416,12 @@ func (t *translator) localDeclaration() {
 }
 
 func (t *translator) forStatement() {
+	objectMark := len(t.objects)
+	t.forStatementBody()
+	t.objects = t.objects[:objectMark]
+}
+
+func (t *translator) forStatementBody() {
 	if !t.take("(") {
 		t.fail(TranslateErrStatement)
 		return
@@ -1192,6 +1468,12 @@ func (t *translator) forStatement() {
 }
 
 func (t *translator) switchStatement() {
+	objectMark := len(t.objects)
+	t.switchStatementBody()
+	t.objects = t.objects[:objectMark]
+}
+
+func (t *translator) switchStatementBody() {
 	if !t.take("(") {
 		t.fail(TranslateErrStatement)
 		return
@@ -1332,6 +1614,13 @@ func (t *translator) condition(tokens []token) {
 }
 
 func (t *translator) expression(tokens []token) {
+	if t.emitBitfieldMutation(tokens) {
+		return
+	}
+	t.emitExpression(tokens)
+}
+
+func (t *translator) emitExpression(tokens []token) {
 	for i := 0; i < len(tokens); i++ {
 		tok := tokens[i]
 		if tokenIs(t.src, tok, "sizeof") || tokenIs(t.src, tok, "_Alignof") {
@@ -1368,6 +1657,13 @@ func (t *translator) expression(tokens []token) {
 			i += consumed - 1
 			continue
 		}
+		if tokenKind(tok) == tokenIdent {
+			if access, ok := t.memberAccess(tokens, i); ok {
+				t.out = append(t.out, access.expr...)
+				i = access.end - 1
+				continue
+			}
+		}
 		text := tokenText(t.src, tok)
 		if t.object && tokenKind(tok) == tokenString {
 			t.emitCStringValue(text)
@@ -1395,6 +1691,135 @@ func (t *translator) expression(tokens []token) {
 			t.out = append(t.out, ' ')
 		}
 	}
+}
+
+func (t *translator) emitBitfieldMutation(tokens []token) bool {
+	depth := 0
+	for i := 0; i < len(tokens); i++ {
+		switch {
+		case tokenIs(t.src, tokens[i], "(") || tokenIs(t.src, tokens[i], "[") || tokenIs(t.src, tokens[i], "{"):
+			depth++
+		case tokenIs(t.src, tokens[i], ")") || tokenIs(t.src, tokens[i], "]") || tokenIs(t.src, tokens[i], "}"):
+			depth--
+		}
+		if depth != 0 || !isAssignmentToken(t.src, tokens[i]) {
+			continue
+		}
+		access, ok := t.memberAccess(tokens[:i], 0)
+		if !ok || !access.bitfield || access.end != i {
+			return false
+		}
+		t.out = append(t.out, access.receiver...)
+		t.out = append(t.out, ".__c_set_"...)
+		t.out = append(t.out, access.field.name...)
+		t.out = append(t.out, '(')
+		if !tokenIs(t.src, tokens[i], "=") {
+			t.out = append(t.out, access.expr...)
+			op := tokenText(t.src, tokens[i])
+			t.out = append(t.out, op[:len(op)-1]...)
+		}
+		t.emitExpression(tokens[i+1:])
+		t.out = append(t.out, ')')
+		return true
+	}
+	if len(tokens) > 1 && (tokenIs(t.src, tokens[len(tokens)-1], "++") || tokenIs(t.src, tokens[len(tokens)-1], "--")) {
+		access, ok := t.memberAccess(tokens[:len(tokens)-1], 0)
+		if ok && access.bitfield && access.end == len(tokens)-1 {
+			t.emitBitfieldStep(access, tokens[len(tokens)-1])
+			return true
+		}
+	}
+	if len(tokens) > 1 && (tokenIs(t.src, tokens[0], "++") || tokenIs(t.src, tokens[0], "--")) {
+		access, ok := t.memberAccess(tokens[1:], 0)
+		if ok && access.bitfield && access.end == len(tokens)-1 {
+			t.emitBitfieldStep(access, tokens[0])
+			return true
+		}
+	}
+	return false
+}
+
+func (t *translator) emitBitfieldStep(access cMemberAccess, op token) {
+	t.out = append(t.out, access.receiver...)
+	t.out = append(t.out, ".__c_set_"...)
+	t.out = append(t.out, access.field.name...)
+	t.out = append(t.out, '(')
+	t.out = append(t.out, access.expr...)
+	if tokenIs(t.src, op, "++") {
+		t.out = append(t.out, "+1)"...)
+	} else {
+		t.out = append(t.out, "-1)"...)
+	}
+}
+
+func isAssignmentToken(src []byte, tok token) bool {
+	return tokenIs(src, tok, "=") || tokenIs(src, tok, "+=") || tokenIs(src, tok, "-=") ||
+		tokenIs(src, tok, "*=") || tokenIs(src, tok, "/=") || tokenIs(src, tok, "%=") ||
+		tokenIs(src, tok, "<<=") || tokenIs(src, tok, ">>=") || tokenIs(src, tok, "&=") ||
+		tokenIs(src, tok, "^=") || tokenIs(src, tok, "|=")
+}
+
+func (t *translator) memberAccess(tokens []token, start int) (cMemberAccess, bool) {
+	if start < 0 || start >= len(tokens) || tokenKind(tokens[start]) != tokenIdent {
+		return cMemberAccess{}, false
+	}
+	typeID, ok := t.lookupObject(tokenText(t.src, tokens[start]))
+	if !ok {
+		return cMemberAccess{}, false
+	}
+	expr := append([]byte{}, tokenText(t.src, tokens[start])...)
+	result := cMemberAccess{expr: expr, typeID: typeID, end: start + 1}
+	for result.end+1 < len(tokens) && (tokenIs(t.src, tokens[result.end], ".") || tokenIs(t.src, tokens[result.end], "->")) {
+		arrow := tokenIs(t.src, tokens[result.end], "->")
+		aggregateType := result.typeID
+		if arrow {
+			pointer := t.typeInfo(aggregateType)
+			if pointer.kind != cTypePointer {
+				break
+			}
+			aggregateType = pointer.base
+		}
+		aggregate := t.typeInfo(aggregateType)
+		if (aggregate.kind != cTypeStruct && aggregate.kind != cTypeUnion) || tokenKind(tokens[result.end+1]) != tokenIdent {
+			break
+		}
+		field, found := t.lookupField(aggregateType, tokenText(t.src, tokens[result.end+1]))
+		if !found {
+			break
+		}
+		receiver := append([]byte{}, result.expr...)
+		if field.bitWidth > 0 {
+			expr = append(expr, ".__c_get_"...)
+			expr = append(expr, field.name...)
+			expr = append(expr, '(', ')')
+			result.expr = expr
+			result.receiver = receiver
+			result.field = field
+			result.typeID = field.typeID
+			result.end += 2
+			result.bitfield = true
+			return result, true
+		}
+		if aggregate.kind == cTypeUnion {
+			wrapped := make([]byte, 0, len(expr)+len(field.name)+15)
+			wrapped = append(wrapped, '(', '*')
+			wrapped = append(wrapped, expr...)
+			wrapped = append(wrapped, ".__c_ptr_"...)
+			wrapped = append(wrapped, field.name...)
+			wrapped = append(wrapped, '(', ')', ')')
+			expr = wrapped
+		} else if field.emit {
+			expr = append(expr, '.')
+			expr = append(expr, field.name...)
+		} else {
+			break
+		}
+		result.expr = expr
+		result.field = field
+		result.typeID = field.typeID
+		result.end += 2
+	}
+	return result, result.end > start+1
 }
 
 func matchingToken(src []byte, tokens []token, at int, open string, close string) int {
@@ -1541,7 +1966,7 @@ func (t *translator) fieldOffset(typeID int, tokens []token) (int, bool) {
 	name := tokenText(t.src, tokens[0])
 	for i := 0; i < info.fieldCount; i++ {
 		field := t.fields[info.fieldStart+i]
-		if textEquals(name, field.name) {
+		if field.bitWidth == 0 && textEquals(name, field.name) {
 			return field.offset, true
 		}
 	}
@@ -1696,6 +2121,33 @@ func (t *translator) findAtDepth(text string) int {
 		case tokenIs(t.src, tok, "{"):
 			brace++
 		case tokenIs(t.src, tok, "}"):
+			if brace == 0 {
+				return -1
+			}
+			brace--
+		}
+	}
+	return -1
+}
+
+func (t *translator) findFieldSeparator() int {
+	paren, bracket, brace := 0, 0, 0
+	for i := t.pos; i < len(t.tokens); i++ {
+		if paren == 0 && bracket == 0 && brace == 0 && (tokenIs(t.src, t.tokens[i], ",") || tokenIs(t.src, t.tokens[i], ";")) {
+			return i
+		}
+		switch {
+		case tokenIs(t.src, t.tokens[i], "("):
+			paren++
+		case tokenIs(t.src, t.tokens[i], ")"):
+			paren--
+		case tokenIs(t.src, t.tokens[i], "["):
+			bracket++
+		case tokenIs(t.src, t.tokens[i], "]"):
+			bracket--
+		case tokenIs(t.src, t.tokens[i], "{"):
+			brace++
+		case tokenIs(t.src, t.tokens[i], "}"):
 			if brace == 0 {
 				return -1
 			}
