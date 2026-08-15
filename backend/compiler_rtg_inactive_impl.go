@@ -736,6 +736,8 @@ func renvoRTGEmitPrimaryTertiaryOp(g *renvoLinearGen, tok int) bool { return fal
 func renvoRTGEmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool { return false }
 func renvoRTGStoreParamWord(g *renvoLinearGen, word int, offset int) {}
 func renvoRTGEmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {}
+func renvoRTGPushObjectCallWord(a *renvoAsm, word int) bool { return false }
+func renvoRTGAdjustObjectStack(a *renvoAsm, reserve bool) {}
 func renvoRTGEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {}
 func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 	return renvoCompileResult{}
@@ -747,6 +749,7 @@ func renvoRTGEmitKernelCallbackArgReverse(
 const renvoRTGPreparedOS = 0
 const renvoRTGPreparedIntBits = 0
 const renvoRTGPreparedKernelModule = 0
+const renvoRTGPreparedObject = 0
 const renvoRTGPreparedFunctionSymbols = 0
 
 func renvoRTGParseTargetArg(name string) int {

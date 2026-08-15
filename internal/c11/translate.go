@@ -177,7 +177,7 @@ func (t *translator) externalDeclaration() {
 			t.fail(TranslateErrDeclaration)
 			return
 		}
-		t.emitFunction(decl)
+		t.emitFunction(decl, storage)
 		return
 	}
 	decl.initializer = t.takeInitializer()
@@ -316,7 +316,7 @@ done:
 	if base == "" {
 		base = "int"
 	}
-	name := "int"
+	name := "int32"
 	switch base {
 	case "void":
 		name = ""
@@ -346,7 +346,7 @@ done:
 				name = "int64"
 			}
 		} else if unsigned {
-			name = "uint"
+			name = "uint32"
 		}
 	}
 	return cType{name: name}, storage, true
@@ -434,11 +434,16 @@ func (t *translator) takeInitializer() []token {
 	return t.tokens[start:t.pos]
 }
 
-func (t *translator) emitFunction(decl declarator) {
+func (t *translator) emitFunction(decl declarator, storage int) {
 	if tokenIs(t.src, decl.name, "main") && t.packageName == "main" &&
-		(len(decl.params) != 0 || decl.typeInfo.name != "int" || decl.typeInfo.pointer != 0 || len(decl.typeInfo.arrays) != 0) {
+		(len(decl.params) != 0 || decl.typeInfo.name != "int32" || decl.typeInfo.pointer != 0 || len(decl.typeInfo.arrays) != 0) {
 		t.fail(TranslateErrUnsupported)
 		return
+	}
+	if t.object && storage != storageOther {
+		t.out = append(t.out, "//export "...)
+		t.out = append(t.out, tokenText(t.src, decl.name)...)
+		t.out = append(t.out, '\n')
 	}
 	t.out = append(t.out, "func "...)
 	name := tokenText(t.src, decl.name)

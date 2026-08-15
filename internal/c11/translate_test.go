@@ -25,8 +25,8 @@ int call_go(int value) {
 	if !result.Ok {
 		t.Fatalf("Translate failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
-	if !bytes.Contains(result.Source, []byte("func add(left int,right int) int")) ||
-		!bytes.Contains(result.Source, []byte("var sum int=left+right")) ||
+	if !bytes.Contains(result.Source, []byte("func add(left int32,right int32) int32")) ||
+		!bytes.Contains(result.Source, []byte("var sum int32=left+right")) ||
 		!bytes.Contains(result.Source, []byte("return goDouble(value)")) {
 		t.Fatalf("unexpected shared source:\n%s", result.Source)
 	}
@@ -50,7 +50,7 @@ int main(void) {
 	if !result.Ok {
 		t.Fatalf("Translate failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
-	if !bytes.Contains(result.Source, []byte("func appMain() int")) {
+	if !bytes.Contains(result.Source, []byte("func appMain() int32")) {
 		t.Fatalf("C entrypoint was not adapted:\n%s", result.Source)
 	}
 	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
@@ -63,7 +63,7 @@ func TestTranslateFixedArray(t *testing.T) {
 	int values[3] = {42, 1, 2};
 	return values[0];
 }`))
-	if !result.Ok || !bytes.Contains(result.Source, []byte("var values [3]int=[3]int{42,1,2}")) {
+	if !result.Ok || !bytes.Contains(result.Source, []byte("var values [3]int32=[3]int32{42,1,2}")) {
 		t.Fatalf("fixed array translation = %#v\n%s", result, result.Source)
 	}
 	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
@@ -88,8 +88,9 @@ int main(void) { puts("Hello, world!"); return 0; }
 		t.Fatalf("TranslateObject failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
 	for _, want := range [][]byte{
+		[]byte("//export main"),
 		[]byte("// renvo:linkstatic libc,puts"),
-		[]byte("func puts(__s string) int{return 0}"),
+		[]byte("func puts(__s string) int32{return 0}"),
 		[]byte(`puts("\x48\x65\x6c\x6c\x6f\x2c\x20\x77\x6f\x72\x6c\x64\x21\x00")`),
 	} {
 		if !bytes.Contains(result.Source, want) {

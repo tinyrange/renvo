@@ -19,6 +19,7 @@ type Session struct {
 	filesEnd   int
 	transient  bool
 	cached     bool
+	object     bool
 	stage      int
 	loadStart  int
 	loadEnd    int
@@ -28,6 +29,14 @@ type Session struct {
 }
 
 func BeginSession(workDir string, stdRoot string, arg string, files []load.SourceFile, filesStart int, filesEnd int, transient bool, cached bool) *Session {
+	return beginSession(workDir, stdRoot, arg, files, filesStart, filesEnd, transient, cached, false)
+}
+
+func BeginObjectSession(workDir string, stdRoot string, arg string, files []load.SourceFile, filesStart int, filesEnd int, transient bool, cached bool) *Session {
+	return beginSession(workDir, stdRoot, arg, files, filesStart, filesEnd, transient, cached, true)
+}
+
+func beginSession(workDir string, stdRoot string, arg string, files []load.SourceFile, filesStart int, filesEnd int, transient bool, cached bool, object bool) *Session {
 	return &Session{
 		workDir:    workDir,
 		stdRoot:    stdRoot,
@@ -37,6 +46,7 @@ func BeginSession(workDir string, stdRoot string, arg string, files []load.Sourc
 		filesEnd:   filesEnd,
 		transient:  transient,
 		cached:     cached,
+		object:     object,
 		result: Result{
 			Ok:           true,
 			Error:        PipelineOK,
@@ -64,7 +74,11 @@ func (s *Session) Step() bool {
 			s.stage = 4
 			return true
 		}
-		s.builder = build.BeginProgramsSession(workspace.Graph, s.transient, s.cached)
+		if s.object {
+			s.builder = build.BeginObjectProgramsSession(workspace.Graph, s.transient, s.cached)
+		} else {
+			s.builder = build.BeginProgramsSession(workspace.Graph, s.transient, s.cached)
+		}
 		s.stage = 1
 		return false
 	}

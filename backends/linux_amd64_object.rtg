@@ -1,0 +1,18 @@
+@import "../backend/definitions/linux_amd64.rtg"
+
+# A translation-unit backend has no process or kernel entrypoint. The compiler
+# roots explicit exports and the format emits their code and unresolved imports
+# as a conventional System V ELF relocatable object. It deliberately reuses the
+# production Linux runtime's external-call ABI instead of defining a second
+# object-only calling convention.
+
+target linux-object/amd64 {
+	family = native_v1
+	os = linux
+	arch = x86_64
+	abi = sysv_x86_64
+	runtime = linux_x86_64
+	object = elf64_object_x86_64
+	build_tags = ["linux", "unix", "amd64"]
+	capabilities = [freestanding, object, imports, linkstatic, function_symbols]
+}

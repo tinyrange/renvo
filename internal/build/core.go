@@ -40,17 +40,27 @@ type Result struct {
 }
 
 func BuildUnits(graph load.Graph) Result {
-	return buildProgramsDirect(graph, false)
+	return buildProgramsDirect(graph, false, true)
 }
 
 func BuildPrograms(graph load.Graph) Result {
 	return buildProgramsCore(graph, false, false, true)
 }
 
+func BuildObjectPrograms(graph load.Graph) Result {
+	return buildProgramsDirect(graph, false, false)
+}
+
 // BuildProgramsTransient releases parsed and checked package storage after
 // each lowered unit has taken ownership of the data needed by the linker.
 func BuildProgramsTransient(graph load.Graph) Result {
-	return buildProgramsDirect(graph, true)
+	return buildProgramsDirect(graph, true, true)
+}
+
+// BuildObjectProgramsTransient checks and lowers a translation unit without
+// imposing executable-package entrypoint rules on its root package.
+func BuildObjectProgramsTransient(graph load.Graph) Result {
+	return buildProgramsDirect(graph, true, false)
 }
 
 // BuildProgramsTransientCached reuses lowered dependency packages when their
@@ -62,9 +72,9 @@ func BuildProgramsTransientCached(graph load.Graph) Result {
 
 func buildProgramsCore(graph load.Graph, transient bool, cached bool, identities bool) Result {
 	if !cached && !identities {
-		return buildProgramsDirect(graph, transient)
+		return buildProgramsDirect(graph, transient, true)
 	}
-	session := beginProgramsSession(graph, transient, cached, identities)
+	session := beginProgramsSession(graph, transient, cached, identities, true)
 	for !session.Step() {
 	}
 	return session.Result()
@@ -73,7 +83,7 @@ func buildProgramsCore(graph load.Graph, transient bool, cached bool, identities
 // buildProgramsDirect is the compact one-shot path. Resumable editor builds
 // use ProgramSession, but routing command-line builds through its cache and
 // phase state adds work that cannot be reused after the process exits.
-func buildProgramsDirect(graph load.Graph, transient bool) Result {
+func buildProgramsDirect(graph load.Graph, transient bool, requireMain bool) Result {
 	headerStart := arena.Mark()
 	checked := check.CheckGraphHeadersCore(graph)
 	headerEnd := arena.Mark()
@@ -103,7 +113,7 @@ func buildProgramsDirect(graph load.Graph, transient bool) Result {
 			return buildFail(result, BuildErrCheck, checked.ErrorPackage, checked.ErrorFile, checked.ErrorToken)
 		}
 		pkg := graph.Packages[i]
-		if pkg.Ref.ImportPath == graph.Root && pkg.Name == "main" {
+		if requireMain && pkg.Ref.ImportPath == graph.Root && pkg.Name == "main" {
 			if mainErr, mainFile, mainTok := check.CheckRootMain(pkg); mainErr != check.CheckOK {
 				if transient {
 					arena.PersistReset(persistMark)

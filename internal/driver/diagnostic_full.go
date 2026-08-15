@@ -78,9 +78,7 @@ func optionDiagnostic(options Options) Diagnostic {
 	case ParseErrObjectRequiresLinuxAmd64:
 		code, message = "RENVO-OPTION-029", "object mode requires linux/amd64"
 	case ParseErrObjectFileCount:
-		code, message = "RENVO-OPTION-030", "object mode requires exactly one explicit C source file"
-	case ParseErrObjectRequiresC:
-		code, message = "RENVO-OPTION-031", "object mode requires a .c source file"
+		code, message = "RENVO-OPTION-030", "object mode requires exactly one explicit source file"
 	case ParseErrMissingIncludePath:
 		code, message = "RENVO-OPTION-032", "missing include directory after "+options.ErrorArg
 	case ParseErrInvalidModuleLicense:

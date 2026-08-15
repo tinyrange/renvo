@@ -192,7 +192,12 @@ func buildFromFSOneShotCompactWithModuleCache(args []string, workDir string, std
 		rootArg = sources.Root.Dir
 	}
 	var built pipeline.Result
-	if options.EmitUnit {
+	if options.Mode == ModeObject && options.EmitUnit {
+		built = pipeline.BuildObjectUnit(workDir, stdRoot, rootArg, sources.Files)
+	} else if options.Mode == ModeObject {
+		built = pipeline.BuildObjectUnitWithTransientFiles(
+			workDir, stdRoot, rootArg, sources.Files, sourcesStart, sourcesEnd)
+	} else if options.EmitUnit {
 		// An emitted unit is a persistent interchange artifact. Preserve package
 		// ownership and cache-key metadata so host and self-hosted frontends emit
 		// the same canonical bytes.
@@ -264,7 +269,12 @@ func buildFromFSOptions(options Options, workDir string, stdRoot string, moduleC
 		rootArg = sources.Root.Dir
 	}
 	var built pipeline.Result
-	if compact {
+	if compact && options.Mode == ModeObject {
+		built = pipeline.BuildObjectUnitWithTransientFilesCached(
+			workDir, stdRoot, rootArg, sources.Files, sourcesStart, sourcesEnd)
+	} else if options.Mode == ModeObject {
+		built = pipeline.BuildObjectUnit(workDir, stdRoot, rootArg, sources.Files)
+	} else if compact {
 		built = pipeline.BuildUnitWithTransientFilesCached(workDir, stdRoot, rootArg, sources.Files, sourcesStart, sourcesEnd)
 	} else {
 		built = pipeline.BuildUnit(workDir, stdRoot, rootArg, sources.Files)

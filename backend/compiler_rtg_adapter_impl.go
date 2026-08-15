@@ -388,6 +388,9 @@ func renvoRTGEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount
 func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 	renvoRTGUnsupportedOperation = 0
 	renvoRTGFailureDetail = -1
+	if renvoRTGPreparedObject != 0 {
+		return renvoTryCompileObjectProgramRTG(p, meta)
+	}
 	appIndex := -1
 	for i := 0; i < len(meta.funcs); i++ {
 		if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
@@ -485,6 +488,44 @@ func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoComp
 		return renvoCompileResult{}
 	}
 	if len(data) == 0 {
+		return renvoCompileResult{}
+	}
+	return renvoCompileResult{data: data, ok: true}
+}
+
+func renvoRTGAdjustObjectStack(a *renvoAsm, reserve bool) {
+	renvoRTGDirectMoveImmediate(
+		a, renvoRTGScratch, int64(renvoRTGStackWordBytes))
+	if reserve {
+		renvoRTGDirectSubtract(a, renvoRTGStack, renvoRTGScratch)
+	} else {
+		renvoRTGDirectAdd(a, renvoRTGStack, renvoRTGScratch)
+	}
+}
+
+func renvoRTGPushObjectCallWord(a *renvoAsm, word int) bool {
+	registers := []RTGRegister{
+		renvoRTGCallWord0, renvoRTGCallWord1, renvoRTGCallWord2,
+		renvoRTGCallWord3, renvoRTGCallWord4, renvoRTGCallWord5,
+	}
+	if word < 0 || word >= len(registers) || !registers[word].Valid {
+		return false
+	}
+	renvoRTGAsmPushRegister(a, registers[word])
+	return true
+}
+
+func renvoTryCompileObjectProgramRTG(
+	p *renvoProgram, meta *renvoMeta,
+) renvoCompileResult {
+	g := renvoBeginObjectProgram(p, meta)
+	if g == nil || !renvoEmitAllQueuedFunctionsScratch(g) ||
+		renvoRTGUnsupportedOperation != 0 {
+		return renvoCompileResult{}
+	}
+	data := renvoRTGImage(&g.asm)
+	renvoRTGValidateRelocations(&g.asm)
+	if renvoRTGUnsupportedOperation != 0 || len(data) == 0 {
 		return renvoCompileResult{}
 	}
 	return renvoCompileResult{data: data, ok: true}

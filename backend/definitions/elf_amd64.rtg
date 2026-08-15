@@ -1,69 +1,135 @@
 @import "x86_64.rtg"
 
 go backend {
-	func nativeAppend32(out []byte, value int) []byte {
-		out = append(out, byte(value), byte(value>>8), byte(value>>16), byte(value>>24))
+	func elfObjectUntil(out []byte, size int) []byte {
+		for len(out) < size {
+			out = append(out, 0)
+		}
 		return out
 	}
 
-	func nativeAppend64(out []byte, value int) []byte {
-		out = nativeAppend32(out, value)
-		out = nativeAppend32(out, value>>32)
-		return out
+	func elfObjectString(out []byte, value string) []byte {
+		for i := 0; i < len(value); i++ {
+			out = append(out, value[i])
+		}
+		return append(out, 0)
 	}
-}
 
-# Shared ELF executable and relocatable formats for AMD64 Linux targets.
-extend arch x86_64 {
-	sequences {
-		kernelAppend16(out:bytes, value:int) -> bytes {
-			return append(out, byte(value), byte(value>>8))
+	func elfObjectImage(emitter *RTGEmitter) []byte {
+		emitter.Patch()
+		code := emitter.Code()
+		data := emitter.Data()
+		exportCount := emitter.SymbolCount()
+		importCount := emitter.ExternalImportCount()
+		relocationCount := emitter.AbsoluteRelocationCount()
+
+		stringSize := 1
+		for i := 0; i < exportCount; i++ {
+			stringSize += emitter.SymbolNameLength(i)+1
 		}
-		kernelAppendELFHeader(out:bytes, sectionOffset:int, sectionCount:int, namesIndex:int) -> bytes {
-			set out = append(out, 0x7f, 'E', 'L', 'F', 2, 1, 1, 0)
-			set out = append(out, 0, 0, 0, 0, 0, 0, 0, 0)
-			set out = kernelAppend16(out, 1)
-			set out = kernelAppend16(out, 62)
-			set out = nativeAppend32(out, 1)
-			set out = nativeAppend64(out, 0)
-			set out = nativeAppend64(out, 0)
-			set out = nativeAppend64(out, sectionOffset)
-			set out = nativeAppend32(out, 0)
-			set out = kernelAppend16(out, 64)
-			set out = kernelAppend16(out, 0)
-			set out = kernelAppend16(out, 0)
-			set out = kernelAppend16(out, 64)
-			set out = kernelAppend16(out, sectionCount)
-			set out = kernelAppend16(out, namesIndex)
-			return out
+		for i := 0; i < importCount; i++ {
+			stringSize += len(emitter.ExternalImportName(i))+1
 		}
-		kernelAppendRelocation(out:bytes, offset:int, symbol:int, kind:int, addend:int) -> bytes {
-			set out = nativeAppend64(out, offset)
-			set out = nativeAppend64(out, symbol<<32|kind)
-			set out = nativeAppend64(out, addend)
-			return out
+		sectionNames := []byte("\x00.text\x00.rela.text\x00.data\x00.bss\x00.symtab\x00.strtab\x00.shstrtab\x00.note.GNU-stack\x00")
+		textOffset := 64
+		relocationOffset := RTGAlignValue(textOffset+len(code), 8)
+		dataOffset := RTGAlignValue(relocationOffset+relocationCount*24, 8)
+		bssOffset := dataOffset+len(data)
+		symbolOffset := RTGAlignValue(bssOffset, 8)
+		symbolSize := (4+exportCount+importCount)*24
+		stringOffset := symbolOffset+symbolSize
+		sectionStringOffset := stringOffset+stringSize
+		sectionOffset := RTGAlignValue(sectionStringOffset+len(sectionNames), 8)
+
+		image := make([]byte, 64)
+		image = elfObjectUntil(image, textOffset)
+		image = append(image, code...)
+		image = elfObjectUntil(image, relocationOffset)
+		for i := 0; i < relocationCount; i++ {
+			at := emitter.AbsoluteRelocationOffset(i)
+			addend := emitter.AbsoluteRelocationAddend(i)
+			kind := emitter.AbsoluteRelocationKind(i)
+			symbol := 2
+			if kind == RTGRelocationAbsoluteBSS {
+				symbol = 3
+			} else if kind == RTGRelocationAbsoluteBSSEnd {
+				symbol = 3
+				alignment := addend
+				if alignment <= 0 {
+					alignment = 1
+				}
+				addend = RTGAlignValue(emitter.BSSSize(), alignment)
+			} else if kind == RTGRelocationImport {
+				if addend < 0 || addend >= importCount {
+					return nil
+				}
+				symbol = 4+exportCount+addend
+				image = elf_amd64_primitives.kernelAppendRelocation(
+					image, at, symbol, 4, -4)
+				continue
+			} else if kind != RTGRelocationAbsoluteData {
+				return nil
+			}
+			image = elf_amd64_primitives.kernelAppendRelocation(
+				image, at, symbol, 2, addend-4)
 		}
-		kernelAppendSection(out:bytes, name:int, kind:int, flags:int, offset:int, size:int, link:int, info:int, alignment:int, entrySize:int) -> bytes {
-			set out = nativeAppend32(out, name)
-			set out = nativeAppend32(out, kind)
-			set out = nativeAppend64(out, flags)
-			set out = nativeAppend64(out, 0)
-			set out = nativeAppend64(out, offset)
-			set out = nativeAppend64(out, size)
-			set out = nativeAppend32(out, link)
-			set out = nativeAppend32(out, info)
-			set out = nativeAppend64(out, alignment)
-			set out = nativeAppend64(out, entrySize)
-			return out
+		image = elfObjectUntil(image, dataOffset)
+		image = append(image, data...)
+		image = elfObjectUntil(image, symbolOffset)
+		image = elf_amd64_primitives.kernelAppendSymbol(image, 0, 0, 0, 0, 0)
+		image = elf_amd64_primitives.kernelAppendSymbol(image, 0, 3, 1, 0, 0)
+		image = elf_amd64_primitives.kernelAppendSymbol(image, 0, 3, 3, 0, 0)
+		image = elf_amd64_primitives.kernelAppendSymbol(image, 0, 3, 4, 0, 0)
+		nameOffset := 1
+		for i := 0; i < exportCount; i++ {
+			position := emitter.SymbolPC(i)
+			if position < 0 {
+				return nil
+			}
+			image = elf_amd64_primitives.kernelAppendSymbol(
+				image, nameOffset, 18, 1, position, 0)
+			nameOffset += emitter.SymbolNameLength(i)+1
 		}
-		kernelAppendSymbol(out:bytes, name:int, info:int, section:int, value:int, size:int) -> bytes {
-			set out = nativeAppend32(out, name)
-			set out = append(out, byte(info), 0)
-			set out = kernelAppend16(out, section)
-			set out = nativeAppend64(out, value)
-			set out = nativeAppend64(out, size)
-			return out
+		for i := 0; i < importCount; i++ {
+			image = elf_amd64_primitives.kernelAppendSymbol(
+				image, nameOffset, 16, 0, 0, 0)
+			nameOffset += len(emitter.ExternalImportName(i))+1
 		}
+		image = append(image, 0)
+		for i := 0; i < exportCount; i++ {
+			for j := 0; j < emitter.SymbolNameLength(i); j++ {
+				image = append(image, emitter.SymbolNameByte(i, j))
+			}
+			image = append(image, 0)
+		}
+		for i := 0; i < importCount; i++ {
+			image = elfObjectString(image, emitter.ExternalImportName(i))
+		}
+		image = append(image, sectionNames...)
+		image = elfObjectUntil(image, sectionOffset)
+		image = elf_amd64_primitives.kernelAppendSection(image, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+		image = elf_amd64_primitives.kernelAppendSection(
+			image, 1, 1, 6, textOffset, len(code), 0, 0, 16, 0)
+		image = elf_amd64_primitives.kernelAppendSection(
+			image, 7, 4, 64, relocationOffset, relocationCount*24, 5, 1, 8, 24)
+		image = elf_amd64_primitives.kernelAppendSection(
+			image, 18, 1, 3, dataOffset, len(data), 0, 0, 8, 0)
+		image = elf_amd64_primitives.kernelAppendSection(
+			image, 24, 8, 3, bssOffset, emitter.BSSSize(), 0, 0, 8, 0)
+		image = elf_amd64_primitives.kernelAppendSection(
+			image, 29, 2, 0, symbolOffset, symbolSize, 6, 4, 8, 24)
+		image = elf_amd64_primitives.kernelAppendSection(
+			image, 37, 3, 0, stringOffset, stringSize, 0, 0, 1, 0)
+		image = elf_amd64_primitives.kernelAppendSection(
+			image, 45, 3, 0, sectionStringOffset, len(sectionNames), 0, 0, 1, 0)
+		image = elf_amd64_primitives.kernelAppendSection(
+			image, 55, 1, 0, bssOffset, 0, 0, 0, 1, 0)
+		header := elf_amd64_primitives.kernelAppendELFHeader(
+			[]byte{}, sectionOffset, 9, 7)
+		for i := 0; i < len(header); i++ {
+			image[i] = header[i]
+		}
+		return image
 	}
 }
 
@@ -134,16 +200,17 @@ format elf64_x86_64 {
 
 format elf64_object_x86_64 {
 	kind = "elf-relocatable"
+	image = go elfObjectImage
 	kernel_image = linux_module_elf
 	byte_order = little
 	address_bits = 64
 	machine = 62
 	type = relocatable
-	append64 = sequence nativeAppend64
-	append_header = sequence kernelAppendELFHeader
-	append_relocation = sequence kernelAppendRelocation
-	append_section = sequence kernelAppendSection
-	append_symbol = sequence kernelAppendSymbol
+	append64 = sequence elf_amd64_primitives.nativeAppend64
+	append_header = sequence elf_amd64_primitives.kernelAppendELFHeader
+	append_relocation = sequence elf_amd64_primitives.kernelAppendRelocation
+	append_section = sequence elf_amd64_primitives.kernelAppendSection
+	append_symbol = sequence elf_amd64_primitives.kernelAppendSymbol
 
 	sections {
 		text progbits alloc|execute align=16

@@ -78,6 +78,18 @@ func appendDeclarativeKernelImage(out []byte, document Document, format Declarat
 	}
 	hookName := func(field string) string {
 		algorithm, _ := architectureGoHook(format, field)
+		if nativeEmitter {
+			for i := 0; i < len(document.Declarations); i++ {
+				declaration := document.Declarations[i]
+				if declaration.Kind != DeclArch {
+					continue
+				}
+				if external, found := embeddedExternalName(
+					architectureExports(declaration), algorithm); found {
+					return external
+				}
+			}
+		}
 		return "rtg" + exportedName(document.Unit) + exportedName(algorithm)
 	}
 	replacements := []string{

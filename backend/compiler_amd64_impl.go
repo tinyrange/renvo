@@ -70,8 +70,12 @@ func renvoTryCompileScalarProgramAmd64Cached(p *renvoProgram, meta *renvoMeta) r
 	}
 	return renvoFinishScalarProgramAmd64(g)
 }
+
 func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
 	renvoNonNil(p, meta)
+	if renvoIsHostedObjectAmd64(meta.c) {
+		return renvoBeginObjectProgram(p, meta)
+	}
 	appIndex := -1
 	for i := 0; i < len(meta.funcs); i++ {
 		if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
@@ -81,17 +85,11 @@ func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinear
 	if appIndex < 0 {
 		return nil
 	}
-	// Metadata building consumes the decoded declaration records completely;
-	// amd64 emission uses the canonical body ranges in renvoFuncInfo.
-	renvo_runtime_ArenaDiscardDecls(p.decls)
-	renvo_runtime_ArenaDiscardFuncs(p.funcs)
-	g := new(renvoLinearGen)
-	g.c = meta.c
-	g.prog = p
-	g.meta = meta
-	g.arenaSize = meta.arenaSize
+	g := renvoBeginLinearProgram(p, meta)
+	if g == nil {
+		return nil
+	}
 	a := &g.asm
-	renvoAsmInitWithContext(a, g.c)
 	if renvoFixedTarget == 0 {
 		// Large dynamic programs have enough output-size headroom to favor
 		// faster instructions. Fixed-target compilers retain their compact
@@ -110,14 +108,6 @@ func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinear
 	if targetIsWindows(meta.c.renvoTargetOS) {
 		a.codeOffset = renvoWinSectionRVA
 	}
-	if renvoFixedTarget != 0 {
-		g.funcLabels = make([]int, 0, len(meta.funcs))
-	}
-	for i := 0; i < len(meta.funcs); i++ {
-		label := renvoAsmNewLabel(a)
-		g.funcLabels = append(g.funcLabels, label)
-	}
-	renvoInitFuncQueue(g, len(meta.funcs))
 	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
 		renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(meta.c) {
 		if !renvoBeginKernelModuleAmd64(g, appIndex) {
@@ -221,15 +211,13 @@ func renvoFinishScalarProgramAmd64(g *renvoLinearGen) renvoCompileResult {
 	renvo_runtime_ArenaDiscard(g.meta.scratchStart, g.meta.scratchEnd)
 	a := &g.asm
 	var data []byte
-	if targetIsWindows(g.c.renvoTargetOS) {
+	if renvoIsHostedObjectAmd64(g.c) {
+		data = renvoAsmImageObjectAmd64(a)
+	} else if targetIsWindows(g.c.renvoTargetOS) {
 		data = renvoAsmImageWindowsAmd64(a)
 	} else if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
 		renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
-		if g.c.objectFile {
-			data = renvoAsmImageObjectAmd64(a, g.kernelInitLabel)
-		} else {
-			data = renvoAsmImageKernelModuleAmd64(a, g.kernelInitLabel, g.kernelExitLabel)
-		}
+		data = renvoAsmImageKernelModuleAmd64(a, g.kernelInitLabel, g.kernelExitLabel)
 	} else {
 		data = renvoAsmImageAmd64(a)
 	}

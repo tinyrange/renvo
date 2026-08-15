@@ -26,13 +26,21 @@ type Result struct {
 }
 
 func BuildUnit(workDir string, stdRoot string, arg string, files []load.SourceFile) Result {
-	return buildUnitDirect(workDir, stdRoot, arg, files, 0, 0, false)
+	return buildUnitDirect(workDir, stdRoot, arg, files, 0, 0, false, false)
+}
+
+func BuildObjectUnit(workDir string, stdRoot string, arg string, files []load.SourceFile) Result {
+	return buildUnitDirect(workDir, stdRoot, arg, files, 0, 0, false, true)
 }
 
 // BuildUnitWithTransientFiles allows the command driver to release source
 // collection storage once lowering has copied every package into link units.
 func BuildUnitWithTransientFiles(workDir string, stdRoot string, arg string, files []load.SourceFile, filesStart int, filesEnd int) Result {
-	return buildUnitTransientDirect(workDir, stdRoot, arg, files, filesStart, filesEnd)
+	return buildUnitTransientDirect(workDir, stdRoot, arg, files, filesStart, filesEnd, false)
+}
+
+func BuildObjectUnitWithTransientFiles(workDir string, stdRoot string, arg string, files []load.SourceFile, filesStart int, filesEnd int) Result {
+	return buildUnitTransientDirect(workDir, stdRoot, arg, files, filesStart, filesEnd, true)
 }
 
 // BuildUnitWithTransientFilesCached reuses unchanged lowered dependencies for
@@ -44,7 +52,14 @@ func BuildUnitWithTransientFilesCached(workDir string, stdRoot string, arg strin
 	return session.Result()
 }
 
-func buildUnitTransientDirect(workDir string, stdRoot string, arg string, files []load.SourceFile, filesStart int, filesEnd int) Result {
+func BuildObjectUnitWithTransientFilesCached(workDir string, stdRoot string, arg string, files []load.SourceFile, filesStart int, filesEnd int) Result {
+	session := BeginObjectSession(workDir, stdRoot, arg, files, filesStart, filesEnd, true, true)
+	for !session.Step() {
+	}
+	return session.Result()
+}
+
+func buildUnitTransientDirect(workDir string, stdRoot string, arg string, files []load.SourceFile, filesStart int, filesEnd int, object bool) Result {
 	result := Result{
 		Ok:           true,
 		Error:        PipelineOK,
@@ -59,7 +74,12 @@ func buildUnitTransientDirect(workDir string, stdRoot string, arg string, files 
 	if !workspace.Ok {
 		return pipelineFail(result, PipelineErrLoad, -1, workspace.ErrorFile, -1)
 	}
-	built := build.BuildProgramsTransient(workspace.Graph)
+	var built build.Result
+	if object {
+		built = build.BuildObjectProgramsTransient(workspace.Graph)
+	} else {
+		built = build.BuildProgramsTransient(workspace.Graph)
+	}
 	result.Build = built
 	if !built.Ok {
 		return pipelineFail(result, PipelineErrBuild, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
@@ -76,7 +96,7 @@ func buildUnitTransientDirect(workDir string, stdRoot string, arg string, files 
 	return result
 }
 
-func buildUnitDirect(workDir string, stdRoot string, arg string, files []load.SourceFile, filesStart int, filesEnd int, transient bool) Result {
+func buildUnitDirect(workDir string, stdRoot string, arg string, files []load.SourceFile, filesStart int, filesEnd int, transient bool, object bool) Result {
 	result := Result{
 		Ok:           true,
 		Error:        PipelineOK,
@@ -92,7 +112,11 @@ func buildUnitDirect(workDir string, stdRoot string, arg string, files []load.So
 		return pipelineFail(result, PipelineErrLoad, -1, workspace.ErrorFile, -1)
 	}
 	var built build.Result
-	if transient {
+	if object && transient {
+		built = build.BuildObjectProgramsTransient(workspace.Graph)
+	} else if object {
+		built = build.BuildObjectPrograms(workspace.Graph)
+	} else if transient {
 		built = build.BuildProgramsTransient(workspace.Graph)
 	} else {
 		built = build.BuildPrograms(workspace.Graph)

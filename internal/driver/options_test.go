@@ -81,6 +81,14 @@ func TestParseOptionsCIncludePaths(t *testing.T) {
 	}
 }
 
+func TestParseOptionsGoObject(t *testing.T) {
+	options := ParseOptions([]string{"-mode=object", "-o", "bridge.o", "bridge.go"})
+	if !options.Ok || options.Mode != ModeObject || options.Target != "linux/amd64" ||
+		len(options.Files) != 1 || options.Files[0] != "bridge.go" {
+		t.Fatalf("Go object options = %#v", options)
+	}
+}
+
 func TestNormalizeCCompilerCommand(t *testing.T) {
 	args := NormalizeCCompilerCommand([]string{"renvo", "cc", "-c", "hello.c", "-o", "hello.o"})
 	want := []string{"renvo", "-c", "hello.c", "-o", "hello.o"}
@@ -152,7 +160,6 @@ func TestParseOptionsRejectsInvalidInputs(t *testing.T) {
 		{name: "object on non-Linux target", args: []string{"-c", "-t", "windows/amd64", "-o", "app.o", "main.c"}, err: ParseErrObjectRequiresLinuxAmd64, arg: "windows/amd64", at: 0},
 		{name: "object package mode", args: []string{"-c", "-o", "app.o", "./cmd/app"}, err: ParseErrObjectFileCount, arg: "./cmd/app", at: 4},
 		{name: "object multiple files", args: []string{"-c", "-o", "app.o", "main.c", "other.c"}, err: ParseErrObjectFileCount, arg: "main.c", at: 5},
-		{name: "object Go file", args: []string{"-c", "-o", "app.o", "main.go"}, err: ParseErrObjectRequiresC, arg: "main.go", at: 4},
 		{name: "missing include path", args: []string{"-c", "-I"}, err: ParseErrMissingIncludePath, arg: "-I", at: 1},
 		{name: "missing system include path", args: []string{"-c", "-isystem"}, err: ParseErrMissingIncludePath, arg: "-isystem", at: 1},
 		{name: "C script", args: []string{"-script", "-o", "app", "main.c"}, err: ParseErrScriptRequiresGo, arg: "main.c", at: 4},

@@ -20,6 +20,44 @@ func TestFrontendStage3CObjectSystemLink(t *testing.T) {
 	runCObjectSystemLink(t, selfHostedFrontendCompiler(t, root))
 }
 
+func TestFrontendCObjectWithoutMainSystemLink(t *testing.T) {
+	root := repoRoot(t)
+	frontend := frontendCompiler(t, root)
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skip("the first C object target is Linux/amd64")
+	}
+	linkerDriver, err := exec.LookPath("cc")
+	if err != nil {
+		t.Skip("system C linker driver is unavailable")
+	}
+	dir := t.TempDir()
+	source := filepath.Join(dir, "bridge.c")
+	harness := filepath.Join(dir, "harness.c")
+	object := filepath.Join(dir, "bridge.o")
+	executable := filepath.Join(dir, "harness")
+	if err := os.WriteFile(source,
+		[]byte("int renvo_weighted(int left, int right) { return left * 100 + right; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(harness,
+		[]byte("extern int renvo_weighted(int, int);\nint main(void) { return renvo_weighted(50, 8) == 5008 ? 0 : 1; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := frontendCommand(frontend, "cc", "-c", filepath.Base(source), "-o", object)
+	command.Dir = dir
+	command.Env = frontendCommandEnv(frontend.env, dir)
+	if combined, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("compile C leaf object with Renvo: %v\n%s", err, combined)
+	}
+	link := exec.Command(linkerDriver, harness, object, "-o", executable)
+	if combined, err := link.CombinedOutput(); err != nil {
+		t.Fatalf("system-link Renvo C leaf object: %v\n%s", err, combined)
+	}
+	if combined, err := exec.Command(executable).CombinedOutput(); err != nil {
+		t.Fatalf("run linked C leaf object: %v, output %q", err, combined)
+	}
+}
+
 func runCObjectSystemLink(t *testing.T, frontend frontendConfig) {
 	t.Helper()
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
