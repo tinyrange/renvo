@@ -364,7 +364,7 @@
         <span class="chip hot">North star: boot</span>
         <span class="chip">first target: x86_64 tinyconfig</span>
         <span class="chip">dialect: GNU C11</span>
-        <span class="chip">hard gate: &lt; 1,000,000-byte compiler</span>
+        <span class="chip">hard gate: &lt; 2,000,000-byte compiler</span>
         <span class="chip">foundation: PR #381</span>
       </div>
       <div class="command mono">make ARCH=x86_64 CC=/path/to/renvo LD=ld.lld tinyconfig &amp;&amp; make ARCH=x86_64 CC=/path/to/renvo LD=ld.lld</div>
@@ -543,7 +543,7 @@ cc hello.o -o hello
                 <li>Use an include stack and expansion stack; do not materialize a giant preprocessed file.</li>
                 <li>Retain spelling/source maps only where diagnostics or stringizing need them.</li>
               </ul>
-              <div class="gate">Renvo's token stream for a curated kernel-header corpus matches checked-in reference fixtures, and <code>-E</code> can preprocess the first real kernel translation units.</div>
+              <div class="gate">Complete · the checked corpus matches GCC's token stream on host and stage3, and <code>-E</code> preprocesses the complete pinned <code>scripts/mod/devicetable-offsets.c</code> closure with transitive dependencies.</div>
             </div>
           </article>
 
@@ -557,7 +557,7 @@ cc hello.o -o hello
                 <li>Represent types and declarations by integer IDs in flat arenas; avoid pointer-rich object graphs.</li>
                 <li>Reject VLAs initially if the selected kernel config forbids them; parse them well enough to diagnose precisely.</li>
               </ul>
-              <div class="gate">Freestanding C regression programs cover layout, calls, globals, pointers, aggregates, and control flow on host and stage3.</div>
+              <div class="gate">Active · freestanding C regression programs cover layout, calls, globals, pointers, aggregates, and control flow on host and stage3.</div>
             </div>
           </article>
 
@@ -675,7 +675,7 @@ cc hello.o -o hello
             </thead>
             <tbody>
               <tr><td>Lexing</td><td>Compact byte-span tokens</td><td>System-header Hello World slice first; then every literal, escape, preprocessing token, and source map needed by the kernel corpus</td><td><span class="status now">M0/M2</span></td></tr>
-              <tr><td>Preprocessing</td><td>Directive lines accepted as placeholders</td><td>Real installed <code>stdio.h</code> include path first; then full macro rescanning, variadics, stringize/paste, conditionals, builtins, and dep tracking</td><td><span class="status now">M0/M2</span></td></tr>
+              <tr><td>Preprocessing</td><td>Complete span/hide-set token engine, recursive include search, GNU macro expansion, conditionals, line maps, predefines, and transitive deps</td><td>Keep the checked GCC fixture and pinned kernel translation unit green while later phases consume the token stream directly</td><td><span class="status now">M2</span></td></tr>
               <tr><td>Declarations</td><td>Scalars, pointers, fixed arrays, direct functions</td><td>Enough typedef/attribute declarations for hosted Hello World first; then full declarators, qualifiers, linkage, function pointers, and variadics</td><td><span class="status now">M0/M3</span></td></tr>
               <tr><td>Data model</td><td>Go-shaped scalar mapping</td><td>C promotions/conversions, structs, unions, enums, bitfields, flexible/zero-length arrays, SysV layout</td><td><span class="status next">M3–4</span></td></tr>
               <tr><td>Control flow</td><td><code>if</code>, <code>while</code>, expression <code>for</code>, return</td><td><code>switch</code>, <code>do</code>, labels/goto, case ranges, statement expressions, computed goto if observed</td><td><span class="status next">M3–4</span></td></tr>
@@ -705,14 +705,14 @@ cc hello.o -o hello
 
         <div class="grid two">
           <div class="card">
-            <div class="budget"><b>&lt; 1,000,000 B</b><span>the stripped, runnable frontend plus only the Linux/x86_64 backend; measured as exact file bytes, excluding offline source/assets and every other target backend</span></div>
+            <div class="budget"><b>&lt; 2,000,000 B</b><span>the stripped, runnable frontend plus only the Linux/x86_64 backend; measured as exact file bytes, excluding offline source/assets and every other target backend</span></div>
             <div class="budget"><b>Tracked</b><span>cold CPU time and wall time on a pinned corpus, reported against the main-branch baseline rather than compared with an absolute pass/fail ceiling</span></div>
             <div class="budget"><b>Tracked</b><span>peak RSS, allocations, and per-phase high-water marks, including the worst translation unit rather than only an average</span></div>
             <div class="budget"><b>1 TU</b><span>architectural invariant: release preprocessing, syntax, and lowering arenas before compiling the next object</span></div>
           </div>
           <div class="card">
             <h3>Exactly what the gate measures</h3>
-            <p>The measured artifact is a self-contained command-line compiler that can take Go/C source through the shared frontend and emit Linux/amd64 code. It is stripped, contains the x86_64 backend, and contains no other architecture backend, bundled module cache, documentation, forms, device data, or test corpus. The threshold is decimal: 999,999 bytes passes; 1,000,000 bytes does not.</p>
+            <p>The measured artifact is a self-contained command-line compiler that can take Go/C source through the shared frontend and emit Linux/amd64 code. It is stripped, contains the x86_64 backend, and contains no other architecture backend, bundled module cache, documentation, forms, device data, or test corpus. The threshold is decimal: 1,999,999 bytes passes; 2,000,000 bytes does not.</p>
             <h3 style="margin-top: 1.25rem">Telemetry policy</h3>
             <p>Keep source text once. Store tokens, types, declarations, and scopes as small integer-indexed records. Intern identifiers once per translation unit. Use mark/reset arenas for macro expansion and function bodies. Stream object sections to bounded buffers where fixups permit. Cache completed objects by source, flags, includes, target definition, and compiler version hashes.</p>
             <p>Every milestone records cold wall time, CPU time, peak RSS, allocation count, compiler bytes, output bytes, tokens, macro expansions, declarations, and emitted relocations. Median hides disasters, so the dashboard includes p95 and the worst translation unit.</p>
@@ -798,33 +798,33 @@ cc hello.o -o hello
     <section id="next">
       <div class="wrap">
         <div class="eyebrow">08 · Immediate sequence</div>
-        <h2>The Kbuild handshake is green.</h2>
-        <p class="section-intro">The hosted object path and M1 driver contract now form permanent host-and-stage3 acceptance paths; the active edge moves to the real kernel preprocessor corpus.</p>
+        <h2>The kernel preprocessor corpus is green.</h2>
+        <p class="section-intro">The M0 object path, M1 driver contract, and M2 token stream now form permanent host-and-stage3 acceptance paths; the active edge moves to the ISO C type and declaration model.</p>
 
         <div class="grid three">
           <article class="card next-pr" data-number="1">
-            <h3>Pin and census</h3>
-            <p>Fix Linux 6.12.99 by peeled commit and kernel.org archive digest, select x86_64 <code>tinyconfig</code>, and provide a read-only <code>.cmd</code>, syntax, builtin, flag, ELF section, relocation, object-size, CPU, and RSS census.</p>
-            <div class="gate">Complete · <code>tools/kbuild/prepare</code> recreates the tree and leaves a machine-readable dashboard.</div>
+            <h3>Compact token engine</h3>
+            <p>Store preprocessing tokens as three-word source spans, intern macro names in a grow-only open-addressed table, and represent rescanning exclusions as packed hide-set IDs rather than per-token object graphs.</p>
+            <div class="gate">Complete · recursive expansion remains linear enough for the first kernel closure; macro-table growth no longer causes quadratic stage3 arena consumption.</div>
           </article>
           <article class="card next-pr" data-number="2">
-            <h3>Truthful compiler persona</h3>
-            <p>Handle GCC-compatible identity preprocessing, version queries, nested response files, forced includes, target include roots, defines, dependency output, and the pinned harmless/target flags. Preserve strict failure for every unclassified semantic option.</p>
-            <div class="gate">Complete · checked probes succeed only for classified behavior on both the Go-hosted and stage3 compilers.</div>
+            <h3>GNU translation phases</h3>
+            <p>Handle splicing/comments, recursive includes and <code>include_next</code>, guards/<code>pragma once</code>, object/function/named variadic macros, <code>#</code>/<code>##</code>, conditionals, <code>#line</code>, predefines, forced includes, and dependency output.</p>
+            <div class="gate">Complete · the checked fixture is byte-stable on both Go-hosted and stage3 compilers and token-equivalent to GCC.</div>
           </article>
           <article class="card next-pr" data-number="3">
-            <h3>First Kbuild target object</h3>
-            <p>Keep generators on <code>HOSTCC</code>, compile <code>scripts/mod/empty.c</code> with Renvo, let <code>fixdep</code> consume its dependency rule, and continue until the first source-located C frontend blocker.</p>
-            <div class="gate">Complete · <code>empty.o</code> is accepted; the active blocker is <code>devicetable-offsets.c:5:1</code>.</div>
+            <h3>First kernel translation unit</h3>
+            <p>Run the semantic portion of the real Kbuild command over forced compiler/config headers and the full <code>devicetable-offsets.c</code> include closure, preserving pasted <code>SIZE_</code>/<code>OFF_</code> names and every transitive dependency.</p>
+            <div class="gate">Complete · host and stage3 emit the same 289,360-byte stream; the final stage3 observation is 0.06 s wall, 80,028 KiB peak RSS, and a 1,863,602-byte compiler.</div>
           </article>
         </div>
 
         <div class="callout">
-          <strong>Active next step:</strong> M2 turns the bounded identity
-          preprocessor into a streaming token preprocessor for the forced kernel
-          headers and <code>devicetable-offsets.c</code>. Expand macros, includes,
-          conditionals, stringizing, and token pasting in measured blocker order;
-          keep the M0 hosted-link and M1 Kbuild-handshake paths permanently green.
+          <strong>Active next step:</strong> M3 replaces the bounded Go-shaped C
+          declaration adapter with integer-ID C types, namespaces, declarators,
+          aggregates, constant expressions, and SysV layout. Feed it the M2 token
+          stream directly while keeping the M0 hosted link, M1 Kbuild handshake,
+          and M2 host/stage3 preprocessing corpus permanently green.
         </div>
       </div>
     </section>

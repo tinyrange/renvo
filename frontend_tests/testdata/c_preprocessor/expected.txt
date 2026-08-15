@@ -1,0 +1,9 @@
+int forced_header ;
+int first_layer ;
+int second_layer ;
+int selected_value = 4 + 3 + 5 ;
+const char * text = "token + LAYER_VALUE" ;
+api_call ( selected_value , 21 ) ;
+int source_line = 200 ;
+const char * source_file = "virtual-kernel.h" ;
+SELF

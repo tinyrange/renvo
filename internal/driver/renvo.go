@@ -55,6 +55,21 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 		return ExecuteCCompilerRequest(request, input)
 	}
 	args = NormalizeCCompilerCommand(args)
+	if CPreprocessCommandRequested(args) {
+		result := PreprocessCCommand(args, renvoWorkDir(env), RenvoFS{})
+		if !result.Ok {
+			return 1, FormatDiagnostic(CPreprocessCommandDiagnostic(result))
+		}
+		if result.Output == "-" {
+			print(string(result.Source))
+		} else if os.WriteFile(result.Output, result.Source, 0644) != nil {
+			return 1, "renvo cc: failed to write preprocessor output\n"
+		}
+		if len(result.DependencyData) > 0 && os.WriteFile(result.DependencyFile, result.DependencyData, 0644) != nil {
+			return 1, "renvo cc: failed to write dependency file\n"
+		}
+		return 0, ""
+	}
 	if len(args) > 1 && args[1] == "run" {
 		return runRenvoScript(args, env)
 	}
@@ -82,6 +97,11 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 	moduleLicense := built.Options.ModuleLicense
 	dependencyFile := built.Options.DependencyFile
 	dependencyOutput := CDependencyOutput(built.Options)
+	if len(dependencyOutput) > 0 {
+		if os.WriteFile(dependencyFile, dependencyOutput, 0644) != nil {
+			return 1, "renvo cc: failed to write dependency file\n"
+		}
+	}
 	arenaSize := backendArenaSize(target, built.Options.Tags, built.Options.ArenaSize)
 	if built.Options.EmitUnit {
 		if output == "-" {
@@ -142,14 +162,6 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 			arena.PersistReset(persistMark)
 		}
 		return status, message
-	}
-	if len(dependencyOutput) > 0 {
-		if os.WriteFile(dependencyFile, dependencyOutput, 0644) != nil {
-			if resetArena {
-				arena.PersistReset(persistMark)
-			}
-			return 1, "renvo cc: failed to write dependency file\n"
-		}
 	}
 	if resetArena {
 		arena.PersistReset(persistMark)

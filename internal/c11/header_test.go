@@ -17,6 +17,10 @@ func (r headerTestReader) ReadInclude(_ string, name string, angled bool) ([]byt
 	return r.src, "/usr/include/" + name, true
 }
 
+func (r headerTestReader) ReadIncludeNext(from string, name string, angled bool) ([]byte, string, bool) {
+	return r.ReadInclude(from, name, angled)
+}
+
 func TestBuildObjectPreludeRetainsOnlyReferencedHeaderDeclaration(t *testing.T) {
 	source := []byte("#include <stdio.h>\nint main(void) { puts(\"PASS\"); return 0; }\n")
 	header := []byte("extern int remove (const char *__name);\nextern int puts (const char *__s);\n")

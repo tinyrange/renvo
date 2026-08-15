@@ -1,0 +1,4 @@
+#ifndef RENVO_TEST_FEATURE_H
+#define RENVO_TEST_FEATURE_H
+#define FEATURE_VALUE 5
+#endif

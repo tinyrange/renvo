@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "pin": {
     "kernel": "linux-6.12.99",
     "commit": "720e8bcaa674dfa40b989207d6cdb44b3aaa8db6",
@@ -13,6 +13,29 @@
     "first_target_object_format": "ELF64 ET_REL x86_64",
     "dependency_rule_consumed": true,
     "accepted_target_commands": 1,
+    "preprocessor": {
+      "source": "scripts/mod/devicetable-offsets.c",
+      "output_lines": 4881,
+      "output_bytes": 289360,
+      "transitive_dependency_bytes": 7812,
+      "checked_expansions": [
+        "SIZE_usb_device_id",
+        "OFF_usb_device_id_match_flags"
+      ],
+      "host": {
+        "elapsed_seconds": 0.02,
+        "user_seconds": 0.01,
+        "system_seconds": 0.00,
+        "peak_rss_kib": 15968
+      },
+      "stage3": {
+        "compiler_bytes": 1863602,
+        "elapsed_seconds": 0.06,
+        "user_seconds": 0.02,
+        "system_seconds": 0.03,
+        "peak_rss_kib": 80028
+      }
+    },
     "blocker": {
       "path": "scripts/mod/devicetable-offsets.c",
       "line": 5,
@@ -79,9 +102,9 @@
   },
   "telemetry": {
     "scope": "fresh extracted tree through the checked blocker; informational only",
-    "elapsed_seconds": 2.48,
-    "user_seconds": 1.59,
+    "elapsed_seconds": 1.93,
+    "user_seconds": 1.05,
     "system_seconds": 0.97,
-    "peak_rss_kib": 44384
+    "peak_rss_kib": 34752
   }
 }
