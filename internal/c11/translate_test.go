@@ -423,6 +423,54 @@ func TestTranslateRejectsThreadStorageUntilTLSLoweringExists(t *testing.T) {
 	}
 }
 
+func TestTranslateDesignatedInitializersAndCompoundLiterals(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+struct inner { int x; int y; };
+struct record {
+	int head;
+	struct inner nested;
+	int values[3];
+	int tail;
+};
+union word { unsigned whole; unsigned char bytes[4]; };
+int inspect(void) {
+	struct record selected = {
+		.tail = 5,
+		.nested = { .y = 3, .x = 2 },
+		.values = { [2] = 7, [0] = 1 }
+	};
+	struct record positional = { 1, { 2, 3 }, { 4, 5, 6 }, 7 };
+	int sparse[5] = { [3] = 9, 10 };
+	int inferred[] = { [2] = 8, 9 };
+	union word word = { .whole = 0x04030201 };
+	union word bytes = (union word){ .bytes = { 9, 8, 7, 6 } };
+	return selected.tail + selected.nested.x + selected.values[2] +
+		positional.nested.y + sparse[4] + inferred[3] + ((struct inner){ .x = 4, .y = 6 }).y +
+		word.bytes[0] + bytes.bytes[1];
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("aggregate initializer translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{
+		[]byte("__c_struct_record{tail:5,nested:__c_struct_inner{y:3,x:2},values:[3]int32{2:7,0:1}}"),
+		[]byte("__c_struct_record{head:1,nested:__c_struct_inner{x:2,y:3},values:[3]int32{4,5,6},tail:7}"),
+		[]byte("[5]int32{3:9,10}"),
+		[]byte("var inferred [4]int32=[4]int32{2:8,9}"),
+		[]byte("(__c_struct_inner{x:4,y:6}).y"),
+		[]byte("func __c_union_init_"),
+		[]byte("(*p.__c_ptr_whole())=v"),
+		[]byte("(*p.__c_ptr_bytes())=v"),
+	} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("aggregate initializer source is missing %q:\n%s", want, result.Source)
+		}
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("translated aggregate initializer does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
 func TestTranslateReportsOriginalOffset(t *testing.T) {
 	source := []byte("int main(void) { int value = 1")
 	result := Translate("main", source)
