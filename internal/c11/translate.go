@@ -11,8 +11,11 @@ const (
 const (
 	storageNone = iota
 	storageOther
+	storageStatic
+	storageThread
 	storageExtern
 	storageTypedef
+	storageInvalid
 )
 
 // Result is the C11 source adapter result. Source is ordinary Renvo Go input,
@@ -66,12 +69,16 @@ type translator struct {
 	opaqueTypes    []cTypeName
 	values         []cValueName
 	objects        []cObjectName
+	tentatives     []cObjectName
+	definitions    []cObjectName
+	functions      []cFunctionName
 	functionParams []int
 	typeSerial     int
 	dataModel      int
 	pointerSize    int
 	packageHeader  int
 	usesUnsafe     bool
+	staticOut      []byte
 }
 
 // Translate lowers one preprocessed C translation unit into the shared Go
@@ -110,6 +117,7 @@ func translate(packageName string, src []byte, prelude []byte, object bool, data
 	if !t.translateSource(src) {
 		return Result{Ok: false, Error: t.err, ErrorAt: t.errorAt}
 	}
+	t.emitPendingDeclarations()
 	if t.usesUnsafe {
 		declaration := []byte("import __c_unsafe \"unsafe\"\n")
 		at := t.packageHeader
@@ -193,6 +201,10 @@ func (t *translator) externalDeclaration() {
 		t.fail(TranslateErrDeclaration)
 		return
 	}
+	if storage == storageThread {
+		t.fail(TranslateErrUnsupported)
+		return
+	}
 	if t.take(";") {
 		return
 	}
@@ -203,12 +215,16 @@ func (t *translator) externalDeclaration() {
 	}
 	if decl.function {
 		if t.take(";") {
-			if t.object {
-				t.emitForeignFunction(decl)
+			if t.object && storage != storageStatic {
+				t.rememberFunction(decl, false)
 			}
 			return // Otherwise a C or Go definition in the package satisfies it.
 		}
 		if !t.currentIs("{") {
+			t.fail(TranslateErrDeclaration)
+			return
+		}
+		if !t.rememberFunction(decl, true) {
 			t.fail(TranslateErrDeclaration)
 			return
 		}
@@ -237,10 +253,20 @@ func (t *translator) externalDeclaration() {
 		return
 	}
 	if storage == storageExtern {
+		for i := 0; i < len(decls); i++ {
+			t.rememberObject(tokenText(t.src, decls[i].name), decls[i].typeID)
+		}
+		return
+	}
+	if storage == storageOther {
+		t.fail(TranslateErrDeclaration)
 		return
 	}
 	for i := 0; i < len(decls); i++ {
-		t.emitVariable(decls[i])
+		if !t.fileVariable(decls[i]) {
+			t.fail(TranslateErrDeclaration)
+			return
+		}
 	}
 }
 
@@ -532,19 +558,123 @@ func (t *translator) lookupValue(name []byte) (int, bool) {
 }
 
 func (t *translator) rememberObject(name []byte, typeID int) {
+	t.rememberAliasedObject(name, string(name), typeID)
+}
+
+func (t *translator) rememberAliasedObject(name []byte, goName string, typeID int) {
 	if len(name) == 0 {
 		return
 	}
-	t.objects = append(t.objects, cObjectName{name: string(name), typeID: typeID})
+	t.objects = append(t.objects, cObjectName{name: string(name), goName: goName, typeID: typeID})
 }
 
-func (t *translator) lookupObject(name []byte) (int, bool) {
-	for i := len(t.objects) - 1; i >= 0; i-- {
-		if textEquals(name, t.objects[i].name) {
-			return t.objects[i].typeID, true
+func (t *translator) rememberFunction(decl declarator, definition bool) bool {
+	name := string(tokenText(t.src, decl.name))
+	for i := 0; i < len(t.functions); i++ {
+		fn := &t.functions[i]
+		if fn.name != name {
+			continue
+		}
+		if fn.resultType != decl.typeID || fn.paramCount != len(decl.params) || definition && fn.defined {
+			return false
+		}
+		for j := 0; j < fn.paramCount; j++ {
+			if t.functionParams[fn.paramStart+j] != decl.params[j].typeID {
+				return false
+			}
+		}
+		if definition {
+			fn.defined = true
+		}
+		return true
+	}
+	start := len(t.functionParams)
+	for i := 0; i < len(decl.params); i++ {
+		t.functionParams = append(t.functionParams, decl.params[i].typeID)
+	}
+	t.functions = append(t.functions, cFunctionName{
+		name: name, resultType: decl.typeID, paramStart: start,
+		paramCount: len(decl.params), defined: definition,
+	})
+	return true
+}
+
+func (t *translator) fileVariable(decl declarator) bool {
+	name := string(tokenText(t.src, decl.name))
+	if len(decl.initializer) > 0 && t.typeInfo(decl.typeID).kind == cTypeArray && t.typeInfo(decl.typeID).count == 0 {
+		return false
+	}
+	t.rememberObject([]byte(name), decl.typeID)
+	for i := 0; i < len(t.definitions); i++ {
+		if t.definitions[i].name != name {
+			continue
+		}
+		return t.compatibleType(t.definitions[i].typeID, decl.typeID) && len(decl.initializer) == 0
+	}
+	tentative := -1
+	for i := 0; i < len(t.tentatives); i++ {
+		if t.tentatives[i].name == name {
+			if !t.compatibleType(t.tentatives[i].typeID, decl.typeID) {
+				return false
+			}
+			if t.typeInfo(t.tentatives[i].typeID).kind == cTypeArray && t.typeInfo(t.tentatives[i].typeID).count == 0 {
+				t.tentatives[i].typeID = decl.typeID
+			}
+			tentative = i
+			break
 		}
 	}
-	return cTypeVoidID, false
+	if len(decl.initializer) == 0 {
+		if tentative < 0 {
+			t.tentatives = append(t.tentatives, cObjectName{name: name, typeID: decl.typeID})
+		}
+		return true
+	}
+	if tentative >= 0 {
+		copy(t.tentatives[tentative:], t.tentatives[tentative+1:])
+		t.tentatives = t.tentatives[:len(t.tentatives)-1]
+	}
+	t.definitions = append(t.definitions, cObjectName{name: name, typeID: decl.typeID})
+	t.emitVariable(decl)
+	return true
+}
+
+func (t *translator) emitPendingDeclarations() {
+	t.out = append(t.out, t.staticOut...)
+	for i := 0; i < len(t.functions); i++ {
+		if !t.functions[i].defined {
+			t.emitForeignFunctionName(t.functions[i])
+		}
+	}
+	for i := 0; i < len(t.tentatives); i++ {
+		typeID := t.tentatives[i].typeID
+		info := t.typeInfo(typeID)
+		if info.kind == cTypeArray && info.count == 0 {
+			typeID = t.arrayType(info.base, 1)
+		}
+		t.out = append(t.out, "var "...)
+		t.out = append(t.out, t.tentatives[i].name...)
+		t.out = append(t.out, ' ')
+		t.emitType(typeID)
+		t.out = append(t.out, ';', '\n')
+	}
+}
+
+func (t *translator) compatibleType(left int, right int) bool {
+	if left == right {
+		return true
+	}
+	a, b := t.typeInfo(left), t.typeInfo(right)
+	return a.kind == cTypeArray && b.kind == cTypeArray && a.base == b.base && (a.count == 0 || b.count == 0)
+}
+
+func (t *translator) lookupObject(name []byte) (cObjectName, bool) {
+	for i := len(t.objects) - 1; i >= 0; i-- {
+		if textEquals(name, t.objects[i].name) {
+			return t.objects[i], true
+		}
+	}
+	return cObjectName{}, false
 }
 
 func (t *translator) lookupField(typeID int, name []byte) (cField, bool) {
@@ -764,31 +894,30 @@ func decimalString(value int) string {
 	return string(out)
 }
 
-func (t *translator) emitForeignFunction(decl declarator) {
-	name := tokenText(t.src, decl.name)
+func (t *translator) emitForeignFunctionName(fn cFunctionName) {
 	t.out = append(t.out, "// renvo:linkstatic libc,"...)
-	t.out = append(t.out, name...)
+	t.out = append(t.out, fn.name...)
 	t.out = append(t.out, '\n', 'f', 'u', 'n', 'c', ' ')
-	t.out = append(t.out, name...)
+	t.out = append(t.out, fn.name...)
 	t.out = append(t.out, '(')
-	for i := 0; i < len(decl.params); i++ {
+	for i := 0; i < fn.paramCount; i++ {
 		if i > 0 {
 			t.out = append(t.out, ',')
 		}
 		t.out = append(t.out, 'p')
 		t.appendDecimal(i)
 		t.out = append(t.out, ' ')
-		t.emitForeignType(decl.params[i].typeID)
+		t.emitForeignType(t.functionParams[fn.paramStart+i])
 	}
 	t.out = append(t.out, ')')
-	if decl.typeID != cTypeVoidID {
+	if fn.resultType != cTypeVoidID {
 		t.out = append(t.out, ' ')
-		t.emitType(decl.typeID)
+		t.emitType(fn.resultType)
 	}
 	t.out = append(t.out, '{')
-	if t.typeInfo(decl.typeID).kind == cTypePointer {
+	if t.typeInfo(fn.resultType).kind == cTypePointer {
 		t.out = append(t.out, "return nil"...)
-	} else if decl.typeID != cTypeVoidID {
+	} else if fn.resultType != cTypeVoidID {
 		t.out = append(t.out, "return 0"...)
 	}
 	t.out = append(t.out, '}', '\n')
@@ -844,16 +973,42 @@ func (t *translator) parseType() (int, int, bool) {
 		switch {
 		case t.currentIs("__extension__"):
 			t.pos++
-		case t.currentIs("static") || t.currentIs("register") || t.currentIs("auto") || t.currentIs("inline"):
+		case t.currentIs("static"):
 			if storage == storageNone {
-				storage = storageOther
+				storage = storageStatic
+			} else if storage != storageThread {
+				storage = storageInvalid
 			}
 			t.pos++
+		case t.currentIs("_Thread_local"):
+			if storage == storageNone || storage == storageStatic || storage == storageExtern {
+				storage = storageThread
+			} else {
+				storage = storageInvalid
+			}
+			t.pos++
+		case t.currentIs("register") || t.currentIs("auto"):
+			if storage == storageNone {
+				storage = storageOther
+			} else {
+				storage = storageInvalid
+			}
+			t.pos++
+		case t.currentIs("inline"):
+			t.pos++
 		case t.currentIs("extern"):
-			storage = storageExtern
+			if storage == storageNone {
+				storage = storageExtern
+			} else if storage != storageThread {
+				storage = storageInvalid
+			}
 			t.pos++
 		case t.currentIs("typedef"):
-			storage = storageTypedef
+			if storage == storageNone {
+				storage = storageTypedef
+			} else {
+				storage = storageInvalid
+			}
 			t.pos++
 		case t.currentIs("const") || t.currentIs("volatile") || t.currentIs("restrict") || t.currentIs("_Atomic"):
 			t.pos++
@@ -938,7 +1093,7 @@ func (t *translator) parseType() (int, int, bool) {
 		}
 	}
 done:
-	if !seen {
+	if !seen || storage == storageInvalid {
 		return cTypeVoidID, storage, false
 	}
 	if hasTypeID {
@@ -1044,12 +1199,16 @@ func (t *translator) parseDeclaratorOps(abstract bool) (token, []declaratorOp, b
 	for {
 		if t.take("[") {
 			end := t.findClosing("]")
-			if end <= t.pos {
+			if end < t.pos {
 				return name, ops, false
 			}
-			count, valid := t.constantExpression(t.tokens[t.pos:end])
-			if !valid || count < 1 {
-				return name, ops, false
+			count := 0
+			if end > t.pos {
+				var valid bool
+				count, valid = t.constantExpression(t.tokens[t.pos:end])
+				if !valid || count < 1 {
+					return name, ops, false
+				}
 			}
 			ops = append(ops, declaratorOp{kind: declaratorArray, count: count})
 			t.pos = end + 1
@@ -1187,7 +1346,7 @@ func (t *translator) emitFunction(decl declarator, storage int) {
 		t.fail(TranslateErrUnsupported)
 		return
 	}
-	if t.object && storage != storageOther {
+	if t.object && storage != storageStatic {
 		t.out = append(t.out, "//export "...)
 		t.out = append(t.out, tokenText(t.src, decl.name)...)
 		t.out = append(t.out, '\n')
@@ -1224,8 +1383,12 @@ func (t *translator) emitFunction(decl declarator, storage int) {
 
 func (t *translator) emitVariable(decl declarator) {
 	t.rememberObject(tokenText(t.src, decl.name), decl.typeID)
+	t.emitVariableName(string(tokenText(t.src, decl.name)), decl)
+}
+
+func (t *translator) emitVariableName(name string, decl declarator) {
 	t.out = append(t.out, "var "...)
-	t.out = append(t.out, tokenText(t.src, decl.name)...)
+	t.out = append(t.out, name...)
 	t.out = append(t.out, ' ')
 	t.emitType(decl.typeID)
 	if len(decl.initializer) > 0 {
@@ -1237,6 +1400,17 @@ func (t *translator) emitVariable(decl declarator) {
 		t.expression(decl.initializer)
 	}
 	t.out = append(t.out, ';', '\n')
+}
+
+func (t *translator) emitStaticLocal(decl declarator) {
+	t.typeSerial++
+	name := "__c_static_" + decimalString(t.typeSerial) + "_" + string(tokenText(t.src, decl.name))
+	t.rememberAliasedObject(tokenText(t.src, decl.name), name, decl.typeID)
+	outer := t.out
+	t.out = t.staticOut
+	t.emitVariableName(name, decl)
+	t.staticOut = t.out
+	t.out = outer
 }
 
 func (t *translator) block() {
@@ -1387,7 +1561,11 @@ func (t *translator) controlledStatement() {
 
 func (t *translator) localDeclaration() {
 	base, storage, ok := t.parseType()
-	if !ok || storage == storageExtern {
+	if !ok {
+		t.fail(TranslateErrUnsupported)
+		return
+	}
+	if storage == storageThread {
 		t.fail(TranslateErrUnsupported)
 		return
 	}
@@ -1401,8 +1579,20 @@ func (t *translator) localDeclaration() {
 			return
 		}
 		decl.initializer = t.takeInitializer()
+		if t.typeInfo(decl.typeID).kind == cTypeArray && t.typeInfo(decl.typeID).count == 0 && storage != storageExtern {
+			t.fail(TranslateErrDeclaration)
+			return
+		}
 		if storage == storageTypedef {
 			t.rememberTypedef(string(tokenText(t.src, decl.name)), decl.typeID)
+		} else if storage == storageExtern {
+			if len(decl.initializer) != 0 {
+				t.fail(TranslateErrDeclaration)
+				return
+			}
+			t.rememberObject(tokenText(t.src, decl.name), decl.typeID)
+		} else if storage == storageStatic {
+			t.emitStaticLocal(decl)
 		} else {
 			t.emitVariable(decl)
 		}
@@ -1675,6 +1865,9 @@ func (t *translator) emitExpression(tokens []token) {
 				t.appendDecimalSigned(value)
 				continue
 			}
+			if object, ok := t.lookupObject(text); ok && object.goName != "" {
+				text = []byte(object.goName)
+			}
 		} else if tokenIs(t.src, tok, "NULL") {
 			text = []byte("nil")
 		} else if tokenIs(t.src, tok, "->") {
@@ -1763,12 +1956,12 @@ func (t *translator) memberAccess(tokens []token, start int) (cMemberAccess, boo
 	if start < 0 || start >= len(tokens) || tokenKind(tokens[start]) != tokenIdent {
 		return cMemberAccess{}, false
 	}
-	typeID, ok := t.lookupObject(tokenText(t.src, tokens[start]))
+	object, ok := t.lookupObject(tokenText(t.src, tokens[start]))
 	if !ok {
 		return cMemberAccess{}, false
 	}
-	expr := append([]byte{}, tokenText(t.src, tokens[start])...)
-	result := cMemberAccess{expr: expr, typeID: typeID, end: start + 1}
+	expr := append([]byte{}, object.goName...)
+	result := cMemberAccess{expr: expr, typeID: object.typeID, end: start + 1}
 	for result.end+1 < len(tokens) && (tokenIs(t.src, tokens[result.end], ".") || tokenIs(t.src, tokens[result.end], "->")) {
 		arrow := tokenIs(t.src, tokens[result.end], "->")
 		aggregateType := result.typeID
@@ -2187,7 +2380,7 @@ func isTypeToken(src []byte, tok token) bool {
 		tokenIs(src, tok, "void") || tokenIs(src, tok, "char") || tokenIs(src, tok, "short") ||
 		tokenIs(src, tok, "int") || tokenIs(src, tok, "long") || tokenIs(src, tok, "float") ||
 		tokenIs(src, tok, "double") || tokenIs(src, tok, "signed") || tokenIs(src, tok, "unsigned") ||
-		tokenIs(src, tok, "_Bool") || tokenIs(src, tok, "_Atomic") || tokenIs(src, tok, "struct") ||
+		tokenIs(src, tok, "_Bool") || tokenIs(src, tok, "_Atomic") || tokenIs(src, tok, "_Thread_local") || tokenIs(src, tok, "struct") ||
 		tokenIs(src, tok, "union") || tokenIs(src, tok, "enum") || tokenIs(src, tok, "__extension__") || tokenIs(src, tok, "__signed__")
 }
 

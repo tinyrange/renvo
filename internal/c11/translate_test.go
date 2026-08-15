@@ -351,6 +351,78 @@ done:
 	}
 }
 
+func TestTranslateCoalescesTentativeDefinitionsAndPrototypes(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+int accumulate(int value);
+int shared;
+extern int shared;
+int shared;
+static int hidden;
+int fallback[];
+int bounded[];
+int bounded[3];
+int selected;
+int selected = 7;
+int selected;
+int accumulate(int value) {
+	extern int shared;
+	static int calls;
+	calls++;
+	hidden++;
+	shared += value;
+	return shared + hidden + calls + selected;
+}
+int accumulate(int value);
+`), nil)
+	if !result.Ok {
+		t.Fatalf("linkage translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, declaration := range [][]byte{
+		[]byte("var shared int32;"),
+		[]byte("var hidden int32;"),
+		[]byte("var fallback [1]int32;"),
+		[]byte("var bounded [3]int32;"),
+		[]byte("var selected int32=7;"),
+		[]byte("var __c_static_1_calls int32;"),
+		[]byte("func accumulate(value int32) int32"),
+	} {
+		if bytes.Count(result.Source, declaration) != 1 {
+			t.Fatalf("declaration %q was not coalesced:\n%s", declaration, result.Source)
+		}
+	}
+	if bytes.Contains(result.Source, []byte("linkstatic libc,accumulate")) {
+		t.Fatalf("defined prototype became a foreign stub:\n%s", result.Source)
+	}
+	if !bytes.Contains(result.Source, []byte("__c_static_1_calls++;")) {
+		t.Fatalf("static local references were not hoisted consistently:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("translated linkage source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateRejectsConflictingTentativeDefinition(t *testing.T) {
+	for _, source := range []string{"int shared; long shared;", "int values[2]; int values[3];"} {
+		result := TranslateObject("main", []byte(source), nil)
+		if result.Ok || result.Error != TranslateErrDeclaration {
+			t.Fatalf("conflicting tentative definition %q result = %#v", source, result)
+		}
+	}
+}
+
+func TestTranslateRejectsThreadStorageUntilTLSLoweringExists(t *testing.T) {
+	for _, source := range []string{
+		"_Thread_local int value;",
+		"_Thread_local static int value;",
+		"extern _Thread_local int value;",
+	} {
+		result := TranslateObject("main", []byte(source), nil)
+		if result.Ok || result.Error != TranslateErrUnsupported {
+			t.Fatalf("thread-storage %q result = %#v", source, result)
+		}
+	}
+}
+
 func TestTranslateReportsOriginalOffset(t *testing.T) {
 	source := []byte("int main(void) { int value = 1")
 	result := Translate("main", source)
