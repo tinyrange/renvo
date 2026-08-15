@@ -38,6 +38,13 @@ literals.
 Qualifier IDs are retained on scalar, aggregate, and individual pointer levels;
 `const` lvalue mutation and invalid non-pointer `restrict` are diagnosed, while
 volatile loads/stores remain explicit in the shared unoptimized object path.
+The scalar expression path applies integer promotions, signed/unsigned rank
+selection, assignment/return/call conversions, `_Bool` normalization, and
+conditional-expression result typing. Adjacent ordinary strings are joined and
+octal/hex escapes are decoded before their single trailing NUL is emitted.
+Linux/x86_64 thread-duration definitions use libc thread-specific keys behind a
+process-wide initialization mutex; linked pthread regressions verify independent
+state and persistence under host and stage3 compilers.
 Header directive lines and function prototypes are accepted so declarations can
 be supplied by Go files in the same package. The output-only preprocessing path
 implements translation-phase splicing/comments, recursive includes and
@@ -46,9 +53,9 @@ with hide sets, stringizing/pasting, conditionals and integer expressions,
 `#line`, target predefines, and transitive dependency capture. Object translation
 now consumes that stream directly: declarations from quoted project headers are
 retained, while large system headers remain bounded by demand-selecting the
-referenced external prototypes. Variadic functions, thread-local storage,
-atomic/remaining qualifier semantics, integer promotions/conversions, and the remaining
-aggregate-initializer edge cases remain frozen M3 work. Direct external variadic
+referenced external prototypes. Variadic definitions, external thread-local
+linkage, atomic/remaining qualifier semantics, and the remaining
+aggregate/expression edge cases remain frozen M3 work. Direct external variadic
 calls are arity-specialized after C default argument promotion; the shared
 x86_64 object-call descriptor classifies integer and floating arguments and
 sets the SysV vector count. Attributes and the other GNU C

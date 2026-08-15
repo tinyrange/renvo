@@ -80,6 +80,16 @@ func TestFrontendStage3CObjectVariadicSystemLink(t *testing.T) {
 	runCObjectVariadicSystemLink(t, selfHostedFrontendCompiler(t, root))
 }
 
+func TestFrontendCObjectThreadStorageSystemLink(t *testing.T) {
+	root := repoRoot(t)
+	runCObjectThreadStorageSystemLink(t, frontendCompiler(t, root))
+}
+
+func TestFrontendStage3CObjectThreadStorageSystemLink(t *testing.T) {
+	root := repoRoot(t)
+	runCObjectThreadStorageSystemLink(t, selfHostedFrontendCompiler(t, root))
+}
+
 func TestFrontendCObjectWithoutMainSystemLink(t *testing.T) {
 	root := repoRoot(t)
 	frontend := frontendCompiler(t, root)
@@ -348,6 +358,7 @@ struct record {
 };
 union word { unsigned whole; unsigned char bytes[4]; };
 struct packed { unsigned low : 3; unsigned high : 5; int value; };
+int promotion_truth(void) { return (unsigned char)250 + 10 == 260; }
 int renvo_aggregate(void) {
 	struct record selected = {
 		.tail = 5,
@@ -366,6 +377,18 @@ int renvo_aggregate(void) {
 	struct packed sequence = { 6, 3, 2 };
 	const int qualified = 2;
 	volatile int observed = qualified;
+	unsigned char promotion_left = 250, promotion_right = 10;
+	short promotion_wide = 30000;
+	signed char promotion_negative = -1;
+	unsigned int promotion_one = 1;
+	long promotion_large = -1;
+	_Bool promotion_bool = 260;
+	int promotion_selected = promotion_negative < promotion_one ? 7 : 9;
+	if (promotion_left + promotion_right != 260 || promotion_wide + promotion_wide != 60000 ||
+		promotion_negative < promotion_one || !(promotion_large < promotion_one)) return -1;
+	if (!promotion_truth()) return -2;
+	if (promotion_bool != 1) return -3;
+	if (promotion_selected != 9) return -4;
 	return selected.tail + selected.nested.x + selected.values[2] +
 		positional.nested.y + sparse[4] + inferred[3] + ((struct inner){ .x = 4, .y = 6 }).y +
 		word.bytes[0] + bytes.bytes[1] + packed.high + packed.low + packed.value +
@@ -439,6 +462,59 @@ int main(void) { return renvo_variadic() == 24 ? 0 : 1; }
 	}
 	if string(combined) != "renvo variadic 7 -3 2.5\n" {
 		t.Fatalf("variadic output = %q", combined)
+	}
+}
+
+func runCObjectThreadStorageSystemLink(t *testing.T, frontend frontendConfig) {
+	t.Helper()
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skip("the first C object target is Linux/amd64")
+	}
+	linkerDriver, err := exec.LookPath("cc")
+	if err != nil {
+		t.Skip("system C linker driver is unavailable")
+	}
+	dir := t.TempDir()
+	source := filepath.Join(dir, "thread.c")
+	harness := filepath.Join(dir, "harness.c")
+	object := filepath.Join(dir, "thread.o")
+	executable := filepath.Join(dir, "thread-test")
+	if err := os.WriteFile(source, []byte(`_Thread_local int counter;
+int renvo_tls_step(int delta) { counter += delta; return counter; }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(harness, []byte(`#include <pthread.h>
+extern int renvo_tls_step(int);
+struct result { int first; int second; };
+static void *run(void *opaque) {
+	struct result *result = opaque;
+	result->first = renvo_tls_step(1);
+	result->second = renvo_tls_step(2);
+	return 0;
+}
+int main(void) {
+	pthread_t left, right;
+	struct result a = {0}, b = {0};
+	if (pthread_create(&left, 0, run, &a) || pthread_create(&right, 0, run, &b)) return 1;
+	pthread_join(left, 0); pthread_join(right, 0);
+	return a.first == 1 && a.second == 3 && b.first == 1 && b.second == 3 && renvo_tls_step(5) == 5 ? 0 : 2;
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := frontendCommand(frontend, "cc", "-c", filepath.Base(source), "-o", object)
+	command.Dir = dir
+	command.Env = frontendCommandEnv(frontend.env, dir)
+	if combined, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("compile C thread-storage object with Renvo: %v\n%s", err, combined)
+	}
+	link := exec.Command(linkerDriver, harness, object, "-pthread", "-o", executable)
+	if combined, err := link.CombinedOutput(); err != nil {
+		t.Fatalf("system-link C thread-storage object: %v\n%s", err, combined)
+	}
+	if combined, err := exec.Command(executable).CombinedOutput(); err != nil {
+		t.Fatalf("run linked C thread-storage object: %v, output %q", err, combined)
 	}
 }
 

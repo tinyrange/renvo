@@ -13,6 +13,8 @@ const (
 	storageOther
 	storageStatic
 	storageThread
+	storageThreadStatic
+	storageThreadExtern
 	storageExtern
 	storageTypedef
 	storageInvalid
@@ -94,6 +96,9 @@ type translator struct {
 	packageHeader  int
 	usesUnsafe     bool
 	staticOut      []byte
+	resultType     int
+	boolHelper     bool
+	tlsRuntime     bool
 }
 
 // Translate lowers one preprocessed C translation unit into the shared Go
@@ -122,7 +127,7 @@ func translate(packageName string, src []byte, prelude []byte, object bool, data
 		errorAt:     -1,
 	}
 	t.initTypes(dataModel)
-	t.out = append(t.out, "package "...)
+	t.appendText("package ")
 	t.out = append(t.out, packageName...)
 	t.out = append(t.out, '\n')
 	t.packageHeader = len(t.out)
@@ -220,10 +225,6 @@ func (t *translator) externalDeclaration() {
 		t.fail(TranslateErrDeclaration)
 		return
 	}
-	if storage == storageThread {
-		t.fail(TranslateErrUnsupported)
-		return
-	}
 	if t.take(";") {
 		return
 	}
@@ -233,6 +234,10 @@ func (t *translator) externalDeclaration() {
 		return
 	}
 	if decl.function {
+		if storage == storageThread || storage == storageThreadStatic || storage == storageThreadExtern {
+			t.fail(TranslateErrDeclaration)
+			return
+		}
 		if t.take(";") {
 			if t.object && storage != storageStatic {
 				t.rememberFunction(decl, false)
@@ -273,6 +278,16 @@ func (t *translator) externalDeclaration() {
 		for i := 0; i < len(decls); i++ {
 			t.rememberTypedef(string(tokenText(t.src, decls[i].name)), decls[i].typeID)
 		}
+		return
+	}
+	if storage == storageThread || storage == storageThreadStatic {
+		for i := 0; i < len(decls); i++ {
+			t.emitThreadVariable(decls[i])
+		}
+		return
+	}
+	if storage == storageThreadExtern {
+		t.fail(TranslateErrUnsupported)
 		return
 	}
 	if storage == storageExtern {
@@ -725,7 +740,7 @@ func (t *translator) emitPendingDeclarations() {
 		if info.kind == cTypeArray && info.count == 0 {
 			typeID = t.arrayType(info.base, 1)
 		}
-		t.out = append(t.out, "var "...)
+		t.appendText("var ")
 		t.out = append(t.out, t.tentatives[i].name...)
 		t.out = append(t.out, ' ')
 		t.emitType(typeID)
@@ -788,29 +803,29 @@ func (t *translator) unsignedStorageType(size int) int {
 
 func (t *translator) emitAggregateDeclaration(typeID int) {
 	info := t.typeInfo(typeID)
-	t.out = append(t.out, "type "...)
+	t.appendText("type ")
 	t.out = append(t.out, info.goName...)
 	if info.kind == cTypeUnion {
-		t.out = append(t.out, " struct{__c_align "...)
+		t.appendText(" struct{__c_align ")
 		switch info.align {
 		case 8:
-			t.out = append(t.out, "uint64"...)
+			t.appendText("uint64")
 		case 4:
-			t.out = append(t.out, "uint32"...)
+			t.appendText("uint32")
 		case 2:
-			t.out = append(t.out, "uint16"...)
+			t.appendText("uint16")
 		default:
-			t.out = append(t.out, "uint8"...)
+			t.appendText("uint8")
 		}
 		if tail := info.size - info.align; tail > 0 {
-			t.out = append(t.out, ";__c_tail ["...)
+			t.appendText(";__c_tail [")
 			t.appendDecimal(tail)
-			t.out = append(t.out, "]byte"...)
+			t.appendText("]byte")
 		}
 		t.out = append(t.out, "};\n"...)
 		return
 	}
-	t.out = append(t.out, " struct{"...)
+	t.appendText(" struct{")
 	for i := 0; i < info.fieldCount; i++ {
 		field := t.fields[info.fieldStart+i]
 		if !field.emit {
@@ -836,13 +851,13 @@ func (t *translator) emitAggregateAccessors(typeID int) {
 				continue
 			}
 			t.usesUnsafe = true
-			t.out = append(t.out, "func(p *"...)
+			t.appendText("func(p *")
 			t.out = append(t.out, info.goName...)
-			t.out = append(t.out, ")__c_ptr_"...)
+			t.appendText(")__c_ptr_")
 			t.out = append(t.out, field.name...)
-			t.out = append(t.out, "()*"...)
+			t.appendText("()*")
 			t.emitType(field.typeID)
-			t.out = append(t.out, "{return (*"...)
+			t.appendText("{return (*")
 			t.emitType(field.typeID)
 			t.out = append(t.out, ")(__c_unsafe.Pointer(p))}\n"...)
 			continue
@@ -856,54 +871,54 @@ func (t *translator) emitBitfieldAccessors(typeID int, field cField) {
 	fieldInfo := t.typeInfo(field.typeID)
 	storageType := t.unsignedStorageType(fieldInfo.size)
 	bits := fieldInfo.size * 8
-	t.out = append(t.out, "func(p *"...)
+	t.appendText("func(p *")
 	t.out = append(t.out, info.goName...)
-	t.out = append(t.out, ")__c_get_"...)
+	t.appendText(")__c_get_")
 	t.out = append(t.out, field.name...)
-	t.out = append(t.out, "() "...)
+	t.appendText("() ")
 	if fieldInfo.kind == cTypeBool {
-		t.out = append(t.out, "uint8"...)
+		t.appendText("uint8")
 	} else {
 		t.emitType(field.typeID)
 	}
-	t.out = append(t.out, "{return "...)
+	t.appendText("{return ")
 	if fieldInfo.kind == cTypeInt {
 		t.emitType(field.typeID)
 		t.out = append(t.out, '(')
 		t.emitBitfieldCarrier(info, field, storageType)
-		t.out = append(t.out, "<<"...)
+		t.appendText("<<")
 		t.appendDecimal(bits - field.bitOffset - field.bitWidth)
-		t.out = append(t.out, ")>>"...)
+		t.appendText(")>>")
 		t.appendDecimal(bits - field.bitWidth)
 	} else {
 		t.out = append(t.out, '(')
 		t.emitBitfieldCarrier(info, field, storageType)
 		if field.bitOffset > 0 {
-			t.out = append(t.out, ">>"...)
+			t.appendText(">>")
 			t.appendDecimal(field.bitOffset)
 		}
-		t.out = append(t.out, ")&"...)
+		t.appendText(")&")
 		t.emitBitfieldMask(storageType, field.bitWidth, bits)
 	}
 	t.out = append(t.out, "}\nfunc(p *"...)
 	t.out = append(t.out, info.goName...)
-	t.out = append(t.out, ")__c_set_"...)
+	t.appendText(")__c_set_")
 	t.out = append(t.out, field.name...)
-	t.out = append(t.out, "(v "...)
+	t.appendText("(v ")
 	if fieldInfo.kind == cTypeBool {
-		t.out = append(t.out, "uint8"...)
+		t.appendText("uint8")
 	} else {
 		t.emitType(field.typeID)
 	}
-	t.out = append(t.out, "){"...)
+	t.appendText("){")
 	if info.kind == cTypeUnion {
 		t.usesUnsafe = true
-		t.out = append(t.out, "q:=(*"...)
+		t.appendText("q:=(*")
 		t.emitType(storageType)
-		t.out = append(t.out, ")(__c_unsafe.Pointer(p));*q="...)
+		t.appendText(")(__c_unsafe.Pointer(p));*q=")
 		t.emitBitfieldUpdated("*q", storageType, field, bits)
 	} else {
-		t.out = append(t.out, "p."...)
+		t.appendText("p.")
 		t.out = append(t.out, field.carrier...)
 		t.out = append(t.out, '=')
 		t.emitBitfieldUpdated("p."+field.carrier, storageType, field, bits)
@@ -914,12 +929,12 @@ func (t *translator) emitBitfieldAccessors(typeID int, field cField) {
 func (t *translator) emitBitfieldCarrier(info cTypeInfo, field cField, storageType int) {
 	if info.kind == cTypeUnion {
 		t.usesUnsafe = true
-		t.out = append(t.out, "*(*"...)
+		t.appendText("*(*")
 		t.emitType(storageType)
-		t.out = append(t.out, ")(__c_unsafe.Pointer(p))"...)
+		t.appendText(")(__c_unsafe.Pointer(p))")
 		return
 	}
-	t.out = append(t.out, "p."...)
+	t.appendText("p.")
 	t.out = append(t.out, field.carrier...)
 }
 
@@ -927,32 +942,32 @@ func (t *translator) emitBitfieldMask(storageType int, width int, bits int) {
 	if width == bits {
 		t.out = append(t.out, '^')
 		t.emitType(storageType)
-		t.out = append(t.out, "(0)"...)
+		t.appendText("(0)")
 		return
 	}
-	t.out = append(t.out, "(("...)
+	t.appendText("((")
 	t.emitType(storageType)
-	t.out = append(t.out, "(1)<<"...)
+	t.appendText("(1)<<")
 	t.appendDecimal(width)
-	t.out = append(t.out, ")-1)"...)
+	t.appendText(")-1)")
 }
 
 func (t *translator) emitBitfieldUpdated(carrier string, storageType int, field cField, bits int) {
 	t.out = append(t.out, '(')
 	t.out = append(t.out, carrier...)
-	t.out = append(t.out, "&^("...)
+	t.appendText("&^(")
 	t.emitBitfieldMask(storageType, field.bitWidth, bits)
 	if field.bitOffset > 0 {
-		t.out = append(t.out, "<<"...)
+		t.appendText("<<")
 		t.appendDecimal(field.bitOffset)
 	}
-	t.out = append(t.out, "))|(("...)
+	t.appendText("))|((")
 	t.emitType(storageType)
-	t.out = append(t.out, "(v)&"...)
+	t.appendText("(v)&")
 	t.emitBitfieldMask(storageType, field.bitWidth, bits)
 	t.out = append(t.out, ')')
 	if field.bitOffset > 0 {
-		t.out = append(t.out, "<<"...)
+		t.appendText("<<")
 		t.appendDecimal(field.bitOffset)
 	}
 	t.out = append(t.out, ')')
@@ -981,7 +996,7 @@ func (t *translator) emitForeignFunctionName(fn cFunctionName) {
 }
 
 func (t *translator) emitForeignFunction(symbol string, goName string, resultType int, paramStart int, paramCount int) {
-	t.out = append(t.out, "// renvo:linkstatic libc,"...)
+	t.appendText("// renvo:linkstatic libc,")
 	t.out = append(t.out, symbol...)
 	t.out = append(t.out, '\n', 'f', 'u', 'n', 'c', ' ')
 	t.out = append(t.out, goName...)
@@ -1002,9 +1017,9 @@ func (t *translator) emitForeignFunction(symbol string, goName string, resultTyp
 	}
 	t.out = append(t.out, '{')
 	if t.typeInfo(resultType).kind == cTypePointer {
-		t.out = append(t.out, "return nil"...)
+		t.appendText("return nil")
 	} else if resultType != cTypeVoidID {
-		t.out = append(t.out, "return 0"...)
+		t.appendText("return 0")
 	}
 	t.out = append(t.out, '}', '\n')
 }
@@ -1032,6 +1047,10 @@ func (t *translator) appendDecimal(value int) {
 	}
 }
 
+func (t *translator) appendText(value string) {
+	t.out = append(t.out, value...)
+}
+
 func (t *translator) appendDecimalSigned(value int) {
 	if value < 0 {
 		t.out = append(t.out, '-')
@@ -1047,7 +1066,7 @@ func (t *translator) emitForeignType(typeID int) {
 	info := t.typeInfo(typeID)
 	base := t.typeInfo(info.base)
 	if info.kind == cTypePointer && base.kind == cTypeInt && base.size == 1 {
-		t.out = append(t.out, "string"...)
+		t.appendText("string")
 		return
 	}
 	t.emitType(typeID)
@@ -1069,13 +1088,19 @@ func (t *translator) parseType() (int, int, bool) {
 		case t.currentIs("static"):
 			if storage == storageNone {
 				storage = storageStatic
-			} else if storage != storageThread {
+			} else if storage == storageThread {
+				storage = storageThreadStatic
+			} else {
 				storage = storageInvalid
 			}
 			t.pos++
 		case t.currentIs("_Thread_local"):
-			if storage == storageNone || storage == storageStatic || storage == storageExtern {
+			if storage == storageNone {
 				storage = storageThread
+			} else if storage == storageStatic {
+				storage = storageThreadStatic
+			} else if storage == storageExtern {
+				storage = storageThreadExtern
 			} else {
 				storage = storageInvalid
 			}
@@ -1092,7 +1117,9 @@ func (t *translator) parseType() (int, int, bool) {
 		case t.currentIs("extern"):
 			if storage == storageNone {
 				storage = storageExtern
-			} else if storage != storageThread {
+			} else if storage == storageThread {
+				storage = storageThreadExtern
+			} else {
 				storage = storageInvalid
 			}
 			t.pos++
@@ -1467,11 +1494,11 @@ func (t *translator) emitFunction(decl declarator, storage int) {
 		return
 	}
 	if t.object && storage != storageStatic {
-		t.out = append(t.out, "//export "...)
+		t.appendText("//export ")
 		t.out = append(t.out, tokenText(t.src, decl.name)...)
 		t.out = append(t.out, '\n')
 	}
-	t.out = append(t.out, "func "...)
+	t.appendText("func ")
 	name := tokenText(t.src, decl.name)
 	if tokenIs(t.src, decl.name, "main") && t.packageName == "main" {
 		name = []byte("appMain")
@@ -1493,10 +1520,13 @@ func (t *translator) emitFunction(decl declarator, storage int) {
 	}
 	t.out = append(t.out, ' ')
 	objectMark := len(t.objects)
+	oldResult := t.resultType
+	t.resultType = decl.typeID
 	for i := 0; i < len(decl.params); i++ {
 		t.rememberObject(tokenText(t.src, decl.params[i].name), decl.params[i].typeID)
 	}
 	t.block()
+	t.resultType = oldResult
 	t.objects = t.objects[:objectMark]
 	t.out = append(t.out, '\n')
 }
@@ -1507,7 +1537,7 @@ func (t *translator) emitVariable(decl declarator) {
 }
 
 func (t *translator) emitVariableName(name string, decl declarator) {
-	t.out = append(t.out, "var "...)
+	t.appendText("var ")
 	t.out = append(t.out, name...)
 	t.out = append(t.out, ' ')
 	t.emitType(decl.typeID)
@@ -1519,7 +1549,7 @@ func (t *translator) emitVariableName(name string, decl declarator) {
 		} else if kind == cTypeUnion && tokenIs(t.src, decl.initializer[0], "{") {
 			t.emitUnionInitializer(decl.typeID, decl.initializer)
 		} else {
-			t.expression(decl.initializer)
+			t.convertedExpression(decl.typeID, decl.initializer)
 		}
 	}
 	t.out = append(t.out, ';', '\n')
@@ -1534,6 +1564,70 @@ func (t *translator) emitStaticLocal(decl declarator) {
 	t.emitVariableName(name, decl)
 	t.staticOut = t.out
 	t.out = outer
+}
+
+func (t *translator) emitThreadVariable(decl declarator) {
+	t.ensureThreadRuntime()
+	t.typeSerial++
+	number := decimalString(t.typeSerial)
+	getter := "__c_tls_get_" + number
+	t.rememberAliasedObject(tokenText(t.src, decl.name), "(*"+getter+"())", decl.typeID)
+	var initializer []byte
+	if len(decl.initializer) != 0 {
+		outer := t.out
+		t.out = nil
+		info := t.typeInfo(decl.typeID)
+		if (info.kind == cTypeArray || info.kind == cTypeStruct || info.kind == cTypeUnion) && tokenIs(t.src, decl.initializer[0], "{") {
+			t.emitInitializerValue(decl.typeID, decl.initializer)
+		} else {
+			t.convertedExpression(decl.typeID, decl.initializer)
+		}
+		initializer = t.out
+		t.out = outer
+	}
+	outer := t.out
+	t.out = t.staticOut
+	t.appendText("var __c_tls_key_")
+	t.out = append(t.out, number...)
+	t.appendText(" uint32\nvar __c_tls_ready_")
+	t.out = append(t.out, number...)
+	t.appendText(" uint8\nfunc ")
+	t.out = append(t.out, getter...)
+	t.appendText("() *")
+	t.emitType(decl.typeID)
+	t.appendText("{__c_pthread_mutex_lock((*byte)(__c_unsafe.Pointer(&__c_tls_mutex)));if __c_tls_ready_")
+	t.out = append(t.out, number...)
+	t.appendText("==0{__c_pthread_key_create(&__c_tls_key_")
+	t.out = append(t.out, number...)
+	t.appendText(",nil);__c_tls_ready_")
+	t.out = append(t.out, number...)
+	t.appendText("=1};__c_pthread_mutex_unlock((*byte)(__c_unsafe.Pointer(&__c_tls_mutex)));raw:=__c_pthread_getspecific(__c_tls_key_")
+	t.out = append(t.out, number...)
+	t.appendText(");if raw==nil{raw=__c_calloc(1,")
+	t.appendDecimal(t.typeSize(decl.typeID))
+	t.appendText(");__c_pthread_setspecific(__c_tls_key_")
+	t.out = append(t.out, number...)
+	t.appendText(",raw)")
+	if len(initializer) != 0 {
+		t.appendText(";*(*")
+		t.emitType(decl.typeID)
+		t.appendText(")(__c_unsafe.Pointer(raw))=")
+		t.out = append(t.out, initializer...)
+	}
+	t.appendText("};return (*")
+	t.emitType(decl.typeID)
+	t.appendText(")(__c_unsafe.Pointer(raw))}\n")
+	t.staticOut = t.out
+	t.out = outer
+	t.usesUnsafe = true
+}
+
+func (t *translator) ensureThreadRuntime() {
+	if t.tlsRuntime {
+		return
+	}
+	t.tlsRuntime = true
+	t.staticOut = append(t.staticOut, "var __c_tls_mutex [40]byte\n// renvo:linkstatic libc,pthread_key_create\nfunc __c_pthread_key_create(p0 *uint32,p1 *byte) int32{return 0}\n// renvo:linkstatic libc,pthread_mutex_lock\nfunc __c_pthread_mutex_lock(p0 *byte) int32{return 0}\n// renvo:linkstatic libc,pthread_mutex_unlock\nfunc __c_pthread_mutex_unlock(p0 *byte) int32{return 0}\n// renvo:linkstatic libc,pthread_getspecific\nfunc __c_pthread_getspecific(p0 uint32) *byte{return nil}\n// renvo:linkstatic libc,pthread_setspecific\nfunc __c_pthread_setspecific(p0 uint32,p1 *byte) int32{return 0}\n// renvo:linkstatic libc,calloc\nfunc __c_calloc(p0 uintptr,p1 uintptr) *byte{return nil}\n"...)
 }
 
 func (t *translator) block() {
@@ -1574,18 +1668,18 @@ func (t *translator) statement() {
 		return
 	}
 	if t.take("if") {
-		t.out = append(t.out, "if "...)
+		t.appendText("if ")
 		t.parenthesizedCondition()
 		t.out = append(t.out, ' ')
 		t.controlledStatement()
 		if t.take("else") {
-			t.out = append(t.out, " else "...)
+			t.appendText(" else ")
 			t.controlledStatement()
 		}
 		return
 	}
 	if t.take("while") {
-		t.out = append(t.out, "for "...)
+		t.appendText("for ")
 		t.parenthesizedCondition()
 		t.out = append(t.out, ' ')
 		t.controlledStatement()
@@ -1608,7 +1702,7 @@ func (t *translator) statement() {
 			t.fail(TranslateErrStatement)
 			return
 		}
-		t.out = append(t.out, "goto "...)
+		t.appendText("goto ")
 		t.out = append(t.out, tokenText(t.src, t.tokens[t.pos])...)
 		t.pos++
 		if !t.take(";") {
@@ -1624,7 +1718,7 @@ func (t *translator) statement() {
 		return
 	}
 	if t.take("return") {
-		t.out = append(t.out, "return"...)
+		t.appendText("return")
 		start := t.pos
 		end := t.findAtDepth(";")
 		if end < 0 {
@@ -1633,7 +1727,7 @@ func (t *translator) statement() {
 		}
 		if end > start {
 			t.out = append(t.out, ' ')
-			t.expression(t.tokens[start:end])
+			t.convertedExpression(t.resultType, t.tokens[start:end])
 		}
 		t.out = append(t.out, ';')
 		t.pos = end + 1
@@ -1692,10 +1786,6 @@ func (t *translator) localDeclaration() {
 		t.fail(TranslateErrDeclaration)
 		return
 	}
-	if storage == storageThread {
-		t.fail(TranslateErrUnsupported)
-		return
-	}
 	if t.take(";") {
 		return
 	}
@@ -1718,6 +1808,11 @@ func (t *translator) localDeclaration() {
 				return
 			}
 			t.rememberObject(tokenText(t.src, decl.name), decl.typeID)
+		} else if storage == storageThread || storage == storageThreadStatic {
+			t.emitThreadVariable(decl)
+		} else if storage == storageThreadExtern {
+			t.fail(TranslateErrUnsupported)
+			return
 		} else if storage == storageStatic {
 			t.emitStaticLocal(decl)
 		} else {
@@ -1750,14 +1845,14 @@ func (t *translator) forStatementBody() {
 		if !t.ok {
 			return
 		}
-		t.out = append(t.out, "for ;"...)
+		t.appendText("for ;")
 	} else {
 		end := t.findAtDepth(";")
 		if end < 0 {
 			t.fail(TranslateErrStatement)
 			return
 		}
-		t.out = append(t.out, "for "...)
+		t.appendText("for ")
 		t.expression(t.tokens[t.pos:end])
 		t.out = append(t.out, ';')
 		t.pos = end + 1
@@ -1800,7 +1895,7 @@ func (t *translator) switchStatementBody() {
 		t.fail(TranslateErrStatement)
 		return
 	}
-	t.out = append(t.out, "switch "...)
+	t.appendText("switch ")
 	t.expression(t.tokens[t.pos:close])
 	t.pos = close + 1
 	if !t.take("{") {
@@ -1814,7 +1909,7 @@ func (t *translator) switchStatementBody() {
 		t.skipDirectives()
 		if t.currentIs("case") || t.currentIs("default") {
 			if haveCase && !terminal {
-				t.out = append(t.out, "fallthrough;"...)
+				t.appendText("fallthrough;")
 			}
 			terminal = false
 			haveCase = true
@@ -1824,7 +1919,7 @@ func (t *translator) switchStatementBody() {
 					t.fail(TranslateErrStatement)
 					return
 				}
-				t.out = append(t.out, "case "...)
+				t.appendText("case ")
 				t.expression(t.tokens[t.pos:end])
 				t.out = append(t.out, ':')
 				t.pos = end + 1
@@ -1834,7 +1929,7 @@ func (t *translator) switchStatementBody() {
 					t.fail(TranslateErrStatement)
 					return
 				}
-				t.out = append(t.out, "default:"...)
+				t.appendText("default:")
 			}
 			continue
 		}
@@ -1874,15 +1969,15 @@ func (t *translator) doStatement() {
 	}
 	t.typeSerial++
 	name := "__c_do_first_" + decimalString(t.typeSerial)
-	t.out = append(t.out, "{var "...)
+	t.appendText("{var ")
 	t.out = append(t.out, name...)
-	t.out = append(t.out, " bool=true;for "...)
+	t.appendText(" bool=true;for ")
 	t.out = append(t.out, name...)
-	t.out = append(t.out, "||"...)
+	t.appendText("||")
 	t.condition(t.tokens[t.pos:close])
-	t.out = append(t.out, " {"...)
+	t.appendText(" {")
 	t.out = append(t.out, name...)
-	t.out = append(t.out, "=false;"...)
+	t.appendText("=false;")
 	t.out = append(t.out, body[1:]...)
 	t.out = append(t.out, '}')
 	t.pos = close + 1
@@ -1907,27 +2002,10 @@ func (t *translator) parenthesizedCondition() {
 
 func (t *translator) condition(tokens []token) {
 	if len(tokens) == 0 {
-		t.out = append(t.out, "true"...)
+		t.appendText("true")
 		return
 	}
-	boolean := false
-	for i := 0; i < len(tokens); i++ {
-		if tokenIs(t.src, tokens[i], "==") || tokenIs(t.src, tokens[i], "!=") ||
-			tokenIs(t.src, tokens[i], "<") || tokenIs(t.src, tokens[i], ">") ||
-			tokenIs(t.src, tokens[i], "<=") || tokenIs(t.src, tokens[i], ">=") ||
-			tokenIs(t.src, tokens[i], "&&") || tokenIs(t.src, tokens[i], "||") ||
-			tokenIs(t.src, tokens[i], "true") || tokenIs(t.src, tokens[i], "false") {
-			boolean = true
-			break
-		}
-	}
-	if boolean {
-		t.expression(tokens)
-		return
-	}
-	t.out = append(t.out, '(')
-	t.expression(tokens)
-	t.out = append(t.out, ")!=0"...)
+	t.emitConditionExpression(tokens)
 }
 
 func (t *translator) expression(tokens []token) {
@@ -1937,7 +2015,115 @@ func (t *translator) expression(tokens []token) {
 	if t.emitBitfieldMutation(tokens) {
 		return
 	}
+	if t.emitConvertedAssignment(tokens) {
+		return
+	}
 	t.emitExpression(tokens)
+}
+
+func (t *translator) emitConvertedAssignment(tokens []token) bool {
+	depth := 0
+	for i := 0; i < len(tokens); i++ {
+		if tokenIs(t.src, tokens[i], "(") || tokenIs(t.src, tokens[i], "[") {
+			depth++
+		} else if tokenIs(t.src, tokens[i], ")") || tokenIs(t.src, tokens[i], "]") {
+			depth--
+		} else if depth == 0 && tokenIs(t.src, tokens[i], "=") {
+			t.emitExpression(tokens[:i])
+			t.out = append(t.out, '=')
+			t.convertedExpression(t.lvalueType(tokens[:i]), tokens[i+1:])
+			return true
+		}
+	}
+	return false
+}
+
+func (t *translator) convertedExpression(typeID int, tokens []token) {
+	if t.typeInfo(typeID).kind == cTypePointer {
+		if value, ok := t.constantExpression(tokens); ok && value == 0 {
+			t.appendText("nil")
+			return
+		}
+	}
+	if len(tokens) > 3 && tokenIs(t.src, tokens[0], "(") {
+		close := matchingToken(t.src, tokens, 0, "(", ")")
+		if close > 1 && close+1 < len(tokens) && tokenIs(t.src, tokens[close+1], "{") {
+			end := matchingToken(t.src, tokens, close+1, "{", "}")
+			if end == len(tokens)-1 {
+				t.emitInitializerValue(typeID, tokens[close+1:])
+				return
+			}
+		}
+	}
+	if t.typeInfo(typeID).kind == cTypeBool {
+		t.appendText("uint8(")
+		if t.booleanExpression(tokens) {
+			t.emitBoolInteger(tokens)
+		} else {
+			t.emitBoolIntegerComparison(tokens)
+		}
+		t.out = append(t.out, ')')
+		return
+	}
+	sourceType := t.expressionType(tokens)
+	if typeID == cTypeVoidID || sourceType == typeID && !t.booleanExpression(tokens) || t.pointerConversionCompatible(typeID, sourceType) {
+		t.expression(tokens)
+		return
+	}
+	if t.booleanExpression(tokens) {
+		t.emitBoolInteger(tokens)
+		return
+	}
+	info := t.typeInfo(typeID)
+	if info.kind == cTypeStruct || info.kind == cTypeUnion || info.kind == cTypeArray || info.kind == cTypeFunction {
+		t.expression(tokens)
+		return
+	}
+	if info.kind == cTypePointer {
+		t.out = append(t.out, '(')
+		t.emitType(typeID)
+		t.out = append(t.out, ')')
+	} else {
+		t.emitType(typeID)
+	}
+	t.out = append(t.out, '(')
+	t.expression(tokens)
+	t.out = append(t.out, ')')
+}
+
+func (t *translator) pointerConversionCompatible(left int, right int) bool {
+	a, b := t.typeInfo(left), t.typeInfo(right)
+	if a.kind != cTypePointer || b.kind != cTypePointer {
+		return false
+	}
+	a, b = t.typeInfo(a.base), t.typeInfo(b.base)
+	return a.kind == b.kind && a.size == b.size && a.base == b.base &&
+		a.fieldStart == b.fieldStart && a.fieldCount == b.fieldCount && a.paramStart == b.paramStart
+}
+
+func (t *translator) emitBoolIntegerComparison(tokens []token) {
+	t.ensureBoolHelper()
+	t.appendText("__c_bool_int((")
+	t.expression(tokens)
+	if t.typeInfo(t.expressionType(tokens)).kind == cTypePointer {
+		t.appendText(")!=nil)")
+	} else {
+		t.appendText(")!=0)")
+	}
+}
+
+func (t *translator) emitBoolInteger(tokens []token) {
+	t.ensureBoolHelper()
+	t.appendText("__c_bool_int(")
+	t.emitExpression(tokens)
+	t.out = append(t.out, ')')
+}
+
+func (t *translator) ensureBoolHelper() {
+	if !t.boolHelper {
+		t.staticOut = append(t.staticOut, "func __c_bool_int(v bool) int32{if v{return 1};return 0}\n"...)
+		t.boolHelper = true
+	}
 }
 
 func (t *translator) rejectConstMutation(tokens []token) bool {
@@ -1999,6 +2185,25 @@ func (t *translator) lvalueType(tokens []token) int {
 }
 
 func (t *translator) emitExpression(tokens []token) {
+	if len(tokens) > 1 && tokenIs(t.src, tokens[0], "!") {
+		t.out = append(t.out, '!')
+		t.emitConditionExpression(tokens[1:])
+		return
+	}
+	if len(tokens) > 2 && tokenIs(t.src, tokens[0], "(") && matchingToken(t.src, tokens, 0, "(", ")") == len(tokens)-1 {
+		t.out = append(t.out, '(')
+		t.emitExpression(tokens[1 : len(tokens)-1])
+		t.out = append(t.out, ')')
+		return
+	}
+	if question, colon := t.conditionalOperator(tokens); question >= 0 {
+		t.emitConditionalExpression(tokens, question, colon)
+		return
+	}
+	if at := t.binaryOperator(tokens); at >= 0 {
+		t.emitBinaryExpression(tokens, at)
+		return
+	}
 	if len(tokens) > 2 && tokenIs(t.src, tokens[0], "(") {
 		close := matchingToken(t.src, tokens, 0, "(", ")")
 		if close > 1 && close < len(tokens)-1 && !tokenIs(t.src, tokens[close+1], "{") {
@@ -2014,9 +2219,13 @@ func (t *translator) emitExpression(tokens []token) {
 	for i := 0; i < len(tokens); i++ {
 		tok := tokens[i]
 		if tokenKind(tok) == tokenIdent && i+1 < len(tokens) && tokenIs(t.src, tokens[i+1], "(") {
-			if function, ok := t.lookupFunction(tokenText(t.src, tok)); ok && t.functions[function].variadic && !t.functions[function].defined {
+			if function, ok := t.lookupFunction(tokenText(t.src, tok)); ok {
 				close := matchingToken(t.src, tokens, i+1, "(", ")")
-				if close > i+1 && t.emitVariadicCall(function, tokens[i+2:close]) {
+				if close > i+1 && t.functions[function].variadic && !t.functions[function].defined && t.emitVariadicCall(function, tokens[i+2:close]) {
+					i = close
+					continue
+				}
+				if close > i+1 && !t.functions[function].variadic && t.emitFixedCall(function, tokens[i+2:close]) {
 					i = close
 					continue
 				}
@@ -2066,7 +2275,7 @@ func (t *translator) emitExpression(tokens []token) {
 			}
 		}
 		if consumed := t.nullPointerPrefix(tokens[i:]); consumed > 0 {
-			t.out = append(t.out, "nil"...)
+			t.appendText("nil")
 			i += consumed - 1
 			continue
 		}
@@ -2079,10 +2288,18 @@ func (t *translator) emitExpression(tokens []token) {
 		}
 		text := tokenText(t.src, tok)
 		if t.object && tokenKind(tok) == tokenString {
-			t.emitCStringValue(text)
+			end := i + 1
+			for end < len(tokens) && tokenKind(tokens[end]) == tokenString {
+				end++
+			}
+			t.emitCStringValues(tokens[i:end])
+			i = end - 1
 			continue
 		} else if tokenKind(tok) == tokenNumber {
 			text = trimIntegerSuffix(text)
+			if len(text) > 0 && (text[len(text)-1] == 'f' || text[len(text)-1] == 'F') {
+				text = text[:len(text)-1]
+			}
 		} else if tokenKind(tok) == tokenIdent {
 			if value, ok := t.lookupValue(text); ok {
 				t.appendDecimalSigned(value)
@@ -2107,6 +2324,238 @@ func (t *translator) emitExpression(tokens []token) {
 			t.out = append(t.out, ' ')
 		}
 	}
+}
+
+func (t *translator) emitFixedCall(function int, tokens []token) bool {
+	fn := t.functions[function]
+	args := splitTopLevel(t.src, tokens, ",")
+	if len(tokens) == 0 {
+		args = nil
+	}
+	if len(args) != fn.paramCount {
+		t.fail(TranslateErrUnsupported)
+		return true
+	}
+	t.out = append(t.out, fn.name...)
+	t.out = append(t.out, '(')
+	for i := 0; i < len(args); i++ {
+		if i > 0 {
+			t.out = append(t.out, ',')
+		}
+		t.convertedExpression(t.functionParams[fn.paramStart+i], args[i])
+	}
+	t.out = append(t.out, ')')
+	return true
+}
+
+func (t *translator) conditionalOperator(tokens []token) (int, int) {
+	paren, bracket, question := 0, 0, -1
+	nested := 0
+	for i := 0; i < len(tokens); i++ {
+		switch string(tokenText(t.src, tokens[i])) {
+		case "(":
+			paren++
+		case ")":
+			paren--
+		case "[":
+			bracket++
+		case "]":
+			bracket--
+		case "?":
+			if paren == 0 && bracket == 0 {
+				if question < 0 {
+					question = i
+				} else {
+					nested++
+				}
+			}
+		case ":":
+			if paren == 0 && bracket == 0 && question >= 0 {
+				if nested == 0 {
+					return question, i
+				}
+				nested--
+			}
+		}
+	}
+	return -1, -1
+}
+
+func (t *translator) emitConditionalExpression(tokens []token, question int, colon int) {
+	left, right := t.expressionType(tokens[question+1:colon]), t.expressionType(tokens[colon+1:])
+	typeID := t.usualArithmeticType(left, right)
+	if t.typeInfo(left).kind == cTypePointer {
+		typeID = left
+	} else if t.typeInfo(right).kind == cTypePointer {
+		typeID = right
+	}
+	t.typeSerial++
+	name := "__c_conditional_" + decimalString(t.typeSerial)
+	t.out = append(t.out, name...)
+	t.out = append(t.out, '(')
+	t.emitConditionExpression(tokens[:question])
+	t.out = append(t.out, ',')
+	t.convertedExpression(typeID, tokens[question+1:colon])
+	t.out = append(t.out, ',')
+	t.convertedExpression(typeID, tokens[colon+1:])
+	t.out = append(t.out, ')')
+	outer := t.out
+	t.out = t.staticOut
+	t.appendText("func ")
+	t.out = append(t.out, name...)
+	t.appendText("(c bool,a ")
+	t.emitType(typeID)
+	t.appendText(",b ")
+	t.emitType(typeID)
+	t.appendText(") ")
+	t.emitType(typeID)
+	t.out = append(t.out, "{if c{return a};return b}\n"...)
+	t.staticOut = t.out
+	t.out = outer
+}
+
+func (t *translator) binaryOperator(tokens []token) int {
+	best, precedence := -1, 100
+	paren, bracket := 0, 0
+	operand := true
+	for i := 0; i < len(tokens); i++ {
+		switch {
+		case tokenIs(t.src, tokens[i], "("):
+			paren++
+			operand = true
+			continue
+		case tokenIs(t.src, tokens[i], ")"):
+			paren--
+			operand = false
+			continue
+		case tokenIs(t.src, tokens[i], "["):
+			bracket++
+			continue
+		case tokenIs(t.src, tokens[i], "]"):
+			bracket--
+			continue
+		}
+		if paren != 0 || bracket != 0 {
+			continue
+		}
+		p := t.binaryPrecedence(tokens[i])
+		if p != 0 && !(operand && (tokenIs(t.src, tokens[i], "+") || tokenIs(t.src, tokens[i], "-") || tokenIs(t.src, tokens[i], "*") || tokenIs(t.src, tokens[i], "&"))) {
+			if p <= precedence {
+				best, precedence = i, p
+			}
+			operand = true
+		} else {
+			operand = false
+		}
+	}
+	return best
+}
+
+func (t *translator) binaryPrecedence(tok token) int {
+	switch string(tokenText(t.src, tok)) {
+	case "||":
+		return 1
+	case "&&":
+		return 2
+	case "|":
+		return 3
+	case "^":
+		return 4
+	case "&":
+		return 5
+	case "==", "!=":
+		return 6
+	case "<", ">", "<=", ">=":
+		return 7
+	case "<<", ">>":
+		return 8
+	case "+", "-":
+		return 9
+	case "*", "/", "%":
+		return 10
+	}
+	return 0
+}
+
+func (t *translator) emitBinaryExpression(tokens []token, at int) {
+	op := tokens[at]
+	left, right := tokens[:at], tokens[at+1:]
+	if tokenIs(t.src, op, "&&") || tokenIs(t.src, op, "||") {
+		t.emitConditionExpression(left)
+		t.out = append(t.out, tokenText(t.src, op)...)
+		t.emitConditionExpression(right)
+		return
+	}
+	leftType, rightType := t.expressionType(left), t.expressionType(right)
+	typeID := t.usualArithmeticType(leftType, rightType)
+	t.convertedExpression(typeID, left)
+	t.out = append(t.out, tokenText(t.src, op)...)
+	if tokenIs(t.src, op, "<<") || tokenIs(t.src, op, ">>") {
+		t.convertedExpression(t.integerPromotion(rightType), right)
+	} else {
+		t.convertedExpression(typeID, right)
+	}
+}
+
+func (t *translator) emitConditionExpression(tokens []token) {
+	if t.booleanExpression(tokens) {
+		t.emitExpression(tokens)
+	} else {
+		t.out = append(t.out, '(')
+		t.emitExpression(tokens)
+		t.appendText(")!=0")
+	}
+}
+
+func (t *translator) booleanExpression(tokens []token) bool {
+	for len(tokens) > 1 && tokenIs(t.src, tokens[0], "(") && matchingToken(t.src, tokens, 0, "(", ")") == len(tokens)-1 {
+		tokens = tokens[1 : len(tokens)-1]
+	}
+	if question, _ := t.conditionalOperator(tokens); question >= 0 {
+		return false
+	}
+	at := t.binaryOperator(tokens)
+	if at < 0 {
+		return len(tokens) > 0 && tokenIs(t.src, tokens[0], "!")
+	}
+	return t.binaryPrecedence(tokens[at]) <= 2 || t.binaryPrecedence(tokens[at]) == 6 || t.binaryPrecedence(tokens[at]) == 7
+}
+
+func (t *translator) integerPromotion(typeID int) int {
+	info := t.typeInfo(typeID)
+	if info.kind == cTypeBool || (info.kind == cTypeInt || info.kind == cTypeUint) && info.size < 4 {
+		return cTypeInt32ID
+	}
+	return typeID
+}
+
+func (t *translator) usualArithmeticType(left int, right int) int {
+	a, b := t.integerPromotion(left), t.integerPromotion(right)
+	ai, bi := t.typeInfo(a), t.typeInfo(b)
+	if ai.kind == cTypeFloat || bi.kind == cTypeFloat {
+		if ai.size > bi.size {
+			return a
+		}
+		return b
+	}
+	if ai.kind != cTypeInt && ai.kind != cTypeUint || bi.kind != cTypeInt && bi.kind != cTypeUint {
+		return a
+	}
+	if ai.kind == bi.kind {
+		if ai.size >= bi.size {
+			return a
+		}
+		return b
+	}
+	unsigned, signed := a, b
+	ui, si := ai, bi
+	if ai.kind == cTypeInt {
+		unsigned, signed, ui, si = b, a, bi, ai
+	}
+	if ui.size >= si.size {
+		return unsigned
+	}
+	return signed
 }
 
 func (t *translator) emitVariadicCall(function int, tokens []token) bool {
@@ -2211,6 +2660,25 @@ func (t *translator) expressionType(tokens []token) int {
 			}
 		}
 	}
+	if question, colon := t.conditionalOperator(tokens); question >= 0 {
+		left, right := t.expressionType(tokens[question+1:colon]), t.expressionType(tokens[colon+1:])
+		if t.typeInfo(left).kind == cTypePointer {
+			return left
+		}
+		if t.typeInfo(right).kind == cTypePointer {
+			return right
+		}
+		return t.usualArithmeticType(left, right)
+	}
+	if at := t.binaryOperator(tokens); at >= 0 {
+		if t.booleanExpression(tokens) {
+			return cTypeInt32ID
+		}
+		if tokenIs(t.src, tokens[at], "<<") || tokenIs(t.src, tokens[at], ">>") {
+			return t.integerPromotion(t.expressionType(tokens[:at]))
+		}
+		return t.usualArithmeticType(t.expressionType(tokens[:at]), t.expressionType(tokens[at+1:]))
+	}
 	if access, ok := t.memberAccess(tokens, 0); ok && access.end == len(tokens) {
 		return access.typeID
 	}
@@ -2248,6 +2716,31 @@ func (t *translator) expressionType(tokens []token) int {
 			}
 			return cTypeFloat64ID
 		}
+		unsigned, long := false, false
+		for i := len(text) - 1; i >= 0; i-- {
+			if text[i] == 'u' || text[i] == 'U' {
+				unsigned = true
+			} else if text[i] == 'l' || text[i] == 'L' {
+				long = true
+			} else {
+				break
+			}
+		}
+		if long {
+			if unsigned {
+				return cTypeUint64ID
+			}
+			return cTypeInt64ID
+		}
+		if unsigned {
+			return cTypeUint32ID
+		}
+		if value, ok := integerTokenValue(t.src, tokens[:1]); ok && value > 0x7fffffff {
+			if len(text) > 1 && text[0] == '0' && value <= 0xffffffff {
+				return cTypeUint32ID
+			}
+			return cTypeInt64ID
+		}
 	}
 	return cTypeInt32ID
 }
@@ -2261,7 +2754,6 @@ func (t *translator) emitAggregateInitializer(typeID int, tokens []token) {
 	}
 	items := splitTopLevel(t.src, tokens[1:len(tokens)-1], ",")
 	fieldIndex := 0
-	arrayIndex := 0
 	t.out = append(t.out, '{')
 	written := 0
 	for i := 0; i < len(items); i++ {
@@ -2270,72 +2762,30 @@ func (t *translator) emitAggregateInitializer(typeID int, tokens []token) {
 			continue
 		}
 		valueType := cTypeVoidID
-		value := item
-		keyed := false
-		if info.kind == cTypeStruct && len(item) >= 4 && tokenIs(t.src, item[0], ".") && tokenKind(item[1]) == tokenIdent && tokenIs(t.src, item[2], "=") {
-			field, ok := t.lookupField(typeID, tokenText(t.src, item[1]))
-			if !ok || !field.emit || field.bitWidth != 0 {
+		if written > 0 {
+			t.out = append(t.out, ',')
+		}
+		if info.kind == cTypeArray {
+			if written >= info.count {
 				t.fail(TranslateErrUnsupported)
 				return
 			}
-			if written > 0 {
-				t.out = append(t.out, ',')
+			valueType = info.base
+		} else {
+			for fieldIndex < info.fieldCount && t.fields[info.fieldStart+fieldIndex].synthetic {
+				fieldIndex++
 			}
+			if fieldIndex >= info.fieldCount {
+				t.fail(TranslateErrUnsupported)
+				return
+			}
+			field := t.fields[info.fieldStart+fieldIndex]
+			valueType = field.typeID
+			fieldIndex++
 			t.out = append(t.out, field.name...)
 			t.out = append(t.out, ':')
-			valueType, value, keyed = field.typeID, item[3:], true
-			for j := 0; j < info.fieldCount; j++ {
-				if t.fields[info.fieldStart+j].name == field.name {
-					fieldIndex = j + 1
-					break
-				}
-			}
-		} else if info.kind == cTypeArray && len(item) >= 4 && tokenIs(t.src, item[0], "[") {
-			close := matchingToken(t.src, item, 0, "[", "]")
-			if close <= 1 || close+1 >= len(item) || !tokenIs(t.src, item[close+1], "=") {
-				t.fail(TranslateErrUnsupported)
-				return
-			}
-			index, ok := t.constantExpression(item[1:close])
-			if !ok || index < 0 || index >= info.count {
-				t.fail(TranslateErrUnsupported)
-				return
-			}
-			if written > 0 {
-				t.out = append(t.out, ',')
-			}
-			t.appendDecimal(index)
-			t.out = append(t.out, ':')
-			valueType, value, keyed = info.base, item[close+2:], true
-			arrayIndex = index + 1
 		}
-		if !keyed {
-			if written > 0 {
-				t.out = append(t.out, ',')
-			}
-			if info.kind == cTypeArray {
-				if arrayIndex >= info.count {
-					t.fail(TranslateErrUnsupported)
-					return
-				}
-				valueType = info.base
-				arrayIndex++
-			} else {
-				for fieldIndex < info.fieldCount && t.fields[info.fieldStart+fieldIndex].synthetic {
-					fieldIndex++
-				}
-				if fieldIndex >= info.fieldCount {
-					t.fail(TranslateErrUnsupported)
-					return
-				}
-				field := t.fields[info.fieldStart+fieldIndex]
-				valueType = field.typeID
-				fieldIndex++
-				t.out = append(t.out, field.name...)
-				t.out = append(t.out, ':')
-			}
-		}
-		t.emitInitializerValue(valueType, value)
+		t.emitInitializerValue(valueType, item)
 		written++
 	}
 	t.out = append(t.out, '}')
@@ -2470,7 +2920,7 @@ func (t *translator) emitMutationInitializer(typeID int, tokens []token) bool {
 	t.out = append(t.out, ')')
 	outer := t.out
 	t.out = t.staticOut
-	t.out = append(t.out, "func "...)
+	t.appendText("func ")
 	t.out = append(t.out, name...)
 	t.out = append(t.out, '(')
 	for i := 0; i < len(paths); i++ {
@@ -2482,14 +2932,14 @@ func (t *translator) emitMutationInitializer(typeID int, tokens []token) bool {
 		t.out = append(t.out, ' ')
 		last := steps[paths[i].start+paths[i].count-1]
 		if last.field >= 0 && t.typeInfo(paths[i].typeID).kind == cTypeBool && t.fields[last.field].bitWidth > 0 {
-			t.out = append(t.out, "uint8"...)
+			t.appendText("uint8")
 		} else {
 			t.emitType(paths[i].typeID)
 		}
 	}
-	t.out = append(t.out, ") "...)
+	t.appendText(") ")
 	t.emitType(typeID)
-	t.out = append(t.out, "{var p "...)
+	t.appendText("{var p ")
 	t.emitType(typeID)
 	t.out = append(t.out, ';')
 	for i := 0; i < len(paths); i++ {
@@ -2497,14 +2947,14 @@ func (t *translator) emitMutationInitializer(typeID int, tokens []token) bool {
 		last := steps[path.start+path.count-1]
 		if last.field >= 0 && t.fields[last.field].bitWidth > 0 {
 			t.emitInitializerPath(steps[path.start:path.start+path.count-1], typeID)
-			t.out = append(t.out, ".__c_set_"...)
+			t.appendText(".__c_set_")
 			t.out = append(t.out, t.fields[last.field].name...)
-			t.out = append(t.out, "(v"...)
+			t.appendText("(v")
 			t.appendDecimal(i)
-			t.out = append(t.out, ");"...)
+			t.appendText(");")
 		} else {
 			t.emitInitializerPath(steps[path.start:path.start+path.count], typeID)
-			t.out = append(t.out, "=v"...)
+			t.appendText("=v")
 			t.appendDecimal(i)
 			t.out = append(t.out, ';')
 		}
@@ -2532,9 +2982,9 @@ func (t *translator) emitInitializerPath(steps []initializerStep, typeID int) {
 		if t.typeInfo(typeID).kind == cTypeUnion {
 			receiver := t.out
 			t.out = append([]byte("(*"), receiver...)
-			t.out = append(t.out, ".__c_ptr_"...)
+			t.appendText(".__c_ptr_")
 			t.out = append(t.out, field.name...)
-			t.out = append(t.out, "())"...)
+			t.appendText("())")
 		} else {
 			t.out = append(t.out, '.')
 			t.out = append(t.out, field.name...)
@@ -2598,27 +3048,27 @@ func (t *translator) emitUnionInitializer(typeID int, tokens []token) {
 	t.out = append(t.out, ')')
 	outer := t.out
 	t.out = t.staticOut
-	t.out = append(t.out, "func "...)
+	t.appendText("func ")
 	t.out = append(t.out, name...)
-	t.out = append(t.out, "(v "...)
+	t.appendText("(v ")
 	if t.typeInfo(field.typeID).kind == cTypeBool && field.bitWidth > 0 {
-		t.out = append(t.out, "uint8"...)
+		t.appendText("uint8")
 	} else {
 		t.emitType(field.typeID)
 	}
-	t.out = append(t.out, ") "...)
+	t.appendText(") ")
 	t.emitType(typeID)
-	t.out = append(t.out, "{var p "...)
+	t.appendText("{var p ")
 	t.emitType(typeID)
 	t.out = append(t.out, ';')
 	if field.bitWidth > 0 {
-		t.out = append(t.out, "p.__c_set_"...)
+		t.appendText("p.__c_set_")
 		t.out = append(t.out, field.name...)
-		t.out = append(t.out, "(v);"...)
+		t.appendText("(v);")
 	} else {
-		t.out = append(t.out, "(*p.__c_ptr_"...)
+		t.appendText("(*p.__c_ptr_")
 		t.out = append(t.out, field.name...)
-		t.out = append(t.out, "())=v;"...)
+		t.appendText("())=v;")
 	}
 	t.out = append(t.out, "return p}\n"...)
 	t.staticOut = t.out
@@ -2642,7 +3092,7 @@ func (t *translator) emitBitfieldMutation(tokens []token) bool {
 			return false
 		}
 		t.out = append(t.out, access.receiver...)
-		t.out = append(t.out, ".__c_set_"...)
+		t.appendText(".__c_set_")
 		t.out = append(t.out, access.field.name...)
 		t.out = append(t.out, '(')
 		if !tokenIs(t.src, tokens[i], "=") {
@@ -2673,14 +3123,14 @@ func (t *translator) emitBitfieldMutation(tokens []token) bool {
 
 func (t *translator) emitBitfieldStep(access cMemberAccess, op token) {
 	t.out = append(t.out, access.receiver...)
-	t.out = append(t.out, ".__c_set_"...)
+	t.appendText(".__c_set_")
 	t.out = append(t.out, access.field.name...)
 	t.out = append(t.out, '(')
 	t.out = append(t.out, access.expr...)
 	if tokenIs(t.src, op, "++") {
-		t.out = append(t.out, "+1)"...)
+		t.appendText("+1)")
 	} else {
-		t.out = append(t.out, "-1)"...)
+		t.appendText("-1)")
 	}
 }
 
@@ -2933,16 +3383,18 @@ func (t *translator) nullPointerPrefix(tokens []token) int {
 	return 0
 }
 
-func (t *translator) emitCStringValue(text []byte) {
-	value, ok := decodeCString(text)
-	if !ok {
-		t.fail(TranslateErrUnsupported)
-		return
-	}
+func (t *translator) emitCStringValues(tokens []token) {
 	t.out = append(t.out, '"')
 	hex := "0123456789abcdef"
-	for i := 0; i < len(value); i++ {
-		t.out = append(t.out, '\\', 'x', hex[value[i]>>4], hex[value[i]&15])
+	for i := 0; i < len(tokens); i++ {
+		value, ok := decodeCString(tokenText(t.src, tokens[i]))
+		if !ok {
+			t.fail(TranslateErrUnsupported)
+			return
+		}
+		for j := 0; j < len(value); j++ {
+			t.out = append(t.out, '\\', 'x', hex[value[j]>>4], hex[value[j]&15])
+		}
 	}
 	t.out = append(t.out, '\\', 'x', '0', '0', '"')
 }
@@ -2985,6 +3437,24 @@ func decodeCString(text []byte) ([]byte, bool) {
 		case '\\', '\'', '"', '?':
 			out = append(out, ch)
 		default:
+			if ch == 'x' {
+				value := 0
+				digits := 0
+				for i+1 < len(text)-1 {
+					digit := hexDigit(text[i+1])
+					if digit < 0 {
+						break
+					}
+					i++
+					value = value*16 + digit
+					digits++
+				}
+				if digits == 0 {
+					return nil, false
+				}
+				out = append(out, byte(value))
+				continue
+			}
 			if ch < '0' || ch > '7' {
 				return nil, false
 			}
@@ -2997,6 +3467,19 @@ func decodeCString(text []byte) ([]byte, bool) {
 		}
 	}
 	return out, true
+}
+
+func hexDigit(ch byte) int {
+	if ch >= '0' && ch <= '9' {
+		return int(ch - '0')
+	}
+	if ch >= 'a' && ch <= 'f' {
+		return int(ch-'a') + 10
+	}
+	if ch >= 'A' && ch <= 'F' {
+		return int(ch-'A') + 10
+	}
+	return -1
 }
 
 func expressionNeedsSpace(left []byte, right []byte) bool {

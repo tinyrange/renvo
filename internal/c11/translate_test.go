@@ -292,8 +292,8 @@ int inspect(void) {
 		[]byte("func(p *__c_union_word)__c_ptr_whole()*uint32"),
 		[]byte("func(p *__c_struct_flags)__c_get_delta() int32"),
 		[]byte("flags.__c_set_low(flags.__c_get_low()+1)"),
-		[]byte("(*word_cursor.__c_ptr_whole())=0x04030201"),
-		[]byte("return 4+12+(*word.__c_ptr_bytes())[0]+flags.__c_get_low()"),
+		[]byte("(*word_cursor.__c_ptr_whole())=uint32(0x04030201)"),
+		[]byte("(*word.__c_ptr_bytes())[0]"),
 	} {
 		if !bytes.Contains(result.Source, want) {
 			t.Fatalf("translated union/bitfield source is missing %q:\n%s", want, result.Source)
@@ -410,16 +410,31 @@ func TestTranslateRejectsConflictingTentativeDefinition(t *testing.T) {
 	}
 }
 
-func TestTranslateRejectsThreadStorageUntilTLSLoweringExists(t *testing.T) {
-	for _, source := range []string{
-		"_Thread_local int value;",
-		"_Thread_local static int value;",
-		"extern _Thread_local int value;",
+func TestTranslateThreadStorage(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+_Thread_local int value = 3;
+static _Thread_local int second;
+int step(int delta) { value += delta; second = value; return second; }
+`), nil)
+	if !result.Ok {
+		t.Fatalf("thread-storage translation failed: %#v", result)
+	}
+	for _, want := range [][]byte{
+		[]byte("linkstatic libc,pthread_key_create"),
+		[]byte("linkstatic libc,pthread_mutex_lock"),
+		[]byte("func __c_tls_get_"),
+		[]byte("(*__c_tls_get_"),
+		[]byte("__c_calloc(1,4)"),
 	} {
-		result := TranslateObject("main", []byte(source), nil)
-		if result.Ok || result.Error != TranslateErrUnsupported {
-			t.Fatalf("thread-storage %q result = %#v", source, result)
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("thread-storage source is missing %q:\n%s", want, result.Source)
 		}
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("translated thread storage does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+	if external := TranslateObject("main", []byte("extern _Thread_local int value;"), nil); external.Ok || external.Error != TranslateErrUnsupported {
+		t.Fatalf("unresolved external TLS result = %#v", external)
 	}
 }
 
@@ -521,12 +536,13 @@ int inspect(const int parameter, int *restrict cursor) {
 	observed = *cursor;
 	return immutable + observed + parameter;
 }
+
 `), nil)
 	if !result.Ok {
 		t.Fatalf("qualified translation failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
 	for _, want := range [][]byte{
-		[]byte("var immutable int32=3"),
+		[]byte("var immutable int32=int32(3)"),
 		[]byte("var observed int32"),
 		[]byte("func inspect(parameter int32,cursor *int32) int32"),
 	} {
@@ -548,6 +564,45 @@ int inspect(const int parameter, int *restrict cursor) {
 	}
 }
 
+func TestTranslateIntegerPromotionsAndConversions(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+int inspect(void) {
+	unsigned char left = 250, right = 10;
+	short wide = 30000;
+	signed char negative = -1;
+	unsigned int one = 1;
+	long large = -1;
+	int sum = left + right;
+	int doubled = wide + wide;
+	int unsigned_compare = negative < one;
+	int rank_compare = large < one;
+	_Bool normalized = 260;
+	int selected = negative < one ? 7 : 9;
+	return sum == 260 && doubled == 60000 && unsigned_compare == 0 && rank_compare == 1 && normalized == 1 && selected == 9;
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("promotion translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{
+		[]byte("int32(left)+int32(right)"),
+		[]byte("int32(wide)+int32(wide)"),
+		[]byte("uint32(negative)<one"),
+		[]byte("large<int64(one)"),
+		[]byte("__c_bool_int("),
+		[]byte("var normalized uint8=uint8(__c_bool_int((260)!=0))"),
+		[]byte("__c_conditional_"),
+		[]byte("(c bool,a int32,b int32) int32{if c{return a};return b}"),
+	} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("promotion source is missing %q:\n%s", want, result.Source)
+		}
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("translated promotions do not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
 func TestTranslateReportsOriginalOffset(t *testing.T) {
 	source := []byte("int main(void) { int value = 1")
 	result := Translate("main", source)
@@ -559,7 +614,7 @@ func TestTranslateReportsOriginalOffset(t *testing.T) {
 func TestTranslateObjectEmitsForeignDeclarationAndCStringData(t *testing.T) {
 	result := TranslateObject("main", []byte(`
 #include <stdio.h>
-int main(void) { puts("Hello, world!"); return 0; }
+int main(void) { puts("Hello, " "world\x21"); return 0; }
 `), []byte("extern int puts (const char *__s);\n"))
 	if !result.Ok {
 		t.Fatalf("TranslateObject failed: error=%d at=%d", result.Error, result.ErrorAt)
@@ -596,7 +651,7 @@ int EVP_DigestFinal_ex(EVP_MD_CTX *ctx, unsigned char *md, uint32_t *size);
 	}
 	for _, want := range [][]byte{
 		[]byte("var context *byte=EVP_MD_CTX_new()"),
-		[]byte("var count uintptr=0"),
+		[]byte("var count uintptr=uintptr(0)"),
 		[]byte("func EVP_DigestUpdate(p0 *byte,p1 *byte,p2 uintptr) int32"),
 		[]byte("func EVP_DigestFinal_ex(p0 *byte,p1 *uint8,p2 *uint32) int32"),
 	} {

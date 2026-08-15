@@ -126,7 +126,7 @@ func (t *translator) initTypes(dataModel int) {
 	t.pointerSize = 8
 	t.types = append(t.types,
 		cTypeInfo{kind: cTypeVoid, size: 1, align: 1},
-		cTypeInfo{kind: cTypeBool, size: 1, align: 1, goName: "bool"},
+		cTypeInfo{kind: cTypeBool, size: 1, align: 1, goName: "uint8"},
 		cTypeInfo{kind: cTypeInt, size: 1, align: 1, goName: "int8"},
 		cTypeInfo{kind: cTypeUint, size: 1, align: 1, goName: "uint8"},
 		cTypeInfo{kind: cTypeInt, size: 2, align: 2, goName: "int16"},
