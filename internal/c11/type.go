@@ -6,6 +6,13 @@ const (
 )
 
 const (
+	cQualifierConst = 1 << iota
+	cQualifierVolatile
+	cQualifierRestrict
+	cQualifierAtomic
+)
+
+const (
 	cTypeInvalid = iota
 	cTypeVoid
 	cTypeBool
@@ -50,6 +57,7 @@ type cTypeInfo struct {
 	paramStart int
 	paramCount int
 	variadic   bool
+	qualifiers int
 	goName     string
 }
 
@@ -147,6 +155,25 @@ func (t *translator) pointerType(base int) int {
 		}
 	}
 	t.types = append(t.types, cTypeInfo{kind: cTypePointer, base: base, size: t.pointerSize, align: t.pointerSize})
+	return len(t.types) - 1
+}
+
+func (t *translator) qualifiedType(typeID int, qualifiers int) int {
+	if qualifiers == 0 || t.typeInfo(typeID).qualifiers&qualifiers == qualifiers {
+		return typeID
+	}
+	want := t.typeInfo(typeID)
+	want.qualifiers |= qualifiers
+	for i := 0; i < len(t.types); i++ {
+		info := t.types[i]
+		if info.kind == want.kind && info.base == want.base && info.count == want.count &&
+			info.fieldStart == want.fieldStart && info.fieldCount == want.fieldCount &&
+			info.paramStart == want.paramStart && info.paramCount == want.paramCount &&
+			info.variadic == want.variadic && info.qualifiers == want.qualifiers {
+			return i
+		}
+	}
+	t.types = append(t.types, want)
 	return len(t.types) - 1
 }
 

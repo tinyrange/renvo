@@ -364,17 +364,19 @@ int renvo_aggregate(void) {
 	union word bytes = (union word){ .bytes = { 9, 8, 7, 6 } };
 	struct packed packed = { .high = 17, .low = 5, .value = 4 };
 	struct packed sequence = { 6, 3, 2 };
+	const int qualified = 2;
+	volatile int observed = qualified;
 	return selected.tail + selected.nested.x + selected.values[2] +
 		positional.nested.y + sparse[4] + inferred[3] + ((struct inner){ .x = 4, .y = 6 }).y +
 		word.bytes[0] + bytes.bytes[1] + packed.high + packed.low + packed.value +
-		sequence.low + sequence.high + sequence.value + overwritten[0];
+		sequence.low + sequence.high + sequence.value + overwritten[0] + observed;
 }
 
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(harness, []byte(`extern int renvo_aggregate(void);
-int main(void) { return renvo_aggregate() == 92 ? 0 : 1; }
+int main(void) { return renvo_aggregate() == 94 ? 0 : 1; }
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}

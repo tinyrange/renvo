@@ -491,6 +491,7 @@ int inspect(void) {
 	short negative = -3;
 	return printf("values %d %d %.1f\n", small, negative, (float)2.5);
 }
+
 `), nil)
 	if !result.Ok {
 		t.Fatalf("variadic translation failed: error=%d at=%d", result.Error, result.ErrorAt)
@@ -509,6 +510,41 @@ int inspect(void) {
 	}
 	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
 		t.Fatalf("translated variadic call does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateQualifierSemantics(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+const int immutable = 3;
+volatile int observed;
+int inspect(const int parameter, int *restrict cursor) {
+	observed = *cursor;
+	return immutable + observed + parameter;
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("qualified translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{
+		[]byte("var immutable int32=3"),
+		[]byte("var observed int32"),
+		[]byte("func inspect(parameter int32,cursor *int32) int32"),
+	} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("qualified source is missing %q:\n%s", want, result.Source)
+		}
+	}
+	for _, source := range []string{
+		"const int value = 1; int f(void) { value = 2; return value; }",
+		"struct pair { int x; }; const struct pair value = {1}; int f(void) { value.x++; return value.x; }",
+		"int f(const int *value) { *value = 2; return *value; }",
+		"int f(int * const value) { value = 0; return 0; }",
+		"restrict int invalid;",
+	} {
+		invalid := TranslateObject("main", []byte(source), nil)
+		if invalid.Ok {
+			t.Fatalf("qualifier mutation/constraint was accepted: %s\n%s", source, invalid.Source)
+		}
 	}
 }
 
