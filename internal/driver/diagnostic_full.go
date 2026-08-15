@@ -4,6 +4,7 @@ package driver
 
 import (
 	"renvo.dev/internal/build"
+	"renvo.dev/internal/c11"
 	"renvo.dev/internal/check"
 	"renvo.dev/internal/link"
 	"renvo.dev/internal/load"
@@ -252,6 +253,9 @@ func loadDiagnostic(result BuildResult, built pipeline.Result) Diagnostic {
 		diagnostic.Phase, diagnostic.Code, diagnostic.Message = "parser", "RENVO-PARSE-001", "source syntax is invalid"
 	} else if pkg.Error == load.PackageErrC11 {
 		diagnostic.Phase, diagnostic.Code, diagnostic.Message = "c11", "RENVO-C11-001", "C11 source is not supported or is invalid"
+		if pkg.C11Error == c11.TranslateErrVLA {
+			diagnostic.Code, diagnostic.Message = "RENVO-C11-002", "variable length arrays are not supported"
+		}
 	} else if pkg.Error == load.PackageErrName {
 		diagnostic.Code, diagnostic.Message = "RENVO-LOAD-012", "files in one directory declare different packages"
 	} else if pkg.Error == load.PackageErrImport {

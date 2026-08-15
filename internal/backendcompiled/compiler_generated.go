@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "3ad1eee4ba53211c2c43c12a8ce80138ebf1cc470a7c82dc1abfc1f1fee7e505"
+const CompilerSourceDigest = "f7910319537409868ab8fabc17b61c0f5745376b09a3801cd864f5840827b608"
 
 // source: backend/compiler_common_impl.go
 
@@ -25659,7 +25659,7 @@ return renvoRTGParseTargetArg(target)
 
 func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
 if target == renvoTargetLinuxAmd64 {
-return "linux/amd64", "\x00\x83\xf7\xf9,Z\xfc\"z\xb0\x04\xbb\xaa\x86\x1e\xd0jaL\x8e\x1d\xe8\xe5\x13:j\x8e6,\xebp\xe1", 3, true
+return "linux/amd64", "^;\x12\xf0\x807:\x98k\x82\xfd\x10\x80f\x06\xf8S\xf4\x99\xddR\x90\xbf$(\xea\x0f?\vP\x162", 3, true
 }
 if target == renvoTargetLinux386 {
 return "linux/386", "\x1e\xd2A\xf1+&cc\xf9\xb3(0\xa2\xb5\xb9j<\x01\xe4\x0eLd\x8ch\x99\xf2X_o\x9a\xe7\x94", 3, true
@@ -34481,12 +34481,22 @@ renvoAsmEmit8(out, 0xc0 | i<<3)
 }
 externalID := renvoAsmAddExternalImportName(out, out.staticImports[importID].name)
 
+
+
+renvoAsmEmit3(out, 0x49, 0x89, 0xe3)
+renvoAsmEmit4(out, 0x48, 0x83, 0xe4, 0xf0)
+renvoAsmEmit4(out, 0x48, 0x83, 0xec, 0x10)
+renvoAsmEmit4(out, 0x4c, 0x89, 0x5c, 0x24)
+renvoAsmEmit8(out, 0x08)
+
 renvoAsmEmit8(out, 0xb0)
 renvoAsmEmit8(out, vectorCount)
 renvoAsmEmit8(out, 0xe8)
 at := len(out.code)
 renvoAsmEmit32(out, 0)
 renvoAsmAddAbsReloc(out, at, externalID, 2)
+renvoAsmEmit4(out, 0x48, 0x8b, 0x64, 0x24)
+renvoAsmEmit8(out, 0x08)
 }
 
 func rtgBuiltinLinuxAmd64PackageLinuxPrepareReadWriteBuffer(out *renvoAsm) {

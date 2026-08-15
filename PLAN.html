@@ -557,7 +557,7 @@ cc hello.o -o hello
                 <li>Represent types and declarations by integer IDs in flat arenas; avoid pointer-rich object graphs.</li>
                 <li>Reject VLAs initially if the selected kernel config forbids them; parse them well enough to diagnose precisely.</li>
               </ul>
-              <div class="gate">Active · host/stage3 object regressions now cover quoted project headers, typedef structs, LP64 padding, recursive declarators, function-pointer types, enum constants, arrays, globals, pointers, calls, ISO control flow, true union overlap, bitfields, linkage/tentative/static objects, chained/repeated aggregate initialization and compound literals, external integer/floating variadic calls, pointer-level qualifiers, const/restrict constraints, integer promotions/conversions, conditional expressions, adjacent/escaped strings, and pthread-verified thread-duration definitions. The warm pinned closure remains at the M4 GNU-attribute frontier with 0.31 s wall / 30,784 KiB peak RSS; the stripped frontend plus x86_64 backends is 1,994,729 bytes. The M3 scope above is frozen and full ISO C semantics remain in progress.</div>
+              <div class="gate">Complete · translator and system-linked host/stage3 regressions cover every item in the frozen scope above, including block-scoped ordinary/tag namespaces, recursive and abstract declarators, LP64 aggregates/unions/bitfields, qualifier constraints, linkage/tentative/static/thread storage, character-array strings, function pointers, fixed and variadic calls/definitions, designated and compound initialization, promotions/conversions/constants, and ISO control flow. Stage3 matches host canonical units, and its measured frontend is 386.269 ms CPU / 26,180 KiB peak RSS. The stripped frontend plus x86_64 backends is 1,999,249 bytes. The pinned closure stops at the unchanged M4 GNU-attribute frontier with 0.36 s wall / 30,864 KiB peak RSS.</div>
             </div>
           </article>
 
@@ -820,16 +820,13 @@ cc hello.o -o hello
         </div>
 
         <div class="callout">
-          <strong>Active next step:</strong> Continue M3 from the landed integer-ID
-          type/layout slice. Parenthesized/array/function declarators, function
-          pointer types, enum constants, constant array bounds, and anonymous
-          aggregate-member offsets now pass the real kernel closure, and the
-          ISO control-flow slice is covered by a system-linked host/stage3 object.
-          Continue only the frozen M3 scope with external thread-local linkage, atomic/remaining qualifier semantics,
-          aggregate/expression edge cases, and variadic definitions. The observed GNU-attribute
-          blocker remains M4 work and must not expand M3. Object translation consumes M2 output directly while
-          retaining quoted project declarations and bounding system headers; keep
-          the M0 hosted link, M1 Kbuild handshake, and M2 host/stage3 corpus green.
+          <strong>Active next step:</strong> Begin M4 at the pinned GNU-attribute
+          blocker in <code>scripts/mod/devicetable-offsets.c</code>. M3 is complete
+          at its frozen boundary; GNU attributes, builtins, statement expressions,
+          case ranges, external object relocations, and all other later-milestone
+          work remain outside it. Keep the M0 hosted link, M1 Kbuild handshake,
+          M2 preprocessing corpus, M3 system-link regressions, stage3 parity,
+          resource telemetry, and the strict 2 MB payload gate green.
         </div>
       </div>
     </section>

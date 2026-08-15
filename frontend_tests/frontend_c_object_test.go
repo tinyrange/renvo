@@ -358,6 +358,12 @@ struct record {
 };
 union word { unsigned whole; unsigned char bytes[4]; };
 struct packed { unsigned low : 3; unsigned high : 5; int value; };
+struct text { char label[3]; unsigned char wrapped; };
+typedef int (*binary_fn)(int, int);
+static int expression_side;
+static int expression_add(int left, int right) { return left + right; }
+static int expression_mark(int value) { expression_side = expression_side * 10 + value; return value; }
+static int ignored_variadic(int fixed, ...) { return fixed; }
 int promotion_truth(void) { return (unsigned char)250 + 10 == 260; }
 int renvo_aggregate(void) {
 	struct record selected = {
@@ -370,11 +376,16 @@ int renvo_aggregate(void) {
 	struct record positional = { 1, { 2, 3 }, { 4, 5, 6 }, 7 };
 	int sparse[5] = { [3] = 9, 10 };
 	int inferred[] = { [2] = 8, 9 };
+	char string_inferred[] = "A" "B";
+	char string_exact[2] = "ok";
+	unsigned char string_padded[4] = u8"x";
 	int overwritten[2] = { [0] = 1, [0] = 4 };
 	union word word = { .whole = 0x04030201 };
 	union word bytes = (union word){ .bytes = { 9, 8, 7, 6 } };
 	struct packed packed = { .high = 17, .low = 5, .value = 4 };
 	struct packed sequence = { 6, 3, 2 };
+	struct text text = { "ok", 300 };
+	struct text named = { .wrapped = 301, .label = "hi" };
 	const int qualified = 2;
 	volatile int observed = qualified;
 	unsigned char promotion_left = 250, promotion_right = 10;
@@ -384,11 +395,21 @@ int renvo_aggregate(void) {
 	long promotion_large = -1;
 	_Bool promotion_bool = 260;
 	int promotion_selected = promotion_negative < promotion_one ? 7 : 9;
+	binary_fn operation = expression_add;
+	int lazy = 1 ? expression_mark(2) : expression_mark(3);
+	int comma = (expression_mark(4), expression_mark(5));
 	if (promotion_left + promotion_right != 260 || promotion_wide + promotion_wide != 60000 ||
 		promotion_negative < promotion_one || !(promotion_large < promotion_one)) return -1;
 	if (!promotion_truth()) return -2;
 	if (promotion_bool != 1) return -3;
 	if (promotion_selected != 9) return -4;
+	if (lazy != 2 || comma != 5 || expression_side != 245) return -5;
+	if (operation(7, 5) != 12 || ~promotion_left != -251) return -6;
+	if (sizeof inferred != 16 || ignored_variadic(9, expression_mark(6), 2.5) != 9 || expression_side != 2456) return -7;
+	if (sizeof string_inferred != 3 || string_inferred[0] != 'A' || string_inferred[2] != 0 ||
+		string_exact[1] != 'k' || string_padded[0] != 'x' || string_padded[1] != 0 || string_padded[3] != 0 || sizeof "xy" != 3) return -8;
+	if (text.label[0] != 'o' || text.label[2] != 0 || text.wrapped != 44) return -9;
+	if (named.label[1] != 'i' || named.label[2] != 0 || named.wrapped != 45 || ((int[2]){4, 5})[1] != 5) return -10;
 	return selected.tail + selected.nested.x + selected.values[2] +
 		positional.nested.y + sparse[4] + inferred[3] + ((struct inner){ .x = 4, .y = 6 }).y +
 		word.bytes[0] + bytes.bytes[1] + packed.high + packed.low + packed.value +
@@ -479,8 +500,9 @@ func runCObjectThreadStorageSystemLink(t *testing.T, frontend frontendConfig) {
 	harness := filepath.Join(dir, "harness.c")
 	object := filepath.Join(dir, "thread.o")
 	executable := filepath.Join(dir, "thread-test")
-	if err := os.WriteFile(source, []byte(`_Thread_local int counter;
+	if err := os.WriteFile(source, []byte(`extern _Thread_local int counter;
 int renvo_tls_step(int delta) { counter += delta; return counter; }
+_Thread_local int counter;
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -655,6 +677,10 @@ func runCObjectControlFlowSystemLink(t *testing.T, frontend frontendConfig) {
 	default:
 		total += 9;
 	}
+	unsigned char narrow = choice;
+	switch (narrow) { case 300: total = 1000; default: break; }
+	unsigned mask = ~0U;
+	switch (mask) { case -1: total += 4; break; }
 	goto done;
 	total = 1000;
 done:
@@ -665,9 +691,9 @@ done:
 	}
 	if err := os.WriteFile(harness, []byte(`extern int renvo_control(int);
 int main(void) {
-	return renvo_control(0) == 13 &&
-		renvo_control(1) == 12 &&
-		renvo_control(2) == 19 ? 0 : 1;
+	return renvo_control(0) == 17 &&
+		renvo_control(1) == 16 &&
+		renvo_control(2) == 23 ? 0 : 1;
 }
 `), 0o644); err != nil {
 		t.Fatal(err)

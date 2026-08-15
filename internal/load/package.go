@@ -51,6 +51,7 @@ type Package struct {
 	ErrorFile      int
 	ErrorImport    int
 	ErrorOffset    int
+	C11Error       int
 	CoreArenaStart int
 	CoreArenaEnd   int
 }
@@ -161,6 +162,7 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 			}
 			if !translated.Ok {
 				pkg.ErrorOffset = translated.ErrorAt
+				pkg.C11Error = translated.Error
 				pkg.Files = append(pkg.Files, ParsedFile{Path: source.Path, Src: source.Src, ArenaStart: source.ArenaStart, ArenaEnd: source.ArenaEnd})
 				return packageFail(pkg, PackageErrC11, i, -1)
 			}

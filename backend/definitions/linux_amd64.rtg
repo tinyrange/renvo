@@ -46,6 +46,14 @@ go backend {
 			}
 		}
 		externalID := out.ExternalImport(out.StaticImportName(importID))
+		// Expression evaluation can leave an odd number of words below the
+		// arguments. Preserve that exact stack pointer while aligning the SysV
+		// call boundary; the foreign callee may freely clobber r11.
+		out.Bytes3(0x49, 0x89, 0xe3)
+		out.Bytes4(0x48, 0x83, 0xe4, 0xf0)
+		out.Bytes4(0x48, 0x83, 0xec, 0x10)
+		out.Bytes4(0x4c, 0x89, 0x5c, 0x24)
+		out.Byte(0x08)
 		// Fixed callees ignore AL; variadic callees use it as the vector count.
 		out.Byte(0xb0)
 		out.Byte(vectorCount)
@@ -53,6 +61,8 @@ go backend {
 		at := out.Len()
 		out.Int32(0)
 		out.AbsoluteReloc(at, externalID, RTGRelocationImport)
+		out.Bytes4(0x48, 0x8b, 0x64, 0x24)
+		out.Byte(0x08)
 	}
 }
 

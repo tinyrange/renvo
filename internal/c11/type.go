@@ -5,6 +5,26 @@ const (
 	DataModelLP64
 )
 
+type cTargetDescriptor struct {
+	dataModel   int
+	boolSize    int
+	charSize    int
+	shortSize   int
+	intSize     int
+	longSize    int
+	floatSize   int
+	doubleSize  int
+	pointerSize int
+}
+
+// cX8664SysV is the single source of target sizes and natural alignments for
+// the first C object target. Aggregate and bitfield layout consume the scalar
+// type entries initialized from this descriptor.
+var cX8664SysV = cTargetDescriptor{
+	dataModel: DataModelLP64, boolSize: 1, charSize: 1, shortSize: 2,
+	intSize: 4, longSize: 8, floatSize: 4, doubleSize: 8, pointerSize: 8,
+}
+
 const (
 	cQualifierConst = 1 << iota
 	cQualifierVolatile
@@ -77,19 +97,34 @@ type cTypeName struct {
 	typeID int
 }
 
-type cValueName struct {
+const (
+	cNameTypedef = iota
+	cNameValue
+	cNameObject
+	cNameFunction
+	cNameTag
+)
+
+type cNamespaceName struct {
 	name  string
-	value int
+	index int
+	kind  int
+}
+
+type cScopeMark struct {
+	names, nameStart int
 }
 
 type cObjectName struct {
 	name   string
 	goName string
 	typeID int
+	auto   bool
 }
 
 type cFunctionName struct {
 	name       string
+	typeID     int
 	resultType int
 	paramStart int
 	paramCount int
@@ -114,30 +149,30 @@ type cMemberAccess struct {
 }
 
 func (t *translator) initTypes(dataModel int) {
-	// Object mode is currently gated to Linux/x86_64. Keeping the model as an
-	// explicit ID prevents host sizeof assumptions from leaking into C types
-	// and leaves the declaration arena ready for later target descriptors.
+	// Object mode is currently gated to Linux/x86_64. The explicit descriptor
+	// prevents host sizeof assumptions from leaking into C types.
 	t.dataModel = dataModel
-	if dataModel != DataModelLP64 {
+	target := cX8664SysV
+	if dataModel != target.dataModel {
 		t.ok = false
 		t.err = TranslateErrUnsupported
 		return
 	}
-	t.pointerSize = 8
+	t.pointerSize = target.pointerSize
 	t.types = append(t.types,
-		cTypeInfo{kind: cTypeVoid, size: 1, align: 1},
-		cTypeInfo{kind: cTypeBool, size: 1, align: 1, goName: "uint8"},
-		cTypeInfo{kind: cTypeInt, size: 1, align: 1, goName: "int8"},
-		cTypeInfo{kind: cTypeUint, size: 1, align: 1, goName: "uint8"},
-		cTypeInfo{kind: cTypeInt, size: 2, align: 2, goName: "int16"},
-		cTypeInfo{kind: cTypeUint, size: 2, align: 2, goName: "uint16"},
-		cTypeInfo{kind: cTypeInt, size: 4, align: 4, goName: "int32"},
-		cTypeInfo{kind: cTypeUint, size: 4, align: 4, goName: "uint32"},
-		cTypeInfo{kind: cTypeInt, size: 8, align: 8, goName: "int64"},
-		cTypeInfo{kind: cTypeUint, size: 8, align: 8, goName: "uint64"},
-		cTypeInfo{kind: cTypeFloat, size: 4, align: 4, goName: "float32"},
-		cTypeInfo{kind: cTypeFloat, size: 8, align: 8, goName: "float64"},
-		cTypeInfo{kind: cTypeUint, size: 8, align: 8, goName: "uintptr"},
+		cTypeInfo{kind: cTypeVoid, size: target.charSize, align: target.charSize},
+		cTypeInfo{kind: cTypeBool, size: target.boolSize, align: target.boolSize, goName: "uint8"},
+		cTypeInfo{kind: cTypeInt, size: target.charSize, align: target.charSize, goName: "int8"},
+		cTypeInfo{kind: cTypeUint, size: target.charSize, align: target.charSize, goName: "uint8"},
+		cTypeInfo{kind: cTypeInt, size: target.shortSize, align: target.shortSize, goName: "int16"},
+		cTypeInfo{kind: cTypeUint, size: target.shortSize, align: target.shortSize, goName: "uint16"},
+		cTypeInfo{kind: cTypeInt, size: target.intSize, align: target.intSize, goName: "int32"},
+		cTypeInfo{kind: cTypeUint, size: target.intSize, align: target.intSize, goName: "uint32"},
+		cTypeInfo{kind: cTypeInt, size: target.longSize, align: target.longSize, goName: "int64"},
+		cTypeInfo{kind: cTypeUint, size: target.longSize, align: target.longSize, goName: "uint64"},
+		cTypeInfo{kind: cTypeFloat, size: target.floatSize, align: target.floatSize, goName: "float32"},
+		cTypeInfo{kind: cTypeFloat, size: target.doubleSize, align: target.doubleSize, goName: "float64"},
+		cTypeInfo{kind: cTypeUint, size: target.pointerSize, align: target.pointerSize, goName: "uintptr"},
 	)
 }
 
@@ -213,31 +248,15 @@ func (t *translator) opaqueType(name string) int {
 }
 
 func (t *translator) rememberTypedef(name string, typeID int) {
-	for i := len(t.typedefs) - 1; i >= 0; i-- {
-		if t.typedefs[i].name == name {
-			t.typedefs[i].typeID = typeID
-			return
-		}
-	}
-	t.typedefs = append(t.typedefs, cTypeName{name: name, typeID: typeID})
+	t.rememberName(name, typeID, cNameTypedef)
 }
 
 func (t *translator) lookupTypedef(name []byte) (int, bool) {
-	for i := len(t.typedefs) - 1; i >= 0; i-- {
-		if textEquals(name, t.typedefs[i].name) {
-			return t.typedefs[i].typeID, true
-		}
-	}
-	return cTypeVoidID, false
+	return t.lookupName(name, cNameTypedef)
 }
 
 func (t *translator) lookupTag(name []byte) (int, bool) {
-	for i := len(t.tags) - 1; i >= 0; i-- {
-		if textEquals(name, t.tags[i].name) {
-			return t.tags[i].typeID, true
-		}
-	}
-	return cTypeVoidID, false
+	return t.lookupName(name, cNameTag)
 }
 
 func (t *translator) emitType(typeID int) {
@@ -258,7 +277,7 @@ func (t *translator) emitType(typeID int) {
 	case cTypeStruct, cTypeUnion:
 		t.out = append(t.out, info.goName...)
 	case cTypeFunction:
-		t.out = append(t.out, "func("...)
+		t.appendText("func(")
 		for i := 0; i < info.paramCount; i++ {
 			if i > 0 {
 				t.out = append(t.out, ',')
@@ -269,7 +288,7 @@ func (t *translator) emitType(typeID int) {
 			if info.paramCount > 0 {
 				t.out = append(t.out, ',')
 			}
-			t.out = append(t.out, "...uintptr"...)
+			t.appendText("...uintptr")
 		}
 		t.out = append(t.out, ')')
 		if info.base != cTypeVoidID {
@@ -277,7 +296,7 @@ func (t *translator) emitType(typeID int) {
 			t.emitType(info.base)
 		}
 	case cTypeVoid:
-		t.out = append(t.out, "byte"...)
+		t.appendText("byte")
 	default:
 		t.out = append(t.out, info.goName...)
 	}

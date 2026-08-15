@@ -51,14 +51,17 @@ implements translation-phase splicing/comments, recursive includes and
 `include_next`, guards/`pragma once`, object/function/variadic macros, rescanning
 with hide sets, stringizing/pasting, conditionals and integer expressions,
 `#line`, target predefines, and transitive dependency capture. Object translation
-now consumes that stream directly: declarations from quoted project headers are
+consumes that stream directly: declarations from quoted project headers are
 retained, while large system headers remain bounded by demand-selecting the
-referenced external prototypes. Variadic definitions, external thread-local
-linkage, atomic/remaining qualifier semantics, and the remaining
-aggregate/expression edge cases remain frozen M3 work. Direct external variadic
-calls are arity-specialized after C default argument promotion; the shared
-x86_64 object-call descriptor classifies integer and floating arguments and
-sets the SysV vector count. Attributes and the other GNU C
-surface remain M4 work.
+referenced external prototypes. The frozen M3 foundation is complete: it also
+covers block namespaces, character-array strings, function pointers, expression
+sequencing, promotions and conversions, same-unit external thread declarations,
+atomic/remaining qualifier validation, and variadic definitions whose optional
+pack is not consumed. Direct external variadic calls are arity-specialized after
+C default argument promotion; the shared x86_64 object-call descriptor classifies
+integer and floating arguments, sets the SysV vector count, and aligns every
+foreign call boundary. Consuming a variadic pack needs the later builtin surface,
+and cross-object thread or static string addresses need later relocations.
+Attributes and the other GNU C surface remain M4 work.
 Unsupported constructs must fail in this frontend rather than reaching a
 backend.

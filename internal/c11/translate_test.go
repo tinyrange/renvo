@@ -147,6 +147,47 @@ int inspect(void) {
 	}
 }
 
+func TestTranslateTypedefAndTagNamespacesAreBlockScoped(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+typedef int item;
+struct item { int item; };
+enum outer_value { outer_value = 3 };
+int inspect(void) {
+	item before = 1;
+	struct item record = { .item = 2 };
+	{
+		long item = 4;
+		item = item + 1;
+		{
+			typedef short item;
+			item nested = 6;
+			before += nested;
+		}
+		before += item;
+	}
+	item after = outer_value;
+	return before + record.item + after;
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("namespace translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{
+		[]byte("var before int32=1"),
+		[]byte("var item int64=4"),
+		[]byte("item=item+1"),
+		[]byte("var nested int16=6"),
+		[]byte("var after int32=3"),
+	} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("namespace source is missing %q:\n%s", want, result.Source)
+		}
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("translated namespaces do not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
 func TestTranslateLinuxSignedIntegerSpellings(t *testing.T) {
 	result := Translate("main", []byte(`
 typedef __signed__ char signed_byte;
@@ -174,6 +215,9 @@ struct callbacks {
 };
 int *select_value(int *value);
 int consume(int (*matrix)[3], int values[3]);
+int alpha(void), beta(int value);
+int qualified_parameter(int values[const static 3]) { return values[2]; }
+int abstract_layout(void) { return sizeof(int (*)[3]) + _Alignof(int (*)(int)); }
 `), nil)
 	if !result.Ok {
 		t.Fatalf("declarator translation failed: error=%d at=%d", result.Error, result.ErrorAt)
@@ -185,6 +229,10 @@ int consume(int (*matrix)[3], int values[3]);
 		[]byte("matrix *[3]int32"),
 		[]byte("func select_value(p0 *int32) *int32"),
 		[]byte("func consume(p0 *[3]int32,p1 *int32) int32"),
+		[]byte("func alpha() int32"),
+		[]byte("func beta(p0 int32) int32"),
+		[]byte("func qualified_parameter(values *int32) int32"),
+		[]byte("func abstract_layout() int32 {return 16;"),
 	} {
 		if !bytes.Contains(result.Source, want) {
 			t.Fatalf("translated declarators are missing %q:\n%s", want, result.Source)
@@ -192,6 +240,14 @@ int consume(int (*matrix)[3], int values[3]);
 	}
 	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
 		t.Fatalf("translated declarators do not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+	if invalid := TranslateObject("main", []byte("int invalid(int values[const 3]) { values = 0; return 0; }"), nil); invalid.Ok {
+		t.Fatalf("const-qualified adjusted array parameter was assignable:\n%s", invalid.Source)
+	}
+	for _, source := range []string{"typedef int conflict; int conflict;", "enum values { conflict }; int conflict(void);", "int conflict; int conflict(void);"} {
+		if invalid := TranslateObject("main", []byte(source), nil); invalid.Ok {
+			t.Fatalf("ordinary-identifier namespace conflict was accepted: %s", source)
+		}
 	}
 }
 
@@ -204,6 +260,8 @@ enum mode {
 	mode_mask = mode_four | 2
 };
 int values[1024 / (8 * sizeof(long))];
+int converted[-1 < 1U ? 3 : 4];
+int converted64[~0ULL > 0 ? 3 : 4];
 int selected(void) { return mode_five + mode_mask; }
 `))
 	if !result.Ok {
@@ -211,7 +269,9 @@ int selected(void) { return mode_five + mode_mask; }
 	}
 	for _, want := range [][]byte{
 		[]byte("var values [16]int32"),
-		[]byte("return 5+6"),
+		[]byte("var converted [4]int32"),
+		[]byte("var converted64 [3]int32"),
+		[]byte("return 11"),
 	} {
 		if !bytes.Contains(result.Source, want) {
 			t.Fatalf("translated enum source is missing %q:\n%s", want, result.Source)
@@ -292,7 +352,7 @@ int inspect(void) {
 		[]byte("func(p *__c_union_word)__c_ptr_whole()*uint32"),
 		[]byte("func(p *__c_struct_flags)__c_get_delta() int32"),
 		[]byte("flags.__c_set_low(flags.__c_get_low()+1)"),
-		[]byte("(*word_cursor.__c_ptr_whole())=uint32(0x04030201)"),
+		[]byte("(*word_cursor.__c_ptr_whole())=67305985"),
 		[]byte("(*word.__c_ptr_bytes())[0]"),
 	} {
 		if !bytes.Contains(result.Source, want) {
@@ -324,6 +384,10 @@ int control(int choice) {
 	default:
 		total += 9;
 	}
+	unsigned char narrow = choice;
+	switch (narrow) { case 300: total = 1000; default: break; }
+	unsigned mask = ~0U;
+	switch (mask) { case -1: total += 4; break; }
 	goto done;
 	total = 1000;
 done:
@@ -338,6 +402,8 @@ done:
 		[]byte("var j int32=0;"),
 		[]byte("for ;j<3;j++"),
 		[]byte("case 0:total+=1;"),
+		[]byte("switch int32(narrow){case 300:"),
+		[]byte("switch mask{case 4294967295:"),
 		[]byte("fallthrough;case 1:"),
 		[]byte("goto done;"),
 		[]byte("done:"),
@@ -412,9 +478,10 @@ func TestTranslateRejectsConflictingTentativeDefinition(t *testing.T) {
 
 func TestTranslateThreadStorage(t *testing.T) {
 	result := TranslateObject("main", []byte(`
-_Thread_local int value = 3;
-static _Thread_local int second;
+extern _Thread_local int value, second;
 int step(int delta) { value += delta; second = value; return second; }
+_Thread_local int value = 3;
+_Thread_local int second;
 `), nil)
 	if !result.Ok {
 		t.Fatalf("thread-storage translation failed: %#v", result)
@@ -449,6 +516,7 @@ struct record {
 };
 union word { unsigned whole; unsigned char bytes[4]; };
 struct packed { unsigned low : 3; unsigned high : 5; int value; };
+struct text { char label[3]; unsigned char wrapped; };
 int inspect(void) {
 	struct record selected = {
 		.tail = 5,
@@ -465,6 +533,8 @@ int inspect(void) {
 	union word bytes = (union word){ .bytes = { 9, 8, 7, 6 } };
 	struct packed packed = { .high = 17, .low = 5, .value = 4 };
 	struct packed sequence = { 6, 3, 2 };
+	struct text text = { "ok", 300 };
+	struct text named = { .wrapped = 301, .label = "hi" };
 	return selected.tail + selected.nested.x + selected.values[2] +
 		positional.nested.y + sparse[4] + inferred[3] + ((struct inner){ .x = 4, .y = 6 }).y +
 		word.bytes[0] + bytes.bytes[1] + packed.high + packed.low + packed.value +
@@ -488,6 +558,8 @@ int inspect(void) {
 		[]byte("p.__c_set_high(v0)"),
 		[]byte("p.__c_set_low(v1)"),
 		[]byte("p.value=v2"),
+		[]byte("label:[3]int8{111,107,0},wrapped:44"),
+		[]byte("p.wrapped=v0;p.label=v1"),
 	} {
 		if !bytes.Contains(result.Source, want) {
 			t.Fatalf("aggregate initializer source is missing %q:\n%s", want, result.Source)
@@ -542,7 +614,7 @@ int inspect(const int parameter, int *restrict cursor) {
 		t.Fatalf("qualified translation failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
 	for _, want := range [][]byte{
-		[]byte("var immutable int32=int32(3)"),
+		[]byte("var immutable int32=3"),
 		[]byte("var observed int32"),
 		[]byte("func inspect(parameter int32,cursor *int32) int32"),
 	} {
@@ -578,7 +650,9 @@ int inspect(void) {
 	int rank_compare = large < one;
 	_Bool normalized = 260;
 	int selected = negative < one ? 7 : 9;
-	return sum == 260 && doubled == 60000 && unsigned_compare == 0 && rank_compare == 1 && normalized == 1 && selected == 9;
+	int shifted = one << (long)3;
+	unsigned long all = ~0ULL;
+	return sum == 260 && doubled == 60000 && unsigned_compare == 0 && rank_compare == 1 && normalized == 1 && selected == 9 && sizeof(one << (long)3) == 4 && shifted == 8 && all > 0;
 }
 `), nil)
 	if !result.Ok {
@@ -589,10 +663,13 @@ int inspect(void) {
 		[]byte("int32(wide)+int32(wide)"),
 		[]byte("uint32(negative)<one"),
 		[]byte("large<int64(one)"),
+		[]byte("var shifted int32=int32(one<<3)"),
+		[]byte("var all uint64=^uint64(0)"),
 		[]byte("__c_bool_int("),
 		[]byte("var normalized uint8=uint8(__c_bool_int((260)!=0))"),
 		[]byte("__c_conditional_"),
-		[]byte("(c bool,a int32,b int32) int32{if c{return a};return b}"),
+		[]byte("func __c_conditional_1(c bool"),
+		[]byte("if c{return 7};return 9"),
 	} {
 		if !bytes.Contains(result.Source, want) {
 			t.Fatalf("promotion source is missing %q:\n%s", want, result.Source)
@@ -600,6 +677,106 @@ int inspect(void) {
 	}
 	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
 		t.Fatalf("translated promotions do not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateCExpressionSequencingAndFunctionPointers(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+typedef int (*binary_fn)(int, int);
+static int side;
+static int add(int left, int right) { return left + right; }
+static int mark(int value) { side = side * 10 + value; return value; }
+static int ignored_variadic(int fixed, ...) { return fixed; }
+enum constants { letter = 'A', chosen = 0 ? 11 : 13, narrowed = (unsigned char)258, unsigned_compare = -1 < 1U };
+int inspect(int choose) {
+	binary_fn operation = add;
+	unsigned char byte = 250;
+	int array[3] = {1, 2, 3};
+	int *cursor = array;
+	int selected = choose ? mark(2) : mark(3);
+	int comma = (mark(4), mark(5));
+	return selected + comma + operation(7, 5) + ~byte + sizeof array + sizeof *cursor +
+		letter + chosen + narrowed + unsigned_compare + ignored_variadic(9, mark(6), 2.5);
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("expression translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{
+		[]byte("func __c_conditional_"),
+		[]byte("if c{return mark(2)};return mark(3)"),
+		[]byte("func __c_comma_"),
+		[]byte("mark(4);return mark(5)"),
+		[]byte("var operation func(int32,int32) int32=add"),
+		[]byte("operation(7,5)"),
+		[]byte("int32(-int32(byte)-1)"),
+		[]byte("+12+4+65+13+2+0+"),
+		[]byte("return ignored_variadic(p0)"),
+	} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("expression source is missing %q:\n%s", want, result.Source)
+		}
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("translated expressions do not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateCharacterArrayStringInitialization(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+char inferred[] = "A" "\x42";
+char exact[2] = "ok";
+unsigned char padded[4] = u8"x";
+int inspect(void) { return sizeof inferred + sizeof "xy" + inferred[0] + inferred[1] + inferred[2] + exact[1] + padded[1] + padded[3]; }
+`), nil)
+	if !result.Ok {
+		t.Fatalf("character-array translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{
+		[]byte("var inferred [3]int8=[3]int8{65,66,0}"),
+		[]byte("var exact [2]int8=[2]int8{111,107}"),
+		[]byte("var padded [4]uint8=[4]uint8{120,0}"),
+		[]byte("return 3+3+int32(inferred[0])"),
+	} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("character-array source is missing %q:\n%s", want, result.Source)
+		}
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("translated character arrays do not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+	for _, source := range []string{
+		`char too_small[1] = "no";`,
+		`char unsupported[2] = L"x";`,
+	} {
+		invalid := TranslateObject("main", []byte(source), nil)
+		if invalid.Ok {
+			t.Fatalf("invalid string-array initializer %q translated successfully", source)
+		}
+	}
+}
+
+func TestTranslateAtomicTypesAndPreciseVLARejection(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+_Atomic(int) first;
+int _Atomic second;
+int inspect(void) { int * _Atomic pointer = 0; return sizeof(first) + sizeof(second) + sizeof(pointer); }
+`), nil)
+	if !result.Ok {
+		t.Fatalf("atomic type translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("var first int32")) || !bytes.Contains(result.Source, []byte("var second int32")) {
+		t.Fatalf("atomic declarations were not retained:\n%s", result.Source)
+	}
+	for _, source := range []string{
+		"int inspect(int count) { int values[count]; return 0; }",
+		"int inspect(int count, int values[count]) { return 0; }",
+		"int inspect(int values[*]);",
+	} {
+		invalid := TranslateObject("main", []byte(source), nil)
+		if invalid.Ok || invalid.Error != TranslateErrVLA || invalid.ErrorAt < 0 {
+			t.Fatalf("VLA %q result = %#v", source, invalid)
+		}
 	}
 }
 
@@ -634,6 +811,23 @@ int main(void) { puts("Hello, " "world\x21"); return 0; }
 	}
 }
 
+func TestTranslateObjectEmitsNullPointerCast(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+const char *version(int);
+int main(void) { return version(0) == ((void *)0); }
+`), nil)
+	if !result.Ok {
+		t.Fatalf("TranslateObject failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("version(0)==(*int8)(nil)")) {
+		t.Fatalf("translated null pointer cast is incorrect:\n%s", result.Source)
+	}
+	parsed := syntax.ParseFile(result.Source)
+	if !parsed.Ok {
+		t.Fatalf("translated null pointer cast does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
 func TestTranslateObjectMapsSystemTypedefsAndOpaquePointers(t *testing.T) {
 	result := TranslateObject("main", []byte(`
 int main(void) {
@@ -651,7 +845,7 @@ int EVP_DigestFinal_ex(EVP_MD_CTX *ctx, unsigned char *md, uint32_t *size);
 	}
 	for _, want := range [][]byte{
 		[]byte("var context *byte=EVP_MD_CTX_new()"),
-		[]byte("var count uintptr=uintptr(0)"),
+		[]byte("var count uintptr=0"),
 		[]byte("func EVP_DigestUpdate(p0 *byte,p1 *byte,p2 uintptr) int32"),
 		[]byte("func EVP_DigestFinal_ex(p0 *byte,p1 *uint8,p2 *uint32) int32"),
 	} {
