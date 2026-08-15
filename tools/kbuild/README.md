@@ -1,0 +1,27 @@
+# Pinned Kbuild handshake
+
+Milestone M1 uses upstream Linux 6.12.99 LTS, x86_64 `tinyconfig`. The tag,
+peeled commit, and kernel.org archive digest are fixed in `pin.env`; changing
+any of them is an explicit corpus refresh.
+
+Run `./tools/kbuild/prepare`. It creates a fresh temporary tree, verifies the
+archive, builds Renvo, keeps host utilities on `HOSTCC`, and assigns only target
+`CC` to `renvo cc`. Success currently means:
+
+- Kconfig identifies the bounded GCC-compatible driver and its external GNU
+  assembler contract;
+- unsupported option probes return failure;
+- `scripts/mod/empty.c` becomes a valid ET_REL object and its dependency rule
+  is consumed by `fixdep`;
+- the build reaches the checked, source-located C11 blocker in
+  `scripts/mod/devicetable-offsets.c`.
+
+The script leaves its tree, full log, timing/RSS telemetry, and read-only JSON
+census in the printed workspace. CPU and RSS are observations, not gates. The
+checked frontend/backend binary-size gates remain authoritative.
+
+Regenerate a census for any prepared tree without modifying it:
+
+```sh
+go run ./cmd/renvokbuildcensus -kernel /path/to/linux -out dashboard.json
+```

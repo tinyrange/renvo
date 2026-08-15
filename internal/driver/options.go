@@ -47,46 +47,137 @@ const DefaultModuleLicense = "Proprietary"
 const RunHelpText = "Usage: renvo run [-s] [-tags <list>] [-arena-size <bytes>] <script.go> [-- arguments...]\nTop-level statements form func main. The script is compiled for and executed on the host target.\n"
 
 type Options struct {
-	Target         string
-	TargetExplicit bool
-	Output         string
-	Package        string
-	Files          []string
-	Strip          bool
-	EmitUnit       bool
-	EmitImage      bool
-	Script         bool
-	WindowsGUI     bool
-	Mode           string
-	ModuleLicense  string
-	ArenaSize      int
-	BinaryLimit    int
-	System         string
-	SystemName     string
-	SystemError    string
-	SystemAt       int
-	Tags           []string
-	IncludePaths   []string
-	Ok             bool
-	Error          int
-	ErrorArg       string
-	ErrorAt        int
+	Target           string
+	TargetExplicit   bool
+	Output           string
+	Package          string
+	Files            []string
+	Strip            bool
+	EmitUnit         bool
+	EmitImage        bool
+	Script           bool
+	WindowsGUI       bool
+	Mode             string
+	ModuleLicense    string
+	ArenaSize        int
+	BinaryLimit      int
+	System           string
+	SystemName       string
+	SystemError      string
+	SystemAt         int
+	Tags             []string
+	IncludePaths     []string
+	CCompiler        bool
+	CLanguage        string
+	CDefines         []string
+	CUndefines       []string
+	CForcedInclude   []string
+	CNoStdIncludes   bool
+	CAssemblyOutput  bool
+	DependencyFile   string
+	DependencyTarget string
+	CDependencies    []string
+	CDependencyData  []byte
+	Ok               bool
+	Error            int
+	ErrorArg         string
+	ErrorAt          int
 }
 
 func CommandHelpRequested(args []string) bool {
 	return len(args) <= 1 || len(args) == 2 && args[1] == "--help"
 }
 
-// NormalizeCCompilerCommand removes the cc command selector while leaving its
-// compiler-style flags for the shared option parser. This keeps the alternate
-// frontend on the ordinary driver/build/backend path.
+// NormalizeCCompilerCommand translates the explicitly supported GCC-driver
+// surface into private ordinary-driver options. Unrecognized arguments are
+// retained so the shared parser rejects them and cc-option probes stay honest.
 func NormalizeCCompilerCommand(args []string) []string {
 	if len(args) < 2 || args[1] != "cc" {
 		return args
 	}
-	out := make([]string, 1, len(args)-1)
+	out := make([]string, 1, len(args))
 	out[0] = args[0]
-	return append(out, args[2:]...)
+	out = append(out, "-cc")
+	for i := 2; i < len(args); i++ {
+		arg := args[i]
+		if cCompilerInertOption(arg) {
+			continue
+		}
+		if arg == "-nostdinc" {
+			out = append(out, "-cc-nostdinc")
+			continue
+		}
+		if arg == "-S" {
+			out = append(out, "-c", "-cc-assembly-output")
+			continue
+		}
+		if arg == "-x" || arg == "-include" || arg == "-D" || arg == "-U" || arg == "-MF" || arg == "-MT" {
+			if i+1 >= len(args) {
+				out = append(out, arg)
+				continue
+			}
+			i++
+			prefix := "-cc-language="
+			switch arg {
+			case "-include":
+				prefix = "-cc-include="
+			case "-D":
+				prefix = "-cc-define="
+			case "-U":
+				prefix = "-cc-undefine="
+			case "-MF":
+				prefix = "-cc-depfile="
+			case "-MT":
+				prefix = "-cc-deptarget="
+			}
+			out = append(out, prefix+args[i])
+			continue
+		}
+		if len(arg) > 2 && arg[:2] == "-D" {
+			out = append(out, "-cc-define="+arg[2:])
+			continue
+		}
+		if len(arg) > 2 && arg[:2] == "-U" {
+			out = append(out, "-cc-undefine="+arg[2:])
+			continue
+		}
+		if len(arg) > 9 && arg[:9] == "-Wp,-MMD," {
+			out = append(out, "-cc-depfile="+arg[9:])
+			continue
+		}
+		if len(arg) > 8 && arg[:8] == "-Wp,-MD," {
+			out = append(out, "-cc-depfile="+arg[8:])
+			continue
+		}
+		if len(arg) > 8 && arg[:8] == "-Wp,-MT," {
+			out = append(out, "-cc-deptarget="+arg[8:])
+			continue
+		}
+		out = append(out, arg)
+	}
+	return out
+}
+
+func cCompilerInertOption(arg string) bool {
+	switch arg {
+	case "-MMD", "-MD", "-MP", "-P", "-pipe",
+		"-std=gnu11", "-std=c11", "-m64", "-Os", "-O0", "-O1", "-O2", "-O3",
+		"-fshort-wchar", "-funsigned-char", "-fno-common", "-fno-PIE", "-fno-pie",
+		"-fno-strict-aliasing", "-fno-asynchronous-unwind-tables", "-fno-delete-null-pointer-checks",
+		"-fno-stack-protector", "-fomit-frame-pointer", "-fno-strict-overflow", "-fno-stack-check",
+		"-fconserve-stack", "-fno-builtin-wcslen", "-falign-functions=16", "-fverbose-asm",
+		"-mno-sse", "-mno-mmx", "-mno-sse2", "-mno-3dnow", "-mno-avx", "-mno-80387",
+		"-mtune=generic", "-mno-red-zone", "-mcmodel=kernel",
+		"-Wall", "-Wextra", "-Wundef", "-Werror", "-Werror=implicit-function-declaration",
+		"-Werror=implicit-int", "-Werror=return-type", "-Werror=strict-prototypes",
+		"-Wno-format-security", "-Wno-trigraphs", "-Wmissing-declarations", "-Wmissing-prototypes",
+		"-Wframe-larger-than=2048", "-Wno-main", "-Wvla", "-Wno-pointer-sign",
+		"-Werror=date-time", "-Wunused", "-Wno-override-init", "-Wno-missing-field-initializers",
+		"-Wno-type-limits", "-Wno-shift-negative-value", "-Wno-maybe-uninitialized",
+		"-Wno-sign-compare", "-Wno-unused-parameter":
+		return true
+	}
+	return false
 }
 
 func ParseOptions(args []string) Options {
@@ -113,6 +204,54 @@ func parseOptions(args []string, requireAdvertisedTarget bool) Options {
 	arenaAt := -1
 	for i < len(args) {
 		arg := args[i]
+		if arg == "-cc" {
+			options.CCompiler = true
+			i++
+			continue
+		}
+		if len(arg) >= 13 && arg[:13] == "-cc-language=" {
+			options.CLanguage = arg[13:]
+			if options.CLanguage != "c" {
+				return parseFail(options, ParseErrUnknownOption, "-x "+options.CLanguage, i)
+			}
+			i++
+			continue
+		}
+		if len(arg) >= 11 && arg[:11] == "-cc-define=" {
+			options.CDefines = append(options.CDefines, arg[11:])
+			i++
+			continue
+		}
+		if len(arg) >= 13 && arg[:13] == "-cc-undefine=" {
+			options.CUndefines = append(options.CUndefines, arg[13:])
+			i++
+			continue
+		}
+		if len(arg) >= 12 && arg[:12] == "-cc-include=" {
+			options.CForcedInclude = append(options.CForcedInclude, arg[12:])
+			i++
+			continue
+		}
+		if arg == "-cc-nostdinc" {
+			options.CNoStdIncludes = true
+			i++
+			continue
+		}
+		if arg == "-cc-assembly-output" {
+			options.CAssemblyOutput = true
+			i++
+			continue
+		}
+		if len(arg) >= 12 && arg[:12] == "-cc-depfile=" {
+			options.DependencyFile = arg[12:]
+			i++
+			continue
+		}
+		if len(arg) >= 14 && arg[:14] == "-cc-deptarget=" {
+			options.DependencyTarget = arg[14:]
+			i++
+			continue
+		}
 		if arg == "-s" {
 			options.Strip = true
 			i++

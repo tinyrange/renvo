@@ -35,3 +35,19 @@ func TestBuildCObjectReportsMissingHeader(t *testing.T) {
 		t.Fatalf("missing C header result = %#v", result)
 	}
 }
+
+func TestBuildCObjectCapturesMakeDependencies(t *testing.T) {
+	fs := memorySourceFS{files: []load.SourceFile{
+		{Path: "/repo/case/main.c", Src: []byte("#include <api.h>\nint main(void) { return value(); }\n")},
+		{Path: "/repo/include/api.h", Src: []byte("int value(void);\n")},
+	}}
+	args := NormalizeCCompilerCommand([]string{"renvo", "cc", "-Wp,-MMD,obj/.main.o.d", "-I/repo/include", "-c", "main.c", "-o", "obj/main.o"})
+	result := BuildFromFS(args[1:], "/repo/case", "/std", fs)
+	if !result.Ok {
+		t.Fatalf("dependency build failed: %#v", result)
+	}
+	want := "obj/main.o: /repo/case/main.c /repo/include/api.h\n"
+	if got := string(CDependencyOutput(result.Options)); got != want {
+		t.Fatalf("dependency output = %q, want %q", got, want)
+	}
+}

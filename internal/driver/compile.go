@@ -90,6 +90,10 @@ func compileBuiltUnit(result CompileResult, built BuildResult, backend Backend) 
 		result.Binary = built.Unit
 		return result
 	}
+	if built.Options.CAssemblyOutput {
+		result.Diagnostic = Diagnostic{Phase: "backend", Code: "RENVO-BACKEND-007", Message: "C assembly output is not implemented"}
+		return compileFail(result, CompileErrBackend)
+	}
 	if backend == nil {
 		return compileFail(result, CompileErrBackend)
 	}

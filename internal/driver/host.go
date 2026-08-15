@@ -140,6 +140,11 @@ func compileAndWrite(args []string, stdRoot string, moduleCache string, backend 
 	if err != nil {
 		return hostFail(result, HostErrWrite, output)
 	}
+	if dependency := CDependencyOutput(compiled.Build.Options); len(dependency) > 0 {
+		if err := os.WriteFile(compiled.Build.Options.DependencyFile, dependency, 0o644); err != nil {
+			return hostFail(result, HostErrWrite, compiled.Build.Options.DependencyFile)
+		}
+	}
 	return result
 }
 
