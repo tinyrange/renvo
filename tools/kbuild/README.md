@@ -6,7 +6,9 @@ any of them is an explicit corpus refresh.
 
 Run `./tools/kbuild/prepare`. It creates a fresh temporary tree, verifies the
 archive, builds Renvo, keeps host utilities on `HOSTCC`, and assigns only target
-`CC` to `renvo cc`. Success currently means:
+`CC` to `renvo cc`. Set `RENVO_LINUX_ARCHIVE` to a previously downloaded pinned
+tarball to skip the network transfer; the SHA-256 check still runs. Success
+currently means:
 
 - Kconfig identifies the bounded GCC-compatible driver and its external GNU
   assembler contract;
@@ -14,11 +16,15 @@ archive, builds Renvo, keeps host utilities on `HOSTCC`, and assigns only target
 - `scripts/mod/empty.c` becomes a valid ET_REL object and its dependency rule
   is consumed by `fixdep`;
 - the build parses the closure's anonymous aggregates, enums, constant array
-  bounds, and function-pointer declarators, then reaches the checked GNU
-  attribute blocker reported at `scripts/mod/devicetable-offsets.c:152:19`.
+  bounds, function-pointer declarators, and GNU attributes, then reaches the
+  explicit `devicetable-offsets.c` assembly/code-generation frontier;
 - the M2 frontend preprocesses that complete translation unit, expands the
   checked `SIZE_`/`OFF_` paste results, and records its transitive dependency
   rule plus CPU/RSS telemetry.
+- the M5 gate sends a synthetic leaf through the pinned kernel's real
+  `scripts/Makefile.build`, consumes Renvo's dependency rule with `fixdep`, and
+  archives the resulting object in Kbuild's thin `built-in.a`; `readelf` checks
+  its named sections, visibility, weak alias, and external-call relocation.
 
 The script leaves its tree, full log, timing/RSS telemetry, and read-only JSON
 census in the printed workspace. CPU, RSS, and compiler bytes are observations,

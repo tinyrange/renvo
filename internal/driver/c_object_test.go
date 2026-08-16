@@ -55,7 +55,7 @@ func TestBuildCObjectCapturesMakeDependencies(t *testing.T) {
 	if !result.Ok {
 		t.Fatalf("dependency build failed: %#v", result)
 	}
-	want := "obj/main.o: /repo/case/main.c /repo/include/api.h\n"
+	want := "obj/main.o: main.c /repo/include/api.h\n"
 	if got := string(CDependencyOutput(result.Options)); got != want {
 		t.Fatalf("dependency output = %q, want %q", got, want)
 	}

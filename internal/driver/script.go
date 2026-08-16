@@ -139,6 +139,7 @@ func resolveCCompilerPaths(workDir string, options Options) Options {
 	if !options.CCompiler {
 		return options
 	}
+	options.CDependencyRoot = load.CleanPath(workDir)
 	for i := 0; i < len(options.IncludePaths); i++ {
 		options.IncludePaths[i] = load.JoinPath(workDir, options.IncludePaths[i])
 	}

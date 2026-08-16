@@ -585,7 +585,7 @@ cc hello.o -o hello
                 <li>Carry section and alignment attributes through the checked core instead of reconstructing them late.</li>
                 <li>Generate dependency files atomically and deterministically beside each object.</li>
               </ul>
-              <div class="gate">Kbuild accepts and archives a Renvo-built leaf object; <code>readelf</code> fixtures validate sections, symbols, relocations, and ABI without using a host compiler at test time.</div>
+              <div class="gate">Complete · pinned Linux 6.12.99 <code>scripts/Makefile.build</code> accepts a Renvo-built leaf, consumes its deterministic dependency rule, and archives it in <code>built-in.a</code>. Host, fixed-point stage3, and custom-RTG fixtures validate named PROGBITS/NOBITS sections, alignment, local/global/weak bindings, visibility, aliases, COMDAT groups, SysV ABI, and the pinned <code>R_X86_64_64</code>/<code>32</code>/<code>32S</code>/<code>PC32</code>/<code>PLT32</code> relocation census without a host C compiler. The fixed-point stage2/stage3 compiler is byte-identical at 2,147,447 bytes; size remains telemetry.</div>
             </div>
           </article>
 
@@ -684,7 +684,7 @@ cc hello.o -o hello
               <tr><td>Builtins</td><td>None</td><td>Constant/type queries, offsetof, branch hints, bit operations, overflow, object size, unreachable, atomics</td><td><span class="status later">M4/M7</span></td></tr>
               <tr><td>Inline asm</td><td>Out of initial issue scope</td><td>Operands, constraints, clobbers, volatile, goto edges, x86 templates or typed primitives</td><td><span class="status later">M7</span></td></tr>
               <tr><td>C ABI</td><td>Renvo-internal calls; kernel import machinery exists</td><td>System-linkable SysV <code>main</code> and external calls first; complete aggregate/variadic boundaries later</td><td><span class="status now">M0/M3</span></td></tr>
-              <tr><td>Artifacts</td><td>Shared executable pipeline; kernel-module ET_REL backend exists</td><td>Minimal system-linkable ELF64 ET_REL first; then arbitrary kernel sections, symbols, relocations, and depfiles</td><td><span class="status now">M0/M5</span></td></tr>
+              <tr><td>Artifacts</td><td>Shared executable pipeline; kernel-module ET_REL backend exists</td><td>Minimal system-linkable ELF64 ET_REL first; then arbitrary kernel sections, symbols, relocations, and depfiles</td><td><span class="status now">M5 complete</span></td></tr>
               <tr><td>Driver</td><td>Renvo package CLI</td><td><code>cc -c</code> hosted object slice first; then truthful Kbuild flags and compiler feature probes</td><td><span class="status now">M0/M1</span></td></tr>
             </tbody>
           </table>
@@ -799,8 +799,8 @@ cc hello.o -o hello
     <section id="next">
       <div class="wrap">
         <div class="eyebrow">08 · Immediate sequence</div>
-        <h2>The pinned GNU C semantic corpus is green.</h2>
-        <p class="section-intro">M0 through M4 now form permanent host-and-stage3 acceptance paths; the active edge moves from syntax and type checking to Kbuild-compatible object semantics.</p>
+        <h2>Kbuild now accepts Renvo kernel-shaped objects.</h2>
+        <p class="section-intro">M0 through M5 now form permanent host-and-stage3 acceptance paths; the active edge moves from synthetic object semantics to the first real upstream kernel C unit.</p>
 
         <div class="grid three">
           <article class="card next-pr" data-number="1">
@@ -821,13 +821,13 @@ cc hello.o -o hello
         </div>
 
         <div class="callout">
-          <strong>Active next step:</strong> Begin M5 at the frozen object-semantics
-          boundary. M4 is complete with all 482 pinned tinyconfig target C files
-          parsing and type-checking on the fixed-point self-hosted compiler;
-          arbitrary kernel section/symbol/relocation emission remains M5 work.
+          <strong>Active next step:</strong> Begin M6 at the frozen first-real-unit
+          boundary. M5 is complete with Kbuild accepting and archiving the synthetic
+          leaf and host/stage3/custom-RTG object fixtures covering its section,
+          symbol, relocation, ABI, and dependency contract.
           Keep the M0 hosted link, M1 Kbuild handshake, M2 preprocessing corpus,
-          M3 system-link regressions, M4 semantic gate, stage3 parity, and resource
-          and payload telemetry visible.
+          M3 system-link regressions, M4 semantic gate, M5 object gate, stage3
+          parity, and resource and payload telemetry visible.
         </div>
       </div>
     </section>

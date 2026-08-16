@@ -524,6 +524,7 @@ func renvoTryCompileObjectProgramRTG(
 		renvoRTGUnsupportedOperation != 0 {
 		return renvoCompileResult{}
 	}
+	renvoRecordObjectFunctionRanges(g)
 	data := renvoRTGImage(&g.asm)
 	renvoRTGValidateRelocations(&g.asm)
 	if renvoRTGUnsupportedOperation != 0 || len(data) == 0 {

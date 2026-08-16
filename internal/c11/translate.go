@@ -42,6 +42,7 @@ type declarator struct {
 	initializer     []token
 	functionType    int
 	incompleteArray bool
+	storage         int
 }
 
 // cAttributes contains only properties which affect C semantics at the shared
@@ -51,8 +52,9 @@ type cAttributes struct {
 	align             int
 	packed            bool
 	transparentUnion  bool
-	alias             bool
-	visibility        bool
+	section           string
+	alias             string
+	visibility        string
 	weak              bool
 	callingConvention bool
 }
@@ -117,6 +119,9 @@ type translator struct {
 	qualifiedTypes   []int
 	pointerChanges   []cTypeCacheChange
 	qualifiedChanges []cTypeCacheChange
+	functionSections bool
+	dataSections     bool
+	baseAttributes   cAttributes
 	typeSerial       int
 	dataModel        int
 	pointerSize      int
@@ -163,7 +168,20 @@ func TranslateObject(packageName string, src []byte, prelude []byte) Result {
 }
 
 func TranslateObjectForDataModel(packageName string, src []byte, prelude []byte, dataModel int) Result {
-	return translate(packageName, src, prelude, true, dataModel, false)
+	return TranslateObjectWithConfig(packageName, src, prelude, ObjectConfig{DataModel: dataModel})
+}
+
+// ObjectConfig contains object-placement policy selected by the compiler
+// driver. Declaration attributes remain properties of the declaration itself;
+// these booleans only implement the corresponding GCC command-line switches.
+type ObjectConfig struct {
+	DataModel        int
+	FunctionSections bool
+	DataSections     bool
+}
+
+func TranslateObjectWithConfig(packageName string, src []byte, prelude []byte, config ObjectConfig) Result {
+	return translateObjectConfig(packageName, src, prelude, true, config, false)
 }
 
 // CheckObjectForDataModel parses and type-checks a preprocessed C translation
@@ -171,21 +189,27 @@ func TranslateObjectForDataModel(packageName string, src []byte, prelude []byte,
 // It is the M4 boundary used for constructs such as inline assembly whose
 // lowering belongs to a later milestone.
 func CheckObjectForDataModel(src []byte, dataModel int) Result {
-	return translate("main", src, nil, true, dataModel, true)
+	return translateObjectConfig("main", src, nil, true, ObjectConfig{DataModel: dataModel}, true)
 }
 
 func translate(packageName string, src []byte, prelude []byte, object bool, dataModel int, checkOnly bool) Result {
+	return translateObjectConfig(packageName, src, prelude, object, ObjectConfig{DataModel: dataModel}, checkOnly)
+}
+
+func translateObjectConfig(packageName string, src []byte, prelude []byte, object bool, config ObjectConfig, checkOnly bool) Result {
 	t := translator{
-		packageName:  packageName,
-		out:          make([]byte, 0, len(src)+len(src)/4+len(prelude)+64),
-		object:       object,
-		checkOnly:    checkOnly,
-		ok:           true,
-		errorAt:      -1,
-		localStart:   -1,
-		initializing: -1,
+		packageName:      packageName,
+		out:              make([]byte, 0, len(src)+len(src)/4+len(prelude)+64),
+		object:           object,
+		checkOnly:        checkOnly,
+		functionSections: config.FunctionSections,
+		dataSections:     config.DataSections,
+		ok:               true,
+		errorAt:          -1,
+		localStart:       -1,
+		initializing:     -1,
 	}
-	t.initTypes(dataModel)
+	t.initTypes(config.DataModel)
 	t.appendText("package ")
 	t.out = append(t.out, packageName...)
 	t.out = append(t.out, '\n')
@@ -454,6 +478,7 @@ func (t *translator) externalDeclaration() {
 		t.fail(TranslateErrDeclaration)
 		return
 	}
+	typeAttributes := t.baseAttributes
 	if t.take(";") {
 		return
 	}
@@ -462,6 +487,7 @@ func (t *translator) externalDeclaration() {
 		t.fail(TranslateErrDeclaration)
 		return
 	}
+	decl.attributes.merge(typeAttributes)
 	if storage == storageTypedef && decl.function {
 		t.rememberTypedef(string(tokenText(t.src, decl.name)), decl.functionType)
 		for t.take(",") {
@@ -483,19 +509,22 @@ func (t *translator) externalDeclaration() {
 			return
 		}
 		if t.take(";") {
-			if (t.checkOnly || t.object && storage != storageStatic) && !t.rememberFunction(decl, false) {
+			if t.object && decl.attributes.alias != "" {
+				t.emitObjectAlias(decl, storage, true)
+			}
+			if (t.checkOnly || t.object && storage != storageStatic) && !t.rememberFunction(&decl, false) {
 				t.fail(TranslateErrDeclaration)
 			}
 			return // Otherwise a C or Go definition in the package satisfies it.
 		}
 		if t.take(",") {
-			if (t.checkOnly || t.object && storage != storageStatic) && !t.rememberFunction(decl, false) {
+			if (t.checkOnly || t.object && storage != storageStatic) && !t.rememberFunction(&decl, false) {
 				t.fail(TranslateErrDeclaration)
 				return
 			}
 			for {
 				next, valid := t.parseDeclarator(base, true)
-				if !valid || !next.function || (t.checkOnly || t.object && storage != storageStatic) && !t.rememberFunction(next, false) {
+				if !valid || !next.function || (t.checkOnly || t.object && storage != storageStatic) && !t.rememberFunction(&next, false) {
 					t.fail(TranslateErrDeclaration)
 					return
 				}
@@ -512,7 +541,7 @@ func (t *translator) externalDeclaration() {
 			t.fail(TranslateErrDeclaration)
 			return
 		}
-		if !t.rememberFunction(decl, true) {
+		if !t.rememberFunction(&decl, true) {
 			t.fail(TranslateErrDeclaration)
 			return
 		}
@@ -540,6 +569,7 @@ func (t *translator) externalDeclaration() {
 			t.fail(TranslateErrDeclaration)
 			return
 		}
+		next.attributes.merge(typeAttributes)
 		next.initializer = t.takeInitializer()
 		decls = append(decls, next)
 	}
@@ -578,6 +608,9 @@ func (t *translator) externalDeclaration() {
 	}
 	if storage == storageExtern {
 		for i := 0; i < len(decls); i++ {
+			if t.object && decls[i].attributes.alias != "" {
+				t.emitObjectAlias(decls[i], storage, false)
+			}
 			t.rememberObject(tokenText(t.src, decls[i].name), decls[i].typeID)
 		}
 		return
@@ -593,6 +626,7 @@ func (t *translator) externalDeclaration() {
 		return
 	}
 	for i := 0; i < len(decls); i++ {
+		decls[i].storage = storage
 		if !t.fileVariable(decls[i]) {
 			t.fail(TranslateErrDeclaration)
 			return
@@ -925,14 +959,22 @@ func (attributes *cAttributes) merge(other cAttributes) {
 	}
 	attributes.packed = attributes.packed || other.packed
 	attributes.transparentUnion = attributes.transparentUnion || other.transparentUnion
-	attributes.alias = attributes.alias || other.alias
-	attributes.visibility = attributes.visibility || other.visibility
+	if other.section != "" {
+		attributes.section = other.section
+	}
+	if other.alias != "" {
+		attributes.alias = other.alias
+	}
+	if other.visibility != "" {
+		attributes.visibility = other.visibility
+	}
 	attributes.weak = attributes.weak || other.weak
 	attributes.callingConvention = attributes.callingConvention || other.callingConvention
 }
 
 func (attributes cAttributes) requiresObjectMetadata() bool {
-	return attributes.alias || attributes.visibility || attributes.weak || attributes.callingConvention
+	return attributes.section != "" || attributes.alias != "" || attributes.visibility != "" ||
+		attributes.weak || attributes.callingConvention
 }
 
 func (t *translator) packAggregateFields(fields []cField, union bool) (int, int, int) {
@@ -1115,7 +1157,7 @@ func (t *translator) rememberAliasedObject(name []byte, goName string, typeID in
 	t.rememberName(string(name), len(t.objects)-1, cNameObject)
 }
 
-func (t *translator) rememberFunction(decl declarator, definition bool) bool {
+func (t *translator) rememberFunction(decl *declarator, definition bool) bool {
 	name := string(tokenText(t.src, decl.name))
 	function := -1
 	if entry := t.lookupNameEntryString(name, false); entry >= 0 {
@@ -1144,8 +1186,10 @@ func (t *translator) rememberFunction(decl declarator, definition bool) bool {
 			}
 		}
 		if definition {
+			decl.attributes.merge(fn.attributes)
 			fn.defined = true
 		}
+		fn.attributes.merge(decl.attributes)
 		return true
 	}
 	start := len(t.functionParams)
@@ -1154,7 +1198,7 @@ func (t *translator) rememberFunction(decl declarator, definition bool) bool {
 	}
 	t.functions = append(t.functions, cFunctionName{
 		name: name, typeID: decl.functionType, resultType: decl.typeID, paramStart: start,
-		paramCount: len(decl.params), variadic: decl.variadic, defined: definition,
+		paramCount: len(decl.params), variadic: decl.variadic, defined: definition, attributes: decl.attributes,
 	})
 	return t.rememberName(name, len(t.functions)-1, cNameFunction)
 }
@@ -1222,7 +1266,7 @@ func (t *translator) fileVariable(decl declarator) bool {
 	}
 	if len(decl.initializer) == 0 {
 		if tentative < 0 {
-			t.tentatives = append(t.tentatives, cObjectName{name: name, typeID: decl.typeID})
+			t.tentatives = append(t.tentatives, cObjectName{name: name, typeID: decl.typeID, attributes: decl.attributes, storage: decl.storage})
 		}
 		return true
 	}
@@ -1303,6 +1347,7 @@ func (t *translator) emitPendingDeclarations() {
 		if info.kind == cTypeArray && info.count == 0 {
 			typeID = t.arrayType(info.base, 1)
 		}
+		t.emitObjectMetadata("variable", t.tentatives[i].name, t.tentatives[i].attributes, t.tentatives[i].storage, nil, typeID)
 		t.appendText("var ")
 		t.out = append(t.out, t.tentatives[i].name...)
 		t.out = append(t.out, ' ')
@@ -1835,12 +1880,29 @@ func (t *translator) parseAttributes() (cAttributes, bool) {
 				if len(arguments) != 1 || tokenKind(arguments[0]) != tokenString {
 					return attributes, false
 				}
-				attributes.alias = true
+				value, valid := t.attributeString(arguments[0])
+				if !valid || value == "" {
+					return attributes, false
+				}
+				attributes.alias = value
 			case "visibility", "__visibility__":
 				if len(arguments) != 1 || tokenKind(arguments[0]) != tokenString {
 					return attributes, false
 				}
-				attributes.visibility = true
+				value, valid := t.attributeString(arguments[0])
+				if !valid || value != "default" && value != "internal" && value != "hidden" && value != "protected" {
+					return attributes, false
+				}
+				attributes.visibility = value
+			case "__section__", "section":
+				if len(arguments) != 1 || tokenKind(arguments[0]) != tokenString {
+					return attributes, false
+				}
+				value, valid := t.attributeString(arguments[0])
+				if !valid || value == "" || value[0] != '.' {
+					return attributes, false
+				}
+				attributes.section = value
 			case "weak", "__weak__":
 				if len(arguments) != 0 {
 					return attributes, false
@@ -1863,7 +1925,7 @@ func (t *translator) parseAttributes() (cAttributes, bool) {
 				"__always_inline__", "always_inline", "__warn_unused_result__", "warn_unused_result", "__pure__", "pure",
 				"__noinline__", "noinline",
 				"__const__", "const",
-				"__format__", "format", "__noreturn__", "noreturn", "__section__", "section", "__malloc__", "malloc",
+				"__format__", "format", "__noreturn__", "noreturn", "__malloc__", "malloc",
 				"__error__", "error", "__warning__", "warning",
 				"__designated_init__", "designated_init",
 				"__externally_visible__", "externally_visible",
@@ -1889,6 +1951,14 @@ func (t *translator) parseAttributes() (cAttributes, bool) {
 		}
 	}
 	return attributes, true
+}
+
+func (t *translator) attributeString(tok token) (string, bool) {
+	value, ok := decodeCString(tokenText(t.src, tok))
+	if !ok {
+		return "", false
+	}
+	return string(value), true
 }
 
 func (t *translator) takeAsmClause() bool {
@@ -1950,6 +2020,7 @@ func (t *translator) emitForeignType(typeID int) {
 }
 
 func (t *translator) parseType() (int, int, bool) {
+	t.baseAttributes = cAttributes{}
 	storage := storageNone
 	qualifiers := 0
 	unsigned := false
@@ -1966,9 +2037,11 @@ func (t *translator) parseType() (int, int, bool) {
 			if seen {
 				goto done
 			}
-			if _, ok := t.parseAttributes(); !ok {
+			attributes, ok := t.parseAttributes()
+			if !ok {
 				return cTypeVoidID, storage, false
 			}
+			t.baseAttributes.merge(attributes)
 		case t.currentIs("static"):
 			if storage == storageNone {
 				storage = storageStatic
@@ -2291,7 +2364,8 @@ func (t *translator) parseDeclarator(base int, allowFunction bool) (declarator, 
 	if len(ops) > 0 && ops[0].kind == declaratorArray && ops[0].incomplete {
 		result.incompleteArray = true
 	}
-	if result.attributes.requiresObjectMetadata() && !t.checkOnly {
+	if result.attributes.callingConvention && !t.checkOnly ||
+		result.attributes.requiresObjectMetadata() && !t.checkOnly && !t.object {
 		t.fail(TranslateErrUnsupported)
 		return result, false
 	}
@@ -2572,6 +2646,9 @@ func (t *translator) emitFunction(decl declarator, storage int) {
 		t.fail(TranslateErrUnsupported)
 		return
 	}
+	if t.object {
+		t.emitObjectMetadata("function", string(tokenText(t.src, decl.name)), decl.attributes, storage, nil, decl.functionType)
+	}
 	if t.object && storage != storageStatic {
 		t.appendText("//export ")
 		t.out = append(t.out, tokenText(t.src, decl.name)...)
@@ -2630,12 +2707,24 @@ func (t *translator) emitVariable(decl declarator) {
 }
 
 func (t *translator) emitVariableName(name string, decl declarator) {
+	if t.localStart < 0 {
+		t.emitObjectMetadata("variable", name, decl.attributes, decl.storage, decl.initializer, decl.typeID)
+	}
 	t.appendText("var ")
 	t.out = append(t.out, name...)
 	t.out = append(t.out, ' ')
 	t.emitType(decl.typeID)
 	if len(decl.initializer) > 0 {
 		t.out = append(t.out, '=')
+		if relocationKind, _ := t.objectInitializerRelocation(decl.typeID, decl.initializer); t.object && relocationKind != 0 {
+			if t.typeInfo(decl.typeID).kind == cTypePointer {
+				t.appendText("nil")
+			} else {
+				t.appendText("0")
+			}
+			t.out = append(t.out, ';', '\n')
+			return
+		}
 		kind := t.typeInfo(decl.typeID).kind
 		if t.checkOnly {
 			t.checkInitializerValue(decl.typeID, decl.initializer)
@@ -2649,6 +2738,122 @@ func (t *translator) emitVariableName(name string, decl declarator) {
 		}
 	}
 	t.out = append(t.out, ';', '\n')
+}
+
+func (t *translator) emitObjectAlias(decl declarator, storage int, function bool) {
+	if !t.object || decl.attributes.alias == "" {
+		return
+	}
+	t.typeSerial++
+	kind := "variable-alias"
+	if function {
+		kind = "function-alias"
+	}
+	t.emitObjectMetadata(kind, string(tokenText(t.src, decl.name)), decl.attributes, storage, nil, decl.typeID)
+	t.appendText("var __c_object_alias_")
+	t.appendDecimal(t.typeSerial)
+	t.appendText(" uint8\n")
+}
+
+func (t *translator) emitObjectMetadata(kind string, name string, attributes cAttributes, storage int, initializer []token, typeID int) {
+	if !t.object {
+		return
+	}
+	section := attributes.section
+	if section == "" {
+		if kind == "function" && t.functionSections {
+			section = ".text." + name
+		} else if kind == "variable" && t.dataSections {
+			prefix := ".bss."
+			if len(initializer) != 0 {
+				prefix = ".data."
+				if t.typeInfo(typeID).qualifiers&cQualifierConst != 0 {
+					prefix = ".rodata."
+				}
+			}
+			section = prefix + name
+		}
+	}
+	if section == "" {
+		section = "-"
+	}
+	binding := 1
+	if storage == storageStatic {
+		binding = 0
+	}
+	if attributes.weak {
+		binding = 2
+	}
+	visibility := 0
+	switch attributes.visibility {
+	case "internal":
+		visibility = 1
+	case "hidden":
+		visibility = 2
+	case "protected":
+		visibility = 3
+	}
+	alias := attributes.alias
+	if alias == "" {
+		alias = "-"
+	}
+	t.appendText("// renvo:object ")
+	t.appendText(kind)
+	t.out = append(t.out, ' ')
+	t.appendText(name)
+	t.out = append(t.out, ' ')
+	t.appendText(section)
+	t.out = append(t.out, ' ')
+	alignment := attributes.align
+	if kind != "function" && kind != "function-alias" && t.typeInfo(typeID).align > alignment {
+		alignment = t.typeInfo(typeID).align
+	}
+	t.appendDecimal(alignment)
+	t.out = append(t.out, ' ')
+	t.appendDecimal(binding)
+	t.out = append(t.out, ' ')
+	t.appendDecimal(visibility)
+	t.out = append(t.out, ' ')
+	t.appendText(alias)
+	t.out = append(t.out, ' ')
+	t.appendDecimal(t.typeSize(typeID))
+	relocationKind, relocationTarget := t.objectInitializerRelocation(typeID, initializer)
+	t.out = append(t.out, ' ')
+	t.appendDecimal(relocationKind)
+	t.out = append(t.out, ' ')
+	if relocationTarget == "" {
+		relocationTarget = "-"
+	}
+	t.appendText(relocationTarget)
+	t.appendText(" 0")
+	t.out = append(t.out, '\n')
+}
+
+func (t *translator) objectInitializerRelocation(typeID int, initializer []token) (int, string) {
+	if len(initializer) < 2 {
+		return 0, ""
+	}
+	ampersand := -1
+	for i := len(initializer) - 2; i >= 0; i-- {
+		if tokenIs(t.src, initializer[i], "&") && tokenKind(initializer[i+1]) == tokenIdent && i+2 == len(initializer) {
+			ampersand = i
+			break
+		}
+	}
+	if ampersand < 0 {
+		return 0, ""
+	}
+	size := t.typeSize(typeID)
+	if size == 8 {
+		return 1, string(tokenText(t.src, initializer[ampersand+1]))
+	}
+	if size == 4 {
+		if t.typeInfo(typeID).kind == cTypeUint {
+			return 10, string(tokenText(t.src, initializer[ampersand+1]))
+		}
+		return 11, string(tokenText(t.src, initializer[ampersand+1]))
+	}
+	return 0, ""
 }
 
 func (t *translator) emitStaticLocal(decl declarator) {
@@ -2961,6 +3166,7 @@ func (t *translator) localDeclaration() {
 		t.fail(TranslateErrUnsupported)
 		return
 	}
+	typeAttributes := t.baseAttributes
 	if t.typeInfo(base).qualifiers&cQualifierRestrict != 0 && t.typeInfo(base).kind != cTypePointer {
 		t.fail(TranslateErrDeclaration)
 		return
@@ -2974,6 +3180,7 @@ func (t *translator) localDeclaration() {
 			t.fail(TranslateErrDeclaration)
 			return
 		}
+		decl.attributes.merge(typeAttributes)
 		decl.initializer = t.takeInitializer()
 		autoDeclaration := t.typeInfo(decl.typeID).kind == cTypeAuto
 		if !t.resolveAutoDeclarator(&decl) {

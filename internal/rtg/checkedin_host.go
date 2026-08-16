@@ -99,7 +99,7 @@ func GenerateCheckedInTargetProjection(
 	source = appendCheckedInLinuxAmd64Runtime(
 		source, operations, projection.Unit, prepareBuffer, moveOffset)
 	source = appendCheckedInLinuxAmd64Entry(source, template)
-	source = append(source, checkedInLinuxAmd64ObjectImageSource...)
+	source = append(source, checkedInLinuxAmd64GeneralObjectImageSource...)
 	source = append(source, "\nfunc renvoAmd64EmitObjectStaticCall(out *renvoAsm, importID int, wordCount int) {\n"...)
 	source = append(source, '\t')
 	source = append(source, checkedInProjectionAlgorithmName(projection, staticCall)...)
@@ -246,6 +246,16 @@ func appendCheckedInLinuxAmd64Entry(source []byte, template runtimeEntryTemplate
 	return source
 }
 
+const checkedInLinuxAmd64GeneralObjectImageSource = `
+
+func renvoAsmImageObjectAmd64(emitter *renvoAsm) []byte {
+	return renvoAsmImageKernelObjectAmd64(emitter)
+}
+`
+
+// checkedInLinuxAmd64ObjectImageSource retains the original minimal ET_REL
+// projection as historical source material. New projections use the shared,
+// metadata-aware object writer above.
 const checkedInLinuxAmd64ObjectImageSource = `
 
 func renvoAsmImageObjectAmd64(emitter *renvoAsm) []byte {

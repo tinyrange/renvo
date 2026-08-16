@@ -94,6 +94,8 @@ func prepareCObjectSources(result SourceResult, options *Options, workDir string
 		}
 		result.Files[i].CObject = true
 		result.Files[i].CDataModel = dataModel
+		result.Files[i].CFunctionSections = options.CFunctionSections
+		result.Files[i].CDataSections = options.CDataSections
 		result.Files[i].CPrelude = header.Prelude
 		result.Files[i].Src = processed.Source
 		for j := 0; j < len(header.Dependencies); j++ {
@@ -133,7 +135,7 @@ func CDependencyOutputSize(options Options) int {
 	}
 	size := makeDependencyWordSize(target) + 2
 	for i := 0; i < len(options.CDependencies); i++ {
-		size += 1 + makeDependencyWordSize(options.CDependencies[i])
+		size += 1 + makeDependencyWordSize(cDependencyPath(options, options.CDependencies[i]))
 	}
 	return size
 }
@@ -153,18 +155,36 @@ func AppendCDependencyOutput(out []byte, options Options) []byte {
 	out = append(out, ':')
 	for i := 0; i < len(options.CDependencies); i++ {
 		out = append(out, ' ')
-		out = appendMakeDependencyWord(out, options.CDependencies[i])
+		out = appendMakeDependencyWord(out, cDependencyPath(options, options.CDependencies[i]))
 	}
 	out = append(out, '\n')
 	return out
 }
 
 func finalizeCDependencyOptions(options Options) Options {
+	if options.DependencyFile == "" && options.CDependencyRequested {
+		options.DependencyFile = defaultCDependencyPath(options.Output)
+	}
 	if options.DependencyFile == "" || len(options.CDependencyData) > 0 {
 		return options
 	}
 	options.CDependencyData = arena.PersistBytes(CDependencyOutput(options))
 	return options
+}
+
+func defaultCDependencyPath(output string) string {
+	if len(output) > 2 && output[len(output)-2:] == ".o" {
+		return output[:len(output)-1] + "d"
+	}
+	return output + ".d"
+}
+
+func cDependencyPath(options Options, path string) string {
+	root := options.CDependencyRoot
+	if root == "" || root == "/" || len(path) <= len(root) || path[:len(root)] != root || path[len(root)] != '/' {
+		return path
+	}
+	return path[len(root)+1:]
 }
 
 func makeDependencyWordSize(value string) int {

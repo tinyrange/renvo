@@ -47,41 +47,45 @@ const DefaultModuleLicense = "Proprietary"
 const RunHelpText = "Usage: renvo run [-s] [-tags <list>] [-arena-size <bytes>] <script.go> [-- arguments...]\nTop-level statements form func main. The script is compiled for and executed on the host target.\n"
 
 type Options struct {
-	Target           string
-	TargetExplicit   bool
-	Output           string
-	Package          string
-	Files            []string
-	Strip            bool
-	EmitUnit         bool
-	EmitImage        bool
-	Script           bool
-	WindowsGUI       bool
-	Mode             string
-	ModuleLicense    string
-	ArenaSize        int
-	BinaryLimit      int
-	System           string
-	SystemName       string
-	SystemError      string
-	SystemAt         int
-	Tags             []string
-	IncludePaths     []string
-	CCompiler        bool
-	CLanguage        string
-	CDefines         []string
-	CUndefines       []string
-	CForcedInclude   []string
-	CNoStdIncludes   bool
-	CAssemblyOutput  bool
-	DependencyFile   string
-	DependencyTarget string
-	CDependencies    []string
-	CDependencyData  []byte
-	Ok               bool
-	Error            int
-	ErrorArg         string
-	ErrorAt          int
+	Target               string
+	TargetExplicit       bool
+	Output               string
+	Package              string
+	Files                []string
+	Strip                bool
+	EmitUnit             bool
+	EmitImage            bool
+	Script               bool
+	WindowsGUI           bool
+	Mode                 string
+	ModuleLicense        string
+	ArenaSize            int
+	BinaryLimit          int
+	System               string
+	SystemName           string
+	SystemError          string
+	SystemAt             int
+	Tags                 []string
+	IncludePaths         []string
+	CCompiler            bool
+	CLanguage            string
+	CDefines             []string
+	CUndefines           []string
+	CForcedInclude       []string
+	CNoStdIncludes       bool
+	CAssemblyOutput      bool
+	CFunctionSections    bool
+	CDataSections        bool
+	DependencyFile       string
+	DependencyTarget     string
+	CDependencyRoot      string
+	CDependencyRequested bool
+	CDependencies        []string
+	CDependencyData      []byte
+	Ok                   bool
+	Error                int
+	ErrorArg             string
+	ErrorAt              int
 }
 
 func CommandHelpRequested(args []string) bool {
@@ -100,6 +104,10 @@ func NormalizeCCompilerCommand(args []string) []string {
 	out = append(out, "-cc")
 	for i := 2; i < len(args); i++ {
 		arg := args[i]
+		if arg == "-MMD" || arg == "-MD" {
+			out = append(out, "-cc-dependencies")
+			continue
+		}
 		if cCompilerInertOption(arg) {
 			continue
 		}
@@ -117,6 +125,14 @@ func NormalizeCCompilerCommand(args []string) []string {
 			case 4:
 				out = append(out, "-cc-syntax-only")
 			}
+			continue
+		}
+		if arg == "-ffunction-sections" {
+			out = append(out, "-cc-function-sections")
+			continue
+		}
+		if arg == "-fdata-sections" {
+			out = append(out, "-cc-data-sections")
 			continue
 		}
 		option, _ = cCompilerOptionIndex("-x|-include|-D|-U|-MF|-MT", arg, false)
@@ -252,6 +268,21 @@ func parseOptions(args []string, requireAdvertisedTarget bool) Options {
 		}
 		if arg == "-cc-assembly-output" {
 			options.CAssemblyOutput = true
+			i++
+			continue
+		}
+		if arg == "-cc-function-sections" {
+			options.CFunctionSections = true
+			i++
+			continue
+		}
+		if arg == "-cc-data-sections" {
+			options.CDataSections = true
+			i++
+			continue
+		}
+		if arg == "-cc-dependencies" {
+			options.CDependencyRequested = true
 			i++
 			continue
 		}

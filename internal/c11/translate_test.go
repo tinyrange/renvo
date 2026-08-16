@@ -214,8 +214,11 @@ func TestCheckAliasSymbolAttribute(t *testing.T) {
 		t.Fatalf("alias attribute check failed: error=%d at=%d", checked.Error, checked.ErrorAt)
 	}
 	lowered := TranslateObject("main", source, nil)
-	if lowered.Ok || lowered.Error != TranslateErrUnsupported {
-		t.Fatalf("alias lowering result = %#v, want explicit unsupported error", lowered)
+	if !lowered.Ok {
+		t.Fatalf("alias lowering failed: %#v", lowered)
+	}
+	if !bytes.Contains(lowered.Source, []byte("// renvo:object function-alias alias - 0 2 0 target 8 0 - 0")) {
+		t.Fatalf("alias lowering is missing object metadata:\n%s", lowered.Source)
 	}
 }
 
@@ -232,14 +235,45 @@ func TestCheckFileScopeAssembler(t *testing.T) {
 }
 
 func TestCheckVisibilitySymbolAttribute(t *testing.T) {
-	source := []byte(`extern int hidden[2] __attribute__((visibility("hidden")));`)
+	source := []byte(`int hidden __attribute__((visibility("hidden")));`)
 	checked := CheckObjectForDataModel(source, DataModelLP64)
 	if !checked.Ok {
 		t.Fatalf("visibility attribute check failed: error=%d at=%d", checked.Error, checked.ErrorAt)
 	}
 	lowered := TranslateObject("main", source, nil)
-	if lowered.Ok || lowered.Error != TranslateErrUnsupported {
-		t.Fatalf("visibility lowering result = %#v, want explicit unsupported error", lowered)
+	if !lowered.Ok {
+		t.Fatalf("visibility lowering failed: %#v", lowered)
+	}
+	if !bytes.Contains(lowered.Source, []byte("// renvo:object variable hidden - 4 1 2 - 4 0 - 0")) {
+		t.Fatalf("visibility lowering is missing object metadata:\n%s", lowered.Source)
+	}
+}
+
+func TestTranslateObjectPlacementPolicy(t *testing.T) {
+	source := []byte(`
+static int local;
+const int constant = 3;
+int leaf(void) { return local + constant; }
+`)
+	plain := TranslateObjectWithConfig("main", source, nil, ObjectConfig{DataModel: DataModelLP64})
+	if !plain.Ok {
+		t.Fatalf("plain object lowering failed: %#v", plain)
+	}
+	for _, unwanted := range [][]byte{[]byte(".text.leaf"), []byte(".bss.local"), []byte(".rodata.constant")} {
+		if bytes.Contains(plain.Source, unwanted) {
+			t.Fatalf("plain object unexpectedly split %q:\n%s", unwanted, plain.Source)
+		}
+	}
+	split := TranslateObjectWithConfig("main", source, nil, ObjectConfig{
+		DataModel: DataModelLP64, FunctionSections: true, DataSections: true,
+	})
+	if !split.Ok {
+		t.Fatalf("split object lowering failed: %#v", split)
+	}
+	for _, wanted := range [][]byte{[]byte(".text.leaf"), []byte(".bss.local"), []byte(".rodata.constant")} {
+		if !bytes.Contains(split.Source, wanted) {
+			t.Fatalf("split object is missing %q:\n%s", wanted, split.Source)
+		}
 	}
 }
 

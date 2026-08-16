@@ -16,6 +16,11 @@ go backend {
 	}
 
 	func elfObjectImage(emitter *RTGEmitter) []byte {
+		return emitter.ObjectImage()
+		/* The code below is retained as the bootstrap-readable specification of
+		   the original minimal layout. ObjectImage implements its generalized
+		   Kbuild-compatible successor. */
+		/*
 		emitter.Patch()
 		code := emitter.Code()
 		data := emitter.Data()
@@ -129,7 +134,7 @@ go backend {
 		for i := 0; i < len(header); i++ {
 			image[i] = header[i]
 		}
-		return image
+		return image */
 	}
 }
 
