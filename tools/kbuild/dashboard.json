@@ -12,7 +12,29 @@
     "first_target_object": "scripts/mod/empty.o",
     "first_target_object_format": "ELF64 ET_REL x86_64",
     "dependency_rule_consumed": true,
-    "accepted_target_commands": 1,
+    "accepted_target_commands": 2,
+    "accepted_translation_units": [
+      {
+        "path": "lib/union_find.c",
+        "archive": "lib/lib.a",
+        "selection": "-u uf_find reference-link probe",
+        "exported_symbols": [
+          "uf_find",
+          "uf_union"
+        ],
+        "semantic_harness": "PASS",
+        "object_objtool": "PASS",
+        "reference_vmlinux_object_link": "PASS",
+        "reference_vmlinux_objtool": "PASS",
+        "reference_object_bytes": 1256,
+        "renvo_object_bytes": 1552,
+        "renvo_text_bytes": 556,
+        "renvo_relocations": 0,
+        "fixed_point_compiler_bytes": 2149881,
+        "fixed_point_cpu_ms": 412.244,
+        "fixed_point_peak_rss_kib": 27472
+      }
+    ],
     "preprocessor": {
       "source": "scripts/mod/devicetable-offsets.c",
       "output_lines": 4881,

@@ -24,6 +24,7 @@ type dashboard struct {
 	CompilerCommands    int            `json:"compiler_commands"`
 	TargetCCommands     int            `json:"target_c_commands"`
 	RenvoTargetCommands int            `json:"renvo_target_commands"`
+	AcceptedUnits       []string       `json:"accepted_translation_units"`
 	SourceFiles         map[string]int `json:"source_files"`
 	Flags               map[string]int `json:"flags"`
 	Syntax              map[string]int `json:"syntax"`
@@ -81,7 +82,8 @@ func main() {
 func collect(root string, metricsPath string) (dashboard, error) {
 	result := dashboard{
 		Schema: 1, Kernel: "linux-6.12.99", Config: "x86_64 tinyconfig",
-		SourceFiles: map[string]int{}, Flags: map[string]int{}, Syntax: map[string]int{}, Builtins: map[string]int{},
+		AcceptedUnits: []string{"lib/union_find.c"},
+		SourceFiles:   map[string]int{}, Flags: map[string]int{}, Syntax: map[string]int{}, Builtins: map[string]int{},
 		Objects: objectCensus{Sections: map[string]int{}, Relocations: map[string]int{}},
 	}
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {

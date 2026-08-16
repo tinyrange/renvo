@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "315b25b43d1c049a6a1679af15a4d18ce9be60ad27e61e7c4d44cec6c7c5b287"
+const CompilerSourceDigest = "0dbacc03e2a860d594aa0c53dcd7615b77980c293fb3258ae60043819b635e24"
 
 // source: backend/compiler_common_impl.go
 
@@ -107,7 +107,7 @@ offset, targetStart, targetEnd, typ, addend int
 }
 
 type renvoObjectFunctionRange struct {
-label, end, sectionStart, sectionEnd, alignment int
+label, end, nameStart, nameEnd, sectionStart, sectionEnd, alignment int
 }
 
 
@@ -432,6 +432,18 @@ if start >= end || renvoBytesEqualText(src, start, end, "-") {
 return 0, 0
 }
 outStart := len(a.symbolName)
+for i := start; i < end; i++ {
+a.symbolName = append(a.symbolName, renvo_runtime_UnsafeByteAt(src, i))
+}
+return outStart, len(a.symbolName)
+}
+
+func renvoAsmCopyObjectPrefixedText(a *renvoAsm, prefix string, src []byte, start int, end int) (int, int) {
+renvoNonNil(a)
+outStart := len(a.symbolName)
+for i := 0; i < len(prefix); i++ {
+a.symbolName = append(a.symbolName, prefix[i])
+}
 for i := start; i < end; i++ {
 a.symbolName = append(a.symbolName, renvo_runtime_UnsafeByteAt(src, i))
 }
@@ -3109,6 +3121,10 @@ return end
 }
 startKind := renvoTokKind(p, start)
 if startKind == renvoTokReturn {
+if renvoTokCharIs(p, start+1, ';') {
+renvoAddStmt(bp, renvoStmtReturn, start, start+1, start+1, start+1, 0, 0, 0, 0, 0, 0)
+return start + 1
+}
 exprEnd := renvoStatementLineEnd(p, start+1, end)
 renvoAddStmt(bp, renvoStmtReturn, start, exprEnd, start+1, exprEnd, 0, 0, 0, 0, 0, 0)
 return exprEnd
@@ -12905,6 +12921,13 @@ g.arenaFaultLabel = label + 1
 g.runtimeFaultLabel = label + 1
 }
 after := renvoAsmNewLabel(a)
+if renvoIsHostedObjectAmd64(g.c) {
+
+
+
+renvoAsmMarkLabel(a, label)
+renvoAsmEmit16(a, 0x0b0f)
+} else {
 renvoAsmJmpMarkLabel(a, after, label)
 message := "panic\n"
 if outOfMemory {
@@ -12913,7 +12936,11 @@ message = "out of memory\n"
 renvoEmitStaticWrite(g, message, 2)
 renvoAsmPrimaryImm(a, 2)
 renvoEmitExitStatus(g)
+}
 renvoAsmMarkLabel(a, after)
+if renvoIsHostedObjectAmd64(g.c) {
+renvoAsmAddLocalObjectFuncSymbolText(a, "__renvo_object_fault", label, after)
+}
 return label
 }
 
@@ -19011,13 +19038,20 @@ func renvoRecordObjectFunctionRanges(g *renvoLinearGen) {
 renvoNonNil(g)
 for i := 0; i < len(g.meta.funcs) && i < len(g.funcLabels); i++ {
 fn := &g.meta.funcs[i]
-if fn.objectDecl <= 0 || fn.objectDecl >= len(g.meta.objectDecls) || renvoAsmLabelPosition(&g.asm, g.funcLabels[i]) < 0 {
+if renvoAsmLabelPosition(&g.asm, g.funcLabels[i]) < 0 {
 continue
 }
+nameStart, nameEnd := 0, 0
+if fn.exportNameEnd > fn.exportNameStart {
+nameStart, nameEnd = renvoAsmCopyObjectPrefixedText(&g.asm, "__renvo_impl_", g.prog.src, fn.nameStart, fn.nameEnd)
+} else {
+nameStart, nameEnd = renvoAsmCopyObjectText(&g.asm, g.prog.src, fn.nameStart, fn.nameEnd)
+}
+sectionStart, sectionEnd, alignment := 0, 0, 0
+if fn.objectDecl > 0 && fn.objectDecl < len(g.meta.objectDecls) {
 decl := &g.meta.objectDecls[fn.objectDecl]
-sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, g.prog.src, decl.sectionStart, decl.sectionEnd)
-if sectionEnd <= sectionStart && decl.alignment <= 0 {
-continue
+sectionStart, sectionEnd = renvoAsmCopyObjectText(&g.asm, g.prog.src, decl.sectionStart, decl.sectionEnd)
+alignment = decl.alignment
 }
 start := renvoAsmLabelPosition(&g.asm, g.funcLabels[i])
 end := len(g.asm.code)
@@ -19028,7 +19062,7 @@ end = position
 }
 }
 g.asm.objectFunctions = append(g.asm.objectFunctions, renvoObjectFunctionRange{label: g.funcLabels[i], end: end,
-sectionStart: sectionStart, sectionEnd: sectionEnd, alignment: decl.alignment})
+nameStart: nameStart, nameEnd: nameEnd, sectionStart: sectionStart, sectionEnd: sectionEnd, alignment: alignment})
 }
 }
 
@@ -27932,11 +27966,15 @@ return true
 
 func renvoFinishScalarProgramAmd64(g *renvoLinearGen) renvoCompileResult {
 renvoNonNil(g)
-renvo_runtime_ArenaDiscard(g.meta.scratchStart, g.meta.scratchEnd)
 a := &g.asm
+if renvoIsHostedObjectAmd64(g.c) {
+
+
+renvoRecordObjectFunctionRanges(g)
+}
+renvo_runtime_ArenaDiscard(g.meta.scratchStart, g.meta.scratchEnd)
 var data []byte
 if renvoIsHostedObjectAmd64(g.c) {
-renvoRecordObjectFunctionRanges(g)
 data = renvoAsmImageObjectAmd64(a)
 } else if targetIsWindows(g.c.renvoTargetOS) {
 data = renvoAsmImageWindowsAmd64(a)
@@ -28029,7 +28067,7 @@ g.stackUsed = 0
 g.stackPeak = 0
 renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
 framePatch := len(a.code)
-if renvoFixedTarget == 0 && a.c.optimizeRuntime {
+if renvoFixedTarget == 0 && (a.c.optimizeRuntime || renvoIsHostedObjectAmd64(a.c)) {
 
 
 
@@ -28073,7 +28111,7 @@ frame := renvoAlignValue(g.stackPeak, 16)
 if frame > 65520 {
 frame = 65520
 }
-if renvoFixedTarget == 0 && a.c.optimizeRuntime {
+if renvoFixedTarget == 0 && (a.c.optimizeRuntime || renvoIsHostedObjectAmd64(a.c)) {
 a.code[framePatch+7] = byte(frame)
 a.code[framePatch+8] = byte(frame >> 8)
 } else {
@@ -28452,6 +28490,7 @@ return *slot - 1
 label := renvoAsmNewLabel(a)
 *slot = label + 1
 after := renvoAsmNewLabel(a)
+helperEnd := renvoAsmNewLabel(a)
 renvoAsmJmpMarkLabel(a, after, label)
 if kind == 2 && g.meta.panicEnabled {
 renvoAsmEmitText(a, "\x48\x89\xc2\x48\x39\xc8\x0f\x92\xc0\x48\x0f\xb6\xc0\xc3")
@@ -28459,10 +28498,41 @@ renvoAsmEmitText(a, "\x48\x89\xc2\x48\x39\xc8\x0f\x92\xc0\x48\x0f\xb6\xc0\xc3")
 renvoAsmEmitText(a, "\x48\x39\xc2\x72\x0e\x48\x39\xd1\x72\x09\x48\x39\xcf\x72\x04\x6a\x01\x58\xc3\x31\xc0\xc3")
 } else {
 renvoAsmEmitText(a, code)
-renvoAsmAddReloc(a, len(a.code)-4, renvoEnsureUncaughtRuntimeFaultHelper(g))
+relocation := len(a.code) - 4
+renvoAsmMarkLabel(a, helperEnd)
+renvoAsmAddReloc(a, relocation, renvoEnsureUncaughtRuntimeFaultHelper(g))
+}
+if renvoAsmLabelPosition(a, helperEnd) < 0 {
+renvoAsmMarkLabel(a, helperEnd)
 }
 renvoAsmMarkLabel(a, after)
+if renvoIsHostedObjectAmd64(g.c) {
+name := "__renvo_check_non_nil"
+if kind == 1 {
+name = "__renvo_check_secondary"
+} else if kind == 2 {
+name = "__renvo_check_bounds"
+} else if kind == 3 {
+name = "__renvo_check_byte_index"
+} else if kind == 4 {
+name = "__renvo_check_word_index"
+} else if kind == 5 {
+name = "__renvo_check_wide_index"
+} else if kind == 6 {
+name = "__renvo_check_slice_bounds"
+}
+renvoAsmAddLocalObjectFuncSymbolText(a, name, label, helperEnd)
+}
 return label
+}
+
+func renvoAsmAddLocalObjectFuncSymbolText(a *renvoAsm, name string, label int, endLabel int) {
+renvoNonNil(a)
+start := len(a.symbolName)
+for i := 0; i < len(name); i++ {
+a.symbolName = append(a.symbolName, name[i])
+}
+a.symbols = append(a.symbols, renvoAsmSymbol{nameStart: start, nameEnd: len(a.symbolName), label: label, endLabel: endLabel})
 }
 
 func renvoAmd64EnsureAppendAddrHelper(g *renvoLinearGen) int {
@@ -34755,7 +34825,7 @@ alignment = 16
 }
 section := renvoObjectELFSectionIndex(&sections, name, 1, 6, alignment)
 local := renvoAlignValue(len(sections[section].data), alignment)
-sections[section].data = renvoObjectUntil(sections[section].data, local)
+sections[section].data = renvoObjectCodeUntil(sections[section].data, local)
 sections[section].data = append(sections[section].data, a.code[r.start:r.end]...)
 sections[section].size = len(sections[section].data)
 codeMap = append(codeMap, renvoObjectCodeRange{start: r.start, end: r.end, section: section, local: local})
@@ -34823,6 +34893,21 @@ symbols := []renvoObjectELFSymbol{{}}
 for i := 1; i < len(sections); i++ {
 sectionSymbols[i] = len(symbols)
 symbols = append(symbols, renvoObjectELFSymbol{info: 3, section: i})
+}
+
+
+
+
+for i := 0; i < len(a.objectFunctions); i++ {
+f := &a.objectFunctions[i]
+section, value, ok := renvoObjectMapCode(codeMap, renvoAsmLabelPosition(a, f.label))
+endSection, endValue, endOK := renvoObjectMapCodeEnd(codeMap, f.end)
+if !ok || !endOK || endSection != section || endValue <= value {
+return nil
+}
+name := renvoObjectStoredText(a, f.nameStart, f.nameEnd)
+symbols = append(symbols, renvoObjectELFSymbol{name: name,
+info: 2, section: section, value: value, size: endValue - value})
 }
 
 for bindingPass := 0; bindingPass < 2; bindingPass++ {
@@ -35159,6 +35244,16 @@ return -1
 func renvoObjectUntil(out []byte, size int) []byte {
 for len(out) < size {
 out = append(out, 0)
+}
+return out
+}
+
+func renvoObjectCodeUntil(out []byte, size int) []byte {
+
+
+
+for len(out) < size {
+out = append(out, 0x90)
 }
 return out
 }

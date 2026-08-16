@@ -12,3 +12,13 @@ func TestCensusShellWordsAndFlagClassification(t *testing.T) {
 		t.Fatalf("sorted keys = %#v", keys)
 	}
 }
+
+func TestAcceptedTranslationUnitsAreMonotonic(t *testing.T) {
+	result, err := collect(t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.AcceptedUnits) != 1 || result.AcceptedUnits[0] != "lib/union_find.c" {
+		t.Fatalf("accepted translation units = %#v", result.AcceptedUnits)
+	}
+}

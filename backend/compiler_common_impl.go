@@ -100,7 +100,7 @@ type renvoObjectDataRelocation struct {
 }
 
 type renvoObjectFunctionRange struct {
-	label, end, sectionStart, sectionEnd, alignment int
+	label, end, nameStart, nameEnd, sectionStart, sectionEnd, alignment int
 }
 
 // renvoReplSymbol describes one persistent package-global slot in a linked
@@ -425,6 +425,18 @@ func renvoAsmCopyObjectText(a *renvoAsm, src []byte, start int, end int) (int, i
 		return 0, 0
 	}
 	outStart := len(a.symbolName)
+	for i := start; i < end; i++ {
+		a.symbolName = append(a.symbolName, renvo_runtime_UnsafeByteAt(src, i))
+	}
+	return outStart, len(a.symbolName)
+}
+
+func renvoAsmCopyObjectPrefixedText(a *renvoAsm, prefix string, src []byte, start int, end int) (int, int) {
+	renvoNonNil(a)
+	outStart := len(a.symbolName)
+	for i := 0; i < len(prefix); i++ {
+		a.symbolName = append(a.symbolName, prefix[i])
+	}
 	for i := start; i < end; i++ {
 		a.symbolName = append(a.symbolName, renvo_runtime_UnsafeByteAt(src, i))
 	}
@@ -3102,6 +3114,10 @@ func renvoParseOneStatement(bp *renvoBodyParse, start int, end int) int {
 	}
 	startKind := renvoTokKind(p, start)
 	if startKind == renvoTokReturn {
+		if renvoTokCharIs(p, start+1, ';') {
+			renvoAddStmt(bp, renvoStmtReturn, start, start+1, start+1, start+1, 0, 0, 0, 0, 0, 0)
+			return start + 1
+		}
 		exprEnd := renvoStatementLineEnd(p, start+1, end)
 		renvoAddStmt(bp, renvoStmtReturn, start, exprEnd, start+1, exprEnd, 0, 0, 0, 0, 0, 0)
 		return exprEnd
@@ -12898,15 +12914,26 @@ func renvoEnsureUncaughtFaultHelper(g *renvoLinearGen, outOfMemory bool) int {
 		g.runtimeFaultLabel = label + 1
 	}
 	after := renvoAsmNewLabel(a)
-	renvoAsmJmpMarkLabel(a, after, label)
-	message := "panic\n"
-	if outOfMemory {
-		message = "out of memory\n"
+	if renvoIsHostedObjectAmd64(g.c) {
+		// A freestanding object has no userspace process or syscall ABI. Model an
+		// impossible checked-runtime path as a normal compiler trap that objtool
+		// and the kernel linker both understand.
+		renvoAsmMarkLabel(a, label)
+		renvoAsmEmit16(a, 0x0b0f)
+	} else {
+		renvoAsmJmpMarkLabel(a, after, label)
+		message := "panic\n"
+		if outOfMemory {
+			message = "out of memory\n"
+		}
+		renvoEmitStaticWrite(g, message, 2)
+		renvoAsmPrimaryImm(a, 2)
+		renvoEmitExitStatus(g)
 	}
-	renvoEmitStaticWrite(g, message, 2)
-	renvoAsmPrimaryImm(a, 2)
-	renvoEmitExitStatus(g)
 	renvoAsmMarkLabel(a, after)
+	if renvoIsHostedObjectAmd64(g.c) {
+		renvoAsmAddLocalObjectFuncSymbolText(a, "__renvo_object_fault", label, after)
+	}
 	return label
 }
 
@@ -19004,13 +19031,20 @@ func renvoRecordObjectFunctionRanges(g *renvoLinearGen) {
 	renvoNonNil(g)
 	for i := 0; i < len(g.meta.funcs) && i < len(g.funcLabels); i++ {
 		fn := &g.meta.funcs[i]
-		if fn.objectDecl <= 0 || fn.objectDecl >= len(g.meta.objectDecls) || renvoAsmLabelPosition(&g.asm, g.funcLabels[i]) < 0 {
+		if renvoAsmLabelPosition(&g.asm, g.funcLabels[i]) < 0 {
 			continue
 		}
-		decl := &g.meta.objectDecls[fn.objectDecl]
-		sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, g.prog.src, decl.sectionStart, decl.sectionEnd)
-		if sectionEnd <= sectionStart && decl.alignment <= 0 {
-			continue
+		nameStart, nameEnd := 0, 0
+		if fn.exportNameEnd > fn.exportNameStart {
+			nameStart, nameEnd = renvoAsmCopyObjectPrefixedText(&g.asm, "__renvo_impl_", g.prog.src, fn.nameStart, fn.nameEnd)
+		} else {
+			nameStart, nameEnd = renvoAsmCopyObjectText(&g.asm, g.prog.src, fn.nameStart, fn.nameEnd)
+		}
+		sectionStart, sectionEnd, alignment := 0, 0, 0
+		if fn.objectDecl > 0 && fn.objectDecl < len(g.meta.objectDecls) {
+			decl := &g.meta.objectDecls[fn.objectDecl]
+			sectionStart, sectionEnd = renvoAsmCopyObjectText(&g.asm, g.prog.src, decl.sectionStart, decl.sectionEnd)
+			alignment = decl.alignment
 		}
 		start := renvoAsmLabelPosition(&g.asm, g.funcLabels[i])
 		end := len(g.asm.code)
@@ -19021,7 +19055,7 @@ func renvoRecordObjectFunctionRanges(g *renvoLinearGen) {
 			}
 		}
 		g.asm.objectFunctions = append(g.asm.objectFunctions, renvoObjectFunctionRange{label: g.funcLabels[i], end: end,
-			sectionStart: sectionStart, sectionEnd: sectionEnd, alignment: decl.alignment})
+			nameStart: nameStart, nameEnd: nameEnd, sectionStart: sectionStart, sectionEnd: sectionEnd, alignment: alignment})
 	}
 }
 
