@@ -138,6 +138,10 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 		systemName = arena.PersistString(systemName)
 		moduleLicense = arena.PersistString(moduleLicense)
 		dependencyFile = arena.PersistString(dependencyFile)
+		// The dependency rule is an output artifact just like the linked unit.
+		// Promote it at the final ownership boundary so the following bulk reset
+		// cannot reclaim an earlier frontend copy that happened to share a page.
+		dependencyOutput = arena.PersistBytes(dependencyOutput)
 		backendMark := mark
 		remainder := backendMark % 4096
 		if remainder != 0 {
