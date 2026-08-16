@@ -2287,10 +2287,6 @@ done:
 	case "double":
 		typeID = cTypeFloat64ID
 	case "int128":
-		if !t.checkOnly {
-			t.fail(TranslateErrUnsupported)
-			return cTypeVoidID, storage, false
-		}
 		typeID = t.integer128Type(unsigned)
 	default:
 		if longCount > 0 {

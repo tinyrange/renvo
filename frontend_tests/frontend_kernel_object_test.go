@@ -132,18 +132,71 @@ int absolute32s = (long)&public_data;
 		sections[".gnu.linkonce.t.linkonce_leaf"].Flags&elf.SHF_GROUP == 0 || sections[".group"] == nil {
 		t.Fatal("section type/flag/group fixture mismatch")
 	}
+	foundObjectTrap := false
+	for _, section := range file.Sections {
+		if section.Flags&elf.SHF_EXECINSTR == 0 {
+			continue
+		}
+		data, readErr := section.Data()
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if bytes.Contains(data, []byte{0x0f, 0x05}) {
+			t.Fatalf("freestanding executable section %s contains a userspace syscall", section.Name)
+		}
+		foundObjectTrap = foundObjectTrap || bytes.Contains(data, []byte{0x0f, 0x0b})
+	}
+	if len(backendArgs) == 0 && !foundObjectTrap {
+		t.Fatal("freestanding checked-runtime path lacks an x86 UD2 trap")
+	}
 
 	symbols, err := file.Symbols()
 	if err != nil {
 		t.Fatal(err)
 	}
 	byName := map[string]elf.Symbol{}
+	localFunctions := 0
+	standardLocalPrologue := false
 	for _, symbol := range symbols {
 		byName[symbol.Name] = symbol
+		if elf.ST_BIND(symbol.Info) == elf.STB_LOCAL && elf.ST_TYPE(symbol.Info) == elf.STT_FUNC && symbol.Size > 0 {
+			localFunctions++
+			if len(backendArgs) == 0 && int(symbol.Section) < len(file.Sections) {
+				data, readErr := file.Sections[symbol.Section].Data()
+				at := int(symbol.Value - file.Sections[symbol.Section].Addr)
+				if readErr == nil && at >= 0 && at+4 <= len(data) && bytes.Equal(data[at:at+4], []byte{0x55, 0x48, 0x89, 0xe5}) {
+					standardLocalPrologue = true
+				}
+			}
+		}
+	}
+	if localFunctions < 2 {
+		t.Fatalf("local implementation function symbols = %d, want at least 2", localFunctions)
+	}
+	if len(backendArgs) == 0 && !standardLocalPrologue {
+		t.Fatal("hosted object implementation lacks an objtool-decodable x86_64 frame prologue")
 	}
 	leaf, weak := byName["leaf"], byName["weak_leaf"]
 	if elf.ST_BIND(leaf.Info) != elf.STB_GLOBAL || elf.ST_VISIBILITY(leaf.Other) != elf.STV_HIDDEN || leaf.Size == 0 {
 		t.Fatalf("leaf symbol = %#v", leaf)
+	}
+	implementation := byName["__renvo_impl_leaf"]
+	if elf.ST_BIND(implementation.Info) != elf.STB_LOCAL || elf.ST_TYPE(implementation.Info) != elf.STT_FUNC || implementation.Size == 0 {
+		t.Fatalf("leaf implementation symbol = %#v", implementation)
+	}
+	if implementation.Section == leaf.Section && implementation.Value > leaf.Value+leaf.Size {
+		section := file.Sections[leaf.Section]
+		data, readErr := section.Data()
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		start := int(leaf.Value + leaf.Size - section.Addr)
+		end := int(implementation.Value - section.Addr)
+		for at := start; at < end; at++ {
+			if data[at] != 0x90 {
+				t.Fatalf("executable alignment byte at %#x = %#x, want NOP", at, data[at])
+			}
+		}
 	}
 	if elf.ST_BIND(weak.Info) != elf.STB_WEAK || weak.Section != leaf.Section || weak.Value != leaf.Value {
 		t.Fatalf("weak alias = %#v, leaf %#v", weak, leaf)

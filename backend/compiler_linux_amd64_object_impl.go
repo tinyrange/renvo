@@ -62,7 +62,7 @@ func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
 		}
 		section := renvoObjectELFSectionIndex(&sections, name, 1, 6, alignment)
 		local := renvoAlignValue(len(sections[section].data), alignment)
-		sections[section].data = renvoObjectUntil(sections[section].data, local)
+		sections[section].data = renvoObjectCodeUntil(sections[section].data, local)
 		sections[section].data = append(sections[section].data, a.code[r.start:r.end]...)
 		sections[section].size = len(sections[section].data)
 		codeMap = append(codeMap, renvoObjectCodeRange{start: r.start, end: r.end, section: section, local: local})
@@ -130,6 +130,21 @@ func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
 	for i := 1; i < len(sections); i++ {
 		sectionSymbols[i] = len(symbols)
 		symbols = append(symbols, renvoObjectELFSymbol{info: 3, section: i})
+	}
+	// Exported SysV entrypoints are small ABI wrappers around Renvo's internal
+	// calling convention. Keep every implementation body visible as a local
+	// STT_FUNC as well: linkers do not require it, but kernel objtool needs the
+	// function boundary to validate direct calls and stack/control flow.
+	for i := 0; i < len(a.objectFunctions); i++ {
+		f := &a.objectFunctions[i]
+		section, value, ok := renvoObjectMapCode(codeMap, renvoAsmLabelPosition(a, f.label))
+		endSection, endValue, endOK := renvoObjectMapCodeEnd(codeMap, f.end)
+		if !ok || !endOK || endSection != section || endValue <= value {
+			return nil
+		}
+		name := renvoObjectStoredText(a, f.nameStart, f.nameEnd)
+		symbols = append(symbols, renvoObjectELFSymbol{name: name,
+			info: 2, section: section, value: value, size: endValue - value})
 	}
 	// ELF requires all local symbols to precede the first global symbol.
 	for bindingPass := 0; bindingPass < 2; bindingPass++ {
@@ -466,6 +481,16 @@ func renvoObjectFindSymbol(symbols []renvoObjectELFSymbol, name string) int {
 func renvoObjectUntil(out []byte, size int) []byte {
 	for len(out) < size {
 		out = append(out, 0)
+	}
+	return out
+}
+
+func renvoObjectCodeUntil(out []byte, size int) []byte {
+	// Executable-section alignment must remain a valid instruction stream.
+	// Zero bytes can straddle the next function boundary when decoded from the
+	// preceding byte, which prevents Linux objtool from finding that function.
+	for len(out) < size {
+		out = append(out, 0x90)
 	}
 	return out
 }

@@ -26,6 +26,25 @@ currently means:
   archives the resulting object in Kbuild's thin `built-in.a`; `readelf` checks
   its named sections, visibility, weak alias, and external-call relocation.
 
+M6's first accepted upstream unit has a separate opt-in gate. Start with a
+completed system-compiler build of the pinned tinyconfig, then run:
+
+```sh
+./tools/kbuild/first-unit /path/to/linux-6.12.99
+```
+
+The gate compiles the unmodified upstream `lib/union_find.c` with Renvo and its
+real generated/forced kernel headers, compares its exported symbols and records
+section/relocation telemetry against the reference object, runs the checked
+SysV aggregate/algorithm harness, and requires a warning-free per-object
+`objtool` pass. Because tinyconfig archives this optional routine without
+referencing it, the gate uses `ld -u uf_find` to select exactly that member from
+the reference build's thin `lib/lib.a`. It then performs the pinned `vmlinux.o`
+archive-group link and warning-free link-stage `objtool --ibt` pass. The
+reference object is restored even on failure, and the printed workspace keeps
+all evidence. Set `RENVO_FRONTEND` to exercise a particular host or fixed-point
+compiler binary.
+
 The script leaves its tree, full log, timing/RSS telemetry, and read-only JSON
 census in the printed workspace. CPU, RSS, and compiler bytes are observations,
 not M4 gates.

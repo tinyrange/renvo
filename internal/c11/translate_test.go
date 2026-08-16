@@ -277,6 +277,20 @@ int leaf(void) { return local + constant; }
 	}
 }
 
+func TestTranslateObjectRetainsUnusedInt128Types(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+typedef __signed__ __int128 s128 __attribute__((aligned(16)));
+typedef unsigned __int128 u128 __attribute__((aligned(16)));
+unsigned long leaf(unsigned long value) { return value + 1; }
+`), nil)
+	if !result.Ok {
+		t.Fatalf("unused int128 carrier lowering failed: %#v", result)
+	}
+	if !bytes.Contains(result.Source, []byte("func leaf(value uint64) uint64")) {
+		t.Fatalf("unexpected int128 carrier unit:\n%s", result.Source)
+	}
+}
+
 func TestCheckCallingConventionAttribute(t *testing.T) {
 	source := []byte(`
 typedef unsigned long firmware_call(unsigned int command);
@@ -351,7 +365,7 @@ int inspect(void) { int value __attribute__((__cleanup__(release))) = 3; return 
 	}
 }
 
-func TestCheckObjectModelsDeferredInt128(t *testing.T) {
+func TestCheckObjectModelsInt128CarrierTypes(t *testing.T) {
 	source := []byte(`
 typedef __signed__ __int128 s128 __attribute__((aligned(16)));
 typedef unsigned __int128 u128 __attribute__((aligned(16)));
@@ -363,8 +377,11 @@ int widths[(sizeof(u128) == 16 && _Alignof(u128) == 16 && sizeof(union halves) =
 		t.Fatalf("int128 semantic check failed: error=%d at=%d", checked.Error, checked.ErrorAt)
 	}
 	lowered := TranslateObjectForDataModel("main", source, nil, DataModelLP64)
-	if lowered.Ok || lowered.Error != TranslateErrUnsupported {
-		t.Fatalf("int128 lowering result = %#v, want explicit unsupported error", lowered)
+	if !lowered.Ok {
+		t.Fatalf("int128 carrier lowering failed: %#v", lowered)
+	}
+	if parsed := syntax.ParseFile(lowered.Source); !parsed.Ok {
+		t.Fatalf("int128 carrier unit does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, lowered.Source)
 	}
 }
 
