@@ -122,10 +122,12 @@ type cScopeMark struct {
 }
 
 type cObjectName struct {
-	name   string
-	goName string
-	typeID int
-	auto   bool
+	name       string
+	goName     string
+	typeID     int
+	auto       bool
+	attributes cAttributes
+	storage    int
 }
 
 type cFunctionName struct {
@@ -136,6 +138,7 @@ type cFunctionName struct {
 	paramCount int
 	variadic   bool
 	defined    bool
+	attributes cAttributes
 }
 
 type cTypeCacheChange struct {

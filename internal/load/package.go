@@ -24,13 +24,15 @@ const (
 )
 
 type SourceFile struct {
-	Path       string
-	Src        []byte
-	CPrelude   []byte
-	CObject    bool
-	CDataModel int
-	ArenaStart int
-	ArenaEnd   int
+	Path              string
+	Src               []byte
+	CPrelude          []byte
+	CObject           bool
+	CDataModel        int
+	CFunctionSections bool
+	CDataSections     bool
+	ArenaStart        int
+	ArenaEnd          int
 }
 
 type ParsedFile struct {
@@ -158,7 +160,10 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 		if isCSourceFile(source.Path) {
 			translated := c11.Translate(pkg.Name, source.Src)
 			if source.CObject {
-				translated = c11.TranslateObjectForDataModel(pkg.Name, source.Src, source.CPrelude, source.CDataModel)
+				translated = c11.TranslateObjectWithConfig(pkg.Name, source.Src, source.CPrelude, c11.ObjectConfig{
+					DataModel: source.CDataModel, FunctionSections: source.CFunctionSections,
+					DataSections: source.CDataSections,
+				})
 			}
 			if !translated.Ok {
 				pkg.ErrorOffset = translated.ErrorAt
@@ -309,7 +314,9 @@ func selectPackageFiles(dir string, files []SourceFile) []SourceFile {
 		if DirPath(path) != dir {
 			continue
 		}
-		selected = append(selected, SourceFile{Path: path, Src: files[i].Src, CPrelude: files[i].CPrelude, CObject: files[i].CObject, CDataModel: files[i].CDataModel, ArenaStart: files[i].ArenaStart, ArenaEnd: files[i].ArenaEnd})
+		selected = append(selected, SourceFile{Path: path, Src: files[i].Src, CPrelude: files[i].CPrelude,
+			CObject: files[i].CObject, CDataModel: files[i].CDataModel, CFunctionSections: files[i].CFunctionSections,
+			CDataSections: files[i].CDataSections, ArenaStart: files[i].ArenaStart, ArenaEnd: files[i].ArenaEnd})
 	}
 	sortSourceFiles(selected)
 	return selected

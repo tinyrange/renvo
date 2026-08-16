@@ -59,7 +59,9 @@ func LoadWorkspace(workDir string, stdRoot string, arg string, files []SourceFil
 func normalizeSourceFiles(files []SourceFile) ([]SourceFile, int) {
 	out := make([]SourceFile, 0, len(files))
 	for i := 0; i < len(files); i++ {
-		out = append(out, SourceFile{Path: CleanPath(files[i].Path), Src: files[i].Src, CPrelude: files[i].CPrelude, CObject: files[i].CObject, CDataModel: files[i].CDataModel, ArenaStart: files[i].ArenaStart, ArenaEnd: files[i].ArenaEnd})
+		out = append(out, SourceFile{Path: CleanPath(files[i].Path), Src: files[i].Src, CPrelude: files[i].CPrelude,
+			CObject: files[i].CObject, CDataModel: files[i].CDataModel, CFunctionSections: files[i].CFunctionSections,
+			CDataSections: files[i].CDataSections, ArenaStart: files[i].ArenaStart, ArenaEnd: files[i].ArenaEnd})
 	}
 	sortSourceFiles(out)
 	for i := 1; i < len(out); i++ {

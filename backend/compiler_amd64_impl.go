@@ -189,6 +189,7 @@ func renvoFinishScalarProgramAmd64(g *renvoLinearGen) renvoCompileResult {
 	a := &g.asm
 	var data []byte
 	if renvoIsHostedObjectAmd64(g.c) {
+		renvoRecordObjectFunctionRanges(g)
 		data = renvoAsmImageObjectAmd64(a)
 	} else if targetIsWindows(g.c.renvoTargetOS) {
 		data = renvoAsmImageWindowsAmd64(a)

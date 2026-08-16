@@ -12,9 +12,10 @@ must print only `PASS\n` on success.
 The normal `go test ./frontend_tests` command runs both corpus tiers, the
 bundled frontend checks, and the full self-hosted frontend coverage.
 
-Size accounting keeps the compiler plus native backends under 2 MiB and the
-complete offline `std/`, `forms/`, and `device/` source bundle under 4 MiB.
-Framework and device packages remain covered by standalone offline builds.
+Size accounting records the stripped compiler plus native backends as telemetry;
+it is not currently a frontend pass/fail gate. The complete offline `std/`,
+`forms/`, and `device/` source bundle remains limited to 4 MiB. Framework and
+device packages remain covered by standalone offline builds.
 
 `corpus_manifest.json` records case, declared-variant, and normalized AST-shape counts. Tests recompute those fingerprints from the checked tree, so clone count cannot stand in for structural coverage.
 

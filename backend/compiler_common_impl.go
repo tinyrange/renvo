@@ -74,9 +74,33 @@ type renvoAbsRef struct {
 }
 
 type renvoAsmSymbol struct {
-	nameStart int
-	nameEnd   int
-	label     int
+	nameStart    int
+	nameEnd      int
+	label        int
+	endLabel     int
+	sectionStart int
+	sectionEnd   int
+	alignment    int
+	binding      int
+	visibility   int
+}
+
+type renvoObjectDataSymbol struct {
+	nameStart, nameEnd                   int
+	sectionStart, sectionEnd             int
+	targetStart, targetEnd               int
+	offset, size, storageSize, alignment int
+	binding, visibility                  int
+	initialized, value                   int
+	kind                                 int
+}
+
+type renvoObjectDataRelocation struct {
+	offset, targetStart, targetEnd, typ, addend int
+}
+
+type renvoObjectFunctionRange struct {
+	label, end, sectionStart, sectionEnd, alignment int
 }
 
 // renvoReplSymbol describes one persistent package-global slot in a linked
@@ -117,6 +141,9 @@ type renvoAsm struct {
 	kernelImportOffsets []int
 	data                []byte
 	objectStrings       *renvoObjectStrings
+	objectData          []renvoObjectDataSymbol
+	objectFunctions     []renvoObjectFunctionRange
+	objectDataRelocs    []renvoObjectDataRelocation
 	bssSize             int
 	codeOffset          int
 	dataOffset          int
@@ -390,6 +417,45 @@ func renvoAsmAddFuncSymbol(a *renvoAsm, src []byte, nameStart int, nameEnd int, 
 	sym.nameEnd = end
 	sym.label = label
 	a.symbols = append(a.symbols, sym)
+}
+
+func renvoAsmCopyObjectText(a *renvoAsm, src []byte, start int, end int) (int, int) {
+	renvoNonNil(a)
+	if start >= end || renvoBytesEqualText(src, start, end, "-") {
+		return 0, 0
+	}
+	outStart := len(a.symbolName)
+	for i := start; i < end; i++ {
+		a.symbolName = append(a.symbolName, renvo_runtime_UnsafeByteAt(src, i))
+	}
+	return outStart, len(a.symbolName)
+}
+
+// ObjectImage is the RTG-visible bridge to the production x86_64 relocatable
+// writer. A custom target still selects the object format in its definition;
+// the implementation is shared with the compiled-in frontend so the two paths
+// cannot drift on section, symbol, or relocation semantics.
+func (a *renvoAsm) ObjectImage() []byte {
+	return renvoAsmImageKernelObjectAmd64(a)
+}
+
+func renvoAsmAddObjectFuncSymbol(a *renvoAsm, src []byte, nameStart int, nameEnd int, label int, decl *renvoObjectDecl) int {
+	renvoAsmAddFuncSymbol(a, src, nameStart, nameEnd, label)
+	index := len(a.symbols) - 1
+	if index < 0 {
+		return index
+	}
+	if decl == nil {
+		a.symbols[index].binding = 1
+		return index
+	}
+	sectionStart, sectionEnd := renvoAsmCopyObjectText(a, src, decl.sectionStart, decl.sectionEnd)
+	a.symbols[index].sectionStart = sectionStart
+	a.symbols[index].sectionEnd = sectionEnd
+	a.symbols[index].alignment = decl.alignment
+	a.symbols[index].binding = decl.binding
+	a.symbols[index].visibility = decl.visibility
+	return index
 }
 
 func renvoAsmEmit32(a *renvoAsm, v int) {
@@ -1015,6 +1081,7 @@ type renvoSymbolInfo struct {
 	iotaValue    int // const iota value; variable BSS offset during initialization
 	constValue   int
 	constValueOK int // const validity; variable initialization walk state
+	objectDecl   int
 }
 
 type renvoFuncInfo struct {
@@ -1037,6 +1104,19 @@ type renvoFuncInfo struct {
 	exportNameStart int
 	exportNameEnd   int
 	literalTok      int // positive for a literal; negative after named-function init scanning
+	objectDecl      int
+}
+
+type renvoObjectDecl struct {
+	kind                                       int
+	nameStart, nameEnd                         int
+	sectionStart, sectionEnd                   int
+	alignment, binding, visibility             int
+	targetStart, targetEnd                     int
+	size                                       int
+	relocationKind                             int
+	relocationTargetStart, relocationTargetEnd int
+	relocationAddend                           int
 }
 
 type renvoClosureInfo struct {
@@ -1058,6 +1138,7 @@ type renvoMeta struct {
 	params        []renvoSymbolInfo
 	funcs         []renvoFuncInfo
 	globalBuckets []int32
+	objectDecls   []renvoObjectDecl
 	globalNext    []int32
 	funcBuckets   []int32
 	funcNext      []int32
@@ -3487,6 +3568,7 @@ func renvoBuildMetaInto(pp *renvoProgram, m *renvoMeta) {
 	m.closures = make([]renvoClosureInfo, 0, 16)
 	m.captures = make([]renvoSymbolInfo, 0, 32)
 	m.globalBuckets = make([]int32, globalCap*2)
+	m.objectDecls = append(m.objectDecls, renvoObjectDecl{})
 	for i := 0; i < len(m.globalBuckets); i++ {
 		m.globalBuckets[i] = -1
 	}
@@ -4063,7 +4145,8 @@ func renvoParseTopDeclEntry(m *renvoMeta, p *renvoProgram, kind int, start int, 
 	if typ == 0 && initStart < initEnd {
 		typ = renvoInferTopLiteralType(m, p, initStart, initEnd)
 	}
-	renvoMetaAppendGlobal(m, renvoSymbolInfo{nameStart: int(name.start), nameEnd: int(name.end), kind: kind, typ: typ, initStart: initStart, initEnd: initEnd})
+	objectDecl := renvoParseObjectDirective(m, p, int(name.start))
+	renvoMetaAppendGlobal(m, renvoSymbolInfo{nameStart: int(name.start), nameEnd: int(name.end), kind: kind, typ: typ, initStart: initStart, initEnd: initEnd, objectDecl: objectDecl})
 }
 
 func renvoParseVarDeclEntry(m *renvoMeta, p *renvoProgram, start int, end int) {
@@ -4126,7 +4209,8 @@ func renvoParseVarDeclEntry(m *renvoMeta, p *renvoProgram, start int, end int) {
 				symType = renvoInferTopLiteralType(m, p, initStart, initEnd)
 			}
 		}
-		renvoMetaAppendGlobal(m, renvoSymbolInfo{nameStart: int(name.start), nameEnd: int(name.end), kind: renvoTokVar, typ: symType, initStart: initStart, initEnd: initEnd})
+		objectDecl := renvoParseObjectDirective(m, p, int(name.start))
+		renvoMetaAppendGlobal(m, renvoSymbolInfo{nameStart: int(name.start), nameEnd: int(name.end), kind: renvoTokVar, typ: symType, initStart: initStart, initEnd: initEnd, objectDecl: objectDecl})
 	}
 }
 
@@ -4216,7 +4300,8 @@ func renvoParseFuncInfo(m *renvoMeta, fnIndex int) {
 	}
 	linkStatic := renvoParseLinkStaticDirective(p, fn.nameStart)
 	export := renvoParseExportDirective(p, fn.nameStart)
-	m.funcs = append(m.funcs, renvoFuncInfo{declIndex: fnIndex, nameStart: nameStart, nameEnd: nameEnd, firstParam: firstParam, paramCount: paramCount, firstResult: firstResult, resultCount: resultCount, resultType: resultType, receiverType: receiverType, bodyStart: fn.bodyStart + 1, bodyEnd: fn.bodyEnd, linkStatic: linkStatic.ok, linkDLLStart: linkStatic.dllStart, linkDLLEnd: linkStatic.dllEnd, linkMethodStart: linkStatic.methodStart, linkMethodEnd: linkStatic.methodEnd, exportNameStart: export.nameStart, exportNameEnd: export.nameEnd})
+	objectDecl := renvoParseObjectDirective(m, p, fn.nameStart)
+	m.funcs = append(m.funcs, renvoFuncInfo{declIndex: fnIndex, nameStart: nameStart, nameEnd: nameEnd, firstParam: firstParam, paramCount: paramCount, firstResult: firstResult, resultCount: resultCount, resultType: resultType, receiverType: receiverType, bodyStart: fn.bodyStart + 1, bodyEnd: fn.bodyEnd, linkStatic: linkStatic.ok, linkDLLStart: linkStatic.dllStart, linkDLLEnd: linkStatic.dllEnd, linkMethodStart: linkStatic.methodStart, linkMethodEnd: linkStatic.methodEnd, exportNameStart: export.nameStart, exportNameEnd: export.nameEnd, objectDecl: objectDecl})
 	if receiverType != 0 && renvoResolveType(m, receiverType).kind != renvoTypePointer {
 		renvoAddPointerType(m, receiverType, renvoPointerSpaceData)
 	}
@@ -4453,6 +4538,107 @@ func renvoParseLinkStaticDirective(p *renvoProgram, pos int) renvoLinkStaticDire
 	d.methodStart = methodStart
 	d.methodEnd = methodEnd
 	return d
+}
+
+const (
+	renvoObjectDeclFunction      = 1
+	renvoObjectDeclVariable      = 2
+	renvoObjectDeclFunctionAlias = 3
+	renvoObjectDeclVariableAlias = 4
+)
+
+func renvoParseObjectDirective(m *renvoMeta, p *renvoProgram, pos int) int {
+	renvoNonNil(m, p)
+	end := pos
+	for line := 0; line < 4 && end > 0; line++ {
+		for end > 0 {
+			ch := renvo_runtime_UnsafeByteAt(p.src, end-1)
+			if ch != ' ' && ch != '\t' && ch != '\r' && ch != '\n' {
+				break
+			}
+			end--
+		}
+		start := end
+		for start > 0 && renvo_runtime_UnsafeByteAt(p.src, start-1) != '\n' {
+			start--
+		}
+		at := start
+		for at < end && (renvo_runtime_UnsafeByteAt(p.src, at) == ' ' || renvo_runtime_UnsafeByteAt(p.src, at) == '\t') {
+			at++
+		}
+		prefix := "// renvo:object "
+		if end-at >= len(prefix) && renvoBytesEqualText(p.src, at, at+len(prefix), prefix) {
+			fields := renvoObjectDirectiveFields(p.src, at+len(prefix), end)
+			if len(fields) != 22 {
+				return 0
+			}
+			kind := 0
+			if renvoBytesEqualText(p.src, fields[0], fields[1], "function") {
+				kind = renvoObjectDeclFunction
+			} else if renvoBytesEqualText(p.src, fields[0], fields[1], "variable") {
+				kind = renvoObjectDeclVariable
+			} else if renvoBytesEqualText(p.src, fields[0], fields[1], "function-alias") {
+				kind = renvoObjectDeclFunctionAlias
+			} else if renvoBytesEqualText(p.src, fields[0], fields[1], "variable-alias") {
+				kind = renvoObjectDeclVariableAlias
+			}
+			alignment, alignOK := renvoObjectDirectiveDecimal(p.src, fields[6], fields[7])
+			binding, bindOK := renvoObjectDirectiveDecimal(p.src, fields[8], fields[9])
+			visibility, visibilityOK := renvoObjectDirectiveDecimal(p.src, fields[10], fields[11])
+			size, sizeOK := renvoObjectDirectiveDecimal(p.src, fields[14], fields[15])
+			relocationKind, relocationOK := renvoObjectDirectiveDecimal(p.src, fields[16], fields[17])
+			relocationAddend, addendOK := renvoObjectDirectiveDecimal(p.src, fields[20], fields[21])
+			if kind == 0 || !alignOK || !bindOK || !visibilityOK || !sizeOK || !relocationOK || !addendOK ||
+				binding > 2 || visibility > 3 || relocationKind != 0 && relocationKind != 1 && relocationKind != 10 && relocationKind != 11 {
+				return 0
+			}
+			decl := renvoObjectDecl{kind: kind, nameStart: fields[2], nameEnd: fields[3],
+				sectionStart: fields[4], sectionEnd: fields[5], alignment: alignment,
+				binding: binding, visibility: visibility, targetStart: fields[12], targetEnd: fields[13], size: size,
+				relocationKind: relocationKind, relocationTargetStart: fields[18], relocationTargetEnd: fields[19], relocationAddend: relocationAddend}
+			m.objectDecls = append(m.objectDecls, decl)
+			return len(m.objectDecls) - 1
+		}
+		end = start
+	}
+	return 0
+}
+
+// Each field is stored as a start/end pair, avoiding short-lived strings in
+// the compiler's hottest metadata phase.
+func renvoObjectDirectiveFields(src []byte, start int, end int) []int {
+	fields := make([]int, 0, 22)
+	for start < end {
+		for start < end && (renvo_runtime_UnsafeByteAt(src, start) == ' ' || renvo_runtime_UnsafeByteAt(src, start) == '\t') {
+			start++
+		}
+		if start >= end {
+			break
+		}
+		fieldEnd := start
+		for fieldEnd < end && renvo_runtime_UnsafeByteAt(src, fieldEnd) != ' ' && renvo_runtime_UnsafeByteAt(src, fieldEnd) != '\t' {
+			fieldEnd++
+		}
+		fields = append(fields, start, fieldEnd)
+		start = fieldEnd
+	}
+	return fields
+}
+
+func renvoObjectDirectiveDecimal(src []byte, start int, end int) (int, bool) {
+	if start >= end {
+		return 0, false
+	}
+	value := 0
+	for start < end {
+		ch := renvo_runtime_UnsafeByteAt(src, start)
+		if ch < '0' || ch > '9' || value > 1<<28 {
+			return 0, false
+		}
+		value = value*10 + int(ch-'0')
+		start++
+	}
+	return value, true
 }
 
 func renvoParseFuncResults(m *renvoMeta, p *renvoProgram, start int, end int) (int, int) {
@@ -18668,18 +18854,54 @@ func renvoBeginObjectProgram(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
 		return nil
 	}
 	// Relocatable objects have no process entrypoint that can run the ordinary
-	// global initializer function. Tentative/zero-valued globals instead live
-	// directly in the object's NOBITS section and are addressed through the
-	// existing BSS relocation path.
+	// global initializer function. Allocate each declaration directly into its
+	// requested ELF storage and retain a compact virtual-BSS offset for common
+	// load/store lowering; the object writer maps that offset back to a section.
 	for i := 0; i < len(meta.globals); i++ {
 		s := &meta.globals[i]
-		if s.kind != renvoTokVar || s.initStart < s.initEnd {
+		if s.kind != renvoTokVar {
 			continue
 		}
-		off := g.asm.bssSize
+		var decl *renvoObjectDecl
+		if s.objectDecl > 0 && s.objectDecl < len(meta.objectDecls) {
+			decl = &meta.objectDecls[s.objectDecl]
+		}
+		if decl != nil && (decl.kind == renvoObjectDeclFunctionAlias || decl.kind == renvoObjectDeclVariableAlias) {
+			renvoObjectAppendDataSymbol(&g.asm, p.src, decl, 0, 0, 0, false, 0)
+			continue
+		}
+		storageSize := renvoTypeCopySize(meta, s.typ)
+		renvoNativeTypeLayout(meta, s.typ)
+		alignment := meta.types[s.typ].nativeAlign
+		if alignment < 1 {
+			alignment = 1
+		}
+		if decl != nil && decl.alignment > alignment {
+			alignment = decl.alignment
+		}
+		off := renvoAlignValue(g.asm.bssSize, alignment)
 		s.iotaValue = off
 		g.globals = append(g.globals, renvoGlobalInfo{nameStart: s.nameStart, nameEnd: s.nameEnd, offset: off})
-		g.asm.bssSize += renvoAlignTo8(renvoTypeCopySize(meta, s.typ))
+		g.asm.bssSize = off + storageSize
+		size := storageSize
+		if decl != nil && decl.size > 0 && decl.size <= storageSize {
+			size = decl.size
+		}
+		initialized := s.initStart < s.initEnd
+		value := 0
+		if initialized {
+			if decl == nil || decl.relocationKind == 0 {
+				constant := renvoEvalMetaConstExpr(meta, p, s.initStart, s.initEnd, 0)
+				if !constant.ok || storageSize > 8 {
+					return nil
+				}
+				value = constant.value
+			}
+		}
+		if decl == nil {
+			decl = &renvoObjectDecl{kind: renvoObjectDeclVariable, nameStart: s.nameStart, nameEnd: s.nameEnd, size: size}
+		}
+		renvoObjectAppendDataSymbol(&g.asm, p.src, decl, off, size, storageSize, initialized, value)
 	}
 	for i := 0; i < len(meta.funcs); i++ {
 		fn := &meta.funcs[i]
@@ -18722,8 +18944,12 @@ func renvoEmitObjectExport(g *renvoLinearGen, fnIndex int) bool {
 	}
 	wrapper := renvoAsmNewLabel(&g.asm)
 	renvoAsmMarkLabel(&g.asm, wrapper)
-	renvoAsmAddFuncSymbol(
-		&g.asm, g.prog.src, fn.exportNameStart, fn.exportNameEnd, wrapper)
+	var decl *renvoObjectDecl
+	if fn.objectDecl > 0 && fn.objectDecl < len(g.meta.objectDecls) {
+		decl = &g.meta.objectDecls[fn.objectDecl]
+	}
+	symbolIndex := renvoAsmAddObjectFuncSymbol(
+		&g.asm, g.prog.src, fn.exportNameStart, fn.exportNameEnd, wrapper, decl)
 	renvoObjectExportFrame(g, true)
 	if renvoPreparedBackend != 0 {
 		for i := 0; i < wordCount; i++ {
@@ -18743,7 +18969,60 @@ func renvoEmitObjectExport(g *renvoLinearGen, fnIndex int) bool {
 	}
 	renvoObjectExportFrame(g, false)
 	renvoAsmRet(&g.asm)
+	endLabel := renvoAsmNewLabel(&g.asm)
+	renvoAsmMarkLabel(&g.asm, endLabel)
+	if symbolIndex >= 0 && symbolIndex < len(g.asm.symbols) {
+		g.asm.symbols[symbolIndex].endLabel = endLabel
+	}
 	return true
+}
+
+func renvoObjectAppendDataSymbol(a *renvoAsm, src []byte, decl *renvoObjectDecl, offset int, size int, storageSize int, initialized bool, value int) {
+	renvoNonNil(a, decl)
+	nameStart, nameEnd := renvoAsmCopyObjectText(a, src, decl.nameStart, decl.nameEnd)
+	sectionStart, sectionEnd := renvoAsmCopyObjectText(a, src, decl.sectionStart, decl.sectionEnd)
+	targetStart, targetEnd := renvoAsmCopyObjectText(a, src, decl.targetStart, decl.targetEnd)
+	a.objectData = append(a.objectData, renvoObjectDataSymbol{nameStart: nameStart, nameEnd: nameEnd,
+		sectionStart: sectionStart, sectionEnd: sectionEnd, targetStart: targetStart, targetEnd: targetEnd,
+		offset: offset, size: size, storageSize: storageSize, alignment: decl.alignment, binding: decl.binding,
+		visibility: decl.visibility, initialized: renvoBoolInt(initialized), value: value, kind: decl.kind})
+	if decl.relocationKind != 0 {
+		targetStart, targetEnd := renvoAsmCopyObjectText(a, src, decl.relocationTargetStart, decl.relocationTargetEnd)
+		a.objectDataRelocs = append(a.objectDataRelocs, renvoObjectDataRelocation{offset: offset,
+			targetStart: targetStart, targetEnd: targetEnd, typ: decl.relocationKind, addend: decl.relocationAddend})
+	}
+}
+
+func renvoBoolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func renvoRecordObjectFunctionRanges(g *renvoLinearGen) {
+	renvoNonNil(g)
+	for i := 0; i < len(g.meta.funcs) && i < len(g.funcLabels); i++ {
+		fn := &g.meta.funcs[i]
+		if fn.objectDecl <= 0 || fn.objectDecl >= len(g.meta.objectDecls) || renvoAsmLabelPosition(&g.asm, g.funcLabels[i]) < 0 {
+			continue
+		}
+		decl := &g.meta.objectDecls[fn.objectDecl]
+		sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, g.prog.src, decl.sectionStart, decl.sectionEnd)
+		if sectionEnd <= sectionStart && decl.alignment <= 0 {
+			continue
+		}
+		start := renvoAsmLabelPosition(&g.asm, g.funcLabels[i])
+		end := len(g.asm.code)
+		for j := 0; j < len(g.funcLabels); j++ {
+			position := renvoAsmLabelPosition(&g.asm, g.funcLabels[j])
+			if position > start && position < end {
+				end = position
+			}
+		}
+		g.asm.objectFunctions = append(g.asm.objectFunctions, renvoObjectFunctionRange{label: g.funcLabels[i], end: end,
+			sectionStart: sectionStart, sectionEnd: sectionEnd, alignment: decl.alignment})
+	}
 }
 
 func renvoObjectExportFrame(g *renvoLinearGen, reserve bool) {

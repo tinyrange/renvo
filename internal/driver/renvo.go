@@ -107,17 +107,15 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 	moduleLicense := built.Options.ModuleLicense
 	dependencyFile := built.Options.DependencyFile
 	dependencyOutput := CDependencyOutput(built.Options)
-	if len(dependencyOutput) > 0 {
-		if os.WriteFile(dependencyFile, dependencyOutput, 0644) != nil {
-			return 1, "renvo cc: failed to write dependency file\n"
-		}
-	}
 	arenaSize := backendArenaSize(target, built.Options.Tags, built.Options.ArenaSize)
 	if built.Options.EmitUnit {
 		if output == "-" {
 			print(string(unit))
 		} else if os.WriteFile(output, unit, 0644) != nil {
 			return finishRenvoCommandFailure(renvoCommandDiagnosticBuffer[:], Diagnostic{Phase: "unit", Code: "RENVO-UNIT-002", Message: "failed to write linked unit"}, resetArena, mark)
+		}
+		if len(dependencyOutput) > 0 && os.WriteFile(dependencyFile, dependencyOutput, 0644) != nil {
+			return 1, "renvo cc: failed to write dependency file\n"
 		}
 		if resetArena {
 			arena.Reset(mark)
@@ -172,6 +170,12 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 			arena.PersistReset(persistMark)
 		}
 		return status, message
+	}
+	if len(dependencyOutput) > 0 && os.WriteFile(dependencyFile, dependencyOutput, 0644) != nil {
+		if resetArena {
+			arena.PersistReset(persistMark)
+		}
+		return 1, "renvo cc: failed to write dependency file\n"
 	}
 	if resetArena {
 		arena.PersistReset(persistMark)
