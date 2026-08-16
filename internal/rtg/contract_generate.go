@@ -443,6 +443,12 @@ func renvoRTGABIStoreFrame(out *renvoAsm, offset int, source RTGRegister) bool {
 func renvoRTGABIAddressFrame(out *renvoAsm, destination RTGRegister, offset int) bool { return false }
 func renvoRTGABIStoreParamWord(out *renvoAsm, word int, offset int) bool { return false }
 func renvoRTGABICallWordCount(out *renvoAsm, label int, wordCount int) bool { return false }
+func renvoRTGMarkLabel(out *renvoAsm, label int) {}
+const renvoRTGStructuredFunctions = 0
+func renvoRTGFunctionStart(out *renvoAsm, label int) {}
+func renvoRTGFunctionFinish(out *renvoAsm) {}
+func renvoRTGEmitJITCall(out *renvoAsm, entry RTGRegister, stackTop RTGRegister, argsData RTGRegister, argsLen RTGRegister, envData RTGRegister, envLen RTGRegister) bool { return false }
+func renvoRTGEmitUnsignedDivide(out *renvoAsm, remainder bool) bool { return false }
 const renvoRTGCodeOffset = 0
 func renvoRTGImage(out *renvoAsm) []byte { return nil }
 func renvoRTGKernelImage(out *renvoAsm, initLabel int, exitLabel int) []byte { return nil }
@@ -503,6 +509,40 @@ func appendPreparedABIAdapters(out []byte, document Document, target ResolvedTar
 	out = appendPreparedABIHook(out, document, target.ABI, prefix,
 		"renvoRTGABICallWordCount", "call_word_count",
 		"out *renvoAsm, label int, wordCount int", "out, label, wordCount")
+	out = append(out, "func renvoRTGMarkLabel(out *renvoAsm, label int) {\n"...)
+	if algorithm, found := targetABIGoHook(document, target.ABI, "mark_label"); found {
+		out = append(out, prefix...)
+		out = append(out, exportedName(algorithm)...)
+		out = append(out, "(out, label)\n"...)
+	}
+	out = append(out, "}\n"...)
+	structured, _ := integerField(document, target.ABI, "structured_functions")
+	out = append(out, "const renvoRTGStructuredFunctions = "...)
+	if structured != 0 {
+		out = append(out, '1')
+	} else {
+		out = append(out, '0')
+	}
+	out = append(out, "\nfunc renvoRTGFunctionStart(out *renvoAsm, label int) {\n"...)
+	if algorithm, found := targetABIGoHook(document, target.ABI, "function_start"); found {
+		out = append(out, prefix...)
+		out = append(out, exportedName(algorithm)...)
+		out = append(out, "(out, label)\n"...)
+	}
+	out = append(out, "}\nfunc renvoRTGFunctionFinish(out *renvoAsm) {\n"...)
+	if algorithm, found := targetABIGoHook(document, target.ABI, "function_finish"); found {
+		out = append(out, prefix...)
+		out = append(out, exportedName(algorithm)...)
+		out = append(out, "(out)\n"...)
+	}
+	out = append(out, "}\n"...)
+	out = appendPreparedABIHook(out, document, target.ABI, prefix,
+		"renvoRTGEmitJITCall", "jit_call",
+		"out *renvoAsm, entry RTGRegister, stackTop RTGRegister, argsData RTGRegister, argsLen RTGRegister, envData RTGRegister, envLen RTGRegister",
+		"out, entry, stackTop, argsData, argsLen, envData, envLen")
+	out = appendPreparedABIHook(out, document, target.ABI, prefix,
+		"renvoRTGEmitUnsignedDivide", "unsigned_divide",
+		"out *renvoAsm, remainder bool", "out, remainder")
 	return out
 }
 

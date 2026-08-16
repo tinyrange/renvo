@@ -108,6 +108,16 @@ func TestCompilerSourceManifestCoversBackendImplementationFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("glob backend implementation files: %v", err)
 	}
+	// The statically prepared LLVM projection is selected only by the
+	// renvo_prepared build tag. It must not enter the ordinary bootstrap source
+	// manifest, whose stage compilers consume sources without host Go's file
+	// selection pass.
+	for i := 0; i < len(implementationFiles); i++ {
+		if implementationFiles[i] == "compiler_llvm_prepared_impl.go" {
+			implementationFiles = append(implementationFiles[:i], implementationFiles[i+1:]...)
+			break
+		}
+	}
 	implementationFiles = append(implementationFiles, "compiler_main.go")
 	sort.Strings(manifest)
 	sort.Strings(implementationFiles)

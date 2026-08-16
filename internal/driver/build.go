@@ -301,6 +301,9 @@ func bindBuiltInTarget(data *[]byte, options Options) {
 	name := backendTargetForOptions(options.Target, options.Mode)
 	target, definition, version, ok := targetinfo.Binding(name)
 	if !ok {
+		target, definition, version, ok = renvoBackendTargetBinding(name)
+	}
+	if !ok {
 		return
 	}
 	var targetBinding unit.TargetBinding

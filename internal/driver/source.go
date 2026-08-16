@@ -1164,7 +1164,7 @@ func hasBuildTag(target string, tag string, tags []string) bool {
 	if tag == "renvo" {
 		return true
 	}
-	return targetinfo.HasBuildTag(target, tag)
+	return targetinfo.HasBuildTag(target, tag) || renvoBackendTargetHasBuildTag(target, tag)
 }
 
 func trimBuildLine(line []byte) []byte {

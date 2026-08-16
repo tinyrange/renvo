@@ -1,4 +1,4 @@
-//go:build !renvo
+//go:build !renvo || renvo_prepared
 
 package main
 
@@ -286,6 +286,7 @@ func renvoRTGEmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
 	g.currentFunc = fnInfoIndex
 	g.stackUsed = 0
 	g.stackPeak = 0
+	renvoRTGFunctionStart(a, g.funcLabels[fnInfoIndex])
 	renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
 	framePatch := renvoRTGFrameStart(a)
 	if renvoTypeUsesHiddenResult(g.meta, metaFn.resultType) {
@@ -315,6 +316,7 @@ func renvoRTGEmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
 		renvoAsmRet(a)
 	}
 	renvoRTGFrameFinish(a, framePatch, g.stackPeak)
+	renvoRTGFunctionFinish(a)
 	return true
 }
 
@@ -399,6 +401,7 @@ func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoComp
 		}
 	}
 	if appIndex < 0 {
+		renvoPrintErr("renvo: prepared backend could not find appMain\n")
 		return renvoCompileResult{}
 	}
 	g := new(renvoLinearGen)
@@ -440,11 +443,13 @@ func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoComp
 		entryStateOffset = g.asm.ReserveBSS(renvoRTGEntryStateBytes, renvoRTGStackWordBytes)
 	}
 	if !renvoRTGEmitEntryStart(&g.asm, entryStateOffset) {
+		renvoPrintErr("renvo: prepared backend rejected entry start\n")
 		return renvoCompileResult{}
 	}
 	renvoLinearMarkFunc(g, appIndex)
 	renvoEmitPersistentArenaReady(g)
 	if !renvoLinearInitGlobals(g) {
+		renvoPrintErr("renvo: prepared backend failed global initialization\n")
 		return renvoCompileResult{}
 	}
 	app := &meta.funcs[appIndex]
@@ -464,16 +469,20 @@ func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoComp
 	// runtime definition. The hook leaves the ordinary Renvo call words ready
 	// for appMain, so the shared lowering path does not know an OS entry ABI.
 	if !renvoRTGEmitEntry(&g.asm, app.paramCount, entryStateOffset) {
+		renvoPrintErr("renvo: prepared backend rejected process arguments\n")
 		return renvoCompileResult{}
 	}
 	renvoAsmCallLabel(&g.asm, g.funcLabels[appIndex])
 	if !renvoEmitProgramPanicCheck(g) {
+		renvoPrintErr("renvo: prepared backend failed panic check\n")
 		return renvoCompileResult{}
 	}
 	if !renvoRTGEmitExit(&g.asm, renvoRTGPrimary) {
+		renvoPrintErr("renvo: prepared backend rejected process exit\n")
 		return renvoCompileResult{}
 	}
 	if !renvoEmitAllQueuedFunctionsScratch(g) {
+		renvoPrintErr("renvo: prepared backend failed queued functions\n")
 		return renvoCompileResult{}
 	}
 	if renvoRTGUnsupportedOperation != 0 {
@@ -488,6 +497,7 @@ func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoComp
 		return renvoCompileResult{}
 	}
 	if len(data) == 0 {
+		renvoPrintErr("renvo: prepared backend produced empty output\n")
 		return renvoCompileResult{}
 	}
 	return renvoCompileResult{data: data, ok: true}

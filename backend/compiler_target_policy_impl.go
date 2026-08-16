@@ -39,6 +39,11 @@ const renvoOSRTG = 6
 // a private target identity instead of borrowing an advertised target slot.
 const renvoTargetRTG = 12
 
+// A statically embedded target carries non-zero prepared target facts even
+// when the ordinary source policy remains in built-in mode. Dynamic prepared
+// compilers specialize renvoPreparedBackend to one instead.
+const renvoPreparedBackendActive = renvoPreparedBackend + renvoRTGPreparedIntBits
+
 const renvoEndianLittle = 1
 const renvoEndianBig = 2
 
@@ -366,7 +371,7 @@ func targetIsKernelModule(context *renvoCompileContext) bool {
 	if context.renvoTarget == renvoTargetLinuxKernelAmd64 {
 		return true
 	}
-	if renvoPreparedBackend == 0 || context.renvoTarget != renvoTargetRTG {
+	if renvoPreparedBackendActive == 0 || context.renvoTarget != renvoTargetRTG {
 		return false
 	}
 	return renvoRTGPreparedKernelModule != 0
@@ -418,6 +423,10 @@ func renvoEvalFixedTargetInt(g *renvoLinearGen, ep *renvoExprParse, idx int, fix
 		value := renvoFindSmallConstByName(g, e.nameStart, e.nameEnd)
 		if value >= -128 {
 			return value
+		}
+		constant := renvoEvalConstByName(g, e.nameStart, e.nameEnd)
+		if constant.ok {
+			return constant.value
 		}
 	}
 	return renvoFixedTargetUnknown
