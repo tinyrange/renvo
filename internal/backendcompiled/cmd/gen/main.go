@@ -88,7 +88,7 @@ func main() {
 		digestSource.WriteString(name)
 		digestSource.WriteByte(0)
 		digestSource.Write(preparedSource)
-		if !bytes.HasPrefix(source, []byte("//go:build renvo\n")) {
+		if !bytes.HasPrefix(source, []byte("//go:build renvo")) {
 			out.WriteString("// source: backend/")
 			out.WriteString(name)
 			out.WriteByte('\n')

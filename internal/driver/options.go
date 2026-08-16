@@ -662,7 +662,7 @@ func parseBuildTags(value string) ([]string, bool) {
 }
 
 func IsSupportedTarget(target string) bool {
-	return targetinfo.IsAdvertised(target)
+	return targetinfo.IsAdvertised(target) || renvoBackendTargetSupported(target)
 }
 
 func parseFail(options Options, err int, arg string, at int) Options {

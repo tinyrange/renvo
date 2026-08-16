@@ -900,6 +900,9 @@ func TestResolveRejectsABIHookContractErrors(t *testing.T) {
 		{"frame_address", []string{"*RTGEmitter", "RTGRegister", "int"}},
 		{"store_param_word", []string{"*RTGEmitter", "int", "int"}},
 		{"call_word_count", []string{"*RTGEmitter", "RTGLabel", "int"}},
+		{"mark_label", []string{"*RTGEmitter", "RTGLabel"}},
+		{"function_start", []string{"*RTGEmitter", "RTGLabel"}},
+		{"function_finish", []string{"*RTGEmitter"}},
 	}
 	for _, hook := range hooks {
 		t.Run(hook.name, func(t *testing.T) {

@@ -5,6 +5,13 @@ package backendbridge
 import renvo "renvo.dev/backend"
 
 func InitializeObjectCache(targetName string) { renvo.RenvoInitializeObjectCache(targetName) }
+func TargetSupported(targetName string) bool  { return renvo.RenvoTargetSupported(targetName) }
+func TargetBinding(targetName string) (string, string, int, bool) {
+	return renvo.RenvoTargetBinding(targetName)
+}
+func TargetHasBuildTag(targetName string, tag string) bool {
+	return renvo.RenvoTargetHasBuildTag(targetName, tag)
+}
 
 type CompileSession struct{ inner *renvo.RenvoCompileSession }
 

@@ -12,11 +12,22 @@ func renvoRTGEnsureStringEqualHelper(g *renvoLinearGen) int {
 	}
 	g.streqEmitted = true
 	g.streqLabel = renvoAsmNewLabel(a)
+	if renvoRTGStructuredFunctions != 0 {
+		renvoQueueStructuredHelper(g, renvoStructuredHelperStringEqual, 0, g.streqLabel)
+		return g.streqLabel
+	}
 	afterLabel := renvoAsmNewLabel(a)
+	renvoAsmJmpMarkLabel(a, afterLabel, g.streqLabel)
+	renvoRTGEmitStringEqualHelperBody(g)
+	renvoAsmMarkLabel(a, afterLabel)
+	return g.streqLabel
+}
+
+func renvoRTGEmitStringEqualHelperBody(g *renvoLinearGen) {
+	a := &g.asm
 	notEqualLabel := renvoAsmNewLabel(a)
 	equalLabel := renvoAsmNewLabel(a)
 	loopLabel := renvoAsmNewLabel(a)
-	renvoAsmJmpMarkLabel(a, afterLabel, g.streqLabel)
 
 	// String equality receives (left data, left length, right data, right
 	// length) in the first four ABI call words and returns a boolean in primary.
@@ -44,8 +55,6 @@ func renvoRTGEnsureStringEqualHelper(g *renvoLinearGen) int {
 	renvoAsmMarkLabel(a, notEqualLabel)
 	renvoRTGDirectMoveImmediate(a, renvoRTGPrimary, 0)
 	renvoAsmRet(a)
-	renvoAsmMarkLabel(a, afterLabel)
-	return g.streqLabel
 }
 
 // compileTarget composes an OS/architecture implementation after target
@@ -53,7 +62,7 @@ func renvoRTGEnsureStringEqualHelper(g *renvoLinearGen) int {
 // in compiler_linux_impl.go, while target-specific image builders remain in
 // their composition files until those layers are split further.
 func compileTarget(input []int, output int, target int, arenaSize int) int {
-	if renvoPreparedBackend != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
+	if renvoPreparedBackendActive != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
 		return renvoCompileUnitInput(input, output, target, arenaSize)
 	}
 	// A stage compiler is specialized while its parent is lowering this source.
@@ -178,6 +187,28 @@ func RenvoInitializeObjectCache(targetName string) {
 	}
 }
 
+func RenvoTargetSupported(targetName string) bool {
+	return renvoParseTargetArg(targetName) != 0
+}
+
+// RenvoTargetBinding returns the descriptor identity used to bind frontend
+// units to a target. Prepared compilers use this to advertise their embedded
+// target to the frontend as well as to the backend dispatcher.
+func RenvoTargetBinding(targetName string) (string, string, int, bool) {
+	target := renvoParseTargetArg(targetName)
+	if target == 0 {
+		return "", "", 0, false
+	}
+	return renvoRTGTargetBinding(target)
+}
+
+// RenvoTargetHasBuildTag reports the source-selection tags exported by a
+// prepared target descriptor.
+func RenvoTargetHasBuildTag(targetName string, tag string) bool {
+	target := renvoParseTargetArg(targetName)
+	return target != 0 && renvoRTGTargetHasBuildTag(target, tag)
+}
+
 func RenvoDefaultArenaSize(targetName string) (int, bool) {
 	target := renvoParseTargetArg(targetName)
 	if target == 0 {
@@ -255,8 +286,16 @@ func RenvoCompileUnitToOutputStripWindowsGUI(unit []byte, targetName string, out
 
 func RenvoCompileUnitToOutputWithOptions(unit []byte, targetName string, outputPath string, options RenvoCompileOptions) bool {
 	target := renvoParseTargetArg(targetName)
-	if target == 0 || !renvoCompileOptionsValid(target, options) ||
-		!renvoUnitBindingMatchesTarget(unit, target) {
+	if target == 0 {
+		renvoPrintErr("renvo: backend rejected unknown target\n")
+		return false
+	}
+	if !renvoCompileOptionsValid(target, options) {
+		renvoPrintErr("renvo: backend rejected compile options\n")
+		return false
+	}
+	if !renvoUnitBindingMatchesTarget(unit, target) {
+		renvoPrintErr("renvo: frontend unit target binding does not match backend\n")
 		return false
 	}
 	context := renvoNewCompileContext(target, options.StripSymbols, options.WindowsGUI, options.EmitImage)
@@ -264,6 +303,7 @@ func RenvoCompileUnitToOutputWithOptions(unit []byte, targetName string, outputP
 	renvoConfigureCompileContext(context, targetName, outputPath, options.ModuleLicense)
 	prog, isUnit, ok := renvoDecodeUnitProgram(unit)
 	if !isUnit || !ok {
+		renvoPrintErr("renvo: backend could not decode frontend unit\n")
 		return false
 	}
 	prog.c = *context
@@ -452,7 +492,7 @@ func renvoCompileParsedProgramArena(prog *renvoProgram, target int, arenaSize in
 }
 
 func renvoCompileProgramWithMetaScratch(prog *renvoProgram, meta *renvoMeta, target int) renvoCompileResult {
-	if renvoPreparedBackend != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
+	if renvoPreparedBackendActive != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
 		return renvoTryCompileScalarProgramRTG(prog, meta)
 	}
 	if target == renvoTargetLinux386 || target == renvoTargetWindows386 {
@@ -471,7 +511,7 @@ func renvoCompileProgramWithMetaScratch(prog *renvoProgram, meta *renvoMeta, tar
 }
 
 func renvoCompileProgramWithMeta(prog *renvoProgram, meta *renvoMeta, target int) renvoCompileResult {
-	if renvoPreparedBackend != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
+	if renvoPreparedBackendActive != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
 		return renvoTryCompileScalarProgramRTG(prog, meta)
 	}
 	if target == renvoTargetLinuxKernelAmd64 {
