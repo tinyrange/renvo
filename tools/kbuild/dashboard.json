@@ -30,9 +30,9 @@
         "renvo_object_bytes": 1552,
         "renvo_text_bytes": 556,
         "renvo_relocations": 0,
-        "fixed_point_compiler_bytes": 2149881,
-        "fixed_point_cpu_ms": 412.244,
-        "fixed_point_peak_rss_kib": 27472
+        "fixed_point_compiler_bytes": 2149928,
+        "fixed_point_cpu_ms": 417.477,
+        "fixed_point_peak_rss_kib": 27308
       }
     ],
     "preprocessor": {
