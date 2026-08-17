@@ -151,6 +151,11 @@ func navigationResolve(graph load.Graph, program Program, pkgIndex int, fileInde
 	if target, ok := navigationTypeRefs(info.CoreTypeRefs, fileIndex, token); ok {
 		return target, true
 	}
+	// Member resolution uses the parsed function and declaration surfaces, so it
+	// remains available even when checking stopped before retaining CoreBodies.
+	if target, ok := navigationMemberAt(graph, program, pkgIndex, fileIndex, token); ok {
+		return target, true
+	}
 	for i := 0; i < len(info.CoreBodies); i++ {
 		body := info.CoreBodies[i]
 		if body.File != fileIndex {
@@ -160,9 +165,6 @@ func navigationResolve(graph load.Graph, program Program, pkgIndex int, fileInde
 			return target, true
 		}
 		if target, ok := navigationTypeRefs(body.CoreTypeRefs, fileIndex, token); ok {
-			return target, true
-		}
-		if target, ok := navigationMemberAt(graph, program, pkgIndex, fileIndex, token); ok {
 			return target, true
 		}
 		if body.Func < 0 || body.Func >= len(graph.Packages[pkgIndex].Files[fileIndex].File.Funcs) {
