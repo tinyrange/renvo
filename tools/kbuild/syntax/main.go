@@ -37,6 +37,8 @@ func main() {
 	compiler := flag.String("compiler", "", "Renvo compiler executable")
 	expected := flag.Int("expected", 0, "required number of target C commands")
 	workers := flag.Int("j", runtime.NumCPU(), "parallel preprocessing and syntax-check workers")
+	objects := flag.Bool("objects", false, "emit an ELF object for every translation unit instead of syntax-checking it")
+	keepGoing := flag.Bool("keep-going", false, "continue after failures to enumerate the complete blocker set")
 	flag.Parse()
 	if *kernel == "" || *compiler == "" || *workers < 1 || flag.NArg() != 0 {
 		flag.Usage()
@@ -88,7 +90,7 @@ func main() {
 	var group sync.WaitGroup
 	for worker := 0; worker < *workers; worker++ {
 		group.Add(1)
-		go syntaxWorker(ctx, &group, worker, *kernel, compilerPath, workspace, jobQueue, results)
+		go syntaxWorker(ctx, &group, worker, *kernel, compilerPath, workspace, *objects, jobQueue, results)
 	}
 	go func() {
 		defer close(jobQueue)
@@ -105,11 +107,19 @@ func main() {
 		close(results)
 	}()
 	checked := 0
+	failureCount := 0
 	var failed syntaxResult
 	for result := range results {
-		if result.err != nil && failed.err == nil {
-			failed = result
-			cancel()
+		if result.err != nil {
+			failureCount++
+			if failed.err == nil {
+				failed = result
+			}
+			if *keepGoing {
+				fmt.Printf("failure=%d source=%s phase=%s error=%v\n%s", failureCount, result.job.source, result.phase, result.err, result.output)
+			} else if failureCount == 1 {
+				cancel()
+			}
 			continue
 		}
 		if result.err == nil {
@@ -121,15 +131,30 @@ func main() {
 	}
 	cancel()
 	if failed.err != nil {
+		if *keepGoing {
+			_ = os.RemoveAll(workspace)
+			fatalf("gate=FAIL\nchecked=%d/%d\nfailures=%d\nfirst=%s: %v", checked, len(commands), failureCount, failed.job.source, failed.err)
+		}
 		fatalf("%s failed %d/%d %s: %v\n%s", failed.phase, failed.job.index+1, len(commands), failed.job.source, failed.err, failed.output)
 	}
-	fmt.Printf("gate=PASS\nelapsed=%s\n", time.Since(started).Round(time.Millisecond))
+	mode := "syntax"
+	if *objects {
+		mode = "objects"
+	}
+	fmt.Printf("gate=PASS\nmode=%s\nelapsed=%s\n", mode, time.Since(started).Round(time.Millisecond))
 }
 
-func syntaxWorker(ctx context.Context, group *sync.WaitGroup, worker int, kernel string, compiler string, workspace string, jobs <-chan syntaxJob, results chan<- syntaxResult) {
+func syntaxWorker(ctx context.Context, group *sync.WaitGroup, worker int, kernel string, compiler string, workspace string, objects bool, jobs <-chan syntaxJob, results chan<- syntaxResult) {
 	defer group.Done()
 	unit := filepath.Join(workspace, fmt.Sprintf("unit-%d.i", worker))
 	for job := range jobs {
+		if objects {
+			// The stream is already preprocessed, but object-mode source loading
+			// deliberately admits only ordinary C filenames. Giving the saved
+			// stream a .c suffix exercises the exact production object path; with
+			// no directives left, Renvo's preprocessing pass is an identity.
+			unit = filepath.Join(workspace, fmt.Sprintf("unit-%03d.c", job.index))
+		}
 		_, preprocess, _ := preprocessingCommand(job.command, unit)
 		cmd := exec.CommandContext(ctx, "sh", "-c", preprocess)
 		cmd.Dir = kernel
@@ -137,11 +162,32 @@ func syntaxWorker(ctx context.Context, group *sync.WaitGroup, worker int, kernel
 			results <- syntaxResult{job: job, phase: "system preprocessing", err: err, output: output}
 			continue
 		}
-		cmd = exec.CommandContext(ctx, compiler, "cc", "-fsyntax-only", "-x", "c", unit)
+		arguments := []string{"cc", "-fsyntax-only", "-x", "c", unit}
+		phase := "Renvo syntax check"
+		object := ""
+		if objects {
+			object = filepath.Join(workspace, fmt.Sprintf("object-%03d.o", job.index))
+			arguments = []string{"cc", "-c", "-x", "c", "-o", object, unit}
+			phase = "Renvo object emission"
+			if strings.Contains(job.command, " -fshort-wchar ") {
+				arguments = append(arguments, "-fshort-wchar")
+			}
+		}
+		cmd = exec.CommandContext(ctx, compiler, arguments...)
 		cmd.Dir = kernel
 		if output, err := cmd.CombinedOutput(); err != nil {
-			results <- syntaxResult{job: job, phase: "Renvo syntax check", err: err, output: output}
+			results <- syntaxResult{job: job, phase: phase, err: err, output: output}
 			continue
+		}
+		if objects {
+			data, err := os.ReadFile(object)
+			if err != nil || len(data) < 4 || string(data[:4]) != "\x7fELF" {
+				if err == nil {
+					err = fmt.Errorf("output is not ELF")
+				}
+				results <- syntaxResult{job: job, phase: phase, err: err}
+				continue
+			}
 		}
 		results <- syntaxResult{job: job}
 	}
@@ -189,7 +235,20 @@ func preprocessingCommand(command, output string) (string, string, bool) {
 	if compileAt < 0 {
 		return source, "", false
 	}
-	return source, command[:compileAt] + " -E -P " + source + " -o " + shellQuote(output), true
+	prefix := strings.Fields(command[:compileAt])
+	filtered := prefix[:0]
+	for i := 0; i < len(prefix); i++ {
+		field := prefix[i]
+		if strings.HasPrefix(field, "-Wp,-MMD,") || strings.HasPrefix(field, "-Wp,-MD,") || field == "-MMD" || field == "-MD" {
+			continue
+		}
+		if field == "-MF" {
+			i++
+			continue
+		}
+		filtered = append(filtered, field)
+	}
+	return source, strings.Join(filtered, " ") + " -E -P " + source + " -o " + shellQuote(output), true
 }
 
 func shellQuote(value string) string {

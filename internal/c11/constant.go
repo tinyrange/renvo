@@ -182,9 +182,23 @@ func (p *constantParser) unary() (int, bool) {
 			if align {
 				return 0, false
 			}
-			typeID = p.t.expressionType(operand)
+			// sizeof observes the operand's type before array-to-pointer
+			// conversion, just like typeof.  This is especially visible for
+			// string literals: sizeof("") is one, not the pointer width.
+			typeID = p.t.typeofExpressionType(operand)
 			if typeID == cTypeVoidID {
-				return 0, false
+				trimmed := p.t.trimExpressionParens(operand)
+				if len(trimmed) < 2 || !tokenIs(p.t.src, trimmed[0], "*") {
+					return 0, false
+				}
+				pointer := p.t.typeInfo(p.t.expressionType(trimmed[1:]))
+				if pointer.kind != cTypePointer || pointer.base != cTypeVoidID {
+					return 0, false
+				}
+				p.pos = end + 1
+				// GNU C defines sizeof(void) and sizeof(function) as one. The
+				// kernel uses the dereferenced-void-pointer form for type choice.
+				return 1, true
 			}
 		}
 		p.pos = end + 1

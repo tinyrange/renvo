@@ -37,7 +37,7 @@ func runRenvoScript(args []string, env []string) (int, string) {
 		return finishRenvoCommandFailure(renvoCommandDiagnosticBuffer[:], built.Diagnostic, resetArena, mark)
 	}
 	unit := built.Unit
-	arenaSize := backendArenaSize(target, built.Options.Tags, built.Options.ArenaSize)
+	arenaSize := backendArenaSize(target, built.Options.Tags, built.Options.ArenaSize, ModeExecutable)
 	moduleLicense := built.Options.ModuleLicense
 	persistMark := 0
 	if resetArena {

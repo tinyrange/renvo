@@ -28,54 +28,86 @@ type renvoObjectCodeRange struct {
 	start, end, section, local int
 	name                       string
 	alignment                  int
+	priority                   int
 }
 
 type renvoObjectDataRange struct {
 	start, end, section, local int
 }
 
+func renvoObjectImageFail(reason string) []byte {
+	renvoPrintErr("renvo: object image failed: ")
+	renvoPrintErr(reason)
+	renvoPrintErr("\n")
+	return nil
+}
+
 func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
 	renvoNonNil(a)
 	sections := []renvoObjectELFSection{{}}
 	ranges := renvoObjectCodeRanges(a)
-	codeMap := make([]renvoObjectCodeRange, 0, len(ranges)*2+1)
-	position := 0
+	boundaries := make([]int, 0, len(ranges)*2+2)
+	boundaries = append(boundaries, 0, len(a.code))
 	for i := 0; i < len(ranges); i++ {
-		r := ranges[i]
-		if r.start < position || r.start < 0 || r.end > len(a.code) || r.end <= r.start {
-			return nil
+		r := &ranges[i]
+		if r.start < 0 || r.end > len(a.code) || r.end <= r.start {
+			return renvoObjectImageFail("invalid code range")
 		}
-		if position < r.start {
-			section := renvoObjectELFSectionIndex(&sections, ".text", 1, 6, 16)
-			local := len(sections[section].data)
-			sections[section].data = append(sections[section].data, a.code[position:r.start]...)
-			sections[section].size = len(sections[section].data)
-			codeMap = append(codeMap, renvoObjectCodeRange{start: position, end: r.start, section: section, local: local})
+		boundaries = append(boundaries, r.start, r.end)
+	}
+	for i := 1; i < len(boundaries); i++ {
+		value := boundaries[i]
+		j := i
+		for j > 0 && boundaries[j-1] > value {
+			boundaries[j] = boundaries[j-1]
+			j--
 		}
-		name := r.name
+		boundaries[j] = value
+	}
+	unique := boundaries[:0]
+	for i := 0; i < len(boundaries); i++ {
+		if len(unique) == 0 || unique[len(unique)-1] != boundaries[i] {
+			unique = append(unique, boundaries[i])
+		}
+	}
+	codeMap := make([]renvoObjectCodeRange, 0, len(unique))
+	for i := 0; i+1 < len(unique); i++ {
+		start, end := unique[i], unique[i+1]
+		if end <= start {
+			continue
+		}
+		chosen := -1
+		for j := 0; j < len(ranges); j++ {
+			r := &ranges[j]
+			if r.start <= start && r.end >= end &&
+				(chosen < 0 || r.priority > ranges[chosen].priority ||
+					r.priority == ranges[chosen].priority && r.end-r.start < ranges[chosen].end-ranges[chosen].start) {
+				chosen = j
+			}
+		}
+		name := ".text"
+		alignment := 1
+		priority := 0
+		if chosen >= 0 {
+			r := &ranges[chosen]
+			name = r.name
+			priority = r.priority
+			if start == r.start {
+				alignment = r.alignment
+				if alignment < 1 {
+					alignment = 16
+				}
+			}
+		}
 		if name == "" {
 			name = ".text"
-		}
-		alignment := r.alignment
-		if alignment < 1 {
-			alignment = 16
 		}
 		section := renvoObjectELFSectionIndex(&sections, name, 1, 6, alignment)
 		local := renvoAlignValue(len(sections[section].data), alignment)
 		sections[section].data = renvoObjectCodeUntil(sections[section].data, local)
-		sections[section].data = append(sections[section].data, a.code[r.start:r.end]...)
+		sections[section].data = append(sections[section].data, a.code[start:end]...)
 		sections[section].size = len(sections[section].data)
-		codeMap = append(codeMap, renvoObjectCodeRange{start: r.start, end: r.end, section: section, local: local})
-		position = r.end
-	}
-	if position < len(a.code) || len(a.code) == 0 {
-		section := renvoObjectELFSectionIndex(&sections, ".text", 1, 6, 16)
-		local := len(sections[section].data)
-		sections[section].data = append(sections[section].data, a.code[position:]...)
-		sections[section].size = len(sections[section].data)
-		if position < len(a.code) {
-			codeMap = append(codeMap, renvoObjectCodeRange{start: position, end: len(a.code), section: section, local: local})
-		}
+		codeMap = append(codeMap, renvoObjectCodeRange{start: start, end: end, section: section, local: local, priority: priority})
 	}
 
 	dataMap := make([]renvoObjectDataRange, 0, len(a.objectData)+1)
@@ -87,7 +119,10 @@ func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
 	for i := 0; i < len(a.objectData); i++ {
 		item := &a.objectData[i]
 		if item.size <= 0 {
-			continue
+			target := renvoObjectStoredText(a, item.targetStart, item.targetEnd)
+			if target != "" && target != "-" {
+				continue
+			}
 		}
 		name := renvoObjectStoredText(a, item.sectionStart, item.sectionEnd)
 		if name == "" {
@@ -105,6 +140,17 @@ func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
 		if renvoObjectStringPrefix(name, ".rodata") {
 			flags = 2
 		}
+		if renvoObjectStringPrefix(name, ".initcall") {
+			// Linux emits initcall entries through file-scope assembly with an
+			// alloc-only ("a") section declaration.
+			flags = 2
+		}
+		if item.kind == renvoObjectDeclStaticCall {
+			flags = 6
+		}
+		if name == "__ex_table" || renvoObjectStringPrefix(name, "runtime_ptr_") || renvoObjectStringPrefix(name, "runtime_shift_") {
+			flags = 2
+		}
 		alignment := item.alignment
 		if alignment < 1 {
 			alignment = renvoObjectNaturalAlignment(item.size)
@@ -118,13 +164,41 @@ func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
 		sections[section].size = local + storageSize
 		if !nobits {
 			sections[section].data = renvoObjectUntil(sections[section].data, local+storageSize)
-			for at := 0; at < item.size; at++ {
-				sections[section].data[local+at] = byte(item.value >> (at * 8))
+			valueSize := item.valueEnd - item.valueStart
+			if valueSize > 0 {
+				if item.valueStart < 0 || item.valueEnd > len(a.objectDataValues) || valueSize > storageSize {
+					return renvoObjectImageFail("invalid data value range")
+				}
+				copy(sections[section].data[local:local+valueSize], a.objectDataValues[item.valueStart:item.valueEnd])
+			} else {
+				for at := 0; at < item.size; at++ {
+					sections[section].data[local+at] = byte(item.value >> (at * 8))
+				}
 			}
 		}
 		dataMap = append(dataMap, renvoObjectDataRange{start: item.offset, end: item.offset + storageSize, section: section, local: local})
 	}
-
+	declaredRanges := len(dataMap)
+	mappedEnd := 0
+	for i := 0; i < declaredRanges; i++ {
+		r := dataMap[i]
+		if r.start < mappedEnd {
+			return renvoObjectImageFail("overlapping or unordered data ranges")
+		}
+		if r.start > mappedEnd {
+			section := renvoObjectELFSectionIndex(&sections, ".bss", 8, 3, 8)
+			local := renvoAlignValue(sections[section].size, 8)
+			sections[section].size = local + r.start - mappedEnd
+			dataMap = append(dataMap, renvoObjectDataRange{start: mappedEnd, end: r.start, section: section, local: local})
+		}
+		mappedEnd = r.end
+	}
+	if a.bssSize > mappedEnd {
+		section := renvoObjectELFSectionIndex(&sections, ".bss", 8, 3, 8)
+		local := renvoAlignValue(sections[section].size, 8)
+		sections[section].size = local + a.bssSize - mappedEnd
+		dataMap = append(dataMap, renvoObjectDataRange{start: mappedEnd, end: a.bssSize, section: section, local: local})
+	}
 	sectionSymbols := make([]int, len(sections))
 	symbols := []renvoObjectELFSymbol{{}}
 	for i := 1; i < len(sections); i++ {
@@ -140,7 +214,7 @@ func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
 		section, value, ok := renvoObjectMapCode(codeMap, renvoAsmLabelPosition(a, f.label))
 		endSection, endValue, endOK := renvoObjectMapCodeEnd(codeMap, f.end)
 		if !ok || !endOK || endSection != section || endValue <= value {
-			return nil
+			return renvoObjectImageFail("invalid object function range")
 		}
 		name := renvoObjectStoredText(a, f.nameStart, f.nameEnd)
 		symbols = append(symbols, renvoObjectELFSymbol{name: name,
@@ -157,7 +231,7 @@ func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
 			position := renvoAsmLabelPosition(a, s.label)
 			section, value, ok := renvoObjectMapCode(codeMap, position)
 			if !ok {
-				return nil
+				return renvoObjectImageFail("invalid code symbol range")
 			}
 			size := 0
 			if s.endLabel > 0 {
@@ -171,15 +245,25 @@ func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
 		}
 		for i := 0; i < len(a.objectData); i++ {
 			d := &a.objectData[i]
-			if d.size <= 0 || d.binding == 0 && bindingPass != 0 || d.binding != 0 && bindingPass == 0 {
+			target := renvoObjectStoredText(a, d.targetStart, d.targetEnd)
+			alias := d.size <= 0 && target != "" && target != "-"
+			if alias || d.binding == 0 && bindingPass != 0 || d.binding != 0 && bindingPass == 0 {
+				continue
+			}
+			name := renvoObjectStoredText(a, d.nameStart, d.nameEnd)
+			if name == "" {
 				continue
 			}
 			section, value, ok := renvoObjectMapData(dataMap, d.offset)
 			if !ok {
-				return nil
+				return renvoObjectImageFail("invalid data symbol range")
 			}
-			symbols = append(symbols, renvoObjectELFSymbol{name: renvoObjectStoredText(a, d.nameStart, d.nameEnd),
-				info: d.binding<<4 | 1, visibility: d.visibility, section: section, value: value, size: d.size})
+			symbolType := 1
+			if d.kind == renvoObjectDeclStaticCall {
+				symbolType = 2
+			}
+			symbols = append(symbols, renvoObjectELFSymbol{name: name,
+				info: d.binding<<4 | symbolType, visibility: d.visibility, section: section, value: value, size: d.size})
 		}
 	}
 	firstGlobal := len(symbols)
@@ -188,11 +272,6 @@ func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
 			firstGlobal = i
 			break
 		}
-	}
-	importSymbols := make([]int, renvoKernelAmd64ExternalImportCount(a))
-	for i := 0; i < len(importSymbols); i++ {
-		importSymbols[i] = len(symbols)
-		symbols = append(symbols, renvoObjectELFSymbol{name: renvoKernelAmd64ExternalImportName(a, i), info: 16})
 	}
 	for i := 0; i < len(a.objectData); i++ {
 		d := &a.objectData[i]
@@ -205,7 +284,7 @@ func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
 		}
 		targetIndex := renvoObjectFindSymbol(symbols, target)
 		if targetIndex < 0 {
-			return nil
+			return renvoObjectImageFail("alias target missing")
 		}
 		base := symbols[targetIndex]
 		base.name = renvoObjectStoredText(a, d.nameStart, d.nameEnd)
@@ -213,7 +292,19 @@ func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
 		base.visibility = d.visibility
 		symbols = append(symbols, base)
 	}
-
+	importSymbols := make([]int, renvoKernelAmd64ExternalImportCount(a))
+	for i := 0; i < len(importSymbols); i++ {
+		name := renvoKernelAmd64ExternalImportName(a, i)
+		// A C forward reference can first enter the backend as an import and
+		// later acquire a definition through an alias attribute. Reuse that
+		// defined symbol instead of emitting a second SHN_UNDEF entry.
+		importSymbols[i] = renvoObjectFindSymbol(symbols, name)
+		if importSymbols[i] >= 0 {
+			continue
+		}
+		importSymbols[i] = len(symbols)
+		symbols = append(symbols, renvoObjectELFSymbol{name: name, info: 16})
+	}
 	// Convert all label references into either same-section displacements or
 	// section-symbol relocations. This is what makes function sections truthful:
 	// moving a wrapper or implementation never leaves a prepatched PC behind.
@@ -224,7 +315,7 @@ func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
 		sourceSection, sourceOffset, sourceOK := renvoObjectMapCode(codeMap, at)
 		targetSection, targetOffset, targetOK := renvoObjectMapCode(codeMap, targetPosition)
 		if !sourceOK || !targetOK || sourceOffset+4 > len(sections[sourceSection].data) {
-			return nil
+			return renvoObjectImageFail("label relocation range missing")
 		}
 		addend := renvoGet32At(sections[sourceSection].data, sourceOffset)
 		if sourceSection == targetSection {
@@ -241,35 +332,48 @@ func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
 		kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2)) & 2147483647
 		sourceSection, sourceOffset, ok := renvoObjectMapCode(codeMap, at)
 		if !ok || sourceOffset+4 > len(sections[sourceSection].data) {
-			return nil
+			return renvoObjectImageFail("absolute relocation source missing")
 		}
 		targetSymbol, targetOffset, relocationType := 0, 0, 2
 		if kind == renvoKernelAmd64RelocationImport {
 			if addend < 0 || addend >= len(importSymbols) {
-				return nil
+				return renvoObjectImageFail("absolute import index invalid")
 			}
 			targetSymbol = importSymbols[addend]
 			relocationType = 4
 		} else if kind == renvoKernelAmd64RelocationAbsoluteData {
 			section := renvoObjectFindSection(sections, ".rodata")
 			if section < 0 {
-				return nil
+				return renvoObjectImageFail("absolute rodata section missing")
 			}
 			targetSymbol, targetOffset = sectionSymbols[section], addend
 		} else if kind == renvoKernelAmd64RelocationAbsoluteBSS {
-			section, value, found := renvoObjectMapData(dataMap, addend)
-			if !found {
-				return nil
+			externalID, externalAddend := renvoObjectMapExternal(a, addend)
+			if externalID >= 0 {
+				if externalID >= len(importSymbols) {
+					return renvoObjectImageFail("absolute external index invalid")
+				}
+				targetSymbol, targetOffset = importSymbols[externalID], externalAddend
+			} else {
+				section, value, found := renvoObjectMapData(dataMap, addend)
+				if !found {
+					renvoPrintErr("renvo: absolute data target offset ")
+					renvoPrintIntErr(addend)
+					renvoPrintErr(" bss size ")
+					renvoPrintIntErr(a.bssSize)
+					renvoPrintErr("\n")
+					return renvoObjectImageFail("absolute data target missing")
+				}
+				targetSymbol, targetOffset = sectionSymbols[section], value
 			}
-			targetSymbol, targetOffset = sectionSymbols[section], value
 		} else if kind == renvoKernelAmd64RelocationAbsoluteBSSEnd {
 			section := renvoObjectFindSection(sections, ".bss")
 			if section < 0 {
-				return nil
+				return renvoObjectImageFail("absolute bss-end section missing")
 			}
 			targetSymbol, targetOffset = sectionSymbols[section], sections[section].size
 		} else {
-			return nil
+			return renvoObjectImageFail("unknown absolute relocation kind")
 		}
 		renvoPut32At(sections[sourceSection].data, sourceOffset, 0)
 		sections[sourceSection].relocations = append(sections[sourceSection].relocations,
@@ -279,15 +383,43 @@ func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
 		r := &a.objectDataRelocs[i]
 		sourceSection, sourceOffset, found := renvoObjectMapData(dataMap, r.offset)
 		if !found {
-			return nil
+			renvoPrintErr("renvo: object data relocation source missing ")
+			renvoPrintIntErr(i)
+			renvoPrintErr("\n")
+			return renvoObjectImageFail("data relocation source missing")
 		}
-		target := renvoObjectStoredText(a, r.targetStart, r.targetEnd)
-		targetSymbol := renvoObjectFindSymbol(symbols, target)
-		if targetSymbol < 0 {
-			return nil
+		targetSymbol := -1
+		addend := r.addend
+		if r.codeTarget > 0 || r.codeLabel > 0 {
+			targetPosition := r.codeTarget - 1
+			if r.codeLabel > 0 {
+				targetPosition = renvoAsmLabelPosition(a, r.codeLabel-1)
+			}
+			targetSection, targetOffset, ok := renvoObjectMapCode(codeMap, targetPosition)
+			if !ok {
+				renvoPrintErr("renvo: object data relocation code target missing\n")
+				return renvoObjectImageFail("data relocation code target missing")
+			}
+			targetSymbol = sectionSymbols[targetSection]
+			addend += targetOffset
+		} else if target := renvoObjectStoredText(a, r.targetStart, r.targetEnd); target == "" {
+			section := renvoObjectFindSection(sections, ".rodata")
+			if section < 0 {
+				renvoPrintErr("renvo: object data relocation rodata missing\n")
+				return renvoObjectImageFail("data relocation rodata missing")
+			}
+			targetSymbol = sectionSymbols[section]
+		} else {
+			targetSymbol = renvoObjectFindSymbol(symbols, target)
+			if targetSymbol < 0 {
+				renvoPrintErr("renvo: object data relocation symbol missing: ")
+				renvoPrintErr(target)
+				renvoPrintErr("\n")
+				return renvoObjectImageFail("data relocation symbol missing")
+			}
 		}
 		sections[sourceSection].relocations = append(sections[sourceSection].relocations,
-			renvoObjectELFRelocation{offset: sourceOffset, symbol: targetSymbol, typ: r.typ, addend: r.addend})
+			renvoObjectELFRelocation{offset: sourceOffset, symbol: targetSymbol, typ: r.typ, addend: addend})
 	}
 	for i := 1; i < len(sections); i++ {
 		if !renvoObjectStringPrefix(sections[i].name, ".gnu.linkonce.") {
@@ -301,7 +433,7 @@ func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
 			}
 		}
 		if signature < 0 {
-			return nil
+			return renvoObjectImageFail("linkonce signature missing")
 		}
 		sections[i].flags |= 512
 		groupData := renvoElfAmd64Append32(nil, 1)
@@ -386,20 +518,30 @@ func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
 	return image
 }
 
+func renvoObjectMapExternal(a *renvoAsm, offset int) (int, int) {
+	for i := 0; i < len(a.objectExternals); i++ {
+		external := &a.objectExternals[i]
+		if offset >= external.offset && offset < external.offset+renvoObjectExternalStride {
+			return external.importID, offset - external.offset
+		}
+	}
+	return -1, 0
+}
+
 func renvoObjectCodeRanges(a *renvoAsm) []renvoObjectCodeRange {
 	var ranges []renvoObjectCodeRange
 	for i := 0; i < len(a.symbols); i++ {
 		s := &a.symbols[i]
-		if s.endLabel <= 0 || s.sectionEnd <= s.sectionStart && s.alignment <= 0 {
+		if s.endLabel <= 0 {
 			continue
 		}
 		ranges = append(ranges, renvoObjectCodeRange{start: renvoAsmLabelPosition(a, s.label),
-			end: renvoAsmLabelPosition(a, s.endLabel), name: renvoObjectStoredText(a, s.sectionStart, s.sectionEnd), alignment: s.alignment})
+			end: renvoAsmLabelPosition(a, s.endLabel), name: renvoObjectStoredText(a, s.sectionStart, s.sectionEnd), alignment: s.alignment, priority: 2})
 	}
 	for i := 0; i < len(a.objectFunctions); i++ {
 		f := &a.objectFunctions[i]
 		ranges = append(ranges, renvoObjectCodeRange{start: renvoAsmLabelPosition(a, f.label), end: f.end,
-			name: renvoObjectStoredText(a, f.sectionStart, f.sectionEnd), alignment: f.alignment})
+			name: renvoObjectStoredText(a, f.sectionStart, f.sectionEnd), alignment: f.alignment, priority: 1})
 	}
 	for i := 1; i < len(ranges); i++ {
 		value := ranges[i]

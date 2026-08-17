@@ -87,7 +87,7 @@ func TestCompileCObjectPassesStructuredBackendOptions(t *testing.T) {
 	if !result.Ok || !bytes.Equal(result.Binary, backend.binary) {
 		t.Fatalf("object compile = %#v", result)
 	}
-	if backend.options.Target != "linux/amd64" || backend.options.Mode != ModeObject || backend.options.Output != "hello.o" || !backend.options.ObjectFile {
+	if backend.options.Target != "linux/amd64" || backend.options.Mode != ModeObject || backend.options.Output != "hello.o" || !backend.options.ObjectFile || backend.options.ArenaSize != objectDefaultArenaSize {
 		t.Fatalf("backend options = %#v", backend.options)
 	}
 }

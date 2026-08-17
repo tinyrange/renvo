@@ -134,7 +134,7 @@ func (s *RenvoCommandSession) Step() bool {
 		output := s.built.Options.Output
 		systemName := s.built.Options.SystemName
 		moduleLicense := s.built.Options.ModuleLicense
-		arenaSize := backendArenaSize(target, s.built.Options.Tags, s.built.Options.ArenaSize)
+		arenaSize := backendArenaSize(target, s.built.Options.Tags, s.built.Options.ArenaSize, s.built.Options.Mode)
 		if s.resetArena {
 			s.persistMark = arena.PersistMark()
 			unit = arena.PersistBytes(unit)

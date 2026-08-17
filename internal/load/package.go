@@ -31,6 +31,7 @@ type SourceFile struct {
 	CDataModel        int
 	CFunctionSections bool
 	CDataSections     bool
+	CShortWChar       bool
 	ArenaStart        int
 	ArenaEnd          int
 }
@@ -163,6 +164,7 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 				translated = c11.TranslateObjectWithConfig(pkg.Name, source.Src, source.CPrelude, c11.ObjectConfig{
 					DataModel: source.CDataModel, FunctionSections: source.CFunctionSections,
 					DataSections: source.CDataSections,
+					ShortWChar:   source.CShortWChar,
 				})
 			}
 			if !translated.Ok {
@@ -316,7 +318,7 @@ func selectPackageFiles(dir string, files []SourceFile) []SourceFile {
 		}
 		selected = append(selected, SourceFile{Path: path, Src: files[i].Src, CPrelude: files[i].CPrelude,
 			CObject: files[i].CObject, CDataModel: files[i].CDataModel, CFunctionSections: files[i].CFunctionSections,
-			CDataSections: files[i].CDataSections, ArenaStart: files[i].ArenaStart, ArenaEnd: files[i].ArenaEnd})
+			CDataSections: files[i].CDataSections, CShortWChar: files[i].CShortWChar, ArenaStart: files[i].ArenaStart, ArenaEnd: files[i].ArenaEnd})
 	}
 	sortSourceFiles(selected)
 	return selected

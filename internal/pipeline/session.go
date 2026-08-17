@@ -95,7 +95,11 @@ func (s *Session) Step() bool {
 		}
 		if !s.cached {
 			var linked link.Result
-			if s.transient {
+			if s.object && s.transient {
+				linked = link.LinkBuildObjectCoreTransient(built)
+			} else if s.object {
+				linked = link.LinkBuildObjectCore(built)
+			} else if s.transient {
 				linked = link.LinkBuildCoreTransient(built)
 			} else {
 				linked = link.LinkBuildCore(built)
@@ -109,7 +113,11 @@ func (s *Session) Step() bool {
 			s.stage = 3
 			return false
 		}
-		s.linker = link.BeginPackageSession(built, s.transient)
+		if s.object {
+			s.linker = link.BeginObjectPackageSession(built, s.transient)
+		} else {
+			s.linker = link.BeginPackageSession(built, s.transient)
+		}
 		s.stage = 2
 		return false
 	}

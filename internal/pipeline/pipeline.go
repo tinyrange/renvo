@@ -85,6 +85,9 @@ func buildUnitTransientDirect(workDir string, stdRoot string, arg string, files 
 		return pipelineFail(result, PipelineErrBuild, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
 	linked := link.LinkBuildCoreTransient(built)
+	if object {
+		linked = link.LinkBuildObjectCoreTransient(built)
+	}
 	result.Link = linked
 	if !linked.Ok {
 		return pipelineFail(result, PipelineErrLink, linked.ErrorPackage, -1, -1)
@@ -126,7 +129,11 @@ func buildUnitDirect(workDir string, stdRoot string, arg string, files []load.So
 		return pipelineFail(result, PipelineErrBuild, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
 	var linked link.Result
-	if transient {
+	if object && transient {
+		linked = link.LinkBuildObjectCoreTransient(built)
+	} else if object {
+		linked = link.LinkBuildObjectCore(built)
+	} else if transient {
 		linked = link.LinkBuildCoreTransient(built)
 	} else {
 		linked = link.LinkBuildCore(built)

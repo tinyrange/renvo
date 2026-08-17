@@ -67,6 +67,15 @@ func TestCompileUsesBrowserDefaultArenaPolicy(t *testing.T) {
 	}
 }
 
+func TestCompileObjectUsesCompactDefaultArenaPolicy(t *testing.T) {
+	if got := backendArenaSize("linux/amd64", nil, 0, ModeObject); got != objectDefaultArenaSize {
+		t.Fatalf("object arena = %d, want %d", got, objectDefaultArenaSize)
+	}
+	if got := backendArenaSize("linux/amd64", nil, 262144, ModeObject); got != 262144 {
+		t.Fatalf("explicit object arena = %d, want 262144", got)
+	}
+}
+
 func TestCompileUsesBundledCompilerDefaultArenaPolicy(t *testing.T) {
 	const want = 256 * 1024 * 1024
 	if bundledCompilerDefaultArenaSize != want {

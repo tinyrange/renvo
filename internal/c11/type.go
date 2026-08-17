@@ -79,14 +79,18 @@ type cTypeInfo struct {
 	paramStart       int
 	paramCount       int
 	variadic         bool
+	incomplete       bool
+	complete         bool
 	indirect         bool
 	transparentUnion bool
+	msABI            bool
 	qualifiers       int
 	goName           string
 }
 
 type cField struct {
 	name      string
+	goName    string
 	typeID    int
 	offset    int
 	align     int
@@ -95,6 +99,7 @@ type cField struct {
 	carrier   string
 	emit      bool
 	synthetic bool
+	promoted  bool
 }
 
 type cTypeName struct {
@@ -122,23 +127,26 @@ type cScopeMark struct {
 }
 
 type cObjectName struct {
-	name       string
-	goName     string
-	typeID     int
-	auto       bool
-	attributes cAttributes
-	storage    int
+	name              string
+	goName            string
+	typeID            int
+	transparentTypeID int
+	auto              bool
+	attributes        cAttributes
+	storage           int
 }
 
 type cFunctionName struct {
-	name       string
-	typeID     int
-	resultType int
-	paramStart int
-	paramCount int
-	variadic   bool
-	defined    bool
-	attributes cAttributes
+	name             string
+	typeID           int
+	resultType       int
+	paramStart       int
+	paramCount       int
+	constantReturn   int
+	variadic         bool
+	defined          bool
+	constantReturnOK bool
+	attributes       cAttributes
 }
 
 type cTypeCacheChange struct {
@@ -278,6 +286,28 @@ func (t *translator) functionType(result int, params []parameter, variadic bool)
 		variadic:   variadic,
 	})
 	return len(t.types) - 1
+}
+
+func (t *translator) msABIType(typeID int) (int, bool) {
+	info := t.typeInfo(typeID)
+	pointer := info.kind == cTypePointer
+	if pointer {
+		typeID = info.base
+		info = t.typeInfo(typeID)
+	}
+	if info.kind != cTypeFunction || info.variadic {
+		return typeID, false
+	}
+	if !info.msABI {
+		info.msABI = true
+		info.canonical = 0
+		t.types = append(t.types, info)
+		typeID = len(t.types) - 1
+	}
+	if pointer {
+		typeID = t.pointerType(typeID)
+	}
+	return typeID, true
 }
 
 func (t *translator) opaqueType(name string) int {

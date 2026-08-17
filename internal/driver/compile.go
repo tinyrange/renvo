@@ -100,7 +100,7 @@ func compileBuiltUnit(result CompileResult, built BuildResult, backend Backend) 
 	var backendResult BackendResult
 	optionsBackend, acceptsOptions := backend.(OptionsBackend)
 	arenaBackend, acceptsArena := backend.(ArenaBackend)
-	arenaSize := backendArenaSize(built.Options.Target, built.Options.Tags, built.Options.ArenaSize)
+	arenaSize := backendArenaSize(built.Options.Target, built.Options.Tags, built.Options.ArenaSize, built.Options.Mode)
 	if acceptsOptions && (built.Options.Mode != ModeExecutable || built.Options.EmitImage) {
 		backendResult = optionsBackend.CompileUnitWithOptions(built.Unit, BackendCompileOptions{Target: built.Options.Target, Mode: built.Options.Mode, Output: built.Options.Output, Strip: built.Options.Strip, WindowsGUI: built.Options.WindowsGUI, EmitImage: built.Options.EmitImage, ArenaSize: arenaSize, ModuleLicense: built.Options.ModuleLicense, ObjectFile: built.Options.Mode == ModeObject})
 	} else if built.Options.Mode != ModeExecutable {

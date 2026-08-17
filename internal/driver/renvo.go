@@ -107,7 +107,7 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 	moduleLicense := built.Options.ModuleLicense
 	dependencyFile := built.Options.DependencyFile
 	dependencyOutput := CDependencyOutput(built.Options)
-	arenaSize := backendArenaSize(target, built.Options.Tags, built.Options.ArenaSize)
+	arenaSize := backendArenaSize(target, built.Options.Tags, built.Options.ArenaSize, built.Options.Mode)
 	if built.Options.EmitUnit {
 		if output == "-" {
 			print(string(unit))

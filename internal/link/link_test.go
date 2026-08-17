@@ -502,11 +502,11 @@ func appMain() int {
 	if !ok {
 		t.Fatal("LinkUnits failed")
 	}
-	if bytes.Contains(program.Text, []byte("Pointer(&v)")) || bytes.Contains(program.Text, []byte("(*pair)(p)")) {
-		t.Fatalf("linked text still contains unsafe pointer conversions:\n%s", string(program.Text))
+	if bytes.Contains(program.Text, []byte("Pointer(&v)")) {
+		t.Fatalf("linked text still contains the erased unsafe.Pointer conversion:\n%s", string(program.Text))
 	}
-	if !bytes.Contains(program.Text, []byte("p := &v")) || !bytes.Contains(program.Text, []byte("q :=p")) {
-		t.Fatalf("linked text missing erased unsafe pointer values:\n%s", string(program.Text))
+	if !bytes.Contains(program.Text, []byte("p := &v")) || !bytes.Contains(program.Text, []byte("q := (*pair)(p)")) {
+		t.Fatalf("linked text lost the typed unsafe pointer round trip:\n%s", string(program.Text))
 	}
 	linked := LinkBuildCore(result)
 	if !linked.Ok {
@@ -538,6 +538,31 @@ func main() {}
 	}
 	if bytes.Contains(program.Text, []byte("unsafe.Pointer")) || !bytes.Contains(program.Text, []byte("(*[16]uint32)(address)[index] = value")) {
 		t.Fatalf("linked source lost pointer-to-array semantics:\n%s", string(program.Text))
+	}
+}
+
+func TestLinkUnitsPreservesUnsafePointerAddressReinterpretation(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/std/unsafe/unsafe.go", Src: []byte("package unsafe\n\ntype Pointer *byte\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import u "unsafe"
+
+type holder struct { words [24]uint32 }
+var storage holder
+
+func load(address *uint64) uint64 { return *address }
+func main() { _ = load((*uint64)(u.Pointer(&storage.words))) }
+`)},
+	})
+	program, ok := LinkUnitsCore(result.Units, result.Root)
+	if !ok {
+		t.Fatal("LinkUnits failed")
+	}
+	if bytes.Contains(program.Text, []byte("unsafe.Pointer")) ||
+		!bytes.Contains(program.Text, []byte("(*uint64)(&storage.words)")) {
+		t.Fatalf("linked source lost pointer reinterpretation type:\n%s", string(program.Text))
 	}
 }
 

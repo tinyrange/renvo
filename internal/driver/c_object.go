@@ -96,6 +96,7 @@ func prepareCObjectSources(result SourceResult, options *Options, workDir string
 		result.Files[i].CDataModel = dataModel
 		result.Files[i].CFunctionSections = options.CFunctionSections
 		result.Files[i].CDataSections = options.CDataSections
+		result.Files[i].CShortWChar = options.CShortWChar
 		result.Files[i].CPrelude = header.Prelude
 		result.Files[i].Src = processed.Source
 		for j := 0; j < len(header.Dependencies); j++ {

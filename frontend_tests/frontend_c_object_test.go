@@ -686,14 +686,26 @@ func runCObjectControlFlowSystemLink(t *testing.T, frontend frontendConfig) {
 done:
 	return total;
 }
+int renvo_nested_label(int value) {
+	if (!value) {
+fail:
+		return 7;
+	}
+	if (value == 2) goto fail;
+	return 9;
+}
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(harness, []byte(`extern int renvo_control(int);
+extern int renvo_nested_label(int);
 int main(void) {
 	return renvo_control(0) == 17 &&
 		renvo_control(1) == 16 &&
-		renvo_control(2) == 23 ? 0 : 1;
+		renvo_control(2) == 23 &&
+		renvo_nested_label(0) == 7 &&
+		renvo_nested_label(1) == 9 &&
+		renvo_nested_label(2) == 7 ? 0 : 1;
 }
 `), 0o644); err != nil {
 		t.Fatal(err)

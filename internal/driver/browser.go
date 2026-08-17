@@ -3,6 +3,7 @@ package driver
 import "renvo.dev/internal/targetinfo"
 
 const browserDefaultArenaSize = 134217728
+const objectDefaultArenaSize = 65536
 
 // A bundled frontend can self-host within the checked 128 MiB system profile.
 // Leave another 128 MiB for a long-lived host such as renvoide to retain its UI
@@ -20,9 +21,12 @@ func backendTargetForOptions(target string, mode string) string {
 	return backendTarget(target)
 }
 
-func backendArenaSize(target string, tags []string, requested int) int {
+func backendArenaSize(target string, tags []string, requested int, mode string) int {
 	if requested != 0 {
 		return requested
+	}
+	if mode == ModeObject {
+		return objectDefaultArenaSize
 	}
 	if findString(tags, "renvo_bundle") >= 0 {
 		return bundledCompilerDefaultArenaSize
