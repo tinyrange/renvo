@@ -1,5 +1,6 @@
 import { ESPWebSerial, requestESPPort } from "./esp-webserial.mjs";
 import { preferredESPTransport, requestESPUSBPort, supportsESPWebUSBPlatform } from "./esp-webusb.mjs";
+import { installEditorOpener } from "./editor-navigation.mjs";
 import { cleanLanguagePath, sourceImportPath } from "./language-path.mjs";
 import { SerialPlotter, SerialPlotterView } from "./serial-plotter.mjs";
 
@@ -243,6 +244,12 @@ async function loadMonaco() {
     quickSuggestions: { other: true, comments: false, strings: false },
     suggestOnTriggerCharacters: true, wordBasedSuggestions: "off",
     hover: { enabled: true, delay: 80, sticky: true },
+  });
+  installEditorOpener(monaco, {
+    cleanPath,
+    ensureSourceModel,
+    openFile,
+    get editor() { return editor; },
   });
   editor.onDidChangeCursorPosition(({ position }) => {
     elements.cursorStatus.textContent = `Ln ${position.lineNumber}, Col ${position.column}`;

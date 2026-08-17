@@ -86,6 +86,7 @@ build_custom_backend esp32p4/riscv32 backends/esp32p4.rtg esp32p4-riscv32 go
 go run ./tools/wasm/cmd/browserassets -o "$output"
 cp tools/wasm/browser/index.html tools/wasm/browser/styles.css \
 	tools/wasm/browser/app.mjs tools/wasm/browser/worker.mjs \
+	tools/wasm/browser/editor-navigation.mjs \
 	tools/wasm/browser/language-path.mjs \
 	tools/wasm/browser/serial-plotter.mjs \
 	tools/wasm/browser/esp-webserial.mjs tools/wasm/browser/esp-webusb.mjs "$output/browser/"
@@ -93,6 +94,7 @@ cp tools/wasm/browser/index.html tools/wasm/browser/styles.css \
 if [ "$layout" = pages ]; then
   cp tools/wasm/browser/index.html tools/wasm/browser/styles.css \
     tools/wasm/browser/app.mjs tools/wasm/browser/worker.mjs \
+	tools/wasm/browser/editor-navigation.mjs \
 	tools/wasm/browser/language-path.mjs \
 	tools/wasm/browser/serial-plotter.mjs \
     tools/wasm/browser/esp-webserial.mjs tools/wasm/browser/esp-webusb.mjs "$output/"
