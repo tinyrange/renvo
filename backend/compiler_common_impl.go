@@ -9385,6 +9385,11 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 	}
 	targetResolved := renvoResolveType(meta, targetType)
 	renvoNonNil(targetResolved)
+	trackSliceArena := globalOffset < 0 && fieldStackOffset < 0 && targetResolved.kind == renvoTypeSlice
+	sliceArena := 0
+	if trackSliceArena && renvoReturnedSliceCanReuseDescriptor(g, ep, rootIndex) {
+		sliceArena = 1
+	}
 	trackLocalConst := globalOffset < 0 && fieldStackOffset < 0 && declaresLocal && renvoLocalConstTrackable(g, targetType, nameStart, nameEnd, stmt.endTok)
 	localConst := renvoConstResult{}
 	if trackLocalConst {
@@ -9405,6 +9410,9 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 	if renvoEmitAppendAssignGeneral(g, stmt, ep, assignTok) {
 		if globalOffset < 0 && fieldStackOffset < 0 {
 			renvoClearLocalConstAtOffset(g, offset)
+			if sliceArena != 0 {
+				renvoSetLocalConstAtOffset(g, offset, 0, targetResolved.kind)
+			}
 		}
 		return true
 	}
@@ -9514,6 +9522,9 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 				renvoSetLocalConstAtOffset(g, offset, localConst.value, targetResolved.kind)
 			} else {
 				renvoClearLocalConstAtOffset(g, offset)
+			}
+			if sliceArena != 0 {
+				renvoSetLocalConstAtOffset(g, offset, 0, targetResolved.kind)
 			}
 		}
 		return true
@@ -10872,6 +10883,10 @@ func renvoReturnedSliceCanReuseDescriptor(g *renvoLinearGen, ep *renvoExprParse,
 	e := &ep.exprs[idx]
 	if e.kind == renvoExprCall {
 		callee := renvoExprIdentCode(p, ep, e.left)
+		if callee == renvoIdentMake && e.argCount >= 2 {
+			capacity := renvoEvalConstExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+e.argCount-1))
+			return !capacity.ok || capacity.value <= 0
+		}
 		if callee == renvoIdentAppend && e.argCount >= 1 {
 			return renvoReturnedSliceCanReuseDescriptor(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
 		}
@@ -10915,7 +10930,7 @@ func renvoReturnedSliceCanReuseDescriptor(g *renvoLinearGen, ep *renvoExprParse,
 	if localIndex < 0 {
 		return true
 	}
-	return renvoLocalIsCurrentFuncParam(g, localIndex)
+	return g.locals[localIndex].constValid != 0 || renvoLocalIsCurrentFuncParam(g, localIndex)
 }
 
 func renvoLocalIsCurrentFuncParam(g *renvoLinearGen, localIndex int) bool {
@@ -13035,11 +13050,9 @@ func renvoEmitRecoverToLocal(g *renvoLinearGen, offset int) bool {
 	renvoAsmJzPrimary(a, noneLabel)
 	renvoAsmLoadPrimaryThreadState(g, renvoThreadPanicIDOff)
 	renvoAsmJzPrimary(a, noneLabel)
-	renvoAsmLoadPrimaryThreadState(g, renvoThreadPanicValueOff)
-	renvoAsmStorePrimaryStack(a, offset)
+	renvoAsmCopyThreadStateToStack(g, renvoThreadPanicValueOff, offset)
 	if g.c.renvoNativeIntSize == 4 {
-		renvoAsmLoadPrimaryThreadState(g, renvoThreadPanicValueOff+4)
-		renvoAsmStorePrimaryStack(a, offset-4)
+		renvoAsmCopyThreadStateToStack(g, renvoThreadPanicValueOff+4, offset-4)
 	}
 	renvoAsmCopyThreadStateToStack(g, renvoThreadPanicTypeOff, offset-renvoBackendValueSlotSize)
 	renvoAsmStoreStackImm(a, g.panicRecoverAllowedOffset, 0)
