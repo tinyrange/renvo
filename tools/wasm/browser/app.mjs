@@ -1,6 +1,7 @@
 import { ESPWebSerial, requestESPPort } from "./esp-webserial.mjs";
 import { preferredESPTransport, requestESPUSBPort, supportsESPWebUSBPlatform } from "./esp-webusb.mjs";
 import { cleanLanguagePath } from "./language-path.mjs";
+import { SerialPlotter, SerialPlotterView } from "./serial-plotter.mjs";
 
 const MONACO_VERSION = "0.56.0";
 const encoder = new TextEncoder();
@@ -28,6 +29,9 @@ const elements = {
   runArgs: document.querySelector("#run-args"),
   runStdin: document.querySelector("#run-stdin"),
   terminalOutput: document.querySelector("#terminal-output"),
+  plotterLegend: document.querySelector("#plotter-legend"),
+  plotterCanvas: document.querySelector("#serial-plotter-canvas"),
+  togglePlotterSize: document.querySelector("#toggle-plotter-size"),
   compilerStatus: document.querySelector("#compiler-status"),
   languageStatus: document.querySelector("#language-status"),
   cursorStatus: document.querySelector("#cursor-status"),
@@ -100,6 +104,10 @@ let requestID = 0;
 let focusedTargetIndex = -1;
 let activeBuildRoot = ".";
 let autoBuildPending = parameters.has("run");
+let plotterAutoShown = false;
+const plotterView = new SerialPlotterView(elements.plotterCanvas, elements.plotterLegend);
+const serialPlotter = new SerialPlotter({ onChange: (data) => plotterView.update(data) });
+plotterView.update(serialPlotter.snapshot());
 
 setupShell();
 boot().catch(showFatalError);
@@ -315,8 +323,12 @@ function setupShell() {
   document.querySelectorAll(".activity[data-view]").forEach((button) => button.addEventListener("click", () => activateView(button.dataset.view)));
   document.querySelectorAll(".panel-tab").forEach((button) => button.addEventListener("click", () => showPanel(button.dataset.panel)));
   document.querySelector("#toggle-panel").addEventListener("click", togglePanel);
-  document.querySelector("#close-panel").addEventListener("click", () => elements.workbench.classList.add("panel-hidden"));
-  document.querySelector("#clear-output").addEventListener("click", () => { elements.output.textContent = ""; });
+  elements.togglePlotterSize.addEventListener("click", togglePlotterSize);
+  document.querySelector("#close-panel").addEventListener("click", () => {
+    setPlotterExpanded(false);
+    elements.workbench.classList.add("panel-hidden");
+  });
+  document.querySelector("#clear-output").addEventListener("click", clearActivePanel);
   elements.problemStatus.addEventListener("click", () => showPanel("problems"));
   window.addEventListener("keydown", (event) => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "j") {
@@ -602,13 +614,15 @@ async function runArtifactWithMode(resumeAfterBuild) {
     const identity = portInfo.usbVendorId === undefined ? "" :
       ` (USB ${portInfo.usbVendorId.toString(16).padStart(4, "0")}:${(portInfo.usbProductId || 0).toString(16).padStart(4, "0")})`;
     const transportName = espPortTransport === "webusb" ? "WebUSB" : "WebSerial";
+    serialPlotter.clear();
+    plotterAutoShown = false;
     elements.terminalOutput.textContent = `$ flash --transport ${transportName} ${selectedTarget.name}${identity}\n`;
     elements.terminalOutput.textContent += `Build: ${formatElapsed(lastRunnableArtifact.buildMilliseconds)}\n`;
     const flashStarted = performance.now();
     try {
       if (!espSession) espSession = new ESPWebSerial(espPort, {
         log: (message) => { elements.terminalOutput.textContent += `${message}\n`; },
-        serial: (text) => { elements.terminalOutput.textContent += text; },
+        serial: appendSerialText,
         progress: (value) => {
           elements.run.querySelector("span").textContent = `Flashing ${Math.round(value * 100)}%`;
           setMobileFlashProgress(`Flashing ${Math.round(value * 100)}%`, value);
@@ -1084,12 +1098,45 @@ function revealProblem(problem) {
 }
 
 function showPanel(name) {
+  if (name !== "plotter") setPlotterExpanded(false);
   elements.workbench.classList.remove("panel-hidden");
   document.querySelectorAll(".panel-tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.panel === name));
   document.querySelectorAll(".panel-view").forEach((view) => view.classList.toggle("active", view.dataset.panelView === name));
+  elements.togglePlotterSize.hidden = name !== "plotter" || isPhoneWorkspace();
 }
 
-function togglePanel() { elements.workbench.classList.toggle("panel-hidden"); }
+function togglePlotterSize() {
+  setPlotterExpanded(!elements.workbench.classList.contains("plotter-expanded"));
+}
+
+function setPlotterExpanded(expanded) {
+  elements.workbench.classList.toggle("plotter-expanded", expanded);
+  elements.editorHost.inert = expanded;
+  elements.editorHost.setAttribute("aria-hidden", String(expanded));
+  elements.togglePlotterSize.setAttribute("aria-pressed", String(expanded));
+  elements.togglePlotterSize.textContent = expanded ? "Restore" : "Expand";
+  elements.togglePlotterSize.title = expanded ? "Restore editor and plotter" : "Expand plotter over editor";
+}
+
+function appendSerialText(text) {
+  elements.terminalOutput.textContent += text;
+  if (serialPlotter.push(text) && !plotterAutoShown) {
+    plotterAutoShown = true;
+    showPanel("plotter");
+  }
+}
+
+function clearActivePanel() {
+  const active = document.querySelector(".panel-tab.active")?.dataset.panel;
+  if (active === "terminal") elements.terminalOutput.textContent = "";
+  else if (active === "plotter") serialPlotter.clear();
+  else elements.output.textContent = "";
+}
+
+function togglePanel() {
+  if (!elements.workbench.classList.contains("panel-hidden")) setPlotterExpanded(false);
+  elements.workbench.classList.toggle("panel-hidden");
+}
 
 function activateView(view) {
   document.querySelectorAll(".activity[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
@@ -1136,6 +1183,7 @@ function isPhoneWorkspace() {
 
 function configureMobileWorkspace() {
   if (isPhoneWorkspace()) {
+    setPlotterExpanded(false);
     if (!elements.ide.dataset.mobileView) elements.ide.dataset.mobileView = "files";
     showMobileView(elements.ide.dataset.mobileView);
   } else {

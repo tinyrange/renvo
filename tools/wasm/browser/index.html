@@ -119,8 +119,10 @@
           <button class="panel-tab active" data-panel="output" role="tab">OUTPUT</button>
           <button class="panel-tab" data-panel="problems" role="tab">PROBLEMS <span id="problem-count">0</span></button>
           <button class="panel-tab" data-panel="terminal" role="tab">TERMINAL</button>
+          <button class="panel-tab" data-panel="plotter" role="tab">PLOTTER</button>
           <button class="panel-tab" data-panel="artifacts" role="tab">ARTIFACTS <span id="artifact-count">0</span></button>
           <div class="panel-actions">
+            <button id="toggle-plotter-size" title="Expand plotter over editor" aria-pressed="false" hidden>Expand</button>
             <button id="clear-output" title="Clear output">Clear</button>
             <button id="close-panel" title="Close panel">×</button>
           </div>
@@ -134,6 +136,10 @@
               <label>STDIN <textarea id="run-stdin" spellcheck="false" placeholder="optional input"></textarea></label>
             </div>
             <pre id="terminal-output" aria-live="polite">Build a WASI target, then press Run.</pre>
+          </div>
+          <div class="panel-view plotter" data-panel-view="plotter" id="plotter">
+            <div id="plotter-legend" aria-live="polite"></div>
+            <canvas id="serial-plotter-canvas" aria-label="Live serial data plot"></canvas>
           </div>
           <div class="panel-view artifacts" data-panel-view="artifacts" id="artifacts"><div class="empty-state">Build outputs will appear here.</div></div>
         </div>

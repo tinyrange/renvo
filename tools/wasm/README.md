@@ -111,7 +111,10 @@ artifacts. WASI command artifacts can run directly in the terminal panel with
 arguments and preloaded standard input. For ESP32-C6 and ESP32-S3, Flash & Run
 converts Renvo's ELF to the documented Espressif app-image format, writes the
 app partition through WebSerial or WebUSB, reboots the board, and attaches the
-terminal as a serial monitor. The transport picker uses WebUSB on Android and
+terminal as a serial monitor. Arduino Serial Plotter records in either labelled
+`name:value` form or as whitespace-separated numbers also feed the live Plotter
+panel; each labelled series is independently scaled so values with different
+units remain visible. The transport picker uses WebUSB on Android and
 WebSerial on desktop, where the operating-system CDC driver owns the control
 interface required for reset. It remembers an explicit valid choice and falls
 back to the available browser API. Both transports require an HTTPS or localhost

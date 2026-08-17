@@ -133,6 +133,8 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 
 .workbench { grid-column: 3; grid-row: 2; display: grid; min-width: 0; min-height: 0; grid-template-rows: 34px minmax(0, 1fr) var(--panel-height); background: var(--editor); }
 .workbench.panel-hidden { grid-template-rows: 34px minmax(0, 1fr) 0; }
+.workbench.plotter-expanded { grid-template-rows: 34px 0 minmax(0, 1fr); }
+.workbench.plotter-expanded .editor-host { visibility: hidden; }
 .editor-tabs { display: flex; min-width: 0; border-bottom: 1px solid var(--border); background: var(--bg); }
 .editor-tab { display: flex; width: 142px; height: 33px; align-items: center; gap: 7px; padding: 0 8px; border-right: 1px solid var(--border); background: var(--editor); color: var(--bright); cursor: default; font-size: 12px; }
 .editor-tab:not(.active) { background: var(--bg); color: var(--muted); }
@@ -156,6 +158,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .panel-actions { display: flex; flex: 1; align-items: center; justify-content: flex-end; gap: 2px; padding-right: 5px; }
 .panel-actions button { height: 23px; min-width: 26px; padding: 0 5px; color: var(--muted); cursor: pointer; font-size: 11px; }
 .panel-actions button:hover { color: var(--bright); background: var(--hover); }
+.panel-actions button[hidden] { display: none; }
 .panel-content { height: calc(100% - 30px); min-height: 0; }
 .panel-view { display: none; width: 100%; height: 100%; margin: 0; overflow: auto; }
 .panel-view.active { display: block; }
@@ -177,6 +180,13 @@ pre.panel-view { padding: 3px 12px 10px; color: #c8c8c8; background: transparent
 .terminal-options textarea { min-height: 50px; flex: 1; resize: none; padding: 3px 5px; }
 .terminal-options input:focus, .terminal-options textarea:focus { border-color: var(--focus); }
 #terminal-output { height: 100%; margin: 0; overflow: auto; padding: 4px 10px 10px; color: #d7d7d7; font: 12px/19px ui-monospace, monospace; white-space: pre-wrap; }
+.plotter.active { display: grid; min-width: 0; min-height: 0; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; background: #111; }
+#plotter-legend { display: flex; min-height: 28px; align-items: center; gap: 13px; overflow-x: auto; padding: 4px 10px; border-bottom: 1px solid var(--border); color: var(--muted); white-space: nowrap; font: 11px/18px ui-monospace, monospace; }
+.plotter-legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.plotter-legend-item i { width: 9px; height: 9px; border-radius: 50%; }
+.plotter-legend-item strong { color: var(--text); font-weight: 500; }
+.plotter-waiting { color: var(--muted); }
+#serial-plotter-canvas { display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; }
 
 .status-bar { grid-column: 1 / -1; grid-row: 3; display: flex; min-width: 0; align-items: center; background: #181818; border-top: 1px solid var(--border); color: #bdbdbd; user-select: none; }
 .status-item { display: flex; height: 100%; align-items: center; gap: 4px; padding: 0 7px; color: inherit; white-space: nowrap; font-size: 11px; }
@@ -273,10 +283,12 @@ button.status-item:hover { background: var(--hover); }
   .ide[data-mobile-view="console"] .panel-tab { min-width: max-content; min-height: 44px; padding: 0 10px; }
   .ide[data-mobile-view="console"] .panel-actions { min-width: 72px; position: sticky; right: 0; background: var(--editor); }
   .ide[data-mobile-view="console"] .panel-actions button { min-width: 44px; height: 44px; }
+  .ide[data-mobile-view="console"] #toggle-plotter-size { display: none; }
   .ide[data-mobile-view="console"] .panel-content { height: calc(100% - 44px); }
   .ide[data-mobile-view="console"] .terminal.active { grid-template-columns: minmax(0, 1fr); }
   .ide[data-mobile-view="console"] .terminal-options { display: none; }
   .ide[data-mobile-view="console"] #terminal-output { padding: 10px 12px calc(12px + env(safe-area-inset-bottom)); font-size: 12px; line-height: 19px; }
+  .ide[data-mobile-view="console"] #plotter-legend { min-height: 40px; padding-right: 12px; padding-left: 12px; }
   .editor-tabs { height: 44px; }
   .editor-tab { height: 43px; width: auto; min-width: 140px; font-size: 13px; }
   .editor-toolbar button { width: 44px; height: 43px; }

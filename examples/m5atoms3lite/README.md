@@ -57,3 +57,26 @@ sandbox/renvo \
   ./examples/m5atoms3lite/adxl345
 ./sandbox/renvoflash sandbox/m5atoms3lite-adxl345.elf
 ```
+
+## ENV Pro environmental sensor
+
+The `env_pro` example reads calibrated temperature, pressure, humidity, and
+gas resistance once per second from the BME688 in an M5Stack ENV Pro Unit on
+the Grove port. The status LED is green when gas data and the heater are both
+valid, amber while the heater settles, red after a read failure, and blue when
+the device does not initialize. The ENV Pro selects I2C address `0x77`.
+
+The BME688 itself does not directly report IAQ or equivalent CO2. Those values
+require Bosch's separately distributed BSEC algorithm; this open driver reports
+the calibrated physical sensor outputs without inventing an IAQ conversion.
+Its serial stream uses Arduino Serial Plotter-compatible labelled values, which
+Renvo's browser IDE graphs automatically after Flash & Run.
+
+```sh
+sandbox/renvo \
+  -backend backends/esp32s3.rtg \
+  -t esp32s3/xtensa_lx7 \
+  -o sandbox/m5atoms3lite-env-pro.elf \
+  ./examples/m5atoms3lite/env_pro
+./sandbox/renvoflash sandbox/m5atoms3lite-env-pro.elf
+```
