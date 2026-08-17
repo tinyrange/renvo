@@ -189,6 +189,10 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 		return empty, false
 	}
 	program.Tokens = append(program.Tokens, unit.MakeToken(unit.TokenEOF, len(program.Text), 0, line))
+	if !lowerConcurrencyCore(&program, transient) {
+		arena.Discard(actionStart, actionEnd)
+		return empty, false
+	}
 	if !lowerMapsCore(&program, transient) {
 		arena.Discard(actionStart, actionEnd)
 		return empty, false
@@ -240,6 +244,7 @@ func replaceFunctionValueProgram(dst *unit.Program, src *unit.Program) {
 	dst.Calls = src.Calls
 	dst.Refs = src.Refs
 	dst.Selectors = src.Selectors
+	dst.ConcurrencySites = src.ConcurrencySites
 	dst.Packages = src.Packages
 }
 
@@ -331,16 +336,19 @@ func reserveCompactLinkedProgram(program *unit.Program, programs []unit.Program,
 	textCap := 0
 	declCap := 0
 	funcCap := 0
+	concurrencyCap := 0
 	for i := 0; i < len(programs); i++ {
 		p := programs[i]
 		textCap += len(p.Text) + 1
 		declCap += len(p.Decls)
 		funcCap += len(p.Funcs)
+		concurrencyCap += len(p.ConcurrencySites)
 	}
 	program.Text = make([]byte, 0, textCap)
 	program.Tokens = make([]unit.Token, 0, finalEOF+1)
 	program.Decls = make([]unit.Decl, 0, declCap)
 	program.Funcs = make([]unit.Func, 0, funcCap)
+	program.ConcurrencySites = make([]unit.ConcurrencySite, 0, concurrencyCap)
 }
 
 func prepareProgramsCore(programs []unit.Program, root int) ([]unit.Program, bool) {
@@ -635,6 +643,14 @@ func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenActio
 		fn.BodyEnd = mapLinkedToken(tokens, fn.BodyEnd, finalEOF)
 		fn.EndTok = mapLinkedFuncEndToken(tokens, fn.EndTok, fn.BodyEnd, finalEOF)
 		dst.Funcs = append(dst.Funcs, fn)
+	}
+	for i := 0; i < len(src.ConcurrencySites); i++ {
+		site := src.ConcurrencySites[i]
+		site.Token = mapLinkedToken(tokens, site.Token, finalEOF)
+		if site.Token < 0 || site.Token >= finalEOF {
+			return false, line
+		}
+		dst.ConcurrencySites = append(dst.ConcurrencySites, site)
 	}
 	line = lineBase + sourceEndLine - 1
 	if hasNext && (len(text) == 0 || text[len(text)-1] != '\n') {
@@ -1072,6 +1088,24 @@ func coreSymbolKeepsRuntimeName(name string) bool {
 	switch name {
 	case "renvo_runtime_Exit",
 		"renvo_runtime_PrintMirror",
+		"renvo_runtime_Call",
+		"renvo_runtime_ThreadStateSwap",
+		"renvo_runtime_StackRun",
+		"renvo_runtime_StackSupported",
+		"renvo_runtime_StackInit",
+		"renvo_runtime_StackSwitch",
+		"renvo_runtime_Spawn",
+		"renvo_runtime_ChanCreate",
+		"renvo_runtime_ChanSend",
+		"renvo_runtime_ChanReceive",
+		"renvo_runtime_ChanSelect",
+		"renvo_runtime_ChanClose",
+		"renvo_runtime_ChanLen",
+		"renvo_runtime_ChanCap",
+		"renvo_runtime_ChanSelectValue",
+		"renvo_runtime_Channel",
+		"renvo_runtime_SelectReceive",
+		"renvo_runtime_SelectSend",
 		"renvo_runtime_ArenaMark",
 		"renvo_runtime_ArenaReset",
 		"renvo_runtime_ArenaPersistMark",

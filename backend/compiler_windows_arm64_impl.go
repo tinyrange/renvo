@@ -400,7 +400,7 @@ func renvoAsmPatchWindowsArm64(a *renvoAsm, layout renvoWinImportLayout) {
 		kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2))
 		target := a.dataOffset + off
 		if kind == renvoAbsWinImportReloc {
-			target = renvoWinImportIATRVA(layout, off)
+			target = layout.iatRVAs[off]
 		} else if kind == renvoAbsBssReloc {
 			target = renvoAsmBssOffset(a) + off
 		}

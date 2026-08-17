@@ -26,6 +26,7 @@ const (
 	StmtGo
 	StmtFallthrough
 	StmtLabel
+	StmtSelect
 )
 
 const (
@@ -140,6 +141,9 @@ func parseStmt(body Body, file *File, start int, limit int) (int, Body) {
 	}
 	if kind == TokenSwitch {
 		return parseBlockStmt(body, file, start, limit, StmtSwitch)
+	}
+	if kind == TokenSelect {
+		return parseBlockStmt(body, file, start, limit, StmtSelect)
 	}
 	if kind == TokenCase {
 		end := findCaseHeaderEnd(file, start+1, limit)

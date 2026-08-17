@@ -83,11 +83,14 @@ as an oracle. After adding a positive test, run
 
 ## Frontend scope
 
-The exclusion list is closed: generics, goroutines, channels, `select`, and cgo
-are out of scope for now. Every other ordinary Go feature is frontend work
-unless the project explicitly changes that policy. This includes defer,
-panic/recover, maps, interfaces, arrays, function values, dynamic dispatch,
-complex numbers, ordinary builtins, and unsafe intrinsics.
+The exclusion list is closed: generics and cgo are out of scope for now.
+Goroutines, channels, and `select` may be accepted only as frontend syntax that
+is lowered completely through the runtime handler ABI before the compact unit
+reaches a backend; they remain outside the direct backend source subset. Every
+other ordinary Go feature is frontend work unless the project explicitly
+changes that policy. This includes defer, panic/recover, maps, interfaces,
+arrays, function values, dynamic dispatch, complex numbers, ordinary builtins,
+and unsafe intrinsics.
 
 ## Backend structure
 

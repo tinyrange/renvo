@@ -214,11 +214,11 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 		} else if built.Build.ErrorDetail == check.CheckErrCallArgument {
 			d.Code, d.Message = "RENVO-CHECK-016", "call argument is not assignable to its parameter"
 		} else if built.Build.ErrorDetail == check.CheckErrGoroutine {
-			d.Code, d.Message = "RENVO-CHECK-017", "goroutines are not supported by RENVO"
+			d.Code, d.Message = "RENVO-CHECK-017", "go statement requires a function call"
 		} else if built.Build.ErrorDetail == check.CheckErrChannel {
-			d.Code, d.Message = "RENVO-CHECK-018", "channels are not supported by RENVO"
+			d.Code, d.Message = "RENVO-CHECK-018", "channel direction does not permit this operation"
 		} else if built.Build.ErrorDetail == check.CheckErrSelect {
-			d.Code, d.Message = "RENVO-CHECK-019", "select statements are not supported by RENVO"
+			d.Code, d.Message = "RENVO-CHECK-019", "select has an invalid communication clause or multiple defaults"
 		} else if built.Build.ErrorDetail == check.CheckErrUnusedLocal {
 			d.Code, d.Message = "RENVO-CHECK-020", "local variable is declared but not used"
 		} else if built.Build.ErrorDetail == check.CheckErrMissingMain {

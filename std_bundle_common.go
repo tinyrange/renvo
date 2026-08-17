@@ -40,6 +40,7 @@ func BundledStdReadDir(path string) ([]StdEntry, bool) {
 			{Name: "device", IsDir: true},
 			{Name: "forms", IsDir: true},
 			{Name: "std", IsDir: true},
+			{Name: "x", IsDir: true},
 		}, true
 	}
 	moduleDir := bundledHasPrefix(name, "@module/")

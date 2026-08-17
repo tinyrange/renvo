@@ -134,6 +134,31 @@ func (d *Device) Read() (Reading, error) { return Reading{}, nil }
 	t.Fatalf("completion after inferred method result = %#v", items)
 }
 
+func TestCompleteProgramIncludesSelectReceiveBinding(t *testing.T) {
+	source := []byte(`package main
+func main() {
+	values := make(chan int, 1)
+	select {
+	case received := <-values:
+		_ = rece
+	}
+}
+`)
+	files := []load.SourceFile{
+		{Path: "/repo/go.mod", Src: []byte("module example.com/app\n")},
+		{Path: "/repo/main.go", Src: source},
+	}
+	workspace := load.LoadWorkspace("/repo", "/std", ".", files)
+	program := CheckGraph(workspace.Graph)
+	items := CompleteProgram(workspace.Graph, program, "/repo/main.go", completionTestOffset(source, "rece\n"))
+	for i := 0; i < len(items); i++ {
+		if items[i].Name == "received" {
+			return
+		}
+	}
+	t.Fatalf("select receive completion = %#v", items)
+}
+
 func TestCompleteGraphFollowsImportedPackageVariables(t *testing.T) {
 	mainSource := []byte(`package main
 import "example.com/app/board"

@@ -60,6 +60,28 @@ func main() {
 	}
 }
 
+func TestNavigateProgramFindsSelectReceiveBinding(t *testing.T) {
+	source := []byte(`package main
+func main() {
+	values := make(chan int, 1)
+	select {
+	case received := <-values:
+		print(received)
+	}
+}
+`)
+	files := []load.SourceFile{
+		{Path: "/repo/go.mod", Src: []byte("module example.com/app\n")},
+		{Path: "/repo/main.go", Src: source},
+	}
+	workspace := load.LoadWorkspace("/repo", "/std", ".", files)
+	program := CheckGraph(workspace.Graph)
+	result := NavigateProgram(workspace.Graph, program, "/repo/main.go", navigationTestOffset(source, "received)"))
+	if !result.Ok || result.Definition.Path != "/repo/main.go" || len(result.References) != 2 {
+		t.Fatalf("select receive navigation = %#v", result)
+	}
+}
+
 func TestNavigateProgramFindsFieldsAndMethods(t *testing.T) {
 	source := []byte(`package main
 type Label struct { Text string }

@@ -52,9 +52,40 @@ explicitly.
 The frontend supports packages and modules, local replacements, build tags and
 target-specific files, `//go:embed`, and an offline module cache. Language
 coverage includes ordinary control flow, methods, maps, interfaces, closures,
-defer/panic/recover, arrays and slices, complex values, and the builtins needed
-by Renvo itself. Generics, goroutines, channels, `select`, and cgo are currently
-out of scope.
+defer/panic/recover, arrays and slices, complex values, goroutines, channels,
+`select`, and the builtins needed by Renvo itself. Generics and cgo are
+currently out of scope.
+
+Concurrency is a frontend feature: it lowers to the pluggable
+`renvo.dev/x/runtime` handler API before the compact backend unit. The bundled
+`x/runtime/serial` handler provides cooperative, serialized execution rather
+than parallel execution. A target or future microcontroller RTOS can implement
+the same handler contract without adding channel operations to a backend.
+
+The bundled `sync` package follows Go's zero-value API for `Mutex`, `RWMutex`,
+`WaitGroup`, `Once`, and `Cond`. Blocking operations cooperate with the active
+handler, so the same code works with the serialized reference scheduler and a
+future target scheduler.
+
+Install a handler before the first concurrency operation. Synchronizing through
+a channel drives queued work; `Drain` is available when an event loop wants to
+run all currently runnable jobs:
+
+```go
+import (
+	runtime "renvo.dev/x/runtime"
+	"renvo.dev/x/runtime/serial"
+)
+
+func main() {
+	handler := serial.New()
+	runtime.EnableGoroutines(handler)
+
+	values := make(chan int)
+	go func() { values <- 42 }()
+	println(<-values)
+}
+```
 
 ## Build and try it
 

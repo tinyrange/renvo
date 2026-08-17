@@ -275,10 +275,12 @@ Renvo is not a drop-in Go compiler.
 The closed out-of-scope list is:
 
 - generics;
-- goroutines;
-- channels;
-- `select`;
 - cgo.
+
+Goroutines, channels, and `select` are accepted by the frontend and lowered to
+the `renvo.dev/x/runtime` handler ABI before backend compilation. Version 1
+handlers serialize Renvo execution; this is concurrency, not parallelism. The
+direct backend source subset still does not accept those constructs.
 
 These features must fail early with clear, structured diagnostics saying that
 they are unsupported. Do not let them fall through to a generic backend

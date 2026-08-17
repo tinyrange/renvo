@@ -102,6 +102,17 @@ type TypeRef struct {
 	Symbol  int
 }
 
+// ConcurrencySite carries checker-owned facts needed by whole-program
+// goroutine/channel lowering. It is an internal frontend/cache contract and is
+// deliberately omitted from CoreProgram after lowering.
+type ConcurrencySite struct {
+	Kind         int
+	Token        int
+	Direction    int
+	ReceiveArity int
+	ElementType  string
+}
+
 // PackageInfo preserves the independently compiled package that owns a
 // contiguous part of a linked program. Keys are frontend-computed identities:
 // GraphKey includes transitive dependencies while SourceKey covers this
@@ -127,19 +138,20 @@ type PackageInfo struct {
 // Program is the shared lowering and linking model. Checker-only semantic
 // tables stay outside this boundary.
 type Program struct {
-	Package    string
-	ImportPath string
-	Text       []byte
-	Tokens     []Token
-	Imports    []Import
-	Symbols    []Symbol
-	Decls      []Decl
-	Funcs      []Func
-	TypeRefs   []TypeRef
-	Calls      []Call
-	Refs       []NameRef
-	Selectors  []Selector
-	Packages   []PackageInfo
+	Package          string
+	ImportPath       string
+	Text             []byte
+	Tokens           []Token
+	Imports          []Import
+	Symbols          []Symbol
+	Decls            []Decl
+	Funcs            []Func
+	TypeRefs         []TypeRef
+	Calls            []Call
+	Refs             []NameRef
+	Selectors        []Selector
+	ConcurrencySites []ConcurrencySite
+	Packages         []PackageInfo
 }
 
 // CoreProgram is the complete serialized contract consumed by compiler
@@ -172,6 +184,14 @@ const (
 	CallPackage
 	CallImportSelector
 	CallBuiltin
+)
+
+const (
+	ConcurrencyGo = iota + 1
+	ConcurrencyChannelType
+	ConcurrencySend
+	ConcurrencyReceive
+	ConcurrencySelect
 )
 
 const (

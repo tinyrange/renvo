@@ -509,6 +509,7 @@ func renvoBeginScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) *renvoAarc
 		renvoAarch64AsmStoreRegMem(a, 2, 31, 16, 8)
 		renvoAarch64AsmStoreRegMem(a, 3, 31, 24, 8)
 	}
+	renvoEmitInitializeThreadState(g)
 	renvoEmitPersistentArenaReady(g)
 	if !renvoLinearInitGlobals(g) {
 		return nil

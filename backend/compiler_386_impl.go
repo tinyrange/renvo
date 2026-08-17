@@ -51,6 +51,7 @@ func renvoBeginScalarProgram386(p *renvoProgram, meta *renvoMeta) *renvoLinearGe
 	}
 	renvoInitFuncQueue(g, len(meta.funcs))
 	renvoLinearMarkFunc(g, appIndex)
+	renvoEmitInitializeThreadState(g)
 	renvoEmitPersistentArenaReady(g)
 	if !renvoLinearInitGlobals(g) {
 		return nil

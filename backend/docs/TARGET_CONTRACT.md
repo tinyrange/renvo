@@ -42,6 +42,21 @@ Code and function pointers may have widths different from data pointers. Object
 relocations and C carrier types must be selected from the relevant pointer
 space, not from a single host `sizeof(void *)` assumption.
 
+## Thread state
+
+Every execution target provides one compiler-owned logical `ThreadState`
+pointer. Panic and recover fields are addressed through that pointer, allowing
+a scheduler to suspend one Renvo stack and install another without sharing
+panic state. Native amd64 reserves callee-saved R15; portable and stack-machine
+implementations use an equivalent reserved execution-context slot. Normal
+calls preserve the pointer, main initializes it, and
+`renvo.dev/x/runtime.Call` installs a fresh state around a spawned entry.
+
+The v1 runtime contract permits cooperative context switches but requires
+serialized execution of Renvo code. It does not promise parallel execution or
+hosted TLS. A future microcontroller RTOS can retain the pointer in its task
+context and preserve it in the ordinary task switch.
+
 ## Freestanding allocation and failure
 
 A freestanding profile declares one heap model:

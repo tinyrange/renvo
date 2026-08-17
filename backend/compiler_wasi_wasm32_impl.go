@@ -85,6 +85,7 @@ func renvoTryCompileScalarProgramWasm32(p *renvoProgram, meta *renvoMeta) renvoC
 	}
 	renvoInitFuncQueue(&g, len(meta.funcs))
 	renvoWasm32MarkFunc(&g, appIndex)
+	renvoEmitInitializeThreadState(&g)
 	renvoEmitPersistentArenaReady(&g)
 	if !renvoLinearInitGlobals(&g) || !renvoEmitProgramEntryArgsWasm32(&g, appIndex) {
 		return renvoCompileResult{}
@@ -96,6 +97,15 @@ func renvoTryCompileScalarProgramWasm32(p *renvoProgram, meta *renvoMeta) renvoC
 	renvoWasm32AsmExit(a)
 	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
 		i := g.funcQueue[queueIndex]
+		// A whole-program function-value dispatch can discover a closure before
+		// its reachable parent has established the capture layout. Leave that
+		// speculative queue entry available for the parent to enqueue again once
+		// renvoPrepareClosureCaptures has made the environment concrete.
+		closureIndex := renvoClosureIndexByFunction(meta, i)
+		if closureIndex >= 0 && !meta.closures[closureIndex].ready {
+			g.funcReachable[i] = false
+			continue
+		}
 		if !renvoEmitScalarFunctionScratch(&g, i) {
 			if renvoFixedTarget == 0 {
 				renvoPrintErr("renvo: wasm32 failed in function ")

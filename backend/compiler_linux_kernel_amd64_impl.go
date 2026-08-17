@@ -22,6 +22,7 @@ func renvoBeginKernelModuleAmd64(g *renvoLinearGen, appIndex int) bool {
 	if !g.meta.panicEnabled {
 		renvoAmd64InitRuntimeCheckRegs(g)
 	}
+	renvoEmitInitializeThreadState(g)
 	renvoEmitPersistentArenaReady(g)
 	if !renvoLinearInitGlobals(g) {
 		return false

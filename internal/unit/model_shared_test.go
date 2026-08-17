@@ -10,7 +10,7 @@ func TestProgramIsTheExplicitSharedLinkingContract(t *testing.T) {
 	want := []string{
 		"Package", "ImportPath", "Text", "Tokens", "Imports", "Symbols",
 		"Decls", "Funcs", "TypeRefs", "Calls", "Refs", "Selectors",
-		"Packages",
+		"ConcurrencySites", "Packages",
 	}
 	if typeOf.NumField() != len(want) {
 		t.Fatalf("Program has %d fields, want %d", typeOf.NumField(), len(want))

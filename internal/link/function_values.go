@@ -425,6 +425,16 @@ func functionValueTypeEnd(program *unit.Program, start int) int {
 		}
 		return functionValueTypeEnd(program, close+1)
 	}
+	if text == "<-" && functionValueTokenEquals(program, start+1, "chan") {
+		return functionValueTypeEnd(program, start+1)
+	}
+	if text == "chan" {
+		element := start + 1
+		if functionValueTokenEquals(program, element, "<-") {
+			element++
+		}
+		return functionValueTypeEnd(program, element)
+	}
 	if text == "struct" || text == "interface" {
 		if !functionValueTokenEquals(program, start+1, "{") {
 			return start
@@ -944,10 +954,10 @@ func functionValueCaptures(program *unit.Program, literalStart int, bodyOpen int
 			continue
 		}
 		name := functionValueTokenText(program, i)
-		if name == "return" || name == "true" || name == "false" || name == "nil" || functionValueNameInList(params, name) || functionValueNameInList(names, name) {
+		if name == "return" || name == "true" || name == "false" || name == "nil" || name == "bool" || ordinaryBuiltinTypeName(name) || functionValueNameInList(params, name) || functionValueNameInList(names, name) || !functionValueClosureValueReference(program, i) {
 			continue
 		}
-		typ := functionValueEnclosingLocalType(program, literalStart, name)
+		typ := functionValueLexicalLocalType(program, literalStart, name)
 		if typ == "" {
 			continue
 		}
@@ -962,6 +972,14 @@ func functionValueEnclosingLocalType(program *unit.Program, before int, name str
 }
 
 func functionValueEnclosingLocalTypeDepth(program *unit.Program, before int, name string, depth int) string {
+	return functionValueEnclosingLocalTypeDepthMode(program, before, name, depth, true)
+}
+
+func functionValueLexicalLocalType(program *unit.Program, before int, name string) string {
+	return functionValueEnclosingLocalTypeDepthMode(program, before, name, 0, false)
+}
+
+func functionValueEnclosingLocalTypeDepthMode(program *unit.Program, before int, name string, depth int, allowGlobal bool) string {
 	if depth > 16 {
 		return ""
 	}
@@ -1027,7 +1045,7 @@ func functionValueEnclosingLocalTypeDepth(program *unit.Program, before int, nam
 				}
 				simpleIdent := rhs+1 >= len(program.Tokens) || functionValueTokenEquals(program, rhs+1, ";") || functionValueTokenEquals(program, rhs+1, "}") || program.Tokens[rhs+1].KindLine>>8 != program.Tokens[rhs].KindLine>>8
 				if simpleIdent {
-					if typ := functionValueEnclosingLocalTypeDepth(program, i, functionValueTokenText(program, rhs), depth+1); typ != "" {
+					if typ := functionValueEnclosingLocalTypeDepthMode(program, i, functionValueTokenText(program, rhs), depth+1, allowGlobal); typ != "" {
 						return typ
 					}
 				}
@@ -1043,7 +1061,13 @@ func functionValueEnclosingLocalTypeDepth(program *unit.Program, before int, nam
 	if typ := functionValueFunctionParamType(program, fn, name); typ != "" {
 		return typ
 	}
-	return ordinaryGlobalType(program, name)
+	if allowGlobal {
+		return ordinaryGlobalType(program, name)
+	}
+	// Package variables and declarations remain directly addressable from the
+	// generated closure function. Only receiver, parameter, and enclosing-local
+	// bindings belong in the persistent closure environment.
+	return ""
 }
 
 func functionValueDeclaredType(program *unit.Program, name string) bool {
@@ -1109,13 +1133,14 @@ func functionValueFunctionParamType(program *unit.Program, fn unit.Func, name st
 		return ""
 	}
 	close := functionValueFindMatchingParen(program, open)
-	for i := open + 1; i+1 < close; i++ {
-		if functionValueTokenEquals(program, i, name) {
-			end := i + 2
-			for end < close && !functionValueTokenEquals(program, end, ",") {
-				end++
-			}
-			return functionValueTokensText(program, i+1, end)
+	_, names, ok := normalizedFunctionValueParams(program, open+1, close)
+	if !ok {
+		return ""
+	}
+	types := functionValueFunctionParamTypes(program, fn)
+	for i := 0; i < len(names) && i < len(types); i++ {
+		if names[i] == name {
+			return types[i]
 		}
 	}
 	return ""
@@ -1131,7 +1156,7 @@ func functionValueClosureBody(program *unit.Program, bodyOpen int, bodyClose int
 	var edits []functionValueEdit
 	for i := bodyOpen + 1; i < bodyClose; i++ {
 		name := functionValueTokenText(program, i)
-		if !functionValueNameInList(captures, name) {
+		if !functionValueNameInList(captures, name) || !functionValueClosureValueReference(program, i) {
 			continue
 		}
 		tok := program.Tokens[i]
@@ -1142,6 +1167,18 @@ func functionValueClosureBody(program *unit.Program, bodyOpen int, bodyClose int
 		return ""
 	}
 	return string(out)
+}
+
+func functionValueClosureValueReference(program *unit.Program, tok int) bool {
+	if tok > 0 && functionValueTokenEquals(program, tok-1, ".") {
+		return false
+	}
+	// A keyed composite-literal field names storage; it does not refer to an
+	// enclosing local with the same spelling.
+	if functionValueTokenEquals(program, tok+1, ":") {
+		return false
+	}
+	return true
 }
 
 func appendFunctionValuePackageEdits(program *unit.Program, edits []functionValueEdit) []functionValueEdit {
@@ -1789,7 +1826,7 @@ func functionValueTokenCanStartType(program *unit.Program, tok int) bool {
 		return false
 	}
 	text := functionValueTokenText(program, tok)
-	return program.Tokens[tok].KindLine&255 == unit.TokenIdent || text == "*" || text == "[" || text == "struct" || text == "interface" || text == "map" || text == "func"
+	return program.Tokens[tok].KindLine&255 == unit.TokenIdent || text == "*" || text == "[" || text == "struct" || text == "interface" || text == "map" || text == "func" || text == "chan" || text == "<-"
 }
 
 func functionValueTokenAtSpan(program *unit.Program, start int, end int) int {

@@ -119,6 +119,14 @@ func (s *PackageSession) Step() bool {
 	for i := 0; i < len(s.artifacts); i++ {
 		arena.Discard(s.artifactStarts[i], s.artifactEnds[i])
 	}
+	if !lowerConcurrencyCore(&program, s.transient) {
+		s.failUnit()
+		return true
+	}
+	if !lowerMapsCore(&program, s.transient) {
+		s.failUnit()
+		return true
+	}
 	if !lowerFunctionValuesCore(&program, s.transient) {
 		s.failUnit()
 		return true
@@ -180,6 +188,7 @@ func linkOnePackageArtifactCore(src unit.Program, aliases []string, symbolOffset
 	artifact.Tokens = make([]unit.Token, 0, finalEOF+1)
 	artifact.Decls = make([]unit.Decl, 0, len(src.Decls))
 	artifact.Funcs = make([]unit.Func, 0, len(src.Funcs))
+	artifact.ConcurrencySites = make([]unit.ConcurrencySite, 0, len(src.ConcurrencySites))
 	ok, line := appendProgramCore(&artifact, src, actions, finalEOF, 1, aliases, false)
 	if !ok {
 		return empty, false
@@ -201,6 +210,7 @@ func mergePackageArtifactsCore(artifacts []unit.Program, units []build.PackageUn
 	textCapacity := 0
 	declCapacity := 0
 	funcCapacity := 0
+	concurrencyCapacity := 0
 	for i := 0; i < len(artifacts); i++ {
 		if len(artifacts[i].Tokens) == 0 || artifacts[i].Tokens[len(artifacts[i].Tokens)-1].KindLine&255 != unit.TokenEOF {
 			return empty, false
@@ -209,12 +219,14 @@ func mergePackageArtifactsCore(artifacts []unit.Program, units []build.PackageUn
 		textCapacity += len(artifacts[i].Text) + 1
 		declCapacity += len(artifacts[i].Decls)
 		funcCapacity += len(artifacts[i].Funcs)
+		concurrencyCapacity += len(artifacts[i].ConcurrencySites)
 	}
 	program := unit.Program{Package: cloneCoreLinkString(rootName), ImportPath: cloneCoreLinkString(artifacts[root].ImportPath)}
 	program.Text = make([]byte, 0, textCapacity)
 	program.Tokens = make([]unit.Token, 0, finalEOF+1)
 	program.Decls = make([]unit.Decl, 0, declCapacity)
 	program.Funcs = make([]unit.Func, 0, funcCapacity)
+	program.ConcurrencySites = make([]unit.ConcurrencySite, 0, concurrencyCapacity)
 	line := 1
 	for i := 0; i < len(artifacts); i++ {
 		info := beginLinkedPackageInfo(&program, units[i])
@@ -271,6 +283,14 @@ func appendPackageArtifactCore(dst *unit.Program, src unit.Program, line int, ha
 			return line, false
 		}
 		dst.Funcs = append(dst.Funcs, fn)
+	}
+	for i := 0; i < len(src.ConcurrencySites); i++ {
+		site := src.ConcurrencySites[i]
+		site.Token = mapArtifactToken(site.Token, localEOF, tokenBase)
+		if site.Token < 0 {
+			return line, false
+		}
+		dst.ConcurrencySites = append(dst.ConcurrencySites, site)
 	}
 	line += countCoreNewlines(src.Text)
 	if hasNext && (len(src.Text) == 0 || src.Text[len(src.Text)-1] != '\n') {

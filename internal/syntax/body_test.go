@@ -140,6 +140,44 @@ func appMain() int {
 	}
 }
 
+func TestParseFuncBodySelect(t *testing.T) {
+	file := parseOneFuncBodyTestFile(t, `package main
+
+func appMain(send chan<- int, receive <-chan int) {
+	select {
+	case send <- 7:
+		print("sent")
+	case value, ok := <-receive:
+		print(value, ok)
+	default:
+		print("default")
+	}
+}
+`)
+	body := ParseFuncBody(file, file.Funcs[0])
+	if !body.Ok {
+		t.Fatalf("ParseFuncBody failed: err=%d tok=%d", body.Error, body.ErrorTok)
+	}
+	want := []int{
+		StmtBlock,
+		StmtSelect,
+		StmtBlock,
+		StmtCase,
+		StmtExpr,
+		StmtCase,
+		StmtExpr,
+		StmtDefault,
+		StmtExpr,
+	}
+	assertStmtKinds(t, body, want)
+	if exprText(file, body.Exprs[0]) != "send <- 7" {
+		t.Fatalf("first communication clause = %q", exprText(file, body.Exprs[0]))
+	}
+	if exprText(file, body.Exprs[2]) != "value, ok := <-receive" {
+		t.Fatalf("second communication clause = %q", exprText(file, body.Exprs[2]))
+	}
+}
+
 func TestParseFuncBodyErrors(t *testing.T) {
 	file := parseOneFuncBodyTestFile(t, `package main
 
