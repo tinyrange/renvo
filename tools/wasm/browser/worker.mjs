@@ -4,6 +4,8 @@ let compilerError;
 const backendModules = new Map();
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+let languageFiles = new Map();
+let languageWorkspaceRevision = 0;
 
 self.addEventListener("message", async (event) => {
   const request = event.data;
@@ -44,8 +46,15 @@ self.addEventListener("message", async (event) => {
       self.postMessage({ type: "language-result", id: request.id, mode: request.type, output: "", error: "language service is unavailable" });
       return;
     }
-    const files = new Map(request.files.map((file) => [clean(file.name), new Uint8Array(file.data)]));
-    const context = newContext(files);
+    if (request.files) {
+      languageFiles = new Map(request.files.map((file) => [clean(file.name), new Uint8Array(file.data)]));
+      languageWorkspaceRevision = request.workspaceRevision;
+    }
+    if (request.workspaceRevision !== languageWorkspaceRevision) {
+      self.postMessage({ type: "language-result", id: request.id, mode: request.type, output: "", error: "language workspace is stale" });
+      return;
+    }
+    const context = newContext(new Map(languageFiles));
     const args = ["renvo-language", request.type, "-target", request.target, "-file", request.file, "-offset", String(request.offset)];
     for (const tag of request.tags || []) args.push("-tags", tag);
     args.push(request.packageAt || ".");

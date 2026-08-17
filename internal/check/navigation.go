@@ -45,6 +45,9 @@ func NavigateProgram(graph load.Graph, program Program, path string, offset int)
 	}
 	target, ok := navigationResolve(graph, program, pkgIndex, fileIndex, token)
 	if !ok {
+		if imported := navigationImportedPackage(graph, program, pkgIndex, fileIndex, token); imported.Ok {
+			return imported
+		}
 		return NavigationResult{}
 	}
 	if target.local {
@@ -54,6 +57,59 @@ func NavigateProgram(graph load.Graph, program Program, path string, offset int)
 		return navigationMember(graph, program, target)
 	}
 	return navigationPackage(graph, program, target.packageIndex, target.symbolIndex)
+}
+
+func navigationImportedPackage(graph load.Graph, program Program, pkgIndex, fileIndex, token int) NavigationResult {
+	if pkgIndex < 0 || pkgIndex >= len(program.Packages) || pkgIndex >= len(graph.Packages) ||
+		fileIndex < 0 || fileIndex >= len(graph.Packages[pkgIndex].Files) {
+		return NavigationResult{}
+	}
+	file := graph.Packages[pkgIndex].Files[fileIndex].File
+	if fn, ok := completionFunctionAt(file, file.Tokens[token].Start); ok {
+		if scope, scopeOK, _ := buildFuncScopeCore(file, fn); scopeOK && lookupScopeTokenNameCore(scope, &file, token) >= 0 {
+			return NavigationResult{}
+		}
+	}
+	name := tokenString(&file, token)
+	imported := completionImportPackage(program.Packages[pkgIndex], fileIndex, name)
+	if imported < 0 || imported >= len(graph.Packages) {
+		return NavigationResult{}
+	}
+	var definition SourceLocation
+	definitionOK := false
+	for i := 0; i < len(graph.Packages[imported].Files); i++ {
+		packageFile := graph.Packages[imported].Files[i].File
+		if packageFile.PackageName >= 0 {
+			definition, definitionOK = navigationLocation(graph, imported, i, packageFile.PackageName)
+			if definitionOK {
+				break
+			}
+		}
+	}
+	if !definitionOK {
+		return NavigationResult{}
+	}
+	result := NavigationResult{Definition: definition, Ok: true}
+	navigationAppend(&result.References, definition)
+	for i := 0; i < len(file.Tokens); i++ {
+		if file.Tokens[i].KindLine&255 != syntax.TokenIdent || tokenString(&file, i) != name {
+			continue
+		}
+		isAlias := false
+		for j := 0; j < len(file.Imports); j++ {
+			if file.Imports[j].NameTok == i {
+				isAlias = true
+				break
+			}
+		}
+		if !isAlias && (i+1 >= len(file.Tokens) || !tokenTextIs(&file, i+1, ".")) {
+			continue
+		}
+		if location, valid := navigationLocation(graph, pkgIndex, fileIndex, i); valid {
+			navigationAppend(&result.References, location)
+		}
+	}
+	return result
 }
 
 func navigationToken(file syntax.File, offset int) int {
@@ -95,6 +151,11 @@ func navigationResolve(graph load.Graph, program Program, pkgIndex int, fileInde
 	if target, ok := navigationTypeRefs(info.CoreTypeRefs, fileIndex, token); ok {
 		return target, true
 	}
+	// Member resolution uses the parsed function and declaration surfaces, so it
+	// remains available even when checking stopped before retaining CoreBodies.
+	if target, ok := navigationMemberAt(graph, program, pkgIndex, fileIndex, token); ok {
+		return target, true
+	}
 	for i := 0; i < len(info.CoreBodies); i++ {
 		body := info.CoreBodies[i]
 		if body.File != fileIndex {
@@ -104,9 +165,6 @@ func navigationResolve(graph load.Graph, program Program, pkgIndex int, fileInde
 			return target, true
 		}
 		if target, ok := navigationTypeRefs(body.CoreTypeRefs, fileIndex, token); ok {
-			return target, true
-		}
-		if target, ok := navigationMemberAt(graph, program, pkgIndex, fileIndex, token); ok {
 			return target, true
 		}
 		if body.Func < 0 || body.Func >= len(graph.Packages[pkgIndex].Files[fileIndex].File.Funcs) {
