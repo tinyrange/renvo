@@ -83,7 +83,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .primary-action:hover:not(:disabled) { background: var(--accent-hover); }
 .primary-action:disabled { color: #999; background: #393939; cursor: default; }
 .primary-action svg { width: 13px; fill: currentColor; stroke: none; }
-.secondary-action { display: flex; height: 24px; align-items: center; gap: 4px; padding: 0 8px; border: 1px solid var(--border-strong); background: #2d2d2d; color: var(--text); cursor: pointer; font-size: 12px; }
+.secondary-action { display: flex; height: 24px; flex: none; align-items: center; gap: 4px; padding: 0 8px; border: 1px solid var(--border-strong); background: #2d2d2d; color: var(--text); cursor: pointer; font-size: 12px; white-space: nowrap; }
 .secondary-action:hover:not(:disabled) { background: #383838; }
 .secondary-action:disabled { color: #777; cursor: default; }
 .secondary-action svg { width: 12px; fill: currentColor; stroke: none; }

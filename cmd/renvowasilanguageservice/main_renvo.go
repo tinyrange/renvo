@@ -223,23 +223,18 @@ func appMain(args []string, env []string) int {
 		}
 		return 0
 	}
+	program := result.Program
+	if !program.Ok {
+		program = check.CheckGraphBestEffort(result.Workspace.Graph)
+	}
 	if options.mode == "signature" {
-		var help check.SignatureHelp
-		if result.Program.Ok {
-			help = check.SignatureHelpProgram(result.Workspace.Graph, result.Program,
-				load.CleanPath(options.file), options.offset)
-		} else {
-			help = check.SignatureHelpGraph(result.Workspace.Graph,
-				load.CleanPath(options.file), options.offset)
-		}
+		help := check.SignatureHelpProgram(result.Workspace.Graph, program,
+			load.CleanPath(options.file), options.offset)
 		analysisSignature(help)
 		return 0
 	}
 	if options.mode == "definition" || options.mode == "references" {
-		if !result.Program.Ok {
-			return 0
-		}
-		navigation := check.NavigateProgram(result.Workspace.Graph, result.Program,
+		navigation := check.NavigateProgram(result.Workspace.Graph, program,
 			load.CleanPath(options.file), options.offset)
 		if !navigation.Ok {
 			return 0
@@ -254,24 +249,16 @@ func appMain(args []string, env []string) int {
 		return 0
 	}
 	if options.mode == "hover" {
-		if result.Program.Ok {
-			analysisHover(check.HoverProgram(result.Workspace.Graph, result.Program,
-				load.CleanPath(options.file), options.offset))
-		}
+		analysisHover(check.HoverProgram(result.Workspace.Graph, program,
+			load.CleanPath(options.file), options.offset))
 		return 0
 	}
 	source := analysisFindSource(sources.Files, options.file)
 	if languageservice.ImportPathAt(source, options.offset).Ok {
 		return 0
 	}
-	var completions []check.CompletionItem
-	if result.Program.Ok {
-		completions = check.CompleteProgram(result.Workspace.Graph, result.Program,
-			load.CleanPath(options.file), options.offset)
-	} else {
-		completions = check.CompleteGraph(result.Workspace.Graph,
-			load.CleanPath(options.file), options.offset)
-	}
+	completions := check.CompleteProgram(result.Workspace.Graph, program,
+		load.CleanPath(options.file), options.offset)
 	for i := 0; i < len(completions); i++ {
 		analysisCompletion(completions[i])
 	}

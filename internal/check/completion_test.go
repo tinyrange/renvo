@@ -134,6 +134,34 @@ func (d *Device) Read() (Reading, error) { return Reading{}, nil }
 	t.Fatalf("completion after inferred method result = %#v", items)
 }
 
+func TestCompleteGraphFollowsImportedPackageVariables(t *testing.T) {
+	mainSource := []byte(`package main
+import "example.com/app/board"
+func main() { board.Clock.DelayM }
+`)
+	files := []load.SourceFile{
+		{Path: "/repo/go.mod", Src: []byte("module example.com/app\n")},
+		{Path: "/repo/clock/clock.go", Src: []byte(`package clock
+type Clock struct{}
+func New() Clock { return Clock{} }
+func (c *Clock) DelayMilliseconds(milliseconds uint32) {}
+`)},
+		{Path: "/repo/board/board.go", Src: []byte(`package board
+import "example.com/app/clock"
+var Clock = clock.New()
+`)},
+		{Path: "/repo/main.go", Src: mainSource},
+	}
+	workspace := load.LoadWorkspace("/repo", "/std", ".", files)
+	items := CompleteGraph(workspace.Graph, "/repo/main.go", completionTestOffset(mainSource, "DelayM"))
+	for i := 0; i < len(items); i++ {
+		if items[i].Name == "DelayMilliseconds" {
+			return
+		}
+	}
+	t.Fatalf("chained package variable completion = %#v, program = %#v", items, completionProgram(workspace.Graph))
+}
+
 func TestCompletionIncludesDeclarationDocumentation(t *testing.T) {
 	mainSource := []byte("package main\nimport \"example.com/app/lib\"\nfunc main() { lib.Rea }\n")
 	files := []load.SourceFile{

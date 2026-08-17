@@ -1166,8 +1166,9 @@ function updateReadyState() {
   const transportAvailable = !board || !elements.flashTransport.selectedOptions[0]?.disabled;
   elements.run.disabled = !compilerReady || !monaco || !executable || !transportAvailable || running || runAfterBuild;
   elements.flashTransport.disabled = building || running || runAfterBuild;
+  elements.run.title = board ? "Build, flash, and run on the selected device (F5)" : "Run console app (F5)";
   elements.run.querySelector("span").textContent = running ? (board ? "Flashing…" : "Running…") :
-    runAfterBuild ? (board ? "Flash pending…" : "Run pending…") : (board ? "Flash & Run" : "Run");
+    runAfterBuild ? (board ? "Pending…" : "Run pending…") : (board ? "Flash" : "Run");
   elements.mobileRun.disabled = elements.run.disabled;
   elements.mobileRun.textContent = running ? (board ? "Flashing…" : "Running…") :
     runAfterBuild ? (board ? "Pending…" : "Pending…") : (board ? "Flash" : "Run");
