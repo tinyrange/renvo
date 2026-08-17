@@ -319,6 +319,17 @@ func completionNameType(graph load.Graph, prog Program, pkgIndex, fileIndex int,
 }
 
 func completionExpressionType(graph load.Graph, prog Program, pkgIndex, fileIndex int, file syntax.File, start, end, resultIndex int) (completionType, bool) {
+	start, end = trimExprSpan(file, start, end)
+	if start < end && tokenTextIs(&file, start, "<-") {
+		channelType, ok := completionExpressionType(graph, prog, pkgIndex, fileIndex, file, start+1, end, 0)
+		if !ok {
+			return completionType{}, false
+		}
+		if element, ok := completionChannelElement(channelType.Name); ok {
+			return completionType{Package: channelType.Package, Name: element}, true
+		}
+		return completionType{}, false
+	}
 	for start < end && start < len(file.Tokens) && tokenTextIs(&file, start, "&") {
 		start++
 	}
@@ -359,6 +370,17 @@ func completionExpressionType(graph load.Graph, prog Program, pkgIndex, fileInde
 		return completionType{Package: owner, Name: name}, true
 	}
 	if next < end && tokenTextIs(&file, next, "(") {
+		if owner == pkgIndex && name == "make" {
+			close := findTypeMatching(file, next, '(', ')')
+			if close < 0 || close > end {
+				close = end
+			}
+			typeEnd := nextTopLevelComma(file, next+1, close)
+			if typeEnd > close {
+				typeEnd = close
+			}
+			return completionSpanType(graph, prog, pkgIndex, fileIndex, next+1, typeEnd)
+		}
 		if completionPredeclaredType(name) {
 			return completionType{Package: pkgIndex, Name: name}, true
 		}
@@ -380,7 +402,35 @@ func completionExpressionType(graph load.Graph, prog Program, pkgIndex, fileInde
 		}
 		return completionSymbolResultType(graph, prog, target.packageIndex, target.symbolIndex, resultIndex)
 	}
+	if owner == pkgIndex && next == end {
+		if fn, ok := completionFunctionAt(file, file.Tokens[start].Start); ok {
+			if typ, found := completionNameType(graph, prog, pkgIndex, fileIndex, file, fn, name, file.Tokens[start].Start); found {
+				return typ, true
+			}
+		}
+	}
 	return completionType{Package: owner, Name: name}, true
+}
+
+func completionChannelElement(name string) (string, bool) {
+	start := 0
+	if len(name) >= 2 && name[0] == '<' && name[1] == '-' {
+		start = 2
+	}
+	for start < len(name) && (name[start] == ' ' || name[start] == '\t') {
+		start++
+	}
+	if start+4 > len(name) || name[start:start+4] != "chan" {
+		return "", false
+	}
+	start += 4
+	for start < len(name) && (name[start] == ' ' || name[start] == '\t' || name[start] == '<' || name[start] == '-') {
+		start++
+	}
+	if start >= len(name) {
+		return "", false
+	}
+	return name[start:], true
 }
 
 func completionPredeclaredType(name string) bool {
@@ -465,6 +515,12 @@ func completionSpanType(graph load.Graph, prog Program, pkg, fileIndex, start, e
 		return completionType{}, false
 	}
 	file := graph.Packages[pkg].Files[fileIndex].File
+	spanStart, spanEnd := trimTypeSpan(file, start, end)
+	if classifyType(file, spanStart, spanEnd) == TypeChan {
+		first := file.Tokens[spanStart].Start
+		last := file.Tokens[spanEnd-1].End
+		return completionType{Package: pkg, Name: string(file.Src[first:last])}, true
+	}
 	for start < end && start < len(file.Tokens) && file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		start++
 	}

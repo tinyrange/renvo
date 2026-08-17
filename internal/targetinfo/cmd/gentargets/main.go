@@ -231,7 +231,7 @@ func driverHelpSource(descriptors []sourceDescriptor) []byte {
 		"  Explicit .go files must share one directory and package. Exactly the named files are used;\n" +
 		"  build constraints and OS/architecture suffixes are ignored, while _test.go files are skipped.\n" +
 		"Targets:\n  "
-	const suffix = "Unsupported language/toolchain features:\n  generics, goroutines, channels, select, cgo\n"
+	const suffix = "Unsupported language/toolchain features:\n  generics, cgo\nConcurrency:\n  goroutines, channels, and select are frontend-lowered through renvo.dev/x/runtime; v1 handlers serialize execution.\n"
 	var advertised []string
 	for _, descriptor := range descriptors {
 		if descriptor.Advertised {

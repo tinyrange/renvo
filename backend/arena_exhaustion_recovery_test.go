@@ -28,6 +28,10 @@ func TestRuntimeIntrinsicFingerprintTable(t *testing.T) {
 		{name: "renvo_runtime_ArenaDiscardLinkTokens", id: 13},
 		{name: "renvo_runtime_ArenaDiscardLowerTokens", id: 13},
 		{name: "renvo_runtime_ArenaDiscardUnitTokens", id: 13},
+		{name: "renvo_runtime_ThreadStateSwap", id: 14},
+		{name: "renvo_runtime_StackSupported", id: 16},
+		{name: "renvo_runtime_StackInit", id: 17},
+		{name: "renvo_runtime_StackSwitch", id: 18},
 	}
 
 	for _, test := range tests {

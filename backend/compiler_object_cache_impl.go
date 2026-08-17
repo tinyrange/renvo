@@ -186,8 +186,8 @@ func renvoObjectFunctionBodyHash(g *renvoLinearGen, fnIndex int) (int, int) {
 func renvoObjectGeneratorStateHash(g *renvoLinearGen) (int, int) {
 	a, b := 1597, 2017
 	values := []int{
-		g.panicValueOff, g.panicTypeOff, g.panicIDOff, g.panicNextIDOff, g.panicPrevOff,
-		g.panicDeferPendingOff, g.panicRecoveredOff, g.stringHeapOff, g.stringHeapEndOff,
+		g.threadStatePointerOff, g.mainThreadStateOff,
+		g.stringHeapOff, g.stringHeapEndOff,
 		g.stringHeapDataOff, g.stringHeapReady,
 		g.printIntBufferOff, g.darwinEntryOff, g.fixedTargetValue, g.fixedTargetState,
 		len(g.meta.types), len(g.meta.fields), len(g.meta.captures), len(g.asm.staticImports),

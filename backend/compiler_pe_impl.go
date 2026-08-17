@@ -55,13 +55,6 @@ func renvoWinImportName(id int) string {
 	return "ExitProcess"
 }
 
-func renvoWinImportIATRVA(layout renvoWinImportLayout, id int) int {
-	if id >= 0 && id < len(layout.iatRVAs) && layout.iatRVAs[id] != 0 {
-		return layout.iatRVAs[id]
-	}
-	return layout.kernelIATRVA + (id-1)*layout.thunkSize
-}
-
 func renvoAsmAddWinImportReloc(a *renvoAsm, at int, importID int) {
 	renvoNonNil(a)
 	renvoAsmAddAbsReloc(a, at, importID, renvoAbsWinImportReloc)
@@ -82,17 +75,7 @@ func renvoAsmAddWinStaticImport(a *renvoAsm, dllStart int, dllEnd int, nameStart
 }
 
 func renvoStringFromBytes(src []byte, start int, end int) string {
-	if start < 0 {
-		start = 0
-	}
-	if end > len(src) {
-		end = len(src)
-	}
-	out := renvoFixedByteScratch(end - start)
-	for i := start; i < end; i++ {
-		out = append(out, renvo_runtime_UnsafeByteAt(src, i))
-	}
-	value := string(out)
+	value := string(src[start:end])
 	if renvoFixedTarget == 0 {
 		return renvo_runtime_ArenaPersistString(value)
 	}
@@ -132,12 +115,13 @@ func renvoAppendWinImports(a *renvoAsm, layout *renvoWinImportLayout) {
 	a.data = renvoAppendUntil(a.data, tableOff)
 
 	for id := 1; id <= renvoWinImportFixedCount; id++ {
-		renvoAppendWinImportEntry(a, layout, kernelILTOff, kernelIATOff, dataRVA, id, id-1, renvoWinImportName(id))
+		slot := (id - 1) * thunkSize
+		renvoAppendWinImportEntry(a, layout, kernelILTOff+slot, kernelIATOff+slot, id, renvoWinImportName(id))
 	}
 	for i := 0; i < len(a.staticImports); i++ {
 		imp := a.staticImports[i]
 		iltOff := customTablesOff + i*4*thunkSize
-		renvoAppendWinImportEntry(a, layout, iltOff, iltOff+2*thunkSize, dataRVA, renvoWinImportFixedCount+1+i, 0, imp.name)
+		renvoAppendWinImportEntry(a, layout, iltOff, iltOff+2*thunkSize, renvoWinImportFixedCount+1+i, imp.name)
 	}
 	for i := 0; i < groupCount; i++ {
 		iltOff := kernelILTOff
@@ -161,7 +145,7 @@ func renvoAppendWinImports(a *renvoAsm, layout *renvoWinImportLayout) {
 	layout.kernelIATRVA = layout.iatRVAs[renvoWinImportGetStdHandle]
 }
 
-func renvoAppendWinImportEntry(a *renvoAsm, layout *renvoWinImportLayout, iltOff int, iatOff int, dataRVA int, id int, slot int, name string) {
+func renvoAppendWinImportEntry(a *renvoAsm, layout *renvoWinImportLayout, iltAt int, iatAt int, id int, name string) {
 	renvoNonNil(a, layout)
 	nameAt := len(a.data)
 	a.data = renvoAppend16(a.data, 0)
@@ -169,12 +153,10 @@ func renvoAppendWinImportEntry(a *renvoAsm, layout *renvoWinImportLayout, iltOff
 	if len(a.data)&1 != 0 {
 		a.data = append(a.data, 0)
 	}
-	nameRVA := dataRVA + nameAt
-	iltAt := iltOff + slot*layout.thunkSize
-	iatAt := iatOff + slot*layout.thunkSize
+	nameRVA := a.dataOffset + nameAt
 	renvoPut32At(a.data, iltAt, nameRVA)
 	renvoPut32At(a.data, iatAt, nameRVA)
-	layout.iatRVAs[id] = dataRVA + iatAt
+	layout.iatRVAs[id] = a.dataOffset + iatAt
 }
 
 func renvoAsmPatchWindows(a *renvoAsm, layout renvoWinImportLayout) {
@@ -200,7 +182,7 @@ func renvoAsmPatchWindows(a *renvoAsm, layout renvoWinImportLayout) {
 		off := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1))
 		kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2))
 		if kind == renvoAbsWinImportReloc {
-			target := renvoWinImportIATRVA(layout, off)
+			target := layout.iatRVAs[off]
 			if a.c.renvoTargetArch != renvoArch386 {
 				next := a.codeOffset + at + 4
 				renvoPut32At(a.code, at, target-next)
@@ -234,7 +216,6 @@ func renvoAppendPEHeader64WithContext(context *renvoCompileContext, out []byte, 
 	if context.renvoTargetArch == renvoArchAarch64 {
 		machine = 0xaa64
 		imageBase = 0x140000000
-		stackCommit = 0x1000
 	}
 	sizeOfImage := renvoAlignValue(dataRVA+dataVirtualSize, renvoWinSectionAlign)
 	out = renvoAppend32(out, 0x5a4d)

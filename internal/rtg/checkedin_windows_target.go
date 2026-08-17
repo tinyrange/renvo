@@ -137,6 +137,27 @@ func compileWindowsAmd64Arena(input []int, output int, arenaSize int) int {
 	return renvoCompileAmd64(input, output, arenaSize)
 }
 
+func renvoAsmPatchWindowsAmd64(a *renvoAsm, layout renvoWinImportLayout) {
+	for i := 0; i+1 < len(a.relocs); i += 2 {
+		at := int(renvo_runtime_UnsafeInt32At(a.relocs, i))
+		label := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1))
+		target := renvoAsmLabelPosition(a, label)
+		renvoPut32At(a.code, at, target-(at+4))
+	}
+	for i := 0; i+2 < len(a.absRelocs); i += 3 {
+		at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i))
+		off := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1))
+		kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2))
+		target := a.dataOffset + off
+		if kind == renvoAbsWinImportReloc {
+			target = layout.iatRVAs[off]
+		} else if kind == renvoAbsBssReloc {
+			target = renvoAsmBssOffset(a) + off
+		}
+		renvoPut32At(a.code, at, target-(a.codeOffset+at+4))
+	}
+}
+
 // renvoAsmImageWindowsAmd64 is the compact production specialization of the
 // validated declarative PE64 layout. Prepared backends retain the generic
 // definition-driven image builder.
@@ -150,18 +171,12 @@ func renvoAsmImageWindowsAmd64(a *renvoAsm) []byte {
 	dataRVA := renvoAlignValue(a.codeOffset+textVirtualSize, renvoWinSectionAlign)
 	a.dataOffset = dataRVA
 	var imports renvoWinImportLayout
-	if renvoAsmHasWinImportRelocs(a) {
-		renvoAppendWinImports(a, &imports)
-	}
-	renvoAsmPatchWindows(a, imports)
+	renvoAppendWinImports(a, &imports)
+	renvoAsmPatchWindowsAmd64(a, imports)
 	dataRawSize := renvoAlignValue(len(a.data), renvoWinFileAlign)
 	dataVirtualSize := len(a.data) + a.bssSize
-	iatSize := 0
-	if imports.kernelIATRVA != 0 {
-		iatSize = (renvoWinImportFixedCount + 1) * imports.thunkSize
-	}
 	var out []byte
-	out = renvoAppendPEHeader64WithContext(a.c, out, textRawSize, textVirtualSize, dataRVA, dataRawSize, dataVirtualSize, imports.importRVA, imports.importSize, imports.kernelIATRVA, iatSize)
+	out = renvoAppendPEHeader64WithContext(a.c, out, textRawSize, textVirtualSize, dataRVA, dataRawSize, dataVirtualSize, imports.importRVA, imports.importSize, imports.kernelIATRVA, (renvoWinImportFixedCount+1)*imports.thunkSize)
 	for i := 0; i < len(a.code); i++ {
 		out = append(out, a.code[i])
 	}

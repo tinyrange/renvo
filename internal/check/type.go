@@ -12,6 +12,13 @@ const (
 	TypeArray
 	TypePointer
 	TypeFunc
+	TypeChan
+)
+
+const (
+	ChanBoth = iota
+	ChanSendOnly
+	ChanReceiveOnly
 )
 
 type TypeInfo struct {
@@ -30,6 +37,7 @@ type TypeInfo struct {
 	KeyEnd           int
 	ElemStart        int
 	ElemEnd          int
+	Direction        int
 	Signature        FuncSignature
 	Fields           []Field
 	InterfaceMethods []InterfaceMethod
@@ -63,6 +71,7 @@ func buildTypeInfo(file syntax.File, decl DeclInfo, declIndex int) TypeInfo {
 		KeyEnd:    -1,
 		ElemStart: -1,
 		ElemEnd:   -1,
+		Direction: ChanBoth,
 	}
 	if out.Kind == TypeStruct {
 		open := findTypeTopLevelChar(file, decl.TypeStart, decl.TypeEnd, '{')
@@ -84,6 +93,8 @@ func buildTypeInfo(file syntax.File, decl DeclInfo, declIndex int) TypeInfo {
 		out.ElemStart, out.ElemEnd = trimTypeSpan(file, decl.TypeStart+1, decl.TypeEnd)
 	} else if out.Kind == TypeFunc {
 		out.Signature = parseFuncTypeSignature(file, decl.TypeStart, decl.TypeEnd)
+	} else if out.Kind == TypeChan {
+		out.Direction, out.ElemStart, out.ElemEnd = parseChanTypeShape(file, decl.TypeStart, decl.TypeEnd)
 	}
 	return out
 }
@@ -104,6 +115,9 @@ func classifyType(file syntax.File, start int, end int) int {
 	if file.Tokens[start].KindLine&255 == syntax.TokenFunc {
 		return TypeFunc
 	}
+	if file.Tokens[start].KindLine&255 == syntax.TokenChan || tokenTextIs(&file, start, "<-") && start+1 < end && file.Tokens[start+1].KindLine&255 == syntax.TokenChan {
+		return TypeChan
+	}
 	if tokCharIs(&file, start, '*') {
 		return TypePointer
 	}
@@ -117,6 +131,28 @@ func classifyType(file syntax.File, start int, end int) int {
 		return TypeNamed
 	}
 	return TypeOther
+}
+
+func parseChanTypeShape(file syntax.File, start int, end int) (int, int, int) {
+	start, end = trimTypeSpan(file, start, end)
+	if start < 0 || end <= start {
+		return ChanBoth, -1, -1
+	}
+	direction := ChanBoth
+	if tokenTextIs(&file, start, "<-") {
+		direction = ChanReceiveOnly
+		start++
+	}
+	if start >= end || file.Tokens[start].KindLine&255 != syntax.TokenChan {
+		return direction, -1, -1
+	}
+	start++
+	if start < end && tokenTextIs(&file, start, "<-") {
+		direction = ChanSendOnly
+		start++
+	}
+	elemStart, elemEnd := trimTypeSpan(file, start, end)
+	return direction, elemStart, elemEnd
 }
 
 func parseMapTypeShape(file syntax.File, start int, end int) (int, int, int, int) {

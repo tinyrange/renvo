@@ -32,6 +32,12 @@ func TestBundledStandardLibraryFS(t *testing.T) {
 	if _, ok := fs.ReadFile("/std/bytes/bytes_renvo.go"); !ok {
 		t.Fatal("RENVO standard library source was not embedded")
 	}
+	if _, ok := fs.ReadFile("/std/unsafe/unsafe.go"); !ok {
+		t.Fatal("unsafe standard library source was not embedded")
+	}
+	if _, ok := fs.ReadFile("/std/sync/sync_renvo.go"); !ok {
+		t.Fatal("sync standard library source was not embedded")
+	}
 	font, ok := fs.ReadFile("/std/graphics/gofont/Go-Mono.ttf")
 	if !ok || len(font) < 4 || !bytes.Equal(font[:4], []byte{0, 1, 0, 0}) {
 		t.Fatal("standard library embed asset was not embedded")
@@ -51,8 +57,12 @@ func TestBundledOptionalModuleCache(t *testing.T) {
 	if !ok || len(data) == 0 {
 		t.Fatal("bundled device source missing")
 	}
+	data, ok = bundledStdReadFile("/modules/renvo.dev@v0.0.0/x/runtime/runtime.go")
+	if !ok || len(data) == 0 {
+		t.Fatal("bundled runtime source missing")
+	}
 	entries, ok := bundledStdReadDir("/modules/renvo.dev@v0.0.0")
-	if !ok || len(entries) != 4 || entries[0].Name != "go.mod" || entries[1].Name != "device" || entries[2].Name != "forms" || entries[3].Name != "std" {
+	if !ok || len(entries) != 5 || entries[0].Name != "go.mod" || entries[1].Name != "device" || entries[2].Name != "forms" || entries[3].Name != "std" || entries[4].Name != "x" {
 		t.Fatalf("bundled module root = %#v/%v", entries, ok)
 	}
 }
@@ -84,6 +94,36 @@ func TestBundledFormsModuleCompilesOffline(t *testing.T) {
 	result := BuildFromFSWithModuleCache([]string{"-t", "browser/wasm32", "-o", "app", "."}, root, "/std", "/modules", OSFS{})
 	if !result.Ok {
 		t.Fatalf("offline Forms build failed: %#v", result.Diagnostic)
+	}
+}
+
+func TestBundledRuntimeModuleCompilesConcurrencyOffline(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\nrequire renvo.dev v0.0.0\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	source := []byte(`package main
+import (
+	"sync"
+	runtime "renvo.dev/x/runtime"
+	"renvo.dev/x/runtime/serial"
+)
+func main() {
+	runtime.EnableGoroutines(serial.New())
+	var mutex sync.Mutex
+	mutex.Lock()
+	mutex.Unlock()
+	values := make(chan int, 1)
+	values <- 7
+	print(<-values)
+}
+`)
+	if err := os.WriteFile(filepath.Join(root, "main.go"), source, 0644); err != nil {
+		t.Fatal(err)
+	}
+	result := BuildFromFSWithModuleCache([]string{"-t", "linux/amd64", "-o", "app", "."}, root, "/std", "/modules", OSFS{})
+	if !result.Ok {
+		t.Fatalf("offline runtime build failed: %#v", result.Diagnostic)
 	}
 }
 

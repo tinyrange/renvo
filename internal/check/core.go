@@ -128,6 +128,12 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			if assignmentErr, assignmentTok := invalidDefiniteAssignmentType(file, fn); assignmentErr != CheckOK {
 				return info, false, assignmentErr, fileIndex, assignmentTok
 			}
+			channelCheckArenaStart := arena.Mark()
+			channelTok := invalidDefiniteChannelOperation(file, fn)
+			arena.Reset(channelCheckArenaStart)
+			if channelTok >= 0 {
+				return info, false, CheckErrChannel, fileIndex, channelTok
+			}
 			if sliceTok := invalidDefiniteSliceOperand(pkg, info, fileIndex, fn); sliceTok >= 0 {
 				return info, false, CheckErrSliceOperand, fileIndex, sliceTok
 			}

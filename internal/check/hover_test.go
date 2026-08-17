@@ -55,6 +55,33 @@ func (d *Device) Read() (Reading, error) { return Reading{}, nil }
 	}
 }
 
+func TestHoverProgramReportsChannelAndReceiveTypes(t *testing.T) {
+	source := []byte(`package main
+func main() {
+	values := make(chan int, 1)
+	value := <-values
+	_ = value
+}
+`)
+	files := []load.SourceFile{
+		{Path: "/repo/go.mod", Src: []byte("module example.com/app\n")},
+		{Path: "/repo/main.go", Src: source},
+	}
+	workspace := load.LoadWorkspace("/repo", "/std", ".", files)
+	program := CheckGraph(workspace.Graph)
+	if !program.Ok {
+		t.Fatalf("check failed: %#v", program)
+	}
+	values := HoverProgram(workspace.Graph, program, "/repo/main.go", hoverTestOffset(source, "values :="))
+	if !values.Ok || values.Signature != "var values chan int" {
+		t.Fatalf("values hover = %#v", values)
+	}
+	value := HoverProgram(workspace.Graph, program, "/repo/main.go", hoverTestOffset(source, "value :="))
+	if !value.Ok || value.Signature != "var value int" {
+		t.Fatalf("value hover = %#v", value)
+	}
+}
+
 func hoverTestOffset(source []byte, marker string) int {
 	for i := 0; i+len(marker) <= len(source); i++ {
 		if string(source[i:i+len(marker)]) == marker {

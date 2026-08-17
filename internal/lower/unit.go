@@ -42,6 +42,9 @@ func EmitCheckedPackageCore(pkg load.Package, info check.PackageInfo, transient 
 	if !builder.addCheckedFuncs(info, files) {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
+	if !builder.addCheckedConcurrencySites(files) {
+		return emitFail(result, builder.err, builder.errFile, builder.errToken)
+	}
 	if !builder.addCheckedSymbols(info, files) {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
@@ -149,6 +152,160 @@ func (b *coreUnitBuilder) reserveCheckedPackage(pkg load.Package, info check.Pac
 	b.program.Calls = make([]unit.Call, 0, callCap)
 	b.program.Refs = make([]unit.NameRef, 0, refCap)
 	b.program.Selectors = make([]unit.Selector, 0, selectorCap)
+}
+
+func (b *coreUnitBuilder) addCheckedConcurrencySites(files []coreFileTokens) bool {
+	for fileIndex := 0; fileIndex < len(files); fileIndex++ {
+		file := files[fileIndex].file
+		mapping := files[fileIndex].tokens
+		for token := 0; token < len(file.Tokens); token++ {
+			kind := 0
+			direction := check.ChanBoth
+			receiveArity := 0
+			elementType := ""
+			tokenKind := file.Tokens[token].KindLine & 255
+			if tokenKind == syntax.TokenGo {
+				kind = unit.ConcurrencyGo
+			} else if tokenKind == syntax.TokenSelect {
+				kind = unit.ConcurrencySelect
+			} else if tokenKind == syntax.TokenChan {
+				kind = unit.ConcurrencyChannelType
+				start := token + 1
+				if start < len(file.Tokens) && lowerTokenTextIs(file, start, "<-") {
+					direction = check.ChanSendOnly
+					start++
+				} else if token > 0 && lowerTokenTextIs(file, token-1, "<-") {
+					direction = check.ChanReceiveOnly
+				}
+				end := lowerConcurrencyTypeEnd(file, start)
+				if start < end {
+					elementType = string(file.Src[file.Tokens[start].Start:file.Tokens[end-1].End])
+				}
+			} else if tokenKind == syntax.TokenOperator && lowerTokenTextIs(file, token, "<-") {
+				if token+1 < len(file.Tokens) && file.Tokens[token+1].KindLine&255 == syntax.TokenChan || token > 0 && file.Tokens[token-1].KindLine&255 == syntax.TokenChan {
+					continue
+				}
+				kind, direction = unit.ConcurrencyReceive, check.ChanReceiveOnly
+				if lowerConcurrencyArrowIsSend(file, token) {
+					kind, direction = unit.ConcurrencySend, check.ChanSendOnly
+				} else {
+					receiveArity = lowerConcurrencyReceiveArity(file, token)
+				}
+			}
+			if kind == 0 {
+				continue
+			}
+			mapped := mapCoreToken(mapping, token, b.finalEOF)
+			if mapped < 0 {
+				b.setErr(EmitErrToken, fileIndex, token)
+				return false
+			}
+			b.program.ConcurrencySites = append(b.program.ConcurrencySites, unit.ConcurrencySite{
+				Kind: kind, Token: mapped, Direction: direction,
+				ReceiveArity: receiveArity, ElementType: cloneCoreString(elementType),
+			})
+		}
+	}
+	return true
+}
+
+func lowerTokenTextIs(file syntax.File, token int, wanted string) bool {
+	if token < 0 || token >= len(file.Tokens) {
+		return false
+	}
+	item := file.Tokens[token]
+	if item.Start < 0 || item.End-item.Start != len(wanted) || item.End > len(file.Src) {
+		return false
+	}
+	for i := 0; i < len(wanted); i++ {
+		if file.Src[item.Start+i] != wanted[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func lowerConcurrencyTypeEnd(file syntax.File, start int) int {
+	if start < 0 || start >= len(file.Tokens) {
+		return start
+	}
+	text := string(file.Src[file.Tokens[start].Start:file.Tokens[start].End])
+	if text == "*" || text == "[]" {
+		return lowerConcurrencyTypeEnd(file, start+1)
+	}
+	if text == "<-" && start+1 < len(file.Tokens) && file.Tokens[start+1].KindLine&255 == syntax.TokenChan {
+		return lowerConcurrencyTypeEnd(file, start+2)
+	}
+	if file.Tokens[start].KindLine&255 == syntax.TokenChan {
+		element := start + 1
+		if element < len(file.Tokens) && lowerTokenTextIs(file, element, "<-") {
+			element++
+		}
+		return lowerConcurrencyTypeEnd(file, element)
+	}
+	if text == "[" {
+		close := lowerMatchingToken(file, start, "[", "]")
+		return lowerConcurrencyTypeEnd(file, close+1)
+	}
+	if text == "map" && start+1 < len(file.Tokens) && lowerTokenTextIs(file, start+1, "[") {
+		close := lowerMatchingToken(file, start+1, "[", "]")
+		return lowerConcurrencyTypeEnd(file, close+1)
+	}
+	if text == "struct" || text == "interface" {
+		if start+1 < len(file.Tokens) && lowerTokenTextIs(file, start+1, "{") {
+			close := lowerMatchingToken(file, start+1, "{", "}")
+			if close >= 0 {
+				return close + 1
+			}
+		}
+	}
+	if text == "func" && start+1 < len(file.Tokens) && lowerTokenTextIs(file, start+1, "(") {
+		close := lowerMatchingToken(file, start+1, "(", ")")
+		if close >= 0 {
+			return close + 1
+		}
+	}
+	if start+2 < len(file.Tokens) && lowerTokenTextIs(file, start+1, ".") {
+		return start + 3
+	}
+	return start + 1
+}
+
+func lowerMatchingToken(file syntax.File, start int, open string, close string) int {
+	depth := 0
+	for i := start; i < len(file.Tokens); i++ {
+		if lowerTokenTextIs(file, i, open) {
+			depth++
+		} else if lowerTokenTextIs(file, i, close) {
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func lowerConcurrencyArrowIsSend(file syntax.File, arrow int) bool {
+	if arrow <= 0 {
+		return false
+	}
+	previous := string(file.Src[file.Tokens[arrow-1].Start:file.Tokens[arrow-1].End])
+	return previous != "=" && previous != ":=" && previous != "," && previous != "(" && previous != "case" && previous != "return"
+}
+
+func lowerConcurrencyReceiveArity(file syntax.File, arrow int) int {
+	for i := arrow - 1; i >= 0 && file.Tokens[i].KindLine>>8 == file.Tokens[arrow].KindLine>>8; i-- {
+		if lowerTokenTextIs(file, i, ":=") || lowerTokenTextIs(file, i, "=") {
+			for j := i - 1; j >= 0 && file.Tokens[j].KindLine>>8 == file.Tokens[arrow].KindLine>>8; j-- {
+				if lowerTokenTextIs(file, j, ",") {
+					return 2
+				}
+			}
+			return 1
+		}
+	}
+	return 1
 }
 
 func (b *coreUnitBuilder) addFileTokens(file syntax.File, src []byte, fileIndex int, hasNext bool, transient bool) (coreTokenMap, bool) {

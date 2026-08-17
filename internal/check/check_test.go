@@ -66,21 +66,6 @@ func TestCheckGraphCoreDiagnostics(t *testing.T) {
 			err:   CheckErrType,
 		},
 		{
-			name:  "excluded goroutine",
-			files: []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc work() {}\nfunc main() { go work() }\n")}},
-			err:   CheckErrGoroutine,
-		},
-		{
-			name:  "excluded channel declaration",
-			files: []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nvar values chan int\nfunc main() {}\n")}},
-			err:   CheckErrChannel,
-		},
-		{
-			name:  "excluded select",
-			files: []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc main() { select {} }\n")}},
-			err:   CheckErrSelect,
-		},
-		{
 			name:  "undefined value",
 			files: []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc main() { print(missing) }\n")}},
 			err:   CheckErrUndefined,
@@ -171,6 +156,34 @@ func TestCheckGraphCoreDiagnostics(t *testing.T) {
 			}
 			if program.ErrorPackage < 0 || program.ErrorFile < 0 || program.ErrorToken < 0 {
 				t.Fatalf("diagnostic has no source location: %#v", program)
+			}
+		})
+	}
+}
+
+func TestCheckGraphCoreRejectsInvalidChannelForms(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{name: "send non-channel", source: "func main() { value := 1; value <- 2; _ = value }"},
+		{name: "receive non-channel", source: "func main() { value := 1; _ = <-value }"},
+		{name: "send wrong element", source: "func main() { values := make(chan int, 1); values <- \"bad\" }"},
+		{name: "close non-channel", source: "func main() { value := true; close(value); _ = value }"},
+		{name: "negative capacity", source: "func main() { values := make(chan int, -1); _ = values }"},
+		{name: "two range values", source: "func main() { values := make(chan int); for first, second := range values { _, _ = first, second } }"},
+		{name: "direction assignment", source: "func main() { var both chan int; var send chan<- int; both = send; _ = both }"},
+		{name: "opposite directions", source: "func main() { var send chan<- int; var receive <-chan int; receive = send; _ = receive }"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			graph := checkTestGraph(t, []load.SourceFile{{
+				Path: "/repo/case/cmd/app/main.go",
+				Src:  []byte("package main\n" + test.source + "\n"),
+			}})
+			program := CheckGraphCore(graph)
+			if program.Ok || program.ErrorToken < 0 {
+				t.Fatalf("invalid channel form was accepted: %#v", program)
 			}
 		})
 	}

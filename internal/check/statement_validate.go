@@ -11,6 +11,21 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body) (int, int) {
 	var literalLocals []int
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
+		if stmt.Kind == syntax.StmtGo && !definiteCallExpression(file, stmt.ExprStart, stmt.ExprEnd) {
+			return CheckErrGoroutine, stmt.ExprStart
+		}
+		if stmt.Kind == syntax.StmtDefault && enclosingClauseOwner(body, stmt.StartTok) == syntax.StmtSelect {
+			for j := 0; j < i; j++ {
+				previous := body.Stmts[j]
+				if previous.Kind == syntax.StmtDefault && enclosingClauseOwner(body, previous.StartTok) == syntax.StmtSelect &&
+					sameEnclosingStatement(body, syntax.StmtSelect, previous.StartTok, stmt.StartTok) {
+					return CheckErrSelect, stmt.StartTok
+				}
+			}
+		}
+		if stmt.Kind == syntax.StmtCase && enclosingClauseOwner(body, stmt.StartTok) == syntax.StmtSelect && !definiteCommunicationClause(file, stmt.ExprStart, stmt.ExprEnd) {
+			return CheckErrSelect, stmt.ExprStart
+		}
 		if stmt.Kind == syntax.StmtDefer && stmt.ExprStart+1 < stmt.ExprEnd && file.Tokens[stmt.ExprStart].KindLine&255 == syntax.TokenIdent && tokCharIs(&file, stmt.ExprStart+1, '(') {
 			name := tokenString(&file, stmt.ExprStart)
 			if name == "append" || name == "cap" || name == "complex" || name == "imag" || name == "len" || name == "make" || name == "max" || name == "min" || name == "new" || name == "real" {
@@ -25,7 +40,7 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body) (int, int) {
 		}
 		callStart := stmt.StartTok
 		callEnd := stmt.EndTok
-		if stmt.Kind == syntax.StmtBlock || stmt.Kind == syntax.StmtDefault || stmt.Kind == syntax.StmtLabel {
+		if stmt.Kind == syntax.StmtBlock || stmt.Kind == syntax.StmtDefault || stmt.Kind == syntax.StmtLabel || stmt.Kind == syntax.StmtSelect {
 			callStart = -1
 		} else if stmt.Kind == syntax.StmtIf || stmt.Kind == syntax.StmtFor || stmt.Kind == syntax.StmtSwitch || stmt.Kind == syntax.StmtCase {
 			callStart = stmt.ExprStart
@@ -73,6 +88,67 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body) (int, int) {
 		}
 	}
 	return CheckOK, -1
+}
+
+func definiteCallExpression(file syntax.File, start int, end int) bool {
+	start, end = stripOuterParens(file, start, end)
+	if end-start < 2 || !tokCharIs(&file, end-1, ')') {
+		return false
+	}
+	for open := end - 2; open >= start; open-- {
+		if tokCharIs(&file, open, '(') && findTypeMatching(file, open, '(', ')') == end {
+			if open == start+1 && file.Tokens[start].KindLine&255 == syntax.TokenIdent {
+				name := tokenString(&file, start)
+				if name == "append" || name == "cap" || name == "complex" || name == "imag" || name == "len" || name == "make" || name == "max" || name == "min" || name == "new" || name == "real" || name == "recover" {
+					return false
+				}
+			}
+			return open > start
+		}
+	}
+	return false
+}
+
+func definiteCommunicationClause(file syntax.File, start int, end int) bool {
+	for i := start; i >= 0 && i < end; i++ {
+		if tokenTextIs(&file, i, "<-") {
+			return true
+		}
+	}
+	return false
+}
+
+func enclosingClauseOwner(body syntax.Body, token int) int {
+	kind := -1
+	width := 2147483647
+	for i := 0; i < len(body.Stmts); i++ {
+		stmt := body.Stmts[i]
+		if stmt.Kind != syntax.StmtSelect && stmt.Kind != syntax.StmtSwitch {
+			continue
+		}
+		if stmt.BodyStart < token && token < stmt.BodyEnd && stmt.BodyEnd-stmt.BodyStart < width {
+			kind = stmt.Kind
+			width = stmt.BodyEnd - stmt.BodyStart
+		}
+	}
+	return kind
+}
+
+func sameEnclosingStatement(body syntax.Body, kind int, left int, right int) bool {
+	best := -1
+	width := 2147483647
+	for i := 0; i < len(body.Stmts); i++ {
+		stmt := body.Stmts[i]
+		if stmt.Kind == kind && stmt.BodyStart < left && left < stmt.BodyEnd && stmt.BodyEnd-stmt.BodyStart < width {
+			best = i
+			width = stmt.BodyEnd - stmt.BodyStart
+		}
+	}
+	if best < 0 {
+		return false
+	}
+	stmt := body.Stmts[best]
+	return stmt.BodyStart < right && right < stmt.BodyEnd && enclosingClauseOwner(body, right) == kind
 }
 
 func definiteExprListSummary(file syntax.File, start int, end int, validateTargets bool) (int, ExprSpan, int) {
@@ -137,7 +213,7 @@ func branchHasEnclosing(body syntax.Body, branchTok int, continueOnly bool) bool
 		if stmt.StartTok >= branchTok || stmt.EndTok <= branchTok {
 			continue
 		}
-		if stmt.Kind == syntax.StmtFor || (!continueOnly && stmt.Kind == syntax.StmtSwitch) {
+		if stmt.Kind == syntax.StmtFor || (!continueOnly && (stmt.Kind == syntax.StmtSwitch || stmt.Kind == syntax.StmtSelect)) {
 			return true
 		}
 	}

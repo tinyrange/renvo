@@ -389,7 +389,7 @@ func ordinaryGlobalType(program *unit.Program, name string) string {
 }
 
 func ordinaryUnderlyingType(program *unit.Program, typ string, depth int) string {
-	if depth > len(program.Decls)+1 || ordinaryBuiltinTypeName(typ) || functionValueHasPrefix(typ, "[]") || functionValueHasPrefix(typ, "map[") {
+	if depth > len(program.Decls)+1 || ordinaryBuiltinTypeName(typ) || functionValueHasPrefix(typ, "[]") || functionValueHasPrefix(typ, "map[") || functionValueHasPrefix(typ, "chan") || functionValueHasPrefix(typ, "<-chan") {
 		return typ
 	}
 	for i := 0; i < len(program.Decls); i++ {
@@ -1012,7 +1012,11 @@ func ordinaryBuiltinLocalDeclaration(program *unit.Program, nameTok int, limit i
 		return true
 	}
 	paren, bracket := 0, 0
+	line := program.Tokens[nameTok].KindLine >> 8
 	for i := nameTok + 1; i < limit; i++ {
+		if paren == 0 && bracket == 0 && program.Tokens[i].KindLine>>8 != line {
+			return false
+		}
 		text := functionValueTokenText(program, i)
 		if text == "(" {
 			paren++

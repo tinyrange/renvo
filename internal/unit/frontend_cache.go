@@ -1,6 +1,6 @@
 package unit
 
-const frontendCacheMagic = "RVFC1"
+const frontendCacheMagic = "RVFC2"
 
 // MarshalFrontendCache preserves the linker-only semantic tables omitted from
 // the backend unit format. It is used for in-process package caching; it is not
@@ -92,6 +92,15 @@ func MarshalFrontendCache(program Program) ([]byte, bool) {
 		out = appendFrontendCacheInt(out, item.Package)
 		out = appendFrontendCacheInt(out, item.Symbol)
 	}
+	out = appendFrontendCacheInt(out, len(program.ConcurrencySites))
+	for i := 0; i < len(program.ConcurrencySites); i++ {
+		item := program.ConcurrencySites[i]
+		out = appendFrontendCacheInt(out, item.Kind)
+		out = appendFrontendCacheInt(out, item.Token)
+		out = appendFrontendCacheInt(out, item.Direction)
+		out = appendFrontendCacheInt(out, item.ReceiveArity)
+		out = appendFrontendCacheString(out, item.ElementType)
+	}
 	return out, true
 }
 
@@ -154,6 +163,13 @@ func UnmarshalFrontendCache(data []byte) (Program, bool) {
 		out.Selectors[i] = Selector{
 			BaseTok: r.intValue(), DotTok: r.intValue(), NameTok: r.intValue(), BaseKind: r.intValue(),
 			BaseIndex: r.intValue(), BasePackage: r.intValue(), Package: r.intValue(), Symbol: r.intValue(),
+		}
+	}
+	out.ConcurrencySites = make([]ConcurrencySite, r.count())
+	for i := 0; i < len(out.ConcurrencySites); i++ {
+		out.ConcurrencySites[i] = ConcurrencySite{
+			Kind: r.intValue(), Token: r.intValue(), Direction: r.intValue(),
+			ReceiveArity: r.intValue(), ElementType: r.stringValue(),
 		}
 	}
 	return out, r.ok && r.pos == len(r.data)

@@ -119,6 +119,7 @@ func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinear
 	if !meta.panicEnabled {
 		renvoAmd64InitRuntimeCheckRegs(g)
 	}
+	renvoEmitInitializeThreadState(g)
 	renvoEmitPersistentArenaReady(g)
 	if !renvoLinearInitGlobals(g) {
 		return nil

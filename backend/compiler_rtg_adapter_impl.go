@@ -439,6 +439,7 @@ func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoComp
 		return renvoCompileResult{}
 	}
 	renvoLinearMarkFunc(g, appIndex)
+	renvoEmitInitializeThreadState(g)
 	renvoEmitPersistentArenaReady(g)
 	if !renvoLinearInitGlobals(g) {
 		return renvoCompileResult{}
@@ -573,6 +574,7 @@ func renvoBeginKernelModuleRTG(g *renvoLinearGen, appIndex int) bool {
 	renvoAsmMarkLabel(a, g.kernelInitLabel)
 	renvoRTGKernelEntryPrologue(a)
 	renvoLinearMarkFunc(g, appIndex)
+	renvoEmitInitializeThreadState(g)
 	renvoEmitPersistentArenaReady(g)
 	if !renvoLinearInitGlobals(g) {
 		return false

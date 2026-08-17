@@ -165,10 +165,23 @@ func hoverSpanText(file syntax.File, start, end int) string {
 
 func hoverTypeName(program Program, origin int, typ completionType) string {
 	name := typ.Name
-	if typ.Package >= 0 && typ.Package < len(program.Packages) && typ.Package != origin && program.Packages[typ.Package].Name != "" {
+	if hoverSimpleTypeName(name) && typ.Package >= 0 && typ.Package < len(program.Packages) && typ.Package != origin && program.Packages[typ.Package].Name != "" {
 		name = program.Packages[typ.Package].Name + "." + name
 	}
 	return name
+}
+
+func hoverSimpleTypeName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		ch := name[i]
+		if !(ch == '_' || ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || i > 0 && ch >= '0' && ch <= '9') {
+			return false
+		}
+	}
+	return true
 }
 
 func hoverLiteralType(file syntax.File, start, end int) string {

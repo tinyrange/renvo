@@ -21,7 +21,9 @@ func main() {
 		if _, err := os.Stat(stdRoot); err != nil {
 			stdRoot = "../std"
 		}
-		env = append(env, driver.StdRootEnv+"="+stdRoot)
+		if _, err := os.Stat(stdRoot); err == nil {
+			env = append(env, driver.StdRootEnv+"="+stdRoot)
+		}
 	}
 	backend := checkoutBackend()
 	if len(os.Args) > 2 && os.Args[1] == "backend" && os.Args[2] == "build" {

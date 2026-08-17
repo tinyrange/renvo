@@ -5474,20 +5474,71 @@ func renvoBindNamedResults(g *renvoLinearGen, fnIndex int) bool {
 
 func renvoEnsurePanicState(g *renvoLinearGen) {
 	renvoNonNil(g)
-	g.panicValueOff = g.asm.bssSize
-	g.panicTypeOff = g.panicValueOff + renvoBackendValueSlotSize
-	g.panicIDOff = g.panicTypeOff + renvoBackendValueSlotSize
-	g.panicNextIDOff = g.panicIDOff + renvoBackendValueSlotSize
-	g.panicPrevOff = g.panicNextIDOff + renvoBackendValueSlotSize
-	g.panicDeferPendingOff = g.panicPrevOff + renvoBackendValueSlotSize
-	g.panicRecoveredOff = g.panicDeferPendingOff + renvoBackendValueSlotSize
-	g.asm.bssSize += 7 * renvoBackendValueSlotSize
+	if g.mainThreadStateOff > 0 {
+		return
+	}
+	g.threadStatePointerOff = g.asm.bssSize
+	g.asm.bssSize += renvoBackendValueSlotSize
+	g.mainThreadStateOff = g.asm.bssSize
+	g.asm.bssSize += renvoThreadStateSize
 }
 
-func renvoEmitJumpIfBssEqualsStack(g *renvoLinearGen, bssOffset int, stackOffset int, label int) {
+const renvoThreadStateSize = 7 * renvoBackendValueSlotSize
+const renvoThreadPanicValueOff = 0
+const renvoThreadPanicTypeOff = renvoBackendValueSlotSize
+const renvoThreadPanicIDOff = 2 * renvoBackendValueSlotSize
+const renvoThreadPanicNextIDOff = 3 * renvoBackendValueSlotSize
+const renvoThreadPanicPrevOff = 4 * renvoBackendValueSlotSize
+const renvoThreadPanicDeferPendingOff = 5 * renvoBackendValueSlotSize
+const renvoThreadPanicRecoveredOff = 6 * renvoBackendValueSlotSize
+
+func renvoEmitInitializeThreadState(g *renvoLinearGen) {
+	if !g.meta.panicEnabled {
+		return
+	}
+	renvoEnsurePanicState(g)
+	renvoAsmPrimaryBssAddr(&g.asm, g.mainThreadStateOff)
+	if g.c.renvoTargetArch == renvoArchAmd64 && renvoPreparedBackend == 0 {
+		// R15 is callee-saved on the supported amd64 ABIs and is excluded from
+		// ordinary value allocation. It is the native ThreadState register.
+		renvoAsmEmitText(&g.asm, "\x49\x89\xc7")
+	}
+	renvoAsmStorePrimaryBss(&g.asm, g.threadStatePointerOff)
+}
+
+func renvoAsmLoadPrimaryThreadState(g *renvoLinearGen, stateOffset int) {
+	if g.c.renvoTargetArch == renvoArchAmd64 && renvoPreparedBackend == 0 {
+		renvoAsmEmitText(&g.asm, "\x49\x8b\x87")
+		renvoAsmEmit32(&g.asm, stateOffset)
+		return
+	}
+	renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
+	renvoAsmCopyPrimaryToSecondary(&g.asm)
+	renvoAsmLoadPrimaryMemSecondaryDisp(&g.asm, stateOffset)
+}
+
+func renvoAsmStorePrimaryThreadState(g *renvoLinearGen, stateOffset int) {
+	if g.c.renvoTargetArch == renvoArchAmd64 && renvoPreparedBackend == 0 {
+		renvoAsmEmitText(&g.asm, "\x49\x89\x87")
+		renvoAsmEmit32(&g.asm, stateOffset)
+		return
+	}
+	renvoAsmPushPrimary(&g.asm)
+	renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
+	renvoAsmCopyPrimaryToSecondary(&g.asm)
+	renvoAsmPopPrimary(&g.asm)
+	renvoAsmStorePrimaryMemSecondaryDisp(&g.asm, stateOffset)
+}
+
+func renvoAsmCopyThreadStateToStack(g *renvoLinearGen, stateOffset int, stackOffset int) {
+	renvoAsmLoadPrimaryThreadState(g, stateOffset)
+	renvoAsmStorePrimaryStack(&g.asm, stackOffset)
+}
+
+func renvoEmitJumpIfThreadStateEqualsStack(g *renvoLinearGen, stateOffset int, stackOffset int, label int) {
 	renvoNonNil(g)
 	a := &g.asm
-	renvoAsmLoadPrimaryBss(a, bssOffset)
+	renvoAsmLoadPrimaryThreadState(g, stateOffset)
 	renvoAsmPushPrimary(a)
 	renvoAsmLoadPrimaryStack(a, stackOffset)
 	renvoAsmPopTertiary(a)
@@ -5495,17 +5546,17 @@ func renvoEmitJumpIfBssEqualsStack(g *renvoLinearGen, bssOffset int, stackOffset
 	renvoAsmJnzPrimary(a, label)
 }
 
-func renvoEmitStorePanicNodeField(g *renvoLinearGen, nodeOffset int, bssOffset int, displacement int) {
+func renvoEmitStorePanicNodeField(g *renvoLinearGen, nodeOffset int, stateOffset int, displacement int) {
 	renvoNonNil(g)
-	renvoAsmLoadPrimaryBss(&g.asm, bssOffset)
+	renvoAsmLoadPrimaryThreadState(g, stateOffset)
 	renvoAsmLoadSecondaryStack(&g.asm, nodeOffset)
 	renvoAsmStorePrimaryMemSecondaryDisp(&g.asm, displacement)
 }
 
-func renvoEmitLoadPanicNodeField(g *renvoLinearGen, nodeOffset int, bssOffset int, displacement int) {
+func renvoEmitLoadPanicNodeField(g *renvoLinearGen, nodeOffset int, stateOffset int, displacement int) {
 	renvoNonNil(g)
 	renvoAsmLoadPrimaryStackMemory(&g.asm, nodeOffset, displacement)
-	renvoAsmStorePrimaryBss(&g.asm, bssOffset)
+	renvoAsmStorePrimaryThreadState(g, stateOffset)
 }
 
 func renvoPrepareFunctionControl(g *renvoLinearGen) bool {
@@ -5522,11 +5573,11 @@ func renvoPrepareFunctionControl(g *renvoLinearGen) bool {
 		return true
 	}
 	g.panicEntryIDOffset = renvoAddUnnamedLocal(g, renvoTypeInt)
-	renvoAsmCopyBssToStackSlot(&g.asm, g.panicIDOff, g.panicEntryIDOffset)
+	renvoAsmCopyThreadStateToStack(g, renvoThreadPanicIDOff, g.panicEntryIDOffset)
 	g.panicRecoverAllowedOffset = renvoAddUnnamedLocal(g, renvoTypeInt)
-	renvoAsmCopyBssToStackSlot(&g.asm, g.panicDeferPendingOff, g.panicRecoverAllowedOffset)
+	renvoAsmCopyThreadStateToStack(g, renvoThreadPanicDeferPendingOff, g.panicRecoverAllowedOffset)
 	renvoAsmPrimaryImm(&g.asm, 0)
-	renvoAsmStorePrimaryBss(&g.asm, g.panicDeferPendingOff)
+	renvoAsmStorePrimaryThreadState(g, renvoThreadPanicDeferPendingOff)
 	g.deferHeadOffset = renvoAddUnnamedLocal(g, renvoTypeInt)
 	renvoAsmStoreStackImm(&g.asm, g.deferHeadOffset, 0)
 	g.deferReturnLabel = renvoAsmNewLabel(&g.asm)
@@ -5544,12 +5595,12 @@ func renvoEmitPostCallPanicCheck(g *renvoLinearGen) {
 		return
 	}
 	renvoAsmPushPrimary(&g.asm)
-	renvoAsmLoadPrimaryBss(&g.asm, g.panicIDOff)
+	renvoAsmLoadPrimaryThreadState(g, renvoThreadPanicIDOff)
 	renvoAsmCmpPrimaryImm8(&g.asm, 0)
 	noneLabel := renvoAsmNewLabel(&g.asm)
 	renvoAsmJzLabel(&g.asm, noneLabel)
 	samePanicLabel := renvoAsmNewLabel(&g.asm)
-	renvoEmitJumpIfBssEqualsStack(g, g.panicIDOff, g.panicEntryIDOffset, samePanicLabel)
+	renvoEmitJumpIfThreadStateEqualsStack(g, renvoThreadPanicIDOff, g.panicEntryIDOffset, samePanicLabel)
 	renvoAsmJmpMarkLabel(&g.asm, g.deferReturnLabel, samePanicLabel)
 	renvoAsmMarkLabel(&g.asm, noneLabel)
 	renvoAsmPopPrimary(&g.asm)
@@ -5651,10 +5702,10 @@ func renvoEmitFunctionControlEpilogue(g *renvoLinearGen) bool {
 			renvoEmitCopyMemSecondaryToStack(g, argOffsets[j], size)
 			disp += renvoAlignTo8(size)
 		}
-		renvoAsmCopyBssToStackSlot(a, g.panicIDOff, savedPanicIDOffset)
-		renvoAsmCopyBssToStackSlot(a, g.panicPrevOff, savedPanicPrevOffset)
+		renvoAsmCopyThreadStateToStack(g, renvoThreadPanicIDOff, savedPanicIDOffset)
+		renvoAsmCopyThreadStateToStack(g, renvoThreadPanicPrevOff, savedPanicPrevOffset)
 		renvoAsmPrimaryImm(a, 0)
-		renvoAsmStorePrimaryBss(a, g.panicRecoveredOff)
+		renvoAsmStorePrimaryThreadState(g, renvoThreadPanicRecoveredOff)
 		g.emittingDefers = true
 		if !renvoEmitFunctionValueDispatch(g, site.funcType, handleOffset, argOffsets, 0) {
 			g.emittingDefers = false
@@ -5664,13 +5715,13 @@ func renvoEmitFunctionControlEpilogue(g *renvoLinearGen) bool {
 		panicStateReady := renvoAsmNewLabel(a)
 		renvoAsmLoadPrimaryStack(a, savedPanicIDOffset)
 		renvoAsmJzPrimary(a, panicStateReady)
-		renvoEmitJumpIfBssEqualsStack(g, g.panicIDOff, savedPanicIDOffset, panicStateReady)
-		renvoAsmLoadPrimaryBss(a, g.panicRecoveredOff)
+		renvoEmitJumpIfThreadStateEqualsStack(g, renvoThreadPanicIDOff, savedPanicIDOffset, panicStateReady)
+		renvoAsmLoadPrimaryThreadState(g, renvoThreadPanicRecoveredOff)
 		renvoAsmJnzPrimary(a, panicStateReady)
-		renvoAsmLoadPrimaryBss(a, g.panicIDOff)
+		renvoAsmLoadPrimaryThreadState(g, renvoThreadPanicIDOff)
 		renvoAsmJzPrimary(a, panicStateReady)
 		renvoAsmLoadPrimaryStack(a, savedPanicPrevOffset)
-		renvoAsmStorePrimaryBss(a, g.panicPrevOff)
+		renvoAsmStorePrimaryThreadState(g, renvoThreadPanicPrevOff)
 		renvoAsmMarkLabel(a, panicStateReady)
 		renvoAsmJmpMarkLabel(a, loopLabel, nextLabel)
 	}
@@ -5678,9 +5729,9 @@ func renvoEmitFunctionControlEpilogue(g *renvoLinearGen) bool {
 	renvoMoveCapturedResultsFromCells(g)
 	panicReturn := renvoAsmNewLabel(a)
 	normalReturn := renvoAsmNewLabel(a)
-	renvoAsmLoadPrimaryBss(a, g.panicIDOff)
+	renvoAsmLoadPrimaryThreadState(g, renvoThreadPanicIDOff)
 	renvoAsmJzPrimary(a, normalReturn)
-	renvoEmitJumpIfBssEqualsStack(g, g.panicIDOff, g.panicEntryIDOffset, normalReturn)
+	renvoEmitJumpIfThreadStateEqualsStack(g, renvoThreadPanicIDOff, g.panicEntryIDOffset, normalReturn)
 	renvoAsmMarkLabel(a, panicReturn)
 	renvoAsmPrimaryImm(a, 0)
 	renvoAsmLeave(a)
@@ -6781,13 +6832,10 @@ type renvoLinearGen struct {
 	deferSites                []renvoDeferSite
 	emittingDefers            bool
 	suppressPanicCheck        bool
-	panicValueOff             int
-	panicTypeOff              int
-	panicIDOff                int
-	panicNextIDOff            int
-	panicPrevOff              int
-	panicDeferPendingOff      int
-	panicRecoveredOff         int
+	threadStatePointerOff     int
+	mainThreadStateOff        int
+	stackInitLabel            int
+	stackSwitchLabel          int
 	runtimeFaultLabel         int
 	// Runtime helpers have distinct calling conventions, so keep their label
 	// state named and pass the exact slot to architecture-specific emitters.
@@ -7512,6 +7560,7 @@ func renvoEmitLinearFor(g *renvoLinearGen, stmt *renvoStmt) bool {
 	g.pendingControl = 0
 	renvoPushLoopLabels(g, endLabel, startLabel)
 	renvoAsmMarkLabel(a, startLabel)
+	renvoMoveCapturedLocals(g, false)
 	if stmt.exprStart < stmt.exprEnd {
 		ep := renvoNewExprParse()
 		renvoNonNil(ep)
@@ -8235,6 +8284,7 @@ func renvoEmitLinearClassicForScoped(g *renvoLinearGen, stmt *renvoStmt, semi1 i
 	startLabel := renvoAsmNewLabel(a)
 	renvoPushLoopLabels(g, endLabel, postLabel)
 	renvoAsmMarkLabel(a, startLabel)
+	renvoMoveCapturedLocals(g, false)
 	if semi1+1 < semi2 {
 		ep := renvoNewExprParse()
 		renvoNonNil(ep)
@@ -12335,7 +12385,7 @@ func renvoEmitFunctionValueDispatch(g *renvoLinearGen, funcType int, handleOffse
 	previousDeferPendingOffset := 0
 	if g.emittingDefers {
 		previousDeferPendingOffset = renvoAddUnnamedLocal(g, renvoTypeInt)
-		renvoAsmCopyBssToStackSlot(&g.asm, g.panicDeferPendingOff, previousDeferPendingOffset)
+		renvoAsmCopyThreadStateToStack(g, renvoThreadPanicDeferPendingOff, previousDeferPendingOffset)
 	}
 	hiddenResultOffset := resultOffset
 	resultType := funcInfo.elem
@@ -12403,12 +12453,12 @@ func renvoEmitFunctionValueDispatch(g *renvoLinearGen, funcType int, handleOffse
 		g.suppressPanicCheck = true
 		if g.emittingDefers {
 			renvoAsmPrimaryImm(&g.asm, 1)
-			renvoAsmStorePrimaryBss(&g.asm, g.panicDeferPendingOff)
+			renvoAsmStorePrimaryThreadState(g, renvoThreadPanicDeferPendingOff)
 		}
 		renvoEmitCallWithWordCount(g, fnIndex, wordCount+extra)
 		if g.emittingDefers {
 			renvoAsmLoadPrimaryStack(&g.asm, previousDeferPendingOffset)
-			renvoAsmStorePrimaryBss(&g.asm, g.panicDeferPendingOff)
+			renvoAsmStorePrimaryThreadState(g, renvoThreadPanicDeferPendingOff)
 		}
 		g.suppressPanicCheck = oldSuppress
 		if mode == renvoFunctionValueClosure {
@@ -12521,13 +12571,101 @@ func renvoEmitRuntimeArenaCall(g *renvoLinearGen, ep *renvoExprParse, idx int, f
 	if intrinsic == 13 {
 		return renvoEmitRuntimeArenaDiscardSlice(g, ep, idx)
 	}
+	if intrinsic == 14 {
+		e := &ep.exprs[idx]
+		if e.argCount != 1 || !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+			return false
+		}
+		if g.c.renvoTargetArch == renvoArchAmd64 && renvoPreparedBackend == 0 {
+			renvoAsmEmitText(&g.asm, "\x41\x57\x49\x89\xc7")
+		} else {
+			renvoAsmPushPrimary(&g.asm)
+			renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
+			renvoAsmPopSecondary(&g.asm)
+			renvoAsmPushPrimary(&g.asm)
+			renvoAsmCopySecondaryToPrimary(&g.asm)
+		}
+		renvoAsmStorePrimaryBss(&g.asm, g.threadStatePointerOff)
+		renvoAsmPopPrimary(&g.asm)
+		return true
+	}
+	if intrinsic == 16 {
+		if ep.exprs[idx].argCount != 0 {
+			return false
+		}
+		value := 0
+		if g.c.renvoTargetArch == renvoArchAmd64 && renvoPreparedBackend == 0 {
+			value = 1
+		}
+		renvoAsmPrimaryImm(&g.asm, value)
+		return true
+	}
+	if intrinsic == 17 || intrinsic == 18 {
+		return renvoEmitRuntimeStack(g, ep, idx)
+	}
 	return false
+}
+
+func renvoEnsureRuntimeStackHelpers(g *renvoLinearGen, fn int) {
+	if g.stackInitLabel > 0 {
+		return
+	}
+	renvoLinearMarkFunc(g, fn)
+	a := &g.asm
+	init := renvoAsmNewLabel(a)
+	switchStack := renvoAsmNewLabel(a)
+	g.stackInitLabel = init + 1
+	g.stackSwitchLabel = switchStack + 1
+	base := len(a.code)
+	a.labelPos[init] = int32(base + 39)
+	a.labelPos[switchStack] = int32(base + 107)
+	// entry/context are retained in R12/R13 by the initial saved context. The
+	// generated two-argument ABI binds the last source parameter in RDI, so pass
+	// context first and entry second at this raw-to-generated-code boundary. A
+	// single fixed-layout blob holds the entry, finish, initialization, and
+	// switch helpers; only its generated StackRun call needs relocation. Its
+	// labels are offsets 39 and 107 within the 150-byte blob.
+	renvoAsmEmitText(a, "\xe9\x91\x00\x00\x00\x4c\x89\xef\x4c\x89\xe6\xe8\x00\x00\x00\x00\xc3\x41\x5a\x41\xc6\x02\x01\x41\x5b\x49\x8b\x23\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5d\x5b\xc3\x4c\x89\xc0\x48\x83\xe0\xf0\x48\x83\xe8\x58\x4c\x89\x38\x45\x31\xc9\x4c\x89\x48\x08\x48\x89\x50\x10\x48\x89\x48\x18\x4c\x89\x48\x20\x4c\x89\x48\x28\x4c\x8d\x0d\xb2\xff\xff\xff\x4c\x89\x48\x30\x4c\x8d\x0d\xb3\xff\xff\xff\x4c\x89\x48\x38\x48\x89\x70\x40\x48\x89\x78\x48\xc3\x49\x89\xf2\x49\x89\xfb\x4c\x8d\x0d\x1d\x00\x00\x00\x41\x51\x53\x55\x41\x54\x41\x55\x41\x56\x41\x57\x49\x89\x22\x4c\x89\xdc\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5d\x5b\xc3\xc3")
+	renvoAsmAddReloc(a, base+12, g.funcLabels[fn])
+}
+
+func renvoEmitRuntimeStack(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+	e := &ep.exprs[idx]
+	count := e.argCount - 1
+	if count != 2 && count != 5 {
+		return false
+	}
+	if g.c.renvoTargetArch != renvoArchAmd64 || renvoPreparedBackend != 0 {
+		if count == 5 {
+			renvoAsmPrimaryImm(&g.asm, 0)
+		}
+		return true
+	}
+	runner := &ep.exprs[renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+count)]
+	renvoEnsureRuntimeStackHelpers(g, renvoFindMetaFunction(g.meta, runner.nameStart, runner.nameEnd))
+	for i := 0; i < count; i++ {
+		if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+i)) {
+			return false
+		}
+		renvoAsmPushPrimary(&g.asm)
+	}
+	renvoAsmPopCallWord0(&g.asm)
+	renvoAsmPopCallWord1(&g.asm)
+	if count == 5 {
+		renvoAsmPopSecondary(&g.asm)
+		renvoAsmPopTertiary(&g.asm)
+		renvoAsmEmit16(&g.asm, 0x5841)
+		renvoAsmCallLabel(&g.asm, g.stackInitLabel-1)
+	} else {
+		renvoAsmCallLabel(&g.asm, g.stackSwitchLabel-1)
+	}
+	return true
 }
 
 // Compiler-private intrinsics live in the reserved renvo_runtime namespace.
 // A bounded name hash mixed with an independent byte checksum keeps their
 // dispatch table compact while making accidental aliases impractical.
-const renvoRuntimeIntrinsicTable = "\x9f\x85\x31\x61\x01\xcb\x5d\x4c\x2e\x02\x03\x1e\x4f\x00\x03\x67\x75\x10\x6e\x04\xaf\xd8\xf6\x20\x05\x1b\xfe\x37\x3f\x06\xe7\x1a\x8d\x21\x07\x15\x6b\xc1\x4f\x08\x07\xf9\x8f\x0d\x08\x8b\x07\x40\x3f\x08\x3b\x59\x62\x4e\x08\x47\x47\xc5\x5f\x0c\x47\x02\x93\x57\x0d\xc5\x07\xc6\x53\x0d\xad\xfc\x67\x17\x0d\x0b\x3b\x57\x66\x0d\x4f\x60\xcb\x57\x0d\x8b\xd1\xdd\x57\x0d"
+const renvoRuntimeIntrinsicTable = "\x9f\x85\x31\x61\x01\xcb\x5d\x4c\x2e\x02\x03\x1e\x4f\x00\x03\x67\x75\x10\x6e\x04\xaf\xd8\xf6\x20\x05\x1b\xfe\x37\x3f\x06\xe7\x1a\x8d\x21\x07\x15\x6b\xc1\x4f\x08\x07\xf9\x8f\x0d\x08\x8b\x07\x40\x3f\x08\x3b\x59\x62\x4e\x08\x47\x47\xc5\x5f\x0c\x47\x02\x93\x57\x0d\xc5\x07\xc6\x53\x0d\xad\xfc\x67\x17\x0d\x0b\x3b\x57\x66\x0d\x4f\x60\xcb\x57\x0d\x8b\xd1\xdd\x57\x0d\x95\xc5\x1f\x2c\x0e\x71\xbf\x72\x5d\x10\xbb\x84\xa2\x5b\x11\x31\xdd\xa5\x1c\x12"
 
 func renvoRuntimeIntrinsicID(src []byte, start int, end int) int {
 	hash1 := 5381
@@ -12579,7 +12717,7 @@ func renvoEmitBuiltinPanic(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 func renvoEmitPanicState(g *renvoLinearGen, valueOffset int) bool {
 	renvoNonNil(g)
 	noPrevious := renvoAsmNewLabel(&g.asm)
-	renvoAsmLoadPrimaryBss(&g.asm, g.panicIDOff)
+	renvoAsmLoadPrimaryThreadState(g, renvoThreadPanicIDOff)
 	renvoAsmJzPrimary(&g.asm, noPrevious)
 	sizeOffset := renvoAddUnnamedLocal(g, renvoTypeInt)
 	nodeOffset := renvoAddUnnamedLocal(g, renvoTypeInt)
@@ -12589,25 +12727,26 @@ func renvoEmitPanicState(g *renvoLinearGen, valueOffset int) bool {
 	renvoEmitPersistentAllocToPrimary(g, sizeOffset)
 	g.suppressPanicCheck = oldSuppressPanicCheck
 	renvoAsmStorePrimaryStack(&g.asm, nodeOffset)
-	renvoEmitStorePanicNodeField(g, nodeOffset, g.panicValueOff, 0)
+	renvoEmitStorePanicNodeField(g, nodeOffset, renvoThreadPanicValueOff, 0)
 	if g.c.renvoNativeIntSize == 4 {
-		renvoEmitStorePanicNodeField(g, nodeOffset, g.panicValueOff+4, 4)
+		renvoEmitStorePanicNodeField(g, nodeOffset, renvoThreadPanicValueOff+4, 4)
 	}
-	renvoEmitStorePanicNodeField(g, nodeOffset, g.panicTypeOff, renvoBackendValueSlotSize)
-	renvoEmitStorePanicNodeField(g, nodeOffset, g.panicIDOff, 2*renvoBackendValueSlotSize)
-	renvoEmitStorePanicNodeField(g, nodeOffset, g.panicPrevOff, 3*renvoBackendValueSlotSize)
+	renvoEmitStorePanicNodeField(g, nodeOffset, renvoThreadPanicTypeOff, renvoBackendValueSlotSize)
+	renvoEmitStorePanicNodeField(g, nodeOffset, renvoThreadPanicIDOff, 2*renvoBackendValueSlotSize)
+	renvoEmitStorePanicNodeField(g, nodeOffset, renvoThreadPanicPrevOff, 3*renvoBackendValueSlotSize)
 	renvoAsmLoadPrimaryStack(&g.asm, nodeOffset)
-	renvoAsmStorePrimaryBss(&g.asm, g.panicPrevOff)
+	renvoAsmStorePrimaryThreadState(g, renvoThreadPanicPrevOff)
 	renvoAsmMarkLabel(&g.asm, noPrevious)
-	renvoEmitCopyNative(g, valueOffset, g.panicValueOff, renvoBackendValueSlotSize, renvoNativeCopyStackToBSS)
+	renvoAsmLoadPrimaryStack(&g.asm, valueOffset)
+	renvoAsmStorePrimaryThreadState(g, renvoThreadPanicValueOff)
 	renvoAsmLoadPrimaryStack(&g.asm, valueOffset-renvoBackendValueSlotSize)
-	renvoAsmStorePrimaryBss(&g.asm, g.panicTypeOff)
-	renvoAsmLoadPrimaryBss(&g.asm, g.panicNextIDOff)
+	renvoAsmStorePrimaryThreadState(g, renvoThreadPanicTypeOff)
+	renvoAsmLoadPrimaryThreadState(g, renvoThreadPanicNextIDOff)
 	renvoAsmIncPrimary(&g.asm)
-	renvoAsmStorePrimaryBss(&g.asm, g.panicNextIDOff)
-	renvoAsmStorePrimaryBss(&g.asm, g.panicIDOff)
+	renvoAsmStorePrimaryThreadState(g, renvoThreadPanicNextIDOff)
+	renvoAsmStorePrimaryThreadState(g, renvoThreadPanicIDOff)
 	renvoAsmPrimaryImm(&g.asm, 0)
-	renvoAsmStorePrimaryBss(&g.asm, g.panicRecoveredOff)
+	renvoAsmStorePrimaryThreadState(g, renvoThreadPanicRecoveredOff)
 	renvoAsmJmpLabel(&g.asm, g.deferReturnLabel)
 	return true
 }
@@ -12835,10 +12974,10 @@ func renvoEmitProgramPanicCheck(g *renvoLinearGen) bool {
 	outOfMemoryLabel := renvoAsmNewLabel(a)
 	exitLabel := renvoAsmNewLabel(a)
 	renvoAsmPushPrimary(a)
-	renvoAsmLoadPrimaryBss(a, g.panicIDOff)
+	renvoAsmLoadPrimaryThreadState(g, renvoThreadPanicIDOff)
 	renvoAsmJzPrimary(a, normalLabel)
 	renvoEmitStaticWrite(g, "panic: ", 2)
-	renvoAsmLoadPrimaryBss(a, g.panicTypeOff)
+	renvoAsmLoadPrimaryThreadState(g, renvoThreadPanicTypeOff)
 	renvoAsmCopyPrimaryToTertiary(a)
 	renvoAsmPrimaryImm(a, renvoPanicOutOfMemoryTag)
 	renvoAsmCmpTertiaryPrimarySet(a, 0x94)
@@ -12853,11 +12992,11 @@ func renvoEmitProgramPanicCheck(g *renvoLinearGen) bool {
 	renvoAsmJnzPrimary(a, stringLabel)
 	renvoEmitStaticWrite(g, "value", 2)
 	renvoAsmJmpMarkLabel(a, exitLabel, stringLabel)
-	renvoAsmLoadPrimaryBss(a, g.panicValueOff)
+	renvoAsmLoadPrimaryThreadState(g, renvoThreadPanicValueOff)
 	renvoAsmCopyPrimaryToSecondary(a)
 	renvoAsmLoadPrimaryMemSecondaryDisp(a, renvoBackendValueSlotSize)
 	renvoAsmPushPrimary(a)
-	renvoAsmLoadPrimaryBss(a, g.panicValueOff)
+	renvoAsmLoadPrimaryThreadState(g, renvoThreadPanicValueOff)
 	renvoAsmCopyPrimaryToSecondary(a)
 	renvoAsmLoadPrimaryMemSecondaryDisp(a, 0)
 	renvoAsmPopSecondary(a)
@@ -12886,26 +13025,27 @@ func renvoEmitRecoverToLocal(g *renvoLinearGen, offset int) bool {
 	previousOffset := renvoAddUnnamedLocal(g, renvoTypeInt)
 	renvoAsmLoadPrimaryStack(a, g.panicRecoverAllowedOffset)
 	renvoAsmJzPrimary(a, noneLabel)
-	renvoAsmLoadPrimaryBss(a, g.panicIDOff)
+	renvoAsmLoadPrimaryThreadState(g, renvoThreadPanicIDOff)
 	renvoAsmJzPrimary(a, noneLabel)
-	renvoEmitCopyNative(g, g.panicValueOff, offset, renvoBackendValueSlotSize, renvoNativeCopyBSSToStack)
-	renvoAsmCopyBssToStackSlot(a, g.panicTypeOff, offset-renvoBackendValueSlotSize)
+	renvoAsmLoadPrimaryThreadState(g, renvoThreadPanicValueOff)
+	renvoAsmStorePrimaryStack(a, offset)
+	renvoAsmCopyThreadStateToStack(g, renvoThreadPanicTypeOff, offset-renvoBackendValueSlotSize)
 	renvoAsmStoreStackImm(a, g.panicRecoverAllowedOffset, 0)
 	renvoAsmPrimaryImm(a, 1)
-	renvoAsmStorePrimaryBss(a, g.panicRecoveredOff)
-	renvoAsmCopyBssToStackSlot(a, g.panicPrevOff, previousOffset)
+	renvoAsmStorePrimaryThreadState(g, renvoThreadPanicRecoveredOff)
+	renvoAsmCopyThreadStateToStack(g, renvoThreadPanicPrevOff, previousOffset)
 	renvoAsmJzPrimary(a, clearLabel)
-	renvoEmitLoadPanicNodeField(g, previousOffset, g.panicValueOff, 0)
+	renvoEmitLoadPanicNodeField(g, previousOffset, renvoThreadPanicValueOff, 0)
 	if g.c.renvoNativeIntSize == 4 {
-		renvoEmitLoadPanicNodeField(g, previousOffset, g.panicValueOff+4, 4)
+		renvoEmitLoadPanicNodeField(g, previousOffset, renvoThreadPanicValueOff+4, 4)
 	}
-	renvoEmitLoadPanicNodeField(g, previousOffset, g.panicTypeOff, renvoBackendValueSlotSize)
-	renvoEmitLoadPanicNodeField(g, previousOffset, g.panicIDOff, 2*renvoBackendValueSlotSize)
-	renvoEmitLoadPanicNodeField(g, previousOffset, g.panicPrevOff, 3*renvoBackendValueSlotSize)
+	renvoEmitLoadPanicNodeField(g, previousOffset, renvoThreadPanicTypeOff, renvoBackendValueSlotSize)
+	renvoEmitLoadPanicNodeField(g, previousOffset, renvoThreadPanicIDOff, 2*renvoBackendValueSlotSize)
+	renvoEmitLoadPanicNodeField(g, previousOffset, renvoThreadPanicPrevOff, 3*renvoBackendValueSlotSize)
 	renvoAsmJmpMarkLabel(a, doneLabel, clearLabel)
 	renvoAsmPrimaryImm(a, 0)
-	renvoAsmStorePrimaryBss(a, g.panicIDOff)
-	renvoAsmStorePrimaryBss(a, g.panicPrevOff)
+	renvoAsmStorePrimaryThreadState(g, renvoThreadPanicIDOff)
+	renvoAsmStorePrimaryThreadState(g, renvoThreadPanicPrevOff)
 	renvoAsmJmpMarkLabel(a, doneLabel, noneLabel)
 	renvoAsmStoreStackImm(a, offset, 0)
 	renvoAsmStoreStackImm(a, offset-renvoBackendValueSlotSize, 0)
@@ -15687,7 +15827,7 @@ func renvoEmitInterfaceMethodCall(g *renvoLinearGen, ep *renvoExprParse, idx int
 		// program that never constructs an error). Keep it compilable and provide
 		// a useful failure if an invalid interface value reaches the call.
 		renvoAsmMarkLabel(&g.asm, doneLabel)
-		renvoEmitStaticWrite(g, "interface method call has no linked implementation\n", 2)
+		renvoEmitStaticWrite(g, "interface method unavailable\n", 2)
 		renvoAsmPrimaryImm(&g.asm, 2)
 		return renvoEmitExitStatus(g)
 	}

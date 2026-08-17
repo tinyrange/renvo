@@ -297,11 +297,11 @@ func buildPhaseDiagnostic(result BuildResult, built pipeline.Result) Diagnostic 
 		case check.CheckErrCallArgument:
 			code, message = "RENVO-CHECK-016", "call argument is not assignable to its parameter"
 		case check.CheckErrGoroutine:
-			code, message = "RENVO-CHECK-017", "goroutines are not supported by RENVO"
+			code, message = "RENVO-CHECK-017", "go statement requires a function call"
 		case check.CheckErrChannel:
-			code, message = "RENVO-CHECK-018", "channels are not supported by RENVO"
+			code, message = "RENVO-CHECK-018", "channel direction does not permit this operation"
 		case check.CheckErrSelect:
-			code, message = "RENVO-CHECK-019", "select statements are not supported by RENVO"
+			code, message = "RENVO-CHECK-019", "select has an invalid communication clause or multiple defaults"
 		case check.CheckErrUnusedLocal:
 			code, message = "RENVO-CHECK-020", "local variable is declared but not used"
 		case check.CheckErrMissingMain:
