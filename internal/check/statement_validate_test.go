@@ -99,6 +99,16 @@ func TestInvalidConcurrencyStatements(t *testing.T) {
 	}
 }
 
+func TestChannelValidationDoesNotTreatSelectorCloseAsBuiltin(t *testing.T) {
+	file := syntax.ParseFile([]byte("package main\ntype input struct{}\nfunc (input) close() {}\nfunc main() { var value input; value.close() }\n"))
+	if !file.Ok || len(file.Funcs) != 2 {
+		t.Fatalf("parse failed: %#v", file)
+	}
+	if token := invalidDefiniteChannelOperation(file, file.Funcs[1]); token >= 0 {
+		t.Fatalf("selector close rejected at token %d", token)
+	}
+}
+
 func TestChannelDirectionValidationUsesLexicalBinding(t *testing.T) {
 	source := []byte(`package main
 type Send chan<- int

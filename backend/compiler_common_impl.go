@@ -12743,6 +12743,10 @@ func renvoEmitPanicState(g *renvoLinearGen, valueOffset int) bool {
 	renvoAsmMarkLabel(&g.asm, noPrevious)
 	renvoAsmLoadPrimaryStack(&g.asm, valueOffset)
 	renvoAsmStorePrimaryThreadState(g, renvoThreadPanicValueOff)
+	if g.c.renvoNativeIntSize == 4 {
+		renvoAsmLoadPrimaryStack(&g.asm, valueOffset-4)
+		renvoAsmStorePrimaryThreadState(g, renvoThreadPanicValueOff+4)
+	}
 	renvoAsmLoadPrimaryStack(&g.asm, valueOffset-renvoBackendValueSlotSize)
 	renvoAsmStorePrimaryThreadState(g, renvoThreadPanicTypeOff)
 	renvoAsmLoadPrimaryThreadState(g, renvoThreadPanicNextIDOff)
@@ -13033,6 +13037,10 @@ func renvoEmitRecoverToLocal(g *renvoLinearGen, offset int) bool {
 	renvoAsmJzPrimary(a, noneLabel)
 	renvoAsmLoadPrimaryThreadState(g, renvoThreadPanicValueOff)
 	renvoAsmStorePrimaryStack(a, offset)
+	if g.c.renvoNativeIntSize == 4 {
+		renvoAsmLoadPrimaryThreadState(g, renvoThreadPanicValueOff+4)
+		renvoAsmStorePrimaryStack(a, offset-4)
+	}
 	renvoAsmCopyThreadStateToStack(g, renvoThreadPanicTypeOff, offset-renvoBackendValueSlotSize)
 	renvoAsmStoreStackImm(a, g.panicRecoverAllowedOffset, 0)
 	renvoAsmPrimaryImm(a, 1)
