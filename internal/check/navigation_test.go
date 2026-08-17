@@ -134,6 +134,54 @@ func NewLabel() *Label { return &Label{} }
 	}
 }
 
+func TestNavigateProgramFollowsImportedPackageVariables(t *testing.T) {
+	mainSource := []byte(`package main
+import "example.com/app/board"
+func main() { board.Clock.DelayMilliseconds(1) }
+`)
+	files := []load.SourceFile{
+		{Path: "/repo/go.mod", Src: []byte("module example.com/app\n")},
+		{Path: "/repo/clock/clock.go", Src: []byte(`package clock
+type Clock struct{}
+func New() Clock { return Clock{} }
+func (c *Clock) DelayMilliseconds(milliseconds uint32) {}
+`)},
+		{Path: "/repo/board/board.go", Src: []byte(`package board
+import "example.com/app/clock"
+var Clock = clock.New()
+`)},
+		{Path: "/repo/main.go", Src: mainSource},
+	}
+	workspace := load.LoadWorkspace("/repo", "/std", ".", files)
+	program := CheckGraph(workspace.Graph)
+	result := NavigateProgram(workspace.Graph, program, "/repo/main.go", navigationTestOffset(mainSource, "DelayMilliseconds"))
+	if !result.Ok || result.Definition.Path != "/repo/clock/clock.go" || len(result.References) != 2 {
+		t.Fatalf("package variable method navigation = %#v", result)
+	}
+}
+
+func TestNavigateProgramWorksWithBestEffortCheck(t *testing.T) {
+	source := []byte(`package main
+var Value = 1
+func use() { println(Value) }
+func broken() { unused := 1 }
+func main() { use() }
+`)
+	files := []load.SourceFile{
+		{Path: "/repo/go.mod", Src: []byte("module example.com/app\n")},
+		{Path: "/repo/main.go", Src: source},
+	}
+	workspace := load.LoadWorkspace("/repo", "/std", ".", files)
+	if checked := CheckGraph(workspace.Graph); checked.Ok {
+		t.Fatal("ordinary check unexpectedly accepted unused local")
+	}
+	program := CheckGraphBestEffort(workspace.Graph)
+	result := NavigateProgram(workspace.Graph, program, "/repo/main.go", navigationTestOffset(source, "Value)"))
+	if !result.Ok || result.Definition.Path != "/repo/main.go" {
+		t.Fatalf("best-effort navigation = %#v", result)
+	}
+}
+
 func navigationTestOffset(source []byte, marker string) int {
 	for i := 0; i+len(marker) <= len(source); i++ {
 		if string(source[i:i+len(marker)]) == marker {

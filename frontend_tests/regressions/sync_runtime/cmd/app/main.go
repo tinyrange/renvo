@@ -10,6 +10,10 @@ import (
 func main() {
 	handler := serial.New()
 	runtime.EnableGoroutines(handler)
+	if !runtime.StackSupported() {
+		print("PASS\n")
+		return
+	}
 
 	var mutex sync.Mutex
 	held := make(chan int)

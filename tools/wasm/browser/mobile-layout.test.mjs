@@ -20,6 +20,9 @@ test("phone workspace exposes the file, target, editor, and console flow", async
   assert.match(html, /data-mobile-transport="webusb"/);
   assert.match(html, /data-mobile-transport="webserial"/);
   assert.match(html, /id="mobile-flash-view"/);
+  assert.match(html, /data-panel="plotter"/);
+  assert.match(html, /id="serial-plotter-canvas"/);
+  assert.match(html, /id="toggle-plotter-size"/);
   assert.match(html, /interactive-widget=resizes-content/);
   assert.match(css, /@media \(max-width: 680px\)/);
   assert.match(css, /\.ide\[data-mobile-view="files"\] \.sidebar/);
@@ -27,11 +30,14 @@ test("phone workspace exposes the file, target, editor, and console flow", async
   assert.match(css, /\.ide\[data-mobile-view="editor"\] \.workbench/);
   assert.match(css, /\.ide\[data-mobile-view="console"\] \.workbench/);
   assert.match(css, /\.mobile-flash-view \{[\s\S]*position: fixed/);
+  assert.match(css, /\.workbench\.plotter-expanded \{[\s\S]*grid-template-rows: 34px 0 minmax\(0, 1fr\)/);
   assert.match(app, /showMobileView\("editor"\)/);
   assert.match(app, /copyActiveFileToPlayground/);
   assert.match(app, /models\.get\("main\.go"\)/);
   assert.doesNotMatch(app, /PLAYGROUND_COPY_PREFIX/);
   assert.match(app, /openMobileFlashView\("Select a device"\)/);
+  assert.match(app, /appendSerialText/);
+  assert.match(app, /setPlotterExpanded/);
   assert.doesNotMatch(css, /--mobile-viewport-height/);
   assert.doesNotMatch(app, /--mobile-viewport-height/);
 });

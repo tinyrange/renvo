@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "98a68bf6ca854fb768f4caf832bc6241ec1262d6f3e0622198070e02d865e792"
+const CompilerSourceDigest = "ecbd93de2790bdccfa9261302e7ef750115ba81a151bcce326aed79564fb21ea"
 
 // source: backend/compiler_common_impl.go
 
@@ -5519,9 +5519,11 @@ renvoAsmEmitText(&g.asm, "\x49\x8b\x87")
 renvoAsmEmit32(&g.asm, stateOffset)
 return
 }
+renvoAsmPushSecondary(&g.asm)
 renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
 renvoAsmCopyPrimaryToSecondary(&g.asm)
 renvoAsmLoadPrimaryMemSecondaryDisp(&g.asm, stateOffset)
+renvoAsmPopSecondary(&g.asm)
 }
 
 func renvoAsmStorePrimaryThreadState(g *renvoLinearGen, stateOffset int) {
@@ -5530,11 +5532,13 @@ renvoAsmEmitText(&g.asm, "\x49\x89\x87")
 renvoAsmEmit32(&g.asm, stateOffset)
 return
 }
+renvoAsmPushSecondary(&g.asm)
 renvoAsmPushPrimary(&g.asm)
 renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
 renvoAsmCopyPrimaryToSecondary(&g.asm)
 renvoAsmPopPrimary(&g.asm)
 renvoAsmStorePrimaryMemSecondaryDisp(&g.asm, stateOffset)
+renvoAsmPopSecondary(&g.asm)
 }
 
 func renvoAsmCopyThreadStateToStack(g *renvoLinearGen, stateOffset int, stackOffset int) {

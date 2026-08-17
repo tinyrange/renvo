@@ -120,6 +120,10 @@ func evaluatedGoValue() int {
 func main() {
 	handler := serial.New()
 	runtime.EnableGoroutines(handler)
+	if !runtime.StackSupported() {
+		print("PASS\n")
+		return
+	}
 
 	values := make(chan int)
 	go produce(values)

@@ -5512,9 +5512,11 @@ func renvoAsmLoadPrimaryThreadState(g *renvoLinearGen, stateOffset int) {
 		renvoAsmEmit32(&g.asm, stateOffset)
 		return
 	}
+	renvoAsmPushSecondary(&g.asm)
 	renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
 	renvoAsmCopyPrimaryToSecondary(&g.asm)
 	renvoAsmLoadPrimaryMemSecondaryDisp(&g.asm, stateOffset)
+	renvoAsmPopSecondary(&g.asm)
 }
 
 func renvoAsmStorePrimaryThreadState(g *renvoLinearGen, stateOffset int) {
@@ -5523,11 +5525,13 @@ func renvoAsmStorePrimaryThreadState(g *renvoLinearGen, stateOffset int) {
 		renvoAsmEmit32(&g.asm, stateOffset)
 		return
 	}
+	renvoAsmPushSecondary(&g.asm)
 	renvoAsmPushPrimary(&g.asm)
 	renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
 	renvoAsmCopyPrimaryToSecondary(&g.asm)
 	renvoAsmPopPrimary(&g.asm)
 	renvoAsmStorePrimaryMemSecondaryDisp(&g.asm, stateOffset)
+	renvoAsmPopSecondary(&g.asm)
 }
 
 func renvoAsmCopyThreadStateToStack(g *renvoLinearGen, stateOffset int, stackOffset int) {

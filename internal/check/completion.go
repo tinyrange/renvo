@@ -59,7 +59,14 @@ func CompleteKeywords(source []byte, offset int) []CompletionItem {
 // deliberately a query over the frontend graph: editor widgets remain unaware
 // of Go packages and the same answer is available in host and self-hosted IDEs.
 func CompleteGraph(graph load.Graph, path string, offset int) []CompletionItem {
-	return CompleteProgram(graph, completionProgram(graph), path, offset)
+	return CompleteProgram(graph, CheckGraphBestEffort(graph), path, offset)
+}
+
+// CheckGraphBestEffort builds every package independently and retains the
+// semantic information produced before a diagnostic. Editor features use it
+// while a buffer is temporarily incomplete.
+func CheckGraphBestEffort(graph load.Graph) Program {
+	return completionProgram(graph)
 }
 
 // CompleteProgram queries an existing checked snapshot. Interactive callers
@@ -187,7 +194,17 @@ func completionSelectorItems(items []CompletionItem, graph load.Graph, prog Prog
 		if len(components) == 1 {
 			return completionPackageItems(items, prog, imported, prefix)
 		}
-		return items
+		typ, ok := completionPackageNameType(graph, prog, imported, components[1])
+		if !ok {
+			return items
+		}
+		for i := 2; i < len(components); i++ {
+			typ, ok = completionFieldType(graph, prog, typ, components[i])
+			if !ok {
+				return items
+			}
+		}
+		return completionTypeItems(items, graph, prog, typ, pkgIndex, prefix, 0)
 	}
 	fn, ok := completionFunctionAt(file, offset)
 	if !ok {
@@ -204,6 +221,32 @@ func completionSelectorItems(items []CompletionItem, graph load.Graph, prog Prog
 		}
 	}
 	return completionTypeItems(items, graph, prog, typ, pkgIndex, prefix, 0)
+}
+
+func completionPackageNameType(graph load.Graph, prog Program, pkg int, name string) (completionType, bool) {
+	if pkg < 0 || pkg >= len(prog.Packages) || pkg >= len(graph.Packages) {
+		return completionType{}, false
+	}
+	info := prog.Packages[pkg]
+	for i := 0; i < len(info.Decls); i++ {
+		decl := info.Decls[i]
+		if decl.Name != name || decl.File < 0 || decl.File >= len(graph.Packages[pkg].Files) {
+			continue
+		}
+		if decl.TypeStart >= 0 && decl.TypeEnd > decl.TypeStart {
+			return completionSpanType(graph, prog, pkg, decl.File, decl.TypeStart, decl.TypeEnd)
+		}
+		if decl.ValueIndex >= 0 && decl.ValueIndex < len(decl.Values) {
+			span := decl.Values[decl.ValueIndex]
+			file := graph.Packages[pkg].Files[decl.File].File
+			return completionExpressionType(graph, prog, pkg, decl.File, file, span.StartTok, span.EndTok, 0)
+		}
+		if decl.ValueStart >= 0 && decl.ValueEnd > decl.ValueStart {
+			file := graph.Packages[pkg].Files[decl.File].File
+			return completionExpressionType(graph, prog, pkg, decl.File, file, decl.ValueStart, decl.ValueEnd, decl.ValueIndex)
+		}
+	}
+	return completionType{}, false
 }
 
 func completionPackageItems(items []CompletionItem, prog Program, pkg int, prefix string) []CompletionItem {
