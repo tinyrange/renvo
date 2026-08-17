@@ -135,21 +135,32 @@ func navigationMemberAt(graph load.Graph, program Program, pkgIndex int, fileInd
 		return navigationTarget{}, false
 	}
 	components := completionSelectorComponents(file.Src, file.Tokens[token-1].Start)
-	if len(components) == 0 || completionImportPackage(program.Packages[pkgIndex], fileIndex, components[0]) >= 0 {
+	if len(components) == 0 {
 		return navigationTarget{}, false
 	}
-	fn, ok := completionFunctionAt(file, file.Tokens[token].Start)
+	var typ completionType
+	var ok bool
+	start := 1
+	if imported := completionImportPackage(program.Packages[pkgIndex], fileIndex, components[0]); imported >= 0 {
+		if len(components) < 2 {
+			return navigationTarget{}, false
+		}
+		typ, ok = completionPackageNameType(graph, program, imported, components[1])
+		start = 2
+	} else {
+		fn, found := completionFunctionAt(file, file.Tokens[token].Start)
+		if !found {
+			return navigationTarget{}, false
+		}
+		typ, ok = completionNameType(graph, program, pkgIndex, fileIndex, file, fn, components[0], file.Tokens[token].Start)
+		if !ok {
+			typ, ok = navigationShortAssignType(graph, program, pkgIndex, fileIndex, file, fn, components[0], file.Tokens[token].Start)
+		}
+	}
 	if !ok {
 		return navigationTarget{}, false
 	}
-	typ, ok := completionNameType(graph, program, pkgIndex, fileIndex, file, fn, components[0], file.Tokens[token].Start)
-	if !ok {
-		typ, ok = navigationShortAssignType(graph, program, pkgIndex, fileIndex, file, fn, components[0], file.Tokens[token].Start)
-	}
-	if !ok {
-		return navigationTarget{}, false
-	}
-	for i := 1; i < len(components); i++ {
+	for i := start; i < len(components); i++ {
 		typ, ok = completionFieldType(graph, program, typ, components[i])
 		if !ok {
 			return navigationTarget{}, false

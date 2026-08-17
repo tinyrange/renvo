@@ -212,6 +212,7 @@ func platformPackageSpecs() []platformPackageSpec {
 		{Path: "device/display/st7121"},
 		{Path: "device/sensor/sgp30"},
 		{Path: "device/sensor/adxl345"},
+		{Path: "device/sensor/bme688"},
 		{Path: "device/ws2812"},
 		{Path: "device/internal/esprmt"},
 		{Path: "device/esp32c6", Target: "esp32c6/riscv32"},
@@ -223,6 +224,7 @@ func platformPackageSpecs() []platformPackageSpec {
 		{Path: "device/board/m5atoms3lite", Target: "esp32s3/xtensa_lx7"},
 		{Path: "examples/m5atoms3lite/adxl345", Target: "esp32s3/xtensa_lx7", Board: "M5Stack AtomS3 Lite"},
 		{Path: "examples/m5atoms3lite/button_rgb", Target: "esp32s3/xtensa_lx7", Board: "M5Stack AtomS3 Lite"},
+		{Path: "examples/m5atoms3lite/env_pro", Target: "esp32s3/xtensa_lx7", Board: "M5Stack AtomS3 Lite"},
 		{Path: "examples/m5atoms3lite/sk6812_strip", Target: "esp32s3/xtensa_lx7", Board: "M5Stack AtomS3 Lite"},
 		{Path: "device/board/m5sticks3", Target: "esp32s3/xtensa_lx7"},
 		{Path: "examples/m5sticks3/forms_menu", Target: "esp32s3/xtensa_lx7", Board: "M5Stack StickS3"},
@@ -280,6 +282,11 @@ func buildPlatformPackages(root string, output string) (map[string]standardPacka
 			destination := filepath.Join(output, "stdlib", "module", filepath.FromSlash(spec.Path), entry.Name())
 			if err = copyFile(source, destination); err != nil {
 				return nil, err
+			}
+			// Retain package licenses in the deployable bundle without presenting
+			// them to the compiler as source or embeddable package data.
+			if entry.Name() == "LICENSE" {
+				continue
 			}
 			item.Files = append(item.Files, entry.Name())
 			if strings.HasSuffix(entry.Name(), ".go") {
