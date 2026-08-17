@@ -28,7 +28,7 @@ type stackStorage struct {
 
 type waiter struct {
 	value  []byte
-	target uintptr
+	target unsafe.Pointer
 	done   bool
 	open   bool
 	status int
@@ -227,7 +227,7 @@ func (h *Handler) ChanCreate(elementSize uintptr, capacity int) uintptr {
 }
 
 // ChanSend performs a buffered send or serialized rendezvous.
-func (h *Handler) ChanSend(handle uintptr, value uintptr) int {
+func (h *Handler) ChanSend(handle uintptr, value unsafe.Pointer) int {
 	c := h.channel(handle)
 	if c == nil {
 		h.blockForever()
@@ -258,7 +258,7 @@ func (h *Handler) ChanSend(handle uintptr, value uintptr) int {
 }
 
 // ChanReceive performs a buffered receive or serialized rendezvous.
-func (h *Handler) ChanReceive(handle uintptr, target uintptr) bool {
+func (h *Handler) ChanReceive(handle uintptr, target unsafe.Pointer) bool {
 	c := h.channel(handle)
 	if c == nil {
 		h.blockForever()
@@ -338,8 +338,8 @@ func (h *Handler) waitSelect(cases []runtime.ChanSelectValue) (int, int) {
 		}
 	}
 	wait := group.bindings[group.selected].wait
-	if cases[group.selected].Direction == runtime.SelectReceive && cases[group.selected].ReceiveOK != 0 {
-		*(*bool)(unsafe.Pointer(cases[group.selected].ReceiveOK)) = wait.open
+	if cases[group.selected].Direction == runtime.SelectReceive && cases[group.selected].ReceiveOK != nil {
+		*(*bool)(cases[group.selected].ReceiveOK) = wait.open
 	}
 	return group.selected, group.status
 }
@@ -460,13 +460,13 @@ func (h *Handler) selectApply(value runtime.ChanSelectValue) int {
 	} else {
 		open = false
 	}
-	if value.ReceiveOK != 0 {
-		*(*bool)(unsafe.Pointer(value.ReceiveOK)) = open
+	if value.ReceiveOK != nil {
+		*(*bool)(value.ReceiveOK) = open
 	}
 	return int(runtime.StatusOK)
 }
 
-func (c *channel) pushBuffer(source uintptr) {
+func (c *channel) pushBuffer(source unsafe.Pointer) {
 	if c.capacity == 0 {
 		return
 	}
@@ -475,7 +475,7 @@ func (c *channel) pushBuffer(source uintptr) {
 	c.length++
 }
 
-func (c *channel) popBuffer(target uintptr) {
+func (c *channel) popBuffer(target unsafe.Pointer) {
 	if c.length == 0 {
 		return
 	}
@@ -524,32 +524,10 @@ func removeWaiter(waiters *[]*waiter, wanted *waiter) {
 	}
 }
 
-func bytesFromAddress(address uintptr, size int) []byte {
+func bytesFromAddress(address unsafe.Pointer, size int) []byte {
 	value := make([]byte, size)
 	copyAddressToBytes(value, address)
 	return value
-}
-
-func copyAddressToBytes(target []byte, source uintptr) {
-	for i := 0; i < len(target); i++ {
-		address := source + uintptr(i)
-		target[i] = (*[1]byte)(unsafe.Pointer(address))[0]
-	}
-}
-
-func copyBytesToAddress(target uintptr, source []byte) {
-	for i := 0; i < len(source); i++ {
-		address := target + uintptr(i)
-		(*[1]byte)(unsafe.Pointer(address))[0] = source[i]
-	}
-}
-
-func copyFromAddress(target uintptr, source uintptr, size int) {
-	for i := 0; i < size; i++ {
-		targetAddress := target + uintptr(i)
-		sourceAddress := source + uintptr(i)
-		(*[1]byte)(unsafe.Pointer(targetAddress))[0] = (*[1]byte)(unsafe.Pointer(sourceAddress))[0]
-	}
 }
 
 func (h *Handler) blockForever() {

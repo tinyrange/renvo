@@ -529,6 +529,8 @@ type ThreadState struct {
 
         <pre><code>package runtime // import "renvo.dev/x/runtime"
 
+import "unsafe"
+
 type Entry uintptr   // opaque dispatcher ID, not promised to be a code address
 type Context uintptr // address of compiler-generated persistent context
 type Channel uintptr // zero is a nil channel
@@ -548,8 +550,8 @@ const (
 
 type ChanSelectValue struct {
     Channel   Channel
-    Value     uintptr // address of send input or receive destination
-    ReceiveOK uintptr // optional *bool destination; zero when unused
+    Value     unsafe.Pointer // send input or receive destination
+    ReceiveOK unsafe.Pointer // optional *bool destination; nil when unused
     Direction SelectDirection
 }
 
@@ -557,8 +559,8 @@ type GoHandler interface {
     Spawn(entry Entry, context Context)
 
     ChanCreate(elementSize uintptr, capacity int) Channel
-    ChanSend(channel Channel, value uintptr) Status
-    ChanReceive(channel Channel, value uintptr) (open bool)
+    ChanSend(channel Channel, value unsafe.Pointer) Status
+    ChanReceive(channel Channel, value unsafe.Pointer) (open bool)
     ChanSelect(cases []ChanSelectValue, hasDefault bool) (index int, status Status)
     ChanClose(channel Channel) Status
     ChanLen(channel Channel) int

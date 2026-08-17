@@ -41,8 +41,8 @@ const (
 // optional address of the receive's boolean result.
 type ChanSelectValue struct {
 	Channel   Channel
-	Value     uintptr
-	ReceiveOK uintptr
+	Value     unsafe.Pointer
+	ReceiveOK unsafe.Pointer
 	Direction SelectDirection
 }
 
@@ -51,6 +51,7 @@ type ChanSelectValue struct {
 // name. They are aliases, so handlers still receive []ChanSelectValue.
 type renvo_runtime_ChanSelectValue = ChanSelectValue
 type renvo_runtime_Channel = Channel
+type renvo_runtime_Pointer = unsafe.Pointer
 
 const (
 	renvo_runtime_SelectReceive = SelectReceive
@@ -63,8 +64,8 @@ const (
 type GoHandler interface {
 	Spawn(entry uintptr, context uintptr)
 	ChanCreate(elementSize uintptr, capacity int) uintptr
-	ChanSend(channel uintptr, value uintptr) int
-	ChanReceive(channel uintptr, value uintptr) bool
+	ChanSend(channel uintptr, value unsafe.Pointer) int
+	ChanReceive(channel uintptr, value unsafe.Pointer) bool
 	ChanSelect(cases []ChanSelectValue, hasDefault bool) (int, int)
 	ChanClose(channel uintptr) int
 	ChanLen(channel uintptr) int
@@ -153,7 +154,7 @@ func renvo_runtime_ChanCreate(elementSize uintptr, capacity int) uintptr {
 	return requireHandler().ChanCreate(elementSize, capacity)
 }
 
-func renvo_runtime_ChanSend(channel Channel, value uintptr) {
+func renvo_runtime_ChanSend(channel Channel, value unsafe.Pointer) {
 	status := requireHandler().ChanSend(uintptr(channel), value)
 	if status == int(StatusClosed) {
 		panic("send on closed channel")
@@ -163,7 +164,7 @@ func renvo_runtime_ChanSend(channel Channel, value uintptr) {
 	}
 }
 
-func renvo_runtime_ChanReceive(channel Channel, value uintptr) bool {
+func renvo_runtime_ChanReceive(channel Channel, value unsafe.Pointer) bool {
 	return requireHandler().ChanReceive(uintptr(channel), value)
 }
 

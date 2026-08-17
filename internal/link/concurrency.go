@@ -282,19 +282,19 @@ func concurrencySelectText(name string, cases []concurrencySelectCase) (string, 
 		channelParam := "channel" + functionValueDecimal(operation)
 		parameters += channelParam + " uintptr"
 		arguments += "uintptr(" + item.channel + ")"
-		valuePointer := "uintptr(&result.value" + functionValueDecimal(operation) + ")"
-		okPointer := "uintptr(0)"
+		valuePointer := "renvo_runtime_Pointer(&result.value" + functionValueDecimal(operation) + ")"
+		okPointer := "renvo_runtime_Pointer(nil)"
 		direction := "renvo_runtime_SelectReceive"
 		prefix := ""
 		if item.direction == "send" {
 			valueParam := "send" + functionValueDecimal(operation)
 			parameters += ", " + valueParam + " " + item.element
 			arguments += ", " + item.send
-			valuePointer = "uintptr(&" + valueParam + ")"
+			valuePointer = "renvo_runtime_Pointer(&" + valueParam + ")"
 			direction = "renvo_runtime_SelectSend"
 		} else {
 			fields += "value" + functionValueDecimal(operation) + " " + item.element + "; open" + functionValueDecimal(operation) + " bool; "
-			okPointer = "uintptr(&result.open" + functionValueDecimal(operation) + ")"
+			okPointer = "renvo_runtime_Pointer(&result.open" + functionValueDecimal(operation) + ")"
 			if item.receiveLHS != "" {
 				prefix = item.receiveLHS + " " + item.receiveOp + " result.value" + functionValueDecimal(operation)
 				// A two-target receive consumes the open result as its second value.
@@ -424,7 +424,7 @@ func lowerChannelSyntaxCore(program *unit.Program, transient bool) bool {
 		value := functionValueTokensText(program, i+1, end)
 		name := "__renvo_chan_send_" + functionValueDecimal(i)
 		channelName := name + "_channel"
-		replacement := "{ " + channelName + " := " + channel + "; var " + name + " " + element + " = " + value + "; renvo_runtime_ChanSend(uintptr(" + channelName + "), uintptr(&" + name + ")) }"
+		replacement := "{ " + channelName + " := " + channel + "; var " + name + " " + element + " = " + value + "; renvo_runtime_ChanSend(uintptr(" + channelName + "), renvo_runtime_Pointer(&" + name + ")) }"
 		edits = append(edits, functionValueTokenRangeEdit(program, start, end, replacement))
 		concurrencyCover(covered, start, end)
 		i = end - 1
@@ -541,9 +541,9 @@ func lowerChannelSyntaxCore(program *unit.Program, transient bool) bool {
 		generatedStart = len(text)
 		for i := 0; i < len(helpers); i++ {
 			helper := helpers[i]
-			declaration := "func " + helper.name + "(channel uintptr) " + helper.element + " { var value " + helper.element + "; renvo_runtime_ChanReceive(channel, uintptr(&value)); return value }\n"
+			declaration := "func " + helper.name + "(channel uintptr) " + helper.element + " { var value " + helper.element + "; renvo_runtime_ChanReceive(channel, renvo_runtime_Pointer(&value)); return value }\n"
 			if helper.open {
-				declaration = "func " + helper.name + "(channel uintptr) (" + helper.element + ", bool) { var value " + helper.element + "; open := renvo_runtime_ChanReceive(channel, uintptr(&value)); return value, open }\n"
+				declaration = "func " + helper.name + "(channel uintptr) (" + helper.element + ", bool) { var value " + helper.element + "; open := renvo_runtime_ChanReceive(channel, renvo_runtime_Pointer(&value)); return value, open }\n"
 			}
 			text = appendFunctionValueString(text, declaration)
 		}

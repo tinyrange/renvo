@@ -12,9 +12,10 @@ func TestLinkLowersChannelsAndGoroutinesBeforeCoreUnit(t *testing.T) {
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
 
+type renvo_runtime_Pointer uintptr
 func renvo_runtime_ChanCreate(size uintptr, capacity int) uintptr { return 1 }
-func renvo_runtime_ChanSend(channel uintptr, value uintptr) {}
-func renvo_runtime_ChanReceive(channel uintptr, value uintptr) bool { return true }
+func renvo_runtime_ChanSend(channel uintptr, value renvo_runtime_Pointer) {}
+func renvo_runtime_ChanReceive(channel uintptr, value renvo_runtime_Pointer) bool { return true }
 func renvo_runtime_ChanClose(channel uintptr) {}
 func renvo_runtime_ChanLen(channel uintptr) int { return 0 }
 func renvo_runtime_ChanCap(channel uintptr) int { return 0 }
@@ -77,7 +78,8 @@ func TestLinkLowersSelectToOneHandlerDecision(t *testing.T) {
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
 
 type renvo_runtime_Channel uintptr
-type renvo_runtime_ChanSelectValue struct { Channel renvo_runtime_Channel; Value uintptr; ReceiveOK uintptr; Direction int }
+type renvo_runtime_Pointer uintptr
+type renvo_runtime_ChanSelectValue struct { Channel renvo_runtime_Channel; Value renvo_runtime_Pointer; ReceiveOK renvo_runtime_Pointer; Direction int }
 const renvo_runtime_SelectReceive = 0
 const renvo_runtime_SelectSend = 1
 func renvo_runtime_ChanSelect(cases []renvo_runtime_ChanSelectValue, hasDefault bool) int { return -1 }
@@ -117,8 +119,9 @@ func TestLinkStagesChannelOperationsAndDynamicGoCalls(t *testing.T) {
 type namedChannel chan int
 type worker struct{}
 
+type renvo_runtime_Pointer uintptr
 func renvo_runtime_ChanCreate(size uintptr, capacity int) uintptr { return 1 }
-func renvo_runtime_ChanSend(channel uintptr, value uintptr) {}
+func renvo_runtime_ChanSend(channel uintptr, value renvo_runtime_Pointer) {}
 func renvo_runtime_Spawn(entry uintptr, context uintptr) {}
 func renvo_runtime_Call(entry uintptr, context uintptr) { panic("invalid") }
 
@@ -170,12 +173,13 @@ func FuzzConcurrencyLowering(f *testing.F) {
 		source.WriteString(`package main
 
 type renvo_runtime_Channel uintptr
-type renvo_runtime_ChanSelectValue struct { Channel renvo_runtime_Channel; Value uintptr; ReceiveOK uintptr; Direction int }
+type renvo_runtime_Pointer uintptr
+type renvo_runtime_ChanSelectValue struct { Channel renvo_runtime_Channel; Value renvo_runtime_Pointer; ReceiveOK renvo_runtime_Pointer; Direction int }
 const renvo_runtime_SelectReceive = 0
 const renvo_runtime_SelectSend = 1
 func renvo_runtime_ChanCreate(size uintptr, capacity int) uintptr { return 1 }
-func renvo_runtime_ChanSend(channel uintptr, value uintptr) {}
-func renvo_runtime_ChanReceive(channel uintptr, value uintptr) bool { return true }
+func renvo_runtime_ChanSend(channel uintptr, value renvo_runtime_Pointer) {}
+func renvo_runtime_ChanReceive(channel uintptr, value renvo_runtime_Pointer) bool { return true }
 func renvo_runtime_ChanSelect(cases []renvo_runtime_ChanSelectValue, hasDefault bool) int { return -1 }
 func renvo_runtime_ChanClose(channel uintptr) {}
 func renvo_runtime_ChanLen(channel uintptr) int { return 0 }

@@ -11,7 +11,7 @@ func TestBufferedChannelAndSelect(t *testing.T) {
 	h := New()
 	channel := h.ChanCreate(unsafe.Sizeof(int(0)), 2)
 	first, second := 7, 9
-	if h.ChanSend(channel, uintptr(unsafe.Pointer(&first))) != int(runtime.StatusOK) || h.ChanSend(channel, uintptr(unsafe.Pointer(&second))) != int(runtime.StatusOK) {
+	if h.ChanSend(channel, unsafe.Pointer(&first)) != int(runtime.StatusOK) || h.ChanSend(channel, unsafe.Pointer(&second)) != int(runtime.StatusOK) {
 		t.Fatal("buffered send failed")
 	}
 	if h.ChanLen(channel) != 2 || h.ChanCap(channel) != 2 {
@@ -19,7 +19,7 @@ func TestBufferedChannelAndSelect(t *testing.T) {
 	}
 	var got int
 	var open bool
-	cases := []runtime.ChanSelectValue{{Channel: runtime.Channel(channel), Value: uintptr(unsafe.Pointer(&got)), ReceiveOK: uintptr(unsafe.Pointer(&open)), Direction: runtime.SelectReceive}}
+	cases := []runtime.ChanSelectValue{{Channel: runtime.Channel(channel), Value: unsafe.Pointer(&got), ReceiveOK: unsafe.Pointer(&open), Direction: runtime.SelectReceive}}
 	index, status := h.ChanSelect(cases, false)
 	if index != 0 || status != int(runtime.StatusOK) || got != 7 || !open {
 		t.Fatalf("select = index %d status %d value %d open %v", index, status, got, open)
@@ -28,10 +28,10 @@ func TestBufferedChannelAndSelect(t *testing.T) {
 		t.Fatal("close failed")
 	}
 	got = 0
-	if !h.ChanReceive(channel, uintptr(unsafe.Pointer(&got))) || got != 9 {
+	if !h.ChanReceive(channel, unsafe.Pointer(&got)) || got != 9 {
 		t.Fatalf("drain = %d", got)
 	}
-	if h.ChanReceive(channel, uintptr(unsafe.Pointer(&got))) {
+	if h.ChanReceive(channel, unsafe.Pointer(&got)) {
 		t.Fatal("closed channel reported open")
 	}
 }
@@ -40,7 +40,7 @@ func TestSelectDefaultAndClosedSend(t *testing.T) {
 	h := New()
 	channel := h.ChanCreate(1, 0)
 	value := byte(3)
-	cases := []runtime.ChanSelectValue{{Channel: runtime.Channel(channel), Value: uintptr(unsafe.Pointer(&value)), Direction: runtime.SelectReceive}}
+	cases := []runtime.ChanSelectValue{{Channel: runtime.Channel(channel), Value: unsafe.Pointer(&value), Direction: runtime.SelectReceive}}
 	index, status := h.ChanSelect(cases, true)
 	if index != -1 || status != int(runtime.StatusOK) {
 		t.Fatalf("default = %d/%d", index, status)
@@ -61,13 +61,13 @@ func TestSelectCompletionAtomicallyRemovesSiblingWaiters(t *testing.T) {
 	secondChannel := h.channel(second)
 	group := &selectWait{bindings: make([]*selectBinding, 2), selected: -1}
 	for index, owner := range []*channel{firstChannel, secondChannel} {
-		wait := &waiter{target: uintptr(unsafe.Pointer(new(int))), status: selectPendingStatus}
+		wait := &waiter{target: unsafe.Pointer(new(int)), status: selectPendingStatus}
 		group.bindings[index] = &selectBinding{wait: wait, group: group, index: index, owner: owner}
 		owner.selects = append(owner.selects, group.bindings[index])
 		owner.receivers = append(owner.receivers, wait)
 	}
 	value := 41
-	if status := h.ChanSend(first, uintptr(unsafe.Pointer(&value))); status != int(runtime.StatusOK) {
+	if status := h.ChanSend(first, unsafe.Pointer(&value)); status != int(runtime.StatusOK) {
 		t.Fatalf("send status = %d", status)
 	}
 	if group.selected != 0 || len(firstChannel.receivers) != 0 || len(secondChannel.receivers) != 0 {
@@ -83,22 +83,22 @@ func TestSelectRotatesAmongReadyCases(t *testing.T) {
 	channels := []uintptr{h.ChanCreate(unsafe.Sizeof(int(0)), 1), h.ChanCreate(unsafe.Sizeof(int(0)), 1)}
 	values := []int{10, 20}
 	for i := 0; i < len(channels); i++ {
-		if status := h.ChanSend(channels[i], uintptr(unsafe.Pointer(&values[i]))); status != int(runtime.StatusOK) {
+		if status := h.ChanSend(channels[i], unsafe.Pointer(&values[i])); status != int(runtime.StatusOK) {
 			t.Fatalf("initial send %d status = %d", i, status)
 		}
 	}
 	for iteration := 0; iteration < 4; iteration++ {
 		var got int
 		cases := []runtime.ChanSelectValue{
-			{Channel: runtime.Channel(channels[0]), Value: uintptr(unsafe.Pointer(&got)), Direction: runtime.SelectReceive},
-			{Channel: runtime.Channel(channels[1]), Value: uintptr(unsafe.Pointer(&got)), Direction: runtime.SelectReceive},
+			{Channel: runtime.Channel(channels[0]), Value: unsafe.Pointer(&got), Direction: runtime.SelectReceive},
+			{Channel: runtime.Channel(channels[1]), Value: unsafe.Pointer(&got), Direction: runtime.SelectReceive},
 		}
 		index, status := h.ChanSelect(cases, false)
 		want := iteration % 2
 		if status != int(runtime.StatusOK) || index != want || got != values[want] {
 			t.Fatalf("iteration %d = index %d status %d value %d", iteration, index, status, got)
 		}
-		if status := h.ChanSend(channels[want], uintptr(unsafe.Pointer(&values[want]))); status != int(runtime.StatusOK) {
+		if status := h.ChanSend(channels[want], unsafe.Pointer(&values[want])); status != int(runtime.StatusOK) {
 			t.Fatalf("refill %d status = %d", want, status)
 		}
 	}
@@ -136,11 +136,11 @@ func FuzzHandlerChannelStateMachine(f *testing.F) {
 			switch data[step] % 6 {
 			case 0:
 				if model.closed {
-					if status := handler.ChanSend(handles[index], uintptr(unsafe.Pointer(&value))); status != int(runtime.StatusClosed) {
+					if status := handler.ChanSend(handles[index], unsafe.Pointer(&value)); status != int(runtime.StatusClosed) {
 						t.Fatalf("step %d: closed send status = %d", step, status)
 					}
 				} else if len(model.values) < model.capacity {
-					if status := handler.ChanSend(handles[index], uintptr(unsafe.Pointer(&value))); status != int(runtime.StatusOK) {
+					if status := handler.ChanSend(handles[index], unsafe.Pointer(&value)); status != int(runtime.StatusOK) {
 						t.Fatalf("step %d: send status = %d", step, status)
 					}
 					model.values = append(model.values, value)
@@ -148,13 +148,13 @@ func FuzzHandlerChannelStateMachine(f *testing.F) {
 			case 1:
 				if len(model.values) > 0 {
 					var got uint64
-					if !handler.ChanReceive(handles[index], uintptr(unsafe.Pointer(&got))) || got != model.values[0] {
+					if !handler.ChanReceive(handles[index], unsafe.Pointer(&got)) || got != model.values[0] {
 						t.Fatalf("step %d: receive = %d, want %d", step, got, model.values[0])
 					}
 					model.values = model.values[1:]
 				} else if model.closed {
 					var got uint64
-					if handler.ChanReceive(handles[index], uintptr(unsafe.Pointer(&got))) {
+					if handler.ChanReceive(handles[index], unsafe.Pointer(&got)) {
 						t.Fatalf("step %d: closed empty receive reported open", step)
 					}
 				}
@@ -190,8 +190,8 @@ func fuzzReceiveSelect(t *testing.T, handler *Handler, handles []uintptr, models
 	var got uint64
 	var open bool
 	cases := []runtime.ChanSelectValue{
-		{Channel: runtime.Channel(handles[first]), Value: uintptr(unsafe.Pointer(&got)), ReceiveOK: uintptr(unsafe.Pointer(&open)), Direction: runtime.SelectReceive},
-		{Channel: runtime.Channel(handles[second]), Value: uintptr(unsafe.Pointer(&got)), ReceiveOK: uintptr(unsafe.Pointer(&open)), Direction: runtime.SelectReceive},
+		{Channel: runtime.Channel(handles[first]), Value: unsafe.Pointer(&got), ReceiveOK: unsafe.Pointer(&open), Direction: runtime.SelectReceive},
+		{Channel: runtime.Channel(handles[second]), Value: unsafe.Pointer(&got), ReceiveOK: unsafe.Pointer(&open), Direction: runtime.SelectReceive},
 	}
 	index, status := handler.ChanSelect(cases, true)
 	if status != int(runtime.StatusOK) {
@@ -227,8 +227,8 @@ func fuzzReceiveSelect(t *testing.T, handler *Handler, handles []uintptr, models
 func fuzzSendSelect(t *testing.T, handler *Handler, handles []uintptr, models []fuzzChannelModel, first int, second int, value uint64, step int) {
 	t.Helper()
 	cases := []runtime.ChanSelectValue{
-		{Channel: runtime.Channel(handles[first]), Value: uintptr(unsafe.Pointer(&value)), Direction: runtime.SelectSend},
-		{Channel: runtime.Channel(handles[second]), Value: uintptr(unsafe.Pointer(&value)), Direction: runtime.SelectSend},
+		{Channel: runtime.Channel(handles[first]), Value: unsafe.Pointer(&value), Direction: runtime.SelectSend},
+		{Channel: runtime.Channel(handles[second]), Value: unsafe.Pointer(&value), Direction: runtime.SelectSend},
 	}
 	index, status := handler.ChanSelect(cases, true)
 	ready := []bool{models[first].closed || len(models[first].values) < models[first].capacity, models[second].closed || len(models[second].values) < models[second].capacity}
