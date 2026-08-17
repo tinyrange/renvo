@@ -160,6 +160,32 @@ func main() { use() }
 	}
 }
 
+func TestNavigateProgramFindsDefinitionsInDependencyModules(t *testing.T) {
+	mainSource := []byte(`package main
+import "example.com/lib"
+func main() { println(lib.Value()) }
+`)
+	files := []load.SourceFile{
+		{Path: "/repo/go.mod", Src: []byte("module example.com/app\n")},
+		{Path: "/cache/lib/go.mod", Src: []byte("example.com/lib")},
+		{Path: "/cache/lib/lib.go", Src: []byte("package lib\nfunc Value() int { return 42 }\n")},
+		{Path: "/repo/main.go", Src: mainSource},
+	}
+	workspace := load.LoadWorkspace("/repo", "/std", ".", files)
+	if !workspace.Ok {
+		t.Fatalf("workspace failed: %#v", workspace)
+	}
+	program := CheckGraph(workspace.Graph)
+	result := NavigateProgram(workspace.Graph, program, "/repo/main.go", navigationTestOffset(mainSource, "Value()"))
+	if !result.Ok || result.Definition.Path != "/cache/lib/lib.go" {
+		t.Fatalf("dependency definition = %#v", result)
+	}
+	packageResult := NavigateProgram(workspace.Graph, program, "/repo/main.go", navigationTestOffset(mainSource, "lib.Value"))
+	if !packageResult.Ok || packageResult.Definition.Path != "/cache/lib/lib.go" || len(packageResult.References) != 2 {
+		t.Fatalf("dependency package definition = %#v", packageResult)
+	}
+}
+
 func navigationTestOffset(source []byte, marker string) int {
 	for i := 0; i+len(marker) <= len(source); i++ {
 		if string(source[i:i+len(marker)]) == marker {

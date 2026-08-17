@@ -285,6 +285,19 @@ func hoverHex(value int) string {
 }
 
 func hoverBuiltin(name string) (string, string, bool) {
+	if hoverBuiltinType(name) {
+		documentation := "Predeclared Go type."
+		if name == "byte" {
+			documentation = "Predeclared alias for uint8."
+		} else if name == "rune" {
+			documentation = "Predeclared alias for int32, conventionally used for Unicode code points."
+		} else if name == "error" {
+			documentation = "Predeclared interface for values that describe an error condition."
+		} else if name == "any" {
+			documentation = "Predeclared alias for interface{}; it accepts a value of any type."
+		}
+		return "type " + name, documentation, true
+	}
 	signature, documentation := "", ""
 	switch name {
 	case "append":
@@ -329,6 +342,16 @@ func hoverBuiltin(name string) (string, string, bool) {
 	return signature, documentation, true
 }
 
+func hoverBuiltinType(name string) bool {
+	types := []string{"any", "bool", "byte", "complex64", "complex128", "error", "float32", "float64", "int", "int8", "int16", "int32", "int64", "rune", "string", "uint", "uint8", "uint16", "uint32", "uint64", "uintptr"}
+	for i := 0; i < len(types); i++ {
+		if name == types[i] {
+			return true
+		}
+	}
+	return false
+}
+
 func hoverField(graph load.Graph, program Program, target navigationTarget) (string, string) {
 	if target.packageIndex < 0 || target.packageIndex >= len(program.Packages) || target.packageIndex >= len(graph.Packages) ||
 		target.symbolIndex < 0 || target.symbolIndex >= len(program.Packages[target.packageIndex].Types) {
@@ -358,8 +381,11 @@ func hoverSpanText(file syntax.File, start, end int) string {
 
 func hoverTypeName(program Program, origin int, typ completionType) string {
 	name := typ.Name
-	if typ.Package >= 0 && typ.Package < len(program.Packages) && typ.Package != origin && program.Packages[typ.Package].Name != "" {
+	if !completionPredeclaredType(name) && typ.Package >= 0 && typ.Package < len(program.Packages) && typ.Package != origin && program.Packages[typ.Package].Name != "" {
 		name = program.Packages[typ.Package].Name + "." + name
+	}
+	if typ.Pointer {
+		name = "*" + name
 	}
 	return name
 }

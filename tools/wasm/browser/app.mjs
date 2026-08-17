@@ -1,6 +1,6 @@
 import { ESPWebSerial, requestESPPort } from "./esp-webserial.mjs";
 import { preferredESPTransport, requestESPUSBPort, supportsESPWebUSBPlatform } from "./esp-webusb.mjs";
-import { cleanLanguagePath } from "./language-path.mjs";
+import { cleanLanguagePath, sourceImportPath } from "./language-path.mjs";
 import { SerialPlotter, SerialPlotterView } from "./serial-plotter.mjs";
 
 const MONACO_VERSION = "0.56.0";
@@ -78,6 +78,8 @@ const stdlibFiles = new Map();
 const loadedStandardPackages = new Set();
 const loadingStandardPackages = new Map();
 const languageRequests = new Map();
+let languageWorkspaceRevision = 1;
+let sentLanguageWorkspaceRevision = 0;
 const backendReady = new Set();
 let monaco;
 let editor;
@@ -240,6 +242,7 @@ async function loadMonaco() {
     bracketPairColorization: { enabled: true }, lightbulb: { enabled: "off" },
     quickSuggestions: { other: true, comments: false, strings: false },
     suggestOnTriggerCharacters: true, wordBasedSuggestions: "off",
+    hover: { enabled: true, delay: 80, sticky: true },
   });
   editor.onDidChangeCursorPosition(({ position }) => {
     elements.cursorStatus.textContent = `Ln ${position.lineNumber}, Col ${position.column}`;
@@ -696,6 +699,7 @@ async function loadStandardPackage(importPath, catalog) {
     const prefix = platform ? item.root : `std/${name}`;
     for (const [file, data] of values) stdlibFiles.set(`${prefix}/${file}`, data);
     loadedStandardPackages.add(key);
+    languageWorkspaceRevision++;
     await Promise.all((item.imports || []).map((dependency) => loadStandardPackage(dependency, catalog)));
   })();
   loadingStandardPackages.set(key, loading);
@@ -721,6 +725,15 @@ function workspacePayload() {
     transfers.push(data.buffer);
   }
   return { files, transfers };
+}
+
+function languageWorkspacePayload() {
+  if (sentLanguageWorkspaceRevision === languageWorkspaceRevision) {
+    return { revision: languageWorkspaceRevision, transfers: [] };
+  }
+  const payload = workspacePayload();
+  sentLanguageWorkspaceRevision = languageWorkspaceRevision;
+  return { ...payload, revision: languageWorkspaceRevision };
 }
 
 function installLanguageProviders() {
@@ -821,10 +834,10 @@ async function requestLanguage(mode, model, offset) {
   if (!compilerReady || !targetCatalog?.languageService || !selectedTarget) return [];
   await ensureWorkspaceDependencies();
   const id = ++requestID;
-  const payload = workspacePayload();
+  const payload = languageWorkspacePayload();
   const result = new Promise((resolve) => languageRequests.set(id, resolve));
   worker.postMessage({
-    type: mode, id, files: payload.files, target: selectedTarget.name,
+    type: mode, id, files: payload.files, workspaceRevision: payload.revision, target: selectedTarget.name,
     tags: selectedTarget.tags || [], file: fileName(model), offset,
     packageAt: languagePackageForModel(model),
   }, payload.transfers);
@@ -855,11 +868,11 @@ async function runAnalysis(generation) {
   try {
     await ensureWorkspaceDependencies();
     if (generation !== languageGeneration) return;
-    const payload = workspacePayload();
+    const payload = languageWorkspacePayload();
     const id = ++requestID;
     latestAnalysisRequestID = id;
     worker.postMessage({
-      type: "analyze", id, files: payload.files, target: selectedTarget.name,
+      type: "analyze", id, files: payload.files, workspaceRevision: payload.revision, target: selectedTarget.name,
       tags: selectedTarget.tags || [], file: activeFile, offset: 0,
       packageAt: languagePackageForModel(models.get(activeFile)),
     }, payload.transfers);
@@ -1006,6 +1019,7 @@ function handleModelChange(name, model) {
   document.querySelector(`.file[data-file="${name}"]`)?.classList.toggle("modified", model.getValue() !== editableBaselines.get(name));
   saveFiles();
   markBuildStale();
+  languageWorkspaceRevision++;
   if (name.endsWith(".go") || name === "go.mod") scheduleAnalysis();
 }
 
@@ -1492,13 +1506,7 @@ async function ensureSourceModel(path) {
   if (models.has(name)) return models.get(name);
   if (!standardCatalogPromise) return undefined;
   const catalog = await standardCatalogPromise;
-  let importPath;
-  if (name.startsWith("std/")) importPath = name.slice(4, name.lastIndexOf("/"));
-  else {
-    for (const [candidate, item] of Object.entries(catalog.platforms || {})) {
-      if (name.startsWith(`${item.root}/`)) { importPath = candidate; break; }
-    }
-  }
+  const importPath = sourceImportPath(name, catalog);
   if (!importPath) return undefined;
   await loadStandardPackage(importPath, catalog);
   const source = stdlibFiles.get(name);
