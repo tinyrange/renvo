@@ -37,12 +37,17 @@ func main() {
 	compiler := flag.String("compiler", "", "Renvo compiler executable")
 	expected := flag.Int("expected", 0, "required number of target C commands")
 	workers := flag.Int("j", runtime.NumCPU(), "parallel preprocessing and syntax-check workers")
+	filter := flag.String("filter", "", "compile only target C sources containing this path fragment")
 	objects := flag.Bool("objects", false, "emit an ELF object for every translation unit instead of syntax-checking it")
+	installVmlinuxObjects := flag.Bool("install-vmlinux-objects", false, "replace the prepared tree's vmlinux C objects after a complete object pass")
 	keepGoing := flag.Bool("keep-going", false, "continue after failures to enumerate the complete blocker set")
 	flag.Parse()
 	if *kernel == "" || *compiler == "" || *workers < 1 || flag.NArg() != 0 {
 		flag.Usage()
 		os.Exit(2)
+	}
+	if *installVmlinuxObjects && !*objects {
+		fatalf("-install-vmlinux-objects requires -objects")
 	}
 	compilerPath, err := exec.LookPath(*compiler)
 	if err != nil {
@@ -59,6 +64,12 @@ func main() {
 	}
 	if len(commands) == 0 {
 		fatalf("no target C commands found under %s; build the pinned tinyconfig with the system compiler first", *kernel)
+	}
+	if *filter != "" {
+		commands = filterTargetCommands(commands, *filter)
+		if len(commands) == 0 {
+			fatalf("no target C commands match filter %q", *filter)
+		}
 	}
 	if *expected > 0 && len(commands) != *expected {
 		fatalf("target C command count=%d, want %d", len(commands), *expected)
@@ -137,11 +148,29 @@ func main() {
 		}
 		fatalf("%s failed %d/%d %s: %v\n%s", failed.phase, failed.job.index+1, len(commands), failed.job.source, failed.err, failed.output)
 	}
+	if *installVmlinuxObjects {
+		installed, err := installVmlinuxTargetObjects(*kernel, workspace, jobs)
+		if err != nil {
+			fatalf("install target objects: %v", err)
+		}
+		fmt.Printf("installed=%d\n", installed)
+	}
 	mode := "syntax"
 	if *objects {
 		mode = "objects"
 	}
 	fmt.Printf("gate=PASS\nmode=%s\nelapsed=%s\n", mode, time.Since(started).Round(time.Millisecond))
+}
+
+func filterTargetCommands(commands []string, fragment string) []string {
+	selected := make([]string, 0, len(commands))
+	for _, command := range commands {
+		source, _, ok := preprocessingCommand(command, "validate.i")
+		if ok && strings.Contains(source, fragment) {
+			selected = append(selected, command)
+		}
+	}
+	return selected
 }
 
 func syntaxWorker(ctx context.Context, group *sync.WaitGroup, worker int, kernel string, compiler string, workspace string, objects bool, jobs <-chan syntaxJob, results chan<- syntaxResult) {
@@ -167,11 +196,8 @@ func syntaxWorker(ctx context.Context, group *sync.WaitGroup, worker int, kernel
 		object := ""
 		if objects {
 			object = filepath.Join(workspace, fmt.Sprintf("object-%03d.o", job.index))
-			arguments = []string{"cc", "-c", "-x", "c", "-o", object, unit}
+			arguments = objectArguments(job.command, object, unit)
 			phase = "Renvo object emission"
-			if strings.Contains(job.command, " -fshort-wchar ") {
-				arguments = append(arguments, "-fshort-wchar")
-			}
 		}
 		cmd = exec.CommandContext(ctx, compiler, arguments...)
 		cmd.Dir = kernel
@@ -193,6 +219,92 @@ func syntaxWorker(ctx context.Context, group *sync.WaitGroup, worker int, kernel
 	}
 }
 
+func objectArguments(command, object, unit string) []string {
+	arguments := []string{"cc", "-c", "-x", "c", "-o", object, unit}
+	// Preserve the Kbuild flags that affect object semantics after the system
+	// compiler has produced the saved preprocessing stream. Most warning and
+	// optimization flags are intentionally absent at this boundary.
+	if strings.Contains(command, " -fshort-wchar ") {
+		arguments = append(arguments, "-fshort-wchar")
+	}
+	if strings.Contains(command, " -mcmodel=kernel ") {
+		arguments = append(arguments, "-mcmodel=kernel")
+	}
+	return arguments
+}
+
+func targetObjectPath(command string) (string, bool) {
+	compileAt := strings.LastIndex(command, " -c -o ")
+	if compileAt < 0 {
+		return "", false
+	}
+	fields := strings.Fields(command[compileAt+len(" -c -o "):])
+	if len(fields) < 2 || filepath.IsAbs(fields[0]) {
+		return "", false
+	}
+	path := filepath.Clean(fields[0])
+	if path == "." || path == ".." || strings.HasPrefix(path, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return path, true
+}
+
+func installVmlinuxTargetObjects(kernel, workspace string, jobs []syntaxJob) (int, error) {
+	installed := 0
+	for _, job := range jobs {
+		// The x86 boot wrapper and vDSO are separate ELF environments with
+		// their own compiler flags and linker scripts. This installation mode
+		// replaces C objects consumed by vmlinux, while the corpus still
+		// compiles and validates these independently linked sources.
+		if strings.HasPrefix(job.source, "arch/x86/boot/") || strings.HasPrefix(job.source, "arch/x86/entry/vdso/") {
+			continue
+		}
+		relative, ok := targetObjectPath(job.command)
+		if !ok {
+			return installed, fmt.Errorf("unsupported object output in command for %s", job.source)
+		}
+		source := filepath.Join(workspace, fmt.Sprintf("object-%03d.o", job.index))
+		data, err := os.ReadFile(source)
+		if err != nil {
+			return installed, fmt.Errorf("read %s: %w", source, err)
+		}
+		destination := filepath.Join(kernel, relative)
+		info, err := os.Lstat(destination)
+		if err != nil {
+			return installed, fmt.Errorf("inspect %s: %w", destination, err)
+		}
+		if !info.Mode().IsRegular() {
+			return installed, fmt.Errorf("refuse to replace non-regular object %s", destination)
+		}
+		temporary, err := os.CreateTemp(filepath.Dir(destination), ".renvo-object-*")
+		if err != nil {
+			return installed, fmt.Errorf("stage %s: %w", destination, err)
+		}
+		temporaryName := temporary.Name()
+		keep := false
+		defer func() {
+			if !keep {
+				_ = os.Remove(temporaryName)
+			}
+		}()
+		if err := temporary.Chmod(info.Mode().Perm()); err == nil {
+			_, err = temporary.Write(data)
+		}
+		if closeErr := temporary.Close(); err == nil {
+			err = closeErr
+		}
+		if err != nil {
+			return installed, fmt.Errorf("stage %s: %w", destination, err)
+		}
+		if err := os.Rename(temporaryName, destination); err != nil {
+			return installed, fmt.Errorf("replace %s: %w", destination, err)
+		}
+		keep = true
+		installed++
+	}
+	return installed, nil
+}
+
 func targetCCommands(root string) ([]string, error) {
 	var commands []string
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
@@ -209,12 +321,12 @@ func targetCCommands(root string) ([]string, error) {
 		for scanner.Scan() {
 			line := scanner.Text()
 			at := strings.Index(line, ":=")
-			if at < 0 || !strings.Contains(line[:at], "cmd_") {
+			if at < 0 || !strings.HasPrefix(strings.TrimSpace(line[:at]), "savedcmd_") {
 				continue
 			}
-			command := strings.TrimSpace(line[at+2:])
+			command := targetCompileCommand(strings.TrimSpace(line[at+2:]))
 			fields := strings.Fields(command)
-			if len(fields) > 1 && strings.Contains(command, " -nostdinc ") &&
+			if len(fields) > 1 && strings.Contains(command, " -nostdinc ") && strings.Contains(command, " -D__KERNEL__ ") &&
 				strings.Contains(command, " -c ") && strings.HasSuffix(fields[len(fields)-1], ".c") {
 				commands = append(commands, command)
 			}
@@ -223,6 +335,13 @@ func targetCCommands(root string) ([]string, error) {
 	})
 	sort.Strings(commands)
 	return commands, err
+}
+
+func targetCompileCommand(command string) string {
+	if at := strings.Index(command, " ; "); at >= 0 {
+		command = command[:at]
+	}
+	return strings.TrimSpace(command)
 }
 
 func preprocessingCommand(command, output string) (string, string, bool) {

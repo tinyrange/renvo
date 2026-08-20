@@ -352,7 +352,11 @@ func (p *constantParser) constantP() (int, bool) {
 	if end < 0 {
 		return 0, false
 	}
-	_, constant := p.t.constantExpression(p.tokens[p.pos+1 : end])
+	argument := p.tokens[p.pos+1 : end]
+	_, constant := p.t.constantExpression(argument)
+	if !constant {
+		_, constant = p.t.inlineRuntimeAnnihilatorCondition(argument, true)
+	}
 	p.pos = end + 1
 	return boolConstant(constant), true
 }

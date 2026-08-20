@@ -607,6 +607,27 @@ func renvoEmitExitStatus(g *renvoLinearGen) bool {
 
 func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
 	renvoNonNil(g, fn)
+	if renvoIsHostedObject386(g.c) {
+		importID := renvoAsmAddExternalImportRange(&g.asm,
+			g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
+		if importID < 0 {
+			return false
+		}
+		renvoAsmEmit8(&g.asm, 0xe8)
+		at := len(g.asm.code)
+		renvoAsmEmit32(&g.asm, 0)
+		renvoAsmAddAbsReloc(&g.asm, at, importID, renvoKernelAmd64RelocationImport)
+		if wordCount > 0 {
+			bytes := wordCount * 4
+			if renvoAsmImmFits8Signed(bytes) {
+				renvoAsmEmit3(&g.asm, 0x83, 0xc4, bytes)
+			} else {
+				renvoAsmEmit16(&g.asm, 0xc481)
+				renvoAsmEmit32(&g.asm, bytes)
+			}
+		}
+		return true
+	}
 	if renvoIsHostedObjectAmd64(g.c) {
 		memoryAggregate := renvoEmitCObjectMemoryAggregateCall(g, fn, wordCount)
 		if memoryAggregate >= 0 {

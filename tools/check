@@ -168,6 +168,16 @@ check_frontend() {
 		go test -v -count=1 -timeout 30m ./frontend_tests
 }
 
+check_linux_boot() {
+	run_check "pinned Linux/x86_64 deterministic boot" \
+		"$repository_root/tools/kbuild/linux-boot"
+}
+
+check_xv6() {
+	run_check "pinned xv6/i386 build and usertests VM" \
+		"$repository_root/tools/xv6/run"
+}
+
 usage() {
 	cat <<'EOF'
 Usage: ./tools/check MODE [CORPUS_FILTER]
@@ -184,6 +194,10 @@ Modes:
                Run only gates that are stable on shared CI runners.
   frontend     Run the complete frontend corpus and self-hosting suite. An
                optional regular expression runs matching positive corpus cases.
+  linux-boot   Perform the clean, opt-in pinned Linux build and two deterministic
+               bounded QEMU boots. This is intentionally outside preflight.
+  xv6          Build pinned xv6/i386 C sources with Renvo, boot QEMU, and run
+               the complete xv6 usertests suite. This is outside preflight.
   full         Run PR-level performance, preflight, backend, and frontend checks.
                This can take the full 30-minute timeout and is intended for the
                merge queue, not the normal interactive development loop.
@@ -226,6 +240,12 @@ case "$mode" in
 		;;
 	frontend)
 		check_frontend "$filter"
+		;;
+	linux-boot)
+		check_linux_boot
+		;;
+	xv6)
+		check_xv6
 		;;
 	full)
 		# Measure before the parallel package and corpus suites can heat and

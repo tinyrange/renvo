@@ -32,6 +32,7 @@ type SourceFile struct {
 	CFunctionSections bool
 	CDataSections     bool
 	CShortWChar       bool
+	CKernelCodeModel  bool
 	ArenaStart        int
 	ArenaEnd          int
 }
@@ -159,13 +160,16 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 		}
 		source := selected[i]
 		if isCSourceFile(source.Path) {
-			translated := c11.Translate(pkg.Name, source.Src)
+			var translated c11.Result
 			if source.CObject {
 				translated = c11.TranslateObjectWithConfig(pkg.Name, source.Src, source.CPrelude, c11.ObjectConfig{
 					DataModel: source.CDataModel, FunctionSections: source.CFunctionSections,
-					DataSections: source.CDataSections,
-					ShortWChar:   source.CShortWChar,
+					DataSections:    source.CDataSections,
+					ShortWChar:      source.CShortWChar,
+					KernelCodeModel: source.CKernelCodeModel,
 				})
+			} else {
+				translated = c11.Translate(pkg.Name, source.Src)
 			}
 			if !translated.Ok {
 				pkg.ErrorOffset = translated.ErrorAt
@@ -318,7 +322,8 @@ func selectPackageFiles(dir string, files []SourceFile) []SourceFile {
 		}
 		selected = append(selected, SourceFile{Path: path, Src: files[i].Src, CPrelude: files[i].CPrelude,
 			CObject: files[i].CObject, CDataModel: files[i].CDataModel, CFunctionSections: files[i].CFunctionSections,
-			CDataSections: files[i].CDataSections, CShortWChar: files[i].CShortWChar, ArenaStart: files[i].ArenaStart, ArenaEnd: files[i].ArenaEnd})
+			CDataSections: files[i].CDataSections, CShortWChar: files[i].CShortWChar,
+			CKernelCodeModel: files[i].CKernelCodeModel, ArenaStart: files[i].ArenaStart, ArenaEnd: files[i].ArenaEnd})
 	}
 	sortSourceFiles(selected)
 	return selected

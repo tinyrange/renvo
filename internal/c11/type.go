@@ -3,6 +3,7 @@ package c11
 const (
 	DataModelInvalid = iota
 	DataModelLP64
+	DataModelILP32
 )
 
 type cTargetDescriptor struct {
@@ -23,6 +24,11 @@ type cTargetDescriptor struct {
 var cX8664SysV = cTargetDescriptor{
 	dataModel: DataModelLP64, boolSize: 1, charSize: 1, shortSize: 2,
 	intSize: 4, longSize: 8, floatSize: 4, doubleSize: 8, pointerSize: 8,
+}
+
+var cI386SysV = cTargetDescriptor{
+	dataModel: DataModelILP32, boolSize: 1, charSize: 1, shortSize: 2,
+	intSize: 4, longSize: 4, floatSize: 4, doubleSize: 8, pointerSize: 4,
 }
 
 const (
@@ -171,16 +177,20 @@ type cMemberAccess struct {
 }
 
 func (t *translator) initTypes(dataModel int) {
-	// Object mode is currently gated to Linux/x86_64. The explicit descriptor
-	// prevents host sizeof assumptions from leaking into C types.
+	// Explicit descriptors prevent host sizeof assumptions from leaking into C
+	// types. Both supported models retain an eight-byte C long long; only long
+	// and pointers vary between LP64 and ILP32.
 	t.dataModel = dataModel
 	target := cX8664SysV
-	if dataModel != target.dataModel {
+	if dataModel == DataModelILP32 {
+		target = cI386SysV
+	} else if dataModel != target.dataModel {
 		t.ok = false
 		t.err = TranslateErrUnsupported
 		return
 	}
 	t.pointerSize = target.pointerSize
+	t.longSize = target.longSize
 	t.types = append(t.types,
 		cTypeInfo{kind: cTypeVoid, size: target.charSize, align: target.charSize},
 		cTypeInfo{kind: cTypeBool, size: target.boolSize, align: target.boolSize, goName: "uint8"},
@@ -190,8 +200,8 @@ func (t *translator) initTypes(dataModel int) {
 		cTypeInfo{kind: cTypeUint, size: target.shortSize, align: target.shortSize, goName: "uint16"},
 		cTypeInfo{kind: cTypeInt, size: target.intSize, align: target.intSize, goName: "int32"},
 		cTypeInfo{kind: cTypeUint, size: target.intSize, align: target.intSize, goName: "uint32"},
-		cTypeInfo{kind: cTypeInt, size: target.longSize, align: target.longSize, goName: "int64"},
-		cTypeInfo{kind: cTypeUint, size: target.longSize, align: target.longSize, goName: "uint64"},
+		cTypeInfo{kind: cTypeInt, size: 8, align: target.doubleSize, goName: "int64"},
+		cTypeInfo{kind: cTypeUint, size: 8, align: target.doubleSize, goName: "uint64"},
 		cTypeInfo{kind: cTypeFloat, size: target.floatSize, align: target.floatSize, goName: "float32"},
 		cTypeInfo{kind: cTypeFloat, size: target.doubleSize, align: target.doubleSize, goName: "float64"},
 		cTypeInfo{kind: cTypeUint, size: target.pointerSize, align: target.pointerSize, goName: "uintptr"},
@@ -393,11 +403,14 @@ func alignC(value int, alignment int) int {
 	return (value + alignment - 1) &^ (alignment - 1)
 }
 
-func builtinCType(name []byte) (int, bool) {
+func (t *translator) builtinCType(name []byte) (int, bool) {
 	if textEquals(name, "size_t") || textEquals(name, "uintptr_t") {
 		return cTypeUintptrID, true
 	}
 	if textEquals(name, "intptr_t") || textEquals(name, "ptrdiff_t") {
+		if t.pointerSize == 4 {
+			return cTypeInt32ID, true
+		}
 		return cTypeInt64ID, true
 	}
 	if textEquals(name, "int8_t") {

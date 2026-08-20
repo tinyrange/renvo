@@ -77,6 +77,7 @@ type Options struct {
 	CFunctionSections    bool
 	CDataSections        bool
 	CShortWChar          bool
+	CKernelCodeModel     bool
 	DependencyFile       string
 	DependencyTarget     string
 	CDependencyRoot      string
@@ -111,6 +112,14 @@ func NormalizeCCompilerCommand(args []string) []string {
 		}
 		if arg == "-fshort-wchar" {
 			out = append(out, "-cc-short-wchar")
+			continue
+		}
+		if arg == "-mcmodel=kernel" {
+			out = append(out, "-cc-kernel-code-model")
+			continue
+		}
+		if arg == "-m32" {
+			out = append(out, "-t", "linux/386")
 			continue
 		}
 		if cCompilerInertOption(arg) {
@@ -181,7 +190,7 @@ func NormalizeCCompilerCommand(args []string) []string {
 	return out
 }
 
-const cCompilerInertOptions = "-MMD|-MD|-MP|-pipe|-std=gnu11|-std=c11|-m64|-Os|-O0|-O1|-O2|-O3|-funsigned-char|-fno-common|-fno-PIE|-fno-pie|-fno-strict-aliasing|-fno-asynchronous-unwind-tables|-fno-delete-null-pointer-checks|-fno-stack-protector|-fomit-frame-pointer|-fno-strict-overflow|-fno-stack-check|-fconserve-stack|-fno-builtin-wcslen|-falign-functions=16|-fverbose-asm|-mno-sse|-mno-mmx|-mno-sse2|-mno-3dnow|-mno-avx|-mno-80387|-mtune=generic|-mno-red-zone|-mcmodel=kernel|-Wall|-Wextra|-Wundef|-Werror|-Werror=implicit-function-declaration|-Werror=implicit-int|-Werror=return-type|-Werror=strict-prototypes|-Wno-format-security|-Wno-trigraphs|-Wmissing-declarations|-Wmissing-prototypes|-Wframe-larger-than=2048|-Wno-main|-Wvla|-Wno-pointer-sign|-Werror=date-time|-Wunused|-Wno-override-init|-Wno-missing-field-initializers|-Wno-type-limits|-Wno-shift-negative-value|-Wno-maybe-uninitialized|-Wno-sign-compare|-Wno-unused-parameter"
+const cCompilerInertOptions = "-MMD|-MD|-MP|-pipe|-std=gnu11|-std=c11|-m64|-Os|-O0|-O1|-O2|-O3|-ffreestanding|-static|-ggdb|-funsigned-char|-fno-common|-fno-pic|-fno-PIE|-fno-pie|-fno-builtin|-fno-strict-aliasing|-fno-asynchronous-unwind-tables|-fno-delete-null-pointer-checks|-fno-stack-protector|-fomit-frame-pointer|-fno-strict-overflow|-fno-stack-check|-fconserve-stack|-fno-builtin-wcslen|-falign-functions=16|-fverbose-asm|-mno-sse|-mno-mmx|-mno-sse2|-mno-3dnow|-mno-avx|-mno-80387|-mtune=generic|-mno-red-zone|-Wall|-Wextra|-Wundef|-Werror|-Werror=implicit-function-declaration|-Werror=implicit-int|-Werror=return-type|-Werror=strict-prototypes|-Wno-format-security|-Wno-trigraphs|-Wmissing-declarations|-Wmissing-prototypes|-Wframe-larger-than=2048|-Wno-main|-Wvla|-Wno-pointer-sign|-Werror=date-time|-Wunused|-Wno-override-init|-Wno-missing-field-initializers|-Wno-type-limits|-Wno-shift-negative-value|-Wno-maybe-uninitialized|-Wno-sign-compare|-Wno-unused-parameter"
 
 func cCompilerInertOption(arg string) bool {
 	option, _ := cCompilerOptionIndex(cCompilerInertOptions, arg, false)
@@ -288,6 +297,11 @@ func parseOptions(args []string, requireAdvertisedTarget bool) Options {
 		}
 		if arg == "-cc-short-wchar" {
 			options.CShortWChar = true
+			i++
+			continue
+		}
+		if arg == "-cc-kernel-code-model" {
+			options.CKernelCodeModel = true
 			i++
 			continue
 		}
@@ -479,7 +493,7 @@ func parseOptions(args []string, requireAdvertisedTarget bool) Options {
 		if options.Mode == ModeKernelModule && options.Target != "linux/amd64" {
 			return parseFail(options, ParseErrModeRequiresLinuxAmd64, options.Target, modeAt)
 		}
-		if options.Mode == ModeObject && options.Target != "linux/amd64" {
+		if options.Mode == ModeObject && options.Target != "linux/amd64" && options.Target != "linux/386" {
 			return parseFail(options, ParseErrObjectRequiresLinuxAmd64, options.Target, modeAt)
 		}
 	}

@@ -76,3 +76,19 @@ Regenerate a census for any prepared tree without modifying it:
 ```sh
 go run ./tools/kbuild -kernel /path/to/linux -out dashboard.json
 ```
+
+M9's clean boot gate is deliberately outside the one-minute preflight loop:
+
+```sh
+./tools/check linux-boot
+```
+
+It verifies and extracts the pinned archive, applies the checked tinyconfig
+boot fragment, records a complete system-compiler reference build, replaces
+every eligible vmlinux C object with Renvo output, and performs the normal
+external assembly and link stages. A fixed 128 MiB, single-CPU QEMU guest then
+boots the resulting image twice with instruction-counted TCG and a reproducible
+musl initramfs. The normalized serial logs must be identical and reach the
+checked `RENVO-LINUX-M9: PASS` marker within 30 seconds. Set
+`RENVO_LINUX_ARCHIVE` to a cached pinned archive and `RENVO_LINUX_JOBS` to tune
+host parallelism; neither changes the checked guest profile.

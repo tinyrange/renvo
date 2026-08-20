@@ -35,6 +35,37 @@ type renvoObjectDataRange struct {
 	start, end, section, local int
 }
 
+// renvoAmd64EmitObjectStaticCallReverse consumes scalar arguments which were
+// evaluated and pushed from first to last. The top of the hardware stack is
+// therefore the final argument, so populate the SysV registers in reverse
+// order without first copying every word through compiler-frame temporaries.
+func renvoAmd64EmitObjectStaticCallReverse(out *renvoAsm, importID int, wordCount int) {
+	for register := wordCount - 1; register >= 0; register-- {
+		if register == 0 {
+			renvoAsmEmit8(out, 0x5f) // pop %rdi
+		} else if register == 1 {
+			renvoAsmEmit8(out, 0x5e) // pop %rsi
+		} else if register == 2 {
+			renvoAsmEmit8(out, 0x5a) // pop %rdx
+		} else if register == 3 {
+			renvoAsmEmit8(out, 0x59) // pop %rcx
+		} else if register == 4 {
+			renvoAsmEmit2(out, 0x41, 0x58) // pop %r8
+		} else if register == 5 {
+			renvoAsmEmit2(out, 0x41, 0x59) // pop %r9
+		}
+	}
+	externalID := renvoAsmAddExternalImportName(out, out.staticImports[importID].name)
+	// Preserve the exact expression stack pointer while satisfying the SysV
+	// call-boundary alignment rule. Foreign callees may clobber r11.
+	renvoAsmEmitText(out, "\x49\x89\xe3\x48\x83\xe4\xf0\x48\x83\xec\x10\x4c\x89\x5c\x24\x08")
+	renvoAsmEmitText(out, "\x31\xc0\xe8")
+	at := len(out.code)
+	renvoAsmEmit32(out, 0)
+	renvoAsmAddAbsReloc(out, at, externalID, 2)
+	renvoAsmEmitText(out, "\x48\x8b\x64\x24\x08")
+}
+
 func renvoObjectImageFail(reason string) []byte {
 	renvoPrintErr("renvo: object image failed: ")
 	renvoPrintErr(reason)
@@ -43,6 +74,14 @@ func renvoObjectImageFail(reason string) []byte {
 }
 
 func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
+	return renvoAsmImageKernelObjectX86(a, false)
+}
+
+func renvoAsmImageKernelObject386(a *renvoAsm) []byte {
+	return renvoAsmImageKernelObjectX86(a, true)
+}
+
+func renvoAsmImageKernelObjectX86(a *renvoAsm, elf386 bool) []byte {
 	renvoNonNil(a)
 	sections := []renvoObjectELFSection{{}}
 	ranges := renvoObjectCodeRanges(a)
@@ -157,16 +196,18 @@ func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
 		}
 		section := renvoObjectELFSectionIndex(&sections, name, typ, flags, alignment)
 		local := renvoAlignValue(sections[section].size, alignment)
-		storageSize := item.storageSize
-		if storageSize < item.size {
-			storageSize = item.size
-		}
-		sections[section].size = local + storageSize
+		// The virtual global range can be wider than the C object. Arrays, for
+		// example, use a pointer-sized carrier internally even when a custom
+		// linker-table entry is only four bytes. Only the declared object bytes
+		// belong in its ELF section; the range builder below maps any internal
+		// carrier tail into anonymous .bss instead.
+		emittedSize := item.size
+		sections[section].size = local + emittedSize
 		if !nobits {
-			sections[section].data = renvoObjectUntil(sections[section].data, local+storageSize)
+			sections[section].data = renvoObjectUntil(sections[section].data, local+emittedSize)
 			valueSize := item.valueEnd - item.valueStart
 			if valueSize > 0 {
-				if item.valueStart < 0 || item.valueEnd > len(a.objectDataValues) || valueSize > storageSize {
+				if item.valueStart < 0 || item.valueEnd > len(a.objectDataValues) || valueSize > emittedSize {
 					return renvoObjectImageFail("invalid data value range")
 				}
 				copy(sections[section].data[local:local+valueSize], a.objectDataValues[item.valueStart:item.valueEnd])
@@ -176,7 +217,7 @@ func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
 				}
 			}
 		}
-		dataMap = append(dataMap, renvoObjectDataRange{start: item.offset, end: item.offset + storageSize, section: section, local: local})
+		dataMap = append(dataMap, renvoObjectDataRange{start: item.offset, end: item.offset + emittedSize, section: section, local: local})
 	}
 	declaredRanges := len(dataMap)
 	mappedEnd := 0
@@ -341,6 +382,9 @@ func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
 			}
 			targetSymbol = importSymbols[addend]
 			relocationType = 4
+			if elf386 {
+				relocationType = 2
+			}
 		} else if kind == renvoKernelAmd64RelocationAbsoluteData {
 			section := renvoObjectFindSection(sections, ".rodata")
 			if section < 0 {
@@ -376,17 +420,27 @@ func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
 			return renvoObjectImageFail("unknown absolute relocation kind")
 		}
 		renvoPut32At(sections[sourceSection].data, sourceOffset, 0)
+		relocationAddend := targetOffset - 4
+		if elf386 && kind != renvoKernelAmd64RelocationImport {
+			relocationType = 1
+			relocationAddend = targetOffset
+		}
 		sections[sourceSection].relocations = append(sections[sourceSection].relocations,
-			renvoObjectELFRelocation{offset: sourceOffset, symbol: targetSymbol, typ: relocationType, addend: targetOffset - 4})
+			renvoObjectELFRelocation{offset: sourceOffset, symbol: targetSymbol, typ: relocationType, addend: relocationAddend})
 	}
 	for i := 0; i < len(a.objectDataRelocs); i++ {
 		r := &a.objectDataRelocs[i]
-		sourceSection, sourceOffset, found := renvoObjectMapData(dataMap, r.offset)
+		sourceSection, sourceOffset, found := -1, 0, false
+		if r.offset < 0 {
+			sourceSection, sourceOffset, found = renvoObjectMapCode(codeMap, renvoAsmLabelPosition(a, -r.offset-1))
+		} else {
+			sourceSection, sourceOffset, found = renvoObjectMapData(dataMap, r.offset)
+		}
 		if !found {
-			renvoPrintErr("renvo: object data relocation source missing ")
+			renvoPrintErr("renvo: object relocation source missing ")
 			renvoPrintIntErr(i)
 			renvoPrintErr("\n")
-			return renvoObjectImageFail("data relocation source missing")
+			return renvoObjectImageFail("relocation source missing")
 		}
 		targetSymbol := -1
 		addend := r.addend
@@ -449,33 +503,58 @@ func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
 		}
 		name := ".rela" + sections[i].name
 		relocationSection := renvoObjectELFSection{name: name, typ: 4, flags: 64, alignment: 8, info: i, entrySize: 24}
+		if elf386 {
+			name = ".rel" + sections[i].name
+			relocationSection = renvoObjectELFSection{name: name, typ: 9, flags: 64, alignment: 4, info: i, entrySize: 8}
+		}
 		for j := 0; j < len(sections[i].relocations); j++ {
 			r := sections[i].relocations[j]
-			relocationSection.data = renvoElfAmd64AppendRelocation(relocationSection.data, r.offset, r.symbol, r.typ, r.addend)
+			if elf386 {
+				if r.offset < 0 || r.offset+4 > len(sections[i].data) {
+					return renvoObjectImageFail("i386 relocation source missing")
+				}
+				renvoPut32At(sections[i].data, r.offset, renvoGet32At(sections[i].data, r.offset)+r.addend)
+				relocationSection.data = renvoElf386AppendRelocation(relocationSection.data, r.offset, r.symbol, r.typ)
+			} else {
+				relocationSection.data = renvoElfAmd64AppendRelocation(relocationSection.data, r.offset, r.symbol, r.typ, r.addend)
+			}
 		}
 		relocationSection.size = len(relocationSection.data)
 		sections = append(sections, relocationSection)
 	}
 
 	strtab := []byte{0}
-	symtab := make([]byte, 0, len(symbols)*24)
+	symbolSize := 24
+	if elf386 {
+		symbolSize = 16
+	}
+	symtab := make([]byte, 0, len(symbols)*symbolSize)
 	for i := 0; i < len(symbols); i++ {
 		nameOffset := 0
 		if symbols[i].name != "" {
 			nameOffset = len(strtab)
 			strtab = renvoObjectAppendString(strtab, symbols[i].name)
 		}
-		start := len(symtab)
-		symtab = renvoElfAmd64AppendSymbol(symtab, nameOffset, symbols[i].info, symbols[i].section, symbols[i].value, symbols[i].size)
-		symtab[start+5] = byte(symbols[i].visibility)
+		if elf386 {
+			symtab = renvoElf386AppendSymbol(symtab, nameOffset, symbols[i].info, symbols[i].visibility,
+				symbols[i].section, symbols[i].value, symbols[i].size)
+		} else {
+			start := len(symtab)
+			symtab = renvoElfAmd64AppendSymbol(symtab, nameOffset, symbols[i].info, symbols[i].section, symbols[i].value, symbols[i].size)
+			symtab[start+5] = byte(symbols[i].visibility)
+		}
 	}
 	symtabIndex := len(sections)
-	sections = append(sections, renvoObjectELFSection{name: ".symtab", typ: 2, alignment: 8, info: firstGlobal, entrySize: 24, data: symtab, size: len(symtab)})
+	symbolAlignment := 8
+	if elf386 {
+		symbolAlignment = 4
+	}
+	sections = append(sections, renvoObjectELFSection{name: ".symtab", typ: 2, alignment: symbolAlignment, info: firstGlobal, entrySize: symbolSize, data: symtab, size: len(symtab)})
 	strtabIndex := len(sections)
 	sections = append(sections, renvoObjectELFSection{name: ".strtab", typ: 3, alignment: 1, data: strtab, size: len(strtab)})
 	sections[symtabIndex].link = strtabIndex
 	for i := 1; i < symtabIndex; i++ {
-		if sections[i].typ == 4 || sections[i].typ == 17 {
+		if sections[i].typ == 4 || sections[i].typ == 9 || sections[i].typ == 17 {
 			sections[i].link = symtabIndex
 		}
 	}
@@ -491,7 +570,11 @@ func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
 	sections[shstrtabIndex].data = shstrtab
 	sections[shstrtabIndex].size = len(shstrtab)
 
-	image := make([]byte, 64)
+	headerSize := 64
+	if elf386 {
+		headerSize = 52
+	}
+	image := make([]byte, headerSize)
 	for i := 1; i < len(sections); i++ {
 		alignment := sections[i].alignment
 		if alignment < 1 {
@@ -504,18 +587,85 @@ func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
 			image = append(image, sections[i].data...)
 		}
 	}
-	sectionOffset := renvoAlignValue(len(image), 8)
+	sectionAlignment := 8
+	if elf386 {
+		sectionAlignment = 4
+	}
+	sectionOffset := renvoAlignValue(len(image), sectionAlignment)
 	image = renvoObjectUntil(image, sectionOffset)
 	for i := 0; i < len(sections); i++ {
 		s := sections[i]
-		image = renvoElfAmd64AppendSection(image, sectionNameOffsets[i], s.typ, s.flags, s.offset, s.size,
-			s.link, s.info, s.alignment, s.entrySize)
+		if elf386 {
+			image = renvoElf386AppendSection(image, sectionNameOffsets[i], s.typ, s.flags, s.offset, s.size,
+				s.link, s.info, s.alignment, s.entrySize)
+		} else {
+			image = renvoElfAmd64AppendSection(image, sectionNameOffsets[i], s.typ, s.flags, s.offset, s.size,
+				s.link, s.info, s.alignment, s.entrySize)
+		}
 	}
 	header := renvoElfAmd64AppendHeader(nil, sectionOffset, len(sections), shstrtabIndex)
+	if elf386 {
+		header = renvoElf386AppendHeader(nil, sectionOffset, len(sections), shstrtabIndex)
+	}
 	for i := 0; i < len(header); i++ {
 		image[i] = header[i]
 	}
 	return image
+}
+
+func renvoElf386Append16(out []byte, value int) []byte {
+	return append(out, byte(value), byte(value>>8))
+}
+
+func renvoElf386Append32(out []byte, value int) []byte {
+	return append(out, byte(value), byte(value>>8), byte(value>>16), byte(value>>24))
+}
+
+func renvoElf386AppendHeader(out []byte, sectionOffset int, sectionCount int, namesIndex int) []byte {
+	out = append(out, 0x7f, 'E', 'L', 'F', 1, 1, 1, 0)
+	for len(out) < 16 {
+		out = append(out, 0)
+	}
+	out = renvoElf386Append16(out, 1)
+	out = renvoElf386Append16(out, 3)
+	out = renvoElf386Append32(out, 1)
+	out = renvoElf386Append32(out, 0)
+	out = renvoElf386Append32(out, 0)
+	out = renvoElf386Append32(out, sectionOffset)
+	out = renvoElf386Append32(out, 0)
+	out = renvoElf386Append16(out, 52)
+	out = renvoElf386Append16(out, 0)
+	out = renvoElf386Append16(out, 0)
+	out = renvoElf386Append16(out, 40)
+	out = renvoElf386Append16(out, sectionCount)
+	out = renvoElf386Append16(out, namesIndex)
+	return out
+}
+
+func renvoElf386AppendRelocation(out []byte, offset int, symbol int, kind int) []byte {
+	out = renvoElf386Append32(out, offset)
+	return renvoElf386Append32(out, symbol<<8|kind&255)
+}
+
+func renvoElf386AppendSection(out []byte, name int, kind int, flags int, offset int, size int, link int, info int, alignment int, entrySize int) []byte {
+	out = renvoElf386Append32(out, name)
+	out = renvoElf386Append32(out, kind)
+	out = renvoElf386Append32(out, flags)
+	out = renvoElf386Append32(out, 0)
+	out = renvoElf386Append32(out, offset)
+	out = renvoElf386Append32(out, size)
+	out = renvoElf386Append32(out, link)
+	out = renvoElf386Append32(out, info)
+	out = renvoElf386Append32(out, alignment)
+	return renvoElf386Append32(out, entrySize)
+}
+
+func renvoElf386AppendSymbol(out []byte, name int, info int, visibility int, section int, value int, size int) []byte {
+	out = renvoElf386Append32(out, name)
+	out = renvoElf386Append32(out, value)
+	out = renvoElf386Append32(out, size)
+	out = append(out, byte(info), byte(visibility))
+	return renvoElf386Append16(out, section)
 }
 
 func renvoObjectMapExternal(a *renvoAsm, offset int) (int, int) {

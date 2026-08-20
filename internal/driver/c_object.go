@@ -50,10 +50,12 @@ func prepareCObjectSources(result SourceResult, options *Options, workDir string
 		return result
 	}
 	reader := cObjectIncludeReader{fs: fs, paths: cObjectIncludePaths(workDir, options.IncludePaths, options.CNoStdIncludes, fs)}
-	// ModeObject is rejected unless the canonical target is linux/amd64, whose
-	// C ABI is LP64. Carry the model explicitly so translation never depends on
-	// the host Go process and later object targets do not require a rewrite.
+	// Carry the target model explicitly so translation never depends on the host
+	// Go process.
 	dataModel := c11.DataModelLP64
+	if options.Target == "linux/386" {
+		dataModel = c11.DataModelILP32
+	}
 	for i := 0; i < len(result.Files); i++ {
 		if !optionArgIsCFile(result.Files[i].Path) {
 			continue
@@ -97,6 +99,7 @@ func prepareCObjectSources(result SourceResult, options *Options, workDir string
 		result.Files[i].CFunctionSections = options.CFunctionSections
 		result.Files[i].CDataSections = options.CDataSections
 		result.Files[i].CShortWChar = options.CShortWChar
+		result.Files[i].CKernelCodeModel = options.CKernelCodeModel
 		result.Files[i].CPrelude = header.Prelude
 		result.Files[i].Src = processed.Source
 		for j := 0; j < len(header.Dependencies); j++ {
@@ -249,10 +252,14 @@ func cObjectIncludePaths(workDir string, explicit []string, noStandard bool, fs 
 			}
 		}
 	}
-	for _, path := range []string{"/usr/local/include", "/usr/include/x86_64-linux-gnu", "/usr/include"} {
-		if fs.PathExists(path) {
-			paths = appendUniquePath(paths, path)
-		}
+	if fs.PathExists("/usr/local/include") {
+		paths = appendUniquePath(paths, "/usr/local/include")
+	}
+	if fs.PathExists("/usr/include/x86_64-linux-gnu") {
+		paths = appendUniquePath(paths, "/usr/include/x86_64-linux-gnu")
+	}
+	if fs.PathExists("/usr/include") {
+		paths = appendUniquePath(paths, "/usr/include")
 	}
 	return paths
 }

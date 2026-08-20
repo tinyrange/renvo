@@ -117,6 +117,40 @@ func TestTranslateObjectAcceptsCMainSignature(t *testing.T) {
 	}
 }
 
+func TestTranslateObjectMarksC11Semantics(t *testing.T) {
+	result := TranslateObject("main", []byte(`int read(const int *value) { return *value; }`), nil)
+	if !result.Ok {
+		t.Fatalf("TranslateObject failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("\n// renvo:c11\n")) {
+		t.Fatalf("translated object lacks its C11 semantics directive:\n%s", result.Source)
+	}
+	plain := Translate("main", []byte(`int read(const int *value) { return *value; }`))
+	if !plain.Ok {
+		t.Fatalf("Translate failed: error=%d at=%d", plain.Error, plain.ErrorAt)
+	}
+	if bytes.Contains(plain.Source, []byte("renvo:c11")) {
+		t.Fatalf("non-object translation unexpectedly has C11 semantics:\n%s", plain.Source)
+	}
+}
+
+func TestTranslateFunctionPointerDereferenceIsDesignator(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+typedef int (*callback)(int);
+int invoke(callback fn) {
+	callback copy = (*fn);
+	return copy(3);
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("function-pointer dereference translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("var copy func(int32) int32=(fn)")) ||
+		bytes.Contains(result.Source, []byte("=(*(fn))")) {
+		t.Fatalf("function-pointer dereference performed a data load:\n%s", result.Source)
+	}
+}
+
 func TestTranslateObjectLowersIRQStackCallAsm(t *testing.T) {
 	result := TranslateObject("main", []byte(`
 struct regs { unsigned long ip; };
@@ -385,7 +419,9 @@ int inspect(void) {
 	for _, want := range [][]byte{
 		[]byte("type __c_struct_record struct{tag uint8;values [3]int32;tail int64;}"),
 		[]byte("var value __c_struct_record"),
-		[]byte("value.values[2]=11"),
+		[]byte("__c_array_index_"),
+		[]byte("__c_unsafe.Pointer(&(value.values))"),
+		[]byte("uintptr(2)))=11"),
 	} {
 		if !bytes.Contains(result.Source, want) {
 			t.Fatalf("translated struct source is missing %q:\n%s", want, result.Source)
@@ -432,6 +468,55 @@ static __attribute__((__noinline__, __noclone__, __no_stack_protector__, nocf_ch
 	}
 	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
 		t.Fatalf("translated GNU attribute source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateOverAlignedAggregatePreservesSize(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+struct page {
+	unsigned long words[7];
+} __attribute__((aligned(16)));
+unsigned long distance(struct page *first, struct page *last) {
+	return last - first;
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("over-aligned aggregate translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("type __c_struct_page struct{__c_align uint64;__c_tail [56]byte}")) {
+		t.Fatalf("over-aligned aggregate carrier does not preserve its 64-byte C size:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("over-aligned aggregate source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateContainingOverAlignedAggregatePreservesMemberOffset(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+struct aligned_state { unsigned char value; } __attribute__((aligned(64)));
+union register_state {
+	struct aligned_state state;
+	unsigned char padding[4096];
+};
+struct fpstate {
+	unsigned int flags;
+	union register_state regs;
+} __attribute__((aligned(64)));
+unsigned char read_state(struct fpstate *state) { return state->regs.state.value; }
+`), nil)
+	if !result.Ok {
+		t.Fatalf("nested over-aligned aggregate translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{
+		[]byte("type __c_struct_fpstate struct{__c_align uint64;__c_tail [4152]byte}"),
+		[]byte("__c_ptr_64_regs()"),
+	} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("nested over-aligned member layout is missing %q:\n%s", want, result.Source)
+		}
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("nested over-aligned aggregate source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
 	}
 }
 
@@ -812,6 +897,41 @@ int leaf(void) { return local + constant; }
 		if !bytes.Contains(split.Source, wanted) {
 			t.Fatalf("split object is missing %q:\n%s", wanted, split.Source)
 		}
+	}
+}
+
+func TestTranslateKernelCodeModelMarksPointerIntegerConversions(t *testing.T) {
+	source := []byte(`
+extern char image_start[];
+unsigned long linked_address(void) {
+	return (unsigned long)(image_start - 0xffffffff80000000UL);
+}
+unsigned long runtime_address(void) { return (unsigned long)image_start; }
+`)
+	plain := TranslateObjectWithConfig("main", source, nil, ObjectConfig{DataModel: DataModelLP64})
+	if !plain.Ok || bytes.Contains(plain.Source, []byte("renvo_runtime_CKernelLinkAddress")) {
+		t.Fatalf("plain code model unexpectedly requested an absolute link address:\n%s", plain.Source)
+	}
+	kernel := TranslateObjectWithConfig("main", source, nil, ObjectConfig{
+		DataModel: DataModelLP64, KernelCodeModel: true,
+	})
+	if !kernel.Ok {
+		t.Fatalf("kernel code model lowering failed: %#v", kernel)
+	}
+	for _, want := range [][]byte{
+		[]byte("func renvo_runtime_CKernelLinkAddress(value uint64) uint64{return value}"),
+		[]byte("return renvo_runtime_CKernelLinkAddress(uint64("),
+		[]byte("__c_pointer_step_dec_"),
+	} {
+		if !bytes.Contains(kernel.Source, want) {
+			t.Fatalf("kernel code model source is missing %q:\n%s", want, kernel.Source)
+		}
+	}
+	if bytes.Count(kernel.Source, []byte("renvo_runtime_CKernelLinkAddress")) != 2 {
+		t.Fatalf("kernel code model marked a direct runtime address as an absolute link address:\n%s", kernel.Source)
+	}
+	if parsed := syntax.ParseFile(kernel.Source); !parsed.Ok {
+		t.Fatalf("kernel code model source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, kernel.Source)
 	}
 }
 
@@ -1560,7 +1680,10 @@ t_no:
 	}
 	for _, want := range [][]byte{
 		[]byte("_=bit;"),
-		[]byte("if (uint8(*(&(capability[int32(bit)>>3])))&uint8(1<<(int32(bit)&7)))!=0{goto t_yes};goto t_no;"),
+		[]byte("__c_array_index_"),
+		[]byte("__c_unsafe.Pointer(&(capability))"),
+		[]byte("uintptr(int32(bit)>>3)"),
+		[]byte("&uint8(1<<(int32(bit)&7)))!=0{goto t_yes};goto t_no;"),
 		[]byte("t_yes:"),
 		[]byte("t_no:"),
 	} {
@@ -1804,6 +1927,24 @@ long fallback(clockid_t clock, struct timespec *result) {
 	}
 }
 
+func TestTranslateObjectILP32InterruptWithStack(t *testing.T) {
+	result := TranslateObjectForDataModel("main", []byte(`
+void validate(int *stack) {
+	int result;
+	asm("mov %%esp, %%ebx\n\t"
+	    "mov %3, %%esp\n\t"
+	    "int %2\n\t"
+	    "mov %%ebx, %%esp" : "=a"(result) : "a"(13), "n"(64), "c"(stack) : "ebx");
+}
+`), nil, DataModelILP32)
+	if !result.Ok || !bytes.Contains(result.Source, []byte("renvo_runtime_CInterruptWithStack(int32(13),uint8(64),uintptr")) {
+		t.Fatalf("i386 stack-pivot interrupt lowering failed: %#v\n%s", result, result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("stack-pivot interrupt source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
 func TestTranslateObjectAsmAtomicExchangeWidths(t *testing.T) {
 	result := TranslateObject("main", []byte(`
 unsigned char fetch_add_byte(unsigned char *pointer, unsigned char value) {
@@ -1970,11 +2111,15 @@ func TestTranslateObjectAsmScalarStore(t *testing.T) {
 	result := TranslateObject("main", []byte(`
 unsigned long global;
 void store(unsigned long value) { asm volatile("movq %[val], %[var]" : [var] "=m"(global) : [val] "re"(value)); }
+void clear(unsigned int *pointer) { asm volatile("movl $0, %0" : "+m"(*pointer) : ); }
+void barrier(void) { __sync_synchronize(); }
 `), nil)
 	if !result.Ok {
 		t.Fatalf("scalar-store asm lowering failed: %#v", result)
 	}
-	if !bytes.Contains(result.Source, []byte("global=value;")) {
+	if !bytes.Contains(result.Source, []byte("global=value;")) ||
+		!bytes.Contains(result.Source, []byte("*(pointer)=0;")) ||
+		!bytes.Contains(result.Source, []byte("renvo_runtime_CMemoryBarrier();")) {
 		t.Fatalf("scalar-store asm did not become a typed assignment:\n%s", result.Source)
 	}
 }
@@ -2437,6 +2582,40 @@ Efault:
 	}
 }
 
+func TestTranslateObjectAsmGotoUserLoad(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+struct large { unsigned long value; };
+long load(unsigned long *pointer) {
+	unsigned long value;
+	asm volatile goto("1: movq %[umem],%[output]\n"
+	                  ".pushsection \"__ex_table\",\"a\"\n"
+	                  ".balign 4\n"
+	                  ".long (1b) - .\n"
+	                  ".long (%l2) - .\n"
+	                  ".long 3\n"
+	                  ".popsection\n"
+	                  : [output] "=r"(value)
+	                  : [umem] "m"((*(struct large *)(pointer)))
+	                  : : Efault);
+	return (long)value;
+Efault:
+	return -14;
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("user-load asm-goto lowering failed: %#v", result)
+	}
+	for _, want := range [][]byte{
+		[]byte("renvo_runtime_CUserLoad64_Efault"),
+		[]byte("uintptr(__c_unsafe.Pointer((*__c_struct_large)((pointer))))"),
+		[]byte("if false{goto Efault}"),
+	} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("user-load asm-goto source is missing %q:\n%s", want, result.Source)
+		}
+	}
+}
+
 func TestTranslateObjectAsmExceptionLoad(t *testing.T) {
 	result := TranslateObject("main", []byte(`
 unsigned long load_unaligned_zeropad(const void *addr) {
@@ -2681,6 +2860,21 @@ void delayed(void) { asm volatile("outb %al, $237"); }
 	}
 }
 
+func TestTranslateObjectILP32AsmPortIO(t *testing.T) {
+	result := TranslateObjectForDataModel("main", []byte(`
+typedef unsigned char u8;
+typedef unsigned short u16;
+u8 inb(u16 port) { u8 value; asm volatile("in %1,%0" : "=a"(value) : "d"(port)); return value; }
+void outb(u16 port, u8 value) { asm volatile("out %0,%1" : : "a"(value), "d"(port)); }
+u8 inb_explicit(u16 port) { u8 value; asm volatile("inb %1,%0" : "=a"(value) : "d"(port)); return value; }
+void outb_explicit(u16 port, u8 value) { asm volatile("outb %0,%1" : : "a"(value), "d"(port)); }
+`), nil, DataModelILP32)
+	if !result.Ok || bytes.Count(result.Source, []byte("renvo_runtime_CIn8")) < 2 ||
+		bytes.Count(result.Source, []byte("renvo_runtime_COut8")) < 2 {
+		t.Fatalf("i386 port-I/O asm lowering failed: %#v\n%s", result, result.Source)
+	}
+}
+
 func TestTranslateObjectAsmSegmentRegisters(t *testing.T) {
 	result := TranslateObject("main", []byte(`
 typedef unsigned short u16;
@@ -2910,6 +3104,65 @@ int inspect(int value) {
 	}
 }
 
+func TestTranslateLinuxArraySizeTypeCheckDoesNotInflateCount(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+unsigned long values[2];
+unsigned long count(void) {
+	return sizeof(values) / sizeof((values)[0]) +
+		sizeof(struct { int : (-!!__builtin_types_compatible_p(typeof(values), typeof(&(values)[0]))); });
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("Linux ARRAY_SIZE type check failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("func count() uint64 {return 2;")) {
+		t.Fatalf("Linux ARRAY_SIZE type check inflated the array count:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("Linux ARRAY_SIZE source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateSizeofDereferencedPointerArrayUsesPointerWidth(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+struct item { unsigned long value; };
+static struct item *items[262];
+unsigned long pointer_element_size(void) {
+	return sizeof(*items);
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("pointer-array sizeof lowering failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("func pointer_element_size() uint64 {return 8;")) {
+		t.Fatalf("dereferenced pointer-array element did not retain pointer width:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("pointer-array sizeof source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateStringLengthDecaysInlineArrayMember(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+typedef unsigned long size_t;
+struct earlycon_id { char name[15]; char name_term; };
+size_t strlen(const char *value);
+size_t name_length(struct earlycon_id *match) {
+	return strlen(match->name);
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("inline-array strlen lowering failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("renvo_runtime_CStringLength(&(match.name)[0])")) ||
+		bytes.Contains(result.Source, []byte("(*int8)(match.name)")) {
+		t.Fatalf("inline char array did not decay before strlen:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("inline-array strlen source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
 func TestTranslateGNUSizeofDereferencedVoidPointer(t *testing.T) {
 	result := TranslateObject("main", []byte(`
 int choose_size(void) {
@@ -3015,13 +3268,15 @@ void store_cancelled(unsigned long *cursor, unsigned long value) { (*&*cursor++ 
 void store_once(unsigned long *cursor, unsigned long value) {
 	*(volatile typeof(*&*cursor++) *)&(*&*cursor++) = value;
 }
+void store_nested(char **cursor, char value) { *(*cursor)++ = value; }
 `), nil)
 	if !result.Ok {
 		t.Fatalf("parenthesized postfix assignment lowering failed: %#v", result)
 	}
 	if bytes.Count(result.Source, []byte("__c_post_assign_inc_")) < 5 ||
 		bytes.Contains(result.Source, []byte("&((__c_post_deref_inc_")) ||
-		bytes.Contains(result.Source, []byte("__c_post_deref_inc_2(&(cursor))=")) {
+		bytes.Contains(result.Source, []byte("__c_post_deref_inc_2(&(cursor))=")) ||
+		!bytes.Contains(result.Source, []byte("__c_post_assign_inc_20(&((*(cursor))),value)")) {
 		t.Fatalf("parenthesized postfix assignment was not canonicalized:\n%s", result.Source)
 	}
 	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
@@ -3318,7 +3573,7 @@ const char *advance(const char *pointer) { pointer += 2; return pointer; }
 		t.Fatalf("compound assignment lowering failed: %#v", result)
 	}
 	if bytes.Contains(result.Source, []byte("&=")) || bytes.Contains(result.Source, []byte("|=")) ||
-		!bytes.Contains(result.Source, []byte("value=value&")) || !bytes.Contains(result.Source, []byte("value=value|uint64(high)<<32")) ||
+		!bytes.Contains(result.Source, []byte("value=value&")) || !bytes.Contains(result.Source, []byte("value=value|(uint64(high)<<32)")) ||
 		!bytes.Contains(result.Source, []byte("flags.value=flags.value&")) || !bytes.Contains(result.Source, []byte("__c_compound_8_")) ||
 		bytes.Contains(result.Source, []byte("uint64()")) || bytes.Count(result.Source, []byte("__c_compound_bool_")) < 2 ||
 		!bytes.Contains(result.Source, []byte("__c_pointer_step_inc_")) {
@@ -3472,6 +3727,35 @@ int digit(int value) {
 `), nil)
 	if !result.Ok || !bytes.Contains(result.Source, []byte("case 48,49,50,51:")) {
 		t.Fatalf("case-range lowering failed: %#v\n%s", result, result.Source)
+	}
+}
+
+func TestTranslateObjectLowersWideCaseRangeWithSingleEvaluation(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+unsigned int next(void);
+int classify(void) {
+	switch (next()) {
+	case 7: return 1;
+	case 0x70000000 ... 0x7fffffff: return 2;
+	default: return 0;
+	}
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("wide case-range lowering failed: %#v", result)
+	}
+	for _, want := range [][]byte{
+		[]byte("var __c_switch_"),
+		[]byte("=next();switch {case __c_switch_"),
+		[]byte(">=1879048192&&__c_switch_"),
+		[]byte("<=2147483647:"),
+	} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("wide case-range lowering is missing %q:\n%s", want, result.Source)
+		}
+	}
+	if bytes.Count(result.Source, []byte("=next()")) != 1 {
+		t.Fatalf("switch control expression was evaluated more than once:\n%s", result.Source)
 	}
 }
 
@@ -3733,6 +4017,9 @@ void sti_wait(unsigned long extensions, unsigned long hints) {
 void timed_pause(unsigned int control, unsigned int high, unsigned int low) {
 	asm volatile(".byte 0x66, 0x0f, 0xae, 0xf1" : : "c"(control), "d"(high), "a"(low));
 }
+void named_timed_pause(unsigned int control, unsigned int high, unsigned int low) {
+	asm volatile("tpause %%ecx\n" : : "c"(control), "d"(high), "a"(low));
+}
 `), nil)
 	if !result.Ok {
 		t.Fatalf("monitor/wait asm lowering failed: %#v", result)
@@ -3744,6 +4031,7 @@ void timed_pause(unsigned int control, unsigned int high, unsigned int low) {
 		[]byte("renvo_runtime_CWaitExtended(uint64(extensions),uint64(counter),uint64(hints));"),
 		[]byte("renvo_runtime_CEnableInterruptsAndWait(uint64(extensions),uint64(hints));"),
 		[]byte("renvo_runtime_CTimedPause(uint64(control),uint64(high),uint64(low));"),
+		[]byte("func named_timed_pause(control uint32,high uint32,low uint32) {renvo_runtime_CTimedPause(uint64(control),uint64(high),uint64(low));"),
 	} {
 		if !bytes.Contains(result.Source, want) {
 			t.Fatalf("monitor/wait source is missing %q:\n%s", want, result.Source)
@@ -4509,7 +4797,9 @@ int inspect(void) {
 		[]byte("func(p *__c_struct_flags)__c_get_delta() int32"),
 		[]byte("flags.__c_set_low(flags.__c_get_low()+1)"),
 		[]byte("(*word_cursor.__c_ptr_0_whole())=67305985"),
-		[]byte("(*word.__c_ptr_0_bytes())[0]"),
+		[]byte("__c_array_index_"),
+		[]byte("__c_unsafe.Pointer(&((*word.__c_ptr_0_bytes())))"),
+		[]byte("uintptr(0)"),
 	} {
 		if !bytes.Contains(result.Source, want) {
 			t.Fatalf("translated union/bitfield source is missing %q:\n%s", want, result.Source)
@@ -4575,13 +4865,18 @@ void update(struct branch *branches, int index, unsigned long value) {
 void update_nested(struct branch_table *table, int index) {
 	table->entries[index].mispred = 1;
 }
+void update_parenthesized(struct branch *branches, int index, unsigned long value) {
+	(branches[index]).mispred = value;
+}
 `), nil)
 	if !result.Ok {
 		t.Fatalf("indexed bitfield mutation failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
 	if !bytes.Contains(result.Source, []byte(")).__c_set_mispred(value)")) ||
 		!bytes.Contains(result.Source, []byte(")).__c_set_predicted(")) ||
-		!bytes.Contains(result.Source, []byte("table.entries[index].__c_set_mispred(1)")) ||
+		!bytes.Contains(result.Source, []byte("__c_array_index_")) ||
+		!bytes.Contains(result.Source, []byte("__c_unsafe.Pointer(&(table.entries))")) ||
+		!bytes.Contains(result.Source, []byte("uintptr(index))).__c_set_mispred(1)")) ||
 		bytes.Contains(result.Source, []byte(".__c_get_mispred()=value")) {
 		t.Fatalf("indexed bitfield mutation did not use setters:\n%s", result.Source)
 	}
@@ -4660,6 +4955,69 @@ unsigned long *indexed_value(void) {
 	}
 }
 
+func TestTranslateCastAfterMultidimensionalArraySubscriptPreservesRowStride(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+typedef unsigned long entry_t;
+entry_t rows[64][512];
+unsigned int next;
+entry_t *take_row(void) { return (entry_t *)rows[next++]; }
+`), nil)
+	if !result.Ok {
+		t.Fatalf("multidimensional array cast failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("__c_array_index_")) ||
+		!bytes.Contains(result.Source, []byte("uintptr(__c_scalar_post_inc_")) ||
+		!bytes.Contains(result.Source, []byte("index*uintptr(4096)")) ||
+		bytes.Contains(result.Source, []byte("index*uintptr(8)")) {
+		t.Fatalf("cast moved ahead of multidimensional subscript or lost its row stride:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("multidimensional array cast source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateArrayMemberDecaysBeforeIntegerCast(t *testing.T) {
+	result := TranslateObjectWithConfig("main", []byte(`
+struct descriptor { unsigned long value; };
+struct page { struct descriptor table[16]; };
+extern struct page page;
+unsigned long table_address(void) { return (unsigned long)page.table; }
+`), nil, ObjectConfig{DataModel: DataModelLP64, KernelCodeModel: true})
+	if !result.Ok {
+		t.Fatalf("array-member integer conversion failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("uint64(__c_unsafe.Pointer(&(page.table)))")) ||
+		bytes.Contains(result.Source, []byte("uint64(page.table)")) ||
+		bytes.Contains(result.Source, []byte("renvo_runtime_CKernelLinkAddress")) {
+		t.Fatalf("array member did not decay before pointer-to-integer conversion:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("array-member integer conversion does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateParenthesizedPointerArrayMemberDecaysBeforePointerCast(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+struct mask { unsigned long bits[1]; };
+typedef struct mask mask_var[1];
+struct attrs { mask_var mask; };
+unsigned int hash(const void *, unsigned int);
+unsigned int inspect(struct attrs *attrs) {
+	return hash((const void *)((attrs->mask)->bits), sizeof(unsigned long));
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("parenthesized pointer-array member conversion failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("__c_unsafe.Pointer(&(")) ||
+		bytes.Contains(result.Source, []byte("(*byte)(((attrs.mask)[0].bits))")) {
+		t.Fatalf("parenthesized pointer-array member did not decay to its address:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("parenthesized pointer-array member source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
 func TestTranslatePostfixMutationThroughTypeofPointerCast(t *testing.T) {
 	result := TranslateObject("main", []byte(`
 unsigned int next;
@@ -4703,6 +5061,37 @@ unsigned long scan(struct cursor *cursor, char *data) {
 	}
 }
 
+func TestTranslateCommaHelperCapturesOnlyReferencedLocals(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+unsigned long scan(unsigned long limit) {
+	unsigned long index = 0;
+	unsigned long next = 1;
+	unsigned long unrelated_a = 2;
+	unsigned long unrelated_b = 3;
+	for (; index < limit; index++, next = index)
+		;
+	return next + unrelated_a + unrelated_b;
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("selective comma capture failed: %#v", result)
+	}
+	call := bytes.Index(result.Source, []byte("__c_comma_"))
+	if call < 0 {
+		t.Fatalf("comma helper was not emitted:\n%s", result.Source)
+	}
+	close := bytes.IndexByte(result.Source[call:], ')')
+	if close < 0 || !bytes.Contains(result.Source[call:call+close], []byte("&index")) ||
+		!bytes.Contains(result.Source[call:call+close], []byte("&next")) ||
+		bytes.Contains(result.Source[call:call+close], []byte("limit")) ||
+		bytes.Contains(result.Source[call:call+close], []byte("unrelated")) {
+		t.Fatalf("comma helper captured unrelated locals:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("selective comma-capture source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
 func TestTranslateIncompleteExternalArraySubscriptUsesPointerIndex(t *testing.T) {
 	result := TranslateObject("main", []byte(`
 extern unsigned long values[];
@@ -4712,7 +5101,7 @@ void write_value(unsigned long value) { values[511] = value; }
 	if !result.Ok {
 		t.Fatalf("incomplete external array subscript failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
-	if bytes.Count(result.Source, []byte("__c_pointer_index_")) < 3 ||
+	if bytes.Count(result.Source, []byte("__c_array_index_")) < 3 ||
 		bytes.Contains(result.Source, []byte("values[511]")) {
 		t.Fatalf("incomplete external array retained bounded indexing:\n%s", result.Source)
 	}
@@ -4758,7 +5147,7 @@ done:
 		[]byte("bool=true;for __c_do_first_"),
 		[]byte("var j int32=0;"),
 		[]byte("for ;j<3;j++"),
-		[]byte("case 0:total=total+1;"),
+		[]byte("case 0:total=total+(1);"),
 		[]byte("switch int32(narrow){case 300:"),
 		[]byte("switch mask{case 4294967295:"),
 		[]byte("fallthrough;case 1:"),
@@ -5194,12 +5583,36 @@ void check(void) {
 	}
 }
 
+func TestTranslateObjectDoesNotFoldRuntimePrefixThroughConstantNestedSuffix(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+typedef unsigned long size_t;
+extern void *memset(void *, int, size_t);
+static inline _Bool integrated_init(void) { return 0; }
+void initialize(void **objects, _Bool init, size_t size) {
+	_Bool kasan_init = init;
+	for (size_t i = 0; i < 1; i++) {
+		if (objects[i] && init && (!kasan_init || !integrated_init()))
+			memset(objects[i], 0, size);
+	}
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("nested constant suffix translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("_=memset(")) ||
+		!bytes.Contains(result.Source, []byte("if __c_condition_")) {
+		t.Fatalf("runtime condition was incorrectly folded away:\n%s", result.Source)
+	}
+}
+
 func TestTranslateObjectInlinesSideEffectFreeConstantReturnFunction(t *testing.T) {
 	result := TranslateObject("main", []byte(`
 static inline _Bool feature_enabled(void *value) { return 0; }
 static inline _Bool wrapped_feature(void *value) { return __builtin_expect(!!feature_enabled(value), 0); }
 struct feature_state { unsigned int flags; };
 static inline _Bool masked_feature(struct feature_state *state) { return state->flags & 0; }
+static inline _Bool compat_feature(struct feature_state *state) { return 0 && state->flags; }
+static inline _Bool compat_frame(struct feature_state *state) { return 0 || compat_feature(state); }
 extern int unavailable(void);
 int choose(void *value) {
 	if (wrapped_feature(value))
@@ -5217,6 +5630,11 @@ int choose_masked(struct feature_state *state) {
 		return unavailable();
 	return 11;
 }
+int choose_compat(struct feature_state *state) {
+	if (compat_frame(state))
+		return unavailable();
+	return 13;
+}
 `), nil)
 	if !result.Ok {
 		t.Fatalf("TranslateObject failed: error=%d at=%d", result.Error, result.ErrorAt)
@@ -5224,7 +5642,9 @@ int choose_masked(struct feature_state *state) {
 	if bytes.Contains(result.Source, []byte("if (wrapped_feature(value))")) || bytes.Contains(result.Source, []byte("if wrapped_feature(value)")) {
 		t.Fatalf("constant inline call was retained:\n%s", result.Source)
 	}
-	if bytes.Contains(result.Source, []byte("if (uint8(0))!=0")) || bytes.Count(result.Source, []byte("unavailable()")) != 1 {
+	if bytes.Contains(result.Source, []byte("if (uint8(0))!=0")) ||
+		bytes.Contains(result.Source, []byte("if (compat_frame(state))")) ||
+		bytes.Count(result.Source, []byte("unavailable()")) != 1 {
 		t.Fatalf("constant inline false branch was not removed:\n%s", result.Source)
 	}
 	if bytes.Count(result.Source, []byte("observe()")) != 2 {
@@ -5411,7 +5831,7 @@ int inspect(int value) {
 	if !result.Ok {
 		t.Fatalf("statement expression after switch failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
-	if !bytes.Contains(result.Source, []byte("switch 4{case 4:result=result+2;")) ||
+	if !bytes.Contains(result.Source, []byte("switch 4{case 4:result=result+(2);")) ||
 		!bytes.Contains(result.Source, []byte("return result}")) || bytes.Contains(result.Source, []byte("return switch")) {
 		t.Fatalf("statement expression confused its switch with the final value:\n%s", result.Source)
 	}
@@ -5775,6 +6195,21 @@ unsigned long array_index_mask(unsigned long index, unsigned long size) {
 	}
 }
 
+func TestTranslateAsmEndBranchInstructionValue(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+unsigned int gen_endbr(void) {
+	unsigned int endbr;
+	asm ("mov $~0xfa1e0ff3, %[endbr]\n\t"
+	     "not %[endbr]\n\t"
+	     : [endbr] "=&r" (endbr));
+	return endbr;
+}
+`), nil)
+	if !result.Ok || !bytes.Contains(result.Source, []byte("endbr=uint32(0xfa1e0ff3)")) {
+		t.Fatalf("ENDBR instruction-value asm lowering failed: %#v\n%s", result, result.Source)
+	}
+}
+
 func TestCheckBlockExternRedeclaredAtFileScope(t *testing.T) {
 	result := CheckObjectForDataModel([]byte(`
 void release(void) { extern char begin[], end[]; }
@@ -5859,7 +6294,7 @@ size_t literal(void) { return strlen("port@"); }
 	if !result.Ok {
 		t.Fatalf("string length translation failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
-	if bytes.Count(result.Source, []byte("renvo_runtime_CStringLength((*int8)(value))")) != 2 {
+	if bytes.Count(result.Source, []byte("renvo_runtime_CStringLength(value)")) != 2 {
 		t.Fatalf("string lengths did not use the typed helper:\n%s", result.Source)
 	}
 	if !bytes.Contains(result.Source, []byte("renvo_runtime_CStringLength(renvo_runtime_CStringPointer(\"\\x70\\x6f\\x72\\x74\\x40\\x00\"))")) {
@@ -5870,12 +6305,13 @@ size_t literal(void) { return strlen("port@"); }
 func TestTranslateBuiltinFrameAddresses(t *testing.T) {
 	result := TranslateObject("main", []byte(`
 void *frame(void) { return __builtin_frame_address(0); }
+void *parent_frame(void) { return __builtin_frame_address(1); }
 void *caller(void) { return __builtin_return_address(0); }
 `), nil)
 	if !result.Ok {
 		t.Fatalf("builtin address translation failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
-	for _, helper := range [][]byte{[]byte("renvo_runtime_CFrameAddress()"), []byte("renvo_runtime_CReturnAddress()")} {
+	for _, helper := range [][]byte{[]byte("renvo_runtime_CFrameAddress()"), []byte("renvo_runtime_CCallerFrameAddress()"), []byte("renvo_runtime_CReturnAddress()")} {
 		if !bytes.Contains(result.Source, helper) {
 			t.Fatalf("builtin address helper %q is missing:\n%s", helper, result.Source)
 		}
@@ -6209,6 +6645,7 @@ static unsigned long consume(va_list args) {
 	char *pointer = __builtin_va_arg(args, char *);
 	return (unsigned long)number + (pointer != 0);
 }
+
 static unsigned long copy_first(va_list source) {
 	va_list destination;
 	__builtin_va_copy(destination, source);
@@ -6247,6 +6684,37 @@ unsigned long call_inspect(char *pointer) { return inspect(1, 42, pointer); }
 	}
 	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
 		t.Fatalf("varargs shared source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateObjectILP32LowersVariadicStackWords(t *testing.T) {
+	result := TranslateObjectForDataModel("main", []byte(`
+typedef __builtin_va_list va_list;
+unsigned long long inspect(int fixed, ...) {
+	va_list args;
+	unsigned long word;
+	unsigned long long wide;
+	__builtin_va_start(args, fixed);
+	word = __builtin_va_arg(args, unsigned long);
+	wide = __builtin_va_arg(args, unsigned long long);
+	return word + wide;
+}
+`), nil, DataModelILP32)
+	if !result.Ok {
+		t.Fatalf("ILP32 varargs lowering failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{
+		[]byte("func renvo_runtime_CVAArg32(state *uintptr) uintptr"),
+		[]byte("func renvo_runtime_CVAArg64(state *uintptr) uint64"),
+		[]byte("word=uint32(renvo_runtime_CVAArg32(&(args)[0]))"),
+		[]byte("wide=uint64(renvo_runtime_CVAArg64(&(args)[0]))"),
+	} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("ILP32 varargs source is missing %q:\n%s", want, result.Source)
+		}
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("ILP32 varargs source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
 	}
 }
 
@@ -6289,6 +6757,20 @@ void setup(void) {
 	}
 }
 
+func TestTranslateObjectGNUDesignatedInitializerWithoutEquals(t *testing.T) {
+	result := TranslateObjectForDataModel("main", []byte(`
+typedef unsigned char uchar;
+static uchar values[256] = { [0x1d] 2, [0xb8] 4 };
+uchar inspect(void) { return values[0x1d] + values[0xb8]; }
+`), nil, DataModelILP32)
+	if !result.Ok {
+		t.Fatalf("GNU designated initializer lowering failed: %#v", result)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("GNU designated initializer source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
 func TestTranslateObjectFlatDesignatedStructUsesKeyedComposite(t *testing.T) {
 	result := TranslateObject("main", []byte(`
 struct callbacks { const char *name; int (*probe)(void); unsigned enabled : 1; };
@@ -6321,7 +6803,8 @@ int inspect(void) { return sizeof inferred + sizeof "xy" + inferred[0] + inferre
 		[]byte("var escape [2]int8=[2]int8{27,0}"),
 		[]byte("var exact [2]int8=[2]int8{111,107}"),
 		[]byte("var padded [4]uint8=[4]uint8{120,0}"),
-		[]byte("return 3+3+int32(inferred[0])"),
+		[]byte("return 3+3+int32((*__c_array_index_"),
+		[]byte("__c_unsafe.Pointer(&(inferred))"),
 	} {
 		if !bytes.Contains(result.Source, want) {
 			t.Fatalf("character-array source is missing %q:\n%s", want, result.Source)
@@ -6579,6 +7062,52 @@ func TestTranslateLogicalNotOfInteger(t *testing.T) {
 	}
 }
 
+func TestTranslateLogicalAndRetainsRuntimeMemberComparison(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+enum domain_type { DOMAIN_NATIVE, DOMAIN_GUEST };
+struct registers { unsigned short cs; };
+extern void reject(void);
+void inspect(struct registers *regs) {
+	if (!(DOMAIN_NATIVE == DOMAIN_GUEST) && regs->cs != 16)
+		reject();
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("TranslateObject failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if bytes.Contains(result.Source, []byte("if true")) ||
+		!bytes.Contains(result.Source, []byte("regs.cs")) {
+		t.Fatalf("constant logical prefix discarded runtime member comparison:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("translated source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateBuiltinConstantPRecognizesAnnihilatedRuntimeFallback(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+extern int runtime_feature(int);
+extern int unavailable(void);
+int inspect(void) {
+	if (!(__builtin_constant_p((__builtin_constant_p(0) && 0 == 0 ? 1 : runtime_feature(0))) ?
+	      (__builtin_constant_p(0) && 0 == 0 ? 1 : runtime_feature(0)) : runtime_feature(0)))
+		return unavailable();
+	return 7;
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("TranslateObject failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if bytes.Count(result.Source, []byte("unavailable()")) != 1 ||
+		bytes.Contains(result.Source, []byte("if !")) ||
+		bytes.Contains(result.Source, []byte("if false")) {
+		t.Fatalf("compile-time feature fallback retained its dead branch:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("translated source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
 func TestTranslatePointerSubscriptUsesTypedAddress(t *testing.T) {
 	result := TranslateObject("main", []byte(`
 int digit(const char *text) { return text[2]; }
@@ -6600,6 +7129,49 @@ int literal_digit(void) { return "\004\002\006\006"[2]; }
 	}
 	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
 		t.Fatalf("translated pointer subscript does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateArraySubscriptUsesUncheckedPointerArithmetic(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+struct entry { unsigned long value; };
+struct table { unsigned int count; struct entry entries[8]; };
+unsigned long inspect(struct table *table, unsigned int index) {
+	return table->entries[index].value;
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("array subscript translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("__c_array_index_")) &&
+		!bytes.Contains(result.Source, []byte("__c_pointer_index_")) ||
+		bytes.Contains(result.Source, []byte(".entries[index]")) {
+		t.Fatalf("C array subscript retained Go bounds semantics:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("array subscript source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateStaticArraySubscriptAddressRemainsConstant(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+struct node { struct node *next; };
+struct node nodes[2] = {
+	{ .next = &nodes[0] },
+	{ .next = &nodes[1] },
+};
+`), nil)
+	if !result.Ok {
+		t.Fatalf("static array address translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if bytes.Contains(result.Source, []byte("__c_pointer_index_")) ||
+		bytes.Contains(result.Source, []byte("__c_array_index_")) ||
+		!bytes.Contains(result.Source, []byte("next:&(nodes[0])")) ||
+		!bytes.Contains(result.Source, []byte("next:&(nodes[1])")) {
+		t.Fatalf("static array element address is not a constant expression:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("static array address source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
 	}
 }
 
@@ -6651,7 +7223,8 @@ unsigned invert(struct flags *flags, int index) { return ~flags->values[index]; 
 		t.Fatalf("unary subscript translation failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
 	if bytes.Contains(result.Source, []byte("[4]uint32(-")) ||
-		!bytes.Contains(result.Source, []byte("uint32(-flags.values[index]-1)")) {
+		!bytes.Contains(result.Source, []byte("uint32(-(*__c_array_index_")) ||
+		!bytes.Contains(result.Source, []byte("__c_unsafe.Pointer(&(flags.values))")) {
 		t.Fatalf("unary prefix bound before the subscript:\n%s", result.Source)
 	}
 }
@@ -6847,6 +7420,48 @@ int EVP_DigestFinal_ex(EVP_MD_CTX *ctx, unsigned char *md, uint32_t *size);
 	}
 	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
 		t.Fatalf("translated system declarations do not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateCompoundAssignmentPreservesRightOperandGrouping(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+struct range { unsigned long size; };
+unsigned long shrink(unsigned long size, unsigned long base, unsigned long region_base) {
+	size -= base - region_base;
+	return size;
+}
+unsigned long shrink_member(struct range *range, unsigned long base, unsigned long region_base) {
+	range->size -= base - region_base;
+	return range->size;
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("compound-assignment translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if bytes.Contains(result.Source, []byte("size=size-base-region_base")) ||
+		bytes.Contains(result.Source, []byte(".size=range.size-base-region_base")) ||
+		bytes.Count(result.Source, []byte("-(base-region_base)")) != 2 {
+		t.Fatalf("compound-assignment right operand lost its grouping:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("compound-assignment source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateUnaryDereferenceDecaysArrayMember(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+struct identifier { char bytes[8]; };
+int first_byte(struct identifier *identifier) { return *identifier->bytes; }
+`), nil)
+	if !result.Ok {
+		t.Fatalf("array-member dereference translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if bytes.Contains(result.Source, []byte("*(identifier.bytes)")) ||
+		!bytes.Contains(result.Source, []byte("(identifier.bytes)[0]")) {
+		t.Fatalf("array-member dereference did not select its first element:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("array-member dereference source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
 	}
 }
 

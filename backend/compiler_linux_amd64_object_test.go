@@ -7,6 +7,248 @@ import (
 	"testing"
 )
 
+func TestLinuxAmd64ReverseObjectCallUsesSysVArgumentOrder(t *testing.T) {
+	emitter := renvoAsm{staticImports: []renvoStaticImport{{dll: "libc", name: "foreign"}}}
+	renvoAmd64EmitObjectStaticCallReverse(&emitter, 0, 6)
+	wantPrefix := []byte("\x41\x59\x41\x58\x59\x5a\x5e\x5f")
+	if !bytes.HasPrefix(emitter.code, wantPrefix) {
+		t.Fatalf("reverse object call register pops = %x, want prefix %x", emitter.code, wantPrefix)
+	}
+	if len(emitter.absRelocs) != 3 || len(emitter.kernelImportOffsets) != 2 ||
+		string(emitter.kernelImportNames) != "foreign" {
+		t.Fatalf("reverse object call relocation/import metadata is incomplete: relocs=%v offsets=%v names=%q",
+			emitter.absRelocs, emitter.kernelImportOffsets, emitter.kernelImportNames)
+	}
+}
+
+func TestLinuxAmd64ObjectDoesNotFoldLoopVaryingSingleCallArgument(t *testing.T) {
+	context := renvoNewCompileContext(renvoTargetLinuxAmd64, false, false, false)
+	context.objectFile = true
+	source := []byte(`package main
+// renvo:c11
+var values [3]uint64 = [3]uint64{11, 17, 23}
+func lookup(index int32) uint64 { return values[index] }
+// renvo:object function sum .text 0 1 0 - 8 0 - 0
+//export sum
+func sum() uint64 {
+	var result uint64
+	for index := int32(0); index < 3; index++ {
+		result += lookup(index)
+	}
+	return result
+}
+`)
+	program := renvoParseProgramWithContext(source, context)
+	if !program.ok {
+		t.Fatal("loop-varying single-call source did not parse")
+	}
+	var meta renvoMeta
+	renvoBuildMetaInto(&program, &meta)
+	if !meta.ok {
+		t.Fatal("loop-varying single-call metadata failed")
+	}
+	meta.arenaSize = renvoDefaultArenaSize(renvoTargetLinuxAmd64)
+	result := renvoTryCompileScalarProgramAmd64(&program, &meta)
+	if !result.ok {
+		t.Fatal("loop-varying single-call object compilation failed")
+	}
+	file, err := elf.NewFile(bytes.NewReader(result.data))
+	if err != nil {
+		t.Fatalf("parse loop-varying single-call object: %v", err)
+	}
+	symbols, err := file.Symbols()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, symbol := range symbols {
+		if symbol.Name != "lookup" || symbol.Section == elf.SHN_UNDEF || symbol.Size == 0 {
+			continue
+		}
+		section := file.Sections[symbol.Section]
+		data, err := section.Data()
+		if err != nil {
+			t.Fatal(err)
+		}
+		start := int(symbol.Value - section.Addr)
+		end := start + int(symbol.Size)
+		if start < 0 || end > len(data) {
+			t.Fatalf("lookup symbol range [%d,%d) exceeds section size %d", start, end, len(data))
+		}
+		// The first and only parameter is saved at -8(%rbp). Its use must
+		// survive compilation because the single syntactic call is inside a
+		// loop and therefore observes a different value on each execution.
+		if !bytes.Contains(data[start:end], []byte("\x48\x8b\x4d\xf8")) {
+			t.Fatalf("lookup folded its loop-varying index: code=%x", data[start:end])
+		}
+		return
+	}
+	t.Fatal("lookup function symbol not found")
+}
+
+func TestLinuxAmd64InvalidateProcessContextUsesDescriptorMemoryOperand(t *testing.T) {
+	context := renvoNewCompileContext(renvoTargetLinuxAmd64, false, false, false)
+	context.objectFile = true
+	source := []byte(`package main
+func renvo_runtime_CInvalidateProcessContext(address uintptr, kind uintptr) {}
+// renvo:object function invalidate - 0 2 0 - 8 8 0 - 0
+//export invalidate
+func invalidate(address uintptr, kind uintptr) {
+	renvo_runtime_CInvalidateProcessContext(address, kind)
+}
+`)
+	program := renvoParseProgramWithContext(source, context)
+	if !program.ok {
+		t.Fatal("INVPCID operand source did not parse")
+	}
+	var meta renvoMeta
+	renvoBuildMetaInto(&program, &meta)
+	if !meta.ok {
+		t.Fatal("INVPCID operand metadata failed")
+	}
+	meta.arenaSize = renvoDefaultArenaSize(renvoTargetLinuxAmd64)
+	result := renvoTryCompileScalarProgramAmd64(&program, &meta)
+	if !result.ok {
+		t.Fatal("INVPCID operand object compilation failed")
+	}
+	file, err := elf.NewFile(bytes.NewReader(result.data))
+	if err != nil {
+		t.Fatalf("parse INVPCID operand object: %v", err)
+	}
+	want := []byte("\x58\x5a\x66\x0f\x38\x82\x02")
+	wrong := []byte("\x5a\x58\x66\x0f\x38\x82\x02")
+	for _, section := range file.Sections {
+		if section.Flags&elf.SHF_EXECINSTR == 0 {
+			continue
+		}
+		data, err := section.Data()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(data, wrong) {
+			t.Fatal("INVPCID uses its kind as the descriptor address")
+		}
+		if bytes.Contains(data, want) {
+			return
+		}
+	}
+	t.Fatal("INVPCID descriptor/kind register sequence not found")
+}
+
+func TestLinuxAmd64C11ObjectOmitsGoNilDereferenceCheck(t *testing.T) {
+	oldTarget := renvoTarget
+	oldArch := renvoTargetArch
+	oldOS := renvoTargetOS
+	oldObjectFile := renvoCompilerObjectFile
+	t.Cleanup(func() {
+		renvoTarget = oldTarget
+		renvoTargetArch = oldArch
+		renvoTargetOS = oldOS
+		renvoCompilerObjectFile = oldObjectFile
+	})
+	renvoCompilerObjectFile = true
+	renvoSetTarget(renvoTargetLinuxAmd64)
+
+	compileSymbols := func(source string) []elf.Symbol {
+		t.Helper()
+		context := renvoNewCompileContext(renvoTargetLinuxAmd64, false, false, false)
+		context.objectFile = true
+		program := renvoParseProgramWithContext([]byte(source), context)
+		if !program.ok {
+			t.Fatal("pointer-dereference source did not parse")
+		}
+		var meta renvoMeta
+		renvoBuildMetaInto(&program, &meta)
+		if !meta.ok {
+			t.Fatal("pointer-dereference metadata failed")
+		}
+		meta.arenaSize = renvoDefaultArenaSize(renvoTargetLinuxAmd64)
+		result := renvoTryCompileScalarProgramAmd64(&program, &meta)
+		if !result.ok {
+			t.Fatal("pointer-dereference object compilation failed")
+		}
+		file, err := elf.NewFile(bytes.NewReader(result.data))
+		if err != nil {
+			t.Fatalf("parse pointer-dereference object: %v", err)
+		}
+		symbols, err := file.Symbols()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return symbols
+	}
+
+	source := `package main
+// renvo:object function read - 0 1 0 - 8 0 - 0
+//export read
+func read(value *int) int { return *value }
+`
+	goSymbols := compileSymbols(source)
+	cSymbols := compileSymbols("package main\n// renvo:c11\n" + source[len("package main\n"):])
+	hasNonNilCheck := func(symbols []elf.Symbol) bool {
+		for _, symbol := range symbols {
+			if symbol.Name == "__renvo_check_non_nil" && symbol.Section != elf.SHN_UNDEF {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasNonNilCheck(goSymbols) {
+		t.Fatal("ordinary Go object lost its nil-dereference trap")
+	}
+	if hasNonNilCheck(cSymbols) {
+		t.Fatal("C11 object retained a Go-only nil-dereference trap")
+	}
+}
+
+func TestLinuxAmd64C11ObjectDoesNotEnableGoPanicStateForCIdentifier(t *testing.T) {
+	context := renvoNewCompileContext(renvoTargetLinuxAmd64, false, false, false)
+	context.objectFile = true
+	panicEnabled := func(marker string) bool {
+		source := []byte("package main\n" + marker + "var panic int\nfunc read() int { return panic }\n")
+		program := renvoParseProgramWithContext(source, context)
+		if !program.ok {
+			t.Fatal("panic-identifier source did not parse")
+		}
+		var meta renvoMeta
+		renvoBuildMetaInto(&program, &meta)
+		if !meta.ok {
+			t.Fatal("panic-identifier metadata failed")
+		}
+		return meta.panicEnabled
+	}
+	if !panicEnabled("") {
+		t.Fatal("ordinary Go source lost conservative panic state")
+	}
+	if panicEnabled("// renvo:c11\n") {
+		t.Fatal("C11 identifier named panic enabled Go panic state")
+	}
+	cleanupSource := []byte("package main\n// renvo:c11\nfunc cleanup(*int) {}\nfunc read() int { value := 1; defer cleanup(&value); return value }\n")
+	program := renvoParseProgramWithContext(cleanupSource, context)
+	if !program.ok {
+		t.Fatal("C11 cleanup source did not parse")
+	}
+	var meta renvoMeta
+	renvoBuildMetaInto(&program, &meta)
+	if !meta.ok {
+		t.Fatal("C11 cleanup metadata failed")
+	}
+	if !meta.panicEnabled {
+		t.Fatal("C11 cleanup defer lost required unwind state")
+	}
+	cleanupStart := bytes.Index(cleanupSource, []byte("cleanup"))
+	readStart := bytes.Index(cleanupSource, []byte("read"))
+	cleanupIndex := renvoFindMetaFunction(&meta, cleanupStart, cleanupStart+len("cleanup"))
+	readIndex := renvoFindMetaFunction(&meta, readStart, readStart+len("read"))
+	if cleanupIndex < 0 || readIndex < 0 {
+		t.Fatalf("C11 cleanup functions not found: cleanup=%d read=%d", cleanupIndex, readIndex)
+	}
+	cleanupHasDefer := renvoTokenRangeHasIdent(&program, meta.funcs[cleanupIndex].bodyStart, meta.funcs[cleanupIndex].bodyEnd, "defer")
+	readHasDefer := renvoTokenRangeHasIdent(&program, meta.funcs[readIndex].bodyStart, meta.funcs[readIndex].bodyEnd, "defer")
+	if cleanupHasDefer || !readHasDefer {
+		t.Fatalf("C11 per-function defer scan: cleanup=%t read=%t", cleanupHasDefer, readHasDefer)
+	}
+}
+
 func TestLinuxAmd64ObjectArenaHelperHasFunctionSymbol(t *testing.T) {
 	oldTarget := renvoTarget
 	oldArch := renvoTargetArch
@@ -34,6 +276,14 @@ var callbackTableValue callbackTable = callbackTable{callback: callbackValue}
 func initCallbackValue() {}
 // renvo:object variable initCallbackTableValue .init.data 8 0 0 - 8 0 - 0
 var initCallbackTableValue callbackTable = callbackTable{callback: initCallbackValue}
+// renvo:object function earlyCallbackValue .init.text 0 0 0 - 0 0 - 0
+func earlyCallbackValue() {}
+// renvo:object variable earlyCallbackTableValue __earlycon_table 8 0 0 - 8 0 - 0
+var earlyCallbackTableValue callbackTable = callbackTable{callback: earlyCallbackValue}
+// renvo:object function consoleInitCallbackValue .init.text 0 0 0 - 0 0 - 0
+func consoleInitCallbackValue() {}
+// renvo:object variable consoleInitCallbackTableValue .con_initcall.init 8 0 0 - 8 0 - 0
+var consoleInitCallbackTableValue callbackTable = callbackTable{callback: consoleInitCallbackValue}
 // renvo:object function refValue .ref.text 0 1 0 - 8 0 - 0
 //export refValue
 func refValue(value int) int { return sharedValue(value) }
@@ -71,6 +321,8 @@ func allocate_length(length int) int { values := make([]byte, length); callbackV
 	foundEscapedText := false
 	foundEscapedWrapperText := false
 	foundInitWrapper := false
+	foundEarlyWrapper := false
+	foundConsoleInitWrapper := false
 	for _, symbol := range symbols {
 		if symbol.Name == "__renvo_arena_alloc" && elf.ST_TYPE(symbol.Info) == elf.STT_FUNC &&
 			elf.ST_BIND(symbol.Info) == elf.STB_LOCAL && symbol.Section != elf.SHN_UNDEF &&
@@ -97,6 +349,14 @@ func allocate_length(length int) int { values := make([]byte, length); callbackV
 			int(symbol.Section) < len(file.Sections) && file.Sections[symbol.Section].Name == ".init.text" {
 			foundInitWrapper = true
 		}
+		if symbol.Name == "__renvo_cabi_earlyCallbackValue" && symbol.Section != elf.SHN_UNDEF &&
+			int(symbol.Section) < len(file.Sections) && file.Sections[symbol.Section].Name == ".init.text" {
+			foundEarlyWrapper = true
+		}
+		if symbol.Name == "__renvo_cabi_consoleInitCallbackValue" && symbol.Section != elf.SHN_UNDEF &&
+			int(symbol.Section) < len(file.Sections) && file.Sections[symbol.Section].Name == ".init.text" {
+			foundConsoleInitWrapper = true
+		}
 	}
 	if !foundHelper {
 		t.Fatal("arena allocation helper lacks a defined local .text function symbol")
@@ -115,6 +375,12 @@ func allocate_length(length int) int { values := make([]byte, length); callbackV
 	}
 	if !foundInitWrapper {
 		t.Fatal("init-data C-ABI wrapper did not retain .init.text")
+	}
+	if !foundEarlyWrapper {
+		t.Fatal("early-console C-ABI wrapper did not retain .init.text")
+	}
+	if !foundConsoleInitWrapper {
+		t.Fatal("console-initcall C-ABI wrapper did not retain .init.text")
 	}
 }
 
@@ -721,6 +987,87 @@ func invoke(){install("callback\x00",nil)}
 	}
 }
 
+func TestLinuxAmd64ObjectAddressTakenLocalFunctionUsesCABIWrapper(t *testing.T) {
+	oldTarget := renvoTarget
+	oldArch := renvoTargetArch
+	oldOS := renvoTargetOS
+	oldObjectFile := renvoCompilerObjectFile
+	t.Cleanup(func() {
+		renvoTarget = oldTarget
+		renvoTargetArch = oldArch
+		renvoTargetOS = oldOS
+		renvoCompilerObjectFile = oldObjectFile
+	})
+	renvoCompilerObjectFile = true
+	renvoSetTarget(renvoTargetLinuxAmd64)
+	source := []byte(`package main
+// renvo:object function compare - 0 2 0 - 8 8 0 - 0
+func compare(left *byte,right *byte) int32{return 0}
+// renvo:linkstatic libc,install
+func install(callback func(*byte,*byte) int32){}
+// renvo:object function invoke - 0 1 0 - 8 0 - 0
+//export invoke
+func invoke(){install(compare)}
+`)
+	context := renvoNewCompileContext(renvoTargetLinuxAmd64, false, false, false)
+	context.objectFile = true
+	program := renvoParseProgramWithContext(source, context)
+	if !program.ok {
+		t.Fatal("address-taken local function source did not parse")
+	}
+	var meta renvoMeta
+	renvoBuildMetaInto(&program, &meta)
+	if !meta.ok {
+		t.Fatal("address-taken local function metadata failed")
+	}
+	meta.arenaSize = renvoDefaultArenaSize(renvoTargetLinuxAmd64)
+	result := renvoTryCompileScalarProgramAmd64(&program, &meta)
+	if !result.ok {
+		t.Fatal("address-taken local function object compilation failed")
+	}
+	file, err := elf.NewFile(bytes.NewReader(result.data))
+	if err != nil {
+		t.Fatalf("parse address-taken local function object: %v", err)
+	}
+	symbols, err := file.Symbols()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundWrapper, foundRelocation, wrapperInsideFunction := false, false, false
+	var wrapperValue uint64
+	for _, symbol := range symbols {
+		if symbol.Name == "__renvo_cabi_compare" && symbol.Section != elf.SHN_UNDEF {
+			foundWrapper = true
+			wrapperValue = symbol.Value
+		}
+	}
+	for _, symbol := range symbols {
+		if symbol.Name != "__renvo_cabi_compare" && elf.ST_TYPE(symbol.Info) == elf.STT_FUNC &&
+			symbol.Size > 0 && wrapperValue >= symbol.Value && wrapperValue < symbol.Value+symbol.Size {
+			wrapperInsideFunction = true
+		}
+	}
+	for _, section := range file.Sections {
+		if section.Type != elf.SHT_RELA {
+			continue
+		}
+		data, err := section.Data()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for at := 0; at+24 <= len(data); at += 24 {
+			info := binary.LittleEndian.Uint64(data[at+8 : at+16])
+			symbolIndex := int(info >> 32)
+			foundRelocation = foundRelocation || symbolIndex > 0 && symbolIndex-1 < len(symbols) &&
+				symbols[symbolIndex-1].Name == "__renvo_cabi_compare"
+		}
+	}
+	if !foundWrapper || !foundRelocation || wrapperInsideFunction {
+		t.Fatalf("address-taken local function wrapper=%v relocation=%v nested=%v",
+			foundWrapper, foundRelocation, wrapperInsideFunction)
+	}
+}
+
 func TestLinuxAmd64ObjectFunctionPointerInIntegerUnionCarrier(t *testing.T) {
 	oldTarget := renvoTarget
 	oldArch := renvoTargetArch
@@ -815,6 +1162,186 @@ var name=[3]int8{1,2,3}
 	result := renvoTryCompileScalarProgramAmd64(&program, &meta)
 	if !result.ok {
 		t.Fatal("object directive crossed an intervening declaration")
+	}
+}
+
+func TestLinuxAmd64ObjectSectionUsesDeclaredSize(t *testing.T) {
+	oldTarget := renvoTarget
+	oldArch := renvoTargetArch
+	oldOS := renvoTargetOS
+	oldObjectFile := renvoCompilerObjectFile
+	t.Cleanup(func() {
+		renvoTarget = oldTarget
+		renvoTargetArch = oldArch
+		renvoTargetOS = oldOS
+		renvoCompilerObjectFile = oldObjectFile
+	})
+	renvoCompilerObjectFile = true
+	renvoSetTarget(renvoTargetLinuxAmd64)
+	source := []byte(`package main
+// renvo:object variable callback .con_initcall.init 4 0 0 - 4 2 target 0
+var callback [4]uint8=[4]uint8{0,0,0,0}
+// renvo:object function target .init.text 0 0 0 - 8 0 - 0
+func target() int32{return 0}
+`)
+	context := renvoNewCompileContext(renvoTargetLinuxAmd64, false, false, false)
+	context.objectFile = true
+	program := renvoParseProgramWithContext(source, context)
+	if !program.ok {
+		t.Fatal("declared-size object source did not parse")
+	}
+	var meta renvoMeta
+	renvoBuildMetaInto(&program, &meta)
+	if !meta.ok {
+		t.Fatal("declared-size object metadata failed")
+	}
+	meta.arenaSize = renvoDefaultArenaSize(renvoTargetLinuxAmd64)
+	result := renvoTryCompileScalarProgramAmd64(&program, &meta)
+	if !result.ok {
+		t.Fatal("declared-size object compilation failed")
+	}
+	file, err := elf.NewFile(bytes.NewReader(result.data))
+	if err != nil {
+		t.Fatalf("parse declared-size object: %v", err)
+	}
+	section := file.Section(".con_initcall.init")
+	if section == nil {
+		t.Fatal("declared-size object is missing .con_initcall.init")
+	}
+	if section.Size != 4 {
+		t.Fatalf(".con_initcall.init size = %d, want 4", section.Size)
+	}
+	bss := file.Section(".bss")
+	if bss == nil || bss.Size != 4 {
+		if bss == nil {
+			t.Fatal("internal carrier tail is missing from .bss")
+		}
+		t.Fatalf("internal carrier tail size = %d, want 4", bss.Size)
+	}
+}
+
+func TestLinuxAmd64ObjectPrunesLiteralFalseForeignCallBesideStructKey(t *testing.T) {
+	context := renvoNewCompileContext(renvoTargetLinuxAmd64, false, false, false)
+	context.objectFile = true
+	source := []byte(`package main
+type descriptor struct{callback func() int32}
+// renvo:linkstatic libc,missing
+func missing() int32{return 0}
+// renvo:object function choose .text 0 1 0 - 8 0 - 0
+//export choose
+func choose() int32 {
+	if false {
+		value := descriptor{callback:nil}
+		_ = &value
+		return missing()
+	}
+	return 7
+}
+`)
+	program := renvoParseProgramWithContext(source, context)
+	if !program.ok {
+		t.Fatal("literal-false foreign-call source did not parse")
+	}
+	var meta renvoMeta
+	renvoBuildMetaInto(&program, &meta)
+	if !meta.ok {
+		t.Fatal("literal-false foreign-call metadata failed")
+	}
+	meta.arenaSize = renvoDefaultArenaSize(renvoTargetLinuxAmd64)
+	result := renvoTryCompileScalarProgramAmd64(&program, &meta)
+	if !result.ok {
+		t.Fatal("literal-false foreign-call object compilation failed")
+	}
+	file, err := elf.NewFile(bytes.NewReader(result.data))
+	if err != nil {
+		t.Fatalf("parse literal-false foreign-call object: %v", err)
+	}
+	symbols, err := file.Symbols()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, symbol := range symbols {
+		if symbol.Name == "missing" {
+			t.Fatal("literal-false branch retained an undefined foreign call")
+		}
+	}
+}
+
+func TestLinuxAmd64ObjectKernelLinkAddressRelocation(t *testing.T) {
+	oldTarget := renvoTarget
+	oldArch := renvoTargetArch
+	oldOS := renvoTargetOS
+	oldObjectFile := renvoCompilerObjectFile
+	t.Cleanup(func() {
+		renvoTarget = oldTarget
+		renvoTargetArch = oldArch
+		renvoTargetOS = oldOS
+		renvoCompilerObjectFile = oldObjectFile
+	})
+	renvoCompilerObjectFile = true
+	renvoSetTarget(renvoTargetLinuxAmd64)
+	source := []byte(`package main
+import __c_unsafe "unsafe"
+func renvo_runtime_CKernelLinkAddress(value uint64) uint64{return value}
+func __c_pointer_step_dec_1(pointer *int8,count uintptr) *int8{return (*int8)(__c_unsafe.Pointer(uintptr(__c_unsafe.Pointer(pointer))-count*uintptr(1)))}
+// renvo:object variable-extern _text - 1 1 0 - 0 0 - 0
+var _text [0]int8
+// renvo:object function linked_address .head.text 1 1 0 - 8 0 - 0
+//export linked_address
+func linked_address() uint64 {
+	return renvo_runtime_CKernelLinkAddress(uint64(__c_pointer_step_dec_1((*int8)(__c_unsafe.Pointer(&(_text))),uintptr(^uint64(2147483647)))))
+}
+`)
+	context := renvoNewCompileContext(renvoTargetLinuxAmd64, false, false, false)
+	context.objectFile = true
+	program := renvoParseProgramWithContext(source, context)
+	if !program.ok {
+		t.Fatal("kernel link-address source did not parse")
+	}
+	var meta renvoMeta
+	renvoBuildMetaInto(&program, &meta)
+	if !meta.ok {
+		t.Fatal("kernel link-address metadata failed")
+	}
+	meta.arenaSize = renvoDefaultArenaSize(renvoTargetLinuxAmd64)
+	g := renvoBeginScalarProgramAmd64(&program, &meta)
+	if g == nil {
+		t.Fatal("kernel link-address object setup failed")
+	}
+	if !renvoEmitAllQueuedFunctionsScratch(g) {
+		t.Fatal("kernel link-address function emission failed")
+	}
+	result := renvoFinishScalarProgramAmd64(g)
+	if !result.ok {
+		t.Fatal("kernel link-address object compilation failed")
+	}
+	file, err := elf.NewFile(bytes.NewReader(result.data))
+	if err != nil {
+		t.Fatalf("parse kernel link-address object: %v", err)
+	}
+	symbols, err := file.Symbols()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, section := range file.Sections {
+		if section.Type != elf.SHT_RELA {
+			continue
+		}
+		data, err := section.Data()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for at := 0; at+24 <= len(data); at += 24 {
+			info := binary.LittleEndian.Uint64(data[at+8 : at+16])
+			symbolIndex := int(info >> 32)
+			addend := int64(binary.LittleEndian.Uint64(data[at+16 : at+24]))
+			found = found || elf.R_X86_64(info&0xffffffff) == elf.R_X86_64_64 && symbolIndex > 0 &&
+				symbolIndex-1 < len(symbols) && symbols[symbolIndex-1].Name == "_text" && addend == 2147483648
+		}
+	}
+	if !found {
+		t.Fatal("kernel link-address object is missing the absolute _text+0x80000000 relocation")
 	}
 }
 
@@ -1453,6 +1980,60 @@ func invoke(value pair,target *byte){consume_pair(value,target,1)}
 	}
 }
 
+func TestLinuxAmd64ObjectForeignSmallIntegerAggregateReturn(t *testing.T) {
+	oldTarget := renvoTarget
+	oldArch := renvoTargetArch
+	oldOS := renvoTargetOS
+	oldObjectFile := renvoCompilerObjectFile
+	t.Cleanup(func() {
+		renvoTarget = oldTarget
+		renvoTargetArch = oldArch
+		renvoTargetOS = oldOS
+		renvoCompilerObjectFile = oldObjectFile
+	})
+	renvoCompilerObjectFile = true
+	renvoSetTarget(renvoTargetLinuxAmd64)
+	source := []byte(`package main
+type pair struct{first uint64;second uint64}
+// renvo:linkstatic libc,read_pair
+func read_pair(index int32) pair{return pair{}}
+// renvo:object function inspect - 0 1 0 - 8 0 - 0
+//export inspect
+func inspect(index int32) uint64{value:=read_pair(index);return value.second}
+`)
+	context := renvoNewCompileContext(renvoTargetLinuxAmd64, false, false, false)
+	context.objectFile = true
+	program := renvoParseProgramWithContext(source, context)
+	if !program.ok {
+		t.Fatal("foreign aggregate return source did not parse")
+	}
+	var meta renvoMeta
+	renvoBuildMetaInto(&program, &meta)
+	if !meta.ok {
+		t.Fatal("foreign aggregate return metadata failed")
+	}
+	meta.arenaSize = renvoDefaultArenaSize(renvoTargetLinuxAmd64)
+	result := renvoTryCompileScalarProgramAmd64(&program, &meta)
+	if !result.ok {
+		t.Fatal("foreign small integer aggregate return did not compile")
+	}
+	file, err := elf.NewFile(bytes.NewReader(result.data))
+	if err != nil {
+		t.Fatalf("parse foreign aggregate return object: %v", err)
+	}
+	symbols, err := file.Symbols()
+	if err != nil {
+		t.Fatalf("read foreign aggregate return symbols: %v", err)
+	}
+	found := false
+	for _, symbol := range symbols {
+		found = found || symbol.Name == "read_pair" && symbol.Section == elf.SHN_UNDEF
+	}
+	if !found {
+		t.Fatal("foreign aggregate return object is missing read_pair undefined symbol")
+	}
+}
+
 func TestLinuxAmd64ObjectSmallIntegerAggregateReturn(t *testing.T) {
 	oldTarget := renvoTarget
 	oldArch := renvoTargetArch
@@ -1511,6 +2092,9 @@ var callback func(uint64) two=make_two
 		!bytes.Contains(textData, []byte("\x48\x8b\x04\x24\x48\x8b\x54\x24\x08\x48\x83\xc4\x10")) {
 		t.Fatal("small aggregate export/function-pointer wrappers do not load their SysV return words")
 	}
+	if !bytes.Contains(textData, []byte("\x48\x83\xec\x10\x57\x48\x8d\x44\x24\x08\x50")) {
+		t.Fatal("small aggregate export wrapper does not preserve its private result slot across argument marshaling")
+	}
 }
 
 func TestLinuxAmd64ObjectExportScalarStackArguments(t *testing.T) {
@@ -1564,6 +2148,169 @@ func seven(a uintptr,b uintptr,c uintptr,d uintptr,e uintptr,f uintptr,g uintptr
 	}
 	if !found {
 		t.Fatal("stack-argument export wrapper does not preserve and push the first incoming stack word")
+	}
+}
+
+func TestLinuxAmd64ObjectExportNormalizesNarrowSysVArguments(t *testing.T) {
+	oldTarget := renvoTarget
+	oldArch := renvoTargetArch
+	oldOS := renvoTargetOS
+	oldObjectFile := renvoCompilerObjectFile
+	t.Cleanup(func() {
+		renvoTarget = oldTarget
+		renvoTargetArch = oldArch
+		renvoTargetOS = oldOS
+		renvoCompilerObjectFile = oldObjectFile
+	})
+	renvoCompilerObjectFile = true
+	renvoSetTarget(renvoTargetLinuxAmd64)
+	source := []byte(`package main
+// renvo:object function narrow - 0 1 0 - 8 0 - 0
+//export narrow
+func narrow(a uintptr,b uintptr,c int32,d uint32,e uintptr,f uintptr,g int32) int32{return c+int32(d)+g}
+`)
+	context := renvoNewCompileContext(renvoTargetLinuxAmd64, false, false, false)
+	context.objectFile = true
+	program := renvoParseProgramWithContext(source, context)
+	if !program.ok {
+		t.Fatal("narrow SysV argument source did not parse")
+	}
+	var meta renvoMeta
+	renvoBuildMetaInto(&program, &meta)
+	if !meta.ok {
+		t.Fatal("narrow SysV argument metadata failed")
+	}
+	meta.arenaSize = renvoDefaultArenaSize(renvoTargetLinuxAmd64)
+	result := renvoTryCompileScalarProgramAmd64(&program, &meta)
+	if !result.ok {
+		t.Fatal("narrow SysV argument wrapper did not compile")
+	}
+	file, err := elf.NewFile(bytes.NewReader(result.data))
+	if err != nil {
+		t.Fatalf("parse narrow SysV argument object: %v", err)
+	}
+	symbols, err := file.Symbols()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, symbol := range symbols {
+		if symbol.Name != "narrow" || symbol.Section == elf.SHN_UNDEF || symbol.Size == 0 {
+			continue
+		}
+		section := file.Sections[symbol.Section]
+		data, err := section.Data()
+		if err != nil {
+			t.Fatal(err)
+		}
+		start := int(symbol.Value - section.Addr)
+		end := start + int(symbol.Size)
+		if start < 0 || end > len(data) {
+			t.Fatalf("narrow wrapper range [%d,%d) exceeds section size %d", start, end, len(data))
+		}
+		code := data[start:end]
+		// SysV leaves the high bits of narrow integer argument registers and
+		// stack slots unspecified. Renvo's internal ABI uses full words, so the
+		// wrapper must sign/zero extend before pushing those words.
+		for _, want := range [][]byte{
+			[]byte("\x48\x89\xd0\x48\x63\xc0\x50"),
+			[]byte("\x48\x89\xc8\x89\xc0\x50"),
+			[]byte("\x49\x8b\x43\x00\x48\x63\xc0\x50"),
+		} {
+			if !bytes.Contains(code, want) {
+				t.Fatalf("narrow wrapper is missing normalization %x: code=%x", want, code)
+			}
+		}
+		return
+	}
+	t.Fatal("narrow export wrapper symbol not found")
+}
+
+func TestLinuxAmd64ObjectSafeMSROperationsEmitExceptionTable(t *testing.T) {
+	oldTarget := renvoTarget
+	oldArch := renvoTargetArch
+	oldOS := renvoTargetOS
+	oldObjectFile := renvoCompilerObjectFile
+	t.Cleanup(func() {
+		renvoTarget = oldTarget
+		renvoTargetArch = oldArch
+		renvoTargetOS = oldOS
+		renvoCompilerObjectFile = oldObjectFile
+	})
+	renvoCompilerObjectFile = true
+	renvoSetTarget(renvoTargetLinuxAmd64)
+	source := []byte(`package main
+func renvo_runtime_CReadMSRSafe(register uint32,err *int32,low *uint32,high *uint32) {}
+func renvo_runtime_CWriteMSRSafe(register uint32,low uint32,high uint32) int32 { return 0 }
+// renvo:object function safe_msr - 0 1 0 - 8 0 - 0
+//export safe_msr
+func safe_msr(register uint32) int32 {
+	var err int32
+	var low uint32
+	var high uint32
+	renvo_runtime_CReadMSRSafe(register,&err,&low,&high)
+	return err+renvo_runtime_CWriteMSRSafe(register,low,high)
+}
+`)
+	context := renvoNewCompileContext(renvoTargetLinuxAmd64, false, false, false)
+	context.objectFile = true
+	program := renvoParseProgramWithContext(source, context)
+	if !program.ok {
+		t.Fatal("safe MSR source did not parse")
+	}
+	var meta renvoMeta
+	renvoBuildMetaInto(&program, &meta)
+	if !meta.ok {
+		t.Fatal("safe MSR metadata failed")
+	}
+	meta.arenaSize = renvoDefaultArenaSize(renvoTargetLinuxAmd64)
+	result := renvoTryCompileScalarProgramAmd64(&program, &meta)
+	if !result.ok {
+		t.Fatal("safe MSR object did not compile")
+	}
+	file, err := elf.NewFile(bytes.NewReader(result.data))
+	if err != nil {
+		t.Fatalf("parse safe MSR object: %v", err)
+	}
+	exTable := file.Section("__ex_table")
+	if exTable == nil {
+		t.Fatal("safe MSR object has no __ex_table section")
+	}
+	data, err := exTable.Data()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) != 24 || binary.LittleEndian.Uint32(data[8:12]) != 11|(8<<8) ||
+		binary.LittleEndian.Uint32(data[20:24]) != 10 {
+		t.Fatalf("safe MSR exception records = %x", data)
+	}
+	relocations := 0
+	for _, section := range file.Sections {
+		if section.Type != elf.SHT_RELA || int(section.Info) >= len(file.Sections) || file.Sections[section.Info].Name != "__ex_table" {
+			continue
+		}
+		relocationData, err := section.Data()
+		if err != nil {
+			t.Fatal(err)
+		}
+		relocations += len(relocationData) / 24
+	}
+	if relocations != 4 {
+		t.Fatalf("safe MSR exception relocations = %d, want 4", relocations)
+	}
+	var textData []byte
+	for _, section := range file.Sections {
+		if section.Flags&elf.SHF_EXECINSTR == 0 {
+			continue
+		}
+		sectionData, err := section.Data()
+		if err != nil {
+			t.Fatal(err)
+		}
+		textData = append(textData, sectionData...)
+	}
+	if !bytes.Contains(textData, []byte("\x0f\x32\x45\x31\xc0")) ||
+		!bytes.Contains(textData, []byte("\x0f\x30\x31\xc0")) {
+		t.Fatalf("safe MSR instruction/fixup sequences are missing: text=%x", textData)
 	}
 }
 
@@ -1664,7 +2411,7 @@ func variadic(a uintptr,b uintptr,c uintptr,d uintptr,e uintptr,f uintptr,__c_va
 		if err != nil {
 			t.Fatal(err)
 		}
-		found = found || bytes.Contains(data, []byte("\x57\x56\x52\x51\x41\x50\x41\x51\x50"))
+		found = found || bytes.Contains(data, []byte("\x49\x89\xc2\x57\x56\x52\x51\x41\x50\x41\x51\x41\x52"))
 	}
 	if !found {
 		t.Fatal("variadic wrapper did not save all six fixed SysV register arguments before its va_list")
@@ -1776,6 +2523,59 @@ func invoke() uintptr{var value carrier;value.first=6;value.second=7;return fore
 	}
 	if !found {
 		t.Fatal("foreign integer aggregate stack object is missing its undefined function symbol")
+	}
+}
+
+func TestLinuxAmd64ObjectForeignTwentyOneIntegerArguments(t *testing.T) {
+	oldTarget := renvoTarget
+	oldArch := renvoTargetArch
+	oldOS := renvoTargetOS
+	oldObjectFile := renvoCompilerObjectFile
+	t.Cleanup(func() {
+		renvoTarget = oldTarget
+		renvoTargetArch = oldArch
+		renvoTargetOS = oldOS
+		renvoCompilerObjectFile = oldObjectFile
+	})
+	renvoCompilerObjectFile = true
+	renvoSetTarget(renvoTargetLinuxAmd64)
+	source := []byte(`package main
+// renvo:linkstatic libc,foreign_many
+func foreign_many(p0 string,p1 uint64,p2 uint64,p3 uint64,p4 uint64,p5 uint64,p6 uint64,p7 uint64,p8 uint64,p9 uint64,p10 uint64,p11 uint64,p12 uint64,p13 uint64,p14 uint64,p15 uint64,p16 uint64,p17 uint64,p18 uint64,p19 uint64,p20 uint64) int32{return 0}
+// renvo:object function invoke - 0 1 0 - 8 0 - 0
+//export invoke
+func invoke() int32{return foreign_many("values",1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20)}
+`)
+	context := renvoNewCompileContext(renvoTargetLinuxAmd64, false, false, false)
+	context.objectFile = true
+	program := renvoParseProgramWithContext(source, context)
+	if !program.ok {
+		t.Fatal("21-argument foreign-call source did not parse")
+	}
+	var meta renvoMeta
+	renvoBuildMetaInto(&program, &meta)
+	if !meta.ok {
+		t.Fatal("21-argument foreign-call metadata failed")
+	}
+	meta.arenaSize = renvoDefaultArenaSize(renvoTargetLinuxAmd64)
+	result := renvoTryCompileScalarProgramAmd64(&program, &meta)
+	if !result.ok {
+		t.Fatal("21-argument foreign call did not compile")
+	}
+	file, err := elf.NewFile(bytes.NewReader(result.data))
+	if err != nil {
+		t.Fatalf("parse 21-argument foreign-call object: %v", err)
+	}
+	symbols, err := file.Symbols()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, symbol := range symbols {
+		found = found || symbol.Name == "foreign_many" && symbol.Section == elf.SHN_UNDEF
+	}
+	if !found {
+		t.Fatal("21-argument foreign-call object is missing foreign_many")
 	}
 }
 
@@ -2269,6 +3069,96 @@ Efault:
 	}
 }
 
+func TestLinuxAmd64ObjectUserLoadExceptionTable(t *testing.T) {
+	oldTarget := renvoTarget
+	oldArch := renvoTargetArch
+	oldOS := renvoTargetOS
+	oldObjectFile := renvoCompilerObjectFile
+	t.Cleanup(func() {
+		renvoTarget = oldTarget
+		renvoTargetArch = oldArch
+		renvoTargetOS = oldOS
+		renvoCompilerObjectFile = oldObjectFile
+	})
+	renvoCompilerObjectFile = true
+	renvoSetTarget(renvoTargetLinuxAmd64)
+	source := []byte(`package main
+func renvo_runtime_CUserLoad64_Efault(address uintptr) uint64{return 0}
+// renvo:object function invoke - 0 1 0 - 8 0 - 0
+//export invoke
+func invoke(address uintptr) uint64 {
+	value := renvo_runtime_CUserLoad64_Efault(address)
+	if false { goto Efault }
+	return value
+Efault:
+	return ^uint64(13)
+}
+`)
+	context := renvoNewCompileContext(renvoTargetLinuxAmd64, false, false, false)
+	context.objectFile = true
+	program := renvoParseProgramWithContext(source, context)
+	if !program.ok {
+		t.Fatal("user-load exception-table source did not parse")
+	}
+	var meta renvoMeta
+	renvoBuildMetaInto(&program, &meta)
+	if !meta.ok {
+		t.Fatal("user-load exception-table metadata failed")
+	}
+	meta.arenaSize = renvoDefaultArenaSize(renvoTargetLinuxAmd64)
+	result := renvoTryCompileScalarProgramAmd64(&program, &meta)
+	if !result.ok {
+		t.Fatal("user-load exception-table object compilation failed")
+	}
+	file, err := elf.NewFile(bytes.NewReader(result.data))
+	if err != nil {
+		t.Fatalf("parse user-load exception-table object: %v", err)
+	}
+	foundLoad := false
+	for _, section := range file.Sections {
+		if section.Flags&elf.SHF_EXECINSTR == 0 {
+			continue
+		}
+		data, err := section.Data()
+		if err != nil {
+			t.Fatal(err)
+		}
+		foundLoad = foundLoad || bytes.Contains(data, []byte("\x48\x8b\x00"))
+	}
+	if !foundLoad {
+		t.Fatal("user-load object is missing its faulting 64-bit load")
+	}
+	exTable := file.Section("__ex_table")
+	if exTable == nil {
+		t.Fatal("user-load object has no __ex_table section")
+	}
+	exData, err := exTable.Data()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(exData) != 12 || binary.LittleEndian.Uint32(exData[8:12]) != 3 {
+		t.Fatalf("user-load exception-table data = %x, want two offsets and type 3", exData)
+	}
+	relocationCount := 0
+	for _, section := range file.Sections {
+		if section.Type != elf.SHT_RELA || int(section.Info) >= len(file.Sections) || file.Sections[section.Info].Name != "__ex_table" {
+			continue
+		}
+		data, err := section.Data()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for at := 0; at+24 <= len(data); at += 24 {
+			if elf.R_X86_64(binary.LittleEndian.Uint64(data[at+8:at+16])&0xffffffff) == elf.R_X86_64_PC32 {
+				relocationCount++
+			}
+		}
+	}
+	if relocationCount != 2 {
+		t.Fatalf("user-load exception table has %d PC-relative relocations, want 2", relocationCount)
+	}
+}
+
 func TestLinuxAmd64ObjectExceptionLoadTable(t *testing.T) {
 	oldTarget := renvoTarget
 	oldArch := renvoTargetArch
@@ -2500,6 +3390,115 @@ var entry [4]uint8=[4]uint8{}
 	}
 	if !found {
 		t.Fatal("object has no PC-relative relocation to the foreign static-call target")
+	}
+}
+
+func TestLinuxAmd64C11ObjectDoesNotFoldForeignStubResult(t *testing.T) {
+	oldTarget := renvoTarget
+	oldArch := renvoTargetArch
+	oldOS := renvoTargetOS
+	oldObjectFile := renvoCompilerObjectFile
+	t.Cleanup(func() {
+		renvoTarget = oldTarget
+		renvoTargetArch = oldArch
+		renvoTargetOS = oldOS
+		renvoCompilerObjectFile = oldObjectFile
+	})
+	renvoCompilerObjectFile = true
+	renvoSetTarget(renvoTargetLinuxAmd64)
+	source := []byte(`package main
+// renvo:c11
+// renvo:linkstatic libc,query
+func query() uintptr{return 0}
+// renvo:linkstatic libc,observe
+func observe(){}
+// renvo:object function invoke - 0 1 0 - 8 0 - 0
+//export invoke
+func invoke() uintptr{value:=query();if value==0{return 1};observe();return 2}
+`)
+	context := renvoNewCompileContext(renvoTargetLinuxAmd64, false, false, false)
+	context.objectFile = true
+	program := renvoParseProgramWithContext(source, context)
+	if !program.ok {
+		t.Fatal("C11 foreign-result source did not parse")
+	}
+	var meta renvoMeta
+	renvoBuildMetaInto(&program, &meta)
+	if !meta.ok {
+		t.Fatal("C11 foreign-result metadata failed")
+	}
+	meta.arenaSize = renvoDefaultArenaSize(renvoTargetLinuxAmd64)
+	result := renvoTryCompileScalarProgramAmd64(&program, &meta)
+	if !result.ok {
+		t.Fatal("C11 foreign-result object did not compile")
+	}
+	file, err := elf.NewFile(bytes.NewReader(result.data))
+	if err != nil {
+		t.Fatalf("parse C11 foreign-result object: %v", err)
+	}
+	symbols, err := file.Symbols()
+	if err != nil {
+		t.Fatal(err)
+	}
+	queryFound := false
+	observeFound := false
+	for _, symbol := range symbols {
+		queryFound = queryFound || symbol.Name == "query" && symbol.Section == elf.SHN_UNDEF
+		observeFound = observeFound || symbol.Name == "observe" && symbol.Section == elf.SHN_UNDEF
+	}
+	if !queryFound || !observeFound {
+		t.Fatalf("C11 foreign-result imports: query=%t observe=%t", queryFound, observeFound)
+	}
+}
+
+func TestLinuxAmd64C11ObjectInlinesBooleanIntegerNormalization(t *testing.T) {
+	oldTarget := renvoTarget
+	oldArch := renvoTargetArch
+	oldOS := renvoTargetOS
+	oldObjectFile := renvoCompilerObjectFile
+	t.Cleanup(func() {
+		renvoTarget = oldTarget
+		renvoTargetArch = oldArch
+		renvoTargetOS = oldOS
+		renvoCompilerObjectFile = oldObjectFile
+	})
+	renvoCompilerObjectFile = true
+	renvoSetTarget(renvoTargetLinuxAmd64)
+	source := []byte(`package main
+// renvo:c11
+func __c_bool_int(value bool) int32{if value{return 1};return 0}
+// renvo:object function normalize - 0 1 0 - 4 0 - 0
+//export normalize
+func normalize(value uintptr) int32{return __c_bool_int(value!=0)}
+`)
+	context := renvoNewCompileContext(renvoTargetLinuxAmd64, false, false, false)
+	context.objectFile = true
+	program := renvoParseProgramWithContext(source, context)
+	if !program.ok {
+		t.Fatal("C11 boolean normalization source did not parse")
+	}
+	var meta renvoMeta
+	renvoBuildMetaInto(&program, &meta)
+	if !meta.ok {
+		t.Fatal("C11 boolean normalization metadata failed")
+	}
+	meta.arenaSize = renvoDefaultArenaSize(renvoTargetLinuxAmd64)
+	result := renvoTryCompileScalarProgramAmd64(&program, &meta)
+	if !result.ok {
+		t.Fatal("C11 boolean normalization object did not compile")
+	}
+	file, err := elf.NewFile(bytes.NewReader(result.data))
+	if err != nil {
+		t.Fatalf("parse C11 boolean normalization object: %v", err)
+	}
+	symbols, err := file.Symbols()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, symbol := range symbols {
+		if symbol.Name == "__c_bool_int" {
+			t.Fatal("C11 boolean normalization retained an out-of-line helper")
+		}
 	}
 }
 

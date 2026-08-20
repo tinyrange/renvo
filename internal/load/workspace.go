@@ -61,7 +61,8 @@ func normalizeSourceFiles(files []SourceFile) ([]SourceFile, int) {
 	for i := 0; i < len(files); i++ {
 		out = append(out, SourceFile{Path: CleanPath(files[i].Path), Src: files[i].Src, CPrelude: files[i].CPrelude,
 			CObject: files[i].CObject, CDataModel: files[i].CDataModel, CFunctionSections: files[i].CFunctionSections,
-			CDataSections: files[i].CDataSections, CShortWChar: files[i].CShortWChar, ArenaStart: files[i].ArenaStart, ArenaEnd: files[i].ArenaEnd})
+			CDataSections: files[i].CDataSections, CShortWChar: files[i].CShortWChar,
+			CKernelCodeModel: files[i].CKernelCodeModel, ArenaStart: files[i].ArenaStart, ArenaEnd: files[i].ArenaEnd})
 	}
 	sortSourceFiles(out)
 	for i := 1; i < len(out); i++ {

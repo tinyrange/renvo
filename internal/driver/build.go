@@ -198,8 +198,11 @@ func buildFromFSOneShotCompactWithModuleCache(args []string, workDir string, std
 	if options.Mode == ModeObject && options.EmitUnit {
 		built = pipeline.BuildObjectUnit(workDir, stdRoot, rootArg, sources.Files)
 	} else if options.Mode == ModeObject {
-		built = pipeline.BuildObjectUnitWithTransientFiles(
-			workDir, stdRoot, rootArg, sources.Files, sourcesStart, sourcesEnd)
+		// Object linking rewrites source-token line fields as a compact mapping.
+		// Keep the source package resident until that mapping has been restored;
+		// retiring its arena pages during the link can alias a small destination
+		// unit and turn token indexes into source lines before backend decoding.
+		built = pipeline.BuildObjectUnit(workDir, stdRoot, rootArg, sources.Files)
 	} else if options.EmitUnit {
 		// An emitted unit is a persistent interchange artifact. Preserve package
 		// ownership and cache-key metadata so host and self-hosted frontends emit

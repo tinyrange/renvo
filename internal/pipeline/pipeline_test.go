@@ -1,11 +1,35 @@
 package pipeline
 
 import (
+	"bytes"
 	"testing"
 
 	"renvo.dev/backend/unit"
+	"renvo.dev/internal/c11"
 	"renvo.dev/internal/load"
 )
+
+func TestBuildObjectUnitPreservesC11SemanticsDirective(t *testing.T) {
+	result := BuildObjectUnit("/repo/case", "/std", ".", []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{
+			Path:       "/repo/case/value.c",
+			Src:        []byte(`int read(const int *value) { return *value; }`),
+			CObject:    true,
+			CDataModel: c11.DataModelLP64,
+		},
+	})
+	if !result.Ok {
+		t.Fatalf("BuildObjectUnit failed: err=%d pkg=%d file=%d tok=%d", result.Error, result.ErrorPackage, result.ErrorFile, result.ErrorToken)
+	}
+	decoded, err := unit.Unmarshal(result.Link.Data)
+	if err != nil {
+		t.Fatalf("object unit did not decode: %v", err)
+	}
+	if !bytes.Contains(decoded.Text, []byte("// renvo:c11\n")) {
+		t.Fatalf("linked object unit lost C11 semantics directive:\n%s", decoded.Text)
+	}
+}
 
 func TestBuildUnitLinksWorkspace(t *testing.T) {
 	result := BuildUnit("/repo/case", "/std", "./cmd/app", []load.SourceFile{

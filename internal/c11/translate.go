@@ -114,160 +114,166 @@ type initializerStep struct {
 }
 
 type translator struct {
-	src                    []byte
-	tokens                 []token
-	pos                    int
-	packageName            string
-	out                    []byte
-	object                 bool
-	checkOnly              bool
-	speculativeType        bool
-	ok                     bool
-	err                    int
-	errorAt                int
-	types                  []cTypeInfo
-	fields                 []cField
-	opaqueTypes            []cTypeName
-	names                  []cNamespaceName
-	objects                []cObjectName
-	externals              []cObjectName
-	tentatives             []cObjectName
-	definitions            []cObjectName
-	threadNames            []cObjectName
-	functions              []cFunctionName
-	diagnosticErrorNames   []string
-	variadicCalls          []cVariadicCall
-	functionParams         []int
-	ordinaryNames          []int
-	tagNames               []int
-	pointerTypes           []int
-	qualifiedTypes         []int
-	pointerChanges         []cTypeCacheChange
-	qualifiedChanges       []cTypeCacheChange
-	functionSections       bool
-	dataSections           bool
-	baseAttributes         cAttributes
-	typeSerial             int
-	dataModel              int
-	pointerSize            int
-	wcharSize              int
-	packageHeader          int
-	usesUnsafe             bool
-	staticOut              []byte
-	resultType             int
-	helperSection          string
-	boolHelper             bool
-	asmMemoryHelper        bool
-	asmCCHelper            bool
-	asmChecksumHelper      bool
-	asmChecksumAddHelper   bool
-	asmChecksumAdd3Helper  bool
-	asmChecksumAdd64       int
-	asmIPChecksumHelper    bool
-	asmStackHelper         bool
-	asmInstructionHelper   bool
-	asmControlHelper       int
-	asmXControl            int
-	asmDebugHelper         int
-	asmFPUHelper           bool
-	asmFPUStateHelpers     []string
-	asmFPUPrepare          bool
-	asmFPUWait             bool
-	asmFlagsHelper         int
-	asmCPUIDHelper         bool
-	asmMSRHelper           bool
-	asmCounterOps          int
-	asmPauseHelper         bool
-	asmDelayLoop           bool
-	asmMonitorWait         int
-	asmCPUNODEHelper       bool
-	asmFarCallHelper       bool
-	asmFarJumpHelper       bool
-	asmInterruptFlags      int
-	asmDescriptorOps       int
-	asmIOHelpers           int
-	asmStringIOHelpers     int
-	asmSyscallHelper       bool
-	asmBitSetHelper        bool
-	asmByteOps             int
-	asmBitOps64            int
-	asmBitScan             int
-	asmPopulationCount     int
-	asmByteSwap            int
-	asmMultiplyDivide      bool
-	asmMultiply32          bool
-	asmMultiplyShift       bool
-	asmCompareExchange128  bool
-	asmAtomicArithmetic    int
-	asmAtomicExchange      int
-	asmCompareExchange     int
-	asmNonTemporalStore    int
-	asmVerifySegment       bool
-	asmInvalidateHelper    bool
-	asmInvalidatePage      bool
-	asmInt3Selftest        bool
-	asmBreakpointHelper    bool
-	asmRandomOps           int
-	asmFDIVBug             bool
-	asmHaltOps             int
-	asmCacheFlush          bool
-	asmPrefetch            bool
-	asmFenceOps            int
-	asmDirectOps           int
-	asmLoadGS              bool
-	uint128MultiplyShift   bool
-	asmDivideHelper        bool
-	asmBoundsMaskHelper    bool
-	asmCopyHelper          bool
-	asmUserCopyHelper      bool
-	asmUserClearHelper     bool
-	asmUserStoreHelpers    []string
-	asmExceptionLoad       bool
-	asmGetUserOps          int
-	asmPutUserOps          int
-	asmSegmentHelpers      int
-	asmSafeSegmentHelpers  int
-	asmAccessRightsHelper  bool
-	asmStartupSegments     bool
-	asmBaseRegisterOps     int
-	asmSegmentMemory       int
-	asmSegmentCompare      int
-	vaListHelper           bool
-	vaCopyHelper           bool
-	stringPointerHelper    bool
-	wideStringHelpers      int
-	stringLengthHelper     bool
-	variadicFunction       bool
-	overflowHelpers        int
-	builtinBitHelpers      int
-	builtinAddressHelpers  int
-	builtinIsDigitHelper   bool
-	postfixDerefTypes      []int
-	postfixCastedDerefKeys []string
-	postfixScalarTypes     []int
-	prefixScalarTypes      []int
-	postfixAssignTypes     []int
-	prefixDerefAssignTypes []int
-	assignmentValueTypes   []int
-	pointerAssignValueKey  []int
-	compoundAssignKeys     []int
-	pointerStepTypes       []int
-	pointerMutationTypes   []int
-	pointerDiffTypes       []int
-	pointerIndexTypes      []int
-	discardTypes           []int
-	asmClampTypes          []int
-	asmRuntimePointers     []string
-	asmIRQStackHelpers     []string
-	msABICallTypes         []int
-	nestedAccessorKeys     []string
-	localLabels            []cLocalLabel
-	hoistedGotos           []string
-	tlsRuntime             bool
-	localStart             int
-	initializing           int
-	captureExclusions      []int
-	nameStart              int
+	src                     []byte
+	tokens                  []token
+	pos                     int
+	packageName             string
+	out                     []byte
+	object                  bool
+	checkOnly               bool
+	speculativeType         bool
+	ok                      bool
+	err                     int
+	errorAt                 int
+	types                   []cTypeInfo
+	fields                  []cField
+	opaqueTypes             []cTypeName
+	names                   []cNamespaceName
+	objects                 []cObjectName
+	externals               []cObjectName
+	tentatives              []cObjectName
+	definitions             []cObjectName
+	threadNames             []cObjectName
+	functions               []cFunctionName
+	diagnosticErrorNames    []string
+	variadicCalls           []cVariadicCall
+	functionParams          []int
+	ordinaryNames           []int
+	tagNames                []int
+	pointerTypes            []int
+	qualifiedTypes          []int
+	pointerChanges          []cTypeCacheChange
+	qualifiedChanges        []cTypeCacheChange
+	functionSections        bool
+	dataSections            bool
+	kernelCodeModel         bool
+	baseAttributes          cAttributes
+	typeSerial              int
+	dataModel               int
+	pointerSize             int
+	longSize                int
+	wcharSize               int
+	packageHeader           int
+	usesUnsafe              bool
+	c11DirectiveEmitted     bool
+	staticOut               []byte
+	resultType              int
+	helperSection           string
+	boolHelper              bool
+	kernelLinkAddressHelper bool
+	asmMemoryHelper         bool
+	asmCCHelper             bool
+	asmChecksumHelper       bool
+	asmChecksumAddHelper    bool
+	asmChecksumAdd3Helper   bool
+	asmChecksumAdd64        int
+	asmIPChecksumHelper     bool
+	asmStackHelper          bool
+	asmInstructionHelper    bool
+	asmControlHelper        int
+	asmXControl             int
+	asmDebugHelper          int
+	asmFPUHelper            bool
+	asmFPUStateHelpers      []string
+	asmFPUPrepare           bool
+	asmFPUWait              bool
+	asmFlagsHelper          int
+	asmCPUIDHelper          bool
+	asmMSRHelper            bool
+	asmCounterOps           int
+	asmPauseHelper          bool
+	asmDelayLoop            bool
+	asmMonitorWait          int
+	asmCPUNODEHelper        bool
+	asmFarCallHelper        bool
+	asmFarJumpHelper        bool
+	asmInterruptFlags       int
+	asmDescriptorOps        int
+	asmIOHelpers            int
+	asmStringIOHelpers      int
+	asmSyscallHelper        bool
+	asmInterruptStackHelper bool
+	asmBitSetHelper         bool
+	asmByteOps              int
+	asmBitOps64             int
+	asmBitScan              int
+	asmPopulationCount      int
+	asmByteSwap             int
+	asmMultiplyDivide       bool
+	asmMultiply32           bool
+	asmMultiplyShift        bool
+	asmCompareExchange128   bool
+	asmAtomicArithmetic     int
+	asmAtomicExchange       int
+	asmCompareExchange      int
+	asmNonTemporalStore     int
+	asmVerifySegment        bool
+	asmInvalidateHelper     bool
+	asmInvalidatePage       bool
+	asmInt3Selftest         bool
+	asmBreakpointHelper     bool
+	asmRandomOps            int
+	asmFDIVBug              bool
+	asmHaltOps              int
+	asmCacheFlush           bool
+	asmPrefetch             bool
+	asmFenceOps             int
+	asmDirectOps            int
+	asmLoadGS               bool
+	uint128MultiplyShift    bool
+	asmDivideHelper         bool
+	asmBoundsMaskHelper     bool
+	asmCopyHelper           bool
+	asmUserCopyHelper       bool
+	asmUserClearHelper      bool
+	asmUserMemoryHelpers    []string
+	asmExceptionLoad        bool
+	asmGetUserOps           int
+	asmPutUserOps           int
+	asmSegmentHelpers       int
+	asmSafeSegmentHelpers   int
+	asmAccessRightsHelper   bool
+	asmStartupSegments      bool
+	asmBaseRegisterOps      int
+	asmSegmentMemory        int
+	asmSegmentCompare       int
+	vaListHelper            bool
+	vaCopyHelper            bool
+	stringPointerHelper     bool
+	wideStringHelpers       int
+	stringLengthHelper      bool
+	variadicFunction        bool
+	overflowHelpers         int
+	builtinBitHelpers       int
+	builtinAddressHelpers   int
+	builtinIsDigitHelper    bool
+	postfixDerefTypes       []int
+	postfixCastedDerefKeys  []string
+	postfixScalarTypes      []int
+	prefixScalarTypes       []int
+	postfixAssignTypes      []int
+	prefixDerefAssignTypes  []int
+	assignmentValueTypes    []int
+	pointerAssignValueKey   []int
+	compoundAssignKeys      []int
+	pointerStepTypes        []int
+	pointerMutationTypes    []int
+	pointerDiffTypes        []int
+	pointerIndexTypes       []int
+	arrayIndexTypes         []int
+	discardTypes            []int
+	asmClampTypes           []int
+	asmRuntimePointers      []string
+	asmIRQStackHelpers      []string
+	msABICallTypes          []int
+	nestedAccessorKeys      []string
+	localLabels             []cLocalLabel
+	hoistedGotos            []string
+	tlsRuntime              bool
+	localStart              int
+	initializing            int
+	captureExclusions       []int
+	nameStart               int
 }
 
 type checkScratchMark struct {
@@ -319,6 +325,7 @@ type ObjectConfig struct {
 	FunctionSections bool
 	DataSections     bool
 	ShortWChar       bool
+	KernelCodeModel  bool
 }
 
 func TranslateObjectWithConfig(packageName string, src []byte, prelude []byte, config ObjectConfig) Result {
@@ -345,6 +352,7 @@ func translateObjectConfig(packageName string, src []byte, prelude []byte, objec
 		checkOnly:        checkOnly,
 		functionSections: config.FunctionSections,
 		dataSections:     config.DataSections,
+		kernelCodeModel:  config.KernelCodeModel,
 		ok:               true,
 		errorAt:          -1,
 		localStart:       -1,
@@ -358,6 +366,12 @@ func translateObjectConfig(packageName string, src []byte, prelude []byte, objec
 	t.appendText("package ")
 	t.out = append(t.out, packageName...)
 	t.out = append(t.out, '\n')
+	if object && !checkOnly {
+		// C permits the backend to omit checks whose only purpose is to define
+		// behavior for operations that C itself leaves undefined. Keep this an
+		// explicit unit-level contract rather than inferring C from helper names.
+		t.appendText("// renvo:c11\n")
+	}
 	t.packageHeader = len(t.out)
 	if len(prelude) > 0 && !t.translateSource(prelude) {
 		return Result{Ok: false, Error: t.err, ErrorAt: -1}
@@ -1688,6 +1702,9 @@ func (t *translator) parseAggregateType(union bool) (int, bool) {
 				indirect = true
 			}
 			alignment := t.typeAlign(fieldBase)
+			if alignment > cAggregateCarrierSize(alignment) {
+				indirect = true
+			}
 			fieldOffset := 0
 			if union {
 				if fieldInfo.size > maxSize {
@@ -1726,6 +1743,9 @@ func (t *translator) parseAggregateType(union bool) (int, bool) {
 				indirect = true
 			}
 			alignment := t.typeAlign(field.typeID)
+			if alignment > cAggregateCarrierSize(alignment) {
+				indirect = true
+			}
 			if field.attributes.align > alignment {
 				alignment = field.attributes.align
 				indirect = true
@@ -2180,7 +2200,7 @@ func (t *translator) rememberInlineConstantReturn(decl declarator) {
 	}
 	value, ok := t.constantExpression(t.tokens[t.pos+2 : close-1])
 	if !ok {
-		value, ok = t.inlinePureConstantCondition(t.tokens[t.pos+2 : close-1])
+		value, ok = t.inlineRuntimeAnnihilatorCondition(t.tokens[t.pos+2:close-1], true)
 	}
 	if !ok {
 		return
@@ -2196,15 +2216,51 @@ func (t *translator) rememberInlineConstantReturn(decl declarator) {
 }
 
 func (t *translator) inlinePureConstantCondition(tokens []token) (int, bool) {
-	if value, ok := t.constantCondition(tokens); ok {
-		return value, true
-	}
 	for len(tokens) > 1 && tokenIs(t.src, tokens[0], "(") && matchingToken(t.src, tokens, 0, "(", ")") == len(tokens)-1 {
 		tokens = tokens[1 : len(tokens)-1]
 	}
-	if len(tokens) > 1 && tokenIs(t.src, tokens[0], "!") {
-		value, ok := t.inlinePureConstantCondition(tokens[1:])
-		if ok {
+	if value, ok := t.inlineRuntimeAnnihilatorCondition(tokens, true); ok {
+		return value, true
+	}
+	if t.conditionContainsRuntimeObject(tokens) {
+		return 0, false
+	}
+	return t.constantCondition(tokens)
+}
+
+// inlineRuntimeAnnihilatorCondition recognizes constant-return inline calls
+// and value-independent masks without asking the general C constant evaluator
+// to assign a value to a runtime object. Logical folding is limited to cases
+// whose short-circuit behavior makes the runtime operand unreachable.
+func (t *translator) inlineRuntimeAnnihilatorCondition(tokens []token, logical bool) (int, bool) {
+	for len(tokens) > 1 && tokenIs(t.src, tokens[0], "(") && matchingToken(t.src, tokens, 0, "(", ")") == len(tokens)-1 {
+		tokens = tokens[1 : len(tokens)-1]
+	}
+	// The constant parser rejects ordinary object reads, but it must still see
+	// the complete expression: __builtin_constant_p and a selected constant
+	// conditional arm can make an expression constant even when an unselected
+	// fallback names a runtime object.
+	if value, ok := t.constantExpression(tokens); ok {
+		return value, true
+	}
+	if value, ok := t.inlineConstantCallValue(tokens); ok {
+		return value, true
+	}
+	if question, colon := t.conditionalOperator(tokens); question >= 0 {
+		condition, known := t.inlineRuntimeAnnihilatorCondition(tokens[:question], logical)
+		if known {
+			selected := tokens[colon+1:]
+			if condition != 0 {
+				selected = tokens[question+1 : colon]
+				if len(selected) == 0 {
+					return condition, true
+				}
+			}
+			return t.inlineRuntimeAnnihilatorCondition(selected, logical)
+		}
+	}
+	if len(tokens) > 1 && tokenIs(t.src, tokens[0], "!") && t.binaryOperator(tokens) < 0 {
+		if value, ok := t.inlineRuntimeAnnihilatorCondition(tokens[1:], logical); ok {
 			if value == 0 {
 				return 1, true
 			}
@@ -2216,29 +2272,86 @@ func (t *translator) inlinePureConstantCondition(tokens []token) (int, bool) {
 		return 0, false
 	}
 	left, right := tokens[:at], tokens[at+1:]
-	if tokenIs(t.src, tokens[at], "&&") {
-		if value, ok := t.inlinePureConstantCondition(right); ok && value == 0 &&
-			t.constantCallArgumentsSideEffectFree([][]token{left}) {
+	leftValue, leftOK := t.inlineRuntimeAnnihilatorCondition(left, logical)
+	rightValue, rightOK := t.inlineRuntimeAnnihilatorCondition(right, logical)
+	if logical && tokenIs(t.src, tokens[at], "&&") && leftOK {
+		if leftValue == 0 {
+			return 0, true
+		}
+		if rightOK {
+			if rightValue != 0 {
+				return 1, true
+			}
 			return 0, true
 		}
 	}
-	if tokenIs(t.src, tokens[at], "||") {
-		if value, ok := t.inlinePureConstantCondition(right); ok && value != 0 &&
-			t.constantCallArgumentsSideEffectFree([][]token{left}) {
+	if logical && tokenIs(t.src, tokens[at], "||") && leftOK {
+		if leftValue != 0 {
 			return 1, true
 		}
+		if rightOK {
+			if rightValue != 0 {
+				return 1, true
+			}
+			return 0, true
+		}
+	}
+	if logical && tokenIs(t.src, tokens[at], "&&") && rightOK && rightValue == 0 &&
+		t.constantCallArgumentsSideEffectFree([][]token{left}) {
+		return 0, true
+	}
+	if logical && tokenIs(t.src, tokens[at], "||") && rightOK && rightValue != 0 &&
+		t.constantCallArgumentsSideEffectFree([][]token{left}) {
+		return 1, true
 	}
 	if tokenIs(t.src, tokens[at], "&") {
-		if value, ok := t.constantExpression(right); ok && value == 0 &&
+		if (rightOK && rightValue == 0 || valueIsConstantZero(t, right)) &&
 			t.constantCallArgumentsSideEffectFree([][]token{left}) {
 			return 0, true
 		}
-		if value, ok := t.constantExpression(left); ok && value == 0 &&
+		if (leftOK && leftValue == 0 || valueIsConstantZero(t, left)) &&
 			t.constantCallArgumentsSideEffectFree([][]token{right}) {
 			return 0, true
 		}
 	}
+	if leftOK && rightOK {
+		value := 0
+		switch {
+		case tokenIs(t.src, tokens[at], "=="):
+			if leftValue == rightValue {
+				value = 1
+			}
+		case tokenIs(t.src, tokens[at], "!="):
+			if leftValue != rightValue {
+				value = 1
+			}
+		case tokenIs(t.src, tokens[at], "<"):
+			if leftValue < rightValue {
+				value = 1
+			}
+		case tokenIs(t.src, tokens[at], "<="):
+			if leftValue <= rightValue {
+				value = 1
+			}
+		case tokenIs(t.src, tokens[at], ">"):
+			if leftValue > rightValue {
+				value = 1
+			}
+		case tokenIs(t.src, tokens[at], ">="):
+			if leftValue >= rightValue {
+				value = 1
+			}
+		default:
+			return 0, false
+		}
+		return value, true
+	}
 	return 0, false
+}
+
+func valueIsConstantZero(t *translator, tokens []token) bool {
+	value, ok := t.constantExpression(tokens)
+	return ok && value == 0
 }
 
 func (t *translator) diagnosticErrorName(name []byte) bool {
@@ -2706,13 +2819,31 @@ func (t *translator) unsignedStorageType(size int) int {
 	}
 }
 
+// Go's scalar types provide at most eight bytes of alignment. Indirect C
+// aggregates use one scalar as an alignment carrier followed by a byte tail;
+// the carrier's width, rather than the requested C alignment, determines how
+// many bytes it occupies in the translated representation.
+func cAggregateCarrierSize(alignment int) int {
+	if alignment >= 8 {
+		return 8
+	}
+	if alignment >= 4 {
+		return 4
+	}
+	if alignment >= 2 {
+		return 2
+	}
+	return 1
+}
+
 func (t *translator) emitAggregateDeclaration(typeID int) {
 	info := t.typeInfo(typeID)
 	t.appendText("type ")
 	t.out = append(t.out, info.goName...)
 	if info.kind == cTypeUnion || info.indirect {
 		t.appendText(" struct{__c_align ")
-		switch info.align {
+		carrierSize := cAggregateCarrierSize(info.align)
+		switch carrierSize {
 		case 8:
 			t.appendText("uint64")
 		case 4:
@@ -2722,7 +2853,7 @@ func (t *translator) emitAggregateDeclaration(typeID int) {
 		default:
 			t.appendText("uint8")
 		}
-		if tail := info.size - info.align; tail > 0 {
+		if tail := info.size - carrierSize; tail > 0 {
 			t.appendText(";__c_tail [")
 			t.appendDecimal(tail)
 			t.appendText("]byte")
@@ -3319,7 +3450,7 @@ func (t *translator) parseAsmClause() (cAsm, bool) {
 			result.labels = append(result.labels, string(tokenText(t.src, item[0])))
 		}
 	}
-	if result.gotoAsm != (len(groups) == 5) || result.gotoAsm && len(result.outputs) != 0 {
+	if result.gotoAsm != (len(groups) == 5) {
 		return result, false
 	}
 	t.pos = end + 1
@@ -3393,7 +3524,7 @@ func (t *translator) emitAsmStatement() bool {
 		return true
 	}
 	if operation.gotoAsm || len(operation.labels) != 0 {
-		return t.emitAsmGotoCPUFeature(operation) || t.emitAsmGotoUserStore(operation)
+		return t.emitAsmGotoCPUFeature(operation) || t.emitAsmGotoUserLoad(operation) || t.emitAsmGotoUserStore(operation)
 	}
 	identity := string(operation.template) == "leaq %c1(%%rip), %0" &&
 		len(operation.outputs) == 1 && operation.outputs[0].constraint == "=r" &&
@@ -3438,6 +3569,9 @@ func (t *translator) emitAsmStatement() bool {
 	}
 	if !handled {
 		handled = t.emitAsmBoundsMask(operation)
+	}
+	if !handled {
+		handled = t.emitAsmEndBranchValue(operation)
 	}
 	if !handled {
 		handled = t.emitAsmCopyBytes(operation)
@@ -3660,6 +3794,9 @@ func (t *translator) emitAsmStatement() bool {
 	}
 	if !handled {
 		handled = t.emitAsmSyscall(operation)
+	}
+	if !handled {
+		handled = t.emitAsmInterruptWithStack(operation)
 	}
 	if !handled {
 		handled = t.emitAsmSegmentRegister(operation)
@@ -4344,6 +4481,58 @@ func (t *translator) emitAsmGotoCPUFeature(operation cAsm) bool {
 	return t.ok
 }
 
+func (t *translator) emitAsmGotoUserLoad(operation cAsm) bool {
+	if !t.object || !operation.gotoAsm || len(operation.outputs) != 1 || len(operation.inputs) != 1 ||
+		len(operation.clobbers) != 0 || len(operation.labels) != 1 ||
+		operation.outputs[0].name != "output" || operation.inputs[0].name != "umem" ||
+		operation.inputs[0].constraint != "m" ||
+		!t.asmTemplateCompactContains(operation.template, ".pushsection\"__ex_table\",\"a\"") ||
+		!t.asmTemplateCompactContains(operation.template, ".long(%l2)-.") ||
+		!t.asmTemplateCompactContains(operation.template, ".long3") {
+		return false
+	}
+	width := 0
+	if operation.outputs[0].constraint == "=q" && t.asmTemplateCompactPrefix(operation.template, "1:movb%[umem],%[output]") {
+		width = 1
+	} else if operation.outputs[0].constraint == "=r" && t.asmTemplateCompactPrefix(operation.template, "1:movw%[umem],%[output]") {
+		width = 2
+	} else if operation.outputs[0].constraint == "=r" && t.asmTemplateCompactPrefix(operation.template, "1:movl%[umem],%[output]") {
+		width = 4
+	} else if operation.outputs[0].constraint == "=r" && t.asmTemplateCompactPrefix(operation.template, "1:movq%[umem],%[output]") {
+		width = 8
+	}
+	outputInfo := t.typeInfo(t.expressionType(operation.outputs[0].expression))
+	if width == 0 || outputInfo.kind != cTypeInt && outputInfo.kind != cTypeUint || outputInfo.size > 8 {
+		return false
+	}
+	pointer, ok := t.asmDereferencePointer(operation.inputs[0].expression)
+	if !ok || t.typeInfo(t.expressionType(pointer)).kind != cTypePointer {
+		return false
+	}
+	label := t.localLabelGoName(operation.labels[0])
+	name := "renvo_runtime_CUserLoad" + decimalString(width*8) + "_" + label
+	found := false
+	for i := 0; i < len(t.asmUserMemoryHelpers); i++ {
+		found = found || t.asmUserMemoryHelpers[i] == name
+	}
+	if !found {
+		t.asmUserMemoryHelpers = append(t.asmUserMemoryHelpers, name)
+		t.staticOut = append(t.staticOut, ("func " + name + "(address uintptr) uint64{return 0}\n")...)
+	}
+	t.emitExpression(operation.outputs[0].expression)
+	t.appendText("=")
+	t.emitType(t.expressionType(operation.outputs[0].expression))
+	t.appendText("(")
+	t.appendText(name)
+	t.appendText("(uintptr(__c_unsafe.Pointer(")
+	t.emitExpression(pointer)
+	t.appendText("))));if false{goto ")
+	t.appendText(label)
+	t.appendText("};")
+	t.usesUnsafe = true
+	return t.ok
+}
+
 func (t *translator) emitAsmGotoUserStore(operation cAsm) bool {
 	if !t.object || !operation.gotoAsm || len(operation.outputs) != 0 || len(operation.inputs) != 2 ||
 		len(operation.clobbers) != 0 || len(operation.labels) != 1 ||
@@ -4373,11 +4562,11 @@ func (t *translator) emitAsmGotoUserStore(operation cAsm) bool {
 	label := t.localLabelGoName(operation.labels[0])
 	name := "renvo_runtime_CUserStore" + decimalString(width*8) + "_" + label
 	found := false
-	for i := 0; i < len(t.asmUserStoreHelpers); i++ {
-		found = found || t.asmUserStoreHelpers[i] == name
+	for i := 0; i < len(t.asmUserMemoryHelpers); i++ {
+		found = found || t.asmUserMemoryHelpers[i] == name
 	}
 	if !found {
-		t.asmUserStoreHelpers = append(t.asmUserStoreHelpers, name)
+		t.asmUserMemoryHelpers = append(t.asmUserMemoryHelpers, name)
 		t.staticOut = append(t.staticOut, ("func " + name + "(address uintptr,value uint64){}\n")...)
 	}
 	t.appendText(name)
@@ -4553,6 +4742,22 @@ func (t *translator) emitAsmBoundsMask(operation cAsm) bool {
 	return t.ok
 }
 
+func (t *translator) emitAsmEndBranchValue(operation cAsm) bool {
+	if len(operation.outputs) != 1 || operation.outputs[0].name != "endbr" ||
+		operation.outputs[0].constraint != "=&r" || len(operation.inputs) != 0 || len(operation.clobbers) != 0 ||
+		!t.asmTemplateCompactPrefix(operation.template, "mov$~0xfa1e0ff3,%[endbr]not%[endbr]") {
+		return false
+	}
+	// Linux constructs the ENDBR64 instruction word this way so the compiler
+	// cannot fold it into an instruction stream that objtool may mistake for an
+	// actual landing pad. Preserve the resulting scalar value in generated code.
+	t.emitExpression(operation.outputs[0].expression)
+	t.appendText("=")
+	t.emitType(t.expressionType(operation.outputs[0].expression))
+	t.appendText("(0xfa1e0ff3);")
+	return t.ok
+}
+
 func (t *translator) emitAsmFence(operation cAsm) bool {
 	if len(operation.outputs) != 0 || len(operation.inputs) != 0 {
 		return false
@@ -4617,6 +4822,22 @@ func (t *translator) emitAsmSwapGS(operation cAsm) bool {
 
 func (t *translator) emitAsmScalarStore(operation cAsm) bool {
 	width, positional, fixedAccumulator := 0, false, false
+	zeroWidth := 0
+	for index, suffix := range []string{"b", "w", "l", "q"} {
+		if t.asmTemplateCompactPrefix(operation.template, "mov"+suffix+"$0,%0") {
+			zeroWidth = []int{1, 2, 4, 8}[index]
+			break
+		}
+	}
+	if zeroWidth != 0 {
+		if len(operation.outputs) != 1 || operation.outputs[0].constraint != "+m" || len(operation.inputs) != 0 ||
+			t.typeSize(t.expressionType(operation.outputs[0].expression)) != zeroWidth {
+			return false
+		}
+		t.emitExpression(operation.outputs[0].expression)
+		t.appendText("=0;")
+		return t.ok
+	}
 	for index, suffix := range []string{"b", "w", "l", "q"} {
 		if t.asmTemplateCompactPrefix(operation.template, "mov"+suffix+"%[val],%[var]") {
 			width = []int{1, 2, 4, 8}[index]
@@ -4968,8 +5189,9 @@ func (t *translator) emitAsmWriteBackInvalidate(operation cAsm) bool {
 }
 
 func (t *translator) emitAsmReadFlags(operation cAsm) bool {
-	if !t.asmTemplateCompactContains(operation.template, "pushf;pop%0") || len(operation.outputs) != 1 ||
-		operation.outputs[0].constraint != "=rm" || len(operation.inputs) != 0 {
+	legacy := t.asmTemplateCompactContains(operation.template, "pushfl;popl%0")
+	if (!t.asmTemplateCompactContains(operation.template, "pushf;pop%0") && !legacy) || len(operation.outputs) != 1 ||
+		(operation.outputs[0].constraint != "=rm" && (!legacy || operation.outputs[0].constraint != "=r")) || len(operation.inputs) != 0 {
 		return false
 	}
 	typeID := t.expressionType(operation.outputs[0].expression)
@@ -5246,21 +5468,62 @@ func (t *translator) emitAsmNonTemporalCopy(operation cAsm) bool {
 
 func (t *translator) emitAsmRepeatedStore(operation cAsm) bool {
 	width := 0
-	if t.asmTemplateCompactPrefix(operation.template, "rep;stosw") || t.asmTemplateCompactPrefix(operation.template, "repstosw") {
+	if t.asmTemplateCompactPrefix(operation.template, "rep;stosb") || t.asmTemplateCompactPrefix(operation.template, "repstosb") ||
+		t.asmTemplateCompactPrefix(operation.template, "cld;repstosb") {
+		width = 1
+	} else if t.asmTemplateCompactPrefix(operation.template, "rep;stosw") || t.asmTemplateCompactPrefix(operation.template, "repstosw") ||
+		t.asmTemplateCompactPrefix(operation.template, "cld;repstosw") {
 		width = 2
-	} else if t.asmTemplateCompactPrefix(operation.template, "rep;stosl") || t.asmTemplateCompactPrefix(operation.template, "repstosl") {
+	} else if t.asmTemplateCompactPrefix(operation.template, "rep;stosl") || t.asmTemplateCompactPrefix(operation.template, "repstosl") ||
+		t.asmTemplateCompactPrefix(operation.template, "cld;repstosl") {
 		width = 4
-	} else if t.asmTemplateCompactPrefix(operation.template, "rep;stosq") || t.asmTemplateCompactPrefix(operation.template, "repstosq") {
+	} else if t.asmTemplateCompactPrefix(operation.template, "rep;stosq") || t.asmTemplateCompactPrefix(operation.template, "repstosq") ||
+		t.asmTemplateCompactPrefix(operation.template, "cld;repstosq") {
 		width = 8
 	}
-	if width == 0 || len(operation.outputs) != 2 || operation.outputs[0].constraint != "+D" ||
-		operation.outputs[1].constraint != "+c" || len(operation.inputs) != 1 || operation.inputs[0].constraint != "a" {
+	modern := len(operation.outputs) == 2 && operation.outputs[0].constraint == "+D" &&
+		operation.outputs[1].constraint == "+c" && len(operation.inputs) == 1 && operation.inputs[0].constraint == "a"
+	legacy := len(operation.outputs) == 2 && operation.outputs[0].constraint == "=D" &&
+		operation.outputs[1].constraint == "=c" && len(operation.inputs) == 3 &&
+		operation.inputs[0].constraint == "0" && operation.inputs[1].constraint == "1" &&
+		operation.inputs[2].constraint == "a"
+	if width == 0 || !modern && !legacy {
 		return false
 	}
 	pointerType := t.expressionType(operation.outputs[0].expression)
-	if t.typeInfo(pointerType).kind != cTypePointer || t.typeSize(t.typeInfo(pointerType).base) != width ||
-		t.typeSize(t.expressionType(operation.inputs[0].expression)) != width {
+	valueInput := 0
+	if legacy {
+		valueInput = 2
+	}
+	if t.typeInfo(pointerType).kind != cTypePointer ||
+		modern && t.typeSize(t.typeInfo(pointerType).base) != width ||
+		t.typeSize(t.expressionType(operation.inputs[valueInput].expression)) < width {
 		return false
+	}
+	if legacy {
+		t.appendText("for ")
+		t.emitExpression(operation.outputs[1].expression)
+		t.appendText(">0{*(*uint")
+		t.appendDecimal(width * 8)
+		t.appendText(")(__c_unsafe.Pointer(")
+		t.emitExpression(operation.outputs[0].expression)
+		t.appendText("))=uint")
+		t.appendDecimal(width * 8)
+		t.appendText("(")
+		t.emitExpression(operation.inputs[valueInput].expression)
+		t.appendText(");")
+		t.emitExpression(operation.outputs[0].expression)
+		t.appendText("=(")
+		t.emitType(pointerType)
+		t.appendText(")(__c_unsafe.Pointer(uintptr(__c_unsafe.Pointer(")
+		t.emitExpression(operation.outputs[0].expression)
+		t.appendText("))+")
+		t.appendDecimal(width)
+		t.appendText("));")
+		t.emitExpression(operation.outputs[1].expression)
+		t.appendText("--};")
+		t.usesUnsafe = true
+		return t.ok
 	}
 	helper := t.ensurePointerStepHelper(pointerType, false)
 	t.appendText("for ")
@@ -5268,7 +5531,7 @@ func (t *translator) emitAsmRepeatedStore(operation cAsm) bool {
 	t.appendText(">0{*(")
 	t.emitExpression(operation.outputs[0].expression)
 	t.appendText(")=")
-	t.convertedExpression(t.typeInfo(pointerType).base, operation.inputs[0].expression)
+	t.convertedExpression(t.typeInfo(pointerType).base, operation.inputs[valueInput].expression)
 	t.appendText(";")
 	t.emitExpression(operation.outputs[0].expression)
 	t.appendText("=")
@@ -5503,7 +5766,11 @@ func (t *translator) emitAsmAtomicArithmetic(operation cAsm) bool {
 	key := op*4 + widthKey
 	if t.asmAtomicArithmetic&(1<<key) == 0 {
 		t.asmAtomicArithmetic |= 1 << key
-		t.staticOut = append(t.staticOut, ("func " + helper + "(address uintptr,value uint64) uint8{return 0}\n")...)
+		valueType := "uint64"
+		if t.pointerSize == 4 && width <= 4 {
+			valueType = "uintptr"
+		}
+		t.staticOut = append(t.staticOut, ("func " + helper + "(address uintptr,value " + valueType + ") uint8{return 0}\n")...)
 	}
 	if condition >= 0 {
 		t.emitExpression(operation.outputs[condition].expression)
@@ -5512,7 +5779,12 @@ func (t *translator) emitAsmAtomicArithmetic(operation cAsm) bool {
 	t.appendText(helper)
 	t.appendText("(uintptr(__c_unsafe.Pointer(&(")
 	t.emitExpression(operation.outputs[memory].expression)
-	t.appendText("))),uint64(")
+	t.appendText("))),")
+	if t.pointerSize == 4 && width <= 4 {
+		t.appendText("uintptr(")
+	} else {
+		t.appendText("uint64(")
+	}
 	if value >= 0 {
 		t.emitExpression(operation.inputs[value].expression)
 	} else {
@@ -5534,6 +5806,37 @@ func (t *translator) emitAsmAtomicArithmetic(operation cAsm) bool {
 }
 
 func (t *translator) emitAsmAtomicExchange(operation cAsm) bool {
+	legacyXchg := t.asmTemplateCompactContains(operation.template, "xchgl%0,%1") &&
+		len(operation.outputs) == 2 && len(operation.inputs) == 1 &&
+		operation.outputs[0].constraint == "+m" && operation.outputs[1].constraint == "=a" &&
+		operation.inputs[0].constraint == "1"
+	if legacyXchg {
+		const key = 6
+		if t.asmAtomicExchange&(1<<key) == 0 {
+			t.asmAtomicExchange |= 1 << key
+			if t.pointerSize == 4 {
+				t.staticOut = append(t.staticOut, "func renvo_runtime_CAtomicExchange32(address uintptr,value uintptr) uintptr{return 0}\n"...)
+			} else {
+				t.staticOut = append(t.staticOut, "func renvo_runtime_CAtomicExchange32(address uintptr,value uint64) uint64{return 0}\n"...)
+			}
+		}
+		outputType := t.expressionType(operation.outputs[1].expression)
+		t.emitExpression(operation.outputs[1].expression)
+		t.appendText("=")
+		t.emitType(outputType)
+		t.appendText("(renvo_runtime_CAtomicExchange32(uintptr(__c_unsafe.Pointer(&(")
+		t.emitExpression(operation.outputs[0].expression)
+		t.appendText("))),")
+		if t.pointerSize == 4 {
+			t.appendText("uintptr(")
+		} else {
+			t.appendText("uint64(")
+		}
+		t.emitExpression(operation.inputs[0].expression)
+		t.appendText(")));")
+		t.usesUnsafe = true
+		return t.ok
+	}
 	kind, width := 0, 0
 	for index, suffix := range []string{"b", "w", "l", "q"} {
 		if t.asmTemplateCompactPrefix(operation.template, "xadd"+suffix) {
@@ -5565,7 +5868,11 @@ func (t *translator) emitAsmAtomicExchange(operation cAsm) bool {
 	key := (kind-1)*4 + widthKey
 	if t.asmAtomicExchange&(1<<key) == 0 {
 		t.asmAtomicExchange |= 1 << key
-		t.staticOut = append(t.staticOut, ("func " + name + "(address uintptr,value uint64) uint64{return 0}\n")...)
+		valueType := "uint64"
+		if t.pointerSize == 4 && width <= 4 {
+			valueType = "uintptr"
+		}
+		t.staticOut = append(t.staticOut, ("func " + name + "(address uintptr,value " + valueType + ") " + valueType + "{return 0}\n")...)
 	}
 	outputType := t.expressionType(operation.outputs[0].expression)
 	t.emitExpression(operation.outputs[0].expression)
@@ -5581,7 +5888,12 @@ func (t *translator) emitAsmAtomicExchange(operation cAsm) bool {
 	t.appendText(name)
 	t.appendText("(uintptr(__c_unsafe.Pointer(&(")
 	t.emitExpression(operation.outputs[1].expression)
-	t.appendText("))),uint64(")
+	t.appendText("))),")
+	if t.pointerSize == 4 && width <= 4 {
+		t.appendText("uintptr(")
+	} else {
+		t.appendText("uint64(")
+	}
 	t.emitExpression(operation.outputs[0].expression)
 	t.appendText(")))")
 	if t.typeInfo(outputType).kind == cTypePointer {
@@ -6672,7 +6984,8 @@ func (t *translator) emitAsmSegmentRegister(operation cAsm) bool {
 			t.asmTemplateCompactContains(operation.template, ".pushsection\"__ex_table\"")
 		inferredWrite := t.asmTemplateCompactPrefix(operation.template, "mov%0,%%"+segment)
 		if (segment == "fs" || segment == "gs") && (t.asmTemplateCompactPrefix(operation.template, "movw%0,%%"+segment) || wrappedWrite || inferredWrite) {
-			if len(operation.outputs) != 0 || len(operation.inputs) != 1 || operation.inputs[0].constraint != "rm" ||
+			if len(operation.outputs) != 0 || len(operation.inputs) != 1 ||
+				(operation.inputs[0].constraint != "rm" && operation.inputs[0].constraint != "r") ||
 				t.typeSize(t.expressionType(operation.inputs[0].expression)) != 2 &&
 					(!inferredWrite || t.typeSize(t.expressionType(operation.inputs[0].expression)) != 4) {
 				return false
@@ -6752,9 +7065,14 @@ func (t *translator) emitAsmPortIO(operation cAsm) bool {
 			letter, modifier = "l", ""
 		}
 		outTemplate := "out" + letter + "%" + modifier + "0,%w1"
-		if t.asmTemplateCompactPrefix(operation.template, outTemplate) {
+		genericOutput := t.asmTemplateCompactPrefix(operation.template, "out%0,%1") &&
+			len(operation.inputs) == 2 && t.typeSize(t.expressionType(operation.inputs[0].expression)) == size
+		legacyOutput := t.asmTemplateCompactPrefix(operation.template, "out"+letter+"%0,%1") &&
+			len(operation.inputs) == 2 && t.typeSize(t.expressionType(operation.inputs[0].expression)) == size
+		if t.asmTemplateCompactPrefix(operation.template, outTemplate) || genericOutput || legacyOutput {
 			if len(operation.outputs) != 0 || len(operation.inputs) != 2 ||
-				operation.inputs[0].constraint != "a" || operation.inputs[1].constraint != "Nd" ||
+				operation.inputs[0].constraint != "a" ||
+				(operation.inputs[1].constraint != "Nd" && (!genericOutput && !legacyOutput || operation.inputs[1].constraint != "d")) ||
 				t.typeSize(t.expressionType(operation.inputs[0].expression)) != size ||
 				t.typeSize(t.expressionType(operation.inputs[1].expression)) != 2 {
 				return false
@@ -6770,9 +7088,14 @@ func (t *translator) emitAsmPortIO(operation cAsm) bool {
 			return t.ok
 		}
 		inTemplate := "in" + letter + "%w1,%" + modifier + "0"
-		if t.asmTemplateCompactPrefix(operation.template, inTemplate) {
+		genericInput := t.asmTemplateCompactPrefix(operation.template, "in%1,%0") &&
+			len(operation.outputs) == 1 && t.typeSize(t.expressionType(operation.outputs[0].expression)) == size
+		legacyInput := t.asmTemplateCompactPrefix(operation.template, "in"+letter+"%1,%0") &&
+			len(operation.outputs) == 1 && t.typeSize(t.expressionType(operation.outputs[0].expression)) == size
+		if t.asmTemplateCompactPrefix(operation.template, inTemplate) || genericInput || legacyInput {
 			if len(operation.outputs) != 1 || len(operation.inputs) != 1 ||
-				operation.outputs[0].constraint != "=a" || operation.inputs[0].constraint != "Nd" ||
+				operation.outputs[0].constraint != "=a" ||
+				(operation.inputs[0].constraint != "Nd" && (!genericInput && !legacyInput || operation.inputs[0].constraint != "d")) ||
 				t.typeSize(t.expressionType(operation.outputs[0].expression)) != size ||
 				t.typeSize(t.expressionType(operation.inputs[0].expression)) != 2 {
 				return false
@@ -6837,11 +7160,13 @@ func (t *translator) asmDirectOutputPort(operation cAsm) (int, bool) {
 func (t *translator) emitAsmStringPortIO(operation cAsm) bool {
 	width, output := 0, false
 	for index, suffix := range []string{"b", "w", "l"} {
-		if t.asmTemplateCompactPrefix(operation.template, "rep;outs"+suffix) {
+		if t.asmTemplateCompactPrefix(operation.template, "rep;outs"+suffix) ||
+			t.asmTemplateCompactPrefix(operation.template, "cld;repouts"+suffix) {
 			width, output = []int{1, 2, 4}[index], true
 			break
 		}
-		if t.asmTemplateCompactPrefix(operation.template, "rep;ins"+suffix) {
+		if t.asmTemplateCompactPrefix(operation.template, "rep;ins"+suffix) ||
+			t.asmTemplateCompactPrefix(operation.template, "cld;repins"+suffix) {
 			width = []int{1, 2, 4}[index]
 			break
 		}
@@ -6850,9 +7175,22 @@ func (t *translator) emitAsmStringPortIO(operation cAsm) bool {
 	if output {
 		pointerConstraint = "+S"
 	}
-	if width == 0 || len(operation.outputs) != 2 || len(operation.inputs) != 1 ||
-		operation.outputs[0].constraint != pointerConstraint || operation.outputs[1].constraint != "+c" ||
-		operation.inputs[0].constraint != "d" || t.typeSize(t.expressionType(operation.inputs[0].expression)) != 2 {
+	modern := len(operation.outputs) == 2 && len(operation.inputs) == 1 &&
+		operation.outputs[0].constraint == pointerConstraint && operation.outputs[1].constraint == "+c" &&
+		operation.inputs[0].constraint == "d"
+	legacyPointer := "=D"
+	if output {
+		legacyPointer = "=S"
+	}
+	legacy := len(operation.outputs) == 2 && len(operation.inputs) == 3 &&
+		operation.outputs[0].constraint == legacyPointer && operation.outputs[1].constraint == "=c" &&
+		operation.inputs[0].constraint == "d" && operation.inputs[1].constraint == "0" &&
+		operation.inputs[2].constraint == "1"
+	portSize := 0
+	if modern || legacy {
+		portSize = t.typeSize(t.expressionType(operation.inputs[0].expression))
+	}
+	if width == 0 || (!modern && !legacy) || (portSize != 2 && portSize != 4) {
 		return false
 	}
 	pointerType := t.expressionType(operation.outputs[0].expression)
@@ -6949,6 +7287,34 @@ func (t *translator) emitAsmSyscall(operation cAsm) bool {
 		}
 	}
 	t.appendText("));")
+	return t.ok
+}
+
+func (t *translator) emitAsmInterruptWithStack(operation cAsm) bool {
+	if !t.asmTemplateCompactContains(operation.template, "mov%%esp,%%ebx") ||
+		!t.asmTemplateCompactContains(operation.template, "mov%3,%%esp") ||
+		!t.asmTemplateCompactContains(operation.template, "int%2") ||
+		!t.asmTemplateCompactContains(operation.template, "mov%%ebx,%%esp") ||
+		len(operation.outputs) != 1 || operation.outputs[0].constraint != "=a" ||
+		len(operation.inputs) != 3 || operation.inputs[0].constraint != "a" ||
+		operation.inputs[1].constraint != "n" || operation.inputs[2].constraint != "c" ||
+		len(operation.clobbers) != 1 || operation.clobbers[0] != "ebx" ||
+		t.pointerSize != 4 || t.typeInfo(t.expressionType(operation.inputs[2].expression)).kind != cTypePointer {
+		return false
+	}
+	if !t.asmInterruptStackHelper {
+		t.asmInterruptStackHelper = true
+		t.staticOut = append(t.staticOut, "func renvo_runtime_CInterruptWithStack(number int32,vector uint8,stack uintptr) int32{return 0}\n"...)
+	}
+	t.emitExpression(operation.outputs[0].expression)
+	t.appendText("=renvo_runtime_CInterruptWithStack(int32(")
+	t.emitExpression(operation.inputs[0].expression)
+	t.appendText("),uint8(")
+	t.emitExpression(operation.inputs[1].expression)
+	t.appendText("),uintptr(__c_unsafe.Pointer(")
+	t.emitExpression(operation.inputs[2].expression)
+	t.appendText(")));")
+	t.usesUnsafe = true
 	return t.ok
 }
 
@@ -7590,7 +7956,8 @@ func (t *translator) emitAsmMonitorWait(operation cAsm) bool {
 		kind, name = 4, "renvo_runtime_CWaitExtended"
 	} else if t.asmTemplateCompactPrefix(operation.template, "sti;.byte0x0f,0x01,0xc9") {
 		kind, name = 5, "renvo_runtime_CEnableInterruptsAndWait"
-	} else if t.asmTemplateCompactPrefix(operation.template, ".byte0x66,0x0f,0xae,0xf1") {
+	} else if t.asmTemplateCompactPrefix(operation.template, ".byte0x66,0x0f,0xae,0xf1") ||
+		t.asmTemplateCompactPrefix(operation.template, "tpause%%ecx") {
 		kind, name = 6, "renvo_runtime_CTimedPause"
 	}
 	if kind == 0 || len(operation.outputs) != 0 || len(operation.clobbers) != 0 {
@@ -7755,7 +8122,12 @@ func (t *translator) emitAsmDescriptorTable(operation cAsm) bool {
 	kind := 0
 	name := ""
 	store := false
-	if t.asmTemplateCompactPrefix(operation.template, "lgdtl%0") || t.asmTemplateCompactPrefix(operation.template, "lgdt%0") {
+	directPointer := false
+	if t.asmTemplateCompactPrefix(operation.template, "lgdt(%0)") {
+		kind, name, directPointer = 1, "renvo_runtime_CLoadGDT", true
+	} else if t.asmTemplateCompactPrefix(operation.template, "lidt(%0)") {
+		kind, name, directPointer = 2, "renvo_runtime_CLoadIDT", true
+	} else if t.asmTemplateCompactPrefix(operation.template, "lgdtl%0") || t.asmTemplateCompactPrefix(operation.template, "lgdt%0") {
 		kind, name = 1, "renvo_runtime_CLoadGDT"
 	} else if t.asmTemplateCompactPrefix(operation.template, "lidtl%0") || t.asmTemplateCompactPrefix(operation.template, "lidt%0") {
 		kind, name = 2, "renvo_runtime_CLoadIDT"
@@ -7765,7 +8137,7 @@ func (t *translator) emitAsmDescriptorTable(operation cAsm) bool {
 		kind, name, store = 8, "renvo_runtime_CStoreGDT", true
 	} else if t.asmTemplateCompactPrefix(operation.template, "sidt%0") {
 		kind, name, store = 16, "renvo_runtime_CStoreIDT", true
-	} else if t.asmTemplateCompactPrefix(operation.template, "ltr%w0") {
+	} else if t.asmTemplateCompactPrefix(operation.template, "ltr%w0") || t.asmTemplateCompactPrefix(operation.template, "ltr%0") {
 		kind, name = 32, "renvo_runtime_CLoadTR"
 	} else if t.asmTemplateCompactPrefix(operation.template, "str%0") {
 		kind, name, store = 64, "renvo_runtime_CStoreTR", true
@@ -7777,7 +8149,9 @@ func (t *translator) emitAsmDescriptorTable(operation cAsm) bool {
 	if kind == 0 || store && (len(operation.outputs) != 1 ||
 		(registerStore && operation.outputs[0].constraint != "=r" && operation.outputs[0].constraint != "=g" && operation.outputs[0].constraint != "=m" || !registerStore && operation.outputs[0].constraint != "=m") || len(operation.inputs) != 0) ||
 		!store && (len(operation.outputs) != 0 || len(operation.inputs) != 1 ||
-			(kind == 4 || registerLoad) && operation.inputs[0].constraint != "q" && operation.inputs[0].constraint != "rm" || kind != 4 && !registerLoad && operation.inputs[0].constraint != "m") {
+			(kind == 4 || registerLoad) && operation.inputs[0].constraint != "q" && operation.inputs[0].constraint != "rm" && operation.inputs[0].constraint != "r" ||
+			kind != 4 && !registerLoad && !directPointer && operation.inputs[0].constraint != "m" ||
+			directPointer && operation.inputs[0].constraint != "r") {
 		return false
 	}
 	if t.asmDescriptorOps&kind == 0 {
@@ -7807,6 +8181,13 @@ func (t *translator) emitAsmDescriptorTable(operation cAsm) bool {
 		t.appendText("(uint16(")
 		t.emitExpression(operation.inputs[0].expression)
 		t.appendText("));")
+	} else if directPointer {
+		t.appendText(name)
+		t.appendText("(uintptr(__c_unsafe.Pointer(")
+		pointerType := t.decayedExpressionType(operation.inputs[0].expression)
+		t.convertedExpression(pointerType, operation.inputs[0].expression)
+		t.appendText(")));")
+		t.usesUnsafe = true
 	} else {
 		t.appendText(name)
 		t.appendText("(uintptr(&(")
@@ -7886,7 +8267,8 @@ func (t *translator) emitAsmControlRegister(operation cAsm) bool {
 		return t.ok
 	}
 	for _, candidate := range []int{0, 2, 3, 4} {
-		if register < 0 && t.asmTemplateCompactPrefix(operation.template, "mov%%cr"+decimalString(candidate)+",%0") {
+		if register < 0 && (t.asmTemplateCompactPrefix(operation.template, "mov%%cr"+decimalString(candidate)+",%0") ||
+			t.asmTemplateCompactPrefix(operation.template, "movl%%cr"+decimalString(candidate)+",%0")) {
 			register = candidate
 		}
 	}
@@ -7903,7 +8285,8 @@ func (t *translator) emitAsmControlRegister(operation cAsm) bool {
 		return t.ok
 	}
 	for _, candidate := range []int{0, 2, 3, 4} {
-		if t.asmTemplateCompactPrefix(operation.template, "mov%0,%%cr"+decimalString(candidate)) {
+		if t.asmTemplateCompactPrefix(operation.template, "mov%0,%%cr"+decimalString(candidate)) ||
+			t.asmTemplateCompactPrefix(operation.template, "movl%0,%%cr"+decimalString(candidate)) {
 			register = candidate
 			break
 		}
@@ -8663,7 +9046,7 @@ func (t *translator) parseType() (int, int, bool) {
 					typeID, known = t.arrayType(cTypeUintptrID, 3), true
 				}
 				if !known {
-					typeID, known = builtinCType(typeName)
+					typeID, known = t.builtinCType(typeName)
 				}
 				if !known {
 					for i := 0; i < len(t.opaqueTypes); i++ {
@@ -8726,12 +9109,14 @@ done:
 	case "int128":
 		typeID = t.integer128Type(unsigned)
 	default:
-		if longCount > 0 {
+		if longCount > 1 || longCount == 1 && t.longSize == 8 {
 			if unsigned {
 				typeID = cTypeUint64ID
 			} else {
 				typeID = cTypeInt64ID
 			}
+		} else if longCount == 1 && unsigned {
+			typeID = cTypeUint32ID
 		} else if unsigned {
 			typeID = cTypeUint32ID
 		}
@@ -9342,6 +9727,13 @@ func (t *translator) emitObjectMetadata(kind string, name string, attributes cAt
 	if !t.object {
 		return
 	}
+	if !t.c11DirectiveEmitted {
+		// The object linker roots declarations rather than package trivia. Keep
+		// the unit semantic marker adjacent to rooted metadata so it survives
+		// compact unit linking and reaches every backend implementation.
+		t.appendText("// renvo:c11\n")
+		t.c11DirectiveEmitted = true
+	}
 	section := attributes.section
 	if section == "" {
 		if kind == "function" && t.functionSections {
@@ -9906,7 +10298,15 @@ func (t *translator) constantParenthesizedConditionWithPrefix() (int, []token, b
 			brace--
 		case paren == 0 && bracket == 0 && brace == 0 &&
 			(tokenIs(t.src, tokens[i], "&&") || tokenIs(t.src, tokens[i], "||")):
-			right, known := t.constantCondition(tokens[i+1:])
+			// The prefix is emitted as a discarded expression before selecting
+			// the fixed branch, which preserves every evaluation required by C's
+			// left-to-right short-circuit rules.
+			if t.conditionContainsRuntimeObject(tokens[i+1:]) {
+				if _, ok := t.inlineRuntimeAnnihilatorCondition(tokens[i+1:], false); !ok {
+					continue
+				}
+			}
+			right, known := t.inlinePureConstantCondition(tokens[i+1:])
 			if !known || tokenIs(t.src, tokens[i], "&&") && right != 0 || tokenIs(t.src, tokens[i], "||") && right == 0 {
 				continue
 			}
@@ -9918,6 +10318,18 @@ func (t *translator) constantParenthesizedConditionWithPrefix() (int, []token, b
 		}
 	}
 	return 0, nil, false, close
+}
+
+func (t *translator) conditionContainsRuntimeObject(tokens []token) bool {
+	for i := 0; i < len(tokens); i++ {
+		if tokenKind(tokens[i]) != tokenIdent {
+			continue
+		}
+		if _, ok := t.lookupObject(tokenText(t.src, tokens[i])); ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *translator) skipHoistedGotoGuard() bool {
@@ -9983,7 +10395,7 @@ func (t *translator) constantCondition(tokens []token) (int, bool) {
 	if value, ok := t.inlineConstantCallValue(tokens); ok {
 		return value, true
 	}
-	if len(tokens) > 1 && tokenIs(t.src, tokens[0], "!") {
+	if len(tokens) > 1 && tokenIs(t.src, tokens[0], "!") && t.binaryOperator(tokens) < 0 {
 		value, ok := t.constantCondition(tokens[1:])
 		if ok {
 			if value == 0 {
@@ -10035,7 +10447,7 @@ func (t *translator) inlineConstantCallValue(tokens []token) (int, bool) {
 		args = nil
 	}
 	if tokenIs(t.src, tokens[0], "__builtin_expect") && len(args) == 2 {
-		return t.constantCondition(args[0])
+		return t.inlinePureConstantCondition(args[0])
 	}
 	entry := t.lookupNameEntry(tokenText(t.src, tokens[0]), false)
 	if entry < 0 || t.names[entry].kind != cNameFunction {
@@ -10196,7 +10608,7 @@ func (t *translator) discardedExpressionNeedsSink(tokens []token) bool {
 		name := tokenText(t.src, tokens[0])
 		if textEquals(name, "__builtin_va_start") || textEquals(name, "__builtin_va_end") || textEquals(name, "__builtin_va_copy") ||
 			textEquals(name, "__builtin_prefetch") ||
-			textEquals(name, "__builtin_unreachable") {
+			textEquals(name, "__builtin_unreachable") || textEquals(name, "__sync_synchronize") {
 			return false
 		}
 	}
@@ -10456,8 +10868,22 @@ func (t *translator) switchStatementBody() {
 		return
 	}
 	switchType := t.integerPromotion(t.expressionType(t.tokens[t.pos:close]))
-	t.appendText("switch ")
-	t.convertedExpression(switchType, t.tokens[t.pos:close])
+	conditionalCases := t.switchUsesConditionalCases(close + 1)
+	switchName := ""
+	if conditionalCases {
+		t.typeSerial++
+		switchName = "__c_switch_" + decimalString(t.typeSerial)
+		t.appendText("{var ")
+		t.appendText(switchName)
+		t.out = append(t.out, ' ')
+		t.emitType(switchType)
+		t.appendText("=")
+		t.convertedExpression(switchType, t.tokens[t.pos:close])
+		t.appendText(";switch ")
+	} else {
+		t.appendText("switch ")
+		t.convertedExpression(switchType, t.tokens[t.pos:close])
+	}
 	t.pos = close + 1
 	if !t.take("{") {
 		t.fail(TranslateErrStatement)
@@ -10484,17 +10910,27 @@ func (t *translator) switchStatementBody() {
 				if rangeAt := topLevelToken(t.src, caseTokens, "..."); rangeAt >= 0 {
 					first, firstOK := t.constantExpression(caseTokens[:rangeAt])
 					last, lastOK := t.constantExpression(caseTokens[rangeAt+1:])
-					if !firstOK || !lastOK || first > last || last-first > 255 {
+					if !firstOK || !lastOK || first > last || !conditionalCases && last-first > 255 {
 						t.fail(TranslateErrStatement)
 						return
 					}
 					if !t.checkOnly {
 						t.appendText("case ")
-						for value := first; value <= last; value++ {
-							if value > first {
-								t.out = append(t.out, ',')
+						if conditionalCases {
+							t.appendText(switchName)
+							t.appendText(">=")
+							t.appendDecimalSigned(first)
+							t.appendText("&&")
+							t.appendText(switchName)
+							t.appendText("<=")
+							t.appendDecimalSigned(last)
+						} else {
+							for value := first; value <= last; value++ {
+								if value > first {
+									t.out = append(t.out, ',')
+								}
+								t.appendDecimalSigned(value)
 							}
-							t.appendDecimalSigned(value)
 						}
 						t.out = append(t.out, ':')
 					}
@@ -10502,6 +10938,10 @@ func (t *translator) switchStatementBody() {
 					continue
 				}
 				t.appendText("case ")
+				if conditionalCases {
+					t.appendText(switchName)
+					t.appendText("==")
+				}
 				t.convertedExpression(switchType, caseTokens)
 				t.out = append(t.out, ':')
 				t.pos = end + 1
@@ -10538,6 +10978,48 @@ func (t *translator) switchStatementBody() {
 		return
 	}
 	t.out = append(t.out, '}')
+	if conditionalCases {
+		t.out = append(t.out, '}')
+	}
+}
+
+func (t *translator) switchUsesConditionalCases(open int) bool {
+	if open < 0 || open >= len(t.tokens) || !tokenIs(t.src, t.tokens[open], "{") {
+		return false
+	}
+	close := matchingToken(t.src, t.tokens, open, "{", "}")
+	if close < 0 {
+		return false
+	}
+	depth := 0
+	for i := open + 1; i < close; i++ {
+		if tokenIs(t.src, t.tokens[i], "{") {
+			depth++
+			continue
+		}
+		if tokenIs(t.src, t.tokens[i], "}") {
+			depth--
+			continue
+		}
+		if depth != 0 || !tokenIs(t.src, t.tokens[i], "case") {
+			continue
+		}
+		colon := topLevelToken(t.src, t.tokens[i+1:close], ":")
+		if colon < 0 {
+			return false
+		}
+		caseTokens := t.tokens[i+1 : i+1+colon]
+		rangeAt := topLevelToken(t.src, caseTokens, "...")
+		if rangeAt < 0 {
+			continue
+		}
+		first, firstOK := t.constantExpression(caseTokens[:rangeAt])
+		last, lastOK := t.constantExpression(caseTokens[rangeAt+1:])
+		if firstOK && lastOK && first <= last && last-first > 255 {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *translator) doStatement() {
@@ -10597,7 +11079,7 @@ func (t *translator) condition(tokens []token) {
 		t.appendText("true")
 		return
 	}
-	if value, known := t.constantCondition(tokens); known {
+	if value, known := t.inlinePureConstantCondition(tokens); known {
 		if value == 0 {
 			t.appendText("false")
 		} else {
@@ -10754,7 +11236,9 @@ func (t *translator) emitConvertedAssignment(tokens []token) bool {
 			t.convertedExpression(t.lvalueType(left), left)
 			op := tokenText(t.src, tokens[i])
 			t.out = append(t.out, op[:len(op)-1]...)
+			t.out = append(t.out, '(')
 			t.convertedExpression(t.lvalueType(left), tokens[i+1:])
+			t.out = append(t.out, ')')
 			return true
 		}
 	}
@@ -10958,16 +11442,17 @@ func (t *translator) emitPostfixDereferenceAssignment(left []token, right []toke
 		matchingToken(t.src, mutation, 0, "(", ")") == len(mutation)-1 {
 		mutation = mutation[1 : len(mutation)-1]
 	}
-	if len(mutation) != 2 || tokenKind(mutation[0]) != tokenIdent ||
-		!tokenIs(t.src, mutation[1], "++") && !tokenIs(t.src, mutation[1], "--") {
+	if len(mutation) < 2 ||
+		!tokenIs(t.src, mutation[len(mutation)-1], "++") && !tokenIs(t.src, mutation[len(mutation)-1], "--") {
 		return false
 	}
-	pointerType := t.expressionType(mutation[:1])
+	operand := mutation[:len(mutation)-1]
+	pointerType := t.lvalueType(operand)
 	info := t.typeInfo(pointerType)
 	if info.kind != cTypePointer {
 		return false
 	}
-	decrement := tokenIs(t.src, mutation[1], "--")
+	decrement := tokenIs(t.src, mutation[len(mutation)-1], "--")
 	key := pointerType + 1
 	if decrement {
 		key = -key
@@ -11012,7 +11497,7 @@ func (t *translator) emitPostfixDereferenceAssignment(left []token, right []toke
 	}
 	t.appendText(name)
 	t.appendText("(&(")
-	t.emitExpression(mutation[:1])
+	t.emitExpression(operand)
 	t.appendText("),")
 	t.convertedExpression(info.base, right)
 	t.appendText(")")
@@ -11146,6 +11631,18 @@ func (t *translator) convertedExpression(typeID int, tokens []token) {
 	}
 	sourceType := t.expressionType(tokens)
 	sourceInfo := t.typeInfo(sourceType)
+	if sourceInfo.kind == cTypeArray && (info.kind == cTypeInt || info.kind == cTypeUint) {
+		// Array-to-pointer conversion happens before an explicit pointer-to-
+		// integer conversion. Emitting the array expression directly would load
+		// its first word, which is observably wrong for member arrays such as the
+		// kernel's gdt_page.gdt bootstrap address.
+		t.emitType(typeID)
+		t.appendText("(__c_unsafe.Pointer(&(")
+		t.expression(tokens)
+		t.appendText(")))")
+		t.usesUnsafe = true
+		return
+	}
 	if t.typeInfo(typeID).kind == cTypePointer && sourceInfo.kind == cTypeArray {
 		if t.emitSubscriptMemberArrayDecay(typeID, tokens) {
 			return
@@ -11176,6 +11673,13 @@ func (t *translator) convertedExpression(typeID int, tokens []token) {
 		t.expression(tokens)
 		return
 	}
+	kernelLinkAddress := t.kernelCodeModel && t.initializing < 0 && t.kernelLinkAddressExpression(tokens) &&
+		sourceInfo.kind == cTypePointer &&
+		(info.kind == cTypeInt || info.kind == cTypeUint)
+	if kernelLinkAddress {
+		t.ensureKernelLinkAddressHelper()
+		t.appendText("renvo_runtime_CKernelLinkAddress(")
+	}
 	if info.kind == cTypePointer {
 		t.out = append(t.out, '(')
 		t.emitType(typeID)
@@ -11186,6 +11690,24 @@ func (t *translator) convertedExpression(typeID int, tokens []token) {
 	t.out = append(t.out, '(')
 	t.expression(tokens)
 	t.out = append(t.out, ')')
+	if kernelLinkAddress {
+		t.out = append(t.out, ')')
+	}
+}
+
+func (t *translator) kernelLinkAddressExpression(tokens []token) bool {
+	tokens = t.trimExpressionParens(tokens)
+	binary := t.binaryOperator(tokens)
+	return binary > 0 && binary < len(tokens) &&
+		(tokenIs(t.src, tokens[binary], "+") || tokenIs(t.src, tokens[binary], "-"))
+}
+
+func (t *translator) ensureKernelLinkAddressHelper() {
+	if t.kernelLinkAddressHelper {
+		return
+	}
+	t.staticOut = append(t.staticOut, "func renvo_runtime_CKernelLinkAddress(value uint64) uint64{return value}\n"...)
+	t.kernelLinkAddressHelper = true
 }
 
 func (t *translator) ensureStringPointerHelper() {
@@ -11316,7 +11838,10 @@ func (t *translator) lvalueType(tokens []token) int {
 		return subscriptType
 	}
 	if len(tokens) > 1 && tokenIs(t.src, tokens[0], "*") {
-		pointer := t.typeInfo(t.expressionType(tokens[1:]))
+		// Unary * observes the usual array-to-pointer conversion on its
+		// operand.  This matters for expressions such as *pointer_array:
+		// the result is one pointer element, not an untyped scalar.
+		pointer := t.typeInfo(t.decayedExpressionType(tokens[1:]))
 		if pointer.kind == cTypePointer {
 			return pointer.base
 		}
@@ -11483,7 +12008,23 @@ func (t *translator) emitExpression(tokens []token) {
 					return
 				}
 				operandType := t.expressionType(tokens[close+1:])
-				if pointer && t.typeInfo(operandType).kind == cTypeArray {
+				operandInfo := t.typeInfo(operandType)
+				castInfo := t.typeInfo(typeID)
+				if (operandInfo.kind == cTypeArray || operandInfo.kind == cTypePointer) &&
+					(castInfo.kind == cTypeInt || castInfo.kind == cTypeUint) {
+					t.convertedExpression(typeID, tokens[close+1:])
+					return
+				}
+				arrayOperandType := operandType
+				arrayOperandKind := t.typeInfo(arrayOperandType).kind
+				if arrayOperandKind != cTypeArray && arrayOperandKind != cTypePointer {
+					// Parenthesized pointer-member expressions can retain their
+					// scalar value type through the general expression inference
+					// path even though the selected lvalue is an array. Consult the
+					// lvalue type before applying C's array-to-pointer conversion.
+					arrayOperandType = t.lvalueType(tokens[close+1:])
+				}
+				if pointer && t.typeInfo(arrayOperandType).kind == cTypeArray {
 					t.usesUnsafe = true
 					t.out = append(t.out, '(')
 					t.emitType(typeID)
@@ -11524,6 +12065,26 @@ func (t *translator) emitExpression(tokens []token) {
 		t.emitConditionExpression(tokens[1:])
 		t.out = append(t.out, ')')
 		return
+	}
+	if len(tokens) > 1 && tokenIs(t.src, tokens[0], "*") {
+		operand := t.typeInfo(t.expressionType(tokens[1:]))
+		if operand.kind == cTypeArray {
+			// C's usual array-to-pointer conversion happens before unary *.
+			// Dereferencing that decayed pointer selects the array's first
+			// element rather than treating its storage as a pointer word.
+			t.appendText("(")
+			t.emitExpression(tokens[1:])
+			t.appendText(")[0]")
+			return
+		}
+		pointer := t.typeInfo(t.decayedExpressionType(tokens[1:]))
+		if pointer.kind == cTypePointer && t.typeInfo(pointer.base).kind == cTypeFunction {
+			// In C, applying unary * to a function pointer yields a function
+			// designator. Its ordinary value conversion is the original pointer;
+			// unlike a data-pointer dereference, it performs no memory load.
+			t.emitExpression(tokens[1:])
+			return
+		}
 	}
 	if len(tokens) > 1 && (tokenIs(t.src, tokens[0], "*") || tokenIs(t.src, tokens[0], "&")) {
 		t.out = append(t.out, tokenText(t.src, tokens[0])...)
@@ -12729,8 +13290,16 @@ func (t *translator) emitPointerSubscript(tokens []token) bool {
 	}
 	if tokenIs(t.src, tokens[0], "(") {
 		close := matchingToken(t.src, tokens, 0, "(", ")")
-		if close > 1 && close+1 < len(tokens) && t.unaryOperator(tokens[close+1]) {
-			return false
+		if close > 1 && close+1 < len(tokens) {
+			if t.unaryOperator(tokens[close+1]) {
+				return false
+			}
+			if _, cast := t.typeFromTokens(tokens[1:close]); cast {
+				// In (T *)rows[i], postfix subscripting binds before the
+				// leading cast. Treating the cast as part of the subscript base
+				// changes a pointer-to-row stride into sizeof(T).
+				return false
+			}
 		}
 	}
 	// Postfix subscripting binds more tightly than an unparenthesized unary
@@ -12762,26 +13331,32 @@ func (t *translator) emitPointerSubscript(tokens []token) bool {
 	}
 	pointerType := t.expressionType(tokens[:open])
 	pointerInfo := t.typeInfo(pointerType)
-	if pointerInfo.kind == cTypeArray && pointerInfo.count == 0 {
+	if pointerInfo.kind == cTypeArray {
+		if index, constant := t.constantExpression(tokens[open+1 : len(tokens)-1]); t.initializing >= 0 && constant && index >= 0 && index < pointerInfo.count {
+			// Keep in-bounds static-initializer subscripts as Go constant
+			// addresses so the object backend can emit a relocation. A helper
+			// call would turn constructs such as &nodes[0].next into a dynamic
+			// initializer, which C does not require.
+			t.emitExpression(tokens[:open])
+			t.out = append(t.out, '[')
+			t.emitExpression(tokens[open+1 : len(tokens)-1])
+			t.out = append(t.out, ']')
+			return true
+		}
+		// C array subscripting is defined in terms of pointer arithmetic. Do not
+		// lower it to a Go array index: that would add Go bounds checks and panic
+		// state to C code, and would reject the unchecked accesses C permits.
 		elementPointer := t.pointerType(pointerInfo.base)
 		t.appendText("(*")
-		t.appendText(t.ensurePointerIndexHelper(elementPointer))
-		t.appendText("((")
-		t.emitType(elementPointer)
-		t.appendText(")(__c_unsafe.Pointer(&(")
+		t.appendText(t.ensureArrayIndexHelper(elementPointer))
+		t.appendText("(__c_unsafe.Pointer(&(")
 		t.emitExpression(tokens[:open])
-		t.appendText("))),uintptr(")
+		t.appendText(")),")
+		t.appendText("uintptr(")
 		t.emitExpression(tokens[open+1 : len(tokens)-1])
 		t.appendText(")))")
 		t.usesUnsafe = true
 		return t.ok
-	}
-	if pointerInfo.kind == cTypeArray {
-		t.emitExpression(tokens[:open])
-		t.out = append(t.out, '[')
-		t.emitExpression(tokens[open+1 : len(tokens)-1])
-		t.out = append(t.out, ']')
-		return true
 	}
 	if t.typeInfo(pointerType).kind != cTypePointer {
 		return false
@@ -13305,6 +13880,32 @@ func (t *translator) ensurePointerIndexHelper(pointerType int) string {
 	return name
 }
 
+func (t *translator) ensureArrayIndexHelper(pointerType int) string {
+	name := "__c_array_index_" + decimalString(pointerType)
+	for i := 0; i < len(t.arrayIndexTypes); i++ {
+		if t.arrayIndexTypes[i] == pointerType {
+			return name
+		}
+	}
+	t.arrayIndexTypes = append(t.arrayIndexTypes, pointerType)
+	elementType := t.typeInfo(pointerType).base
+	outer := t.out
+	t.out = t.staticOut
+	t.appendText("func ")
+	t.appendText(name)
+	t.appendText("(pointer __c_unsafe.Pointer,index uintptr) *")
+	t.emitType(elementType)
+	t.appendText("{return (*")
+	t.emitType(elementType)
+	t.appendText(")(__c_unsafe.Pointer(uintptr(pointer)+index*uintptr(")
+	t.appendDecimal(t.typeSize(elementType))
+	t.appendText(")))}\n")
+	t.staticOut = t.out
+	t.out = outer
+	t.usesUnsafe = true
+	return name
+}
+
 func (t *translator) emitBuiltinExpression(tokens []token) bool {
 	if len(tokens) < 3 || tokenKind(tokens[0]) != tokenIdent || !tokenIs(t.src, tokens[1], "(") ||
 		matchingToken(t.src, tokens, 1, "(", ")") != len(tokens)-1 {
@@ -13312,6 +13913,11 @@ func (t *translator) emitBuiltinExpression(tokens []token) bool {
 	}
 	name := tokenText(t.src, tokens[0])
 	args := splitTopLevel(t.src, tokens[2:len(tokens)-1], ",")
+	if textEquals(name, "__sync_synchronize") && len(tokens) == 3 {
+		t.ensureAsmMemoryHelper()
+		t.appendText("renvo_runtime_CMemoryBarrier()")
+		return true
+	}
 	if textEquals(name, "__builtin_unreachable") && len(tokens) == 3 {
 		t.ensureUndefinedInstructionHelper()
 		t.appendText("renvo_runtime_CUndefinedInstruction()")
@@ -13397,12 +14003,15 @@ func (t *translator) emitBuiltinExpression(tokens []token) bool {
 	}
 	if (textEquals(name, "__builtin_frame_address") || textEquals(name, "__builtin_return_address")) && len(args) == 1 {
 		level, constant := t.constantExpression(args[0])
-		if !constant || level != 0 {
+		frameCaller := textEquals(name, "__builtin_frame_address") && level == 1
+		if !constant || level != 0 && !frameCaller {
 			t.fail(TranslateErrUnsupported)
 			return true
 		}
 		kind, helper := 1, "renvo_runtime_CFrameAddress"
-		if textEquals(name, "__builtin_return_address") {
+		if frameCaller {
+			kind, helper = 4, "renvo_runtime_CCallerFrameAddress"
+		} else if textEquals(name, "__builtin_return_address") {
 			kind, helper = 2, "renvo_runtime_CReturnAddress"
 		}
 		if t.builtinAddressHelpers&kind == 0 {
@@ -13627,21 +14236,42 @@ func (t *translator) emitBuiltinVAArg(state []token, typeTokens []token) {
 	}
 	if !t.vaListHelper {
 		t.vaListHelper = true
-		t.staticOut = append(t.staticOut, "func renvo_runtime_CVAArg(state *uintptr) uint64{return 0}\n"...)
+		if t.pointerSize == 4 {
+			t.staticOut = append(t.staticOut, "func renvo_runtime_CVAArg32(state *uintptr) uintptr{return 0}\n"...)
+			t.staticOut = append(t.staticOut, "func renvo_runtime_CVAArg64(state *uintptr) uint64{low:=uint64(renvo_runtime_CVAArg32(state));high:=uint64(renvo_runtime_CVAArg32(state));return low|high<<32}\n"...)
+		} else {
+			t.staticOut = append(t.staticOut, "func renvo_runtime_CVAArg(state *uintptr) uint64{return 0}\n"...)
+		}
 	}
 	if info.kind == cTypePointer {
 		t.usesUnsafe = true
 		t.out = append(t.out, '(')
 		t.emitType(typeID)
-		t.appendText(")(__c_unsafe.Pointer(uintptr(renvo_runtime_CVAArg(")
+		t.appendText(")(__c_unsafe.Pointer(uintptr(")
+		if t.pointerSize == 4 {
+			t.appendText("renvo_runtime_CVAArg32(")
+		} else {
+			t.appendText("renvo_runtime_CVAArg(")
+		}
 		t.emitVAListPointer(state)
 		t.appendText("))))")
 		return
 	}
 	t.emitType(typeID)
-	t.appendText("(renvo_runtime_CVAArg(")
-	t.emitVAListPointer(state)
-	t.appendText("))")
+	if t.pointerSize == 4 && info.size > 4 {
+		t.appendText("(renvo_runtime_CVAArg64(")
+		t.emitVAListPointer(state)
+		t.appendText("))")
+	} else {
+		t.appendText("(")
+		if t.pointerSize == 4 {
+			t.appendText("renvo_runtime_CVAArg32(")
+		} else {
+			t.appendText("renvo_runtime_CVAArg(")
+		}
+		t.emitVAListPointer(state)
+		t.appendText("))")
+	}
 }
 
 func (t *translator) emitBuiltinVACopy(destination []token, source []token) {
@@ -13901,16 +14531,11 @@ func (t *translator) emitStringLength(tokens []token) {
 		t.staticOut = append(t.staticOut, "func renvo_runtime_CStringLength(value *int8) uintptr{count:=uintptr(0);for *(*int8)(__c_unsafe.Pointer(uintptr(__c_unsafe.Pointer(value))+count))!=0{count++};return count}\n"...)
 	}
 	t.appendText("renvo_runtime_CStringLength(")
-	if _, ok := t.cStringBytes(tokens); ok {
-		t.ensureStringPointerHelper()
-		t.appendText("renvo_runtime_CStringPointer(")
-		t.emitCStringValues(tokens)
-		t.appendText(")")
-	} else {
-		t.appendText("(*int8)(")
-		t.emitExpression(tokens)
-		t.appendText(")")
-	}
+	// strlen receives its operand after the ordinary array-to-pointer
+	// conversion.  In particular, a struct's inline char array must decay to
+	// its first element instead of being cast as though its bytes were an
+	// already-loaded pointer value.
+	t.convertedExpression(t.pointerType(cTypeInt8ID), tokens)
 	t.appendText(")")
 	t.usesUnsafe = true
 }
@@ -14070,6 +14695,7 @@ func (t *translator) emitCommaExpression(left []token, right []token) {
 	typeID := t.expressionType(right)
 	t.typeSerial++
 	name := "__c_comma_" + decimalString(t.typeSerial)
+	captureMark := t.limitCapturesToTokenPair(left, right)
 	t.out = append(t.out, name...)
 	t.out = append(t.out, '(')
 	t.emitCaptureArguments(false)
@@ -14092,6 +14718,7 @@ func (t *translator) emitCommaExpression(left []token, right []token) {
 	t.convertedExpression(typeID, right)
 	t.appendText("}\n")
 	t.endHelper(outer, names, captureIndices)
+	t.captureExclusions = t.captureExclusions[:captureMark]
 }
 
 func (t *translator) emptyStatementExpression(tokens []token) bool {
@@ -14207,6 +14834,18 @@ func (t *translator) limitCapturesToTokens(tokens []token) int {
 	return mark
 }
 
+func (t *translator) limitCapturesToTokenPair(left []token, right []token) int {
+	mark := len(t.captureExclusions)
+	for index := t.localStart; index >= 0 && index < len(t.objects); index++ {
+		if !t.captureObject(index) || t.tokensReferenceObject(left, t.objects[index].name) ||
+			t.tokensReferenceObject(right, t.objects[index].name) {
+			continue
+		}
+		t.captureExclusions = append(t.captureExclusions, index)
+	}
+	return mark
+}
+
 func (t *translator) tokensReferenceObject(tokens []token, name string) bool {
 	for i := 0; i < len(tokens); i++ {
 		if tokenKind(tokens[i]) == tokenIdent && string(tokenText(t.src, tokens[i])) == name {
@@ -14283,7 +14922,7 @@ func (t *translator) parenthesizedTypeStart(tokens []token) bool {
 	if _, ok := t.lookupTypedef(text); ok {
 		return true
 	}
-	if _, ok := builtinCType(text); ok {
+	if _, ok := t.builtinCType(text); ok {
 		return true
 	}
 	return textEquals(text, "void") || textEquals(text, "_Bool") || textEquals(text, "bool") ||
@@ -14613,6 +15252,9 @@ func (t *translator) expressionType(tokens []token) int {
 	if len(tokens) >= 3 && tokenKind(tokens[0]) == tokenIdent && tokenIs(t.src, tokens[1], "(") &&
 		matchingToken(t.src, tokens, 1, "(", ")") == len(tokens)-1 {
 		name := tokenText(t.src, tokens[0])
+		if textEquals(name, "__sync_synchronize") && len(tokens) == 3 {
+			return cTypeVoidID
+		}
 		if textEquals(name, "__builtin_frame_address") || textEquals(name, "__builtin_return_address") ||
 			textEquals(name, "__builtin_extract_return_addr") || textEquals(name, "__builtin_frob_return_addr") {
 			return t.pointerType(cTypeVoidID)
@@ -14634,7 +15276,7 @@ func (t *translator) expressionType(tokens []token) int {
 		return t.integerPromotion(t.expressionType(tokens[1:]))
 	}
 	if len(tokens) > 1 && tokenIs(t.src, tokens[0], "*") {
-		info := t.typeInfo(t.expressionType(tokens[1:]))
+		info := t.typeInfo(t.decayedExpressionType(tokens[1:]))
 		if info.kind == cTypePointer {
 			return info.base
 		}
@@ -14811,6 +15453,12 @@ func (t *translator) typeofExpressionType(tokens []token) int {
 			base = cTypeUint16ID
 		}
 		return t.arrayType(base, len(value)/t.wcharSize)
+	}
+	if len(tokens) > 1 && tokenIs(t.src, tokens[0], "&") {
+		// The address-of operator changes the type; it is not itself an
+		// lvalue. Asking lvalueType first made typeof(&array[0]) inherit the
+		// array type, defeating Linux's compile-time ARRAY_SIZE check.
+		return t.expressionType(tokens)
 	}
 	if typeID := t.lvalueType(tokens); typeID != cTypeVoidID {
 		return typeID
@@ -15060,10 +15708,16 @@ func (t *translator) memberExpressionType(tokens []token) (int, bool) {
 	base := t.expressionType(tokens[:member])
 	if tokenIs(t.src, tokens[member], "->") {
 		pointer := t.typeInfo(base)
-		if pointer.kind != cTypePointer {
+		if pointer.kind == cTypeArray {
+			// An array operand decays to a pointer to its first element before
+			// -> selects the member. This is common for one-element carrier
+			// typedefs such as the kernel's cpumask_var_t.
+			base = pointer.base
+		} else if pointer.kind == cTypePointer {
+			base = pointer.base
+		} else {
 			return cTypeVoidID, false
 		}
-		base = pointer.base
 	}
 	field, ok := t.lookupField(base, tokenText(t.src, tokens[member+1]))
 	if !ok {
@@ -15293,11 +15947,11 @@ func (t *translator) checkAggregateInitializerItem(typeID int, info cTypeInfo, i
 			}
 			at = close + 1
 		}
-		if at >= len(item) || !tokenIs(t.src, item[at], "=") {
-			t.fail(TranslateErrDeclaration)
-			return next
+		// GNU C's obsolete designated-initializer spelling permits `[index]
+		// value` without the equals token. xv6 intentionally uses that dialect.
+		if at < len(item) && tokenIs(t.src, item[at], "=") {
+			at++
 		}
-		at++
 	} else if info.kind == cTypeArray {
 		if info.count > 0 && next >= info.count {
 			t.fail(TranslateErrDeclaration)
@@ -15424,11 +16078,9 @@ func (t *translator) emitMutationInitializer(typeID int, tokens []token) bool {
 				}
 				firstDesignator = false
 			}
-			if at >= len(item) || !tokenIs(t.src, item[at], "=") {
-				t.fail(TranslateErrUnsupported)
-				return true
+			if at < len(item) && tokenIs(t.src, item[at], "=") {
+				at++
 			}
-			at++
 		} else if info.kind == cTypeArray {
 			if next >= info.count {
 				t.fail(TranslateErrUnsupported)
@@ -16231,16 +16883,21 @@ func (t *translator) emitBitfieldMutation(tokens []token) bool {
 
 func (t *translator) expressionBitfieldAccess(tokens []token) (cMemberAccess, bool) {
 	member := t.finalDirectMemberToken(tokens)
-	if member <= 0 || member+2 != len(tokens) || !tokenIs(t.src, tokens[member], "->") ||
+	if member <= 0 || member+2 != len(tokens) ||
+		(!tokenIs(t.src, tokens[member], "->") && !tokenIs(t.src, tokens[member], ".")) ||
 		tokenKind(tokens[member+1]) != tokenIdent {
 		return cMemberAccess{}, false
 	}
-	pointer := t.typeInfo(t.expressionType(tokens[:member]))
-	if pointer.kind != cTypePointer {
-		return cMemberAccess{}, false
+	aggregateType := t.expressionType(tokens[:member])
+	if tokenIs(t.src, tokens[member], "->") {
+		pointer := t.typeInfo(aggregateType)
+		if pointer.kind != cTypePointer {
+			return cMemberAccess{}, false
+		}
+		aggregateType = pointer.base
 	}
-	aggregate := t.typeInfo(pointer.base)
-	field, ok := t.lookupField(pointer.base, tokenText(t.src, tokens[member+1]))
+	aggregate := t.typeInfo(aggregateType)
+	field, ok := t.lookupField(aggregateType, tokenText(t.src, tokens[member+1]))
 	if !ok || (aggregate.kind != cTypeStruct && aggregate.kind != cTypeUnion) || field.bitWidth == 0 {
 		return cMemberAccess{}, false
 	}
@@ -17037,7 +17694,7 @@ func (t *translator) isTypeStart() bool {
 	if _, known := t.lookupValue(name); known {
 		return false
 	}
-	if _, known := builtinCType(name); known {
+	if _, known := t.builtinCType(name); known {
 		return true
 	}
 	if _, known := t.lookupTypedef(name); known {
