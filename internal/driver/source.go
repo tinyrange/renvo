@@ -102,18 +102,8 @@ func collectSourcesForTargetTagsWithModuleCache(workDir string, stdRoot string, 
 	if moduleCache != "" {
 		moduleCache = load.CleanPath(moduleCache)
 	}
-	moduleRoot, moduleSrc, modulePath, ok := findModuleSource(workDir, fs)
-	if !ok {
-		return sourceFail(result, SourceErrMissingModule, load.JoinPath(workDir, "go.mod"))
-	}
-	config := &load.ModuleConfig{}
-	module := load.ParseModuleConfig(moduleRoot, moduleSrc, config)
-	result.Module = module
-	if !module.Ok {
-		return sourceFail(result, SourceErrModule, modulePath)
-	}
-	result.Files = append(result.Files, load.SourceFile{Path: modulePath, Src: moduleSrc})
 	var normalizedFiles []string
+	moduleSearchDir := packageArgSearchDir(workDir, arg)
 	if len(explicitFiles) > 0 {
 		rootDir := ""
 		for i := 0; i < len(explicitFiles); i++ {
@@ -133,7 +123,19 @@ func collectSourcesForTargetTagsWithModuleCache(workDir string, stdRoot string, 
 			return sourceFail(result, SourceErrFileListEmpty, explicitFiles[0])
 		}
 		arg = rootDir
+		moduleSearchDir = rootDir
 	}
+	moduleRoot, moduleSrc, modulePath, ok := findModuleSource(moduleSearchDir, fs)
+	if !ok {
+		return sourceFail(result, SourceErrMissingModule, load.JoinPath(moduleSearchDir, "go.mod"))
+	}
+	config := &load.ModuleConfig{}
+	module := load.ParseModuleConfig(moduleRoot, moduleSrc, config)
+	result.Module = module
+	if !module.Ok {
+		return sourceFail(result, SourceErrModule, modulePath)
+	}
+	result.Files = append(result.Files, load.SourceFile{Path: modulePath, Src: moduleSrc})
 	root := load.ResolvePackageArg(module, workDir, arg)
 	result.Root = root
 	if !root.Ok {
@@ -168,6 +170,16 @@ func collectSourcesForTargetTagsWithModuleCache(workDir string, stdRoot string, 
 		return result
 	}
 	return sourceFail(result, SourceErrDependencyAmbiguous, module.Path)
+}
+
+func packageArgSearchDir(workDir string, arg string) string {
+	if arg == "." || arg == ".." || len(arg) > 0 && (arg[0] == '/' || arg[0] == '\\') ||
+		len(arg) >= 2 && arg[0] == '.' && (arg[1] == '/' || arg[1] == '\\') ||
+		len(arg) >= 3 && arg[0] == '.' && arg[1] == '.' && (arg[2] == '/' || arg[2] == '\\') ||
+		len(arg) >= 3 && arg[1] == ':' && (arg[2] == '/' || arg[2] == '\\') {
+		return load.JoinPath(workDir, arg)
+	}
+	return workDir
 }
 
 func findModuleSource(workDir string, fs SourceFS) (string, []byte, string, bool) {

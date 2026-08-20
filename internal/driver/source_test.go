@@ -491,6 +491,24 @@ func TestCollectSourcesRejectsNestedModuleAsMainPackage(t *testing.T) {
 	}
 }
 
+func TestCollectSourcesSelectsNestedModuleForRootArgument(t *testing.T) {
+	fs := memorySourceFS{files: []load.SourceFile{
+		{Path: "/repo/outer/go.mod", Src: []byte("module example.com/outer\n")},
+		{Path: "/repo/outer/nested/go.mod", Src: []byte("module example.com/nested\n")},
+		{Path: "/repo/outer/nested/cmd/app/main.go", Src: []byte("package main\nfunc appMain() int { return 0 }\n")},
+	}}
+	packageResult := CollectSources("/repo/outer", "/std", "./nested/cmd/app", fs)
+	if !packageResult.Ok || packageResult.Module.Path != "example.com/nested" || packageResult.Root.ImportPath != "example.com/nested/cmd/app" {
+		t.Fatalf("nested package result = %#v", packageResult)
+	}
+	fileResult := CollectSourceFilesForTargetTagsWithModuleCache(
+		"/repo/outer", "/std", []string{"nested/cmd/app/main.go"}, DefaultTarget, nil, "", fs,
+	)
+	if !fileResult.Ok || fileResult.Module.Path != "example.com/nested" || fileResult.Root.ImportPath != "example.com/nested/cmd/app" {
+		t.Fatalf("nested file result = %#v", fileResult)
+	}
+}
+
 func TestBuildFromFS(t *testing.T) {
 	result := BuildFromFS([]string{"-t", "linux/amd64", "-s", "-o", "app", "./cmd/app"}, "/repo/case", "/std", memorySourceFS{files: driverTestFiles()})
 	if !result.Ok {

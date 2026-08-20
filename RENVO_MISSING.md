@@ -100,8 +100,10 @@ not mean the complete Go API is supported.
   offsets, anonymous status, and tags, exposed through the initial `reflect`
   package surface used by `encoding/json`.
 - [ ] Add staragent protocol fixture tests and compare canonical output with Go.
-- [ ] Run the JSON regression through the self-hosted compiler after stage0
-  passes.
+- [x] Run the JSON regression through a native `darwin/arm64` self-hosted
+  compiler. Explicit-file and package-path invocation both compile and their
+  executables print `PASS`; nested module roots are resolved from the requested
+  input rather than the caller's working directory.
 
 ### Remaining inventory
 

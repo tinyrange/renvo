@@ -95,7 +95,7 @@ func BuildPackageUnitFromFS(packageArg string, target string, tags []string, wor
 	if !sources.Ok {
 		return buildFail(result, BuildErrSource, "", sources.ErrorPath, -1, -1, -1, -1)
 	}
-	built := pipeline.BuildUnit(workDir, stdRoot, packageArg, sources.Files)
+	built := pipeline.BuildUnit(sources.Module.Root, stdRoot, sources.Root.Dir, sources.Files)
 	result.Pipeline = built
 	if !built.Ok {
 		return buildFail(result, BuildErrPipeline, "", "", -1, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
@@ -128,7 +128,7 @@ func BuildPackageUnitCompact(packageArg string, target string, tags []string, wo
 		result.Path = sources.ErrorPath
 		return result
 	}
-	built := pipeline.BuildUnit(workDir, stdRoot, packageArg, sources.Files)
+	built := pipeline.BuildUnit(sources.Module.Root, stdRoot, sources.Root.Dir, sources.Files)
 	if !built.Ok {
 		result.Phase = BuildErrPipeline
 		result.Error = built.Error
@@ -184,18 +184,16 @@ func buildFromFSOneShotCompactWithModuleCache(args []string, workDir string, std
 	if !options.Ok {
 		return buildFail(result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
 	}
-	rootArg := options.Package
-	if len(options.Files) > 0 {
-		rootArg = sources.Root.Dir
-	}
+	rootArg := sources.Root.Dir
+	pipelineWorkDir := sources.Module.Root
 	var built pipeline.Result
 	if options.EmitUnit {
 		// An emitted unit is a persistent interchange artifact. Preserve package
 		// ownership and cache-key metadata so host and self-hosted frontends emit
 		// the same canonical bytes.
-		built = pipeline.BuildUnit(workDir, stdRoot, rootArg, sources.Files)
+		built = pipeline.BuildUnit(pipelineWorkDir, stdRoot, rootArg, sources.Files)
 	} else {
-		built = pipeline.BuildUnitWithTransientFiles(workDir, stdRoot, rootArg, sources.Files, sourcesStart, sourcesEnd)
+		built = pipeline.BuildUnitWithTransientFiles(pipelineWorkDir, stdRoot, rootArg, sources.Files, sourcesStart, sourcesEnd)
 	}
 	result.Pipeline = built
 	if !built.Ok {
@@ -253,15 +251,13 @@ func buildFromFSOptions(options Options, workDir string, stdRoot string, moduleC
 			}
 		}
 	}
-	rootArg := options.Package
-	if len(options.Files) > 0 {
-		rootArg = sources.Root.Dir
-	}
+	rootArg := sources.Root.Dir
+	pipelineWorkDir := sources.Module.Root
 	var built pipeline.Result
 	if compact {
-		built = pipeline.BuildUnitWithTransientFilesCached(workDir, stdRoot, rootArg, sources.Files, sourcesStart, sourcesEnd)
+		built = pipeline.BuildUnitWithTransientFilesCached(pipelineWorkDir, stdRoot, rootArg, sources.Files, sourcesStart, sourcesEnd)
 	} else {
-		built = pipeline.BuildUnit(workDir, stdRoot, rootArg, sources.Files)
+		built = pipeline.BuildUnit(pipelineWorkDir, stdRoot, rootArg, sources.Files)
 	}
 	result.Pipeline = built
 	if !built.Ok {

@@ -32,6 +32,23 @@ func TestBuildUnitFromDriverOptions(t *testing.T) {
 	}
 }
 
+func TestBuildFromFSUsesNestedRootModule(t *testing.T) {
+	fs := memorySourceFS{files: []load.SourceFile{
+		{Path: "/repo/outer/go.mod", Src: []byte("module example.com/outer\n")},
+		{Path: "/repo/outer/nested/go.mod", Src: []byte("module example.com/nested\n")},
+		{Path: "/repo/outer/nested/cmd/app/main.go", Src: []byte("package main\nfunc appMain() int { return 0 }\n")},
+	}}
+	for _, args := range [][]string{
+		{"-o", "app", "./nested/cmd/app"},
+		{"-o", "app", "nested/cmd/app/main.go"},
+	} {
+		result := BuildFromFS(args, "/repo/outer", "/std", fs)
+		if !result.Ok || len(result.Unit) == 0 {
+			t.Fatalf("nested build %v = %#v", args, result)
+		}
+	}
+}
+
 func TestCompactPackageUnitCarriesFixedTargetBinding(t *testing.T) {
 	files := driverTestFiles()
 	result := BuildPackageUnitCompact("./cmd/app", "wasi/wasm32", nil, "/repo/case", "/std", memorySourceFS{files: files})
