@@ -1122,7 +1122,20 @@ func coreSymbolKeepsRuntimeName(name string) bool {
 		"renvo_runtime_ArenaDiscardFuncs",
 		"renvo_runtime_ArenaDiscardUnitTokens",
 		"renvo_runtime_ArenaDiscardLinkTokens",
-		"renvo_runtime_ArenaDiscardLowerTokens":
+		"renvo_runtime_ArenaDiscardLowerTokens",
+		"renvo_runtime_ReflectKind",
+		"renvo_runtime_ReflectTypeName",
+		"renvo_runtime_ReflectNumField",
+		"renvo_runtime_ReflectFieldName",
+		"renvo_runtime_ReflectFieldTag",
+		"renvo_runtime_ReflectFieldOffset",
+		"renvo_runtime_ReflectFieldAnonymous",
+		"renvo_runtime_ReflectField",
+		"renvo_runtime_ReflectElem",
+		"renvo_runtime_ReflectLen",
+		"renvo_runtime_ReflectIndex",
+		"renvo_runtime_ReflectIsNil",
+		"renvo_runtime_ReflectFieldAddress":
 		return true
 	}
 	return false

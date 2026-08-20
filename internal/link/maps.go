@@ -129,11 +129,96 @@ func mapLowerSpecIndex(specs []mapLowerSpec, typ string) int {
 
 func mapLowerExprSpec(program *unit.Program, specs []mapLowerSpec, before int, start int, end int) int {
 	typ := ordinaryBuiltinExprType(program, before, start, end)
-	if typ == "" && end-start == 1 && program.Tokens[start].KindLine&255 == unit.TokenIdent {
-		typ = mapLowerShortLocalType(program, before, functionValueTokenText(program, start))
-	}
 	underlying := ordinaryUnderlyingType(program, typ, 0)
+	if spec := mapLowerSpecIndex(specs, underlying); spec >= 0 {
+		return spec
+	}
+	if end-start == 1 && program.Tokens[start].KindLine&255 == unit.TokenIdent {
+		name := functionValueTokenText(program, start)
+		typ = mapLowerShortLocalType(program, before, name)
+		underlying = ordinaryUnderlyingType(program, typ, 0)
+		if spec := mapLowerSpecIndex(specs, underlying); spec >= 0 {
+			return spec
+		}
+		typ = mapLowerTypeSwitchLocalType(program, before, name)
+	}
+	underlying = ordinaryUnderlyingType(program, typ, 0)
 	return mapLowerSpecIndex(specs, underlying)
+}
+
+// A variable introduced by a type switch has the selected case's type inside
+// a single-type case. Core local metadata deliberately keeps only authored
+// declarations, so recover that narrow fact from the parsed token structure
+// for lowering passes which run before the backend sees the program.
+func mapLowerTypeSwitchLocalType(program *unit.Program, before int, name string) string {
+	caseTok := -1
+	closed := 0
+	for i := before - 1; i >= 0; i-- {
+		text := functionValueTokenText(program, i)
+		if text == "}" {
+			closed++
+			continue
+		}
+		if text == "{" && closed > 0 {
+			closed--
+			continue
+		}
+		if closed == 0 && (text == "case" || text == "default") {
+			caseTok = i
+			break
+		}
+	}
+	if caseTok < 0 || functionValueTokenEquals(program, caseTok, "default") {
+		return ""
+	}
+	colon := mapLowerTopLevelToken(program, caseTok+1, before, ":")
+	if colon <= caseTok+1 || mapLowerTopLevelToken(program, caseTok+1, colon, ",") >= 0 {
+		return ""
+	}
+
+	open := -1
+	closed = 0
+	for i := caseTok - 1; i >= 0; i-- {
+		text := functionValueTokenText(program, i)
+		if text == "}" {
+			closed++
+		} else if text == "{" {
+			if closed > 0 {
+				closed--
+			} else {
+				open = i
+				break
+			}
+		}
+	}
+	if open < 0 {
+		return ""
+	}
+	switchTok := open - 1
+	for switchTok >= 0 && !functionValueTokenEquals(program, switchTok, "switch") && !functionValueTokenEquals(program, switchTok, "{") && !functionValueTokenEquals(program, switchTok, "}") && !functionValueTokenEquals(program, switchTok, ";") {
+		switchTok--
+	}
+	if switchTok < 0 || !functionValueTokenEquals(program, switchTok, "switch") {
+		return ""
+	}
+	define := mapLowerTopLevelToken(program, switchTok+1, open, ":=")
+	if define < 0 || define != switchTok+2 || functionValueTokenText(program, switchTok+1) != name {
+		return ""
+	}
+	typeTok := -1
+	for i := define + 1; i < open; i++ {
+		if functionValueTokenEquals(program, i, "type") {
+			typeTok = i
+			break
+		}
+	}
+	if typeTok < define+3 || typeTok+1 >= open ||
+		!functionValueTokenEquals(program, typeTok-1, "(") ||
+		!functionValueTokenEquals(program, typeTok-2, ".") ||
+		!functionValueTokenEquals(program, typeTok+1, ")") {
+		return ""
+	}
+	return functionValueTokensText(program, caseTok+1, colon)
 }
 
 func mapLowerShortLocalType(program *unit.Program, before int, name string) string {

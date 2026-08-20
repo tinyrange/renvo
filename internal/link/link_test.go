@@ -984,6 +984,35 @@ func appMain() int {
 	}
 }
 
+func TestLinkBuildCoreLowersMapRangeInTypeSwitchCase(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+func appMain(value any) int {
+	switch values := value.(type) {
+	case map[string]any:
+		count := 0
+		for key := range values {
+			_ = key
+			count++
+		}
+		return count
+	}
+	return 0
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	if bytes.Contains(linked.Program.Text, []byte(`range values`)) ||
+		!bytes.Contains(linked.Program.Text, []byte(`__renvo_map_0_entries`)) {
+		t.Fatalf("type-switch map range was not lowered:\n%s", linked.Program.Text)
+	}
+}
+
 func TestLinkBuildCoreTypesMapValuesInMultipleAssignment(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
