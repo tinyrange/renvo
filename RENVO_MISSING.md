@@ -48,11 +48,16 @@ not mean the complete Go API is supported.
   - [x] Host-Go package tests cover known encoding and round trips.
   - [x] `frontend_tests/regressions/std_json_dynamic` runs through Renvo and
     the compiled executable prints `PASS\n`.
+- [x] `crypto/sha256`: one-shot `Sum256`, `Size`, and `BlockSize`.
+  - [x] Host-Go tests cover empty, short, and multi-block standard vectors.
+  - [x] `frontend_tests/regressions/std_sha256` verifies the same vectors in a
+    Renvo-compiled executable.
+  - [ ] Add the streaming `New`/`hash.Hash` surface if a caller requires it.
 - [x] `encoding/base64`: standard and URL alphabets, padded and raw encodings,
   byte encode/decode, and string helpers.
   - [x] Host-Go package tests cover padded standard and raw URL round trips.
   - [x] The focused Renvo regression covers the unpadded URL encoding path.
-  - [ ] Add malformed-input cases to the compiled regression.
+  - [x] Compiled regression rejects malformed characters, impossible one-byte input, and padding in raw URL input.
 - [x] `encoding/json` syntax validation and `RawMessage` support.
   - [x] Host-Go tests cover nested syntax, malformed syntax, escapes including
     `\uXXXX`, and `RawMessage` validation/copying.
@@ -67,7 +72,7 @@ not mean the complete Go API is supported.
     sorted keys in generated code.
 - [x] Initial `encoding/json.MarshalIndent` for the supported dynamic values.
   - [x] Host-Go output test covers nested object/array indentation.
-  - [ ] Compare more empty/nested values and prefix behavior with Go.
+  - [x] Host-Go and compiled regressions cover empty/nested values and non-empty prefix behavior.
   - [x] Execute the indentation path through Renvo.
 - [x] Added the positive frontend regression
   `frontend_tests/regressions/std_json_dynamic`, with checked-in `PASS\n`
@@ -105,6 +110,87 @@ not mean the complete Go API is supported.
   executables print `PASS`; nested module roots are resolved from the requested
   input rather than the caller's working directory.
 
+### Initial `bufio.Scanner` work
+
+- [x] Added host-Go implementations of `Scanner`, `SplitFunc`, `NewScanner`,
+  `Scan`, `Bytes`, `Text`, `Err`, `Split`, and `Buffer`.
+- [x] Added `ScanLines`, `ScanWords`, `ScanBytes`, and `ScanRunes`, with host
+  tests for CRLF/final lines, words, UTF-8 runes, the default token limit, and a
+  caller-supplied larger buffer.
+- [ ] Execute Scanner through Renvo. Function-valued `SplitFunc` storage reaches
+  generated dispatch code, but the backend currently fails with
+  `RENVO-BACKEND-003`; the concrete failures are recorded in
+  `COMPILER_BUGS.md`.
+- [x] Added `Reader`, including buffered reads, byte/rune reads and unread,
+  peeking, discarding, line/slice/byte/string reads, reset, size, and buffered
+  byte reporting.
+  - [x] Host-Go tests cover line boundaries, CRLF, EOF, buffer-full assembly,
+    peeking/discarding, and UTF-8 unread behavior.
+  - [x] A focused Renvo regression covers peeking, discarding, and line reads.
+  - [ ] Renvo execution of repeated three-result `ReadLine` calls and the rune
+    path exposed result corruption; the reproducer is recorded in
+    `COMPILER_BUGS.md` while host-Go coverage remains passing.
+- [x] Added `Writer`, including sized construction, buffered byte/string/rune
+  writes, direct large writes, flush, reset, available/buffered reporting,
+  `AvailableBuffer`, and `ReadFrom`.
+  - [x] Host-Go tests cover buffering and flush, UTF-8 runes, reset, large
+    direct writes, `ReadFrom`, and sticky short-write errors.
+  - [x] `frontend_tests/regressions/std_bufio_writer` executes buffered writes,
+    UTF-8 output, flush, reset, and `ReadFrom` through Renvo.
+
+### Initial `path/filepath` work
+
+- [x] Added Unix lexical path operations: `Clean`, `Join`, `Split`, `Dir`,
+  `Base`, `Ext`, `Abs`, `Rel`, `IsAbs`, `VolumeName`, `ToSlash`, `FromSlash`,
+  separators, and `IsPathSeparator`.
+- [x] Added pattern matching with `*`, `?`, character classes, ranges,
+  negation, escaping, and `ErrBadPattern`.
+- [x] Added filesystem-backed `Glob` using sorted `os.ReadDir` results and
+  Go-style suppression of filesystem I/O errors.
+- [x] Host-Go tests cover lexical cleaning and traversal, relative paths,
+  matching, malformed patterns, and deterministic globbing.
+- [ ] Add Windows volume, UNC, separator, cleaning, and matching semantics;
+  the current implementation is Unix-only.
+- [ ] Add `EvalSymlinks`, `Walk`, and `WalkDir`. These cannot be implemented
+  correctly over the current Renvo `os` surface: it has no `Stat`, `Lstat`,
+  `Readlink`, `FileInfo`, or `io/fs` API, and the allowed syscall set has no
+  metadata/readlink operation. They must not be replaced with lexical cleaning
+  because staragent relies on symlink boundaries for security.
+- [ ] Execute the focused path regression through Renvo. Compilation produced
+  a non-native executable in the current test configuration (`exec format
+  error`), so no semantic compiled result was claimed.
+
+### Initial `unicode` work
+
+- [x] Added generated Unicode-property tables and `IsLetter`, `IsDigit`,
+  `IsNumber`, `IsSpace`, `IsUpper`, `IsLower`, `ToUpper`, and `ToLower`.
+- [x] Tables and simple case mappings are generated from host Go's Unicode
+  database and checked in; they cover the full rune range rather than selected
+  scripts.
+- [x] Host-Go tests cover Latin, Greek, Cyrillic, Arabic, Devanagari, fullwidth
+  digits, CJK, and non-ASCII whitespace and case mapping.
+- [x] `frontend_tests/regressions/std_unicode` passes through Renvo.
+
+### Initial `flag` work
+
+- [x] Added `FlagSet`, `Flag`, `Value`, `Getter`, error-handling modes,
+  scalar string/bool/int/int64/uint registration, parsing, lookup, setting,
+  positional arguments, `--`, visitation, and package-level `CommandLine`
+  helpers.
+- [x] Parsing supports `-name value`, `-name=value`, `--name=value`, and
+  implicit true values for boolean flags.
+- [x] Host-Go tests cover scalar parsing, errors, positional arguments,
+  terminators, counts, and sorted visitation.
+- [x] `frontend_tests/regressions/std_flag` passes through Renvo.
+- [x] Added float and duration values, `SetOutput`, `Output`,
+  `ErrorHandling`, `PrintDefaults`, and `UnquoteUsage`, plus standard
+  stdin/stdout/stderr handles needed for default output.
+  - [x] Host-Go tests cover decimal/exponent floats, compound/fractional
+    durations, usage metavariables, and captured defaults output.
+  - [ ] Renvo execution of float/duration parsing remains blocked by backend
+    compilation, and assigning the Go-style default `FlagSet.Usage` closure
+    also fails; the closure failure is recorded in `COMPILER_BUGS.md`.
+
 ### Remaining inventory
 
 All other packages and hosted-runtime facilities below remain unchecked and are
@@ -117,22 +203,13 @@ The following production imports have no corresponding package in Renvo's
 
 | Package | Staragent usage | Priority |
 |---|---|---|
-| `bufio` | terminal rune input, scanners, SSE parsing, buffered files | Required |
 | `context` | cancellation across agent, HTTP, evaluation, and processes | Required |
-| `crypto/sha256` | workspace and trust-document digests | Required |
-| `encoding/base64` | JWT payloads and binary workspace data | Required |
-| `encoding/hex` | printable SHA-256 values | Required |
-| `encoding/json` | API protocol, auth, settings, sessions, trust, JSON UI | Required |
-| `flag` | command-line parsing | Required |
 | `math` | floating-point equality in the embedded Starlark implementation | Required |
 | `net/http` | OpenAI and Codex HTTP clients | Required and substantial |
 | `os/exec` | trusted host commands exported from `AGENTS.star` | Required for full functionality |
 | `os/signal` | interrupt cancellation | Required for normal CLI behavior |
-| `path/filepath` | native paths and directory traversal | Required |
 | `regexp` | bounded workspace regex search | Required |
 | `syscall` | Unix terminal attributes/ioctl | Required by current platform files |
-| `time` | expiry, durations, timestamps, deadlines, status timing | Required |
-| `unicode` | rune classification in editing and lexing | Required |
 
 Tests additionally import `net/http/httptest`, which is absent. It is not
 needed to build the production command.
@@ -264,14 +341,15 @@ small default token limit must be configurable.
 
 ### Hash and text encodings
 
-Implement Go-compatible SHA-256, standard/raw URL base64 encodings, and hex
-encoding. JWT uses unpadded URL-safe base64. Digest output must be stable across
-targets.
+One-shot SHA-256 plus standard/raw URL base64 and hex encoding are implemented.
+JWT uses unpadded URL-safe base64. Add streaming hash APIs if required, and keep
+digest output stable across targets.
 
 ### `flag`
 
-Support `FlagSet`/command-line parsing and the scalar option types used by
-`main.go`, with Go-compatible errors and usage behavior.
+`FlagSet` parsing now includes integer, boolean, string, float, and duration
+options plus captured defaults output. Renvo still needs backend support for the
+default usage closure and compiled float/duration paths.
 
 ### `path/filepath`
 
@@ -295,9 +373,8 @@ actual target clock and wakeup mechanism.
 
 ### `unicode`
 
-Provide the rune classifications used by word editing and source lexing,
-including letter, digit, and space checks with Unicode rather than ASCII-only
-behavior.
+Generated full-range Unicode letter, digit, number, space, and case APIs are
+implemented and exercised through Renvo.
 
 ## Hosted runtime facilities
 

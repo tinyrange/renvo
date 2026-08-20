@@ -116,3 +116,17 @@ def compile_and_run_with_bootstrap(inputs, output, target, args=[], tags=[], str
     if not built.ok:
         return built
     return run_binary(output, args)
+
+
+def compiler_bug(summary, details=""):
+    """Append a compiler bug report to COMPILER_BUGS.md."""
+    summary = summary.strip()
+    details = details.strip()
+    if not summary:
+        fail("compiler bug summary must not be empty")
+    path = "COMPILER_BUGS.md"
+    content = fs.read(path) if fs.exists(path) else "# Compiler bugs\n\n"
+    entry = "## " + summary + "\n\n"
+    if details:
+        entry += details + "\n\n"
+    fs.write(path, content + entry)

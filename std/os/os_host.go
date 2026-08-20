@@ -10,6 +10,9 @@ import (
 type FileMode int
 
 var Args = stdos.Args
+var Stdin = &File{file: stdos.Stdin}
+var Stdout = &File{file: stdos.Stdout}
+var Stderr = &File{file: stdos.Stderr}
 
 type File struct {
 	file *stdos.File

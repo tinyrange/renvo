@@ -10,6 +10,9 @@ const O_TRUNC = 512
 type FileMode int
 
 var Args []string
+var Stdin = &File{fd: 0}
+var Stdout = &File{fd: 1}
+var Stderr = &File{fd: 2}
 
 var processEnv []string
 
