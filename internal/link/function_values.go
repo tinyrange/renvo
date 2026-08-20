@@ -17,6 +17,7 @@ type functionValueSignature struct {
 	params      string
 	paramNames  []string
 	result      string
+	resultTypes []string
 	zeroType    string
 	fields      []string
 	fieldTypes  []string
@@ -90,6 +91,7 @@ func lowerFunctionValuesCore(program *unit.Program, transient bool) bool {
 			}
 		}
 	}
+	edits = lowerFunctionValueCompositeInitializers(program, signatures, fields, edits)
 	edits = lowerFunctionValueCallArguments(program, signatures, edits)
 	var closures []functionValueClosure
 	signatures, closures, edits, ok = lowerFunctionValueLiterals(program, signatures, fields, closures, edits)
@@ -381,7 +383,11 @@ func parseFunctionValueSignature(program *unit.Program, funcTok int, name string
 			return sig, funcTok, false
 		}
 		sig.result = functionValueTokensText(program, end, resultClose+1)
-		zeroType := functionValueSingleResultType(program, end+1, resultClose)
+		sig.resultTypes = functionValueResultTypes(program, end+1, resultClose)
+		zeroType := ""
+		if len(sig.resultTypes) == 1 {
+			zeroType = sig.resultTypes[0]
+		}
 		if functionValueZero(zeroType) == "0" && !functionValueCanUseScalarZero(zeroType) {
 			sig.zeroType = zeroType
 		}
@@ -392,12 +398,33 @@ func parseFunctionValueSignature(program *unit.Program, funcTok int, name string
 			return sig, funcTok, false
 		}
 		sig.result = functionValueTokensText(program, end, resultEnd)
+		sig.resultTypes = []string{sig.result}
 		if functionValueZero(sig.result) == "0" && !functionValueCanUseScalarZero(sig.result) {
 			sig.zeroType = sig.result
 		}
 		end = resultEnd
 	}
 	return sig, end, true
+}
+
+func functionValueResultTypes(program *unit.Program, start int, end int) []string {
+	starts, ends := functionValueCommaParts(program, start, end)
+	types := make([]string, len(starts))
+	carried := ""
+	for i := len(starts) - 1; i >= 0; i-- {
+		partStart := starts[i]
+		partEnd := ends[i]
+		if partStart+1 < partEnd && program.Tokens[partStart].KindLine&255 == unit.TokenIdent && functionValueTypeEnd(program, partStart+1) == partEnd {
+			carried = functionValueTokensText(program, partStart+1, partEnd)
+			types[i] = carried
+		} else if partEnd == partStart+1 && carried != "" {
+			types[i] = carried
+		} else {
+			carried = ""
+			types[i] = functionValueTokensText(program, partStart, partEnd)
+		}
+	}
+	return types
 }
 
 func functionValueTypeEnd(program *unit.Program, start int) int {
@@ -566,20 +593,46 @@ func lowerFunctionValueAssignment(program *unit.Program, op int, signatures []fu
 		edits = append(edits, functionValueTokenEdit(program, rhs, signatures[sigIndex].name+"{}"))
 		return edits, true
 	}
-	if program.Tokens[rhs].KindLine&255 == unit.TokenIdent {
-		name := functionValueTokenText(program, rhs)
-		if functionValueEnclosingLocalType(program, op, name) == "" && functionValueDeclaredDirectFunction(program, name) {
-			implIndex := functionValueImplIndex(signatures[sigIndex], "", "", name)
-			if implIndex < 0 {
-				implIndex = len(signatures[sigIndex].impls)
-				signatures[sigIndex].impls = append(signatures[sigIndex].impls, functionValueImpl{function: name})
-			}
-			replacement := signatures[sigIndex].name + "{kind: " + functionValueDecimal(implIndex+1) + "}"
-			edits = append(edits, functionValueTokenEdit(program, rhs, replacement))
-			return edits, true
-		}
+	if replacement := functionValueDirectFunctionReplacement(program, op, rhs, sigIndex, signatures); replacement != "" {
+		edits = append(edits, functionValueTokenEdit(program, rhs, replacement))
+		return edits, true
 	}
 	return lowerFunctionValueBoundMethod(program, op, rhs, sigIndex, signatures, edits), true
+}
+
+func functionValueDirectFunctionReplacement(program *unit.Program, before int, rhs int, sigIndex int, signatures []functionValueSignature) string {
+	if rhs < 0 || rhs >= len(program.Tokens) || program.Tokens[rhs].KindLine&255 != unit.TokenIdent {
+		return ""
+	}
+	name := functionValueTokenText(program, rhs)
+	if functionValueEnclosingLocalType(program, before, name) != "" || !functionValueDeclaredDirectFunction(program, name) {
+		return ""
+	}
+	implIndex := functionValueImplIndex(signatures[sigIndex], "", "", name)
+	if implIndex < 0 {
+		implIndex = len(signatures[sigIndex].impls)
+		signatures[sigIndex].impls = append(signatures[sigIndex].impls, functionValueImpl{function: name})
+	}
+	return signatures[sigIndex].name + "{kind: " + functionValueDecimal(implIndex+1) + "}"
+}
+
+func lowerFunctionValueCompositeInitializers(program *unit.Program, signatures []functionValueSignature, fields []functionValueField, edits []functionValueEdit) []functionValueEdit {
+	for colon := 1; colon+1 < len(program.Tokens); colon++ {
+		if !functionValueTokenEquals(program, colon, ":") {
+			continue
+		}
+		fieldTok := colon - 1
+		fieldIndex := functionValueFieldByOwnerAndName(fields, functionValueCompositeOwner(program, fieldTok), functionValueTokenText(program, fieldTok))
+		if fieldIndex < 0 {
+			continue
+		}
+		rhs := colon + 1
+		replacement := functionValueDirectFunctionReplacement(program, colon, rhs, fields[fieldIndex].sig, signatures)
+		if replacement != "" {
+			edits = append(edits, functionValueTokenEdit(program, rhs, replacement))
+		}
+	}
+	return edits
 }
 
 func functionValueDeclaredDirectFunction(program *unit.Program, name string) bool {
@@ -652,14 +705,18 @@ func lowerFunctionValueCallArguments(program *unit.Program, signatures []functio
 			continue
 		}
 		for i := 0; i < len(argStarts); i++ {
-			if argEnds[i]-argStarts[i] != 3 {
-				continue
-			}
 			sigIndex := functionValueSignatureByName(signatures, functionValueBareType(paramTypes[i]))
 			if sigIndex < 0 {
 				continue
 			}
-			edits = lowerFunctionValueBoundMethod(program, open, argStarts[i], sigIndex, signatures, edits)
+			if argEnds[i]-argStarts[i] == 1 {
+				rhs := argStarts[i]
+				if replacement := functionValueDirectFunctionReplacement(program, open, rhs, sigIndex, signatures); replacement != "" {
+					edits = append(edits, functionValueTokenEdit(program, rhs, replacement))
+				}
+			} else if argEnds[i]-argStarts[i] == 3 {
+				edits = lowerFunctionValueBoundMethod(program, open, argStarts[i], sigIndex, signatures, edits)
+			}
 		}
 	}
 	return edits
@@ -869,7 +926,14 @@ func functionValueGeneratedText(signatures []functionValueSignature, closures []
 			out = out + " }\n"
 		}
 		if sig.result != "" {
-			if sig.zeroType != "" {
+			if len(sig.resultTypes) > 1 {
+				zeroNames := make([]string, len(sig.resultTypes))
+				for resultIndex := 0; resultIndex < len(sig.resultTypes); resultIndex++ {
+					zeroNames[resultIndex] = "__renvo_zero_" + functionValueDecimal(resultIndex)
+					out = out + "var " + zeroNames[resultIndex] + " " + sig.resultTypes[resultIndex] + "\n"
+				}
+				out = out + "return " + functionValueJoin(zeroNames, ", ") + "\n"
+			} else if sig.zeroType != "" {
 				out = out + "var __renvo_zero " + sig.zeroType + "\nreturn __renvo_zero\n"
 			} else {
 				out = out + "return " + functionValueZero(sig.result) + "\n"
@@ -1934,7 +1998,7 @@ func functionValueZero(result string) string {
 		}
 		nilable = i < len(result) && result[i] == ']'
 	}
-	if nilable || functionValueHasPrefix(result, "map[") || functionValueHasPrefix(result, "func(") || functionValueHasPrefix(result, "interface{") {
+	if result == "error" || result == "any" || nilable || functionValueHasPrefix(result, "map[") || functionValueHasPrefix(result, "func(") || functionValueHasPrefix(result, "interface{") {
 		return "nil"
 	}
 	return "0"
