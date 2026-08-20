@@ -21576,6 +21576,13 @@ func renvoEmitWideIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 			renvoAsmBoolNotPrimary(a)
 			return true
 		}
+		if renvoTokCharIs(p, e.tok, '^') {
+			renvoAsmBitwiseNotPrimary(a)
+			resultType := renvoInferParsedExprType(g, ep, idx)
+			result := renvoResolveType(g.meta, resultType)
+			renvoAsmNormalizePrimaryForKind(a, result.kind)
+			return true
+		}
 		return false
 	}
 	if e.kind == renvoExprBinary {

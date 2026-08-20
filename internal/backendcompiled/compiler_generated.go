@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "52f2880459a411fcbc09f8347bf4702ef3f18596c506846741135f6a686f225a"
+const CompilerSourceDigest = "047a135e70866307563a99f0f96bb683e8e22b0e4368e06885382e477b4e8d77"
 
 // source: backend/compiler_common_impl.go
 
@@ -21581,6 +21581,13 @@ return true
 }
 if renvoTokCharIs(p, e.tok, '!') {
 renvoAsmBoolNotPrimary(a)
+return true
+}
+if renvoTokCharIs(p, e.tok, '^') {
+renvoAsmBitwiseNotPrimary(a)
+resultType := renvoInferParsedExprType(g, ep, idx)
+result := renvoResolveType(g.meta, resultType)
+renvoAsmNormalizePrimaryForKind(a, result.kind)
 return true
 }
 return false
