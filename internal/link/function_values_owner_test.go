@@ -156,6 +156,55 @@ func main() { current = &Window{surface: &Surface{}}; draw() }
 	}
 }
 
+func TestFunctionValueFieldNameDoesNotRewriteMethodInAnotherPackage(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/timers/timers.go", Src: []byte(`package timers
+
+type Callback func() bool
+type Timer struct { cancel Callback }
+
+func New(cancel Callback) *Timer { return &Timer{cancel: cancel} }
+func Stop(timer *Timer) bool { return timer.cancel() }
+`)},
+		{Path: "/repo/case/contexts/contexts.go", Src: []byte(`package contexts
+
+type Error struct { value int }
+type Context struct { value int }
+
+func (c *Context) cancel(err, cause *Error) { c.value = err.value + cause.value }
+func Cancel(c *Context) int {
+	err := &Error{value: 21}
+	c.cancel(err, err)
+	return c.value
+}
+`)},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import "example.com/case/contexts"
+import "example.com/case/timers"
+
+func ready() bool { return true }
+func main() {
+	timer := timers.New(ready)
+	ctx := &contexts.Context{}
+	if !timers.Stop(timer) || contexts.Cancel(ctx) != 42 { print("FAIL\n"); return }
+	print("PASS\n")
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	if !bytes.Contains(linked.Program.Text, []byte("c.cancel(err, err)")) || bytes.Contains(linked.Program.Text, []byte("&c.cancel")) {
+		t.Fatalf("method was confused with another package's callback field:\n%s", linked.Program.Text)
+	}
+	if !bytes.Contains(linked.Program.Text, []byte("&timer.cancel")) {
+		t.Fatalf("callback field call was not lowered:\n%s", linked.Program.Text)
+	}
+}
+
 func TestFunctionValuesShareStorageForMethodsOnSameReceiverType(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},

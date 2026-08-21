@@ -6861,15 +6861,16 @@ func renvoAsmJnzPrimary(a *renvoAsm, label int) {
 }
 
 type renvoLocalInfo struct {
-	nameStart  int
-	nameEnd    int
-	nameHash   int
-	offset     int
-	captureOff int
-	typ        int
-	size       int
-	constValue int
-	constValid int
+	nameStart   int
+	nameEnd     int
+	nameHash    int
+	offset      int
+	captureOff  int
+	typ         int
+	size        int
+	constValue  int
+	constValid  int
+	sliceStatic int
 }
 
 type renvoGlobalInfo struct {
@@ -9474,6 +9475,10 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 	if trackSliceArena && renvoReturnedSliceCanReuseDescriptor(g, ep, rootIndex) {
 		sliceArena = 1
 	}
+	sliceStatic := 0
+	if trackSliceArena && renvoSliceExprUsesReusableStaticBacking(g, ep, rootIndex) {
+		sliceStatic = 1
+	}
 	trackLocalConst := globalOffset < 0 && fieldStackOffset < 0 && declaresLocal && renvoLocalConstTrackable(g, targetType, nameStart, nameEnd, stmt.endTok)
 	localConst := renvoConstResult{}
 	if trackLocalConst {
@@ -9481,6 +9486,7 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 	}
 	if globalOffset < 0 && fieldStackOffset < 0 && !declaresLocal {
 		renvoClearLocalConstAtOffset(g, offset)
+		renvoSetLocalSliceStaticAtOffset(g, offset, 0)
 	}
 	if stmt.kind == renvoStmtShort {
 		root := &ep.exprs[rootIndex]
@@ -9497,6 +9503,7 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 			if sliceArena != 0 {
 				renvoSetLocalConstAtOffset(g, offset, 0, targetResolved.kind)
 			}
+			renvoSetLocalSliceStaticAtOffset(g, offset, sliceStatic)
 		}
 		return true
 	}
@@ -9610,6 +9617,7 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 			if sliceArena != 0 {
 				renvoSetLocalConstAtOffset(g, offset, 0, targetResolved.kind)
 			}
+			renvoSetLocalSliceStaticAtOffset(g, offset, sliceStatic)
 		}
 		return true
 	}
@@ -9633,12 +9641,34 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 
 func renvoEmitTypedExprToSavedMem(g *renvoLinearGen, ep *renvoExprParse, idx int, typ int, addrOffset int) bool {
 	renvoNonNil(g, ep)
+	if renvoTypeIsSlice(g.meta, typ) {
+		return renvoEmitSliceExprToSavedMem(g, ep, idx, typ, addrOffset, 0)
+	}
 	tempOffset := renvoAddUnnamedLocal(g, typ)
 	if !renvoEmitTypedAssign(g, ep, idx, tempOffset) {
 		return false
 	}
 	renvoAsmLoadSecondaryStack(&g.asm, addrOffset)
 	renvoEmitCopyStackToMemSecondary(g, tempOffset, 0, renvoTypeSize(g.meta, typ))
+	return true
+}
+
+func renvoEmitSliceExprToSavedMem(g *renvoLinearGen, ep *renvoExprParse, idx int, typ int, addrOffset int, disp int) bool {
+	renvoNonNil(g, ep)
+	if !renvoEmitSliceValueRegs(g, ep, idx) {
+		return false
+	}
+	// Constant make expressions and slice literals use bounded static backing
+	// storage. Once their descriptor escapes into addressable memory, preserve
+	// the backing array before a later evaluation can reuse that storage. Slice
+	// parameters, globals, and results already known to use arena storage retain
+	// ordinary Go descriptor-copy aliasing.
+	if renvoSliceExprUsesReusableStaticBacking(g, ep, idx) && !renvoEmitCopySliceRegsToPersistentArenaExact(g, typ) {
+		return false
+	}
+	renvoAsmPushSliceRegs(&g.asm)
+	renvoAsmLoadSecondaryStack(&g.asm, addrOffset)
+	renvoAsmPopStoreSliceMemSecondary(&g.asm, disp)
 	return true
 }
 
@@ -10049,6 +10079,17 @@ func renvoClearLocalConstAtOffset(g *renvoLinearGen, offset int) {
 	}
 }
 
+func renvoSetLocalSliceStaticAtOffset(g *renvoLinearGen, offset int, value int) {
+	renvoNonNil(g)
+	for i := g.localCount - 1; i >= 0; i-- {
+		local := &g.locals[i]
+		if local.offset == offset {
+			local.sliceStatic = value
+			return
+		}
+	}
+}
+
 func renvoLocalConstTrackable(g *renvoLinearGen, typ int, nameStart int, nameEnd int, afterTok int) bool {
 	renvoNonNil(g)
 	if renvoFixedTarget != 0 {
@@ -10407,7 +10448,7 @@ func renvoInferParsedExprTypeUncached(g *renvoLinearGen, ep *renvoExprParse, idx
 		}
 	}
 	if e.kind == renvoExprBinary {
-		if renvoTok2Is(p, e.tok, '=', '=') || renvoTok2Is(p, e.tok, '!', '=') || renvoTokCharIs(p, e.tok, '<') || renvoTokCharIs(p, e.tok, '>') || renvoTok2Is(p, e.tok, '&', '&') || renvoTok2Is(p, e.tok, '|', '|') {
+		if renvoTok2Is(p, e.tok, '=', '=') || renvoTok2Is(p, e.tok, '!', '=') || renvoTokCharIs(p, e.tok, '<') || renvoTokCharIs(p, e.tok, '>') || renvoTok2Is(p, e.tok, '<', '=') || renvoTok2Is(p, e.tok, '>', '=') || renvoTok2Is(p, e.tok, '&', '&') || renvoTok2Is(p, e.tok, '|', '|') {
 			return renvoTypeInt
 		}
 		leftTypeIndex := renvoInferParsedExprType(g, ep, e.left)
@@ -11225,6 +11266,43 @@ func renvoReturnedSliceCanReuseDescriptor(g *renvoLinearGen, ep *renvoExprParse,
 	return g.locals[localIndex].constValid != 0 || renvoLocalIsCurrentFuncParam(g, localIndex)
 }
 
+func renvoSliceExprUsesReusableStaticBacking(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+	renvoNonNil(g, ep)
+	if idx < 0 || idx >= len(ep.exprs) {
+		return false
+	}
+	e := &ep.exprs[idx]
+	if e.kind == renvoExprComposite {
+		return renvoTypeIsSlice(g.meta, renvoInferParsedExprType(g, ep, idx))
+	}
+	if e.kind == renvoExprCall {
+		callee := renvoExprIdentCode(g.prog, ep, e.left)
+		if callee == renvoIdentMake && e.argCount >= 2 {
+			capacity := renvoEvalConstExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+e.argCount-1))
+			return capacity.ok && capacity.value > 0
+		}
+		if callee == renvoIdentAppend && e.argCount >= 1 {
+			return renvoSliceExprUsesReusableStaticBacking(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
+		}
+		return false
+	}
+	if e.kind == renvoExprSlice {
+		baseType := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, e.left))
+		if baseType.kind == renvoTypeArray {
+			return true
+		}
+		if baseType.kind == renvoTypeSlice {
+			return renvoSliceExprUsesReusableStaticBacking(g, ep, e.left)
+		}
+		return false
+	}
+	if e.kind != renvoExprIdent {
+		return false
+	}
+	localIndex := renvoFindLocalIndex(g, e.nameStart, e.nameEnd)
+	return localIndex >= 0 && g.locals[localIndex].sliceStatic != 0
+}
+
 func renvoLocalIsCurrentFuncParam(g *renvoLinearGen, localIndex int) bool {
 	renvoNonNil(g)
 	if localIndex < 0 || localIndex >= g.localCount {
@@ -11245,6 +11323,14 @@ func renvoLocalIsCurrentFuncParam(g *renvoLinearGen, localIndex int) bool {
 }
 
 func renvoEmitCopySliceRegsToArena(g *renvoLinearGen, sliceType int) bool {
+	return renvoEmitCopySliceRegsToArenaMode(g, sliceType, true, false)
+}
+
+func renvoEmitCopySliceRegsToPersistentArenaExact(g *renvoLinearGen, sliceType int) bool {
+	return renvoEmitCopySliceRegsToArenaMode(g, sliceType, false, true)
+}
+
+func renvoEmitCopySliceRegsToArenaMode(g *renvoLinearGen, sliceType int, addSlack bool, persistent bool) bool {
 	renvoNonNil(g)
 	a := &g.asm
 	t := renvoResolveType(g.meta, sliceType)
@@ -11256,14 +11342,6 @@ func renvoEmitCopySliceRegsToArena(g *renvoLinearGen, sliceType int) bool {
 	if elemSize < 1 {
 		elemSize = 8
 	}
-	// Returned slices need enough spare capacity for the largest small
-	// in-place metadata append. Target binding currently needs up to 70 bytes;
-	// keeping 80 avoids copying a multi-megabyte linked unit at peak arena use.
-	slackSize := 80
-	if elemSize > slackSize {
-		slackSize = elemSize
-	}
-	slackCapacity := slackSize / elemSize
 	srcOff := renvoAddUnnamedLocal(g, renvoTypeInt)
 	lenOff := renvoAddUnnamedLocal(g, renvoTypeInt)
 	capOff := renvoAddUnnamedLocal(g, renvoTypeInt)
@@ -11282,13 +11360,26 @@ func renvoEmitCopySliceRegsToArena(g *renvoLinearGen, sliceType int) bool {
 	} else {
 		renvoAsmStackMem(a, capOff, 0x8948, 0x4d, 0x8d)
 	}
-	renvoAsmLoadPrimaryStack(a, lenOff)
-	renvoAsmPushImm(a, slackCapacity)
-	renvoAsmPopTertiary(a)
-	renvoAsmAddPrimaryTertiary(a)
-	renvoAsmStorePrimaryStack(a, copyCapOff)
-	renvoAsmJcmpStackStack(a, capOff, copyCapOff, capOKLabel, 0x9e)
-	renvoAsmCopyStackSlot(a, copyCapOff, capOff)
+	if addSlack {
+		// Returned slices need enough spare capacity for the largest small
+		// in-place metadata append. Target binding currently needs up to 70
+		// bytes; keeping 80 avoids copying a multi-megabyte linked unit at peak
+		// arena use.
+		slackSize := 80
+		if elemSize > slackSize {
+			slackSize = elemSize
+		}
+		slackCapacity := slackSize / elemSize
+		renvoAsmLoadPrimaryStack(a, lenOff)
+		renvoAsmPushImm(a, slackCapacity)
+		renvoAsmPopTertiary(a)
+		renvoAsmAddPrimaryTertiary(a)
+		renvoAsmStorePrimaryStack(a, copyCapOff)
+		renvoAsmJcmpStackStack(a, capOff, copyCapOff, capOKLabel, 0x9e)
+		renvoAsmCopyStackSlot(a, copyCapOff, capOff)
+	} else {
+		renvoAsmCopyStackSlot(a, capOff, copyCapOff)
+	}
 	renvoAsmMarkLabel(a, capOKLabel)
 	renvoAsmLoadPrimaryStack(a, srcOff)
 	renvoAsmJnzPrimary(a, nonNilLabel)
@@ -11316,7 +11407,11 @@ func renvoEmitCopySliceRegsToArena(g *renvoLinearGen, sliceType int) bool {
 		renvoAsmCopyTertiaryToPrimary(a)
 	}
 	renvoAsmStorePrimaryStack(a, allocSizeOff)
-	renvoEmitArenaAllocStackPrimary(g, allocSizeOff)
+	if persistent {
+		renvoEmitPersistentAllocToPrimary(g, allocSizeOff)
+	} else {
+		renvoEmitArenaAllocStackPrimary(g, allocSizeOff)
+	}
 	renvoAsmStorePrimaryStack(a, destOff)
 	if g.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmLoadPrimaryStack(a, destOff)
@@ -14623,7 +14718,7 @@ func renvoExprValueIsFloat(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 		return typ.kind == renvoTypeFloat64
 	}
 	if e.kind == renvoExprBinary {
-		if renvoTok2Is(p, e.tok, '=', '=') || renvoTok2Is(p, e.tok, '!', '=') || renvoTokCharIs(p, e.tok, '<') || renvoTokCharIs(p, e.tok, '>') || renvoTok2Is(p, e.tok, '&', '&') || renvoTok2Is(p, e.tok, '|', '|') {
+		if renvoTok2Is(p, e.tok, '=', '=') || renvoTok2Is(p, e.tok, '!', '=') || renvoTokCharIs(p, e.tok, '<') || renvoTokCharIs(p, e.tok, '>') || renvoTok2Is(p, e.tok, '<', '=') || renvoTok2Is(p, e.tok, '>', '=') || renvoTok2Is(p, e.tok, '&', '&') || renvoTok2Is(p, e.tok, '|', '|') {
 			return false
 		}
 		if renvoExprValueIsFloat(g, ep, e.left) {
@@ -19369,6 +19464,9 @@ func renvoEmitAppendStringBytesToLocation(g *renvoLinearGen, ep *renvoExprParse,
 
 func renvoEmitCompositeFieldToMem(g *renvoLinearGen, ep *renvoExprParse, idx int, fieldType int, addrOffset int, fieldOffset int) bool {
 	renvoNonNil(g, ep)
+	if renvoTypeIsSlice(g.meta, fieldType) {
+		return renvoEmitSliceExprToSavedMem(g, ep, idx, fieldType, addrOffset, fieldOffset)
+	}
 	tempOffset := renvoAddTypedLocal(g, 0, 0, fieldType)
 	if !renvoEmitTypedAssign(g, ep, idx, tempOffset) {
 		return false

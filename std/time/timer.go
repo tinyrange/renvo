@@ -8,12 +8,12 @@ import "sync"
 type Timer struct {
 	C <-chan Time
 
-	mu       sync.Mutex
-	stopped  bool
-	fired    bool
-	stop     chan struct{}
-	send     chan Time
-	cancelFn func() bool
+	mu      sync.Mutex
+	stopped bool
+	fired   bool
+	stop    chan struct{}
+	send    chan Time
+	cancel  func() bool
 }
 
 // Stop prevents a pending timer from firing. It reports whether the call
@@ -29,8 +29,8 @@ func (t *Timer) Stop() bool {
 	if t.fired {
 		return false
 	}
-	if t.cancelFn != nil {
-		return t.cancelFn()
+	if t.cancel != nil {
+		return t.cancel()
 	}
 	return true
 }

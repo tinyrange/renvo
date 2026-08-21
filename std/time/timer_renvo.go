@@ -16,7 +16,7 @@ func NewTimer(d Duration) *Timer {
 	channel := make(chan Time, 1)
 	t := &Timer{C: channel, stop: make(chan struct{}), send: channel}
 	handle := runtime.NewTimer(int64(d))
-	t.cancelFn = func() bool { return handle.Stop() }
+	t.cancel = func() bool { return handle.Stop() }
 	go func() {
 		if !handle.Wait() {
 			return

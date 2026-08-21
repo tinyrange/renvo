@@ -38,8 +38,11 @@ def gofmt(paths):
     return sh.run(["gofmt", "-w"] + paths)
 
 def go_test(packages, run, timeout="2m"):
-    """Run named Go tests in explicit packages; both selections are required."""
-    command = ["go", "test", "-count=1", "-timeout", timeout]
+    """Run focused Go tests, always excluding the huge TestCompileTests suite."""
+    explicit = run.strip()
+    if explicit == "TestCompileTests" or explicit == "^TestCompileTests$":
+        fail("TestCompileTests is banned from go_test because it runs the huge compiler corpus and takes too long; use go_test with a narrower named test, or use the focused compile and run helpers to reproduce one case")
+    command = ["go", "test", "-count=1", "-timeout", timeout, "-skip", "^TestCompileTests$"]
     return sh.run(command + ["-run", run] + packages, timeout_ms=150000)
 
 def go_vet(packages):
@@ -49,6 +52,16 @@ def go_vet(packages):
 def generate(packages):
     """Run go generate on explicitly selected packages."""
     return sh.run(["go", "generate"] + packages)
+
+def system_tuple():
+    """Return the current host system as an os/architecture tuple."""
+    result = sh.run(["go", "env", "GOHOSTOS", "GOHOSTARCH"])
+    if not result.ok:
+        fail("could not determine the host system: " + result.error)
+    parts = result.stdout.split()
+    if len(parts) != 2:
+        fail("go env returned an unexpected host system: " + result.stdout)
+    return parts[0] + "/" + parts[1]
 
 def build_bootstrap():
     """Build a Go-hosted backend and bundled bootstrap under sandbox/bin."""

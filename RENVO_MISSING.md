@@ -223,6 +223,32 @@ not mean the complete Go API is supported.
     and the complete Go quote/unquote escape surface remain.
 - [ ] Complete the remaining audited surfaces in `fmt`, `os`, and `sort`.
 
+### Initial `math` work
+
+- [x] Added portable pure-Go `std/math` with no platform intrinsics, so
+  results are identical across targets (a few ULPs for transcendental
+  functions rather than bit-exact).
+- [x] Constants (`Pi`, `E`, `Phi`, square roots, logs, float/int limits),
+  `Inf`, `NaN`, `IsNaN`, `IsInf`, `Signbit`, `Copysign`, `Abs`.
+- [x] Rounding: `Trunc`, `Floor`, `Ceil`, `Round`, `RoundToEven` with
+  Go-compatible signed-zero behavior.
+- [x] `Mod` via binary scaling (O(log quotient), no long subtraction loops),
+  `Dim`, Go 1.21 `Max`/`Min` NaN and signed-zero rules.
+- [x] `Sqrt` (Newton over a power-of-four decomposition), `Cbrt` (Newton plus
+  2^(e/3) table), `Hypot` (overflow-safe), `Frexp`, `Ldexp`.
+- [x] `Exp` (range reduction to |r| <= ln2/2 plus Taylor series), `Exp2`,
+  `Log` (atanh series over a power-of-two decomposition), `Log2`, `Log10`,
+  and `Pow` with Go's special-case rules and an integer-exponent fast path.
+- [x] Host-Go tests cover constants, rounding, signed zeros, domain errors,
+  overflow/underflow limits, and known-value tolerances for every function.
+- [ ] Compiled execution is blocked by four compiler bugs recorded in
+  `COMPILER_BUGS.md`: reduced-precision float literals outside constant
+  contexts, miscompiled non-strict float comparisons materialized as bool
+  values, no IEEE NaN from arithmetic on native targets, and incorrect
+  `strconv.FormatFloat` digits. The math implementation itself passes host
+  tests; a `frontend_tests/regressions/std_math` regression should be added
+  once those are fixed.
+
 ### Initial `context` work
 
 - [x] Added `Context`, `CancelFunc`, `CancelCauseFunc`, `Background`, `TODO`,
@@ -251,11 +277,9 @@ The following production imports have no corresponding package in Renvo's
 
 | Package | Staragent usage | Priority |
 |---|---|---|
-| `math` | floating-point equality in the embedded Starlark implementation | Required |
 | `net/http` | OpenAI and Codex HTTP clients | Required and substantial |
 | `os/exec` | trusted host commands exported from `AGENTS.star` | Required for full functionality |
 | `os/signal` | interrupt cancellation | Required for normal CLI behavior |
-| `regexp` | bounded workspace regex search | Required |
 | `syscall` | Unix terminal attributes/ioctl | Required by current platform files |
 
 Tests additionally import `net/http/httptest`, which is absent. It is not
@@ -413,9 +437,17 @@ as Unix.
 
 ### `regexp`
 
-Staragent exposes user-supplied regex search. Implement compilation, matching,
-and errors with bounded execution. Catastrophic patterns must not bypass the
-application's file/byte/result limits.
+Implemented at `std/regexp`: a linear-time NFA engine (leftmost-first
+semantics) with literals, classes, Perl classes, anchors, groups,
+alternation, and greedy/lazy quantifiers, so catastrophic patterns cannot
+backtrack exponentially. API includes `Compile`, `MustCompile`, `Match`,
+`MatchString`, `QuoteMeta`, `FindString`, `FindStringIndex`,
+`FindStringSubmatch`, `FindStringSubmatchIndex`, `FindAllString`,
+`FindAllStringIndex`, `FindAllStringSubmatch`, `Split`, `Count`,
+`ReplaceAllString`, `ReplaceAllLiteralString`, `ReplaceAllStringFunc`, and
+`Error`/`ErrorCode` compile diagnostics. Host-Go tests cover matching,
+submatches, indices, splitting, replacement variants, error codes, and
+bounded execution on a classic catastrophic pattern.
 
 ### `time`
 
