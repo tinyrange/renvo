@@ -24,9 +24,10 @@ type concurrencyGoSite struct {
 
 func lowerConcurrencyCore(program *unit.Program, transient bool) bool {
 	needed := len(program.ConcurrencySites) > 0
-	if !needed {
+	if !needed && !transient {
 		// Hand-built linker tests may not carry checked-package metadata. Normal
-		// frontend builds use the compact table transported through RVFC2.
+		// transient frontend builds use the compact table transported through
+		// RVFC2, including an empty table when no lowering is needed.
 		for i := 0; i < len(program.Tokens); i++ {
 			text := functionValueTokenText(program, i)
 			if text == "chan" || text == "<-" || text == "go" || text == "select" {

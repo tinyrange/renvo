@@ -139,7 +139,7 @@ func completionScopeItems(items []CompletionItem, graph load.Graph, prog Program
 		for i := 0; i < len(scope.Names); i++ {
 			name := tokenString(&file, scope.Names[i].Token)
 			tok := file.Tokens[scope.Names[i].Token]
-			if scope.Names[i].Kind != NameLabel && tok.Start < offset {
+			if scope.Names[i].Kind != NameLabel && syntax.TokenStart(tok) < offset {
 				items = completionAdd(items, name, completionScopeDetail(scope.Names[i].Kind), CompletionVariable, prefix)
 			}
 		}
@@ -332,7 +332,7 @@ func completionNameType(graph load.Graph, prog Program, pkgIndex, fileIndex int,
 	}
 	for i := fn.BodyStart + 1; i < fn.BodyEnd && i < len(file.Tokens); i++ {
 		tok := file.Tokens[i]
-		if tok.Start >= offset || tok.KindLine&255 != syntax.TokenIdent || tokenString(&file, i) != name {
+		if syntax.TokenStart(tok) >= offset || tok.KindLine&255 != syntax.TokenIdent || tokenString(&file, i) != name {
 			continue
 		}
 		if i > 0 && file.Tokens[i-1].KindLine&255 == syntax.TokenVar {
@@ -445,11 +445,11 @@ func completionExpressionType(graph load.Graph, prog Program, pkgIndex, fileInde
 		return completionFunctionResultType(graph, prog, owner, name, resultIndex)
 	}
 	if owner == pkgIndex && next+1 < end && tokenTextIs(&file, next, ".") && file.Tokens[next+1].KindLine&255 == syntax.TokenIdent {
-		fn, ok := completionFunctionAt(file, file.Tokens[start].Start)
+		fn, ok := completionFunctionAt(file, syntax.TokenStart(file.Tokens[start]))
 		if !ok {
 			return completionType{}, false
 		}
-		receiver, ok := completionNameType(graph, prog, pkgIndex, fileIndex, file, fn, name, file.Tokens[start].Start)
+		receiver, ok := completionNameType(graph, prog, pkgIndex, fileIndex, file, fn, name, syntax.TokenStart(file.Tokens[start]))
 		if !ok {
 			return completionType{}, false
 		}
@@ -468,8 +468,8 @@ func completionExpressionType(graph load.Graph, prog Program, pkgIndex, fileInde
 		return completionSymbolResultType(graph, prog, target.packageIndex, target.symbolIndex, resultIndex)
 	}
 	if owner == pkgIndex {
-		if fn, ok := completionFunctionAt(file, file.Tokens[start].Start); ok {
-			if typ, found := completionNameType(graph, prog, pkgIndex, fileIndex, file, fn, name, file.Tokens[start].Start); found {
+		if fn, ok := completionFunctionAt(file, syntax.TokenStart(file.Tokens[start])); ok {
+			if typ, found := completionNameType(graph, prog, pkgIndex, fileIndex, file, fn, name, syntax.TokenStart(file.Tokens[start])); found {
 				if address {
 					typ.Pointer = true
 				}
@@ -618,8 +618,8 @@ func completionSpanType(graph load.Graph, prog Program, pkg, fileIndex, start, e
 	file := graph.Packages[pkg].Files[fileIndex].File
 	spanStart, spanEnd := trimTypeSpan(file, start, end)
 	if classifyType(file, spanStart, spanEnd) == TypeChan {
-		first := file.Tokens[spanStart].Start
-		last := file.Tokens[spanEnd-1].End
+		first := syntax.TokenStart(file.Tokens[spanStart])
+		last := syntax.TokenEnd(file.Tokens[spanEnd-1])
 		return completionType{Package: pkg, Name: string(file.Src[first:last])}, true
 	}
 	pointer := false
@@ -647,7 +647,7 @@ func completionSpanType(graph load.Graph, prog Program, pkg, fileIndex, start, e
 func completionFunctionAt(file syntax.File, offset int) (syntax.FuncDecl, bool) {
 	for i := 0; i < len(file.Funcs); i++ {
 		fn := file.Funcs[i]
-		if fn.BodyStart >= 0 && fn.BodyEnd > fn.BodyStart && file.Tokens[fn.BodyStart].Start <= offset && offset <= file.Tokens[fn.BodyEnd-1].End {
+		if fn.BodyStart >= 0 && fn.BodyEnd > fn.BodyStart && syntax.TokenStart(file.Tokens[fn.BodyStart]) <= offset && offset <= syntax.TokenEnd(file.Tokens[fn.BodyEnd-1]) {
 			return fn, true
 		}
 	}
@@ -765,7 +765,7 @@ func completionAddSymbol(items []CompletionItem, graph load.Graph, pkg int, symb
 	if symbol.Kind == SymbolMethod {
 		kind = CompletionMethod
 	}
-	documentation := sourceDocumentation(file.Src, file.Tokens[fn.StartTok].Start)
+	documentation := sourceDocumentation(file.Src, syntax.TokenStart(file.Tokens[fn.StartTok]))
 	return append(items, CompletionItem{Name: displayName, Detail: detail, Kind: kind, Signature: label, Documentation: documentation, Parameters: parameters})
 }
 
@@ -794,8 +794,8 @@ func completionFunctionLabels(file syntax.File, fn syntax.FuncDecl, name string)
 	if end <= start || end > len(file.Tokens) {
 		return name, "function"
 	}
-	startOffset := file.Tokens[start].Start
-	endOffset := file.Tokens[end-1].End
+	startOffset := syntax.TokenStart(file.Tokens[start])
+	endOffset := syntax.TokenEnd(file.Tokens[end-1])
 	if startOffset < 0 || endOffset < startOffset || endOffset > len(file.Src) {
 		return name, "function"
 	}
@@ -816,8 +816,8 @@ func completionFieldTypeText(file syntax.File, field Field) string {
 	if field.TypeStart < 0 || field.TypeEnd <= field.TypeStart || field.TypeEnd > len(file.Tokens) {
 		return ""
 	}
-	start := file.Tokens[field.TypeStart].Start
-	end := file.Tokens[field.TypeEnd-1].End
+	start := syntax.TokenStart(file.Tokens[field.TypeStart])
+	end := syntax.TokenEnd(file.Tokens[field.TypeEnd-1])
 	if start < 0 || end < start || end > len(file.Src) {
 		return ""
 	}

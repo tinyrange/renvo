@@ -3,8 +3,8 @@
 package targetinfo
 
 const DefaultName = "linux/amd64"
-const AdvertisedHelp = "linux/amd64 linux/386 linux/aarch64 linux/arm windows/amd64 windows/386 windows/arm64 darwin/arm64 wasi/wasm32 browser/wasm32 vm/vm32\n"
-const descriptorCount = 12
+const AdvertisedHelp = "linux/amd64 linux/386 linux/aarch64 linux/arm windows/amd64 windows/386 windows/arm64 darwin/arm64 wasi/wasm32 browser/wasm32 vm/vm32 freebsd/amd64 openbsd/amd64 netbsd/amd64\n"
+const descriptorCount = 15
 
 func All() []Descriptor {
 	out := make([]Descriptor, descriptorCount)
@@ -51,6 +51,15 @@ func Lookup(name string) (Descriptor, bool) {
 	if name == "linux-kernel/amd64" {
 		return descriptorAt(11), true
 	}
+	if name == "freebsd/amd64" {
+		return descriptorAt(12), true
+	}
+	if name == "openbsd/amd64" {
+		return descriptorAt(13), true
+	}
+	if name == "netbsd/amd64" {
+		return descriptorAt(14), true
+	}
 	return Descriptor{}, false
 }
 
@@ -90,6 +99,15 @@ func descriptorAt(index int) Descriptor {
 	}
 	if index == 11 {
 		return Descriptor{Name: "linux-kernel/amd64", Backend: "linux-kernel/amd64", Aliases: []string(nil), Family: "native_v1", OS: "linux", ISA: "amd64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "sysv_x86_64", Image: "elf-relocatable", Runtime: []string{"print", "open", "close", "read", "write", "chmod"}, Tags: []string{"amd64", "linux", "renvo_kernel", "unix"}, Capabilities: []string{"freestanding", "imports", "kernel_module", "linkstatic", "object"}, Definition: [32]uint8{0xf5, 0x5c, 0x5c, 0x57, 0x3a, 0x72, 0xca, 0xca, 0x9e, 0x6d, 0xa9, 0xfb, 0x8c, 0xb9, 0x1, 0xa0, 0xb8, 0x17, 0xe, 0x9d, 0xf8, 0x10, 0x17, 0x4b, 0x9b, 0x7a, 0xd5, 0x68, 0xa4, 0x25, 0xe8, 0x92}, DescriptorVersion: 3, Advertised: false, Virtual: false, DefaultArena: 0, ReleaseArtifact: "", IDE: false}
+	}
+	if index == 12 {
+		return Descriptor{Name: "freebsd/amd64", Backend: "freebsd/amd64", Aliases: []string(nil), Family: "native_v1", OS: "freebsd", ISA: "amd64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "sysv_x86_64", Image: "elf", Runtime: []string{"read", "write", "open", "close", "read_at", "write_at", "chmod", "print", "exit", "hosted"}, Tags: []string{"amd64", "freebsd", "unix"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted"}, Definition: [32]uint8{0xeb, 0xe8, 0x94, 0x43, 0x7c, 0xb5, 0x4c, 0x29, 0xe2, 0x15, 0xb0, 0x2d, 0x7e, 0xc4, 0x7c, 0x23, 0x3a, 0x94, 0xb3, 0xe7, 0x15, 0xf3, 0x68, 0xde, 0xd, 0xd2, 0x6a, 0xd, 0x3f, 0x5a, 0xf6, 0xf4}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "renvo-freebsd-amd64", IDE: false}
+	}
+	if index == 13 {
+		return Descriptor{Name: "openbsd/amd64", Backend: "openbsd/amd64", Aliases: []string(nil), Family: "native_v1", OS: "openbsd", ISA: "amd64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "sysv_x86_64", Image: "elf", Runtime: []string{"read", "write", "open", "close", "read_at", "write_at", "chmod", "print", "exit", "hosted"}, Tags: []string{"amd64", "openbsd", "unix"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted"}, Definition: [32]uint8{0x31, 0xb4, 0x80, 0x1b, 0xd4, 0x69, 0x2d, 0xe5, 0xbc, 0xc9, 0xc7, 0xe, 0xac, 0x3e, 0x8d, 0x8, 0xb9, 0x4b, 0xfd, 0xe3, 0x28, 0x49, 0x94, 0x46, 0xa4, 0xce, 0xb9, 0x61, 0xfe, 0x77, 0xb2, 0xb8}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "renvo-openbsd-amd64", IDE: false}
+	}
+	if index == 14 {
+		return Descriptor{Name: "netbsd/amd64", Backend: "netbsd/amd64", Aliases: []string(nil), Family: "native_v1", OS: "netbsd", ISA: "amd64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "sysv_x86_64", Image: "elf", Runtime: []string{"read", "write", "open", "close", "read_at", "write_at", "chmod", "print", "exit", "hosted"}, Tags: []string{"amd64", "netbsd", "unix"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted"}, Definition: [32]uint8{0xc6, 0x85, 0xd1, 0x9f, 0xe7, 0x12, 0x5e, 0xb5, 0x92, 0xa7, 0x8d, 0xa4, 0x44, 0xc2, 0xe6, 0x39, 0x1a, 0xde, 0x84, 0xed, 0x1a, 0x43, 0x97, 0x23, 0xe8, 0xe6, 0xa7, 0x98, 0x34, 0x7e, 0xd7, 0x10}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "renvo-netbsd-amd64", IDE: false}
 	}
 	return Descriptor{}
 }
@@ -131,11 +149,20 @@ func Binding(name string) (string, string, int, bool) {
 	if name == "linux-kernel/amd64" {
 		return "linux-kernel/amd64", "\xf5\\\\W:r\xcaʞm\xa9\xfb\x8c\xb9\x01\xa0\xb8\x17\x0e\x9d\xf8\x10\x17K\x9bz\xd5h\xa4%\xe8\x92", 3, true
 	}
+	if name == "freebsd/amd64" {
+		return "freebsd/amd64", "\xeb\xe8\x94C|\xb5L)\xe2\x15\xb0-~\xc4|#:\x94\xb3\xe7\x15\xf3h\xde\r\xd2j\r?Z\xf6\xf4", 3, true
+	}
+	if name == "openbsd/amd64" {
+		return "openbsd/amd64", "1\xb4\x80\x1b\xd4i-\xe5\xbc\xc9\xc7\x0e\xac>\x8d\b\xb9K\xfd\xe3(I\x94F\xa4ιa\xfew\xb2\xb8", 3, true
+	}
+	if name == "netbsd/amd64" {
+		return "netbsd/amd64", "ƅџ\xe7\x12^\xb5\x92\xa7\x8d\xa4D\xc2\xe69\x1aބ\xed\x1aC\x97#\xe8様4~\xd7\x10", 3, true
+	}
 	return "", "", 0, false
 }
 
 func IsAdvertised(name string) bool {
-	return name == "linux/amd64" || name == "linux/386" || name == "linux/aarch64" || name == "linux/arm" || name == "windows/amd64" || name == "windows/386" || name == "windows/arm64" || name == "darwin/arm64" || name == "wasi/wasm32" || name == "browser/wasm32" || name == "vm/vm32"
+	return name == "linux/amd64" || name == "linux/386" || name == "linux/aarch64" || name == "linux/arm" || name == "windows/amd64" || name == "windows/386" || name == "windows/arm64" || name == "darwin/arm64" || name == "wasi/wasm32" || name == "browser/wasm32" || name == "vm/vm32" || name == "freebsd/amd64" || name == "openbsd/amd64" || name == "netbsd/amd64"
 }
 
 func Backend(name string) string {
@@ -181,6 +208,15 @@ func HasBuildTag(name string, tag string) bool {
 	}
 	if name == "linux-kernel/amd64" {
 		return tag == "amd64" || tag == "linux" || tag == "renvo_kernel" || tag == "unix"
+	}
+	if name == "freebsd/amd64" {
+		return tag == "amd64" || tag == "freebsd" || tag == "unix"
+	}
+	if name == "openbsd/amd64" {
+		return tag == "amd64" || tag == "openbsd" || tag == "unix"
+	}
+	if name == "netbsd/amd64" {
+		return tag == "amd64" || tag == "netbsd" || tag == "unix"
 	}
 	return false
 }

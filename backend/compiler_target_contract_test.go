@@ -71,7 +71,9 @@ func TestAdvertisedTargetsHaveProfilesAndRecognizableImages(t *testing.T) {
 			}
 			wantOS := map[string]int{
 				"linux": renvoOSLinux, "windows": renvoOSWindows, "darwin": renvoOSDarwin,
-				"wasi": renvoOSWasi, "vm": renvoOSVM,
+				"wasi": renvoOSWasi, "vm": renvoOSVM, "freebsd": renvoOSFreeBSD,
+				"openbsd": renvoOSOpenBSD,
+				"netbsd":  renvoOSNetBSD,
 			}[contract.os]
 			wantArch := map[string]int{
 				"amd64": renvoArchAmd64, "386": renvoArch386, "aarch64": renvoArchAarch64,

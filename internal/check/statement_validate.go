@@ -257,12 +257,17 @@ func statementTokensEqual(file *syntax.File, left int, right int) bool {
 	}
 	leftToken := file.Tokens[left]
 	rightToken := file.Tokens[right]
-	leftSize := leftToken.End - leftToken.Start
-	if leftSize < 0 || rightToken.End-rightToken.Start != leftSize {
+	leftStart := int(leftToken.Start)
+	rightStart := int(rightToken.Start)
+	leftSize := int(leftToken.End - leftToken.Start)
+	if leftSize < 0 || int(rightToken.End-rightToken.Start) != leftSize {
 		return false
 	}
-	for i := 0; i < leftSize; i++ {
-		if file.Src[leftToken.Start+i] != file.Src[rightToken.Start+i] {
+	if leftSize > 0 && file.Src[leftStart] != file.Src[rightStart] {
+		return false
+	}
+	for i := 1; i < leftSize; i++ {
+		if file.Src[leftStart+i] != file.Src[rightStart+i] {
 			return false
 		}
 	}

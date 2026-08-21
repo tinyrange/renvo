@@ -38,7 +38,7 @@ func scriptImportPrefixEnd(src []byte) int {
 				} else if ch == int(')') {
 					depth--
 				}
-				last = tokens[pos].End
+				last = syntax.TokenEnd(tokens[pos])
 				pos++
 				if depth == 0 {
 					break
@@ -51,7 +51,7 @@ func scriptImportPrefixEnd(src []byte) int {
 			found := false
 			for pos < len(tokens) {
 				if tokens[pos].KindLine&255 == syntax.TokenString {
-					last = tokens[pos].End
+					last = syntax.TokenEnd(tokens[pos])
 					pos++
 					found = true
 					break
@@ -66,7 +66,7 @@ func scriptImportPrefixEnd(src []byte) int {
 			}
 		}
 		if pos < len(tokens) && tokens[pos].KindLine>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask == int(';') {
-			last = tokens[pos].End
+			last = syntax.TokenEnd(tokens[pos])
 			pos++
 		}
 	}

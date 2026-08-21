@@ -45,6 +45,9 @@ explicitly.
 | `windows/386` | PE executable |
 | `windows/arm64` | PE executable |
 | `darwin/arm64` | Mach-O executable |
+| `freebsd/amd64` | static PIE ELF executable |
+| `openbsd/amd64` | static PIE ELF executable |
+| `netbsd/amd64` | static ELF executable |
 | `wasi/wasm32` | WebAssembly module |
 | `browser/wasm32` | Browser HTML containing WebAssembly |
 | `vm/vm32` | Deterministic Renvo bytecode (`RNVB`) |

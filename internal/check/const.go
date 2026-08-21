@@ -55,11 +55,11 @@ func parseConstInt(file syntax.File, tok int) (int, bool) {
 		return 0, false
 	}
 	token := file.Tokens[tok]
-	if token.KindLine&255 != syntax.TokenNumber || token.Start < 0 || token.End > len(file.Src) || token.Start >= token.End {
+	start := int(token.Start)
+	end := int(token.End)
+	if token.KindLine&255 != syntax.TokenNumber || start < 0 || end > len(file.Src) || start >= end {
 		return 0, false
 	}
-	start := token.Start
-	end := token.End
 	base := 10
 	if end-start > 2 && file.Src[start] == '0' {
 		prefix := file.Src[start+1]

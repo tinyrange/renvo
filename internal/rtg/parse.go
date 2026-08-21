@@ -322,7 +322,7 @@ func (p *documentParser) validateGo(declaration Declaration) {
 	if !file.Ok {
 		offset := declaration.BodyStart
 		if file.ErrorTok >= 0 && file.ErrorTok < len(file.Tokens) {
-			offset += file.Tokens[file.ErrorTok].Start - len("package backend\n")
+			offset += syntax.TokenStart(file.Tokens[file.ErrorTok]) - len("package backend\n")
 		}
 		p.failOffset(offset, "RTG-GO-005", "embedded Go does not parse in the Renvo frontend")
 		return
@@ -341,7 +341,7 @@ func (p *documentParser) validateGo(declaration Declaration) {
 
 func (p *documentParser) validateGoName(wrapped []byte, token syntax.Token, bodyStart int) {
 	name := string(syntax.TokenText(wrapped, token))
-	offset := bodyStart + token.Start - len("package backend\n")
+	offset := bodyStart + syntax.TokenStart(token) - len("package backend\n")
 	if strings.HasPrefix(name, "RTG") {
 		p.failOffset(offset, "RTG-GO-007", "embedded declaration uses reserved RTG prefix: "+name)
 		return

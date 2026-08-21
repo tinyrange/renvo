@@ -208,6 +208,9 @@ The frontend currently recognizes:
 | `windows/386` | PE |
 | `windows/arm64` | PE |
 | `darwin/arm64` | PIE Mach-O |
+| `freebsd/amd64` | static PIE ELF |
+| `openbsd/amd64` | static PIE ELF with pinned syscall sites |
+| `netbsd/amd64` | static ELF |
 | `wasi/wasm32` | WASI WebAssembly |
 | `browser/wasm32` | browser HTML containing WebAssembly |
 | `vm/vm32` | deterministic Renvo bytecode with 32-bit words and pointers |

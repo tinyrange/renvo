@@ -584,8 +584,8 @@ func findEmbeddedFunction(document Document, name string) (embeddedFunction, boo
 			if fnName != name {
 				continue
 			}
-			start := file.Tokens[fn.ParamsStart].Start
-			end := file.Tokens[fn.ResultEnd].Start
+			start := syntax.TokenStart(file.Tokens[fn.ParamsStart])
+			end := syntax.TokenStart(file.Tokens[fn.ResultEnd])
 			signature := make([]byte, end-start)
 			copy(signature, wrapped[start:end])
 			for len(signature) > 0 && (signature[len(signature)-1] == ' ' ||
@@ -645,8 +645,8 @@ func functionParameters(file syntax.File, fn syntax.FuncDecl) []embeddedParamete
 }
 
 func embeddedFunctionParameter(file syntax.File, start int, end int) embeddedParameter {
-	sourceStart := file.Tokens[start].Start
-	sourceEnd := file.Tokens[end-1].End
+	sourceStart := syntax.TokenStart(file.Tokens[start])
+	sourceEnd := syntax.TokenEnd(file.Tokens[end-1])
 	source := make([]byte, sourceEnd-sourceStart)
 	copy(source, file.Src[sourceStart:sourceEnd])
 	return embeddedParameter{
@@ -659,8 +659,8 @@ func functionResult(file syntax.File, fn syntax.FuncDecl) []byte {
 	if fn.ResultStart == fn.ResultEnd {
 		return nil
 	}
-	start := file.Tokens[fn.ResultStart].Start
-	end := file.Tokens[fn.ResultEnd].Start
+	start := syntax.TokenStart(file.Tokens[fn.ResultStart])
+	end := syntax.TokenStart(file.Tokens[fn.ResultEnd])
 	for end > start && (file.Src[end-1] == ' ' || file.Src[end-1] == '\t' ||
 		file.Src[end-1] == '\n' || file.Src[end-1] == '\r') {
 		end--

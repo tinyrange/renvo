@@ -108,6 +108,7 @@ type renvoAsm struct {
 	darwinImports       []renvoDarwinStaticImport
 	darwinImportLabels  []int
 	darwinImportUsed    []bool
+	openbsdSyscalls     []int
 	kernelImportNames   []byte
 	kernelImportOffsets []int
 	data                []byte
@@ -123,6 +124,8 @@ type renvoAsm struct {
 	wasmLocalSlots      []int32
 	c                   *renvoCompileContext
 	patchFailed         bool
+	syscallNumber       int
+	syscallNumberKnown  bool
 }
 
 // A backend object is an unpatched function fragment plus its local labels,
@@ -9966,55 +9969,9 @@ func renvoClearLocalConstAtOffset(g *renvoLinearGen, offset int) {
 
 func renvoLocalConstTrackable(g *renvoLinearGen, typ int, nameStart int, nameEnd int, afterTok int) bool {
 	renvoNonNil(g)
-	if renvoFixedTarget != 0 {
-		return false
-	}
-	resolved := renvoResolveType(g.meta, typ)
-	renvoNonNil(resolved)
-	if !renvoTypeKindIsScalarInt(resolved.kind) {
-		return false
-	}
-	return !renvoLocalNameWrittenAfter(g, nameStart, nameEnd, afterTok)
-}
-
-func renvoLocalNameWrittenAfter(g *renvoLinearGen, nameStart int, nameEnd int, afterTok int) bool {
-	renvoNonNil(g)
-	if nameEnd <= nameStart {
-		return true
-	}
-	p := g.prog
-	src := p.src
-	nameSize := nameEnd - nameStart
-	nameFirst := renvo_runtime_UnsafeByteAt(src, nameStart)
-	end := renvoTokCount(p)
-	if g.currentFunc >= 0 && g.currentFunc < len(g.meta.funcs) {
-		end = g.meta.funcs[g.currentFunc].bodyEnd
-	}
-	i := afterTok
-	if i < 0 {
-		i = 0
-	}
-	for i < end {
-		base := i * renvoTokenStride
-		first := int(renvo_runtime_UnsafeInt32At(p.toks.data, base))
-		packed := int(renvo_runtime_UnsafeInt32At(p.toks.data, base+1))
-		tokenStart := packed & 0xffffff
-		tokenEnd := tokenStart + (packed>>24&255 | first>>16&0xff00)
-		if first&255 == renvoTokIdent && tokenEnd-tokenStart == nameSize && renvo_runtime_UnsafeByteAt(src, tokenStart) == nameFirst && renvoBytesEqualRange(src, tokenStart, tokenEnd, nameStart, nameEnd) {
-			if i > 0 && renvoTokCharIs(p, i-1, '&') {
-				return true
-			}
-			if renvoTok2Is(p, i+1, '+', '+') || renvoTok2Is(p, i+1, '-', '-') {
-				return true
-			}
-			lineEnd := renvoStatementLineEnd(p, i, end)
-			assignTok := renvoFindAssignmentToken(p, i, lineEnd)
-			if assignTok > i {
-				return true
-			}
-		}
-		i++
-	}
+	// Proving that a local is never written requires rescanning the remainder of
+	// its function. That quadratic compile-time optimization costs more than the
+	// generated constant reloads it removes in large self-hosted programs.
 	return false
 }
 
@@ -15974,7 +15931,12 @@ func renvoLinearPersistentCapacity(g *renvoLinearGen) int {
 	// The remaining slices are either fixed-size or completely populated before
 	// function emission begins. Only slices which can grow while a function is
 	// emitted need to prevent the scratch arena from being rewound.
-	return cap(a.code) + cap(a.labelPos) + cap(a.relocs) + cap(a.absRelocs) + cap(a.symbols) + cap(a.symbolName) + cap(a.staticImports) + cap(a.darwinImports) + cap(a.darwinImportLabels) + cap(a.darwinImportUsed) + cap(a.data) + cap(a.wasmLocalSlots) + objectStringCapacity + cap(g.breakLabels) + cap(g.continueLabels) + cap(m.types) + cap(m.fields) + cap(m.captures)
+	capacity := cap(a.code) + cap(a.labelPos) + cap(a.relocs) + cap(a.absRelocs) + cap(a.symbols) + cap(a.symbolName) + cap(a.staticImports) + cap(a.darwinImports) + cap(a.darwinImportLabels) + cap(a.darwinImportUsed) + cap(a.data) + cap(a.wasmLocalSlots) + objectStringCapacity + cap(g.breakLabels) + cap(g.continueLabels) + cap(m.types) + cap(m.fields) + cap(m.captures)
+	if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
+		renvoFixedTarget == 0 && a.c.renvoTargetOS == renvoOSOpenBSD {
+		capacity += cap(a.openbsdSyscalls)
+	}
+	return capacity
 }
 
 func renvoStoreIncomingCallWord(g *renvoLinearGen, word int, offset int) {
@@ -16003,6 +15965,11 @@ func renvoStoreIncomingCallWord(g *renvoLinearGen, word int, offset int) {
 }
 func renvoAsmPrimaryImm(a *renvoAsm, imm int) {
 	renvoNonNil(a)
+	if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
+		renvoFixedTarget == 0 && a.c.renvoTargetOS == renvoOSOpenBSD {
+		a.syscallNumber = imm
+		a.syscallNumberKnown = true
+	}
 	if renvoPreparedBackend != 0 {
 		renvoRTGDirectMoveImmediate(a, renvoRTGPrimary, int64(imm))
 		return
@@ -16312,7 +16279,29 @@ func renvoAsmSyscall(a *renvoAsm) {
 		renvo386AsmSyscall(a)
 		return
 	}
+	if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
+		renvoFixedTarget == 0 && a.c.renvoTargetOS == renvoOSOpenBSD {
+		if !a.syscallNumberKnown {
+			a.patchFailed = true
+			return
+		}
+		label := renvoAsmNewLabel(a)
+		renvoAsmMarkLabel(a, label)
+		a.openbsdSyscalls = append(a.openbsdSyscalls, label, a.syscallNumber)
+	}
 	renvoAsmEmit16(a, 0x050f)
+	if renvoFixedTarget == renvoTargetFreeBSDAmd64 ||
+		renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
+		renvoFixedTarget == renvoTargetNetBSDAmd64 ||
+		renvoFixedTarget == 0 && targetIsBSD(a.c.renvoTargetOS) {
+		// BSD reports syscall errors by setting carry and returning errno.
+		// Renvo's runtime API uses Linux-style negative error results.
+		renvoAsmEmitText(a, "\x73\x03\x48\xf7\xd8")
+	}
+	if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
+		renvoFixedTarget == 0 && a.c.renvoTargetOS == renvoOSOpenBSD {
+		a.syscallNumberKnown = false
+	}
 }
 func renvoAsmPopCallWord0(a *renvoAsm) {
 	renvoNonNil(a)
@@ -18853,7 +18842,7 @@ func renvoEmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		renvoLoadCompilerFixedTarget(g)
 		value := renvoFixedTargetUnknown
 		if g.fixedTargetState == 1 &&
-			g.fixedTargetValue >= renvoTargetLinuxAmd64 && g.fixedTargetValue <= renvoTargetVM32 {
+			g.fixedTargetValue >= renvoTargetLinuxAmd64 && g.fixedTargetValue <= renvoTargetNetBSDAmd64 {
 			nameSize := e.nameEnd - e.nameStart
 			if nameSize >= 5 && renvoBytesEqualText(g.prog.src, e.nameStart, e.nameStart+5, "renvo") {
 				if nameSize == 15 {

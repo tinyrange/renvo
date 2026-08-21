@@ -43,31 +43,46 @@ const (
 
 type Token struct {
 	// KindLine packs the kind into the low byte, a one-byte ASCII operator in
-	// bits 8..14 when present, and the source line above both. A uniform layout
-	// keeps the parser's punctuation and line checks branchless.
+	// bits 8..14 when present, and the source line above both. Source offsets
+	// are explicitly 32-bit so tokens stay compact without depending on the
+	// host's int width.
 	KindLine int
-	Start    int
-	End      int
+	Start    int32
+	End      int32
 }
 
 func MakeToken(kind int, start int, end int, line int) Token {
-	return Token{KindLine: kind | line<<TokenOperatorLineShift, Start: start, End: end}
+	return Token{KindLine: kind | line<<TokenOperatorLineShift, Start: int32(start), End: int32(end)}
 }
 
 func TokenLine(tok Token) int {
 	return tok.KindLine >> TokenOperatorLineShift & TokenLineLimit
 }
 
+func TokenSize(tok Token) int {
+	return int(tok.End - tok.Start)
+}
+
+func TokenEnd(tok Token) int {
+	return int(tok.End)
+}
+
+func TokenStart(tok Token) int {
+	return int(tok.Start)
+}
+
 func TokenText(src []byte, tok Token) []byte {
-	if tok.Start < 0 || tok.End < tok.Start || tok.End > len(src) {
+	start := int(tok.Start)
+	end := int(tok.End)
+	if start < 0 || end < start || end > len(src) {
 		return nil
 	}
-	return src[tok.Start:tok.End]
+	return src[start:end]
 }
 
 func NumberTokenIsFloat(src []byte, tok Token) bool {
-	start := tok.Start
-	end := tok.End
+	start := int(tok.Start)
+	end := int(tok.End)
 	if tok.KindLine&255 != TokenNumber || start < 0 || end < start || end > len(src) {
 		return false
 	}

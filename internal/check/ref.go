@@ -119,13 +119,13 @@ func appendExprRefs(refs []NameRef, file syntax.File, fileIndex int, info Packag
 func shouldSkipIdentRef(file *syntax.File, tok int, end int) bool {
 	if tok > 0 {
 		prev := file.Tokens[tok-1]
-		if prev.KindLine&255 == syntax.TokenOperator && prev.End == prev.Start+1 && file.Src[prev.Start] == '.' {
+		if prev.KindLine&255 == syntax.TokenOperator && prev.End-prev.Start == 1 && file.Src[int(prev.Start)] == '.' {
 			return true
 		}
 	}
 	if tok+1 < end {
 		next := file.Tokens[tok+1]
-		if next.KindLine&255 == syntax.TokenOperator && next.End == next.Start+1 && file.Src[next.Start] == ':' {
+		if next.KindLine&255 == syntax.TokenOperator && next.End-next.Start == 1 && file.Src[int(next.Start)] == ':' {
 			return true
 		}
 	}

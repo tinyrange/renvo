@@ -1,22 +1,24 @@
 package syntax
 
 func StringLiteralValue(src []byte, tok Token) (string, bool) {
-	if tok.KindLine&255 != TokenString || tok.Start < 0 || tok.End-tok.Start < 2 || tok.End > len(src) {
+	start := int(tok.Start)
+	end := int(tok.End)
+	if tok.KindLine&255 != TokenString || start < 0 || end-start < 2 || end > len(src) {
 		return "", false
 	}
-	quote := src[tok.Start]
+	quote := src[start]
 	if quote == '`' {
-		if src[tok.End-1] != '`' {
+		if src[end-1] != '`' {
 			return "", false
 		}
-		return string(src[tok.Start+1 : tok.End-1]), true
+		return string(src[start+1 : end-1]), true
 	}
-	if quote != '"' || src[tok.End-1] != '"' {
+	if quote != '"' || src[end-1] != '"' {
 		return "", false
 	}
-	out := make([]byte, 0, tok.End-tok.Start-2)
-	i := tok.Start + 1
-	for i < tok.End-1 {
+	out := make([]byte, 0, end-start-2)
+	i := start + 1
+	for i < end-1 {
 		c := src[i]
 		if c != '\\' {
 			out = append(out, c)
@@ -24,10 +26,10 @@ func StringLiteralValue(src []byte, tok Token) (string, bool) {
 			continue
 		}
 		i++
-		if i >= tok.End-1 {
+		if i >= end-1 {
 			return "", false
 		}
-		next, value, unicode, ok := stringEscapeValue(src, i-1, tok.End-1)
+		next, value, unicode, ok := stringEscapeValue(src, i-1, end-1)
 		if !ok {
 			return "", false
 		}

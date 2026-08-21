@@ -315,9 +315,9 @@ func sourceEmbedDirectiveDecl(file syntax.File, directive sourceEmbedDirective) 
 		if decl.Kind != syntax.TokenVar || decl.StartTok < 0 || decl.StartTok >= len(file.Tokens) {
 			continue
 		}
-		start := file.Tokens[decl.StartTok].Start
+		start := syntax.TokenStart(file.Tokens[decl.StartTok])
 		if decl.StartTok > 0 && file.Tokens[decl.StartTok-1].KindLine&255 == syntax.TokenVar {
-			start = file.Tokens[decl.StartTok-1].Start
+			start = syntax.TokenStart(file.Tokens[decl.StartTok-1])
 		}
 		if start < directive.end || start >= bestStart || !sourceEmbedGapAllowed(file.Src, directive.end, start) {
 			continue
@@ -363,7 +363,7 @@ func sourceEmbedDeclKind(file syntax.File, decl syntax.TopDecl, embedImport stri
 			return embedVarInvalid, "", 0, false
 		}
 	}
-	insertAt := file.Tokens[end-1].End
+	insertAt := syntax.TokenEnd(file.Tokens[end-1])
 	if end-start == 1 && sourceEmbedTokenText(file, start) == "string" {
 		return embedVarString, "", insertAt, true
 	}
@@ -391,7 +391,7 @@ func sourceEmbedTokenChar(file syntax.File, tok int, want byte) bool {
 		return false
 	}
 	token := file.Tokens[tok]
-	return token.KindLine&255 == syntax.TokenOperator && token.End == token.Start+1 && file.Src[token.Start] == want
+	return token.KindLine&255 == syntax.TokenOperator && syntax.TokenSize(token) == 1 && file.Src[syntax.TokenStart(token)] == want
 }
 
 func resolveSourceEmbedPatterns(fs SourceFS, packageDir string, moduleRoot string, patterns []string) ([]sourceEmbedFile, bool, string) {

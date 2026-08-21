@@ -100,6 +100,9 @@ func compileTarget(input []int, output int, target int, arenaSize int) int {
 			renvoFixedTarget = renvoTargetLinuxArm
 			return compileLinuxArmArena(input, output, arenaSize)
 		}
+		if renvoFixedTarget >= renvoTargetFreeBSDAmd64 && renvoFixedTarget <= renvoTargetNetBSDAmd64 {
+			return compileBSDAmd64Arena(input, output, renvoFixedTarget, arenaSize)
+		}
 		renvoFixedTarget = renvoTargetLinuxAmd64
 		return compileLinuxAmd64Arena(input, output, arenaSize)
 	}
@@ -133,10 +136,18 @@ func compileTarget(input []int, output int, target int, arenaSize int) int {
 	if target == renvoTargetLinuxArm {
 		return compileLinuxArmArena(input, output, arenaSize)
 	}
+	if target >= renvoTargetFreeBSDAmd64 && target <= renvoTargetNetBSDAmd64 {
+		return compileBSDAmd64Arena(input, output, target, arenaSize)
+	}
 	if target != renvoTargetLinuxAmd64 {
 		return 1
 	}
 	return compileLinuxAmd64Arena(input, output, arenaSize)
+}
+
+func compileBSDAmd64Arena(input []int, output int, target int, arenaSize int) int {
+	renvoSetTarget(target)
+	return renvoCompileAmd64(input, output, arenaSize)
 }
 
 func RenvoCompileSourceToBytes(source []byte, targetName string) ([]byte, bool) {

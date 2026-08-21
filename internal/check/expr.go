@@ -116,7 +116,7 @@ func appendSpecInitializerComposites(composites []CompositeExpr, file syntax.Fil
 
 func appendExprIndexes(indexes []IndexExpr, file *syntax.File, start int, end int) []IndexExpr {
 	for i := start; i < end && i < len(file.Tokens); i++ {
-		if !tokCharIs(file, i, '[') {
+		if file.Tokens[i].KindLine>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask != int('[') {
 			continue
 		}
 		close := findTypeMatching(*file, i, '[', ']')
@@ -145,7 +145,7 @@ func appendExprIndexes(indexes []IndexExpr, file *syntax.File, start int, end in
 
 func appendExprComposites(composites []CompositeExpr, file syntax.File, start int, end int) []CompositeExpr {
 	for i := start; i < end && i < len(file.Tokens); i++ {
-		if !tokCharIs(&file, i, '{') {
+		if file.Tokens[i].KindLine>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask != int('{') {
 			continue
 		}
 		if isCompositeTypeBodyOpen(file, i) {
@@ -225,14 +225,16 @@ func exprBinaryOperatorKind(file syntax.File, tok int) int {
 		return exprBinaryNone
 	}
 	token := file.Tokens[tok]
-	if token.KindLine&255 != syntax.TokenOperator || token.Start < 0 || token.End > len(file.Src) {
+	start := int(token.Start)
+	end := int(token.End)
+	if token.KindLine&255 != syntax.TokenOperator || start < 0 || end > len(file.Src) {
 		return exprBinaryNone
 	}
-	size := token.End - token.Start
+	size := end - start
 	if size < 1 {
 		return exprBinaryNone
 	}
-	first := file.Src[token.Start]
+	first := file.Src[start]
 	if size == 1 {
 		if first == '<' || first == '>' {
 			return exprBinaryCompare
@@ -248,7 +250,7 @@ func exprBinaryOperatorKind(file syntax.File, tok int) int {
 	if size != 2 {
 		return exprBinaryNone
 	}
-	second := file.Src[token.Start+1]
+	second := file.Src[start+1]
 	if first == '&' && second == '&' || first == '|' && second == '|' {
 		return exprBinaryLogical
 	}

@@ -1,4 +1,4 @@
-//go:build renvo && !darwin && !wasi && !wasip1
+//go:build renvo && !darwin && !wasi && !wasip1 && !freebsd && !openbsd && !netbsd
 
 package driver
 

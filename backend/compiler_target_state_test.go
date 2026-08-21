@@ -3,7 +3,7 @@ package main
 import "testing"
 
 func TestTargetCoreTablesCoverEveryTarget(t *testing.T) {
-	want := renvoTargetVM32 + 1
+	want := renvoTargetNetBSDAmd64 + 1
 	if got := len(targetOSTable); got != want {
 		t.Fatalf("OS target table length = %d, want %d", got, want)
 	}
@@ -40,6 +40,9 @@ func TestSetTargetDerivesStateFromTargetProfile(t *testing.T) {
 		renvoTargetWasiWasm32,
 		renvoTargetVM32,
 		renvoTargetDarwinArm64,
+		renvoTargetFreeBSDAmd64,
+		renvoTargetOpenBSDAmd64,
+		renvoTargetNetBSDAmd64,
 	}
 	renvoFixedTarget = 0
 	for _, target := range targets {

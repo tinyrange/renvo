@@ -366,7 +366,7 @@ func (s *State) linkIdentifiers(input string) string {
 	at := 0
 	for i := 0; i < len(tokens); i++ {
 		token := tokens[i]
-		if token.KindLine&255 == syntax.TokenEOF || token.Start < at {
+		if token.KindLine&255 == syntax.TokenEOF || syntax.TokenStart(token) < at {
 			continue
 		}
 		id := -1
@@ -380,11 +380,11 @@ func (s *State) linkIdentifiers(input string) string {
 		if id < 0 {
 			continue
 		}
-		out = append(out, src[at:token.Start]...)
+		out = append(out, src[at:syntax.TokenStart(token)]...)
 		out = append(out, "(*renvo_repl_value_"...)
 		out = append(out, strconv.Itoa(id)...)
 		out = append(out, ')')
-		at = token.End
+		at = syntax.TokenEnd(token)
 	}
 	if at == 0 {
 		return input
@@ -479,7 +479,7 @@ func replShortDeclaration(input string) ([]string, string) {
 	if len(names) == 0 {
 		return nil, ""
 	}
-	at := tokens[assignment].End
+	at := syntax.TokenEnd(tokens[assignment])
 	for at < len(src) && replSpace(src[at]) {
 		at++
 	}
@@ -527,12 +527,12 @@ func replVarDeclaration(input string) ([]string, string, string, bool) {
 	}
 	typ := ""
 	if i < end {
-		typ = CleanInput(string(src[tokens[i].Start:tokens[end-1].End]))
+		typ = CleanInput(string(src[syntax.TokenStart(tokens[i]):syntax.TokenEnd(tokens[end-1])]))
 	}
 	initialized := assign >= 0
 	rhs := ""
 	if initialized {
-		at := tokens[assign].End
+		at := syntax.TokenEnd(tokens[assign])
 		for at < len(src) && replSpace(src[at]) {
 			at++
 		}

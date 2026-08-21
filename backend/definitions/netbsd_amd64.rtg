@@ -1,0 +1,44 @@
+definition 1
+unit native
+implements direct_emitter_v1
+
+@import "elf_amd64.rtg"
+
+runtime netbsd_x86_64 {
+	entry process_stack {
+		argc = word(rsp, 0)
+		argv = words(rsp + 8, argc)
+		envp = words(rsp + 16 + argc * 8, until_null)
+		string = nul_terminated_bytes
+		result = [slice(argv), slice(envp)]
+	}
+
+	syscall {
+		number = rax
+		arguments = [rdi, rsi, rdx, r10, r8, r9]
+		result = rax
+		error = carry
+		instruction = syscall
+	}
+
+	operation read { number = 3 args = [fd, buffer, count] }
+	operation write { number = 4 args = [fd, buffer, count] }
+	operation open { number = 5 args = [path, flags, mode] }
+	operation close { number = 6 args = [fd] }
+	operation read_at { number = 173 args = [fd, buffer, count, offset] }
+	operation write_at { number = 174 args = [fd, buffer, count, offset] }
+	operation chmod { number = 124 args = [fd, mode] }
+	operation print { use = write args = [stderr, buffer, count] }
+	operation exit { number = 1 args = [status] noreturn = true }
+}
+
+target netbsd/amd64 {
+	family = native_v1
+	os = netbsd
+	arch = x86_64
+	abi = sysv_x86_64
+	runtime = netbsd_x86_64
+	executable = elf64_x86_64
+	build_tags = ["netbsd", "unix", "amd64"]
+	capabilities = [hosted, executable, filesystem, heap, argv, environment]
+}

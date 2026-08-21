@@ -60,6 +60,9 @@ jobs:
           ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t windows/386 -s -o dist/renvo-windows-386.exe ./cmd/renvo
           ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t windows/arm64 -s -o dist/renvo-windows-arm64.exe ./cmd/renvo
           ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t darwin/arm64 -s -o dist/renvo-darwin-arm64 ./cmd/renvo
+          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t freebsd/amd64 -arena-size 67108864 -s -o dist/renvo-freebsd-amd64 ./cmd/renvo
+          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t openbsd/amd64 -arena-size 67108864 -s -o dist/renvo-openbsd-amd64 ./cmd/renvo
+          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t netbsd/amd64 -arena-size 67108864 -s -o dist/renvo-netbsd-amd64 ./cmd/renvo
           ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t wasi/wasm32 -s -o dist/renvo-wasi-wasm32.wasm ./cmd/renvo
           ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t vm/vm32 -s -o dist/renvo-vm32.rnvb ./cmd/renvo
           chmod +x \
@@ -67,7 +70,10 @@ jobs:
             dist/renvo-linux-386 \
             dist/renvo-linux-arm64 \
             dist/renvo-linux-arm \
-            dist/renvo-darwin-arm64
+            dist/renvo-darwin-arm64 \
+            dist/renvo-freebsd-amd64 \
+            dist/renvo-openbsd-amd64 \
+            dist/renvo-netbsd-amd64
 
       - name: Check release frontend help
         run: |
@@ -77,6 +83,9 @@ jobs:
           grep -F "windows/amd64" dist/renvo-help.txt
           grep -F "windows/arm64" dist/renvo-help.txt
           grep -F "darwin/arm64" dist/renvo-help.txt
+          grep -F "freebsd/amd64" dist/renvo-help.txt
+          grep -F "openbsd/amd64" dist/renvo-help.txt
+          grep -F "netbsd/amd64" dist/renvo-help.txt
           grep -F "wasi/wasm32" dist/renvo-help.txt
           grep -F "vm/vm32" dist/renvo-help.txt
 
@@ -95,6 +104,9 @@ jobs:
             dist/renvo-windows-386.exe
             dist/renvo-windows-arm64.exe
             dist/renvo-darwin-arm64
+            dist/renvo-freebsd-amd64
+            dist/renvo-openbsd-amd64
+            dist/renvo-netbsd-amd64
             dist/renvo-wasi-wasm32.wasm
             dist/renvo-vm32.rnvb
           if-no-files-found: error
@@ -115,6 +127,9 @@ jobs:
             dist/renvo-windows-386.exe \
             dist/renvo-windows-arm64.exe \
             dist/renvo-darwin-arm64 \
+            dist/renvo-freebsd-amd64 \
+            dist/renvo-openbsd-amd64 \
+            dist/renvo-netbsd-amd64 \
             dist/renvo-wasi-wasm32.wasm \
             dist/renvo-vm32.rnvb \
             --clobber

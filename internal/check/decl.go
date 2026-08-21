@@ -337,14 +337,29 @@ func isDeclSpanSeparator(file syntax.File, tok int) bool {
 }
 
 func sortDecls(decls []DeclInfo) {
-	for i := 1; i < len(decls); i++ {
-		item := decls[i]
-		j := i - 1
-		for j >= 0 && declAfter(decls[j], item) {
-			decls[j+1] = decls[j]
-			j--
+	for root := len(decls)/2 - 1; root >= 0; root-- {
+		siftDownDecls(decls, root, len(decls))
+	}
+	for end := len(decls) - 1; end > 0; end-- {
+		decls[0], decls[end] = decls[end], decls[0]
+		siftDownDecls(decls, 0, end)
+	}
+}
+
+func siftDownDecls(decls []DeclInfo, root int, end int) {
+	for {
+		child := root*2 + 1
+		if child >= end {
+			return
 		}
-		decls[j+1] = item
+		if child+1 < end && declAfter(decls[child+1], decls[child]) {
+			child++
+		}
+		if !declAfter(decls[child], decls[root]) {
+			return
+		}
+		decls[root], decls[child] = decls[child], decls[root]
+		root = child
 	}
 }
 

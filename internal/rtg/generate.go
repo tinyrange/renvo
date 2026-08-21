@@ -1938,8 +1938,8 @@ func embeddedSourceRange(source []byte, tokens []syntax.Token, start int, end in
 	if start < 0 || end <= start || end > len(tokens) {
 		return nil
 	}
-	sourceStart := tokens[start].Start
-	sourceEnd := tokens[end-1].End
+	sourceStart := syntax.TokenStart(tokens[start])
+	sourceEnd := syntax.TokenEnd(tokens[end-1])
 	if sourceStart < 0 || sourceEnd < sourceStart || sourceEnd > len(source) {
 		return nil
 	}

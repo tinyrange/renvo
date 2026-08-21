@@ -2,7 +2,7 @@
 
 package main
 
-const renvoSupportedTargets = "linux/amd64, linux/386, linux/aarch64, linux/arm, windows/amd64, windows/386, windows/arm64, darwin/arm64, wasi/wasm32, vm/vm32"
+const renvoSupportedTargets = "linux/amd64, linux/386, linux/aarch64, linux/arm, windows/amd64, windows/386, windows/arm64, darwin/arm64, wasi/wasm32, vm/vm32, freebsd/amd64, openbsd/amd64, netbsd/amd64"
 
 func renvoParseTargetArg(target string) int {
 	if target == "linux/amd64" {
@@ -37,6 +37,15 @@ func renvoParseTargetArg(target string) int {
 	}
 	if target == "vm/vm32" {
 		return renvoTargetVM32
+	}
+	if target == "freebsd/amd64" {
+		return renvoTargetFreeBSDAmd64
+	}
+	if target == "openbsd/amd64" {
+		return renvoTargetOpenBSDAmd64
+	}
+	if target == "netbsd/amd64" {
+		return renvoTargetNetBSDAmd64
 	}
 	return renvoRTGParseTargetArg(target)
 }
@@ -74,6 +83,15 @@ func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
 	}
 	if target == renvoTargetVM32 {
 		return "vm/vm32", "\x16\xc9۽7ԋG@;.Δ\xa4im\xae:\xa1R W@.\xb7\xa2-\b\xce9p|", 3, true
+	}
+	if target == renvoTargetFreeBSDAmd64 {
+		return "freebsd/amd64", "\xeb\xe8\x94C|\xb5L)\xe2\x15\xb0-~\xc4|#:\x94\xb3\xe7\x15\xf3h\xde\r\xd2j\r?Z\xf6\xf4", 3, true
+	}
+	if target == renvoTargetOpenBSDAmd64 {
+		return "openbsd/amd64", "1\xb4\x80\x1b\xd4i-\xe5\xbc\xc9\xc7\x0e\xac>\x8d\b\xb9K\xfd\xe3(I\x94F\xa4ιa\xfew\xb2\xb8", 3, true
+	}
+	if target == renvoTargetNetBSDAmd64 {
+		return "netbsd/amd64", "ƅџ\xe7\x12^\xb5\x92\xa7\x8d\xa4D\xc2\xe69\x1aބ\xed\x1aC\x97#\xe8様4~\xd7\x10", 3, true
 	}
 	return "", "", 0, false
 }

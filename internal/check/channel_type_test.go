@@ -39,5 +39,5 @@ func tokenSpanString(file syntax.File, start int, end int) string {
 	}
 	first := file.Tokens[start]
 	last := file.Tokens[end-1]
-	return string(file.Src[first.Start:last.End])
+	return string(file.Src[syntax.TokenStart(first):syntax.TokenEnd(last)])
 }

@@ -169,7 +169,7 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 					if offset := sourceGenericsOffset(file.Src); offset >= 0 {
 						d.Code, d.Message = "RENVO-PARSE-002", "generics are not supported by RENVO"
 						for i := 0; i < len(file.File.Tokens); i++ {
-							if file.File.Tokens[i].Start == offset {
+							if syntax.TokenStart(file.File.Tokens[i]) == offset {
 								file.File.ErrorTok = i
 								break
 							}
@@ -269,8 +269,8 @@ func renvoBuildDiagnosticLocation(result BuildResult, d Diagnostic) Diagnostic {
 	if tok < 0 || tok >= len(source.File.Tokens) {
 		return d
 	}
-	d.Start = source.File.Tokens[tok].Start
-	d.End = source.File.Tokens[tok].End
+	d.Start = syntax.TokenStart(source.File.Tokens[tok])
+	d.End = syntax.TokenEnd(source.File.Tokens[tok])
 	if renvoDiagnosticNamesToken(d.Code) && d.Start >= 0 && d.End > d.Start && d.End <= len(source.Src) {
 		d.Message += ": " + string(source.Src[d.Start:d.End])
 	}

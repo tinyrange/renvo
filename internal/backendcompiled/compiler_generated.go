@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "ecbd93de2790bdccfa9261302e7ef750115ba81a151bcce326aed79564fb21ea"
+const CompilerSourceDigest = "d701d64165eb1bc7bb36c36905aa25f81698694823f2813a52bbbf2fdfb79e95"
 
 // source: backend/compiler_common_impl.go
 
@@ -115,6 +115,7 @@ staticImports       []renvoStaticImport
 darwinImports       []renvoDarwinStaticImport
 darwinImportLabels  []int
 darwinImportUsed    []bool
+openbsdSyscalls     []int
 kernelImportNames   []byte
 kernelImportOffsets []int
 data                []byte
@@ -130,6 +131,8 @@ replSymbols         []renvoReplSymbol
 wasmLocalSlots      []int32
 c                   *renvoCompileContext
 patchFailed         bool
+syscallNumber       int
+syscallNumberKnown  bool
 }
 
 
@@ -9392,6 +9395,11 @@ targetType = renvoLocalTypeAtOffset(g, offset)
 }
 targetResolved := renvoResolveType(meta, targetType)
 renvoNonNil(targetResolved)
+trackSliceArena := globalOffset < 0 && fieldStackOffset < 0 && targetResolved.kind == renvoTypeSlice
+sliceArena := 0
+if trackSliceArena && renvoReturnedSliceCanReuseDescriptor(g, ep, rootIndex) {
+sliceArena = 1
+}
 trackLocalConst := globalOffset < 0 && fieldStackOffset < 0 && declaresLocal && renvoLocalConstTrackable(g, targetType, nameStart, nameEnd, stmt.endTok)
 localConst := renvoConstResult{}
 if trackLocalConst {
@@ -9412,6 +9420,9 @@ renvoAsmStoreSliceStack(a, offset)
 if renvoEmitAppendAssignGeneral(g, stmt, ep, assignTok) {
 if globalOffset < 0 && fieldStackOffset < 0 {
 renvoClearLocalConstAtOffset(g, offset)
+if sliceArena != 0 {
+renvoSetLocalConstAtOffset(g, offset, 0, targetResolved.kind)
+}
 }
 return true
 }
@@ -9521,6 +9532,9 @@ if trackLocalConst && localConst.ok {
 renvoSetLocalConstAtOffset(g, offset, localConst.value, targetResolved.kind)
 } else {
 renvoClearLocalConstAtOffset(g, offset)
+}
+if sliceArena != 0 {
+renvoSetLocalConstAtOffset(g, offset, 0, targetResolved.kind)
 }
 }
 return true
@@ -9962,55 +9976,9 @@ return
 
 func renvoLocalConstTrackable(g *renvoLinearGen, typ int, nameStart int, nameEnd int, afterTok int) bool {
 renvoNonNil(g)
-if renvoFixedTarget != 0 {
-return false
-}
-resolved := renvoResolveType(g.meta, typ)
-renvoNonNil(resolved)
-if !renvoTypeKindIsScalarInt(resolved.kind) {
-return false
-}
-return !renvoLocalNameWrittenAfter(g, nameStart, nameEnd, afterTok)
-}
 
-func renvoLocalNameWrittenAfter(g *renvoLinearGen, nameStart int, nameEnd int, afterTok int) bool {
-renvoNonNil(g)
-if nameEnd <= nameStart {
-return true
-}
-p := g.prog
-src := p.src
-nameSize := nameEnd - nameStart
-nameFirst := renvo_runtime_UnsafeByteAt(src, nameStart)
-end := renvoTokCount(p)
-if g.currentFunc >= 0 && g.currentFunc < len(g.meta.funcs) {
-end = g.meta.funcs[g.currentFunc].bodyEnd
-}
-i := afterTok
-if i < 0 {
-i = 0
-}
-for i < end {
-base := i * renvoTokenStride
-first := int(renvo_runtime_UnsafeInt32At(p.toks.data, base))
-packed := int(renvo_runtime_UnsafeInt32At(p.toks.data, base+1))
-tokenStart := packed & 0xffffff
-tokenEnd := tokenStart + (packed>>24&255 | first>>16&0xff00)
-if first&255 == renvoTokIdent && tokenEnd-tokenStart == nameSize && renvo_runtime_UnsafeByteAt(src, tokenStart) == nameFirst && renvoBytesEqualRange(src, tokenStart, tokenEnd, nameStart, nameEnd) {
-if i > 0 && renvoTokCharIs(p, i-1, '&') {
-return true
-}
-if renvoTok2Is(p, i+1, '+', '+') || renvoTok2Is(p, i+1, '-', '-') {
-return true
-}
-lineEnd := renvoStatementLineEnd(p, i, end)
-assignTok := renvoFindAssignmentToken(p, i, lineEnd)
-if assignTok > i {
-return true
-}
-}
-i++
-}
+
+
 return false
 }
 
@@ -10879,6 +10847,10 @@ return false
 e := &ep.exprs[idx]
 if e.kind == renvoExprCall {
 callee := renvoExprIdentCode(p, ep, e.left)
+if callee == renvoIdentMake && e.argCount >= 2 {
+capacity := renvoEvalConstExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+e.argCount-1))
+return !capacity.ok || capacity.value <= 0
+}
 if callee == renvoIdentAppend && e.argCount >= 1 {
 return renvoReturnedSliceCanReuseDescriptor(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
 }
@@ -10922,7 +10894,7 @@ localIndex := renvoFindLocalIndex(g, e.nameStart, e.nameEnd)
 if localIndex < 0 {
 return true
 }
-return renvoLocalIsCurrentFuncParam(g, localIndex)
+return g.locals[localIndex].constValid != 0 || renvoLocalIsCurrentFuncParam(g, localIndex)
 }
 
 func renvoLocalIsCurrentFuncParam(g *renvoLinearGen, localIndex int) bool {
@@ -12750,6 +12722,10 @@ renvoAsmStorePrimaryThreadState(g, renvoThreadPanicPrevOff)
 renvoAsmMarkLabel(&g.asm, noPrevious)
 renvoAsmLoadPrimaryStack(&g.asm, valueOffset)
 renvoAsmStorePrimaryThreadState(g, renvoThreadPanicValueOff)
+if g.c.renvoNativeIntSize == 4 {
+renvoAsmLoadPrimaryStack(&g.asm, valueOffset-4)
+renvoAsmStorePrimaryThreadState(g, renvoThreadPanicValueOff+4)
+}
 renvoAsmLoadPrimaryStack(&g.asm, valueOffset-renvoBackendValueSlotSize)
 renvoAsmStorePrimaryThreadState(g, renvoThreadPanicTypeOff)
 renvoAsmLoadPrimaryThreadState(g, renvoThreadPanicNextIDOff)
@@ -13038,8 +13014,10 @@ renvoAsmLoadPrimaryStack(a, g.panicRecoverAllowedOffset)
 renvoAsmJzPrimary(a, noneLabel)
 renvoAsmLoadPrimaryThreadState(g, renvoThreadPanicIDOff)
 renvoAsmJzPrimary(a, noneLabel)
-renvoAsmLoadPrimaryThreadState(g, renvoThreadPanicValueOff)
-renvoAsmStorePrimaryStack(a, offset)
+renvoAsmCopyThreadStateToStack(g, renvoThreadPanicValueOff, offset)
+if g.c.renvoNativeIntSize == 4 {
+renvoAsmCopyThreadStateToStack(g, renvoThreadPanicValueOff+4, offset-4)
+}
 renvoAsmCopyThreadStateToStack(g, renvoThreadPanicTypeOff, offset-renvoBackendValueSlotSize)
 renvoAsmStoreStackImm(a, g.panicRecoverAllowedOffset, 0)
 renvoAsmPrimaryImm(a, 1)
@@ -15960,7 +15938,12 @@ objectStringCapacity = cap(a.objectStrings.refs)
 
 
 
-return cap(a.code) + cap(a.labelPos) + cap(a.relocs) + cap(a.absRelocs) + cap(a.symbols) + cap(a.symbolName) + cap(a.staticImports) + cap(a.darwinImports) + cap(a.darwinImportLabels) + cap(a.darwinImportUsed) + cap(a.data) + cap(a.wasmLocalSlots) + objectStringCapacity + cap(g.breakLabels) + cap(g.continueLabels) + cap(m.types) + cap(m.fields) + cap(m.captures)
+capacity := cap(a.code) + cap(a.labelPos) + cap(a.relocs) + cap(a.absRelocs) + cap(a.symbols) + cap(a.symbolName) + cap(a.staticImports) + cap(a.darwinImports) + cap(a.darwinImportLabels) + cap(a.darwinImportUsed) + cap(a.data) + cap(a.wasmLocalSlots) + objectStringCapacity + cap(g.breakLabels) + cap(g.continueLabels) + cap(m.types) + cap(m.fields) + cap(m.captures)
+if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
+renvoFixedTarget == 0 && a.c.renvoTargetOS == renvoOSOpenBSD {
+capacity += cap(a.openbsdSyscalls)
+}
+return capacity
 }
 
 func renvoStoreIncomingCallWord(g *renvoLinearGen, word int, offset int) {
@@ -15989,6 +15972,11 @@ renvoAmd64StoreParamWord(g, word, offset)
 }
 func renvoAsmPrimaryImm(a *renvoAsm, imm int) {
 renvoNonNil(a)
+if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
+renvoFixedTarget == 0 && a.c.renvoTargetOS == renvoOSOpenBSD {
+a.syscallNumber = imm
+a.syscallNumberKnown = true
+}
 if renvoPreparedBackend != 0 {
 renvoRTGDirectMoveImmediate(a, renvoRTGPrimary, int64(imm))
 return
@@ -16298,7 +16286,29 @@ if a.c.renvoTargetArch == renvoArch386 {
 renvo386AsmSyscall(a)
 return
 }
+if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
+renvoFixedTarget == 0 && a.c.renvoTargetOS == renvoOSOpenBSD {
+if !a.syscallNumberKnown {
+a.patchFailed = true
+return
+}
+label := renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, label)
+a.openbsdSyscalls = append(a.openbsdSyscalls, label, a.syscallNumber)
+}
 renvoAsmEmit16(a, 0x050f)
+if renvoFixedTarget == renvoTargetFreeBSDAmd64 ||
+renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
+renvoFixedTarget == renvoTargetNetBSDAmd64 ||
+renvoFixedTarget == 0 && targetIsBSD(a.c.renvoTargetOS) {
+
+
+renvoAsmEmitText(a, "\x73\x03\x48\xf7\xd8")
+}
+if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
+renvoFixedTarget == 0 && a.c.renvoTargetOS == renvoOSOpenBSD {
+a.syscallNumberKnown = false
+}
 }
 func renvoAsmPopCallWord0(a *renvoAsm) {
 renvoNonNil(a)
@@ -18839,7 +18849,7 @@ if e.kind == renvoExprSelector {
 renvoLoadCompilerFixedTarget(g)
 value := renvoFixedTargetUnknown
 if g.fixedTargetState == 1 &&
-g.fixedTargetValue >= renvoTargetLinuxAmd64 && g.fixedTargetValue <= renvoTargetVM32 {
+g.fixedTargetValue >= renvoTargetLinuxAmd64 && g.fixedTargetValue <= renvoTargetNetBSDAmd64 {
 nameSize := e.nameEnd - e.nameStart
 if nameSize >= 5 && renvoBytesEqualText(g.prog.src, e.nameStart, e.nameStart+5, "renvo") {
 if nameSize == 15 {
@@ -23141,7 +23151,7 @@ return true
 renvoAsmPushImm(a, fd)
 renvoAsmPopCallWord0(a)
 renvoAsmCopyPrimaryToCallWord1(a)
-renvoAsmPrimaryImm(a, renvoLinuxSysWriteSeq(g.c.renvoTargetArch))
+renvoAsmPrimaryImm(a, renvoLinuxSysWriteSeq(g.c.renvoTargetOS, g.c.renvoTargetArch))
 renvoAsmSyscall(a)
 return true
 }
@@ -23150,7 +23160,7 @@ func renvoEmitBuiltinReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, s
 renvoNonNil(g, ep)
 if renvoPreparedBackend != 0 {
 operation := RTGRuntimeRead
-if seqSyscall == renvoLinuxSysWriteSeq(g.c.renvoTargetArch) ||
+if seqSyscall == renvoLinuxSysWriteSeq(g.c.renvoTargetOS, g.c.renvoTargetArch) ||
 seqSyscall == renvoDarwinImportWrite {
 operation = RTGRuntimeWrite
 }
@@ -23280,13 +23290,13 @@ if renvoBytesEqualText(p.src, nameStart, nameEnd, "O_RDWR") {
 return renvoConstResultOk(2)
 }
 if renvoBytesEqualText(p.src, nameStart, nameEnd, "O_CREATE") {
-if targetIsDarwin(g.c.renvoTargetOS) {
+if targetIsDarwin(g.c.renvoTargetOS) || targetIsBSD(g.c.renvoTargetOS) {
 return renvoConstResultOk(512)
 }
 return renvoConstResultOk(64)
 }
 if renvoBytesEqualText(p.src, nameStart, nameEnd, "O_TRUNC") {
-if targetIsDarwin(g.c.renvoTargetOS) {
+if targetIsDarwin(g.c.renvoTargetOS) || targetIsBSD(g.c.renvoTargetOS) {
 return renvoConstResultOk(1024)
 }
 return renvoConstResultOk(512)
@@ -23321,9 +23331,9 @@ return renvoEmitBuiltinReadWrite(g, ep, idx, renvoDarwinImportWrite, renvoDarwin
 return renvoEmitBuiltinReadWrite(g, ep, idx, renvoDarwinImportRead, renvoDarwinImportPread)
 }
 if isWrite {
-return renvoEmitBuiltinReadWrite(g, ep, idx, renvoLinuxSysWriteSeq(g.c.renvoTargetArch), renvoLinuxSysWriteAt(g.c.renvoTargetArch))
+return renvoEmitBuiltinReadWrite(g, ep, idx, renvoLinuxSysWriteSeq(g.c.renvoTargetOS, g.c.renvoTargetArch), renvoLinuxSysWriteAt(g.c.renvoTargetOS, g.c.renvoTargetArch))
 }
-return renvoEmitBuiltinReadWrite(g, ep, idx, renvoLinuxSysReadSeq(g.c.renvoTargetArch), renvoLinuxSysReadAt(g.c.renvoTargetArch))
+return renvoEmitBuiltinReadWrite(g, ep, idx, renvoLinuxSysReadSeq(g.c.renvoTargetOS, g.c.renvoTargetArch), renvoLinuxSysReadAt(g.c.renvoTargetOS, g.c.renvoTargetArch))
 }
 e := &ep.exprs[idx]
 a := &g.asm
@@ -23365,7 +23375,7 @@ renvoAsmCopyPrimaryToCallWord1(a)
 renvoAsmPopSecondary(a)
 renvoAarch64AsmMovRegImm(a, renvoAarch64RegRdi, -100)
 renvoAarch64AsmMovRegImm(a, renvoAarch64RegR10, 493)
-renvoAsmPrimaryImm(a, renvoLinuxSysOpen(g.c.renvoTargetArch))
+renvoAsmPrimaryImm(a, renvoLinuxSysOpen(g.c.renvoTargetOS, g.c.renvoTargetArch))
 renvoAsmSyscall(a)
 return true
 }
@@ -23379,7 +23389,7 @@ return false
 }
 renvoAsmCopyPrimaryToCallWord0(a)
 renvoAsmPopCallWord1(a)
-renvoAsmPrimaryImm(a, renvoLinuxSysOpen(g.c.renvoTargetArch))
+renvoAsmPrimaryImm(a, renvoLinuxSysOpen(g.c.renvoTargetOS, g.c.renvoTargetArch))
 renvoAsmSyscall(a)
 return true
 }
@@ -23397,7 +23407,7 @@ renvoAsmPopTertiary(a)
 renvoAsmPopCallWord1(a)
 }
 renvoAsmSecondaryImm(a, 493)
-renvoAsmPrimaryImm(a, renvoLinuxSysOpen(g.c.renvoTargetArch))
+renvoAsmPrimaryImm(a, renvoLinuxSysOpen(g.c.renvoTargetOS, g.c.renvoTargetArch))
 renvoAsmSyscall(a)
 return true
 }
@@ -23413,7 +23423,7 @@ if targetIsDarwin(g.c.renvoTargetOS) {
 renvoDarwinArm64CallVirtualArgs(a, renvoDarwinImportClose, 1)
 return true
 }
-renvoAsmPrimaryImm(a, renvoLinuxSysClose(g.c.renvoTargetArch))
+renvoAsmPrimaryImm(a, renvoLinuxSysClose(g.c.renvoTargetOS, g.c.renvoTargetArch))
 renvoAsmSyscall(a)
 return true
 }
@@ -23433,7 +23443,7 @@ if targetIsDarwin(g.c.renvoTargetOS) {
 renvoDarwinArm64CallVirtualArgs(a, renvoDarwinImportFchmod, 2)
 return true
 }
-renvoAsmPrimaryImm(a, renvoLinuxSysFchmod(g.c.renvoTargetArch))
+renvoAsmPrimaryImm(a, renvoLinuxSysFchmod(g.c.renvoTargetOS, g.c.renvoTargetArch))
 renvoAsmSyscall(a)
 return true
 }
@@ -23534,7 +23544,7 @@ if targetIsWindows(g.c.renvoTargetOS) {
 renvoWinAmd64EmitExit(a)
 } else {
 renvoAsmCopyPrimaryToCallWord0(a)
-renvoAsmPrimaryImm(a, 60)
+renvoAsmPrimaryImm(a, renvoHostedAmd64SysExit(g.c.renvoTargetOS))
 renvoAsmSyscall(a)
 }
 return true
@@ -23698,6 +23708,14 @@ return renvoEmitRuntimeArenaDiscardStackRange(g, startOff, endOff)
 
 func renvoEmitRuntimeArenaDiscardStackRange(g *renvoLinearGen, startOff int, endOff int) bool {
 renvoNonNil(g)
+if renvoFixedTarget != 0 &&
+renvoFixedTarget != renvoTargetLinuxAmd64 &&
+renvoFixedTarget != renvoTargetLinux386 &&
+renvoFixedTarget != renvoTargetLinuxAarch64 &&
+renvoFixedTarget != renvoTargetLinuxArm ||
+renvoFixedTarget == 0 && g.c.renvoTargetOS != renvoOSLinux {
+return true
+}
 a := &g.asm
 lenOff := renvoAddUnnamedLocal(g, renvoTypeInt)
 doneLabel := renvoAsmNewLabel(a)
@@ -23913,6 +23931,15 @@ if !number.ok || number.value != 217 {
 return false
 }
 }
+syscallNumber := -1
+if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
+renvoFixedTarget == 0 && g.c.renvoTargetOS == renvoOSOpenBSD {
+number := renvoEvalConstExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
+if !number.ok {
+return false
+}
+syscallNumber = number.value
+}
 for i := e.argCount - 1; i >= 0; i-- {
 argIndex := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+i)
 if !renvoEmitSyscallArg(g, ep, argIndex) {
@@ -23920,7 +23947,7 @@ return false
 }
 renvoAsmPushPrimary(&g.asm)
 }
-return renvoEmitSyscallFromStack(g, e.argCount)
+return renvoEmitSyscallFromStack(g, e.argCount, syscallNumber)
 }
 
 
@@ -24022,7 +24049,7 @@ return true
 return renvoEmitIntExpr(g, ep, idx)
 }
 
-func renvoEmitSyscallFromStack(g *renvoLinearGen, wordCount int) bool {
+func renvoEmitSyscallFromStack(g *renvoLinearGen, wordCount int, syscallNumber int) bool {
 renvoNonNil(g)
 a := &g.asm
 if renvoPreparedBackend != 0 {
@@ -24067,6 +24094,11 @@ renvoAsmEmit16(a, 0x5841)
 }
 if wordCount > 6 {
 renvoAsmEmit16(a, 0x5941)
+}
+if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
+renvoFixedTarget == 0 && g.c.renvoTargetOS == renvoOSOpenBSD {
+a.syscallNumber = syscallNumber
+a.syscallNumberKnown = syscallNumber >= 0
 }
 renvoAsmSyscall(a)
 return true
@@ -24195,7 +24227,10 @@ func compileLinuxTarget(input []int, output int, target int) int {
 return compileTarget(input, output, target, 0)
 }
 
-func renvoLinuxSysWriteSeq(renvoTargetArch int) int {
+func renvoLinuxSysWriteSeq(renvoTargetOS int, renvoTargetArch int) int {
+if renvoTargetArch == renvoArchAmd64 && targetIsBSD(renvoTargetOS) {
+return renvoBSDAmd64SysWriteSeq
+}
 if renvoTargetArch == renvoArchAarch64 {
 return 64
 }
@@ -24208,7 +24243,10 @@ return 4
 return 1
 }
 
-func renvoLinuxSysReadSeq(renvoTargetArch int) int {
+func renvoLinuxSysReadSeq(renvoTargetOS int, renvoTargetArch int) int {
+if renvoTargetArch == renvoArchAmd64 && targetIsBSD(renvoTargetOS) {
+return renvoBSDAmd64SysReadSeq
+}
 if renvoTargetArch == renvoArchAarch64 {
 return 63
 }
@@ -24221,7 +24259,19 @@ return 3
 return 0
 }
 
-func renvoLinuxSysReadAt(renvoTargetArch int) int {
+func renvoLinuxSysReadAt(renvoTargetOS int, renvoTargetArch int) int {
+if renvoTargetArch == renvoArchAmd64 {
+if renvoTargetOS == renvoOSFreeBSD {
+return renvoFreeBSDAmd64SysReadAt
+}
+if renvoTargetOS == renvoOSOpenBSD {
+return renvoOpenBSDAmd64SysReadAt
+}
+if renvoTargetOS == renvoOSNetBSD {
+return renvoNetBSDAmd64SysReadAt
+}
+return 17
+}
 if renvoTargetArch == renvoArchAarch64 {
 return 67
 }
@@ -24234,20 +24284,14 @@ return 180
 return 17
 }
 
-func renvoLinuxSysWriteAt(renvoTargetArch int) int {
-if renvoTargetArch == renvoArchAarch64 {
-return 68
-}
-if renvoTargetArch == renvoArchArm {
-return 181
-}
-if renvoTargetArch == renvoArch386 {
-return 181
-}
-return 18
+func renvoLinuxSysWriteAt(renvoTargetOS int, renvoTargetArch int) int {
+return renvoLinuxSysReadAt(renvoTargetOS, renvoTargetArch) + 1
 }
 
-func renvoLinuxSysOpen(renvoTargetArch int) int {
+func renvoLinuxSysOpen(renvoTargetOS int, renvoTargetArch int) int {
+if renvoTargetArch == renvoArchAmd64 && targetIsBSD(renvoTargetOS) {
+return renvoBSDAmd64SysOpen
+}
 if renvoTargetArch == renvoArchAarch64 {
 return 56
 }
@@ -24260,7 +24304,10 @@ return 5
 return 2
 }
 
-func renvoLinuxSysClose(renvoTargetArch int) int {
+func renvoLinuxSysClose(renvoTargetOS int, renvoTargetArch int) int {
+if renvoTargetArch == renvoArchAmd64 && targetIsBSD(renvoTargetOS) {
+return renvoBSDAmd64SysClose
+}
 if renvoTargetArch == renvoArchAarch64 {
 return 57
 }
@@ -24273,7 +24320,10 @@ return 6
 return 3
 }
 
-func renvoLinuxSysFchmod(renvoTargetArch int) int {
+func renvoLinuxSysFchmod(renvoTargetOS int, renvoTargetArch int) int {
+if renvoTargetArch == renvoArchAmd64 && targetIsBSD(renvoTargetOS) {
+return renvoBSDAmd64SysFchmod
+}
 if renvoTargetArch == renvoArchAarch64 {
 return 52
 }
@@ -24284,6 +24334,13 @@ if renvoTargetArch == renvoArch386 {
 return 94
 }
 return 91
+}
+
+func renvoHostedAmd64SysExit(renvoTargetOS int) int {
+if targetIsBSD(renvoTargetOS) {
+return renvoBSDAmd64SysExit
+}
+return 60
 }
 
 func renvoAsmPrepareReadWriteBuf(a *renvoAsm) {
@@ -24719,10 +24776,13 @@ const renvoTargetDarwinArm64 = 8
 const renvoTargetLinuxKernelAmd64 = 9
 const renvoTargetWindowsArm64 = 10
 const renvoTargetVM32 = 11
+const renvoTargetFreeBSDAmd64 = 12
+const renvoTargetOpenBSDAmd64 = 13
+const renvoTargetNetBSDAmd64 = 14
 
-const targetOSTable = "\x00\x01\x01\x01\x01\x02\x02\x04\x03\x01\x02\x05"
-const targetArchTable = "\x00\x01\x02\x03\x04\x01\x02\x05\x03\x01\x03\x05"
-const renvoTargetIntBitsTable = "\x00@ @ @  @@@ "
+const targetOSTable = "\x00\x01\x01\x01\x01\x02\x02\x04\x03\x01\x02\x05\a\b\t"
+const targetArchTable = "\x00\x01\x02\x03\x04\x01\x02\x05\x03\x01\x03\x05\x01\x01\x01"
+const renvoTargetIntBitsTable = "\x00@ @ @  @@@ @@@"
 
 
 
@@ -24739,10 +24799,13 @@ const renvoOSDarwin = 3
 const renvoOSWasi = 4
 const renvoOSVM = 5
 const renvoOSRTG = 6
+const renvoOSFreeBSD = 7
+const renvoOSOpenBSD = 8
+const renvoOSNetBSD = 9
 
 
 
-const renvoTargetRTG = 12
+const renvoTargetRTG = 15
 
 const renvoEndianLittle = 1
 const renvoEndianBig = 2
@@ -24837,7 +24900,7 @@ p.funcPointerBits = p.intBits
 p.maxAlign = p.intBits / 8
 return p, true
 }
-if target < renvoTargetLinuxAmd64 || target > renvoTargetVM32 {
+if target < renvoTargetLinuxAmd64 || target > renvoTargetNetBSDAmd64 {
 return p, false
 }
 p.target = target
@@ -24963,7 +25026,7 @@ context.emitImage = emitImage
 if windowsGUI {
 context.windowsSubsystem = 2
 }
-if target >= renvoTargetLinuxAmd64 && target <= renvoTargetVM32 {
+if target >= renvoTargetLinuxAmd64 && target <= renvoTargetNetBSDAmd64 {
 context.renvoTargetOS = int(targetOSTable[target])
 context.renvoTargetArch = int(targetArchTable[target])
 context.renvoNativeIntSize = int(renvoTargetIntBitsTable[target]) / 8
@@ -25044,7 +25107,7 @@ renvoNativeIntSize = renvoRTGPreparedIntBits / 8
 return
 }
 renvoTarget = target
-if target >= renvoTargetLinuxAmd64 && target <= renvoTargetVM32 {
+if target >= renvoTargetLinuxAmd64 && target <= renvoTargetNetBSDAmd64 {
 renvoTargetOS = int(targetOSTable[target])
 renvoTargetArch = int(targetArchTable[target])
 renvoNativeIntSize = int(renvoTargetIntBitsTable[target]) / 8
@@ -25078,6 +25141,10 @@ func targetIsDarwin(renvoTargetOS int) bool {
 return renvoTargetOS == renvoOSDarwin
 }
 
+func targetIsBSD(renvoTargetOS int) bool {
+return renvoTargetOS >= renvoOSFreeBSD && renvoTargetOS <= renvoOSNetBSD
+}
+
 const renvoFixedTargetUnknown = -2147483647
 
 func renvoEvalFixedTargetInt(g *renvoLinearGen, ep *renvoExprParse, idx int, fixedTarget int, fixedTargetKnown bool) int {
@@ -25098,7 +25165,7 @@ if e.kind == renvoExprBool {
 return renvoBoolTokenValue(p, e.tok)
 }
 if (e.kind == renvoExprIdent || e.kind == renvoExprSelector) &&
-fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetVM32 {
+fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetNetBSDAmd64 {
 nameSize := e.nameEnd - e.nameStart
 if nameSize == 15 && renvoBytesEqualText(p.src, e.nameStart, e.nameEnd, "renvoTargetArch") {
 return int(targetArchTable[fixedTarget])
@@ -25143,12 +25210,17 @@ return 0
 }
 return -1
 }
-if e.kind == renvoExprCall && fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetVM32 {
+if e.kind == renvoExprCall && fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetNetBSDAmd64 {
 wantOS := 0
 if renvoExprIsIdentText(g.prog, ep, e.left, "targetIsWindows") {
 wantOS = renvoOSWindows
 } else if renvoExprIsIdentText(g.prog, ep, e.left, "targetIsDarwin") {
 wantOS = renvoOSDarwin
+} else if renvoExprIsIdentText(g.prog, ep, e.left, "targetIsBSD") {
+if int(targetOSTable[fixedTarget]) >= renvoOSFreeBSD {
+return 1
+}
+return 0
 }
 if wantOS != 0 {
 if int(targetOSTable[fixedTarget]) == wantOS {
@@ -25278,14 +25350,17 @@ return a, b
 func renvoAsmSetDataOffsets(a *renvoAsm) {
 renvoNonNil(a)
 a.dataOffset = a.codeOffset + len(a.code)
-if a.c.renvoTargetOS == renvoOSLinux {
+if a.c.renvoTargetOS == renvoOSOpenBSD {
+a.dataOffset = renvoAlignValue(a.dataOffset, 0x1000)
+}
+if a.c.renvoTargetOS == renvoOSLinux || targetIsBSD(a.c.renvoTargetOS) {
 a.bssOffset = renvoAlignValue(a.dataOffset+len(a.data), 0x1000)
 }
 }
 
 // source: backend/compiler_target_registry_impl.go
 
-const renvoSupportedTargets = "linux/amd64, linux/386, linux/aarch64, linux/arm, windows/amd64, windows/386, windows/arm64, darwin/arm64, wasi/wasm32, vm/vm32"
+const renvoSupportedTargets = "linux/amd64, linux/386, linux/aarch64, linux/arm, windows/amd64, windows/386, windows/arm64, darwin/arm64, wasi/wasm32, vm/vm32, freebsd/amd64, openbsd/amd64, netbsd/amd64"
 
 func renvoParseTargetArg(target string) int {
 if target == "linux/amd64" {
@@ -25320,6 +25395,15 @@ return renvoTargetWindowsArm64
 }
 if target == "vm/vm32" {
 return renvoTargetVM32
+}
+if target == "freebsd/amd64" {
+return renvoTargetFreeBSDAmd64
+}
+if target == "openbsd/amd64" {
+return renvoTargetOpenBSDAmd64
+}
+if target == "netbsd/amd64" {
+return renvoTargetNetBSDAmd64
 }
 return renvoRTGParseTargetArg(target)
 }
@@ -25357,6 +25441,15 @@ return "windows/arm64", "\x8d\r\xe8\xa0ת>\xa4C6N\xde8X\xdb\xc0\x81>+\xa5\xdb\xc
 }
 if target == renvoTargetVM32 {
 return "vm/vm32", "\x16\xc9۽7ԋG@;.Δ\xa4im\xae:\xa1R W@.\xb7\xa2-\b\xce9p|", 3, true
+}
+if target == renvoTargetFreeBSDAmd64 {
+return "freebsd/amd64", "\xeb\xe8\x94C|\xb5L)\xe2\x15\xb0-~\xc4|#:\x94\xb3\xe7\x15\xf3h\xde\r\xd2j\r?Z\xf6\xf4", 3, true
+}
+if target == renvoTargetOpenBSDAmd64 {
+return "openbsd/amd64", "1\xb4\x80\x1b\xd4i-\xe5\xbc\xc9\xc7\x0e\xac>\x8d\b\xb9K\xfd\xe3(I\x94F\xa4ιa\xfew\xb2\xb8", 3, true
+}
+if target == renvoTargetNetBSDAmd64 {
+return "netbsd/amd64", "ƅџ\xe7\x12^\xb5\x92\xa7\x8d\xa4D\xc2\xe69\x1aބ\xed\x1aC\x97#\xe8様4~\xd7\x10", 3, true
 }
 return "", "", 0, false
 }
@@ -25463,6 +25556,9 @@ if renvoFixedTarget == renvoTargetLinuxArm {
 renvoFixedTarget = renvoTargetLinuxArm
 return compileLinuxArmArena(input, output, arenaSize)
 }
+if renvoFixedTarget >= renvoTargetFreeBSDAmd64 && renvoFixedTarget <= renvoTargetNetBSDAmd64 {
+return compileBSDAmd64Arena(input, output, renvoFixedTarget, arenaSize)
+}
 renvoFixedTarget = renvoTargetLinuxAmd64
 return compileLinuxAmd64Arena(input, output, arenaSize)
 }
@@ -25496,10 +25592,18 @@ return compileLinuxAarch64Arena(input, output, arenaSize)
 if target == renvoTargetLinuxArm {
 return compileLinuxArmArena(input, output, arenaSize)
 }
+if target >= renvoTargetFreeBSDAmd64 && target <= renvoTargetNetBSDAmd64 {
+return compileBSDAmd64Arena(input, output, target, arenaSize)
+}
 if target != renvoTargetLinuxAmd64 {
 return 1
 }
 return compileLinuxAmd64Arena(input, output, arenaSize)
+}
+
+func compileBSDAmd64Arena(input []int, output int, target int, arenaSize int) int {
+renvoSetTarget(target)
+return renvoCompileAmd64(input, output, arenaSize)
 }
 
 func RenvoCompileSourceToBytes(source []byte, targetName string) ([]byte, bool) {
@@ -27295,6 +27399,13 @@ return 1
 const renvoAmd64ELFCodeOffset = 0xb0
 const renvoAmd64RuntimeOptimizationSourceThreshold = 1048576
 
+const renvoHostedAmd64ArgsBSSSize = renvoLinuxAmd64ArgsBSSSize
+const renvoHostedAmd64ArgsBSSAlignment = renvoLinuxAmd64ArgsBSSAlignment
+const renvoHostedAmd64EnvironmentBSSSize = renvoLinuxAmd64EnvironmentBSSSize
+const renvoHostedAmd64EnvironmentBSSAlignment = renvoLinuxAmd64EnvironmentBSSAlignment
+const renvoHostedAmd64EnvironmentLengthBSSSize = renvoLinuxAmd64EnvironmentLengthBSSSize
+const renvoHostedAmd64EnvironmentLengthBSSAlignment = renvoLinuxAmd64EnvironmentLengthBSSAlignment
+
 func renvoCompileAmd64(input []int, output int, arenaSize int) int {
 if (renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
 renvoFixedTarget == 0 && renvoTarget == renvoTargetLinuxKernelAmd64) &&
@@ -27384,6 +27495,14 @@ if renvoFixedTarget == 0 {
 g.c.optimizeRuntime = len(p.src) >= renvoAmd64RuntimeOptimizationSourceThreshold
 }
 a.codeOffset = renvoAmd64ELFCodeOffset
+if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
+renvoFixedTarget == 0 && meta.c.renvoTargetOS == renvoOSOpenBSD {
+a.codeOffset = renvoOpenBSDAmd64ELFCodeOffset
+}
+if renvoFixedTarget == renvoTargetNetBSDAmd64 ||
+renvoFixedTarget == 0 && meta.c.renvoTargetOS == renvoOSNetBSD {
+a.codeOffset = renvoNetBSDAmd64ELFCodeOffset
+}
 if targetIsWindows(meta.c.renvoTargetOS) {
 a.codeOffset = renvoWinSectionRVA
 }
@@ -27403,6 +27522,13 @@ return nil
 return g
 }
 renvoLinearMarkFunc(g, appIndex)
+if renvoFixedTarget == renvoTargetFreeBSDAmd64 ||
+renvoFixedTarget == 0 && meta.c.renvoTargetOS == renvoOSFreeBSD {
+
+
+
+renvoAsmEmitText(a, "\x48\x89\xfc")
+}
 if renvoFixedTarget == 0 && meta.c.emitImage {
 
 
@@ -27441,7 +27567,7 @@ renvoWinAmd64EmitExit(a)
 renvoAsmRet(a)
 } else {
 renvoAsmCopyPrimaryToCallWord0(a)
-renvoAsmPrimaryImm(a, 60)
+renvoAsmPrimaryImm(a, renvoHostedAmd64SysExit(meta.c.renvoTargetOS))
 renvoAsmSyscall(a)
 }
 return g
@@ -27542,14 +27668,14 @@ g.asm.bssSize, renvoWindowsAmd64EnvironmentLengthBSSAlignment)
 g.asm.bssSize = envLenOff + renvoWindowsAmd64EnvironmentLengthBSSSize
 renvoAsmBuildWindowsArgvEnvSlicesAmd64(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
 } else {
-argsOff = renvoAlignValue(g.asm.bssSize, renvoLinuxAmd64ArgsBSSAlignment)
-g.asm.bssSize = argsOff + renvoLinuxAmd64ArgsBSSSize
+argsOff = renvoAlignValue(g.asm.bssSize, renvoHostedAmd64ArgsBSSAlignment)
+g.asm.bssSize = argsOff + renvoHostedAmd64ArgsBSSSize
 envDataOff := renvoAlignValue(
-g.asm.bssSize, renvoLinuxAmd64EnvironmentBSSAlignment)
-g.asm.bssSize = envDataOff + renvoLinuxAmd64EnvironmentBSSSize
+g.asm.bssSize, renvoHostedAmd64EnvironmentBSSAlignment)
+g.asm.bssSize = envDataOff + renvoHostedAmd64EnvironmentBSSSize
 envLenOff := renvoAlignValue(
-g.asm.bssSize, renvoLinuxAmd64EnvironmentLengthBSSAlignment)
-g.asm.bssSize = envLenOff + renvoLinuxAmd64EnvironmentLengthBSSSize
+g.asm.bssSize, renvoHostedAmd64EnvironmentLengthBSSAlignment)
+g.asm.bssSize = envLenOff + renvoHostedAmd64EnvironmentLengthBSSSize
 renvoAsmBuildArgvEnvSlicesAmd64(&g.asm, argsOff, envDataOff, envLenOff)
 }
 if app.paramCount == 1 {
@@ -34002,8 +34128,9 @@ const renvoLinuxAmd64ELFMachine = 62
 func renvoAsmImageAmd64(a *renvoAsm) []byte {
 renvoNonNil(a)
 renvoAsmPatch(a)
-loadFileSize := a.codeOffset + len(a.code) + len(a.data)
+loadFileSize := a.dataOffset + len(a.data)
 bssOffset := renvoAsmBssOffset(a)
+syscallTableSize := len(a.openbsdSyscalls) / 2 * 8
 if a.c.stripSymbols {
 oldCodeLen := len(a.code)
 var out []byte
@@ -34021,7 +34148,7 @@ out[a.codeOffset+i-1] = out[i-1]
 }
 }
 var header []byte
-header = renvoAppendElfHeaderAmd64(header, a.codeOffset, loadFileSize, bssOffset, a.bssSize, 0)
+header = renvoAppendElfHeaderAmd64(header, a, a.codeOffset, loadFileSize, bssOffset, a.bssSize, 0, loadFileSize, syscallTableSize)
 if renvoFixedTarget == 0 {
 copy(out, header)
 } else {
@@ -34029,7 +34156,10 @@ for i := 0; i < len(header); i++ {
 out[i] = header[i]
 }
 }
-pos := a.codeOffset + oldCodeLen
+pos := a.dataOffset
+if a.c.renvoTargetOS == renvoOSOpenBSD {
+out = renvoAppendOpenBSDSyscallTable(out, a)
+}
 if renvoFixedTarget == 0 {
 copy(out[pos:], a.data)
 } else {
@@ -34045,12 +34175,15 @@ return out
 var sec renvoElfSymbolSections
 renvoBuildElfSymbolSections(a, 0, a.codeOffset, loadFileSize, &sec)
 finalSize := sec.shoff + 448
+syscallTableOff := finalSize
+finalSize += syscallTableSize
 out := make([]byte, finalSize)
 renvoTruncBytes(&out, 0)
-out = renvoAppendElfHeaderAmd64(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff)
+out = renvoAppendElfHeaderAmd64(out, a, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff, syscallTableOff, syscallTableSize)
 for i := 0; i < len(a.code); i++ {
 out = append(out, a.code[i])
 }
+out = renvoAppendUntil(out, a.dataOffset)
 for i := 0; i < len(a.data); i++ {
 out = append(out, a.data[i])
 }
@@ -34068,13 +34201,22 @@ out = append(out, sec.shstrtab[i])
 }
 out = renvoAppendUntil(out, sec.shoff)
 out = renvoAppendElfSectionHeaders(out, &sec, a, 0)
+if a.c.renvoTargetOS == renvoOSOpenBSD {
+out = renvoAppendOpenBSDSyscallTable(out, a)
+}
 if renvoFixedTarget == 0 {
 return renvoAppendReplLinkTable(out, a)
 }
 return out
 }
 
-func renvoAppendElfHeaderAmd64(out []byte, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int) []byte {
+func renvoAppendElfHeaderAmd64(out []byte, a *renvoAsm, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int, syscallTableOff int, syscallTableSize int) []byte {
+if a.c.renvoTargetOS == renvoOSOpenBSD {
+return renvoAppendOpenBSDElfHeaderAmd64(out, entryOff, a.dataOffset, fileSize, bssOffset, bssSize, shoff, syscallTableOff, syscallTableSize)
+}
+if a.c.renvoTargetOS == renvoOSNetBSD {
+return renvoAppendNetBSDElfHeaderAmd64(out, entryOff, fileSize, bssOffset, bssSize, shoff)
+}
 start := len(out)
 base := 0
 header := "\x7f\x45\x4c\x46\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x38\x00\x02\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x05\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00"
@@ -34083,6 +34225,9 @@ out = append(out, header[i])
 }
 out[start+18] = byte(renvoLinuxAmd64ELFMachine)
 out[start+19] = byte(renvoLinuxAmd64ELFMachine >> 8)
+if a.c.renvoTargetOS == renvoOSFreeBSD {
+out[start+7] = 9
+}
 
 
 out[start+16] = 3
@@ -34099,6 +34244,127 @@ renvoPut32At(out, start+96, fileSize)
 renvoPut32At(out, start+104, fileSize)
 out = renvoAppendElf64LoadProgram(out, 6, bssOffset, base+bssOffset, 0, bssSize)
 return out
+}
+
+func renvoAppendElf64Program(out []byte, kind int, flags int, offset int, address int, fileSize int, memorySize int, alignment int) []byte {
+out = renvoAppend32(out, kind)
+out = renvoAppend32(out, flags)
+out = renvoAppend64(out, offset)
+out = renvoAppend64(out, address)
+out = renvoAppend64(out, address)
+out = renvoAppend64(out, fileSize)
+out = renvoAppend64(out, memorySize)
+return renvoAppend64(out, alignment)
+}
+
+// source: backend/compiler_freebsd_amd64_impl.go
+
+
+const renvoBSDAmd64SysReadSeq = 3
+const renvoBSDAmd64SysWriteSeq = 4
+const renvoBSDAmd64SysOpen = 5
+const renvoBSDAmd64SysClose = 6
+const renvoFreeBSDAmd64SysReadAt = 475
+const renvoFreeBSDAmd64SysWriteAt = 476
+const renvoBSDAmd64SysFchmod = 124
+const renvoBSDAmd64SysExit = 1
+
+// source: backend/compiler_openbsd_amd64_impl.go
+
+
+const renvoOpenBSDAmd64SysReadAt = 169
+const renvoOpenBSDAmd64SysWriteAt = 170
+
+
+const renvoOpenBSDAmd64ELFCodeOffset = 432
+const renvoOpenBSDPTSyscalls = 0x65a3dbe9
+
+func renvoAppendOpenBSDElfHeaderAmd64(out []byte, entryOff int, dataOffset int, fileSize int, bssOffset int, bssSize int, shoff int, syscallTableOff int, syscallTableSize int) []byte {
+start := len(out)
+header := "\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x03\x00\x3e\x00\x01\x00\x00\x00"
+for i := 0; i < len(header); i++ {
+out = append(out, header[i])
+}
+out = renvoAppendUntil(out, start+64)
+renvoPut32At(out, start+24, entryOff)
+renvoPut32At(out, start+32, 64)
+renvoPut32At(out, start+40, shoff)
+out[start+52] = 64
+out[start+54] = 56
+out[start+56] = 6
+if shoff != 0 {
+out[start+58] = 64
+out[start+60] = 7
+out[start+62] = 6
+}
+out = renvoAppendElf64Program(out, 6, 4, 64, 64, 336, 336, 8)
+dataFileSize := fileSize - dataOffset
+out = renvoAppendElf64LoadProgram(out, 5, 0, 0, dataOffset, dataOffset)
+out = renvoAppendElf64LoadProgram(out, 4, dataOffset, dataOffset, dataFileSize, dataFileSize)
+out = renvoAppendElf64LoadProgram(out, 6, bssOffset, bssOffset, 0, bssSize)
+out = renvoAppendElf64Program(out, 4, 4, 400, 400, 24, 24, 4)
+out = renvoAppendElf64Program(out, renvoOpenBSDPTSyscalls, 4, syscallTableOff, 0, syscallTableSize, syscallTableSize, 4)
+out = renvoAppendOpenBSDIdentNote(out)
+return renvoAppendUntil(out, start+renvoOpenBSDAmd64ELFCodeOffset)
+}
+
+func renvoAppendOpenBSDIdentNote(out []byte) []byte {
+out = renvoAppend32(out, 8)
+out = renvoAppend32(out, 4)
+out = renvoAppend32(out, 1)
+out = append(out, 'O', 'p', 'e', 'n', 'B', 'S', 'D', 0)
+return renvoAppend32(out, 0)
+}
+
+func renvoAppendOpenBSDSyscallTable(out []byte, a *renvoAsm) []byte {
+for i := 0; i+1 < len(a.openbsdSyscalls); i += 2 {
+label := a.openbsdSyscalls[i]
+if label < 0 || label >= len(a.labelPos) || a.labelPos[label] < 0 {
+a.patchFailed = true
+return out
+}
+out = renvoAppend32(out, a.codeOffset+int(a.labelPos[label]))
+out = renvoAppend32(out, a.openbsdSyscalls[i+1])
+}
+return out
+}
+
+// source: backend/compiler_netbsd_amd64_impl.go
+
+
+const renvoNetBSDAmd64SysReadAt = 173
+const renvoNetBSDAmd64SysWriteAt = 174
+
+
+const renvoNetBSDAmd64ELFCodeOffset = 256
+const renvoNetBSDAmd64ImageBase = 0x400000
+
+func renvoAppendNetBSDElfHeaderAmd64(out []byte, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int) []byte {
+start := len(out)
+header := "\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x3e\x00\x01\x00\x00\x00"
+for i := 0; i < len(header); i++ {
+out = append(out, header[i])
+}
+out = renvoAppendUntil(out, start+64)
+renvoPut32At(out, start+24, renvoNetBSDAmd64ImageBase+entryOff)
+renvoPut32At(out, start+32, 64)
+renvoPut32At(out, start+40, shoff)
+out[start+52] = 64
+out[start+54] = 56
+out[start+56] = 3
+if shoff != 0 {
+out[start+58] = 64
+out[start+60] = 7
+out[start+62] = 6
+}
+out = renvoAppendElf64Program(out, 1, 5, 0, renvoNetBSDAmd64ImageBase, fileSize, fileSize, 0x1000)
+out = renvoAppendElf64Program(out, 1, 6, bssOffset, renvoNetBSDAmd64ImageBase+bssOffset, 0, bssSize, 0x1000)
+out = renvoAppendElf64Program(out, 4, 4, 232, renvoNetBSDAmd64ImageBase+232, 24, 24, 4)
+out = renvoAppend32(out, 7)
+out = renvoAppend32(out, 4)
+out = renvoAppend32(out, 1)
+out = append(out, 'N', 'e', 't', 'B', 'S', 'D', 0, 0)
+return renvoAppend32(out, 1100000000)
 }
 
 // source: backend/compiler_windows_amd64_impl.go

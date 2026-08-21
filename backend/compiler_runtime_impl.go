@@ -206,7 +206,7 @@ func renvoEmitWriteValueRegs(g *renvoLinearGen, fd int) bool {
 	renvoAsmPushImm(a, fd)
 	renvoAsmPopCallWord0(a)
 	renvoAsmCopyPrimaryToCallWord1(a)
-	renvoAsmPrimaryImm(a, renvoLinuxSysWriteSeq(g.c.renvoTargetArch))
+	renvoAsmPrimaryImm(a, renvoLinuxSysWriteSeq(g.c.renvoTargetOS, g.c.renvoTargetArch))
 	renvoAsmSyscall(a)
 	return true
 }
@@ -215,7 +215,7 @@ func renvoEmitBuiltinReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, s
 	renvoNonNil(g, ep)
 	if renvoPreparedBackend != 0 {
 		operation := RTGRuntimeRead
-		if seqSyscall == renvoLinuxSysWriteSeq(g.c.renvoTargetArch) ||
+		if seqSyscall == renvoLinuxSysWriteSeq(g.c.renvoTargetOS, g.c.renvoTargetArch) ||
 			seqSyscall == renvoDarwinImportWrite {
 			operation = RTGRuntimeWrite
 		}
@@ -345,13 +345,13 @@ func renvoEvalBuiltinConst(g *renvoLinearGen, nameStart int, nameEnd int) renvoC
 		return renvoConstResultOk(2)
 	}
 	if renvoBytesEqualText(p.src, nameStart, nameEnd, "O_CREATE") {
-		if targetIsDarwin(g.c.renvoTargetOS) {
+		if targetIsDarwin(g.c.renvoTargetOS) || targetIsBSD(g.c.renvoTargetOS) {
 			return renvoConstResultOk(512)
 		}
 		return renvoConstResultOk(64)
 	}
 	if renvoBytesEqualText(p.src, nameStart, nameEnd, "O_TRUNC") {
-		if targetIsDarwin(g.c.renvoTargetOS) {
+		if targetIsDarwin(g.c.renvoTargetOS) || targetIsBSD(g.c.renvoTargetOS) {
 			return renvoConstResultOk(1024)
 		}
 		return renvoConstResultOk(512)
@@ -386,9 +386,9 @@ func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, call
 			return renvoEmitBuiltinReadWrite(g, ep, idx, renvoDarwinImportRead, renvoDarwinImportPread)
 		}
 		if isWrite {
-			return renvoEmitBuiltinReadWrite(g, ep, idx, renvoLinuxSysWriteSeq(g.c.renvoTargetArch), renvoLinuxSysWriteAt(g.c.renvoTargetArch))
+			return renvoEmitBuiltinReadWrite(g, ep, idx, renvoLinuxSysWriteSeq(g.c.renvoTargetOS, g.c.renvoTargetArch), renvoLinuxSysWriteAt(g.c.renvoTargetOS, g.c.renvoTargetArch))
 		}
-		return renvoEmitBuiltinReadWrite(g, ep, idx, renvoLinuxSysReadSeq(g.c.renvoTargetArch), renvoLinuxSysReadAt(g.c.renvoTargetArch))
+		return renvoEmitBuiltinReadWrite(g, ep, idx, renvoLinuxSysReadSeq(g.c.renvoTargetOS, g.c.renvoTargetArch), renvoLinuxSysReadAt(g.c.renvoTargetOS, g.c.renvoTargetArch))
 	}
 	e := &ep.exprs[idx]
 	a := &g.asm
@@ -430,7 +430,7 @@ func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, call
 			renvoAsmPopSecondary(a)
 			renvoAarch64AsmMovRegImm(a, renvoAarch64RegRdi, -100)
 			renvoAarch64AsmMovRegImm(a, renvoAarch64RegR10, 493)
-			renvoAsmPrimaryImm(a, renvoLinuxSysOpen(g.c.renvoTargetArch))
+			renvoAsmPrimaryImm(a, renvoLinuxSysOpen(g.c.renvoTargetOS, g.c.renvoTargetArch))
 			renvoAsmSyscall(a)
 			return true
 		}
@@ -444,7 +444,7 @@ func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, call
 			}
 			renvoAsmCopyPrimaryToCallWord0(a)
 			renvoAsmPopCallWord1(a)
-			renvoAsmPrimaryImm(a, renvoLinuxSysOpen(g.c.renvoTargetArch))
+			renvoAsmPrimaryImm(a, renvoLinuxSysOpen(g.c.renvoTargetOS, g.c.renvoTargetArch))
 			renvoAsmSyscall(a)
 			return true
 		}
@@ -462,7 +462,7 @@ func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, call
 			renvoAsmPopCallWord1(a)
 		}
 		renvoAsmSecondaryImm(a, 493)
-		renvoAsmPrimaryImm(a, renvoLinuxSysOpen(g.c.renvoTargetArch))
+		renvoAsmPrimaryImm(a, renvoLinuxSysOpen(g.c.renvoTargetOS, g.c.renvoTargetArch))
 		renvoAsmSyscall(a)
 		return true
 	}
@@ -478,7 +478,7 @@ func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, call
 			renvoDarwinArm64CallVirtualArgs(a, renvoDarwinImportClose, 1)
 			return true
 		}
-		renvoAsmPrimaryImm(a, renvoLinuxSysClose(g.c.renvoTargetArch))
+		renvoAsmPrimaryImm(a, renvoLinuxSysClose(g.c.renvoTargetOS, g.c.renvoTargetArch))
 		renvoAsmSyscall(a)
 		return true
 	}
@@ -498,7 +498,7 @@ func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, call
 		renvoDarwinArm64CallVirtualArgs(a, renvoDarwinImportFchmod, 2)
 		return true
 	}
-	renvoAsmPrimaryImm(a, renvoLinuxSysFchmod(g.c.renvoTargetArch))
+	renvoAsmPrimaryImm(a, renvoLinuxSysFchmod(g.c.renvoTargetOS, g.c.renvoTargetArch))
 	renvoAsmSyscall(a)
 	return true
 }
@@ -599,7 +599,7 @@ func renvoEmitExitStatus(g *renvoLinearGen) bool {
 		renvoWinAmd64EmitExit(a)
 	} else {
 		renvoAsmCopyPrimaryToCallWord0(a)
-		renvoAsmPrimaryImm(a, 60)
+		renvoAsmPrimaryImm(a, renvoHostedAmd64SysExit(g.c.renvoTargetOS))
 		renvoAsmSyscall(a)
 	}
 	return true
@@ -763,6 +763,14 @@ func renvoEmitRuntimeArenaDiscardSlice(g *renvoLinearGen, ep *renvoExprParse, id
 
 func renvoEmitRuntimeArenaDiscardStackRange(g *renvoLinearGen, startOff int, endOff int) bool {
 	renvoNonNil(g)
+	if renvoFixedTarget != 0 &&
+		renvoFixedTarget != renvoTargetLinuxAmd64 &&
+		renvoFixedTarget != renvoTargetLinux386 &&
+		renvoFixedTarget != renvoTargetLinuxAarch64 &&
+		renvoFixedTarget != renvoTargetLinuxArm ||
+		renvoFixedTarget == 0 && g.c.renvoTargetOS != renvoOSLinux {
+		return true
+	}
 	a := &g.asm
 	lenOff := renvoAddUnnamedLocal(g, renvoTypeInt)
 	doneLabel := renvoAsmNewLabel(a)
@@ -978,6 +986,15 @@ func renvoEmitArbitrarySyscall(g *renvoLinearGen, ep *renvoExprParse, idx int) b
 			return false
 		}
 	}
+	syscallNumber := -1
+	if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
+		renvoFixedTarget == 0 && g.c.renvoTargetOS == renvoOSOpenBSD {
+		number := renvoEvalConstExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
+		if !number.ok {
+			return false
+		}
+		syscallNumber = number.value
+	}
 	for i := e.argCount - 1; i >= 0; i-- {
 		argIndex := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+i)
 		if !renvoEmitSyscallArg(g, ep, argIndex) {
@@ -985,7 +1002,7 @@ func renvoEmitArbitrarySyscall(g *renvoLinearGen, ep *renvoExprParse, idx int) b
 		}
 		renvoAsmPushPrimary(&g.asm)
 	}
-	return renvoEmitSyscallFromStack(g, e.argCount)
+	return renvoEmitSyscallFromStack(g, e.argCount, syscallNumber)
 }
 
 // renvo_runtime_CallJIT is a frontend-only escape hatch used by the bundled
@@ -1087,7 +1104,7 @@ func renvoEmitSyscallArg(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	return renvoEmitIntExpr(g, ep, idx)
 }
 
-func renvoEmitSyscallFromStack(g *renvoLinearGen, wordCount int) bool {
+func renvoEmitSyscallFromStack(g *renvoLinearGen, wordCount int, syscallNumber int) bool {
 	renvoNonNil(g)
 	a := &g.asm
 	if renvoPreparedBackend != 0 {
@@ -1132,6 +1149,11 @@ func renvoEmitSyscallFromStack(g *renvoLinearGen, wordCount int) bool {
 		}
 		if wordCount > 6 {
 			renvoAsmEmit16(a, 0x5941)
+		}
+		if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
+			renvoFixedTarget == 0 && g.c.renvoTargetOS == renvoOSOpenBSD {
+			a.syscallNumber = syscallNumber
+			a.syscallNumberKnown = syscallNumber >= 0
 		}
 		renvoAsmSyscall(a)
 		return true

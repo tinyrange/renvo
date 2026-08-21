@@ -4,8 +4,6 @@ package os
 
 const O_RDONLY = 0
 const O_RDWR = 2
-const O_CREATE = 64
-const O_TRUNC = 512
 
 type FileMode int
 
