@@ -576,7 +576,7 @@ func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenActio
 				}
 				actions[i] = tokenAction(finalEOF)
 			}
-			if releaseSource && pendingStart-releaseStart >= 65536 {
+			if releaseSource && pendingStart-releaseStart >= 262144 {
 				arena.DiscardBytes(text[releaseStart:pendingStart])
 				releaseStart = pendingStart
 			}
@@ -617,7 +617,7 @@ func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenActio
 			}
 			pendingStart = tokEnd
 			prevEnd = tokEnd
-			if releaseSource && pendingStart-releaseStart >= 65536 {
+			if releaseSource && pendingStart-releaseStart >= 262144 {
 				arena.DiscardBytes(text[releaseStart:pendingStart])
 				releaseStart = pendingStart
 			}
@@ -643,17 +643,17 @@ func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenActio
 			actions[i] = tokenAction(mappedToken)
 		}
 		prevEnd = tokEnd
-		if releaseSource && tokEnd-pendingStart >= 65536 {
+		if releaseSource && tokEnd-pendingStart >= 262144 {
 			// Stream long unedited stretches instead of retaining the complete
 			// package text until its final token.
 			dst.Text = appendCoreBytes(dst.Text, text[pendingStart:tokEnd])
 			pendingStart = tokEnd
 		}
-		if releaseSource && pendingStart-releaseStart >= 65536 {
+		if releaseSource && pendingStart-releaseStart >= 262144 {
 			arena.DiscardBytes(text[releaseStart:pendingStart])
 			releaseStart = pendingStart
 		}
-		if releaseSource && i+1-tokenReleaseStart >= 4096 {
+		if releaseSource && i+1-tokenReleaseStart >= 16384 {
 			renvo_runtime_ArenaDiscardLinkTokens(tokens[tokenReleaseStart : i+1])
 			tokenReleaseStart = i + 1
 		}
