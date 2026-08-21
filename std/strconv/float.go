@@ -10,6 +10,29 @@ func ParseFloat(s string, bitSize int) (float64, error) {
 		neg = s[0] == '-'
 		s = s[1:]
 	}
+	if s == "NaN" && !neg {
+		return floatNaN(), nil
+	}
+	if s == "Inf" || s == "Infinity" {
+		value := floatInf()
+		if neg {
+			value = -value
+		}
+		return value, nil
+	}
+	if len(s) > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X') {
+		value, err := parseHexFloat(s)
+		if err != nil {
+			return 0, numError("ParseFloat", original, ErrSyntax)
+		}
+		if neg {
+			value = -value
+		}
+		if bitSize == 32 {
+			value = float64(float32(value))
+		}
+		return value, nil
+	}
 	value := float64(0)
 	digits := 0
 	for len(s) > 0 && s[0] >= '0' && s[0] <= '9' {
@@ -73,7 +96,80 @@ func ParseFloat(s string, bitSize int) (float64, error) {
 	return value, nil
 }
 
+func floatInf() float64 { zero := float64(0); return 1 / zero }
+func floatNaN() float64 { zero := float64(0); return zero / zero }
+func parseHexFloat(s string) (float64, error) {
+	s = s[2:]
+	value := float64(0)
+	fractionDigits := 0
+	seenDot := false
+	digits := 0
+	for len(s) > 0 && s[0] != 'p' && s[0] != 'P' {
+		if s[0] == '.' {
+			if seenDot {
+				return 0, ErrSyntax
+			}
+			seenDot = true
+			s = s[1:]
+			continue
+		}
+		digit, ok := digitValue(s[0])
+		if !ok || digit >= 16 {
+			return 0, ErrSyntax
+		}
+		value = value*16 + float64(digit)
+		if seenDot {
+			fractionDigits++
+		}
+		digits++
+		s = s[1:]
+	}
+	if digits == 0 || len(s) == 0 {
+		return 0, ErrSyntax
+	}
+	s = s[1:]
+	neg := false
+	if len(s) > 0 && (s[0] == '+' || s[0] == '-') {
+		neg = s[0] == '-'
+		s = s[1:]
+	}
+	if s == "" {
+		return 0, ErrSyntax
+	}
+	exp := 0
+	for len(s) > 0 {
+		if s[0] < '0' || s[0] > '9' {
+			return 0, ErrSyntax
+		}
+		exp = exp*10 + int(s[0]-'0')
+		s = s[1:]
+	}
+	if neg {
+		exp = -exp
+	}
+	exp -= fractionDigits * 4
+	for exp > 0 {
+		value *= 2
+		exp--
+	}
+	for exp < 0 {
+		value /= 2
+		exp++
+	}
+	return value, nil
+}
+
 func FormatFloat(value float64, format byte, precision int, bitSize int) string {
+	if value != value {
+		return "NaN"
+	}
+	inf := floatInf()
+	if value == inf {
+		return "+Inf"
+	}
+	if value == -inf {
+		return "-Inf"
+	}
 	if bitSize == 32 {
 		value = float64(float32(value))
 	}
@@ -84,7 +180,7 @@ func FormatFloat(value float64, format byte, precision int, bitSize int) string 
 	if precision < 0 {
 		precision = 9
 		if bitSize == 64 {
-			precision = 15
+			precision = 17
 		}
 	}
 	if precision > 18 {

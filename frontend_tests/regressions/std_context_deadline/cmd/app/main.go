@@ -4,6 +4,7 @@ import (
 	"context"
 	runtime "renvo.dev/x/runtime"
 	"renvo.dev/x/runtime/serial"
+	"time"
 )
 
 func main() {
@@ -12,17 +13,14 @@ func main() {
 		print("PASS\n")
 		return
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if ctx.Err() != context.Canceled {
-		print("FAIL\n")
-		return
-	}
+	timed, cancelTimed := context.WithTimeout(context.Background(), 2*time.Millisecond)
 	select {
-	case <-ctx.Done():
-	default:
+	case <-timed.Done():
+	}
+	if timed.Err() != context.DeadlineExceeded || context.Cause(timed) != context.DeadlineExceeded {
 		print("FAIL\n")
 		return
 	}
+	cancelTimed()
 	print("PASS\n")
 }

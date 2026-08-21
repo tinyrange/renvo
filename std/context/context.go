@@ -4,6 +4,7 @@ package context
 
 import (
 	"errors"
+	runtime "renvo.dev/x/runtime"
 	"time"
 )
 
@@ -45,6 +46,9 @@ type cancelCtx struct {
 	children []*cancelCtx
 	err      error
 	cause    error
+	deadline time.Time
+	hasLimit bool
+	timer    runtime.Timer
 }
 
 func WithCancel(parent Context) (Context, CancelFunc) {
@@ -73,19 +77,33 @@ func newCancel(parent Context) *cancelCtx {
 		} else {
 			p.children = append(p.children, c)
 		}
+	} else if err := parent.Err(); err != nil {
+		c.cancel(err, Cause(parent))
+	} else if parent.Done() != nil {
+		go waitParent(parent, c)
 	}
 	return c
 }
-func (c *cancelCtx) Deadline() (time.Time, bool) { return c.parent.Deadline() }
-func (c *cancelCtx) Done() <-chan struct{}       { return c.done }
-func (c *cancelCtx) Err() error                  { return c.err }
-func (c *cancelCtx) Value(key any) any           { return c.parent.Value(key) }
+func (c *cancelCtx) Deadline() (time.Time, bool) {
+	if c.hasLimit {
+		return c.deadline, true
+	}
+	return c.parent.Deadline()
+}
+func (c *cancelCtx) Done() <-chan struct{} { return c.done }
+func (c *cancelCtx) Err() error            { return c.err }
+func (c *cancelCtx) Value(key any) any     { return c.parent.Value(key) }
 func (c *cancelCtx) cancel(err, cause error) {
 	if c.err != nil {
 		return
 	}
 	c.err = err
 	c.cause = cause
+	timer := c.timer
+	c.timer = 0
+	if timer != 0 {
+		timer.Stop()
+	}
 	done := c.done
 	close(done)
 	children := c.children
@@ -94,6 +112,54 @@ func (c *cancelCtx) cancel(err, cause error) {
 		child.cancel(err, cause)
 	}
 	removeChild(c.parent, c)
+}
+func waitParent(parent Context, child *cancelCtx) {
+	select {
+	case <-parent.Done():
+		err := parent.Err()
+		if err == nil {
+			err = Canceled
+		}
+		cause := Cause(parent)
+		if cause == nil {
+			cause = err
+		}
+		child.cancel(err, cause)
+	case <-child.Done():
+	}
+}
+
+func WithDeadline(parent Context, deadline time.Time) (Context, CancelFunc) {
+	if parent == nil {
+		panic("cannot create context from nil parent")
+	}
+	if inherited, ok := parent.Deadline(); ok && inherited.Sub(deadline) <= 0 {
+		return WithCancel(parent)
+	}
+	c := newCancel(parent)
+	c.deadline = deadline
+	c.hasLimit = true
+	if c.err == nil {
+		delay := deadline.Sub(time.Now())
+		if delay <= 0 {
+			c.cancel(DeadlineExceeded, DeadlineExceeded)
+		} else {
+			c.timer = runtime.NewTimer(int64(delay))
+			go waitDeadline(c)
+		}
+	}
+	return c, func() { c.cancel(Canceled, Canceled) }
+}
+
+func WithTimeout(parent Context, timeout time.Duration) (Context, CancelFunc) {
+	return WithDeadline(parent, time.Now().Add(timeout))
+}
+
+func waitDeadline(c *cancelCtx) {
+	timer := c.timer
+	if timer != 0 && timer.Wait() {
+		c.cancel(DeadlineExceeded, DeadlineExceeded)
+	}
 }
 func removeChild(parent Context, child *cancelCtx) {
 	p := findCancel(parent)

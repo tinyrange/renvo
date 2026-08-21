@@ -29,6 +29,14 @@ func WithCancelCause(parent Context) (Context, CancelCauseFunc) {
 	ctx, cancel := stdcontext.WithCancelCause(parent)
 	return ctx, CancelCauseFunc(cancel)
 }
+func WithDeadline(parent Context, deadline time.Time) (Context, CancelFunc) {
+	ctx, cancel := stdcontext.WithDeadline(parent, deadline)
+	return ctx, CancelFunc(cancel)
+}
+func WithTimeout(parent Context, timeout time.Duration) (Context, CancelFunc) {
+	ctx, cancel := stdcontext.WithTimeout(parent, timeout)
+	return ctx, CancelFunc(cancel)
+}
 func WithValue(parent Context, key, value any) Context {
 	return stdcontext.WithValue(parent, key, value)
 }

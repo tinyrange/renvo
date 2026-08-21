@@ -6,6 +6,10 @@ import (
 	"renvo.dev/x/runtime/serial"
 )
 
+var sharedCancel context.CancelFunc
+
+func cancelShared() { sharedCancel() }
+
 func main() {
 	runtime.EnableGoroutines(serial.New())
 	if !runtime.StackSupported() {
@@ -13,14 +17,13 @@ func main() {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if ctx.Err() != context.Canceled {
-		print("FAIL\n")
-		return
-	}
+	sharedCancel = cancel
+	go cancelShared()
 	select {
 	case <-ctx.Done():
-	default:
+	}
+	cancel()
+	if ctx.Err() != context.Canceled {
 		print("FAIL\n")
 		return
 	}

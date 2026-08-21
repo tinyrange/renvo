@@ -247,6 +247,18 @@ func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end i
 		}
 		return functionValueDeclaredFunctionResultType(program, name)
 	}
+	if functionValueTokenEquals(program, end-1, ")") {
+		open := functionValueFindMatchingBackward(program, end-1, "(", ")")
+		if open >= start+3 && functionValueTokenEquals(program, open-2, ".") && program.Tokens[open-1].KindLine&255 == unit.TokenIdent {
+			owner := ordinaryBuiltinExprType(program, before, start, open-2)
+			if owner == "" && open-2 == start+1 && program.Tokens[start].KindLine&255 == unit.TokenIdent {
+				owner = ordinaryShortTupleLocalType(program, before, functionValueTokenText(program, start))
+			}
+			if result := ordinaryMethodResultType(program, owner, functionValueTokenText(program, open-1)); result != "" {
+				return result
+			}
+		}
+	}
 	if end-start >= 3 && functionValueTokenEquals(program, end-2, ".") && program.Tokens[end-1].KindLine&255 == unit.TokenIdent {
 		owner := ordinaryBuiltinExprType(program, before, start, end-2)
 		if owner != "" {
@@ -287,6 +299,139 @@ func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end i
 		}
 	}
 	return ""
+}
+
+func ordinaryShortTupleLocalType(program *unit.Program, before int, name string) string {
+	fnIndex := functionValueEnclosingFunc(program, before)
+	if fnIndex < 0 {
+		return ""
+	}
+	fn := program.Funcs[fnIndex]
+	for assign := before - 1; assign > fn.BodyStart; assign-- {
+		if !functionValueTokenEquals(program, assign, ":=") {
+			continue
+		}
+		start := mapLowerAssignmentStart(program, assign)
+		leftStarts, leftEnds := functionValueCommaParts(program, start, assign)
+		resultIndex := -1
+		for i := 0; i < len(leftStarts); i++ {
+			if leftEnds[i]-leftStarts[i] == 1 && functionValueTokenEquals(program, leftStarts[i], name) {
+				resultIndex = i
+				break
+			}
+		}
+		if resultIndex < 0 {
+			continue
+		}
+		end := mapLowerAssignmentEnd(program, assign)
+		rightStarts, rightEnds := functionValueCommaParts(program, assign+1, end)
+		if len(rightStarts) != 1 {
+			return ""
+		}
+		callStart, callEnd := rightStarts[0], rightEnds[0]
+		if callEnd-callStart < 3 || program.Tokens[callStart].KindLine&255 != unit.TokenIdent || !functionValueTokenEquals(program, callStart+1, "(") || functionValueFindMatchingParen(program, callStart+1) != callEnd-1 {
+			return ""
+		}
+		return ordinaryDeclaredFunctionResultTypeAt(program, functionValueTokenText(program, callStart), resultIndex)
+	}
+	return ""
+}
+
+func ordinaryDeclaredFunctionResultTypeAt(program *unit.Program, name string, index int) string {
+	for i := 0; i < len(program.Funcs); i++ {
+		fn := program.Funcs[i]
+		if fn.ReceiverStart < fn.ReceiverEnd || functionValueTokenText(program, fn.NameTok) != name {
+			continue
+		}
+		paramsClose := functionValueFindMatchingParen(program, fn.NameTok+1)
+		resultStart := paramsClose + 1
+		if resultStart >= fn.BodyStart {
+			return ""
+		}
+		if !functionValueTokenEquals(program, resultStart, "(") {
+			if index == 0 {
+				return functionValueSingleResultType(program, resultStart, fn.BodyStart)
+			}
+			return ""
+		}
+		resultClose := functionValueFindMatchingParen(program, resultStart)
+		if resultClose <= resultStart || resultClose >= fn.BodyStart {
+			return ""
+		}
+		results := functionValueResultTypes(program, resultStart+1, resultClose)
+		if index < 0 || index >= len(results) {
+			return ""
+		}
+		return results[index]
+	}
+	return ""
+}
+
+func ordinaryMethodResultType(program *unit.Program, owner string, method string) string {
+	owner = functionValueBareType(owner)
+	result := ""
+	for i := 0; i < len(program.Funcs); i++ {
+		fn := program.Funcs[i]
+		if fn.ReceiverStart >= fn.ReceiverEnd || functionValueTokenText(program, fn.NameTok) != method || owner != "" && functionValueBareType(functionValueReceiverType(program, fn)) != owner {
+			continue
+		}
+		open := fn.NameTok + 1
+		close := functionValueFindMatchingParen(program, open)
+		if close > open {
+			candidate := functionValueSingleResultType(program, close+1, fn.BodyStart)
+			if candidate != "" {
+				if result != "" && result != candidate {
+					return ""
+				}
+				result = candidate
+			}
+		}
+	}
+	for i := 0; i < len(program.Decls); i++ {
+		decl := program.Decls[i]
+		if decl.Kind != unit.TokenType {
+			continue
+		}
+		nameTok := functionValueTokenAtSpan(program, decl.NameStart, decl.NameEnd)
+		if nameTok < 0 || owner != "" && functionValueTokenText(program, nameTok) != owner || !functionValueTokenEquals(program, nameTok+1, "interface") || !functionValueTokenEquals(program, nameTok+2, "{") {
+			continue
+		}
+		close := functionValueFindMatchingBrace(program, nameTok+2)
+		for token := nameTok + 3; token < close; token++ {
+			if !functionValueTokenEquals(program, token, method) || !functionValueTokenEquals(program, token+1, "(") {
+				continue
+			}
+			paramsClose := functionValueFindMatchingParen(program, token+1)
+			if paramsClose <= token+1 || paramsClose+1 >= close {
+				continue
+			}
+			resultStart := paramsClose + 1
+			candidate := ""
+			if functionValueTokenEquals(program, resultStart, "(") {
+				resultClose := functionValueFindMatchingParen(program, resultStart)
+				if resultClose <= resultStart || resultClose > close {
+					continue
+				}
+				candidate = functionValueSingleResultType(program, resultStart+1, resultClose)
+			} else {
+				resultEnd := functionValueTypeEnd(program, resultStart)
+				if resultEnd <= resultStart || resultEnd > close {
+					continue
+				}
+				candidate = functionValueTokensText(program, resultStart, resultEnd)
+			}
+			if candidate != "" {
+				if result != "" && result != candidate {
+					return ""
+				}
+				result = candidate
+			}
+		}
+		if owner != "" {
+			return result
+		}
+	}
+	return result
 }
 
 func ordinaryBuiltinSliceExpression(program *unit.Program, start int, end int) bool {

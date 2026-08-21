@@ -40,6 +40,21 @@ func TestIntegerBoundsAndErrors(t *testing.T) {
 	}
 }
 
+func TestFloatSpecialAndHex(t *testing.T) {
+	value, err := ParseFloat("0x1.8p-1", 64)
+	if err != nil || value != 0.75 {
+		t.Fatalf("hex float=%v,%v", value, err)
+	}
+	inf, err := ParseFloat("-Inf", 64)
+	if err != nil || FormatFloat(inf, 'g', -1, 64) != "-Inf" {
+		t.Fatal("Inf")
+	}
+	nan, err := ParseFloat("NaN", 64)
+	if err != nil || nan == nan || FormatFloat(nan, 'g', -1, 64) != "NaN" {
+		t.Fatal("NaN")
+	}
+}
+
 func TestFloatAndAppend(t *testing.T) {
 	for _, tc := range []struct {
 		text  string

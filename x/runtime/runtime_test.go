@@ -13,6 +13,10 @@ type recordingHandler struct {
 	channel      Channel
 	sendStatus   Status
 	closeStatus  Status
+	timerDelay   int64
+	timer        Timer
+	timerWait    bool
+	timerStopped bool
 }
 
 func (h *recordingHandler) Spawn(entry uintptr, context uintptr) {
@@ -34,6 +38,12 @@ func (h *recordingHandler) ChanSelect([]ChanSelectValue, bool) (int, int) {
 func (h *recordingHandler) ChanClose(uintptr) int { return int(h.closeStatus) }
 func (h *recordingHandler) ChanLen(uintptr) int   { return 3 }
 func (h *recordingHandler) ChanCap(uintptr) int   { return 5 }
+func (h *recordingHandler) TimerStart(nanoseconds int64) uintptr {
+	h.timerDelay = nanoseconds
+	return uintptr(h.timer)
+}
+func (h *recordingHandler) TimerWait(uintptr) bool { return h.timerWait }
+func (h *recordingHandler) TimerStop(uintptr) bool { return h.timerStopped }
 
 func withHandler(t *testing.T, handler GoHandler) {
 	t.Helper()
@@ -43,7 +53,7 @@ func withHandler(t *testing.T, handler GoHandler) {
 }
 
 func TestRuntimeWrappersDelegateToHandler(t *testing.T) {
-	handler := &recordingHandler{channel: 17, sendStatus: StatusOK, closeStatus: StatusOK}
+	handler := &recordingHandler{channel: 17, sendStatus: StatusOK, closeStatus: StatusOK, timer: 23, timerWait: true, timerStopped: true}
 	withHandler(t, handler)
 
 	renvo_runtime_Spawn(4, 9)
@@ -61,6 +71,10 @@ func TestRuntimeWrappersDelegateToHandler(t *testing.T) {
 	}
 	renvo_runtime_ChanSend(17, nil)
 	renvo_runtime_ChanClose(17)
+	timer := NewTimer(125)
+	if timer != 23 || handler.timerDelay != 125 || !timer.Wait() || !timer.Stop() {
+		t.Fatalf("timer = %d delay=%d wait=%v stop=%v", timer, handler.timerDelay, timer.Wait(), timer.Stop())
+	}
 }
 
 func TestRuntimeWrappersReportUsefulPanics(t *testing.T) {

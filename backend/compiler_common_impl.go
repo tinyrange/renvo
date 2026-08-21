@@ -19384,7 +19384,7 @@ func renvoEmitStructReturnExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) b
 	resultKind := renvoResolveType(g.meta, resultType).kind
 	renvoNonNil(resultKind)
 	indirect := idx >= 0 && idx < len(ep.exprs) && ep.exprs[idx].kind == renvoExprUnary && renvoTokCharIs(g.prog, ep.exprs[idx].tok, '*')
-	if resultKind != renvoTypeStruct || indirect || idx >= 0 && idx < len(ep.exprs) && (ep.exprs[idx].kind == renvoExprAssert || ep.exprs[idx].kind == renvoExprSelector || ep.exprs[idx].kind == renvoExprIdent && renvoFindLocalIndex(g, ep.exprs[idx].nameStart, ep.exprs[idx].nameEnd) < 0) {
+	if resultKind != renvoTypeStruct || indirect || renvoIsInterfaceMethodCall(g, ep, idx) || idx >= 0 && idx < len(ep.exprs) && (ep.exprs[idx].kind == renvoExprAssert || ep.exprs[idx].kind == renvoExprSelector || ep.exprs[idx].kind == renvoExprIdent && renvoFindLocalIndex(g, ep.exprs[idx].nameStart, ep.exprs[idx].nameEnd) < 0) {
 		if g.returnStruct <= 0 {
 			return false
 		}

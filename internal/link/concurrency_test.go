@@ -111,6 +111,51 @@ func main() {
 	}
 }
 
+func TestLinkLowersSelectReceiveFromInterfaceMethodResult(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/context/context.go", Src: []byte(`package context
+
+type Context interface { Done() <-chan struct{} }
+type Unrelated interface { Done() bool }
+type CancelFunc func()
+func WithCancel() (Context, CancelFunc) { return nil, nil }
+`)},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import "example.com/case/context"
+
+type renvo_runtime_Channel uintptr
+type renvo_runtime_Pointer uintptr
+type renvo_runtime_ChanSelectValue struct { Channel renvo_runtime_Channel; Value renvo_runtime_Pointer; ReceiveOK renvo_runtime_Pointer; Direction int }
+const renvo_runtime_SelectReceive = 0
+func renvo_runtime_ChanSelect(cases []renvo_runtime_ChanSelectValue, hasDefault bool) int { return -1 }
+
+func main() {
+	ctx, cancel := context.WithCancel()
+	_ = cancel
+	select {
+	case <-ctx.Done():
+		print("done")
+	default:
+		print("waiting")
+	}
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("link failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	text := linked.Program.Text
+	if bytes.Contains(text, []byte("select {")) || bytes.Contains(text, []byte("<-ctx.Done()")) {
+		t.Fatalf("linked program retained interface channel receive:\n%s", text)
+	}
+	if !bytes.Contains(text, []byte("uintptr(ctx.Done())")) || !bytes.Contains(text, []byte("value0 struct{}")) {
+		t.Fatalf("interface channel receive was not lowered with its element type:\n%s", text)
+	}
+}
+
 func TestLinkStagesChannelOperationsAndDynamicGoCalls(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},

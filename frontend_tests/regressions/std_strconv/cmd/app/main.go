@@ -27,6 +27,11 @@ func main() {
 		print("FAIL\n")
 		return
 	}
+	hex, err := strconv.ParseFloat("0x1.8p-1", 64)
+	if err != nil || hex != 0.75 {
+		print("FAIL\n")
+		return
+	}
 	floating, err := strconv.ParseFloat("-2.5e2", 64)
 	if err != nil || floating != -250 || strconv.FormatFloat(12.5, 'f', 2, 64) != "12.50" || strconv.FormatFloat(12.5, 'g', -1, 64) != "12.5" {
 		print("FAIL\n")

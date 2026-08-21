@@ -216,6 +216,12 @@ func Quote(s string) string {
 		} else if c == '\r' {
 			out = append(out, '\\')
 			out = append(out, 'r')
+		} else if c == '\b' {
+			out = append(out, '\\', 'b')
+		} else if c == '\f' {
+			out = append(out, '\\', 'f')
+		} else if c < 0x20 || c == 0x7f {
+			out = append(out, '\\', 'x', hexEscapeDigit(c>>4), hexEscapeDigit(c&15))
 		} else {
 			out = append(out, c)
 		}
@@ -246,6 +252,34 @@ func Unquote(s string) (string, error) {
 			out = append(out, '\t')
 		} else if e == 'r' {
 			out = append(out, '\r')
+		} else if e == 'b' {
+			out = append(out, '\b')
+		} else if e == 'f' {
+			out = append(out, '\f')
+		} else if e == 'u' || e == 'U' {
+			count := 4
+			if e == 'U' {
+				count = 8
+			}
+			if i+count >= len(s)-1 {
+				return "", ErrSyntax
+			}
+			value, ok := parseHexEscape(s[i+1 : i+1+count])
+			if !ok || value > 0x10ffff || value >= 0xd800 && value <= 0xdfff {
+				return "", ErrSyntax
+			}
+			out = appendUTF8(out, value)
+			i += count
+		} else if e == 'x' {
+			if i+2 >= len(s)-1 {
+				return "", ErrSyntax
+			}
+			value, ok := parseHexEscape(s[i+1 : i+3])
+			if !ok {
+				return "", ErrSyntax
+			}
+			out = append(out, byte(value))
+			i += 2
 		} else if e == '\\' || e == '"' {
 			out = append(out, e)
 		} else {
@@ -253,6 +287,37 @@ func Unquote(s string) (string, error) {
 		}
 	}
 	return string(out), nil
+}
+
+func hexEscapeDigit(value byte) byte {
+	if value < 10 {
+		return '0' + value
+	}
+	return 'a' + value - 10
+}
+
+func parseHexEscape(s string) (int, bool) {
+	value := 0
+	for i := 0; i < len(s); i++ {
+		digit, ok := digitValue(s[i])
+		if !ok || digit >= 16 {
+			return 0, false
+		}
+		value = value*16 + digit
+	}
+	return value, true
+}
+func appendUTF8(out []byte, r int) []byte {
+	if r <= 0x7f {
+		return append(out, byte(r))
+	}
+	if r <= 0x7ff {
+		return append(out, byte(0xc0|r>>6), byte(0x80|r&63))
+	}
+	if r <= 0xffff {
+		return append(out, byte(0xe0|r>>12), byte(0x80|r>>6&63), byte(0x80|r&63))
+	}
+	return append(out, byte(0xf0|r>>18), byte(0x80|r>>12&63), byte(0x80|r>>6&63), byte(0x80|r&63))
 }
 
 func digitValue(c byte) (int, bool) {

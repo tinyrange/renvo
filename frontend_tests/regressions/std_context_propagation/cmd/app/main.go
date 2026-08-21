@@ -12,17 +12,16 @@ func main() {
 		print("PASS\n")
 		return
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if ctx.Err() != context.Canceled {
-		print("FAIL\n")
-		return
-	}
+	parent, cancelParent := context.WithCancel(context.Background())
+	child, cancelChild := context.WithCancel(parent)
+	go cancelParent()
 	select {
-	case <-ctx.Done():
-	default:
+	case <-child.Done():
+	}
+	if child.Err() != context.Canceled || parent.Err() != context.Canceled {
 		print("FAIL\n")
 		return
 	}
+	cancelChild()
 	print("PASS\n")
 }
