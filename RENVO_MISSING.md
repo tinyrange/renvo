@@ -200,8 +200,14 @@ not mean the complete Go API is supported.
 - [x] `unicode/utf8`: validation for strings and byte slices, rune decoding,
   rune counts and lengths, encoding, and replacement-rune semantics, with
   host-Go compatibility tests.
+- [x] `time`: duration parsing/formatting plus UTC/fixed-offset calendar values,
+  Unix conversion, arithmetic, comparisons, and RFC3339/RFC3339Nano parsing and
+  formatting, with host-Go tests and a Renvo-compiled regression.
+  - [ ] A real `Now`, timers, sleeps, deadlines, named locations, and general Go
+    layouts still require a target clock/wakeup facility; returning a synthetic
+    clock value would not provide compatible cancellation semantics.
 - [ ] Complete the remaining audited surfaces in `errors`, `fmt`, `os`, `sort`,
-  `strconv`, and `time`.
+  and `strconv`.
 
 ### Remaining inventory
 
@@ -379,10 +385,11 @@ application's file/byte/result limits.
 
 ### `time`
 
-Required concepts include `Time`, `Duration`, `Now`, `Since`, `Unix`, `Date`,
-`Parse`, comparisons, arithmetic, UTC conversion, and RFC3339/RFC3339Nano
-formatting. Timers/deadlines used by context and process execution need an
-actual target clock and wakeup mechanism.
+The initial surface implements `Time`, `Duration`, `Unix`, `Date`, `Parse`,
+comparisons, arithmetic, UTC/fixed-offset conversion, and RFC3339/RFC3339Nano
+formatting. `Now`, `Since`, timers, sleeps, deadlines, named locations, and
+arbitrary layouts remain. Timers/deadlines used by context and process execution
+need an actual target clock and wakeup mechanism.
 
 ### `unicode`
 
