@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "add28a723f099db3a7dbfea84948b0cba179b1c5f5444a5f87e71790b62c52cb"
+const CompilerSourceDigest = "10a36f26703e6bad69f26929d3795ac27a675968f3b3ae3ba0d75ed487cc4339"
 
 // source: backend/compiler_common_impl.go
 
@@ -24275,13 +24275,7 @@ return compileTarget(input, output, target, 0)
 
 func renvoLinuxSysWriteSeq(renvoTargetOS int, renvoTargetArch int) int {
 if renvoTargetArch == renvoArchAmd64 && targetIsBSD(renvoTargetOS) {
-if renvoTargetOS == renvoOSFreeBSD {
-return renvoFreeBSDAmd64SysWriteSeq
-}
-if renvoTargetOS == renvoOSNetBSD {
-return renvoNetBSDAmd64SysWriteSeq
-}
-return renvoOpenBSDAmd64SysWriteSeq
+return renvoBSDAmd64SysWriteSeq
 }
 if renvoTargetArch == renvoArchAarch64 {
 return 64
@@ -24297,13 +24291,7 @@ return 1
 
 func renvoLinuxSysReadSeq(renvoTargetOS int, renvoTargetArch int) int {
 if renvoTargetArch == renvoArchAmd64 && targetIsBSD(renvoTargetOS) {
-if renvoTargetOS == renvoOSFreeBSD {
-return renvoFreeBSDAmd64SysReadSeq
-}
-if renvoTargetOS == renvoOSNetBSD {
-return renvoNetBSDAmd64SysReadSeq
-}
-return renvoOpenBSDAmd64SysReadSeq
+return renvoBSDAmd64SysReadSeq
 }
 if renvoTargetArch == renvoArchAarch64 {
 return 63
@@ -24343,39 +24331,12 @@ return 17
 }
 
 func renvoLinuxSysWriteAt(renvoTargetOS int, renvoTargetArch int) int {
-if renvoTargetArch == renvoArchAmd64 {
-if renvoTargetOS == renvoOSFreeBSD {
-return renvoFreeBSDAmd64SysWriteAt
-}
-if renvoTargetOS == renvoOSOpenBSD {
-return renvoOpenBSDAmd64SysWriteAt
-}
-if renvoTargetOS == renvoOSNetBSD {
-return renvoNetBSDAmd64SysWriteAt
-}
-return 18
-}
-if renvoTargetArch == renvoArchAarch64 {
-return 68
-}
-if renvoTargetArch == renvoArchArm {
-return 181
-}
-if renvoTargetArch == renvoArch386 {
-return 181
-}
-return 18
+return renvoLinuxSysReadAt(renvoTargetOS, renvoTargetArch) + 1
 }
 
 func renvoLinuxSysOpen(renvoTargetOS int, renvoTargetArch int) int {
 if renvoTargetArch == renvoArchAmd64 && targetIsBSD(renvoTargetOS) {
-if renvoTargetOS == renvoOSFreeBSD {
-return renvoFreeBSDAmd64SysOpen
-}
-if renvoTargetOS == renvoOSNetBSD {
-return renvoNetBSDAmd64SysOpen
-}
-return renvoOpenBSDAmd64SysOpen
+return renvoBSDAmd64SysOpen
 }
 if renvoTargetArch == renvoArchAarch64 {
 return 56
@@ -24391,13 +24352,7 @@ return 2
 
 func renvoLinuxSysClose(renvoTargetOS int, renvoTargetArch int) int {
 if renvoTargetArch == renvoArchAmd64 && targetIsBSD(renvoTargetOS) {
-if renvoTargetOS == renvoOSFreeBSD {
-return renvoFreeBSDAmd64SysClose
-}
-if renvoTargetOS == renvoOSNetBSD {
-return renvoNetBSDAmd64SysClose
-}
-return renvoOpenBSDAmd64SysClose
+return renvoBSDAmd64SysClose
 }
 if renvoTargetArch == renvoArchAarch64 {
 return 57
@@ -24413,13 +24368,7 @@ return 3
 
 func renvoLinuxSysFchmod(renvoTargetOS int, renvoTargetArch int) int {
 if renvoTargetArch == renvoArchAmd64 && targetIsBSD(renvoTargetOS) {
-if renvoTargetOS == renvoOSFreeBSD {
-return renvoFreeBSDAmd64SysFchmod
-}
-if renvoTargetOS == renvoOSNetBSD {
-return renvoNetBSDAmd64SysFchmod
-}
-return renvoOpenBSDAmd64SysFchmod
+return renvoBSDAmd64SysFchmod
 }
 if renvoTargetArch == renvoArchAarch64 {
 return 52
@@ -24435,13 +24384,7 @@ return 91
 
 func renvoHostedAmd64SysExit(renvoTargetOS int) int {
 if targetIsBSD(renvoTargetOS) {
-if renvoTargetOS == renvoOSFreeBSD {
-return renvoFreeBSDAmd64SysExit
-}
-if renvoTargetOS == renvoOSNetBSD {
-return renvoNetBSDAmd64SysExit
-}
-return renvoOpenBSDAmd64SysExit
+return renvoBSDAmd64SysExit
 }
 return 60
 }
@@ -34373,14 +34316,14 @@ return renvoAppend64(out, alignment)
 // source: backend/compiler_freebsd_amd64_impl.go
 
 
-const renvoFreeBSDAmd64SysReadSeq = 3
-const renvoFreeBSDAmd64SysWriteSeq = 4
-const renvoFreeBSDAmd64SysOpen = 5
-const renvoFreeBSDAmd64SysClose = 6
+const renvoBSDAmd64SysReadSeq = 3
+const renvoBSDAmd64SysWriteSeq = 4
+const renvoBSDAmd64SysOpen = 5
+const renvoBSDAmd64SysClose = 6
 const renvoFreeBSDAmd64SysReadAt = 475
 const renvoFreeBSDAmd64SysWriteAt = 476
-const renvoFreeBSDAmd64SysFchmod = 124
-const renvoFreeBSDAmd64SysExit = 1
+const renvoBSDAmd64SysFchmod = 124
+const renvoBSDAmd64SysExit = 1
 
 
 func compileFreeBSDAmd64(input []int, output int) int {
@@ -34395,14 +34338,8 @@ return renvoCompileAmd64(input, output, arenaSize)
 // source: backend/compiler_openbsd_amd64_impl.go
 
 
-const renvoOpenBSDAmd64SysReadSeq = 3
-const renvoOpenBSDAmd64SysWriteSeq = 4
-const renvoOpenBSDAmd64SysOpen = 5
-const renvoOpenBSDAmd64SysClose = 6
 const renvoOpenBSDAmd64SysReadAt = 169
 const renvoOpenBSDAmd64SysWriteAt = 170
-const renvoOpenBSDAmd64SysFchmod = 124
-const renvoOpenBSDAmd64SysExit = 1
 
 
 const renvoOpenBSDAmd64ELFCodeOffset = 432
@@ -34470,14 +34407,8 @@ return out
 // source: backend/compiler_netbsd_amd64_impl.go
 
 
-const renvoNetBSDAmd64SysReadSeq = 3
-const renvoNetBSDAmd64SysWriteSeq = 4
-const renvoNetBSDAmd64SysOpen = 5
-const renvoNetBSDAmd64SysClose = 6
 const renvoNetBSDAmd64SysReadAt = 173
 const renvoNetBSDAmd64SysWriteAt = 174
-const renvoNetBSDAmd64SysFchmod = 124
-const renvoNetBSDAmd64SysExit = 1
 
 
 const renvoNetBSDAmd64ELFCodeOffset = 256

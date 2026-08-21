@@ -5,14 +5,8 @@
 package main
 
 
-const renvoOpenBSDAmd64SysReadSeq = 3
-const renvoOpenBSDAmd64SysWriteSeq = 4
-const renvoOpenBSDAmd64SysOpen = 5
-const renvoOpenBSDAmd64SysClose = 6
 const renvoOpenBSDAmd64SysReadAt = 169
 const renvoOpenBSDAmd64SysWriteAt = 170
-const renvoOpenBSDAmd64SysFchmod = 124
-const renvoOpenBSDAmd64SysExit = 1
 
 
 const renvoOpenBSDAmd64ELFCodeOffset = 432

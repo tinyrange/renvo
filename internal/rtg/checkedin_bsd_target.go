@@ -24,8 +24,20 @@ func generateCheckedInBSDAmd64Projection(
 		body = checkedInNetBSDAmd64Source
 	}
 	for i := 0; i < len(operations); i++ {
+		common, commonValue := checkedInBSDAmd64CommonOperation(operations[i].name)
+		if common && operations[i].value != commonValue {
+			return checkedInTargetProjectionFailure(resolved.Document, target.Runtime,
+				target.Descriptor.Name+" runtime operation "+operations[i].name+" violates the shared BSD syscall ABI")
+		}
+		if common && target.Descriptor.Name != "freebsd/amd64" {
+			continue
+		}
 		source = append(source, "\nconst "...)
-		source = append(source, prefix...)
+		if common {
+			source = append(source, "renvoBSDAmd64"...)
+		} else {
+			source = append(source, prefix...)
+		}
 		suffix := operations[i].symbol[len("renvoLinuxAmd64"):]
 		source = append(source, suffix...)
 		source = append(source, " = "...)
@@ -36,15 +48,38 @@ func generateCheckedInBSDAmd64Projection(
 		return checkedInTargetProjectionFailure(resolved.Document, target.Runtime,
 			target.Descriptor.Name+" runtime exit requires a syscall number")
 	}
-	source = append(source, "\nconst "...)
-	source = append(source, prefix...)
-	source = append(source, "SysExit = "...)
-	source = appendDecimalFrame(source, exit)
+	if exit != 1 {
+		return checkedInTargetProjectionFailure(resolved.Document, target.Runtime,
+			target.Descriptor.Name+" runtime exit violates the shared BSD syscall ABI")
+	}
+	if target.Descriptor.Name == "freebsd/amd64" {
+		source = append(source, "\nconst renvoBSDAmd64SysExit = "...)
+		source = appendDecimalFrame(source, exit)
+	}
 	source = append(source, '\n')
 	source = append(source, body...)
 	return GenerateResult{
 		Source: source, Descriptor: target.Descriptor, Manifest: manifest, Ok: true,
 	}
+}
+
+func checkedInBSDAmd64CommonOperation(name string) (bool, int) {
+	if name == "read" {
+		return true, 3
+	}
+	if name == "write" {
+		return true, 4
+	}
+	if name == "open" {
+		return true, 5
+	}
+	if name == "close" {
+		return true, 6
+	}
+	if name == "chmod" {
+		return true, 124
+	}
+	return false, 0
 }
 
 const checkedInFreeBSDAmd64Source = `

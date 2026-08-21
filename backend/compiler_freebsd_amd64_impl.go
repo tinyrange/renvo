@@ -5,14 +5,14 @@
 package main
 
 
-const renvoFreeBSDAmd64SysReadSeq = 3
-const renvoFreeBSDAmd64SysWriteSeq = 4
-const renvoFreeBSDAmd64SysOpen = 5
-const renvoFreeBSDAmd64SysClose = 6
+const renvoBSDAmd64SysReadSeq = 3
+const renvoBSDAmd64SysWriteSeq = 4
+const renvoBSDAmd64SysOpen = 5
+const renvoBSDAmd64SysClose = 6
 const renvoFreeBSDAmd64SysReadAt = 475
 const renvoFreeBSDAmd64SysWriteAt = 476
-const renvoFreeBSDAmd64SysFchmod = 124
-const renvoFreeBSDAmd64SysExit = 1
+const renvoBSDAmd64SysFchmod = 124
+const renvoBSDAmd64SysExit = 1
 
 
 func compileFreeBSDAmd64(input []int, output int) int {
