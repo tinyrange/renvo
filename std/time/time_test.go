@@ -42,6 +42,16 @@ func TestRFC3339(t *testing.T) {
 	}
 }
 
+func TestNowAndSince(t *testing.T) {
+	start := Now()
+	for i := 0; i < 100000; i++ {
+	}
+	elapsed := Since(start)
+	if start.Year() < 2020 || elapsed < 0 || elapsed > Minute {
+		t.Fatalf("Now/Since returned start=%v elapsed=%v", start, elapsed)
+	}
+}
+
 func TestArithmeticAndComparison(t *testing.T) {
 	a := Unix(10, 250)
 	b := a.Add(2*Second + 750)

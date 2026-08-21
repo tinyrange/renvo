@@ -31,6 +31,7 @@ type Time struct {
 	sec  int64
 	nsec int32
 	loc  *Location
+	mono int64
 }
 
 const (
@@ -69,9 +70,19 @@ func Date(year int, month Month, day, hour, min, sec, nsec int, loc *Location) T
 func (t Time) Unix() int64     { return t.sec }
 func (t Time) Nanosecond() int { return int(t.nsec) }
 func (t Time) Add(d Duration) Time {
-	return Unix(t.sec+int64(d)/1000000000, int64(t.nsec)+int64(d)%1000000000).in(t.loc)
+	result := Unix(t.sec+int64(d)/1000000000, int64(t.nsec)+int64(d)%1000000000).in(t.loc)
+	if t.mono != 0 {
+		result.mono = t.mono + int64(d)
+	}
+	return result
 }
-func (t Time) Sub(u Time) Duration   { return Duration((t.sec-u.sec)*1000000000 + int64(t.nsec-u.nsec)) }
+func Since(t Time) Duration { return Now().Sub(t) }
+func (t Time) Sub(u Time) Duration {
+	if t.mono != 0 && u.mono != 0 {
+		return Duration(t.mono - u.mono)
+	}
+	return Duration((t.sec-u.sec)*1000000000 + int64(t.nsec-u.nsec))
+}
 func (t Time) Before(u Time) bool    { return t.sec < u.sec || t.sec == u.sec && t.nsec < u.nsec }
 func (t Time) After(u Time) bool     { return u.Before(t) }
 func (t Time) Equal(u Time) bool     { return t.sec == u.sec && t.nsec == u.nsec }

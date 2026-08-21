@@ -20,7 +20,8 @@ const renvoDarwinImportPread = 6
 const renvoDarwinImportPwrite = 7
 const renvoDarwinImportFchmod = 8
 const renvoDarwinImportGetdirentries = 9
-const renvoDarwinImportCount = 9
+const renvoDarwinImportClockGettime = 10
+const renvoDarwinImportCount = 10
 
 func compileDarwinArm64(input []int, output int) int {
 	return compileDarwinArm64Arena(input, output, 0)
@@ -58,6 +59,9 @@ func renvoDarwinImportName(id int) string {
 	}
 	if id == renvoDarwinImportGetdirentries {
 		return "_getdirentries"
+	}
+	if id == renvoDarwinImportClockGettime {
+		return "_clock_gettime"
 	}
 	return ""
 }

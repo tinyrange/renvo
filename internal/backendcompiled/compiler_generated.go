@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "1173d65ef1a7e3bb4963f4ef3f266234bb04fe719dba0a519b882ab18f5eb9b2"
+const CompilerSourceDigest = "a4702f40898a6eaae7b633bd5d14b57072bd2ef22ac37d6859293dc6c7ddb829"
 
 // source: backend/compiler_common_impl.go
 
@@ -24630,14 +24630,21 @@ if e.argCount < 1 || e.argCount > 7 {
 return false
 }
 if targetIsDarwin(g.c.renvoTargetOS) {
-if e.argCount != 4 {
-return false
-}
 number := renvoEvalConstExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
 
 
-
-if !number.ok || number.value != 217 {
+if !number.ok {
+return false
+}
+if number.value == 217 {
+if e.argCount != 4 {
+return false
+}
+} else if number.value == 228 {
+if e.argCount != 3 {
+return false
+}
+} else {
 return false
 }
 }
@@ -24833,6 +24840,13 @@ return true
 }
 if g.c.renvoTargetArch == renvoArchAarch64 {
 if targetIsDarwin(g.c.renvoTargetOS) {
+if wordCount == 3 {
+renvoAarch64AsmPopReg(a, 9)
+renvoAarch64AsmPopReg(a, 0)
+renvoAarch64AsmPopReg(a, 1)
+renvoDarwinArm64CallImport(a, renvoDarwinImportClockGettime)
+return true
+}
 if wordCount != 4 {
 return false
 }
@@ -39231,7 +39245,8 @@ const renvoDarwinImportPread = 6
 const renvoDarwinImportPwrite = 7
 const renvoDarwinImportFchmod = 8
 const renvoDarwinImportGetdirentries = 9
-const renvoDarwinImportCount = 9
+const renvoDarwinImportClockGettime = 10
+const renvoDarwinImportCount = 10
 
 func compileDarwinArm64(input []int, output int) int {
 return compileDarwinArm64Arena(input, output, 0)
@@ -39269,6 +39284,9 @@ return "_fchmod"
 }
 if id == renvoDarwinImportGetdirentries {
 return "_getdirentries"
+}
+if id == renvoDarwinImportClockGettime {
+return "_clock_gettime"
 }
 return ""
 }

@@ -967,14 +967,21 @@ func renvoEmitArbitrarySyscall(g *renvoLinearGen, ep *renvoExprParse, idx int) b
 		return false
 	}
 	if targetIsDarwin(g.c.renvoTargetOS) {
-		if e.argCount != 4 {
+		number := renvoEvalConstExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
+		// Darwin adapters use compiler-intrinsic selectors lowered to libSystem
+		// calls rather than unstable raw Darwin syscall numbers.
+		if !number.ok {
 			return false
 		}
-		number := renvoEvalConstExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
-		// The Darwin directory adapter uses one compiler-intrinsic selector,
-		// which is lowered to libc getdirentries rather than issued as a raw
-		// Darwin syscall number.
-		if !number.ok || number.value != 217 {
+		if number.value == 217 {
+			if e.argCount != 4 {
+				return false
+			}
+		} else if number.value == 228 {
+			if e.argCount != 3 {
+				return false
+			}
+		} else {
 			return false
 		}
 	}
@@ -1170,6 +1177,13 @@ func renvoEmitSyscallFromStack(g *renvoLinearGen, wordCount int) bool {
 	}
 	if g.c.renvoTargetArch == renvoArchAarch64 {
 		if targetIsDarwin(g.c.renvoTargetOS) {
+			if wordCount == 3 {
+				renvoAarch64AsmPopReg(a, 9)
+				renvoAarch64AsmPopReg(a, 0)
+				renvoAarch64AsmPopReg(a, 1)
+				renvoDarwinArm64CallImport(a, renvoDarwinImportClockGettime)
+				return true
+			}
 			if wordCount != 4 {
 				return false
 			}

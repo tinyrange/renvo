@@ -3,6 +3,14 @@ package main
 import "time"
 
 func main() {
+	start := time.Now()
+	for i := 0; i < 100000; i++ {
+	}
+	elapsed := time.Since(start)
+	if start.Year() < 2020 || elapsed < 0 || elapsed > time.Minute {
+		print("FAIL\n")
+		return
+	}
 	t, err := time.Parse(time.RFC3339Nano, "2024-02-29T12:34:56.123456789+05:30")
 	if err != nil || t.Format(time.RFC3339Nano) != "2024-02-29T12:34:56.123456789+05:30" {
 		print("FAIL\n")

@@ -203,9 +203,10 @@ not mean the complete Go API is supported.
 - [x] `time`: duration parsing/formatting plus UTC/fixed-offset calendar values,
   Unix conversion, arithmetic, comparisons, and RFC3339/RFC3339Nano parsing and
   formatting, with host-Go tests and a Renvo-compiled regression.
-  - [ ] A real `Now`, timers, sleeps, deadlines, named locations, and general Go
-    layouts still require a target clock/wakeup facility; returning a synthetic
-    clock value would not provide compatible cancellation semantics.
+  - [x] `Now` reads native realtime and monotonic clocks on Linux and
+    darwin/arm64; `Since` uses monotonic elapsed time when both values carry it.
+  - [ ] Timers, sleeps, deadline wakeups, named locations, and general Go layouts
+    still require additional runtime and package support.
 - [ ] Complete the remaining audited surfaces in `errors`, `fmt`, `os`, `sort`,
   and `strconv`.
 
@@ -387,9 +388,9 @@ application's file/byte/result limits.
 
 The initial surface implements `Time`, `Duration`, `Unix`, `Date`, `Parse`,
 comparisons, arithmetic, UTC/fixed-offset conversion, and RFC3339/RFC3339Nano
-formatting. `Now`, `Since`, timers, sleeps, deadlines, named locations, and
-arbitrary layouts remain. Timers/deadlines used by context and process execution
-need an actual target clock and wakeup mechanism.
+formatting. `Now` uses native realtime plus monotonic clocks on Linux and
+Darwin/arm64, and `Since` preserves monotonic elapsed-time semantics. Timers,
+sleeps, deadline wakeups, named locations, and arbitrary layouts remain.
 
 ### `unicode`
 
