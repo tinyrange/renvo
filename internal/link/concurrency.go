@@ -395,7 +395,13 @@ func lowerChannelSyntaxCore(program *unit.Program, transient bool) bool {
 		if len(starts) == 2 {
 			capacity = functionValueTokensText(program, starts[1], ends[1])
 		}
-		replacement := "renvo_runtime_ChanCreate(Sizeof(*new(" + element + ")), " + capacity + ")"
+		elementSize := "Sizeof(*new(" + element + "))"
+		// Runtime channels need storage for each queued element even when Go's
+		// element type has size zero. struct{} is the canonical signaling type.
+		if element == "struct{}" {
+			elementSize = "Sizeof(*new(byte))"
+		}
+		replacement := "renvo_runtime_ChanCreate(" + elementSize + ", " + capacity + ")"
 		if named {
 			replacement = channelType + "(" + replacement + ")"
 		}
@@ -483,8 +489,10 @@ func lowerChannelSyntaxCore(program *unit.Program, transient bool) bool {
 		} else if name == "cap" {
 			replacement = "renvo_runtime_ChanCap"
 		}
-		edits = append(edits, functionValueTokenEdit(program, i, replacement))
-		covered[i] = true
+		operand := functionValueTokensText(program, starts[0], ends[0])
+		edits = append(edits, functionValueTokenRangeEdit(program, i, close+1, replacement+"("+operand+")"))
+		concurrencyCover(covered, i, close+1)
+		i = close
 	}
 
 	// Channel nil comparisons use the opaque zero handle after type erasure.

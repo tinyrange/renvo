@@ -18,6 +18,11 @@ type Context uintptr
 // nil channel.
 type Channel uintptr
 
+// Timer is an opaque handler-owned monotonic wakeup. Timers are independent
+// of channels so packages such as context can stop them without retaining a
+// sleeping goroutine until the original deadline.
+type Timer uintptr
+
 // Status reports failures which the compiler-owned wrapper converts to the
 // corresponding recoverable runtime panic.
 type Status int
@@ -70,6 +75,14 @@ type GoHandler interface {
 	ChanClose(channel uintptr) int
 	ChanLen(channel uintptr) int
 	ChanCap(channel uintptr) int
+}
+
+// TimerHandler is the optional deadline facility implemented by schedulers
+// that support timed wakeups. Durations are relative monotonic nanoseconds.
+type TimerHandler interface {
+	TimerStart(nanoseconds int64) uintptr
+	TimerWait(timer uintptr) bool
+	TimerStop(timer uintptr) bool
 }
 
 var activeHandler GoHandler
@@ -141,6 +154,36 @@ func requireHandler() GoHandler {
 		panic("runtime: goroutines are not enabled")
 	}
 	return activeHandler
+}
+
+func requireTimerHandler() TimerHandler {
+	handler := requireHandler()
+	timers, ok := handler.(TimerHandler)
+	if !ok {
+		panic("runtime: timer wakeups are not supported")
+	}
+	return timers
+}
+
+// NewTimer creates a monotonic one-shot timer. A non-positive duration is
+// already expired. Wait reports whether the timer expired; Stop reports
+// whether it canceled a timer which had not yet expired or been stopped.
+func NewTimer(nanoseconds int64) Timer {
+	return Timer(requireTimerHandler().TimerStart(nanoseconds))
+}
+
+func (timer Timer) Wait() bool {
+	if timer == 0 {
+		return false
+	}
+	return requireTimerHandler().TimerWait(uintptr(timer))
+}
+
+func (timer Timer) Stop() bool {
+	if timer == 0 {
+		return false
+	}
+	return requireTimerHandler().TimerStop(uintptr(timer))
 }
 
 func renvo_runtime_Spawn(entry Entry, context Context) {

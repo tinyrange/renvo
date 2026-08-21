@@ -127,6 +127,24 @@ func main() {
 	}
 }
 
+func TestBundledStandardLibraryResolvesRuntimeWithoutApplicationRequirement(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	source := []byte(`package main
+import "context"
+func main() { _ = context.Background() }
+`)
+	if err := os.WriteFile(filepath.Join(root, "main.go"), source, 0644); err != nil {
+		t.Fatal(err)
+	}
+	result := BuildFromFSWithModuleCache([]string{"-t", "linux/amd64", "-o", "app", "."}, root, "/std", "/modules", OSFS{})
+	if !result.Ok {
+		t.Fatalf("standard library runtime dependency failed: %#v", result.Diagnostic)
+	}
+}
+
 func TestBundledStandardLibraryMatchesRepository(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {

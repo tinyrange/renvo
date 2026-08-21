@@ -84,6 +84,25 @@ func TestBundledFrontendStandaloneAllTargets(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(standaloneDir, "std")); !os.IsNotExist(err) {
 		t.Fatalf("test unexpectedly has an adjacent standard library: %v", err)
 	}
+	jsonRegression := filepath.Join(root, "frontend_tests", "regressions", "std_json_dynamic")
+	for _, input := range []string{
+		filepath.Join(jsonRegression, "cmd", "app", "main.go"),
+		filepath.Join(jsonRegression, "cmd", "app"),
+	} {
+		jsonOutput := filepath.Join(toolDir, "self-hosted-json")
+		cmd = exec.Command(standalone, "-s", "-o", jsonOutput, input)
+		cmd.Dir = root
+		cmd.Env = []string{"PWD=" + root}
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("self-hosted JSON compile for %s failed: %v\n%s", input, err, string(out))
+		}
+		cmd = exec.Command(jsonOutput)
+		cmd.Dir = root
+		cmd.Env = []string{"PWD=" + root}
+		if out, err := cmd.CombinedOutput(); err != nil || string(out) != "PASS\n" {
+			t.Fatalf("self-hosted JSON output for %s: err=%v output=%q", input, err, out)
+		}
+	}
 
 	helpDir := t.TempDir()
 	cmd = exec.Command(standalone)

@@ -10,6 +10,9 @@ import (
 type FileMode int
 
 var Args = stdos.Args
+var Stdin = &File{file: stdos.Stdin}
+var Stdout = &File{file: stdos.Stdout}
+var Stderr = &File{file: stdos.Stderr}
 
 type File struct {
 	file *stdos.File
@@ -22,6 +25,9 @@ type DirEntry struct {
 func Environ() []string {
 	return stdos.Environ()
 }
+
+func LookupEnv(key string) (string, bool) { return stdos.LookupEnv(key) }
+func Getenv(key string) string            { return stdos.Getenv(key) }
 
 func Exit(code int) {
 	stdos.Exit(code)

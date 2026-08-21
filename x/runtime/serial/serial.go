@@ -5,6 +5,7 @@
 package serial
 
 import (
+	"time"
 	"unsafe"
 
 	runtime "renvo.dev/x/runtime"
@@ -61,12 +62,20 @@ type channel struct {
 	selects     []*selectBinding
 }
 
+type timer struct {
+	deadline time.Time
+	waiter   *job
+	fired    bool
+	stopped  bool
+}
+
 // Handler is the serialized reference implementation of runtime.GoHandler.
 // Its zero value is ready for use.
 type Handler struct {
 	jobs       []*job
 	jobHead    int
 	channels   []*channel
+	timers     []*timer
 	selectNext int
 	scheduler  uintptr
 	current    *job
@@ -90,12 +99,18 @@ func (h *Handler) Drain() {
 }
 
 func (h *Handler) runOne() bool {
-	for h.jobHead < len(h.jobs) && h.jobs[h.jobHead].done {
-		h.jobHead++
-	}
-	if h.jobHead >= len(h.jobs) {
+	for {
+		h.wakeTimers()
+		for h.jobHead < len(h.jobs) && h.jobs[h.jobHead].done {
+			h.jobHead++
+		}
+		if h.jobHead < len(h.jobs) {
+			break
+		}
 		h.compactJobs()
-		return false
+		if !h.hasWaitingTimer() {
+			return false
+		}
 	}
 	item := h.jobs[h.jobHead]
 	h.jobHead++
@@ -115,6 +130,88 @@ func (h *Handler) runOne() bool {
 	}
 	h.compactJobs()
 	return true
+}
+
+// TimerStart creates a handler-owned one-shot wakeup using time.Time's
+// monotonic component when the target supplies one.
+func (h *Handler) TimerStart(nanoseconds int64) uintptr {
+	item := &timer{deadline: time.Now().Add(time.Duration(nanoseconds))}
+	if nanoseconds <= 0 {
+		item.fired = true
+	}
+	h.timers = append(h.timers, item)
+	return uintptr(len(h.timers))
+}
+
+// TimerWait suspends the current task without occupying its stack until the
+// timer fires or is stopped. The return value distinguishes those outcomes.
+func (h *Handler) TimerWait(handle uintptr) bool {
+	item := h.timer(handle)
+	if item == nil || item.stopped {
+		return false
+	}
+	if item.fired {
+		return true
+	}
+	item.waiter = h.current
+	for !item.fired && !item.stopped {
+		h.wakeTimers()
+		if item.fired || item.stopped {
+			break
+		}
+		if runtime.StackSupported() && h.current != nil {
+			current := h.current
+			runtime.StackSwitch(uintptr(unsafe.Pointer(&current.sp)), h.scheduler)
+		}
+	}
+	item.waiter = nil
+	return item.fired
+}
+
+// TimerStop cancels a pending wakeup and makes a task blocked in TimerWait
+// runnable so it can release its compiler-generated context immediately.
+func (h *Handler) TimerStop(handle uintptr) bool {
+	item := h.timer(handle)
+	if item == nil || item.fired || item.stopped {
+		return false
+	}
+	item.stopped = true
+	waiter := item.waiter
+	item.waiter = nil
+	h.enqueue(waiter)
+	return true
+}
+
+func (h *Handler) timer(handle uintptr) *timer {
+	index := int(handle) - 1
+	if index < 0 || index >= len(h.timers) {
+		return nil
+	}
+	return h.timers[index]
+}
+
+func (h *Handler) wakeTimers() {
+	now := time.Now()
+	for i := 0; i < len(h.timers); i++ {
+		item := h.timers[i]
+		if item == nil || item.fired || item.stopped || item.deadline.Sub(now) > 0 {
+			continue
+		}
+		item.fired = true
+		waiter := item.waiter
+		item.waiter = nil
+		h.enqueue(waiter)
+	}
+}
+
+func (h *Handler) hasWaitingTimer() bool {
+	for i := 0; i < len(h.timers); i++ {
+		item := h.timers[i]
+		if item != nil && !item.fired && !item.stopped && item.waiter != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handler) enqueue(item *job) {

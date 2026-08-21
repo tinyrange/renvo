@@ -41,3 +41,20 @@ func TestBuffer(t *testing.T) {
 		t.Fatalf("empty read = %d, %v", n, err)
 	}
 }
+
+func TestReaderRequestBodySurface(t *testing.T) {
+	r := NewReader([]byte("payload"))
+	if r.Size() != 7 || r.Len() != 7 {
+		t.Fatalf("initial Size/Len = %d/%d", r.Size(), r.Len())
+	}
+	buf := make([]byte, 4)
+	n, err := r.Read(buf)
+	if n != 4 || err != nil || string(buf) != "payl" || r.Len() != 3 {
+		t.Fatalf("first Read = %d, %v, %q, len %d", n, err, buf, r.Len())
+	}
+	r.Reset([]byte("ok"))
+	got, err := io.ReadAll(r)
+	if err != nil || string(got) != "ok" {
+		t.Fatalf("after Reset ReadAll = %q, %v", got, err)
+	}
+}

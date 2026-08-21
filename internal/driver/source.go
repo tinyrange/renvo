@@ -102,18 +102,8 @@ func collectSourcesForTargetTagsWithModuleCache(workDir string, stdRoot string, 
 	if moduleCache != "" {
 		moduleCache = load.CleanPath(moduleCache)
 	}
-	moduleRoot, moduleSrc, modulePath, ok := findModuleSource(workDir, fs)
-	if !ok {
-		return sourceFail(result, SourceErrMissingModule, load.JoinPath(workDir, "go.mod"))
-	}
-	config := &load.ModuleConfig{}
-	module := load.ParseModuleConfig(moduleRoot, moduleSrc, config)
-	result.Module = module
-	if !module.Ok {
-		return sourceFail(result, SourceErrModule, modulePath)
-	}
-	result.Files = append(result.Files, load.SourceFile{Path: modulePath, Src: moduleSrc})
 	var normalizedFiles []string
+	moduleSearchDir := packageArgSearchDir(workDir, arg)
 	if len(explicitFiles) > 0 {
 		rootDir := ""
 		for i := 0; i < len(explicitFiles); i++ {
@@ -133,7 +123,19 @@ func collectSourcesForTargetTagsWithModuleCache(workDir string, stdRoot string, 
 			return sourceFail(result, SourceErrFileListEmpty, explicitFiles[0])
 		}
 		arg = rootDir
+		moduleSearchDir = rootDir
 	}
+	moduleRoot, moduleSrc, modulePath, ok := findModuleSource(moduleSearchDir, fs)
+	if !ok {
+		return sourceFail(result, SourceErrMissingModule, load.JoinPath(moduleSearchDir, "go.mod"))
+	}
+	config := &load.ModuleConfig{}
+	module := load.ParseModuleConfig(moduleRoot, moduleSrc, config)
+	result.Module = module
+	if !module.Ok {
+		return sourceFail(result, SourceErrModule, modulePath)
+	}
+	result.Files = append(result.Files, load.SourceFile{Path: modulePath, Src: moduleSrc})
 	root := load.ResolvePackageArg(module, workDir, arg)
 	result.Root = root
 	if !root.Ok {
@@ -168,6 +170,16 @@ func collectSourcesForTargetTagsWithModuleCache(workDir string, stdRoot string, 
 		return result
 	}
 	return sourceFail(result, SourceErrDependencyAmbiguous, module.Path)
+}
+
+func packageArgSearchDir(workDir string, arg string) string {
+	if arg == "." || arg == ".." || len(arg) > 0 && (arg[0] == '/' || arg[0] == '\\') ||
+		len(arg) >= 2 && arg[0] == '.' && (arg[1] == '/' || arg[1] == '\\') ||
+		len(arg) >= 3 && arg[0] == '.' && arg[1] == '.' && (arg[2] == '/' || arg[2] == '\\') ||
+		len(arg) >= 3 && arg[1] == ':' && (arg[2] == '/' || arg[2] == '\\') {
+		return load.JoinPath(workDir, arg)
+	}
+	return workDir
 }
 
 func findModuleSource(workDir string, fs SourceFS) (string, []byte, string, bool) {
@@ -291,6 +303,16 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 					imports[j] = loaded
 				}
 			}
+			// Bundled standard-library packages may depend on the matching bundled
+			// runtime handler module. Applications should not have to add a
+			// compiler-internal renvo.dev requirement merely because they import a
+			// standard package such as context, time, or sync.
+			if !imports[j].Ok && ref.Kind == load.PackageStandard {
+				bundled := c.resolveBundledRuntimeImport(imports[j].ImportPath)
+				if bundled.Ok {
+					imports[j] = bundled
+				}
+			}
 			_, required := longestModuleRequirement(c.config.Requires, imports[j].ImportPath)
 			dependencyShadowsOwner := required && imports[j].Kind == load.PackageInModule
 			if !imports[j].Ok || dependencyShadowsOwner {
@@ -322,6 +344,42 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 	}
 	c.loading = c.loading[:len(c.loading)-1]
 	c.loaded = append(c.loaded, ref.ImportPath)
+}
+
+func (c *sourceCollector) resolveBundledRuntimeImport(importPath string) load.PackageRef {
+	const modulePath = "renvo.dev"
+	const moduleVersion = "v0.0.0"
+	const runtimePath = "renvo.dev/x/runtime"
+	if c.moduleCache == "" || importPath != runtimePath && !load.HasImportPrefix(importPath, runtimePath) {
+		return unsupportedPackage(importPath)
+	}
+	root := load.JoinPath(c.moduleCache, escapeModuleCachePath(modulePath)+"@"+escapeModuleCachePath(moduleVersion))
+	dependency, exists := c.moduleByPath(modulePath)
+	if !exists {
+		goModPath := load.JoinPath(root, "go.mod")
+		goMod, readable := c.fs.ReadFile(goModPath)
+		if !readable {
+			return unsupportedPackage(importPath)
+		}
+		dependencyConfig := &load.ModuleConfig{}
+		dependency = load.ParseModuleConfig(root, goMod, dependencyConfig)
+		if !dependency.Ok || dependency.Path != modulePath || !c.selectRequirements(dependencyConfig.Requires) {
+			return unsupportedPackage(importPath)
+		}
+		c.files = append(c.files, load.SourceFile{Path: goModPath, Src: []byte(modulePath)})
+		c.modules = append(c.modules, dependency)
+		c.resolved = append(c.resolved, load.ModuleVersion{Path: modulePath, Version: moduleVersion})
+	} else if load.CleanPath(dependency.Root) != load.CleanPath(root) {
+		return unsupportedPackage(importPath)
+	}
+	dir := dependency.Root
+	if importPath != dependency.Path {
+		dir = load.JoinPath(dir, importPath[len(dependency.Path)+1:])
+	}
+	if _, present := c.fs.ReadDir(dir); !present {
+		return unsupportedPackage(importPath)
+	}
+	return load.PackageRef{Kind: load.PackageDependency, ImportPath: importPath, Dir: dir, Ok: true, Error: load.ResolveOK}
 }
 
 func sourceGenericsOffset(src []byte) int {

@@ -10,6 +10,9 @@ const O_TRUNC = 512
 type FileMode int
 
 var Args []string
+var Stdin = &File{fd: 0}
+var Stdout = &File{fd: 1}
+var Stderr = &File{fd: 2}
 
 var processEnv []string
 
@@ -50,6 +53,22 @@ func Environ() []string {
 		out[i] = processEnv[i]
 	}
 	return out
+}
+
+func LookupEnv(key string) (string, bool) {
+	prefix := key + "="
+	for i := 0; i < len(processEnv); i++ {
+		entry := processEnv[i]
+		if len(entry) >= len(prefix) && entry[:len(prefix)] == prefix {
+			return entry[len(prefix):], true
+		}
+	}
+	return "", false
+}
+
+func Getenv(key string) string {
+	value, _ := LookupEnv(key)
+	return value
 }
 
 func renvo_runtime_SetProcess(args []string, env []string) {

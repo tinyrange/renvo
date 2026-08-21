@@ -2,10 +2,27 @@ package serial
 
 import (
 	"testing"
+	"time"
 	"unsafe"
 
 	runtime "renvo.dev/x/runtime"
 )
+
+func TestMonotonicTimerWakeAndStop(t *testing.T) {
+	h := New()
+	started := time.Now()
+	timer := h.TimerStart(int64(time.Millisecond))
+	if !h.TimerWait(timer) {
+		t.Fatal("timer did not fire")
+	}
+	if time.Since(started) < time.Millisecond {
+		t.Fatal("timer fired before its deadline")
+	}
+	stopped := h.TimerStart(int64(time.Hour))
+	if !h.TimerStop(stopped) || h.TimerWait(stopped) || h.TimerStop(stopped) {
+		t.Fatal("stopped timer state is inconsistent")
+	}
+}
 
 func TestBufferedChannelAndSelect(t *testing.T) {
 	h := New()

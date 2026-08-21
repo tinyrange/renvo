@@ -115,6 +115,36 @@ func Repeat(b []byte, count int) []byte {
 	return out
 }
 
+type Reader struct {
+	s []byte
+	i int64
+}
+
+func NewReader(b []byte) *Reader { return &Reader{s: b} }
+
+func (r *Reader) Read(p []byte) (int, error) {
+	if r.i >= int64(len(r.s)) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.s[r.i:])
+	r.i += int64(n)
+	return n, nil
+}
+
+func (r *Reader) Len() int {
+	if r.i >= int64(len(r.s)) {
+		return 0
+	}
+	return len(r.s) - int(r.i)
+}
+
+func (r *Reader) Size() int64 { return int64(len(r.s)) }
+
+func (r *Reader) Reset(b []byte) {
+	r.s = b
+	r.i = 0
+}
+
 type Buffer struct {
 	buf []byte
 	off int

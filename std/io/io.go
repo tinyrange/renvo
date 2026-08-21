@@ -8,6 +8,15 @@ type Writer interface {
 	Write(p []byte) (n int, err error)
 }
 
+type Closer interface {
+	Close() error
+}
+
+type ReadCloser interface {
+	Reader
+	Closer
+}
+
 type StringWriter interface {
 	WriteString(s string) (n int, err error)
 }
@@ -20,6 +29,40 @@ func (shortWriteError) Error() string { return "short write" }
 
 var EOF error = eofError{}
 var ErrShortWrite error = shortWriteError{}
+
+// Discard succeeds without retaining written data.
+var Discard Writer = discard{}
+
+type discard struct{}
+
+func (discard) Write(p []byte) (int, error) { return len(p), nil }
+
+type limitedReader struct {
+	r Reader
+	n int64
+}
+
+// LimitReader returns a Reader that reads at most n bytes from r.
+func LimitReader(r Reader, n int64) Reader { return &limitedReader{r: r, n: n} }
+
+func (l *limitedReader) Read(p []byte) (int, error) {
+	if l.n <= 0 {
+		return 0, EOF
+	}
+	if int64(len(p)) > l.n {
+		p = p[:int(l.n)]
+	}
+	n, err := l.r.Read(p)
+	l.n -= int64(n)
+	return n, err
+}
+
+type nopCloser struct{ Reader }
+
+func (nopCloser) Close() error { return nil }
+
+// NopCloser wraps a Reader with a no-op Close method.
+func NopCloser(r Reader) ReadCloser { return nopCloser{Reader: r} }
 
 func ReadAll(r Reader) ([]byte, error) {
 	var out []byte

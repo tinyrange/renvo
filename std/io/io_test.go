@@ -44,3 +44,18 @@ func TestReadAllCopyWriteString(t *testing.T) {
 		t.Fatalf("WriteString = %d, %v, %q", n2, err, string(w.data))
 	}
 }
+
+func TestLimitReaderNopCloserAndDiscard(t *testing.T) {
+	source := &sliceReader{data: []byte("abcdef")}
+	got, err := ReadAll(LimitReader(source, 3))
+	if err != nil || string(got) != "abc" {
+		t.Fatalf("LimitReader ReadAll = %q, %v", got, err)
+	}
+	closer := NopCloser(&sliceReader{data: []byte("x")})
+	if closer.Close() != nil {
+		t.Fatal("NopCloser.Close returned an error")
+	}
+	if n, err := Discard.Write([]byte("discarded")); n != 9 || err != nil {
+		t.Fatalf("Discard.Write = %d, %v", n, err)
+	}
+}
