@@ -35,6 +35,7 @@ type PreprocessConfig struct {
 	// SuppressForcedIncludes retains forced-header macro state without adding
 	// its declaration tokens to the result.
 	SuppressForcedIncludes bool
+	MacroDump              bool
 	LineMarkers            bool
 }
 
@@ -181,7 +182,43 @@ func Preprocess(config PreprocessConfig) PreprocessResult {
 	if !p.ok {
 		return PreprocessResult{Ok: false, Error: p.err, ErrorPath: p.errorPath, Line: p.errorLine, Detail: p.errorDetail}
 	}
+	if config.MacroDump {
+		p.renderMacroDump()
+	}
 	return PreprocessResult{Source: p.out, Dependencies: p.dependencies, Ok: true, Error: PreprocessOK}
+}
+
+func (p *preprocessor) renderMacroDump() {
+	p.out = p.out[:0]
+	for i := 0; i < len(p.macros); i++ {
+		macro := p.macros[i]
+		if macro.deleted {
+			continue
+		}
+		p.out = append(p.out, "#define "...)
+		p.out = append(p.out, macro.name...)
+		if macro.function {
+			p.out = append(p.out, '(')
+			for j := 0; j < len(macro.params); j++ {
+				if j > 0 {
+					p.out = append(p.out, ',')
+				}
+				if macro.variadic && j == len(macro.params)-1 {
+					p.out = append(p.out, "..."...)
+				} else {
+					p.out = append(p.out, macro.params[j]...)
+				}
+			}
+			p.out = append(p.out, ')')
+		}
+		for j := 0; j < len(macro.replace); j++ {
+			if j == 0 || ppTokenSpace(macro.replace[j]) {
+				p.out = append(p.out, ' ')
+			}
+			p.out = append(p.out, p.tokenText(macro.replace[j])...)
+		}
+		p.out = append(p.out, '\n')
+	}
 }
 
 // PreprocessProbe preserves the compiler-identity API while using the same
@@ -203,6 +240,12 @@ func (p *preprocessor) installPredefined(predefined []Macro) {
 		p.defineText(ppFeatureMacros[start:end], []string{"x"}, true, false, "0")
 		start = end + 1
 	}
+	// Feature probes are part of the compiler contract: report only attributes
+	// whose semantics the translator implements. Token pasting leaves unknown
+	// attribute names as undefined identifiers, which #if evaluates as zero.
+	p.defineText("__has_attribute", []string{"x"}, true, false, "__RENVO_HAS_ATTRIBUTE_##x")
+	p.defineText("__RENVO_HAS_ATTRIBUTE_error", nil, false, false, "1")
+	p.defineText("__RENVO_HAS_ATTRIBUTE___error__", nil, false, false, "1")
 }
 
 const ppFeatureMacros = "__has_attribute __has_builtin __has_feature __has_extension __has_c_attribute"
@@ -214,6 +257,7 @@ __RENVO__=1
 __GNUC__=5
 __GNUC_MINOR__=1
 __GNUC_PATCHLEVEL__=0
+__GCC_ASM_FLAG_OUTPUTS__=1
 __VERSION__="Renvo 5.1.0 compatible"
 __x86_64__=1
 __x86_64=1
@@ -307,7 +351,15 @@ func (p *preprocessor) processFile(path string, src []byte, emit bool, depth int
 			break
 		}
 		if len(tokens) > 0 && p.tokenIs(tokens[0], "#") {
-			if len(pending) > 0 {
+			conditionalDirective := false
+			if len(tokens) > 1 && ppTokenKind(tokens[1]) == ppIdent {
+				name := p.tokenText(tokens[1])
+				conditionalDirective = ppBytesStringEqual(name, "if") || ppBytesStringEqual(name, "ifdef") ||
+					ppBytesStringEqual(name, "ifndef") || ppBytesStringEqual(name, "elif") ||
+					ppBytesStringEqual(name, "elifdef") || ppBytesStringEqual(name, "elifndef") ||
+					ppBytesStringEqual(name, "else") || ppBytesStringEqual(name, "endif")
+			}
+			if len(pending) > 0 && !conditionalDirective {
 				p.flushPending(pending, pendingLine)
 				pending = nil
 				parenDepth = 0

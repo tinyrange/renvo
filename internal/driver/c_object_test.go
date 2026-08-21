@@ -28,6 +28,37 @@ func TestBuildCObjectReadsExplicitSystemHeader(t *testing.T) {
 	}
 }
 
+func TestBuildFreestandingCObjectRetainsForcedAndKernelHeaders(t *testing.T) {
+	fs := memorySourceFS{files: []load.SourceFile{
+		{Path: "/repo/case/main.c", Src: []byte("#include <kernel.h>\nforced_word value = KERNEL_VALUE;\n")},
+		{Path: "/repo/include/forced.h", Src: []byte("typedef unsigned long forced_word;\n#define FORCED_VALUE 40\n")},
+		{Path: "/repo/include/kernel.h", Src: []byte("#define KERNEL_VALUE (FORCED_VALUE + 2)\n")},
+	}}
+	args := NormalizeCCompilerCommand([]string{
+		"renvo", "cc", "-nostdinc", "-I/repo/include", "-include", "/repo/include/forced.h",
+		"-c", "main.c", "-o", "main.o",
+	})
+	result := BuildFromFS(args[1:], "/repo/case", "/std", fs)
+	if !result.Ok {
+		t.Fatalf("BuildFromFS freestanding C object failed: %#v", result)
+	}
+	found := false
+	for i := 0; i < len(result.Pipeline.Workspace.Files); i++ {
+		file := result.Pipeline.Workspace.Files[i]
+		if file.Path != "/repo/case/main.c" {
+			continue
+		}
+		found = true
+		if len(file.CPrelude) != 0 || !bytes.Contains(file.Src, []byte("typedef unsigned long forced_word")) ||
+			!bytes.Contains(file.Src, []byte("forced_word value = ( 40 + 2 )")) {
+			t.Fatalf("freestanding source boundary = prelude %q, source %q", file.CPrelude, file.Src)
+		}
+	}
+	if !found {
+		t.Fatalf("workspace did not retain freestanding C source: %#v", result.Pipeline.Workspace.Files)
+	}
+}
+
 func TestBuildCObjectReportsMissingHeader(t *testing.T) {
 	fs := memorySourceFS{files: []load.SourceFile{{Path: "/repo/case/main.c", Src: []byte("#include <missing.h>\nint main(void) { return 0; }\n")}}}
 	result := BuildFromFS([]string{"-c", "-o", "main.o", "main.c"}, "/repo/case", "/std", fs)

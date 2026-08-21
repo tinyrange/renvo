@@ -451,6 +451,7 @@ static __attribute__((__noinline__, __noclone__, __no_stack_protector__, nocf_ch
 		sizeof(packed_record) + _Alignof(packed_record) +
 		__builtin_offsetof(packed_record, value) + aligned.tag + packed.value;
 }
+int inspect_layout(void) { return inspect(); }
 
 `), nil)
 	if !result.Ok {
@@ -555,6 +556,7 @@ func TestCheckTransparentUnionCallingConventionAttribute(t *testing.T) {
 typedef union { int *integers; long *longs; } argument __attribute__((__transparent_union__));
 void release(argument);
 long *select_longs(argument value) { return value.longs; }
+void release_value(argument value) { release(value); }
 `)
 	checked := CheckObjectForDataModel(source, DataModelLP64)
 	if !checked.Ok {
@@ -984,7 +986,6 @@ int inspect(void) { return sizeof(va_list) + _Alignof(va_list); }
 		t.Fatalf("builtin va_list translation failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
 	for _, want := range [][]byte{
-		[]byte("func consume(p0 string,p1 *uintptr) int32"),
 		[]byte("return 32"),
 	} {
 		if !bytes.Contains(result.Source, want) {
@@ -1034,6 +1035,27 @@ void barrier(void) { asm volatile("" : : : "memory", "cc"); }
 		if !bytes.Contains(result.Source, want) {
 			t.Fatalf("asm clobber source is missing %q:\n%s", want, result.Source)
 		}
+	}
+}
+
+func TestTranslateAssemblyMetadataEvaluatesLayoutConstants(t *testing.T) {
+	result := TranslateAssemblyMetadata([]byte(`
+struct sample { char tag; unsigned long value; };
+int main(void) {
+	asm volatile("\n.ascii \"->SIZE_sample %0 sizeof(struct sample)\"" : : "i"(sizeof(struct sample)));
+	asm volatile("\n.ascii \"->OFF_sample_value %c0 offsetof(struct sample, value)\"" : : "i"(__builtin_offsetof(struct sample, value)));
+	asm volatile("\n.ascii \"->#layout comment\"");
+	return 0;
+}
+`), nil, ObjectConfig{DataModel: DataModelLP64})
+	if !result.Ok {
+		t.Fatalf("assembly metadata lowering failed: %#v", result)
+	}
+	want := ".ascii \"->SIZE_sample $16 sizeof(struct sample)\"\n" +
+		".ascii \"->OFF_sample_value 8 offsetof(struct sample, value)\"\n" +
+		".ascii \"->#layout comment\"\n"
+	if string(result.Source) != want {
+		t.Fatalf("assembly metadata = %q, want %q", result.Source, want)
 	}
 }
 
@@ -2675,7 +2697,10 @@ void serialize(void) {
 }
 
 func TestTranslateObjectConcatenatedSectionAttribute(t *testing.T) {
-	result := TranslateObject("main", []byte(`extern __attribute__((section(".data" "..read_mostly"))) unsigned long value;`), nil)
+	result := TranslateObject("main", []byte(`
+extern __attribute__((section(".data" "..read_mostly"))) unsigned long value;
+unsigned long read_value(void) { return value; }
+`), nil)
 	if !result.Ok {
 		t.Fatalf("concatenated section attribute failed: %#v", result)
 	}
@@ -4529,6 +4554,9 @@ int consume(int (*matrix)[3], int values[3]);
 int alpha(void), beta(int value);
 int qualified_parameter(int values[const static 3]) { return values[2]; }
 int abstract_layout(void) { return sizeof(int (*)[3]) + _Alignof(int (*)(int)); }
+int use_declarations(int *value, int (*matrix)[3]) {
+	return *select_value(value) + consume(matrix, value) + alpha() + beta(1);
+}
 `), nil)
 	if !result.Ok {
 		t.Fatalf("declarator translation failed: error=%d at=%d", result.Error, result.ErrorAt)
@@ -5562,7 +5590,7 @@ int selected(void) {
 	if !result.Ok {
 		t.Fatalf("constant conditional translation failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
-	if bytes.Count(result.Source, []byte("missing()")) != 1 {
+	if bytes.Contains(result.Source, []byte("missing()")) {
 		t.Fatalf("constant conditional retained its runtime arm:\n%s", result.Source)
 	}
 }
@@ -5578,7 +5606,7 @@ void check(void) {
 	if !result.Ok {
 		t.Fatalf("constant loop condition translation failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
-	if bytes.Count(result.Source, []byte("missing()")) != 1 {
+	if bytes.Contains(result.Source, []byte("missing()")) {
 		t.Fatalf("constant loop retained a runtime operand:\n%s", result.Source)
 	}
 }
@@ -5644,7 +5672,7 @@ int choose_compat(struct feature_state *state) {
 	}
 	if bytes.Contains(result.Source, []byte("if (uint8(0))!=0")) ||
 		bytes.Contains(result.Source, []byte("if (compat_frame(state))")) ||
-		bytes.Count(result.Source, []byte("unavailable()")) != 1 {
+		bytes.Contains(result.Source, []byte("unavailable()")) {
 		t.Fatalf("constant inline false branch was not removed:\n%s", result.Source)
 	}
 	if bytes.Count(result.Source, []byte("observe()")) != 2 {
@@ -5831,7 +5859,7 @@ int inspect(int value) {
 	if !result.Ok {
 		t.Fatalf("statement expression after switch failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
-	if !bytes.Contains(result.Source, []byte("switch 4{case 4:result=result+(2);")) ||
+	if !bytes.Contains(result.Source, []byte("switch 0 {default:result=result+(2);")) ||
 		!bytes.Contains(result.Source, []byte("return result}")) || bytes.Contains(result.Source, []byte("return switch")) {
 		t.Fatalf("statement expression confused its switch with the final value:\n%s", result.Source)
 	}
@@ -6221,7 +6249,7 @@ extern char begin[], end[];
 	}
 }
 
-func TestTranslateMergesBlockScopeFunctionDeclarations(t *testing.T) {
+func TestTranslateOmitsUnusedMergedBlockScopeFunctionDeclarations(t *testing.T) {
 	result := TranslateObject("main", []byte(`
 void first(void) { extern void failure(void); }
 void second(void) { extern void failure(void); }
@@ -6229,8 +6257,8 @@ void second(void) { extern void failure(void); }
 	if !result.Ok {
 		t.Fatalf("block-scope function declarations failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
-	if bytes.Count(result.Source, []byte("func failure()")) != 1 {
-		t.Fatalf("external function was emitted more than once:\n%s", result.Source)
+	if bytes.Contains(result.Source, []byte("func failure()")) {
+		t.Fatalf("unused external function was emitted:\n%s", result.Source)
 	}
 }
 
@@ -6246,6 +6274,33 @@ static word_t select_word(word_t value) { return value; }
 	}
 	if bytes.Contains(result.Source, []byte("word_t")) || !bytes.Contains(result.Source, []byte("select_word(1)")) {
 		t.Fatalf("static forward call did not use its prototype:\n%s", result.Source)
+	}
+}
+
+func TestTranslateObjectForwardDefinedStringLiteralCallUsesPointer(t *testing.T) {
+	result := TranslateObjectWithConfig("main", []byte(`
+struct wait_queue_head { unsigned long words[2]; };
+struct lock_class_key { unsigned long word; };
+extern void __init_waitqueue_head(struct wait_queue_head *, const char *, struct lock_class_key *);
+static struct wait_queue_head bit_wait_table[4];
+void __attribute__((section(".init.text"))) wait_bit_init(void) {
+	for (int i = 0; i < 4; i++) {
+		do {
+			static struct lock_class_key __key;
+			__init_waitqueue_head((bit_wait_table + i), "bit_wait_table + i", &__key);
+		} while (0);
+	}
+}
+void __init_waitqueue_head(struct wait_queue_head *head, const char *name, struct lock_class_key *key) {
+	head->words[0] = (unsigned long)name;
+	head->words[1] = (unsigned long)key;
+}
+`), nil, ObjectConfig{DataModel: DataModelLP64, PruneUnusedStatics: true})
+	if !result.Ok {
+		t.Fatalf("TranslateObject failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("renvo_runtime_CStringPointer(\"\\x62\\x69\\x74\\x5f")) {
+		t.Fatalf("forward-defined string-pointer call retained a two-word Go string carrier:\n%s", result.Source)
 	}
 }
 
@@ -6571,8 +6626,7 @@ int inspect(int choose) {
 		[]byte("operation(7,5)"),
 		[]byte("int32(-int32(byte)-1)"),
 		[]byte("+12+4+65+13+2+0+"),
-		[]byte("__c_va_words[0]=uintptr(p1)"),
-		[]byte("return ignored_variadic(p0,&__c_va)"),
+		[]byte("return ignored_variadic(p0,nil)"),
 	} {
 		if !bytes.Contains(result.Source, want) {
 			t.Fatalf("expression source is missing %q:\n%s", want, result.Source)
@@ -6720,7 +6774,12 @@ unsigned long long inspect(int fixed, ...) {
 
 func TestTranslateObjectLowersVariadicStackWords(t *testing.T) {
 	result := TranslateObject("main", []byte(`
-static unsigned long inspect(int fixed, ...) { return fixed; }
+typedef __builtin_va_list va_list;
+static unsigned long inspect(int fixed, ...) {
+	va_list args;
+	__builtin_va_start(args, fixed);
+	return __builtin_va_arg(args, unsigned long);
+}
 unsigned long call(void) { return inspect(1, 2, 3, 4, 5, 6, 7, 8); }
 `), nil)
 	if !result.Ok {
@@ -6962,6 +7021,94 @@ unsigned long read_max(void) { return max_pfn_mapped + 3; }
 	}
 }
 
+func TestTranslateObjectOmitsUnreferencedExternalDeclarations(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+extern unsigned long unused_object;
+extern unsigned long used_object;
+extern int unused_function(void);
+extern int used_function(void);
+unsigned long read_used(void) { return used_object + used_function(); }
+`), nil)
+	if !result.Ok {
+		t.Fatalf("TranslateObject failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{[]byte("variable-extern used_object"), []byte("func used_function(")} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("translated object source is missing %q:\n%s", want, result.Source)
+		}
+	}
+	for _, unwanted := range [][]byte{[]byte("variable-extern unused_object"), []byte("func unused_function(")} {
+		if bytes.Contains(result.Source, unwanted) {
+			t.Fatalf("translated object source retained %q:\n%s", unwanted, result.Source)
+		}
+	}
+}
+
+func TestTranslateObjectSelectsConstantSwitchCase(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+extern void wrong_size(void);
+extern void selected(void);
+void dispatch(void) {
+	switch (sizeof(long)) {
+	case 4: wrong_size(); break;
+	case 8: selected(); break;
+	default: wrong_size();
+	}
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("TranslateObject failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if bytes.Contains(result.Source, []byte("wrong_size()")) || bytes.Count(result.Source, []byte("selected()")) != 2 {
+		t.Fatalf("constant switch retained an unselected case:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("constant-switch source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateOptimizedObjectRetainsReachableStaticInlineVariadicFunction(t *testing.T) {
+	result := TranslateObjectWithConfig("main", []byte(`
+static inline int silent(const char *format, ...) { return 0; }
+int use(void) { return silent("value=%d", 7); }
+`), nil, ObjectConfig{DataModel: DataModelLP64, PruneUnusedStatics: true})
+	if !result.Ok {
+		t.Fatalf("TranslateObject failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{[]byte("func silent("), []byte("return silent(p0,nil)"), []byte("func __c_variadic_")} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("optimized variadic static inline source is missing %q:\n%s", want, result.Source)
+		}
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("optimized variadic static inline source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateObjectConstantSwitchContinueTargetsEnclosingLoop(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+int inspect(void) {
+	int result = 0;
+	for (int i = 0; i < 2; i++) {
+		switch (sizeof(long)) {
+		case 8: result++; continue;
+		default: result += 10;
+		}
+	}
+	return result;
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("TranslateObject failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("switch 0 {default:")) || !bytes.Contains(result.Source, []byte("continue;")) {
+		t.Fatalf("constant switch lost its enclosing-loop continue:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("constant-switch continue source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
 func TestTranslateObjectEmitsArrayDecayRelocation(t *testing.T) {
 	result := TranslateObject("main", []byte(`
 extern char image_end[];
@@ -7098,7 +7245,7 @@ int inspect(void) {
 	if !result.Ok {
 		t.Fatalf("TranslateObject failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
-	if bytes.Count(result.Source, []byte("unavailable()")) != 1 ||
+	if bytes.Contains(result.Source, []byte("unavailable()")) ||
 		bytes.Contains(result.Source, []byte("if !")) ||
 		bytes.Contains(result.Source, []byte("if false")) {
 		t.Fatalf("compile-time feature fallback retained its dead branch:\n%s", result.Source)
@@ -7411,8 +7558,6 @@ int EVP_DigestFinal_ex(EVP_MD_CTX *ctx, unsigned char *md, uint32_t *size);
 	for _, want := range [][]byte{
 		[]byte("var context *byte=EVP_MD_CTX_new()"),
 		[]byte("var count uintptr=0"),
-		[]byte("func EVP_DigestUpdate(p0 *byte,p1 *byte,p2 uintptr) int32"),
-		[]byte("func EVP_DigestFinal_ex(p0 *byte,p1 *uint8,p2 *uint32) int32"),
 	} {
 		if !bytes.Contains(result.Source, want) {
 			t.Fatalf("translated object source is missing %q:\n%s", want, result.Source)
@@ -7465,6 +7610,31 @@ int first_byte(struct identifier *identifier) { return *identifier->bytes; }
 	}
 }
 
+func TestTranslateObjectEmptyAggregateAssignmentDoesNotStoreCarrier(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+struct empty {};
+struct holder { struct empty lock; unsigned long value; };
+void initialize_lock(struct holder *holder) {
+	holder->lock = (struct empty){};
+}
+unsigned long preserve_value(void) {
+	struct holder holder = { .value = 0x3f8 };
+	initialize_lock(&holder);
+	return holder.value;
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("empty-aggregate assignment translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("{return value}")) ||
+		bytes.Contains(result.Source, []byte("{*target=value;return *target}")) {
+		t.Fatalf("empty C aggregate assignment stores its Go carrier byte:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("empty-aggregate assignment source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
 func TestTranslateRejectsSemanticsNotYetPreserved(t *testing.T) {
 	for _, source := range []string{
 		"#if 0\nint hidden(void) { return 1; }\n#endif\n",
@@ -7474,6 +7644,26 @@ func TestTranslateRejectsSemanticsNotYetPreserved(t *testing.T) {
 		if result.Ok || result.Error != TranslateErrUnsupported {
 			t.Fatalf("Translate(%q) = %#v, want explicit unsupported error", source, result)
 		}
+	}
+}
+
+func TestGeneratedIdentifierReferencesIndexWholeIdentifiers(t *testing.T) {
+	references := newGeneratedIdentifierReferences(4)
+	references.add("alpha")
+	references.add("alphabet")
+	references.add("beta")
+	references.add("missing")
+	references.add("alpha")
+	references.scan([]byte("alpha alphabetic beta _alpha alpha2"))
+	if !references.contains("alpha") || !references.contains("beta") {
+		t.Fatal("identifier index missed an exact whole-identifier reference")
+	}
+	if references.contains("alphabet") || references.contains("missing") {
+		t.Fatal("identifier index accepted a substring or absent identifier")
+	}
+	references.mark("missing")
+	if !references.contains("missing") {
+		t.Fatal("identifier index did not retain an explicit reference")
 	}
 }
 

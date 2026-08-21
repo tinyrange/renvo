@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+frontend="${RENVO_KBUILD_COMPILER:?RENVO_KBUILD_COMPILER must name the Renvo compiler}"
+external="${RENVO_KBUILD_EXTERNAL_CC:-cc}"
+assembly=false
+boot16=false
+language=""
+for argument in "$@"; do
+	if [[ "$language" == "next" ]]; then
+		language="$argument"
+		continue
+	fi
+	if [[ "$argument" == "-x" ]]; then
+		language=next
+		continue
+	fi
+	case "$argument" in
+		*.S) assembly=true ;;
+		-m16) boot16=true ;;
+	esac
+done
+if [[ "$language" == "assembler-with-cpp" ]]; then
+	assembly=true
+fi
+
+if [[ "$assembly" == true || "$boot16" == true ]]; then
+	exec "$external" "$@"
+fi
+exec "$frontend" cc "$@"

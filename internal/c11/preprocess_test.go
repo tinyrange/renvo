@@ -30,10 +30,83 @@ func TestPreprocessProbeSelectsAndExpandsObjectMacros(t *testing.T) {
 	}
 }
 
+func TestPreprocessReportsImplementedDiagnosticErrorAttribute(t *testing.T) {
+	result := Preprocess(PreprocessConfig{Path: "probe.c", Source: []byte(`
+#if __has_attribute(__error__)
+extern void invalid(void) __attribute__((__error__("invalid")));
+#else
+extern void invalid(void);
+#endif
+#if __has_attribute(renvo_not_implemented)
+INVALID_FEATURE_REPORT
+#endif
+void use(int value) { if (value) invalid(); }
+`)})
+	if !result.Ok {
+		t.Fatalf("Preprocess failed: %#v", result)
+	}
+	if !bytes.Contains(result.Source, []byte("__attribute__")) || !bytes.Contains(result.Source, []byte("__error__")) {
+		t.Fatalf("implemented error attribute was hidden from the source:\n%s", result.Source)
+	}
+	if bytes.Contains(result.Source, []byte("INVALID_FEATURE_REPORT")) {
+		t.Fatalf("unknown attribute was reported as implemented:\n%s", result.Source)
+	}
+	translated := TranslateObject("main", result.Source, nil)
+	if !translated.Ok {
+		t.Fatalf("TranslateObject failed: error=%d at=%d", translated.Error, translated.ErrorAt)
+	}
+	if !bytes.Contains(translated.Source, []byte("renvo_runtime_CUndefinedInstruction()")) ||
+		bytes.Contains(translated.Source, []byte("invalid();")) {
+		t.Fatalf("diagnostic error call was not lowered locally:\n%s", translated.Source)
+	}
+}
+
 func TestPreprocessDefinesTargetInt128Width(t *testing.T) {
 	result := PreprocessProbe([]byte("#ifdef __SIZEOF_INT128__\n__SIZEOF_INT128__\n#endif\n"), nil)
 	if !result.Ok || string(result.Source) != "16\n" {
 		t.Fatalf("int128 target predefine = %#v, source %q", result, result.Source)
+	}
+}
+
+func TestPreprocessAdvertisesSupportedAsmFlagOutputs(t *testing.T) {
+	result := PreprocessProbe([]byte("#ifdef __GCC_ASM_FLAG_OUTPUTS__\nflag_outputs\n#endif\n"), nil)
+	if !result.Ok || string(result.Source) != "flag_outputs\n" {
+		t.Fatalf("asm flag-output predefine = %#v, source %q", result, result.Source)
+	}
+}
+
+func TestPreprocessMacroDumpIncludesActiveBuiltinsAndSourceDefinitions(t *testing.T) {
+	result := Preprocess(PreprocessConfig{
+		Path: "main.c", Source: []byte("#define PROJECT_VALUE 42\n#undef __GNUC_MINOR__\n"),
+		EmitIncludes: true, MacroDump: true,
+	})
+	if !result.Ok || !bytes.Contains(result.Source, []byte("#define __GNUC__ 5\n")) ||
+		!bytes.Contains(result.Source, []byte("#define PROJECT_VALUE 42\n")) ||
+		bytes.Contains(result.Source, []byte("#define __GNUC_MINOR__")) {
+		t.Fatalf("macro dump = %#v\n%s", result, result.Source)
+	}
+}
+
+func TestPreprocessGNUVariadicStructGroupWithCommaMembers(t *testing.T) {
+	source := []byte(`#define __struct_group_tag(TAG) TAG
+#define __struct_group(TAG, NAME, ATTRS, MEMBERS...) union { struct { MEMBERS } ATTRS; struct __struct_group_tag(TAG) { MEMBERS } ATTRS NAME; } ATTRS
+#define struct_group(NAME, MEMBERS...) __struct_group(, NAME, , MEMBERS)
+struct packet {
+	struct_group(headers,
+		unsigned char first:1, second:1;
+#if defined(KEEP_UNION)
+		union { unsigned int left, right; };
+#endif
+	);
+};
+`)
+	result := Preprocess(PreprocessConfig{
+		Path: "main.c", Source: source, EmitIncludes: true,
+		Predefined: []Macro{{Name: "KEEP_UNION", Value: "1"}},
+	})
+	if !result.Ok || !bytes.Contains(result.Source, []byte("union { struct")) ||
+		!bytes.Contains(result.Source, []byte("unsigned int left , right")) {
+		t.Fatalf("struct-group expansion = %#v\n%s", result, result.Source)
 	}
 }
 
@@ -57,6 +130,18 @@ CALL(run, VALUE, 9)
 	want := "\"VALUE + 1\"\nprefix_run ( 7 , 9 )\n"
 	if !result.Ok || string(result.Source) != want {
 		t.Fatalf("preprocess = %#v, source %q, want %q", result, result.Source, want)
+	}
+}
+
+func TestPreprocessPreservesReplacementWhitespaceThroughNestedStringize(t *testing.T) {
+	source := []byte(`#define ASM_REF(symbol) .quad symbol
+#define STRINGIFY_INNER(value...) #value
+#define STRINGIFY(value...) STRINGIFY_INNER(value)
+STRINGIFY(ASM_REF(exported))
+`)
+	result := Preprocess(PreprocessConfig{Path: "main.c", Source: source, EmitIncludes: true})
+	if !result.Ok || string(result.Source) != "\".quad exported\"\n" {
+		t.Fatalf("nested stringize expansion = %#v, source %q", result, result.Source)
 	}
 }
 

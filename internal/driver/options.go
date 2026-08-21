@@ -78,6 +78,7 @@ type Options struct {
 	CDataSections        bool
 	CShortWChar          bool
 	CKernelCodeModel     bool
+	COptimize            bool
 	DependencyFile       string
 	DependencyTarget     string
 	CDependencyRoot      string
@@ -106,6 +107,18 @@ func NormalizeCCompilerCommand(args []string) []string {
 	out = append(out, "-cc")
 	for i := 2; i < len(args); i++ {
 		arg := args[i]
+		if arg == "-" {
+			out = append(out, "-cc-stdin")
+			continue
+		}
+		if arg == "/dev/null" {
+			out = append(out, "-cc-null-input")
+			continue
+		}
+		if arg == "-dM" {
+			out = append(out, "-cc-macro-dump")
+			continue
+		}
 		if arg == "-MMD" || arg == "-MD" {
 			out = append(out, "-cc-dependencies")
 			continue
@@ -114,8 +127,36 @@ func NormalizeCCompilerCommand(args []string) []string {
 			out = append(out, "-cc-short-wchar")
 			continue
 		}
+		if arg == "-O0" {
+			out = append(out, "-cc-no-optimize")
+			continue
+		}
+		if arg == "-O1" || arg == "-O2" || arg == "-O3" || arg == "-Os" {
+			out = append(out, "-cc-optimize")
+			continue
+		}
 		if arg == "-mcmodel=kernel" {
 			out = append(out, "-cc-kernel-code-model")
+			continue
+		}
+		if arg == "-mcmodel=small" {
+			out = append(out, "-cc-small-code-model")
+			continue
+		}
+		if arg == "-fPIC" || arg == "-fpic" || arg == "-fPIE" || arg == "-fpie" {
+			// linux/amd64 object text uses PC-relative local, data, and
+			// import references unconditionally. Keep PIC acceptance explicit
+			// so compiler feature probes do not mistake it for a generic flag.
+			// The same representation satisfies the kernel decompressor's PIE
+			// object contract; final executable placement remains the linker's job.
+			out = append(out, "-cc-position-independent")
+			continue
+		}
+		if arg == "-fasynchronous-unwind-tables" {
+			// C objects retain Renvo's canonical frame chain; the ELF object
+			// writer does not yet materialize an additional .eh_frame copy.
+			// Keep this vDSO metadata request distinct from semantic flags.
+			out = append(out, "-cc-asynchronous-unwind-tables")
 			continue
 		}
 		if arg == "-m32" {
@@ -145,8 +186,16 @@ func NormalizeCCompilerCommand(args []string) []string {
 			out = append(out, "-cc-function-sections")
 			continue
 		}
+		if arg == "-fno-function-sections" {
+			out = append(out, "-cc-no-function-sections")
+			continue
+		}
 		if arg == "-fdata-sections" {
 			out = append(out, "-cc-data-sections")
+			continue
+		}
+		if arg == "-fno-data-sections" {
+			out = append(out, "-cc-no-data-sections")
 			continue
 		}
 		option, _ = cCompilerOptionIndex("-x|-include|-D|-U|-MF|-MT", arg, false)
@@ -190,7 +239,7 @@ func NormalizeCCompilerCommand(args []string) []string {
 	return out
 }
 
-const cCompilerInertOptions = "-MMD|-MD|-MP|-pipe|-std=gnu11|-std=c11|-m64|-Os|-O0|-O1|-O2|-O3|-ffreestanding|-static|-ggdb|-funsigned-char|-fno-common|-fno-pic|-fno-PIE|-fno-pie|-fno-builtin|-fno-strict-aliasing|-fno-asynchronous-unwind-tables|-fno-delete-null-pointer-checks|-fno-stack-protector|-fomit-frame-pointer|-fno-strict-overflow|-fno-stack-check|-fconserve-stack|-fno-builtin-wcslen|-falign-functions=16|-fverbose-asm|-mno-sse|-mno-mmx|-mno-sse2|-mno-3dnow|-mno-avx|-mno-80387|-mtune=generic|-mno-red-zone|-Wall|-Wextra|-Wundef|-Werror|-Werror=implicit-function-declaration|-Werror=implicit-int|-Werror=return-type|-Werror=strict-prototypes|-Wno-format-security|-Wno-trigraphs|-Wmissing-declarations|-Wmissing-prototypes|-Wframe-larger-than=2048|-Wno-main|-Wvla|-Wno-pointer-sign|-Werror=date-time|-Wunused|-Wno-override-init|-Wno-missing-field-initializers|-Wno-type-limits|-Wno-shift-negative-value|-Wno-maybe-uninitialized|-Wno-sign-compare|-Wno-unused-parameter"
+const cCompilerInertOptions = "-MMD|-MD|-MP|-pipe|-std=gnu11|-std=c11|-m64|-ffreestanding|-static|-ggdb|-funsigned-char|-fno-common|-fno-pic|-fno-PIE|-fno-pie|-fno-builtin|-fno-strict-aliasing|-fno-asynchronous-unwind-tables|-fno-delete-null-pointer-checks|-fno-stack-protector|-fomit-frame-pointer|-fno-omit-frame-pointer|-foptimize-sibling-calls|-fno-strict-overflow|-fno-stack-check|-fconserve-stack|-fno-builtin-wcslen|-falign-functions=16|-fverbose-asm|-mno-sse|-mno-mmx|-mno-sse2|-mno-3dnow|-mno-avx|-mno-80387|-mtune=generic|-mno-red-zone|-Wall|-Wextra|-Wundef|-Werror|-Wno-error|-Werror=implicit-function-declaration|-Werror=implicit-int|-Werror=return-type|-Werror=strict-prototypes|-Wno-format-security|-Wno-trigraphs|-Wmissing-declarations|-Wmissing-prototypes|-Wframe-larger-than=2048|-Wno-main|-Wvla|-Wno-pointer-sign|-Werror=date-time|-Wunused|-Wno-unused-macros|-Wno-override-init|-Wno-missing-field-initializers|-Wno-type-limits|-Wno-shift-negative-value|-Wno-maybe-uninitialized|-Wno-sign-compare|-Wno-unused-parameter"
 
 func cCompilerInertOption(arg string) bool {
 	option, _ := cCompilerOptionIndex(cCompilerInertOptions, arg, false)
@@ -290,8 +339,18 @@ func parseOptions(args []string, requireAdvertisedTarget bool) Options {
 			i++
 			continue
 		}
+		if arg == "-cc-no-function-sections" {
+			options.CFunctionSections = false
+			i++
+			continue
+		}
 		if arg == "-cc-data-sections" {
 			options.CDataSections = true
+			i++
+			continue
+		}
+		if arg == "-cc-no-data-sections" {
+			options.CDataSections = false
 			i++
 			continue
 		}
@@ -300,8 +359,31 @@ func parseOptions(args []string, requireAdvertisedTarget bool) Options {
 			i++
 			continue
 		}
+		if arg == "-cc-optimize" {
+			options.COptimize = true
+			i++
+			continue
+		}
+		if arg == "-cc-no-optimize" {
+			options.COptimize = false
+			i++
+			continue
+		}
 		if arg == "-cc-kernel-code-model" {
 			options.CKernelCodeModel = true
+			i++
+			continue
+		}
+		if arg == "-cc-small-code-model" {
+			options.CKernelCodeModel = false
+			i++
+			continue
+		}
+		if arg == "-cc-position-independent" {
+			i++
+			continue
+		}
+		if arg == "-cc-asynchronous-unwind-tables" {
 			i++
 			continue
 		}

@@ -107,13 +107,34 @@ func TestNormalizeCCompilerCommand(t *testing.T) {
 }
 
 func TestNormalizeKbuildCCompilerCommand(t *testing.T) {
-	args := NormalizeCCompilerCommand([]string{"renvo", "cc", "-MMD", "-Wp,-MMD,obj/.leaf.o.d", "-ffunction-sections", "-fdata-sections", "-fshort-wchar", "-nostdinc", "-Iinclude", "-include", "include/config.h", "-D__KERNEL__", "-std=gnu11", "-m64", "-mcmodel=kernel", "-Wall", "-c", "leaf.c", "-o", "obj/leaf.o"})
+	args := NormalizeCCompilerCommand([]string{"renvo", "cc", "-MMD", "-Wp,-MMD,obj/.leaf.o.d", "-ffunction-sections", "-fdata-sections", "-fshort-wchar", "-nostdinc", "-Iinclude", "-include", "include/config.h", "-D__KERNEL__", "-std=gnu11", "-m64", "-mcmodel=kernel", "-Os", "-Wall", "-c", "leaf.c", "-o", "obj/leaf.o"})
 	options := ParseOptions(args[1:])
 	if !options.Ok || !options.CCompiler || !options.CNoStdIncludes || !options.CDependencyRequested ||
-		!options.CFunctionSections || !options.CDataSections || !options.CShortWChar || !options.CKernelCodeModel || options.DependencyFile != "obj/.leaf.o.d" ||
+		!options.CFunctionSections || !options.CDataSections || !options.CShortWChar || !options.CKernelCodeModel || !options.COptimize || options.DependencyFile != "obj/.leaf.o.d" ||
 		len(options.CForcedInclude) != 1 || options.CForcedInclude[0] != "include/config.h" ||
 		len(options.CDefines) != 1 || options.CDefines[0] != "__KERNEL__" {
 		t.Fatalf("normalized Kbuild options = %#v (args %#v)", options, args)
+	}
+}
+
+func TestNormalizeKbuildSectionOverrides(t *testing.T) {
+	args := NormalizeCCompilerCommand([]string{
+		"renvo", "cc", "-ffunction-sections", "-fdata-sections",
+		"-fno-function-sections", "-fno-data-sections", "-c", "leaf.c", "-o", "leaf.o",
+	})
+	options := ParseOptions(args[1:])
+	if !options.Ok || options.CFunctionSections || options.CDataSections {
+		t.Fatalf("normalized section overrides = %#v (args %#v)", options, args)
+	}
+}
+
+func TestNormalizeKbuildCodeModelOverride(t *testing.T) {
+	args := NormalizeCCompilerCommand([]string{
+		"renvo", "cc", "-mcmodel=kernel", "-mcmodel=small", "-O2", "-O0", "-fPIC", "-fPIE", "-c", "leaf.c", "-o", "leaf.o",
+	})
+	options := ParseOptions(args[1:])
+	if !options.Ok || options.CKernelCodeModel || options.COptimize {
+		t.Fatalf("normalized code-model override = %#v (args %#v)", options, args)
 	}
 }
 

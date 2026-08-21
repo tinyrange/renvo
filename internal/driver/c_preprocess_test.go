@@ -3,6 +3,7 @@ package driver
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -52,5 +53,27 @@ func TestPreprocessCCommandPreservesExplicitEmptyDefine(t *testing.T) {
 	result := PreprocessCCommand(args, dir, OSFS{})
 	if !result.Ok || string(result.Source) != "before after\n" {
 		t.Fatalf("empty define result = %#v, source %q", result, result.Source)
+	}
+}
+
+func TestPreprocessCCommandReadsKbuildStandardInput(t *testing.T) {
+	args := NormalizeCCompilerCommand([]string{
+		"renvo", "cc", "-Wno-error", "-Wno-unused-macros", "-E", "-P", "-x", "c", "-",
+	})
+	if !CPreprocessCommandUsesStandardInput(args) {
+		t.Fatalf("normalized standard-input command = %#v", args)
+	}
+	result := PreprocessCCommandWithInput(args, "/repo", memorySourceFS{}, []byte("#define VALUE 42\nVALUE\n"))
+	if !result.Ok || string(result.Source) != "42\n" || result.Output != "-" {
+		t.Fatalf("standard-input preprocess result = %#v, source %q", result, result.Source)
+	}
+}
+
+func TestPreprocessCCommandDumpsMacrosForNullProbe(t *testing.T) {
+	args := NormalizeCCompilerCommand([]string{"renvo", "cc", "-dM", "-E", "-x", "c", "/dev/null"})
+	result := PreprocessCCommand(args, "/repo", memorySourceFS{})
+	if !result.Ok || !strings.Contains(string(result.Source), "#define __GNUC__ 5\n") ||
+		strings.Contains(string(result.Source), "__clang__") {
+		t.Fatalf("null macro-dump result = %#v, source %q", result, result.Source)
 	}
 }

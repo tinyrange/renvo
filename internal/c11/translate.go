@@ -63,6 +63,13 @@ type cAttributes struct {
 	callingConvention int
 	asmRegister       string
 	cleanup           string
+	used              bool
+}
+
+type cDeferredFunction struct {
+	name    string
+	source  []byte
+	emitted bool
 }
 
 type cAsmOperand struct {
@@ -113,6 +120,17 @@ type initializerStep struct {
 	index int
 }
 
+type generatedIdentifierReference struct {
+	name  string
+	next  int
+	found bool
+}
+
+type generatedIdentifierReferences struct {
+	buckets []int
+	names   []generatedIdentifierReference
+}
+
 type translator struct {
 	src                     []byte
 	tokens                  []token
@@ -121,6 +139,8 @@ type translator struct {
 	out                     []byte
 	object                  bool
 	checkOnly               bool
+	assemblyOutput          bool
+	assemblyOut             []byte
 	speculativeType         bool
 	ok                      bool
 	err                     int
@@ -135,7 +155,12 @@ type translator struct {
 	definitions             []cObjectName
 	threadNames             []cObjectName
 	functions               []cFunctionName
+	deferredFunctions       []cDeferredFunction
+	deferredVariables       []cDeferredFunction
+	deferredStaticOut       []byte
+	capturingDeferred       bool
 	diagnosticErrorNames    []string
+	translationUnitDefs     []string
 	variadicCalls           []cVariadicCall
 	functionParams          []int
 	ordinaryNames           []int
@@ -147,6 +172,7 @@ type translator struct {
 	functionSections        bool
 	dataSections            bool
 	kernelCodeModel         bool
+	pruneUnusedStatics      bool
 	baseAttributes          cAttributes
 	typeSerial              int
 	dataModel               int
@@ -321,15 +347,24 @@ func TranslateObjectForDataModel(packageName string, src []byte, prelude []byte,
 // driver. Declaration attributes remain properties of the declaration itself;
 // these booleans only implement the corresponding GCC command-line switches.
 type ObjectConfig struct {
-	DataModel        int
-	FunctionSections bool
-	DataSections     bool
-	ShortWChar       bool
-	KernelCodeModel  bool
+	DataModel          int
+	FunctionSections   bool
+	DataSections       bool
+	ShortWChar         bool
+	KernelCodeModel    bool
+	PruneUnusedStatics bool
 }
 
 func TranslateObjectWithConfig(packageName string, src []byte, prelude []byte, config ObjectConfig) Result {
 	return translateObjectConfig(packageName, src, prelude, true, config, false)
+}
+
+// TranslateAssemblyMetadata evaluates constant inline-assembly records used
+// by build-time layout generators. It deliberately accepts only translation
+// units which emit at least one .ascii record beginning with "->"; ordinary
+// compiler assembly output remains unsupported rather than being approximated.
+func TranslateAssemblyMetadata(src []byte, prelude []byte, config ObjectConfig) Result {
+	return translateObjectConfigMode("main", src, prelude, true, config, false, true)
 }
 
 // CheckObjectForDataModel parses and type-checks a preprocessed C translation
@@ -345,18 +380,24 @@ func translate(packageName string, src []byte, prelude []byte, object bool, data
 }
 
 func translateObjectConfig(packageName string, src []byte, prelude []byte, object bool, config ObjectConfig, checkOnly bool) Result {
+	return translateObjectConfigMode(packageName, src, prelude, object, config, checkOnly, false)
+}
+
+func translateObjectConfigMode(packageName string, src []byte, prelude []byte, object bool, config ObjectConfig, checkOnly bool, assemblyOutput bool) Result {
 	t := translator{
-		packageName:      packageName,
-		out:              make([]byte, 0, len(src)+len(src)/4+len(prelude)+64),
-		object:           object,
-		checkOnly:        checkOnly,
-		functionSections: config.FunctionSections,
-		dataSections:     config.DataSections,
-		kernelCodeModel:  config.KernelCodeModel,
-		ok:               true,
-		errorAt:          -1,
-		localStart:       -1,
-		initializing:     -1,
+		packageName:        packageName,
+		out:                make([]byte, 0, len(src)+len(src)/4+len(prelude)+64),
+		object:             object,
+		checkOnly:          checkOnly,
+		assemblyOutput:     assemblyOutput,
+		functionSections:   config.FunctionSections,
+		dataSections:       config.DataSections,
+		kernelCodeModel:    config.KernelCodeModel,
+		pruneUnusedStatics: config.PruneUnusedStatics,
+		ok:                 true,
+		errorAt:            -1,
+		localStart:         -1,
+		initializing:       -1,
 	}
 	t.initTypes(config.DataModel)
 	t.wcharSize = 4
@@ -373,15 +414,31 @@ func translateObjectConfig(packageName string, src []byte, prelude []byte, objec
 		t.appendText("// renvo:c11\n")
 	}
 	t.packageHeader = len(t.out)
-	if len(prelude) > 0 && !t.translateSource(prelude) {
+	var preludeScan scanResult
+	if len(prelude) > 0 {
+		preludeScan = scan(prelude)
+	}
+	sourceScan := scan(src)
+	if object {
+		t.rememberTranslationUnitFunctionDefinitions(prelude, preludeScan.tokens)
+		t.rememberTranslationUnitFunctionDefinitions(src, sourceScan.tokens)
+	}
+	if len(prelude) > 0 && !t.translateScannedSource(prelude, preludeScan) {
 		return Result{Ok: false, Error: t.err, ErrorAt: -1}
 	}
-	if !t.translateSource(src) {
+	if !t.translateScannedSource(src, sourceScan) {
 		return Result{Ok: false, Error: t.err, ErrorAt: t.errorAt}
 	}
 	if checkOnly {
 		return Result{Ok: true, Error: TranslateOK, ErrorAt: -1}
 	}
+	if assemblyOutput {
+		if len(t.assemblyOut) == 0 {
+			return Result{Ok: false, Error: TranslateErrUnsupported, ErrorAt: -1}
+		}
+		return Result{Source: t.assemblyOut, Ok: true, Error: TranslateOK, ErrorAt: -1}
+	}
+	t.emitReachableDeferredFunctions()
 	t.emitPendingDeclarations()
 	if !t.ok {
 		return Result{Ok: false, Error: t.err, ErrorAt: t.errorAt}
@@ -396,8 +453,76 @@ func translateObjectConfig(packageName string, src []byte, prelude []byte, objec
 	return Result{Source: t.out, Ok: true, Error: TranslateOK, ErrorAt: -1}
 }
 
+// rememberTranslationUnitFunctionDefinitions records ordinary function
+// definitions before lowering any body. C permits a call through a prototype
+// to precede the definition, while object-mode foreign char pointers use a
+// deliberately different shared-Go carrier. Knowing which declarations become
+// local definitions keeps that ABI choice independent of source order.
+func (t *translator) rememberTranslationUnitFunctionDefinitions(src []byte, tokens []token) {
+	if len(src) == 0 {
+		return
+	}
+	segmentStart := 0
+	braceDepth := 0
+	for i := 0; i < len(tokens); i++ {
+		tok := tokens[i]
+		if tokenIs(src, tok, "{") {
+			if braceDepth == 0 {
+				name := -1
+				parenDepth := 0
+				for j := segmentStart; j+1 < i; j++ {
+					switch {
+					case tokenIs(src, tokens[j], "("):
+						parenDepth++
+					case tokenIs(src, tokens[j], ")"):
+						parenDepth--
+					case parenDepth == 0 && tokenKind(tokens[j]) == tokenIdent &&
+						tokenIs(src, tokens[j+1], "(") &&
+						!cTokenSetContains("__attribute__,__attribute,__declspec,typeof,__typeof,__typeof__", tokenText(src, tokens[j])):
+						name = j
+					}
+				}
+				if name >= 0 {
+					t.rememberTranslationUnitFunctionDefinition(string(tokenText(src, tokens[name])))
+				}
+			}
+			braceDepth++
+		} else if tokenIs(src, tok, "}") {
+			if braceDepth > 0 {
+				braceDepth--
+			}
+			if braceDepth == 0 {
+				segmentStart = i + 1
+			}
+		} else if braceDepth == 0 && tokenIs(src, tok, ";") {
+			segmentStart = i + 1
+		}
+	}
+}
+
+func (t *translator) rememberTranslationUnitFunctionDefinition(name string) {
+	for i := 0; i < len(t.translationUnitDefs); i++ {
+		if t.translationUnitDefs[i] == name {
+			return
+		}
+	}
+	t.translationUnitDefs = append(t.translationUnitDefs, arena.PersistString(name))
+}
+
+func (t *translator) translationUnitFunctionDefined(name string) bool {
+	for i := 0; i < len(t.translationUnitDefs); i++ {
+		if t.translationUnitDefs[i] == name {
+			return true
+		}
+	}
+	return false
+}
+
 func (t *translator) translateSource(src []byte) bool {
-	scanned := scan(src)
+	return t.translateScannedSource(src, scan(src))
+}
+
+func (t *translator) translateScannedSource(src []byte, scanned scanResult) bool {
 	if !scanned.ok {
 		t.ok = false
 		t.err = TranslateErrScan
@@ -726,7 +851,24 @@ func (t *translator) externalDeclaration() {
 			t.checkFunction(decl, storage)
 			return
 		}
-		t.emitFunction(decl, storage)
+		if t.object && t.pruneUnusedStatics && decl.attributes.inline && !decl.attributes.used &&
+			(storage == storageStatic || storage == storageExtern && decl.attributes.gnuInline) {
+			start := len(t.out)
+			oldDeferredStatic, oldCapturing := t.deferredStaticOut, t.capturingDeferred
+			t.deferredStaticOut = nil
+			t.capturingDeferred = true
+			t.emitFunction(decl, storage)
+			deferred := append([]byte{}, t.deferredStaticOut...)
+			deferred = append(deferred, t.out[start:]...)
+			t.out = t.out[:start]
+			t.deferredStaticOut = oldDeferredStatic
+			t.capturingDeferred = oldCapturing
+			t.deferredFunctions = append(t.deferredFunctions, cDeferredFunction{
+				name: string(tokenText(t.src, decl.name)), source: arena.PersistBytes(deferred),
+			})
+		} else {
+			t.emitFunction(decl, storage)
+		}
 		return
 	}
 	decl.initializer = t.takeInitializer()
@@ -1900,6 +2042,7 @@ func (attributes *cAttributes) merge(other cAttributes) {
 	attributes.inline = attributes.inline || other.inline
 	attributes.gnuInline = attributes.gnuInline || other.gnuInline
 	attributes.diagnosticError = attributes.diagnosticError || other.diagnosticError
+	attributes.used = attributes.used || other.used
 	if other.section != "" {
 		attributes.section = other.section
 	}
@@ -2156,6 +2299,7 @@ func (t *translator) rememberFunction(decl *declarator, definition bool) bool {
 		if definition {
 			decl.attributes.merge(fn.attributes)
 			fn.defined = true
+			fn.consumesVariadic = t.functionConsumesVariadicArguments()
 		}
 		fn.attributes.merge(decl.attributes)
 		return true
@@ -2166,9 +2310,24 @@ func (t *translator) rememberFunction(decl *declarator, definition bool) bool {
 	}
 	t.functions = append(t.functions, cFunctionName{
 		name: name, typeID: decl.functionType, resultType: decl.typeID, paramStart: start,
-		paramCount: len(decl.params), variadic: decl.variadic, defined: definition, attributes: decl.attributes,
+		paramCount: len(decl.params), variadic: decl.variadic, defined: definition,
+		consumesVariadic: definition && t.functionConsumesVariadicArguments(), attributes: decl.attributes,
 	})
 	return t.rememberName(name, len(t.functions)-1, cNameFunction)
+}
+
+func (t *translator) functionConsumesVariadicArguments() bool {
+	if !t.currentIs("{") {
+		return false
+	}
+	close := matchingToken(t.src, t.tokens, t.pos, "{", "}")
+	for i := t.pos + 1; i >= 0 && i < close; i++ {
+		if tokenIs(t.src, t.tokens[i], "__builtin_va_start") || tokenIs(t.src, t.tokens[i], "va_start") ||
+			tokenIs(t.src, t.tokens[i], "__va_start") {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *translator) rememberDiagnosticErrorName(name string) {
@@ -2444,7 +2603,17 @@ func (t *translator) fileVariable(decl declarator) bool {
 		decl.objectTypeID = t.objectFlexibleInitializerType(decl.typeID, decl.initializer)
 	}
 	t.definitions = append(t.definitions, cObjectName{name: name, typeID: decl.typeID})
-	t.emitVariable(decl)
+	if t.object && t.pruneUnusedStatics && decl.storage == storageStatic && !decl.attributes.used {
+		start := len(t.out)
+		t.emitVariable(decl)
+		deferred := append([]byte{}, t.out[start:]...)
+		t.out = t.out[:start]
+		t.deferredVariables = append(t.deferredVariables, cDeferredFunction{
+			name: name, source: arena.PersistBytes(deferred),
+		})
+	} else {
+		t.emitVariable(decl)
+	}
 	return true
 }
 
@@ -2586,8 +2755,65 @@ func (t *translator) completeInitializerArray(decl *declarator) bool {
 	return true
 }
 
+func (t *translator) emitReachableDeferredFunctions() {
+	references := newGeneratedIdentifierReferences(len(t.deferredFunctions) + len(t.deferredVariables))
+	for i := 0; i < len(t.deferredFunctions); i++ {
+		references.add(t.deferredFunctions[i].name)
+	}
+	for i := 0; i < len(t.deferredVariables); i++ {
+		references.add(t.deferredVariables[i].name)
+	}
+	references.scan(t.out)
+	references.scan(t.staticOut)
+	for i := 0; i < len(t.variadicCalls); i++ {
+		function := t.variadicCalls[i].function
+		if function >= 0 && function < len(t.functions) {
+			references.mark(t.functions[function].name)
+		}
+	}
+	for {
+		progress := false
+		for i := 0; i < len(t.deferredFunctions); i++ {
+			deferred := &t.deferredFunctions[i]
+			if deferred.emitted || !references.contains(deferred.name) {
+				continue
+			}
+			deferred.emitted = true
+			t.out = append(t.out, deferred.source...)
+			references.scan(deferred.source)
+			progress = true
+		}
+		for i := 0; i < len(t.deferredVariables); i++ {
+			deferred := &t.deferredVariables[i]
+			if deferred.emitted || !references.contains(deferred.name) {
+				continue
+			}
+			deferred.emitted = true
+			t.out = append(t.out, deferred.source...)
+			references.scan(deferred.source)
+			progress = true
+		}
+		if !progress {
+			return
+		}
+	}
+}
+
 func (t *translator) emitPendingDeclarations() {
 	t.out = append(t.out, t.staticOut...)
+	references := newGeneratedIdentifierReferences(len(t.externals) + len(t.functions) + len(t.tentatives))
+	for i := 0; i < len(t.externals); i++ {
+		references.add(t.externals[i].goName)
+	}
+	for i := 0; i < len(t.functions); i++ {
+		if !t.functions[i].defined && !t.functions[i].variadic {
+			references.add(t.functions[i].name)
+		}
+	}
+	for i := 0; i < len(t.tentatives); i++ {
+		references.add(t.tentatives[i].name)
+	}
+	references.scan(t.out)
 	for i := 0; i < len(t.types); i++ {
 		info := t.typeInfo(i)
 		if info.complete || info.goName == "" || info.kind != cTypeStruct && info.kind != cTypeUnion {
@@ -2619,7 +2845,7 @@ func (t *translator) emitPendingDeclarations() {
 		for j := 0; j < len(t.tentatives); j++ {
 			defined = defined || t.tentatives[j].name == external.name
 		}
-		if defined {
+		if defined || !references.contains(external.goName) {
 			continue
 		}
 		t.emitObjectMetadata("variable-extern", external.name, external.attributes, storageExtern, nil, external.typeID, false)
@@ -2630,7 +2856,7 @@ func (t *translator) emitPendingDeclarations() {
 		t.out = append(t.out, ';', '\n')
 	}
 	for i := 0; i < len(t.functions); i++ {
-		if !t.functions[i].defined && !t.functions[i].variadic {
+		if !t.functions[i].defined && !t.functions[i].variadic && references.contains(t.functions[i].name) {
 			t.emitForeignFunctionName(t.functions[i])
 		}
 	}
@@ -2638,6 +2864,10 @@ func (t *translator) emitPendingDeclarations() {
 		t.emitVariadicForeignFunction(t.variadicCalls[i])
 	}
 	for i := 0; i < len(t.tentatives); i++ {
+		if t.pruneUnusedStatics && t.tentatives[i].storage == storageStatic && !t.tentatives[i].attributes.used &&
+			!references.contains(t.tentatives[i].name) {
+			continue
+		}
 		typeID := t.tentatives[i].typeID
 		info := t.typeInfo(typeID)
 		if info.kind == cTypeArray && info.count == 0 {
@@ -2656,6 +2886,78 @@ func (t *translator) emitPendingDeclarations() {
 			return
 		}
 	}
+}
+
+func newGeneratedIdentifierReferences(capacity int) generatedIdentifierReferences {
+	size := 16
+	for size < capacity*2 {
+		size *= 2
+	}
+	return generatedIdentifierReferences{
+		buckets: make([]int, size),
+		names:   make([]generatedIdentifierReference, 0, capacity),
+	}
+}
+
+func (r *generatedIdentifierReferences) add(name string) {
+	if name == "" {
+		return
+	}
+	bucket := cNameHashString(name) & (len(r.buckets) - 1)
+	for entry := r.buckets[bucket]; entry != 0; entry = r.names[entry-1].next {
+		if r.names[entry-1].name == name {
+			return
+		}
+	}
+	r.names = append(r.names, generatedIdentifierReference{name: name, next: r.buckets[bucket]})
+	r.buckets[bucket] = len(r.names)
+}
+
+func (r *generatedIdentifierReferences) scan(source []byte) {
+	for start := 0; start < len(source); {
+		if !generatedIdentifierByte(source[start]) {
+			start++
+			continue
+		}
+		end := start + 1
+		for end < len(source) && generatedIdentifierByte(source[end]) {
+			end++
+		}
+		bucket := cNameHash(source[start:end]) & (len(r.buckets) - 1)
+		for entry := r.buckets[bucket]; entry != 0; entry = r.names[entry-1].next {
+			candidate := &r.names[entry-1]
+			if len(candidate.name) == end-start && ppBytesStringEqual(source[start:end], candidate.name) {
+				candidate.found = true
+			}
+		}
+		start = end
+	}
+}
+
+func (r *generatedIdentifierReferences) mark(name string) {
+	bucket := cNameHashString(name) & (len(r.buckets) - 1)
+	for entry := r.buckets[bucket]; entry != 0; entry = r.names[entry-1].next {
+		candidate := &r.names[entry-1]
+		if candidate.name == name {
+			candidate.found = true
+			return
+		}
+	}
+}
+
+func (r *generatedIdentifierReferences) contains(name string) bool {
+	bucket := cNameHashString(name) & (len(r.buckets) - 1)
+	for entry := r.buckets[bucket]; entry != 0; entry = r.names[entry-1].next {
+		candidate := r.names[entry-1]
+		if candidate.name == name {
+			return candidate.found
+		}
+	}
+	return false
+}
+
+func generatedIdentifierByte(ch byte) bool {
+	return ch == '_' || ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9'
 }
 
 func (t *translator) compatibleType(left int, right int) bool {
@@ -3086,7 +3388,7 @@ func (t *translator) emitVariadicForeignFunction(call cVariadicCall) {
 			t.fail(TranslateErrUnsupported)
 			return
 		}
-		for i := fn.paramCount; i < call.paramCount; i++ {
+		for i := fn.paramCount; fn.consumesVariadic && i < call.paramCount; i++ {
 			info := t.typeInfo(t.functionParams[call.paramStart+i])
 			if info.kind != cTypePointer && info.kind != cTypeInt && info.kind != cTypeUint && info.kind != cTypeBool ||
 				info.kind != cTypePointer && (info.size < 1 || info.size > 8) {
@@ -3110,6 +3412,26 @@ func (t *translator) emitVariadicForeignFunction(call cVariadicCall) {
 		if fn.resultType != cTypeVoidID {
 			t.out = append(t.out, ' ')
 			t.emitType(fn.resultType)
+		}
+		if !fn.consumesVariadic {
+			t.appendText("{")
+			if fn.resultType != cTypeVoidID {
+				t.appendText("return ")
+			}
+			t.out = append(t.out, fn.name...)
+			t.out = append(t.out, '(')
+			for i := 0; i < fn.paramCount; i++ {
+				if i > 0 {
+					t.out = append(t.out, ',')
+				}
+				t.out = append(t.out, 'p')
+				t.appendDecimal(i)
+			}
+			if fn.paramCount != 0 {
+				t.out = append(t.out, ',')
+			}
+			t.appendText("nil)}\n")
+			return
 		}
 		wordCount := extraCount
 		if wordCount < 6 {
@@ -3326,6 +3648,11 @@ func (t *translator) parseAttributes() (cAttributes, bool) {
 					return attributes, false
 				}
 				attributes.diagnosticError = true
+			case "used", "__used__":
+				if len(arguments) != 0 {
+					return attributes, false
+				}
+				attributes.used = true
 			case "__unused__", "unused", "__no_instrument_function__", "no_instrument_function",
 				"__always_inline__", "always_inline", "__warn_unused_result__", "warn_unused_result", "__pure__", "pure",
 				"__noinline__", "noinline",
@@ -3337,7 +3664,7 @@ func (t *translator) parseAttributes() (cAttributes, bool) {
 				"__alloc_size__", "alloc_size",
 				"__assume_aligned__", "assume_aligned",
 				"__nonnull__", "nonnull",
-				"cold", "__cold__", "hot", "__hot__", "used", "__used__", "nocf_check", "__nocf_check__",
+				"cold", "__cold__", "hot", "__hot__", "nocf_check", "__nocf_check__",
 				"no_sanitize_address", "__no_sanitize_address__", "no_profile_instrument_function", "__no_profile_instrument_function__",
 				"noclone", "__noclone__", "no_stack_protector", "__no_stack_protector__",
 				"fallthrough", "__fallthrough__":
@@ -3522,6 +3849,13 @@ func (t *translator) emitAsmStatement() bool {
 	}
 	if t.checkOnly {
 		return true
+	}
+	if t.assemblyOutput {
+		// Header-only inline functions contain many target instructions which do
+		// not contribute to a layout generator's assembly. Preserve only the
+		// constant metadata records that the -S contract explicitly supports.
+		t.emitAsmConstantMetadata(operation)
+		return t.ok
 	}
 	if operation.gotoAsm || len(operation.labels) != 0 {
 		return t.emitAsmGotoCPUFeature(operation) || t.emitAsmGotoUserLoad(operation) || t.emitAsmGotoUserStore(operation)
@@ -3844,6 +4178,55 @@ func (t *translator) emitAsmStatement() bool {
 	if len(operation.clobbers) == 0 {
 		t.out = append(t.out, ';')
 	}
+	return true
+}
+
+func (t *translator) emitAsmConstantMetadata(operation cAsm) bool {
+	line := trimAsmLine(operation.template)
+	for len(line) > 0 && line[0] == '\n' {
+		line = trimAsmLine(line[1:])
+	}
+	if !asmLinePrefix(line, ".ascii") || !textContains(line, "\"->") ||
+		len(operation.outputs) != 0 || len(operation.clobbers) != 0 || len(operation.labels) != 0 || operation.gotoAsm {
+		return false
+	}
+	start := len(t.assemblyOut)
+	for i := 0; i < len(line); i++ {
+		if line[i] != '%' {
+			t.assemblyOut = append(t.assemblyOut, line[i])
+			continue
+		}
+		modifier := byte(0)
+		at := i + 1
+		if at < len(line) && line[at] == 'c' {
+			modifier = 'c'
+			at++
+		}
+		if at >= len(line) || line[at] < '0' || line[at] > '9' {
+			t.assemblyOut = t.assemblyOut[:start]
+			return false
+		}
+		index := int(line[at] - '0')
+		if index >= len(operation.inputs) {
+			t.assemblyOut = t.assemblyOut[:start]
+			return false
+		}
+		value, ok := t.constantExpression(operation.inputs[index].expression)
+		if !ok || operation.inputs[index].constraint != "i" {
+			t.assemblyOut = t.assemblyOut[:start]
+			return false
+		}
+		if modifier == 0 {
+			t.assemblyOut = append(t.assemblyOut, '$')
+		}
+		if value < 0 {
+			t.assemblyOut = append(t.assemblyOut, '-')
+			value = -value
+		}
+		t.assemblyOut = append(t.assemblyOut, decimalString(value)...)
+		i = at
+	}
+	t.assemblyOut = append(t.assemblyOut, '\n')
 	return true
 }
 
@@ -9858,10 +10241,19 @@ func (t *translator) emitStaticLocal(decl declarator) {
 	t.out = nil
 	t.emitObjectMetadata("variable", name, decl.attributes, storageStatic, decl.initializer, decl.typeID, false)
 	t.emitVariableName(name, decl)
-	if len(t.staticOut) != 0 && t.staticOut[len(t.staticOut)-1] != '\n' {
-		t.staticOut = append(t.staticOut, '\n')
+	target := t.staticOut
+	if t.capturingDeferred {
+		target = t.deferredStaticOut
 	}
-	t.staticOut = append(t.staticOut, t.out...)
+	if len(target) != 0 && target[len(target)-1] != '\n' {
+		target = append(target, '\n')
+	}
+	target = append(target, t.out...)
+	if t.capturingDeferred {
+		t.deferredStaticOut = target
+	} else {
+		t.staticOut = target
+	}
 	t.out = outer
 }
 
@@ -10868,6 +11260,11 @@ func (t *translator) switchStatementBody() {
 		return
 	}
 	switchType := t.integerPromotion(t.expressionType(t.tokens[t.pos:close]))
+	if switchValue, constant := t.constantExpression(t.tokens[t.pos:close]); constant {
+		t.pos = close + 1
+		t.constantSwitchStatementBody(switchValue)
+		return
+	}
 	conditionalCases := t.switchUsesConditionalCases(close + 1)
 	switchName := ""
 	if conditionalCases {
@@ -10981,6 +11378,138 @@ func (t *translator) switchStatementBody() {
 	if conditionalCases {
 		t.out = append(t.out, '}')
 	}
+}
+
+func (t *translator) constantSwitchStatementBody(value int) {
+	if !t.take("{") {
+		t.fail(TranslateErrStatement)
+		return
+	}
+	open := t.pos - 1
+	close := matchingToken(t.src, t.tokens, open, "{", "}")
+	selected := t.constantSwitchSelectedCase(open, close, value)
+	if close < 0 || selected < 0 {
+		t.fail(TranslateErrStatement)
+		return
+	}
+	// Keep a real switch in the generated control-flow tree. Besides making a
+	// selected top-level break valid, this preserves C's rule that continue
+	// targets an enclosing loop rather than the switch itself.
+	t.appendText("switch 0 {default:")
+	active, haveCase := false, false
+	for t.ok && t.pos < close {
+		t.skipDirectives()
+		if t.currentIs("case") || t.currentIs("default") {
+			label := t.pos
+			haveCase = true
+			if t.take("case") {
+				end := t.findAtDepth(":")
+				if end < 0 || end == t.pos {
+					t.fail(TranslateErrStatement)
+					return
+				}
+				t.pos = end + 1
+			} else {
+				t.pos++
+				if !t.take(":") {
+					t.fail(TranslateErrStatement)
+					return
+				}
+			}
+			active = active || label == selected
+			continue
+		}
+		if !haveCase {
+			t.fail(TranslateErrUnsupported)
+			return
+		}
+		if active && t.currentIs("break") {
+			t.pos++
+			if !t.take(";") {
+				t.fail(TranslateErrStatement)
+				return
+			}
+			t.appendText("break;")
+			active = false
+			continue
+		}
+		if active {
+			t.statement()
+			if t.ok {
+				t.out = append(t.out, '\n')
+			}
+			continue
+		}
+		outer := t.out
+		oldCheckOnly := t.checkOnly
+		t.out = nil
+		t.checkOnly = true
+		mark := t.beginCheckScratch()
+		t.statement()
+		t.endCheckScratch(mark)
+		t.checkOnly = oldCheckOnly
+		t.out = outer
+	}
+	if !t.take("}") {
+		t.fail(TranslateErrStatement)
+		return
+	}
+	t.appendText("}")
+}
+
+func (t *translator) constantSwitchSelectedCase(open int, close int, value int) int {
+	if open < 0 || close <= open {
+		return -1
+	}
+	selected, fallback := -1, -1
+	depth := 0
+	for i := open + 1; i < close; i++ {
+		if tokenIs(t.src, t.tokens[i], "{") {
+			depth++
+			continue
+		}
+		if tokenIs(t.src, t.tokens[i], "}") {
+			depth--
+			continue
+		}
+		if depth != 0 {
+			continue
+		}
+		if tokenIs(t.src, t.tokens[i], "default") && i+1 < close && tokenIs(t.src, t.tokens[i+1], ":") {
+			fallback = i
+			continue
+		}
+		if !tokenIs(t.src, t.tokens[i], "case") {
+			continue
+		}
+		colon := topLevelToken(t.src, t.tokens[i+1:close], ":")
+		if colon <= 0 {
+			return -1
+		}
+		caseTokens := t.tokens[i+1 : i+1+colon]
+		if rangeAt := topLevelToken(t.src, caseTokens, "..."); rangeAt >= 0 {
+			first, firstOK := t.constantExpression(caseTokens[:rangeAt])
+			last, lastOK := t.constantExpression(caseTokens[rangeAt+1:])
+			if !firstOK || !lastOK || first > last {
+				return -1
+			}
+			if value >= first && value <= last {
+				selected = i
+			}
+		} else if caseValue, ok := t.constantExpression(caseTokens); !ok {
+			return -1
+		} else if value == caseValue {
+			selected = i
+		}
+		i += colon
+	}
+	if selected >= 0 {
+		return selected
+	}
+	if fallback >= 0 {
+		return fallback
+	}
+	return close
 }
 
 func (t *translator) switchUsesConditionalCases(open int) bool {
@@ -11206,6 +11735,16 @@ func (t *translator) emitConvertedAssignment(tokens []token) bool {
 				return true
 			}
 			leftType := t.lvalueType(left)
+			leftInfo := t.typeInfo(leftType)
+			if tokenIs(t.src, tokens[i], "=") && leftInfo.size == 0 &&
+				(leftInfo.kind == cTypeStruct || leftInfo.kind == cTypeUnion) {
+				// GNU empty aggregates occupy no C storage. Their Go carrier is
+				// necessarily addressable and therefore one byte wide, so a native
+				// Go assignment would overwrite the following C field. Preserve the
+				// lvalue and RHS evaluations through the assignment-value helper,
+				// whose zero-sized specialization deliberately performs no store.
+				return t.emitAssignmentValue(tokens)
+			}
 			pointerStep := t.typeInfo(leftType).kind == cTypePointer &&
 				(tokenIs(t.src, tokens[i], "+=") || tokenIs(t.src, tokens[i], "-="))
 			plainIdentifier := len(left) == 1 && tokenKind(left[0]) == tokenIdent
@@ -12778,7 +13317,12 @@ func (t *translator) emitAssignmentValue(tokens []token) bool {
 		t.emitType(typeID)
 		t.appendText(") ")
 		t.emitType(typeID)
-		t.appendText("{*target=value;return *target}\n")
+		info := t.typeInfo(typeID)
+		if info.size == 0 && (info.kind == cTypeStruct || info.kind == cTypeUnion) {
+			t.appendText("{return value}\n")
+		} else {
+			t.appendText("{*target=value;return *target}\n")
+		}
 		t.staticOut = append(t.staticOut, t.out...)
 		t.out = outer
 	}
@@ -14489,7 +15033,7 @@ func (t *translator) emitFixedCall(function int, tokens []token) bool {
 		}
 		paramType := t.functionParams[fn.paramStart+i]
 		paramInfo := t.typeInfo(paramType)
-		if t.object && !fn.defined && paramInfo.kind == cTypePointer {
+		if t.object && !fn.defined && !t.translationUnitFunctionDefined(fn.name) && paramInfo.kind == cTypePointer {
 			if _, ok := t.cStringBytes(args[i]); ok {
 				t.emitCStringValues(args[i])
 				continue
@@ -14673,14 +15217,26 @@ func (t *translator) commaOperator(tokens []token) int {
 	for i := len(tokens) - 1; i >= 0; i-- {
 		switch {
 		case tokenIs(t.src, tokens[i], ")"):
+			if match := i + tokens[i].match; tokens[i].match < 0 && match >= 0 && tokenIs(t.src, tokens[match], "(") {
+				i = match
+				continue
+			}
 			paren++
 		case tokenIs(t.src, tokens[i], "("):
 			paren--
 		case tokenIs(t.src, tokens[i], "]"):
+			if match := i + tokens[i].match; tokens[i].match < 0 && match >= 0 && tokenIs(t.src, tokens[match], "[") {
+				i = match
+				continue
+			}
 			bracket++
 		case tokenIs(t.src, tokens[i], "["):
 			bracket--
 		case tokenIs(t.src, tokens[i], "}"):
+			if match := i + tokens[i].match; tokens[i].match < 0 && match >= 0 && tokenIs(t.src, tokens[match], "{") {
+				i = match
+				continue
+			}
 			brace++
 		case tokenIs(t.src, tokens[i], "{"):
 			brace--
@@ -14863,6 +15419,11 @@ func (t *translator) binaryOperator(tokens []token) int {
 	for i := 0; i < len(tokens); i++ {
 		switch {
 		case tokenIs(t.src, tokens[i], "("):
+			if match := i + tokens[i].match; tokens[i].match > 0 && match < len(tokens) && tokenIs(t.src, tokens[match], ")") {
+				operand = (i == 0 || tokenKind(tokens[i-1]) != tokenIdent) && t.parenthesizedTypeStart(tokens[i+1:match])
+				i = match
+				continue
+			}
 			if paren == 0 {
 				topOpen = i
 			}
@@ -14881,12 +15442,21 @@ func (t *translator) binaryOperator(tokens []token) int {
 			}
 			continue
 		case tokenIs(t.src, tokens[i], "["):
+			if match := i + tokens[i].match; tokens[i].match > 0 && match < len(tokens) && tokenIs(t.src, tokens[match], "]") {
+				i = match
+				continue
+			}
 			bracket++
 			continue
 		case tokenIs(t.src, tokens[i], "]"):
 			bracket--
 			continue
 		case tokenIs(t.src, tokens[i], "{"):
+			if match := i + tokens[i].match; tokens[i].match > 0 && match < len(tokens) && tokenIs(t.src, tokens[match], "}") {
+				operand = false
+				i = match
+				continue
+			}
 			brace++
 			operand = true
 			continue
@@ -15169,7 +15739,7 @@ func (t *translator) emitVariadicCall(function int, tokens []token) bool {
 		original := t.expressionType(args[i])
 		if i < fn.paramCount {
 			info := t.typeInfo(typeID)
-			if t.object && !fn.defined && info.kind == cTypePointer {
+			if t.object && !fn.defined && !t.translationUnitFunctionDefined(fn.name) && info.kind == cTypePointer {
 				if _, ok := t.cStringBytes(args[i]); ok {
 					t.emitCStringValues(args[i])
 					continue
@@ -15476,6 +16046,12 @@ func (t *translator) tokensContainSubscript(tokens []token) bool {
 }
 
 func (t *translator) trailingCallOpen(tokens []token) int {
+	if len(tokens) > 1 && tokenIs(t.src, tokens[len(tokens)-1], ")") {
+		open := len(tokens) - 1 + tokens[len(tokens)-1].match
+		if tokens[len(tokens)-1].match < 0 && open > 0 && tokenIs(t.src, tokens[open], "(") && t.postfixCallCalleeEnd(tokens[open-1]) {
+			return open
+		}
+	}
 	paren, bracket := 0, 0
 	for i := 0; i < len(tokens); i++ {
 		switch {
@@ -17144,6 +17720,9 @@ func cPointerAccessorName(field cField) string {
 func matchingToken(src []byte, tokens []token, at int, open string, close string) int {
 	if at < 0 || at >= len(tokens) || !tokenIs(src, tokens[at], open) {
 		return -1
+	}
+	if match := at + tokens[at].match; tokens[at].match > 0 && match < len(tokens) && tokenIs(src, tokens[match], close) {
+		return match
 	}
 	depth := 0
 	for i := at; i < len(tokens); i++ {

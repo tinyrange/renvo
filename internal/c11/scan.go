@@ -19,6 +19,9 @@ type scanResult struct {
 func scan(src []byte) scanResult {
 	result := scanResult{ok: true, errorAt: -1}
 	result.tokens = make([]token, 0, scanCapacity(src))
+	var parens []int
+	var brackets []int
+	var braces []int
 	i := 0
 	line := 1
 	for i < len(src) {
@@ -114,9 +117,36 @@ func scan(src []byte) scanResult {
 		}
 		i = end
 		result.tokens = append(result.tokens, makeToken(tokenPunct, start, i, line))
+		if end-start == 1 {
+			index := len(result.tokens) - 1
+			switch src[start] {
+			case '(':
+				parens = append(parens, index)
+			case ')':
+				parens = matchScannedDelimiter(result.tokens, parens, index)
+			case '[':
+				brackets = append(brackets, index)
+			case ']':
+				brackets = matchScannedDelimiter(result.tokens, brackets, index)
+			case '{':
+				braces = append(braces, index)
+			case '}':
+				braces = matchScannedDelimiter(result.tokens, braces, index)
+			}
+		}
 	}
 	result.tokens = append(result.tokens, makeToken(tokenEOF, len(src), len(src), line))
 	return result
+}
+
+func matchScannedDelimiter(tokens []token, stack []int, close int) []int {
+	if len(stack) == 0 {
+		return stack
+	}
+	open := stack[len(stack)-1]
+	tokens[open].match = close - open
+	tokens[close].match = open - close
+	return stack[:len(stack)-1]
 }
 
 func scanFail(result scanResult, err int, at int, line int, sourceEnd int) scanResult {

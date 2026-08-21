@@ -335,6 +335,10 @@ func renvoAsmImageKernelObjectX86(a *renvoAsm, elf386 bool) []byte {
 	}
 	importSymbols := make([]int, renvoKernelAmd64ExternalImportCount(a))
 	for i := 0; i < len(importSymbols); i++ {
+		importSymbols[i] = -1
+		if !renvoObjectImportReferenced(a, i) {
+			continue
+		}
 		name := renvoKernelAmd64ExternalImportName(a, i)
 		// A C forward reference can first enter the backend as an import and
 		// later acquire a definition through an alias attribute. Reuse that
@@ -611,6 +615,31 @@ func renvoAsmImageKernelObjectX86(a *renvoAsm, elf386 bool) []byte {
 		image[i] = header[i]
 	}
 	return image
+}
+
+func renvoObjectImportReferenced(a *renvoAsm, importID int) bool {
+	for i := 0; i+2 < len(a.absRelocs); i += 3 {
+		addend := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1)) & 2147483647
+		kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2)) & 2147483647
+		if kind == renvoKernelAmd64RelocationImport && addend == importID {
+			return true
+		}
+		if kind == renvoKernelAmd64RelocationAbsoluteBSS {
+			externalID, _ := renvoObjectMapExternal(a, addend)
+			if externalID == importID {
+				return true
+			}
+		}
+	}
+	name := renvoKernelAmd64ExternalImportName(a, importID)
+	for i := 0; i < len(a.objectDataRelocs); i++ {
+		r := &a.objectDataRelocs[i]
+		if r.codeTarget <= 0 && r.codeLabel <= 0 &&
+			renvoObjectStoredText(a, r.targetStart, r.targetEnd) == name {
+			return true
+		}
+	}
+	return false
 }
 
 func renvoElf386Append16(out []byte, value int) []byte {

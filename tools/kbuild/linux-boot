@@ -11,12 +11,21 @@ if [[ "$(uname -s)/$(uname -m)" != "Linux/x86_64" ]]; then
 fi
 
 required_tools=(
-	cc cpio curl go make musl-gcc qemu-system-x86_64 readelf rg sha256sum
+	cpio curl go make musl-gcc qemu-system-x86_64 readelf rg sha256sum
 	tar timeout
 )
 for tool in "${required_tools[@]}"; do
 	if ! command -v "$tool" >/dev/null 2>&1; then
 		printf 'the Linux boot gate requires %s\n' "$tool" >&2
+		exit 2
+	fi
+done
+
+external_cc="${CC:-cc}"
+host_cc="${HOSTCC:-cc}"
+for compiler in "$external_cc" "$host_cc"; do
+	if ! command -v "$compiler" >/dev/null 2>&1; then
+		printf 'the Linux boot gate requires compiler %s\n' "$compiler" >&2
 		exit 2
 	fi
 done
@@ -35,6 +44,7 @@ init_root="$work_root/initramfs"
 initramfs="$work_root/initramfs.cpio"
 config_fragment="$repository_root/tools/kbuild/m9.config"
 command_line='console=ttyS0,115200 rdinit=/init panic=-1 nokaslr'
+compiler_driver="$repository_root/tools/kbuild/renvo-cc"
 
 printf 'workspace=%s\n' "$work_root"
 if [[ -z "${RENVO_LINUX_ARCHIVE:-}" ]]; then
@@ -50,8 +60,16 @@ export KBUILD_BUILD_TIMESTAMP='Thu Jan  1 00:00:00 UTC 1970'
 export KBUILD_BUILD_USER=renvo
 export KBUILD_BUILD_VERSION=1
 export SOURCE_DATE_EPOCH=0
+export RENVO_STDROOT="$repository_root/std"
+export RENVO_KBUILD_COMPILER="$frontend"
+export RENVO_KBUILD_EXTERNAL_CC="$external_cc"
 
-make -C "$tree" ARCH="$RENVO_LINUX_ARCH" KCONFIG_ALLCONFIG="$config_fragment" tinyconfig \
+(cd "$repository_root" && /usr/bin/time \
+	-f 'elapsed_seconds=%e\nuser_seconds=%U\nsystem_seconds=%S\npeak_rss_kib=%M' \
+	-o "$work_root/compiler-build.metrics" go build -o "$frontend" ./cmd/renvo)
+
+make -C "$tree" ARCH="$RENVO_LINUX_ARCH" CC="$compiler_driver" HOSTCC="$host_cc" \
+	KCONFIG_ALLCONFIG="$config_fragment" tinyconfig \
 	>"$work_root/config.log" 2>&1
 # The x86 physical-load address is a hexadecimal Kconfig value whose default is
 # re-applied after the tiny fragments merge. Set it on the completed tinyconfig,
@@ -59,7 +77,8 @@ make -C "$tree" ARCH="$RENVO_LINUX_ARCH" KCONFIG_ALLCONFIG="$config_fragment" ti
 "$tree/scripts/config" --file "$tree/.config" \
 	--set-val PHYSICAL_START 0x200000 \
 	--set-val PHYSICAL_ALIGN 0x200000
-make -C "$tree" ARCH="$RENVO_LINUX_ARCH" olddefconfig >>"$work_root/config.log" 2>&1
+make -C "$tree" ARCH="$RENVO_LINUX_ARCH" CC="$compiler_driver" HOSTCC="$host_cc" \
+	olddefconfig >>"$work_root/config.log" 2>&1
 for setting in \
 	'CONFIG_64BIT=y' \
 	'CONFIG_BLK_DEV_INITRD=y' \
@@ -74,22 +93,13 @@ for setting in \
 done
 
 /usr/bin/time -f 'elapsed_seconds=%e\nuser_seconds=%U\nsystem_seconds=%S\npeak_rss_kib=%M' \
-	-o "$work_root/reference-build.metrics" \
-	make -C "$tree" -j"$jobs" ARCH="$RENVO_LINUX_ARCH" CC="${CC:-cc}" \
-	HOSTCC="${HOSTCC:-cc}" bzImage >"$work_root/reference-build.log" 2>&1
+	-o "$work_root/renvo-build.metrics" \
+	make -C "$tree" -j"$jobs" ARCH="$RENVO_LINUX_ARCH" CC="$compiler_driver" \
+	HOSTCC="$host_cc" bzImage >"$work_root/renvo-build.log" 2>&1
 
-(cd "$repository_root" && /usr/bin/time \
-	-f 'elapsed_seconds=%e\nuser_seconds=%U\nsystem_seconds=%S\npeak_rss_kib=%M' \
-	-o "$work_root/compiler-build.metrics" go build -o "$frontend" ./cmd/renvo)
-
-(cd "$repository_root" && RENVO_STDROOT="$repository_root/std" \
-	/usr/bin/time -f 'elapsed_seconds=%e\nuser_seconds=%U\nsystem_seconds=%S\npeak_rss_kib=%M' \
-	-o "$work_root/renvo-objects.metrics" go run ./tools/kbuild/syntax \
-	-kernel "$tree" -compiler "$frontend" -expected "$RENVO_LINUX_M9_C_COMMANDS" \
-	-objects -install-vmlinux-objects -j "$jobs") | tee "$work_root/renvo-objects.log"
-
-make -C "$tree" -j"$jobs" ARCH="$RENVO_LINUX_ARCH" CC="${CC:-cc}" \
-	HOSTCC="${HOSTCC:-cc}" bzImage >"$work_root/renvo-link.log" 2>&1
+(cd "$repository_root" && go run ./tools/kbuild/syntax \
+	-kernel "$tree" -compiler "$compiler_driver" -expected "$RENVO_LINUX_M9_C_COMMANDS" \
+	-audit-direct) | tee "$work_root/direct-audit.log"
 readelf -h "$tree/vmlinux" | rg -q 'Machine:[[:space:]]+Advanced Micro Devices X86-64'
 test -s "$tree/arch/x86/boot/bzImage"
 
@@ -149,6 +159,5 @@ printf 'compiler_bytes=%s\n' "$(stat -c %s "$frontend")"
 printf 'vmlinux_bytes=%s\n' "$(stat -c %s "$tree/vmlinux")"
 printf 'bzimage_bytes=%s\n' "$(stat -c %s "$tree/arch/x86/boot/bzImage")"
 printf 'boot_log_sha256=%s\n' "$(sha256sum "$work_root/boot-1.normalized.log" | cut -d' ' -f1)"
-printf 'reference_build_metrics=%s\n' "$work_root/reference-build.metrics"
 printf 'compiler_build_metrics=%s\n' "$work_root/compiler-build.metrics"
-printf 'renvo_object_metrics=%s\n' "$work_root/renvo-objects.metrics"
+printf 'renvo_build_metrics=%s\n' "$work_root/renvo-build.metrics"

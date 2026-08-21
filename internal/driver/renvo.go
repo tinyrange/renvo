@@ -55,8 +55,31 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 		return ExecuteCCompilerRequest(request, input)
 	}
 	args = NormalizeCCompilerCommand(args)
+	if CAssemblyCommandRequested(args) {
+		result := CompileCAssemblyCommand(args, renvoWorkDir(env), RenvoFS{})
+		if !result.Ok {
+			return 1, FormatDiagnostic(CAssemblyCommandDiagnostic(result))
+		}
+		if result.Output == "-" {
+			print(string(result.Source))
+		} else if os.WriteFile(result.Output, result.Source, 0644) != nil {
+			return 1, "renvo cc: failed to write assembly output\n"
+		}
+		if len(result.DependencyData) > 0 && os.WriteFile(result.DependencyFile, result.DependencyData, 0644) != nil {
+			return 1, "renvo cc: failed to write dependency file\n"
+		}
+		return 0, ""
+	}
 	if CPreprocessCommandRequested(args) {
-		result := PreprocessCCommand(args, renvoWorkDir(env), RenvoFS{})
+		var input []byte
+		if CPreprocessCommandUsesStandardInput(args) {
+			var ok bool
+			input, ok = renvoReadStandardInput()
+			if !ok {
+				return 1, "renvo cc: failed to read standard input\n"
+			}
+		}
+		result := PreprocessCCommandWithInput(args, renvoWorkDir(env), RenvoFS{}, input)
 		if !result.Ok {
 			return 1, FormatDiagnostic(CPreprocessCommandDiagnostic(result))
 		}

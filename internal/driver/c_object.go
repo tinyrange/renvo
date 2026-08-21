@@ -74,18 +74,21 @@ func prepareCObjectSources(result SourceResult, options *Options, workDir string
 			prefix = append(prefix, source...)
 			headerSource = prefix
 		}
-		header := c11.BuildObjectPrelude(result.Files[i].Path, headerSource, reader)
-		if !header.Ok {
-			result = sourceFail(result, SourceErrCInclude, header.ErrorPath)
-			result.ErrorSourcePath = result.Files[i].Path
-			result.ErrorOffset = header.ErrorAt
-			return result
+		header := c11.HeaderResult{Ok: true, ErrorAt: -1}
+		if !options.CNoStdIncludes {
+			header = c11.BuildObjectPrelude(result.Files[i].Path, headerSource, reader)
+			if !header.Ok {
+				result = sourceFail(result, SourceErrCInclude, header.ErrorPath)
+				result.ErrorSourcePath = result.Files[i].Path
+				result.ErrorOffset = header.ErrorAt
+				return result
+			}
 		}
 		processed := c11.Preprocess(c11.PreprocessConfig{
 			Path: result.Files[i].Path, Source: source, Reader: reader,
 			Predefined: cCommandMacros(options.CDefines), Undefined: options.CUndefines,
 			ForcedIncludes: options.CForcedInclude, EmitIncludes: options.CNoStdIncludes, EmitQuotedIncludes: true,
-			SuppressForcedIncludes: true,
+			SuppressForcedIncludes: !options.CNoStdIncludes,
 		})
 		if !processed.Ok {
 			result = sourceFail(result, SourceErrCPreprocess, processed.ErrorPath)
@@ -100,6 +103,7 @@ func prepareCObjectSources(result SourceResult, options *Options, workDir string
 		result.Files[i].CDataSections = options.CDataSections
 		result.Files[i].CShortWChar = options.CShortWChar
 		result.Files[i].CKernelCodeModel = options.CKernelCodeModel
+		result.Files[i].COptimize = options.COptimize
 		result.Files[i].CPrelude = header.Prelude
 		result.Files[i].Src = processed.Source
 		for j := 0; j < len(header.Dependencies); j++ {

@@ -151,6 +151,7 @@ type cFunctionName struct {
 	constantReturn   int
 	variadic         bool
 	defined          bool
+	consumesVariadic bool
 	constantReturnOK bool
 	attributes       cAttributes
 }

@@ -77,7 +77,15 @@ func sum() uint64 {
 		// The first and only parameter is saved at -8(%rbp). Its use must
 		// survive compilation because the single syntactic call is inside a
 		// loop and therefore observes a different value on each execution.
-		if !bytes.Contains(data[start:end], []byte("\x48\x8b\x4d\xf8")) {
+		loadsIndex := false
+		for at := start; at+4 <= end; at++ {
+			// MOV r64,-8(%rbp); the destination register is an allocator choice.
+			if data[at] == 0x48 && data[at+1] == 0x8b && data[at+2]&0xc7 == 0x45 && data[at+3] == 0xf8 {
+				loadsIndex = true
+				break
+			}
+		}
+		if !loadsIndex {
 			t.Fatalf("lookup folded its loop-varying index: code=%x", data[start:end])
 		}
 		return
@@ -623,6 +631,8 @@ func TestLinuxAmd64ObjectConstantSwitchDoesNotImportDeadCase(t *testing.T) {
 	source := []byte(`package main
 // renvo:linkstatic libc,missing_dead_case
 func missing()
+// renvo:linkstatic libc,missing_unused_declaration
+func unusedDeclaration()
 // renvo:object function choose - 0 1 0 - 8 0 - 0
 //export choose
 func choose() int {
@@ -663,8 +673,8 @@ func choose() int {
 		t.Fatal(err)
 	}
 	for _, symbol := range symbols {
-		if symbol.Name == "missing_dead_case" {
-			t.Fatal("constant switch retained an import from an unreachable case")
+		if symbol.Name == "missing_dead_case" || symbol.Name == "missing_unused_declaration" {
+			t.Fatalf("constant switch object retained dead import %q", symbol.Name)
 		}
 	}
 }
@@ -1790,6 +1800,22 @@ func invoke(tos *byte,first uintptr,second uintptr){renvo_runtime_CIRQStackCall2
 	}
 	if !foundSequence {
 		t.Fatal("IRQ stack-call object is missing the callee-save and operand-load sequence")
+	}
+	foundInternalArgumentOrder := false
+	for _, section := range file.Sections {
+		if section.Flags&elf.SHF_EXECINSTR == 0 {
+			continue
+		}
+		data, err := section.Data()
+		if err != nil {
+			t.Fatal(err)
+		}
+		// mov %r12,%rsi; mov %r13,%rdi passes the first and second source
+		// arguments according to Renvo's reversed internal parameter binding.
+		foundInternalArgumentOrder = foundInternalArgumentOrder || bytes.Contains(data, []byte("\x4c\x89\xe6\x4c\x89\xef"))
+	}
+	if !foundInternalArgumentOrder {
+		t.Fatal("IRQ stack-call object does not bind two target arguments in Renvo internal order")
 	}
 	symbols, err := file.Symbols()
 	if err != nil {

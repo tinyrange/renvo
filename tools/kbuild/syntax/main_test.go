@@ -61,6 +61,42 @@ func TestTargetObjectPath(t *testing.T) {
 	}
 }
 
+func TestAuditDirectObjectsRequiresSelectedCompilerAndELF(t *testing.T) {
+	kernel := t.TempDir()
+	compiler := filepath.Join(t.TempDir(), "renvo-cc")
+	object := filepath.Join(kernel, "init", "main.o")
+	if err := os.MkdirAll(filepath.Dir(object), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(object, []byte("\x7fELFobject"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := compiler + " -nostdinc -D__KERNEL__ -c -o init/main.o init/main.c"
+	if err := auditDirectObjects(kernel, compiler, []string{command}); err != nil {
+		t.Fatal(err)
+	}
+	if err := auditDirectObjects(kernel, "/usr/bin/cc", []string{command}); err == nil || !strings.Contains(err.Error(), "command used") {
+		t.Fatalf("compiler mismatch error = %v", err)
+	}
+	if err := os.WriteFile(object, []byte("not ELF"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := auditDirectObjects(kernel, compiler, []string{command}); err == nil || !strings.Contains(err.Error(), "is not ELF") {
+		t.Fatalf("non-ELF error = %v", err)
+	}
+}
+
+func TestM16TargetCommandCountRecognizesOnlyExactOption(t *testing.T) {
+	commands := []string{
+		"renvo-cc -m64 -c -o init/main.o init/main.c",
+		"renvo-cc -m16 -c -o arch/x86/boot/main.o arch/x86/boot/main.c",
+		"renvo-cc -DVALUE=-m16 -c -o lib/value.o lib/value.c",
+	}
+	if got := m16TargetCommandCount(commands); got != 1 {
+		t.Fatalf("m16TargetCommandCount = %d, want 1", got)
+	}
+}
+
 func TestTargetCompileCommandDropsPostCompileObjtool(t *testing.T) {
 	command := "gcc -nostdinc -D__KERNEL__ -c -o init/main.o init/main.c   ; ./tools/objtool/objtool --uaccess init/main.o"
 	want := "gcc -nostdinc -D__KERNEL__ -c -o init/main.o init/main.c"

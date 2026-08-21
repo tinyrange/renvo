@@ -226,6 +226,10 @@ func (p *preprocessor) substitute(macro ppMacro, args [][]ppToken, depth int) []
 				}
 				piece = expandedArgs[param]
 			}
+			if len(piece) > 0 && ppTokenSpace(tok) && !ppTokenSpace(piece[0]) {
+				piece = ppCloneTokens(piece)
+				piece[0] = ppWithSpace(piece[0], true)
+			}
 		}
 		out = p.appendReplacementPiece(out, piece, paste)
 		paste = false

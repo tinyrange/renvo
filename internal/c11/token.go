@@ -17,6 +17,7 @@ type token struct {
 	kindLine int
 	start    int
 	end      int
+	match    int
 }
 
 func makeToken(kind int, start int, end int, line int) token {

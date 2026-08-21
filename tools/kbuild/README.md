@@ -83,12 +83,26 @@ M9's clean boot gate is deliberately outside the one-minute preflight loop:
 ./tools/check linux-boot
 ```
 
-It verifies and extracts the pinned archive, applies the checked tinyconfig
-boot fragment, records a complete system-compiler reference build, replaces
-every eligible vmlinux C object with Renvo output, and performs the normal
-external assembly and link stages. A fixed 128 MiB, single-CPU QEMU guest then
-boots the resulting image twice with instruction-counted TCG and a reproducible
-musl initramfs. The normalized serial logs must be identical and reach the
-checked `RENVO-LINUX-M9: PASS` marker within 30 seconds. Set
+It verifies and extracts the pinned archive, builds Renvo, and applies the
+checked tinyconfig boot fragment with Kbuild's target `CC` set to the checked
+`renvo-cc` driver. Every recorded 64-bit target `.c` command is compiled directly
+by Renvo from the original source and generated headers. Until Renvo gains a
+16-bit code generator, the narrowly identified `-m16` setup C commands join
+standalone assembly, host utilities, and the normal assembler/linker stages on
+the external toolchain. The audit reports the Renvo and `-m16` command counts
+separately and checks every resulting ELF object before a fixed 128 MiB,
+single-CPU QEMU guest boots the image twice with instruction-counted TCG and a
+reproducible musl initramfs. The normalized serial logs must be identical and
+reach the checked `RENVO-LINUX-M9: PASS` marker within 30 seconds. Set
 `RENVO_LINUX_ARCHIVE` to a cached pinned archive and `RENVO_LINUX_JOBS` to tune
-host parallelism; neither changes the checked guest profile.
+host parallelism; neither changes the checked guest profile. CPU, RSS, compiler,
+`vmlinux`, and `bzImage` sizes remain recorded telemetry rather than gates.
+
+On the 16-logical-CPU development host, the optimized direct M9 build compiles
+and packages all 507 target C commands from `make clean` in 53.10 seconds at
+`-j16` (584.97s user / 61.03s system, 355,436 KiB maximum child RSS). The audit
+attributes 487 commands to Renvo and the 20 narrowly permitted `-m16` commands
+to the external compiler. This is a reproducible profiling baseline, not a
+portable wall-clock acceptance limit; regressions should be investigated with
+the object-corpus runner and a representative raw-source unit before changing
+worker count.

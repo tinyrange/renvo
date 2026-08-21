@@ -27,20 +27,50 @@ func CPreprocessCommandRequested(args []string) bool {
 	return false
 }
 
+func CPreprocessCommandUsesStandardInput(args []string) bool {
+	for i := 1; i < len(args); i++ {
+		if args[i] == "-cc-stdin" {
+			return true
+		}
+	}
+	return false
+}
+
 // PreprocessCCommand reuses the strict ordinary-driver parser after removing
 // the two output-only switches. This keeps one definition of the supported C
 // compiler surface without adding preprocessing state to the compact Options
 // value copied through the package/backend pipeline.
 func PreprocessCCommand(args []string, workDir string, fs SourceFS) CPreprocessCommandResult {
+	return PreprocessCCommandWithInput(args, workDir, fs, nil)
+}
+
+func PreprocessCCommandWithInput(args []string, workDir string, fs SourceFS, input []byte) CPreprocessCommandResult {
 	ordinary := make([]string, 0, len(args)+2)
 	lineMarkers := true
 	hasOutput := false
+	standardInput := false
+	nullInput := false
+	macroDump := false
 	for i := 1; i < len(args); i++ {
 		if args[i] == "-cc-preprocess" {
 			continue
 		}
 		if args[i] == "-cc-no-line-markers" {
 			lineMarkers = false
+			continue
+		}
+		if args[i] == "-cc-stdin" {
+			ordinary = append(ordinary, "__renvo_stdin__.c")
+			standardInput = true
+			continue
+		}
+		if args[i] == "-cc-null-input" {
+			ordinary = append(ordinary, "__renvo_null__.c")
+			nullInput = true
+			continue
+		}
+		if args[i] == "-cc-macro-dump" {
+			macroDump = true
 			continue
 		}
 		if args[i] == "-o" {
@@ -60,6 +90,11 @@ func PreprocessCCommand(args []string, workDir string, fs SourceFS) CPreprocessC
 	options = resolveCCompilerPaths(workDir, options)
 	path := load.JoinPath(workDir, options.Files[0])
 	source, ok := fs.ReadFile(path)
+	if standardInput {
+		path, source, ok = "<stdin>", input, true
+	} else if nullInput {
+		path, source, ok = "/dev/null", nil, true
+	}
 	if !ok {
 		result.Ok = false
 		result.Error = c11.PreprocessErrInclude
@@ -70,7 +105,7 @@ func PreprocessCCommand(args []string, workDir string, fs SourceFS) CPreprocessC
 	processed := c11.Preprocess(c11.PreprocessConfig{
 		Path: path, Source: source, Reader: reader,
 		Predefined: cCommandMacros(options.CDefines), Undefined: options.CUndefines,
-		ForcedIncludes: options.CForcedInclude, EmitIncludes: true, LineMarkers: lineMarkers,
+		ForcedIncludes: options.CForcedInclude, EmitIncludes: true, LineMarkers: lineMarkers, MacroDump: macroDump,
 	})
 	result.Source = processed.Source
 	result.Ok = processed.Ok

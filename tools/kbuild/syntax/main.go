@@ -40,6 +40,7 @@ func main() {
 	filter := flag.String("filter", "", "compile only target C sources containing this path fragment")
 	objects := flag.Bool("objects", false, "emit an ELF object for every translation unit instead of syntax-checking it")
 	installVmlinuxObjects := flag.Bool("install-vmlinux-objects", false, "replace the prepared tree's vmlinux C objects after a complete object pass")
+	auditDirect := flag.Bool("audit-direct", false, "verify every recorded target C command used the selected driver and produced ELF")
 	keepGoing := flag.Bool("keep-going", false, "continue after failures to enumerate the complete blocker set")
 	flag.Parse()
 	if *kernel == "" || *compiler == "" || *workers < 1 || flag.NArg() != 0 {
@@ -73,6 +74,14 @@ func main() {
 	}
 	if *expected > 0 && len(commands) != *expected {
 		fatalf("target C command count=%d, want %d", len(commands), *expected)
+	}
+	if *auditDirect {
+		if err := auditDirectObjects(*kernel, compilerPath, commands); err != nil {
+			fatalf("direct compiler audit: %v", err)
+		}
+		boot16 := m16TargetCommandCount(commands)
+		fmt.Printf("gate=PASS\nmode=direct-audit\ncommands=%d\nrenvo_commands=%d\nhost_m16_commands=%d\n", len(commands), len(commands)-boot16, boot16)
+		return
 	}
 
 	workspace, err := os.MkdirTemp("", "renvo-linux-syntax-")
@@ -160,6 +169,47 @@ func main() {
 		mode = "objects"
 	}
 	fmt.Printf("gate=PASS\nmode=%s\nelapsed=%s\n", mode, time.Since(started).Round(time.Millisecond))
+}
+
+func m16TargetCommandCount(commands []string) int {
+	count := 0
+	for _, command := range commands {
+		for _, field := range strings.Fields(command) {
+			if field == "-m16" {
+				count++
+				break
+			}
+		}
+	}
+	return count
+}
+
+func auditDirectObjects(kernel, compiler string, commands []string) error {
+	for _, command := range commands {
+		fields := strings.Fields(command)
+		if len(fields) == 0 {
+			return fmt.Errorf("empty saved command")
+		}
+		commandCompiler, err := filepath.Abs(fields[0])
+		if err != nil {
+			return fmt.Errorf("resolve command compiler %q: %w", fields[0], err)
+		}
+		if commandCompiler != compiler {
+			return fmt.Errorf("command used %s, want %s: %s", commandCompiler, compiler, command)
+		}
+		object, ok := targetObjectPath(command)
+		if !ok {
+			return fmt.Errorf("unsupported object output: %s", command)
+		}
+		data, err := os.ReadFile(filepath.Join(kernel, object))
+		if err != nil {
+			return fmt.Errorf("read %s: %w", object, err)
+		}
+		if len(data) < 4 || string(data[:4]) != "\x7fELF" {
+			return fmt.Errorf("%s is not ELF", object)
+		}
+	}
+	return nil
 }
 
 func filterTargetCommands(commands []string, fragment string) []string {
