@@ -12,15 +12,6 @@ const renvoOpenBSDAmd64SysWriteAt = 170
 const renvoOpenBSDAmd64ELFCodeOffset = 432
 const renvoOpenBSDPTSyscalls = 0x65a3dbe9
 
-func compileOpenBSDAmd64(input []int, output int) int {
-	return compileOpenBSDAmd64Arena(input, output, 0)
-}
-
-func compileOpenBSDAmd64Arena(input []int, output int, arenaSize int) int {
-	renvoSetTarget(renvoTargetOpenBSDAmd64)
-	return renvoCompileAmd64(input, output, arenaSize)
-}
-
 func renvoAppendOpenBSDElfHeaderAmd64(out []byte, entryOff int, dataOffset int, fileSize int, bssOffset int, bssSize int, shoff int, syscallTableOff int, syscallTableSize int) []byte {
 	start := len(out)
 	header := "\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x03\x00\x3e\x00\x01\x00\x00\x00"

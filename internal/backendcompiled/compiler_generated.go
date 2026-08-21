@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "10a36f26703e6bad69f26929d3795ac27a675968f3b3ae3ba0d75ed487cc4339"
+const CompilerSourceDigest = "6e23688b81372decb43a6f4eaf5d80e4ddfdaece170e8d531945f16fc3082a21"
 
 // source: backend/compiler_common_impl.go
 
@@ -25602,17 +25602,8 @@ if renvoFixedTarget == renvoTargetLinuxArm {
 renvoFixedTarget = renvoTargetLinuxArm
 return compileLinuxArmArena(input, output, arenaSize)
 }
-if renvoFixedTarget == renvoTargetFreeBSDAmd64 {
-renvoFixedTarget = renvoTargetFreeBSDAmd64
-return compileFreeBSDAmd64Arena(input, output, arenaSize)
-}
-if renvoFixedTarget == renvoTargetOpenBSDAmd64 {
-renvoFixedTarget = renvoTargetOpenBSDAmd64
-return compileOpenBSDAmd64Arena(input, output, arenaSize)
-}
-if renvoFixedTarget == renvoTargetNetBSDAmd64 {
-renvoFixedTarget = renvoTargetNetBSDAmd64
-return compileNetBSDAmd64Arena(input, output, arenaSize)
+if renvoFixedTarget >= renvoTargetFreeBSDAmd64 && renvoFixedTarget <= renvoTargetNetBSDAmd64 {
+return compileBSDAmd64Arena(input, output, renvoFixedTarget, arenaSize)
 }
 renvoFixedTarget = renvoTargetLinuxAmd64
 return compileLinuxAmd64Arena(input, output, arenaSize)
@@ -25647,19 +25638,18 @@ return compileLinuxAarch64Arena(input, output, arenaSize)
 if target == renvoTargetLinuxArm {
 return compileLinuxArmArena(input, output, arenaSize)
 }
-if target == renvoTargetFreeBSDAmd64 {
-return compileFreeBSDAmd64Arena(input, output, arenaSize)
-}
-if target == renvoTargetOpenBSDAmd64 {
-return compileOpenBSDAmd64Arena(input, output, arenaSize)
-}
-if target == renvoTargetNetBSDAmd64 {
-return compileNetBSDAmd64Arena(input, output, arenaSize)
+if target >= renvoTargetFreeBSDAmd64 && target <= renvoTargetNetBSDAmd64 {
+return compileBSDAmd64Arena(input, output, target, arenaSize)
 }
 if target != renvoTargetLinuxAmd64 {
 return 1
 }
 return compileLinuxAmd64Arena(input, output, arenaSize)
+}
+
+func compileBSDAmd64Arena(input []int, output int, target int, arenaSize int) int {
+renvoSetTarget(target)
+return renvoCompileAmd64(input, output, arenaSize)
 }
 
 func RenvoCompileSourceToBytes(source []byte, targetName string) ([]byte, bool) {
@@ -34325,16 +34315,6 @@ const renvoFreeBSDAmd64SysWriteAt = 476
 const renvoBSDAmd64SysFchmod = 124
 const renvoBSDAmd64SysExit = 1
 
-
-func compileFreeBSDAmd64(input []int, output int) int {
-return compileFreeBSDAmd64Arena(input, output, 0)
-}
-
-func compileFreeBSDAmd64Arena(input []int, output int, arenaSize int) int {
-renvoSetTarget(renvoTargetFreeBSDAmd64)
-return renvoCompileAmd64(input, output, arenaSize)
-}
-
 // source: backend/compiler_openbsd_amd64_impl.go
 
 
@@ -34344,15 +34324,6 @@ const renvoOpenBSDAmd64SysWriteAt = 170
 
 const renvoOpenBSDAmd64ELFCodeOffset = 432
 const renvoOpenBSDPTSyscalls = 0x65a3dbe9
-
-func compileOpenBSDAmd64(input []int, output int) int {
-return compileOpenBSDAmd64Arena(input, output, 0)
-}
-
-func compileOpenBSDAmd64Arena(input []int, output int, arenaSize int) int {
-renvoSetTarget(renvoTargetOpenBSDAmd64)
-return renvoCompileAmd64(input, output, arenaSize)
-}
 
 func renvoAppendOpenBSDElfHeaderAmd64(out []byte, entryOff int, dataOffset int, fileSize int, bssOffset int, bssSize int, shoff int, syscallTableOff int, syscallTableSize int) []byte {
 start := len(out)
@@ -34413,15 +34384,6 @@ const renvoNetBSDAmd64SysWriteAt = 174
 
 const renvoNetBSDAmd64ELFCodeOffset = 256
 const renvoNetBSDAmd64ImageBase = 0x400000
-
-func compileNetBSDAmd64(input []int, output int) int {
-return compileNetBSDAmd64Arena(input, output, 0)
-}
-
-func compileNetBSDAmd64Arena(input []int, output int, arenaSize int) int {
-renvoSetTarget(renvoTargetNetBSDAmd64)
-return renvoCompileAmd64(input, output, arenaSize)
-}
 
 func renvoAppendNetBSDElfHeaderAmd64(out []byte, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int) []byte {
 start := len(out)

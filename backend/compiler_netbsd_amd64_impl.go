@@ -12,15 +12,6 @@ const renvoNetBSDAmd64SysWriteAt = 174
 const renvoNetBSDAmd64ELFCodeOffset = 256
 const renvoNetBSDAmd64ImageBase = 0x400000
 
-func compileNetBSDAmd64(input []int, output int) int {
-	return compileNetBSDAmd64Arena(input, output, 0)
-}
-
-func compileNetBSDAmd64Arena(input []int, output int, arenaSize int) int {
-	renvoSetTarget(renvoTargetNetBSDAmd64)
-	return renvoCompileAmd64(input, output, arenaSize)
-}
-
 func renvoAppendNetBSDElfHeaderAmd64(out []byte, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int) []byte {
 	start := len(out)
 	header := "\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x3e\x00\x01\x00\x00\x00"

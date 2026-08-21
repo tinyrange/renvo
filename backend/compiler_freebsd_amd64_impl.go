@@ -13,13 +13,3 @@ const renvoFreeBSDAmd64SysReadAt = 475
 const renvoFreeBSDAmd64SysWriteAt = 476
 const renvoBSDAmd64SysFchmod = 124
 const renvoBSDAmd64SysExit = 1
-
-
-func compileFreeBSDAmd64(input []int, output int) int {
-	return compileFreeBSDAmd64Arena(input, output, 0)
-}
-
-func compileFreeBSDAmd64Arena(input []int, output int, arenaSize int) int {
-	renvoSetTarget(renvoTargetFreeBSDAmd64)
-	return renvoCompileAmd64(input, output, arenaSize)
-}

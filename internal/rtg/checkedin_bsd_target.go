@@ -82,31 +82,12 @@ func checkedInBSDAmd64CommonOperation(name string) (bool, int) {
 	return false, 0
 }
 
-const checkedInFreeBSDAmd64Source = `
-
-func compileFreeBSDAmd64(input []int, output int) int {
-	return compileFreeBSDAmd64Arena(input, output, 0)
-}
-
-func compileFreeBSDAmd64Arena(input []int, output int, arenaSize int) int {
-	renvoSetTarget(renvoTargetFreeBSDAmd64)
-	return renvoCompileAmd64(input, output, arenaSize)
-}
-`
+const checkedInFreeBSDAmd64Source = ``
 
 const checkedInNetBSDAmd64Source = `
 
 const renvoNetBSDAmd64ELFCodeOffset = 256
 const renvoNetBSDAmd64ImageBase = 0x400000
-
-func compileNetBSDAmd64(input []int, output int) int {
-	return compileNetBSDAmd64Arena(input, output, 0)
-}
-
-func compileNetBSDAmd64Arena(input []int, output int, arenaSize int) int {
-	renvoSetTarget(renvoTargetNetBSDAmd64)
-	return renvoCompileAmd64(input, output, arenaSize)
-}
 
 func renvoAppendNetBSDElfHeaderAmd64(out []byte, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int) []byte {
 	start := len(out)
@@ -141,15 +122,6 @@ const checkedInOpenBSDAmd64Source = `
 
 const renvoOpenBSDAmd64ELFCodeOffset = 432
 const renvoOpenBSDPTSyscalls = 0x65a3dbe9
-
-func compileOpenBSDAmd64(input []int, output int) int {
-	return compileOpenBSDAmd64Arena(input, output, 0)
-}
-
-func compileOpenBSDAmd64Arena(input []int, output int, arenaSize int) int {
-	renvoSetTarget(renvoTargetOpenBSDAmd64)
-	return renvoCompileAmd64(input, output, arenaSize)
-}
 
 func renvoAppendOpenBSDElfHeaderAmd64(out []byte, entryOff int, dataOffset int, fileSize int, bssOffset int, bssSize int, shoff int, syscallTableOff int, syscallTableSize int) []byte {
 	start := len(out)
