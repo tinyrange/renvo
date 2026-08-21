@@ -212,8 +212,13 @@ not mean the complete Go API is supported.
   with host-Go and Renvo-compiled coverage.
   - [ ] General assignable typed-target handling in `As` still needs reflective
     interface assignment; custom `As` methods and `*error` targets work.
-- [ ] Complete the remaining audited surfaces in `fmt`, `os`, `sort`, and
-  `strconv`.
+- [x] `strconv`: booleans, integer formatting/parsing across bases, bit-size
+  overflow saturation, `NumError`, decimal/exponent float parsing, initial
+  `f`/`e`/`g` formatting, and basic quoting/unquoting, with host-Go and compiled
+  coverage.
+  - [ ] Hex floats, `NaN`/`Inf`, exact shortest-round-trip float formatting,
+    and the complete Go quote/unquote escape surface remain.
+- [ ] Complete the remaining audited surfaces in `fmt`, `os`, and `sort`.
 
 ### Initial `context` work
 
@@ -316,9 +321,12 @@ The embedded Starlark runtime uses callback-based stable sorting. Verify
 
 ### `strconv`
 
-Audit integer parsing/formatting, float formatting, quoting, and unquoting APIs.
-The Starlark lexer and renderer are sensitive to exact numeric and quoted-string
-behavior.
+The implemented surface covers boolean conversion, integer parsing/formatting
+with base prefixes and bit-size overflow, `NumError`, decimal/exponent float
+parsing, initial `f`/`e`/`g` formatting, append helpers, and basic string quoting
+and unquoting. Hex floats, special values, exact shortest-round-trip formatting,
+and the complete Go escape grammar remain; the Starlark lexer and renderer need
+compatibility fixtures before this package can be considered exact.
 
 ### `strings`
 

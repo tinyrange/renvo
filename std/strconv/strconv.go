@@ -6,8 +6,20 @@ var ErrRange = rangeError{marker: 2}
 type syntaxError struct{ marker int }
 type rangeError struct{ marker int }
 
-func (syntaxError) Error() string { return "invalid syntax" }
-func (rangeError) Error() string  { return "value out of range" }
+type NumError struct {
+	Func string
+	Num  string
+	Err  error
+}
+
+func (e *NumError) Error() string {
+	return "strconv." + e.Func + ": parsing " + Quote(e.Num) + ": " + e.Err.Error()
+}
+func (e *NumError) Unwrap() error { return e.Err }
+
+func (syntaxError) Error() string              { return "invalid syntax" }
+func (rangeError) Error() string               { return "value out of range" }
+func numError(fn, num string, err error) error { return &NumError{Func: fn, Num: num, Err: err} }
 
 func Itoa(i int) string {
 	return FormatInt(int64(i), 10)
@@ -42,7 +54,8 @@ func FormatInt(i int64, base int) string {
 	if i < 0 {
 		var out []byte
 		out = append(out, '-')
-		out = appendString(out, FormatUint(uint64(-i), base))
+		magnitude := uint64(-(i + 1)) + 1
+		out = appendString(out, FormatUint(magnitude, base))
 		return string(out)
 	}
 	return FormatUint(uint64(i), base)
@@ -74,31 +87,71 @@ func FormatUint(i uint64, base int) string {
 }
 
 func ParseInt(s string, base int, bitSize int) (int64, error) {
-	if len(s) == 0 {
-		return 0, ErrSyntax
+	original := s
+	if s == "" {
+		return 0, numError("ParseInt", original, ErrSyntax)
 	}
 	neg := false
 	if s[0] == '+' || s[0] == '-' {
 		neg = s[0] == '-'
 		s = s[1:]
-		if len(s) == 0 {
-			return 0, ErrSyntax
-		}
 	}
-	u, err := ParseUint(s, base, bitSize)
-	if err != nil {
-		return 0, err
+	if s == "" {
+		return 0, numError("ParseInt", original, ErrSyntax)
+	}
+	if bitSize == 0 {
+		bitSize = 64
+	}
+	if bitSize < 1 || bitSize > 64 {
+		return 0, numError("ParseInt", original, ErrSyntax)
+	}
+	limit := uint64(1) << uint(bitSize-1)
+	value, syntax, overflow := parseUintMagnitude(s, base, limit)
+	if syntax {
+		return 0, numError("ParseInt", original, ErrSyntax)
+	}
+	if overflow || (!neg && value >= limit) {
+		if neg {
+			return -int64(limit-1) - 1, numError("ParseInt", original, ErrRange)
+		}
+		return int64(limit - 1), numError("ParseInt", original, ErrRange)
 	}
 	if neg {
-		return -int64(u), nil
+		if value == limit {
+			return -int64(limit-1) - 1, nil
+		}
+		return -int64(value), nil
 	}
-	return int64(u), nil
+	return int64(value), nil
 }
 
 func ParseUint(s string, base int, bitSize int) (uint64, error) {
-	if len(s) == 0 {
-		return 0, ErrSyntax
+	original := s
+	if bitSize == 0 {
+		bitSize = 64
 	}
+	if bitSize < 1 || bitSize > 64 {
+		return 0, numError("ParseUint", original, ErrSyntax)
+	}
+	limit := ^uint64(0)
+	if bitSize < 64 {
+		limit = uint64(1)<<uint(bitSize) - 1
+	}
+	value, syntax, overflow := parseUintMagnitude(s, base, limit)
+	if syntax {
+		return 0, numError("ParseUint", original, ErrSyntax)
+	}
+	if overflow {
+		return limit, numError("ParseUint", original, ErrRange)
+	}
+	return value, nil
+}
+
+func parseUintMagnitude(s string, base int, limit uint64) (uint64, bool, bool) {
+	if s == "" {
+		return 0, true, false
+	}
+	allowUnderscore := base == 0
 	if base == 0 {
 		base = 10
 		if len(s) > 1 && s[0] == '0' {
@@ -110,26 +163,40 @@ func ParseUint(s string, base int, bitSize int) (uint64, error) {
 				base = 2
 				s = s[2:]
 			} else if len(s) > 2 && (s[1] == 'o' || s[1] == 'O') {
+				base = 8
 				s = s[2:]
 			}
 		}
 	}
-	if base < 2 || base > 36 || len(s) == 0 {
-		return 0, ErrSyntax
+	if base < 2 || base > 36 || s == "" {
+		return 0, true, false
 	}
-	var out uint64
+	value := uint64(0)
+	digits := 0
+	underscore := false
+	overflow := false
 	for i := 0; i < len(s); i++ {
+		if s[i] == '_' && allowUnderscore {
+			if digits == 0 || underscore || i+1 == len(s) {
+				return 0, true, false
+			}
+			underscore = true
+			continue
+		}
 		d, ok := digitValue(s[i])
 		if !ok || d >= base {
-			return 0, ErrSyntax
+			return 0, true, false
 		}
-		next := out*uint64(base) + uint64(d)
-		if next < out {
-			return 0, ErrRange
+		digits++
+		underscore = false
+		if uint64(d) > limit || value > (limit-uint64(d))/uint64(base) {
+			overflow = true
+			value = limit
+		} else if !overflow {
+			value = value*uint64(base) + uint64(d)
 		}
-		out = next
 	}
-	return out, nil
+	return value, digits == 0 || underscore, overflow
 }
 
 func Quote(s string) string {
