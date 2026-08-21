@@ -3507,7 +3507,10 @@ func renvoBuildMetaInto(pp *renvoProgram, m *renvoMeta) {
 				parsedGroupEnd = groupEnd
 				continue
 			}
-			renvoParseTopDeclEntry(m, p, decl.kind, decl.startTok, decl.endTok)
+			// Linked units describe an ungrouped const declaration from the
+			// first name rather than from the const keyword. Parse that span as
+			// a const spec so its value is available to array type expressions.
+			renvoParseConstDecls(m, p, decl.startTok, decl.endTok)
 			continue
 		}
 		entryStart := decl.startTok + 1

@@ -92,6 +92,45 @@ func main() {
 	}
 }
 
+func TestFunctionValueFieldClosureAssignmentIsLowered(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+type FlagSet struct {
+	called bool
+	Usage func()
+}
+
+func newFlagSet() *FlagSet {
+	f := &FlagSet{}
+	f.Usage = func() { f.called = true }
+	return f
+}
+
+func main() {
+	f := newFlagSet()
+	f.Usage()
+	if f.called { print("PASS\n") }
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	for _, want := range [][]byte{
+		[]byte("f.Usage = __renvo_function_0{kind: 1"),
+		[]byte("f: f"),
+		[]byte("env.f.called = true"),
+		[]byte("__renvo_call_0(&f.Usage)"),
+	} {
+		if !bytes.Contains(linked.Program.Text, want) {
+			t.Fatalf("closure field assignment did not contain %q:\n%s", want, linked.Program.Text)
+		}
+	}
+}
+
 func TestFunctionValueFieldNameDoesNotRewriteNestedMethod(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},

@@ -1,5 +1,71 @@
 package strings
 
+import (
+	"io"
+	"unicode"
+	"unicode/utf8"
+)
+
+type Builder struct {
+	buf []byte
+}
+
+func (b *Builder) Write(p []byte) (int, error) {
+	b.buf = append(b.buf, p...)
+	return len(p), nil
+}
+func (b *Builder) WriteByte(c byte) error { b.buf = append(b.buf, c); return nil }
+func (b *Builder) WriteString(s string) (int, error) {
+	b.buf = append(b.buf, []byte(s)...)
+	return len(s), nil
+}
+func (b *Builder) WriteRune(r rune) (int, error) {
+	data := make([]byte, utf8.UTFMax)
+	n := utf8.EncodeRune(data, r)
+	if n == 0 {
+		n = utf8.EncodeRune(data, utf8.RuneError)
+	}
+	b.buf = append(b.buf, data[:n]...)
+	return n, nil
+}
+func (b *Builder) String() string { return string(b.buf) }
+func (b *Builder) Len() int       { return len(b.buf) }
+func (b *Builder) Cap() int       { return cap(b.buf) }
+func (b *Builder) Reset()         { b.buf = nil }
+func (b *Builder) Grow(n int) {
+	if n < 0 {
+		panic("strings.Builder.Grow: negative count")
+	}
+	if cap(b.buf)-len(b.buf) < n {
+		grown := make([]byte, len(b.buf), len(b.buf)+n)
+		copy(grown, b.buf)
+		b.buf = grown
+	}
+}
+
+type Reader struct {
+	s string
+	i int64
+}
+
+func NewReader(s string) *Reader { return &Reader{s: s} }
+func (r *Reader) Read(p []byte) (int, error) {
+	if r.i >= int64(len(r.s)) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.s[r.i:])
+	r.i += int64(n)
+	return n, nil
+}
+func (r *Reader) Len() int {
+	if r.i >= int64(len(r.s)) {
+		return 0
+	}
+	return len(r.s) - int(r.i)
+}
+func (r *Reader) Size() int64    { return int64(len(r.s)) }
+func (r *Reader) Reset(s string) { r.s = s; r.i = 0 }
+
 func Contains(s string, substr string) bool {
 	return Index(s, substr) >= 0
 }
@@ -195,4 +261,20 @@ func appendString(out []byte, s string) []byte {
 		out = append(out, s[i])
 	}
 	return out
+}
+
+func ToLower(s string) string {
+	var b Builder
+	for _, r := range s {
+		b.WriteRune(unicode.ToLower(r))
+	}
+	return b.String()
+}
+
+func ToUpper(s string) string {
+	var b Builder
+	for _, r := range s {
+		b.WriteRune(unicode.ToUpper(r))
+	}
+	return b.String()
 }

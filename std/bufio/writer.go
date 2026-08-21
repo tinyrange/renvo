@@ -90,7 +90,7 @@ func (b *Writer) WriteRune(r rune) (int, error) {
 	if r < utf8.RuneSelf {
 		return 1, b.WriteByte(byte(r))
 	}
-	data := make([]byte, utf8.UTFMax)
+	var data [utf8.UTFMax]byte
 	if r < 0 || r > utf8.MaxRune || (r >= 0xd800 && r <= 0xdfff) {
 		r = utf8.RuneError
 	}

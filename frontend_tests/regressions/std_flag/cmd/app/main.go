@@ -4,6 +4,10 @@ import "flag"
 
 func main() {
 	set := flag.NewFlagSet("test", flag.ContinueOnError)
+	if set.Usage == nil {
+		print("FAIL\n")
+		return
+	}
 	name := set.String("name", "", "")
 	verbose := set.Bool("verbose", false, "")
 	count := set.Int("count", 0, "")

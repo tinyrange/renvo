@@ -117,3 +117,7 @@ func ValidString(s string) bool {
 func isCont(c byte) bool {
 	return c >= 0x80 && c < 0xC0
 }
+
+func DecodeRune(p []byte) (r rune, size int) { return DecodeRuneInString(string(p)) }
+func RuneCount(p []byte) int                 { return RuneCountInString(string(p)) }
+func Valid(p []byte) bool                    { return ValidString(string(p)) }

@@ -951,14 +951,19 @@ func lowerFunctionValueLiterals(program *unit.Program, signatures []functionValu
 		if !functionValueTokenEquals(program, funcTok, "func") || !functionValueTokenEquals(program, funcTok+1, "(") || functionValueIsDeclaredFunction(program, funcTok) {
 			continue
 		}
-		fieldTok := funcTok - 2
-		if fieldTok < 0 || !functionValueTokenEquals(program, funcTok-1, ":") {
-			continue
-		}
-		fieldName := functionValueTokenText(program, fieldTok)
-		fieldIndex := functionValueFieldByOwnerAndName(fields, functionValueCompositeOwner(program, fieldTok), fieldName)
-		if fieldIndex < 0 {
-			fieldIndex = functionValueUniqueFieldByName(fields, fieldName)
+		fieldIndex := -1
+		if functionValueTokenEquals(program, funcTok-1, ":") {
+			fieldTok := funcTok - 2
+			if fieldTok >= 0 {
+				fieldName := functionValueTokenText(program, fieldTok)
+				fieldIndex = functionValueFieldByOwnerAndName(fields, functionValueCompositeOwner(program, fieldTok), fieldName)
+				if fieldIndex < 0 {
+					fieldIndex = functionValueUniqueFieldByName(fields, fieldName)
+				}
+			}
+		} else if functionValueTokenEquals(program, funcTok-1, "=") {
+			fieldTok := functionValueSelectorFieldBefore(program, funcTok-1)
+			fieldIndex = functionValueFieldForSelector(program, fieldTok, fields)
 		}
 		if fieldIndex < 0 {
 			continue

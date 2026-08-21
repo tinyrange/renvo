@@ -117,19 +117,16 @@ not mean the complete Go API is supported.
 - [x] Added `ScanLines`, `ScanWords`, `ScanBytes`, and `ScanRunes`, with host
   tests for CRLF/final lines, words, UTF-8 runes, the default token limit, and a
   caller-supplied larger buffer.
-- [ ] Execute Scanner through Renvo. Function-valued `SplitFunc` storage reaches
-  generated dispatch code, but the backend currently fails with
-  `RENVO-BACKEND-003`; the concrete failures are recorded in
-  `COMPILER_BUGS.md`.
+- [x] Execute Scanner through Renvo, including imported `SplitFunc` callbacks and
+  function-valued scanner fields.
 - [x] Added `Reader`, including buffered reads, byte/rune reads and unread,
   peeking, discarding, line/slice/byte/string reads, reset, size, and buffered
   byte reporting.
   - [x] Host-Go tests cover line boundaries, CRLF, EOF, buffer-full assembly,
     peeking/discarding, and UTF-8 unread behavior.
   - [x] A focused Renvo regression covers peeking, discarding, and line reads.
-  - [ ] Renvo execution of repeated three-result `ReadLine` calls and the rune
-    path exposed result corruption; the reproducer is recorded in
-    `COMPILER_BUGS.md` while host-Go coverage remains passing.
+  - [x] Renvo execution covers repeated three-result `ReadLine` calls and the
+    rune path without result corruption.
 - [x] Added `Writer`, including sized construction, buffered byte/string/rune
   writes, direct large writes, flush, reset, available/buffered reporting,
   `AvailableBuffer`, and `ReadFrom`.
@@ -187,9 +184,24 @@ not mean the complete Go API is supported.
   stdin/stdout/stderr handles needed for default output.
   - [x] Host-Go tests cover decimal/exponent floats, compound/fractional
     durations, usage metavariables, and captured defaults output.
-  - [ ] Renvo execution of float/duration parsing remains blocked by backend
-    compilation, and assigning the Go-style default `FlagSet.Usage` closure
-    also fails; the closure failure is recorded in `COMPILER_BUGS.md`.
+  - [x] Renvo execution covers float/duration parsing and the Go-style default
+    `FlagSet.Usage` closure.
+
+### Foundational package audit progress
+
+- [x] `io`: `Reader`, `Writer`, `Closer`, `ReadCloser`, canonical `EOF`,
+  `ErrShortWrite`, `Discard`, `ReadAll`, `LimitReader`, `Copy`, `NopCloser`, and
+  `WriteString`, with host-Go compatibility tests.
+- [x] `bytes`: byte helpers, `Buffer`, and request-body-compatible `NewReader`
+  with `Read`, `Len`, `Size`, and `Reset`, with host-Go compatibility tests.
+- [x] `strings`: `Builder`, request-body-compatible `Reader`, joining, splitting,
+  fields, prefix/suffix and substring operations, trimming, replacement,
+  repetition, and Unicode case conversion, with host-Go compatibility tests.
+- [x] `unicode/utf8`: validation for strings and byte slices, rune decoding,
+  rune counts and lengths, encoding, and replacement-rune semantics, with
+  host-Go compatibility tests.
+- [ ] Complete the remaining audited surfaces in `errors`, `fmt`, `os`, `sort`,
+  `strconv`, and `time`.
 
 ### Remaining inventory
 
@@ -284,10 +296,10 @@ behavior.
 
 ### `strings`
 
-The required surface is broad: `Builder`, `Reader`, joining, splitting,
-`Fields`, prefix/suffix tests, substring search, trimming, replacement,
-repetition, and case conversion. `strings.Reader` must satisfy the interfaces
-needed by request construction and buffered input.
+The audited staragent surface is implemented: `Builder`, `Reader`, joining,
+splitting, `Fields`, prefix/suffix tests, substring search, trimming,
+replacement, repetition, and Unicode case conversion. `strings.Reader`
+satisfies `io.Reader` for request construction and buffered input.
 
 ### `sync`
 
@@ -298,8 +310,9 @@ unnecessary because callbacks and future concurrency can interleave state.
 
 ### `unicode/utf8`
 
-Verify `Valid`, `ValidString`, rune decoding, rune length, and replacement-rune
-semantics needed by bounded output and terminal editing.
+The audited surface provides `Valid`, `ValidString`, byte and string rune
+decoding, rune counts and lengths, encoding, and replacement-rune semantics
+needed by bounded output and terminal editing.
 
 ### `unsafe`
 

@@ -20,3 +20,17 @@ func TestUTF8(t *testing.T) {
 		t.Fatalf("EncodeRune failed: %d %v", n, buf[:n])
 	}
 }
+
+func TestByteAPIs(t *testing.T) {
+	valid := []byte("Aλ界")
+	if !Valid(valid) || RuneCount(valid) != 3 {
+		t.Fatal("valid byte APIs failed")
+	}
+	r, n := DecodeRune(valid[1:])
+	if r != 'λ' || n != 2 {
+		t.Fatalf("DecodeRune = %U, %d", r, n)
+	}
+	if Valid([]byte{0xff}) {
+		t.Fatal("invalid bytes accepted")
+	}
+}

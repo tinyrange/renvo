@@ -1,6 +1,9 @@
 package strings
 
-import "testing"
+import (
+	"io"
+	"testing"
+)
 
 func TestSearchAndTrim(t *testing.T) {
 	if !Contains("alpha beta", "ha b") || Index("banana", "na") != 2 || LastIndex("banana", "na") != 4 {
@@ -25,5 +28,24 @@ func TestSplitJoinReplace(t *testing.T) {
 	}
 	if Repeat("ab", 3) != "ababab" || Replace("aaaa", "aa", "b", 1) != "baa" || ReplaceAll("aaaa", "aa", "b") != "bb" {
 		t.Fatalf("repeat/replace failed")
+	}
+}
+
+func TestBuilderReaderAndCase(t *testing.T) {
+	var b Builder
+	b.Grow(8)
+	b.WriteString("Go")
+	b.WriteByte(' ')
+	b.WriteRune('λ')
+	if b.String() != "Go λ" || b.Len() != len("Go λ") {
+		t.Fatalf("builder = %q", b.String())
+	}
+	r := NewReader("body")
+	got, err := io.ReadAll(r)
+	if err != nil || string(got) != "body" || r.Len() != 0 || r.Size() != 4 {
+		t.Fatalf("reader = %q, %v", got, err)
+	}
+	if ToLower("ΓO") != "γo" || ToUpper("γo") != "ΓO" {
+		t.Fatal("Unicode case conversion failed")
 	}
 }

@@ -44,6 +44,7 @@ type FlagSet struct {
 
 func NewFlagSet(name string, handling ErrorHandling) *FlagSet {
 	f := &FlagSet{name: name, errorHandling: handling, output: os.Stderr}
+	f.Usage = func() { f.PrintDefaults() }
 	return f
 }
 func (f *FlagSet) SetOutput(output io.Writer)   { f.output = output }

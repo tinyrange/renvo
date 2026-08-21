@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "9856902526a47f7c95ce8f217ab2e53b5035ec40f6c1bdc19a176f4d3b36e929"
+const CompilerSourceDigest = "1173d65ef1a7e3bb4963f4ef3f266234bb04fe719dba0a519b882ab18f5eb9b2"
 
 // source: backend/compiler_common_impl.go
 
@@ -3514,7 +3514,10 @@ parsedGroupStart = groupStart
 parsedGroupEnd = groupEnd
 continue
 }
-renvoParseTopDeclEntry(m, p, decl.kind, decl.startTok, decl.endTok)
+
+
+
+renvoParseConstDecls(m, p, decl.startTok, decl.endTok)
 continue
 }
 entryStart := decl.startTok + 1
