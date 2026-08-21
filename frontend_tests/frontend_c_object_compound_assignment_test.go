@@ -96,6 +96,12 @@ uint64_t nested_array_member_pointer_decay(void) {
 	attrs.mask[0].bits[0] = 73;
 	return *(uint64_t *)(void *)((attrs.mask)->bits);
 }
+static int multiplied_size_overflows(uint64_t factor, uint64_t size) {
+	return factor > 18446744073709551615ULL / size;
+}
+int constant_unsigned_overflow_check(void) {
+	return multiplied_size_overflows(1, 16);
+}
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -114,6 +120,7 @@ extern uint64_t allocation_argument_order(void);
 extern uint64_t loop_varying_single_call(void);
 extern uint64_t internal_string_literal_argument(void);
 extern uint64_t nested_array_member_pointer_decay(void);
+extern int constant_unsigned_overflow_check(void);
 int main(void) {
 	struct range range = {100};
 	struct identifier identifier = {{37}};
@@ -126,7 +133,8 @@ int main(void) {
 		allocation_argument_order() == 1000 &&
 		loop_varying_single_call() == 51 &&
 		internal_string_literal_argument() == 136 &&
-		nested_array_member_pointer_decay() == 73 ? 0 : 1;
+		nested_array_member_pointer_decay() == 73 &&
+		constant_unsigned_overflow_check() == 0 ? 0 : 1;
 }
 `), 0o644); err != nil {
 		t.Fatal(err)

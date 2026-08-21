@@ -544,6 +544,28 @@ int exported_add(int value) { return header_add(value); }
 	}
 }
 
+func TestTranslateWeakDefinitionCallsThroughInterposableSymbol(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+__attribute__((weak)) int selectable(int value) { return value + 1; }
+int call_selectable(int value) { return selectable(value); }
+`), nil)
+	if !result.Ok {
+		t.Fatalf("weak definition translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{
+		[]byte("//export selectable\nfunc __c_weak_impl_selectable(value int32) int32"),
+		[]byte("// renvo:linkstatic libc,selectable\nfunc selectable(p0 int32) int32"),
+		[]byte("return selectable(value)"),
+	} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("interposable weak definition is missing %q:\n%s", want, result.Source)
+		}
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("weak definition source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
 func TestTranslateRejectsUnknownGNUAttribute(t *testing.T) {
 	result := TranslateObject("main", []byte(`int value __attribute__((renvo_unknown));`), nil)
 	if result.Ok || result.Error != TranslateErrUnsupported {
@@ -3126,6 +3148,44 @@ int inspect(int value) {
 		if bytes.Contains(result.Source, unwanted) {
 			t.Fatalf("compile-time builtin %q escaped into shared syntax:\n%s", unwanted, result.Source)
 		}
+	}
+}
+
+func TestTranslateBuiltinChooseExprPreservesSelectedType(t *testing.T) {
+	result := TranslateObjectForDataModel("main", []byte(`
+unsigned long preserve(unsigned long input) {
+	__typeof__(__builtin_choose_expr(
+		sizeof(input) <= sizeof(int), (unsigned int)0, (unsigned long)0)) value = input;
+	return value;
+}
+`), nil, DataModelLP64)
+	if !result.Ok {
+		t.Fatalf("typed builtin choose translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("var value uint64=input")) ||
+		bytes.Contains(result.Source, []byte("var value int32=input")) {
+		t.Fatalf("builtin choose selected expression lost its type:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("typed builtin choose source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateShiftPreservesCMultiplicationPrecedence(t *testing.T) {
+	result := TranslateObjectForDataModel("main", []byte(`
+unsigned long aligned_byte_mask(unsigned long align) {
+	return (1UL << 8 * align) - 1;
+}
+`), nil, DataModelLP64)
+	if !result.Ok {
+		t.Fatalf("shift precedence translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("<<(8*align)")) ||
+		bytes.Contains(result.Source, []byte("<<8*align")) {
+		t.Fatalf("C multiplication lost precedence over shift:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("shift precedence source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
 	}
 }
 

@@ -2806,7 +2806,7 @@ func (t *translator) emitPendingDeclarations() {
 		references.add(t.externals[i].goName)
 	}
 	for i := 0; i < len(t.functions); i++ {
-		if !t.functions[i].defined && !t.functions[i].variadic {
+		if !t.functions[i].variadic && (!t.functions[i].defined || t.object && t.functions[i].attributes.weak) {
 			references.add(t.functions[i].name)
 		}
 	}
@@ -2856,7 +2856,8 @@ func (t *translator) emitPendingDeclarations() {
 		t.out = append(t.out, ';', '\n')
 	}
 	for i := 0; i < len(t.functions); i++ {
-		if !t.functions[i].defined && !t.functions[i].variadic && references.contains(t.functions[i].name) {
+		if !t.functions[i].variadic && references.contains(t.functions[i].name) &&
+			(!t.functions[i].defined || t.object && t.functions[i].attributes.weak) {
 			t.emitForeignFunctionName(t.functions[i])
 		}
 	}
@@ -9891,6 +9892,11 @@ func (t *translator) emitFunction(decl declarator, storage int) {
 	name := tokenText(t.src, decl.name)
 	if tokenIs(t.src, decl.name, "main") && t.packageName == "main" {
 		name = []byte("appMain")
+	} else if t.object && linkageStorage != storageStatic && decl.attributes.weak {
+		// A weak definition remains interposable from its own translation unit.
+		// Keep the implementation behind the exported C symbol so calls resolve
+		// through the linker instead of binding directly to Renvo's local body.
+		name = append([]byte("__c_weak_impl_"), name...)
 	}
 	t.out = append(t.out, name...)
 	t.out = append(t.out, '(')
@@ -15557,7 +15563,17 @@ func (t *translator) emitBinaryExpression(tokens []token, at int) {
 	t.convertedExpression(typeID, left)
 	t.out = append(t.out, tokenText(t.src, op)...)
 	if shift {
+		// C gives multiplication higher precedence than shifts, while Go puts
+		// them in the same left-associative group. Preserve the C tree for
+		// expressions such as 1UL << 8 * align.
+		nested := t.binaryOperator(right) >= 0
+		if nested {
+			t.out = append(t.out, '(')
+		}
 		t.convertedExpression(t.integerPromotion(rightType), right)
+		if nested {
+			t.out = append(t.out, ')')
+		}
 	} else if value, constant := t.constantExpression(right); constant && value < 0 {
 		// Keep a folded negative right operand from merging with the binary
 		// operator into a different Go token such as <- or --.
@@ -15791,6 +15807,18 @@ func (t *translator) expressionType(tokens []token) int {
 	if assignment := t.simpleAssignment(tokens); assignment > 0 {
 		if typeID := t.lvalueType(tokens[:assignment]); typeID != cTypeVoidID {
 			return typeID
+		}
+	}
+	if len(tokens) >= 6 && tokenIs(t.src, tokens[0], "__builtin_choose_expr") && tokenIs(t.src, tokens[1], "(") &&
+		matchingToken(t.src, tokens, 1, "(", ")") == len(tokens)-1 {
+		args := splitTopLevel(t.src, tokens[2:len(tokens)-1], ",")
+		if len(args) == 3 {
+			if value, ok := t.constantExpression(args[0]); ok {
+				if value != 0 {
+					return t.expressionType(args[1])
+				}
+				return t.expressionType(args[2])
+			}
 		}
 	}
 	if open := t.trailingCallOpen(tokens); open > 0 {

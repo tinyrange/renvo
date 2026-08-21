@@ -43,7 +43,9 @@ func runCObjectAggregateABISystemLink(
 	dir := t.TempDir()
 	source := filepath.Join(dir, "aggregate-abi.c")
 	harness := filepath.Join(dir, "harness.c")
+	provider := filepath.Join(dir, "provider.c")
 	object := filepath.Join(dir, "aggregate-abi.o")
+	providerObject := filepath.Join(dir, "provider.o")
 	executable := filepath.Join(dir, "aggregate-abi-test")
 	if err := os.WriteFile(source, []byte(`
 struct pair { long first; long second; };
@@ -61,6 +63,29 @@ unsigned long preserve_after_empty_assignment(void) {
 	holder.lock = (struct empty){};
 	return holder.value;
 }
+typedef struct { unsigned long value; } protection_t;
+static unsigned long protection_value(protection_t protection) {
+	return protection.value;
+}
+#define make_protection(value) ((protection_t) { (value) })
+unsigned long preserve_compound_literal_assignment(protection_t protection) {
+	protection = make_protection(protection_value(protection));
+	return protection.value;
+}
+extern protection_t external_protection(protection_t, void *);
+unsigned long call_external_protection(unsigned long value) {
+	return external_protection((protection_t){value}, (void *)0).value;
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(provider, []byte(`
+typedef struct { unsigned long value; } protection_t;
+protection_t external_protection(protection_t protection, void *context) {
+	(void)context;
+	protection.value += 1;
+	return protection;
+}
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -69,10 +94,15 @@ unsigned long preserve_after_empty_assignment(void) {
 struct pair { long first; long second; };
 extern struct pair add_pair(struct pair, struct pair);
 extern unsigned long preserve_after_empty_assignment(void);
+typedef struct { unsigned long value; } protection_t;
+extern unsigned long preserve_compound_literal_assignment(protection_t);
+extern unsigned long call_external_protection(unsigned long);
 int main(void) {
 	struct pair result = add_pair((struct pair){1, 2}, (struct pair){10, 20});
 	if (result.first != 11 || result.second != 22 ||
-	    preserve_after_empty_assignment() != 0x3f8)
+	    preserve_after_empty_assignment() != 0x3f8 ||
+	    preserve_compound_literal_assignment((protection_t){2}) != 2 ||
+	    call_external_protection(41) != 42)
 		return 1;
 	puts("PASS");
 	return 0;
@@ -92,7 +122,11 @@ int main(void) {
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("compile C aggregate-ABI object with Renvo: %v\n%s", err, output)
 	}
-	link := exec.Command(linkerDriver, harness, object, "-o", executable)
+	compileProvider := exec.Command(linkerDriver, "-c", provider, "-o", providerObject)
+	if output, err := compileProvider.CombinedOutput(); err != nil {
+		t.Fatalf("compile system aggregate-ABI provider: %v\n%s", err, output)
+	}
+	link := exec.Command(linkerDriver, harness, object, providerObject, "-o", executable)
 	if output, err := link.CombinedOutput(); err != nil {
 		t.Fatalf("system-link C aggregate-ABI object: %v\n%s", err, output)
 	}

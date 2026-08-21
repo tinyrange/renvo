@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "38e2ad053bc5e9713aa0450b9f3b432cd20237e95cbc861e9aae409386647fd1"
+const CompilerSourceDigest = "d453d2d7a61dd3c55cbf8068d31b6130d0b7b63f791953f30115253f996549fd"
 
 // source: backend/compiler_common_impl.go
 
@@ -2542,7 +2542,17 @@ if !right.ok {
 renvoSetConstResult(out, 0, false)
 return
 }
-renvoEvalConstBinaryInto(g, opTok, left.value, right.value, out)
+unsignedKind := 0
+if renvoExprHasUnsignedIntType(g, ep, e.left) {
+unsignedKind = renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, e.left)).kind
+}
+if renvoExprHasUnsignedIntType(g, ep, e.right) {
+rightUnsignedKind := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, e.right)).kind
+if unsignedKind == 0 || renvoUnsignedKindSize(rightUnsignedKind) > renvoUnsignedKindSize(unsignedKind) {
+unsignedKind = rightUnsignedKind
+}
+}
+renvoEvalConstBinaryInto(g, opTok, left.value, right.value, unsignedKind, out)
 return
 }
 renvoSetConstResult(out, 0, false)
@@ -2638,7 +2648,36 @@ at++
 return 0, false
 }
 
-func renvoEvalConstBinaryInto(g *renvoLinearGen, tok int, left int, right int, out *renvoConstResult) {
+func renvoUnsignedConstValue(value int, kind int) uint64 {
+if kind == renvoTypeByte {
+return uint64(uint8(value))
+}
+if kind == renvoTypeUint16 {
+return uint64(uint16(value))
+}
+if kind == renvoTypeUint32 {
+return uint64(uint32(value))
+}
+return uint64(value)
+}
+
+func renvoUnsignedKindSize(kind int) int {
+if kind == renvoTypeByte {
+return 1
+}
+if kind == renvoTypeUint16 {
+return 2
+}
+if kind == renvoTypeUint32 {
+return 4
+}
+if kind == renvoTypeUint64 {
+return 8
+}
+return 0
+}
+
+func renvoEvalConstBinaryInto(g *renvoLinearGen, tok int, left int, right int, unsignedKind int, out *renvoConstResult) {
 p := g.prog
 if tok < 0 || tok >= renvoTokCount(p) {
 renvoSetConstResult(out, 0, false)
@@ -2649,6 +2688,8 @@ end := renvoTokEnd(p, tok)
 n := end - start
 value := 0
 ok := true
+unsignedLeft := renvoUnsignedConstValue(left, unsignedKind)
+unsignedRight := renvoUnsignedConstValue(right, unsignedKind)
 if n == 1 {
 c := renvo_runtime_UnsafeByteAt(p.src, start)
 if c == '+' {
@@ -2662,13 +2703,21 @@ if right == 0 {
 renvoSetConstResult(out, 0, false)
 return
 }
+if unsignedKind != 0 {
+value = int(unsignedLeft / unsignedRight)
+} else {
 value = left / right
+}
 } else if c == '%' {
 if right == 0 {
 renvoSetConstResult(out, 0, false)
 return
 }
+if unsignedKind != 0 {
+value = int(unsignedLeft % unsignedRight)
+} else {
 value = left % right
+}
 } else if c == '&' {
 value = left & right
 } else if c == '|' {
@@ -2676,11 +2725,11 @@ value = left | right
 } else if c == '^' {
 value = left ^ right
 } else if c == '<' {
-if left < right {
+if unsignedKind != 0 && unsignedLeft < unsignedRight || unsignedKind == 0 && left < right {
 value = 1
 }
 } else if c == '>' {
-if left > right {
+if unsignedKind != 0 && unsignedLeft > unsignedRight || unsignedKind == 0 && left > right {
 value = 1
 }
 } else {
@@ -2698,7 +2747,11 @@ return
 }
 value = left << right
 } else if c0 == '>' && c1 == '>' {
+if unsignedKind != 0 {
+value = int(unsignedLeft >> right)
+} else {
 value = left >> right
+}
 } else if c0 == '=' && c1 == '=' {
 if left == right {
 value = 1
@@ -2708,11 +2761,11 @@ if left != right {
 value = 1
 }
 } else if c0 == '<' && c1 == '=' {
-if left <= right {
+if unsignedKind != 0 && unsignedLeft <= unsignedRight || unsignedKind == 0 && left <= right {
 value = 1
 }
 } else if c0 == '>' && c1 == '=' {
-if left >= right {
+if unsignedKind != 0 && unsignedLeft >= unsignedRight || unsignedKind == 0 && left >= right {
 value = 1
 }
 } else {
@@ -4329,7 +4382,7 @@ return
 }
 var g renvoLinearGen
 g.prog = p
-renvoEvalConstBinaryInto(&g, e.tok, left.value, right.value, out)
+renvoEvalConstBinaryInto(&g, e.tok, left.value, right.value, 0, out)
 return
 }
 renvoSetConstResult(out, 0, false)
@@ -11628,9 +11681,18 @@ renvoEmitCopyMemSecondaryToStack(g, offset, renvoTypeSize(meta, destType))
 return true
 }
 if e.kind == renvoExprComposite {
-renvoZeroLocalAtOffset(g, offset)
+
+
+
+
+valueOffset := renvoAddUnnamedLocal(g, destType)
+renvoZeroLocalAtOffset(g, valueOffset)
 if destResolved.kind == renvoTypeArray {
-return renvoEmitCompositeFieldToStack(g, ep, idx, destType, offset)
+if !renvoEmitCompositeFieldToStack(g, ep, idx, destType, valueOffset) {
+return false
+}
+renvoEmitCopyStackToStack(g, valueOffset, offset, renvoTypeSize(meta, destType))
+return true
 }
 for i := 0; i < e.argCount; i++ {
 field := ep.fields[e.firstArg+i]
@@ -11643,7 +11705,7 @@ fieldType := g.meta.fields[fieldIndex].typ
 if fieldType == 0 {
 return false
 }
-if !renvoEmitCompositeFieldToStack(g, ep, field.expr, fieldType, offset-fieldOffset) {
+if !renvoEmitCompositeFieldToStack(g, ep, field.expr, fieldType, valueOffset-fieldOffset) {
 renvoPrintErr("renvo: failed composite field: ")
 if field.nameEnd > field.nameStart {
 write(2, g.prog.src[field.nameStart:field.nameEnd], -1)
@@ -11652,6 +11714,7 @@ renvoPrintErr("\n")
 return false
 }
 }
+renvoEmitCopyStackToStack(g, valueOffset, offset, renvoTypeSize(meta, destType))
 return true
 }
 return false
@@ -14219,6 +14282,12 @@ if e.argCount == 0 &&
 (renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CDisableUserAccess") ||
 renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CEnableUserAccess")) &&
 g.c.renvoTargetArch == renvoArchAmd64 {
+
+
+
+
+
+renvoAsmEmitText(&g.asm, "\x0f\x20\xe0\x0f\xba\xe0\x15\x73\x03")
 if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CEnableUserAccess") {
 renvoAsmEmitText(&g.asm, "\x0f\x01\xcb")
 } else {
@@ -15063,20 +15132,30 @@ return true
 
 func renvoCObjectReverseRegisterCallEligible(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
 renvoNonNil(g, fn)
-if !renvoIsHostedObjectAmd64(g.c) || wordCount != fn.paramCount || wordCount > 6 {
+if !renvoIsHostedObjectAmd64(g.c) || wordCount > 6 {
 return false
 }
+expectedWords := 0
 for i := 0; i < fn.paramCount; i++ {
 paramType := g.meta.params[fn.firstParam+i].typ
 if renvoTypeIsString(g.meta, paramType) {
+expectedWords++
 continue
 }
 param := renvoResolveType(g.meta, paramType)
+if param.kind == renvoTypeStruct {
+if !renvoObjectCABIIntegerAggregate(g.meta, paramType) {
+return false
+}
+expectedWords += renvoAlignValue(renvoTypeSize(g.meta, paramType), 8) / 8
+continue
+}
 if !renvoTypeKindIsScalarInt(param.kind) && param.kind != renvoTypePointer && param.kind != renvoTypeFunc {
 return false
 }
+expectedWords++
 }
-return true
+return wordCount == expectedWords
 }
 
 

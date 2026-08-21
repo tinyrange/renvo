@@ -583,6 +583,14 @@ typedef struct renvo_callbacks {
 	if err := os.WriteFile(source, []byte(`#include "layout.h"
 static renvo_record global_record;
 static int global_value;
+unsigned long renvo_choose_type(unsigned long input) {
+	__typeof__(__builtin_choose_expr(
+		sizeof(input) <= sizeof(int), (unsigned int)0, (unsigned long)0)) value = input;
+	return value;
+}
+unsigned long renvo_shift_precedence(unsigned long align) {
+	return (1UL << 8 * align) - 1;
+}
 int renvo_layout(void) {
 	renvo_record value;
 	renvo_record *cursor = &value;
@@ -609,6 +617,8 @@ int renvo_layout(void) {
 	if (total != 6) return 7;
 	if (global_value != 0) return 8;
 	if (global_record.tail != 13) return 9;
+	if (renvo_choose_type(0x123456789abcdef0UL) != 0x123456789abcdef0UL) return 15;
+	if (renvo_shift_precedence(7) != 0x00ffffffffffffffUL) return 16;
 	return 5008;
 }
 `), 0o644); err != nil {

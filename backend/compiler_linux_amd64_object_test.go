@@ -21,6 +21,56 @@ func TestLinuxAmd64ReverseObjectCallUsesSysVArgumentOrder(t *testing.T) {
 	}
 }
 
+func TestLinuxAmd64ObjectUserAccessInstructionsRequireSMAPEnabled(t *testing.T) {
+	context := renvoNewCompileContext(renvoTargetLinuxAmd64, false, false, false)
+	context.objectFile = true
+	source := []byte(`package main
+func renvo_runtime_CEnableUserAccess() {}
+func renvo_runtime_CDisableUserAccess() {}
+// renvo:object function access .text 0 0 0 - 0 - 0
+//export access
+func access() {
+	renvo_runtime_CEnableUserAccess()
+	renvo_runtime_CDisableUserAccess()
+}
+`)
+	program := renvoParseProgramWithContext(source, context)
+	if !program.ok {
+		t.Fatal("guarded user-access source did not parse")
+	}
+	var meta renvoMeta
+	renvoBuildMetaInto(&program, &meta)
+	if !meta.ok {
+		t.Fatal("guarded user-access metadata failed")
+	}
+	meta.arenaSize = renvoDefaultArenaSize(renvoTargetLinuxAmd64)
+	result := renvoTryCompileScalarProgramAmd64(&program, &meta)
+	if !result.ok {
+		t.Fatal("guarded user-access object compilation failed")
+	}
+	file, err := elf.NewFile(bytes.NewReader(result.data))
+	if err != nil {
+		t.Fatalf("parse guarded user-access object: %v", err)
+	}
+	var textData []byte
+	for _, section := range file.Sections {
+		if section.Flags&elf.SHF_EXECINSTR == 0 {
+			continue
+		}
+		data, err := section.Data()
+		if err != nil {
+			t.Fatal(err)
+		}
+		textData = append(textData, data...)
+	}
+	guard := []byte("\x0f\x20\xe0\x0f\xba\xe0\x15\x73\x03")
+	for _, instruction := range [][]byte{{0x0f, 0x01, 0xcb}, {0x0f, 0x01, 0xca}} {
+		if !bytes.Contains(textData, append(append([]byte{}, guard...), instruction...)) {
+			t.Fatalf("user-access instruction %x is not guarded by CR4.SMAP: code=%x", instruction, textData)
+		}
+	}
+}
+
 func TestLinuxAmd64ObjectDoesNotFoldLoopVaryingSingleCallArgument(t *testing.T) {
 	context := renvoNewCompileContext(renvoTargetLinuxAmd64, false, false, false)
 	context.objectFile = true
@@ -2020,12 +2070,13 @@ func TestLinuxAmd64ObjectForeignSmallIntegerAggregateReturn(t *testing.T) {
 	renvoCompilerObjectFile = true
 	renvoSetTarget(renvoTargetLinuxAmd64)
 	source := []byte(`package main
-type pair struct{first uint64;second uint64}
+// renvo:c11
+type pair struct{first uint64}
 // renvo:linkstatic libc,read_pair
-func read_pair(index int32) pair{return pair{}}
+func read_pair(value pair,context *byte) pair{return pair{}}
 // renvo:object function inspect - 0 1 0 - 8 0 - 0
 //export inspect
-func inspect(index int32) uint64{value:=read_pair(index);return value.second}
+func inspect(index int32) uint64{value:=read_pair(pair{first:uint64(index)},nil);return value.first}
 `)
 	context := renvoNewCompileContext(renvoTargetLinuxAmd64, false, false, false)
 	context.objectFile = true

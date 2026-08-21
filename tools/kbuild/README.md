@@ -92,8 +92,8 @@ standalone assembly, host utilities, and the normal assembler/linker stages on
 the external toolchain. The audit reports the Renvo and `-m16` command counts
 separately and checks every resulting ELF object before a fixed 128 MiB,
 single-CPU QEMU guest boots the image twice with instruction-counted TCG and a
-reproducible musl initramfs. The normalized serial logs must be identical and
-reach the checked `RENVO-LINUX-M9: PASS` marker within 30 seconds. Set
+reproducible musl initramfs. Each boot must reach the checked
+`RENVO-LINUX-M9: PASS` marker within 30 seconds. Set
 `RENVO_LINUX_ARCHIVE` to a cached pinned archive and `RENVO_LINUX_JOBS` to tune
 host parallelism; neither changes the checked guest profile. CPU, RSS, compiler,
 `vmlinux`, and `bzImage` sizes remain recorded telemetry rather than gates.

@@ -2535,7 +2535,17 @@ func renvoEvalConstExprInto(g *renvoLinearGen, ep *renvoExprParse, idx int, out 
 			renvoSetConstResult(out, 0, false)
 			return
 		}
-		renvoEvalConstBinaryInto(g, opTok, left.value, right.value, out)
+		unsignedKind := 0
+		if renvoExprHasUnsignedIntType(g, ep, e.left) {
+			unsignedKind = renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, e.left)).kind
+		}
+		if renvoExprHasUnsignedIntType(g, ep, e.right) {
+			rightUnsignedKind := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, e.right)).kind
+			if unsignedKind == 0 || renvoUnsignedKindSize(rightUnsignedKind) > renvoUnsignedKindSize(unsignedKind) {
+				unsignedKind = rightUnsignedKind
+			}
+		}
+		renvoEvalConstBinaryInto(g, opTok, left.value, right.value, unsignedKind, out)
 		return
 	}
 	renvoSetConstResult(out, 0, false)
@@ -2631,7 +2641,36 @@ func renvoCFieldAccessorOffset(src []byte, start int, end int) (int, bool) {
 	return 0, false
 }
 
-func renvoEvalConstBinaryInto(g *renvoLinearGen, tok int, left int, right int, out *renvoConstResult) {
+func renvoUnsignedConstValue(value int, kind int) uint64 {
+	if kind == renvoTypeByte {
+		return uint64(uint8(value))
+	}
+	if kind == renvoTypeUint16 {
+		return uint64(uint16(value))
+	}
+	if kind == renvoTypeUint32 {
+		return uint64(uint32(value))
+	}
+	return uint64(value)
+}
+
+func renvoUnsignedKindSize(kind int) int {
+	if kind == renvoTypeByte {
+		return 1
+	}
+	if kind == renvoTypeUint16 {
+		return 2
+	}
+	if kind == renvoTypeUint32 {
+		return 4
+	}
+	if kind == renvoTypeUint64 {
+		return 8
+	}
+	return 0
+}
+
+func renvoEvalConstBinaryInto(g *renvoLinearGen, tok int, left int, right int, unsignedKind int, out *renvoConstResult) {
 	p := g.prog
 	if tok < 0 || tok >= renvoTokCount(p) {
 		renvoSetConstResult(out, 0, false)
@@ -2642,6 +2681,8 @@ func renvoEvalConstBinaryInto(g *renvoLinearGen, tok int, left int, right int, o
 	n := end - start
 	value := 0
 	ok := true
+	unsignedLeft := renvoUnsignedConstValue(left, unsignedKind)
+	unsignedRight := renvoUnsignedConstValue(right, unsignedKind)
 	if n == 1 {
 		c := renvo_runtime_UnsafeByteAt(p.src, start)
 		if c == '+' {
@@ -2655,13 +2696,21 @@ func renvoEvalConstBinaryInto(g *renvoLinearGen, tok int, left int, right int, o
 				renvoSetConstResult(out, 0, false)
 				return
 			}
-			value = left / right
+			if unsignedKind != 0 {
+				value = int(unsignedLeft / unsignedRight)
+			} else {
+				value = left / right
+			}
 		} else if c == '%' {
 			if right == 0 {
 				renvoSetConstResult(out, 0, false)
 				return
 			}
-			value = left % right
+			if unsignedKind != 0 {
+				value = int(unsignedLeft % unsignedRight)
+			} else {
+				value = left % right
+			}
 		} else if c == '&' {
 			value = left & right
 		} else if c == '|' {
@@ -2669,11 +2718,11 @@ func renvoEvalConstBinaryInto(g *renvoLinearGen, tok int, left int, right int, o
 		} else if c == '^' {
 			value = left ^ right
 		} else if c == '<' {
-			if left < right {
+			if unsignedKind != 0 && unsignedLeft < unsignedRight || unsignedKind == 0 && left < right {
 				value = 1
 			}
 		} else if c == '>' {
-			if left > right {
+			if unsignedKind != 0 && unsignedLeft > unsignedRight || unsignedKind == 0 && left > right {
 				value = 1
 			}
 		} else {
@@ -2691,7 +2740,11 @@ func renvoEvalConstBinaryInto(g *renvoLinearGen, tok int, left int, right int, o
 			}
 			value = left << right
 		} else if c0 == '>' && c1 == '>' {
-			value = left >> right
+			if unsignedKind != 0 {
+				value = int(unsignedLeft >> right)
+			} else {
+				value = left >> right
+			}
 		} else if c0 == '=' && c1 == '=' {
 			if left == right {
 				value = 1
@@ -2701,11 +2754,11 @@ func renvoEvalConstBinaryInto(g *renvoLinearGen, tok int, left int, right int, o
 				value = 1
 			}
 		} else if c0 == '<' && c1 == '=' {
-			if left <= right {
+			if unsignedKind != 0 && unsignedLeft <= unsignedRight || unsignedKind == 0 && left <= right {
 				value = 1
 			}
 		} else if c0 == '>' && c1 == '=' {
-			if left >= right {
+			if unsignedKind != 0 && unsignedLeft >= unsignedRight || unsignedKind == 0 && left >= right {
 				value = 1
 			}
 		} else {
@@ -4322,7 +4375,7 @@ func renvoEvalMetaParsedConstExprInto(m *renvoMeta, p *renvoProgram, ep *renvoEx
 		}
 		var g renvoLinearGen
 		g.prog = p
-		renvoEvalConstBinaryInto(&g, e.tok, left.value, right.value, out)
+		renvoEvalConstBinaryInto(&g, e.tok, left.value, right.value, 0, out)
 		return
 	}
 	renvoSetConstResult(out, 0, false)
@@ -11621,9 +11674,18 @@ func renvoEmitTypedAssign(g *renvoLinearGen, ep *renvoExprParse, idx int, offset
 			return true
 		}
 		if e.kind == renvoExprComposite {
-			renvoZeroLocalAtOffset(g, offset)
+			// A composite literal's field expressions are evaluated before the
+			// assignment stores its result. Build the value in a separate frame
+			// slot so an expression such as value = T{field: read(value)} does not
+			// clear value before read(value) runs.
+			valueOffset := renvoAddUnnamedLocal(g, destType)
+			renvoZeroLocalAtOffset(g, valueOffset)
 			if destResolved.kind == renvoTypeArray {
-				return renvoEmitCompositeFieldToStack(g, ep, idx, destType, offset)
+				if !renvoEmitCompositeFieldToStack(g, ep, idx, destType, valueOffset) {
+					return false
+				}
+				renvoEmitCopyStackToStack(g, valueOffset, offset, renvoTypeSize(meta, destType))
+				return true
 			}
 			for i := 0; i < e.argCount; i++ {
 				field := ep.fields[e.firstArg+i]
@@ -11636,7 +11698,7 @@ func renvoEmitTypedAssign(g *renvoLinearGen, ep *renvoExprParse, idx int, offset
 				if fieldType == 0 {
 					return false
 				}
-				if !renvoEmitCompositeFieldToStack(g, ep, field.expr, fieldType, offset-fieldOffset) {
+				if !renvoEmitCompositeFieldToStack(g, ep, field.expr, fieldType, valueOffset-fieldOffset) {
 					renvoPrintErr("renvo: failed composite field: ")
 					if field.nameEnd > field.nameStart {
 						write(2, g.prog.src[field.nameStart:field.nameEnd], -1)
@@ -11645,6 +11707,7 @@ func renvoEmitTypedAssign(g *renvoLinearGen, ep *renvoExprParse, idx int, offset
 					return false
 				}
 			}
+			renvoEmitCopyStackToStack(g, valueOffset, offset, renvoTypeSize(meta, destType))
 			return true
 		}
 		return false
@@ -14212,6 +14275,12 @@ func renvoEmitUserCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 			(renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CDisableUserAccess") ||
 				renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CEnableUserAccess")) &&
 			g.c.renvoTargetArch == renvoArchAmd64 {
+			// Linux normally patches STAC/CLAC into these sites only when SMAP
+			// is enabled. C objects do not yet carry alternatives metadata, so
+			// make the same choice at runtime. Reading CR4 is valid in the
+			// privileged context required by these intrinsics, and guarding on
+			// CR4.SMAP avoids #UD on processors without the instructions.
+			renvoAsmEmitText(&g.asm, "\x0f\x20\xe0\x0f\xba\xe0\x15\x73\x03")
 			if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CEnableUserAccess") {
 				renvoAsmEmitText(&g.asm, "\x0f\x01\xcb")
 			} else {
@@ -15056,20 +15125,30 @@ func renvoEmitUserCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 
 func renvoCObjectReverseRegisterCallEligible(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
 	renvoNonNil(g, fn)
-	if !renvoIsHostedObjectAmd64(g.c) || wordCount != fn.paramCount || wordCount > 6 {
+	if !renvoIsHostedObjectAmd64(g.c) || wordCount > 6 {
 		return false
 	}
+	expectedWords := 0
 	for i := 0; i < fn.paramCount; i++ {
 		paramType := g.meta.params[fn.firstParam+i].typ
 		if renvoTypeIsString(g.meta, paramType) {
+			expectedWords++
 			continue
 		}
 		param := renvoResolveType(g.meta, paramType)
+		if param.kind == renvoTypeStruct {
+			if !renvoObjectCABIIntegerAggregate(g.meta, paramType) {
+				return false
+			}
+			expectedWords += renvoAlignValue(renvoTypeSize(g.meta, paramType), 8) / 8
+			continue
+		}
 		if !renvoTypeKindIsScalarInt(param.kind) && param.kind != renvoTypePointer && param.kind != renvoTypeFunc {
 			return false
 		}
+		expectedWords++
 	}
-	return true
+	return wordCount == expectedWords
 }
 
 // renvoCallArgumentsDiscardable is deliberately narrower than general purity:
