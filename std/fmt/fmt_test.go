@@ -2,6 +2,13 @@ package fmt
 
 import "testing"
 
+func TestErrorf(t *testing.T) {
+	err := Errorf("failed %s: %d", "item", 7)
+	if got := err.Error(); got != "failed item: 7" {
+		t.Fatalf("Errorf = %q", got)
+	}
+}
+
 type sink struct {
 	data []byte
 }

@@ -580,6 +580,9 @@ func mapLowerConstructionEdits(program *unit.Program, specs []mapLowerSpec, edit
 		if !functionValueTokenEquals(program, i, "{") {
 			continue
 		}
+		if mapLowerFunctionBodyStart(program, i) {
+			continue
+		}
 		typeStart := mapLowerLiteralTypeStart(program, i)
 		if typeStart < 0 || functionValueTypeEnd(program, typeStart) != i {
 			continue
@@ -611,6 +614,15 @@ func mapLowerConstructionEdits(program *unit.Program, specs []mapLowerSpec, edit
 		i = close
 	}
 	return edits, covered, true
+}
+
+func mapLowerFunctionBodyStart(program *unit.Program, open int) bool {
+	for i := 0; i < len(program.Funcs); i++ {
+		if program.Funcs[i].BodyStart == open {
+			return true
+		}
+	}
+	return false
 }
 
 func mapLowerSequenceLiteral(program *unit.Program, specs []mapLowerSpec, typ string, open int, close int, literals *[]mapLowerLiteral) (string, bool, bool) {

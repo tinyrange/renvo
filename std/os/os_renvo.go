@@ -55,6 +55,22 @@ func Environ() []string {
 	return out
 }
 
+func LookupEnv(key string) (string, bool) {
+	prefix := key + "="
+	for i := 0; i < len(processEnv); i++ {
+		entry := processEnv[i]
+		if len(entry) >= len(prefix) && entry[:len(prefix)] == prefix {
+			return entry[len(prefix):], true
+		}
+	}
+	return "", false
+}
+
+func Getenv(key string) string {
+	value, _ := LookupEnv(key)
+	return value
+}
+
 func renvo_runtime_SetProcess(args []string, env []string) {
 	Args = args
 	processEnv = env

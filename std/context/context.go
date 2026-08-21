@@ -1,4 +1,4 @@
-//go:build renvo
+//go:build renvo && !staragent_minimal
 
 package context
 

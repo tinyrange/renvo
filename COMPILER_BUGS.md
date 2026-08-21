@@ -38,33 +38,6 @@ func main() {
 Observed while validating std/math; see also the FormatFloat and NaN
 reports below, which were found in the same investigation.
 
-## Non-strict float comparisons materialized as bool values are wrong for equal operands
-
-Backend. When a float64 comparison `a <= b` or `a >= b` is used as a
-boolean value (function return or assignment) and the operands are equal,
-the result is false. The same comparison in an if condition branches
-correctly, and strict `<`, `>`, `!=` materialize correctly.
-
-Minimal reproducer (bootstrap, darwin/arm64):
-
-```go
-package main
-
-func le(a, b float64) bool { return a <= b }
-
-func main() {
-	if le(3, 3) {
-		print("true\n")
-	} else {
-		print("false\n") // printed; want true
-	}
-}
-```
-
-`return a-b <= c` inside a three-float-parameter function shows the same
-failure, while `if a-b <= c { return true }; return false` in the identical
-function returns the correct answer.
-
 ## No IEEE NaN can be produced by arithmetic on native targets
 
 Hosted runtime / backend. On compiled native targets, 0.0/0.0 yields +Inf
@@ -103,4 +76,3 @@ The underlying computation was verified correct by comparing against
 expected constants with tolerance checks, so this is a formatting bug, not
 arithmetic. It may share a root cause with the float literal precision
 report above.
-

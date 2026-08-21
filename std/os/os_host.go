@@ -26,6 +26,9 @@ func Environ() []string {
 	return stdos.Environ()
 }
 
+func LookupEnv(key string) (string, bool) { return stdos.LookupEnv(key) }
+func Getenv(key string) string            { return stdos.Getenv(key) }
+
 func Exit(code int) {
 	stdos.Exit(code)
 }

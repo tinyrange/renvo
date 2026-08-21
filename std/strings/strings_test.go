@@ -17,6 +17,22 @@ func TestSearchAndTrim(t *testing.T) {
 	}
 }
 
+func TestExtendedSearchAndTrim(t *testing.T) {
+	if !EqualFold("GoPHER", "gopher") || IndexByte("abc", 'b') != 1 || LastIndexByte("abca", 'a') != 3 {
+		t.Fatal("extended search helpers failed")
+	}
+	if got := Trim("xyhelloxy", "xy"); got != "hello" {
+		t.Fatalf("Trim = %q", got)
+	}
+	if got := TrimSpace("\u2003 hello \u2003"); got != "hello" {
+		t.Fatalf("Unicode TrimSpace = %q", got)
+	}
+	parts := SplitN("a:b:c", ":", 2)
+	if len(parts) != 2 || parts[0] != "a" || parts[1] != "b:c" {
+		t.Fatalf("SplitN = %#v", parts)
+	}
+}
+
 func TestSplitJoinReplace(t *testing.T) {
 	parts := Split("a,b,c", ",")
 	if len(parts) != 3 || parts[1] != "b" || Join(parts, "|") != "a|b|c" {

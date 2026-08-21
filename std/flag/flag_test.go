@@ -18,6 +18,20 @@ func TestParseScalarFlags(t *testing.T) {
 		t.Fatal(*name, *verbose, *count, set.Args())
 	}
 }
+
+func TestPackageIntegerHelpers(t *testing.T) {
+	old := CommandLine
+	defer func() { CommandLine = old }()
+	CommandLine = NewFlagSet("test", ContinueOnError)
+	large := Int64("large", 0, "large value")
+	unsigned := Uint("unsigned", 0, "unsigned value")
+	if err := CommandLine.Parse([]string{"-large", "2147483648", "-unsigned", "7"}); err != nil {
+		t.Fatal(err)
+	}
+	if *large != 2147483648 || *unsigned != 7 {
+		t.Fatalf("large=%d unsigned=%d", *large, *unsigned)
+	}
+}
 func TestParseErrorsAndTerminator(t *testing.T) {
 	set := NewFlagSet("test", ContinueOnError)
 	value := set.String("value", "", "")

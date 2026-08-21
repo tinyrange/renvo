@@ -155,7 +155,10 @@ func (f *FlagSet) VisitAll(fn func(*Flag)) {
 	}
 }
 func sorted(input []*Flag) []*Flag {
-	out := append([]*Flag(nil), input...)
+	out := make([]*Flag, len(input))
+	for i := 0; i < len(input); i++ {
+		out[i] = input[i]
+	}
 	for i := 1; i < len(out); i++ {
 		item := out[i]
 		j := i - 1
@@ -363,8 +366,18 @@ func BoolVar(p *bool, name string, value bool, usage string) {
 }
 func Int(name string, value int, usage string) *int       { return CommandLine.Int(name, value, usage) }
 func IntVar(p *int, name string, value int, usage string) { CommandLine.IntVar(p, name, value, usage) }
-func Visit(fn func(*Flag))                                { CommandLine.Visit(fn) }
-func VisitAll(fn func(*Flag))                             { CommandLine.VisitAll(fn) }
+func Int64(name string, value int64, usage string) *int64 {
+	return CommandLine.Int64(name, value, usage)
+}
+func Int64Var(p *int64, name string, value int64, usage string) {
+	CommandLine.Int64Var(p, name, value, usage)
+}
+func Uint(name string, value uint, usage string) *uint { return CommandLine.Uint(name, value, usage) }
+func UintVar(p *uint, name string, value uint, usage string) {
+	CommandLine.UintVar(p, name, value, usage)
+}
+func Visit(fn func(*Flag))    { CommandLine.Visit(fn) }
+func VisitAll(fn func(*Flag)) { CommandLine.VisitAll(fn) }
 
 type float64Value struct{ p *float64 }
 

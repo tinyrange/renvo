@@ -303,6 +303,16 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 					imports[j] = loaded
 				}
 			}
+			// Bundled standard-library packages may depend on the matching bundled
+			// runtime handler module. Applications should not have to add a
+			// compiler-internal renvo.dev requirement merely because they import a
+			// standard package such as context, time, or sync.
+			if !imports[j].Ok && ref.Kind == load.PackageStandard {
+				bundled := c.resolveBundledRuntimeImport(imports[j].ImportPath)
+				if bundled.Ok {
+					imports[j] = bundled
+				}
+			}
 			_, required := longestModuleRequirement(c.config.Requires, imports[j].ImportPath)
 			dependencyShadowsOwner := required && imports[j].Kind == load.PackageInModule
 			if !imports[j].Ok || dependencyShadowsOwner {
@@ -334,6 +344,42 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 	}
 	c.loading = c.loading[:len(c.loading)-1]
 	c.loaded = append(c.loaded, ref.ImportPath)
+}
+
+func (c *sourceCollector) resolveBundledRuntimeImport(importPath string) load.PackageRef {
+	const modulePath = "renvo.dev"
+	const moduleVersion = "v0.0.0"
+	const runtimePath = "renvo.dev/x/runtime"
+	if c.moduleCache == "" || importPath != runtimePath && !load.HasImportPrefix(importPath, runtimePath) {
+		return unsupportedPackage(importPath)
+	}
+	root := load.JoinPath(c.moduleCache, escapeModuleCachePath(modulePath)+"@"+escapeModuleCachePath(moduleVersion))
+	dependency, exists := c.moduleByPath(modulePath)
+	if !exists {
+		goModPath := load.JoinPath(root, "go.mod")
+		goMod, readable := c.fs.ReadFile(goModPath)
+		if !readable {
+			return unsupportedPackage(importPath)
+		}
+		dependencyConfig := &load.ModuleConfig{}
+		dependency = load.ParseModuleConfig(root, goMod, dependencyConfig)
+		if !dependency.Ok || dependency.Path != modulePath || !c.selectRequirements(dependencyConfig.Requires) {
+			return unsupportedPackage(importPath)
+		}
+		c.files = append(c.files, load.SourceFile{Path: goModPath, Src: []byte(modulePath)})
+		c.modules = append(c.modules, dependency)
+		c.resolved = append(c.resolved, load.ModuleVersion{Path: modulePath, Version: moduleVersion})
+	} else if load.CleanPath(dependency.Root) != load.CleanPath(root) {
+		return unsupportedPackage(importPath)
+	}
+	dir := dependency.Root
+	if importPath != dependency.Path {
+		dir = load.JoinPath(dir, importPath[len(dependency.Path)+1:])
+	}
+	if _, present := c.fs.ReadDir(dir); !present {
+		return unsupportedPackage(importPath)
+	}
+	return load.PackageRef{Kind: load.PackageDependency, ImportPath: importPath, Dir: dir, Ok: true, Error: load.ResolveOK}
 }
 
 func sourceGenericsOffset(src []byte) int {

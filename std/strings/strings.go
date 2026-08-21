@@ -53,7 +53,14 @@ func (r *Reader) Read(p []byte) (int, error) {
 	if r.i >= int64(len(r.s)) {
 		return 0, io.EOF
 	}
-	n := copy(p, r.s[r.i:])
+	remaining := len(r.s) - int(r.i)
+	n := len(p)
+	if n > remaining {
+		n = remaining
+	}
+	for i := 0; i < n; i++ {
+		p[i] = r.s[int(r.i)+i]
+	}
 	r.i += int64(n)
 	return n, nil
 }
@@ -68,6 +75,10 @@ func (r *Reader) Reset(s string) { r.s = s; r.i = 0 }
 
 func Contains(s string, substr string) bool {
 	return Index(s, substr) >= 0
+}
+
+func EqualFold(s string, t string) bool {
+	return ToLower(s) == ToLower(t)
 }
 
 func HasPrefix(s string, prefix string) bool {
@@ -114,6 +125,24 @@ func LastIndex(s string, substr string) int {
 	return -1
 }
 
+func IndexByte(s string, c byte) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == c {
+			return i
+		}
+	}
+	return -1
+}
+
+func LastIndexByte(s string, c byte) int {
+	for i := len(s) - 1; i >= 0; i-- {
+		if s[i] == c {
+			return i
+		}
+	}
+	return -1
+}
+
 func Count(s string, substr string) int {
 	if len(substr) == 0 {
 		count := 1
@@ -139,14 +168,60 @@ func Count(s string, substr string) int {
 
 func TrimSpace(s string) string {
 	start := 0
-	for start < len(s) && isSpace(s[start]) {
-		start++
+	for start < len(s) {
+		r, size := utf8.DecodeRuneInString(s[start:])
+		if !unicode.IsSpace(r) {
+			break
+		}
+		start += size
 	}
-	end := len(s)
-	for end > start && isSpace(s[end-1]) {
-		end--
+	end := start
+	for position := start; position < len(s); {
+		r, size := utf8.DecodeRuneInString(s[position:])
+		position += size
+		if !unicode.IsSpace(r) {
+			end = position
+		}
 	}
 	return s[start:end]
+}
+
+func Trim(s string, cutset string) string {
+	return TrimFunc(s, func(r rune) bool { return containsRune(cutset, r) })
+}
+
+func TrimLeft(s string, cutset string) string {
+	return TrimLeftFunc(s, func(r rune) bool { return containsRune(cutset, r) })
+}
+
+func TrimRight(s string, cutset string) string {
+	return TrimRightFunc(s, func(r rune) bool { return containsRune(cutset, r) })
+}
+
+func TrimFunc(s string, f func(rune) bool) string {
+	return TrimRightFunc(TrimLeftFunc(s, f), f)
+}
+
+func TrimLeftFunc(s string, f func(rune) bool) string {
+	start := 0
+	for index, r := range s {
+		if !f(r) {
+			start = index
+			return s[start:]
+		}
+		start = index + len(string(r))
+	}
+	return s[start:]
+}
+
+func TrimRightFunc(s string, f func(rune) bool) string {
+	end := 0
+	for index, r := range s {
+		if !f(r) {
+			end = index + len(string(r))
+		}
+	}
+	return s[:end]
 }
 
 func TrimPrefix(s string, prefix string) string {
@@ -182,6 +257,51 @@ func Split(s string, sep string) []string {
 		out = append(out, s[start:start+i])
 		start = start + i + len(sep)
 	}
+}
+
+func SplitN(s string, sep string, n int) []string {
+	if n == 0 {
+		return nil
+	}
+	if n == 1 {
+		return []string{s}
+	}
+	if sep == "" {
+		var out []string
+		for _, r := range s {
+			if n > 0 && len(out) == n-1 {
+				consumed := len(Join(out, ""))
+				out = append(out, s[consumed:])
+				return out
+			}
+			out = append(out, string(r))
+		}
+		return out
+	}
+	var out []string
+	start := 0
+	for {
+		if n > 0 && len(out) == n-1 {
+			out = append(out, s[start:])
+			return out
+		}
+		i := Index(s[start:], sep)
+		if i < 0 {
+			out = append(out, s[start:])
+			return out
+		}
+		out = append(out, s[start:start+i])
+		start = start + i + len(sep)
+	}
+}
+
+func containsRune(s string, wanted rune) bool {
+	for _, r := range s {
+		if r == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func Join(items []string, sep string) string {
