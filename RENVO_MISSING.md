@@ -207,8 +207,13 @@ not mean the complete Go API is supported.
     darwin/arm64; `Since` uses monotonic elapsed time when both values carry it.
   - [ ] Timers, sleeps, deadline wakeups, named locations, and general Go layouts
     still require additional runtime and package support.
-- [ ] Complete the remaining audited surfaces in `errors`, `fmt`, `os`, `sort`,
-  and `strconv`.
+- [x] `errors`: identity-preserving `New`, single and multi-error traversal for
+  `Is`, custom `Is`/`As`, `Unwrap`, `Join`, and direct assignment to `*error`,
+  with host-Go and Renvo-compiled coverage.
+  - [ ] General assignable typed-target handling in `As` still needs reflective
+    interface assignment; custom `As` methods and `*error` targets work.
+- [ ] Complete the remaining audited surfaces in `fmt`, `os`, `sort`, and
+  `strconv`.
 
 ### Initial `context` work
 
@@ -259,9 +264,11 @@ semantics must satisfy the `io` interfaces used by `net/http` and staragent.
 
 ### `errors`
 
-Required surface includes `New`, `Is`, and `As`, including traversal through
-wrapped errors. Error identity matters for `os.ErrNotExist`, `io.EOF`, and
-staragent's own sentinels.
+The implemented surface includes identity-preserving `New`, `Unwrap`, `Join`,
+and single/multi-error traversal through `Is` and `As`, including custom
+`Is(error) bool` and `As(any) bool` methods. `As` directly assigns `*error`
+targets; general typed-target assignment still needs reflective interface
+assignment. Error identity is retained for sentinels.
 
 ### `fmt`
 
