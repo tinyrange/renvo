@@ -166,7 +166,7 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 		var ok bool
 		packageActions := actions[actionOffset : actionOffset+len(programs[i].Tokens)]
 		actionOffset += len(packageActions)
-		ok, line = appendProgramCore(&program, programs[i], packageActions, finalEOF, line, aliases, i+1 < len(programs), transient)
+		ok, line = appendProgramCore(&program, programs[i], packageActions, finalEOF, line, aliases, i+1 < len(programs))
 		if !ok {
 			appendOK = false
 			break
@@ -514,7 +514,7 @@ func appendRootEntrypointTailCore(src *unit.Program, initNames []string, line in
 	return mainTok, eof
 }
 
-func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenAction, finalEOF int, line int, aliases []string, hasNext bool, releaseSource bool) (bool, int) {
+func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenAction, finalEOF int, line int, aliases []string, hasNext bool) (bool, int) {
 	if src.Package == "" || len(src.Text) == 0 || len(src.Tokens) == 0 || len(actions) != len(src.Tokens) {
 		return false, line
 	}
@@ -527,28 +527,11 @@ func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenActio
 	}
 	prevEnd := 0
 	pendingStart := 0
-	releaseStart := 0
-	endsNewline := text[len(text)-1] == '\n'
-	var redirectSources []int
-	var redirectTargets []int
-	var declNameTokens []int
-	if releaseSource {
-		// The compact linker retires source token pages while it assembles the
-		// combined program. Save the only span-to-token lookups needed later.
-		declNameTokens = make([]int, len(src.Decls))
-		for i := 0; i < len(src.Decls); i++ {
-			declNameTokens[i] = coreTokenIndexAtSpan(tokens, src.Decls[i].NameStart, src.Decls[i].NameEnd)
-		}
-	}
-	tokenReleaseStart := 0
 	for i := 0; i < len(tokens); i++ {
 		action := actions[i]
 		tok := tokens[i]
 		if tok.KindLine&255 == unit.TokenEOF {
 			tokens[i].KindLine = tokens[i].KindLine&255 | len(dst.Tokens)<<8
-			if releaseSource {
-				actions[i] = tokenAction(len(dst.Tokens))
-			}
 			continue
 		}
 		tokStart := tok.Start
@@ -567,18 +550,6 @@ func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenActio
 			}
 			if tokenActionRedirect(action) < 0 {
 				tokens[i].KindLine = tokens[i].KindLine&255 | finalEOF<<8
-			}
-			if releaseSource {
-				target := tokenActionRedirect(action)
-				if target >= 0 {
-					redirectSources = append(redirectSources, i)
-					redirectTargets = append(redirectTargets, target)
-				}
-				actions[i] = tokenAction(finalEOF)
-			}
-			if releaseSource && pendingStart-releaseStart >= 65536 {
-				arena.DiscardBytes(text[releaseStart:pendingStart])
-				releaseStart = pendingStart
 			}
 			continue
 		}
@@ -612,15 +583,8 @@ func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenActio
 				dst.Tokens = append(dst.Tokens, dot)
 			}
 			tokens[i].KindLine = tokens[i].KindLine&255 | mappedToken<<8
-			if releaseSource {
-				actions[i] = tokenAction(mappedToken)
-			}
 			pendingStart = tokEnd
 			prevEnd = tokEnd
-			if releaseSource && pendingStart-releaseStart >= 65536 {
-				arena.DiscardBytes(text[releaseStart:pendingStart])
-				releaseStart = pendingStart
-			}
 			continue
 		} else if tok.KindLine&255 == unit.TokenString && tokStart < len(text) && text[tokStart] == '"' {
 			if tokStart > pendingStart {
@@ -639,56 +603,22 @@ func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenActio
 		}
 		dst.Tokens = append(dst.Tokens, tok)
 		tokens[i].KindLine = tokens[i].KindLine&255 | mappedToken<<8
-		if releaseSource {
-			actions[i] = tokenAction(mappedToken)
-		}
 		prevEnd = tokEnd
-		if releaseSource && tokEnd-pendingStart >= 65536 {
-			// Stream long unedited stretches instead of retaining the complete
-			// package text until its final token.
-			dst.Text = appendCoreBytes(dst.Text, text[pendingStart:tokEnd])
-			pendingStart = tokEnd
-		}
-		if releaseSource && pendingStart-releaseStart >= 65536 {
-			arena.DiscardBytes(text[releaseStart:pendingStart])
-			releaseStart = pendingStart
-		}
-		if releaseSource && i+1-tokenReleaseStart >= 4096 {
-			renvo_runtime_ArenaDiscardLinkTokens(tokens[tokenReleaseStart : i+1])
-			tokenReleaseStart = i + 1
-		}
 	}
 	if pendingStart < len(text) {
 		dst.Text = appendCoreBytes(dst.Text, text[pendingStart:])
 	}
-	if releaseSource {
-		// The action table is dead after assembly, so reuse it for source to
-		// linked token mappings before releasing the much larger token table.
-		renvo_runtime_ArenaDiscardLinkTokens(tokens[tokenReleaseStart:])
-		for i := 0; i < len(redirectSources); i++ {
-			actions[redirectSources[i]] = actions[redirectTargets[i]]
-		}
-	} else {
-		for i := 0; i < len(tokens); i++ {
-			target := tokenActionRedirect(actions[i])
-			if target >= 0 {
-				tokens[i].KindLine = tokens[i].KindLine&255 | mapLinkedToken(tokens, target, finalEOF)<<8
-			}
+	for i := 0; i < len(tokens); i++ {
+		target := tokenActionRedirect(actions[i])
+		if target >= 0 {
+			tokens[i].KindLine = tokens[i].KindLine&255 | mapLinkedToken(tokens, target, finalEOF)<<8
 		}
 	}
 	for i := 0; i < len(src.Decls); i++ {
 		decl := src.Decls[i]
-		nameToken := -1
-		if releaseSource {
-			decl.StartTok = mapLinkedAction(actions, decl.StartTok, finalEOF)
-			decl.EndTok = mapLinkedAction(actions, decl.EndTok, finalEOF)
-			nameToken = mapLinkedAction(actions, declNameTokens[i], finalEOF)
-		} else {
-			decl.StartTok = mapLinkedToken(tokens, decl.StartTok, finalEOF)
-			decl.EndTok = mapLinkedToken(tokens, decl.EndTok, finalEOF)
-			nameToken = mapLinkedToken(tokens, coreTokenIndexAtSpan(tokens, decl.NameStart, decl.NameEnd), finalEOF)
-		}
-		nameStart, nameEnd, ok := mappedCoreTokenTextSpan(dst, nameToken)
+		decl.StartTok = mapLinkedToken(tokens, decl.StartTok, finalEOF)
+		decl.EndTok = mapLinkedToken(tokens, decl.EndTok, finalEOF)
+		nameStart, nameEnd, ok := mapCoreTextSpanByToken(src, dst, finalEOF, decl.NameStart, decl.NameEnd)
 		if !ok {
 			return false, line
 		}
@@ -698,35 +628,32 @@ func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenActio
 	}
 	for i := 0; i < len(src.Funcs); i++ {
 		fn := src.Funcs[i]
-		fn.StartTok = mapLinkedSourceToken(tokens, actions, fn.StartTok, finalEOF, releaseSource)
-		fn.NameTok = mapLinkedSourceToken(tokens, actions, fn.NameTok, finalEOF, releaseSource)
+		fn.StartTok = mapLinkedToken(tokens, fn.StartTok, finalEOF)
+		fn.NameTok = mapLinkedToken(tokens, fn.NameTok, finalEOF)
 		nameStart, nameEnd, ok := mappedCoreTokenTextSpan(dst, fn.NameTok)
 		if !ok {
 			return false, line
 		}
 		fn.NameStart = nameStart
 		fn.NameEnd = nameEnd
-		fn.ReceiverStart = mapLinkedSourceToken(tokens, actions, fn.ReceiverStart, finalEOF, releaseSource)
-		fn.ReceiverEnd = mapLinkedSourceToken(tokens, actions, fn.ReceiverEnd, finalEOF, releaseSource)
+		fn.ReceiverStart = mapLinkedToken(tokens, fn.ReceiverStart, finalEOF)
+		fn.ReceiverEnd = mapLinkedToken(tokens, fn.ReceiverEnd, finalEOF)
 		normalizeCoreLinkedReceiver(&fn, finalEOF)
-		fn.BodyStart = mapLinkedSourceToken(tokens, actions, fn.BodyStart, finalEOF, releaseSource)
-		fn.BodyEnd = mapLinkedSourceToken(tokens, actions, fn.BodyEnd, finalEOF, releaseSource)
-		fn.EndTok = mapLinkedSourceFuncEndToken(tokens, actions, fn.EndTok, fn.BodyEnd, finalEOF, releaseSource)
+		fn.BodyStart = mapLinkedToken(tokens, fn.BodyStart, finalEOF)
+		fn.BodyEnd = mapLinkedToken(tokens, fn.BodyEnd, finalEOF)
+		fn.EndTok = mapLinkedFuncEndToken(tokens, fn.EndTok, fn.BodyEnd, finalEOF)
 		dst.Funcs = append(dst.Funcs, fn)
 	}
 	for i := 0; i < len(src.ConcurrencySites); i++ {
 		site := src.ConcurrencySites[i]
-		site.Token = mapLinkedSourceToken(tokens, actions, site.Token, finalEOF, releaseSource)
+		site.Token = mapLinkedToken(tokens, site.Token, finalEOF)
 		if site.Token < 0 || site.Token >= finalEOF {
 			return false, line
 		}
 		dst.ConcurrencySites = append(dst.ConcurrencySites, site)
 	}
 	line = lineBase + sourceEndLine - 1
-	if releaseSource {
-		arena.DiscardBytes(text[releaseStart:])
-	}
-	if hasNext && !endsNewline {
+	if hasNext && (len(text) == 0 || text[len(text)-1] != '\n') {
 		dst.Text = append(dst.Text, '\n')
 		line++
 	}
@@ -1301,24 +1228,24 @@ func coreLinkedProgramText(program unit.Program, start int, end int) string {
 	return string(program.Text[start:end])
 }
 
-func coreTokenIndexAtSpan(tokens []unit.Token, start int, end int) int {
+func mapCoreTextSpanByToken(src unit.Program, dst *unit.Program, eof int, start int, end int) (int, int, bool) {
 	low := 0
-	high := len(tokens)
+	high := len(src.Tokens)
 	for low < high {
 		mid := low + (high-low)/2
-		if tokens[mid].Start < start {
+		if src.Tokens[mid].Start < start {
 			low = mid + 1
 		} else {
 			high = mid
 		}
 	}
-	if low < len(tokens) {
-		tok := tokens[low]
+	if low < len(src.Tokens) {
+		tok := src.Tokens[low]
 		if tok.Start == start && tok.Start+tok.Size == end {
-			return low
+			return mappedCoreTokenTextSpan(dst, mapLinkedToken(src.Tokens, low, eof))
 		}
 	}
-	return -1
+	return 0, 0, false
 }
 
 func mappedCoreTokenTextSpan(program *unit.Program, tok int) (int, int, bool) {
@@ -1346,25 +1273,8 @@ func mapLinkedToken(tokens []unit.Token, tok int, eof int) int {
 	return mapped
 }
 
-func mapLinkedAction(actions []tokenAction, tok int, eof int) int {
-	if tok < 0 {
-		return eof
-	}
-	if tok >= len(actions) {
-		return -1
-	}
-	return int(actions[tok])
-}
-
-func mapLinkedSourceToken(tokens []unit.Token, actions []tokenAction, tok int, eof int, actionsHoldMappings bool) int {
-	if actionsHoldMappings {
-		return mapLinkedAction(actions, tok, eof)
-	}
-	return mapLinkedToken(tokens, tok, eof)
-}
-
-func mapLinkedSourceFuncEndToken(tokens []unit.Token, actions []tokenAction, tok int, bodyEnd int, eof int, actionsHoldMappings bool) int {
-	mapped := mapLinkedSourceToken(tokens, actions, tok, eof, actionsHoldMappings)
+func mapLinkedFuncEndToken(tokens []unit.Token, tok int, bodyEnd int, eof int) int {
+	mapped := mapLinkedToken(tokens, tok, eof)
 	if mapped == eof && bodyEnd >= 0 && bodyEnd+1 <= eof {
 		return bodyEnd + 1
 	}
