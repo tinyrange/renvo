@@ -3,6 +3,13 @@ package main
 const renvoAmd64ELFCodeOffset = 0xb0
 const renvoAmd64RuntimeOptimizationSourceThreshold = 1048576
 
+const renvoHostedAmd64ArgsBSSSize = renvoLinuxAmd64ArgsBSSSize
+const renvoHostedAmd64ArgsBSSAlignment = renvoLinuxAmd64ArgsBSSAlignment
+const renvoHostedAmd64EnvironmentBSSSize = renvoLinuxAmd64EnvironmentBSSSize
+const renvoHostedAmd64EnvironmentBSSAlignment = renvoLinuxAmd64EnvironmentBSSAlignment
+const renvoHostedAmd64EnvironmentLengthBSSSize = renvoLinuxAmd64EnvironmentLengthBSSSize
+const renvoHostedAmd64EnvironmentLengthBSSAlignment = renvoLinuxAmd64EnvironmentLengthBSSAlignment
+
 func renvoCompileAmd64(input []int, output int, arenaSize int) int {
 	if (renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
 		renvoFixedTarget == 0 && renvoTarget == renvoTargetLinuxKernelAmd64) &&
@@ -92,6 +99,14 @@ func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinear
 		g.c.optimizeRuntime = len(p.src) >= renvoAmd64RuntimeOptimizationSourceThreshold
 	}
 	a.codeOffset = renvoAmd64ELFCodeOffset
+	if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
+		renvoFixedTarget == 0 && meta.c.renvoTargetOS == renvoOSOpenBSD {
+		a.codeOffset = renvoOpenBSDAmd64ELFCodeOffset
+	}
+	if renvoFixedTarget == renvoTargetNetBSDAmd64 ||
+		renvoFixedTarget == 0 && meta.c.renvoTargetOS == renvoOSNetBSD {
+		a.codeOffset = renvoNetBSDAmd64ELFCodeOffset
+	}
 	if targetIsWindows(meta.c.renvoTargetOS) {
 		a.codeOffset = renvoWinSectionRVA
 	}
@@ -111,6 +126,13 @@ func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinear
 		return g
 	}
 	renvoLinearMarkFunc(g, appIndex)
+	if renvoFixedTarget == renvoTargetFreeBSDAmd64 ||
+		renvoFixedTarget == 0 && meta.c.renvoTargetOS == renvoOSFreeBSD {
+		// FreeBSD supplies the initial process-stack pointer in RDI. Preserve
+		// it as RSP before global initializers can use the ordinary call
+		// registers.
+		renvoAsmEmitText(a, "\x48\x89\xfc")
+	}
 	if renvoFixedTarget == 0 && meta.c.emitImage {
 		// Preserve the four linked-image ABI words while global
 		// initialization freely uses the ordinary call registers.
@@ -149,7 +171,7 @@ func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinear
 		renvoAsmRet(a)
 	} else {
 		renvoAsmCopyPrimaryToCallWord0(a)
-		renvoAsmPrimaryImm(a, 60)
+		renvoAsmPrimaryImm(a, renvoHostedAmd64SysExit(meta.c.renvoTargetOS))
 		renvoAsmSyscall(a)
 	}
 	return g
@@ -250,14 +272,14 @@ func renvoEmitProgramEntryArgsAmd64(g *renvoLinearGen, appIndex int) bool {
 		g.asm.bssSize = envLenOff + renvoWindowsAmd64EnvironmentLengthBSSSize
 		renvoAsmBuildWindowsArgvEnvSlicesAmd64(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
 	} else {
-		argsOff = renvoAlignValue(g.asm.bssSize, renvoLinuxAmd64ArgsBSSAlignment)
-		g.asm.bssSize = argsOff + renvoLinuxAmd64ArgsBSSSize
+		argsOff = renvoAlignValue(g.asm.bssSize, renvoHostedAmd64ArgsBSSAlignment)
+		g.asm.bssSize = argsOff + renvoHostedAmd64ArgsBSSSize
 		envDataOff := renvoAlignValue(
-			g.asm.bssSize, renvoLinuxAmd64EnvironmentBSSAlignment)
-		g.asm.bssSize = envDataOff + renvoLinuxAmd64EnvironmentBSSSize
+			g.asm.bssSize, renvoHostedAmd64EnvironmentBSSAlignment)
+		g.asm.bssSize = envDataOff + renvoHostedAmd64EnvironmentBSSSize
 		envLenOff := renvoAlignValue(
-			g.asm.bssSize, renvoLinuxAmd64EnvironmentLengthBSSAlignment)
-		g.asm.bssSize = envLenOff + renvoLinuxAmd64EnvironmentLengthBSSSize
+			g.asm.bssSize, renvoHostedAmd64EnvironmentLengthBSSAlignment)
+		g.asm.bssSize = envLenOff + renvoHostedAmd64EnvironmentLengthBSSSize
 		renvoAsmBuildArgvEnvSlicesAmd64(&g.asm, argsOff, envDataOff, envLenOff)
 	}
 	if app.paramCount == 1 {

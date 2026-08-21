@@ -7,6 +7,9 @@ package definitions
 //go:generate go run ../../internal/rtg/cmd/rtggen -algorithms -arch aarch64 -package main -o ../compiler_aarch64_impl.go aarch64_algorithms.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -algorithms -arch x86_64 -package main -o ../compiler_amd64_target_impl.go x86_64_algorithms.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -target-projection -t linux/amd64 -package main -o ../compiler_linux_amd64_impl.go linux_amd64.rtg
+//go:generate go run ../../internal/rtg/cmd/rtggen -target-projection -t freebsd/amd64 -package main -o ../compiler_freebsd_amd64_impl.go freebsd_amd64.rtg
+//go:generate go run ../../internal/rtg/cmd/rtggen -target-projection -t openbsd/amd64 -package main -o ../compiler_openbsd_amd64_impl.go openbsd_amd64.rtg
+//go:generate go run ../../internal/rtg/cmd/rtggen -target-projection -t netbsd/amd64 -package main -o ../compiler_netbsd_amd64_impl.go netbsd_amd64.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -target-projection -t windows/amd64 -package main -o ../compiler_windows_amd64_impl.go windows_amd64.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -target-projection -t linux-kernel/amd64 -package main -o ../compiler_linux_kernel_amd64_target_impl.go linux_kernel_amd64.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -algorithms -arch x86_32 -package main -o ../compiler_386_target_impl.go x86_32_algorithms.rtg

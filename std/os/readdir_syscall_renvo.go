@@ -1,4 +1,4 @@
-//go:build renvo && !windows && !linux
+//go:build renvo && !windows && !linux && !freebsd
 
 package os
 

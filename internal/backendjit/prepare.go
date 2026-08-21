@@ -278,6 +278,12 @@ func hostTarget() string {
 		return "windows/arm64"
 	case "darwin/arm64":
 		return "darwin/arm64"
+	case "freebsd/amd64":
+		return "freebsd/amd64"
+	case "openbsd/amd64":
+		return "openbsd/amd64"
+	case "netbsd/amd64":
+		return "netbsd/amd64"
 	}
 	return ""
 }

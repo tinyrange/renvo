@@ -95,6 +95,15 @@ func hostIDETarget() string {
 	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
 		return "darwin/arm64"
 	}
+	if runtime.GOOS == "freebsd" && runtime.GOARCH == "amd64" {
+		return "freebsd/amd64"
+	}
+	if runtime.GOOS == "openbsd" && runtime.GOARCH == "amd64" {
+		return "openbsd/amd64"
+	}
+	if runtime.GOOS == "netbsd" && runtime.GOARCH == "amd64" {
+		return "netbsd/amd64"
+	}
 	if runtime.GOOS == "linux" && runtime.GOARCH == "amd64" {
 		return "linux/amd64"
 	}

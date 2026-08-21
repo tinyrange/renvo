@@ -100,6 +100,18 @@ func compileTarget(input []int, output int, target int, arenaSize int) int {
 			renvoFixedTarget = renvoTargetLinuxArm
 			return compileLinuxArmArena(input, output, arenaSize)
 		}
+		if renvoFixedTarget == renvoTargetFreeBSDAmd64 {
+			renvoFixedTarget = renvoTargetFreeBSDAmd64
+			return compileFreeBSDAmd64Arena(input, output, arenaSize)
+		}
+		if renvoFixedTarget == renvoTargetOpenBSDAmd64 {
+			renvoFixedTarget = renvoTargetOpenBSDAmd64
+			return compileOpenBSDAmd64Arena(input, output, arenaSize)
+		}
+		if renvoFixedTarget == renvoTargetNetBSDAmd64 {
+			renvoFixedTarget = renvoTargetNetBSDAmd64
+			return compileNetBSDAmd64Arena(input, output, arenaSize)
+		}
 		renvoFixedTarget = renvoTargetLinuxAmd64
 		return compileLinuxAmd64Arena(input, output, arenaSize)
 	}
@@ -132,6 +144,15 @@ func compileTarget(input []int, output int, target int, arenaSize int) int {
 	}
 	if target == renvoTargetLinuxArm {
 		return compileLinuxArmArena(input, output, arenaSize)
+	}
+	if target == renvoTargetFreeBSDAmd64 {
+		return compileFreeBSDAmd64Arena(input, output, arenaSize)
+	}
+	if target == renvoTargetOpenBSDAmd64 {
+		return compileOpenBSDAmd64Arena(input, output, arenaSize)
+	}
+	if target == renvoTargetNetBSDAmd64 {
+		return compileNetBSDAmd64Arena(input, output, arenaSize)
 	}
 	if target != renvoTargetLinuxAmd64 {
 		return 1

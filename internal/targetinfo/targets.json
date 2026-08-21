@@ -119,5 +119,35 @@
     "os_id": 1,
     "isa_id": 1,
     "advertised": false
+  },
+  {
+    "name": "freebsd/amd64",
+    "backend": "freebsd/amd64",
+    "backend_id": 12,
+    "constant": "renvoTargetFreeBSDAmd64",
+    "os_id": 7,
+    "isa_id": 1,
+    "advertised": true,
+    "release_artifact": "renvo-freebsd-amd64"
+  },
+  {
+    "name": "openbsd/amd64",
+    "backend": "openbsd/amd64",
+    "backend_id": 13,
+    "constant": "renvoTargetOpenBSDAmd64",
+    "os_id": 8,
+    "isa_id": 1,
+    "advertised": true,
+    "release_artifact": "renvo-openbsd-amd64"
+  },
+  {
+    "name": "netbsd/amd64",
+    "backend": "netbsd/amd64",
+    "backend_id": 14,
+    "constant": "renvoTargetNetBSDAmd64",
+    "os_id": 9,
+    "isa_id": 1,
+    "advertised": true,
+    "release_artifact": "renvo-netbsd-amd64"
   }
 ]

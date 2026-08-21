@@ -32,6 +32,11 @@ func GenerateCheckedInTargetProjection(
 		return generateCheckedInLinuxKernelAmd64Projection(
 			resolved, target, packageName)
 	}
+	if (target.Descriptor.Name == "freebsd/amd64" ||
+		target.Descriptor.Name == "openbsd/amd64" ||
+		target.Descriptor.Name == "netbsd/amd64") && target.Arch.Name == "x86_64" {
+		return generateCheckedInBSDAmd64Projection(resolved, target, packageName)
+	}
 	if target.Descriptor.Name != "linux/amd64" || target.Arch.Name != "x86_64" {
 		return checkedInTargetProjectionFailure(resolved.Document, target.Declaration,
 			"checked-in production projection is not implemented for "+target.Descriptor.Name)
@@ -232,8 +237,9 @@ const checkedInLinuxAmd64ImageSource = `
 func renvoAsmImageAmd64(a *renvoAsm) []byte {
 	renvoNonNil(a)
 	renvoAsmPatch(a)
-	loadFileSize := a.codeOffset + len(a.code) + len(a.data)
+	loadFileSize := a.dataOffset + len(a.data)
 	bssOffset := renvoAsmBssOffset(a)
+	syscallTableSize := len(a.openbsdSyscalls) / 2 * 8
 	if a.c.stripSymbols {
 		oldCodeLen := len(a.code)
 		var out []byte
@@ -251,7 +257,7 @@ func renvoAsmImageAmd64(a *renvoAsm) []byte {
 			}
 		}
 		var header []byte
-		header = renvoAppendElfHeaderAmd64(header, a.codeOffset, loadFileSize, bssOffset, a.bssSize, 0)
+		header = renvoAppendElfHeaderAmd64(header, a, a.codeOffset, loadFileSize, bssOffset, a.bssSize, 0, loadFileSize, syscallTableSize)
 		if renvoFixedTarget == 0 {
 			copy(out, header)
 		} else {
@@ -259,7 +265,10 @@ func renvoAsmImageAmd64(a *renvoAsm) []byte {
 				out[i] = header[i]
 			}
 		}
-		pos := a.codeOffset + oldCodeLen
+		pos := a.dataOffset
+		if a.c.renvoTargetOS == renvoOSOpenBSD {
+			out = renvoAppendOpenBSDSyscallTable(out, a)
+		}
 		if renvoFixedTarget == 0 {
 			copy(out[pos:], a.data)
 		} else {
@@ -275,12 +284,15 @@ func renvoAsmImageAmd64(a *renvoAsm) []byte {
 	var sec renvoElfSymbolSections
 	renvoBuildElfSymbolSections(a, 0, a.codeOffset, loadFileSize, &sec)
 	finalSize := sec.shoff + 448
+	syscallTableOff := finalSize
+	finalSize += syscallTableSize
 	out := make([]byte, finalSize)
 	renvoTruncBytes(&out, 0)
-	out = renvoAppendElfHeaderAmd64(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff)
+	out = renvoAppendElfHeaderAmd64(out, a, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff, syscallTableOff, syscallTableSize)
 	for i := 0; i < len(a.code); i++ {
 		out = append(out, a.code[i])
 	}
+	out = renvoAppendUntil(out, a.dataOffset)
 	for i := 0; i < len(a.data); i++ {
 		out = append(out, a.data[i])
 	}
@@ -298,13 +310,22 @@ func renvoAsmImageAmd64(a *renvoAsm) []byte {
 	}
 	out = renvoAppendUntil(out, sec.shoff)
 	out = renvoAppendElfSectionHeaders(out, &sec, a, 0)
+	if a.c.renvoTargetOS == renvoOSOpenBSD {
+		out = renvoAppendOpenBSDSyscallTable(out, a)
+	}
 	if renvoFixedTarget == 0 {
 		return renvoAppendReplLinkTable(out, a)
 	}
 	return out
 }
 
-func renvoAppendElfHeaderAmd64(out []byte, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int) []byte {
+func renvoAppendElfHeaderAmd64(out []byte, a *renvoAsm, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int, syscallTableOff int, syscallTableSize int) []byte {
+	if a.c.renvoTargetOS == renvoOSOpenBSD {
+		return renvoAppendOpenBSDElfHeaderAmd64(out, entryOff, a.dataOffset, fileSize, bssOffset, bssSize, shoff, syscallTableOff, syscallTableSize)
+	}
+	if a.c.renvoTargetOS == renvoOSNetBSD {
+		return renvoAppendNetBSDElfHeaderAmd64(out, entryOff, fileSize, bssOffset, bssSize, shoff)
+	}
 	start := len(out)
 	base := 0
 	header := "\x7f\x45\x4c\x46\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x38\x00\x02\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x05\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00"
@@ -313,6 +334,9 @@ func renvoAppendElfHeaderAmd64(out []byte, entryOff int, fileSize int, bssOffset
 	}
 	out[start+18] = byte(renvoLinuxAmd64ELFMachine)
 	out[start+19] = byte(renvoLinuxAmd64ELFMachine >> 8)
+	if a.c.renvoTargetOS == renvoOSFreeBSD {
+		out[start+7] = 9
+	}
 	// All Linux/amd64 references are RIP-relative. ET_DYN lets the kernel
 	// randomize this self-contained image without a dynamic loader.
 	out[start+16] = 3
@@ -329,6 +353,17 @@ func renvoAppendElfHeaderAmd64(out []byte, entryOff int, fileSize int, bssOffset
 	renvoPut32At(out, start+104, fileSize)
 	out = renvoAppendElf64LoadProgram(out, 6, bssOffset, base+bssOffset, 0, bssSize)
 	return out
+}
+
+func renvoAppendElf64Program(out []byte, kind int, flags int, offset int, address int, fileSize int, memorySize int, alignment int) []byte {
+	out = renvoAppend32(out, kind)
+	out = renvoAppend32(out, flags)
+	out = renvoAppend64(out, offset)
+	out = renvoAppend64(out, address)
+	out = renvoAppend64(out, address)
+	out = renvoAppend64(out, fileSize)
+	out = renvoAppend64(out, memorySize)
+	return renvoAppend64(out, alignment)
 }
 `
 
