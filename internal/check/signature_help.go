@@ -30,8 +30,8 @@ func SignatureHelpProgram(graph load.Graph, program Program, path string, offset
 	}
 	nameTok := open - 1
 	name := tokenString(&file, nameTok)
-	queryOffset := file.Tokens[nameTok].End
-	if queryOffset > file.Tokens[nameTok].Start {
+	queryOffset := syntax.TokenEnd(file.Tokens[nameTok])
+	if queryOffset > syntax.TokenStart(file.Tokens[nameTok]) {
 		queryOffset--
 	}
 	items := CompleteProgram(graph, program, path, queryOffset)
@@ -52,7 +52,7 @@ func signatureCallOpen(file syntax.File, offset int) int {
 	paren, bracket, brace := 0, 0, 0
 	for i := len(file.Tokens) - 1; i >= 0; i-- {
 		tok := file.Tokens[i]
-		if tok.Start >= offset || tok.KindLine&255 == syntax.TokenEOF {
+		if syntax.TokenStart(tok) >= offset || tok.KindLine&255 == syntax.TokenEOF {
 			continue
 		}
 		text := syntax.TokenText(file.Src, tok)
@@ -90,7 +90,7 @@ func signatureActiveParameter(file syntax.File, open int, offset int) int {
 	paren, bracket, brace := 0, 0, 0
 	for i := open + 1; i < len(file.Tokens); i++ {
 		tok := file.Tokens[i]
-		if tok.Start >= offset || tok.KindLine&255 == syntax.TokenEOF {
+		if syntax.TokenStart(tok) >= offset || tok.KindLine&255 == syntax.TokenEOF {
 			break
 		}
 		text := syntax.TokenText(file.Src, tok)

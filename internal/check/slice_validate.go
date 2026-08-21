@@ -8,7 +8,7 @@ import (
 func invalidDefiniteSliceOperand(pkg load.Package, info PackageInfo, fileIndex int, fn syntax.FuncDecl) int {
 	file := pkg.Files[fileIndex].File
 	for open := fn.BodyStart + 1; open < fn.BodyEnd; open++ {
-		if !tokCharIs(&file, open, '[') {
+		if file.Tokens[open].KindLine>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask != int('[') {
 			continue
 		}
 		close := findTypeMatching(file, open, '[', ']')

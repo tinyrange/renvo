@@ -546,7 +546,7 @@ func protectVirtualFunctionBindings(source []byte, tokens []Token, protected []b
 				bindings, file, fn.ReceiverStart, fn.ReceiverEnd,
 				tokens, protected, len(prefix))
 			protectVirtualSyntaxToken(
-				tokens, protected, file.Tokens[fn.NameTok].Start-len(prefix))
+				tokens, protected, syntax.TokenStart(file.Tokens[fn.NameTok])-len(prefix))
 		}
 		bindings = appendVirtualBindings(
 			bindings, file, fn.ParamsStart+1, fn.ParamsEnd-1,
@@ -557,8 +557,8 @@ func protectVirtualFunctionBindings(source []byte, tokens []Token, protected []b
 				bindings, file, fn.ResultStart+1, fn.ResultEnd-1,
 				tokens, protected, len(prefix))
 		}
-		bodyStart := file.Tokens[fn.BodyStart].Start - len(prefix)
-		bodyEnd := file.Tokens[fn.BodyEnd-1].End - len(prefix)
+		bodyStart := syntax.TokenStart(file.Tokens[fn.BodyStart]) - len(prefix)
+		bodyEnd := syntax.TokenEnd(file.Tokens[fn.BodyEnd-1]) - len(prefix)
 		protectVirtualLocalBindings(source, tokens, protected, bodyStart, bodyEnd)
 		for at := 0; at < len(tokens) && tokens[at].Kind != TokenEOF; at++ {
 			if tokens[at].Start < bodyStart || tokens[at].End > bodyEnd {
@@ -671,7 +671,7 @@ func appendVirtualBindings(bindings []string, file syntax.File, start int, end i
 				bindings = append(bindings, first)
 			}
 			protectVirtualSyntaxToken(
-				tokens, protected, file.Tokens[itemStart].Start-prefix)
+				tokens, protected, syntax.TokenStart(file.Tokens[itemStart])-prefix)
 		}
 		itemStart = at + 1
 	}

@@ -213,10 +213,7 @@ func nextTopLevelComma(file syntax.File, start int, end int) int {
 	i := start
 	for i < end {
 		tok := file.Tokens[i]
-		c := byte(0)
-		if tok.KindLine&255 == syntax.TokenOperator && tok.End == tok.Start+1 {
-			c = file.Src[tok.Start]
-		}
+		c := byte(tok.KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask)
 		if c == '(' {
 			parenDepth++
 		} else if c == ')' {
@@ -296,17 +293,31 @@ func tokenTextIs(file *syntax.File, tok int, text string) bool {
 		return false
 	}
 	token := file.Tokens[tok]
-	if token.End-token.Start != len(text) || token.Start < 0 || token.End > len(file.Src) {
+	start := int(token.Start)
+	size := int(token.End - token.Start)
+	if size != len(text) || start < 0 || start+size > len(file.Src) {
 		return false
 	}
 	if len(text) == 1 {
-		return file.Src[token.Start] == text[0]
+		if token.KindLine&255 == syntax.TokenOperator {
+			return token.KindLine>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask == int(text[0])
+		}
+		return file.Src[start] == text[0]
 	}
 	if len(text) == 2 {
-		return file.Src[token.Start] == text[0] && file.Src[token.Start+1] == text[1]
+		return file.Src[start] == text[0] && file.Src[start+1] == text[1]
+	}
+	if len(text) == 3 {
+		return file.Src[start] == text[0] && file.Src[start+1] == text[1] && file.Src[start+2] == text[2]
+	}
+	if len(text) == 4 {
+		return file.Src[start] == text[0] && file.Src[start+1] == text[1] && file.Src[start+2] == text[2] && file.Src[start+3] == text[3]
+	}
+	if len(text) == 5 {
+		return file.Src[start] == text[0] && file.Src[start+1] == text[1] && file.Src[start+2] == text[2] && file.Src[start+3] == text[3] && file.Src[start+4] == text[4]
 	}
 	for i := 0; i < len(text); i++ {
-		if file.Src[token.Start+i] != text[i] {
+		if file.Src[start+i] != text[i] {
 			return false
 		}
 	}

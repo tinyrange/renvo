@@ -65,7 +65,7 @@ func navigationImportedPackage(graph load.Graph, program Program, pkgIndex, file
 		return NavigationResult{}
 	}
 	file := graph.Packages[pkgIndex].Files[fileIndex].File
-	if fn, ok := completionFunctionAt(file, file.Tokens[token].Start); ok {
+	if fn, ok := completionFunctionAt(file, syntax.TokenStart(file.Tokens[token])); ok {
 		if scope, scopeOK, _ := buildFuncScopeCore(file, fn); scopeOK && lookupScopeTokenNameCore(scope, &file, token) >= 0 {
 			return NavigationResult{}
 		}
@@ -119,13 +119,14 @@ func navigationToken(file syntax.File, offset int) int {
 		if tok.KindLine&255 != syntax.TokenIdent {
 			continue
 		}
-		if tok.Start <= offset && offset < tok.End {
+		tokenStart := syntax.TokenStart(tok)
+		if tokenStart <= offset && offset < syntax.TokenEnd(tok) {
 			return i
 		}
-		if tok.End == offset {
+		if syntax.TokenEnd(tok) == offset {
 			previous = i
 		}
-		if tok.Start > offset {
+		if tokenStart > offset {
 			break
 		}
 	}
@@ -192,7 +193,7 @@ func navigationMemberAt(graph load.Graph, program Program, pkgIndex int, fileInd
 	if token < 2 || !tokenTextIs(&file, token-1, ".") {
 		return navigationTarget{}, false
 	}
-	components := completionSelectorComponents(file.Src, file.Tokens[token-1].Start)
+	components := completionSelectorComponents(file.Src, syntax.TokenStart(file.Tokens[token-1]))
 	if len(components) == 0 {
 		return navigationTarget{}, false
 	}
@@ -206,13 +207,13 @@ func navigationMemberAt(graph load.Graph, program Program, pkgIndex int, fileInd
 		typ, ok = completionPackageNameType(graph, program, imported, components[1])
 		start = 2
 	} else {
-		fn, found := completionFunctionAt(file, file.Tokens[token].Start)
+		fn, found := completionFunctionAt(file, syntax.TokenStart(file.Tokens[token]))
 		if !found {
 			return navigationTarget{}, false
 		}
-		typ, ok = completionNameType(graph, program, pkgIndex, fileIndex, file, fn, components[0], file.Tokens[token].Start)
+		typ, ok = completionNameType(graph, program, pkgIndex, fileIndex, file, fn, components[0], syntax.TokenStart(file.Tokens[token]))
 		if !ok {
-			typ, ok = navigationShortAssignType(graph, program, pkgIndex, fileIndex, file, fn, components[0], file.Tokens[token].Start)
+			typ, ok = navigationShortAssignType(graph, program, pkgIndex, fileIndex, file, fn, components[0], syntax.TokenStart(file.Tokens[token]))
 		}
 	}
 	if !ok {
@@ -233,7 +234,7 @@ func navigationMemberAt(graph load.Graph, program Program, pkgIndex int, fileInd
 
 func navigationShortAssignType(graph load.Graph, program Program, pkgIndex int, fileIndex int, file syntax.File, fn syntax.FuncDecl, name string, offset int) (completionType, bool) {
 	for i := fn.BodyStart + 1; i < fn.BodyEnd && i < len(file.Tokens); i++ {
-		if file.Tokens[i].Start >= offset || file.Tokens[i].KindLine&255 != syntax.TokenIdent || tokenString(&file, i) != name {
+		if syntax.TokenStart(file.Tokens[i]) >= offset || file.Tokens[i].KindLine&255 != syntax.TokenIdent || tokenString(&file, i) != name {
 			continue
 		}
 		assign := completionFindShortAssign(file, i, fn.BodyEnd)
@@ -474,7 +475,7 @@ func navigationLocation(graph load.Graph, pkg int, file int, token int) (SourceL
 		return SourceLocation{}, false
 	}
 	tok := source.File.Tokens[token]
-	return SourceLocation{Path: load.CleanPath(source.Path), Start: tok.Start, End: tok.End}, true
+	return SourceLocation{Path: load.CleanPath(source.Path), Start: syntax.TokenStart(tok), End: syntax.TokenEnd(tok)}, true
 }
 
 func navigationAppend(locations *[]SourceLocation, location SourceLocation) {

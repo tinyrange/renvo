@@ -179,10 +179,7 @@ func findTopLevelAssignOp(file syntax.File, start int, end int) int {
 			return i
 		}
 		tok := file.Tokens[i]
-		c := byte(0)
-		if tok.KindLine&255 == syntax.TokenOperator && tok.End == tok.Start+1 {
-			c = file.Src[tok.Start]
-		}
+		c := byte(tok.KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask)
 		if c == '(' {
 			parenDepth++
 		} else if c == ')' {
@@ -211,20 +208,22 @@ func isAssignOp(file syntax.File, tok int) bool {
 		return false
 	}
 	token := file.Tokens[tok]
-	if token.KindLine&255 != syntax.TokenOperator || token.Start < 0 || token.End > len(file.Src) {
+	start := int(token.Start)
+	end := int(token.End)
+	if token.KindLine&255 != syntax.TokenOperator || start < 0 || end > len(file.Src) {
 		return false
 	}
-	size := token.End - token.Start
+	size := end - start
 	if size == 1 {
-		return file.Src[token.Start] == '='
+		return file.Src[start] == '='
 	}
-	if size == 2 && file.Src[token.Start+1] == '=' {
-		first := file.Src[token.Start]
+	if size == 2 && file.Src[start+1] == '=' {
+		first := file.Src[start]
 		return first == ':' || first == '+' || first == '-' || first == '*' || first == '/' || first == '%' || first == '&' || first == '|' || first == '^'
 	}
-	if size == 3 && file.Src[token.Start+2] == '=' {
-		first := file.Src[token.Start]
-		second := file.Src[token.Start+1]
+	if size == 3 && file.Src[start+2] == '=' {
+		first := file.Src[start]
+		second := file.Src[start+1]
 		return first == '<' && second == '<' || first == '>' && second == '>' || first == '&' && second == '^'
 	}
 	return false

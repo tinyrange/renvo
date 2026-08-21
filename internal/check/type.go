@@ -367,7 +367,19 @@ func typeAfter(left TypeInfo, right TypeInfo) bool {
 }
 
 func checkStringAfter(left string, right string) bool {
-	return checkStringBefore(right, left)
+	limit := len(left)
+	if len(right) < limit {
+		limit = len(right)
+	}
+	for i := 0; i < limit; i++ {
+		if left[i] > right[i] {
+			return true
+		}
+		if left[i] < right[i] {
+			return false
+		}
+	}
+	return len(left) > len(right)
 }
 
 func checkStringBefore(left string, right string) bool {

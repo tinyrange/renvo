@@ -9,17 +9,38 @@ type definiteChannelBinding struct {
 	token     int
 }
 
+func fileMayNeedChannelCheck(file syntax.File) bool {
+	for i := 0; i < len(file.Tokens); i++ {
+		token := file.Tokens[i]
+		kind := token.KindLine & 255
+		if kind == syntax.TokenChan {
+			return true
+		}
+		size := int(token.End - token.Start)
+		start := int(token.Start)
+		if kind == syntax.TokenOperator && size == 2 && file.Src[start] == '<' && file.Src[start+1] == '-' {
+			return true
+		}
+		if kind == syntax.TokenIdent && size == 5 && file.Src[start] == 'c' && tokenTextIs(&file, i, "close") {
+			return true
+		}
+	}
+	return false
+}
+
 func invalidDefiniteAssignmentType(file syntax.File, fn syntax.FuncDecl) (int, int) {
 	for i := fn.BodyStart + 2; i+1 < fn.BodyEnd; i++ {
 		if file.Tokens[i].KindLine&255 != syntax.TokenOperator {
 			continue
 		}
-		operator := file.Src[file.Tokens[i].Start]
+		operator := file.Src[int(file.Tokens[i].Start)]
 		if operator == '+' || operator == '-' || operator == '*' || operator == '/' || operator == '%' || operator == '&' || operator == '|' || operator == '^' || operator == '<' || operator == '>' || operator == '!' || operator == '=' {
 			leftToken := file.Tokens[i-1]
 			rightToken := file.Tokens[i+1]
-			leftPossible := leftToken.KindLine&255 == syntax.TokenNumber || leftToken.KindLine&255 == syntax.TokenString || leftToken.KindLine&255 == syntax.TokenIdent && (leftToken.End-leftToken.Start == 4 || leftToken.End-leftToken.Start == 5)
-			rightPossible := rightToken.KindLine&255 == syntax.TokenNumber || rightToken.KindLine&255 == syntax.TokenString || rightToken.KindLine&255 == syntax.TokenIdent && (rightToken.End-rightToken.Start == 4 || rightToken.End-rightToken.Start == 5)
+			leftSize := leftToken.End - leftToken.Start
+			rightSize := rightToken.End - rightToken.Start
+			leftPossible := leftToken.KindLine&255 == syntax.TokenNumber || leftToken.KindLine&255 == syntax.TokenString || leftToken.KindLine&255 == syntax.TokenIdent && (leftSize == 4 || leftSize == 5)
+			rightPossible := rightToken.KindLine&255 == syntax.TokenNumber || rightToken.KindLine&255 == syntax.TokenString || rightToken.KindLine&255 == syntax.TokenIdent && (rightSize == 4 || rightSize == 5)
 			if leftPossible && rightPossible {
 				leftKind := definiteLiteralKind(file, i-1)
 				rightKind := definiteLiteralKind(file, i+1)
@@ -67,7 +88,10 @@ func definiteShortValueKind(file syntax.File, fn syntax.FuncDecl, nameTok int, b
 		limit = fn.BodyStart
 	}
 	for i := before - 1; i > limit; i-- {
-		if statementTokensEqual(&file, i, nameTok) && i+2 < before && tokenTextIs(&file, i+1, ":=") {
+		if i+2 >= before || file.Tokens[i].KindLine&255 != syntax.TokenIdent || !tokenTextIs(&file, i+1, ":=") {
+			continue
+		}
+		if statementTokensEqual(&file, i, nameTok) {
 			return definiteLiteralKind(file, i+2)
 		}
 	}
@@ -80,6 +104,7 @@ func excludedFileFeature(file syntax.File) (int, int) {
 
 func invalidDefiniteChannelOperation(file syntax.File, fn syntax.FuncDecl) int {
 	var channels []definiteChannelBinding
+	maybeChannelOperation := false
 	for i := 0; i < len(file.Decls); i++ {
 		decl := file.Decls[i]
 		if decl.Kind != syntax.TokenVar {
@@ -91,8 +116,22 @@ func invalidDefiniteChannelOperation(file syntax.File, fn syntax.FuncDecl) int {
 		}
 	}
 	for i := fn.StartTok; i+1 < fn.BodyEnd && i+1 < len(file.Tokens); i++ {
-		if file.Tokens[i].KindLine&255 != syntax.TokenIdent {
+		kind := file.Tokens[i].KindLine & 255
+		if kind == syntax.TokenChan {
+			maybeChannelOperation = true
+		}
+		if kind == syntax.TokenOperator && file.Tokens[i].End-file.Tokens[i].Start == 2 &&
+			file.Src[int(file.Tokens[i].Start)] == '<' && file.Src[int(file.Tokens[i].Start)+1] == '-' {
+			maybeChannelOperation = true
+		}
+		if kind != syntax.TokenIdent {
 			continue
+		}
+		size := int(file.Tokens[i].End - file.Tokens[i].Start)
+		start := int(file.Tokens[i].Start)
+		if size == 4 && file.Src[start] == 'm' && tokenTextIs(&file, i, "make") ||
+			size == 5 && file.Src[start] == 'c' && tokenTextIs(&file, i, "close") {
+			maybeChannelOperation = true
 		}
 		typeStart := i + 1
 		directChannel := typeStart < len(file.Tokens) && (file.Tokens[typeStart].KindLine&255 == syntax.TokenChan || tokenTextIs(&file, typeStart, "<-"))
@@ -109,6 +148,9 @@ func invalidDefiniteChannelOperation(file syntax.File, fn syntax.FuncDecl) int {
 				continue
 			}
 		}
+	}
+	if len(channels) == 0 && !maybeChannelOperation {
+		return -1
 	}
 	for i := fn.BodyStart + 1; i < fn.BodyEnd && i < len(file.Tokens); i++ {
 		if tokenTextIs(&file, i, "=") && i > fn.BodyStart+1 && i+1 < fn.BodyEnd && file.Tokens[i-1].KindLine&255 == syntax.TokenIdent && file.Tokens[i+1].KindLine&255 == syntax.TokenIdent {

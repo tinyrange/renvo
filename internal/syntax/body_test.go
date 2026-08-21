@@ -230,9 +230,10 @@ func exprText(file File, expr Expr) string {
 	if expr.StartTok < 0 || expr.EndTok <= expr.StartTok || expr.EndTok > len(file.Tokens) {
 		return ""
 	}
-	start := file.Tokens[expr.StartTok].Start
-	end := file.Tokens[expr.EndTok-1].End
-	if start < 0 || end < start || end > len(file.Src) {
+	start := TokenStart(file.Tokens[expr.StartTok])
+	last := file.Tokens[expr.EndTok-1]
+	end := TokenEnd(last)
+	if start < 0 || end < start || int(end) > len(file.Src) {
 		return ""
 	}
 	return string(file.Src[start:end])

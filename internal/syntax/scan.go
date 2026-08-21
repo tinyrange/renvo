@@ -70,13 +70,13 @@ func scanTokens(src []byte) ([]Token, bool) {
 			if size >= 2 && size <= 9 || size == 11 {
 				kind = keywordKind(src, start, i, c)
 			}
-			tokens = append(tokens, Token{KindLine: kind | line<<TokenOperatorLineShift, Start: start, End: i})
+			tokens = append(tokens, Token{KindLine: kind | line<<TokenOperatorLineShift, Start: int32(start), End: int32(i)})
 			continue
 		}
 		if c >= '0' && c <= '9' {
 			start := i
 			i = scanNumberEnd(src, i)
-			tokens = append(tokens, Token{KindLine: TokenNumber | line<<TokenOperatorLineShift, Start: start, End: i})
+			tokens = append(tokens, Token{KindLine: TokenNumber | line<<TokenOperatorLineShift, Start: int32(start), End: int32(i)})
 			continue
 		}
 		if c == '"' {
@@ -102,7 +102,7 @@ func scanTokens(src []byte) ([]Token, bool) {
 				break
 			}
 			i++
-			tokens = append(tokens, Token{KindLine: TokenString | line<<TokenOperatorLineShift, Start: start, End: i})
+			tokens = append(tokens, Token{KindLine: TokenString | line<<TokenOperatorLineShift, Start: int32(start), End: int32(i)})
 			continue
 		}
 		if c == '`' {
@@ -120,7 +120,7 @@ func scanTokens(src []byte) ([]Token, bool) {
 				break
 			}
 			i++
-			tokens = append(tokens, Token{KindLine: TokenString | tokenLine<<TokenOperatorLineShift, Start: start, End: i})
+			tokens = append(tokens, Token{KindLine: TokenString | tokenLine<<TokenOperatorLineShift, Start: int32(start), End: int32(i)})
 			continue
 		}
 		if c == '\'' {
@@ -141,7 +141,7 @@ func scanTokens(src []byte) ([]Token, bool) {
 				break
 			}
 			i++
-			tokens = append(tokens, Token{KindLine: TokenChar | line<<TokenOperatorLineShift, Start: start, End: i})
+			tokens = append(tokens, Token{KindLine: TokenChar | line<<TokenOperatorLineShift, Start: int32(start), End: int32(i)})
 			continue
 		}
 		start := i
@@ -168,7 +168,7 @@ func scanTokens(src []byte) ([]Token, bool) {
 				}
 			}
 		}
-		tok := Token{KindLine: TokenOperator | line<<TokenOperatorLineShift, Start: start, End: i}
+		tok := Token{KindLine: TokenOperator | line<<TokenOperatorLineShift, Start: int32(start), End: int32(i)}
 		if i == start+1 && c <= TokenOperatorCharMask {
 			tok.KindLine = tok.KindLine | int(c)<<TokenOperatorCharShift
 		}
@@ -177,7 +177,7 @@ func scanTokens(src []byte) ([]Token, bool) {
 	if line > TokenLineLimit {
 		ok = false
 	}
-	tokens = append(tokens, Token{KindLine: TokenEOF | line<<TokenOperatorLineShift, Start: len(src), End: len(src)})
+	tokens = append(tokens, Token{KindLine: TokenEOF | line<<TokenOperatorLineShift, Start: int32(len(src)), End: int32(len(src))})
 	return tokens, ok
 }
 
@@ -240,15 +240,9 @@ func scanNumberEnd(src []byte, start int) int {
 
 func scanTokenCapacity(src []byte) int {
 	capacity := 0
-	// Large linked programs are less token-dense than individual source files.
-	// Keep the wider estimate for small and hand-minified inputs, but avoid
-	// permanently touching an oversized token arena in no-GC self-hosted runs.
-	if len(src) >= 262144 {
-		capacity = len(src) / 5
-		capacity += capacity / 10
-	} else {
-		capacity = len(src) / 4
-	}
+	// The compact two-word token representation makes this estimate cheaper
+	// than growing and copying the arena while scanning a linked package.
+	capacity = len(src) / 4
 	if capacity < 16 {
 		return 16
 	}

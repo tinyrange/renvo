@@ -326,14 +326,14 @@ func CheckRootMain(pkg load.Package) (int, int, int) {
 				continue
 			}
 			name := file.Tokens[fn.NameTok]
-			isMain := tokenMatchesCoreSymbol(file.Src, name.Start, name.End-name.Start, "main")
+			isMain := tokenMatchesCoreSymbol(file.Src, int(name.Start), int(name.End-name.Start), "main")
 			if fn.ReceiverStart >= 0 {
 				if isMain {
 					methodFile, methodTok = fileIndex, fn.NameTok
 				}
 				continue
 			}
-			if tokenMatchesCoreSymbol(file.Src, name.Start, name.End-name.Start, "appMain") {
+			if tokenMatchesCoreSymbol(file.Src, int(name.Start), int(name.End-name.Start), "appMain") {
 				return CheckOK, -1, -1
 			}
 			if isMain {

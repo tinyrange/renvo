@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "6e23688b81372decb43a6f4eaf5d80e4ddfdaece170e8d531945f16fc3082a21"
+const CompilerSourceDigest = "d701d64165eb1bc7bb36c36905aa25f81698694823f2813a52bbbf2fdfb79e95"
 
 // source: backend/compiler_common_impl.go
 
@@ -9976,55 +9976,9 @@ return
 
 func renvoLocalConstTrackable(g *renvoLinearGen, typ int, nameStart int, nameEnd int, afterTok int) bool {
 renvoNonNil(g)
-if renvoFixedTarget != 0 {
-return false
-}
-resolved := renvoResolveType(g.meta, typ)
-renvoNonNil(resolved)
-if !renvoTypeKindIsScalarInt(resolved.kind) {
-return false
-}
-return !renvoLocalNameWrittenAfter(g, nameStart, nameEnd, afterTok)
-}
 
-func renvoLocalNameWrittenAfter(g *renvoLinearGen, nameStart int, nameEnd int, afterTok int) bool {
-renvoNonNil(g)
-if nameEnd <= nameStart {
-return true
-}
-p := g.prog
-src := p.src
-nameSize := nameEnd - nameStart
-nameFirst := renvo_runtime_UnsafeByteAt(src, nameStart)
-end := renvoTokCount(p)
-if g.currentFunc >= 0 && g.currentFunc < len(g.meta.funcs) {
-end = g.meta.funcs[g.currentFunc].bodyEnd
-}
-i := afterTok
-if i < 0 {
-i = 0
-}
-for i < end {
-base := i * renvoTokenStride
-first := int(renvo_runtime_UnsafeInt32At(p.toks.data, base))
-packed := int(renvo_runtime_UnsafeInt32At(p.toks.data, base+1))
-tokenStart := packed & 0xffffff
-tokenEnd := tokenStart + (packed>>24&255 | first>>16&0xff00)
-if first&255 == renvoTokIdent && tokenEnd-tokenStart == nameSize && renvo_runtime_UnsafeByteAt(src, tokenStart) == nameFirst && renvoBytesEqualRange(src, tokenStart, tokenEnd, nameStart, nameEnd) {
-if i > 0 && renvoTokCharIs(p, i-1, '&') {
-return true
-}
-if renvoTok2Is(p, i+1, '+', '+') || renvoTok2Is(p, i+1, '-', '-') {
-return true
-}
-lineEnd := renvoStatementLineEnd(p, i, end)
-assignTok := renvoFindAssignmentToken(p, i, lineEnd)
-if assignTok > i {
-return true
-}
-}
-i++
-}
+
+
 return false
 }
 

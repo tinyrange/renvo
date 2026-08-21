@@ -472,20 +472,22 @@ func findAssign(file *File, start int, end int) int {
 }
 
 func tokenIsAssign(file *File, token Token) bool {
-	if token.KindLine&255 != TokenOperator || token.Start < 0 || token.End > len(file.Src) {
+	start := int(token.Start)
+	end := int(token.End)
+	if token.KindLine&255 != TokenOperator || start < 0 || end > len(file.Src) {
 		return false
 	}
-	size := token.End - token.Start
+	size := end - start
 	if size == 1 {
-		return file.Src[token.Start] == '='
+		return file.Src[start] == '='
 	}
-	if size == 2 && file.Src[token.Start+1] == '=' {
-		first := file.Src[token.Start]
+	if size == 2 && file.Src[start+1] == '=' {
+		first := file.Src[start]
 		return first == ':' || first == '+' || first == '-' || first == '*' || first == '/' || first == '%' || first == '&' || first == '|' || first == '^'
 	}
-	if size == 3 && file.Src[token.Start+2] == '=' {
-		first := file.Src[token.Start]
-		second := file.Src[token.Start+1]
+	if size == 3 && file.Src[start+2] == '=' {
+		first := file.Src[start]
+		second := file.Src[start+1]
 		return first == '<' && second == '<' || first == '>' && second == '>' || first == '&' && second == '^'
 	}
 	return false
@@ -532,10 +534,7 @@ func hasTopLevelBinary(file *File, start int, end int) bool {
 	braceDepth := 0
 	for i := start; i < end; i++ {
 		tok := file.Tokens[i]
-		c := byte(0)
-		if tok.KindLine&255 == TokenOperator && tok.End == tok.Start+1 {
-			c = file.Src[tok.Start]
-		}
+		c := byte(tok.KindLine >> TokenOperatorCharShift & TokenOperatorCharMask)
 		if c == '(' {
 			parenDepth++
 		} else if c == ')' {
@@ -562,47 +561,41 @@ func hasTopLevelBinary(file *File, start int, end int) bool {
 }
 
 func isBinaryOp(file *File, i int) bool {
-	if tokenTextIs(file.Src, file.Tokens[i], "||") || tokenTextIs(file.Src, file.Tokens[i], "&&") {
-		return true
+	tok := file.Tokens[i]
+	if tok.KindLine&255 != TokenOperator {
+		return false
 	}
-	if tokenTextIs(file.Src, file.Tokens[i], "==") || tokenTextIs(file.Src, file.Tokens[i], "!=") {
-		return true
+	size := int(tok.End - tok.Start)
+	if size == 1 {
+		c := tok.KindLine >> TokenOperatorCharShift & TokenOperatorCharMask
+		return c == int('+') || c == int('-') || c == int('*') || c == int('/') ||
+			c == int('%') || c == int('&') || c == int('|') || c == int('^') ||
+			c == int('<') || c == int('>')
 	}
-	if tokenTextIs(file.Src, file.Tokens[i], "<") || tokenTextIs(file.Src, file.Tokens[i], "<=") {
-		return true
+	tokenStart := int(tok.Start)
+	if size != 2 || tokenStart < 0 || tokenStart+1 >= len(file.Src) {
+		return false
 	}
-	if tokenTextIs(file.Src, file.Tokens[i], ">") || tokenTextIs(file.Src, file.Tokens[i], ">=") {
-		return true
-	}
-	if tokenTextIs(file.Src, file.Tokens[i], "+") || tokenTextIs(file.Src, file.Tokens[i], "-") {
-		return true
-	}
-	if tokenTextIs(file.Src, file.Tokens[i], "*") || tokenTextIs(file.Src, file.Tokens[i], "/") {
-		return true
-	}
-	if tokenTextIs(file.Src, file.Tokens[i], "%") || tokenTextIs(file.Src, file.Tokens[i], "&") {
-		return true
-	}
-	if tokenTextIs(file.Src, file.Tokens[i], "|") || tokenTextIs(file.Src, file.Tokens[i], "^") {
-		return true
-	}
-	if tokenTextIs(file.Src, file.Tokens[i], "<<") || tokenTextIs(file.Src, file.Tokens[i], ">>") {
-		return true
-	}
-	return tokenTextIs(file.Src, file.Tokens[i], "&^")
+	pair := int(file.Src[tokenStart])<<8 | int(file.Src[tokenStart+1])
+	return pair == int('|')<<8|int('|') || pair == int('&')<<8|int('&') ||
+		pair == int('=')<<8|int('=') || pair == int('!')<<8|int('=') ||
+		pair == int('<')<<8|int('=') || pair == int('>')<<8|int('=') ||
+		pair == int('<')<<8|int('<') || pair == int('>')<<8|int('>') ||
+		pair == int('&')<<8|int('^')
 }
 
 func isUnaryExpr(file *File, start int) bool {
-	if tokenTextIs(file.Src, file.Tokens[start], "+") || tokenTextIs(file.Src, file.Tokens[start], "-") {
-		return true
+	tok := file.Tokens[start]
+	if tok.KindLine&255 != TokenOperator {
+		return false
 	}
-	if tokenTextIs(file.Src, file.Tokens[start], "!") || tokenTextIs(file.Src, file.Tokens[start], "^") {
-		return true
+	size := int(tok.End - tok.Start)
+	if size == 1 {
+		c := tok.KindLine >> TokenOperatorCharShift & TokenOperatorCharMask
+		return c == int('+') || c == int('-') || c == int('!') || c == int('^') || c == int('*') || c == int('&')
 	}
-	if tokenTextIs(file.Src, file.Tokens[start], "*") || tokenTextIs(file.Src, file.Tokens[start], "&") {
-		return true
-	}
-	return tokenTextIs(file.Src, file.Tokens[start], "<-")
+	tokenStart := int(tok.Start)
+	return size == 2 && tokenStart >= 0 && tokenStart+1 < len(file.Src) && file.Src[tokenStart] == '<' && file.Src[tokenStart+1] == '-'
 }
 
 func spanHasCall(file *File, start int, end int) bool {
@@ -644,7 +637,7 @@ func lineContinues(file *File, prev int, next int) bool {
 	if prev < 0 || next < 0 || prev >= len(file.Tokens) || next >= len(file.Tokens) {
 		return false
 	}
-	if isBinaryOp(file, prev) || tokenTextIs(file.Src, file.Tokens[prev], ",") || tokenTextIs(file.Src, file.Tokens[prev], ".") {
+	if isBinaryOp(file, prev) || tokCharIs(file.Tokens, prev, ',') || tokCharIs(file.Tokens, prev, '.') {
 		return true
 	}
 	if tokCharIs(file.Tokens, next, '.') || tokCharIs(file.Tokens, next, ',') {
@@ -654,17 +647,19 @@ func lineContinues(file *File, prev int, next int) bool {
 }
 
 func tokenTextIs(src []byte, tok Token, text string) bool {
-	if tok.End-tok.Start != len(text) || tok.Start < 0 || tok.End > len(src) {
+	start := int(tok.Start)
+	end := int(tok.End)
+	if end-start != len(text) || start < 0 || end > len(src) {
 		return false
 	}
 	if len(text) == 1 {
-		return src[tok.Start] == text[0]
+		return src[start] == text[0]
 	}
 	if len(text) == 2 {
-		return src[tok.Start] == text[0] && src[tok.Start+1] == text[1]
+		return src[start] == text[0] && src[start+1] == text[1]
 	}
 	for i := 0; i < len(text); i++ {
-		if src[tok.Start+i] != text[i] {
+		if src[start+i] != text[i] {
 			return false
 		}
 	}

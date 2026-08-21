@@ -360,7 +360,7 @@ func diagnosticAtToken(diagnostic Diagnostic, source load.SourceFile, tokens []s
 	line := 1
 	if tokenIndex >= 0 && tokenIndex < len(tokens) {
 		token := tokens[tokenIndex]
-		start, end, line = token.Start, token.End, syntax.TokenLine(token)
+		start, end, line = syntax.TokenStart(token), syntax.TokenEnd(token), syntax.TokenLine(token)
 		if diagnosticNamesToken(diagnostic.Code) && start >= 0 && end > start && end <= len(source.Src) {
 			diagnostic.Message += ": " + string(source.Src[start:end])
 		}

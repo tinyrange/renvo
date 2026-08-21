@@ -218,7 +218,7 @@ func packageImportLocation(pkg Package, importPath string) (string, int) {
 			}
 			path, ok := syntax.StringLiteralValue(file.Src, file.File.Tokens[tokenIndex])
 			if ok && path == importPath {
-				return file.Path, file.File.Tokens[tokenIndex].Start
+				return file.Path, syntax.TokenStart(file.File.Tokens[tokenIndex])
 			}
 		}
 	}

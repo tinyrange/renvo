@@ -159,11 +159,20 @@ func (b *coreUnitBuilder) addCheckedConcurrencySites(files []coreFileTokens) boo
 		file := files[fileIndex].file
 		mapping := files[fileIndex].tokens
 		for token := 0; token < len(file.Tokens); token++ {
+			tokenValue := file.Tokens[token]
+			tokenKind := tokenValue.KindLine & 255
+			arrow := false
+			if tokenKind == syntax.TokenOperator {
+				start := int(tokenValue.Start)
+				arrow = tokenValue.End-tokenValue.Start == 2 && start >= 0 && start+1 < len(file.Src) && file.Src[start] == '<' && file.Src[start+1] == '-'
+			}
+			if tokenKind != syntax.TokenGo && tokenKind != syntax.TokenSelect && tokenKind != syntax.TokenChan && !arrow {
+				continue
+			}
 			kind := 0
 			direction := check.ChanBoth
 			receiveArity := 0
 			elementType := ""
-			tokenKind := file.Tokens[token].KindLine & 255
 			if tokenKind == syntax.TokenGo {
 				kind = unit.ConcurrencyGo
 			} else if tokenKind == syntax.TokenSelect {
@@ -179,9 +188,9 @@ func (b *coreUnitBuilder) addCheckedConcurrencySites(files []coreFileTokens) boo
 				}
 				end := lowerConcurrencyTypeEnd(file, start)
 				if start < end {
-					elementType = string(file.Src[file.Tokens[start].Start:file.Tokens[end-1].End])
+					elementType = string(file.Src[int(file.Tokens[start].Start):int(file.Tokens[end-1].End)])
 				}
-			} else if tokenKind == syntax.TokenOperator && lowerTokenTextIs(file, token, "<-") {
+			} else if arrow {
 				if token+1 < len(file.Tokens) && file.Tokens[token+1].KindLine&255 == syntax.TokenChan || token > 0 && file.Tokens[token-1].KindLine&255 == syntax.TokenChan {
 					continue
 				}
@@ -214,11 +223,13 @@ func lowerTokenTextIs(file syntax.File, token int, wanted string) bool {
 		return false
 	}
 	item := file.Tokens[token]
-	if item.Start < 0 || item.End-item.Start != len(wanted) || item.End > len(file.Src) {
+	start := int(item.Start)
+	end := int(item.End)
+	if start < 0 || end-start != len(wanted) || end > len(file.Src) {
 		return false
 	}
 	for i := 0; i < len(wanted); i++ {
-		if file.Src[item.Start+i] != wanted[i] {
+		if file.Src[start+i] != wanted[i] {
 			return false
 		}
 	}
@@ -229,7 +240,7 @@ func lowerConcurrencyTypeEnd(file syntax.File, start int) int {
 	if start < 0 || start >= len(file.Tokens) {
 		return start
 	}
-	text := string(file.Src[file.Tokens[start].Start:file.Tokens[start].End])
+	text := string(file.Src[int(file.Tokens[start].Start):int(file.Tokens[start].End)])
 	if text == "*" || text == "[]" {
 		return lowerConcurrencyTypeEnd(file, start+1)
 	}
@@ -290,7 +301,7 @@ func lowerConcurrencyArrowIsSend(file syntax.File, arrow int) bool {
 	if arrow <= 0 {
 		return false
 	}
-	previous := string(file.Src[file.Tokens[arrow-1].Start:file.Tokens[arrow-1].End])
+	previous := string(file.Src[int(file.Tokens[arrow-1].Start):int(file.Tokens[arrow-1].End)])
 	return previous != "=" && previous != ":=" && previous != "," && previous != "(" && previous != "case" && previous != "return"
 }
 
@@ -320,7 +331,12 @@ func (b *coreUnitBuilder) addFileTokens(file syntax.File, src []byte, fileIndex 
 			continue
 		}
 		kind := coreUnitTokenKind(src, tok)
-		b.program.Tokens = append(b.program.Tokens, unit.MakeToken(kind, base+tok.Start, tok.End-tok.Start, lineOffset+syntax.TokenLine(tok)))
+		line := tok.KindLine >> syntax.TokenOperatorLineShift & syntax.TokenLineLimit
+		b.program.Tokens = append(b.program.Tokens, unit.Token{
+			KindLine: kind | (lineOffset+line)<<8,
+			Start:    base + int(tok.Start),
+			Size:     int(tok.End - tok.Start),
+		})
 	}
 	if transient {
 		renvo_runtime_ArenaDiscardLowerTokens(file.Tokens)
@@ -364,14 +380,14 @@ func (b *coreUnitBuilder) addDecl(file syntax.File, decl syntax.TopDecl, mapping
 		return false
 	}
 	name := file.Tokens[decl.NameTok]
-	if name.Start < 0 || name.End < name.Start || name.End > len(file.Src) {
+	if name.Start < 0 || name.End < name.Start || int(name.End) > len(file.Src) {
 		b.setErr(EmitErrToken, fileIndex, decl.NameTok)
 		return false
 	}
 	b.program.Decls = append(b.program.Decls, unit.Decl{
 		Kind:      kind,
-		NameStart: textBase + name.Start,
-		NameEnd:   textBase + name.End,
+		NameStart: textBase + int(name.Start),
+		NameEnd:   textBase + int(name.End),
 		StartTok:  mapCoreDeclStartToken(file, decl, mapping, b.finalEOF),
 		EndTok:    mapCoreToken(mapping, decl.EndTok, b.finalEOF),
 	})
@@ -398,13 +414,13 @@ func (b *coreUnitBuilder) addFunc(file syntax.File, fn syntax.FuncDecl, mapping 
 		return false
 	}
 	name := file.Tokens[fn.NameTok]
-	if name.Start < 0 || name.End < name.Start || name.End > len(file.Src) {
+	if name.Start < 0 || name.End < name.Start || int(name.End) > len(file.Src) {
 		b.setErr(EmitErrToken, fileIndex, fn.NameTok)
 		return false
 	}
 	b.program.Funcs = append(b.program.Funcs, unit.Func{
-		NameStart:     textBase + name.Start,
-		NameEnd:       textBase + name.End,
+		NameStart:     textBase + int(name.Start),
+		NameEnd:       textBase + int(name.End),
 		StartTok:      mapCoreToken(mapping, fn.StartTok, b.finalEOF),
 		NameTok:       nameTok,
 		ReceiverStart: mapCoreToken(mapping, fn.ReceiverStart, b.finalEOF),

@@ -7,10 +7,10 @@ import (
 
 func TestTokenCompactLayout(t *testing.T) {
 	tok := MakeToken(TokenIdent, 12, 18, 345)
-	if tok.KindLine&255 != TokenIdent || TokenLine(tok) != 345 || tok.Start != 12 || tok.End != 18 {
+	if tok.KindLine&255 != TokenIdent || TokenLine(tok) != 345 || TokenStart(tok) != 12 || TokenSize(tok) != 6 {
 		t.Fatalf("token fields were not preserved: %#v", tok)
 	}
-	if got, want := unsafe.Sizeof(tok), 3*unsafe.Sizeof(int(0)); got != want {
+	if got, want := unsafe.Sizeof(tok), unsafe.Sizeof(int(0))+8; got != want {
 		t.Fatalf("token size = %d, want %d", got, want)
 	}
 	nonOperator := MakeToken(TokenIdent, 0, 1, int('+'))

@@ -132,8 +132,8 @@ func analysisCheckDiagnostic(graph load.Graph, program check.Program) Diagnostic
 	diagnostic = analysisDiagnosticAtToken(diagnostic, file, program.ErrorToken)
 	if analysisDiagnosticNamesToken(code) && program.ErrorToken >= 0 && program.ErrorToken < len(file.File.Tokens) {
 		token := file.File.Tokens[program.ErrorToken]
-		if token.Start >= 0 && token.End > token.Start && token.End <= len(file.Src) {
-			diagnostic.Message += ": " + string(file.Src[token.Start:token.End])
+		if syntax.TokenStart(token) >= 0 && syntax.TokenSize(token) > 0 && syntax.TokenEnd(token) <= len(file.Src) {
+			diagnostic.Message += ": " + string(file.Src[syntax.TokenStart(token):syntax.TokenEnd(token)])
 		}
 	}
 	return diagnostic
@@ -149,7 +149,7 @@ func analysisDiagnosticAtToken(diagnostic Diagnostic, file load.ParsedFile, toke
 	start, end, line := len(file.Src), len(file.Src), 1
 	if tokenIndex >= 0 && tokenIndex < len(file.File.Tokens) {
 		token := file.File.Tokens[tokenIndex]
-		start, end, line = token.Start, token.End, syntax.TokenLine(token)
+		start, end, line = syntax.TokenStart(token), syntax.TokenEnd(token), syntax.TokenLine(token)
 	}
 	diagnostic.Start, diagnostic.End, diagnostic.Line = start, end, line
 	diagnostic.Column = 1

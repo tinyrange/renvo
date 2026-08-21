@@ -31,16 +31,16 @@ func HoverProgram(graph load.Graph, program Program, path string, offset int) Ho
 	if !ok {
 		name := tokenString(&file, token)
 		if signature, documentation, found := hoverImportedPackage(graph, program, pkgIndex, fileIndex, name); found {
-			return HoverInfo{Signature: signature, Documentation: documentation, Start: file.Tokens[token].Start, End: file.Tokens[token].End, Ok: true}
+			return HoverInfo{Signature: signature, Documentation: documentation, Start: syntax.TokenStart(file.Tokens[token]), End: syntax.TokenEnd(file.Tokens[token]), Ok: true}
 		}
 		if signature, documentation, found := hoverBuiltin(name); found {
-			return HoverInfo{Signature: signature, Documentation: documentation, Start: file.Tokens[token].Start, End: file.Tokens[token].End, Ok: true}
+			return HoverInfo{Signature: signature, Documentation: documentation, Start: syntax.TokenStart(file.Tokens[token]), End: syntax.TokenEnd(file.Tokens[token]), Ok: true}
 		}
 		return HoverInfo{}
 	}
-	hover := HoverInfo{Start: file.Tokens[token].Start, End: file.Tokens[token].End}
+	hover := HoverInfo{Start: syntax.TokenStart(file.Tokens[token]), End: syntax.TokenEnd(file.Tokens[token])}
 	if target.local {
-		hover.Signature = hoverLocalSignature(graph, program, target, tokenString(&file, token), file.Tokens[token].End)
+		hover.Signature = hoverLocalSignature(graph, program, target, tokenString(&file, token), syntax.TokenEnd(file.Tokens[token]))
 	} else if target.member && target.field {
 		hover.Signature, hover.Documentation = hoverField(graph, program, target)
 	} else {
@@ -73,12 +73,12 @@ func hoverLocalSignature(graph load.Graph, program Program, target navigationTar
 	for i := 0; i < len(info.Bodies); i++ {
 		body := info.Bodies[i]
 		if body.File != target.fileIndex || body.Func < 0 || body.Func >= len(file.Funcs) ||
-			before < file.Tokens[file.Funcs[body.Func].StartTok].Start || before > file.Tokens[file.Funcs[body.Func].EndTok-1].End {
+			before < syntax.TokenStart(file.Tokens[file.Funcs[body.Func].StartTok]) || before > syntax.TokenEnd(file.Tokens[file.Funcs[body.Func].EndTok-1]) {
 			continue
 		}
 		for j := len(body.Locals) - 1; j >= 0; j-- {
 			local := body.Locals[j]
-			if local.Name != name || local.Token < 0 || local.Token >= len(file.Tokens) || file.Tokens[local.Token].Start > before {
+			if local.Name != name || local.Token < 0 || local.Token >= len(file.Tokens) || syntax.TokenStart(file.Tokens[local.Token]) > before {
 				continue
 			}
 			typeText := ""
@@ -112,7 +112,7 @@ func hoverLocalSignature(graph load.Graph, program Program, target navigationTar
 			locals := buildFuncLocalDecls(file, target.fileIndex, info, program.Packages, body, scope)
 			for i := len(locals) - 1; i >= 0; i-- {
 				local := locals[i]
-				if local.Name == name && local.Token >= 0 && local.Token < len(file.Tokens) && file.Tokens[local.Token].Start <= before && local.Kind == SymbolConst {
+				if local.Name == name && local.Token >= 0 && local.Token < len(file.Tokens) && syntax.TokenStart(file.Tokens[local.Token]) <= before && local.Kind == SymbolConst {
 					return hoverConstSignature(name, hoverSpanText(file, local.TypeStart, local.TypeEnd), local.Const)
 				}
 			}
@@ -134,7 +134,7 @@ func hoverSymbol(graph load.Graph, program Program, pkgIndex, symbolIndex int) (
 		return "", ""
 	}
 	file := graph.Packages[pkgIndex].Files[symbol.File].File
-	documentation := sourceDocumentation(file.Src, file.Tokens[symbol.Token].Start)
+	documentation := sourceDocumentation(file.Src, syntax.TokenStart(file.Tokens[symbol.Token]))
 	if symbol.Kind == SymbolFunc || symbol.Kind == SymbolMethod {
 		for i := 0; i < len(file.Funcs); i++ {
 			if file.Funcs[i].NameTok == symbol.Token {
@@ -191,7 +191,7 @@ func hoverImportedPackage(graph load.Graph, program Program, pkgIndex, fileIndex
 	for i := 0; i < len(graph.Packages[imported].Files); i++ {
 		file := graph.Packages[imported].Files[i].File
 		if file.PackageName >= 0 && file.PackageName < len(file.Tokens) {
-			documentation = sourceDocumentation(file.Src, file.Tokens[file.PackageName].Start)
+			documentation = sourceDocumentation(file.Src, syntax.TokenStart(file.Tokens[file.PackageName]))
 			if documentation != "" {
 				break
 			}
@@ -364,7 +364,7 @@ func hoverField(graph load.Graph, program Program, target navigationTarget) (str
 	}
 	file := graph.Packages[target.packageIndex].Files[typ.File].File
 	field := typ.Fields[fieldIndex]
-	documentation := sourceDocumentation(file.Src, file.Tokens[field.NameTok].Start)
+	documentation := sourceDocumentation(file.Src, syntax.TokenStart(file.Tokens[field.NameTok]))
 	return "field " + field.Name + " " + hoverSpanText(file, field.TypeStart, field.TypeEnd), documentation
 }
 
@@ -372,7 +372,7 @@ func hoverSpanText(file syntax.File, start, end int) string {
 	if start < 0 || end <= start || end > len(file.Tokens) {
 		return ""
 	}
-	first, last := file.Tokens[start].Start, file.Tokens[end-1].End
+	first, last := syntax.TokenStart(file.Tokens[start]), syntax.TokenEnd(file.Tokens[end-1])
 	if first < 0 || last < first || last > len(file.Src) {
 		return ""
 	}

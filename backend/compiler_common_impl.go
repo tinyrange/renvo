@@ -9969,55 +9969,9 @@ func renvoClearLocalConstAtOffset(g *renvoLinearGen, offset int) {
 
 func renvoLocalConstTrackable(g *renvoLinearGen, typ int, nameStart int, nameEnd int, afterTok int) bool {
 	renvoNonNil(g)
-	if renvoFixedTarget != 0 {
-		return false
-	}
-	resolved := renvoResolveType(g.meta, typ)
-	renvoNonNil(resolved)
-	if !renvoTypeKindIsScalarInt(resolved.kind) {
-		return false
-	}
-	return !renvoLocalNameWrittenAfter(g, nameStart, nameEnd, afterTok)
-}
-
-func renvoLocalNameWrittenAfter(g *renvoLinearGen, nameStart int, nameEnd int, afterTok int) bool {
-	renvoNonNil(g)
-	if nameEnd <= nameStart {
-		return true
-	}
-	p := g.prog
-	src := p.src
-	nameSize := nameEnd - nameStart
-	nameFirst := renvo_runtime_UnsafeByteAt(src, nameStart)
-	end := renvoTokCount(p)
-	if g.currentFunc >= 0 && g.currentFunc < len(g.meta.funcs) {
-		end = g.meta.funcs[g.currentFunc].bodyEnd
-	}
-	i := afterTok
-	if i < 0 {
-		i = 0
-	}
-	for i < end {
-		base := i * renvoTokenStride
-		first := int(renvo_runtime_UnsafeInt32At(p.toks.data, base))
-		packed := int(renvo_runtime_UnsafeInt32At(p.toks.data, base+1))
-		tokenStart := packed & 0xffffff
-		tokenEnd := tokenStart + (packed>>24&255 | first>>16&0xff00)
-		if first&255 == renvoTokIdent && tokenEnd-tokenStart == nameSize && renvo_runtime_UnsafeByteAt(src, tokenStart) == nameFirst && renvoBytesEqualRange(src, tokenStart, tokenEnd, nameStart, nameEnd) {
-			if i > 0 && renvoTokCharIs(p, i-1, '&') {
-				return true
-			}
-			if renvoTok2Is(p, i+1, '+', '+') || renvoTok2Is(p, i+1, '-', '-') {
-				return true
-			}
-			lineEnd := renvoStatementLineEnd(p, i, end)
-			assignTok := renvoFindAssignmentToken(p, i, lineEnd)
-			if assignTok > i {
-				return true
-			}
-		}
-		i++
-	}
+	// Proving that a local is never written requires rescanning the remainder of
+	// its function. That quadratic compile-time optimization costs more than the
+	// generated constant reloads it removes in large self-hosted programs.
 	return false
 }
 

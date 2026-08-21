@@ -115,7 +115,7 @@ func invalidDefiniteCallArgumentType(pkg *load.Package, info *PackageInfo, fileI
 		firstArg := file.Tokens[open+1]
 		hasLiteral := firstArg.KindLine&255 == syntax.TokenNumber || firstArg.KindLine&255 == syntax.TokenString
 		if !hasLiteral && firstArg.KindLine&255 == syntax.TokenIdent {
-			size := firstArg.End - firstArg.Start
+			size := int(firstArg.End - firstArg.Start)
 			hasLiteral = size == 4 && tokenTextIs(file, open+1, "true") || size == 5 && tokenTextIs(file, open+1, "false")
 		}
 		target := &targets[ref.Index]
@@ -175,10 +175,7 @@ func nextDefiniteCallComma(file *syntax.File, start int, end int) int {
 	braceDepth := 0
 	for i := start; i < end; i++ {
 		tok := file.Tokens[i]
-		c := byte(0)
-		if tok.KindLine&255 == syntax.TokenOperator && tok.End == tok.Start+1 {
-			c = file.Src[tok.Start]
-		}
+		c := byte(tok.KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask)
 		if c == '(' {
 			parenDepth++
 		} else if c == ')' {
