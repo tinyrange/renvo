@@ -78,6 +78,7 @@ func lowerFunctionValuesCore(program *unit.Program, transient bool) bool {
 	if !ok {
 		return false
 	}
+	signatures, fields = functionValueFieldSignatures(signatures, fields)
 	if len(signatures) == 0 {
 		return true
 	}
@@ -134,6 +135,29 @@ func lowerFunctionValuesCore(program *unit.Program, transient bool) bool {
 		arena.DiscardBytes(program.Text)
 	}
 	return reparseFunctionValueProgram(program, text, edits, originalLength, generatedStart)
+}
+
+func functionValueFieldSignatures(signatures []functionValueSignature, fields []functionValueField) ([]functionValueSignature, []functionValueField) {
+	used := make([]bool, len(signatures))
+	for i := 0; i < len(fields); i++ {
+		if fields[i].sig >= 0 && fields[i].sig < len(signatures) {
+			used[fields[i].sig] = true
+		}
+	}
+	remap := make([]int, len(signatures))
+	kept := make([]functionValueSignature, 0, len(signatures))
+	for i := 0; i < len(signatures); i++ {
+		remap[i] = -1
+		if !used[i] {
+			continue
+		}
+		remap[i] = len(kept)
+		kept = append(kept, signatures[i])
+	}
+	for i := 0; i < len(fields); i++ {
+		fields[i].sig = remap[fields[i].sig]
+	}
+	return kept, fields
 }
 
 func lowerDeferredBuiltins(program *unit.Program, transient bool) bool {

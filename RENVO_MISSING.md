@@ -30,10 +30,10 @@ agent.go:4:3: error RENVO-LOAD-020 (loader):
 standard library package context is not included in this RENVO build
 ```
 
-This confirms `context` as the first dependency blocker in source/import order.
-The compiler reports one loader failure at a time, so the remaining entries
-below are still based on the complete import/tree audit and will become visible
-progressively as packages are added.
+The initial `context` package now clears this loader blocker. Recompiling the
+external staragent source is the next way to identify the following missing
+package in import order; the remaining entries below still come from the complete
+import/tree audit.
 
 ## Implementation progress checklist
 
@@ -210,6 +210,19 @@ not mean the complete Go API is supported.
 - [ ] Complete the remaining audited surfaces in `errors`, `fmt`, `os`, `sort`,
   and `strconv`.
 
+### Initial `context` work
+
+- [x] Added `Context`, `CancelFunc`, `CancelCauseFunc`, `Background`, `TODO`,
+  `WithCancel`, `WithCancelCause`, `Cause`, and `WithValue`.
+- [x] Host-Go tests cover empty contexts, nested values, cancellation trees,
+  cause propagation, idempotent cancellation, and child/parent independence.
+- [x] Renvo execution covers creating and invoking a returned `CancelFunc` and
+  observing `Canceled` through `Err` with the serial runtime installed.
+- [ ] Receiving from `Context.Done()` through an interface currently fails in
+  frontend linking; the focused failure is recorded in `COMPILER_BUGS.md`.
+- [ ] Add `WithDeadline`, `WithTimeout`, timer wakeups, and external-parent
+  cancellation observation.
+
 ### Remaining inventory
 
 All other packages and hosted-runtime facilities below remain unchecked and are
@@ -222,7 +235,6 @@ The following production imports have no corresponding package in Renvo's
 
 | Package | Staragent usage | Priority |
 |---|---|---|
-| `context` | cancellation across agent, HTTP, evaluation, and processes | Required |
 | `math` | floating-point equality in the embedded Starlark implementation | Required |
 | `net/http` | OpenAI and Codex HTTP clients | Required and substantial |
 | `os/exec` | trusted host commands exported from `AGENTS.star` | Required for full functionality |

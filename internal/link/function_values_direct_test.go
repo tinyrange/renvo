@@ -64,3 +64,33 @@ func main() { callback.NewScanner() }
 		t.Fatalf("direct function composite field was not lowered:\n%s", linked.Program.Text)
 	}
 }
+
+func TestFunctionValueNamedReturnWithoutFieldKeepsNativeRepresentation(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+type CancelFunc func()
+
+func withCancel(value *int) CancelFunc {
+	return func() { *value = 42 }
+}
+
+func main() {
+	value := 0
+	cancel := withCancel(&value)
+	cancel()
+	if value == 42 { print("PASS\n") }
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	if !bytes.Contains(linked.Program.Text, []byte("type CancelFunc func()")) ||
+		bytes.Contains(linked.Program.Text, []byte("type CancelFunc struct")) ||
+		bytes.Contains(linked.Program.Text, []byte("__renvo_call_")) {
+		t.Fatalf("field-free named function value was unnecessarily lowered:\n%s", linked.Program.Text)
+	}
+}
