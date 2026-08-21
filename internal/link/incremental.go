@@ -189,7 +189,7 @@ func linkOnePackageArtifactCore(src unit.Program, aliases []string, symbolOffset
 	artifact.Decls = make([]unit.Decl, 0, len(src.Decls))
 	artifact.Funcs = make([]unit.Func, 0, len(src.Funcs))
 	artifact.ConcurrencySites = make([]unit.ConcurrencySite, 0, len(src.ConcurrencySites))
-	ok, line := appendProgramCore(&artifact, src, actions, finalEOF, 1, aliases, false)
+	ok, line := appendProgramCore(&artifact, src, actions, finalEOF, 1, aliases, false, false)
 	if !ok {
 		return empty, false
 	}
