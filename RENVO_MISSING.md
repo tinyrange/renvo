@@ -205,8 +205,11 @@ not mean the complete Go API is supported.
   formatting, with host-Go tests and a Renvo-compiled regression.
   - [x] `Now` reads native realtime and monotonic clocks on Linux and
     darwin/arm64; `Since` uses monotonic elapsed time when both values carry it.
-  - [ ] Timers, sleeps, deadline wakeups, named locations, and general Go layouts
-    still require additional runtime and package support.
+  - [x] `Sleep`, `After`, `NewTimer`, and `Timer.Stop` are implemented over the
+    `x/runtime` TimerHandler ABI, with host-Go tests and the
+    `frontend_tests/regressions/std_time_timer` Renvo regression.
+  - [ ] Named locations, ticker surfaces, and general Go layouts still require
+    additional runtime and package support.
 - [x] `errors`: identity-preserving `New`, single and multi-error traversal for
   `Is`, custom `Is`/`As`, `Unwrap`, `Join`, and direct assignment to `*error`,
   with host-Go and Renvo-compiled coverage.
@@ -228,10 +231,13 @@ not mean the complete Go API is supported.
   cause propagation, idempotent cancellation, and child/parent independence.
 - [x] Renvo execution covers creating and invoking a returned `CancelFunc` and
   observing `Canceled` through `Err` with the serial runtime installed.
-- [ ] Receiving from `Context.Done()` through an interface currently fails in
-  frontend linking; the focused failure is recorded in `COMPILER_BUGS.md`.
-- [ ] Add `WithDeadline`, `WithTimeout`, timer wakeups, and external-parent
-  cancellation observation.
+- [x] Receiving from `Context.Done()` through an interface links and runs; the
+  frontend linker now lowers interface method result channels, covered by an
+  internal/link test and `backend/tests/interface_method_tuple_return`.
+- [x] `WithDeadline`, `WithTimeout`, timer wakeups, and external-parent
+  cancellation observation are implemented, with host tests and the
+  `std_context_deadline*`, `std_context_external`, `std_context_propagation`,
+  and `std_context_wakeup` Renvo regressions.
 
 ### Remaining inventory
 

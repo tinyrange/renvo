@@ -982,10 +982,14 @@ func corePackageSymbolAliases(programs []unit.Program, root int, symbolOffsets [
 	next := make([]int, total)
 	names := make([]string, total)
 	duplicate := make([]bool, total)
+	methods := coreMethodSymbolFlags(programs, symbolOffsets)
 	for i := 0; i < len(programs); i++ {
 		initOrdinal := 0
 		for j := 0; j < len(programs[i].Symbols); j++ {
 			index := symbolOffsets[i] + j
+			if methods[index] {
+				continue
+			}
 			name := programs[i].Symbols[j].Name
 			names[index] = name
 			directiveSize := -1
@@ -1300,6 +1304,35 @@ func normalizeCoreLinkedReceiver(fn *unit.Func, eof int) {
 		fn.ReceiverStart = 0
 		fn.ReceiverEnd = 0
 	}
+}
+
+// coreMethodSymbolFlags reports which symbols are method declarations. The
+// backend resolves method calls by receiver type plus source name at emit
+// time, so method names must stay intact even when a same-named symbol exists
+// in another package; renaming a method would orphan every call site.
+func coreMethodSymbolFlags(programs []unit.Program, symbolOffsets []int) []bool {
+	total := 0
+	if len(programs) > 0 {
+		last := len(programs) - 1
+		total = symbolOffsets[last] + len(programs[last].Symbols)
+	}
+	out := make([]bool, total)
+	for i := 0; i < len(programs); i++ {
+		program := &programs[i]
+		for f := 0; f < len(program.Funcs); f++ {
+			fn := program.Funcs[f]
+			if fn.ReceiverStart >= fn.ReceiverEnd {
+				continue
+			}
+			for j := 0; j < len(program.Symbols); j++ {
+				if program.Symbols[j].Token == fn.NameTok {
+					out[symbolOffsets[i]+j] = true
+					break
+				}
+			}
+		}
+	}
+	return out
 }
 
 func corePackageSymbolOffsets(programs []unit.Program) []int {
