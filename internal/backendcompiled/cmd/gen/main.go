@@ -175,7 +175,11 @@ func specializePreparationSource(name string, source []byte) ([]byte, error) {
 	if name != "compiler_target_policy_impl.go" {
 		return source, nil
 	}
-	const identifier = "renvoPreparedBackend"
+	const ordinaryTag = "//go:build !renvo_prepared\n"
+	if !bytes.HasPrefix(source, []byte(ordinaryTag)) {
+		return nil, fmt.Errorf("%s does not declare the ordinary preparation build tag", name)
+	}
+	const identifier = "renvoPreparedBackendActive"
 	files := token.NewFileSet()
 	file, err := parser.ParseFile(files, name, source, 0)
 	if err != nil {
@@ -211,10 +215,17 @@ func specializePreparationSource(name string, source []byte) ([]byte, error) {
 	if start < 0 || end <= start {
 		return nil, fmt.Errorf("%s does not declare the preparation const %s", name, identifier)
 	}
-	prepared := make([]byte, 0, len(source)-end+start+1)
-	prepared = append(prepared, source[:start]...)
+	preparedTag := "//go:build renvo_prepared\n\n// Code generated from compiler_target_policy_impl.go; DO NOT EDIT.\n"
+	prepared := make([]byte, 0, len(source)+len(preparedTag)-len(ordinaryTag)-end+start+1)
+	prepared = append(prepared, preparedTag...)
+	prepared = append(prepared, source[len(ordinaryTag):start]...)
 	prepared = append(prepared, '1')
 	prepared = append(prepared, source[end:]...)
+	const ordinaryStructuredMode = "const renvoRTGStructuredFunctions = 0\n"
+	if bytes.Count(prepared, []byte(ordinaryStructuredMode)) != 1 {
+		return nil, fmt.Errorf("%s does not declare one ordinary structured-function const", name)
+	}
+	prepared = bytes.Replace(prepared, []byte(ordinaryStructuredMode), nil, 1)
 	return prepared, nil
 }
 

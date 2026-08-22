@@ -444,7 +444,6 @@ func renvoRTGABIAddressFrame(out *renvoAsm, destination RTGRegister, offset int)
 func renvoRTGABIStoreParamWord(out *renvoAsm, word int, offset int) bool { return false }
 func renvoRTGABICallWordCount(out *renvoAsm, label int, wordCount int) bool { return false }
 func renvoRTGMarkLabel(out *renvoAsm, label int) {}
-const renvoRTGStructuredFunctions = 0
 func renvoRTGFunctionStart(out *renvoAsm, label int) {}
 func renvoRTGFunctionFinish(out *renvoAsm) {}
 func renvoRTGEmitJITCall(out *renvoAsm, entry RTGRegister, stackTop RTGRegister, argsData RTGRegister, argsLen RTGRegister, envData RTGRegister, envLen RTGRegister) bool { return false }

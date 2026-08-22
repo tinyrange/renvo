@@ -260,29 +260,32 @@ func renvoQueueStructuredHelper(g *renvoLinearGen, kind int, arg int, label int)
 }
 
 func renvoEmitStructuredHelper(g *renvoLinearGen, kind int, arg int, label int) bool {
-	renvoRTGFunctionStart(&g.asm, label)
-	renvoAsmMarkLabel(&g.asm, label)
-	if kind == renvoStructuredHelperSignedDivide {
-		renvoEmitSignedDivisionHelperBody(g, arg != 0)
-	} else if kind == renvoStructuredHelperMakeZero {
-		renvoEmitMakeZeroHelperBody(g)
-	} else if kind == renvoStructuredHelperFault {
-		renvoEmitUncaughtFaultHelperBody(g, arg != 0)
-	} else if kind == renvoStructuredHelperStringEqual {
-		renvoRTGEmitStringEqualHelperBody(g)
-	} else if kind == renvoStructuredHelperArenaAlloc {
-		renvoEmitArenaAllocHelperBody(g, arg != 0)
-	} else if kind == renvoStructuredHelperIndexAddress {
-		renvoEmitIndexAddressHelperBody(g, arg)
-	} else if kind == renvoStructuredHelperBoundsCheck {
-		renvoEmitBoundsCheckHelperBody(g)
-	} else if kind == renvoStructuredHelperNonNil {
-		renvoEmitNonNilCheckHelperBody(g, arg != 0)
-	} else {
-		return false
+	if renvoRTGStructuredFunctions != 0 {
+		renvoRTGFunctionStart(&g.asm, label)
+		renvoAsmMarkLabel(&g.asm, label)
+		if kind == renvoStructuredHelperSignedDivide {
+			renvoEmitSignedDivisionHelperBody(g, arg != 0)
+		} else if kind == renvoStructuredHelperMakeZero {
+			renvoEmitMakeZeroHelperBody(g)
+		} else if kind == renvoStructuredHelperFault {
+			renvoEmitUncaughtFaultHelperBody(g, arg != 0)
+		} else if kind == renvoStructuredHelperStringEqual {
+			renvoRTGEmitStringEqualHelperBody(g)
+		} else if kind == renvoStructuredHelperArenaAlloc {
+			renvoEmitArenaAllocHelperBody(g, arg != 0)
+		} else if kind == renvoStructuredHelperIndexAddress {
+			renvoEmitIndexAddressHelperBody(g, arg)
+		} else if kind == renvoStructuredHelperBoundsCheck {
+			renvoEmitBoundsCheckHelperBody(g)
+		} else if kind == renvoStructuredHelperNonNil {
+			renvoEmitNonNilCheckHelperBody(g, arg != 0)
+		} else {
+			return false
+		}
+		renvoRTGFunctionFinish(&g.asm)
+		return true
 	}
-	renvoRTGFunctionFinish(&g.asm)
-	return true
+	return false
 }
 
 func renvoEmitAllQueuedFunctionsScratch(g *renvoLinearGen) bool {

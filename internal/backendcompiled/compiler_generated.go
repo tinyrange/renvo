@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "e8051c2c1dee55fcb3973210e8922302dc3029eda209a5d1c0c92d2731872e76"
+const CompilerSourceDigest = "7fc51c6d122e153b467695e44eab1c9b1cf47541a4d01fe5f8040c99772ee30b"
 
 // source: backend/compiler_common_impl.go
 
@@ -267,6 +267,7 @@ g.structuredHelperCount++
 }
 
 func renvoEmitStructuredHelper(g *renvoLinearGen, kind int, arg int, label int) bool {
+if renvoRTGStructuredFunctions != 0 {
 renvoRTGFunctionStart(&g.asm, label)
 renvoAsmMarkLabel(&g.asm, label)
 if kind == renvoStructuredHelperSignedDivide {
@@ -290,6 +291,8 @@ return false
 }
 renvoRTGFunctionFinish(&g.asm)
 return true
+}
+return false
 }
 
 func renvoEmitAllQueuedFunctionsScratch(g *renvoLinearGen) bool {
@@ -31868,7 +31871,8 @@ return true
 
 // source: backend/compiler_target_policy_impl.go
 
-const renvoPreparedBackend = 0
+const renvoPreparedBackendActive = 0
+const renvoRTGStructuredFunctions = 0
 
 
 const renvoTargetLinuxAmd64 = 1
@@ -31912,11 +31916,6 @@ const renvoOSNetBSD = 9
 
 
 const renvoTargetRTG = 15
-
-
-
-
-const renvoPreparedBackendActive = renvoPreparedBackend + renvoRTGPreparedIntBits
 
 const renvoEndianLittle = 1
 const renvoEndianBig = 2
@@ -33886,7 +33885,6 @@ func renvoRTGABIAddressFrame(out *renvoAsm, destination RTGRegister, offset int)
 func renvoRTGABIStoreParamWord(out *renvoAsm, word int, offset int) bool { return false }
 func renvoRTGABICallWordCount(out *renvoAsm, label int, wordCount int) bool { return false }
 func renvoRTGMarkLabel(out *renvoAsm, label int) {}
-const renvoRTGStructuredFunctions = 0
 func renvoRTGFunctionStart(out *renvoAsm, label int) {}
 func renvoRTGFunctionFinish(out *renvoAsm) {}
 func renvoRTGEmitJITCall(out *renvoAsm, entry RTGRegister, stackTop RTGRegister, argsData RTGRegister, argsLen RTGRegister, envData RTGRegister, envLen RTGRegister) bool { return false }

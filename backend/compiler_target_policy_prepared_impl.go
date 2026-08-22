@@ -1,9 +1,10 @@
-//go:build !renvo_prepared
+//go:build renvo_prepared
+
+// Code generated from compiler_target_policy_impl.go; DO NOT EDIT.
 
 package main
 
-const renvoPreparedBackendActive = 0
-const renvoRTGStructuredFunctions = 0
+const renvoPreparedBackendActive = 1
 
 // BEGIN GENERATED TARGET REGISTRY
 const renvoTargetLinuxAmd64 = 1

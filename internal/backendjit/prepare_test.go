@@ -55,7 +55,7 @@ func TestPreparationBundleCarriesTypedSettings(t *testing.T) {
 		}
 		if name == "compiler_target_policy_impl.go" {
 			foundPreparedMode =
-				bytes.Contains([]byte(source), []byte("const renvoPreparedBackend = 1"))
+				bytes.Contains([]byte(source), []byte("const renvoPreparedBackendActive = 1"))
 		}
 	}
 	if !foundMain || !foundPreparedMode {
@@ -66,7 +66,7 @@ func TestPreparationBundleCarriesTypedSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(source, []byte("const renvoPreparedBackend = 0")) {
+	if !bytes.Contains(source, []byte("const renvoPreparedBackendActive = 0")) {
 		t.Fatal("checked-in compiler policy did not retain built-in mode")
 	}
 }
