@@ -607,7 +607,7 @@ func renvoEmitExitStatus(g *renvoLinearGen) bool {
 
 func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
 	renvoNonNil(g, fn)
-	if renvoIsHostedObject386(g.c) {
+	if renvoFixedTarget == 0 && renvoIsHostedObject386(g.c) {
 		importID := renvoAsmAddExternalImportRange(&g.asm,
 			g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
 		if importID < 0 {
@@ -616,7 +616,7 @@ func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int
 		renvoAsmEmit8(&g.asm, 0xe8)
 		at := len(g.asm.code)
 		renvoAsmEmit32(&g.asm, 0)
-		renvoAsmAddAbsReloc(&g.asm, at, importID, renvoKernelAmd64RelocationImport)
+		renvoAsmAddAbsReloc(&g.asm, at, importID, renvoImportReloc)
 		if wordCount > 0 {
 			bytes := wordCount * 4
 			if renvoAsmImmFits8Signed(bytes) {
@@ -628,7 +628,7 @@ func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int
 		}
 		return true
 	}
-	if renvoIsHostedObjectAmd64(g.c) {
+	if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
 		memoryAggregate := renvoEmitCObjectMemoryAggregateCall(g, fn, wordCount)
 		if memoryAggregate >= 0 {
 			return memoryAggregate != 0
@@ -983,6 +983,9 @@ func renvoAsmAddPreparedStaticImport(
 	a *renvoAsm, libraryStart int, libraryEnd int,
 	nameStart int, nameEnd int, src []byte,
 ) int {
+	if renvoFixedTarget != 0 {
+		return -1
+	}
 	renvoNonNil(a)
 	library := renvoStringFromBytes(src, libraryStart, libraryEnd)
 	name := renvoStringFromBytes(src, nameStart, nameEnd)

@@ -279,8 +279,10 @@ func buildFromFSOptions(options Options, workDir string, stdRoot string, moduleC
 	}
 	var built pipeline.Result
 	if compact && options.Mode == ModeObject {
-		built = pipeline.BuildObjectUnitWithTransientFilesCached(
-			workDir, stdRoot, rootArg, sources.Files, sourcesStart, sourcesEnd)
+		// Object linking temporarily rewrites source-token line fields. Keep the
+		// source package resident until it restores them; the ordinary transient
+		// pipeline can otherwise recycle that storage into the destination unit.
+		built = pipeline.BuildObjectUnit(workDir, stdRoot, rootArg, sources.Files)
 	} else if options.Mode == ModeObject {
 		built = pipeline.BuildObjectUnit(workDir, stdRoot, rootArg, sources.Files)
 	} else if compact {

@@ -100,9 +100,10 @@ func (s *FSBuildSession) Step() bool {
 			s.rootArg = sources.Root.Dir
 		}
 		if options.Mode == ModeObject {
+			// Object linking rewrites source-token line fields while producing the
+			// compact mapping, so its source arena cannot yet be transient.
 			s.pipeline = pipeline.BeginObjectSession(
-				s.workDir, s.stdRoot, s.rootArg, sources.Files,
-				s.sourcesStart, s.sourcesEnd, s.compact, s.cached)
+				s.workDir, s.stdRoot, s.rootArg, sources.Files, s.cached)
 		} else {
 			s.pipeline = pipeline.BeginSession(
 				s.workDir, s.stdRoot, s.rootArg, sources.Files,

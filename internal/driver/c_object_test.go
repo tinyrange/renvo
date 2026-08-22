@@ -7,6 +7,57 @@ import (
 	"renvo.dev/internal/load"
 )
 
+type cIncludeDiscoveryFS struct {
+	directories map[string][]DirEntry
+	paths       map[string]bool
+}
+
+func (fs cIncludeDiscoveryFS) ReadDir(path string) ([]DirEntry, bool) {
+	entries, ok := fs.directories[path]
+	return entries, ok
+}
+
+func (cIncludeDiscoveryFS) ReadFile(string) ([]byte, bool) { return nil, false }
+
+func (fs cIncludeDiscoveryFS) PathExists(path string) bool { return fs.paths[path] }
+
+func TestCObjectIncludePathsSelectNewestGCCVersionNumerically(t *testing.T) {
+	fs := cIncludeDiscoveryFS{
+		directories: map[string][]DirEntry{
+			"/usr/lib/gcc": {
+				{Name: "x86_64-linux-gnu", IsDir: true},
+			},
+			"/usr/lib/gcc/x86_64-linux-gnu": {
+				{Name: "9", IsDir: true},
+				{Name: "14.2.0", IsDir: true},
+				{Name: "15-snapshot", IsDir: true},
+				{Name: "13", IsDir: true},
+			},
+		},
+		paths: map[string]bool{
+			"/usr/lib/gcc/x86_64-linux-gnu/9/include":           true,
+			"/usr/lib/gcc/x86_64-linux-gnu/14.2.0/include":      true,
+			"/usr/lib/gcc/x86_64-linux-gnu/15-snapshot/include": true,
+			"/usr/lib/gcc/x86_64-linux-gnu/13/include":          true,
+			"/usr/include": true,
+		},
+	}
+	got := cObjectIncludePaths("/repo", []string{"include"}, false, fs)
+	want := []string{
+		"/repo/include",
+		"/usr/lib/gcc/x86_64-linux-gnu/14.2.0/include",
+		"/usr/include",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("include paths = %#v, want %#v", got, want)
+	}
+	for i := 0; i < len(want); i++ {
+		if got[i] != want[i] {
+			t.Fatalf("include path %d = %q, want %q in %#v", i, got[i], want[i], got)
+		}
+	}
+}
+
 func TestBuildCObjectReadsExplicitSystemHeader(t *testing.T) {
 	fs := memorySourceFS{files: []load.SourceFile{
 		{Path: "/repo/case/main.c", Src: []byte("#include <stdio.h>\nint main(void) { puts(\"PASS\"); return 0; }\n")},

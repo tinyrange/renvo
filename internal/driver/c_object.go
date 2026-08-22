@@ -245,15 +245,19 @@ func cObjectIncludePaths(workDir string, explicit []string, noStandard bool, fs 
 			if !readable {
 				continue
 			}
-			sortDirEntries(versions)
-			for j := len(versions) - 1; j >= 0; j-- {
-				if !versions[j].IsDir {
+			bestVersion := ""
+			for j := 0; j < len(versions); j++ {
+				if !versions[j].IsDir || !gccVersionNewer(versions[j].Name, bestVersion) {
 					continue
 				}
 				include := load.JoinPath(load.JoinPath(targetRoot, versions[j].Name), "include")
 				if fs.PathExists(include) {
-					paths = appendUniquePath(paths, include)
+					bestVersion = versions[j].Name
 				}
+			}
+			if bestVersion != "" {
+				paths = appendUniquePath(paths, load.JoinPath(
+					load.JoinPath(targetRoot, bestVersion), "include"))
 			}
 		}
 	}
@@ -267,6 +271,75 @@ func cObjectIncludePaths(workDir string, explicit []string, noStandard bool, fs 
 		paths = appendUniquePath(paths, "/usr/include")
 	}
 	return paths
+}
+
+func gccVersionNewer(candidate string, current string) bool {
+	if !validGCCVersion(candidate) {
+		return false
+	}
+	if current == "" {
+		return true
+	}
+	left := 0
+	right := 0
+	for left < len(candidate) || right < len(current) {
+		leftPart, leftNext := gccVersionPart(candidate, left)
+		rightPart, rightNext := gccVersionPart(current, right)
+		leftPart = trimVersionZeros(leftPart)
+		rightPart = trimVersionZeros(rightPart)
+		if len(leftPart) != len(rightPart) {
+			return len(leftPart) > len(rightPart)
+		}
+		if leftPart != rightPart {
+			return leftPart > rightPart
+		}
+		left = leftNext
+		right = rightNext
+	}
+	return candidate > current
+}
+
+func validGCCVersion(version string) bool {
+	if len(version) == 0 || version[0] == '.' || version[len(version)-1] == '.' {
+		return false
+	}
+	previousDot := false
+	for i := 0; i < len(version); i++ {
+		if version[i] == '.' {
+			if previousDot {
+				return false
+			}
+			previousDot = true
+			continue
+		}
+		if version[i] < '0' || version[i] > '9' {
+			return false
+		}
+		previousDot = false
+	}
+	return true
+}
+
+func gccVersionPart(version string, at int) (string, int) {
+	if at >= len(version) {
+		return "", at
+	}
+	end := at
+	for end < len(version) && version[end] != '.' {
+		end++
+	}
+	next := end
+	if next < len(version) {
+		next++
+	}
+	return version[at:end], next
+}
+
+func trimVersionZeros(part string) string {
+	for len(part) > 0 && part[0] == '0' {
+		part = part[1:]
+	}
+	return part
 }
 
 func appendUniquePath(paths []string, path string) []string {

@@ -11,6 +11,7 @@ import (
 const (
 	frontendBackendsReference = int64(2_000_000)
 	frontendBundleReference   = int64(4 * 1024 * 1024)
+	frontendPayloadMax        = int64(4 * 1024 * 1024)
 )
 
 func TestFrontendWithBackendsSize(t *testing.T) {
@@ -55,4 +56,7 @@ func recordFrontendPayloadSize(t *testing.T, path, measurement string, reference
 		t.Fatal(err)
 	}
 	t.Logf("%s payload=%dB previous reference=%dB delta=%+dB", measurement, info.Size(), reference, info.Size()-reference)
+	if info.Size() > frontendPayloadMax {
+		t.Fatalf("%s payload=%dB > %dB", measurement, info.Size(), frontendPayloadMax)
+	}
 }

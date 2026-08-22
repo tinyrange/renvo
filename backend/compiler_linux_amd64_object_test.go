@@ -1718,7 +1718,7 @@ func TestLinuxAmd64ObjectMapsInteriorAnonymousBSS(t *testing.T) {
 	})
 	asm.bssSize = 32
 
-	image := renvoAsmImageKernelObjectAmd64(&asm)
+	image := renvoAsmImageRelocatableObjectAmd64(&asm)
 	if len(image) == 0 {
 		t.Fatal("object writer rejected an interior anonymous BSS range")
 	}

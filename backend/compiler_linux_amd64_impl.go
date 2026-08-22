@@ -121,7 +121,7 @@ func renvoAsmBuildArgvEnvSlicesAmd64(a *renvoAsm, argsOff int, environmentOff in
 
 
 func renvoAsmImageObjectAmd64(emitter *renvoAsm) []byte {
-	return renvoAsmImageKernelObjectAmd64(emitter)
+	return renvoAsmImageRelocatableObjectAmd64(emitter)
 }
 
 func renvoAmd64EmitObjectStaticCall(out *renvoAsm, importID int, wordCount int) {

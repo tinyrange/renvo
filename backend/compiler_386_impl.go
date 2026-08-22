@@ -3,7 +3,7 @@ package main
 const renvo386ELFCodeOffset = 0x74
 
 func renvoAsmImageObject386(emitter *renvoAsm) []byte {
-	return renvoAsmImageKernelObject386(emitter)
+	return renvoAsmImageRelocatableObject386(emitter)
 }
 
 func renvoTryCompileScalarProgram386(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
@@ -26,8 +26,10 @@ func renvoTryCompileScalarProgram386Cached(p *renvoProgram, meta *renvoMeta) ren
 	return renvoFinishScalarProgram386(g)
 }
 func renvoBeginScalarProgram386(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
-	if renvoIsHostedObject386(meta.c) {
-		return renvoBeginObjectProgram(p, meta)
+	if renvoFixedTarget == 0 {
+		if renvoIsHostedObject386(meta.c) {
+			return renvoBeginObjectProgram(p, meta)
+		}
 	}
 	appIndex := -1
 	for i := 0; i < len(meta.funcs); i++ {
@@ -117,12 +119,12 @@ func renvoEmitImageEntryArgs386(g *renvoLinearGen, appIndex int) bool {
 func renvoFinishScalarProgram386(g *renvoLinearGen) renvoCompileResult {
 	renvoNonNil(g)
 	a := &g.asm
-	if renvoIsHostedObject386(g.c) {
+	if renvoFixedTarget == 0 && renvoIsHostedObject386(g.c) {
 		renvoRecordObjectFunctionRanges(g)
 	}
 	renvo_runtime_ArenaDiscard(g.meta.scratchStart, g.meta.scratchEnd)
 	var data []byte
-	if renvoIsHostedObject386(g.c) {
+	if renvoFixedTarget == 0 && renvoIsHostedObject386(g.c) {
 		data = renvoAsmImageObject386(a)
 	} else if targetIsWindows(g.c.renvoTargetOS) {
 		data = renvoAsmImageWindows386(a)

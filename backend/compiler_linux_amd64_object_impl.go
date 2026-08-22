@@ -73,15 +73,15 @@ func renvoObjectImageFail(reason string) []byte {
 	return nil
 }
 
-func renvoAsmImageKernelObjectAmd64(a *renvoAsm) []byte {
-	return renvoAsmImageKernelObjectX86(a, false)
+func renvoAsmImageRelocatableObjectAmd64(a *renvoAsm) []byte {
+	return renvoAsmImageRelocatableObjectX86(a, false)
 }
 
-func renvoAsmImageKernelObject386(a *renvoAsm) []byte {
-	return renvoAsmImageKernelObjectX86(a, true)
+func renvoAsmImageRelocatableObject386(a *renvoAsm) []byte {
+	return renvoAsmImageRelocatableObjectX86(a, true)
 }
 
-func renvoAsmImageKernelObjectX86(a *renvoAsm, elf386 bool) []byte {
+func renvoAsmImageRelocatableObjectX86(a *renvoAsm, elf386 bool) []byte {
 	renvoNonNil(a)
 	sections := []renvoObjectELFSection{{}}
 	ranges := renvoObjectCodeRanges(a)
@@ -380,7 +380,7 @@ func renvoAsmImageKernelObjectX86(a *renvoAsm, elf386 bool) []byte {
 			return renvoObjectImageFail("absolute relocation source missing")
 		}
 		targetSymbol, targetOffset, relocationType := 0, 0, 2
-		if kind == renvoKernelAmd64RelocationImport {
+		if kind == renvoImportReloc {
 			if addend < 0 || addend >= len(importSymbols) {
 				return renvoObjectImageFail("absolute import index invalid")
 			}
@@ -425,7 +425,7 @@ func renvoAsmImageKernelObjectX86(a *renvoAsm, elf386 bool) []byte {
 		}
 		renvoPut32At(sections[sourceSection].data, sourceOffset, 0)
 		relocationAddend := targetOffset - 4
-		if elf386 && kind != renvoKernelAmd64RelocationImport {
+		if elf386 && kind != renvoImportReloc {
 			relocationType = 1
 			relocationAddend = targetOffset
 		}
@@ -621,7 +621,7 @@ func renvoObjectImportReferenced(a *renvoAsm, importID int) bool {
 	for i := 0; i+2 < len(a.absRelocs); i += 3 {
 		addend := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1)) & 2147483647
 		kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2)) & 2147483647
-		if kind == renvoKernelAmd64RelocationImport && addend == importID {
+		if kind == renvoImportReloc && addend == importID {
 			return true
 		}
 		if kind == renvoKernelAmd64RelocationAbsoluteBSS {

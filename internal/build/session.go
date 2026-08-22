@@ -32,8 +32,8 @@ func BeginProgramsSession(graph load.Graph, transient bool, cached bool) *Progra
 	return beginProgramsSession(graph, transient, cached, cached, true)
 }
 
-func BeginObjectProgramsSession(graph load.Graph, transient bool, cached bool) *ProgramSession {
-	return beginProgramsSession(graph, transient, cached, cached, false)
+func BeginObjectProgramsSession(graph load.Graph, cached bool) *ProgramSession {
+	return beginProgramsSession(graph, false, cached, cached, false)
 }
 
 func beginProgramsSession(graph load.Graph, transient bool, cached bool, identities bool, requireMain bool) *ProgramSession {

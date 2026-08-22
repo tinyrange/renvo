@@ -32,8 +32,8 @@ func BeginSession(workDir string, stdRoot string, arg string, files []load.Sourc
 	return beginSession(workDir, stdRoot, arg, files, filesStart, filesEnd, transient, cached, false)
 }
 
-func BeginObjectSession(workDir string, stdRoot string, arg string, files []load.SourceFile, filesStart int, filesEnd int, transient bool, cached bool) *Session {
-	return beginSession(workDir, stdRoot, arg, files, filesStart, filesEnd, transient, cached, true)
+func BeginObjectSession(workDir string, stdRoot string, arg string, files []load.SourceFile, cached bool) *Session {
+	return beginSession(workDir, stdRoot, arg, files, 0, 0, false, cached, true)
 }
 
 func beginSession(workDir string, stdRoot string, arg string, files []load.SourceFile, filesStart int, filesEnd int, transient bool, cached bool, object bool) *Session {
@@ -75,7 +75,7 @@ func (s *Session) Step() bool {
 			return true
 		}
 		if s.object {
-			s.builder = build.BeginObjectProgramsSession(workspace.Graph, s.transient, s.cached)
+			s.builder = build.BeginObjectProgramsSession(workspace.Graph, s.cached)
 		} else {
 			s.builder = build.BeginProgramsSession(workspace.Graph, s.transient, s.cached)
 		}
@@ -95,9 +95,7 @@ func (s *Session) Step() bool {
 		}
 		if !s.cached {
 			var linked link.Result
-			if s.object && s.transient {
-				linked = link.LinkBuildObjectCoreTransient(built)
-			} else if s.object {
+			if s.object {
 				linked = link.LinkBuildObjectCore(built)
 			} else if s.transient {
 				linked = link.LinkBuildCoreTransient(built)

@@ -44,7 +44,7 @@ func compileMobileProgram(
 		filepath.Join(root, program),
 	}, root, filepath.Join(root, "std"), driver.OSFS{},
 		New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
-			t.TempDir(), backendcompiled.Backend{}))
+			backendJITTestCacheDir, backendcompiled.Backend{}))
 	if !result.Ok {
 		t.Fatalf("%s custom backend compile failed: %#v", target, result.Diagnostic)
 	}

@@ -57,12 +57,6 @@ func BuildProgramsTransient(graph load.Graph) Result {
 	return buildProgramsDirect(graph, true, true)
 }
 
-// BuildObjectProgramsTransient checks and lowers a translation unit without
-// imposing executable-package entrypoint rules on its root package.
-func BuildObjectProgramsTransient(graph load.Graph) Result {
-	return buildProgramsDirect(graph, true, false)
-}
-
 // BuildProgramsTransientCached reuses lowered dependency packages when their
 // source and graph position are unchanged. The root package is always checked
 // and lowered so an editor build never conceals changes in the user's code.

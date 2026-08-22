@@ -249,7 +249,7 @@ func appendCheckedInLinuxAmd64Entry(source []byte, template runtimeEntryTemplate
 const checkedInLinuxAmd64GeneralObjectImageSource = `
 
 func renvoAsmImageObjectAmd64(emitter *renvoAsm) []byte {
-	return renvoAsmImageKernelObjectAmd64(emitter)
+	return renvoAsmImageRelocatableObjectAmd64(emitter)
 }
 `
 

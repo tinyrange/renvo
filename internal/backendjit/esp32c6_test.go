@@ -28,7 +28,7 @@ func TestCompiledInBootstrapPreparesESP32C6Definition(t *testing.T) {
 		filepath.Join(root, "examples", "m5nanoc6", "oracle"),
 	}, root, filepath.Join(root, "std"), driver.OSFS{},
 		New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
-			t.TempDir(), backendcompiled.Backend{}))
+			backendJITTestCacheDir, backendcompiled.Backend{}))
 	if !result.Ok {
 		t.Fatalf("ESP32-C6 custom backend compile failed: %#v", result.Diagnostic)
 	}
@@ -90,7 +90,7 @@ func TestCompiledInBootstrapCompilesESP32C6MicrocontrollerSuite(t *testing.T) {
 		filepath.Join(root, "frontend_tests", "single_file_microcontroller"),
 	}, root, filepath.Join(root, "std"), driver.OSFS{},
 		New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
-			t.TempDir(), backendcompiled.Backend{}))
+			backendJITTestCacheDir, backendcompiled.Backend{}))
 	if !result.Ok {
 		t.Fatalf("ESP32-C6 microcontroller suite compile failed: %#v", result.Diagnostic)
 	}
