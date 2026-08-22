@@ -219,6 +219,12 @@ func appendPreparedTargetFacts(source []byte, descriptor TargetDescriptor, activ
 	} else {
 		source = append(source, '0')
 	}
+	source = append(source, "\nconst renvoRTGPreparedSysVX8664 = "...)
+	if active && descriptor.ABI == "sysv_x86_64" {
+		source = append(source, '1')
+	} else {
+		source = append(source, '0')
+	}
 	source = append(source, "\nconst renvoRTGPreparedFunctionSymbols = "...)
 	if active && (stringIndex(descriptor.Capabilities, "function_symbols") >= 0 ||
 		descriptor.OutputKind == "rnvm" ||

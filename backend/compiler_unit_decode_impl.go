@@ -290,6 +290,7 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 		return false
 	}
 	prog.src = text
+	prog.c11Semantics = renvoSourceHasC11Directive(text)
 	prog.toks.data = tokens
 	prog.toks.lineBases = lineBases
 	prog.toks.count = tokenCount

@@ -102,6 +102,13 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 	if root < 0 || root >= len(programs) || rootName == "" {
 		return empty, false
 	}
+	c11Semantics := coreProgramsUseC11Semantics(programs)
+	for i := 0; i < len(units); i++ {
+		if units[i].C11 {
+			c11Semantics = true
+			break
+		}
+	}
 	programs, ok := prepareProgramsCore(programs, root)
 	if !ok {
 		return empty, false
@@ -211,9 +218,54 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 		arena.Discard(actionStart, actionEnd)
 		return empty, false
 	}
+	if c11Semantics && !coreTextHasC11Directive(program.Text) {
+		program.Text = appendCoreStringBytes(program.Text, "\n// renvo:c11\n")
+		if len(program.Tokens) > 0 {
+			last := len(program.Tokens) - 1
+			if program.Tokens[last].KindLine&255 == unit.TokenEOF {
+				program.Tokens[last].Start = len(program.Text)
+			}
+		}
+	}
 	arena.Discard(actionStart, actionEnd)
 	compactCoreLinkedTokenLines(program.Tokens)
 	return program, true
+}
+
+func coreProgramsUseC11Semantics(programs []unit.Program) bool {
+	for i := 0; i < len(programs); i++ {
+		if coreTextHasC11Directive(programs[i].Text) {
+			return true
+		}
+	}
+	return false
+}
+
+func coreTextHasC11Directive(text []byte) bool {
+	marker := "// renvo:c11"
+	for start := 0; start < len(text); {
+		end := start
+		for end < len(text) && text[end] != '\n' && text[end] != '\r' {
+			end++
+		}
+		if end-start == len(marker) {
+			match := true
+			for i := 0; i < len(marker); i++ {
+				if text[start+i] != marker[i] {
+					match = false
+					break
+				}
+			}
+			if match {
+				return true
+			}
+		}
+		for end < len(text) && (text[end] == '\n' || text[end] == '\r') {
+			end++
+		}
+		start = end
+	}
+	return false
 }
 
 // Linked programs no longer need gaps for comments, blank lines, or removed

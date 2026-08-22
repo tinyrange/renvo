@@ -93,7 +93,7 @@ func TestBundledFrontendStandaloneAllTargets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("standalone frontend help failed: %v\n%s", err, string(help))
 	}
-	for _, want := range []string{"Usage: renvo", "file.go...", "Exactly the named files", "Targets:", "windows/amd64", "darwin/arm64", "wasi/wasm32", "vm/vm32"} {
+	for _, want := range []string{"Usage: renvo", "source files...", "Exactly the named files", "Targets:", "windows/amd64", "darwin/arm64", "wasi/wasm32", "vm/vm32"} {
 		if !strings.Contains(string(help), want) {
 			t.Fatalf("standalone frontend help missing %q:\n%s", want, string(help))
 		}
@@ -483,7 +483,7 @@ x/24i $pc-32
 
 func assertBundledFrontendWritableMemory(t *testing.T, path string) {
 	t.Helper()
-	const limit = 134 * 1024 * 1024
+	const limit = 166 * 1024 * 1024
 	file, err := elf.Open(path)
 	if err != nil {
 		t.Fatalf("open bundled frontend ELF failed: %v", err)

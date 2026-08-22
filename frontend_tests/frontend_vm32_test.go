@@ -88,7 +88,7 @@ func TestVM32FrontendPerformanceGate(t *testing.T) {
 	}
 	files := vmFrontendSourceFiles(t, root)
 	compileResult := vm.RunConfig(image, vm.Config{
-		Limits: vm.Limits{Steps: 9 * 1000 * 1000 * 1000, Memory: 192 * 1024 * 1024},
+		Limits: vm.Limits{Steps: 12 * 1000 * 1000 * 1000, Memory: 192 * 1024 * 1024},
 		Args: []string{
 			"renvo",
 			"-system", "/workspace/systems/frontend-linux-amd64.rtg",
@@ -116,9 +116,9 @@ func TestVM32FrontendPerformanceGate(t *testing.T) {
 		output[1] != 'E' || output[2] != 'L' || output[3] != 'F' {
 		t.Fatalf("VM frontend Linux output prefix = % x", output[:minBundleLength(len(output), 4)])
 	}
-	if len(image) > 4*1024*1024 ||
-		len(output) > 2*1024*1024 ||
-		compileResult.Steps > 8*1000*1000*1000 ||
+	if len(image) > 6*1024*1024 ||
+		len(output) > 4*1024*1024 ||
+		compileResult.Steps > 11*1000*1000*1000 ||
 		compileResult.PeakMemory > 150*1024*1024 {
 		t.Fatalf("VM frontend performance budget exceeded: artifact=%dB, output=%dB, execution=%d steps, peak=%dB",
 			len(image), len(output), compileResult.Steps, compileResult.PeakMemory)

@@ -40,12 +40,17 @@ func runRenvoScript(args []string, env []string) (int, string) {
 	arenaSize := backendArenaSize(target, built.Options.Tags, built.Options.ArenaSize, ModeExecutable)
 	moduleLicense := built.Options.ModuleLicense
 	persistMark := 0
+	backendMark := 0
 	if resetArena {
 		persistMark = arena.PersistMark()
-		unit = arena.PersistBytes(unit)
+		// The compact pipeline leaves the linked unit as its final low-arena
+		// allocation. Transfer that allocation just as the ordinary command path
+		// does; copying a complete self-hosted frontend unit here needlessly
+		// doubles its peak arena use before the backend can start.
+		unit = arena.PersistLastBytes(unit, mark)
 		target = arena.PersistString(target)
 		moduleLicense = arena.PersistString(moduleLicense)
-		backendMark := mark
+		backendMark = mark
 		remainder := backendMark % 4096
 		if remainder != 0 {
 			backendMark += 4096 - remainder
@@ -58,6 +63,13 @@ func runRenvoScript(args []string, env []string) (int, string) {
 			arena.PersistReset(persistMark)
 		}
 		return finishRenvoCommandFailure(renvoCommandDiagnosticBuffer[:], Diagnostic{Phase: "backend", Code: "RENVO-BACKEND-001", Message: "backend compilation failed"}, false, 0)
+	}
+	if resetArena {
+		// The in-memory backend leaves the RNVI image as its final allocation.
+		// Retain that small result and release compiler scratch before the native
+		// loader allocates segment metadata and argument vectors.
+		image = arena.PersistLastBytes(image, backendMark)
+		arena.Reset(backendMark)
 	}
 	imageTarget, _, native, imageOK := linkedimage.Payload(image)
 	if !imageOK || imageTarget != renvoRunTargetID() || len(native) == 0 {
@@ -72,6 +84,9 @@ func runRenvoScript(args []string, env []string) (int, string) {
 			arena.PersistReset(persistMark)
 		}
 		return 1, "renvo: error RENVO-RUN-004 (runtime): failed to execute linked image\n"
+	}
+	if resetArena {
+		arena.PersistReset(persistMark)
 	}
 	return exitCode, ""
 }

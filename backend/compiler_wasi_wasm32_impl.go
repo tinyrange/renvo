@@ -401,16 +401,6 @@ func renvoWasm32EmitWideCompareStack(g *renvoLinearGen, left int, right int, tok
 		op = 0x51
 	} else if renvoTok2Is(p, tok, '!', '=') {
 		op = 0x52
-	} else if renvoTokCharIs(p, tok, '<') {
-		op = 0x54
-		if signed {
-			op = 0x53
-		}
-	} else if renvoTokCharIs(p, tok, '>') {
-		op = 0x56
-		if signed {
-			op = 0x55
-		}
 	} else if renvoTok2Is(p, tok, '<', '=') {
 		op = 0x58
 		if signed {
@@ -420,6 +410,16 @@ func renvoWasm32EmitWideCompareStack(g *renvoLinearGen, left int, right int, tok
 		op = 0x5a
 		if signed {
 			op = 0x59
+		}
+	} else if renvoTokCharIs(p, tok, '<') {
+		op = 0x54
+		if signed {
+			op = 0x53
+		}
+	} else if renvoTokCharIs(p, tok, '>') {
+		op = 0x56
+		if signed {
+			op = 0x55
 		}
 	}
 	if op == 0 {
@@ -522,32 +522,7 @@ func renvoEmitVM32WideShiftStack(g *renvoLinearGen, dest int, left int, count in
 }
 
 func renvoWasm32EmitWideComparePortable(g *renvoLinearGen, left int, right int, tok int, signed bool) bool {
-	p := g.prog
-	equal := renvoTok2Is(p, tok, '=', '=') || renvoTok2Is(p, tok, '!', '=')
-	if equal {
-		notEqual := renvoAsmNewLabel(&g.asm)
-		done := renvoAsmNewLabel(&g.asm)
-		renvoEmitNativeCompareStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, 0x94)
-		renvoAsmJzPrimary(&g.asm, notEqual)
-		renvoEmitNativeCompareStack(g, left, right, 0x94)
-		renvoAsmJmpMarkLabel(&g.asm, done, notEqual)
-		renvoAsmPrimaryImm(&g.asm, 0)
-		renvoAsmMarkLabel(&g.asm, done)
-		if renvoTok2Is(p, tok, '!', '=') {
-			renvoAsmBoolNotPrimary(&g.asm)
-		}
-		return true
-	}
-	greater := renvoTokCharIs(p, tok, '>') || renvoTok2Is(p, tok, '>', '=')
-	inclusive := renvoTok2Is(p, tok, '<', '=') || renvoTok2Is(p, tok, '>', '=')
-	if greater != inclusive {
-		left, right = right, left
-	}
-	renvoEmitWideLessStack(g, left, right, signed)
-	if inclusive {
-		renvoAsmBoolNotPrimary(&g.asm)
-	}
-	return true
+	return renvoEmitPortableWideCompareStack(g, left, right, tok, signed)
 }
 
 func renvoWasm32StoreParamWord(g *renvoLinearGen, reg int, offset int) {

@@ -73,7 +73,7 @@ func replLinuxIoctl(fd int, request int, data []byte) int {
 	if len(data) == 0 {
 		return -1
 	}
-	return syscall(replLinuxIoctlNumber(), fd, request, int(unsafe.Pointer(&data[0])), 0, 0, 0)
+	return renvo_runtime_Syscall(replLinuxIoctlNumber(), fd, request, int(unsafe.Pointer(&data[0])), 0, 0, 0)
 }
 
 func replLinuxUint32(data []byte, offset int) int {

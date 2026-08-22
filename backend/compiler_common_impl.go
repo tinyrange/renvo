@@ -11,8 +11,12 @@ const renvoObjectExternalBase = 536870912
 const renvoObjectExternalStride = 1048576
 
 func renvoIsHostedObjectAmd64(c *renvoCompileContext) bool {
+	amd64ABI := c != nil && c.renvoTargetArch == renvoArchAmd64
+	if renvoPreparedBackend != 0 && renvoRTGPreparedSysVX8664 != 0 {
+		amd64ABI = true
+	}
 	return c != nil && c.objectFile && c.renvoTargetOS == renvoOSLinux &&
-		c.renvoTargetArch == renvoArchAmd64 && !targetIsKernelModule(c)
+		amd64ABI && !targetIsKernelModule(c)
 }
 
 func renvoIsHostedObject386(c *renvoCompileContext) bool {
@@ -1362,10 +1366,7 @@ func renvoSetCompilerIntWidth(p *renvoProgram) {
 func renvoParseProgramInto(src []byte, p *renvoProgram) {
 	renvoNonNil(p)
 	p.src = src
-	p.c11Semantics = false
-	if renvoFixedTarget == 0 {
-		p.c11Semantics = p.c.objectFile && renvoSourceHasC11Directive(src)
-	}
+	p.c11Semantics = renvoSourceHasC11Directive(src)
 	renvoSetCompilerIntWidth(p)
 	renvoScan(src, &p.toks)
 	declCap := len(src)/1024 + 64
@@ -4037,7 +4038,7 @@ func renvoBuildMetaInto(pp *renvoProgram, m *renvoMeta) {
 	// Go defer, however, so retain the unwind machinery only for C units which
 	// contain an actual lowered defer statement.
 	m.panicEnabled = p.toks.panicEnabled
-	if renvoFixedTarget == 0 && renvoProgramUsesC11Semantics(p) {
+	if renvoProgramUsesC11Semantics(p) {
 		m.panicEnabled = m.panicEnabled && renvoC11UsesDefer(p)
 	}
 	renvoFinalizeTypeLayouts(m)
@@ -5837,6 +5838,14 @@ func renvoTypeIsInt(m *renvoMeta, typ int) bool {
 	renvoNonNil(m)
 	t := renvoResolveType(m, typ)
 	renvoNonNil(t)
+	return t.kind == renvoTypeInt ||
+		m.prog != nil && renvoProgramUsesC11Semantics(m.prog) && t.kind == renvoTypeInt32
+}
+
+func renvoTypeIsNativeInt(m *renvoMeta, typ int) bool {
+	renvoNonNil(m)
+	t := renvoResolveType(m, typ)
+	renvoNonNil(t)
 	return t.kind == renvoTypeInt
 }
 
@@ -6268,12 +6277,10 @@ func renvoPrepareFunctionControl(g *renvoLinearGen) bool {
 	if !g.meta.panicEnabled {
 		return true
 	}
-	if renvoFixedTarget == 0 {
-		if renvoProgramUsesC11Semantics(g.prog) &&
-			(g.currentFunc < 0 || g.currentFunc >= len(g.meta.funcs) ||
-				!renvoTokenRangeHasIdent(g.prog, g.meta.funcs[g.currentFunc].bodyStart, g.meta.funcs[g.currentFunc].bodyEnd, "defer")) {
-			return true
-		}
+	if renvoProgramUsesC11Semantics(g.prog) &&
+		(g.currentFunc < 0 || g.currentFunc >= len(g.meta.funcs) ||
+			!renvoTokenRangeHasIdent(g.prog, g.meta.funcs[g.currentFunc].bodyStart, g.meta.funcs[g.currentFunc].bodyEnd, "defer")) {
+		return true
 	}
 	g.panicEntryIDOffset = renvoAddUnnamedLocal(g, renvoTypeInt)
 	renvoAsmCopyThreadStateToStack(g, renvoThreadPanicIDOff, g.panicEntryIDOffset)
@@ -9823,7 +9830,7 @@ func renvoLinearInitGlobal(g *renvoLinearGen, index int) bool {
 			renvoAsmJnzPrimary(&g.asm, skipInitializer)
 		}
 	}
-	if renvoTypeIsInt(meta, s.typ) && renvoBytesEqualText(g.prog.src, s.nameStart, s.nameEnd, "renvoDefaultTarget") {
+	if renvoTypeIsNativeInt(meta, s.typ) && renvoBytesEqualText(g.prog.src, s.nameStart, s.nameEnd, "renvoDefaultTarget") {
 		renvoAsmPrimaryImm(&g.asm, g.c.renvoTarget)
 		renvoAsmStorePrimaryBss(&g.asm, off)
 	} else if s.initStart < s.initEnd {
@@ -10312,6 +10319,15 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 		if assignTok <= stmt.startTok || !renvoTokCharIs(p, assignTok, '=') {
 			return true
 		}
+		// Canonical frontend units represent a value-less expression statement as
+		// a blank assignment. Preserve the print builtin's statement semantics
+		// when that representation reaches the backend.
+		discardStmt := *stmt
+		discardStmt.exprStart = assignTok + 1
+		discardStmt.exprEnd = stmt.endTok
+		if renvoEmitLinearPrintStmt(g, &discardStmt) {
+			return true
+		}
 		ep := renvoNewExprParse()
 		renvoNonNil(ep)
 		rootIndex := renvoParseExpressionRoot(ep, p, assignTok+1, stmt.endTok)
@@ -10543,7 +10559,7 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 		} else if renvoTok2Is(p, assignTok, '^', '=') {
 			memoryOp = 0x3148
 		}
-		if g.c.renvoTargetArch == renvoArchAmd64 && memoryOp != 0 && globalOffset < 0 && fieldStackOffset < 0 && renvoTypeIsInt(meta, targetType) {
+		if g.c.renvoTargetArch == renvoArchAmd64 && memoryOp != 0 && globalOffset < 0 && fieldStackOffset < 0 && renvoTypeIsNativeInt(meta, targetType) {
 			if !renvoEmitScalarExprForKind(g, ep, rootIndex, targetResolved.kind) {
 				return false
 			}
@@ -11587,7 +11603,17 @@ func renvoInferParsedExprTypeUncached(g *renvoLinearGen, ep *renvoExprParse, idx
 		}
 	}
 	if e.kind == renvoExprBinary {
-		if renvoTok2Is(p, e.tok, '=', '=') || renvoTok2Is(p, e.tok, '!', '=') || renvoTokCharIs(p, e.tok, '<') || renvoTokCharIs(p, e.tok, '>') || renvoTok2Is(p, e.tok, '&', '&') || renvoTok2Is(p, e.tok, '|', '|') {
+		start := int(renvoTokStart(p, e.tok))
+		end := int(renvoTokEnd(p, e.tok))
+		c0 := renvo_runtime_UnsafeByteAt(p.src, start)
+		var c1 byte
+		if start+1 < end {
+			c1 = renvo_runtime_UnsafeByteAt(p.src, start+1)
+		}
+		if renvoIsComparisonChars(c0, c1) {
+			return renvoTypeInt
+		}
+		if renvoTok2Is(p, e.tok, '&', '&') || renvoTok2Is(p, e.tok, '|', '|') {
 			return renvoTypeInt
 		}
 		leftTypeIndex := renvoInferParsedExprType(g, ep, e.left)
@@ -13249,7 +13275,11 @@ func renvoEmitStructCallToLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, 
 	if renvoFunctionValueCalleeType(g, ep, ep.exprs[idx].left) != 0 {
 		return renvoEmitFunctionValueCall(g, ep, idx, offset)
 	}
-	if renvoFixedTarget == 0 {
+	objectCABI := renvoFixedTarget == 0
+	if renvoPreparedBackend != 0 {
+		objectCABI = true
+	}
+	if objectCABI {
 		if renvoEmitCObjectSmallAggregateCallToLocal(g, ep, idx, destType, offset) {
 			return true
 		}
@@ -13270,7 +13300,9 @@ func renvoEmitStructCallToLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, 
 
 func renvoEmitCObjectSmallAggregateCallToLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, destType int, offset int) bool {
 	if renvoFixedTarget != 0 {
-		return false
+		if renvoPreparedBackend == 0 {
+			return false
+		}
 	}
 	renvoNonNil(g, ep)
 	if !renvoIsHostedObjectAmd64(g.c) || idx < 0 || idx >= len(ep.exprs) {
@@ -13298,7 +13330,9 @@ func renvoEmitCObjectSmallAggregateCallToLocal(g *renvoLinearGen, ep *renvoExprP
 	if importID < 0 {
 		return false
 	}
-	renvoAmd64EmitObjectStaticCallReverse(&g.asm, importID, wordCount)
+	if !renvoEmitCObjectReverseRegisterStaticCall(g, importID, wordCount) {
+		return false
+	}
 	size := renvoTypeSize(g.meta, fn.resultType)
 	primarySize := size
 	if primarySize > 8 {
@@ -13348,7 +13382,7 @@ func renvoEmitUserCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 			return true
 		}
 	}
-	if renvoFixedTarget == 0 && renvoProgramUsesC11Semantics(g.prog) && e.argCount == 1 &&
+	if renvoProgramUsesC11Semantics(g.prog) && e.argCount == 1 &&
 		renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "__c_bool_int") {
 		// The C frontend uses this helper to turn a Go bool into C's integer
 		// 0/1 representation. Renvo boolean expressions already materialize
@@ -13459,8 +13493,7 @@ func renvoEmitDynamicUserCallTail(g *renvoLinearGen, ep *renvoExprParse, e *renv
 		if importID < 0 {
 			return false
 		}
-		renvoAmd64EmitObjectStaticCallReverse(&g.asm, importID, wordCount)
-		return true
+		return renvoEmitCObjectReverseRegisterStaticCall(g, importID, wordCount)
 	}
 	if fn.linkStatic != 0 && (renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
 		renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) ||
@@ -15463,6 +15496,28 @@ func renvoCObjectReverseRegisterCallEligible(g *renvoLinearGen, fn *renvoFuncInf
 	return wordCount == expectedWords
 }
 
+func renvoEmitCObjectReverseRegisterStaticCall(g *renvoLinearGen, importID int, wordCount int) bool {
+	renvoNonNil(g)
+	if wordCount < 0 || wordCount > 6 || importID < 0 {
+		return false
+	}
+	if renvoPreparedBackend == 0 {
+		renvoAmd64EmitObjectStaticCallReverse(&g.asm, importID, wordCount)
+		return true
+	}
+	offsets := renvoFixedIntScratch(wordCount)
+	for i := 0; i < wordCount; i++ {
+		offset := renvoAddUnnamedLocal(g, renvoTypeInt)
+		renvoAsmPopPrimary(&g.asm)
+		renvoAsmStorePrimaryStack(&g.asm, offset)
+		offsets = append(offsets, offset)
+	}
+	for i := 0; i < wordCount; i++ {
+		renvoAsmPushStackWord(&g.asm, offsets[i])
+	}
+	return renvoRTGEmitStaticCall(&g.asm, importID, wordCount)
+}
+
 // renvoCallArgumentsDiscardable is deliberately narrower than general purity:
 // it recognizes the literal and address expressions used as arguments to C
 // feature stubs, while retaining calls whose discarded arguments could call,
@@ -16907,20 +16962,20 @@ func renvoEmitCallParamArgReverse(g *renvoLinearGen, ep *renvoExprParse, idx int
 		}
 		resolved := renvoResolveType(meta, param.typ)
 		renvoNonNil(resolved)
-		if renvoFixedTarget == 0 {
-			if resolved.kind == renvoTypePointer && renvoProgramUsesC11Semantics(g.prog) {
-				e := &ep.exprs[idx]
-				if e.kind == renvoExprString {
-					if !renvoEmitStringValueRegs(g, ep, idx) {
-						return -1
-					}
-					// C string literals decay to their first byte. The C frontend
-					// retains a Go string literal as compact storage, but its length
-					// word must not become a second argument in an internal call.
-					renvoAsmPushPrimary(&g.asm)
-					return 1
+		if resolved.kind == renvoTypePointer && renvoProgramUsesC11Semantics(g.prog) {
+			e := &ep.exprs[idx]
+			if e.kind == renvoExprString {
+				if !renvoEmitStringValueRegs(g, ep, idx) {
+					return -1
 				}
+				// C string literals decay to their first byte. The C frontend
+				// retains a Go string literal as compact storage, but its length
+				// word must not become a second argument in an internal call.
+				renvoAsmPushPrimary(&g.asm)
+				return 1
 			}
+		}
+		if renvoFixedTarget == 0 {
 			if resolved.kind == renvoTypeFunc && g.c.objectFile {
 				if !renvoEmitScalarExprForKind(g, ep, idx, renvoTypeFunc) {
 					return -1
@@ -25579,6 +25634,58 @@ func renvoEmitNativeWideStack(g *renvoLinearGen, dest int, left int, right int, 
 	return false
 }
 
+func renvoEmitPortableWideCompareStack(g *renvoLinearGen, left int, right int, tok int, signed bool) bool {
+	if renvoFixedTarget != 0 && g.c.renvoTargetArch != renvoArch386 && g.c.renvoTargetArch != renvoArchArm && g.c.renvoTargetArch != renvoArchWasm32 {
+		return false
+	}
+	renvoNonNil(g)
+	p := g.prog
+	start := int(renvoTokStart(p, tok))
+	end := int(renvoTokEnd(p, tok))
+	c0 := renvo_runtime_UnsafeByteAt(p.src, start)
+	var c1 byte
+	if start+1 < end {
+		c1 = renvo_runtime_UnsafeByteAt(p.src, start+1)
+	}
+	equality := false
+	if c1 == '=' {
+		equality = c0 == '='
+		if c0 == '!' {
+			equality = true
+		}
+	}
+	if equality {
+		notEqual := renvoAsmNewLabel(&g.asm)
+		done := renvoAsmNewLabel(&g.asm)
+		renvoEmitNativeCompareStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, 0x94)
+		renvoAsmJzPrimary(&g.asm, notEqual)
+		renvoEmitNativeCompareStack(g, left, right, 0x94)
+		renvoAsmJmpMarkLabel(&g.asm, done, notEqual)
+		renvoAsmPrimaryImm(&g.asm, 0)
+		renvoAsmMarkLabel(&g.asm, done)
+		if c0 == '!' {
+			renvoAsmBoolNotPrimary(&g.asm)
+		}
+		return true
+	}
+	greater := c0 == '>'
+	inclusive := false
+	if c1 == '=' {
+		inclusive = c0 == '<'
+		if c0 == '>' {
+			inclusive = true
+		}
+	}
+	if greater != inclusive {
+		left, right = right, left
+	}
+	renvoEmitWideLessStack(g, left, right, signed)
+	if inclusive {
+		renvoAsmBoolNotPrimary(&g.asm)
+	}
+	return true
+}
+
 func renvoEmitRTGWideStack(g *renvoLinearGen, dest int, left int, right int, mode int) bool {
 	renvoNonNil(g)
 	if mode == 0 {
@@ -27542,7 +27649,7 @@ func renvoEmitNativeCompareJump(g *renvoLinearGen, ep *renvoExprParse, e *renvoE
 		if left.kind == renvoExprIdent && right.kind == renvoExprIdent {
 			leftLocal := renvoFindLocalIndex(g, left.nameStart, left.nameEnd)
 			rightLocal := renvoFindLocalIndex(g, right.nameStart, right.nameEnd)
-			if leftLocal >= 0 && rightLocal >= 0 && renvoTypeIsInt(g.meta, g.locals[leftLocal].typ) && renvoTypeIsInt(g.meta, g.locals[rightLocal].typ) {
+			if leftLocal >= 0 && rightLocal >= 0 && renvoTypeIsNativeInt(g.meta, g.locals[leftLocal].typ) && renvoTypeIsNativeInt(g.meta, g.locals[rightLocal].typ) {
 				renvoAsmLoadPrimaryStack(&g.asm, g.locals[rightLocal].offset)
 				renvoAsmStackMem(&g.asm, g.locals[leftLocal].offset, 0x3948, 0x45, 0x85)
 				renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, unsigned)

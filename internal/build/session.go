@@ -154,6 +154,7 @@ func (s *ProgramSession) Step() bool {
 				SourceKeyB: sourceKeyB,
 				ArenaStart: unitStart,
 				ArenaEnd:   unitEnd,
+				C11:        packageUsesC11(pkg),
 			})
 			s.discardPackage(pkg)
 			if s.transient {
@@ -189,6 +190,7 @@ func (s *ProgramSession) Step() bool {
 		SourceKeyB: sourceKeyB,
 		ArenaStart: unitStart,
 		ArenaEnd:   unitEnd,
+		C11:        packageUsesC11(pkg),
 	})
 	s.discardPackage(pkg)
 	if s.transient {

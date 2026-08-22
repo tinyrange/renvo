@@ -123,6 +123,9 @@ func TestBuildUnitCompilesC11OnlyRoot(t *testing.T) {
 	if decoded.Package != "main" {
 		t.Fatalf("C-only package = %q, want main", decoded.Package)
 	}
+	if !bytes.Contains(decoded.Text, []byte("// renvo:c11\n")) {
+		t.Fatalf("linked executable unit lost C11 semantics directive:\n%s", decoded.Text)
+	}
 }
 
 func TestBuildUnitReportsLoadError(t *testing.T) {

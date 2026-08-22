@@ -984,7 +984,9 @@ func renvoAsmAddPreparedStaticImport(
 	nameStart int, nameEnd int, src []byte,
 ) int {
 	if renvoFixedTarget != 0 {
-		return -1
+		if renvoPreparedBackend == 0 {
+			return -1
+		}
 	}
 	renvoNonNil(a)
 	library := renvoStringFromBytes(src, libraryStart, libraryEnd)

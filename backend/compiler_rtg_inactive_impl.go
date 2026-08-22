@@ -750,6 +750,7 @@ const renvoRTGPreparedOS = 0
 const renvoRTGPreparedIntBits = 0
 const renvoRTGPreparedKernelModule = 0
 const renvoRTGPreparedObject = 0
+const renvoRTGPreparedSysVX8664 = 0
 const renvoRTGPreparedFunctionSymbols = 0
 
 func renvoRTGParseTargetArg(name string) int {

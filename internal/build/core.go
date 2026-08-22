@@ -26,6 +26,7 @@ type PackageUnit struct {
 	SourceKeyB int
 	ArenaStart int
 	ArenaEnd   int
+	C11        bool
 }
 
 type Result struct {
@@ -135,6 +136,7 @@ func buildProgramsDirect(graph load.Graph, transient bool, requireMain bool) Res
 			Program:    emit.Program,
 			ArenaStart: unitStart,
 			ArenaEnd:   unitEnd,
+			C11:        packageUsesC11(pkg),
 		})
 		if transient {
 			for j := 0; j < len(pkg.Files); j++ {
@@ -151,6 +153,16 @@ func buildProgramsDirect(graph load.Graph, transient bool, requireMain bool) Res
 		arena.Discard(headerStart, headerEnd)
 	}
 	return result
+}
+
+func packageUsesC11(pkg load.Package) bool {
+	for i := 0; i < len(pkg.Files); i++ {
+		path := pkg.Files[i].Path
+		if len(path) >= 2 && path[len(path)-2] == '.' && path[len(path)-1] == 'c' {
+			return true
+		}
+	}
+	return false
 }
 
 func RootUnit(result Result) PackageUnit {
