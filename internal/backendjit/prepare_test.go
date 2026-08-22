@@ -539,6 +539,7 @@ func TestCompiledInBootstrapUsesDefinitionOwnedPEImages(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.custom, func(t *testing.T) {
+			t.Parallel()
 			definition := copyNativeDefinition(t, root,
 				"target "+test.target+" {", "target "+test.custom+" {")
 			result := driver.CompileFromFS([]string{
@@ -803,6 +804,7 @@ func TestCompiledInBootstrapUses32BitDefinitions(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.custom, func(t *testing.T) {
+			t.Parallel()
 			definition := copyNativeDefinition(t, root,
 				"target "+test.target+" {", "target "+test.custom+" {")
 			result := driver.CompileFromFS([]string{
@@ -843,6 +845,7 @@ func TestCompiledInBootstrapUsesVM32Definitions(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.custom, func(t *testing.T) {
+			t.Parallel()
 			definitionSource, readErr := os.ReadFile(filepath.Join(
 				root, "backend", "definitions", "wasm32.rtg"))
 			if readErr != nil {
