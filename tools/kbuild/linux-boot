@@ -112,6 +112,7 @@ touch -d @0 "$init_root" "$init_root/init"
 boot_once() {
 	local run="$1"
 	local raw="$work_root/boot-${run}.log"
+	local checked="$work_root/boot-${run}.checked.log"
 	local result=0
 	set +e
 	# A zero shift gives the deterministic guest a 1 GHz virtual TSC. Larger
@@ -131,13 +132,16 @@ boot_once() {
 		tail -n 80 "$raw" >&2
 		exit 1
 	fi
+	# The emulated serial port writes terminal-style CRLF. Match semantic log
+	# lines after removing only the transport carriage return.
+	sed 's/\r$//' "$raw" >"$checked"
 	for marker in \
 		'^Linux version 6\.12\.99 ' \
 		'^printk: legacy console \[ttyS0\] enabled$' \
 		'^Memory: ' \
 		'^Run /init as init process$' \
 		'^RENVO-LINUX-M9: PASS$'; do
-		if ! rg -q "$marker" "$raw"; then
+		if ! rg -q "$marker" "$checked"; then
 			printf 'QEMU boot %s did not reach marker %s\n' "$run" "$marker" >&2
 			tail -n 80 "$raw" >&2
 			exit 1
