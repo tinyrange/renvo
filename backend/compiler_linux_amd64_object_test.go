@@ -750,7 +750,7 @@ func TestLinuxAmd64ObjectReturningBlockDoesNotImportFollowingCode(t *testing.T) 
 		renvoFixedTarget = oldFixedTarget
 	})
 	renvoCompilerObjectFile = true
-	renvoFixedTarget = renvoTargetLinuxAmd64
+	renvoFixedTarget = 0
 	renvoSetTarget(renvoTargetLinuxAmd64)
 	source := []byte(`package main
 // renvo:linkstatic libc,missing_dead_if

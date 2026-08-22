@@ -1,15 +1,35 @@
 package main
 
-func renvo_runtime_CCompareExchange8(address *uint8, observed *uint8, replacement uint64) uint8 {
+func renvo_runtime_CCompareExchange8(address *uint8, observed *uint8, replacement uint32) uint8 {
+	if *address == *observed {
+		*address = uint8(replacement)
+		return 1
+	}
+	*observed = *address
 	return 0
 }
-func renvo_runtime_CCompareExchange16(address *uint16, observed *uint16, replacement uint64) uint8 {
+func renvo_runtime_CCompareExchange16(address *uint16, observed *uint16, replacement uint32) uint8 {
+	if *address == *observed {
+		*address = uint16(replacement)
+		return 1
+	}
+	*observed = *address
 	return 0
 }
-func renvo_runtime_CCompareExchange32(address *uint32, observed *uint32, replacement uint64) uint8 {
+func renvo_runtime_CCompareExchange32(address *uint32, observed *uint32, replacement uint32) uint8 {
+	if *address == *observed {
+		*address = uint32(replacement)
+		return 1
+	}
+	*observed = *address
 	return 0
 }
 func renvo_runtime_CCompareExchange64(address *uint64, observed *uint64, replacement uint64) uint8 {
+	if *address == *observed {
+		*address = replacement
+		return 1
+	}
+	*observed = *address
 	return 0
 }
 

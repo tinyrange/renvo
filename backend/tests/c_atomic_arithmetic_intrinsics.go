@@ -1,14 +1,63 @@
 package main
 
-func renvo_runtime_CAtomicAdd32(address *int32, value uint64) uint8 { return 0 }
-func renvo_runtime_CAtomicSub32(address *int32, value uint64) uint8 { return 0 }
-func renvo_runtime_CAtomicAnd32(address *int32, value uint64) uint8 { return 0 }
-func renvo_runtime_CAtomicOr32(address *int32, value uint64) uint8  { return 0 }
-func renvo_runtime_CAtomicXor32(address *int32, value uint64) uint8 { return 0 }
-func renvo_runtime_CAtomicInc32(address *int32, value uint64) uint8 { return 0 }
-func renvo_runtime_CAtomicDec32(address *int32, value uint64) uint8 { return 0 }
-func renvo_runtime_CAtomicAdd64(address *int64, value uint64) uint8 { return 0 }
-func renvo_runtime_CAtomicSub64(address *int64, value uint64) uint8 { return 0 }
+func atomicFlags32(value int32) uint8 {
+	flags := uint8(0)
+	if value == 0 {
+		flags = flags | 1
+	}
+	if value < 0 {
+		flags = flags | 2
+	}
+	return flags
+}
+
+func atomicFlags64(value int64) uint8 {
+	flags := uint8(0)
+	if value == 0 {
+		flags = flags | 1
+	}
+	if value < 0 {
+		flags = flags | 2
+	}
+	return flags
+}
+
+func renvo_runtime_CAtomicAdd32(address *int32, value uint32) uint8 {
+	*address = *address + int32(value)
+	return atomicFlags32(*address)
+}
+func renvo_runtime_CAtomicSub32(address *int32, value uint32) uint8 {
+	*address = *address - int32(value)
+	return atomicFlags32(*address)
+}
+func renvo_runtime_CAtomicAnd32(address *int32, value uint32) uint8 {
+	*address = *address & int32(value)
+	return atomicFlags32(*address)
+}
+func renvo_runtime_CAtomicOr32(address *int32, value uint32) uint8 {
+	*address = *address | int32(value)
+	return atomicFlags32(*address)
+}
+func renvo_runtime_CAtomicXor32(address *int32, value uint32) uint8 {
+	*address = *address ^ int32(value)
+	return atomicFlags32(*address)
+}
+func renvo_runtime_CAtomicInc32(address *int32, value uint32) uint8 {
+	*address = *address + 1
+	return atomicFlags32(*address)
+}
+func renvo_runtime_CAtomicDec32(address *int32, value uint32) uint8 {
+	*address = *address - 1
+	return atomicFlags32(*address)
+}
+func renvo_runtime_CAtomicAdd64(address *int64, value uint64) uint8 {
+	*address = *address + int64(value)
+	return atomicFlags64(*address)
+}
+func renvo_runtime_CAtomicSub64(address *int64, value uint64) uint8 {
+	*address = *address - int64(value)
+	return atomicFlags64(*address)
+}
 
 func appMain(args []string) int {
 	value32 := int32(3)

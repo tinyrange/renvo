@@ -1,6 +1,8 @@
 package main
 
-func renvo_runtime_CReadInstructionPointer() uint64 { return 0 }
+var portableInstructionPosition uint64 = 1
+
+func renvo_runtime_CReadInstructionPointer() uint64 { return portableInstructionPosition }
 
 func appMain(args []string) int {
 	if renvo_runtime_CReadInstructionPointer() == 0 {

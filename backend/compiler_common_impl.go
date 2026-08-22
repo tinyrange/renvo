@@ -234,9 +234,13 @@ func renvoMakeIntScratch(capacity int) []int {
 func renvoEmitAllQueuedFunctionsScratch(g *renvoLinearGen) bool {
 	renvoNonNil(g)
 	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
-		if !renvoEmitScalarFunctionScratch(g, g.funcQueue[queueIndex]) {
+		fnIndex := g.funcQueue[queueIndex]
+		if renvoDeferUnreadyQueuedClosure(g, fnIndex) {
+			continue
+		}
+		if !renvoEmitScalarFunctionScratch(g, fnIndex) {
 			if renvoFixedTarget == 0 {
-				fn := &g.meta.funcs[g.funcQueue[queueIndex]]
+				fn := &g.meta.funcs[fnIndex]
 				renvoPrintErr("renvo: failed function: ")
 				write(2, g.prog.src[fn.nameStart:fn.nameEnd], -1)
 				renvoPrintErr("\n")
@@ -244,6 +248,19 @@ func renvoEmitAllQueuedFunctionsScratch(g *renvoLinearGen) bool {
 			return false
 		}
 	}
+	return true
+}
+
+func renvoDeferUnreadyQueuedClosure(g *renvoLinearGen, fnIndex int) bool {
+	renvoNonNil(g)
+	closureIndex := renvoClosureIndexByFunction(g.meta, fnIndex)
+	if closureIndex < 0 || g.meta.closures[closureIndex].ready {
+		return false
+	}
+	// A whole-program function-value dispatch can discover a closure before
+	// its reachable parent has established the capture layout. Make that
+	// speculative queue entry available for the parent to enqueue again.
+	g.funcReachable[fnIndex] = false
 	return true
 }
 
@@ -2563,17 +2580,32 @@ func renvoEvalConstExprInto(g *renvoLinearGen, ep *renvoExprParse, idx int, out 
 			renvoSetConstResult(out, 0, false)
 			return
 		}
+		usesFloat := renvoBinaryUsesFloat(g, ep, e)
+		if usesFloat {
+			if !renvoExprValueIsFloat(g, ep, e.left) {
+				left.value = left.value << 2
+			}
+			if !renvoExprValueIsFloat(g, ep, e.right) {
+				right.value = right.value << 2
+			}
+			if renvoTokCharIs(p, opTok, '/') {
+				left.value = left.value << 2
+			}
+		}
 		unsignedKind := 0
-		if renvoExprHasUnsignedIntType(g, ep, e.left) {
+		if !usesFloat && renvoExprHasUnsignedIntType(g, ep, e.left) {
 			unsignedKind = renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, e.left)).kind
 		}
-		if renvoExprHasUnsignedIntType(g, ep, e.right) {
+		if !usesFloat && renvoExprHasUnsignedIntType(g, ep, e.right) {
 			rightUnsignedKind := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, e.right)).kind
 			if unsignedKind == 0 || renvoUnsignedKindSize(rightUnsignedKind) > renvoUnsignedKindSize(unsignedKind) {
 				unsignedKind = rightUnsignedKind
 			}
 		}
 		renvoEvalConstBinaryInto(g, opTok, left.value, right.value, unsignedKind, out)
+		if usesFloat && out.ok && renvoTokCharIs(p, opTok, '*') {
+			out.value = out.value / 4
+		}
 		return
 	}
 	renvoSetConstResult(out, 0, false)
@@ -5552,7 +5584,12 @@ func renvoFinalizeTypeLayouts(m *renvoMeta) {
 			continue
 		}
 		for j := 0; j < fn.paramCount; j++ {
-			renvoNativeTypeLayout(m, m.params[fn.firstParam+j].typ)
+			paramType := m.params[fn.firstParam+j].typ
+			resolved := renvoResolveType(m, paramType)
+			renvoNativeTypeLayout(m, paramType)
+			if resolved.kind == renvoTypePointer {
+				renvoNativeTypeLayout(m, resolved.elem)
+			}
 		}
 		renvoNativeTypeLayout(m, fn.resultType)
 	}
@@ -8258,12 +8295,12 @@ func renvoLoadCompilerFixedTarget(g *renvoLinearGen) {
 		if !renvoBytesEqualText(g.prog.src, s.nameStart, s.nameEnd, "renvoFixedTarget") {
 			continue
 		}
-		g.fixedTargetState = 1
 		if s.initStart >= s.initEnd {
 			return
 		}
 		r := renvoEvalMetaConstExpr(g.meta, g.prog, s.initStart, s.initEnd, 0)
 		if r.ok {
+			g.fixedTargetState = 1
 			g.fixedTargetValue = r.value
 			return
 		}
@@ -11478,10 +11515,8 @@ func renvoInferParsedExprTypeUncached(g *renvoLinearGen, ep *renvoExprParse, idx
 		if t.kind == renvoTypePointer {
 			pointerElem := t.elem
 			t = renvoResolveType(meta, pointerElem)
-			if renvoFixedTarget == 0 {
-				if t.kind != renvoTypeArray && t.kind != renvoTypeSlice {
-					return pointerElem
-				}
+			if t.kind != renvoTypeArray && t.kind != renvoTypeSlice {
+				return pointerElem
 			}
 		}
 		if t.kind == renvoTypeSlice || t.kind == renvoTypeArray {
@@ -11704,10 +11739,7 @@ func renvoConversionTypeFromExpr(g *renvoLinearGen, ep *renvoExprParse, idx int)
 	renvoNonNil(g, ep)
 	callee := &ep.exprs[idx]
 	if callee.kind == renvoExprUnary && renvoTokCharIs(g.prog, callee.tok, '*') {
-		target := 0
-		if renvoFixedTarget == 0 {
-			target = renvoConversionTypeFromExpr(g, ep, callee.left)
-		}
+		target := renvoConversionTypeFromExpr(g, ep, callee.left)
 		if target == 0 {
 			target = renvoTypeFromExpr(g, ep, callee.left)
 		}
@@ -16973,17 +17005,15 @@ func renvoEmitMethodReceiverArgReverse(g *renvoLinearGen, ep *renvoExprParse, id
 			if !renvoEmitIntExpr(g, ep, idx) {
 				return -1
 			}
-			if renvoFixedTarget == 0 {
-				// A selector may find a method through one or more pointer layers.
-				// Its receiver is the value at the declared pointer depth, not the
-				// address of the outer pointer. C aggregate accessors exercise this
-				// with chains such as a **T field followed by a method on *T.
-				receiverDereferences := renvoPointerDereferenceDistance(meta, actualExprType, receiverType)
-				for i := 0; i < receiverDereferences; i++ {
-					renvoEmitRuntimeNonNilPrimary(g)
-					renvoAsmCopyPrimaryToSecondary(a)
-					renvoAsmLoadPrimaryMemSecondaryDisp(a, 0)
-				}
+			// A selector may find a method through one or more pointer layers.
+			// Its receiver is the value at the declared pointer depth, not the
+			// address of the outer pointer. C aggregate accessors exercise this
+			// with chains such as a **T field followed by a method on *T.
+			receiverDereferences := renvoPointerDereferenceDistance(meta, actualExprType, receiverType)
+			for i := 0; i < receiverDereferences; i++ {
+				renvoEmitRuntimeNonNilPrimary(g)
+				renvoAsmCopyPrimaryToSecondary(a)
+				renvoAsmLoadPrimaryMemSecondaryDisp(a, 0)
 			}
 			renvoAsmPushPrimary(a)
 			return 1
@@ -18770,12 +18800,10 @@ func renvoEmitIndexAddressPrimary(g *renvoLinearGen, ep *renvoExprParse, indexId
 	indexExpr := &ep.exprs[indexIdx]
 	sliceType := renvoResolveType(meta, renvoInferParsedExprType(g, ep, indexExpr.left))
 	renvoNonNil(sliceType)
-	if renvoFixedTarget == 0 {
-		if sliceType.kind == renvoTypePointer {
-			elem := renvoResolveType(meta, sliceType.elem)
-			if elem.kind != renvoTypeArray && elem.kind != renvoTypeSlice {
-				return renvoEmitCPointerIndexAddressPrimary(g, ep, indexIdx, sliceType)
-			}
+	if sliceType.kind == renvoTypePointer {
+		elem := renvoResolveType(meta, sliceType.elem)
+		if elem.kind != renvoTypeArray && elem.kind != renvoTypeSlice {
+			return renvoEmitCPointerIndexAddressPrimary(g, ep, indexIdx, sliceType)
 		}
 	}
 	pointerArray := sliceType.kind == renvoTypePointer
@@ -25394,6 +25422,18 @@ func renvoEmitWideExprToLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, of
 		}
 	}
 	if e.kind == renvoExprCall {
+		if e.left >= 0 && e.left < len(ep.exprs) && ep.exprs[e.left].kind == renvoExprIdent {
+			callee := &ep.exprs[e.left]
+			if renvoBytesPrefixText(g.prog.src, callee.nameStart, callee.nameEnd, "__c_pointer_diff_") {
+				if !renvoEmitCPointerDifference(g, ep, e) {
+					return false
+				}
+				renvoAsmStorePrimaryStack(&g.asm, offset)
+				renvoAsmSarPrimaryImm(&g.asm, 31)
+				renvoAsmStorePrimaryStack(&g.asm, offset-g.c.renvoNativeIntSize)
+				return true
+			}
+		}
 		conversionType := renvoConversionTypeFromExpr(g, ep, e.left)
 		if conversionType != 0 {
 			arg := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)

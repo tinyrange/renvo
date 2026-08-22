@@ -1,13 +1,45 @@
 package main
 
-func renvo_runtime_CAtomicFetchAdd8(address *uint64, value uint64) uint64  { return 0 }
-func renvo_runtime_CAtomicFetchAdd16(address *uint64, value uint64) uint64 { return 0 }
-func renvo_runtime_CAtomicFetchAdd32(address *uint64, value uint64) uint64 { return 0 }
-func renvo_runtime_CAtomicFetchAdd64(address *uint64, value uint64) uint64 { return 0 }
-func renvo_runtime_CAtomicExchange8(address *uint64, value uint64) uint64  { return 0 }
-func renvo_runtime_CAtomicExchange16(address *uint64, value uint64) uint64 { return 0 }
-func renvo_runtime_CAtomicExchange32(address *uint64, value uint64) uint64 { return 0 }
-func renvo_runtime_CAtomicExchange64(address *uint64, value uint64) uint64 { return 0 }
+func renvo_runtime_CAtomicFetchAdd8(address *uint64, value uint32) uint32 {
+	old := *address & 0xff
+	*address = *address&^0xff | (old+uint64(value))&0xff
+	return uint32(old)
+}
+func renvo_runtime_CAtomicFetchAdd16(address *uint64, value uint32) uint32 {
+	old := *address & 0xffff
+	*address = *address&^0xffff | (old+uint64(value))&0xffff
+	return uint32(old)
+}
+func renvo_runtime_CAtomicFetchAdd32(address *uint64, value uint32) uint32 {
+	old := *address & 0xffffffff
+	*address = *address&^0xffffffff | (old+uint64(value))&0xffffffff
+	return uint32(old)
+}
+func renvo_runtime_CAtomicFetchAdd64(address *uint64, value uint64) uint64 {
+	old := *address
+	*address = old + value
+	return old
+}
+func renvo_runtime_CAtomicExchange8(address *uint64, value uint32) uint32 {
+	old := *address & 0xff
+	*address = *address&^0xff | uint64(value)&0xff
+	return uint32(old)
+}
+func renvo_runtime_CAtomicExchange16(address *uint64, value uint32) uint32 {
+	old := *address & 0xffff
+	*address = *address&^0xffff | uint64(value)&0xffff
+	return uint32(old)
+}
+func renvo_runtime_CAtomicExchange32(address *uint64, value uint32) uint32 {
+	old := *address & 0xffffffff
+	*address = *address&^0xffffffff | uint64(value)&0xffffffff
+	return uint32(old)
+}
+func renvo_runtime_CAtomicExchange64(address *uint64, value uint64) uint64 {
+	old := *address
+	*address = value
+	return old
+}
 
 func appMain(args []string) int {
 	value := uint64(0x1122334455667788)

@@ -1,7 +1,7 @@
 package main
 
 func renvo_runtime_CMultiplyDivide64(value uint64, multiplier uint64, divisor uint64) uint64 {
-	return value * multiplier / divisor
+	return value/divisor*multiplier + value%divisor*multiplier/divisor
 }
 
 func appMain(args []string) int {

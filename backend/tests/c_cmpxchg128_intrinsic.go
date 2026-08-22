@@ -1,6 +1,13 @@
 package main
 
 func renvo_runtime_CCompareExchange128(address *[2]uint64, oldLow *uint64, oldHigh *uint64, newLow uint64, newHigh uint64) uint8 {
+	if address[0] == *oldLow && address[1] == *oldHigh {
+		address[0] = newLow
+		address[1] = newHigh
+		return 1
+	}
+	*oldLow = address[0]
+	*oldHigh = address[1]
 	return 0
 }
 

@@ -1,26 +1,86 @@
 package main
 
-func renvo_runtime_COrByte(address *int8, value int8)                {}
-func renvo_runtime_CAndByte(address *int8, value int8)               {}
-func renvo_runtime_CXorByte(address *int8, value int8)               {}
-func renvo_runtime_CXorByteNegative(address *int8, value int8) uint8 { return 0 }
-func renvo_runtime_CTestByte(address *uint8, value uint8) uint8      { return 0 }
+func renvo_runtime_COrByte(address *int8, value int8)  { *address = *address | value }
+func renvo_runtime_CAndByte(address *int8, value int8) { *address = *address & value }
+func renvo_runtime_CXorByte(address *int8, value int8) { *address = *address ^ value }
+func renvo_runtime_CXorByteNegative(address *int8, value int8) uint8 {
+	*address = *address ^ value
+	if *address < 0 {
+		return 1
+	}
+	return 0
+}
+func renvo_runtime_CTestByte(address *uint8, value uint8) uint8 {
+	if *address&value != 0 {
+		return 1
+	}
+	return 0
+}
 
-func renvo_runtime_CBitSet64(address *uint64, bit int64) uint8        { return 0 }
-func renvo_runtime_CBitReset64(address *uint64, bit int64) uint8      { return 0 }
-func renvo_runtime_CBitComplement64(address *uint64, bit int64) uint8 { return 0 }
-func renvo_runtime_CBitTest64(address *uint64, bit int64) uint8       { return 0 }
+func renvo_runtime_CBitTest64(address *uint64, bit int64) uint8 {
+	if *address&(uint64(1)<<uint64(bit)) != 0 {
+		return 1
+	}
+	return 0
+}
+func renvo_runtime_CBitSet64(address *uint64, bit int64) uint8 {
+	old := renvo_runtime_CBitTest64(address, bit)
+	*address = *address | uint64(1)<<uint64(bit)
+	return old
+}
+func renvo_runtime_CBitReset64(address *uint64, bit int64) uint8 {
+	old := renvo_runtime_CBitTest64(address, bit)
+	*address = *address &^ (uint64(1) << uint64(bit))
+	return old
+}
+func renvo_runtime_CBitComplement64(address *uint64, bit int64) uint8 {
+	old := renvo_runtime_CBitTest64(address, bit)
+	*address = *address ^ uint64(1)<<uint64(bit)
+	return old
+}
 func renvo_runtime_CBitScanForward32(value uint32, fallback int32) int32 {
-	return fallback
+	if value == 0 {
+		return fallback
+	}
+	index := int32(0)
+	for value&1 == 0 {
+		value = value >> 1
+		index++
+	}
+	return index
 }
 func renvo_runtime_CBitScanReverse32(value uint32, fallback int32) int32 {
-	return fallback
+	if value == 0 {
+		return fallback
+	}
+	index := int32(31)
+	for value&(uint32(1)<<31) == 0 {
+		value = value << 1
+		index--
+	}
+	return index
 }
 func renvo_runtime_CBitScanForward64(value uint64, fallback int64) int64 {
-	return fallback
+	if value == 0 {
+		return fallback
+	}
+	index := int64(0)
+	for value&1 == 0 {
+		value = value >> 1
+		index++
+	}
+	return index
 }
 func renvo_runtime_CBitScanReverse64(value uint64, fallback int64) int64 {
-	return fallback
+	if value == 0 {
+		return fallback
+	}
+	index := int64(63)
+	for value&(uint64(1)<<63) == 0 {
+		value = value << 1
+		index--
+	}
+	return index
 }
 
 func appMain(args []string) int {

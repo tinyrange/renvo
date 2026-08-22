@@ -595,6 +595,9 @@ func (s *renvoAarch64ProgramSession) stepScratch(functionLimit int) bool {
 		i := s.gen.funcQueue[s.queueIndex]
 		s.queueIndex++
 		emitted++
+		if renvoDeferUnreadyQueuedClosure(&s.gen, i) {
+			continue
+		}
 		if !renvoEmitScalarFunctionScratch(&s.gen, i) {
 			return s.failFunction(i)
 		}
@@ -614,6 +617,9 @@ func (s *renvoAarch64ProgramSession) stepCached(functionLimit int) bool {
 		i := s.gen.funcQueue[s.queueIndex]
 		s.queueIndex++
 		emitted++
+		if renvoDeferUnreadyQueuedClosure(&s.gen, i) {
+			continue
+		}
 		if !renvoEmitScalarFunctionObjectCached(&s.gen, i) {
 			return s.failFunction(i)
 		}

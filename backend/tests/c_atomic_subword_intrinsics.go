@@ -1,9 +1,36 @@
 package main
 
-func renvo_runtime_CAtomicAdd8(address *uint64, value uint64) uint8  { return 0 }
-func renvo_runtime_CAtomicAdd16(address *uint64, value uint64) uint8 { return 0 }
-func renvo_runtime_CAtomicInc8(address *uint64, value uint64) uint8  { return 0 }
-func renvo_runtime_CAtomicDec16(address *uint64, value uint64) uint8 { return 0 }
+func subwordFlags(value uint64, sign uint64) uint8 {
+	flags := uint8(0)
+	if value == 0 {
+		flags = flags | 1
+	}
+	if value&sign != 0 {
+		flags = flags | 2
+	}
+	return flags
+}
+
+func renvo_runtime_CAtomicAdd8(address *uint64, value uint32) uint8 {
+	result := (*address + uint64(value)) & 0xff
+	*address = *address&^0xff | result
+	return subwordFlags(result, 0x80)
+}
+func renvo_runtime_CAtomicAdd16(address *uint64, value uint32) uint8 {
+	result := (*address + uint64(value)) & 0xffff
+	*address = *address&^0xffff | result
+	return subwordFlags(result, 0x8000)
+}
+func renvo_runtime_CAtomicInc8(address *uint64, value uint32) uint8 {
+	result := (*address + 1) & 0xff
+	*address = *address&^0xff | result
+	return subwordFlags(result, 0x80)
+}
+func renvo_runtime_CAtomicDec16(address *uint64, value uint32) uint8 {
+	result := (*address - 1) & 0xffff
+	*address = *address&^0xffff | result
+	return subwordFlags(result, 0x8000)
+}
 
 func appMain(args []string) int {
 	value := uint64(0x1122334455667788)

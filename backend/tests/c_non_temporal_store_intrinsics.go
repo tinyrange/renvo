@@ -1,7 +1,7 @@
 package main
 
-func renvo_runtime_CNonTemporalStore32(address *uint32, value uint64) {}
-func renvo_runtime_CNonTemporalStore64(address *uint64, value uint64) {}
+func renvo_runtime_CNonTemporalStore32(address *uint32, value uint32) { *address = value }
+func renvo_runtime_CNonTemporalStore64(address *uint64, value uint64) { *address = value }
 
 func appMain(args []string) int {
 	value32 := uint32(0)

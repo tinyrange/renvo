@@ -1,7 +1,27 @@
 package main
 
 func renvo_runtime_CMultiplyShift32(value uint64, multiplier uint64, high *uint64) uint64 {
-	return value * multiplier >> 32
+	const mask = uint64(0xffffffff)
+	valueLow := value & mask
+	valueHigh := value >> 32
+	multiplierLow := multiplier & mask
+	multiplierHigh := multiplier >> 32
+	lowProduct := valueLow * multiplierLow
+	middle1 := valueHigh * multiplierLow
+	middle2 := valueLow * multiplierHigh
+	highProduct := valueHigh * multiplierHigh
+	low := lowProduct + (middle1 << 32)
+	carry := uint64(0)
+	if low < lowProduct {
+		carry = 1
+	}
+	beforeMiddle2 := low
+	low = low + (middle2 << 32)
+	if low < beforeMiddle2 {
+		carry++
+	}
+	*high = highProduct + (middle1 >> 32) + (middle2 >> 32) + carry
+	return low>>32 | *high<<32
 }
 
 func appMain(args []string) int {

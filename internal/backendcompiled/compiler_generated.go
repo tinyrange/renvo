@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "b7b0374a661f9831a546865dd5e9dfb8d1ff9fadc10267938ff6664bb4b1ac85"
+const CompilerSourceDigest = "ecbea744755be730fbed92202e4debe70e18021a838def28b44798aa359bfa2a"
 
 // source: backend/compiler_common_impl.go
 
@@ -241,9 +241,13 @@ return make([]int, 0, capacity)
 func renvoEmitAllQueuedFunctionsScratch(g *renvoLinearGen) bool {
 renvoNonNil(g)
 for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
-if !renvoEmitScalarFunctionScratch(g, g.funcQueue[queueIndex]) {
+fnIndex := g.funcQueue[queueIndex]
+if renvoDeferUnreadyQueuedClosure(g, fnIndex) {
+continue
+}
+if !renvoEmitScalarFunctionScratch(g, fnIndex) {
 if renvoFixedTarget == 0 {
-fn := &g.meta.funcs[g.funcQueue[queueIndex]]
+fn := &g.meta.funcs[fnIndex]
 renvoPrintErr("renvo: failed function: ")
 write(2, g.prog.src[fn.nameStart:fn.nameEnd], -1)
 renvoPrintErr("\n")
@@ -251,6 +255,19 @@ renvoPrintErr("\n")
 return false
 }
 }
+return true
+}
+
+func renvoDeferUnreadyQueuedClosure(g *renvoLinearGen, fnIndex int) bool {
+renvoNonNil(g)
+closureIndex := renvoClosureIndexByFunction(g.meta, fnIndex)
+if closureIndex < 0 || g.meta.closures[closureIndex].ready {
+return false
+}
+
+
+
+g.funcReachable[fnIndex] = false
 return true
 }
 
@@ -2570,17 +2587,32 @@ if !right.ok {
 renvoSetConstResult(out, 0, false)
 return
 }
+usesFloat := renvoBinaryUsesFloat(g, ep, e)
+if usesFloat {
+if !renvoExprValueIsFloat(g, ep, e.left) {
+left.value = left.value << 2
+}
+if !renvoExprValueIsFloat(g, ep, e.right) {
+right.value = right.value << 2
+}
+if renvoTokCharIs(p, opTok, '/') {
+left.value = left.value << 2
+}
+}
 unsignedKind := 0
-if renvoExprHasUnsignedIntType(g, ep, e.left) {
+if !usesFloat && renvoExprHasUnsignedIntType(g, ep, e.left) {
 unsignedKind = renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, e.left)).kind
 }
-if renvoExprHasUnsignedIntType(g, ep, e.right) {
+if !usesFloat && renvoExprHasUnsignedIntType(g, ep, e.right) {
 rightUnsignedKind := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, e.right)).kind
 if unsignedKind == 0 || renvoUnsignedKindSize(rightUnsignedKind) > renvoUnsignedKindSize(unsignedKind) {
 unsignedKind = rightUnsignedKind
 }
 }
 renvoEvalConstBinaryInto(g, opTok, left.value, right.value, unsignedKind, out)
+if usesFloat && out.ok && renvoTokCharIs(p, opTok, '*') {
+out.value = out.value / 4
+}
 return
 }
 renvoSetConstResult(out, 0, false)
@@ -5559,7 +5591,12 @@ if fn.linkStatic == 0 {
 continue
 }
 for j := 0; j < fn.paramCount; j++ {
-renvoNativeTypeLayout(m, m.params[fn.firstParam+j].typ)
+paramType := m.params[fn.firstParam+j].typ
+resolved := renvoResolveType(m, paramType)
+renvoNativeTypeLayout(m, paramType)
+if resolved.kind == renvoTypePointer {
+renvoNativeTypeLayout(m, resolved.elem)
+}
 }
 renvoNativeTypeLayout(m, fn.resultType)
 }
@@ -8265,12 +8302,12 @@ s := &g.meta.globals[i]
 if !renvoBytesEqualText(g.prog.src, s.nameStart, s.nameEnd, "renvoFixedTarget") {
 continue
 }
-g.fixedTargetState = 1
 if s.initStart >= s.initEnd {
 return
 }
 r := renvoEvalMetaConstExpr(g.meta, g.prog, s.initStart, s.initEnd, 0)
 if r.ok {
+g.fixedTargetState = 1
 g.fixedTargetValue = r.value
 return
 }
@@ -11485,10 +11522,8 @@ renvoNonNil(t)
 if t.kind == renvoTypePointer {
 pointerElem := t.elem
 t = renvoResolveType(meta, pointerElem)
-if renvoFixedTarget == 0 {
 if t.kind != renvoTypeArray && t.kind != renvoTypeSlice {
 return pointerElem
-}
 }
 }
 if t.kind == renvoTypeSlice || t.kind == renvoTypeArray {
@@ -11711,10 +11746,7 @@ func renvoConversionTypeFromExpr(g *renvoLinearGen, ep *renvoExprParse, idx int)
 renvoNonNil(g, ep)
 callee := &ep.exprs[idx]
 if callee.kind == renvoExprUnary && renvoTokCharIs(g.prog, callee.tok, '*') {
-target := 0
-if renvoFixedTarget == 0 {
-target = renvoConversionTypeFromExpr(g, ep, callee.left)
-}
+target := renvoConversionTypeFromExpr(g, ep, callee.left)
 if target == 0 {
 target = renvoTypeFromExpr(g, ep, callee.left)
 }
@@ -16980,7 +17012,6 @@ if actualExprResolved.kind == renvoTypePointer {
 if !renvoEmitIntExpr(g, ep, idx) {
 return -1
 }
-if renvoFixedTarget == 0 {
 
 
 
@@ -16990,7 +17021,6 @@ for i := 0; i < receiverDereferences; i++ {
 renvoEmitRuntimeNonNilPrimary(g)
 renvoAsmCopyPrimaryToSecondary(a)
 renvoAsmLoadPrimaryMemSecondaryDisp(a, 0)
-}
 }
 renvoAsmPushPrimary(a)
 return 1
@@ -18777,12 +18807,10 @@ a := &g.asm
 indexExpr := &ep.exprs[indexIdx]
 sliceType := renvoResolveType(meta, renvoInferParsedExprType(g, ep, indexExpr.left))
 renvoNonNil(sliceType)
-if renvoFixedTarget == 0 {
 if sliceType.kind == renvoTypePointer {
 elem := renvoResolveType(meta, sliceType.elem)
 if elem.kind != renvoTypeArray && elem.kind != renvoTypeSlice {
 return renvoEmitCPointerIndexAddressPrimary(g, ep, indexIdx, sliceType)
-}
 }
 }
 pointerArray := sliceType.kind == renvoTypePointer
@@ -25401,6 +25429,18 @@ return true
 }
 }
 if e.kind == renvoExprCall {
+if e.left >= 0 && e.left < len(ep.exprs) && ep.exprs[e.left].kind == renvoExprIdent {
+callee := &ep.exprs[e.left]
+if renvoBytesPrefixText(g.prog.src, callee.nameStart, callee.nameEnd, "__c_pointer_diff_") {
+if !renvoEmitCPointerDifference(g, ep, e) {
+return false
+}
+renvoAsmStorePrimaryStack(&g.asm, offset)
+renvoAsmSarPrimaryImm(&g.asm, 31)
+renvoAsmStorePrimaryStack(&g.asm, offset-g.c.renvoNativeIntSize)
+return true
+}
+}
 conversionType := renvoConversionTypeFromExpr(g, ep, e.left)
 if conversionType != 0 {
 arg := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
@@ -28754,7 +28794,11 @@ return true
 func renvoEmitAllQueuedFunctionsCached(g *renvoLinearGen) bool {
 renvoNonNil(g)
 for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
-if !renvoEmitScalarFunctionObjectCached(g, g.funcQueue[queueIndex]) {
+fnIndex := g.funcQueue[queueIndex]
+if renvoDeferUnreadyQueuedClosure(g, fnIndex) {
+continue
+}
+if !renvoEmitScalarFunctionObjectCached(g, fnIndex) {
 return false
 }
 }
@@ -37864,6 +37908,9 @@ for s.queueIndex < len(s.gen.funcQueue) && emitted < functionLimit {
 i := s.gen.funcQueue[s.queueIndex]
 s.queueIndex++
 emitted++
+if renvoDeferUnreadyQueuedClosure(&s.gen, i) {
+continue
+}
 if !renvoEmitScalarFunctionScratch(&s.gen, i) {
 return s.failFunction(i)
 }
@@ -37883,6 +37930,9 @@ for s.queueIndex < len(s.gen.funcQueue) && emitted < functionLimit {
 i := s.gen.funcQueue[s.queueIndex]
 s.queueIndex++
 emitted++
+if renvoDeferUnreadyQueuedClosure(&s.gen, i) {
+continue
+}
 if !renvoEmitScalarFunctionObjectCached(&s.gen, i) {
 return s.failFunction(i)
 }
@@ -45502,13 +45552,18 @@ g.c = meta.c
 g.prog = p
 g.meta = meta
 g.arenaSize = meta.arenaSize
+if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && meta.c.renvoTarget == renvoTargetVM32 {
+renvoLoadCompilerFixedTarget(&g)
+if g.fixedTargetState != 1 {
+
+
+
+g.fixedTargetState = 1
+g.fixedTargetValue = 0
+}
+} else {
 g.fixedTargetState = 1
 g.fixedTargetValue = meta.c.renvoTarget
-if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && meta.c.renvoTarget == renvoTargetVM32 {
-
-
-
-g.fixedTargetValue = 0
 }
 a := &g.asm
 renvoAsmInitWithContext(a, g.c)
@@ -45535,13 +45590,7 @@ return renvoCompileResult{}
 renvoWasm32AsmExit(a)
 for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
 i := g.funcQueue[queueIndex]
-
-
-
-
-closureIndex := renvoClosureIndexByFunction(meta, i)
-if closureIndex >= 0 && !meta.closures[closureIndex].ready {
-g.funcReachable[i] = false
+if renvoDeferUnreadyQueuedClosure(&g, i) {
 continue
 }
 if !renvoEmitScalarFunctionScratch(&g, i) {

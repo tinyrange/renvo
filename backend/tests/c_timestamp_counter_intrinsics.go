@@ -1,7 +1,15 @@
 package main
 
-func renvo_runtime_CReadTimestampCounter(low *uint32, high *uint32)        {}
-func renvo_runtime_CReadTimestampCounterOrdered(low *uint32, high *uint32) {}
+var portableTimestampCounter uint64 = 1
+
+func renvo_runtime_CReadTimestampCounter(low *uint32, high *uint32) {
+	*low = uint32(portableTimestampCounter)
+	*high = uint32(portableTimestampCounter >> 32)
+	portableTimestampCounter++
+}
+func renvo_runtime_CReadTimestampCounterOrdered(low *uint32, high *uint32) {
+	renvo_runtime_CReadTimestampCounter(low, high)
+}
 
 func appMain(args []string) int {
 	var low, high uint32
