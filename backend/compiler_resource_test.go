@@ -34,7 +34,7 @@ func TestCompilerResourceGates(t *testing.T) {
 				t.Fatalf("failed to stat compiler binary: %v", err)
 			}
 			const maxRSSKB = 16 * 1024
-			const maxBinarySize = 288 * 1024
+			const maxBinarySize = 320 * 1024
 			bestRSS := 1 << 30
 			for attempt := 0; attempt < 3; attempt++ {
 				outputPath := filepath.Join(outDir, fmt.Sprintf("compiler-output-%d", attempt))

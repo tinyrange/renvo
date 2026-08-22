@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "772479d5c13bf7707751cd54a549602e283d01fc99471374a7858e8bb33b4bea"
+const CompilerSourceDigest = "0b67ab1d6bf1af4d45ccbec7eb4cf77627514a6db0067456701ec2c727a3f626"
 
 // source: backend/compiler_common_impl.go
 
@@ -15508,9 +15508,12 @@ renvoNonNil(g)
 if wordCount < 0 || wordCount > 6 || importID < 0 {
 return false
 }
-if renvoPreparedBackend == 0 {
+if renvoFixedTarget == 0 {
 renvoAmd64EmitObjectStaticCallReverse(&g.asm, importID, wordCount)
 return true
+}
+if renvoPreparedBackend == 0 {
+return false
 }
 offsets := renvoFixedIntScratch(wordCount)
 for i := 0; i < wordCount; i++ {

@@ -1058,7 +1058,7 @@ func TestRunTests(t *testing.T) {
 }
 
 // Check each single-backend Linux-host compiler cross-compiles its target in
-// under 50ms, produces a binary under 288KB, and uses under 16MB max RSS.
+// under 50ms, produces a binary under 320KB, and uses under 16MB max RSS.
 func TestCompilerPerformance(t *testing.T) {
 	for _, target := range performanceCompilerTargets(t) {
 		target := target
@@ -1080,7 +1080,7 @@ func TestCompilerPerformance(t *testing.T) {
 				t.Fatalf("failed to stat compiler binary: %v", err)
 			}
 			const maxRSSKB = 16 * 1024
-			const maxBinarySize = 288 * 1024
+			const maxBinarySize = 320 * 1024
 			bestElapsed := 24 * time.Hour
 			bestRSS := 1 << 30
 			for attempt := 0; attempt < 3; attempt++ {

@@ -15501,9 +15501,12 @@ func renvoEmitCObjectReverseRegisterStaticCall(g *renvoLinearGen, importID int, 
 	if wordCount < 0 || wordCount > 6 || importID < 0 {
 		return false
 	}
-	if renvoPreparedBackend == 0 {
+	if renvoFixedTarget == 0 {
 		renvoAmd64EmitObjectStaticCallReverse(&g.asm, importID, wordCount)
 		return true
+	}
+	if renvoPreparedBackend == 0 {
+		return false
 	}
 	offsets := renvoFixedIntScratch(wordCount)
 	for i := 0; i < wordCount; i++ {
