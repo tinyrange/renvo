@@ -13,7 +13,6 @@ var renvoKernelModuleNameOff int
 var renvoKernelModuleInitOff int
 var renvoKernelModuleExitOff int
 var renvoKernelLicense string
-var renvoCompilerObjectFile bool
 
 func renvoOpenArg(path string, env []string) int {
 	directFd := open(path, O_RDONLY)

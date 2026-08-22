@@ -220,6 +220,7 @@ var renvoNativeIntSize int = 8
 var renvoTarget int = renvoTargetLinuxAmd64
 var renvoCompilerWindowsSubsystem int = 3
 var renvoCompilerEmitImage bool
+var renvoCompilerObjectFile bool
 
 // renvoCompileContext is owned by one compilation. The target identity and
 // output policy are fixed when the context is created, so independent host
