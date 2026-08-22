@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "d453d2d7a61dd3c55cbf8068d31b6130d0b7b63f791953f30115253f996549fd"
+const CompilerSourceDigest = "714e8e3cf2dd4022385fc3a57aa17c7d2a7067f023c65ed435ee151b1a01384a"
 
 // source: backend/compiler_common_impl.go
 
@@ -6105,6 +6105,14 @@ renvoAsmStorePrimaryBss(&g.asm, g.threadStatePointerOff)
 }
 
 func renvoAsmLoadPrimaryThreadState(g *renvoLinearGen, stateOffset int) {
+if renvoIsHostedObjectAmd64(g.c) {
+
+
+
+renvoEnsurePanicState(g)
+renvoAsmLoadPrimaryBss(&g.asm, g.mainThreadStateOff+stateOffset)
+return
+}
 if g.c.renvoTargetArch == renvoArchAmd64 && renvoPreparedBackend == 0 {
 renvoAsmEmitText(&g.asm, "\x49\x8b\x87")
 renvoAsmEmit32(&g.asm, stateOffset)
@@ -6118,6 +6126,11 @@ renvoAsmPopSecondary(&g.asm)
 }
 
 func renvoAsmStorePrimaryThreadState(g *renvoLinearGen, stateOffset int) {
+if renvoIsHostedObjectAmd64(g.c) {
+renvoEnsurePanicState(g)
+renvoAsmStorePrimaryBss(&g.asm, g.mainThreadStateOff+stateOffset)
+return
+}
 if g.c.renvoTargetArch == renvoArchAmd64 && renvoPreparedBackend == 0 {
 renvoAsmEmitText(&g.asm, "\x49\x89\x87")
 renvoAsmEmit32(&g.asm, stateOffset)

@@ -6098,6 +6098,14 @@ func renvoEmitInitializeThreadState(g *renvoLinearGen) {
 }
 
 func renvoAsmLoadPrimaryThreadState(g *renvoLinearGen, stateOffset int) {
+	if renvoIsHostedObjectAmd64(g.c) {
+		// Object wrappers reserve R15 for the word-index helper. Until object
+		// output has a TLS runtime contract, retain unwind state in this object's
+		// private BSS instead of clobbering that ABI register.
+		renvoEnsurePanicState(g)
+		renvoAsmLoadPrimaryBss(&g.asm, g.mainThreadStateOff+stateOffset)
+		return
+	}
 	if g.c.renvoTargetArch == renvoArchAmd64 && renvoPreparedBackend == 0 {
 		renvoAsmEmitText(&g.asm, "\x49\x8b\x87")
 		renvoAsmEmit32(&g.asm, stateOffset)
@@ -6111,6 +6119,11 @@ func renvoAsmLoadPrimaryThreadState(g *renvoLinearGen, stateOffset int) {
 }
 
 func renvoAsmStorePrimaryThreadState(g *renvoLinearGen, stateOffset int) {
+	if renvoIsHostedObjectAmd64(g.c) {
+		renvoEnsurePanicState(g)
+		renvoAsmStorePrimaryBss(&g.asm, g.mainThreadStateOff+stateOffset)
+		return
+	}
 	if g.c.renvoTargetArch == renvoArchAmd64 && renvoPreparedBackend == 0 {
 		renvoAsmEmitText(&g.asm, "\x49\x89\x87")
 		renvoAsmEmit32(&g.asm, stateOffset)

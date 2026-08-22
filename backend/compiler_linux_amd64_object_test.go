@@ -586,6 +586,13 @@ func invoke() { defer cleanup() }
 	if err != nil {
 		t.Fatalf("parse object panic-state object: %v", err)
 	}
+	text, err := file.Section(".text").Data()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(text, []byte{0x49, 0x8b, 0x87}) || bytes.Contains(text, []byte{0x49, 0x89, 0x87}) {
+		t.Fatal("object panic/defer state uses the R15 wrapper-helper register")
+	}
 	for _, section := range file.Sections {
 		if section.Type != elf.SHT_RELA || section.Info == 0 || int(section.Info) >= len(file.Sections) || file.Sections[section.Info].Flags&elf.SHF_EXECINSTR == 0 {
 			continue
