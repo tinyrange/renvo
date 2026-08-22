@@ -166,6 +166,9 @@ func buildFromFSOneShotCompactWithModuleCache(args []string, workDir string, std
 	if !options.Ok {
 		return buildFail(result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
 	}
+	options = resolveCCompilerPaths(workDir, options)
+	workDir, options = objectSourceContext(workDir, options)
+	result.Options = options
 	fs = sourceFSForOptions(fs, workDir, options)
 	sourcesStart := arena.Mark()
 	var sources SourceResult
@@ -174,8 +177,11 @@ func buildFromFSOneShotCompactWithModuleCache(args []string, workDir string, std
 	} else {
 		sources = CollectSourcesForTargetTagsWithModuleCache(workDir, stdRoot, options.Package, options.Target, options.Tags, moduleCache, fs)
 	}
+	sources = prepareCObjectSources(sources, &options, workDir, fs)
+	options = finalizeCDependencyOptions(options)
 	sourcesEnd := arena.Mark()
 	result.Sources = sources
+	result.Options = options
 	if !sources.Ok {
 		return buildFail(result, BuildErrSource, "", sources.ErrorPath, -1, -1, -1, -1)
 	}
@@ -189,7 +195,15 @@ func buildFromFSOneShotCompactWithModuleCache(args []string, workDir string, std
 		rootArg = sources.Root.Dir
 	}
 	var built pipeline.Result
-	if options.EmitUnit {
+	if options.Mode == ModeObject && options.EmitUnit {
+		built = pipeline.BuildObjectUnit(workDir, stdRoot, rootArg, sources.Files)
+	} else if options.Mode == ModeObject {
+		// Object linking rewrites source-token line fields as a compact mapping.
+		// Keep the source package resident until that mapping has been restored;
+		// retiring its arena pages during the link can alias a small destination
+		// unit and turn token indexes into source lines before backend decoding.
+		built = pipeline.BuildObjectUnit(workDir, stdRoot, rootArg, sources.Files)
+	} else if options.EmitUnit {
 		// An emitted unit is a persistent interchange artifact. Preserve package
 		// ownership and cache-key metadata so host and self-hosted frontends emit
 		// the same canonical bytes.
@@ -224,6 +238,9 @@ func buildFromFSOptions(options Options, workDir string, stdRoot string, moduleC
 	if !options.Ok {
 		return buildFail(result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
 	}
+	options = resolveCCompilerPaths(workDir, options)
+	workDir, options = objectSourceContext(workDir, options)
+	result.Options = options
 	fs = sourceFSForOptions(fs, workDir, options)
 	sourcesStart := arena.Mark()
 	var sources SourceResult
@@ -232,8 +249,11 @@ func buildFromFSOptions(options Options, workDir string, stdRoot string, moduleC
 	} else {
 		sources = CollectSourcesForTargetTagsWithModuleCache(workDir, stdRoot, options.Package, options.Target, options.Tags, moduleCache, fs)
 	}
+	sources = prepareCObjectSources(sources, &options, workDir, fs)
+	options = finalizeCDependencyOptions(options)
 	sourcesEnd := arena.Mark()
 	result.Sources = sources
+	result.Options = options
 	if !sources.Ok {
 		return buildFail(result, BuildErrSource, "", sources.ErrorPath, -1, -1, -1, -1)
 	}
@@ -258,7 +278,14 @@ func buildFromFSOptions(options Options, workDir string, stdRoot string, moduleC
 		rootArg = sources.Root.Dir
 	}
 	var built pipeline.Result
-	if compact {
+	if compact && options.Mode == ModeObject {
+		// Object linking temporarily rewrites source-token line fields. Keep the
+		// source package resident until it restores them; the ordinary transient
+		// pipeline can otherwise recycle that storage into the destination unit.
+		built = pipeline.BuildObjectUnit(workDir, stdRoot, rootArg, sources.Files)
+	} else if options.Mode == ModeObject {
+		built = pipeline.BuildObjectUnit(workDir, stdRoot, rootArg, sources.Files)
+	} else if compact {
 		built = pipeline.BuildUnitWithTransientFilesCached(workDir, stdRoot, rootArg, sources.Files, sourcesStart, sourcesEnd)
 	} else {
 		built = pipeline.BuildUnit(workDir, stdRoot, rootArg, sources.Files)

@@ -64,13 +64,18 @@ func renvoTryCompileScalarProgramWasm32(p *renvoProgram, meta *renvoMeta) renvoC
 	g.prog = p
 	g.meta = meta
 	g.arenaSize = meta.arenaSize
-	g.fixedTargetState = 1
-	g.fixedTargetValue = meta.c.renvoTarget
 	if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && meta.c.renvoTarget == renvoTargetVM32 {
-		// VM bytecode is an execution format, not a restriction on the targets
-		// exposed by a compiler running inside the VM. Preserve dynamic target
-		// selection so a runtime -t value remains authoritative.
-		g.fixedTargetValue = 0
+		renvoLoadCompilerFixedTarget(&g)
+		if g.fixedTargetState != 1 {
+			// VM bytecode is an execution format, not a restriction on the targets
+			// exposed by a compiler running inside the VM. Preserve dynamic target
+			// selection so a runtime -t value remains authoritative.
+			g.fixedTargetState = 1
+			g.fixedTargetValue = 0
+		}
+	} else {
+		g.fixedTargetState = 1
+		g.fixedTargetValue = meta.c.renvoTarget
 	}
 	a := &g.asm
 	renvoAsmInitWithContext(a, g.c)
@@ -97,13 +102,7 @@ func renvoTryCompileScalarProgramWasm32(p *renvoProgram, meta *renvoMeta) renvoC
 	renvoWasm32AsmExit(a)
 	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
 		i := g.funcQueue[queueIndex]
-		// A whole-program function-value dispatch can discover a closure before
-		// its reachable parent has established the capture layout. Leave that
-		// speculative queue entry available for the parent to enqueue again once
-		// renvoPrepareClosureCaptures has made the environment concrete.
-		closureIndex := renvoClosureIndexByFunction(meta, i)
-		if closureIndex >= 0 && !meta.closures[closureIndex].ready {
-			g.funcReachable[i] = false
+		if renvoDeferUnreadyQueuedClosure(&g, i) {
 			continue
 		}
 		if !renvoEmitScalarFunctionScratch(&g, i) {
@@ -402,16 +401,6 @@ func renvoWasm32EmitWideCompareStack(g *renvoLinearGen, left int, right int, tok
 		op = 0x51
 	} else if renvoTok2Is(p, tok, '!', '=') {
 		op = 0x52
-	} else if renvoTokCharIs(p, tok, '<') {
-		op = 0x54
-		if signed {
-			op = 0x53
-		}
-	} else if renvoTokCharIs(p, tok, '>') {
-		op = 0x56
-		if signed {
-			op = 0x55
-		}
 	} else if renvoTok2Is(p, tok, '<', '=') {
 		op = 0x58
 		if signed {
@@ -421,6 +410,16 @@ func renvoWasm32EmitWideCompareStack(g *renvoLinearGen, left int, right int, tok
 		op = 0x5a
 		if signed {
 			op = 0x59
+		}
+	} else if renvoTokCharIs(p, tok, '<') {
+		op = 0x54
+		if signed {
+			op = 0x53
+		}
+	} else if renvoTokCharIs(p, tok, '>') {
+		op = 0x56
+		if signed {
+			op = 0x55
 		}
 	}
 	if op == 0 {
@@ -523,32 +522,7 @@ func renvoEmitVM32WideShiftStack(g *renvoLinearGen, dest int, left int, count in
 }
 
 func renvoWasm32EmitWideComparePortable(g *renvoLinearGen, left int, right int, tok int, signed bool) bool {
-	p := g.prog
-	equal := renvoTok2Is(p, tok, '=', '=') || renvoTok2Is(p, tok, '!', '=')
-	if equal {
-		notEqual := renvoAsmNewLabel(&g.asm)
-		done := renvoAsmNewLabel(&g.asm)
-		renvoEmitNativeCompareStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, 0x94)
-		renvoAsmJzPrimary(&g.asm, notEqual)
-		renvoEmitNativeCompareStack(g, left, right, 0x94)
-		renvoAsmJmpMarkLabel(&g.asm, done, notEqual)
-		renvoAsmPrimaryImm(&g.asm, 0)
-		renvoAsmMarkLabel(&g.asm, done)
-		if renvoTok2Is(p, tok, '!', '=') {
-			renvoAsmBoolNotPrimary(&g.asm)
-		}
-		return true
-	}
-	greater := renvoTokCharIs(p, tok, '>') || renvoTok2Is(p, tok, '>', '=')
-	inclusive := renvoTok2Is(p, tok, '<', '=') || renvoTok2Is(p, tok, '>', '=')
-	if greater != inclusive {
-		left, right = right, left
-	}
-	renvoEmitWideLessStack(g, left, right, signed)
-	if inclusive {
-		renvoAsmBoolNotPrimary(&g.asm)
-	}
-	return true
+	return renvoEmitPortableWideCompareStack(g, left, right, tok, signed)
 }
 
 func renvoWasm32StoreParamWord(g *renvoLinearGen, reg int, offset int) {

@@ -1,11 +1,35 @@
 package pipeline
 
 import (
+	"bytes"
 	"testing"
 
 	"renvo.dev/backend/unit"
+	"renvo.dev/internal/c11"
 	"renvo.dev/internal/load"
 )
+
+func TestBuildObjectUnitPreservesC11SemanticsDirective(t *testing.T) {
+	result := BuildObjectUnit("/repo/case", "/std", ".", []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{
+			Path:       "/repo/case/value.c",
+			Src:        []byte(`int read(const int *value) { return *value; }`),
+			CObject:    true,
+			CDataModel: c11.DataModelLP64,
+		},
+	})
+	if !result.Ok {
+		t.Fatalf("BuildObjectUnit failed: err=%d pkg=%d file=%d tok=%d", result.Error, result.ErrorPackage, result.ErrorFile, result.ErrorToken)
+	}
+	decoded, err := unit.Unmarshal(result.Link.Data)
+	if err != nil {
+		t.Fatalf("object unit did not decode: %v", err)
+	}
+	if !bytes.Contains(decoded.Text, []byte("// renvo:c11\n")) {
+		t.Fatalf("linked object unit lost C11 semantics directive:\n%s", decoded.Text)
+	}
+}
 
 func TestBuildUnitLinksWorkspace(t *testing.T) {
 	result := BuildUnit("/repo/case", "/std", "./cmd/app", []load.SourceFile{
@@ -41,6 +65,66 @@ func Value() int { return answer }
 	}
 	if result.Build.Root != 1 || result.Build.Units[result.Build.Root].ImportPath != "example.com/case/cmd/app" {
 		t.Fatalf("root unit = %d %#v", result.Build.Root, result.Build.Units)
+	}
+}
+
+func TestBuildUnitLinksMixedGoAndC11Files(t *testing.T) {
+	result := BuildUnit("/repo/case", "/std", "./cmd/app", []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+func goDouble(value int) int { return value * 2 }
+
+func main() {
+	if cAdd(20, 22) == 42 && callGo(21) == 42 {
+		print("PASS\n")
+	}
+}
+`)},
+		{Path: "/repo/case/cmd/app/math.c", Src: []byte(`
+int cAdd(int left, int right) { return left + right; }
+int callGo(int value) { return goDouble(value); }
+`)},
+	})
+	if !result.Ok {
+		t.Fatalf("mixed BuildUnit failed: err=%d pkg=%d file=%d tok=%d graph=%#v", result.Error, result.ErrorPackage, result.ErrorFile, result.ErrorToken, result.Workspace.Graph)
+	}
+	decoded, err := unit.Unmarshal(result.Link.Data)
+	if err != nil {
+		t.Fatalf("mixed linked unit did not decode: %v", err)
+	}
+	for _, name := range []string{"goDouble", "cAdd", "callGo", "main", "appMain"} {
+		found := false
+		for i := 0; i < len(decoded.Funcs); i++ {
+			fn := decoded.Funcs[i]
+			if string(decoded.Text[fn.NameStart:fn.NameEnd]) == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("linked unit is missing %s: %s", name, decoded.Text)
+		}
+	}
+}
+
+func TestBuildUnitCompilesC11OnlyRoot(t *testing.T) {
+	result := BuildUnit("/repo/case", "/std", "./cmd/app", []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.c", Src: []byte(`int main(void) { print("PASS\n"); return 0; }`)},
+	})
+	if !result.Ok {
+		t.Fatalf("C-only BuildUnit failed: err=%d pkg=%d file=%d tok=%d", result.Error, result.ErrorPackage, result.ErrorFile, result.ErrorToken)
+	}
+	decoded, err := unit.Unmarshal(result.Link.Data)
+	if err != nil {
+		t.Fatalf("C-only linked unit did not decode: %v", err)
+	}
+	if decoded.Package != "main" {
+		t.Fatalf("C-only package = %q, want main", decoded.Package)
+	}
+	if !bytes.Contains(decoded.Text, []byte("// renvo:c11\n")) {
+		t.Fatalf("linked executable unit lost C11 semantics directive:\n%s", decoded.Text)
 	}
 }
 

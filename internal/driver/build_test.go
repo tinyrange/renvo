@@ -57,6 +57,32 @@ func TestOneShotEmitUnitPreservesCanonicalPackageMetadata(t *testing.T) {
 	}
 }
 
+func TestCompactObjectBuildPreservesPersistentSemantics(t *testing.T) {
+	command := NormalizeCCompilerCommand([]string{
+		"renvo", "cc", "-c", "-nostdinc", "-emit-unit", "-t", "linux/amd64", "-o", "program.unit", "main.c",
+	})
+	args := command[1:]
+	fs := memorySourceFS{files: []load.SourceFile{{
+		Path: "/repo/case/main.c",
+		Src:  []byte("int value(void) { return 42; }\n"),
+	}}}
+	want := BuildFromFS(args, "/repo/case", "/std", fs)
+	got := buildFromFSCompact(args, "/repo/case", "/std", fs)
+	if !want.Ok || !got.Ok {
+		t.Fatalf("persistent ok=%v diagnostic=%#v, compact ok=%v diagnostic=%#v",
+			want.Ok, want.Diagnostic, got.Ok, got.Diagnostic)
+	}
+	wantUnit, wantErr := unit.Unmarshal(want.Unit)
+	gotUnit, gotErr := unit.Unmarshal(got.Unit)
+	if wantErr != nil || gotErr != nil {
+		t.Fatalf("decode persistent error=%v, compact error=%v", wantErr, gotErr)
+	}
+	if !bytes.Equal(gotUnit.Text, wantUnit.Text) || len(gotUnit.Funcs) != len(wantUnit.Funcs) {
+		t.Fatalf("compact C object semantics differ: text=%v funcs=%d/%d",
+			bytes.Equal(gotUnit.Text, wantUnit.Text), len(gotUnit.Funcs), len(wantUnit.Funcs))
+	}
+}
+
 func TestBuildUnitFiltersBuildTaggedFiles(t *testing.T) {
 	result := BuildUnit([]string{"-t", "linux/aarch64", "-o", "app", "./cmd/app"}, "/repo/case", "/std", []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},

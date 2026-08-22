@@ -359,6 +359,21 @@ func findStmtBlockStart(file *File, start int, limit int) int {
 				bracketDepth--
 			}
 		} else if c == '{' && parenDepth == 0 && bracketDepth == 0 {
+			closeTok := skipBalanced(file, i, '{', '}')
+			if closeTok > i && closeTok < limit && TokenLine(file.Tokens[closeTok-1]) == TokenLine(file.Tokens[closeTok]) {
+				next := byte(0)
+				nextTok := file.Tokens[closeTok]
+				if nextTok.End > nextTok.Start {
+					next = file.Src[nextTok.Start]
+				}
+				continues := next == '{' || next == '.' || next == '[' || next == '(' || next == ',' ||
+					next == '!' || next == '=' || next == '<' || next == '>' || next == '+' || next == '-' ||
+					next == '*' || next == '/' || next == '%' || next == '&' || next == '|' || next == '^'
+				if continues {
+					i = closeTok
+					continue
+				}
+			}
 			return i
 		}
 		i++

@@ -4,6 +4,7 @@ package bootstrap
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"renvo.dev/internal/driver"
@@ -11,6 +12,114 @@ import (
 
 func Run(args []string, env []string, backend driver.Backend) int {
 	args, backend = bootstrapArgs(args, backend)
+	if response := driver.ExpandCCompilerResponseFiles(args, driver.OSFS{}); response.Ok {
+		args = response.Args
+	} else {
+		fmt.Fprintf(os.Stderr, "renvo cc: could not read response file: %s\n", response.ErrorPath)
+		return 1
+	}
+	if request := driver.InspectCCompilerRequest(args); request.Kind != driver.CCompilerRequestNone {
+		var input []byte
+		if request.Kind == driver.CCompilerRequestPreprocessStdin {
+			var err error
+			input, err = io.ReadAll(os.Stdin)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "renvo cc: failed to read standard input")
+				return 1
+			}
+		}
+		status, output := driver.ExecuteCCompilerRequest(request, input)
+		if status == 0 {
+			fmt.Fprint(os.Stdout, output)
+		} else {
+			fmt.Fprint(os.Stderr, output)
+		}
+		return status
+	}
+	args = driver.NormalizeCCompilerCommand(args)
+	if driver.CAssemblyCommandRequested(args) {
+		workDir, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "renvo cc: failed to determine working directory")
+			return 1
+		}
+		result := driver.CompileCAssemblyCommand(args, workDir, driver.OSFS{})
+		if !result.Ok {
+			fmt.Fprint(os.Stderr, driver.FormatDiagnostic(driver.CAssemblyCommandDiagnostic(result)))
+			return 1
+		}
+		if result.Output == "-" {
+			_, err = os.Stdout.Write(result.Source)
+		} else {
+			err = os.WriteFile(result.Output, result.Source, 0o644)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "renvo cc: failed to write assembly output")
+			return 1
+		}
+		if len(result.DependencyData) > 0 {
+			if err := os.WriteFile(result.DependencyFile, result.DependencyData, 0o644); err != nil {
+				fmt.Fprintln(os.Stderr, "renvo cc: failed to write dependency file")
+				return 1
+			}
+		}
+		return 0
+	}
+	if driver.CPreprocessCommandRequested(args) {
+		workDir, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "renvo cc: failed to determine working directory")
+			return 1
+		}
+		var input []byte
+		if driver.CPreprocessCommandUsesStandardInput(args) {
+			input, err = io.ReadAll(os.Stdin)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "renvo cc: failed to read standard input")
+				return 1
+			}
+		}
+		result := driver.PreprocessCCommandWithInput(args, workDir, driver.OSFS{}, input)
+		if !result.Ok {
+			fmt.Fprint(os.Stderr, driver.FormatDiagnostic(driver.CPreprocessCommandDiagnostic(result)))
+			return 1
+		}
+		if result.Output == "-" {
+			_, err = os.Stdout.Write(result.Source)
+		} else {
+			err = os.WriteFile(result.Output, result.Source, 0o644)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "renvo cc: failed to write preprocessor output")
+			return 1
+		}
+		if len(result.DependencyData) > 0 {
+			if err := os.WriteFile(result.DependencyFile, result.DependencyData, 0o644); err != nil {
+				fmt.Fprintln(os.Stderr, "renvo cc: failed to write dependency file")
+				return 1
+			}
+		}
+		return 0
+	}
+	if driver.CSyntaxCommandRequested(args) {
+		workDir, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "renvo cc: failed to determine working directory")
+			return 1
+		}
+		result := driver.CheckCCommand(args, workDir, driver.OSFS{})
+		if !result.Ok {
+			fmt.Fprint(os.Stderr, driver.FormatDiagnostic(driver.CSyntaxCommandDiagnostic(result)))
+			return 1
+		}
+		if len(result.DependencyData) > 0 {
+			if err := os.WriteFile(result.DependencyFile, result.DependencyData, 0o644); err != nil {
+				fmt.Fprintln(os.Stderr, "renvo cc: failed to write dependency file")
+				return 1
+			}
+		}
+		return 0
+	}
 	if driver.TestCommandRequested(args) {
 		if len(args) == 3 && (args[2] == "--help" || args[2] == "-h") {
 			fmt.Fprint(os.Stdout, driver.TestHelpText)

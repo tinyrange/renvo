@@ -27,7 +27,7 @@ func TestCompiledInBootstrapPreparesESP32P4Definition(t *testing.T) {
 		filepath.Join(root, "examples", "m5tab5", "hello"),
 	}, root, filepath.Join(root, "std"), driver.OSFS{},
 		New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
-			t.TempDir(), backendcompiled.Backend{}))
+			backendJITTestCacheDir, backendcompiled.Backend{}))
 	if !result.Ok {
 		t.Fatalf("ESP32-P4 custom backend compile failed: %#v", result.Diagnostic)
 	}

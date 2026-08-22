@@ -47,14 +47,15 @@ func renvoRTGAsmPushImmediate(a *renvoAsm, value int) {
 	if renvoRTGABIPushImmediate(a, value) {
 		return
 	}
-	// Store below SP before using the scratch register to adjust SP, so one
-	// reserved scratch location is sufficient.
-	renvoRTGDirectMoveImmediate(a, renvoRTGScratch, int64(value))
-	renvoRTGDirectStoreNative(a,
-		renvoRTGAsmAddress(renvoRTGStack, RTGNoRegister, -renvoRTGStackWordBytes, 1),
-		renvoRTGScratch)
+	// Move SP before materializing the value. An architecture may implement an
+	// immediate move with a temporary push/pop sequence, so staging the value
+	// below the old SP first would let that sequence overwrite it.
 	renvoRTGDirectMoveImmediate(a, renvoRTGScratch, int64(renvoRTGStackWordBytes))
 	renvoRTGDirectSubtract(a, renvoRTGStack, renvoRTGScratch)
+	renvoRTGDirectMoveImmediate(a, renvoRTGScratch, int64(value))
+	renvoRTGDirectStoreNative(a,
+		renvoRTGAsmAddress(renvoRTGStack, RTGNoRegister, 0, 1),
+		renvoRTGScratch)
 }
 
 func renvoRTGAsmPopRegister(a *renvoAsm, destination RTGRegister) {
@@ -388,6 +389,9 @@ func renvoRTGEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount
 func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 	renvoRTGUnsupportedOperation = 0
 	renvoRTGFailureDetail = -1
+	if renvoRTGPreparedObject != 0 {
+		return renvoTryCompileObjectProgramRTG(p, meta)
+	}
 	appIndex := -1
 	for i := 0; i < len(meta.funcs); i++ {
 		if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
@@ -485,6 +489,45 @@ func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoComp
 		return renvoCompileResult{}
 	}
 	if len(data) == 0 {
+		return renvoCompileResult{}
+	}
+	return renvoCompileResult{data: data, ok: true}
+}
+
+func renvoRTGAdjustObjectStack(a *renvoAsm, reserve bool) {
+	renvoRTGDirectMoveImmediate(
+		a, renvoRTGScratch, int64(renvoRTGStackWordBytes))
+	if reserve {
+		renvoRTGDirectSubtract(a, renvoRTGStack, renvoRTGScratch)
+	} else {
+		renvoRTGDirectAdd(a, renvoRTGStack, renvoRTGScratch)
+	}
+}
+
+func renvoRTGPushObjectCallWord(a *renvoAsm, word int) bool {
+	registers := []RTGRegister{
+		renvoRTGCallWord0, renvoRTGCallWord1, renvoRTGCallWord2,
+		renvoRTGCallWord3, renvoRTGCallWord4, renvoRTGCallWord5,
+	}
+	if word < 0 || word >= len(registers) || !registers[word].Valid {
+		return false
+	}
+	renvoRTGAsmPushRegister(a, registers[word])
+	return true
+}
+
+func renvoTryCompileObjectProgramRTG(
+	p *renvoProgram, meta *renvoMeta,
+) renvoCompileResult {
+	g := renvoBeginObjectProgram(p, meta)
+	if g == nil || !renvoEmitAllQueuedFunctionsScratch(g) ||
+		renvoRTGUnsupportedOperation != 0 {
+		return renvoCompileResult{}
+	}
+	renvoRecordObjectFunctionRanges(g)
+	data := renvoRTGImage(&g.asm)
+	renvoRTGValidateRelocations(&g.asm)
+	if renvoRTGUnsupportedOperation != 0 || len(data) == 0 {
 		return renvoCompileResult{}
 	}
 	return renvoCompileResult{data: data, ok: true}

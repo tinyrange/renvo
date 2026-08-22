@@ -52,6 +52,9 @@ func (s *FSBuildSession) Step() bool {
 			s.stage = 4
 			return true
 		}
+		options = resolveCCompilerPaths(s.workDir, options)
+		s.workDir, options = objectSourceContext(s.workDir, options)
+		s.result.Options = options
 		s.fs = sourceFSForOptions(s.fs, s.workDir, options)
 		s.stage = 1
 		return false
@@ -65,8 +68,11 @@ func (s *FSBuildSession) Step() bool {
 		} else {
 			sources = CollectSourcesForTargetTagsWithModuleCache(s.workDir, s.stdRoot, options.Package, options.Target, options.Tags, s.moduleCache, s.fs)
 		}
+		sources = prepareCObjectSources(sources, &options, s.workDir, s.fs)
+		options = finalizeCDependencyOptions(options)
 		s.sourcesEnd = arena.Mark()
 		s.result.Sources = sources
+		s.result.Options = options
 		if !sources.Ok {
 			s.result = buildFail(s.result, BuildErrSource, "", sources.ErrorPath, -1, -1, -1, -1)
 			s.stage = 4
@@ -93,7 +99,16 @@ func (s *FSBuildSession) Step() bool {
 		if len(options.Files) > 0 {
 			s.rootArg = sources.Root.Dir
 		}
-		s.pipeline = pipeline.BeginSession(s.workDir, s.stdRoot, s.rootArg, sources.Files, s.sourcesStart, s.sourcesEnd, s.compact, s.cached)
+		if options.Mode == ModeObject {
+			// Object linking rewrites source-token line fields while producing the
+			// compact mapping, so its source arena cannot yet be transient.
+			s.pipeline = pipeline.BeginObjectSession(
+				s.workDir, s.stdRoot, s.rootArg, sources.Files, s.cached)
+		} else {
+			s.pipeline = pipeline.BeginSession(
+				s.workDir, s.stdRoot, s.rootArg, sources.Files,
+				s.sourcesStart, s.sourcesEnd, s.compact, s.cached)
+		}
 		s.stage = 2
 		return false
 	}

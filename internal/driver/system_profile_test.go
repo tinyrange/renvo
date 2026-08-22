@@ -91,6 +91,17 @@ func TestExplicitTargetOverridesSystemDefault(t *testing.T) {
 	}
 }
 
+func TestObjectModeRejectsNonLinuxSystemDefault(t *testing.T) {
+	files := append(driverTestFiles(),
+		load.SourceFile{Path: "/repo/case/windows.rtg", Src: []byte(`system "windows" { target = "windows/amd64" binary = 1MiB arena = 1MiB }`)},
+		load.SourceFile{Path: "/repo/case/main.c", Src: []byte("int main(void) { return 0; }\n")},
+	)
+	result := BuildFromFS([]string{"-c", "-system", "windows.rtg", "-o", "main.o", "main.c"}, "/repo/case", "/std", memorySourceFS{files: files})
+	if result.Ok || result.Options.Error != ParseErrObjectRequiresLinuxAmd64 || result.Diagnostic.Code != "RENVO-OPTION-029" {
+		t.Fatalf("BuildFromFS object with Windows system = %#v", result)
+	}
+}
+
 type systemProfileBackend struct {
 	binary    []byte
 	target    string

@@ -1,0 +1,61 @@
+diff --git a/console.c b/console.c
+--- a/console.c
++++ b/console.c
+@@ -6,0 +7,2 @@
++
++typedef __builtin_va_list va_list;
+@@ -58 +60 @@ cprintf(char *fmt, ...)
+-  uint *argp;
++  va_list argp;
+@@ -68 +70 @@ cprintf(char *fmt, ...)
+-  argp = (uint*)(void*)(&fmt + 1);
++  __builtin_va_start(argp, fmt);
+@@ -79 +81 @@ cprintf(char *fmt, ...)
+-      printint(*argp++, 10, 1);
++      printint(__builtin_va_arg(argp, uint), 10, 1);
+@@ -83 +85 @@ cprintf(char *fmt, ...)
+-      printint(*argp++, 16, 0);
++      printint(__builtin_va_arg(argp, uint), 16, 0);
+@@ -86 +88 @@ cprintf(char *fmt, ...)
+-      if((s = (char*)*argp++) == 0)
++      if((s = (char*)__builtin_va_arg(argp, uint)) == 0)
+@@ -101,0 +104,2 @@ cprintf(char *fmt, ...)
++  __builtin_va_end(argp);
++
+diff --git a/printf.c b/printf.c
+--- a/printf.c
++++ b/printf.c
+@@ -4,0 +5,2 @@
++typedef __builtin_va_list va_list;
++
+@@ -44 +46 @@ printf(int fd, const char *fmt, ...)
+-  uint *ap;
++  va_list ap;
+@@ -47 +49 @@ printf(int fd, const char *fmt, ...)
+-  ap = (uint*)(void*)&fmt + 1;
++  __builtin_va_start(ap, fmt);
+@@ -58,2 +60 @@ printf(int fd, const char *fmt, ...)
+-        printint(fd, *ap, 10, 1);
+-        ap++;
++        printint(fd, __builtin_va_arg(ap, uint), 10, 1);
+@@ -61,2 +62 @@ printf(int fd, const char *fmt, ...)
+-        printint(fd, *ap, 16, 0);
+-        ap++;
++        printint(fd, __builtin_va_arg(ap, uint), 16, 0);
+@@ -64,2 +64 @@ printf(int fd, const char *fmt, ...)
+-        s = (char*)*ap;
+-        ap++;
++        s = (char*)__builtin_va_arg(ap, uint);
+@@ -73,2 +72 @@ printf(int fd, const char *fmt, ...)
+-        putc(fd, *ap);
+-        ap++;
++        putc(fd, __builtin_va_arg(ap, uint));
+@@ -84,0 +83 @@ printf(int fd, const char *fmt, ...)
++  __builtin_va_end(ap);
+diff --git a/spinlock.c b/spinlock.c
+--- a/spinlock.c
++++ b/spinlock.c
+@@ -77 +77,2 @@ getcallerpcs(void *v, uint pcs[])
+-  ebp = (uint*)v - 2;
++  (void)v;
++  ebp = __builtin_frame_address(1);

@@ -13,6 +13,7 @@ type ProgramSession struct {
 	graph       load.Graph
 	transient   bool
 	cached      bool
+	requireMain bool
 	stage       int
 	packageNext int
 	headerStart int
@@ -28,10 +29,14 @@ type ProgramSession struct {
 }
 
 func BeginProgramsSession(graph load.Graph, transient bool, cached bool) *ProgramSession {
-	return beginProgramsSession(graph, transient, cached, cached)
+	return beginProgramsSession(graph, transient, cached, cached, true)
 }
 
-func beginProgramsSession(graph load.Graph, transient bool, cached bool, identities bool) *ProgramSession {
+func BeginObjectProgramsSession(graph load.Graph, cached bool) *ProgramSession {
+	return beginProgramsSession(graph, false, cached, cached, false)
+}
+
+func beginProgramsSession(graph load.Graph, transient bool, cached bool, identities bool, requireMain bool) *ProgramSession {
 	graphKeyA, graphKeyB := 0, 0
 	var contextA []int
 	var contextB []int
@@ -45,15 +50,16 @@ func beginProgramsSession(graph load.Graph, transient bool, cached bool, identit
 		InitializePackageProgramCache()
 	}
 	return &ProgramSession{
-		graph:     graph,
-		transient: transient,
-		cached:    cached,
-		graphKeyA: graphKeyA,
-		graphKeyB: graphKeyB,
-		contextA:  contextA,
-		contextB:  contextB,
-		sourceA:   sourceA,
-		sourceB:   sourceB,
+		graph:       graph,
+		transient:   transient,
+		cached:      cached,
+		requireMain: requireMain,
+		graphKeyA:   graphKeyA,
+		graphKeyB:   graphKeyB,
+		contextA:    contextA,
+		contextB:    contextB,
+		sourceA:     sourceA,
+		sourceB:     sourceB,
 		result: Result{
 			Root:         -1,
 			Ok:           true,
@@ -122,7 +128,7 @@ func (s *ProgramSession) Step() bool {
 		s.stage = 2
 		return true
 	}
-	if isRoot && pkg.Name == "main" {
+	if s.requireMain && isRoot && pkg.Name == "main" {
 		if mainErr, mainFile, mainTok := check.CheckRootMain(pkg); mainErr != check.CheckOK {
 			if s.transient {
 				arena.PersistReset(persistMark)
@@ -148,6 +154,7 @@ func (s *ProgramSession) Step() bool {
 				SourceKeyB: sourceKeyB,
 				ArenaStart: unitStart,
 				ArenaEnd:   unitEnd,
+				C11:        packageUsesC11(pkg),
 			})
 			s.discardPackage(pkg)
 			if s.transient {
@@ -183,6 +190,7 @@ func (s *ProgramSession) Step() bool {
 		SourceKeyB: sourceKeyB,
 		ArenaStart: unitStart,
 		ArenaEnd:   unitEnd,
+		C11:        packageUsesC11(pkg),
 	})
 	s.discardPackage(pkg)
 	if s.transient {

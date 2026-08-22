@@ -134,6 +134,20 @@ func lowerFunctionValuesCore(program *unit.Program, transient bool) bool {
 	return reparseFunctionValueProgram(program, text, edits, originalLength, generatedStart)
 }
 
+// Relocatable objects expose function values through the platform C ABI, where
+// they are raw code pointers. Keep those values intact for the object backend;
+// only the syntax-level builtin rewrites shared with ordinary linking apply.
+func lowerObjectFunctionValuesCore(program *unit.Program, transient bool) bool {
+	_, deferred, builtins := functionValueProgramNeedsLowering(program)
+	if deferred && !lowerDeferredBuiltins(program, transient) {
+		return false
+	}
+	if builtins && !lowerOrdinaryBuiltins(program, transient) {
+		return false
+	}
+	return true
+}
+
 func lowerDeferredBuiltins(program *unit.Program, transient bool) bool {
 	var edits []functionValueEdit
 	for i := 0; i+2 < len(program.Tokens); i++ {

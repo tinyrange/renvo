@@ -57,7 +57,11 @@ func renvoTryCompileScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) renvoCo
 
 func renvoTryCompileScalarProgramAmd64Scratch(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 	g := renvoBeginScalarProgramAmd64(p, meta)
-	if g == nil || !renvoEmitAllQueuedFunctionsScratch(g) {
+	if g == nil {
+		renvoPrintErr("renvo: failed to begin amd64 program\n")
+		return renvoCompileResult{}
+	}
+	if !renvoEmitAllQueuedFunctionsScratch(g) {
 		return renvoCompileResult{}
 	}
 	return renvoFinishScalarProgramAmd64(g)
@@ -70,8 +74,14 @@ func renvoTryCompileScalarProgramAmd64Cached(p *renvoProgram, meta *renvoMeta) r
 	}
 	return renvoFinishScalarProgramAmd64(g)
 }
+
 func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
 	renvoNonNil(p, meta)
+	if renvoFixedTarget == 0 {
+		if renvoIsHostedObjectAmd64(meta.c) {
+			return renvoBeginObjectProgram(p, meta)
+		}
+	}
 	appIndex := -1
 	for i := 0; i < len(meta.funcs); i++ {
 		if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
@@ -81,17 +91,11 @@ func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinear
 	if appIndex < 0 {
 		return nil
 	}
-	// Metadata building consumes the decoded declaration records completely;
-	// amd64 emission uses the canonical body ranges in renvoFuncInfo.
-	renvo_runtime_ArenaDiscardDecls(p.decls)
-	renvo_runtime_ArenaDiscardFuncs(p.funcs)
-	g := new(renvoLinearGen)
-	g.c = meta.c
-	g.prog = p
-	g.meta = meta
-	g.arenaSize = meta.arenaSize
+	g := renvoBeginLinearProgram(p, meta)
+	if g == nil {
+		return nil
+	}
 	a := &g.asm
-	renvoAsmInitWithContext(a, g.c)
 	if renvoFixedTarget == 0 {
 		// Large dynamic programs have enough output-size headroom to favor
 		// faster instructions. Fixed-target compilers retain their compact
@@ -110,14 +114,6 @@ func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinear
 	if targetIsWindows(meta.c.renvoTargetOS) {
 		a.codeOffset = renvoWinSectionRVA
 	}
-	if renvoFixedTarget != 0 {
-		g.funcLabels = make([]int, 0, len(meta.funcs))
-	}
-	for i := 0; i < len(meta.funcs); i++ {
-		label := renvoAsmNewLabel(a)
-		g.funcLabels = append(g.funcLabels, label)
-	}
-	renvoInitFuncQueue(g, len(meta.funcs))
 	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
 		renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(meta.c) {
 		if !renvoBeginKernelModuleAmd64(g, appIndex) {
@@ -218,10 +214,17 @@ func renvoEmitImageEntryArgsAmd64(g *renvoLinearGen, appIndex int) bool {
 
 func renvoFinishScalarProgramAmd64(g *renvoLinearGen) renvoCompileResult {
 	renvoNonNil(g)
-	renvo_runtime_ArenaDiscard(g.meta.scratchStart, g.meta.scratchEnd)
 	a := &g.asm
+	if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+		// Copy implementation names and placement metadata before a self-hosted
+		// compiler releases the frontend scratch arena that owns their spans.
+		renvoRecordObjectFunctionRanges(g)
+	}
+	renvo_runtime_ArenaDiscard(g.meta.scratchStart, g.meta.scratchEnd)
 	var data []byte
-	if targetIsWindows(g.c.renvoTargetOS) {
+	if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+		data = renvoAsmImageObjectAmd64(a)
+	} else if targetIsWindows(g.c.renvoTargetOS) {
 		data = renvoAsmImageWindowsAmd64(a)
 	} else if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
 		renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
@@ -312,7 +315,7 @@ func renvoAmd64EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
 	g.stackPeak = 0
 	renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
 	framePatch := len(a.code)
-	if renvoFixedTarget == 0 && a.c.optimizeRuntime {
+	if renvoFixedTarget == 0 && (a.c.optimizeRuntime || renvoIsHostedObjectAmd64(a.c)) {
 		// Avoid the microcoded ENTER instruction in large generated programs.
 		// Keep the frame size as an immediate placeholder until emission
 		// discovers the function's peak stack use.
@@ -356,7 +359,7 @@ func renvoAmd64EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
 	if frame > 65520 {
 		frame = 65520
 	}
-	if renvoFixedTarget == 0 && a.c.optimizeRuntime {
+	if renvoFixedTarget == 0 && (a.c.optimizeRuntime || renvoIsHostedObjectAmd64(a.c)) {
 		a.code[framePatch+7] = byte(frame)
 		a.code[framePatch+8] = byte(frame >> 8)
 	} else {
@@ -693,6 +696,20 @@ func renvoAmd64InitRuntimeCheckRegs(g *renvoLinearGen) {
 	renvoAmd64InitRuntimeCheckReg(a, 0x1d8d48, renvoAmd64EnsureRuntimeCheck(g, &g.runtimeWideIndexLabel, 5, "\x48\x39\xd1\x73\x08\x48\x6b\xc9\x48\x48\x01\xc8\xc3\xe9\x00\x00\x00\x00"))
 }
 
+func renvoAmd64ObjectExportFrame(g *renvoLinearGen, reserve bool) {
+	if reserve {
+		// Renvo uses RBX for division and R12-R15 for compact runtime helpers.
+		// They are callee-saved in the System V ABI, so an exported wrapper must
+		// preserve the C caller's values before installing its own helper set.
+		renvoAsmEmitText(&g.asm, "\x53\x41\x54\x41\x55\x41\x56\x41\x57")
+		if !g.meta.panicEnabled {
+			renvoAmd64InitRuntimeCheckRegs(g)
+		}
+		return
+	}
+	renvoAsmEmitText(&g.asm, "\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5b")
+}
+
 func renvoAmd64InitRuntimeCheckReg(a *renvoAsm, op int, label int) {
 	renvoNonNil(a)
 	renvoAsmEmit24(a, op)
@@ -721,6 +738,7 @@ func renvoAmd64EnsureRuntimeCheck(g *renvoLinearGen, slot *int, kind int, code s
 	label := renvoAsmNewLabel(a)
 	*slot = label + 1
 	after := renvoAsmNewLabel(a)
+	helperEnd := renvoAsmNewLabel(a)
 	renvoAsmJmpMarkLabel(a, after, label)
 	if kind == 2 && g.meta.panicEnabled {
 		renvoAsmEmitText(a, "\x48\x89\xc2\x48\x39\xc8\x0f\x92\xc0\x48\x0f\xb6\xc0\xc3")
@@ -728,10 +746,41 @@ func renvoAmd64EnsureRuntimeCheck(g *renvoLinearGen, slot *int, kind int, code s
 		renvoAsmEmitText(a, "\x48\x39\xc2\x72\x0e\x48\x39\xd1\x72\x09\x48\x39\xcf\x72\x04\x6a\x01\x58\xc3\x31\xc0\xc3")
 	} else {
 		renvoAsmEmitText(a, code)
-		renvoAsmAddReloc(a, len(a.code)-4, renvoEnsureUncaughtRuntimeFaultHelper(g))
+		relocation := len(a.code) - 4
+		renvoAsmMarkLabel(a, helperEnd)
+		renvoAsmAddReloc(a, relocation, renvoEnsureUncaughtRuntimeFaultHelper(g))
+	}
+	if renvoAsmLabelPosition(a, helperEnd) < 0 {
+		renvoAsmMarkLabel(a, helperEnd)
 	}
 	renvoAsmMarkLabel(a, after)
+	if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+		name := "__renvo_check_non_nil"
+		if kind == 1 {
+			name = "__renvo_check_secondary"
+		} else if kind == 2 {
+			name = "__renvo_check_bounds"
+		} else if kind == 3 {
+			name = "__renvo_check_byte_index"
+		} else if kind == 4 {
+			name = "__renvo_check_word_index"
+		} else if kind == 5 {
+			name = "__renvo_check_wide_index"
+		} else if kind == 6 {
+			name = "__renvo_check_slice_bounds"
+		}
+		renvoAsmAddLocalObjectFuncSymbolText(a, name, label, helperEnd)
+	}
 	return label
+}
+
+func renvoAsmAddLocalObjectFuncSymbolText(a *renvoAsm, name string, label int, endLabel int) {
+	renvoNonNil(a)
+	start := len(a.symbolName)
+	for i := 0; i < len(name); i++ {
+		a.symbolName = append(a.symbolName, name[i])
+	}
+	a.symbols = append(a.symbols, renvoAsmSymbol{nameStart: start, nameEnd: len(a.symbolName), label: label, endLabel: endLabel})
 }
 
 func renvoAmd64EnsureAppendAddrHelper(g *renvoLinearGen) int {
@@ -744,6 +793,7 @@ func renvoAmd64EnsureAppendAddrHelper(g *renvoLinearGen) int {
 	g.appendAddrEmitted = true
 	g.appendAddrLabel = renvoAsmNewLabel(a)
 	afterLabel := renvoAsmNewLabel(a)
+	helperEnd := renvoAsmNewLabel(a)
 	renvoAsmJmpMarkLabel(a, afterLabel, g.appendAddrLabel)
 	noGrowLabel := renvoAsmNewLabel(a)
 	haveCapLabel := renvoAsmNewLabel(a)
@@ -765,7 +815,11 @@ func renvoAmd64EnsureAppendAddrHelper(g *renvoLinearGen) int {
 	renvoAsmEmitText(a, "\x50\x48\x8b\x4c\x24\x10\x48\x8b\x54\x24\x18\x0f\xaf\xca\x48\x8b\x7c\x24\x30\x48\x8b\x37\x48\x8b\x3c\x24\xfc\xf3\xa4\x48\x8b\x7c\x24\x30\x48\x8b\x04\x24\x48\x89\x07\x4c\x8b\x4c\x24\x20\x4c\x8b\x44\x24\x08\x4d\x89\x01\x48\x8b\x04\x24\x48\x8b\x4c\x24\x10\x48\x8b\x54\x24\x18\x0f\xaf\xca\x48\x01\xc8\x48\x8b\x74\x24\x28\x48\x8b\x4c\x24\x10\x48\xff\xc1\x48\x89\x0e\x48\x83\xc4\x38\xc3")
 	renvoAsmMarkLabel(a, noGrowLabel)
 	renvoAsmEmitText(a, "\x48\x8b\x0e\x48\x8b\x07\x48\x0f\xaf\xca\x48\x01\xc8\x48\x8b\x0e\x48\xff\xc1\x48\x89\x0e\xc3")
+	renvoAsmMarkLabel(a, helperEnd)
 	renvoAsmMarkLabel(a, afterLabel)
+	if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+		renvoAsmAddLocalObjectFuncSymbolText(a, "__renvo_append_addr", g.appendAddrLabel, helperEnd)
+	}
 	return g.appendAddrLabel
 }
 
@@ -778,9 +832,14 @@ func renvoAmd64EnsureAppend8Helper(g *renvoLinearGen) int {
 	g.append8Emitted = true
 	g.append8Label = renvoAsmNewLabel(a)
 	afterLabel := renvoAsmNewLabel(a)
+	helperEnd := renvoAsmNewLabel(a)
 	renvoAsmJmpMarkLabel(a, afterLabel, g.append8Label)
 	renvoAsmEmitText(a, "\x48\x8b\x0e\x4c\x8b\x07\x41\x88\x14\x08\x48\xff\xc1\x48\x89\x0e\xc3")
+	renvoAsmMarkLabel(a, helperEnd)
 	renvoAsmMarkLabel(a, afterLabel)
+	if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+		renvoAsmAddLocalObjectFuncSymbolText(a, "__renvo_append_byte", g.append8Label, helperEnd)
+	}
 	return g.append8Label
 }
 func renvoAmd64EnsureAppend64Helper(g *renvoLinearGen) int {
@@ -792,9 +851,14 @@ func renvoAmd64EnsureAppend64Helper(g *renvoLinearGen) int {
 	g.append64Emitted = true
 	g.append64Label = renvoAsmNewLabel(a)
 	afterLabel := renvoAsmNewLabel(a)
+	helperEnd := renvoAsmNewLabel(a)
 	renvoAsmJmpMarkLabel(a, afterLabel, g.append64Label)
 	renvoAsmEmitText(a, "\x48\x8b\x0e\x4c\x8b\x07\x49\x89\x14\xc8\x48\xff\xc1\x48\x89\x0e\xc3")
+	renvoAsmMarkLabel(a, helperEnd)
 	renvoAsmMarkLabel(a, afterLabel)
+	if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+		renvoAsmAddLocalObjectFuncSymbolText(a, "__renvo_append_word", g.append64Label, helperEnd)
+	}
 	return g.append64Label
 }
 
@@ -807,6 +871,7 @@ func renvoAmd64EnsureAppendBytesHelper(g *renvoLinearGen) int {
 	g.appendBytesEmitted = true
 	g.appendBytesLabel = renvoAsmNewLabel(a)
 	afterLabel := renvoAsmNewLabel(a)
+	helperEnd := renvoAsmNewLabel(a)
 	renvoAsmJmpMarkLabel(a, afterLabel, g.appendBytesLabel)
 	// rdi, rsi, and r9 point at the destination data, length, and capacity
 	// slots. rdx and rcx hold the source data and length. The compact helper
@@ -815,7 +880,11 @@ func renvoAmd64EnsureAppendBytesHelper(g *renvoLinearGen) int {
 	// byte 77; internal branches have fixed displacements within this bytecode.
 	renvoAsmEmitText(a, "\x48\x85\xc9\x0f\x84\xc8\x00\x00\x00\x4c\x8b\x06\x4d\x89\xc2\x49\x01\xca\x0f\x82\xbd\x00\x00\x00\x4d\x39\x11\x0f\x83\x83\x00\x00\x00\x4d\x8b\x19\x4d\x85\xdb\x75\x06\x41\xbb\x10\x00\x00\x00\x4d\x01\xdb\x0f\x82\x9d\x00\x00\x00\x4d\x39\xd3\x72\xf2\x57\x56\x41\x51\x52\x51\x41\x50\x41\x52\x41\x53\x4c\x89\xd8\xe8\x00\x00\x00\x00\x48\x85\xc0\x75\x05\x48\x83\xc4\x40\xc3\x50\x48\x8b\x4c\x24\x18\x48\x89\xc7\x48\x8b\x74\x24\x40\x48\x8b\x36\xf3\xa4\x48\x8b\x7c\x24\x40\x48\x8b\x04\x24\x48\x89\x07\x4c\x8b\x4c\x24\x30\x4c\x8b\x5c\x24\x08\x4d\x89\x19\x48\x8b\x4c\x24\x20\x48\x8b\x54\x24\x28\x4c\x8b\x44\x24\x18\x4c\x8b\x54\x24\x10\x48\x8b\x74\x24\x38\x48\x83\xc4\x48\x4c\x89\x16\x48\x8b\x07\x4a\x8d\x3c\x00\x48\x89\xd6\x48\x39\xf7\x76\x19\x48\x8d\x04\x0e\x48\x39\xc7\x73\x10\x48\x8d\x74\x0e\xff\x48\x8d\x7c\x0f\xff\xfd\xf3\xa4\xfc\xeb\x02\xf3\xa4\x6a\x01\x58\xc3\x31\xc0\xc3")
 	renvoAsmAddReloc(a, len(a.code)-139, arenaAllocLabel)
+	renvoAsmMarkLabel(a, helperEnd)
 	renvoAsmMarkLabel(a, afterLabel)
+	if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+		renvoAsmAddLocalObjectFuncSymbolText(a, "__renvo_append_bytes", g.appendBytesLabel, helperEnd)
+	}
 	return g.appendBytesLabel
 }
 
@@ -834,6 +903,7 @@ func renvoAmd64EnsureStringEqualHelper(g *renvoLinearGen) int {
 	g.streqEmitted = true
 	g.streqLabel = renvoAsmNewLabel(a)
 	afterLabel := renvoAsmNewLabel(a)
+	helperEnd := renvoAsmNewLabel(a)
 	renvoAsmJmpMarkLabel(a, afterLabel, g.streqLabel)
 	notEqualLabel := renvoAsmNewLabel(a)
 	equalLabel := renvoAsmNewLabel(a)
@@ -851,6 +921,10 @@ func renvoAmd64EnsureStringEqualHelper(g *renvoLinearGen) int {
 	renvoAsmEmitText(a, "\x6a\x01\x58")
 	renvoAsmMarkLabel(a, notEqualLabel)
 	renvoAsmEmitText(a, "\xc3")
+	renvoAsmMarkLabel(a, helperEnd)
 	renvoAsmMarkLabel(a, afterLabel)
+	if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+		renvoAsmAddLocalObjectFuncSymbolText(a, "__renvo_string_equal", g.streqLabel, helperEnd)
+	}
 	return g.streqLabel
 }

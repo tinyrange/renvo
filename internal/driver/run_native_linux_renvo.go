@@ -48,8 +48,7 @@ func (s *LinkedImageSession) Prepare() {
 // it on an isolated stack.
 func RunNativeLinkedImage(native []byte, script string, args []string, env []string) int {
 	var session LinkedImageSession
-	session.Prepare()
-	exitCode := session.Run(native, script, args, env)
+	exitCode := session.run(native, script, args, env, false)
 	session.Reset()
 	return exitCode
 }
@@ -57,6 +56,10 @@ func RunNativeLinkedImage(native []byte, script string, args []string, env []str
 // Run incrementally links, enters, and—on successful execution—commits a new
 // image generation to this session.
 func (s *LinkedImageSession) Run(native []byte, script string, args []string, env []string) int {
+	return s.run(native, script, args, env, true)
+}
+
+func (s *LinkedImageSession) run(native []byte, script string, args []string, env []string, retain bool) int {
 	if renvoRunLinuxSyscall == nil || renvoRunJITCall == nil {
 		return -1
 	}
@@ -64,18 +67,21 @@ func (s *LinkedImageSession) Run(native []byte, script string, args []string, en
 	if !ok {
 		return -1
 	}
-	linkSymbols, ok := linkedimage.PersistentSymbols(native, memorySize)
-	if !ok {
-		return -1
-	}
+	var linkSymbols []linkedimage.PersistentSymbol
 	newSymbols := 0
-	for i := 0; i < len(linkSymbols); i++ {
-		if s.findSymbol(linkSymbols[i].ID) < 0 {
-			newSymbols++
+	if retain {
+		linkSymbols, ok = linkedimage.PersistentSymbols(native, memorySize)
+		if !ok {
+			return -1
 		}
-	}
-	if len(s.mappings) >= cap(s.mappings) || len(s.symbols)+newSymbols > cap(s.symbols) {
-		return -1
+		for i := 0; i < len(linkSymbols); i++ {
+			if s.findSymbol(linkSymbols[i].ID) < 0 {
+				newSymbols++
+			}
+		}
+		if len(s.mappings) >= cap(s.mappings) || len(s.symbols)+newSymbols > cap(s.symbols) {
+			return -1
+		}
 	}
 	memorySize = renvoRunPageAlign(memorySize)
 	base := renvoRunLinuxSyscall(renvoRunMmapSyscall(), 0, memorySize, 3, 34, -1, 0)
@@ -151,16 +157,20 @@ func (s *LinkedImageSession) Run(native []byte, script string, args []string, en
 		renvoRunLinuxSyscall(renvoRunMunmapSyscall(), base, memorySize, 0, 0, 0, 0)
 		return exitCode
 	}
-	s.mappings = append(s.mappings, renvoRunMapping{base: base, size: memorySize})
-	for i := 0; i < len(linkSymbols); i++ {
-		symbol := linkSymbols[i]
-		current := renvoRunPersistentSymbol{id: symbol.ID, address: base + symbol.Address, size: symbol.Size}
-		previous := s.findSymbol(symbol.ID)
-		if previous >= 0 {
-			s.symbols[previous] = current
-		} else {
-			s.symbols = append(s.symbols, current)
+	if retain {
+		s.mappings = append(s.mappings, renvoRunMapping{base: base, size: memorySize})
+		for i := 0; i < len(linkSymbols); i++ {
+			symbol := linkSymbols[i]
+			current := renvoRunPersistentSymbol{id: symbol.ID, address: base + symbol.Address, size: symbol.Size}
+			previous := s.findSymbol(symbol.ID)
+			if previous >= 0 {
+				s.symbols[previous] = current
+			} else {
+				s.symbols = append(s.symbols, current)
+			}
 		}
+	} else {
+		renvoRunLinuxSyscall(renvoRunMunmapSyscall(), base, memorySize, 0, 0, 0, 0)
 	}
 	return exitCode
 }

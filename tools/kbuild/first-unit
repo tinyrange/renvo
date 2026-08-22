@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$repository_root/tools/kbuild/pin.env"
+
+kernel="${1:-}"
+if [[ -z "$kernel" || ! -d "$kernel" ]]; then
+	printf 'usage: %s /path/to/built/linux-%s\n' "$0" "$RENVO_LINUX_VERSION" >&2
+	exit 2
+fi
+kernel="$(cd "$kernel" && pwd)"
+
+for required in .config lib/union_find.c lib/union_find.o lib/lib.a vmlinux.a arch/x86/lib/lib.a tools/objtool/objtool; do
+	if [[ ! -e "$kernel/$required" ]]; then
+		printf 'reference build is missing %s\n' "$required" >&2
+		exit 2
+	fi
+done
+if [[ "$(make -s -C "$kernel" kernelversion)" != "$RENVO_LINUX_VERSION" ]]; then
+	printf 'reference build is not pinned Linux %s\n' "$RENVO_LINUX_VERSION" >&2
+	exit 2
+fi
+if ! rg -q '^CONFIG_64BIT=y$' "$kernel/.config"; then
+	printf 'reference build is not the pinned x86_64 configuration\n' >&2
+	exit 2
+fi
+
+work_root="$(mktemp -d "${TMPDIR:-/tmp}/renvo-m6-${RENVO_LINUX_VERSION}-XXXXXX")"
+frontend="${RENVO_FRONTEND:-$work_root/renvo}"
+object="$work_root/union_find.o"
+dependency="$work_root/union_find.d"
+reference_object="$work_root/union_find.reference.o"
+semantic="$work_root/union_find.semantic"
+linked="$work_root/vmlinux.o"
+compile_metrics="$work_root/compile.metrics"
+object_log="$work_root/objtool.log"
+link_log="$work_root/vmlinux-objtool.log"
+
+printf 'workspace=%s\n' "$work_root"
+if [[ -z "${RENVO_FRONTEND:-}" ]]; then
+	(cd "$repository_root" && go build -o "$frontend" ./cmd/renvo)
+else
+	frontend="$(cd "$(dirname "$frontend")" && pwd)/$(basename "$frontend")"
+fi
+if [[ ! -x "$frontend" ]]; then
+	printf 'Renvo frontend is not executable: %s\n' "$frontend" >&2
+	exit 2
+fi
+
+cp "$kernel/lib/union_find.o" "$reference_object"
+(cd "$kernel" && /usr/bin/time -f 'elapsed_seconds=%e\nuser_seconds=%U\nsystem_seconds=%S\npeak_rss_kib=%M' -o "$compile_metrics" \
+	"$frontend" cc -Wp,-MMD,"$dependency" -nostdinc \
+	-I./arch/x86/include -I./arch/x86/include/generated -I./include \
+	-I./arch/x86/include/uapi -I./arch/x86/include/generated/uapi \
+	-I./include/uapi -I./include/generated/uapi \
+	-include ./include/linux/compiler-version.h -include ./include/linux/kconfig.h \
+	-include ./include/linux/compiler_types.h -D__KERNEL__ -std=gnu11 \
+	-fshort-wchar -funsigned-char -fno-common -fno-PIE -fno-strict-aliasing \
+	-mno-sse -mno-mmx -mno-sse2 -mno-3dnow -mno-avx -m64 -mno-80387 \
+	-mtune=generic -mno-red-zone -mcmodel=kernel -Os -fno-stack-protector \
+	-fomit-frame-pointer -falign-functions=16 -fno-strict-overflow \
+	-DKBUILD_MODFILE='"lib/union_find"' -DKBUILD_BASENAME='"union_find"' \
+	-DKBUILD_MODNAME='"union_find"' -D__KBUILD_MODNAME=kmod_union_find \
+	-c -o "$object" lib/union_find.c)
+
+readelf -h "$object" >"$work_root/object.header"
+rg -q 'Type:[[:space:]]+REL \(Relocatable file\)' "$work_root/object.header"
+rg -q 'lib/union_find.c' "$dependency"
+nm -g --defined-only "$reference_object" | awk '{ print $2, $3 }' | sort >"$work_root/reference.symbols"
+nm -g --defined-only "$object" | awk '{ print $2, $3 }' | sort >"$work_root/renvo.symbols"
+diff -u "$work_root/reference.symbols" "$work_root/renvo.symbols"
+size -A "$reference_object" >"$work_root/reference.sections"
+size -A "$object" >"$work_root/renvo.sections"
+readelf -rW "$reference_object" >"$work_root/reference.relocations"
+readelf -rW "$object" >"$work_root/renvo.relocations"
+
+"$kernel/tools/objtool/objtool" --hacks=jump_label --hacks=noinstr \
+	--static-call --uaccess "$object" >"$object_log" 2>&1
+if rg -q 'warning:|error:' "$object_log"; then
+	cat "$object_log" >&2
+	exit 1
+fi
+
+cc -std=c11 -Wall -Wextra -Werror -no-pie \
+	"$repository_root/tools/kbuild/testdata/union_find_harness.c" "$object" -o "$semantic"
+if [[ "$($semantic)" != "PASS" ]]; then
+	printf 'union_find semantic harness failed\n' >&2
+	exit 1
+fi
+
+# lib/lib.a is thin. Temporarily substitute the Renvo object, force this
+# otherwise-unused tinyconfig member into the normal reference archive group,
+# run the saved vmlinux.o link contract, then restore the reference object.
+restore_reference() {
+	cp "$reference_object" "$kernel/lib/union_find.o"
+}
+trap restore_reference EXIT
+cp "$object" "$kernel/lib/union_find.o"
+ar t "$kernel/lib/lib.a" >"$work_root/lib.members"
+rg -q '(^|/)lib/union_find.o$' "$work_root/lib.members"
+(cd "$kernel" && ld -m elf_x86_64 -z noexecstack --no-warn-rwx-segments -r \
+	-u uf_find -o "$linked" --whole-archive vmlinux.a --no-whole-archive \
+	--start-group lib/lib.a arch/x86/lib/lib.a --end-group)
+"$kernel/tools/objtool/objtool" --hacks=jump_label --hacks=noinstr --ibt \
+	--static-call --uaccess --link "$linked" >"$link_log" 2>&1
+if rg -q 'warning:|error:' "$link_log"; then
+	cat "$link_log" >&2
+	exit 1
+fi
+nm -a "$linked" >"$work_root/linked.symbols"
+rg -q '__renvo_impl_uf_find' "$work_root/linked.symbols"
+rg -q ' [Tt] uf_find$' "$work_root/linked.symbols"
+restore_reference
+trap - EXIT
+
+printf 'gate=PASS\naccepted_translation_unit=lib/union_find.c\nsemantic=PASS\nobjtool=PASS\nreference_link=PASS\nobject=%s\nlinked=%s\nmetrics=%s\n' \
+	"$object" "$linked" "$compile_metrics"

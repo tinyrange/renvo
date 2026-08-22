@@ -134,7 +134,7 @@ func (s *RenvoCommandSession) Step() bool {
 		output := s.built.Options.Output
 		systemName := s.built.Options.SystemName
 		moduleLicense := s.built.Options.ModuleLicense
-		arenaSize := backendArenaSize(target, s.built.Options.Tags, s.built.Options.ArenaSize)
+		arenaSize := backendArenaSize(target, s.built.Options.Tags, s.built.Options.ArenaSize, s.built.Options.Mode)
 		if s.resetArena {
 			s.persistMark = arena.PersistMark()
 			unit = arena.PersistBytes(unit)
@@ -171,7 +171,7 @@ func (s *RenvoCommandSession) Step() bool {
 			s.done = true
 			return true
 		}
-		s.backend = backendbridge.BeginCompileSession(unit, target, output, s.built.Options.Strip, s.built.Options.WindowsGUI, arenaSize, moduleLicense)
+		s.backend = backendbridge.BeginCompileSession(unit, target, output, s.built.Options.Strip, s.built.Options.WindowsGUI, arenaSize, moduleLicense, s.built.Options.Mode == ModeObject)
 		return false
 	}
 	if !s.backend.Step() {

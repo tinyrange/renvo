@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$repository_root/tools/kbuild/pin.env"
+
+if [[ "$(uname -s)/$(uname -m)" != "Linux/x86_64" ]]; then
+	printf 'the Linux boot gate requires Linux/x86_64\n' >&2
+	exit 2
+fi
+
+required_tools=(
+	cpio curl go make musl-gcc qemu-system-x86_64 readelf rg sha256sum
+	tar timeout
+)
+for tool in "${required_tools[@]}"; do
+	if ! command -v "$tool" >/dev/null 2>&1; then
+		printf 'the Linux boot gate requires %s\n' "$tool" >&2
+		exit 2
+	fi
+done
+
+external_cc="${CC:-cc}"
+host_cc="${HOSTCC:-cc}"
+for compiler in "$external_cc" "$host_cc"; do
+	if ! command -v "$compiler" >/dev/null 2>&1; then
+		printf 'the Linux boot gate requires compiler %s\n' "$compiler" >&2
+		exit 2
+	fi
+done
+
+jobs="${RENVO_LINUX_JOBS:-16}"
+if [[ ! "$jobs" =~ ^[1-9][0-9]*$ ]]; then
+	printf 'RENVO_LINUX_JOBS must be a positive integer\n' >&2
+	exit 2
+fi
+
+work_root="$(mktemp -d "${TMPDIR:-/tmp}/renvo-linux-boot-${RENVO_LINUX_VERSION}-XXXXXX")"
+archive="${RENVO_LINUX_ARCHIVE:-$work_root/linux.tar.xz}"
+tree="$work_root/linux-$RENVO_LINUX_VERSION"
+frontend="$work_root/renvo"
+init_root="$work_root/initramfs"
+initramfs="$work_root/initramfs.cpio"
+config_fragment="$repository_root/tools/kbuild/m9.config"
+command_line='console=ttyS0,115200 rdinit=/init panic=-1 nokaslr'
+compiler_driver="$repository_root/tools/kbuild/renvo-cc"
+
+printf 'workspace=%s\n' "$work_root"
+if [[ -z "${RENVO_LINUX_ARCHIVE:-}" ]]; then
+	curl -fL --retry 5 \
+		"https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${RENVO_LINUX_VERSION}.tar.xz" \
+		-o "$archive"
+fi
+printf '%s  %s\n' "$RENVO_LINUX_ARCHIVE_SHA256" "$archive" | sha256sum -c -
+tar -xJf "$archive" -C "$work_root"
+
+export KBUILD_BUILD_HOST=renvo
+export KBUILD_BUILD_TIMESTAMP='Thu Jan  1 00:00:00 UTC 1970'
+export KBUILD_BUILD_USER=renvo
+export KBUILD_BUILD_VERSION=1
+export SOURCE_DATE_EPOCH=0
+export RENVO_STDROOT="$repository_root/std"
+export RENVO_KBUILD_COMPILER="$frontend"
+export RENVO_KBUILD_EXTERNAL_CC="$external_cc"
+
+(cd "$repository_root" && /usr/bin/time \
+	-f 'elapsed_seconds=%e\nuser_seconds=%U\nsystem_seconds=%S\npeak_rss_kib=%M' \
+	-o "$work_root/compiler-build.metrics" go build -o "$frontend" ./cmd/renvo)
+
+make -C "$tree" ARCH="$RENVO_LINUX_ARCH" CC="$compiler_driver" HOSTCC="$host_cc" \
+	KCONFIG_ALLCONFIG="$config_fragment" tinyconfig \
+	>"$work_root/config.log" 2>&1
+# The x86 physical-load address is a hexadecimal Kconfig value whose default is
+# re-applied after the tiny fragments merge. Set it on the completed tinyconfig,
+# then let Kconfig resolve dependent values once more.
+"$tree/scripts/config" --file "$tree/.config" \
+	--set-val PHYSICAL_START 0x200000 \
+	--set-val PHYSICAL_ALIGN 0x200000
+make -C "$tree" ARCH="$RENVO_LINUX_ARCH" CC="$compiler_driver" HOSTCC="$host_cc" \
+	olddefconfig >>"$work_root/config.log" 2>&1
+for setting in \
+	'CONFIG_64BIT=y' \
+	'CONFIG_BLK_DEV_INITRD=y' \
+	'CONFIG_BINFMT_ELF=y' \
+	'CONFIG_PRINTK=y' \
+	'CONFIG_SERIAL_8250_CONSOLE=y' \
+	'CONFIG_PHYSICAL_START=0x200000'; do
+	if ! rg -q "^${setting}$" "$tree/.config"; then
+		printf 'pinned boot config did not retain %s\n' "$setting" >&2
+		exit 1
+	fi
+done
+
+/usr/bin/time -f 'elapsed_seconds=%e\nuser_seconds=%U\nsystem_seconds=%S\npeak_rss_kib=%M' \
+	-o "$work_root/renvo-build.metrics" \
+	make -C "$tree" -j"$jobs" ARCH="$RENVO_LINUX_ARCH" CC="$compiler_driver" \
+	HOSTCC="$host_cc" bzImage >"$work_root/renvo-build.log" 2>&1
+
+(cd "$repository_root" && go run ./tools/kbuild/syntax \
+	-kernel "$tree" -compiler "$compiler_driver" -expected "$RENVO_LINUX_M9_C_COMMANDS" \
+	-audit-direct) | tee "$work_root/direct-audit.log"
+readelf -h "$tree/vmlinux" | rg -q 'Machine:[[:space:]]+Advanced Micro Devices X86-64'
+test -s "$tree/arch/x86/boot/bzImage"
+
+mkdir -p "$init_root"
+musl-gcc -static -Os -s -o "$init_root/init" "$repository_root/tools/kbuild/testdata/m9_init.c"
+touch -d @0 "$init_root" "$init_root/init"
+(cd "$init_root" && find . -print0 | LC_ALL=C sort -z | \
+	cpio --null --format=newc --owner=0:0 --reproducible -o >"$initramfs" 2>"$work_root/cpio.log")
+
+boot_once() {
+	local run="$1"
+	local raw="$work_root/boot-${run}.log"
+	local checked="$work_root/boot-${run}.checked.log"
+	local result=0
+	set +e
+	# A zero shift gives the deterministic guest a 1 GHz virtual TSC. Larger
+	# shifts make this deliberately unoptimized kernel spend the entire
+	# wall-clock gate calibrating and servicing virtual timers.
+	timeout --signal=TERM 30s qemu-system-x86_64 \
+		-machine pc,accel=tcg -cpu qemu64 -m 128M -smp 1 \
+		-display none -monitor none -serial stdio -no-reboot \
+		-rtc base=2000-01-01T00:00:00,clock=vm \
+		-icount shift=0,align=off,sleep=off \
+		-kernel "$tree/arch/x86/boot/bzImage" -initrd "$initramfs" \
+		-append "$command_line" >"$raw" 2>&1
+	result=$?
+	set -e
+	if [[ "$result" -ne 0 && "$result" -ne 124 ]]; then
+		printf 'QEMU boot %s failed with status %d\n' "$run" "$result" >&2
+		tail -n 80 "$raw" >&2
+		exit 1
+	fi
+	# The emulated serial port writes terminal-style CRLF. Match semantic log
+	# lines after removing only the transport carriage return.
+	sed 's/\r$//' "$raw" >"$checked"
+	for marker in \
+		'^Linux version 6\.12\.99 ' \
+		'^printk: legacy console \[ttyS0\] enabled$' \
+		'^Memory: ' \
+		'^Run /init as init process$' \
+		'^RENVO-LINUX-M9: PASS$'; do
+		if ! rg -q "$marker" "$checked"; then
+			printf 'QEMU boot %s did not reach marker %s\n' "$run" "$marker" >&2
+			tail -n 80 "$raw" >&2
+			exit 1
+		fi
+	done
+}
+
+boot_once 1
+boot_once 2
+
+printf 'gate=PASS\n'
+printf 'compiler_bytes=%s\n' "$(stat -c %s "$frontend")"
+printf 'vmlinux_bytes=%s\n' "$(stat -c %s "$tree/vmlinux")"
+printf 'bzimage_bytes=%s\n' "$(stat -c %s "$tree/arch/x86/boot/bzImage")"
+printf 'compiler_build_metrics=%s\n' "$work_root/compiler-build.metrics"
+printf 'renvo_build_metrics=%s\n' "$work_root/renvo-build.metrics"

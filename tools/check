@@ -26,7 +26,7 @@ check_generated() {
 		go test -count=1 ./internal/rtg ./internal/backendcompiled
 }
 
-check_packages() {
+check_tracked_packages() {
 	local package_patterns=(
 		./internal/... ./std/... ./cmd/...
 		./backend/unit ./backend/target ./backend/bringup
@@ -47,21 +47,50 @@ check_packages() {
 	else
 		run_check "tracked package suites" go test -count=1 "${package_patterns[@]}"
 	fi
+}
+
+check_bundled_packages() {
 	run_check "bundled driver and bootstrap" \
 		go test -count=1 -tags renvo_bundle ./internal/driver ./cmd/renvobootstrap
 }
 
+check_packages() {
+	check_tracked_packages "${1:-}"
+	check_bundled_packages
+}
+
 check_preflight() {
 	local started=$SECONDS
+	local budget="${RENVO_CHECK_PREFLIGHT_BUDGET_SECONDS:-60}"
+	if [[ ! "$budget" =~ ^[1-9][0-9]*$ ]]; then
+		printf 'RENVO_CHECK_PREFLIGHT_BUDGET_SECONDS must be a positive integer\n' >&2
+		return 2
+	fi
 	# The tracked patterns include the generated-source authority packages. Keep
 	# them in one Go invocation so cold preflight builds compile each package once.
-	check_packages preflight
+	# The tracked suite saturates small CI runners, so let it finish first. The
+	# bundled-tag build and corpus compilation are short, independent cached
+	# checks; overlap only that tail instead of oversubscribing the main suite.
+	check_tracked_packages preflight
+	check_bundled_packages &
+	local bundled_pid=$!
 	run_check "backend and frontend test compilation" \
-		go test -run '^$' ./backend ./frontend_tests
+		go test -run '^$' ./backend ./frontend_tests &
+	local compile_pid=$!
+	local failed=0
+	if ! wait "$bundled_pid"; then
+		failed=1
+	fi
+	if ! wait "$compile_pid"; then
+		failed=1
+	fi
 	local elapsed=$((SECONDS - started))
-	printf '\nPreflight completed in %ds (budget: 60s)\n' "$elapsed"
-	if ((elapsed > 60)); then
-		printf 'development preflight exceeded its 60-second budget\n' >&2
+	printf '\nPreflight completed in %ds (budget: %ss)\n' "$elapsed" "$budget"
+	if ((failed != 0)); then
+		return 1
+	fi
+	if ((elapsed > budget)); then
+		printf 'preflight exceeded its %s-second budget\n' "$budget" >&2
 		return 1
 	fi
 }
@@ -144,6 +173,16 @@ check_frontend() {
 		go test -v -count=1 -timeout 30m ./frontend_tests
 }
 
+check_linux_boot() {
+	run_check "pinned Linux/x86_64 deterministic boot" \
+		"$repository_root/tools/kbuild/linux-boot"
+}
+
+check_xv6() {
+	run_check "pinned xv6/i386 build and usertests VM" \
+		"$repository_root/tools/xv6/run"
+}
+
 usage() {
 	cat <<'EOF'
 Usage: ./tools/check MODE [CORPUS_FILTER]
@@ -160,6 +199,10 @@ Modes:
                Run only gates that are stable on shared CI runners.
   frontend     Run the complete frontend corpus and self-hosting suite. An
                optional regular expression runs matching positive corpus cases.
+  linux-boot   Perform the clean, opt-in pinned Linux build and two deterministic
+               bounded QEMU boots. This is intentionally outside preflight.
+  xv6          Build pinned xv6/i386 C sources with Renvo, boot QEMU, and run
+               the complete xv6 usertests suite. This is outside preflight.
   full         Run PR-level performance, preflight, backend, and frontend checks.
                This can take the full 30-minute timeout and is intended for the
                merge queue, not the normal interactive development loop.
@@ -167,6 +210,8 @@ Modes:
 Set RENVO_CHECK_MEMORY_MAX=4G on systemd-based Linux to put each command in a
 memory-limited user unit. This prevents a runaway compiler test from taking
 down the interactive session while retaining the command's exit status.
+Set RENVO_CHECK_PREFLIGHT_BUDGET_SECONDS only for slower, cache-disabled CI
+runners; the local development budget remains 60 seconds by default.
 EOF
 }
 
@@ -203,9 +248,15 @@ case "$mode" in
 	frontend)
 		check_frontend "$filter"
 		;;
+	linux-boot)
+		check_linux_boot
+		;;
+	xv6)
+		check_xv6
+		;;
 	full)
 		# Measure before the parallel package and corpus suites can heat and
-		# throttle the host; the performance limits themselves stay unchanged.
+		# throttle the host; frontend CPU, RSS, and size are reported as telemetry.
 		check_performance
 		check_preflight
 		check_backend

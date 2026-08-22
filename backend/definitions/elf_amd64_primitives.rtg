@@ -1,0 +1,66 @@
+# Shared byte encoders used by both hosted ELF objects and Linux kernel modules.
+go backend {
+	func nativeAppend32(out []byte, value int) []byte {
+		out = append(out, byte(value), byte(value>>8), byte(value>>16), byte(value>>24))
+		return out
+	}
+
+	func nativeAppend64(out []byte, value int) []byte {
+		out = nativeAppend32(out, value)
+		out = nativeAppend32(out, value>>32)
+		return out
+	}
+}
+
+extend arch x86_64 {
+	sequences {
+		kernelAppend16(out:bytes, value:int) -> bytes {
+			return append(out, byte(value), byte(value>>8))
+		}
+		kernelAppendELFHeader(out:bytes, sectionOffset:int, sectionCount:int, namesIndex:int) -> bytes {
+			set out = append(out, 0x7f, 'E', 'L', 'F', 2, 1, 1, 0)
+			set out = append(out, 0, 0, 0, 0, 0, 0, 0, 0)
+			set out = kernelAppend16(out, 1)
+			set out = kernelAppend16(out, 62)
+			set out = nativeAppend32(out, 1)
+			set out = nativeAppend64(out, 0)
+			set out = nativeAppend64(out, 0)
+			set out = nativeAppend64(out, sectionOffset)
+			set out = nativeAppend32(out, 0)
+			set out = kernelAppend16(out, 64)
+			set out = kernelAppend16(out, 0)
+			set out = kernelAppend16(out, 0)
+			set out = kernelAppend16(out, 64)
+			set out = kernelAppend16(out, sectionCount)
+			set out = kernelAppend16(out, namesIndex)
+			return out
+		}
+		kernelAppendRelocation(out:bytes, offset:int, symbol:int, kind:int, addend:int) -> bytes {
+			set out = nativeAppend64(out, offset)
+			set out = nativeAppend64(out, symbol<<32|kind)
+			set out = nativeAppend64(out, addend)
+			return out
+		}
+		kernelAppendSection(out:bytes, name:int, kind:int, flags:int, offset:int, size:int, link:int, info:int, alignment:int, entrySize:int) -> bytes {
+			set out = nativeAppend32(out, name)
+			set out = nativeAppend32(out, kind)
+			set out = nativeAppend64(out, flags)
+			set out = nativeAppend64(out, 0)
+			set out = nativeAppend64(out, offset)
+			set out = nativeAppend64(out, size)
+			set out = nativeAppend32(out, link)
+			set out = nativeAppend32(out, info)
+			set out = nativeAppend64(out, alignment)
+			set out = nativeAppend64(out, entrySize)
+			return out
+		}
+		kernelAppendSymbol(out:bytes, name:int, info:int, section:int, value:int, size:int) -> bytes {
+			set out = nativeAppend32(out, name)
+			set out = append(out, byte(info), 0)
+			set out = kernelAppend16(out, section)
+			set out = nativeAppend64(out, value)
+			set out = nativeAppend64(out, size)
+			return out
+		}
+	}
+}

@@ -90,6 +90,13 @@ func main() {
 }
 ```
 
+Packages may also contain `.c` files. The initial C11 frontend is a compact
+source adapter into the same package checker, linker, unit format, and backends
+used for Go, allowing direct calls between C and Go functions in one package.
+Its current scalar/control-flow subset is deliberately smaller than the Go
+frontend; see [`internal/c11/README.md`](internal/c11/README.md) for its exact
+scope and growth boundary.
+
 ## Build and try it
 
 A Go-built bootstrap uses a sibling standalone backend during development.
@@ -104,9 +111,44 @@ go build -tags renvo_bundle -o renvo-bootstrap ./cmd/renvobootstrap
   -t linux/amd64 -o hello ./path/to/hello-package
 ```
 
+A package can mix the two source languages without cgo:
+
+```go
+package main
+
+func main() { print(cAdd(20, 22)) }
+```
+
+```c
+int cAdd(int left, int right) { return left + right; }
+```
+
 The bootstrap looks for `renvo-backend` beside its own executable. Tooling that
 keeps the backend elsewhere can pass `-bootstrap-backend <path>` immediately
 after the bootstrap executable name.
+
+The C driver can also emit an ordinary Linux/x86_64 ELF relocatable object.
+It treats one explicit C file as a standalone translation unit, so no
+`go.mod` is required:
+
+```sh
+# hello.c contains:
+#include <stdio.h>
+int main(void) { puts("Hello, world!"); return 0; }
+
+renvo cc -c hello.c -o hello.o
+cc hello.o -o hello
+./hello
+```
+
+The system C driver is used only for startup objects and the final link. Renvo
+is the compiler for `hello.c`: it searches installed and `-I`/`-isystem`
+headers, retains referenced external declarations from the real header, emits
+NUL-terminated C string data and an undefined `puts` with a standard x86_64
+PLT relocation, and leaves libc resolution to the system link. The C frontend
+also implements the macro and GNU C surface exercised by the pinned Linux
+bring-up; unsupported constructs fail explicitly. Its current boundaries are
+documented in `internal/c11/README.md`.
 
 Running `renvo` with no arguments or with `--help` prints the complete command
 reference and target list.

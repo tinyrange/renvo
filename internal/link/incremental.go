@@ -23,6 +23,7 @@ func LinkBuildCoreIncremental(result build.Result) Result {
 type PackageSession struct {
 	build           build.Result
 	transient       bool
+	object          bool
 	stage           int
 	packageNext     int
 	prepared        []unit.Program
@@ -38,10 +39,19 @@ type PackageSession struct {
 }
 
 func BeginPackageSession(input build.Result, transient bool) *PackageSession {
+	return beginPackageSession(input, transient, false)
+}
+
+func BeginObjectPackageSession(input build.Result, transient bool) *PackageSession {
+	return beginPackageSession(input, transient, true)
+}
+
+func beginPackageSession(input build.Result, transient bool, object bool) *PackageSession {
 	InitializePackageArtifactCache()
 	return &PackageSession{
 		build:     input,
 		transient: transient,
+		object:    object,
 		result:    Result{Ok: true, Error: LinkOK, ErrorPackage: -1},
 	}
 }
@@ -127,7 +137,13 @@ func (s *PackageSession) Step() bool {
 		s.failUnit()
 		return true
 	}
-	if !lowerFunctionValuesCore(&program, s.transient) {
+	functionValuesOK := false
+	if s.object {
+		functionValuesOK = lowerObjectFunctionValuesCore(&program, s.transient)
+	} else {
+		functionValuesOK = lowerFunctionValuesCore(&program, s.transient)
+	}
+	if !functionValuesOK {
 		s.failUnit()
 		return true
 	}

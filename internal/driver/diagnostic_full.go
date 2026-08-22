@@ -4,6 +4,7 @@ package driver
 
 import (
 	"renvo.dev/internal/build"
+	"renvo.dev/internal/c11"
 	"renvo.dev/internal/check"
 	"renvo.dev/internal/link"
 	"renvo.dev/internal/load"
@@ -64,7 +65,7 @@ func optionDiagnostic(options Options) Diagnostic {
 	case ParseErrWindowsGUIRequiresWindows:
 		code, message = "RENVO-OPTION-010", "-windows-gui requires a Windows target"
 	case ParseErrMixedFileList:
-		code, message = "RENVO-OPTION-011", "explicit source list contains a non-.go argument "+options.ErrorArg
+		code, message = "RENVO-OPTION-011", "explicit source list contains a non-.go/.c argument "+options.ErrorArg
 	case ParseErrMissingArenaSize:
 		code, message = "RENVO-OPTION-012", "missing arena size after -arena-size"
 	case ParseErrInvalidArenaSize:
@@ -75,6 +76,12 @@ func optionDiagnostic(options Options) Diagnostic {
 		code, message = "RENVO-OPTION-015", "unsupported output mode "+options.ErrorArg
 	case ParseErrModeRequiresLinuxAmd64:
 		code, message = "RENVO-OPTION-016", "kernel-module mode requires linux/amd64"
+	case ParseErrObjectRequiresLinuxAmd64:
+		code, message = "RENVO-OPTION-029", "object mode requires linux/amd64"
+	case ParseErrObjectFileCount:
+		code, message = "RENVO-OPTION-030", "object mode requires exactly one explicit source file"
+	case ParseErrMissingIncludePath:
+		code, message = "RENVO-OPTION-032", "missing include directory after "+options.ErrorArg
 	case ParseErrInvalidModuleLicense:
 		code, message = "RENVO-OPTION-017", "invalid renvo:module-license directive"
 	case ParseErrConflictingModuleLicense:
@@ -97,6 +104,8 @@ func optionDiagnostic(options Options) Diagnostic {
 		code, message = "RENVO-OPTION-026", "invalid backend definition: "+options.ErrorArg
 	case ParseErrBackendTarget:
 		code, message = "RENVO-OPTION-027", "backend definition does not export target "+options.ErrorArg
+	case ParseErrScriptRequiresGo:
+		code, message = "RENVO-OPTION-028", "-script requires a .go source file"
 	}
 	return Diagnostic{Phase: "options", Code: code, Message: message}
 }
@@ -139,7 +148,12 @@ func sourceDiagnostic(result BuildResult) Diagnostic {
 	case SourceErrFileDirectory:
 		code, message = "RENVO-LOAD-021", "named source files must all be in one directory"
 	case SourceErrFileListEmpty:
-		code, message = "RENVO-LOAD-022", "explicit source list contains no buildable Go files"
+		code, message = "RENVO-LOAD-022", "explicit source list contains no buildable Go or C files"
+	case SourceErrCInclude:
+		phase, code, message = "preprocessor", "RENVO-CPP-001", "C include could not be read: "+result.Sources.ErrorPath
+	case SourceErrCPreprocess:
+		return cPreprocessDiagnostic(result.Sources.CPreprocessError, result.Sources.ErrorPath,
+			result.Sources.CPreprocessLine, result.Sources.CPreprocessDetail)
 	}
 	path := result.ErrorPath
 	if result.Sources.ErrorSourcePath != "" {
@@ -237,17 +251,24 @@ func loadDiagnostic(result BuildResult, built pipeline.Result) Diagnostic {
 	pkg := graph.Packages[packageIndex]
 	if pkg.Error == load.PackageErrParse {
 		diagnostic.Phase, diagnostic.Code, diagnostic.Message = "parser", "RENVO-PARSE-001", "source syntax is invalid"
+	} else if pkg.Error == load.PackageErrC11 {
+		diagnostic.Phase, diagnostic.Code, diagnostic.Message = "c11", "RENVO-C11-001", "C11 source is not supported or is invalid"
+		if pkg.C11Error == c11.TranslateErrVLA {
+			diagnostic.Code, diagnostic.Message = "RENVO-C11-002", "variable length arrays are not supported"
+		}
 	} else if pkg.Error == load.PackageErrName {
 		diagnostic.Code, diagnostic.Message = "RENVO-LOAD-012", "files in one directory declare different packages"
 	} else if pkg.Error == load.PackageErrImport {
 		diagnostic.Code, diagnostic.Message = "RENVO-LOAD-008", "import could not be resolved"
 	} else if pkg.Error == load.PackageErrNoFiles {
-		diagnostic.Code, diagnostic.Message = "RENVO-LOAD-013", "package contains no selected Go files"
+		diagnostic.Code, diagnostic.Message = "RENVO-LOAD-013", "package contains no selected Go or C files"
 	}
 	if pkg.ErrorFile >= 0 && pkg.ErrorFile < len(pkg.Files) {
 		file := pkg.Files[pkg.ErrorFile]
 		diagnostic.Path = file.Path
-		if pkg.Error == load.PackageErrParse {
+		if pkg.Error == load.PackageErrC11 {
+			diagnostic = diagnosticAtOffset(diagnostic, load.SourceFile{Path: file.Path, Src: file.Src}, pkg.ErrorOffset)
+		} else if pkg.Error == load.PackageErrParse {
 			if offset := sourceGenericsOffset(file.Src); offset >= 0 {
 				diagnostic.Code, diagnostic.Message = "RENVO-PARSE-002", "generics are not supported by RENVO"
 				return diagnosticAtOffset(diagnostic, load.SourceFile{Path: file.Path, Src: file.Src}, offset)

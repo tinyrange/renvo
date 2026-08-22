@@ -405,6 +405,44 @@ func TestExpressionParserCapacityTracksTokenRange(t *testing.T) {
 	}
 }
 
+func TestExpressionParserHandlesArrayOfFunctionPointers(t *testing.T) {
+	program := renvoParseProgram([]byte(`package main
+
+func first(value int) int { return value }
+func second(value int) int { return value + 1 }
+func third(value int) int { return value + 2 }
+var callbacks = [3]func(int) int{first, second, third}
+`))
+	if !program.ok {
+		t.Fatal("test program did not parse")
+	}
+	start := -1
+	end := -1
+	for i := 0; i+1 < renvoTokCount(&program); i++ {
+		if renvoTokIdentIs(&program, i, "callbacks") && renvoTokCharIs(&program, i+1, '=') {
+			start = i + 2
+			break
+		}
+	}
+	if start < 0 {
+		t.Fatal("callback table initializer not found")
+	}
+	end = renvoTokCount(&program) - 1
+	ep := renvoNewExprParse()
+	root := renvoParseExpressionRoot(ep, &program, start, end)
+	if root < 0 {
+		if ep.pos < ep.end {
+			t.Fatalf("array-of-function-pointers composite stopped at token %d/%d: %q", ep.pos, ep.end,
+				program.src[renvoTokStart(&program, ep.pos):renvoTokEnd(&program, ep.pos)])
+		}
+		t.Fatalf("array-of-function-pointers composite failed at token %d/%d", ep.pos, ep.end)
+	}
+	expression := &ep.exprs[root]
+	if expression.kind != renvoExprComposite || expression.argCount != 3 {
+		t.Fatalf("initializer root = kind %d with %d fields, want 3-field composite", expression.kind, expression.argCount)
+	}
+}
+
 func TestAppendAssignmentRecognizesSameSource(t *testing.T) {
 	program := renvoParseProgram([]byte(`package main
 

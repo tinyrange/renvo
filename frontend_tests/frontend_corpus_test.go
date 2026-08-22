@@ -284,10 +284,20 @@ func compileFrontendSource(root string, compiler string, target string, output s
 }
 
 func frontendCommandEnv(extra []string, pwd string) []string {
-	env := make([]string, 0, len(extra)+1)
+	env := make([]string, 0, len(extra)+2)
+	hasTempDir := false
 	for _, item := range extra {
-		if envKey(item) != "PWD" {
+		key := envKey(item)
+		if key == "TMPDIR" {
+			hasTempDir = true
+		}
+		if key != "PWD" {
 			env = append(env, item)
+		}
+	}
+	if !hasTempDir {
+		if tempDir := os.Getenv("TMPDIR"); tempDir != "" {
+			env = append(env, "TMPDIR="+tempDir)
 		}
 	}
 	env = append(env, "PWD="+pwd)

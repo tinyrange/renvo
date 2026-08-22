@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$repository_root/tools/xv6/pin.env"
+
+if [[ "$(uname -s)/$(uname -m)" != "Linux/x86_64" ]]; then
+	printf 'the xv6 VM gate requires Linux/x86_64\n' >&2
+	exit 2
+fi
+for command in git go gcc ld objcopy qemu-system-i386 python3 dd stat truncate; do
+	if ! command -v "$command" >/dev/null; then
+		printf 'the xv6 VM gate requires %s\n' "$command" >&2
+		exit 2
+	fi
+done
+
+work_root="$(mktemp -d "${TMPDIR:-/tmp}/renvo-xv6-XXXXXX")"
+tree="$work_root/xv6-public"
+frontend="${RENVO_XV6_FRONTEND:-$work_root/renvo}"
+source_repository="${RENVO_XV6_SOURCE:-$RENVO_XV6_URL}"
+printf 'workspace=%s\n' "$work_root"
+
+git clone --quiet "$source_repository" "$tree"
+git -C "$tree" checkout --quiet "$RENVO_XV6_COMMIT"
+git -C "$tree" apply --unidiff-zero "$repository_root/tools/xv6/renvo.patch"
+
+if [[ -z "${RENVO_XV6_FRONTEND:-}" ]]; then
+	(cd "$repository_root" && go build -o "$frontend" ./cmd/renvo)
+fi
+frontend="$(cd "$(dirname "$frontend")" && pwd)/$(basename "$frontend")"
+flat="$work_root/preprocessed"
+mkdir -p "$flat"
+
+host_cflags=(-m32 -fno-pic -static -fno-builtin -fno-strict-aliasing -Wall -Werror \
+	-fno-omit-frame-pointer -fno-stack-protector -fno-pie -no-pie -nostdinc -I.)
+(cd "$tree" &&
+	gcc "${host_cflags[@]}" -O -c bootmain.c -o bootmain.o &&
+	gcc "${host_cflags[@]}" -c bootasm.S -o bootasm.o &&
+	ld -m elf_i386 -N -e start -Ttext 0x7c00 -o bootblock.o bootasm.o bootmain.o &&
+	objcopy -S -O binary -j .text bootblock.o bootblock &&
+	./sign.pl bootblock &&
+	gcc "${host_cflags[@]}" -c entryother.S -o entryother.o &&
+	ld -m elf_i386 -N -e start -Ttext 0x7000 -o bootblockother.o entryother.o &&
+	objcopy -S -O binary -j .text bootblockother.o entryother &&
+	gcc "${host_cflags[@]}" -c initcode.S -o initcode.o &&
+	ld -m elf_i386 -N -e start -Ttext 0 -o initcode.out initcode.o &&
+	objcopy -S -O binary -j .text initcode.out initcode &&
+	./vectors.pl >vectors.S &&
+	gcc "${host_cflags[@]}" -gdwarf-2 -Wa,-divide -c entry.S swtch.S trapasm.S vectors.S usys.S &&
+	gcc -Wall -Werror -Wno-error=stringop-truncation -o mkfs mkfs.c)
+
+kernel_units=(bio console exec file fs ide ioapic kalloc kbd lapic log main mp picirq pipe proc sleeplock spinlock string syscall sysfile sysproc trap uart vm)
+user_units=(ulib printf umalloc cat echo forktest grep init kill ln ls mkdir rm sh stressfs usertests wc zombie)
+for unit in "${kernel_units[@]}" "${user_units[@]}"; do
+	"$frontend" cc -m32 -E -P -nostdinc -I"$tree" "$tree/$unit.c" -o "$flat/$unit.c"
+	"$frontend" cc -m32 -c "$flat/$unit.c" -o "$tree/$unit.o"
+done
+
+kernel_objects=()
+for unit in "${kernel_units[@]}"; do
+	kernel_objects+=("$unit.o")
+done
+(cd "$tree" &&
+	ld -m elf_i386 -T kernel.ld -o kernel entry.o "${kernel_objects[@]}" swtch.o trapasm.o vectors.o -b binary initcode entryother)
+
+programs=(cat echo grep init kill ln ls mkdir rm sh stressfs usertests wc zombie)
+for program in "${programs[@]}"; do
+	(cd "$tree" && ld -m elf_i386 -N -e main -Ttext 0 -o "_$program" \
+		"$program.o" ulib.o usys.o printf.o umalloc.o 2>/dev/null)
+done
+(cd "$tree" &&
+	ld -m elf_i386 -N -e main -Ttext 0 -o _forktest forktest.o ulib.o usys.o 2>/dev/null &&
+	./mkfs fs.img README _cat _echo _forktest _grep _init _kill _ln _ls _mkdir _rm _sh _stressfs _usertests _wc _zombie >/dev/null &&
+	truncate -s 5120000 xv6.img &&
+	dd if=bootblock of=xv6.img conv=notrunc status=none &&
+	dd if=kernel of=xv6.img seek=1 conv=notrunc status=none)
+
+printf 'kernel_bytes=%s\n' "$(stat -c %s "$tree/kernel")"
+python3 "$repository_root/tools/xv6/vmtest.py" "${RENVO_XV6_QEMU:-qemu-system-i386}" \
+	"$tree/xv6.img" "$tree/fs.img"

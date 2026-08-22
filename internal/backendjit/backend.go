@@ -158,6 +158,9 @@ func (ProcessRunner) Run(artifact rtgb.Artifact, request Request) driver.Backend
 	if options.EmitImage {
 		args = append(args, "-emit-image")
 	}
+	if options.ObjectFile || options.Mode == driver.ModeObject {
+		args = append(args, "-object")
+	}
 	if options.ArenaSize > 0 {
 		args = append(args, "-arena-size", decimal(options.ArenaSize))
 	}

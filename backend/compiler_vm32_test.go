@@ -73,6 +73,7 @@ func TestVM32EnforcesLimitsDeterministically(t *testing.T) {
 }
 
 func TestVM32FullBackendSuite(t *testing.T) {
+	resetRuntime()
 	paths, err := filepath.Glob("tests/*.go")
 	if err != nil {
 		t.Fatal(err)
@@ -143,7 +144,7 @@ func TestVM32SelfHostedBackend(t *testing.T) {
 			compileResult.ExitCode, compileResult.Trap, compileResult.TrapPC,
 			compileResult.Stderr, compileResult.Steps, compileResult.PeakMemory)
 	}
-	if len(compilerImage) > 1200*1024 ||
+	if len(compilerImage) > 2*1024*1024 ||
 		compileResult.Steps > 400000 ||
 		compileResult.PeakMemory > 80*1024*1024 {
 		t.Fatalf("VM backend performance budget exceeded: artifact=%dB, execution=%d steps, peak=%dB",

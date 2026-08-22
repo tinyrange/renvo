@@ -28,6 +28,13 @@ func TestFrontendStructuredDiagnostics(t *testing.T) {
 
 	cases := []frontendDiagnosticCase{
 		{
+			name:       "c_vla",
+			files:      map[string]string{"cmd/app/main.c": "int inspect(int count) { int values[count]; return 0; }\nint main(void) { return 0; }\n"},
+			wantCode:   "RENVO-C11-002",
+			wantFile:   "cmd/app/main.c",
+			wantDetail: "variable length arrays are not supported",
+		},
+		{
 			name:       "syntax",
 			files:      map[string]string{"cmd/app/main.go": "package main\n\nfunc main( {\n"},
 			wantCode:   "RENVO-PARSE-001",

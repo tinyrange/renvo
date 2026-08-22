@@ -104,6 +104,40 @@ done:
 	}
 }
 
+func TestParseFuncBodyRangeCompositeLiteral(t *testing.T) {
+	file := parseOneFuncBodyTestFile(t, `package main
+
+func appMain() int {
+	for _, value := range []int{1, 2, 3} {
+		if value == 2 {
+			break
+		}
+	}
+	if [2]int{3, 5} != [2]int{3, 5} {
+		return 1
+	}
+	return 0
+}
+`)
+	body := ParseFuncBodyStatements(file, file.Funcs[0])
+	if !body.Ok {
+		t.Fatalf("ParseFuncBodyStatements failed: err=%d tok=%d", body.Error, body.ErrorTok)
+	}
+	want := []int{
+		StmtBlock,
+		StmtFor,
+		StmtBlock,
+		StmtIf,
+		StmtBlock,
+		StmtBreak,
+		StmtIf,
+		StmtBlock,
+		StmtReturn,
+		StmtReturn,
+	}
+	assertStmtKinds(t, body, want)
+}
+
 func TestParseFuncBodyExpressionKinds(t *testing.T) {
 	file := parseOneFuncBodyTestFile(t, `package main
 

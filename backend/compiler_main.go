@@ -13,6 +13,7 @@ var renvoKernelModuleNameOff int
 var renvoKernelModuleInitOff int
 var renvoKernelModuleExitOff int
 var renvoKernelLicense string
+var renvoCompilerObjectFile bool
 
 func renvoOpenArg(path string, env []string) int {
 	directFd := open(path, O_RDONLY)
@@ -109,6 +110,7 @@ func appMain(args []string, env []string) int {
 	arenaSize := 0
 	renvoCompilerStripSymbols = false
 	renvoCompilerEmitImage = false
+	renvoCompilerObjectFile = false
 	renvoCompilerWindowsSubsystem = 3
 	if len(args) == 0 {
 		renvoPrintErr("renvo: missing output path (-o)\n")
@@ -125,6 +127,11 @@ func appMain(args []string, env []string) int {
 		}
 		if arg == "-emit-image" {
 			renvoCompilerEmitImage = true
+			i++
+			continue
+		}
+		if arg == "-object" {
+			renvoCompilerObjectFile = true
 			i++
 			continue
 		}

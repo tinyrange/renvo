@@ -47,13 +47,20 @@ func GenerateCheckedInTargetProjection(
 		return checkedInTargetProjectionFailure(resolved.Document, target.Executable,
 			"linux/amd64 requires production_image elf_executable_symbols")
 	}
+	_, hasObjectImage := architectureGoHook(target.Object, "image")
+	if !hasObjectImage {
+		return checkedInTargetProjectionFailure(resolved.Document, target.Object,
+			"linux/amd64 requires an object image implementation")
+	}
 	prepareBuffer, hasPrepareBuffer := architectureGoHook(
 		target.Runtime, "prepare_read_write_buffer")
 	moveOffset, hasMoveOffset := architectureGoHook(
 		target.Runtime, "move_offset_argument")
-	if !hasPrepareBuffer || !hasMoveOffset {
+	staticCall, hasStaticCall := architectureGoHook(
+		target.Runtime, "emit_static_call")
+	if !hasPrepareBuffer || !hasMoveOffset || !hasStaticCall {
 		return checkedInTargetProjectionFailure(resolved.Document, target.Runtime,
-			"linux/amd64 runtime is missing its syscall ABI sequences")
+			"linux/amd64 runtime is missing its syscall or static-call ABI sequences")
 	}
 	operations, missingOperation := checkedInLinuxAmd64RuntimeOperations(target.Runtime)
 	if missingOperation != "" {
@@ -83,13 +90,20 @@ func GenerateCheckedInTargetProjection(
 		manifest, "target-projection/"+target.Descriptor.Name, packageName)
 	projection := resolved.Document
 	projection.Unit = "builtin"
-	_, sequences := resolveArchitectureSequenceProjection(
-		projection, target.Arch, nil, []string{prepareBuffer, moveOffset})
+	goRoots, sequences := resolveArchitectureSequenceProjection(
+		projection, target.Arch, []string{staticCall}, []string{prepareBuffer, moveOffset})
+	source = appendReachableEmbeddedGo(
+		source, projection, goRoots, true, architectureExports(target.Arch))
 	source = appendArchitectureSequences(
 		source, projection, target.Arch, true, false, false, sequences)
 	source = appendCheckedInLinuxAmd64Runtime(
 		source, operations, projection.Unit, prepareBuffer, moveOffset)
 	source = appendCheckedInLinuxAmd64Entry(source, template)
+	source = append(source, checkedInLinuxAmd64GeneralObjectImageSource...)
+	source = append(source, "\nfunc renvoAmd64EmitObjectStaticCall(out *renvoAsm, importID int, wordCount int) {\n"...)
+	source = append(source, '\t')
+	source = append(source, checkedInProjectionAlgorithmName(projection, staticCall)...)
+	source = append(source, "(out, importID, wordCount)\n}\n"...)
 	source = append(source, "\nconst renvoLinuxAmd64ELFMachine = "...)
 	source = appendDecimalFrame(source, machine)
 	source = append(source, checkedInLinuxAmd64ImageSource...)
@@ -231,6 +245,139 @@ func appendCheckedInLinuxAmd64Entry(source []byte, template runtimeEntryTemplate
 	source = append(source, "}\n"...)
 	return source
 }
+
+const checkedInLinuxAmd64GeneralObjectImageSource = `
+
+func renvoAsmImageObjectAmd64(emitter *renvoAsm) []byte {
+	return renvoAsmImageRelocatableObjectAmd64(emitter)
+}
+`
+
+// checkedInLinuxAmd64ObjectImageSource retains the original minimal ET_REL
+// projection as historical source material. New projections use the shared,
+// metadata-aware object writer above.
+const checkedInLinuxAmd64ObjectImageSource = `
+
+func renvoAsmImageObjectAmd64(emitter *renvoAsm) []byte {
+	renvoAsmPatch(emitter)
+
+	var strings []byte
+	strings = append(strings, 0)
+	var symbols []byte
+	symbols = renvoElfAmd64AppendSymbol(symbols, 0, 0, 0, 0, 0)
+	symbols = renvoElfAmd64AppendSymbol(symbols, 0, 3, 1, 0, 0)
+	symbols = renvoElfAmd64AppendSymbol(symbols, 0, 3, 3, 0, 0)
+	symbols = renvoElfAmd64AppendSymbol(symbols, 0, 3, 4, 0, 0)
+	nameOffset := 1
+	for i := 0; i < len(emitter.symbols); i++ {
+		symbol := emitter.symbols[i]
+		position := renvoAsmLabelPosition(emitter, symbol.label)
+		symbols = renvoElfAmd64AppendSymbol(
+			symbols, nameOffset, 18, 1, position, 0,
+		)
+		for j := symbol.nameStart; j < symbol.nameEnd; j++ {
+			strings = append(strings, emitter.symbolName[j])
+		}
+		strings = append(strings, 0)
+		nameOffset = len(strings)
+	}
+	for i := 0; i < renvoKernelAmd64ExternalImportCount(emitter); i++ {
+		symbols = renvoElfAmd64AppendSymbol(
+			symbols, nameOffset, 16, 0, 0, 0,
+		)
+		strings = rtgBuiltinElf64ObjectX8664AppendString(
+			strings, renvoKernelAmd64ExternalImportName(emitter, i),
+		)
+		nameOffset = len(strings)
+	}
+
+	code := emitter.code
+	data := emitter.data
+	var image []byte
+	image = rtgBuiltinElf64ObjectX8664Until(image, 64)
+	textOffset := renvoAlignValue(len(image), 16)
+	image = rtgBuiltinElf64ObjectX8664Until(image, textOffset)
+	image = append(image, code...)
+	textRelocationOffset := renvoAlignValue(len(image), 8)
+	image = rtgBuiltinElf64ObjectX8664Until(image, textRelocationOffset)
+	for i := 0; i < len(emitter.absRelocs)/3; i++ {
+		at := renvoKernelAmd64AbsoluteRelocationOffset(emitter, i)
+		addend := renvoKernelAmd64AbsoluteRelocationAddend(emitter, i)
+		kind := renvoKernelAmd64AbsoluteRelocationKind(emitter, i)
+		symbol := 2
+		if kind == renvoKernelAmd64RelocationAbsoluteBSS {
+			symbol = 3
+		} else if kind == renvoKernelAmd64RelocationAbsoluteBSSEnd {
+			symbol = 3
+			alignment := addend
+			if alignment <= 0 {
+				alignment = 1
+			}
+			addend = renvoAlignValue(emitter.bssSize, alignment)
+		} else if kind == renvoKernelAmd64RelocationImport {
+			if addend < 0 || addend >= renvoKernelAmd64ExternalImportCount(emitter) {
+				return nil
+			}
+			symbol = 4+len(emitter.symbols)+addend
+			image = renvoElfAmd64AppendRelocation(
+				image, at, symbol, 4, -4,
+			)
+			continue
+		} else if kind != renvoKernelAmd64RelocationAbsoluteData {
+			return nil
+		}
+		image = renvoElfAmd64AppendRelocation(
+			image, at, symbol, 2, addend-4,
+		)
+	}
+
+	sectionNames := []byte("\x00.text\x00.rela.text\x00.data\x00.bss\x00.symtab\x00.strtab\x00.shstrtab\x00")
+
+	dataOffset := renvoAlignValue(len(image), 8)
+	image = rtgBuiltinElf64ObjectX8664Until(image, dataOffset)
+	image = append(image, data...)
+	bssOffset := len(image)
+	symbolOffset := renvoAlignValue(len(image), 8)
+	image = rtgBuiltinElf64ObjectX8664Until(image, symbolOffset)
+	image = append(image, symbols...)
+	stringOffset := len(image)
+	image = append(image, strings...)
+	sectionStringOffset := len(image)
+	image = append(image, sectionNames...)
+	sectionOffset := renvoAlignValue(len(image), 8)
+	image = rtgBuiltinElf64ObjectX8664Until(image, sectionOffset)
+	image = renvoElfAmd64AppendSection(image, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+	image = renvoElfAmd64AppendSection(
+		image, 1, 1, 6, textOffset, len(code), 0, 0, 16, 0,
+	)
+	image = renvoElfAmd64AppendSection(
+		image, 7, 4, 64, textRelocationOffset,
+		len(emitter.absRelocs)/3*24, 5, 1, 8, 24,
+	)
+	image = renvoElfAmd64AppendSection(
+		image, 18, 1, 3, dataOffset, len(data), 0, 0, 8, 0,
+	)
+	image = renvoElfAmd64AppendSection(
+		image, 24, 8, 3, bssOffset, emitter.bssSize, 0, 0, 8, 0,
+	)
+	image = renvoElfAmd64AppendSection(
+		image, 29, 2, 0, symbolOffset, len(symbols), 6, 4, 8, 24,
+	)
+	image = renvoElfAmd64AppendSection(
+		image, 37, 3, 0, stringOffset, len(strings), 0, 0, 1, 0,
+	)
+	image = renvoElfAmd64AppendSection(
+		image, 45, 3, 0, sectionStringOffset,
+		len(sectionNames), 0, 0, 1, 0,
+	)
+	var header []byte
+	header = renvoElfAmd64AppendHeader(header, sectionOffset, 8, 7)
+	for i := 0; i < len(header); i++ {
+		image[i] = header[i]
+	}
+	return image
+}
+`
 
 const checkedInLinuxAmd64ImageSource = `
 

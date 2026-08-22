@@ -23,14 +23,18 @@ type Result struct {
 }
 
 func LinkBuildCore(result build.Result) Result {
-	return linkBuildCore(result, false)
+	return linkBuildCore(result, false, false)
 }
 
 func LinkBuildCoreTransient(result build.Result) Result {
-	return linkBuildCore(result, true)
+	return linkBuildCore(result, true, false)
 }
 
-func linkBuildCore(result build.Result, transient bool) Result {
+func LinkBuildObjectCore(result build.Result) Result {
+	return linkBuildCore(result, false, true)
+}
+
+func linkBuildCore(result build.Result, transient bool, object bool) Result {
 	out := Result{Ok: true, Error: LinkOK, ErrorPackage: -1}
 	if !result.Ok {
 		out.Ok = false
@@ -46,9 +50,9 @@ func linkBuildCore(result build.Result, transient bool) Result {
 	var program unit.Program
 	var ok bool
 	if transient {
-		program, ok = linkUnitsCore(result.Units, result.Root, true)
+		program, ok = linkUnitsCore(result.Units, result.Root, true, object)
 	} else {
-		program, ok = LinkUnitsCore(result.Units, result.Root)
+		program, ok = linkUnitsCore(result.Units, result.Root, false, object)
 	}
 	if !ok {
 		out.Ok = false
@@ -74,10 +78,10 @@ func linkBuildCore(result build.Result, transient bool) Result {
 }
 
 func LinkUnitsCore(units []build.PackageUnit, root int) (unit.Program, bool) {
-	return linkUnitsCore(units, root, false)
+	return linkUnitsCore(units, root, false, false)
 }
 
-func linkUnitsCore(units []build.PackageUnit, root int, transient bool) (unit.Program, bool) {
+func linkUnitsCore(units []build.PackageUnit, root int, transient bool, object bool) (unit.Program, bool) {
 	var empty unit.Program
 	if root < 0 || root >= len(units) {
 		return empty, false
@@ -86,17 +90,24 @@ func linkUnitsCore(units []build.PackageUnit, root int, transient bool) (unit.Pr
 	for i := 0; i < len(units); i++ {
 		programs[i] = units[i].Program
 	}
-	return linkProgramsCore(programs, root, units[root].Name, units, transient)
+	return linkProgramsCore(programs, root, units[root].Name, units, transient, object)
 }
 
 func LinkProgramsCore(programs []unit.Program, root int, rootName string) (unit.Program, bool) {
-	return linkProgramsCore(programs, root, rootName, nil, false)
+	return linkProgramsCore(programs, root, rootName, nil, false, false)
 }
 
-func linkProgramsCore(programs []unit.Program, root int, rootName string, units []build.PackageUnit, transient bool) (unit.Program, bool) {
+func linkProgramsCore(programs []unit.Program, root int, rootName string, units []build.PackageUnit, transient bool, object bool) (unit.Program, bool) {
 	var empty unit.Program
 	if root < 0 || root >= len(programs) || rootName == "" {
 		return empty, false
+	}
+	c11Semantics := coreProgramsUseC11Semantics(programs)
+	for i := 0; i < len(units); i++ {
+		if units[i].C11 {
+			c11Semantics = true
+			break
+		}
 	}
 	programs, ok := prepareProgramsCore(programs, root)
 	if !ok {
@@ -197,13 +208,64 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 		arena.Discard(actionStart, actionEnd)
 		return empty, false
 	}
-	if !lowerFunctionValuesCore(&program, transient) {
+	functionValuesOK := false
+	if object {
+		functionValuesOK = lowerObjectFunctionValuesCore(&program, transient)
+	} else {
+		functionValuesOK = lowerFunctionValuesCore(&program, transient)
+	}
+	if !functionValuesOK {
 		arena.Discard(actionStart, actionEnd)
 		return empty, false
+	}
+	if c11Semantics && !coreTextHasC11Directive(program.Text) {
+		program.Text = appendCoreStringBytes(program.Text, "\n// renvo:c11\n")
+		if len(program.Tokens) > 0 {
+			last := len(program.Tokens) - 1
+			if program.Tokens[last].KindLine&255 == unit.TokenEOF {
+				program.Tokens[last].Start = len(program.Text)
+			}
+		}
 	}
 	arena.Discard(actionStart, actionEnd)
 	compactCoreLinkedTokenLines(program.Tokens)
 	return program, true
+}
+
+func coreProgramsUseC11Semantics(programs []unit.Program) bool {
+	for i := 0; i < len(programs); i++ {
+		if coreTextHasC11Directive(programs[i].Text) {
+			return true
+		}
+	}
+	return false
+}
+
+func coreTextHasC11Directive(text []byte) bool {
+	marker := "// renvo:c11"
+	for start := 0; start < len(text); {
+		end := start
+		for end < len(text) && text[end] != '\n' && text[end] != '\r' {
+			end++
+		}
+		if end-start == len(marker) {
+			match := true
+			for i := 0; i < len(marker); i++ {
+				if text[start+i] != marker[i] {
+					match = false
+					break
+				}
+			}
+			if match {
+				return true
+			}
+		}
+		for end < len(text) && (text[end] == '\n' || text[end] == '\r') {
+			end++
+		}
+		start = end
+	}
+	return false
 }
 
 // Linked programs no longer need gaps for comments, blank lines, or removed
@@ -700,7 +762,6 @@ func linkedTokenActions(program *unit.Program, aliases *[]string, symbolOffsets 
 	if coreProgramImportsUnsafe(program) {
 		markCoreUnsafeLayoutTokens(program, actions)
 		markCoreUnsafePointerCallTokens(program, actions)
-		markCoreUnsafePointerConversionTokens(program, actions)
 	}
 	markCoreEndianSelectorTokens(program, actions)
 	for i := 0; i < len(program.Symbols); i++ {
@@ -781,7 +842,7 @@ func markCoreSkipToken(actions []tokenAction, tok int) {
 func markCoreUnsafePointerCallTokens(program *unit.Program, actions []tokenAction) {
 	for i := 0; i < len(program.Selectors); i++ {
 		selector := program.Selectors[i]
-		if selector.BaseKind != unit.RefImport || !coreTokenTextEquals(program, selector.BaseTok, "unsafe") || !coreTokenTextEquals(program, selector.NameTok, "Pointer") {
+		if !coreSelectorIsUnsafePointer(program, selector) {
 			continue
 		}
 		open := selector.NameTok + 1
@@ -835,6 +896,12 @@ func markCoreUnsafePointerConversionTokens(program *unit.Program, actions []toke
 		if coreTokenTextEquals(program, i+2, "[") {
 			continue
 		}
+		// Keep a typed conversion that directly reinterprets an address. Erasing
+		// both conversions would turn (*uint64)(unsafe.Pointer(&words32)) into
+		// &words32 and lose the destination pointee type required by the backend.
+		if coreUnsafePointerAddressCallAt(program, typeEnd+2) {
+			continue
+		}
 		valueEnd := findCoreMatchingParen(program, typeEnd+1)
 		if valueEnd < 0 {
 			continue
@@ -846,6 +913,36 @@ func markCoreUnsafePointerConversionTokens(program *unit.Program, actions []toke
 		markCoreSkipToken(actions, valueEnd)
 		i = valueEnd
 	}
+}
+
+func coreUnsafePointerAddressCallAt(program *unit.Program, start int) bool {
+	for i := 0; i < len(program.Selectors); i++ {
+		selector := program.Selectors[i]
+		if selector.BaseTok != start || !coreSelectorIsUnsafePointer(program, selector) {
+			continue
+		}
+		open := selector.NameTok + 1
+		return coreTokenTextEquals(program, open, "(") && coreTokenTextEquals(program, open+1, "&")
+	}
+	return false
+}
+
+func coreSelectorIsUnsafePointer(program *unit.Program, selector unit.Selector) bool {
+	if selector.BaseKind != unit.RefImport || !coreTokenTextEquals(program, selector.NameTok, "Pointer") {
+		return false
+	}
+	for i := 0; i < len(program.Imports); i++ {
+		imp := program.Imports[i]
+		if !coreTokenTextEquals(program, imp.PathTok, "\"unsafe\"") && !coreTokenTextEquals(program, imp.PathTok, "`unsafe`") {
+			continue
+		}
+		name := "unsafe"
+		if imp.NameTok >= 0 {
+			name = coreTokenText(program, imp.NameTok)
+		}
+		return coreTokenText(program, selector.BaseTok) == name
+	}
+	return false
 }
 
 func markCoreEndianSelectorTokens(program *unit.Program, actions []tokenAction) {

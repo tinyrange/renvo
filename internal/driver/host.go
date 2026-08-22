@@ -129,7 +129,7 @@ func compileAndWrite(args []string, stdRoot string, moduleCache string, backend 
 	}
 	output := compiled.Build.Options.Output
 	mode := os.FileMode(0o755)
-	if compiled.Build.Options.EmitUnit || compiled.Build.Options.EmitImage || compiled.Build.Options.Target == "browser/wasm32" {
+	if compiled.Build.Options.EmitUnit || compiled.Build.Options.EmitImage || compiled.Build.Options.Mode == ModeObject || compiled.Build.Options.Target == "browser/wasm32" {
 		mode = 0o644
 	}
 	if output == "-" {
@@ -139,6 +139,11 @@ func compileAndWrite(args []string, stdRoot string, moduleCache string, backend 
 	}
 	if err != nil {
 		return hostFail(result, HostErrWrite, output)
+	}
+	if dependency := CDependencyOutput(compiled.Build.Options); len(dependency) > 0 {
+		if err := os.WriteFile(compiled.Build.Options.DependencyFile, dependency, 0o644); err != nil {
+			return hostFail(result, HostErrWrite, compiled.Build.Options.DependencyFile)
+		}
 	}
 	return result
 }

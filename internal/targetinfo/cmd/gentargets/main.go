@@ -215,7 +215,8 @@ func contains(values []string, value string) bool {
 }
 
 func driverHelpSource(descriptors []sourceDescriptor) []byte {
-	const prefix = "Usage: renvo -o <file> [-t <target>] [-backend <file.rtg|file.rtgb>] [-system <file.rtg>] [-mode=<mode>] [-tags <list>] [-arena-size <bytes>] [-s] [-emit-unit] [-emit-image] [-windows-gui] <package | file.go...>\n" +
+	const prefix = "Usage: renvo -o <file> [-t <target>] [-backend <file.rtg|file.rtgb>] [-system <file.rtg>] [-mode=<mode>] [-tags <list>] [-arena-size <bytes>] [-s] [-emit-unit] [-emit-image] [-windows-gui] <package | source files...>\n" +
+		"       renvo cc -c [-I <dir>] [-isystem <dir>] <source.c> -o <object.o>\n" +
 		"       renvo run [build options] <script.go> [-- script arguments...]\n" +
 		"       renvo test [build options] [package]\n" +
 		"Options:\n" +
@@ -224,12 +225,15 @@ func driverHelpSource(descriptors []sourceDescriptor) []byte {
 		"  -system      load target, binary-size, and arena limits from a hosted system profile\n" +
 		"  -emit-unit   write the canonical linked Renvo unit without invoking a backend\n" +
 		"  -emit-image  write a format-neutral linked image instead of an executable\n" +
-		"  -mode        select executable (default) or kernel-module output\n" +
+		"  -c           emit a Linux/amd64 ELF relocatable object\n" +
+		"  -I           add a C include search directory\n" +
+		"  -isystem     add a C system include search directory\n" +
+		"  -mode        select executable (default), object, or kernel-module output\n" +
 		"  -script      compile one file whose top-level statements form func main\n" +
 		"  -windows-gui select the Windows GUI subsystem instead of the console subsystem\n" +
 		"Source files:\n" +
-		"  Explicit .go files must share one directory and package. Exactly the named files are used;\n" +
-		"  build constraints and OS/architecture suffixes are ignored, while _test.go files are skipped.\n" +
+		"  Explicit .go and .c files must share one directory and package. Exactly the named files are used;\n" +
+		"  build constraints and OS/architecture suffixes are ignored, while test files are skipped.\n" +
 		"Targets:\n  "
 	const suffix = "Unsupported language/toolchain features:\n  generics, cgo\nConcurrency:\n  goroutines, channels, and select are frontend-lowered through renvo.dev/x/runtime; v1 handlers serialize execution.\n"
 	var advertised []string

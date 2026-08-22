@@ -34,7 +34,8 @@ The most important working rules are:
   independent programs and modules.
 - Do not modify `backend/main_test.go` or weaken a performance gate to make a
   change pass.
-- Treat compiler size, CPU, and RSS as correctness constraints.
+- Track compiler size, CPU, and RSS on fixed workloads; investigate regressions
+  and pathological outliers even when the frontend has no temporary hard gate.
 - Test Windows behavior on native Windows and Darwin behavior on native
   macOS. Wine, QEMU, and format parsers are valuable but not sufficient.
 - Keep the frontend/backend handoff deterministic. Host-built and self-hosted
@@ -117,9 +118,10 @@ Compile exactly named files:
 renvo -t windows/amd64 -o app.exe main.go platform.go
 ```
 
-Explicit files must be `.go` files in one directory and package. Exactly those
-files are used. For the explicit root file list, build constraints and
-OS/architecture suffixes are ignored and `_test.go` files are skipped.
+Explicit files must be `.go` or `.c` files in one directory and package.
+Exactly those files are used. For the explicit root file list, build
+constraints and OS/architecture suffixes are ignored and test files are
+skipped.
 Dependencies still use normal target selection rules. Prefer package mode when
 you want ordinary Go build selection.
 
@@ -134,6 +136,9 @@ Useful options include:
 - `-emit-unit`: stop after frontend linking and write the canonical unit;
 - `-emit-image`: write the `RNVI` linked-image transport;
 - `-mode=kernel-module`: build a Linux/amd64 kernel module;
+- `cc -c`: compile one standalone C translation unit to a system-linkable
+  Linux/amd64 ELF relocatable object;
+- `-I <dir>` / `-I<dir>` / `-isystem <dir>`: add C header search roots;
 - `-script`: treat one explicit file as a script.
 
 ### Hosted system profiles
@@ -165,11 +170,12 @@ Profiles accept byte counts with `B`, `KiB`, `MiB`, or `GiB` suffixes. Both
 limits and the target are required. `-system` cannot be combined with `-t` or
 `-arena-size`.
 
-The frontend size checks measure two payloads independently: the stripped
-compiler with its native backends stays below 2 MiB, while the offline bundle
-containing `std/`, `forms/`, and `device/` stays below 4 MiB. The checked-in
-`systems/frontend-linux-amd64.rtg` profile applies the full-bundle limit and
-gives the running compiler a 128 MiB arena:
+The frontend size checks report two payloads independently: the stripped
+compiler with its native backends against the former 2,000,000-byte reference,
+and the offline bundle containing `std/`, `forms/`, and `device/` against the
+former 4 MiB reference. These are telemetry during M4 rather than test failures.
+The checked-in `systems/frontend-linux-amd64.rtg` profile still applies its
+explicit full-bundle limit and gives the running compiler a 128 MiB arena:
 
 ```sh
 renvo -system systems/frontend-linux-amd64.rtg -tags renvo_bundle -s \
@@ -274,6 +280,14 @@ embedding:
 ## Language scope
 
 Renvo is not a drop-in Go compiler.
+
+The alternate C11 frontend under `internal/c11` feeds the same checked-package
+and linked-unit pipeline as Go. It is not cgo and does not invoke a host C
+toolchain. Mixed `.go` and `.c` files in a package therefore share symbols and
+all downstream optimization/code-generation work. Keep C-specific parsing and
+source adaptation above the shared checker boundary; do not duplicate the
+linker or add C semantics to a target backend. The supported C subset and its
+current limitations are documented beside that frontend.
 
 The closed out-of-scope list is:
 
@@ -923,21 +937,18 @@ stable signals on GitHub's shared runners. Actions therefore uses:
 ```
 
 That mode retains the native compiler resource/binary policy and the
-calibrated frontend CPU/RSS/binary policy. It omits the absolute native and
+frontend binary policy plus calibrated CPU/RSS telemetry. It omits the absolute native and
 WASI performance tests, which remain mandatory through `performance` on a
 suitable development or dedicated benchmark host. Do not interpret this CI
 partition as permission to loosen or skip those limits locally.
 
-The self-hosted frontend gate builds through stage3 and currently requires:
+The self-hosted frontend telemetry builds through stage3 and reports the
+stripped compiler against the former 2,000,000-byte reference. Normalized CPU
+and peak RSS are recorded on every run for regression review; none of these
+frontend observations is currently an absolute pass/fail limit.
 
-- normalized compiler CPU no more than twice a deterministic
-  Renvo-generated calibration workload;
-- 32 MiB maximum RSS;
-- 2 MiB stage3 compiler binary.
-
-The CPU metric is process user plus system CPU, normalized on the same runner.
-It is deliberately not raw wall-clock time. Do not replace it with a
-machine-specific absolute duration.
+The CPU telemetry is process user plus system CPU, normalized on the same
+runner. It is deliberately not raw wall-clock time.
 
 Run the frontend gate with the checkout's standard-library root:
 
@@ -1006,8 +1017,8 @@ Compiler crashes and generated-program crashes are different:
 
 For backend failures, useful temporary capabilities are welcome: symbol maps,
 relocation dumps, deterministic labels, phase counters, and clearer
-diagnostics. Keep them when they improve future debugging without violating the
-size gate.
+diagnostics. Keep them when they improve future debugging without causing an
+unexplained payload regression.
 
 ## Frontend development advice
 

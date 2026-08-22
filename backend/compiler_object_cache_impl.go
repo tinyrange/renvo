@@ -632,7 +632,11 @@ func renvoEmitScalarFunctionObjectCached(g *renvoLinearGen, fnIndex int) bool {
 func renvoEmitAllQueuedFunctionsCached(g *renvoLinearGen) bool {
 	renvoNonNil(g)
 	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
-		if !renvoEmitScalarFunctionObjectCached(g, g.funcQueue[queueIndex]) {
+		fnIndex := g.funcQueue[queueIndex]
+		if renvoDeferUnreadyQueuedClosure(g, fnIndex) {
+			continue
+		}
+		if !renvoEmitScalarFunctionObjectCached(g, fnIndex) {
 			return false
 		}
 	}

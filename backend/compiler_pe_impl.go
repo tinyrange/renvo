@@ -74,14 +74,6 @@ func renvoAsmAddWinStaticImport(a *renvoAsm, dllStart int, dllEnd int, nameStart
 	return renvoWinImportFixedCount + len(a.staticImports)
 }
 
-func renvoStringFromBytes(src []byte, start int, end int) string {
-	value := string(src[start:end])
-	if renvoFixedTarget == 0 {
-		return renvo_runtime_ArenaPersistString(value)
-	}
-	return value
-}
-
 func renvoAsmHasWinImportRelocs(a *renvoAsm) bool {
 	renvoNonNil(a)
 	for i := 2; i < len(a.absRelocs); i += 3 {

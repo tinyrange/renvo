@@ -41,6 +41,7 @@ func compile(unit []byte, options driver.BackendCompileOptions) driver.BackendRe
 		ArenaSize: options.ArenaSize, StripSymbols: options.Strip,
 		WindowsGUI: options.WindowsGUI, EmitImage: options.EmitImage,
 		ModuleLicense: options.ModuleLicense, ModuleNamePath: options.Output,
+		ObjectFile: options.ObjectFile || options.Mode == driver.ModeObject,
 	})
 	if !ok {
 		return driver.BackendResult{Diagnostic: driver.Diagnostic{

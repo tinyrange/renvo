@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$repository_root/tools/kbuild/pin.env"
+
+if [[ "$(uname -s)/$(uname -m)" != "Linux/x86_64" ]]; then
+	printf 'the pinned Kbuild handshake requires Linux/x86_64\n' >&2
+	exit 2
+fi
+
+work_root="$(mktemp -d "${TMPDIR:-/tmp}/renvo-kbuild-${RENVO_LINUX_VERSION}-XXXXXX")"
+archive="${RENVO_LINUX_ARCHIVE:-$work_root/linux.tar.xz}"
+tree="$work_root/linux-$RENVO_LINUX_VERSION"
+frontend="$work_root/renvo"
+log="$work_root/prepare.log"
+metrics="$work_root/prepare.metrics"
+preprocess_metrics="$work_root/preprocess.metrics"
+preprocessed="$work_root/devicetable-offsets.i"
+preprocess_dependency="$work_root/devicetable-offsets.d"
+dashboard="$work_root/dashboard.json"
+m5_dir="$tree/renvo-m5"
+m5_log="$work_root/m5-object.log"
+
+printf 'workspace=%s\n' "$work_root"
+if [[ -z "${RENVO_LINUX_ARCHIVE:-}" ]]; then
+	curl -fL --retry 5 "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${RENVO_LINUX_VERSION}.tar.xz" -o "$archive"
+fi
+printf '%s  %s\n' "$RENVO_LINUX_ARCHIVE_SHA256" "$archive" | sha256sum -c -
+tar -xJf "$archive" -C "$work_root"
+
+(cd "$repository_root" && go build -o "$frontend" ./cmd/renvo)
+make -C "$tree" ARCH="$RENVO_LINUX_ARCH" "$RENVO_LINUX_CONFIG_TARGET"
+
+set +e
+/usr/bin/time -f 'elapsed_seconds=%e\nuser_seconds=%U\nsystem_seconds=%S\npeak_rss_kib=%M' -o "$metrics" \
+	make -C "$tree" ARCH="$RENVO_LINUX_ARCH" V=1 CC="$frontend cc" HOSTCC="${HOSTCC:-cc}" prepare \
+	>"$log" 2>&1
+prepare_status=$?
+set -e
+
+if [[ "$prepare_status" -eq 0 ]]; then
+	printf 'pinned prepare unexpectedly completed; advance the checked blocker\n' >&2
+	exit 1
+fi
+if ! rg -q 'scripts/mod/devicetable-offsets.c:[0-9]+:[0-9]+: error RENVO-C11-001' "$log"; then
+	printf 'prepare did not reach the checked devicetable code-generation blocker\n' >&2
+	tail -n 40 "$log" >&2
+	exit 1
+fi
+readelf -h "$tree/scripts/mod/empty.o" | rg -q 'Type:[[:space:]]+REL \(Relocatable file\)'
+rg -q 'savedcmd_scripts/mod/empty.o := .*renvo cc' "$tree/scripts/mod/.empty.o.cmd"
+
+(cd "$tree" && /usr/bin/time -f 'elapsed_seconds=%e\nuser_seconds=%U\nsystem_seconds=%S\npeak_rss_kib=%M' -o "$preprocess_metrics" \
+	"$frontend" cc -E -P -Wp,-MMD,"$preprocess_dependency" -nostdinc \
+	-I./arch/x86/include -I./arch/x86/include/generated -I./include \
+	-I./arch/x86/include/uapi -I./arch/x86/include/generated/uapi \
+	-I./include/uapi -I./include/generated/uapi \
+	-include ./include/linux/compiler-version.h -include ./include/linux/kconfig.h \
+	-include ./include/linux/compiler_types.h -D__KERNEL__ -std=gnu11 -m64 \
+	-DKBUILD_MODFILE='"scripts/mod/devicetable-offsets"' \
+	-DKBUILD_BASENAME='"devicetable_offsets"' \
+	-DKBUILD_MODNAME='"devicetable_offsets"' \
+	-D__KBUILD_MODNAME=kmod_devicetable_offsets \
+	scripts/mod/devicetable-offsets.c -o "$preprocessed")
+rg -q 'SIZE_usb_device_id' "$preprocessed"
+rg -q 'OFF_usb_device_id_match_flags' "$preprocessed"
+rg -q 'scripts/mod/devicetable-offsets.c' "$preprocess_dependency"
+
+mkdir -p "$m5_dir"
+cat >"$m5_dir/Makefile" <<'EOF'
+obj-y += leaf.o
+OBJECT_FILES_NON_STANDARD := y
+EOF
+cat >"$m5_dir/leaf.c" <<'EOF'
+extern int external_call(int);
+static int local_bss __attribute__((section(".bss.renvo"), aligned(32)));
+int public_data __attribute__((section(".data.renvo"), aligned(16))) = 7;
+__attribute__((section(".text.renvo"), visibility("hidden")))
+int renvo_kbuild_leaf(int value)
+{
+	local_bss += value;
+	return local_bss + public_data + external_call(value);
+}
+int renvo_kbuild_alias(int value) __attribute__((weak, alias("renvo_kbuild_leaf")));
+EOF
+(cd "$tree" && make -f scripts/Makefile.build srctree=. objtree=. obj=renvo-m5 \
+	need-builtin=1 V=1 ARCH="$RENVO_LINUX_ARCH" CC="$frontend cc" HOSTCC="${HOSTCC:-cc}" \
+	renvo-m5/built-in.a >"$m5_log" 2>&1)
+ar t "$m5_dir/built-in.a" | rg -q 'leaf.o$'
+readelf -SW "$m5_dir/leaf.o" | rg -q '\.text\.renvo.*AX'
+readelf -SW "$m5_dir/leaf.o" | rg -q '\.bss\.renvo.*NOBITS'
+readelf -SW "$m5_dir/leaf.o" | rg -q '\.data\.renvo.*PROGBITS'
+readelf -sW "$m5_dir/leaf.o" | rg -q 'GLOBAL HIDDEN.*renvo_kbuild_leaf'
+readelf -sW "$m5_dir/leaf.o" | rg -q 'WEAK[[:space:]]+DEFAULT.*renvo_kbuild_alias'
+readelf -rW "$m5_dir/leaf.o" | rg -q 'R_X86_64_PLT32.*external_call'
+rg -q 'savedcmd_renvo-m5/leaf.o := .*renvo cc' "$m5_dir/.leaf.o.cmd"
+
+(cd "$repository_root" && go run ./tools/kbuild -kernel "$tree" -metrics "$metrics" -out "$dashboard")
+printf 'gate=PASS\nlog=%s\npreprocessed=%s\npreprocess_metrics=%s\nm5_object_log=%s\ndashboard=%s\n' \
+	"$log" "$preprocessed" "$preprocess_metrics" "$m5_log" "$dashboard"

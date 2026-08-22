@@ -65,7 +65,7 @@ func compileC89SourceArenaTags(t *testing.T, target string, sourcePath string, a
 	args = append(args, "-s", "-o", "program.c", sourcePath)
 	result := driver.CompileFromFS(args, root, filepath.Join(root, "std"), driver.OSFS{},
 		New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
-			t.TempDir(), backendcompiled.Backend{}))
+			backendJITTestCacheDir, backendcompiled.Backend{}))
 	if !result.Ok {
 		t.Fatalf("C89 CompilerJIT compile failed: %#v", result.Diagnostic)
 	}

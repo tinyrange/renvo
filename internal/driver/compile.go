@@ -28,6 +28,7 @@ type BackendCompileOptions struct {
 	EmitImage     bool
 	ArenaSize     int
 	ModuleLicense string
+	ObjectFile    bool
 }
 
 type OptionsBackend interface {
@@ -89,15 +90,19 @@ func compileBuiltUnit(result CompileResult, built BuildResult, backend Backend) 
 		result.Binary = built.Unit
 		return result
 	}
+	if built.Options.CAssemblyOutput {
+		result.Diagnostic = Diagnostic{Phase: "backend", Code: "RENVO-BACKEND-007", Message: "C assembly output is not implemented"}
+		return compileFail(result, CompileErrBackend)
+	}
 	if backend == nil {
 		return compileFail(result, CompileErrBackend)
 	}
 	var backendResult BackendResult
 	optionsBackend, acceptsOptions := backend.(OptionsBackend)
 	arenaBackend, acceptsArena := backend.(ArenaBackend)
-	arenaSize := backendArenaSize(built.Options.Target, built.Options.Tags, built.Options.ArenaSize)
+	arenaSize := backendArenaSize(built.Options.Target, built.Options.Tags, built.Options.ArenaSize, built.Options.Mode)
 	if acceptsOptions && (built.Options.Mode != ModeExecutable || built.Options.EmitImage) {
-		backendResult = optionsBackend.CompileUnitWithOptions(built.Unit, BackendCompileOptions{Target: built.Options.Target, Mode: built.Options.Mode, Output: built.Options.Output, Strip: built.Options.Strip, WindowsGUI: built.Options.WindowsGUI, EmitImage: built.Options.EmitImage, ArenaSize: arenaSize, ModuleLicense: built.Options.ModuleLicense})
+		backendResult = optionsBackend.CompileUnitWithOptions(built.Unit, BackendCompileOptions{Target: built.Options.Target, Mode: built.Options.Mode, Output: built.Options.Output, Strip: built.Options.Strip, WindowsGUI: built.Options.WindowsGUI, EmitImage: built.Options.EmitImage, ArenaSize: arenaSize, ModuleLicense: built.Options.ModuleLicense, ObjectFile: built.Options.Mode == ModeObject})
 	} else if built.Options.Mode != ModeExecutable {
 		backendResult.Diagnostic = Diagnostic{Phase: "backend", Code: "RENVO-BACKEND-006", Message: "backend does not accept output modes"}
 	} else if acceptsArena {

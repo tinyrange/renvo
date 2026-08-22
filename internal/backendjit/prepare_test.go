@@ -271,6 +271,23 @@ func TestCompiledInBootstrapPreparesAndCachesBackend(t *testing.T) {
 	if string(equalityExecution) != "PASS\n" {
 		t.Fatalf("custom backend equality output = %q, want PASS", equalityExecution)
 	}
+	immediateArgs := append([]string(nil), args...)
+	immediateArgs[len(immediateArgs)-1] = filepath.Join(root, "backend", "tests", "prepared_push_immediate_argument.go")
+	immediateResult := driver.CompileFromFS(immediateArgs, root, stdRoot, driver.OSFS{}, first)
+	if !immediateResult.Ok {
+		t.Fatalf("custom backend immediate argument compile failed: %#v", immediateResult.Diagnostic)
+	}
+	immediateExecutable := filepath.Join(t.TempDir(), "custom-backend-immediate-argument-output")
+	if err := os.WriteFile(immediateExecutable, immediateResult.Binary, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	immediateExecution, err := exec.Command(immediateExecutable).CombinedOutput()
+	if err != nil {
+		t.Fatalf("custom backend immediate argument output failed: %v\n%s", err, immediateExecution)
+	}
+	if string(immediateExecution) != "PASS\n" {
+		t.Fatalf("custom backend immediate argument output = %q, want PASS", immediateExecution)
+	}
 	for _, mutate := range []func(*rtgb.Artifact){
 		func(artifact *rtgb.Artifact) { artifact.Protocol++ },
 		func(artifact *rtgb.Artifact) { artifact.Unit++ },
@@ -522,6 +539,7 @@ func TestCompiledInBootstrapUsesDefinitionOwnedPEImages(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.custom, func(t *testing.T) {
+			t.Parallel()
 			definition := copyNativeDefinition(t, root,
 				"target "+test.target+" {", "target "+test.custom+" {")
 			result := driver.CompileFromFS([]string{
@@ -786,6 +804,7 @@ func TestCompiledInBootstrapUses32BitDefinitions(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.custom, func(t *testing.T) {
+			t.Parallel()
 			definition := copyNativeDefinition(t, root,
 				"target "+test.target+" {", "target "+test.custom+" {")
 			result := driver.CompileFromFS([]string{
@@ -826,6 +845,7 @@ func TestCompiledInBootstrapUsesVM32Definitions(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.custom, func(t *testing.T) {
+			t.Parallel()
 			definitionSource, readErr := os.ReadFile(filepath.Join(
 				root, "backend", "definitions", "wasm32.rtg"))
 			if readErr != nil {

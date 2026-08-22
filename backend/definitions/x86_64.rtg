@@ -1,5 +1,7 @@
 # Shared x86-64 machine facts, encoder, direct-emitter bindings, and reusable
 # calling conventions. Target entrypoints own platform-specific code.
+@import "elf_amd64_primitives.rtg"
+
 go backend {
 	func asmSecondaryDisp(a *RTGEmitter, disp int) {
 		if disp == 0 {
@@ -621,6 +623,13 @@ arch x86_64 {
     # Target-neutral lowering consumes these stable, generated exports; their
     # architecture-specific implementations remain owned by this definition.
     exports {
+		renvoElfAmd64Append32 = go elf_amd64_primitives.nativeAppend32
+		renvoElfAmd64Append64 = go elf_amd64_primitives.nativeAppend64
+		renvoElfAmd64Append16 = sequence elf_amd64_primitives.kernelAppend16
+		renvoElfAmd64AppendHeader = sequence elf_amd64_primitives.kernelAppendELFHeader
+		renvoElfAmd64AppendRelocation = sequence elf_amd64_primitives.kernelAppendRelocation
+		renvoElfAmd64AppendSection = sequence elf_amd64_primitives.kernelAppendSection
+		renvoElfAmd64AppendSymbol = sequence elf_amd64_primitives.kernelAppendSymbol
 		renvoAmd64AsmSecondaryDisp = go asmSecondaryDisp
         renvoAmd64AsmMovRaxImm = go asmMovRaxImm
         renvoAmd64AsmMovR10BssAddr = sequence asmMovR10BssAddr

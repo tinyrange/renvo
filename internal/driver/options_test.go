@@ -51,6 +51,13 @@ func TestParseOptionsAcceptsExplicitGoFiles(t *testing.T) {
 	}
 }
 
+func TestParseOptionsAcceptsMixedGoAndCFiles(t *testing.T) {
+	options := ParseOptions([]string{"main.go", "-o", "app", "helper.c"})
+	if !options.Ok || len(options.Files) != 2 || options.Files[1] != "helper.c" {
+		t.Fatalf("mixed file-list options = %#v", options)
+	}
+}
+
 func TestCommandHelpRequested(t *testing.T) {
 	for _, args := range [][]string{nil, {"renvo"}, {"renvo", "--help"}} {
 		if !CommandHelpRequested(args) {
@@ -60,10 +67,98 @@ func TestCommandHelpRequested(t *testing.T) {
 	if CommandHelpRequested([]string{"renvo", "-o", "app", "."}) {
 		t.Fatal("compile command requested help")
 	}
-	for _, want := range []string{"Usage: renvo", "-o <file>", "-system <file.rtg>", "-mode=<mode>", "kernel-module", "file.go...", "Exactly the named files", "windows/amd64", "windows/arm64", "darwin/arm64", "wasi/wasm32", "vm/vm32"} {
+	for _, want := range []string{"Usage: renvo", "renvo cc -c", "-o <file>", "-I", "-isystem", "-system <file.rtg>", "-mode=<mode>", "kernel-module", "object", "source files...", "Explicit .go and .c files", "Exactly the named files", "windows/amd64", "windows/arm64", "darwin/arm64", "wasi/wasm32", "vm/vm32"} {
 		if !strings.Contains(HelpText, want) {
 			t.Fatalf("HelpText missing %q", want)
 		}
+	}
+}
+
+func TestParseOptionsCIncludePaths(t *testing.T) {
+	options := ParseOptions([]string{"-c", "-I", "include", "-Ivendor/include", "-isystem", "/sdk/include", "-o", "hello.o", "hello.c"})
+	if !options.Ok || len(options.IncludePaths) != 3 || options.IncludePaths[0] != "include" || options.IncludePaths[1] != "vendor/include" || options.IncludePaths[2] != "/sdk/include" {
+		t.Fatalf("C include options = %#v", options)
+	}
+}
+
+func TestParseOptionsGoObject(t *testing.T) {
+	options := ParseOptions([]string{"-mode=object", "-o", "bridge.o", "bridge.go"})
+	if !options.Ok || options.Mode != ModeObject || options.Target != "linux/amd64" ||
+		len(options.Files) != 1 || options.Files[0] != "bridge.go" {
+		t.Fatalf("Go object options = %#v", options)
+	}
+}
+
+func TestNormalizeCCompilerCommand(t *testing.T) {
+	args := NormalizeCCompilerCommand([]string{"renvo", "cc", "-c", "hello.c", "-o", "hello.o"})
+	want := []string{"renvo", "-cc", "-c", "hello.c", "-o", "hello.o"}
+	if len(args) != len(want) {
+		t.Fatalf("normalized args = %#v", args)
+	}
+	for i := 0; i < len(want); i++ {
+		if args[i] != want[i] {
+			t.Fatalf("normalized args = %#v", args)
+		}
+	}
+	options := ParseOptions(args[1:])
+	if !options.Ok || options.Mode != ModeObject || options.Target != "linux/amd64" || options.Package != "hello.c" || options.Output != "hello.o" {
+		t.Fatalf("C compiler options = %#v", options)
+	}
+}
+
+func TestNormalizeKbuildCCompilerCommand(t *testing.T) {
+	args := NormalizeCCompilerCommand([]string{"renvo", "cc", "-MMD", "-Wp,-MMD,obj/.leaf.o.d", "-ffunction-sections", "-fdata-sections", "-fshort-wchar", "-funsigned-char", "-nostdinc", "-Iinclude", "-include", "include/config.h", "-D__KERNEL__", "-std=gnu11", "-m64", "-mcmodel=kernel", "-Os", "-Wall", "-c", "leaf.c", "-o", "obj/leaf.o"})
+	options := ParseOptions(args[1:])
+	if !options.Ok || !options.CCompiler || !options.CNoStdIncludes || !options.CDependencyRequested ||
+		!options.CFunctionSections || !options.CDataSections || !options.CShortWChar || !options.CUnsignedChar || !options.CKernelCodeModel || !options.COptimize || options.DependencyFile != "obj/.leaf.o.d" ||
+		len(options.CForcedInclude) != 1 || options.CForcedInclude[0] != "include/config.h" ||
+		len(options.CDefines) != 1 || options.CDefines[0] != "__KERNEL__" {
+		t.Fatalf("normalized Kbuild options = %#v (args %#v)", options, args)
+	}
+}
+
+func TestNormalizeKbuildCharSignednessOverride(t *testing.T) {
+	args := NormalizeCCompilerCommand([]string{"renvo", "cc", "-funsigned-char", "-fsigned-char", "-c", "leaf.c", "-o", "leaf.o"})
+	options := ParseOptions(args[1:])
+	if !options.Ok || options.CUnsignedChar {
+		t.Fatalf("normalized signed-char override = %#v (args %#v)", options, args)
+	}
+}
+
+func TestNormalizeKbuildSectionOverrides(t *testing.T) {
+	args := NormalizeCCompilerCommand([]string{
+		"renvo", "cc", "-ffunction-sections", "-fdata-sections",
+		"-fno-function-sections", "-fno-data-sections", "-c", "leaf.c", "-o", "leaf.o",
+	})
+	options := ParseOptions(args[1:])
+	if !options.Ok || options.CFunctionSections || options.CDataSections {
+		t.Fatalf("normalized section overrides = %#v (args %#v)", options, args)
+	}
+}
+
+func TestNormalizeKbuildCodeModelOverride(t *testing.T) {
+	args := NormalizeCCompilerCommand([]string{
+		"renvo", "cc", "-mcmodel=kernel", "-mcmodel=small", "-O2", "-O0", "-fPIC", "-fPIE", "-c", "leaf.c", "-o", "leaf.o",
+	})
+	options := ParseOptions(args[1:])
+	if !options.Ok || options.CKernelCodeModel || options.COptimize {
+		t.Fatalf("normalized code-model override = %#v (args %#v)", options, args)
+	}
+}
+
+func TestNormalizeKbuildCCompilerCommandRejectsUnknownSemanticFlag(t *testing.T) {
+	args := NormalizeCCompilerCommand([]string{"renvo", "cc", "-fmade-up-semantics", "-c", "leaf.c", "-o", "leaf.o"})
+	options := ParseOptions(args[1:])
+	if options.Ok || options.Error != ParseErrUnknownOption || options.ErrorArg != "-fmade-up-semantics" {
+		t.Fatalf("unknown Kbuild options = %#v", options)
+	}
+}
+
+func TestNormalizeKbuildAssemblyOutput(t *testing.T) {
+	args := NormalizeCCompilerCommand([]string{"renvo", "cc", "-fverbose-asm", "-S", "offsets.c", "-o", "offsets.s"})
+	options := ParseOptions(args[1:])
+	if !options.Ok || options.Mode != ModeObject || !options.CAssemblyOutput {
+		t.Fatalf("assembly output options = %#v (args %#v)", options, args)
 	}
 }
 
@@ -118,6 +213,12 @@ func TestParseOptionsRejectsInvalidInputs(t *testing.T) {
 		{name: "missing mode", args: []string{"-mode=", "-o", "app", "main.go"}, err: ParseErrMissingMode, arg: "-mode=", at: 0},
 		{name: "unsupported mode", args: []string{"-mode=firmware", "-o", "app", "main.go"}, err: ParseErrUnsupportedMode, arg: "firmware", at: 0},
 		{name: "kernel module on non-Linux target", args: []string{"-mode=kernel-module", "-t", "windows/amd64", "-o", "app.ko", "main.go"}, err: ParseErrModeRequiresLinuxAmd64, arg: "windows/amd64", at: 0},
+		{name: "object on non-Linux target", args: []string{"-c", "-t", "windows/amd64", "-o", "app.o", "main.c"}, err: ParseErrObjectRequiresLinuxAmd64, arg: "windows/amd64", at: 0},
+		{name: "object package mode", args: []string{"-c", "-o", "app.o", "./cmd/app"}, err: ParseErrObjectFileCount, arg: "./cmd/app", at: 4},
+		{name: "object multiple files", args: []string{"-c", "-o", "app.o", "main.c", "other.c"}, err: ParseErrObjectFileCount, arg: "main.c", at: 5},
+		{name: "missing include path", args: []string{"-c", "-I"}, err: ParseErrMissingIncludePath, arg: "-I", at: 1},
+		{name: "missing system include path", args: []string{"-c", "-isystem"}, err: ParseErrMissingIncludePath, arg: "-isystem", at: 1},
+		{name: "C script", args: []string{"-script", "-o", "app", "main.c"}, err: ParseErrScriptRequiresGo, arg: "main.c", at: 4},
 	}
 	for i := 0; i < len(tests); i++ {
 		tc := tests[i]
