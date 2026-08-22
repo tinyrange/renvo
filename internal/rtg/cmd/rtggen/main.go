@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"go/build/constraint"
 	"os"
 	"path/filepath"
 
@@ -23,6 +24,7 @@ func main() {
 	kernel := flag.Bool("kernel", false, "generate the shared checked-in architecture kernel")
 	inactiveKernel := flag.Bool("inactive-kernel", false, "generate the self-hosted inactive architecture kernel")
 	packageName := flag.String("package", "backend", "generated Go package")
+	buildTag := flag.String("build-tag", "", "prepend one Go build tag to generated source")
 	output := flag.String("o", "", "generated Go output")
 	check := flag.Bool("check", false, "fail if the output is stale")
 	flag.Parse()
@@ -105,7 +107,23 @@ func main() {
 	if !generated.Ok {
 		failDiagnostics(generated.Diagnostics)
 	}
+	if *buildTag != "" {
+		if !validBuildTag(*buildTag) {
+			fail("-build-tag must be one Go identifier")
+		}
+		prefix := []byte("//go:build " + *buildTag + "\n\n")
+		generated.Source = append(prefix, generated.Source...)
+	}
 	writeGenerated(*output, *check, generated)
+}
+
+func validBuildTag(tag string) bool {
+	expression, err := constraint.Parse("//go:build " + tag)
+	if err != nil {
+		return false
+	}
+	_, ok := expression.(*constraint.TagExpr)
+	return ok
 }
 
 type filesystemImportLoader struct{}

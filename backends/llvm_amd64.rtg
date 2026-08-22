@@ -789,7 +789,7 @@ go backend {
 		out.Text(" = inttoptr i64 ")
 		llvmTemp(out, integer)
 		out.Text(" to ptr\n")
-		llvmEmitCall(out, RTGLabel{}, 0, pointer)
+		llvmEmitCall(out, RTGLabel(0), 0, pointer)
 	}
 
 	func llvmReturn(out *RTGEmitter) {

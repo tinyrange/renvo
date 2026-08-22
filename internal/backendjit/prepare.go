@@ -167,9 +167,6 @@ func preparationSources(backendRoot string, generated rtg.GenerateResult) ([]loa
 		if name == "" || excluded[name] {
 			continue
 		}
-		if name == "compiler_llvm_prepared_impl.go" {
-			continue
-		}
 		path := load.JoinPath("/backend", name)
 		sources = append(sources, load.SourceFile{Path: path, Src: []byte(source)})
 		names = append(names, path)
