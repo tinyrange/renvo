@@ -104,7 +104,6 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 	callTargets := make([]definiteCallTarget, len(info.Symbols))
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
 		file := pkg.Files[fileIndex].File
-		checkChannels := fileMayNeedChannelCheck(file)
 		for i := 0; i < len(file.Funcs); i++ {
 			fn := file.Funcs[i]
 			functionArenaStart := arena.Mark()
@@ -129,7 +128,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			if assignmentErr, assignmentTok := invalidDefiniteAssignmentType(file, fn); assignmentErr != CheckOK {
 				return info, false, assignmentErr, fileIndex, assignmentTok
 			}
-			if checkChannels {
+			if functionMayNeedChannelCheck(file, fn) {
 				channelCheckArenaStart := arena.Mark()
 				channelTok := invalidDefiniteChannelOperation(file, fn)
 				arena.Reset(channelCheckArenaStart)

@@ -249,7 +249,7 @@ case "$mode" in
 		;;
 	full)
 		# Measure before the parallel package and corpus suites can heat and
-		# throttle the host; the performance limits themselves stay unchanged.
+		# throttle the host; frontend CPU, RSS, and size are reported as telemetry.
 		check_performance
 		check_preflight
 		check_backend

@@ -146,3 +146,16 @@ func TestChannelValidationPreservesIntegerCloseSyscall(t *testing.T) {
 		t.Fatalf("integer close syscall rejected at token %d", tok)
 	}
 }
+
+func TestChannelValidationGateIsFunctionLocal(t *testing.T) {
+	file := syntax.ParseFile([]byte("package main\nfunc unrelated() { value := 1; _ = value }\nfunc channelOperation(values chan int) { close(values) }\n"))
+	if !file.Ok || len(file.Funcs) != 2 {
+		t.Fatal("parse failed")
+	}
+	if functionMayNeedChannelCheck(file, file.Funcs[0]) {
+		t.Fatal("unrelated function selected for channel validation")
+	}
+	if !functionMayNeedChannelCheck(file, file.Funcs[1]) {
+		t.Fatal("channel operation was not selected for validation")
+	}
+}

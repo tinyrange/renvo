@@ -9,8 +9,16 @@ type definiteChannelBinding struct {
 	token     int
 }
 
-func fileMayNeedChannelCheck(file syntax.File) bool {
-	for i := 0; i < len(file.Tokens); i++ {
+func functionMayNeedChannelCheck(file syntax.File, fn syntax.FuncDecl) bool {
+	start := fn.BodyStart + 1
+	end := fn.BodyEnd
+	if start < 0 {
+		start = 0
+	}
+	if end > len(file.Tokens) {
+		end = len(file.Tokens)
+	}
+	for i := start; i < end; i++ {
 		token := file.Tokens[i]
 		kind := token.KindLine & 255
 		if kind == syntax.TokenChan {
