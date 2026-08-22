@@ -155,14 +155,14 @@ func renvoEmitWriteValueRegs(g *renvoLinearGen, fd int) bool {
 	renvoNonNil(g)
 	a := &g.asm
 	renvoEmitPrintMirror(g)
-	if renvoPreparedBackend != 0 {
+	if renvoPreparedBackendActive != 0 {
 		renvoRTGDirectMove(a, renvoRTGCallWord2, renvoRTGSecondary)
 		renvoRTGDirectMove(a, renvoRTGCallWord1, renvoRTGPrimary)
 		renvoRTGDirectMoveImmediate(a, renvoRTGCallWord0, int64(fd))
 		return renvoRTGEmitRuntimeOperation(a, RTGRuntimeWrite)
 	}
 	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-		renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
+		renvoPreparedBackendActive == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
 		renvoAmd64EmitKernelPrintValue(a)
 		return true
 	}
@@ -213,7 +213,7 @@ func renvoEmitWriteValueRegs(g *renvoLinearGen, fd int) bool {
 
 func renvoEmitBuiltinReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, seqSyscall int, offSyscall int) bool {
 	renvoNonNil(g, ep)
-	if renvoPreparedBackend != 0 {
+	if renvoPreparedBackendActive != 0 {
 		operation := RTGRuntimeRead
 		if seqSyscall == renvoLinuxSysWriteSeq(g.c.renvoTargetOS, g.c.renvoTargetArch) ||
 			seqSyscall == renvoDarwinImportWrite {
@@ -362,7 +362,7 @@ func renvoEvalBuiltinConst(g *renvoLinearGen, nameStart int, nameEnd int) renvoC
 
 func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, callee int) bool {
 	renvoNonNil(g, ep)
-	if renvoPreparedBackend != 0 {
+	if renvoPreparedBackendActive != 0 {
 		return renvoEmitPreparedTargetRuntime(g, ep, idx, callee)
 	}
 	if targetIsWindows(g.c.renvoTargetOS) {
@@ -557,7 +557,7 @@ func renvoEmitPreparedTargetRuntime(
 func renvoEmitExitStatus(g *renvoLinearGen) bool {
 	renvoNonNil(g)
 	a := &g.asm
-	if renvoPreparedBackend != 0 {
+	if renvoPreparedBackendActive != 0 {
 		return renvoRTGEmitExit(a, renvoRTGPrimary)
 	}
 	if g.c.renvoTargetArch == renvoArchWasm32 {
@@ -647,10 +647,10 @@ func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int
 		return true
 	}
 	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-		renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
+		renvoPreparedBackendActive == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
 		return renvoAmd64EmitKernelLinkStaticCall(g, fn, wordCount)
 	}
-	if renvoPreparedBackend != 0 && renvoRTGPreparedKernelModule != 0 &&
+	if renvoPreparedBackendActive != 0 && renvoRTGPreparedKernelModule != 0 &&
 		renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "kernel") {
 		importID := renvoAsmAddKernelImport(
 			&g.asm, g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
@@ -659,7 +659,7 @@ func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int
 		}
 		return renvoRTGEmitStaticCall(&g.asm, importID, wordCount)
 	}
-	if renvoPreparedBackend != 0 {
+	if renvoPreparedBackendActive != 0 {
 		importID := renvoAsmAddPreparedStaticImport(&g.asm,
 			fn.linkDLLStart, fn.linkDLLEnd,
 			fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
@@ -672,7 +672,7 @@ func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int
 		return false
 	}
 	importID := renvoAsmAddWinStaticImport(&g.asm, fn.linkDLLStart, fn.linkDLLEnd, fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
-	if renvoPreparedBackend != 0 {
+	if renvoPreparedBackendActive != 0 {
 		return renvoRTGEmitStaticCall(&g.asm, importID, wordCount)
 	}
 	if g.c.renvoTargetArch == renvoArch386 {
@@ -936,14 +936,14 @@ func renvoEmitTargetStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount i
 		}
 		return 0
 	}
-	if renvoPreparedBackend != 0 && renvoRTGPreparedObject != 0 {
+	if renvoPreparedBackendActive != 0 && renvoRTGPreparedObject != 0 {
 		if renvoEmitLinkStaticCall(g, fn, wordCount) {
 			return 1
 		}
 		return 0
 	}
 	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-		renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
+		renvoPreparedBackendActive == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
 		if !renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "kernel") {
 			return 0
 		}
@@ -952,7 +952,7 @@ func renvoEmitTargetStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount i
 		}
 		return 0
 	}
-	if renvoPreparedBackend != 0 {
+	if renvoPreparedBackendActive != 0 {
 		if renvoEmitLinkStaticCall(g, fn, wordCount) {
 			return 1
 		}
@@ -984,7 +984,7 @@ func renvoAsmAddPreparedStaticImport(
 	nameStart int, nameEnd int, src []byte,
 ) int {
 	if renvoFixedTarget != 0 {
-		if renvoPreparedBackend == 0 {
+		if renvoPreparedBackendActive == 0 {
 			return -1
 		}
 	}
@@ -1313,6 +1313,21 @@ func renvoEmitJITCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		renvoAsmPushPrimary(&g.asm)
 	}
 	a := &g.asm
+	if renvoPreparedBackendActive != 0 {
+		entry := renvoRTGScratch
+		stackTop := renvoRTGPrimary
+		argsData := renvoRTGCallWord0
+		argsLen := renvoRTGCallWord1
+		envData := renvoRTGTertiary
+		envLen := renvoRTGSecondary
+		renvoRTGAsmPopRegister(a, entry)
+		renvoRTGAsmPopRegister(a, stackTop)
+		renvoRTGAsmPopRegister(a, argsData)
+		renvoRTGAsmPopRegister(a, argsLen)
+		renvoRTGAsmPopRegister(a, envData)
+		renvoRTGAsmPopRegister(a, envLen)
+		return renvoRTGEmitJITCall(a, entry, stackTop, argsData, argsLen, envData, envLen)
+	}
 	if g.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmPopCallWord0(a)
 		renvoAsmEmit8(a, 0x5e)
@@ -1398,7 +1413,7 @@ func renvoEmitSyscallArg(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 func renvoEmitSyscallFromStack(g *renvoLinearGen, wordCount int, syscallNumber int) bool {
 	renvoNonNil(g)
 	a := &g.asm
-	if renvoPreparedBackend != 0 {
+	if renvoPreparedBackendActive != 0 {
 		if wordCount > 7 {
 			return false
 		}

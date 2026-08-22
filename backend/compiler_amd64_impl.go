@@ -115,7 +115,7 @@ func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinear
 		a.codeOffset = renvoWinSectionRVA
 	}
 	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-		renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(meta.c) {
+		renvoPreparedBackendActive == 0 && renvoFixedTarget == 0 && targetIsKernelModule(meta.c) {
 		if !renvoBeginKernelModuleAmd64(g, appIndex) {
 			return nil
 		}
@@ -227,7 +227,7 @@ func renvoFinishScalarProgramAmd64(g *renvoLinearGen) renvoCompileResult {
 	} else if targetIsWindows(g.c.renvoTargetOS) {
 		data = renvoAsmImageWindowsAmd64(a)
 	} else if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-		renvoPreparedBackend == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
+		renvoPreparedBackendActive == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
 		data = renvoAsmImageKernelModuleAmd64(a, g.kernelInitLabel, g.kernelExitLabel)
 	} else {
 		data = renvoAsmImageAmd64(a)

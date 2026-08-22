@@ -453,7 +453,9 @@ func declarationAllowedFields(kind string) []string {
 			"hidden_result_word", "internal", "caller_saved", "callee_saved", "red_zone",
 			"frame_start", "frame_finish", "push_register", "push_immediate",
 			"pop_register", "frame_load", "frame_store", "frame_address",
-			"store_param_word", "call_word_count",
+			"store_param_word", "call_word_count", "mark_label",
+			"structured_functions", "function_start", "function_finish", "jit_call",
+			"unsigned_divide",
 		}
 	}
 	if kind == DeclRuntime {
@@ -542,9 +544,10 @@ func validateABI(document Document, declaration Declaration) []Diagnostic {
 	hookNames := []string{
 		"frame_start", "frame_finish", "push_register", "push_immediate",
 		"pop_register", "frame_load", "frame_store", "frame_address",
-		"store_param_word", "call_word_count",
+		"store_param_word", "call_word_count", "mark_label",
+		"function_start", "function_finish", "jit_call", "unsigned_divide",
 	}
-	hookParameters := make([][]string, 10)
+	hookParameters := make([][]string, 15)
 	hookParameters[0] = []string{"*RTGEmitter"}
 	hookParameters[1] = []string{"*RTGEmitter", "int", "int"}
 	hookParameters[2] = []string{"*RTGEmitter", "RTGRegister"}
@@ -555,6 +558,11 @@ func validateABI(document Document, declaration Declaration) []Diagnostic {
 	hookParameters[7] = []string{"*RTGEmitter", "RTGRegister", "int"}
 	hookParameters[8] = []string{"*RTGEmitter", "int", "int"}
 	hookParameters[9] = []string{"*RTGEmitter", "RTGLabel", "int"}
+	hookParameters[10] = []string{"*RTGEmitter", "RTGLabel"}
+	hookParameters[11] = []string{"*RTGEmitter", "RTGLabel"}
+	hookParameters[12] = []string{"*RTGEmitter"}
+	hookParameters[13] = []string{"*RTGEmitter", "RTGRegister", "RTGRegister", "RTGRegister", "RTGRegister", "RTGRegister", "RTGRegister"}
+	hookParameters[14] = []string{"*RTGEmitter", "bool"}
 	for i := 0; i < len(declaration.Statements); i++ {
 		left, right, assignment := statementAssignment(declaration.Statements[i])
 		if !assignment || len(left) != 1 {
@@ -573,6 +581,8 @@ func validateABI(document Document, declaration Declaration) []Diagnostic {
 		result := ""
 		if left[0] == "frame_start" {
 			result = "int"
+		} else if left[0] == "jit_call" || left[0] == "unsigned_divide" {
+			result = "bool"
 		}
 		if !found || !directEmitterSignatureMatches(function, directEmitterOperation{
 			Name: left[0], Parameters: hookParameters[hook], Result: result,

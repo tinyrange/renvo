@@ -107,7 +107,7 @@ func GenerateArchitectureKernel(packageName string) GenerateResult {
 // executable. The host and prepared topologies use the full implementations.
 func GenerateInactiveArchitectureKernel(packageName string) GenerateResult {
 	ensureDirectEmitterV1()
-	source := []byte("//go:build renvo\n\n")
+	source := []byte("//go:build renvo && !renvo_prepared\n\n")
 	source = append(source, generateHeaderPackage(nil, "inactive-architecture-kernel", packageName)...)
 	source = appendNativeRegisterAPI(source)
 	source = appendNativeArchitectureAPI(source)
@@ -266,6 +266,25 @@ func appendPreparedTargetFacts(source []byte, descriptor TargetDescriptor, activ
 		source = append(source, " }\n"...)
 	}
 	source = append(source, "return 0\n}\n"...)
+	source = append(source, "\nfunc renvoRTGTargetHasBuildTag(target int, tag string) bool {\n"...)
+	if active {
+		source = append(source, "if target != renvoTargetRTG { return false }\nreturn "...)
+		if len(descriptor.BuildTags) == 0 {
+			source = append(source, "false"...)
+		} else {
+			for i := 0; i < len(descriptor.BuildTags); i++ {
+				if i != 0 {
+					source = append(source, " || "...)
+				}
+				source = append(source, "tag == "...)
+				source = appendQuoted(source, descriptor.BuildTags[i])
+			}
+		}
+		source = append(source, '\n')
+	} else {
+		source = append(source, "return false\n"...)
+	}
+	source = append(source, "}\n"...)
 
 	source = append(source, "\nfunc renvoRTGProfileForTarget(target int) renvoTargetProfile {\n"...)
 	if active {

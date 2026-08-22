@@ -2,19 +2,24 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"testing"
 )
 
 func TestSpecializePreparationSource(t *testing.T) {
-	source := []byte("package main\n\nconst renvoPreparedBackend = 0\n")
+	source := []byte("//go:build !renvo_prepared\n\npackage main\n\nconst renvoPreparedBackendActive = 0\nconst renvoRTGStructuredFunctions = 0\n")
 	prepared, err := specializePreparationSource("compiler_target_policy_impl.go", source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(prepared, []byte("const renvoPreparedBackend = 1")) {
+	if !bytes.HasPrefix(prepared, []byte("//go:build renvo_prepared\n")) ||
+		!bytes.Contains(prepared, []byte("const renvoPreparedBackendActive = 1")) {
 		t.Fatalf("prepared source = %q", prepared)
 	}
-	if !bytes.Contains(source, []byte("const renvoPreparedBackend = 0")) {
+	if bytes.Contains(prepared, []byte("const renvoRTGStructuredFunctions")) {
+		t.Fatalf("prepared source retained ordinary structured-function mode: %q", prepared)
+	}
+	if !bytes.Contains(source, []byte("const renvoPreparedBackendActive = 0")) {
 		t.Fatal("specialization mutated its input")
 	}
 }
@@ -24,10 +29,12 @@ func TestSpecializePreparationSourceRejectsInvalidSetting(t *testing.T) {
 		name   string
 		source string
 	}{
-		{"missing", "package main\n"},
-		{"variable", "package main\nvar renvoPreparedBackend = 0\n"},
-		{"multiple names", "package main\nconst renvoPreparedBackend, other = 0, 0\n"},
-		{"duplicate", "package main\nconst renvoPreparedBackend = 0\nconst renvoPreparedBackend = 0\n"},
+		{"missing tag", "package main\nconst renvoPreparedBackendActive = 0\nconst renvoRTGStructuredFunctions = 0\n"},
+		{"missing", "//go:build !renvo_prepared\n\npackage main\n"},
+		{"variable", "//go:build !renvo_prepared\n\npackage main\nvar renvoPreparedBackendActive = 0\nconst renvoRTGStructuredFunctions = 0\n"},
+		{"multiple names", "//go:build !renvo_prepared\n\npackage main\nconst renvoPreparedBackendActive, other = 0, 0\nconst renvoRTGStructuredFunctions = 0\n"},
+		{"duplicate", "//go:build !renvo_prepared\n\npackage main\nconst renvoPreparedBackendActive = 0\nconst renvoPreparedBackendActive = 0\nconst renvoRTGStructuredFunctions = 0\n"},
+		{"missing structured mode", "//go:build !renvo_prepared\n\npackage main\nconst renvoPreparedBackendActive = 0\n"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -47,5 +54,23 @@ func TestSpecializePreparationSourceIgnoresOtherFiles(t *testing.T) {
 	}
 	if !bytes.Equal(prepared, source) {
 		t.Fatalf("other source changed from %q to %q", source, prepared)
+	}
+}
+
+func TestCheckedInPreparedPolicy(t *testing.T) {
+	source, err := os.ReadFile("../../../../backend/compiler_target_policy_impl.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated, err := specializePreparationSource("compiler_target_policy_impl.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkedIn, err := os.ReadFile("../../../../backend/compiler_target_policy_prepared_impl.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(generated, checkedIn) {
+		t.Fatal("checked-in prepared target policy is stale; regenerate it with internal/backendcompiled/cmd/gen")
 	}
 }

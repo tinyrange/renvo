@@ -62,9 +62,9 @@ build_custom_backend() {
   source_dir=$build_dir/browser-$output_name-source
   generated=$source_dir/compiler_rtg_prepared_impl.go
   custom_sources=$(stage_backend "$source_dir" "$compiler")
-	go run ./internal/backendcompiled/cmd/gen \
-	  -prepare-source "$source_dir/compiler_target_policy_impl.go" \
-	  -o "$source_dir/compiler_target_policy_impl.go"
+  go run ./internal/backendcompiled/cmd/gen \
+    -prepare-source "$source_dir/compiler_target_policy_impl.go" \
+    -o "$source_dir/compiler_target_policy_impl.go"
   go run ./internal/rtg/cmd/rtggen \
     -prepared -t "$target_name" -o "$generated" "$definition"
   if [ "$compiler" = go ]; then

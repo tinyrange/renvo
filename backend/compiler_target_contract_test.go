@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"renvo.dev/internal/targetinfo"
@@ -110,6 +111,21 @@ func TestCompilerSourceManifestCoversBackendImplementationFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("glob backend implementation files: %v", err)
 	}
+	// Statically prepared projections are selected by the renvo_prepared build
+	// tag. They must not enter the ordinary bootstrap source manifest, whose
+	// stage compilers consume sources without host Go's file-selection pass.
+	bootstrapFiles := implementationFiles[:0]
+	for _, path := range implementationFiles {
+		source, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read compiler implementation %s: %v", path, err)
+		}
+		if bytes.HasPrefix(source, []byte("//go:build renvo_prepared\n")) {
+			continue
+		}
+		bootstrapFiles = append(bootstrapFiles, path)
+	}
+	implementationFiles = bootstrapFiles
 	implementationFiles = append(implementationFiles, "compiler_main.go")
 	sort.Strings(manifest)
 	sort.Strings(implementationFiles)

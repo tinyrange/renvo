@@ -711,6 +711,25 @@ func TestCheckedInArchitectureKernelOutput(t *testing.T) {
 	}
 }
 
+func TestCheckedInLLVMPreparedOutput(t *testing.T) {
+	resolved := ResolveDefinitions(parseDefinitionFile(t, "../../backends/llvm_amd64.rtg"))
+	if !resolved.Ok {
+		t.Fatalf("resolve LLVM definition: %#v", resolved.Diagnostics)
+	}
+	generated := GeneratePreparedBackend(resolved, "llvm/linux-amd64")
+	if !generated.Ok {
+		t.Fatalf("generate prepared LLVM backend: %#v", generated.Diagnostics)
+	}
+	generated.Source = append([]byte("//go:build renvo_prepared\n\n"), generated.Source...)
+	checkedIn, err := os.ReadFile("../../backend/compiler_llvm_prepared_impl.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(generated.Source, checkedIn) {
+		t.Fatal("checked-in prepared LLVM backend is stale; run go run ./internal/rtg/cmd/rtggen -prepared -build-tag renvo_prepared -t llvm/linux-amd64 -o backend/compiler_llvm_prepared_impl.go backends/llvm_amd64.rtg")
+	}
+}
+
 // These mirrors make the expected instruction words reviewable independently
 // from generated-source spelling. The generated functions use the same direct
 // expressions and are syntax-checked by TestAArch64DefinitionVerticalSlice.
